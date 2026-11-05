@@ -15,7 +15,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
   kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, \
-  flag_allreduce, ring_mailbox, host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
+  flag_allreduce, ring_mailbox, ring_queue, host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes, _disk_location
 from tinygrad.uop.ops import resolve, Ops, AxisType, KernelInfo
@@ -1167,11 +1167,25 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
   """
   # (the order of the batches as a read of the one before's output (a value of it, zero): a call on another queue waits for the calls whose
   # buffers it reads, the state and cache they write are implicit inputs)
-  def after(x:Tensor, dep:Tensor|None) -> Tensor:
-    if dep is None: return x
-    if getenv("MB_QUEUES", 1): return x + dep[..., :1].cast(x.dtype) * 0
-    return Tensor(x.uop.after(*dep.uop.src[1:]))
   def queued(i:int, *outs:Tensor) -> tuple[Tensor, ...]: return _on_queue(outs, f"COMPUTE:{i}") if i and getenv("MB_QUEUES", 1) else outs
+  lane_calls = getenv("MB_LANE_CALLS", 0)  # (a batch's ordering reads and its n-gram embedding calls on its queue, else the first's)
+  def after(i:int, x:Tensor, dep:Tensor|None, rows:bool=True) -> Tensor:
+    if dep is None: return x
+    if getenv("MB_QUEUES", 1) and not lane_calls:
+      z = (dep[..., :1] if rows else dep.flatten()[:1]).cast(x.dtype) * 0
+      while rows and z.ndim < x.ndim: z = z.unsqueeze(-1)
+      return x + (z != z).where(0, z)
+    if getenv("MB_QUEUES", 1):
+      # (a call of its own on the batch's queue (precompiled: a function that isn't is inlined, its kernel on the first queue). rows: dep is
+      # split on its rows as x, a value of every row read)
+      @function(precompile=True, allow_implicit=True)
+      def _after(x:Tensor, dep:Tensor) -> Tensor:
+        # (zero, also from a NaN or inf of dep (the padding rows of a chunk's last piece): not a value of it in x)
+        z = (dep[..., :1] if rows else dep.flatten()[:1]).cast(x.dtype) * 0
+        while rows and z.ndim < x.ndim: z = z.unsqueeze(-1)
+        return (x + (z != z).where(0, z)).contiguous()
+      return queued(i, _after(x, dep))[0]
+    return Tensor(x.uop.after(*dep.uop.src[1:]))
   subs = [(block, hc, norm, sub) for block in blocks for hc, norm, sub in ((block.hc_attn, block.attn_norm, "attn"),
                                                                            (block.hc_ffn, block.ffn_norm, "ffn"))]
   for block in blocks: block._init_state(xs[0])
@@ -1182,24 +1196,42 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
       # (the n-gram embedding's conv runs over the rows in order: on all of them of the batch, every device keeps its rows. a batch's conv
       # state is the one the batch before it wrote: after it)
       n = int(ple.shape[1]) // len(xs)
-      xi = xs[i] if not ple_done else (xs[i] + ple_done[-1].flatten()[:1].cast(xs[i].dtype) * 0) if getenv("MB_QUEUES", 1) else \
-        Tensor(xs[i].uop.after(*ple_done[-1].uop.src[1:]))
-      full = all_gather(xi, 1)
-      p = block._phase_ple(full, ple[:, i*n:(i+1)*n].contiguous(), starts[i], ts[i])
-      ple_done.append(p)
-      xs[i] = xs[i] + shard_rows(p, 1)
+      xi = after(i, xs[i], ple_done[-1] if ple_done else None, rows=False)
+      if lane_calls:
+        # (the gather, the embedding and its add: calls on the batch's queue)
+        @function(precompile=True, allow_implicit=True)
+        def _gather(x:Tensor) -> Tensor: return all_gather(x, 1).contiguous()
+        p = queued(i, block._phase_ple(queued(i, _gather(xi))[0], ple[:, i*n:(i+1)*n].contiguous(), starts[i], ts[i]))[0]
+        ple_done.append(p)
+        @function(precompile=True, allow_implicit=True)
+        def _add(x:Tensor, p:Tensor) -> Tensor: return (x + shard_rows(p, 1)).contiguous()
+        xs[i] = queued(i, _add(xs[i], p))[0]
+      else:
+        p = block._phase_ple(all_gather(xi, 1), ple[:, i*n:(i+1)*n].contiguous(), starts[i], ts[i])
+        ple_done.append(p)
+        xs[i] = xs[i] + shard_rows(p, 1)
     return queued(i, *block._phase_pre(hc, norm, xs[i]))
-  done:list[Tensor] = []
-  for i in range(len(xs)):
-    FLAG_LANE[0] = i
-    for k, (block, hc, norm, sub) in enumerate(subs):
-      if k == 0: hn, post, comb = pre(i, 0)
-      # (the batch before it ran this sublayer: its output's call, sublayer k of every batch is kept in done)
-      out = queued(i, block._phase_sub(sub, after(hn, done[k] if i else None), starts[i], ts[i]))[0]
-      if i == 0: done.append(out)
-      else: done[k] = out
+  # the batches' sublayers in a skewed order: batch i's sublayer k in step k + i*MB_SKEW (the first batch's next sublayer before the last's
+  # this one: with the collectives of the batches on one queue (RING_QUEUE_LANES=0) in that order, a batch's exchanges run while the other
+  # computes and none runs ahead of the others: the queue's order keeps them together. a batch only waits for the batch before it)
+  done:list[list[Tensor|None]] = [[None]*len(subs) for _ in xs]
+  phases:list[tuple[Tensor, ...]] = [() for _ in xs]
+  skew = getenv("MB_SKEW", -1)
+  if skew < 0: skew = len(subs)  # (a batch's sublayers all before the next batch's)
+  for step in range(len(subs) + skew*(len(xs)-1)):
+    for i in range(len(xs)):
+      if not 0 <= (k:=step - i*skew) < len(subs): continue
+      block, hc, norm, sub = subs[k]
+      FLAG_LANE[0] = i
+      if k == 0: phases[i] = pre(i, 0)
+      hn, post, comb = phases[i]
+      # (the batch before it ran this sublayer: its output's call)
+      # (TODO: the first batch's sublayer k after the last's k-2 keeps the batches together (the collectives of one while the other computes,
+      # 461 vs 523 ms a 4608 chunk with AM_MEC_PIPES=4): its results are wrong, a dependency unseen)
+      out = queued(i, block._phase_sub(sub, after(i, hn, done[i-1][k] if i else None), starts[i], ts[i]))[0]
+      done[i][k] = out
       xs[i] = queued(i, block._phase_post(hc, out, post, comb, xs[i]))[0]
-      if k + 1 < len(subs): hn, post, comb = pre(i, k+1)
+      if k + 1 < len(subs): phases[i] = pre(i, k+1)
   FLAG_LANE[0] = 0
   return xs
 
@@ -3910,9 +3942,13 @@ class Transformer:
       for ln in (lane, lane + SEL_LANE):
         FLAG_LANE[0] = ln
         for g in (4, 16, 64): flag_allreduce(devs, g)
-        # (the ring's mailbox: made before the jits are captured (in a fork, it'd be the child's). the selections' gathers are small: no ring)
-        if ln == lane: ring_mailbox(devs)
+        # (the ring's mailbox: made before the jits are captured (in a fork, it'd be the child's))
+        ring_mailbox(devs)
     FLAG_LANE[0] = 0
+    # (the ring collectives' queue of their own, see ring_queue)
+    if ring_queue():
+      for lane in range(getenv("MICRO_BATCHES", 1)):
+        for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(ring_queue() + lane)
     p2p_allreduce(devs), host_allreduce(devs), _device_index(devs)
     _argmax_parts(devs, (self.config.padded_vocab_size or self.config.vocab_size) // len(devs), self.config.vocab_size)
 

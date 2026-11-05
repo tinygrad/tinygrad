@@ -168,7 +168,10 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(self.pm4.PACKET3_RELEASE_MEM, event_dw | cache_flags_dw, memsel_dw, addr_w, val_w, ctxid)
 
   def memory_barrier(self):
-    (req, done), mask = self.dev.hdp_flush, self.dev.hdp_flush[0].fields_mask('cp2')
+    # (the hdp flush's request and done bit of the queue's pipe (cp2 is MEC pipe 0, as amdgpu's ref_and_mask_cp2 << pipe): queues of two pipes
+    # flushing with one bit at once, one can wait for a done bit the other's flush took)
+    pipe = int(self.queue.split(":")[1]) if self.queue.startswith("COMPUTE:") else 0
+    (req, done), mask = self.dev.hdp_flush, self.dev.hdp_flush[0].fields_mask(f'cp{2 + pipe}')
     self.wait_reg_mem(reg=req.addr[0], reg_done=done.addr[0], value=mask, mask=mask, op=WAIT_REG_MEM_FUNCTION_EQ)
     self.acquire_mem()
 
@@ -419,8 +422,18 @@ class AMDComputeQueue(HWQueue):
     # a ring collective (it spins on its peers, with many waves) runs alone on the queue: the kernels before it done, the one after it waits for
     # it (two spinning at once: each one's waves can keep the other's waiting ones from starting, on two devices: a cycle)
     ring = prg.src[0].arg.name.startswith("ring_")
-    if flag_ar or ring or getattr(self, "_after_ring", False): self.exec_barrier()
+    if flag_ar or ((ring or getattr(self, "_after_ring", False)) and getenv("RING_BARRIER", 1)): self.exec_barrier()
     self._after_ring = ring
+    # COMM_WGPS: the collectives that spin on their peers on that many WGPs of every shader engine of their own, every other kernel on the rest:
+    # a spinning kernel never keeps another kernel's waves from starting, nor waits for compute units the others hold (no cycles through them)
+    if (nw:=getenv("COMM_WGPS", 0)) and self.target[0] == 11 and not self.dev.sqtt_enabled:
+      spins = ring or flag_ar or prg.src[0].arg.name.startswith("p2p_")
+      wgps = self.dev.iface.props['cu_per_simd_array'] // 2
+      comm = sum(1 << (16 + wgps - 1 - i) for i in range(nw))  # (the last WGPs of the second shader array)
+      mask = comm if spins else 0xffffffff & ~comm
+      if getattr(self, "_cu_mask", None) != mask:
+        for i in range(self.dev.se_cnt): self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), mask)
+        self._cu_mask = mask
     self.acquire_mem(gli=0, gl2=0, gl2_wb=int(flag_ar))
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
@@ -520,7 +533,8 @@ class AMDSDMAQueue(HWQueue):
   def memory_barrier(self):
     (req, done), op = self.dev.hdp_flush, self.sdma.SDMA_OP_POLL_REGMEM | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_HDP_FLUSH(1)
     self.q(op | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_EQ), done.addr[0] << 2, req.addr[0] << 2,
-           m:=req.fields_mask('sdma0'), m, self.sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(10) | self.sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
+           m:=req.fields_mask(f'sdma{int(self.queue.split(":")[1]) % 2}'), m,
+           self.sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(10) | self.sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
 
   def wait(self, signal:UOp, value:UOp, eq:bool=False):
     func = WAIT_REG_MEM_FUNCTION_EQ if eq else WAIT_REG_MEM_FUNCTION_GEQ
@@ -781,6 +795,12 @@ class PCIIface(PCIIfaceBase):
       'simd_arrays_per_engine': max_sh_per_se, 'lds_size_in_kb': self.dev_impl.gc_info.gc_lds_size, 'num_xcc': self.dev_impl.gfx.xccs,
       'gfx_target_version': {90403: 90402}.get(gfxver, gfxver)}
 
+  def _hw_queue(self, idx:int) -> int:
+    """compute queue idx's (4*pipe + queue) of MEC1: the first ones a pipe each, the next ones (past the pipes) the second queue of a pipe"""
+    pipes = self.dev_impl.gfx.mec_pipes
+    assert idx < 2 * pipes, f"no compute queue {idx}: {pipes} pipes (AM_MEC_PIPES)"
+    return 4 * (idx % pipes) + idx // pipes
+
   def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
                    xcc_id=0, idx=0):
     assert cwsr_buffer is None, "no cwsr buffer for am"
@@ -790,7 +810,8 @@ class PCIIface(PCIIfaceBase):
       doorbell_index = self.dev_impl.sdma.setup_ring(*(rcvr_params:=(ring._buf, ring.nbytes, gart._buf+rptr, gart._buf+wptr, idx)))
     else:
       doorbell_index = self.dev_impl.gfx.setup_ring(*(rcvr_params:=(ring._buf, ring.nbytes, gart._buf+rptr,
-        gart._buf+wptr, eop_buffer._buf, eop_buffer.nbytes, 4*idx + (is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)), is_aql)))
+        gart._buf+wptr, eop_buffer._buf, eop_buffer.nbytes, self._hw_queue(idx) + (is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)),
+        is_aql)))
 
     put_value = Buffer(host:=self.dev.host, 8, initial_value=bytes(8))
     doorbell = Buffer(host, 8, options=BufferSpec(external_ptr=self.dev_impl.doorbell64.addr + doorbell_index*8), preallocate=True)
@@ -817,6 +838,9 @@ class PCIIface(PCIIfaceBase):
     if self.dev_impl.is_err_state: raise RuntimeError("Device is in error state")
 
   def on_device_hang(self):
+    if getenv("HCQ_TRACE"):
+      from tinygrad.runtime.support.hcq2 import hcq_trace_dump
+      print(hcq_trace_dump(), flush=True)
     self._collect_interrupts(reset=self.dev.can_recover)
     # (the device isn't finalized as clean: its next boot quiesces and resets it, see AMDev.fini)
     self.dev_impl.is_err_state = True

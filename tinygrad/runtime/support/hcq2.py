@@ -273,6 +273,48 @@ class BatchCtx:
   def queue_signal(self, dev:str, queue:str) -> UOp: return self.slot(dev, self.queues[dev].index(queue))
   def stamps(self, dev:str, tag:int) -> tuple[int, ...]: return (st:=len(self.queues[dev])+1+2*tag, st + 1) if self.profile else ()
 
+# HCQ_TRACE: every call stores (batch << 32 | tag+1) into its queue's slot of a host buffer of its device, see hcq_trace_dump
+HCQ_TRACE_BATCHES:list[dict[tuple[str, str], list[tuple[int, str]]]] = []
+TRACE_IDS:dict[int, int] = {}
+def _trace_queue_index(queue:str) -> int: return (8 if queue.startswith("COPY") else 0) + int(queue.split(":")[1])
+def _trace_slot(dev:str, queue:str, part:int=0) -> UOp:
+  name = to_name(dev, "hcqtrace")
+  if name not in Compiled.link_bufs:
+    Compiled.link_bufs[name] = Buffer(dev, 34*8, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
+  i = _trace_queue_index(queue)
+  return UOp.alloc((34,), dtypes.u64, device=dev, spec=BufferSpec(host=True, uncached=True, cpu_access=True),
+                   name="hcqtrace").shrink(((2*i+part, 2*i+part+2),))
+def _trace_id(calls:list[tuple[str, str, str]]) -> int:
+  import zlib
+  return zlib.crc32("|".join(f"{n}@{d}@{q}" for n, d, q in calls).encode()) & 0x7FFFFFFF
+def hcq_trace_dump() -> str:
+  """the last call each queue of every device finished, and its next (HCQ_TRACE)"""
+  import gc
+  for info in [o for o in gc.get_objects() if isinstance(o, HCQInfo) and o.kernels and len(o.kernels[0]) > 7]:
+    calls = [(k[1], k[0], k[7]) for k in info.kernels]
+    bid = _trace_id(calls)
+    while len(HCQ_TRACE_BATCHES) <= bid % 4096: HCQ_TRACE_BATCHES.append({})
+    per:dict[tuple[str, str], list[tuple[int, str]]] = {}
+    for t, (n, d, q) in enumerate(calls): per.setdefault((d, q), []).append((t, n))
+    HCQ_TRACE_BATCHES[bid % 4096] = per
+    TRACE_IDS[bid % 4096] = bid
+  lines = []
+  for name, b in Compiled.link_bufs.items():
+    if not name.endswith("hcqtrace") or not isinstance(b, Buffer): continue
+    mv = b._host_mv()
+    vals = memoryview(bytearray(mv)).cast("Q").tolist() if mv is not None else []
+    for i in range(0, len(vals) - 2, 2):
+      if not vals[i]: continue
+      bid, tag = vals[i+1] & 0xFFFFFFFF, (vals[i] & 0xFFFFFFFF) - 1
+      q = (f"COPY:{i//2-8}" if i//2 >= 8 else f"COMPUTE:{i//2}")
+      known = bid % 4096 < len(HCQ_TRACE_BATCHES) and TRACE_IDS.get(bid % 4096) == bid
+      batch:dict[tuple[str, str], list[tuple[int, str]]] = HCQ_TRACE_BATCHES[bid % 4096] if known else {}
+      qcalls = next((v for (d, qq), v in batch.items() if to_name(d, "hcqtrace") == name and qq == q), [])
+      at = next((j for j, (t, _) in enumerate(qcalls) if t == tag), None)
+      nxt = qcalls[at+1:at+3] if at is not None else qcalls[:2]
+      lines.append(f"{name} {q}: batch {bid} done {tag} {qcalls[at][1] if at is not None else '?'} ({at}/{len(qcalls)}), next {nxt}")
+  return "\n".join(lines)
+
 def _wait_ins(ctx:BatchCtx, waits:dict[tuple[str, str], int]) -> list[UOp]:
   return [ins("wait", ctx.queue_signal(d, q), UOp.const(t + 1, dtypes.u64)) for (d, q), t in waits.items()]
 
@@ -316,10 +358,15 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   # all tags that should signal
   signal_tags = {tag for waits in [*call_waits, *close_waits.values()] for tag in waits.values()}
 
+  # (the batch's id: a hash of its calls' names and queues, the parent finds it in its batches' infos)
+  trace_bid = _trace_id([(get_call_name(c, get_call_arg_uops(c)), d, q) for c, d, q in ctx.batch]) if getenv("HCQ_TRACE") else None
   def call_cmds(tag:int, call:UOp, dev:str, queue:str) -> list[UOp]:
     barrier = [ins("exec_barrier")] if tag in barriers else []
     stamps = [ins("timestamp", ctx.slot(dev, i)) for i in ctx.stamps(dev, tag)]
     signal = [ins("store", ctx.queue_signal(dev, queue), UOp.const(tag + 1, dtypes.u64))] if tag in signal_tags else []
+    if trace_bid is not None:  # (the signal's store writes 32 bits: the batch, then the tag)
+      signal += [ins("store", _trace_slot(dev, queue, 1), UOp.const(trace_bid, dtypes.u64)),
+                 ins("store", _trace_slot(dev, queue), UOp.const(tag + 1, dtypes.u64))]
     # (waits for other queues: then the memory barrier, see _start_ins)
     waits = _wait_ins(ctx, call_waits[tag]) + ([ins("memory_barrier")] if call_waits[tag] else [])
     return barrier + waits + stamps[:1] + [call] + stamps[1:] + signal
@@ -351,7 +398,8 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   profile_keys = [c.body.key if c.body.op is Ops.PROGRAM else None for c, _, _ in ctx.batch]
   args = [[unwrap_lane(c.src[1 + g])[:2] for g in getattr(c.body.arg, "globals", range(len(c.src) - 1))] for c, _, _ in ctx.batch]
   bufs = [tuple(b.arg.slot for b, _ in a) if all(b.op is Ops.PARAM and lane is None for b, lane in a) else () for a in args]
-  kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch]))
+  kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch],
+                    [q for _, _, q in ctx.batch]))
   slots = ctx.slots if ctx.profile else {} # profiling reads them
   info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, estimates=Estimates.sum(estimates),
                  slots=tuple((d, i) for i, d in enumerate(slots)))

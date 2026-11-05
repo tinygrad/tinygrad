@@ -355,7 +355,8 @@ class AM_GFX(AM_IP):
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool, kiq_xcc=-1) -> int:
     me, pipe, queue = (2, 1, 0) if (kiq:=kiq_xcc >= 0) else (1, idx // 4, idx % 4)
     assert kiq or (pipe < self.mec_pipes and queue < 2), f"no compute queue {queue} on pipe {pipe}"
-    doorbell = am.AMDGPU_DOORBELL_KIQ + kiq_xcc*0x20 if kiq else am.AMDGPU_NAVI10_DOORBELL_MEC_RING0 + pipe
+    # (a doorbell a queue of a pipe: two queues of a pipe (a second compute queue on it) don't share one)
+    doorbell = am.AMDGPU_DOORBELL_KIQ + kiq_xcc*0x20 if kiq else am.AMDGPU_NAVI10_DOORBELL_MEC_RING0 + pipe * 2 + queue
     slot = 2 * self.mec_pipes if kiq else pipe * 2 + queue
 
     for xcc in ([kiq_xcc] if kiq else range(self.xccs if aql else 1)):

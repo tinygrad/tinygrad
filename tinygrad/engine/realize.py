@@ -33,7 +33,7 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
   if isinstance(call.arg.aux, HCQInfo): # the submitter itself, then every kernel it enqueues
     kernels:list[tuple[str, UOp, tuple|None]] = [(Device[call.arg.aux.device[0]].host, call, None)]
-    return kernels + [(d, call, (name, estimates, key, bufs, io)) for d,name,estimates,_,key,bufs,io in call.arg.aux.kernels]
+    return kernels + [(d, call, (name, estimates, key, bufs, io)) for d,name,estimates,_,key,bufs,io,*_ in call.arg.aux.kernels]
   ast = call.body
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "validate": return []
   return [(d, call, None) for d in to_tuple(call.device)]
