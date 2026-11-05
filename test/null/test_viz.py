@@ -198,9 +198,10 @@ class TestViz(unittest.TestCase):
     self.assertIn("\n[i+1][2]", uop_to_json(VizData(), u)[id(u)]["label"])
 
   def test_dtype_label(self):
-    u = UOp.custom_function("fn") + 1
+    u = UOp(Ops.ADD, src=(UOp.custom_function("fn"), UOp.const(1)))
     node = uop_to_json(VizData(), u)[id(u)]
     self.assertTrue(node["label"].startswith("ADD"))
+    self.assertIn("ISSUE GETTING DTYPE", node["label"])
     self.assertEqual(node["src"], [(i, id(s)) for i,s in enumerate(u.src)])
 
   def test_colored_label_multiline(self):
