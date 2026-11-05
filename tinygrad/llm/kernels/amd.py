@@ -3223,6 +3223,104 @@ def _scatter_rows_kernel(out:UOp, pos:UOp) -> UOp:
   p = pos[i].load()
   return out[p.valid(p >= 0)].store(i.cast(dtypes.int32)).end(i).sink(arg=KernelInfo(name="scatter_rows", opts_to_apply=()))
 
+# ******** moe_route of many tokens: a counting sort in three kernels (the generic one-hot and cumsum kernels: ~0.3 ms a layer) ********
+
+ROUTE_G, ROUTE_T = 64, 256  # workgroups, threads
+
+@functools.cache
+def _route_init_kernel(counts:UOp, entries:UOp, tiles:UOp) -> UOp:
+  # counts 0, the rows -1, the tiles -1
+  n = max(int(prod(counts.shape)), int(prod(entries.shape)), int(prod(tiles.shape)))
+  i = UOp.range(n, 0, AxisType.GLOBAL)
+  st = [counts.reshape(-1)[i.valid(i < int(prod(counts.shape)))].store(UOp.const(0, dtypes.int32)),
+        entries.reshape(-1)[i.valid(i < int(prod(entries.shape)))].store(UOp.const(-1, dtypes.int32)),
+        tiles.reshape(-1)[i.valid(i < int(prod(tiles.shape)))].store(UOp.const(-1, dtypes.int32))]
+  return UOp.group(*st).end(i).sink(arg=KernelInfo(name="route_init", opts_to_apply=(), estimates=Estimates()))
+
+def _route_expert(sel:UOp, first:UOp, i:UOp, N:int, experts:int) -> tuple[UOp, UOp]:
+  e = (sel.reshape(-1)[i.minimum(N-1)].load() - first.reshape(-1)[0].load()).cast(dtypes.weakint)
+  return e.maximum(0).minimum(experts-1), (i < N) & (e >= 0) & (e < experts)
+
+@functools.cache
+def _route_count_kernel(rank:UOp, counts:UOp, sel:UOp, first:UOp, *, experts:int) -> UOp:
+  # the rank of every selection among its expert's (a workgroup's in LDS, its workgroup's base from the global counts)
+  N = int(prod(rank.shape))
+  Q = (N + ROUTE_G*ROUTE_T - 1) // (ROUTE_G*ROUTE_T)
+  per = (experts + ROUTE_T - 1) // ROUTE_T
+  wg, t = UOp.range(ROUTE_G, 0, AxisType.GLOBAL), UOp.range(ROUTE_T, 1, AxisType.LOCAL)
+  hist = UOp.alloc((per*ROUTE_T,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  hist = hist.after(UOp.group(*(hist[t*per + m].store(UOp.const(0, dtypes.int32)) for m in range(per))).barrier())
+  locs = []
+  for q in range(Q):
+    e, ok = _route_expert(sel, first, i:=(wg*Q + q)*ROUTE_T + t, N, experts)
+    locs.append(_sys("__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP)", dtypes.int32, hist[e],
+                     ok.cast(dtypes.int32)))
+  hist = hist.after(UOp.group(*locs).barrier())
+  base = UOp.alloc((per*ROUTE_T,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  bst = [base[t*per + m].store(_sys("__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT)", dtypes.int32,
+                                    counts.reshape(-1)[(t*per + m).minimum(experts-1)], (t*per + m < experts).where(hist[t*per + m].load(), 0)))
+         for m in range(per)]
+  base = base.after(UOp.group(*bst).barrier())
+  stores = []
+  for q, loc in enumerate(locs):
+    e, ok = _route_expert(sel, first, i:=(wg*Q + q)*ROUTE_T + t, N, experts)
+    stores.append(rank.reshape(-1)[i.valid(i < N)].store(ok.where(base[e].load() + loc, -1)))
+  return UOp.group(*stores).end(wg, t).sink(arg=KernelInfo(name="route_count", opts_to_apply=(), estimates=Estimates()))
+
+@functools.cache
+def _route_place_kernel(pos:UOp, entries:UOp, tiles:UOp, rank:UOp, counts:UOp, sel:UOp, first:UOp, *, experts:int, tile:int) -> UOp:
+  # the offsets of the experts' tiles (every workgroup scans the padded counts), every selection its row, the first workgroup the tiles
+  N = int(prod(pos.shape))
+  Q = (N + ROUTE_G*ROUTE_T - 1) // (ROUTE_G*ROUTE_T)
+  per = (experts + ROUTE_T - 1) // ROUTE_T
+  wg = UOp.range(ROUTE_G, 0, AxisType.GLOBAL)
+  wave, lane = UOp.range(ROUTE_T // WARP_SIZE, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  t, zero = wave * WARP_SIZE + lane, UOp.const(0, dtypes.int32)
+  pads = [(t*per + m < experts).where((counts.reshape(-1)[(t*per + m).minimum(experts-1)].load() + (tile-1)) // tile * tile, zero)
+          for m in range(per)]
+  local = [functools.reduce(lambda a, b: a + b, pads[:m], zero) for m in range(per)]
+  total = functools.reduce(lambda a, b: a + b, pads, zero)
+  incl = _wave_scan(total, lane)
+  wt = UOp.alloc((ROUTE_T // WARP_SIZE,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  wt = wt.after(wt[wave.valid(lane.eq(WARP_SIZE-1))].store(incl).barrier())
+  woff = functools.reduce(lambda a, b: a + b, [(w < wave).where(wt[w].load(), zero) for w in range(ROUTE_T // WARP_SIZE)], zero)
+  off = UOp.alloc((per*ROUTE_T,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  offs = [woff + incl - total + local[m] for m in range(per)]
+  off = off.after(UOp.group(*(off[t*per + m].store(offs[m]) for m in range(per))).barrier())
+  stores = []
+  for q in range(Q):
+    e, ok = _route_expert(sel, first, i:=(wg*Q + q)*ROUTE_T + t, N, experts)
+    p = off[e].load() + rank.reshape(-1)[i.minimum(N-1)].load()
+    stores += [pos.reshape(-1)[i.valid(i < N)].store(ok.where(p, -1)),
+               entries.reshape(-1)[p.cast(dtypes.weakint).valid(ok)].store(i.cast(dtypes.int32))]
+  # (the first workgroup: an expert's tiles its index)
+  for m in range(per):
+    x = t*per + m
+    nt = UOp.range(((x < experts) & wg.eq(0)).where(pads[m] // tile, 0), 2 + m, AxisType.LOOP)
+    stores.append(UOp.group(tiles.reshape(-1)[(offs[m] // tile + nt).cast(dtypes.weakint)].store(x.cast(dtypes.int32))).end(nt))
+  return UOp.group(*stores).end(wg, wave, lane).sink(arg=KernelInfo(name="route_place", opts_to_apply=(), estimates=Estimates()))
+
+def _moe_route_sort(sel:Tensor, first:Tensor, experts:int, tile:int) -> tuple[Tensor, Tensor, Tensor]|None:
+  """moe_route's entries, tiles and pos of many tokens by the counting sort (None: not those shapes)"""
+  if not amd_custom_kernels_supported(sel.device) or not getenv("ROUTE_SORT", 1) or experts > 2048: return None
+  N = int(prod(sel.shape[-3:]))
+  R = round_up(N + (tile-1)*experts, tile)
+  devs = first.device
+  if isinstance(devs, tuple) and first.uop.axis != 0: return None
+  n = len(devs) if isinstance(devs, tuple) else 1
+  axis = 0 if isinstance(devs, tuple) else None
+  counts = Tensor.empty(n, experts, dtype=dtypes.int32, device=devs, axis=axis)
+  entries = Tensor.empty(n, R, dtype=dtypes.int32, device=devs, axis=axis)
+  tiles = Tensor.empty(n, R // tile, dtype=dtypes.int32, device=devs, axis=axis)
+  counts, entries, tiles = Tensor.custom_kernel(counts, entries, tiles, fxn=_route_init_kernel)
+  sel_f = sel.reshape(-1).cast(dtypes.int32).contiguous()
+  rank = Tensor.empty(n, N, dtype=dtypes.int32, device=devs, axis=axis)
+  rank, counts = Tensor.custom_kernel(rank, counts, sel_f, first.cast(dtypes.int32), fxn=functools.partial(_route_count_kernel, experts=experts))[:2]
+  pos = Tensor.empty(n, N, dtype=dtypes.int32, device=devs, axis=axis)
+  pos, entries, tiles = Tensor.custom_kernel(pos, entries, tiles, rank, counts, sel_f, first.cast(dtypes.int32),
+                                             fxn=functools.partial(_route_place_kernel, experts=experts, tile=tile))[:3]
+  return entries, tiles, pos
+
 def moe_route(sel:Tensor, first:Tensor, experts:int, tile:int=MOE_TILE) -> tuple[Tensor, Tensor, Tensor, Tensor]:
   """
   sorts the (token, slot) selections of sel (B, T, k) by local expert, each expert's rows padded to whole tiles.
@@ -3233,6 +3331,11 @@ def moe_route(sel:Tensor, first:Tensor, experts:int, tile:int=MOE_TILE) -> tuple
   """
   k, N = sel.shape[-1], int(prod(sel.shape[-3:]))  # sel can have a leading device axis
   tokens, R = N // k, round_up(N + (tile-1)*experts, tile)
+  # (many tokens: the counting sort, valid not made (its callers don't use it))
+  # (sel: (B, T, k) the same on every device, or (devices, B, T, k) split on the devices)
+  if tokens >= getenv("ROUTE_SORT_TOKENS", 256) and (sel.ndim == 3 or (sel.ndim == 4 and isinstance(sel.device, tuple) and sel.uop.axis == 0)) and \
+     (r:=_moe_route_sort(sel, first, experts, tile)) is not None:
+    return Tensor.zeros(1, dtype=dtypes.bool), *r
   e = sel.reshape(-1, tokens, k).cast(dtypes.int32) - first.reshape(-1, 1, 1)
   valid = (e >= 0) & (e < experts)
   onehot = (e.unsqueeze(-1) == Tensor.arange(experts, dtype=dtypes.int32)) & valid.unsqueeze(-1)  # (n, tokens, k, experts)
