@@ -51,6 +51,11 @@ class DiskCache(unittest.TestCase):
     self.assertEqual(diskcache_get(table, 4), 5)
     self.assertEqual(diskcache_get(table, "4"), 5)
 
+  def test_bytes_key(self):
+    table = "test_bytes_key"
+    diskcache_put(table, b"4", 5)
+    self.assertEqual(diskcache_get(table, b"4"), 5)
+
   def test_decorator(self):
     calls = 0
     @diskcache
