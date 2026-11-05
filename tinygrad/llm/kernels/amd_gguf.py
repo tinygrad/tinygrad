@@ -54,7 +54,7 @@ def _amd_dp4a(a:UOp, b:UOp, c:UOp, cdna:bool) -> UOp:
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
   perm_fn = UOp.custom_function("__builtin_amdgcn_perm({}, {}, {})", shape=a.shape, dtype=dtypes.uint32, inline=True, fmt=True)
-  return perm_fn.call(x.cast(dtypes.uint32) for x in (a, b, selectors))
+  return perm_fn.call(*[x.cast(dtypes.uint32) for x in (a, b, selectors)])
 
 def _load_byte(raw:UOp, base:UOp, offset:int|UOp) -> UOp:
   size = raw.dtype.itemsize
