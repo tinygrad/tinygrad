@@ -539,6 +539,27 @@ class TestCustomKernel(unittest.TestCase):
       return C[i].store(tmp.after(st)[i, 0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), fxn=kernel)[0].tolist(), [1.]*4)
 
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_dependent_local_ends(self):
+    # the second END reads what the other threads stored in the first END
+    def kernel(C:UOp) -> UOp:
+      t = UOp.range(8, 0, AxisType.LOCAL)
+      tmp = UOp.placeholder((8,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
+      st = tmp[t].store(t.cast(dtypes.int)).end(t)
+      return C[t].store(tmp.after(st)[7-t]).end(t).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(8, dtype=dtypes.int), fxn=kernel)[0].tolist(), [7-i for i in range(8)])
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_dependent_local_ends_merged_ranges(self):
+    # t0 and t1 merge into one range of 8 in both ENDs
+    def kernel(C:UOp) -> UOp:
+      t0, t1 = UOp.range(4, 0, AxisType.LOCAL), UOp.range(2, 1, AxisType.LOCAL)
+      i = t0*2+t1
+      tmp = UOp.placeholder((8,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
+      st = tmp[i].store(i.cast(dtypes.int)).end(t0, t1)
+      return C[i].store(tmp.after(st)[t0*2+1-t1]).end(t0, t1).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(8, dtype=dtypes.int), fxn=kernel)[0].tolist(), [i^1 for i in range(8)])
+
   @unittest.expectedFailure
   def test_gated_load_2d(self):
     # TODO: broken now, the valid is dropped. the valid on one index of the 2d A gates the whole load, it is 0 where j != 0
