@@ -342,9 +342,11 @@ class AM_GFX(AM_IP):
     self._dequeue_hqds()
 
     if self.adev.ip_ver[am.GC_HWIP] < (12,0,0): # gfx12+ uses mec_pipe0_reset
+      self._rlc_safe_mode(enter=True)
       for xcc in range(self.xccs): self.adev.regGRBM_SOFT_RESET.write(soft_reset_cp=1, soft_reset_cpc=1, inst=xcc)
       time.sleep(0.05)
       for xcc in range(self.xccs): self.adev.regGRBM_SOFT_RESET.write(0x0, inst=xcc)
+      self._rlc_safe_mode(enter=False)
 
     self._config_mec()
     self._enable_mec()
@@ -388,10 +390,8 @@ class AM_GFX(AM_IP):
   def set_clockgating_state(self):
     if hasattr(self.adev, 'regMM_ATC_L2_MISC_CG'): self.adev.regMM_ATC_L2_MISC_CG.write(enable=1, mem_ls_enable=1)
 
+    self._rlc_safe_mode(enter=True)
     for xcc in range(self.xccs):
-      self.adev.regRLC_SAFE_MODE.write(message=1, cmd=1, inst=xcc)
-      wait_cond(lambda: self.adev.regRLC_SAFE_MODE.read(inst=xcc) & 0x1, value=0, msg="RLC safe mode timeout")
-
       self.adev.regRLC_CGCG_CGLS_CTRL.update(cgcg_gfx_idle_threshold=0x36, cgcg_en=1, cgls_rep_compansat_delay=0xf, cgls_en=1, inst=xcc)
 
       self.adev.regCP_RB_WPTR_POLL_CNTL.update(poll_frequency=0x100, idle_poll_count=0x90, inst=xcc)
@@ -404,8 +404,13 @@ class AM_GFX(AM_IP):
       feats_gfx11 = {'perfmon_clock_state':1, 'gfxip_repeater_fgcg_override':0} if self.adev.ip_ver[am.GC_HWIP][0] >= 11 else {}
       self.adev.regRLC_CGTT_MGCG_OVERRIDE.update(**feats_gfx9, **feats_gfx11, gfxip_fgcg_override=0, grbm_cgtt_sclk_override=0,
         rlc_cgtt_sclk_override=0, gfxip_mgcg_override=0, gfxip_cgls_override=0, gfxip_cgcg_override=0, inst=xcc)
+    self._rlc_safe_mode(enter=False)
 
-      self.adev.regRLC_SAFE_MODE.write(message=0, cmd=1, inst=xcc)
+  def _rlc_safe_mode(self, enter:bool):
+    if self.adev.is_vf: return
+    for xcc in range(self.xccs):
+      self.adev.regRLC_SAFE_MODE.write(message=int(enter), cmd=1, inst=xcc)
+      if enter: wait_cond(lambda: self.adev.regRLC_SAFE_MODE.read(inst=xcc) & 0x1, value=0, msg="RLC safe mode timeout")
 
   def _grbm_select(self, me=0, pipe=0, queue=0, vmid=0, inst=0):
     self.adev.regGRBM_GFX_CNTL.write(meid=me, pipeid=pipe, vmid=vmid, queueid=queue, inst=inst)
