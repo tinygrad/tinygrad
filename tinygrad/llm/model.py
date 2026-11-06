@@ -2506,6 +2506,16 @@ class QwenMTPBlock(QSABlock):
     self.enorm = nn.RMSNorm(config.dim, config.norm_eps)
     self.hnorm = {"weight": Tensor.zeros(unwrap(config.hc).count * config.dim)}
     self.hc_head = GatedResidual(config, inject=False)
+  def _project_input_split(self, emb:Tensor, h:Tensor) -> Tensor:
+    """_project_input of rows split over the devices (the projection a device's rows: q8_linear split)"""
+    count, dim = unwrap(self.config.hc).count, self.config.dim
+    hs = h.reshape(*h.shape[:2], count, dim).float()
+    hn = hs.rmsnorm(eps=self.config.norm_eps) * self.hnorm["weight"].reshape(count, dim)
+    en = self.enorm(emb.float()).unsqueeze(2).expand(*hn.shape)
+    inp = en.cat(hn, dim=-1)
+    B, R = int(inp.shape[0]), int(inp.shape[1])
+    return q8_linear(self.eh_proj, inp.reshape(B*R*count, 2*dim).half().contiguous(), split=True).reshape(B, R, count, dim)
+
   def _project_input(self, emb:Tensor, h:Tensor) -> Tensor:
     count, dim = unwrap(self.config.hc).count, self.config.dim
     hs = h.reshape(*h.shape[:2], count, dim).float()
@@ -2903,7 +2913,16 @@ class Transformer:
       # (the streams of every position: the MTP layer's input of the next one, the ones before the chunk's first in _spec_h's row 0)
       hs = x.flatten(2).float()
       emb, carry = emb.pad_to((1, x.shape[1], emb.shape[-1])), self._spec_h[0:1].unsqueeze(0).contiguous()
-      m = cast(QwenMTPBlock, self.mtp).prefill_cache(emb, carry.cat(hs[:, :-1], dim=1), start_pos, T)
+      qm, R = cast(QwenMTPBlock, self.mtp), int(x.shape[1])
+      if getenv("MTP_SPLIT", 1) and self.sequence_parallel(R) and amd_custom_kernels_supported(x.device):
+        # (the MTP layer's input projection and mix of every device's rows only (of the gathered streams: its part kept), its mixed input
+        # gathered for the caches: not the projections of every row on every device)
+        e_l, h_l = shard_rows(emb.contiguous(), 1), shard_rows(carry.cat(hs[:, :-1], dim=1).contiguous(), 1)
+        xs_l = qm._project_input_split(e_l, h_l)
+        qm._init_state(xs_l)
+        mixed = cast(GatedResidual, qm.hc_attn).pre_split(xs_l)[0]
+        m = qm._cache_input(all_gather(mixed, 1, dtypes.half).float(), start_pos, T)
+      else: m = qm.prefill_cache(emb, carry.cat(hs[:, :-1], dim=1), start_pos, T)
       effects = [m[:, :, :1, :1].contiguous(), self._spec_h[0:1].assign(hs[0].shrink(((T-1, T), None)))]
       if self._effects is None: Tensor.realize(*effects)
       else: self._effects += effects
