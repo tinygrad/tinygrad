@@ -101,7 +101,7 @@ def main():
     try:
       import jinja2
       env = jinja2.Environment(trim_blocks=True, lstrip_blocks=True, extensions=['jinja2.ext.loopcontrols'])  # (for {% break %})
-      env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj, **kwargs)  # jinja2's tojson escapes <>& for HTML safety
+      env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj, **{'ensure_ascii':False, **kwargs})  # jinja2's tojson escapes <>& for HTML safety
       env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
       env.globals['strftime_now'] = lambda fmt: time.strftime(fmt)
       env.globals['bos_token'] = tok.decode([tok.bos_id]) if tok.bos_id is not None else ""
