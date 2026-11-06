@@ -650,6 +650,7 @@ class Parser:
         self.eat('LBRACKET')
         reg = self.parse()
         self.eat('RBRACKET')
+        if 'vgpr_index' in self.funcs: return self.funcs['vgpr_index'](_to_u32(reg), _to_u32(lane)).load()
         vgpr = self.vars.get('_vgpr')
         if vgpr is None: return _u32(0)
         ws = self.vars.get('_wave_size', 32)
@@ -676,6 +677,7 @@ class Parser:
           self.eat('LBRACKET')
           reg = self.parse()
           self.eat('RBRACKET')
+          if 'vgpr_index' in self.funcs: return self.funcs['vgpr_index'](_to_u32(reg), _u32(int(idx))).load()
           vgpr = self.vars.get('_vgpr')
           if vgpr is None: return _u32(0)
           ws = self.vars.get('_wave_size', 32)
@@ -1160,6 +1162,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
           rg, val = parse_tokens(reg_toks, env, funcs), parse_tokens(toks[j:], env, funcs)
           ws = env.get('_wave_size', 32)
           vgpr_idx = _to_u32(rg) * _u32(ws) + _to_u32(ln)
+          if funcs and 'vgpr_index' in funcs: vgpr_idx = funcs['vgpr_index'](_to_u32(rg), _to_u32(ln))
           if assigns is not None:
             assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}][{hi_val}:{lo_val}]', (vgpr_idx, val, _u32(hi_val), _u32(lo_val))))
           i += 1
@@ -1170,7 +1173,8 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         rg, val = parse_tokens(reg_toks, env, funcs), parse_tokens(toks[j:], env, funcs)
         if assigns is not None:
           ws = env.get('_wave_size', 32)
-          assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(ws) + _to_u32(ln), val)))
+          vgpr_idx = funcs['vgpr_index'](_to_u32(rg), _to_u32(ln)) if funcs and 'vgpr_index' in funcs else _to_u32(rg) * _u32(ws) + _to_u32(ln)
+          assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (vgpr_idx, val)))
         i += 1
         continue
 
