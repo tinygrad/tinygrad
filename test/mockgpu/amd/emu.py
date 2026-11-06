@@ -58,7 +58,7 @@ from tinygrad.codegen import to_program, to_program_config
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import Context, DEV, to_mv, ContextVar, VIZ
 from tinygrad.runtime.autogen import hsa
-from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND, get_elf_section
+from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, get_elf_section
 
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE as PCODE_RDNA3
 from tinygrad.runtime.autogen.amd.rdna4.str_pcode import PCODE as PCODE_RDNA4
@@ -1724,9 +1724,11 @@ def emu_consts(sgpr:UOp, wave_size:int):
   return UOp.sink(init_ints, init_floats, *([sgpr.index(124).store(_c(0))] if wave_size == 32 else []))
 
 @uopfunc
-def emu_loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
+def emu_loop_active(routes:UOp, active:UOp, header:UOp|None, waves:UOp):
   w = UOp.range(waves, 0, AxisType.LOOP, dtype=dtypes.int)
-  return active[0].store(routes[w].load().eq(header).cast(dtypes.uint32).reduce(w, arg=Ops.MAX).ne(0)).sink()
+  next_pc = routes[w].load()
+  more = next_pc >= 0 if header is None else next_pc.eq(header)
+  return active[0].store(more.cast(dtypes.uint32).reduce(w, arg=Ops.MAX).ne(0)).sink()
 
 def lower_body(sink:UOp, name:str) -> UOp:
   bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
@@ -1774,28 +1776,8 @@ def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
     if _Ctx.sgpr in call.src[1:]: seen.clear()
   return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("emu_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
-def merge_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
-  groups:dict[tuple, list[int]] = {}
-  opposite = {"S_CBRANCH_SCC1":"S_CBRANCH_SCC0", "S_CBRANCH_VCCNZ":"S_CBRANCH_VCCZ", "S_CBRANCH_EXECNZ":"S_CBRANCH_EXECZ"}
-  for pc, pcs in blocks.items():
-    if len(paths[pc]) != 2: continue
-    inst = insts[pcs[-1]]
-    # complementary tests with reversed destinations are the same branch.
-    branch_dests = tuple(sorted((dst, kind ^ (inst.op_name in opposite)) for dst,kind in paths[pc].items()))
-    key = (type(inst), opposite.get(inst.op_name, inst.op_name),
-           tuple((n, getattr(inst, n)) for n,_ in inst._fields if n not in {"op", "simm16"}), branch_dests)
-    groups.setdefault(key, []).append(pc)
-  for group in groups.values():
-    if len(group) < 2: continue
-    header = blocks[group[0]][-1]
-    dests = paths[group[0]]
-    for pc in group:
-      blocks[pc] = blocks[pc][:-1]
-      paths[pc] = {header:UNCOND}
-    blocks[header], paths[header] = [header], dests
-
 # a block has an empty body; a loop contains its header block and the rest of its iteration.
-CFGRegion = tuple[int, list["CFGRegion"]]
+CFGRegion = tuple[int|None, list["CFGRegion"]]
 class IrreducibleCFG(RuntimeError): pass
 
 def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
@@ -1858,9 +1840,12 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   cfg = get_cfg(insts)
   try: regions = cfg_regions(cfg["paths"], 0)
   except IrreducibleCFG:
-    # sharing branch tails can make rotated loops reducible, but adds dispatch blocks otherwise.
-    merge_branches(insts, cfg["blocks"], cfg["paths"])
-    regions = cfg_regions(cfg["paths"], 0)
+    reachable, todo = set(), [0]
+    while todo:
+      if (pc:=todo.pop()) in reachable: continue
+      reachable.add(pc)
+      todo.extend(cfg["paths"][pc])
+    regions = [(None, [(pc, []) for pc in sorted(reachable)])]
   # propagate possible wave PCs across acyclic regions; loops retain runtime routing.
   unconditional:set[int] = set()
   possible:set[int]|None = {0}
@@ -1956,7 +1941,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
         loop = UOp.loop(next(axes)).replace(src=(UOp(Ops.NOOP).after(end),))
         end = emit_dispatch(body, scopes+(loop,), loop)
         # waves that exited keep their route while the remaining waves repeat the loop.
-        check = emu_loop_active(routes.after(end, *scopes, loop), active, _c(pc, dtypes.int), _c(n_waves, dtypes.int))
+        check = emu_loop_active(routes.after(end, *scopes, loop), active, None if pc is None else _c(pc, dtypes.int),
+                                _c(n_waves, dtypes.int))
         end = end.backedge(loop, active.after(check, *scopes, loop)[0].load())
       else:
         # complete the block for every participating wave before entering its successors, including barrier successors.
