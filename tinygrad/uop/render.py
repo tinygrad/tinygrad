@@ -1,7 +1,7 @@
 import re
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, KernelInfo, CallInfo, range_str, sint
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, KernelInfo, range_str, sint
 from tinygrad.helpers import strip_parens, colored
 
 def pretty_print(x:UOp, cache=None, d=0)->str:
