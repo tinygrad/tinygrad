@@ -1744,12 +1744,11 @@ def lower_body(sink:UOp, name:str) -> UOp:
   body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}, walk=True)
   return body.call(*bufs, name=name)
 
-instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp, UOp|None, dict[UOp, tuple[UOp, UOp]]]]]] = {}
+instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp, UOp|None, dict[UOp, tuple[UOp, UOp]], tuple[UOp, ...]]]]] = {}
 
 @functools.cache
-def instruction_body(call:UOp, slots:tuple[int, ...]) -> UOp:
-  return call.body.substitute({p:p.param_like(slots[p.arg.slot], name=p.arg.name)
-                               for p in call.body.toposort() if p.op is Ops.PARAM}, walk=True)
+def instruction_body(sink:UOp, params:tuple[UOp, ...], slots:tuple[int, ...]) -> UOp:
+  return sink.substitute({p:p.param_like(i, name=p.arg.name) for p,i in zip(params, slots)}, walk=True)
 
 def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|None]:
   entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target, *(x.value for x in to_program_config)), [])
@@ -1761,20 +1760,21 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|N
     ctx = _Ctx(_wave_size(arch))
     sink = _get_handler(inst)(inst, ctx)
     base, mask = ctx.canonical_mask(inst_bytes)
-    name = f"{_op_name(inst).lower()}_{base.to_bytes(len(inst_bytes), 'little').hex()}"
-    call = lower_body(UOp.sink(sink, *(ctx.inst_word(i) for i in range(inst.size()//4))), name)
-    used = UOp.sink(call, ctx.branch_cond).toposort()
-    ret = call, ctx.branch_cond, {p:index for index,p in ctx.registers.items() if p in used}
+    sink = UOp.sink(sink, *(ctx.inst_word(i) for i in range(inst.size()//4)))
+    params = tuple(sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u:u.arg.slot))
+    used = UOp.sink(sink, ctx.branch_cond).toposort()
+    ret = sink, ctx.branch_cond, {p:index for index,p in ctx.registers.items() if p in used}, params
     entries.append((base, mask, ret))
-  call, cond, registers = ret
+  sink, cond, registers, params = ret
   words = {f"inst_w{i}":(bits >> (32*i)) & 0xffffffff for i in range(inst.size()//4)}
   bindings = {_Ctx.inst_word(i):_c(words[f"inst_w{i}"]) for i in range(inst.size()//4)}
   for p,(buf,reg) in registers.items():
     size = p.shape[0]
     bindings[p] = UOp(Ops.SHRINK, src=(buf, _c(reg.sym_infer(words)*size, dtypes.int), _c(size, dtypes.int)))
-  args = [b if b.addrspace is AddrSpace.ALU else bindings.get(b, b) for b in call.src[1:]]
+  args = [b if b.addrspace is AddrSpace.ALU else bindings.get(b, b) for b in params]
   slots = {a:i for i,a in enumerate(dict.fromkeys(args))}
-  call = call.replace(src=(instruction_body(call, tuple(slots[a] for a in args)), *(bindings.get(a, a) for a in slots)))
+  name = f"{_op_name(inst).lower()}_{base.to_bytes(len(inst_bytes), 'little').hex()}"
+  call = instruction_body(sink, params, tuple(slots[a] for a in args)).call(*(bindings.get(a, a) for a in slots), name=name)
   return call, cond.substitute(bindings) if cond is not None else None
 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
