@@ -3,7 +3,7 @@ import decimal, json, contextlib, tempfile, pickle, io, math, pathlib, gc
 from dataclasses import dataclass
 from typing import Generator
 
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group, uopfunc, CustomInfo
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group, uopfunc
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
@@ -472,7 +472,7 @@ class TestVizIntegration(unittest.TestCase):
     def custom_fn(X:UOp):
       X = X.flatten()
       i = UOp.range(X.numel(), 0)
-      custom_op = UOp.custom_function("{0} + undeclared_name;", shape=X[i].shape, dtype=X.dtype).call(X[i], aux=CustomInfo(inline=True))
+      custom_op = UOp.custom_function("{0} + undeclared_name;", shape=X[i].shape, dtype=X.dtype, fmt=True).call(X[i], inline=True)
       self.assertEqual(custom_op.shape, ())
       return X[i].store(custom_op).end(i).sink(arg=KernelInfo(name=f"custom_fn_{X.numel()}"))
     x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_fn)[0]

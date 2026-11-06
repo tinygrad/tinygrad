@@ -6,7 +6,7 @@ from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import prod, getenv, round_up, unwrap
-from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve, CustomInfo
+from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.renderer import Estimates
 
@@ -58,7 +58,7 @@ def _wmma_rdna4(device:str|tuple[str, ...]) -> bool:
 def _cfn(inline:bool, src:tuple[UOp, ...], arg:tuple[str, DType]) -> UOp:
   """a call of inline C (the old CUSTOM (a statement, or a value in a variable) and CUSTOMI (inline=True: an expression)): arg (format, dtype)"""
   fmt, dt = arg
-  return UOp.custom_function(fmt, shape=src[0].shape if src and dt != dtypes.void else (), dtype=dt).call(*src, aux=CustomInfo(inline=inline))
+  return UOp.custom_function(fmt, shape=src[0].shape if src and dt != dtypes.void else (), dtype=dt, fmt=True).call(*src, inline=inline)
 
 def _lane_xor(val:UOp, mask:int) -> UOp:
   """the float of lane ^ mask (wave32): DPP within rows of 16 lanes, permlanex16 across them (RDNA, a few cycles), else a ds_swizzle"""

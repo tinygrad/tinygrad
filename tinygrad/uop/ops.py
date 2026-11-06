@@ -1283,12 +1283,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
-  def custom_function(name:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void) -> UOp:
+  def custom_function(name:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
     shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
-    return UOp(Ops.CUSTOM_FUNCTION, src=shape_src+src, arg=CustomFunction(name, dtype))
+    return UOp(Ops.CUSTOM_FUNCTION, src=shape_src+src, arg=CustomFunction(name, dtype, fmt))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
-           name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
+           name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, aux:Any=None) -> UOp:
     """call a body with the given args: a plain CallInfo CALL. all inputs must be ready (buffers/params), this never
     creates ALLOCs: use call_with_outputs for calls that produce values"""
     assert self.op in OPAQUE_CALL_BODIES, f"cannot call a {self.op} body, use call_with_outputs for value-producing bodies"
@@ -1297,7 +1297,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       f"ranges {self.ranges} are leaking out of the call in {self.render_uir()}"
     # an external C call is a CALL on a CUSTOM_FUNCTION body stating the (possibly void) return dtype, the callee
     # (a function pointer) in source, rendered as an indirect call
-    return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
+    return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, inline, aux))
 
   @staticmethod
   def call_with_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
@@ -1427,9 +1427,7 @@ OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_F
 class CustomFunction:
   name: str
   dtype: DType = dtypes.void
-
-@dataclass(frozen=True)
-class CustomInfo: inline: bool = False
+  fmt: bool = False
 
 @dataclass(frozen=True)
 class CallInfo:
@@ -1437,13 +1435,15 @@ class CallInfo:
   name: str|None = None
   precompile: bool = False
   precompile_backward: bool = False
+  inline: bool = False
   aux: Any = None
   queue: str|None = None  # the queue its kernels run on (e.g. "COMPUTE:1"), the default one if None
   # grad_fxn can't be pickled
-  def __reduce__(self): return (CallInfo, (None, self.name, self.precompile, self.precompile_backward, self.aux, self.queue))
+  def __reduce__(self): return (CallInfo, (None, self.name, self.precompile, self.precompile_backward, self.inline, self.aux, self.queue))
   def __repr__(self):
     gf = id(self.grad_fxn) if self.grad_fxn else None
-    return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward}, {self.aux}{f', {self.queue!r}' if self.queue else ''})"
+    return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward}, {self.inline}, {self.aux}" \
+           f"{f', {self.queue!r}' if self.queue else ''})"
 
 # ******** ops in python ********
 
