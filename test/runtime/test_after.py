@@ -8,6 +8,13 @@ class TestAfterCounterexamples(unittest.TestCase):
     b = a.after(a.store(2))
     self.assertEqual(Tensor(b).tolist(), [2.])
 
+  def test_older_dependency_preserves_selected_state(self):
+    x = Tensor([0.]).realize().uop
+    first = x.store(1)
+    a = x.after(first)
+    second = a.store(2)
+    self.assertEqual((Tensor(x.after(second).after(first)) + 0).tolist(), [2.])
+
   def test_disjoint_writes_allowed(self):
     x = Tensor([0., 0.]).realize().uop
     y = Tensor(x.after(x[:1].store(1), x[1:].store(2)))
