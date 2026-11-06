@@ -544,11 +544,14 @@ class AM_IH(AM_IP):
       self.adev.is_err_state = True
 
 class AM_SDMA(AM_IP):
-  def init_sw(self): self.sdma_reginst, self.sdma_name = [], "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
+  def init_sw(self):
+    self.sdma_reginst, self.sdma_name = [], "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
+    self.engines = sum(len(self.adev.regs_offset[hw].keys() - self.adev.harvested[hw]) for hw in (am.SDMA0_HWIP, am.SDMA1_HWIP))
   def halt_engines(self):
-    if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0): self.adev.reg(f"regSDMA0_{self.sdma_name}_CNTL").update(halt=1)
+    if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0):
+      for pipe in range(self.engines): self.adev.reg(f"regSDMA{pipe}_{self.sdma_name}_CNTL").update(halt=1)
   def init_hw(self):
-    for pipe_id in range(16 if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else 1):
+    for pipe_id in range(16 if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else self.engines):
       pipe, inst = ("", pipe_id) if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else (str(pipe_id), 0)
 
       if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0):
@@ -570,7 +573,8 @@ class AM_SDMA(AM_IP):
           self.adev.reg(f"regDOORBELL0_CTRL_ENTRY_{entry}").write(**{f"bif_doorbell{entry}_range_size_entry": 20,
             f"bif_doorbell{entry}_range_offset_entry": (am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + (entry - 1) * 0xA) * 2})
           self.adev.soc.doorbell_enable(port=port, awid=awid, awaddr_31_28_value=awaddr, offset=offset, size=4, aid=aid_id)
-    else: self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2, size=4)
+    else:
+      self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2, size=20*self.engines)
 
   def fini_hw(self):
     for reg, inst in self.sdma_reginst:
@@ -580,14 +584,15 @@ class AM_SDMA(AM_IP):
       self.adev.reg(f"{reg}_DOORBELL_OFFSET").update(offset=0, inst=inst)
 
     if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0):
-      self.adev.regGRBM_SOFT_RESET.write(soft_reset_sdma0=1)
+      self.adev.regGRBM_SOFT_RESET.write(**{f"soft_reset_sdma{pipe}":1 for pipe in range(self.engines)})
       time.sleep(0.01)
       self.adev.regGRBM_SOFT_RESET.write(0x0)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, idx:int) -> int:
-    if self.adev.ip_ver[am.SDMA0_HWIP] >= (5,0,0) and idx > 0: raise RuntimeError(f"am {self.adev.devfmt}: sdma queue {idx} is not available")
+    if self.adev.ip_ver[am.SDMA0_HWIP] >= (5,0,0) and idx >= self.engines:
+      raise RuntimeError(f"am {self.adev.devfmt}: sdma queue {idx} is not available")
 
-    pipe, queue = idx // 4, idx % 4
+    pipe, queue = (idx // 4, idx % 4) if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else (idx, 0)
     reg, inst = ("regSDMA_GFX", pipe+queue*4) if self.adev.ip_ver[am.SDMA0_HWIP][:2] == (4,4) else (f"regSDMA{pipe}_QUEUE{queue}", 0)
     doorbell = am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + (pipe+queue*4) * 0xA
     self.sdma_reginst.append((reg, inst))
