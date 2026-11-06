@@ -393,6 +393,10 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_equal(t.tolist(), data)
     np.testing.assert_equal((t+1).tolist(), data+1)
 
+  def test_from_numpy_big_endian(self):
+    self.assertEqual(Tensor(np.array([1, 2, 3], dtype=">i4")).tolist(), [1, 2, 3])
+    self.assertEqual(Tensor(np.array([1.5, 2.5], dtype=">f8")).tolist(), [1.5, 2.5])
+
   # Regression test for https://github.com/tinygrad/tinygrad/issues/1751
   def test_copy_from_numpy_unaligned(self):
     # 2**15 is the minimum for repro
