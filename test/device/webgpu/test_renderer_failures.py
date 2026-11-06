@@ -13,6 +13,10 @@ class TestWGSLFailures(unittest.TestCase):
     ret = _setup_and_test_alu(Ops.MUL, 5.0, UOp.const(float("inf")).cast(dtypes.float32))
     self.assertEqual(ret[0], float("inf"))
 
+  def test_uint_sub_large_const(self):
+    x = Tensor([0xffffffff], dtype=dtypes.uint32).contiguous().realize()
+    self.assertEqual((x - 0x80000001).tolist(), [0x7ffffffe])
+
   # WGSL has a specific select(alt, val, gate) ternary operator instead of gate?val:alt
   def test_gated_load(self):
     a = UOp.param(0, dtypes.int, 4)

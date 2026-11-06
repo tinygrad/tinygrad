@@ -47,8 +47,8 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
       chunk, reduced = buf.reshape((numel,)).shrink(((s,e),)), buf.reshape((numel,)).shrink(((s,e),))
       for step in range(ndev-1):
         src, dest = (i+step)%ndev, (i+step+1)%ndev
-        cp = reduced.copy_to_device(buf.device[dest], src if isinstance(reduced.device, tuple) else None)
-        reduced = cp.alu(op, chunk.copy_to_device(buf.device[dest], dest))
+        cp = (reduced.mselect(src) if isinstance(reduced.device, tuple) else reduced).copy_to_device(buf.device[dest])
+        reduced = cp.alu(op, chunk.mselect(dest).copy_to_device(buf.device[dest]))
       reduced_chunks.append(reduced)
 
   # allgather

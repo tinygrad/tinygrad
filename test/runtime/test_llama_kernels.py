@@ -35,6 +35,11 @@ class TestFusedCE(unittest.TestCase):
   def test_fused_ce_1_2_16(self): run_fused_ce(1, 2, 16, label_smoothing=0.2)
   def test_fused_ce_2_16_128(self): run_fused_ce(2, 16, 128)
   def test_fused_ce_4_128_1024(self): run_fused_ce(4, 128, 1024, label_smoothing=0.2)
+  def test_fused_ce_grad_with_logits_reader(self):
+    # squaring makes the backward's upstream grad read the forward's loss too. the backward must not pin logits behind the forward
+    logits = Tensor.randn(1, 2, 16).cast(dtypes.bfloat16).contiguous().realize()
+    targets = Tensor.randint(1, 2, high=16, dtype=dtypes.int32).realize()
+    (fused_ce_loss(logits, targets).square() * logits.float().sum()).gradient(logits)[0].realize()
 
   # note: this is the shape used in llama 8b
   #def test_fused_ce_smoothing_16_1024_128256(self): run_fused_ce(16, 1024, 128256, label_smoothing=0.2)

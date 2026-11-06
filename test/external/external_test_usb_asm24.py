@@ -1,7 +1,13 @@
 import unittest
-from tinygrad.helpers import Timing, getenv
-from tinygrad import Tensor, Device, TinyJit
+from tinygrad.helpers import Timing, getenv, unwrap, wait_cond
+from tinygrad import Tensor, Device, TinyJit, dtypes
+from tinygrad.device import Buffer
+from tinygrad.engine.realize import run_linear
+from tinygrad.uop.ops import UOp
+from tinygrad.runtime.ops_amd import AMDSDMAQueue
+from tinygrad.runtime.support.hcq2 import make_submit
 from tinygrad.runtime.support.usb import HALF, CHUNK, SLOT
+from test.null.test_hcq2 import lower_hcq
 import numpy as np
 
 class USBTestCase(unittest.TestCase):
@@ -81,10 +87,26 @@ class TestUSBIntegrity(USBTestCase):
       np.testing.assert_array_equal(a, (Tensor(a, device="NPY").to(Device.DEFAULT) * 1).numpy())
       for size in (31, CHUNK + 31, 2 * CHUNK + 31): self.roundtrip(np.tile(tags, size // 32 + 1).view(np.uint8)[:size])
 
-  def testRingWrap(self): # 64MB of chunks: the sdma ring (1MB on usb) wraps within the copy
+  def testRingWrap(self):
+    self.dev.synchronize()
+    q = unwrap(self.dev.sdma_queue(0))
+    put, read = [b.host.view(fmt='Q') for b in (q.put_value, q.read_ptr)]
+    ring_size = q.ring.nbytes
+    # advance with NOPs, leave one dword so the next eager copy forces wrapping
+    target = (put[0] // ring_size + 1) * ring_size - 4
+    if nbytes := target - put[0]:
+      nops = UOp.from_buffer(Buffer("CPU", nbytes, initial_value=bytes(nbytes)), dtypes.uint8)
+      hq = AMDSDMAQueue(make_submit(dev=self.dev.device, queue="COPY:0", deps=(nops,)))
+      run_linear(lower_hcq(hq.submit(nops)))
+    wait_cond(lambda: read[0], value=target)
+    self.assertEqual(put[0], target)
+
     a = self.rng.integers(0, 256, 64 << 20, dtype=np.uint8)
     t = Tensor(a, device="NPY").to(Device.DEFAULT).realize()
+    self.assertGreater(put[0] // ring_size, target // ring_size)
     np.testing.assert_array_equal(a, t.numpy())
+    self.dev.synchronize()
+    wait_cond(lambda: read[0], value=put[0])
 
 if __name__ == "__main__":
   unittest.main()

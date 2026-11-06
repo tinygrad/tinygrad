@@ -97,6 +97,7 @@ class AMDriver(VirtDriver):
 
   def open(self, name, flags, mode, virtfile): return virtfile.fdcls(self._alloc_fd())
 
+  def progress(self): self._emulate_execute()
   def _emulate_execute(self):
     if self._executing: return
     self._executing = True

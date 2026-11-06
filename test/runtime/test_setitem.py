@@ -275,6 +275,13 @@ class TestAssignBitcast(unittest.TestCase):
     a.bitcast(dtypes.uint32).assign(Tensor([0x40800000, 0x40400000, 0x40000000, 0x3f800000], dtype=dtypes.uint32)).realize()
     np.testing.assert_allclose(a.numpy(), [4.0, 3.0, 2.0, 1.0])
 
+  @unittest.expectedFailure
+  def test_setitem_through_bitcast(self):
+    # TODO: the view of a bitcast is not storage, so the functional path replaces the temporary and a is never written
+    a = Tensor.full((4,), 1.0, dtype=dtypes.float32).contiguous().realize()
+    a.bitcast(dtypes.uint32)[1] = 0x40000000
+    np.testing.assert_allclose(a.numpy(), [1.0, 2.0, 1.0, 1.0])
+
 class TestWithGrad(unittest.TestCase):
   def test_set_backward(self):
     z = Tensor.ones(8, 8)

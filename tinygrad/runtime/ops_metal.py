@@ -87,7 +87,7 @@ MSGSEND, SELNAME = [metal.dll.bind(ctypes.c_void_p)(f) for f in (metal.dll.objc_
 
 # the slot of a handle of the device
 def mtl_handle(d, name:str) -> UOp:
-  return UOp.alloc((len(HANDLES),), dtypes.uint64, 0, device=to_tuple(d)[0]).rtag(to_name(to_tuple(d)[0], "handles"))[(i:=HANDLES.index(name)):i+1]
+  return UOp.alloc((len(HANDLES),), dtypes.uint64, 0, device=to_tuple(d)[0], name="handles")[(i:=HANDLES.index(name)):i+1]
 
 @uopfunc
 def mtl_send(obj:UOp, sel:UOp, a:UOp, b:UOp, c:UOp, out:UOp|None=None) -> UOp: # objc_msgSend by the selector's name, the result to out
@@ -101,7 +101,7 @@ def mtl_msg(obj:UOp, sel:str, *args:UOp|int, out:UOp|None=None) -> UOp:
 @uopfunc
 def mtl_run(icb:UOp, value:UOp, first:UOp|int, count:int, last:bool, q:MetalQueue, stamp:UOp|None=None) -> UOp:
   cmds, hdr, devs, dev = q.cmds, round_up(q.nbytes, 8) + 24, q.devs, q.dev # a command buffer for the commands [first, first + count)
-  cb, enc = [UOp.alloc((1,), dtypes.uint64, 0, device=devs[0]).rtag(t) for t in ("mtl_cb", "mtl_enc")]
+  cb, enc = [UOp.alloc((1,), dtypes.uint64, 0, device=devs[0], name=t) for t in ("mtl_cb", "mtl_enc")]
   fence, event = [mtl_handle(devs, h).index(0).load() for h in ("fence", "event")]
   c = mtl_msg(mtl_handle(devs, "queue"), "commandBuffer", out=cb)
   c = mtl_msg(cb.after(c), "computeCommandEncoder", out=enc)
@@ -151,7 +151,7 @@ class MetalQueue(HWQueue):
 
   def submit(self, cmdbuf:UOp) -> UOp:
     n, zero, pipes, cmds = len(self.cmds), round_up(self.nbytes, 8), dedup(c.src[:2] for c in self.cmds), UOp(Ops.LINEAR, src=tuple(self.cmds))
-    buf = UOp.alloc((zero + 24 + 8 * (1 + n + len(pipes)),), dtypes.uint8, device=self.devs[0])
+    buf = UOp.alloc((zero + 24 + 8 * (1 + n + len(pipes)),), dtypes.uint8, device=self.devs[0], name="icb")
     icb = patch(buf.after(buf.store(cmds), *self.deps), self.rows + [(zero + 8 * i, UOp.const(0, dtypes.uint64)) for i in range(3)])
 
     # symbolic sizes
@@ -185,12 +185,14 @@ class MetalAllocator(Allocator['MetalDevice']):
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("metal_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: MetalQueue(s).encode()),
 ])
-Compiled.pm_lower += PatternMatcher([
-  # the fence polls the shared event, not the timeline's memory
-  (UPat(Ops.PARAM, name="p").f(Ops.AFTER, allow_any_len=True, name="t").index(UPat.const(0)).load(),
-   lambda p, t: None if p.arg.name != "tl" or not str(p.device).startswith("METAL") else \
-   (r:=UOp.placeholder((1,), dtypes.uint64, None, AddrSpace.REG)).after(mtl_msg(mtl_handle(p.device, "event").after(t), "signaledValue", out=r))[0]),
-])
+
+def poll_event(p:UOp, t:UOp) -> UOp|None:
+  if p.arg.name != "tl" or not str(p.device).startswith("METAL"): return None
+  event = mtl_handle(p.device, "event").after(t)
+  done = (r:=UOp.placeholder((1,), dtypes.uint64, None, AddrSpace.REG)).after(mtl_msg(event, "signaledValue", out=r))[0]
+  # then mirror it into the timeline
+  return r.after(t.index(0).store(done))[0]
+Compiled.pm_lower += PatternMatcher([(UPat(Ops.PARAM, name="p").f(Ops.AFTER, allow_any_len=True, name="t").index(UPat.const(0)).load(), poll_event)])
 
 class MetalDevice(Compiled):
   has_copy_queue = False
@@ -209,16 +211,13 @@ class MetalDevice(Compiled):
 
     self.resources, self.table = list[int](), (ctypes.c_uint64 * 1)()
     self.event, self.fence = self.sysdevice.newSharedEvent(), self.sysdevice.newFence()
-    self.icbs, self.profile_slots = weakref.WeakKeyDictionary[Buffer, tuple](), weakref.WeakSet[Buffer]()
+    self.icbs = weakref.WeakKeyDictionary[Buffer, tuple]()
 
     # https://developer.apple.com/documentation/metal/mtlgpufamily
     def check_family(f): return next(filter(self.sysdevice.supportsFamily, reversed([v for v, nm in metal.enum_MTLGPUFamily.items() if f in nm])), 0)
     super().__init__(device, MetalAllocator(self), [MetalRenderer], None,
                      arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
-    Compiled.pm_bufferize += PatternMatcher([
-      (UPat(Ops.ALLOC, tag=self.tag("handles")), lambda d=self: d.handles),
-      (UPat(Ops.ALLOC, tag="slots", name="b"), # with stamps
-       lambda b, d=self: d.new_slots(b.max_numel()) if b.device == d.device and b.max_numel() > 4 else None)])
+    Compiled.link_bufs |= {to_name(self.device, "handles"): lambda b: self.handles}
     Compiled.pm_link += PatternMatcher([
       (UPat(Ops.BUFFER, name="b").store(UPat(Ops.LINEAR, name="cmds")), lambda b, cmds, d=self: d.new_icb(b.buffer, cmds.src))])
 
@@ -237,10 +236,6 @@ class MetalDevice(Compiled):
 
     # update sels table
     if "handles" in self.__dict__: self.handles.host.view(fmt='Q')[3:5] = array.array('Q', [ctypes.addressof(self.table), len(self.resources)])
-
-  def new_slots(self, n:int) -> Buffer:
-    self.profile_slots.add(buf:=Buffer(self.host, n * 8, initial_value=bytes(8 * n)))
-    return buf
 
   @functools.cache
   def pipeline(self, lib:bytes, name:str) -> metal.MTLComputePipelineState:
@@ -275,12 +270,10 @@ class MetalDevice(Compiled):
     if not wait(self.event, value, int(self.wait_timeout_ms)): raise RuntimeError(f"{self.device} signal wait timed out")
 
   def synchronize(self, timeout:int|None=None):
-    for buf in list(self.profile_slots): # pending: [command buffer, 0]
-      slots = buf.host.view(fmt='Q')
-      for start in range(5, buf.nbytes // 8, 4):
-        if slots[start] and not slots[start + 2]:
-          (cb:=metal.MTLCommandBuffer(slots[start])).waitUntilCompleted()
-          slots[start], slots[start + 2] = int(cb.GPUStartTime() * 1e9), int(cb.GPUEndTime() * 1e9)
+    for slots, start in [(buf.host.view(fmt='Q'), start) for buf, start in self.prof_ents]:
+      if slots[start] and not slots[start + 2]: # [command buffer, 0]
+        (cb:=metal.MTLCommandBuffer(slots[start])).waitUntilCompleted()
+        slots[start], slots[start + 2] = int(cb.GPUStartTime() * 1e9), int(cb.GPUEndTime() * 1e9)
 
     super().synchronize(timeout)
     if (pool:=getattr(pools, "pool", None)) is not None: objc.lib.objc_autoreleasePoolPop(pool)

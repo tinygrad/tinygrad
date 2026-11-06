@@ -2,7 +2,7 @@ import unittest, re, ast as pyast
 from typing import Any
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid
-from tinygrad.uop import Ops
+from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.ops import AxisType, UOp, graph_rewrite, ParamArg, KernelInfo
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.render import render_uir
@@ -36,11 +36,10 @@ def _parse_const(tok:str) -> UOp:
 
 def _parse_paramarg(rest:str, name:str|None) -> ParamArg:
   kv = _kv(rest)
-  def i(k:str) -> int|None: return int(kv[k]) if k in kv else None
   dev = kv.get("device")
   return ParamArg(int(kv["slot"]), _DTYPES_BY_NAME[kv["dtype"]],
                   tuple(map(int, kv["bounds"].strip("[]").split(","))) if "bounds" in kv else None,
-                  i("multiple_of"), name, AddrSpace[kv["addrspace"]] if "addrspace" in kv else AddrSpace.GLOBAL,
+                  name, AddrSpace[kv["addrspace"]] if "addrspace" in kv else AddrSpace.GLOBAL,
                   pyast.literal_eval(dev) if dev and dev[0] in "'(" else dev, kv.get("volatile") == "true")
 
 def parse_ssa(text:str) -> UOp:
@@ -66,7 +65,7 @@ def parse_ssa(text:str) -> UOp:
       name, argstr = argstr[1:end], argstr[end+1:].strip()
     srcs = [parse_tok(t) for t in _src_tok.findall(srcstr)]
     arg: Any = None
-    if op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: arg = _parse_paramarg(argstr, name)
+    if op in GroupOp.Defines: arg = _parse_paramarg(argstr, name)
     elif op is Ops.RANGE:
       t, *ids = argstr.split()
       arg = (AxisType[t], *map(int, ids))
@@ -86,7 +85,7 @@ def parse_ssa(text:str) -> UOp:
 
 def _strip_buffers(root:UOp) -> UOp:
   # realized BUFFERs carry runtime state the wire can't; a BUFFER with no binding is exactly an ALLOC
-  subs = {b: b.replace(op=Ops.ALLOC, arg=ParamArg(b.arg.slot, b.arg.dtype, b.arg.vmin_vmax, b.arg.multiple_of,
+  subs = {b: b.replace(op=Ops.ALLOC, arg=ParamArg(b.arg.slot, b.arg.dtype, b.arg.vmin_vmax,
                                                  b.arg.name, b.arg.addrspace, b.arg.device, b.arg.volatile))
           for b in root.toposort() if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg)}
   return root.substitute(subs, walk=True, name="strip buffers for wire format test") if subs else root

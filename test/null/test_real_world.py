@@ -30,7 +30,7 @@ def helper_test(nm, gen, model, max_memory_allowed, max_kernels_allowed, all_jit
       tms.append(time.perf_counter_ns() - st)
     mem_used = (GlobalCounters.mem_used - global_mem_used) / 1e9
 
-    kernels_used = jit_cache_count(model.captured.linear) if getattr(model, "captured", None) is not None else None
+    kernels_used = jit_cache_count(model.captured._linear) if getattr(model, "captured", None) is not None else None
     print(f"{nm}: used {mem_used/1e9:.2f} GB and {kernels_used} kernels in {min(tms)/1e6:.2f} ms")
     assert mem_used < max_memory_allowed, f"{nm} used more than {max_memory_allowed:.3f} GB - {mem_used:.3} GB used"
     assert (max_memory_allowed - mem_used) / max_memory_allowed < 0.2, f"{max_memory_allowed:.3f} GB is too far from {mem_used:.3} GB used"

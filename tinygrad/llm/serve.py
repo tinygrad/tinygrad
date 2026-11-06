@@ -9,6 +9,13 @@ if TYPE_CHECKING:
 
 def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
   s = s.strip()
+  # Kimi-K3 format: tool="name" index="1"<|sep|><|open|>argument key="key" type="string"<|sep|>value<|close|>argument<|sep|>...
+  if (m := re.fullmatch(r'tool="([^"]+)"(?: index="\d+")?<\|sep\|>(.*)', s, re.DOTALL)):
+    pattern = r'<\|open\|>argument key="([^"]+)" type="([^"]+)"<\|sep\|>(.*?)<\|close\|>argument<\|sep\|>'
+    if re.sub(pattern, '', m[2], flags=re.DOTALL).strip(): return None
+    def unescape(v:str) -> str: return v.replace('&quot;', '"').replace('&amp;', '&')
+    try: return unescape(m[1]), {unescape(a[1]): a[3] if a[2] == "string" else json.loads(a[3]) for a in re.finditer(pattern, m[2], re.DOTALL)}
+    except json.JSONDecodeError: return None
   if s.startswith("{"):  # hermes JSON format: {"name": ..., "arguments": {...}}
     try:
       call = json.loads(s)
@@ -48,7 +55,13 @@ def disconnected(conn:socket.socket) -> bool:
 
 class StreamRouter:
   # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse
-  def __init__(self, reasoning:bool=False):
+  # (start think, end think, end content, tool call)
+  FORMATS = (("<think>", "</think>", "<tool_call>", r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)"),
+             ("<|open|>think<|sep|>", "<|close|>think<|sep|><|open|>response<|sep|>", "<|close|>response<|sep|>",
+              r"<\|open\|>call \s*(.*?)\s*(?:<\|close\|>call<\|sep\|>|$)"))
+  def __init__(self, special_tokens:dict[str, int], reasoning:bool=False):
+    self.think, self.end_think, self.end_content, self.call = next((f for f in self.FORMATS if any(f[2].startswith(t) for t in special_tokens)),
+                                                                   self.FORMATS[0])
     self.buf = ""
     self.mode = "reasoning" if reasoning else "undecided"  # output inside a think block is sent as reasoning_content
   def split(self, tag:str, final:bool) -> tuple[str, bool]:
@@ -62,17 +75,17 @@ class StreamRouter:
   def route(self, piece:str, final:bool=False) -> typing.Iterator[tuple[str, str]]:
     self.buf += piece
     if self.mode == "undecided":  # decide whether the output starts with a think block
-      if not final and len(self.buf) < len("<think>") and "<think>".startswith(self.buf): return
-      self.mode, self.buf = ("reasoning", self.buf[len("<think>"):]) if self.buf.startswith("<think>") else ("content", self.buf)
+      if not final and len(self.buf) < len(self.think) and self.think.startswith(self.buf): return
+      self.mode, self.buf = ("reasoning", self.buf[len(self.think):]) if self.buf.startswith(self.think) else ("content", self.buf)
     if self.mode == "reasoning":
-      emit, done = self.split("</think>", final)
+      emit, done = self.split(self.end_think, final)
       if emit: yield "reasoning_content", emit
       if not done: return
       self.mode = "content"
     if self.mode == "tool": return
-    emit, found = self.split("<tool_call>", final)
+    emit, found = self.split(self.end_content, final)
     if emit: yield "content", emit
-    if found: self.mode, self.buf = "tool", "<tool_call>" + self.buf
+    if found: self.mode, self.buf = "tool", self.end_content + self.buf
 
 class Request:
   def __init__(self, ids:list[int], disconnected:typing.Callable[[], bool], max_tokens:int|None=None, temperature:float=0.0, log_prefix:str=""):
@@ -95,7 +108,7 @@ class Handler(VizHandler):
     def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
     out: list[int] = []
     dec = tok.stream_decoder()
-    router = StreamRouter(reasoning)
+    router = StreamRouter(tok._special_tokens, reasoning)
     self.server.waiting.put(req)
     yield chunk({"role":"assistant", "content":""})
     while (next_id := req.out.get()) is not None:
@@ -107,7 +120,7 @@ class Handler(VizHandler):
     finish_reason = req.finish_reason
     for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
     tool_calls: list[dict] = []
-    for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
+    for m in re.finditer(router.call, router.buf, re.DOTALL):
       if (parsed := parse_tool_call(m.group(1))) is None:
         stderr_log(f"{colored('failed to parse tool call', 'red')}: {m.group(1)[:200]}\n")
         yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
@@ -122,7 +135,6 @@ class Handler(VizHandler):
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
                                       "total_tokens": prompt_tokens + len(out)}, **tmpl}
-
   def do_POST(self):
     request_st = time.perf_counter()
     log_prefix = f"{self.path}  {colored('--', 'BLACK')}  "
@@ -146,7 +158,7 @@ class Handler(VizHandler):
       req = Request(ids, functools.partial(disconnected, self.connection), max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
                     log_prefix=log_prefix)
       chunks = self.run_model(req, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                              reasoning=rendered.rstrip().endswith("<think>"))
+                              reasoning=rendered.rstrip().endswith(tuple(f[0] for f in StreamRouter.FORMATS)))
       if body.get("stream"): self.stream_json(chunks)
       else:
         out, reasoning, tool_calls, finish_reason = [], [], [], "stop"

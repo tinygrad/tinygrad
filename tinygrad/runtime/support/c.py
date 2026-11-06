@@ -38,6 +38,7 @@ class Array(Generic[T, U], ctypes.Array):
 
 class Struct(ctypes.Structure):
   SIZE = 0
+  _real_fields_:list[tuple[str, type, int]|tuple[str, type, int, int, int]] # (name, type, offset[, bit width, bit offset])
 
   def __init__(self, *args, **kwargs):
     ctypes.Structure.__init__(self)

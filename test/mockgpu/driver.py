@@ -37,3 +37,4 @@ class VirtDriver:
     self.tracked_addresses = []
   def track_address(self, staddr, enaddr, rcb, wcb): self.tracked_addresses.append((staddr, enaddr, rcb, wcb))
   def open(self, name, flags, mode, fdcls): raise NotImplementedError()
+  def progress(self): pass # runs the queues

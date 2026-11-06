@@ -257,6 +257,7 @@ def train_resnet():
           min_time = min(step_times)
           assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
 
+        if not INITMLPERF: batch_loader.close()
         if (TRAIN_BEAM or EVAL_BEAM) and e == start_epoch: break
         return
     if MLLOGGER and RUNMLPERF:

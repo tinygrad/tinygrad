@@ -5,7 +5,7 @@ from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.codegen import to_program
 from tinygrad.dtype import DType, dtypes, AddrSpace
-from tinygrad.renderer.isa import ISARenderer
+from tinygrad.renderer.x86 import ISARenderer
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.helpers import Target
@@ -63,7 +63,7 @@ class TestLinearizer(unittest.TestCase):
     x = Tensor.empty(7, 4).realize()
     r = Tensor.stack(x.const_like(0), x, x.const_like(0)).reshape(21, 4).shrink(((4, 19), None)).contiguous()
     uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
-    self.assertEqual([u.op for u in uops if u.op in {Ops.FLOORDIV, Ops.FLOORMOD, Ops.CDIV, Ops.CMOD}], [])
+    self.assertEqual([u.op for u in uops if u.op in {Ops.DIV, Ops.MOD, Ops.TRUNCDIV, Ops.TRUNCMOD}], [])
 
   def test_const_table_even_index(self):
     # idx*2 is even, so the gather never selects the odd entry 5 and the store folds to 0

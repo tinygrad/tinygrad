@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, functools, mmap, struct, time
-from typing import Any
-from tinygrad.helpers import DEBUG, DEV, getenv, unwrap
+from typing import Any, Callable
+from tinygrad.helpers import DEBUG, DEV, getenv, unwrap, to_name
 from tinygrad.device import Device, Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
@@ -23,7 +23,7 @@ def check(status:int):
 
 def cu_launch_kernel(ctx:CUDADevice, call:UOp, prg:UOp) -> tuple:
   rows = layout_args(get_call_kernel_args(call, prg, (ctx.device,)), 48)
-  buf = UOp.alloc((max([o + w.dtype.itemsize for o, w in rows], default=48),), dtypes.uint8, device=HCQ_RUNTIME_DEV.device).rtag("kernargs")
+  buf = UOp.alloc((max([o + w.dtype.itemsize for o, w in rows], default=48),), dtypes.uint8, device=HCQ_RUNTIME_DEV.device, name="kernargs")
   addr = buf.getaddr(HCQ_RUNTIME_DEV.device) # [extra: buffer pointer, &args, buffer size, &size, end][size][args]
   hdr = layout_args([UOp.const(v, dtypes.uint64) if isinstance(v, int) else v for v in (1, addr+48, 2, addr+40, ctx.launch_end, buf.max_numel()-48)])
   func = (p:=make_program(prg, 8, ctx.device)).after(p.store(prg)).bitcast(dtypes.u64).index(0).load()
@@ -40,18 +40,18 @@ pm_cuda = PatternMatcher([ # None is the stream
   (UPat(Ops.CALL, src=(UPat.custom_function("store"), UPat(name="sig"), UPat(name="val"))),
    lambda ctx, sig, val: (cuda.cuStreamWriteValue64_v2, None, sig.getaddr(ctx.device), val, cuda.CU_STREAM_WRITE_VALUE_DEFAULT)),
   (UPat(Ops.CALL, src=(UPat.custom_function("timestamp"), UPat(name="sig"))), # [sig][stamp]
-   lambda ctx, sig: (cuda.cuLaunchHostFunc, None, UOp.alloc((1,), dtypes.uint64, 0, device=ctx.device).rtag(ctx.tag("stamp")).getaddr(ctx.host),
+   lambda ctx, sig: (cuda.cuLaunchHostFunc, None, UOp.alloc((1,), dtypes.uint64, 0, device=ctx.device, name="stamp").getaddr(ctx.host),
                      sig[1:2].getaddr(ctx.device))),
 ])
 
-def cuda_submit(s:UOp) -> UOp:
+def cuda_submit(s:UOp, ccallfn:Callable[[Any, *tuple[UOp, ...]], UOp]=ccall) -> UOp:
   (call, *deps), q = s.src, s.src[0].src[1]
   rt_vars = UOp.param(0, dtypes.uint64, 3, q.device, name="rt_vars") # [ctx, compute stream, copy stream]
-  h = ccall(cuda.cuCtxSetCurrent, rt_vars.index(0).load())
+  h = ccallfn(cuda.cuCtxSetCurrent, rt_vars.index(0).load())
   for fn, *args in [x for c in call.body.src if (x:=pm_cuda.rewrite(c, ctx=Device[q.device])) is not None]:
     stream = rt_vars.after(h).index(2 if q.arg.name.startswith("COPY") else 1).load() # the stream after the last call
-    h = ccall(fn, *[stream if a is None else UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args])
-  return h.sink().call(UOp.alloc((3,), dtypes.uint64, 0, device=q.device).rtag(Device[q.device].tag("cuda")).after(*deps), name=call.body.arg.name)
+    h = ccallfn(fn, *[stream if a is None else UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args])
+  return h.sink().call(UOp.alloc((3,), dtypes.uint64, 0, device=q.device, name="handles").after(*deps), name=call.body.arg.name)
 
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("cuda_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), cuda_submit),
@@ -98,24 +98,18 @@ class CUDADevice(Compiled):
     self.context = init_c_var(api.CUcontext, lambda x: check(api.cuCtxCreate_v2(ctypes.byref(x), 0, self.cu_device)))
     self.streams = [init_c_var(api.CUstream, lambda x: check(api.cuStreamCreate(ctypes.byref(x), cuda.CU_STREAM_NON_BLOCKING))) for _ in range(2)]
     super().__init__(device, CUDAAllocator(self), self.renderers, None, arch=self.get_arch(device_id))
-    Compiled.pm_bufferize += PatternMatcher([
-      (UPat(Ops.ALLOC, tag=self.tag("cuda")), lambda d=self: d.handles),
-      (UPat(Ops.ALLOC, tag=self.tag("stamp")), lambda d=self: d.stamp)])
+
+    # [ctx, compute stream, copy stream], and the host function that writes a timestamp
+    handles = Buffer(HCQ_RUNTIME_DEV.device, 24, initial_value=b"".join(map(bytes, (self.context, *self.streams))))
+    fn = cuda.CUhostFn(lambda slot: ctypes.memmove(slot, struct.pack("Q", time.perf_counter_ns()), 8))
+    stamp = Buffer(HCQ_RUNTIME_DEV.device, 8, opaque=BufferStorage(int.from_bytes(bytes(fn), "little"), fn))
+    Compiled.link_bufs |= {to_name(self.device, "handles"): handles, to_name(self.device, "stamp"): stamp}
     Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, name="p").store(UPat(Ops.PROGRAM, name="prg")), lambda p, prg, d=self:
       p.store(UOp(Ops.BINARY, arg=d.function(prg.src[3].arg, prg.src[0].arg.function_name))) if p.device == d.device else None)])
 
   def get_arch(self, device_id:int) -> str:
     check(cuda.cuDeviceComputeCapability(ctypes.byref(major:=ctypes.c_int()), ctypes.byref(minor:=ctypes.c_int()), device_id))
     return f"sm_{major.value}{minor.value}"
-
-  @functools.cached_property
-  def handles(self) -> Buffer:
-    return Buffer(HCQ_RUNTIME_DEV.device, 24, initial_value=b"".join(map(bytes, (self.context, *self.streams))))
-
-  @functools.cached_property
-  def stamp(self) -> Buffer:
-    fn = cuda.CUhostFn(lambda slot: ctypes.memmove(slot, struct.pack("Q", time.perf_counter_ns()), 8))
-    return Buffer(HCQ_RUNTIME_DEV.device, 8, opaque=BufferStorage(int.from_bytes(bytes(fn), "little"), fn))
 
   @functools.cache
   def function(self, lib:bytes, name:str) -> bytes:

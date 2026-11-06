@@ -6,14 +6,13 @@ when USE_HW=1.
 """
 import ctypes, unittest
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
-from tinygrad.helpers import Target
 from test.amd.hw.helpers import USE_HW, assemble
 from test.mockgpu.amd.emu import run_asm
 
 WAVE64 = 64
 
-def _wave64_code(instructions: list, out_reg: int = 1) -> bytes:
-  return assemble([
+def _wave64_code(instructions: list, out_reg: int = 1) -> list:
+  return [
     s_mov_b32(s[80], s[0]),
     s_mov_b32(s[81], s[1]),
     v_mov_b32_e32(v[255], v[0]),
@@ -23,12 +22,12 @@ def _wave64_code(instructions: list, out_reg: int = 1) -> bytes:
     v_lshlrev_b32_e32(v[240], 2, v[255]),
     global_store_b32(addr=v[240], data=v[out_reg], saddr=s[92:93], offset=0),
     s_endpgm(),
-  ])
+  ]
 
 def _run_wave64_emu(instructions: list, out_reg: int = 1) -> list[int]:
   out_buf = (ctypes.c_uint32 * WAVE64)(*([0] * WAVE64))
   args = (ctypes.c_uint64 * 1)(ctypes.addressof(out_buf))
-  code = _wave64_code(instructions, out_reg)
+  code = assemble(_wave64_code(instructions, out_reg))
   kernel_buf = (ctypes.c_char * len(code)).from_buffer_copy(code)
   rsrc2 = 0x19c | (128 << 15)
   scratch_size = 0x10000
@@ -37,55 +36,19 @@ def _run_wave64_emu(instructions: list, out_reg: int = 1) -> list[int]:
   return list(out_buf)
 
 def _run_wave64_hw(instructions: list, out_reg: int = 1) -> list[int]:
-  from tinygrad.device import Device, TinyELF, Buffer
-  from tinygrad.runtime.support.compiler_amd import HIPCompiler
+  from tinygrad.device import Device, Buffer
+  from tinygrad.dtype import dtypes, AddrSpace
+  from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+  from tinygrad.engine.realize import run_linear
 
   dev = Device["AMD"]
-  compiler = HIPCompiler(dev.arch)  # type: ignore[attr-defined]
-  code = _wave64_code(instructions, out_reg)
-  byte_str = ', '.join(f'0x{b:02x}' for b in code)
-  asm_src = f""".text
-.globl test
-.p2align 8
-.type test,@function
-test:
-.byte {byte_str}
-
-.rodata
-.p2align 6
-.amdhsa_kernel test
-  .amdhsa_next_free_vgpr 256
-  .amdhsa_next_free_sgpr 96
-  .amdhsa_user_sgpr_kernarg_segment_ptr 1
-  .amdhsa_kernarg_size 8
-  .amdhsa_group_segment_fixed_size 65536
-  .amdhsa_private_segment_fixed_size 65536
-  .amdhsa_enable_private_segment 1
-.end_amdhsa_kernel
-
-.amdgpu_metadata
----
-amdhsa.version:
-  - 1
-  - 0
-amdhsa.kernels:
-  - .name: test
-    .symbol: test.kd
-    .kernarg_segment_size: 8
-    .group_segment_fixed_size: 65536
-    .private_segment_fixed_size: 65536
-    .kernarg_segment_align: 8
-    .wavefront_size: 64
-    .sgpr_count: 96
-    .vgpr_count: 256
-    .max_flat_workgroup_size: 1024
-...
-.end_amdgpu_metadata
-"""
-  lib = compiler.compile(asm_src)
-  prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ()))
   out_gpu = Buffer(dev.device, WAVE64 * 4, preallocate=True)
-  prg(out_gpu._buf, global_size=(1, 1, 1), local_size=(WAVE64, 1, 1), wait=True)
+  lds = UOp.placeholder((65536,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  sink = UOp.sink(UOp.param(0, dtypes.uint32, (WAVE64,)), UOp.special(WAVE64, "lidx0"),
+                  lds.end(UOp.range(WAVE64, 0, AxisType.WARP)), arg=KernelInfo("test"))
+  body = UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in _wave64_code(instructions, out_reg)))
+  prg = UOp(Ops.PROGRAM, src=(sink, body))
+  run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
   out = out_gpu.as_memoryview()
   return [int.from_bytes(out[i*4:(i+1)*4], 'little') for i in range(WAVE64)]
 

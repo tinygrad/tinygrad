@@ -9,7 +9,7 @@ class TestQCOM(unittest.TestCase):
   def test_dcache_flush(self):
     from tinygrad.runtime.ops_qcom import dcache_flush
     buf = (ctypes.c_uint8 * 64)()
-    dcache_flush().fxn(buf, 0)
+    dcache_flush()(ctypes.addressof(buf), 0)
 
 if __name__ == '__main__':
   unittest.main()

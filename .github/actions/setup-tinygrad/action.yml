@@ -74,17 +74,22 @@ runs:
       with:
         enable-cache: 'false' # see below for manual caching
 
-    # **** Caching packages ****
+    # **** Caching ****
+    # NOTE: self-hosted CI (ie. collaborator PRs) should never cache anything, instead, either:
+    #   * bake into the CI image: https://git.tinygrad.win/tinygrad/images, OR
+    #   * handle in CI runner HTTP cache
+    # Because CI for master and non-collaborator PRs are github-hosted, they need caching to workaround the flaky internet.
+    # Additionally, the actions/cache/restore pattern should be used to avoid PRs polluting the limited github cache storage.
 
     - name: Cache Python packages (PR)
-      if: github.event_name == 'pull_request' && env.RUNNER_ENVIRONMENT == 'github-hosted'
+      if: github.event_name == 'pull_request' && runner.environment == 'github-hosted'
       id: restore-venv-pr
       uses: actions/cache/restore@v5
       with:
         path: /tmp/.uv-cache
         key: uv-${{ runner.os }}-${{ runner.arch }}-python-${{ inputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
     - name: Cache Python packages
-      if: github.event_name != 'pull_request'
+      if: github.event_name != 'pull_request' && runner.environment == 'github-hosted'
       id: restore-venv
       uses: actions/cache@v5
       with:
@@ -94,13 +99,13 @@ runs:
     # **** Caching downloads ****
 
     - name: Cache downloads (PR)
-      if: inputs.key != '' && github.event_name == 'pull_request' && env.RUNNER_ENVIRONMENT == 'github-hosted'
+      if: inputs.key != '' && github.event_name == 'pull_request' && runner.environment == 'github-hosted'
       uses: actions/cache/restore@v5
       with:
         path: ${{ runner.os == 'Linux' && '~/.cache/tinygrad/downloads/' || '~/Library/Caches/tinygrad/downloads/' }}
         key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
     - name: Cache downloads
-      if: inputs.key != '' && github.event_name != 'pull_request'
+      if: inputs.key != '' && github.event_name != 'pull_request' && runner.environment == 'github-hosted'
       uses: actions/cache@v5
       with:
         path: ${{ runner.os == 'Linux' && '~/.cache/tinygrad/downloads/' || '~/Library/Caches/tinygrad/downloads/' }}
@@ -205,13 +210,13 @@ runs:
         echo "installed=$installed" >> "$GITHUB_OUTPUT"
 
     - name: Cache apt (PR)
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && github.event_name == 'pull_request' && steps.apt-pkgs.outputs.installed == 'false' && env.RUNNER_ENVIRONMENT == 'github-hosted'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && github.event_name == 'pull_request' && steps.apt-pkgs.outputs.installed == 'false' && runner.environment == 'github-hosted'
       uses: actions/cache/restore@v5
       with:
         path: /var/cache/apt/archives/
         key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
     - name: Cache apt
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && github.event_name != 'pull_request' && steps.apt-pkgs.outputs.installed == 'false'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && github.event_name != 'pull_request' && steps.apt-pkgs.outputs.installed == 'false' && runner.environment == 'github-hosted'
       uses: actions/cache@v5
       with:
         path: /var/cache/apt/archives/

@@ -393,6 +393,10 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_equal(t.tolist(), data)
     np.testing.assert_equal((t+1).tolist(), data+1)
 
+  def test_from_numpy_big_endian(self):
+    self.assertEqual(Tensor(np.array([1, 2, 3], dtype=">i4")).tolist(), [1, 2, 3])
+    self.assertEqual(Tensor(np.array([1.5, 2.5], dtype=">f8")).tolist(), [1.5, 2.5])
+
   # Regression test for https://github.com/tinygrad/tinygrad/issues/1751
   def test_copy_from_numpy_unaligned(self):
     # 2**15 is the minimum for repro
@@ -417,6 +421,11 @@ class TestTinygrad(unittest.TestCase):
       reshaped_item = Tensor([a]).reshape((1, 1, 1, 1, 1)).item()
       assert type(reshaped_item) is type(a), a
       np.testing.assert_allclose(reshaped_item, a), a
+
+  def test_item_narrow_float(self):
+    for dt in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s):
+      self.assertEqual(Tensor([1.5], dtype=dt).item(), 1.5)
+      self.assertEqual(Tensor(1.5).cast(dt).item(), 1.5)
 
   def test_no_attributeerror_after_apply_uop_exception(self):
     try:

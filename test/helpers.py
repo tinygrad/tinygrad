@@ -1,6 +1,6 @@
-import os, sys, time, struct, functools, unittest
+import os, sys, gc, time, struct, functools, unittest, contextlib
 from dataclasses import replace
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.device import Buffer
@@ -66,6 +66,13 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
     raise KernelCountException(allowed, kernel_cnt)
   return linear, var_vals
 
+@contextlib.contextmanager
+def measure_mem() -> Iterator[Callable[[], int]]:
+  Device.default.synchronize()
+  gc.collect()
+  base = GlobalCounters.mem_used
+  yield lambda: (gc.collect(), GlobalCounters.mem_used - base)[1]
+
 def assert_kernel_count(expected:int):
   got = GlobalCounters.kernel_count
   if got != expected: raise KernelCountException(expected, got)
@@ -82,7 +89,7 @@ def jit_cache_count(linear:UOp) -> int:
   return sum(len(call.without_after.arg.aux.kernels) if call_is_hcq(call) else 1 for call in linear.src)
 
 def assert_jit_cache_len(fxn, expected_len):
-  linear = fxn.captured.linear if fxn.captured is not None else None
+  linear = fxn.captured._linear if fxn.captured is not None else None
   if linear is None or not linear.src:
     if expected_len != 0: raise KernelCountException(expected_len, 0)
     return

@@ -350,6 +350,13 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), [1,2,3])
     np.testing.assert_equal(b.numpy(), [10,20,30])
 
+  def test_offset_slice(self):
+    @function(precompile=True)
+    def square(x:Tensor) -> Tensor: return x * x
+
+    x = Tensor([0., 1., 2., 3., 4.]).realize()
+    self.assertEqual(square(x[1:]).tolist(), [1., 4., 9., 16.])
+
 class TestFunctionMulti(unittest.TestCase):
   devices_2 = ("CPU:0", "CPU:1")
 
