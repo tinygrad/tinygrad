@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence, Callable
-import decimal, weakref, pickle
+import decimal, weakref, pickle, time, os
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
@@ -255,7 +255,13 @@ pm_beam = PatternMatcher([
 # **************** parallel lowering + compilation ****************
 
 def _compile_kernel(x:tuple[int, tuple[UOp, Renderer], dict]) -> tuple[int, UOp]:
-  with Context(**x[2]): return x[0], to_program(*x[1])
+  with Context(**x[2]):
+    if not os.environ.get("COMPILE_LOG"): return x[0], to_program(*x[1])
+    # (COMPILE_LOG: every kernel's codegen time to /tmp/compile_log.txt)
+    st = time.perf_counter()
+    prg = to_program(*x[1])
+    with open("/tmp/compile_log.txt", "a") as f: f.write(f"{time.perf_counter()-st:.3f} {prg.src[0].arg.name}\n")
+    return x[0], prg
 def _compile_pickled(task:bytes) -> bytes: return pickle.dumps(_compile_kernel(pickle.loads(task))[1])
 
 # (a process compiling for another: its kernels compiled there, by their keys, see capture_parallel) [(key, task)] -> their programs

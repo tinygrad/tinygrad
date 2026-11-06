@@ -2734,13 +2734,34 @@ class Transformer:
     q, nb = _GGML_QUANT[ple.ggml_type]
     return ggml_data_to_tensor(rows.flatten(), int(prod(rows.shape)) // nb * q, ple.ggml_type).reshape(B, T, -1).float()
 
-  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp=0) -> Tensor:
-    """base: the first row of the sequence's region of the caches (and of the token buffer), see regions"""
+  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp=0, part:int|None=None) -> Tensor:
+    """base: the first row of the sequence's region of the caches (and of the token buffer), see regions. part: of a prefill in parts"""
     _seq_base[0] = base
-    try: return self._forward(tokens, start_pos, temperature, base)
+    try: return self._forward(tokens, start_pos, temperature, base, part)
     finally: _seq_base[0] = 0
 
-  def _forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp) -> Tensor:
+  # ******** PREFILL_PARTS: a prefill chunk's jit in parts of the blocks (jits captured at once, in processes of their own: a jit's capture
+  # is ~80 s of python for all the blocks of two micro batches). the streams of the micro batches between parts in buffers of the model ********
+
+  def prefill_parts(self, rows:int) -> list[tuple[int, int]]:
+    """the blocks of the parts of a prefill chunk of rows (one part: not split)"""
+    k, n = getenv("PREFILL_PARTS", 4), len(self.blk)
+    mb = getenv("MICRO_BATCHES", 1)
+    if k <= 1 or self.config.hc is None or not amd_custom_kernels_supported(self.token_embd.weight.device) or \
+       not (self.sequence_parallel(rows) and (mb > 1 or getenv("MB_PHASES", 1)) and self.sequence_parallel(rows // mb) and rows % mb == 0):
+      return [(0, n)]
+    return [(i*n//k, (i+1)*n//k) for i in range(k)]
+
+  def _carry(self, rows:int) -> list[Tensor]:
+    """the streams of every micro batch of a prefill chunk of rows between its parts (made before the jits are captured)"""
+    carry = self.__dict__.setdefault("_pf_carry", {})
+    if rows not in carry:
+      hc, mb, devs = unwrap(self.config.hc), getenv("MICRO_BATCHES", 1), cast(tuple[str, ...], self.token_embd.weight.device)
+      dt = dtypes.half if getenv("HC_STREAMS_HALF", 1) else dtypes.float32
+      carry[rows] = [Tensor.zeros(1, rows // mb, hc.count, self.config.dim, dtype=dt).shard(devs, axis=1).contiguous().realize() for _ in range(mb)]
+    return carry[rows]
+
+  def _forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp, part:int|None=None) -> Tensor:
     # (a view of the token buffer from a variable base: copied, the lookup of the embedding's rows of a view at two variables is a reduce over
     # the vocabulary)
     x = emb = self.token_embd((tokens.contiguous() if isinstance(base, UOp) else tokens).to(self.token_embd.weight.device)).float()  # (B, T, D)
@@ -2766,11 +2787,19 @@ class Transformer:
         # the blocks in phases (micro_batch_blocks), on micro batches of rows if MICRO_BATCHES > 1 (the copies of one overlap the kernels of
         # the next). a batch starts at the end of the tokens before it (all padding if there are none): its states follow theirs
         n, xs, ts, starts = R // mb, [], [], []
+        parts = self.prefill_parts(R)
+        a, b = parts[part or 0]
         for i in range(mb):
-          xs.append(shard_rows(x[:, i*n:(i+1)*n].contiguous(), 1))
+          if not a: xs.append(shard_rows(x[:, i*n:(i+1)*n].contiguous(), 1))
           ts.append((T - i*n).maximum(0).minimum(n))
           starts.append(start_pos + (T.minimum(i*n) if i else 0))
-        xs = micro_batch_blocks(self.blk, xs, starts, ts, ple)
+        if a: xs = list(self._carry(R))
+        xs = micro_batch_blocks(self.blk[a:b], xs, starts, ts, ple)
+        if b < len(self.blk):
+          # (not the last part: the streams to the model's buffers, the output one of them)
+          carry = self._carry(R)
+          outs = [Tensor(c.uop.after(c.uop.store(xi.cast(c.dtype).uop))) for c, xi in zip(carry, xs)]
+          return functools.reduce(lambda a, o: a + o[:, :, :1, :1].float(), outs[1:], outs[0][:, :, :1, :1].float()).contiguous()
         if self.gated:
           # (the streams of all the rows: the MTP layer's input, their last mix the output's)
           x = Tensor.cat(*[_on_lane(i, all_gather, xi, 1) for i, xi in enumerate(xs)], dim=1).float()
@@ -3983,7 +4012,7 @@ class Transformer:
   def _prefill_jit(self, n:int, dense:bool) -> Any:
     """the jit of a prefill chunk of n tokens on a sequence's region (dense: a context the indexer's top_k covers), see __call__"""
     jits = self.__dict__.setdefault("jits" + ("_dense" if dense else "") + "_seq", {})
-    if n not in jits: jits[n] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
+    if n not in jits: jits[n] = self._new_jit(n)
     return jits[n]
 
   def _seq_shared(self, read:bool=True):
@@ -4062,10 +4091,13 @@ class Transformer:
     # the prefills' and steps' jits captured and compiled at once (in forked processes, see capture_parallel): their jits called alone (no
     # device work but theirs)
     par:list[tuple[Any, Callable[[], Any]]] = []
+    def pf(jit:Any, call:Callable[..., Any]):
+      # (a prefill in parts: every part's jit captured on its own)
+      par.extend([(j, functools.partial(call, part=p)) for p, j in enumerate(jit)] if isinstance(jit, list) else [(jit, call)])
     for c, n in chunks:
       if self._dense_ctx(0, n) or top + c > self.seq_rows():
-        par.append((self._prefill_jit(c, self._dense_ctx(0, n)), functools.partial(self._seq_chunk, 0, 0, n)))
-      if top + c <= self.seq_rows(): par.append((self._prefill_jit(c, False), functools.partial(self._seq_chunk, 0, top, c)))
+        pf(self._prefill_jit(c, self._dense_ctx(0, n)), functools.partial(self._seq_chunk, 0, 0, n))
+      if top + c <= self.seq_rows(): pf(self._prefill_jit(c, False), functools.partial(self._seq_chunk, 0, top, c))
     for m in self.SEQ_SIZES: par.append((jit:=self._seq_jit(m), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m)))
     mp_vars = dict(zip(("seqp_slot", "seqp_base", "seqp_start", "seqp_count"), mix_prompt[:4]))
     for m in self.SEQ_MIX_SIZES:
@@ -4128,12 +4160,12 @@ class Transformer:
       n -= ret[-1]
     return ret
 
-  def _seq_chunk(self, base:int, pos:int, n:int):
+  def _seq_chunk(self, base:int, pos:int, n:int, part:int|None=None):
     """a prefill chunk: the n tokens from pos of the region from base in the token buffer (the jit of the smallest chunk size of n or more)"""
     sizes = self.prefill_chunks()
     vb, sp = UOp.variable("seq_base", 0, self.seq_rows()).bind(base), UOp.variable("start_pos", 0, self.max_context-1).bind(pos)
     nt = UOp.variable("toks", 1, next(s for s in sizes if n <= s)).bind(n)
-    self(self._token_buf[:, vb+sp:vb+sp+nt], sp, self._seq_pf_temp, vb)
+    self(self._token_buf[:, vb+sp:vb+sp+nt], sp, self._seq_pf_temp, vb, part)
 
   def forward_seqs(self, *vs:UOp) -> Tensor: return self._forward_seqs(vs, ())
   def forward_seqs_mixed(self, *vs:UOp) -> Tensor:
@@ -4324,7 +4356,7 @@ class Transformer:
     else: Tensor.realize(*todo)
     self._states_ready = True
 
-  def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp=0) -> Tensor:
+  def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp=0, part:int|None=None) -> Tensor:
     # a view of the token buffer is already realized: no schedule for the jit input
     if (buf:=getattr(self, "_token_buf", None)) is None or tokens.uop.base is not buf.uop.base: tokens = tokens.contiguous()
     key = int(T.vmax) if isinstance(T:=tokens.shape[1], UOp) else T
@@ -4336,10 +4368,21 @@ class Transformer:
     if (jit:=jits.get(key)) is None:
       # the states and caches are set up before: a jit captures on its first call
       self._init_states()
-      jit = jits[key] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
+      jit = jits[key] = self._new_jit(key)
     _qsa_dense[0] = dense
-    try: return jit(tokens, start_pos, temperature, base)[0]
+    try:
+      if not isinstance(jit, list): return jit(tokens, start_pos, temperature, base)[0]
+      # (a prefill in parts: one of them (part, see seq_warmup), else all in order)
+      for p, j in enumerate(jit):
+        if part is None or p == part: out = j(tokens, start_pos, temperature, base)[0]
+      return out
     finally: _qsa_dense[0] = False
+
+  def _new_jit(self, rows:int) -> Any:
+    """the jit of a call of rows (a list of the parts' jits: PREFILL_PARTS)"""
+    if len(parts:=self.prefill_parts(rows)) == 1: return TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
+    self._carry(rows)
+    return [TinyJit(functools.partial(self._forward_effects, part=p), capture_first=True, scratch=self._scratch) for p in range(len(parts))]
 
   def _dense_ctx(self, start_pos:int|UOp, T:int|UOp) -> bool:
     """the context of a call (start_pos and T: bound variables or ints) is covered by the qwen sparse attention's top_k: it sees every key"""
@@ -4347,10 +4390,10 @@ class Transformer:
     def val(u:int|UOp) -> int: return u if isinstance(u, int) else int(u.unbind()[1])
     return val(start_pos) + val(T) <= idx.top_k
 
-  def _forward_effects(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp=0) -> tuple[Tensor, ...]:
+  def _forward_effects(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp=0, part:int|None=None) -> tuple[Tensor, ...]:
     # forward and the tensors realized with its output for their effects (e.g. the caches of the MTP layer)
     self._effects = []
-    out = self.forward(tokens, start_pos, temperature, base)
+    out = self.forward(tokens, start_pos, temperature, base, part)
     effects, self._effects = self._effects, None
     return (out, *effects)
 

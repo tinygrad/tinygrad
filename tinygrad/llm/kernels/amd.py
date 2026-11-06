@@ -2063,18 +2063,24 @@ def _ring_ag_kernel(out:UOp, x:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flag
   G, R, EP = _ring_rounds(-(-n // 32), getenv("RING_AG_EP", 32))  # (rows of 32 words: a word a lane)
   C, wg, warp, lane, ch, me, recv, send, finish, at_round, end_round = _ring_common(counter, N, dbg, G, n << 10)
   mult = [(2*(i*32 + lane) + 1).cast(dtypes.uint32) for i in range(EP)]
-  prev:UOp|None = None
-  for k in range(N):
+  def step(k:UOp|int, dep:list[UOp], rid:int, first:bool, last:bool) -> UOp:
     s = (me - k + N) % N
     # (the rounds a loop: a round after the one before, the step after the rounds of the one before)
-    r = UOp.range(R, 10 + k, AxisType.LOOP)
+    r = UOp.range(R, rid, AxisType.LOOP)
     at_round(r)
     at = [(e, e < n) for e in [((ch*R + r)*EP + i)*32 + lane for i in range(EP)]]
-    dep = [prev] if prev is not None else []
-    vals = [x.after(*dep, r)[0, e.valid(v)].load() for e, v in at] if k == 0 else recv(UOp.group(*dep, r), flags, inbox, s, at, mult, k)
+    vals = [x.after(*dep, r)[0, e.valid(v)].load() for e, v in at] if first else \
+      recv(UOp.group(*dep, r), flags, inbox, s, at, mult, k if isinstance(k, int) else 1)
     st = [out.after(*dep)[(s*n + e).valid(v)].store(w) for (e, v), w in zip(at, vals)]
-    prev = end_round(UOp.group(*st, send(dep, inbox_next, flags_next, s, at, vals, mult)) if k < N-1 else UOp.group(*st), r)
-  assert prev is not None
+    return end_round(UOp.group(*st, send(dep, inbox_next, flags_next, s, at, vals, mult)) if not last else UOp.group(*st), r)
+  # (the steps between the first and the last a loop, see _ring_rs_q8_kernel)
+  prev = step(0, [], 10, True, False)
+  if getenv("RING_STEP_LOOP", 1) and N > 3:
+    kk = UOp.range(N-2, 11, AxisType.LOOP)
+    prev = step(kk + 1, [prev, kk], 12, False, False).end(kk)
+  else:
+    for k in range(1, N-1): prev = step(k, [prev], 10 + k, False, False)
+  prev = step(N-1, [prev], 10 + N, False, True)
   return UOp.group(prev, finish(prev)).end(wg, warp, lane).sink(arg=KernelInfo(name=f"ring_allgather_{n*4}", opts_to_apply=()))
 
 @functools.cache
@@ -2087,38 +2093,46 @@ def _ring_rs_q8_kernel(out:UOp, p:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, f
   G, R, EP = _ring_rounds(-(-BG // 8), getenv("RING_RS_EP", 8))
   C, wg, warp, lane, ch, me, recv, send, finish, at_round, end_round = _ring_common(counter, N, dbg, G, (1 << 31) | (size >> 8 << 10))
   sub = lane % 4
-  prev:UOp|None = None
-  for k in range(N):
+  def step(k:UOp|int, dep:list[UOp], rid:int, last:bool, first:bool) -> UOp:
+    # step k: the partials of part me-k-1 plus what came (k > 0), sent on (or stored: the last step)
     b = (me - k - 1 + N) % N
-    if True:
-      r = UOp.range(R, 10 + k, AxisType.LOOP)
-      at_round(r)
-      dep = [prev, r] if prev is not None else [r]
-      groups = [((ch*R + r)*EP + i)*8 + lane//4 for i in range(EP)]
-      # the wave's 8 groups on the wire: the words of the lanes (two a lane, lane after lane: a store a line), then the 8 scales (uncached
-      # stores of a peer's memory are its writes: lanes' words apart are a write each)
-      base = [((ch*R + r)*EP + i)*72 for i in range(EP)]
-      at = [(b0 + w*32 + lane, g < BG) for b0, g in zip(base, groups) for w in range(2)] + \
-           [(b0 + 64 + lane//4, (g < BG) & sub.eq(0)) for b0, g in zip(base, groups)]
-      mult = [(2*(j*32 + lane) + 1).cast(dtypes.uint32) for j in range(len(at))]
-      # (the partials loaded after the round before: not all of them at the start, in registers)
-      acc = [[p.after(*dep).reshape(-1)[(b*blk + g*32 + sub*8 + j).valid(g < BG)].load().float() for j in range(8)] for g in groups]
-      if k > 0:
-        # (the partials' loads before the wait for what came: their latency in it)
-        got = recv(UOp.group(*dep, *[a for g in acc for a in g]) if getenv("RING_PREFETCH", 1) else UOp.group(*dep), flags, inbox, k-1, at, mult, k)
-        for i in range(EP):
-          # (the scale from the group's first lane: every lane loads its word, the others' are masked)
-          sc = got[2*EP + i].bitcast(dtypes.float32)
-          d = _lane_xor(_lane_xor(sc, 1), 2) + _lane_xor(sc, 1) + _lane_xor(sc, 2) + sc
-          ws = got[2*i:2*i+2]
-          acc[i] = [a + (ws[j//4] >> (8*(j%4))).cast(dtypes.uint8).bitcast(dtypes.int8).float()*d for j, a in enumerate(acc[i])]
-      if k < N-1:
-        packed = [_q8_pack_values(a, recip=True) for a in acc]
-        words = [ws[w] for ws, _ in packed for w in range(2)] + [d.bitcast(dtypes.uint32) for _, d in packed]
-        prev = end_round(send(dep, inbox_next, flags_next, k, at, words, mult), r)
-      else:
-        outs = [out.after(*dep)[(g*32 + sub*8 + j).valid(g < BG)].store(a[j]) for g, a in zip(groups, acc) for j in range(8)]
-        prev = end_round(UOp.group(*outs), r)
+    r = UOp.range(R, rid, AxisType.LOOP)
+    at_round(r)
+    dep = dep + [r]
+    groups = [((ch*R + r)*EP + i)*8 + lane//4 for i in range(EP)]
+    # the wave's 8 groups on the wire: the words of the lanes (two a lane, lane after lane: a store a line), then the 8 scales (uncached
+    # stores of a peer's memory are its writes: lanes' words apart are a write each)
+    base = [((ch*R + r)*EP + i)*72 for i in range(EP)]
+    at = [(b0 + w*32 + lane, g < BG) for b0, g in zip(base, groups) for w in range(2)] + \
+         [(b0 + 64 + lane//4, (g < BG) & sub.eq(0)) for b0, g in zip(base, groups)]
+    mult = [(2*(j*32 + lane) + 1).cast(dtypes.uint32) for j in range(len(at))]
+    # (the partials loaded after the round before: not all of them at the start, in registers)
+    acc = [[p.after(*dep).reshape(-1)[(b*blk + g*32 + sub*8 + j).valid(g < BG)].load().float() for j in range(8)] for g in groups]
+    if not first:
+      # (the partials' loads before the wait for what came: their latency in it)
+      got = recv(UOp.group(*dep, *[a for g in acc for a in g]) if getenv("RING_PREFETCH", 1) else UOp.group(*dep), flags, inbox, k-1, at, mult,
+                 k if isinstance(k, int) else 1)
+      for i in range(EP):
+        # (the scale from the group's first lane: every lane loads its word, the others' are masked)
+        sc = got[2*EP + i].bitcast(dtypes.float32)
+        d = _lane_xor(_lane_xor(sc, 1), 2) + _lane_xor(sc, 1) + _lane_xor(sc, 2) + sc
+        ws = got[2*i:2*i+2]
+        acc[i] = [a + (ws[j//4] >> (8*(j%4))).cast(dtypes.uint8).bitcast(dtypes.int8).float()*d for j, a in enumerate(acc[i])]
+    if not last:
+      packed = [_q8_pack_values(a, recip=True) for a in acc]
+      words = [ws[w] for ws, _ in packed for w in range(2)] + [d.bitcast(dtypes.uint32) for _, d in packed]
+      return end_round(send(dep, inbox_next, flags_next, k, at, words, mult), r)
+    outs = [out.after(*dep)[(g*32 + sub*8 + j).valid(g < BG)].store(a[j]) for g, a in zip(groups, acc) for j in range(8)]
+    return end_round(UOp.group(*outs), r)
+  # (the steps between the first and the last a loop: unrolled, every step's graph has all the ones before it (their order), the codegen's
+  # simplifications of them ~quadratic: ~25 s a kernel)
+  prev = step(0, [], 10, False, True)
+  if getenv("RING_STEP_LOOP", 1) and N > 3:
+    kk = UOp.range(N-2, 11, AxisType.LOOP)
+    prev = step(kk + 1, [prev, kk], 12, False, False).end(kk)
+  else:
+    for k in range(1, N-1): prev = step(k, [prev], 10 + k, False, False)
+  prev = step(N-1, [prev], 10 + N, True, False)
   assert prev is not None
   return UOp.group(prev, finish(prev)).end(wg, warp, lane).sink(arg=KernelInfo(name=f"ring_reduce_scatter_q8_{size}", opts_to_apply=()))
 
