@@ -75,9 +75,6 @@ class Ops(FastEnum):
   # const.
   CONST = auto()
 
-  # CUSTOM/CUSTOMI are used to output strings into codegen. the I makes the string inline
-  CUSTOM = auto(); CUSTOMI = auto()
-
   # INS is a machine instruction
   INS = auto()
 
@@ -97,7 +94,7 @@ class Ops(FastEnum):
   REDUCE = auto(); ALLREDUCE = auto()
 
   # ** 7 -- pattern compiler IR (used in upat.py) **
-  # PYLITERAL carries a Python literal as an arg for CUSTOM predicates
+  # PYLITERAL carries a Python literal as an arg for custom predicates
   PYLITERAL = auto()
 
 class GroupOp:
@@ -115,6 +112,9 @@ class GroupOp:
 
   Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM, Ops.GETADDR}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK}
+
+  # ops that may have a side effect each time they run
+  Effect = {Ops.STORE, Ops.CALL, Ops.BARRIER}
 
   # BinaryOps that can be flipped
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.CMPEQ, Ops.XOR, Ops.AND, Ops.OR}

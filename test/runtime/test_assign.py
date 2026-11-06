@@ -257,6 +257,17 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_equal(b0.numpy(), 128)
     np.testing.assert_equal(b1.numpy(), 608)
 
+  def test_assign_reads_behind_other_after(self):
+    a = Tensor([1, 2]).contiguous().realize()
+    b = Tensor([0, 0]).contiguous().realize()
+    b.assign(a + 1)
+    a.assign(b.sum().expand(2))
+    GlobalCounters.reset()
+    Tensor.realize(a, b)
+    assert_kernel_count(2)
+    self.assertEqual(a.tolist(), [5, 5])
+    self.assertEqual(b.tolist(), [2, 3])
+
   def test_crossunder_assign(self):
     a = Tensor.full((4,), 2).contiguous().realize()
     b = Tensor.full((4,), 3).contiguous().realize()

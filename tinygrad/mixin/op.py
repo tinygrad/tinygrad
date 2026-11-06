@@ -1092,8 +1092,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (num//den, (num+den-1)//den, (num % den).cast(dtypes.float32)/den)]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
       else:
-        scale, arr = in_sz / size[i], type(self).arange(size[i], dtype=dtypes.float32)
-        index = (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
+        scale, arr = in_sz / size[i], type(self).arange(1, size[i]+1, dtype=dtypes.float32) - (0.5 if mode=="nearest-exact" else 1)
+        index = (scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
         x = x.gather(i, index)
     return x.cast(self.dtype)
 

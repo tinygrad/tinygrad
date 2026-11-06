@@ -1,5 +1,5 @@
 from dataclasses import replace
-from tinygrad.dtype import dtypes, to_dtype
+from tinygrad.dtype import AddrSpace, dtypes, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp
 from tinygrad.uop.ops import graph_rewrite, MapCtx, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
@@ -159,10 +159,12 @@ def copy_to_anon_store(x:UOp, copy:UOp):
   return buf.after(buf.store(x)).shrink_to(copy.shape)
 
 def stage_to_anon_store(x:UOp, stg:UOp):
+  if stg.arg is not None and stg.arg.addrspace is not AddrSpace.GLOBAL: return None
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp.alloc(x.max_shape, stg.dtype, device=x.device)
+  buf = UOp.alloc(stg.max_shape, stg.dtype, device=x.device)
   view = buf.shrink_to(stg.shape)
-  return view.after(view.store(x))
+  dst = view.index(*stg.src[1:]) if len(stg.src) > 1 else view
+  return view.after(dst.store(x).end(*stg.src[1:]))
 
 def materialize_cross_device_src(dest:UOp, src:UOp):
   # cross-device copies must read a whole buffer (SDMA can't do offset copies)
@@ -176,11 +178,11 @@ pm_inline_calls = PatternMatcher([
 
 pm_disk_copy = PatternMatcher([
   # remove contiguous on movement ops before a copy on disk
-  (UPat(GroupOp.Movement, name="x").f(Ops.STAGE).f(Ops.COPY, name="copy"), lambda x,copy:
+  (UPat(GroupOp.Movement | {Ops.BITCAST}, name="x").f(Ops.STAGE).f(Ops.COPY, name="copy"), lambda x,copy:
    copy.replace(src=(x,)) if x.on_disk() else None),
   # push all movement ops to the destination: views exposed here are no longer normalized into input PARAMs,
   # so leaving SHRINK/RESHAPE behind can cause materialize_cross_device_src to allocate a temporary on disk
-  (UPat(GroupOp.Movement, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
+  (UPat(GroupOp.Movement | {Ops.BITCAST}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
    x.replace(src=(copy.replace(src=(x.src[0],)),)+x.src[1:]) if x.on_disk() else None),
 ])
 
@@ -212,8 +214,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.STAGE, src=(UPat.var("x"),)),
    lambda x: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY else None),
 
-  # a bare STAGE is an anonymous same-device materialization: realize it as a STORE into a fresh call-local buffer
-  (UPat(Ops.STAGE, src=(UPat.var("x"),), name="stg"), stage_to_anon_store),
+  # a GLOBAL STAGE stores each value slice at its leading range coordinates in a fresh call-local buffer
+  (UPat(Ops.STAGE, src=(UPat.var("x"),), allow_any_len=True, name="stg"), stage_to_anon_store),
 
   # reshaping on STORE can be a NOOP
   (UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),

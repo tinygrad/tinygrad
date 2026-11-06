@@ -69,7 +69,7 @@ def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
   return canonical[0] if len(canonical:=tuple(Device.canonicalize(d) for d in device)) == 1 else canonical
 
 def is_disk_device(device:str|tuple[str, ...]) -> bool:
-  return any(d.split(":", 1)[0].upper() == "DISK" for d in to_tuple(device))
+  return any(d.split(":", 1)[0].upper() in ("DISK", "NVME") for d in to_tuple(device))
 
 # **************** Profile ****************
 
@@ -182,7 +182,7 @@ class Buffer:
     else: storage = self.allocator.alloc(self.nbytes, self.options)
     storage = replace(storage, host=storage.host.view(self.offset, self.nbytes, fmt='B') if storage.host is not None else None)
     if self._base is None:
-      if not self.device.startswith("DISK") and self.options.external_ptr is None:
+      if not is_disk_device(self.device) and self.options.external_ptr is None:
         GlobalCounters.mem_used += self.nbytes
         GlobalCounters.mem_used_per_device[self.device] += self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", self.trace_num, {"nbytes":self.nbytes}))
@@ -193,7 +193,7 @@ class Buffer:
     assert self._storage is not None, "buffer must be allocated to deallocate"
     if DEBUG is not None and DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None:
-      if GlobalCounters is not None and not self.device.startswith("DISK") and self.options.external_ptr is None:
+      if GlobalCounters is not None and not is_disk_device(self.device) and self.options.external_ptr is None:
         GlobalCounters.mem_used -= self.nbytes
         GlobalCounters.mem_used_per_device[self.device] -= self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", self.trace_num))

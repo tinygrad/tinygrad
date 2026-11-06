@@ -364,7 +364,8 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'isEven': lambda a: (UOp(Ops.TRUNC, src=(a,)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
   'max': lambda a, b: UOp(Ops.MAX, src=(a, b)),
   'min': lambda a, b: UOp(Ops.MAX, src=(a.neg(), b.neg())).neg(),
-  'pow': lambda a, b: UOp(Ops.EXP2, src=(b.bitcast(dtypes.float32),)),
+  # pow(2.0, x): interpret the operand's float bits at its original width.
+  'pow': lambda a, b: UOp(Ops.EXP2, src=(b.bitcast({2: dtypes.half, 4: dtypes.float32, 8: dtypes.float64}[b.dtype.itemsize]),)),
   'fma': lambda a, b, c: a * b + c,
   'i32_to_f32': lambda a: a.cast(dtypes.int).cast(dtypes.float32),
   'u32_to_f32': lambda a: a.cast(dtypes.uint32).cast(dtypes.float32),

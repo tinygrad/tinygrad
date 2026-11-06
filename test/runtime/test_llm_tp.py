@@ -40,6 +40,16 @@ class TestGGUFShard(unittest.TestCase):
           self.assertEqual((out[name].device, out[name].uop.axis), (DEVICES, axis))
           np.testing.assert_array_equal(out[name].to(Device.DEFAULT).numpy(), full[name].numpy())
 
+  def test_repeat(self):
+    # two row blocks (KV heads) over four devices: device i holds block i//2, the blocks must divide the rows and the devices
+    if Device.DEFAULT != "CPU" and Device[Device.DEFAULT].count() < 4: self.skipTest("needs 4 devices")
+    devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(4))
+    entry = (Tensor(random_data((8, 512), Q.Q4_K).reshape(-1), device='CPU'), (8, 512), Q.Q4_K)
+    full, out = gguf_shard({'w': entry}, (Device.DEFAULT,))['w'].numpy(), gguf_shard({'w': entry}, devices, {'w': 0}, {'w': 2})['w']
+    self.assertEqual((out.device, out.uop.axis), (devices, 0))
+    np.testing.assert_array_equal(out.to(Device.DEFAULT).numpy(), full.reshape(2, 4, 512).repeat(2, 0).reshape(16, 512))
+    with self.assertRaises(ValueError): gguf_shard({'w': entry}, devices, {'w': 0}, {'w': 3})
+
   def test_split_quantization_block(self):
     # two devices would each get one and a half Q4_K blocks of every row
     data = Tensor(random_data((8, 768), Q.Q4_K).reshape(-1), device='CPU')
@@ -123,7 +133,7 @@ class TestTensorParallel(unittest.TestCase):
     rng = np.random.default_rng(42)
     # Keep GQA, partial RoPE, gated attention and replicated SSM state; custom kernels have separate tests.
     config = TransformerConfig(num_blocks=2, dim=8, hidden_dim=8, n_heads=4, n_kv_heads=2, norm_eps=1e-5, vocab_size=16, head_dim=4,
-      v_head_dim=4, rope_theta=10000, rope_dim=2, max_context=4, qk_norm=4, attn_output_gate=True, ssm=SSMConfig(2, 2, 2, 4, 8),
+      v_head_dim=4, rope_theta=10000, rope_dim=2, max_context=4, qk_norm=4, attn_output_gate=True, ssm=SSMConfig(2, 2, 2, 4, 8, silu_gate=True),
       ssm_layers=(True, False))
     with tempfile.TemporaryDirectory() as folder:
       writer = GGUFWriter(path:=pathlib.Path(folder)/'model.gguf', 'qwen35')

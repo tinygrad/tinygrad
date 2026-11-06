@@ -2,7 +2,7 @@
 import math
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, promo_dtype, identity_element
-from tinygrad.dtype import PyConst, ConstFloat, dtypes, can_lossless_cast, Invalid, bitcast, truncate
+from tinygrad.dtype import PyConst, ConstFloat, AddrSpace, dtypes, can_lossless_cast, Invalid, bitcast, truncate
 from tinygrad.helpers import partition, all_same, prod, flatten, IMAGE, dedup, ceildiv
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 from tinygrad.uop.movement import mop_cleanup
@@ -121,7 +121,14 @@ def fold_const_where(gate:UOp, c0:UOp, c1:UOp, w:UOp) -> UOp:
   ret = c0 if gate.val else c1
   return ret.ccast(w.dtype) if ret.op is Ops.CONST and ret.dtype in dtypes.weaks and w.dtype not in dtypes.weaks else ret
 
+def lift_value_after(x:UOp) -> UOp|None:
+  afters = [s for s in x.src if s.op is Ops.AFTER]
+  if x.shape != () or x.src[-1].is_invalid: return None
+  if any(a.src[0].op not in GroupOp.ALU and a.src[0].addrspace is not AddrSpace.ALU for a in afters): return None
+  return x.replace(src=tuple(s.src[0] if s.op is Ops.AFTER else s for s in x.src)).after(*dedup(flatten(a.src[1:] for a in afters)))
+
 symbolic_simple = pm_data_invalid + PatternMatcher([
+  (UPat(GroupOp.ALU|{Ops.CAST}, custom_early_reject={Ops.AFTER}, name="x"), lift_value_after),
   # ** self folding **
   (UPat({Ops.ADD, Ops.XOR, Ops.OR}, src=[UPat.var("x"), UPat.const(0)]), lambda x: x),  # x+0 / x^0 / x|0 -> x
   (UPat({Ops.SHL, Ops.SHR}, src=(UPat.var("x"), UPat.const(0))), lambda x: x),          # x<<0 / x>>0 -> x
@@ -168,7 +175,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
    a.replace(src=tuple(s.ccast(dt) if s.dtype in dtypes.weaks else s for s in a.src))
    if (dt:=promo_dtype(a.src)) not in dtypes.weaks else None),
   # ** two stage ALU folding **
-  *((UPat.var("x").alu(op, UPat.cvar("c1")).alu(op, UPat.cvar("c2")).named("f"),
+  *((UPat.var("x", dtypes.wints if op is Ops.ADD else None).alu(op, UPat.cvar("c1")).alu(op, UPat.cvar("c2")).named("f"),
      lambda f,x,c1,c2: x.alu(f.op,c1.alu(f.op,c2)) if fits(x, exec_alu(f.op, dtypes.weakint, [c1.vmin, c2.vmin])) else None)
     for op in GroupOp.Associative),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
@@ -330,9 +337,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
     and not (u.op is Ops.SHR and u.src[1].vmax >= 32)
     and not (u.op in (Ops.MOD, Ops.TRUNCMOD) and u.src[0].vmin <= dtypes.int.min and u.src[1].vmin <= -1 <= u.src[1].vmax) else None),
   ((UPat.var("x", dtypes.weakint) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+cast.const_like(c.val)),
-  # an AFTER waits only on the effect ops listed here, any other dep is replaced by its srcs
+  # an AFTER waits only on effects and the ops listed here, a REDUCE dep keeps its body ended by its ranges, any other dep is replaced by its srcs
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
-    tuple(dedup(flatten([(y,) if y.op in {Ops.RANGE, Ops.STORE, Ops.CALL, Ops.BARRIER, Ops.END, Ops.BACKEDGE, Ops.LINEAR, Ops.STAGE, Ops.IF, Ops.ENDIF}
+    tuple(dedup(flatten([(y,) if y.op in GroupOp.Effect|{Ops.RANGE, Ops.END, Ops.BACKEDGE, Ops.LINEAR, Ops.STAGE, Ops.LOAD, Ops.IF, Ops.ENDIF}
                         else (UOp(Ops.NOOP).after(y.src[0]).end(*y.src[1:]),) if y.op is Ops.REDUCE else y.src for y in x.src[1:]]))))),
   # after/end with 1 src is just src[0]
   (UPat((Ops.AFTER, Ops.END), src=(UPat.var("s"),)), lambda s: s),
@@ -464,7 +471,7 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   # ** pow **
   ((UPat(Ops.POW, name="p"), lambda p: xpow_int(p.src[0], p.src[1], p.dtype) if dtypes.is_int(p.dtype) else xpow(*p.src))),
   # ** load/store folding **
-  (UPat.store(UPat(Ops.INDEX, name="index"), UPat.load(UPat(Ops.INDEX, name="index")), name="x"), lambda index,x: UOp(Ops.NOOP).after(*x.src)),
+  (UPat.store(UPat(Ops.INDEX, name="index"), UPat.load(UPat(Ops.INDEX, name="index"))), lambda index: UOp(Ops.NOOP).after(index)),
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"),
                                                                     UPat.load(UPat(Ops.INDEX, name="index")))),
    lambda index, gate, alt: UOp.store(index.src[0].index(index.src[1].valid(gate)), alt)),

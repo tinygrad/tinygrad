@@ -160,7 +160,7 @@ def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # NOTE: this is a codegen for SDMA devices
-  if dst.device == src.device and not dst.on_disk(): return None
+  if dst.is_virtual or src.is_virtual or (dst.device == src.device and not dst.on_disk()): return None
   from tinygrad.codegen.simplify import pm_flatten_range, pm_simplify_ranges
   from tinygrad.schedule.prepare import pm_mops
   from tinygrad.uop.symbolic import sym
@@ -200,14 +200,14 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   if buf.op is Ops.UNSHARD:
     if isinstance(c.device, str): return None
     if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
-    view = contiguous_mops_to_view(ctx, unshard.src[0], unshard.src[0])
-    return None if view is None else view.unshard(unshard.arg, unshard.src[1:])
-
-  if buf.op is not Ops.BUFFER or (cv := src.contiguous_view()) is None or cv[0].op is not Ops.BUFFER: return None
-  buf, offset = cv
-  view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
-  if ctx is not None: ctx.views.add(view)
-  view = view.reshape(c.shape)
+    if (view := contiguous_mops_to_view(ctx, unshard.src[0], unshard.src[0])) is None: return None
+    view = view.unshard(unshard.arg, unshard.src[1:])
+  elif buf.op is Ops.BUFFER and (cv := src.contiguous_view()) is not None and cv[0].op is Ops.BUFFER:
+    buf, offset = cv
+    view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
+    if ctx is not None: ctx.views.add(view)
+    view = view.reshape(c.shape)
+  else: return None
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
 def is_store_after(u:UOp) -> bool:
