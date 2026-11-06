@@ -441,7 +441,12 @@ class AMDComputeQueue(HWQueue):
     self.acquire_mem(gli=0, gl2=getenv("AMD_EXEC_GL2", 0), gl2_wb=int(flag_ar) or getenv("AMD_EXEC_GL2", 0))
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
-    self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
+    # AMD_WAVE_PRIO: the waves' priority (0..3, PGM_RSRC1 bits 10:11, as s_setprio) of a compute queue's kernels, a list by queue: the SIMDs issue
+    # a higher one's first (a micro batch's ahead of the other's: its chain of kernels and collectives not slowed by it)
+    prios = [int(v) for v in str(getenv("AMD_WAVE_PRIO", "")).split(",") if v != ""]
+    qi_ = int(self.queue.split(":")[1]) if self.queue.startswith("COMPUTE:") else 0
+    rsrc1 = (data.rsrc1 & ~(3 << 10)) | (prios[qi_] << 10) if qi_ < len(prios) and self.target[0] == 11 else data.rsrc1
+    self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, rsrc1, data.rsrc2)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
     self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, self.dev.tmpring_size(data.private_segment_size))
     for xcc_id in range(self.dev.xccs): # architected flat scratch: each xcc gets its part

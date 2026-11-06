@@ -352,6 +352,11 @@ class AM_GFX(AM_IP):
     self._config_mec()
     self._enable_mec()
 
+  def _pipe_prio(self, pipe:int, kiq:bool) -> int:
+    # AM_PIPE_PRIO: the priority (0 low, 1 medium, 2 high) of the compute pipes' queues, a list by pipe (the wave launches of a higher one first)
+    prios = [int(v) for v in str(getenv("AM_PIPE_PRIO", "")).split(",") if v != ""]
+    return 2 if kiq or pipe >= len(prios) else prios[pipe]
+
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool, kiq_xcc=-1) -> int:
     me, pipe, queue = (2, 1, 0) if (kiq:=kiq_xcc >= 0) else (1, idx // 4, idx % 4)
     assert kiq or (pipe < self.mec_pipes and queue < 2), f"no compute queue {queue} on pipe {pipe}"
@@ -364,7 +369,7 @@ class AM_GFX(AM_IP):
 
       struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}{'_compute' if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else ''}_mqd")
       mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(self.mqd_mc[slot] + 0x1000*xcc),
-        cp_mqd_base_addr_hi=hi32(self.mqd_mc[slot] + 0x1000*xcc), cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf,
+        cp_mqd_base_addr_hi=hi32(self.mqd_mc[slot] + 0x1000*xcc), cp_hqd_pipe_priority=self._pipe_prio(pipe, kiq), cp_hqd_queue_priority=0xf,
         cp_hqd_quantum=getenv("AM_HQD_QUANTUM", 0x111),
         cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.encode(preload_size=0x55, preload_req=1),
         cp_hqd_pq_base_lo=lo32(ring_addr>>8), cp_hqd_pq_base_hi=hi32(ring_addr>>8),
