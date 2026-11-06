@@ -50,11 +50,11 @@ def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
 def _amd_dp4a(a:UOp, b:UOp, c:UOp, cdna:bool) -> UOp:
   # CDNA has no sudot4 (dot8-insts)
   return UOp.custom_function("__builtin_amdgcn_sdot4({}, {}, {}, false)" if cdna else "__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)",
-                             shape=a.shape, dtype=dtypes.int32, inline=True, fmt=True).call(a, b, c)
+                             shape=a.shape, dtype=dtypes.int32, fmt=True).call(a, b, c, inline=True)
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
-  perm_fn = UOp.custom_function("__builtin_amdgcn_perm({}, {}, {})", shape=a.shape, dtype=dtypes.uint32, inline=True, fmt=True)
-  return perm_fn.call(*[x.cast(dtypes.uint32) for x in (a, b, selectors)])
+  return UOp.custom_function("__builtin_amdgcn_perm({}, {}, {})", shape=a.shape, dtype=dtypes.uint32,
+                             fmt=True).call(*[x.cast(dtypes.uint32) for x in (a, b, selectors)], inline=True)
 
 def _load_byte(raw:UOp, base:UOp, offset:int|UOp) -> UOp:
   size = raw.dtype.itemsize
@@ -108,7 +108,8 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, tokens:int, in_featur
   quant = rounded.clip(-127, 127).cast(dtypes.int8)
   word = quant.cast(dtypes.uint8).cast(dtypes.uint32) << ((lane%4)*8).cast(dtypes.uint32)
   for offset in (1, 2):
-    word |= UOp.custom_function(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f|offset<<10})", shape=word.shape, dtype=dtypes.uint32, fmt=True).call(word)
+    word |= UOp.custom_function(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f|offset<<10})", shape=word.shape, dtype=dtypes.uint32,
+                                fmt=True).call(word)
   stores = (q[token, group, (lane//4).valid((lane%4).eq(0))].store(word),
             scale[token, group.valid(lane.eq(0))].store(d),
             xsum[token, group, (lane//16).valid((lane%16).eq(0))].store(warp_reduce(quant.float())))

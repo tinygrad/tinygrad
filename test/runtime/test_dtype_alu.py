@@ -335,6 +335,10 @@ class TestDTypeALU(unittest.TestCase):
     self.assertEqual(((t+t*(2**31-1))//2).tolist(), [-2**30, 0])
     self.assertEqual((((u+t*(2**31-1))+t)//2).tolist(), [-2**30, 0])
 
+  def test_add_right_operand_no_overflow(self):
+    self.assertEqual((2**30+(2**30+Tensor([-5], dtype=dtypes.int32))).tolist(), [2**31-5])
+    self.assertEqual((2**62+(2**62+Tensor([-5], dtype=dtypes.int64))).tolist(), [2**63-5])
+
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, CUDARenderer), "nvrtc 11.5 reassociates (x+c)+y<d and folds it to True")
   def test_reassociate_no_overflow(self):
     t, c = Tensor.arange(3, dtype=dtypes.int32), Tensor([False, True])

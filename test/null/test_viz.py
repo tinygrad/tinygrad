@@ -472,7 +472,7 @@ class TestVizIntegration(unittest.TestCase):
     def custom_fn(X:UOp):
       X = X.flatten()
       i = UOp.range(X.numel(), 0)
-      custom_op = UOp.custom_function("{0} + undeclared_name;", shape=X[i].shape, inline=True, dtype=X.dtype, fmt=True).call(X[i])
+      custom_op = UOp.custom_function("{0} + undeclared_name;", shape=X[i].shape, dtype=X.dtype, fmt=True).call(X[i], inline=True)
       self.assertEqual(custom_op.shape, ())
       return X[i].store(custom_op).end(i).sink(arg=KernelInfo(name=f"custom_fn_{X.numel()}"))
     x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_fn)[0]
