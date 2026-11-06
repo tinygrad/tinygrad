@@ -1173,7 +1173,9 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   col, half = lane % 16, lane // 16
   wt, wo, tid = wave // OW, wave % OW, wave * 32 + lane
   # GS groups of 32 inputs a stage (a barrier a stage)
-  GS = 1 if hc else next(gs for gs in (getenv("Q8_GEMM_GS", 2), 1) if groups % gs == 0 and (block_n*gs % 128 == 0 or gs == 1) and
+  # (the hyper-connections' mix of a few rows (decoding's): two groups a stage, the next group's weights prefetched)
+  GS = next(gs for gs in (getenv("HC_GS", 2 if M <= 64 else 1), 1) if groups % gs == 0) if hc else \
+    next(gs for gs in (getenv("Q8_GEMM_GS", 2), 1) if groups % gs == 0 and (block_n*gs % 128 == 0 or gs == 1) and
                         (token_tile * (32*gs + 8) <= 128 * 72 if rdna4 else (token_tile+max(block_n, 128//gs))*(32*gs+8)*2 <= 32768))
   stage_rows = max(streams*block_n, 128//GS)  # full waves stage weights, including unused rows when block_n=64 and GS=1
   assert rdna4 or (token_tile+stage_rows)*(32*GS+8)*2 <= 32768
@@ -1185,7 +1187,7 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   # Q8_PREFETCH (Q8_0): the next group's x and weight words loaded into registers before this group's tensor core work, converted and stored
   # to LDS after it (their latency hidden by it, not a stall of every group)
   # (ggml_type F32T: raw is a float weight transposed (K, N), the router's: converted to half as it's staged)
-  prefetch = ggml_type in (Q8_0, F32T) and not hc and getenv("Q8_PREFETCH", 1) and getenv("Q8_FAST_CVT", 1)
+  prefetch = ggml_type in (Q8_0, F32T) and (not hc or getenv("HC_PREFETCH", int(M <= 64))) and getenv("Q8_PREFETCH", 1) and getenv("Q8_FAST_CVT", 1)
   def pf_loads(gg:UOp) -> list[UOp]:
     out:list[UOp] = []
     for k in range((token_tile * 4 * GS + 127) // 128):
@@ -1194,7 +1196,7 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
       out += [x[token_block * token_tile + r, gg * 32 + c * 8 + i].load() for i in range(8)]
     for bi in range(stage_rows * GS // 128):
       gi, wr = (bi*128 + tid) // stage_rows, (bi*128 + tid) % stage_rows
-      row = (output_block * block_n + wr).minimum(N-1)
+      row = (output_block * block_n + (wr % block_n if hc else wr)).minimum(N-1) + (wr // block_n * N if hc else 0)
       if ggml_type == F32T:
         out += [raw.reshape(K*k_splits, N)[(gg + gi) * 32 + i, row].load() for i in range(32)]
         continue
@@ -1314,7 +1316,11 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # the tiles of 16 of the tensor cores)
   skinny = not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and xq is None and not split and 16 < tokens <= SKINNY_ROWS and \
     layer.in_features % 32 == 0 and getenv("SKINNY_GEMM", 1)
-  pad = round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny else \
+  # (Q6_GEMM_RDNA3: Q6_K (the output head) of many rows in the gemm, its weights dequantized once a tile of 32 or 64 rows)
+  q6_rdna3 = not _wmma_rdna4(x.device) and layer.ggml_type == Q6_K and xq is None and not split and tokens >= getenv("Q6_GEMM_MIN", 17) and \
+    layer.in_features % 256 == 0 and getenv("Q6_GEMM_RDNA3", 1)
+  pad = round_up(tokens, 64 if tokens > 32 else 32) if q6_rdna3 and tokens % (64 if tokens > 32 else 32) else \
+        round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny else \
         round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) else 0
   skinny_i8 = skinny and getenv("SKINNY_I8", 0)
   if not pad and skinny and tokens % (16 if skinny_i8 else 32): pad = round_up(tokens, 16 if skinny_i8 else 32)
@@ -1336,8 +1342,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # (Q8_0 and Q6_K (the output head) too for the rows of batched decoding, Q8_ROWS_I8: the weights are the time, the int8 tensor cores read
   # them once)
   # (Q6_GEMM: Q6_K (the output head) of the rows of batched decoding in the gemm (its weights dequantized once a tile of rows, in LDS))
-  q6_gemm = layer.ggml_type == Q6_K and xq is None and Q8_ROWS_I8[0] and tokens >= 32 and getenv("Q6_GEMM", 1) and _wmma_rdna4(x.device) and \
-    in_features % 256 == 0 and any(local_rows % t == 0 for t in (96, 128, 64))
+  q6_gemm = q6_rdna3 or (layer.ggml_type == Q6_K and xq is None and Q8_ROWS_I8[0] and tokens >= 32 and getenv("Q6_GEMM", 1) and \
+    _wmma_rdna4(x.device) and in_features % 256 == 0 and any(local_rows % t == 0 for t in (96, 128, 64)))
   few_q8 = Q8_ROWS_I8[0] and layer.ggml_type in (Q8_0, Q6_K) and tokens <= getenv("Q8_I8_ROWS", 64) and _wmma_rdna4(x.device) and not q6_gemm
   # (RDNA3: the int8 tensor cores of many rows, I8_DENSE_RDNA3)
   dense_i8 = not _wmma_rdna4(x.device) and tokens >= 64 and layer.ggml_type in (Q8_0,) and getenv("I8_DENSE_RDNA3", 0)
@@ -1375,8 +1381,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     srcs = (*xq[:3], *extra)
     out_shape = (ksplits*tokens, out_features)
   elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm or few_out_long) and \
-       in_features % 32 == 0 and (_wmma_rdna4(x.device) or local_rows >= 256 or few_out_long) and \
+       in_features % 32 == 0 and (_wmma_rdna4(x.device) or local_rows >= 256 or few_out_long or q6_rdna3) and \
        (tt:=next((t for t in ((96, 128, 64) if _wmma_rdna4(x.device) else
+                              tuple(int(t) for t in str(getenv("Q6_TT", "192,128,64,32")).split(",")) if q6_rdna3 else
                               (getenv("Q8_TT_RDNA3", 128) if local_out % 128 == 0 and local_out >= 512 else 64, 64, 32))
                    if local_rows % t == 0), 0)) and \
        getenv("Q8_GEMM", 1):
@@ -1384,7 +1391,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     if not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and layer.shard_axis is None and not half_out and \
        local_rows <= getenv("Q8_KSPLIT_ROWS", 2048) and local_out <= 512 and in_features >= 4096:
       # (a few outputs of a long input: its parts on workgroups of their own, summed. 768 rows of 320 outputs are 60 tiles: 152 -> 99 us)
-      ksplits = next(s for s in (getenv("Q8_KSPLITS", 16 if local_rows <= 512 else 8), 8, 4, 2, 1) if in_features % (32*s) == 0)
+      ksplits = next(s for s in (getenv("Q8_KSPLITS", 32 if local_rows <= 64 else 16 if local_rows <= 512 else 8), 8, 4, 2, 1)
+                     if in_features % (32*s) == 0)
       out_shape = (ksplits*tokens, out_features)
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=_wmma_rdna4(x.device),
                             block_n=128 if _wmma_rdna4(x.device) else (getenv("Q8_BN_RDNA3", 128) if local_out % getenv("Q8_BN_RDNA3", 128) == 0
@@ -2044,9 +2052,12 @@ class RingMailbox:
 RING_W, RING_CMAX = 8, 4096  # waves a workgroup (a wave a chunk), the most (chunk, round) flags of a slot
 # (the workgroups of a kernel: few, a kernel spinning with many waves on a device can keep the ones another device waits for from starting.
 # a wave's chunk in rounds of a few values a lane (no spills), a flag a round)
-def _ring_rounds(units:int, per_round:int) -> tuple[int, int, int]:
-  """(workgroups, rounds, units of a wave a round) of units over the waves (per_round: the most a wave a round)"""
-  G = getenv("RING_G", 8)
+# (the collectives of decoding steps on lanes of their own (from DEC_LANE): their exchanges are small, more workgroups (RING_G_DEC) move them in
+# fewer rounds. a lane's mailboxes always have the same workgroups: their epoch counters move together)
+DEC_LANE = 16
+def ring_g() -> int: return getenv("RING_G_DEC", 32) if FLAG_LANE[0] >= DEC_LANE else getenv("RING_G", 8)
+def _ring_rounds(units:int, per_round:int, G:int) -> tuple[int, int, int]:
+  """(workgroups, rounds, units of a wave a round) of units over the waves of G workgroups (per_round: the most a wave a round)"""
   per_wave = -(-units // (G * RING_W))
   R = -(-per_wave // per_round)
   assert R * G * RING_W <= RING_CMAX, f"ring: {units} units in {R} rounds of {G*RING_W} waves"
@@ -2128,9 +2139,9 @@ def _ring_common(counter:UOp, N:int, dbg:UOp, G:int, tag:int=0):
   return C, wg, warp, lane, ch, me, recv, send, finish, at_round, end_round
 
 @functools.cache
-def _ring_ag_kernel(out:UOp, x:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flags:UOp, flags_next:UOp, dbg:UOp, *, N:int, n:int) -> UOp:
+def _ring_ag_kernel(out:UOp, x:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flags:UOp, flags_next:UOp, dbg:UOp, *, N:int, n:int, G:int=8) -> UOp:
   # out (N*n words): part s from the device at s, x (n words) this device's. a wave's words in R rounds of EP a lane
-  G, R, EP = _ring_rounds(-(-n // 32), getenv("RING_AG_EP", 32))  # (rows of 32 words: a word a lane)
+  G, R, EP = _ring_rounds(-(-n // 32), getenv("RING_AG_EP", 32), G)  # (rows of 32 words: a word a lane)
   C, wg, warp, lane, ch, me, recv, send, finish, at_round, end_round = _ring_common(counter, N, dbg, G, n << 10)
   mult = [(2*(i*32 + lane) + 1).cast(dtypes.uint32) for i in range(EP)]
   def step(k:UOp|int, dep:list[UOp], rid:int, first:bool, last:bool) -> UOp:
@@ -2154,14 +2165,15 @@ def _ring_ag_kernel(out:UOp, x:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flag
   return UOp.group(prev, finish(prev)).end(wg, warp, lane).sink(arg=KernelInfo(name=f"ring_allgather_{n*4}", opts_to_apply=()))
 
 @functools.cache
-def _ring_rs_q8_kernel(out:UOp, p:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flags:UOp, flags_next:UOp, dbg:UOp, *, N:int, size:int) -> UOp:
+def _ring_rs_q8_kernel(out:UOp, p:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flags:UOp, flags_next:UOp, dbg:UOp, *, N:int, size:int,
+                       G:int=8) -> UOp:
   # p (size) this device's partials, out (size/N) the sum of part me (float). in step k a device adds its partials of part me-k-1 to what
   # came (the sum of the devices before it), sends it on as int8 groups of 32 with their scale (q8_pack), the last its own. a wave's groups in
   # R rounds of EP (8 groups a wave, four lanes a group: eight values a lane)
   blk = size // N
   BG = blk // 32
   out = out.reshape(-1)
-  G, R, EP = _ring_rounds(-(-BG // 8), getenv("RING_RS_EP", 8))
+  G, R, EP = _ring_rounds(-(-BG // 8), getenv("RING_RS_EP", 8), G)
   C, wg, warp, lane, ch, me, recv, send, finish, at_round, end_round = _ring_common(counter, N, dbg, G, (1 << 31) | (size >> 8 << 10))
   sub = lane % 4
   def step(k:UOp|int, dep:list[UOp], rid:int, last:bool, first:bool) -> UOp:
@@ -2249,7 +2261,7 @@ def ring_all_gather_words(x:Tensor) -> Tensor|None:
   if n > RING_MAXW or (mb:=ring_mailbox(devs)) is None: return None
   out = Tensor.empty(len(devs)*n, dtype=dtypes.uint32, device=devs)
   return _ring_queued(Tensor.custom_kernel(out, x.bitcast(dtypes.uint32).contiguous(), mb.counter, mb.inbox, mb.inbox_next, mb.flags,
-                                          mb.flags_next, mb.dbg, fxn=functools.partial(_ring_ag_kernel, N=len(devs), n=n))[0])
+                                          mb.flags_next, mb.dbg, fxn=functools.partial(_ring_ag_kernel, N=len(devs), n=n, G=ring_g()))[0])
 
 def ring_reduce_scatter_q8(p:Tensor, size:int, shape:tuple[int, ...]|None=None, axis:int=0) -> Tensor|None:
   """
@@ -2258,11 +2270,11 @@ def ring_reduce_scatter_q8(p:Tensor, size:int, shape:tuple[int, ...]|None=None, 
   """
   devs = p.device
   if not isinstance(devs, tuple) or size % (len(devs)*256): return None
-  G, R, EP = _ring_rounds(-(-(size//len(devs)//32) // 8), getenv("RING_RS_EP", 8))
+  G, R, EP = _ring_rounds(-(-(size//len(devs)//32) // 8), getenv("RING_RS_EP", 8), ring_g())
   if G*RING_W*R*EP*72 > RING_MAXW or (mb:=ring_mailbox(devs)) is None: return None
   out = Tensor.empty(*(shape or (size,)), dtype=dtypes.float32, device=devs, axis=axis if shape else 0)
   return _ring_queued(Tensor.custom_kernel(out, p.reshape(len(devs), size).contiguous(), mb.counter, mb.inbox, mb.inbox_next, mb.flags,
-                                          mb.flags_next, mb.dbg, fxn=functools.partial(_ring_rs_q8_kernel, N=len(devs), size=size))[0])
+                                          mb.flags_next, mb.dbg, fxn=functools.partial(_ring_rs_q8_kernel, N=len(devs), size=size, G=G))[0])
 
 def p2p_reduce_scatter(p:Tensor) -> Tensor|None:
   """p (devices, devices, n) partials split on the first: device i gets the sum over the devices of their part i, (devices, n) split on the
@@ -2829,7 +2841,8 @@ def few_out_rows(x:Tensor, w:Tensor) -> Tensor|None:
   """
   R, K = int(prod(x.shape[:-1])), int(x.shape[-1])
   E = int(w.uop.shard_shape[0]) if isinstance(w.device, tuple) and w.uop.axis == 0 else int(w.shape[0])
-  if not amd_custom_kernels_supported(x.device) or K % 256 or E > 16 or R % 32 or R < 256 or not getenv("FEW_OUT_ROWS", 1): return None
+  if not amd_custom_kernels_supported(x.device) or K % 256 or E > 16 or R % 32 or R < getenv("FEW_OUT_MIN", 32) or not getenv("FEW_OUT_ROWS", 1):
+    return None
   if isinstance(x.device, tuple) and (x.uop.axis is not None or w.uop.axis not in (0, None)): return None
   out = Tensor.empty(R, int(w.shape[0]), dtype=dtypes.float32, device=x.device, axis=1 if isinstance(w.device, tuple) and w.uop.axis == 0 else None)
   out = Tensor.custom_kernel(out, x.reshape(R, K).half().contiguous(), w, fxn=functools.partial(_few_out_rows_kernel, RW=4, W=8))[0]
@@ -6471,7 +6484,7 @@ KDA_WAVES = 8
 @functools.cache
 def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp, pv:UOp, wq:UOp, wk:UOp, wv:UOp, gate:UOp, alpha:UOp, beta:UOp,
                        dt:UOp, a:UOp, norm:UOp, start_pos:UOp, lb:float|None, eps:float, R:int=0, row0:int=0, G:int=1,
-                       positions:UOp|None=None, S:int=0, SC:int=0, slots:UOp|None=None) -> UOp:
+                       positions:UOp|None=None, S:int=0, SC:int=0, slots:UOp|None=None, rp:UOp|None=None, kb:UOp|None=None, Q:int=0) -> UOp:
   # row0: the tokens are rows row0.. of the inputs (a row of batched decoding: the inputs of all of them, not a copy of its own)
   # G: groups (batched decoding: a sequence each, its tokens the rows g*T.., its states the S of g*S.. in the states, its start position the
   # g-th of positions)
@@ -6483,6 +6496,10 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   # (S: the states of a group, the state buffer can hold more groups than the call's)
   # (SC: the conv states' S, default S. a recurrent state of S == T: a thread reads its rows of the one of start_pos before it writes them, the
   # conv states (read by every workgroup of a head, written by the first) need SC > T)
+  # (rp: replay (SEQ_REPLAY): a group's state (S=1) is the one after the first token of its last step (at kb[g], its base), and rp the inputs of
+  # the tokens after it (k, decay, v, beta of a head, a row (slot*Q + position%Q)*heads + head): the ones up to start_pos replayed, then the
+  # step's tokens. the state after its first token written (the next base) and the inputs of its others: reads and writes of the inputs at
+  # positions start_pos-T+1.. and ..start_pos+T-1 apart (Q >= 2T): no workgroup reads what another writes)
   S, T, N = S or cast(int, state.shape[0]), cast(int, z.shape[-2]) // G, cast(int, pq.shape[-2])
   SC = SC or S
   heads, V, K = cast(tuple[int, int, int], state.shape[-3:])
@@ -6490,7 +6507,7 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   W, conv = KDA_WAVES * (1 if T == 1 else getenv("KDA_MULTI_WAVES", 2)), cast(int, wq.shape[-1])
   if R: W = getenv("KDA_SPLIT_WAVES", 8)
   assert K == V and W*32 >= K and V % W == 0 and conv == 4, "a thread per channel of q, k and v"
-  assert T <= S and T < SC, "the states of the T tokens and the one before"
+  assert (T <= S or rp is not None) and T < SC, "the states of the T tokens and the one before"
   state, z = state.reshape(-1, V, K), z.reshape(G*T, heads*V)
   cq, ck, cv = (x.reshape(-1, heads*K) for x in (cq, ck, cv))
   pq, pk, pv, gate, alpha = (x.reshape(N, heads*K) for x in (pq, pk, pv, gate, alpha))
@@ -6500,7 +6517,7 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   if positions is not None: start_pos = positions[grp].load().cast(dtypes.weakint)
   # (slots: the states of group g are slot slots[g]'s, else g's)
   slot = slots[grp].load().cast(dtypes.weakint) if slots is not None else grp
-  rp, wps = start_pos % S, [(start_pos + t + 1) % S for t in range(T)]
+  rpos, wps = start_pos % S, [(start_pos + t + 1) % S for t in range(T)]
   rpc, wpcs, cbase = start_pos % SC, [(start_pos + t + 1) % SC for t in range(T)], slot*SC
   sbase, prow = slot*S, [grp*T + row0 + t for t in range(T)]  # (the group's states and the rows of its tokens)
   qrows, krows, vrows, gate_rows, alpha_rows, beta_rows = ([x[r] for r in prow] for x in (pq, pk, pv, gate, alpha, beta))
@@ -6542,18 +6559,43 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   # the delta rule on the rows of this wave, token by token
   rows_per_wave = V // (W * max(R, 1))
   lds_o = UOp.alloc((T, V), dtypes.float, addrspace=AddrSpace.LOCAL)
-  ostores, sstores = [], []
+  ostores, sstores, istores = [], [], []
+  replay = rp is not None
+  if replay:
+    assert S == 1 and kb is not None and Q >= 2*T
+    rp = cast(UOp, rp).reshape(-1, cast(int, cast(UOp, rp).shape[-1]))
+    # (the host's bases are 0..T-1 tokens before start_pos: no clamps in the indexing, see Transformer._kbase_of)
+    kbase = kb[grp].load().cast(dtypes.weakint)
+    nrep = initial.where(0, start_pos - kbase)
+    def irow(p:UOp) -> UOp: return (slot*Q + p % Q)*heads + h
+    first = wave.eq(0) & chunk.eq(0)  # (a head's vectors written by one wave)
+    for t in range(1, T):
+      at = irow(start_pos + t)
+      rpu = rp
+      istores += [rpu[at, c.valid(first)].store(x) for c, x in zip(cols, ks[t])] + \
+                 [rpu[at, (K + c).valid(first)].store(x) for c, x in zip(cols, decays[t])] + \
+                 [rpu[at, UOp.const(2*K + V, dtypes.weakint).valid(first & lane.eq(0))].store(b[t])]
   for j in range(rows_per_wave):
     r = (chunk * W + wave) * rows_per_wave + j
-    row = [initial.where(0, state[(sbase+rp)*heads + h, r, c].load().float()) for c in cols]
+    row = [initial.where(0, state[(sbase+rpos)*heads + h, r, c].load().float()) for c in cols]
+    if replay:
+      for tt in range(T-1):
+        at = irow(kbase + tt)
+        rpu = cast(UOp, rp)
+        kk, dd = [rpu[at, c].load() for c in cols], [rpu[at, K + c].load() for c in cols]
+        decayed = [x * d for x, d in zip(row, dd)]
+        delta = (rpu[at, 2*K + r].load() - dot(decayed, kk)) * rpu[at, 2*K + V].load()
+        on = nrep > tt
+        row = [on.where(x + delta * k_, o) for x, k_, o in zip(decayed, kk, row)]
     for t in range(T):
       decayed = [x * d for x, d in zip(row, decays[t])]
       sk, sq = dot(decayed, ks[t]), dot(decayed, qs[t])
       delta = (lds[t, 2, r].load() - sk) * b[t]
       row = [x + delta * kk for x, kk in zip(decayed, ks[t])]
-      sstores += [state[(sbase+wps[t])*heads + h, r, c].store(x.cast(state.dtype)) for c, x in zip(cols, row)]
+      if not replay or t == 0: sstores += [state[(sbase+wps[t])*heads + h, r, c].store(x.cast(state.dtype)) for c, x in zip(cols, row)]
+      if replay and t > 0: istores.append(cast(UOp, rp)[irow(start_pos + t), (2*K + r).valid(lane.eq(0))].store(lds[t, 2, r].load()))
       ostores.append((z[grp*T + t, (h*V + r).valid(lane.eq(0))] if R else lds_o[t, r.valid(lane.eq(0))]).store(sq + delta * kq[t]))
-  if R: return UOp.group(*ostores, *sstores).end(ghr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
+  if R: return UOp.group(*ostores, *sstores, *istores).end(ghr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
   lds_o = lds_o.after(UOp.group(*ostores).barrier())
   # rms norm of the head's outputs, gated
   zs = []
@@ -6563,7 +6605,41 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
     r = tid % V
     out = lds_o[t, r].load() * rinv * norm[r].load().float() * sigmoid(gate_rows[t][h*V + r].load().float())
     zs.append(z[grp*T + t, (h*V + r).valid(tid < V)].store(out.cast(z.dtype)))
-  return UOp.group(*zs, *sstores).end(ghr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
+  return UOp.group(*zs, *sstores, *istores).end(ghr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
+
+def _kda_replay_kernel(state:UOp, rp:UOp, slot:UOp, base:UOp, n:UOp, *, T:int, Q:int, W:int=8) -> UOp:
+  """
+  replay (SEQ_REPLAY): the state of slot `slot` (S=1, the one at base) after its n (< T) next tokens of its inputs in rp, written back: the
+  state of position base+n (see _kda_decode_kernel)
+  """
+  heads, V, K = cast(tuple[int, int, int], state.shape[-3:])
+  state = state.reshape(-1, V, K)
+  RW = cast(int, rp.shape[-1])
+  rp = rp.reshape(-1, RW)
+  hw, lane = UOp.range(heads * (V // W), 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  h, r = hw // (V // W), hw % (V // W) * W
+  cols = [lane + 32*i for i in range(K // 32)]
+  def dot(x:list[UOp], y:list[UOp]) -> UOp: return warp_reduce(functools.reduce(lambda s,ab: s + ab[0]*ab[1], zip(x[1:], y[1:]), x[0]*y[0]),
+                                                               full_wave=True)
+  stores = []
+  for j in range(W):
+    row = [state[slot*heads + h, r + j, c].load().float() for c in cols]
+    for tt in range(T-1):
+      at = (slot*Q + (base + tt) % Q)*heads + h
+      kk, dd = [rp[at, c].load() for c in cols], [rp[at, K + c].load() for c in cols]
+      decayed = [x * d for x, d in zip(row, dd)]
+      delta = (rp[at, 2*K + r + j].load() - dot(decayed, kk)) * rp[at, 2*K + V].load()
+      on = n > tt
+      row = [on.where(x + delta * k_, o) for x, k_, o in zip(decayed, kk, row)]
+    stores += [state[slot*heads + h, r + j, c].store(x.cast(state.dtype)) for c, x in zip(cols, row)]
+  return UOp.group(*stores).end(hw, lane).sink(arg=KernelInfo(name="kda_replay", opts_to_apply=()))
+
+def kda_replay(state:Tensor, rp:Tensor, slot:UOp, base:UOp, n:UOp, T:int, Q:int) -> Tensor:
+  """the state of a slot (replay's, see _kda_replay_kernel) advanced n tokens from its base: the state after the kernel"""
+  # (the variables bound by the state input: its kernel the unbound ones)
+  st = Tensor(state.uop.after(slot, base, n))
+  return Tensor.custom_kernel(st, rp, fxn=functools.partial(_kda_replay_kernel, slot=cast(UOp, _unbind(slot)), base=cast(UOp, _unbind(base)),
+                                                            n=cast(UOp, _unbind(n)), T=T, Q=Q))[0]
 
 @functools.cache
 def _kda_out_kernel(z:UOp, q:UOp, scale:UOp, xsum:UOp, o:UOp, norm:UOp, gate:UOp, eps:float, heads:int) -> UOp:
@@ -6584,7 +6660,8 @@ def _kda_out_kernel(z:UOp, q:UOp, scale:UOp, xsum:UOp, o:UOp, norm:UOp, gate:UOp
 
 def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_weights:list[Tensor], gate:Tensor, alpha:Tensor, beta:Tensor,
                dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float, row:int|None=None, rows:int=1,
-               positions:Tensor|None=None, groups:int=1, S:int=0, SC:int=0, calls_out:list[UOp]|None=None, slots:Tensor|None=None) -> Tensor:
+               positions:Tensor|None=None, groups:int=1, S:int=0, SC:int=0, calls_out:list[UOp]|None=None, slots:Tensor|None=None,
+               replay:Tensor|None=None, kbases:Tensor|None=None, replay_q:int=0) -> Tensor:
   """
   a few tokens (B=1, T) of a kda layer: returns the gated, normed outputs (1, T, heads*V) in half. the states (S, B, ...) at a position p
   are p%S: the ones of start_pos are read, the ones after every token written (T < S). calls_out: the kernel appended (a later write of
@@ -6603,15 +6680,18 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   # the states are written in place
   inplace = tuple(Tensor(s.uop.after(start_pos.uop)) for s in (state, *conv_states))
   assert slots is None or positions is not None, "the slots of groups"
-  extra = ((positions,) if positions is not None else ()) + ((slots,) if slots is not None else ())
+  assert replay is None or (slots is not None and kbases is not None), "replay: the slots' bases"
+  extra = ((positions,) if positions is not None else ()) + ((slots,) if slots is not None else ()) + \
+    ((Tensor(replay.uop.after(start_pos.uop)), cast(Tensor, kbases)) if replay is not None else ())
   srcs = (z, *inplace, *projs, *conv_weights, gate, alpha, beta, dt, a, norm) + extra
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
   nx = len(extra)
   pos_param = params[len(params)-nx] if positions is not None else None
-  slot_param = params[-1] if slots is not None else None
+  slot_param = params[len(params)-nx+1] if slots is not None else None
+  rp_param, kb_param = (params[-2], params[-1]) if replay is not None else (None, None)
   call = _kda_decode_kernel(*params[:len(params)-nx], cast(UOp, _unbind(start_pos.uop)), lb, eps, R, row or 0, G,
-                            pos_param, S, SC, slot_param).call(*contig)
+                            pos_param, S, SC, slot_param, rp_param, kb_param, replay_q).call(*contig)
   out = Tensor(contig[0].after(call))
   if calls_out is not None: calls_out.append(call)
   if not R: return out

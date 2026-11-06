@@ -261,6 +261,9 @@ def _compile_kernel(x:tuple[int, tuple[UOp, Renderer], dict]) -> tuple[int, UOp]
     st = time.perf_counter()
     prg = to_program(*x[1])
     with open("/tmp/compile_log.txt", "a") as f: f.write(f"{time.perf_counter()-st:.3f} {prg.src[0].arg.name}\n")
+    # (COMPILE_DUMP: the input of a kernel's codegen that took more than that many seconds, pickled to /tmp/slow_<pid>.pkl)
+    if (lim:=float(os.environ.get("COMPILE_DUMP", 0))) and time.perf_counter()-st > lim:
+      with open(f"/tmp/slow_{os.getpid()}.pkl", "wb") as f: pickle.dump(x[1], f)
     return x[0], prg
 def _compile_pickled(task:bytes) -> bytes: return pickle.dumps(_compile_kernel(pickle.loads(task))[1])
 

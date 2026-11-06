@@ -11,11 +11,12 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, slot_scatter, slot_gather, \
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
-  all_gather, all_gather_q8, sharded_argmax, skinny_matmul, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
+  all_gather, all_gather_q8, sharded_argmax, skinny_matmul, moe_combine_scatter, kda_conv, kda_replay, tables_ready, moe_router_local, \
+  hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, I8_WMMA_QUANTS, flash_attention_rows, \
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
-  kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, \
+  kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, DEC_LANE, \
   flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, after_kernel, \
   host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
@@ -352,17 +353,19 @@ _partial_out = [False]
 # and the sublayer's input rows of this device (before the gather): per token work (the router) runs on them, its results are gathered
 _sp_rows:list[Tensor|None] = [None]
 # batched decoding with the streams' rows split over the devices (SEQ_SPLIT, see Transformer._forward_seqs): the real rows of a device (its
-# rows are padded to SEQ_SPLIT_ROWS), 0: not split
+# rows are padded to whole tiles of 32), 0: not split
 _seq_split = [0]
-SEQ_SPLIT_ROWS = 32
+SEQ_SPLIT_MAX = 128  # (the most real rows a device)
+def _split_rows() -> int: return round_up(_seq_split[0], 32)
 def _split_real(x:Tensor) -> Tensor:
-  """(B, N*SEQ_SPLIT_ROWS, ...) split padded rows: the real rows (B, N*R, ...), split"""
+  """(B, N*P, ...) split padded rows: the real rows (B, N*R, ...), split"""
   N, R, B, rest = len(cast(tuple, x.device)), _seq_split[0], x.shape[0], x.shape[2:]
-  return x.reshape(B, N, SEQ_SPLIT_ROWS, *rest)[:, :, :R].reshape(B, N*R, *rest)
+  return x.reshape(B, N, _split_rows(), *rest)[:, :, :R].reshape(B, N*R, *rest)
 def _split_pad(x:Tensor) -> Tensor:
-  """(B, N*R, ...) split real rows: the padded rows (B, N*SEQ_SPLIT_ROWS, ...), split (zeros past the real ones)"""
+  """(B, N*R, ...) split real rows: the padded rows (B, N*P, ...), split (zeros past the real ones)"""
   N, R, B, rest = len(cast(tuple, x.device)), _seq_split[0], x.shape[0], x.shape[2:]
-  return x.reshape(B, N, R, *rest).pad((None, None, (0, SEQ_SPLIT_ROWS - R), *[None]*len(rest))).reshape(B, N*SEQ_SPLIT_ROWS, *rest)
+  P = _split_rows()
+  return x.reshape(B, N, R, *rest).pad((None, None, (0, P - R), *[None]*len(rest))).reshape(B, N*P, *rest)
 # the tokens of a prefill chunk (its rows past them are padding): the experts don't take the padding rows
 _ffn_rows:list[UOp|int|None] = [None]
 # (MB_DEP=state: the states and caches a micro batch's sublayer writes (the tensors after their writes), the next batch's sublayer waits for
@@ -430,6 +433,10 @@ def _batch_attention(x:Tensor, groups:list[tuple[UOp, int]], fn:Callable[[Tensor
   finally: _batch_prefill[0] = pf
   return dec.cat(pre, dim=1)
 
+# SEQ_REPLAY: a sequence slot's recurrent state is one (after the first token of its last step) and the inputs of the tokens after it, replayed
+# by the next step (see kda_decode): a step writes one state, not k+1 (their memory and their writes)
+SEQ_REPLAY = getenv("SEQ_REPLAY", 1)
+def replay_q(k:int) -> int: return 2*(k+1)
 def slot_states(k:int) -> tuple[int, int]:
   """
   the S of a slot's recurrent states and of its conv states (the state of a position p is p%S, see kda_decode): a step of k+1 tokens reads
@@ -443,17 +450,21 @@ def _group_positions(groups:list[tuple[UOp, int]], device:str|tuple[str, ...]|No
   if all(p.op is Ops.CONST and p.arg == 0 for p, _ in groups): return Tensor.zeros(len(groups), dtype=dtypes.int32, device=device).contiguous()
   return Tensor.stack(*[Tensor(p) for p, _ in groups]).cast(dtypes.int32).contiguous().to(device).contiguous()
 
-def _slot_pool(n:int, like:Tensor, shape:tuple[int|UOp, ...]|None=None, dtype:DType|None=None) -> tuple[Tensor, list[Tensor]]:
+def _slot_pool(n:int, like:Tensor, shape:tuple[int|UOp, ...]|None=None, dtype:DType|None=None, host:bool=False) -> tuple[Tensor, list[Tensor]]:
   """
   n slots of a state like `like` (of shape, or like's, of dtype or like's) in one buffer of every device, made but not allocated (a jit
   captured before its memory is holds it): the pool (n*shape[0], ...) and the n slots, views of it (buffers of their own: a kernel writes one
-  in place)
+  in place). host: in host memory (every device its part), the devices read and write it directly
   """
   shape, devs, axis = tuple(int(x) for x in (shape or like.shape)), cast(str|tuple[str, ...], like.device), like.uop.axis
   local = tuple(x//len(devs) if isinstance(devs, tuple) and i == axis else x for i, x in enumerate(shape))
   dtype = dtype or like.dtype
   size, item = prod(local), dtype.itemsize
-  base = UOp.new_buffer(devs, n * size, dtype)
+  if host:
+    hb = [Buffer(d, n * size * item, options=BufferSpec(host=True)) for d in to_tuple(devs)]
+    if isinstance(devs, tuple): (hm:=MultiBuffer.__new__(MultiBuffer)).bufs = hb
+    base = UOp.from_buffer(hm if isinstance(devs, tuple) else hb[0], dtype, devs)
+  else: base = UOp.new_buffer(devs, n * size, dtype)
   def tensor(u:UOp, rows:int) -> Tensor:
     u = u.reshape((rows * local[0], *local[1:]))
     return Tensor(u.unshard(axis) if isinstance(devs, tuple) and axis is not None else u)
@@ -1426,6 +1437,7 @@ class SeqBatch:
   caches, the position of its first row (int32 tensors (G,) of the devices)
   """
   G:int; R:int; slots:Tensor; bases:Tensor; positions:Tensor # noqa: E702
+  kbases:Tensor|None = None  # (SEQ_REPLAY: the positions of the slots' recurrent states, see kda_decode)
   def _rows(self, t:Tensor) -> Tensor: return t.reshape(self.G, 1).expand(self.G, self.R).reshape(-1)
   @property
   def row_positions(self) -> Tensor:
@@ -2254,10 +2266,18 @@ class GatedDeltaNetBlock(FFNBlock):
   def _gate(self, x:Tensor) -> Tensor:
     """the output gate's input of every channel (a sigmoid gate in the kda layout)"""
     return self.attn_gate(x) if hasattr(self, "attn_gate") else self.ssm_g_b(self.ssm_g_a(x))
-  def _alpha(self, x:Tensor) -> Tensor:
+  def _few_rows(self, layer:Linear, x:Tensor) -> Tensor:
+    """layer(x) of a float weight of few outputs (alpha, beta): the rows of batched decoding (32 or more) by few_out_rows (padded to its tiles)"""
+    R = int(prod(x.shape[:-1]))
+    if layer.bias is None and layer.ggml_type is None and R >= 32 and getenv("FEW_BATCH", 1):
+      xr = x.reshape(R, x.shape[-1])
+      if R % 32: xr = xr.pad(((0, round_up(R, 32) - R), None))
+      if (r:=few_out_rows(xr, layer.weight)) is not None: return r[:R].reshape(*x.shape[:-1], -1)
+    return layer(x)
+  def _alpha(self, x:Tensor, rows:bool=False) -> Tensor:
     """the decay's input of every channel (kda): a head's (head_decay) for each of its channels"""
     if not hasattr(self, "ssm_alpha"): return self.ssm_f_b(self.ssm_f_a(x))
-    a = self.ssm_alpha(x).float() + self.ssm_dt["bias"]
+    a = (self._few_rows(self.ssm_alpha, x) if rows else self.ssm_alpha(x)).float() + self.ssm_dt["bias"]
     return a.unsqueeze(-1).expand(*a.shape, self.head_k_dim).flatten(-2)
 
   def _ple(self, x:Tensor, emb:Tensor, start_pos:int|UOp, T:int|UOp|None, dep:UOp|None=None) -> Tensor:
@@ -2386,7 +2406,7 @@ class GatedDeltaNetBlock(FFNBlock):
     if (pf:=_batch_prefill[0]) is not None and not pf.off: return self._prefill_batch(x, pf)
     xin, x = x, x.half()
     projs, gate = [self.attn_q(x), self.attn_k(x), self.attn_v(x)], self._gate(x)
-    alpha, beta = self._alpha(x), self.ssm_beta(x)
+    alpha, beta = self._alpha(x, rows=True), self._few_rows(self.ssm_beta, x)
     weights = [w["weight"] for w in (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v)]
     if (sb:=_seq_batch[0]) is not None and (sp:=_seq_prompt[0]) is not None:
       # (a mixed step of sequences sharing the caches: the decoding rows' outputs (their kernel reads the first rows of the projections), the
@@ -2418,10 +2438,12 @@ class GatedDeltaNetBlock(FFNBlock):
       S, SC, T = int(self.slot_rec[0].shape[0]), int(self.slot_conv[0][0].shape[0]), groups[0][1]
       # (sequences sharing the caches: their slots)
       sb = _seq_batch[0]
+      rp = getattr(self, "pool_rp", None) if sb is not None and sb.kbases is not None else None
       z = kda_decode(self.pool_rec, self.pool_conv[:3], projs, weights, gate, alpha, beta, self._dt_ch, self.ssm_a,
                      unwrap(self.ssm_norm.weight), Tensor(groups[0][0]), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps, row=0, rows=T,
                      positions=sb.positions if sb is not None else _group_positions(groups, self.pool_rec.device), groups=len(groups), S=S, SC=SC,
-                     slots=sb.slots if sb is not None else None)
+                     slots=sb.slots if sb is not None else None, replay=rp, kbases=cast(SeqBatch, sb).kbases if rp is not None else None,
+                     replay_q=replay_q(self.config.spec_drafts))
       return _out(self.ssm_out, z)
     # (every row's kernel reads its row of the inputs)
     starts = list(itertools.accumulate((t for _, t in groups), initial=0))
@@ -2431,12 +2453,19 @@ class GatedDeltaNetBlock(FFNBlock):
           for g, (pos, T) in enumerate(groups)]
     return _out(self.ssm_out, zs[0].cat(*zs[1:], dim=1))
 
-  def _init_slots(self, n:int, ctx:int, half:bool|None=None):
+  def _init_slots(self, n:int, ctx:int, half:bool|None=None, replay:bool=False):
     """
-    the states of n sequences of batched decoding (one slot each): S of each state, the one of a position p is p%S (see slot_states)
+    the states of n sequences of batched decoding (one slot each): S of each state, the one of a position p is p%S (see slot_states). replay:
+    one recurrent state a slot and the replayed inputs (see SEQ_REPLAY)
     """
     if len(getattr(self, "slot_rec", [])) >= n: return
     S, SC = slot_states(self.config.spec_drafts)
+    if replay:
+      S = 1
+      K, V = self.head_k_dim, self.head_v_dim
+      # (a row of a head: its k, decay, v and beta)
+      self.pool_rp = _slot_pool(n, self.recurrent_state, (replay_q(self.config.spec_drafts), *self.recurrent_state.shape[1:3], 2*K + V + 1),
+                                dtypes.float32)[0]
     # (in one buffer of every device: slot_store writes what a step reads)
     # (in float as the model's: a step reads and writes it, in half its rounding adds up over a long reply. in half for many slots
     # (SLOT_STATE_HALF, default past 8): their memory, a long context's model and 32 slots of it don't fit)
@@ -3947,12 +3976,13 @@ class Transformer:
     k, n, devs, m = self.config.spec_drafts, self.seq_slots() + 1, cast(tuple[str, ...], self.token_embd.weight.device), max(self.SEQ_SIZES)
     # (the slots' recurrent states in float, SEQ_STATE_HALF: in half)
     for b in self.blk:
-      if isinstance(b, GatedDeltaNetBlock): b._init_slots(n, 0, half=bool(getenv("SEQ_STATE_HALF", 0)))
+      if isinstance(b, GatedDeltaNetBlock): b._init_slots(n, 0, half=bool(getenv("SEQ_STATE_HALF", 0)), replay=bool(SEQ_REPLAY))
     # every slot's hidden states (the streams) of the last step's tokens, two parities of k+1
     self.seq_spec_h = _zeros(n*2*(k+1), self._spec_dim, device=devs)
     # every slot's checkpoint: its states of a position (the end of its last prompt), the hidden state of the last token
     self.seq_ckpt_h = _zeros(n, self._spec_dim, device=devs)
-    self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]))[0]] +
+    # (SEQ_CKPT_HOST: the checkpoints' recurrent states in host memory: a copy a turn, the device memory more slots')
+    self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]), host=bool(getenv("SEQ_CKPT_HOST", 1)))[0]] +
                             [_slot_pool(n, p, (1, *p.shape[1:]))[0] for p in b.pool_conv] for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
     self._spec_init()
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self._token_rows())
@@ -3968,11 +3998,15 @@ class Transformer:
     self._seq_host_out, self._seq_out = _host_ints(devs[0], m*(2*k+1) + 1)
     self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True) for sv in (True, False)}
     self._seq_ckpt_jits = {sv: TinyJit(functools.partial(self._seq_ckpt_copy, sv), capture_first=True) for sv in (True, False)}
+    # (SEQ_REPLAY: a slot's recurrent states advanced to a position, see _seq_materialize; the position of every slot's state)
+    self._seq_mat_jit = TinyJit(self._seq_mat, capture_first=True) if SEQ_REPLAY else None
+    self._seq_kbase:dict[int, int] = {}
     # (the calls' chunk counts that fit the caches: a short max context's are a few chunks)
     self._move_calls = self._chunk_calls((self.seq_rows() + REGION_ALIGN) // self.SEQ_MOVE - 1)
     self._seq_move_jits = {m: TinyJit(functools.partial(self._seq_move_copy, m), capture_first=True) for m in self._move_calls}
     self._seq_stash_init()
     todo = [self.seq_spec_h, self.seq_ckpt_h] + [p for b in self.blk if isinstance(b, GatedDeltaNetBlock) for p in (b.pool_rec, *b.pool_conv)] + \
+      [b.pool_rp for b in self.blk if isinstance(b, GatedDeltaNetBlock) and hasattr(b, "pool_rp")] + \
       [t for c in self.seq_ckpt_states for t in c]
     _fill_zero(*todo)
 
@@ -3994,10 +4028,27 @@ class Transformer:
       (h, hs), rest = pairs[0], pairs[1:]
       Tensor.realize(hs.assign(h.contiguous() * Tensor(keep).cast(dtypes.float)), *[s.assign(d.cast(s.dtype)) for d, s in rest])
 
+  def _seq_mat(self, slot:UOp, base:UOp, n:UOp):
+    """the recurrent states of slot `slot` (SEQ_REPLAY: of position base) advanced n tokens (the replayed inputs of its last step)"""
+    T = self.config.spec_drafts + 1
+    outs = [kda_replay(b.pool_rec, b.pool_rp, slot, base, n, T, replay_q(T-1)) for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
+    Tensor.realize(*outs)
+  def _mat_vars(self, slot:int, base:int, n:int) -> list[UOp]:
+    return [UOp.variable("mat_slot", 0, self.seq_slots()).bind(slot), UOp.variable("mat_base", 0, self.max_context).bind(base),
+            UOp.variable("mat_n", 0, self.config.spec_drafts).bind(n)]
+  def _seq_materialize(self, slot:int, pos:int):
+    """SEQ_REPLAY: slot `slot`'s recurrent states of position pos (its state's and the replayed tokens after it) made its state"""
+    if self._seq_mat_jit is None or (base:=self._seq_kbase.get(slot)) is None or base == pos: return
+    # (a position its state isn't a few tokens before (a slot not decoded to it): its state as it is, as the states of other positions are)
+    if 0 < pos - base <= self.config.spec_drafts: self._seq_mat_jit(*self._mat_vars(slot, base, pos - base))
+    self._seq_kbase[slot] = pos
+
   def _seq_copy_call(self, save:bool, slot:int, pos:int, hrow:int, keep:bool=True):
     k = self.config.spec_drafts
-    S, SC = slot_states(k)
+    S, SC = self._seq_S()
+    if not save and keep: self._seq_materialize(slot, pos)
     Sm = self.config.rewind + 1
+    if SEQ_REPLAY and save: self._seq_kbase[slot] = pos
     self._seq_copy_jits[save](UOp.variable("seq_slot", 0, self.seq_slots()).bind(slot), UOp.variable("seq_pm", 0, Sm-1).bind(pos % Sm),
                               UOp.variable("seq_ps", 0, S-1).bind(pos % S), UOp.variable("seq_pc", 0, SC-1).bind(pos % SC),
                               UOp.variable("seq_hrow", 0, 2*k+1).bind(hrow), UOp.variable("seq_keep", 0, 1).bind(int(keep)))
@@ -4130,7 +4181,8 @@ class Transformer:
     pairs = [(rows(st, entry), x) for st, x in zip(self._stash_state, slots)]
     Tensor.realize(*[(d.assign(x) if save else x.assign(d)) for d, x in pairs])
   def _stash_state_vars(self, slot:int, entry:int, pos:int, hrow:int) -> list[UOp]:
-    S, SC = slot_states(k:=self.config.spec_drafts)
+    k = self.config.spec_drafts
+    S, SC = self._seq_S()
     return [UOp.variable("stash_slot", 0, self.seq_slots()).bind(slot), UOp.variable("stash_entry", 0, self.stash_entries - 1).bind(entry),
             UOp.variable("stash_ps", 0, S-1).bind(pos % S), UOp.variable("stash_pc", 0, SC-1).bind(pos % SC),
             UOp.variable("stash_hrow", 0, 2*k+1).bind(hrow)]
@@ -4146,6 +4198,8 @@ class Transformer:
         m = next(m for m in self._stash_calls if m <= n)
         self._stash_kv_jits[(save, m)](*self._stash_kv_vars(base + i * self.SEQ_MOVE, c))
         i, c, n = i + m, c + m, n - m
+    if save: self._seq_materialize(slot, pos)
+    elif SEQ_REPLAY: self._seq_kbase[slot] = pos
     self._stash_state_jits[save](*self._stash_state_vars(slot, entry, pos, hrow))
 
   def _seq_ckpt_copy(self, save:bool, slot:UOp, ps:UOp, pc:UOp):
@@ -4157,9 +4211,15 @@ class Transformer:
       S, SC = int(b.slot_rec[0].shape[0]), int(b.slot_conv[0][0].shape[0])
       pairs += [(rows(c[0], slot), rows(b.pool_rec, slot*S + ps))] + [(rows(d, slot), rows(p, slot*SC + pc)) for d, p in zip(c[1:], b.pool_conv)]
     Tensor.realize(*[(d.assign(s) if save else s.assign(d)) for d, s in pairs])
+  def _seq_S(self) -> tuple[int, int]:
+    """the S of a sequence slot's recurrent states (one with SEQ_REPLAY) and of its conv states"""
+    S, SC = slot_states(self.config.spec_drafts)
+    return (1 if SEQ_REPLAY else S), SC
   def seq_ckpt(self, save:bool, slot:int, pos:int):
     """the checkpoint of slot `slot`: its states of position pos (and the hidden state of row 0) saved, or restored"""
-    S, SC = slot_states(self.config.spec_drafts)
+    S, SC = self._seq_S()
+    if save: self._seq_materialize(slot, pos)
+    elif SEQ_REPLAY: self._seq_kbase[slot] = pos
     self._seq_ckpt_jits[save](UOp.variable("seq_slot", 0, self.seq_slots()).bind(slot), UOp.variable("seq_ps", 0, S-1).bind(pos % S),
                               UOp.variable("seq_pc", 0, SC-1).bind(pos % SC))
 
@@ -4180,7 +4240,8 @@ class Transformer:
     for lane in range(getenv("MICRO_BATCHES", 1)):
       if mb_queue(lane) and getenv("MB_QUEUES", 1):
         for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(mb_queue(lane))
-      for ln in (lane, lane + SEL_LANE):
+      # (and the decoding steps' lanes, see DEC_LANE)
+      for ln in (lane, lane + SEL_LANE) + ((DEC_LANE, DEC_LANE + SEL_LANE) if lane == 0 and getenv("SEQ_DEC_LANE", 1) else ()):
         FLAG_LANE[0] = ln
         for g in (4, 16, 64): flag_allreduce(devs, g)
         # (the ring's mailbox: made before the jits are captured (in a fork, it'd be the child's))
@@ -4242,6 +4303,8 @@ class Transformer:
       add(f"copy{int(sv)}", self._seq_copy_jits[sv], functools.partial(self._seq_copy_call, sv, 0, 1, 0))
       add(f"ckpt{int(sv)}", self._seq_ckpt_jits[sv], functools.partial(self.seq_ckpt, sv, 0, 1))
     add("move", self._seq_move_jits[1], functools.partial(self.seq_move, 0, REGION_ALIGN, 1))
+    if self._seq_mat_jit is not None and self.config.spec_drafts:
+      add("mat", self._seq_mat_jit, functools.partial(lambda: cast(Any, self._seq_mat_jit)(*self._mat_vars(0, 1, 1))))
     # the prefills' and steps' jits captured and compiled at once (in forked processes, see capture_parallel): their jits called alone (no
     # device work but theirs)
     par:list[tuple[Any, Callable[[], Any]]] = []
@@ -4263,11 +4326,20 @@ class Transformer:
               (self._seq_ckpt_jits[sv], functools.partial(self.seq_ckpt, sv, 0, 1))]
     v = functools.partial(UOp.variable, min_val=0, max_val=self.seq_rows())
     par += [(j, functools.partial(lambda j: j(v("move_src").bind(0), v("move_dst").bind(REGION_ALIGN)), j)) for j in self._seq_move_jits.values()]
+    if self._seq_mat_jit is not None and self.config.spec_drafts:
+      par.append((self._seq_mat_jit, functools.partial(lambda j: j(*self._mat_vars(0, 1, 1)), self._seq_mat_jit)))
     if self.stash_entries:
       for sv in (True, False):
         par += [(j:=self._stash_kv_jits[(sv, n)], functools.partial(lambda j: j(*self._stash_kv_vars(0, 0)), j)) for n in self._stash_calls]
         par.append((self._stash_state_jits[sv], functools.partial(lambda j: j(*self._stash_state_vars(0, 0, 0, 0)), self._stash_state_jits[sv])))
     par += loads
+    # (SEQ_WARMUP_ONLY=step: the steps' jits only (experiments: the others captured when first called))
+    if (only:=getenv("SEQ_WARMUP_ONLY", "")):
+      steps = {self._seq_jit(m) for m in self.SEQ_SIZES}
+      par = [(j, c) for j, c in par if j in steps or any(j is lj for lj, _ in loads)]
+      calls = {k: v for k, v in calls.items() if k.startswith(str(only))}
+    if DEBUG >= 1:
+      for i, (_, call) in enumerate(par): print(f"seq_warmup: jit {i}: {getattr(call, 'func', call)} {getattr(call, 'args', '')}"[:160])
     if getenv("WARMUP_PARALLEL", 1): capture_parallel(par, meanwhile)
     else: meanwhile(lambda j: False)
     if DEBUG >= 1: print(f"seq_warmup: {len(par)} jits compiled at {time.perf_counter()-st:.2f}s")
@@ -4334,9 +4406,9 @@ class Transformer:
     pv (a mixed step): a prompt's chunk of SEQ_MIX_ROWS rows at most (its tokens in the token buffer) prefilled with the step, its rows after
     the sequences' (the projections and the experts of all the rows at once: no prefill of its own), the token after it last in the output
     """
-    k, G, devs = self.config.spec_drafts, len(vs) // 5, self.token_embd.weight.device
+    k, G, devs = self.config.spec_drafts, len(vs) // 6, self.token_embd.weight.device
     hc, mtp, ple = unwrap(self.config.hc), cast(QwenMTPBlock, self.mtp), unwrap(self.config.ple)
-    sl, bs, mp, js, ps = (list(vs[i::5]) for i in range(5))
+    sl, bs, mp, js, ps, kbs = (list(vs[i::6]) for i in range(6))
     slots, bases, H = self._ints(tuple(sl)), self._ints(tuple(bs)), 2*(k+1)
     y = self._seq_in[:, :G*(k+1)]
     temps = self._seq_temp[:2*G].reshape(G, 2)
@@ -4347,10 +4419,22 @@ class Transformer:
     # not the others')
     seed = self._seq_temp[-1:].bitcast(dtypes.uint32)
     Q8_ROWS_I8[0] = bool(getenv("SEQ_I8", 0))
+    # (SEQ_DEC_LANE: the step's collectives on the decoding lanes, see DEC_LANE)
+    prev_lane = FLAG_LANE[0]
+    if getenv("SEQ_DEC_LANE", 1): FLAG_LANE[0] = DEC_LANE
     try:
       # the MTP layer catches up on the k+1 positions from mtp_pos, row j of every sequence drafts
       _seq_batch[0], _batch_rows[0] = batch(mp, k+1), [(p, k+1) for p in mp]
-      m = mtp.predict(self.token_embd(y.to(devs)).float(), last.unsqueeze(0), 0)
+      emb = self.token_embd(y.to(devs)).float()
+      Nd = len(devs) if isinstance(devs, tuple) else 1
+      if getenv("SEQ_SPLIT", 0) and getenv("SEQ_SPLIT_MTP", 1) and not pv and Nd > 1 and (G*(k+1)) % Nd == 0 and G*(k+1)//Nd <= SEQ_SPLIT_MAX:
+        # (SEQ_SPLIT: the MTP layer's rows split over the devices as the model's, its streams gathered for the drafts' head and the next pass)
+        _seq_split[0] = G*(k+1) // Nd
+        try:
+          xs = mtp._project_input_split(_split_pad(shard_rows(emb, 1)).contiguous(), _split_pad(shard_rows(last.unsqueeze(0), 1)).contiguous())
+          m = all_gather(_split_real(mtp(xs, 0)).contiguous(), 1, dtypes.half).float()
+        finally: _seq_split[0] = 0
+      else: m = mtp.predict(emb, last.unsqueeze(0), 0)
       m = Tensor.cat(*[m.shrink((None, (g*(k+1)+j, g*(k+1)+j+1), None, None)) for g, j in enumerate(js)], dim=1)
       drafts:list[Tensor] = []
       for i in range(k):
@@ -4380,10 +4464,14 @@ class Transformer:
       x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
       ple_emb = self._ple_emb(ple_rows.unsqueeze(0))
       _seq_batch[0], _batch_rows[0] = batch(starts, k+1), [(s, k+1) for s in starts]
-      # SEQ_SPLIT: the streams' rows split over the devices (whole sequences on each, padded to SEQ_SPLIT_ROWS): the hyper-connections and the
+      # (SEQ_REPLAY: the positions of the slots' recurrent states, their replayed tokens up to a sequence's start)
+      if SEQ_REPLAY:
+        assert not pv, "SEQ_REPLAY: no mixed steps (SEQ_MIX_SIZES)"
+        _seq_batch[0] = replace(cast(SeqBatch, _seq_batch[0]), kbases=self._ints(tuple(kbs)))
+      # SEQ_SPLIT: the streams' rows split over the devices (whole sequences on each, padded to tiles of 32): the hyper-connections and the
       # router of a device's rows only, a sublayer's input gathered and its output reduce-scattered (the bytes of an allreduce)
       N = len(devs) if isinstance(devs, tuple) else 1
-      split = bool(getenv("SEQ_SPLIT", 0)) and not pv and N > 1 and (G*(k+1)) % N == 0 and G*(k+1) // N <= SEQ_SPLIT_ROWS
+      split = bool(getenv("SEQ_SPLIT", 0)) and not pv and N > 1 and (G*(k+1)) % N == 0 and G*(k+1) // N <= SEQ_SPLIT_MAX
       if split:
         _seq_split[0] = G*(k+1) // N
         x = _split_pad(shard_rows(x, 1)).contiguous()
@@ -4417,7 +4505,7 @@ class Transformer:
         hrows, keys = hs.cat(last), Tensor.arange(G*(k+1) + 1)
         tt = tt.cat(self._seq_temp[2*self._seq_m:2*self._seq_m+2].reshape(1, 2))
       tok = self._sample(self._hc_out(hrows.reshape(1, -1, hc.count, hrows.shape[-1] // hc.count))[0], tt, y.device, (seed, keys))
-    finally: _seq_batch[0], _batch_rows[0], _seq_prompt[0], Q8_ROWS_I8[0] = None, None, None, False
+    finally: _seq_batch[0], _batch_rows[0], _seq_prompt[0], Q8_ROWS_I8[0], FLAG_LANE[0] = None, None, None, False, prev_lane
     q8_quantize_cache_clear()  # don't keep the graph alive
     ptok_out = tok[G*(k+1):] if pv else None
     tok = tok[:G*(k+1)]
@@ -4445,7 +4533,11 @@ class Transformer:
     return [v for g, (sl, b, mp, j, par) in enumerate(seqs) for v in (
       UOp.variable(f"seq_slot{g}", 0, n).bind(sl), UOp.variable(f"seq_base{g}", 0, self.seq_rows()).bind(b),
       UOp.variable(f"seq_mtp{g}", 0, self.max_context-1).bind(mp), UOp.variable(f"seq_j{g}", 0, k).bind(j),
-      UOp.variable(f"seq_par{g}", 0, 1).bind(par))]
+      UOp.variable(f"seq_par{g}", 0, 1).bind(par), UOp.variable(f"seq_kb{g}", 0, self.max_context).bind(self._kbase_of(sl, mp + j)))]
+  def _kbase_of(self, slot:int, start:int) -> int:
+    """the position of slot `slot`'s recurrent state for a step at start (SEQ_REPLAY: the replayed tokens' before it), else start"""
+    if not SEQ_REPLAY or (b:=getattr(self, "_seq_kbase", {}).get(slot)) is None or not 0 <= start - b <= self.config.spec_drafts: return start
+    return b
 
   step_times = [0.0, 0.0, 0.0]  # (the launches' and the waits' time of the steps, see the server's status line)
   def seq_step(self, seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, float]]],
@@ -4477,8 +4569,12 @@ class Transformer:
     if (cap:=getattr(jit, "captured", None)) is not None:
       # (captured: the variables' values as they are, no bound variables made a step)
       cap([], {**{name: v for g, (sl, b, mp, j, par, _, _) in enumerate(seqs)
-                  for name, v in ((f"seq_slot{g}", sl), (f"seq_base{g}", b), (f"seq_mtp{g}", mp), (f"seq_j{g}", j), (f"seq_par{g}", par))}, **pvals})
+                  for name, v in ((f"seq_slot{g}", sl), (f"seq_base{g}", b), (f"seq_mtp{g}", mp), (f"seq_j{g}", j), (f"seq_par{g}", par),
+                                  (f"seq_kb{g}", self._kbase_of(sl, mp + j)))}, **pvals})
     else: jit(*self._seq_vars([(sl, b, mp, j, par) for sl, b, mp, j, par, _, _ in seqs]), *self._prompt_vars(pvals))
+    # (SEQ_REPLAY: every sequence's recurrent states now the ones after its step's first token)
+    if SEQ_REPLAY:
+      for sl, _, mp, j, _, _, _ in seqs[:n]: self._seq_kbase[sl] = mp + j + 1
     launched = time.perf_counter()
     out = self._wait_host(lambda: min(o:=self._seq_host_out[:W].tolist()) >= 0 and o or -1, f"a step of {m} sequences")
     self.step_times[0] += launched - st
@@ -4517,7 +4613,7 @@ class Transformer:
     todo = [t for h in holders for v in vars(h).values() for t in lazy(v)] + ([] if self._loaded else lazy(nn.state.get_parameters(self)))
     # with the weights still to read: their memory now, their values after
     if self._pending_load: _realize_later(todo, self._pending_load)
-    else: Tensor.realize(*todo)
+    elif todo: Tensor.realize(*todo)
     self._states_ready = True
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp=0, part:int|None=None) -> Tensor:
