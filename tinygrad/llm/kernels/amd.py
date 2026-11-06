@@ -1304,6 +1304,23 @@ def f32t_gemm(x:Tensor, wt:Tensor) -> Tensor|None:
   fxn = functools.partial(_q8_gemm_kernel, token_tile=64, ggml_type=F32T, rdna4=False, block_n=64)
   return Tensor.custom_kernel(out, wt, x.half().contiguous(), fxn=fxn)[0]
 
+def f16t_gemm(x:Tensor, wt:Tensor) -> Tensor|None:
+  """
+  x (R, K) @ wt (K, N) (a transposed float weight) on the tensor cores, the rows whole on every device (f32t_gemm's: split over them): the rows
+  of batched decoding (a few hundred), padded to tiles of 32. (R, N) float. None: not those shapes
+  """
+  if x.ndim != 2 or not isinstance(R:=x.shape[0], int) or not 32 <= R <= getenv("F16T_ROWS", 1024) or not amd_custom_kernels_supported(x.device) or \
+     _wmma_rdna4(x.device): return None
+  K, N = int(wt.shape[0]), int(wt.shape[1])
+  if (isinstance(x.device, tuple) and x.uop.axis is not None) or (isinstance(wt.device, tuple) and wt.uop.axis is not None) or N % 64 or K % 32 \
+     or not getenv("F16T_GEMM", 1): return None
+  P = round_up(R, 32)
+  xp = x.half()
+  if P != R: xp = xp.pad(((0, P - R), None))
+  out = Tensor.empty(P, N, dtype=dtypes.float32, device=x.device)
+  fxn = functools.partial(_q8_gemm_kernel, token_tile=32, ggml_type=F32T, rdna4=False, block_n=64)
+  return Tensor.custom_kernel(out, wt, xp.contiguous(), fxn=fxn)[0][:R]
+
 def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False, half_out:bool=False) -> Tensor:
   assert layer.ggml_type in QUANT_SIZES
   tokens = int(x.numel()) // layer.in_features
@@ -4256,8 +4273,10 @@ def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, sca
   B, H, DK = cast(tuple[int, int, int], q.shape)
   DV = (int(cache.shape[-1]) * 32 // 9 if cache.dtype == dtypes.uint32 else int(cache.shape[-1])) - DK
   # (many rows (a prefill's): a workgroup of a wave a row, all its keys (enough workgroups, its queries loaded once, no combining))
-  parts = parts or (getenv("QSA_PARTS_ROWS", 1) if B > 64 else 8)
-  waves = waves or (getenv("QSA_WAVES_ROWS", 1) if B > 64 else 4)
+  # (the rows of batched decoding (a few hundred): their keys split over parts and waves, a workgroup a row alone is too few for the GPU)
+  many = B > getenv("QSA_ROWS_MANY", 256)
+  parts = parts or (getenv("QSA_PARTS_ROWS", 1) if many else 8)
+  waves = waves or (getenv("QSA_WAVES_ROWS", 1) if many else 4)
   axis = q.uop.axis
   partial = Tensor.empty(B, H, parts, DV, dtype=dtypes.float32, device=q.device, axis=axis)
   stats = Tensor.empty(B, H, parts, 2, dtype=dtypes.float32, device=q.device, axis=axis)

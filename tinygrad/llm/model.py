@@ -18,7 +18,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
   kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, DEC_LANE, \
   flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, after_kernel, \
-  host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
+  host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, f16t_gemm, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes, _disk_location
 from tinygrad.uop.ops import resolve, Ops, AxisType, KernelInfo
@@ -1518,6 +1518,8 @@ class QSAIndexer:
   def _proj(lin:Linear, x:Tensor) -> Tensor:
     """the projections (float weights) of many rows on the tensor cores: half copies of the input and the weight, a float accumulator"""
     if lin.ggml_type is not None or not isinstance(x.shape[0], int) or x.shape[0] < 32 or x.ndim != 2: return lin(x)
+    # (its weight stored transposed (_derive_weights): the gemm of the rows (a hundred or more of batched decoding), the generic matmul slower)
+    if (wt:=getattr(lin, "weight_t", None)) is not None and (r:=f16t_gemm(x, wt)) is not None: return r
     return x.half().contiguous().matmul(lin.weight.half().T, dtype=dtypes.float).contiguous()
 
   def scores(self, x:Tensor, start_pos:int|UOp, T:int|UOp, freqs:Tensor) -> tuple[Tensor, int|UOp]:
@@ -4955,6 +4957,7 @@ class Transformer:
     # outputs the fast axis), the Linear's a view of it: skinny_matmul reads every input's weights of all the outputs at once
     blocks = self.blk + ([self.mtp] if hasattr(self, "mtp") else [])
     lins = [l for b in blocks for l in (getattr(b, "ffn_gate_inp", None), getattr(getattr(b, "indexer", None), "proj", None),
+                                        *(getattr(getattr(b, "indexer", None), p, None) for p in ("q_proj", "k_proj")),
                                         *(getattr(getattr(b, h, None), "inject", None) for h in ("hc_attn", "hc_ffn")))
             if isinstance(l, Linear) and l.ggml_type is None and l.weight.dtype in (dtypes.float32, dtypes.half) and l.weight.ndim == 2 and
             getattr(l, "bias", None) is None and not hasattr(l, "weight_t") and amd_custom_kernels_supported(l.weight.device) and getenv("SKINNY", 1)]
