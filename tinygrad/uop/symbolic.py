@@ -50,12 +50,13 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
   #   q == b//div     -> b*mul              (full recombine)
   #   q == (b//div)%d -> (b%(div*d))*mul    (partial recombine into a wider mod, needs d>0)
   terms = list(x.split_uop(Ops.ADD))
-  for i,u in enumerate(terms):
-    mod, mul = u.pop_const(Ops.MUL)
+  # fast reject: most ADDs have no MOD or MOD*c term, skip the pop_consts
+  if not any(t.op is Ops.MOD or (t.op is Ops.MUL and t.src[0].op is Ops.MOD and t.src[1].op is Ops.CONST) for t in terms): return None
+  split = [t.pop_const(Ops.MUL) for t in terms]
+  for i,(mod,mul) in enumerate(split):
     if mod.op is not Ops.MOD or mod.src[1].op is not Ops.CONST: continue
     base, div = mod.src[0], mod.src[1].val
-    for j,v in enumerate(terms):
-      q, scale = v.pop_const(Ops.MUL)
+    for j,(q,scale) in enumerate(split):
       if i == j or scale != div*mul: continue
       rest = [t for k,t in enumerate(terms) if k not in (i,j)]
       if (b:=_quotient_base(q, base, div)) is not None: return (b*mul).usum(*rest)
