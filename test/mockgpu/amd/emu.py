@@ -1746,7 +1746,7 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|N
     sink = _get_handler(inst)(inst, ctx)
     base, mask = ctx.canonical_mask(inst_bytes)
     name = f"{_op_name(inst).lower()}_{base.to_bytes(len(inst_bytes), 'little').hex()}"
-    call = lower_body(sink, name)
+    call = lower_body(UOp.sink(sink, *(ctx.inst_word(i) for i in range(inst.size()//4))), name)
     used = UOp.sink(call, ctx.branch_cond).toposort()
     ret = call, ctx.branch_cond, {p:index for index,p in ctx.sgpr_reads.items() if p in used}
     entries.append((base, mask, ret))
@@ -1980,7 +1980,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   ret = emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name, optimized=True))
   if RENDER:
     linear = graph_rewrite(ret, pm_render, name="render", enter_calls=True)
-    if VIZ: graph_rewrite(render, PatternMatcher([]), name="View Rendered Graph")
+    if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View Rendered Graph")
     assert len(linear.src) == len(insts), f"{len(linear.src)} != {len(insts)}"
     for (pc, inst), x in zip(insts.items(), linear.src):
       out = x.arg if x.op is Ops.BINARY else b"".join(y.arg for y in x.src)
