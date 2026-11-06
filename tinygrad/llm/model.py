@@ -633,7 +633,7 @@ class Transformer:
                   kv.get(f'{arch}.hyper_connection.epsilon', 0.0)) if f'{arch}.hyper_connection.count' in kv else None
     if hc is not None: state_dict = {k.replace('.hc_attn_', '.hc_attn.').replace('.hc_ffn_', '.hc_ffn.'):v for k,v in state_dict.items()}
 
-    kpool = kv.get(f'{arch}.attention.indexer.block_size' if arch == 'minimax-m3' else f'{arch}.attention.indexer.kpool', int(arch == 'glm-dsa'))
+    kpool = 1 if arch == 'glm-dsa' else kv.get(f'{arch}.attention.indexer.block_size' if arch == 'minimax-m3' else f'{arch}.attention.indexer.kpool')
     indexer = IndexerConfig(kv[f'{arch}.attention.indexer.head_count'], kv[f'{arch}.attention.indexer.key_length'],
                             kv[f'{arch}.attention.indexer.top_k'], kpool,
                             kv.get(f'{arch}.attention.layer_norm_epsilon') or kv[f'{arch}.attention.layer_norm_rms_epsilon']) if kpool else None
@@ -712,9 +712,8 @@ class Transformer:
       swiglu_up_bias=1.0 if swiglu_oai else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer,
-      # without indexer.types, as llama.cpp: GLM-5.2+ (1M context) runs the indexer on blocks 0, 1, 2, 6, 10, ..., the others reuse the previous top-k
-      indexer_shared=tuple(not full for full in kv[f'{arch}.attention.indexer.types']) if f'{arch}.attention.indexer.types' in kv else
-        tuple(i > 2 and i % 4 != 2 for i in range(num_blocks)) if arch == 'glm-dsa' and kv[f'{arch}.context_length'] >= 1048576 else (),
+      # as llama.cpp: GLM-5.2+ runs the indexer on blocks 0-2 and every 4th after (6, 10, ..), the rest reuse its top-k
+      indexer_shared=tuple(i > 2 and i % 4 != 2 for i in range(num_blocks)) if arch == 'glm-dsa' else (),
       expert_latent_dim=kv.get(f'{arch}.expert_latent_length', 0), attn_res_block_size=kv.get(f'{arch}.attn_res.block_size', 0),
       situ=(kv[f'{arch}.activation.situ_beta'], kv[f'{arch}.activation.situ_linear_beta']) if f'{arch}.activation.situ_beta' in kv else None)
     model = Transformer(config)
