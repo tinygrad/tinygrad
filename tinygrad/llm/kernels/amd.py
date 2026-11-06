@@ -6,7 +6,7 @@ from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import prod, getenv, round_up, unwrap
-from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
+from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve, CustomInfo
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.renderer import Estimates
 
@@ -55,13 +55,18 @@ def _wmma_rdna4(device:str|tuple[str, ...]) -> bool:
   if isinstance(device, tuple): device = device[0]
   with Context(ALLOW_DEVICE_USAGE=1): return getattr(Device[device], "target")[0] == 12
 
+def _cfn(inline:bool, src:tuple[UOp, ...], arg:tuple[str, DType]) -> UOp:
+  """a call of inline C (the old CUSTOM (a statement, or a value in a variable) and CUSTOMI (inline=True: an expression)): arg (format, dtype)"""
+  fmt, dt = arg
+  return UOp.custom_function(fmt, shape=src[0].shape if src and dt != dtypes.void else (), dtype=dt).call(*src, aux=CustomInfo(inline=inline))
+
 def _lane_xor(val:UOp, mask:int) -> UOp:
   """the float of lane ^ mask (wave32): DPP within rows of 16 lanes, permlanex16 across them (RDNA, a few cycles), else a ds_swizzle"""
   if getenv("LANE_DPP", 1) and 0 < mask < 16: op = f"__builtin_amdgcn_update_dpp(0, __builtin_bit_cast(int, {{0}}), {0x160 | mask}, 15, 15, false)"
   elif getenv("LANE_DPP", 1) and mask == 16:
     op = "__builtin_amdgcn_permlanex16(0, __builtin_bit_cast(int, {0}), 0x76543210, 0xfedcba98, false, false)"
   else: op = f"__builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | mask<<10})"
-  return UOp(Ops.CUSTOM, src=(val,), arg=(f"__builtin_bit_cast(float, {op})", dtypes.float))
+  return _cfn(False, src=(val,), arg=(f"__builtin_bit_cast(float, {op})", dtypes.float))
 
 def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
@@ -172,20 +177,20 @@ class Linear(nn.Linear):
     return super().__call__(x)
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
-  return UOp(Ops.CUSTOMI, src=(a, b, c), arg=("__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)", dtypes.int32))
+  return _cfn(True, src=(a, b, c), arg=("__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)", dtypes.int32))
 
 def _amd_sudot4u(a:UOp, b:UOp, c:UOp) -> UOp:  # c + the dot of a's 4 signed bytes with b's 4 unsigned ones
-  return UOp(Ops.CUSTOMI, src=(a, b, c), arg=("__builtin_amdgcn_sudot4(true, {}, false, {}, {}, false)", dtypes.int32))
+  return _cfn(True, src=(a, b, c), arg=("__builtin_amdgcn_sudot4(true, {}, false, {}, {}, false)", dtypes.int32))
 
 _H2 = "_Float16 __attribute__((ext_vector_type(2)))"
 def _amd_pkrtz(a:UOp, b:UOp) -> UOp:  # two floats to a half2 (its bits)
-  return UOp(Ops.CUSTOMI, src=(a, b), arg=("__builtin_bit_cast(unsigned int, __builtin_amdgcn_cvt_pkrtz({}, {}))", dtypes.uint32))
+  return _cfn(True, src=(a, b), arg=("__builtin_bit_cast(unsigned int, __builtin_amdgcn_cvt_pkrtz({}, {}))", dtypes.uint32))
 def _amd_fdot2_less1152(a:UOp, b:UOp, c:UOp) -> UOp:  # c + the dot of the half2s a - 1152 and b (in float)
-  return UOp(Ops.CUSTOMI, src=(a, b, c), arg=(f"__builtin_amdgcn_fdot2(__builtin_bit_cast({_H2}, {{0}}) - ({_H2})((_Float16)1152.0f), "
+  return _cfn(True, src=(a, b, c), arg=(f"__builtin_amdgcn_fdot2(__builtin_bit_cast({_H2}, {{0}}) - ({_H2})((_Float16)1152.0f), "
                                              f"__builtin_bit_cast({_H2}, {{1}}), {{2}}, false)", dtypes.float))
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
-  return UOp(Ops.CUSTOMI, src=tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), arg=("__builtin_amdgcn_perm({}, {}, {})", dtypes.uint32))
+  return _cfn(True, src=tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), arg=("__builtin_amdgcn_perm({}, {}, {})", dtypes.uint32))
 
 def _amd_load(ptr:UOp, lanes:int|None=None, stream:bool=False) -> UOp:
   assert ptr.op is Ops.INDEX
@@ -268,12 +273,12 @@ def _q8_narrow_stores(value:UOp, q:UOp, scale:UOp, xsum:UOp, sq:UOp|None, token:
   # a lane's value of a group of 32 (a wave): its words, scale, sums (and squares)
   # Quantize each input once, then pack four neighboring lanes into one word.
   # Keep divisions intact: reciprocal multiplication can move half-precision inputs across rounding ties.
-  d = UOp(Ops.CUSTOM, src=(warp_reduce(value.abs(), maximum=True, full_wave=True),), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
-  rounded = UOp(Ops.CUSTOM, src=(value, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float))
+  d = _cfn(False, src=(warp_reduce(value.abs(), maximum=True, full_wave=True),), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
+  rounded = _cfn(False, src=(value, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float))
   quant = rounded.clip(-127, 127).cast(dtypes.int8)
   word = quant.cast(dtypes.uint8).cast(dtypes.uint32) << ((lane%4)*8).cast(dtypes.uint32)
   for offset in (1, 2):
-    word |= UOp(Ops.CUSTOM, src=(word,), arg=(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f | offset<<10})", dtypes.uint32))
+    word |= _cfn(False, src=(word,), arg=(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f | offset<<10})", dtypes.uint32))
   stores:list[UOp] = [q[token, group, (lane//4).valid((lane%4).eq(0))].store(word),
             scale[token, group.valid(lane.eq(0))].store(d),
             xsum[token, group, (lane//16).valid((lane%16).eq(0))].store(warp_reduce(quant.float()))]
@@ -295,8 +300,8 @@ def _q8_wide_stores(values:list[UOp], q:UOp, scale:UOp, xsum:UOp, sq:UOp|None, t
   # a lane's 8 neighboring values of a group of 32 (four lanes a group, sub the lane of the four): their words, scale, sums (and squares)
   mx = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
   for off in (1, 2): mx = mx.maximum(_lane_xor(mx, off))
-  d = UOp(Ops.CUSTOM, src=(mx,), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
-  quants = [UOp(Ops.CUSTOM, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float)).clip(-127, 127).cast(dtypes.int8) for v in values]
+  d = _cfn(False, src=(mx,), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
+  quants = [_cfn(False, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float)).clip(-127, 127).cast(dtypes.int8) for v in values]
   words = [functools.reduce(lambda a, b: a | b, [quants[w*4+i].cast(dtypes.uint8).cast(dtypes.uint32) << (8*i) for i in range(4)]) for w in range(2)]
   qs = functools.reduce(lambda a, b: a + b, [qv.float() for qv in quants])
   qs = qs + _lane_xor(qs, 1)
@@ -423,7 +428,7 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
                                 for t, tok in enumerate(tokens) for r in range(rep)]).end(s))
     totals = [acc[i].load() for i in range(rep*len(tokens))]
   for offset in (16, 8, 4, 2, 1)[(32//lanes).bit_length()-1:]:
-    totals = [total + UOp(Ops.CUSTOM, src=(total,), arg=
+    totals = [total + _cfn(False, src=(total,), arg=
       (f"__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | offset<<10}))", dtypes.float))
       for total in totals]
   if chunks > 1:
@@ -657,7 +662,7 @@ def _q8_decode_f16_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features
       for j, sel in enumerate((0x04010400, 0x04030402)):
         pair = _amd_byte_perm(UOp.const(0x64646464, dtypes.uint32), word, UOp.const(sel, dtypes.uint32))
         k = 4*i + 2*j
-        acc = UOp(Ops.CUSTOMI, src=(pair, packed(xs[k], xs[k+1]), acc), arg=(f"__builtin_amdgcn_fdot2(__builtin_bit_cast({H2}, {{0}}) - "
+        acc = _cfn(True, src=(pair, packed(xs[k], xs[k+1]), acc), arg=(f"__builtin_amdgcn_fdot2(__builtin_bit_cast({H2}, {{0}}) - "
                   f"({H2})((_Float16)1152.0f), __builtin_bit_cast({H2}, {{1}}), {{2}}, false)", dtypes.float))
     return acc * _half(raw[base])
   multi = int(out.shape[0]) if 1 < out.shape[0] <= DECODE_MULTI else 1
@@ -869,8 +874,8 @@ def _q8k_quantize_kernel(q:UOp, scale:UOp, x:UOp, tokens:int, in_features:int) -
   token, block = token_block // blocks, token_block % blocks
   values = [x.reshape(tokens, in_features)[token, block*256 + lane*8 + i].load().float() for i in range(8)]
   local = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
-  d = UOp(Ops.CUSTOM, src=(warp_reduce(local, maximum=True, full_wave=True),), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
-  quants = [UOp(Ops.CUSTOM, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float)).clip(-127, 127).cast(dtypes.int8) for v in values]
+  d = _cfn(False, src=(warp_reduce(local, maximum=True, full_wave=True),), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
+  quants = [_cfn(False, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float)).clip(-127, 127).cast(dtypes.int8) for v in values]
   words = [functools.reduce(lambda a, b: a | b, [quants[w*4+i].cast(dtypes.uint8).cast(dtypes.uint32) << (8*i) for i in range(4)]) for w in range(2)]
   group = block*8 + lane//4
   stores = [q[token, group, (lane%4)*2 + w].store(words[w]) for w in range(2)] + [scale[token, block.valid(lane.eq(0))].store(d)]
@@ -955,7 +960,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
       dreg = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
       dreg = dreg.after(dreg.store(dot))
       prev = ints[o][t].after(sb)
-      sums.append(ints[o][t].store(UOp.stack(*[UOp(Ops.CUSTOMI, src=(dreg[j].load(), sub, prev[j].load()), arg=(MAD_I24, dtypes.int32))
+      sums.append(ints[o][t].store(UOp.stack(*[_cfn(True, src=(dreg[j].load(), sub, prev[j].load()), arg=(MAD_I24, dtypes.int32))
                                               for j in range(8)])))
   done = UOp.group(*sums).end(sb)
   new = [[UOp.stack(*(accs[o][t].after(b)[j].load() + ints[o][t].after(done)[j].load().float() *
@@ -1484,7 +1489,7 @@ def _host_allreduce_kernel(out:UOp, x:UOp, mbox:UOp, counter:UOp, N:int, n:int, 
     pr = UOp.alloc((1,), dtypes.uint64, addrspace=AddrSpace.REG)
     ploop = UOp.range(UOp(Ops.NOOP).after(after), next(UOp.unique_num), dtype=dtypes.void)
     pwait = on & stale(pr.after(pr.after(ploop).store(UOp.stack(mbox.after(ploop)[probe.valid(on)].load())))[0].load())
-    ppause = UOp(Ops.CUSTOM, src=(pwait,), arg=("__builtin_amdgcn_s_sleep(1);", dtypes.void))
+    ppause = _cfn(False, src=(pwait,), arg=("__builtin_amdgcn_s_sleep(1);", dtypes.void))
     seen = UOp.alloc((probes,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
     seen = seen.after(seen[t.valid(t < probes)].store(pr.after(ppause.backedge(ploop, pwait))[0].load().cast(dtypes.uint32)).barrier())
     loop = UOp.range(UOp(Ops.NOOP).after(after, seen), next(UOp.unique_num), dtype=dtypes.void)
@@ -1497,7 +1502,7 @@ def _host_allreduce_kernel(out:UOp, x:UOp, mbox:UOp, counter:UOp, N:int, n:int, 
     cnt = cnt.after(cnt.store(UOp.const(0, dtypes.int32)))
     c = cnt.after(loop)
     waiting = waiting & (cnt.after(c.store(c[0].load() + 1))[0].load() < getenv("AR_POLL_LIMIT", 1 << 26))
-    pause = UOp(Ops.CUSTOM, src=(waiting,), arg=("__builtin_amdgcn_s_sleep(1);", dtypes.void))
+    pause = _cfn(False, src=(waiting,), arg=("__builtin_amdgcn_s_sleep(1);", dtypes.void))
     words = words.after(pause.backedge(loop, waiting))
     return [(words[i].load() & 0xFFFFFFFF).cast(dtypes.uint32).bitcast(dtypes.float32) for i in range(len(slots))]
   write = mbox[slot(me)].store(word(val))
@@ -1590,7 +1595,7 @@ def p2p_ar_shape(n:int) -> tuple[int, int]|None:
     if n % (T*EP) == 0 and n // (T*EP) <= P2P_AR_MAXG: return T, EP
   return None
 
-def _sys(fmt:str, dtype:DType, *src:UOp) -> UOp: return UOp(Ops.CUSTOM, src=src, arg=(fmt, dtype))
+def _sys(fmt:str, dtype:DType, *src:UOp) -> UOp: return _cfn(False, src=src, arg=(fmt, dtype))
 
 _ATOMIC_LOAD = "__hip_atomic_load({0}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM)"
 
@@ -1673,7 +1678,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     got = [words.after(loaded)[i].load() for i in range(len(slots))]
     stale = functools.reduce(lambda a,b: a | b, [w & fresh(g).logical_not() for g, w in zip(got, waits)])
     waiting = stale & (_sys("__builtin_readsteadycounter()", dtypes.uint64, stale) < deadline)
-    words = words.after(UOp(Ops.CUSTOM, src=(waiting,), arg=("", dtypes.void)).backedge(loop, waiting))
+    words = words.after(_cfn(False, src=(waiting,), arg=("", dtypes.void)).backedge(loop, waiting))
     return [words[i].load() for i in range(len(slots))]
   # (packed: a device's own values as the others get them, the sums don't depend on which device sums them)
   if pack is not None: vals = [value(word(v)) for v in vals]
@@ -1811,7 +1816,7 @@ def _flag_poll(wg:UOp, t:UOp, epoch:UOp, me:UOp, flags_mb:tuple[UOp, ...], N:int
   got = word.after(loaded)[0].load()
   stale = (t < N) & s_t.ne(me) & got.ne(epoch)
   # Never consume stale payloads on timeout. A missing peer is reported by the host queue's wait timeout.
-  word = word.after(UOp(Ops.CUSTOM, src=(stale,), arg=("", dtypes.void)).backedge(loop, stale))
+  word = word.after(_cfn(False, src=(stale,), arg=("", dtypes.void)).backedge(loop, stale))
   return UOp.group(word[0].load()).barrier()
 
 @functools.cache
@@ -2069,7 +2074,7 @@ def _ring_spin(after:UOp, loads:Callable[[UOp], list[UOp]], stale:Callable[[list
   st = stale(got)
   if (dl:=RING_DEADLINE[0]) is not None: st = st & (_sys("__builtin_readsteadycounter()", dtypes.uint64, st) < dl)
   s = _sys(f"({{0}} ? (__builtin_amdgcn_s_sleep({getenv('RING_SLEEP', 16)}), true) : false)", dtypes.bool, st)
-  reg = reg.after(UOp(Ops.CUSTOM, src=(s,), arg=("", dtypes.void)).backedge(loop, s))
+  reg = reg.after(_cfn(False, src=(s,), arg=("", dtypes.void)).backedge(loop, s))
   vals = [reg[i].load() for i in range(len(ld))]
   return vals, stale(vals)
 
@@ -2383,10 +2388,10 @@ def _q8_pack_values(values:list[UOp], recip:bool=False) -> tuple[list[UOp], UOp]
   # (recip: times the scale's reciprocal, not divided by it: a value at a half can round the other way)
   mx = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
   for off in (1, 2): mx = mx.maximum(_lane_xor(mx, off))
-  d = UOp(Ops.CUSTOM, src=(mx,), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
-  rd = UOp(Ops.CUSTOM, src=(d,), arg=("(1.0f/{0})", dtypes.float)) if recip else None
-  quants = [(UOp(Ops.CUSTOM, src=(v, rd), arg=("__builtin_nearbyintf({0}*{1})", dtypes.float)) if rd is not None else
-             UOp(Ops.CUSTOM, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float))).clip(-127, 127).cast(dtypes.int8) for v in values]
+  d = _cfn(False, src=(mx,), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
+  rd = _cfn(False, src=(d,), arg=("(1.0f/{0})", dtypes.float)) if recip else None
+  quants = [(_cfn(False, src=(v, rd), arg=("__builtin_nearbyintf({0}*{1})", dtypes.float)) if rd is not None else
+             _cfn(False, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float))).clip(-127, 127).cast(dtypes.int8) for v in values]
   words = [functools.reduce(lambda a, b: a | b, [quants[w*4+i].cast(dtypes.uint8).cast(dtypes.uint32) << (8*i) for i in range(4)]) for w in range(2)]
   return words, d
 
@@ -3592,8 +3597,8 @@ def _add_rows_q8_kernel(y:UOp, acc:UOp, *add:UOp, add_rows:tuple[int, ...]=()) -
   else:
     mx = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in vals])
     for off in (1, 2): mx = mx.maximum(_lane_xor(mx, off))
-    d = UOp(Ops.CUSTOM, src=(mx,), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
-    quants = [UOp(Ops.CUSTOM, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float)).clip(-127, 127).cast(dtypes.int8) for v in vals]
+    d = _cfn(False, src=(mx,), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
+    quants = [_cfn(False, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float)).clip(-127, 127).cast(dtypes.int8) for v in vals]
     words = [functools.reduce(lambda a, b: a | b, [quants[w*4+i].cast(dtypes.uint8).cast(dtypes.uint32) << (8*i) for i in range(4)])
              for w in range(2)]
     stores = [y[token, group, sub*2 + w].store(words[w]) for w in range(2)]
@@ -4560,10 +4565,10 @@ def _ghc_decode_mix_kernel(mixed:UOp, inj:UOp, mq:UOp, md:UOp, ms:UOp, lo:UOp, r
     tok, group, valid = (tg//NB).minimum(T-1), tg % NB, tg < T*NB
     z = lo[tok, group*32+lane].load()*(1/count)
     value = z*_sigmoid(z)
-    d = UOp(Ops.CUSTOM, src=(warp_reduce(value.abs(), maximum=True, full_wave=True),), arg=("({0}/127.0f)", dtypes.float32)).maximum(1e-8)
-    quant = UOp(Ops.CUSTOM, src=(value, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float32)).clip(-127, 127).cast(dtypes.int8)
+    d = _cfn(False, src=(warp_reduce(value.abs(), maximum=True, full_wave=True),), arg=("({0}/127.0f)", dtypes.float32)).maximum(1e-8)
+    quant = _cfn(False, src=(value, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float32)).clip(-127, 127).cast(dtypes.int8)
     word = quant.cast(dtypes.uint8).cast(dtypes.uint32) << ((lane%4)*8).cast(dtypes.uint32)
-    for off in (1, 2): word |= UOp(Ops.CUSTOM, src=(word,), arg=(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f | off<<10})", dtypes.uint32))
+    for off in (1, 2): word |= _cfn(False, src=(word,), arg=(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f | off<<10})", dtypes.uint32))
     prep.extend((q[tok, (lane//4).valid(valid & (lane%4).eq(0)), group].store(word), scales[tok, group.valid(valid & lane.eq(0))].store(d)))
   ready = UOp.group(*prep).barrier()
   q, scales, raw = q.after(ready), scales.after(ready), raw.after(ready)
@@ -5859,12 +5864,12 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, po
 DECODE_THREADS = 1024
 
 # a ballot is across the wave: a CUSTOM (a statement of its own), not inlined where it is used (in the branch of a gated store)
-def _ballot(pred:UOp) -> UOp: return UOp(Ops.CUSTOM, src=(pred,), arg=("__builtin_amdgcn_ballot_w32({0})", dtypes.uint32))
-def _popcount(x:UOp) -> UOp: return UOp(Ops.CUSTOMI, src=(x,), arg=("__builtin_popcount({})", dtypes.int32))
+def _ballot(pred:UOp) -> UOp: return _cfn(False, src=(pred,), arg=("__builtin_amdgcn_ballot_w32({0})", dtypes.uint32))
+def _popcount(x:UOp) -> UOp: return _cfn(True, src=(x,), arg=("__builtin_popcount({})", dtypes.int32))
 # across the wave: CUSTOMs (statements of their own, not inlined in the branch of a gated store)
 def _bpermute(x:UOp, src_lane:UOp) -> UOp:
-  return UOp(Ops.CUSTOM, src=(x, src_lane), arg=("__builtin_amdgcn_ds_bpermute((int)({1})*4, (int)({0}))", dtypes.int32))
-def _readlane(x:UOp, lane:int) -> UOp: return UOp(Ops.CUSTOM, src=(x,), arg=(f"__builtin_amdgcn_readlane((int)({{0}}), {lane})", dtypes.int32))
+  return _cfn(False, src=(x, src_lane), arg=("__builtin_amdgcn_ds_bpermute((int)({1})*4, (int)({0}))", dtypes.int32))
+def _readlane(x:UOp, lane:int) -> UOp: return _cfn(False, src=(x,), arg=(f"__builtin_amdgcn_readlane((int)({{0}}), {lane})", dtypes.int32))
 def _wave_scan(x:UOp, lane:UOp) -> UOp:
   """the inclusive prefix sums of x (int32) over the lanes of a wave"""
   for d in (1, 2, 4, 8, 16): x = x + (lane >= d).where(_bpermute(x, (lane - d).maximum(0)), UOp.const(0, dtypes.int32))

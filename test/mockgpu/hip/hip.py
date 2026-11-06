@@ -20,7 +20,7 @@ def hipModuleLoadData(module, image):
   elf = libc.Elf64_Ehdr.from_address(image) # the section headers end the elf
   gfx1100 = SimpleNamespace(iface=SimpleNamespace(props={"lds_size_in_kb": 64}), target=(11, 0, 0))
   lib = ctypes.string_at(image, elf.e_shoff + elf.e_shnum * elf.e_shentsize)
-  data, img = _amd_program_image(gfx1100, lib)
+  data, img = _amd_program_image(lib, gfx1100.target, gfx1100.iface.props["lds_size_in_kb"])
   text = next(sh.header for sh in elf_loader(lib)[1] if sh.name == ".text")
   buf = ctypes.create_string_buffer(img, len(img))
   programs[ctypes.addressof(buf)] = (buf, data, text.sh_addr + text.sh_size)

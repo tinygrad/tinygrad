@@ -713,7 +713,7 @@ def _gather_units(data:Tensor, E:int, rows:int, slices:int, units:list[int], by_
   return Tensor(UOp.from_buffer(out_buf, dtypes.uint8, device)).reshape(1, -1)
 
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
-               shard_map:dict[str, int]|None=None, units:dict[str, tuple[int, list[list[int]]]]|None=None,
+               shard_map:dict[str, int]|None=None, repeats:dict[str, int]|None=None, units:dict[str, tuple[int, list[list[int]]]]|None=None,
                pads:dict[str, int]|None=None, fuse:dict[str, str]|None=None, defer:list[Callable[[], None]]|None=None,
                row_sel:dict[str, tuple[int, list[tuple[int, int]]]]|None=None) -> dict[str, Tensor]:
   """
@@ -725,9 +725,14 @@ def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:t
   defer: the bytes are read later, by the function added to it (if loaded straight from the file)
   row_sel: a tensor (its entry's shape the loaded one: devices*count rows, sharded on axis 0) is every device's rows (start, count) of the file's
   tensor of src_rows rows: (src_rows, [(start, count) of every device])
+  repeats: a tensor first cut into len(devices)//repeats row blocks that are each repeated `repeats` times
   """
   pads, fuse = pads or {}, fuse or {}
   n, packed, shard_map, units, shapes = len(devices), {}, shard_map or {}, units or {}, {}
+  for name, r in (repeats or {}).items():
+    data, shape, typ = entries[name]
+    if n % r or shape[0] % (n//r): raise ValueError(f"{name}: can't repeat {shape} {r} times over {n} devices")
+    entries[name] = (data.to("CPU").reshape(n//r, -1).repeat_interleave(r, 0).flatten(), (shape[0]*r, *shape[1:]), typ)
   for name, (_, shape, _) in entries.items():
     if name in units: shapes[name] = (n*len(units[name][1][0]), shape[1] // units[name][0], shape[2]) if not name.endswith("down_exps.weight") else \
       (n*len(units[name][1][0]), shape[1], shape[2] // units[name][0])

@@ -301,7 +301,7 @@ class RMSNorm:
     x = x.float().rmsnorm(eps=self.eps).cast(x.dtype)
     return x if self.weight is None else x * self.weight
 
-from tinygrad.uop.ops import UOp, KernelInfo, Ops, AxisType
+from tinygrad.uop.ops import UOp, KernelInfo, Ops, AxisType, CustomInfo
 def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
   weight, idx = (a for a in call.src[1:] if (b:=a.unsharded_base).op is not Ops.ALLOC or b.arg.bind_on_realize)
   is_vocab_sharded = isinstance(weight.device, tuple) and weight.axis == 0
@@ -356,8 +356,8 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"
     elif device == "AMD": atomic_arg = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
     else: raise NotImplementedError(f"no atomics for device {device}")
-    atomic = UOp(Ops.CUSTOM, src=(grad_weight.index(local_token_id, j_idx), grad_val), arg=(atomic_arg, dtypes.void))
-    return atomic.end(i, j_outer, j_inner).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
+    atomic = UOp.custom_function(atomic_arg).call(grad_weight.index(local_token_id, j_idx), grad_val, aux=CustomInfo())
+    return grad_weight.flatten().after(atomic.end(i, j_outer, j_inner)).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
 
   grad_weight_uop = grad_weight_uop.custom_kernel(grad_emb, idx, fxn=_embedding_bwd_kernel)[0]
 

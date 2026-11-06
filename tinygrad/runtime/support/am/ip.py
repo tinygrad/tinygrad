@@ -560,12 +560,12 @@ class AM_IH(AM_IP):
 class AM_SDMA(AM_IP):
   def init_sw(self):
     self.sdma_reginst, self.sdma_name = [], "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
-    # SDMA 7 (RDNA4) has two engines, each with its own queue: a copy on each runs in parallel (a direction each)
-    two = self.adev.ip_ver[am.SDMA0_HWIP] >= (7,0,0) and hasattr(self.adev, "regSDMA1_MCU_CNTL") and getenv("AM_SDMA_ENGINES", 2) > 1
-    self.engines = 2 if two else 1
+    self.engines = sum(len(self.adev.regs_offset[hw].keys() - self.adev.harvested[hw]) for hw in (am.SDMA0_HWIP, am.SDMA1_HWIP))
+    # (AM_SDMA_ENGINES: at most this many. SDMA 6 (RDNA3) runs one by default: with two up, the next process' init fails (PSP/SMU timeouts))
+    self.engines = max(1, min(self.engines, getenv("AM_SDMA_ENGINES", 2 if self.adev.ip_ver[am.SDMA0_HWIP] >= (7,0,0) else 1)))
   def halt_engines(self):
     if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0):
-      for e in range(self.engines): self.adev.reg(f"regSDMA{e}_{self.sdma_name}_CNTL").update(halt=1)
+      for pipe in range(self.engines): self.adev.reg(f"regSDMA{pipe}_{self.sdma_name}_CNTL").update(halt=1)
   def init_hw(self):
     for pipe_id in range(16 if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else self.engines):
       pipe, inst = ("", pipe_id) if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else (str(pipe_id), 0)
@@ -589,9 +589,10 @@ class AM_SDMA(AM_IP):
           self.adev.reg(f"regDOORBELL0_CTRL_ENTRY_{entry}").write(**{f"bif_doorbell{entry}_range_size_entry": 20,
             f"bif_doorbell{entry}_range_offset_entry": (am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + (entry - 1) * 0xA) * 2})
           self.adev.soc.doorbell_enable(port=port, awid=awid, awaddr_31_28_value=awaddr, offset=offset, size=4, aid=aid_id)
-    # one range for the doorbells of all the engines (10 64-bit doorbells an engine, as amdgpu's sdma_doorbell_range of 20 dwords)
-    else: self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2,
-                                        size=4 if self.engines == 1 else 20 * self.engines)
+    else:
+      # (one range for the doorbells of all the engines: 10 64-bit doorbells an engine, as amdgpu's sdma_doorbell_range of 20 dwords)
+      self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2,
+                                    size=4 if self.engines == 1 else 20*self.engines)
 
   def fini_hw(self):
     for reg, inst in self.sdma_reginst:
@@ -601,7 +602,7 @@ class AM_SDMA(AM_IP):
       self.adev.reg(f"{reg}_DOORBELL_OFFSET").update(offset=0, inst=inst)
 
     if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0):
-      self.adev.regGRBM_SOFT_RESET.write(soft_reset_sdma0=1, **({'soft_reset_sdma1':1} if self.engines > 1 else {}))
+      self.adev.regGRBM_SOFT_RESET.write(**{f"soft_reset_sdma{pipe}":1 for pipe in range(self.engines)})
       time.sleep(0.01)
       self.adev.regGRBM_SOFT_RESET.write(0x0)
 
@@ -609,7 +610,6 @@ class AM_SDMA(AM_IP):
     if self.adev.ip_ver[am.SDMA0_HWIP] >= (5,0,0) and idx >= self.engines:
       raise RuntimeError(f"am {self.adev.devfmt}: sdma queue {idx} is not available")
 
-    # queue idx is the first queue of engine idx (one engine before SDMA 7: queue 0)
     pipe, queue = (idx // 4, idx % 4) if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else (idx, 0)
     reg, inst = ("regSDMA_GFX", pipe+queue*4) if self.adev.ip_ver[am.SDMA0_HWIP][:2] == (4,4) else (f"regSDMA{pipe}_QUEUE{queue}", 0)
     doorbell = am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + (pipe+queue*4) * 0xA

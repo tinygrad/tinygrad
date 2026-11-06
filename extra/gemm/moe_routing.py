@@ -1,7 +1,7 @@
 import functools, math, pathlib
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, CustomInfo
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 
@@ -98,8 +98,8 @@ def _ggather_bwd(gradient:UOp, kernel:UOp) -> tuple:
     g, m, j, jo, ji = _kv_ranges(Gk, M, Dk, _blk_for(Dk))
     row = idx.index(g, m).cast(dtypes.weakint)
     val = gout.index(g, m, j).load().cast(dtypes.float32)
-    atomic = UOp(Ops.CUSTOM, src=(gtab.index(g, row, j), val), arg=(atomic_str, dtypes.void))
-    return atomic.end(g, m, jo, ji).sink(arg=KernelInfo(name=f"ggather_bwd_{M}_{Dk}", opts_to_apply=()))
+    atomic = UOp.custom_function(atomic_str).call(gtab.index(g, row, j), val, aux=CustomInfo())
+    return gtab.flatten().after(atomic.end(g, m, jo, ji)).sink(arg=KernelInfo(name=f"ggather_bwd_{M}_{Dk}", opts_to_apply=()))
   grad_table = Tensor.custom_kernel(gt, go, Tensor(idx_u, device=dev), fxn=_bwd_kernel)[0]
   return (None, grad_table.cast(table_u.dtype).uop, None)
 

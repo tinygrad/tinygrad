@@ -241,7 +241,8 @@ def flatten_bufferize(x:UOp):
 pm_flatten_bufferize = PatternMatcher([(UPat(Ops.STAGE, name="x"), flatten_bufferize)])
 
 def is_noop_after_dep(x:UOp) -> bool:
-  return (x.op is Ops.NOOP and len(x.src) == 0) or (x.op is Ops.END and is_noop_after_dep(x.src[0]))
+  return (x.op is Ops.NOOP and len(x.src) == 0) or (x.op in (Ops.END, Ops.AFTER) and is_noop_after_dep(x.src[0]) and
+    all(s.op is Ops.RANGE for s in x.src[1:]))
 
 def remove_noop_afters(x:UOp) -> UOp|None:
   src = (x.src[0],) + tuple(s for s in x.src[1:] if not is_noop_after_dep(s))
@@ -289,6 +290,7 @@ def debuf(slot:int, buf:UOp):
 
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
   if after.addrspace == AddrSpace.LOCAL: return None
+  if after.addrspace is AddrSpace.ALU: raise RuntimeError("kernel boundary requires storage")
   buf = after.buf_uop
   # NOTE: this is bottom up, so we only add it once
   if buf not in ctx.map: ctx.map[buf] = after
