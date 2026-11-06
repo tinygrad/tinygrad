@@ -75,6 +75,9 @@ class Ops(FastEnum):
   # const.
   CONST = auto()
 
+  # CUSTOM is a CALL body used to output formatted strings into codegen
+  CUSTOM = auto()
+
   # INS is a machine instruction
   INS = auto()
 

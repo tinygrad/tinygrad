@@ -126,6 +126,9 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
     case Ops.CUSTOM_FUNCTION:
       # an external function states its return dtype in the arg
       return arg.dtype
+    case Ops.CUSTOM:
+      assert isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[1], DType), f"CUSTOM arg must be (str, DType), got {arg}"
+      return arg[1]
     case Ops.INS:
       # arg is (instruction, dtype, *registers), a queue command or an asm line is void
       assert isinstance(arg, tuple) and len(arg) >= 2 and isinstance(arg[1], DType), f"INS arg must be (instruction, DType, *registers), got {arg}"
@@ -349,7 +352,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         assert len(self.src[0].as_shape) <= 1
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
-      case Ops.CUSTOM_FUNCTION:
+      case Ops.CUSTOM | Ops.CUSTOM_FUNCTION:
         return self.src[0].as_shape if self.dtype != dtypes.void else None
       case Ops.PYLITERAL: return None
       case Ops.STAGE:
@@ -1206,17 +1209,23 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
     return UOp(Ops.CUSTOM_FUNCTION, src=shape_src+src, arg=CustomFunction(name, dtype))
 
-  def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
-           name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
+  @staticmethod
+  def custom(fmt:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, inline:bool=False) -> UOp:
+    shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
+    return UOp(Ops.CUSTOM, src=shape_src, arg=(fmt, dtype)).call(*src, inline=inline)
+
+  def call(self, *srcs:UOp, grad_fxn:Callable|None=None, name:str|None=None, precompile:bool=False, precompile_backward:bool=False,
+           inline:bool=False, aux:Any=None) -> UOp:
     """call a body with the given args: a plain CallInfo CALL. all inputs must be ready (buffers/params), this never
     creates ALLOCs: use call_with_outputs for calls that produce values"""
     assert self.op in OPAQUE_CALL_BODIES, f"cannot call a {self.op} body, use call_with_outputs for value-producing bodies"
+    assert self.op is Ops.CUSTOM or not inline, "inline is only allowed on CUSTOM calls"
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
     assert all(r.axis_type is AxisType.DEVICE for r in self.ranges), \
       f"ranges {self.ranges} are leaking out of the call in {self.render_uir()}"
     # an external C call is a CALL on a CUSTOM_FUNCTION body stating the (possibly void) return dtype, the callee
     # (a function pointer) in source, rendered as an indirect call
-    return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
+    return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, inline, aux))
 
   @staticmethod
   def call_with_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
@@ -1338,8 +1347,8 @@ class ProgramInfo:
                        tuple(sorted(_params, key=lambda p: p.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),
                        tuple(sorted(dedup(ins))), target)
 
-# the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), bulk stores, and function references
-OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION}
+# the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), bulk stores, custom source, and function references
+OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM, Ops.CUSTOM_FUNCTION}
 
 # the arg of CUSTOM_FUNCTION: an external function symbol and the dtype of the value it returns
 @dataclass(frozen=True)
@@ -1348,20 +1357,18 @@ class CustomFunction:
   dtype: DType = dtypes.void
 
 @dataclass(frozen=True)
-class CustomInfo: inline: bool = False
-
-@dataclass(frozen=True)
 class CallInfo:
   grad_fxn: Callable|None = None
   name: str|None = None
   precompile: bool = False
   precompile_backward: bool = False
+  inline: bool = False
   aux: Any = None
   # grad_fxn can't be pickled
-  def __reduce__(self): return (CallInfo, (None, self.name, self.precompile, self.precompile_backward, self.aux))
+  def __reduce__(self): return (CallInfo, (None, self.name, self.precompile, self.precompile_backward, self.inline, self.aux))
   def __repr__(self):
     gf = id(self.grad_fxn) if self.grad_fxn else None
-    return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward}, {self.aux})"
+    return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward}, {self.inline}, {self.aux})"
 
 # ******** ops in python ********
 
