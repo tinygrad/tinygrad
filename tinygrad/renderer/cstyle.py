@@ -2,7 +2,7 @@ from typing import Literal, Callable
 import math
 from collections import defaultdict, Counter
 from tinygrad.renderer import tc
-from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
+from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters, CustomInfo
 from tinygrad.uop.weak import commit_weak_consts
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_storage_scalar
@@ -67,7 +67,7 @@ base_rewrite = PatternMatcher([
 
   # call an external function by symbol: the CUSTOM_FUNCTION body names the callee, the srcs are the args and set the types
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
-   f.arg.name.format(*[ctx[y] for y in x.src[1:]]) if f.arg.fmt else
+   f.arg.name.format(*[ctx[y] for y in x.src[1:]]) if isinstance(x.arg.aux, CustomInfo) else
    f"(({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(map(ctx.render_type, x.src[1:]))}))({f.arg.name}))"
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])})" + (";" if x.dtype is dtypes.void else "")),
 
@@ -257,7 +257,7 @@ class CStyleLanguage(Renderer):
       if u.op in {Ops.ENDIF, Ops.END, Ops.BACKEDGE}: depth -= 1
       if (u.op is not Ops.CAST or u.max_numel() == 1) and ((u.op is Ops.CAST and u.src[0].op is Ops.CONST) or \
         u.op in {Ops.INDEX, Ops.SHRINK, Ops.REFPARAM} or \
-        (u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION and u.body.arg.inline) or \
+        (u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION and isinstance(u.arg.aux, CustomInfo) and u.arg.aux.inline) or \
         (u.op is Ops.LOAD and u.src[0].addrspace == AddrSpace.REG and child_count[u] == 1) or \
         (u.op in {Ops.CAST, Ops.BITCAST} and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)) or \
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
@@ -276,7 +276,7 @@ class CStyleLanguage(Renderer):
   def param_type(self, p:UOp): return "volatile "*p.arg.volatile + self._render_dtype(p.dtype, 1, p.addrspace, True, p.addrspace != AddrSpace.ALU)
   def render(self, uops:list[UOp]) -> str:
     bodies = dedup(u.body for u in UOp.sink(*uops).toposort(enter_calls=bool(self.inline_prefix)) if u.op is Ops.CALL
-                   and not (u.body.op is Ops.CUSTOM_FUNCTION and u.body.arg.fmt))
+                   and not (u.body.op is Ops.CUSTOM_FUNCTION and isinstance(u.arg.aux, CustomInfo)))
     inlines = {b:self._render(list(b.src)) for b in bodies if b.op is Ops.LINEAR}
     prefix = [f"extern void {b.arg.name}();" if b.op is Ops.CUSTOM_FUNCTION else
               f"extern void {b.src[0].arg.function_name}({', '.join(self.param_type(p) for p in b.arg.params)});" if b.op is Ops.PROGRAM else

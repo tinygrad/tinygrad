@@ -1202,9 +1202,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
-  def custom_function(name:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False, inline:bool=False) -> UOp:
+  def custom_function(name:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void) -> UOp:
     shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
-    return UOp(Ops.CUSTOM_FUNCTION, src=shape_src+src, arg=CustomFunction(name, dtype, fmt, inline))
+    return UOp(Ops.CUSTOM_FUNCTION, src=shape_src+src, arg=CustomFunction(name, dtype))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
@@ -1346,8 +1346,9 @@ OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_F
 class CustomFunction:
   name: str
   dtype: DType = dtypes.void
-  fmt: bool = False
-  inline: bool = False
+
+@dataclass(frozen=True)
+class CustomInfo: inline: bool = False
 
 @dataclass(frozen=True)
 class CallInfo:
