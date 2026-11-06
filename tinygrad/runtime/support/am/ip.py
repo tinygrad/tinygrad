@@ -1,4 +1,4 @@
-import ctypes, time, contextlib, functools
+import ctypes, time, contextlib, functools, threading
 from typing import Iterable, Literal
 from tinygrad.helpers import to_mv, data64, data64_le, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits, getenv
 from tinygrad.runtime.autogen.am import am, pm4_soc15 as pm4
@@ -267,11 +267,15 @@ class AM_SMU(AM_IP):
     (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).write(param)
     (self.adev.mmMP1_SMN_C2PMSG_66 if not debug else self.adev.mmMP1_SMN_C2PMSG_75).write(msg)
 
+  @functools.cached_property
+  def msg_lock(self) -> threading.RLock: return threading.RLock()  # (a message and its response: not interleaved with another thread's)
+
   def _send_msg(self, msg:int, param:int, read_back_arg=False, timeout=10000, debug=False): # default timeout is 10 seconds
-    self._smu_cmn_send_msg(msg, param, debug=debug)
-    wait_cond((self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).read, value=1, timeout_ms=timeout,
-      msg=f"SMU msg {msg:#x} timeout")
-    return (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).read() if read_back_arg else None
+    with self.msg_lock:
+      self._smu_cmn_send_msg(msg, param, debug=debug)
+      wait_cond((self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).read, value=1, timeout_ms=timeout,
+        msg=f"SMU msg {msg:#x} timeout")
+      return (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).read() if read_back_arg else None
 
 class AM_GFX(AM_IP):
   def init_sw(self):

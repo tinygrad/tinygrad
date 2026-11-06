@@ -330,6 +330,7 @@ def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequenc
   assert linear.op is Ops.LINEAR, f"run_linear calls on {linear.op}"
   if len(linear.src) == 0: return
   if device_mod.FORKED_COMPILE: raise RuntimeError("nothing runs in a process that only compiles")
+  for hook in device_mod.launch_hooks: hook()
   inputs = list(input_uops)
   if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, cache=True), input_uops=inputs)
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)

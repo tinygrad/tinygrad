@@ -110,6 +110,8 @@ class MultiBuffer:
 # a forked process that only compiles (capture_parallel in engine/jit.py) shares the devices of its parent: it must not change them (no device
 # memory is allocated or freed, nothing runs)
 FORKED_COMPILE = False
+# called before anything is launched (run_linear): a device's runtime readies itself (e.g. AM's clocks back up after idle, see AMIdleClocks)
+launch_hooks:list[Callable[[], None]] = []
 
 @dataclass(frozen=True)
 class BufferStorage: buf:Any; meta:Any=None; host:MMIOInterface|None=None; maps:dict[Compiled, BufferStorage]=field(default_factory=dict) # noqa: E702

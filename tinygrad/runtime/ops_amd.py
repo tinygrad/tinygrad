@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Any
-import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, itertools, collections, atexit
+import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, itertools, collections, atexit, threading, time
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, encode_cmdbuf, to_name, patch, unwrap_view, layout_args, pack_args, make_program, ccall
 from tinygrad.uop.ops import sint, UOp, ProgramInfo, Ops, UPat, PatternMatcher, KernelInfo, uopfunc
@@ -782,6 +782,52 @@ class KFDIface:
     return inf
   def is_wgp_active(self, xcc, se, sa, wgp) -> bool: return ((self.drm_dev_info.cu_bitmap[se % 4][sa + (se // 4) * 2] >> (2 * wgp)) & 0x3) == 0x3
 
+class AMIdleClocks:
+  """
+  AM_IDLE_MS: the clocks of the AM devices pinned at their lowest after that long without a launch, their work done (the timelines' last
+  submitted value signaled), and back at AM_PERF_LEVEL's (pinned high by default) before the next launch (~2 ms a device). an idle 7900 XTX
+  pinned high draws ~180 W (its smu sees it busy: auto doesn't lower it either), pinned low as with no process. 0: never lowered
+  """
+  devs:list[tuple[AMDev, Any]] = []
+  low, last, started = False, 0.0, False
+  lock = threading.Lock()
+  @classmethod
+  def add(cls, adev:AMDev, dev:Any):
+    if getattr(adev, "perf_level", 0) == 0 or (idle:=getenv("AM_IDLE_MS", 1000)) <= 0: return
+    cls.devs.append((adev, dev))
+    cls.last = time.perf_counter()
+    if not cls.started:
+      from tinygrad import device as device_mod
+      device_mod.launch_hooks.append(cls.wake)
+      threading.Thread(target=cls._loop, args=(idle / 1000,), daemon=True, name="am_idle_clocks").start()
+      cls.started = True
+  @classmethod
+  def wake(cls):
+    with cls.lock:
+      cls.last = time.perf_counter()
+      # (the timelines the idle thread reads made here, before a launch: not in the thread)
+      for _, dev in cls.devs:
+        if "timeline" not in dev.__dict__: _ = dev.timeline
+      if not cls.low: return
+      st = time.perf_counter()
+      for adev, _ in cls.devs:
+        if not getattr(adev, "finalized", False): adev.smu.set_clocks(level=adev.perf_level)
+      cls.low = False
+      if DEBUG >= 2 or getenv("AM_IDLE_LOG"): print(f"am: clocks up on {len(cls.devs)} devices in {(time.perf_counter()-st)*1e3:.1f} ms", flush=True)
+  @classmethod
+  def _loop(cls, idle:float):
+    while True:
+      time.sleep(min(idle, 0.25))
+      if cls.low or time.perf_counter() - cls.last < idle: continue
+      with cls.lock:
+        if cls.low or time.perf_counter() - cls.last < idle: continue
+        # (their work done: the value of the last submitted batch signaled. a timeline not made yet: nothing submitted, see wake)
+        if any((t:=dev.__dict__.get("timeline")) is not None and (tl:=t.host.view(fmt='Q'))[0] < tl[1] for _, dev in cls.devs): continue
+        for adev, _ in cls.devs:
+          if not getattr(adev, "finalized", False): adev.smu.set_clocks(level=0)
+        cls.low = True
+        if DEBUG >= 2 or getenv("AM_IDLE_LOG"): print(f"am: clocks down on {len(cls.devs)} devices after {idle:.2f} s idle", flush=True)
+
 class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
     pci_ids = {"gfx1100": (0X744C,), "gfx1102": (0x7480,), "gfx1201": (0x7550, 0x7551), "gfx1200": (0x7590,),
@@ -988,6 +1034,8 @@ class AMDDevice(Compiled):
       self.compute_queue # the property builds it
       for idx in range(min(self.iface.count, 8)): self.sdma_queue(idx)
       self.iface.dev_impl.release_vf_access()
+    # (am: the clocks lowered while idle, see AMIdleClocks)
+    if self.is_am() and not self.is_vf: AMIdleClocks.add(self.iface.dev_impl, self)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, idx=0):
     spec = BufferSpec(host=True, uncached=True, cpu_access=True)

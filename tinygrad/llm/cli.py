@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time, pathlib, threading
+import sys, signal, argparse, codecs, itertools, typing, re, unicodedata, json, time, pathlib, threading
 from typing import TYPE_CHECKING, cast
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
@@ -180,6 +180,8 @@ def main():
   parser.add_argument("--no_chat_template", action="store_true", help="Don't use the model's chat template, always use the fallback template")
   parser.add_argument("--shard", type=int, default=1, help="Tensor parallel device count")
   args = parser.parse_args()
+  # (SIGTERM exits as an interrupt does: the devices are finalized (am: their queues stopped, the clocks at their lowest), not left pinned high)
+  signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
   if args.benchmark: args.max_context = max(args.max_context, round_up(sum(args.benchmark)+1, 1024))
 
   # load the model

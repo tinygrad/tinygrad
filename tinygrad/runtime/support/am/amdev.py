@@ -220,7 +220,9 @@ class AMDev:
       if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0: self.smu.set_power_limit(max_power)
       levels, perf = {"auto": None, "high": -1, "low": 0}, getenv("AM_PERF_LEVEL", "auto" if max_power > 0 else "high")
       assert perf in levels, f"AM_PERF_LEVEL must be one of {list(levels)}, got {perf!r}"
-      self.smu.set_clocks(level=levels[perf])
+      # (the level of the clocks while working: AMIdleClocks lowers them while idle, see ops_amd)
+      self.perf_level = levels[perf]
+      self.smu.set_clocks(level=self.perf_level)
       for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
       self.reg("regSCRATCH_REG5").write(self.psp.tmr_size) # scratch registers are writable after GFX initialization
       self.reg("regSCRATCH_REG7").write(self.boot_version)
@@ -256,6 +258,7 @@ class AMDev:
 
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
+    self.finalized = True  # (AMIdleClocks leaves it alone)
     # a VF may only touch the engines inside an access window, take one so the host does not have to FLR the VF later
     if self.is_vf and not self.vf_access:
       with contextlib.suppress(TimeoutError): self.vf_access = self._vf_mailbox_request(am.IDH_REQ_GPU_FINI_ACCESS)
