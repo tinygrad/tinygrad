@@ -30,7 +30,7 @@ def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
 
 def create_schedule(sched_sink:UOp) -> UOp:
   with cpu_profile(TracingKey("toposort sched_sink")):
-    # build kernel dependency graph: edges from producer kernel to consumer kernels
+    # build dependency graph: kernels and buffer-state barriers
     children: dict[UOp, list[UOp]] = {}
     in_degree: dict[UOp, int] = {}
     writes: dict[UOp, list[tuple[UOp, tuple[UOp, ...]]]] = {}  # superseded state -> (AFTER, new kernels)
@@ -41,18 +41,22 @@ def create_schedule(sched_sink:UOp) -> UOp:
       prev_state = _unwrap_src(u.src[0])
       prev_kernels = set(_split_after(prev_state)[0]) if prev_state.op is Ops.AFTER else set()
       writes.setdefault(prev_state, []).append((u, tuple(k for k in kernels if k not in prev_kernels)))
+      # a buffer state is a node after its prior state, its joins and its kernels, so readers inherit its history
+      in_degree.setdefault(u, 0)
+      for st in ([prev_state] if prev_state.op is Ops.AFTER else []) + [*after_deps, *kernels]:
+        children.setdefault(st, []).append(u)
+        in_degree[u] += 1
       for k in kernels:
         in_degree.setdefault(k, 0)
         if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
         kernel_deps = k.src[0].src[1:] if k.op is Ops.END else k.src[1:]
         read_states = [st for s in kernel_deps for st in _states(s)]
         reads += [(u, k, st) for st in read_states]
-        # RAW deps: a kernel runs after the kernels that produced the states it reads or joins
+        # RAW deps: a kernel runs after the states it reads or joins
         for st in read_states + [st for s in after_deps for st in _states(s)]:
           if st.op is Ops.AFTER:
-            for t in _split_after(st)[0]:
-              children.setdefault(t, []).append(k)
-              in_degree[k] += 1
+            children.setdefault(st, []).append(k)
+            in_degree[k] += 1
     # WAR deps: a kernel reading buffer state S must run before another write that supersedes S. an AFTER only
     # supersedes its immediate prior state; join members already present in that prior state are ordering deps, not writes
     for u, k, s in reads:
@@ -68,10 +72,11 @@ def create_schedule(sched_sink:UOp) -> UOp:
     linearized: list[UOp] = []
     while len(queue):
       rk = queue.popleft()
-      k = rk.src[0] if rk.op is Ops.END else rk
-      assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-      buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
-      linearized.append(k.replace(src=(k.body, *buf_uops)))
+      if rk.op is not Ops.AFTER:
+        k = rk.src[0] if rk.op is Ops.END else rk
+        assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
+        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
+        linearized.append(k.replace(src=(k.body, *buf_uops)))
       for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
