@@ -1772,11 +1772,9 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|N
   for p,(buf,reg) in registers.items():
     size = p.shape[0]
     bindings[p] = UOp(Ops.SHRINK, src=(buf, _c(reg.sym_infer(words)*size, dtypes.int), _c(size, dtypes.int)))
-  if call is not None:
-    args = [bindings.get(b, b) for b in call.src[1:]]
-    keys = [(a, i if a.addrspace is AddrSpace.ALU else -1) for i,a in enumerate(args)]
-    slots = {a:i for i,a in enumerate(dict.fromkeys(keys))}
-    call = call.replace(src=(instruction_body(call, tuple(slots[a] for a in keys)), *(a for a,_ in slots)))
+  args = [b if b.addrspace is AddrSpace.ALU else bindings.get(b, b) for b in call.src[1:]]
+  slots = {a:i for i,a in enumerate(dict.fromkeys(args))}
+  call = call.replace(src=(instruction_body(call, tuple(slots[a] for a in args)), *(bindings.get(a, a) for a in slots)))
   return call, cond.substitute(bindings) if cond is not None else None
 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
