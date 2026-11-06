@@ -1859,6 +1859,7 @@ def render_call(call:UOp):
 
 pm_render = PatternMatcher([
   (UPat(Ops.CALL, name="call"), render_call),
+  (UPat(Ops.SINK, name="root"), lambda root: next((x for x in root.toposort() if x.op is Ops.LINEAR), None)),
 ])
 
 @rewrite_group(replay="emu_process_replay")
@@ -1978,9 +1979,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
 
   ret = emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name, optimized=True))
   if RENDER:
-    render = graph_rewrite(ret, pm_render, name="render", enter_calls=True)
+    linear = graph_rewrite(ret, pm_render, name="render", enter_calls=True)
     if VIZ: graph_rewrite(render, PatternMatcher([]), name="View Rendered Graph")
-    linear = next(x for x in render.toposort() if x.op is Ops.LINEAR)
     assert len(linear.src) == len(insts), f"{len(linear.src)} != {len(insts)}"
     for (pc, inst), x in zip(insts.items(), linear.src):
       out = x.arg if x.op is Ops.BINARY else b"".join(y.arg for y in x.src)
