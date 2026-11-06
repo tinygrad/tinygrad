@@ -4831,6 +4831,66 @@ def seq_rows(max_context:int, n:int) -> int:
   return (max_context + SEQ_BLK*n - 1) // (SEQ_BLK*n) * SEQ_BLK
 
 @functools.cache
+@functools.cache
+def _rows_shift_kernel(out:UOp, x:UOp, bounds:UOp, carry:UOp, dev:UOp, *, lane:int, N:int) -> UOp:
+  # out row r: x's row r-1 (a device's first: the last row of the device before it (bounds (lanes*devices, W), lane-major), the first device's
+  # of lane 0 the carry, of another lane the last device's of the lane before it)
+  m, W = cast(int, x.shape[0]), cast(int, x.shape[1])
+  r, c = UOp.range(m, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOOP)
+  d = dev[0].load().cast(dtypes.weakint)
+  prev_b = (d > 0).where(lane*N + d - 1, (lane - 1)*N + N - 1) if lane else (d - 1).maximum(0)
+  first = r.eq(0)
+  from_carry = first & d.eq(0) & UOp.const(lane == 0, dtypes.bool)
+  v = from_carry.where(carry[c].load().float(), first.where(bounds[prev_b.maximum(0), c].load().float(), x[(r - 1).maximum(0), c].load().float()))
+  return out[r, c].store(v.cast(out.dtype)).end(r, c).sink(arg=KernelInfo(name="rows_shift", opts_to_apply=()))
+
+@functools.cache
+def _last_row_kernel(out:UOp, x:UOp) -> UOp:
+  W = cast(int, x.shape[1])
+  c = UOp.range(W, 0, AxisType.GLOBAL)
+  return out[0, c].store(x[cast(int, x.shape[0]) - 1, c].load()).end(c).sink(arg=KernelInfo(name="last_row", opts_to_apply=()))
+
+@functools.cache
+def _row_pick_kernel(out:UOp, x:UOp, dev:UOp, *, row:UOp, row0:int) -> UOp:
+  # out (1, W): x's row (of the rows split over the devices, a device's m from row0 + its index * m) row if it's this device's, else zeros
+  m, W = cast(int, x.shape[0]), cast(int, x.shape[1])
+  c = UOp.range(W, 0, AxisType.GLOBAL)
+  local = row - row0 - dev[0].load().cast(dtypes.weakint) * m
+  ok = (local >= 0) & (local < m)
+  return out[0, c].store(ok.where(x[local.maximum(0).minimum(m-1), c].load().float(), 0.0).cast(out.dtype)).end(c).sink(
+    arg=KernelInfo(name="row_pick", opts_to_apply=()))
+
+def _lane_call(lane:int, fn:Callable, *args):
+  # (an exchange on a lane of its own: two that can run at once on one lane's mailbox and counter hang)
+  prev, FLAG_LANE[0] = FLAG_LANE[0], lane
+  try: return fn(*args)
+  finally: FLAG_LANE[0] = prev
+
+def rows_shifted(xs:list[Tensor], carry:Tensor) -> list[Tensor]:
+  """
+  xs: the micro batches' rows (lane after lane), each (rows, W) split on the devices: each one row later (a row the one before it, the very first
+  carry (W,)): every device's last row gathered (small, a lane's on its lane), every device its own rows
+  """
+  devs = cast(tuple[str, ...], xs[0].device)
+  W = int(xs[0].shape[1])
+  lasts = [Tensor.custom_kernel(Tensor.empty(len(devs), W, dtype=x.dtype, device=devs, axis=0), x, fxn=_last_row_kernel)[0] for x in xs]
+  bounds = Tensor.cat(*[_lane_call(i, all_gather, lt, 0) for i, lt in enumerate(lasts)], dim=0).contiguous()
+  di = _device_index(devs)
+  return [Tensor.custom_kernel(Tensor.empty(*x.shape, dtype=x.dtype, device=devs, axis=0), x, bounds, carry.contiguous(), di,
+                               fxn=functools.partial(_rows_shift_kernel, lane=i, N=len(devs)))[0] for i, x in enumerate(xs)]
+
+def rows_pick(xs:list[Tensor], row:UOp, var:UOp, lane0:int) -> Tensor:
+  """the row `row` (an expression of the bound variable var) of the micro batches' rows xs ((rows, W) each, split on the devices, lane after
+  lane): (1, W) on every device (every device its part, zeros if not its row, gathered on lanes from lane0 and summed)"""
+  devs = cast(tuple[str, ...], xs[0].device)
+  di, n, W, tot = _device_index(devs), int(xs[0].shape[0]), int(xs[0].shape[1]), None
+  for i, x in enumerate(xs):
+    part = Tensor.custom_kernel(Tensor.empty(len(devs), W, dtype=dtypes.float32, device=devs, axis=0), Tensor(x.uop.after(var)), di,
+                                fxn=functools.partial(_row_pick_kernel, row=_unbind(row), row0=i*n))[0]
+    g = _lane_call(lane0 + i, all_gather, part, 0).sum(axis=0, keepdim=True)
+    tot = g if tot is None else tot + g
+  return cast(Tensor, tot)
+
 def _device_index(devs:tuple[str, ...]) -> Tensor:
   # the index of every device on it (a kernel's own part)
   return Tensor(list(range(len(devs))), dtype=dtypes.int32).shard(devs, 0).realize()
