@@ -1206,10 +1206,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
     return UOp(Ops.CUSTOM_FUNCTION, src=shape_src+src, arg=CustomFunction(name, dtype, fmt))
 
-  @staticmethod
-  def custom(fmt:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, inline:bool=False) -> UOp:
-    return UOp.custom_function(fmt, shape=shape, dtype=dtype, fmt=True).call(*src, inline=inline)
-
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, aux:Any=None) -> UOp:
     """call a body with the given args: a plain CallInfo CALL. all inputs must be ready (buffers/params), this never
