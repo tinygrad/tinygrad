@@ -711,6 +711,13 @@ class TestCustomKernel(unittest.TestCase):
     a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([7], [14]))
 
+  def test_stack_index_keeps_selector_effect(self):
+    def kernel(A:UOp, B:UOp):
+      i = UOp.const(0, dtypes.int).after(A[0].store(A[0].load()+1))
+      return B[0].store(UOp.stack(UOp.const(2, dtypes.int)).index(i)).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor([0]).contiguous(), Tensor([9]).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([1], [2]))
+
   def test_valid_gate_after_effect(self):
     def kernel(A:UOp, B:UOp):
       i = UOp.range(2, 0)
