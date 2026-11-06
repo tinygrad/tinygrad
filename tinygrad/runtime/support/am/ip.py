@@ -565,8 +565,8 @@ class AM_SDMA(AM_IP):
   def init_sw(self):
     self.sdma_reginst, self.sdma_name = [], "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
     self.engines = sum(len(self.adev.regs_offset[hw].keys() - self.adev.harvested[hw]) for hw in (am.SDMA0_HWIP, am.SDMA1_HWIP))
-    # (AM_SDMA_ENGINES: at most this many. SDMA 6 (RDNA3) runs one by default: with two up, the next process' init fails (PSP/SMU timeouts))
-    self.engines = max(1, min(self.engines, getenv("AM_SDMA_ENGINES", 2 if self.adev.ip_ver[am.SDMA0_HWIP] >= (7,0,0) else 1)))
+    # (AM_SDMA_ENGINES: at most this many, one by default (master reverted two: on SDMA 6 the next process' init fails, PSP/SMU timeouts))
+    self.engines = max(1, min(self.engines, getenv("AM_SDMA_ENGINES", 1)))
   def halt_engines(self):
     if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0):
       for pipe in range(self.engines): self.adev.reg(f"regSDMA{pipe}_{self.sdma_name}_CNTL").update(halt=1)

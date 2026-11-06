@@ -124,6 +124,18 @@ class TestAttention(unittest.TestCase):
     allowed[0, 4:, 2:4] = allowed[1, 4:, 0:2] = 0
     np.testing.assert_array_equal(indexer(x, Tensor.ones(1, 6, 2), 0).numpy(), np.where(allowed, 0., -np.inf)[None])
 
+  def test_indexer_qsa(self):
+    # a pool's key is its normed mean key, roped at the pool start
+    idx = IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6, rope_dim=2, qsa=True)
+    indexer = Indexer(self._make_config(dim=2, indexer=idx))
+    indexer.attn_q_b.weight, indexer.attn_k.weight = Tensor.eye(2), Tensor.eye(2)
+    x, q = Tensor([[[-6., 8.], [0., 0.], [0., 2.], [2., -2.]]]), Tensor([[[1., 0.], [1., 0.], [1., 0.], [0., -1.]]])
+    indexer._init_state(x)
+    # a quarter turn per position: query 3 faces 180 degrees like pool 1 (mean (1, 0) roped at 2), not the larger pool 0 at 127 degrees
+    freqs = Tensor([[1., 0.], [0., 1.], [-1., 0.], [0., -1.]])
+    allowed = [[1, 0, 0, 0], [1, 1, 0, 0], [1, 1, 1, 0], [0, 0, 1, 1]]
+    np.testing.assert_array_equal(indexer(x, q, 0, freqs).numpy(), np.where(allowed, 0., -np.inf)[None, None])
+
   def test_mla_indexer_mask(self):
     idx = IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6)
     block = MLATransformerBlock(self._make_config(dim=2, kv_lora_rank=2, q_lora_rank=2, max_context=5, indexer=idx))

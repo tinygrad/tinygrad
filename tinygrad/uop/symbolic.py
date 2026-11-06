@@ -2,7 +2,7 @@
 import math
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, promo_dtype, identity_element
-from tinygrad.dtype import PyConst, ConstFloat, dtypes, can_lossless_cast, Invalid, bitcast, truncate
+from tinygrad.dtype import PyConst, ConstFloat, AddrSpace, dtypes, can_lossless_cast, Invalid, bitcast, truncate
 from tinygrad.helpers import partition, all_same, prod, flatten, IMAGE, dedup, ceildiv
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 from tinygrad.uop.movement import mop_cleanup
@@ -121,7 +121,14 @@ def fold_const_where(gate:UOp, c0:UOp, c1:UOp, w:UOp) -> UOp:
   ret = c0 if gate.val else c1
   return ret.ccast(w.dtype) if ret.op is Ops.CONST and ret.dtype in dtypes.weaks and w.dtype not in dtypes.weaks else ret
 
+def lift_value_after(x:UOp) -> UOp|None:
+  afters = [s for s in x.src if s.op is Ops.AFTER]
+  if x.shape != () or x.src[-1].is_invalid: return None
+  if any(a.src[0].op not in GroupOp.ALU and a.src[0].addrspace is not AddrSpace.ALU for a in afters): return None
+  return x.replace(src=tuple(s.src[0] if s.op is Ops.AFTER else s for s in x.src)).after(*dedup(flatten(a.src[1:] for a in afters)))
+
 symbolic_simple = pm_data_invalid + PatternMatcher([
+  (UPat(GroupOp.ALU|{Ops.CAST}, custom_early_reject={Ops.AFTER}, name="x"), lift_value_after),
   # ** self folding **
   (UPat({Ops.ADD, Ops.XOR, Ops.OR}, src=[UPat.var("x"), UPat.const(0)]), lambda x: x),  # x+0 / x^0 / x|0 -> x
   (UPat({Ops.SHL, Ops.SHR}, src=(UPat.var("x"), UPat.const(0))), lambda x: x),          # x<<0 / x>>0 -> x
