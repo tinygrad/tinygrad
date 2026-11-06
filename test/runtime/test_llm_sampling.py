@@ -3,7 +3,7 @@ from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor
 from tinygrad.llm.kernels.amd_qwen import nucleus
-from tinygrad.llm.qwen4exp import Transformer, TransformerConfig
+from tinygrad.llm.qwen4exp import Transformer, TransformerConfig, HCConfig
 
 def nucleus_ref(z:np.ndarray, p:float) -> np.ndarray:
   # the smallest set of the most likely tokens with a probability of at least p
@@ -37,8 +37,10 @@ class TestNucleus(unittest.TestCase):
 class TestSamplingModes(unittest.TestCase):
   @staticmethod
   def config():
-    return TransformerConfig(num_blocks=1, dim=8, hidden_dim=16, n_heads=2, n_kv_heads=2, norm_eps=1e-6,
-                             vocab_size=32, head_dim=4, rope_theta=10000, rope_dim=4, v_head_dim=4, max_context=32)
+    # (a qwen4exp block: gated hyper-connections, the attention's q/k norms and output gate)
+    return TransformerConfig(num_blocks=1, dim=8, hidden_dim=16, n_heads=2, n_kv_heads=2, norm_eps=1e-6, vocab_size=32, head_dim=4,
+                             rope_theta=10000, rope_dim=4, v_head_dim=4, max_context=32, qk_norm=4, attn_output_gate=True,
+                             hc=HCConfig(2, 0, 1e-6, low_rank=4))
 
   def test_greedy_and_stochastic_jits_are_separate(self):
     Tensor.manual_seed(81)
