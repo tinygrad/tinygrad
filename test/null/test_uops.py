@@ -585,6 +585,27 @@ class TestUopsObject(unittest.TestCase):
     for _ in range(10_000): a = a+a
     self.assertEqual(a.device, Device.DEFAULT)
 
+  def test_shape(self):
+    buf, end = UOp.param(0, dtypes.uint, 64), UOp(Ops.NOOP)
+    for i in range(1_000):
+      r = UOp.range(UOp.const(2).after(end), i)
+      s = buf.shrink(((r*32, (r+1)*32),))
+      end = UOp.group(s, r).end(r)
+    self.assertEqual(r.shape, ())
+
+  def test_shape_assert(self):
+    buf = UOp.param(0, dtypes.uint, 64)
+    invalid = UOp(Ops.SHRINK, src=(buf, UOp.const(65), UOp.const(1)))
+    r = UOp.range(UOp.const(2).after(invalid), 0)
+    with self.assertRaises(ValueError):
+      _ = r.shape
+      _ = invalid.shape
+
+  def test_shape_recurse(self):
+    a = UOp.const(1)
+    for _ in range(10_000): a = a+a
+    self.assertEqual(a.shape, ())
+
 class TestUOpRender(unittest.TestCase):
   def test_render_ssimplified_marg_outside_toposort(self):
     r = UOp.range(UOp.const(16, dtypes.int), 2, AxisType.WEAK, dtype=dtypes.int)
