@@ -540,6 +540,14 @@ class AMDSDMAQueue(HWQueue):
     for off in range(0, sz, self.max_copy_size):
       self.q(self.sdma.SDMA_OP_COPY|self.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_COPY_LINEAR), min(sz-off, self.max_copy_size)-1,
             0, *(a + UOp.const(off, dtypes.uint64) if off else a for a in (src.getaddr(self.devs), dst.getaddr(self.devs))))
+    # a push into a peer: its writes are posted, the completion signal after it takes another path and can land first. a read of the peer
+    # (the copy's last bytes back over the same ones of the source: no change) can't pass the writes before it to that peer: it completes after
+    # they're in, the signal is after it (pulls across root complexes are ~3x slower than pushes)
+    if sz > 0 and isinstance(dd:=dst.device, str) and dd.startswith("AMD") and dd not in self.devs and isinstance(src.device, str) and \
+       src.device in self.devs and getenv("SDMA_PUSH_READBACK", 1):
+      n = min(sz, 4)
+      self.q(self.sdma.SDMA_OP_COPY|self.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_COPY_LINEAR), n-1, 0,
+             dst.getaddr(self.devs) + UOp.const(sz-n, dtypes.uint64), src.getaddr(self.devs) + UOp.const(sz-n, dtypes.uint64))
 
   def memory_barrier(self):
     (req, done), op = self.dev.hdp_flush, self.sdma.SDMA_OP_POLL_REGMEM | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_HDP_FLUSH(1)

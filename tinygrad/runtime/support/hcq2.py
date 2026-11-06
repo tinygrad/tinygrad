@@ -31,10 +31,11 @@ def get_enqueue_devs(call:UOp) -> tuple[str, ...]:
   if call.op is not Ops.CALL: return () # entries can be AFTER-wrapped calls
   if call.body.op not in (Ops.PROGRAM, Ops.STORE) and not (call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg.name == "encdec"): return ()
   runs_on = call.device if call.body.op is Ops.STORE and all_devices_in(call.device, HCQ_DEVS - UVM_DEVS) else get_call_arg_uops(call)[0].device
-  # a copy between two devices runs on the one it goes to (pulls): a push's writes into the peer are posted, its completion signal (in host memory)
-  # takes another path and can land first, the peer then reads its memory before all of the copy is in it
+  # HCQ_COPY_PULL: a copy between two devices runs on the one it goes to (pulls). a push's writes into the peer are posted, its completion signal
+  # (in host memory) takes another path and can land first: the copy queue reads the peer back after a push (see AMDCopyQueue.copy), pulls
+  # across root complexes are ~3x slower
   if call.body.op is Ops.STORE and all_devices_in(dst:=call.src[1].device, HCQ_DEVS - UVM_DEVS) and all_devices_in(runs_on, HCQ_DEVS - UVM_DEVS) and \
-     isinstance(dst, str) and isinstance(runs_on, str) and dst.split(":")[0] == runs_on.split(":")[0] and getenv("HCQ_COPY_PULL", 1): runs_on = dst
+     isinstance(dst, str) and isinstance(runs_on, str) and dst.split(":")[0] == runs_on.split(":")[0] and getenv("HCQ_COPY_PULL", 0): runs_on = dst
   devs = tuple(Device.canonicalize(d) for d in to_tuple(runs_on))
   if not all_devices_in(devs, HCQ_DEVS) or (call.body.op is Ops.STORE and all_devices_in(devs, UVM_DEVS)): return ()
   return devs
@@ -349,6 +350,9 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
       if not cons or any(x in names[tag] for x in cons):
         dep_tags[tag] = sorted(set(dep_tags[tag]) | {t for qq, t in last.items() if qq[0] == q[0] and qq != q})
       if not prod or any(x in names[tag] for x in prod): last[q] = tag
+  if getenv("HCQ_STATS") and len(queue_of) > getenv("HCQ_STATS_MIN", 100):
+    # (the calls of a batch, how many wait for the ones before them on their queue)
+    print(f"hcq batch: {len(queue_of)} calls, {len(barriers)} barriers, queues {len(set(queue_of))}", flush=True)
   # keep only latest tags to wait for each queue
   call_waits = [{queue_of[t]: t for t in sorted(deps) if queue_of[t] != queue_of[tag]} for tag, deps in enumerate(dep_tags)]
 

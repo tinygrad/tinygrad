@@ -377,6 +377,7 @@ def _prefetched(body:UOp, rng:UOp, last:UOp|int, params:tuple[UOp, ...]|None=Non
 
 def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str, active:Callable|None=None,
                    estimates:Estimates|None=None, multi:int=1, bundles:tuple[int, Callable]|None=None) -> UOp:
+  if getenv("LIN_NAMES"): name = f"{name}_{out.shape[0] if len(out.shape) > 1 else 1}x{out_features}x{group_count*32}"  # (profiling: the shapes)
   # One wave per output/chunk of 32 groups; group neighboring rows to amortize workgroup scheduling. the waves of the chunks of an output
   # share the workgroup: they add up their sums in LDS
   # a wave serves 32//lanes outputs with `lanes` lanes each, whichever leaves fewer lanes idle. at most 16 waves in a workgroup: a wave sums
@@ -1861,7 +1862,7 @@ def flag_partial_sum(x:Tensor) -> Tensor|None:
   # values the quantized layers' kernels would make of them, a prefill's exchanges are of them too))
   if n >= getenv("AR_Q8_MIN", 65536) and getenv("AR_Q8", 1) and (r:=_flag_partial_sum_q8(x, n)) is not None: return r
   N, groups = len(x.device), flag_ar_groups(n//2)
-  scatter = n >= 8192
+  scatter = n >= getenv("AR_SCATTER_MIN", 8192)
   chunk = round_up((n//2 + N-1)//N, 64)
   if (shape:=flag_ar_shape(2*chunk if scatter else n//2, groups)) is None or (ar:=flag_allreduce(x.device, groups)) is None: return None
   out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
