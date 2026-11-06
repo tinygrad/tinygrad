@@ -674,11 +674,11 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.logsumexp(axis=1).numpy())
     ```
     """
-    m = (mx:=self.max(axis=axis, keepdim=True).detach()).isfinite().where(mx, 0)
+    m = (mx:=self._reduce(Ops.MAX, axis, keepdim=True).detach()).isfinite().where(mx, 0)
     return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + (m if keepdim else m.squeeze(axis))
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Self, Self, Self]:
-    m = self - self.max(axis=axis, keepdim=True).detach()
+    m = self - self._reduce(Ops.MAX, axis, keepdim=True).detach()
     if dtype is not None: m = m.cast(dtype)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
@@ -904,8 +904,11 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.argmax(axis=1).numpy()) # Returns the indices of the maximum values along axis 1.
     ```
     """
-    if axis is None: return self.flatten().argmax(0)
+    if axis is None:
+      if resolve(self.numel() == 0, False): raise IndexError("argmax(): Expected reduction dim to be specified for input.numel() == 0.")
+      return self.flatten().argmax(0)
     axis = self._resolve_dim(axis)
+    if resolve(self.shape[axis] == 0, False): raise IndexError(f"argmax(): Expected reduction dim {axis} to have non-zero size.")
     m = self.eq(self.max(axis=axis, keepdim=True))
     idx = m * type(self).arange(self.shape[axis], 0, -1).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
     return (self.shape[axis] - idx.max(axis=axis, keepdim=keepdim)).cast(dtypes.int32)

@@ -1,5 +1,6 @@
 from typing import Self, Sequence
 from tinygrad.uop import Ops
+from tinygrad.uop.ops import resolve
 from tinygrad.dtype import DTypeLike, dtypes, sum_acc_dtype
 from tinygrad.helpers import make_tuple
 from tinygrad.mixin.dtype import DTypeMixin
@@ -10,10 +11,13 @@ class ReduceMixin(DTypeMixin, MovementMixin):
   def _rop(self, op: Ops, axis: tuple[int, ...]) -> Self:
     raise NotImplementedError
 
+  def _reduce_axes(self, axis:int|Sequence[int]|None=None) -> tuple[int, ...]:
+    axes = tuple(self._resolve_dim(x) for x in (range(self.ndim) if axis is None else make_tuple(axis, 1)))
+    return () if self.ndim == 0 else axes
+
   def _reduce(self, op:Ops, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
     self = self.cast(self.commit_dtype())
-    axis = tuple(self._resolve_dim(x) for x in (range(self.ndim) if axis is None else make_tuple(axis, 1)))
-    if self.ndim == 0: axis = ()
+    axis = self._reduce_axes(axis)
     ret = self._rop(op, axis)
     return ret.reshape(tuple(1 if i in axis else s for i,s in enumerate(self.shape))) if keepdim else ret
 
@@ -91,7 +95,11 @@ class ReduceMixin(DTypeMixin, MovementMixin):
     print(t.max(axis=1, keepdim=True).numpy())
     ```
     """
-    return self._reduce(Ops.MAX, axis, keepdim)
+    axes = self._reduce_axes(axis)
+    if any(resolve(self.shape[i] == 0, False) for i in axes):
+      if axis is None: raise RuntimeError("max(): Expected reduction dim to be specified for input.numel() == 0.")
+      raise IndexError(f"max(): Expected reduction dim {axes[0] if len(axes) == 1 else axes} to have non-zero size.")
+    return self._reduce(Ops.MAX, axes, keepdim)
 
   def any(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
     """
@@ -113,7 +121,7 @@ class ReduceMixin(DTypeMixin, MovementMixin):
     print(t.any(axis=1, keepdim=True).numpy())
     ```
     """
-    return self.bool().max(axis, keepdim)
+    return self.bool()._reduce(Ops.MAX, axis, keepdim)
 
   def all(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
     """

@@ -5,21 +5,29 @@ from tinygrad import Tensor, nn, Context
 class TestEmptyTensorEdgeCases(unittest.TestCase):
   # we don't need more of these
 
-  @unittest.expectedFailure
   def test_max_empty(self):
     # Max on an empty tensor should also raise an error.
     with self.assertRaises(RuntimeError):
       torch.tensor([]).max()
     with self.assertRaises(RuntimeError):
       Tensor([]).max()
+    with self.assertRaises(IndexError):
+      torch.zeros(0, 3).max(0)
+    with self.assertRaises(IndexError):
+      Tensor.zeros(0, 3).max(0)
 
-  @unittest.expectedFailure
   def test_argmax_empty(self):
     # Argmax on an empty tensor should raise an error like torch does.
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises(IndexError):
       torch.tensor([]).argmax()
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises(IndexError):
       Tensor([]).argmax()
+
+  def test_empty_identity_reductions(self):
+    # reductions with a defined identity don't go through the max() guard
+    assert not torch.tensor([]).any().item()
+    assert not Tensor([]).any().item()
+    assert Tensor.zeros(0, 3).softmax(0).shape == (0, 3)
 
 class TestDropoutProbabilityEdgeCases(unittest.TestCase):
   # we don't need more of these
