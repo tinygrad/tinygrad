@@ -183,10 +183,7 @@ def stack_multi(root:UOp):
   return UOp(Ops.STACK, src=tuple(shard_srcs(root.src, axis-1))).unshard(axis, multis[0].src[1])
 
 def index_multi(root:UOp, multi:UOp):
-  # INDEX on UNSHARD: resolve each sharded axis into this range's own shard.
-  # Two ownership patterns are supported:
-  #   contiguous: idx = rng*shard_sz + local   (thread rng owns [rng*shard_sz, ...))
-  #   strided:    idx = rng + ir*shard_sz      (thread rng owns {rng, rng+shard_sz, ...})
+  # INDEX on UNSHARD: resolve each sharded axis into this range's own contiguous block.
   idxs = list(root.src[1:])
   for ax, rng in multi.sharding:
     shard_sz = multi.src[0].shape[ax]
@@ -194,13 +191,6 @@ def index_multi(root:UOp, multi:UOp):
     if local.vmin >= 0 and local.vmax < shard_sz:
       idxs[ax] = local
       continue
-    # strided ownership: idx ≡ rng (mod shard_sz), intra-shard position is (idx - rng) // shard_sz
-    diff = (idxs[ax] - rng).simplify()
-    if (mod:=(diff % shard_sz).simplify()).op is Ops.CONST and mod.val == 0:
-      local = (diff // shard_sz).simplify()
-      if local.vmin >= 0 and local.vmax < shard_sz:
-        idxs[ax] = local
-        continue
     raise RuntimeError(f"index_multi: cannot shard index {idxs[ax]} for UNSHARD axis {ax} with shard size {shard_sz}")
   return multi.src[0].index(*idxs)
 
