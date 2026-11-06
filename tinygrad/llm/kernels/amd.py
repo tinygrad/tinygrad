@@ -1176,40 +1176,78 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   # the stage: x (token_tile, 32*GS) in eight halves a thread, the weights (128, 32*GS): the blocks of output tid
   lds_x = UOp.alloc((token_tile, 32*GS + 8), dtypes.float16, addrspace=AddrSpace.LOCAL)
   lds_w = UOp.alloc((stage_rows, 32*GS + 8), dtypes.float16, addrspace=AddrSpace.LOCAL)
-  st = []
-  for k in range((token_tile * 4 * GS + 127) // 128):
-    e = tid + k * 128
-    r, c = (e // (4*GS)).minimum(token_tile - 1), e % (4*GS)
-    st += [lds_x[r.valid(e < token_tile * 4 * GS), c * 8 + i].store(x[token_block * token_tile + r, g * 32 + c * 8 + i]) for i in range(8)]
-  for bi in range(stage_rows * GS // 128):
-    gi, wr = (bi*128 + tid) // stage_rows, (bi*128 + tid) % stage_rows
-    row = (output_block * block_n + (wr % block_n if hc else wr)).minimum(N-1) + (wr // block_n * N if hc else 0)
-    if ggml_type == Q6_K:
-      # (Q6_K: a group's 32 weights of a block of 256, their 6 bit values less 32 times the scale of their half (16), in half as the f16 path's)
-      gg = g + gi
-      bbase = (row * (groups // 8) + gg // 8) * (QUANT_SIZES[Q6_K] // raw.dtype.itemsize)
-      words = _quant_group_words(raw, bbase, gg % 8, Q6_K, None)
-      scales = [_wmma_scale(raw, bbase, gg % 8, h, Q6_K)[0].cast(dtypes.float16) for h in (0, 1)]
-      st += [lds_w[wr, gi * 32 + w * 4 + i].store((((words[w] >> (8*i)) & 255).cast(dtypes.int32) - 32).cast(dtypes.float16) * scales[w // 4])
-             for w in range(8) for i in range(4)]
-      continue
-    base = (row * groups*k_splits + g + gi) * 17
-    scale = raw[base].load().cast(dtypes.uint16).bitcast(dtypes.float16)
-    if getenv("Q8_FAST_CVT", 1):
-      # the bytes to halves without floats (as F16_FAST_CVT): with the sign bit flipped a byte is the mantissa of the half 1024+u, minus 1152 the
-      # signed byte (exact), times the scale rounds once: the same halves
+  # Q8_PREFETCH (Q8_0): the next group's x and weight words loaded into registers before this group's tensor core work, converted and stored
+  # to LDS after it (their latency hidden by it, not a stall of every group)
+  prefetch = ggml_type == Q8_0 and not hc and getenv("Q8_PREFETCH", 1) and getenv("Q8_FAST_CVT", 1)
+  def pf_loads(gg:UOp) -> list[UOp]:
+    out:list[UOp] = []
+    for k in range((token_tile * 4 * GS + 127) // 128):
+      e = tid + k * 128
+      r, c = (e // (4*GS)).minimum(token_tile - 1), e % (4*GS)
+      out += [x[token_block * token_tile + r, gg * 32 + c * 8 + i].load() for i in range(8)]
+    for bi in range(stage_rows * GS // 128):
+      gi, wr = (bi*128 + tid) // stage_rows, (bi*128 + tid) % stage_rows
+      row = (output_block * block_n + wr).minimum(N-1)
+      base = (row * groups*k_splits + gg + gi) * 17
+      out += [raw[base + w].load() for w in range(17)]
+    return out
+  def pf_stores(vals:list[UOp], bx:UOp, bw:UOp) -> list[UOp]:
+    out, j = [], 0
+    for k in range((token_tile * 4 * GS + 127) // 128):
+      e = tid + k * 128
+      r, c = (e // (4*GS)).minimum(token_tile - 1), e % (4*GS)
+      out += [bx[r.valid(e < token_tile * 4 * GS), c * 8 + i].store(vals[j + i]) for i in range(8)]
+      j += 8
+    for bi in range(stage_rows * GS // 128):
+      gi, wr = (bi*128 + tid) // stage_rows, (bi*128 + tid) % stage_rows
+      wv, j = vals[j:j+17], j + 17
+      scale = wv[0].cast(dtypes.uint16).bitcast(dtypes.float16)
       for w in range(8):
-        u = (raw[base + 1 + 2*w].load().cast(dtypes.uint32) | (raw[base + 2 + 2*w].load().cast(dtypes.uint32) << 16)) ^ 0x80808080
+        u = (wv[1 + 2*w].cast(dtypes.uint32) | (wv[2 + 2*w].cast(dtypes.uint32) << 16)) ^ 0x80808080
         pairs = [_amd_byte_perm(UOp.const(0x64646464, dtypes.uint32), u, UOp.const(sel, dtypes.uint32)) for sel in (0x04010400, 0x04030402)]
         halves = [((p >> sh) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.half) for p in pairs for sh in (0, 16)]
-        st += [lds_w[wr, gi * 32 + w * 4 + i].store((h - 1152) * scale) for i, h in enumerate(halves)]
-    else:
-      for w in range(16):
-        word = raw[base + 1 + w].load().cast(dtypes.uint32)
-        for b in range(2):
-          st.append(lds_w[wr, gi * 32 + w * 2 + b].store(((word >> (b * 8)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.float16)) * scale))
-  staged = UOp.group(*st).barrier()
-  lds_x, lds_w = lds_x.after(staged), lds_w.after(staged)
+        out += [bw[wr, gi * 32 + w * 4 + i].store((h - 1152) * scale) for i, h in enumerate(halves)]
+    return out
+  lds_x0, lds_w0 = lds_x, lds_w
+  if prefetch:
+    first = UOp.group(*pf_stores(pf_loads(UOp.const(0, dtypes.weakint) + split*groups), lds_x, lds_w)).barrier()
+    nxt_vals = pf_loads((gr + 1).minimum(groups // GS - 1) * GS + split*groups)
+    lds_x, lds_w = lds_x.after(first, gr), lds_w.after(first, gr)
+  else:
+    st = []
+    for k in range((token_tile * 4 * GS + 127) // 128):
+      e = tid + k * 128
+      r, c = (e // (4*GS)).minimum(token_tile - 1), e % (4*GS)
+      st += [lds_x[r.valid(e < token_tile * 4 * GS), c * 8 + i].store(x[token_block * token_tile + r, g * 32 + c * 8 + i]) for i in range(8)]
+    for bi in range(stage_rows * GS // 128):
+      gi, wr = (bi*128 + tid) // stage_rows, (bi*128 + tid) % stage_rows
+      row = (output_block * block_n + (wr % block_n if hc else wr)).minimum(N-1) + (wr // block_n * N if hc else 0)
+      if ggml_type == Q6_K:
+        # (Q6_K: a group's 32 weights of a block of 256, their 6 bit values less 32 times the scale of their half (16), in half as the f16 path's)
+        gg = g + gi
+        bbase = (row * (groups // 8) + gg // 8) * (QUANT_SIZES[Q6_K] // raw.dtype.itemsize)
+        words = _quant_group_words(raw, bbase, gg % 8, Q6_K, None)
+        scales = [_wmma_scale(raw, bbase, gg % 8, h, Q6_K)[0].cast(dtypes.float16) for h in (0, 1)]
+        st += [lds_w[wr, gi * 32 + w * 4 + i].store((((words[w] >> (8*i)) & 255).cast(dtypes.int32) - 32).cast(dtypes.float16) * scales[w // 4])
+               for w in range(8) for i in range(4)]
+        continue
+      base = (row * groups*k_splits + g + gi) * 17
+      scale = raw[base].load().cast(dtypes.uint16).bitcast(dtypes.float16)
+      if getenv("Q8_FAST_CVT", 1):
+        # the bytes to halves without floats (as F16_FAST_CVT): with the sign bit flipped a byte is the mantissa of the half 1024+u, minus 1152 the
+        # signed byte (exact), times the scale rounds once: the same halves
+        for w in range(8):
+          u = (raw[base + 1 + 2*w].load().cast(dtypes.uint32) | (raw[base + 2 + 2*w].load().cast(dtypes.uint32) << 16)) ^ 0x80808080
+          pairs = [_amd_byte_perm(UOp.const(0x64646464, dtypes.uint32), u, UOp.const(sel, dtypes.uint32)) for sel in (0x04010400, 0x04030402)]
+          halves = [((p >> sh) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.half) for p in pairs for sh in (0, 16)]
+          st += [lds_w[wr, gi * 32 + w * 4 + i].store((h - 1152) * scale) for i, h in enumerate(halves)]
+      else:
+        for w in range(16):
+          word = raw[base + 1 + w].load().cast(dtypes.uint32)
+          for b in range(2):
+            st.append(lds_w[wr, gi * 32 + w * 2 + b].store(((word >> (b * 8)).cast(dtypes.uint8).bitcast(dtypes.int8).cast(dtypes.float16)) * scale))
+    staged = UOp.group(*st).barrier()
+    lds_x, lds_w = lds_x.after(staged), lds_w.after(staged)
   ks = tuple(i % 4 + half * 4 + (i // 4) * 8 for i in range(8)) if rdna4 else tuple(range(16))
   accs = [[UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
   accs = [[acc.after(acc.store(acc.const_like(0))) for acc in row] for row in accs]
@@ -1220,7 +1258,9 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
                              kh * 16 + i].load() for i in ks)) for o in range(OT)]
     cur = [[UOp.wmma(afr[t], bfr[o], cur[o][t], *WMMA_ARG) for t in range(TT)] for o in range(OT)]
   # (a barrier after the group's reads: the next group's stage doesn't overwrite what a slower wave still reads)
-  update = UOp.group(*(accs[o][t].store(cur[o][t]) for o in range(OT) for t in range(TT))).barrier().end(gr)
+  update = UOp.group(*(accs[o][t].store(cur[o][t]) for o in range(OT) for t in range(TT))).barrier()
+  if prefetch: update = UOp.group(*pf_stores(nxt_vals, lds_x0.after(update), lds_w0.after(update))).barrier()
+  update = update.end(gr)
   def ocol(o:int) -> UOp:
     c = output_block * block_n + wo * (OT//streams) * 16 + o * 16 + col
     return c.valid(c < N) if N % block_n else c
