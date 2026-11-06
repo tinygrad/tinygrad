@@ -687,6 +687,25 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(A:UOp): return A[0].store(UOp.stack(UOp.const(42, dtypes.int)).index(A[1].load())).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.zeros(2, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [42, 0])
 
+  def test_stack_runtime_index_two_axes(self):
+    def kernel(A:UOp):
+      i, j = UOp.range(2, 0), UOp.range(2, 1)
+      m = UOp.const(((1, 2), (3, 4)), dtypes.int)
+      return A[i*2+j].store(m.index(i, j)).end(j, i).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(4, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [1, 2, 3, 4])
+
+  def test_stack_runtime_index_effectful_trailing_axis(self):
+    def kernel(A:UOp, B:UOp):
+      j = UOp.const(1, dtypes.int).after(A[0].store(A[0].load()+1))
+      return B[0].store(UOp.const(((1, 2), (3, 4)), dtypes.int).index(A[1].load(), j)).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor([0, 1]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([1, 1], [4]))
+
+  def test_stack_runtime_index_then_getitem(self):
+    def kernel(A:UOp, B:UOp):
+      return B[0].store(UOp.const(((1, 2), (3, 4)), dtypes.int).index(A[0].load())[A[1].load()]).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor([1, 0]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)[1].tolist(), [3])
+
   def test_identity_shrink_keeps_offset_effect(self):
     def kernel(A:UOp, B:UOp):
       s = UOp.const(0, dtypes.weakint).after(A[0].store(7))
