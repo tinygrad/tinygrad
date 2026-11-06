@@ -90,8 +90,7 @@ class MovementMixin:
       case None: return {"size":1, "boundary":(0,1), "stride":1, "collapse_dim":False}
       case int() | UOp(): # sint
         if resolve(index >= size, False) or resolve(index < -size, False): raise IndexError(f"{index=} is out of bounds with {size=}")
-        # TODO: is this right for (negative) symbolic?
-        b = index if resolve(index >= 0, False) else index + size
+        b = (index < 0).where(index + size, index) if isinstance(index, UOp) else index + size if index < 0 else index
         return {"size":size, "boundary":(b, b+1), "stride":1, "collapse_dim":True}
       case slice():
         if not all(s is None or isinstance(s, sint) for s in (index.start, index.stop, index.step)):
@@ -209,7 +208,7 @@ class MovementMixin:
     if self.ndim != len(arg):
       raise ValueError(f"{self.ndim=} != {len(arg)=}")
     ret = self._mop(Ops.SHRINK, arg=[(x[0], x[1]-x[0]) if x is not None else (0, s) for x, s in zip(arg, self.shape)])
-    return self if ret.shape == self.shape else ret
+    return self if ret.shape == self.shape and all(x is None or isinstance(x[0], int) for x in arg) else ret
 
   def permute(self, order, *args) -> Self:
     """

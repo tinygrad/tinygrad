@@ -77,11 +77,11 @@ def load_rewrites(data:VizData) -> None:
                                trace=k.tb if j==0 else None, depth=s.depth))
       if s.name == "View Base AST": data.ref_map[canonicalize_ast(_reconstruct(data, s.sink))] = i
       # get source and binary from Ops.PROGRAM
-      if s.name == "linearize/render": lin_idx = j
-      if lin_idx is not None and (j+1 == len(rewrites) or rewrites[j+1].depth <= rewrites[lin_idx].depth):
-        steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin_idx, depth=0))
-        steps.append(create_step("View Source", ("/code", i, len(steps)), lin_idx, depth=0))
-        steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, lin_idx), depth=0))
+      if s.name == "linearize/render": lin_idx, depth = j, s.depth
+      if lin_idx is not None and (j+1 == len(rewrites) or rewrites[j+1].depth <= depth):
+        steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin_idx, depth=depth))
+        steps.append(create_step("View Source", ("/code", i, len(steps)), lin_idx, depth=depth))
+        steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, lin_idx), depth=depth))
         lin_idx = None
       if s.name == "View Program": ki = data.trace.uop_fields[data.trace.uop_fields[s.sink][1][0]][2]
     for key in k.keys: data.ref_map[key] = i
@@ -133,8 +133,9 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if u.op is not Ops.SOURCE: argst = word_wrap(argst.replace(':', ''))
     if isinstance(u.arg, ProgramInfo):
       argst = word_wrap(repr(u.arg).replace(f"params={u.arg.params!r}", "params=(\n" + '\n'.join(render_uir(p) for p in u.arg.params) + "\n)"))
-    label = f"{str(u.op).split('.')[1]}{(chr(10)+argst) if argst else ''}"
-    if u.dtype != dtypes.void: label += f"\n{u.dtype}"
+    label = [f"{str(u.op).split('.')[1]}{(chr(10)+argst) if argst else ''}"]
+    with soft_err(lambda _: label.append("<ISSUE GETTING DTYPE>")):
+      if u.dtype != dtypes.void: label.append(str(u.dtype))
     for idx,x in enumerate(u.src[:1] if u.op in {Ops.STAGE, Ops.INDEX} else (u.src if u.op is not Ops.END else [])):
       if x in excluded:
         # walk through excluded movement ops to find the underlying CONST
@@ -142,31 +143,29 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
         while cx.op in GroupOp.Movement and len(cx.src) >= 1 and cx.src[0] in excluded: cx = cx.src[0]
         arg = f"{cx.val:g}" if cx.op is Ops.CONST and dtypes.is_float(cx.dtype) else cx.render() if cx.op is Ops.STACK \
             else cx.arg.name if isinstance(cx.arg, ParamArg) else f"{cx.arg}"
-        label += f"\n{cx.op.name}{idx} {arg}" + (f" {cx.src[0].op}" if len(cx.src) else "")
-    try:
+        label.append(f"{cx.op.name}{idx} {arg}" + (f" {cx.src[0].op}" if len(cx.src) else ""))
+    with soft_err(lambda _: label.append("<ISSUE GETTING LABEL>")):
       if len(rngs:=u.ranges):
-        label += f"\n({multirange_str(rngs, color=True)})"
+        label.append(f"({multirange_str(rngs, color=True)})")
       if u._shape is not None:
-        label += f"\n{shape_to_str(u.shape)}"
+        label.append(shape_to_str(u.shape))
       if u.op is Ops.CALL:
-        label += f"\n{u.src[0].key.hex()[:8]}\n{u.src[0].op}"
+        label += [u.src[0].key.hex()[:8], str(u.src[0].op)]
       if u.op in {Ops.INDEX, Ops.STAGE}:
         if len(u.src) > 1:
-          label += "\n"+(render_index(s.render() for s in u.src[1:]) if sum(len(s.toposort()) for s in u.src[1:]) < 50 else "INDEX TOO LARGE")
+          label.append(render_index(s.render() for s in u.src[1:]) if sum(len(s.toposort()) for s in u.src[1:]) < 50 else "INDEX TOO LARGE")
         ranges: list[UOp] = []
         for us in u.src[1:]: ranges += [s for s in us.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
-        if ranges: label += "\n"+' '.join([f"{s.render()}={s.vmax+1}" for s in ranges])
+        if ranges: label.append(' '.join([f"{s.render()}={s.vmax+1}" for s in ranges]))
       if u.op in {Ops.END, Ops.REDUCE, Ops.BACKEDGE} and len(trngs:=list(u.ended_ranges if u.op is Ops.BACKEDGE else
                                                                  UOp.sink(*u.src[range_start[u.op]:]).ranges)):
-        label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
-    except Exception:
-      label += "\n<ISSUE GETTING LABEL>"
+        label.append(' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs]))
     ref = data.ref_map.get(canonicalize_ast(u.body)) if u.op is Ops.CALL else None
-    if ref is not None: label += f"\ncodegen@{fmt_colored(data.ctxs[ref]['name'])}"
+    if ref is not None: label.append(f"codegen@{fmt_colored(data.ctxs[ref]['name'])}")
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
     color = uops_colors.get(u.op, "#ffffff")
-    graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":color,
+    graph[id(u)] = {"label":"\n".join(label), "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":color,
                     "ref":ref, "addrspace":addrspace_color}
   return graph
 

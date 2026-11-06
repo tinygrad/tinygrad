@@ -3,8 +3,9 @@ from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.helpers import DEV
-from tinygrad.llm.kernels.amd import (Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill,
-                                      QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, _is_rdna4, _is_cdna, Q4_K, IQ3_S, ExpertWeights)
+from tinygrad.llm.kernels.amd import (Linear, ExpertWeights, amd_custom_kernels_supported, flash_attention, gated_delta_prefill,
+                                      _is_rdna4, _is_cdna)
+from tinygrad.llm.kernels.amd_gguf import q8_quantize, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, Q4_K, IQ3_S
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.runtime.test_llm_quantized import QuantLinearMixin
 
@@ -70,12 +71,12 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_iq2_s_linear(self): self._test_quant_linear(22, 82, in_features=768, token_counts=(1, 3, 16))
 
   def test_wmma_linear_symbolic(self):
-    with patch("tinygrad.llm.kernels.amd.q8_quantize", side_effect=AssertionError("expected WMMA")):
+    with patch("tinygrad.llm.kernels.amd_gguf.q8_quantize", side_effect=AssertionError("expected WMMA")):
       for typ in QUANT_SIZES:
         self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=48, token_counts=(3, 17), bias=True, symbolic=True)
 
   def test_mixed_quant_linear_wmma_tiles(self):
-    with patch("tinygrad.llm.kernels.amd.q8_quantize", side_effect=AssertionError("expected WMMA")):
+    with patch("tinygrad.llm.kernels.amd_gguf.q8_quantize", side_effect=AssertionError("expected WMMA")):
       for typ in HALFWORD_QUANTS:
         self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=768, out_features=64, token_counts=(16, 32, 64), bias=True)
 

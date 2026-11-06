@@ -75,7 +75,7 @@ def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   for i, s in enumerate(x.src):
     new_src = s
     src_rngs = broadcast_rngs(x, s, ctx.range_map[x][0]) if x in ctx.range_map else ()
-    if s.op in GroupOp.Defines|{Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
+    if s.op in GroupOp.Defines|{Ops.MSTACK, Ops.MSELECT, Ops.AFTER, Ops.STAGE}:
       if x in ctx.range_map and i < data_src_count: new_src = new_src.index(*src_rngs)
     elif s in ctx.realize_map:
       assert isinstance(ctx.realize_map[s], list), "realize map must contain range list"
@@ -106,9 +106,9 @@ def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   if x.arg[1] == 0: return None
   if x not in ctx.range_map: raise RuntimeError("REDUCE has no ranges in rangeify, UOp verification failed")
   bx = create_bufferize_and_index_based_on_ranges(ctx, x)
-  # input ranges
-  new_ranges = list(ctx.range_map[x][0][:x.arg[1]])
-  return UOp(Ops.REDUCE, src=(bx.src[0],)+tuple(new_ranges), arg=(x.arg[0], 0))
+  # only non-singleton popped axes contribute loops alongside the REDUCE's own ranges
+  new_ranges = tuple(r for r in ctx.range_map[x][0][:x.arg[1]] if r.op is Ops.RANGE)
+  return UOp(Ops.REDUCE, src=(bx.src[0],)+new_ranges+bx.src[1:], arg=(x.arg[0], 0))
 
 def _stack_select(r0:UOp, srcs:list[UOp]) -> UOp:
   # MSB-first bit tree

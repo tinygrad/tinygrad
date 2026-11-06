@@ -35,6 +35,7 @@ def _tensor_holds(u:UOp) -> bool: return any((t:=tref()) is not None and t.uop i
 # **** Tensor helper functions ****
 
 def _fromnp(x: 'numpy.ndarray') -> UOp:
+  x = x.astype(x.dtype.newbyteorder("="), copy=False)
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
   # fake realize
   ret.buffer.allocate(x)

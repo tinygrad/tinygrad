@@ -333,6 +333,7 @@ class TestAsmKernel(unittest.TestCase):
       out = Tensor(np.full(t, 0xFFFFFFFF, dtype=np.uint32)).realize().custom_kernel(fxn=functools.partial(readlane_kernel, threads=t))[0]
       self.assertListEqual(out.tolist(), [i//32*32 for i in range(t)])
 
+  @Context(RENDER=1)
   def test_plus_tensor(self):
     out = Tensor.arange(1, 4).clone() + Tensor.arange(4, 7).clone()
     self.assertListEqual(out.tolist(), [5, 7, 9])

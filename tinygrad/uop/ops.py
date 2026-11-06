@@ -126,9 +126,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
     case Ops.CUSTOM_FUNCTION:
       # an external function states its return dtype in the arg
       return arg.dtype
-    case Ops.CUSTOM | Ops.CUSTOMI:
-      assert isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[1], DType), f"CUSTOM/CUSTOMI arg must be (str, DType), got {arg}"
-      return arg[1]
     case Ops.INS:
       # arg is (instruction, dtype, *registers), a queue command or an asm line is void
       assert isinstance(arg, tuple) and len(arg) >= 2 and isinstance(arg[1], DType), f"INS arg must be (instruction, DType, *registers), got {arg}"
@@ -222,6 +219,7 @@ class _UOpTuple(tuple):
 
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin.rand import RandMixin
+from tinygrad.mixin.elementwise import ElementwiseMixin
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
@@ -351,11 +349,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         assert len(self.src[0].as_shape) <= 1
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
-      case Ops.CUSTOM | Ops.CUSTOMI:
-        if self.dtype is dtypes.void: return None
-        input_shapes = [x._shape for x in self.src if x._shape is not None]
-        return _broadcast_shape(*input_shapes) if input_shapes else None
-      case Ops.CUSTOM_FUNCTION: return None if self.dtype is dtypes.void else ()
+      case Ops.CUSTOM_FUNCTION:
+        return self.src[0].as_shape if self.dtype != dtypes.void else None
       case Ops.PYLITERAL: return None
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
@@ -576,7 +571,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # for use after movement ops have been removed
     return UOp.const(b, self.dtype).broadcast(self.max_numel())
   def ufix(self, x):
-    if isinstance(x, UOp): return x
+    # only a python const becomes a UOp, a Tensor passes through so _broadcasted lifts self into a Tensor
+    if isinstance(x, ElementwiseMixin): return x
     return UOp.const(x)
   def broadcast(self, count:int):
     if count == 1: return self
@@ -1206,8 +1202,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
-  def custom_function(name:str, *src:UOp, dtype:DType=dtypes.void) -> UOp:
-    return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=CustomFunction(name, dtype))
+  def custom_function(name:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False, inline:bool=False) -> UOp:
+    shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
+    return UOp(Ops.CUSTOM_FUNCTION, src=shape_src+src, arg=CustomFunction(name, dtype, fmt, inline))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
@@ -1349,6 +1346,8 @@ OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_F
 class CustomFunction:
   name: str
   dtype: DType = dtypes.void
+  fmt: bool = False
+  inline: bool = False
 
 @dataclass(frozen=True)
 class CallInfo:
@@ -1734,18 +1733,13 @@ class CountCtx(itertools.count): pass
 class MapCtx(dict): pass
 
 class RewriteContext:
-  def __init__(self, pm, bpm, ctx=None, enter_calls=False, cache_key=None):
+  def __init__(self, pm, bpm, ctx=None, enter_calls=False):
     self.pm: PatternMatcher|None = pm
     self.bpm: PatternMatcher|None = bpm
     self.bpm_cache: dict[UOp, UOp|None] = {}
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
     self.enter_calls = enter_calls
-    self.cache_key = cache_key
-
-  def cached(self, n:UOp) -> UOp|None:
-    if self.cache_key is not None and (ref:=n.__dict__.get("_rewrite_cache", {}).get(self.cache_key)) is not None: return ref()
-    return None
 
   # no cache needed: pm_rewrite is called at most once per UOp due to the replace dict check in unified_rewrite
   def pm_rewrite(self, x:UOp) -> UOp|None: return unwrap(self.pm).rewrite(x, self.ctx)
@@ -1761,9 +1755,6 @@ class RewriteContext:
     while stack:
       n, processed = stack.pop()
       if n in self.replace: continue
-      if not processed and (cached:=self.cached(n)) is not None:
-        self.replace[n] = cached
-        continue
       if not processed:
         # bottom-up: try bpm on original node first, if it rewrites, use result as-is (no traversal into replacement)
         if self.bpm is not None and (rewritten:=self.cached_bpm_rewrite(n)) is not None:
@@ -1792,10 +1783,6 @@ class RewriteContext:
       if len(stack) > REWRITE_STACK_LIMIT: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
-      if stage == 0 and (cached:=self.cached(n)) is not None:
-        self.replace[n] = cached
-        if n in waitlist: stack.extend(waitlist.pop(n))
-        continue
       if stage == 0:
         # if bottom up, we rewrite this node early. in both cases, we add its srcs to the stack
         if self.bpm is not None:
@@ -1862,18 +1849,11 @@ class RewriteContext:
 @rewrite_group(new_ctx=False)
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False,
                   init_ctx:type|None=None) -> UOp:
-  cache_key = (weakref.ref(pm), weakref.ref(bpm) if bpm is not None else None, bottom_up, walk, enter_calls, init_ctx,
-               tuple(tuple(v.value) if isinstance(v.value, list) else v.value for v in ContextVar._cache.values())) if ctx is None else None
-  if cache_key is not None and (ref:=sink.__dict__.get("_rewrite_cache", {}).get(cache_key)) is not None and (ret:=ref()) is not None: return ret
   if init_ctx is not None:
     assert ctx is None
     ctx = init_ctx()
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls, cache_key if init_ctx is None else None)
-  ret = rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
-  if cache_key is not None:
-    for node, rewritten in (rewrite_ctx.replace.items() if init_ctx is None else ((sink, ret),)):
-      node.__dict__.setdefault("_rewrite_cache", {})[cache_key] = weakref.ref(rewritten)
-  return ret
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls)
+  return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
 
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
