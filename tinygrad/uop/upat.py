@@ -1,7 +1,7 @@
 from typing import Any, Callable
 import itertools, inspect, functools, types
 from tinygrad.helpers import partition, dedup, Context
-from tinygrad.uop.ops import UPat, UOp, Ops, PatternMatcher, graph_rewrite, deconstruct_function, CustomInfo
+from tinygrad.uop.ops import UPat, UOp, Ops, PatternMatcher, graph_rewrite, deconstruct_function
 
 class UPatCompileError(Exception): pass
 
@@ -21,42 +21,42 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   and_clause:list[UOp] = []
   if self.op is not None:
     if len(self.op) > 1:
-      and_clause.append(UOp.custom_function("{0}.op in {1}").call(base, UOp(Ops.PYLITERAL, arg=frozenset(self.op)), aux=CustomInfo()))
-    else: and_clause.append(UOp.custom_function("{0}.op is {1}").call(base, UOp(Ops.PYLITERAL, arg=self.op[0]), aux=CustomInfo()))
+      and_clause.append(UOp.custom_function("{0}.op in {1}").call(base, UOp(Ops.PYLITERAL, arg=frozenset(self.op))))
+    else: and_clause.append(UOp.custom_function("{0}.op is {1}").call(base, UOp(Ops.PYLITERAL, arg=self.op[0])))
   if self.arg is not None:
-    if isinstance(self.arg, int): and_clause.append(UOp.custom_function("{0}.arg == "+str(int(self.arg))).call(base, aux=CustomInfo()))
-    else: and_clause.append(UOp.custom_function("{0}.arg == {1}").call(base, UOp(Ops.PYLITERAL, arg=self.arg), aux=CustomInfo()))
+    if isinstance(self.arg, int): and_clause.append(UOp.custom_function("{0}.arg == "+str(int(self.arg))).call(base))
+    else: and_clause.append(UOp.custom_function("{0}.arg == {1}").call(base, UOp(Ops.PYLITERAL, arg=self.arg)))
   if self.strict_length or self.required_len > 0:
     and_clause.append(UOp.custom_function("len({0}.src)"+(" == " if self.strict_length else " >= ")+str(self.required_len)
-                                          ).call(base, aux=CustomInfo()))
-  if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp.custom_function(self.name).call(aux=CustomInfo(inline=True)), base)))
+                                          ).call(base))
+  if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp.custom_function(self.name).call(inline=True), base)))
   if self.match_dtype is not None:
     if len(self.match_dtype) > 1:
-      and_clause.append(UOp.custom_function("{0}.dtype in {1}").call(base, UOp(Ops.PYLITERAL, arg=frozenset(self.match_dtype)), aux=CustomInfo()))
+      and_clause.append(UOp.custom_function("{0}.dtype in {1}").call(base, UOp(Ops.PYLITERAL, arg=frozenset(self.match_dtype))))
     else:
-      and_clause.append(UOp.custom_function("{0}.dtype is {1}").call(base, UOp(Ops.PYLITERAL, arg=self.match_dtype[0]), aux=CustomInfo()))
+      and_clause.append(UOp.custom_function("{0}.dtype is {1}").call(base, UOp(Ops.PYLITERAL, arg=self.match_dtype[0])))
   if self.src is not None:
     # single match
     if len(self.src) == 1 and isinstance(self.src[0], tuple):
       and_clause += [_get_clause(s, base.index(i), depth) for i,s in enumerate(self.src[0])]
     # repeat match
     elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
-      it = UOp.custom_function(f"ituop{depth}").call(aux=CustomInfo(inline=True))
+      it = UOp.custom_function(f"ituop{depth}").call(inline=True)
       match = _get_clause(next(self.src[0]), it, depth+1)
       # lift named binds out of the repeat: they bind the first src, and every element must be identical to it
       stores, pred = partition(flatands(match), lambda x: x.op is Ops.STORE)
       for st in stores:
         first = st.src[1].substitute({it: base.index(0)})
-        pred.append(UOp.custom_function("{0} is {1}").call(st.src[1], first, aux=CustomInfo()))
+        pred.append(UOp.custom_function("{0} is {1}").call(st.src[1], first))
         and_clause.append(UOp(Ops.STORE, src=(st.src[0], first)))
-      if len(stores): and_clause.append(UOp.custom_function("len({0}.src) != 0").call(base, aux=CustomInfo()))
-      and_clause.append(UOp.custom_function("all([{0} for {1} in {2}.src])").call(UOp(Ops.AND, src=tuple(pred)), it, base, aux=CustomInfo()))
+      if len(stores): and_clause.append(UOp.custom_function("len({0}.src) != 0").call(base))
+      and_clause.append(UOp.custom_function("all([{0} for {1} in {2}.src])").call(UOp(Ops.AND, src=tuple(pred)), it, base))
     # multi match (fork)
     elif len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
       fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
       and_clause.append(UOp(Ops.OR, src=tuple(fork_cond)))
     else: raise RuntimeError("broken")
-  return UOp(Ops.AND, src=tuple(and_clause)) if and_clause else UOp.custom_function("True").call(aux=CustomInfo(inline=True))
+  return UOp(Ops.AND, src=tuple(and_clause)) if and_clause else UOp.custom_function("True").call(inline=True)
 
 # *** pattern matcher ***
 
@@ -96,7 +96,7 @@ def do_process_and(a:UOp) -> UOp|None:
       for store in stores:
         if store.src[0] in dict_stores:
           # duplicate store is an identity compare
-          new_src.append(UOp.custom_function("{0} is {1}").call(dict_stores[store.src[0]], store.src[1], aux=CustomInfo()))
+          new_src.append(UOp.custom_function("{0} is {1}").call(dict_stores[store.src[0]], store.src[1]))
           found = True
         else:
           dict_stores[store.src[0]] = store.src[1]
@@ -113,28 +113,28 @@ pm_proc = PatternMatcher([(UPat(Ops.AND, name="a"), do_process_and)], compiled=F
 # renderer
 def wrap(ctx, x) -> UOp:
   ctx[ret:=f"a{len(ctx)}"] = x.arg
-  return UOp.custom_function(ret).call(aux=CustomInfo(inline=True))
+  return UOp.custom_function(ret).call(inline=True)
 
 pm_renderer = PatternMatcher([
   (UPat(Ops.PYLITERAL, name="x"), wrap),
 
   # AND/OR of CUSTOMI fragments becomes a single CUSTOMI
   (UPat(Ops.AND, src=UPat(Ops.CALL), name="x"), lambda x:
-   UOp.custom_function("(" + ' and '.join(y.body.arg.name for y in x.src) + ")").call(aux=CustomInfo(inline=True))
-   if all(y.arg.aux.inline for y in x.src) else None),
+   UOp.custom_function("(" + ' and '.join(y.body.arg.name for y in x.src) + ")").call(inline=True)
+   if all(y.arg.inline for y in x.src) else None),
   (UPat(Ops.OR, src=UPat(Ops.CALL), name="x"), lambda x:
-   UOp.custom_function("(" + ' or '.join(y.body.arg.name for y in x.src) + ")").call(aux=CustomInfo(inline=True))
-   if all(y.arg.aux.inline for y in x.src) else None),
+   UOp.custom_function("(" + ' or '.join(y.body.arg.name for y in x.src) + ")").call(inline=True)
+   if all(y.arg.inline for y in x.src) else None),
 
   (UPat(Ops.CALL, name="x"), lambda x: UOp.custom_function(x.body.arg.name.format(*[y.body.arg.name for y in x.src[1:]])).call(
-    aux=CustomInfo(inline=True)) if not x.arg.aux.inline and all(y.op is Ops.CALL and y.arg.aux.inline for y in x.src[1:]) else None),
+    inline=True) if not x.arg.inline and all(y.op is Ops.CALL and y.arg.inline for y in x.src[1:]) else None),
   (UPat(Ops.INDEX, src=(UPat(Ops.CALL, name="x"), UPat(Ops.CONST, name="c"))),
-   lambda x,c: UOp.custom_function(x.body.arg.name + f".src[{c.val}]").call(aux=CustomInfo(inline=True)) if x.arg.aux.inline else None)
+   lambda x,c: UOp.custom_function(x.body.arg.name + f".src[{c.val}]").call(inline=True) if x.arg.inline else None)
 ], compiled=False)
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
   # if the whole clause collapsed to a single predicate (no binds), rewrap it
-  if x.op is Ops.CALL and x.arg.aux.inline: x = UOp(Ops.AND, (x,))
+  if x.op is Ops.CALL and x.arg.inline: x = UOp(Ops.AND, (x,))
   assert x.op is Ops.AND
   and_pieces, store_pieces = [], []
   or_pieces: list[str] = []
@@ -143,9 +143,9 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
       assert len(or_pieces) == 0 and len(s.src) >= 1
       for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1))
     elif s.op is Ops.STORE:
-      assert all(y.op is Ops.CALL and y.arg.aux.inline for y in s.src)
+      assert all(y.op is Ops.CALL and y.arg.inline for y in s.src)
       store_pieces.append(f"{s.src[0].body.arg.name}={s.src[1].body.arg.name}")
-    elif s.op is Ops.CALL and s.arg.aux.inline: and_pieces.append(s.body.arg.name)
+    elif s.op is Ops.CALL and s.arg.inline: and_pieces.append(s.body.arg.name)
     else: raise UPatCompileError(f"can't compile this {s}")
   # if we have an or, render it
   if len(or_pieces):
@@ -158,7 +158,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
   return [f"{'  '*depth}if {and_clause}: return _ret"]
 
 def _get_code(self:UPat, has_ctx:bool):
-  ret = _get_clause(self, UOp.custom_function("uop").call(aux=CustomInfo(inline=True)))
+  ret = _get_clause(self, UOp.custom_function("uop").call(inline=True))
   try:
     # TODO: this should be tracked in a "system" rewrite, not untracked or tracked with kernel
     with Context(TRACK_MATCH_STATS=0):
