@@ -351,6 +351,18 @@ class TransformerConfig:
 _partial_out = [False]
 # and the sublayer's input rows of this device (before the gather): per token work (the router) runs on them, its results are gathered
 _sp_rows:list[Tensor|None] = [None]
+# batched decoding with the streams' rows split over the devices (SEQ_SPLIT, see Transformer._forward_seqs): the real rows of a device (its
+# rows are padded to SEQ_SPLIT_ROWS), 0: not split
+_seq_split = [0]
+SEQ_SPLIT_ROWS = 32
+def _split_real(x:Tensor) -> Tensor:
+  """(B, N*SEQ_SPLIT_ROWS, ...) split padded rows: the real rows (B, N*R, ...), split"""
+  N, R, B, rest = len(cast(tuple, x.device)), _seq_split[0], x.shape[0], x.shape[2:]
+  return x.reshape(B, N, SEQ_SPLIT_ROWS, *rest)[:, :, :R].reshape(B, N*R, *rest)
+def _split_pad(x:Tensor) -> Tensor:
+  """(B, N*R, ...) split real rows: the padded rows (B, N*SEQ_SPLIT_ROWS, ...), split (zeros past the real ones)"""
+  N, R, B, rest = len(cast(tuple, x.device)), _seq_split[0], x.shape[0], x.shape[2:]
+  return x.reshape(B, N, R, *rest).pad((None, None, (0, SEQ_SPLIT_ROWS - R), *[None]*len(rest))).reshape(B, N*SEQ_SPLIT_ROWS, *rest)
 # the tokens of a prefill chunk (its rows past them are padding): the experts don't take the padding rows
 _ffn_rows:list[UOp|int|None] = [None]
 # (MB_DEP=state: the states and caches a micro batch's sublayer writes (the tensors after their writes), the next batch's sublayer waits for
@@ -832,6 +844,7 @@ class GatedResidual:
 
   def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], Tensor], norm:Callable[[Tensor], Tensor]|None=None, rows:bool=False) -> Tensor:
     # (norm: the streams are normed by the mix. rows: static padded rows, the sublayer's input and output too)
+    if _seq_split[0] and token_sharded(xs): return self._split_call(xs, sublayer)
     if (fused:=self._fused(xs)) is not None: mixed, inj = fused
     else:
       mixed, xn = self.mix(xs)
@@ -839,6 +852,22 @@ class GatedResidual:
     out = sublayer(mixed)
     if out.shape[1] is not xs.shape[1]: out = out.pad_to((out.shape[0], xs.shape[1], out.shape[2]))
     return xs + out.unsqueeze(2) * (inj.sigmoid() * 2).unsqueeze(-1)
+
+  def _split_call(self, xs:Tensor, sublayer:Callable[[Tensor], Tensor]) -> Tensor:
+    """
+    batched decoding with the streams' rows split over the devices (padded, see _seq_split): every device the mix and coefficients of its rows,
+    the sublayer sees all the real rows (gathered) and returns its partial sums, every device sums its rows of them (as a prefill's phases)
+    """
+    mixed, post, _ = self.pre_split(xs)
+    own = _split_real(mixed).contiguous()
+    x = all_gather_q8(own, 1) if getenv("AG_Q8", 1) and own.shape[-1] % 256 == 0 else all_gather(own, 1, dtypes.half)
+    _partial_out[0], _sp_rows[0] = True, own
+    try: out = sublayer(x)
+    finally: _partial_out[0], _sp_rows[0] = False, None
+    # (summed and split already: moe_combine_scatter)
+    done = out.ndim == own.ndim and token_sharded(out)
+    out = out if done else reduce_scatter(out, 1) if out.ndim == own.ndim + 1 else shard_rows(out, 1)
+    return self.post_split(_split_pad(out), post, post, xs)
 
   def pre_split(self, xs:Tensor, norm:Callable[[Tensor], Tensor]|None=None) -> tuple[Tensor, Tensor, Tensor]:
     """
@@ -1108,13 +1137,17 @@ class FFNBlock:
     self._init_state(x)
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     # (decoding: the output's quantization made by its last kernel is returned too, the next block's input's: BLOCK_Q8_OUT)
-    q8_out = T is None and self.config.hc is not None and not self.gated and bool(getenv("BLOCK_Q8_OUT", 1))
+    q8_out = T is None and self.config.hc is not None and not self.gated and bool(getenv("BLOCK_Q8_OUT", 1)) and not _seq_split[0]
     # (the block before's output's quantization, if x is that output: its function's arguments, the quantization of x in it)
     xq = _block_q8[0][1] if q8_out and _block_q8[0] is not None and _block_q8[0][0] is x.uop else ()
     if ple_emb is not None and not hasattr(self, "ple"): ple_emb = None
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp, T:int|UOp|None, ple_emb:Tensor|None, *xq:Tensor):
-      if ple_emb is not None: x = x + self._ple(x, ple_emb, start_pos, T)
+      if ple_emb is not None:
+        if _seq_split[0] and token_sharded(x):
+          # (split rows: the n-gram embedding of all the real rows, every device adds its rows of it)
+          x = x + _split_pad(shard_rows(self._ple(all_gather(_split_real(x).contiguous(), 1, dtypes.half).float(), ple_emb, start_pos, T), 1))
+        else: x = x + self._ple(x, ple_emb, start_pos, T)
       if xq:
         fx = x.flatten(2)
         q8_quantize_known(fx, int(prod(fx.shape[:-1])), int(fx.shape[-1]), True, tuple(xq))
@@ -2389,14 +2422,14 @@ class GatedDeltaNetBlock(FFNBlock):
                      unwrap(self.ssm_norm.weight), Tensor(groups[0][0]), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps, row=0, rows=T,
                      positions=sb.positions if sb is not None else _group_positions(groups, self.pool_rec.device), groups=len(groups), S=S, SC=SC,
                      slots=sb.slots if sb is not None else None)
-      return self.ssm_out(z)
+      return _out(self.ssm_out, z)
     # (every row's kernel reads its row of the inputs)
     starts = list(itertools.accumulate((t for _, t in groups), initial=0))
     zs = [kda_decode(self.slot_rec[g], self.slot_conv[g][:3], projs, weights, gate, alpha, beta, self._dt_ch, self.ssm_a,
                      unwrap(self.ssm_norm.weight), Tensor(pos), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps, row=starts[g], rows=T,
                      SC=int(self.slot_conv[g][0].shape[0]))
           for g, (pos, T) in enumerate(groups)]
-    return self.ssm_out(zs[0].cat(*zs[1:], dim=1))
+    return _out(self.ssm_out, zs[0].cat(*zs[1:], dim=1))
 
   def _init_slots(self, n:int, ctx:int, half:bool|None=None):
     """
@@ -2434,7 +2467,7 @@ class GatedDeltaNetBlock(FFNBlock):
                      [w["weight"] for w in (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v)], self._gate(x),
                      self._alpha(x), self.ssm_beta(x), self._dt_ch, self.ssm_a, unwrap(self.ssm_norm.weight),
                      Tensor(start_pos), unwrap(self.config.ssm).gate_lower_bound, self.ssm_norm.eps)
-      return self.ssm_out(z)
+      return _out(self.ssm_out, z)
     out_gate = self._gate(x)
     out_gate = out_gate.reshape(B, Tq, self.num_v_heads, self.head_v_dim)
     # (a prefill's many rows: few outputs a device, their kernel)
@@ -4347,7 +4380,17 @@ class Transformer:
       x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
       ple_emb = self._ple_emb(ple_rows.unsqueeze(0))
       _seq_batch[0], _batch_rows[0] = batch(starts, k+1), [(s, k+1) for s in starts]
-      for block in self.blk: x = block(x, 0, ple_emb=ple_emb)
+      # SEQ_SPLIT: the streams' rows split over the devices (whole sequences on each, padded to SEQ_SPLIT_ROWS): the hyper-connections and the
+      # router of a device's rows only, a sublayer's input gathered and its output reduce-scattered (the bytes of an allreduce)
+      N = len(devs) if isinstance(devs, tuple) else 1
+      split = bool(getenv("SEQ_SPLIT", 0)) and not pv and N > 1 and (G*(k+1)) % N == 0 and G*(k+1) // N <= SEQ_SPLIT_ROWS
+      if split:
+        _seq_split[0] = G*(k+1) // N
+        x = _split_pad(shard_rows(x, 1)).contiguous()
+      try:
+        for block in self.blk: x = block(x, 0, ple_emb=ple_emb)
+        if split: x = all_gather(_split_real(x).contiguous(), 1, dtypes.half).float()
+      finally: _seq_split[0] = 0
       effects:list[Tensor] = []
       if pv:
         sp, _seq_prompt[0], _seq_batch[0], _batch_rows[0] = cast(SeqPrompt, _seq_prompt[0]), None, None, None
