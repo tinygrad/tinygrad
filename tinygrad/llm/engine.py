@@ -2,7 +2,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from typing import cast
-from tinygrad.helpers import getenv, round_up
+from tinygrad.helpers import round_up
 
 # ******** sequences sharing the model's caches (Transformer.seq_*): the host's side ********
 # every resident sequence (a conversation) has a slot of the recurrent states and a region of rows of the attention caches. a prompt continues
@@ -58,7 +58,7 @@ def common_prefix(a:list[int], b:list[int]) -> int:
 
 class SeqEngine:
   # (the room for a reply a region has past its prompt when it's made, more is made as it's needed)
-  ROOM = getenv("SEQ_ROOM", 2048)
+  ROOM = 2048
   EVICT_FIRST = 3  # (the idle ones evicted for a region before the regions are compacted)
   def __init__(self, model):
     from tinygrad.llm.model import REGION_ALIGN
@@ -86,8 +86,7 @@ class SeqEngine:
     if not idle: return False
     self.seqs.remove(out:=min(idle, key=lambda s: s.used))
     self.evictions += 1
-    stashed = self._stash(out)
-    if getenv("SEQ_LOG", 0): print(f"seq slot {out.slot} evicted ({out.n} tokens{', stashed' if stashed else ''})", flush=True)
+    self._stash(out)
     return True
   def _stash(self, s:Seq) -> bool:
     """
@@ -245,7 +244,6 @@ class SeqEngine:
       self.model._token_host[s.base:s.base+n] = __import__("array").array('i', stashed.tokens)
       # (as it was: prefilled from its last token's states, or its checkpoint restored)
       s.tokens, s.n, s.hrow, s.ckpt = list(stashed.tokens), n, stashed.hrow, stashed.ckpt
-      if getenv("SEQ_LOG", 0): print(f"seq slot {s.slot} unstashed ({n} tokens, from {start})", flush=True)
       return s, start, start < n
     finally:
       # (back in the stash if it's not in the caches now)
@@ -261,25 +259,9 @@ class SeqEngine:
     s.mtp, s.j, s.par, s.y, s.temp = len(ids), 0, 1, [first] + [0]*self.k, temp
     return first
 
-  # ** a mixed step: a prompt prefilled with a step of the others (see Transformer.seq_step)
-  def mixable(self, n:int, ids:list[int], start:int) -> bool:
-    return callable(getattr(self.model, "mix_size", None)) and self.model.mix_size(n, len(ids) - start, start) is not None
-  def mix_prompt(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, float]) -> tuple:
-    """the prompt of a mixed step: its tokens into the token buffer, its slot's states the model's (its checkpoint's if restore)"""
-    if restore: self.model.seq_ckpt(False, s.slot, s.ckpt)
-    self.model._token_host[s.base+start:s.base+len(ids)+1] = __import__("array").array('i', ids[start:] + [-1])
-    self.model._seq_copy_call(False, s.slot, start, 0 if restore else s.hrow, keep=start > 0)
-    return (s.slot, s.base, start, len(ids) - start, temp)
-  def mix_done(self, s:Seq, ids:list[int], first:int, temp:tuple[float, float]):
-    """after a mixed step: the model's states into the prompt's slot, its checkpoint, s decodes from the token after it (as prefill)"""
-    self.model._seq_copy_call(True, s.slot, len(ids), 0)
-    self.model.seq_ckpt(True, s.slot, len(ids))
-    s.tokens, s.n, s.hrow, s.ckpt, s.used = ids + [first], len(ids), 0, len(ids), time.perf_counter()
-    s.mtp, s.j, s.par, s.y, s.temp = len(ids), 0, 1, [first] + [0]*self.k, temp
-
-  def step(self, seqs:list[Seq], prompt:tuple|None=None) -> list[list[int]]:
+  def step(self, seqs:list[Seq]) -> list[list[int]]:
     """a step of decoding of the sequences: the tokens every one accepted (its caches have the ones before them)"""
-    k, out = self.k, self.model.seq_step([(s.slot, s.base, s.mtp, s.j, s.par, s.y, s.temp) for s in seqs], prompt)
+    k, out = self.k, self.model.seq_step([(s.slot, s.base, s.mtp, s.j, s.par, s.y, s.temp) for s in seqs])
     ret = []
     for s, (sampled, drafts) in zip(seqs, out):
       j = next((i for i in range(k) if drafts[i] != sampled[i]), k)
@@ -292,14 +274,18 @@ class SeqEngine:
       ret.append(sampled[:j+1])
     return ret
 
+  def forget(self):
+    """the idle sequences and the stash dropped (their states may be wrong): every prompt is prefilled from the start"""
+    for s in [s for s in self.seqs if not s.active]: self.seqs.remove(s)
+    while self._drop_one() is not None: pass
+
   def fits(self, length:int) -> bool: return self._need(length) <= self.rows
   def pause(self, s:Seq):
     """s (decoding) out of the caches, into the stash if it fits: its slot and region free, a prompt of its tokens goes on from it"""
     s.active, s.used = False, time.perf_counter()
     self.seqs.remove(s)
     self.evictions += 1
-    stashed = self._stash(s)
-    if getenv("SEQ_LOG", 0): print(f"seq slot {s.slot} paused ({s.n} tokens{', stashed' if stashed else ''})", flush=True)
+    self._stash(s)
 
   def stop(self, s:Seq, kept:int):
     """the end of the decoding of s: its tokens past `kept` (of its reply, after its end) aren't its"""
