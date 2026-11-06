@@ -85,13 +85,11 @@ def shard_subview(full:UOp, multi:UOp) -> UOp:
   return full
 
 def alu_multi(root:UOp):
-  multis = [m for m in root.src if m.op is Ops.UNSHARD]
-  sharding = multis[0].sharding
-  target = multis[0]
+  target = next(m for m in root.src if m.op is Ops.UNSHARD)
   def can_handle(m:UOp) -> bool:
     # same sharding (peel the UNSHARD), or a whole unsharded value of the full tile shape (takes its per-shard
     # sub-view), or a broadcast scalar
-    if m.sharding: return m.sharding == sharding
+    if m.sharding: return m.sharding == target.sharding
     return m.shape == () or tuple(m.shape) == tuple(target.shape)
   if all(can_handle(m) for m in root.src):
     # every src either has the target sharding or is whole on every shard: run the alu per-shard
@@ -105,19 +103,16 @@ def alu_multi(root:UOp):
 
 def reduce_multi(root:UOp, multi:UOp):
   op, num_axes = root.arg
-  sharding = multi.sharding
-  reduced = [(ax, rng) for ax, rng in sharding if ax < num_axes]
-  remaining = [(ax, rng) for ax, rng in sharding if ax >= num_axes]
   local = multi.src[0]._rop(op, tuple(range(num_axes)))
-  if reduced:
-    assert not remaining, f"partial allreduce not supported for multi-axis sharding {sharding}"
+  if any(ax < num_axes for ax in multi.arg):
+    assert all(ax < num_axes for ax in multi.arg), f"partial allreduce not supported for multi-axis sharding {multi.arg}"
     # all sharded axes are reduced: full allreduce
     if ALLREDUCE_CAST and multi.src[0].op is Ops.CAST and multi.src[0].src[0].dtype in (dtypes.bfloat16, dtypes.half):
       orig_dtype = multi.src[0].src[0].dtype
       return local.cast(orig_dtype).allreduce(op, multi.device).cast(local.dtype)
     return local.allreduce(op, multi.device)
   # no sharded axes reduced: piecewise, keep all remaining sharding
-  return local.unshard(tuple(ax - num_axes for ax, _ in remaining), multi.src[1:])
+  return local.unshard(tuple(ax - num_axes for ax in multi.arg), multi.src[1:])
 
 def reshape_multi(root:UOp, multi:UOp):
   if prod(multi.shape) != prod(new_shape:=root.marg): raise RuntimeError("reshape must maintain prod(shape)")
@@ -138,19 +133,18 @@ def reshape_multi(root:UOp, multi:UOp):
 
 def expand_multi(root:UOp, multi:UOp):
   shift = len(root.marg)
-  return multi.src[0]._mop(Ops.EXPAND, arg=root.marg).unshard(tuple(ax+shift for ax,_ in multi.sharding), multi.src[1:])
+  return multi.src[0]._mop(Ops.EXPAND, arg=root.marg).unshard(tuple(ax+shift for ax in multi.arg), multi.src[1:])
 
 def pad_multi(root:UOp, multi:UOp):
-  for ax, _ in multi.sharding:
+  for ax in multi.arg:
     assert root.marg[ax] == (0, multi.shape[ax]), f"padding not supported for {root.marg=}"
-  counts = {a for a,_ in multi.sharding}
-  local_pad = tuple((0, multi.src[0].shape[a]) if a in counts else s for a,s in enumerate(root.marg))
+  local_pad = tuple((0, multi.src[0].shape[a]) if a in multi.arg else s for a,s in enumerate(root.marg))
   return multi.src[0]._mop(Ops.PAD, local_pad).unshard(multi.arg, multi.src[1:])
 
 def permute_multi(root:UOp, multi:UOp):
   # all permutes supported!
   return multi.src[0].permute(root.marg) \
-    .unshard(tuple(root.marg.index(ax) for ax,_ in multi.sharding), multi.src[1:])
+    .unshard(tuple(root.marg.index(ax) for ax in multi.arg), multi.src[1:])
 
 def shrink_multi(root:UOp, multi:UOp):
   # resolve each sharded axis independently: a shrink to exactly this range's own shard resolves the UNSHARD along
@@ -182,7 +176,7 @@ def stack_multi(root:UOp):
   sharding = multis[0].sharding
   if all(m.sharding == sharding for m in multis):
     srcs = [m.src[0] if m.op is Ops.UNSHARD else shard_subview(m, multis[0]) for m in root.src]
-    return UOp(Ops.STACK, src=tuple(srcs)).unshard(tuple(ax+1 for ax,_ in sharding), multis[0].src[1:])
+    return UOp(Ops.STACK, src=tuple(srcs)).unshard(tuple(ax+1 for ax in multis[0].arg), multis[0].src[1:])
   # resharding: single-axis fallback
   axis = root.axis
   assert axis is not None
@@ -215,27 +209,18 @@ def _shard_idx(rng:UOp, dev_idx:int) -> int:
   return 0 if not drngs else int(rng.substitute({drngs[0]: drngs[0].const_like(dev_idx)}).ssimplify())
 
 def copy_multi(multi:UOp, device:str | tuple[str, ...]):
-  sharding = multi.sharding
   if isinstance(device, str):
-    # reconstruct by concatenating along each axis from last to first
-    piece_info: list[tuple[tuple, UOp]] = []
-    for i in range(len(multi.device)):
-      idxs = tuple(_shard_idx(r, i) for _, r in sharding)
-      piece_info.append((idxs, multi.src[0].mselect(i).copy_to_device(device)))
-    for j in range(len(sharding) - 1, -1, -1):
-      ax, rng = sharding[j]
-      groups: dict[tuple, list[tuple[int, UOp]]] = {}
-      for idxs, p in piece_info:
-        key = idxs[:j] + idxs[j+1:]
-        groups.setdefault(key, []).append((idxs[j], p))
-      piece_info = []
-      for key in sorted(groups):
-        grp = sorted(groups[key], key=lambda x: x[0])
-        piece_info.append((key, grp[0][1].cat(*[x[1] for x in grp[1:]], dim=ax)))
-    return piece_info[0][1]
+    # reconstruct by concatenating along each axis from last to first, pieces sorted by their shard coordinates
+    pieces = sorted([(tuple(_shard_idx(r, i) for r in multi.src[1:]), multi.src[0].mselect(i).copy_to_device(device))
+                     for i in range(len(multi.device))], key=lambda x: x[0])
+    for ax in reversed(multi.arg):
+      groups: dict[tuple, list[UOp]] = {}
+      for idxs, p in pieces: groups.setdefault(idxs[:-1], []).append(p)
+      pieces = [(key, grp[0].cat(*grp[1:], dim=ax)) for key, grp in groups.items()]
+    return pieces[0][1]
   # multi-device target: unshard all axes and allreduce
   val = multi.src[0]
-  for ax, rng in sharding:
+  for ax, rng in multi.sharding:
     bsz = val.shape[ax]
     val = val.pad(tuple((0,0) if a != ax else (bsz*rng, bsz*int(rng.vmax) - bsz*rng) for a in range(len(val.shape))))
   return val.allreduce(Ops.ADD, device)

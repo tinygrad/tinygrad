@@ -976,6 +976,10 @@ class Test2DShard(unittest.TestCase):
     out = t.contiguous().realize()
     np.testing.assert_equal(out.numpy(), ref.numpy())
 
+  def test_2d_shard_copy_to_one(self):
+    ref = Tensor.arange(8*6).reshape(8, 6).contiguous().realize()
+    np.testing.assert_equal(self._shard_2d(ref).to(Device.DEFAULT).numpy(), ref.numpy())
+
   def test_2d_shard_clone(self):
     ref = Tensor.arange(16).reshape(4, 4).realize()
     t = self._shard_2d(ref)
