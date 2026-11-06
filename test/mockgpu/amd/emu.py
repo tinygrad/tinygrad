@@ -1774,19 +1774,6 @@ def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
     if _Ctx.sgpr in call.src[1:]: seen.clear()
   return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("emu_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
-def thread_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
-  # thread jump-only blocks.
-  targets:dict[int, int] = {}
-  def target(pc:int) -> int:
-    seen:set[int] = set()
-    while pc not in targets and pc not in seen and len(blocks[pc]) == 1 and getattr(insts[blocks[pc][0]], "op_name", "") == "S_BRANCH":
-      seen.add(pc)
-      pc = next(iter(paths[pc]))
-    pc = targets.get(pc, pc)
-    targets.update((src, pc) for src in seen)
-    return pc
-  for pc, dsts in list(paths.items()): paths[pc] = {target(dst):kind for dst,kind in dsts.items()}
-
 def merge_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
   groups:dict[tuple, list[int]] = {}
   opposite = {"S_CBRANCH_SCC1":"S_CBRANCH_SCC0", "S_CBRANCH_VCCNZ":"S_CBRANCH_VCCZ", "S_CBRANCH_EXECNZ":"S_CBRANCH_EXECZ"}
@@ -1869,7 +1856,6 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     inst_st = getattr(inst, "op_name", "").lower()
     if inst_st.startswith(("s_getpc", "s_setpc")): raise NotImplementedError(f"AMD lifter does not support {inst_st}")
   cfg = get_cfg(insts)
-  thread_branches(insts, cfg["blocks"], cfg["paths"])
   try: regions = cfg_regions(cfg["paths"], 0)
   except IrreducibleCFG:
     # sharing branch tails can make rotated loops reducible, but adds dispatch blocks otherwise.
