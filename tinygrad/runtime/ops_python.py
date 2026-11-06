@@ -78,7 +78,7 @@ class PythonProgram(Program['PythonDevice']):
           exec_masks.pop()
           i += 1
           continue
-        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.CUSTOM_FUNCTION, Ops.CUSTOM) or (u.op is Ops.RANGE and u.dtype == dtypes.void) or u in env \
+        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.CUSTOM_FUNCTION) or (u.op is Ops.RANGE and u.dtype == dtypes.void) or u in env \
           or (u.op is Ops.AFTER and u.dtype is dtypes.void):
           # in the python emulator, the warp is always in sync
           i += 1
