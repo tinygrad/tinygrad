@@ -249,24 +249,17 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   kv, entries = gguf_parse(fn)
   return kv, gguf_shard(entries, (Device.DEFAULT,))
 
-class GGUFPackedTable:
-  """
-  A 2D quantized tensor kept packed in host RAM: write copies packed rows to slots of a host buffer without creating a tensor, read decodes
-  the rows of slots on device. slots are never written while being read.
-  """
+class GGUFPackedTable:  # a quantized 2D table left packed in host memory: write copies rows into slots, read decodes slots on device
   def __init__(self, entry:tuple[Tensor, tuple[int, ...], int]):
-    data, (_, self.width), self.typ = entry
-    block, size = _GGML_QUANT[self.typ]
-    assert self.width % block == 0, f"rows of {self.width} don't split into blocks of {block}"
-    self.data, self.row_bytes = data.to("CPU").realize(), self.width // block * size
+    data, (n_rows, self.width), self.typ = entry
+    self.data, self.row_bytes = data.realize(), data.nbytes() // n_rows
+    self.table = self.data._buffer().as_memoryview(allow_zero_copy=True)
   def write(self, start:int, ids:list[list[int]], slots:int):
     if not hasattr(self, "rows"): self.rows = Tensor.empty(slots, len(ids[0]), self.row_bytes, dtype=dtypes.uint8, device="CPU").realize()
-    table, rows, rb = self.data._buffer().as_memoryview(allow_zero_copy=True), self.rows._buffer().as_memoryview(allow_zero_copy=True), self.row_bytes
-    rows[start*len(ids[0])*rb:(start+len(ids))*len(ids[0])*rb] = b"".join(table[i*rb:(i+1)*rb] for slot in ids for i in slot)
+    rows, rb = self.rows._buffer().as_memoryview(allow_zero_copy=True), self.row_bytes
+    rows[start*len(ids[0])*rb:(start+len(ids))*len(ids[0])*rb] = b"".join(self.table[i*rb:(i+1)*rb] for slot in ids for i in slot)
   def read(self, start:int|UOp, n:int, device:str|tuple[str, ...]|None) -> Tensor:
-    # the rows of the slots start..start+n, decoded on device: (n, rows per slot * width)
-    rows = self.rows[start:start+n].to(device).flatten()
-    return ggml_data_to_tensor(rows, n*int(self.rows.shape[1])*self.width, self.typ).reshape(n, -1)
+    return ggml_data_to_tensor(self.rows[start:start+n].to(device).flatten(), n*int(self.rows.shape[1])*self.width, self.typ)
 
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
                shard_map:dict[str, int]|None=None, repeats:dict[str, int]|None=None) -> dict[str, Tensor]:

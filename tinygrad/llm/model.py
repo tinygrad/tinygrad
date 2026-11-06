@@ -89,14 +89,14 @@ class HCConfig:  # manifold-constrained hyper-connections: count residual stream
   count: int
   sinkhorn_iters: int
   eps: float
-  low_rank: int = 0  # qwen4exp: the streams are mixed by a sigmoid gated low-rank projection instead (GatedResidual)
+  low_rank: int = 0
 
 @dataclass(frozen=True)
-class PLEConfig:  # qwen4exp n-gram embeddings: hashed rows of a packed host-side table, mixed into the streams of one layer
+class PLEConfig:
   layer: int
   head_dim: int
-  multipliers: tuple[int, ...]  # per n-gram position
-  vocab_sizes: tuple[int, ...]  # per head: the bigram heads, then the trigram heads
+  multipliers: tuple[int, ...]
+  vocab_sizes: tuple[int, ...]
   offsets: tuple[int, ...]
   eos: int
   conv_kernel: int
@@ -193,14 +193,14 @@ class HyperConnection:
     out, aux = sublayer((xs * pre.unsqueeze(-1)).sum(2))
     return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs), aux
 
-class StreamNorm:  # rmsnorm of each stream (..., count, dim), the weight is (count*dim,)
+class GroupedRMSNorm:  # x: (B, T, count, dim), w: (count*dim,)
   def __init__(self, count:int, dim:int, eps:float): self.weight, self.eps = Tensor.zeros(count*dim), eps
   def __call__(self, x:Tensor) -> Tensor: return x.rmsnorm(eps=self.eps) * self.weight.reshape(x.shape[-2:])
 
 class GatedResidual(HyperConnection):
   def __init__(self, config:TransformerConfig, inject:bool=True):
     self.count, self.dim, low_rank = (hc:=unwrap(config.hc)).count, config.dim, hc.low_rank
-    self.norm = StreamNorm(self.count, self.dim, config.norm_eps)
+    self.norm = GroupedRMSNorm(self.count, self.dim, config.norm_eps)
     self.down, self.up = Linear(self.count*self.dim, low_rank, bias=False), Linear(low_rank, self.count*self.dim, bias=False)
     if inject: self.inject = Linear(self.count*self.dim, self.count, bias=False)
 
@@ -223,7 +223,7 @@ class FFNBlock:
     if config.hc is not None:
       hc = GatedResidual if config.hc.low_rank else HyperConnection
       self.hc_attn, self.hc_ffn = hc(config), hc(config)
-      if config.hc.low_rank: self.attn_norm = self.ffn_norm = lambda x: x  # GatedResidual norms the streams itself
+      if config.hc.low_rank: self.attn_norm = self.ffn_norm = lambda x: x
     if config.ple is not None: self.ple = PLELayer(config)
     if config.attn_res_block_size:
       self.attn_res_score, self.ffn_res_score = AttentionResidual(config, config.attn_res_new_block), AttentionResidual(config)
@@ -387,13 +387,13 @@ class TransformerBlock(FFNBlock):
                                             device=x.device, yarn=self.config.yarn)
     if self.indexer: self.indexer._init_state(x)
 
-class PLELayer:  # qwen4exp: each stream gates the n-gram row values by their normed key-query score, plus a causal conv dilated by the n-gram size
+class PLELayer:
   def __init__(self, config:TransformerConfig):
-    self.table: GGUFPackedTable  # the packed n-grams in host RAM, set by from_gguf
+    self.table: GGUFPackedTable  # set by from_gguf
     self.ple, self.count, self.dim = unwrap(config.ple), unwrap(config.hc).count, config.dim
     self.max_context, self.hist, width = config.max_context, (self.ple.conv_kernel - 1) * len(self.ple.multipliers), self.count * config.dim
     self.key, self.value = Linear(config.dim, width, bias=False), Linear(config.dim, config.dim, bias=False)
-    self.norm_key, self.norm_query, self.norm_conv = (StreamNorm(self.count, self.dim, config.norm_eps) for _ in range(3))
+    self.norm_key, self.norm_query, self.norm_conv = (GroupedRMSNorm(self.count, self.dim, config.norm_eps) for _ in range(3))
     self.conv1d = {"weight": Tensor.zeros(width, self.ple.conv_kernel)}
 
   def _init_state(self, x:Tensor):
@@ -402,20 +402,19 @@ class PLELayer:  # qwen4exp: each stream gates the n-gram row values by their no
   def write_rows(self, tokens:list[int], start_pos:int, n_toks:int, chunk_size:int):
     # hash the n-grams ending at each token (t0*m0 ^ t1*m1 ^ ..., EOS before the start or an EOS) and copy their table rows to host RAM
     ple, n, ids = self.ple, len(self.ple.multipliers), []
-    per_gram = len(ple.vocab_sizes) // (n-1)  # the bigram heads, then the trigram heads
     for p in range(start_pos, start_pos+n_toks):
       ctx = [ple.eos if p < i or ple.eos in tokens[p-i:p] else tokens[p-i] for i in range(n)]
       hashes = list(itertools.accumulate((c*m for c,m in zip(ctx, ple.multipliers)), lambda a,b: a^b))[1:]
-      ids.append([hashes[j//per_gram] % v + o for j,(v,o) in enumerate(zip(ple.vocab_sizes, ple.offsets))])
+      ids.append([hashes[j//(len(ple.vocab_sizes)//(n-1))] % v + o for j,(v,o) in enumerate(zip(ple.vocab_sizes, ple.offsets))])
     self.table.write(start_pos, ids, self.max_context+chunk_size)
 
   def __call__(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     (B, T), T_pad, n = x.shape[:2], x.max_shape[1], len(self.ple.multipliers)
     emb = self.table.read(start_pos, T_pad, x.device).reshape(B, T_pad, -1)[:, :T].float()
-    s = (self.norm_key(self.key(emb).unflatten(-1, (self.count, self.dim))) * self.norm_query(x)).sum(-1, keepdim=True) * self.dim**-0.5
+    s = (self.norm_key(self.key(emb).reshape(x.shape)) * self.norm_query(x)).sum(-1, keepdim=True) * self.dim**-0.5
     gated = self.value(emb).unsqueeze(2) * (s.sign() * s.abs().clamp(min_=1e-6).sqrt()).sigmoid()
     conv, store = short_conv(self.conv_state, self.norm_conv(gated).flatten(2), self.conv1d["weight"], Tensor(start_pos).eq(0), n)
-    return Tensor((gated + conv[:, :T].unflatten(-1, (self.count, self.dim))).contiguous().uop.after(store))
+    return Tensor((gated + conv[:, :T].reshape(gated.shape)).contiguous().uop.after(store))
 
 class Indexer:
   def __init__(self, config:TransformerConfig):
@@ -450,13 +449,12 @@ class Indexer:
     else:
       k = Tensor(self.cache_kg.uop.after(self.cache_kg[:, start_pos:S].uop.store(k.half().uop))).float()  # (B, S, D)
     if idx.qsa:
-      k = self.k_norm(k.reshape(B, -1, idx.kpool, idx.head_dim).mean(2))
-      rot = unwrap(freqs)[:self.max_context:idx.kpool]
+      k, rot = self.k_norm(k.reshape(B, -1, idx.kpool, idx.head_dim).mean(2)), unwrap(freqs)[:self.max_context:idx.kpool]
       k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), rot, idx.rope_interleave).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
     scores = iq @ k.transpose(-1, -2).unsqueeze(1)
-    if idx.msa: scores = scores.reshape(B, T, idx.n_heads, scores.shape[-1] // idx.kpool, idx.kpool).max(-1).transpose(1, 2)
+    if idx.msa:   scores = scores.reshape(B, T, idx.n_heads, scores.shape[-1] // idx.kpool, idx.kpool).max(-1).transpose(1, 2)
     elif idx.qsa: scores = (scores.relu() * idx.head_dim**-0.5).sum(2).unsqueeze(1)
-    else: scores = (scores.relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2).unsqueeze(1)
+    else:         scores = (scores.relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2).unsqueeze(1)
     # the query sees the top_k/kpool best complete pools and the tokens of its own pool while incomplete (the tail)
     q_pos, k_pos = (Tensor(start_pos) + Tensor.arange(T)).reshape(T, 1), Tensor.arange(S)
     scores = ((Tensor.arange(scores.shape[-1]) + 1) * idx.kpool <= q_pos + 1).where(scores, -math.inf)
