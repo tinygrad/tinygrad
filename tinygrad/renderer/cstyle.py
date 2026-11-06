@@ -42,7 +42,6 @@ base_rewrite = PatternMatcher([
    if x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"__builtin_bit_cast({ctx.render_type(x)}, ({ctx.render_type(x.src[0])})({ctx[x.src[0]]}))"),
   (UPat(Ops.REFPARAM, name="x"), lambda ctx,x: f"(({ctx.param_type(x)})({ctx[x.src[1]]}))"),
-  (UPat(Ops.GETADDR, name="x"), lambda ctx,x: f"(({ctx.render_dtype(x.dtype)})({ctx[x.src[0]]}))"),
 
   # GPU stuff
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
@@ -238,7 +237,8 @@ class CStyleLanguage(Renderer):
         if u.arg is not None: name = u.arg.function_name
         continue
       if u.op is Ops.PARAM:
-        r[u] = (u.arg.name.replace(":", "_")+"_" if u.arg.name is not None else "data") + str(len(bufs))
+        r[u] = (u.arg.name.replace(":", "_") if u.arg.name is not None else f"data{u.arg.slot}") + \
+          "_" + '_'.join([str(x) for x in u.shape])
         bufs[u] = (r[u], (u, u in writable_params))
         continue
 
