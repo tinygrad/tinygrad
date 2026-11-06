@@ -1980,6 +1980,11 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   if RENDER:
     render = graph_rewrite(ret, pm_render, name="render", enter_calls=True)
     if VIZ: graph_rewrite(render, PatternMatcher([]), name="View Rendered Graph")
+    linear = next(x for x in render.toposort() if x.op is Ops.LINEAR)
+    assert len(linear.src) == len(insts), f"{len(linear.src)} != {len(insts)}"
+    for (pc, inst), x in zip(insts.items(), linear.src):
+      out = x.arg if x.op is Ops.BINARY else b"".join(y.arg for y in x.src)
+      assert out == inst.to_bytes(), f"{inst.op_name.lower()}: {out.hex()} != {inst.to_bytes().hex()}"
   return ret
 
 dispatch_cache:dict[tuple, UOp] = {}
