@@ -125,13 +125,13 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   cache_key = function.key
   # SCACHE >= 2 also persists the cache to disk
   sc_ret, disk_hit = schedule_cache.get(cache_key, None) if SCACHE else None, False
-  if sc_ret is None and SCACHE >= 2: disk_hit = (sc_ret:=diskcache_get("schedule_cache", {"key": cache_key})) is not None
+  if sc_ret is None and SCACHE >= 2: disk_hit = (sc_ret:=diskcache_get("schedule_cache", cache_key)) is not None
   if sc_ret is None:
     if SPEC: type_verify(function, spec_tensor)
     # support recursive CALLs
     linear = create_schedule(get_kernel_graph(prepare_rangeify(function)))
     if SCACHE: schedule_cache[cache_key] = linear
-    if SCACHE >= 2: diskcache_put("schedule_cache", {"key": cache_key}, linear)
+    if SCACHE >= 2: diskcache_put("schedule_cache", cache_key, linear)
   else:
     # schedule cache hit (memory or disk)
     linear = schedule_cache[cache_key] = sc_ret
