@@ -170,6 +170,19 @@ class TestCustomKernel(unittest.TestCase):
     assert all(x == 6 for x in c.flatten().tolist()), "all 6"
     assert all(x == 9 for x in d.flatten().tolist()), "all 9"
 
+  def test_multioutput_realize_one_inplace(self):
+    def increment(C:UOp, D:UOp):
+      i = UOp.range(C.shape[0], 0)
+      return UOp.sink(C[i].store(C[i] + 1).end(i), D[i].store(D[i] + 2).end(i), arg=KernelInfo(name="increment_both"))
+    for buf in (lambda x: Tensor(x).realize(), lambda x: Tensor.empty(4).assign(Tensor(x))):
+      c, d = Tensor.custom_kernel(*Tensor.custom_kernel(buf([1., 2., 3., 4.]), buf([5., 6., 7., 8.]), fxn=increment), fxn=increment)
+      c.realize()
+      GlobalCounters.reset()
+      d.realize()
+      assert_kernel_count(0)
+      self.assertEqual(c.tolist(), [3., 4., 5., 6.])
+      self.assertEqual(d.tolist(), [9., 10., 11., 12.])
+
   def test_arange(self):
     ref = Tensor.arange(100)
     tst = Tensor.empty_like(ref)
