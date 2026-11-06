@@ -28,9 +28,10 @@ def hook_doorbells(s:UOp) -> UOp|None:
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])
 
+pfuncs = [d.progress for d in drivers]
 @ctypes.CFUNCTYPE(None, ctypes.c_uint64)
 def mockgpu_progress(_:int): # compiled spin loops wait on the gpus, which run only when called
-  for d in drivers: d.progress()
+  for p in pfuncs: p()
 setattr(libc.dll, "mockgpu_progress", mockgpu_progress)
 
 def kick_gpus(body:UOp, loop:UOp, cond:UOp) -> UOp|None: # each iteration of a spin loop runs the gpus
