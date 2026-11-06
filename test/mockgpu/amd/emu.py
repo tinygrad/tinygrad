@@ -50,13 +50,13 @@ class _MXCSRContext:
     if lib is None or not hasattr(self, '_saved'): return
     lib.set_fpcr(self._saved)
 
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, uopfunc, AxisType, rewrite_group, graph_rewrite, PatternMatcher
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, uopfunc, AxisType, rewrite_group, graph_rewrite, PatternMatcher, UPat
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program, to_program_config
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import Context, DEV, to_mv, ContextVar
+from tinygrad.helpers import Context, DEV, to_mv, ContextVar, VIZ
 from tinygrad.runtime.autogen import hsa
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND, get_elf_section
 
@@ -1847,7 +1847,18 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
   return build(set(order))
 
 RENDER = ContextVar("RENDER", 0) # render lifted ast back to assembly
-pm_render = PatternMatcher([])
+
+def render_call(call:UOp):
+  if call.arg.name.startswith("emu_"): return None
+  encoding = bytes.fromhex(call.arg.name.rsplit("_", 1)[1])
+  words = [UOp(Ops.BINARY, arg=encoding[i:i+4]) for i in range(0, len(encoding), 4)]
+  for i,x in enumerate(call.src_without_body[:len(words)]):
+    words[-1-i] = UOp(Ops.BINARY, arg=int(x.src[0].arg).to_bytes(4, "little"))
+  return words[0] if len(words) == 1 else UOp(Ops.STACK, src=tuple(words))
+
+pm_render = PatternMatcher([
+  (UPat(Ops.CALL, name="call"), render_call),
+])
 
 @rewrite_group(replay="emu_process_replay")
 def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
@@ -1966,7 +1977,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
 
   ret = emit_dispatch(regions, (wg,), initialized).end(wg).sink(ctx.vmem, arg=KernelInfo(name=name, optimized=True))
   if RENDER:
-    render = graph_rewrite(ret, pm_render, name="render")
+    render = graph_rewrite(ret, pm_render, name="render", enter_calls=True)
+    if VIZ: graph_rewrite(render, PatternMatcher([]), name="View Rendered Graph")
   return ret
 
 dispatch_cache:dict[tuple, UOp] = {}
