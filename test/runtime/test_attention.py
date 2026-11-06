@@ -141,16 +141,15 @@ class TestAttention(unittest.TestCase):
     np.testing.assert_array_equal(indexer(x, Tensor.ones(1, 6, 2), 0).numpy(), np.where(allowed, 0., -np.inf)[None])
 
   def test_indexer_qsa(self):
-    # qwen4exp: a pool's key is its normed mean key, roped at the pool start
+    # a pool's key is its normed mean key, roped at the pool start
     idx = IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6, rope_dim=2, qsa=True)
-    indexer = Indexer(self._make_config(dim=2, max_context=6, indexer=idx))
+    indexer = Indexer(self._make_config(dim=2, indexer=idx))
     indexer.attn_q_b.weight, indexer.attn_k.weight = Tensor.eye(2), Tensor.eye(2)
-    x = Tensor([[[2., 0.], [0., 0.], [-4., -4.], [0., 0.], [-1., 0.], [-1., 0.]]])
-    q = Tensor([[[1., 0.], [1., 0.], [1., 0.], [-1., 1.], [1., 0.], [0., 1.]]])
+    x, q = Tensor([[[-6., 8.], [0., 0.], [0., 2.], [2., -2.]]]), Tensor([[[1., 0.], [1., 0.], [1., 0.], [0., -1.]]])
     indexer._init_state(x)
-    # a quarter turn per position: the pools face 0, 45, 180 degrees, queries 3, 4, 5 face 45, 0, 180
-    freqs = Tensor([[1., 0.], [0., 1.], [-1., 0.], [0., -1.], [1., 0.], [0., 1.]])
-    allowed = [[1, 0, 0, 0, 0, 0], [1, 1, 0, 0, 0, 0], [1, 1, 1, 0, 0, 0], [0, 0, 1, 1, 0, 0], [1, 1, 0, 0, 1, 0], [0, 0, 0, 0, 1, 1]]
+    # a quarter turn per position: query 3 faces 180 degrees like pool 1 (mean (1, 0) roped at 2), not the larger pool 0 at 127 degrees
+    freqs = Tensor([[1., 0.], [0., 1.], [-1., 0.], [0., -1.]])
+    allowed = [[1, 0, 0, 0], [1, 1, 0, 0], [1, 1, 1, 0], [0, 0, 1, 1]]
     np.testing.assert_array_equal(indexer(x, q, 0, freqs).numpy(), np.where(allowed, 0., -np.inf)[None, None])
 
   def test_mla_indexer_mask(self):
@@ -166,13 +165,12 @@ class TestAttention(unittest.TestCase):
     np.testing.assert_array_equal(block._indexer_mask(x, 0, None).numpy(), expected[None, None])
 
   def test_ple_rows(self):
-    # qwen4exp: a bigram and a trigram head, EOS (7) before the start or an EOS
-    ple = PLELayer(self._make_config(hc=HCConfig(2, 0, 0.0), ple=PLEConfig(0, 32, (1, 2, 4), (13, 17), (0, 13), 7, 2)))
+    # a bigram and a trigram head, EOS (7) before the start or an EOS
+    ple = PLELayer(self._make_config(hc=HCConfig(2, 0, 0.0), ple=PLEConfig(0, 32, (1, 2, 4), (13, 17), 7, 2)))
     table = np.random.default_rng(0).integers(0, 256, (30, 18), dtype=np.uint8)
-    # a table view, as loaded on CPU
     ple.table = GGUFPackedTable((Tensor(table.flatten()).pad((7, 11)).contiguous().realize()[7:-11], (30, 32), 20))
     for start_pos in (0, 2): ple.write_rows([3, 7, 5, 9], start_pos, 2, 2)
-    # t0 ^ 2*t1 % 13, t0 ^ 2*t1 ^ 4*t2 % 17 + 13
+    # (t0 ^ 2*t1) % 13, (t0 ^ 2*t1 ^ 4*t2) % 17 + 13
     np.testing.assert_array_equal(ple.table.rows.numpy()[:4], table[[[0, 13], [1, 25], [11, 19], [3, 27]]])
 
 class TestGatedDeltaNetBlock(unittest.TestCase):

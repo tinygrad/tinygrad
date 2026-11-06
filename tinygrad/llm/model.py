@@ -97,7 +97,6 @@ class PLEConfig:
   head_dim: int
   multipliers: tuple[int, ...]
   vocab_sizes: tuple[int, ...]
-  offsets: tuple[int, ...]
   eos: int
   conv_kernel: int
 
@@ -206,7 +205,7 @@ class GatedResidual(HyperConnection):
 
   def mix(self, xs:Tensor) -> tuple[Tensor, Tensor]:
     xn = self.norm(xs).flatten(2)
-    return (self.up((self.down(xn) / self.count).silu()).sigmoid() * xn).unflatten(-1, (self.count, self.dim)).mean(2), xn
+    return (self.up((self.down(xn) / self.count).silu()).sigmoid() * xn).reshape(xs.shape).mean(2), xn
 
   def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], tuple[Tensor, Tensor|None]]) -> tuple[Tensor, Tensor|None]:
     mixed, xn = self.mix(xs)
@@ -389,10 +388,10 @@ class TransformerBlock(FFNBlock):
 
 class PLELayer:
   def __init__(self, config:TransformerConfig):
-    self.table: GGUFPackedTable  # set by from_gguf
+    self.table: GGUFPackedTable
     self.ple, self.count, self.dim = unwrap(config.ple), unwrap(config.hc).count, config.dim
     self.max_context, self.hist, width = config.max_context, (self.ple.conv_kernel - 1) * len(self.ple.multipliers), self.count * config.dim
-    self.key, self.value = Linear(config.dim, width, bias=False), Linear(config.dim, config.dim, bias=False)
+    self.key, self.value = (Linear(len(self.ple.vocab_sizes) * self.ple.head_dim, out, bias=False) for out in (width, config.dim))
     self.norm_key, self.norm_query, self.norm_conv = (GroupedRMSNorm(self.count, self.dim, config.norm_eps) for _ in range(3))
     self.conv1d = {"weight": Tensor.zeros(width, self.ple.conv_kernel)}
 
@@ -400,12 +399,12 @@ class PLELayer:
     if not hasattr(self, "conv_state"): self.conv_state = Tensor.zeros(x.shape[0], self.hist, self.count*self.dim, device=x.device).clone()
 
   def write_rows(self, tokens:list[int], start_pos:int, n_toks:int, chunk_size:int):
-    # hash the n-grams ending at each token (t0*m0 ^ t1*m1 ^ ..., EOS before the start or an EOS) and copy their table rows to host RAM
-    ple, n, ids = self.ple, len(self.ple.multipliers), []
+    # hash the n-grams ending at each token (t0*m0 ^ t1*m1 ^ ..., EOS before the start or an EOS)
+    ple, n, ids, offsets = self.ple, len(self.ple.multipliers), [], list(itertools.accumulate(self.ple.vocab_sizes, initial=0))
     for p in range(start_pos, start_pos+n_toks):
       ctx = [ple.eos if p < i or ple.eos in tokens[p-i:p] else tokens[p-i] for i in range(n)]
       hashes = list(itertools.accumulate((c*m for c,m in zip(ctx, ple.multipliers)), lambda a,b: a^b))[1:]
-      ids.append([hashes[j//(len(ple.vocab_sizes)//(n-1))] % v + o for j,(v,o) in enumerate(zip(ple.vocab_sizes, ple.offsets))])
+      ids.append([hashes[j*(n-1)//len(ple.vocab_sizes)] % v + o for j,(v,o) in enumerate(zip(ple.vocab_sizes, offsets))])
     self.table.write(start_pos, ids, self.max_context+chunk_size)
 
   def __call__(self, x:Tensor, start_pos:int|UOp) -> Tensor:
@@ -677,7 +676,7 @@ class Transformer:
     # TODO: remove the need for copy to default device
     kv, entries = gguf_parse(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
     arch = kv['general.architecture']
-    ple_entry = entries.pop('per_layer_token_embd.weight', None)  # the n-gram table stays in CPU RAM
+    ple_entry = entries.pop('per_layer_token_embd.weight', None)
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
     assert shard >= 1, f"shard must be at least 1, got {shard}"
     shard_map, repeats = {}, {}
@@ -704,11 +703,11 @@ class Transformer:
 
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
-    if f'{arch}.hyper_connection.count' in kv:
-      hc = HCConfig(kv[f'{arch}.hyper_connection.count'], kv.get(f'{arch}.hyper_connection.sinkhorn_iterations', 0),
-                    kv.get(f'{arch}.hyper_connection.epsilon', 0.0), kv.get(f'{arch}.hyper_connection.low_rank', 0))
-      state_dict = {re.sub(r'(hc_attn|hc_ffn|output_hc|\.ple)_', r'\1.', k):v for k,v in state_dict.items()}
-    else: hc = None
+
+    hc = HCConfig(kv[f'{arch}.hyper_connection.count'], kv.get(f'{arch}.hyper_connection.sinkhorn_iterations', 0),
+                  kv.get(f'{arch}.hyper_connection.epsilon', 0.0),
+                  kv.get(f'{arch}.hyper_connection.low_rank', 0)) if f'{arch}.hyper_connection.count' in kv else None
+    if hc is not None: state_dict = {re.sub(r'(hc_attn|hc_ffn|output_hc|\.ple)_', r'\1.', k):v for k,v in state_dict.items()}
 
     kpool = kv.get(f'{arch}.attention.indexer.block_size' if arch == 'minimax-m3' else f'{arch}.attention.indexer.kpool')
     if arch == 'qwen4exp': kpool = max(kv[f'{arch}.attention.compress_ratios'])
@@ -791,8 +790,7 @@ class Transformer:
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer,
       ple=PLEConfig(kv[f'{arch}.ple.layers'][0], ple_entry[1][1], tuple(kv[f'{arch}.ple.layer_multipliers']),
-                    tuple(kv[f'{arch}.ple.head_vocab_sizes']), tuple(kv[f'{arch}.ple.head_offsets']), kv[f'{arch}.ple.eos_token_id'],
-                    kv[f'{arch}.ple.conv_kernel']) if ple_entry else None,
+                    tuple(kv[f'{arch}.ple.head_vocab_sizes']), kv[f'{arch}.ple.eos_token_id'], kv[f'{arch}.ple.conv_kernel']) if ple_entry else None,
       expert_latent_dim=kv.get(f'{arch}.expert_latent_length', 0), attn_res_block_size=kv.get(f'{arch}.attn_res.block_size', 0),
       situ=(kv[f'{arch}.activation.situ_beta'], kv[f'{arch}.activation.situ_linear_beta']) if f'{arch}.activation.situ_beta' in kv else None)
     model = Transformer(config)

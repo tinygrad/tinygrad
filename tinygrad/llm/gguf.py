@@ -249,11 +249,13 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   kv, entries = gguf_parse(fn)
   return kv, gguf_shard(entries, (Device.DEFAULT,))
 
-class GGUFPackedTable:  # a quantized 2D table left packed in host memory: write copies rows into slots, read decodes slots on device
+class GGUFPackedTable:
+  """
+  Quantized rows mmapped from the GGUF file: `write` copies rows into host memory slots, `read` decodes the slots on device.
+  """
   def __init__(self, entry:tuple[Tensor, tuple[int, ...], int]):
     data, (n_rows, self.width), self.typ = entry
-    self.data, self.row_bytes = data.realize(), data.nbytes() // n_rows
-    self.table = self.data._buffer().as_memoryview(allow_zero_copy=True)
+    self.data, self.row_bytes, self.table = data, data.nbytes() // n_rows, data._buffer().as_memoryview(allow_zero_copy=True)
   def write(self, start:int, ids:list[list[int]], slots:int):
     if not hasattr(self, "rows"): self.rows = Tensor.empty(slots, len(ids[0]), self.row_bytes, dtype=dtypes.uint8, device="CPU").realize()
     rows, rb = self.rows._buffer().as_memoryview(allow_zero_copy=True), self.row_bytes
