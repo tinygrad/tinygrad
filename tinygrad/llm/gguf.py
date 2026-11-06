@@ -253,6 +253,7 @@ class GGUFPackedTable:
   """
   Quantized rows mmapped from the GGUF file: `write` copies rows into host memory slots, `read` decodes the slots on device.
   """
+  __slots__ = ("data", "width", "typ", "row_bytes", "table", "rows")
   def __init__(self, entry:tuple[Tensor, tuple[int, ...], int]):
     data, (n_rows, self.width), self.typ = entry
     self.data, self.row_bytes, self.table = data, data.nbytes() // n_rows, data._buffer().as_memoryview(allow_zero_copy=True)
