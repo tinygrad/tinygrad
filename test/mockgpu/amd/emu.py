@@ -1724,11 +1724,9 @@ def emu_consts(sgpr:UOp, wave_size:int):
   return UOp.sink(init_ints, init_floats, *([sgpr.index(124).store(_c(0))] if wave_size == 32 else []))
 
 @uopfunc
-def emu_loop_active(routes:UOp, active:UOp, header:UOp|None, waves:UOp):
+def emu_loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
   w = UOp.range(waves, 0, AxisType.LOOP, dtype=dtypes.int)
-  next_pc = routes[w].load()
-  more = next_pc >= 0 if header is None else next_pc.eq(header)
-  return active[0].store(more.cast(dtypes.uint32).reduce(w, arg=Ops.MAX).ne(0)).sink()
+  return active[0].store(routes[w].load().eq(header).cast(dtypes.uint32).reduce(w, arg=Ops.MAX).ne(0)).sink()
 
 def lower_body(sink:UOp, name:str) -> UOp:
   bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
@@ -1776,9 +1774,21 @@ def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
     if _Ctx.sgpr in call.src[1:]: seen.clear()
   return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("emu_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
+def thread_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
+  # thread jump-only blocks.
+  targets:dict[int, int] = {}
+  def target(pc:int) -> int:
+    seen:set[int] = set()
+    while pc not in targets and pc not in seen and len(blocks[pc]) == 1 and getattr(insts[blocks[pc][0]], "op_name", "") == "S_BRANCH":
+      seen.add(pc)
+      pc = next(iter(paths[pc]))
+    pc = targets.get(pc, pc)
+    targets.update((src, pc) for src in seen)
+    return pc
+  for pc, dsts in list(paths.items()): paths[pc] = {target(dst):kind for dst,kind in dsts.items()}
+
 # a block has an empty body; a loop contains its header block and the rest of its iteration.
-CFGRegion = tuple[int|None, list["CFGRegion"]]
-class IrreducibleCFG(RuntimeError): pass
+CFGRegion = tuple[int, list["CFGRegion"]]
 
 def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
   # number the reachable blocks in DFS postorder, without recursion on long instruction streams.
@@ -1808,7 +1818,7 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
       body:list[CFGRegion] = []
       if len(component) > 1 or pc in paths[pc]:
         if any(preds[dst] - component for dst in component if dst != pc):
-          raise IrreducibleCFG("irreducible control flow is not supported by the AMD lifter")
+          raise RuntimeError("irreducible control flow is not supported by the AMD lifter")
         # removing the single entry exposes nested loops; the original DFS order still applies.
         body = [(pc, [])] + build(component - {pc})
       regions.append((pc, body))
@@ -1838,14 +1848,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     inst_st = getattr(inst, "op_name", "").lower()
     if inst_st.startswith(("s_getpc", "s_setpc")): raise NotImplementedError(f"AMD lifter does not support {inst_st}")
   cfg = get_cfg(insts)
-  try: regions = cfg_regions(cfg["paths"], 0)
-  except IrreducibleCFG:
-    reachable, todo = set(), [0]
-    while todo:
-      if (pc:=todo.pop()) in reachable: continue
-      reachable.add(pc)
-      todo.extend(cfg["paths"][pc])
-    regions = [(None, [(pc, []) for pc in sorted(reachable)])]
+  thread_branches(insts, cfg["blocks"], cfg["paths"])
+  regions = cfg_regions(cfg["paths"], 0)
   # propagate possible wave PCs across acyclic regions; loops retain runtime routing.
   unconditional:set[int] = set()
   possible:set[int]|None = {0}
@@ -1941,8 +1945,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
         loop = UOp.loop(next(axes)).replace(src=(UOp(Ops.NOOP).after(end),))
         end = emit_dispatch(body, scopes+(loop,), loop)
         # waves that exited keep their route while the remaining waves repeat the loop.
-        check = emu_loop_active(routes.after(end, *scopes, loop), active, None if pc is None else _c(pc, dtypes.int),
-                                _c(n_waves, dtypes.int))
+        check = emu_loop_active(routes.after(end, *scopes, loop), active, _c(pc, dtypes.int), _c(n_waves, dtypes.int))
         end = end.backedge(loop, active.after(check, *scopes, loop)[0].load())
       else:
         # complete the block for every participating wave before entering its successors, including barrier successors.
