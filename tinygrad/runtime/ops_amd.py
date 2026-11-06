@@ -17,7 +17,7 @@ from tinygrad.runtime.support.memory import MMIOInterface, AddrSpace
 from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices, PCIIfaceBase, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
-from tinygrad.runtime.support.usb import USB3, setup_usb_rules, usb_reset
+from tinygrad.runtime.support.usb import USB3, setup_usb_rules, usb_reset, usb_ctrl_buffer
 from tinygrad.engine.realize import get_call_kernel_args
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -793,16 +793,6 @@ class USBIface(PCIIface):
     self.dev_impl = AMDev(self.pci_dev)
     self._compute_props()
 
-  @functools.cached_property
-  def ctrl(self) -> Buffer:
-    # the controller's memory the queue and the host share, one range (usb.py slices it): the sys page at 0, the cq page at 0x1000, the sram at
-    # 0x5000. the host's view starts at the sys page's controller address 0xa000, which puts the sram on its scsi window 0xf000
-    vaddr, pieces = self.dev_impl.mm.alloc_vaddr(size=0x85000), [(0x0, 0x820000, 0x1000), (0x1000, 0x822000, 0x1000), (0x5000, 0x200000, 0x80000)]
-    for off, paddr, n in pieces: self.dev_impl.mm.map_range(vaddr + off, n, [(paddr, n)], aspace=AddrSpace.SYS, uncached=True)
-    view = self.pci_dev.dma_view(0xa000, 0x85000)
-    for off, n in ((0x800, 4), (0x5000, 0x80000)): view.view(off, n)[:] = bytes(n) # no stale fence or sentinel
-    return Buffer(self.dev.device, 0x85000, options=BufferSpec(external_ptr=vaddr), opaque=BufferStorage(vaddr, host=view))
-
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False,
             **kwargs) -> BufferStorage:
     # everything, even host-style signals, lives in vram: gpu writes into the bridge's own memory collide with an armed 0xF2 read stream
@@ -866,7 +856,7 @@ class AMDDevice(Compiled):
     names = ("ring", "write_ptr", "doorbell", "put_value")
     Compiled.link_bufs |= {to_name(self.device, n, q): lambda b, n=n, f=f: getattr(f(), n) for q, f in queues.items() for n in names}
     Compiled.link_bufs |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel())}
-    if self.is_usb: setup_usb_rules(self)
+    if self.is_usb: setup_usb_rules(self, usb_ctrl_buffer(self.iface))
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.pmc_enabled, self.sqtt_enabled, self.prof_enabled = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0, PROFILE > 0 and (PMC > 0 or SQTT > 0)
