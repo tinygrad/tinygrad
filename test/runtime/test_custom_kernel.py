@@ -677,8 +677,8 @@ class TestCustomKernel(unittest.TestCase):
   def test_custom_uop(self):
     N = 4
     def kernel(x:UOp) -> UOp:
-      shuffle_fn = UOp.custom_function("__builtin_shufflevector({0}, {0}, 3, 2, 1, 0)", shape=(N,), dtype=x.dtype)
-      y = shuffle_fn.call(UOp.stack([x[i].load() for i in range(N)]))
+      y = UOp.custom("__builtin_shufflevector({0}, {0}, 3, 2, 1, 0)", UOp.stack([x[i].load() for i in range(N)]),
+                     shape=(N,), dtype=x.dtype)
       self.assertEqual(y.shape, (N,))
       return x.store(y).sink(arg=KernelInfo("kernel"))
     out = Tensor.custom_kernel(Tensor.arange(N).clone("CPU"), fxn=kernel)[0]

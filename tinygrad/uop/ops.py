@@ -123,8 +123,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
     case Ops.CALL:
       # a call has the dtype of its body, void for opaque bodies
       return src[0].dtype
-    case Ops.CUSTOM_FUNCTION:
-      # an external function states its return dtype in the arg
+    case Ops.CUSTOM_FUNCTION | Ops.CUSTOM:
+      # external functions and formatted strings state their return dtype in the arg
       return arg.dtype
     case Ops.INS:
       # arg is (instruction, dtype, *registers), a queue command or an asm line is void
@@ -349,7 +349,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         assert len(self.src[0].as_shape) <= 1
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
-      case Ops.CUSTOM_FUNCTION:
+      case Ops.CUSTOM_FUNCTION | Ops.CUSTOM:
         return self.src[0].as_shape if self.dtype != dtypes.void else None
       case Ops.PYLITERAL: return None
       case Ops.STAGE:
@@ -1206,6 +1206,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
     return UOp(Ops.CUSTOM_FUNCTION, src=shape_src+src, arg=CustomFunction(name, dtype))
 
+  @staticmethod
+  def custom(fmt:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, inline:bool=False) -> UOp:
+    shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
+    return UOp(Ops.CUSTOM, src=shape_src, arg=CustomFunction(fmt, dtype)).call(*src, inline=inline)
+
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, aux:Any=None) -> UOp:
     """call a body with the given args: a plain CallInfo CALL. all inputs must be ready (buffers/params), this never
@@ -1339,7 +1344,7 @@ class ProgramInfo:
                        tuple(sorted(dedup(ins))), target)
 
 # the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), bulk stores, and function references
-OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION}
+OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION, Ops.CUSTOM}
 
 # the arg of CUSTOM_FUNCTION: an external function symbol and the dtype of the value it returns
 @dataclass(frozen=True)

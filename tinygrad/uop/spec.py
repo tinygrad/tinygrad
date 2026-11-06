@@ -103,8 +103,8 @@ spec_shared = PatternMatcher([
   # an AFTER can wrap a scalar ALU (e.g. a computed RANGE bound) to order it after effect ops
   (UPat(Ops.AFTER, src=(UPat(GroupOp.ALU),), allow_any_len=True, name="x"), lambda x: x.src[0].shape == ()),
 
-  # a CUSTOM_FUNCTION names an external function: the arg is a CustomFunction stating the return dtype
-  (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, CustomFunction)),
+  # CUSTOM_FUNCTION names an external function and CUSTOM is a formatted string: both state their return dtype
+  (UPat((Ops.CUSTOM_FUNCTION, Ops.CUSTOM), name="x", allow_any_len=True), lambda x: isinstance(x.arg, CustomFunction)),
   # CALL: the body is always an opaque body stating the dtype, the arg is a CallInfo
   (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, CallInfo)),
 
