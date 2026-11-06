@@ -2072,7 +2072,10 @@ RING_W, RING_CMAX = 8, 4096  # waves a workgroup (a wave a chunk), the most (chu
 # (the collectives of decoding steps on lanes of their own (from DEC_LANE): their exchanges are small, more workgroups (RING_G_DEC) move them in
 # fewer rounds. a lane's mailboxes always have the same workgroups: their epoch counters move together)
 DEC_LANE = 16
-def ring_g() -> int: return getenv("RING_G_DEC", 32) if FLAG_LANE[0] >= DEC_LANE else getenv("RING_G", 8)
+def ring_g(units:int=0) -> int:
+  # (the decoding steps' lanes: RING_G_DEC, more for a unit a wave (units: a reduce scatter's), two a wave are ~2.5x the time (78 sequences))
+  if FLAG_LANE[0] < DEC_LANE: return getenv("RING_G", 8)
+  return max(G:=getenv("RING_G_DEC", 32), min(-(-units // RING_W), getenv("RING_G_DEC_MAX", 2*G)))
 def _ring_rounds(units:int, per_round:int, G:int) -> tuple[int, int, int]:
   """(workgroups, rounds, units of a wave a round) of units over the waves of G workgroups (per_round: the most a wave a round)"""
   per_wave = -(-units // (G * RING_W))
@@ -2287,7 +2290,8 @@ def ring_reduce_scatter_q8(p:Tensor, size:int, shape:tuple[int, ...]|None=None, 
   """
   devs = p.device
   if not isinstance(devs, tuple) or size % (len(devs)*256): return None
-  G, R, EP = _ring_rounds(-(-(size//len(devs)//32) // 8), getenv("RING_RS_EP", 8), ring_g())
+  units = -(-(size//len(devs)//32) // 8)
+  G, R, EP = _ring_rounds(units, getenv("RING_RS_EP", 8), ring_g(units))
   if G*RING_W*R*EP*72 > RING_MAXW or (mb:=ring_mailbox(devs)) is None: return None
   out = Tensor.empty(*(shape or (size,)), dtype=dtypes.float32, device=devs, axis=axis if shape else 0)
   return _ring_queued(Tensor.custom_kernel(out, p.reshape(len(devs), size).contiguous(), mb.counter, mb.inbox, mb.inbox_next, mb.flags,
