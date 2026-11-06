@@ -2767,7 +2767,7 @@ class Transformer:
 
   def prefill_parts(self, rows:int) -> list[tuple[int, int]]:
     """the blocks of the parts of a prefill chunk of rows (one part: not split)"""
-    k, n = getenv("PREFILL_PARTS", 4), len(self.blk)
+    k, n = getenv("PREFILL_PARTS", 1), len(self.blk)
     mb = getenv("MICRO_BATCHES", 1)
     if k <= 1 or self.config.hc is None or not amd_custom_kernels_supported(self.token_embd.weight.device) or \
        not (self.sequence_parallel(rows) and (mb > 1 or getenv("MB_PHASES", 1)) and self.sequence_parallel(rows // mb) and rows % mb == 0):

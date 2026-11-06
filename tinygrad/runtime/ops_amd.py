@@ -445,7 +445,9 @@ class AMDComputeQueue(HWQueue):
     # a higher one's first (a micro batch's ahead of the other's: its chain of kernels and collectives not slowed by it)
     prios = [int(v) for v in str(getenv("AMD_WAVE_PRIO", "")).split(",") if v != ""]
     qi_ = int(self.queue.split(":")[1]) if self.queue.startswith("COMPUTE:") else 0
-    rsrc1 = (data.rsrc1 & ~(3 << 10)) | (prios[qi_] << 10) if qi_ < len(prios) and self.target[0] == 11 else data.rsrc1
+    # (RING_WAVE_PRIO: a ring collective's waves (they move the data the other micro batch waits for) first by default)
+    pr = prios[qi_] if qi_ < len(prios) else getenv("RING_WAVE_PRIO", 3) if prg.src[0].arg.name.startswith("ring_") else None
+    rsrc1 = (data.rsrc1 & ~(3 << 10)) | (pr << 10) if pr is not None and self.target[0] == 11 else data.rsrc1
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, rsrc1, data.rsrc2)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
     self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, self.dev.tmpring_size(data.private_segment_size))
