@@ -1849,7 +1849,8 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
 RENDER = ContextVar("RENDER", 0) # render lifted ast back to assembly
 
 def render_call(call:UOp):
-  if call.arg.name.startswith("emu_"): return None
+  if call.arg.name.startswith("emu_"):
+    return UOp(Ops.LINEAR, src=tuple(y for x in call.body.toposort() if x.op is Ops.LINEAR for y in x.src if y.op in {Ops.BINARY, Ops.STACK}))
   encoding = bytes.fromhex(call.arg.name.rsplit("_", 1)[1])
   words = [UOp(Ops.BINARY, arg=encoding[i:i+4]) for i in range(0, len(encoding), 4)]
   for i,x in enumerate(call.src_without_body[:len(words)]):
