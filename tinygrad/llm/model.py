@@ -15,7 +15,7 @@ from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attentio
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
   kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, \
-  flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, few_out_rows, index_scores, after_kernel, \
+  flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, after_kernel, \
   host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT, _disk_bytes, _disk_location
@@ -843,7 +843,7 @@ class GatedResidual:
     act = (lo * lo.sigmoid()).contiguous()
     if self.up.ggml_type == Q8_0 and self.count == 4 and self.dim % 32 == 0 and not _wmma_rdna4(xs.device) and \
        int(act.uop.shard_shape[0]) % 32 == 0:
-      mixed = ghc_prefill_mix(act, self.up.weight, xn.reshape(rows, -1)).reshape(B, R, self.dim)
+      mixed = ghc_prefill_mix(act, self.up.weight, xn.reshape(rows, -1), (int(B), int(R), self.dim))
     else:
       g = q8_linear(self.up, act, split=True).reshape(B, R, self.count, self.dim)
       mixed = (g.sigmoid() * xn.reshape(B, R, self.count, self.dim)).mean(2)
@@ -939,7 +939,11 @@ class FFNBlock:
          isinstance(xr.shape[1], int) and int(xr.uop.shard_shape[1]) >= 32 and (router.weight.dtype == dtypes.half or rows is not None) and \
          amd_custom_kernels_supported(x.device):
         # many tokens: half copies of the input and the output, a float accumulator: the tensor cores (a float weight's half copy made)
-        logits = xr.half().contiguous().matmul(router.weight.T.half().contiguous(), dtype=dtypes.float).contiguous()
+        # (f32t_gemm: the transposed float weight (SKINNY's) staged in half by a kernel of whole tiles)
+        wt = getattr(router, "weight_t", None)
+        if wt is None or (lt:=f32t_gemm(xr.reshape(-1, xr.shape[-1]), wt)) is None:
+          logits = xr.half().contiguous().matmul(router.weight.T.half().contiguous(), dtype=dtypes.float).contiguous()
+        else: logits = lt.reshape(*xr.shape[:-1], -1)
       elif isinstance(T:=xr.shape[1], int) and 16 < T < 128 and T % 16 and getenv("ROUTER_PAD", 1):
         # (the rows of batched decoding (3 a sequence): padded to whole tiles of 16, the matmul's kernel of 60 rows is several times slower)
         logits = router(xr.pad((None, (0, round_up(T, 16) - T), None)))[:, :T]
@@ -1122,7 +1126,7 @@ class FFNBlock:
     @function(precompile=True, allow_implicit=True)
     def _pre(xs:Tensor) -> tuple[Tensor, Tensor, Tensor]:
       hn, post, comb = hc.pre_split(xs, norm)
-      return hn.contiguous(), post.contiguous(), comb.contiguous()
+      return _fn_out(hn), _fn_out(post), _fn_out(comb)
     return _pre(xs)
   def _phase_sub(self, sub:str, hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
     @function(precompile=True, allow_implicit=True)
@@ -1143,7 +1147,7 @@ class FFNBlock:
       done = out.ndim == hn.ndim and token_sharded(out)
       # (MB_DEP=compute: the token after the sublayer's compute (a value of its output before its collective))
       if state and getenv("MB_DEP", "sub") == "compute": writes = [out.contiguous() if done else out]
-      out = (out if done else reduce_scatter(out, 1) if out.ndim == hn.ndim + 1 else shard_rows(out, 1)).contiguous()
+      out = _fn_out(out if done else reduce_scatter(out, 1) if out.ndim == hn.ndim + 1 else shard_rows(out, 1))
       return (out, state_token(hn, writes or [])) if state else out
     state = (getenv("MB_DEP", "sub") == "compute" or (getenv("MB_DEP", "sub") == "state" and sub == "attn")) and _mb_active[0]
     if not state: return _sub(hn, start_pos, T)
@@ -1162,6 +1166,13 @@ class FFNBlock:
       ret = hc.post_split(out, post, comb, xs)
       return (ret.cast(dtypes.half) if getenv("HC_STREAMS_HALF", 1) else ret).contiguous()
     return _post(out, post, comb, xs)
+
+def _fn_out(t:Tensor) -> Tensor:
+  """
+  a function's output: a kernel's output as it is (its buffer: contiguous() of it in a function is a copy kernel, ~0.1 ms of 1152 rows of
+  2560 floats, 500 a 13824 chunk), else made contiguous
+  """
+  return t if getenv("FN_OUT_DIRECT", 1) and t.uop.has_buffer_identity(after_ok=True) else t.contiguous()
 
 def _on_queue(ts:tuple[Tensor, ...], queue:str) -> tuple[Tensor, ...]:
   """the outputs of a function call, its kernels on the compute queue `queue` (its copies on the copy queue of that index)"""

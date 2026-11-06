@@ -1178,7 +1178,8 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   lds_w = UOp.alloc((stage_rows, 32*GS + 8), dtypes.float16, addrspace=AddrSpace.LOCAL)
   # Q8_PREFETCH (Q8_0): the next group's x and weight words loaded into registers before this group's tensor core work, converted and stored
   # to LDS after it (their latency hidden by it, not a stall of every group)
-  prefetch = ggml_type == Q8_0 and not hc and getenv("Q8_PREFETCH", 1) and getenv("Q8_FAST_CVT", 1)
+  # (ggml_type F32T: raw is a float weight transposed (K, N), the router's: converted to half as it's staged)
+  prefetch = ggml_type in (Q8_0, F32T) and not hc and getenv("Q8_PREFETCH", 1) and getenv("Q8_FAST_CVT", 1)
   def pf_loads(gg:UOp) -> list[UOp]:
     out:list[UOp] = []
     for k in range((token_tile * 4 * GS + 127) // 128):
@@ -1188,6 +1189,9 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
     for bi in range(stage_rows * GS // 128):
       gi, wr = (bi*128 + tid) // stage_rows, (bi*128 + tid) % stage_rows
       row = (output_block * block_n + wr).minimum(N-1)
+      if ggml_type == F32T:
+        out += [raw.reshape(K*k_splits, N)[(gg + gi) * 32 + i, row].load() for i in range(32)]
+        continue
       base = (row * groups*k_splits + gg + gi) * 17
       out += [raw[base + w].load() for w in range(17)]
     return out
@@ -1200,6 +1204,10 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
       j += 8
     for bi in range(stage_rows * GS // 128):
       gi, wr = (bi*128 + tid) // stage_rows, (bi*128 + tid) % stage_rows
+      if ggml_type == F32T:
+        out += [bw[wr, gi * 32 + i].store(vals[j + i].cast(dtypes.half)) for i in range(32)]
+        j += 32
+        continue
       wv, j = vals[j:j+17], j + 17
       scale = wv[0].cast(dtypes.uint16).bitcast(dtypes.float16)
       for w in range(8):
@@ -1272,6 +1280,21 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
     stores.append(out[split*M + r, ocol(o)].store(value.cast(out.dtype)))
   name = f"q8_gemm_{M}_{N}_{K}" if getenv("LIN_NAMES") else "q8_gemm"  # (profiling: the shapes)
   return UOp.group(*stores).end(token_block, output_block, split, lane, wave).sink(arg=KernelInfo(name=name, opts_to_apply=()))
+
+F32T = -1  # (_q8_gemm_kernel: a float weight transposed)
+
+def f32t_gemm(x:Tensor, wt:Tensor) -> Tensor|None:
+  """
+  x (..., K) @ wt (K, N) float (a transposed float weight, a router's) on the tensor cores in float (the weight in half as it's staged): rows
+  split over the devices (wt on all), (..., N) float. None: not those shapes (the generic matmul's kernel: a few dozen workgroups)
+  """
+  K, N = int(wt.shape[0]), int(wt.shape[1])
+  R = int(x.uop.shard_shape[0]) if isinstance(x.device, tuple) and x.uop.axis == 0 and x.ndim == 2 else None
+  if not amd_custom_kernels_supported(x.device) or _wmma_rdna4(x.device) or R is None or R % 64 or N % 64 or K % 32 or \
+     isinstance(wt.device, tuple) and wt.uop.axis is not None or not getenv("F32T_GEMM", 1): return None
+  out = Tensor.empty(int(x.shape[0]), N, dtype=dtypes.float32, device=x.device, axis=0)
+  fxn = functools.partial(_q8_gemm_kernel, token_tile=64, ggml_type=F32T, rdna4=False, block_n=64)
+  return Tensor.custom_kernel(out, wt, x.half().contiguous(), fxn=fxn)[0]
 
 def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False, half_out:bool=False) -> Tensor:
   assert layer.ggml_type in QUANT_SIZES
@@ -1925,7 +1948,8 @@ def flag_reduce_scatter(p:Tensor, axis:int) -> Tensor|None:
   size = int(prod(S))
   if size % (2*N): return None
   # (big ones around the ring: see RingMailbox)
-  if size*9//8 >= getenv("RING_MIN", 1 << 16) and getenv("RING_RS", 1) and (r:=ring_reduce_scatter_q8(p, size)) is not None: return r.reshape(S)
+  if size*9//8 >= getenv("RING_MIN", 1 << 16) and getenv("RING_RS", 1) and \
+     (r:=ring_reduce_scatter_q8(p, size, tuple(int(s) for s in S) if getenv("RS_SHAPED", 1) else None, axis)) is not None: return r.reshape(S)
   if size and size % (N*256) == 0:
     qgroups, groups = size//(N*32), flag_ar_groups(size//2)
     if qgroups*9 > FLAG_AR_MAXN or (ar:=flag_allreduce(p.device, groups)) is None: return None
@@ -2130,6 +2154,7 @@ def _ring_rs_q8_kernel(out:UOp, p:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, f
   # R rounds of EP (8 groups a wave, four lanes a group: eight values a lane)
   blk = size // N
   BG = blk // 32
+  out = out.reshape(-1)
   G, R, EP = _ring_rounds(-(-BG // 8), getenv("RING_RS_EP", 8))
   C, wg, warp, lane, ch, me, recv, send, finish, at_round, end_round = _ring_common(counter, N, dbg, G, (1 << 31) | (size >> 8 << 10))
   sub = lane % 4
@@ -2220,13 +2245,16 @@ def ring_all_gather_words(x:Tensor) -> Tensor|None:
   return _ring_queued(Tensor.custom_kernel(out, x.bitcast(dtypes.uint32).contiguous(), mb.counter, mb.inbox, mb.inbox_next, mb.flags,
                                           mb.flags_next, mb.dbg, fxn=functools.partial(_ring_ag_kernel, N=len(devs), n=n))[0])
 
-def ring_reduce_scatter_q8(p:Tensor, size:int) -> Tensor|None:
-  """p (N, size) partials split on the devices: the sum of part i (size/N, float) on device i, around the ring in int8 groups"""
+def ring_reduce_scatter_q8(p:Tensor, size:int, shape:tuple[int, ...]|None=None, axis:int=0) -> Tensor|None:
+  """
+  p (N, size) partials split on the devices: the sum of part i (size/N, float) on device i, around the ring in int8 groups. shape: the output's
+  (split on axis), made so (a view of the flat one isn't a buffer: a copy of it)
+  """
   devs = p.device
   if not isinstance(devs, tuple) or size % (len(devs)*256): return None
   G, R, EP = _ring_rounds(-(-(size//len(devs)//32) // 8), getenv("RING_RS_EP", 8))
   if G*RING_W*R*EP*72 > RING_MAXW or (mb:=ring_mailbox(devs)) is None: return None
-  out = Tensor.empty(size, dtype=dtypes.float32, device=devs, axis=0)
+  out = Tensor.empty(*(shape or (size,)), dtype=dtypes.float32, device=devs, axis=axis if shape else 0)
   return _ring_queued(Tensor.custom_kernel(out, p.reshape(len(devs), size).contiguous(), mb.counter, mb.inbox, mb.inbox_next, mb.flags,
                                           mb.flags_next, mb.dbg, fxn=functools.partial(_ring_rs_q8_kernel, N=len(devs), size=size))[0])
 
@@ -4437,13 +4465,21 @@ def ghc_prefill_norm(xs:Tensor, w:Tensor, winj:Tensor, count:int, eps:float) -> 
                              fxn=functools.partial(_ghc_prefill_norm_kernel, count=count, D=D, eps=eps))
   return res[0], res[1], res[2]
 
-def ghc_prefill_mix(lo:Tensor, raw:Tensor, xn:Tensor) -> Tensor:
+def _q8_gemm_2d(out:UOp, *srcs:UOp, **kw) -> UOp: return _q8_gemm_kernel(out.reshape(-1, out.shape[-1]), *srcs, **kw)
+
+def ghc_prefill_mix(lo:Tensor, raw:Tensor, xn:Tensor, shape:tuple[int, ...]|None=None) -> Tensor:
+  """shape: the output's (rows its second axis, split on it: made so, a view of the (rows, D) one isn't a buffer: a copy of it)"""
   # Four stream projections in each workgroup: sigmoid and weighted mean stay in registers, not a full-size gate tensor.
   T, CD = cast(tuple[int, int], xn.shape)
   assert CD % 128 == 0
-  out = Tensor.empty(T, CD//4, dtype=dtypes.float32, device=xn.device, axis=0 if token_sharded(xn) else None)
-  return Tensor.custom_kernel(out, raw, lo.half().contiguous(), xn,
-                              fxn=functools.partial(_q8_gemm_kernel, token_tile=32, rdna4=False, block_n=32))[0]
+  sharded = token_sharded(xn)
+  if shape is not None and getenv("GHC_MIX_SHAPED", 1):
+    out = Tensor.empty(*shape, dtype=dtypes.float32, device=xn.device, axis=len(shape) - 2 if sharded else None)
+    return Tensor.custom_kernel(out, raw, lo.half().contiguous(), xn,
+                                fxn=functools.partial(_q8_gemm_2d, token_tile=32, rdna4=False, block_n=32))[0]
+  out = Tensor.empty(T, CD//4, dtype=dtypes.float32, device=xn.device, axis=0 if sharded else None)
+  ret = Tensor.custom_kernel(out, raw, lo.half().contiguous(), xn, fxn=functools.partial(_q8_gemm_kernel, token_tile=32, rdna4=False, block_n=32))[0]
+  return ret.reshape(shape) if shape is not None else ret
 
 def ghc_pre(xs:Tensor, w:Tensor, winj:Tensor, count:int, eps:float) -> tuple[Tensor, tuple[Tensor, Tensor, Tensor], Tensor]:
   """xs (T, count*D) the streams of T rows: their norms (T, count*D) half, its quantization (q8_quantize's), the inject partials (T, count, NJ)"""
