@@ -1,11 +1,12 @@
 from __future__ import annotations
-from typing import cast, Iterator, Any, Sequence
-import decimal
+from typing import cast, Iterator, Any, Sequence, Callable
+import decimal, weakref, pickle, time, os
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS
+import tinygrad.device as device_mod
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
@@ -32,7 +33,7 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
   if isinstance(call.arg.aux, HCQInfo): # the submitter itself, then every kernel it enqueues
     kernels:list[tuple[str, UOp, tuple|None]] = [(Device[call.arg.aux.device[0]].host, call, None)]
-    return kernels + [(d, call, (name, estimates, key, bufs, io)) for d,name,estimates,_,key,bufs,io in call.arg.aux.kernels]
+    return kernels + [(d, call, (name, estimates, key, bufs, io)) for d,name,estimates,_,key,bufs,io,*_ in call.arg.aux.kernels]
   ast = call.body
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "validate": return []
   return [(d, call, None) for d in to_tuple(call.device)]
@@ -154,8 +155,23 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
   return []
 
+# the launches of a jit's batch (exec_hcq) on the same inputs: the buffers and constants of its args, the variables filled in at every launch.
+# (a jit's: it holds the buffers, a relinked jit has new calls)
+_launch_args:weakref.WeakKeyDictionary[UOp, dict[tuple[UOp, ...], list]] = weakref.WeakKeyDictionary()
+
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|None]:
-  ets:list[float|None] = []
+  if devices is not None and ctx.jit and ctx.cache:
+    if (lanes:=(per:=_launch_args.setdefault(call, {})).get(ctx.input_uops)) is None:
+      lanes = per[ctx.input_uops] = _launch_lanes(ctx, call, ast, devices)
+    ets:list[float|None] = []
+    for rt, template, fixed in lanes:
+      var_vals = {**ctx.var_vals, **fixed}
+      global_sz, local_sz = ast.arg.launch_dims(var_vals)
+      try: args = [var_vals[a] if v else a for v, a in template]
+      except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
+      ets.append(rt(*args, global_size=global_sz, local_size=local_sz, wait=ctx.wait, timeout=ctx.timeout))
+    return ets
+  ets = []
   resolved = [_resolve(call.src[1+i], ctx.input_uops) for i in ast.arg.globals]
   for device, (bufs, device_vars) in zip(devices or to_tuple(get_call_arg_uops(call)[0].device), unwrap_multi(call, resolved)):
     if devices is None and device.split(":")[0] in HOST_DEVS: Device[device].synchronize(ctx.timeout)
@@ -168,6 +184,20 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
     except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
     ets.append(rt(*args, global_size=global_sz, local_size=local_sz, wait=ctx.wait, timeout=ctx.timeout))
   return ets
+
+def _launch_lanes(ctx:ExecContext, call:UOp, ast:UOp, devices) -> list:
+  # per device: the runtime, the args (True and a variable's name, or False and the value: a buffer, a constant) and the fixed variables
+  lanes = []
+  resolved = [_resolve(call.src[1+i], ctx.input_uops) for i in ast.arg.globals]
+  for device, (bufs, device_vars) in zip(devices, unwrap_multi(call, resolved)):
+    fixed = {**device_vars, **{s.expr: s.arg.val for s in call.src[1:] if s.is_bound_var}}
+    prg_bufs = {i:b.ensure_allocated() for i,b in zip(ast.arg.globals, bufs)}
+    template = [(True, p.expr) if p.is_variable else (False, _resolve(call.src[1+p.arg.slot], ctx.input_uops).val) if p.addrspace is AddrSpace.ALU
+                else (False, prg_bufs[p.arg.slot].get_buf(device)) for p in ast.kernel_params]
+    # (the variables bound by the call are fixed)
+    template = [(False, fixed[a]) if v and a in fixed else (v, a) for v, a in template]
+    lanes.append((get_runtime(device, ast, cache=ctx.cache), template, fixed))
+  return lanes
 
 def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
@@ -225,7 +255,17 @@ pm_beam = PatternMatcher([
 # **************** parallel lowering + compilation ****************
 
 def _compile_kernel(x:tuple[int, tuple[UOp, Renderer], dict]) -> tuple[int, UOp]:
-  with Context(**x[2]): return x[0], to_program(*x[1])
+  with Context(**x[2]):
+    if not os.environ.get("COMPILE_LOG"): return x[0], to_program(*x[1])
+    # (COMPILE_LOG: every kernel's codegen time to /tmp/compile_log.txt)
+    st = time.perf_counter()
+    prg = to_program(*x[1])
+    with open("/tmp/compile_log.txt", "a") as f: f.write(f"{time.perf_counter()-st:.3f} {prg.src[0].arg.name}\n")
+    return x[0], prg
+def _compile_pickled(task:bytes) -> bytes: return pickle.dumps(_compile_kernel(pickle.loads(task))[1])
+
+# (a process compiling for another: its kernels compiled there, by their keys, see capture_parallel) [(key, task)] -> their programs
+remote_compile:Callable[[list[tuple[bytes, bytes]]], list[UOp]]|None = None
 
 def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
   ast = c.body
@@ -242,7 +282,12 @@ def lower_and_compile(linear:UOp, verbose=True) -> UOp:
   # lower and compile what's not cached, in parallel if there's a worker pool
   keys = {c: to_program_key(*a) for c, a in ar.items()}
   todo = list({keys[c]: a for c, a in ar.items() if keys[c] not in to_program_cache}.items())
-  if len(todo):
+  if len(todo) and remote_compile is not None and not any(getattr(c.body.arg, "beam", 0) for c in ar):
+    ctx = {v.key: v.value for v in to_program_context}
+    if CAPTURE_PROCESS_REPLAY: ctx["PROCESS_REPLAY_LOC"] = get_process_replay_loc()
+    prgs = remote_compile([(pickle.dumps(key), pickle.dumps((0, ast_ren, ctx))) for key, ast_ren in todo])
+    for (key, _), prg in zip(todo, prgs): to_program_cache[key] = prg
+  elif len(todo):
     # kernels that beam search must compile in the parent, beam needs device access to time candidates
 
     pool = None if len(todo) == 1 or any(getattr(c.body.arg, "beam", 0) for c in ar) else get_worker_pool()
@@ -284,6 +329,7 @@ def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp: return hcq_l
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   assert linear.op is Ops.LINEAR, f"run_linear calls on {linear.op}"
   if len(linear.src) == 0: return
+  if device_mod.FORKED_COMPILE: raise RuntimeError("nothing runs in a process that only compiles")
   inputs = list(input_uops)
   if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, cache=True), input_uops=inputs)
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)

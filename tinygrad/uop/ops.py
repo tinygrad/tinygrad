@@ -184,6 +184,37 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   if op in GroupOp.Movement: return src[0].dtype
   raise RuntimeError(f"no dtype for {op} with arg {arg}")
 
+def _forward_outputs(values:tuple[UOp, ...], params:tuple[UOp, ...]) -> list[UOp]:
+  """
+  the body's effects storing the values into the output params. a value that is a view (reshapes) of a buffer the body allocates and writes
+  with kernels (an AFTER on an ALLOC) is made in the output itself: the ALLOC is replaced by the param, no copy into it
+  """
+  from tinygrad.helpers import getenv, prod
+  fwd:dict[UOp, UOp] = {}
+  made:set[int] = set()  # the outputs made in place
+  if getenv("FORWARD_OUTPUTS", 1):
+    # (the states of the buffers: one written in place more than once is the last state's, not forwarded)
+    def base(x:UOp) -> UOp:
+      while x.op is Ops.RESHAPE: x = x.src[0]
+      return x
+    afters:dict[UOp, set[UOp]] = {}
+    for x in UOp.sink(*values).toposort():
+      if x.op is Ops.AFTER: afters.setdefault(base(x.src[0]), set()).add(x)
+    for i, (v, p) in enumerate(zip(values, params)):
+      u = v
+      while u.op in (Ops.STAGE, Ops.RESHAPE): u = u.src[0]
+      if u.op is not Ops.AFTER or (a:=base(u.src[0])).op is not Ops.ALLOC or a in fwd or a.dtype != v.dtype or a.device != p.device: continue
+      # (written by kernels only: the output of a nested call stays its STORE, autograd differentiates through it)
+      if afters[a] != {u} or not all(c.op is Ops.CALL and c.src[0].op is Ops.SINK and c.src[0].arg is not None for c in u.src[1:]): continue
+      if a.axis is not None or v.axis is not None or not all(isinstance(x, int) for x in (*a.shape, *p.shape)): continue
+      if prod(a.shape) != prod(p.shape): continue
+      fwd[a] = p.reshape(a.shape)
+      made.add(i)
+  if not fwd: return [p.store(v) for v, p in zip(values, params)]
+  # (an allocation used by a value that isn't forwarded keeps its own: only the forwarded values sink their writes)
+  subbed = UOp.sink(*values).substitute(fwd).src
+  return [sv if i in made else p.store(sv) for i, (sv, p) in enumerate(zip(subbed, params))]
+
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, src:tuple[UOp,...]=tuple(), arg:Any=None):
@@ -199,6 +230,9 @@ class UOpMetaClass(type):
       if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {created}")
     return created
 
+# a bound Variable's unbound one (see bind)
+_unbound_vars:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary()
+
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
 class recursive_property:
   def __init__(self, fxn):
@@ -207,8 +241,16 @@ class recursive_property:
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
+    # (computed already: no walk, the most common case)
+    if (ret:=x.__dict__.get(self.nm, _MISSING)) is not _MISSING: return ret
+    # (its sources' computed: no walk, a new node of known ones)
+    if all(self.nm in s.__dict__ for s in x.src):
+      ret = x.__dict__[self.nm] = self.fxn(x)
+      return ret
     for node in x.toposort(gate=lambda node: self.nm not in node.__dict__, enter_calls=True): node.__dict__[self.nm] = self.fxn(node)
     return x.__dict__[self.nm]
+
+_MISSING = object()
 
 class _UOpTuple(tuple):
   # UOps are hash-consed, so structurally identical UOps are the same object and equality can be identity.
@@ -266,9 +308,24 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
-  def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
-    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
-    return self.op in ops or any(x.op in ops for x in self.backward_slice)
+  @recursive_property
+  def _slice_ops(self) -> int:
+    # the ops in backward_slice, a bit each (memoized: a lookup instead of a walk of the slice)
+    m = 0
+    for x in self.src_without_body: m |= x._slice_ops | (1 << x.op.value)
+    return m
+  def op_in_backward_slice_with_self(self, *ops:Ops) -> bool: return self.op in ops or any(self._slice_ops >> op.value & 1 for op in ops)
+
+  @recursive_property
+  def _defines_slice(self) -> frozenset[UOp]:
+    sets = [s.defines_slice for s in self.src_without_body]
+    if not sets: return frozenset()
+    return sets[0] if all(x is sets[0] for x in sets[1:]) else frozenset().union(*sets)
+  @property
+  def defines_slice(self) -> frozenset[UOp]:
+    """the PARAMs, BUFFERs and ALLOCs in toposort() (memoized: whether a graph reads a buffer, without a toposort of it)"""
+    return self._defines_slice | {self} if self.op in GroupOp.Defines else self._defines_slice
+  def reaches(self, x:UOp) -> bool: return x in self.defines_slice if x.op in GroupOp.Defines else x in self.toposort()
 
   @recursive_property
   def _bool_slice(self) -> frozenset[UOp]: return frozenset().union(*[s.bool_slice for s in self.src])
@@ -899,6 +956,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # by relevant CL runtimes at time of writing.
     if (dev:=self.device) is not None and any(d.startswith(("WEBGPU", "CL")) for d in to_tuple(dev)): return None
 
+    # reshapes and contiguous shrinks of a buffer (most views): the offset directly
+    if (fast:=self._reshape_shrink_view()) is not None and fast[0].op is not Ops.BITCAST: return fast
     rng = UOp.range(self.numel(), 0)
     out = graph_rewrite(self.flatten().index(rng), pm_mops+symbolic, name="contiguous_view_offset")
     if out.op is not Ops.INDEX or len(out.src)-1 != len((b:=out.src[0]).shape): return None
@@ -908,6 +967,20 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     osz, isz = b.element_size(), b.src[0].element_size()
     if (offset*osz) % isz or (self.numel()*osz) % isz: return b, offset
     return b.src[0].flatten()[offset*osz//isz:(offset+self.numel())*osz//isz].contiguous_view()
+
+  def _reshape_shrink_view(self) -> tuple[UOp, int]|None:
+    # self is the elements off.. of the first non movement op under its reshapes and shrinks (contiguous: one range), None for other views
+    if self.op not in (Ops.RESHAPE, Ops.SHRINK):
+      base = self.op in GroupOp.Defines or (self.op is Ops.MSELECT and self.src[0].op in GroupOp.Defines)
+      return (self, 0) if base and all_int(self.shape) else None
+    if (inner:=self.src[0]._reshape_shrink_view()) is None or not all_int(shape:=self.src[0].shape): return None
+    if self.op is Ops.RESHAPE: return inner if all_int(self.shape) else None
+    marg = self.marg
+    if not all(isinstance(x, int) for se in marg for x in se): return None
+    # contiguous: the dims before the last cut one keep one element
+    cut = [i for i, ((st, en), n) in enumerate(zip(marg, shape)) if (st, en) != (0, n)]
+    if cut and any(en - st != 1 for st, en in marg[:cut[-1]]): return None
+    return inner[0], inner[1] + sum(st * sd for (st, _), sd in zip(marg, strides_for_shape(shape)))
 
   def contiguous_view_offset(self) -> int|None: return None if (view := self.contiguous_view()) is None else view[1]
 
@@ -983,16 +1056,24 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return unwrap(self.arg.name)
   def bind(self, val:int|UOp):
     assert self.is_variable and not self.is_bound_var, f"op is {self.op}, need an unbound Variable"
-    uval = UOp.const(val) if isinstance(val, int) else val
-    assert uval.op is Ops.CONST, f"bind value must be a CONST, not {uval.op}"
-    assert self.vmin <= uval.vmin and uval.vmax <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
-    return self.replace(arg=replace(self.arg, val=uval.val))
+    if isinstance(val, int) and not isinstance(val, bool):
+      # (an int: checked as is, no CONST)
+      assert self.vmin <= val <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
+    else:
+      uval = UOp.const(val) if isinstance(val, int) else val
+      assert uval.op is Ops.CONST, f"bind value must be a CONST, not {uval.op}"
+      assert self.vmin <= uval.vmin and uval.vmax <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
+      val = uval.val
+    ret = self.replace(arg=replace(self.arg, val=val))
+    # (its unbound Variable: unbind doesn't make it again)
+    _unbound_vars[ret] = self
+    return ret
   def unbound(self) -> Variable:
     assert self.is_variable, f"op is {self.op}, need Variable"
     return self.replace(arg=replace(self.arg, val=None))
   def unbind(self) -> tuple[Variable, int]:
     assert self.is_bound_var, f"can't unbind {self}"
-    return self.unbound(), self.arg.val
+    return (u if (u:=_unbound_vars.get(self)) is not None else self.unbound()), self.arg.val
   def unbind_all(self) -> tuple[UOp, dict[Variable, int]]:
     bound = {x: x.unbound() for x in self.backward_slice_with_self if x.is_bound_var}
     return self.substitute(bound, walk=True), {v: cast(int, x.arg.val) for x, v in bound.items()}
@@ -1248,7 +1329,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return UOp.alloc(shp, o.dtype, slot=buf.buf_uop.arg.slot, device=dev, axis=axis), buf.param_like(p)
     outputs = tuple(mint(o, p) for o, p in zip(values, pos))
     rets = tuple(r for r, _ in outputs)
-    body = UOp.sink(*[p.store(v) for v, (_, p) in zip(values, outputs)])
+    body = UOp.sink(*_forward_outputs(values, tuple(p for _, p in outputs)))
     args: list[UOp|None] = [None] * (len(srcs) + len(values))
     for p, r in zip(pos, rets): args[p] = r
     it = iter(x.contiguous() if precompile else x for x in srcs)
@@ -1356,11 +1437,13 @@ class CallInfo:
   precompile_backward: bool = False
   inline: bool = False
   aux: Any = None
+  queue: str|None = None  # the queue its kernels run on (e.g. "COMPUTE:1"), the default one if None
   # grad_fxn can't be pickled
-  def __reduce__(self): return (CallInfo, (None, self.name, self.precompile, self.precompile_backward, self.inline, self.aux))
+  def __reduce__(self): return (CallInfo, (None, self.name, self.precompile, self.precompile_backward, self.inline, self.aux, self.queue))
   def __repr__(self):
     gf = id(self.grad_fxn) if self.grad_fxn else None
-    return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward}, {self.inline}, {self.aux})"
+    return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward}, {self.inline}, {self.aux}" \
+           f"{f', {self.queue!r}' if self.queue else ''})"
 
 # ******** ops in python ********
 

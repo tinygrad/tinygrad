@@ -1,6 +1,6 @@
 from __future__ import annotations
-import sys, argparse, codecs, itertools, typing, re, string, unicodedata, json, time, pathlib
-from typing import TYPE_CHECKING
+import sys, argparse, codecs, itertools, typing, re, unicodedata, json, time, pathlib, threading
+from typing import TYPE_CHECKING, cast
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, Context, fetch, profile_marker, getenv, round_up
@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
                bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None, eom_id:int|None=None, chat_template:str|None=None):
+    self._enc_cache: list[tuple[str, list[int]]] = []  # (encode(cache=True))
+    self._enc_lock = threading.Lock()
     preset = {"qwen35":"qwen2","qwen35moe":"qwen2","minimax-m2":"gpt-4o"}.get(preset, preset)
     if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4","gpt-4o","joyai-llm"):
       raise ValueError(f"Invalid tokenizer preset '{preset}'")
@@ -19,10 +21,10 @@ class SimpleTokenizer:
     self._byte_decoder = {chr(b): b for b in bs} | {chr(256+i): b for i,b in enumerate(b for b in range(256) if b not in bs)}
 
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L286
-    # each limit is one past the category's max codepoint (Z→U+3000, N→U+1FBF9, L→U+323AF, M→U+E01EF, P→U+1E95F, S→U+1FBCA)
+    # each limit is one past the category's max codepoint (Z→U+3000, N→U+1FBF9, L→U+323AF, M→U+E01EF)
     # compact adjacent codepoints into ranges: listing them all makes re spend seconds on large prompts
     def ucat_range(pre:str|tuple[str, ...]) -> str:
-      limits = {"Z": 0x3001, "N": 0x1fbfa, "L": 0x323b0, "M": 0xe01f0, "P": 0x1e960, "S": 0x1fbcb}
+      limits = {"Z": 0x3001, "N": 0x1fbfa, "L": 0x323b0, "M": 0xe01f0}
       limit = max(limits[p if p in limits else p[0]] for p in (pre if isinstance(pre, tuple) else (pre,)))
       cps = enumerate(cp for cp in range(limit) if unicodedata.category(chr(cp)).startswith(pre))
       runs = [list(g) for _, g in itertools.groupby(cps, lambda e: e[1]-e[0])]
@@ -30,18 +32,11 @@ class SimpleTokenizer:
     r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
     contr, r_l, r_n = "(?i:'s|'t|'re|'ve|'m|'ll|'d)", f"[^\\r\\n{r_p_N}{r_p_L}]?", f"[{r_p_N}]" if preset == "tekken" else f"[{r_p_N}]{{1,3}}"
     r_p, r_w, r_t = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*", f"{contr}|{r_l}[{r_p_L}]+", f"[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+"
-    if preset in ("tekken", "gpt-4o", "kimi-k2"):
+    if preset in ("tekken", "gpt-4o"):
       r_up, r_lo = ucat_range(("Lu","Lt","Lm","Lo","M")), ucat_range(("Ll","Lm","Lo","M"))
-      sfx = "" if preset == "tekken" else f"{contr}?"
-      r_w = f"{r_l}[{r_up}]*[{r_lo}]+{sfx}|{r_l}[{r_up}]+[{r_lo}]*{sfx}"
-      if preset != "kimi-k2": r_p = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n/]*"
-    self._pre_split = None
-    if preset == "joyai-llm":
-      r_ps = ucat_range(("P", "S"))
-      r_p, r_w = f" ?[{r_ps}]+[\\r\\n]*", f"[{re.escape(string.punctuation)}][A-Za-z]+|[^\\r\\n{r_p_L}{r_ps}]?[{r_p_L}{ucat_range('M')}]+"
-      # numbers and CJK runs are split off before the words
-      self._pre_split = re.compile(f"({r_n}|[\u4e00-\u9fa5\u3040-\u309f\u30a0-\u30ff]+)")
-    self._split_to_word = re.compile(f"({r_w}|{r_n}|{r_p}|{r_t})")
+      sfx = f"{contr}?" if preset == "gpt-4o" else ""
+      r_p, r_w = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n/]*", f"{r_l}[{r_up}]*[{r_lo}]+{sfx}|{r_l}[{r_up}]+[{r_lo}]*{sfx}"
+    self._split_to_word = re.compile(f"{r_w}|{r_n}|{r_p}|{r_t}")
     self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
 
     self._normal_tokens = {bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
@@ -86,15 +81,27 @@ class SimpleTokenizer:
     try: return [self._normal_tokens[p] for p in parts]
     except KeyError: raise RuntimeError("token not found")
   def _encode_sentence(self, chunk:str) -> list[int]:
-    if self._pre_split is None: words = self._split_to_word.findall(chunk)
-    else: words = [w for p in self._pre_split.split(chunk) for w in self._split_to_word.split(p) if w]
-    return [tok for word in words for tok in self._encode_word(word.encode())]
-  def encode(self, text:str) -> list[int]:
-    tokens: list[int] = []
-    pos = 0
-    for match in self._split_to_sentence.finditer(text):
+    return [tok for word in self._split_to_word.findall(chunk) for tok in self._encode_word(word.encode())]
+  def encode(self, text:str, cache:bool=False) -> list[int]:
+    """
+    the tokens of text. cache: the text up to its last special token kept with its tokens (the last ENCODE_CACHE ones), a text that starts with
+    one encodes only what follows (the text between special tokens is encoded on its own: the same tokens). a conversation's prompts grow
+    """
+    base, tokens = "", cast(list[int], [])
+    if cache:
+      with self._enc_lock:
+        base, tokens = max(((t, ids) for t, ids in self._enc_cache if text.startswith(t)), key=lambda e: len(e[0]), default=("", tokens))
+    tokens, pos, cut, cut_n = list(tokens), len(base), None, 0
+    for match in self._split_to_sentence.finditer(text, pos):
       tokens.extend(self._encode_sentence(text[pos:match.start(0)]) + [self._special_tokens[text[match.start(0):match.end(0)]]])
-      pos = match.end(0)
+      pos = cut = match.end(0)
+      cut_n = len(tokens)
+    if cache and cut is not None:
+      with self._enc_lock:
+        keep = [e for e in self._enc_cache if not text[:cut].startswith(e[0])]
+        # (a conversation's own each: a server's clients (agents and their side requests) are dozens, a 250k token prompt encoded again takes
+        # seconds. one is a few MB)
+        self._enc_cache = keep[len(keep)-getenv("ENCODE_CACHE", 64)+1:] + [(text[:cut], tokens[:cut_n])]
     return tokens + self._encode_sentence(text[pos:])
 
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
@@ -146,7 +153,7 @@ class FallbackTemplate:
     if self.tok.preset == 'glm4': return ""
     if self.tok.preset == 'tekken': return "[/INST]"
     return self.tok.decode([self.tok.eos_id])
-  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True, preserve_thinking:bool=False) -> str:
+  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True, preserve_thinking:bool=False, **kwargs) -> str:
     out = self.tok.decode([] if self.tok.bos_id is None else [self.tok.bos_id]) + ("<sop>" if self.tok.preset == 'glm4' else "")
     for msg in messages:
       out += self.role(msg["role"])
@@ -164,8 +171,7 @@ from tinygrad.llm.serve import LLMServer
 
 def main():
   parser = argparse.ArgumentParser()
-  parser.add_argument("--model", "-m", default=list(models.keys())[0],
-                      help=f"Model choice ({', '.join(models.keys())}) or local GGUF file/HF checkpoint directory")
+  parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
@@ -179,23 +185,25 @@ def main():
   # load the model
   st = time.perf_counter()
   with Context(DEBUG=max(DEBUG.value, 1 if args.serve else 0)):
-    path = fetch(models.get(args.model, args.model))
-    model, kv = (Transformer.from_hf if path.is_dir() else Transformer.from_gguf)(path, args.max_context, shard=args.shard)
-  model_name = kv.get('general.name') or kv.get('general.basename') or kv.get('_name_or_path') or args.model
+    # serving: the weights are read while the warmup compiles
+    model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context, shard=args.shard, defer_load=bool(args.serve))
+  model_name = kv.get('general.name') or kv.get('general.basename') or args.model
   file_sizes = [y.nbytes()*args.shard for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
   print(f"loaded model \"{model_name}\" at {sum(file_sizes)*1e-9/(time.perf_counter()-st):.2f} GB/s with {sum(file_sizes):,} bytes "
         f"and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params, "
         f"max context {args.max_context} on {nn.state.get_parameters(model)[0].device}")
 
   # get tokenizer
-  tok = SimpleTokenizer.from_hf(path, preset='glm4') if path.is_dir() else SimpleTokenizer.from_gguf_kv(kv)
+  tok = SimpleTokenizer.from_gguf_kv(kv)
 
   # use the model's chat template if jinja2 is available (enables model-specific formatting)
   template: jinja2.Template|FallbackTemplate = FallbackTemplate(tok)
   if not args.no_chat_template and (ct := tok.chat_template) is not None:
     try:
       import jinja2
-      env = jinja2.Environment(extensions=['jinja2.ext.loopcontrols'])  # (for {% break %})
+      # chat templates are written for the environment of HF apply_chat_template: the newline after a block tag and the whitespace before it
+      # aren't output (a model generates what it was trained on: re-rendered history then matches its tokens, its cache is reused)
+      env = jinja2.Environment(trim_blocks=True, lstrip_blocks=True, extensions=['jinja2.ext.loopcontrols'])  # (for {% break %})
       env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj, **kwargs)  # jinja2's tojson escapes <>& for HTML safety
       env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
       env.globals['strftime_now'] = lambda fmt: time.strftime(fmt)
@@ -205,11 +213,21 @@ def main():
     except ImportError: print("warning: jinja2 is not installed, the model's chat template is disabled")
 
   # warmup the JIT
+  wst = time.perf_counter()
   if args.warmup or args.serve:
-    with Context(DEBUG=max(DEBUG.value, 1)): model.warmup()
+    with Context(DEBUG=max(DEBUG.value, 1)):
+      # (sequences sharing the caches, served batched: their jits, see Transformer.seq_warmup)
+      if args.serve and model.seqs_supported() and getenv("SEQS", 1): model.seq_warmup()
+      else: model.warmup()
 
   # start server
-  if args.serve: LLMServer(('', args.serve), model, model_name, tok, template).serve_forever()
+  # (a request's top_p without one: TOP_P, else the model's recommended one)
+  top_p = float(getenv("TOP_P", 0.0) or kv.get("general.sampling.top_p", 1.0))
+  # (a chat completion's temperature without one: TEMPERATURE, else greedy)
+  temperature = float(getenv("TEMPERATURE", 0.0))
+  if args.serve:
+    print(f"ready: model made in {wst-st:.1f}s, warmed up in {time.perf_counter()-wst:.1f}s, serving on port {args.serve}", flush=True)
+    LLMServer(('', args.serve), model, model_name, tok, template, top_p=top_p, temperature=temperature).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:

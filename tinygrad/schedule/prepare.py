@@ -5,8 +5,10 @@ from tinygrad.uop.ops import graph_rewrite, MapCtx, rewrite_group, identity_elem
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
 from tinygrad.schedule.indexing import apply_movement_op
+from tinygrad.uop.symbolic import loads_as_variables
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
+from tinygrad.schedule.custom_inline import pm_inline_custom_srcs
 
 def forward_call_outputs(sink:UOp) -> UOp:
   placed:dict[UOp, UOp] = {}
@@ -63,13 +65,23 @@ pm_fold_moved_after = PatternMatcher([
 
 # movement op on INDEX as a PatternMatcher
 def _mop_index(r:UOp, idx:UOp):
-  idxs = idx.src[1:]
+  # the valids of the index (the gate of a store) aren't the movement op's: it moves the address, they are put back as they were. (moved
+  # with it, the reshape simplifies the address given them and drops the clauses on ranges no longer in the address)
+  idxs, valid = tuple(i.get_idx() for i in idx.src[1:]), UOp.const(True).uprod(*[i.get_valid() for i in idx.src[1:]])
+  # the loaded values in the address are variables to the movement op's index math (it would rewrite the stores they are after)
+  if (hidden:=loads_as_variables(UOp.sink(*idxs))) is None: return None
+  idxs = tuple(i.substitute(hidden) for i in idxs)
+  def gated(moved:tuple[UOp, ...]) -> tuple[UOp, ...]:
+    moved = tuple(m.substitute({v:k for k,v in hidden.items()}) for m in moved)
+    if valid.op is Ops.CONST or not moved: return moved
+    return moved[:-1] + ((valid & moved[-1].get_valid()).where(moved[-1].get_idx(), UOp.invalid()),)
   if len(idxs) == len(r.shape):
-    return r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idxs), arg=idx.arg)
+    return r.src[0].index(*gated(apply_movement_op(r.op, r.src[0].shape, r.marg, idxs)), arg=idx.arg)
   if r.op is Ops.RESHAPE:
     src_prefix = len(r.src[0].shape) - len(r.shape[len(idxs):])
     if src_prefix >= 0 and r.src[0].shape[src_prefix:] == r.shape[len(idxs):]:
-      ret = r.src[0].index(*apply_movement_op(r.op, r.src[0].shape[:src_prefix], r.shape[:len(idxs)], idxs), arg=idx.arg)
+      if src_prefix == 0: return r.src[0] if valid.op is Ops.CONST else None
+      ret = r.src[0].index(*gated(apply_movement_op(r.op, r.src[0].shape[:src_prefix], r.shape[:len(idxs)], idxs)), arg=idx.arg)
       return ret if ret.shape == idx.shape else None
 
 pm_mops = PatternMatcher([
@@ -150,6 +162,28 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   parts = [tmp>>8*i*ns for i in range(os//ns)]
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
+def _stacked_buffers(x:UOp) -> bool:
+  # the values of the devices stacked, each materialized (a buffer, or a STAGE: materialized by itself), reshaped: a multi device value
+  while x.op is Ops.RESHAPE: x = x.src[0]
+  return x.op is Ops.MSTACK and all(s.has_buffer_identity(after_ok=True) or s.op is Ops.STAGE for s in x.src)
+
+def _stageable(x:UOp) -> bool:
+  # a computed value a STAGE materializes (not a view of a buffer, one materialized already, a scalar or a variable)
+  return x.op not in {Ops.AFTER, Ops.BUFFER, Ops.ALLOC, Ops.CONST, Ops.MSELECT, Ops.MSTACK, Ops.PARAM, Ops.LOAD, Ops.CALL, Ops.COPY, Ops.STAGE,
+                      Ops.UNSHARD, *GroupOp.Movement} and not x.is_variable and x._shape is not None and x.shape != () and \
+    not (x.has_buffer_identity(after_ok=True) or _stacked_buffers(x))
+
+def stage_custom_kernel_srcs(c:UOp) -> UOp|None:
+  def staged(s:UOp) -> UOp:
+    if s.op is Ops.RESHAPE: return staged(s.src[0]).reshape(s.shape) if _stageable(s.src[0]) else s
+    return s.contiguous() if _stageable(s) else s
+  return c.replace(src=(c.src[0], *new)) if (new:=tuple(staged(s) for s in c.src[1:])) != c.src[1:] else None
+
+def _store_target(dst:UOp) -> bool:
+  # a buffer, or a contiguous view of one (a copy writes the range)
+  if dst.has_buffer_identity(after_ok=True): return True
+  return dst.op in GroupOp.Movement and (cv:=dst.contiguous_view()) is not None and cv[0].has_buffer_identity(after_ok=True)
+
 def copy_to_anon_store(x:UOp, copy:UOp):
   # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
   x = x.pad_to(x.max_shape)
@@ -201,9 +235,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # a copy to the same device as the source is not allowed: it is a no-op, STAGE materializes on the same device
   (UPat(Ops.COPY, src=(UPat.var("x"),), allow_any_len=True, name="copy"), lambda x,copy: x if x.device == copy.device else None),
 
-  # a COPY in src[1] of a plain STORE can just be removed: a STORE to a buffer on a different device is a COPY
+  # a COPY in src[1] of a plain STORE can just be removed: a STORE to a buffer (or a contiguous view of it) on a different device is a COPY
   (UPat(Ops.STORE, src=(UPat.var("dst"), UPat(Ops.COPY, src=(UPat.var("x"),), allow_any_len=True, name="cpy"))),
-   lambda dst,x,cpy: dst.store(x) if dst.device == cpy.device and dst.has_buffer_identity(after_ok=True) else None),
+   lambda dst,x,cpy: dst.store(x) if dst.device == cpy.device and _store_target(dst) else None),
 
   # a bare COPY is an anonymous store: realize it as a STORE into a fresh call-local buffer on the copy device
   (UPat(Ops.COPY, src=(UPat.var("x"),), allow_any_len=True, name="copy"), copy_to_anon_store),
@@ -212,7 +246,13 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # a STAGE of an already materialized value (or of a COPY, which materializes itself) is a no-op
   (UPat(Ops.STAGE, src=(UPat.var("x"),)),
-   lambda x: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY else None),
+   lambda x: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY or _stacked_buffers(x) else None),
+
+  # the inputs of a custom kernel are materialized: a STAGE of them too (one buffer for it and a STAGE of the same value, not a copy)
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM)),), allow_any_len=True, name="c"), stage_custom_kernel_srcs),
+  # a STAGE of a reshape is the reshape of the STAGE (the same buffer as a STAGE of the value)
+  (UPat(Ops.STAGE, src=(UPat(Ops.RESHAPE, name="r"),)),
+   lambda r: r if r.src[0].op is Ops.STAGE else r.src[0].contiguous().reshape(r.shape) if _stageable(r.src[0]) else None),
 
   # a GLOBAL STAGE stores each value slice at its leading range coordinates in a fresh call-local buffer
   (UPat(Ops.STAGE, src=(UPat.var("x"),), allow_any_len=True, name="stg"), stage_to_anon_store),
@@ -258,5 +298,6 @@ def prepare_rangeify(sink:UOp) -> UOp:
   tsink = graph_rewrite(forward_call_outputs(sink), multi_pm, name="multi_pm")
   tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls+pm_disk_copy, name="inline calls")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, init_ctx=MapCtx, name="fold moved afters")
+  tsink = graph_rewrite(tsink, pm_inline_custom_srcs, name="inline custom kernel inputs")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   return tsink

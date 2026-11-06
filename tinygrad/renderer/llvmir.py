@@ -169,6 +169,9 @@ class LLVMRenderer(Renderer):
     super().__init__(target)
     self.extra_matcher = create_non_native_float_pats((dtypes.bfloat16,))+ \
       pm_manual_bf16_cast+pm_widen_uidx if target.arch != "gfx950" else pm_widen_uidx
+    # (a NEG or SUB made after the decompositions: no llvm op of their own)
+    self.extra_matcher += PatternMatcher([(UPat(Ops.NEG, name="x"), lambda x: x.src[0] * x.const_like(-1)),
+                                          (UPat(Ops.SUB, name="x"), lambda x: x.src[0] + x.src[1] * x.const_like(-1))])
   def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # Buffer views may start at an offset from the aligned allocation.
     tys = [ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU) for _,u in args]

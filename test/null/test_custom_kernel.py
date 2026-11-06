@@ -101,6 +101,30 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(prg.ranges, {})
     self.assertEqual(len([u for u in prg.src[1].src if u.op is Ops.BARRIER]), 1)
 
+  def test_local_store_gate_not_in_address(self):
+    # the gate of a store (lane 0) is on a range that isn't in its address: the store is still gated
+    def kernel(C:UOp, A:UOp) -> UOp:
+      wave, lane = UOp.range(4, 0, AxisType.LOCAL), UOp.range(32, 1, AxisType.LOCAL)
+      tmp = UOp.placeholder((1, 4), dtypes.int32, slot=0, addrspace=AddrSpace.LOCAL)
+      tmp = tmp.after(tmp[0, wave.valid(lane.eq(0))].store(A[wave*32+lane]).barrier())
+      return C[wave*32+lane].store(tmp[0, (wave+1)%4]).end(wave, lane).sink(arg=KernelInfo(opts_to_apply=()))
+    c, a = Tensor.empty(128, dtype=dtypes.int32), Tensor.empty(128, dtype=dtypes.int32)
+    ast = Tensor.custom_kernel(c, a, fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
+    self.assertEqual(len([u for u in uops if u.op is Ops.IF]), 1)
+
+  def test_index_with_loaded_value_keeps_stores(self):
+    # an address with a value loaded after a store: moving the index doesn't rewrite (copy) the store it is after
+    from tinygrad.uop.ops import graph_rewrite
+    from tinygrad.schedule.prepare import pm_mops
+    r = UOp.range(4, 0, AxisType.LOCAL)
+    tmp = UOp.placeholder((4,), dtypes.int32, slot=1, addrspace=AddrSpace.LOCAL)
+    st = tmp[r.valid(r < 2)].store(UOp(Ops.ADD, src=(r.cast(dtypes.int32), UOp.const(0, dtypes.int32))))  # not simplified
+    out = UOp.placeholder((2, 4), dtypes.int32, slot=0)
+    ret = graph_rewrite(out[tmp.after(st.barrier())[(r+1)%4] % 2, r].store(1).end(r).sink(), pm_mops, bottom_up=True)
+    self.assertIn(st, ret.toposort())
+    self.assertFalse(any(u.op is Ops.RESHAPE for u in ret.toposort()))
+
   def test_gemm_qkv(self):
     B, N, K_DIM, H_KV, REP, D = 2, 7, 6, 2, 2, 6
     H, QKV = H_KV * REP, H_KV * (REP + 2) * D

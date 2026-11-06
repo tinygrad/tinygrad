@@ -23,6 +23,17 @@ class Estimates:
   def __add__(self, o:Estimates): return Estimates(self.ops + o.ops, self.lds + o.lds, self.mem + o.mem)
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
   @staticmethod
+  def sum(es:list[Estimates]) -> Estimates:
+    """the simplified total: the same symbolic terms (calls of a kernel) are counted, not chained (one small expression to simplify)"""
+    def total(xs:list[sint]) -> sint:
+      terms:dict[UOp, int] = {}
+      for x in xs:
+        if isinstance(x, UOp): terms[x] = terms.get(x, 0) + 1
+      ret:sint = sum(x for x in xs if not isinstance(x, UOp))
+      for t, n in terms.items(): ret = ret + (t * n if n > 1 else t)
+      return ssimplify(ret)
+    return Estimates(total([e.ops for e in es]), total([e.lds for e in es]), total([e.mem for e in es]))
+  @staticmethod
   def from_uops(uops:tuple[UOp, ...], ignore_indexing=False) -> Estimates:
     flops: sint = 0
     lds: sint = 0

@@ -640,6 +640,21 @@ class TestFunctionTuple(unittest.TestCase):
         self.assertEqual(b.tolist(), [6., 8.])
         self.assertIsNot(a.uop.buffer, b.uop.buffer)
 
+  def test_custom_kernel_output_made_in_place(self):
+    # a returned view of a buffer the body allocates and fills with a kernel is made in the output: no copy kernel
+    def write(C:UOp, A:UOp) -> UOp:
+      i = UOp.range(A.shape[0], 0)
+      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="write"))
+    for precompile in (False, True):
+      with self.subTest(precompile=precompile):
+        @function(precompile=precompile)
+        def f(a:Tensor): return Tensor.custom_kernel(Tensor.empty(16), a, fxn=write)[0].reshape(4, 4).contiguous()
+        a = Tensor(np.arange(16, dtype=np.float32)).realize()
+        GlobalCounters.reset()
+        out = f(a).realize()
+        self.assertEqual(GlobalCounters.kernel_count, 1)
+        np.testing.assert_equal(out.numpy(), np.arange(16).reshape(4, 4) * 2)
+
   def test_custom_kernel_write_only_persistent_output_is_implicit(self):
     # a write-only custom_kernel output that is a realized buffer must be captured
     def write(C:UOp, A:UOp) -> UOp:

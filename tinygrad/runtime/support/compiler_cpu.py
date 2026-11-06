@@ -1,10 +1,12 @@
-import subprocess
+import subprocess, shutil
 from tinygrad.device import Compiler
 from tinygrad.helpers import getenv, capstone_flatdump, cpu_objdump
 
 class ClangCompiler(Compiler):
   def __init__(self, arch:list[str], cachekey="compile_clang_obj"):
     assert len(arch) >= 2, f"invalid arch string: {','.join(arch)!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
+    # without clang the renderer selection falls back to the next one (LLVM)
+    if shutil.which(getenv("CC", "clang")) is None: raise FileNotFoundError(f"C compiler {getenv('CC', 'clang')!r} not found")
     self.arch, cpu, *feats = arch
     match self.arch:
       case "x86_64": self.args = [f"-march={cpu}"] + [f"-mno{f}" if f.startswith("-") else f"-m{f}" for f in feats]

@@ -39,6 +39,8 @@ class _Device:
     return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{base}.runtime.ops_{x}')) if (cname.lower() == x + "device")][0]
   @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
+    # a forked compile process uses the devices its parent opened, it doesn't open one (a device is opened once, by one process)
+    if FORKED_COMPILE and ix.split(":")[0] not in {"CPU", "PYTHON", "NPY", "DISK", "NULL"}: raise RuntimeError(f"no device {ix} opened here")
     ret = self.get_class(ix)(ix)
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
     self._opened_devices.add(ix)
@@ -104,6 +106,10 @@ class MultiBuffer:
   def nbytes(self): return self.bufs[0].nbytes
   def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
   def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} nbytes:{self.nbytes}>"
+
+# a forked process that only compiles (capture_parallel in engine/jit.py) shares the devices of its parent: it must not change them (no device
+# memory is allocated or freed, nothing runs)
+FORKED_COMPILE = False
 
 @dataclass(frozen=True)
 class BufferStorage: buf:Any; meta:Any=None; host:MMIOInterface|None=None; maps:dict[Compiled, BufferStorage]=field(default_factory=dict) # noqa: E702
@@ -191,6 +197,7 @@ class Buffer:
 
   def deallocate(self):
     assert self._storage is not None, "buffer must be allocated to deallocate"
+    if FORKED_COMPILE: return
     if DEBUG is not None and DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None:
       if GlobalCounters is not None and not is_disk_device(self.device) and self.options.external_ptr is None:
@@ -255,9 +262,12 @@ class Allocator(Generic[DeviceType]):
 
   def alloc(self, size:int, options:BufferSpec|None=None) -> BufferStorage:
     assert size > 0, f"alloc size must be positive, getting {size}"
+    if FORKED_COMPILE and self.dev.device.split(":")[0] not in {"CPU", "PYTHON", "NPY"}: raise RuntimeError(f"no allocation on {self.dev.device}")
 
     # check if old most is free
-    if (c:=self.cache[(size, options)]) and all(dev.timeline.host.view(fmt='Q')[0] >= freed_at for dev, freed_at in c[0][1].items()):
+    # (a forked compile process doesn't reuse its parent's freed buffers: their devices' timelines aren't mapped there)
+    if not FORKED_COMPILE and (c:=self.cache[(size, options)]) and \
+       all(dev.timeline.host.view(fmt='Q')[0] >= freed_at for dev, freed_at in c[0][1].items()):
       return c.pop(0)[0]
 
     spec = options if options is not None else BufferSpec()
