@@ -1336,9 +1336,10 @@ def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P | irc.VOP3PX2, ctx: _
   def _pk_sel(src_lo: UOp, src_off: UOp, sel: int) -> UOp:
     """Lo (sel=0) / hi (sel!=0) half of a packed source: VGPR/SGPR pairs select from the two registers of the pair
     (off>=256 is a VGPR pair, off<128 an SGPR pair), inline constants (128<=off<256) broadcast to both halves."""
-    if not sel: return (src_off >= _c(256)).where(ctx.rvgpr_dyn(src_off - _c(256), lane), src_lo)
+    is_vgpr = src_off >= _c(256)
+    if not sel: return is_vgpr.where(ctx.rvgpr_dyn(src_off - _c(256), lane, is_vgpr), src_lo)
     is_sgpr_pair = src_off < _c(128)
-    return (src_off >= _c(256)).where(ctx.rvgpr_dyn(src_off - _c(256) + _c(1), lane),
+    return is_vgpr.where(ctx.rvgpr_dyn(src_off - _c(256) + _c(1), lane, is_vgpr),
                                       is_sgpr_pair.where(ctx.rsgpr_dyn(src_off + _c(1), is_sgpr_pair), src_lo))
 
   if is_pk_mov_b32:
