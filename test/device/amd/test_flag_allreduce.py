@@ -4,8 +4,8 @@ import numpy as np
 from tinygrad import Device, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv
 from tinygrad.device import Buffer
-from tinygrad.llm.kernels.amd import partial_sum, _flag_allreduce, flag_allreduce, flag_ar_groups, reduce_scatter, all_gather, all_gather_q8
-from tinygrad.llm.kernels.amd import _q8_pack_kernel
+from tinygrad.llm.kernels.amd_qwen import partial_sum, _flag_allreduce, flag_allreduce, flag_ar_groups, reduce_scatter, all_gather, all_gather_q8
+from tinygrad.llm.kernels.amd_qwen import _q8_pack_kernel
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "AMD required")
 class TestFlagAllreduce(unittest.TestCase):

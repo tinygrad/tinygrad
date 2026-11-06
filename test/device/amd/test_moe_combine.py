@@ -1,7 +1,7 @@
 import functools, unittest
 import numpy as np
 from tinygrad import Tensor, TinyJit, Device, dtypes
-from tinygrad.llm.kernels.amd import _moe_combine_kernel, amd_custom_kernels_supported
+from tinygrad.llm.kernels.amd_qwen import _moe_combine_kernel, amd_custom_kernels_supported
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD")
 class TestMoeCombine(unittest.TestCase):

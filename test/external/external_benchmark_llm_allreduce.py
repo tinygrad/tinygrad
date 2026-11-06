@@ -11,7 +11,7 @@ import os, time
 import numpy as np
 from tinygrad import Tensor, TinyJit, Device, UOp, dtypes
 from tinygrad.uop.ops import KernelInfo
-from tinygrad.llm.kernels.amd import partial_sum, reduce_scatter, all_gather, all_gather_q8, host_allgather, _sys, FLAG_AR_MAXN
+from tinygrad.llm.kernels.amd_qwen import partial_sum, reduce_scatter, all_gather, all_gather_q8, host_allgather, _sys, FLAG_AR_MAXN
 
 
 def stamp(out, *deps):

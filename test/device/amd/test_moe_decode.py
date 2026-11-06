@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Tensor, TinyJit, Device, UOp, dtypes
 from tinygrad.helpers import getenv
 from tinygrad.llm.gguf import ggml_data_to_tensor
-from tinygrad.llm.kernels.amd import moe_linear, q8_quantize, q8_quantize_cache_clear, _quant_decode_kernel, IQ3_S, IQ4_NL, Q8_0
+from tinygrad.llm.kernels.amd_qwen import moe_linear, q8_quantize, q8_quantize_cache_clear, _quant_decode_kernel, IQ3_S, IQ4_NL, Q8_0
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD")
 class TestMoEDecode(unittest.TestCase):

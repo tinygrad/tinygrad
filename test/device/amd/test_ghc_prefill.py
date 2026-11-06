@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, TinyJit, Device, dtypes
 from tinygrad.helpers import getenv
-from tinygrad.llm.kernels.amd import amd_custom_kernels_supported, ghc_prefill_norm, ghc_prefill_mix, Linear, q8_linear, Q8_0
+from tinygrad.llm.kernels.amd_qwen import amd_custom_kernels_supported, ghc_prefill_norm, ghc_prefill_mix, Linear, q8_linear, Q8_0
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD")
 class TestGHCPrefill(unittest.TestCase):

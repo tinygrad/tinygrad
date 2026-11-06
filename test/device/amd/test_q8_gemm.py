@@ -1,7 +1,7 @@
 import functools, unittest
 import numpy as np
 from tinygrad import Device, Tensor, TinyJit, dtypes
-from tinygrad.llm.kernels.amd import _q8_gemm_kernel
+from tinygrad.llm.kernels.amd_qwen import _q8_gemm_kernel
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD")
 class TestQ8Gemm(unittest.TestCase):

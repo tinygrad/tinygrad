@@ -2,16 +2,17 @@ import unittest
 from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
-from tinygrad.llm.kernels.amd import (Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill,
-                                      QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, _wmma_rdna4, _use_i8_wmma, I8_WMMA_QUANTS)
-from tinygrad.helpers import getenv
+from tinygrad.helpers import DEV
+from tinygrad.llm.kernels.amd import (Linear, ExpertWeights, amd_custom_kernels_supported, flash_attention, gated_delta_prefill,
+                                      _is_rdna4, _is_cdna)
+from tinygrad.llm.kernels.amd_gguf import q8_quantize, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, Q4_K, IQ3_S
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.runtime.test_llm_quantized import QuantLinearMixin
 
 class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_wmma_architecture_selection(self):
     if not amd_custom_kernels_supported(device:=Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
-    self.assertEqual(_wmma_rdna4(device), Device[device].target[0] == 12)
+    self.assertEqual(_is_rdna4(device), Device[device].target[0] == 12)
 
   def test_values_and_scales(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
@@ -70,14 +71,13 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_iq2_s_linear(self): self._test_quant_linear(22, 82, in_features=768, token_counts=(1, 3, 16))
 
   def test_wmma_linear_symbolic(self):
-    with patch("tinygrad.llm.kernels.amd.q8_quantize", side_effect=AssertionError("expected WMMA")):
+    with patch("tinygrad.llm.kernels.amd_gguf.q8_quantize", side_effect=AssertionError("expected WMMA")):
       for typ in QUANT_SIZES:
         self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=48, token_counts=(3, 17), bias=True, symbolic=True)
 
   def test_mixed_quant_linear_wmma_tiles(self):
-    with patch("tinygrad.llm.kernels.amd.q8_quantize", side_effect=AssertionError("expected WMMA")):
-      # the formats of the int8 tensor cores quantize the activations
-      for typ in (t for t in HALFWORD_QUANTS if not _use_i8_wmma(Device.DEFAULT, t)):
+    with patch("tinygrad.llm.kernels.amd_gguf.q8_quantize", side_effect=AssertionError("expected WMMA")):
+      for typ in HALFWORD_QUANTS:
         self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=768, out_features=64, token_counts=(16, 32, 64), bias=True)
 
   def test_wmma_dequantization_basis(self):
@@ -223,6 +223,30 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         np.testing.assert_array_equal(out.numpy(), 32)
         np.testing.assert_array_equal(state.numpy(), 1)
 
+  def _test_moe_decode(self, typ:int):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
+    rng = np.random.default_rng(5)
+    E, T, K, IN, OUT, size = 4, 1, 2, 256, 16, QUANT_SIZES[typ]
+    blocks = rng.integers(0, 256, (E*OUT*IN//256, size), dtype=np.uint8)
+    blocks[:, :2] = np.array([0.001], np.float16).view(np.uint8)
+    blocks[:, 2:4] = np.array([0.0001], np.float16).view(np.uint8)
+    decoded = ggml_data_to_tensor(Tensor(blocks.flatten()).contiguous().realize(), E*OUT*IN, typ).reshape(E, OUT, IN)
+    w = decoded.numpy()
+    act = rng.standard_normal((1, T, K, IN)).astype(np.float32)
+    sel = np.stack([rng.choice(E, K, replace=False) for _ in range(T)])[None].astype(np.int32)
+    ew = ExpertWeights(E, IN, OUT)
+    ew.weight = decoded.half()
+    ew.set_quantized()
+    self.assertEqual(ew.ggml_type, typ)
+    got = ew(Tensor(sel), Tensor(act)).numpy()[0]
+    for t in range(T):
+      for j in range(K):
+        ref = w[sel[0, t, j]] @ act[0, t, j]
+        np.testing.assert_allclose(got[t, j], ref, rtol=2e-2, atol=2e-2*np.abs(ref).max())
+
+  def test_moe_decode(self): self._test_moe_decode(Q4_K)
+  def test_moe_decode_iq3_s(self): self._test_moe_decode(IQ3_S)
+
   def test_gated_delta_random_scan(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
     rng = np.random.default_rng(42)
@@ -248,110 +272,6 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
           out = gated_delta_prefill(*map(Tensor, (q, k, v, beta, alpha)), state, Tensor(UOp.variable("start", 0, 3).bind(start)))
           np.testing.assert_allclose(out.numpy(), np.stack(outputs, axis=2), rtol=2e-4, atol=2e-6)
           np.testing.assert_allclose(state.numpy(), expected_state, rtol=2e-4, atol=2e-6)
-
-  def test_gated_delta_lds_scan(self):
-    # The 128-wide state selects the LDS scan, including its 32-token staging on Qwen shapes.
-    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
-    rng = np.random.default_rng(1)
-    H, T, K, V = 2, 32, 128, 128
-    q, k = (rng.normal(0, 0.1, (1, H, T, K)).astype(np.float32) for _ in range(2))
-    v = rng.normal(size=(1, H, T, V)).astype(np.float32)
-    beta = rng.uniform(0, 1, (1, H, T)).astype(np.float32)
-    initial = rng.normal(0, 0.1, (1, H, V, K)).astype(np.float32)
-    for per_channel in (False, True):
-      alpha = rng.uniform(0.8, 1, (1, H, T, K) if per_channel else (1, H, T)).astype(np.float32)
-      for start in (0, 3):
-        with self.subTest(per_channel=per_channel, start=start):
-          expected_state = np.zeros_like(initial) if start == 0 else initial.copy()
-          outputs = []
-          for t in range(T):
-            expected_state *= alpha[:, :, t, None, :] if per_channel else alpha[:, :, t, None, None]
-            delta = (v[:, :, t] - (expected_state*k[:, :, t, None]).sum(-1)) * beta[:, :, t, None]
-            expected_state += delta[..., None]*k[:, :, t, None]
-            outputs.append((expected_state*q[:, :, t, None]).sum(-1))
-          state = Tensor(initial).contiguous().realize()
-          out = gated_delta_prefill(*map(Tensor, (q, k, v, beta, alpha)), state, Tensor(UOp.variable("start", 0, 3).bind(start)))
-          np.testing.assert_allclose(out.numpy(), np.stack(outputs, axis=2), rtol=1e-3, atol=1e-5)
-          np.testing.assert_allclose(state.numpy(), expected_state, rtol=1e-3, atol=1e-5)
-
-  def test_grouped_iq3_s(self): self._test_grouped_k256(21, 110, np.uint16)  # 110 byte blocks: halfwords
-  def test_grouped_iq4_xs(self):
-    from tinygrad.helpers import getenv
-    try:
-      with patch.dict("os.environ", {"IQ4_K256": "1"}): self._test_grouped_k256(23, 136, np.uint32)
-    finally: getenv.cache_clear()
-
-  def _test_grouped_k256(self, ggml_type, block_bytes, word):
-    # grouped experts (prefill): every sorted row is the weights of its expert times its token's activations, quantized to int8 with a
-    # scale per 256 inputs (as llama.cpp's q8_K for the IQ formats)
-    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
-    if ggml_type != 21 and not _wmma_rdna4(Device.DEFAULT): self.skipTest("IQ4 K256 requires RDNA4")
-    from tinygrad import TinyJit
-    from tinygrad.helpers import getenv
-    from tinygrad.llm.kernels.amd import moe_route, moe_grouped_linear
-    getenv.cache_clear()
-    rng = np.random.default_rng(3)
-    T, E, K, IN, OUT = 96, 16, 4, 512, 256
-    packed = rng.integers(0, 256, (E*OUT*IN//256, block_bytes), dtype=np.uint8)
-    packed[:, :2] = np.array([0.01], dtype=np.float16).view(np.uint8)
-    raw = Tensor(packed.flatten().view(word)).realize()
-    weight = ggml_data_to_tensor(Tensor(packed.flatten()), E*OUT*IN, ggml_type).reshape(E, OUT, IN).numpy()
-    sel = rng.integers(0, E, (1, T, K)).astype(np.int32)
-    for tile in (32, 64):
-      _, entries, tiles, _ = moe_route(Tensor(sel), Tensor([0], dtype=dtypes.int32), E, tile=tile)
-      Tensor.realize(entries, tiles)
-      @TinyJit
-      def run(x): return moe_grouped_linear(raw, ggml_type, E, x, entries, tiles, slots=K).realize()
-      for iteration in range(3):
-        x = rng.standard_normal((T, IN)).astype(np.float32)
-        out = run(Tensor(x).realize()).numpy()
-        blocks = x.reshape(T, -1, 256)
-        d = np.maximum(np.abs(blocks).max(-1, keepdims=True) / 127, 1e-8)
-        xq = (np.clip(np.rint(blocks / d), -127, 127) * d).reshape(T, IN)
-        rows = entries.numpy().reshape(-1)
-        with self.subTest(tile=tile, iteration=iteration):
-          for r in np.nonzero(rows >= 0)[0]:
-            t, k = divmod(int(rows[r]), K)
-            np.testing.assert_allclose(out[r], weight[sel[0, t, k]] @ xq[t], rtol=1e-3, atol=1e-3)
-
-  def test_grouped_fused_gate_up(self):
-    # grouped experts (prefill) with the gate and up rows interleaved (fuse_gate_up): the kernel stores their gated activation in half.
-    # eight waves of two output tiles: on RDNA3 the accumulator halves are exchanged by permlanex16 (their LDS exchange is too big)
-    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
-    from tinygrad.llm.kernels.amd import moe_route, moe_grouped_linear, fuse_gate_up
-    rng = np.random.default_rng(5)
-    T, E, K, IN, OUT, act = 96, 8, 4, 512, 256, (1.0, 10.0, 0.0)
-    for typ in (22, 10, 11, 21, 23):  # IQ2_S, Q2_K, Q3_K, IQ3_S, IQ4_XS: GLM-5.3-Flash UD-IQ3_XXS's experts
-      with self.subTest(ggml_type=typ):
-        size = QUANT_SIZES[typ]
-        weights, raws = [], []
-        for _ in range(2):
-          packed = rng.integers(0, 256, (E*OUT*IN//256, size), dtype=np.uint8)
-          offset = size-2 if typ in (11, 14) else 80 if typ == 10 else 0
-          packed[:, offset:offset+2] = np.array([0.0005], np.float16).view(np.uint8)
-          if typ == 10: packed[:, 82:84] = np.array([0.0002], np.float16).view(np.uint8)
-          weights.append(ggml_data_to_tensor(Tensor(packed.flatten()), E*OUT*IN, typ).reshape(E, OUT, IN).numpy())
-          raws.append(Tensor(packed.flatten().view(np.uint16 if typ in HALFWORD_QUANTS else np.uint32)))
-        raw = fuse_gate_up(raws[0], raws[1], E, OUT).contiguous().realize()
-        x = rng.standard_normal((T, IN)).astype(np.float16)
-        sel = rng.integers(0, E, (1, T, K)).astype(np.int32)
-        _, entries, tiles, _ = moe_route(Tensor(sel), Tensor([0], dtype=dtypes.int32), E)
-        out = moe_grouped_linear(raw, typ, E, Tensor(x), entries, tiles, slots=K, act=act).numpy()
-        self.assertEqual(out.shape[1], OUT)
-        rows = entries.numpy().reshape(-1)
-        valid = np.nonzero(rows >= 0)[0]
-        t, k = np.divmod(rows[valid], K)
-        xr = x.astype(np.float32)
-        if typ in I8_WMMA_QUANTS and (_wmma_rdna4(Device.DEFAULT) or getenv("I8_WMMA_RDNA3", 1)):
-          # IQ3_S accumulates 256-input blocks in int32; other formats use per-32 activation scales.
-          grouped = xr.reshape(T, -1, 256 if typ == 21 else 32)
-          dq = np.maximum(np.abs(grouped).max(-1, keepdims=True) / 127, 1e-8)
-          xr = (np.clip(np.rint(grouped / dq), -127, 127) * dq).reshape(T, IN)
-        g, u = (np.einsum("roi,ri->ro", w[sel[0, t, k]], xr[t]) for w in weights)
-        g, u = np.minimum(g, act[1]), np.clip(u, -act[1], act[1])
-        expected, actual = g / (1 + np.exp(-g)) * u, out[valid].astype(np.float32)
-        # (the weights decode to half: errors of a few thousandths of the outputs' scale; a wrong row or column is of its scale)
-        self.assertLess(np.abs(actual - expected).max(), 5e-3 * np.abs(expected).max())
 
   def test_dense_gemv_bias(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
@@ -449,7 +369,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
           np.testing.assert_allclose(run(q, kv, end).numpy(), expected, rtol=1e-3, atol=1e-3)
 
   def test_prefill_attention_random(self):
-    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
+    if not amd_custom_kernels_supported(d:=Tensor.empty(1).device) or _is_cdna(d): self.skipTest("RDNA3/4 required")
     rng = np.random.default_rng(42)
     cases = ((2, 4, 2, 32, 64, 45, 64, False), (1, 3, 1, 64, 128, 83, 128, False),
              (1, 2, 1, 96, 256, 149, 192, False), (1, 4, 2, 17, 128, 128, 128, True), (1, 2, 1, 3, 64, 33, 64, True),
@@ -517,7 +437,8 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     np.testing.assert_allclose(flash_attention(q, cache, valid_kv_len).numpy(), 5500, rtol=2e-3, atol=2e-3)
 
   def test_prefill_attention_unaligned_start(self):
-    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    if not amd_custom_kernels_supported(d:=Tensor.empty(1).device): self.skipTest("RDNA3/4 or CDNA3/4 required")
+    if _is_cdna(d) and DEV.interface.startswith("MOCK"): self.skipTest("too slow on the CDNA emulator")
     rng = np.random.default_rng(42)
     start_pos = 1718
     q = Tensor.zeros(1, 8, 32, 128)

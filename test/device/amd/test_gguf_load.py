@@ -3,7 +3,7 @@ from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, Device
 from tinygrad.helpers import getenv
-from tinygrad.llm.gguf import _parallel_load, _preadv_exact
+from tinygrad.llm.gguf_load import _parallel_load, _preadv_exact
 
 class TestFileReads(unittest.TestCase):
   def test_repeated_short_reads(self):

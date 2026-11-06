@@ -22,6 +22,13 @@ def unmark(s:str) -> str:
 
 def parse_tool_call(s:str, tags:dict[str, str]=TEXT_TAGS) -> tuple[str, typing.Any]|None:
   s = s.strip()
+  # Kimi-K3 format: tool="name" index="1"<|sep|><|open|>argument key="key" type="string"<|sep|>value<|close|>argument<|sep|>...
+  if (m := re.fullmatch(r'tool="([^"]+)"(?: index="\d+")?<\|sep\|>(.*)', s, re.DOTALL)):
+    pattern = r'<\|open\|>argument key="([^"]+)" type="([^"]+)"<\|sep\|>(.*?)<\|close\|>argument<\|sep\|>'
+    if re.sub(pattern, '', m[2], flags=re.DOTALL).strip(): return None
+    def unescape(v:str) -> str: return v.replace('&quot;', '"').replace('&amp;', '&')
+    try: return unescape(m[1]), {unescape(a[1]): a[3] if a[2] == "string" else json.loads(a[3]) for a in re.finditer(pattern, m[2], re.DOTALL)}
+    except json.JSONDecodeError: return None
   if s.startswith("{"):  # hermes JSON format: {"name": ..., "arguments": {...}}
     try:
       call = json.loads(s)
@@ -29,18 +36,16 @@ def parse_tool_call(s:str, tags:dict[str, str]=TEXT_TAGS) -> tuple[str, typing.A
     except (json.JSONDecodeError, KeyError): return None
   # XML format: <function=name>\n<parameter=key>\nvalue\n</parameter>...</function>
   # GLM format: name<arg_key>key</arg_key><arg_value>value</arg_value>...
-  # the XML format puts the value on its own lines (the newlines around it aren't part of it), GLM's is exact: a value is sent back as it was
-  # generated (the next prompt renders it, the model's cache is reused)
   ak, akc, av, avc = (re.escape(tags[t]) for t in ("<arg_key>", "</arg_key>", "<arg_value>", "</arg_value>"))
   patterns = (
-    (r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?$", r"<parameter=([^>]+)>(.*?)</parameter>", True),
+    (r"<function=([^>]+)>\s*(.*?)\s*(?:</function>)?$", r"<parameter=([^>]+)>(.*?)</parameter>"),
     # a value ends at the </arg_value> before the next <arg_key> or the end (as text tags, a value can hold the markup: code that parses it)
-    (rf"([\w.-]+)\s*((?:{ak}.+?{akc}\s*{av}.*?{avc}\s*)*)$", rf"{ak}(.+?){akc}\s*{av}(.*?){avc}(?=\s*(?:{ak}|$))", False))
-  for call_pattern, arg_pattern, own_lines in patterns:
+    (rf"([\w.-]+)\s*((?:{ak}.+?{akc}\s*{av}.*?{avc}\s*)*)$", rf"{ak}(.+?){akc}\s*{av}(.*?){avc}(?=\s*(?:{ak}|$))"))
+  for call_pattern, arg_pattern in patterns:
     if (fm := re.match(call_pattern, s, re.DOTALL)):
       args = {}
       for pm in re.finditer(arg_pattern, fm.group(2), re.DOTALL):
-        value = re.sub(r"^\r?\n|\r?\n\Z", "", pm.group(2)) if own_lines else pm.group(2)
+        value = re.sub(r"^\r?\n|\r?\n\Z", "", pm.group(2))
         try: args[pm.group(1)] = json.loads(value)
         except json.JSONDecodeError: args[pm.group(1)] = value
       return fm.group(1), args
@@ -101,6 +106,10 @@ def anthropic_messages(body:dict) -> tuple[list[dict], list[dict]|None]:
   return msgs, tools or None
 
 STOP_REASONS = {"tool_calls": "tool_use", "length": "max_tokens"}
+# (a reply not streamed and not done in HOLD_JSON seconds: its headers then, and a space every HOLD_JSON seconds until it's done (whitespace
+# before JSON is JSON): a proxy that drops a connection quiet for a while doesn't drop it, a client doesn't ask again. a stream: a ping after
+# KEEPALIVE seconds without a chunk)
+HOLD_JSON, KEEPALIVE = 5.0, 15.0
 PING = -1  # (Handler.next_token: no token for a while)
 
 def starts(ids:list[int], t:list[int], n:int|None=None) -> bool:
@@ -185,11 +194,23 @@ def anthropic_message(events:typing.Iterator[dict]) -> dict:
       msg["usage"]["output_tokens"] = e["usage"]["output_tokens"]
   return msg
 
+# Kimi-K3's markup (its tags of special tokens and text): start think, end think, end content, a tool call
+KIMI_FORMAT = ("<|open|>think<|sep|>", "<|close|>think<|sep|><|open|>response<|sep|>", "<|close|>response<|sep|>",
+               r"<\|open\|>call \s*(.*?)\s*(?:<\|close\|>call<\|sep\|>|$)")
+THINK_STARTS = ("<think>", KIMI_FORMAT[0])
+
 class StreamRouter:
-  # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse. tags: the string of every tag
-  def __init__(self, reasoning:bool=False, tags:dict[str, str]=TEXT_TAGS):
-    self.buf, self.tags = "", tags
+  # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse. tags: the string of every tag.
+  # special_tokens: the model's (Kimi-K3's markup: KIMI_FORMAT)
+  def __init__(self, special_tokens:dict[str, int]|None=None, reasoning:bool=False, tags:dict[str, str]=TEXT_TAGS):
+    self.buf = ""
     self.mode = "reasoning" if reasoning else "undecided"  # output inside a think block is sent as reasoning_content
+    if any(KIMI_FORMAT[2].startswith(t) for t in special_tokens or {}): self.think, self.end_think, self.end_content, self.call = KIMI_FORMAT
+    else:
+      # a call ends at the </tool_call> before the next <tool_call> or the end (as text tags, its arguments can hold the markup)
+      call, call_end = re.escape(tags["<tool_call>"]), re.escape(tags["</tool_call>"])
+      self.think, self.end_think, self.end_content = tags["<think>"], tags["</think>"], tags["<tool_call>"]
+      self.call = rf"{call}\s*(.*?)\s*(?:{call_end}(?=\s*(?:{call}|$))|$)"
   def split(self, tag:str, final:bool) -> tuple[str, bool]:
     # split buf on the first full tag, holding back a partial tag at the end unless final
     if tag in self.buf:
@@ -200,7 +221,7 @@ class StreamRouter:
     return emit, False
   def route(self, piece:str, final:bool=False) -> typing.Iterator[tuple[str, str]]:
     self.buf += piece
-    think, think_end, call = self.tags["<think>"], self.tags["</think>"], self.tags["<tool_call>"]
+    think, think_end, call = self.think, self.end_think, self.end_content
     if self.mode == "undecided":  # decide whether the output starts with a think block
       if not final and len(self.buf) < len(think) and think.startswith(self.buf): return
       self.mode, self.buf = ("reasoning", self.buf[len(think):]) if self.buf.startswith(think) else ("content", self.buf)
@@ -230,7 +251,7 @@ class Handler(VizHandler):
     out: list[int] = []
     dec = tok.stream_decoder()
     tags, sentinels = markup_tags(sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {})
-    router = StreamRouter(reasoning, tags)
+    router = StreamRouter(sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else None, reasoning, tags)
     # the model runs on the server's thread (LLMServer.serve_forever): the request waits there, its tokens come back here
     # (no top_p: the model's own, general.sampling.top_p)
     req = Request(ids, log, max_tokens, temperature, self.server.top_p if top_p is None else top_p)
@@ -262,9 +283,7 @@ class Handler(VizHandler):
       finish_reason = req.finish_reason
       for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
       tool_calls: list[dict] = []
-      # a call ends at the </tool_call> before the next <tool_call> or the end (as text tags, its arguments can hold the markup)
-      call, call_end = re.escape(tags["<tool_call>"]), re.escape(tags["</tool_call>"])
-      for m in re.finditer(rf"{call}\s*(.*?)\s*(?:{call_end}(?=\s*(?:{call}|$))|$)", router.buf, re.DOTALL):
+      for m in re.finditer(router.call, router.buf, re.DOTALL):
         if (parsed := parse_tool_call(m.group(1), tags)) is None:
           stderr_log(f"failed to parse tool call: {unmark(m.group(1))[:200]}\n")
           yield chunk({"content":unmark(m.group(0))})  # don't silently drop output the client can't use
@@ -318,7 +337,7 @@ class Handler(VizHandler):
       # render and tokenize
       normalize_messages(body["messages"])
       rendered = self.render(body["messages"], body.get("tools"), body)
-      ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered, cache=True))
+      ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
       log += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
       if len(ids) >= self.server.model.max_context:
         stderr_log(log + f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{self.server.model.max_context:5d}\n")
@@ -328,12 +347,10 @@ class Handler(VizHandler):
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
-      # (a reply not streamed and not done in HOLD_JSON seconds: its headers then, and a space every HOLD_JSON seconds until it's done
-      # (whitespace before JSON is JSON): a proxy that drops a connection quiet for a while doesn't drop it, a client doesn't ask again)
-      hold = 0.0 if body.get("stream") else 5.0
+      hold = 0.0 if body.get("stream") else HOLD_JSON
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
                               max_tokens=max_tokens, temperature=self.server.temperature if (t:=body.get("temperature")) is None else float(t),
-                              reasoning=rendered.rstrip().endswith("<think>"), log=log,
+                              reasoning=rendered.rstrip().endswith(THINK_STARTS), log=log,
                               top_p=float(tp) if (tp:=body.get("top_p")) is not None else None, keepalive=hold or None)
       if body.get("stream"): self.stream_json(chunks)
       else:
@@ -381,7 +398,7 @@ class Handler(VizHandler):
     msgs, tools = anthropic_messages(body)
     normalize_messages(msgs)
     rendered = self.render(msgs, tools, body)
-    ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered, cache=True))
+    ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
     if path.endswith("count_tokens"): return self.send_data(json.dumps({"input_tokens": len(ids)}).encode())
     log += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
     if len(ids) >= (n:=self.server.model.max_context):
@@ -392,8 +409,8 @@ class Handler(VizHandler):
     # (the API's default temperature is 1)
     chunks = self.run_model(ids, body.get("model", self.server.model_name), True, max_tokens=body.get("max_tokens"),
                             temperature=float(t if (t:=body.get("temperature")) is not None else 1.0),
-                            reasoning=rendered.rstrip().endswith("<think>"), log=log,
-                            keepalive=15.0 if body.get("stream") else None,
+                            reasoning=rendered.rstrip().endswith(THINK_STARTS), log=log,
+                            keepalive=KEEPALIVE if body.get("stream") else None,
                             top_p=float(tp) if (tp:=body.get("top_p")) is not None else None)
     events = anthropic_events(chunks, body.get("model", self.server.model_name), len(ids))
     try:
@@ -477,7 +494,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     sys.setswitchinterval(0.0005)
     # the model runs here, not on a thread of its own: BEAM's _try_compile installs a SIGALRM handler, which raises ValueError off the main thread
     threading.Thread(target=super().serve_forever, args=(poll_interval,), daemon=True, name="HTTPServer").start()
-    if callable(f:=getattr(self.model, "seqs_supported", None)) and f(): self.schedule_seqs()
+    if hasattr(type(self.model), "seqs_supported") and typing.cast(typing.Any, self.model).seqs_supported(): self.schedule_seqs()
     else: self.schedule_alone()
 
   # ** the requests' tokens and their end
@@ -568,7 +585,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       self.inflight = 1 + self.waiting.qsize()
       if req.cancelled and not self.finish(req): continue
       req.cache_start = self.model.get_start_pos(req.ids)
-      g = self.model.generate(list(req.ids), temperature=req.temperature, top_p=req.top_p)
+      g = self.model.generate(list(req.ids), temperature=req.temperature)
       try:
         for tok in g:
           if not self.emit(req, tok): break
@@ -588,7 +605,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     eng = self.engine = SeqEngine(self.model)
     active: dict[Seq, Request] = {}
     pending: list[Request] = []
-    k = self.model.config.spec_drafts
+    k = eng.k
     while True:
       try:
         while not active and not pending:

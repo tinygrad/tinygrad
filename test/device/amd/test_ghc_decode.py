@@ -2,7 +2,7 @@ import functools, unittest
 import numpy as np
 from tinygrad import Tensor, TinyJit, Device, UOp
 from tinygrad.helpers import getenv
-from tinygrad.llm.kernels.amd import ghc_decode_mix, q8_quantize, q8_quantize_cache_clear, _quant_decode_kernel, Q8_0
+from tinygrad.llm.kernels.amd_qwen import ghc_decode_mix, q8_quantize, q8_quantize_cache_clear, _quant_decode_kernel, Q8_0
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD")
 class TestGHCDecode(unittest.TestCase):

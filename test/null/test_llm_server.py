@@ -1,4 +1,4 @@
-import unittest, threading, time, json, os
+import unittest, threading, time, json
 from unittest.mock import Mock, patch
 from tinygrad.llm.model import Transformer, TransformerConfig
 from tinygrad.llm.serve import StreamRouter, parse_tool_call
@@ -10,9 +10,8 @@ class TestParseToolCall(unittest.TestCase):
   def test_argument_newlines(self):
     for value in ("", "text", " text ", "\n", "\nfirst\nsecond\n\n", "\r\nfirst\r\nsecond\r\n\r\n"):
       for newline in ("\n", "\r\n"):
-        # GLM's values are exact (its template renders them as they are), the XML format puts them on their own lines
         self.assertEqual(parse_tool_call(f"write<arg_key>content</arg_key><arg_value>{newline}{value}{newline}</arg_value>"),
-                         ("write", {"content":newline+value+newline}))
+                         ("write", {"content":value}))
         self.assertEqual(parse_tool_call(f"<function=write><parameter=content>{newline}{value}{newline}</parameter></function>"),
                          ("write", {"content":value}))
 
@@ -48,7 +47,7 @@ class TestParseToolCall(unittest.TestCase):
     for separator in ("", "\n"):
       call = separator.join(("write", "<arg_key>path</arg_key>", "<arg_value>out.txt</arg_value>",
                              "<arg_key>content</arg_key>", "<arg_value>\nhello\n</arg_value>"))
-      self.assertEqual(parse_tool_call(call), ("write", {"path":"out.txt", "content":"\nhello\n"}))
+      self.assertEqual(parse_tool_call(call), ("write", {"path":"out.txt", "content":"hello"}))
 
   def test_glm_no_arguments(self):
     self.assertEqual(parse_tool_call("tools.ping-v1"), ("tools.ping-v1", {}))
@@ -67,6 +66,7 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
     cls.mock_tok.decode = Mock(return_value="Hello")
     cls.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: "Hello" if tid is not None else "")
+    cls.mock_tok._special_tokens = {}
     cls.mock_tok.preset = "llama3"
     cls.mock_tok.bos_id = 1
     cls.mock_tok.eos_id = 999
@@ -156,7 +156,7 @@ class TestLLMServer(unittest.TestCase):
     import jinja2
     # Qwen3's template concatenates content with strings, so a content array raises TypeError without normalization.
     template = jinja2.Template("{% for m in messages %}{{ '<|im_start|>' + m.role + '\n' + m.content + '<|im_end|>\n' }}{% endfor %}")
-    with patch.object(self.server, "template", template), patch.object(self.mock_tok, "encode", side_effect=lambda text, **kwargs: [200, 201, 202]):
+    with patch.object(self.server, "template", template), patch.object(self.mock_tok, "encode", side_effect=lambda text: [200, 201, 202]):
       response = self.client.chat.completions.create(model="test", messages=[
         {"role":"user", "content":[{"type":"text", "text":"Hello"}, {"type":"text", "text":" world"}]},
         {"role":"assistant", "content":None, "tool_calls":[
@@ -165,7 +165,7 @@ class TestLLMServer(unittest.TestCase):
       ], stream=True)
       self.assertEqual(list(response)[-1].choices[0].finish_reason, "stop")
       self.mock_tok.encode.assert_called_with('<|im_start|>user\nHello world<|im_end|>\n'
-                                              '<|im_start|>assistant\n<|im_end|>\n<|im_start|>tool\nresult<|im_end|>\n', cache=True)
+                                              '<|im_start|>assistant\n<|im_end|>\n<|im_start|>tool\nresult<|im_end|>\n')
 
   def test_content_is_streamed(self):
     stream = self.client.chat.completions.create(
@@ -182,30 +182,27 @@ class TestLLMServer(unittest.TestCase):
     self.assertGreater(len(contents), 0)
 
   def test_interrupted_stream_logs_tokens(self):
-    # the threaded server checks cancellation between tokens, so gate the scheduler to synchronize:
-    # generation pauses after the first token until close() has set req.cancelled
-    gate, interrupted = threading.Event(), threading.Event()
-    def slow_generate(ids, **kwargs):
-      yield 300
-      gate.wait(2)
-      yield 301
-    def log(s):
-      if "total:" in s: interrupted.set()
-    with patch.object(self.mock_model, "generate", side_effect=slow_generate), \
-         patch("tinygrad.llm.serve.stderr_log", side_effect=log) as log_mock, \
-         patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
+    # (the model decodes on the server's thread: the request's line is logged when it sees the client gone, its total in red)
+    def slow(ids, **kwargs):
+      for t in range(300, 400):
+        time.sleep(0.02)
+        yield t
+    with patch.object(self.mock_model, "generate", side_effect=slow), \
+         patch("tinygrad.llm.serve.stderr_log") as log, patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
       stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), [200, 201, 202], "test")
       next(stream)
       next(stream)
       stream.close()
-      gate.set()
-      self.assertTrue(interrupted.wait(2))
-    interrupt = log_mock.call_args.args[0]
+      def red_total() -> bool: return any(args[0].startswith("total:") and args[1] == "red" for args, _ in color.call_args_list)
+      for _ in range(250):
+        if red_total(): break
+        time.sleep(0.02)
+    interrupt = next(args[0] for args, _ in log.call_args_list if "total:" in args[0])
     self.assertFalse(interrupt.startswith("\n"))
     self.assertTrue(interrupt.endswith("\n"))
     self.assertIn("gen:", interrupt)
-    self.assertIn("out:    1", interrupt)
-    self.assertTrue(any(args[0].startswith("total:") and args[1] == "red" for args, _ in color.call_args_list))
+    self.assertIn("out:", interrupt)
+    self.assertTrue(red_total())
 
   def test_stream_disconnect_closes_source(self):
     from tinygrad.llm.serve import Handler
@@ -350,14 +347,11 @@ class TestLLMServer(unittest.TestCase):
   def test_slow_reply_held(self):
     # a reply not streamed and slow: spaces while it's made (a proxy doesn't drop the quiet connection), then its JSON
     import urllib.request
-    from tinygrad.helpers import getenv
     def slow_generate(ids, **kwargs):
       for t in (300, 301, 999):
         time.sleep(0.12)
         yield t
-    self.addCleanup(getenv.cache_clear)
-    with patch.object(self.mock_model, "generate", side_effect=slow_generate), patch.dict(os.environ, {"HOLD_JSON": "0.05"}):
-      getenv.cache_clear()
+    with patch.object(self.mock_model, "generate", side_effect=slow_generate), patch("tinygrad.llm.serve.HOLD_JSON", 0.05):
       req = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/chat/completions", method="POST", headers={"Content-Type": "application/json"},
                                    data=json.dumps({"model":"test", "messages":[{"role":"user","content":"Hello"}]}).encode())
       raw = urllib.request.urlopen(req).read()
@@ -367,7 +361,6 @@ class TestLLMServer(unittest.TestCase):
   def test_tool_call_held(self):
     # a slow reply that's a tool call (sent when it ends, no chunks before): spaces while it's made all the same
     import urllib.request
-    from tinygrad.helpers import getenv
     from tinygrad.llm.serve import Request
     seen = []
     orig = self.server.emit
@@ -375,10 +368,8 @@ class TestLLMServer(unittest.TestCase):
       time.sleep(0.12)
       return orig(req, tok)
     def generate(ids, **kwargs): yield from (300, 301, 302, 999)
-    self.addCleanup(getenv.cache_clear)
     with patch.object(self.mock_model, "generate", side_effect=generate), patch.object(self.server, "emit", side_effect=slow_emit), \
-         patch.object(self.mock_tok, "stream_decoder", return_value=lambda tid=None: ""), patch.dict(os.environ, {"HOLD_JSON": "0.05"}):
-      getenv.cache_clear()
+         patch.object(self.mock_tok, "stream_decoder", return_value=lambda tid=None: ""), patch("tinygrad.llm.serve.HOLD_JSON", 0.05):
       req = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/chat/completions", method="POST", headers={"Content-Type": "application/json"},
                                    data=json.dumps({"model":"test", "messages":[{"role":"user","content":"Hello"}]}).encode())
       seen.append(urllib.request.urlopen(req).read())
@@ -401,6 +392,7 @@ class TestLLMToolCalls(unittest.TestCase):
     cls.mock_tok = Mock()
     cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
     cls.mock_tok.decode = Mock(return_value="")
+    cls.mock_tok._special_tokens = {}
     cls.mock_tok.preset = "qwen2"
     cls.mock_tok.bos_id, cls.mock_tok.eos_id, cls.mock_tok.eot_id = None, 999, None
     cls.mock_tok.is_end = Mock(return_value=False)
@@ -465,8 +457,7 @@ class TestLLMToolCalls(unittest.TestCase):
     self.assertEqual("".join(c.choices[0].delta.content or "" for c in chunks if c.choices), "before")
     calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
     self.assertEqual([tc.function.name for tc in calls], ["read", "read"])
-    # GLM's values are exact
-    self.assertEqual([json.loads(tc.function.arguments) for tc in calls], [{"path":"a"}, {"path":"\nb\n"}])
+    self.assertEqual([json.loads(tc.function.arguments) for tc in calls], [{"path":"a"}, {"path":"b"}])
     self.assertEqual([tc.index for tc in calls], [0, 1])
     self.assertEqual(chunks[-1].choices[0].finish_reason, "tool_calls")
 
@@ -597,17 +588,26 @@ class TestLLMToolCalls(unittest.TestCase):
     status, data = self.anthropic({"model":"m", "messages":[{"role":"user", "content":"hi"}]}, "/v1/messages/count_tokens")
     self.assertEqual((status, json.loads(data)), (200, {"input_tokens":3}))
 
-class TestStash(unittest.TestCase):
-  """the conversations kept in the free slots (LLMServer.stash_main, stash_load)"""
+  def test_kimi_tool_call(self):
+    self.set_output('a </think> b<|close|>think<|sep|><|open|>response<|sep|>c <tool_call>{}</tool_call> d<|close|>response<|sep|>'
+      '<|open|>tools<|sep|><|open|>call tool="read" index="1"<|sep|><|open|>argument key="x&quot;y" type="string"<|sep|>\n</tool_call>\n'
+      '<|close|>argument<|sep|><|open|>argument key="n" type="number"<|sep|>3<|close|>argument<|sep|><|close|>call<|sep|><|close|>tools<|sep|>')
+    with (patch.object(self.mock_tok, "_special_tokens", {"<|close|>": 0}),
+          patch.object(self.server.template, "render", return_value='<|open|>message role="assistant"<|sep|><|open|>think<|sep|>')):
+      chunks = list(self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"hi"}], tools=self.tools(),
+                                                       stream=True))
+    self.assertEqual(''.join(getattr(c.choices[0].delta, 'reasoning_content', '') for c in chunks if c.choices), 'a </think> b')
+    self.assertEqual(''.join(c.choices[0].delta.content or '' for c in chunks if c.choices), 'c <tool_call>{}</tool_call> d')
+    calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
+    self.assertEqual([(tc.function.name, json.loads(tc.function.arguments)) for tc in calls], [('read', {'x"y':'\n</tool_call>\n', 'n':3})])
+    self.assertEqual(chunks[-1].choices[0].finish_reason, 'tool_calls')
+
+class TestKept(unittest.TestCase):
+  """the kept conversations' tokens (LLMServer.kept, reuse_tokens) and the caches dropped (drop_caches)"""
   def setUp(self):
     from tinygrad.llm.serve import LLMServer
-    model = Mock()
-    model.batch_slots, model.batch_ctx, model._cached_tokens, model._spec_row = Mock(return_value=3), Mock(return_value=10000), [], 0
-    def start(ids): return len(model._cached_tokens) if ids[:len(model._cached_tokens)] == model._cached_tokens else 0
-    model.get_start_pos = Mock(side_effect=start)
-    self.model, self.server = model, LLMServer.__new__(LLMServer)
-    self.server.model, self.server.slots, self.server.stash, self.server.host, self.server.STASH_MIN = model, 3, {}, [], 4
-    self.server.host_free, self.server.host_made, self.server.partner, self.server.landing = [], 0, {}, []
+    self.model, self.server = Mock(_cached_tokens=[]), LLMServer.__new__(LLMServer)
+    self.server.model, self.server.engine = self.model, None
 
   def test_common_prefix(self):
     import random
@@ -629,98 +629,6 @@ class TestStash(unittest.TestCase):
       self.assertEqual(starts(ids, t), ids[:len(t)] == t)
       self.assertEqual(starts(ids, t, n), n <= len(ids) and ids[:n] == t[:n])
 
-  def test_host_without_slots(self):
-    # no slots (BATCH_SLOTS=0): a conversation that's overwritten goes to host memory, one continued is loaded back
-    from tinygrad.helpers import getenv
-    m = self.model
-    m.HOST_CHUNK, m.host_ckpt = 1000, Mock(return_value=0)
-    m.host_chunks, m.host_alloc = Mock(side_effect=lambda n, ckpt=True: (n + 999) // 1000), Mock(side_effect=lambda: Mock())
-    self.server.slots = 0
-    a, b = list(range(6000)), list(range(10000, 16000))
-    self.addCleanup(getenv.cache_clear)
-    with patch.dict(os.environ, {"HOST_STASH": "0.0001"}):
-      getenv.cache_clear()
-      m._cached_tokens = a[:5000]
-      self.server.stash_load(b, set())
-      m.slot_store.assert_not_called()
-      self.assertEqual([len(e.tokens) for e in self.server.host], [5000])
-      m._cached_tokens = b[:5000]
-      self.server.stash_load(a, set())
-      self.assertEqual((m.host_load.call_args.args[1], m._cached_tokens), (5000, a[:5000]))
-
-  def test_step_writes(self):
-    # a step of slots 0 and 2 is one of 4 rows (sizes 1, 2, 4): slots 1 and 3 are written (rows of nothing), the ones kept there are gone
-    self.model.batch_sizes = Mock(return_value=(1, 2, 4, 8))
-    self.server.stash = {i: ([i]*100, 0) for i in (1, 3, 5)}
-    self.server.step_writes({0: None, 2: None})
-    self.assertEqual(list(self.server.stash), [5])
-
-  def test_host(self):
-    # (HOST_STASH) one longer than a slot into host memory (chunks of it), loaded back when continued. a later turn replaces its older one (its
-    # chunks are its), past the GB the least recently used one's chunks are used
-    a, b, c = list(range(30000)), list(range(30000, 50000)), list(range(60000, 80000))
-    m = self.model
-    m.HOST_CHUNK = 1000
-    m.host_chunks = Mock(side_effect=lambda n, ckpt=True: (n + 999) // 1000)
-    m.host_alloc = Mock(side_effect=lambda: Mock())
-    m.host_ckpt = Mock(return_value=0)
-    from tinygrad.helpers import getenv
-    self.addCleanup(getenv.cache_clear)  # (getenv is cached: the patched one not past this test)
-    with patch.dict(os.environ, {"HOST_STASH": "0.000045"}):  # (45 chunks)
-      getenv.cache_clear()
-      m._cached_tokens = a[:15000]
-      self.server.stash_load(b, set())
-      self.assertEqual((m.host_save.call_args.args[0], len(m.host_save.call_args.args[1])), (15000, 15))
-      m.slot_store.assert_not_called()
-      m._cached_tokens = b[:12000]
-      self.server.stash_load(a, set())  # a continues: b kept, a loaded back
-      m.host_load.assert_called_once()
-      self.assertEqual(m.host_load.call_args.args[1], 15000)
-      self.assertEqual((m._cached_tokens, [len(e.tokens) for e in self.server.host]), (a[:15000], [12000, 15000]))
-      self.assertEqual(self.server.stash_hit(b, set()), 12000)
-      m._cached_tokens = a[:25000]
-      self.server.stash_load(c, set())  # a's later turn replaces its older one (its 15 chunks and 10 more: 37 > 45 - 12)
-      self.assertEqual(([len(e.tokens) for e in self.server.host], m.host_alloc.call_count), ([12000, 25000], 37))
-      m._cached_tokens = c[:10000]
-      self.server.stash_load(a, set())  # past the GB: b's chunks are c's
-      self.assertEqual(([len(e.tokens) for e in self.server.host], m.host_alloc.call_count), ([10000, 25000], 45))
-      self.assertEqual(len(self.server.host_free), 10)
-      # a later turn of a: its chunks again, in their order (its copies the same program)
-      chunks_a = self.server.host[-1].chunks
-      m._cached_tokens = a[:26000]
-      self.server.stash_load(c, set())
-      self.assertEqual(m.host_save.call_args.args[1][:25], chunks_a)
-      # a request that continues the prompt of a's last reply, not the reply: from its checkpoint
-      from tinygrad.llm.serve import HostConv
-      self.server.host = [HostConv(a[:18000], [Mock()], 16000, 2)]
-      m._cached_tokens = c[:5000]
-      ids = a[:16000] + [7, 8, 9]
-      self.assertEqual(self.server.stash_hit(ids, set()), 16000)
-      self.server.stash_load(ids, set())
-      self.assertEqual(m.host_load.call_args.args[1:], (18000, 2, True))  # (with its checkpoint)
-      self.assertEqual((len(m._cached_tokens), m._ckpt_tokens), (18000, a[:16000]))
-
-  def test_switch_conversations(self):
-    a, b = list(range(100)), list(range(1000, 1100))
-    self.model._cached_tokens = a[:50]
-    self.server.stash_load(b, set())  # b overwrites a: a is kept
-    self.model.slot_store.assert_called_once_with(0, 50, 0)
-    self.assertEqual(self.server.stash, {0: (a[:50], 0)})
-    self.model._cached_tokens = b[:60]
-    self.server.stash_load(a, set())  # a continues: b kept, a loaded back
-    self.model.slot_store.assert_called_with(1, 60, 0)
-    self.model.slot_load.assert_called_once_with(0, 50, 0)
-    self.assertEqual(self.model._cached_tokens, a[:50])
-    self.assertEqual(self.server.stash, {0: (a[:50], 0), 1: (b[:60], 0)})
-
-  def test_load_from_target(self):
-    # the conversation kept in the slot a request goes to is loaded before the prefill writes the slot
-    a = list(range(100))
-    self.server.stash = {1: (a[:50], 0)}
-    self.server.stash_load(a, {0, 1}, target=1)
-    self.model.slot_load.assert_called_once_with(1, 50, 0)
-    self.assertEqual(self.model._cached_tokens, a[:50])
-
   def test_reuse_tokens(self):
     # a prompt that continues the model's conversation as text, tokenized differently ("bc" one token): the kept tokens and the rest's
     class Tok:
@@ -737,12 +645,13 @@ class TestStash(unittest.TestCase):
     rendered = "a" * 1500 + "bc" + "xyz"
     ids = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
     self.assertEqual(ids, kept + [ord("x"), ord("y"), ord("z")])
-    # the text past a checkpoint different (the reply there came back changed): the tokens up to the checkpoint kept
-    self.model._cached_tokens, self.model._ckpt_tokens = kept + [ord("q")] * 50, kept
+    # the text past a sequence's checkpoint different (the reply there came back changed): the tokens up to the checkpoint kept
+    self.model._cached_tokens = []
+    self.server.engine = Mock(seqs=[Mock(tokens=kept + [ord("q")] * 50, ckpt=len(kept))], stashed=[])
     ids = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
     self.assertEqual(ids, kept + [ord("x"), ord("y"), ord("z")])
     # a prompt that continues one as it is: its tokens
-    self.model._ckpt_tokens = []
+    self.server.engine = None
     self.assertEqual(self.server.reuse_tokens("a" * 1500 + "q", [ord("a")] * 1500 + [ord("q")]), [ord("a")] * 1500 + [ord("q")])
     # the tokens different early (a reply of an early turn, after the task, sampled as "b", "c"), the conversation long after it: the kept tokens
     long = [ord("a")] * 2100 + [ord("b"), ord("c")] + [ord("d")] * 6000
@@ -755,229 +664,16 @@ class TestStash(unittest.TestCase):
     from tinygrad.llm.serve import Request
     from tinygrad.llm.serve import BatchStats
     self.server.tok, self.server.stats, self.server.odd_ids, self.server.inflight = Mock(is_end=lambda t: False), BatchStats(), {999}, 0
-    self.server.stash, self.model._cached_tokens = {0: ([1, 2], 0)}, [1, 2, 3]
+    self.server.engine, self.model._cached_tokens = Mock(), [1, 2, 3]
     with patch("tinygrad.llm.serve.stderr_log"):
       req = Request([1], "", None, 0.0)
       self.assertTrue(all(self.server.emit(req, 0) for _ in range(15)))
       self.assertFalse(self.server.emit(req, 0))
       self.assertIsNotNone(req.error)
-      self.assertEqual((self.server.stash, self.model._cached_tokens), ({}, []))
+      self.server.engine.forget.assert_called_once()
+      self.assertEqual(self.model._cached_tokens, [])
       req = Request([1], "", None, 0.0)
       self.assertFalse(self.server.emit(req, 999))
-
-  def test_next_alone(self):
-    # the request whose conversation the model has goes first, unless the first has waited too long
-    from tinygrad.llm.serve import Request
-    self.model._cached_tokens = list(range(50))
-    reqs = [Request(list(range(1000, 1060)), "", None, 0.0), Request(list(range(60)), "", None, 0.0)]
-    self.assertEqual(self.server.next_alone(reqs), 1)
-    reqs[0].st -= 1000
-    self.assertEqual(self.server.next_alone(reqs), 0)
-
-  def test_kept_past_busy_slots(self):
-    self.model._cached_tokens = list(range(50))
-    self.server.stash_main({0, 1})
-    self.model.slot_store.assert_called_once_with(2, 50, 0)
-    self.model.slot_store.reset_mock()
-    self.model._cached_tokens = list(range(500, 550))
-    self.server.stash_main({0, 1, 2})  # no free slot past the busy ones
-    self.model.slot_store.assert_not_called()
-
-  def test_one_replaced(self):
-    for i in range(4):
-      self.model._cached_tokens = list(range(i*100, i*100+50))
-      self.server.stash_main(set())
-    firsts = sorted(t[0] for t, _ in self.server.stash.values())
-    self.assertEqual(len(firsts), 3)
-    self.assertIn(300, firsts)  # the newest is kept, one of the others replaced
-
-  def test_batched_done(self):
-    # a request done in slot 2 (its last step's rows at 100..102, two drafts accepted, an end token after them): the states of its tokens
-    from tinygrad.llm.serve import Request
-    self.server.spec = 2
-    req = Request(list(range(90)), "", None, 0.0)
-    req.generated = list(range(1000, 1012))  # positions 90..101, the end token (not kept) at 102
-    req.mtp, req.j, req.par, req.pos = 101, 2, 0, 103
-    self.server.slot_done(2, req, {0: None})
-    self.assertEqual(self.server.stash, {2: (list(range(90)) + list(range(1000, 1012)), 3 + 1)})
-    self.server.slot_done(1, req, {0: None, 2: None})  # a slot a step writes (before an active one): not kept
-    self.assertNotIn(1, self.server.stash)
-
-  def test_preempt(self):
-    # the batch drains for a long request: the ones decoding stop now (each as one done in its slot), they go on first after it, oldest first
-    from tinygrad.llm.serve import Request
-    self.server.spec = 2
-    reqs = [Request(list(range(90)), "", None, 0.0) for _ in range(3)]
-    for r, st in zip(reqs, (3.0, 1.0, 2.0)): r.st = st
-    long, active = Request(list(range(9000)), "", None, 0.0), {0: reqs[0], 1: reqs[1], 2: reqs[2]}
-    with patch.object(self.server, "slot_done") as done:
-      pending = [long]
-      self.server.preempt(active, pending)
-    self.assertEqual(active, {})
-    self.assertEqual(pending, [reqs[1], reqs[2], reqs[0], long])
-    self.assertEqual([c.args[0] for c in done.call_args_list], [2, 1, 0])
-
-  def test_admit_order(self):
-    # the longest conversation first, the ones that waited past STARVE before them, oldest first
-    from tinygrad.llm.serve import Request
-    reqs = [Request(list(range(n)), "", None, 0.0) for n in (100, 5000, 300, 50)]
-    self.assertEqual(self.server.admit_order(reqs), [reqs[1], reqs[2], reqs[0], reqs[3]])
-    reqs[3].st -= 1000
-    reqs[0].st -= 2000
-    self.assertEqual(self.server.admit_order(reqs), [reqs[0], reqs[3], reqs[1], reqs[2]])
-
-  def test_bcp_batch(self):
-    # the oldest, then the fewest new tokens, as many as a step of the rows of their class takes
-    from tinygrad.llm.serve import Request
-    self.model.BPF_P = 384
-    self.model.bpf_class = lambda n: next((p for p in (96, 192, 384) if p >= n), None)
-    self.model.bpf_sizes = lambda P: tuple(g for g in (1, 2, 4, 8) if g * P <= 768)
-    reqs = [Request(list(range(n)), "", None, 0.0) for n in (300, 50, 90, 150, 60, 20)]
-    self.assertEqual(self.server.bcp_batch(reqs, 8, set()), [reqs[0], reqs[5]])
-    self.assertEqual(self.server.bcp_batch(reqs[1:], 8, set()), [reqs[1], reqs[5], reqs[4], reqs[2]])
-    self.assertEqual(self.server.bcp_batch(reqs[1:], 3, set()), [reqs[1], reqs[5], reqs[4]])
-    self.assertEqual(self.server.bcp_batch(reqs[:1], 8, set()), [reqs[0]])
-
-  def test_mix(self):
-    # (MIX) a request's new tokens prefilled in steps (into the landing slot past the slots decoded, in chunks), then moved into a free slot
-    from tinygrad.llm.serve import Request, BatchStats
-    m, srv = self.model, self.server
-    m.MIX_PS, m.mix_landing = (192, 384), Mock(return_value=1)
-    m.batch_sizes, m.mix_sizes = Mock(return_value=(1, 2, 3)), Mock(return_value=(3,))
-    srv.spec, srv.stats, srv.main_moved, srv.landing, srv.MIX_MAX = 2, BatchStats(), False, [], 1000
-    # (mixed steps of the largest size only)
-    self.assertEqual(srv.mixing({}), 0)
-    self.assertEqual(srv.mixing({0: None, 1: None}), 0)
-    self.assertEqual(srv.mixing({2: None}), 1)
-    reqs = [Request(list(range(n)), "", None, 0.0) for n in (900, 1500, 120)]
-    self.assertEqual([srv.mix_ok(r, set()) for r in reqs], [True, False, True])
-    # (a conversation the model has less of than it seemed: not mixed)
-    m.prefix_to_slot = Mock(side_effect=lambda ids, slot: 100 if len(ids) == 900 else 0)
-    pending = list(reqs)
-    srv.mix_take([reqs[0], reqs[1]], {2: Mock()}, pending, 1)
-    self.assertEqual(srv.landing, [(reqs[0], 3, 100, 100)])
-    self.assertEqual(pending, reqs[1:])
-    self.assertTrue(reqs[1].no_mix and not reqs[0].no_mix)
-    # (one landing slot: no other one meanwhile)
-    srv.mix_take([reqs[2]], {2: Mock()}, pending, 1)
-    self.assertEqual(len(srv.landing), 1)
-    # its 800 new tokens in chunks of 384
-    active = {2: Mock()}
-    srv.emit = Mock(return_value=True)
-    for pos in (100, 484, 868):
-      self.assertEqual([(len(t), sl, st) for t, sl, _, st in srv.mix_prompts()], [(min(384, 900 - pos), 3, pos)])
-      srv.mix_done([7], active)
-    m.slot_move.assert_called_once_with(3, 0)
-    self.assertIs(active[0], reqs[0])
-    self.assertEqual(srv.landing, [])
-    self.assertEqual((reqs[0].pos, reqs[0].cache_start, reqs[0].y[0]), (900, 100, 7))
-    # (no free slot: none taken)
-    srv.mix_take([reqs[2]], {0: Mock(), 1: Mock(), 2: Mock()}, pending, 1)
-    self.assertEqual(srv.landing, [])
-
-  def test_wide(self):
-    # (WIDE) a sequence longer than a slot spans the next one too: two free slots next to each other (a sequence moved for them)
-    from tinygrad.llm.serve import Request
-    m, srv = self.model, self.server
-    m.max_span, srv.spec, srv.slots = Mock(return_value=2), 2, 4
-    long, short = Request(list(range(12000)), "", None, 0.0), Request(list(range(100)), "", None, 0.0)
-    self.assertTrue(srv.batchable(long) and srv.wide(long) and not srv.wide(short))
-    self.assertFalse(srv.batchable(Request(list(range(19500)), "", None, 0.0)))
-    self.assertEqual(srv.free_slot({1: short}, wide=True), 2)
-    self.assertIsNone(srv.free_slot({1: short, 3: short}, wide=True))
-    active = {1: short, 3: short}
-    self.assertEqual(srv.make_pair(active), 0)
-    m.slot_move.assert_called_with(1, 2)
-    self.assertEqual(active, {2: short, 3: short})
-    srv.partner[0] = 1
-    self.assertEqual(srv.taken(active), {1, 2, 3})
-    self.assertEqual((srv.wide_limit(0), srv.wide_limit(2)), (2*10000 - 4, 10000))
-    # (no free slot: no pair)
-    self.assertIsNone(srv.make_pair({0: long, 2: short, 3: short}))
-
-  def test_pause_long(self):
-    # (aliased slots) the batch waits for a long request: only the ones in the slots its cache overwrites stop, it runs alone (the others' slots
-    # busy: nothing of theirs written), its conversation kept (in host memory) before the next step writes those slots
-    from tinygrad.llm.serve import Request
-    self.server.spec = 2
-    self.model.main_overlaps, self.model.max_context = Mock(return_value=[0, 1]), 4096
-    reqs = [Request(list(range(90)), "", None, 0.0) for _ in range(3)]
-    long, active = Request(list(range(9000)), "", None, 0.0), {0: reqs[0], 1: reqs[1], 5: reqs[2]}
-    pending = [long]
-    with patch.object(self.server, "slot_done"), patch.object(self.server, "run_alone") as alone, \
-         patch.object(self.server, "stash_main") as stash:
-      self.server.pause_long(long, active, pending)
-    self.assertEqual(active, {5: reqs[2]})
-    self.assertEqual(pending, [reqs[0], reqs[1]])
-    alone.assert_called_once_with(long, {5})
-    stash.assert_called_once_with({5})
-
-  def test_batched_done_to_host(self):
-    # (SLOT_HOST with HOST_STASH) a request done in a slot: its whole conversation into the model's states and from them to host memory (the
-    # slot is taken by another request before its next turn), even in a slot a step writes. the model's conversation was a prompt moved to a
-    # slot (its whole one saved when it's done): not saved
-    from tinygrad.llm.serve import Request
-    from tinygrad.helpers import getenv
-    m = self.model
-    m.HOST_CHUNK, m.host_ckpt = 1000, Mock(return_value=0)
-    m.host_chunks, m.host_alloc = Mock(side_effect=lambda n, ckpt=True: (n + 999) // 1000), Mock(side_effect=lambda: Mock())
-    self.server.spec, self.server.main_moved = 2, True
-    m._cached_tokens = list(range(5000, 10000))
-    req = Request(list(range(5000)), "", None, 0.0)
-    req.generated = list(range(20000, 20012))
-    req.mtp, req.j, req.par, req.pos = 5011, 2, 0, 5013
-    self.addCleanup(getenv.cache_clear)
-    with patch.dict(os.environ, {"HOST_STASH": "0.001"}):
-      getenv.cache_clear()
-      self.server.slot_done(1, req, {0: None, 2: None})
-      conv = list(range(5000)) + list(range(20000, 20012))
-      self.assertEqual((m.slot_load.call_args.args, m._cached_tokens, self.server.main_moved), ((1, 5012, 3 + 1), conv, False))
-      self.assertEqual([e.tokens for e in self.server.host], [conv])
-      self.assertEqual(m.host_save.call_count, 1)
-      self.assertEqual(self.server.stash_hit(conv + [7, 8], set()), 5012)
-
-  def test_batched_done_ckpt(self):
-    # (SLOT_HOST) a request decoded in a slot keeps a copy of the model's checkpoint at its prompt's end (taken after its prefill): its
-    # conversation's host_save has it, a next turn without the reply's reasoning goes on from the prompt's end. the copy is used again
-    from tinygrad.llm.serve import Request
-    from tinygrad.helpers import getenv
-    m = self.model
-    m.HOST_CHUNK, m.host_ckpt = 1000, Mock(side_effect=lambda t: len(m._ckpt_tokens) if t[:len(m._ckpt_tokens)] == m._ckpt_tokens else 0)
-    m.host_chunks, m.host_alloc = Mock(side_effect=lambda n, ckpt=True: (n + 999) // 1000), Mock(side_effect=lambda: Mock())
-    m.ckpt_alloc = Mock(side_effect=lambda: Mock())
-    self.server.spec, self.server.main_moved = 2, True
-    prompt = list(range(5000))
-    req = Request(prompt, "", None, 0.0)
-    self.addCleanup(getenv.cache_clear)
-    with patch.dict(os.environ, {"HOST_STASH": "0.001"}):
-      getenv.cache_clear()
-      m._ckpt_tokens = list(range(7))  # (another prompt's: not this request's checkpoint)
-      self.server.ckpt_keep(req)
-      self.assertIsNone(req.ckpt_buf)
-      m._ckpt_tokens = list(prompt)  # (after its prefill)
-      self.server.ckpt_keep(req)
-      buf = req.ckpt_buf
-      self.assertEqual((m.ckpt_copy.call_args.args, req.ckpt_tokens), ((True, buf), prompt))
-      m._ckpt_tokens = list(range(7))  # (the model's checkpoint another prompt's while it decodes)
-      req.generated = list(range(20000, 20012))
-      req.mtp, req.j, req.par, req.pos = 5011, 2, 0, 5013
-      # (its end emitted: done, then its slot_done: the checkpoint still its own)
-      self.server.inflight = 0
-      self.server.finish(req)
-      self.assertIs(req.ckpt_buf, buf)
-      self.server.slot_done(1, req, {0: None, 2: None})
-      self.assertEqual(m.ckpt_copy.call_args.args, (False, buf))
-      self.assertEqual([(e.tokens[:5000], e.ckpt) for e in self.server.host], [(prompt, 5000)])
-      # its next turn: the reply without its reasoning (differs right after the prompt): from the prompt's end
-      self.assertEqual(self.server.stash_hit(prompt + [1, 2, 3], set()), 5000)
-      for r in self.server.ckpt_later: self.server.ckpt_free(r)  # (the scheduler's next iteration)
-      self.assertEqual((req.ckpt_buf, self.server.ckpt_pool), (None, [buf]))
-      # that turn decoded in a slot too: its conversation replaces the older turn's (continued from its checkpoint), not kept beside it
-      req2 = Request(prompt + [1, 2, 3], "", None, 0.0)
-      req2.generated = list(range(30000, 30012))
-      req2.mtp, req2.j, req2.par, req2.pos = 5014, 2, 0, 5016
-      self.server.slot_done(1, req2, {0: None, 2: None})
-      self.assertEqual([e.tokens[:5003] for e in self.server.host], [prompt + [1, 2, 3]])
 
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):
@@ -986,10 +682,10 @@ class TestTransformerGenerate(unittest.TestCase):
       calls.append(tokens)
       yield from (1, 2)
     with patch.object(model, "generate", generate): model.warmup()
-    self.assertEqual(calls, [[0]])
+    self.assertEqual(calls, [[0], [0]])
 
   def test_template_starts_reasoning(self):
-    router = StreamRouter(reasoning=True)
+    router = StreamRouter({}, reasoning=True)
     self.assertEqual(list(router.route("reasoning</think>answer")),
                      [("reasoning_content", "reasoning"), ("content", "answer")])
 

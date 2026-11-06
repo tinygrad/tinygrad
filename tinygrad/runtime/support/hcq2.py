@@ -812,7 +812,6 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=
   if cache and input_uops is not None and final_linear is not linear: hcq_compile_cache[key] = final_linear
   return final_linear
 
-@rewrite_group(lambda _,input_uops=None,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def _alloc_programs(ctx:LinkCtx, linear:UOp):
   """the code images a linear's programs don't have on their devices yet: views of one allocation a device (not a mapping each)"""
   want:dict[str, dict[tuple[str, int, int], list[UOp]]] = {}
@@ -829,6 +828,7 @@ def _alloc_programs(ctx:LinkCtx, linear:UOp):
       _program_bufs[key] = view = base.view(key[2], off).ensure_allocated()
       for u in us: ctx.allocs[u] = UOp.from_buffer(view, u.dtype, HCQ_RUNTIME_DEV.device)
 
+@rewrite_group(lambda _,input_uops=None,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
   linked = graph_rewrite(linear, Compiled.pm_link, walk=True, name="link programs") if Compiled.pm_link.patterns else linear
   ctx = LinkCtx(input_uops or [])

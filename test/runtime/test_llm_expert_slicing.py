@@ -1,6 +1,6 @@
 import unittest
 from collections import Counter
-from tinygrad.llm.model import expert_slicing, expert_slice_table
+from tinygrad.llm.qwen4exp import expert_slicing, expert_slice_table
 
 class TestExpertSlicing(unittest.TestCase):
   def test_balanced_complete_partition(self):

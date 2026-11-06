@@ -8,7 +8,7 @@ RPC gaps: use prefill_all() for end-to-end warm prefill timing, once the individ
 import array, ast, hashlib, time
 from pathlib import Path
 from tinygrad import Device, UOp
-from tinygrad.llm.model import _host_ints
+from tinygrad.llm.qwen4exp import _host_ints
 
 TASKS = {
   "sampling-review": """Review a proposed change in tinygrad/llm/model.py that removes the temperature-mode suffix from the JIT cache keys:

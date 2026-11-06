@@ -1,3 +1,4 @@
+import copy
 import unittest, base64, functools, re, unicodedata, json, pathlib, tempfile
 from tinygrad.llm.cli import SimpleTokenizer, FallbackTemplate
 from tinygrad.helpers import fetch
@@ -39,14 +40,17 @@ class TestLLMTokenizer(unittest.TestCase):
 
   def test_llama_basic(self): self._test_coding(self.llama_tok, "hello world", [ 15339, 1917 ])
   def test_encode_cache(self):
-    # a conversation's growing prompts: the tokens of encode(cache=True) are encode's, the text up to a special token encoded once
+    # a conversation's growing prompts: the tokens of the text up to its last special token kept, the rest encoded (the same tokens)
     tok, h, e = self.llama_tok, "<|start_header_id|>", "<|eot_id|>"
+    def fresh(text:str) -> list[int]:
+      (c:=copy.copy(tok))._enc_cache = []
+      return c.encode(text)
     conv = "<|begin_of_text|>"
     for turn in (f"{h}user hello world{e}", f"{h}assistant hi there{e}", f"{h}user how are you{e}", f"{h}assistant fine thanks", " and you?"):
       conv += turn
-      self.assertEqual(tok.encode(conv, cache=True), tok.encode(conv))
+      self.assertEqual(tok.encode(conv), fresh(conv))
     self.assertEqual(tok._enc_cache[-1][0], conv[:conv.rindex(h) + len(h)])
-    self.assertEqual(tok.encode(f"{h}other", cache=True), tok.encode(f"{h}other"))
+    self.assertEqual(tok.encode(f"{h}other"), fresh(f"{h}other"))
 
   def test_llama_control_char(self): self._test_coding(self.llama_tok, " \x850", [ 220, 116360, 15 ])
   def test_llama_bytes(self): self._test_coding(self.llama_tok, " \xec\x8b\xa4\xed", [ 1717, 105, 116174, 82638, 2483 ])
@@ -143,7 +147,7 @@ class TestLLMTokenizer(unittest.TestCase):
       self.assertEqual(SimpleTokenizer.from_hf(path, preset="llama3").chat_template, "{{ messages[0].content }}")
 
   def test_tekken_gpt4o_split(self):
-    split = {p: SimpleTokenizer({}, {}, p)._split_to_word.findall for p in ("tekken", "gpt-4o")}
+    split = {p: SimpleTokenizer({}, {}, p)._split_to_word.findall for p in ("tekken", "gpt-4o", "kimi-k2")}
     shared = {
       "HelloWorld": ["Hello", "World"],
       " ÜNICODE": [" ÜNICODE"],  # Ü: non-ascii upper joins the run
@@ -154,6 +158,7 @@ class TestLLMTokenizer(unittest.TestCase):
     for s, want in shared.items():
       self.assertEqual(split["tekken"](s), want, f"tekken {s!r}")
       self.assertEqual(split["gpt-4o"](s), want, f"gpt-4o {s!r}")
+      self.assertEqual(split["kimi-k2"](s), want, f"kimi-k2 {s!r}")
     differ = [
       ("12345", list("12345"), ["123", "45"]),  # digits: tekken single, o200k groups {1,3}
       ("it's I'M don'T", ["it", "'s", " I", "'M", " don", "'T"], ["it's", " I'M", " don'T"]),  # contraction: o200k inline suffix
@@ -161,6 +166,17 @@ class TestLLMTokenizer(unittest.TestCase):
     for s, tk, go in differ:
       self.assertEqual(split["tekken"](s), tk, f"tekken {s!r}")
       self.assertEqual(split["gpt-4o"](s), go, f"gpt-4o {s!r}")
+      self.assertEqual(split["kimi-k2"](s), go, f"kimi-k2 {s!r}")
+    self.assertEqual(split["kimi-k2"]("a.\n/b"), ["a", ".\n", "/b"])
+
+  def test_joyai_llm_split(self):
+    tok = SimpleTokenizer({}, {}, "joyai-llm")
+    tok._encode_word = lambda word: [word.decode()]
+    self.assertEqual(tok.encode("é café"), ["é", " café"])
+    self.assertEqual(tok.encode("  12345"), ["  ", "123", "45"])
+    self.assertEqual(tok.encode("it's I'M don'T"), ["it", "'s", " I", "'M", " don", "'T"])
+    self.assertEqual(tok.encode("  你好hello"), ["  ", "你好", "hello"])
+    self.assertEqual(tok.encode("a\u200b"), ["a", "\u200b"])
 
   def test_stream_decoder(self):
     """stream_decoder buffers incomplete UTF-8: token 25677 has 3/4 of emoji, token 138 completes it."""

@@ -61,7 +61,7 @@ class SeqEngine:
   ROOM = 2048
   EVICT_FIRST = 3  # (the idle ones evicted for a region before the regions are compacted)
   def __init__(self, model):
-    from tinygrad.llm.model import REGION_ALIGN
+    from tinygrad.llm.qwen4exp import REGION_ALIGN
     self.model, self.k, self.align = model, model.config.spec_drafts, REGION_ALIGN
     self.rows, self.nslots = model.seq_rows(), model.seq_slots()
     self.seqs:list[Seq] = []

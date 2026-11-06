@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from tinygrad import Device, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv
-from tinygrad.llm.model import ExpertWeights, expert_slicing, expert_slice_table, _expert_first, _slice_table
+from tinygrad.llm.qwen4exp import ExpertWeights, expert_slicing, expert_slice_table, _expert_first, _slice_table
 
 @unittest.skipUnless(Device.DEFAULT == "AMD" and getenv("TEST_GPUS", 0) >= 6, "requires six AMD GPUs")
 class TestExpertSlices(unittest.TestCase):

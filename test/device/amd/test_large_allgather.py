@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, TinyJit, Device, UOp
 from tinygrad.helpers import getenv
-from tinygrad.llm.kernels.amd import all_gather
+from tinygrad.llm.kernels.amd_qwen import all_gather
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD")
 class TestLargeAllgather(unittest.TestCase):

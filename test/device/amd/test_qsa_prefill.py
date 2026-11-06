@@ -2,7 +2,7 @@ import functools, unittest
 import numpy as np
 from tinygrad import Tensor, TinyJit, Device, UOp, dtypes
 from tinygrad.helpers import getenv
-from tinygrad.llm.kernels.amd import qsa_prefill_mask, qsa_sparse_prefill, _qsa_tiles_kernel, pool_index_rows
+from tinygrad.llm.kernels.amd_qwen import qsa_prefill_mask, qsa_sparse_prefill, _qsa_tiles_kernel, pool_index_rows
 
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD")

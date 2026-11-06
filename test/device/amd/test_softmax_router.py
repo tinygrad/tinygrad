@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, TinyJit, Device
 from tinygrad.helpers import getenv
-from tinygrad.llm.kernels.amd import amd_custom_kernels_supported, moe_softmax_router
+from tinygrad.llm.kernels.amd_qwen import amd_custom_kernels_supported, moe_softmax_router
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD")
 class TestSoftmaxRouter(unittest.TestCase):
