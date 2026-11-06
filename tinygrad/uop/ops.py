@@ -126,9 +126,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
     case Ops.CUSTOM_FUNCTION:
       # an external function states its return dtype in the arg
       return arg.dtype
-    case Ops.CUSTOM:
-      assert isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[1], DType), f"CUSTOM arg must be (str, DType), got {arg}"
-      return arg[1]
     case Ops.INS:
       # arg is (instruction, dtype, *registers), a queue command or an asm line is void
       assert isinstance(arg, tuple) and len(arg) >= 2 and isinstance(arg[1], DType), f"INS arg must be (instruction, DType, *registers), got {arg}"
@@ -352,7 +349,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         assert len(self.src[0].as_shape) <= 1
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
-      case Ops.CUSTOM | Ops.CUSTOM_FUNCTION:
+      case Ops.CUSTOM_FUNCTION:
         return self.src[0].as_shape if self.dtype != dtypes.void else None
       case Ops.PYLITERAL: return None
       case Ops.STAGE:
@@ -1205,21 +1202,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
-  def custom_function(name:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void) -> UOp:
+  def custom_function(name:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
     shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
-    return UOp(Ops.CUSTOM_FUNCTION, src=shape_src+src, arg=CustomFunction(name, dtype))
-
-  @staticmethod
-  def custom(fmt:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, inline:bool=False) -> UOp:
-    shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
-    return UOp(Ops.CUSTOM, src=shape_src, arg=(fmt, dtype)).call(*src, inline=inline)
+    return UOp(Ops.CUSTOM_FUNCTION, src=shape_src+src, arg=CustomFunction(name, dtype, fmt))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None, name:str|None=None, precompile:bool=False, precompile_backward:bool=False,
            inline:bool=False, aux:Any=None) -> UOp:
     """call a body with the given args: a plain CallInfo CALL. all inputs must be ready (buffers/params), this never
     creates ALLOCs: use call_with_outputs for calls that produce values"""
     assert self.op in OPAQUE_CALL_BODIES, f"cannot call a {self.op} body, use call_with_outputs for value-producing bodies"
-    assert self.op is Ops.CUSTOM or not inline, "inline is only allowed on CUSTOM calls"
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
     assert all(r.axis_type is AxisType.DEVICE for r in self.ranges), \
       f"ranges {self.ranges} are leaking out of the call in {self.render_uir()}"
@@ -1348,13 +1339,14 @@ class ProgramInfo:
                        tuple(sorted(dedup(ins))), target)
 
 # the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), bulk stores, custom source, and function references
-OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM, Ops.CUSTOM_FUNCTION}
+OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION}
 
 # the arg of CUSTOM_FUNCTION: an external function symbol and the dtype of the value it returns
 @dataclass(frozen=True)
 class CustomFunction:
   name: str
   dtype: DType = dtypes.void
+  fmt: bool = False
 
 @dataclass(frozen=True)
 class CallInfo:
