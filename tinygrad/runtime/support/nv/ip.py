@@ -8,7 +8,7 @@ from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.elf import elf_loader
 
 fw_src = "https://github.com/tinygrad/open-gpu-kernel-modules/releases/download/firmware-570.190"
-def fetch_nv_fw(arch:str, name:str, sha256:str) -> bytes: return fetch(f"{nv_fw_src}/{arch}-{name}", subdir="fw", sha256=sha256).read_bytes()
+def fetch_nv_fw(arch:str, name:str, sha256:str) -> bytes: return fetch(f"{fw_src}/{arch}-{name}", subdir="fw", sha256=sha256).read_bytes()
 
 @dataclasses.dataclass(frozen=True)
 class GRBufDesc: size:int; virt:bool; phys:bool; local:bool=False # noqa: E702
