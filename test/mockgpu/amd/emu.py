@@ -1418,10 +1418,55 @@ def _compile_vopd(inst: ir3.VOPD | ir4.VOPD, ctx: _Ctx) -> UOp:
       if dest.startswith('D0'): all_stores.append(ctx.wvgpr_dyn(vdst_reg, lane, _val_to_u32(val), exec_mask, after=srcy1))
   return UOp.sink(UOp.group(*all_stores).end(lane))
 
+def _compile_tr_read(inst: irc.DS, ctx: _Ctx) -> UOp:
+  """CDNA4 DS_READ_*_TR_*. These ops have no pcode. One instruction transposes the matrix the 16-lane group just read.
+
+  Each lane reads m tightly packed E-bit elements (m = 64/E, or 96/E for TR_B6) from its own LDS address. Output lane tx
+  receives column tx: element j comes from lane j*(16//m) + (tx//m), element tx%m of that word (CDNA4 ISA 11.4). The two
+  instructions that complete an MFMA tile differ only in the addresses the kernel passes in; this is one of them.
+  """
+  elem_bits, out_bits = {'TR_B16': (16, 64), 'TR_B8': (8, 64), 'TR_B4': (4, 64), 'TR_B6': (6, 96)}['TR_' + _op_name(inst).split('TR_', 1)[1]]
+  m, n_out = out_bits // elem_bits, out_bits // 32
+  exec_mask = ctx.rexec()
+  addr_reg, vdst_reg = ctx.inst_field(type(inst).addr), ctx.inst_field(type(inst).vdst)
+  offset = (ctx.inst_field(type(inst).offset1) << _c(8)) | ctx.inst_field(type(inst).offset0)
+  wdst = ctx.waccvgpr_dyn if _iattr(inst, 'acc') else ctx.wvgpr_dyn
+  per_row = 16 // m
+
+  # Snapshot the address VGPR first. vdst may be that register, and the transpose reads other lanes' addresses.
+  snap_lane = ctx.range()
+  snap = UOp.alloc((ctx.wave_size,), dtypes.uint32, 0, AddrSpace.REG)
+  snap_phase = snap.index(snap_lane).store(ctx.rvgpr_dyn(addr_reg, snap_lane)).end(snap_lane)
+  lane = ctx.range()
+  group, tx = lane // _c(16, dtypes.int), lane % _c(16, dtypes.int)
+  addrs = snap.after(snap_phase)
+  out = [_c(0) for _ in range(n_out)]
+  for j in range(m):
+    reader = group * _c(16, dtypes.int) + _c(j * per_row, dtypes.int) + tx // _c(m, dtypes.int)
+    elem = (tx % _c(m, dtypes.int)).cast(dtypes.uint32)
+    bit = (addrs.index(reader).load() + offset).cast(dtypes.uint32) * _c(8) + elem * _c(elem_bits)
+    word, shift = bit >> _c(5), bit & _c(31)
+    # A 4/6/8-bit element can cross a dword. Reload the same dword when it does not, so the high index stays in range.
+    span = shift + _c(elem_bits) > _c(32)
+    lo = ctx.lds.index(word).load()
+    hi = ctx.lds.index(word + span.where(_c(1), _c(0))).load()
+    hi_shift = (_c(32) - shift) & _c(31)  # 32-shift for shift in 1..31; 0 when shift is 0 (that path is not selected)
+    val = span.where((lo >> shift) | (hi << hi_shift), lo >> shift) & _c((1 << elem_bits) - 1)
+    bit0 = j * elem_bits
+    for w in range(n_out):
+      lo_w = bit0 - 32 * w
+      if lo_w < 32 and lo_w + elem_bits > 0:
+        start, nbits = max(lo_w, 0), min(lo_w + elem_bits, 32) - max(lo_w, 0)
+        part = val if nbits == elem_bits else (val >> _c(start - lo_w)) & _c((1 << nbits) - 1)
+        out[w] = out[w] | (part << _c(start))
+  stores = [wdst(vdst_reg + _c(w), lane, out[w], exec_mask) for w in range(n_out)]
+  return UOp.sink(snap_phase, UOp.group(*stores).end(lane))
+
 def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLAT|ir4.VGLOBAL|ir4.VSCRATCH
                     |irc.DS|irc.FLAT|irc.GLOBAL|irc.SCRATCH, ctx: _Ctx) -> UOp:
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rexec(), _op_name(inst)
+  if isinstance(inst, irc.DS) and '_TR_' in op_name: return _compile_tr_read(inst, ctx)
   pcode = get_pcode(inst.op)
   # CDNA and RDNA4 FLAT/SCRATCH pcode compute addresses from raw components, but make_addr already handles this.
   # Strip the addr computation line and use pre-computed ADDR directly (rename 'addr' -> 'ADDR' in remaining pcode).
