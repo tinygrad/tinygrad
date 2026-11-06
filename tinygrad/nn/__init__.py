@@ -313,10 +313,10 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
   if is_vocab_sharded:
     ndev = len(weight.device)
     local_vocab_size = weight.shape[0] // ndev
-    grad_weight_uop = Tensor.zeros(local_vocab_size, weight.shape[1], dtype=dtypes.float, device=weight.device).contiguous().uop.unshard(axis=0)
+    grad_weight_uop = Tensor.zeros(local_vocab_size, weight.shape[1], dtype=dtypes.float, device=weight.device).uop.unshard(axis=0)
   else:
     # weight is replicated (or single device), grad_weight should match
-    grad_weight_uop = Tensor.zeros(weight.shape, dtype=dtypes.float, device=weight.device).contiguous().uop
+    grad_weight_uop = Tensor.zeros(weight.shape, dtype=dtypes.float, device=weight.device).uop
 
   device = to_tuple(call.device)[0].split(":")[0]
 
