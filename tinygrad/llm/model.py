@@ -55,8 +55,7 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False) -> Tensor:
 def _update_cache(cache:Tensor, value:Tensor, start_pos:StartPos, dim:int) -> Tensor:
   def store(c:Tensor, v:Tensor, pos:int|UOp) -> UOp:
     return c.shrink(tuple((pos, pos+v.shape[dim]) if i == dim else None for i in range(c.ndim))).uop.store(v.cast(c.dtype).uop)
-  stores = ([store(cache, value, start_pos[0])] if len(start_pos) == 1 else
-            [store(cache[b:b+1], value[b:b+1], p) for b, p in enumerate(start_pos)])
+  stores = ([store(cache, value, start_pos[0])] if len(start_pos) == 1 else [store(cache[b:b+1], value[b:b+1], p) for b, p in enumerate(start_pos)])
   return Tensor(cache.uop.after(*stores))
 
 def _cache_prefix(cache:Tensor, start_pos:StartPos, n_tokens:int|UOp, dim:int) -> Tensor:
