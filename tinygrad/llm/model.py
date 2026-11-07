@@ -432,12 +432,14 @@ class PLELayer:
       ids.append([hashes[j*(n-1)//len(ple.vocab_sizes)] % v + o for j,(v,o) in enumerate(zip(ple.vocab_sizes, offsets))])
     self.table.write(start_pos, ids, self.max_context+chunk_size)
 
-  def __call__(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+  def __call__(self, x:Tensor, start_pos:StartPos) -> Tensor:
+    assert len(start_pos) == 1, "independent positions are not supported for per-layer embeddings"
+    pos = start_pos[0]
     (B, T), T_pad, n = x.shape[:2], x.max_shape[1], len(self.ple.multipliers)
-    emb = self.table.read(start_pos, T_pad, x.device).reshape(B, T_pad, -1)[:, :T].float()
+    emb = self.table.read(pos, T_pad, x.device).reshape(B, T_pad, -1)[:, :T].float()
     s = (self.norm_key(self.key(emb).reshape(x.shape)) * self.norm_query(x)).sum(-1, keepdim=True) * self.dim**-0.5
     gated = self.value(emb).unsqueeze(2) * (s.sign() * s.abs().clamp(min_=1e-6).sqrt()).sigmoid()
-    conv, store = short_conv(self.conv_state, self.norm_conv(gated).flatten(2), self.conv1d["weight"], Tensor(start_pos).eq(0), n)
+    conv, store = short_conv(self.conv_state, self.norm_conv(gated).flatten(2), self.conv1d["weight"], Tensor(pos).eq(0), n)
     return Tensor((gated + conv[:, :T].reshape(gated.shape)).contiguous().uop.after(store))
 
 class Indexer:
@@ -698,6 +700,7 @@ class Transformer:
     # One position is shared by the batch; otherwise each fixed cache row has its own position.
     assert len(start_pos) in (1, tokens.shape[0]), "expected one shared position or one position per batch row"
     assert len(start_pos) == 1 or not self.has_recurrent_block, "independent positions are not supported for recurrent blocks"
+    assert len(start_pos) == 1 or self.config.ple is None, "independent positions are not supported for per-layer embeddings"
     key = (resolve(tokens.shape[1] != 1), len(start_pos))  # prefill/decode and shared/per-row positions
     if key not in self.jits:
       # Pass positions as separate arguments so TinyJit rebinds every row's variable on replay.
