@@ -240,7 +240,7 @@ class Handler(VizHandler):
   def log_request(self, code='-', size='-'): pass
   def do_GET(self):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
-    elif self.path == "/status": self.send_data(json.dumps(self.server.status()).encode())
+    elif self.path.split("?")[0] == "/status": self.send_data(json.dumps(self.server.status(gpus="gpus" in self.path)).encode())
     elif self.path.startswith("/assets/"): super().do_GET()
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
@@ -483,6 +483,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   daemon_threads = True
   request_queue_size = 1024  # the connections waiting to be accepted (many clients at once: the default of 5 refuses them)
   verbose_prefill = False
+  generated_total, prefilled_total = 0, 0  # (the tokens generated and prefilled since the start, see status)
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any, top_p:float=1.0,
                temperature:float=0.0):
     # top_p: a request's without one (the model's recommended, general.sampling.top_p of its gguf); temperature: a chat completion's
@@ -529,6 +530,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if hold: req.held.append(tok)
     else: req.out.put(tok)
     self.stats.tokens += 1
+    self.generated_total += 1
     if req.max_tokens is not None and len(req.generated) >= req.max_tokens:
       req.finish_reason = "length"
       return self.finish(req)
@@ -551,15 +553,22 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     req.out.put(None)
     return False
 
-  def status(self) -> dict:
+  def status(self, gpus:bool=False) -> dict:
     """the requests and the caches now (GET /status): the requests decoding, being prefilled (their tokens left) and waiting, the sequences in
     the caches and in the stash (their tokens)"""
-    now, ret = time.perf_counter(), typing.cast(dict[str, typing.Any], {"waiting": self.waiting.qsize()})
+    now, ret = time.perf_counter(), typing.cast(dict[str, typing.Any], {"waiting": self.waiting.qsize(), "time": time.time(),
+                                                                    "generated_total": self.generated_total, "prefilled_total": self.prefilled_total})
     if (q:=getattr(self, "queues", None)) is not None:
       active, filling, pending = (list(x.values()) if isinstance(x, dict) else list(x) for x in q)
       def req(r:Request) -> dict: return {"prompt": len(r.ids), "cached": r.cache_start, "generated": len(r.generated), "age": round(now - r.st, 2)}
       ret |= {"decoding": [req(r) for r in active], "prefilling": [req(r) | {"left": len(r.fill[0]) - r.fill[1]} for r in filling],
               "waiting": [req(r) for r in pending] + [{}] * self.waiting.qsize()}
+    if gpus:
+      # (?gpus: the power and clocks of the devices)
+      try:
+        from tinygrad.runtime.ops_amd import AMIdleClocks
+        ret["gpus"] = AMIdleClocks.metrics()
+      except Exception as e: ret["gpus"] = str(e)
     if (eng:=self.engine) is not None:
       seqs, stashed = list(eng.seqs), list(eng.stashed)
       ret |= {"resident": {"sequences": len(seqs), "tokens": sum(s.n for s in seqs), "rows": eng.rows, "rows_taken": sum(s.cap for s in seqs)},
@@ -694,6 +703,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           slice_time = time.perf_counter() - st
           stall += slice_time
           req.prefill_time, req.slices = req.prefill_time + slice_time, req.slices + 1
+          self.prefilled_total += (end if end < len(ids) else len(ids)) - pos
           self.stats.prefill_time += slice_time
           if end < len(ids): req.fill = (ids, end, False)
           else:

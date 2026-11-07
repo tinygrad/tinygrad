@@ -809,9 +809,27 @@ class AMIdleClocks:
         ok = False
     return ok
   @classmethod
+  def metrics(cls) -> list[dict]:
+    """every device's power (W, the smu's average) and clocks (MHz) now"""
+    ret = []
+    with cls.lock:
+      for adev, _ in cls.devs:
+        try:
+          m = adev.smu.smu_mod
+          t = adev.smu.read_table(m.SmuMetricsExternal_t, getattr(m, "TABLE_SMU_METRICS", getattr(m, "SMU_TABLE_SMU_METRICS", 0))).SmuMetrics
+          ret.append({"power": t.AverageSocketPower, "gfxclk": t.AverageGfxclkFrequencyPreDs, "uclk": t.AverageMemclkFrequencyPreDs})
+        except Exception as e: ret.append({"error": f"{type(e).__name__}: {e}"})
+    return ret
+  @classmethod
   def _loop(cls, idle:float):
+    clocks_file, mtime = getenv("AM_CLOCKS_FILE", ""), 0.0
     while True:
       time.sleep(min(idle, 0.25))
+      # (AM_CLOCKS_FILE: the clocks' caps of the file applied when it changes, see AM_SMU.clock_caps)
+      if clocks_file and os.path.exists(clocks_file) and (mt:=os.path.getmtime(clocks_file)) != mtime:
+        mtime = mt
+        with cls.lock:
+          if not cls.low: cls._set(lambda adev: adev.perf_level)
       if cls.low or time.perf_counter() - cls.last < idle: continue
       with cls.lock:
         if cls.low or time.perf_counter() - cls.last < idle: continue
