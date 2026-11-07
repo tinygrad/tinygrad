@@ -737,6 +737,19 @@ class TestCustomKernel(unittest.TestCase):
     a, b = Tensor.custom_kernel(Tensor([0]).contiguous(), Tensor([9]).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([1], [2]))
 
+  def test_stack_index_keeps_lane_effects(self):
+    def kernel(A:UOp):
+      lanes = [A.after(A[j].store(7+2*j))[j].load() for j in range(2)]
+      return A[2].store(UOp.stack(*lanes).index(UOp.const(0, dtypes.int))).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(3, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [7, 9, 7])
+
+  def test_stack_bounded_index_keeps_lane_effects(self):
+    i = UOp.range(2, 0)
+    def kernel(A:UOp):
+      lanes = [A.after(A[j].store(7+2*j))[j].load() for j in range(4)]
+      return A[4+i].store(UOp.stack(*lanes).index(i)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(6, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [7, 9, 11, 13, 7, 9])
+
   def test_valid_gate_after_effect(self):
     def kernel(A:UOp, B:UOp):
       i = UOp.range(2, 0)
