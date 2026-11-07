@@ -1286,7 +1286,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     groups, blocks = in_features // 32, (tokens // 32) * round_up(local_out, 64) // 64
     ks = [s for s in (1, 2, 4, 8, 16) if groups % s == 0 and (s == 1 or groups // s >= 8)]
     ksplits = next((s for s in ks if blocks * s >= 192), ks[-1])
-    fxn = functools.partial(_q8_gemm_kernel, token_tile=32, ggml_type=Q8_0, block_n=64, k_splits=ksplits)
+    # (a tile of up to 96 rows: the weights dequantized in LDS once for them, 3 tiles of the 192 rows of 48 sequences of 3 drafts: -2% a step)
+    tt = next(t for t in (96, 64, 32) if tokens % t == 0)
+    fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=Q8_0, block_n=64, k_splits=ksplits)
     srcs = (x.cast(dtypes.float16).contiguous(),)
     out_shape = (splits*ksplits*tokens, out_features)
   elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm or few_out_long) and \
