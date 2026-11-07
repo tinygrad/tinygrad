@@ -22,7 +22,7 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.schedule.multi import multi_pm
-from tinygrad.schedule.prepare import pm_mops
+from tinygrad.schedule.prepare import pm_mops, expand_bitcast
 from tinygrad.schedule.indexing import _stack_select, apply_movement_op
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
@@ -213,11 +213,17 @@ pm_reduce_local = pm_wmma_add+PatternMatcher([
 ])+pm_clean_up_group_sink
 
 def is_shape_changing_bitcast(u:UOp): return u.op is Ops.BITCAST and u.shape != u.src[0].shape
-def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
+def in_memory(u:UOp): return u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)
+def maybe_load(u:UOp): return u.load() if in_memory(u) else u
 pm_add_loads = PatternMatcher([
   (UPat(GroupOp.Elementwise|{Ops.WMMA,Ops.STACK}, name="x"),
    lambda x: None if is_shape_changing_bitcast(x) else x.replace(src=tuple(map(maybe_load, x.src)))),
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
+])
+
+# a shape-changing bitcast of memory reinterprets the pointer, of a value it is expanded here (custom kernels bypass the scheduler)
+pm_expand_value_bitcast = PatternMatcher([
+  (UPat(Ops.BITCAST, name="bc"), lambda bc: None if in_memory(bc) else expand_bitcast(bc)),
 ])
 
 def add_local_buffer(ctx, x:UOp):
@@ -270,7 +276,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(ast, multi_pm, name="multi_pm")
 
   # preprocess
-  sink = graph_rewrite(sink, pm_mops, name="early movement ops", bottom_up=True)
+  sink = graph_rewrite(sink, pm_mops+pm_expand_value_bitcast, name="early movement ops", bottom_up=True)
 
   # first we optimize
   if optimize:

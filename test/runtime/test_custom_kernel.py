@@ -725,6 +725,16 @@ class TestCustomKernel(unittest.TestCase):
     a, b = Tensor.custom_kernel(Tensor([3, 0]).contiguous(), Tensor.ones(1, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([3, 7], [0]))
 
+  def test_index_vector_bitcast_widen(self):
+    def kernel(A:UOp, B:UOp): return B[0].store(A.index().load().bitcast(dtypes.int32)[1]).sink(arg=KernelInfo(opts_to_apply=()))
+    _, b = Tensor.custom_kernel(Tensor([1, 2, -3, 4], dtype=dtypes.int16).contiguous(), Tensor.zeros(1, dtype=dtypes.int32).contiguous(), fxn=kernel)
+    self.assertEqual(b.tolist(), [(-3 & 0xFFFF) + (4 << 16)])
+
+  def test_index_vector_bitcast_narrow(self):
+    def kernel(A:UOp, B:UOp): return B[0].store((A.index()+1).bitcast(dtypes.uint16)[3]).sink(arg=KernelInfo(opts_to_apply=()))
+    _, b = Tensor.custom_kernel(Tensor([1, 5 << 16], dtype=dtypes.uint32).contiguous(), Tensor.zeros(1, dtype=dtypes.uint16).contiguous(), fxn=kernel)
+    self.assertEqual(b.tolist(), [5])
+
   def test_simplify_keeps_read_after_store(self):
     def kernel(A:UOp, B:UOp): return B[0].store((A[0].after(A[0].store(7))*2).simplify()).sink(arg=KernelInfo(opts_to_apply=()))
     a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
