@@ -53,6 +53,8 @@ def absorb_weak_src(s:UOp) -> UOp:
 
 def lower_weak_node(u:UOp) -> UOp|None:
   if u.op is Ops.CAST and u.src[0].op is Ops.CONST: return None  # a committed const, not a consumer
+  # only weak CASTs and weak CONSTs in src are changed below
+  if not any([s.op in (Ops.CAST, Ops.CONST) and s.dtype in dtypes.weaks for s in u.src]): return None
   src = tuple(absorb_weak_src(s) for s in u.src)
   if derived_dtypes(u, src) is None:
     src = tuple(s.ccast(s.commit_dtype(dtypes.int)) if s.op is Ops.CONST and s.dtype in dtypes.weaks else s for s in src)
@@ -94,7 +96,8 @@ def uncast_const(u:UOp) -> UOp|None:
   if src == u.src or (dts:=derived_dtypes(u, src)) is None or dts[0] != promo_dtype(u.src) or dts[1] is not u.dtype: return None
   return u.replace(src=src)
 
-pm_uncast_const = PatternMatcher([(UPat(GroupOp.Broadcastable, name="u"), uncast_const)])
+# NOTE: uncast_const only changes CAST srcs
+pm_uncast_const = PatternMatcher([(UPat(GroupOp.Broadcastable, name="u", custom_early_reject={Ops.CAST}), uncast_const)])
 
 # commit every remaining bare const, keyed on the consumer: "bare" is a property of the edge
 def cast_consts(u:UOp) -> UOp|None:
