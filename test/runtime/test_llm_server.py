@@ -18,6 +18,14 @@ class TestTransformerGenerate(unittest.TestCase):
     model.warmup()
     self.assertIsInstance(next(model.generate([5, 6, 7, 8])), int)
 
+  def test_shared_and_per_row_position_jits(self):
+    model = Transformer(TEST_CONFIG)
+    tokens, temperature = Tensor([[1], [2]]), Tensor([0.0])
+    for positions in [(0,), (1,), (2,), (0, 0), (1, 1), (2, 0)]:
+      model(tokens, positions, temperature).realize()
+    self.assertEqual(set(model.jits), {(False, 1), (False, 2)})
+    self.assertTrue(all(jit.cnt == 3 and jit.captured is not None for jit in model.jits.values()))
+
   def test_first_recurrent_generate_before_state_init(self):
     model = Transformer(TEST_CONFIG)
     model.has_recurrent_block = True

@@ -1,10 +1,10 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, dtypes, nn, UOp
+from tinygrad import Tensor, dtypes, nn, UOp, TinyJit
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig, MLATransformerBlock, Indexer, IndexerConfig,
   HyperConnection, HCConfig, AttentionResidual, GatedResidual, PLELayer, PLEConfig,
-  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk, short_conv,
+  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk, short_conv, _rope_freqs,
 )
 from tinygrad.llm.gguf import GGUFPackedTable
 from test.helpers import slow
@@ -28,6 +28,32 @@ class TestAttention(unittest.TestCase):
     self.assertEqual(result.dtype, x.dtype)
     self.assertGreater((result - apply_rope(x, 5)).abs().max().item(), 1e-6)
     with self.assertRaises(AssertionError): apply_rope(Tensor.randn(1, 1, 4, 7, dtype=dtypes.float32), 0)
+
+  def test_rope_per_row_positions(self):
+    freqs = Tensor([[1., 0.], [0., 1.]])
+    x = Tensor([[[[1., 0.]]], [[[1., 0.]]]])
+    out = apply_rope_new(x, _rope_freqs(freqs, (0, 1), 1))
+    np.testing.assert_array_equal(out.numpy(), [[[[1., 0.]]], [[[0., 1.]]]])
+
+  def test_independent_positions_jit(self):
+    block = TransformerBlock(self._make_config(dim=2, hidden_dim=2, n_heads=1))
+    block.attn_q.weight = block.attn_k.weight = Tensor.zeros(2, 2)
+    block.attn_v.weight = block.attn_output.weight = Tensor.eye(2)
+    prefix = Tensor([[[1., 1.], [3., 3.], [5., 5.]], [[2., 2.], [4., 4.], [6., 6.]]])
+    block._init_state(prefix)
+    block.cache_kv.assign(float('nan')).realize()
+    block._attention(prefix, (0,)).realize()
+    p0, p1 = UOp.variable('pos0', 0, 3), UOp.variable('pos1', 0, 3)
+    @TinyJit
+    def forward(x, pos0, pos1): return block._attention(x, (pos0, pos1))
+    # Zero queries/keys make attention the mean of each row's valid values.
+    for positions, (a, b), expected in [((3, 1), (7., 8.), [[4., 4.], [5., 5.]]),
+                                        ((0, 2), (9., 10.), [[9., 9.], [20/3, 20/3]]),
+                                        ((1, 0), (11., 12.), [[10., 10.], [12., 12.]])]:
+      out = forward(Tensor([[[a, a]], [[b, b]]]), p0.bind(positions[0]), p1.bind(positions[1]))
+      np.testing.assert_allclose(out.numpy()[:, 0], expected, atol=1e-6, rtol=1e-6)
+    self.assertEqual(forward.cnt, 3)
+    self.assertIsNotNone(forward.captured)
 
   def test_attention_sink(self):
     x = Tensor([[[2., 4.]]])
