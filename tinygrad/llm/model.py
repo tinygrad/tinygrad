@@ -52,15 +52,6 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False) -> Tensor:
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
-def _positions(start_pos:StartPos) -> Tensor:
-  return Tensor.stack(*(Tensor(p) for p in start_pos))
-
-def _end_pos(start_pos:StartPos, n_tokens:int|UOp) -> int|UOp:
-  return ssimplify(smax(start_pos) + n_tokens)
-
-def _rope_freqs(freqs:Tensor, start_pos:StartPos, n_tokens:int|UOp) -> Tensor:
-  return Tensor.stack(*(freqs[p:p+n_tokens] for p in start_pos))
-
 def _update_cache(cache:Tensor, value:Tensor, start_pos:StartPos, dim:int) -> Tensor:
   def store(c:Tensor, v:Tensor, pos:int|UOp) -> UOp:
     return c.shrink(tuple((pos, pos+v.shape[dim]) if i == dim else None for i in range(c.ndim))).uop.store(v.cast(c.dtype).uop)
@@ -69,19 +60,19 @@ def _update_cache(cache:Tensor, value:Tensor, start_pos:StartPos, dim:int) -> Te
   return Tensor(cache.uop.after(*stores))
 
 def _cache_prefix(cache:Tensor, start_pos:StartPos, n_tokens:int|UOp, dim:int) -> Tensor:
-  end = _end_pos(start_pos, n_tokens)
+  end = ssimplify(smax(start_pos) + n_tokens)
   cache = cache.shrink(tuple((0, end) if i == dim else None for i in range(cache.ndim)))
   if len(start_pos) > 1:
     keys = Tensor.arange(end).reshape(tuple(end if i == dim else 1 for i in range(cache.ndim)))
-    ends = (_positions(start_pos) + Tensor(n_tokens)).reshape(len(start_pos), *((1,) * (cache.ndim-1)))
+    ends = (Tensor.stack(*(Tensor(p) for p in start_pos)) + Tensor(n_tokens)).reshape(len(start_pos), *((1,) * (cache.ndim-1)))
     cache = (keys < ends).where(cache, 0)  # future entries can be uninitialized, including NaNs
   return cache
 
 def _causal_mask(x:Tensor, start_pos:StartPos, window:int=0) -> Tensor|None:
   T = x.shape[1]
   if len(start_pos) == 1 and not resolve(T != 1) and not window: return None
-  q_pos = _positions(start_pos).reshape(-1, 1, 1, 1) + Tensor.arange(T).reshape(1, 1, T, 1)
-  k_pos = Tensor.arange(_end_pos(start_pos, T)).reshape(1, 1, 1, -1)
+  q_pos = Tensor.stack(*(Tensor(p) for p in start_pos)).reshape(-1, 1, 1, 1) + Tensor.arange(T).reshape(1, 1, T, 1)
+  k_pos = Tensor.arange(ssimplify(smax(start_pos) + T)).reshape(1, 1, 1, -1)
   valid = k_pos <= q_pos
   if window: valid = valid & (k_pos > q_pos-window)
   return valid.where(0.0, -math.inf).cast(x.dtype)
@@ -373,8 +364,9 @@ class TransformerBlock(FFNBlock):
     v = v.reshape(B, T, self.config.n_kv_heads, self.config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     if self.config.qk_norm == self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
-    q = apply_rope(q[..., :self.config.rope_dim], _rope_freqs(self.freqs_cis, start_pos, T)).cat(q[..., self.config.rope_dim:], dim=-1)
-    k = apply_rope(k[..., :self.config.rope_dim], _rope_freqs(self.freqs_cis, start_pos, T)).cat(k[..., self.config.rope_dim:], dim=-1)
+    freqs = Tensor.stack(*(self.freqs_cis[p:p+T] for p in start_pos))
+    q = apply_rope(q[..., :self.config.rope_dim], freqs).cat(q[..., self.config.rope_dim:], dim=-1)
+    k = apply_rope(k[..., :self.config.rope_dim], freqs).cat(k[..., self.config.rope_dim:], dim=-1)
 
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
     assigned_kv = _update_cache(self.cache_kv.transpose(0, 1), Tensor.stack(k, v).transpose(0, 1), start_pos, 3)
@@ -388,10 +380,11 @@ class TransformerBlock(FFNBlock):
     mask = (idx_mask.repeat_interleave(self.config.n_heads // int(idx_mask.shape[1]), dim=1) if idx_mask is not None else
             _causal_mask(x, start_pos, self.config.sliding_window))
     if hasattr(self, 'attn_sinks'):
+      S = k.shape[-2]
       k, v = k.cat(k[..., :1, :].const_like(0), dim=-2), v.cat(v[..., :1, :].const_like(0), dim=-2)
       sink_col = self.attn_sinks["weight"].reshape(1, -1, 1, 1).expand(1, self.config.n_heads, T, 1)
-      if mask is None: mask = Tensor.zeros(1, 1, T, _end_pos(start_pos, T), dtype=x.dtype, buffer=False)
-      mask = mask.expand(B, self.config.n_heads, T, _end_pos(start_pos, T)).cat(sink_col.expand(B, -1, -1, -1), dim=-1)
+      if mask is None: mask = Tensor.zeros(1, 1, T, S, dtype=x.dtype, buffer=False)
+      mask = mask.expand(B, self.config.n_heads, T, S).cat(sink_col.expand(B, -1, -1, -1), dim=-1)
     attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
     return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
@@ -460,11 +453,11 @@ class Indexer:
                                   dtype=dtypes.half, device=x.device)
 
   def __call__(self, x:Tensor, q:Tensor, start_pos:StartPos, freqs:Tensor|None=None) -> Tensor:
-    (B, T, _), idx, S = x.shape, self.idx, _end_pos(start_pos, x.shape[1])
+    (B, T, _), idx, S = x.shape, self.idx, ssimplify(smax(start_pos) + x.shape[1])
     k, iq = self.attn_k(x) if idx.qsa else self.k_norm(self.attn_k(x)), self.attn_q_b(q).reshape(B, T, idx.n_heads, idx.head_dim)
     if idx.msa or idx.qsa: iq = self.q_norm(iq)
     if idx.rope_dim:
-      rot = _rope_freqs(unwrap(freqs), start_pos, T)
+      rot = Tensor.stack(*(unwrap(freqs)[p:p+T] for p in start_pos))
       if not idx.qsa: k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), rot, idx.rope_interleave).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
       iq = apply_rope(iq[..., :idx.rope_dim].transpose(1, 2), rot, idx.rope_interleave).transpose(1, 2).cat(iq[..., idx.rope_dim:], dim=-1)
     if hasattr(self, "compressor_gate"):
@@ -482,7 +475,7 @@ class Indexer:
     elif idx.qsa: scores = (scores.relu() * idx.head_dim**-0.5).sum(2).unsqueeze(1)
     else:         scores = (scores.relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2).unsqueeze(1)
     # the query sees the top_k/kpool best complete pools and the tokens of its own pool while incomplete (the tail)
-    q_pos = _positions(start_pos).reshape(-1, 1, 1, 1) + Tensor.arange(T).reshape(1, 1, T, 1)
+    q_pos = Tensor.stack(*(Tensor(p) for p in start_pos)).reshape(-1, 1, 1, 1) + Tensor.arange(T).reshape(1, 1, T, 1)
     k_pos = Tensor.arange(S)
     scores = ((Tensor.arange(scores.shape[-1]) + 1) * idx.kpool <= q_pos + 1).where(scores, -math.inf)
     if idx.msa: scores = (Tensor.arange(scores.shape[-1]) == q_pos // idx.kpool).where(math.inf, scores)
@@ -517,8 +510,8 @@ class MLATransformerBlock(FFNBlock):
     q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
     q = q_proj.reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
-    if not self.config.ssm or not self.config.ssm.kda:
-      q_rope = apply_rope(q_rope, _rope_freqs(self.freqs_cis, start_pos, T), self.config.rope_interleave)
+    freqs = Tensor.stack(*(self.freqs_cis[p:p+T] for p in start_pos)) if not self.config.ssm or not self.config.ssm.kda else None
+    if freqs is not None: q_rope = apply_rope(q_rope, freqs, self.config.rope_interleave)
     if 'weight_scale_inv' in self.attn_k_b:
       q_nope = fp8_matmul(q_nope, self.attn_k_b['weight'], self.attn_k_b['weight_scale_inv'], self.kv_b_block_size[::-1])
     else: q_nope = q_nope @ self.attn_k_b['weight'].transpose(-1, -2)
@@ -527,15 +520,15 @@ class MLATransformerBlock(FFNBlock):
     kv_a = self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
     k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, T, 1, self.config.rope_dim).transpose(1, 2)
-    if not self.config.ssm or not self.config.ssm.kda:
-      k_rope = apply_rope(k_rope, _rope_freqs(self.freqs_cis, start_pos, T), self.config.rope_interleave)
+    if freqs is not None: k_rope = apply_rope(k_rope, freqs, self.config.rope_interleave)
 
     k_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, T, self.config.rope_dim), dim=-1)
     k = _cache_prefix(_update_cache(self.cache_k, k_store, start_pos, 2), start_pos, T, 2)
     v = k[..., :self.config.kv_lora_rank]
 
     attn = q @ k.transpose(-1, -2) * (1.0 / self.config.head_dim ** 0.5)
-    if (mask:=self._attn_mask(x, start_pos, idx_mask)) is not None: attn = attn + mask
+    mask = idx_mask if idx_mask is not None else _causal_mask(x, start_pos)
+    if mask is not None: attn = attn + mask
     attn = attn.softmax(-1)
     attn = attn @ v
     if 'weight_scale_inv' in self.attn_v_b:
@@ -543,10 +536,6 @@ class MLATransformerBlock(FFNBlock):
     else: attn = attn @ self.attn_v_b['weight'].transpose(-1, -2)
     attn = attn.transpose(1, 2).reshape(B, T, -1)
     return self.attn_output(attn * self.attn_gate(x).sigmoid() if self.config.attn_output_gate else attn)
-
-  def _attn_mask(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None=None) -> Tensor|None:
-    if idx_mask is not None: return idx_mask
-    return _causal_mask(x, start_pos)
 
   def _indexer_mask(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None) -> Tensor|None:
     # a full indexer layer selects the top-k tokens for itself and the shared layers after it
