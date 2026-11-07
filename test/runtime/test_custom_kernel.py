@@ -150,6 +150,15 @@ class TestCustomKernel(unittest.TestCase):
     out = c.flatten().tolist()
     assert all(x == 2 for x in out), "all 2"
 
+  def test_reduce_device_range(self):
+    def kernel(C:UOp, A:UOp, B:UOp):
+      d = UOp.range(2, 0, AxisType.DEVICE)
+      return C[0].store(UOp.stack(A, B)[d, 0].reduce(d, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+    devs = ('CPU:1', 'CPU:2')
+    lanes = [Tensor([2]).to(devs[0]).realize(), Tensor([3]).to(devs[1]).realize()]
+    out = Tensor.empty(2, dtype=lanes[0].dtype, device='CPU').shard(devs, axis=0).realize()
+    with self.assertRaises(RuntimeError): Tensor.custom_kernel(out, *lanes, fxn=kernel)[0].realize()
+
   def test_sharded_add_one(self):
     # PYTHON backend explicitly checks for OOB access for wrong multi shape regression
     devs = ("PYTHON:0", "PYTHON:1")
