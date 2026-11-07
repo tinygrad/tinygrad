@@ -670,8 +670,12 @@ class Transformer:
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
-    self.jits:dict = {}
+    self._position_count: int|None = None
+    # we specialize the JIT for prefill and rollout
+    self.prefill_jit = TinyJit(self.forward)
+    self.rollout_jit = TinyJit(self.forward)
 
+  # Positions are separate arguments so TinyJit can rebind each one.
   def forward(self, tokens:Tensor, temperature:Tensor, *start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
@@ -687,10 +691,11 @@ class Transformer:
 
   def __call__(self, tokens:Tensor, start_pos:StartPos, temperature:Tensor) -> Tensor:
     assert len(start_pos) in (1, tokens.shape[0]), "expected one shared position or one position per batch row"
-    key = (resolve(tokens.shape[1] != 1), len(start_pos))
-    if key not in self.jits: self.jits[key] = TinyJit(self.forward)
-    positions = tuple(UOp.variable(f"start_pos_{b}", 0, self.max_context-1).bind(p) if isinstance(p, int) else p for b, p in enumerate(start_pos))
-    return self.jits[key](tokens.contiguous(), temperature, *positions)
+    if self._position_count is None: self._position_count = len(start_pos)
+    assert len(start_pos) == self._position_count, "position count is fixed for this model"
+    positions = tuple(UOp.variable(f"start_pos_{b}", 0, self.max_context-1).bind(p) if isinstance(p, int) else p
+                      for b, p in enumerate(start_pos))
+    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), temperature, *positions)
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
