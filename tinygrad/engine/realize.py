@@ -23,16 +23,16 @@ def get_call_kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...]) -> list[UOp]:
 
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.body
-  if isinstance(call.arg.aux, HCQInfo): return (), ()
+  if call.arg.hcq is not None: return (), ()
   if ast.op is Ops.PROGRAM: return tuple(ast.arg.outs), tuple(ast.arg.ins)
   if ast.op is Ops.STORE: return (0,), (1,)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
 
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
-  if isinstance(call.arg.aux, HCQInfo): # the submitter itself, then every kernel it enqueues
-    kernels:list[tuple[str, UOp, tuple|None]] = [(Device[call.arg.aux.device[0]].host, call, None)]
-    return kernels + [(d, call, (name, estimates, key, bufs, io)) for d,name,estimates,_,key,bufs,io in call.arg.aux.kernels]
+  if call.arg.hcq is not None: # the submitter itself, then every kernel it enqueues
+    kernels:list[tuple[str, UOp, tuple|None]] = [(Device[call.arg.hcq.device[0]].host, call, None)]
+    return kernels + [(d, call, (name, estimates, key, bufs, io)) for d,name,estimates,_,key,bufs,io in call.arg.hcq.kernels]
   ast = call.body
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "validate": return []
   return [(d, call, None) for d in to_tuple(call.device)]
@@ -51,7 +51,7 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
 
 def estimate_uop(call:UOp) -> Estimates:
   call = call.without_after
-  if isinstance(call.arg.aux, HCQInfo): return call.arg.aux.estimates
+  if call.arg.hcq is not None: return call.arg.hcq.estimates
   if (ast:=call.body).op is Ops.PROGRAM: return ast.src[0].arg.estimates or Estimates()
   if ast.op is Ops.STORE or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "encdec"):
     return Estimates(lds=(nbytes:=prod(call.src[1].shape) * call.src[1].dtype.itemsize), mem=nbytes)
@@ -60,16 +60,16 @@ def estimate_uop(call:UOp) -> Estimates:
 first_run_cache:set[bytes] = set()
 def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|None]):
   if ctx.update_stats:
-    is_hcq = isinstance(call.arg.aux, HCQInfo)
+    is_hcq = call.arg.hcq is not None
     estimates, n = estimate_uop(call), 1 if is_hcq else len(get_call_kernels(call))
-    GlobalCounters.kernel_count += len(call.arg.aux.kernels) if is_hcq else n
+    GlobalCounters.kernel_count += len(call.arg.hcq.kernels) if is_hcq else n
     GlobalCounters.global_ops += n*sym_infer(estimates.ops, ctx.var_vals)
     GlobalCounters.global_mem += n*sym_infer(estimates.mem, ctx.var_vals)
     GlobalCounters.time_sum_s += sum(et for et in ets if et is not None)
   if DEBUG < 2 and not PROFILE: return
 
   kernels = get_call_kernels(call) # everything below is the per kernel display: exec events for the profiler and DEBUG=2 lines
-  args = [] if isinstance(call.arg.aux, HCQInfo) else resolve_params(call, ctx.input_uops)
+  args = [] if call.arg.hcq is not None else resolve_params(call, ctx.input_uops)
   prg_args = [_resolve(call.src[1+g], ctx.input_uops) for g in call.body.arg.globals] if call.body.op is Ops.PROGRAM else args
   lanes = list(unwrap_multi(call, prg_args)) if args else []
   for i, (device, kcall, stats) in enumerate(kernels):
@@ -80,8 +80,8 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
       outputs, inputs = get_call_outs_ins(kcall) if stats is None else stats[4]
       cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": ctx.var_vals,
         "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}, ts=st))
-    if DEBUG < (3 if stats is None and isinstance(call.arg.aux, HCQInfo) else 2) or not ctx.update_stats: continue
-    if et is None and not getattr(call.arg.aux, "skip_wait", False):
+    if DEBUG < (3 if stats is None and call.arg.hcq is not None else 2) or not ctx.update_stats: continue
+    if et is None and not (call.arg.hcq is not None and call.arg.hcq.skip_wait):
       Device[device].synchronize()
       et, st = float(perf_counter_us() - st)*1e-6, perf_counter_us()
       GlobalCounters.time_sum_s += et
@@ -185,7 +185,7 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return []
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
-  info = call.arg.aux
+  info = call.arg.hcq
   ctx = replace(ctx, wait=ctx.wait and not info.skip_wait,
                 var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
@@ -232,7 +232,7 @@ def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
   # a PROGRAM with a ProgramInfo and a BINARY is already compiled
   if (ast.op is Ops.SINK and isinstance(ast.arg, KernelInfo)) or \
      (ast.op is Ops.PROGRAM and not (isinstance(ast.arg, ProgramInfo) and ast.src[-1].op is Ops.BINARY)):
-    return ast, Device[to_tuple(c.device)[0]]._select_renderer(HCQ_RUNTIME_DEV if isinstance(c.arg.aux, HCQInfo) else DEV)
+    return ast, Device[to_tuple(c.device)[0]]._select_renderer(HCQ_RUNTIME_DEV if c.arg.hcq is not None else DEV)
   return None
 
 def lower_and_compile(linear:UOp, verbose=True) -> UOp:
@@ -263,12 +263,12 @@ def lower_and_compile(linear:UOp, verbose=True) -> UOp:
   return linear.substitute({c: c.replace(src=(to_program_cache[keys[c]], *c.src[1:])) for c in ar},
                            name="precompile kernels")
 
-from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQInfo # noqa: E402 # down here, hcq2 imports realize
+from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link # noqa: E402 # down here, hcq2 imports realize
 
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.STORE, name="ast"),), name="call", allow_any_len=True), exec_copy),
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True),
-   lambda ctx, call, ast: exec_hcq(ctx, call, ast) if isinstance(call.arg.aux, HCQInfo) else exec_kernel(ctx, call, ast)),
+   lambda ctx, call, ast: exec_hcq(ctx, call, ast) if call.arg.hcq is not None else exec_kernel(ctx, call, ast)),
   (UPat(Ops.CALL, src=(UPat.custom_function("validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
@@ -298,4 +298,4 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
       else:
         from tinygrad.tensor import Tensor
         with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
-    yield max(map(unwrap, pm_exec.rewrite(c:=linear.src[0].without_after, ctx)[isinstance(c.arg.aux, HCQInfo):]))
+    yield max(map(unwrap, pm_exec.rewrite(c:=linear.src[0].without_after, ctx)[c.arg.hcq is not None:]))

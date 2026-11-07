@@ -344,7 +344,7 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   slots = ctx.slots if ctx.profile else {} # profiling reads them
   info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, slots=tuple((d, i) for i, d in enumerate(slots)),
                  estimates=Estimates(*[sum(x*n for x, n in Counter(t).items()) for t in zip(*[vars(e).values() for e in estimates])]).simplify())
-  return sink.call(*slots.values(), aux=info)
+  return sink.call(*slots.values(), hcq=info)
 
 @rewrite_group(new_ctx=False)
 def sched_batches(l:UOp, profile:bool) -> UOp:
@@ -500,7 +500,7 @@ Compiled.pm_encode = PatternMatcher([])
 Compiled.pm_lower = PatternMatcher([])
 
 def lower_call(call:UOp) -> UOp|None:
-  if not isinstance(call.arg.aux, HCQInfo): return None
+  if call.arg.hcq is None: return None
 
   # encode bodies
   body = graph_rewrite(call.body, Compiled.pm_encode, ctx=(lt_patches:=list[UOp]()), bpm=pm_hoist_links, name="encode")
@@ -571,7 +571,7 @@ hcq_compile_cache:dict[tuple[UOp, bool, bool], UOp] = {} # eager templates: a bu
 
 @rewrite_group(lambda linear,input_uops,profile,cache=False,ret=None: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=False) -> UOp:
-  if any(isinstance(getattr(c.without_after.arg, "aux", None), HCQInfo) for c in linear.src): return linear # compiled already
+  if any(getattr(c.without_after.arg, "hcq", None) is not None for c in linear.src): return linear # compiled already
 
   if cache and input_uops is not None:
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
