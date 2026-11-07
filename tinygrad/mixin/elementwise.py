@@ -12,6 +12,14 @@ if TYPE_CHECKING:
 def remint(u:'UOp', dt:DType) -> 'UOp':
   return u.ccast(dt) if u.op is Ops.CONST else u.replace(src=(remint(u.src[0], dt),)+u.src[1:])
 
+def _promote(t, out_dtype:DType):
+  # nothing to promote if t has the out dtype. invalid bool is weak const
+  if t.dtype is out_dtype or t._uop.base.is_invalid: return t
+  # keep weak CONST weak, might lift weakint -> weakfloat
+  if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST:
+    return t if t.dtype == (dt:=weak_dtype(out_dtype)) else t._wrap_uop(remint(t._uop, dt))
+  return t.cast(out_dtype)
+
 class ElementwiseMixin(CreationMixin):
   # required to implement
   def alu(self, op: Ops, *src: Self) -> Self:
@@ -25,13 +33,7 @@ class ElementwiseMixin(CreationMixin):
     y = self.ufix(y)
     x, y = (y.ufix(self), y) if not reverse else (y, y.ufix(self))
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
-    # keep weak CONST weak, might lift weakint -> weakfloat
-    def promote(t):
-      if t._uop.base.is_invalid: return t  # invalid bool is weak const
-      if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST:
-        return t if t.dtype == (dt:=weak_dtype(out_dtype)) else t._wrap_uop(remint(t._uop, dt))
-      return t.cast(out_dtype)
-    return promote(x), promote(y)
+    return _promote(x, out_dtype), _promote(y, out_dtype)
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)

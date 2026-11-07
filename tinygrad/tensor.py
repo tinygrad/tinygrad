@@ -60,8 +60,7 @@ class Tensor(RandMixin):
       if isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
       elif isinstance(data, UOp): device = data.device
     _dtype:DType|None = to_dtype(dtype) if dtype is not None else None
-    _device:str|tuple[str, ...] = canonicalize_device(device)
-    del device, dtype
+    del dtype
 
     # tensors can have gradients if you have called .backward
     self.grad:Tensor|None = None
@@ -90,8 +89,8 @@ class Tensor(RandMixin):
     # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
-    # data might be on a different device
-    self.uop:UOp = data if data.device is None or data.device == _device else data.copy_to_device(_device)
+    # data might be on a different device. NOTE: a const has no device, it doesn't need to look up the default device
+    self.uop:UOp = data if data.device is None or data.device == (_device:=canonicalize_device(device)) else data.copy_to_device(_device)
     # cast on the target device, the source may not hold the dtype (numpy has no fp8/bfloat16) or be able to compute it (DISK)
     if _dtype is not None: self.uop = self.uop.cast(_dtype)
 

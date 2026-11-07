@@ -1,8 +1,8 @@
 # all of symbolic lives here now
 import math
 from collections import defaultdict
-from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, promo_dtype, identity_element
-from tinygrad.dtype import PyConst, ConstFloat, dtypes, can_lossless_cast, Invalid, bitcast, truncate
+from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, BottomUpGate, exec_alu, promo_dtype, identity_element
+from tinygrad.dtype import PyConst, ConstFloat, AddrSpace, dtypes, can_lossless_cast, Invalid, bitcast, truncate
 from tinygrad.helpers import partition, all_same, prod, flatten, IMAGE, dedup, ceildiv
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 from tinygrad.uop.movement import mop_cleanup
@@ -121,7 +121,14 @@ def fold_const_where(gate:UOp, c0:UOp, c1:UOp, w:UOp) -> UOp:
   ret = c0 if gate.val else c1
   return ret.ccast(w.dtype) if ret.op is Ops.CONST and ret.dtype in dtypes.weaks and w.dtype not in dtypes.weaks else ret
 
+def lift_value_after(x:UOp) -> UOp|None:
+  afters = [s for s in x.src if s.op is Ops.AFTER]
+  if x.shape != () or x.src[-1].is_invalid: return None
+  if any(a.src[0].op not in GroupOp.ALU and a.src[0].addrspace is not AddrSpace.ALU for a in afters): return None
+  return x.replace(src=tuple(s.src[0] if s.op is Ops.AFTER else s for s in x.src)).after(*dedup(flatten(a.src[1:] for a in afters)))
+
 symbolic_simple = pm_data_invalid + PatternMatcher([
+  (UPat(GroupOp.ALU|{Ops.CAST}, custom_early_reject={Ops.AFTER}, name="x"), lift_value_after),
   # ** self folding **
   (UPat({Ops.ADD, Ops.XOR, Ops.OR}, src=[UPat.var("x"), UPat.const(0)]), lambda x: x),  # x+0 / x^0 / x|0 -> x
   (UPat({Ops.SHL, Ops.SHR}, src=(UPat.var("x"), UPat.const(0))), lambda x: x),          # x<<0 / x>>0 -> x
@@ -351,6 +358,10 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
   if (a:=lt.src[0]).op is Ops.CONST: return lt.src[1], neg, int(a.val) + (0 if neg else 1)
   return a, not neg, int(lt.src[1].vmin) if neg else int(lt.src[1].vmax)-1
 
+def _keep_range(ctx:dict[UOp, UOp], r:UOp) -> None:
+  if r not in ctx: raise BottomUpGate
+pm_keep_range = PatternMatcher([(UPat(Ops.RANGE, name="r"), _keep_range)])
+
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # return simplified uop (might be the same as input)
 
@@ -371,14 +382,14 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
       # For X0 + X1 + ... > 0, check whether every Xi > 0 gives the same simplified output.
       candidate = [(Xi, UOp.variable(f"fake{i}", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)]
       if any(X not in uop.backward_slice_with_self for X,_ in candidate): continue
-      newuops = [uop.substitute({X:newX}).simplify().substitute({newX:X}).simplify() for X,newX in candidate]
+      newuops = [uop.substitute({X:newX}, extra_pm=pm_keep_range).simplify().substitute({newX:X}).simplify() for X,newX in candidate]
       if all_same(newuops): uop = newuops[0]
       elif uop.op is Ops.STACK and len(uop.src) == 2:
         if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
         if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
 
   # try all the valids together (but only the whole expressions)
-  if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates))) is not uop:
+  if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates), extra_pm=pm_keep_range)) is not uop:
     uop = s_uop.simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
   return uop
 

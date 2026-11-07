@@ -100,8 +100,8 @@ spec_shared = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement|GroupOp.Defines|{Ops.STAGE, Ops.INDEX, Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS,
                                                 Ops.CONST, Ops.CAST, Ops.NOOP, Ops.STACK}),),
         allow_any_len=True), lambda: True),
-  # an AFTER can wrap a scalar ALU (e.g. a computed RANGE bound) to order it after effect ops
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.ALU),), allow_any_len=True, name="x"), lambda x: x.src[0].shape == ()),
+  # an AFTER can wrap a scalar value (e.g. a computed RANGE bound) to order it after effect ops
+  (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True, name="x"), lambda x: x.src[0].shape == () and x.src[0].dtype is not dtypes.void),
 
   # a CUSTOM_FUNCTION names an external function: the arg is a CustomFunction stating the return dtype
   (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, CustomFunction)),

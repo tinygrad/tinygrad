@@ -539,6 +539,27 @@ class TestCustomKernel(unittest.TestCase):
       return C[i].store(tmp.after(st)[i, 0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), fxn=kernel)[0].tolist(), [1.]*4)
 
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_dependent_local_ends(self):
+    # the second END reads what the other threads stored in the first END
+    def kernel(C:UOp) -> UOp:
+      t = UOp.range(8, 0, AxisType.LOCAL)
+      tmp = UOp.placeholder((8,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
+      st = tmp[t].store(t.cast(dtypes.int)).end(t)
+      return C[t].store(tmp.after(st)[7-t]).end(t).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(8, dtype=dtypes.int), fxn=kernel)[0].tolist(), [7-i for i in range(8)])
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_dependent_local_ends_merged_ranges(self):
+    # t0 and t1 merge into one range of 8 in both ENDs
+    def kernel(C:UOp) -> UOp:
+      t0, t1 = UOp.range(4, 0, AxisType.LOCAL), UOp.range(2, 1, AxisType.LOCAL)
+      i = t0*2+t1
+      tmp = UOp.placeholder((8,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
+      st = tmp[i].store(i.cast(dtypes.int)).end(t0, t1)
+      return C[i].store(tmp.after(st)[t0*2+1-t1]).end(t0, t1).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(8, dtype=dtypes.int), fxn=kernel)[0].tolist(), [i^1 for i in range(8)])
+
   @unittest.expectedFailure
   def test_gated_load_2d(self):
     # TODO: broken now, the valid is dropped. the valid on one index of the 2d A gates the whole load, it is 0 where j != 0
@@ -666,12 +687,85 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(A:UOp): return A[0].store(UOp.stack(UOp.const(42, dtypes.int)).index(A[1].load())).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.zeros(2, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [42, 0])
 
+  def test_stack_runtime_index_two_axes(self):
+    def kernel(A:UOp):
+      i, j = UOp.range(2, 0), UOp.range(2, 1)
+      m = UOp.const(((1, 2), (3, 4)), dtypes.int)
+      return A[i*2+j].store(m.index(i, j)).end(j, i).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(4, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [1, 2, 3, 4])
+
+  def test_stack_runtime_index_effectful_trailing_axis(self):
+    def kernel(A:UOp, B:UOp):
+      j = UOp.const(1, dtypes.int).after(A[0].store(A[0].load()+1))
+      return B[0].store(UOp.const(((1, 2), (3, 4)), dtypes.int).index(A[1].load(), j)).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor([0, 1]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([1, 1], [4]))
+
+  def test_stack_runtime_index_then_getitem(self):
+    def kernel(A:UOp, B:UOp):
+      return B[0].store(UOp.const(((1, 2), (3, 4)), dtypes.int).index(A[0].load())[A[1].load()]).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor([1, 0]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)[1].tolist(), [3])
+
   def test_identity_shrink_keeps_offset_effect(self):
     def kernel(A:UOp, B:UOp):
       s = UOp.const(0, dtypes.weakint).after(A[0].store(7))
       return B[0].store(A.shrink(((s, s+1),))[0].load()).sink(arg=KernelInfo(opts_to_apply=()))
     a, b = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([7], [7]))
+
+  def test_fold_keeps_each_operand_effect_once(self):
+    def kernel(A:UOp, B:UOp):
+      x, y = UOp.const(1, dtypes.int).after(A[0].store(A[0].load()+1)), UOp.const(2, dtypes.int).after(A[1].store(8))
+      return B[0].store((x*x*y).cast(dtypes.bool).where(x, y) % 1).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor.zeros(2, dtype=dtypes.int).contiguous(), Tensor.ones(1, dtype=dtypes.int).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([1, 8], [0]))
+
+  def test_fold_keeps_effect_on_unloaded_value(self):
+    def kernel(A:UOp, B:UOp): return B[0].store((A[0]+1).after(A[1].store(7)) * 0).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor([3, 0]).contiguous(), Tensor.ones(1, dtype=dtypes.int).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([3, 7], [0]))
+
+  def test_index_vector_bitcast_widen(self):
+    def kernel(A:UOp, B:UOp): return B[0].store(A.index().load().bitcast(dtypes.int32)[1]).sink(arg=KernelInfo(opts_to_apply=()))
+    _, b = Tensor.custom_kernel(Tensor([1, 2, -3, 4], dtype=dtypes.int16).contiguous(), Tensor.zeros(1, dtype=dtypes.int32).contiguous(), fxn=kernel)
+    self.assertEqual(b.tolist(), [(-3 & 0xFFFF) + (4 << 16)])
+
+  def test_index_vector_bitcast_narrow(self):
+    def kernel(A:UOp, B:UOp): return B[0].store((A.index()+1).bitcast(dtypes.uint16)[3]).sink(arg=KernelInfo(opts_to_apply=()))
+    _, b = Tensor.custom_kernel(Tensor([1, 5 << 16], dtype=dtypes.uint32).contiguous(), Tensor.zeros(1, dtype=dtypes.uint16).contiguous(), fxn=kernel)
+    self.assertEqual(b.tolist(), [5])
+
+  def test_simplify_keeps_read_after_store(self):
+    def kernel(A:UOp, B:UOp): return B[0].store((A[0].after(A[0].store(7))*2).simplify()).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([7], [14]))
+
+  def test_stack_index_keeps_selector_effect(self):
+    def kernel(A:UOp, B:UOp):
+      i = UOp.const(0, dtypes.int).after(A[0].store(A[0].load()+1))
+      return B[0].store(UOp.stack(UOp.const(2, dtypes.int)).index(i)).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor([0]).contiguous(), Tensor([9]).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([1], [2]))
+
+  def test_stack_index_keeps_lane_effects(self):
+    def kernel(A:UOp):
+      lanes = [A.after(A[j].store(7+2*j))[j].load() for j in range(2)]
+      return A[2].store(UOp.stack(*lanes).index(UOp.const(0, dtypes.int))).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(3, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [7, 9, 7])
+
+  def test_stack_bounded_index_keeps_lane_effects(self):
+    i = UOp.range(2, 0)
+    def kernel(A:UOp):
+      lanes = [A.after(A[j].store(7+2*j))[j].load() for j in range(4)]
+      return A[4+i].store(UOp.stack(*lanes).index(i)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(6, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [7, 9, 11, 13, 7, 9])
+
+  def test_valid_gate_after_effect(self):
+    def kernel(A:UOp, B:UOp):
+      i = UOp.range(2, 0)
+      return B[i].store(A[UOp.const(0).valid(UOp.const(False).after(A[0].store(7)))]+1).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(2, dtype=dtypes.int).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([7], [1, 1]))
 
   @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "custom renders in cstyle")
   def test_custom_uop(self):
@@ -954,13 +1048,12 @@ class TestUnshardIndex(unittest.TestCase):
 
   A fragment is a per-thread REG buffer wrapped in UNSHARD over LOCAL thread ranges.
   index_multi must resolve an INDEX on the UNSHARD view into an INDEX on the per-thread
-  shard. Two ownership patterns must work:
-    contiguous: idx = rng*shard_sz + local   (thread rng owns [rng*shard_sz, ...))
-    strided:    idx = rng + ir*shard_sz      (thread rng owns {rng, rng+shard_sz, ...})
+  shard. Ownership is contiguous: idx = rng*shard_sz + local (thread rng owns [rng*shard_sz, ...)).
+  Other placements are movement ops on the fragment.
   """
-  def _run(self, kernel, shape=(8, 8)):
+  def _run(self, kernel, shape=(8, 8), inputs=()):
     c = Tensor.empty(*shape)
-    out = Tensor.custom_kernel(c, fxn=kernel)[0]
+    out = Tensor.custom_kernel(c, *inputs, fxn=kernel)[0]
     try: return out.numpy()
     except RuntimeError as e:
       if isinstance(Device[Device.DEFAULT].renderer, PTXRenderer) and "dynamic register indexing" in str(e):
@@ -983,23 +1076,29 @@ class TestUnshardIndex(unittest.TestCase):
 
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "fragment tests need LOCAL ranges")
   def test_strided_fragment_index(self):
-    # thread ty owns rows {ty, ty+8, ty+16, ty+24, ..., ty+56} of a 64-row fragment --
-    # strided ownership. idx = ty + ir*8 where shard_sz=8 (8 threads, shard rows=8).
-    # The contiguous check (idx - rng*shard_sz) fails; the strided check
-    # (idx-rng) % shard_sz == 0 must succeed. This is the pattern the index_multi fix adds.
-    def kernel(C:UOp) -> UOp:
+    # thread ty writes rows {ty, ty+8, ..., ty+56} of C: the strided placement is a permute of the fragment's blocks
+    def kernel(C:UOp, A:UOp) -> UOp:
       ty = UOp.range(8, 0, AxisType.LOCAL)
       ir = UOp.range(8, 1, AxisType.LOOP)
       j = UOp.range(8, 2, AxisType.LOOP)
-      # 8x8 fragment, 8 threads -> 64x8 full tile. thread ty owns rows {ty, ty+8, ..., ty+56}.
       frag = UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG).unshard((0,), (ty,))
-      return C[ty + ir*8, j].store(frag[ty + ir*8, j]).end(j, ir, ty).sink(arg=KernelInfo(name="strided_frag"))
-    out = self._run(kernel, (64, 8))
-    assert out.shape == (64, 8)
+      frag = frag.after(frag.store(A)).reshape(8, 8, 8).permute(1, 0, 2)
+      return C[ty + ir*8, j].store(frag[ir, ty, j]).end(j, ir, ty).sink(arg=KernelInfo(name="strided_frag", opts_to_apply=()))
+    a = Tensor.arange(512).float().reshape(64, 8).contiguous()
+    np.testing.assert_equal(self._run(kernel, (64, 8), inputs=(a,)), a.numpy().reshape(8, 8, 8).transpose(1, 0, 2).reshape(64, 8))
+
+  def test_strided_index_into_block_fragment(self):
+    # owner + local*2 reads another owner's block, so index_multi must raise
+    def kernel(C:UOp, A:UOp) -> UOp:
+      owner = UOp.range(2, 0, AxisType.LOOP)
+      local = UOp.range(2, 1, AxisType.LOOP)
+      frag = UOp.placeholder((2,), dtypes.float32, 0, AddrSpace.REG).unshard(0, owner)
+      frag = frag.after(frag.store(A))
+      return C[owner + local*2].store(frag[owner + local*2]).end(local, owner).sink(arg=KernelInfo(opts_to_apply=()))
+    with self.assertRaisesRegex(RuntimeError, "cannot shard index"): self._run(kernel, (4,), inputs=(Tensor.arange(4).float().contiguous(),))
 
   def test_fragment_index_cannot_shard(self):
-    # thread ty indexing rows [ty, ty+8) overlaps with other threads' rows -- this matches neither
-    # the contiguous nor the strided ownership pattern, so index_multi must raise.
+    # thread ty indexing rows [ty, ty+8) overlaps with other threads' rows, so index_multi must raise.
     def kernel(C:UOp) -> UOp:
       ty = UOp.range(8, 0, AxisType.LOCAL)
       ir = UOp.range(8, 1, AxisType.LOOP)
