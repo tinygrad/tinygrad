@@ -49,6 +49,13 @@ class TestJit(unittest.TestCase):
 
   def test_jit_assign_int8(self): self.test_jit_assign(dtypes.int8)
 
+  def test_jit_assign_return_input(self):
+    @TinyJit
+    def add(a):
+      a.assign(a + 1)
+      return a
+    for i in range(5): self.assertEqual(add(Tensor([float(i)]).contiguous().realize()).item(), i + 1)
+
   def test_jit_copyin(self):
     @TinyJit
     def f(a):

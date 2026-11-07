@@ -52,16 +52,18 @@ class CapturedJit(Generic[ReturnType]):
   _linear: UOp
   expected_names: list[int|str]
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
+  ret_inputs: dict[int, UOp]  # input position -> capture-time buffer, for the inputs ret references
   _linears: dict[tuple[UOp, ...], tuple[UOp, dict[UOp, UOp]]] = field(default_factory=dict)  # aliased inputs -> (linked linear with copies, staging)
 
-  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info)
+  def __reduce__(self):
+    return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info, self.ret_inputs), {'_rebind_ret': self._rebind_ret}
 
   @functools.cached_property
   def _jit_bufs(self) -> set[UOp]: return {u for u in self._linear.toposort() if u.op is Ops.BUFFER}
 
   @functools.cached_property
-  def _symbolic_ret(self) -> list[tuple[Tensor, UOp, dict[Variable, int]]]:
-    return [(t, *ub) for t in get_parameters(self.ret) if (ub:=t.uop.unbind_all())[1]]
+  def _rebind_ret(self) -> list[tuple[Tensor, UOp, dict[Variable, int]]]:
+    return [(t, *ub) for t in get_parameters(self.ret) if (ub:=t.uop.unbind_all())[1] or ub[0].toposort().keys() & set(self.ret_inputs.values())]
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
     # aliased inputs
@@ -74,7 +76,8 @@ class CapturedJit(Generic[ReturnType]):
     linear, staging = self._linears[aliased]
     if DEBUG >= 1 and len(linear.src) >= 10: print(f"jit execs {len(linear.src)} calls")
     run_linear(linear, var_vals, input_uops=[staging.get(u, u) for u in input_uops], jit=True)
-    for t,u,vals in self._symbolic_ret: t.uop = u.substitute({v:v.bind(var_vals.get(v.expr, i)) for v,i in vals.items()}, walk=True)
+    subs = {u:input_uops[i] for i,u in self.ret_inputs.items()}
+    for t,u,vals in self._rebind_ret: t.uop = u.substitute(subs | {v:v.bind(var_vals.get(v.expr, i)) for v,i in vals.items()}, walk=True)
     return self.ret
 
   def free_intermediates(self): self._linears.clear()
@@ -162,7 +165,8 @@ class _TinyJit(Generic[ReturnType]):
       # drop the pre-planning graph: it keeps the whole capture-time working set allocated (big_linear) or referenced (held_bufs).
       # the planned linear only uses the arena/held buffers, so the intermediates must be freed before linking and first exec
       del big_linear, held_bufs
-      self.captured = CapturedJit(ret, linear, names, expected_input_info)
+      ret_uops = {u for t in get_parameters(ret) for u in t.uop.toposort()}
+      self.captured = CapturedJit(ret, linear, names, expected_input_info, {i:u for i,u in enumerate(input_buf_uops) if u in ret_uops})
       ret = self.captured(input_buf_uops, var_vals)
     elif self.cnt >= 2:
       # jit exec
