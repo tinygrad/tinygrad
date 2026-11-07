@@ -672,7 +672,6 @@ class Transformer:
     self._cached_tokens: list[int] = []
     self.jits:dict = {}
 
-  # Positions are separate arguments so TinyJit can rebind each one.
   def forward(self, tokens:Tensor, temperature:Tensor, *start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
