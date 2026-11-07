@@ -100,9 +100,23 @@ class AMDComputeQueue(HWQueue):
     super().__init__(submit)
     self.pm4, self.gc, self.soc, self.nbio, self.target = self.dev.pm4, self.dev.gc, self.dev.soc, self.dev.nbio, self.dev.target
     self.profiled:list[UOp] = []
+    # (an exec barrier is emitted before the next packet that isn't a register's: a kernel's registers set while the kernels before it run)
+    self.barrier_pending, self._regs_end, self._acq_end, self._pre_barrier = False, 0, 0, False
     if self.dev.pmc_enabled: self.pmc_start()
 
-  def pkt3(self, cmd, *vals): self.q(self.pm4.PACKET3(cmd, _dw(vals) - 1), *vals)
+  def pkt3(self, cmd, *vals):
+    if self.barrier_pending and cmd != self.pm4.PACKET3_SET_SH_REG: self.flush_barrier()
+    self.q(self.pm4.PACKET3(cmd, _dw(vals) - 1), *vals)
+
+  def flush_barrier(self):
+    if not self.barrier_pending: return
+    self.barrier_pending = False
+    self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
+  def loop(self, body:UOp, r:UOp):
+    self.flush_barrier()
+    super().loop(body, r)
+    self.flush_barrier()
+  def finish(self): self.flush_barrier()
 
   def wreg(self, reg:AMDReg, *args:sint, **kwargs:int):
     if bool(args) == bool(kwargs): raise RuntimeError('One (and only one) of *args or **kwargs must be specified')
@@ -391,17 +405,28 @@ class AMDComputeQueue(HWQueue):
       return self._exec(prg, data, amd_build_program(self.dev, prg, self.devs)[1], args_addr)
     # the packets of a launch are the program's on the device, but the kernargs address: made once, with a placeholder for it
     # (the template has the queue's scratch and the barrier after a ring kernel: one a queue and that)
+    # (made without a pending barrier: the template's registers part, then the barrier pending at the launch, then the rest)
     if (tmpl:=self.dev.exec_templates.get(key:=(prg, self.devs, self.queue, getattr(self, "_after_ring", False)))) is None:
-      start, pstart = len(self.blob), len(self.patches)
+      start, pstart, pending, self.barrier_pending = len(self.blob), len(self.patches), self.barrier_pending, False
       self._exec(prg, data, amd_build_program(self.dev, prg, self.devs)[1], ph:=UOp.variable("_kernargs_addr", 0, 2**62, dtypes.uint64))
       words = [(cast(int, o) - start, w, ph in w.toposort()) for o, w in self.patches[pstart:]]
-      tmpl = self.dev.exec_templates[key] = (bytes(self.blob[start:]), words, ph)
+      tmpl = self.dev.exec_templates[key] = (bytes(self.blob[start:]), words, ph, self._regs_end - start, self._acq_end - start, self._pre_barrier)
       del self.blob[start:], self.patches[pstart:]
-    blob, words, ph = tmpl
+      self.barrier_pending = pending
+    blob, words, ph, mid, acq, pre = tmpl
+    # (a template with its own barrier before its registers: the pending one is it)
+    if pre: self.barrier_pending = False
     start = len(self.blob)
-    self.blob += blob
+    self.blob += blob[:mid]
+    # the caches the kernel reads through invalidated after a barrier (it may read what the kernels before it wrote), not for a kernel that runs
+    # with the ones before it (it doesn't: the queue's first commands invalidate them for the kernels until a barrier)
+    if (barrier:=self.barrier_pending or pre): self.flush_barrier()
+    shift = len(self.blob) - start - mid
+    self.blob += blob[mid:] if barrier else blob[acq:]
+    if not barrier: shift -= acq - mid
     def sub(w:UOp) -> UOp: return args_addr if w is ph else w.replace(src=tuple(sub(x) for x in w.src)) if ph in w.backward_slice else w
-    self.patches += [(start + o, sub(w) if has else w) for o, w, has in words]
+    assert not any(mid <= o < acq for o, _, _ in words), "a template's acquire has no patches"
+    self.patches += [(start + o + (shift if o >= mid else 0), sub(w) if has else w) for o, w, has in words]
     self._after_ring = prg.src[0].arg.name.startswith("ring_")  # (as _exec)
 
   def _exec(self, prg:UOp, data:AMDProgramData, lib:UOp, args_addr:UOp):
@@ -418,15 +443,16 @@ class AMDComputeQueue(HWQueue):
 
     dispatch_init = self.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(
       **({'cs_w32_en': int(data.wave32)} if self.target[0] != 9 else {}), force_start_at_000=1, compute_shader_en=1)
-    if data.private_segment_size: self.exec_barrier() # kernels share the scratch ring, each with its own TMPRING wave size
     # Peer sends must finish and reach memory before the next kernel publishes their completion flags.
     flag_ar = prg.src[0].arg.name.startswith("flag_allreduce_push")
     # a ring collective (it spins on its peers, with many waves) runs alone on the queue: the kernels before it done, the one after it waits for
     # it (two spinning at once: each one's waves can keep the other's waiting ones from starting, on two devices: a cycle)
     ring = prg.src[0].arg.name.startswith("ring_")
-    if flag_ar or ring or getattr(self, "_after_ring", False): self.exec_barrier()
-    self._after_ring = ring
-    self.acquire_mem(gli=0, gl2=0, gl2_wb=int(flag_ar))
+    # (kernels share the scratch ring, each with its own TMPRING wave size: the ones before it done before its registers are set)
+    if (pre:=bool(data.private_segment_size) or flag_ar or ring or getattr(self, "_after_ring", False)):
+      self.barrier_pending = True
+      self.flush_barrier()
+    self._after_ring, self._pre_barrier = ring, pre
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
     # a ring collective's waves at the highest priority (PGM_RSRC1 bits 10:11, as s_setprio): the SIMDs issue them first (they move the data the
@@ -442,14 +468,16 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_USER_DATA_0, *user_regs)
     self.wreg(self.gc.regCOMPUTE_RESOURCE_LIMITS, self.gc.regCOMPUTE_RESOURCE_LIMITS.encode(waves_per_sh=getenv("WAVES_PER_SH")))
     self.wreg(self.gc.regCOMPUTE_START_X, 0, 0, 0, *prg.arg.local_size, 0, 0)
+    self._regs_end = len(self.blob)
+    self.acquire_mem(gli=0, gl2=0, gl2_wb=int(flag_ar))
+    self._acq_end = len(self.blob)
     self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *prg.arg.global_size, dispatch_init)
     if self.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
     # else the next kernel starts right away unless hcq2 adds an exec_barrier (it depends on this one)
     if self.dev.prof_enabled or self.dev.sqtt_enabled: self.exec_barrier()
     if self.dev.prof_enabled: self.prof_stop(slot)
 
-  def exec_barrier(self):
-    self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
+  def exec_barrier(self): self.barrier_pending = True
 
   def wait(self, signal:UOp, value:UOp): self.wait_reg_mem(value.cast(dtypes.uint32), mem=signal.getaddr(self.devs))
 
@@ -1031,7 +1059,8 @@ class AMDDevice(Compiled):
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.pmc_enabled, self.sqtt_enabled, self.prof_enabled = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0, PROFILE > 0 and (PMC > 0 or SQTT > 0)
-    self.exec_templates:dict[tuple[UOp, tuple[str, ...], str, bool], tuple[bytes, list[tuple[int, UOp, bool]], UOp]] = {} # AMDComputeQueue.exec
+    # AMDComputeQueue.exec
+    self.exec_templates:dict[tuple[UOp, tuple[str, ...], str, bool], tuple[bytes, list[tuple[int, UOp, bool]], UOp, int, int, bool]] = {}
     if self.prof_enabled:
       self.iface.require_profile_mode()
       self.prof_slots, self.prof_read = getenv("PROF_SLOTS", 32), 0

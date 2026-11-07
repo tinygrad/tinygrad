@@ -465,11 +465,13 @@ class HWQueue:
 
   def memory_barrier(self): pass # a copy queue has nothing to flush
   def exec_barrier(self): pass # wait for the kernels before. queues that run their kernels one after another have nothing to do
+  def finish(self): pass # the stream's last commands (e.g. one deferred)
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
   def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin)) # submit(linear) becomes submit(cmdbuf)
 
 def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|tuple[str, ...]|None=None) -> UOp:
   for u in lin.src if lin is not None else (): hq.q_rewrite.rewrite(u, ctx=hq) # the commands of the linear go to the stream
+  hq.finish()
   stream = bytes(hq.blob)
 
   # loop over pathes with the same value
