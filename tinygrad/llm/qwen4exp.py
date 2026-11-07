@@ -1965,6 +1965,7 @@ class Transformer:
     self._seq_ckpt_jits = {sv: TinyJit(functools.partial(self._seq_ckpt_copy, sv), capture_first=True) for sv in (True, False)}
     # (SEQ_REPLAY: a slot's recurrent states advanced to a position, see _seq_materialize; the position of every slot's state)
     self._seq_mat_jit = TinyJit(self._seq_mat, capture_first=True)
+    self._seq_first_jit = TinyJit(self._seq_first, capture_first=True)
     self._seq_kbase:dict[int, int] = {}
     # (the calls' chunk counts that fit the caches: a short max context's are a few chunks)
     self._move_calls = self._chunk_calls((self.seq_rows() + REGION_ALIGN) // self.SEQ_MOVE - 1)
@@ -2262,6 +2263,7 @@ class Transformer:
       add(f"copy{int(sv)}", self._seq_copy_jits[sv], functools.partial(self._seq_copy_call, sv, 0, 1, 0))
       add(f"ckpt{int(sv)}", self._seq_ckpt_jits[sv], functools.partial(self.seq_ckpt, sv, 0, 1))
     add("move", self._seq_move_jits[1], functools.partial(self.seq_move, 0, REGION_ALIGN, 1))
+    add("first", self._seq_first_jit, functools.partial(self.seq_first, 0, 0, 1))
     if self._seq_mat_jit is not None and self.config.spec_drafts:
       add("mat", self._seq_mat_jit, functools.partial(lambda: cast(Any, self._seq_mat_jit)(*self._mat_vars(0, 1, 1))))
     # the prefills' and steps' jits captured and compiled at once (in forked processes, see capture_parallel): their jits called alone (no
@@ -2277,6 +2279,7 @@ class Transformer:
               (self._seq_ckpt_jits[sv], functools.partial(self.seq_ckpt, sv, 0, 1))]
     v = functools.partial(UOp.variable, min_val=0, max_val=self.seq_rows())
     par += [(j, functools.partial(lambda j: j(v("move_src").bind(0), v("move_dst").bind(REGION_ALIGN)), j)) for j in self._seq_move_jits.values()]
+    par.append((self._seq_first_jit, functools.partial(lambda j: j(*self._first_vars(0, 1)), self._seq_first_jit)))
     if self._seq_mat_jit is not None and self.config.spec_drafts:
       par.append((self._seq_mat_jit, functools.partial(lambda j: j(*self._mat_vars(0, 1, 1)), self._seq_mat_jit)))
     if self.stash_entries:
@@ -2311,6 +2314,26 @@ class Transformer:
       pos += n
     self._seq_copy_call(True, slot, L, 0)
     return self._wait_host(lambda: self._token_host[base + L], "the token after a prefill")
+
+  def _seq_first(self, slot:UOp, at:UOp):
+    """the token after the hidden state of row 0 of slot `slot` (a prompt's last token's) sampled into the token buffer at row `at`"""
+    hc, H = unwrap(self.config.hc), 2*(self.config.spec_drafts+1)
+    h = self.seq_spec_h.shrink(((slot*H, slot*H+1), None)).reshape(1, 1, hc.count, self.config.dim)
+    tok = self._sample(self.output_norm(self._hc_out(h))[:, -1, :], self._seq_pf_temp, self._token_buf.device)
+    self._token_buf[:, at:at+1].assign(tok.cast(self._token_buf.dtype)).realize()
+  def _first_vars(self, slot:int, at:int) -> list[UOp]:
+    return [UOp.variable("first_slot", 0, self.seq_slots()).bind(slot), UOp.variable("first_at", 0, self._token_rows()-1).bind(at)]
+  def seq_first(self, slot:int, base:int, pos:int, temp:float|tuple[float, float]=0.0) -> int:
+    """
+    the token after the sequence of slot `slot` (its region from base) of pos tokens, from its states there (its hidden state of the last token
+    its row 0: a prompt's checkpoint restored, see SeqEngine.prefill): a prompt that is all in the caches has no token to prefill
+    """
+    self._seq_init()
+    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (a step may read the token buffer)
+    self._token_host[base+pos] = -1
+    self._seq_pf_host_temp[:2] = array.array('f', temp if isinstance(temp, tuple) else (temp, 1.0))
+    self._seq_first_jit(*self._first_vars(slot, base+pos))
+    return self._wait_host(lambda: self._token_host[base + pos], "the token after a prompt")
 
   def _chunk_plan(self, n:int) -> list[int]:
     """

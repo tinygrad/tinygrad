@@ -240,6 +240,7 @@ class Handler(VizHandler):
   def log_request(self, code='-', size='-'): pass
   def do_GET(self):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
+    elif self.path == "/status": self.send_data(json.dumps(self.server.status()).encode())
     elif self.path.startswith("/assets/"): super().do_GET()
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
@@ -297,8 +298,10 @@ class Handler(VizHandler):
         if finish_reason == "stop": finish_reason = "tool_calls"
       yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
       if include_usage:
+        # (cached_tokens: the prompt's tokens that were in the caches, not prefilled)
         yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
-                                        "total_tokens": prompt_tokens + len(out)}, **tmpl}
+                                        "total_tokens": prompt_tokens + len(out),
+                                        "prompt_tokens_details": {"cached_tokens": req.cache_start}}, **tmpl}
     finally: req.cancelled = True  # (a client gone: the model stops at its next token)
 
   def client_gone(self) -> bool:
@@ -445,6 +448,10 @@ class Request:
     self.generated: list[int] = []
     self.st, self.pt, self.cache_start, self.steps = time.perf_counter(), 0.0, 0, 0
     self.done = False
+    # (the prefill: the prompt, the position of the next slice, whether the first restores a checkpoint. the time it waited for its sequence
+    # (queued), the time of its slices)
+    self.fill: tuple[list[int], int, bool] = ([], 0, False)
+    self.queued, self.prefill_time, self.slices = 0.0, 0.0, 0
 
 
 class BatchStats:
@@ -530,16 +537,35 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if req.done: return False
     req.done, req.error = True, error
     et, n = time.perf_counter(), len(req.generated)
-    total = f"total:{et-req.st:6.2f}s"
-    pre = (len(req.ids) - req.cache_start) / ((req.pt or et) - req.st)
-    spec = f"spec:{n/req.steps:4.2f} tok/step  {colored('--', 'BLACK')}  " if req.steps else ""
-    stderr_log(req.log + f"reqs:{self.inflight:3d}  {colored('--', 'BLACK')}  "
-               f"in:{colored(f'{req.cache_start:5d}', 'green')} +{len(req.ids)-req.cache_start:5d}  {colored('--', 'BLACK')}  "
-               f"prefill:{pre:5.0f} tok/s  {colored('--', 'BLACK')}  gen:{(n-1)/(et-req.pt) if n > 1 and req.pt else 0:4.0f} tok/s  "
-               f"{colored('--', 'BLACK')}  {spec}out:{n:5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if req.cancelled else total}\n")
+    total, sep = f"total:{et-req.st:6.2f}s", colored('--', 'BLACK')
+    # (the phases: waiting for a sequence, the prefill's slices (the decoding ones' steps between them), the first token)
+    new = len(req.ids) - req.cache_start
+    pre = f"prefill:{req.prefill_time:5.2f}s" + (f" in {req.slices}" if req.slices > 1 else "") + \
+          (f" {new/req.prefill_time:5.0f} tok/s" if req.prefill_time else "")
+    spec = f"spec:{n/req.steps:4.2f} tok/step  {sep}  " if req.steps else ""
+    stderr_log(req.log + f"reqs:{self.inflight:3d}  {sep}  in:{colored(f'{req.cache_start:5d}', 'green')} +{new:5d}  {sep}  "
+               f"queue:{req.queued:5.2f}s  {sep}  {pre}  {sep}  ttft:{(req.pt or et)-req.st:5.2f}s  {sep}  "
+               f"gen:{(n-1)/(et-req.pt) if n > 1 and req.pt else 0:4.0f} tok/s  {sep}  {spec}out:{n:5d}  {sep}  "
+               f"{colored(total, 'red') if req.cancelled else total}\n")
     self.flush(req)
     req.out.put(None)
     return False
+
+  def status(self) -> dict:
+    """the requests and the caches now (GET /status): the requests decoding, being prefilled (their tokens left) and waiting, the sequences in
+    the caches and in the stash (their tokens)"""
+    now, ret = time.perf_counter(), typing.cast(dict[str, typing.Any], {"waiting": self.waiting.qsize()})
+    if (q:=getattr(self, "queues", None)) is not None:
+      active, filling, pending = (list(x.values()) if isinstance(x, dict) else list(x) for x in q)
+      def req(r:Request) -> dict: return {"prompt": len(r.ids), "cached": r.cache_start, "generated": len(r.generated), "age": round(now - r.st, 2)}
+      ret |= {"decoding": [req(r) for r in active], "prefilling": [req(r) | {"left": len(r.fill[0]) - r.fill[1]} for r in filling],
+              "waiting": [req(r) for r in pending] + [{}] * self.waiting.qsize()}
+    if (eng:=self.engine) is not None:
+      seqs, stashed = list(eng.seqs), list(eng.stashed)
+      ret |= {"resident": {"sequences": len(seqs), "tokens": sum(s.n for s in seqs), "rows": eng.rows, "rows_taken": sum(s.cap for s in seqs)},
+              "stash": {"sequences": len(stashed), "tokens": sum(len(x.tokens) for x in stashed), "chunks_free": len(eng.free_chunks)},
+              "evictions": eng.evictions}
+    return ret
 
   # ** the kept conversations
   def kept(self) -> list[list[int]]:
@@ -596,6 +622,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       finally: _close(g)
 
   # ** sequences sharing the model's caches (Transformer.seqs_supported): continuous batching
+  # (a prompt is prefilled in slices of PREFILL_SLICE tokens (~1 s). the decoding ones' steps run after MAX_STALL s of slices, for their share
+  # of the time (the requests decoding of the ones in flight, DECODE_SHARE at most and 0.1 at least): a long prompt doesn't stop the replies,
+  # many prompts at once are prefilled mostly one after another (a step of many is about as fast as one of a few). the next slice is the prompt's with the fewest tokens left to prefill (a short one, an agent's turn, isn't behind a long one),
+  # less AGING tokens a second it waited (a long one isn't behind short ones that keep coming))
+  PREFILL_SLICE, MAX_STALL, DECODE_SHARE, AGING = 13824, 1.0, 0.5, 1000
   def schedule_seqs(self):
     """
     every request has a sequence of its own (the resident one its prompt continues: an agent's turn is prefilled from its last one), prefilled
@@ -604,75 +635,114 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     from tinygrad.llm.engine import SeqEngine, Seq
     eng = self.engine = SeqEngine(self.model)
     active: dict[Seq, Request] = {}
+    filling: dict[Seq, Request] = {}  # (the sequences of the prompts being prefilled: their request's fill is where)
     pending: list[Request] = []
+    self.queues = (active, filling, pending)
     k = eng.k
+    def prompt(req:Request) -> list[int]: return req.ids + req.generated  # (a paused one (see below) goes on from its tokens so far)
+    stall = 0.0  # (the time of the slices since the last steps)
     while True:
       try:
-        while not active and not pending:
+        while not active and not pending and not filling:
           try: pending.append(self.waiting.get(timeout=0.2))
           except queue.Empty: pass
         while not self.waiting.empty(): pending.append(self.waiting.get_nowait())
-        pending = [r for r in pending if not (r.cancelled and not self.finish(r))]
-        self.inflight = len(active) + len(pending)
-        # the waiting requests join (prefilled one at a time, the others wait for it)
-        while pending and len(active) < eng.max_active:
-          req = pending[0]
-          # (a paused one (see below) goes on from its tokens so far)
-          ids = req.ids + req.generated
+        pending[:] = [r for r in pending if not (r.cancelled and not self.finish(r))]
+        for s, req in list(filling.items()):
+          if req.cancelled:
+            del filling[s]
+            self.finish(req)
+            eng.stop(s, len(s.tokens))
+        self.inflight = len(active) + len(filling) + len(pending)
+        # the prompt to prefill a slice of: the one with the fewest tokens left (aged), a waiting one taking a sequence
+        now, job = time.perf_counter(), None
+        cands:list[tuple[float, int, Seq|Request]] = [(len(r.fill[0]) - r.fill[1] - self.AGING*(now - r.st), 0, s) for s, r in filling.items()]
+        if len(active) + len(filling) < eng.max_active:
+          cands += [(len(ids) - eng.cached(ids) - self.AGING*(now - r.st), 1, r) for r in pending if (ids:=prompt(r))]
+        for _, _, c in sorted(cands, key=lambda x: x[:2]):
+          if isinstance(c, Seq):
+            job = c
+            break
           t0 = time.perf_counter()
-          got = eng.take(ids, max(0, (req.max_tokens or 0) - len(req.generated)))
+          got = eng.take(ids:=prompt(c), max(0, (c.max_tokens or 0) - len(c.generated)))
           self.stats.add("take", time.perf_counter() - t0)
-          for name, t in eng.times.items(): self.stats.add(name, t)
-          eng.times.clear()
-          if got is None: break
-          pending.pop(0)
-          s, start, restore = got
-          if not req.generated: req.cache_start = start
+          if got is None: continue
+          pending.remove(c)
+          job, start, restore = got
+          if not c.generated: c.cache_start, c.queued = start, time.perf_counter() - c.st
+          c.fill = (ids, start, restore)
+          filling[job] = c
           self.miss_log(ids, start)
+          break
+        for name, t in eng.times.items(): self.stats.add(name, t)
+        eng.times.clear()
+        if job is not None:
+          req = filling[job]
+          ids, pos, restore = req.fill
+          end = len(ids) if len(ids) - pos <= self.PREFILL_SLICE * 3 // 2 else pos + self.PREFILL_SLICE
           st = time.perf_counter()
-          try: first = eng.prefill(s, ids, start, restore, (req.temperature, req.top_p))
+          try:
+            if end < len(ids): eng.prefill_slice(job, ids, pos, restore, end)
+            else: first = eng.prefill(job, ids, pos, restore, (req.temperature, req.top_p))
           except Exception as e:
             traceback.print_exc()
-            eng.seqs.remove(s)
+            del filling[job]
+            eng.seqs.remove(job)
             self.finish(req, e)
             continue
-          self.stats.prefills, self.stats.prefill_time = self.stats.prefills + 1, self.stats.prefill_time + time.perf_counter() - st
-          if self.emit(req, first): active[s] = req
-          else: eng.stop(s, len(s.tokens))
-        if not active: continue
-        seqs = list(active)
-        st = time.perf_counter()
-        outs = eng.step(seqs)
-        self.stats.step_time += time.perf_counter() - st
-        for s, toks in zip(seqs, outs):
-          req = active[s]
-          req.steps += 1
-          for i, t in enumerate(toks):
-            if not self.emit(req, t, hold=True):
-              # (its tokens up to this one: the ones after it aren't the conversation's)
-              eng.stop(s, len(s.tokens) - (len(toks) - 1 - i))
-              del active[s]
-              break
+          slice_time = time.perf_counter() - st
+          stall += slice_time
+          req.prefill_time, req.slices = req.prefill_time + slice_time, req.slices + 1
+          self.stats.prefill_time += slice_time
+          if end < len(ids): req.fill = (ids, end, False)
           else:
-            self.flush(req)
-            if not eng.room(s, len(s.tokens) + 2*(k+1)):
-              del active[s]
-              # (the caches full of the decoding ones: it pauses (into the stash), its request goes on when there's room, first. one longer
-              # than the caches ends)
-              if eng.fits(len(s.tokens) + 2*(k+1)):
-                eng.pause(s)
-                pending.insert(0, req)
-                self.stats.add("paused", 1)
-              else:
-                req.finish_reason = "length"
-                self.finish(req)
-                eng.stop(s, len(s.tokens))
-        self.stats.step(len(active), len(pending))
+            del filling[job]
+            self.stats.prefills += 1
+            if self.emit(req, first): active[job] = req
+            else: eng.stop(job, len(job.tokens))
+        # (requests that can't take a sequence yet, none decoding: not a busy loop)
+        if job is None and not active: time.sleep(0.005)
+        # the steps of the decoding ones: one, or their share of the time of the slices
+        if job is not None and stall < self.MAX_STALL: continue
+        share = min(self.DECODE_SHARE, max(0.1, len(active) / max(1, len(active) + len(filling) + len(pending))))
+        budget, stall = stall * share / (1 - share), 0.0
+        st0 = time.perf_counter()
+        while active:
+          seqs = list(active)
+          st = time.perf_counter()
+          outs = eng.step(seqs)
+          self.stats.step_time += time.perf_counter() - st
+          for s, toks in zip(seqs, outs):
+            req = active[s]
+            req.steps += 1
+            for i, t in enumerate(toks):
+              if not self.emit(req, t, hold=True):
+                # (its tokens up to this one: the ones after it aren't the conversation's)
+                eng.stop(s, len(s.tokens) - (len(toks) - 1 - i))
+                del active[s]
+                break
+            else:
+              self.flush(req)
+              if not eng.room(s, len(s.tokens) + 2*(k+1)):
+                del active[s]
+                # (the caches full of the decoding ones: it pauses (into the stash), its request goes on when there's room, first. one longer
+                # than the caches ends)
+                if eng.fits(len(s.tokens) + 2*(k+1)):
+                  eng.pause(s)
+                  pending.insert(0, req)
+                  self.stats.add("paused", 1)
+                else:
+                  req.finish_reason = "length"
+                  self.finish(req)
+                  eng.stop(s, len(s.tokens))
+          self.stats.step(len(active), len(pending) + len(filling))
+          if time.perf_counter() - st0 >= budget: break
       except KeyboardInterrupt: raise
       except Exception as e:
         # (a step that failed: its requests fail, the sequences are dropped)
         traceback.print_exc()
-        for s, req in active.items():
+        for s, req in [*active.items(), *filling.items()]:
           self.finish(req, e)
           if s in eng.seqs: eng.seqs.remove(s)
-        active = {}
+        active.clear()
+        filling.clear()

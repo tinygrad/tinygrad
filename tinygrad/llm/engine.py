@@ -212,13 +212,14 @@ class SeqEngine:
     for s in self.seqs:
       if s.active: continue
       if s.n and s.n < len(ids) and starts(ids, s.tokens, s.n): cand = (s, s.n, False)
-      elif s.ckpt and s.ckpt < len(ids) and starts(ids, s.tokens, s.ckpt): cand = (s, s.ckpt, True)
+      # (its checkpoint: a prompt that continues it, or is it (the same prompt again: the token after it sampled from it, nothing prefilled))
+      elif s.ckpt and s.ckpt <= len(ids) and starts(ids, s.tokens, s.ckpt): cand = (s, s.ckpt, True)
       else: continue
       if best is None or cand[1] > best[1]: best = cand
     # (a stashed one it continues further: back from host memory, prefilled from its end, or its checkpoint)
     def scont(x:Stashed) -> int:
       if len(x.tokens) < len(ids) and starts(ids, x.tokens, len(x.tokens)): return len(x.tokens)
-      return x.ckpt if 0 < x.ckpt < len(ids) and starts(ids, x.tokens, x.ckpt) else 0
+      return x.ckpt if 0 < x.ckpt <= len(ids) and starts(ids, x.tokens, x.ckpt) else 0
     stashed = max(((n, i, x) for i, x in enumerate(self.stashed) if (n:=scont(x))), default=(0, 0, None))[2]
     if best is not None and (stashed is None or best[1] >= scont(stashed)):
       s, start, restore = best
@@ -244,17 +245,34 @@ class SeqEngine:
       self.model._token_host[s.base:s.base+n] = __import__("array").array('i', stashed.tokens)
       # (as it was: prefilled from its last token's states, or its checkpoint restored)
       s.tokens, s.n, s.hrow, s.ckpt = list(stashed.tokens), n, stashed.hrow, stashed.ckpt
-      return s, start, start < n
+      return s, start, start < n or start == len(ids)
     finally:
       # (back in the stash if it's not in the caches now)
       if stashed is not None and not restored: self.stashed.append(stashed)
 
+  def cached(self, ids:list[int]) -> int:
+    """the tokens of a prompt in the caches or the stash (the position take would prefill it from, no sequence taken)"""
+    def cont(tokens:list[int], n:int, ckpt:int) -> int:
+      if n and n < len(ids) and starts(ids, tokens, n): return n
+      return ckpt if ckpt and ckpt <= len(ids) and starts(ids, tokens, ckpt) else 0
+    return max([cont(s.tokens, s.n, s.ckpt) for s in self.seqs if not s.active] +
+               [cont(x.tokens, len(x.tokens), x.ckpt) for x in self.stashed], default=0)
+
+  def prefill_slice(self, s:Seq, ids:list[int], start:int, restore:bool, end:int):
+    """the tokens of the prompt ids from start to end prefilled in s (its checkpoint restored first): the rest is prefilled from end"""
+    if restore: self.model.seq_ckpt(False, s.slot, s.ckpt)
+    self.model.seq_prefill(s.slot, s.base, ids[:end], start, 0 if restore else s.hrow)
+    s.tokens, s.n, s.hrow, s.used = ids[:end], end, 0, time.perf_counter()
+
   def prefill(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, float]) -> int:
     """the prompt ids prefilled in s from start (its checkpoint restored first): the token sampled after it"""
     if restore: self.model.seq_ckpt(False, s.slot, s.ckpt)
-    first = self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, temp)
-    # (the end of the prompt: the checkpoint of the states there)
-    self.model.seq_ckpt(True, s.slot, len(ids))
+    # (a prompt that is its checkpoint: the token after it from the hidden state of its last token, restored)
+    if restore and start == len(ids): first = self.model.seq_first(s.slot, s.base, start, temp)
+    else:
+      first = self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, temp)
+      # (the end of the prompt: the checkpoint of the states there)
+      self.model.seq_ckpt(True, s.slot, len(ids))
     s.tokens, s.n, s.hrow, s.ckpt, s.used = ids + [first], len(ids), 0, len(ids), time.perf_counter()
     s.mtp, s.j, s.par, s.y, s.temp = len(ids), 0, 1, [first] + [0]*self.k, temp
     return first
