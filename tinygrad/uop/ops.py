@@ -1519,7 +1519,8 @@ class UPat(RandMixin):
 def deconstruct_function(fxn:Callable) -> tuple:
   # globals can be referenced from arbitrarily nested code objects (comprehensions/lambdas, pre PEP 709)
   def names(co:types.CodeType) -> set: return set(co.co_names).union(*(names(c) for c in co.co_consts if isinstance(c, types.CodeType)))
-  new_globals = {k:fxn.__globals__[k] for k in names(fxn.__code__) if k in fxn.__globals__}
+  used = names(fxn.__code__)
+  new_globals = {k:v for k,v in fxn.__globals__.items() if k in used}
   # NOTE: optional round trip through pickle!
   assert fxn.__closure__ is None, "closures are not supported in pattern matchers"
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
