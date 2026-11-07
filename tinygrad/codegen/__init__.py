@@ -82,6 +82,7 @@ expander = PatternMatcher([
     .reshape(tuple([r.vmax+1 if i == ctx[r.arg] else 1 for i in range(len(ctx))])) if r.arg in ctx else None),
   (UPat(Ops.WMMA, name="u"), expand_wmma),
 ])+pm_flatten_range+mop_cleanup
+expander.order_free = True  # the range map is only read
 
 def expand_broadcast(x:UOp):
   shapes = [u._shape for u in x.src]

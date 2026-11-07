@@ -1555,6 +1555,11 @@ def upat_deferred_compile(p:UPat, fxn:Callable, entry:list) -> Callable:
   return lazy_compile
 
 class PatternMatcher:
+  # if the result of a rewrite doesn't depend on the order of the rewrites, graph_rewrite uses the faster fast_rewrite.
+  # None means it's order free unless a pattern takes ctx. set it to True if the patterns only read ctx,
+  # and to False if they have other side effects, like making new buffers (their numbers are in the order of the rewrites)
+  order_free: bool|None = None
+  _parts: tuple[PatternMatcher, ...] = ()
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
@@ -1570,7 +1575,17 @@ class PatternMatcher:
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
-  def __add__(self, more:PatternMatcher) -> PatternMatcher: return PatternMatcher(self.patterns+more.patterns)
+  def __add__(self, more:PatternMatcher) -> PatternMatcher:
+    ret = PatternMatcher(self.patterns+more.patterns)
+    ret._parts = (self, more)
+    return ret
+
+  @functools.cached_property
+  def _order_free(self) -> tuple[bool, bool]:
+    """(order free without a ctx, order free with a ctx)"""
+    if self.order_free is not None: return self.order_free, self.order_free
+    if self._parts: return all(p._order_free[0] for p in self._parts), all(p._order_free[1] for p in self._parts)
+    return True, not any('ctx' in inspect.signature(fxn).parameters for _,fxn in self.patterns)
 
   def rewrite(self, uop:UOp, ctx=None):
     if len(pats:=self.pdict.get(uop.op, [])):
@@ -1786,6 +1801,41 @@ class RewriteContext:
         self.replace[n] = new_n
     return self.replace.get(root, root)
 
+  def fast_rewrite(self, root:UOp) -> UOp:
+    """unified_rewrite for when the order of the rewrites doesn't matter. It's recursive, deep graphs fall back to unified_rewrite"""
+    replace, enter_calls = self.replace, self.enter_calls
+    pm = self.pm_rewrite if self.pm is not None else None
+    bpm = self.cached_bpm_rewrite if self.bpm is not None else None
+    def rw(n:UOp) -> UOp:
+      if (r:=replace.get(n)) is not None: return r
+      m = n
+      if bpm is not None:
+        # apply bottom up rewrite rules until a fixed point is reached
+        try:
+          seen = {n}
+          while (test_n:=bpm(m)) is not None:
+            if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
+            seen.add(m:=test_n)
+        except BottomUpGate:
+          # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
+          replace[n] = m
+          return m
+      if m.op is Ops.CALL and not enter_calls: new_src = (m.src[0],)+tuple([rw(x) for x in m.src[1:]])
+      else: new_src = tuple([rw(x) for x in m.src])
+      if new_src == m.src:
+        if pm is None or (ret:=pm(m)) is None:
+          replace[n] = m
+          return m
+      else: ret = UOp(m.op, new_src, m.arg)
+      replace[n] = r = rw(ret)
+      return r
+    # NOTE: everything in replace is final, so unified_rewrite can finish the job
+    try: return rw(root)
+    except RecursionError: return self.unified_rewrite(root)
+    finally:
+      # NOTE: rw is a recursive closure, this breaks the reference cycle
+      rw = None  # type: ignore[assignment]
+
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
@@ -1864,13 +1914,18 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
     assert ctx is None
     ctx = init_ctx()
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls)
-  return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
+  if walk: return rewrite_ctx.walk_rewrite(sink)
+  # NOTE: VIZ needs the order of the rewrites
+  if TRACK_MATCH_STATS.value < 2 and all(x is None or x._order_free[ctx is not None] for x in (rewrite_ctx.pm, rewrite_ctx.bpm)):
+    return rewrite_ctx.fast_rewrite(sink)
+  return rewrite_ctx.unified_rewrite(sink)
 
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
+_substitute.order_free = True  # the substitute dict is only read
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot] if p.arg.slot >= 0 else None)])
 
 def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
