@@ -650,10 +650,7 @@ class Parser:
         self.eat('LBRACKET')
         reg = self.parse()
         self.eat('RBRACKET')
-        vgpr = self.vars.get('_vgpr')
-        if vgpr is None: return _u32(0)
-        ws = self.vars.get('_wave_size', 32)
-        return vgpr.index(_to_u32(reg) * _u32(ws) + _to_u32(lane)).load()
+        return self.funcs['vgpr_index'](_to_u32(reg), _to_u32(lane)).load()
       if self.try_eat('LPAREN'):
         args = self._parse_args()
         self.eat('RPAREN')
@@ -676,10 +673,7 @@ class Parser:
           self.eat('LBRACKET')
           reg = self.parse()
           self.eat('RBRACKET')
-          vgpr = self.vars.get('_vgpr')
-          if vgpr is None: return _u32(0)
-          ws = self.vars.get('_wave_size', 32)
-          return vgpr.index(_to_u32(reg) * _u32(ws) + _u32(int(idx))).load()
+          return self.funcs['vgpr_index'](_to_u32(reg), _u32(int(idx))).load()
         elem = self.vars.get(f'{name}@{idx}', self.vars.get(f'{name}{idx}'))
         if elem is None:
           # Extract bit idx from base variable (like var[idx])
@@ -1158,8 +1152,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
           if j < len(toks) and toks[j].type == 'EQUALS': j += 1
           ln = parse_tokens(lane_toks, env, funcs)
           rg, val = parse_tokens(reg_toks, env, funcs), parse_tokens(toks[j:], env, funcs)
-          ws = env.get('_wave_size', 32)
-          vgpr_idx = _to_u32(rg) * _u32(ws) + _to_u32(ln)
+          vgpr_idx = funcs['vgpr_index'](_to_u32(rg), _to_u32(ln))
           if assigns is not None:
             assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}][{hi_val}:{lo_val}]', (vgpr_idx, val, _u32(hi_val), _u32(lo_val))))
           i += 1
@@ -1169,8 +1162,8 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         ln = parse_tokens(lane_toks, env, funcs)
         rg, val = parse_tokens(reg_toks, env, funcs), parse_tokens(toks[j:], env, funcs)
         if assigns is not None:
-          ws = env.get('_wave_size', 32)
-          assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(ws) + _to_u32(ln), val)))
+          vgpr_idx = funcs['vgpr_index'](_to_u32(rg), _to_u32(ln))
+          assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (vgpr_idx, val)))
         i += 1
         continue
 
