@@ -93,8 +93,16 @@ def dispatch_packet(data:AMDProgramData, info:ProgramInfo, kernel_object:UOp=UOp
   grid = [(g * l).cast(dtypes.uint32) if isinstance(g, UOp) else g * l for g, l in zip(cast(tuple[Any, ...], info.global_size), info.local_size)]
   return [UOp(Ops.BINARY, arg=pkt[:12]), *grid, UOp(Ops.BINARY, arg=pkt[24:32]), kernel_object, kernarg_address, UOp(Ops.BINARY, arg=pkt[48:])]
 
+EL_SLOTS = 4096  # the early launch counters of a command buffer
+
 class AMDComputeQueue(HWQueue):
   dev:AMDDevice
+  # (early launch) a consumer kernel right after a producer it depends on is launched without the barrier: it loads what doesn't depend on
+  # the producer (its weights) while the producer runs, then waits for the producer's counter (every workgroup of the producer adds 1 to it
+  # when its stores are done, from -its workgroups). their last arguments are the counter (a consumer not launched so: a 0). the kernels after
+  # it without a barrier of their own are consumers too or get one (the producer isn't waited for by the queue)
+  el_producers:set[str] = set()
+  el_consumers:set[str] = set()
 
   def __init__(self, submit):
     super().__init__(submit)
@@ -103,6 +111,11 @@ class AMDComputeQueue(HWQueue):
     # (an exec barrier is emitted before the next packet that isn't a register's: a kernel's registers set while the kernels before it run.
     # barrier_since: one was emitted since the last kernel (the next one invalidates the caches it reads through))
     self.barrier_pending, self.barrier_since, self._regs_end, self._acq_end, self._pre_barrier = False, True, 0, 0, False
+    # early launch: the counters' starting values (slot 0: the 0 of the consumers launched with a barrier), where they're set (before the first
+    # kernel that uses them), the producer last launched (its slot, whether the kernels before it were done), the producer the queue didn't wait
+    # for, loops open
+    self._el_init:list[int] = [0]
+    self._el_at, self._el_last, self._el_open, self._loops = -1, cast(tuple[int, bool]|None, None), cast(int|None, None), 0
     if self.dev.pmc_enabled: self.pmc_start()
 
   def pkt3(self, cmd, *vals):
@@ -111,15 +124,36 @@ class AMDComputeQueue(HWQueue):
 
   def flush_barrier(self):
     if not self.barrier_pending: return
-    self.barrier_pending, self.barrier_since = False, True
+    self.barrier_pending, self.barrier_since, self._el_open = False, True, None
     self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
   def loop(self, body:UOp, r:UOp):
-    # (a trip's first kernel after the trip before it: its caches invalidated)
+    # (a trip's first kernel after the trip before it: its caches invalidated. no early launches in it, set up before it)
     self.flush_barrier()
-    self.barrier_since = True
-    super().loop(body, r)
+    if self._el_open is not None: self.barrier_pending = True
     self.flush_barrier()
-  def finish(self): self.flush_barrier()
+    self.barrier_since, self._el_last = True, None
+    start, self._loops = len(self.blob), self._loops + 1
+    try: super().loop(body, r)
+    finally: self._loops -= 1
+    if self._el_at > start: self._el_at = start
+    self.flush_barrier()
+  def finish(self):
+    self.flush_barrier()
+    if self._el_at < 0: return
+    # the counters set before the first kernel that uses them (the queue's kernels before this command buffer are done there, the caches were
+    # written back and invalidated at its start: no line of them)
+    at, n, pstart = self._el_at, len(self.blob), len(self.patches)
+    self.pkt3(self.pm4.PACKET3_WRITE_DATA, self.pm4.WR_CONFIRM | self.pm4.WRITE_DATA_DST_SEL(5), self.el_counters().getaddr(self.devs),
+              *self._el_init)
+    pkt, new = bytes(self.blob[n:]), self.patches[pstart:]
+    del self.blob[n:], self.patches[pstart:]
+    self.blob[at:at] = pkt
+    def shift(o:int|UOp) -> int|UOp: return o + len(pkt) if (o if isinstance(o, int) else o.vmin) >= at else o
+    self.patches = [(shift(o), w) for o, w in self.patches] + [(at + cast(int, o) - n, w) for o, w in new]
+    self._el_at = -1  # (once: encode_cmdbuf encodes the nested linears (kernargs) with this queue after)
+
+  def el_counters(self) -> UOp:
+    return UOp.alloc((EL_SLOTS,), dtypes.uint32, 0, device=self.devs[0], name=to_name("el_counters", self.queue))
 
   def wreg(self, reg:AMDReg, *args:sint, **kwargs:int):
     if bool(args) == bool(kwargs): raise RuntimeError('One (and only one) of *args or **kwargs must be specified')
@@ -395,16 +429,41 @@ class AMDComputeQueue(HWQueue):
 
   ### exec
 
-  def kernargs(self, call:UOp, prg:UOp, data:AMDProgramData) -> UOp:
+  def kernargs(self, call:UOp, prg:UOp, data:AMDProgramData, last:UOp|None=None) -> UOp:
     if not data.kernargs_segment_size and not data.enable_dispatch_ptr: return UOp.const(0, dtypes.uint64) # no kernargs, nothing to point at
     args = get_call_kernel_args(call, prg, self.devs)
+    if last is not None: args[-1] = last
     words = pack_args(layout_args(args), data.kernargs_segment_size) + (dispatch_packet(data, prg.arg) if data.enable_dispatch_ptr else [])
     return UOp(Ops.LINEAR, src=tuple(words), arg="kernargs").getaddr(self.devs)
 
   def exec(self, call:UOp, prg:UOp):
     data = _amd_program_image(prg.src[3].arg, self.dev.target, self.dev.iface.props['lds_size_in_kb'])[0]
-    args_addr = self.kernargs(call, prg, data)
+    name, last, producer = prg.src[0].arg.name, None, None
+    el_ok = not self._loops and not data.private_segment_size and not getattr(self, "_after_ring", False) and \
+      not name.startswith(("flag_allreduce_push", "ring_")) and not self.dev.prof_enabled and not self.dev.sqtt_enabled
+    if name in self.el_consumers or name in self.el_producers:
+      if self._el_at < 0: self._el_at = len(self.blob)
+    if name in self.el_consumers:
+      slot = 0
+      # (right after the producer it depends on, the kernels before that done: its wait is the barrier. after a consumer launched so, a
+      # consumer without a barrier waits for that producer too)
+      if el_ok and self.barrier_pending and self._el_last is not None and self._el_last[1]: slot, self.barrier_pending = self._el_last[0], False
+      elif el_ok and not self.barrier_pending and self._el_open is not None: slot = self._el_open
+      if slot: self._el_open = slot
+      last = self.el_counters().getaddr(self.devs) + UOp.const(4*slot, dtypes.uint64) if slot else UOp.const(0, dtypes.uint64)
+    elif self._el_open is not None and not self.barrier_pending:
+      # (a kernel that doesn't wait itself, after a producer the queue didn't wait for: a barrier)
+      self.barrier_pending = True
+    if name in self.el_producers and el_ok and all(isinstance(g, int) for g in prg.arg.global_size) and len(self._el_init) < EL_SLOTS-1:
+      producer = len(self._el_init)
+      self._el_init.append((-prod(cast(tuple[int, ...], prg.arg.global_size))) & 0xffffffff)
+      last = self.el_counters().getaddr(self.devs) + UOp.const(4*producer, dtypes.uint64)
+    elif name in self.el_producers:
+      # (not counted: its counter is slot 0's 0 plus its adds, never read again... a scratch word past the slots)
+      last = self.el_counters().getaddr(self.devs) + UOp.const(4*(EL_SLOTS-1), dtypes.uint64)
+    args_addr = self.kernargs(call, prg, data, last)
     if self.dev.prof_enabled or self.dev.sqtt_enabled:
+      self._el_last = None
       return self._exec(prg, data, amd_build_program(self.dev, prg, self.devs)[1], args_addr)
     # the packets of a launch are the program's on the device, but the kernargs address: made once, with a placeholder for it
     # (the template has the queue's scratch and the barrier after a ring kernel: one a queue and that)
@@ -432,6 +491,7 @@ class AMDComputeQueue(HWQueue):
     assert not any(mid <= o < acq for o, _, _ in words), "a template's acquire has no patches"
     self.patches += [(start + o + (shift if o >= mid else 0), sub(w) if has else w) for o, w, has in words]
     self._after_ring = prg.src[0].arg.name.startswith("ring_")  # (as _exec)
+    self._el_last = (producer, barrier) if producer is not None else None
 
   def _exec(self, prg:UOp, data:AMDProgramData, lib:UOp, args_addr:UOp):
     prog_addr = lib.getaddr(self.devs) + data.entry_point_offset

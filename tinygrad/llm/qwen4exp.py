@@ -5,7 +5,7 @@ from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.jit import capture_parallel
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
-from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES
+from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES, _el_dummy
 from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custom_kernels_supported, find_packed, moe_linear, q8_linear, \
   q8_quantize_cache_clear, moe_route, moe_grouped_linear, partial_sum, fuse_gate_up, kda_decode, pool_index_rows, slot_scatter, \
   slot_gather, moe_combine, token_sharded, shard_rows, reduce_scatter, all_gather, all_gather_q8, sharded_argmax, skinny_matmul, kda_conv, \
@@ -2683,6 +2683,8 @@ class Transformer:
         raw = inj.weight.bitcast(dtypes.uint8).flatten()
         g._winj = ggml_data_to_tensor(raw, g.count*g.count*g.dim, inj.ggml_type).reshape(g.count, -1).contiguous()
       winj.append(g._winj)
+    # (the early launch arguments of the decode kernels made before a jit reads them, see amd_qwen._el_wait)
+    if amd_custom_kernels_supported(devs:=self.token_embd.weight.device): _el_dummy(devs)
     for g in ghcs:
       if g._wnorm is None:
         g._wnorm = g.norm["weight"].float().contiguous()

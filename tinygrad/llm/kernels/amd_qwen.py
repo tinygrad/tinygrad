@@ -373,8 +373,28 @@ def _prefetched(body:UOp, rng:UOp, last:UOp|int, params:tuple[UOp, ...]|None=Non
     stores.append(reg.after(cur)[0].store(t.substitute({rng: hole}).substitute({hole: (rng + 1).minimum(last)})))
   return body.substitute(repl), stores
 
+# (early launch, see AMDComputeQueue.el_producers) a producer adds 1 to a counter (its last argument) when a workgroup's stores are done, a
+# consumer launched with it (no barrier) loads its weights, then waits for the counter (its last argument: -the producer's workgroups at the
+# start, 0 when they're all done; the queue points it at a 0 if not launched so)
+def _el_signal(cnt:UOp, first:UOp, *stores:UOp) -> UOp:
+  fenced = _sys('__builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");', dtypes.void, *stores)
+  return _sys("if ({1}) __hip_atomic_fetch_add({0}, 1u, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);", dtypes.void,
+              cnt.after(UOp.group(fenced).barrier())[0], first)
+def _el_wait(cnt:UOp, first:UOp, dep:UOp) -> UOp:
+  # (a null counter: not launched early, no wait. else the first weight load waited for (the ones after it in flight: loaded before the wait),
+  # a lane of every wave polls the counter (coherent loads: the producer's stores are in the l2, this kernel's caches have no line of them))
+  return _sys("if ((unsigned long long)({0}) != 0ull) {{ asm volatile(\"\" :: \"v\"({2})); if ({1}) {{ "
+              "while (__hip_atomic_load({0}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) != 0u) __builtin_amdgcn_s_sleep(2); }} "
+              "__builtin_amdgcn_s_barrier(); }}", dtypes.void, cnt[0], first, dep)
+
+@functools.cache
+def _el_dummy(device:str|tuple[str, ...]) -> tuple[Tensor, Tensor]:
+  """the early launch arguments outside a queue that sets them: a producer's counter, a consumer's 0"""
+  return tuple(Tensor([0], dtype=dtypes.uint32, device=device).contiguous().realize() for _ in range(2))  # type: ignore[return-value]
+
 def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str, active:Callable|None=None,
-                   estimates:Estimates|None=None, multi:int=1, bundles:tuple[int, Callable]|None=None) -> UOp:
+                   estimates:Estimates|None=None, multi:int=1, bundles:tuple[int, Callable]|None=None,
+                   early:tuple[Callable, Callable, UOp]|None=None) -> UOp:
   # One wave per output/chunk of 32 groups; group neighboring rows to amortize workgroup scheduling. the waves of the chunks of an output
   # share the workgroup: they add up their sums in LDS
   # a wave serves 32//lanes outputs with `lanes` lanes each, whichever leaves fewer lanes idle. at most 16 waves in a workgroup: a wave sums
@@ -409,7 +429,16 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
   if bundles: tokens = [token_outputs[0] // out_features * multi + t for t in range(multi)]
   def dot(token:UOp, group:UOp, output:UOp=outputs[0]) -> UOp:
     return (group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32))
-  if active is None:
+  if early is not None and active is None and not bundles:
+    # (early: (wload(output, group) -> weights, wdot(token, group, weights, wait) -> the dot, the counter) the weights of the lane's groups
+    # loaded, the wait, then the activations)
+    wload, wdot, cnt = early
+    groups = [sub+(chunk*per+s)*lanes for s in range(per)]
+    ws = [wload(outputs[0], g.minimum(group_count-1)) for g in groups]
+    wait = _el_wait(cnt, wave.eq(0) & chunk.eq(0) & lane.eq(0), ws[0][0])
+    totals = [functools.reduce(lambda a, b: a + b, [(g < group_count).where(wdot(t, g.minimum(group_count-1), wl, wait), UOp.const(0, dtypes.float32))
+                                                    for g, wl in zip(groups, ws)]) for t in tokens]
+  elif active is None:
     totals = [functools.reduce(lambda a,s: a + dot(t, sub+(chunk*per+s)*lanes), range(1, per), dot(t, sub+chunk*per*lanes)) for t in tokens]
   else:
     # a data dependent loop: inactive tokens run it 0 times
@@ -610,7 +639,20 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
                                estimates=None if active is None else Estimates(2*weights, nbytes, nbytes))
   # a few tokens share the weight loads
   multi = int(out.shape[0]) if gate is None and xtoken is None and 1 < out.shape[0] <= DECODE_MULTI else 1
-  return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type], multi=multi)
+  early = None
+  if ggml_type == Q8_0 and gate is None and xtoken is None and grids:
+    def wload(output:UOp, group:UOp) -> list[UOp]:
+      base = (output*in_features//32 + group)*SMALL_BLOCK_QUANTS[Q8_0]
+      return [_quant_word(raw, base, UOp.const(0), i, Q8_0, None) for i in range(8)] + [_amd_load(raw[base])]
+    def wdot(token:UOp, group:UOp, w:list[UOp], wait:UOp) -> UOp:
+      xwords = _amd_load(xq.after(wait)[token, group, 0], 8)
+      dot = UOp.const(0, dtypes.int32)
+      for i in range(8): dot = _amd_dp4a(w[i], xwords[i], dot)
+      return dot.float() * _half(w[8]) * xd.after(wait)[token, group]
+    early = (wload, wdot, grids[-1])
+    from tinygrad.runtime.ops_amd import AMDComputeQueue
+    AMDComputeQueue.el_consumers.add(name+QUANT_NAMES[ggml_type])
+  return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type], multi=multi, early=early)
 
 def _is_buffer(x:Tensor) -> bool:
   # x is a kernel's output (its views): every load of it in a kernel is a load, not a computation (each element is read by many outputs)
@@ -1310,7 +1352,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     srcs = (x.cast(dtypes.float16).contiguous(), *extra)
   else:
     fxn = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type)
-    srcs = (*(xq or q8_quantize(x, tokens, in_features))[:3], *extra)
+    # (Q8_0: launched early, its counter the last argument, see _el_wait)
+    el = (_el_dummy(x.device)[1],) if layer.ggml_type == Q8_0 and not extra and EARLY else ()
+    srcs = (*(xq or q8_quantize(x, tokens, in_features))[:3], *extra, *el)
   # split: x has its rows split over the devices (the weight is whole on every device), so has the output
   out_axis = 0 if split and layer.shard_axis is None else None if layer.shard_axis is None else 1-layer.shard_axis
   # half_out: q8_gemm stores the sums in half (the others in float, then cast)
@@ -1343,6 +1387,7 @@ def _sys(fmt:str, dtype:DType, *src:UOp) -> UOp: return _cfn(False, src=src, arg
 # of the others: two parities. Each pool has a fixed workgroup count so all its epoch counters move together across varying payload sizes.
 
 FLAG_AR_MAXN = 1 << 20  # words (two half values or one float32 each)
+EARLY = getenv("EARLY", 1)
 
 def flag_ar_groups(n:int) -> int: return 4 if n <= 8192 else 16 if n <= 65536 else 64
 
@@ -3179,7 +3224,7 @@ def _slot_gather_kernel(dst:UOp, pool:UOp, slots:UOp, starts:UOp, S:int) -> UOp:
 def _sigmoid(x:UOp) -> UOp: return ((-x * LOG2E).exp2() + 1).reciprocal()
 
 @functools.cache
-def _ghc_pre_kernel(xn:UOp, q:UOp, scale:UOp, xsum:UOp, part:UOp, xs:UOp, w:UOp, winj:UOp, *, count:int, D:int, eps:float) -> UOp:
+def _ghc_pre_kernel(xn:UOp, q:UOp, scale:UOp, xsum:UOp, part:UOp, xs:UOp, w:UOp, winj:UOp, *el:UOp, count:int, D:int, eps:float) -> UOp:
   # a workgroup a (token, stream) of xs (T, count*D): its rms norm (times w) in xn, quantized in groups of 32 (q, scale, xsum: q8_quantize's),
   # and its inject partials part[token, stream, j] = winj[j, stream's] . xn of the stream
   NJ, W = cast(int, winj.shape[0]), 8
@@ -3202,6 +3247,10 @@ def _ghc_pre_kernel(xn:UOp, q:UOp, scale:UOp, xsum:UOp, part:UOp, xs:UOp, w:UOp,
   red2 = red.after(UOp.group(*ps).barrier())
   stores += [part[tok, st, (UOp.const(j, dtypes.weakint)).valid(t.eq(0))].store(
                functools.reduce(lambda a,b: a+b, [red2[1+j, i].load() for i in range(W)])) for j in range(NJ)]
+  if el:
+    from tinygrad.runtime.ops_amd import AMDComputeQueue
+    AMDComputeQueue.el_producers.add("ghc_pre")
+    stores = [_el_signal(el[0], t.eq(0), *stores)]
   return UOp.group(*stores).end(wg, wave, lane).sink(arg=KernelInfo(name="ghc_pre", opts_to_apply=()))
 
 @functools.cache
@@ -3262,7 +3311,7 @@ def ghc_pre(xs:Tensor, w:Tensor, winj:Tensor, count:int, eps:float) -> tuple[Ten
           Tensor.empty(T, G, dtype=dtypes.float32, device=xs.device), Tensor.empty(T, G, 2, dtype=dtypes.float32, device=xs.device),
           Tensor.empty(T, count, NJ, dtype=dtypes.float32, device=xs.device)]
   res = Tensor.custom_kernel(*outs, xs.float().contiguous(), w.float().contiguous(), winj.float().contiguous(),
-                             fxn=functools.partial(_ghc_pre_kernel, count=count, D=D, eps=eps))
+                             *((_el_dummy(xs.device)[0],) if EARLY else ()), fxn=functools.partial(_ghc_pre_kernel, count=count, D=D, eps=eps))
   return res[0], (res[1], res[2], res[3]), res[4]
 
 @functools.cache
@@ -3318,8 +3367,8 @@ def ghc_post(lo:Tensor, up_raw:Tensor, xn:Tensor, part:Tensor, count:int) -> tup
   return res[0], res[1]
 
 @functools.cache
-def _ghc_decode_mix_kernel(mixed:UOp, inj:UOp, mq:UOp, md:UOp, ms:UOp, lo:UOp, raw:UOp, xn:UOp, part:UOp,
-                           *, count:int, D:int, R:int) -> UOp:
+def _ghc_decode_mix_kernel(mixed:UOp, inj:UOp, mq:UOp, md:UOp, ms:UOp, lo:UOp, raw:UOp, xn:UOp, part:UOp, *el:UOp,
+                           count:int, D:int, R:int) -> UOp:
   # Quantize silu(lo/count) in LDS, share Q8 up weights across the rows, and emit the mix plus its next-layer Q8 representation.
   T, NJ, NB = int(lo.shape[0]), int(part.shape[2]), R//32
   assert count == 4 and R % 32 == 0 and 0 < NB <= 16 and D % 32 == 0 and 1 < T <= 8 and T*NJ <= 32
@@ -3369,6 +3418,11 @@ def _ghc_decode_mix_kernel(mixed:UOp, inj:UOp, mq:UOp, md:UOp, ms:UOp, lo:UOp, r
   valid = blk.eq(0) & (lane < T*NJ)
   it, j = (lane//NJ).valid(valid), lane % NJ
   stores.append(inj[it, j].store(sum(part.after(only)[it, s, j].load() for s in range(count))*(1/count)))
+  if el:
+    from tinygrad.runtime.ops_amd import AMDComputeQueue
+    AMDComputeQueue.el_producers.add("ghc_decode_mix")
+    return UOp.group(_el_signal(el[0], wave.eq(0) & lane.eq(0), UOp.group(*stores).end(only))).end(blk, wave, lane) \
+      .sink(arg=KernelInfo(name="ghc_decode_mix", opts_to_apply=()))
   return UOp.group(*stores).end(only, blk, wave, lane).sink(arg=KernelInfo(name="ghc_decode_mix", opts_to_apply=()))
 
 def ghc_decode_mix(lo:Tensor, up_raw:Tensor, xn:Tensor, part:Tensor, count:int) -> tuple[Tensor, Tensor]:
@@ -3377,7 +3431,7 @@ def ghc_decode_mix(lo:Tensor, up_raw:Tensor, xn:Tensor, part:Tensor, count:int) 
   outs = (Tensor.empty(T, D, dtype=dtypes.float32, device=lo.device), Tensor.empty(T, NJ, dtype=dtypes.float32, device=lo.device),
           Tensor.empty(T, D//32, 8, dtype=dtypes.uint32, device=lo.device), Tensor.empty(T, D//32, dtype=dtypes.float32, device=lo.device),
           Tensor.empty(T, D//32, 2, dtype=dtypes.float32, device=lo.device))
-  ret = Tensor.custom_kernel(*outs, lo.float().contiguous(), up_raw, xn, part,
+  ret = Tensor.custom_kernel(*outs, lo.float().contiguous(), up_raw, xn, part, *((_el_dummy(lo.device)[0],) if EARLY else ()),
                             fxn=functools.partial(_ghc_decode_mix_kernel, count=count, D=D, R=R))[:5]
   q8_quantize_known(ret[0], T, D, False, tuple(ret[2:]))
   return ret[0], ret[1]
