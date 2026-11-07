@@ -672,7 +672,8 @@ class Transformer:
     self._cached_tokens: list[int] = []
     self.jits:dict = {}
 
-  def forward(self, tokens:Tensor, start_pos:StartPos, temperature:Tensor) -> Tensor:
+  # Positions are separate arguments so TinyJit can rebind each one.
+  def forward(self, tokens:Tensor, temperature:Tensor, *start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     elif self.config.attn_res_block_size: x = x.unsqueeze(2)
@@ -686,15 +687,9 @@ class Transformer:
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:StartPos, temperature:Tensor) -> Tensor:
-    # One position is shared by the batch; otherwise each fixed cache row has its own position.
     assert len(start_pos) in (1, tokens.shape[0]), "expected one shared position or one position per batch row"
-    assert len(start_pos) == 1 or not self.has_recurrent_block, "independent positions are not supported for recurrent blocks"
-    assert len(start_pos) == 1 or self.config.ple is None, "independent positions are not supported for per-layer embeddings"
-    key = (resolve(tokens.shape[1] != 1), len(start_pos))  # prefill/decode and shared/per-row positions
-    if key not in self.jits:
-      # Pass positions as separate arguments so TinyJit rebinds every row's variable on replay.
-      def forward(tokens:Tensor, temperature:Tensor, *positions:int|UOp) -> Tensor: return self.forward(tokens, positions, temperature)
-      self.jits[key] = TinyJit(forward)
+    key = (resolve(tokens.shape[1] != 1), len(start_pos))
+    if key not in self.jits: self.jits[key] = TinyJit(self.forward)
     positions = tuple(UOp.variable(f"start_pos_{b}", 0, self.max_context-1).bind(p) if isinstance(p, int) else p
                       for b, p in enumerate(start_pos))
     return self.jits[key](tokens.contiguous(), temperature, *positions)
