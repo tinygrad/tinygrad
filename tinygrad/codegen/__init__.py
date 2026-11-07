@@ -23,7 +23,7 @@ from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.prepare import pm_mops
-from tinygrad.schedule.indexing import _stack_select
+from tinygrad.schedule.indexing import _stack_select, apply_movement_op
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
@@ -114,13 +114,19 @@ pm_expand_broadcast = pm_wmma_add+PatternMatcher([
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
 
+def index_lane(x:UOp, idx:tuple[UOp, ...]) -> UOp:
+  # x.index(*idx) with the index pushed through the movement ops, like _mop_index in pm_mops
+  while x.op in GroupOp.Movement and len(idx) == len(x.shape):
+    x, idx = x.src[0], apply_movement_op(x.op, x.src[0].shape, x.marg, idx)
+  return x.index(*idx)
+
 def do_devectorize(b:UOp):
   if b.shape == (): return None
   # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
   if not all(x.shape == b.shape or x.base.is_invalid for x in b.src): return None
   src = []
   for idx_c in itertools.product(*[[UOp.const(i) for i in range(x)] for x in b.shape]):
-    src.append(b.replace(src=tuple(x.base if x.base.is_invalid else x.index(*idx_c) for x in b.src)))
+    src.append(b.replace(src=tuple(x.base if x.base.is_invalid else index_lane(x, idx_c) for x in b.src)))
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
