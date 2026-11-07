@@ -1064,6 +1064,10 @@ class AMDDevice(Compiled):
   @functools.cached_property
   def compute_queues(self) -> dict[int, AMDQueueDesc]: return {}
 
+  def compute_queue_count(self) -> int:
+    """the compute queues compute_queue_n makes (am: two a MEC pipe, AM_MEC_PIPES of them)"""
+    return 2 * self.iface.dev_impl.gfx.mec_pipes if self.is_am() else 8
+
   def compute_queue_n(self, idx:int) -> AMDQueueDesc:
     """compute queue idx (am: on MEC pipe idx, they run concurrently)"""
     if idx not in self.compute_queues: self.compute_queues[idx] = self._create_compute_queue(idx)

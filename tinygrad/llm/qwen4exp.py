@@ -5,6 +5,7 @@ from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.jit import capture_parallel, _TinyJit
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
+from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES
 from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custom_kernels_supported, find_packed, moe_linear, q8_linear, \
   q8_quantize_cache_clear, moe_route, moe_grouped_linear, partial_sum, fuse_gate_up, kda_decode, pool_index_rows, slot_scatter, \
   slot_gather, moe_combine, token_sharded, shard_rows, reduce_scatter, all_gather, all_gather_q8, sharded_argmax, skinny_matmul, kda_conv, \
@@ -2560,6 +2561,8 @@ class Transformer:
     pads = {k: sizes[k] for k in sizes if sizes[k] != entries[k][1][shard_map[k]]}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
     _open_devices(devices)
+    # (the micro batches on compute queues of their own if the devices have four)
+    EXTRA_QUEUES[0] = all(getattr(Device[d], "compute_queue_count", lambda: 0)() >= 4 for d in devices)
     # gate and up experts of the same format load as one (fuse_gate_up)
     # (a pair in different files of a split gguf isn't: a fused read is of the gate's file. prepare fuses it on the devices)
     def file_of(data:Tensor) -> str|None:

@@ -1826,24 +1826,23 @@ def _ring_rs_q8_kernel(out:UOp, p:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, f
   assert prev is not None
   return UOp.group(prev, finish(prev)).end(wg, warp, lane).sink(arg=KernelInfo(name=f"ring_reduce_scatter_q8_{size}", opts_to_apply=()))
 
+# the micro batches' calls on compute queues of their own (1.., the first's 0), their collectives on two more (2, 3): set if the devices have
+# them (AM_MEC_PIPES=2 at least on am), else all on queue 0 (the copies of one micro batch don't run with the kernels of the other)
+EXTRA_QUEUES = [False]
 def ring_queue() -> int:
   """
-  RING_QUEUE: the compute queue of the ring collectives (0: the calls' own), a queue of their own for the micro batches on queues of theirs (a
-  kernel that spins on its peers holds its queue and its waves: two at once on a device (one a batch) can wait on each other through the
-  devices' queues. on one queue they run one at a time, in the same order on every device). it needs AM_MEC_PIPES past it. TODO: it still
-  hangs (a flag the previous device wrote isn't seen), the ring is off for micro batches on queues without it
+  the compute queue of the ring collectives (0: the calls' own), a queue of their own for the micro batches on queues of theirs (a kernel that
+  spins on its peers holds its queue and its waves: two at once on a device (one a batch) can wait on each other through the devices' queues.
+  on one queue they run one at a time, in the same order on every device)
   """
-  return 2
-
-def _queue_list(name:str) -> list[int]: return [int(v) for v in str(getenv(name, "")).split(",") if v != ""]
+  return 2 if EXTRA_QUEUES[0] else 0
 def mb_queue(i:int) -> int:
-  """the compute queue of micro batch i (MB_QUEUE_OF: a list, else i)"""
-  return qs[i] if i < len(qs:=_queue_list("MB_QUEUE_OF")) else i
+  """the compute queue of micro batch i"""
+  return i if EXTRA_QUEUES[0] else 0
 RING_QUEUE_ON = [False]  # (the collectives on queues of their own only in the micro batches' prefill: a step's on its queue)
 def ring_queue_of(lane:int, any_time:bool=False) -> int:
-  """the queue of a lane's collectives (RING_QUEUES: a list a micro batch, else RING_QUEUE (+ the lane, RING_QUEUE_LANES)), 0: the calls' own"""
+  """the queue of a lane's collectives (the ring's queue + the lane), 0: the calls' own"""
   if not (any_time or RING_QUEUE_ON[0]): return 0
-  if (qs:=_queue_list("RING_QUEUES")): return qs[lane % len(qs)]
   return ring_queue() + (lane if ring_queue() else 0)
 
 def _comm_queued(outs:list[Tensor]) -> list[Tensor]:

@@ -16,6 +16,7 @@ def _can_plan(b:UOp, held_bufs:set[UOp]) -> bool:
 
 LaneKey = tuple[str, int, int]
 LARGE_BUFFER = 1 << 20  # buffers placed before the others (see memory_plan_rewrite)
+MEM_LANES = getenv("MEM_LANES", 2)
 
 def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None, arenas:dict[LaneKey, UOp]|None=None) -> UOp:
   # arenas: the arena of every lane, shared with other linears that never run at the same time (e.g. the jits of a model): an arena that is big
@@ -30,12 +31,9 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None, arenas:dict[La
   queues:dict[UOp, set[int]] = defaultdict(set)
   for i, si in enumerate(linear.src):
     si_bufs = [b for src in si.src[1:] for b in _collect_bufs(src) if _can_plan(b, held_bufs)]
-    q = int(si.arg.queue.split(":")[1]) if isinstance(si.arg, CallInfo) and si.arg.queue else 0
-    # (MEM_LANES: the queues of a lane (queue % lanes) run its calls in order: e.g. a micro batch's compute queue and its collectives' queue. a
-    # buffer of one lane is reused as the others, its queues wait for each other)
-    if (nl:=getenv("MEM_LANES", 0)): q %= nl
-    # (MEM_LANE_OF: the lane of every queue, a list)
-    if (lane_of:=[int(v) for v in str(getenv("MEM_LANE_OF", "")).split(",") if v != ""]) and q < len(lane_of): q = lane_of[q]
+    # (the queues of a lane (queue % MEM_LANES) run its calls in order: e.g. a micro batch's compute queue and its collectives' queue (queue
+    # + 2, see qwen4exp's micro batches). a buffer of one lane is reused as the others, its queues wait for each other)
+    q = int(si.arg.queue.split(":")[1]) % MEM_LANES if isinstance(si.arg, CallInfo) and si.arg.queue else 0
     for b in si_bufs:
       if b not in first_appearance: first_appearance[b] = i
       last_appearance[b] = i
@@ -59,10 +57,9 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None, arenas:dict[La
   # allocator fragments the arena: its size can be twice the memory live at once). the many small ones are suballocated after them
   start = {b: first_appearance[b] for b in first_appearance}
   end = {b: last_appearance[b] + 1 + buf_hold.get(b, 0) for b in first_appearance}
-  # (a buffer of the calls of more than one queue: in a lane of its own. MEM_SHARED_HOLD: its memory none's but its own (its calls' order in the
-  # linear isn't their order in time). else reused as the others: a call that writes its memory waits for the calls before it that read it
-  # (the queues' waits, see DepsTracker), a wait of a later call for an earlier one)
-  shared = {b for b in first_appearance if _key(b)[2] == -1} if getenv("MEM_SHARED_HOLD", 1) else set()
+  # (a buffer of the calls of more than one queue: in a lane of its own, its memory none's but its own (its calls' order in the linear isn't
+  # their order in time))
+  shared = {b for b in first_appearance if _key(b)[2] == -1}
   for b in shared: start[b], end[b] = 0, len(linear.src) + 1
   offsets:dict[UOp, int] = {}
   large_peak:dict[LaneKey, int] = defaultdict(int)
