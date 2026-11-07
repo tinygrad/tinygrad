@@ -10,13 +10,14 @@ from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 
 GGML_BLOCK_SIZE, Q8_GROUP_SIZE = 256, 32
 Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q2_0 = 8, 10, 11, 12, 13, 14, 42
-IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS = 17, 18, 20, 21, 22, 23
-QUANT_SIZES = {Q8_0: 272, Q2_K: 84, Q3_K: 110, Q4_K: 144, Q5_K: 176, Q6_K: 210, IQ2_XS: 74,
-               IQ3_XXS: 98, IQ4_NL: 144, IQ3_S: 110, IQ2_S: 82, IQ4_XS: 136, Q2_0: 72}  # bytes per 256 weights
-HALFWORD_QUANTS = (Q8_0, Q6_K, Q2_K, Q3_K, IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S, Q2_0)
+IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS = 16, 17, 18, 19, 20, 21, 22, 23
+QUANT_SIZES = {Q8_0: 272, Q2_K: 84, Q3_K: 110, Q4_K: 144, Q5_K: 176, Q6_K: 210, IQ2_XXS: 66, IQ2_XS: 74,
+               IQ3_XXS: 98, IQ1_S: 50, IQ4_NL: 144, IQ3_S: 110, IQ2_S: 82, IQ4_XS: 136, Q2_0: 72}  # bytes per 256 weights
+HALFWORD_QUANTS = (Q8_0, Q6_K, Q2_K, Q3_K, IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S, Q2_0)
 SMALL_BLOCK_QUANTS = {Q8_0: (32, 17), IQ4_NL: (32, 9), Q2_0: (64, 9)}  # weights, halfwords per block
-QUANT_NAMES = {Q8_0: "q8_0", Q2_K: "q2_k", Q3_K: "q3_k", Q4_K: "q4_k", Q5_K: "q5_k", Q6_K: "q6", IQ4_XS: "iq4_xs",
-               IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ4_NL: "iq4_nl", IQ3_S: "iq3_s", IQ2_S: "iq2_s", Q2_0: "q2_0"}
+GRID_QUANTS = (IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ3_S, IQ2_S)
+QUANT_NAMES = {Q8_0: "q8_0", Q2_K: "q2_k", Q3_K: "q3_k", Q4_K: "q4_k", Q5_K: "q5_k", Q6_K: "q6", IQ4_XS: "iq4_xs", IQ2_XXS: "iq2_xxs",
+               IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ1_S: "iq1_s", IQ4_NL: "iq4_nl", IQ3_S: "iq3_s", IQ2_S: "iq2_s", Q2_0: "q2_0"}
 
 def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
   """(ggml type, packed words) if `decoded` is exactly the dequantization of packed ggml weights, rows of in_features"""
@@ -140,7 +141,7 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
 
 def _iq_grid(device:str|tuple[str, ...]|None, ggml_type:int) -> Tensor:
   from tinygrad.runtime.autogen import ggml_common as ggml
-  grid, words = {IQ2_XS: (ggml.iq2xs_grid, 2), IQ2_S: (ggml.iq2s_grid, 2),
+  grid, words = {IQ2_XXS: (ggml.iq2xxs_grid, 2), IQ2_XS: (ggml.iq2xs_grid, 2), IQ2_S: (ggml.iq2s_grid, 2), IQ1_S: (ggml.iq1s_grid, 2),
                  IQ3_XXS: (ggml.iq3xxs_grid, 1), IQ3_S: (ggml.iq3s_grid, 1)}[ggml_type]
   return Tensor.const(tuple((v >> (32*i)) & 0xffffffff for v in grid for i in range(words)),
                       dtypes.uint32).to(device, force=True)
@@ -183,13 +184,17 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
     packed = word(2+(i%4)*4) if ggml_type == IQ4_NL else _amd_load(raw[base+2+subgroup*4+i%4])
     return _iq4_bytes(packed, 4*(i//4))
   assert grid is not None
-  grid_words = 2 if ggml_type in (IQ2_XS, IQ2_S) else 1
-  if ggml_type in (IQ3_S, IQ3_XXS):
-    index = byte(2+subgroup*8+i)
+  grid_words = 2 if ggml_type in (IQ2_XS, IQ2_S, IQ2_XXS, IQ1_S) else 1
+  if ggml_type == IQ1_S:
+    # the grid bytes are -1, 0 or 1 already, the shift and the delta of a group are in its qh halfword
+    qh = raw[base+17+subgroup].cast(dtypes.uint32)
+    return grid[(byte(2+subgroup*4+i//2) | ((qh >> (3*(i//2))) & 7) << 8)*2+i%2].load()
+  if ggml_type in (IQ3_S, IQ3_XXS, IQ2_XXS):
+    index = byte(2+subgroup*8+i//grid_words)
     if ggml_type == IQ3_S:
       index |= ((byte(66+subgroup) >> i) & 1) << 8
       signs = byte(74+subgroup*4+i//2)
-    else: signs = _iq_even_signs((word(66+subgroup*4) >> (7*(i//2))) & 127)
+    else: signs = _iq_even_signs((word(66+subgroup*4 if ggml_type == IQ3_XXS else 6+subgroup*8) >> (7*(i//2))) & 127)
   elif ggml_type == IQ2_XS:
     packed = raw[base+1+subgroup*4+i//2].cast(dtypes.uint32)
     index, signs = packed & 511, _iq_even_signs(packed >> 9)
@@ -250,10 +255,15 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
     elif ggml_type in (IQ2_XS, IQ2_S):
       scales = byte((66 if ggml_type == IQ2_XS else 74)+subgroup)
       total = sum(dots[h].float() * (((scales >> (h*4)) & 15).float()+0.5) for h in range(2)) * 0.25 * _half(raw[base])
+    elif ggml_type == IQ1_S:
+      qh = raw[base+17+subgroup].cast(dtypes.uint32)
+      delta = (qh >> 15).eq(0).where(0.125, -0.125)
+      total = ((dots[0]+dots[1]).float() + (xs[token, group, 0]+xs[token, group, 1])*delta) * (((qh >> 12) & 7)*2+1).float() * _half(raw[base])
     else:
       total = (dots[0]+dots[1]).float() * _half(raw[base])
       if ggml_type == IQ3_S: total *= (1+2*((byte(106+subgroup//2) >> ((subgroup%2)*4)) & 15)).float()
       if ggml_type == IQ3_XXS: total *= ((word(66+subgroup*4) >> 28).float()+0.5)*0.5
+      if ggml_type == IQ2_XXS: total *= ((word(6+subgroup*8) >> 28).float()+0.5)*0.25
     return total * xd[token, group]
   return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type])
 
@@ -282,7 +292,7 @@ def moe_linear(layer:ExpertWeights, sel:Tensor, x:Tensor) -> Tensor:
   out = Tensor.empty(ndev*B*T*slots, global_out, splits*((in_features+1023)//1024), dtype=dtypes.float32, device=x.device, axis=layer.weight.uop.axis)
   fxn = functools.partial(_moe_decode_kernel, out_features=local_out, in_features=in_features, ggml_type=ggml_type, x_share=slots//x_slots,
                           cdna=_is_cdna(x.device), ndev=ndev)
-  extra = (_iq_grid(x.device, ggml_type),) if ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
+  extra = (_iq_grid(x.device, ggml_type),) if ggml_type in GRID_QUANTS else ()
   result = Tensor.custom_kernel(out, layer.packed, xq, xd, xs, sel.cast(dtypes.int32).flatten(), *extra, fxn=fxn)[0].sum(-1)
   return result.reshape(ndev, B, T, slots, global_out) if ndev > 1 else result.reshape(B, T, slots, global_out)
 
@@ -416,6 +426,11 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
         scale *= (((sc >> (half*4)) & 15).float()+0.5)*0.25
       elif ggml_type == IQ3_S: scale *= (1+2*((byte(106+subgroup//2) >> ((subgroup%2)*4)) & 15)).float()
       elif ggml_type == IQ3_XXS: scale *= ((_load_u32(raw, base, 66+subgroup*4) >> 28).float()+0.5)*0.5
+      elif ggml_type == IQ2_XXS: scale *= ((_load_u32(raw, base, 6+subgroup*8) >> 28).float()+0.5)*0.25
+      elif ggml_type == IQ1_S:
+        qh = raw[base+17+subgroup].cast(dtypes.uint32)
+        scale *= (((qh >> 12) & 7)*2+1).float()
+        minimum = (qh >> 15).eq(0).where(-0.125, 0.125)*scale
       elif ggml_type == Q2_0: zero = 1
     words = tuple(_quant_word(raw, base, subgroup, half*4+i, ggml_type, grid) for i in word_indices)
     return tuple((((word >> (b*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float()-zero)*scale-minimum).cast(dtypes.half)
@@ -431,7 +446,7 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   assert (layer.shard_axis == 1) == (splits > 1), f"input features split over {splits} devices, weight split on axis {layer.shard_axis}"
   out_shape:tuple[int, ...] = (splits*tokens, out_features)
   fxn:Callable[..., UOp]
-  extra = (_iq_grid(x.device, layer.ggml_type),) if layer.ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
+  extra = (_iq_grid(x.device, layer.ggml_type),) if layer.ggml_type in GRID_QUANTS else ()
   # the kernels write the output features of their own device
   local_out = out_features // len(dev) if isinstance(dev:=layer.weight.device, tuple) and layer.shard_axis == 0 else out_features
   cdna = _is_cdna(x.device)
