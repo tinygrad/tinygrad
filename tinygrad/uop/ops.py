@@ -207,8 +207,16 @@ class recursive_property:
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
-    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__, enter_calls=True): node.__dict__[self.nm] = self.fxn(node)
-    return x.__dict__[self.nm]
+    # NOTE: this is a non-data descriptor, so it's only called if the value isn't in x.__dict__
+    # compute it in post order (srcs left to right) for x and all the srcs that don't have it yet
+    nm, stack = self.nm, [x]
+    while stack:
+      if nm in (d:=(node:=stack[-1]).__dict__): stack.pop()
+      elif missing:=[s for s in node.src if nm not in s.__dict__]: stack.extend(reversed(missing))
+      else:
+        d[nm] = self.fxn(node)
+        stack.pop()
+    return x.__dict__[nm]
 
 class _UOpTuple(tuple):
   # UOps are hash-consed, so structurally identical UOps are the same object and equality can be identity.
