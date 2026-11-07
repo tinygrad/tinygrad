@@ -6,8 +6,10 @@ from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, ExpertWeights, fp8_matmul, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, GGUFPackedTable, _GGML_QUANT
 from tinygrad.llm.hf import hf_load
-from tinygrad.uop.ops import resolve
+from tinygrad.uop.ops import resolve, smax, ssimplify
 from tinygrad.helpers import unwrap, round_up, get_child
+
+StartPos = tuple[int|UOp, ...]
 
 class ExpertGating(enum.IntEnum):
   SOFTMAX = 1
@@ -46,9 +48,33 @@ def gated_activation(gate:Tensor, up:Tensor, config:TransformerConfig) -> Tensor
 def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False) -> Tensor:
   assert x.shape[-1] % 2 == 0
   if interleaved: x = x.rearrange("b h t (d two) -> b h t (two d)", two=2)
-  cos, sin = freqs_cis.reshape(1, 1, x.shape[2], -1).chunk(2, dim=-1)
+  cos, sin = freqs_cis.unsqueeze(-3).chunk(2, dim=-1)
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
+
+def _update_cache(cache:Tensor, value:Tensor, start_pos:StartPos, dim:int) -> Tensor:
+  def store(c:Tensor, v:Tensor, pos:int|UOp) -> UOp:
+    return c.shrink(tuple((pos, pos+v.shape[dim]) if i == dim else None for i in range(c.ndim))).uop.store(v.cast(c.dtype).uop)
+  stores = ([store(cache, value, start_pos[0])] if len(start_pos) == 1 else [store(cache[b:b+1], value[b:b+1], p) for b, p in enumerate(start_pos)])
+  return Tensor(cache.uop.after(*stores))
+
+def _cache_prefix(cache:Tensor, start_pos:StartPos, n_tokens:int|UOp, dim:int) -> Tensor:
+  end = ssimplify(smax(start_pos) + n_tokens)
+  cache = cache.shrink(tuple((0, end) if i == dim else None for i in range(cache.ndim)))
+  if len(start_pos) > 1:
+    keys = Tensor.arange(end).reshape(tuple(end if i == dim else 1 for i in range(cache.ndim)))
+    ends = (Tensor.stack(*(Tensor(p) for p in start_pos)) + Tensor(n_tokens)).reshape(len(start_pos), *((1,) * (cache.ndim-1)))
+    cache = (keys < ends).where(cache, 0)  # future entries can be uninitialized, including NaNs
+  return cache
+
+def _causal_mask(x:Tensor, start_pos:StartPos, window:int=0) -> Tensor|None:
+  T = x.shape[1]
+  if len(start_pos) == 1 and not resolve(T != 1) and not window: return None
+  q_pos = Tensor.stack(*(Tensor(p) for p in start_pos)).reshape(-1, 1, 1, 1) + Tensor.arange(T).reshape(1, 1, T, 1)
+  k_pos = Tensor.arange(ssimplify(smax(start_pos) + T)).reshape(1, 1, 1, -1)
+  valid = k_pos <= q_pos
+  if window: valid = valid & (k_pos > q_pos-window)
+  return valid.where(0.0, -math.inf).cast(x.dtype)
 
 def permute_rope(w:Tensor, n_heads:int, rope_dim:int) -> Tensor:
   x = w.reshape(n_heads, w.shape[0]//n_heads, -1)
@@ -283,17 +309,17 @@ class FFNBlock:
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
   def _init_state(self, x:Tensor): raise NotImplementedError
-  def _attention(self, x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None=None) -> Tensor: raise NotImplementedError
-  def _indexer_mask(self, x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None) -> Tensor|None:
+  def _attention(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None=None) -> Tensor: raise NotImplementedError
+  def _indexer_mask(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None) -> Tensor|None:
     # a full indexer layer selects the top-k tokens for itself and the shared layers after it (MLATransformerBlock)
     return idx_mask
 
-  def __call__(self, x: Tensor, start_pos: int|UOp, idx_mask: Tensor|None=None):
+  def __call__(self, x: Tensor, start_pos: StartPos, idx_mask: Tensor|None=None):
     self._init_state(x)
     if hasattr(self, 'ple'): self.ple._init_state(x)
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
-    def _run(x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None):
+    def _run(x:Tensor, start_pos:StartPos, idx_mask:Tensor|None):
       if hasattr(self, 'ple'): x = x + self.ple(x, start_pos)  # (B, T, hc, D)
       def attend(h:Tensor) -> tuple[Tensor, Tensor|None]:
         h = self.attn_norm(h)
@@ -324,7 +350,7 @@ class TransformerBlock(FFNBlock):
     if config.attn_sinks: self.attn_sinks = {"weight": Tensor.zeros(config.n_heads)}
     self.indexer = Indexer(config) if config.indexer else None
 
-  def _attention(self, x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None=None) -> Tensor:
+  def _attention(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None=None) -> Tensor:
     q, k, v = self.attn_q(x), self.attn_k(x), self.attn_v(x)
     if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
@@ -337,41 +363,32 @@ class TransformerBlock(FFNBlock):
     v = v.reshape(B, T, self.config.n_kv_heads, self.config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     if self.config.qk_norm == self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
-    q = apply_rope(q[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(q[..., self.config.rope_dim:], dim=-1)
-    k = apply_rope(k[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(k[..., self.config.rope_dim:], dim=-1)
+    freqs = Tensor.stack(*(self.freqs_cis[p:p+T] for p in start_pos))
+    q = apply_rope(q[..., :self.config.rope_dim], freqs).cat(q[..., self.config.rope_dim:], dim=-1)
+    k = apply_rope(k[..., :self.config.rope_dim], freqs).cat(k[..., self.config.rope_dim:], dim=-1)
 
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
-    store = self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).cast(self.cache_kv.dtype).uop)
-    assigned_kv = Tensor(self.cache_kv.uop.after(store))
+    assigned_kv = _update_cache(self.cache_kv.transpose(0, 1), Tensor.stack(k, v).transpose(0, 1), start_pos, 3)
     # on RDNA3/4, hybrid models use custom flash attention kernels on the KV cache
-    if idx_mask is None and amd_custom_kernels_supported(x.device) and self.config.ssm is not None:
-      attn = flash_attention(q, assigned_kv, start_pos+T)
+    if  idx_mask is None and amd_custom_kernels_supported(x.device) and self.config.ssm is not None and len(start_pos) == 1:
+      attn = flash_attention(q, assigned_kv.transpose(0, 1), start_pos[0]+T)
       attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
       return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
-    k = assigned_kv[0, :, :, 0:start_pos+T, :]
-    v = assigned_kv[1, :, :, 0:start_pos+T, :]
-
-    #self.cache_kv[:, :, :, start_pos:start_pos+T, :].assign(Tensor.stack(k, v))
-    #k = self.cache_kv[0, :, :, 0:start_pos+T, :]
-    #v = self.cache_kv[1, :, :, 0:start_pos+T, :]
-
-    # NOTE: this mask is causal_lower_right, not the causal_upper_left generated by is_casual = True
-    # TODO: this if statement should be removed and it shouldn't generate extra kernels
-    mask, window = None, self.config.sliding_window
-    if idx_mask is not None: mask = idx_mask.repeat_interleave(self.config.n_heads // int(idx_mask.shape[1]), dim=1)
-    elif resolve(T != 1) or window:
-      mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, buffer=False)
-      mask = mask.triu(start_pos+1) + mask.tril(start_pos-window) if window else mask.triu(start_pos+1)
+    assigned_kv = _cache_prefix(assigned_kv, start_pos, T, 3).transpose(0, 1)
+    k, v = assigned_kv[0], assigned_kv[1]
+    mask = (idx_mask.repeat_interleave(self.config.n_heads // int(idx_mask.shape[1]), dim=1) if idx_mask is not None else
+            _causal_mask(x, start_pos, self.config.sliding_window))
     if hasattr(self, 'attn_sinks'):
+      S = k.shape[-2]
       k, v = k.cat(k[..., :1, :].const_like(0), dim=-2), v.cat(v[..., :1, :].const_like(0), dim=-2)
       sink_col = self.attn_sinks["weight"].reshape(1, -1, 1, 1).expand(1, self.config.n_heads, T, 1)
-      if mask is None: mask = Tensor.zeros(1, 1, T, start_pos+T, dtype=x.dtype, buffer=False)
-      mask = mask.expand(1, self.config.n_heads, T, start_pos+T).cat(sink_col, dim=-1)
+      if mask is None: mask = Tensor.zeros(1, 1, T, S, dtype=x.dtype, buffer=False)
+      mask = mask.expand(B, self.config.n_heads, T, S).cat(sink_col.expand(B, -1, -1, -1), dim=-1)
     attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
     return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
 
-  def _indexer_mask(self, x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None) -> Tensor|None:
+  def _indexer_mask(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None) -> Tensor|None:
     if self.indexer is None or self.config.max_context <= self.indexer.idx.top_k: return idx_mask
     return self.indexer(x, x, start_pos, self.freqs_cis)
 
@@ -407,12 +424,14 @@ class PLELayer:
       ids.append([hashes[j*(n-1)//len(ple.vocab_sizes)] % v + o for j,(v,o) in enumerate(zip(ple.vocab_sizes, offsets))])
     self.table.write(start_pos, ids, self.max_context+chunk_size)
 
-  def __call__(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+  def __call__(self, x:Tensor, start_pos:StartPos) -> Tensor:
+    assert len(start_pos) == 1, "independent positions are not supported for per-layer embeddings"
+    pos = start_pos[0]
     (B, T), T_pad, n = x.shape[:2], x.max_shape[1], len(self.ple.multipliers)
-    emb = self.table.read(start_pos, T_pad, x.device).reshape(B, T_pad, -1)[:, :T].float()
+    emb = self.table.read(pos, T_pad, x.device).reshape(B, T_pad, -1)[:, :T].float()
     s = (self.norm_key(self.key(emb).reshape(x.shape)) * self.norm_query(x)).sum(-1, keepdim=True) * self.dim**-0.5
     gated = self.value(emb).unsqueeze(2) * (s.sign() * s.abs().clamp(min_=1e-6).sqrt()).sigmoid()
-    conv, store = short_conv(self.conv_state, self.norm_conv(gated).flatten(2), self.conv1d["weight"], Tensor(start_pos).eq(0), n)
+    conv, store = short_conv(self.conv_state, self.norm_conv(gated).flatten(2), self.conv1d["weight"], Tensor(pos).eq(0), n)
     return Tensor((gated + conv[:, :T].reshape(gated.shape)).contiguous().uop.after(store))
 
 class Indexer:
@@ -432,21 +451,21 @@ class Indexer:
                                   *((2, self.idx.head_dim) if hasattr(self, "compressor_gate") else (self.idx.head_dim,)),
                                   dtype=dtypes.half, device=x.device)
 
-  def __call__(self, x:Tensor, q:Tensor, start_pos:int|UOp, freqs:Tensor|None=None) -> Tensor:
-    (B, T, _), idx, S = x.shape, self.idx, start_pos + x.shape[1]
+  def __call__(self, x:Tensor, q:Tensor, start_pos:StartPos, freqs:Tensor|None=None) -> Tensor:
+    (B, T, _), idx, S = x.shape, self.idx, ssimplify(smax(start_pos) + x.shape[1])
     k, iq = self.attn_k(x) if idx.qsa else self.k_norm(self.attn_k(x)), self.attn_q_b(q).reshape(B, T, idx.n_heads, idx.head_dim)
     if idx.msa or idx.qsa: iq = self.q_norm(iq)
     if idx.rope_dim:
-      rot = unwrap(freqs)[start_pos:start_pos+T]
+      rot = Tensor.stack(*(unwrap(freqs)[p:p+T] for p in start_pos))
       if not idx.qsa: k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), rot, idx.rope_interleave).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
       iq = apply_rope(iq[..., :idx.rope_dim].transpose(1, 2), rot, idx.rope_interleave).transpose(1, 2).cat(iq[..., idx.rope_dim:], dim=-1)
     if hasattr(self, "compressor_gate"):
       # cache an indexer key and a pooling gate per token, a pool's key is the gate softmax weighted sum of its keys
       kg = k.stack(self.compressor_gate(x), dim=2)  # (B, T, kpool, 2, D)
-      kg = Tensor(self.cache_kg.uop.after(self.cache_kg[:, start_pos:S].uop.store(kg.half().uop))).float().reshape(B, -1, idx.kpool, 2, idx.head_dim)
+      kg = _update_cache(self.cache_kg, kg, start_pos, 1).float().reshape(B, -1, idx.kpool, 2, idx.head_dim)
       k = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2)  # (B, S, D)
     else:
-      k = Tensor(self.cache_kg.uop.after(self.cache_kg[:, start_pos:S].uop.store(k.half().uop))).float()  # (B, S, D)
+      k = _update_cache(self.cache_kg, k, start_pos, 1).float()  # (B, S, D)
     if idx.qsa:
       k, rot = self.k_norm(k.reshape(B, -1, idx.kpool, idx.head_dim).mean(2)), unwrap(freqs)[:self.max_context:idx.kpool]
       k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), rot, idx.rope_interleave).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
@@ -455,7 +474,8 @@ class Indexer:
     elif idx.qsa: scores = (scores.relu() * idx.head_dim**-0.5).sum(2).unsqueeze(1)
     else:         scores = (scores.relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2).unsqueeze(1)
     # the query sees the top_k/kpool best complete pools and the tokens of its own pool while incomplete (the tail)
-    q_pos, k_pos = (Tensor(start_pos) + Tensor.arange(T)).reshape(T, 1), Tensor.arange(S)
+    q_pos = Tensor.stack(*(Tensor(p) for p in start_pos)).reshape(-1, 1, 1, 1) + Tensor.arange(T).reshape(1, 1, T, 1)
+    k_pos = Tensor.arange(S)
     scores = ((Tensor.arange(scores.shape[-1]) + 1) * idx.kpool <= q_pos + 1).where(scores, -math.inf)
     if idx.msa: scores = (Tensor.arange(scores.shape[-1]) == q_pos // idx.kpool).where(math.inf, scores)
     _, sel = scores.topk(idx.top_k // idx.kpool)
@@ -483,13 +503,14 @@ class MLATransformerBlock(FFNBlock):
     self.indexer = Indexer(config) if config.indexer else None
     if config.attn_output_gate: self.attn_gate = Linear(config.dim, config.n_heads * config.v_head_dim, bias=False)
 
-  def _attention(self, x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None=None) -> Tensor:
+  def _attention(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None=None) -> Tensor:
     B, T, _ = x.shape
     q_nope_head_dim = self.config.head_dim - self.config.rope_dim
     q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
     q = q_proj.reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
-    if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T], self.config.rope_interleave)
+    freqs = Tensor.stack(*(self.freqs_cis[p:p+T] for p in start_pos)) if not self.config.ssm or not self.config.ssm.kda else None
+    if freqs is not None: q_rope = apply_rope(q_rope, freqs, self.config.rope_interleave)
     if 'weight_scale_inv' in self.attn_k_b:
       q_nope = fp8_matmul(q_nope, self.attn_k_b['weight'], self.attn_k_b['weight_scale_inv'], self.kv_b_block_size[::-1])
     else: q_nope = q_nope @ self.attn_k_b['weight'].transpose(-1, -2)
@@ -498,14 +519,15 @@ class MLATransformerBlock(FFNBlock):
     kv_a = self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
     k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, T, 1, self.config.rope_dim).transpose(1, 2)
-    if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, self.freqs_cis[start_pos:start_pos+T], self.config.rope_interleave)
+    if freqs is not None: k_rope = apply_rope(k_rope, freqs, self.config.rope_interleave)
 
     k_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, T, self.config.rope_dim), dim=-1)
-    k = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(k_store.uop)))[:, :, 0:start_pos+T, :]
+    k = _cache_prefix(_update_cache(self.cache_k, k_store, start_pos, 2), start_pos, T, 2)
     v = k[..., :self.config.kv_lora_rank]
 
     attn = q @ k.transpose(-1, -2) * (1.0 / self.config.head_dim ** 0.5)
-    if (mask:=self._attn_mask(x, start_pos, idx_mask)) is not None: attn = attn + mask
+    mask = idx_mask if idx_mask is not None else _causal_mask(x, start_pos)
+    if mask is not None: attn = attn + mask
     attn = attn.softmax(-1)
     attn = attn @ v
     if 'weight_scale_inv' in self.attn_v_b:
@@ -514,12 +536,7 @@ class MLATransformerBlock(FFNBlock):
     attn = attn.transpose(1, 2).reshape(B, T, -1)
     return self.attn_output(attn * self.attn_gate(x).sigmoid() if self.config.attn_output_gate else attn)
 
-  def _attn_mask(self, x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None=None) -> Tensor|None:  # (1, 1, T, start_pos+T), None: everything is visible
-    if idx_mask is not None: return idx_mask
-    T = x.shape[1]
-    return Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, buffer=False).triu(start_pos+1) if resolve(T != 1) else None
-
-  def _indexer_mask(self, x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None) -> Tensor|None:
+  def _indexer_mask(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None) -> Tensor|None:
     # a full indexer layer selects the top-k tokens for itself and the shared layers after it
     if self.indexer is not None and self.config.max_context > self.indexer.idx.top_k:
       return self.indexer(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos, self.freqs_cis)
@@ -556,11 +573,13 @@ class GatedDeltaNetBlock(FFNBlock):
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), Linear(ssm.inner_size, config.dim, bias=False)
 
-  def _attention(self, x:Tensor, start_pos:int|UOp, idx_mask:Tensor|None=None) -> Tensor:
+  def _attention(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None=None) -> Tensor:
     B, T, _ = x.shape
+    assert len(start_pos) == 1, "independent positions are not supported for recurrent blocks"
     # bind ints to a variable so the reset flag stays a runtime value (it toggles when generation restarts at position 0)
-    start_pos = start_pos if isinstance(start_pos, UOp) else UOp.variable("start_pos", 0, self.config.max_context-1).bind(start_pos)
-    initial = Tensor(start_pos).eq(0)
+    pos = start_pos[0]
+    pos = pos if isinstance(pos, UOp) else UOp.variable("start_pos", 0, self.config.max_context-1).bind(pos)
+    initial = Tensor(pos).eq(0)
     is_kda = unwrap(self.config.ssm).kda
     symbolic = isinstance(T, UOp)
     T_pad = x.max_shape[1]  # symbolic chunks are padded to their max size: one graph serves every size
@@ -598,7 +617,7 @@ class GatedDeltaNetBlock(FFNBlock):
     if self.head_k_dim % 32 == 0 and self.head_v_dim % 4 == 0 and amd_custom_kernels_supported(x.device):
       # one fused kernel for the whole scan; it resets and updates the recurrent state in place (RDNA3/4)
       state = Tensor(self.recurrent_state.uop.after(*conv_state_stores))  # carry the conv write into this graph
-      core = gated_delta_prefill(q, k, v, beta, alpha, state, Tensor(start_pos)).transpose(1, 2)
+      core = gated_delta_prefill(q, k, v, beta, alpha, state, Tensor(pos)).transpose(1, 2)
     else:
       q, k, v, beta = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
       alpha = alpha.unsqueeze(-2)
@@ -650,11 +669,12 @@ class Transformer:
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
+    self._position_count: int|None = None
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
 
-  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
+  def forward(self, tokens:Tensor, temperature:Tensor, *start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     elif self.config.attn_res_block_size: x = x.unsqueeze(2)
@@ -667,8 +687,12 @@ class Transformer:
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
-  def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos, temperature)
+  def __call__(self, tokens:Tensor, start_pos:StartPos, temperature:Tensor) -> Tensor:
+    assert len(start_pos) in (1, tokens.shape[0]), "expected one shared position or one position per batch row"
+    if self._position_count is None: self._position_count = len(start_pos)
+    assert len(start_pos) == self._position_count, "position count is fixed for this model"
+    positions = tuple(UOp.variable(f"start_pos_{b}", 0, self.max_context-1).bind(p) if isinstance(p, int) else p for b, p in enumerate(start_pos))
+    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), temperature, *positions)
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
@@ -913,7 +937,7 @@ class Transformer:
       n_toks = min(chunk_size, len(tokens) - start_pos)
       if self.config.ple: self.blk[self.config.ple.layer].ple.write_rows(tokens, start_pos, n_toks, chunk_size)
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n_toks)
-      out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
+      out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, (sp,), temp).realize()
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
