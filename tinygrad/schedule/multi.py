@@ -77,7 +77,7 @@ def shard_srcs(msrcs:tuple[UOp, ...], axis:int) -> list[UOp]:
 def shard_subview(full:UOp, multi:UOp) -> UOp:
   """the sub-view of an unsharded full-shape value (shape == multi.shape) that belongs to this shard:
   _shard along every sharded axis (contiguous blocks, like the device path)."""
-  assert tuple(full.shape) == tuple(multi.shape), f"shard sub-view shape mismatch {full.shape} != {multi.shape}"
+  assert full.shape == multi.shape, f"shard sub-view shape mismatch {full.shape} != {multi.shape}"
   # an EXPAND of a scalar over the full shape is the same broadcast on every shard: re-expand over the shard shape
   if full.op is Ops.EXPAND and full.src[0].shape == (): return full.src[0].expand(multi.src[0].shape)
   for ax, rng in multi.sharding: full = full._shard(ax, rng)
@@ -89,7 +89,7 @@ def alu_multi(root:UOp):
     # same sharding (peel the UNSHARD), or a whole unsharded value of the full tile shape (takes its per-shard
     # sub-view), or a broadcast scalar
     if m.sharding: return m.sharding == target.sharding
-    return m.shape == () or tuple(m.shape) == tuple(target.shape)
+    return m.shape == () or m.shape == target.shape
   if all(can_handle(m) for m in root.src):
     # every src either has the target sharding or is whole on every shard: run the alu per-shard
     srcs = [m.src[0] if m.op is Ops.UNSHARD else m if m.shape == () else shard_subview(m, target) for m in root.src]
@@ -210,8 +210,7 @@ def store_dest_multi(root:UOp, multi:UOp):
   # STORE with a sharded dest: every shard stores into its own shard of the dest.
   # the value is handled like in alu_multi: UNSHARD srcs peel, full-shape values take their per-shard sub-view
   # (scalars arrive EXPANDed to the full shape by UOp.store's const_like, so they sub-view like everything else)
-  srcs = [multi.src[0]] + [x.src[0] if x.op is Ops.UNSHARD else shard_subview(x, multi) if tuple(x.shape) == tuple(multi.shape) else x
-                           for x in root.src[1:]]
+  srcs = [multi.src[0]] + [x.src[0] if x.op is Ops.UNSHARD else shard_subview(x, multi) if x.shape == multi.shape else x for x in root.src[1:]]
   return UOp(root.op, src=tuple(srcs), arg=root.arg)
 
 def passthrough_multi(root:UOp, multi:UOp):
