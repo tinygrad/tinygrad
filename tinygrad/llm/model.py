@@ -709,12 +709,14 @@ class Transformer:
                   kv.get(f'{arch}.hyper_connection.low_rank', 0)) if f'{arch}.hyper_connection.count' in kv else None
     if hc is not None: state_dict = {re.sub(r'(hc_attn|hc_ffn|output_hc|\.ple)_', r'\1.', k):v for k,v in state_dict.items()}
 
-    kpool = kv.get(f'{arch}.attention.indexer.block_size' if arch == 'minimax-m3' else f'{arch}.attention.indexer.kpool')
+    kpool = kv.get(f'{arch}.attention.indexer.block_size' if arch == 'minimax-m3' else f'{arch}.attention.indexer.kpool',
+                   1 if f'{arch}.attention.indexer.top_k' in kv else None)
     if arch == 'qwen4exp': kpool = max(kv[f'{arch}.attention.compress_ratios'])
     indexer = IndexerConfig(kv[f'{arch}.attention.indexer.head_count'], kv[f'{arch}.attention.indexer.key_length'],
                             kv[f'{arch}.attention.indexer.top_k'], kpool,
                             kv.get(f'{arch}.attention.layer_norm_epsilon') or kv[f'{arch}.attention.layer_norm_rms_epsilon']) if kpool else None
     if indexer is not None: state_dict = {k.replace('.indexer_compressor_', '.indexer.compressor_'):v for k,v in state_dict.items()}
+    if arch == 'glm-dsa': indexer = replace(unwrap(indexer), rope_dim=kv[f'{arch}.rope.dimension_count'], norm_eps=1e-6)
     if arch in ('minimax-m3', 'qwen4exp'):
       indexer = replace(unwrap(indexer), rope_dim=kv[f'{arch}.rope.dimension_count'], rope_interleave=False, msa=arch == 'minimax-m3',
                         qsa=arch == 'qwen4exp', top_k=kv[f'{arch}.attention.indexer.top_k'] * kv.get(f'{arch}.attention.indexer.block_size', 1))
@@ -751,7 +753,7 @@ class Transformer:
 
     # Permute RoPE weights from interleaved to half-split layout.
     for name in state_dict:
-      if arch in ('kimi-linear', 'glm5-next', 'kimi-k3'): continue
+      if arch in ('kimi-linear', 'glm5-next', 'kimi-k3') or '.indexer.' in name: continue
       if ('attn_q.weight' in name or 'attn_q_b.weight' in name) and (arch == 'llama' or kv_lora_rank):
         state_dict[name] = permute_rope(state_dict[name], n_heads, rope_dim)
       elif arch == 'llama' and 'attn_k.weight' in name:
@@ -789,6 +791,9 @@ class Transformer:
       swiglu_up_bias=1.0 if swiglu_oai else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer,
+      # without indexer.types, GLM-5.2+ (1M context) runs the indexer on blocks 0-2 and every 4th after (6, 10, ..), GLM-5/5.1 on all
+      indexer_shared=tuple(not full for full in kv[f'{arch}.attention.indexer.types']) if f'{arch}.attention.indexer.types' in kv else
+        tuple(i > 2 and i % 4 != 2 for i in range(num_blocks)) if arch == 'glm-dsa' and kv[f'{arch}.context_length'] >= 1048576 else (),
       ple=PLEConfig(kv[f'{arch}.ple.layers'][0], ple_entry[1][1], tuple(kv[f'{arch}.ple.layer_multipliers']),
                     tuple(kv[f'{arch}.ple.head_vocab_sizes']), kv[f'{arch}.ple.eos_token_id'], kv[f'{arch}.ple.conv_kernel']) if ple_entry else None,
       expert_latent_dim=kv.get(f'{arch}.expert_latent_length', 0), attn_res_block_size=kv.get(f'{arch}.attn_res.block_size', 0),
