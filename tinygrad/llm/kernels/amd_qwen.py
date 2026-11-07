@@ -1353,7 +1353,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   else:
     fxn = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type)
     # (Q8_0: launched early, its counter the last argument, see _el_wait)
-    el = (_el_dummy(x.device)[1],) if layer.ggml_type == Q8_0 and not extra and EARLY else ()
+    el = (_el_dummy(x.device)[1],) if layer.ggml_type == Q8_0 and not extra else ()
     srcs = (*(xq or q8_quantize(x, tokens, in_features))[:3], *extra, *el)
   # split: x has its rows split over the devices (the weight is whole on every device), so has the output
   out_axis = 0 if split and layer.shard_axis is None else None if layer.shard_axis is None else 1-layer.shard_axis
@@ -1387,7 +1387,6 @@ def _sys(fmt:str, dtype:DType, *src:UOp) -> UOp: return _cfn(False, src=src, arg
 # of the others: two parities. Each pool has a fixed workgroup count so all its epoch counters move together across varying payload sizes.
 
 FLAG_AR_MAXN = 1 << 20  # words (two half values or one float32 each)
-EARLY = getenv("EARLY", 1)
 
 def flag_ar_groups(n:int) -> int: return 4 if n <= 8192 else 16 if n <= 65536 else 64
 
@@ -2265,7 +2264,7 @@ def sharded_argmax(x:Tensor, n:int) -> Tensor|None:
   N, (B, V) = len(devs), x.shape
   count, first = _argmax_parts(devs, local:=int(V) // N, n)
   part = Tensor.empty(N*B, 2, dtype=dtypes.float32, device=devs, axis=0)
-  if (C:=getenv("ARGMAX_CHUNKS", 32)) > 1 and local >= C*256:
+  if local >= (C:=32)*256:
     # (a row's chunks a workgroup each, then their max: one workgroup a row is a long serial scan)
     chunks = Tensor.empty(N*B, C, 2, dtype=dtypes.float32, device=devs, axis=0)
     chunks = Tensor.custom_kernel(chunks, x.contiguous(), count, fxn=_argmax_chunks_kernel)[0]
@@ -3357,7 +3356,7 @@ def ghc_pre(xs:Tensor, w:Tensor, winj:Tensor, count:int, eps:float) -> tuple[Ten
           Tensor.empty(T, G, dtype=dtypes.float32, device=xs.device), Tensor.empty(T, G, 2, dtype=dtypes.float32, device=xs.device),
           Tensor.empty(T, count, NJ, dtype=dtypes.float32, device=xs.device)]
   res = Tensor.custom_kernel(*outs, xs.float().contiguous(), w.float().contiguous(), winj.float().contiguous(),
-                             *((_el_dummy(xs.device)[0],) if EARLY else ()), fxn=functools.partial(_ghc_pre_kernel, count=count, D=D, eps=eps))
+                             _el_dummy(xs.device)[0], fxn=functools.partial(_ghc_pre_kernel, count=count, D=D, eps=eps))
   return res[0], (res[1], res[2], res[3]), res[4]
 
 @functools.cache
@@ -3477,7 +3476,7 @@ def ghc_decode_mix(lo:Tensor, up_raw:Tensor, xn:Tensor, part:Tensor, count:int) 
   outs = (Tensor.empty(T, D, dtype=dtypes.float32, device=lo.device), Tensor.empty(T, NJ, dtype=dtypes.float32, device=lo.device),
           Tensor.empty(T, D//32, 8, dtype=dtypes.uint32, device=lo.device), Tensor.empty(T, D//32, dtype=dtypes.float32, device=lo.device),
           Tensor.empty(T, D//32, 2, dtype=dtypes.float32, device=lo.device))
-  ret = Tensor.custom_kernel(*outs, lo.float().contiguous(), up_raw, xn, part, *((_el_dummy(lo.device)[0],) if EARLY else ()),
+  ret = Tensor.custom_kernel(*outs, lo.float().contiguous(), up_raw, xn, part, _el_dummy(lo.device)[0],
                             fxn=functools.partial(_ghc_decode_mix_kernel, count=count, D=D, R=R))[:5]
   q8_quantize_known(ret[0], T, D, False, tuple(ret[2:]))
   return ret[0], ret[1]
