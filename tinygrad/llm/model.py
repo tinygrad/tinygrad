@@ -690,8 +690,7 @@ class Transformer:
     assert len(start_pos) in (1, tokens.shape[0]), "expected one shared position or one position per batch row"
     key = (resolve(tokens.shape[1] != 1), len(start_pos))
     if key not in self.jits: self.jits[key] = TinyJit(self.forward)
-    positions = tuple(UOp.variable(f"start_pos_{b}", 0, self.max_context-1).bind(p) if isinstance(p, int) else p
-                      for b, p in enumerate(start_pos))
+    positions = tuple(UOp.variable(f"start_pos_{b}", 0, self.max_context-1).bind(p) if isinstance(p, int) else p for b, p in enumerate(start_pos))
     return self.jits[key](tokens.contiguous(), temperature, *positions)
 
   @staticmethod
