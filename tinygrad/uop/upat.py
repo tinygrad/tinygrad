@@ -28,7 +28,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
     else: and_clause.append(UOp.custom_function("{0}.arg == {1}", fmt=True).call(base, UOp(Ops.PYLITERAL, arg=self.arg)))
   if self.strict_length or self.required_len > 0:
     and_clause.append(UOp.custom_function("len({0}.src)"+(" == " if self.strict_length else " >= ")+str(self.required_len), fmt=True).call(base))
-  if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp.custom_function(self.name, inline=True, fmt=True).call(), base)))
+  if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp.custom_function(self.name, fmt=True).call(inline=True), base)))
   if self.match_dtype is not None:
     if len(self.match_dtype) > 1:
       and_clause.append(UOp.custom_function("{0}.dtype in {1}", fmt=True).call(base, UOp(Ops.PYLITERAL, arg=frozenset(self.match_dtype))))
@@ -40,7 +40,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
       and_clause += [_get_clause(s, base.index(i), depth) for i,s in enumerate(self.src[0])]
     # repeat match
     elif len(self.src) == 1 and isinstance(self.src[0], itertools.repeat):
-      it = UOp.custom_function(f"ituop{depth}", inline=True, fmt=True).call()
+      it = UOp.custom_function(f"ituop{depth}", fmt=True).call(inline=True)
       match = _get_clause(next(self.src[0]), it, depth+1)
       # lift named binds out of the repeat: they bind the first src, and every element must be identical to it
       stores, pred = partition(flatands(match), lambda x: x.op is Ops.STORE)
@@ -55,7 +55,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
       fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
       and_clause.append(UOp(Ops.OR, src=tuple(fork_cond)))
     else: raise RuntimeError("broken")
-  return UOp(Ops.AND, src=tuple(and_clause)) if and_clause else UOp.custom_function("True", inline=True, fmt=True).call()
+  return UOp(Ops.AND, src=tuple(and_clause)) if and_clause else UOp.custom_function("True", fmt=True).call(inline=True)
 
 # *** pattern matcher ***
 
@@ -112,29 +112,28 @@ pm_proc = PatternMatcher([(UPat(Ops.AND, name="a"), do_process_and)], compiled=F
 # renderer
 def wrap(ctx, x) -> UOp:
   ctx[ret:=f"a{len(ctx)}"] = x.arg
-  return UOp.custom_function(ret, inline=True, fmt=True).call()
+  return UOp.custom_function(ret, fmt=True).call(inline=True)
 
 pm_renderer = PatternMatcher([
   (UPat(Ops.PYLITERAL, name="x"), wrap),
 
   # AND/OR of CUSTOMI fragments becomes a single CUSTOMI
   (UPat(Ops.AND, src=UPat(Ops.CALL), name="x"), lambda x:
-   UOp.custom_function("(" + ' and '.join(y.body.arg.name for y in x.src) + ")", inline=True,
-                       fmt=True).call() if all(y.body.arg.inline for y in x.src) else None),
+   UOp.custom_function("(" + ' and '.join(y.body.arg.name for y in x.src) + ")", fmt=True).call(inline=True)
+   if all(y.arg.inline for y in x.src) else None),
   (UPat(Ops.OR, src=UPat(Ops.CALL), name="x"), lambda x:
-   UOp.custom_function("(" + ' or '.join(y.body.arg.name for y in x.src) + ")", inline=True,
-                       fmt=True).call() if all(y.body.arg.inline for y in x.src) else None),
+   UOp.custom_function("(" + ' or '.join(y.body.arg.name for y in x.src) + ")", fmt=True).call(inline=True)
+   if all(y.arg.inline for y in x.src) else None),
 
-  (UPat(Ops.CALL, name="x"), lambda x: UOp.custom_function(x.body.arg.name.format(*[y.body.arg.name for y in x.src[1:]]),
-                                                            inline=True, fmt=True).call()
-   if not x.body.arg.inline and all(y.op is Ops.CALL and y.body.arg.inline for y in x.src[1:]) else None),
+  (UPat(Ops.CALL, name="x"), lambda x: UOp.custom_function(x.body.arg.name.format(*[y.body.arg.name for y in x.src[1:]]), fmt=True).call(inline=True)
+   if not x.arg.inline and all(y.op is Ops.CALL and y.arg.inline for y in x.src[1:]) else None),
   (UPat(Ops.INDEX, src=(UPat(Ops.CALL, name="x"), UPat(Ops.CONST, name="c"))),
-   lambda x,c: UOp.custom_function(x.body.arg.name + f".src[{c.val}]", inline=True, fmt=True).call() if x.body.arg.inline else None)
+   lambda x,c: UOp.custom_function(x.body.arg.name + f".src[{c.val}]", fmt=True).call(inline=True) if x.arg.inline else None)
 ], compiled=False)
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
   # if the whole clause collapsed to a single predicate (no binds), rewrap it
-  if x.op is Ops.CALL and x.body.arg.inline: x = UOp(Ops.AND, (x,))
+  if x.op is Ops.CALL and x.arg.inline: x = UOp(Ops.AND, (x,))
   assert x.op is Ops.AND
   and_pieces, store_pieces = [], []
   or_pieces: list[str] = []
@@ -143,9 +142,9 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
       assert len(or_pieces) == 0 and len(s.src) >= 1
       for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1))
     elif s.op is Ops.STORE:
-      assert all(y.op is Ops.CALL and y.body.arg.inline for y in s.src)
+      assert all(y.op is Ops.CALL and y.arg.inline for y in s.src)
       store_pieces.append(f"{s.src[0].body.arg.name}={s.src[1].body.arg.name}")
-    elif s.op is Ops.CALL and s.body.arg.inline: and_pieces.append(s.body.arg.name)
+    elif s.op is Ops.CALL and s.arg.inline: and_pieces.append(s.body.arg.name)
     else: raise UPatCompileError(f"can't compile this {s}")
   # if we have an or, render it
   if len(or_pieces):
@@ -158,7 +157,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
   return [f"{'  '*depth}if {and_clause}: return _ret"]
 
 def _get_code(self:UPat, has_ctx:bool):
-  ret = _get_clause(self, UOp.custom_function("uop", inline=True, fmt=True).call())
+  ret = _get_clause(self, UOp.custom_function("uop", fmt=True).call(inline=True))
   try:
     # TODO: this should be tracked in a "system" rewrite, not untracked or tracked with kernel
     with Context(TRACK_MATCH_STATS=0):

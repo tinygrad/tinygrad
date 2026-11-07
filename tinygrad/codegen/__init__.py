@@ -142,8 +142,8 @@ devectorizer2 = pm_mops+PatternMatcher([
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # reshape of a single element shaped value to scalar is an index
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
-  # a scalar index into a one-lane STACK is its lane, 0 is the only in-bounds index
-  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, src=(UPat.var("x"),)), UPat.var("i"))), lambda x,i: x if i.shape == () else None),
+  # a scalar index into a one-lane STACK is its lane after the index, 0 is the only in-bounds index
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, src=(UPat.var("x"),)), UPat.var("i"))), lambda x,i: x.after(i) if i.shape == () else None),
 ])
 
 def fix_group_for_reduce(x:UOp):
@@ -163,13 +163,14 @@ def fix_group_for_reduce(x:UOp):
 def merge_reduce_ends(sink:UOp):
   # merge ENDs that share the same range and nesting context
   # ENDs at different nesting depths get cloned RANGEs so each RANGE maps to one END
+  # dependent ENDs are sequential, not merged
   range_to_ends: dict[tuple[UOp, ...], list[UOp]] = {}
   for u in sink.backward_slice:
     if u.op is Ops.END: range_to_ends.setdefault(u.src[1:], []).append(u)
   subs: dict[UOp, UOp] = {}
   next_axis = max((u.axis_id[0] for u in sink.backward_slice if u.op is Ops.RANGE), default=-1) + 1
   for r, ends in range_to_ends.items():
-    if len(ends) <= 1: continue
+    if len(ends) <= 1 or any(a in b.backward_slice for a in ends for b in ends): continue
     by_ctx: dict[frozenset[UOp], list[UOp]] = {}
     for e in ends: by_ctx.setdefault(frozenset(e.ranges), []).append(e)
     for i, group in enumerate(by_ctx.values()):

@@ -6,6 +6,7 @@ from tinygrad.device import Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
+from tinygrad.uop.ops import UOp
 
 # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
 def _ggml_iq_grid(device: str|tuple[str, ...]|None, grid: tuple[int, ...], grid_shape: tuple[int, int]) -> Tensor:
@@ -247,6 +248,21 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   """
   kv, entries = gguf_parse(fn)
   return kv, gguf_shard(entries, (Device.DEFAULT,))
+
+class GGUFPackedTable:
+  """
+  Quantized rows mmapped from the GGUF file: `write` copies rows into host memory slots, `read` decodes the slots on device.
+  """
+  __slots__ = ("data", "width", "typ", "row_bytes", "table", "rows")
+  def __init__(self, entry:tuple[Tensor, tuple[int, ...], int]):
+    data, (n_rows, self.width), self.typ = entry
+    self.data, self.row_bytes, self.table = data, data.nbytes() // n_rows, data._buffer().as_memoryview(allow_zero_copy=True)
+  def write(self, start:int, ids:list[list[int]], slots:int):
+    if not hasattr(self, "rows"): self.rows = Tensor.empty(slots, len(ids[0]), self.row_bytes, dtype=dtypes.uint8, device="CPU").realize()
+    rows, rb = self.rows._buffer().as_memoryview(allow_zero_copy=True), self.row_bytes
+    rows[start*len(ids[0])*rb:(start+len(ids))*len(ids[0])*rb] = b"".join(self.table[i*rb:(i+1)*rb] for slot in ids for i in slot)
+  def read(self, start:int|UOp, n:int, device:str|tuple[str, ...]|None) -> Tensor:
+    return ggml_data_to_tensor(self.rows[start:start+n].to(device).flatten(), n*int(self.rows.shape[1])*self.width, self.typ)
 
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
                shard_map:dict[str, int]|None=None, repeats:dict[str, int]|None=None) -> dict[str, Tensor]:
