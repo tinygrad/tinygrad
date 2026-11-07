@@ -84,7 +84,8 @@ class ExpertWeights:
   def fuse_up(self, up:ExpertWeights, rows:int):
     """take the up weights: the packed rows interleaved by 16 with this gate's, one kernel for both"""
     assert self.ggml_type is not None and self.ggml_type == up.ggml_type and self.weight.device == up.weight.device
-    self.weight = fuse_gate_up(self.weight, up.weight, self.num_experts, rows).contiguous().realize()
+    # (not realized: made from the read weights, see _prepare)
+    self.weight = fuse_gate_up(self.weight, up.weight, self.num_experts, rows).contiguous()
     self.fused = True
   def __call__(self, sel:Tensor, x:Tensor, out_dtype:DType=dtypes.float32) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out) (out_dtype: the bundles of batched decoding's)
@@ -2684,7 +2685,8 @@ class Transformer:
         m.set_quantized(m.weight)
       if isinstance(m, ExpertWeights): m.set_quantized()
       if m.ggml_type is not None: packed.add(id(m.weight))
-    # packed gate and up experts of the same format are one weight: their rows interleaved
+    # packed gate and up experts of the same format are one weight: their rows interleaved (the ones the load didn't fuse: a pair in two files)
+    fused:list[Tensor] = []
     for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []):
       if (g:=getattr(b, 'ffn_gate_exps', None)) is not None and hasattr(b, 'ffn_up_exps') and g.ggml_type is not None and \
          g.ggml_type == b.ffn_up_exps.ggml_type and amd_custom_kernels_supported(g.weight.device):
@@ -2693,6 +2695,10 @@ class Transformer:
         g.fuse_up(b.ffn_up_exps, b.config.hidden_dim // (b.config.expert_slices or 1))
         del b.ffn_up_exps
         packed.add(id(g.weight))
+        fused.append(g.weight)
+    # (with the weights still to read: their memory now, fused after they are read. not before: it'd be of the memory they're read into)
+    if fused and self._pending_load: _realize_later(fused, self._pending_load)
+    elif fused: Tensor.realize(*fused)
     small = [p for p in nn.state.get_parameters(self) if id(p) not in packed and p is not self.token_embd.weight and not p.uop.is_realized]
     for p in small: p.replace(p.contiguous())
     tables = dedup([t for m in modules([self.blk] + ([self.mtp] if hasattr(self, "mtp") else []), set()) if isinstance(m, ExpertWeights)
