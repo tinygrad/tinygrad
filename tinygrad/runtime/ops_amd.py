@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import cast, Any
+from typing import cast, Any, Callable
 import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, itertools, collections, atexit, threading, time
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, encode_cmdbuf, to_name, patch, unwrap_view, layout_args, pack_args, make_program, ccall
@@ -794,10 +794,20 @@ class AMIdleClocks:
         if "timeline" not in dev.__dict__: _ = dev.timeline
       if not cls.low: return
       st = time.perf_counter()
-      for adev, _ in cls.devs:
-        if not getattr(adev, "finalized", False): adev.smu.set_clocks(level=adev.perf_level)
-      cls.low = False
+      # (every device's, a failed one's again before the next launch)
+      cls.low = not cls._set(lambda adev: adev.perf_level)
       if DEBUG >= 2: print(f"am: clocks up on {len(cls.devs)} devices in {(time.perf_counter()-st)*1e3:.1f} ms", flush=True)
+  @classmethod
+  def _set(cls, level:Callable[[AMDev], int|None]) -> bool:
+    """the clocks of every device at their level: whether they all are (a device's smu that didn't answer: logged, not raised)"""
+    ok = True
+    for adev, _ in cls.devs:
+      if getattr(adev, "finalized", False): continue
+      try: adev.smu.set_clocks(level=level(adev))
+      except Exception as e:
+        print(f"am {adev.devfmt}: setting the clocks failed: {type(e).__name__}: {e}", flush=True)
+        ok = False
+    return ok
   @classmethod
   def _loop(cls, idle:float):
     while True:
@@ -807,9 +817,9 @@ class AMIdleClocks:
         if cls.low or time.perf_counter() - cls.last < idle: continue
         # (their work done: the value of the last submitted batch signaled. a timeline not made yet: nothing submitted, see wake)
         if any((t:=dev.__dict__.get("timeline")) is not None and (tl:=t.host.view(fmt='Q'))[0] < tl[1] for _, dev in cls.devs): continue
-        for adev, _ in cls.devs:
-          if not getattr(adev, "finalized", False): adev.smu.set_clocks(level=0)
+        # (low before they're lowered: a device lowered is raised again before the next launch, if another one failed too)
         cls.low = True
+        cls._set(lambda adev: 0)
         if DEBUG >= 2: print(f"am: clocks down on {len(cls.devs)} devices after {idle:.2f} s idle", flush=True)
 
 class PCIIface(PCIIfaceBase):

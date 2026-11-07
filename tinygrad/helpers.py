@@ -555,10 +555,13 @@ def amdgpu_disassemble(lib:bytes):
   print("\n".join(asm))
 
 def wait_cond(cb, *args, value=True, timeout_ms=10000, msg="") -> bool:
-  start_time = int(time.perf_counter() * 1000)
-  while int(time.perf_counter() * 1000) - start_time < timeout_ms:
-    if (val:=cb(*args)) == value: return val
-  raise TimeoutError(f"{msg}. Timed out after {timeout_ms} ms, condition not met: {val} != {value}")
+  # (checked once more after the deadline: a thread that didn't run until then (another one held the GIL) doesn't miss a value that came)
+  deadline = time.perf_counter() + timeout_ms / 1000
+  while (val:=cb(*args)) != value:
+    if time.perf_counter() > deadline:
+      if (val:=cb(*args)) == value: break
+      raise TimeoutError(f"{msg}. Timed out after {timeout_ms} ms, condition not met: {val} != {value}")
+  return val
 
 # *** ctypes helpers
 
