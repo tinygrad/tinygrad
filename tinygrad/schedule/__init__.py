@@ -33,14 +33,16 @@ def create_schedule(sched_sink:UOp) -> UOp:
     # build dependency graph: kernels and buffer-state barriers
     children: dict[UOp, list[UOp]] = {}
     in_degree: dict[UOp, int] = {}
-    writes: dict[UOp, list[tuple[UOp, tuple[UOp, ...]]]] = {}  # superseded state -> (AFTER, new kernels)
+    writes: dict[UOp, tuple[UOp, tuple[UOp, ...]]] = {}  # superseded state -> (AFTER, new kernels)
     reads: list[tuple[UOp, UOp, UOp]] = []  # (reader AFTER, reader kernel, buffer state read)
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       kernels, after_deps = _split_after(u)
       prev_state = _unwrap_src(u.src[0])
       prev_kernels = set(_split_after(prev_state)[0]) if prev_state.op is Ops.AFTER else set()
-      writes.setdefault(prev_state, []).append((u, tuple(k for k in kernels if k not in prev_kernels)))
+      # writes to one buffer are a chain of states: at most one AFTER supersedes a state
+      if prev_state in writes: raise RuntimeError("sibling AFTERs detected in assign graph")
+      writes[prev_state] = (u, tuple(k for k in kernels if k not in prev_kernels))
       # a buffer state is a node after its prior state, its joins and its kernels, so readers inherit its history
       in_degree.setdefault(u, 0)
       for st in ([prev_state] if prev_state.op is Ops.AFTER else []) + [*after_deps, *kernels]:
@@ -60,12 +62,12 @@ def create_schedule(sched_sink:UOp) -> UOp:
     # WAR deps: a kernel reading buffer state S must run before another write that supersedes S. an AFTER only
     # supersedes its immediate prior state; join members already present in that prior state are ordering deps, not writes
     for u, k, s in reads:
-      for a, write_kernels in writes.get(s, []):
-        if a is u: continue
-        for t in write_kernels:
-          if t is not k:
-            children.setdefault(k, []).append(t)
-            in_degree[t] += 1
+      a, write_kernels = writes.get(s, (u, ()))
+      if a is u: continue
+      for t in write_kernels:
+        if t is not k:
+          children.setdefault(k, []).append(t)
+          in_degree[t] += 1
 
   with cpu_profile(TracingKey("linearize schedule")):
     queue: deque[UOp] = deque(k for k,v in in_degree.items() if v == 0)
