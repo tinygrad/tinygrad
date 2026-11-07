@@ -127,14 +127,21 @@ class TestLLMServer(unittest.TestCase):
       for token in (300, 301, 999):
         ids.append(token)
         yield token
-    with patch.object(self.mock_model, "generate", side_effect=generate):
+    with patch.object(self.mock_model, "generate", side_effect=generate), patch.object(self.mock_model, "get_start_pos", return_value=2):
       chunks = list(self.client.chat.completions.create(
         model="test", messages=[{"role": "user", "content": "Hello"}], stream=True, stream_options={"include_usage": True}))
     last_chunk = chunks[-1]
-
     self.assertEqual(last_chunk.usage.prompt_tokens, 3)
     self.assertEqual(last_chunk.usage.completion_tokens, 2)
     self.assertEqual(last_chunk.usage.total_tokens, 5)
+    self.assertEqual(last_chunk.usage.prompt_tokens_details.cached_tokens, 2)
+
+  def test_stream_with_continuous_usage(self):
+    with patch.object(self.mock_model, "generate", side_effect=lambda ids, **kwargs: iter([300, 301, 999])):
+      chunks = list(self.client.chat.completions.create(model="test", messages=[{"role": "user", "content": "Hello"}],
+                                                        stream=True, stream_options={"include_usage": True, "continuous_usage_stats": True}))
+    self.assertTrue(all(c.usage is not None for c in chunks))
+    self.assertEqual([c.usage.completion_tokens for c in chunks], [0, 1, 2, 2, 2])
 
   def test_multi_turn_conversation(self):
     stream = self.client.chat.completions.create(
@@ -215,11 +222,12 @@ class TestLLMServer(unittest.TestCase):
     source.close.assert_called_once()
 
   def test_non_streaming(self):
-    resp = self.client.chat.completions.create(
-      model="test-model",
-      messages=[{"role": "user", "content": "Hello"}],
-      stream=False
-    )
+    with patch.object(self.mock_model, "get_start_pos", return_value=2):
+      resp = self.client.chat.completions.create(
+        model="test-model",
+        messages=[{"role": "user", "content": "Hello"}],
+        stream=False
+      )
 
     self.assertTrue(resp.id.startswith("chatcmpl-"))
     self.assertEqual(resp.object, "chat.completion")
@@ -232,6 +240,7 @@ class TestLLMServer(unittest.TestCase):
     self.assertIsNotNone(resp.usage)
     self.assertIsNotNone(resp.usage.prompt_tokens)
     self.assertIsNotNone(resp.usage.completion_tokens)
+    self.assertEqual(resp.usage.prompt_tokens_details.cached_tokens, 2)
 
   def test_context_length_error(self):
     from openai import BadRequestError

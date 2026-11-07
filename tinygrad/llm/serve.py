@@ -91,6 +91,7 @@ class Request:
   def __init__(self, ids:list[int], disconnected:typing.Callable[[], bool], max_tokens:int|None=None, temperature:float=0.0, log_prefix:str=""):
     self.ids, self.disconnected, self.max_tokens, self.temperature, self.log_prefix = ids, disconnected, max_tokens, temperature, log_prefix
     self.finish_reason = "stop"
+    self.cached_tokens = 0
     self.error: Exception|None = None
     self.out: queue.Queue[int|None] = queue.Queue()
 
@@ -101,12 +102,18 @@ class Handler(VizHandler):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     elif self.path.startswith("/assets/"): super().do_GET()
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
-  def run_model(self, req:Request, model_name:str, include_usage:bool=False, reasoning:bool=False):
+  def run_model(self, req:Request, model_name:str, include_usage:bool=False, reasoning:bool=False, continuous_usage:bool=False):
     tok = self.server.tok
     prompt_tokens = len(req.ids)
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
-    def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
     out: list[int] = []
+    def usage():
+      return {"prompt_tokens": prompt_tokens, "completion_tokens": len(out), "total_tokens": prompt_tokens + len(out),
+              "prompt_tokens_details": {"cached_tokens": req.cached_tokens}}
+    def chunk(d:dict, finish_reason:str|None=None):
+      ret = {"choices": [{"index":0, "delta":d, "finish_reason":finish_reason}], **tmpl}
+      if continuous_usage: ret["usage"] = usage()
+      return ret
     dec = tok.stream_decoder()
     router = StreamRouter(tok._special_tokens, reasoning)
     self.server.waiting.put(req)
@@ -127,14 +134,12 @@ class Handler(VizHandler):
       else:
         name, args = parsed
         tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
-                            "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
+                           "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
     if tool_calls:
       yield chunk({"tool_calls":tool_calls})
       if finish_reason == "stop": finish_reason = "tool_calls"
-    yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
-    if include_usage:
-      yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
-                                      "total_tokens": prompt_tokens + len(out)}, **tmpl}
+    yield chunk({}, finish_reason)
+    if include_usage: yield {"choices": [], "usage": usage(), **tmpl}
   def do_POST(self):
     request_st = time.perf_counter()
     log_prefix = f"{self.path}  {colored('--', 'BLACK')}  "
@@ -157,7 +162,10 @@ class Handler(VizHandler):
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       req = Request(ids, functools.partial(disconnected, self.connection), max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
                     log_prefix=log_prefix)
-      chunks = self.run_model(req, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
+      stream_options = body.get("stream_options", {})
+      include_usage = not body.get("stream") or stream_options.get("include_usage", False)
+      continuous_usage = include_usage and stream_options.get("continuous_usage_stats", False)
+      chunks = self.run_model(req, body["model"], include_usage, continuous_usage=continuous_usage,
                               reasoning=rendered.rstrip().endswith(tuple(f[0] for f in StreamRouter.FORMATS)))
       if body.get("stream"): self.stream_json(chunks)
       else:
@@ -208,7 +216,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
 
   def generate(self, req:Request):
     n, finished = 0, False
-    cache_start_pos = self.model.get_start_pos(req.ids)
+    req.cached_tokens = cache_start_pos = self.model.get_start_pos(req.ids)
     stderr_log(req.log_prefix + f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(req.ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
     prompt_tokens = len(req.ids)
     st = pt = time.perf_counter()
