@@ -1,5 +1,5 @@
 # all of symbolic lives here now
-import math, functools
+import math
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, BottomUpGate, exec_alu, promo_dtype, identity_element
 from tinygrad.dtype import PyConst, ConstFloat, AddrSpace, dtypes, can_lossless_cast, Invalid, bitcast, truncate
@@ -365,8 +365,6 @@ def _keep_range(ctx:dict[UOp, UOp], r:UOp) -> None:
 pm_keep_range = PatternMatcher([(UPat(Ops.RANGE, name="r"), _keep_range)])
 pm_keep_range.order_free = True  # ctx (the substitute dict) is only read
 
-# NOTE: it only depends on the UOps, so it's cached. the cache is bounded and global, valid can contain uop so caching on uop could make a cycle
-@functools.lru_cache(maxsize=4096)
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # return simplified uop (might be the same as input)
 

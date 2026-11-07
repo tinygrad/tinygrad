@@ -144,6 +144,16 @@ pm_fix_deviceless = PatternMatcher([
     lambda ctx,b: b.replace(arg=replace(b.arg, device=ctx)) if b.arg.device is None else None),
 ])
 
+def reshape_idx(idx:tuple[int, ...], in_shape:tuple[sint, ...], out_shape:tuple[sint, ...]) -> tuple[int, ...]|None:
+  """the index into in_shape of the int index idx into the reshape of in_shape to out_shape, None if the shapes aren't ints"""
+  if not all_int(in_shape) or not all_int(out_shape) or not all(s > 0 for s in in_shape): return None
+  flat, ret = 0, []
+  for i,s in zip(idx, out_shape, strict=True): flat = flat*s + i
+  for s in reversed(in_shape):
+    flat, r = divmod(flat, s)
+    ret.append(r)
+  return tuple(reversed(ret))
+
 @functools.cache
 def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:UOp) -> UOp:
   acc:sint = 1
@@ -173,14 +183,8 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
         symbolic+pm_simplify_valid, name="pad")) for r,sh,(off,sz) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
       # fast path: const indices fold to consts, this is what the symbolic below does without the rewrites
-      if all(r.op is Ops.CONST and r.dtype is dtypes.weakint for r in rngs) and all_int(in_shape) and all_int(arg) and all(s > 0 for s in in_shape):
-        flat = 0
-        for r,s in zip(rngs, arg, strict=True): flat = flat*s + r.arg
-        out: list[int] = []
-        for s in reversed(in_shape):
-          out.append(flat % s)
-          flat //= s
-        return tuple(UOp.const(v) for v in reversed(out))
+      if all(r.op is Ops.CONST and r.dtype is dtypes.weakint for r in rngs) and (ret:=reshape_idx(tuple(r.arg for r in rngs), in_shape, arg)):
+        return tuple(UOp.const(v) for v in ret)
       sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
       sub_array = {r:r.replace(arg=(AxisType.PLACEHOLDER, i)) for i,r in enumerate(sink.ranges)}
       rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src

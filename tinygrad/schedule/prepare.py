@@ -187,7 +187,7 @@ pm_disk_copy = PatternMatcher([
    x.replace(src=(copy.replace(src=(x.src[0],)),)+x.src[1:]) if x.on_disk() else None),
 ])
 
-earliest_rewrites = PatternMatcher([
+earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve allreduce (must be bottom up)
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
 
@@ -252,9 +252,7 @@ earliest_rewrites = PatternMatcher([
   (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=tuple(walk_mop(u) for u in s.src if u.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="s"), lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u) for u in s.src[1:] if u.op is not Ops.NOOP))),
 ])
-# NOTE: these make new buffers, the order of the rewrites is the order of the buffer numbers
-earliest_rewrites.order_free = False
-earliest_rewrites = mop_cleanup+earliest_rewrites
+earliest_rewrites.order_free = False  # the copy and allreduce rules make new buffers
 
 @rewrite_group(new_ctx=False)
 def prepare_rangeify(sink:UOp) -> UOp:

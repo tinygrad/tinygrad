@@ -1,32 +1,27 @@
 import unittest
+from unittest.mock import patch
 from tinygrad import Tensor
 from tinygrad.function import function
 from tinygrad.uop.ops import UOp, RewriteContext
 
-class _CountInOrderFree:
-  # counts the UOp.unique_num draws made while graph_rewrite is using a rewriter that doesn't keep the rewrite order
-  def __init__(self, cnt): self.cnt, self.depth, self.draws = cnt, 0, 0
-  def __next__(self):
-    if self.depth: self.draws += 1
-    return next(self.cnt)
-
 class TestOrderFreeRewrite(unittest.TestCase):
-  # graph_rewrite uses faster rewriters if PatternMatcher.order_free. new buffer numbers are in the order of the rewrites,
+  # graph_rewrite uses fast_rewrite if the PatternMatchers are order_free. new buffer numbers are in the order of the rewrites,
   # so the patterns that make new buffers must set order_free = False
   def setUp(self):
-    self.counter = _CountInOrderFree(UOp.unique_num)
-    self.orig = (UOp.unique_num, RewriteContext.topo_rewrite, RewriteContext.bottom_up_rewrite)
-    def wrap(fxn):
-      def wrapped(rctx, root):
-        self.counter.depth += 1
-        try: return fxn(rctx, root)
-        finally: self.counter.depth -= 1
-      return wrapped
-    UOp.unique_num = self.counter  # type: ignore[assignment]
-    RewriteContext.topo_rewrite, RewriteContext.bottom_up_rewrite = wrap(self.orig[1]), wrap(self.orig[2])
+    self.depth, self.draws, cnt, fast_rewrite = 0, 0, UOp.unique_num, RewriteContext.fast_rewrite
+    def counted():
+      for x in cnt:
+        self.draws += self.depth > 0
+        yield x
+    def wrapped(rctx, root):
+      self.depth += 1
+      try: return fast_rewrite(rctx, root)
+      finally: self.depth -= 1
+    self.patches = [patch.object(UOp, "unique_num", counted()), patch.object(RewriteContext, "fast_rewrite", wrapped)]
+    for p in self.patches: p.start()
   def tearDown(self):
-    UOp.unique_num, RewriteContext.topo_rewrite, RewriteContext.bottom_up_rewrite = self.orig
-    self.assertEqual(self.counter.draws, 0)
+    for p in self.patches: p.stop()
+    self.assertEqual(self.draws, 0)
 
   def test_realize(self):
     # the second one is a schedule cache hit
@@ -45,6 +40,7 @@ class TestOrderFreeRewrite(unittest.TestCase):
     def outer(a:Tensor, b:Tensor) -> Tensor: return inner(a.reshape(1,2) + b.reshape(1,2))
     a, b = Tensor.ones(2).contiguous(), Tensor.ones(2).contiguous()
     outer(a, b).sum().backward()
+    assert a.grad is not None and b.grad is not None
     Tensor.realize(a.grad, b.grad)
 
 if __name__ == '__main__':

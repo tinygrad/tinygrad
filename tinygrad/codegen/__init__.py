@@ -24,11 +24,11 @@ from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.prepare import pm_mops
-from tinygrad.schedule.indexing import _stack_select
+from tinygrad.schedule.indexing import _stack_select, reshape_idx
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, argsort, partition, to_function_name, all_int, disable_gc
+from tinygrad.helpers import all_same, argsort, partition, to_function_name, disable_gc
 from tinygrad.device import TinyELF
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
@@ -76,16 +76,14 @@ def expand_wmma(ctx:dict[tuple, int], u:UOp):
   wmma = u.replace(src=(contract_axis(u.src[0], in0), contract_axis(u.src[1], in1), u.src[2]), arg=(*u.arg[:3], None))
   return unroll_axis(wmma, out0, [sz for _,sz in u.arg[3][2]])
 
-pm_expand = PatternMatcher([
+expander = PatternMatcher([
   (UPat(Ops.REDUCE, name="r"), expand_reduce),
   (UPat(Ops.RANGE, name="r"),
    lambda ctx, r: UOp.const(tuple(range(r.vmax+1)), r.dtype) \
     .reshape(tuple([r.vmax+1 if i == ctx[r.arg] else 1 for i in range(len(ctx))])) if r.arg in ctx else None),
   (UPat(Ops.WMMA, name="u"), expand_wmma),
-])
-# the range map is only read
-pm_expand.order_free = True
-expander = pm_expand+pm_flatten_range+mop_cleanup
+])+pm_flatten_range+mop_cleanup
+expander.order_free = True  # the range map is only read
 
 def expand_broadcast(x:UOp):
   shapes = [u._shape for u in x.src]
@@ -137,18 +135,8 @@ def _lanes(x:UOp, idxs:list[tuple[int, ...]]) -> list[UOp|None]:
         perm = argsort(x.marg)
         idxs = [tuple(i[p] for p in perm) for i in idxs]
       case Ops.RESHAPE:
-        in_shape, out_shape = x.src[0].shape, x.marg
-        if not all_int(in_shape) or not all_int(out_shape) or not all(sz > 0 for sz in in_shape): return [None]*len(idxs)
-        new_idxs = []
-        for idx in idxs:
-          flat = 0
-          for i,sz in zip(idx, out_shape): flat = flat*sz + i
-          new_idx: list[int] = []
-          for sz in reversed(in_shape):
-            new_idx.append(flat % sz)
-            flat //= sz
-          new_idxs.append(tuple(reversed(new_idx)))
-        idxs = new_idxs
+        if None in (new_idxs:=[reshape_idx(i, x.src[0].shape, x.marg) for i in idxs]): return [None]*len(idxs)
+        idxs = cast(list[tuple[int, ...]], new_idxs)
       case _:
         if x.shape == (): return [x if not i else None for i in idxs]
         # a full const index into anything else is what pushing the INDEX through the movement ops above gives
@@ -316,7 +304,6 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
-# NOTE: UOps don't make reference cycles, the cyclic gc running during codegen only costs time (like schedule_linear)
 @disable_gc()
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(render_uir(ast))
