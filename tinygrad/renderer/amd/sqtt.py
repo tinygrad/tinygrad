@@ -669,6 +669,10 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       if (inst:=pc_map[pc:=wave_pc[key]]).op_name not in {'S_NOP', 'S_WAITCNT', 'S_SETPRIO'}: continue
       wave_pc[key] += inst.size()
       yield (p, InstructionInfo(pc, key[1], inst))
+  # s_delay_alu, s_wait_alu and s_barrier_wait instructions are skipped
+  def next_inst(key:tuple[int, int]) -> tuple[int, Inst]:
+    while getattr(inst:=pc_map[pc:=wave_pc[key]], 'op_name', '') in {"S_DELAY_ALU", "S_WAIT_ALU", "S_BARRIER_WAIT"}: wave_pc[key] += inst.size()
+    return pc, inst
   # RDNA selects one SIMD for instruction tracing, CDNA traces multiple SIMDs
   simd:int = 0
   for p in decode(data):
@@ -684,7 +688,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       # immediate mask may yield multiple times per packet
       for wave in range(16):
         if p.mask & (1 << wave):
-          inst = pc_map[pc:=wave_pc[(simd, wave)]]
+          pc, inst = next_inst((simd, wave))
           wave_pc[(simd, wave)] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
     elif isinstance(p, CDNA_ISSUE):
@@ -704,13 +708,9 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       yield from cdna_imm_dequeue((p.simd, p.wave))
     # map INST events on this SIMD to the program counter, we know the waves
     elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)) and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_")):
-      inst = pc_map[pc:=wave_pc[(simd, p.wave)]]
-      # s_delay_alu, s_wait_alu and s_barrier_wait instructions are skipped
-      while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU", "S_BARRIER_WAIT"}:
-        wave_pc[(simd, p.wave)] += inst.size()
-        inst = pc_map[pc:=wave_pc[(simd, p.wave)]]
+      pc, inst = next_inst((simd, p.wave))
       # assert branch always has a JUMP packet
-      if "BRANCH" in inst_op and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("JUMP")):
+      if "BRANCH" in (inst_op:=getattr(inst, 'op_name', '')) and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("JUMP")):
         raise AssertionError(f"{inst_op} can only be followed by JUMP, got {p}")
       # JUMP handling
       if isinstance(p, (INST, INST_RDNA4)) and p.op in {InstOp.JUMP, InstOpRDNA4.JUMP}:
