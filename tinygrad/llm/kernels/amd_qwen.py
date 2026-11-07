@@ -2214,6 +2214,47 @@ def _argmax_parts(devs:tuple[str, ...], local:int, n:int) -> tuple[Tensor, Tenso
   return (Tensor([max(0, min(local, n - i*local)) for i in range(N)], dtype=dtypes.int32).shard(devs, 0).realize(),
           Tensor([[i*local] for i in range(N)], dtype=dtypes.int32).to(devs).realize())
 
+@functools.cache
+def _argmax_chunks_kernel(out:UOp, x:UOp, count:UOp) -> UOp:
+  # out (B, C, 2): the max of every chunk of a row's first count values and its first index (as local_argmax, a workgroup a chunk)
+  B, V = cast(tuple[int, int], x.shape)
+  C, T = int(out.shape[1]), 256
+  CW = round_up((V + C - 1) // C, T)
+  row, c, t = UOp.range(B, 0, AxisType.GLOBAL), UOp.range(C, 1, AxisType.GLOBAL), UOp.range(T, 2, AxisType.LOCAL)
+  n = count[0].load()
+  best, idx = UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG), UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
+  best = best.after(best[0].store(UOp.const(-math.inf, dtypes.float32)))
+  idx = idx.after(idx[0].store(UOp.const(0, dtypes.int32)))
+  i = UOp.range(CW // T, 3, AxisType.LOOP)
+  col = c*CW + i*T + t
+  v = ((col < n) & (col < V)).where(x[row, col.minimum(V-1)].load().float(), UOp.const(-math.inf, dtypes.float32))
+  cb, ci = best.after(i)[0].load(), idx.after(i)[0].load()
+  better = v > cb
+  upd = UOp.group(best[0].store(better.where(v, cb)), idx[0].store(better.where(col.cast(dtypes.int32), ci))).end(i)
+  vb, vi = best.after(upd)[0].load(), idx.after(upd)[0].load()
+  lds = UOp.alloc((T, 2), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  lds = lds.after(UOp.group(lds[t, 0].store(vb), lds[t, 1].store(vi.bitcast(dtypes.float32))).barrier())
+  win_v, win_i = lds[0, 0].load(), lds[0, 1].load().bitcast(dtypes.int32)
+  for j in range(1, T):
+    v2, i2 = lds[j, 0].load(), lds[j, 1].load().bitcast(dtypes.int32)
+    take = (v2 > win_v) | (v2.eq(win_v) & (i2 < win_i))
+    win_v, win_i = take.where(v2, win_v), take.where(i2, win_i)
+  return UOp.group(out[row, c, UOp.const(0, dtypes.weakint).valid(t.eq(0))].store(win_v),
+                   out[row, c, UOp.const(1, dtypes.weakint).valid(t.eq(0))].store(win_i.bitcast(dtypes.float32))).end(row, c, t) \
+    .sink(arg=KernelInfo(name="argmax_chunks", opts_to_apply=()))
+
+@functools.cache
+def _argmax_final_kernel(out:UOp, parts:UOp) -> UOp:
+  # out (B, 2): the first max of the chunks of a row (in order: the lowest index of the max)
+  B, C = int(parts.shape[0]), int(parts.shape[1])
+  row = UOp.range(B, 0, AxisType.GLOBAL)
+  win_v, win_i = parts[row, 0, 0].load(), parts[row, 0, 1].load()
+  for c in range(1, C):
+    v2, i2 = parts[row, c, 0].load(), parts[row, c, 1].load()
+    take = v2 > win_v
+    win_v, win_i = take.where(v2, win_v), take.where(i2, win_i)
+  return UOp.group(out[row, 0].store(win_v), out[row, 1].store(win_i)).end(row).sink(arg=KernelInfo(name="argmax_final", opts_to_apply=()))
+
 def sharded_argmax(x:Tensor, n:int) -> Tensor|None:
   """
   x (B, V) split on its last axis over the devices: the argmax (B, 1) int32 of the first n columns (the first max) on every device. every
@@ -2224,7 +2265,12 @@ def sharded_argmax(x:Tensor, n:int) -> Tensor|None:
   N, (B, V) = len(devs), x.shape
   count, first = _argmax_parts(devs, local:=int(V) // N, n)
   part = Tensor.empty(N*B, 2, dtype=dtypes.float32, device=devs, axis=0)
-  part = Tensor.custom_kernel(part, x.contiguous(), count, fxn=_local_argmax_kernel)[0]
+  if (C:=getenv("ARGMAX_CHUNKS", 32)) > 1 and local >= C*256:
+    # (a row's chunks a workgroup each, then their max: one workgroup a row is a long serial scan)
+    chunks = Tensor.empty(N*B, C, 2, dtype=dtypes.float32, device=devs, axis=0)
+    chunks = Tensor.custom_kernel(chunks, x.contiguous(), count, fxn=_argmax_chunks_kernel)[0]
+    part = Tensor.custom_kernel(part, chunks, fxn=_argmax_final_kernel)[0]
+  else: part = Tensor.custom_kernel(part, x.contiguous(), count, fxn=_local_argmax_kernel)[0]
   if (g:=host_allgather(part.reshape(N, B*2))) is None: return None
   g = g.reshape(N, B, 2)
   vals, idxs = g[..., 0], g[..., 1].bitcast(dtypes.int32) + first
