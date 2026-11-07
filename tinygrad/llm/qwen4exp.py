@@ -10,8 +10,8 @@ from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custo
   q8_quantize_cache_clear, moe_route, moe_grouped_linear, partial_sum, fuse_gate_up, kda_decode, pool_index_rows, slot_scatter, \
   slot_gather, moe_combine, token_sharded, shard_rows, reduce_scatter, all_gather, all_gather_q8, sharded_argmax, skinny_matmul, kda_conv, \
   kda_replay, tables_ready, MOE_TILE, I8_WMMA_QUANTS, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, \
-  Q8_0, IQ3_S, weighted_sum, ghc_decode_mix, rows_gather, rows_scatter, seq_scores, seq_index, kv_q8_pack, qsa_decode_attention, FLAG_LANE, \
-  DEC_LANE, flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, \
+  Q8_0, IQ3_S, q8_embed, weighted_sum, ghc_decode_mix, rows_gather, rows_scatter, seq_scores, seq_index, kv_q8_pack, qsa_decode_attention, \
+  FLAG_LANE, DEC_LANE, flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, \
   after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus
 from tinygrad.llm.gguf import gguf_parse, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm.direct_read import DirectFile, read_many, close_rings
@@ -1589,6 +1589,7 @@ class QwenMTPBlock(QSABlock):
     return self.hc_head.mixed(streams)
 
 class Transformer:
+  _embd_q8:Tensor|None = None  # (the token embedding's Q8_0 bytes in host memory, see _embed)
   def __init__(self, config:TransformerConfig):
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
@@ -1785,6 +1786,12 @@ class Transformer:
     win = buf.pad(((0, 0), (k, 0)), value=ple.eos)[0].shrink(((base + start, base + start + n),))
     if isinstance(base, int) and base == 0: return win
     return ((Tensor.arange(n) + Tensor(start - k)).to(buf.device) >= 0).where(win, ple.eos)
+
+  def _embed(self, tokens:Tensor) -> Tensor:
+    """the embeddings (..., dim) in float of tokens on the devices: a Q8_0 table in host memory read by its rows (not the generic gather)"""
+    if (raw:=getattr(self, "_embd_q8", None)) is not None and amd_custom_kernels_supported(tokens.device) and isinstance(tokens.numel(), int):
+      return q8_embed(raw, tokens.reshape(-1), self.config.dim).reshape(*tokens.shape, self.config.dim)
+    return self.token_embd(tokens).float()
 
   def _sample(self, h:Tensor, temperature:Tensor|None, device:str|tuple[str, ...]|None, noise:tuple[Tensor, Tensor]|None=None) -> Tensor:
     """
@@ -2343,7 +2350,7 @@ class Transformer:
     try:
       # the MTP layer catches up on the k+1 positions from mtp_pos, row j of every sequence drafts
       _seq_batch[0], _batch_rows[0] = batch(mp, k+1), [(p, k+1) for p in mp]
-      emb = self.token_embd(y.to(devs)).float()
+      emb = self._embed(y.to(devs))
       if split:
         # (its rows split over the devices as the model's, its streams gathered for the drafts' head and the next pass)
         _seq_split[0] = G*(k+1) // N
@@ -2360,12 +2367,12 @@ class Transformer:
         if i < k-1:
           pos = [p + j + 1 + i for p, j in zip(mp, js)]
           _seq_batch[0], _batch_rows[0] = batch(pos, 1), [(p, 1) for p in pos]
-          m = mtp.predict(self.token_embd(drafts[-1].to(devs)).float(), m.flatten(2), 0)
+          m = mtp.predict(self._embed(drafts[-1].to(devs)), m.flatten(2), 0)
       # verify: the model on every sequence's token at start_pos (mtp_pos+j) and its drafts
       vt = Tensor.cat(*[y.shrink((None, (g*(k+1)+j, g*(k+1)+j+1))).cat(*[d[:, g:g+1] for d in drafts], dim=1) for g, j in enumerate(js)],
                       dim=1).contiguous()
       starts = [p + j for p, j in zip(mp, js)]
-      x = self.token_embd(vt.to(devs)).float()
+      x = self._embed(vt.to(devs))
       # (the n-gram rows: every sequence's tokens before its start from the token buffer, then its verified ones)
       n = len(ple.multipliers)
       wins = Tensor.cat(*[self._token_window(self._token_buf, b, s, n-1).reshape(1, n-1) for b, s in zip(bs, starts)])
@@ -2541,12 +2548,13 @@ class Transformer:
     fuse = {g: u for g in units_map if g.endswith("ffn_gate_exps.weight") and (u:=g.replace("gate", "up")) in units_map and
             entries[g][2] == entries[u][2] and file_of(entries[g][0]) == file_of(entries[u][0])}
     # a token embedding copied to every device (a vocab that doesn't split) stays in host memory: a call looks up a few of its rows
-    host_embd = None
+    host_embd, embd_q8 = None, None
     if 'token_embd.weight' not in shard_map and 'output.weight' in entries:
       data, shape, typ = entries.pop('token_embd.weight')
       mv, raw = _host_buffer(devices, int(data.nbytes()))
       mv[:] = data.to("CPU").data()
       host_embd = ggml_data_to_tensor(raw, prod(shape), typ).reshape(shape)
+      if typ == Q8_0: embd_q8 = raw
     state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads, fuse, row_sel=rows_map)
     if host_embd is not None: state_dict['token_embd.weight'] = host_embd
     state_dict = {k:v.cast('float16') for k,v in state_dict.items()}
@@ -2604,6 +2612,7 @@ class Transformer:
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     model._loaded = True
+    model._embd_q8 = embd_q8
     # (the n-gram table: the bytes in the gguf file, mmapped, or a copy in host memory)
     if ple_entry is not None:
       model.ple_table = _disk_bytes(ple_entry[0]) or cast(Buffer, ple_entry[0].to("CPU").realize().uop.base.buffer).as_memoryview()

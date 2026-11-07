@@ -3930,6 +3930,21 @@ def kv_q8_pack(x:Tensor) -> Tensor:
   return words.cat(sc.reshape(*x.shape[:-1], D//32).bitcast(dtypes.uint32), dim=-1)
 
 
+@functools.cache
+def _q8_embed_kernel(out:UOp, raw:UOp, ids:UOp) -> UOp:
+  # out (R, D) <- the rows ids (R,) of a Q8_0 table raw (bytes: 34 a block of 32), dequantized as the gguf loader does (in float, then half)
+  R, D = cast(tuple[int, int], out.shape)
+  r, blk, lane = UOp.range(R, 0, AxisType.GLOBAL), UOp.range(D//32, 1, AxisType.GLOBAL), UOp.range(32, 2, AxisType.LOCAL)
+  base = ids[r].load().cast(dtypes.weakint)*(D//32*34) + blk*34
+  d = (raw[base].load().cast(dtypes.uint16) | (raw[base+1].load().cast(dtypes.uint16) << 8)).bitcast(dtypes.half).float()
+  q = raw[base+2+lane].load().bitcast(dtypes.int8).float()
+  return out[r, blk*32+lane].store((d*q).cast(dtypes.half).float()).end(r, blk, lane).sink(arg=KernelInfo(name="q8_embed", opts_to_apply=()))
+
+def q8_embed(raw:Tensor, ids:Tensor, dim:int) -> Tensor:
+  """the rows ids (n,) of the Q8_0 table raw (uint8, rows of dim) as float (n, dim)"""
+  out = Tensor.empty(int(ids.shape[0]), dim, dtype=dtypes.float32, device=ids.device)
+  return Tensor.custom_kernel(out, raw, ids.cast(dtypes.int32).contiguous(), fxn=_q8_embed_kernel)[0]
+
 def rows_gather(table:Tensor, idx:Tensor, dtype:DType|None=None, const:bool=False) -> Tensor:
   """
   the rows idx (n,) int32 of table (P, F): (n, F) (a table split on its rows: every device's of its own). const: the table isn't written while
