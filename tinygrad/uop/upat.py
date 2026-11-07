@@ -1,5 +1,5 @@
-from typing import Any, Callable, cast
-import itertools, inspect, functools, types, hashlib, marshal, sys, ast, copy, pathlib, os, operator, re, pickle
+from typing import Any, Callable
+import itertools, inspect, functools, types, hashlib, marshal, sys
 from tinygrad.helpers import partition, dedup, Context, diskcache_get, diskcache_put
 from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UPat, UOp, Ops, PatternMatcher, graph_rewrite, deconstruct_function, upat_interpret
@@ -143,99 +143,9 @@ pm_renderer = PatternMatcher([
 
 # leaf modes: "single" returns from a standalone matcher, "merged" falls through to the next pattern if the fxn returns uop,
 # "merged_loop" is "merged" for patterns with forks: it's wrapped in a `while True:` so `break` exits the pattern
-def _call_args(stores:list[tuple[str, str]], has_ctx:bool, params:tuple[str, ...]|None) -> str:
-  """the args for calling the pattern fxn. positional (faster) if params is the fxn's positional args, else keywords"""
-  named = dict(stores)
-  if has_ctx: named["ctx"] = "ctx"
-  if params is not None and set(params) == set(named): return ', '.join(named[p] for p in params)
-  return ', '.join(f"{k}={v}" for k,v in named.items())
+def _call_args(stores:list[tuple[str, str]], has_ctx:bool) -> str: return ', '.join((["ctx=ctx"] if has_ctx else [])+[f"{k}={v}" for k,v in stores])
 
-def _positional_params(fxn:Callable) -> tuple[str, ...]|None:
-  # the names of the args of fxn if they are all positional (no defaults, *args, **kwargs or keyword only args)
-  co = fxn.__code__
-  if co.co_flags & (inspect.CO_VARARGS | inspect.CO_VARKEYWORDS) or co.co_kwonlyargcount or fxn.__defaults__: return None
-  return co.co_varnames[:co.co_argcount]
-
-# **** lambda inlining ****
-# a pattern's lambda is inlined into the compiled matcher: its args are replaced with the matched expressions, so `lambda x: x` is just
-# `return uop.src[0]`. globals are bound by value into the compiled code, like deconstruct_function does
-
-@functools.cache
-def _module_lambdas(filename:str) -> dict[int, list[ast.Lambda]]:
-  """all the lambdas in a source file, by the line they start on"""
-  try: tree = ast.parse(pathlib.Path(filename).read_text())
-  except (OSError, SyntaxError): return {}
-  ret: dict[int, list[ast.Lambda]] = {}
-  for n in ast.walk(tree):
-    if isinstance(n, ast.Lambda): ret.setdefault(n.lineno, []).append(n)
-  return ret
-
-def _lambda_ast(fxn:Callable) -> ast.Lambda|None:
-  """the ast of a lambda, from its source file. the lambda is the innermost one whose body contains all the code positions"""
-  co = fxn.__code__
-  if co.co_name != "<lambda>": return None
-  # NOTE: the first instruction (RESUME) has the position of the def
-  pos = [(l, c, el, ec) for l, el, c, ec in list(co.co_positions())[1:] if None not in (l, c, el, ec)]
-  if not pos: return None
-  def contains(b:ast.expr) -> bool:
-    return all((b.lineno, b.col_offset) <= (l, c) and (el, ec) <= (cast(int, b.end_lineno), cast(int, b.end_col_offset)) for l,c,el,ec in pos)
-  # NOTE: the lambda starts on co_firstlineno
-  cands = [n for n in _module_lambdas(co.co_filename).get(co.co_firstlineno, []) if contains(n.body)]
-  return min(cands, key=lambda n: (cast(int, n.end_lineno)-n.lineno, cast(int, n.end_col_offset)-n.col_offset)) if cands else None
-
-def _lambda_template(fxn:Callable) -> tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...]]|None:
-  """(body source with __ARG_x__/__GLB_x__/__BND_x__ placeholders, arg names, global names, bound names) of a lambda, None if it can't be inlined"""
-  co = fxn.__code__
-  if co.co_name != "<lambda>": return None
-  try: st = os.stat(co.co_filename)
-  except OSError: return None
-  key = hashlib.sha256(repr((co.co_filename, st.st_mtime_ns, st.st_size, co.co_firstlineno, list(co.co_positions()))).encode()).hexdigest()
-  if (ret:=diskcache_get("lambda_template", key)) is not None: return ret[0]
-  diskcache_put("lambda_template", key, (ret:=(_make_lambda_template(fxn),)))
-  return ret[0]
-
-def _make_lambda_template(fxn:Callable) -> tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...]]|None:
-  if (lam:=_lambda_ast(fxn)) is None: return None
-  a = lam.args
-  if a.vararg or a.kwarg or a.kwonlyargs or a.defaults or a.posonlyargs: return None
-  args = tuple(x.arg for x in a.args)
-  body = copy.deepcopy(lam.body)
-  if any(isinstance(n, ast.Lambda) for n in ast.walk(body)): return None
-  fglobs = fxn.__globals__
-  builtins = b if isinstance(b:=getattr(fxn, "__builtins__"), dict) else vars(b)
-  # names bound in the body (comprehension targets, walrus) are renamed, they can't shadow anything
-  bound = {n.id for n in ast.walk(body) if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del))}
-  if bound & (set(args) | set(fglobs) | set(builtins)): return None
-  gnames: list[str] = []
-  class Rename(ast.NodeTransformer):
-    def visit_Name(self, n:ast.Name):
-      if n.id in bound: return ast.copy_location(ast.Name(f"__BND_{n.id}__", n.ctx), n)
-      if n.id in args: return ast.copy_location(ast.Name(f"__ARG_{n.id}__", n.ctx), n)
-      if n.id in fglobs:
-        if n.id not in gnames: gnames.append(n.id)
-        return ast.copy_location(ast.Name(f"__GLB_{n.id}__", n.ctx), n)
-      if n.id in builtins: return n
-      raise UPatCompileError(f"can't inline {n.id}")
-  try: return ast.unparse(Rename().visit(body)), args, tuple(gnames), tuple(bound)
-  except UPatCompileError: return None
-
-_inline_cnt = itertools.count()
-def _inline_lambda(fxn:Callable, args:dict[str, str], globs:dict[str, Any]) -> str|None:
-  """the body of the lambda fxn as an expression of args (arg name -> expression), adding the globals it needs to globs. None if it can't"""
-  if (tmpl:=_lambda_template(fxn)) is None: return None
-  src, params, gnames, bnames = tmpl
-  if set(params) != set(args): return None
-  uid = next(_inline_cnt)
-  for g in gnames: globs[f"_i{uid}_{g}"] = fxn.__globals__[g]
-  # NOTE: the args are expressions, they are put in parens
-  subs = {f"__GLB_{g}__":f"_i{uid}_{g}" for g in gnames} | {f"__BND_{b}__":f"_i{uid}_b_{b}" for b in bnames} | \
-         {f"__ARG_{k}__":f"({v})" for k,v in args.items()}
-  # longest first, a placeholder can be a prefix of another
-  for k in sorted(subs, key=len, reverse=True): src = src.replace(k, subs[k])
-  return src
-
-def _final_render(x:UOp, has_ctx:bool, depth=1, fxn_name="_fxn", leaf="single", params:tuple[str, ...]|None=None,
-                  call:Callable[[list[tuple[str, str]]], str]|None=None) -> list[str]:
+def _final_render(x:UOp, has_ctx:bool, depth=1, fxn_name="_fxn", leaf="single") -> list[str]:
   # if the whole clause collapsed to a single predicate (no binds), rewrap it
   if x.op is Ops.CALL and x.arg.inline: x = UOp(Ops.AND, (x,))
   assert x.op is Ops.AND
@@ -244,7 +154,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1, fxn_name="_fxn", leaf="single", 
   for s in x.src:
     if s.op is Ops.OR:
       assert len(or_pieces) == 0 and len(s.src) >= 1
-      for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1, fxn_name, leaf, params, call))
+      for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1, fxn_name, leaf))
     elif s.op is Ops.STORE:
       assert all(y.op is Ops.CALL and y.arg.inline for y in s.src)
       store_pieces.append((s.src[0].body.arg.name, s.src[1].body.arg.name))
@@ -256,8 +166,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1, fxn_name="_fxn", leaf="single", 
     and_clause = ' and '.join(and_pieces)
     return [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"] + or_pieces
   # if we don't, this is a final return
-  call_expr = call(store_pieces) if call is not None else f"{fxn_name}({_call_args(store_pieces, has_ctx, params)})"
-  and_clause = ' and '.join(and_pieces + [f"(_ret:={call_expr}) is not None"])
+  and_clause = ' and '.join(and_pieces + [f"(_ret:={fxn_name}({_call_args(store_pieces, has_ctx)})) is not None"])
   if leaf == "single": return [f"{'  '*depth}if {and_clause}: return _ret"]
   if leaf == "merged": return [f"{'  '*depth}if {and_clause} and _ret is not uop: return _ret"]
   return [f"{'  '*depth}if {and_clause}:", f"{'  '*depth}  if _ret is not uop: return _ret", f"{'  '*depth}  break"]
@@ -296,8 +205,7 @@ def compile_cached(code:str, filename:str) -> types.CodeType:
   """compile Python source, with the code object cached on disk (like compiled kernels)"""
   key = hashlib.sha256(f"{sys.version}\n{filename}\n{code}".encode()).hexdigest()
   if (ret:=diskcache_get("python_code", key)) is not None: return marshal.loads(ret)
-  co = compile(code, filename, "exec")
-  diskcache_put("python_code", key, marshal.dumps(co))
+  diskcache_put("python_code", key, marshal.dumps(co:=compile(code, filename, "exec")))
   return co
 
 # **** whole PatternMatcher compiled ****
@@ -310,7 +218,7 @@ _fxn_cnt = itertools.count()
 def _pattern_code(p:UPat, fxn) -> tuple[tuple[str, ...], str, list[str], dict[str, Any]]:
   """returns (conds, leaf, fork_lines, globals) to try pattern p on `uop`. Assumes uop.op in p.op.
   if fork_lines is empty, the pattern is `if all(conds) and leaf: return _ret`, else it's `if all(conds): while True: fork_lines`"""
-  real_fxn = _real_fxn(fxn)
+  real_fxn = types.FunctionType(*deconstruct_function(fxn))
   globs: dict[str, Any] = {(fname:=f"_f{next(_fxn_cnt)}"): real_fxn}
   has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
   try:
@@ -322,15 +230,11 @@ def _pattern_code(p:UPat, fxn) -> tuple[tuple[str, ...], str, list[str], dict[st
     return (), f"(_ret:={fname}(uop, ctx)) is not None", [], globs
   if out.op is Ops.CALL and out.arg.inline: out = UOp(Ops.AND, (out,))
   conds = tuple(s.body.arg.name for s in out.src if s.op is Ops.CALL)
-  params = _positional_params(real_fxn)
-  def call(stores:list[tuple[str, str]]) -> str:
-    # inline the lambda if we can, else call the fxn
-    if (inl:=_inline_lambda(real_fxn, dict(stores) | ({"ctx":"ctx"} if has_ctx else {}), globs)) is not None: return f"({inl})"
-    return f"{fname}({_call_args(stores, has_ctx, params)})"
   if any(s.op is Ops.OR for s in out.src):
-    fork_lines = [l for s in out.src if s.op is Ops.OR for ss in s.src for l in _final_render(ss, has_ctx, 0, fname, "merged_loop", call=call)]
+    fork_lines = [l for s in out.src if s.op is Ops.OR for ss in s.src for l in _final_render(ss, has_ctx, 0, fname, "merged_loop")]
     return conds, "", fork_lines + ["break"], globs
-  return conds, f"(_ret:={call([(s.src[0].body.arg.name, s.src[1].body.arg.name) for s in out.src if s.op is Ops.STORE])}) is not None", [], globs
+  stores = [(s.src[0].body.arg.name, s.src[1].body.arg.name) for s in out.src if s.op is Ops.STORE]
+  return conds, f"(_ret:={fname}({_call_args(stores, has_ctx)})) is not None", [], globs
 
 def _early_reject_implied(p:UPat) -> bool:
   # the default early_reject is the set of single ops in the src, if the src is a tuple (or permutations) these are all checked by the matcher
@@ -358,400 +262,23 @@ def _render_pats(pats:list[tuple[tuple[str, ...], str, list[str], str]], depth:i
     i = j
   return ret
 
-def _op_compat(q:UPat, o:Ops) -> bool:
-  if q.is_any: return any(_op_compat(x, o) for x in q.src[0])
-  return q.op is None or o in q.op
-
-def _sig_compat(p:UPat, sig:tuple[Ops, ...]) -> bool:
-  """False if p can't match a UOp whose srcs have these ops"""
-  if not p.early_reject.issubset(sig) or len(sig) < p.required_len or (p.strict_length and len(sig) != p.required_len): return False
-  if p.src is None: return True
-  if isinstance(p.src[0], itertools.repeat): return all(_op_compat(cast(UPat, p._in_src), o) for o in sig)
-  return any(all(_op_compat(q, o) for q,o in zip(ss, sig)) for ss in p.src)
-
-def _render_matcher(name:str, items:list[tuple[UPat, tuple]], sig:tuple[Ops, ...]|None) -> Callable:
-  """the matcher for the patterns in items, in order. if sig is the ops of the srcs, only the patterns that can match are in it"""
+@functools.cache
+def pm_compile_op(op:Ops, pats:tuple[tuple[UPat, Callable], ...]) -> Callable:
   globs: dict[str, Any] = {}
   rpats: list[tuple[tuple[str, ...], str, list[str], str]] = []
   need_ler = False
-  for i,(p,(conds, leaf, fork_lines, pglobs)) in enumerate(items):
-    if sig is not None and not _sig_compat(p, sig): continue
+  for i,(p,fxn) in enumerate(pats):
+    conds, leaf, fork_lines, pglobs = _pattern_code(p, fxn)
     globs.update(pglobs)
-    # NOTE: with sig, the early_reject is known
-    if sig is None and len(p.early_reject) and not _early_reject_implied(p):
+    if len(p.early_reject) and not _early_reject_implied(p):
       need_ler = True
       globs[ername:=f"_er{i}"] = frozenset(p.early_reject)
       conds = (f"{ername}.issubset(_ler)",) + conds
     rpats.append((conds, leaf, fork_lines, f"{p.location[0].split('/')[-1]}:{p.location[1]}"))
   pre = ["if (_ler:=uop.__dict__.get('_src_ops')) is None: uop.__dict__['_src_ops'] = _ler = {u.op for u in uop.src}"] if need_ler else []
-  code = '\n'.join([f"def {name}(uop, ctx):"] + ["  "+l for l in pre] + _render_pats(rpats, 1) + ["  return None"])
-  if sig is not None: code = _fold_sig(code, sig, globs)
+  code = '\n'.join([f"def compiled_pm_{op.name}(uop, ctx):"] + ["  "+l for l in pre] + _render_pats(rpats, 1) + ["  return None"])
   namespace: dict = {}
-  exec(compile_cached(code, f"<{name}>"), globs, namespace)  # pylint: disable=W0122
-  fxn = namespace[name]
+  exec(compile_cached(code, f"<compiled_pm_{op.name}>"), globs, namespace)  # pylint: disable=W0122
+  fxn = namespace[f"compiled_pm_{op.name}"]
   fxn.__source__ = code
   return fxn
-
-def _fold_sig(code:str, sig:tuple[Ops, ...], globs:dict[str, Any]) -> str:
-  """the checks on the number and ops of the srcs of uop are known with sig, they become True/False and python removes the dead code"""
-  def src_op(m:re.Match) -> str:
-    if (i:=int(m.group(1))) >= len(sig): return m.group(0)
-    return str(sig[i] is globs[m.group(3)] if m.group(2) == "is" else sig[i] in globs[m.group(3)])
-  code = re.sub(r"\buop\.src\[(\d+)\]\.op (is|in) (_l\d+)\b", src_op, code)
-  def src_len(m:re.Match) -> str: return str(len(sig) == int(m.group(2)) if m.group(1) == "==" else len(sig) >= int(m.group(2)))
-  return re.sub(r"\blen\(uop\.src\) (==|>=) (\d+)\b", src_len, code)
-
-# matchers with many patterns dispatch on the ops of the srcs. a signature seen SIG_HOT times gets its own matcher with only the patterns
-# that can match it, the others use the generic matcher
-SIG_MIN_PATS, SIG_HOT = 8, 4
-
-# **** disk cache of the generic matchers ****
-# the code of a matcher is cached with a recipe to rebuild its globals from the patterns (the fxns, their globals for inlined lambdas,
-# literals, early rejects). the key is the structure of the patterns and the code of their fxns
-
-@functools.cache
-def _compiler_version() -> str: return hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()
-
-@functools.cache
-def _pat_key(p:UPat, fxn:Callable) -> bytes|None:
-  try: return hashlib.sha256(pickle.dumps(p) + marshal.dumps(fxn.__code__) + pickle.dumps(fxn.__defaults__)).digest()
-  except Exception: return None
-
-def _pm_key(op:Ops, pats:tuple[tuple[UPat, Callable], ...]) -> str|None:
-  if any(_pat_key(p, fxn) is None for p,fxn in pats): return None
-  return hashlib.sha256(_compiler_version().encode() + op.name.encode() + b"".join(cast(bytes, _pat_key(p, fxn)) for p,fxn in pats)).hexdigest()
-
-def _make_recipe(items:list[tuple[UPat, tuple]], pats:tuple[tuple[UPat, Callable], ...], globs:dict[str, Any]) -> dict[str, tuple]|None:
-  recipe: dict[str, tuple] = {}
-  for i,(_,(_,_,_,pglobs)) in enumerate(items):
-    fxn = pats[i][1]
-    for name,v in pglobs.items():
-      if name not in globs: continue
-      if name.startswith("_f"): recipe[name] = ("fxn", i) if getattr(v, "__code__", None) is fxn.__code__ else ("interp", i)
-      elif name.startswith("_l"): recipe[name] = ("lit", v)
-      elif (m:=re.fullmatch(r"_i\d+_(.+)", name)) and (g:=m.group(1)) in fxn.__globals__ and fxn.__globals__[g] is v: recipe[name] = ("glob", i, g)
-      else: return None
-  for name in globs:
-    if name.startswith("_er"): recipe[name] = ("er", int(name[3:]))
-  if set(recipe) != set(globs) - {"__builtins__"}: return None
-  try: pickle.dumps(recipe)
-  except Exception: return None
-  return recipe
-
-@functools.cache
-def _real_fxn(fxn:Callable) -> Callable: return types.FunctionType(*deconstruct_function(fxn))
-
-def _rebuild_globs(recipe:dict[str, tuple], pats:tuple[tuple[UPat, Callable], ...]) -> dict[str, Any]:
-  globs: dict[str, Any] = {}
-  for name,r in recipe.items():
-    if r[0] == "fxn": globs[name] = _real_fxn(pats[r[1]][1])
-    elif r[0] == "interp": globs[name] = upat_interpret(*pats[r[1]])
-    elif r[0] == "glob": globs[name] = pats[r[1]][1].__globals__[r[2]]
-    elif r[0] == "lit": globs[name] = r[1]
-    elif r[0] == "er": globs[name] = frozenset(pats[r[1]][0].early_reject)
-  return globs
-
-def _cached_matcher(name:str, pats:tuple[tuple[UPat, Callable], ...], items:Callable[[], list], sig:tuple[Ops, ...]|None,
-                    key:str|None) -> Callable:
-  if key is not None and (cached:=diskcache_get("pm_matcher", key)) is not None:
-    code, co, recipe = cached
-    namespace: dict = {}
-    exec(marshal.loads(co), _rebuild_globs(recipe, pats), namespace)  # pylint: disable=W0122
-    (fxn:=namespace[name]).__source__ = code
-    return fxn
-  fxn = _render_matcher(name, items(), sig)
-  if key is not None and (recipe:=_make_recipe(items(), pats, fxn.__globals__)) is not None:
-    code = getattr(fxn, "__source__")
-    diskcache_put("pm_matcher", key, (code, marshal.dumps(compile(code, f"<{name}>", "exec")), recipe))
-  return fxn
-
-@functools.cache
-def pm_compile_op(op:Ops, pats:tuple[tuple[UPat, Callable], ...]) -> Callable:
-  # NOTE: the pattern code is only made if it's needed
-  items = functools.cache(lambda: [(p, _pattern_code(p, fxn)) for p,fxn in pats])
-  generic = _cached_matcher(f"compiled_pm_{op.name}", pats, items, None, key:=_pm_key(op, pats))
-  if len(pats) < SIG_MIN_PATS: return generic
-  sigs: dict[tuple[Ops, ...], Callable] = {}
-  counts: dict[tuple[Ops, ...], int] = {}
-  def sig_miss(sig:tuple[Ops, ...]) -> Callable:
-    if (cnt:=counts.get(sig, 0)+1) < SIG_HOT:
-      counts[sig] = cnt
-      return generic
-    sig_name = f"compiled_pm_{op.name}_{'_'.join(o.name for o in sig)}"
-    sigs[sig] = ret = _cached_matcher(sig_name, pats, items, sig, None if key is None else hashlib.sha256(f"{key}{sig}".encode()).hexdigest())
-    return ret
-  globs = {"_sig_get":sigs.get, "_sig_miss":sig_miss, "_get_op":operator.attrgetter("op")}
-  code = '\n'.join([f"def compiled_pm_{op.name}_dispatch(uop, ctx):",
-                    "  if (n:=len(s:=uop.src)) == 2: sig = (s[0].op, s[1].op)",
-                    "  elif n == 1: sig = (s[0].op,)",
-                    "  else: sig = tuple(map(_get_op, s))",
-                    "  if (f:=_sig_get(sig)) is None: f = _sig_miss(sig)",
-                    "  return f(uop, ctx)"])
-  namespace: dict = {}
-  exec(compile_cached(code, f"<compiled_pm_{op.name}_dispatch>"), globs, namespace)  # pylint: disable=W0122
-  fxn = namespace[f"compiled_pm_{op.name}_dispatch"]
-  fxn.__source__ = getattr(generic, "__source__")
-  return fxn
-
-# **** compiled graph_rewrite ****
-# The unified_rewrite loop is generated for each mode (top down pm, bottom up bpm, compiled matchers, enter_calls), so the hot loop
-# has no branches on the mode and calls the compiled per-op matchers directly.
-
-def _matcher_call(name:str, fd:bool, x:str) -> str:
-  return f"(_f({x}, ctx) if (_f:={name}_fd_get({x}.op)) is not None else None)" if fd else f"{name}_rewrite({x}, ctx)"
-
-# the loops over srcs are unrolled for the common small number of srcs
-UNROLL = 3
-
-def _push_srcs(ind:str, srcs:str) -> list[str]:
-  # push the srcs not on the stack (last one first), and before the first push, the node itself to come back to after its srcs
-  def push(x:str, i:str) -> list[str]:
-    return [f"{i}if {x} not in on_stack:",
-            f"{i}  if not pushed:",
-            f"{i}    stack.append((n, 1, new_n))",
-            f"{i}    pushed = True",
-            f"{i}  stack.append(({x}, 0, {x}))",
-            f"{i}  on_stack.add({x})"]
-  L = [f"{ind}pushed = False", f"{ind}ps = {srcs}", f"{ind}ns = len(ps)"]
-  srcs = "ps"
-  for k in range(1, UNROLL+1):
-    L.append(f"{ind}{'if' if k == 1 else 'elif'} ns == {k}:")
-    if k == 1: L.append(f"{ind}  s0 = {srcs}[0]")
-    else: L.append(f"{ind}  {', '.join(f's{i}' for i in range(k))} = {srcs}")
-    for i in reversed(range(k)): L += push(f"s{i}", ind+"  ")
-  L += [f"{ind}elif ns:", f"{ind}  for x in reversed({srcs}):"] + push("x", ind+"    ")
-  return L
-
-def _rebuild_srcs(ind:str, enter_calls:bool) -> list[str]:
-  # sets changed and new_src from replace, or waits for the first src that isn't rewritten yet
-  def wait(x:str, i:str) -> list[str]: return [f"{i}waitlist.setdefault({x}, []).append((n, 1, new_n))", f"{i}continue"]
-  L = [f"{ind}src = new_n.src", f"{ind}ns = len(src)"]
-  # NOTE: a CALL body is not rewritten, unless enter_calls
-  L.append(f"{ind}if ns == 0: changed = False")
-  for k in range(1, UNROLL+1):
-    L.append(f"{ind}elif ns == {k}{'' if enter_calls else ' and new_n.op is not CALL'}:")
-    L.append(f"{ind}  s0 = src[0]" if k == 1 else f"{ind}  {', '.join(f's{i}' for i in range(k))} = src")
-    for i in range(k): L += [f"{ind}  if (r{i}:=replace_get(s{i})) is None:"] + wait(f"s{i}", ind+"    ")
-    L += [f"{ind}  if changed:={' or '.join(f'r{i} is not s{i}' for i in range(k))}: new_src = ({', '.join(f'r{i}' for i in range(k))},)"]
-  L += [f"{ind}else:",
-        f"{ind}  # NOTE: replace never has None values",
-        f"{ind}  new_src = tuple(map(replace_get, src))" if enter_calls else
-        f"{ind}  new_src = (src[0],)+tuple(map(replace_get, src[1:])) if new_n.op is CALL else tuple(map(replace_get, src))",
-        f"{ind}  if None in new_src:"] + wait("src[new_src.index(None)]", ind+"    ") + [f"{ind}  changed = not (new_src == src)"]
-  return L
-
-def _finalize(ind:str, v:str) -> list[str]: return [f"{ind}replace[n] = {v}", f"{ind}if n in waitlist: stack.extend(waitlist.pop(n))"]
-
-_rewrite_sources: dict = {}
-@functools.cache
-def compile_unified_rewrite(has_pm:bool, pm_fd:bool, has_bpm:bool, bpm_fd:bool, enter_calls:bool) -> Callable:
-  L = ["def unified_rewrite(self, root):",
-       "  replace, ctx = self.replace, self.ctx",
-       "  replace_get = replace.get",
-       "  limit = REWRITE_STACK_LIMIT.value"]
-  if has_pm: L.append("  pm_fd_get = self.pm.fdict.get" if pm_fd else "  pm_rewrite = self.pm.rewrite")
-  if has_bpm:
-    L += ["  bpm_cache = self.bpm_cache", "  bpm_cache_get = bpm_cache.get"]
-    L.append("  bpm_fd_get = self.bpm.fdict.get" if bpm_fd else "  bpm_rewrite = self.bpm.rewrite")
-  L += ["  stack = [(root, 0, root)]",
-        "  on_stack = {root}  # all UOps either on the stack or in replace, i.e. dont have to be placed again",
-        "  waitlist = {}  # UOps waiting on a dependency to be in replace",
-        "  while stack:",
-        "    if len(stack) > limit: raise RuntimeError('infinite loop in graph_rewrite (stack too big)')",
-        "    n, stage, new_n = stack.pop()",
-        "    if n in replace: continue  # skip any nodes we have seen",
-        "    if stage == 0:"]
-  if has_bpm:
-    # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
-    L += ["      test_n = n",
-          "      seen = set()",
-          "      try:",
-          "        while test_n is not None:",
-          "          if test_n in seen: raise RuntimeError('infinite loop in fixed_point_rewrite')",
-          "          seen.add(test_n)",
-          "          if (nxt:=bpm_cache_get(test_n, SENTINEL)) is SENTINEL: nxt = bpm_cache[test_n] = "+_matcher_call("bpm", bpm_fd, "test_n"),
-          "          new_n, test_n = test_n, nxt",
-          "      except BottomUpGate:",
-          "        # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs"] + \
-         _finalize("        ", "test_n") + ["        continue"]
-  # NOTE: CALLs are handled as a special case: their bodies are not included in the graph_rewrite, rewrites that need them pass enter_calls
-  L += _push_srcs("      ", "new_n.src" if enter_calls else "(new_n.src[1:] if new_n.op is CALL else new_n.src)")
-  L += ["      # if no srcs were pushed, stage 1 is the next thing popped, so do it now",
-        "      if pushed: continue",
-        "      stage = 1",
-        "    if stage == 1:"]
-  L += _rebuild_srcs("      ", enter_calls)
-  L += ["      # in stage 1, once all srcs are rewritten, rebuild (if changed) or run top-down rewrite",
-        "      if not changed:"]
-  if has_pm:
-    L += ["        # if top down, do the rewrite. if no rewrite, we are done rewriting this node so we add it to the dict",
-          "        if (new_src_n:="+_matcher_call("pm", pm_fd, "new_n")+") is None:"] + _finalize("          ", "new_n") + ["          continue"]
-  else: L += _finalize("        ", "new_n") + ["        continue"]
-  L += ["      else:",
-        "        # if srcs changed from rewrites, construct a new UOp with the new srcs",
-        "        new_src_n = UOp(new_n.op, new_src, new_n.arg)",
-        "      # if new_src_n is already rewritten, link it now. this is what stage 2 does right after skipping new_src_n",
-        "      if (replaced_new_n:=replace_get(new_src_n)) is not None:"] + _finalize("        ", "replaced_new_n") + ["        continue",
-        "      # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n",
-        "      stack.append((n, 2, new_src_n))",
-        "      stack.append((new_src_n, 0, new_src_n))",
-        "    else:",
-        "      # in stage 2, we link the result of new_n to the result of n",
-        "      if (replaced_new_n:=replace_get(new_n)) is None:",
-        "        # not ready: register in waitlist instead of spinning",
-        "        waitlist.setdefault(new_n, []).append((n, 2, new_n))",
-        "      else:"] + _finalize("        ", "replaced_new_n") + [
-        "  if root not in replace: self.stalled(waitlist)",
-        "  return replace[root]"]
-  from tinygrad.uop.ops import REWRITE_STACK_LIMIT, SENTINEL, BottomUpGate
-  globs = {"Ops":Ops, "CALL":Ops.CALL, "UOp":UOp, "REWRITE_STACK_LIMIT":REWRITE_STACK_LIMIT, "SENTINEL":SENTINEL, "BottomUpGate":BottomUpGate}
-  code = '\n'.join(L)
-  _rewrite_sources[(has_pm, pm_fd, has_bpm, bpm_fd, enter_calls)] = code
-  namespace: dict = {}
-  exec(compile(code, f"<unified_rewrite pm={has_pm}{'fd' if pm_fd else ''} bpm={has_bpm}{'fd' if bpm_fd else ''} calls={enter_calls}>", "exec"),
-       globs, namespace)  # pylint: disable=W0122
-  return namespace["unified_rewrite"]
-
-# **** compiled order free graph_rewrite ****
-# For rewrites where the result of a node only depends on the node (no ctx side effects), the nodes are processed in toposort order
-# and the (usually small) new subgraphs created by rewrites are rewritten recursively.
-
-def _topo_srcs(ind:str, n:str, enter_calls:bool) -> list[str]:
-  return [f"{ind}src = {n}.src" if enter_calls else f"{ind}src = {n}.src[1:] if {n}.op is CALL else {n}.src", f"{ind}ns = len(src)"]
-
-@functools.cache
-def compile_topo_rewrite(pm_fd:bool, enter_calls:bool, memo:str|None=None) -> Callable:
-  # memo: the result of rewriting a node is stored on the node with this name (None means unchanged), and reused by later rewrites
-  match = _matcher_call("pm", pm_fd, "n")
-  # rebuild n from its rewritten srcs (all in replace) into new_src/changed, the srcs are unrolled
-  def rebuild(ind:str, get:str) -> list[str]:
-    L = _topo_srcs(ind, "n", enter_calls) + [f"{ind}if ns == 0: changed = False"]
-    for k in range(1, UNROLL+1):
-      L.append(f"{ind}elif ns == {k}:")
-      L.append(f"{ind}  s0 = src[0]" if k == 1 else f"{ind}  {', '.join(f's{i}' for i in range(k))} = src")
-      L += [f"{ind}  r{i} = {get.format(f's{i}')}" for i in range(k)]
-      L.append(f"{ind}  if changed:={' or '.join(f'r{i} is not s{i}' for i in range(k))}: new_src = ({', '.join(f'r{i}' for i in range(k))},)")
-    L += [f"{ind}else:", f"{ind}  new_src = tuple([{get.format('x')} for x in src])", f"{ind}  changed = not (new_src == src)"]
-    if not enter_calls: L.append(f"{ind}if changed and n.op is CALL: new_src = (n.src[0],)+new_src")
-    return L
-  def process(ind:str, get:str, ret:str) -> list[str]:
-    # rewrite n (whose srcs are rewritten), the result is in replace[n]
-    return rebuild(ind, get) + [
-      f"{ind}if not changed:",
-      f"{ind}  if (nr:={match}) is None:",
-      f"{ind}    replace[n] = n",
-      f"{ind}    {ret}",
-      f"{ind}else: nr = UOp(n.op, new_src, n.arg)",
-      f"{ind}replace[n] = r = rw(nr)"]
-  L = ["def topo_rewrite(self, root):",
-       "  replace, ctx = self.replace, self.ctx",
-       "  replace_get = replace.get",
-       "  pm_fd_get = self.pm.fdict.get" if pm_fd else "  pm_rewrite = self.pm.rewrite",
-       "  def rw(n):",
-       "    # recursive rewrite for the (usually small) new subgraphs created by rewrites",
-       "    if (r:=replace_get(n)) is not None: return r"] + \
-      ([f"    if (r:=n.__dict__.get('{memo}', SENTINEL)) is not SENTINEL:", "      replace[n] = r = n if r is None else r", "      return r"]
-       if memo else []) + \
-      process("    ", "rw({})", "return n") + [
-       "    return r",
-       "  try:",
-       "    # post order DFS (same order as toposort), each node is processed once all its srcs are in replace",
-       "    stack = [(root, False)]" if memo else "    stack = [root]",
-       "    while stack:",
-       "      n, visited = stack.pop()" if memo else "      n = stack.pop()",
-       "      if n in replace: continue"] + \
-      (["      if not visited and (r:=n.__dict__.get('{memo}', SENTINEL)) is not SENTINEL:".replace("{memo}", memo),
-        "        replace[n] = n if r is None else r", "        continue"] if memo else [])
-  def entry(x:str, visited:str) -> str: return f"({x}, {visited})" if memo else x
-  # the srcs are looked up once: if they are all rewritten, n is processed now (it would be popped next), else push the missing ones
-  L += _topo_srcs("      ", "n", enter_calls) + ["      if ns == 0: changed = False"]
-  for k in range(1, UNROLL+1):
-    L.append(f"      elif ns == {k}:")
-    L.append("        s0 = src[0]" if k == 1 else f"        {', '.join(f's{i}' for i in range(k))} = src")
-    L += [f"        r{i} = replace_get(s{i})" for i in range(k)]
-    L += [f"        if {' or '.join(f'r{i} is None' for i in range(k))}:", "          stack.append("+entry("n", "True")+")"]
-    for i in reversed(range(k)): L.append(f"          if r{i} is None: stack.append("+entry(f"s{i}", "False")+")")
-    L.append("          continue")
-    L.append(f"        if changed:={' or '.join(f'r{i} is not s{i}' for i in range(k))}: new_src = ({', '.join(f'r{i}' for i in range(k))},)")
-  L += ["      else:",
-        "        new_src = tuple(map(replace_get, src))",
-        "        if None in new_src:",
-        "          stack.append("+entry("n", "True")+")",
-        "          for x in reversed(src):",
-        "            if x not in replace: stack.append("+entry("x", "False")+")",
-        "          continue",
-        "        changed = not (new_src == src)"]
-  if not enter_calls: L.append("      if changed and n.op is CALL: new_src = (n.src[0],)+new_src")
-  # NOTE: the results already in replace are final, so on deep (or infinite) recursion the general rewrite finishes the job
-  L += ["      try:",
-        "        if not changed:",
-        f"          if (nr:={match}) is None:",
-        "            replace[n] = n",
-        "            continue",
-        "        else: nr = UOp(n.op, new_src, n.arg)",
-        "        replace[n] = rw(nr)",
-        "      except RecursionError: replace[n] = self.unified_rewrite(nr)",
-        "  finally:",
-        "    # NOTE: rw is a recursive closure, this breaks the reference cycle so the refcounter can free everything",
-        "    rw = None"]
-
-  # NOTE: a result never contains the node it's the result of, so this doesn't make reference cycles
-  if memo: L += ["  for k,v in replace.items():", f"    if '{memo}' not in (d:=k.__dict__): d['{memo}'] = None if v is k else v"]
-  L += ["  return replace[root]"]
-  from tinygrad.uop.ops import SENTINEL
-  globs = {"CALL":Ops.CALL, "UOp":UOp, "SENTINEL":SENTINEL}
-  code = '\n'.join(L)
-  _rewrite_sources[("topo", pm_fd, enter_calls, memo)] = code
-  namespace: dict = {}
-  exec(compile_cached(code, f"<topo_rewrite pm={'fd' if pm_fd else ''} calls={enter_calls} memo={memo}>"), globs, namespace)  # pylint: disable=W0122
-  return namespace["topo_rewrite"]
-
-@functools.cache
-def compile_bottom_up_rewrite(bpm_fd:bool, enter_calls:bool, inline:str|None=None) -> Callable:
-  """order free bottom up rewrite, same semantics as unified_rewrite with only a bpm. inline is the bpm as an expression of x and ctx"""
-  def bpm_call(x:str, ind:str) -> list[str]:
-    # the cached bpm rewrite of x into nxt
-    if inline is not None: return [f"{ind}nxt = {inline.format(x=x)}"]
-    return [f"{ind}if (nxt:=bpm_cache_get({x}, SENTINEL)) is SENTINEL: nxt = bpm_cache[{x}] = "+_matcher_call("bpm", bpm_fd, x)]
-  L = ["def bottom_up_rewrite(self, root):",
-       "  replace, ctx, bpm_cache = self.replace, self.ctx, self.bpm_cache",
-       "  replace_get, bpm_cache_get = replace.get, bpm_cache.get",
-       "  bpm_fd_get = self.bpm.fdict.get" if bpm_fd else "  bpm_rewrite = self.bpm.rewrite",
-       "  def rw(n):",
-       "    if (r:=replace_get(n)) is not None: return r",
-       "    # apply rewrite rules until a fixed point is reached",
-       "    m = n",
-       "    try:"] + bpm_call("n", "      ") + [
-       "      if nxt is not None:",
-       "        seen = {n}",
-       "        while nxt is not None:",
-       "          if nxt in seen: raise RuntimeError('infinite loop in fixed_point_rewrite')",
-       "          seen.add(nxt)",
-       "          m = nxt"] + bpm_call("m", "          ") + [
-       "    except BottomUpGate:",
-       "      # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs",
-       "      replace[n] = m",
-       "      return m"]
-  L += _topo_srcs("    ", "m", enter_calls) + ["    if ns == 0: changed = False"]
-  for k in range(1, UNROLL+1):
-    L.append(f"    elif ns == {k}:")
-    L.append("      s0 = src[0]" if k == 1 else f"      {', '.join(f's{i}' for i in range(k))} = src")
-    L += [f"      r{i} = rw(s{i})" for i in range(k)]
-    L.append(f"      if changed:={' or '.join(f'r{i} is not s{i}' for i in range(k))}: new_src = ({', '.join(f'r{i}' for i in range(k))},)")
-  L += ["    else:", "      new_src = tuple([rw(x) for x in src])", "      changed = not (new_src == src)"]
-  if not enter_calls: L.append("    if changed and m.op is CALL: new_src = (m.src[0],)+new_src")
-  L += ["    replace[n] = r = rw(UOp(m.op, new_src, m.arg)) if changed else m",
-        "    return r",
-        "  # NOTE: the results already in replace are final, so on deep (or infinite) recursion the general rewrite finishes the job",
-        "  try: return rw(root)",
-        "  except RecursionError: return self.unified_rewrite(root)",
-        "  finally:",
-        "    # NOTE: rw is a recursive closure, this breaks the reference cycle so the refcounter can free everything",
-        "    rw = None"]
-  from tinygrad.uop.ops import SENTINEL, BottomUpGate
-  globs = {"CALL":Ops.CALL, "UOp":UOp, "SENTINEL":SENTINEL, "BottomUpGate":BottomUpGate}
-  code = '\n'.join(L)
-  _rewrite_sources[("bottom_up", bpm_fd, enter_calls, inline)] = code
-  namespace: dict = {}
-  exec(compile_cached(code, f"<bottom_up_rewrite bpm={'fd' if bpm_fd else ''} calls={enter_calls} inline={inline}>"), globs, namespace)  # pylint: disable=W0122
-  return namespace["bottom_up_rewrite"]

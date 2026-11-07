@@ -26,7 +26,7 @@ from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.prepare import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
-from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image, pm_store_image
+from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, argsort, partition, to_function_name, all_int, disable_gc
 from tinygrad.device import TinyELF
 from tinygrad.uop.ops import _broadcast_shape, identity_element
@@ -124,8 +124,6 @@ def _lanes(x:UOp, idxs:list[tuple[int, ...]]) -> list[UOp|None]:
     match x.op:
       case Ops.STACK:
         if any(len(i) == 0 for i in idxs): return [None]*len(idxs)
-        # common case: one level STACK of scalars
-        if all(len(i) == 1 for i in idxs) and all(s._shape == () for s in x.src): return [x.src[i[0]] for i in idxs]
         return [_lanes(x.src[i[0]], [i[1:]])[0] for i in idxs]
       case Ops.EXPAND:
         k = len(x.marg)
@@ -176,9 +174,6 @@ def do_devectorize(b:UOp):
         lanes[j] = x.index(*[c[i] for c,i in zip(consts, idxs[j])])
     src_lanes.append(cast(list[UOp], lanes))
   src = [UOp(b.op, lsrc, b.arg) for lsrc in zip(*src_lanes)]
-  # all the srcs of a lane are scalars, so it's a scalar. this is what _shape computes
-  for l in src:
-    if "_shape" not in l.__dict__: l.__dict__["_shape"] = ()
   if b.op is Ops.STORE: return UOp.group(*src)
   # fast path for UOp.stack: all the lanes are scalars, so if they have the same dtype it's just a STACK
   # NOTE: the STACK of scalar lanes has shape (len(src),), this is .reshape(b.shape) without recomputing the shape of every lane
@@ -360,8 +355,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # add locals
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=slots, name="add local buffers")
-  # NOTE: LOCAL addrspace only comes from a LOCAL buffer, all of them exist after this point. the barriers are only for LOCAL memory
-  has_local = any(u.op in {Ops.PARAM, Ops.REFPARAM, Ops.BUFFER, Ops.ALLOC} and u.arg.addrspace is AddrSpace.LOCAL for u in sink.toposort())
 
   # group GPU dimensions early so their index arithmetic goes through normal lowering
   sink = graph_rewrite(sink, pm_group_gpudims, ctx=ren, name="group gpudims", walk=True)
@@ -378,15 +371,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # do memory coalescing (late)
   sink = memory_coalescing(sink, ren)
-  # NOTE: without IMAGE, transform_to_image doesn't do anything (and doesn't use the ctx)
-  if IMAGE:
-    # an image is read_only or write_only, so a PARAM that is both loaded and stored stays a buffer
-    loaded, stored = set(), set()
-    for u in sink.toposort():
-      if u.op is Ops.LOAD: loaded.add(u.src[0].buf_uop)
-      elif u.op is Ops.STORE: stored.add(u.src[0].buf_uop)
-    sink = graph_rewrite(sink, pm_simplify_add_image, name="add images", ctx=({}, ren, loaded & stored), bottom_up=True)
-  else: sink = graph_rewrite(sink, pm_store_image, name="add images", bottom_up=True)
+  # an image is read_only or write_only, so a PARAM that is both loaded and stored stays a buffer
+  loaded, stored = [{u.src[0].buf_uop for u in sink.toposort() if u.op is op} for op in (Ops.LOAD, Ops.STORE)]
+  sink = graph_rewrite(sink, pm_simplify_add_image, name="add images", ctx=({}, ren, loaded & stored), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?
   # NOTE: also run indexing_simplify here, while the index is still weakint and (x+y)*c -> x*c+y*c applies
@@ -416,9 +403,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions")
   # Transcendental decompositions can introduce unsupported dtypes, e.g. uint64 in Payne-Hanek reduction.
-  # NOTE: the ctx collects dtypes for the SINK to decompose. if the root is the only SINK, it's rewritten after everything else in any order
-  nested_sink = any(s._op_mask & (1 << Ops.SINK.value) for s in sink.src)
-  sink = graph_rewrite(sink, pm_dtype_decomps+pm_commit_weak, ctx=DTypeDecompCtx(ren), name="decomp dtypes", order_free=not nested_sink)
+  sink = graph_rewrite(sink, pm_dtype_decomps+pm_commit_weak, ctx=DTypeDecompCtx(ren), name="decomp dtypes")
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # final rules for the renderer (without sym)
@@ -430,7 +415,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_cast_const, name="cast consts", walk=True)
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
-  if has_local: sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
+  # the barriers are only for LOCAL memory, which comes from a LOCAL buffer
+  if any(u.op in {Ops.PARAM, Ops.REFPARAM, Ops.BUFFER, Ops.ALLOC} and u.arg.addrspace is AddrSpace.LOCAL for u in sink.toposort()):
+    sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
 
   # hardware ranges are no longer loops; preserve their already lowered bounds
   sink = graph_rewrite(sink, pm_range_to_special, name="range to special")

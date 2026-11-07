@@ -11,6 +11,7 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   if len(uidx.src) != 2: return True  # skip for non final index. TODO: check more complex index with shape
   buf,idx = uidx.src
   if idx.is_invalid: return True
+  if gate is None: gate = UOp.const(True)
   # TODO: check for overflow
   if not CHECK_OOB or is_image_shape(buf._shape): return True
 
@@ -22,7 +23,7 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
 
   # if all is good and CHECK_OOB=1, validate with z3
   from tinygrad.uop.validate import validate_index_with_z3
-  return validate_index_with_z3(sz, idx, UOp.const(True) if gate is None else gate)
+  return validate_index_with_z3(sz, idx, gate)
 
 def valid_device_range(device:str|tuple[str, ...]|None, src:tuple[UOp, ...]) -> bool:
   if not isinstance(device, tuple): return len(src) == 0

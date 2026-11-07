@@ -4,11 +4,9 @@ from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid, least_upper_dtype,
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, GroupOp, dtype_from_uop, promo_dtype
 from tinygrad.helpers import is_image_shape
 
-_weaks = frozenset(dtypes.weaks)
-
 # the decomps and float emulation commit bare consts at a dtype another src already states
 def commit_weak_consts(u:UOp, dt:DType|None) -> UOp:
-  return u if dt is None else u.replace(src=tuple([s.ccast(dt) if s.op is Ops.CONST and s.dtype in dtypes.weaks else s for s in u.src]))
+  return u if dt is None else u.replace(src=tuple(s.ccast(dt) if s.op is Ops.CONST and s.dtype in dtypes.weaks else s for s in u.src))
 
 # the concrete dtypes u commits its srcs at: the operands' meet and u's own derived dtype, None if either is weak
 def derived_dtypes(u:UOp, src:tuple[UOp, ...]) -> tuple[DType, DType]|None:
@@ -19,14 +17,11 @@ def derived_dtypes(u:UOp, src:tuple[UOp, ...]) -> tuple[DType, DType]|None:
 def commit_srcs_at(u:UOp, dt:DType) -> UOp|None:
   # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
   bare = derived_dtypes(u, u.src) is not None
-  src = tuple([s if s.dtype not in dtypes.weaks else UOp.const(dt.const(s.val)) if bare and s.op is Ops.CONST else s.ccast(dt) for s in u.src])
+  src = tuple(s if s.dtype not in dtypes.weaks else UOp.const(dt.const(s.val)) if bare and s.op is Ops.CONST else s.ccast(dt) for s in u.src)
   return None if (ret := u.replace(src=src)) is u else ret
 
 def commit_weak_srcs(u:UOp) -> UOp|None:
-  for s in u.src:
-    if s.dtype in _weaks: break
-  else: return None
-  if (dt:=least_upper_dtype(*[s.dtype for s in u.src])) in dtypes.weaks: return None
+  if not any(s.dtype in dtypes.weaks for s in u.src) or (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None
   return commit_srcs_at(u, dt)
 
 # a concrete CAST over a weak node states the width the value will live at. that width is a floor, never a narrowing
@@ -58,13 +53,11 @@ def absorb_weak_src(s:UOp) -> UOp:
 
 def lower_weak_node(u:UOp) -> UOp|None:
   if u.op is Ops.CAST and u.src[0].op is Ops.CONST: return None  # a committed const, not a consumer
-  # fast reject: only weak CASTs and weak CONSTs in src are changed below
-  for s in u.src:
-    if (s.op is Ops.CAST or s.op is Ops.CONST) and s.dtype in _weaks: break
-  else: return None
-  src = tuple([absorb_weak_src(s) for s in u.src])
+  # only weak CASTs and weak CONSTs in src are changed below
+  if not any([s.op in (Ops.CAST, Ops.CONST) and s.dtype in dtypes.weaks for s in u.src]): return None
+  src = tuple(absorb_weak_src(s) for s in u.src)
   if derived_dtypes(u, src) is None:
-    src = tuple([s.ccast(s.commit_dtype(dtypes.int)) if s.op is Ops.CONST and s.dtype in dtypes.weaks else s for s in src])
+    src = tuple(s.ccast(s.commit_dtype(dtypes.int)) if s.op is Ops.CONST and s.dtype in dtypes.weaks else s for s in src)
   if src == u.src: return None
   start = 1 if u.op is Ops.WHERE else 0  # WHERE's cond is bool, never part of the width unification
   if u.op not in _lower_weak_ops or any(s.dtype in dtypes.weaks and s.op is not Ops.CONST for s in src[start:]): return u.replace(src=src)
@@ -97,10 +90,6 @@ pm_lower_weak = PatternMatcher([
 # drop the CAST off a committed const where the consumer re-derives it anyway, so bare-CONST rules keep matching.
 # the drop must change nothing the consumer derives: neither the operands' meet nor the node's own dtype
 def uncast_const(u:UOp) -> UOp|None:
-  # fast reject: only CASTs of CONSTs in src are changed below
-  for s in u.src:
-    if s.op is Ops.CAST and s.src[0].op is Ops.CONST: break
-  else: return None
   # a weak CAST over a const is not a commit, it is still resolving
   src = tuple(s.src[0] if s.op is Ops.CAST and s.dtype not in dtypes.weaks and s.src[0].op is Ops.CONST
               and s.src[0].dtype in dtypes.weaks else s for s in u.src)

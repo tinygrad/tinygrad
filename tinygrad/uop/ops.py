@@ -1,12 +1,11 @@
 from __future__ import annotations
-from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final
+from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final, Iterator
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections, struct
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.uop.specialize import OpTable
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace, strong_dtype
-from tinygrad.dtype import PyConst, InvalidType, bitcast, promo_lattice, weak_dtype
+from tinygrad.dtype import PyConst, InvalidType, bitcast
 from tinygrad.device import Buffer, BufferSpec, MultiBuffer, canonicalize_device, is_disk_device, TinyELF
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, flatten
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
@@ -80,8 +79,7 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   max_dim = max(len(s) for s in shapes)
   return tuple((1,)*(max_dim-len(s))+s for s in shapes)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
-  s0 = shapes[0]
-  if all(s is s0 or s == s0 for s in shapes): return s0
+  if all_same(shapes): return shapes[0]
   # per right-aligned dim: sizes of 1 broadcast to the others, which must all agree
   ret = []
   for sizes in zip(*_align_left(*shapes)):
@@ -107,13 +105,7 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
   return ret
 
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
-  # NOTE: True == 1, so only exact ints are cached
-  if all(type(x) is int for x in arg): return _int_shape_to_shape_arg(tuple(arg))
-  return _shape_to_shape_arg(arg)
-@functools.lru_cache(maxsize=4096)
-def _int_shape_to_shape_arg(arg:tuple[int, ...]) -> UOp: return _shape_to_shape_arg(arg)
-def _shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
-  src = tuple([x if isinstance(x, UOp) else UOp.const(x) for x in arg])
+  src = tuple(x if isinstance(x, UOp) else UOp.const(x) for x in arg)
   for x in src:
     if not dtypes.is_int(x.dtype): raise RuntimeError(f"shape must be int, got {x.dtype} in {arg}")
   return src[0] if len(src) == 1 else UOp(Ops.STACK, src=src)
@@ -124,10 +116,32 @@ def promo_dtype(src:tuple[UOp,...]) -> DType:
     if (d:=src[i].dtype) is not d0 and d != d0: return least_upper_dtype(*[x.dtype for x in src])
   return d0
 
-def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType: return _dtype_rules[op](op, src, arg)
-def _dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
-  # here are the dtype production rules, total over all Ops. NOTE: this is specialized for each op, see _dtype_rules
+# the most common ops are handled first in dtype_from_uop, these are the ones that fall through the match
+_promo_ops = frozenset(GroupOp.Broadcastable - {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.WHERE, Ops.THREEFRY, Ops.FDIV, Ops.SHL, Ops.SHR})
+_passthrough_ops = frozenset({Ops.NEG, Ops.TRUNC, Ops.LOAD, Ops.UNSHARD, Ops.REDUCE, Ops.AFTER, Ops.RANGE, Ops.CONTIGUOUS_BACKWARD, Ops.COPY,
+                              Ops.STAGE, Ops.DETACH, Ops.MSTACK, Ops.MSELECT, Ops.ALLREDUCE, Ops.SPECIAL, Ops.END} | GroupOp.Movement)
+
+def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
+  if op in _promo_ops: return promo_dtype(src)
+  if op in _passthrough_ops: return src[0].dtype
+  # here are the dtype production rules, total over all Ops
   match op:
+    # NOTE: the cases are in order of how common they are
+    case Ops.CONST:
+      # derived from the value. order matters: bool is an int subclass, ConstFloat is a float subclass
+      if isinstance(arg, InvalidType): return dtypes.bool  # Invalid is always bool, the promo lattice bottom
+      if isinstance(arg, bool): return dtypes.bool
+      if isinstance(arg, int): return dtypes.weakint
+      if isinstance(arg, float): return dtypes.weakfloat
+      raise TypeError(f"no dtype for CONST with arg {arg}")
+    case Ops.CAST | Ops.BITCAST:
+      assert isinstance(arg, DType), f"CAST/BITCAST arg must be DType, got {arg}"
+      return arg
+    case Ops.INDEX:
+      # an image access is always float, no matter the storage dtype
+      # TODO: should there be a CAST so src[0].dtype just work?
+      if (b:=src[0]).op is Ops.PARAM and is_image_shape(b.shape): return dtypes.float
+      return b.dtype
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
          Ops.BACKEDGE | Ops.BARRIER | Ops.IF | Ops.ENDIF | Ops.NOOP | \
          Ops.REWRITE_ERROR | Ops.PYLITERAL:
@@ -143,11 +157,6 @@ def _dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       # arg is (instruction, dtype, *registers), a queue command or an asm line is void
       assert isinstance(arg, tuple) and len(arg) >= 2 and isinstance(arg[1], DType), f"INS arg must be (instruction, DType, *registers), got {arg}"
       return arg[1]
-    case Ops.INDEX:
-      # an image access is always float, no matter the storage dtype
-      # TODO: should there be a CAST so src[0].dtype just work?
-      if (b:=src[0]).op is Ops.PARAM and is_image_shape(b.shape): return dtypes.float
-      return b.dtype
     case Ops.LOAD | Ops.UNSHARD | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
          Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
          Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE | Ops.SPECIAL | Ops.END:
@@ -181,29 +190,14 @@ def _dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       return arg.dtype
     case Ops.BINARY:
       return dtypes.uint8
-    case Ops.CAST | Ops.BITCAST:
-      assert isinstance(arg, DType), f"CAST/BITCAST arg must be DType, got {arg}"
-      return arg
-    case Ops.CONST:
-      # derived from the value. order matters: bool is an int subclass, ConstFloat is a float subclass
-      if isinstance(arg, InvalidType): return dtypes.bool  # Invalid is always bool, the promo lattice bottom
-      if isinstance(arg, bool): return dtypes.bool
-      if isinstance(arg, int): return dtypes.weakint
-      if isinstance(arg, float): return dtypes.weakfloat
-      raise TypeError(f"no dtype for CONST with arg {arg}")
   if op in GroupOp.Unary: return src[0].dtype
   # NOTE: CMPLT, CMPNE, CMPEQ, WHERE, SHL, SHR are handled above
   if op in GroupOp.Broadcastable: return promo_dtype(src)
   if op in GroupOp.Movement: return src[0].dtype
   raise RuntimeError(f"no dtype for {op} with arg {arg}")
 
-_dtype_rules = OpTable(_dtype_from_uop, "op")
 
 # NOTE: these are module level (not class attributes) because UOp creation is hot
-_promo_lattice_dtypes = frozenset(promo_lattice)
-# the ops whose dtype rule is promo_dtype(src), see test_promo_dtype_ops
-_promo_dtype_ops = frozenset({Ops.ADD, Ops.AND, Ops.DIV, Ops.MAX, Ops.MOD, Ops.MUL, Ops.MULACC, Ops.OR, Ops.POW, Ops.SUB, Ops.TRUNCDIV,
-                              Ops.TRUNCMOD, Ops.XOR})
 _ucache: dict[tuple, weakref.ReferenceType[UOp]] = {}
 _ucache_get, _wref = _ucache.get, weakref.ref
 class UOpMetaClass(type):
@@ -214,11 +208,8 @@ class UOpMetaClass(type):
     created: UOp = object.__new__(cls)  # type: ignore[arg-type]
     created.op, created.src, created.arg = op, src, arg
     # dtype is read for almost every UOp, so it's computed now. if it can't be, it stays lazy and raises on access like before
-    try:
-      # the common case of the promo_dtype rule: two srcs with the same dtype
-      # NOTE: an attribute store, not __dict__[...], doesn't materialize the instance dict (dtype is a non-data descriptor)
-      if op in _promo_dtype_ops and len(src) == 2 and (d:=src[0].dtype) is src[1].dtype: created.dtype = d
-      else: created.dtype = _dtype_rules[op](op, src, arg)
+    # NOTE: an attribute store, not __dict__[...], doesn't materialize the instance dict (dtype is a non-data descriptor)
+    try: created.dtype = dtype_from_uop(op, src, arg)
     except Exception: pass
     _ucache[key] = _wref(created)
     if SPEC.value > 1:
@@ -230,6 +221,7 @@ class UOpMetaClass(type):
       if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {created}")
     return created
 
+_broadcastable_ops = frozenset(GroupOp.Broadcastable)
 _unary_shape_ops = frozenset(GroupOp.Unary | {Ops.CAST})
 # the ops whose _shape/addrspace rule only reads the _shape/addrspace of src[0]
 _shape_src0_ops = frozenset(GroupOp.Movement | GroupOp.Unary | {Ops.CAST, Ops.BITCAST, Ops.STACK, Ops.LOAD, Ops.STORE, Ops.END, Ops.CALL, Ops.AFTER,
@@ -283,10 +275,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
   @recursive_property
-  def dtype(self) -> DType: return _dtype_rules[self.op](self.op, self.src, self.arg)
+  def dtype(self) -> DType: return dtype_from_uop(self.op, self.src, self.arg)
   def __del__(self):
     # NOTE: getattr because this object may be partially constructed (e.g. if __init__ raised, like the BEAM timeout SIGALRM)
-    try: del _ucache[(self.op, self.src, self.arg, type(self.arg))]
+    try: del UOpMetaClass.ucache[(self.op, self.src, self.arg, type(self.arg))]
     except (AttributeError, KeyError): pass
   def __reduce__(self): return UOp, (self.op, self.src, self.arg)
   def replace(self, **kwargs) -> UOp:
@@ -321,16 +313,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
-  @recursive_property
-  def _op_mask(self) -> int:
-    """bitmask of the ops in backward_slice_with_self"""
-    ret = 1 << self.op.value
-    for s in (self.src[1:] if self.op is Ops.CALL else self.src): ret |= s._op_mask
-    return ret
   def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
-    mask = 0
-    for o in ops: mask |= 1 << o.value
-    return bool(self._op_mask & mask)
+    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
+    return self.op in ops or any(x.op in ops for x in self.backward_slice)
 
   @recursive_property
   def _bool_slice(self) -> frozenset[UOp]: return frozenset().union(*[s.bool_slice for s in self.src])
@@ -346,16 +331,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if node in cache: continue
       if not visited:
         if gate is None or gate(node):
-          # push node back on stack to process after its srcs, if any src isn't processed yet
-          pushed = False
-          for s in reversed(node.src if enter_calls or node.op is not Ops.CALL else node.src[1:]):
-            if s in cache: continue
-            if not pushed:
-              stack.append((node, True))
-              pushed = True
+          stack.append((node, True))  # push node back on stack to process after its srcs
+          for s in reversed(node.src if enter_calls else node.src_without_body):
             stack.append((s, False)) # push srcs on the stack
-          # if nothing was pushed, node would be popped next
-          if not pushed: cache[node] = None
       else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
     return cache
 
@@ -379,10 +357,29 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop shape stuff ***
 
   @recursive_property_srcs(lambda x: x.src[:1] if x.op in _shape_src0_ops else x.src)
-  def _shape(self) -> tuple[sint, ...]|None: return _shape_rules[self.op](self)
-  def _shape_from_uop(self) -> tuple[sint, ...]|None:
-    # NOTE: this is specialized for each op, see _shape_rules
+  def _shape(self) -> tuple[sint, ...]|None:
+    # fast paths for the common elementwise ops, see below
+    if (op:=self.op) in _broadcastable_ops and len(self.src) == 2:
+      if (s0:=self.src[0]._shape) is not None and s0 == self.src[1]._shape: return s0
+    elif op in _unary_shape_ops and len(self.src) == 1: return self.src[0]._shape
     match self.op:
+      # NOTE: the common cases are first
+      case Ops.CONST:
+        return ()
+
+      case Ops.INDEX:
+        shp:list[sint] = []
+        for s in self.src[1:]: shp.extend(list(s.shape))
+        return tuple(shp) + self.src[0].shape[len(self.src[1:]):]
+
+      # passthrough ops
+      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
+           Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END | Ops.CALL:
+        return self.src[0]._shape
+
+      case Ops.STACK:
+        if len(self.src) == 0: return ()
+        return (len(self.src),) + self.src[0].shape
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.BACKEDGE | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE:
@@ -400,17 +397,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       # hacks for NOOP
       case Ops.NOOP:
         return self.src[0]._shape if len(self.src) >= 1 else None
-
-      case Ops.INDEX:
-        shp:list[sint] = []
-        for s in self.src[1:]: shp.extend(list(s.shape))
-        return tuple(shp) + self.src[0].shape[len(self.src[1:]):]
-
-      case Ops.STACK:
-        if len(self.src) == 0: return ()
-        return (len(self.src),) + self.src[0].shape
-      case Ops.CONST:
-        return ()
 
       # some ops init the shape
       case Ops.GETADDR: return ()
@@ -431,11 +417,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.WMMA:
         wmma_b = _broadcast_shape(self.src[0].shape[:-1], self.src[1].shape[:-1], self.src[2].shape[:-1])
         return wmma_b + (self.src[2].shape[-1],)
-
-      # passthrough ops
-      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
-           Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END | Ops.CALL:
-        return self.src[0]._shape
 
       case Ops.BITCAST:
         ps = self.src[0]._shape
@@ -553,12 +534,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def simplify(self):
     if self.op is Ops.CONST: return self
     if self.op is Ops.SINK and all(s.op is Ops.CONST or (s.op is Ops.STACK and all(x.op is Ops.CONST for x in s.src)) for s in self.src): return self
-    # the result is cached on the UOp by the rewrite, see symbolic.memo
+    # UOps are immutable and symbolic doesn't depend on any context, so the result is cached on the UOp. None means self
     if (ret:=self.__dict__.get("_simplified", SENTINEL)) is not SENTINEL: return self if ret is None else ret
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0):
-      return graph_rewrite(self, symbolic, name="simplify")
+      ret = graph_rewrite(self, symbolic, name="simplify")
+    self.__dict__["_simplified"] = None if ret is self else ret
+    return ret
   def ssimplify(self) -> UOp|ConstType:
     if (ret := self.simplify()).op is Ops.CAST and ret.src[0].op is Ops.CONST: return ret.dtype.const(ret.src[0].val)
     return ret.val if ret.op is Ops.CONST else ret
@@ -666,32 +649,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
                            for idx in itertools.product(*[range(int(r.vmax)+1) for r in rngs])])
   def alu(self, op, *src:UOp, **kwargs): return UOp(op, src=(self, *src), **kwargs)
-  def _broadcast_to(self, new_shape:tuple[sint, ...]) -> UOp:
-    # same as the mixin's _broadcast_to, without the shape checks in reshape/permute: they hold by construction
-    if (shape:=self.shape) == new_shape: return self
-    if len(shape) > len(new_shape): raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={shape} to {new_shape=}")
-    aligned, _ = _align_left(shape, new_shape)
-    if not all(s == ns or s == 1 for s, ns in zip(aligned, new_shape)): raise ValueError(f"cannot broadcast {shape} to {new_shape=}")
-    n_left = len(new_shape) - len(shape)
-    expand_at = tuple(i-n_left for i in broadcast_axes(shape, new_shape) if i >= n_left)
-    kept = tuple(i for i in range(len(shape)) if i not in expand_at)
-    # the expanded dims are 1s, so this reshape keeps the size. a reshape to the same shape is a noop
-    squeezed = self if (sq_shape:=tuple(shape[i] for i in kept)) == shape else self._mop(Ops.RESHAPE, sq_shape)
-    expanded = squeezed._mop(Ops.EXPAND, new_shape[:n_left] + tuple(new_shape[n_left+i] for i in expand_at))
-    perm = tuple(range(n_left)) + tuple(
-      n_left + (expand_at.index(i) if i in expand_at else len(expand_at) + kept.index(i)) for i in range(len(shape)))
-    return expanded if perm == tuple(range(len(perm))) else expanded._mop(Ops.PERMUTE, perm)
-  def _binop(self, op:Ops, x:UOp|ConstType, reverse:bool) -> UOp:
-    # fast paths for the common cases where the promotion in _broadcasted doesn't change either side
-    if (d:=self.dtype) in _promo_lattice_dtypes:
-      # a UOp of the same dtype: least_upper_dtype(d, d) is d
-      if type(x) is UOp:
-        if x.dtype is d: return UOp(op, (x, self) if reverse else (self, x))
-      # a python int/float: its weak CONST is kept if the result dtype is d and the CONST already has the weak dtype of d
-      elif type(x) is int or type(x) is float:
-        y = UOp.const(x)
-        if least_upper_dtype(d, y.dtype) is d and weak_dtype(d) is y.dtype: return UOp(op, (y, self) if reverse else (self, y))
-    return ElementwiseMixin._binop(self, op, x, reverse)
   @staticmethod
   def const(b:ConstLike, dtype:DType|None=None):
     if dtype is None or b is Invalid: dtype = dtypes.from_py(b)
@@ -746,15 +703,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.ALLREDUCE, src=(self,), arg=(op, device))
   def overflows(self, dtype:DType) -> bool: return self.vmin < dtype.min or dtype.max < self.vmax
 
-  def split_uop(self:UOp, sep:Ops) -> tuple[UOp, ...]:
-    if self.op is not sep: return (self,)
-    # iterative left to right DFS
-    ret: list[UOp] = []
-    stack = [self]
-    while stack:
-      if (x:=stack.pop()).op is sep: stack.extend(x.src[::-1])
-      else: ret.append(x)
-    return tuple(ret)
+  def split_uop(self:UOp, sep:Ops) -> Iterator[UOp]:
+    if self.op is sep:
+      for s in self.src: yield from s.split_uop(sep)
+    else: yield self
 
   # *** multi-device helpers ***
 
@@ -1663,10 +1615,6 @@ class PatternMatcher:
   tracked = False
   # set to True if the patterns only read ctx, then the order of the rewrites doesn't matter
   ctx_readonly = False
-  # for a matcher that doesn't depend on anything but the UOp (no ctx, no global state), the rewrite results can be cached on the UOps
-  memo: str|None = None
-  # the whole matcher as a python expression of x and ctx, compiled into the bottom up rewriter
-  inline: str|None = None
   _parts: tuple[PatternMatcher, PatternMatcher]|None = None
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     # if this comes from a pickle, we reconstruct the lambda functions here
@@ -1899,76 +1847,170 @@ class RewriteContext:
 
   def walk_rewrite(self, root:UOp) -> UOp:
     """MLIR-style Walk Pattern Rewrite Driver: single-pass, no re-traversal into rewritten subtrees."""
-    replace, ctx, enter_calls, bpm = self.replace, self.ctx, self.enter_calls, self.bpm
-    replace_get = replace.get
-    pm_fdict = self.pm.fdict if self.pm is not None and not self.pm.tracked else None
-    # NOTE: a node is pushed again (after its missing srcs) to come back to it, the first time it's seen is when it's not in seen
-    stack: list[UOp] = [root]
-    seen: set[UOp] = set()
+    stack: list[tuple[UOp, bool]] = [(root, False)]
     while stack:
-      n = stack.pop()
-      if n in replace: continue
-      skip = int(n.op is Ops.CALL and not enter_calls)
-      if n not in seen:
-        seen.add(n)
+      n, processed = stack.pop()
+      if n in self.replace: continue
+      if not processed:
         # bottom-up: try bpm on original node first, if it rewrites, use result as-is (no traversal into replacement)
-        if bpm is not None and (rewritten:=self.cached_bpm_rewrite(n)) is not None:
-          replace[n] = rewritten
+        if self.bpm is not None and (rewritten:=self.cached_bpm_rewrite(n)) is not None:
+          self.replace[n] = rewritten
           continue
         # no rewrite, process children then come back to rebuild
+        stack.append((n, True))
         # CALL bodies are never rewritten separately, rewrites that need them pass enter_calls=True
-        pushed = False
-        for x in reversed(n.src[skip:]):
-          if x not in replace:
-            if not pushed:
-              stack.append(n)
-              pushed = True
-            stack.append(x)
-        # if nothing was pushed, n would be popped next, so rebuild it now
-        if pushed: continue
-      # rebuild node with rewritten srcs, they are all in replace
-      new_src = n.src[:skip] + tuple(map(replace_get, n.src[skip:])) if skip else tuple(map(replace_get, n.src))
-      new_n = UOp(n.op, new_src, n.arg) if new_src != n.src else n  # type: ignore[arg-type]
-      # top-down: try pm on rebuilt node, use result as-is (no re-traversal)
-      if pm_fdict is not None: rewritten = fxn(new_n, ctx) if (fxn:=pm_fdict.get(new_n.op)) is not None else None
-      elif self.pm is not None: rewritten = self.pm_rewrite(new_n)
-      else: rewritten = None
-      if rewritten is not None: new_n = rewritten
-      replace[n] = new_n
-    return replace.get(root, root)
+        for x in reversed(n.src[1:] if n.op is Ops.CALL and not self.enter_calls else n.src):
+          if x not in self.replace: stack.append((x, False))
+      else:
+        # rebuild node with rewritten srcs
+        skip = int(n.op is Ops.CALL and not self.enter_calls)
+        new_src = n.src[:skip] + tuple(self.replace.get(x, x) for x in n.src[skip:])
+        new_n = UOp(n.op, new_src, n.arg) if new_src != n.src else n
+        # top-down: try pm on rebuilt node, use result as-is (no re-traversal)
+        if self.pm is not None and (rewritten:=self.pm_rewrite(new_n)) is not None: new_n = rewritten
+        self.replace[n] = new_n
+    return self.replace.get(root, root)
+
+  @staticmethod
+  def _matcher(pm:PatternMatcher) -> Callable[[Ops], Callable|None]:
+    # op -> the function to call with (uop, ctx). the compiled matcher for the op if there is one
+    if pm.tracked or (fdict:=pm.fdict) is None: return lambda op: pm.rewrite
+    return fdict.get
 
   def topo_rewrite(self, root:UOp) -> UOp:
-    """For top down rewrites where the order doesn't matter, the result of each node only depends on the node.
-    Visit the nodes in toposort order, and rewrite the new subgraphs created by rewrites recursively. See compile_topo_rewrite"""
-    assert self.pm is not None and self.bpm is None
-    from tinygrad.uop.upat import compile_topo_rewrite
-    return compile_topo_rewrite(not self.pm.tracked and self.pm.fdict is not None, self.enter_calls,
-                                self.pm.memo if self.ctx is None else None)(self, root)
+    """Top down rewrite where the order doesn't matter, the result of each node only depends on the node (no ctx side effects).
+    Each node is rewritten (recursively) after its srcs, the order is the same as toposort."""
+    replace, enter_calls, ctx, matcher = self.replace, self.enter_calls, self.ctx, self._matcher(unwrap(self.pm))
+    replace_get = replace.get
+
+    def rw(n:UOp) -> UOp:
+      if (r:=replace_get(n)) is not None: return r
+      src = n.src
+      if n.op is Ops.CALL and not enter_calls: new_src = (src[0],)+tuple([rw(x) for x in src[1:]])
+      else: new_src = tuple([rw(x) for x in src])
+      if new_src == src:
+        if (ret:=fxn(n, ctx) if (fxn:=matcher(n.op)) is not None else None) is None:
+          replace[n] = n
+          return n
+      else: ret = UOp(n.op, new_src, n.arg)
+      replace[n] = r = rw(ret)
+      return r
+
+    # NOTE: the results already in replace are final, so on deep (or infinite) recursion the general rewrite finishes the job
+    try: return rw(root)
+    except RecursionError: return self.unified_rewrite(root)
+    finally:
+      # NOTE: rw is a recursive closure, this breaks the reference cycle so the refcounter can free everything
+      rw = None  # type: ignore[assignment]
 
   def bottom_up_rewrite(self, root:UOp) -> UOp:
-    """For bottom up only rewrites where the order doesn't matter. Same semantics as unified_rewrite with only a bpm"""
-    assert self.pm is None and self.bpm is not None
-    from tinygrad.uop.upat import compile_bottom_up_rewrite
-    return compile_bottom_up_rewrite(not self.bpm.tracked and self.bpm.fdict is not None, self.enter_calls,
-                                     self.bpm.inline if not self.bpm.tracked else None)(self, root)
+    """Bottom up only rewrite where the order doesn't matter. Same semantics as unified_rewrite with only a bpm."""
+    replace, enter_calls, bpm_rewrite = self.replace, self.enter_calls, self.cached_bpm_rewrite
+    replace_get = replace.get
+
+    def rw(n:UOp) -> UOp:
+      if (r:=replace_get(n)) is not None: return r
+      # apply rewrite rules until a fixed point is reached
+      m = n
+      try:
+        if (test_n:=bpm_rewrite(n)) is not None:
+          seen = {n}
+          while test_n is not None:
+            if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
+            seen.add(test_n)
+            m, test_n = test_n, None
+            test_n = bpm_rewrite(m)
+      except BottomUpGate:
+        # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
+        replace[n] = m
+        return m
+      src = m.src
+      if m.op is Ops.CALL and not enter_calls: new_src = (src[0],)+tuple([rw(x) for x in src[1:]])
+      else: new_src = tuple([rw(x) for x in src])
+      replace[n] = r = m if new_src == src else rw(UOp(m.op, new_src, m.arg))
+      return r
+
+    # NOTE: the results already in replace are final, so on deep (or infinite) recursion the general rewrite finishes the job
+    try: return rw(root)
+    except RecursionError: return self.unified_rewrite(root)
+    finally:
+      # NOTE: rw is a recursive closure, this breaks the reference cycle so the refcounter can free everything
+      rw = None  # type: ignore[assignment]
 
   def unified_rewrite(self, root:UOp) -> UOp:
-    # the loop is generated for each mode, see compile_unified_rewrite
-    from tinygrad.uop.upat import compile_unified_rewrite
-    pm_fd, bpm_fd = (p is not None and not p.tracked and p.fdict is not None for p in (self.pm, self.bpm))
-    return compile_unified_rewrite(self.pm is not None, pm_fd, self.bpm is not None, bpm_fd, self.enter_calls)(self, root)
-
-  def stalled(self, waitlist:dict[UOp, list[tuple[UOp, int, UOp]]]):
-    def label(u:UOp) -> str: return f"{u.op.name}@{id(u):x}"
-    details = [f"  {label(n)} -> {label(new_n)} waits for {label(dep)}"
-               for dep, waiters in itertools.islice(waitlist.items(), 5) for n, _, new_n in waiters[:1]]
-    raise RuntimeError("graph_rewrite stalled: unresolved rewrite dependencies (possible cycle). "
-                       "A replacement may depend on the node being rewritten.\n" + "\n".join(details))
+    stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
+    on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
+    waitlist: dict[UOp, list[tuple[UOp, int, UOp]]] = {}  # UOps waiting on a dependency to be in self.replace
+    while stack:
+      if len(stack) > REWRITE_STACK_LIMIT: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
+      n, stage, new_n = stack.pop()
+      if n in self.replace: continue  # skip any nodes we have seen
+      if stage == 0:
+        # if bottom up, we rewrite this node early. in both cases, we add its srcs to the stack
+        if self.bpm is not None:
+          # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
+          test_n: UOp|None = n
+          seen = set()
+          try:
+            while test_n is not None:
+              if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
+              seen.add(test_n)
+              new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
+          except BottomUpGate:
+            # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
+            self.replace[n] = unwrap(test_n)
+            if n in waitlist: stack.extend(waitlist.pop(n))
+            continue
+        stack.append((n, 1, new_n))
+        # NOTE: CALLs are handled as a special case: their bodies are not included in the graph_rewrite,
+        # rewrites that need them pass enter_calls=True
+        for x in reversed(new_n.src[1:] if new_n.op is Ops.CALL and not self.enter_calls else new_n.src):
+          if x in on_stack: continue
+          stack.append((x, 0, x))
+          on_stack.add(x)
+      elif stage == 1:
+        skip = int(new_n.op is Ops.CALL and not self.enter_calls)
+        tmp = list(new_n.src[:skip])
+        for x in new_n.src[skip:]:
+          if (rx:=self.replace.get(x, SENTINEL)) is SENTINEL:
+            # source not ready: register in waitlist instead of spinning
+            waitlist.setdefault(x, []).append((n, 1, new_n))
+            break
+          tmp.append(rx)
+        else:
+          # in stage 1, once all srcs are rewritten, rebuild (if changed) or run top-down rewrite
+          if (new_src:=tuple(tmp)) == new_n.src:
+            # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
+            if self.pm is None or (new_src_n:=self.pm_rewrite(new_n)) is None:
+              self.replace[n] = new_n
+              if n in waitlist: stack.extend(waitlist.pop(n))
+              continue
+          else:
+            # if srcs changed from rewrites, construct a new UOp with the new srcs
+            new_src_n = UOp(new_n.op, new_src, new_n.arg)
+          # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
+          stack.append((n, 2, new_src_n))
+          stack.append((new_src_n, 0, new_src_n))
+      else:
+        # in stage 2, we link the result of new_n to the result of n
+        if (replaced_new_n:=self.replace.get(new_n, SENTINEL)) is SENTINEL:
+          # not ready: register in waitlist instead of spinning
+          waitlist.setdefault(new_n, []).append((n, 2, new_n))
+        else:
+          # otherwise we are done
+          self.replace[n] = replaced_new_n
+          if n in waitlist: stack.extend(waitlist.pop(n))
+    if root not in self.replace:
+      def label(u:UOp) -> str: return f"{u.op.name}@{id(u):x}"
+      details = [f"  {label(n)} -> {label(new_n)} waits for {label(dep)}"
+                 for dep, waiters in itertools.islice(waitlist.items(), 5) for n, _, new_n in waiters[:1]]
+      raise RuntimeError("graph_rewrite stalled: unresolved rewrite dependencies (possible cycle). "
+                         "A replacement may depend on the node being rewritten.\n" + "\n".join(details))
+    return self.replace[root]
 
 @rewrite_group(new_ctx=False)
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False,
-                  init_ctx:type|None=None, order_free=False) -> UOp:
-  """order_free: the caller knows that the result doesn't depend on the order of the rewrites (no ctx side effects that matter)"""
+                  init_ctx:type|None=None) -> UOp:
   if init_ctx is not None:
     assert ctx is None
     ctx = init_ctx()
@@ -1976,21 +2018,18 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
   if walk: return rewrite_ctx.walk_rewrite(sink)
   # if the order of the rewrites doesn't matter (no ctx side effects), use a faster rewriter. VIZ keeps the order for the trace
   if TRACK_MATCH_STATS.value < 2:
-    if rewrite_ctx.bpm is None and rewrite_ctx.pm is not None and (order_free or rewrite_ctx.pm.order_free(ctx)):
+    if rewrite_ctx.bpm is None and rewrite_ctx.pm is not None and rewrite_ctx.pm.order_free(ctx):
       return rewrite_ctx.topo_rewrite(sink)
-    if rewrite_ctx.pm is None and rewrite_ctx.bpm is not None and (order_free or rewrite_ctx.bpm.order_free(ctx)):
+    if rewrite_ctx.pm is None and rewrite_ctx.bpm is not None and rewrite_ctx.bpm.order_free(ctx):
       return rewrite_ctx.bottom_up_rewrite(sink)
   return rewrite_ctx.unified_rewrite(sink)
 
-
-_shape_rules = OpTable(UOp._shape_from_uop, "self.op")
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 _substitute.ctx_readonly = True
-_substitute.inline = "ctx.get({x})"
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot] if p.arg.slot >= 0 else None)])
 
 def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
