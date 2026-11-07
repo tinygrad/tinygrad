@@ -5,11 +5,11 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
 from tinygrad.uop.ops import gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, colored, Context, SPEC
+from tinygrad.helpers import argsort, all_same, cpu_profile, Context, SPEC
 
 @dataclass
 class IndexingContext:
-  realize_map: dict[UOp, None|list[int]] = field(default_factory=dict)
+  realize_map: dict[UOp, None] = field(default_factory=dict)
   non_removable: dict[UOp, None] = field(default_factory=dict)
   range_map: dict[UOp, tuple[tuple[UOp, ...], tuple[UOp, ...]]] = field(default_factory=dict)
 
@@ -78,7 +78,6 @@ def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
     if s.op in GroupOp.Defines|{Ops.MSTACK, Ops.MSELECT, Ops.AFTER, Ops.STAGE}:
       if x in ctx.range_map and i < data_src_count: new_src = new_src.index(*src_rngs)
     elif s in ctx.realize_map:
-      assert isinstance(ctx.realize_map[s], list), "realize map must contain range list"
       closed_ranges = ctx.range_map[s][1]
       if s.op is Ops.STORE:
         # add the ends if this is a store
@@ -179,8 +178,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
   return rngs
 
 @rewrite_group(new_ctx=False)
-def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
-  if debug: print("**************************")
+def run_rangeify(tsink:UOp) -> UOp:
   rctx = IndexingContext()
 
   # get ops to realize
@@ -195,7 +193,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
         if x in consumer_map: consumer_map[x][c] = None
 
   # explicit rangeify
-  ending_ranges: dict[UOp, list[UOp]] = {}
+  ending_ranges: dict[UOp, bool] = {}
   for x in reversed(tsink_toposort):
     # no ranges on kernels, they are internal
     if x.op is Ops.CALL: continue
@@ -206,13 +204,13 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
     # treat MSTACK/MSELECT like SINK
     if x.op in {Ops.MSTACK, Ops.MSELECT}: continue
 
-    ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
+    ending_ranges[x] = any(ending_ranges.get(u, False) for u in consumer_map[x])
     # ranges the consumers iterate that this node broadcasts over
     ended = [rctx.range_map[c][0][i] for c in consumer_map[x] if c in rctx.range_map and c.op in GroupOp.Broadcastable
              for i in broadcast_axes(x.shape, c.shape)]
-    broadcast_ending_ranges = list(UOp.sink(*ended).ranges)
+    broadcast_ending_ranges = bool(UOp.sink(*ended).ranges)
     # fusion decision: REDUCE before the broadcast
-    if x.op is Ops.REDUCE: ending_ranges[x] += broadcast_ending_ranges
+    if x.op is Ops.REDUCE: ending_ranges[x] |= broadcast_ending_ranges
 
     # *** the ranges on the output are
     #  1. new if this op is realized
@@ -224,10 +222,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
       # if this is in the realize_map, we create new ranges (at the output)
       out_rngs = tuple(rctx.new_range(s) for s in x.shape)
       # all ranges are ended now
-      ending_ranges[x] = []
-      # mark all ranges as ended
-      assert rctx.realize_map[x] is None
-      rctx.realize_map[x] = list(range(len(x.shape)))
+      ending_ranges[x] = False
     elif len(consumer_rngs) == 0:
       # if no consumers have ranges and this isn't realized, this doesn't have ranges either.
       continue
@@ -236,15 +231,13 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
       out_rngs = consumer_rngs[0]
     elif len(consumer_rngs) > 1:
       # if this has two consumers, we have to merge the ranges and might create new ones
-      all_rngs: list[tuple[UOp, ...]] = list(zip(*consumer_rngs))
       rngs_valids = []
-      for valid_rngs in all_rngs:
+      for valid_rngs in zip(*consumer_rngs):
         local_rngs, valids = zip(*[(r.get_idx(), r.get_valid()) for r in valid_rngs])
         rngs_valids.append((local_rngs, valids))
 
       all_all_same = all(all_same(local_rngs) for local_rngs,_ in rngs_valids)
       _out_rngs = []
-      _realize_axis = []
       for i,(local_rngs,valids) in enumerate(rngs_valids):
         # we compare the ranges without their valids
         if all_all_same:
@@ -253,20 +246,18 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
           _out_rngs.append(graph_rewrite(local_rngs[0].valid(minimum_valid), symbolic, name="minimum_valid"))
         else:
           _out_rngs.append(rctx.new_range(x.shape[i]))
-          _realize_axis.append(i)
       out_rngs = tuple(_out_rngs)
 
-      # we have to (partially) realize here if there's new ranges
-      if len(_realize_axis): rctx.realize_map[x] = _realize_axis
+      # we have to realize here if there's new ranges
+      if not all_all_same: rctx.realize_map[x] = None
 
     # if this element is a reduce and there's ended ranges, we might have to end some other ranges
-    if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE}):
-      _realize_axis = list(range(len(out_rngs)))
-      ending_ranges[x] = []
-      if len(_realize_axis):
-        rctx.realize_map[x] = _realize_axis
+    if ending_ranges[x] and x.op in GroupOp.Elementwise.union({Ops.REDUCE}):
+      ending_ranges[x] = False
+      if out_rngs:
+        rctx.realize_map[x] = None
         out_rngs = tuple(rctx.new_range(x.shape[i]) for i in range(len(out_rngs)))
-    ending_ranges[x] += broadcast_ending_ranges
+    ending_ranges[x] |= broadcast_ending_ranges
 
     # TODO: some ops don't have shape, enable this after the `.st` property is removed
     #assert len(out_rngs) == len(x.shape), \
@@ -288,20 +279,11 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
     # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
     # NOTE: this doesn't actually always end a range, but this is why convs are realized, so for now we need it
     if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape):
-      ending_ranges[x] += list(UOp.sink(*out_rngs[:len(x.marg)]).ranges.keys())
+      ending_ranges[x] |= bool(UOp.sink(*out_rngs[:len(x.marg)]).ranges)
 
     # REDUCE creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE:
       rngs = tuple(rctx.new_range(s) for s in x.src[0].shape[:x.arg[1]]) + out_rngs
-
-    if debug:
-      realized_ranges = rctx.realize_map.get(x, None)
-      if x.op is Ops.RESHAPE or len(rngs) != len(out_rngs):
-        disp = render_ranges(rngs, realized=realized_ranges) + " -> " + render_ranges(out_rngs, realized=realized_ranges)
-      else:
-        disp = render_ranges(rngs, out_rngs, realized=realized_ranges)
-      print("***" if x in rctx.realize_map else "   ",
-            f"{len(consumer_map[x]):2d} {str(x.op):20s} {str(x._shape):35s} {len(ending_ranges[x]):2d}", disp)
 
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)
@@ -312,11 +294,3 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
   # if a deviceless value must materialize, place it on the sink device
   tsink = graph_rewrite(tsink, pm_fix_deviceless, ctx=tsink.device, name="add device to deviceless")
   return tsink
-
-def render_ranges(*rngs_list, realized) -> str:
-  disp = []
-  for i, rs in enumerate(zip(*[[r.render() for r in rngs] for rngs in rngs_list])):
-    rng = rs[0] if all_same(rs) else " -> ".join(rs)
-    if realized is not None and i in realized: rng = colored(rng, "yellow")
-    disp.append("["+rng+"]")
-  return ''.join(disp)
