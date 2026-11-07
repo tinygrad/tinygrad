@@ -80,9 +80,12 @@ pm_mops = PatternMatcher([
    lambda a,b,dst,pad,val: (a&b).where(dst, 0).store(val) if pad.is_invalid else None),
   (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")), 0).store(UPat.var("val")),
    lambda cond,buf,idx,val: buf.index(idx.valid(cond)).store(val)),
-  # move movement ops and INDEX after AFTER
+  # storage moves movement ops and INDEX after AFTER
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
-   lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
+   lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg) if r.addrspace is not AddrSpace.ALU else None),
+  # a value keeps AFTER outside INDEX
+  (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="a"),), allow_any_len=True, name="x"),
+   lambda a,x: a.src[0].index(*x.src[1:]).after(*a.src[1:]) if a.addrspace is AddrSpace.ALU else None),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
 ])
 

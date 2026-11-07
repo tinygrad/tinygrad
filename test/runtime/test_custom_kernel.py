@@ -735,6 +735,23 @@ class TestCustomKernel(unittest.TestCase):
     _, b = Tensor.custom_kernel(Tensor([1, 5 << 16], dtype=dtypes.uint32).contiguous(), Tensor.zeros(1, dtype=dtypes.uint16).contiguous(), fxn=kernel)
     self.assertEqual(b.tolist(), [5])
 
+  def test_index_shaped_value_after_range(self):
+    def kernel(B:UOp):
+      r = UOp.range(3, 0)
+      value = UOp.stack(UOp.const(2.0, dtypes.float)).reciprocal().after(r)
+      return B[0].store(value.index(UOp.const(0, dtypes.int).after(r)).reduce(r, arg=Ops.MAX)).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(1).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [0.5])
+
+  def test_reduce_keeps_shaped_value_effect_count(self):
+    def kernel(A:UOp, B:UOp, C:UOp):
+      i = UOp.range(3, 0)
+      value = (A.index().load()*(i+1)).after(C[0].store(C.after(i)[0].load()+1)).reduce(i, arg=Ops.ADD)
+      return B[0].store(value[0]+value[1]).sink(arg=KernelInfo(opts_to_apply=()))
+    _, b, c = Tensor.custom_kernel(Tensor([1, 10]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(),
+                                   Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
+    Tensor.realize(b, c)
+    self.assertEqual((b.tolist(), c.tolist()), ([66], [3]))
+
   def test_simplify_keeps_read_after_store(self):
     def kernel(A:UOp, B:UOp): return B[0].store((A[0].after(A[0].store(7))*2).simplify()).sink(arg=KernelInfo(opts_to_apply=()))
     a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
