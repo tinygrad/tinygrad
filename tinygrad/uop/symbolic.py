@@ -361,7 +361,6 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
 def _keep_range(ctx:dict[UOp, UOp], r:UOp) -> None:
   if r not in ctx: raise BottomUpGate
 pm_keep_range = PatternMatcher([(UPat(Ops.RANGE, name="r"), _keep_range)])
-pm_keep_range.order_free = True  # the substitute dict is only read
 
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # return simplified uop (might be the same as input)

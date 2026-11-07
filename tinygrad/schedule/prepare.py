@@ -175,7 +175,6 @@ pm_inline_calls = PatternMatcher([
   (UPat(Ops.CALL, name="c"), resolve_function),
   (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
 ])
-pm_inline_calls.order_free = False  # resolve_function numbers the ALLOCs
 
 pm_disk_copy = PatternMatcher([
   # remove contiguous on movement ops before a copy on disk
@@ -252,7 +251,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=tuple(walk_mop(u) for u in s.src if u.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="s"), lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u) for u in s.src[1:] if u.op is not Ops.NOOP))),
 ])
-earliest_rewrites.order_free = False  # the copy and allreduce rules make new buffers
 
 @rewrite_group(new_ctx=False)
 def prepare_rangeify(sink:UOp) -> UOp:

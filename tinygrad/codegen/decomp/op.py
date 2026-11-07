@@ -121,6 +121,4 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
   if Ops.FDIV in ops:
     pat += [(UPat.var("x").reciprocal(), lambda x: UOp.const(1.0).alu(Ops.FDIV, x))]
     pat += [(UPat.var("a") * UPat(Ops.FDIV, dtypes.floats, src=(UPat.const(1), UPat.var("b"))), lambda a,b: a.alu(Ops.FDIV, b))]
-  ret = PatternMatcher(pat)
-  ret.order_free = True  # the renderer is only read
-  return ret
+  return PatternMatcher(pat)
