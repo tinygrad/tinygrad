@@ -683,27 +683,29 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # NOTE: they all have to share an axis, we always choose [-1]. src axes are right-aligned into the output shape
     if self.op in GroupOp.ALU.union({Ops.STACK}):
       return axes[-1] if (axes := dedup([x.axis+len(self.shape)-len(x.shape) for x in self.src if x.axis is not None])) else None
-    if len(self.src) == 0: return None
-    src_axis = self.src[0].axis
-    if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (0, self.src[0].shape[src_axis]):
+    if len(self.src) == 0 or (src_axis := self.src[0].axis) is None: return None
+    dcount = 1
+    if self.op is Ops.RESHAPE:
+      dcount = len(self.device) if isinstance(self.device, tuple) else \
+        int(next(u.src[1] for u in self.src[0].toposort() if u.op is Ops.UNSHARD).vmax)+1
+    return self._axis_after(src_axis, dcount)
+
+  def _axis_after(self, src_axis:int, dcount:int):
+    if self.op is Ops.SHRINK and self.marg[src_axis] != (0, self.src[0].shape[src_axis]):
       return None # SHRINK will remove the sharding if it's on axis
     if self.op is Ops.REDUCE:
-      if src_axis is None: return None
       if src_axis < self.arg[1]: return None
       return src_axis - self.arg[1]
     if self.op is Ops.RESHAPE:
-      if src_axis is None: return None
       arg_acc:list[sint] = [ssimplify(x) for x in itertools.accumulate(self.marg, operator.mul, initial=1)]
       # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
       target = ssimplify(prod(self.src[0].shape[:src_axis]))
       if target not in arg_acc: raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
       new_axis = len(arg_acc) - arg_acc[::-1].index(target) - 1
-      dcount = len(self.device) if isinstance(self.device, tuple) else \
-        int(next(u.src[1] for u in self.src[0].toposort() if u.op is Ops.UNSHARD).vmax)+1
       if self.shape[new_axis] % dcount != 0: raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
       return new_axis
-    if self.op is Ops.PERMUTE: return self.marg.index(src_axis) if src_axis is not None else None
-    if self.op is Ops.EXPAND: return src_axis + len(self.marg) if src_axis is not None else None
+    if self.op is Ops.PERMUTE: return self.marg.index(src_axis)
+    if self.op is Ops.EXPAND: return src_axis + len(self.marg)
     return src_axis
 
   def _shard(self, axis:int, rng:UOp) -> UOp:
