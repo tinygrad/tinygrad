@@ -212,7 +212,7 @@ class TestTransformerGenerate(unittest.TestCase):
   def test_recurrent_temperature_high_produces_variety(self):
     model = Transformer(TEST_CONFIG)
     model.has_recurrent_block = True
-    outputs = {model.forward(Tensor([[1]]), (0,), Tensor([2.0])).item() for _ in range(5)}
+    outputs = {model.forward(Tensor([[1]]), Tensor([2.0]), 0).item() for _ in range(5)}
     self.assertGreater(len(outputs), 1)
 
   def test_temperature_passed_to_forward(self):
