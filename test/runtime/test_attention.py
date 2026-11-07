@@ -4,7 +4,7 @@ from tinygrad import Tensor, dtypes, nn, UOp, TinyJit
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig, MLATransformerBlock, Indexer, IndexerConfig,
   HyperConnection, HCConfig, AttentionResidual, GatedResidual, PLELayer, PLEConfig,
-  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk, short_conv, _rope_freqs,
+  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk, short_conv,
 )
 from tinygrad.llm.gguf import GGUFPackedTable
 from test.helpers import slow
@@ -30,9 +30,9 @@ class TestAttention(unittest.TestCase):
     with self.assertRaises(AssertionError): apply_rope(Tensor.randn(1, 1, 4, 7, dtype=dtypes.float32), 0)
 
   def test_rope_per_row_positions(self):
-    freqs = Tensor([[1., 0.], [0., 1.]])
+    freqs = Tensor([[[1., 0.]], [[0., 1.]]])
     x = Tensor([[[[1., 0.]]], [[[1., 0.]]]])
-    out = apply_rope_new(x, _rope_freqs(freqs, (0, 1), 1))
+    out = apply_rope_new(x, freqs)
     np.testing.assert_array_equal(out.numpy(), [[[[1., 0.]]], [[[0., 1.]]]])
 
   def test_independent_positions_jit(self):
