@@ -1,92 +1,78 @@
 import unittest, re, ast as pyast
+from dataclasses import replace
 from typing import Any
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid
-from tinygrad.uop import Ops, GroupOp
-from tinygrad.uop.ops import AxisType, UOp, graph_rewrite, ParamArg, KernelInfo
+from tinygrad.uop import Ops
+from tinygrad.uop.ops import AxisType, UOp, graph_rewrite, ParamArg, KernelInfo, CallInfo, CustomFunction
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.render import render_uir
 from tinygrad.device import Device
 from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.helpers import Context, ansistrip
 
-# ***** prototype parse for the uop v1 wire format *****
+# ***** prototype parse for the uir wire format: %id = op src src key=value *****
 
 _DTYPES_BY_NAME: dict[str, DType] = {d.name: d for _,v in vars(type(dtypes)).items() if isinstance(v, DType) for d in [v]}
+# a token is a key=, a %ref, a bracket, a quoted string, or a bare word. '#' starts a comment
+_tok_re = re.compile(r"""#.*|\w+=|%\d+|[\[\]]|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[^\s\[\]]+""")
+_line_re = re.compile(r"^%(\d+) = (\w+)$")
+_named_vals = {"dtype": lambda v: _DTYPES_BY_NAME[v], "addrspace": lambda v: AddrSpace[v], "axis": lambda v: AxisType[v],
+               "op": lambda v: Ops[v.upper()]}
+_dataclass_args = {Ops.PARAM: ParamArg, Ops.REFPARAM: ParamArg, Ops.ALLOC: ParamArg, Ops.BUFFER: ParamArg,
+                   Ops.SINK: KernelInfo, Ops.CALL: CallInfo, Ops.CUSTOM_FUNCTION: CustomFunction}
 
-_line_re = re.compile(r"^\s*%(\d+) = (\w+)\s*(.*)$")
-_src_tok = re.compile(r"\([^()]*\)|[^,\s]+")   # a src is %N, a literal, or a flat all-const tuple
-
-def _kv(zone:str) -> dict[str, str]:
-  """the arg zone is k=v tokens"""
-  kv = {}
-  for t in zone.split():
-    k, _, v = t.partition("=")
-    kv[k] = v
-  return kv
+def _parse_lit(tok:str) -> Any:
+  if tok in ("true", "false"): return tok == "true"
+  if re.fullmatch(r"-?\d+", tok): return int(tok)
+  if re.fullmatch(r"-?(\d+\.\d*(e[-+]?\d+)?|\d+e[-+]?\d+|inf)|nan", tok): return float(tok)
+  return tok
 
 def _parse_const(tok:str) -> UOp:
   if tok == "invalid": return UOp(Ops.CONST, src=(), arg=Invalid)
-  if tok in ("true", "false"): return UOp(Ops.CONST, src=(), arg=tok == "true")
-  if ":" in tok:
-    dt = _DTYPES_BY_NAME[d:=tok.split(":", 1)[0]]
-    return UOp(Ops.CONST, src=(), arg=dt.const(float.fromhex(tok[len(d)+1:])) if dtypes.is_float(dt) else dt.const(int(tok[len(d)+1:])))
-  if re.match(r"^-?\d+$", tok): return UOp(Ops.CONST, src=(), arg=int(tok))
-  return UOp(Ops.CONST, src=(), arg=dtypes.weakfloat.const(float(tok)))
+  return UOp(Ops.CONST, src=(), arg=v if isinstance(v:=_parse_lit(tok), (bool, int)) else dtypes.weakfloat.const(v))
 
-def _parse_paramarg(rest:str, name:str|None) -> ParamArg:
-  kv = _kv(rest)
-  dev = kv.get("device")
-  return ParamArg(int(kv["slot"]), _DTYPES_BY_NAME[kv["dtype"]],
-                  tuple(map(int, kv["bounds"].strip("[]").split(","))) if "bounds" in kv else None,
-                  name, AddrSpace[kv["addrspace"]] if "addrspace" in kv else AddrSpace.GLOBAL,
-                  pyast.literal_eval(dev) if dev and dev[0] in "'(" else dev, kv.get("volatile") == "true")
+def _parse_val(toks:list[str], bare) -> Any:
+  if (t:=toks.pop(0)) == "[":
+    items = []
+    while toks[0] != "]": items.append(_parse_val(toks, bare))
+    toks.pop(0)
+    return tuple(items)
+  return pyast.literal_eval(t) if t[0] in "'\"" else bare(t)
 
 def parse_ssa(text:str) -> UOp:
   # the wire format carries storage declarations without runtime state: `buffer` reconstructs as an ALLOC
-  nodes, root = {}, None
-  def parse_tok(tok:str) -> UOp:
-    if tok.startswith("%"): return nodes[int(tok[1:])]
-    if tok.startswith("("): return UOp(Ops.STACK, src=tuple(parse_tok(t) for t in tok[1:-1].split(", ") if t))
-    return _parse_const(tok)
+  nodes: dict[int, UOp] = {}
+  root = None
+  def src_tok(t:str) -> UOp: return nodes[int(t[1:])] if t.startswith("%") else _parse_const(t)
   for raw in ansistrip(text).splitlines():   # op names may carry ANSI color from render_uir
-    line = raw.strip()
-    if not line or line.startswith(";"): continue
-    m = _line_re.match(line)
+    toks = [t for t in _tok_re.findall(raw) if not t.startswith("#")]
+    if not toks: continue
+    m = _line_re.match(" ".join(toks[:3]))
     assert m, f"unparseable line {raw!r}"
-    n, op, rest = int(m.group(1)), Ops[m.group(2).upper()], m.group(3).strip()
-    if op is Ops.BUFFER: op = Ops.ALLOC   # the wire carries storage declarations without runtime state
-    if rest.startswith(": "): srcstr, argstr = "", rest[2:]
-    elif " : " in rest: srcstr, argstr = rest.split(" : ", 1)
-    else: srcstr, argstr = rest, ""
-    name: str|None = None
-    if argstr.startswith('"'):  # quoted param name comes first in the args
-      end = argstr.index('"', 1)
-      name, argstr = argstr[1:end], argstr[end+1:].strip()
-    srcs = [parse_tok(t) for t in _src_tok.findall(srcstr)]
+    n, op, toks = int(m.group(1)), Ops[m.group(2).upper()], toks[3:]
+    srcs: list[UOp] = []
+    while toks and not toks[0].endswith("="):
+      v = _parse_val(toks, src_tok)
+      srcs.append(UOp(Ops.STACK, src=v) if isinstance(v, tuple) else v)
+    kv: dict[str, Any] = {}
+    while toks:
+      k = toks.pop(0)[:-1]
+      kv[k] = _parse_val(toks, _named_vals.get(k, _parse_lit))
     arg: Any = None
-    if op in GroupOp.Defines: arg = _parse_paramarg(argstr, name)
-    elif op is Ops.RANGE:
-      t, *ids = argstr.split()
-      arg = (AxisType[t], *map(int, ids))
-    elif op is Ops.REDUCE:
-      kv = _kv(argstr)
-      arg = (Ops[kv["op"].upper()], int(kv["pop"]) if "pop" in kv else 0)
-    elif op in (Ops.CAST, Ops.BITCAST): arg = _DTYPES_BY_NAME[argstr]
-    elif op is Ops.SINK: arg = KernelInfo(name=argstr) if argstr else None
-    elif op in (Ops.COPY, Ops.SPECIAL): arg = argstr
-    elif argstr:
-      try: arg = pyast.literal_eval(argstr)
-      except (SyntaxError, ValueError): arg = argstr
-    if op is Ops.BUFFER: op = Ops.ALLOC
+    if op is Ops.RANGE: arg = (kv["axis"], *(kv["id"] if isinstance(kv["id"], tuple) else (kv["id"],)))
+    elif op is Ops.REDUCE: arg = (kv["op"], kv.get("pop", 0))
+    elif op is Ops.ALLREDUCE: arg = (kv["op"], kv["device"])
+    elif op in _dataclass_args and (kv or op is Ops.CALL): arg = _dataclass_args[op](**kv)
+    elif kv: (arg,) = kv.values()
+    if op is Ops.BUFFER: op = Ops.ALLOC   # the wire carries storage declarations without runtime state
     nodes[n] = root = UOp(op, src=tuple(srcs), arg=arg)   # root is always the last node
   assert root is not None, "empty graph"
   return root
 
 def _strip_buffers(root:UOp) -> UOp:
   # realized BUFFERs carry runtime state the wire can't; a BUFFER with no binding is exactly an ALLOC
-  subs = {b: b.replace(op=Ops.ALLOC, arg=ParamArg(b.arg.slot, b.arg.dtype, b.arg.vmin_vmax,
-                                                 b.arg.name, b.arg.addrspace, b.arg.device, b.arg.volatile))
+  subs = {b: b.replace(op=Ops.ALLOC, arg=replace(b.arg, buffer=None, spec=None))
           for b in root.toposort() if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg)}
   return root.substitute(subs, walk=True, name="strip buffers for wire format test") if subs else root
 
@@ -152,10 +138,23 @@ class TestSSARender(unittest.TestCase):
     assert_roundtrip(self, o.uop)
     assert len(o.uop.toposort()) > 10  # not trivially small
 
+  def test_bound_variable(self):
+    v = UOp.variable("n", 1, 10).bind(3)
+    assert_roundtrip(self, (Tensor.empty(10, device="CPU")[:v] + 1).uop)
+
+  def test_multi_device(self):
+    x = Tensor.empty(4, 4, device="CPU").shard(("CPU:0", "CPU:1"), axis=0)
+    assert_roundtrip(self, (x + 1).sum().uop)
+
+  def test_quoted_args(self):
+    g = UOp.sink(UOp.param(0, dtypes.int32, name="has space %1"), UOp.param(1, dtypes.int32, name="[x]"))
+    self.assertIn("name='has space %1'", ansistrip(render_uir(g)))
+    assert_roundtrip(self, g)
+
   def test_continue_parsing(self):
     # lines out of order / comments tolerated, ids sparse
     g = UOp.sink(UOp.const(1) + UOp.const(2))
-    txt = "; hand written\n" + render_uir(g) + "\n;; trailing comment\n"
+    txt = "# hand written\n" + render_uir(g) + " # trailing comment\n\n# last line comment\n"
     assert_roundtrip(self, parse_ssa(txt))
 
 if __name__ == '__main__': unittest.main()

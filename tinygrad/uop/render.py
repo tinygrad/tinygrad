@@ -1,5 +1,7 @@
 import re
-from tinygrad.dtype import dtypes, AddrSpace
+from enum import Enum
+from dataclasses import is_dataclass, fields
+from tinygrad.dtype import dtypes, DType
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, KernelInfo, range_str, sint
 from tinygrad.helpers import strip_parens, colored
@@ -27,48 +29,52 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0",
                Ops.STAGE: "#FFC14D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46", Ops.BACKEDGE: "#464752"}
 
-def _render_arg(x:UOp) -> str:
-  """arg rendering: bare scalars, keyed fields, mini-grammars for real structures"""
-  match x.op:
-    case Ops.CONST:
-      if x.is_invalid: return "invalid"
-      dt, v = x.dtype, x.val
-      if dtypes.is_bool(dt): return str(bool(v)).lower()
-      if dt in dtypes.weaks: return repr(v) if dt is dtypes.weakint else repr(float(v))
-      if dtypes.is_float(dt): return f"{dt.name}:{float(v).hex()}"   # float.hex() roundtrips exactly, inf/nan included
-      return f"{dt.name}:{v}"
-    case Ops.PARAM | Ops.REFPARAM | Ops.BUFFER | Ops.ALLOC:
-      a, opts = x.arg, ""
-      if a.vmin_vmax is not None: opts += f" bounds=[{a.vmin_vmax[0]},{a.vmin_vmax[1]}]"
-      if a.addrspace not in (None, AddrSpace.GLOBAL): opts += f" addrspace={a.addrspace.name}"
-      if a.device is not None:
-        opts += " device=" + (a.device if isinstance(a.device, str) and re.fullmatch(r"[\w:]+", a.device) else repr(a.device))
-      if a.volatile: opts += " volatile=true"
-      name = f'"{a.name}" ' if a.name is not None else ""
-      return f"{name}dtype={x.dtype.name} slot={a.slot}{opts}"
-    case Ops.RANGE: return f"{x.arg[0].name} {' '.join(map(str, x.arg[1:]))}"   # flatten_range merges ids: WEAK 1 2
-    case Ops.SINK: return x.arg.name if isinstance(x.arg, KernelInfo) else ""
-    case Ops.REDUCE: return f"op={x.arg[0].name.lower()}" + (f" pop={x.arg[1]}" if x.arg[1] else "")
-    case Ops.CAST | Ops.BITCAST: return x.arg.name   # one scalar -> bare
-    case Ops.COPY | Ops.SPECIAL: return x.arg   # the whole arg is a device/string
-    case _: return repr(x.arg) if x.arg is not None else ""
+def _const_str(x:UOp) -> str:
+  """CONSTs are weak or bool, so literals are bare: 1, 2.5, -inf, true, invalid. typed values are CASTs of these"""
+  if x.is_invalid: return "invalid"
+  return str(x.val).lower() if isinstance(x.val, bool) else repr(x.val) if isinstance(x.val, int) else repr(float(x.val))
 
-# CONSTs never get lines (inline literals, no %id); concrete all-const STACKs merge into their parent as tuples
+def _val(v) -> str:
+  """an arg value: tuples are [a b], enums and dtypes by name, one-word strings bare, anything else quoted"""
+  if isinstance(v, bool): return str(v).lower()
+  if isinstance(v, Ops): return v.name.lower()
+  if isinstance(v, Enum): return v.name
+  if isinstance(v, DType): return v.name
+  if isinstance(v, (int, float)): return repr(v)
+  if isinstance(v, tuple): return "[" + " ".join(map(_val, v)) + "]"
+  if isinstance(v, str) and re.fullmatch(r"[\w:.\-]+", v): return v
+  return repr(v if isinstance(v, str) else repr(v))
+
+# single-value args get a name, structured args are key=value per field. runtime objects (Buffer, BufferSpec, grad_fxn) are not rendered
+_arg_key = {Ops.CAST:"dtype", Ops.BITCAST:"dtype", Ops.COPY:"device", Ops.GETADDR:"device", Ops.SPECIAL:"name", Ops.UNSHARD:"axes",
+            Ops.MSELECT:"index"}
+_skip_fields = {"buffer", "spec", "grad_fxn"}
+
+def _render_arg(x:UOp) -> str:
+  """args are key=value, written after the srcs"""
+  if (a:=x.arg) is None: return ""
+  match x.op:
+    case Ops.CONST: return _const_str(x)
+    case Ops.RANGE: return f"axis={a[0].name} id={_val(a[1] if len(a) == 2 else a[1:])}"   # flatten_range merges ids: id=[1 2]
+    case Ops.REDUCE: return f"op={_val(a[0])}" + (f" pop={a[1]}" if a[1] else "")
+    case Ops.ALLREDUCE: return f"op={_val(a[0])} device={_val(a[1])}"
+    case Ops.SINK if isinstance(a, KernelInfo): return f"name={_val(a.name)}"
+  if x.op not in _arg_key and is_dataclass(a):
+    return " ".join(f"{f.name}={_val(v)}" for f in fields(a) if f.name not in _skip_fields and (v:=getattr(a, f.name)) != f.default)
+  return f"{_arg_key.get(x.op, 'arg')}={_val(a)}"
+
+# CONSTs never get lines (inline literals, no %id); concrete all-const STACKs inline into their parent as [a b]
 def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
 
 def render_uir(root:UOp|list[UOp]) -> str:
+  """one line per UOp: %id = op src src key=value"""
   nodes = [u for u in (list(root.toposort(enter_calls=True)) if isinstance(root, UOp) else list(root)) if not _inline(u)]
   table = {u:i for i,u in enumerate(nodes)}
   def src_str(u:UOp) -> str:
     if not _inline(u): return f"%{table[u]}"
-    return _render_arg(u) if u.op is Ops.CONST else "(" + ", ".join(src_str(s) for s in u.src) + ")"
-  lines = []
-  for i,u in enumerate(nodes):
-    line = f"%{i} = {colored(u.op.name.lower(), uops_colors.get(u.op))}"
-    if len(u.src): line += " " + ", ".join(src_str(s) for s in u.src)
-    if (a:=_render_arg(u)): line += f" : {a}"   # args always after ' : '
-    lines.append(line)
-  return "\n".join(lines)
+    return _const_str(u) if u.op is Ops.CONST else "[" + " ".join(src_str(s) for s in u.src) + "]"
+  return "\n".join(" ".join(filter(None, [f"%{i} = {colored(u.op.name.lower(), uops_colors.get(u.op))}", *map(src_str, u.src), _render_arg(u)]))
+                   for i,u in enumerate(nodes))
 
 
 # for debug
