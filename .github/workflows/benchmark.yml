@@ -531,7 +531,7 @@ jobs:
 
   drivertests:
     name: PCI Driver Tests (DEV=${{ matrix.dev }})
-    runs-on: ${{ matrix.dev == 'AMD' && '9060xt' || '3080' }}
+    runs-on: ${{ matrix.dev == 'AMD' && '9060xt' || '5060' }}
     strategy:
       fail-fast: false
       matrix:

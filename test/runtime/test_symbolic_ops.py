@@ -226,6 +226,10 @@ class TestSymbolicOps(unittest.TestCase):
       expected = a[3:5, i:i+2].numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  def test_slice_pad_sum(self):
+    vi = Variable("i", 1, 4).bind(4)
+    self.assertEqual(Tensor.ones(1, 12).contiguous().pad(((4, 0), (0, 0)))[vi, :5+vi].sum().item(), 9)
+
   def test_slice_no_start(self):
     a = Tensor.rand(7, 11)
     for i in range(1, 5):
