@@ -98,10 +98,12 @@ def store_image(x:UOp, d:UOp) -> UOp:
   lanes = d.src if d.op is Ops.STACK else tuple(d.index(i) for i in range(d.shape[0]))
   return x.store(UOp.stack(*[as_float(s) for s in lanes]))
 
-pm_simplify_add_image = PatternMatcher([
-  (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))), transform_to_image),
+pm_store_image = PatternMatcher([
   (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), store_image),
 ])
+pm_simplify_add_image = PatternMatcher([
+  (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))), transform_to_image),
+])+pm_store_image
 
 def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
@@ -111,9 +113,10 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   # depth[u] is the lexicographically largest (GLOBAL stores, LOCAL stores) count on any chain u waits on, u included
   depth: dict[UOp, tuple[int, int]] = {}
   for u in sink.toposort():
-    depth[u] = waits = max([depth[s] for s in u.src_without_body], default=(0, 0))
+    src = u.src[1:] if u.op is Ops.CALL else u.src
+    depth[u] = waits = (max([depth[s] for s in src]) if len(src) > 1 else depth[src[0]]) if src else (0, 0)
     if u.op is Ops.STORE: depth[u] = (waits[0]+(u.src[0].addrspace is AddrSpace.GLOBAL), waits[1]+(u.src[0].addrspace is AddrSpace.LOCAL))
-    if u.op in {Ops.LOAD, Ops.STORE}:
+    if u.op is Ops.LOAD or u.op is Ops.STORE:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalescing does not support gated loads/stores"
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src

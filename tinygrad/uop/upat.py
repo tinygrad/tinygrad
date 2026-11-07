@@ -1,5 +1,5 @@
-from typing import Any, Callable
-import itertools, inspect, functools, types, hashlib, marshal, sys
+from typing import Any, Callable, cast
+import itertools, inspect, functools, types, hashlib, marshal, sys, ast, copy, pathlib, os, operator, re, pickle
 from tinygrad.helpers import partition, dedup, Context, diskcache_get, diskcache_put
 from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UPat, UOp, Ops, PatternMatcher, graph_rewrite, deconstruct_function, upat_interpret
@@ -156,7 +156,86 @@ def _positional_params(fxn:Callable) -> tuple[str, ...]|None:
   if co.co_flags & (inspect.CO_VARARGS | inspect.CO_VARKEYWORDS) or co.co_kwonlyargcount or fxn.__defaults__: return None
   return co.co_varnames[:co.co_argcount]
 
-def _final_render(x:UOp, has_ctx:bool, depth=1, fxn_name="_fxn", leaf="single", params:tuple[str, ...]|None=None) -> list[str]:
+# **** lambda inlining ****
+# a pattern's lambda is inlined into the compiled matcher: its args are replaced with the matched expressions, so `lambda x: x` is just
+# `return uop.src[0]`. globals are bound by value into the compiled code, like deconstruct_function does
+
+@functools.cache
+def _module_lambdas(filename:str) -> dict[int, list[ast.Lambda]]:
+  """all the lambdas in a source file, by the line they start on"""
+  try: tree = ast.parse(pathlib.Path(filename).read_text())
+  except (OSError, SyntaxError): return {}
+  ret: dict[int, list[ast.Lambda]] = {}
+  for n in ast.walk(tree):
+    if isinstance(n, ast.Lambda): ret.setdefault(n.lineno, []).append(n)
+  return ret
+
+def _lambda_ast(fxn:Callable) -> ast.Lambda|None:
+  """the ast of a lambda, from its source file. the lambda is the innermost one whose body contains all the code positions"""
+  co = fxn.__code__
+  if co.co_name != "<lambda>": return None
+  # NOTE: the first instruction (RESUME) has the position of the def
+  pos = [(l, c, el, ec) for l, el, c, ec in list(co.co_positions())[1:] if None not in (l, c, el, ec)]
+  if not pos: return None
+  def contains(b:ast.expr) -> bool:
+    return all((b.lineno, b.col_offset) <= (l, c) and (el, ec) <= (cast(int, b.end_lineno), cast(int, b.end_col_offset)) for l,c,el,ec in pos)
+  # NOTE: the lambda starts on co_firstlineno
+  cands = [n for n in _module_lambdas(co.co_filename).get(co.co_firstlineno, []) if contains(n.body)]
+  return min(cands, key=lambda n: (cast(int, n.end_lineno)-n.lineno, cast(int, n.end_col_offset)-n.col_offset)) if cands else None
+
+def _lambda_template(fxn:Callable) -> tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...]]|None:
+  """(body source with __ARG_x__/__GLB_x__/__BND_x__ placeholders, arg names, global names, bound names) of a lambda, None if it can't be inlined"""
+  co = fxn.__code__
+  if co.co_name != "<lambda>": return None
+  try: st = os.stat(co.co_filename)
+  except OSError: return None
+  key = hashlib.sha256(repr((co.co_filename, st.st_mtime_ns, st.st_size, co.co_firstlineno, list(co.co_positions()))).encode()).hexdigest()
+  if (ret:=diskcache_get("lambda_template", key)) is not None: return ret[0]
+  diskcache_put("lambda_template", key, (ret:=(_make_lambda_template(fxn),)))
+  return ret[0]
+
+def _make_lambda_template(fxn:Callable) -> tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...]]|None:
+  if (lam:=_lambda_ast(fxn)) is None: return None
+  a = lam.args
+  if a.vararg or a.kwarg or a.kwonlyargs or a.defaults or a.posonlyargs: return None
+  args = tuple(x.arg for x in a.args)
+  body = copy.deepcopy(lam.body)
+  if any(isinstance(n, ast.Lambda) for n in ast.walk(body)): return None
+  fglobs = fxn.__globals__
+  builtins = b if isinstance(b:=getattr(fxn, "__builtins__"), dict) else vars(b)
+  # names bound in the body (comprehension targets, walrus) are renamed, they can't shadow anything
+  bound = {n.id for n in ast.walk(body) if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del))}
+  if bound & (set(args) | set(fglobs) | set(builtins)): return None
+  gnames: list[str] = []
+  class Rename(ast.NodeTransformer):
+    def visit_Name(self, n:ast.Name):
+      if n.id in bound: return ast.copy_location(ast.Name(f"__BND_{n.id}__", n.ctx), n)
+      if n.id in args: return ast.copy_location(ast.Name(f"__ARG_{n.id}__", n.ctx), n)
+      if n.id in fglobs:
+        if n.id not in gnames: gnames.append(n.id)
+        return ast.copy_location(ast.Name(f"__GLB_{n.id}__", n.ctx), n)
+      if n.id in builtins: return n
+      raise UPatCompileError(f"can't inline {n.id}")
+  try: return ast.unparse(Rename().visit(body)), args, tuple(gnames), tuple(bound)
+  except UPatCompileError: return None
+
+_inline_cnt = itertools.count()
+def _inline_lambda(fxn:Callable, args:dict[str, str], globs:dict[str, Any]) -> str|None:
+  """the body of the lambda fxn as an expression of args (arg name -> expression), adding the globals it needs to globs. None if it can't"""
+  if (tmpl:=_lambda_template(fxn)) is None: return None
+  src, params, gnames, bnames = tmpl
+  if set(params) != set(args): return None
+  uid = next(_inline_cnt)
+  for g in gnames: globs[f"_i{uid}_{g}"] = fxn.__globals__[g]
+  # NOTE: the args are expressions, they are put in parens
+  subs = {f"__GLB_{g}__":f"_i{uid}_{g}" for g in gnames} | {f"__BND_{b}__":f"_i{uid}_b_{b}" for b in bnames} | \
+         {f"__ARG_{k}__":f"({v})" for k,v in args.items()}
+  # longest first, a placeholder can be a prefix of another
+  for k in sorted(subs, key=len, reverse=True): src = src.replace(k, subs[k])
+  return src
+
+def _final_render(x:UOp, has_ctx:bool, depth=1, fxn_name="_fxn", leaf="single", params:tuple[str, ...]|None=None,
+                  call:Callable[[list[tuple[str, str]]], str]|None=None) -> list[str]:
   # if the whole clause collapsed to a single predicate (no binds), rewrap it
   if x.op is Ops.CALL and x.arg.inline: x = UOp(Ops.AND, (x,))
   assert x.op is Ops.AND
@@ -165,7 +244,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1, fxn_name="_fxn", leaf="single", 
   for s in x.src:
     if s.op is Ops.OR:
       assert len(or_pieces) == 0 and len(s.src) >= 1
-      for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1, fxn_name, leaf, params))
+      for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1, fxn_name, leaf, params, call))
     elif s.op is Ops.STORE:
       assert all(y.op is Ops.CALL and y.arg.inline for y in s.src)
       store_pieces.append((s.src[0].body.arg.name, s.src[1].body.arg.name))
@@ -177,8 +256,8 @@ def _final_render(x:UOp, has_ctx:bool, depth=1, fxn_name="_fxn", leaf="single", 
     and_clause = ' and '.join(and_pieces)
     return [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"] + or_pieces
   # if we don't, this is a final return
-  store_clause = _call_args(store_pieces, has_ctx, params)
-  and_clause = ' and '.join(and_pieces + [f"(_ret:={fxn_name}({store_clause})) is not None"])
+  call_expr = call(store_pieces) if call is not None else f"{fxn_name}({_call_args(store_pieces, has_ctx, params)})"
+  and_clause = ' and '.join(and_pieces + [f"(_ret:={call_expr}) is not None"])
   if leaf == "single": return [f"{'  '*depth}if {and_clause}: return _ret"]
   if leaf == "merged": return [f"{'  '*depth}if {and_clause} and _ret is not uop: return _ret"]
   return [f"{'  '*depth}if {and_clause}:", f"{'  '*depth}  if _ret is not uop: return _ret", f"{'  '*depth}  break"]
@@ -231,7 +310,7 @@ _fxn_cnt = itertools.count()
 def _pattern_code(p:UPat, fxn) -> tuple[tuple[str, ...], str, list[str], dict[str, Any]]:
   """returns (conds, leaf, fork_lines, globals) to try pattern p on `uop`. Assumes uop.op in p.op.
   if fork_lines is empty, the pattern is `if all(conds) and leaf: return _ret`, else it's `if all(conds): while True: fork_lines`"""
-  real_fxn = types.FunctionType(*deconstruct_function(fxn))
+  real_fxn = _real_fxn(fxn)
   globs: dict[str, Any] = {(fname:=f"_f{next(_fxn_cnt)}"): real_fxn}
   has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
   try:
@@ -243,13 +322,15 @@ def _pattern_code(p:UPat, fxn) -> tuple[tuple[str, ...], str, list[str], dict[st
     return (), f"(_ret:={fname}(uop, ctx)) is not None", [], globs
   if out.op is Ops.CALL and out.arg.inline: out = UOp(Ops.AND, (out,))
   conds = tuple(s.body.arg.name for s in out.src if s.op is Ops.CALL)
+  params = _positional_params(real_fxn)
+  def call(stores:list[tuple[str, str]]) -> str:
+    # inline the lambda if we can, else call the fxn
+    if (inl:=_inline_lambda(real_fxn, dict(stores) | ({"ctx":"ctx"} if has_ctx else {}), globs)) is not None: return f"({inl})"
+    return f"{fname}({_call_args(stores, has_ctx, params)})"
   if any(s.op is Ops.OR for s in out.src):
-    fork_lines = [l for s in out.src if s.op is Ops.OR for ss in s.src
-                  for l in _final_render(ss, has_ctx, 0, fname, "merged_loop", _positional_params(real_fxn))]
+    fork_lines = [l for s in out.src if s.op is Ops.OR for ss in s.src for l in _final_render(ss, has_ctx, 0, fname, "merged_loop", call=call)]
     return conds, "", fork_lines + ["break"], globs
-  stores = _call_args([(s.src[0].body.arg.name, s.src[1].body.arg.name) for s in out.src if s.op is Ops.STORE], has_ctx,
-                      _positional_params(real_fxn))
-  return conds, f"(_ret:={fname}({stores})) is not None", [], globs
+  return conds, f"(_ret:={call([(s.src[0].body.arg.name, s.src[1].body.arg.name) for s in out.src if s.op is Ops.STORE])}) is not None", [], globs
 
 def _early_reject_implied(p:UPat) -> bool:
   # the default early_reject is the set of single ops in the src, if the src is a tuple (or permutations) these are all checked by the matcher
@@ -277,25 +358,139 @@ def _render_pats(pats:list[tuple[tuple[str, ...], str, list[str], str]], depth:i
     i = j
   return ret
 
-@functools.cache
-def pm_compile_op(op:Ops, pats:tuple[tuple[UPat, Callable], ...]) -> Callable:
+def _op_compat(q:UPat, o:Ops) -> bool:
+  if q.is_any: return any(_op_compat(x, o) for x in q.src[0])
+  return q.op is None or o in q.op
+
+def _sig_compat(p:UPat, sig:tuple[Ops, ...]) -> bool:
+  """False if p can't match a UOp whose srcs have these ops"""
+  if not p.early_reject.issubset(sig) or len(sig) < p.required_len or (p.strict_length and len(sig) != p.required_len): return False
+  if p.src is None: return True
+  if isinstance(p.src[0], itertools.repeat): return all(_op_compat(cast(UPat, p._in_src), o) for o in sig)
+  return any(all(_op_compat(q, o) for q,o in zip(ss, sig)) for ss in p.src)
+
+def _render_matcher(name:str, items:list[tuple[UPat, tuple]], sig:tuple[Ops, ...]|None) -> Callable:
+  """the matcher for the patterns in items, in order. if sig is the ops of the srcs, only the patterns that can match are in it"""
   globs: dict[str, Any] = {}
   rpats: list[tuple[tuple[str, ...], str, list[str], str]] = []
   need_ler = False
-  for i,(p,fxn) in enumerate(pats):
-    conds, leaf, fork_lines, pglobs = _pattern_code(p, fxn)
+  for i,(p,(conds, leaf, fork_lines, pglobs)) in enumerate(items):
+    if sig is not None and not _sig_compat(p, sig): continue
     globs.update(pglobs)
-    if len(p.early_reject) and not _early_reject_implied(p):
+    # NOTE: with sig, the early_reject is known
+    if sig is None and len(p.early_reject) and not _early_reject_implied(p):
       need_ler = True
       globs[ername:=f"_er{i}"] = frozenset(p.early_reject)
       conds = (f"{ername}.issubset(_ler)",) + conds
     rpats.append((conds, leaf, fork_lines, f"{p.location[0].split('/')[-1]}:{p.location[1]}"))
   pre = ["if (_ler:=uop.__dict__.get('_src_ops')) is None: uop.__dict__['_src_ops'] = _ler = {u.op for u in uop.src}"] if need_ler else []
-  code = '\n'.join([f"def compiled_pm_{op.name}(uop, ctx):"] + ["  "+l for l in pre] + _render_pats(rpats, 1) + ["  return None"])
+  code = '\n'.join([f"def {name}(uop, ctx):"] + ["  "+l for l in pre] + _render_pats(rpats, 1) + ["  return None"])
+  if sig is not None: code = _fold_sig(code, sig, globs)
   namespace: dict = {}
-  exec(compile_cached(code, f"<compiled_pm_{op.name}>"), globs, namespace)  # pylint: disable=W0122
-  fxn = namespace[f"compiled_pm_{op.name}"]
+  exec(compile_cached(code, f"<{name}>"), globs, namespace)  # pylint: disable=W0122
+  fxn = namespace[name]
   fxn.__source__ = code
+  return fxn
+
+def _fold_sig(code:str, sig:tuple[Ops, ...], globs:dict[str, Any]) -> str:
+  """the checks on the number and ops of the srcs of uop are known with sig, they become True/False and python removes the dead code"""
+  def src_op(m:re.Match) -> str:
+    if (i:=int(m.group(1))) >= len(sig): return m.group(0)
+    return str(sig[i] is globs[m.group(3)] if m.group(2) == "is" else sig[i] in globs[m.group(3)])
+  code = re.sub(r"\buop\.src\[(\d+)\]\.op (is|in) (_l\d+)\b", src_op, code)
+  def src_len(m:re.Match) -> str: return str(len(sig) == int(m.group(2)) if m.group(1) == "==" else len(sig) >= int(m.group(2)))
+  return re.sub(r"\blen\(uop\.src\) (==|>=) (\d+)\b", src_len, code)
+
+# matchers with many patterns dispatch on the ops of the srcs. a signature seen SIG_HOT times gets its own matcher with only the patterns
+# that can match it, the others use the generic matcher
+SIG_MIN_PATS, SIG_HOT = 8, 4
+
+# **** disk cache of the generic matchers ****
+# the code of a matcher is cached with a recipe to rebuild its globals from the patterns (the fxns, their globals for inlined lambdas,
+# literals, early rejects). the key is the structure of the patterns and the code of their fxns
+
+@functools.cache
+def _compiler_version() -> str: return hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()
+
+@functools.cache
+def _pat_key(p:UPat, fxn:Callable) -> bytes|None:
+  try: return hashlib.sha256(pickle.dumps(p) + marshal.dumps(fxn.__code__) + pickle.dumps(fxn.__defaults__)).digest()
+  except Exception: return None
+
+def _pm_key(op:Ops, pats:tuple[tuple[UPat, Callable], ...]) -> str|None:
+  if any(_pat_key(p, fxn) is None for p,fxn in pats): return None
+  return hashlib.sha256(_compiler_version().encode() + op.name.encode() + b"".join(cast(bytes, _pat_key(p, fxn)) for p,fxn in pats)).hexdigest()
+
+def _make_recipe(items:list[tuple[UPat, tuple]], pats:tuple[tuple[UPat, Callable], ...], globs:dict[str, Any]) -> dict[str, tuple]|None:
+  recipe: dict[str, tuple] = {}
+  for i,(_,(_,_,_,pglobs)) in enumerate(items):
+    fxn = pats[i][1]
+    for name,v in pglobs.items():
+      if name not in globs: continue
+      if name.startswith("_f"): recipe[name] = ("fxn", i) if getattr(v, "__code__", None) is fxn.__code__ else ("interp", i)
+      elif name.startswith("_l"): recipe[name] = ("lit", v)
+      elif (m:=re.fullmatch(r"_i\d+_(.+)", name)) and (g:=m.group(1)) in fxn.__globals__ and fxn.__globals__[g] is v: recipe[name] = ("glob", i, g)
+      else: return None
+  for name in globs:
+    if name.startswith("_er"): recipe[name] = ("er", int(name[3:]))
+  if set(recipe) != set(globs) - {"__builtins__"}: return None
+  try: pickle.dumps(recipe)
+  except Exception: return None
+  return recipe
+
+@functools.cache
+def _real_fxn(fxn:Callable) -> Callable: return types.FunctionType(*deconstruct_function(fxn))
+
+def _rebuild_globs(recipe:dict[str, tuple], pats:tuple[tuple[UPat, Callable], ...]) -> dict[str, Any]:
+  globs: dict[str, Any] = {}
+  for name,r in recipe.items():
+    if r[0] == "fxn": globs[name] = _real_fxn(pats[r[1]][1])
+    elif r[0] == "interp": globs[name] = upat_interpret(*pats[r[1]])
+    elif r[0] == "glob": globs[name] = pats[r[1]][1].__globals__[r[2]]
+    elif r[0] == "lit": globs[name] = r[1]
+    elif r[0] == "er": globs[name] = frozenset(pats[r[1]][0].early_reject)
+  return globs
+
+def _cached_matcher(name:str, pats:tuple[tuple[UPat, Callable], ...], items:Callable[[], list], sig:tuple[Ops, ...]|None,
+                    key:str|None) -> Callable:
+  if key is not None and (cached:=diskcache_get("pm_matcher", key)) is not None:
+    code, co, recipe = cached
+    namespace: dict = {}
+    exec(marshal.loads(co), _rebuild_globs(recipe, pats), namespace)  # pylint: disable=W0122
+    (fxn:=namespace[name]).__source__ = code
+    return fxn
+  fxn = _render_matcher(name, items(), sig)
+  if key is not None and (recipe:=_make_recipe(items(), pats, fxn.__globals__)) is not None:
+    code = getattr(fxn, "__source__")
+    diskcache_put("pm_matcher", key, (code, marshal.dumps(compile(code, f"<{name}>", "exec")), recipe))
+  return fxn
+
+@functools.cache
+def pm_compile_op(op:Ops, pats:tuple[tuple[UPat, Callable], ...]) -> Callable:
+  # NOTE: the pattern code is only made if it's needed
+  items = functools.cache(lambda: [(p, _pattern_code(p, fxn)) for p,fxn in pats])
+  generic = _cached_matcher(f"compiled_pm_{op.name}", pats, items, None, key:=_pm_key(op, pats))
+  if len(pats) < SIG_MIN_PATS: return generic
+  sigs: dict[tuple[Ops, ...], Callable] = {}
+  counts: dict[tuple[Ops, ...], int] = {}
+  def sig_miss(sig:tuple[Ops, ...]) -> Callable:
+    if (cnt:=counts.get(sig, 0)+1) < SIG_HOT:
+      counts[sig] = cnt
+      return generic
+    sig_name = f"compiled_pm_{op.name}_{'_'.join(o.name for o in sig)}"
+    sigs[sig] = ret = _cached_matcher(sig_name, pats, items, sig, None if key is None else hashlib.sha256(f"{key}{sig}".encode()).hexdigest())
+    return ret
+  globs = {"_sig_get":sigs.get, "_sig_miss":sig_miss, "_get_op":operator.attrgetter("op")}
+  code = '\n'.join([f"def compiled_pm_{op.name}_dispatch(uop, ctx):",
+                    "  if (n:=len(s:=uop.src)) == 2: sig = (s[0].op, s[1].op)",
+                    "  elif n == 1: sig = (s[0].op,)",
+                    "  else: sig = tuple(map(_get_op, s))",
+                    "  if (f:=_sig_get(sig)) is None: f = _sig_miss(sig)",
+                    "  return f(uop, ctx)"])
+  namespace: dict = {}
+  exec(compile_cached(code, f"<compiled_pm_{op.name}_dispatch>"), globs, namespace)  # pylint: disable=W0122
+  fxn = namespace[f"compiled_pm_{op.name}_dispatch"]
+  fxn.__source__ = getattr(generic, "__source__")
   return fxn
 
 # **** compiled graph_rewrite ****
