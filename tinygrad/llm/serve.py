@@ -705,6 +705,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         if job is None and not active: time.sleep(0.005)
         # the steps of the decoding ones: one, or their share of the time of the slices
         if job is not None and stall < self.MAX_STALL: continue
+        if job is not None:
+          # (the slice queued last done: its time the prefill's, not the steps')
+          st = time.perf_counter()
+          eng.settle()
+          stall += time.perf_counter() - st
         share = min(self.DECODE_SHARE, max(0.1, len(active) / max(1, len(active) + len(filling) + len(pending))))
         budget, stall = stall * share / (1 - share), 0.0
         st0 = time.perf_counter()

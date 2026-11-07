@@ -13,10 +13,11 @@ class FakeModel:
     self.calls:list[tuple] = []
   def seq_rows(self) -> int: return 1 << 16
   def seq_slots(self) -> int: return 4
-  def seq_prefill(self, slot, base, tokens, start, hrow, temp=0.0) -> int:
-    self.calls.append(("prefill", slot, start, len(tokens)))
-    time.sleep(self.per_token * (len(tokens) - start))
-    return 7
+  def seq_prefill(self, slot, base, tokens, start, hrow, temp=0.0, upto=None) -> int|None:
+    end = len(tokens) if upto is None else upto
+    self.calls.append(("prefill", slot, start, end))
+    time.sleep(self.per_token * (end - start))
+    return 7 if upto is None else None
   def seq_first(self, slot, base, pos, temp=0.0) -> int:
     self.calls.append(("first", slot, pos))
     return 8

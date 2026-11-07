@@ -2295,17 +2295,34 @@ class Transformer:
       call()
       if DEBUG >= 1: print(f"seq_warmup: {name} run in {time.perf_counter()-st:.2f}s")
 
-  def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, float]=0.0) -> int:
+  def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, float]=0.0,
+                  upto:int|None=None) -> int|None:
     """
     the tokens from start of the sequence of slot `slot` (its region of the caches from base) prefilled, from its states of position start (the
     slot's, and its row hrow the hidden state of the token before it; start 0: none): its states of position len(tokens) into the slot (the
-    hidden state of the last token its row 0). returns the token sampled after the last
+    hidden state of the last token its row 0). returns the token sampled after the last. upto: only the tokens up to upto (a slice of the
+    prompt, the rest from there): None returned, the devices not waited for (the slice before it is: one slice queued while one runs)
     """
     self._finish_load()
     self._seq_init()
+    devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
+    if upto is not None:
+      assert 0 <= start < upto < len(tokens) and base % REGION_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
+      # (the token after the slice the prompt's: the slice's sampled token isn't written over it, the next slice's tokens are its)
+      self._token_host[base+start:base+upto+1] = array.array('i', tokens[start:upto+1])
+      self._seq_copy_call(False, slot, start, hrow, keep=start > 0)
+      pos = start
+      for n in self._chunk_plan(upto - start):
+        self._seq_chunk(base, pos, n)
+        pos += n
+      self._seq_copy_call(True, slot, upto, 0)
+      self._slice_wait()
+      self._slice_done = [(t:=Device[d].timeline.host.view(fmt='Q'), t[1]) for d in devs]
+      return None
     assert 0 <= start < len(tokens) and base % REGION_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
-    L, devs = len(tokens), to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
+    L = len(tokens)
     for d in devs: Device[d].synchronize()  # (a step may still read the token buffer)
+    self._slice_done = []
     self._token_host[base+start:base+L+1] = array.array('i', tokens[start:] + [-1])
     self._seq_copy_call(False, slot, start, hrow, keep=start > 0)
     self._seq_pf_host_temp[:2] = array.array('f', temp if isinstance(temp, tuple) else (temp, 1.0))
@@ -2315,6 +2332,12 @@ class Transformer:
       pos += n
     self._seq_copy_call(True, slot, L, 0)
     return self._wait_host(lambda: self._token_host[base + L], "the token after a prefill")
+
+  def _slice_wait(self):
+    """the last slice (seq_prefill's upto) done on the devices"""
+    for tl, v in getattr(self, "_slice_done", []):
+      while tl[0] < v: time.sleep(0.0002)
+    self._slice_done = []
 
   def _seq_first(self, slot:UOp, at:UOp):
     """the token after the hidden state of row 0 of slot `slot` (a prompt's last token's) sampled into the token buffer at row `at`"""

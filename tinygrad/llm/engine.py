@@ -261,8 +261,12 @@ class SeqEngine:
   def prefill_slice(self, s:Seq, ids:list[int], start:int, restore:bool, end:int):
     """the tokens of the prompt ids from start to end prefilled in s (its checkpoint restored first): the rest is prefilled from end"""
     if restore: self.model.seq_ckpt(False, s.slot, s.ckpt)
-    self.model.seq_prefill(s.slot, s.base, ids[:end], start, 0 if restore else s.hrow)
+    self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, upto=end)
     s.tokens, s.n, s.hrow, s.used = ids[:end], end, 0, time.perf_counter()
+
+  def settle(self):
+    """the last slice of a prefill (prefill_slice: not waited for) done"""
+    if (wait:=getattr(self.model, "_slice_wait", None)) is not None: wait()
 
   def prefill(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, float]) -> int:
     """the prompt ids prefilled in s from start (its checkpoint restored first): the token sampled after it"""
