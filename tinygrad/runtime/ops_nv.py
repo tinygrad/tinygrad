@@ -13,7 +13,8 @@ from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, PROFILE, ContextVar, VIZ, ProfileEvent, unwrap
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
-from tinygrad.runtime.autogen import nv_570, nv_580, nv_610, nv_615, mesa
+from tinygrad.runtime import autogen
+from tinygrad.runtime.autogen import nv_570, mesa
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
 from tinygrad.renderer.nir import NAKRenderer
@@ -354,9 +355,10 @@ class NVKIface:
       NVKIface.root = self.rm_alloc(0, nv_gpu.NV01_ROOT_CLIENT, None, root=0)
 
       drvver = self.rm_control(self.root, nv_gpu.NV0000_CTRL_CMD_SYSTEM_GET_BUILD_VERSION_V2, nv_gpu.NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS())
-      if (major:=int(drvver.driverVersionBuffer.decode().split('.')[0], 10)) >= 615: nv_gpu = nv_615
-      elif major >= 610: nv_gpu = nv_610
-      elif major >= 580: nv_gpu = nv_580
+      # NOTE: the autogen modules load on access, so only the headers for this driver are loaded
+      if (major:=int(drvver.driverVersionBuffer.decode().split('.')[0], 10)) >= 615: nv_gpu = autogen.nv_615
+      elif major >= 610: nv_gpu = autogen.nv_610
+      elif major >= 580: nv_gpu = autogen.nv_580
 
       self.uvm(nv_gpu.UVM_INITIALIZE, nv_gpu.UVM_INITIALIZE_PARAMS())
 
