@@ -1,26 +1,36 @@
-import unittest, re, ast as pyast
+import unittest, re, math, ast as pyast
 from dataclasses import replace
 from typing import Any
 from tinygrad import Tensor
-from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid
-from tinygrad.uop import Ops
-from tinygrad.uop.ops import AxisType, UOp, graph_rewrite, ParamArg, KernelInfo, CallInfo, CustomFunction
+from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid, ConstFloat
+from tinygrad.uop import Ops, FastEnum
+from tinygrad.uop.ops import AxisType, UOp, graph_rewrite, ParamArg, KernelInfo, CallInfo, CustomFunction, ProgramInfo
+from tinygrad.renderer import Estimates
+from tinygrad.device import BufferSpec
+from tinygrad.runtime.support.hcq2 import HCQInfo
+from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.schedule.indexing import BufferizeOpts
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.render import render_uir
 from tinygrad.device import Device
-from tinygrad.codegen import full_rewrite_to_sink
-from tinygrad.helpers import Context, ansistrip
+from tinygrad.codegen import full_rewrite_to_sink, to_program
+from tinygrad.helpers import Context, ansistrip, Target
 
 # ***** prototype parse for the uir wire format: %id = op src src key=value *****
 
 _DTYPES_BY_NAME: dict[str, DType] = {d.name: d for _,v in vars(type(dtypes)).items() if isinstance(v, DType) for d in [v]}
-# a token is a key=, a %ref, a bracket, a quoted string, or a bare word. '#' starts a comment
-_tok_re = re.compile(r"""#.*|\w+=|%\d+|[\[\]]|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[^\s\[\]]+""")
+# a token is a key=, a %ref, a bracket, a quoted string, a `python object`, or a bare word. '#' starts a comment
+_tok_re = re.compile(r"""#.*|\w+=|%\d+|[\[\]]|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`[^`]*`|[^\s\[\]]+""")
 _line_re = re.compile(r"^%(\d+) = (\w+)$")
 _named_vals = {"dtype": lambda v: _DTYPES_BY_NAME[v], "addrspace": lambda v: AddrSpace[v], "axis": lambda v: AxisType[v],
                "op": lambda v: Ops[v.upper()]}
 _dataclass_args = {Ops.PARAM: ParamArg, Ops.REFPARAM: ParamArg, Ops.ALLOC: ParamArg, Ops.BUFFER: ParamArg,
-                   Ops.SINK: KernelInfo, Ops.CALL: CallInfo, Ops.CUSTOM_FUNCTION: CustomFunction}
+                   Ops.SINK: KernelInfo, Ops.CALL: CallInfo, Ops.CUSTOM_FUNCTION: CustomFunction, Ops.STAGE: BufferizeOpts,
+                   Ops.PROGRAM: ProgramInfo}
+# names a `python object` can use
+_eval_ns = {"Ops": Ops, "dtypes": dtypes, "AxisType": AxisType, "AddrSpace": AddrSpace, "Opt": Opt, "OptOps": OptOps, "Estimates": Estimates,
+            "BufferSpec": BufferSpec, "HCQInfo": HCQInfo, "Invalid": Invalid, "ConstFloat": ConstFloat, "inf": math.inf, "nan": math.nan,
+            "UOp": UOp, "ParamArg": ParamArg, "KernelInfo": KernelInfo, "CallInfo": CallInfo, "CustomFunction": CustomFunction}
 
 def _parse_lit(tok:str) -> Any:
   if tok in ("true", "false"): return tok == "true"
@@ -38,10 +48,11 @@ def _parse_val(toks:list[str], bare) -> Any:
     while toks[0] != "]": items.append(_parse_val(toks, bare))
     toks.pop(0)
     return tuple(items)
+  # any FastEnum (Ops, ISA ops) can appear in a python object; they are all loaded by the time they are rendered
+  if t[0] == "`": return eval(t[1:-1], {**{c.__name__:c for c in FastEnum.__subclasses__()}, **_eval_ns})  # pylint: disable=eval-used
   return pyast.literal_eval(t) if t[0] in "'\"" else bare(t)
 
 def parse_ssa(text:str) -> UOp:
-  # the wire format carries storage declarations without runtime state: `buffer` reconstructs as an ALLOC
   nodes: dict[int, UOp] = {}
   root = None
   def src_tok(t:str) -> UOp: return nodes[int(t[1:])] if t.startswith("%") else _parse_const(t)
@@ -58,14 +69,14 @@ def parse_ssa(text:str) -> UOp:
     kv: dict[str, Any] = {}
     while toks:
       k = toks.pop(0)[:-1]
-      kv[k] = _parse_val(toks, _named_vals.get(k, _parse_lit))
+      kv[k] = _parse_val(toks, lambda t: nodes[int(t[1:])] if t.startswith("%") else _named_vals.get(k, _parse_lit)(t))
+      if k == "target": kv[k] = Target.parse(kv[k])   # a Target is written as its string, bare or quoted
     arg: Any = None
-    if op is Ops.RANGE: arg = (kv["axis"], *(kv["id"] if isinstance(kv["id"], tuple) else (kv["id"],)))
+    if op is Ops.RANGE: arg = (kv.get("axis", AxisType.WEAK), *(kv["slot"] if isinstance(kv["slot"], tuple) else (kv["slot"],)))
     elif op is Ops.REDUCE: arg = (kv["op"], kv.get("pop", 0))
     elif op is Ops.ALLREDUCE: arg = (kv["op"], kv["device"])
     elif op in _dataclass_args and (kv or op is Ops.CALL): arg = _dataclass_args[op](**kv)
     elif kv: (arg,) = kv.values()
-    if op is Ops.BUFFER: op = Ops.ALLOC   # the wire carries storage declarations without runtime state
     nodes[n] = root = UOp(op, src=tuple(srcs), arg=arg)   # root is always the last node
   assert root is not None, "empty graph"
   return root
@@ -73,16 +84,13 @@ def parse_ssa(text:str) -> UOp:
 def _strip_buffers(root:UOp) -> UOp:
   # realized BUFFERs carry runtime state the wire can't; a BUFFER with no binding is exactly an ALLOC
   subs = {b: b.replace(op=Ops.ALLOC, arg=replace(b.arg, buffer=None, spec=None))
-          for b in root.toposort() if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg)}
-  return root.substitute(subs, walk=True, name="strip buffers for wire format test") if subs else root
+          for b in root.toposort(enter_calls=True) if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg) and b.arg.buffer is not None}
+  return root.substitute(subs, walk=True, enter_calls=True, name="strip buffers for wire format test") if subs else root
 
 def assert_roundtrip(case, root:UOp):
-  txt = render_uir(root)
-  parsed = parse_ssa(txt)
-  # text + structural equality, both sides stripped: realized BUFFER vs parsed ALLOC converge to the same thing
-  g1, g2 = _strip_buffers(root), _strip_buffers(parsed)
-  case.assertEqual(render_uir(g1), render_uir(g2))
-  case.assertEqual({x.tuplize for x in g1.toposort()}, {x.tuplize for x in g2.toposort()})
+  # UOps are hash-consed, so a lossless round trip gives back the identical UOp
+  g = _strip_buffers(root)
+  case.assertIs(parse_ssa(render_uir(g)), g, render_uir(g))
 
 class TestSSARender(unittest.TestCase):
   def test_gemm_pre_rangeify(self):
@@ -150,6 +158,12 @@ class TestSSARender(unittest.TestCase):
     g = UOp.sink(UOp.param(0, dtypes.int32, name="has space %1"), UOp.param(1, dtypes.int32, name="[x]"))
     self.assertIn("name='has space %1'", ansistrip(render_uir(g)))
     assert_roundtrip(self, g)
+
+  def test_program(self):
+    # SINK with applied opts, PROGRAM with params as %refs, SOURCE, BINARY bytes, Target
+    prg = to_program(self._kernel((Tensor.empty(16, device="NULL") + 1).sum()), Device["NULL"].renderer)
+    self.assertIs(prg.op, Ops.PROGRAM)
+    assert_roundtrip(self, prg)
 
   def test_continue_parsing(self):
     # lines out of order / comments tolerated, ids sparse
