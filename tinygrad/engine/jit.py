@@ -172,7 +172,7 @@ class _TinyJit(Generic[ReturnType]):
         raise JitError(f"args mismatch in JIT: {self.captured.expected_input_info=} != {expected_input_info=}")
       ret = self.captured(input_buf_uops, var_vals)
 
-    self.cnt += 1
+    if JIT: self.cnt += 1
     return ret
 
 # overload signatures support both @TinyJit and @TinyJit(prune=True) syntax

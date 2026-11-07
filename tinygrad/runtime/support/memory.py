@@ -242,11 +242,10 @@ class MemoryManager:
       return VirtMapping(self.identity_va(uncached) + paddr, size, [(paddr, size)], aspace=AddrSpace.PHYS, uncached=uncached)
 
     # Alloc physical memory and map it to the virtual address
-    va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
-
+    size = round_up(size, 0x1000)
     if contiguous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
-      # Traverse the PT to find the largest contiguous sizes we need to allocate. Try to allocate the longest segment to reduce TLB pressure.
+      # Try to allocate the longest segment to reduce TLB pressure.
       nxt_range, rem_size, paddrs = 0, size, []
       while rem_size > 0:
         while self.palloc_ranges[nxt_range][0] > rem_size: nxt_range += 1
@@ -261,7 +260,7 @@ class MemoryManager:
           continue
         rem_size -= self.palloc_ranges[nxt_range][0]
 
-    return self.map_range(va, size, paddrs, aspace=AddrSpace.PHYS, uncached=uncached)
+    return self.map_range(self.alloc_vaddr(size, align), size, paddrs, aspace=AddrSpace.PHYS, uncached=uncached)
 
   def vfree(self, vm:VirtMapping):
     if not getenv("GMMU", 1): return self.pfree(vm.paddrs[0][0])
