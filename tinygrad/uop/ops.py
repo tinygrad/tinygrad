@@ -192,8 +192,6 @@ class UOpMetaClass(type):
       if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {created}")
     return created
 
-_unary_shape_ops, _movement_shape_ops = GroupOp.Unary | {Ops.CAST}, GroupOp.Movement | {Ops.UNSHARD, Ops.REDUCE}
-
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
 class recursive_property:
   def __init__(self, fxn):
@@ -315,7 +313,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @recursive_property
   def _shape(self) -> tuple[sint, ...]|None:
     # elementwise ops are the most common, they are first
-    if self.op in _unary_shape_ops:
+    if self.op in GroupOp.UnaryElementwise:
       assert len(self.src) == 1, "unary ops must have 1 src"
       return self.src[0]._shape
 
@@ -392,7 +390,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         return ps
 
     # movement ops change the shape
-    if self.op in _movement_shape_ops:
+    if self.op in GroupOp.ShapeChanging:
       ps = self.src[0]._shape
       if ps is None: raise RuntimeError(f"movement op {self.op} requires shape, {self.src[0].op} doesn't have one")
       match self.op:
