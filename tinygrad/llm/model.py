@@ -676,7 +676,7 @@ class Transformer:
     # TODO: remove the need for copy to default device
     kv, entries = gguf_parse(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
     arch = kv['general.architecture']
-    if arch == 'qwen4exp' and shard > 1 and amd_custom_kernels_supported(Device.DEFAULT):
+    if arch == 'qwen4exp' and shard > 1:
       # tensor parallel on RDNA3: its own implementation (custom kernels, sequences decoded at once, speculative decoding). defer_load: the
       # weights read while the warmup compiles
       from tinygrad.llm.qwen4exp import Transformer as Qwen4Exp, amd_custom_kernels_supported as qwen4exp_supported

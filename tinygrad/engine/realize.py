@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence, Callable
-import decimal, weakref, pickle, time, os
+import decimal, weakref, pickle
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
@@ -33,7 +33,7 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
   if isinstance(call.arg.aux, HCQInfo): # the submitter itself, then every kernel it enqueues
     kernels:list[tuple[str, UOp, tuple|None]] = [(Device[call.arg.aux.device[0]].host, call, None)]
-    return kernels + [(d, call, (name, estimates, key, bufs, io)) for d,name,estimates,_,key,bufs,io,*_ in call.arg.aux.kernels]
+    return kernels + [(d, call, (name, estimates, key, bufs, io)) for d,name,estimates,_,key,bufs,io in call.arg.aux.kernels]
   ast = call.body
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "validate": return []
   return [(d, call, None) for d in to_tuple(call.device)]
@@ -255,16 +255,7 @@ pm_beam = PatternMatcher([
 # **************** parallel lowering + compilation ****************
 
 def _compile_kernel(x:tuple[int, tuple[UOp, Renderer], dict]) -> tuple[int, UOp]:
-  with Context(**x[2]):
-    if not os.environ.get("COMPILE_LOG"): return x[0], to_program(*x[1])
-    # (COMPILE_LOG: every kernel's codegen time to /tmp/compile_log.txt)
-    st = time.perf_counter()
-    prg = to_program(*x[1])
-    with open("/tmp/compile_log.txt", "a") as f: f.write(f"{time.perf_counter()-st:.3f} {prg.src[0].arg.name}\n")
-    # (COMPILE_DUMP: the input of a kernel's codegen that took more than that many seconds, pickled to /tmp/slow_<pid>.pkl)
-    if (lim:=float(os.environ.get("COMPILE_DUMP", 0))) and time.perf_counter()-st > lim:
-      with open(f"/tmp/slow_{os.getpid()}.pkl", "wb") as f: pickle.dump(x[1], f)
-    return x[0], prg
+  with Context(**x[2]): return x[0], to_program(*x[1])
 def _compile_pickled(task:bytes) -> bytes: return pickle.dumps(_compile_kernel(pickle.loads(task))[1])
 
 # (a process compiling for another: its kernels compiled there, by their keys, see capture_parallel) [(key, task)] -> their programs

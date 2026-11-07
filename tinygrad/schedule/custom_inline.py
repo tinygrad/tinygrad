@@ -2,7 +2,7 @@
 # materialized by a kernel of its own, the custom kernel's loads of it load the buffers and compute it (at the indices it loads)
 from dataclasses import replace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import prod
 from tinygrad.dtype import Invalid, dtypes
 from tinygrad.schedule.indexing import apply_movement_op, broadcast_rngs, _stack_select
 
@@ -39,7 +39,7 @@ def _chain_to(u:UOp, p:UOp) -> list[UOp]|None:
 
 def inline_custom_kernel_srcs(c:UOp) -> UOp|None:
   body, srcs = c.src[0], c.src[1:]
-  if body.op is not Ops.SINK or not getenv("INLINE_CUSTOM_SRCS", 1): return None
+  if body.op is not Ops.SINK: return None
   nodes = body.toposort()
   params = {u.arg.slot: u for u in nodes if u.op is Ops.PARAM and u.arg.slot >= 0}
   consumers: dict[UOp, list[UOp]] = {}

@@ -7,7 +7,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.uop.ops import UOp
 from tinygrad.device import Device
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, round_up, getenv, Context, unwrap, dedup
+from tinygrad.helpers import prod, round_up, Context, unwrap, dedup
 from tinygrad.llm.gguf import ggml_data_to_tensor, _GGML_NATIVE, _GGML_QUANT
 
 # the dequantized weights the loader made: the expression (its storage views unwrapped) -> (ggml type, the packed bytes). the quantized
@@ -170,7 +170,7 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
     for i,(nb, _) in enumerate(parts):
       offsets[name].append(totals[i])
       totals[i] += round_up(nb, align)
-  STAGE, K = getenv("LOAD_STAGE", 256 << 20), getenv("LOAD_STAGES", 3)
+  STAGE, K = 256 << 20, 3
   assert STAGE > 0 and K > 0
   fds = {path: os.open(path, os.O_RDONLY) for path in dedup(path for path, _, _ in locs.values())}
   # the gathered tensors (split by columns: every device a part of the same bytes) are read once into a host buffer mapped on every device,
@@ -264,7 +264,7 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
       def alias(b:Buffer, d:str) -> Buffer:
         return Buffer(d, b.nbytes, opaque=BufferStorage(va:=b.get_buf(d)), options=BufferSpec(external_ptr=va)).ensure_allocated()
       salias = [[b] + [alias(b, d) for d in devices[1:]] for b in sbufs]
-      pool = cleanup.enter_context(concurrent.futures.ThreadPoolExecutor(getenv("LOAD_THREADS", 16)))
+      pool = cleanup.enter_context(concurrent.futures.ThreadPoolExecutor(16))
       # per device: the next job to fill, the next job to issue, the timeline (the device signals it: the value of the last work issued),
       # per host buffer: its job and fill, or the timeline value of its copy (free once reached). per shared buffer: free, its tensor and
       # fills, or the timeline values of the gathers from it. nothing waits holding the gil (fills run meanwhile)

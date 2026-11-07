@@ -3,7 +3,6 @@ from typing import cast, Any, Sequence, Callable
 import itertools, ctypes, struct, time, weakref, bisect
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import dedup, round_up, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, flatten, DEBUG, VIZ, ALL2ALL, PROFILE
-from tinygrad.helpers import getenv
 from tinygrad.device import Device, Buffer, MultiBuffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS
 from tinygrad.device import ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
@@ -32,11 +31,6 @@ def get_enqueue_devs(call:UOp) -> tuple[str, ...]:
   if call.op is not Ops.CALL: return () # entries can be AFTER-wrapped calls
   if call.body.op not in (Ops.PROGRAM, Ops.STORE) and not (call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg.name == "encdec"): return ()
   runs_on = call.device if call.body.op is Ops.STORE and all_devices_in(call.device, HCQ_DEVS - UVM_DEVS) else get_call_arg_uops(call)[0].device
-  # HCQ_COPY_PULL: a copy between two devices runs on the one it goes to (pulls). a push's writes into the peer are posted, its completion signal
-  # (in host memory) takes another path and can land first: the copy queue reads the peer back after a push (see AMDCopyQueue.copy), pulls
-  # across root complexes are ~3x slower
-  if call.body.op is Ops.STORE and all_devices_in(dst:=call.src[1].device, HCQ_DEVS - UVM_DEVS) and all_devices_in(runs_on, HCQ_DEVS - UVM_DEVS) and \
-     isinstance(dst, str) and isinstance(runs_on, str) and dst.split(":")[0] == runs_on.split(":")[0] and getenv("HCQ_COPY_PULL", 0): runs_on = dst
   devs = tuple(Device.canonicalize(d) for d in to_tuple(runs_on))
   if not all_devices_in(devs, HCQ_DEVS) or (call.body.op is Ops.STORE and all_devices_in(devs, UVM_DEVS)): return ()
   return devs
@@ -304,48 +298,6 @@ class BatchCtx:
   def queue_signal(self, dev:str, queue:str) -> UOp: return self.slot(dev, self.queues[dev].index(queue))
   def stamps(self, dev:str, tag:int) -> tuple[int, ...]: return (st:=len(self.queues[dev])+1+2*tag, st + 1) if self.profile else ()
 
-# HCQ_TRACE: every call stores (batch << 32 | tag+1) into its queue's slot of a host buffer of its device, see hcq_trace_dump
-HCQ_TRACE_BATCHES:list[dict[tuple[str, str], list[tuple[int, str]]]] = []
-TRACE_IDS:dict[int, int] = {}
-def _trace_queue_index(queue:str) -> int: return (8 if queue.startswith("COPY") else 0) + int(queue.split(":")[1])
-def _trace_slot(dev:str, queue:str, part:int=0) -> UOp:
-  name = to_name(dev, "hcqtrace")
-  if name not in Compiled.link_bufs:
-    Compiled.link_bufs[name] = Buffer(dev, 34*8, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
-  i = _trace_queue_index(queue)
-  return UOp.alloc((34,), dtypes.u64, device=dev, spec=BufferSpec(host=True, uncached=True, cpu_access=True),
-                   name="hcqtrace").shrink(((2*i+part, 2*i+part+2),))
-def _trace_id(calls:list[tuple[str, str, str]]) -> int:
-  import zlib
-  return zlib.crc32("|".join(f"{n}@{d}@{q}" for n, d, q in calls).encode()) & 0x7FFFFFFF
-def hcq_trace_dump() -> str:
-  """the last call each queue of every device finished, and its next (HCQ_TRACE)"""
-  import gc
-  for info in [o for o in gc.get_objects() if isinstance(o, HCQInfo) and o.kernels and len(o.kernels[0]) > 7]:
-    calls = [(k[1], k[0], k[7]) for k in info.kernels]
-    bid = _trace_id(calls)
-    while len(HCQ_TRACE_BATCHES) <= bid % 4096: HCQ_TRACE_BATCHES.append({})
-    per:dict[tuple[str, str], list[tuple[int, str]]] = {}
-    for t, (n, d, q) in enumerate(calls): per.setdefault((d, q), []).append((t, n))
-    HCQ_TRACE_BATCHES[bid % 4096] = per
-    TRACE_IDS[bid % 4096] = bid
-  lines = []
-  for name, b in Compiled.link_bufs.items():
-    if not name.endswith("hcqtrace") or not isinstance(b, Buffer): continue
-    mv = b._host_mv()
-    vals = memoryview(bytearray(mv)).cast("Q").tolist() if mv is not None else []
-    for i in range(0, len(vals) - 2, 2):
-      if not vals[i]: continue
-      bid, tag = vals[i+1] & 0xFFFFFFFF, (vals[i] & 0xFFFFFFFF) - 1
-      q = (f"COPY:{i//2-8}" if i//2 >= 8 else f"COMPUTE:{i//2}")
-      known = bid % 4096 < len(HCQ_TRACE_BATCHES) and TRACE_IDS.get(bid % 4096) == bid
-      batch:dict[tuple[str, str], list[tuple[int, str]]] = HCQ_TRACE_BATCHES[bid % 4096] if known else {}
-      qcalls = next((v for (d, qq), v in batch.items() if to_name(d, "hcqtrace") == name and qq == q), [])
-      at = next((j for j, (t, _) in enumerate(qcalls) if t == tag), None)
-      nxt = qcalls[at+1:at+3] if at is not None else qcalls[:2]
-      lines.append(f"{name} {q}: batch {bid} done {tag} {qcalls[at][1] if at is not None else '?'} ({at}/{len(qcalls)}), next {nxt}")
-  return "\n".join(lines)
-
 def _wait_ins(ctx:BatchCtx, waits:dict[tuple[str, str], int]) -> list[UOp]:
   return [ins("wait", ctx.queue_signal(d, q), UOp.const(t + 1, dtypes.u64)) for (d, q), t in waits.items()]
 
@@ -369,20 +321,6 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
       barriers.add(tag)
       last_barrier[queue] = tag
 
-  # (debugging races: HCQ_ALL_BARRIERS a barrier before every call, HCQ_ALL_WAITS every call waits for the last call of its device's other queues)
-  if getenv("HCQ_ALL_BARRIERS"): barriers = set(range(len(queue_of)))
-  if getenv("HCQ_ALL_WAITS"):
-    # (HCQ_WAIT_CONS / HCQ_WAIT_PROD: only consumers / producers with these in their names)
-    names = [get_call_name(c, get_call_arg_uops(c)) for c, _, _ in ctx.batch]
-    cons, prod = [x for x in getenv("HCQ_WAIT_CONS", "").split(",") if x], [x for x in getenv("HCQ_WAIT_PROD", "").split(",") if x]
-    last:dict[tuple[str, str], int] = {}
-    for tag, q in enumerate(queue_of):
-      if not cons or any(x in names[tag] for x in cons):
-        dep_tags[tag] = sorted(set(dep_tags[tag]) | {t for qq, t in last.items() if qq[0] == q[0] and qq != q})
-      if not prod or any(x in names[tag] for x in prod): last[q] = tag
-  if getenv("HCQ_STATS") and len(queue_of) > getenv("HCQ_STATS_MIN", 100):
-    # (the calls of a batch, how many wait for the ones before them on their queue)
-    print(f"hcq batch: {len(queue_of)} calls, {len(barriers)} barriers, queues {len(set(queue_of))}", flush=True)
   # keep only latest tags to wait for each queue
   call_waits = [{queue_of[t]: t for t in sorted(deps) if queue_of[t] != queue_of[tag]} for tag, deps in enumerate(dep_tags)]
 
@@ -403,15 +341,10 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   # all tags that should signal
   signal_tags = {tag for waits in [*call_waits, *close_waits.values()] for tag in waits.values()}
 
-  # (the batch's id: a hash of its calls' names and queues, the parent finds it in its batches' infos)
-  trace_bid = _trace_id([(get_call_name(c, get_call_arg_uops(c)), d, q) for c, d, q in ctx.batch]) if getenv("HCQ_TRACE") else None
   def ins_for_call(tag:int) -> tuple[list[UOp], list[UOp]]: # the commands before and after a call
     (_, dev, queue), barrier = ctx.batch[tag], [ins("exec_barrier")] if tag in barriers else []
     stamps = [ins("timestamp", ctx.slot(dev, i)) for i in ctx.stamps(dev, tag)]
     signal = [ins("store", ctx.queue_signal(dev, queue), UOp.const(tag + 1, dtypes.u64))] if tag in signal_tags else []
-    if trace_bid is not None:  # (the signal's store writes 32 bits: the batch, then the tag)
-      signal += [ins("store", _trace_slot(dev, queue, 1), UOp.const(trace_bid, dtypes.u64)),
-                 ins("store", _trace_slot(dev, queue), UOp.const(tag + 1, dtypes.u64))]
     # (waits for other queues: then the memory barrier, see _start_ins)
     return barrier + _wait_ins(ctx, call_waits[tag]) + [ins("memory_barrier")] * bool(call_waits[tag]) + stamps[:1], stamps[1:] + signal
 
@@ -443,8 +376,7 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   profile_keys = [c.body.key if c.body.op is Ops.PROGRAM else None for c, _, _ in ctx.batch]
   args = [[unwrap_lane(c.src[1 + g])[:2] for g in getattr(c.body.arg, "globals", range(len(c.src) - 1))] for c, _, _ in ctx.batch]
   bufs = [tuple(b.arg.slot for b, _ in a) if all(b.op is Ops.PARAM and lane is None for b, lane in a) else () for a in args]
-  kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch],
-                    [q for _, _, q in ctx.batch]))
+  kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch]))
   slots = ctx.slots if ctx.profile else {} # profiling reads them
   info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, estimates=Estimates.sum(estimates),
                  slots=tuple((d, i) for i, d in enumerate(slots)))
@@ -455,8 +387,8 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
   copies = [c for c in l.src if c.op is Ops.CALL and c.body.op is Ops.STORE]
   ring = sorted({Device.canonicalize(d) for c in copies for b in get_call_arg_uops(c) for d in to_tuple(b.device) if all_devices_in(d, HCQ_DEVS)})
   # TODO: handle max queue amt better
-  num_copy = max(1, getenv("HCQ_NUM_SDMA", min(len(ring), 8 if {d.split(":")[0] for d in ring} == {"AMD"} else 1,
-                                                *(getattr(Device[d], "copy_queues", 8) for d in ring))) if ALL2ALL >= 1 else 1)
+  num_copy = max(1, min(len(ring), 8 if {d.split(":")[0] for d in ring} == {"AMD"} else 1, *(getattr(Device[d], "copy_queues", 8) for d in ring))
+                 if ALL2ALL >= 1 else 1)
   copy_of = {(dst, src): (i - j - 1) % len(ring) % num_copy for i, dst in enumerate(ring) for j, src in enumerate(ring)}
 
   def queue_for(c:UOp, dev:str) -> str:
@@ -466,10 +398,7 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
     # the copies of a call on a copy queue run there
     if isinstance(c.arg, CallInfo) and c.arg.queue and int(c.arg.queue.split(":")[1]) < getattr(Device[dev], "copy_queues", 1):
       return "COPY:" + c.arg.queue.split(":")[1]
-    if (c.src[1].device, c.src[2].device) in copy_of: return f"COPY:{copy_of[(c.src[1].device, c.src[2].device)]}"
-    # a device with two copy engines pulls the copies into it on the second (e.g. from host memory), they run with the ones out of it
-    if c.src[1].device == dev != c.src[2].device and getattr(Device[dev], "copy_duplex", False): return "COPY:1"
-    return "COPY:0"
+    return f"COPY:{copy_of.get((c.src[1].device, c.src[2].device), 0)}"
 
   devs = [get_enqueue_devs(c) for c in l.src]
   srcs:list[UOp] = []
