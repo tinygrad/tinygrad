@@ -170,12 +170,10 @@ def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   from tinygrad.schedule.prepare import pm_mops
   from tinygrad.uop.symbolic import sym
   sink = graph_rewrite(ast, sym+pm_mops+pm_flatten_range+pm_simplify_ranges, init_ctx=MapCtx, name="simplify ranges in copy")
-  return call.replace(src=(sink,) + call.src[1:])
+  # the simplified body is kept only if it is a copy, any other kernel goes to codegen unchanged
+  return pm_copy_kernel.rewrite(call.replace(src=(sink,) + call.src[1:]))
 
-pm_copy_from_store = PatternMatcher([
-  # simplify copy kernels
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
-
+pm_copy_kernel = PatternMatcher([
   # lower copy kernels to bulk STOREs
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
@@ -183,7 +181,12 @@ pm_copy_from_store = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_store),
+])
 
+pm_copy_from_store = PatternMatcher([
+  # simplify copy kernels
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
+])+pm_copy_kernel+PatternMatcher([
   # if it wasn't copy, it currently can't be cross device
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
 ])
