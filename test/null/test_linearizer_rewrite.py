@@ -64,10 +64,12 @@ class TestLinearizerRewrite(unittest.TestCase):
     inner = UOp.range(counts.index(outer).load().maximum(0).minimum(4), 1)
     store = buf.index(outer * 4 + inner).store(UOp.const(1, dtypes.int)).end(inner)
     uops = to_uops_list([out.after(store).index(outer).store(UOp.const(2, dtypes.int))])
-    self.assertEqual([u.op for u in uops if u.op in (Ops.RANGE, Ops.STORE, Ops.END)],
-                     [Ops.RANGE, Ops.RANGE, Ops.STORE, Ops.END, Ops.STORE, Ops.END])
-    rngs, ends = [u for u in uops if u.op is Ops.RANGE], [u for u in uops if u.op is Ops.END]
-    self.assertEqual([e.src[1] for e in ends], rngs[::-1])
+    loops = [u for u in uops if u.op is Ops.RANGE and u.dtype is dtypes.void]
+    guards = [u for u in uops if u.op is Ops.RANGE and u.dtype is not dtypes.void]
+    backedges, ends = [u for u in uops if u.op is Ops.BACKEDGE], [u for u in uops if u.op is Ops.END]
+    self.assertEqual(len(loops), 2)
+    self.assertEqual([b.src[1] for b in backedges], loops[::-1])
+    self.assertEqual([e.src[1] for e in ends], guards[::-1])
 
 if __name__ == '__main__':
   unittest.main()
