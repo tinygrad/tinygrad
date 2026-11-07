@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, pathlib, queue, re, select, socket, socketserver, sys, threading, time, traceback, typing, uuid
+import collections, json, pathlib, queue, re, select, socket, socketserver, sys, threading, time, traceback, typing, uuid
 from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
@@ -451,7 +451,7 @@ class Request:
     # (the prefill: the prompt, the position of the next slice, whether the first restores a checkpoint. the time it waited for its sequence
     # (queued), the time of its slices)
     self.fill: tuple[list[int], int, bool] = ([], 0, False)
-    self.queued, self.prefill_time, self.slices = 0.0, 0.0, 0
+    self.queued, self.prefill_time, self.slices, self.max_gap, self.last_tok = 0.0, 0.0, 0, 0.0, 0.0
 
 
 class BatchStats:
@@ -484,6 +484,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   request_queue_size = 1024  # the connections waiting to be accepted (many clients at once: the default of 5 refuses them)
   verbose_prefill = False
   generated_total, prefilled_total = 0, 0  # (the tokens generated and prefilled since the start, see status)
+  # (the requests that ended (when, ttft, longest wait for a token, total, prompt, cached, generated): the latencies of status)
+  recent: collections.deque = collections.deque(maxlen=1000)
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any, top_p:float=1.0,
                temperature:float=0.0):
     # top_p: a request's without one (the model's recommended, general.sampling.top_p of its gguf); temperature: a chat completion's
@@ -492,6 +494,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.inflight = 0  # the requests taken by the model (decoded, or waiting for it): the status line's
     self.stats = BatchStats()
     self.engine: typing.Any = None  # (schedule_seqs': the sequences)
+    self.recent = collections.deque(maxlen=1000)
     specials = sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {}
     self.odd_ids = {i for t, i in specials.items() if t in ODD_TOKENS}
     super().__init__(server_address, Handler)
@@ -526,6 +529,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
                                    "the reply fails, the caches are dropped\n", "red") + f"  ...{self.tok.decode(req.generated[-60:])!r}\n")
       self.drop_caches()
       return self.finish(req, RuntimeError("the model's states went wrong (dropped: retry)"))
+    # (the longest wait for a token after the first: a reply's stall, e.g. behind a prefill)
+    if req.generated: req.max_gap = max(req.max_gap, time.perf_counter() - req.last_tok)
+    req.last_tok = time.perf_counter()
     req.generated.append(tok)
     if hold: req.held.append(tok)
     else: req.out.put(tok)
@@ -549,6 +555,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
                f"queue:{req.queued:5.2f}s  {sep}  {pre}  {sep}  ttft:{(req.pt or et)-req.st:5.2f}s  {sep}  "
                f"gen:{(n-1)/(et-req.pt) if n > 1 and req.pt else 0:4.0f} tok/s  {sep}  {spec}out:{n:5d}  {sep}  "
                f"{colored(total, 'red') if req.cancelled else total}\n")
+    self.recent.append((time.time(), (req.pt or et) - req.st, req.max_gap, et - req.st, len(req.ids), req.cache_start, n))
     self.flush(req)
     req.out.put(None)
     return False
@@ -563,6 +570,13 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       def req(r:Request) -> dict: return {"prompt": len(r.ids), "cached": r.cache_start, "generated": len(r.generated), "age": round(now - r.st, 2)}
       ret |= {"decoding": [req(r) for r in active], "prefilling": [req(r) | {"left": len(r.fill[0]) - r.fill[1]} for r in filling],
               "waiting": [req(r) for r in pending] + [{}] * self.waiting.qsize()}
+    # the latencies of the requests of the last 10 minutes: their ttft, their longest wait for a token after the first, their total
+    if rs:=[r for r in list(self.recent) if r[0] > time.time() - 600]:
+      def pct(xs:list[float]) -> dict:
+        xs = sorted(xs)
+        return {f"p{q}": round(xs[min(len(xs)-1, int(q / 100 * len(xs)))], 3) for q in (50, 90, 99)} | {"max": round(xs[-1], 3)}
+      ret["last_10m"] = {"requests": len(rs), "ttft": pct([r[1] for r in rs]), "token_gap": pct([r[2] for r in rs]), "total": pct([r[3] for r in rs]),
+                         "prompt_tokens": sum(r[4] for r in rs), "cached_tokens": sum(r[5] for r in rs), "generated_tokens": sum(r[6] for r in rs)}
     if gpus:
       # (?gpus: the power and clocks of the devices)
       try:

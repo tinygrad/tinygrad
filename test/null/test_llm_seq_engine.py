@@ -83,7 +83,7 @@ class TestScheduleSeqs(unittest.TestCase):
     srv = self.server = LLMServer.__new__(LLMServer)
     srv.model, srv.engine, srv.stats, srv.inflight, srv.odd_ids = self.model, None, BatchStats(), 0, set()
     srv.tok = Mock(is_end=lambda t: False)
-    srv.waiting = __import__("queue").Queue()
+    srv.waiting, srv.recent = __import__("queue").Queue(), __import__("collections").deque()
     srv.PREFILL_SLICE, srv.MAX_STALL = 1000, 0.01
     self.done:list[Request] = []
     finish = srv.finish
@@ -116,6 +116,11 @@ class TestScheduleSeqs(unittest.TestCase):
     self.wait([again])
     self.assertEqual(again.cache_start, len(again.ids))
     self.assertEqual(again.slices, 1)
+    # the latencies of the requests in the status
+    st = self.server.status()
+    self.assertEqual(st["last_10m"]["requests"], 3)
+    self.assertGreater(st["last_10m"]["ttft"]["max"], 0)
+    self.assertEqual(st["generated_total"], 12)
 
 if __name__ == "__main__":
   unittest.main()
