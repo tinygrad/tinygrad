@@ -1,3 +1,4 @@
+from typing import cast
 from dataclasses import replace, dataclass, field
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
@@ -26,7 +27,7 @@ from tinygrad.schedule.prepare import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, argsort, partition, to_function_name
+from tinygrad.helpers import all_same, argsort, partition, to_function_name, all_int, disable_gc
 from tinygrad.device import TinyELF
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
@@ -74,13 +75,16 @@ def expand_wmma(ctx:dict[tuple, int], u:UOp):
   wmma = u.replace(src=(contract_axis(u.src[0], in0), contract_axis(u.src[1], in1), u.src[2]), arg=(*u.arg[:3], None))
   return unroll_axis(wmma, out0, [sz for _,sz in u.arg[3][2]])
 
-expander = PatternMatcher([
+pm_expand = PatternMatcher([
   (UPat(Ops.REDUCE, name="r"), expand_reduce),
   (UPat(Ops.RANGE, name="r"),
    lambda ctx, r: UOp.const(tuple(range(r.vmax+1)), r.dtype) \
     .reshape(tuple([r.vmax+1 if i == ctx[r.arg] else 1 for i in range(len(ctx))])) if r.arg in ctx else None),
   (UPat(Ops.WMMA, name="u"), expand_wmma),
-])+pm_flatten_range+mop_cleanup
+])
+# the range map is only read
+pm_expand.ctx_readonly = True
+expander = pm_expand+pm_flatten_range+mop_cleanup
 
 def expand_broadcast(x:UOp):
   shapes = [u._shape for u in x.src]
@@ -113,14 +117,72 @@ pm_expand_broadcast = pm_wmma_add+PatternMatcher([
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
 
+def _lanes(x:UOp, idxs:list[tuple[int, ...]]) -> list[UOp|None]:
+  # walk const lane indices through movement ops into a STACK or scalar. this is what INDEX(x, *consts) rewrites to, without the rewrites
+  # all the lanes walk the same chain until the STACK, so this is done for all the lanes at once
+  while True:
+    match x.op:
+      case Ops.STACK:
+        if any(len(i) == 0 for i in idxs): return [None]*len(idxs)
+        # common case: one level STACK of scalars
+        if all(len(i) == 1 for i in idxs) and all(s._shape == () for s in x.src): return [x.src[i[0]] for i in idxs]
+        return [_lanes(x.src[i[0]], [i[1:]])[0] for i in idxs]
+      case Ops.EXPAND:
+        k = len(x.marg)
+        idxs = [i[k:] for i in idxs]
+      case Ops.INDEX if len(x.src) >= 2 and all(s.op is Ops.CONST and type(s.arg) is int for s in x.src[1:]):
+        # an INDEX by const ints is a prefix of the lane index (INDEX on INDEX merges)
+        prefix = tuple(s.arg for s in x.src[1:])
+        idxs = [prefix+i for i in idxs]
+      case Ops.PERMUTE:
+        perm = argsort(x.marg)
+        idxs = [tuple(i[p] for p in perm) for i in idxs]
+      case Ops.RESHAPE:
+        in_shape, out_shape = x.src[0].shape, x.marg
+        if not all_int(in_shape) or not all_int(out_shape) or not all(sz > 0 for sz in in_shape): return [None]*len(idxs)
+        new_idxs = []
+        for idx in idxs:
+          flat = 0
+          for i,sz in zip(idx, out_shape): flat = flat*sz + i
+          new_idx: list[int] = []
+          for sz in reversed(in_shape):
+            new_idx.append(flat % sz)
+            flat //= sz
+          new_idxs.append(tuple(reversed(new_idx)))
+        idxs = new_idxs
+      case _:
+        if x.shape == (): return [x if not i else None for i in idxs]
+        # a full const index into anything else is what pushing the INDEX through the movement ops above gives
+        if len(x.shape) != len(idxs[0]): return [None]*len(idxs)
+        consts = [[UOp.const(j) for j in range(s)] for s in x.shape]
+        return [x.index(*[c[j] for c,j in zip(consts, i)]) for i in idxs]
+    x = x.src[0]
+
 def do_devectorize(b:UOp):
   if b.shape == (): return None
   # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
   if not all(x.shape == b.shape or x.base.is_invalid for x in b.src): return None
-  src = []
-  for idx_c in itertools.product(*[[UOp.const(i) for i in range(x)] for x in b.shape]):
-    src.append(b.replace(src=tuple(x.base if x.base.is_invalid else x.index(*idx_c) for x in b.src)))
-  return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
+  idxs = list(itertools.product(*[range(x) for x in b.shape]))
+  src_lanes: list[list[UOp]] = []
+  consts: list[list[UOp]]|None = None
+  for x in b.src:
+    if x.base.is_invalid:
+      src_lanes.append([x.base]*len(idxs))
+      continue
+    lanes = _lanes(x, idxs)
+    for j,l in enumerate(lanes):
+      if l is None:
+        if consts is None: consts = [[UOp.const(i) for i in range(s)] for s in b.shape]
+        lanes[j] = x.index(*[c[i] for c,i in zip(consts, idxs[j])])
+    src_lanes.append(cast(list[UOp], lanes))
+  src = [UOp(b.op, lsrc, b.arg) for lsrc in zip(*src_lanes)]
+  if b.op is Ops.STORE: return UOp.group(*src)
+  # fast path for UOp.stack: all the lanes are scalars, so if they have the same dtype it's just a STACK
+  # NOTE: the STACK of scalar lanes has shape (len(src),), this is .reshape(b.shape) without recomputing the shape of every lane
+  if all(x.dtype is src[0].dtype for x in src):
+    stk = UOp(Ops.STACK, src=tuple(src))
+    return stk if b.shape == (len(src),) else stk._mop(Ops.RESHAPE, b.shape)
+  return UOp.stack(*src).reshape(b.shape)
 
 def do_stack_wmma(u:UOp):
   if all(x.op in (Ops.STACK, Ops.WMMA) for x in u.src): return None
@@ -252,6 +314,8 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
+# NOTE: UOps don't make reference cycles, the cyclic gc running during codegen only costs time (like schedule_linear)
+@disable_gc()
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(render_uir(ast))
   if SPEC: type_verify(ast, spec_tensor)
@@ -293,6 +357,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # add locals
   sink = graph_rewrite(sink, pm_add_local_buffers, ctx=slots, name="add local buffers")
+  # NOTE: LOCAL addrspace only comes from a LOCAL buffer, all of them exist after this point. the barriers are only for LOCAL memory
+  has_local = any(u.op in {Ops.PARAM, Ops.REFPARAM, Ops.BUFFER, Ops.ALLOC} and u.arg.addrspace is AddrSpace.LOCAL for u in sink.toposort())
 
   # group GPU dimensions early so their index arithmetic goes through normal lowering
   sink = graph_rewrite(sink, pm_group_gpudims, ctx=ren, name="group gpudims", walk=True)
@@ -310,7 +376,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # do memory coalescing (late)
   sink = memory_coalescing(sink, ren)
   # an image is read_only or write_only, so a PARAM that is both loaded and stored stays a buffer
-  loaded, stored = [{u.src[0].buf_uop for u in sink.toposort() if u.op is op} for op in (Ops.LOAD, Ops.STORE)]
+  loaded, stored = set(), set()
+  for u in sink.toposort():
+    if u.op is Ops.LOAD: loaded.add(u.src[0].buf_uop)
+    elif u.op is Ops.STORE: stored.add(u.src[0].buf_uop)
   sink = graph_rewrite(sink, pm_simplify_add_image, name="add images", ctx=({}, ren, loaded & stored), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?
@@ -353,7 +422,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_cast_const, name="cast consts", walk=True)
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
-  sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
+  if has_local: sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
 
   # hardware ranges are no longer loops; preserve their already lowered bounds
   sink = graph_rewrite(sink, pm_range_to_special, name="range to special")

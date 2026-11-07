@@ -50,6 +50,8 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
   #   q == b//div     -> b*mul              (full recombine)
   #   q == (b//div)%d -> (b%(div*d))*mul    (partial recombine into a wider mod, needs d>0)
   terms = list(x.split_uop(Ops.ADD))
+  # fast reject: a candidate term is a MOD or a MUL of a MOD
+  if not any(t.op is Ops.MOD or (t.op is Ops.MUL and t.src[0].op is Ops.MOD) for t in terms): return None
   for i,u in enumerate(terms):
     mod, mul = u.pop_const(Ops.MUL)
     if mod.op is not Ops.MOD or mod.src[1].op is not Ops.CONST: continue
@@ -333,7 +335,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # try to do math in int instead of long, keep weak const weak=
   (UPat(GroupOp.Binary, src=(UPat(dtype=(dtypes.long, dtypes.weakint)),)*2, name="u"), lambda u:
     UOp(u.op, src=tuple(UOp.const(s.val) if s.op is Ops.CONST else s.cast(dtypes.int) for s in u.src)).cast(u.dtype)
-    if dtypes.long in (s.dtype for s in u.src) and not any(v.overflows(dtypes.int) for v in (u,*u.src))
+    if dtypes.long in [s.dtype for s in u.src] and not any(v.overflows(dtypes.int) for v in (u,*u.src))
     and not (u.op is Ops.SHR and u.src[1].vmax >= 32)
     and not (u.op in (Ops.MOD, Ops.TRUNCMOD) and u.src[0].vmin <= dtypes.int.min and u.src[1].vmin <= -1 <= u.src[1].vmax) else None),
   ((UPat.var("x", dtypes.weakint) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+cast.const_like(c.val)),
@@ -345,6 +347,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat((Ops.AFTER, Ops.END), src=(UPat.var("s"),)), lambda s: s),
   # the rules above key on bare CONSTs, so a redundantly committed const has to be uncast in the same fixpoint
 ])+div_and_mod_symbolic+pm_uncast_const
+
+# symbolic only depends on the UOps, so the results are cached on them. this is what UOp.simplify returns
+symbolic.memo = "_simplified"
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
 
