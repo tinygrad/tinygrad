@@ -197,6 +197,8 @@ class UOpMetaClass(type):
       if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {created}")
     return created
 
+_unary_shape_ops, _movement_shape_ops = GroupOp.Unary | {Ops.CAST}, GroupOp.Movement | {Ops.UNSHARD, Ops.REDUCE}
+
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
 class recursive_property:
   def __init__(self, fxn):
@@ -309,6 +311,20 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @recursive_property
   def _shape(self) -> tuple[sint, ...]|None:
+    # elementwise ops are the most common, they are first
+    if self.op in _unary_shape_ops:
+      assert len(self.src) == 1, "unary ops must have 1 src"
+      return self.src[0]._shape
+
+    # elementwise ops keep the shape the same. all inputs with shape must match
+    if self.op in GroupOp.Broadcastable:
+      input_shapes = [x._shape for x in self.src]
+      assert len(self.src) > 0 and all(x is not None for x in input_shapes), f"None input shape not supported for {self.op}"
+      if DISALLOW_BROADCAST and not all_same(input_shapes):
+        raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes} {[x.op for x in self.src]}")
+      # broadcasting lives in _shape property now
+      return _broadcast_shape(*input_shapes)
+
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.BACKEDGE | \
@@ -373,7 +389,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         return ps
 
     # movement ops change the shape
-    if self.op in GroupOp.Movement.union({Ops.UNSHARD, Ops.REDUCE}):
+    if self.op in _movement_shape_ops:
       ps = self.src[0]._shape
       if ps is None: raise RuntimeError(f"movement op {self.op} requires shape, {self.src[0].op} doesn't have one")
       match self.op:
@@ -403,19 +419,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           if not isinstance(num_axes, int) or num_axes < 0 or num_axes > len(ps):
             raise ValueError(f"invalid type for axis: {num_axes}")
           return ps[num_axes:]
-
-    if self.op in GroupOp.Unary.union({Ops.CAST}):
-      assert len(self.src) == 1, "unary ops must have 1 src"
-      return self.src[0]._shape
-
-    # elementwise ops keep the shape the same. all inputs with shape must match
-    if self.op in GroupOp.Broadcastable:
-      input_shapes = [x._shape for x in self.src]
-      assert len(self.src) > 0 and all(x is not None for x in input_shapes), f"None input shape not supported for {self.op}"
-      if DISALLOW_BROADCAST and not all_same(input_shapes):
-        raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes} {[x.op for x in self.src]}")
-      # broadcasting lives in _shape property now
-      return _broadcast_shape(*input_shapes)
 
     # all Ops must be explicitly handled
     raise NotImplementedError(f"no shape handling for {self.op} with {self.dtype}")
