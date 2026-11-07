@@ -536,18 +536,14 @@ class TestCustomKernel(unittest.TestCase):
     v.assign(Tensor.invalids(4, 4, dtype=dtypes.float))
     self.assertEqual(v.contiguous().tolist(), [[10., 11., 12., 13.]]*4)
 
-  @unittest.expectedFailure
   def test_gated_store_2d(self):
-    # TODO: broken now, the valid is dropped. the valid on one index of the 2d C gates the whole store, only j == 0 writes C[i, 0]
     def kernel(C:UOp) -> UOp:
       i, j = UOp.range(4, 0), UOp.range(4, 1, AxisType.LOOP)
       return C[i.valid(j.eq(0)), 0].store((j+1).cast(C.dtype)).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4, 4), fxn=kernel)[0][:, 0].tolist(), [1.]*4)
 
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_shared, "LOCAL buffer needs shared memory")
-  @unittest.expectedFailure
   def test_gated_local_store_2d(self):
-    # TODO: broken now, the valid is dropped. the valid on one index of the 2d LOCAL tmp gates the whole store, only j == 0 writes tmp[i, 0]
     def kernel(C:UOp) -> UOp:
       i, j = UOp.range(4, 0), UOp.range(4, 1, AxisType.LOOP)
       tmp = UOp.placeholder((4, 4), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
@@ -576,9 +572,7 @@ class TestCustomKernel(unittest.TestCase):
       return C[i].store(tmp.after(st)[t0*2+1-t1]).end(t0, t1).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(8, dtype=dtypes.int), fxn=kernel)[0].tolist(), [i^1 for i in range(8)])
 
-  @unittest.expectedFailure
   def test_gated_load_2d(self):
-    # TODO: broken now, the valid is dropped. the valid on one index of the 2d A gates the whole load, it is 0 where j != 0
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j = UOp.range(4, 0), UOp.range(4, 1)
       return C[i, j].store(A[i.valid(j.eq(0)), 0]).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))

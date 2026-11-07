@@ -156,7 +156,7 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
     axes_out.append(combined_axes % s)
     combined_axes //= s
   # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
-  return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
+  return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid, name="reshape")
 
 # this is the definition of the movement ops
 @functools.cache
@@ -272,6 +272,8 @@ def run_rangeify(tsink:UOp) -> UOp:
 
     # apply movement ops
     if x.op in GroupOp.Movement: rngs = apply_movement_op(x.op, x.src[0].shape, x.marg, rngs)
+    # RESHAPE: drop valid clauses on ranges the index doesn't use, the WHERE of their PAD still has them
+    if x.op is Ops.RESHAPE: rngs = graph_rewrite(UOp.sink(*rngs), pm_drop_and_clauses, name="reshape drop ands").src
     # STACK: the leading range selects the src, srcs get the trailing ranges
     if x.op is Ops.STACK: rngs = out_rngs[1:]
     # when the index srcs and output ranges of INDEX address every axis of its src, the index srcs select the leading axes
