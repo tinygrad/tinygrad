@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, dtypes, nn, UOp
+from tinygrad import Tensor, dtypes, nn, UOp, TinyJit
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig, MLATransformerBlock, Indexer, IndexerConfig,
   HyperConnection, HCConfig, AttentionResidual, GatedResidual, PLELayer, PLEConfig,
@@ -29,6 +29,32 @@ class TestAttention(unittest.TestCase):
     self.assertGreater((result - apply_rope(x, 5)).abs().max().item(), 1e-6)
     with self.assertRaises(AssertionError): apply_rope(Tensor.randn(1, 1, 4, 7, dtype=dtypes.float32), 0)
 
+  def test_rope_per_row_positions(self):
+    freqs = Tensor([[[1., 0.]], [[0., 1.]]])
+    x = Tensor([[[[1., 0.]]], [[[1., 0.]]]])
+    out = apply_rope_new(x, freqs)
+    np.testing.assert_array_equal(out.numpy(), [[[[1., 0.]]], [[[0., 1.]]]])
+
+  def test_independent_positions_jit(self):
+    block = TransformerBlock(self._make_config(dim=2, hidden_dim=2, n_heads=1))
+    block.attn_q.weight = block.attn_k.weight = Tensor.zeros(2, 2)
+    block.attn_v.weight = block.attn_output.weight = Tensor.eye(2)
+    prefix = Tensor([[[1., 1.], [3., 3.], [5., 5.]], [[2., 2.], [4., 4.], [6., 6.]]])
+    block._init_state(prefix)
+    block.cache_kv.assign(float('nan')).realize()
+    block._attention(prefix, (0,)).realize()
+    p0, p1 = UOp.variable('pos0', 0, 3), UOp.variable('pos1', 0, 3)
+    @TinyJit
+    def forward(x, pos0, pos1): return block._attention(x, (pos0, pos1))
+    # Zero queries/keys make attention the mean of each row's valid values.
+    for positions, (a, b), expected in [((3, 1), (7., 8.), [[4., 4.], [5., 5.]]),
+                                        ((0, 2), (9., 10.), [[9., 9.], [20/3, 20/3]]),
+                                        ((1, 0), (11., 12.), [[10., 10.], [12., 12.]])]:
+      out = forward(Tensor([[[a, a]], [[b, b]]]), p0.bind(positions[0]), p1.bind(positions[1]))
+      np.testing.assert_allclose(out.numpy()[:, 0], expected, atol=1e-6, rtol=1e-6)
+    self.assertEqual(forward.cnt, 3)
+    self.assertIsNotNone(forward.captured)
+
   def test_attention_sink(self):
     x = Tensor([[[2., 4.]]])
     def attention(attn_sinks:bool):
@@ -36,7 +62,7 @@ class TestAttention(unittest.TestCase):
       block.attn_q.weight, block.attn_k.weight = Tensor.zeros(2, 2), Tensor.zeros(2, 2)
       block.attn_v.weight, block.attn_output.weight = Tensor.eye(2), Tensor.eye(2)
       block._init_state(x)
-      return block._attention(x, 0)
+      return block._attention(x, (0,))
     self.assertTrue(attention(False).allclose(x, rtol=0, atol=1e-6).item())
     # the token and zero-value sink have equal weights: ([2,4] + [0,0]) / 2
     self.assertTrue(attention(True).allclose(x / 2, rtol=0, atol=1e-6).item())
@@ -50,7 +76,7 @@ class TestAttention(unittest.TestCase):
     expected = Tensor([[[1., 1.],  # only itself
                         [2., 2.],  # ([1,1] + [3,3]) / 2
                         [4., 4.]]]) # ([3,3] + [5,5]) / 2
-    self.assertTrue(block._attention(x, 0).allclose(expected, rtol=0, atol=1e-6).item())
+    self.assertTrue(block._attention(x, (0,)).allclose(expected, rtol=0, atol=1e-6).item())
 
   def test_partial_rope_in_attention(self):
     dim, rope_dim, seqlen = 8, 4, 3
@@ -66,7 +92,7 @@ class TestAttention(unittest.TestCase):
     precompute_freqs_cis.cache_clear()
     block.cache_kv = Tensor.empty(2, 1, 1, config.max_context, max(dim, config.v_head_dim), device=x.device)
     block.freqs_cis = precompute_freqs_cis(rope_dim, config.max_context, config.rope_theta)
-    block._attention(x_norm, 0).realize()
+    block._attention(x_norm, (0,)).realize()
 
     expected = apply_rope_new(k[..., :rope_dim], block.freqs_cis[:seqlen]).cat(k[..., rope_dim:], dim=-1)
     np.testing.assert_allclose(block.cache_kv[0, :, :, :seqlen, :].numpy(), expected.numpy(), rtol=1e-5, atol=1e-5)
@@ -108,7 +134,7 @@ class TestAttention(unittest.TestCase):
     indexer._init_state(x)
     # the first three queries prefer the first pool, the final query selects the completed second pool
     expected = np.where([[1, 0, 0, 0], [1, 1, 0, 0], [1, 1, 1, 0], [0, 0, 1, 1]], 0., -np.inf)
-    np.testing.assert_array_equal(indexer(x, q, 0).numpy(), expected[None, None])
+    np.testing.assert_array_equal(indexer(x, q, (0,)).numpy(), expected[None, None])
 
   def test_indexer_no_kpool(self):
     # glm-dsa: every key is scored on its own (no k-pools) and the first rope_dim dims are rotated, interleaved
@@ -126,7 +152,7 @@ class TestAttention(unittest.TestCase):
     scores = np.maximum(irope(q.numpy()[0]) @ irope(x.numpy()[0]).T, 0) / 2**0.5
     expected = np.full((4, 4), -np.inf)
     for t in range(4): expected[t, np.argsort(scores[t, :t+1])[-2:]] = 0.0
-    np.testing.assert_allclose(indexer(x, q, 0, precompute_freqs_cis(2, 4, 10000.0)).numpy(), expected[None, None])
+    np.testing.assert_allclose(indexer(x, q, (0,), precompute_freqs_cis(2, 4, 10000.0)).numpy(), expected[None, None])
 
   def test_indexer_msa(self):
     # minimax-m3: each head selects the pools with its best max(q·k) and always its own pool
@@ -138,7 +164,7 @@ class TestAttention(unittest.TestCase):
     # head 0 picks the first pool by its best key (the second has the higher sum), head 1 the second, the last query keeps its own low pool
     allowed = np.tril(np.ones((2, 6, 6)))
     allowed[0, 4:, 2:4] = allowed[1, 4:, 0:2] = 0
-    np.testing.assert_array_equal(indexer(x, Tensor.ones(1, 6, 2), 0).numpy(), np.where(allowed, 0., -np.inf)[None])
+    np.testing.assert_array_equal(indexer(x, Tensor.ones(1, 6, 2), (0,)).numpy(), np.where(allowed, 0., -np.inf)[None])
 
   def test_indexer_qsa(self):
     # a pool's key is its normed mean key, roped at the pool start
@@ -150,7 +176,7 @@ class TestAttention(unittest.TestCase):
     # a quarter turn per position: query 3 faces 180 degrees like pool 1 (mean (1, 0) roped at 2), not the larger pool 0 at 127 degrees
     freqs = Tensor([[1., 0.], [0., 1.], [-1., 0.], [0., -1.]])
     allowed = [[1, 0, 0, 0], [1, 1, 0, 0], [1, 1, 1, 0], [0, 0, 1, 1]]
-    np.testing.assert_array_equal(indexer(x, q, 0, freqs).numpy(), np.where(allowed, 0., -np.inf)[None, None])
+    np.testing.assert_array_equal(indexer(x, q, (0,), freqs).numpy(), np.where(allowed, 0., -np.inf)[None, None])
 
   def test_mla_indexer_mask(self):
     idx = IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6)
@@ -162,7 +188,7 @@ class TestAttention(unittest.TestCase):
     block._init_state(x)
     # every query prefers the first pool, and incomplete pools contribute only their visible tail
     expected = np.where([[1, 0, 0, 0, 0], [1, 1, 0, 0, 0], [1, 1, 1, 0, 0], [1, 1, 0, 0, 0], [1, 1, 0, 0, 1]], 0., -np.inf)
-    np.testing.assert_array_equal(block._indexer_mask(x, 0, None).numpy(), expected[None, None])
+    np.testing.assert_array_equal(block._indexer_mask(x, (0,), None).numpy(), expected[None, None])
 
   def test_ple_rows(self):
     # a bigram and a trigram head, EOS (7) before the start or an EOS
@@ -201,7 +227,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
   def _run_attention(self, block:GatedDeltaNetBlock, x:Tensor, start_pos:int):
     x_norm = block.attn_norm(x)
     block._init_state(x_norm)
-    return block._attention(x_norm, start_pos).realize().numpy()
+    return block._attention(x_norm, (start_pos,)).realize().numpy()
 
   def _cache_views(self, block:GatedDeltaNetBlock) -> tuple[np.ndarray, np.ndarray]:
     if hasattr(block, 'conv_state'):
@@ -331,7 +357,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     block.ssm_conv1d_q["weight"] = block.ssm_conv1d_k["weight"] = block.ssm_conv1d_v["weight"] = Tensor.ones(16, 4)
     x = Tensor.ones(1, 1, 16)
     block._init_state(x)
-    block._attention(x, 0).realize()
+    block._attention(x, (0,)).realize()
     # the first token's state is beta * v (x) l2norm(k), with beta = sigmoid(0) and v, k through the conv and silu
     def silu(z): return z / (1 + np.exp(-z))
     np.testing.assert_allclose(block.recurrent_state.numpy(), 0.5 * silu(1.0) * silu(1e-4) / np.sqrt(8 * silu(1e-4)**2 + 1e-6), rtol=1e-3)
@@ -346,7 +372,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     initial_state = Tensor.arange(8, dtype=dtypes.float32).reshape(1, 2, 2, 2)
     block.recurrent_state.assign(initial_state).realize()
     block.ssm_a = Tensor([[-1.], [-1.]])
-    block._attention(x, x.shape[1]).realize()
+    block._attention(x, (x.shape[1],)).realize()
     alpha = np.exp(-self._softplus_np(np.array([[1, 2, 3, 4], [2, 1, 3, 5]])).reshape(2, 2, 2)).prod(0)
     np.testing.assert_allclose(block.recurrent_state.numpy(), initial_state.numpy() * alpha[:, None, :], rtol=1e-5, atol=1e-5)
 
