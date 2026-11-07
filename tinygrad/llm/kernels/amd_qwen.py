@@ -152,8 +152,10 @@ class Linear(nn.Linear):
       if self.ggml_type is None:
         # tiny dense fp16 matmul (e.g. the ssm beta/alpha head rows): single fp16 gemv kernel instead of a
         # generic matmul schedule, and realize the densely packed weight once if it is still a lazy ggml view
+        # (a weight split on its outputs over the devices: every device its outputs)
         if self.weight.dtype in (dtypes.half, dtypes.float, dtypes.bfloat16) and self.out_features <= 2048 \
-          and self.in_features % (WARP_SIZE*4) == 0 and self.weight.uop.axis is None:
+          and self.in_features % (WARP_SIZE*4) == 0 and (self.weight.uop.axis is None or (self.weight.uop.axis == 0 and
+          isinstance(self.weight.device, tuple) and self.out_features % len(self.weight.device) == 0)):
           numel, max_shape = x.numel(), x.max_shape
           if prod(max_shape) // self.in_features <= 32:
             out = f16_gemv(self, x if isinstance(numel, int) else x.pad_to(max_shape))
@@ -2919,8 +2921,11 @@ def f16_gemv(layer:Linear, x:Tensor) -> Tensor:
   assert isinstance(tokens, int)
   weight = _view_back(layer.weight)
   x = x.contiguous()
-  out = Tensor.empty(tokens, layer.out_features, dtype=dtypes.float32, device=x.device)
-  fxn = functools.partial(_amd_f16_gemv_kernel, in_features=layer.in_features, out_features=layer.out_features, tokens=tokens)
+  # (the weight split on its outputs: every device's of its own, the output split so)
+  split = weight.uop.axis == 0 and isinstance(weight.device, tuple)
+  local = layer.out_features // len(cast(tuple, weight.device)) if split else layer.out_features
+  out = Tensor.empty(tokens, layer.out_features, dtype=dtypes.float32, device=x.device, axis=1 if split else None)
+  fxn = functools.partial(_amd_f16_gemv_kernel, in_features=layer.in_features, out_features=local, tokens=tokens)
   srcs = (out, weight.reshape(-1), x.reshape(tokens, layer.in_features)) + (() if layer.bias is None else (_view_back(layer.bias),))
   return Tensor.custom_kernel(*srcs, fxn=fxn)[0].reshape(*x.shape[:-1], layer.out_features)
 
