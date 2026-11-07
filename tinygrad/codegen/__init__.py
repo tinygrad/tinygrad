@@ -149,8 +149,6 @@ devectorizer2 = pm_mops+PatternMatcher([
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # reshape of a single element shaped value to scalar is an index
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
-  # a scalar index into a one-lane STACK is its lane after the index, 0 is the only in-bounds index
-  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, src=(UPat.var("x"),)), UPat.var("i"))), lambda x,i: x.after(i) if i.shape == () else None),
   # a scalar index into a STACK selects its lanes after the STACK and the index, renderers only extract lanes at const indices
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.var("i"))),
    lambda a,i: _stack_select(i, list(a.src)).after(a, i) if i.shape == () and a.ndim == 1 else None),
