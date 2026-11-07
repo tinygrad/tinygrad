@@ -82,7 +82,7 @@ pm_add_control_flow = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=(x.src[0].after(y),)) if (y:=ctx.edges.get(x)) is not None else None),
 ])
 # the CFGContext is only read
-pm_add_control_flow.ctx_readonly = True
+pm_add_control_flow.order_free = True
 
 def do_split_ends(e:UOp):
   ret = e.src[0]

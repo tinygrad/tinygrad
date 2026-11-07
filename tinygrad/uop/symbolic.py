@@ -363,6 +363,7 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
 def _keep_range(ctx:dict[UOp, UOp], r:UOp) -> None:
   if r not in ctx: raise BottomUpGate
 pm_keep_range = PatternMatcher([(UPat(Ops.RANGE, name="r"), _keep_range)])
+pm_keep_range.order_free = True  # ctx (the substitute dict) is only read
 
 # NOTE: it only depends on the UOps, so it's cached. the cache is bounded and global, valid can contain uop so caching on uop could make a cycle
 @functools.lru_cache(maxsize=4096)

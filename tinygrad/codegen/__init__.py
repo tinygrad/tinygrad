@@ -84,7 +84,7 @@ pm_expand = PatternMatcher([
   (UPat(Ops.WMMA, name="u"), expand_wmma),
 ])
 # the range map is only read
-pm_expand.ctx_readonly = True
+pm_expand.order_free = True
 expander = pm_expand+pm_flatten_range+mop_cleanup
 
 def expand_broadcast(x:UOp):

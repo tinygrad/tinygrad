@@ -123,5 +123,5 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
     pat += [(UPat.var("a") * UPat(Ops.FDIV, dtypes.floats, src=(UPat.const(1), UPat.var("b"))), lambda a,b: a.alu(Ops.FDIV, b))]
   ret = PatternMatcher(pat)
   # ctx is the renderer, which is only read
-  ret.ctx_readonly = True
+  ret.order_free = True
   return ret

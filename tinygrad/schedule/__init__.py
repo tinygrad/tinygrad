@@ -119,7 +119,10 @@ def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
 pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), resolve_linear_call),
-])+pm_flatten_linear
+])
+# NOTE: these make new buffers, the order of the rewrites is the order of the buffer numbers
+pm_resolve_linear_call.order_free = False
+pm_resolve_linear_call += pm_flatten_linear
 
 schedule_cache: dict[bytes, UOp] = {}
 # ctx is just for DEBUG on inner
@@ -154,6 +157,7 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
 pm_schedule = PatternMatcher([
   (UPat(Ops.CALL, name="call"), lower_sink_to_linear),
 ])
+pm_schedule.order_free = False
 
 def assert_all_same_devices(ast:UOp):
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])

@@ -1615,8 +1615,10 @@ class _LazyCompileOp:
 
 class PatternMatcher:
   tracked = False
-  # set to True if the patterns only read ctx, then the order of the rewrites doesn't matter
-  ctx_readonly = False
+  # True if the result of the rewrite doesn't depend on the order the nodes are rewritten in, so graph_rewrite can use a faster rewriter.
+  # if None, it's inferred: patterns that don't take ctx are assumed to have no side effects that depend on the order.
+  # set to True if the patterns only read ctx, set to False if they have other side effects (like UOp.unique_num for new buffers)
+  order_free: bool|None = None
   _parts: tuple[PatternMatcher, PatternMatcher]|None = None
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     # if this comes from a pickle, we reconstruct the lambda functions here
@@ -1640,16 +1642,14 @@ class PatternMatcher:
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
   @functools.cached_property
-  def ctx_free(self) -> bool:
-    """True if no pattern reads or writes ctx"""
-    return not any('ctx' in fxn.__code__.co_varnames[:fxn.__code__.co_argcount+fxn.__code__.co_kwonlyargcount] for _,fxn in self.patterns)
-  @functools.cached_property
-  def _ctx_order_free(self) -> bool:
-    if self.ctx_readonly or self.ctx_free: return True
-    return self._parts is not None and all(p._ctx_order_free for p in self._parts)
-  def order_free(self, ctx) -> bool:
-    """True if the result of a rewrite doesn't depend on the order of the rewrites with this ctx"""
-    return ctx is None or self._ctx_order_free
+  def _order_free(self) -> tuple[bool, bool]:
+    """(order free with no ctx, order free with a ctx)"""
+    if self._parts is not None:
+      a, b = self._parts[0]._order_free, self._parts[1]._order_free
+      return a[0] and b[0], a[1] and b[1]
+    if self.order_free is not None: return self.order_free, self.order_free
+    return True, not any('ctx' in fxn.__code__.co_varnames[:fxn.__code__.co_argcount+fxn.__code__.co_kwonlyargcount] for _,fxn in self.patterns)
+  def is_order_free(self, ctx) -> bool: return self._order_free[ctx is not None]
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher) -> PatternMatcher:
@@ -2020,9 +2020,9 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
   if walk: return rewrite_ctx.walk_rewrite(sink)
   # if the order of the rewrites doesn't matter (no ctx side effects), use a faster rewriter. VIZ keeps the order for the trace
   if TRACK_MATCH_STATS.value < 2:
-    if rewrite_ctx.bpm is None and rewrite_ctx.pm is not None and rewrite_ctx.pm.order_free(ctx):
+    if rewrite_ctx.bpm is None and rewrite_ctx.pm is not None and rewrite_ctx.pm.is_order_free(ctx):
       return rewrite_ctx.topo_rewrite(sink)
-    if rewrite_ctx.pm is None and rewrite_ctx.bpm is not None and rewrite_ctx.bpm.order_free(ctx):
+    if rewrite_ctx.pm is None and rewrite_ctx.bpm is not None and rewrite_ctx.bpm.is_order_free(ctx):
       return rewrite_ctx.bottom_up_rewrite(sink)
   return rewrite_ctx.unified_rewrite(sink)
 
@@ -2031,7 +2031,7 @@ def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
-_substitute.ctx_readonly = True
+_substitute.order_free = True
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot] if p.arg.slot >= 0 else None)])
 
 def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
