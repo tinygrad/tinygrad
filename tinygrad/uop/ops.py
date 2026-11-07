@@ -112,8 +112,15 @@ def promo_dtype(src:tuple[UOp,...]) -> DType:
   dts = [x.dtype for x in src]
   return dts[0] if all_same(dts) else least_upper_dtype(*dts)
 
+# the ops with the dtype of their first src, and the ops with the promoted dtype of their srcs
+_passthrough_dtype_ops = {Ops.LOAD, Ops.UNSHARD, Ops.REDUCE, Ops.AFTER, Ops.RANGE, Ops.CONTIGUOUS_BACKWARD, Ops.COPY, Ops.STAGE, Ops.DETACH,
+                          Ops.MSTACK, Ops.MSELECT, Ops.ALLREDUCE, Ops.SPECIAL, Ops.END, Ops.NEG, Ops.TRUNC} | GroupOp.Movement
+_promo_dtype_ops = GroupOp.Broadcastable - {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.WHERE, Ops.THREEFRY, Ops.FDIV, Ops.SHL, Ops.SHR}
+
 def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   # here are the dtype production rules, total over all Ops
+  if op in _passthrough_dtype_ops: return src[0].dtype
+  if op in _promo_dtype_ops: return promo_dtype(src)
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
          Ops.BACKEDGE | Ops.BARRIER | Ops.IF | Ops.ENDIF | Ops.NOOP | \
@@ -135,11 +142,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       # TODO: should there be a CAST so src[0].dtype just work?
       if (b:=src[0]).op is Ops.PARAM and is_image_shape(b.shape): return dtypes.float
       return b.dtype
-    case Ops.LOAD | Ops.UNSHARD | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
-         Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
-         Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE | Ops.SPECIAL | Ops.END:
-      # pass through first
-      return src[0].dtype
     case Ops.CMPLT | Ops.CMPNE | Ops.CMPEQ:
       return dtypes.bool
     case Ops.SIN | Ops.LOG2 | Ops.EXP2 | Ops.SQRT | Ops.RECIP:
@@ -178,10 +180,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       if isinstance(arg, int): return dtypes.weakint
       if isinstance(arg, float): return dtypes.weakfloat
       raise TypeError(f"no dtype for CONST with arg {arg}")
-  if op in GroupOp.Unary: return src[0].dtype
-  # NOTE: CMPLT, CMPNE, CMPEQ, WHERE, SHL, SHR are handled above
-  if op in GroupOp.Broadcastable: return promo_dtype(src)
-  if op in GroupOp.Movement: return src[0].dtype
   raise RuntimeError(f"no dtype for {op} with arg {arg}")
 
 class UOpMetaClass(type):
