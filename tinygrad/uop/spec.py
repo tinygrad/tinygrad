@@ -168,7 +168,8 @@ spec_tensor = PatternMatcher([
   # REDUCE has arg=(op, num_axes), src[1:] are ranges after lowering
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"),
    lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in GroupOp.Reduce
-   and isinstance(x.arg[1], int) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
+   and isinstance(x.arg[1], int) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])
+   and not any(y.op is Ops.RANGE and y.axis_type is AxisType.DEVICE for y in x.src[1:])),
 
   # COPY carries the DEVICE range as src[1] when the target is multi-device
   (UPat(Ops.COPY, name="copy", src=(UPat(),), allow_any_len=True), lambda copy:
