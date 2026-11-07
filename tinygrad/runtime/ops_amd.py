@@ -100,8 +100,9 @@ class AMDComputeQueue(HWQueue):
     super().__init__(submit)
     self.pm4, self.gc, self.soc, self.nbio, self.target = self.dev.pm4, self.dev.gc, self.dev.soc, self.dev.nbio, self.dev.target
     self.profiled:list[UOp] = []
-    # (an exec barrier is emitted before the next packet that isn't a register's: a kernel's registers set while the kernels before it run)
-    self.barrier_pending, self._regs_end, self._acq_end, self._pre_barrier = False, 0, 0, False
+    # (an exec barrier is emitted before the next packet that isn't a register's: a kernel's registers set while the kernels before it run.
+    # barrier_since: one was emitted since the last kernel (the next one invalidates the caches it reads through))
+    self.barrier_pending, self.barrier_since, self._regs_end, self._acq_end, self._pre_barrier = False, True, 0, 0, False
     if self.dev.pmc_enabled: self.pmc_start()
 
   def pkt3(self, cmd, *vals):
@@ -110,10 +111,12 @@ class AMDComputeQueue(HWQueue):
 
   def flush_barrier(self):
     if not self.barrier_pending: return
-    self.barrier_pending = False
+    self.barrier_pending, self.barrier_since = False, True
     self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
   def loop(self, body:UOp, r:UOp):
+    # (a trip's first kernel after the trip before it: its caches invalidated)
     self.flush_barrier()
+    self.barrier_since = True
     super().loop(body, r)
     self.flush_barrier()
   def finish(self): self.flush_barrier()
@@ -420,7 +423,8 @@ class AMDComputeQueue(HWQueue):
     self.blob += blob[:mid]
     # the caches the kernel reads through invalidated after a barrier (it may read what the kernels before it wrote), not for a kernel that runs
     # with the ones before it (it doesn't: the queue's first commands invalidate them for the kernels until a barrier)
-    if (barrier:=self.barrier_pending or pre): self.flush_barrier()
+    if (barrier:=self.barrier_pending or self.barrier_since or pre): self.flush_barrier()
+    self.barrier_since = False
     shift = len(self.blob) - start - mid
     self.blob += blob[mid:] if barrier else blob[acq:]
     if not barrier: shift -= acq - mid
