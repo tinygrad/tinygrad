@@ -9,20 +9,20 @@ from tinygrad.helpers import prod, unwrap
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 
 GGML_BLOCK_SIZE, Q8_GROUP_SIZE = 256, 32
-Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K = 8, 10, 11, 12, 13, 14
+Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q2_0 = 8, 10, 11, 12, 13, 14, 42
 IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS = 17, 18, 20, 21, 22, 23
 QUANT_SIZES = {Q8_0: 272, Q2_K: 84, Q3_K: 110, Q4_K: 144, Q5_K: 176, Q6_K: 210, IQ2_XS: 74,
-               IQ3_XXS: 98, IQ4_NL: 144, IQ3_S: 110, IQ2_S: 82, IQ4_XS: 136}  # bytes per 256 weights
-HALFWORD_QUANTS = (Q8_0, Q6_K, Q2_K, Q3_K, IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S)
-SMALL_BLOCK_QUANTS = {Q8_0: 17, IQ4_NL: 9}
+               IQ3_XXS: 98, IQ4_NL: 144, IQ3_S: 110, IQ2_S: 82, IQ4_XS: 136, Q2_0: 72}  # bytes per 256 weights
+HALFWORD_QUANTS = (Q8_0, Q6_K, Q2_K, Q3_K, IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S, Q2_0)
+SMALL_BLOCK_QUANTS = {Q8_0: (32, 17), IQ4_NL: (32, 9), Q2_0: (64, 9)}  # weights, halfwords per block
 QUANT_NAMES = {Q8_0: "q8_0", Q2_K: "q2_k", Q3_K: "q3_k", Q4_K: "q4_k", Q5_K: "q5_k", Q6_K: "q6", IQ4_XS: "iq4_xs",
-               IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ4_NL: "iq4_nl", IQ3_S: "iq3_s", IQ2_S: "iq2_s"}
+               IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ4_NL: "iq4_nl", IQ3_S: "iq3_s", IQ2_S: "iq2_s", Q2_0: "q2_0"}
 
 def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
   """(ggml type, packed words) if `decoded` is exactly the dequantization of packed ggml weights, rows of in_features"""
   if in_features % Q8_GROUP_SIZE: return None
   packed_sizes = {typ: decoded.numel() * type_size // 256 for typ,type_size in QUANT_SIZES.items()
-                  if in_features % GGML_BLOCK_SIZE == 0 or typ in SMALL_BLOCK_QUANTS}
+                  if in_features % SMALL_BLOCK_QUANTS.get(typ, (GGML_BLOCK_SIZE,))[0] == 0}
   graph = decoded.uop.toposort()
   raw = next((u for u in graph if u.op in (Ops.SHRINK, Ops.BUFFER, Ops.UNSHARD) and u.dtype == dtypes.uint8 and
               prod(u.shape) in packed_sizes.values()), None)
@@ -161,6 +161,10 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
   def byte(offset): return _load_byte(raw, base, offset)
   def word(offset): return _load_u32(raw, base, offset, stream=ggml_type == Q6_K)
   if ggml_type == Q8_0: return _load_u32(raw, base, 2+i*4, stream=True)
+  if ggml_type == Q2_0:
+    # four 2-bit weights per byte, low bits first, the group is one half of the 64 weight block
+    packed = byte(2+(subgroup%2)*8+i)
+    return (packed | (packed << 6) | (packed << 12) | (packed << 18)) & 0x03030303
   if ggml_type in (Q4_K, Q5_K):
     offset = (4 if ggml_type == Q4_K else 12) + (subgroup//2)*8
     weights = (_amd_load(raw[base+offset], 8)[i] >> ((subgroup&1)*4).cast(dtypes.uint32)) & 0x0f0f0f0f
@@ -205,14 +209,16 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
   def group_dot(token:UOp, output:UOp, group:UOp) -> UOp:
     block, subgroup = group//8, group%8
     base = (output*in_features//256 + block) * (QUANT_SIZES[ggml_type]//raw.dtype.itemsize)
-    if ggml_type in SMALL_BLOCK_QUANTS: base = (output*in_features//32 + group)*SMALL_BLOCK_QUANTS[ggml_type]
+    if ggml_type in SMALL_BLOCK_QUANTS:
+      width, halfwords = SMALL_BLOCK_QUANTS[ggml_type]
+      base = (output*in_features//width + group*32//width)*halfwords
     if gate is not None: base = gate(token, base)
     if xtoken is not None: token = xtoken(token)
     def byte(offset): return _load_byte(raw, base, offset)
     def word(offset): return _load_u32(raw, base, offset)
     xwords = _amd_load(xq[token, group, 0], 8)
-    # One accumulator per scale group: 32 weights for Q4/Q5/IQ4_XS, two groups of 16 otherwise.
-    dots = [UOp.const(0, dtypes.int32)] * (1 if ggml_type in (Q4_K, Q5_K, IQ4_XS) else 2)
+    # One accumulator per scale group: 32 weights for Q4/Q5/IQ4_XS/Q2_0, two groups of 16 otherwise.
+    dots = [UOp.const(0, dtypes.int32)] * (1 if ggml_type in (Q4_K, Q5_K, IQ4_XS, Q2_0) else 2)
     for i in range(8):
       weights = _quant_word(raw, base, subgroup, i, ggml_type, grids[0] if grids else None)
       acc = i//(8//len(dots))
@@ -222,6 +228,9 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
       total = dots[0].float()*d*scale - (xs[token, group, 0].load()+xs[token, group, 1].load())*dmin*minimum
     elif ggml_type == IQ4_XS:
       total = dots[0].float() * _iq4_scale(raw, base, subgroup)
+    elif ggml_type == Q2_0:
+      # weights are 2-bit values minus one, subtract the offset via the activation sums
+      total = (dots[0].float() - xs[token, group, 0].load() - xs[token, group, 1].load()) * _half(raw[base])
     elif ggml_type == Q6_K:
       # Subtract the quant offset via the activation sums instead of unpacking signed bytes.
       scales = [(raw[base+96+subgroup] >> (h*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float() for h in range(2)]
@@ -386,7 +395,9 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
     tid, threads = wave*lanes+lane, output_waves*lanes
     grid = grid.after(*(grid[tid+i*threads].store(grids[0][tid+i*threads]) for i in range(int(grid.numel())//threads)))
   def dequant(base:UOp, subgroup:UOp, half:int) -> tuple[UOp, ...]:
-    if ggml_type in SMALL_BLOCK_QUANTS: base += subgroup*SMALL_BLOCK_QUANTS[ggml_type]  # eight independent blocks per 256 weights
+    if ggml_type in SMALL_BLOCK_QUANTS:  # independent blocks within 256 weights
+      width, halfwords = SMALL_BLOCK_QUANTS[ggml_type]
+      base += subgroup*32//width*halfwords
     def byte(offset): return _load_byte(raw, base, offset)
     zero, minimum = 0, UOp.const(0, dtypes.float)
     if ggml_type == Q2_K:
@@ -405,6 +416,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
         scale *= (((sc >> (half*4)) & 15).float()+0.5)*0.25
       elif ggml_type == IQ3_S: scale *= (1+2*((byte(106+subgroup//2) >> ((subgroup%2)*4)) & 15)).float()
       elif ggml_type == IQ3_XXS: scale *= ((_load_u32(raw, base, 66+subgroup*4) >> 28).float()+0.5)*0.5
+      elif ggml_type == Q2_0: zero = 1
     words = tuple(_quant_word(raw, base, subgroup, half*4+i, ggml_type, grid) for i in word_indices)
     return tuple((((word >> (b*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float()-zero)*scale-minimum).cast(dtypes.half)
                  for word in words for b in range(4))
