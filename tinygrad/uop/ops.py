@@ -112,15 +112,10 @@ def promo_dtype(src:tuple[UOp,...]) -> DType:
   dts = [x.dtype for x in src]
   return dts[0] if all_same(dts) else least_upper_dtype(*dts)
 
-# the ops with the dtype of their first src, and the ops with the promoted dtype of their srcs
-_passthrough_dtype_ops = {Ops.LOAD, Ops.UNSHARD, Ops.REDUCE, Ops.AFTER, Ops.RANGE, Ops.CONTIGUOUS_BACKWARD, Ops.COPY, Ops.STAGE, Ops.DETACH,
-                          Ops.MSTACK, Ops.MSELECT, Ops.ALLREDUCE, Ops.SPECIAL, Ops.END, Ops.NEG, Ops.TRUNC} | GroupOp.Movement
-_promo_dtype_ops = GroupOp.Broadcastable - {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.WHERE, Ops.THREEFRY, Ops.FDIV, Ops.SHL, Ops.SHR}
-
 def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   # here are the dtype production rules, total over all Ops
-  if op in _passthrough_dtype_ops: return src[0].dtype
-  if op in _promo_dtype_ops: return promo_dtype(src)
+  if op in GroupOp.PassthroughDType: return src[0].dtype
+  if op in GroupOp.PromoteDType: return promo_dtype(src)
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
          Ops.BACKEDGE | Ops.BARRIER | Ops.IF | Ops.ENDIF | Ops.NOOP | \
