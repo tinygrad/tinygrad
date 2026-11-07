@@ -774,6 +774,7 @@ class AMIdleClocks:
   """
   devs:list[tuple[AMDev, Any]] = []
   low, last, started = False, 0.0, False
+  caps:str|None = None  # (the clocks' caps of a working level now, see set_caps. None: AM_CLOCKS)
   lock = threading.Lock()
   @classmethod
   def add(cls, adev:AMDev, dev:Any):
@@ -803,7 +804,7 @@ class AMIdleClocks:
     ok = True
     for adev, _ in cls.devs:
       if getattr(adev, "finalized", False): continue
-      try: adev.smu.set_clocks(level=level(adev))
+      try: adev.smu.set_clocks(level=level(adev), caps=adev.smu.clock_caps(cls.caps))
       except Exception as e:
         print(f"am {adev.devfmt}: setting the clocks failed: {type(e).__name__}: {e}", flush=True)
         ok = False
@@ -821,15 +822,23 @@ class AMIdleClocks:
         except Exception as e: ret.append({"error": f"{type(e).__name__}: {e}"})
     return ret
   @classmethod
+  def set_caps(cls, spec:str|None):
+    """
+    the caps of the gfx clock of a working level (AM_CLOCKS syntax, e.g. "GFXCLK=2000"; "": none, None: AM_CLOCKS), applied now (two messages a
+    device) unless the clocks are low (applied at the wake)
+    """
+    with cls.lock:
+      if spec == cls.caps: return
+      cls.caps = spec
+      if cls.low: return
+      for adev, _ in cls.devs:
+        if getattr(adev, "finalized", False) or (clck:=getattr(adev.smu.smu_mod, "PPCLK_GFXCLK", None)) is None or adev.perf_level is None: continue
+        try: adev.smu.set_clock(clck, adev.perf_level, adev.smu.clock_caps(spec).get(clck, 0))
+        except Exception as e: print(f"am {adev.devfmt}: setting the clocks failed: {type(e).__name__}: {e}", flush=True)
+  @classmethod
   def _loop(cls, idle:float):
-    clocks_file, mtime = getenv("AM_CLOCKS_FILE", ""), 0.0
     while True:
       time.sleep(min(idle, 0.25))
-      # (AM_CLOCKS_FILE: the clocks' caps of the file applied when it changes, see AM_SMU.clock_caps)
-      if clocks_file and os.path.exists(clocks_file) and (mt:=os.path.getmtime(clocks_file)) != mtime:
-        mtime = mt
-        with cls.lock:
-          if not cls.low: cls._set(lambda adev: adev.perf_level)
       if cls.low or time.perf_counter() - cls.last < idle: continue
       with cls.lock:
         if cls.low or time.perf_counter() - cls.last < idle: continue

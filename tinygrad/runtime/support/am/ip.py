@@ -1,4 +1,4 @@
-import ctypes, time, contextlib, functools, threading, os
+import ctypes, time, contextlib, functools, threading
 from typing import Iterable, Literal
 from tinygrad.helpers import to_mv, data64, data64_le, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits, getenv
 from tinygrad.runtime.autogen.am import am, pm4_soc15 as pm4
@@ -233,17 +233,22 @@ class AM_SMU(AM_IP):
     return {clck: [self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|i, read_back_arg=True)&0x7fffffff for i in range(cnt)]
       for clck in clk_list if (cnt:=self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|0xff, read_back_arg=True)&0x7fffffff)}
 
-  def clock_caps(self) -> dict[int, int]:
+  def clock_caps(self, spec:str|None=None) -> dict[int, int]:
     """
-    AM_CLOCKS (e.g. "GFXCLK=1800,UCLK=772"): clocks at most these (MHz) at a working level (less power a token: decoding doesn't use the
-    full clocks)
+    spec (default AM_CLOCKS, e.g. "GFXCLK=2000,UCLK=772"): clocks at most these (MHz) at a working level (less power a token: decoding doesn't
+    use the full clocks)
     """
-    spec = getenv("AM_CLOCKS", "")
-    if (path:=getenv("AM_CLOCKS_FILE", "")) and os.path.exists(path):
-      with open(path) as f: spec = f.read().strip()
+    spec = getenv("AM_CLOCKS", "") if spec is None else spec
     return {getattr(self.smu_mod, f"PPCLK_{k.strip().upper()}"): int(v) for k, v in (x.split("=") for x in spec.split(",") if "=" in x)}
 
-  def set_clocks(self, level:int|None):
+  def set_clock(self, clck:int, level:int, cap:int=0):
+    """one clock at its level (at most cap MHz, 0: none): its soft minimum and maximum"""
+    vals = self.read_clocks((clck,))[clck]
+    f = min(vals[level], cap) if cap and level != 0 else vals[level]
+    with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | f, timeout=20)
+    if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | f)
+
+  def set_clocks(self, level:int|None, caps:dict[int, int]|None=None):
     clks = tuple([self.smu_mod.PPCLK_UCLK, self.smu_mod.PPCLK_FCLK, self.smu_mod.PPCLK_SOCCLK])
     if self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,12), (13,0,15)}: clks += (self.smu_mod.PPCLK_GFXCLK,)
 
@@ -253,7 +258,7 @@ class AM_SMU(AM_IP):
         if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | 0xffff)
       return
 
-    caps = self.clock_caps()
+    caps = self.clock_caps() if caps is None else caps
     for clck, vals in self.read_clocks(clks).items():
       f = min(vals[level], cap) if level != 0 and (cap:=caps.get(clck, 0)) else vals[level]
       with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | f, timeout=20)

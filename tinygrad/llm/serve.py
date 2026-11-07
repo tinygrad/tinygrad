@@ -637,6 +637,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # prompt's with the fewest tokens left to prefill (a short one, an agent's turn, isn't behind a long one), less AGING tokens a second it
   # waited (a long one isn't behind short ones that keep coming))
   PREFILL_SLICE, MAX_STALL, DECODE_SHARE, AGING = 13824, 1.0, 0.5, 1000
+  # (the gpus' clocks (AM: their gfx clock's cap, see AMIdleClocks.set_caps): a few users decoding at the full clocks (a user's tokens fast),
+  # more at less (the energy a token: ~0.85 J at 2000 MHz on 6x 7900 XTX, ~1.2 J at full), a prefill at a cap it isn't slower at. switched
+  # CLOCK_HOLD s apart at most)
+  CLOCKS, FAST_USERS, CLOCK_HOLD = {"fast": "", "many": "GFXCLK=2000", "prefill": "GFXCLK=2300"}, 4, 0.5
   def schedule_seqs(self):
     """
     every request has a sequence of its own (the resident one its prompt continues: an agent's turn is prefilled from its last one), prefilled
@@ -651,6 +655,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     k = eng.k
     def prompt(req:Request) -> list[int]: return req.ids + req.generated  # (a paused one (see below) goes on from its tokens so far)
     stall = 0.0  # (the time of the slices since the last steps)
+    try:
+      from tinygrad.runtime.ops_amd import AMIdleClocks
+      set_caps = AMIdleClocks.set_caps if AMIdleClocks.devs else None
+    except ImportError: set_caps = None
+    clock_mode, clock_at = "", 0.0
     while True:
       try:
         while not active and not pending and not filling:
@@ -686,6 +695,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           break
         for name, t in eng.times.items(): self.stats.add(name, t)
         eng.times.clear()
+        if set_caps is not None and (mode:="prefill" if job is not None else "many" if len(active) > self.FAST_USERS else "fast") != clock_mode \
+           and time.perf_counter() - clock_at >= self.CLOCK_HOLD:
+          set_caps(self.CLOCKS[mode])
+          clock_mode, clock_at = mode, time.perf_counter()
         if job is not None:
           req = filling[job]
           ids, pos, restore = req.fill
