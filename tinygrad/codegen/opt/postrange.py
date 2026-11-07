@@ -14,22 +14,13 @@ from tinygrad.renderer import Renderer
 split_targets = {AxisType.UPCAST: (AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK),
                  AxisType.LOCAL: (AxisType.GLOBAL, AxisType.WEAK)}
 
-def ast_cached(fxn):
-  """a property of the Scheduler that only depends on self.ast, cached until self.ast changes. NOTE: don't mutate the result"""
-  key = f"_cached_{fxn.__name__}"
-  def get(self):
-    if (c:=self.__dict__.get(key)) is not None and c[0] is self.ast: return c[1]
-    self.__dict__[key] = (self.ast, ret:=fxn(self))
-    return ret
-  return property(get)
-
 class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
     self.ast, self.ren = graph_rewrite(ast, pm_flatten_range), ren
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
     self.opt_range = count(start=max([x.axis_id[0] for x in self.ast.backward_slice if x.op is Ops.RANGE], default=0)+1)
 
-  @ast_cached
+  @property
   def rngs(self):
     # Keep serial/vectorized reduction axes last, deriving their role from REDUCE rather than the axis type.
     # void RANGEs are loops, not opt axes. the DEVICE axis is launched, not an opt axis
@@ -239,11 +230,11 @@ class Scheduler:
     return None
 
   # helpers for hand_coded_optimizations
-  @ast_cached
+  @property
   def reduceops(self) -> list[UOp]: return [x for x in self.ast.backward_slice if x.op is Ops.REDUCE]
   @property
   def reduceop(self) -> UOp|None: return red[0] if (red:=self.reduceops) else None
-  @ast_cached
+  @property
   def bufs(self) -> list[UOp]: return [x for x in self.ast.backward_slice if x.op is Ops.INDEX][::-1]
   @property
   def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.WARP, AxisType.LOCAL, reduce=True))

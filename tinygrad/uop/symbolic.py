@@ -50,8 +50,6 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
   #   q == b//div     -> b*mul              (full recombine)
   #   q == (b//div)%d -> (b%(div*d))*mul    (partial recombine into a wider mod, needs d>0)
   terms = list(x.split_uop(Ops.ADD))
-  # a candidate term is a MOD or a MUL of a MOD
-  if not any([t.op is Ops.MOD or (t.op is Ops.MUL and t.src[0].op is Ops.MOD) for t in terms]): return None
   for i,u in enumerate(terms):
     mod, mul = u.pop_const(Ops.MUL)
     if mod.op is not Ops.MOD or mod.src[1].op is not Ops.CONST: continue
@@ -363,7 +361,7 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
 def _keep_range(ctx:dict[UOp, UOp], r:UOp) -> None:
   if r not in ctx: raise BottomUpGate
 pm_keep_range = PatternMatcher([(UPat(Ops.RANGE, name="r"), _keep_range)])
-pm_keep_range.order_free = True  # ctx (the substitute dict) is only read
+pm_keep_range.order_free = True  # the substitute dict is only read
 
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # return simplified uop (might be the same as input)
