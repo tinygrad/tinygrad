@@ -624,8 +624,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # ** sequences sharing the model's caches (Transformer.seqs_supported): continuous batching
   # (a prompt is prefilled in slices of PREFILL_SLICE tokens (~1 s). the decoding ones' steps run after MAX_STALL s of slices, for their share
   # of the time (the requests decoding of the ones in flight, DECODE_SHARE at most and 0.1 at least): a long prompt doesn't stop the replies,
-  # many prompts at once are prefilled mostly one after another (a step of many is about as fast as one of a few). the next slice is the prompt's with the fewest tokens left to prefill (a short one, an agent's turn, isn't behind a long one),
-  # less AGING tokens a second it waited (a long one isn't behind short ones that keep coming))
+  # many prompts at once are prefilled mostly one after another (a step of many is about as fast as one of a few). the next slice is the
+  # prompt's with the fewest tokens left to prefill (a short one, an agent's turn, isn't behind a long one), less AGING tokens a second it
+  # waited (a long one isn't behind short ones that keep coming))
   PREFILL_SLICE, MAX_STALL, DECODE_SHARE, AGING = 13824, 1.0, 0.5, 1000
   def schedule_seqs(self):
     """
