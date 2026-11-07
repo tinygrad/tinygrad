@@ -6,13 +6,12 @@ from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.jit import capture_parallel, _TinyJit
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
 from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custom_kernels_supported, find_packed, moe_linear, q8_linear, \
-  q8_quantize_cache_clear, moe_route, moe_grouped_linear, partial_sum, fuse_gate_up, \
-  kda_decode, _wmma_rdna4, pool_index_rows, slot_scatter, slot_gather, moe_combine, token_sharded, shard_rows, reduce_scatter, all_gather, \
-  all_gather_q8, sharded_argmax, skinny_matmul, kda_conv, kda_replay, tables_ready, MOE_TILE, I8_WMMA_QUANTS, \
-  ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, weighted_sum, ghc_decode_mix, \
-  rows_gather, rows_scatter, seq_scores, seq_index, kv_q8_pack, qsa_decode_attention, FLAG_LANE, DEC_LANE, flag_allreduce, ring_mailbox, \
-  ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, after_kernel, host_allreduce, p2p_allreduce, \
-  _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus
+  q8_quantize_cache_clear, moe_route, moe_grouped_linear, partial_sum, fuse_gate_up, kda_decode, pool_index_rows, slot_scatter, \
+  slot_gather, moe_combine, token_sharded, shard_rows, reduce_scatter, all_gather, all_gather_q8, sharded_argmax, skinny_matmul, kda_conv, \
+  kda_replay, tables_ready, MOE_TILE, I8_WMMA_QUANTS, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, \
+  Q8_0, IQ3_S, weighted_sum, ghc_decode_mix, rows_gather, rows_scatter, seq_scores, seq_index, kv_q8_pack, qsa_decode_attention, FLAG_LANE, \
+  DEC_LANE, flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, \
+  after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus
 from tinygrad.llm.gguf import gguf_parse, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm.gguf_load import gguf_shard_units, _disk_bytes, _disk_location
 from tinygrad.uop.ops import Ops, AxisType, KernelInfo
@@ -630,7 +629,7 @@ class GatedResidual:
     """
     B, T = xs.shape[:2]
     if isinstance(B, int) and isinstance(T, int) and 8 < B*T <= 1024 and amd_custom_kernels_supported(xs.device) and \
-       not _wmma_rdna4(xs.device) and self.down.ggml_type == self.up.ggml_type == Q8_0 and self.count == 4 and self.dim % 256 == 0 and \
+       self.down.ggml_type == self.up.ggml_type == Q8_0 and self.count == 4 and self.dim % 256 == 0 and \
        getattr(self, "_winj", None) is not None and not token_sharded(xs):
       # (the rows of batched decoding: the prefill's kernels on whole tiles of 32 rows (the rows past them padding), not a dozen of generic ones)
       n = B*T
@@ -645,8 +644,7 @@ class GatedResidual:
     if self.down.ggml_type != Q8_0 or self.up.ggml_type != Q8_0 or getattr(self, "_winj", None) is None: return None
     xn, xq, part = ghc_pre(xs.reshape(B*T, self.count*self.dim), self.norm["weight"], unwrap(self._winj), self.count, self.eps)
     down = q8_linear(self.down, xn, xq=xq)
-    if 1 < B*T <= 8 and self.count == 4 and self.dim % 32 == 0 and self.up.in_features % 32 == 0 and 0 < self.up.in_features <= 512 and \
-       not _wmma_rdna4(xs.device):
+    if 1 < B*T <= 8 and self.count == 4 and self.dim % 32 == 0 and self.up.in_features % 32 == 0 and 0 < self.up.in_features <= 512:
       mixed, inj = ghc_decode_mix(down, self.up.weight, xn, part, self.count)
       return mixed.reshape(B, T, self.dim), inj.reshape(B, T, -1)[..., :self.count]
     if B*T == 1:
@@ -707,7 +705,7 @@ class GatedResidual:
       xhalf, inj = xn.reshape(rows, -1).half().contiguous(), self.inject(xn)
     lo = q8_linear(self.down, xhalf, split=True) * (1 / self.count)
     act = (lo * lo.sigmoid()).contiguous()
-    if self.up.ggml_type == Q8_0 and self.count == 4 and self.dim % 32 == 0 and not _wmma_rdna4(xs.device) and \
+    if self.up.ggml_type == Q8_0 and self.count == 4 and self.dim % 32 == 0 and \
        int(act.uop.shard_shape[0]) % 32 == 0:
       mixed = ghc_prefill_mix(act, self.up.weight, xn.reshape(rows, -1), (int(B), int(R), self.dim))
     else:
@@ -898,7 +896,7 @@ class FFNBlock:
     # (batched decoding: a few rows an expert, small tiles)
     # RDNA3: 32 rows for f16 and IQ3_S K256 kernels; the latter needs fewer padded rows and fits two LDS tiles per WGP.
     i8 = gate_exps.ggml_type in I8_WMMA_QUANTS and gate_exps.ggml_type != IQ3_S
-    tile = MOE_TILE if _wmma_rdna4(x.device) or i8 else 32
+    tile = MOE_TILE if i8 else 32
     _, entries, tiles, pos = moe_route(sel, gate_exps.first, gate_exps.local_experts, tile)
     k, sel_shape = int(sel.shape[-1]), sel.shape[-3:]
     # gate and up read the token of each sorted row, down writes the row of each selection
@@ -2217,7 +2215,7 @@ class Transformer:
     for lane in range(MICRO_BATCHES):
       if ring_queue_of(lane, any_time=True):
         for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(ring_queue_of(lane, any_time=True))
-    p2p_allreduce(devs), host_allreduce(devs), _device_index(devs)
+    _device_index(devs)
     _argmax_parts(devs, (self.config.padded_vocab_size or self.config.vocab_size) // len(devs), self.config.vocab_size)
 
   def seq_warmup(self):
