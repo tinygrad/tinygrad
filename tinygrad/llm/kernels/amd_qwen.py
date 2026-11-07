@@ -1483,7 +1483,8 @@ def flag_partial_sum(x:Tensor) -> Tensor|None:
   # values the quantized layers' kernels would make of them, a prefill's exchanges are of them too))
   if n >= 65536 and (r:=_flag_partial_sum_q8(x, n)) is not None: return r
   N, groups = len(x.device), flag_ar_groups(n//2)
-  scatter = n >= 8192
+  # (a few rows (a sequence's drafts): one exchange, the sums of the whole of every device's partials (the latency of the links, not the bytes))
+  scatter = n >= 16384
   chunk = round_up((n//2 + N-1)//N, 64)
   if (shape:=flag_ar_shape(2*chunk if scatter else n//2, groups)) is None or (ar:=flag_allreduce(x.device, groups)) is None: return None
   out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
