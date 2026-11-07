@@ -264,6 +264,25 @@ class AM_SMU(AM_IP):
       with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | f, timeout=20)
       if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | f)
 
+  def set_overdrive(self, power_pct:int|None=None, volt_offset:int|None=None) -> bool:
+    """
+    the overdrive table: the power limit power_pct % above or below the default (in its allowed range, the board's: -10..15 on a 7900 XTX), the gfx
+    voltage curve volt_offset mV (<= 0) lower. False: not supported
+    """
+    m = self.smu_mod
+    if not all(hasattr(m, a) for a in ("OverDriveTableExternal_t", "TABLE_OVERDRIVE", "PP_OD_FEATURE_PPT_BIT", "PPSMC_MSG_TransferTableDram2Smu")):
+      return False
+    ext = self.read_table(m.OverDriveTableExternal_t, m.TABLE_OVERDRIVE)
+    od = ext.OverDriveTable
+    if power_pct is not None:
+      od.Ppt, od.FeatureCtrlMask = int(power_pct), od.FeatureCtrlMask | (1 << m.PP_OD_FEATURE_PPT_BIT)
+    if volt_offset is not None:
+      for i in range(len(od.VoltageOffsetPerZoneBoundary)): od.VoltageOffsetPerZoneBoundary[i] = int(volt_offset)
+      od.FeatureCtrlMask |= 1 << m.PP_OD_FEATURE_GFX_VF_CURVE_BIT
+    self.adev.vram.view(self.driver_table_paddr, ctypes.sizeof(ext))[:] = bytes(ext)
+    self._send_msg(m.PPSMC_MSG_TransferTableDram2Smu, m.TABLE_OVERDRIVE)
+    return True
+
   def set_power_limit(self, watts:float):
     ppt_limit = max(int(round(watts)), 1)
     self._send_msg(self.smu_mod.PPSMC_MSG_SetPptLimit, ppt_limit)

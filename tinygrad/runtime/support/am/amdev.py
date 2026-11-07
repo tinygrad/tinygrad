@@ -218,6 +218,11 @@ class AMDev:
 
     if not self.is_vf: # skip in vf mode, these are pf funcs.
       if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0: self.smu.set_power_limit(max_power)
+      # (AM_POWER_PCT: the power limit that % above (or below) the board's default, AM_VOLT_OFFSET: the gfx voltage curve that many mV lower, in
+      # the board's overdrive limits)
+      # (they stay set until the next one or a reset: set them every time to have them)
+      pp, vo = getenv("AM_POWER_PCT", ""), getenv("AM_VOLT_OFFSET", "")
+      if pp != "" or vo != "": self.smu.set_overdrive(int(pp) if pp != "" else None, int(vo) if vo != "" else None)
       levels, perf = {"auto": None, "high": -1, "low": 0}, getenv("AM_PERF_LEVEL", "auto" if max_power > 0 else "high")
       assert perf in levels, f"AM_PERF_LEVEL must be one of {list(levels)}, got {perf!r}"
       # (the level of the clocks while working: AMIdleClocks lowers them while idle, see ops_amd)
