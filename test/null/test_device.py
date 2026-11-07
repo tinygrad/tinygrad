@@ -141,6 +141,12 @@ class TestDevice(unittest.TestCase):
     with Context(DEV="NULL"): self.assertEqual(Tensor.empty(1).device, "NULL")
     self.assertEqual(Tensor.empty(1).device, orig_dev)
 
+  def test_const_doesnt_need_default_device(self):
+    # finding the default device can open every device, a const (like the 1 in x+1) has no device and doesn't need it
+    with patch.object(type(Device), "DEFAULT", property(lambda _: self.fail("looked up the default device"))):
+      Tensor(1.0)
+      Tensor.empty(3, device="NULL") + 1
+
 class TestDevVar(unittest.TestCase):
   def test_parse(self):
     for d, t in [("AMD", Target(device="AMD", renderer="")), ("AMD:LLVM", Target(device="AMD", renderer="LLVM")),
