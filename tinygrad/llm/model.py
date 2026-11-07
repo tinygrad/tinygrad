@@ -709,7 +709,8 @@ class Transformer:
                   kv.get(f'{arch}.hyper_connection.low_rank', 0)) if f'{arch}.hyper_connection.count' in kv else None
     if hc is not None: state_dict = {re.sub(r'(hc_attn|hc_ffn|output_hc|\.ple)_', r'\1.', k):v for k,v in state_dict.items()}
 
-    kpool = 1 if arch == 'glm-dsa' else kv.get(f'{arch}.attention.indexer.block_size' if arch == 'minimax-m3' else f'{arch}.attention.indexer.kpool')
+    kpool = kv.get(f'{arch}.attention.indexer.block_size' if arch == 'minimax-m3' else f'{arch}.attention.indexer.kpool',
+                   1 if f'{arch}.attention.indexer.top_k' in kv else None)
     if arch == 'qwen4exp': kpool = max(kv[f'{arch}.attention.compress_ratios'])
     indexer = IndexerConfig(kv[f'{arch}.attention.indexer.head_count'], kv[f'{arch}.attention.indexer.key_length'],
                             kv[f'{arch}.attention.indexer.top_k'], kpool,
