@@ -1,11 +1,11 @@
 from __future__ import annotations
 import contextlib, functools, itertools, math
 from dataclasses import replace
-from typing import Callable, cast
+from typing import Any, Callable, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.dtype import AddrSpace, DType, dtypes
-from tinygrad.helpers import prod, getenv, round_up, unwrap
+from tinygrad.helpers import prod, getenv, round_up, unwrap, dedup
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.renderer import Estimates
@@ -1343,13 +1343,33 @@ FLAG_AR_MAXN = 1 << 20  # words (two half values or one float32 each)
 
 def flag_ar_groups(n:int) -> int: return 4 if n <= 8192 else 16 if n <= 65536 else 64
 
+def _init_buffers(pairs:list[tuple[Any, bytes]]):
+  """the buffers allocated, their bytes copied in at once: one launch of copies from host memory every device maps (not a copy each)"""
+  from tinygrad.device import Buffer, BufferSpec, BufferStorage
+  from tinygrad.engine.realize import run_linear
+  for b, _ in pairs: b.ensure_allocated()
+  if not pairs: return
+  offs = list(itertools.accumulate([round_up(len(v), 256) for _, v in pairs], initial=0))
+  host = Buffer(pairs[0][0].device, offs[-1], options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
+  mv = host.as_memoryview(allow_zero_copy=True)
+  for (_, v), o in zip(pairs, offs): mv[o:o+len(v)] = v
+  def alias(d:str) -> Any:
+    if d == host.device: return host
+    return Buffer(d, host.nbytes, opaque=BufferStorage(va:=host.get_buf(d)), options=BufferSpec(external_ptr=va)).ensure_allocated()
+  aliases = {d: alias(d) for d in dedup(b.device for b, _ in pairs)}
+  calls = [UOp.from_buffer(b, dtypes.uint8).store_call(UOp.from_buffer(aliases[b.device].view(len(v), o).ensure_allocated(), dtypes.uint8))
+           for (b, v), o in zip(pairs, offs)]
+  run_linear(UOp(Ops.LINEAR, src=tuple(calls)), update_stats=False)
+  for d in aliases: Device[d].synchronize()
+
 class FlagAllreduce:
   def __init__(self, devs:tuple[str, ...], groups:int):
     from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
     N = len(devs)
     def mapped(nbytes:int, slot:int=0, peer_mtype:int|None=None) -> list[Tensor]:
       # (zeroed: a flag the last process left could have an epoch this one waits for)
-      own = [Buffer(d, nbytes, initial_value=bytes(nbytes), options=BufferSpec(uncached=True)) for d in devs]
+      own = [Buffer(d, nbytes, options=BufferSpec(uncached=True)).ensure_allocated() for d in devs]
+      inits.extend((b, bytes(nbytes)) for b in own)
       for b in own: setattr(b, "peer_mtype", peer_mtype)
       def alias(b:Buffer, d:int) -> Buffer:
         # (slot: the alias from the slot of device d on, its bytes)
@@ -1360,12 +1380,14 @@ class FlagAllreduce:
         (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [own[d] if k == 0 else alias(own[(d+k) % N], d) for d in range(N)]
         ret.append(Tensor(UOp.from_buffer(mb, dtypes.uint32, devs)))
       return ret
+    inits:list[tuple[Buffer, bytes]] = []
     with Context(ALLOW_DEVICE_USAGE=1):
       # (the values: the peers' aliases at the slot of the device (its two parities), what the send kernel writes back from the l2)
       self.vals = mapped(2*N*FLAG_AR_MAXN*4, 2*FLAG_AR_MAXN*4, 4)
       self.flags = mapped(2*N*4)
       # (an epoch counter a workgroup, then the device's index)
-      counters = [Buffer(d, (groups+1)*4, initial_value=bytes(groups*4)+i.to_bytes(4, "little")) for i,d in enumerate(devs)]
+      counters = [Buffer(d, (groups+1)*4) for d in devs]
+      _init_buffers(inits + [(b, bytes(groups*4) + i.to_bytes(4, "little")) for i, b in enumerate(counters)])
       (cb:=MultiBuffer.__new__(MultiBuffer)).bufs = counters
       self.counter = Tensor(UOp.from_buffer(cb, dtypes.uint32, devs))
       for d in devs: Device[d].synchronize()
@@ -1636,7 +1658,8 @@ class RingMailbox:
     N = len(devs)
     def mapped(nbytes:int, dtype:DType) -> tuple[Tensor, Tensor]:
       # (zeroed: a flag the last process left could have an epoch this one waits for. uncached on the device, uncached in the previous one's)
-      own = [Buffer(d, nbytes, initial_value=bytes(nbytes), options=BufferSpec(uncached=True)) for d in devs]
+      own = [Buffer(d, nbytes, options=BufferSpec(uncached=True)).ensure_allocated() for d in devs]
+      inits.extend((b, bytes(nbytes)) for b in own)
       for b in own: setattr(b, "peer_mtype", 3)
       def alias(b:Buffer, d:int) -> Buffer:
         va = b.get_buf(devs[d])
@@ -1644,11 +1667,13 @@ class RingMailbox:
       (m0:=MultiBuffer.__new__(MultiBuffer)).bufs = own
       (m1:=MultiBuffer.__new__(MultiBuffer)).bufs = [alias(own[(d+1) % N], d) for d in range(N)]
       return Tensor(UOp.from_buffer(m0, dtype, devs)), Tensor(UOp.from_buffer(m1, dtype, devs))
+    inits:list[tuple[Buffer, bytes]] = []
     with Context(ALLOW_DEVICE_USAGE=1):
       self.inbox, self.inbox_next = mapped(2*N*RING_MAXW*4, dtypes.uint32)
       self.flags, self.flags_next = mapped(2*N*chunks*8, dtypes.uint64)
       # (an epoch counter a chunk, then the device's place in the ring)
-      counters = [Buffer(d, (chunks+1)*4, initial_value=bytes(chunks*4)+i.to_bytes(4, "little")) for i, d in enumerate(devs)]
+      counters = [Buffer(d, (chunks+1)*4) for d in devs]
+      _init_buffers(inits + [(b, bytes(chunks*4) + i.to_bytes(4, "little")) for i, b in enumerate(counters)])
       (cb:=MultiBuffer.__new__(MultiBuffer)).bufs = counters
       self.counter = Tensor(UOp.from_buffer(cb, dtypes.uint32, devs))
       dbg = [Buffer(d, 4) for d in devs]

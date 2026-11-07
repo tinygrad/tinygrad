@@ -7,8 +7,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.uop.ops import UOp
 from tinygrad.device import Device
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, round_up, Context, unwrap, dedup
+from tinygrad.helpers import prod, round_up, Context, unwrap, dedup, DEBUG
 from tinygrad.llm.gguf import ggml_data_to_tensor, _GGML_NATIVE, _GGML_QUANT
+from tinygrad.llm.direct_read import DirectFile, read_many, close_rings, slow_bytes, PAGE
 
 # the dequantized weights the loader made: the expression (its storage views unwrapped) -> (ggml type, the packed bytes). the quantized
 # kernels use the packed bytes (find_packed) without making the expression again to match it
@@ -55,71 +56,45 @@ def _disk_bytes(data:Tensor) -> memoryview|None:
 def _gather_word(*nbytes:int) -> Any:
   return next(dt for dt in (dtypes.uint32, dtypes.uint16, dtypes.uint8) if all(n % dt.itemsize == 0 for n in nbytes))
 
-def _units_gather_kernel(dst:UOp, src:UOp, units:UOp, rows:int, slices:int) -> UOp:
-  # dst (units, rows, L) words: unit i (expert e, slice j) is the column block j of the rows of expert e in src (experts, rows, slices, L)
-  # (one index, the words innermost: a wave's loads of consecutive words, src can be host memory)
-  from tinygrad.uop.ops import AxisType, KernelInfo
-  L = dst.shape[0] // (units.shape[0] * rows)
-  g = UOp.range(dst.shape[0], 0, AxisType.GLOBAL)
-  k, r, u = g % L, (g // L) % rows, units[g // (L*rows)].load().cast(dtypes.weakint)
-  return dst[g].store(src[((u // slices * rows + r) * slices + u % slices) * L + k].load()).end(g).sink(arg=KernelInfo(name="units_gather"))
+COPY_THREADS, COPY_UNROLL, COPY_ITERS = 256, 4, 1024
+COPY_PIECE = COPY_THREADS * COPY_UNROLL * COPY_ITERS  # (the words of a row of a copy at most, see _ranges_copy_kernel)
 
-def _rows_gather_kernel(dst:UOp, src:UOp, units:UOp, parts:int, chunk:int) -> UOp:
-  # dst (units, chunks, parts, chunk) words: the chunks of unit i of every part interleaved. src (parts, units', unit): a unit's rows contiguous
+def _ranges_copy_kernel(dst:UOp, src:UOp, table:UOp) -> UOp:
+  """
+  table (rows*6,) int32, a row: the source word (-1: zeros) and the destination word of `count` ranges of `words`, the next range's source and
+  destination `sstride` and `dstride` words on (words*count COPY_PIECE at most). a workgroup a row
+  """
   from tinygrad.uop.ops import AxisType, KernelInfo
-  unit, part = dst.shape[0] // (units.shape[0] * parts), src.shape[0] // parts
-  g = UOp.range(dst.shape[0], 0, AxisType.GLOBAL)
-  w, p, c, u = g % chunk, (g // chunk) % parts, (g // (chunk*parts)) % (unit // chunk), units[g // (unit*parts)].load().cast(dtypes.weakint)
-  return dst[g].store(src[p*part + u*unit + c*chunk + w].load()).end(g).sink(arg=KernelInfo(name="rows_gather"))
+  g, t = UOp.range(table.shape[0] // 6, 0, AxisType.GLOBAL), UOp.range(COPY_THREADS, 1, AxisType.LOCAL)
+  so, do, nw, cnt, ss, ds = (table[g*6 + k].load().cast(dtypes.weakint) for k in range(6))
+  j = UOp.range(COPY_ITERS, 2, AxisType.LOOP)
+  stores = []
+  for u in range(COPY_UNROLL):
+    w = (j*COPY_UNROLL + u)*COPY_THREADS + t
+    i, k = w // nw, w % nw
+    ok = w < nw*cnt
+    val = (so >= 0).where(src[(so + i*ss + k).valid(ok & (so >= 0))].load(), UOp.const(0, src.dtype))
+    stores.append(dst[(do + i*ds + k).valid(ok)].store(val))
+  return UOp.group(*stores).end(j).end(g, t).sink(arg=KernelInfo(name="ranges_copy", opts_to_apply=()))
 
-def _part_gather_kernel(dst:UOp, src:UOp, outer:int, off:int) -> UOp:
-  # dst (outer, P) words: the words off.. of every row of src (outer, R), zero past the row
-  from tinygrad.uop.ops import AxisType, KernelInfo
-  P, R = dst.shape[0] // outer, src.shape[0] // outer
-  g = UOp.range(dst.shape[0], 0, AxisType.GLOBAL)
-  r, c = g // P, off + g % P
-  return dst[g].store((c < R).where(src[r*R + c.minimum(R-1)].load(), UOp.const(0, src.dtype))).end(g).sink(arg=KernelInfo(name="part_gather"))
-
+@functools.cache
+def _gather_ast(fxn:Callable, *params:tuple) -> UOp: return fxn(*[UOp.placeholder(*p) for p in params])
 def _gather_call(fxn:Callable, *bufs:UOp) -> UOp:
-  # the kernel on the buffers, a call (compiled once: the kernel is the same for buffers of the same sizes, no schedule)
-  return fxn(*[UOp.placeholder_like(b, slot=i) for i,b in enumerate(bufs)]).call(*bufs)
+  # the kernel on the buffers, a call (compiled once: the kernel is the same for buffers of the same sizes, no schedule. its ast made once)
+  return _gather_ast(fxn, *[(b.max_shard_shape, b.dtype, i) for i, b in enumerate(bufs)]).call(*bufs)
 
-def _merge_reads(reads:list[tuple]) -> list[tuple]:
-  """
-  the reads (fd, src, [(at, len)]) as few as can be: the ones of contiguous bytes of a file one read (up to IOV_MAX pieces), its pieces
-  contiguous in the host buffer one piece. a fill thread holds the gil between its reads (a read of many small ones waits for it every time)
-  """
-  out:list[list] = []
-  for fd, src, iov in sorted(reads, key=lambda r: (r[0], r[1])):
-    if out and out[-1][0] == fd and out[-1][1] + out[-1][3] == src and len(out[-1][2]) + len(iov) <= 1024:
-      cur = out[-1]
-    else: out.append(cur:=[fd, src, [], 0])
-    for at, ln in iov:
-      if cur[2] and cur[2][-1][0] + cur[2][-1][1] == at: cur[2][-1] = (cur[2][-1][0], cur[2][-1][1] + ln)
-      else: cur[2].append((at, ln))
-      cur[3] += ln
-  return [(fd, src, iov) for fd, src, iov, _ in out]
-
-def _preadv_exact(fd:int, views:list[memoryview], offset:int):
-  """Fill every view, handling short reads and raising instead of spinning forever at EOF."""
-  import os
-  while views:
-    if (count:=os.preadv(fd, views, offset)) == 0: raise EOFError(f"short read at file offset {offset}")
-    offset += count
-    while views and count >= len(views[0]): count -= len(views.pop(0))
-    if views and count: views[0] = views[0][count:]
+# (the bytes of a chunk of the files at most, the host buffers they're read into, the bytes of a device's buffer a copy kernel writes at most,
+# the bytes of the copies' tables of a chunk)
+CHUNK, HOST_BUFS, COPY_WINDOW, TABLES = 2 << 30, 4, 1 << 30, 16 << 20
 
 def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...], shard_map:dict[str, int],
                    units:dict[str, tuple[int, list[list[int]]]], pads:dict[str, int], fuse:dict[str, str],
-                   defer:list[Callable[[], None]]|None=None,
                    row_sel:dict[str, tuple[int, list[tuple[int, int]]]]|None=None) -> dict[str, Tensor]|None:
   """
-  every device's tensors are file reads (os.preadv, threads) into host buffers of the device, then copies to its
-  buffer, the devices in turn. expert tensors and column-split weights are read once into shared host buffers; device kernels gather each
-  shard directly from host memory
-  defer: the device memory is allocated (the tensors are made), the bytes are read by the function added to it
+  the files read in chunks (in their order, io_uring and O_DIRECT, see direct_read) into host buffers every device maps, every device takes its
+  parts of a chunk (its tensors, its experts' units, its columns: a copy kernel of ranges from the host buffer) while the next ones are read
   """
-  import os, time, concurrent.futures, contextlib
+  import time
   from tinygrad.device import Buffer, BufferSpec, MultiBuffer
   n = len(devices)
   if not all(d.split(":")[0] == "AMD" for d in devices): return None
@@ -170,171 +145,137 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
     for i,(nb, _) in enumerate(parts):
       offsets[name].append(totals[i])
       totals[i] += round_up(nb, align)
-  STAGE, K = 256 << 20, 3
-  assert STAGE > 0 and K > 0
-  fds = {path: os.open(path, os.O_RDONLY) for path in dedup(path for path, _, _ in locs.values())}
-  # the gathered tensors (split by columns: every device a part of the same bytes) are read once into a host buffer mapped on every device,
-  # every device's gather kernel reads its part of it over its link. shared[name]: the reads, the bytes, {device: (kind, args, offset, nb)}
-  shared:dict[str, tuple[list[tuple], int, dict[int, tuple], dict[int, int]|None]] = {}
-  # every device's jobs in order: ("copy", reads, zeros, size, offset) a host buffer filled by reads (fd, src, [(at, len)]) and zero ranges,
-  # then copied to the device's buffer
-  def device_jobs(i:int) -> list[tuple]:
-    jobs:list[tuple] = []
-    start, end = 0, 0
-    reads:list[tuple] = []
-    zeros:list[tuple[int, int]] = []
-    def flush():
-      nonlocal reads, zeros
-      if (reads or zeros) and end > start: jobs.append(("copy", _merge_reads(reads), zeros, end - start, start))
-      reads, zeros = [], []
-    def place(lo:int, hi:int):
-      # a window of the buffer covering lo..hi (a new one starts at lo)
-      nonlocal start, end
-      if (not reads and not zeros) or lo < start or hi > start + STAGE:
-        flush()
-        start = end = lo
-      end = max(end, hi)
-    for name, parts in plan.items():
-      nb, fill = parts[i]
-      fd, base = fds[locs[name][0]], offsets[name][i]
-      if fill[0] == "segs":
-        for src, length, dst, piece, stride in fill[1]:
-          if piece == length:  # contiguous: split in windows
-            for o in range(0, length, STAGE):
-              place(base + dst + o, base + dst + (e:=min(length, o + STAGE)))
-              reads.append((fd, src + o, [(base + dst + o - start, e - o)]))
-          else:
-            place(base + dst, base + dst + (length // piece - 1) * stride + piece)
-            reads.append((fd, src, [(base + dst + p*stride - start, piece) for p in range(length // piece)]))
-        for z0, z1 in fill[2]:
-          place(base + z0, base + z1)
-          zeros.append((base + z0 - start, z1 - z0))
-        continue
-      # (a window doesn't cover a gathered tensor: its copy would write over what the gather writes)
-      flush()
-      _, src_off, src_nb = locs[name]
-      if name not in shared:
-        if fill[1] in ("units", "rows"):
-          # only the experts some device uses (contiguous in the file), compacted (a fused up's after the gate's), the units renumbered in them
-          E, slices = fill[2][0], fill[2][2]
-          ebytes, ex = src_nb // E, sorted(set(u // slices for _, p in plan[name] for u in p[2][-1]))
-          sreads:list[tuple] = []
-          for pi, so in enumerate([src_off] + ([locs[fuse[name]][1]] if name in fuse else [])):
-            for j, e in enumerate(ex):  # runs of consecutive experts in one read
-              if j and e == ex[j-1] + 1: sreads[-1] = (fd, sreads[-1][1], [(sreads[-1][2][0][0], sreads[-1][2][0][1] + ebytes)])
-              else: sreads.append((fd, so + e*ebytes, [((pi*len(ex) + j)*ebytes, ebytes)]))
-          shared[name] = (sreads, (2 if name in fuse else 1)*len(ex)*ebytes, {}, {e: j for j, e in enumerate(ex)})
-        else: shared[name] = ([(fd, src_off, [(0, src_nb)])], src_nb, {}, None)
-      args, pos = fill[2], shared[name][3]
-      if pos is not None: args = (*args[:-1], [pos[u // args[2]]*args[2] + u % args[2] for u in args[-1]])
-      shared[name][2][i] = (fill[1], args, base, nb)
-    flush()
-    return jobs
-  jobs = [device_jobs(i) for i in range(n)]
-  def fill(mv:memoryview, reads:list, zeros:list):
-    for fd, src, iov in reads:
-      _preadv_exact(fd, [mv[at:at+ln] for at, ln in iov if ln], src)
-    for at, ln in zeros: mv[at:at+ln] = bytes(ln)
-  def pieces(reads:list[tuple], size:int) -> list[list[tuple]]:
-    # the reads of one piece (a read) in parts of up to size bytes: fills in parallel
-    return [[(fd, src + o, [(iov[0][0] + o, min(size, iov[0][1] - o))])] for fd, src, iov in reads for o in range(0, iov[0][1], size)]
   with Context(ALLOW_DEVICE_USAGE=1): bufs = [Buffer(d, t).ensure_allocated() for d,t in zip(devices, totals)]
+  # the files in chunks (in their order, every tensor whole in one, a fused gate with its up): a chunk read once (io_uring, O_DIRECT: the drives'
+  # rate) into a host buffer every device maps, the devices take their parts of it (a kernel of the copies a device, the gathers) while the
+  # next ones are read
+  span:dict[str, tuple[str, int, int]] = {}
+  for name in plan:
+    path, lo, nb = locs[name]
+    hi = lo + nb
+    if name in fuse: lo, hi = min(lo, locs[fuse[name]][1]), max(hi, locs[fuse[name]][1] + locs[fuse[name]][2])
+    span[name] = (path, lo, hi)
+  chunks:list[tuple[str, int, int, list[str]]] = []
+  for name in sorted(plan, key=lambda nm: span[nm]):
+    path, lo, hi = span[name]
+    if chunks and chunks[-1][0] == path and max(chunks[-1][2], hi) - chunks[-1][1] <= CHUNK:
+      chunks[-1] = (path, chunks[-1][1], max(chunks[-1][2], hi), chunks[-1][3] + [name])
+    else: chunks.append((path, lo, hi, [name]))
+  files = {path: DirectFile(path) for path in dedup(path for path, _, _ in locs.values())}
   def fill_all():
-    import sys
-    # (the fill threads wait for the gil after every read: handed over sooner)
-    switch = sys.getswitchinterval()
-    sys.setswitchinterval(50 / 1e6)
     try: _fill_all()
     finally:
-      sys.setswitchinterval(switch)
-      for fd in fds.values(): os.close(fd)
+      for f in files.values(): f.close()
+      close_rings()
   def _fill_all():
+    import threading, queue
     from tinygrad.device import BufferStorage
-    with Context(ALLOW_DEVICE_USAGE=1), contextlib.ExitStack() as cleanup:
-      for d in devices: cleanup.callback(Device[d].synchronize)
-      # Small loads need small staging buffers, not 3 x 256MB per GPU regardless of the actual copy jobs.
-      stages = [[Buffer(d, max(j[3] for j in jobs[i]), options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
-                 for _ in range(min(K, len(jobs[i])))] for i, d in enumerate(devices)]
-      mvs = [[s.as_memoryview(allow_zero_copy=True) for s in ss] for ss in stages]
-      # the shared host buffers: on the first device, mapped on the others at the same address
-      KS, sh_items = 3, list(shared)
-      sh_size = round_up(max([v[1] for v in shared.values()], default=0), align)
-      sbufs = [Buffer(devices[0], sh_size, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated() for _ in range(KS if shared else 0)]
-      smvs = [b.as_memoryview(allow_zero_copy=True) for b in sbufs]
-      def alias(b:Buffer, d:str) -> Buffer:
-        return Buffer(d, b.nbytes, opaque=BufferStorage(va:=b.get_buf(d)), options=BufferSpec(external_ptr=va)).ensure_allocated()
-      salias = [[b] + [alias(b, d) for d in devices[1:]] for b in sbufs]
-      pool = cleanup.enter_context(concurrent.futures.ThreadPoolExecutor(16))
-      # per device: the next job to fill, the next job to issue, the timeline (the device signals it: the value of the last work issued),
-      # per host buffer: its job and fill, or the timeline value of its copy (free once reached). per shared buffer: free, its tensor and
-      # fills, or the timeline values of the gathers from it. nothing waits holding the gil (fills run meanwhile)
-      nxt, done = [0]*n, [0]*n
-      tls = [Device[d].timeline.host.view(fmt='Q') for d in devices]
-      fills:list[list[Any]] = [[None]*len(ss) for ss in stages]
-      busy:list[list[int]] = [[0]*len(ss) for ss in stages]
-      snext = 0
-      sstate:list[Any] = [None]*len(sbufs)
-      unit_tables:dict[tuple, Buffer] = {}
-      from tinygrad.engine.realize import run_linear
-      from tinygrad.uop.ops import Ops
-      def launch(call:UOp): run_linear(UOp(Ops.LINEAR, src=(call,)), update_stats=False)
-      def gather(i:int, src_buf:Buffer, src_nb:int, kind:str, args:tuple, dst0:int, nb:int) -> UOp:
-        word = _gather_word(nb, src_nb, *((args[3],) if kind == "units" else args[3:5] if kind == "rows" else (args[1], args[2])))
-        dst = UOp.from_buffer(bufs[i].view(nb, dst0).ensure_allocated(), word, devices[i])
-        src = UOp.from_buffer(src_buf.view(src_nb, 0).ensure_allocated(), word, devices[i])
-        if kind in ("units", "rows"):
-          us = args[-1]
-          if (ut:=unit_tables.get((i, tuple(us)))) is None:
-            ut = unit_tables[(i, tuple(us))] = Buffer(devices[i], 4*len(us), initial_value=struct.pack(f"<{len(us)}i", *us)).ensure_allocated()
-          fxn = functools.partial(_units_gather_kernel, rows=args[1], slices=args[2]) if kind == "units" else \
-            functools.partial(_rows_gather_kernel, parts=args[1], chunk=args[4] // word.itemsize)
-          return _gather_call(fxn, dst, src, UOp.from_buffer(ut, dtypes.int32, devices[i]))
-        outer, row, part, di = args
-        return _gather_call(functools.partial(_part_gather_kernel, outer=outer, off=di*part//word.itemsize), dst, src)
-      while any(done[i] < len(jobs[i]) for i in range(n)) or snext < len(sh_items) or any(s is not None for s in sstate):
-        progressed = False
-        for i in range(n):
-          cur = tls[i][0]
-          # fill the free host buffers with the next copy jobs
-          for k in range(len(stages[i])):
-            if fills[i][k] is None and cur >= busy[i][k] and nxt[i] < len(jobs[i]):
-              fills[i][k], nxt[i], progressed = (job:=jobs[i][nxt[i]], pool.submit(fill, mvs[i][k], job[1], job[2])), nxt[i] + 1, True
-          if done[i] >= len(jobs[i]): continue
-          job = jobs[i][done[i]]
-          kf = next((k for k in range(len(stages[i])) if fills[i][k] is not None and fills[i][k][0] is job), None)
-          if kf is None or not fills[i][kf][1].done(): continue
-          fills[i][kf][1].result()
-          dst = UOp.from_buffer(bufs[i].view(job[3], job[4]).ensure_allocated(), dtypes.uint8)
-          src = UOp.from_buffer(stages[i][kf].view(job[3], 0).ensure_allocated(), dtypes.uint8)
-          launch(dst.store_call(src))
-          fills[i][kf], busy[i][kf] = None, tls[i][1]
-          done[i], progressed = done[i] + 1, True
-        for k, st in enumerate(sstate):
-          if st is None and snext < len(sh_items):
-            name = sh_items[snext]
-            futs = [pool.submit(fill, smvs[k], p, []) for p in pieces(shared[name][0], 64 << 20)]
-            sstate[k], snext, progressed = ("fill", name, futs), snext + 1, True
-          elif st is not None and st[0] == "fill" and all(f.done() for f in st[2]):
-            for f in st[2]: f.result()
-            targets = [0]*n
-            for i, g in shared[st[1]][2].items(): launch(gather(i, salias[k][i], shared[st[1]][1], *g))
-            for i in shared[st[1]][2]: targets[i] = tls[i][1]
-            sstate[k], progressed = ("busy", targets), True
-          elif st is not None and st[0] == "busy" and all(tls[i][0] >= st[1][i] for i in range(n)): sstate[k], progressed = None, True
-        if not progressed:
-          pending = [x[1] for row in fills for x in row if x is not None and not x[1].done()] + \
-                    [f for s in sstate if s is not None and s[0] == "fill" for f in s[2] if not f.done()]
-          if pending: concurrent.futures.wait(pending, timeout=0.0005, return_when=concurrent.futures.FIRST_COMPLETED)
-          else: time.sleep(0.0002)
+    from tinygrad.engine.realize import run_linear
+    from tinygrad.uop.ops import Ops
+    st, slow0 = time.perf_counter(), slow_bytes[0]
+    size = max(round_up(hi, PAGE) - (lo - lo % PAGE) for _, lo, hi, _ in chunks)
+    hosts = [Buffer(devices[0], size, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
+             for _ in range(min(HOST_BUFS, len(chunks)))]
+    def alias(b:Buffer, d:str) -> Buffer:
+      return Buffer(d, b.nbytes, opaque=BufferStorage(va:=b.get_buf(d)), options=BufferSpec(external_ptr=va)).ensure_allocated()
+    views = [[h] + [alias(h, d) for d in devices[1:]] for h in hosts]
+    # (the copies' tables of a chunk: in host memory every device maps, written here)
+    tabs = [Buffer(devices[0], TABLES, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated() for _ in hosts]
+    tviews = [[t] + [alias(t, d) for d in devices[1:]] for t in tabs]
+    # (their memory, taken now: as_memoryview waits for the devices)
+    hmvs, tmvs = [h.as_memoryview(allow_zero_copy=True) for h in hosts], [t.as_memoryview(allow_zero_copy=True) for t in tabs]
+    # the reader: the chunks in order into the free host buffers
+    free:queue.Queue[int] = queue.Queue()
+    ready:queue.Queue[tuple[int, int]|BaseException] = queue.Queue()
+    for k in range(len(hosts)): free.put(k)
+    def reader():
+      try:
+        for c, (path, lo, hi, _) in enumerate(chunks):
+          k, base = free.get(), lo - lo % PAGE
+          read_many([(files[path], base, hmvs[k][:min(round_up(hi, PAGE), files[path].size) - base])])
+          ready.put((c, k))
+      except BaseException as e: ready.put(e)
+    threading.Thread(target=reader, daemon=True, name="weights_reader").start()
+    tls = [Device[d].timeline.host.view(fmt='Q') for d in devices]
+    def ranges_of(name:str, i:int, base:int) -> list[tuple[int, int, int, int, int, int]]:
+      """the bytes device i takes of the tensor (in the chunk from base): (source (-1: zeros), destination, bytes, count, strides) ranges"""
+      nb, fill = plan[name][i]
+      at = offsets[name][i]
+      if fill[0] == "segs":
+        return [(src - base, at + dst, length, 1, 0, 0) for src, length, dst, _, _ in fill[1]] + \
+               [(-1, at + z0, z1 - z0, 1, 0, 0) for z0, z1 in fill[2]]
+      kind, args, src0 = fill[1], fill[2], locs[name][1] - base
+      if kind == "units":
+        # unit u (expert u // slices, its column block u % slices): its L bytes of every row
+        E, rows, slices, L, us = args
+        return [(src0 + (u // slices * rows * slices + u % slices) * L, at + ui * rows * L, L, rows, slices * L, L) for ui, u in enumerate(us)]
+      if kind == "rows":
+        # unit u: its rows (unit bytes), of every part (the gate's and the fused up's) chunk bytes in turn
+        E, nparts, slices, unit, chunk, us = args
+        srcs = [src0] + ([locs[fuse[name]][1] - base] if nparts == 2 else [])
+        return [(sp + u * unit, at + ui * nparts * unit + p * chunk, chunk, unit // chunk, chunk, nparts * chunk)
+                for ui, u in enumerate(us) for p, sp in enumerate(srcs)]
+      # the columns di*part.. of every row (zeros past the row)
+      outer, row, part, di = args
+      real = max(0, min(part, row - di * part))
+      return ([(src0 + di * part, at, real, outer, row, part)] if real else []) + \
+             ([(-1, at + real, part - real, outer, 0, part)] if real < part else [])
+    def calls_of(c:int, k:int) -> list[UOp]:
+      path, lo, _, names = chunks[c]
+      base, calls, tat, tmv = lo - lo % PAGE, [], 0, tmvs[k]
+      for i, d in enumerate(devices):
+        # every range in words of the largest size that divides it, a copy kernel a size (and a window of the device's buffer)
+        by_word:dict[Any, list[tuple[int, int, int, int, int, int]]] = {}
+        for name in names:
+          for r in ranges_of(name, i, base):
+            if r[2] and r[3]: by_word.setdefault(_gather_word(r[1], r[2], r[4], r[5], *([r[0]] if r[0] >= 0 else [])), []).append(r)
+        for word, rs in by_word.items():
+          # (the kernels of a few shapes: compiled once. a window of the device's buffer, the whole host buffer, the table padded)
+          w, window = word.itemsize, min(COPY_WINDOW, totals[i])
+          groups:list[list[tuple[int, int, int, int, int, int]]] = []
+          def end(r): return r[1] + (r[3] - 1) * r[5] + r[2]
+          for r in sorted(rs, key=lambda x: x[1]):
+            if groups and end(r) - (groups[-1][0][1] - groups[-1][0][1] % align) <= window: groups[-1].append(r)
+            else: groups.append([r])
+          for g in groups:
+            v0 = min(g[0][1] - g[0][1] % align, (totals[i] - window) // align * align)
+            rows = []
+            for so, do, ln, cnt, ss, ds in g:
+              so, do, ln, ss, ds = (so // w if so >= 0 else -1), (do - v0) // w, ln // w, ss // w, ds // w
+              if cnt == 1:  # (a long range in pieces)
+                rows += [(so + o if so >= 0 else -1, do + o, min(COPY_PIECE, ln - o), 1, 0, 0) for o in range(0, ln, COPY_PIECE)]
+              elif ln > COPY_PIECE: rows += [(so + n*ss if so >= 0 else -1, do + n*ds, ln, 1, 0, 0) for n in range(cnt)]
+              else:
+                per = COPY_PIECE // ln
+                rows += [(so + n*ss if so >= 0 else -1, do + n*ds, ln, min(per, cnt - n), ss, ds) for n in range(0, cnt, per)]
+            rows += [(-1, 0, 1, 0, 0, 0)] * (max(64, 1 << (len(rows) - 1).bit_length()) - len(rows))
+            assert tat + 24*len(rows) <= TABLES, "the copies' tables of a chunk don't fit"
+            struct.pack_into(f"<{6*len(rows)}i", tmv, tat, *[x for r in rows for x in r])
+            table = tviews[k][i].view(24*len(rows), tat).ensure_allocated()
+            tat += round_up(24*len(rows), 256)
+            calls.append(_gather_call(_ranges_copy_kernel, UOp.from_buffer(bufs[i].view(window, v0).ensure_allocated(), word, d),
+                                      UOp.from_buffer(views[k][i], word, d), UOp.from_buffer(table, dtypes.int32, d)))
+      return calls
+    busy:list[tuple[int, list[int]]] = []  # (the host buffer, every device's timeline value its work is done at)
+    with Context(ALLOW_DEVICE_USAGE=1):
+      for _ in range(len(chunks)):
+        while True:
+          for b in [b for b in busy if all(tls[i][0] >= v for i, v in enumerate(b[1]))]:
+            busy.remove(b)
+            free.put(b[0])
+          try: got = ready.get(timeout=0.0005)
+          except queue.Empty: continue
+          break
+        if isinstance(got, BaseException): raise got
+        c, k = got
+        run_linear(UOp(Ops.LINEAR, src=tuple(calls_of(c, k))), update_stats=False)
+        busy.append((k, [int(tl[1]) for tl in tls]))
       for d in devices: Device[d].synchronize()
-      pool.shutdown()
-      mvs.clear()
-      stages.clear()
-      smvs.clear()
-      salias.clear()
-      sbufs.clear()
-  if defer is not None: defer.append(fill_all)
-  else: fill_all()
+    if DEBUG >= 1:
+      total, dt = sum(hi - lo for _, lo, hi, _ in chunks), time.perf_counter() - st
+      print(f"weights read: {total/1e9:.1f} GB in {dt:.2f} s ({total/1e9/dt:.1f} GB/s), {len(chunks)} chunks, "
+            f"{(slow_bytes[0]-slow0)/1e6:.1f} MB through the page cache")
+  fill_all()
   packed:dict[str, Tensor] = {}
   for name, parts in plan.items():
     (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [bufs[i].view(nb, offsets[name][i]).ensure_allocated() for i,(nb,_) in enumerate(parts)]
@@ -374,7 +315,7 @@ def _gather_units(data:Tensor, E:int, rows:int, slices:int, units:list[int], by_
 
 def gguf_shard_units(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
                shard_map:dict[str, int]|None=None, repeats:dict[str, int]|None=None, units:dict[str, tuple[int, list[list[int]]]]|None=None,
-               pads:dict[str, int]|None=None, fuse:dict[str, str]|None=None, defer:list[Callable[[], None]]|None=None,
+               pads:dict[str, int]|None=None, fuse:dict[str, str]|None=None,
                row_sel:dict[str, tuple[int, list[tuple[int, int]]]]|None=None) -> dict[str, Tensor]:
   """
   Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
@@ -382,7 +323,6 @@ def gguf_shard_units(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], dev
   (its columns for the down projection). every device gets its units in order, a tensor (devices*units, unit rows, unit cols)
   pads: a sharded tensor is zero padded on its shard axis to this size (gguf_pad)
   fuse: gate -> up tensors in units to load as one gate tensor, their unit rows interleaved by 16 (if loaded straight from the file)
-  defer: the bytes are read later, by the function added to it (if loaded straight from the file)
   row_sel: a tensor (its entry's shape the loaded one: devices*count rows, sharded on axis 0) is every device's rows (start, count) of the file's
   tensor of src_rows rows: (src_rows, [(start, count) of every device])
   repeats: a tensor first cut into len(devices)//repeats row blocks that are each repeated `repeats` times
@@ -399,7 +339,7 @@ def gguf_shard_units(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], dev
   # the tensors of the files are read straight into the devices' memory, the others (made from them: a model's layout of them) copied
   row_sel = row_sel or {}
   disk = {k:v for k,v in entries.items() if _disk_bytes(v[0]) is not None}
-  direct = _parallel_load(disk, devices, shard_map, units, pads, fuse, defer, row_sel) if disk else None
+  direct = _parallel_load(disk, devices, shard_map, units, pads, fuse, row_sel) if disk else None
   if direct is not None:
     packed = direct
     entries_left = {k:gguf_pad(v, unwrap(shard_map.get(k)), pads[k]) if k in pads else v for k,v in entries.items() if k not in disk}

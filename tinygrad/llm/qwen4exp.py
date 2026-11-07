@@ -1,9 +1,9 @@
 from __future__ import annotations
-import array, contextlib, enum, functools, itertools, math, os, pathlib, random, re, time
+import array, contextlib, enum, functools, itertools, math, pathlib, random, re, time
 from dataclasses import dataclass, replace
 from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
-from tinygrad.engine.jit import capture_parallel, _TinyJit
+from tinygrad.engine.jit import capture_parallel
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
 from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES
 from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custom_kernels_supported, find_packed, moe_linear, q8_linear, \
@@ -14,6 +14,7 @@ from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custo
   DEC_LANE, flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, \
   after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus
 from tinygrad.llm.gguf import gguf_parse, ggml_data_to_tensor, _GGML_QUANT
+from tinygrad.llm.direct_read import DirectFile, read_many, close_rings
 from tinygrad.llm.gguf_load import gguf_shard_units, _disk_bytes, _disk_location
 from tinygrad.uop.ops import Ops, AxisType, KernelInfo
 from tinygrad.dtype import DType
@@ -523,60 +524,10 @@ def _open_devices(devices:tuple[str, ...]):
   for t in threads: t.start()
   for t in threads: t.join()
 
-def _read_ahead(entries:dict, skip:tuple[str, ...]=()):
-  """
-  the bytes of the entries (not skip's: read otherwise) read into memory in the background: a thread a file, in order (the disk's fastest:
-  6.8 GB/s on the 990 pro, scattered reads 4.9), the loader finds them there
-  """
-  import threading
-  ranges:dict[str, list[tuple[int, int]]] = {}
-  for name, (d, _, _) in entries.items():
-    if name not in skip and (loc:=_disk_location(d)) is not None: ranges.setdefault(loc[0], []).append((loc[1], loc[1] + loc[2]))
-  def run(path:str, rs:list[tuple[int, int]]):
-    fd, mv = os.open(path, os.O_RDONLY), memoryview(bytearray(64 << 20))
-    try:
-      for lo, hi in merge_ranges(rs):
-        while lo < hi and (got:=os.preadv(fd, [mv[:min(len(mv), hi - lo)]], lo)) > 0: lo += got
-    finally: os.close(fd)
-  for path, rs in ranges.items(): threading.Thread(target=run, args=(path, rs), daemon=True, name="read_ahead").start()
-
-def merge_ranges(rs:list[tuple[int, int]]) -> list[tuple[int, int]]:
-  """the ranges (lo, hi) sorted, the ones that touch or overlap one"""
-  out:list[tuple[int, int]] = []
-  for lo, hi in sorted(rs):
-    if out and lo <= out[-1][1]: out[-1] = (out[-1][0], max(out[-1][1], hi))
-    else: out.append((lo, hi))
-  return out
-
 def _is_buffer(u:UOp) -> bool:
   """the uop is a buffer's (realized: its reshapes, split over devices or not), not a computation"""
   while u.op in (Ops.RESHAPE, Ops.UNSHARD): u = u.src[0]
   return u.op is Ops.BUFFER
-
-def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
-  """the tensors are buffers now (allocated, their devices and split kept), their values are computed by the function added to pending"""
-  pairs, ts = [], list({id(t): t for t in ts}.values())  # (a tensor of two modules once)
-  # (an empty tensor is just its memory: allocated now)
-  if now:=[t for t in ts if t.numel() == 0 or t.uop.base.op is Ops.ALLOC]: Tensor.realize(*now)
-  # one allocation of the devices of a group (one each is slow: a device's page tables are flushed after every one), the tensors' views of it
-  groups:dict[str|tuple[str, ...], list[Tensor]] = {}
-  for t in ts:
-    if t.numel() > 0 and not any(t is x for x in now): groups.setdefault(cast(str|tuple[str, ...], t.device), []).append(t)
-  for devs, grp in groups.items():
-    def shard(t:Tensor) -> tuple[int, ...]:
-      return cast(tuple[int, ...], t.uop.shard_shape if isinstance(devs, tuple) and t.uop.axis is not None else t.shape)
-    sizes = [round_up(prod(shard(t)) * t.dtype.itemsize, 256) for t in grp]
-    big = [Buffer(d, sum(sizes)).ensure_allocated() for d in to_tuple(devs)]
-    for t, off in zip(grp, itertools.accumulate([0] + sizes[:-1])):
-      views = [b.view(prod(shape:=shard(t)) * t.dtype.itemsize, off).ensure_allocated() for b in big]
-      if isinstance(devs, tuple): (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = views
-      u = UOp.from_buffer(mb if isinstance(devs, tuple) else views[0], t.dtype, devs).reshape(shape)
-      lazy, u = t.uop, u.unshard(t.uop.axis) if isinstance(devs, tuple) and t.uop.axis is not None else u
-      t.replace(Tensor(u))
-      pairs.append((u, lazy))
-  # (a jit: compiled with the model's jits, see _capture_parallel)
-  def compute(): Tensor.realize(*[Tensor(u).assign(Tensor(lazy)) for u, lazy in pairs])
-  if pairs: pending.append(TinyJit(compute, capture_first=True))
 
 def _host_ints(devs:str|tuple[str, ...], n:int) -> tuple[memoryview, Tensor]:
   """n int32 in host memory that the host polls: a (1, n) tensor every device reads and writes directly"""
@@ -1663,7 +1614,6 @@ class Transformer:
     # a jit for every token count of a call (the max size of a symbolic chunk, 1 for decoding): static padded shapes of a small chunk don't pay
     # for a big one
     self.jits:dict[int, Any] = {}
-    self._pending_load:list[Callable[[], None]] = []  # the work left of loading (from_gguf defer_load)
     self._loaded = False  # the weights are loaded (from_gguf)
     self._scratch:dict = {}  # the memory of the jits' intermediates: they run one at a time
 
@@ -1717,31 +1667,20 @@ class Transformer:
     # (the host's reads of the table: the copy, not the file's pages)
     self._ple_np = np.frombuffer(self._ple_mv, dtype=np.uint8)[self._ple_pre:self._ple_pre + n].reshape(-1, self._ple_rb)
 
-  def _ple_dev_read(self, background:bool=False):
-    """the table read into its host memory (see _ple_dev_init). background: by threads (joined by _ple_dev_wait)"""
+  def _ple_dev_read(self):
+    """the table read into its host memory (see _ple_dev_init): from the file (io_uring, O_DIRECT, see direct_read), or copied from its bytes"""
     if not hasattr(self, "_ple_heads"): self._ple_dev_init(read=False)
     if getattr(self, "_ple_read", False): return
     self._ple_dev_alloc()
-    import concurrent.futures
-    self._ple_read, table, loc, mv, pre, C = True, unwrap(self.ple_table), self._ple_file, self._ple_mv, self._ple_pre, 64 << 20
-    fd = os.open(loc[0], os.O_RDONLY | getattr(os, "O_DIRECT", 0)) if loc is not None else None
-    def cp(a:int):
-      # (direct: a read is a short one only at the file's end)
-      if fd is None: mv[a:a+C] = table[a:a+C]
-      else: os.preadv(fd, [mv[a:min(len(mv), a + C)]], unwrap(loc)[1] - pre + a)
-    ex = concurrent.futures.ThreadPoolExecutor(16)
-    self._ple_copies, self._ple_fd = [ex.submit(cp, a) for a in range(0, len(mv) if fd is not None else table.nbytes, C)], fd
-    ex.shutdown(wait=False)
-    if not background: self._ple_dev_wait()
-  def _ple_dev_wait(self):
-    for f in getattr(self, "_ple_copies", []): f.result()
-    self._ple_copies = []
-    if (fd:=getattr(self, "_ple_fd", None)) is not None:
-      # (the table's pages of the file a process before read: the page cache is the weights')
-      loc = cast(tuple[str, int, int], self._ple_file)
-      if hasattr(os, "posix_fadvise"): os.posix_fadvise(fd, loc[1], loc[2], os.POSIX_FADV_DONTNEED)
-      os.close(fd)
-      self._ple_fd = None
+    self._ple_read, table, loc, mv, pre = True, unwrap(self.ple_table), self._ple_file, self._ple_mv, self._ple_pre
+    if loc is None:
+      mv[:table.nbytes] = table
+      return
+    f = DirectFile(loc[0])
+    try: read_many([(f, loc[1] - pre, mv[:min(len(mv), f.size - (loc[1] - pre))])])
+    finally:
+      f.close()
+      close_rings()
 
   def _ple_rows_dev(self, window:Tensor) -> Tensor:
     """
@@ -2229,29 +2168,17 @@ class Transformer:
     every jit of the sequences sharing the caches (a prefill of every chunk size, a context the indexer's top_k covers and longer, a step of
     every size, the copies of the slots' states and of a region), captured and run once (linked)
     """
-    # the memory of everything the jits read made first (the derived weights', the states'), the jits compiled while the weights are read and
-    # what's computed from them, the states zeroed, the n-gram table copied
+    # the memory of everything the jits read made first (the derived weights', the states'), the states zeroed by a jit compiled with the others
     st = time.perf_counter()
     self._derive_weights()
     with _zero_deferred() as zero_bufs: self._seq_init()
-    self._seq_shared(read=False)
-    # (the computations from the weights and the zeroing of the states: jits compiled with the others, run when the weights are read)
-    loads = [(j, j) for j in self._pending_load if isinstance(j, _TinyJit)] + [_zero_jit(dedup(zero_bufs))]
+    self._seq_shared()
+    loads = [_zero_jit(dedup(zero_bufs))]
     if DEBUG >= 1: print(f"seq_warmup: memory made at {time.perf_counter()-st:.2f}s")
     def meanwhile(take:Callable[[Any], bool]):
-      # the files' reads (the weights', then the n-gram table's while the values are computed from the weights: not at once, the reads of
-      # both are slower than one after the other)
-      while self._pending_load and not isinstance(self._pending_load[0], _TinyJit): self._pending_load.pop(0)()
-      if self.config.ple is not None: self._ple_dev_read(background=True)
-      if DEBUG >= 1: print(f"seq_warmup: read at {time.perf_counter()-st:.2f}s")
       for j, call in loads:
-        if j in self._pending_load: self._pending_load.remove(j)
         take(j)
         call()
-      self._finish_load()
-      if DEBUG >= 1: print(f"seq_warmup: weights and zeros at {time.perf_counter()-st:.2f}s")
-      self._ple_dev_wait()
-      if DEBUG >= 1: print(f"seq_warmup: loaded at {time.perf_counter()-st:.2f}s")
     top, k = unwrap(self.config.indexer).top_k, self.config.spec_drafts
     calls:dict[str, tuple[Any, Callable[[], Any]]] = {}
     def add(name:str, jit:Any, call:Callable[[], Any]):
@@ -2521,9 +2448,7 @@ class Transformer:
       return [t for x in v for t in lazy(x)] if isinstance(v, (list, tuple)) else []
     # (and the parameters of a model initialized but not loaded. a loaded one's are: the quantized weights' are their decoding, not used)
     todo = [t for h in holders for v in vars(h).values() for t in lazy(v)] + ([] if self._loaded else lazy(nn.state.get_parameters(self)))
-    # with the weights still to read: their memory now, their values after
-    if self._pending_load: _realize_later(todo, self._pending_load)
-    elif todo: Tensor.realize(*todo)
+    if todo: Tensor.realize(*todo)
     self._states_ready = True
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp=0) -> Tensor:
@@ -2547,16 +2472,9 @@ class Transformer:
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
-                realize=bool(getenv("REALIZE", 0)), shard:int=1, defer_load:bool=False,
-                parsed:tuple[dict, dict]|None=None) -> tuple[Transformer, dict]:
-    """
-    the qwen4exp model of a gguf file on `shard` devices. defer_load: the weights are read later (warmup compiles meanwhile), before the first
-    call. parsed: the file's (kv, entries)
-    """
+                realize=bool(getenv("REALIZE", 0)), shard:int=1, parsed:tuple[dict, dict]|None=None) -> tuple[Transformer, dict]:
+    """the qwen4exp model of a gguf file on `shard` devices (its weights read, the n-gram table too). parsed: the file's (kv, entries)"""
     kv, entries = parsed if parsed is not None else gguf_parse(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
-    # deferred: the files are read ahead from now (the disk works while the model is made, the loader finds them in memory)
-    # (not the n-gram table: read to host memory by its loader, see _ple_dev_init)
-    if defer_load: _read_ahead(entries, skip=("per_layer_token_embd.weight",))
     arch = kv['general.architecture']
     assert arch == 'qwen4exp' and shard > 1, f"the qwen4exp model on tensor parallel devices, not {arch} on {shard}"
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
@@ -2627,8 +2545,7 @@ class Transformer:
       mv, raw = _host_buffer(devices, int(data.nbytes()))
       mv[:] = data.to("CPU").data()
       host_embd = ggml_data_to_tensor(raw, prod(shape), typ).reshape(shape)
-    pending:list[Callable[[], None]] = []
-    state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads, fuse, pending if defer_load else None, row_sel=rows_map)
+    state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads, fuse, row_sel=rows_map)
     if host_embd is not None: state_dict['token_embd.weight'] = host_embd
     state_dict = {k:v.cast('float16') for k,v in state_dict.items()}
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
@@ -2684,7 +2601,7 @@ class Transformer:
         del b.ffn_up_exps
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
-    model._pending_load, model._loaded = pending, True
+    model._loaded = True
     # (the n-gram table: the bytes in the gguf file, mmapped, or a copy in host memory)
     if ple_entry is not None:
       model.ple_table = _disk_bytes(ple_entry[0]) or cast(Buffer, ple_entry[0].to("CPU").realize().uop.base.buffer).as_memoryview()
@@ -2722,27 +2639,25 @@ class Transformer:
         del b.ffn_up_exps
         packed.add(id(g.weight))
         fused.append(g.weight)
-    # (with the weights still to read: their memory now, fused after they are read. not before: it'd be of the memory they're read into)
-    if fused and self._pending_load: _realize_later(fused, self._pending_load)
-    elif fused: Tensor.realize(*fused)
+    if fused: Tensor.realize(*fused)
     small = [p for p in nn.state.get_parameters(self) if id(p) not in packed and p is not self.token_embd.weight and not p.uop.is_realized]
     for p in small: p.replace(p.contiguous())
     tables = dedup([t for m in modules([self.blk] + ([self.mtp] if hasattr(self, "mtp") else []), set()) if isinstance(m, ExpertWeights)
                     for t in (getattr(m, "first", None), getattr(m, "slice_table", None)) if t is not None and not t.uop.is_realized])
-    # With the weights still to read: the small ones' memory now, their values after.
-    if self._pending_load: _realize_later(small, self._pending_load)
-    Tensor.realize(*tables, *([] if self._pending_load else small))
+    Tensor.realize(*tables)
+    # (a block's at a time: the blocks' graphs are the same, scheduled once (the schedule cache), not one graph of all of them)
+    ids = {id(p) for p in small}
+    for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []):
+      if mine:=[p for p in nn.state.get_parameters(b) if id(p) in ids]:
+        Tensor.realize(*mine)
+        ids -= {id(p) for p in mine}
+    Tensor.realize(*[p for p in small if id(p) in ids])
 
-  def _finish_load(self):
-    """the work left of loading (deferred): the weights read, the values computed from them"""
-    self._derive_weights()
-    while self._pending_load: self._pending_load.pop(0)()
+  def _finish_load(self): self._derive_weights()
 
   def _derive_weights(self):
-    """the weights computed from the file's: their memory now, their values after the weights are read if they aren't yet (_pending_load)"""
-    def realize(ts:list[Tensor]):
-      if self._pending_load: _realize_later(ts, self._pending_load)
-      else: Tensor.realize(*ts)
+    """the weights computed from the file's"""
+    def realize(ts:list[Tensor]): Tensor.realize(*ts)
     # (SKINNY) the float weights of few outputs that decoding multiplies by (the routers, the indexers' head weights) stored transposed (the
     # outputs the fast axis), the Linear's a view of it: skinny_matmul reads every input's weights of all the outputs at once
     blocks = self.blk + ([self.mtp] if hasattr(self, "mtp") else [])

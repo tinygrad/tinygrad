@@ -672,15 +672,14 @@ class Transformer:
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
-                realize=bool(getenv("REALIZE", 0)), shard:int=1, defer_load:bool=False) -> tuple[Transformer, dict]:
+                realize=bool(getenv("REALIZE", 0)), shard:int=1) -> tuple[Transformer, dict]:
     # TODO: remove the need for copy to default device
     kv, entries = gguf_parse(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
     arch = kv['general.architecture']
     if arch == 'qwen4exp' and shard > 1:
-      # tensor parallel on RDNA3: its own implementation (custom kernels, sequences decoded at once, speculative decoding). defer_load: the
-      # weights read while the warmup compiles
+      # tensor parallel on RDNA3: its own implementation (custom kernels, sequences decoded at once, speculative decoding)
       from tinygrad.llm.qwen4exp import Transformer as Qwen4Exp, amd_custom_kernels_supported as qwen4exp_supported
-      if qwen4exp_supported(Device.DEFAULT): return Qwen4Exp.from_gguf(gguf, max_context, realize, shard, defer_load, parsed=(kv, entries))  # type: ignore
+      if qwen4exp_supported(Device.DEFAULT): return Qwen4Exp.from_gguf(gguf, max_context, realize, shard, parsed=(kv, entries))  # type: ignore
     ple_entry = entries.pop('per_layer_token_embd.weight', None)
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
     assert shard >= 1, f"shard must be at least 1, got {shard}"
