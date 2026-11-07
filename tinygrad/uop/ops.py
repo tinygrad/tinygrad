@@ -116,14 +116,15 @@ def promo_dtype(src:tuple[UOp,...]) -> DType:
     if (d:=src[i].dtype) is not d0 and d != d0: return least_upper_dtype(*[x.dtype for x in src])
   return d0
 
-# the most common ops, handled before the match. these are the ones that fall through the match
+# the most common dtype rules are frozenset lookups before the match
+_passthrough_ops = frozenset({Ops.LOAD, Ops.UNSHARD, Ops.REDUCE, Ops.AFTER, Ops.RANGE, Ops.CONTIGUOUS_BACKWARD, Ops.COPY, Ops.STAGE, Ops.DETACH,
+                              Ops.MSTACK, Ops.MSELECT, Ops.ALLREDUCE, Ops.SPECIAL, Ops.END, Ops.NEG, Ops.TRUNC} | GroupOp.Movement)
+# NOTE: CMPLT, CMPNE, CMPEQ, WHERE, THREEFRY, FDIV, SHL, SHR are handled in the match
 _promo_ops = frozenset(GroupOp.Broadcastable - {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.WHERE, Ops.THREEFRY, Ops.FDIV, Ops.SHL, Ops.SHR})
-_passthrough_ops = frozenset({Ops.NEG, Ops.TRUNC, Ops.LOAD, Ops.UNSHARD, Ops.REDUCE, Ops.AFTER, Ops.RANGE, Ops.CONTIGUOUS_BACKWARD, Ops.COPY,
-                              Ops.STAGE, Ops.DETACH, Ops.MSTACK, Ops.MSELECT, Ops.ALLREDUCE, Ops.SPECIAL, Ops.END} | GroupOp.Movement)
 def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
-  if op in _promo_ops: return promo_dtype(src)
-  if op in _passthrough_ops: return src[0].dtype
   # here are the dtype production rules, total over all Ops
+  if op in _passthrough_ops: return src[0].dtype
+  if op in _promo_ops: return promo_dtype(src)
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
          Ops.BACKEDGE | Ops.BARRIER | Ops.IF | Ops.ENDIF | Ops.NOOP | \
@@ -145,11 +146,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       # TODO: should there be a CAST so src[0].dtype just work?
       if (b:=src[0]).op is Ops.PARAM and is_image_shape(b.shape): return dtypes.float
       return b.dtype
-    case Ops.LOAD | Ops.UNSHARD | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
-         Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
-         Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE | Ops.SPECIAL | Ops.END:
-      # pass through first
-      return src[0].dtype
     case Ops.CMPLT | Ops.CMPNE | Ops.CMPEQ:
       return dtypes.bool
     case Ops.SIN | Ops.LOG2 | Ops.EXP2 | Ops.SQRT | Ops.RECIP:
@@ -188,10 +184,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       if isinstance(arg, int): return dtypes.weakint
       if isinstance(arg, float): return dtypes.weakfloat
       raise TypeError(f"no dtype for CONST with arg {arg}")
-  if op in GroupOp.Unary: return src[0].dtype
-  # NOTE: CMPLT, CMPNE, CMPEQ, WHERE, SHL, SHR are handled above
-  if op in GroupOp.Broadcastable: return promo_dtype(src)
-  if op in GroupOp.Movement: return src[0].dtype
   raise RuntimeError(f"no dtype for {op} with arg {arg}")
 
 # NOTE: these are module level (not class attributes) because UOp creation is hot
@@ -333,7 +325,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # fast paths for the common elementwise ops, see below
     if (op:=self.op) in _broadcastable_ops and len(self.src) == 2:
       if (s0:=self.src[0]._shape) is not None and s0 == self.src[1]._shape: return s0
-    elif op in _unary_shape_ops and len(self.src) == 1: return self.src[0]._shape
+    elif op in _unary_shape_ops:
+      assert len(self.src) == 1, "unary ops must have 1 src"
+      return self.src[0]._shape
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.BACKEDGE | \
@@ -428,10 +422,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           if not isinstance(num_axes, int) or num_axes < 0 or num_axes > len(ps):
             raise ValueError(f"invalid type for axis: {num_axes}")
           return ps[num_axes:]
-
-    if self.op in GroupOp.Unary.union({Ops.CAST}):
-      assert len(self.src) == 1, "unary ops must have 1 src"
-      return self.src[0]._shape
 
     # elementwise ops keep the shape the same. all inputs with shape must match
     if self.op in GroupOp.Broadcastable:
