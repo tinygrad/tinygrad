@@ -333,6 +333,7 @@ def q8_quantize_cache_clear():
   # (the caches of a forward's graph: kept, they'd keep its buffers from the memory planner of the jits captured after)
   _q8_cache.clear()
   _bundle_cache.clear()
+  _gather_cache.clear()
 
 def _q8_quantize(x_uop:UOp, tokens:int, in_features:int, sumsq:bool, split:bool) -> tuple[Tensor, ...]:
   x, groups = Tensor(x_uop), in_features//Q8_GROUP_SIZE
@@ -3875,10 +3876,17 @@ def kv_q8_pack(x:Tensor) -> Tensor:
   return words.cat(sc.reshape(*x.shape[:-1], D//32).bitcast(dtypes.uint32), dim=-1)
 
 
-def rows_gather(table:Tensor, idx:Tensor, dtype:DType|None=None) -> Tensor:
-  """the rows idx (n,) int32 of table (P, F): (n, F) (a table split on its rows: every device's of its own)"""
+def rows_gather(table:Tensor, idx:Tensor, dtype:DType|None=None, const:bool=False) -> Tensor:
+  """
+  the rows idx (n,) int32 of table (P, F): (n, F) (a table split on its rows: every device's of its own). const: the table isn't written while
+  a graph is made, the same rows of it gathered once (the blocks' rope rows of a step)
+  """
+  if const and (ret:=_gather_cache.get(key:=(table.uop, idx.uop, dtype))) is not None: return ret
   out = Tensor.empty(int(idx.shape[0]), int(table.shape[1]), dtype=dtype or table.dtype, device=table.device)
-  return Tensor.custom_kernel(out, table, idx, fxn=_rows_gather_kernel)[0]
+  ret = Tensor.custom_kernel(out, table, idx, fxn=_rows_gather_kernel)[0]
+  if const: _gather_cache[key] = ret
+  return ret
+_gather_cache:dict[tuple, Tensor] = {}
 
 @functools.cache
 def _rows_scatter_kernel(buf:UOp, rows:UOp, idx:UOp) -> UOp:

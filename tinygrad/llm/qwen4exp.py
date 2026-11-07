@@ -569,6 +569,7 @@ class GatedResidual:
   stream with a 2*sigmoid weight of its own
   """
   _winj:Tensor|None = None  # (the inject weights in float for ghc_pre, see Transformer._finish_load)
+  _wnorm:Tensor|None = None  # (the norm weight in float for ghc_pre: not cast by every step)
   def __init__(self, config:TransformerConfig, inject:bool=True):
     self.count, self.dim, self.eps, low_rank = (hc:=unwrap(config.hc)).count, config.dim, config.norm_eps, hc.low_rank
     self.norm = {"weight": Tensor.zeros(self.count*self.dim)}
@@ -595,7 +596,8 @@ class GatedResidual:
     for lin in (self.down, self.up):
       if lin.ggml_type is None and lin.use_custom_quant: lin.set_quantized(lin.weight)
     if self.down.ggml_type != Q8_0 or self.up.ggml_type != Q8_0 or getattr(self, "_winj", None) is None: return None
-    xn, xq, part = ghc_pre(xs.reshape(B*T, self.count*self.dim), self.norm["weight"], unwrap(self._winj), self.count, self.eps)
+    w = self._wnorm if self._wnorm is not None else self.norm["weight"]
+    xn, xq, part = ghc_pre(xs.reshape(B*T, self.count*self.dim), w, unwrap(self._winj), self.count, self.eps)
     down = q8_linear(self.down, xn, xq=xq)
     if 1 < B*T <= 8 and self.count == 4 and self.dim % 32 == 0 and self.up.in_features % 32 == 0 and 0 < self.up.in_features <= 512:
       mixed, inj = ghc_decode_mix(down, self.up.weight, xn, part, self.count)
@@ -1237,7 +1239,7 @@ class QSABlock(TransformerBlock):
     rows, idx, ic = G*R, self.indexer, self.indexer.idx
     kp = ic.kpool
     pos, phys = sb.row_positions, sb.row_phys
-    freqs = rows_gather(self.freqs_cis, pos)  # (rows, rope)
+    freqs = rows_gather(self.freqs_cis, pos, const=True)  # (rows, rope)
     cos, sin = (f.reshape(1, 1, rows, -1) for f in freqs.chunk(2, dim=-1))
     q, gate, k, v = self._qkv(x, cos, sin)
     # the keys and values of the rows into their rows of the cache (a device's of its KV head)
@@ -1252,7 +1254,7 @@ class QSABlock(TransformerBlock):
     pbase = sb.bases.reshape(G, 1).expand(G, NP).reshape(-1) // kp
     krows = (((pbase + pools) * kp).reshape(-1, 1) + Tensor.arange(kp, dtype=dtypes.int32).reshape(1, kp).to(x.device)).reshape(-1)
     pkeys = rows_gather(ck, krows.contiguous()).reshape(G*NP, kp, ic.head_dim)
-    pf = rows_gather(self.freqs_cis, (pools * kp).contiguous())
+    pf = rows_gather(self.freqs_cis, (pools * kp).contiguous(), const=True)
     pooled = idx._pooled(pkeys, *pf.chunk(2, dim=-1))
     pk = rows_scatter(idx.cache_pk, pooled.half(), (pbase + pools).contiguous())
     self._seq_written = (cache, ck, pk)
@@ -2681,6 +2683,10 @@ class Transformer:
         raw = inj.weight.bitcast(dtypes.uint8).flatten()
         g._winj = ggml_data_to_tensor(raw, g.count*g.count*g.dim, inj.ggml_type).reshape(g.count, -1).contiguous()
       winj.append(g._winj)
+    for g in ghcs:
+      if g._wnorm is None:
+        g._wnorm = g.norm["weight"].float().contiguous()
+        winj.append(g._wnorm)
     if winj: realize(winj)
 
   def sequence_parallel(self, rows:int) -> bool:
