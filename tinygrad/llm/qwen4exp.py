@@ -1502,6 +1502,9 @@ class GatedDeltaNetBlock(FFNBlock):
       # assemble the conv window in a static-size buffer: [conv_state | qkv rows | zero-pad].
       # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
       state = parity(states, rp).reshape(states.shape[1:])
+      # (read with the projection, a value of the sublayer's input: a read of the state alone is of the function's implicit inputs only, made
+      # before its call, not after the micro batch before it writes it (see micro_batch_blocks))
+      state = state + proj[:, :1].cast(state.dtype) * 0
       window = (masked:=initial.where(0, state)).cat(proj.cast(state.dtype), dim=1)
       # (the fused kernel makes the conv itself: the window is the next state's rows only, not a buffer)
       window = window.pad_to((B, self.ssm_conv_kernel-1 + T_pad, proj.shape[-1]))
