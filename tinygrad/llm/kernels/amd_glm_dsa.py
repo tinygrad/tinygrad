@@ -2287,7 +2287,7 @@ def host_allgather_half(x:Tensor) -> Tensor|None:
   """x (devices, n) fp16 values: all N*n values on every device as float32. Paired halves halve mailbox traffic."""
   N, n = int(x.shape[0]), int(x.shape[1])
   if not isinstance(x.device, tuple) or n % 2: return None
-  m = round_up(n, HOST_AR_THREADS)
+  m = round_up(n, 2*HOST_AR_THREADS)  # an integral number of 256-thread workgroups after pairing
   out = Tensor.empty(N*m, dtype=dtypes.float32, device=x.device)
   if (p2p:=p2p_allreduce(x.device)) is not None and (shape:=p2p_ar_shape(m // 2)) is not None:
     fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m//2, T=shape[0], EP=shape[1], gather=True, half=True)
