@@ -112,6 +112,22 @@ if run("stash"):
     starts.append(st)
   emit("stash", tokens=outs, starts=starts, evictions=eng.evictions)
 
+# a sequence's region moved (the regions compacted): the same tokens as not moved
+if run("move"):
+  outs = []
+  for move in (False, True):
+    reset()
+    got = eng.take(piece(60000, 5001), 4*GEN)
+    assert got is not None
+    s, start, restore = got
+    first = eng.prefill(s, piece(60000, 5001), start, restore, TEMP)
+    if move:
+      gap = max(b for b, c in eng._gaps(s) if c >= s.cap)
+      eng._move(s, gap + (eng.rows - gap - s.cap) // eng.align * eng.align if gap + s.cap <= eng.rows else gap)
+    outs.append(gen(s, first)[:GEN])
+    eng.stop(s, len(s.tokens))
+  emit("move", tokens=outs, same=outs[0] == outs[1])
+
 # a long prompt prefilled in slices (the server's: other sequences' steps between them)
 if run("slices"):
   reset()
