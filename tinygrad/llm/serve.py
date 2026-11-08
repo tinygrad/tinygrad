@@ -280,6 +280,16 @@ class Handler(VizHandler):
     # the model runs on the server's thread (LLMServer.serve_forever): the request waits there, its tokens come back here
     # (no top_p: the model's own, general.sampling.top_p)
     req = Request(ids, log, max_tokens, temperature, self.server.top_p if top_p is None else top_p)
+    # (SUPERSEDE: the same prompt again from the same session (X-Session-ID) while its request runs is a client's retry of it (a client that
+    # timed out behind a proxy that doesn't close our connection): the older one stops, it isn't decoded for nobody)
+    sid = self.headers.get("X-Session-ID")
+    key = (sid, len(ids), hash(tuple(ids))) if isinstance(sid, str) and sid and getenv("SUPERSEDE", 1) else None
+    if key is not None:
+      with self.server.keys_lock:
+        if (old:=self.server.inflight_keys.get(key)) is not None and not old.done:
+          stderr_log(log + colored(f"the same prompt again from session {str(sid)[:40]}: the request before it stops\n", "yellow"))
+          old.superseded = old.cancelled = True
+        self.server.inflight_keys[key] = req
     self.server.waiting.put(req)
     try:
       yield chunk({"role":"assistant", "content":""})
@@ -302,8 +312,9 @@ class Handler(VizHandler):
         if keepalive is not None and time.perf_counter() - last > keepalive:
           yield {"ping": True}
           last = time.perf_counter()
-      if req.error is not None:
-        yield {"error":{"message":f"{type(req.error).__name__}: {req.error}", "type":"server_error", "code":"generation_failed"}}
+      if req.error is not None or req.superseded:
+        msg = f"{type(req.error).__name__}: {req.error}" if req.error is not None else "superseded by the same request again"
+        yield {"error":{"message":msg, "type":"server_error", "code":"generation_failed"}}
         return
       finish_reason = req.finish_reason
       for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
@@ -322,7 +333,11 @@ class Handler(VizHandler):
         if finish_reason == "stop": finish_reason = "tool_calls"
       yield chunk({}, finish_reason)
       if include_usage: yield {"choices": [], "usage": usage(), **tmpl}
-    finally: req.cancelled = True  # (a client gone: the model stops at its next token)
+    finally:
+      req.cancelled = True  # (a client gone: the model stops at its next token)
+      if key is not None:
+        with self.server.keys_lock:
+          if self.server.inflight_keys.get(key) is req: del self.server.inflight_keys[key]
 
   def client_gone(self) -> bool:
     """the client closed the connection (a non streaming request writes only at its end: the model would decode for nobody)"""
@@ -483,7 +498,7 @@ class Request:
   """a request to the model: its prompt, its sampled tokens come back in out (None: the end), it's cancelled when the client goes away"""
   def __init__(self, ids:list[int], log:str, max_tokens:int|None, temperature:float, top_p:float=1.0):
     self.ids, self.log, self.max_tokens, self.temperature, self.top_p, self.rid = ids, log, max_tokens, temperature, top_p, next(_rids)
-    self.cancelled, self.finish_reason, self.checked, self.zeros = False, "stop", 0.0, 0
+    self.cancelled, self.finish_reason, self.checked, self.zeros, self.superseded = False, "stop", 0.0, 0, False
     self.error: Exception|None = None
     self.out: queue.Queue[int|list[int]|None] = queue.Queue()
     self.held: list[int] = []  # (the tokens of a step not put in out yet: put at once, one wakeup of its thread a step)
@@ -586,6 +601,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.host_made = 0  # (the chunks made: never freed, used again)
     specials = sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {}
     self.odd_ids = {i for t, i in specials.items() if t in ODD_TOKENS}
+    # (SUPERSEDE: the requests running of every (session, prompt), see Handler.run_model)
+    self.inflight_keys:dict[tuple, Request] = {}
+    self.keys_lock = threading.Lock()
     super().__init__(server_address, Handler)
 
   def serve_forever(self, poll_interval:float=0.5):

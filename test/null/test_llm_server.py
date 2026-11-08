@@ -204,6 +204,20 @@ class TestLLMServer(unittest.TestCase):
     self.assertIn("out:", interrupt)
     self.assertTrue(red_total())
 
+  def test_superseded_retry(self):
+    # the same prompt again from the same session while it runs (a client's retry): the one before it stops with an error
+    def slow(ids, **kwargs):
+      for t in range(300, 400):
+        time.sleep(0.02)
+        yield t
+    with patch.object(self.mock_model, "generate", side_effect=slow), patch("tinygrad.llm.serve.stderr_log"):
+      first = self.server.RequestHandlerClass.run_model(Mock(server=self.server, headers={"X-Session-ID": "s1"}), [200, 201, 202], "test")
+      next(first)
+      second = self.server.RequestHandlerClass.run_model(Mock(server=self.server, headers={"X-Session-ID": "s1"}), [200, 201, 202], "test")
+      next(second)
+      self.assertIn("error", list(first)[-1])
+      second.close()
+
   def test_stream_disconnect_closes_source(self):
     from tinygrad.llm.serve import Handler
     source, handler = Mock(), Mock()
