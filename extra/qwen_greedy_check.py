@@ -41,8 +41,10 @@ def turn(ids:list[int], n:int=GEN, room:int=GEN+16, drop:int=0):
   s, start, restore = got
   out = gen(s, eng.prefill(s, ids, start, restore, TEMP), n)
   # (the reply's first n tokens kept: the next prompts the same whatever the drafts accepted)
-  eng.stop(s, len(ids) + n - drop)
-  return s, out[:n-drop], start, restore
+  # (tokens dropped past the last step's accepted ones: its states are of those)
+  kept = max(len(ids) + n - drop, len(s.tokens) - s.hrow % (model.config.spec_drafts + 1))
+  eng.stop(s, kept)
+  return s, out[:kept - len(ids)], start, restore
 def reset():
   for s in [s for s in eng.seqs if s.active]: eng.stop(s, len(s.tokens))
   eng.forget()
