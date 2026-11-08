@@ -60,9 +60,13 @@ class Seq:
   y:list[int] = field(default_factory=list)
   temp:tuple[float, float] = (0.0, 1.0)
 
-def starts(ids:list[int], toks:list[int], n:int) -> bool:
-  """ids[:n] == toks[:n] (a few tokens compared first: another conversation's differ there, not copied)"""
+def starts(ids:list[int], toks:list[int], n:int, exact:bool=True) -> bool:
+  """
+  ids[:n] == toks[:n] (a few tokens compared first: another conversation's differ there, not copied). not exact: 16 tokens of the n compared
+  (an estimate, for an order: a long prompt's copies are ~0.5 ms)
+  """
   if n <= 0 or len(ids) < n or len(toks) < n or ids[n-1] != toks[n-1] or ids[n//2] != toks[n//2]: return n <= 0
+  if not exact: return all(ids[p] == toks[p] for p in range(0, n, max(1, n // 16)))
   return ids[:n] == toks[:n]
 
 def common_prefix(a:list[int], b:list[int]) -> int:
@@ -76,20 +80,27 @@ def common_prefix(a:list[int], b:list[int]) -> int:
   return lo
 
 class SeqEngine:
-  # (the room for a reply a region has past its prompt when it's made, more is made as it's needed)
-  ROOM = 2048
-  EVICT_FIRST = 3  # (the idle ones evicted for a region before the regions are compacted)
+  # (the room for a reply a region has past its prompt when it's made (a request's max_tokens, RESERVE at most: more is made as it's needed),
+  # and an idle one's for its next turn)
+  ROOM, RESERVE = 2048, getenv("SEQ_RESERVE", 8192)
+  # (an idle conversation used in the last STICKY s is held: its agent runs a tool, its next turn comes soon. a prompt of another conversation
+  # doesn't make it lost (out of the caches and the stash), unless it's forced (it waited too long, see the server's STARVE))
+  STICKY = getenv("SEQ_STICKY", 180.0)
   def __init__(self, model):
     from tinygrad.llm.qwen4exp import REGION_ALIGN
     self.model, self.k, self.align = model, model.config.spec_drafts, REGION_ALIGN
     if getenv("SEQ_TRACE"): _trace(model)
     self.rows, self.nslots = model.seq_rows(), model.seq_slots()
     self.seqs:list[Seq] = []
-    self.max_active, self.evictions = max(model.SEQ_SIZES), 0
+    self.max_active, self.evictions, self.lost = max(model.SEQ_SIZES), 0, 0
+    # (changed when what a prompt could take does: a sequence taken, stopped or evicted (a prompt that didn't fit is tried again after that)
+    self.version = 0
     # (the stash: the free chunks (in order) and entries, the evicted sequences in it)
     self.free_chunks, self.free_entries = list(range(getattr(model, "stash_chunks", 0))), list(range(getattr(model, "stash_entries", 0)))
     self.stashed:list[Stashed] = []
     self.times:dict[str, float|int] = {}  # (the time of the moves, stashes and restores: see the server's status line)
+
+  def held(self, used:float) -> bool: return time.perf_counter() - used < self.STICKY
 
   # ** regions and slots
   def _gaps(self, skip:Seq|None=None) -> list[tuple[int, int]]:
@@ -100,27 +111,56 @@ class SeqEngine:
       at = max(at, b + c)
     if at < self.rows: gaps.append((at, self.rows - at))
     return gaps
-  def _evict(self, keep:Seq|None=None) -> bool:
-    """the least recently used idle sequence out (its slot and region free): False if none"""
-    idle = [s for s in self.seqs if not s.active and s is not keep]
-    if not idle: return False
-    self.seqs.remove(out:=min(idle, key=lambda s: s.used))
-    self.evictions += 1
-    self._stash(out)
+  def _chunks(self, n:int) -> int: return -(-n // self.model.SEQ_MOVE)
+  def _victims(self, rows:int, slot:bool, keep:Seq|None=None) -> list[Seq]|None:
+    """
+    the idle sequences evicted for `rows` free rows (in all: the regions compacted) and (slot) a free slot: the ones not held first, the least
+    recently used first. None: the idle ones aren't enough
+    """
+    idle = sorted((s for s in self.seqs if not s.active and s is not keep), key=lambda s: (self.held(s.used), s.used))
+    free, slots, out = self.rows - sum(s.cap for s in self.seqs), self.nslots - len(self.seqs), []
+    while free < rows or (slot and slots <= 0):
+      if not idle: return None
+      out.append(v:=idle.pop(0))
+      free, slots = free + v.cap, slots + 1
+    return out
+  def _stash_fits(self, victims:list[Seq]) -> bool:
+    """the held ones of victims fit in the stash, no held one there dropped for them (the ones not held, the residents' copies are)"""
+    if not (held:=[v for v in victims if self.held(v.used)]): return True
+    if not self.free_entries and not self.stashed and not any(v.host for v in held): return False
+    others = [t.host for t in self.seqs if t.host is not None and t not in victims] + [x for x in self.stashed if not self.held(x.used)]
+    chunks, entries = len(self.free_chunks) + sum(len(x.chunks) for x in others), len(self.free_entries) + len(others)
+    for v in held:
+      have = len(v.host.chunks) if v.host is not None else 0
+      chunks -= max(0, self._chunks(v.n) - have)
+      entries -= v.host is None
+    return chunks >= 0 and entries >= 0
+  def _make_room(self, rows:int, slot:bool, keep:Seq|None=None, force:bool=False) -> bool:
+    """
+    `rows` free rows (in all) and (slot) a free slot: the idle sequences evicted for them (into the stash, the held ones first). checked before
+    anything is evicted: False (nothing evicted) if they can't be, or a held one would be lost (not forced)
+    """
+    if (victims:=self._victims(rows, slot, keep)) is None or (not force and not self._stash_fits(victims)): return False
+    for v in sorted(victims, key=lambda v: not self.held(v.used)):
+      self.seqs.remove(v)
+      self.evictions += 1
+      if not self._stash(v, force): self.lost += 1
+    self.version += 1
     return True
-  def _stash(self, s:Seq) -> bool:
+  def _stash(self, s:Seq, force:bool=False) -> bool:
     """
     s (evicted) into the stash: its chunks its copy there doesn't have (a resident's copy, of the prefix it shares) and its states, the least
-    recently used copies out for it (the residents' first: they're in the caches). False if it doesn't fit
+    recently used copies out for it (the residents' first: they're in the caches, then the ones not held, the held ones if forced). False if it
+    doesn't fit
     """
-    C, n, h = self.model.SEQ_MOVE, -(-s.n // self.model.SEQ_MOVE), s.host
+    C, n, h = self.model.SEQ_MOVE, self._chunks(s.n), s.host
     if s.n <= 0 or not (self.free_entries or self.stashed or h): return False
     s.host = None
     chunks, entry, keep = (h.chunks, h.entry, min(common_prefix(h.tokens, s.tokens[:s.n]) // C, len(h.chunks))) if h else ([], -1, 0)
     if n < len(chunks): self._free(chunks[n:], None)
     chunks = chunks[:n]
     while len(self.free_chunks) < n - len(chunks) or (entry < 0 and not self.free_entries):
-      if self._drop_one() is None:
+      if self._drop_one(force) is None:
         if h: self._free(chunks, entry)
         return False
     chunks, entry = chunks + self._take(n - len(chunks)), entry if entry >= 0 else self.free_entries.pop()
@@ -130,13 +170,15 @@ class SeqEngine:
     self.times["stashed"] = self.times.get("stashed", 0) + n - keep
     self.stashed.append(Stashed(s.tokens[:s.n], chunks, entry, s.used, s.hrow, s.ckpt))
     return True
-  def _drop_one(self) -> Stashed|None:
-    """the least recently used copy in the stash out (a resident's first), None if none"""
+  def _drop_one(self, held:bool=True) -> Stashed|None:
+    """the least recently used copy in the stash out (a resident's first, then the ones not held, then (held) the held ones), None if none"""
     residents = [t for t in self.seqs if t.host is not None]
     if residents:
       t = min(residents, key=lambda t: t.used)
       x, t.host = cast(Stashed, t.host), None
-    elif self.stashed: self.stashed.remove(x:=min(self.stashed, key=lambda x: x.used))
+    elif (cands:=[x for x in self.stashed if held or not self.held(x.used)]):
+      self.stashed.remove(x:=min(cands, key=lambda x: (self.held(x.used), x.used)))
+      self.lost += 1
     else: return None
     self._free(x.chunks, x.entry)
     return x
@@ -157,23 +199,10 @@ class SeqEngine:
       if segs and segs[-1][0] + segs[-1][2] == i and segs[-1][1] + segs[-1][2] == chunks[i]: segs[-1] = (segs[-1][0], segs[-1][1], segs[-1][2] + 1)
       else: segs.append((i, chunks[i], 1))
     return segs
-  def _place(self, s:Seq, need:int) -> bool:
-    """a free region of need rows for s (not a resident one yet): the regions compacted, the idle sequences evicted, for it"""
-    evicted = 0
-    while need <= self.rows:
-      if (b:=next((b for b, c in self._gaps() if c >= need), None)) is not None:
-        s.base, s.cap = b, need
-        return True
-      # (with the stash: a few idle ones out before the regions are compacted (it moves every one), their copies there cheap)
-      if (evicted < self.EVICT_FIRST and self.free_entries + self.stashed and self._evict()) or \
-         (self.rows - sum(t.cap for t in self.seqs) < need and self._evict()): evicted += 1
-      elif self.rows - sum(t.cap for t in self.seqs) >= need: self._compact()
-      else: return False
-    return False
-  def _slot(self) -> int|None:
-    while len(self.seqs) >= self.nslots:
-      if not self._evict(): return None
-    return min(set(range(self.nslots)) - {s.slot for s in self.seqs})
+  def _place(self, s:Seq, need:int):
+    """a region of need rows for s (not a resident one yet, the free rows in all are enough): a gap, else the regions compacted"""
+    if (b:=next((b for b, c in self._gaps() if c >= need), None)) is None: b = sum(t.cap for t in self._compact())
+    s.base, s.cap = b, need
 
   def _need(self, length:int) -> int:
     # (a step writes 2*(k+1) positions past the last token at most, a pool past that)
@@ -194,28 +223,22 @@ class SeqEngine:
       self._move(t, at)
       at += t.cap
     return order
-  def room(self, s:Seq, length:int) -> bool:
+  def room(self, s:Seq, length:int, force:bool=True) -> bool:
     """the region of s has rows for a sequence of `length` tokens (grown in place, moved, or the regions compacted, if not): False if no region
-    does (the idle sequences evicted for it)"""
+    does (the idle sequences evicted for it, held ones too if forced: a reply decoding goes before them)"""
     need = self._need(length)
     if need <= s.cap: return True
     if need > self.rows: return False
-    evicted = 0
-    while True:
-      end = next((b for b, _ in sorted((t.base, t.cap) for t in self.seqs if t is not s) if b > s.base), self.rows)
-      if s.base + need <= end:
-        s.cap = need
-        return True
-      if (base:=next((b for b, c in self._gaps(s) if c >= need and (b >= s.base + s.cap or b + need <= s.base)), None)) is not None:
-        self._move(s, base)
-        s.cap = need
-        return True
-      # (with the stash: a few idle ones out before the regions are compacted, see _place)
-      if not (evicted < self.EVICT_FIRST and self.free_entries + self.stashed and self._evict(s)): break
-      evicted += 1
+    end = next((b for b, _ in sorted((t.base, t.cap) for t in self.seqs if t is not s) if b > s.base), self.rows)
+    if s.base + need <= end:
+      s.cap = need
+      return True
+    if (base:=next((b for b, c in self._gaps(s) if c >= need and (b >= s.base + s.cap or b + need <= s.base)), None)) is not None:
+      self._move(s, base)
+      s.cap = need
+      return True
     # (all the free rows: the regions compacted, the ones after s moved up by its growth, the last first)
-    while self.rows - sum(t.cap for t in self.seqs) < need - s.cap:
-      if not self._evict(s): return False
+    if not self._make_room(need - s.cap, False, s, force): return False
     order = self._compact()
     delta = need - s.cap
     for t in reversed(order[order.index(s)+1:]): self._move(t, t.base + delta)
@@ -223,11 +246,17 @@ class SeqEngine:
     return True
 
   # ** a prompt's sequence
-  def take(self, ids:list[int], room:int=0) -> tuple[Seq, int, bool]|None:
+  def take(self, ids:list[int], room:int=0, force:bool=False) -> tuple[Seq, int, bool]|None:
     """
     the sequence of a prompt and the position its prefill starts at, and whether that's its checkpoint (restored): an idle one it continues, else
-    a new one (from 0). None: no slot or region for it (every slot active)
+    a new one (from 0), with rows for a reply of `room` tokens (RESERVE at most, 0: RESERVE). None: no slot or region for it without losing a held
+    conversation (not forced), or every slot active: nothing evicted, it waits
     """
+    if (ret:=self._take_seq(ids, room, force)) is not None: self.version += 1
+    return ret
+  def _take_seq(self, ids:list[int], room:int, force:bool) -> tuple[Seq, int, bool]|None:
+    # (no slot or rows for it even with every idle one out: none of its prefix compared)
+    if sum(t.active for t in self.seqs) >= self.nslots or self._need(len(ids)) > self.rows - sum(t.cap for t in self.seqs if t.active): return None
     best:tuple[Seq, int, bool]|None = None
     for s in self.seqs:
       if s.active: continue
@@ -241,40 +270,40 @@ class SeqEngine:
       if len(x.tokens) < len(ids) and starts(ids, x.tokens, len(x.tokens)): return len(x.tokens)
       return x.ckpt if 0 < x.ckpt <= len(ids) and starts(ids, x.tokens, x.ckpt) else 0
     stashed = max(((n, i, x) for i, x in enumerate(self.stashed) if (n:=scont(x))), default=(0, 0, None))[2]
+    # (the rows of its prompt and reply. more than the active ones leave even with every idle one out: its prompt's, the reply's grown later)
+    length = len(ids) + min(room or self.RESERVE, self.RESERVE)
+    if self._need(length) > self.rows - sum(t.cap for t in self.seqs if t.active): length = len(ids)
     if best is not None and (stashed is None or best[1] >= scont(stashed)):
       s, start, restore = best
       s.active = True  # (not evicted for its own room)
-      if self.room(s, len(ids) + room): return best
+      if self.room(s, length, force): return best
       s.active = False
-      self.seqs.remove(s)
+      return None
     # (the stashed one out of the stash while its slot and region are made: the evictions don't stash over it)
     start = scont(stashed) if stashed is not None else 0
     if stashed is not None: self.stashed.remove(stashed)
-    restored = False
-    try:
-      if (slot:=self._slot()) is None: return None
-      s = Seq(slot, 0, 0, active=True)
-      if not self._place(s, self._need(len(ids) + min(room, self.ROOM))) and not self._place(s, self._need(len(ids))): return None
-      self.seqs.append(s)
-      if stashed is None: return s, 0, False
-      n, restored, st = len(stashed.tokens), True, time.perf_counter()
-      self.model.seq_stash(False, s.slot, s.base, self._segs(stashed.chunks, 0, len(stashed.chunks)), stashed.entry, n, stashed.hrow)
-      self._time("restore", st)
-      self.times["restored"] = self.times.get("restored", 0) + len(stashed.chunks)
-      s.host = stashed  # (its copy stays: evicted again, only what it writes since is copied)
-      self.model._token_host[s.base:s.base+n] = __import__("array").array('i', stashed.tokens)
-      # (as it was: prefilled from its last token's states, or its checkpoint restored)
-      s.tokens, s.n, s.hrow, s.ckpt = list(stashed.tokens), n, stashed.hrow, stashed.ckpt
-      return s, start, start < n or start == len(ids)
-    finally:
-      # (back in the stash if it's not in the caches now)
-      if stashed is not None and not restored: self.stashed.append(stashed)
+    if (need:=self._need(length)) > self.rows or not self._make_room(need, True, None, force):
+      if stashed is not None: self.stashed.append(stashed)
+      return None
+    s = Seq(min(set(range(self.nslots)) - {t.slot for t in self.seqs}), 0, 0, active=True)
+    self._place(s, need)
+    self.seqs.append(s)
+    if stashed is None: return s, 0, False
+    n, st = len(stashed.tokens), time.perf_counter()
+    self.model.seq_stash(False, s.slot, s.base, self._segs(stashed.chunks, 0, len(stashed.chunks)), stashed.entry, n, stashed.hrow)
+    self._time("restore", st)
+    self.times["restored"] = self.times.get("restored", 0) + len(stashed.chunks)
+    s.host = stashed  # (its copy stays: evicted again, only what it writes since is copied)
+    self.model._token_host[s.base:s.base+n] = __import__("array").array('i', stashed.tokens)
+    # (as it was: prefilled from its last token's states, or its checkpoint restored)
+    s.tokens, s.n, s.hrow, s.ckpt = list(stashed.tokens), n, stashed.hrow, stashed.ckpt
+    return s, start, start < n or start == len(ids)
 
   def cached(self, ids:list[int]) -> int:
-    """the tokens of a prompt in the caches or the stash (the position take would prefill it from, no sequence taken)"""
+    """the tokens of a prompt in the caches or the stash (about: the position take would prefill it from, no sequence taken)"""
     def cont(tokens:list[int], n:int, ckpt:int) -> int:
-      if n and n < len(ids) and starts(ids, tokens, n): return n
-      return ckpt if ckpt and ckpt <= len(ids) and starts(ids, tokens, ckpt) else 0
+      if n and n < len(ids) and starts(ids, tokens, n, exact=False): return n
+      return ckpt if ckpt and ckpt <= len(ids) and starts(ids, tokens, ckpt, exact=False) else 0
     return max([cont(s.tokens, s.n, s.ckpt) for s in self.seqs if not s.active] +
                [cont(x.tokens, len(x.tokens), x.ckpt) for x in self.stashed], default=0)
 
@@ -318,19 +347,21 @@ class SeqEngine:
 
   def forget(self):
     """the idle sequences and the stash dropped (their states may be wrong): every prompt is prefilled from the start"""
+    self.version += 1
     for s in [s for s in self.seqs if not s.active]: self.seqs.remove(s)
     while self._drop_one() is not None: pass
 
   def fits(self, length:int) -> bool: return self._need(length) <= self.rows
   def pause(self, s:Seq):
     """s (decoding) out of the caches, into the stash if it fits: its slot and region free, a prompt of its tokens goes on from it"""
-    s.active, s.used = False, time.perf_counter()
+    s.active, s.used, self.version = False, time.perf_counter(), self.version + 1
     self.seqs.remove(s)
     self.evictions += 1
-    self._stash(s)
+    if not self._stash(s, True): self.lost += 1
 
   def stop(self, s:Seq, kept:int):
     """the end of the decoding of s: its tokens past `kept` (of its reply, after its end) aren't its"""
+    self.version += 1
     if kept < len(s.tokens):
       # (the caches have the tokens before the last one kept: the hidden state of the one before it is the step's row of it)
       drop = len(s.tokens) - kept

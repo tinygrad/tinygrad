@@ -75,6 +75,43 @@ class TestSeqEngine(unittest.TestCase):
                                                                           ("prefill", s.slot, 4000, 5000)])
     self.assertEqual((s.n, s.ckpt), (5000, 5000))
 
+  def _conv(self, eng:SeqEngine, first:int, n:int=20000):
+    ids = list(range(first, first + n))
+    s, start, restore = eng.take(ids, room=100)
+    eng.prefill(s, ids, start, restore, (0.0, 1.0))
+    eng.stop(s, len(s.tokens))
+    return s, ids
+
+  def test_held_not_lost(self):
+    # three agents' conversations fill the caches (no stash): a new one waits (nothing evicted) while they're held, takes the least recently
+    # used one's room when it's forced or they aren't held anymore
+    eng = self.engine()
+    convs = [self._conv(eng, 100000 * (i + 1)) for i in range(3)]
+    new = list(range(900000, 920000))
+    self.assertIsNone(eng.take(new, room=100))
+    self.assertEqual((len(eng.seqs), eng.evictions), (3, 0))
+    # (an agent's next turn: its conversation continued)
+    s, start, _ = eng.take(convs[1][1] + [1, 2, 3], room=100)
+    self.assertIs(s, convs[1][0])
+    self.assertEqual(start, len(convs[1][1]))
+    eng.stop(s, len(s.tokens))
+    got = eng.take(new, room=100, force=True)
+    self.assertIsNotNone(got)
+    self.assertEqual((eng.evictions, eng.lost), (1, 1))
+    self.assertNotIn(convs[0][0], eng.seqs)
+    eng.stop(got[0], 0)
+    with patch.object(SeqEngine, "STICKY", 0.0):
+      self.assertIsNotNone(eng.take(list(range(700000, 720000)), room=100))
+
+  def test_reserve(self):
+    # a reply's room: its max_tokens, RESERVE at most (and without one)
+    eng, ids = self.engine(), list(range(100, 3100))
+    s, _, _ = eng.take(ids, room=100)
+    self.assertEqual(s.cap, eng._need(len(ids) + 100))
+    eng.stop(s, 0)
+    s2, _, _ = eng.take(list(range(5000, 8000)))
+    self.assertEqual(s2.cap, eng._need(3000 + eng.RESERVE))
+
 class TestScheduleSeqs(unittest.TestCase):
   """the server's scheduling of sequences (schedule_seqs) on a fake model"""
   def setUp(self):

@@ -500,6 +500,8 @@ class Request:
     self.y:list[int] = []
     self.mtp, self.j, self.par = 0, 0, 1
     self.no_mix = False  # (MIX) prefilled before its steps, not in them (its cache was less than it seemed)
+    # (sequences) the tokens of its prompt in the caches or the stash, and the engine's version then; the version its take last failed at, when
+    self.hit, self.hit_v, self.tried, self.tried_at = 0, -1, -1, 0.0
     # (decoded in a slot: a copy of the model's checkpoint at the end of its prompt, see LLMServer.ckpt_keep)
     self.ckpt_buf: typing.Any = None
     self.ckpt_tokens: list[int] = []
@@ -660,8 +662,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if (q:=getattr(self, "queues", None)) is not None:
       active, filling, pending = (list(x.values()) if isinstance(x, dict) else list(x) for x in q)
       def req(r:Request) -> dict: return {"prompt": len(r.ids), "cached": r.cache_start, "generated": len(r.generated), "age": round(now - r.st, 2)}
+      # (a waiting one's hit: the tokens of its prompt the caches or the stash have)
       ret |= {"decoding": [req(r) for r in active], "prefilling": [req(r) | {"left": len(r.fill[0]) - r.fill[1]} for r in filling],
-              "waiting": [req(r) for r in pending] + [{}] * self.waiting.qsize()}
+              "waiting": [req(r) | {"hit": r.hit} for r in pending] + [{}] * self.waiting.qsize()}
     # the latencies of the requests of the last 10 minutes: their ttft, their longest wait for a token after the first, their total
     if rs:=[r for r in list(self.recent) if r[0] > time.time() - 600]:
       def pct(xs:list[float]) -> dict:
@@ -676,10 +679,16 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         ret["gpus"] = AMIdleClocks.metrics()
       except Exception as e: ret["gpus"] = str(e)
     if (eng:=self.engine) is not None:
-      seqs, stashed = list(eng.seqs), list(eng.stashed)
-      ret |= {"resident": {"sequences": len(seqs), "tokens": sum(s.n for s in seqs), "rows": eng.rows, "rows_taken": sum(s.cap for s in seqs)},
-              "stash": {"sequences": len(stashed), "tokens": sum(len(x.tokens) for x in stashed), "chunks_free": len(eng.free_chunks)},
-              "evictions": eng.evictions}
+      # (held: the idle conversations of agents mid task, see SeqEngine.STICKY. capacity: the tokens the caches and the stash hold, the
+      # conversations the stash holds; lost: the conversations out of both)
+      seqs, stashed, C = list(eng.seqs), list(eng.stashed), getattr(self.model, "SEQ_MOVE", 0)
+      ret |= {"resident": {"sequences": len(seqs), "tokens": sum(s.n for s in seqs), "rows": eng.rows, "rows_taken": sum(s.cap for s in seqs),
+                           "held": sum(not s.active and eng.held(s.used) for s in seqs)},
+              "stash": {"sequences": len(stashed), "tokens": sum(len(x.tokens) for x in stashed), "chunks_free": len(eng.free_chunks),
+                        "held": sum(eng.held(x.used) for x in stashed)},
+              "capacity": {"tokens": eng.rows + C * getattr(self.model, "stash_chunks", 0), "slots": eng.nslots,
+                           "stash_entries": getattr(self.model, "stash_entries", 0), "max_active": eng.max_active},
+              "evictions": eng.evictions, "lost": eng.lost}
     return ret
 
   # ** the kept conversations
@@ -1183,8 +1192,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # of the time (the requests decoding of the ones in flight, DECODE_SHARE at most and 0.1 at least): a long prompt doesn't stop the replies,
   # many prompts at once are prefilled mostly one after another (a step of many is about as fast as one of a few). the next slice is the
   # prompt's with the fewest tokens left to prefill (a short one, an agent's turn, isn't behind a long one), less AGING tokens a second it
-  # waited (a long one isn't behind short ones that keep coming))
-  PREFILL_SLICE, MAX_STALL, DECODE_SHARE, AGING = 13824, 1.0, 0.5, 1000
+  # waited. a long one isn't behind short ones that keep coming forever: one waiting past STARVE_SEQ goes first, and takes a sequence even if
+  # a held conversation is lost for it (see SeqEngine.STICKY))
+  PREFILL_SLICE, MAX_STALL, DECODE_SHARE, AGING, STARVE_SEQ = 13824, 1.0, 0.5, getenv("AGING", 0), getenv("SEQ_STARVE", 120.0)
   # (the gpus' clocks (AM: their gfx clock's cap, see AMIdleClocks.set_caps): a few users decoding at the full clocks (a user's tokens fast),
   # more at less (the energy a token: ~0.85 J at 2000 MHz on 6x 7900 XTX, ~1.2 J at full), a prefill at a cap it isn't slower at. switched
   # CLOCK_HOLD s apart at most)
@@ -1201,7 +1211,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     pending: list[Request] = []
     self.queues = (active, filling, pending)
     k = eng.k
-    def prompt(req:Request) -> list[int]: return req.ids + req.generated  # (a paused one (see below) goes on from its tokens so far)
+    # (a paused one (see below) goes on from its tokens so far)
+    def prompt(req:Request) -> list[int]: return req.ids + req.generated if req.generated else req.ids
     stall = 0.0  # (the time of the slices since the last steps)
     clocks = f(self.CLOCKS) if callable(f:=getattr(self.model, "clock_caps", None)) else self.CLOCKS
     try:
@@ -1222,19 +1233,31 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             self.finish(req)
             eng.stop(s, len(s.tokens))
         self.inflight = len(active) + len(filling) + len(pending)
-        # the prompt to prefill a slice of: the one with the fewest tokens left (aged), a waiting one taking a sequence
+        # the prompt to prefill a slice of: the ones waiting past STARVE first (in turn), then the one with the fewest tokens left (aged: AGING),
+        # a waiting one taking a sequence (one that would lose a held conversation waits, see SeqEngine.take: an agent's next turn first)
         now, job = time.perf_counter(), None
-        cands:list[tuple[float, int, Seq|Request]] = [(len(r.fill[0]) - r.fill[1] - self.AGING*(now - r.st), 0, s) for s, r in filling.items()]
+        def starving(r:Request) -> bool: return now - r.st > self.STARVE_SEQ
+        cands:list[tuple[bool, float, int, Seq|Request]] = \
+          [(not starving(r), r.st if starving(r) else len(r.fill[0]) - r.fill[1] - self.AGING*(now - r.st), 0, s) for s, r in filling.items()]
+        # (what the caches have of a waiting one's prompt, and whether it fits: looked at again when the engine's sequences change, its take
+        # tried again then or a second later (a held conversation's hold ends))
         if len(active) + len(filling) < eng.max_active:
-          cands += [(len(ids) - eng.cached(ids) - self.AGING*(now - r.st), 1, r) for r in pending if (ids:=prompt(r))]
-        for _, _, c in sorted(cands, key=lambda x: x[:2]):
+          t0 = time.perf_counter()
+          for r in pending:
+            if r.hit_v != eng.version: r.hit, r.hit_v = eng.cached(prompt(r)), eng.version
+          self.stats.add("cached", time.perf_counter() - t0)
+          cands += [(not starving(r), (r.st if starving(r) else len(r.ids) + len(r.generated) - r.hit - self.AGING*(now - r.st)), 1, r)
+                    for r in pending if r.tried != eng.version or now - r.tried_at > 1.0]
+        for _, _, _, c in sorted(cands, key=lambda x: x[:3]):
           if isinstance(c, Seq):
             job = c
             break
           t0 = time.perf_counter()
-          got = eng.take(ids:=prompt(c), max(0, (c.max_tokens or 0) - len(c.generated)))
+          got = eng.take(ids:=prompt(c), max(0, (c.max_tokens or 0) - len(c.generated)), force=starving(c))
           self.stats.add("take", time.perf_counter() - t0)
-          if got is None: continue
+          if got is None:
+            c.tried, c.tried_at = eng.version, now
+            continue
           pending.remove(c)
           job, start, restore = got
           if not c.generated: c.cache_start, c.queued = start, time.perf_counter() - c.st
@@ -1282,7 +1305,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           st = time.perf_counter()
           eng.settle()
           stall += time.perf_counter() - st
-        share = min(self.DECODE_SHARE, max(0.1, len(active) / max(1, len(active) + len(filling) + len(pending))))
+        # (the waiting ones that can't take a sequence now (no room) don't count: their prefill isn't the steps' time)
+        can = len(filling) + sum(r.tried != eng.version for r in pending)
+        share = min(self.DECODE_SHARE, max(0.1, len(active) / max(1, len(active) + can)))
         budget, stall = stall * share / (1 - share), 0.0
         st0 = time.perf_counter()
         while active:

@@ -2811,7 +2811,7 @@ class Transformer:
     """generate of a model whose sequences share its caches: a sequence of the engine (the one its prompt continues), decoded alone"""
     from tinygrad.llm.engine import SeqEngine
     if (eng:=getattr(self, "_engine", None)) is None: eng = self._engine = SeqEngine(self)
-    if (got:=eng.take(list(tokens))) is None: raise RuntimeError(f"a prompt of {len(tokens)} tokens doesn't fit the caches")
+    if (got:=eng.take(list(tokens), force=True)) is None: raise RuntimeError(f"a prompt of {len(tokens)} tokens doesn't fit the caches")
     s, start, restore = got
     kept, k = len(tokens), self.config.spec_drafts
     try:
