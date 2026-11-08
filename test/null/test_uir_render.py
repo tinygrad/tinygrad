@@ -9,6 +9,7 @@ from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.device import Device
 from tinygrad.codegen import full_rewrite_to_sink, to_program
 from tinygrad.helpers import Context, ansistrip
+from tinygrad.renderer import Estimates
 
 def _strip_buffers(root:UOp) -> UOp:
   # realized BUFFERs carry runtime state the wire can't; a BUFFER with no binding is exactly an ALLOC
@@ -99,6 +100,35 @@ class TestSSARender(unittest.TestCase):
     g = UOp.sink(UOp.const(1) + UOp.const(2))
     txt = "# hand written\n" + render_uir(g) + " # trailing comment\n\n# last line comment\n"
     assert_roundtrip(self, parse_uir(txt))
+
+class LyingRepr:
+  def __init__(self, x): self.x = x
+  def __eq__(self, other): return isinstance(other, LyingRepr) and self.x == other.x
+  def __hash__(self): return hash(self.x)
+  def __repr__(self): return "LyingRepr()"
+
+class TestPythonObjects(unittest.TestCase):
+  def test_uop_in_arg(self):
+    # a symbolic Estimates holds UOps that aren't in the graph: they get lines and are %refs in the arg
+    n = UOp.variable("n", 1, 64)
+    sink = UOp.sink(UOp.const(1), arg=KernelInfo(name="k", estimates=Estimates(ops=n*2, mem=n)))
+    self.assertIn("estimates=`Estimates(ops=%", ansistrip(render_uir(sink)))
+    assert_roundtrip(self, sink)
+
+  def test_ambiguous_names(self):
+    # rdna3 and rdna4 define the same instruction names, so the instruction is evaluated in its own module
+    from tinygrad.runtime.autogen.amd.rdna3 import ins as rdna3
+    from tinygrad.runtime.autogen.amd.rdna4 import ins as rdna4
+    for ins in (rdna3, rdna4):
+      g = UOp(Ops.INS, arg=(ins.v_mov_b32_e32(ins.v[1], 1.0), dtypes.void))
+      self.assertIn(f"`{ins.__name__}:v_mov_b32_e32", ansistrip(render_uir(g)))
+      assert_roundtrip(self, g)
+
+  def test_pickle_fallback(self):
+    # a repr that doesn't rebuild the object is caught when rendering
+    g = UOp(Ops.PYLITERAL, arg=LyingRepr(3))
+    self.assertIn("unpickle(", render_uir(g))
+    assert_roundtrip(self, g)
 
 class TestParseUIR(unittest.TestCase):
   def test_handwritten(self):
