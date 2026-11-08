@@ -5,7 +5,7 @@ from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.jit import capture_parallel
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
-from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES
+from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES, _wmma_rdna4
 from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custom_kernels_supported, find_packed, moe_linear, q8_linear, \
   q8_quantize_cache_clear, moe_route, moe_grouped_linear, partial_sum, fuse_gate_up, kda_decode, pool_index_rows, slot_scatter, \
   slot_gather, moe_combine, token_sharded, shard_rows, reduce_scatter, all_gather, all_gather_q8, sharded_argmax, skinny_matmul, kda_conv, \
@@ -851,7 +851,7 @@ class FFNBlock:
     # (batched decoding: a few rows an expert, small tiles)
     # RDNA3: 32 rows for f16 and IQ3_S K256 kernels; the latter needs fewer padded rows and fits two LDS tiles per WGP.
     i8 = gate_exps.ggml_type in I8_WMMA_QUANTS and gate_exps.ggml_type != IQ3_S
-    tile = MOE_TILE if i8 else 32
+    tile = MOE_TILE if _wmma_rdna4(x.device) or i8 else 32
     _, entries, tiles, pos = moe_route(sel, gate_exps.first, gate_exps.local_experts, tile)
     k, sel_shape = int(sel.shape[-1]), sel.shape[-3:]
     # gate and up read the token of each sorted row, down writes the row of each selection
