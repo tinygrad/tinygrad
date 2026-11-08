@@ -1,9 +1,9 @@
-import unittest, re
+import unittest, re, math
 from dataclasses import replace
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes, Invalid
 from tinygrad.uop import Ops
-from tinygrad.uop.ops import UOp, graph_rewrite, ParamArg, KernelInfo
+from tinygrad.uop.ops import UOp, UPat, graph_rewrite, ParamArg, KernelInfo
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.device import Device
@@ -123,6 +123,12 @@ class TestPythonObjects(unittest.TestCase):
       g = UOp(Ops.INS, arg=(ins.v_mov_b32_e32(ins.v[1], 1.0), dtypes.void))
       self.assertIn(f"`{ins.__name__}:v_mov_b32_e32", ansistrip(render_uir(g)))
       assert_roundtrip(self, g)
+
+  def test_nan(self):
+    # a nan literal is a ConstFloat (nan == nan), in a CONST and in the pattern compiler's clauses
+    from tinygrad.uop.upat import _get_clause
+    assert_roundtrip(self, _get_clause(UPat(Ops.CONST, arg=math.nan), UOp.custom_function("x", fmt=True).call(inline=True)))
+    assert_roundtrip(self, UOp.sink(UOp.const(math.nan), UOp.const(-math.inf)))
 
   def test_pickle_fallback(self):
     # a repr that doesn't rebuild the object is caught when rendering
