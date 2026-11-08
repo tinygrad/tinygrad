@@ -1072,22 +1072,29 @@ def _rope(x:Tensor, cos:Tensor, sin:Tensor) -> Tensor:
 class QSAIndexer:
   """
   qwen sparse attention's indexer: the keys of a pool of kpool tokens are averaged, normed and roped at the pool's first position, a query's (its
-  heads normed and roped) score of a pool is the sum of its heads' rectified dots. its cache holds every token's key (the pools are made of them)
+  heads normed and roped) score of a pool is the sum of its heads' rectified dots. its cache holds the pooled keys only: the keys of the pool a
+  position is in come from its state (the kpool-1 keys before it, slotted as the gated deltanets' conv states) and the call's
   """
-  pool_k:Tensor  # batched decoding: the keys of every slot, their pooled keys (QSABlock._init_slots)
-  pool_pk:Tensor
+  state:Tensor  # (S, kpool-1, D) the keys of the kpool-1 positions before a position p at p%S (S: the model's states', see update)
+  pool_state:Tensor  # batched decoding: every slot's (n*SC, kpool-1, D), see slot_states
   def __init__(self, config:TransformerConfig):
     self.idx, self.max_context, self.cache_rows = (idx:=unwrap(config.indexer)), config.max_context, config.cache_rows
+    self.S, self.SC = config.rewind + 1, slot_states(config.spec_drafts)[1]
     self.q_proj, self.k_proj = Linear(config.dim, idx.n_heads * idx.head_dim, bias=False), Linear(config.dim, idx.head_dim, bias=False)
     self.q_norm, self.k_norm = nn.RMSNorm(idx.head_dim, idx.norm_eps), nn.RMSNorm(idx.head_dim, idx.norm_eps)
 
   def _init_state(self, x:Tensor):
-    if hasattr(self, "cache_k"): return
-    # every token's key, and the pooled keys (a call pools the pools of its tokens: the ones before them are cached). the rows of every sequence's
-    # region (see Transformer.regions), REGION_ALIGN more than a context: the region of the padding sequences of a step
+    if hasattr(self, "cache_pk"): return
+    # the pooled keys (a call pools the pools of its tokens) of the rows of every sequence's region (see Transformer.regions), REGION_ALIGN more
+    # than a context: the region of the padding sequences of a step
     rows = max(self.max_context, self.cache_rows) + REGION_ALIGN
-    self.cache_k = _zeros(rows, self.idx.head_dim, dtype=dtypes.half, device=x.device)
     self.cache_pk = _zeros(rows // self.idx.kpool, self.idx.head_dim, dtype=dtypes.half, device=x.device)
+    self.state = _zeros(self.S, self.idx.kpool - 1, self.idx.head_dim, dtype=dtypes.half, device=x.device)
+
+  def _init_slots(self, n:int):
+    """the states of n sequences of batched decoding (a slot each): SC of them a slot, the one of a position p is p%SC (made, not zeroed)"""
+    if hasattr(self, "pool_state") and int(self.pool_state.shape[0]) >= n * self.SC: return
+    self.pool_state = _slot_pool(n, self.state, (self.SC, *self.state.shape[1:]))[0]
 
   def _pooled(self, keys:Tensor, cos:Tensor, sin:Tensor) -> Tensor:
     """keys (..., pools, kpool, D): the pooled keys (..., pools, D), roped with cos and sin (pools, rope/2) of the pools' first positions"""
@@ -1118,16 +1125,27 @@ class QSAIndexer:
     the keys of the T tokens of x at start_pos and their pools cached (the sequence's region, from _seq_base): the pooled keys (pools, D) of the
     sequence (after) and that count of pools up to the last token's
     """
-    idx, kp, b = self.idx, self.idx.kpool, _seq_base[0]
+    idx, kp, b, Tq = self.idx, self.idx.kpool, _seq_base[0], int(x.shape[1])
     S, pb = start_pos + T, b // kp
-    keys = self._proj(self.k_proj, x[0])[:T].half()
-    cache = Tensor(self.cache_k.uop.after(self.cache_k.shrink(((b+start_pos, b+S), None)).uop.store(keys.uop)))
-    # the pools of the tokens (the first one's tokens before them are cached), from the cached keys
+    assert Tq % kp == 0, "the rows of a call: whole pools"
+    keys = self._proj(self.k_proj, x[0]).half()  # (Tq, D): the first T are the tokens'
+    # the keys of the kpool-1 positions before start_pos (its state, start_pos%S) and the tokens': window row i is position start_pos-(kp-1)+i
+    # (read with the keys, a value of the call's input: a micro batch's state is the one the batch before it wrote, see GatedDeltaNetBlock)
+    states, NS = self.state, int(self.state.shape[0])
+    rp, wp = start_pos % NS, S % NS
+    prev = states.shrink(((rp, rp+1), None, None)).reshape(kp-1, idx.head_dim)
+    window = (prev + keys[:1] * 0).cat(keys, dim=0).pad(((0, kp), None)).contiguous()
+    # the state of the position after the tokens: the window's rows of the kpool-1 positions before it
+    store = states.shrink(((wp, wp+1), None, None)).uop.store(window.shrink(((T, T+kp-1), None)).unsqueeze(0).uop)
+    # the pools of the tokens (the first one's tokens before them from the state): the window from the first one's first position
     first, new = start_pos // kp, (start_pos % kp + T + kp - 1) // kp
+    # (pooled after the state is written: the next micro batch waits for the pooled keys (see micro_batch_blocks), the state then too)
+    at = kp - 1 - start_pos % kp
+    keys_p = Tensor(window.uop.after(store)).shrink(((at, at + Tq + kp), None)).reshape(Tq // kp + 1, kp, idx.head_dim)
     pf = freqs.reshape(-1, kp, freqs.shape[-1])[:, 0].shrink(((first, first + new), None))
-    pk_new = self._pooled(cache.reshape(-1, kp, idx.head_dim).shrink(((pb + first, pb + first + new), None, None)), *pf.chunk(2, dim=-1))
+    pk_new = self._pooled(keys_p.shrink(((0, new), None, None)), *pf.chunk(2, dim=-1))
     pk = Tensor(self.cache_pk.uop.after(self.cache_pk.shrink(((pb + first, pb + first + new), None)).uop.store(pk_new.half().uop)))
-    _state_written(cache, pk)
+    _state_written(pk)
     pools = (S + kp - 1) // kp
     return pk.shrink(((pb, pb + pools), None)), pools
 
@@ -1247,17 +1265,28 @@ class QSABlock(TransformerBlock):
     kv = self._kv_rows(k.cat(v, dim=-1).transpose(0, 1).reshape(-1, 2*hd))
     cache = rows_scatter(self.cache_k.reshape(-1, W), kv, phys).reshape(self.cache_k.shape)
     # the indexer: the keys of the rows, then the pools they're in (NP from a sequence's first row's, the ones past its last row's are
-    # incomplete: never picked, made again when they are) pooled from the cached keys
-    ck = rows_scatter(idx.cache_k, idx._proj(idx.k_proj, x[0]).half(), phys)
+    # incomplete: never picked, made again when they are) pooled from a sequence's window: the keys of the kpool-1 positions before its first
+    # row (its slot's state of the position) and its rows' (window row i is position positions[g]-(kp-1)+i)
+    W0 = kp - 1 + R
+    keys = idx._proj(idx.k_proj, x[0]).half().reshape(G, R, ic.head_dim).contiguous()
+    # (read after the keys, a value of the call's input: not before the call (its implicit inputs), the MTP layer's second call reads what its
+    # first one wrote)
+    before = slot_gather(idx.pool_state, sb.slots, after_kernel(sb.positions, keys), idx.SC, dtypes.half)  # (G, kp-1, D)
+    window = before.cat(keys, dim=1).contiguous()  # (G, W0, D)
+    # (every row's state of the position after it written: the window's rows of the kpool-1 positions before that)
+    effects = [slot_scatter(idx.pool_state, window, sb.slots, Tensor.full((G,), r+1, dtype=dtypes.int32).to(x.device).contiguous(), idx.SC,
+                            shift=1, starts=sb.positions) for r in range(R)]
     NP = (R - 1) // kp + 2
     pools = ((sb.positions // kp).reshape(G, 1) + Tensor.arange(NP, dtype=dtypes.int32).reshape(1, NP).to(x.device)).reshape(-1)  # (G*NP,)
     pbase = sb.bases.reshape(G, 1).expand(G, NP).reshape(-1) // kp
-    krows = (((pbase + pools) * kp).reshape(-1, 1) + Tensor.arange(kp, dtype=dtypes.int32).reshape(1, kp).to(x.device)).reshape(-1)
-    pkeys = rows_gather(ck, krows.contiguous()).reshape(G*NP, kp, ic.head_dim)
+    # (the window's row of key i of pool j of a sequence: kp-1 - positions%kp + j*kp + i, the ones past its rows (incomplete pools) its last)
+    ar = (Tensor.arange(NP, dtype=dtypes.int32).reshape(1, NP, 1) * kp + Tensor.arange(kp, dtype=dtypes.int32).reshape(1, 1, kp)).to(x.device)
+    wrow = ((kp - 1 - sb.positions % kp).reshape(G, 1, 1) + ar).minimum(W0 - 1)
+    krows = (wrow + (Tensor.arange(G, dtype=dtypes.int32).to(x.device) * W0).reshape(G, 1, 1)).reshape(-1)
+    pkeys = rows_gather(window.reshape(G*W0, ic.head_dim), krows.contiguous()).reshape(G*NP, kp, ic.head_dim)
     pf = rows_gather(self.freqs_cis, (pools * kp).contiguous(), const=True)
     pooled = idx._pooled(pkeys, *pf.chunk(2, dim=-1))
-    pk = rows_scatter(idx.cache_pk, pooled.half(), (pbase + pools).contiguous())
-    self._seq_written = (cache, ck, pk)
+    pk = Tensor(rows_scatter(idx.cache_pk, pooled.half(), (pbase + pools).contiguous()).uop.after(*[e.uop for e in effects]))
     # every query's scores of its sequence's pools, the lists of the keys it sees
     iq = idx._queries(x[0], *(f.reshape(rows, 1, -1) for f in freqs.chunk(2, dim=-1)))  # (rows, H, D)
     scores = seq_scores(iq, pk, sb.bases, sb.positions, R, kp, self.config.max_context // kp)
@@ -1268,8 +1297,6 @@ class QSABlock(TransformerBlock):
     # (a lane a key: its scores of the heads without reductions over the lanes, the value half only of the rows read for the output)
     attn = qsa_decode_attention(qr[:, :, 0], latent, picks, sb.row_bases, hd**-0.5, parts=8, waves=4)
     return self._out_gated(attn.permute(2, 1, 0, 3), gate)
-
-  _seq_written:tuple[Tensor, Tensor, Tensor]  # (the caches after a step's writes: the attention's, the indexer's keys and pooled keys)
 
   @property
   def _q8(self) -> bool: return self.cache_k.dtype == dtypes.uint32
@@ -1907,6 +1934,7 @@ class Transformer:
     # (the slots' recurrent states in float, SEQ_STATE_HALF: in half)
     for b in self.blk:
       if isinstance(b, GatedDeltaNetBlock): b._init_slots(n, 0, half=False, replay=True)
+    for idx in self._indexers(): idx._init_slots(n)
     # every slot's hidden states (the streams) of the last step's tokens, two parities of k+1
     self.seq_spec_h = _zeros(n*2*(k+1), self._spec_dim, device=devs)
     # every slot's checkpoint: its states of a position (the end of its last prompt), the hidden state of the last token
@@ -1914,6 +1942,8 @@ class Transformer:
     # (the checkpoints' recurrent states in host memory: a copy a turn, the device memory more slots')
     self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]), host=True)[0]] +
                             [_slot_pool(n, p, (1, *p.shape[1:]))[0] for p in b.pool_conv] for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
+    # (and the indexers' states)
+    self.seq_ckpt_idx = [_slot_pool(n, idx.pool_state, (1, *idx.pool_state.shape[1:]))[0] for idx in self._indexers()]
     self._spec_init()
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self._token_rows())
     # in host memory: a step's input tokens, the temperature and top_p of every sequence, its sampled tokens and drafts (written by one device)
@@ -1938,7 +1968,7 @@ class Transformer:
     self._seq_stash_init()
     todo = [self.seq_spec_h, self.seq_ckpt_h] + [p for b in self.blk if isinstance(b, GatedDeltaNetBlock) for p in (b.pool_rec, *b.pool_conv)] + \
       [b.pool_rp for b in self.blk if isinstance(b, GatedDeltaNetBlock) and hasattr(b, "pool_rp")] + \
-      [t for c in self.seq_ckpt_states for t in c]
+      [t for c in self.seq_ckpt_states for t in c] + [idx.pool_state for idx in self._indexers()] + self.seq_ckpt_idx
     _fill_zero(*todo)
 
   def _seq_copy(self, save:bool, slot:UOp, pm:UOp, ps:UOp, pc:UOp, hrow:UOp, keep:UOp):
@@ -1954,10 +1984,15 @@ class Transformer:
         S, SC = int(b.slot_rec[0].shape[0]), int(b.slot_conv[0][0].shape[0])
         pairs.append((rows(b.pool_rec, slot*S + ps), rows(b.recurrent_state, pm)))
         pairs += [(rows(d, slot*SC + pc), rows(c, pm)) for d, c in zip(b.pool_conv, b.conv_states)]
+    pairs += [(rows(idx.pool_state, slot*idx.SC + pc), rows(idx.state, pm)) for idx in self._indexers()]
     if save: Tensor.realize(*[d.assign(s.cast(d.dtype)) for d, s in pairs])
     else:
       (h, hs), rest = pairs[0], pairs[1:]
       Tensor.realize(hs.assign(h.contiguous() * Tensor(keep).cast(dtypes.float)), *[s.assign(d.cast(s.dtype)) for d, s in rest])
+
+  def _indexers(self) -> list[QSAIndexer]:
+    """the indexers of the attention blocks (and the MTP layer's)"""
+    return [b.indexer for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []) if isinstance(b, QSABlock) and b.indexer is not None]
 
   def _seq_mat(self, slot:UOp, base:UOp, n:UOp):
     """the recurrent states of slot `slot` (SEQ_REPLAY: of position base) advanced n tokens (the replayed inputs of its last step)"""
@@ -1995,7 +2030,7 @@ class Transformer:
       copies.append(mv(b.cache_k, src, dst, n, 2))
       if (idx:=b.indexer) is not None:
         kp = idx.idx.kpool
-        copies += [mv(idx.cache_k, src, dst, n, 0), mv(idx.cache_pk, src // kp, dst // kp, n // kp, 0)]
+        copies.append(mv(idx.cache_pk, src // kp, dst // kp, n // kp, 0))
     Tensor.realize(*copies)
   SEQ_MOVE = REGION_ALIGN
   def seq_move(self, src:int, dst:int, n:int):
@@ -2024,12 +2059,13 @@ class Transformer:
       return t.nbytes() // int(t.shape[axis]) // (len(t.device) if isinstance(t.device, tuple) and t.uop.axis is not None else 1)
     # (the host memory of a chunk: every distinct KV head's rows and the indexers' (see below))
     kvr = self._kv_real
-    chunk = C * sum(kvr * per_row(b.cache_k, 2) + (per_row(b.indexer.cache_k, 0) + per_row(b.indexer.cache_pk, 0) // b.indexer.idx.kpool
-                                                    if b.indexer is not None else 0) for b in qsa)
+    chunk = C * sum(kvr * per_row(b.cache_k, 2) + (per_row(b.indexer.cache_pk, 0) // b.indexer.idx.kpool if b.indexer is not None else 0)
+                    for b in qsa)
     self.stash_entries = 32 if gb > 0 else 0
     gdn = [b for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
     entry = sum(per_row(t, 0) for b in gdn for t in (b.pool_rec, *b.pool_conv)) + per_row(self.seq_spec_h, 0) + \
-            sum(per_row(t, 0) for c in self.seq_ckpt_states for t in c) + per_row(self.seq_ckpt_h, 0)
+            sum(per_row(t, 0) for c in self.seq_ckpt_states for t in c) + per_row(self.seq_ckpt_h, 0) + \
+            sum(per_row(t, 0) for t in [idx.pool_state for idx in self._indexers()] + self.seq_ckpt_idx)
     self.stash_chunks = max(0, int(gb * 1e9 - self.stash_entries * entry) // chunk) if gb > 0 else 0
     if not self.stash_chunks: self.stash_entries = 0
     if not self.stash_entries: return
@@ -2047,8 +2083,7 @@ class Transformer:
       return ret
     self._stash_writers = code([[d for d in range(len(devs)) if head[d] == h] for h in range(kvr)]), code([list(range(len(devs)))])
     self._stash_kv = []
-    kv_specs = [[(b.cache_k, H)] + ([(b.indexer.cache_k, H), (b.indexer.cache_pk, H // b.indexer.idx.kpool)] if b.indexer is not None else [])
-                for b in qsa]
+    kv_specs = [[(b.cache_k, H)] + ([(b.indexer.cache_pk, H // b.indexer.idx.kpool)] if b.indexer is not None else []) for b in qsa]
     owners = [devs[head.index(h)] for h in range(kvr)] + [devs[0]]
     def row_bytes(t:Tensor) -> int: return per_row(t, 2 if t is not None and t.ndim == 4 else 0)
     sizes = [sum(round_up(rows * row_bytes(t), 4096) for b in kv_specs for t, rows in b[:1]) for _ in range(kvr)] + \
@@ -2067,7 +2102,7 @@ class Transformer:
       self._stash_kv.append(tuple(take(t, rows, head if i == 0 else [kvr]*len(devs)) for i, (t, rows) in enumerate(b)))
     # (a sequence's states of its last position: the recurrent and conv ones, the hidden state of its last token. and its checkpoint's)
     states = [t for b in gdn for t in (b.pool_rec, *b.pool_conv)] + [self.seq_spec_h] + \
-             [t for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
+             [t for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c] + [idx.pool_state for idx in self._indexers()] + self.seq_ckpt_idx
     self._stash_state = _host_like([(t, 0, E) for t in states])
     self._stash_calls = self._chunk_calls(min((self.seq_rows() + REGION_ALIGN) // C - 1, self.stash_chunks))
     self._stash_kv_jits = {(sv, n): TinyJit(functools.partial(self._stash_kv_copy, sv, n), capture_first=True)
@@ -2086,8 +2121,7 @@ class Transformer:
       ts = [(st[0], b.cache_k, row, chunk*C, C*chunks, self._stash_writers[0])]
       if (idx:=b.indexer) is not None:
         kp = idx.idx.kpool
-        ts += [(st[1], idx.cache_k, row, chunk*C, C*chunks, self._stash_writers[1]),
-               (st[2], idx.cache_pk, row//kp, chunk*(C//kp), (C//kp)*chunks, self._stash_writers[1])]
+        ts.append((st[1], idx.cache_pk, row//kp, chunk*(C//kp), (C//kp)*chunks, self._stash_writers[1]))
       for dst, src, r, c, n, writers in ts:
         axis = 2 if src.ndim == 4 else 0
         if save:
@@ -2109,6 +2143,8 @@ class Transformer:
         slots += [rows(b.pool_rec, slot*S + ps)] + [rows(p, slot*SC + pc) for p in b.pool_conv]
     slots.append(rows(self.seq_spec_h, slot*H + hrow))
     slots += [rows(t, slot) for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
+    # (the indexers' states of the position, and of the checkpoint)
+    slots += [rows(idx.pool_state, slot*idx.SC + pc) for idx in self._indexers()] + [rows(t, slot) for t in self.seq_ckpt_idx]
     pairs = [(rows(st, entry), x) for st, x in zip(self._stash_state, slots)]
     Tensor.realize(*[(d.assign(x) if save else x.assign(d)) for d, x in pairs])
   def _stash_state_vars(self, slot:int, entry:int, pos:int, hrow:int) -> list[UOp]:
@@ -2141,6 +2177,7 @@ class Transformer:
     for b, c in zip([b for b in self.blk if isinstance(b, GatedDeltaNetBlock)], self.seq_ckpt_states):
       S, SC = int(b.slot_rec[0].shape[0]), int(b.slot_conv[0][0].shape[0])
       pairs += [(rows(c[0], slot), rows(b.pool_rec, slot*S + ps))] + [(rows(d, slot), rows(p, slot*SC + pc)) for d, p in zip(c[1:], b.pool_conv)]
+    pairs += [(rows(c, slot), rows(idx.pool_state, slot*idx.SC + pc)) for c, idx in zip(self.seq_ckpt_idx, self._indexers())]
     Tensor.realize(*[(d.assign(s) if save else s.assign(d)) for d, s in pairs])
   def _seq_S(self) -> tuple[int, int]:
     """the S of a sequence slot's recurrent states (one with SEQ_REPLAY) and of its conv states"""
