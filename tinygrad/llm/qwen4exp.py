@@ -12,7 +12,7 @@ from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custo
   kda_replay, tables_ready, MOE_TILE, I8_WMMA_QUANTS, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, \
   Q8_0, IQ3_S, q8_embed, weighted_sum, ghc_decode_mix, rows_gather, rows_scatter, seq_scores, seq_index, kv_q8_pack, qsa_decode_attention, \
   FLAG_LANE, DEC_LANE, flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, \
-  after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus, pool_window
+  after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus, picks_local, pool_window
 from tinygrad.llm.gguf import gguf_parse, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm.direct_read import DirectFile, read_many, close_rings
 from tinygrad.llm.gguf_load import gguf_shard_units, _disk_bytes, _disk_location
@@ -133,12 +133,13 @@ def _qwen_mtp_file(model:pathlib.Path) -> pathlib.Path|None:
     if (found:=sorted(d.glob("MTP/mtp-*-shared-*.gguf"))): return found[-1]
   return None
 
-def _qwen4exp_entries(kv:dict, entries:dict[str, tuple[Tensor, tuple[int, ...], int]], shard:int) -> tuple[dict, int, dict]:
+def _qwen4exp_entries(kv:dict, entries:dict[str, tuple[Tensor, tuple[int, ...], int]], shard:int, kv_split:int=1) -> tuple[dict, int, dict]:
   """
   qwen4exp's tensors as the model's: the KV heads repeated so every device holds one (shard a multiple of them), the gated deltanets in the kda
   layout (attn_qkv and its conv split in q, k and v, the q and k heads repeated for the v heads). on devices, as the rows of every device of the
-  file's tensors (gguf_shard's rows: read straight from the file): a device's v heads use a run of the k heads. returns the entries, the KV
-  heads and the rows
+  file's tensors (gguf_shard's rows: read straight from the file): a device's v heads use a run of the k heads. kv_split: the query heads of a
+  KV head's group (and their columns of the output projection) on every device of it (see TransformerConfig.kv_split). returns the entries,
+  the KV heads and the rows
   """
   entries, arch = dict(entries), kv['general.architecture']
   n_kv, rows = kv[f"{arch}.attention.head_count_kv"], {}
@@ -151,6 +152,16 @@ def _qwen4exp_entries(kv:dict, entries:dict[str, tuple[Tensor, tuple[int, ...], 
       data, shape, typ = entries[name]
       hd = shape[0] // n_kv
       entries[name], rows[name] = (data, (shard * hd, *shape[1:]), typ), (shape[0], [(d * n_kv // shard * hd, hd) for d in range(shard)])
+    if kv_split > 1:
+      for name in [k for k in entries if k.endswith('attn_q.weight')]:
+        data, shape, typ = entries[name]
+        g = shape[0] // n_kv
+        entries[name], rows[name] = (data, (shard * g, *shape[1:]), typ), (shape[0], [(d * n_kv // shard * g, g) for d in range(shard)])
+      for name in [k for k in entries if k.endswith('attn_output.weight')]:
+        # (its columns of a group repeated: every row's bytes of a group's columns (whole quant blocks) kv_split times)
+        data, shape, typ = entries[name]
+        t = data.to("CPU").reshape(shape[0], n_kv, -1).repeat_interleave(kv_split, 1)
+        entries[name] = (t.flatten(), (shape[0], shape[1] * kv_split), typ)
     n_kv = shard
   for name in [k for k in entries if k.endswith('attn_qkv.weight')]:
     blk = name[:-len('attn_qkv.weight')]
@@ -259,6 +270,9 @@ class TransformerConfig:
   max_context: int = 0
   # (the qwen sparse attention's caches: rows of the regions of the sequences sharing them (see Transformer.regions), at least max_context)
   cache_rows: int = 0
+  # the devices that split the rows of a KV head (its positions by pools, see QSABlock): the heads of the queries of its group on every one
+  # of them (n_heads its group's times kv_split), each attends its keys, the outputs combined by their log sum exps
+  kv_split: int = 1
   qk_norm: int = 0
   num_experts: int = 0
   num_experts_per_tok: int = 0
@@ -1035,7 +1049,11 @@ class TransformerBlock(FFNBlock):
 _seq_base:list[UOp|int] = [0]
 # (a prefill chunk's time is about that of this many rows more than its padded ones: its kernels' fixed time, see Transformer._chunk_plan)
 CHUNK_FIXED_ROWS = 256
-REGION_ALIGN = 2048
+# (a multiple of the pools of the KV heads' devices (kpool*kv_split): a region's pools on the devices as its positions)
+REGION_ALIGN = 3072
+def _region_rows(config:TransformerConfig) -> int:
+  """the rows of the caches the regions of the sequences are of (the REGION_ALIGN after them: the padding sequences' region)"""
+  return round_up(max(config.max_context, config.cache_rows), REGION_ALIGN)
 # a prefill chunk's rows in this many micro batches (sequence parallel: the copies of one run with the kernels of the other)
 MICRO_BATCHES = getenv("MICRO_BATCHES", 2)
 
@@ -1078,7 +1096,7 @@ class QSAIndexer:
   state:Tensor  # (S, kpool-1, D) the keys of the kpool-1 positions before a position p at p%S (S: the model's states', see update)
   pool_state:Tensor  # batched decoding: every slot's (n*SC, kpool-1, D), see slot_states
   def __init__(self, config:TransformerConfig):
-    self.idx, self.max_context, self.cache_rows = (idx:=unwrap(config.indexer)), config.max_context, config.cache_rows
+    self.idx, self.max_context, self.rows = (idx:=unwrap(config.indexer)), config.max_context, _region_rows(config) + REGION_ALIGN
     self.S, self.SC = config.rewind + 1, slot_states(config.spec_drafts)[1]
     self.q_proj, self.k_proj = Linear(config.dim, idx.n_heads * idx.head_dim, bias=False), Linear(config.dim, idx.head_dim, bias=False)
     self.q_norm, self.k_norm = nn.RMSNorm(idx.head_dim, idx.norm_eps), nn.RMSNorm(idx.head_dim, idx.norm_eps)
@@ -1087,8 +1105,7 @@ class QSAIndexer:
     if hasattr(self, "cache_pk"): return
     # the pooled keys (a call pools the pools of its tokens) of the rows of every sequence's region (see Transformer.regions), REGION_ALIGN more
     # than a context: the region of the padding sequences of a step
-    rows = max(self.max_context, self.cache_rows) + REGION_ALIGN
-    self.cache_pk = _zeros(rows // self.idx.kpool, self.idx.head_dim, dtype=dtypes.half, device=x.device)
+    self.cache_pk = _zeros(self.rows // self.idx.kpool, self.idx.head_dim, dtype=dtypes.half, device=x.device)
     self.state = _zeros(self.S, self.idx.kpool - 1, self.idx.head_dim, dtype=dtypes.half, device=x.device)
 
   def _init_slots(self, n:int):
@@ -1239,13 +1256,60 @@ class QSABlock(TransformerBlock):
     assert self.sparse and self.indexer is not None and B == 1 and isinstance(Tq, int) and Tq % 32 == 0 and isinstance(start_pos, UOp) and \
       self.indexer.idx.kpool == 4 and hd == 256, "the qwen sparse attention on the custom kernels: a prefill chunk of tiles of 32 rows"
     row_picks = self.indexer.prefill_picks(x, start_pos, T, self.freqs_cis)
-    k_store = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1)  # (KV, B, T, 2*hd)
-    store = self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(self._kv_rows(k_store).uop)
-    cache = Tensor(self.cache_k.uop.after(store))
+    cache = self._cache_store(k, v, start_pos, T)
     _state_written(cache)
     bases = (Tensor.zeros(Tq, dtype=dtypes.int32, device=x.device) + (Tensor(b).cast(dtypes.int32) if isinstance(b, UOp) else b)).contiguous()
-    attn = qsa_decode_attention(q[0].transpose(0, 1), cache.unsqueeze(2), row_picks, bases, hd**-0.5, kpool=self.indexer.idx.kpool)  # (Tq, H, 1, hd)
+    attn = self._attend(q[0].transpose(0, 1), cache, row_picks, bases)  # (Tq, H, 1, hd)
     return self._out_gated(attn.permute(2, 1, 0, 3), gate)
+
+  def _cache_store(self, k:Tensor, v:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
+    """the keys and values (B, KV, Tq, hd) of the T tokens at start_pos (of the region at _seq_base) into the cache: the cache after"""
+    b, Tq = _seq_base[0], int(k.shape[2])
+    if self.config.kv_split == 1:
+      k_store = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1)  # (KV, B, T, 2*hd)
+      store = self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(self._kv_rows(k_store).uop)
+      return Tensor(self.cache_k.uop.after(store))
+    # (the rows split over the devices of a KV head: every device its pools' rows of them)
+    t = Tensor.arange(Tq, dtype=dtypes.int32).to(k.device)
+    at = b + start_pos
+    phys = t + (Tensor(at).cast(dtypes.int32) if isinstance(at, UOp) else at)
+    W = int(self.cache_k.shape[-1])
+    kv = self._kv_rows(k.cat(v, dim=-1).transpose(0, 1).reshape(-1, 2*self.config.head_dim))
+    return rows_scatter(self.cache_k.reshape(-1, W), kv, self._kv_index(phys, t < Tensor(T))).reshape(self.cache_k.shape)
+
+  def _kv_index(self, phys:Tensor, valid:Tensor|None=None) -> Tensor:
+    """
+    the rows of the cache of every device of the positions' rows phys (n,) of the regions (valid ones): (KV*n,) split, a device's row of the
+    ones of its pools, -1 for the others (not written). kv_split 1: phys
+    """
+    S, kp = self.config.kv_split, unwrap(self.indexer).idx.kpool
+    if S == 1: return phys if valid is None else valid.where(phys, -1)
+    devs = cast(tuple[str, ...], self.cache_k.device)
+    part = (_device_index(devs) % S).reshape(-1, 1)
+    p = (phys // kp).reshape(1, -1)
+    own = (p % S) == part
+    if valid is not None: own = own & valid.reshape(1, -1)
+    return own.where((p // S) * kp + (phys % kp).reshape(1, -1), -1).reshape(-1).contiguous()
+
+  def _attend(self, q:Tensor, cache:Tensor, picks:Tensor, bases:Tensor, compact:bool=True, **kw) -> Tensor:
+    """
+    every row's heads q (rows, H, hd) on the keys of its list picks (compact: (rows, top+2) its pools, see _pool_index_kernel) of the cache from
+    bases: (rows, H, 1, hd). kv_split (compact lists): a device's heads (its group's) on its keys, the devices' outputs weighted by their log
+    sum exps (exchanged)
+    """
+    kp, S, hd = unwrap(self.indexer).idx.kpool, self.config.kv_split, self.config.head_dim
+    if S == 1: return cast(Tensor, qsa_decode_attention(q, cache.unsqueeze(2), picks, bases, hd**-0.5, kpool=kp if compact else 0, **kw))
+    local = picks_local(picks, S, kp)
+    attn, lse = cast(tuple[Tensor, Tensor], qsa_decode_attention(q, cache.unsqueeze(2), local, bases // S, hd**-0.5, kpool=kp, lse=True, **kw))
+    rows, H = int(lse.shape[0]), int(lse.shape[1])
+    N = len(cast(tuple, lse.device))
+    # the log sum exp of every head of a group: of its devices' (the heads of device d are the group's, d's part of its keys)
+    # (gathered with the devices' parts outermost: one contiguous part a device)
+    la = all_gather(lse.T.contiguous(), 0).T.reshape(rows, N // S, S, H // N)
+    m = la.max(2, keepdim=True)
+    tot = (m + (la - m).exp().sum(2, keepdim=True).log()).expand(rows, N // S, S, H // N).reshape(rows, H)
+    w = (lse - shard_rows(tot.contiguous(), 1)).exp()
+    return attn * w.reshape(rows, H, 1, 1)
 
   def _attention_seqs(self, x:Tensor, sb:SeqBatch) -> Tensor:
     """
@@ -1263,7 +1327,7 @@ class QSABlock(TransformerBlock):
     # the keys and values of the rows into their rows of the cache (a device's of its KV head)
     W = int(self.cache_k.shape[-1])
     kv = self._kv_rows(k.cat(v, dim=-1).transpose(0, 1).reshape(-1, 2*hd))
-    cache = rows_scatter(self.cache_k.reshape(-1, W), kv, phys).reshape(self.cache_k.shape)
+    cache = rows_scatter(self.cache_k.reshape(-1, W), kv, self._kv_index(phys)).reshape(self.cache_k.shape)
     # the indexer: the keys of the rows, then the pools they're in (NP from a sequence's first row's, the ones past its last row's are
     # incomplete: never picked, made again when they are) pooled from a sequence's window: the keys of the kpool-1 positions before its first
     # row (its slot's state of the position) and its rows' (window row i is position positions[g]-(kp-1)+i)
@@ -1280,12 +1344,12 @@ class QSABlock(TransformerBlock):
     # every query's scores of its sequence's pools, the lists of the keys it sees
     iq = idx._queries(x[0], *(f.reshape(rows, 1, -1) for f in freqs.chunk(2, dim=-1)))  # (rows, H, D)
     scores = seq_scores(iq, pk, sb.bases, sb.positions, R, kp, self.config.max_context // kp)
-    picks = seq_index(scores, sb.positions, ic.top_k // kp, kp)
+    picks = seq_index(scores, sb.positions, ic.top_k // kp, kp, compact=self.config.kv_split > 1)
     # every row its own list of the keys of its region: [q|0] on the latent [k|v] rows (the second half of the output is the attention's)
     qr = q.permute(2, 1, 0, 3)  # (rows, H, 1, hd)
-    latent = Tensor(cache.uop.after(pk.uop)).unsqueeze(2)
+    latent = Tensor(cache.uop.after(pk.uop))
     # (a lane a key: its scores of the heads without reductions over the lanes, the value half only of the rows read for the output)
-    attn = qsa_decode_attention(qr[:, :, 0], latent, picks, sb.row_bases, hd**-0.5, parts=8, waves=4)
+    attn = self._attend(qr[:, :, 0], latent, picks, sb.row_bases, compact=self.config.kv_split > 1, parts=8, waves=4)
     return self._out_gated(attn.permute(2, 1, 0, 3), gate)
 
   @property
@@ -1297,7 +1361,7 @@ class QSABlock(TransformerBlock):
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k"):
       # (the rows of every sequence's region, see QSAIndexer._init_state)
-      KV, N, D = self.config.n_kv_heads, max(self.config.max_context, self.config.cache_rows) + REGION_ALIGN, 2*self.config.head_dim
+      KV, N, D = self.config.n_kv_heads, (_region_rows(self.config) + REGION_ALIGN) // self.config.kv_split, 2*self.config.head_dim
       # (zeroed: the flash kernels read whole tiles past the valid region. SEQ_KV_Q8: in int8 groups of 32 and their scales (kv_q8_pack), the
       # bytes of a row 0.56x: more rows in memory)
       q8 = D % 32 == 0 and amd_custom_kernels_supported(x.device)
@@ -1596,10 +1660,9 @@ class QwenMTPBlock(QSABlock):
     Tq = x.shape[1]
     freqs = self.freqs_cis.shrink(((start_pos, start_pos + T), None)).pad_to((Tq, self.freqs_cis.shape[-1]))
     k, v = self._kv(x, *(f.reshape(1, 1, Tq, -1) for f in freqs.chunk(2, dim=-1)))
-    kv, b = self._kv_rows(k.cat(v, dim=-1)[:, :, :T].transpose(0, 1)), _seq_base[0]
-    deps = [self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(kv.uop)]
-    if self.indexer is not None: deps.append(self.indexer.update(x, start_pos, T, self.freqs_cis)[0].uop)
-    return Tensor(self.cache_k.uop.after(*deps))
+    cache = self._cache_store(k, v, start_pos, T)
+    if self.indexer is None: return cache
+    return Tensor(cache.uop.after(self.indexer.update(x, start_pos, T, self.freqs_cis)[0].uop))
 
   def head(self, streams:Tensor) -> Tensor:
     """the streams' mix: the output head's input"""
@@ -1910,10 +1973,10 @@ class Transformer:
     return getenv("SEQ_SLOTS", max(self.SEQ_SIZES))
   def _token_rows(self) -> int:
     """the token buffer: a token of every row of the caches (the regions of the sequences sharing them), and one past"""
-    return max(self.max_context, self.config.cache_rows) + REGION_ALIGN + 1
+    return _region_rows(self.config) + REGION_ALIGN + 1
   def seq_rows(self) -> int:
     """the rows of the caches the regions of the sequences are of (the REGION_ALIGN after them: the padding sequences' region)"""
-    return max(self.max_context, self.config.cache_rows)
+    return _region_rows(self.config)
 
   def _seq_init(self):
     if hasattr(self, "seq_spec_h"): return
@@ -2017,7 +2080,8 @@ class Transformer:
       return t.shrink(rng(d)).assign(t.shrink(rng(s)).contiguous())
     for b in self.blk + [self.mtp]:
       if not isinstance(b, QSABlock): continue
-      copies.append(mv(b.cache_k, src, dst, n, 2))
+      S = self.config.kv_split
+      copies.append(mv(b.cache_k, src // S, dst // S, n // S, 2))
       if (idx:=b.indexer) is not None:
         kp = idx.idx.kpool
         copies.append(mv(idx.cache_pk, src // kp, dst // kp, n // kp, 0))
@@ -2062,8 +2126,10 @@ class Transformer:
     H, E = self.stash_chunks * C, self.stash_entries
     # (the attention caches: a copy of every distinct one in host memory every device maps, written by one device: the KV heads repeated over
     # the devices are the same, the indexers' caches are on every device)
-    devs, kvr = cast(tuple[str, ...], self.token_embd.weight.device), self._kv_real
+    devs, kvr, S = cast(tuple[str, ...], self.token_embd.weight.device), self._kv_real, self.config.kv_split
     head = [d * kvr // len(devs) for d in range(len(devs))]
+    # (the rows of a KV head split over its devices (kv_split): a copy of every device's rows)
+    kv_arena = list(range(len(devs))) if S > 1 else head
     # (the devices of a copy write their part of its rows: SEQ_STASH_SPLIT of them at most)
     def code(group:list[list[int]]) -> int:
       ret = 0
@@ -2071,12 +2137,14 @@ class Transformer:
         g = g[:3]
         for i, d in enumerate(g): ret |= (i | (len(g) << 4)) << (8*d)
       return ret
-    self._stash_writers = code([[d for d in range(len(devs)) if head[d] == h] for h in range(kvr)]), code([list(range(len(devs)))])
+    self._stash_writers = code([[d] for d in range(len(devs))] if S > 1 else [[d for d in range(len(devs)) if head[d] == h] for h in range(kvr)]), \
+      code([list(range(len(devs)))])
     self._stash_kv = []
-    kv_specs = [[(b.cache_k, H)] + ([(b.indexer.cache_pk, H // b.indexer.idx.kpool)] if b.indexer is not None else []) for b in qsa]
-    owners = [devs[head.index(h)] for h in range(kvr)] + [devs[0]]
+    kv_specs = [[(b.cache_k, H // S)] + ([(b.indexer.cache_pk, H // b.indexer.idx.kpool)] if b.indexer is not None else []) for b in qsa]
+    owners = [devs[d] for d in range(len(devs))] if S > 1 else [devs[head.index(h)] for h in range(kvr)]
+    owners.append(devs[0])
     def row_bytes(t:Tensor) -> int: return per_row(t, 2 if t is not None and t.ndim == 4 else 0)
-    sizes = [sum(round_up(rows * row_bytes(t), 4096) for b in kv_specs for t, rows in b[:1]) for _ in range(kvr)] + \
+    sizes = [sum(round_up(rows * row_bytes(t), 4096) for b in kv_specs for t, rows in b[:1]) for _ in range(len(owners) - 1)] + \
             [sum(round_up(rows * row_bytes(t), 4096) for b in kv_specs for t, rows in b[1:])]
     arenas = [_shared_host(o, devs, sz) for o, sz in zip(owners, sizes)]
     offs = [0] * len(arenas)
@@ -2089,7 +2157,7 @@ class Transformer:
       u = UOp.from_buffer(mb, t.dtype, devs).reshape((1, 1, *local) if t.ndim == 4 else local)
       return Tensor(u.unshard(0) if t.ndim == 4 else u)
     for b in kv_specs:
-      self._stash_kv.append(tuple(take(t, rows, head if i == 0 else [kvr]*len(devs)) for i, (t, rows) in enumerate(b)))
+      self._stash_kv.append(tuple(take(t, rows, kv_arena if i == 0 else [len(owners) - 1]*len(devs)) for i, (t, rows) in enumerate(b)))
     # (a sequence's states of its last position: the recurrent and conv ones, the hidden state of its last token. and its checkpoint's)
     states = [t for b in gdn for t in (b.pool_rec, *b.pool_conv)] + [self.seq_spec_h] + \
              [t for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c] + [idx.pool_state for idx in self._indexers()] + self.seq_ckpt_idx
@@ -2108,7 +2176,8 @@ class Transformer:
     devs = cast(tuple[str, ...], self.token_embd.weight.device)
     def rows(t:Tensor, at:UOp, m:int, axis:int) -> Tensor: return t.shrink(tuple((at, at+m) if i == axis else None for i in range(t.ndim)))
     for b, st in zip([b for b in self.blk + [self.mtp] if isinstance(b, QSABlock)], self._stash_kv):
-      ts = [(st[0], b.cache_k, row, chunk*C, C*chunks, self._stash_writers[0])]
+      S = self.config.kv_split
+      ts = [(st[0], b.cache_k, row // S, chunk*(C // S), (C // S)*chunks, self._stash_writers[0])]
       if (idx:=b.indexer) is not None:
         kp = idx.idx.kpool
         ts.append((st[1], idx.cache_pk, row//kp, chunk*(C//kp), (C//kp)*chunks, self._stash_writers[1]))
@@ -2538,7 +2607,10 @@ class Transformer:
     entries = {k:v for k,v in entries.items() if not ((m:=re.match(r"blk\.(\d+)\.", k)) and int(m.group(1)) >= num_blocks + mtp)}
     # the n-gram table stays in host memory, the gated deltanets in the kda layout, a KV head a device
     ple_entry = entries.pop('per_layer_token_embd.weight', None)
-    entries, n_kv_heads, rows_map = _qwen4exp_entries(kv, entries, shard)
+    # (QSA_KV_SPLIT: the rows of a KV head split over its devices, see TransformerConfig.kv_split)
+    kv_real = n_kv_heads
+    kv_split = shard // kv_real if getenv("QSA_KV_SPLIT", 0) and shard > kv_real and shard % kv_real == 0 else 1
+    entries, n_kv_heads, rows_map = _qwen4exp_entries(kv, entries, shard, kv_split)
     units_map:dict[str, tuple[int, list[list[int]]]] = {}
     repeats:dict[str, int] = {}
     sizes:dict[str, int] = {}
@@ -2624,7 +2696,7 @@ class Transformer:
                       beta_fast=kv.get(f'{arch}.rope.scaling.yarn_beta_fast', 32.0),
                       beta_slow=kv.get(f'{arch}.rope.scaling.yarn_beta_slow', 1.0)) if kv.get(f'{arch}.rope.scaling.type') == 'yarn' else None
     config = TransformerConfig(
-      num_blocks=num_blocks, dim=kv[f'{arch}.embedding_length'], hidden_dim=exp_hidden, n_heads=n_heads, n_kv_heads=n_kv_heads,
+      num_blocks=num_blocks, dim=kv[f'{arch}.embedding_length'], hidden_dim=exp_hidden, n_heads=n_heads * kv_split, n_kv_heads=n_kv_heads,
       norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'], vocab_size=len(kv['tokenizer.ggml.tokens']),
       padded_vocab_size=int(state_dict['output.weight'].shape[0]), head_dim=head_dim, rope_theta=kv.get(f'{arch}.rope.freq_base', 10000.0),
       rope_dim=kv.get(f'{arch}.rope.dimension_count', head_dim), yarn=yarn, v_head_dim=kv.get(f'{arch}.attention.value_length', head_dim),
@@ -2637,7 +2709,7 @@ class Transformer:
       # (SPEC_DRAFTS: the drafts of a step (fewer for many sequences at once))
       spec_drafts=getenv("SPEC_DRAFTS", 4) if mtp else 0, ple=ple, qsa=True, expert_pad=expert_pad,
       # (SEQ_ROWS: the rows of the caches of the sequences sharing them, past a context: more conversations kept)
-      cache_rows=round_up(getenv("SEQ_ROWS", 0), REGION_ALIGN))
+      cache_rows=round_up(getenv("SEQ_ROWS", 0), REGION_ALIGN), kv_split=kv_split)
     with Linear.empty_init(): model = Transformer(config)  # (the weights are loaded)
     # (the file's KV heads: repeated so every device holds one, device d holds head d*n//devices)
     model._kv_real = kv[f'{arch}.attention.head_count_kv']
