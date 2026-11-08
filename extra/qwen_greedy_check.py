@@ -24,8 +24,12 @@ GEN, ONLY = getenv("GEN", 48), [x for x in os.environ.get("ONLY", "").split(",")
 TEMP = (0.0, 1.0)
 
 # the corpus: the repo's python files (text the model continues meaningfully)
+# (CORPUS: a file of it, the same prompts for two builds; else this tree's files, made into it)
 root = pathlib.Path(__file__).resolve().parents[1]
-text = "\n".join(p.read_text(errors="replace") for p in sorted(root.glob("tinygrad/**/*.py")) + sorted(root.glob("test/**/*.py")))
+if (cp:=os.environ.get("CORPUS")) and pathlib.Path(cp).exists(): text = pathlib.Path(cp).read_text()
+else:
+  text = "\n".join(p.read_text(errors="replace") for p in sorted(root.glob("tinygrad/**/*.py")) + sorted(root.glob("test/**/*.py")))
+  if cp: pathlib.Path(cp).write_text(text)
 corpus = tok.encode(text)
 while len(corpus) < getenv("MAXCTX", 262144): corpus = corpus + corpus
 log(f"corpus {len(corpus)} tokens")
