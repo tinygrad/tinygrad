@@ -323,7 +323,10 @@ class SeqEngine:
     a new one (from 0), with rows for a reply of `room` tokens (RESERVE at most, 0: RESERVE). None: no slot or region for it without losing a held
     conversation (not forced), or every slot active: nothing evicted, it waits
     """
-    if (ret:=self._take_seq(ids, room, force)) is not None: self.version += 1
+    if (ret:=self._take_seq(ids, room, force)) is not None:
+      self.version += 1
+      # (the continuations from a conversation's end and from its checkpoint (the reply not sent back as it was): see the status line)
+      if ret[1]: self.times["from_ckpt" if ret[2] else "from_end"] = self.times.get("from_ckpt" if ret[2] else "from_end", 0) + 1
     return ret
   def _take_seq(self, ids:list[int], room:int, force:bool) -> tuple[Seq, int, bool]|None:
     # (no slot or rows for it even with every idle one out: none of its prefix compared)
