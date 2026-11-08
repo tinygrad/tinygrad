@@ -12,7 +12,7 @@ from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custo
   kda_replay, tables_ready, MOE_TILE, I8_WMMA_QUANTS, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, \
   Q8_0, IQ3_S, q8_embed, weighted_sum, ghc_decode_mix, rows_gather, rows_scatter, seq_scores, seq_index, kv_q8_pack, qsa_decode_attention, \
   FLAG_LANE, DEC_LANE, flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, \
-  after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus
+  after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus, pool_window
 from tinygrad.llm.gguf import gguf_parse, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm.direct_read import DirectFile, read_many, close_rings
 from tinygrad.llm.gguf_load import gguf_shard_units, _disk_bytes, _disk_location
@@ -1267,26 +1267,16 @@ class QSABlock(TransformerBlock):
     # the indexer: the keys of the rows, then the pools they're in (NP from a sequence's first row's, the ones past its last row's are
     # incomplete: never picked, made again when they are) pooled from a sequence's window: the keys of the kpool-1 positions before its first
     # row (its slot's state of the position) and its rows' (window row i is position positions[g]-(kp-1)+i)
-    W0 = kp - 1 + R
-    keys = idx._proj(idx.k_proj, x[0]).half().reshape(G, R, ic.head_dim).contiguous()
-    # (read after the keys, a value of the call's input: not before the call (its implicit inputs), the MTP layer's second call reads what its
-    # first one wrote)
-    before = slot_gather(idx.pool_state, sb.slots, after_kernel(sb.positions, keys), idx.SC, dtypes.half)  # (G, kp-1, D)
-    window = before.cat(keys, dim=1).contiguous()  # (G, W0, D)
-    # (every row's state of the position after it written: the window's rows of the kpool-1 positions before that)
-    effects = [slot_scatter(idx.pool_state, window, sb.slots, Tensor.full((G,), r+1, dtype=dtypes.int32).to(x.device).contiguous(), idx.SC,
-                            shift=1, starts=sb.positions) for r in range(R)]
+    keys = idx._proj(idx.k_proj, x[0]).half().reshape(G, R, ic.head_dim)
     NP = (R - 1) // kp + 2
+    # (and every row's state of the position after it written: the window's rows of the kpool-1 positions before that)
+    pkeys, pool_after = pool_window(idx.pool_state, keys, sb.slots, sb.positions, idx.SC, NP, kp)
+    pkeys = pkeys.reshape(G*NP, kp, ic.head_dim)
     pools = ((sb.positions // kp).reshape(G, 1) + Tensor.arange(NP, dtype=dtypes.int32).reshape(1, NP).to(x.device)).reshape(-1)  # (G*NP,)
     pbase = sb.bases.reshape(G, 1).expand(G, NP).reshape(-1) // kp
-    # (the window's row of key i of pool j of a sequence: kp-1 - positions%kp + j*kp + i, the ones past its rows (incomplete pools) its last)
-    ar = (Tensor.arange(NP, dtype=dtypes.int32).reshape(1, NP, 1) * kp + Tensor.arange(kp, dtype=dtypes.int32).reshape(1, 1, kp)).to(x.device)
-    wrow = ((kp - 1 - sb.positions % kp).reshape(G, 1, 1) + ar).minimum(W0 - 1)
-    krows = (wrow + (Tensor.arange(G, dtype=dtypes.int32).to(x.device) * W0).reshape(G, 1, 1)).reshape(-1)
-    pkeys = rows_gather(window.reshape(G*W0, ic.head_dim), krows.contiguous()).reshape(G*NP, kp, ic.head_dim)
     pf = rows_gather(self.freqs_cis, (pools * kp).contiguous(), const=True)
     pooled = idx._pooled(pkeys, *pf.chunk(2, dim=-1))
-    pk = Tensor(rows_scatter(idx.cache_pk, pooled.half(), (pbase + pools).contiguous()).uop.after(*[e.uop for e in effects]))
+    pk = Tensor(rows_scatter(idx.cache_pk, pooled.half(), (pbase + pools).contiguous()).uop.after(pool_after.uop))
     # every query's scores of its sequence's pools, the lists of the keys it sees
     iq = idx._queries(x[0], *(f.reshape(rows, 1, -1) for f in freqs.chunk(2, dim=-1)))  # (rows, H, D)
     scores = seq_scores(iq, pk, sb.bases, sb.positions, R, kp, self.config.max_context // kp)

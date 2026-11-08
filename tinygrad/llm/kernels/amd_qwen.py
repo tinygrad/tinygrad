@@ -3356,6 +3356,38 @@ def slot_scatter(pool:Tensor, src:Tensor, slots:Tensor, counts:Tensor, S:int, sh
                               fxn=functools.partial(_slot_scatter_kernel, S=S, shift=shift))[0]
 
 @functools.cache
+def _pool_window_kernel(pkeys:UOp, pool:UOp, keys:UOp, slots:UOp, positions:UOp, *, S:int, NP:int, kpool:int) -> UOp:
+  # the keys (G*NP*kpool, D) of the NP pools from every sequence g's first row's (at positions[g]) from its window: the kpool-1 keys before it
+  # (its slot's state of the position: row slots[g]*S + positions[g]%S of pool (n*S, kpool-1, D)) and the keys of its R rows (keys (G, R, D)),
+  # the keys past them its last (an incomplete pool's). and the state of the position after every row written (the window's kpool-1 rows
+  # before it, rows positions[g]+r+1 of the slot: not the one read, R < S)
+  G, R, D = cast(tuple[int, int, int], keys.shape)
+  K1, W0, NK = kpool - 1, kpool - 1 + R, NP * kpool
+  g, item, lane = UOp.range(G, 0, AxisType.GLOBAL), UOp.range(NK + R * K1, 1, AxisType.GLOBAL), UOp.range(D, 2, AxisType.LOCAL)
+  slot, pos = slots[g].load().cast(dtypes.weakint), positions[g].load().cast(dtypes.weakint)
+  def win(w:UOp) -> UOp:
+    sv = pool[slot * S + pos % S, w.minimum(K1 - 1), lane].load()
+    kv = keys[g, (w - K1).maximum(0).minimum(R - 1), lane].load()
+    return (w < K1).where(sv, kv)
+  is_pk = item < NK
+  pk = pkeys[(g * NK + item).valid(is_pk), lane].store(win((K1 - pos % kpool + item).minimum(W0 - 1)).cast(pkeys.dtype))
+  si = (item - NK).maximum(0)
+  r, i = si // K1, si % K1
+  st = pool[(slot * S + (pos + r + 1) % S).valid(item >= NK), i, lane].store(win(r + 1 + i).cast(pool.dtype))
+  return UOp.group(pk, st).end(g, item, lane).sink(arg=KernelInfo(name="pool_window", opts_to_apply=()))
+
+def pool_window(pool:Tensor, keys:Tensor, slots:Tensor, positions:Tensor, S:int, NP:int, kpool:int) -> tuple[Tensor, Tensor]:
+  """
+  the keys (G*NP*kpool, D) of the NP pools from the first row's of G sequences of R rows (keys (G, R, D)), the ones before them from the
+  sequences' slots' states (pool (n*S, kpool-1, D), see QSAIndexer), and the pool after the states of their rows' next positions are written
+  """
+  G, R, D = (int(x) for x in keys.shape)
+  out = Tensor.empty(G * NP * kpool, D, dtype=keys.dtype, device=keys.device)
+  out, pool = Tensor.custom_kernel(out, pool, keys.contiguous(), slots, positions,
+                                   fxn=functools.partial(_pool_window_kernel, S=S, NP=NP, kpool=kpool))[:2]
+  return out, pool
+
+@functools.cache
 def _slot_gather_kernel(dst:UOp, pool:UOp, slots:UOp, starts:UOp, S:int) -> UOp:
   # dst[g] (G, rows, F) <- row slots[g]*S + starts[g]%S of pool (n*S, rows, F), cast to dst's dtype
   G, rows, F = cast(tuple[int, int, int], dst.shape)
