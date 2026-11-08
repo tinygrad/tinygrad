@@ -397,7 +397,8 @@ class Handler(VizHandler):
         if tool_calls: message["tool_calls"] = tool_calls
         reply(json.dumps({**c, "object":"chat.completion", "choices":[{"index":0, "message":message, "finish_reason":finish_reason}]}).encode())
     else:
-      raise RuntimeError(f"unhandled path {self.path}")
+      self.send_data(json.dumps({"error": {"message": f"unknown path {self.path}", "type": "invalid_request_error", "code": "not_found"}}).encode(),
+                     status_code=404)
 
   def render(self, messages:list[dict], tools:list[dict]|None, body:dict) -> str:
     # (a reasoning effort asked for is the template's, else its default)
@@ -497,6 +498,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   requests come in on threads of their own, the model runs on the server's thread: a model whose sequences share its caches
   (Transformer.seqs_supported) decodes all of them at once (schedule_seqs), another one request at a time (schedule_alone)
   """
+  def handle_error(self, request, client_address):
+    # (a client gone before its reply: not an error of the server's, no traceback)
+    if isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError)): return
+    super().handle_error(request, client_address)
   daemon_threads = True
   request_queue_size = 1024  # the connections waiting to be accepted (many clients at once: the default of 5 refuses them)
   verbose_prefill = False
