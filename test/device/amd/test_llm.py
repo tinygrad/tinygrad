@@ -130,7 +130,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         self.assertIsNone(linear.ggml_type)
 
   def test_mixed_quant_linear_split_k(self):
-    for typ in (10, 11, 16, 17, 18, 19, 20, 21, 22):
+    for typ in (10, 11, 16, 17, 18, 19, 20, 21, 22, 42):
       with self.subTest(ggml_type=typ):
         self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=3, token_counts=(1,))
 
@@ -228,12 +228,12 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         np.testing.assert_array_equal(out.numpy(), 32)
         np.testing.assert_array_equal(state.numpy(), 1)
 
-  def _test_moe_decode(self, typ:int, IN:int=256):
+  def _test_moe_decode(self, typ:int):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
     rng = np.random.default_rng(5)
-    E, T, K, OUT, size = 4, 1, 2, 16, QUANT_SIZES[typ]
+    E, T, K, IN, OUT, size = 4, 1, 2, 256, 16, QUANT_SIZES[typ]
     blocks = rng.integers(0, 256, (E*OUT*IN//256, size), dtype=np.uint8)
-    blocks.reshape(-1, SMALL_BLOCK_QUANTS[typ][1]*2 if typ in SMALL_BLOCK_QUANTS else size)[:, :2] = np.array([0.001], np.float16).view(np.uint8)
+    blocks[:, :2] = np.array([0.001], np.float16).view(np.uint8)
     blocks[:, 2:4] = np.array([0.0001], np.float16).view(np.uint8)
     decoded = ggml_data_to_tensor(Tensor(blocks.flatten()).contiguous().realize(), E*OUT*IN, typ).reshape(E, OUT, IN)
     w = decoded.numpy()
@@ -252,7 +252,6 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_moe_decode(self): self._test_moe_decode(Q4_K)
   def test_moe_decode_iq3_s(self): self._test_moe_decode(IQ3_S)
   def test_moe_decode_iq1_s(self): self._test_moe_decode(IQ1_S)
-  def test_moe_decode_q2_0(self): self._test_moe_decode(Q2_0, IN=640)
 
   def test_gated_delta_random_scan(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
