@@ -148,6 +148,24 @@ class TestSeqRegions(unittest.TestCase):
         for t in eng.seqs: self.assertEqual(model.cache[t.base:t.base+t.n], t.tokens[:t.n])
     self.assertGreater(len([c for c in model.calls if c[0] == "move"]), 0)
 
+class TestSeqWindow(unittest.TestCase):
+  def test_idle_neighbor_not_moved(self):
+    # rows full of A (decoding), B (idle), C (decoding): a new prompt that fits B's rows evicts B, nothing moved
+    model = CacheModel()
+    eng = SeqEngine(model)
+    seqs = []
+    for i in range(3):
+      ids = [100000 * (i + 1) + j for j in range(18000)]
+      s, start, restore = eng.take(ids, 100)
+      eng.prefill(s, ids, start, restore, (0.0, 1.0))
+      seqs.append(s)
+    eng.stop(seqs[1], len(seqs[1].tokens))
+    model.calls.clear()
+    with patch.object(SeqEngine, "STICKY", 0.0): s, _, _ = eng.take(list(range(900000, 915000)), 100)
+    self.assertEqual([c for c in model.calls if c[0] == "move"], [])
+    self.assertNotIn(seqs[1], eng.seqs)
+    self.assertEqual(s.base, seqs[0].base + seqs[0].cap)
+
 class TestScheduleSeqs(unittest.TestCase):
   """the server's scheduling of sequences (schedule_seqs) on a fake model"""
   def setUp(self):

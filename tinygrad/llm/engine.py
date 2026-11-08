@@ -141,12 +141,34 @@ class SeqEngine:
     anything is evicted: False (nothing evicted) if they can't be, or a held one would be lost (not forced)
     """
     if (victims:=self._victims(rows, slot, keep)) is None or (not force and not self._stash_fits(victims)): return False
+    self._evict_all(victims, force)
+    return True
+  def _evict_all(self, victims:list[Seq], force:bool):
     for v in sorted(victims, key=lambda v: not self.held(v.used)):
       self.seqs.remove(v)
       self.evictions += 1
       if not self._stash(v, force): self.lost += 1
     self.version += 1
-    return True
+  def _window(self, need:int, force:bool, after:Seq|None=None) -> tuple[int, list[Seq]]|None:
+    """
+    a run of free rows and idle regions of need rows (after: the one right after its region), nothing moved: its first row and the idle ones
+    evicted for it (the fewest held ones, then the fewest rows of them). None: none (a held one would be lost, not forced)
+    """
+    regs = sorted(self.seqs, key=lambda t: t.base)
+    ends = [0] + [t.base + t.cap for t in regs]
+    gaps = [t.base - ends[i] for i, t in enumerate(regs)] + [self.rows - ends[-1]]
+    best:tuple[tuple[bool, int], int, list[Seq]]|None = None
+    for a in ([regs.index(after) + 1] if after is not None else range(len(regs) + 1)):
+      total, victims = 0, cast(list[Seq], [])
+      for b in range(a, len(regs) + 1):
+        if (total:=total + gaps[b]) >= need:
+          key = (any(self.held(v.used) for v in victims), sum(v.n for v in victims))
+          if (best is None or key < best[0]) and (force or self._stash_fits(victims)): best = (key, ends[a], victims)
+          break
+        if b == len(regs) or regs[b].active: break
+        victims.append(regs[b])
+        total += regs[b].cap
+    return best[1:] if best is not None else None
   def _stash(self, s:Seq, force:bool=False) -> bool:
     """
     s (evicted) into the stash: its chunks its copy there doesn't have (a resident's copy, of the prefix it shares) and its states, the least
@@ -265,6 +287,11 @@ class SeqEngine:
       self._move(s, base)
       s.cap = need
       return True
+    # (idle ones right after it evicted, nothing moved)
+    if (win:=self._window(need - s.cap, force, after=s)) is not None:
+      self._evict_all(win[1], force)
+      s.cap = need
+      return True
     if not self._make_room(need - s.cap, False, s, force): return False
     # (the fewest rows moved: the regions after s packed up for its growth (the last first), or s moved into a gap made for it)
     delta, after = need - s.cap, sorted((t for t in self.seqs if t.base > s.base), key=lambda t: t.base)
@@ -325,11 +352,17 @@ class SeqEngine:
     # (the stashed one out of the stash while its slot and region are made: the evictions don't stash over it)
     start = scont(stashed) if stashed is not None else 0
     if stashed is not None: self.stashed.remove(stashed)
-    if (need:=self._need(length)) > self.rows or not self._make_room(need, True, None, force):
+    # (a run of free rows and idle ones evicted, nothing moved: else the least recently used ones evicted, the fewest rows moved for a region)
+    need, base = self._need(length), None
+    if need <= self.rows and (win:=self._window(need, force)) is not None and (win[1] or len(self.seqs) < self.nslots):
+      self._evict_all(win[1], force)
+      base = win[0]
+    elif need > self.rows or not self._make_room(need, True, None, force):
       if stashed is not None: self.stashed.append(stashed)
       return None
     s = Seq(min(set(range(self.nslots)) - {t.slot for t in self.seqs}), 0, 0, active=True)
-    self._place(s, need)
+    if base is None: self._place(s, need)
+    else: s.base, s.cap = base, need
     self.seqs.append(s)
     if stashed is None: return s, 0, False
     n, st = len(stashed.tokens), time.perf_counter()
