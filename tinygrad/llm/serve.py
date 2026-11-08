@@ -707,7 +707,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
               "stash": {"sequences": len(stashed), "tokens": sum(len(x.tokens) for x in stashed), "chunks_free": len(eng.free_chunks),
                         "held": sum(eng.held(x.used) for x in stashed)},
               "capacity": {"tokens": eng.rows + C * getattr(self.model, "stash_chunks", 0), "slots": eng.nslots,
-                           "stash_entries": getattr(self.model, "stash_entries", 0), "max_active": eng.max_active},
+                           "stash_entries": getattr(self.model, "stash_entries", 0), "max_active": eng.max_active,
+                           "conversations": eng.nslots + getattr(self.model, "stash_entries", 0)},
               "evictions": eng.evictions, "lost": eng.lost}
       # (the memory of the devices: weights, caches, slots, workspace, free)
       if (mr:=getattr(self.model, "memory_report", None)) is not None:
@@ -831,32 +832,36 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def host_hit(e:HostConv, ids:list[int]) -> int:
     """the tokens of ids a conversation in host memory has: all of it, its checkpoint's (the prompt of its last reply), or none"""
     return next((n for n in (len(e.tokens), e.ckpt) if 0 < n < len(ids) and starts(ids, e.tokens, n)), 0)
-  def kept(self) -> list[list[int]]:
-    """the kept conversations' tokens (and their checkpoints'): the model's, the sequences', the stashed ones', the batch slots' and the host's"""
-    ret = [list(c)] if isinstance(c:=getattr(self.model, "_cached_tokens", None), list) else []
+  def kept(self) -> list[tuple[list[int], int]]:
+    """
+    the kept conversations' tokens and their lengths (and their checkpoints': the same tokens, the checkpoint's length. not a copy of every
+    conversation's prefix a request): the model's, the sequences', the stashed ones', the batch slots' and the host's
+    """
+    ret = [(list(c), len(c))] if isinstance(c:=getattr(self.model, "_cached_tokens", None), list) else []
     if (eng:=getattr(self, "engine", None)) is not None:
-      ret += [t for s in list(eng.seqs) for t in (s.tokens, s.tokens[:s.ckpt])]
-      ret += [t for x in list(eng.stashed) for t in (x.tokens, x.tokens[:x.ckpt])]
-    return ret + [t for t, _ in list(getattr(self, "stash", {}).values())] + [e.tokens for e in list(getattr(self, "host", []))]
+      ret += [p for s in list(eng.seqs) for p in ((s.tokens, len(s.tokens)), (s.tokens, s.ckpt))]
+      ret += [p for x in list(eng.stashed) for p in ((x.tokens, len(x.tokens)), (x.tokens, x.ckpt))]
+    return ret + [(t, len(t)) for t, _ in list(getattr(self, "stash", {}).values())] + \
+      [(e.tokens, len(e.tokens)) for e in list(getattr(self, "host", []))]
   def reuse_tokens(self, rendered:str, ids:list[int]) -> list[int]:
     """
     the tokens of a prompt that continues a kept conversation as its text but not its tokens (the model's reply tokenized again differently):
     the kept ones and the rest's, so the cache holds it
     """
-    cands = [t for t in self.kept() if 1000 <= len(t) < len(ids) + 1000]
+    cands = [(t, n) for t, n in self.kept() if 1000 <= n < len(ids) + 1000 and n <= len(t)]
     # (one the prompt's tokens continue: the cache has it. a longer one the prompt's text continues: the ones sharing the most tokens with it
     # (an agent's own conversation, not the others' with the same system prompt), however early they differ: a sampled token of an early
     # reply that isn't its text's tokenization differs from then on, every turn after)
-    exact = max((len(t) for t in cands if starts(ids, t)), default=0)
+    exact = max((n for t, n in cands if starts(ids, t, n)), default=0)
     # (an agent's own ones: the others' differ in their task, at the start)
-    cands = [t for t in cands if len(t) > exact and same_start(t, ids)]
-    for t in sorted(cands, key=lambda t: common_prefix(t, ids), reverse=True)[:2]:
+    own = [t[:n] for t, n in cands if n > exact and t[:(m:=min(2048, n // 2, len(ids) // 2))] == ids[:m]]
+    for t in sorted(own, key=lambda t: common_prefix(t, ids), reverse=True)[:2]:
       if rendered.startswith(text:=self.tok.decode(t)): return t + self.tok.encode(rendered[len(text):])
     return ids
 
   def miss_log(self, ids:list[int], start:int):
     """a request prefilled from 2000 tokens less than it shares with a kept conversation at least: where they differ"""
-    kept = [t for t in self.kept() if len(t) >= start + 2000 <= len(ids) and t[start+1999] == ids[start+1999]]
+    kept = [t for t, n in self.kept() if n == len(t) >= start + 2000 <= len(ids) and t[start+1999] == ids[start+1999]]
     n, t = max(((common_prefix(t, ids), t) for t in kept if same_start(t, ids)), key=lambda x: x[0], default=(0, []))
     if n - start < 2000: return
     dec = self.tok.decode
@@ -1279,7 +1284,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             job = c
             break
           t0 = time.perf_counter()
-          got = eng.take(ids:=prompt(c), max(0, (c.max_tokens or 0) - len(c.generated)), force=starving(c))
+          # (a starving one loses a held conversation for its own only if it continues one (an agent's turn), or nothing else runs: a new
+          # conversation past the caches' and the stash's capacity waits for one to end, not every turn after it prefilled again)
+          force = starving(c) and (c.hit > 0 or not (active or filling))
+          got = eng.take(ids:=prompt(c), max(0, (c.max_tokens or 0) - len(c.generated)), force=force)
           self.stats.add("take", time.perf_counter() - t0)
           if got is None:
             c.tried, c.tried_at = eng.version, now
