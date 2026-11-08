@@ -58,7 +58,7 @@ class TestGGUFShard(unittest.TestCase):
   def test_quantized_shards(self):
     # the shards are still recognized as packed quantized weights, and keep the direction of their split
     if Tensor.empty(1, device=DEVICES[0]).uop.contiguous_view() is None: self.skipTest("requires buffer views")
-    for typ, axis in itertools.product((Q.Q4_K, Q.Q6_K, Q.IQ4_XS), (0, 1, None)):
+    for typ, axis in itertools.product((Q.Q8_0, Q.Q4_K, Q.Q6_K, Q.IQ4_XS), (0, 1, None)):
       with self.subTest(typ=typ.name, axis=axis):
         data = Tensor(random_data((8, 1024), typ).reshape(-1), device='CPU')
         layer = Linear(1024, 8, bias=False)

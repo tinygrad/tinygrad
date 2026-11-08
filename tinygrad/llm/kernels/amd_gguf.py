@@ -25,9 +25,6 @@ def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
   packed_sizes = {typ: decoded.numel() * type_size // 256 for typ,type_size in QUANT_SIZES.items()
                   if in_features % (SMALL_BLOCK_QUANTS[typ][0] if typ in SMALL_BLOCK_QUANTS else GGML_BLOCK_SIZE) == 0}
   graph = decoded.uop.toposort()
-  raw = next((u for u in graph if u.op in (Ops.SHRINK, Ops.BUFFER, Ops.UNSHARD) and u.dtype == dtypes.uint8 and
-              prod(u.shape) in packed_sizes.values()), None)
-  if raw is None: return None
   # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
   # This rejects subsequent arithmetic and permutations, including RoPE's concatenated query weights.
   # a permute keeps the order if the axes not of size 1 on a device stay sorted (gguf_shard moves the devices)
@@ -36,9 +33,11 @@ def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
       (u.op is Ops.PERMUTE and (kept:=[a for a in u.marg if u.src[0].shard_shape[a] != 1]) == sorted(kept)):
       u = u.src[0]
     return u
-  # Several formats have the same byte count (Q3_K/IQ3_S and Q4_K/IQ4_NL). Match the expression, not just the size.
+  # Several formats have the same byte count (Q3_K/IQ3_S, Q4_K/IQ4_NL and a Q4_K shard/Q2_0). Match the expression, not just the size.
   for ggml_type, size in packed_sizes.items():
-    if size != prod(raw.shape): continue
+    raw = next((u for u in graph if u.op in (Ops.SHRINK, Ops.BUFFER, Ops.UNSHARD) and u.dtype == dtypes.uint8 and
+                prod(u.shape) == size), None)
+    if raw is None: continue
     expected = ggml_data_to_tensor(Tensor(raw).flatten(), int(decoded.numel()), ggml_type)
     if unwrapped(decoded.uop).key == unwrapped(expected.uop).key: break
   else: return None
