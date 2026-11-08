@@ -6,9 +6,7 @@ from test.helpers import assert_kernel_count
 from test.runtime.test_custom_kernel import custom_add_one_kernel
 
 # a gated index pushed through movement ops keeps gating the access
-# TODO: the expectedFailures are the movement op dropping the valid
 class TestGatedIndexMovement(unittest.TestCase):
-  @unittest.expectedFailure
   def test_gated_store_2d(self):
     # the valid on one index of the 2d C gates the whole store, only j == 0 writes C[i, 0]
     def kernel(C:UOp) -> UOp:
@@ -17,7 +15,6 @@ class TestGatedIndexMovement(unittest.TestCase):
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4, 4), fxn=kernel)[0][:, 0].tolist(), [1.]*4)
 
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_shared, "LOCAL buffer needs shared memory")
-  @unittest.expectedFailure
   def test_gated_local_store_2d(self):
     # the valid on one index of the 2d LOCAL tmp gates the whole store, only j == 0 writes tmp[i, 0]
     def kernel(C:UOp) -> UOp:
@@ -27,7 +24,6 @@ class TestGatedIndexMovement(unittest.TestCase):
       return C[i].store(tmp.after(st)[i, 0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), fxn=kernel)[0].tolist(), [1.]*4)
 
-  @unittest.expectedFailure
   def test_gated_store_partial_reshape(self):
     def kernel(C:UOp) -> UOp:
       i, j = UOp.range(2, 0), UOp.range(3, 1, AxisType.LOOP)
@@ -35,14 +31,12 @@ class TestGatedIndexMovement(unittest.TestCase):
       return dst.store((j+10).cast(C.dtype).reshape(1).expand(4)).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.zeros(4, 4).contiguous(), fxn=kernel)[0].tolist(), [[10.]*4, [0.]*4]*2)
 
-  @unittest.expectedFailure
   def test_gated_store_reshape_indexed_clause(self):
     def kernel(C:UOp) -> UOp:
       i, j = UOp.range(4, 0), UOp.range(2, 1)
       return C.reshape(4, 2, 2).index(i.valid(j.eq(0)), j, 0).store(7.).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.zeros(16).contiguous(), fxn=kernel)[0].tolist(), [7., 0., 0., 0.]*4)
 
-  @unittest.expectedFailure
   def test_gated_load_2d(self):
     # the valid on one index of the 2d A gates the whole load, it is 0 where j != 0
     def kernel(C:UOp, A:UOp) -> UOp:
@@ -51,7 +45,6 @@ class TestGatedIndexMovement(unittest.TestCase):
     a = Tensor.arange(16).reshape(4, 4).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4, 4), a, fxn=kernel)[0].tolist(), a[:, :1].pad(((0, 0), (0, 3))).tolist())
 
-  @unittest.expectedFailure
   def test_gated_load_expand(self):
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j = UOp.range(5, 0), UOp.range(4, 1)
@@ -59,7 +52,6 @@ class TestGatedIndexMovement(unittest.TestCase):
     a = Tensor([1., 2., 3., 4.]).realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(5, 4), a, fxn=kernel)[0].tolist(), [[1., 2., 3., 4.]]*4+[[0.]*4])
 
-  @unittest.expectedFailure
   def test_gated_load_expand_double_pad(self):
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j = UOp.range(6, 0), UOp.range(4, 1)
@@ -68,14 +60,12 @@ class TestGatedIndexMovement(unittest.TestCase):
     a = Tensor([1., 2., 3., 4.]).realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(6, 4), a, fxn=kernel)[0].tolist(), [[0.]*4]*2+[[1., 2., 3., 4.]]*4)
 
-  @unittest.expectedFailure
   def test_gated_load_expand_bool(self):
     def kernel(C:UOp, A:UOp) -> UOp:
       i = UOp.range(3, 0)
       return C[i].store(A.reshape(()).expand(3)[i.valid(i.eq(0))].where(7., 2.)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(3), Tensor([True]).realize(), fxn=kernel)[0].tolist(), [7., 2., 2.])
 
-  @unittest.expectedFailure
   def test_gated_load_reshape(self):
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j = UOp.range(3, 0), UOp.range(4, 1)
@@ -83,7 +73,6 @@ class TestGatedIndexMovement(unittest.TestCase):
     a = Tensor([float(i) for i in range(16)]).realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(3, 4), a, fxn=kernel)[0].tolist(), [[v, 0., 0., 0.] for v in (4., 8., 12.)])
 
-  @unittest.expectedFailure
   def test_gated_load_reshape_indexed_clause(self):
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j = UOp.range(4, 0), UOp.range(2, 1)
@@ -91,7 +80,6 @@ class TestGatedIndexMovement(unittest.TestCase):
     a = Tensor([float(i) for i in range(16)]).realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4, 2), a, fxn=kernel)[0].tolist(), [[v, 0.] for v in (0., 4., 8., 12.)])
 
-  @unittest.expectedFailure
   def test_gated_load_reshape_nested(self):
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j = UOp.range(3, 0), UOp.range(4, 1)
@@ -99,7 +87,6 @@ class TestGatedIndexMovement(unittest.TestCase):
     a = Tensor([float(i) for i in range(16)]).realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(3, 4), a, fxn=kernel)[0].tolist(), [[v, 0., 0., 0.] for v in (4., 8., 12.)])
 
-  @unittest.expectedFailure
   def test_gated_load_reshape_stack_nested(self):
     def kernel(C:UOp, A:UOp) -> UOp:
       j = UOp.range(3, 0)
@@ -109,12 +96,9 @@ class TestGatedIndexMovement(unittest.TestCase):
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(3, 2), a, fxn=kernel)[0].tolist(), [[1., 5.], [0., 5.], [0., 5.]])
 
 # an invalid view has no contiguous offset
-# TODO: the expectedFailures are the movement op dropping the valid
 @unittest.skipIf(Device.DEFAULT in {"WEBGPU", "CL"}, "subbuffer not supported")
 class TestContiguousViewOffsetInvalid(unittest.TestCase):
-  @unittest.expectedFailure
   def test_expand_shrink_invalid(self): self.assertIsNone(UOp.empty(1,4).expand(2,4).pad(((0,1),(0,0)))[2].contiguous_view_offset())
-  @unittest.expectedFailure
   def test_scalar_expand_shrink_invalid(self): self.assertIsNone(UOp.empty(1).expand(2).pad(((0,1),))[2:3].contiguous_view_offset())
 
 class TestCustomKernelInput(unittest.TestCase):
