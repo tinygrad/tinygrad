@@ -707,7 +707,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
               "stash": {"sequences": len(stashed), "tokens": sum(len(x.tokens) for x in stashed), "chunks_free": len(eng.free_chunks),
                         "held": sum(eng.held(x.used) for x in stashed)},
               "capacity": {"tokens": eng.rows + C * getattr(self.model, "stash_chunks", 0), "slots": eng.nslots,
-                           "stash_entries": getattr(self.model, "stash_entries", 0), "max_active": eng.max_active},
+                           "stash_entries": getattr(self.model, "stash_entries", 0), "max_active": eng.max_active,
+                           "conversations": eng.nslots + getattr(self.model, "stash_entries", 0)},
               "evictions": eng.evictions, "lost": eng.lost}
       # (the memory of the devices: weights, caches, slots, workspace, free)
       if (mr:=getattr(self.model, "memory_report", None)) is not None:
@@ -1283,7 +1284,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             job = c
             break
           t0 = time.perf_counter()
-          got = eng.take(ids:=prompt(c), max(0, (c.max_tokens or 0) - len(c.generated)), force=starving(c))
+          # (a starving one loses a held conversation for its own only if it continues one (an agent's turn), or nothing else runs: a new
+          # conversation past the caches' and the stash's capacity waits for one to end, not every turn after it prefilled again)
+          force = starving(c) and (c.hit > 0 or not (active or filling))
+          got = eng.take(ids:=prompt(c), max(0, (c.max_tokens or 0) - len(c.generated)), force=force)
           self.stats.add("take", time.perf_counter() - t0)
           if got is None:
             c.tried, c.tried_at = eng.version, now
