@@ -329,17 +329,28 @@ class Handler(VizHandler):
       req.rx = item[1:]
       return item[0]
 
+  def bad_request(self, msg:str):
+    stderr_log(f"{self.path}  {colored('--', 'BLACK')}  {colored('bad request', 'red')}: {msg[:200]}\n")
+    return self.send_data(json.dumps({"error": {"message": msg, "type": "invalid_request_error", "code": "invalid_request"}}).encode(),
+                          status_code=400)
+
   def do_POST(self):
     request_st = time.perf_counter()
     log = f"{self.path}  {colored('--', 'BLACK')}  "
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-    body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
+    # (a body that isn't a JSON object, messages the template can't render: a 400, not the handler's exception (the connection dropped))
+    try:
+      body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
+      if not isinstance(body, dict): raise ValueError("the body is not a JSON object")
+    except Exception as e: return self.bad_request(f"invalid request body: {e}")
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if (path:=self.path.split("?")[0]) in ("/v1/messages", "/v1/messages/count_tokens"): return self.anthropic(path, body, log, request_st)
     if self.path == "/v1/chat/completions":
       # render and tokenize
-      normalize_messages(body["messages"])
-      rendered = self.render(body["messages"], body.get("tools"), body)
+      try:
+        normalize_messages(body["messages"])
+        rendered = self.render(body["messages"], body.get("tools"), body)
+      except Exception as e: return self.bad_request(f"{type(e).__name__}: {e}")
       ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
       log += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
       if len(ids) >= self.server.model.max_context:
@@ -393,14 +404,20 @@ class Handler(VizHandler):
     effort = body.get("reasoning_effort") or (body.get("output_config") or {}).get("effort")
     # (the template's own arguments a request asks for, e.g. enable_thinking: chat_template_kwargs as vLLM's)
     extra = {k: v for k, v in (body.get("chat_template_kwargs") or {}).items() if k not in ("messages", "tools", "add_generation_prompt")}
-    return self.server.template.render(**{"messages": messages, "tools": tools, "add_generation_prompt": True, "preserve_thinking": True,
+    text = self.server.template.render(**{"messages": messages, "tools": tools, "add_generation_prompt": True, "preserve_thinking": True,
                                           **({"reasoning_effort": effort} if effort else {}), **extra})
+    # (JSON can have lone surrogates ("\ud800"), not text the tokenizer can encode: a replacement character)
+    return text.encode("utf-8", "surrogatepass").decode("utf-8", "replace")
 
   def anthropic(self, path:str, body:dict, log:str, request_st:float):
     """the Anthropic Messages API: the request as chat completions' messages, the reply's chunks as its content blocks (and stream events)"""
-    msgs, tools = anthropic_messages(body)
-    normalize_messages(msgs)
-    rendered = self.render(msgs, tools, body)
+    try:
+      msgs, tools = anthropic_messages(body)
+      normalize_messages(msgs)
+      rendered = self.render(msgs, tools, body)
+    except Exception as err:
+      return self.send_data(json.dumps({"type": "error", "error": {"type": "invalid_request_error", "message": f"{type(err).__name__}: {err}"}})
+                            .encode(), status_code=400)
     ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
     if path.endswith("count_tokens"): return self.send_data(json.dumps({"input_tokens": len(ids)}).encode())
     log += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "

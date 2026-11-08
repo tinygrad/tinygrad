@@ -955,7 +955,19 @@ class PCIIface(PCIIfaceBase):
     self._collect_interrupts()
     if self.dev_impl.is_err_state: raise RuntimeError("Device is in error state")
 
+  def hang_report(self) -> str:
+    """where every compute queue of the device is: its ring and its command processor's place in its indirect buffer (a command buffer)"""
+    out = []
+    for q in self.dev.compute_queues.values():
+      with contextlib.suppress(Exception):
+        st = self.dev_impl.gfx.hqd_state(q.params[6])
+        size, pos = (st["IB_CONTROL"] & 0xfffff) * 4, (st["IB_RPTR"] & 0xfffff) * 4
+        out.append(f"hw queue {q.params[6]}: active {st['ACTIVE']} ring rptr {st['PQ_RPTR']} wptr {st['PQ_WPTR_LO']} ib {st['IB_BASE_ADDR_HI']:x}"
+                   f"{st['IB_BASE_ADDR']:08x} at {pos} of {size} bytes (processing {st['IB_CONTROL'] >> 31})")
+    return f"{self.dev.device}: " + "; ".join(out)
+
   def on_device_hang(self):
+    with contextlib.suppress(Exception): print("hang:", self.hang_report(), flush=True)
     self._collect_interrupts(reset=self.dev.can_recover)
     # (the device isn't finalized as clean: its next boot quiesces and resets it, see AMDev.fini)
     self.dev_impl.is_err_state = True

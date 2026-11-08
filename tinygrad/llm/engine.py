@@ -2,7 +2,26 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from typing import cast
-from tinygrad.helpers import round_up
+from tinygrad.helpers import round_up, getenv
+
+def _trace(model):
+  """(SEQ_TRACE) every seq_ call of the model printed when it starts and ends (the last one started of a hang is its)"""
+  import functools, sys
+  def short(a):
+    if isinstance(a, list) and a and isinstance(a[0], tuple) and len(a[0]) >= 4:
+      return f"[{len(a)} seqs: " + " ".join(f"{t[0]}@{t[2]}+{t[3]}" for t in a) + "]"
+    if isinstance(a, list): return f"<{len(a)} ints>"
+    return repr(a)
+  for name in [n for n in dir(model) if n.startswith("seq_") and callable(getattr(model, n))]:
+    fn = getattr(model, name)
+    @functools.wraps(fn)
+    def w(*a, _fn=fn, _name=name, **kw):
+      st = time.perf_counter()
+      print(f"TRACE {st:.3f} {_name}({', '.join(short(x) for x in a)}{', ' if kw else ''}{kw or ''})", file=sys.stderr, flush=True)
+      r = _fn(*a, **kw)
+      print(f"TRACE {time.perf_counter():.3f} {_name} done {1000*(time.perf_counter()-st):.1f} ms", file=sys.stderr, flush=True)
+      return r
+    setattr(model, name, w)
 
 # ******** sequences sharing the model's caches (Transformer.seq_*): the host's side ********
 # every resident sequence (a conversation) has a slot of the recurrent states and a region of rows of the attention caches. a prompt continues
@@ -63,6 +82,7 @@ class SeqEngine:
   def __init__(self, model):
     from tinygrad.llm.qwen4exp import REGION_ALIGN
     self.model, self.k, self.align = model, model.config.spec_drafts, REGION_ALIGN
+    if getenv("SEQ_TRACE"): _trace(model)
     self.rows, self.nslots = model.seq_rows(), model.seq_slots()
     self.seqs:list[Seq] = []
     self.max_active, self.evictions = max(model.SEQ_SIZES), 0

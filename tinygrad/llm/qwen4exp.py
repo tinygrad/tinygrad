@@ -1856,7 +1856,14 @@ class Transformer:
     st = time.perf_counter()
     while isinstance(v:=get(), int) and v < 0:
       if time.perf_counter() - st > 10:
-        for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
+        # (the devices' timelines: done / submitted, the ones behind the others are where it hangs)
+        devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
+        print(f"{what}: none after 10 s, timelines " + " ".join(f"{d}={(tl:=Device[d].timeline.host.view(fmt='Q'))[0]}/{tl[1]}" for d in devs),
+              flush=True)
+        for d in devs:
+          if (rep:=getattr(getattr(Device[d], "iface", None), "hang_report", None)) is not None:
+            with contextlib.suppress(Exception): print("  " + rep(), flush=True)
+        for d in devs: Device[d].synchronize()
         if isinstance(v:=get(), int) and v < 0: raise RuntimeError(f"{what}: none after the devices finished")
         break
     return v

@@ -453,6 +453,13 @@ class AM_GFX(AM_IP):
 
       self.adev.regRLC_SAFE_MODE.write(message=0, cmd=1, inst=xcc)
 
+  def hqd_state(self, idx:int) -> dict[str, int]:
+    """a compute queue's (hardware queue idx, as setup_ring's) registers: where its command processor is in its ring and indirect buffer"""
+    self._grbm_select(me=1, pipe=idx // 4, queue=idx % 4)
+    try: return {n: self.adev.reg(f"regCP_HQD_{n}").read() for n in ("ACTIVE", "PQ_RPTR", "PQ_WPTR_LO", "IB_BASE_ADDR", "IB_BASE_ADDR_HI", "IB_RPTR",
+                                                                        "IB_CONTROL")}
+    finally: self._grbm_select()
+
   def _grbm_select(self, me=0, pipe=0, queue=0, vmid=0, inst=0):
     self.adev.regGRBM_GFX_CNTL.write(meid=me, pipeid=pipe, vmid=vmid, queueid=queue, inst=inst)
 
