@@ -112,6 +112,60 @@ class TestSeqEngine(unittest.TestCase):
     s2, _, _ = eng.take(list(range(5000, 8000)))
     self.assertEqual(s2.cap, eng._need(3000 + eng.RESERVE))
 
+class CacheModel(FakeModel):
+  """a FakeModel whose caches are a row of every token: a prefill writes its tokens' rows, a move copies them"""
+  def __init__(self):
+    super().__init__()
+    self.cache = [-1] * (self.seq_rows() + 4096)
+  def seq_prefill(self, slot, base, tokens, start, hrow, temp=0.0, upto=None):
+    end = len(tokens) if upto is None else upto
+    self.cache[base+start:base+end] = tokens[start:end]
+    return super().seq_prefill(slot, base, tokens, start, hrow, temp, upto)
+  def seq_move(self, src, dst, n):
+    self.cache[dst:dst+n] = self.cache[src:src+n]
+    super().seq_move(src, dst, n)
+
+class TestSeqRegions(unittest.TestCase):
+  def test_moves_keep_tokens(self):
+    # conversations growing turn by turn, new ones, idle ones evicted: every resident one's rows are its tokens, the regions never overlap
+    import random
+    rng, model = random.Random(0), CacheModel()
+    model.seq_slots = lambda: 8
+    eng = SeqEngine(model)
+    convs:list[list[int]] = []
+    with patch.object(SeqEngine, "STICKY", 0.0):
+      for it in range(300):
+        if convs and rng.random() < 0.7: ids = convs.pop(rng.randrange(len(convs))) + [rng.randrange(1000) for _ in range(rng.randrange(1, 3000))]
+        else: ids = [it * 100000 + i for i in range(rng.randrange(100, 12000))]
+        if len(ids) > 20000: continue
+        if (got:=eng.take(ids, rng.choice([0, 100, 3000]))) is None: continue
+        s, start, restore = got
+        eng.prefill(s, ids, start, restore, (0.0, 1.0))
+        eng.stop(s, len(s.tokens))
+        convs.append(ids)
+        regs = sorted((t.base, t.base + t.cap) for t in eng.seqs)
+        self.assertTrue(all(a[1] <= b[0] for a, b in zip(regs, regs[1:])) and regs[-1][1] <= eng.rows)
+        for t in eng.seqs: self.assertEqual(model.cache[t.base:t.base+t.n], t.tokens[:t.n])
+    self.assertGreater(len([c for c in model.calls if c[0] == "move"]), 0)
+
+class TestSeqWindow(unittest.TestCase):
+  def test_idle_neighbor_not_moved(self):
+    # rows full of A (decoding), B (idle), C (decoding): a new prompt that fits B's rows evicts B, nothing moved
+    model = CacheModel()
+    eng = SeqEngine(model)
+    seqs = []
+    for i in range(3):
+      ids = [100000 * (i + 1) + j for j in range(18000)]
+      s, start, restore = eng.take(ids, 100)
+      eng.prefill(s, ids, start, restore, (0.0, 1.0))
+      seqs.append(s)
+    eng.stop(seqs[1], len(seqs[1].tokens))
+    model.calls.clear()
+    with patch.object(SeqEngine, "STICKY", 0.0): s, _, _ = eng.take(list(range(900000, 915000)), 100)
+    self.assertEqual([c for c in model.calls if c[0] == "move"], [])
+    self.assertNotIn(seqs[1], eng.seqs)
+    self.assertEqual(s.base, seqs[0].base + seqs[0].cap)
+
 class TestScheduleSeqs(unittest.TestCase):
   """the server's scheduling of sequences (schedule_seqs) on a fake model"""
   def setUp(self):

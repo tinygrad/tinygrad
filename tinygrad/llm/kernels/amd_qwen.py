@@ -1654,6 +1654,14 @@ def _flag_partial_sum_q8(x:Tensor, n:int) -> Tensor|None:
   if (rs:=flag_reduce_scatter(xf, 0)) is None: return None
   return all_gather_q8(rs.reshape(1, n2 // 256, 256), 1).reshape(n2)[:n].float().reshape(x.shape[1:])
 
+def ring_min(devs:str|tuple[str, ...]) -> int:
+  """
+  the bytes of an exchange from which it goes around the ring (RING_MIN), not one exchange with every peer: 7900 XTX: 512 KB (a decoding step
+  of 16/32/48 sequences: 31.3/37.3/46.7 -> 25.8/35.5/45.9 ms; a ring's ~70 us of latency is more than the links' time of its bytes), RDNA4
+  (R9700, its one exchange slow): 64 KB
+  """
+  return getenv("RING_MIN", (1 << 16) if _wmma_rdna4(devs) else (1 << 19))
+
 def flag_reduce_scatter(p:Tensor, axis:int) -> Tensor|None:
   """One P2P exchange: each rank receives its contiguous chunk, summed in float32 from Q8 (or unaligned fp16) partials."""
   if not isinstance(p.device, tuple) or p.uop.axis != 0 or p.shape[0] != len(p.device) or p.dtype not in (dtypes.half, dtypes.float32): return None
@@ -1662,7 +1670,7 @@ def flag_reduce_scatter(p:Tensor, axis:int) -> Tensor|None:
   size = int(prod(S))
   if size % (2*N): return None
   # (big ones around the ring: see RingMailbox)
-  if size*9//8 >= 1 << 16 and (r:=ring_reduce_scatter_q8(p, size, tuple(int(s) for s in S), axis)) is not None: return r.reshape(S)
+  if size*9//8 >= ring_min(p.device) and (r:=ring_reduce_scatter_q8(p, size, tuple(int(s) for s in S), axis)) is not None: return r.reshape(S)
   if size and size % (N*256) == 0:
     qgroups, groups = size//(N*32), flag_ar_groups(size//2)
     if qgroups*9 > FLAG_AR_MAXN or (ar:=flag_allreduce(p.device, groups)) is None: return None
@@ -1686,7 +1694,7 @@ def flag_all_gather(x:Tensor, axis:int, dtype=None) -> Tensor|None:
   # (around the ring: see RingMailbox. 2 byte values as pairs in words)
   if isinstance(x.device, tuple) and x.uop.axis == axis and prod(x.shape[:axis]) == 1 and \
      isinstance(size:=x.numel(), int) and (w:=dtype.itemsize) in (2, 4) and size % (len(x.device)*(4//w)) == 0 and \
-     size*w >= 1 << 16 and ring_mailbox(x.device) is not None:
+     size*w >= ring_min(x.device) and ring_mailbox(x.device) is not None:
     wds = x.cast(dtype).reshape(len(x.device), size//len(x.device)).contiguous()
     if w == 2: wds = wds.bitcast(dtypes.uint32)
     if (r:=ring_all_gather_words(wds)) is not None: return r.bitcast(dtype).reshape(x.shape)
