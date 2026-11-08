@@ -3229,11 +3229,13 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
   rnd = UOp.range(((tiles - part + P - 1) // P).maximum(0), 3, AxisType.LOOP)
   i = (part + rnd * P) * T + wave * WARP_SIZE + lane
   valid = i < count
+  # (the lanes past the list a copy of its last key: not the rows past it, of positions not written yet (a draft row's later ones, a past
+  # sequence's): masked, they still changed the outputs)
+  ic = i.minimum((count - 1).maximum(0))
   if kpool:
-    ic = i.minimum(n_max - 1)
     keyi = (ic < npk * kpool).where(index[b, (ic // kpool).minimum(kp - 1)].load().cast(dtypes.weakint) * kpool + ic % kpool,
                                     tail0 + ic - npk * kpool)
-  else: keyi = index[b, i.minimum(n_max - 1)].load().cast(dtypes.weakint)
+  else: keyi = index[b, ic].load().cast(dtypes.weakint)
   row = (koff + keyi.maximum(0)).minimum(N - 1)
   def vals(r:UOp, d0:UOp|int, m:int) -> list[UOp]:
     # m values from dim d0 of row r (int8: the bytes are the values + 128, a group of 32 a scale)
