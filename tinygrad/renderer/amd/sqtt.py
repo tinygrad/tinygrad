@@ -198,6 +198,12 @@ class PacketType:
     inst._raw, inst._time = raw, time
     return inst
 
+  @classmethod
+  def new(cls, **fields):
+    raw = cls.encoding.set(0)
+    for k, v in fields.items(): raw = cls._fields[k].set(raw, v)  # type: ignore[attr-defined]
+    return cls.from_raw(raw)
+
   def __repr__(self) -> str:
     fields_str = ", ".join(f"{k}={getattr(self, k)}" for k in self._fields if not k.startswith('_') and k != 'encoding')  # type: ignore[attr-defined]
     return f"{self.__class__.__name__}({fields_str})"
@@ -586,6 +592,13 @@ def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dic
 _DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3 = _build_decode_tables(PACKET_TYPES_RDNA3)
 _DECODE_INFO_RDNA4, _STATE_TABLE_RDNA4 = _build_decode_tables(PACKET_TYPES_RDNA4)
 _DECODE_INFO_CDNA, _STATE_TABLE_CDNA = _build_decode_tables(PACKET_TYPES_CDNA)
+
+def encode(packets: list[PacketType]) -> bytes:
+  """Pack packets into a raw SQTT blob. Each packet's delta field already holds its time step."""
+  nibbles = [(p._raw >> (4*i)) & 0xF for p in packets for i in range(p._size_nibbles)]  # type: ignore[attr-defined]
+  # decode emits a packet once 16 nibbles from its start are buffered, so 14 zeros finish a 2-nibble packet and 16 would decode as NOPs
+  nibbles += [0] * (14 + len(nibbles) % 2)
+  return bytes(lo | hi << 4 for lo, hi in zip(nibbles[::2], nibbles[1::2]))
 
 def decode(data: bytes) -> Iterator[PacketType]:
   """Decode raw SQTT blob, yielding packet instances. Auto-detects RDNA (layout 3/4) vs CDNA."""
