@@ -135,7 +135,7 @@ class TestSeqRegions(unittest.TestCase):
     convs:list[list[int]] = []
     with patch.object(SeqEngine, "STICKY", 0.0):
       for it in range(300):
-        if convs and rng.random() < 0.7: ids = (c:=convs.pop(rng.randrange(len(convs)))) + [rng.randrange(1000) for _ in range(rng.randrange(1, 3000))]
+        if convs and rng.random() < 0.7: ids = convs.pop(rng.randrange(len(convs))) + [rng.randrange(1000) for _ in range(rng.randrange(1, 3000))]
         else: ids = [it * 100000 + i for i in range(rng.randrange(100, 12000))]
         if len(ids) > 20000: continue
         if (got:=eng.take(ids, rng.choice([0, 100, 3000]))) is None: continue
