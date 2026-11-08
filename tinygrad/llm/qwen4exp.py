@@ -2051,12 +2051,16 @@ class Transformer:
     kvr = self._kv_real
     chunk = C * sum(kvr * per_row(b.cache_k, 2) + (per_row(b.indexer.cache_pk, 0) // b.indexer.idx.kpool if b.indexer is not None else 0)
                     for b in qsa)
-    self.stash_entries = 32 if gb > 0 else 0
     gdn = [b for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
-    entry = sum(per_row(t, 0) for b in gdn for t in (b.pool_rec, *b.pool_conv)) + per_row(self.seq_spec_h, 0) + \
-            sum(per_row(t, 0) for c in self.seq_ckpt_states for t in c) + per_row(self.seq_ckpt_h, 0) + \
-            sum(per_row(t, 0) for t in [idx.pool_state for idx in self._indexers()] + self.seq_ckpt_idx)
+    # (an entry: a copy on every device of its part of the states)
+    entry = len(to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))) * \
+      (sum(per_row(t, 0) for b in gdn for t in (b.pool_rec, *b.pool_conv)) + per_row(self.seq_spec_h, 0) +
+       sum(per_row(t, 0) for c in self.seq_ckpt_states for t in c) + per_row(self.seq_ckpt_h, 0) +
+       sum(per_row(t, 0) for t in [idx.pool_state for idx in self._indexers()] + self.seq_ckpt_idx))
+    # (the conversations the stash holds at most: SEQ_STASH_ENTRIES, two of every slot's by default, a quarter of its memory at most)
+    self.stash_entries = max(1, min(getenv("SEQ_STASH_ENTRIES", max(32, 2 * self.seq_slots())), int(gb * 1e9 / 4) // entry)) if gb > 0 else 0
     self.stash_chunks = max(0, int(gb * 1e9 - self.stash_entries * entry) // chunk) if gb > 0 else 0
+    print(f"stash: {self.stash_chunks} chunks of {C} rows ({chunk/1e6:.1f} MB), {self.stash_entries} entries ({entry/1e6:.1f} MB)")
     if not self.stash_chunks: self.stash_entries = 0
     if not self.stash_entries: return
     H, E = self.stash_chunks * C, self.stash_entries
