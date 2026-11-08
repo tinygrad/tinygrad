@@ -46,6 +46,64 @@ class TestEffectRetention(unittest.TestCase):
     Tensor.realize(c, d)
     self.assertEqual((c.tolist(), d.tolist()), ([1]*4, [1]*4))
 
+  def test_stack_runtime_index_effectful_trailing_axis(self):
+    def kernel(A:UOp, B:UOp):
+      j = UOp.const(1, dtypes.int).after(A[0].store(A[0].load()+1))
+      return B[0].store(UOp.const(((1, 2), (3, 4)), dtypes.int).index(A[1].load(), j)).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor([0, 1]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([1, 1], [4]))
+
+  def test_identity_shrink_keeps_offset_effect(self):
+    def kernel(A:UOp, B:UOp):
+      s = UOp.const(0, dtypes.weakint).after(A[0].store(7))
+      return B[0].store(A.shrink(((s, s+1),))[0].load()).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([7], [7]))
+
+  def test_fold_keeps_each_operand_effect_once(self):
+    def kernel(A:UOp, B:UOp):
+      x, y = UOp.const(1, dtypes.int).after(A[0].store(A[0].load()+1)), UOp.const(2, dtypes.int).after(A[1].store(8))
+      return B[0].store((x*x*y).cast(dtypes.bool).where(x, y) % 1).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor.zeros(2, dtype=dtypes.int).contiguous(), Tensor.ones(1, dtype=dtypes.int).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([1, 8], [0]))
+
+  def test_fold_keeps_effect_on_unloaded_value(self):
+    def kernel(A:UOp, B:UOp): return B[0].store((A[0]+1).after(A[1].store(7)) * 0).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor([3, 0]).contiguous(), Tensor.ones(1, dtype=dtypes.int).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([3, 7], [0]))
+
+  def test_simplify_keeps_read_after_store(self):
+    def kernel(A:UOp, B:UOp): return B[0].store((A[0].after(A[0].store(7))*2).simplify()).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([7], [14]))
+
+  def test_stack_index_keeps_selector_effect(self):
+    def kernel(A:UOp, B:UOp):
+      i = UOp.const(0, dtypes.int).after(A[0].store(A[0].load()+1))
+      return B[0].store(UOp.stack(UOp.const(2, dtypes.int)).index(i)).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor([0]).contiguous(), Tensor([9]).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([1], [2]))
+
+  def test_stack_index_keeps_lane_effects(self):
+    def kernel(A:UOp):
+      lanes = [A.after(A[j].store(7+2*j))[j].load() for j in range(2)]
+      return A[2].store(UOp.stack(*lanes).index(UOp.const(0, dtypes.int))).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(3, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [7, 9, 7])
+
+  def test_stack_bounded_index_keeps_lane_effects(self):
+    i = UOp.range(2, 0)
+    def kernel(A:UOp):
+      lanes = [A.after(A[j].store(7+2*j))[j].load() for j in range(4)]
+      return A[4+i].store(UOp.stack(*lanes).index(i)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(6, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [7, 9, 11, 13, 7, 9])
+
+  def test_valid_gate_after_effect(self):
+    def kernel(A:UOp, B:UOp):
+      i = UOp.range(2, 0)
+      return B[i].store(A[UOp.const(0).valid(UOp.const(False).after(A[0].store(7)))]+1).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(2, dtype=dtypes.int).contiguous(), fxn=kernel)
+    self.assertEqual((a.tolist(), b.tolist()), ([7], [1, 1]))
+
 class TestEffectOrder(unittest.TestCase):
   def test_snapshot_before_overwrite(self):
     def kernel(A:UOp) -> UOp:
@@ -87,6 +145,27 @@ class TestEffectOrder(unittest.TestCase):
       return (cell:=S.after(x, y)[0]).store(cell*10+A[y*2+x]).end(y, x).sink(arg=KernelInfo(opts_to_apply=()))
     s = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor([1, 2, 3, 4], dtype=dtypes.int), fxn=kernel)[0]
     self.assertEqual(s.item(), 1324)
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_dependent_local_ends(self):
+    # the second END reads what the other threads stored in the first END
+    def kernel(C:UOp) -> UOp:
+      t = UOp.range(8, 0, AxisType.LOCAL)
+      tmp = UOp.placeholder((8,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
+      st = tmp[t].store(t.cast(dtypes.int)).end(t)
+      return C[t].store(tmp.after(st)[7-t]).end(t).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(8, dtype=dtypes.int), fxn=kernel)[0].tolist(), [7-i for i in range(8)])
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_dependent_local_ends_merged_ranges(self):
+    # t0 and t1 merge into one range of 8 in both ENDs
+    def kernel(C:UOp) -> UOp:
+      t0, t1 = UOp.range(4, 0, AxisType.LOCAL), UOp.range(2, 1, AxisType.LOCAL)
+      i = t0*2+t1
+      tmp = UOp.placeholder((8,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
+      st = tmp[i].store(i.cast(dtypes.int)).end(t0, t1)
+      return C[i].store(tmp.after(st)[t0*2+1-t1]).end(t0, t1).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(8, dtype=dtypes.int), fxn=kernel)[0].tolist(), [i^1 for i in range(8)])
 
 class TestEffectFrequency(unittest.TestCase):
   def test_range_merge_keeps_after_domain(self):
@@ -197,6 +276,16 @@ class TestEffectFrequency(unittest.TestCase):
       with self.subTest(name):
         def kernel(C:UOp, effect=effect) -> UOp: return effect(C).end(r).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.PADTO, 0, 4),)))
         with self.assertRaises(KernelOptError): Tensor.zeros(1, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].realize()
+
+  def test_reduce_keeps_shaped_value_effect_count(self):
+    def kernel(A:UOp, B:UOp, C:UOp):
+      i = UOp.range(3, 0)
+      value = (A.index().load()*(i+1)).after(C[0].store(C.after(i)[0].load()+1)).reduce(i, arg=Ops.ADD)
+      return B[0].store(value[0]+value[1]).sink(arg=KernelInfo(opts_to_apply=()))
+    _, b, c = Tensor.custom_kernel(Tensor([1, 10]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(),
+                                   Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
+    Tensor.realize(b, c)
+    self.assertEqual((b.tolist(), c.tolist()), ([66], [3]))
 
 if __name__ == '__main__':
   unittest.main()
