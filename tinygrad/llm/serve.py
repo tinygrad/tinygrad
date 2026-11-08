@@ -1,5 +1,5 @@
 from __future__ import annotations
-import collections, json, pathlib, queue, re, select, socket, socketserver, sys, threading, time, traceback, typing, uuid
+import collections, json, math, pathlib, queue, re, select, socket, socketserver, sys, threading, time, traceback, typing, uuid
 from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
@@ -235,6 +235,18 @@ class StreamRouter:
     if emit: yield "content", unmark(emit)
     if found: self.mode, self.buf = "tool", call + self.buf
 
+def sampling_params(body:dict, temperature:float) -> tuple[int|None, float, float|None]:
+  """a request's (max_tokens, temperature, top_p) checked (a ValueError: the request's 400, not a value the model's thread fails on)"""
+  def num(k:str, lo:float, hi:float) -> float|None:
+    if (v:=body.get(k)) is None: return None
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not lo <= v <= hi:
+      raise ValueError(f"{k} must be a number from {lo} to {hi}, not {v!r}")
+    return float(v)
+  if (mt:=body.get("max_completion_tokens")) is None: mt = body.get("max_tokens")
+  if mt is not None and (isinstance(mt, bool) or not isinstance(mt, int) or mt < 1):
+    raise ValueError(f"max_tokens must be an integer >= 1, not {mt!r}")
+  return mt, t if (t:=num("temperature", 0, 100)) is not None else temperature, num("top_p", 0, 1)
+
 class Handler(VizHandler):
   server: LLMServer
   def log_request(self, code='-', size='-'): pass
@@ -360,12 +372,13 @@ class Handler(VizHandler):
           status_code=400)
 
       # reply
-      max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
+      try: max_tokens, temperature, top_p = sampling_params(body, self.server.temperature)
+      except ValueError as e: return self.bad_request(str(e))
       hold = 0.0 if body.get("stream") else HOLD_JSON
-      chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                              max_tokens=max_tokens, temperature=self.server.temperature if (t:=body.get("temperature")) is None else float(t),
-                              reasoning=rendered.rstrip().endswith(THINK_STARTS), log=log,
-                              top_p=float(tp) if (tp:=body.get("top_p")) is not None else None, keepalive=hold or None)
+      chunks = self.run_model(ids, str(body.get("model") or self.server.model_name),
+                              not body.get("stream") or (body.get("stream_options") or {}).get("include_usage", False),
+                              max_tokens=max_tokens, temperature=temperature, reasoning=rendered.rstrip().endswith(THINK_STARTS), log=log,
+                              top_p=top_p, keepalive=hold or None)
       if body.get("stream"): self.stream_json(chunks)
       else:
         held = False
@@ -416,6 +429,8 @@ class Handler(VizHandler):
       msgs, tools = anthropic_messages(body)
       normalize_messages(msgs)
       rendered = self.render(msgs, tools, body)
+      # (the API's default temperature is 1)
+      max_tokens, temperature, top_p = sampling_params(body, 1.0)
     except Exception as err:
       return self.send_data(json.dumps({"type": "error", "error": {"type": "invalid_request_error", "message": f"{type(err).__name__}: {err}"}})
                             .encode(), status_code=400)
@@ -427,13 +442,10 @@ class Handler(VizHandler):
       stderr_log(log + f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{n:5d}\n")
       return self.send_data(json.dumps({"type": "error", "error": {"type": "invalid_request_error",
                                         "message": f"prompt is too long: {len(ids)} tokens > {n-1} maximum"}}).encode(), status_code=400)
-    # (the API's default temperature is 1)
-    chunks = self.run_model(ids, body.get("model", self.server.model_name), True, max_tokens=body.get("max_tokens"),
-                            temperature=float(t if (t:=body.get("temperature")) is not None else 1.0),
-                            reasoning=rendered.rstrip().endswith(THINK_STARTS), log=log,
-                            keepalive=KEEPALIVE if body.get("stream") else None,
-                            top_p=float(tp) if (tp:=body.get("top_p")) is not None else None)
-    events = anthropic_events(chunks, body.get("model", self.server.model_name), len(ids))
+    chunks = self.run_model(ids, str(body.get("model") or self.server.model_name), True, max_tokens=max_tokens, temperature=temperature,
+                            reasoning=rendered.rstrip().endswith(THINK_STARTS), log=log, keepalive=KEEPALIVE if body.get("stream") else None,
+                            top_p=top_p)
+    events = anthropic_events(chunks, str(body.get("model") or self.server.model_name), len(ids))
     try:
       if body.get("stream"):
         self.send_response(200)
