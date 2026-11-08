@@ -8,6 +8,9 @@ from tinygrad.llm.model import Transformer
 if TYPE_CHECKING:
   import jinja2
 
+# (the conversations' texts and tokens SimpleTokenizer.encode keeps: one an agent of the server's (96 of them: their prompts not encoded again))
+ENC_CACHE = getenv("ENC_CACHE", 256)
+
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
                bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None, eom_id:int|None=None, chat_template:str|None=None):
@@ -93,7 +96,7 @@ class SimpleTokenizer:
     return [tok for word in words for tok in self._encode_word(word.encode())]
   def encode(self, text:str) -> list[int]:
     """
-    the tokens of text. the text up to its last special token is kept with its tokens (the last 64 ones): a text that starts with one encodes
+    the tokens of text. the text up to its last special token is kept with its tokens (the last ENC_CACHE ones): a text that starts with one encodes
     only what follows (the text between special tokens is encoded on its own: the same tokens). a conversation's prompts grow
     """
     with self._enc_lock:
@@ -108,7 +111,7 @@ class SimpleTokenizer:
         # (a conversation's own each: a server's clients (agents and their side requests) are dozens, a 250k token prompt encoded again takes
         # seconds. one is a few MB)
         keep = [e for e in self._enc_cache if not text[:cut].startswith(e[0])]
-        self._enc_cache = keep[len(keep)-63:] + [(text[:cut], tokens[:cut_n])]
+        self._enc_cache = keep[len(keep)-(ENC_CACHE-1):] + [(text[:cut], tokens[:cut_n])]
     return tokens + self._encode_sentence(text[pos:])
 
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
