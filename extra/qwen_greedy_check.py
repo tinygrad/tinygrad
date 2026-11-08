@@ -24,8 +24,12 @@ GEN, ONLY = getenv("GEN", 48), [x for x in os.environ.get("ONLY", "").split(",")
 TEMP = (0.0, 1.0)
 
 # the corpus: the repo's python files (text the model continues meaningfully)
+# (CORPUS: a file of it, the same prompts for two builds; else this tree's files, made into it)
 root = pathlib.Path(__file__).resolve().parents[1]
-text = "\n".join(p.read_text(errors="replace") for p in sorted(root.glob("tinygrad/**/*.py")) + sorted(root.glob("test/**/*.py")))
+if (cp:=os.environ.get("CORPUS")) and pathlib.Path(cp).exists(): text = pathlib.Path(cp).read_text()
+else:
+  text = "\n".join(p.read_text(errors="replace") for p in sorted(root.glob("tinygrad/**/*.py")) + sorted(root.glob("test/**/*.py")))
+  if cp: pathlib.Path(cp).write_text(text)
 corpus = tok.encode(text)
 while len(corpus) < getenv("MAXCTX", 262144): corpus = corpus + corpus
 log(f"corpus {len(corpus)} tokens")
@@ -107,6 +111,22 @@ if run("stash"):
     outs.append(o)
     starts.append(st)
   emit("stash", tokens=outs, starts=starts, evictions=eng.evictions)
+
+# a sequence's region moved (the regions compacted): the same tokens as not moved
+if run("move"):
+  outs = []
+  for move in (False, True):
+    reset()
+    got = eng.take(piece(60000, 5001), 4*GEN)
+    assert got is not None
+    s, start, restore = got
+    first = eng.prefill(s, piece(60000, 5001), start, restore, TEMP)
+    if move:
+      gap = max(b for b, c in eng._gaps(s) if c >= s.cap)
+      eng._move(s, gap + (eng.rows - gap - s.cap) // eng.align * eng.align if gap + s.cap <= eng.rows else gap)
+    outs.append(gen(s, first)[:GEN])
+    eng.stop(s, len(s.tokens))
+  emit("move", tokens=outs, same=outs[0] == outs[1])
 
 # a long prompt prefilled in slices (the server's: other sequences' steps between them)
 if run("slices"):
