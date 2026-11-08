@@ -74,13 +74,16 @@ class CFGContext:
       zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[1]] + order, order)
       for x,y in zipped:
         # TODO: this can happen! it causes infinite loop in shufflenet
-        assert y.src[1] not in x.backward_slice_with_self
+        # (deps[x]: the ranges x depends on, a walk of x's backward slice for every edge is quadratic in the ends (a host program has thousands))
+        assert y.src[1] not in deps[x]
         self.edges[y.src[1]] = x
 
 pm_add_control_flow = PatternMatcher([
   # the ordering dep goes on the bound wrapped in AFTER, so a RANGE always has exactly one src
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=(x.src[0].after(y),)) if (y:=ctx.edges.get(x)) is not None else None),
 ])
+# the CFGContext is only read
+pm_add_control_flow.ctx_readonly = True
 
 def do_split_ends(e:UOp):
   ret = e.src[0]

@@ -76,18 +76,17 @@ class DType(metaclass=DTypeMetaClass):
     # e4m3 and the fnuz fp8s have no inf: their largest value is the largest normal
     if self in dtypes.fp8s and self is not dtypes.fp8e5m2: return fp8_to_float(_fp8_cfg[self][5], self)
     return float("inf") if dtypes.is_float(self) else True
+  @functools.cached_property
+  def _const_kind(self) -> str: return "int" if self in dtypes.ints else "float" if dtypes.is_float(self) else "bool" if dtypes.is_bool(self) else ""
   def const(self, val: ConstType):
     if isinstance(val, InvalidType): return val
-    if self in dtypes.ints:
+    if (kind:=self._const_kind) == "int":
       if isinstance(val, float) and not math.isfinite(val): val = 0 if math.isnan(val) else self.max if val > 0 else self.min
       return truncate[self](int(val))
-    if dtypes.is_float(self):
-      # NOTE: float('nan') != float('nan'), so we canonicalize here
-      if isinstance(val, float) and math.isnan(val): val = math.nan
-      # wrap floats in ConstFloat to distinguish -0.0 from 0.0 in cache
-      return ConstFloat(truncate.get(self, float)(float(val)))
-    # int is the default
-    return bool(val) if dtypes.is_bool(self) else int(val)
+    # NOTE: float('nan') != float('nan'), so we canonicalize here
+    if isinstance(val, float) and math.isnan(val): val = math.nan
+    # int is the default. wrap floats in ConstFloat to distinguish -0.0 from 0.0 in cache
+    return ConstFloat(truncate.get(self, float)(float(val))) if kind == "float" else bool(val) if kind == "bool" else int(val)
 
 
 class DTypes:

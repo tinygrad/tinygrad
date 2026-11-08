@@ -1,12 +1,12 @@
 from __future__ import annotations
 from typing import cast, Any, Sequence, Callable
-import itertools, ctypes, struct, time
+import itertools, ctypes, struct, time, weakref, bisect
 from dataclasses import replace, dataclass, field
-from collections import defaultdict, Counter
-from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, flatten, DEBUG, VIZ, ALL2ALL, PROFILE
-from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
+from tinygrad.helpers import dedup, round_up, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, flatten, DEBUG, VIZ, ALL2ALL, PROFILE
+from tinygrad.device import Device, Buffer, MultiBuffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS
+from tinygrad.device import ProfileProgramEvent
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
-from tinygrad.uop.ops import pm_renumber_slots, CountCtx, sint_to_uop
+from tinygrad.uop.ops import pm_renumber_slots, CountCtx, CallInfo
 from tinygrad.dtype import dtypes, AddrSpace, truncate
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.c import Struct
@@ -51,10 +51,14 @@ def unwrap_lane(v:UOp) -> tuple[UOp, int|None, int]: # look through views and a 
 def timeline(dev:str) -> UOp: return UOp.alloc((2,), dtypes.u64, 0, device=dev, name="timeline")
 def timeline_value(dev:str) -> UOp: return timeline(dev).index(1).load()
 
-def make_program(prg:UOp, size:int, device:str) -> UOp:
+def make_program(prg:UOp, size:int, device:str, image:bool=False) -> UOp:
+  """
+  the memory of a program on a device. image: its code image (a function of the program and the memory's address): one for every linear that
+  runs it, see bufferize_buf
+  """
   slot = int.from_bytes(prg.key[:8], "little")
   if PROFILE: Compiled.profile_events.append(ProfileProgramEvent(device, prg.src[0].arg.function_name, prg.src[3].arg, None, slot, prg.key))
-  return UOp.alloc((size,), dtypes.u8, slot, device=device, name="program")
+  return UOp.alloc((size,), dtypes.u8, slot, device=device, name="program_image" if image else "program")
 
 def make_submit(*cmds:UOp, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a submit calls its commands on a queue, after deps
   kind = to_name(dev.split(":")[0], queue.split(":")[0], "submit") # nv_compute_submit: the backend matches the kind
@@ -118,7 +122,11 @@ def copy_submit(s:UOp, keys:dict[int, Any], encode:Callable[[UOp, list[UOp]], li
 
 # **** patchers
 
+_link_patch_memo:weakref.WeakKeyDictionary[UOp, bool] = weakref.WeakKeyDictionary()
 def _is_link_patch(w:UOp) -> bool:
+  if (r:=_link_patch_memo.get(w)) is None: r = _link_patch_memo[w] = _is_link_patch_uncached(w)
+  return r
+def _is_link_patch_uncached(w:UOp) -> bool:
   if w.op is Ops.GETADDR: return not ((base:=unwrap_lane(w.src[0])[0]).op is Ops.PARAM and base.arg.name != "lt_input") # an input's is runtime
   if w.op is Ops.BUFFER: return w.addrspace is AddrSpace.GLOBAL # a register is written at runtime
   if w.op in {Ops.LOAD, Ops.CALL, Ops.PARAM}: return False
@@ -127,8 +135,12 @@ def _is_link_patch(w:UOp) -> bool:
 
 def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> UOp:
   # group into stacks based on dtype, alignment, is_link (rt/lt can't share a store) and ranges (a ranged offset is a loop)
-  keys = [(w.dtype, (u:=sint_to_uop(o)).vmin % w.dtype.itemsize, _is_link_patch(w), tuple(u.ranges)) for o, w in rows]
-  groups = [(key, [row for row, k in zip(rows, keys) if k == key]) for key in dedup(keys)]
+  grouped:dict[tuple, list[tuple[int|UOp, UOp]]] = {}
+  for o, w in rows:
+    key = (w.dtype, o % w.dtype.itemsize if isinstance(o, int) else o.vmin % w.dtype.itemsize, _is_link_patch(w),
+           () if isinstance(o, int) else tuple(o.ranges))
+    grouped.setdefault(key, []).append((o, w))
+  groups = list(grouped.items())
 
   # a link patch writes the bare buffer after the blob, a runtime patch writes it after its deps
   dep = [buf.without_after.store(UOp(Ops.BINARY, arg=blob).bitcast(buf.dtype))] if blob is not None else []
@@ -213,25 +225,46 @@ pm_insert_copy_staging = PatternMatcher([
 # **** batch: calls become queue programs
 
 class DepsTracker:
+  """
+  the accesses of the calls in order, the earlier calls a call waits on. per (base, lane) a sorted map of disjoint spans: the last call that
+  wrote it and the last of every queue that read it since (a queue runs in order: its last read covers its earlier ones)
+  """
   def __init__(self, queue_of:Sequence[Any]):
     self.queue_of = queue_of
-    self.ranges:dict[tuple[UOp, int|None], list[tuple[int, int, bool, int]]] = defaultdict(list) # per (base, lane): (start, end, is_write, tag)
+    self.spans:dict[tuple[UOp, int|None], tuple[list[int], list[tuple[int, int, int|None, dict[Any, int]]]]] = {} # per (base, lane): starts, spans
+
+  def _find(self, key:tuple[UOp, int|None], start:int, end:int) -> tuple[list[int], list, int, int]: # the spans overlapping start..end: [i, j)
+    starts, spans = self.spans.setdefault(key, ([], []))
+    i = bisect.bisect_right(starts, start) - 1
+    if i < 0 or spans[i][1] <= start: i += 1
+    return starts, spans, i, bisect.bisect_left(starts, end)
 
   def access_resources(self, accesses:Sequence[tuple[UOp, bool]], tag:int) -> list[int]: # (buffer, is_write) accesses -> earlier tags to wait on
     lanes = [(*unwrap_lane(b), b, is_write) for b, is_write in accesses]
-    spans = [((base, lane), off, off + b.max_numel() * b.dtype.itemsize, is_write) for base, lane, off, b, is_write in lanes]
-
+    accs = [((base, lane), off, off + b.max_numel() * b.dtype.itemsize, is_write) for base, lane, off, b, is_write in lanes]
     # a write waits for the overlapping reads and writes, a read for the overlapping writes
-    waits = [t for key, start, end, is_write in spans for lo, hi, was_write, t in self.ranges[key]
-             if lo < end and start < hi and (is_write or was_write)]
-
-    # a write owns its span: the earlier accesses keep only the parts outside it.
-    for key, start, end, is_write in spans:
-      if is_write:
-        self.ranges[key] = [(lo, hi, w, t) for a, b, w, t in self.ranges[key] for lo, hi in ((a, min(b, start)), (max(a, end), b)) if lo < hi]
-      else: self.ranges[key] = [r for r in self.ranges[key] if r[:3] != (start, end, False) or self.queue_of[r[3]] != self.queue_of[tag]]
-      self.ranges[key].append((start, end, is_write, tag))
-    return dedup(waits)
+    waits:list[int] = []
+    for key, start, end, is_write in accs:
+      _, spans, i, j = self._find(key, start, end)
+      for _, _, w, reads in spans[i:j]:
+        if w is not None: waits.append(w)
+        if is_write: waits.extend(reads.values())
+    # a write owns its span, a read is its queue's last there
+    q = self.queue_of[tag]
+    for key, start, end, is_write in accs:
+      starts, spans, i, j = self._find(key, start, end)
+      new:list[tuple[int, int, int|None, dict[Any, int]]] = []
+      if i < j and spans[i][0] < start: new.append((spans[i][0], start, spans[i][2], spans[i][3]))
+      if is_write: new.append((start, end, tag, {}))
+      else:
+        at = start
+        for lo, hi, w, reads in spans[i:j]:
+          if at < (lo:=max(lo, start)): new.append((at, lo, None, {q: tag}))
+          new.append((lo, at:=min(hi, end), w, {**reads, q: tag}))
+        if at < end: new.append((at, end, None, {q: tag}))
+      if i < j and spans[j-1][1] > end: new.append((end, spans[j-1][1], spans[j-1][2], spans[j-1][3]))
+      spans[i:j], starts[i:j] = new, [x[0] for x in new]
+    return sorted(set(waits))
 
 @dataclass
 class BatchCtx:
@@ -269,6 +302,8 @@ def _wait_ins(ctx:BatchCtx, waits:dict[tuple[str, str], int]) -> list[UOp]:
   return [ins("wait", ctx.queue_signal(d, q), UOp.const(t + 1, dtypes.u64)) for (d, q), t in waits.items()]
 
 def _start_ins(ctx:BatchCtx, dev:str, queue:str) -> list[UOp]:
+  # the waits first, then the barrier: what the earlier work wrote (e.g. another device's copy into this one's memory, posted writes over the
+  # links) is flushed into this device's memory and its caches invalidated after it's done, not before
   return [ins("wait", timeline(d), timeline_value(d)) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]] + [ins("memory_barrier")]
 
 def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
@@ -310,6 +345,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
     (_, dev, queue), barrier = ctx.batch[tag], [ins("exec_barrier")] if tag in barriers else []
     stamps = [ins("timestamp", ctx.slot(dev, i)) for i in ctx.stamps(dev, tag)]
     signal = [ins("store", ctx.queue_signal(dev, queue), UOp.const(tag + 1, dtypes.u64))] if tag in signal_tags else []
+    # (waits for other queues: then the memory barrier, see _start_ins)
     return barrier + _wait_ins(ctx, call_waits[tag]) + [ins("memory_barrier")] * bool(call_waits[tag]) + stamps[:1], stamps[1:] + signal
 
   # closers advance device timelines
@@ -342,8 +378,8 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   bufs = [tuple(b.arg.slot for b, _ in a) if all(b.op is Ops.PARAM and lane is None for b, lane in a) else () for a in args]
   kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch]))
   slots = ctx.slots if ctx.profile else {} # profiling reads them
-  info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, slots=tuple((d, i) for i, d in enumerate(slots)),
-                 estimates=Estimates(*[sum(x*n for x, n in Counter(t).items()) for t in zip(*[vars(e).values() for e in estimates])]).simplify())
+  info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, estimates=Estimates.sum(estimates),
+                 slots=tuple((d, i) for i, d in enumerate(slots)))
   return sink.call(*slots.values(), hcq=info)
 
 @rewrite_group(new_ctx=False)
@@ -351,12 +387,17 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
   copies = [c for c in l.src if c.op is Ops.CALL and c.body.op is Ops.STORE]
   ring = sorted({Device.canonicalize(d) for c in copies for b in get_call_arg_uops(c) for d in to_tuple(b.device) if all_devices_in(d, HCQ_DEVS)})
   # TODO: handle max queue amt better
-  num_copy = max(1, min(len(ring), 8 if {d.split(":")[0] for d in ring} == {"AMD"} else 1) if ALL2ALL >= 1 else 1)
+  num_copy = max(1, min(len(ring), 8 if {d.split(":")[0] for d in ring} == {"AMD"} else 1, *(getattr(Device[d], "copy_queues", 8) for d in ring))
+                 if ALL2ALL >= 1 else 1)
   copy_of = {(dst, src): (i - j - 1) % len(ring) % num_copy for i, dst in enumerate(ring) for j, src in enumerate(ring)}
 
-  def queue_for(c:UOp) -> str:
-    if c.body.op is Ops.PROGRAM: return "COMPUTE:0"
+  def queue_for(c:UOp, dev:str) -> str:
+    # the kernels of a call tagged with a compute queue run there (the queues wait for each other's dependencies)
+    if c.body.op is Ops.PROGRAM: return c.arg.queue if isinstance(c.arg, CallInfo) and c.arg.queue else "COMPUTE:0"
     if c.body.op is Ops.CUSTOM_FUNCTION: return "ENCDEC:0"
+    # the copies of a call on a copy queue run there
+    if isinstance(c.arg, CallInfo) and c.arg.queue and int(c.arg.queue.split(":")[1]) < getattr(Device[dev], "copy_queues", 1):
+      return "COPY:" + c.arg.queue.split(":")[1]
     return f"COPY:{copy_of.get((c.src[1].device, c.src[2].device), 0)}"
 
   devs = [get_enqueue_devs(c) for c in l.src]
@@ -364,7 +405,7 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
   for hcq, grp in itertools.groupby(zip(l.src, devs), key=lambda e: bool(e[1])):
     run = list(grp)
     peer_groups = dedup([Device[d[0]].peer_group for _, d in run if d])
-    batches = [[(c, d[0], queue_for(c)) for c, d in run if Device[d[0]].peer_group == pg] for pg in peer_groups]
+    batches = [[(c, d[0], queue_for(c, d[0])) for c, d in run if Device[d[0]].peer_group == pg] for pg in peer_groups]
     if hcq: srcs += [_finalize_batch(BatchCtx(batch, profile), batch is not batches[-1]) for batch in batches]
     else: srcs += [c for c, _ in run]
   return l.replace(src=tuple(srcs))
@@ -423,12 +464,14 @@ class HWQueue:
     self.blob += self.blob[start:] * int(r.vmax)
 
   def memory_barrier(self): pass # a copy queue has nothing to flush
-  def exec_barrier(self): pass
+  def exec_barrier(self): pass # wait for the kernels before. queues that run their kernels one after another have nothing to do
+  def finish(self): pass # the stream's last commands (e.g. one deferred)
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
   def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin)) # submit(linear) becomes submit(cmdbuf)
 
 def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|tuple[str, ...]|None=None) -> UOp:
   for u in lin.src if lin is not None else (): hq.q_rewrite.rewrite(u, ctx=hq) # the commands of the linear go to the stream
+  hq.finish()
   stream = bytes(hq.blob)
 
   # loop over pathes with the same value
@@ -438,6 +481,7 @@ def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|t
   dwords = [(UOp(Ops.BINARY, arg=struct.pack(f"<{len(at)}I", *at)).bitcast(dtypes.u32).index(r).load() + 4 * k, (w >> 32 * k).cast(dtypes.u32))
             for w, (at, r) in looped.items() for k in range(w.dtype.itemsize // 4)]
   patches = [(o, w) for o, w in hq.patches if w not in looped] + dwords
+  # (one walk of all the patches: they share most of their graphs. the order is the one of walking them one by one)
   nested = dedup([g.src[0] for g in UOp.sink(*[w for _, w in patches]).toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
 
   # nested linears (like kernargs) merge into a buffer per name, patched before the stream
@@ -519,22 +563,125 @@ Compiled.link_bufs |= {"timeline": lambda b: Device[b.device].timeline}
 Compiled.pm_link = PatternMatcher([])
 
 @dataclass
-class LinkCtx: inputs:list[UOp]; refs:list[UOp] = field(default_factory=list) # noqa: E702
+class LinkCtx:
+  inputs:list[UOp]; refs:list[UOp] = field(default_factory=list) # noqa: E702
+  addrs:dict[tuple[UOp, str], int] = field(default_factory=dict) # a buffer's address on a device (the same buffer has many)
+  allocs:dict[UOp, UOp] = field(default_factory=dict) # an alloc's buffer (one, whichever rewrite finds it first)
+  linked:dict[UOp, UOp] = field(default_factory=dict) # a view's of the buffers (allocs and link time inputs replaced), see _linked
+  words:dict[UOp, int|None] = field(default_factory=dict) # a word's value, None if it isn't known at link time, see _word
+  stores:dict[UOp, UOp|None] = field(default_factory=dict) # a store written by _store (NOOP), or left to the walk (None): decided once
+
+# a program's code image on a device, by its slot (its key's hash) and size: one for every linear that runs it (live while one does)
+_program_bufs:weakref.WeakValueDictionary[tuple[str, int, int], Buffer] = weakref.WeakValueDictionary()
 
 def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp:
+  if (got:=ctx.allocs.get(b)) is None: got = ctx.allocs[b] = _bufferize_buf(b)
+  return got
+
+def _bufferize_buf(b:UOp) -> UOp:
   if b.arg.name is None: return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
   dev, spec = Device[b.device], b.arg.spec or BufferSpec(cpu_access=True)
 
   owned = Compiled.link_bufs.get(b.arg.name, Compiled.link_bufs.get(to_name(b.device, b.arg.name)))
+  size = max(b.max_numel(), 1) * b.dtype.itemsize
+  shared = b.arg.name == "program_image" and b.arg.spec is None
   if owned is not None: r = owned if isinstance(owned, Buffer) else owned(b)
-  else: r = Buffer(dev.device, max(b.max_numel(), 1) * b.dtype.itemsize, options=spec, preallocate=True)
+  elif shared and (got:=_program_bufs.get(key:=(dev.device, b.arg.slot, size))) is not None: r = got
+  else:
+    r = Buffer(dev.device, size, options=spec, preallocate=True)
+    if shared: _program_bufs[key] = r
 
   return UOp.from_buffer(r, b.dtype, HCQ_RUNTIME_DEV.device)
 
+def _buffer_at(u:UOp) -> tuple[Buffer|MultiBuffer, int]:
+  """the buffer of a realized buffer uop (an MSELECT's: its lane's) and the byte offset of its view in it, as UOp.buffer finds them (no views made)"""
+  if (u.op is Ops.STAGE and u.arg is None) or u.op in {Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER, Ops.BITCAST}:
+    return _buffer_at(u.src[0])
+  if u is not u.base:
+    src, off = u._buffer_view
+    b, o = _buffer_at(src)
+    return b, o + off
+  if u.op is Ops.MSELECT:
+    mb, o = _buffer_at(u.src[0])
+    return cast(MultiBuffer, mb).bufs[u.arg], o
+  return u.buffer, 0
+
+def _addr(ctx:LinkCtx, g:UOp) -> int|None:
+  """the address of a GETADDR, None if it's an input's (resolved per run)"""
+  if unwrap_lane(buf:=(v:=unwrap_view(g.src[0]))[0])[0].op is not Ops.BUFFER: return None
+  dev = to_tuple(g.arg)[0]
+  if (addr:=ctx.addrs.get((buf, dev))) is None:
+    ctx.refs.append(buf) # add to refs
+    # (the address a view of it has there, as Buffer.get_storage makes it: no view Buffers made, of every lane)
+    b, off = cast(tuple[Buffer, int], _buffer_at(buf))
+    cdev, size = Device.canonicalize(dev), buf.max_numel() * buf.dtype.itemsize
+    addr = ctx.addrs[(buf, dev)] = Device[cdev].allocator._offset(b.base.get_buf(cdev), size, b.offset + off)
+  return truncate[dtypes.u64](addr + v[1])
+
 def resolve_getaddr(ctx:LinkCtx, g:UOp) -> UOp|None:
-  if unwrap_lane(buf:=(v:=unwrap_view(g.src[0]))[0])[0].op is not Ops.BUFFER: return None # input address, resolved per run
-  ctx.refs.append(buf) # add to refs
-  return UOp.const(cast(Buffer, buf.buffer).view(g.src[0].nbytes(), v[1]).get_buf(to_tuple(g.arg)[0]), dtypes.u64)
+  if (addr:=_addr(ctx, g)) is None: return None
+  # (UOp.const's: a CAST of the CONST, made directly)
+  return UOp(Ops.CAST, src=(UOp(Ops.CONST, arg=addr),), arg=dtypes.u64)
+
+def _linked(ctx:LinkCtx, u:UOp) -> UOp:
+  """u with its allocs bufferized and the link time inputs replaced (as the link's rewrite makes them)"""
+  if (got:=ctx.linked.get(u)) is not None: return got
+  if u.op is Ops.ALLOC: ret = bufferize_buf(ctx, u)
+  elif u.op is Ops.PARAM and u.arg.name == "lt_input": ret = ctx.inputs[u.arg.slot]
+  elif u.src and (src:=tuple(_linked(ctx, x) for x in u.src)) != u.src: ret = u.replace(src=src)
+  else: ret = u
+  ctx.linked[u] = ret
+  return ret
+
+def _deps_written(ctx:LinkCtx, u:UOp) -> bool:
+  """the stores the views of a buffer come after written (in the order the link's walk writes them), False if one can't be written here"""
+  while True:
+    if u.op is Ops.AFTER and not all(s.op is Ops.NOOP or (s.op is Ops.STORE and _store(ctx, s) is not None) for s in u.src[1:]): return False
+    if u.op not in (Ops.AFTER, Ops.SHRINK, Ops.BITCAST, Ops.MSELECT, Ops.RESHAPE): return True
+    u = u.src[0]
+
+def _word(ctx:LinkCtx, u:UOp) -> int|None:
+  """the value of a word at link time (addresses, consts and math on them, as the link's rewrite folds them), None if it isn't one"""
+  if (got:=ctx.words.get(u, -1)) != -1: return got
+  ret:int|None = None
+  if u.op is Ops.CONST: ret = u.arg if isinstance(u.arg, int) else None
+  elif u.op is Ops.GETADDR:
+    # (a buffer's: as it is, an alloc's or a link time input's: linked)
+    if _deps_written(ctx, u.src[0]): ret = _addr(ctx, u if unwrap_lane(unwrap_view(u.src[0])[0])[0].op is Ops.BUFFER else _linked(ctx, u))
+  elif u.op in (Ops.CAST, Ops.BITCAST) and dtypes.is_int(u.dtype) and (u.op is Ops.CAST or u.src[0].dtype.itemsize == u.dtype.itemsize) and \
+       (dtypes.is_int(u.src[0].dtype) or u.src[0].dtype in (dtypes.bool, dtypes.weakint)) and (x:=_word(ctx, u.src[0])) is not None:
+    ret = truncate[u.dtype](x)
+  elif u.op in GroupOp.ALU and dtypes.is_int(u.dtype) and None not in (xs:=[_word(ctx, x) for x in u.src]):
+    ret = truncate.get(u.dtype, lambda x: x)(exec_alu(u.op, u.dtype, cast(list, xs)))
+  ctx.words[u] = ret
+  return ret
+
+def _host_buf(ctx:LinkCtx, buf:UOp) -> UOp|None:
+  """a store's buffer, linked (None if it isn't a buffer at link time), its writes before written"""
+  if not _deps_written(ctx, buf) or unwrap_lane(unwrap_view(lb:=_linked(ctx, buf))[0])[0].op is not Ops.BUFFER: return None
+  return lb
+
+def _store(ctx:LinkCtx, st:UOp) -> UOp|None:
+  """
+  a store of link time words (consts, addresses and math on them) or of a blob written to the host memory, before the link's walk visits the
+  words (most of a linear's uops are addresses, many thousands). None if it can't be (the walk resolves it)
+  """
+  if st not in ctx.stores: ctx.stores[st] = _store_now(ctx, st)
+  return ctx.stores[st]
+
+def _store_now(ctx:LinkCtx, st:UOp) -> UOp|None:
+  buf, val = st.src[0], st.src[1]
+  if (blob:=val.src[0] if val.op is Ops.BITCAST else val).op is Ops.BINARY and buf.op is not Ops.INDEX:
+    if (lb:=_host_buf(ctx, buf)) is None: return None
+    ret = _write_host(lb, [(0, blob.arg)])
+  else:
+    if buf.op is not Ops.INDEX or len(buf.src) != 2: return None
+    idx, buf = buf.src[1], buf.src[0]
+    offs, ws = idx.src if idx.op is Ops.STACK else (idx,), val.src if val.op is Ops.STACK else (val,)
+    if len(offs) != len(ws) or any(o.op is not Ops.CONST or not isinstance(o.arg, int) for o in offs): return None
+    if any(w.dtype.fmt is None for w in ws) or None in (vals:=[_word(ctx, w) for w in ws]) or (lb:=_host_buf(ctx, buf)) is None: return None
+    ret = _fold_words(lb, [o.arg for o in offs], [(w.dtype, cast(int, v)) for w, v in zip(ws, vals)])
+  return ret
 
 def _write_host(buf:UOp, writes:list[tuple[int, bytes]]) -> UOp:
   base, off = unwrap_view(buf)
@@ -542,8 +689,18 @@ def _write_host(buf:UOp, writes:list[tuple[int, bytes]]) -> UOp:
   for o, data in writes: mv[off + o:off + o + len(data)] = data
   return UOp(Ops.NOOP)
 
-def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
-  return _write_host(buf, [(o.val * w.dtype.itemsize, struct.pack(w.dtype.fmt, truncate[w.dtype](w.val))) for o, w in zip(offs.src, ws.src)])
+def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp: return _fold_words(buf, [o.val for o in offs.src], [(w.dtype, w.val) for w in ws.src])
+def _fold_words(buf:UOp, offs:list[int], ws:list[tuple[Any, Any]]) -> UOp:
+  # words of one dtype: the host memory cast to it, assigned by item (not a pack and a slice per word)
+  if len({dt for dt, _ in ws}) == 1 and (dt:=ws[0][0]).fmt is not None:
+    base, off = unwrap_view(buf)
+    if off % dt.itemsize == 0:
+      mv = cast(Buffer, base.buffer).ensure_allocated().host.view(fmt='B')
+      words = mv[off:off + (len(mv) - off) // dt.itemsize * dt.itemsize].cast(dt.fmt)
+      tr = truncate[dt]
+      for o, (_, w) in zip(offs, ws): words[o] = tr(w)
+      return UOp(Ops.NOOP)
+  return _write_host(buf, [(o * dt.itemsize, struct.pack(dt.fmt, truncate[dt](w))) for o, (dt, w) in zip(offs, ws)])
 
 pm_resolve_link = PatternMatcher([
   # collapse committed const conversions
@@ -565,6 +722,9 @@ pm_resolve_link = PatternMatcher([
    a.src[0] if all(s.op is Ops.NOOP for s in a.src[1:]) else panic(RuntimeError, f"unresolved link words on {a.src[0].op}")),
 ])
 
+# (before the walk visits their words)
+pm_fold_stores = PatternMatcher([(UPat(Ops.STORE, name="st"), _store)])
+
 # **** compile and link
 
 hcq_compile_cache:dict[tuple[UOp, bool, bool], UOp] = {} # eager templates: a buffer-free linear (uops are hash-consed) to its compiled form
@@ -583,10 +743,27 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=
   if cache and input_uops is not None and final_linear is not linear: hcq_compile_cache[key] = final_linear
   return final_linear
 
+def _alloc_programs(ctx:LinkCtx, linear:UOp):
+  """the code images a linear's programs don't have on their devices yet: views of one allocation a device (not a mapping each)"""
+  want:dict[str, dict[tuple[str, int, int], list[UOp]]] = {}
+  for u in linear.toposort():
+    if u.op is not Ops.ALLOC or u.arg.name != "program_image" or u.arg.spec is not None: continue
+    key = (Device[u.device].device, u.arg.slot, max(u.max_numel(), 1) * u.dtype.itemsize)
+    if (got:=_program_bufs.get(key)) is not None: ctx.allocs[u] = UOp.from_buffer(got, u.dtype, HCQ_RUNTIME_DEV.device)
+    else: want.setdefault(key[0], {}).setdefault(key, []).append(u)
+  for dev, keys in want.items():
+    # (page aligned, as an allocation of its own is)
+    offs = list(itertools.accumulate([round_up(k[2], 0x1000) for k in keys], initial=0))
+    base = Buffer(dev, offs[-1], options=BufferSpec(cpu_access=True), preallocate=True)
+    for (key, us), off in zip(keys.items(), offs):
+      _program_bufs[key] = view = base.view(key[2], off).ensure_allocated()
+      for u in us: ctx.allocs[u] = UOp.from_buffer(view, u.dtype, HCQ_RUNTIME_DEV.device)
+
 @rewrite_group(lambda _,input_uops=None,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
   linked = graph_rewrite(linear, Compiled.pm_link, walk=True, name="link programs") if Compiled.pm_link.patterns else linear
   ctx = LinkCtx(input_uops or [])
-  linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_link, ctx=ctx, walk=True, name="link")
+  _alloc_programs(ctx, linked)
+  linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_link, ctx=ctx, walk=True, name="link", bpm=pm_fold_stores)
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
   return linked

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, codecs, itertools, typing, re, string, unicodedata, json, time, pathlib
+import sys, signal, argparse, codecs, itertools, typing, re, string, unicodedata, json, time, pathlib, threading
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
                bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None, eom_id:int|None=None, chat_template:str|None=None):
+    self._enc_cache: list[tuple[str, list[int]]] = []  # (see encode)
+    self._enc_lock = threading.Lock()
     preset = {"qwen35":"qwen2","qwen35moe":"qwen2","minimax-m2":"gpt-4o"}.get(preset, preset)
     if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4","gpt-4o","joyai-llm"):
       raise ValueError(f"Invalid tokenizer preset '{preset}'")
@@ -90,11 +92,23 @@ class SimpleTokenizer:
     else: words = [w for p in self._pre_split.split(chunk) for w in self._split_to_word.split(p) if w]
     return [tok for word in words for tok in self._encode_word(word.encode())]
   def encode(self, text:str) -> list[int]:
-    tokens: list[int] = []
-    pos = 0
-    for match in self._split_to_sentence.finditer(text):
+    """
+    the tokens of text. the text up to its last special token is kept with its tokens (the last 64 ones): a text that starts with one encodes
+    only what follows (the text between special tokens is encoded on its own: the same tokens). a conversation's prompts grow
+    """
+    with self._enc_lock:
+      base, tokens = max(((t, ids) for t, ids in self._enc_cache if text.startswith(t)), key=lambda e: len(e[0]), default=("", []))
+    tokens, pos, cut, cut_n = list(tokens), len(base), None, 0
+    for match in self._split_to_sentence.finditer(text, pos):
       tokens.extend(self._encode_sentence(text[pos:match.start(0)]) + [self._special_tokens[text[match.start(0):match.end(0)]]])
-      pos = match.end(0)
+      pos = cut = match.end(0)
+      cut_n = len(tokens)
+    if cut is not None:
+      with self._enc_lock:
+        # (a conversation's own each: a server's clients (agents and their side requests) are dozens, a 250k token prompt encoded again takes
+        # seconds. one is a few MB)
+        keep = [e for e in self._enc_cache if not text[:cut].startswith(e[0])]
+        self._enc_cache = keep[len(keep)-63:] + [(text[:cut], tokens[:cut_n])]
     return tokens + self._encode_sentence(text[pos:])
 
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
@@ -146,7 +160,7 @@ class FallbackTemplate:
     if self.tok.preset == 'glm4': return ""
     if self.tok.preset == 'tekken': return "[/INST]"
     return self.tok.decode([self.tok.eos_id])
-  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True, preserve_thinking:bool=False) -> str:
+  def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True, preserve_thinking:bool=False, **kwargs) -> str:
     out = self.tok.decode([] if self.tok.bos_id is None else [self.tok.bos_id]) + ("<sop>" if self.tok.preset == 'glm4' else "")
     for msg in messages:
       out += self.role(msg["role"])
@@ -174,6 +188,8 @@ def main():
   parser.add_argument("--no_chat_template", action="store_true", help="Don't use the model's chat template, always use the fallback template")
   parser.add_argument("--shard", type=int, default=1, help="Tensor parallel device count")
   args = parser.parse_args()
+  # (SIGTERM exits as an interrupt does: the devices are finalized (am: their queues stopped, the clocks at their lowest), not left pinned high)
+  signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
   if args.benchmark: args.max_context = max(args.max_context, round_up(sum(args.benchmark)+1, 1024))
 
   # load the model
@@ -195,7 +211,9 @@ def main():
   if not args.no_chat_template and (ct := tok.chat_template) is not None:
     try:
       import jinja2
-      env = jinja2.Environment(extensions=['jinja2.ext.loopcontrols'])  # (for {% break %})
+      # chat templates are written for the environment of HF apply_chat_template: the newline after a block tag and the whitespace before it
+      # aren't output (a model generates what it was trained on: re-rendered history then matches its tokens, its cache is reused)
+      env = jinja2.Environment(trim_blocks=True, lstrip_blocks=True, extensions=['jinja2.ext.loopcontrols'])  # (for {% break %})
       env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj, **kwargs)  # jinja2's tojson escapes <>& for HTML safety
       env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
       env.globals['strftime_now'] = lambda fmt: time.strftime(fmt)
@@ -209,7 +227,10 @@ def main():
     with Context(DEBUG=max(DEBUG.value, 1)): model.warmup()
 
   # start server
-  if args.serve: LLMServer(('', args.serve), model, model_name, tok, template).serve_forever()
+  if args.serve:
+    print(f"ready: serving on port {args.serve}", flush=True)
+    # (a request's top_p without one: the model's recommended one)
+    LLMServer(('', args.serve), model, model_name, tok, template, top_p=float(kv.get("general.sampling.top_p", 1.0))).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:

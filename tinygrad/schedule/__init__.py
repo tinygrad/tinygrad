@@ -1,8 +1,8 @@
-import time, inspect
+import time, inspect, weakref
 from collections import deque
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import GroupOp, UOp, Ops, UOpMetaClass, graph_rewrite, MapCtx, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import GroupOp, UOp, Ops, UOpMetaClass, graph_rewrite, MapCtx, gate_kernel_sink, KernelInfo, CallInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, SCACHE, BASEDIR, partition, dedup, all_int, VIZ
 from tinygrad.helpers import diskcache_get, diskcache_put, colored
@@ -33,16 +33,14 @@ def create_schedule(sched_sink:UOp) -> UOp:
     # build dependency graph: kernels and buffer-state barriers
     children: dict[UOp, list[UOp]] = {}
     in_degree: dict[UOp, int] = {}
-    writes: dict[UOp, tuple[UOp, tuple[UOp, ...]]] = {}  # superseded state -> (AFTER, new kernels)
+    writes: dict[UOp, list[tuple[UOp, tuple[UOp, ...]]]] = {}  # superseded state -> (AFTER, new kernels)
     reads: list[tuple[UOp, UOp, UOp]] = []  # (reader AFTER, reader kernel, buffer state read)
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       kernels, after_deps = _split_after(u)
       prev_state = _unwrap_src(u.src[0])
-      # writes to one buffer are a chain of states: at most one AFTER supersedes a state
-      if prev_state in writes: raise RuntimeError("sibling AFTERs detected in assign graph")
-      new_kernels = tuple(k for k in kernels if all(a.storage_base is not u.storage_base for a in children.get(k, [])))
-      writes[prev_state] = (u, new_kernels)
+      prev_kernels = set(_split_after(prev_state)[0]) if prev_state.op is Ops.AFTER else set()
+      writes.setdefault(prev_state, []).append((u, tuple(k for k in kernels if k not in prev_kernels)))
       # a buffer state is a node after its prior state, its joins and its kernels, so readers inherit its history
       in_degree.setdefault(u, 0)
       for st in ([prev_state] if prev_state.op is Ops.AFTER else []) + [*after_deps, *kernels]:
@@ -60,14 +58,15 @@ def create_schedule(sched_sink:UOp) -> UOp:
             children.setdefault(st, []).append(k)
             in_degree[k] += 1
     # WAR deps: a kernel reading buffer state S must run before another write that supersedes S. an AFTER only
-    # supersedes its immediate prior state; a kernel already on an earlier state of the same buffer is an ordering dep, not a write
+    # supersedes its immediate prior state; join members already present in that prior state are ordering deps, not writes
     for u, k, s in reads:
-      a, write_kernels = writes.get(s, (u, ()))
-      if a is u: continue
-      for t in write_kernels:
-        if t is not k:
-          children.setdefault(k, []).append(t)
-          in_degree[t] += 1
+      for a, write_kernels in writes.get(s, []):
+        if a is u: continue
+        for t in write_kernels:
+          # (a write the reader depends on already ran before it: no edge back to it, see redflash's in place state updates)
+          if t is not k and t not in k.backward_slice:
+            children.setdefault(k, []).append(t)
+            in_degree[t] += 1
 
   with cpu_profile(TracingKey("linearize schedule")):
     queue: deque[UOp] = deque(k for k,v in in_degree.items() if v == 0)
@@ -104,19 +103,25 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.ALLOC, name="b"), create_new_buffer),
 ])
 
-def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
+def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None, queue:str|None=None):
   linear = graph_rewrite(linear_call.body, pm_post_sched_cache, ctx=linear_call.src[1:], walk=True, name="params to buffers")
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
            **{i:x.unbound() if x.is_variable else x for i,x in enumerate(linear_call.src[1:])
               if x.op is Ops.PARAM and x.addrspace is AddrSpace.ALU}}
+  # a call on a queue: its kernels run there
+  if queue is None and isinstance(linear_call.arg, CallInfo): queue = linear_call.arg.queue
   def apply_binds(si:UOp) -> UOp:
-    if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
+    if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds, queue)
     if si.op is Ops.CALL and si.body.op is Ops.PROGRAM: return si  # compiled parameters already have ABI slots
     subs = {v:binds[v.arg.slot] for s in si.src for v in s.variables() if v.arg.name is None and v.arg.slot in binds}
     return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
-  return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
+  def queued(si:UOp) -> UOp:
+    # (the copies of a call on compute queue i on copy queue i)
+    if queue is None or si.op is not Ops.CALL or not isinstance(si.arg, CallInfo) or si.arg.queue: return si
+    return si.replace(arg=replace(si.arg, queue=queue.replace("COMPUTE", "COPY") if si.body.op is Ops.STORE else queue))
+  return linear.replace(src=tuple(queued(apply_binds(si)) for si in linear.src))
 
 pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here
@@ -157,13 +162,23 @@ pm_schedule = PatternMatcher([
   (UPat(Ops.CALL, name="call"), lower_sink_to_linear),
 ])
 
+_same_devices:weakref.WeakSet[UOp] = weakref.WeakSet()  # (the asts checked: hash consed, a kernel's is checked once)
 def assert_all_same_devices(ast:UOp):
+  if ast in _same_devices: return
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
+  _same_devices.add(ast)
 
 def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
   if dst.device == src.device and not dst.on_disk(): return None
   return call.replace(src=(dst.store(src),) + call.src[1:])
+
+def copy_kernel_to_view_store(call:UOp, dst:UOp, src:UOp, r:UOp, off:UOp):
+  # dst[off+i] = src[i] across devices: a STORE to the view of the destination (a copy writes a range)
+  if dst.device == src.device or not isinstance(off.arg, int) or off.arg < 0: return None
+  n, args = int(r.vmax) + 1, list(call.src[1:])
+  args[dst.arg.slot] = args[dst.arg.slot].shrink(((off.arg, off.arg + n),))
+  return call.replace(src=(UOp.param(dst.arg.slot, dst.dtype, n, dst.device).store(src),) + tuple(args))
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # NOTE: this is a codegen for SDMA devices
@@ -183,6 +198,10 @@ pm_copy_kernel = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_store),
+  # a copy into a range of the destination: a STORE to that view
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r") + UPat.cvar("off"))
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
+                name="call", allow_any_len=True), copy_kernel_to_view_store),
 ])
 
 pm_copy_from_store = PatternMatcher([
@@ -242,8 +261,14 @@ def canonicalize_alloc(ctx:CallifyCtx, b:UOp):
   if b.arg.slot >= 0 and b not in ctx.allocs: ctx.allocs[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.allocs)))
   return ctx.allocs.get(b)
 
+# a body's canonical form (a function is called many times: canonicalized once). None: the body is canonical (no reference to the key kept)
+_canonical_bodies:weakref.WeakKeyDictionary[UOp, UOp|None] = weakref.WeakKeyDictionary()
 def canonicalize_call_body(c:UOp):
-  return c.replace(src=(graph_rewrite(c.body, pm_canonicalize_alloc, init_ctx=CallifyCtx, bottom_up=True),)+c.src[1:])
+  if c.body in _canonical_bodies: body = _canonical_bodies[c.body]
+  else:
+    r = graph_rewrite(c.body, pm_canonicalize_alloc, init_ctx=CallifyCtx, bottom_up=True)
+    _canonical_bodies[c.body] = body = None if r is c.body else r
+  return c.replace(src=(c.body if body is None else body,)+c.src[1:])
 
 pm_canonicalize_alloc = PatternMatcher([
   # NOTE: lambda for late binding, canonicalize_call_body references pm_canonicalize_alloc

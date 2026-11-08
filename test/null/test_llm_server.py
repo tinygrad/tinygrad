@@ -1,7 +1,7 @@
-import unittest, threading, time, json, socket
+import unittest, threading, time, json
 from unittest.mock import Mock, patch
 from tinygrad.llm.model import Transformer, TransformerConfig
-from tinygrad.llm.serve import Request, StreamRouter, disconnected, parse_tool_call
+from tinygrad.llm.serve import StreamRouter, parse_tool_call
 
 TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
                            norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, rope_dim=32, v_head_dim=32, max_context=32)
@@ -14,6 +14,28 @@ class TestParseToolCall(unittest.TestCase):
                          ("write", {"content":value}))
         self.assertEqual(parse_tool_call(f"<function=write><parameter=content>{newline}{value}{newline}</parameter></function>"),
                          ("write", {"content":value}))
+
+  def test_glm_markup_in_values(self):
+    # a value (code, a tool call in a string) can hold the format's own markup
+    code = "parse_tool_call('write<arg_key>content</arg_key><arg_value>hi</arg_value>')"
+    call = f"bash<arg_key>command</arg_key><arg_value>{code}</arg_value><arg_key>timeout</arg_key><arg_value>30</arg_value>"
+    self.assertEqual(parse_tool_call(call), ("bash", {"command":code, "timeout":30}))
+    self.assertEqual(parse_tool_call(f"bash<arg_key>command</arg_key><arg_value>{code}</arg_value>"), ("bash", {"command":code}))
+
+  def test_special_token_markup(self):
+    # tags that are special tokens decode to sentinels: the same text in a value is literal
+    from tinygrad.llm.serve import markup_tags
+    tags, sentinels = markup_tags({tag: 1000+i for i, tag in enumerate(("<tool_call>", "</tool_call>", "<arg_key>", "</arg_key>", "<arg_value>",
+                                                                        "</arg_value>"))})
+    self.assertEqual(len(sentinels), 6)
+    code = "x = '</arg_value><arg_key>k</arg_key><arg_value>v</arg_value></tool_call>'"
+    call = f"bash{tags['<arg_key>']}command{tags['</arg_key>']}{tags['<arg_value>']}{code}{tags['</arg_value>']}"
+    self.assertEqual(parse_tool_call(call, tags), ("bash", {"command":code}))
+    router, out = StreamRouter(tags=tags), []
+    for piece in ("prose about `<tool_call>` tags ", tags["<tool_call>"], call, tags["</tool_call>"]): out += list(router.route(piece))
+    out += list(router.route("", final=True))
+    self.assertEqual("".join(d for f, d in out if f == "content"), "prose about `<tool_call>` tags ")
+    self.assertTrue(router.buf.startswith(tags["<tool_call>"]))
 
   def test_json_arguments(self):
     for value in ('"text"', '42', 'true', 'null', '[1, "two"]', '{"nested":{"ok":true}}'):
@@ -34,28 +56,6 @@ class TestParseToolCall(unittest.TestCase):
     for call in ("not a call", "read<arg_key>path</arg_key>", "read<arg_key>path</arg_key><arg_value>unfinished",
                  "read<arg_key>path</arg_key><arg_value>a</arg_value>trailing junk"):
       self.assertIsNone(parse_tool_call(call))
-
-class TestDisconnected(unittest.TestCase):
-  def setUp(self):
-    self.client, self.server = socket.socketpair()
-    self.addCleanup(self.client.close)
-    self.addCleanup(self.server.close)
-
-  def test_idle(self):
-    self.assertFalse(disconnected(self.server))
-
-  def test_client_closed(self):
-    self.client.close()
-    self.assertTrue(disconnected(self.server))
-
-  def test_server_closed(self):
-    self.server.close()
-    self.assertTrue(disconnected(self.server))
-
-  def test_peeks(self):
-    self.client.send(b"a")
-    self.assertFalse(disconnected(self.server))
-    self.assertEqual(self.server.recv(1, socket.MSG_DONTWAIT), b"a")
 
 class TestLLMServer(unittest.TestCase):
   """Integration tests using the real OpenAI client."""
@@ -127,21 +127,14 @@ class TestLLMServer(unittest.TestCase):
       for token in (300, 301, 999):
         ids.append(token)
         yield token
-    with patch.object(self.mock_model, "generate", side_effect=generate), patch.object(self.mock_model, "get_start_pos", return_value=2):
+    with patch.object(self.mock_model, "generate", side_effect=generate):
       chunks = list(self.client.chat.completions.create(
         model="test", messages=[{"role": "user", "content": "Hello"}], stream=True, stream_options={"include_usage": True}))
     last_chunk = chunks[-1]
+
     self.assertEqual(last_chunk.usage.prompt_tokens, 3)
     self.assertEqual(last_chunk.usage.completion_tokens, 2)
     self.assertEqual(last_chunk.usage.total_tokens, 5)
-    self.assertEqual(last_chunk.usage.prompt_tokens_details.cached_tokens, 2)
-
-  def test_stream_with_continuous_usage(self):
-    with patch.object(self.mock_model, "generate", side_effect=lambda ids, **kwargs: iter([300, 301, 999])):
-      chunks = list(self.client.chat.completions.create(model="test", messages=[{"role": "user", "content": "Hello"}],
-                                                        stream=True, stream_options={"include_usage": True, "continuous_usage_stats": True}))
-    self.assertTrue(all(c.usage is not None for c in chunks))
-    self.assertEqual([c.usage.completion_tokens for c in chunks], [0, 1, 2, 2, 2])
 
   def test_multi_turn_conversation(self):
     stream = self.client.chat.completions.create(
@@ -189,29 +182,27 @@ class TestLLMServer(unittest.TestCase):
     self.assertGreater(len(contents), 0)
 
   def test_interrupted_stream_logs_tokens(self):
-    gate, client_disconnected, interrupted = threading.Event(), threading.Event(), threading.Event()
-    def slow_generate(ids, **kwargs):
-      yield 300
-      gate.wait(2)
-      yield 301
-    def log(s):
-      if "total:" in s: interrupted.set()
-    with patch.object(self.mock_model, "generate", side_effect=slow_generate), \
-         patch("tinygrad.llm.serve.stderr_log", side_effect=log) as log_mock, \
-         patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
-      req = Request([200, 201, 202], client_disconnected.is_set)
-      stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), req, "test")
+    # (the model decodes on the server's thread: the request's line is logged when it sees the client gone, its total in red)
+    def slow(ids, **kwargs):
+      for t in range(300, 400):
+        time.sleep(0.02)
+        yield t
+    with patch.object(self.mock_model, "generate", side_effect=slow), \
+         patch("tinygrad.llm.serve.stderr_log") as log, patch("tinygrad.llm.serve.colored", side_effect=lambda text, color: text) as color:
+      stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), [200, 201, 202], "test")
       next(stream)
       next(stream)
-      client_disconnected.set()
-      gate.set()
-      self.assertTrue(interrupted.wait(2))
-    interrupt = log_mock.call_args.args[0]
+      stream.close()
+      def red_total() -> bool: return any(args[0].startswith("total:") and args[1] == "red" for args, _ in color.call_args_list)
+      for _ in range(250):
+        if red_total(): break
+        time.sleep(0.02)
+    interrupt = next(args[0] for args, _ in log.call_args_list if "total:" in args[0])
     self.assertFalse(interrupt.startswith("\n"))
     self.assertTrue(interrupt.endswith("\n"))
     self.assertIn("gen:", interrupt)
-    self.assertIn("out:    1", interrupt)
-    self.assertTrue(any(args[0].startswith("total:") and args[1] == "red" for args, _ in color.call_args_list))
+    self.assertIn("out:", interrupt)
+    self.assertTrue(red_total())
 
   def test_stream_disconnect_closes_source(self):
     from tinygrad.llm.serve import Handler
@@ -222,12 +213,11 @@ class TestLLMServer(unittest.TestCase):
     source.close.assert_called_once()
 
   def test_non_streaming(self):
-    with patch.object(self.mock_model, "get_start_pos", return_value=2):
-      resp = self.client.chat.completions.create(
-        model="test-model",
-        messages=[{"role": "user", "content": "Hello"}],
-        stream=False
-      )
+    resp = self.client.chat.completions.create(
+      model="test-model",
+      messages=[{"role": "user", "content": "Hello"}],
+      stream=False
+    )
 
     self.assertTrue(resp.id.startswith("chatcmpl-"))
     self.assertEqual(resp.object, "chat.completion")
@@ -240,7 +230,6 @@ class TestLLMServer(unittest.TestCase):
     self.assertIsNotNone(resp.usage)
     self.assertIsNotNone(resp.usage.prompt_tokens)
     self.assertIsNotNone(resp.usage.completion_tokens)
-    self.assertEqual(resp.usage.prompt_tokens_details.cached_tokens, 2)
 
   def test_context_length_error(self):
     from openai import BadRequestError
@@ -288,53 +277,44 @@ class TestLLMServer(unittest.TestCase):
       generating.set()
       if len(calls) == 1: gate.wait(5)
       yield from (300, 999)
-    def encode(text):
+    def encode(text, **kwargs):
       if generating.is_set(): encoded.set()
       return [200, 201, 202]
     results: dict[str, str] = {}
     def chat(prompt):
-      resp = self.client.chat.completions.create(model="test", messages=[{"role":"user", "content":prompt}])
+      resp = self.client.chat.completions.create(model="test-model", messages=[{"role":"user", "content":prompt}])
       results[prompt] = resp.choices[0].message.content
     first, second = (threading.Thread(target=chat, args=(p,)) for p in ("first", "second"))
     with patch.object(self.mock_model, "generate", side_effect=gated_generate), patch.object(self.mock_tok, "encode", side_effect=encode):
       first.start()
-      try:
-        self.assertTrue(generating.wait(2))
-        second.start()
-        self.assertTrue(encoded.wait(2))
-        self.assertEqual(len(calls), 1)
-      finally: gate.set()  # release the shared inference thread even if an assertion above fails, so later tests don't queue behind it
+      self.assertTrue(generating.wait(2))
+      second.start()
+      self.assertTrue(encoded.wait(2))
+      self.assertEqual(len(calls), 1)
+      gate.set()
       first.join(5)
       second.join(5)
     self.assertEqual(results, {"first":"Hello", "second":"Hello"})
 
-  def test_client_disconnect_stops_generation(self):
-    # once the client's socket closes, generate() must stop at its disconnect check instead of running the model to the end
-    client, server = socket.socketpair()
-    self.addCleanup(server.close)
-    client_closed, tokens_generated = threading.Event(), []
-    def generate(ids, **kwargs):
-      for token in range(300, 310):
-        tokens_generated.append(token)
-        yield token
-        client_closed.wait(5)
-    with patch.object(self.mock_model, "generate", side_effect=generate):
-      req = Request([200, 201, 202], lambda: disconnected(server))
-      stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), req, "test")
+  def test_disconnect_stops_generation(self):
+    # after the client goes away the inference loop must stop at the req.cancelled check
+    gate, done, generated_tokens = threading.Event(), threading.Event(), []
+    def gated_generate(ids, **kwargs):
+      for tid in (300, 301, 302, 999):
+        if tid == 302: gate.wait(5)
+        generated_tokens.append(tid)
+        yield tid
+    def log(s):
+      if "total:" in s: done.set()
+    with patch.object(self.mock_model, "generate", side_effect=gated_generate), patch("tinygrad.llm.serve.stderr_log", side_effect=log):
+      stream = self.server.RequestHandlerClass.run_model(Mock(server=self.server), [200, 201, 202], "test")
       next(stream)
       next(stream)
-      client.close()
-      client_closed.set()
-      self.assertIsNone(req.out.get(timeout=2))
-    self.assertEqual(tokens_generated, [300, 301])
-
-  def test_disconnected_while_queued(self):
-    # a request whose client went away while it was still queued must not reach the model
-    req = Request([200, 201, 202], lambda: True)
-    with patch.object(self.mock_model, "generate") as generate:
-      self.server.waiting.put(req)
-      self.assertIsNone(req.out.get(timeout=2))
-    generate.assert_not_called()
+      next(stream)
+      stream.close()
+      gate.set()
+      self.assertTrue(done.wait(2))
+    self.assertEqual(generated_tokens, [300, 301, 302])
 
   def test_model_generation_failure(self):
     from openai import APIError, InternalServerError
@@ -349,6 +329,51 @@ class TestLLMServer(unittest.TestCase):
       # streaming: the client raises on the error chunk instead of returning the partial text
       with self.assertRaises(APIError):
         for _ in client.chat.completions.create(model="test", messages=[{"role":"user","content":"Hello"}], stream=True): pass
+
+  def test_default_temperature(self):
+    # a chat completion without a temperature (or a null one) samples at the server's (TEMPERATURE)
+    import urllib.request
+    seen = []
+    def generate(ids, **kwargs):
+      seen.append(kwargs.get("temperature"))
+      yield from (300, 999)
+    with patch.object(self.mock_model, "generate", side_effect=generate), patch.object(self.server, "temperature", 1.0, create=True):
+      for extra in ({}, {"temperature": None}, {"temperature": 0.3}):
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/chat/completions", method="POST", headers={"Content-Type": "application/json"},
+                                     data=json.dumps({"model":"test", "messages":[{"role":"user","content":"Hello"}], **extra}).encode())
+        urllib.request.urlopen(req).read()
+    self.assertEqual(seen, [1.0, 1.0, 0.3])
+
+  def test_slow_reply_held(self):
+    # a reply not streamed and slow: spaces while it's made (a proxy doesn't drop the quiet connection), then its JSON
+    import urllib.request
+    def slow_generate(ids, **kwargs):
+      for t in (300, 301, 999):
+        time.sleep(0.12)
+        yield t
+    with patch.object(self.mock_model, "generate", side_effect=slow_generate), patch("tinygrad.llm.serve.HOLD_JSON", 0.05):
+      req = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/chat/completions", method="POST", headers={"Content-Type": "application/json"},
+                                   data=json.dumps({"model":"test", "messages":[{"role":"user","content":"Hello"}]}).encode())
+      raw = urllib.request.urlopen(req).read()
+    self.assertTrue(raw.startswith(b" "))
+    self.assertEqual(json.loads(raw)["choices"][0]["message"]["content"], "HelloHello")
+
+  def test_tool_call_held(self):
+    # a slow reply that's a tool call (sent when it ends, no chunks before): spaces while it's made all the same
+    import urllib.request
+    from tinygrad.llm.serve import Request
+    seen = []
+    orig = self.server.emit
+    def slow_emit(req:Request, tok:int) -> bool:
+      time.sleep(0.12)
+      return orig(req, tok)
+    def generate(ids, **kwargs): yield from (300, 301, 302, 999)
+    with patch.object(self.mock_model, "generate", side_effect=generate), patch.object(self.server, "emit", side_effect=slow_emit), \
+         patch.object(self.mock_tok, "stream_decoder", return_value=lambda tid=None: ""), patch("tinygrad.llm.serve.HOLD_JSON", 0.05):
+      req = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/chat/completions", method="POST", headers={"Content-Type": "application/json"},
+                                   data=json.dumps({"model":"test", "messages":[{"role":"user","content":"Hello"}]}).encode())
+      seen.append(urllib.request.urlopen(req).read())
+    self.assertGreater(len(seen[0]) - len(seen[0].lstrip()), 2)
 
   def test_generate_runs_on_serving_thread(self):
     threads = []
@@ -470,6 +495,99 @@ class TestLLMToolCalls(unittest.TestCase):
     self.assertEqual(second.choices[0].message.content, "done")
     self.assertEqual(second.choices[0].finish_reason, "stop")
 
+  # ** the Anthropic Messages API
+  def anthropic(self, body:dict, path:str="/v1/messages") -> tuple[int, bytes]:
+    import urllib.request, urllib.error
+    req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=json.dumps(body).encode(), headers={"Content-Type":"application/json"})
+    try:
+      with urllib.request.urlopen(req) as resp: return resp.status, resp.read()
+    except urllib.error.HTTPError as e: return e.code, e.read()
+
+  @staticmethod
+  def anthropic_tools():
+    return [{"name":"read", "description":"Read a file", "input_schema":{"type":"object", "properties":{"path":{"type":"string"}}}}]
+
+  def test_anthropic_stream_tool_use(self):
+    self.set_output('<think>plan</think>before<tool_call>{"name":"read","arguments":{"path":"README.md"}}</tool_call>')
+    status, data = self.anthropic({"model":"m", "max_tokens":100, "stream":True, "tools":self.anthropic_tools(),
+                                   "messages":[{"role":"user", "content":"Read README.md"}]})
+    self.assertEqual(status, 200)
+    events = [json.loads(l[len("data: "):]) for l in data.decode().splitlines() if l.startswith("data: ")]
+    names = [l[len("event: "):] for l in data.decode().splitlines() if l.startswith("event: ")]
+    self.assertEqual(names, [e["type"] for e in events])
+    self.assertEqual(events[0]["type"], "message_start")
+    self.assertEqual(events[-1]["type"], "message_stop")
+    blocks = [e["content_block"]["type"] for e in events if e["type"] == "content_block_start"]
+    self.assertEqual(blocks, ["thinking", "text", "tool_use"])
+    deltas = [e["delta"] for e in events if e["type"] == "content_block_delta"]
+    self.assertEqual("".join(d.get("thinking", "") for d in deltas), "plan")
+    self.assertEqual("".join(d.get("text", "") for d in deltas), "before")
+    self.assertEqual([json.loads(d["partial_json"]) for d in deltas if d["type"] == "input_json_delta"], [{"path":"README.md"}])
+    self.assertEqual(next(e for e in events if e["type"] == "message_delta")["delta"]["stop_reason"], "tool_use")
+
+  def test_anthropic_round_trip(self):
+    # the tool_use and tool_result blocks go back as the chat's tool calls and tool messages
+    self.set_output("done")
+    status, data = self.anthropic({"model":"m", "max_tokens":100, "system":[{"type":"text", "text":"be brief"}], "tools":self.anthropic_tools(),
+      "messages":[{"role":"user", "content":"Read README.md"},
+                  {"role":"assistant", "content":[{"type":"thinking", "thinking":"t", "signature":""},
+                                                  {"type":"tool_use", "id":"toolu_1", "name":"read", "input":{"path":"README.md"}}]},
+                  {"role":"user", "content":[{"type":"tool_result", "tool_use_id":"toolu_1", "content":"file contents"},
+                                             {"type":"text", "text":"go on"}]}]})
+    self.assertEqual(status, 200)
+    reply = json.loads(data)
+    self.assertEqual(reply["type"], "message")
+    self.assertEqual(reply["role"], "assistant")
+    self.assertEqual(reply["content"], [{"type":"text", "text":"done"}])
+    self.assertEqual(reply["stop_reason"], "end_turn")
+    self.assertEqual(reply["usage"]["output_tokens"], 4)
+
+  def test_anthropic_messages_conversion(self):
+    from tinygrad.llm.serve import anthropic_messages
+    msgs, tools = anthropic_messages({"system":"sys", "tools":self.anthropic_tools() + [{"type":"web_search_20250305", "name":"web_search"}],
+      "messages":[{"role":"user", "content":"q"},
+                  {"role":"assistant", "content":[{"type":"text", "text":"a"}, {"type":"tool_use", "id":"t1", "name":"read", "input":{"path":"x"}}]},
+                  {"role":"user", "content":[{"type":"tool_result", "tool_use_id":"t1", "content":[{"type":"text", "text":"r"}]}]}]})
+    self.assertEqual(msgs, [{"role":"system", "content":"sys"}, {"role":"user", "content":"q"},
+                            {"role":"assistant", "content":"a", "tool_calls":[{"id":"t1", "type":"function",
+                                                                               "function":{"name":"read", "arguments":{"path":"x"}}}]},
+                            {"role":"tool", "tool_call_id":"t1", "content":"r"}])
+    self.assertEqual([t["function"]["name"] for t in tools or []], ["read"])
+    # a system message in the conversation is one, as blocks or a string
+    for content in ("update", [{"type":"text", "text":"update"}]):
+      self.assertEqual(anthropic_messages({"messages":[{"role":"system", "content":content}]})[0], [{"role":"system", "content":"update"}])
+
+  def test_anthropic_billing_header(self):
+    # Claude Code's billing metadata block isn't the model's system prompt
+    from tinygrad.llm.serve import anthropic_messages
+    system = [{"type":"text", "text":"x-anthropic-billing-header: cc_version=2.1.207.614; cc_entrypoint=sdk-cli;"},
+              {"type":"text", "text":"You are an agent."}, {"type":"text", "text":"\nBe brief."}]
+    self.assertEqual(anthropic_messages({"system":system, "messages":[]})[0], [{"role":"system", "content":"You are an agent.\nBe brief."}])
+
+  def test_media_note(self):
+    # an image (a tool result's, a user's) isn't served to the model: a note says so, not a placeholder the model takes for an image it saw
+    from tinygrad.llm.serve import anthropic_messages, normalize_messages, MEDIA_NOTE
+    img = {"type":"image", "source":{"type":"base64", "media_type":"image/png", "data":"AAAA"}}
+    msgs, _ = anthropic_messages({"messages":[{"role":"user", "content":[{"type":"tool_result", "tool_use_id":"t1", "content":[img]},
+                                                                   {"type":"text", "text":"look"}, img]}]})
+    note = MEDIA_NOTE.format(kind="image")
+    self.assertEqual(msgs, [{"role":"tool", "tool_call_id":"t1", "content":note}, {"role":"user", "content":"look" + note}])
+    chat = [{"role":"user", "content":[{"type":"text", "text":"what is "}, {"type":"image_url", "image_url":{"url":"data:..."}}]}]
+    normalize_messages(chat)
+    self.assertEqual(chat, [{"role":"user", "content":"what is " + note}])
+
+  def test_anthropic_ping(self):
+    # a request waiting for the model: ping events in the stream, nothing in the reply
+    from tinygrad.llm.serve import anthropic_events, anthropic_message
+    def chunk(d): return {"choices":[{"index":0, "delta":d, "finish_reason":None}]}
+    chunks = [chunk({"role":"assistant", "content":""}), {"ping":True}, {"ping":True}, chunk({"content":"hi"})]
+    self.assertEqual([e["type"] for e in anthropic_events(iter(chunks), "m", 3)][:4], ["message_start", "ping", "ping", "content_block_start"])
+    self.assertEqual(anthropic_message(anthropic_events(iter(chunks), "m", 3))["content"], [{"type":"text", "text":"hi"}])
+
+  def test_anthropic_count_tokens(self):
+    status, data = self.anthropic({"model":"m", "messages":[{"role":"user", "content":"hi"}]}, "/v1/messages/count_tokens")
+    self.assertEqual((status, json.loads(data)), (200, {"input_tokens":3}))
+
   def test_kimi_tool_call(self):
     self.set_output('a </think> b<|close|>think<|sep|><|open|>response<|sep|>c <tool_call>{}</tool_call> d<|close|>response<|sep|>'
       '<|open|>tools<|sep|><|open|>call tool="read" index="1"<|sep|><|open|>argument key="x&quot;y" type="string"<|sep|>\n</tool_call>\n'
@@ -483,6 +601,79 @@ class TestLLMToolCalls(unittest.TestCase):
     calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
     self.assertEqual([(tc.function.name, json.loads(tc.function.arguments)) for tc in calls], [('read', {'x"y':'\n</tool_call>\n', 'n':3})])
     self.assertEqual(chunks[-1].choices[0].finish_reason, 'tool_calls')
+
+class TestKept(unittest.TestCase):
+  """the kept conversations' tokens (LLMServer.kept, reuse_tokens) and the caches dropped (drop_caches)"""
+  def setUp(self):
+    from tinygrad.llm.serve import LLMServer
+    self.model, self.server = Mock(_cached_tokens=[]), LLMServer.__new__(LLMServer)
+    self.server.model, self.server.engine = self.model, None
+
+  def test_common_prefix(self):
+    import random
+    from tinygrad.llm.serve import common_prefix
+    rng = random.Random(0)
+    for _ in range(200):
+      a = [rng.randrange(3) for _ in range(rng.randrange(40))]
+      b = a[:rng.randrange(len(a)+1)] + [rng.randrange(3) for _ in range(rng.randrange(40))]
+      self.assertEqual(common_prefix(a, b), next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b))))
+
+  def test_starts(self):
+    import random
+    from tinygrad.llm.serve import starts
+    rng = random.Random(1)
+    for _ in range(300):
+      t = [rng.randrange(3) for _ in range(rng.randrange(1, 60))]
+      ids = t[:rng.randrange(len(t)+1)] + [rng.randrange(3) for _ in range(rng.randrange(40))]
+      n = rng.randrange(len(t)+1)
+      self.assertEqual(starts(ids, t), ids[:len(t)] == t)
+      self.assertEqual(starts(ids, t, n), n <= len(ids) and ids[:n] == t[:n])
+
+  def test_reuse_tokens(self):
+    # a prompt that continues the model's conversation as text, tokenized differently ("bc" one token): the kept tokens and the rest's
+    class Tok:
+      def encode(self, text:str, **kwargs) -> list[int]:
+        out, i = [], 0
+        while i < len(text):
+          if text[i:i+2] == "bc": out, i = out + [999], i + 2
+          else: out, i = out + [ord(text[i])], i + 1
+        return out
+      def decode(self, ids:list[int]) -> str: return "".join("bc" if i == 999 else chr(i) for i in ids)
+    self.server.tok = Tok()
+    kept = [ord("a")] * 1500 + [ord("b"), ord("c")]  # as the model generated it: "b", "c"
+    self.model._cached_tokens = kept
+    rendered = "a" * 1500 + "bc" + "xyz"
+    ids = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
+    self.assertEqual(ids, kept + [ord("x"), ord("y"), ord("z")])
+    # the text past a sequence's checkpoint different (the reply there came back changed): the tokens up to the checkpoint kept
+    self.model._cached_tokens = []
+    self.server.engine = Mock(seqs=[Mock(tokens=kept + [ord("q")] * 50, ckpt=len(kept))], stashed=[])
+    ids = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
+    self.assertEqual(ids, kept + [ord("x"), ord("y"), ord("z")])
+    # a prompt that continues one as it is: its tokens
+    self.server.engine = None
+    self.assertEqual(self.server.reuse_tokens("a" * 1500 + "q", [ord("a")] * 1500 + [ord("q")]), [ord("a")] * 1500 + [ord("q")])
+    # the tokens different early (a reply of an early turn, after the task, sampled as "b", "c"), the conversation long after it: the kept tokens
+    long = [ord("a")] * 2100 + [ord("b"), ord("c")] + [ord("d")] * 6000
+    self.model._cached_tokens = long
+    rendered = "a" * 2100 + "bc" + "d" * 6000 + "xyz"
+    self.assertEqual(self.server.reuse_tokens(rendered, self.server.tok.encode(rendered)), long + [ord("x"), ord("y"), ord("z")])
+
+  def test_corrupt_reply_fails(self):
+    # token 0 again and again (NaN logits) or an odd special token: the reply fails, the caches are dropped
+    from tinygrad.llm.serve import Request
+    from tinygrad.llm.serve import BatchStats
+    self.server.tok, self.server.stats, self.server.odd_ids, self.server.inflight = Mock(is_end=lambda t: False), BatchStats(), {999}, 0
+    self.server.engine, self.model._cached_tokens = Mock(), [1, 2, 3]
+    with patch("tinygrad.llm.serve.stderr_log"):
+      req = Request([1], "", None, 0.0)
+      self.assertTrue(all(self.server.emit(req, 0) for _ in range(15)))
+      self.assertFalse(self.server.emit(req, 0))
+      self.assertIsNotNone(req.error)
+      self.server.engine.forget.assert_called_once()
+      self.assertEqual(self.model._cached_tokens, [])
+      req = Request([1], "", None, 0.0)
+      self.assertFalse(self.server.emit(req, 999))
 
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):

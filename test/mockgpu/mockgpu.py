@@ -45,7 +45,8 @@ def emit_kernel_info(ctx:HWQueue, prg:UOp) -> None:
     from tinygrad.viz.serve import get_elf_section
     name = prg.src[0].arg.name.encode() + b"\x00"
     text = get_elf_section(prg.src[3].arg, ".text").header
-    text_size = text.sh_addr + text.sh_size - _amd_program_image(ctx.dev, prg.src[3].arg)[0].entry_point_offset
+    data = _amd_program_image(prg.src[3].arg, ctx.dev.target, ctx.dev.iface.props['lds_size_in_kb'])[0]
+    text_size = text.sh_addr + text.sh_size - data.entry_point_offset
     ctx.pkt3(ctx.pm4.PACKET3_NOP, *memoryview(name.ljust(round_up(len(name), 4), b"\x00")).cast("I"), text_size)
 
 HWQueue.q_rewrite = PatternMatcher([

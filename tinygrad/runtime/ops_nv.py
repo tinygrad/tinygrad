@@ -310,7 +310,7 @@ class NVProgramData:
 
 def nv_build_program(dev:NVDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[NVProgramData, UOp]:
   data = NVProgramData(dev, prg.to_elf())
-  buf = make_program(prg, len(data.image), devs[0])
+  buf = make_program(prg, len(data.image), devs[0], image=True)
   rows = [(off, ((buf.getaddr(devs) + sym) >> sh).ccast(dt)) for off, sym, dt, sh in data.relocs]
   return data, patch(buf, rows, data.image)
 

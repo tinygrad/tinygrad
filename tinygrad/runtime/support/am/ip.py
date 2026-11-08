@@ -1,6 +1,6 @@
-import ctypes, time, contextlib, functools
+import ctypes, time, contextlib, functools, threading
 from typing import Iterable, Literal
-from tinygrad.helpers import to_mv, data64, data64_le, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits
+from tinygrad.helpers import to_mv, data64, data64_le, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits, getenv
 from tinygrad.runtime.autogen.am import am, pm4_soc15 as pm4
 from tinygrad.runtime.support.amd import import_soc
 from tinygrad.runtime.support.memory import AddrSpace
@@ -182,7 +182,8 @@ class AM_GMC(AM_IP):
       extra |= am.AMDGPU_PTE_MTYPE_GFX12(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
       extra |= (am.AMDGPU_PDE_PTE_GFX12 if not is_table and pte_lv != am.AMDGPU_VM_PTB else (am.AMDGPU_PTE_IS_PTE if not is_table else 0))
     elif self.adev.ip_ver[am.GC_HWIP] >= (10,0,0):
-      extra |= am.AMDGPU_PTE_MTYPE_NV10(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
+      # (uncached from 100: the mtype uncached-100)
+      extra |= am.AMDGPU_PTE_MTYPE_NV10(0, uncached - 100 if uncached >= 100 else self.adev.soc.module.MTYPE_UC if uncached else 0)
       extra |= (am.AMDGPU_PDE_PTE if not is_table and pte_lv != am.AMDGPU_VM_PTB else 0)
     else:
       extra |= am.AMDGPU_PTE_MTYPE_VG10(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
@@ -232,7 +233,22 @@ class AM_SMU(AM_IP):
     return {clck: [self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|i, read_back_arg=True)&0x7fffffff for i in range(cnt)]
       for clck in clk_list if (cnt:=self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|0xff, read_back_arg=True)&0x7fffffff)}
 
-  def set_clocks(self, level:int|None):
+  def clock_caps(self, spec:str|None=None) -> dict[int, int]:
+    """
+    spec (default AM_CLOCKS, e.g. "GFXCLK=2000,UCLK=772"): clocks at most these (MHz) at a working level (less power a token: decoding doesn't
+    use the full clocks)
+    """
+    spec = getenv("AM_CLOCKS", "") if spec is None else spec
+    return {getattr(self.smu_mod, f"PPCLK_{k.strip().upper()}"): int(v) for k, v in (x.split("=") for x in spec.split(",") if "=" in x)}
+
+  def set_clock(self, clck:int, level:int, cap:int=0):
+    """one clock at its level (at most cap MHz, 0: none): its soft minimum and maximum"""
+    vals = self.read_clocks((clck,))[clck]
+    f = min(vals[level], cap) if cap and level != 0 else vals[level]
+    with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | f, timeout=20)
+    if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | f)
+
+  def set_clocks(self, level:int|None, caps:dict[int, int]|None=None):
     clks = tuple([self.smu_mod.PPCLK_UCLK, self.smu_mod.PPCLK_FCLK, self.smu_mod.PPCLK_SOCCLK])
     if self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,12), (13,0,15)}: clks += (self.smu_mod.PPCLK_GFXCLK,)
 
@@ -242,9 +258,30 @@ class AM_SMU(AM_IP):
         if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | 0xffff)
       return
 
+    caps = self.clock_caps() if caps is None else caps
     for clck, vals in self.read_clocks(clks).items():
-      with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]), timeout=20)
-      if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]))
+      f = min(vals[level], cap) if level != 0 and (cap:=caps.get(clck, 0)) else vals[level]
+      with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | f, timeout=20)
+      if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | f)
+
+  def set_overdrive(self, power_pct:int|None=None, volt_offset:int|None=None) -> bool:
+    """
+    the overdrive table: the power limit power_pct % above or below the default (in its allowed range, the board's: -10..15 on a 7900 XTX), the gfx
+    voltage curve volt_offset mV (<= 0) lower. False: not supported
+    """
+    m = self.smu_mod
+    if not all(hasattr(m, a) for a in ("OverDriveTableExternal_t", "TABLE_OVERDRIVE", "PP_OD_FEATURE_PPT_BIT", "PPSMC_MSG_TransferTableDram2Smu")):
+      return False
+    ext = self.read_table(m.OverDriveTableExternal_t, m.TABLE_OVERDRIVE)
+    od = ext.OverDriveTable
+    if power_pct is not None:
+      od.Ppt, od.FeatureCtrlMask = int(power_pct), od.FeatureCtrlMask | (1 << m.PP_OD_FEATURE_PPT_BIT)
+    if volt_offset is not None:
+      for i in range(len(od.VoltageOffsetPerZoneBoundary)): od.VoltageOffsetPerZoneBoundary[i] = int(volt_offset)
+      od.FeatureCtrlMask |= 1 << m.PP_OD_FEATURE_GFX_VF_CURVE_BIT
+    self.adev.vram.view(self.driver_table_paddr, ctypes.sizeof(ext))[:] = bytes(ext)
+    self._send_msg(m.PPSMC_MSG_TransferTableDram2Smu, m.TABLE_OVERDRIVE)
+    return True
 
   def set_power_limit(self, watts:float):
     ppt_limit = max(int(round(watts)), 1)
@@ -266,16 +303,22 @@ class AM_SMU(AM_IP):
     (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).write(param)
     (self.adev.mmMP1_SMN_C2PMSG_66 if not debug else self.adev.mmMP1_SMN_C2PMSG_75).write(msg)
 
+  @functools.cached_property
+  def msg_lock(self) -> threading.RLock: return threading.RLock()  # (a message and its response: not interleaved with another thread's)
+
   def _send_msg(self, msg:int, param:int, read_back_arg=False, timeout=10000, debug=False): # default timeout is 10 seconds
-    self._smu_cmn_send_msg(msg, param, debug=debug)
-    wait_cond((self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).read, value=1, timeout_ms=timeout,
-      msg=f"SMU msg {msg:#x} timeout")
-    return (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).read() if read_back_arg else None
+    with self.msg_lock:
+      self._smu_cmn_send_msg(msg, param, debug=debug)
+      wait_cond((self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).read, value=1, timeout_ms=timeout,
+        msg=f"SMU msg {msg:#x} timeout")
+      return (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).read() if read_back_arg else None
 
 class AM_GFX(AM_IP):
   def init_sw(self):
     self.xccs = sum(1 for i in self.adev.regs_offset[am.GC_HWIP] if i not in self.adev.harvested[am.GC_HWIP])
-    self.mqd_paddr = [self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True) for i in range(2 + self.adev.is_vf)]
+    # the pipes of MEC1 that run (a compute queue on each): queues 0 and 1 (pm4, aql) of a pipe, the kiq's after them
+    self.mec_pipes = getenv("AM_MEC_PIPES", 1) if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0) else 1
+    self.mqd_paddr = [self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True) for i in range(2 * self.mec_pipes + self.adev.is_vf)]
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
 
   def init_hw(self):
@@ -353,14 +396,17 @@ class AM_GFX(AM_IP):
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool, kiq_xcc=-1) -> int:
     me, pipe, queue = (2, 1, 0) if (kiq:=kiq_xcc >= 0) else (1, idx // 4, idx % 4)
-    doorbell = am.AMDGPU_DOORBELL_KIQ + kiq_xcc*0x20 if kiq else am.AMDGPU_NAVI10_DOORBELL_MEC_RING0
+    assert kiq or (pipe < self.mec_pipes and queue < 2), f"no compute queue {queue} on pipe {pipe}"
+    # (a doorbell a queue of a pipe: two queues of a pipe (a second compute queue on it) don't share one)
+    doorbell = am.AMDGPU_DOORBELL_KIQ + kiq_xcc*0x20 if kiq else am.AMDGPU_NAVI10_DOORBELL_MEC_RING0 + pipe * 2 + queue
+    slot = 2 * self.mec_pipes if kiq else pipe * 2 + queue
 
     for xcc in ([kiq_xcc] if kiq else range(self.xccs if aql else 1)):
       self._grbm_select(me=me, pipe=pipe, queue=queue, inst=xcc)
 
       struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}{'_compute' if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else ''}_mqd")
-      mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(self.mqd_mc[queue + 2*kiq] + 0x1000*xcc),
-        cp_mqd_base_addr_hi=hi32(self.mqd_mc[queue + 2*kiq] + 0x1000*xcc), cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
+      mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(self.mqd_mc[slot] + 0x1000*xcc),
+        cp_mqd_base_addr_hi=hi32(self.mqd_mc[slot] + 0x1000*xcc), cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
         cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.encode(preload_size=0x55, preload_req=1),
         cp_hqd_pq_base_lo=lo32(ring_addr>>8), cp_hqd_pq_base_hi=hi32(ring_addr>>8),
         cp_hqd_pq_rptr_report_addr_lo=lo32(rptr_addr), cp_hqd_pq_rptr_report_addr_hi=hi32(rptr_addr),
@@ -376,7 +422,7 @@ class AM_GFX(AM_IP):
         **({'compute_tg_chunk_size':1, 'compute_current_logic_xcc_id':xcc, 'cp_mqd_stride_size':0x1000} if aql and self.xccs > 1 else {}))
       for se in range(8 if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else 4): setattr(mqd_struct, f'compute_static_thread_mgmt_se{se}', 0xffffffff)
 
-      self.adev.vram.view(self.mqd_paddr[queue + 2*kiq] + 0x1000*xcc, ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
+      self.adev.vram.view(self.mqd_paddr[slot] + 0x1000*xcc, ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
 
       mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
       for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
@@ -412,12 +458,21 @@ class AM_GFX(AM_IP):
       self.adev.regRLC_SAFE_MODE.write(message=int(enter), cmd=1, inst=xcc)
       if enter: wait_cond(lambda: self.adev.regRLC_SAFE_MODE.read(inst=xcc) & 0x1, value=0, msg="RLC safe mode timeout")
 
+  def hqd_state(self, idx:int) -> dict[str, int]:
+    """a compute queue's (hardware queue idx, as setup_ring's) registers: where its command processor is in its ring and indirect buffer"""
+    self._grbm_select(me=1, pipe=idx // 4, queue=idx % 4)
+    try: return {n: self.adev.reg(f"regCP_HQD_{n}").read() for n in ("ACTIVE", "PQ_RPTR", "PQ_WPTR_LO", "IB_BASE_ADDR", "IB_BASE_ADDR_HI", "IB_RPTR",
+                                                                        "IB_CONTROL")}
+    finally: self._grbm_select()
+
   def _grbm_select(self, me=0, pipe=0, queue=0, vmid=0, inst=0):
     self.adev.regGRBM_GFX_CNTL.write(meid=me, pipeid=pipe, vmid=vmid, queueid=queue, inst=inst)
 
   def _enable_mec(self):
     for xcc in range(self.xccs):
-      if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=0, mec_pipe0_active=1, mec_halt=0, inst=xcc)
+      if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0):
+        pipes = {f"mec_pipe{p}_{f}": int(f == "active") for p in range(self.mec_pipes) for f in ("reset", "active")}
+        self.adev.regCP_MEC_RS64_CNTL.update(**pipes, mec_halt=0, inst=xcc)
       else: self.adev.regCP_MEC_CNTL.write(0x0, inst=xcc)
     time.sleep(0.05)  # Wait for MEC to be ready
 
@@ -442,10 +497,10 @@ class AM_GFX(AM_IP):
         _config_helper(eng_name="PFP", cntl_reg="ME", eng_reg="PFP", pipe_cnt=1, xcc=xcc)
         _config_helper(eng_name="ME", cntl_reg="ME", eng_reg="ME", pipe_cnt=1, xcc=xcc)
       if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0):
-        _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=1, me=1, xcc=xcc)
+        _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=self.mec_pipes, me=1, xcc=xcc)
 
   def _dequeue_hqds(self):
-    for me, pipe, q in [(1, 0, 0), (1, 0, 1)] + [(2, 1, 0)] * self.adev.is_vf:
+    for me, pipe, q in [(1, p, q) for p in range(self.mec_pipes) for q in (0, 1)] + [(2, 1, 0)] * self.adev.is_vf:
       for xcc in range(self.xccs):
         self._grbm_select(me=me, pipe=pipe, queue=q, inst=xcc)
         if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:

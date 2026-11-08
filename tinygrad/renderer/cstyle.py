@@ -330,6 +330,16 @@ class ClangRenderer(CStyleLanguage):
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     self.compiler = ClangCompiler(target.arch.split(","))
 
+class TCCRenderer(ClangRenderer):
+  """the C of ClangRenderer compiled by libtcc (TCCCompiler, fast to compile: the HCQ host programs): scalars only, a fence it knows"""
+  supports_float4 = False
+  barrier = '__asm__ volatile("mfence" ::: "memory");'
+  def __init__(self, target:Target):
+    CStyleLanguage.__init__(self, target)
+    assert target.arch.startswith("x86_64"), f"TCC renders x86_64, not {target.arch}"
+    from tinygrad.runtime.support.compiler_tcc import TCCCompiler
+    self.compiler = TCCCompiler()
+
 class OpenCLRenderer(CStyleLanguage):
   # language options
   kernel_typedef = "__kernel void"

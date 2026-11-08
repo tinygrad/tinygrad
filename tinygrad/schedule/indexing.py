@@ -1,11 +1,11 @@
 from typing import Iterator
 import functools, itertools
 from dataclasses import dataclass, field, replace
-from tinygrad.dtype import AddrSpace
+from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
 from tinygrad.uop.ops import gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, Context, SPEC
+from tinygrad.helpers import argsort, all_same, cpu_profile, Context, SPEC, all_int
 
 @dataclass
 class IndexingContext:
@@ -138,6 +138,14 @@ pm_apply_rangeify = PatternMatcher([
   (UPat(GroupOp.Movement, name="x"), remove_movement_op_after_rangeify),
 ])
 
+def mstack_reshape_after(m:UOp) -> UOp|None:
+  if not all_same([x.src[0].shape for x in m.src]): return None
+  return m.replace(src=tuple(x.src[0] for x in m.src)).reshape(m.shape)
+
+# an MSTACK takes its srcs whole: RESHAPEs of them move after it. a RESHAPE shared with a consumer that indexes it would get that consumer's
+# ranges, and be replaced by its INDEX in the MSTACK too
+pm_mstack_reshape = PatternMatcher([(UPat(Ops.MSTACK, src=UPat(Ops.RESHAPE), name="m"), mstack_reshape_after)])
+
 pm_fix_deviceless = PatternMatcher([
   (UPat(Ops.STAGE, name="b"),
     lambda ctx,b: b.replace(arg=replace(b.arg, device=ctx)) if b.arg.device is None else None),
@@ -171,6 +179,15 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
       rngs = tuple(r if (sz == sh and off == 0) else (r-off).valid(graph_rewrite((r >= off) & (r < (sh+off)),
         symbolic+pm_simplify_valid, name="pad")) for r,sh,(off,sz) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
+      # fast path: const indices fold to consts, this is what the symbolic below does without the rewrites
+      if all(r.op is Ops.CONST and r.dtype is dtypes.weakint for r in rngs) and all_int(in_shape) and all_int(arg) and all(s > 0 for s in in_shape):
+        flat = 0
+        for r,s in zip(rngs, arg, strict=True): flat = flat*s + r.arg
+        out: list[int] = []
+        for s in reversed(in_shape):
+          out.append(flat % s)
+          flat //= s
+        return tuple(UOp.const(v) for v in reversed(out))
       sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
       sub_array = {r:r.replace(arg=(AxisType.PLACEHOLDER, i)) for i,r in enumerate(sink.ranges)}
       rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src
@@ -180,6 +197,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
 @rewrite_group(new_ctx=False)
 def run_rangeify(tsink:UOp) -> UOp:
   rctx = IndexingContext()
+  tsink = graph_rewrite(tsink, pm_mstack_reshape, name="reshapes after mstack")
 
   # get ops to realize
   graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx, name="get realize")

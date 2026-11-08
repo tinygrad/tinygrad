@@ -4,7 +4,7 @@ from typing import Any
 from tinygrad.helpers import OSX, unwrap, data64_le, cpu_profile
 from tinygrad.device import Compiled, TinyELF, Program, HostAllocator, BufferSpec
 from tinygrad.runtime.support.c import DLL
-from tinygrad.renderer.cstyle import ClangRenderer
+from tinygrad.renderer.cstyle import ClangRenderer, TCCRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.renderer.x86 import X86Renderer
@@ -21,7 +21,12 @@ class CPUProgram(Program['CPUDevice']):
   def __init__(self, dev:CPUDevice, obj:TinyELF, links:dict[str,CPUProgram]):
     self.dev, self.name, self.signature, self.profile_key, self.links = dev, obj.name, obj.signature, obj.profile_key, links
     self.lvp = obj.target.renderer == "LVP"
-    self.packer = struct.Struct(''.join(unwrap(dt.fmt) for _, dt in TinyELF.iter_sig(self.signature)))
+    # the args are packed at once (a graph's launch passes hundreds): their formats at their offsets, the gaps padding
+    fmt, end = '<', 0
+    for off, dt in TinyELF.iter_sig(self.signature):
+      fmt, end = fmt + (f'{off-end}x' if off > end else '') + (dt.fmt or '?'), off + dt.itemsize
+    self.packer = struct.Struct(fmt) if all(dt.fmt for _, dt in TinyELF.iter_sig(self.signature)) else None
+    self.args_size = end
     if dev.remote is not None:
       link_ids = json.dumps({n:p.fxn for n,p in links.items()}).encode()
       self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), len(link_ids), payload=obj.lib + link_ids)[0]
@@ -47,9 +52,11 @@ class CPUProgram(Program['CPUDevice']):
   def __call__(self, *args:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                wait:bool=False, timeout:int|None=None) -> float|None:
     hdr = 12 if self.lvp else 0
-    kernargs = ctypes.create_string_buffer(hdr + len(args) * 8)
+    kernargs = ctypes.create_string_buffer(hdr + max(len(args) * 8, self.args_size))
     if self.lvp: struct.pack_into('<3I', kernargs, 0, *data64_le(ctypes.addressof(kernargs) + hdr), len(args) * 2)
-    self.packer.pack_into(kernargs, hdr, *args)
+    if self.packer is not None and len(args) == len(self.signature): self.packer.pack_into(kernargs, hdr, *args)
+    else:
+      for a, (off, dt) in zip(args, TinyELF.iter_sig(self.signature)): struct.pack_into(f'<{dt.fmt}', kernargs, hdr + off, a)
     if (remote:=self.dev.remote) is not None:
       ret = (remote._rpc if wait else remote._post)(remote.sock, RemoteCmd.EXEC_PROG, self.fxn, len(kernargs), int(wait), payload=bytes(kernargs))
       return ret[0] / 1e9 if ret is not None else None
@@ -64,7 +71,7 @@ class CPUDevice(Compiled):
     self.remote = None
     if len(parts:=device.split(':')) == 3:
       self.remote = RemotePCIDevice("CPU", f"remote:{device[4:]}:0", RemotePCIDevice.connect(parts[1], int(parts[2])))
-    super().__init__(device, HostAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], CPUProgram,
+    super().__init__(device, HostAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer, TCCRenderer], CPUProgram,
       arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
     if self.remote is not None: self.peer_group = self.remote.peer_group
 

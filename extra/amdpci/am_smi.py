@@ -75,7 +75,8 @@ class AMSMI(AMDev):
     self._run_discovery()
     self._build_regs()
 
-    if self.reg("regSCRATCH_REG7").read() != AMDev.Version:
+    # (the version's bits 16-17: the compute pipes of the boot less one, see AMDev boot_version)
+    if self.reg("regSCRATCH_REG7").read() & ~(3 << 16) != AMDev.Version:
       raise Exception(f"Unsupported AM version: {self.reg('regSCRATCH_REG7').read():x}")
 
     self.is_booting = True
@@ -151,7 +152,7 @@ class SMICtx:
         if d.pci_state == "D0": d._init_from_d0()
         os.system('clear')
 
-      if d.pci_state == "D0" and d.reg("regSCRATCH_REG7").read() != AMDev.Version:
+      if d.pci_state == "D0" and d.reg("regSCRATCH_REG7").read() & ~(3 << 16) != AMDev.Version:
         self.devs.remove(d)
         self.opened_pcidevs.remove(d.pcibus)
         os.system('clear')
