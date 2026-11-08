@@ -1,85 +1,14 @@
-import unittest, re, math, ast as pyast
+import unittest, re
 from dataclasses import replace
-from typing import Any
 from tinygrad import Tensor
-from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid, ConstFloat
-from tinygrad.uop import Ops, FastEnum
-from tinygrad.uop.ops import AxisType, UOp, graph_rewrite, ParamArg, KernelInfo, CallInfo, CustomFunction, ProgramInfo
-from tinygrad.renderer import Estimates
-from tinygrad.device import BufferSpec
-from tinygrad.runtime.support.hcq2 import HCQInfo
-from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.schedule.indexing import BufferizeOpts
+from tinygrad.dtype import dtypes, Invalid
+from tinygrad.uop import Ops
+from tinygrad.uop.ops import UOp, graph_rewrite, ParamArg, KernelInfo
 from tinygrad.uop.movement import mop_cleanup
-from tinygrad.uop.render import render_uir
+from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.device import Device
 from tinygrad.codegen import full_rewrite_to_sink, to_program
-from tinygrad.helpers import Context, ansistrip, Target
-
-# ***** prototype parse for the uir wire format: %id = op src src key=value *****
-
-_DTYPES_BY_NAME: dict[str, DType] = {d.name: d for _,v in vars(type(dtypes)).items() if isinstance(v, DType) for d in [v]}
-# a token is a key=, a %ref, a bracket, a quoted string, a `python object`, or a bare word. '#' starts a comment
-_tok_re = re.compile(r"""#.*|\w+=|%\d+|[\[\]]|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`[^`]*`|[^\s\[\]]+""")
-_line_re = re.compile(r"^%(\d+) = (\w+)$")
-_named_vals = {"dtype": lambda v: _DTYPES_BY_NAME[v], "addrspace": lambda v: AddrSpace[v], "axis": lambda v: AxisType[v],
-               "op": lambda v: Ops[v.upper()]}
-_dataclass_args = {Ops.PARAM: ParamArg, Ops.REFPARAM: ParamArg, Ops.ALLOC: ParamArg, Ops.BUFFER: ParamArg,
-                   Ops.SINK: KernelInfo, Ops.CALL: CallInfo, Ops.CUSTOM_FUNCTION: CustomFunction, Ops.STAGE: BufferizeOpts,
-                   Ops.PROGRAM: ProgramInfo}
-# names a `python object` can use
-_eval_ns = {"Ops": Ops, "dtypes": dtypes, "AxisType": AxisType, "AddrSpace": AddrSpace, "Opt": Opt, "OptOps": OptOps, "Estimates": Estimates,
-            "BufferSpec": BufferSpec, "HCQInfo": HCQInfo, "Invalid": Invalid, "ConstFloat": ConstFloat, "inf": math.inf, "nan": math.nan,
-            "UOp": UOp, "ParamArg": ParamArg, "KernelInfo": KernelInfo, "CallInfo": CallInfo, "CustomFunction": CustomFunction}
-
-def _parse_lit(tok:str) -> Any:
-  if tok in ("true", "false"): return tok == "true"
-  if re.fullmatch(r"-?\d+", tok): return int(tok)
-  if re.fullmatch(r"-?(\d+\.\d*(e[-+]?\d+)?|\d+e[-+]?\d+|inf)|nan", tok): return float(tok)
-  return tok
-
-def _parse_const(tok:str) -> UOp:
-  if tok == "invalid": return UOp(Ops.CONST, src=(), arg=Invalid)
-  return UOp(Ops.CONST, src=(), arg=v if isinstance(v:=_parse_lit(tok), (bool, int)) else dtypes.weakfloat.const(v))
-
-def _parse_val(toks:list[str], bare) -> Any:
-  if (t:=toks.pop(0)) == "[":
-    items = []
-    while toks[0] != "]": items.append(_parse_val(toks, bare))
-    toks.pop(0)
-    return tuple(items)
-  # any FastEnum (Ops, ISA ops) can appear in a python object; they are all loaded by the time they are rendered
-  if t[0] == "`": return eval(t[1:-1], {**{c.__name__:c for c in FastEnum.__subclasses__()}, **_eval_ns})  # pylint: disable=eval-used
-  return pyast.literal_eval(t) if t[0] in "'\"" else bare(t)
-
-def parse_ssa(text:str) -> UOp:
-  nodes: dict[int, UOp] = {}
-  root = None
-  def src_tok(t:str) -> UOp: return nodes[int(t[1:])] if t.startswith("%") else _parse_const(t)
-  for raw in ansistrip(text).splitlines():   # op names may carry ANSI color from render_uir
-    toks = [t for t in _tok_re.findall(raw) if not t.startswith("#")]
-    if not toks: continue
-    m = _line_re.match(" ".join(toks[:3]))
-    assert m, f"unparseable line {raw!r}"
-    n, op, toks = int(m.group(1)), Ops[m.group(2).upper()], toks[3:]
-    srcs: list[UOp] = []
-    while toks and not toks[0].endswith("="):
-      v = _parse_val(toks, src_tok)
-      srcs.append(UOp(Ops.STACK, src=v) if isinstance(v, tuple) else v)
-    kv: dict[str, Any] = {}
-    while toks:
-      k = toks.pop(0)[:-1]
-      kv[k] = _parse_val(toks, lambda t: nodes[int(t[1:])] if t.startswith("%") else _named_vals.get(k, _parse_lit)(t))
-      if k == "target": kv[k] = Target.parse(kv[k])   # a Target is written as its string, bare or quoted
-    arg: Any = None
-    if op is Ops.RANGE: arg = (kv.get("axis", AxisType.WEAK), *(kv["slot"] if isinstance(kv["slot"], tuple) else (kv["slot"],)))
-    elif op is Ops.REDUCE: arg = (kv["op"], kv.get("pop", 0))
-    elif op is Ops.ALLREDUCE: arg = (kv["op"], kv["device"])
-    elif op in _dataclass_args and (kv or op is Ops.CALL): arg = _dataclass_args[op](**kv)
-    elif kv: (arg,) = kv.values()
-    nodes[n] = root = UOp(op, src=tuple(srcs), arg=arg)   # root is always the last node
-  assert root is not None, "empty graph"
-  return root
+from tinygrad.helpers import Context, ansistrip
 
 def _strip_buffers(root:UOp) -> UOp:
   # realized BUFFERs carry runtime state the wire can't; a BUFFER with no binding is exactly an ALLOC
@@ -90,7 +19,7 @@ def _strip_buffers(root:UOp) -> UOp:
 def assert_roundtrip(case, root:UOp):
   # UOps are hash-consed, so a lossless round trip gives back the identical UOp
   g = _strip_buffers(root)
-  case.assertIs(parse_ssa(render_uir(g)), g, render_uir(g))
+  case.assertIs(parse_uir(render_uir(g)), g, render_uir(g))
 
 class TestSSARender(unittest.TestCase):
   def test_gemm_pre_rangeify(self):
@@ -169,6 +98,46 @@ class TestSSARender(unittest.TestCase):
     # lines out of order / comments tolerated, ids sparse
     g = UOp.sink(UOp.const(1) + UOp.const(2))
     txt = "# hand written\n" + render_uir(g) + " # trailing comment\n\n# last line comment\n"
-    assert_roundtrip(self, parse_ssa(txt))
+    assert_roundtrip(self, parse_uir(txt))
+
+class TestParseUIR(unittest.TestCase):
+  def test_handwritten(self):
+    sink = parse_uir("""
+      # a+1 over 4 elements
+      %0 = param 4 slot=0 dtype=f32
+      %1 = range 4 slot=0
+      %2 = index %0 %1
+      %3 = param 4 slot=1 dtype=f32
+      %4 = index %3 %1   # comments can trail a line
+      %5 = add %4 1.0
+      %6 = store %2 %5
+      %7 = end %6 %1
+      %8 = sink %7 name=add_one
+    """)
+    a, b, r = UOp.param(0, dtypes.float32, (4,)), UOp.param(1, dtypes.float32, (4,)), UOp.range(4, 0)
+    self.assertIs(sink, a.index(r).store(b.index(r) + 1.0).end(r).sink(arg=KernelInfo(name="add_one")))
+
+  def test_studentgrad_syntax(self):
+    # named values, nested (op ...), [stacks] of expressions, {scoped blocks}, hex and exponent literals
+    sink = parse_uir("""
+      %buf   = param 4 slot=0 dtype=i32   # comment
+      %i     = range 4 slot=0
+      %inc   = { %one = 0x1
+                 %result = (add (index [10 20 30 40] %i) %one) }
+      %store = store (index %buf %i) (add %inc (cast 1E2 dtype=i32))
+      %end   = end %store %i
+    """)
+    buf, i = UOp.param(0, dtypes.int32, (4,)), UOp.range(4, 0)
+    vals = UOp(Ops.STACK, tuple(UOp.const(v) for v in (10, 20, 30, 40)))
+    inc = UOp(Ops.ADD, (UOp(Ops.INDEX, (vals, i)), UOp.const(1)))   # raw UOps: the parser builds exactly what is written
+    val = UOp(Ops.ADD, (inc, UOp(Ops.CAST, (UOp.const(100.0),), dtypes.int32)))
+    self.assertIs(sink, UOp(Ops.END, (UOp(Ops.STORE, (UOp(Ops.INDEX, (buf, i)), val)), i)))
+
+  def test_errors(self):
+    for txt, err in [("%0 = add %1 1", "%1 is not defined"), ("%0 = add 1 2 x=1 4", "srcs must come before key=value"),
+                     ("%0 = frob 1", "unknown op 'frob'"), ("%0 = add 1 nope", "not a %name or a literal"), ("", "expected an assignment"),
+                     ("%0 = add 1 (mul 2 3", "expected ')'"), ("%0 = [1 2", "expected ']'"), ("%0 = add load 1", "write (load ...)"),
+                     ("%x = 1\n%x = 2", "%x is already defined"), ("%x = 1 }", "expected 'end of input'")]:
+      with self.assertRaisesRegex(ValueError, re.escape(err)): parse_uir(txt)
 
 if __name__ == '__main__': unittest.main()

@@ -1146,7 +1146,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ctx[s]
 
   def render_uir(self) -> str:
-    from tinygrad.uop.render import render_uir
+    from tinygrad.uop.uir import render_uir
     return render_uir(self)
 
   # *** uop high level syntactic sugar ***
