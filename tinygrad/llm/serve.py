@@ -567,7 +567,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   request_queue_size = 1024  # the connections waiting to be accepted (many clients at once: the default of 5 refuses them)
   verbose_prefill = False
   generated_total, prefilled_total = 0, 0  # (the tokens generated and prefilled since the start, see status)
-  # (the requests that ended (when, ttft, longest wait for a token, total, prompt, cached, generated): the latencies of status)
+  # (the requests that ended (when, ttft, longest wait for a token, total, prompt, cached, generated, queued): the latencies of status)
   recent: collections.deque = collections.deque(maxlen=1000)
   temperature = 0.0  # a chat completion's without one
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any, top_p:float=1.0,
@@ -667,7 +667,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
                f"queue:{req.queued:5.2f}s  {sep}  {pre}  {sep}  ttft:{(req.pt or et)-req.st:5.2f}s  {sep}  "
                f"gen:{(n-1)/(et-req.pt) if n > 1 and req.pt else 0:4.0f} tok/s  {sep}  {spec}out:{n:5d}  {sep}  "
                f"{colored(total, 'red') if req.cancelled else total}\n")
-    self.recent.append((time.time(), (req.pt or et) - req.st, req.max_gap, et - req.st, len(req.ids), req.cache_start, n))
+    self.recent.append((time.time(), (req.pt or et) - req.st, req.max_gap, et - req.st, len(req.ids), req.cache_start, n, req.queued))
     self.flush(req)
     req.out.put(None)
     return False
@@ -688,7 +688,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       def pct(xs:list[float]) -> dict:
         xs = sorted(xs)
         return {f"p{q}": round(xs[min(len(xs)-1, int(q / 100 * len(xs)))], 3) for q in (50, 90, 99)} | {"max": round(xs[-1], 3)}
-      ret["last_10m"] = {"requests": len(rs), "ttft": pct([r[1] for r in rs]), "token_gap": pct([r[2] for r in rs]), "total": pct([r[3] for r in rs]),
+      # (queue: the wait for a sequence, before its prefill)
+      ret["last_10m"] = {"requests": len(rs), "ttft": pct([r[1] for r in rs]), "queue": pct([r[7] for r in rs]), "token_gap": pct([r[2] for r in rs]),
+                         "total": pct([r[3] for r in rs]),
                          "prompt_tokens": sum(r[4] for r in rs), "cached_tokens": sum(r[5] for r in rs), "generated_tokens": sum(r[6] for r in rs)}
     if gpus:
       # (?gpus: the power and clocks of the devices)
