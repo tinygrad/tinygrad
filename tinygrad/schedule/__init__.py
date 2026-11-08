@@ -38,7 +38,10 @@ def create_schedule(sched_sink:UOp) -> UOp:
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       kernels, after_deps = _split_after(u)
-      prev_state = _unwrap_src(u.src[0])
+      read_states = {k:[st for s in (k.src[0].src[1:] if k.op is Ops.END else k.src[1:]) for st in _states(s)] for k in kernels}
+      # the prior state is the first of its source and the same-buffer states its kernels read that is not superseded yet
+      prior_states = [_unwrap_src(u.src[0]), *[st for k in kernels for st in read_states[k] if st.storage_base is u.storage_base]]
+      prev_state = next((st for st in prior_states if st not in writes), prior_states[0])
       # writes to one buffer are a chain of states: at most one AFTER supersedes a state
       if prev_state in writes: raise RuntimeError("sibling AFTERs detected in assign graph")
       new_kernels = tuple(k for k in kernels if all(a.storage_base is not u.storage_base for a in children.get(k, [])))
@@ -51,11 +54,9 @@ def create_schedule(sched_sink:UOp) -> UOp:
       for k in kernels:
         in_degree.setdefault(k, 0)
         if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
-        kernel_deps = k.src[0].src[1:] if k.op is Ops.END else k.src[1:]
-        read_states = [st for s in kernel_deps for st in _states(s)]
-        reads += [(u, k, st) for st in read_states]
+        reads += [(u, k, st) for st in read_states[k]]
         # RAW deps: a kernel runs after the states it reads or joins
-        for st in read_states + [st for s in after_deps for st in _states(s)]:
+        for st in read_states[k] + [st for s in after_deps for st in _states(s)]:
           if st.op is Ops.AFTER:
             children.setdefault(st, []).append(k)
             in_degree[k] += 1

@@ -18,11 +18,16 @@ class TestAfterCounterexamples(unittest.TestCase):
 
   def test_sibling_afters_rejected(self):
     x = Tensor([0.]).realize().uop
+    with self.assertRaises(RuntimeError):
+      Tensor.realize(Tensor(x.after(x.store(1))) + 0, Tensor(x.after(x.store(2))) + 0)
+
+  def test_write_into_newer_state_allowed(self):
+    x = Tensor([0.]).realize().uop
     first = x.store(1)
     a = x.after(first)
-    # a and x.after(second) both supersede x, the chain is a.after(second)
-    with self.assertRaises(RuntimeError):
-      Tensor.realize(Tensor(x.after(a.store(2))) + 0, Tensor(a) + 0)
+    p, q = Tensor(x.after(a.store(2))) + 0, Tensor(a) + 0
+    Tensor.realize(p, q)
+    self.assertEqual((p.tolist(), q.tolist()), ([2.], [1.]))
 
   def test_shared_readers_after_older_dependency(self):
     x = Tensor([0.]).realize().uop
