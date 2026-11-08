@@ -1535,7 +1535,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     sent = push([mb[k][reg(me, l)].store(word(v)) for k in range(1, N) for l, v in zip(li, vals)])
     got = poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li])
     parts = [[mine(s, v, got[s*EP + i]) for s in range(N)] for i, v in enumerate(vals)]
-    if gather: stores = [out[s*n + e].store(p[0]) for e, ps in zip(els, parts) for s, p in enumerate(ps)]
+    if gather: stores = [out[s*n*W + e*W + c].store(p[c]) for e, ps in zip(els, parts) for s, p in enumerate(ps) for c in range(W)]
     else: stores = [out[e*W + c].store(ordered_sum([p[c] for p in ps])) for e, ps in zip(els, parts) for c in range(W)]
   else:
     owner = (wg % N).cast(dtypes.weakint)
@@ -2282,6 +2282,17 @@ def all_gather(x:Tensor, axis:int, dtype=None) -> Tensor:
   # (every device's whole a buffer: its readers don't each make one)
   whole = [Tensor.cat(*[Tensor(mine[i] if i == j else sent[(i, j)]) for i in range(n)], dim=axis) for j in range(n)]
   return Tensor(UOp.mstack(*[w.contiguous().uop for w in whole]))
+
+def host_allgather_half(x:Tensor) -> Tensor|None:
+  """x (devices, n) fp16 values: all N*n values on every device as float32. Paired halves halve mailbox traffic."""
+  N, n = int(x.shape[0]), int(x.shape[1])
+  if not isinstance(x.device, tuple) or n % 2: return None
+  m = round_up(n, HOST_AR_THREADS)
+  out = Tensor.empty(N*m, dtype=dtypes.float32, device=x.device)
+  if (p2p:=p2p_allreduce(x.device)) is not None and (shape:=p2p_ar_shape(m // 2)) is not None:
+    fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m//2, T=shape[0], EP=shape[1], gather=True, half=True)
+    return Tensor.custom_kernel(out, x.pad((None, (0, m-n))).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(N, m)[:, :n]
+  return None
 
 def host_allgather(x:Tensor) -> Tensor|None:
   """
@@ -4225,7 +4236,11 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   if q.uop.axis == 1 and getenv("SEQ_Q_Q8", 1) and not small and int(D) % 32 == 0:
     # (SEQ_Q_Q8: the queries sent as int8 groups of 32 with their scale, about half the bytes)
     qa = all_gather_q8(q.contiguous().reshape(1, H*T, D), 1).reshape(1, H, T, D)
-  elif q.uop.axis == 1: qa = gather(q.contiguous().reshape(n, H//n, T, D), dtypes.half, bool(getenv("SEQ_P2P_Q", 1))).reshape(1, H, T, D).half()
+  elif q.uop.axis == 1:
+    parts = q.contiguous().reshape(n, H//n, T, D)
+    if small and getenv("SEQ_P2P_Q_HALF", 1) and (hg:=host_allgather_half(parts.reshape(n, -1))) is not None:
+      qa = hg.reshape(n, H//n, T, D).reshape(1, H, T, D).half()
+    else: qa = gather(parts, dtypes.half, bool(getenv("SEQ_P2P_Q", 1))).reshape(1, H, T, D).half()
   else: qa = q.half()
   rows = qa.reshape(H, T, D).pad(((0, G*16 - H), None, None)).reshape(G, 16, T, D).permute(0, 2, 1, 3).reshape(G*T*16, D).contiguous()
   # every device's lists of its keys (the kernel's tokens are (16 heads, token): the list of token tok%T)
