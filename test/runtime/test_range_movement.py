@@ -110,6 +110,7 @@ class TestGatedIndexMovement(unittest.TestCase):
 
 # an invalid view has no contiguous offset
 # TODO: the expectedFailures are the movement op dropping the valid
+@unittest.skipIf(Device.DEFAULT in {"WEBGPU", "CL"}, "subbuffer not supported")
 class TestContiguousViewOffsetInvalid(unittest.TestCase):
   @unittest.expectedFailure
   def test_expand_shrink_invalid(self): self.assertIsNone(UOp.empty(1,4).expand(2,4).pad(((0,1),(0,0)))[2].contiguous_view_offset())
