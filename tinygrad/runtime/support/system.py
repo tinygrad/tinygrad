@@ -258,6 +258,7 @@ class PCIDevice:
   _vfio_groups:dict[str, FileIOInterface] = {}
   _vfio_lock = threading.Lock()
   def __init__(self, devpref:str, pcibus:str):
+    self._bar_lock = threading.Lock()
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.pcibus, self.irq_poller = pcibus, None
 
@@ -326,12 +327,14 @@ class PCIDevice:
     """
     iova, mapped = self.bar_iova(bar)
     sh = 26
-    for c in range(off >> sh, (off + max(size, 1) - 1 >> sh) + 1):
-      if c not in mapped:
-        # (the chunk mapped into the process for the iommu to pin: not the whole bar, its mapping costs with its size)
-        n = min(1 << sh, self.bar_info(bar)[1] - (c << sh))
-        System.dma_map(self.map_bar(bar, off=c << sh, size=n).addr, n, iova + (c << sh))
-        mapped.add(c)
+    with self._bar_lock:
+      for c in range(off >> sh, (off + max(size, 1) - 1 >> sh) + 1):
+        if c not in mapped:
+          # (the chunk mapped into the process for the iommu to pin: not the whole bar, its mapping costs with its size)
+          n = min(1 << sh, self.bar_info(bar)[1] - (c << sh))
+          try: System.dma_map(self.map_bar(bar, off=c << sh, size=n).addr, n, iova + (c << sh))
+          except FileExistsError: pass  # a parallel-capture child inherited a chunk its parent had already mapped
+          mapped.add(c)
     return iova + off
 
   def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
