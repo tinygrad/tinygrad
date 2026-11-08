@@ -7,6 +7,10 @@ from test.runtime.test_custom_kernel import custom_add_one_kernel
 
 # a gated index pushed through movement ops keeps gating the access
 class TestGatedIndexMovement(unittest.TestCase):
+  def test_gated_tensor_index_valid(self):
+    y, k = Tensor([7]).realize().expand(3).uop, Tensor([2, 0]).realize().uop
+    self.assertEqual(Tensor(y.index(k.valid(k.eq(0)))).tolist(), [0, 7])
+
   def test_gated_store_2d(self):
     # the valid on one index of the 2d C gates the whole store, only j == 0 writes C[i, 0]
     def kernel(C:UOp) -> UOp:

@@ -632,7 +632,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis)) if axis != reduce_axis else ret
   @staticmethod
   def invalid() -> UOp: return UOp.const(Invalid)
-  def valid(self, cond) -> UOp: return cond.where(self, self.const_like(Invalid))
+  def valid(self, cond) -> UOp: return cond.where(self, UOp.invalid())
   def get_idx(self) -> UOp:
     if self.op is Ops.STACK: return UOp.stack(*(x.get_idx() for x in self.src))
     return self.src[1] if self.op is Ops.WHERE and self.src[2].is_invalid else self
