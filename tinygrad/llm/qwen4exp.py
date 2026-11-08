@@ -2347,13 +2347,19 @@ class Transformer:
     while n > 2*sizes[-1]:
       ret.append(sizes[-1])
       n -= sizes[-1]
-    def cost(s:int) -> float: return CHUNK_FIXED_ROWS + s
-    best:list[tuple[float, int]] = [(0.0, 0)] + [(math.inf, 0)] * n
-    for i in range(1, n+1): best[i] = min((cost(s) + best[max(0, i - s)][0], s) for s in sizes)
+    best = self._chunk_best(tuple(sizes))
     while n > 0:
       ret.append(min(best[n][1], n))
       n -= ret[-1]
     return ret
+
+  @staticmethod
+  @functools.cache
+  def _chunk_best(sizes:tuple[int, ...]) -> list[tuple[float, int]]:
+    """the least time of a prefill of n tokens (up to twice the biggest size) and its last chunk's size, every n (once: ~0.1 s of python)"""
+    best:list[tuple[float, int]] = [(0.0, 0)] + [(math.inf, 0)] * (2 * sizes[-1])
+    for i in range(1, len(best)): best[i] = min((CHUNK_FIXED_ROWS + s + best[max(0, i - s)][0], s) for s in sizes)
+    return best
 
   def _seq_chunk(self, base:int, pos:int, n:int):
     """a prefill chunk: the n tokens from pos of the region from base in the token buffer (the jit of the smallest chunk size of n or more)"""
