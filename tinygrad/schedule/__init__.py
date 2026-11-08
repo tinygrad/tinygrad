@@ -39,10 +39,10 @@ def create_schedule(sched_sink:UOp) -> UOp:
       if u.op is not Ops.AFTER: continue
       kernels, after_deps = _split_after(u)
       prev_state = _unwrap_src(u.src[0])
-      prev_kernels = set(_split_after(prev_state)[0]) if prev_state.op is Ops.AFTER else set()
       # writes to one buffer are a chain of states: at most one AFTER supersedes a state
       if prev_state in writes: raise RuntimeError("sibling AFTERs detected in assign graph")
-      writes[prev_state] = (u, tuple(k for k in kernels if k not in prev_kernels))
+      new_kernels = tuple(k for k in kernels if all(a.storage_base is not u.storage_base for a in children.get(k, [])))
+      writes[prev_state] = (u, new_kernels)
       # a buffer state is a node after its prior state, its joins and its kernels, so readers inherit its history
       in_degree.setdefault(u, 0)
       for st in ([prev_state] if prev_state.op is Ops.AFTER else []) + [*after_deps, *kernels]:
@@ -60,7 +60,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
             children.setdefault(st, []).append(k)
             in_degree[k] += 1
     # WAR deps: a kernel reading buffer state S must run before another write that supersedes S. an AFTER only
-    # supersedes its immediate prior state; join members already present in that prior state are ordering deps, not writes
+    # supersedes its immediate prior state; a kernel already on an earlier state of the same buffer is an ordering dep, not a write
     for u, k, s in reads:
       a, write_kernels = writes.get(s, (u, ()))
       if a is u: continue
