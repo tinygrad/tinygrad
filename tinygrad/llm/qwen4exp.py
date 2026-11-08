@@ -1878,6 +1878,12 @@ class Transformer:
   # a step of speculative decoding takes every sequence decoding at once (forward_seqs). the regions are the caller's (see SeqEngine) ********
 
   SEQ_SIZES = tuple(int(x) for x in str(getenv("SEQ_SIZES", "1,2,4,8")).split(","))
+  def clock_caps(self, default:dict[str, str]) -> dict[str, str]:
+    """
+    the gfx clock caps of the server's modes (fast: few users, many, prefill). RDNA4 (R9700): none, its board's power limit is the cap (at
+    2000 MHz 48 users are 15% slower for 22% less energy a token)
+    """
+    return {mode: "" for mode in default} if _wmma_rdna4(self.token_embd.weight.device) else default
   def seqs_supported(self) -> bool:
     devs = self.token_embd.weight.device
     return bool(self.config.qsa and self.gated and self.config.spec_drafts and self.config.indexer is not None and isinstance(devs, tuple) and

@@ -1203,6 +1203,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     k = eng.k
     def prompt(req:Request) -> list[int]: return req.ids + req.generated  # (a paused one (see below) goes on from its tokens so far)
     stall = 0.0  # (the time of the slices since the last steps)
+    clocks = f(self.CLOCKS) if callable(f:=getattr(self.model, "clock_caps", None)) else self.CLOCKS
     try:
       from tinygrad.runtime.ops_amd import AMIdleClocks
       set_caps = AMIdleClocks.set_caps if AMIdleClocks.devs else None
@@ -1245,7 +1246,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         eng.times.clear()
         if set_caps is not None and (mode:="prefill" if job is not None else "many" if len(active) > self.FAST_USERS else "fast") != clock_mode \
            and time.perf_counter() - clock_at >= self.CLOCK_HOLD:
-          set_caps(self.CLOCKS[mode])
+          set_caps(clocks[mode])
           clock_mode, clock_at = mode, time.perf_counter()
         if job is not None:
           req = filling[job]

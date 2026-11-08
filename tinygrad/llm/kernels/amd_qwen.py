@@ -1351,9 +1351,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=rdna4,
                             block_n=128 if rdna4 or (local_out % 128 == 0 and ksplits == 1 and tt == 128) else 64, k_splits=ksplits)
     srcs = (x.cast(dtypes.float16).contiguous(),)
-  elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None and not (tokens <= DECODE_MULTI and in_features >= 1024 and not rdna4):
-    # (RDNA3: a few rows of a long input (batched decoding's) in the decode kernel, its weight loads shared by the rows: the f16 tensor cores'
-    # tiles of them are few workgroups that loop over the input, 2-4x slower. a short input's many outputs are the tensor cores')
+  elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None and not (tokens <= DECODE_MULTI and in_features >= 1024):
+    # (a few rows of a long input (batched decoding's) in the decode kernel, its weight loads shared by the rows: the f16 tensor cores' tiles of
+    # them are few workgroups that loop over the input, 2-4x slower. a short input's many outputs are the tensor cores')
     if layer.ggml_type == IQ4_XS: fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
     else: fxn = functools.partial(_q5_linear_f16_wmma_kernel if layer.ggml_type in (Q4_K, Q5_K) else _quant_linear_f16_wmma_kernel,
                                   ggml_type=layer.ggml_type)
@@ -1558,8 +1558,10 @@ def flag_partial_sum(x:Tensor) -> Tensor|None:
   # values the quantized layers' kernels would make of them, a prefill's exchanges are of them too))
   if n >= 65536 and (r:=_flag_partial_sum_q8(x, n)) is not None: return r
   N, groups = len(x.device), flag_ar_groups(n//2)
-  # (a few rows (a sequence's drafts): one exchange, the sums of the whole of every device's partials (the latency of the links, not the bytes))
-  scatter = n >= 16384
+  # (a few rows (a sequence's drafts): one exchange, the sums of the whole of every device's partials (the latency of the links, not the bytes).
+  # RDNA4 (R9700): every device's stores to all the others at once are slow (a 2560*3 one: 57 us), the two exchanges of a reduce scatter from
+  # 2048 values (21 us))
+  scatter = n >= (2048 if _wmma_rdna4(x.device) else 16384)
   chunk = round_up((n//2 + N-1)//N, 64)
   if (shape:=flag_ar_shape(2*chunk if scatter else n//2, groups)) is None or (ar:=flag_allreduce(x.device, groups)) is None: return None
   out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
@@ -2576,7 +2578,7 @@ def moe_softmax_router(logits:Tensor, k:int, scale:float, table:Tensor|None=None
   probs = Tensor.empty(shape, dtype=dtypes.float32, device=logits.device, axis=axis)
   n = int(logits.shape[-1])
   kernel = _moe_softmax_router_bitonic_kernel if isinstance(rows:=prod(logits.shape[:-1]), int) and 0 < rows <= 128 and \
-    32 <= n <= 1024 and n & (n-1) == 0 and not _wmma_rdna4(logits.device) else _moe_softmax_router_kernel
+    32 <= n <= 1024 and n & (n-1) == 0 else _moe_softmax_router_kernel
   res = Tensor.custom_kernel(sel, probs, logits.contiguous(), *([table] if table is not None else []),
                              fxn=functools.partial(kernel, k=k, scale=scale))
   return res[0], res[1]
@@ -2801,8 +2803,8 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
                             expert_words=expert_words, x_div=x_div, act=act, rdna4=rdna4)
     result = Tensor.custom_kernel(out, weight, xq, xd, *extra, *group, fxn=fxn)[0]
     return result.reshape(devices, rows_out, cols) if devices > 1 else result
-  # (the int8 tensor cores: the grid formats, RDNA3 IQ4_NL too)
-  if ggml_type in I8_WMMA_QUANTS or (ggml_type == IQ4_NL and not rdna4):
+  # (the int8 tensor cores: the grid formats and IQ4_NL)
+  if ggml_type in I8_WMMA_QUANTS or ggml_type == IQ4_NL:
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=ggml_type, out_features=out_features, in_features=in_features,
                             expert_words=expert_words, x_div=x_div, act=act, rdna4=rdna4)
