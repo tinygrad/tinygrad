@@ -1,7 +1,7 @@
 # all of symbolic lives here now
 import math, functools
 from collections import defaultdict
-from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, promo_dtype, identity_element
+from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, BottomUpGate, exec_alu, promo_dtype, identity_element
 from tinygrad.dtype import PyConst, ConstFloat, AddrSpace, dtypes, can_lossless_cast, Invalid, bitcast, truncate
 from tinygrad.helpers import partition, all_same, prod, flatten, IMAGE, dedup, ceildiv
 from tinygrad.uop.divandmod import div_and_mod_symbolic
@@ -255,6 +255,8 @@ def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
+  # (!x|y)&x -> y&x
+  ((UPat.var("x", dtype=dtypes.bool).logical_not() | UPat.var("y")) & UPat.var("x"), lambda x,y: y & x),
   # TODO: make a more general or folder like simplify_valid
   (UPat.var("x", dtype=dtypes.bool) | UPat.var("x", dtype=dtypes.bool).logical_not(), lambda x: x.const_like(True)),  # x|!x -> True
   # ** combine terms **
@@ -372,6 +374,10 @@ def loads_as_variables(uop:UOp) -> dict[UOp, UOp]|None:
   hidden = {u:UOp.variable(f"_load{i}", u.vmin, u.vmax, u.dtype) for i,u in enumerate(loads)}
   return None if uop.substitute(hidden).op_in_backward_slice_with_self(Ops.AFTER) else hidden
 
+def _keep_range(ctx:dict[UOp, UOp], r:UOp) -> None:
+  if r not in ctx: raise BottomUpGate
+pm_keep_range = PatternMatcher([(UPat(Ops.RANGE, name="r"), _keep_range)])
+
 # NOTE: it only depends on the UOps, so it's cached. the cache is bounded and global, valid can contain uop so caching on uop could make a cycle
 @functools.lru_cache(maxsize=4096)
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
@@ -398,14 +404,14 @@ def _uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
       # For X0 + X1 + ... > 0, check whether every Xi > 0 gives the same simplified output.
       candidate = [(Xi, UOp.variable(f"fake{i}", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)]
       if any(X not in uop.backward_slice_with_self for X,_ in candidate): continue
-      newuops = [uop.substitute({X:newX}).simplify().substitute({newX:X}).simplify() for X,newX in candidate]
+      newuops = [uop.substitute({X:newX}, extra_pm=pm_keep_range).simplify().substitute({newX:X}).simplify() for X,newX in candidate]
       if all_same(newuops): uop = newuops[0]
       elif uop.op is Ops.STACK and len(uop.src) == 2:
         if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
         if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
 
   # try all the valids together (but only the whole expressions)
-  if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates))) is not uop:
+  if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates), extra_pm=pm_keep_range)) is not uop:
     uop = s_uop.simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
   return uop
 

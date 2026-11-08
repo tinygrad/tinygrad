@@ -13,8 +13,8 @@ def remint(u:'UOp', dt:DType) -> 'UOp':
   return u.ccast(dt) if u.op is Ops.CONST else u.replace(src=(remint(u.src[0], dt),)+u.src[1:])
 
 def _promote(t, out_dtype:DType):
-  # NOTE: if t already has the out dtype, every case below returns t
-  if t.dtype is out_dtype or t._uop.base.is_invalid: return t  # invalid bool is weak const
+  # nothing to promote if t has the out dtype. invalid bool is weak const
+  if t.dtype is out_dtype or t._uop.base.is_invalid: return t
   # keep weak CONST weak, might lift weakint -> weakfloat
   if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST:
     return t if t.dtype == (dt:=weak_dtype(out_dtype)) else t._wrap_uop(remint(t._uop, dt))

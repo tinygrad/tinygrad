@@ -256,11 +256,16 @@ class Handler(VizHandler):
     elif self.path.startswith("/assets/"): super().do_GET()
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
-                reasoning:bool=False, log:str="", keepalive:float|None=None, top_p:float|None=None):
+                reasoning:bool=False, log:str="", keepalive:float|None=None, top_p:float|None=None, continuous_usage:bool=False):
     tok = self.server.tok
     prompt_tokens = len(ids)
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
-    def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
+    # (cached_tokens: the prompt's tokens that were in the caches, not prefilled)
+    def usage() -> dict: return {"prompt_tokens": prompt_tokens, "completion_tokens": len(out), "total_tokens": prompt_tokens + len(out),
+                                 "prompt_tokens_details": {"cached_tokens": req.cache_start}}
+    # (continuous_usage: the usage so far in every chunk, stream_options.continuous_usage_stats as vLLM's)
+    def chunk(d:dict, finish_reason:str|None=None) -> dict:
+      return {"choices": [{"index":0, "delta":d, "finish_reason":finish_reason}], **tmpl, **({"usage": usage()} if continuous_usage else {})}
     out: list[int] = []
     dec = tok.stream_decoder()
     tags, sentinels = markup_tags(sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {})
@@ -308,12 +313,8 @@ class Handler(VizHandler):
       if tool_calls:
         yield chunk({"tool_calls":tool_calls})
         if finish_reason == "stop": finish_reason = "tool_calls"
-      yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
-      if include_usage:
-        # (cached_tokens: the prompt's tokens that were in the caches, not prefilled)
-        yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
-                                        "total_tokens": prompt_tokens + len(out),
-                                        "prompt_tokens_details": {"cached_tokens": req.cache_start}}, **tmpl}
+      yield chunk({}, finish_reason)
+      if include_usage: yield {"choices": [], "usage": usage(), **tmpl}
     finally: req.cancelled = True  # (a client gone: the model stops at its next token)
 
   def client_gone(self) -> bool:
@@ -375,8 +376,9 @@ class Handler(VizHandler):
       try: max_tokens, temperature, top_p = sampling_params(body, self.server.temperature)
       except ValueError as e: return self.bad_request(str(e))
       hold = 0.0 if body.get("stream") else HOLD_JSON
-      chunks = self.run_model(ids, str(body.get("model") or self.server.model_name),
-                              not body.get("stream") or (body.get("stream_options") or {}).get("include_usage", False),
+      include_usage = not body.get("stream") or (body.get("stream_options") or {}).get("include_usage", False)
+      chunks = self.run_model(ids, str(body.get("model") or self.server.model_name), include_usage,
+                              continuous_usage=include_usage and bool((body.get("stream_options") or {}).get("continuous_usage_stats", False)),
                               max_tokens=max_tokens, temperature=temperature, reasoning=rendered.rstrip().endswith(THINK_STARTS), log=log,
                               top_p=top_p, keepalive=hold or None)
       if body.get("stream"): self.stream_json(chunks)

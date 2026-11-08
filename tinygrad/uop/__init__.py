@@ -107,11 +107,18 @@ class GroupOp:
 
   # TODO: is BITCAST always Elementwise if it's shape changing?
   Elementwise = set.union(ALU, {Ops.CAST, Ops.BITCAST})
+  UnaryElementwise = Unary | {Ops.CAST}
 
   Defines = {Ops.PARAM, Ops.REFPARAM, Ops.BUFFER, Ops.ALLOC, Ops.BINARY}
 
   Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM, Ops.GETADDR}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK}
+  # ops with a shape from the shape of src[0] and the arg
+  ShapeChanging = Movement | {Ops.UNSHARD, Ops.REDUCE}
+
+  # ops with the dtype of their first src, and ops with the promoted dtype of their srcs. the other ops are in dtype_from_uop
+  PassthroughDType = {Ops.LOAD, Ops.UNSHARD, Ops.REDUCE, Ops.AFTER, Ops.RANGE, Ops.CONTIGUOUS_BACKWARD, Ops.COPY, Ops.STAGE, Ops.DETACH,
+                      Ops.MSTACK, Ops.MSELECT, Ops.ALLREDUCE, Ops.SPECIAL, Ops.END, Ops.NEG, Ops.TRUNC} | Movement
 
   # ops that may have a side effect each time they run
   Effect = {Ops.STORE, Ops.CALL, Ops.BARRIER}
@@ -130,5 +137,6 @@ class GroupOp:
 
   # These can change the dtype to bool
   Comparison = {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}
+  PromoteDType = Broadcastable - Comparison - {Ops.WHERE, Ops.THREEFRY, Ops.FDIV, Ops.SHL, Ops.SHR}
 
   All = set(Ops)

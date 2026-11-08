@@ -353,8 +353,8 @@ class OnnxRunner:
     """Convert tensor to python const with name-based caching for JIT stability."""
     t = self.graph_values[name]
     if idx not in required_input_python_consts.get(op, ()) or not isinstance(t, Tensor): return t
+    if name in self.graph_inputs: return _to_python_const(t)
     # cache by name - safe because JIT requires fixed input shapes, so computed values (Shape ops) are deterministic
-    # true graph inputs that are python consts are rare; if they change across runs, cached value will be wrong
     if (cached := self._python_const_cache.get(name)) is None: cached = self._python_const_cache[name] = _to_python_const(t)
     return cached
 
