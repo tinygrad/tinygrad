@@ -1210,13 +1210,15 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       self.main_writes(max(len(ids) + len(req.generated), len(getattr(model, "_cached_tokens", []))) + 64)
 
   # ** sequences sharing the model's caches (Transformer.seqs_supported): continuous batching
-  # (a prompt is prefilled in slices of PREFILL_SLICE tokens (~1 s). the decoding ones' steps run after MAX_STALL s of slices, for their share
+  # (a prompt is prefilled in slices of PREFILL_SLICE tokens (~1 s). the decoding ones' steps run after MAX_STALL s of slices (0.3: 1.0 had
+  # replies wait 1.5/2.3 s p50/p90 for a token under agent load, 0.3: 0.8/1.5 s, and more tokens), for their share
   # of the time (the requests decoding of the ones in flight, DECODE_SHARE at most and 0.1 at least): a long prompt doesn't stop the replies,
   # many prompts at once are prefilled mostly one after another (a step of many is about as fast as one of a few). the next slice is the
   # prompt's with the fewest tokens left to prefill (a short one, an agent's turn, isn't behind a long one), less AGING tokens a second it
   # waited. a long one isn't behind short ones that keep coming forever: one waiting past STARVE_SEQ goes first, and takes a sequence even if
   # a held conversation is lost for it (see SeqEngine.STICKY))
-  PREFILL_SLICE, MAX_STALL, DECODE_SHARE, AGING, STARVE_SEQ = 13824, 1.0, 0.5, getenv("AGING", 0), getenv("SEQ_STARVE", 120.0)
+  PREFILL_SLICE, MAX_STALL, DECODE_SHARE = getenv("PREFILL_SLICE", 13824), getenv("MAX_STALL", 0.3), getenv("DECODE_SHARE", 0.5)
+  AGING, STARVE_SEQ = getenv("AGING", 0), getenv("SEQ_STARVE", 120.0)
   # (the gpus' clocks (AM: their gfx clock's cap, see AMIdleClocks.set_caps): a few users decoding at the full clocks (a user's tokens fast),
   # more at less (the energy a token: ~0.85 J at 2000 MHz on 6x 7900 XTX, ~1.2 J at full), a prefill at a cap it isn't slower at. switched
   # CLOCK_HOLD s apart at most)
