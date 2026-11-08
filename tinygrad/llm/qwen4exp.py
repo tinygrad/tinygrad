@@ -18,7 +18,7 @@ from tinygrad.llm.direct_read import DirectFile, read_many, close_rings
 from tinygrad.llm.gguf_load import gguf_shard_units, _disk_bytes, _disk_location
 from tinygrad.uop.ops import Ops, AxisType, KernelInfo
 from tinygrad.dtype import DType
-from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup, DEBUG, GlobalCounters
+from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup, DEBUG
 from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
 
 class ExpertGating(enum.IntEnum):
@@ -537,6 +537,23 @@ def _open_devices(devices:tuple[str, ...]):
   threads = [threading.Thread(target=Device.__getitem__, args=(d,), daemon=True) for d in devices[1:]]
   for t in threads: t.start()
   for t in threads: t.join()
+
+def _bytes_by_device(ts:list[Tensor], devs:tuple[str, ...]) -> dict[str, int]:
+  """the bytes of the realized buffers of ts on every device of devs (a buffer once, host memory not)"""
+  seen:set[int] = set()
+  out = dict.fromkeys(devs, 0)
+  for t in ts:
+    # (a realized tensor's buffer: its base's, or its own (a view of one))
+    try: b = t.uop.base.buffer
+    except Exception:
+      try: b = t.uop.buffer
+      except Exception: continue
+    for x in (b.bufs if isinstance(b, MultiBuffer) else [b]):
+      x = x.base if x._base is not None else x
+      if id(x) in seen or (x.options is not None and x.options.host) or x.device not in out: continue
+      seen.add(id(x))
+      out[x.device] += x.nbytes
+  return out
 
 def _is_buffer(u:UOp) -> bool:
   """the uop is a buffer's (realized: its reshapes, split over devices or not), not a computation"""
@@ -1670,6 +1687,7 @@ class QwenMTPBlock(QSABlock):
 
 class Transformer:
   _embd_q8:Tensor|None = None  # (the token embedding's Q8_0 bytes in host memory, see _embed)
+  _weight_bytes:dict[str, int] = {}  # (the weights' memory of every device, see from_gguf)
   def __init__(self, config:TransformerConfig):
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
@@ -2290,37 +2308,27 @@ class Transformer:
     devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
     rep:dict[str, Any]|None = getattr(self, "_mem_report", None)
     if rep is None:
-      def by_dev(ts:list[Tensor]) -> dict[str, int]:
-        seen:set[int] = set()
-        out = dict.fromkeys(devs, 0)
-        for t in ts:
-          for u in t.uop.toposort():
-            if u.op is not Ops.BUFFER or (b:=u.arg.buffer if hasattr(u.arg, "buffer") else None) is None: continue
-            for x in (b.bufs if isinstance(b, MultiBuffer) else [b]):
-              x = x.base if x._base is not None else x
-              if id(x) in seen or (x.options is not None and x.options.host) or x.device not in out: continue
-              seen.add(id(x))
-              out[x.device] += x.nbytes
-        return out
       qsa = [b for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []) if isinstance(b, QSABlock) and hasattr(b, "cache_k")]
       gdn = [b for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
-      groups = {"weights": nn.state.get_parameters(self), "kv": [b.cache_k for b in qsa],
+      groups = {"kv": [b.cache_k for b in qsa],
                 "indexer": [t for i in self._indexers() for t in (getattr(i, "cache_pk", None), getattr(i, "state", None),
                                                                   getattr(i, "pool_state", None)) if t is not None],
                 "slots": [t for b in gdn for t in (getattr(b, "pool_rec", None), getattr(b, "pool_rp", None), *getattr(b, "pool_conv", []))
                           if t is not None] + [t for t in (getattr(self, "seq_spec_h", None), getattr(self, "seq_ckpt_h", None)) if t is not None]}
       rows = self.seq_rows()
-      kvb = sum(int(b.cache_k.nbytes()) // len(devs) for b in qsa) + \
-            sum(int(i.cache_pk.nbytes()) // len(devs) for i in self._indexers() if hasattr(i, "cache_pk"))
-      rep = self._mem_report = {"groups": {k: by_dev(v) for k, v in groups.items()}, "rows": rows,
-                                "bytes_per_token": kvb // (rows + REGION_ALIGN), "full_contexts": round(rows / self.max_context, 2)}
+      grp = {"weights": self._weight_bytes} | {k: _bytes_by_device(v, devs) for k, v in groups.items()}
+      per_token = (grp["kv"][devs[0]] + grp["indexer"][devs[0]]) // (rows + REGION_ALIGN)
+      rep = self._mem_report = {"groups": grp, "rows": rows, "bytes_per_token": per_token, "full_contexts": round(rows / self.max_context, 2)}
     def free(d:str) -> int:
       try: return sum(sz for sz, _, _, f in Device[d].iface.dev_impl.mm.pa_allocator.blocks.values() if f)  # type: ignore[attr-defined]
       except Exception: return -1
-    used = {d: GlobalCounters.mem_used_per_device.get(d, 0) for d in devs}
+    def vram(d:str) -> int:
+      try: return int(Device[d].iface.dev_impl.vram_size)  # type: ignore[attr-defined]
+      except Exception: return 0
     grp = cast(dict[str, dict[str, int]], rep["groups"])
     per = {d: {k: gb(v[d]) for k, v in grp.items()} for d in devs}
-    for d in devs: per[d] |= {"workspace": gb(used[d] - sum(v[d] for v in grp.values())), "free": gb(free(d))}
+    # (the rest of the memory: the activations, the collectives' buffers, the jits')
+    for d in devs: per[d] |= {"workspace": gb(vram(d) - free(d) - sum(v[d] for v in grp.values())), "free": gb(free(d))}
     return {"devices": per, "rows": rep["rows"], "bytes_per_token": rep["bytes_per_token"], "full_contexts": rep["full_contexts"],
             "kv_split": self.config.kv_split}
 
@@ -2777,6 +2785,8 @@ class Transformer:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
       Tensor.realize(*params)
     else: model.prepare()
+    # (the weights' memory: a walk of the model later meets the jits' and the engine's references)
+    model._weight_bytes = _bytes_by_device(nn.state.get_parameters(model), devices)
     return model, kv
 
   def prepare(self):
