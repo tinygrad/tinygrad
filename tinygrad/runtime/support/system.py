@@ -255,6 +255,8 @@ System = _System()
 # *** PCI Devices
 
 class PCIDevice:
+  _vfio_groups:dict[str, FileIOInterface] = {}
+  _vfio_lock = threading.Lock()
   def __init__(self, devpref:str, pcibus:str):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.pcibus, self.irq_poller = pcibus, None
@@ -263,7 +265,8 @@ class PCIDevice:
     except PermissionError: raise PermissionError(f"Cannot access PCI device {pcibus}: run `extra/amdpci/setup_python_cap.sh` or use sudo")
 
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
-      FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
+      # Another device in the same IOMMU group may concurrently unbind this one.
+      with contextlib.suppress(OSError): FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"): raise RuntimeError(f"Driver is bound to {pcibus}")
 
     # remove sibling functions of the gpu, if any
@@ -282,10 +285,17 @@ class PCIDevice:
       FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
       iommu_group = FileIOInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
 
-      self.vfio_group = FileIOInterface(f"/dev/vfio/{iommu_group}", os.O_RDWR)
-      vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(vfio_fd.fd))
-
-      with contextlib.suppress(OSError): vfio.VFIO_SET_IOMMU(vfio_fd, vfio.VFIO_TYPE1v2_IOMMU) # set iommu works only once for the fd.
+      # Open a group once per process: all of a root port's endpoints share it. Bring sibling endpoints to vfio before attaching it.
+      with PCIDevice._vfio_lock:
+        if (grp:=PCIDevice._vfio_groups.get(iommu_group)) is None:
+          for d in os.listdir(gdir:=f"/sys/kernel/iommu_groups/{iommu_group}/devices"):
+            if d == self.pcibus or open(f"{gdir}/{d}/class").read().strip().startswith("0x0604"): continue  # bridges stay bound
+            if os.path.exists(drv:=f"{gdir}/{d}/driver") and os.path.basename(os.readlink(drv)) != "vfio-pci":
+              with contextlib.suppress(OSError): FileIOInterface(f"{drv}/unbind", os.O_WRONLY).write(d)
+          grp = PCIDevice._vfio_groups[iommu_group] = FileIOInterface(f"/dev/vfio/{iommu_group}", os.O_RDWR)
+          vfio.VFIO_GROUP_SET_CONTAINER(grp, ctypes.c_int(vfio_fd.fd))
+          with contextlib.suppress(OSError): vfio.VFIO_SET_IOMMU(vfio_fd, vfio.VFIO_TYPE1v2_IOMMU) # set iommu works only once for the fd.
+      self.vfio_group = grp
       self.vfio_dev = FileIOInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode())))
 
       self.irq_fd = FileIOInterface.eventfd(0, 0)

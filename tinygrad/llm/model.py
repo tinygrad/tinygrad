@@ -704,6 +704,10 @@ class Transformer:
       # tensor parallel on RDNA3: its own implementation (custom kernels, sequences decoded at once, speculative decoding)
       from tinygrad.llm.qwen4exp import Transformer as Qwen4Exp, amd_custom_kernels_supported as qwen4exp_supported
       if qwen4exp_supported(Device.DEFAULT): return Qwen4Exp.from_gguf(gguf, max_context, realize, shard, parsed=(kv, entries))  # type: ignore
+    if arch == 'glm-dsa' and shard > 1:
+      # GLM-5.3 tensor parallel on AMD (RDNA4): DSA attention, sequence-sharded long-context caches and MTP
+      from tinygrad.llm.glm_dsa import Transformer as GLMDSA, amd_custom_kernels_supported as glm_dsa_supported
+      if glm_dsa_supported(Device.DEFAULT): return GLMDSA.from_gguf(gguf, max_context, realize, shard)  # type: ignore
     if arch == 'glm5-next' and shard > 1:
       # GLM-5.3-Flash tensor parallel on AMD (RDNA3/RDNA4): its own implementation (custom kernels, requests decoded in batches, MTP)
       from tinygrad.llm.glm5next import Transformer as GLM5Next, amd_custom_kernels_supported as glm5next_supported
