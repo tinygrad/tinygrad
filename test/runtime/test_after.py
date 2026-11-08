@@ -23,6 +23,16 @@ class TestAfterCounterexamples(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       Tensor.realize(Tensor(x.after(a.store(2))) + 0, Tensor(a) + 0)
 
+  def test_shared_readers_after_older_dependency(self):
+    x = Tensor([0.]).realize().uop
+    first = x.store(1)
+    a = x.after(first)
+    second = a.store(2)
+    y = a.after(second)
+    p, q = Tensor(y) + 0, Tensor(y.after(first)) + 0
+    Tensor.realize(p, q)
+    self.assertEqual((p.tolist(), q.tolist()), ([2.], [2.]))
+
   def test_disjoint_writes_allowed(self):
     x = Tensor([0., 0.]).realize().uop
     y = Tensor(x.after(x[:1].store(1), x[1:].store(2)))
