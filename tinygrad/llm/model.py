@@ -704,6 +704,10 @@ class Transformer:
       # tensor parallel on RDNA3: its own implementation (custom kernels, sequences decoded at once, speculative decoding)
       from tinygrad.llm.qwen4exp import Transformer as Qwen4Exp, amd_custom_kernels_supported as qwen4exp_supported
       if qwen4exp_supported(Device.DEFAULT): return Qwen4Exp.from_gguf(gguf, max_context, realize, shard, parsed=(kv, entries))  # type: ignore
+    if arch == 'glm5-next' and shard > 1:
+      # GLM-5.3-Flash tensor parallel on AMD (RDNA3/RDNA4): its own implementation (custom kernels, requests decoded in batches, MTP)
+      from tinygrad.llm.glm5next import Transformer as GLM5Next, amd_custom_kernels_supported as glm5next_supported
+      if glm5next_supported(Device.DEFAULT): return GLM5Next.from_gguf(gguf, max_context, realize, shard)  # type: ignore
     ple_entry = entries.pop('per_layer_token_embd.weight', None)
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
     assert shard >= 1, f"shard must be at least 1, got {shard}"

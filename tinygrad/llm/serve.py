@@ -1,7 +1,7 @@
 from __future__ import annotations
-import collections, json, math, pathlib, queue, re, select, socket, socketserver, sys, threading, time, traceback, typing, uuid
+import collections, json, math, pathlib, queue, random, re, select, socket, socketserver, sys, threading, time, traceback, typing, uuid
 from typing import TYPE_CHECKING
-from tinygrad.helpers import DEBUG, colored, stderr_log
+from tinygrad.helpers import DEBUG, colored, stderr_log, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
 if TYPE_CHECKING:
   from tinygrad.llm.cli import SimpleTokenizer
@@ -134,6 +134,13 @@ def common_prefix(a:list[int], b:list[int]) -> int:
     else: hi = mid - 1
   return lo
 
+class HostConv(typing.NamedTuple):
+  """a conversation kept in host memory (HOST_STASH): its tokens, its chunks (Transformer.host_save), the tokens of its checkpoint (the prompt
+  of its last reply: a request can continue that one, its reply came back different, or 0), its row of the hidden states (_spec_row)"""
+  tokens: list[int]
+  chunks: list[typing.Any]
+  ckpt: int
+  hrow: int
 ODD_TOKENS = ("[gMASK]", "[sMASK]", "[MASK]", "<sop>", "<eop>")
 
 def anthropic_events(chunks:typing.Iterator[dict], model:str, input_tokens:int) -> typing.Iterator[dict]:
@@ -467,6 +474,10 @@ def _close(g:typing.Iterator) -> None:
   if (close:=getattr(g, "close", None)) is not None: close()  # (a generator: the model stops where it is)
 
 _rids = iter(range(1, 1 << 62))
+def trace(msg:str):
+  """(SERVE_TRACE: a file) the model's operations of the scheduler, in order: to tell what came before a reply went wrong"""
+  if (path:=getenv("SERVE_TRACE", "")):
+    with open(path, "a") as f: f.write(f"{time.time():.3f} {msg}\n")
 
 class Request:
   """a request to the model: its prompt, its sampled tokens come back in out (None: the end), it's cancelled when the client goes away"""
@@ -484,7 +495,23 @@ class Request:
     # (queued), the time of its slices)
     self.fill: tuple[list[int], int, bool] = ([], 0, False)
     self.queued, self.prefill_time, self.slices, self.max_gap, self.last_tok = 0.0, 0.0, 0, 0.0, 0.0
+    self.pos, self.done = 0, False  # batched decoding: the position of its last token (the next step's input)
+    # batched speculative decoding: the last step's sampled tokens, the position the MTP layer catches up from, the drafts accepted, the parity
+    self.y:list[int] = []
+    self.mtp, self.j, self.par = 0, 0, 1
+    self.no_mix = False  # (MIX) prefilled before its steps, not in them (its cache was less than it seemed)
+    # (decoded in a slot: a copy of the model's checkpoint at the end of its prompt, see LLMServer.ckpt_keep)
+    self.ckpt_buf: typing.Any = None
+    self.ckpt_tokens: list[int] = []
+  def spec_start(self, first:int, pos:int, k:int):
+    """the slot's state after a prefill (or the model alone): the token at pos is the next step's input"""
+    self.y, self.mtp, self.j, self.par, self.pos = [first] + [0]*k, pos, 0, 1, pos
 
+# short prompts prefilled together (Transformer.batch_prefill) from this many: a step of them costs about what three alone do
+BATCH_PREFILL_MIN = getenv("BATCH_PREFILL_MIN", 3)
+# (BCP) requests prefilled together from this many: continuations of their conversations, the rest of each prompt in its slot (see Transformer.
+# batch_prefill's starts): a step of the model's weights for all of them, not one each. fewer: one at a time (a step is G of P rows)
+BCP_MIN = getenv("BCP_MIN", 2)
 
 class BatchStats:
   """batched decoding's status line every few seconds while it runs: the requests decoding and waiting now, the tokens generated a second and
@@ -493,14 +520,15 @@ class BatchStats:
     self.every, self.st = every, time.perf_counter()
     self.reset()
   def reset(self):
-    self.steps, self.tokens, self.step_time, self.prefills, self.prefill_time = 0, 0, 0.0, 0, 0.0
+    self.steps, self.tokens, self.step_time, self.prefills, self.prefill_time, self.mixed = 0, 0, 0.0, 0, 0.0, 0
     self.times:dict[str, float|int] = {}  # (more of the time: where it went, and counts)
   def add(self, name:str, t:float|int): self.times[name] = self.times.get(name, 0) + t
   def step(self, running:int, waiting:int):
     if (dt:=time.perf_counter() - self.st) > self.every and self.steps:
       sep = colored('--', 'BLACK')
       stderr_log(f"batch  {sep}  {running:3d} requests decoding, {waiting:3d} waiting  {sep}  {self.tokens/dt:5.0f} tok/s generated  {sep}  "
-                 f"{self.steps:4d} steps of {self.step_time/self.steps*1e3:5.1f} ms  {sep}  {self.prefills:3d} prefills ({self.prefill_time:4.1f}s)  "
+                 f"{self.steps:4d} steps of {self.step_time/self.steps*1e3:5.1f} ms  {sep}  {self.prefills:3d} prefills ({self.prefill_time:4.1f}s, "
+                 f"{self.mixed} mixed)  "
                  f"{sep}  in the last {dt:.0f}s" + "".join(f"  {sep}  {k} {v:.1f}s" if isinstance(v, float) else f"  {sep}  {k} {v}"
                                                            for k, v in self.times.items()) + "\n")
       self.st = time.perf_counter()
@@ -509,8 +537,10 @@ class BatchStats:
 
 class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   """
-  requests come in on threads of their own, the model runs on the server's thread: a model whose sequences share its caches
-  (Transformer.seqs_supported) decodes all of them at once (schedule_seqs), another one request at a time (schedule_alone)
+  requests come in on threads of their own, the model runs on the server's thread: one request alone is decoded as before (speculative
+  decoding, its reply cached for the next turn), many at the same time are batched (Transformer.batch_step): every one has a slot of the
+  model's states, a step gives the next token of all of them. a request that may not fit a slot (prompt + max_tokens) waits for the model
+  alone, one that fills its slot goes on alone (its tokens prefilled again)
   """
   def handle_error(self, request, client_address):
     # (a client gone before its reply: not an error of the server's, no traceback)
@@ -522,26 +552,49 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   generated_total, prefilled_total = 0, 0  # (the tokens generated and prefilled since the start, see status)
   # (the requests that ended (when, ttft, longest wait for a token, total, prompt, cached, generated): the latencies of status)
   recent: collections.deque = collections.deque(maxlen=1000)
+  temperature = 0.0  # a chat completion's without one
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any, top_p:float=1.0,
                temperature:float=0.0):
     # top_p: a request's without one (the model's recommended, general.sampling.top_p of its gguf); temperature: a chat completion's
-    self.model, self.model_name, self.tok, self.template, self.top_p, self.temperature = model, model_name, tok, template, top_p, temperature
+    # (the model: master's Transformer, or a tensor parallel implementation of its own with more (qwen4exp's sequences, glm5next's batch slots))
+    self.model: typing.Any = model
+    self.model_name, self.tok, self.template, self.top_p = model_name, tok, template, top_p
+    self.temperature = temperature
     self.waiting: queue.Queue[Request] = queue.Queue()
     self.inflight = 0  # the requests taken by the model (decoded, or waiting for it): the status line's
     self.stats = BatchStats()
     self.engine: typing.Any = None  # (schedule_seqs': the sequences)
     self.recent = collections.deque(maxlen=1000)
+    # the slots of batched decoding (none: one request at a time)
+    # (the slots past them: the landing slots of mixed steps, see Transformer.batch_mixed_step)
+    self.slots = n if isinstance(n:=getattr(model, "decode_slots", getattr(model, "batch_slots", lambda: 0))(), int) else 0
+    # batched decoding is speculative (the drafts of every sequence verified in the step) when the model drafts
+    self.spec = k if self.slots and isinstance(k:=getattr(getattr(model, "config", None), "spec_drafts", 0), int) else 0
+    # the conversations kept in the free slots (their tokens, the slot's row of the last one's hidden state): a request that continues one is
+    # prefilled from its states (agents taking turns)
+    self.stash: dict[int, tuple[list[int], int]] = {}
+    # (MIX) the requests prefilled in the steps: (request, landing slot, start, position)
+    self.landing:list[tuple[Request, int, int, int]] = []
+    # (WIDE) the slot after a sequence's that its positions past its own are in (a sequence spanning two slots): not decoded, kept, taken
+    self.partner:dict[int, int] = {}
+    # (HOST_STASH: GB of host memory for the ones longer than a slot, their states copied there. the least recently used first out)
+    # (see HostConv). the chunks of the ones out are used again (new memory and its devices' mappings are slow, ~1 s a GB)
+    self.host: list[HostConv] = []
+    self.host_free: list[typing.Any] = []
+    self.host_made = 0  # (the chunks made: never freed, used again)
     specials = sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {}
     self.odd_ids = {i for t, i in specials.items() if t in ODD_TOKENS}
     super().__init__(server_address, Handler)
 
   def serve_forever(self, poll_interval:float=0.5):
-    # (the model's thread polls the devices holding the GIL: the request threads (many streams) take it in turns of 0.5 ms, the default 5 ms
-    # delays its steps)
-    sys.setswitchinterval(0.0005)
+    # (the model's thread polls the devices holding the GIL: the request threads (many streams) take it in turns of SWITCH_INTERVAL, the
+    # default 5 ms delays its steps)
+    sys.setswitchinterval(getenv("SWITCH_INTERVAL", 0.0005))
     # the model runs here, not on a thread of its own: BEAM's _try_compile installs a SIGALRM handler, which raises ValueError off the main thread
     threading.Thread(target=super().serve_forever, args=(poll_interval,), daemon=True, name="HTTPServer").start()
-    if hasattr(type(self.model), "seqs_supported") and typing.cast(typing.Any, self.model).seqs_supported(): self.schedule_seqs()
+    # sequences sharing the caches (qwen4exp), else requests in batch slots (glm5next), else one at a time
+    if hasattr(type(self.model), "seqs_supported") and self.model.seqs_supported(): self.schedule_seqs()
+    elif self.slots: self.schedule()
     else: self.schedule_alone()
 
   # ** the requests' tokens and their end
@@ -577,9 +630,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       req.finish_reason = "length"
       return self.finish(req)
     return True
+  verbose_prefill = False
   def finish(self, req:Request, error:Exception|None=None) -> bool:
     if req.done: return False
     req.done, req.error = True, error
+    # (its checkpoint's host memory after its slot_done: a reply's end is emitted before it, see schedule)
+    if req.ckpt_buf is not None: self.ckpt_later = (self.ckpt_later or []) + [req]
     et, n = time.perf_counter(), len(req.generated)
     total, sep = f"total:{et-req.st:6.2f}s", colored('--', 'BLACK')
     # (the phases: waiting for a sequence, the prefill's slices (the decoding ones' steps between them), the first token)
@@ -627,13 +683,128 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     return ret
 
   # ** the kept conversations
+  # ** the model
+  def batchable(self, req:Request) -> bool:
+    """req can be decoded in a slot: its prompt and room for a reply fit (a reply that fills the slot goes on alone)"""
+    # (BATCH_DECODE=0: every request alone, in turn, the slots keep the conversations)
+    if not self.slots or not getenv("BATCH_DECODE", 1): return False
+    room = min(1024, req.max_tokens - len(req.generated)) if req.max_tokens is not None else 1024
+    return len(req.ids) + len(req.generated) + room < self.span_max() * self.model.batch_ctx() - 2*(self.spec + 2)
+  def span_max(self) -> int:
+    """(WIDE) the slots a sequence spans at most (the model's)"""
+    return n if self.spec and isinstance(n:=getattr(self.model, "max_span", lambda: 1)(), int) else 1
+  def wide(self, req:Request) -> bool:
+    """(WIDE) req spans two slots: its prompt and room for a reply past one"""
+    room = min(1024, req.max_tokens - len(req.generated)) if req.max_tokens is not None else 1024
+    return self.span_max() > 1 and len(req.ids) + len(req.generated) + room >= self.model.batch_ctx() - self.spec - 2
+  def wide_limit(self, i:int) -> int:
+    """the positions of the sequence in slot i at most: its slot's, (WIDE) the next one's too but the last ones (its row of nothing writes them)"""
+    return self.model.batch_ctx() * (2 if i in self.partner else 1) - (self.spec + 2 if i in self.partner else 0)
+  def make_pair(self, active:dict) -> int|None:
+    """(WIDE) two free slots next to each other: a sequence moved from between two free ones. the first of them, None: no two free"""
+    taken = self.taken(active)
+    free = [i for i in range(self.slots) if i not in taken]
+    if len(free) < 2: return None
+    # (the one after the first free slot, if it's a sequence alone in its slot, into the last free one)
+    for a in free:
+      if a + 1 < self.slots and a + 1 in active and a + 1 not in self.partner and (b:=free[-1]) != a:
+        trace(f"slot_move req {active[a+1].rid} {a+1} -> {b} (a pair for a wide one)")
+        self.slot_taken(b)
+        self.model.slot_move(a + 1, b)
+        active[b] = active.pop(a + 1)
+        return a
+    return None
+  def taken(self, active:dict) -> set[int]:
+    """the slots taken: decoded, and (WIDE) the ones after them a sequence's positions are in"""
+    return set(active) | set(self.partner.values())
+  def free_slots(self, active:dict) -> int:
+    """the slots free: not taken, not the ones the requests landing (MIX) go into"""
+    return self.slots - len(self.taken(active)) - len(self.landing)
+  def free_slot(self, active:dict, wide:bool=False) -> int|None:
+    """a free slot (wide: one with the next free too, not the last), None: none"""
+    taken = self.taken(active)
+    return next((i for i in range(self.slots - wide) if i not in taken and not (wide and i+1 in taken)), None)
+
+  # ** the conversations kept in slots (STASH): the model's states hold one conversation, a request of another one overwrites them. the one
+  # there is stored in a free slot first, a request that continues a stored one takes its states back (an agent's turn isn't prefilled again)
+  # (SLOT_HOST: the model's conversation is a prompt decoded in a slot: its whole conversation is saved when done, see slot_done)
+  main_moved = False
+  ckpt_pool: list|None = None  # (host memory for requests' checkpoints, see ckpt_keep)
+  ckpt_later: list|None = None  # (the requests done, their checkpoints' host memory freed next)
+  STASH_MIN = getenv("STASH_MIN", 512)  # the tokens a conversation has at least to be kept, a request continues one by at least to load it
+  def stash_main(self, busy:set[int]):
+    """
+    the model's conversation into a free slot (an empty one, else the oldest kept) past the busy ones: a batched step writes the free slots
+    before its last one (rows of nothing), a request takes the first free one
+    """
+    model, tokens = self.model, list(getattr(self.model, "_cached_tokens", []))
+    if not self.keeps() or not getenv("STASH", 1) or len(tokens) < self.STASH_MIN or any(t == tokens for t, _ in self.stash.values()) or \
+       any(e.tokens == tokens for e in self.host) or (self.main_moved and self.slot_host()): return
+    if not self.slots or len(tokens) >= model.batch_ctx(): return self.host_save(tokens)
+    busy = busy | set(self.partner) | set(self.partner.values())
+    free = list(range(max(busy, default=-1)+1, self.slots))
+    # (an empty one, else host memory, else a random kept one: agents taking turns in a cycle longer than the slots, the oldest is always the
+    # next one used)
+    kept = [i for i in self.stash if i in free]
+    if not [i for i in free if i not in self.stash] and getenv("HOST_STASH", 0.0) > 0: return self.host_save(tokens)
+    if not (victims := [i for i in free if i not in self.stash] or ([random.choice(kept)] if kept else [])): return
+    trace(f"stash_main victim {victims[0]} len {len(tokens)} busy {sorted(busy)}")
+    model.slot_store(victims[0], len(tokens), getattr(model, "_spec_row", 0))
+    self.stash.pop(victims[0], None)
+    self.stash[victims[0]] = (tokens, 0)  # (the newest last: the oldest is the next victim)
+  def slot_host(self) -> bool:
+    """
+    (SLOT_HOST, with slots and HOST_STASH) a request decoded in a slot has its whole conversation saved to host memory when done: with more
+    agents than slots the slot is taken before its next turn, the prompt alone kept would have the turn prefill the reply again
+    """
+    return bool(self.slots) and getenv("HOST_STASH", 0.0) > 0 and bool(getenv("SLOT_HOST", 1))
+  def keeps(self) -> bool:
+    """conversations are kept past the model's (in slots, or in host memory: HOST_STASH, or the sequences sharing its caches)"""
+    return bool(self.slots) or getenv("HOST_STASH", 0.0) > 0 or hasattr(self, "engine")
+  def host_save(self, tokens:list[int]):
+    """(HOST_STASH) the model's conversation into host memory: an older turn of it out, the least recently used out past the GB"""
+    model = self.model
+    if (most:=int(getenv("HOST_STASH", 0.0) * 1e9) // model.HOST_CHUNK) <= 0: return
+    # (a short one is prefilled again about as fast as it's saved and loaded, ~0.5 s)
+    if len(tokens) < getenv("HOST_MIN", 4096): return
+    st = time.perf_counter()
+    ckpt = model.host_ckpt(tokens) if getenv("HOST_CKPT", 1) else 0
+    k = model.host_chunks(len(tokens), bool(ckpt))
+    # (an older turn of it out first: its chunks are this one's, in their order (its copies the same program). then free ones, new ones up to
+    # the GB, the least recently used one's. one this continues from its checkpoint is an older turn too: its client sent the reply back
+    # without its reasoning, that reply isn't coming back)
+    older = [e for e in self.host if starts(tokens, e.tokens) or (0 < e.ckpt < len(tokens) and starts(tokens, e.tokens, e.ckpt))]
+    chunks = max((e.chunks for e in older), key=len, default=[])[:k]
+    self.host_free += [c for e in older for c in e.chunks if not any(c is x for x in chunks)]
+    self.host = [e for e in self.host if not any(e is o for o in older)]
+    made = 0
+    while len(self.host_free) < k - len(chunks):
+      if self.host_made < most:
+        self.host_free.append(model.host_alloc())
+        self.host_made, made = self.host_made + 1, made + 1
+      elif self.host: self.host_free += self.host.pop(0).chunks
+      else: return
+    chunks = chunks + [self.host_free.pop() for _ in range(k - len(chunks))]
+    model.host_save(len(tokens), chunks, bool(ckpt))
+    self.host.append(HostConv(tokens, chunks, ckpt, getattr(model, "_spec_row", 0)))
+    trace(f"host_save len {len(tokens)} ckpt {ckpt} {k} chunks ({made} new) in {time.perf_counter()-st:.2f} s, {len(self.host)} kept, "
+          f"{len(self.host_free)} free")
+  def host_prepare(self):
+    """(HOST_STASH) idle: a chunk of host memory made ahead (its memory and its mappings on the devices, ~0.7 s a GB: not a request's wait)"""
+    if (gb:=getenv("HOST_STASH", 0.0)) > 0 and getenv("HOST_PREPARE", 1) and self.host_made < int(gb * 1e9) // self.model.HOST_CHUNK:
+      self.host_free.append(self.model.host_alloc())
+      self.host_made += 1
+  @staticmethod
+  def host_hit(e:HostConv, ids:list[int]) -> int:
+    """the tokens of ids a conversation in host memory has: all of it, its checkpoint's (the prompt of its last reply), or none"""
+    return next((n for n in (len(e.tokens), e.ckpt) if 0 < n < len(ids) and starts(ids, e.tokens, n)), 0)
   def kept(self) -> list[list[int]]:
-    """the kept conversations' tokens (and their checkpoints'): the model's, the sequences', the stashed ones'"""
+    """the kept conversations' tokens (and their checkpoints'): the model's, the sequences', the stashed ones', the batch slots' and the host's"""
     ret = [list(c)] if isinstance(c:=getattr(self.model, "_cached_tokens", None), list) else []
-    if self.engine is not None:
-      ret += [t for s in list(self.engine.seqs) for t in (s.tokens, s.tokens[:s.ckpt])]
-      ret += [t for x in list(self.engine.stashed) for t in (x.tokens, x.tokens[:x.ckpt])]
-    return ret
+    if (eng:=getattr(self, "engine", None)) is not None:
+      ret += [t for s in list(eng.seqs) for t in (s.tokens, s.tokens[:s.ckpt])]
+      ret += [t for x in list(eng.stashed) for t in (x.tokens, x.tokens[:x.ckpt])]
+    return ret + [t for t, _ in list(getattr(self, "stash", {}).values())] + [e.tokens for e in list(getattr(self, "host", []))]
   def reuse_tokens(self, rendered:str, ids:list[int]) -> list[int]:
     """
     the tokens of a prompt that continues a kept conversation as its text but not its tokens (the model's reply tokenized again differently):
@@ -649,6 +820,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     for t in sorted(cands, key=lambda t: common_prefix(t, ids), reverse=True)[:2]:
       if rendered.startswith(text:=self.tok.decode(t)): return t + self.tok.encode(rendered[len(text):])
     return ids
+
   def miss_log(self, ids:list[int], start:int):
     """a request prefilled from 2000 tokens less than it shares with a kept conversation at least: where they differ"""
     kept = [t for t in self.kept() if len(t) >= start + 2000 <= len(ids) and t[start+1999] == ids[start+1999]]
@@ -657,10 +829,118 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     dec = self.tok.decode
     stderr_log(colored(f"cache miss: prefilled from {start}, shares {n} of {len(t)} kept tokens: kept {dec(t[max(0,n-30):n+30])!r} "
                        f"vs {dec(ids[max(0,n-30):n+30])!r}\n", "yellow"))
+
+  def stash_load(self, ids:list[int], busy:set[int], target:int|None=None):
+    """
+    before a prefill of ids (into slot target): the kept conversation it continues the most into the model (if more than the model's own), the
+    model's kept. (the target's own is loaded before the prefill writes the slot)
+    """
+    if not self.keeps() or not getenv("STASH", 1): return
+    model, have = self.model, self.model.get_start_pos(ids)
+    best = max(((len(t), i) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and len(t) < len(ids) and starts(ids, t)),
+               default=(0, -1))
+    host = max(((self.host_hit(e, ids), j) for j, e in enumerate(self.host)), default=(0, -1))
+    if host[0] > best[0] and host[0] >= have + self.STASH_MIN:
+      # (out of the list while the model's is saved: not the one it frees memory of. back as the most recently used)
+      e = self.host.pop(host[1])
+      self.stash_main(busy)
+      self.host.append(e)
+      st = time.perf_counter()
+      model.host_load(e.chunks, len(e.tokens), e.hrow, bool(e.ckpt))
+      self.main_writes(n if callable(f:=getattr(model, "_host_len", None)) and isinstance(n:=f(len(e.tokens)), int) else len(e.tokens))
+      model._cached_tokens, model._ckpt_tokens = list(e.tokens), list(e.tokens[:e.ckpt])
+      trace(f"host_load len {len(e.tokens)} ckpt {e.ckpt} for {host[0]} in {time.perf_counter()-st:.2f} s")
+    elif best[0] >= have + self.STASH_MIN:
+      self.stash_main(busy | {best[1]})
+      tokens, hrow = self.stash[best[1]]
+      trace(f"stash_load slot {best[1]} len {best[0]} hrow {hrow} busy {sorted(busy)} target {target}")
+      model.slot_load(best[1], best[0], hrow)
+      model._cached_tokens = list(tokens)
+    elif have < self.STASH_MIN: self.stash_main(busy)  # (ids overwrite the model's conversation)
+  def stash_hit(self, ids:list[int], busy:set[int], target:int|None=None) -> int:
+    """the tokens of ids the model or a kept conversation has (where its prefill starts)"""
+    if not self.keeps(): return 0
+    return max([self.model.get_start_pos(ids)] + [len(t) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and
+                                                  len(t) < len(ids) and starts(ids, t)] +
+               [self.host_hit(e, ids) for e in self.host])
+  # requests waiting this long are taken in turn, before the others the cache has more of
+  STARVE = getenv("STARVE", 120.0)
+  STARVE_LONG = getenv("STARVE_LONG", 30.0)  # (a request that doesn't fit a slot: the batch drains for it after this long)
+  PAUSE_LONG = getenv("PAUSE_LONG", 1)  # (aliased slots: the batch waits for it instead, after PAUSE_WAIT, see pause_long)
+  PAUSE_WAIT = getenv("PAUSE_WAIT", 0.0)
+  def next_alone(self, pending:list[Request]) -> int:
+    """
+    the next request alone: the one whose conversation the model or a slot has the most of (agents taking turns: one's next request often comes
+    while the others wait, taking it first keeps its cache), but the first one if it has waited too long
+    """
+    if len(pending) == 1 or not self.keeps() or time.perf_counter() - pending[0].st > self.STARVE: return 0
+    return max(range(len(pending)), key=lambda i: (self.stash_hit(pending[i].ids + pending[i].generated, set()), -i))
+
+  LONG_FIRST = getenv("LONG_FIRST", 1)
+  def admit_order(self, reqs:list[Request]) -> list[Request]:
+    """
+    (LONG_FIRST) the requests waiting for a slot, the longest conversation first (agents' longest tasks: their turns one after the other are the
+    end of a run of many, a turn's wait for a slot is on that path every turn), the ones that waited past STARVE before them in turn
+    """
+    if not self.LONG_FIRST or len(reqs) < 2: return reqs
+    now = time.perf_counter()
+    return sorted(reqs, key=lambda r: (now - r.st <= self.STARVE, -(len(r.ids) + len(r.generated)) if now - r.st <= self.STARVE else r.st))
+
+  def main_writes(self, length:int):
+    """
+    the model's cache written up to `length` positions: the conversations kept in the slots it overwrites are gone (SLOT_ALIAS: the slots are
+    the model's cache past its first batch_ctx positions, a sequence that long is alone)
+    """
+    if callable(f:=getattr(self.model, "main_overlaps", None)) and isinstance(gone:=f(length), list) and gone:
+      trace(f"main_writes {length}: slots {gone} gone")
+      self.slot_taken(*gone)
   def drop_caches(self):
     """the kept conversations forgotten (their states may be wrong): every request is prefilled from the start"""
-    if self.engine is not None: self.engine.forget()
+    if (eng:=getattr(self, "engine", None)) is not None: eng.forget()
+    if getattr(self, "stash", None): self.stash.clear()
+    if getattr(self, "host", None):
+      self.host_free += [c for e in self.host for c in e.chunks]
+      self.host.clear()
     if hasattr(self.model, "_cached_tokens"): self.model._cached_tokens = []
+    if hasattr(self.model, "_ckpt_tokens"): self.model._ckpt_tokens = []
+  def step_writes(self, active:dict):
+    """
+    a batched step of the active slots writes every slot below its size (the next of batch_sizes past the last active one): the free ones
+    there are rows of nothing at position 0, the conversations kept in them are gone (their first positions and their states overwritten)
+    """
+    m = next(s for s in self.model.batch_sizes() if s >= max(active) + 1)
+    self.slot_taken(*[i for i in range(m) if i not in active])
+  def slot_taken(self, *slots:int):
+    for i in slots: self.stash.pop(i, None)
+  def slot_done(self, i:int, req:Request, active:dict):
+    """
+    a request decoded batched in slot i is done (or goes on alone): its conversation is kept there, if no step writes it (past the active ones).
+    its last step's rows were its tokens at start..start+k, the first j+1 real ones: the states of its tokens up to the last of them it has
+    """
+    try: self._slot_done(i, req, active)
+    finally: self.partner.pop(i, None)
+  def _slot_done(self, i:int, req:Request, active:dict):
+    k = self.spec
+    if not k or not getenv("STASH", 1) or req.error is not None: return
+    start = req.mtp - 1
+    n = min(len(req.ids) + len(req.generated), req.pos)
+    hrow = (1 - req.par) * (k + 1) + n - start - 1
+    if self.slot_host() and n >= max(getenv("HOST_MIN", 4096), start + 1):
+      # (its states are the slot's until the next step: into the model's (the model's conversation kept first if it isn't), from it to host)
+      st = time.perf_counter()
+      if not self.main_moved: self.stash_main(set(active) | {i})
+      self.model.slot_load(i, n, hrow)
+      self.model._cached_tokens, self.model._ckpt_tokens, self.main_moved = (req.ids + req.generated)[:n], [], False
+      # (its prompt's checkpoint too: a next turn without its reasoning goes on from there)
+      if req.ckpt_buf is not None and len(ck:=req.ckpt_tokens) < n and starts(self.model._cached_tokens, ck):
+        self.model.ckpt_copy(False, req.ckpt_buf)
+        self.model._ckpt_tokens = list(ck)
+      self.host_save(self.model._cached_tokens)
+      trace(f"slot_host req {req.rid} slot {i} len {n} in {time.perf_counter()-st:.2f} s")
+    if i <= max(active, default=-1) or n < max(self.STASH_MIN, start + 1) or n >= self.model.batch_ctx() - k - 2: return
+    self.stash.pop(i, None)
+    self.stash[i] = ((req.ids + req.generated)[:n], hrow)
+    trace(f"slot_done req {req.rid} slot {i} len {n} hrow {self.stash[i][1]} active {sorted(active)}")
 
   # ** one request at a time: its prompt prefilled (from the conversation the model has, if it continues it), then decoded to its end
   def schedule_alone(self):
@@ -679,6 +959,224 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         traceback.print_exc()
         self.finish(req, e)
       finally: _close(g)
+  def ckpt_keep(self, req:Request):
+    """
+    (SLOT_HOST) req goes on in a slot after its prompt: the model's checkpoint (the states at its prompt's end) copied to host memory, its
+    conversation's host_save has it (the model's own checkpoint is another prompt's by then). a client that doesn't send the model's reasoning
+    back (its next turn: the reply without it, a tool's result) has the conversation differ right after the prompt: without the checkpoint
+    it's prefilled from the start every turn
+    """
+    model = self.model
+    if not self.slot_host() or not getenv("SLOT_CKPT", 1) or req.ckpt_buf is not None or len(req.ids) < getenv("HOST_MIN", 4096): return
+    if not callable(getattr(model, "ckpt_copy", None)) or getattr(model, "_ckpt_tokens", None) != req.ids: return
+    pool = self.ckpt_pool = self.ckpt_pool or []
+    if not pool and (buf:=model.ckpt_alloc()) is not None: pool.append(buf)
+    if not pool: return
+    req.ckpt_buf, req.ckpt_tokens = pool.pop(), list(req.ids)
+    model.ckpt_copy(True, req.ckpt_buf)
+    trace(f"ckpt_keep req {req.rid} len {len(req.ids)}")
+  def ckpt_free(self, req:Request):
+    if req.ckpt_buf is not None:
+      self.ckpt_pool = self.ckpt_pool or []
+      self.ckpt_pool.append(req.ckpt_buf)
+    req.ckpt_buf, req.ckpt_tokens = None, []
+
+  def mixing(self, active:dict) -> int:
+    """(MIX) the prompts of the next step (mixed steps: requests' new tokens prefilled in a step of decoding, its sizes the model's)"""
+    model = self.model
+    if not active or not self.spec or not isinstance(land:=getattr(model, "mix_landing", lambda: 0)(), int) or not land: return 0
+    return land if next(m for m in model.batch_sizes() if m > max(active)) in model.mix_sizes() else 0
+  def mix_ok(self, req:Request, busy:set[int]) -> bool:
+    """(MIX) req's prompt in mixed steps: its new tokens (past what's kept of its conversation) MIX_MAX at most, in chunks of a step's"""
+    n = len(req.ids) + len(req.generated)
+    return self.batchable(req) and not self.wide(req) and not req.no_mix and n - self.stash_hit(req.ids + req.generated, busy) <= self.MIX_MAX
+  MIX_MAX = getenv("MIX_MAX", 4096)
+  def mix_take(self, mixes:list[Request], active:dict, pending:list[Request], land:int):
+    """
+    (MIX) the prompts of the next mixed steps (as many as free landing slots, free slots): each one's conversation from the model's or a kept
+    one into its landing slot (self.landing: request, landing slot, start, position)
+    """
+    model, busy = self.model, {x[1] for x in self.landing}
+    for req in self.admit_order(mixes):
+      if len(busy) >= land or len(self.taken(active)) + len(self.landing) >= self.slots: break
+      ids, landing = req.ids + req.generated, next(self.slots + i for i in range(land) if self.slots + i not in busy)
+      _p0 = time.perf_counter()
+      trace(f"mix req {req.rid} ids {len(ids)} landing {landing}")
+      self.miss_log(ids, self.stash_hit(ids, set(active)))
+      self.stash_load(ids, set(active))
+      start = model.prefix_to_slot(ids, landing)
+      self.main_moved = True
+      self.stats.prefill_time += time.perf_counter() - _p0
+      # (a cache that has less of it: prefilled before a step)
+      if len(ids) - start > self.MIX_MAX:
+        req.no_mix = True
+        continue
+      pending.remove(req)
+      self.landing.append((req, landing, start, start))
+      busy.add(landing)
+  def mix_prompts(self) -> list[tuple[list[int], int, float|tuple[float, float], int]]:
+    """(MIX) the prompts of a mixed step: the next chunk of every landing one (as many tokens as the model's largest prompt of a step)"""
+    most = max(self.model.MIX_PS)
+    return [((req.ids + req.generated)[pos:pos+most], landing, (req.temperature, req.top_p), pos) for req, landing, _, pos in self.landing]
+  def mix_done(self, firsts:list[int], active:dict):
+    """(MIX) the chunks of a mixed step done: the prompts done from their landing slots into free ones, decoded from their first tokens"""
+    model, k, most, left = self.model, self.spec, max(self.model.MIX_PS), []
+    for (req, landing, start, pos), first in zip(self.landing, firsts):
+      n = len(req.ids) + len(req.generated)
+      if (pos:=min(n, pos + most)) < n:
+        left.append((req, landing, start, pos))
+        continue
+      # (its prompt's checkpoint from its slot, as ckpt_keep's: the model's own is another prompt's)
+      if self.slot_host() and getenv("SLOT_CKPT", 1) and not req.generated and n >= getenv("HOST_MIN", 4096) and \
+         callable(getattr(model, "ckpt_from_slot", None)):
+        model.ckpt_from_slot(landing, n)
+        model._ckpt_tokens = list(req.ids)
+        self.ckpt_keep(req)
+        model._ckpt_tokens = []
+      # (a free slot is kept for every one landing, see free_slots)
+      if (slot:=self.free_slot(active)) is None: raise RuntimeError(f"mixed step: no free slot for req {req.rid}")
+      self.slot_taken(slot)
+      model.slot_move(landing, slot)
+      req.cache_start, req.pos = start, n
+      trace(f"mix done req {req.rid} landing {landing} slot {slot} start {start} pos {n}")
+      self.stats.prefills += 1
+      req.spec_start(first, n, k)
+      if self.emit(req, first): active[slot] = req
+    self.landing = left
+
+  def bcp_batch(self, cands:list[Request], most:int, busy:set[int]) -> list[Request]:
+    """
+    (BCP) the requests of a batch_continue: the oldest, then the ones of the fewest new tokens, as many as a step of the rows of the class of
+    the most new tokens of them takes (BPF_PS: a step's prompts padded to its rows)
+    """
+    model = self.model
+    if not cands or most <= 0 or not callable(getattr(model, "bpf_class", None)): return cands[:most]
+    def new(r:Request) -> int: return len(r.ids) + len(r.generated) - self.stash_hit(r.ids + r.generated, busy)
+    batch = [cands[0]] + sorted(cands[1:], key=new)[:most - 1]
+    while len(batch) > 1 and len(batch) > max(model.bpf_sizes(model.bpf_class(max(new(r) for r in batch)) or model.BPF_P)): batch.pop()
+    return batch
+
+  def batch_continue(self, batch:list[Request], active:dict, pending:list[Request]):
+    """
+    (BCP) requests into free slots in steps of the model for all of them: each one's conversation (the model's, a kept one, its checkpoint)
+    into its slot, the rest of its prompt prefilled there (batch_prefill from its start, in chunks of P), its first token. its prompt's
+    checkpoint (in its slot: the model's isn't its) kept with it (ckpt_keep)
+    """
+    model, k = self.model, self.spec
+    _p0 = time.perf_counter()
+    free = [i for i in range(self.slots) if i not in self.taken(active)][:len(batch)]
+    starts, lens = [], []
+    for req, slot in zip(batch, free):
+      ids = req.ids + req.generated
+      busy = set(active) | set(free)
+      trace(f"batch_continue req {req.rid} ids {len(ids)} slot {slot}")
+      self.miss_log(ids, self.stash_hit(ids, busy, slot))
+      self.stash_load(ids, busy, slot)
+      starts.append(model.prefix_to_slot(ids, slot))
+      lens.append(len(ids))
+      # (the model's conversation is in the slot: not saved again)
+      self.main_moved = True
+      self.slot_taken(slot)
+    pos, firsts = list(starts), [0] * len(batch)
+    # (the steps' rows: the class of the most new tokens, BPF_P if past them (chunks of it))
+    P = c if callable(getattr(model, "bpf_class", None)) and (c:=model.bpf_class(max(l - s for l, s in zip(lens, starts)))) else model.BPF_P
+    while (todo:=[g for g in range(len(batch)) if pos[g] < lens[g]]):
+      chunks:list[tuple[list[int], int, float|tuple[float, float]]] = \
+        [((batch[g].ids + batch[g].generated)[pos[g]:pos[g] + P], free[g], (batch[g].temperature, batch[g].top_p)) for g in todo]
+      outs = model.batch_prefill(chunks, starts=[pos[g] for g in todo], P=P)
+      for g, out in zip(todo, outs): pos[g], firsts[g] = min(lens[g], pos[g] + P), out
+    self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(batch), self.stats.prefill_time + time.perf_counter() - _p0
+    for g, (req, slot) in enumerate(zip(batch, free)):
+      pending.remove(req)
+      req.cache_start, req.pos = starts[g], lens[g]
+      # (its prompt's checkpoint from its slot, as ckpt_keep's: the model's own is another prompt's)
+      if self.slot_host() and getenv("SLOT_CKPT", 1) and not req.generated and lens[g] >= getenv("HOST_MIN", 4096) and \
+         callable(getattr(model, "ckpt_from_slot", None)):
+        model.ckpt_from_slot(slot, lens[g])
+        model._ckpt_tokens = list(req.ids)
+        self.ckpt_keep(req)
+        model._ckpt_tokens = []
+      trace(f"batch_continue done req {req.rid} slot {slot} start {starts[g]} pos {req.pos}")
+      req.spec_start(firsts[g], req.pos, k)
+      if self.emit(req, firsts[g]): active[slot] = req
+
+  def preempt(self, active:dict, pending:list[Request], only:set[int]|None=None):
+    """
+    (PREEMPT_LONG) the batch drains for a request that doesn't fit a slot: the requests decoding stop now, not after their replies (thousands
+    of tokens: the server mostly idle meanwhile). each goes on after it as one that fills its slot does, its conversation kept (in host memory).
+    only: the ones in these slots
+    """
+    stopped = []
+    for i, req in sorted(active.items(), reverse=True):
+      if only is not None and i not in only: continue
+      del active[i]
+      self.slot_done(i, req, active)
+      stopped.append(req)
+    trace(f"preempt reqs {[r.rid for r in stopped]}")
+    pending[:0] = sorted(stopped, key=lambda r: r.st)
+
+  def prefill(self, req:Request, busy:set[int]|None=None, target:int|None=None) -> int:
+    """the prompt (and what req generated, a continuation) through the model (into slot target): the first sampled token"""
+    ids = req.ids + req.generated
+    trace(f"prefill req {req.rid} ids {len(ids)} target {target} busy {sorted(busy or set())}")
+    self.miss_log(ids, self.stash_hit(ids, busy or set(), target))
+    self.stash_load(ids, busy or set(), target)
+    self.main_moved = False
+    req.cache_start = self.model.get_start_pos(ids)
+    g = self.model.generate(list(ids), temperature=req.temperature, top_p=req.top_p)
+    try: return next(g)
+    finally: _close(g)
+
+  def pause_long(self, req:Request, active:dict, pending:list[Request]):
+    """
+    (PAUSE_LONG) a request that doesn't fit a slot alone while the batch waits (aliased: the model's cache past batch_ctx is the first slots'):
+    the requests in the slots it overwrites stop (see preempt), the others go on from their slots after it, nothing of theirs prefilled again
+    """
+    model = self.model
+    self.preempt(active, pending, only=set(model.main_overlaps(model.max_context)))
+    pending.remove(req)
+    trace(f"pause_long req {req.rid} active {sorted(active)}")
+    try: self.run_alone(req, set(active))
+    except Exception as e:
+      traceback.print_exc()
+      self.finish(req, e)
+    # (its conversation past batch_ctx is the slots', the next step writes them: kept in host memory first)
+    self.stash_main(set(active))
+
+  def run_alone(self, req:Request, busy:set[int]|None=None) -> bool:
+    """
+    req alone on the model: speculative decoding until its end, or until another request comes (it goes on in slot 0: returns True). busy: the
+    slots of a batch that waits for it (it goes on to its end)
+    """
+    model = self.model
+    ids = req.ids + req.generated
+    trace(f"alone req {req.rid} ids {len(ids)}")
+    self.miss_log(ids, self.stash_hit(ids, busy or set()))
+    self.stash_load(ids, busy or set())
+    self.main_moved = False
+    req.cache_start = model.get_start_pos(ids)
+    spec_st = list(ss) if isinstance(ss:=getattr(model, "spec_stats", None), list) else []
+    g = model.generate(list(ids), temperature=req.temperature, top_p=req.top_p)
+    try:
+      for tok in g:
+        if not self.emit(req, tok): return False
+        if busy is None and not self.waiting.empty() and self.batchable(req):
+          # another request: this one goes on batched (the model's states after its last token's position are the slot's)
+          _close(g)
+          req.pos = len(model._cached_tokens)
+          self.ckpt_keep(req)
+          self.slot_taken(0)
+          trace(f"alone to batch req {req.rid} slot 0 pos {req.pos} row {getattr(model, '_spec_row', 0)}")
+          model.slot_store(0, req.pos, getattr(model, "_spec_row", 0))
+          self.main_moved = True
+          req.spec_start(req.generated[-1], req.pos, self.spec)
+          return True
+      return self.finish(req)
+    finally:
+      if spec_st and isinstance(ss:=getattr(model, "spec_stats", None), list): req.steps += ss[0] - spec_st[0]
+      _close(g)
+      # (its positions and the drafts past them)
+      self.main_writes(max(len(ids) + len(req.generated), len(getattr(model, "_cached_tokens", []))) + 64)
 
   # ** sequences sharing the model's caches (Transformer.seqs_supported): continuous batching
   # (a prompt is prefilled in slices of PREFILL_SLICE tokens (~1 s). the decoding ones' steps run after MAX_STALL s of slices, for their share
@@ -825,3 +1323,166 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           if s in eng.seqs: eng.seqs.remove(s)
         active.clear()
         filling.clear()
+
+  def schedule(self):
+    model, slots, k = self.model, self.slots, self.spec
+    active: dict[int, Request] = {}  # the slot of every request decoded batched
+    pending: list[Request] = []  # requests waiting for a slot or for the model alone
+    self.landing = []
+    while True:
+      try:
+        # (a wait of a while at a time: a Ctrl-C stops the server, a lock's wait without a timeout doesn't see it)
+        while not active and not pending and not self.landing:
+          try: pending.append(self.waiting.get(timeout=0.2))
+          except queue.Empty: self.host_prepare()
+        while not self.waiting.empty(): pending.append(self.waiting.get_nowait())
+        pending = [r for r in pending if not (r.cancelled and not self.finish(r))]
+        for r in self.ckpt_later or []: self.ckpt_free(r)
+        self.ckpt_later = []
+        self.inflight = len(active) + len(pending) + len(self.landing)
+        # (a request that doesn't fit a slot waiting past STARVE_LONG: the slots take no more requests (the batch drains, see preempt), then it
+        # goes on alone. else it waits for no request to be decoded: while agents take turns that's never)
+        # (PAUSE_LONG: the batch waits for it, see pause_long)
+        if active and self.PAUSE_LONG and callable(getattr(model, "main_overlaps", None)) and \
+           (long_req:=next((r for r in pending if not self.batchable(r) and time.perf_counter() - r.st > self.PAUSE_WAIT), None)) is not None:
+          self.pause_long(long_req, active, pending)
+          continue
+        drain = any(not self.batchable(r) and time.perf_counter() - r.st > self.STARVE_LONG for r in pending)
+        if drain and active and getenv("PREEMPT_LONG", 1): self.preempt(active, pending)
+        if not active and pending:
+          # one request (or one that doesn't fit a slot): alone
+          if len(pending) == 1 or not self.batchable(pending[0]) or drain:
+            long = next((i for i, r in enumerate(pending) if not self.batchable(r)), None) if drain else None
+            req = pending.pop(long if long is not None else self.next_alone(pending))
+            try:
+              if self.run_alone(req): active[0] = req
+            except Exception as e:
+              traceback.print_exc()
+              self.finish(req, e)
+            continue
+        # (BCP) new requests into free slots, prefilled together: each one's conversation from the model's or a kept one into its slot, the rest
+        # of its prompt (in chunks of P) continued there
+        if (G:=model.batch_prefills()) and getenv("BCP", 0) and callable(getattr(model, "prefix_to_slot", None)) and not drain:
+          room, most = model.batch_ctx() - model.BPF_P, getenv("BCP_MAX_NEW", 1536)
+          # (a prompt of many new tokens: alone, in big chunks (the prefill's chunks of up to 1536 rows run faster than a batch's of P))
+          def cont(r:Request) -> bool:
+            n = len(r.ids) + len(r.generated)
+            return self.batchable(r) and n <= room and n - self.stash_hit(r.ids + r.generated, set(active)) <= most
+          # (fewer than a step's worth while others decode: they wait BCP_WAIT seconds at most for more, agents' turns come one at a time)
+          while len(batch:=self.bcp_batch([r for r in pending if cont(r)], min(G, self.free_slots(active)), set(active))) >= BCP_MIN and \
+                (len(batch) >= G or not active or time.perf_counter() - min(r.st for r in batch) > getenv("BCP_WAIT", 1.5)):
+            self.batch_continue(batch, active, pending)
+          # (the ones that wait for more: not prefilled alone meanwhile. one that waited long enough is, if no others came)
+          waiting_bcp = {r for r in pending if cont(r) and time.perf_counter() - r.st <= getenv("BCP_WAIT", 1.5)} if active else set()
+        else: waiting_bcp = set()
+        # new requests into free slots: short prompts prefilled together into theirs, (the others) prefilled, their states copied into the slot
+        def shorts() -> list[Request]: return [r for r in pending if self.batchable(r) and not r.generated and len(r.ids) <= model.BPF_P]
+        # (with a step's worth waiting, they wait for that many free slots)
+        defer = bool(G:=model.batch_prefills()) and bool(active) and len(shorts()) >= G and self.free_slots(active) < G
+        while G and not defer and not drain and len(short:=shorts()[:min(G, self.free_slots(active))]) >= BATCH_PREFILL_MIN:
+          _p0 = time.perf_counter()
+          free = [i for i in range(slots) if i not in self.taken(active)][:len(short)]
+          self.slot_taken(*free)
+          firsts = model.batch_prefill([(r.ids, slot, (r.temperature, r.top_p)) for r, slot in zip(short, free)])
+          self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(short), self.stats.prefill_time + time.perf_counter() - _p0
+          for req, slot, first in zip(short, free, firsts):
+            pending.remove(req)
+            req.cache_start, req.pos = 0, len(req.ids)
+            req.spec_start(first, req.pos, k)
+            if self.emit(req, first): active[slot] = req
+        # (MIX: the requests of mixed steps wait for theirs)
+        mixes = [r for r in pending if self.mix_ok(r, set(active))] if (land:=self.mixing(active)) and not drain else []
+        if mixes: self.mix_take(mixes, active, pending, land)
+        for req in self.admit_order([r for r in pending if self.batchable(r) and not (defer and r in shorts()) and r not in waiting_bcp and
+                                     r not in mixes]):
+          if len(self.taken(active)) + len(self.landing) >= slots or drain: break
+          wide = self.wide(req)
+          to = self.free_slot(active, wide) if self.free_slots(active) >= 1 + wide else None
+          # (WIDE: two free slots apart: a sequence moved for them to be next to each other. else it waits for them, before the others)
+          if to is None and wide and self.free_slots(active) >= 2: to = self.make_pair(active)
+          if to is None: break
+          slot = to
+          _p0 = time.perf_counter()
+          first = self.prefill(req, self.taken(active) | {slot} | ({slot+1} if wide else set()), slot)
+          self.slot_taken(slot)
+          self.stats.prefills, self.stats.prefill_time = self.stats.prefills + 1, self.stats.prefill_time + time.perf_counter() - _p0
+          pending.remove(req)
+          req.pos = len(req.ids) + len(req.generated)
+          self.ckpt_keep(req)
+          trace(f"slot_store req {req.rid} slot {slot} pos {req.pos}" + (f" wide {slot+1}" if wide else ""))
+          model.slot_store(slot, req.pos)
+          if wide:
+            self.partner[slot] = slot + 1
+            self.slot_taken(slot + 1)
+          self.main_moved = True
+          req.spec_start(first, req.pos, k)
+          if self.emit(req, first): active[slot] = req
+        if not active and not self.landing: continue
+        self.stats.step(len(active), len(pending) + self.waiting.qsize())
+        _t0 = time.perf_counter()
+        # a step of every slot up to the last one used (the free ones in between are rows of nothing)
+        self.inflight = len(active) + len(pending) + self.waiting.qsize() + len(self.landing)
+        trace("step " + " ".join(f"{i}:{r.rid}@{r.pos}" for i, r in sorted(active.items())))
+        self.step_writes(active)
+        if k:
+          # (WIDE: a partner slot's row of nothing at its last positions, past the ones of the sequence spanning it, see wide_limit)
+          # (every row of the step's size: a mixed step's is the largest)
+          hi = max(active, default=-1) + 1
+          if self.partner: hi = next(m for m in model.batch_sizes() if m >= max(hi, max(self.partner.values()) + 1))
+          if self.landing and self.partner: hi = max(model.mix_sizes())
+          seqs:list[tuple[list[int], int, int, int, float|tuple[float, float]]] = \
+            [(active[i].y, active[i].mtp, active[i].j, active[i].par, (active[i].temperature, active[i].top_p)) if i in active else
+             ([0]*(k+1), model.batch_ctx() - k - 2 if i in self.partner.values() else 0, 0, 1, 0.0) for i in range(hi)]
+          if self.landing:
+            prompts = self.mix_prompts()
+            trace("mix step " + " ".join(f"{r.rid}@{pos}+{len(t)}" for (r, _, _, pos), (t, *_) in zip(self.landing, prompts)))
+            spec, firsts = model.batch_mixed_step(seqs, prompts)
+          else: spec = model.batch_spec_step(seqs)
+        else: out = model.batch_step([(active[i].generated[-1], active[i].pos, (active[i].temperature, active[i].top_p)) if i in active else
+                                      (0, 0, 0.0)
+                                      for i in range(max(active)+1)])
+        self.stats.step_time += time.perf_counter() - _t0
+        for i, req in list(active.items()):
+          req.steps += 1
+          if k:
+            # the drafts accepted: up to the first that isn't the sampled token, the sampled tokens after them (see Transformer._spec_steps)
+            sampled, drafts = spec[i]
+            j = next((t for t in range(k) if drafts[t] != sampled[t]), k)
+            start = req.mtp + req.j
+            req.y, req.mtp, req.j, req.par, req.pos = sampled, start + 1, j, 1 - req.par, start + j + 1
+            if not all(self.emit(req, t) for t in sampled[:j+1]):
+              del active[i]
+              self.slot_done(i, req, active)
+              continue
+          else:
+            req.pos += 1
+            if not self.emit(req, out[i]):
+              del active[i]
+              continue
+          if req.pos + k + 2 >= model.batch_ctx() and i not in self.partner and self.span_max() > 1 and i + 1 < slots and \
+             i + 1 not in self.taken(active) and self.free_slots(active) > 0:
+            # (WIDE) its slot is full, the next is free: its positions go on there
+            self.partner[i] = i + 1
+            self.slot_taken(i + 1)
+            trace(f"wide req {req.rid} slot {i} -> {i+1} pos {req.pos}")
+          if req.pos + k + 2 >= self.wide_limit(i):
+            # its slot is full: it goes on alone (from its kept states, or prefilled again), when the model is free
+            del active[i]
+            self.slot_done(i, req, active)
+            pending.insert(0, req)
+        if self.landing: self.mix_done(firsts, active)
+        # the sequences in the first slots: a step of fewer rows (the one of the last slot used is the size of every step)
+        while active and (hi:=max(active)) >= len(active) and hi not in self.partner and \
+              next(m for m in model.batch_sizes() if m >= hi+1) > next(m for m in model.batch_sizes() if m >= len(self.taken(active))):
+          if (lo:=self.free_slot(active)) is None or lo > hi: break
+          self.slot_taken(lo)
+          trace(f"slot_move req {active[hi].rid} {hi} -> {lo}")
+          model.slot_move(hi, lo)
+          active[lo] = active.pop(hi)
+        # the last one batched (not speculative), nothing waiting: it goes on alone (prefilled again), speculative decoding is faster
+        if not k and len(active) == 1 and not pending and self.waiting.empty() and getenv("BATCH_LAST_ALONE", 1):
+          pending.append(active.pop(next(iter(active))))
+      except Exception as e:
+        traceback.print_exc()
+        for req in [*active.values(), *pending, *(x[0] for x in self.landing)]: self.finish(req, e)
+        active, pending, self.landing = {}, [], []
