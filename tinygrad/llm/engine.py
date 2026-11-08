@@ -92,7 +92,8 @@ class SeqEngine:
     if getenv("SEQ_TRACE"): _trace(model)
     self.rows, self.nslots = model.seq_rows(), model.seq_slots()
     self.seqs:list[Seq] = []
-    self.max_active, self.evictions, self.lost = max(model.SEQ_SIZES), 0, 0
+    # (the sequences decoding and prefilled at once: SEQ_MAX_ACTIVE, the largest step's by default)
+    self.max_active, self.evictions, self.lost = min(max(model.SEQ_SIZES), getenv("SEQ_MAX_ACTIVE", max(model.SEQ_SIZES))), 0, 0
     # (changed when what a prompt could take does: a sequence taken, stopped or evicted (a prompt that didn't fit is tried again after that)
     self.version = 0
     # (the stash: the free chunks (in order) and entries, the evicted sequences in it)

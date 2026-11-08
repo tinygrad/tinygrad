@@ -2176,8 +2176,10 @@ class Transformer:
       (sum(per_row(t, 0) for b in gdn for t in (b.pool_rec, *b.pool_conv)) + per_row(self.seq_spec_h, 0) +
        sum(per_row(t, 0) for c in self.seq_ckpt_states for t in c) + per_row(self.seq_ckpt_h, 0) +
        sum(per_row(t, 0) for t in [idx.pool_state for idx in self._indexers()] + self.seq_ckpt_idx))
-    # (the conversations the stash holds at most: SEQ_STASH_ENTRIES, two of every slot's by default, a quarter of its memory at most)
-    self.stash_entries = max(1, min(getenv("SEQ_STASH_ENTRIES", max(32, 2 * self.seq_slots())), int(gb * 1e9 / 4) // entry)) if gb > 0 else 0
+    # (the conversations the stash holds at most: SEQ_STASH_ENTRIES, by default as many as fit of SEQ_STASH_CTX tokens each (an agent's
+    # conversation, 32k), at least 8)
+    ctx = getenv("SEQ_STASH_CTX", 32768)
+    self.stash_entries = max(8, getenv("SEQ_STASH_ENTRIES", int(gb * 1e9) // (entry + chunk * ctx // C))) if gb > 0 else 0
     self.stash_chunks = max(0, int(gb * 1e9 - self.stash_entries * entry) // chunk) if gb > 0 else 0
     print(f"stash: {self.stash_chunks} chunks of {C} rows ({chunk/1e6:.1f} MB), {self.stash_entries} entries ({entry/1e6:.1f} MB)")
     if not self.stash_chunks: self.stash_entries = 0
