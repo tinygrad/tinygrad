@@ -680,6 +680,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       ret |= {"resident": {"sequences": len(seqs), "tokens": sum(s.n for s in seqs), "rows": eng.rows, "rows_taken": sum(s.cap for s in seqs)},
               "stash": {"sequences": len(stashed), "tokens": sum(len(x.tokens) for x in stashed), "chunks_free": len(eng.free_chunks)},
               "evictions": eng.evictions}
+      # (the memory of the devices: weights, caches, slots, workspace, free)
+      if (mr:=getattr(self.model, "memory_report", None)) is not None:
+        try: ret["memory"] = mr()
+        except Exception as e: ret["memory"] = str(e)
     return ret
 
   # ** the kept conversations

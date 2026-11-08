@@ -18,7 +18,7 @@ from tinygrad.llm.direct_read import DirectFile, read_many, close_rings
 from tinygrad.llm.gguf_load import gguf_shard_units, _disk_bytes, _disk_location
 from tinygrad.uop.ops import Ops, AxisType, KernelInfo
 from tinygrad.dtype import DType
-from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup, DEBUG
+from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup, DEBUG, GlobalCounters
 from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
 
 class ExpertGating(enum.IntEnum):
@@ -2280,6 +2280,49 @@ class Transformer:
         for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(ring_queue_of(lane, any_time=True))
     _device_index(devs)
     _argmax_parts(devs, (self.config.padded_vocab_size or self.config.vocab_size) // len(devs), self.config.vocab_size)
+
+  def memory_report(self) -> dict:
+    """
+    the memory of every device (GB): the weights, the attention caches (KV, the indexer's), the slots' states, the rest used (workspace), free
+    (the AM driver's), and the caches' bytes a token and the full contexts (max_context) their rows hold
+    """
+    def gb(x:float) -> float: return round(x / 1e9, 3)
+    devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
+    rep:dict[str, Any]|None = getattr(self, "_mem_report", None)
+    if rep is None:
+      def by_dev(ts:list[Tensor]) -> dict[str, int]:
+        seen:set[int] = set()
+        out = dict.fromkeys(devs, 0)
+        for t in ts:
+          for u in t.uop.toposort():
+            if u.op is not Ops.BUFFER or (b:=u.arg.buffer if hasattr(u.arg, "buffer") else None) is None: continue
+            for x in (b.bufs if isinstance(b, MultiBuffer) else [b]):
+              x = x.base if x._base is not None else x
+              if id(x) in seen or (x.options is not None and x.options.host) or x.device not in out: continue
+              seen.add(id(x))
+              out[x.device] += x.nbytes
+        return out
+      qsa = [b for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []) if isinstance(b, QSABlock) and hasattr(b, "cache_k")]
+      gdn = [b for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
+      groups = {"weights": nn.state.get_parameters(self), "kv": [b.cache_k for b in qsa],
+                "indexer": [t for i in self._indexers() for t in (getattr(i, "cache_pk", None), getattr(i, "state", None),
+                                                                  getattr(i, "pool_state", None)) if t is not None],
+                "slots": [t for b in gdn for t in (getattr(b, "pool_rec", None), getattr(b, "pool_rp", None), *getattr(b, "pool_conv", []))
+                          if t is not None] + [t for t in (getattr(self, "seq_spec_h", None), getattr(self, "seq_ckpt_h", None)) if t is not None]}
+      rows = self.seq_rows()
+      kvb = sum(int(b.cache_k.nbytes()) // len(devs) for b in qsa) + \
+            sum(int(i.cache_pk.nbytes()) // len(devs) for i in self._indexers() if hasattr(i, "cache_pk"))
+      rep = self._mem_report = {"groups": {k: by_dev(v) for k, v in groups.items()}, "rows": rows,
+                                "bytes_per_token": kvb // (rows + REGION_ALIGN), "full_contexts": round(rows / self.max_context, 2)}
+    def free(d:str) -> int:
+      try: return sum(sz for sz, _, _, f in Device[d].iface.dev_impl.mm.pa_allocator.blocks.values() if f)  # type: ignore[attr-defined]
+      except Exception: return -1
+    used = {d: GlobalCounters.mem_used_per_device.get(d, 0) for d in devs}
+    grp = cast(dict[str, dict[str, int]], rep["groups"])
+    per = {d: {k: gb(v[d]) for k, v in grp.items()} for d in devs}
+    for d in devs: per[d] |= {"workspace": gb(used[d] - sum(v[d] for v in grp.values())), "free": gb(free(d))}
+    return {"devices": per, "rows": rep["rows"], "bytes_per_token": rep["bytes_per_token"], "full_contexts": rep["full_contexts"],
+            "kv_split": self.config.kv_split}
 
   def seq_warmup(self):
     """
