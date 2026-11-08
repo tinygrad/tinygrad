@@ -1150,7 +1150,7 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   M, N = cast(tuple[int, int], out.shape)
   K, streams = cast(int, x.shape[-1]), 4 if hc else 1
   assert k_splits > 0 and M % k_splits == 0 and K % (32*k_splits) == 0
-  assert k_splits == 1 or ggml_type == Q8_0
+  assert k_splits == 1 or ggml_type == Q8_0 or (ggml_type == Q6_K and (K // (32*k_splits)) % 8 == 0), "a split of whole blocks"
   M //= k_splits
   x = x.reshape(M, K)
   assert block_n in ((32, 64) if hc else (64, 128)) and token_tile >= 32 and token_tile % 32 == 0 and M % token_tile == 0
@@ -1232,7 +1232,7 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
       if ggml_type == Q6_K:
         # (Q6_K: a group's 32 weights of a block of 256, their 6 bit values less 32 times the scale of their half (16), in half as the f16 path's)
         gg = g + gi
-        bbase = (row * (groups // 8) + gg // 8) * (QUANT_SIZES[Q6_K] // raw.dtype.itemsize)
+        bbase = (row * (groups*k_splits // 8) + gg // 8) * (QUANT_SIZES[Q6_K] // raw.dtype.itemsize)
         words = _quant_group_words(raw, bbase, gg % 8, Q6_K, None)
         scales = [_wmma_scale(raw, bbase, gg % 8, h, Q6_K)[0].cast(dtypes.float16) for h in (0, 1)]
         st += [lds_w[wr, gi * 32 + w * 4 + i].store((((words[w] >> (8*i)) & 255).cast(dtypes.int32) - 32).cast(dtypes.float16) * scales[w // 4])
@@ -1313,9 +1313,13 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   rdna4 = _wmma_rdna4(x.device)
   # (RDNA3: more rows than share a decode kernel's weight loads (batched decoding's): Q8_0 in the gemm of tiles of 32 rows (skinny), the others
   # padded to the tiles of 16 of the tensor cores, the extra rows sliced off)
-  skinny = layer.ggml_type == Q8_0 and xq is None and not split and 16 < tokens <= SKINNY_ROWS and layer.in_features % 32 == 0
+  # (Q6_K too, whole blocks of 256 a split of the input: its gemm's few output blocks of a device's few outputs are few workgroups. not the
+  # output head's many)
+  dev_out = out_features // len(d) if isinstance(d:=layer.weight.device, tuple) and layer.shard_axis == 0 else out_features
+  skinny = (layer.ggml_type == Q8_0 or (layer.ggml_type == Q6_K and dev_out <= 16384)) and xq is None and not split and \
+    16 < tokens <= SKINNY_ROWS and layer.in_features % (256 if layer.ggml_type == Q6_K else 32) == 0
   # (RDNA3: Q6_K (the output head) of many rows in the gemm, its weights dequantized once a tile of 32 or 64 rows)
-  q6_gemm = layer.ggml_type == Q6_K and xq is None and not split and tokens >= 17 and layer.in_features % 256 == 0
+  q6_gemm = not skinny and layer.ggml_type == Q6_K and xq is None and not split and tokens >= 17 and layer.in_features % 256 == 0
   pad = round_up(tokens, 64 if tokens > 32 else 32) if q6_gemm and tokens % (64 if tokens > 32 else 32) else \
         round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny else \
         round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) else 0
@@ -1341,11 +1345,12 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   if skinny:
     # (the inputs split over workgroups: a few row tiles and output blocks are few workgroups for the GPU, their partial outputs summed after)
     groups, blocks = in_features // 32, (tokens // 32) * round_up(local_out, 64) // 64
-    ks = [s for s in (1, 2, 4, 8, 16) if groups % s == 0 and (s == 1 or groups // s >= 8)]
+    ks = [s for s in (1, 2, 4, 8, 16) if groups % s == 0 and (s == 1 or groups // s >= 8) and
+          (layer.ggml_type != Q6_K or (groups // s) % 8 == 0)]
     ksplits = next((s for s in ks if blocks * s >= 192), ks[-1])
     # (a tile of up to 96 rows: the weights dequantized in LDS once for them, 3 tiles of the 192 rows of 48 sequences of 3 drafts: -2% a step)
     tt = next(t for t in (96, 64, 32) if tokens % t == 0)
-    fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=Q8_0, block_n=64, k_splits=ksplits, rdna4=rdna4)
+    fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, block_n=64, k_splits=ksplits, rdna4=rdna4)
     srcs = (x.cast(dtypes.float16).contiguous(),)
     out_shape = (splits*ksplits*tokens, out_features)
   elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm or few_out_long) and \
