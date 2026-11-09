@@ -1411,10 +1411,10 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     16 < tokens <= SKINNY_ROWS and layer.in_features % (256 if layer.ggml_type == Q6_K else 32) == 0
   # (RDNA3: Q6_K (the output head) of many rows in the gemm, its weights dequantized once a tile of 32 or 64 rows)
   q6_gemm = not skinny and layer.ggml_type == Q6_K and xq is None and not split and tokens >= 17 and layer.in_features % 256 == 0
-  # (the output head of 65-95 rows (22-31 sequences of 3 drafts): a tile of 96 rows, the gemm reads the last row again past them, not 128)
-  q6_rows = q6_gemm and 64 < tokens < 96
+  # (the output head of 65-96 rows (22-32 sequences of 3 drafts): a tile of 96 rows, the gemm reads the last row again past them, not 128)
+  q6_rows = q6_gemm and 64 < tokens <= 96
   pad = round_up(tokens, 64 if tokens > 32 else 32) if q6_gemm and tokens % (64 if tokens > 32 else 32) and not q6_rows else \
-        round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny else \
+        round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny and not q6_rows else \
         round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) and not skinny else 0
   # (skinny: the gemm's tiles of 32 rows past the rows read the last row again (no padded copy of x), the outputs past them aren't summed)
   P = round_up(tokens, 32) if skinny else 96 if q6_rows else tokens

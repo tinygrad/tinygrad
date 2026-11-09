@@ -14,8 +14,10 @@ k = model.config.spec_drafts
 random.seed(0)
 G, C = int(os.environ.get("G", 1)), int(os.environ.get("CTXP", 4000))
 seqs = [(g, g*int(os.environ.get("GSTRIDE", 8192)), C, 0, 1, [random.randrange(1000, 50000) for _ in range(k+1)], 0.0) for g in range(G)]
-for _ in range(3): model.seq_step(seqs)
-print(f"ready {time.perf_counter()-t0:.1f}s", flush=True)
+outs = [model.seq_step(seqs) for _ in range(3)]
+# (the steps' sampled tokens and drafts (temperature 0: greedy) hashed: two builds' steps compared)
+import hashlib
+print(f"ready {time.perf_counter()-t0:.1f}s outhash {hashlib.md5(repr(outs).encode()).hexdigest()[:12]}", flush=True)
 if os.environ.get("METRICS"):
   import threading
   from tinygrad.runtime.ops_amd import AMIdleClocks
