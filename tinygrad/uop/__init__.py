@@ -78,6 +78,9 @@ class Ops(FastEnum):
   # INS is a machine instruction
   INS = auto()
 
+  # this is meant to replace INS.
+  ASM = auto()
+
   # ** 6 -- ops that don't exist in programs **
 
   # ops that adjust the behavior of the scheduler
