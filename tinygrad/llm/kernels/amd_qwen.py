@@ -2397,15 +2397,18 @@ def _q8_sum_kernel(out:UOp, mine:UOp, *packed:UOp, row0:int=0) -> UOp:
   stores = [out[token, group*32 + sub*8 + i].store(acc[i].cast(out.dtype)) for i in range(8)]
   return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q8_sum", opts_to_apply=()))
 
-def all_gather_q8(x:Tensor, axis:int) -> Tensor:
+def all_gather_q8(x:Tensor, axis:int, real:int=0) -> Tensor:
   """
   all_gather of x (1, T, D) split on its rows (axis 1) in half, sent as int8 groups of 32 with their scale (as q8_quantize: the activations
-  the quantized layers' kernels would make), a bit over half the bytes. every device's own rows are quantized too (the same values everywhere)
+  the quantized layers' kernels would make), a bit over half the bytes. every device's own rows are quantized too (the same values everywhere).
+  real: x's rows of every device are padded, its first `real` ones gathered (packed from x as it is, not a copy of them)
   """
   assert axis == 1 and x.ndim == 3 and x.shape[0] == 1
   devs, (T, D) = cast(tuple[str, ...], x.device), cast(tuple[int, int], x.shape[1:])
+  src = x.reshape(T, D)
+  if real: T = len(devs) * real
   packed = Tensor.empty(T, D//32, 9, dtype=dtypes.uint32, device=devs, axis=0)
-  packed = Tensor.custom_kernel(packed, x.reshape(T, D), fxn=_q8_pack_kernel)[0]
+  packed = Tensor.custom_kernel(packed, src, fxn=_q8_pack_kernel)[0]
   if (gathered:=flag_all_gather(packed, 0)) is not None:
     out = Tensor.empty(T, D, dtype=dtypes.half, device=devs)
     return Tensor.custom_kernel(out, gathered, fxn=_q8_unpack_kernel)[0].reshape(1, T, D)

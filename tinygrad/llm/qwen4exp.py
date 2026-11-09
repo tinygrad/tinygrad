@@ -680,8 +680,10 @@ class GatedResidual:
     if HC_REAL: own, post, _ = self.pre_split(xs, real=True)
     else:
       mixed, post, _ = self.pre_split(xs)
+      # (own: lazy, a copy only if the sublayer reads it (the router): the gather packs the real rows from mixed)
       own = _split_real(mixed).contiguous()
-    x = all_gather_q8(own, 1) if own.shape[-1] % 256 == 0 else all_gather(own, 1, dtypes.half)
+    x = all_gather_q8(own, 1) if HC_REAL and own.shape[-1] % 256 == 0 else all_gather_q8(mixed, 1, real=_seq_split[0]) \
+      if own.shape[-1] % 256 == 0 and mixed.shape[0] == 1 else all_gather(own, 1, dtypes.half)
     _partial_out[0], _sp_rows[0] = True, own
     try: out = sublayer(x)
     finally: _partial_out[0], _sp_rows[0] = False, None
