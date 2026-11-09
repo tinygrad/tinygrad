@@ -295,7 +295,8 @@ class FFNBlock:
       if self.config.expert_group_count > 1:
         groups = route_scores.unflatten(-1, (self.config.expert_group_count, -1))
         gscore = groups.topk(1 if bias is None else 2)[0].sum(-1)
-        route_scores = (gscore >= gscore.topk(self.config.expert_group_used)[0][..., -1:]).unsqueeze(-1).where(groups, -math.inf).flatten(-2)
+        keep = gscore.zeros_like(dtype=dtypes.bool).scatter(-1, gscore.topk(self.config.expert_group_used)[1], True)
+        route_scores = keep.unsqueeze(-1).where(groups, -math.inf).flatten(-2)
       _, sel = pairwise_topk(route_scores, self.config.num_experts_per_tok)
       probs = scores.gather(-1, sel)
       # SOFTMAX_WEIGHT applies softmax after top-k selection
