@@ -1143,8 +1143,10 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
 
 @functools.cache
 def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
-                    out_features:int=0, in_features:int=0, ggml_type:int=Q8_0, block_n:int=128, k_splits:int=1, rdna4:bool=False) -> UOp:
+                    out_features:int=0, in_features:int=0, ggml_type:int=Q8_0, block_n:int=128, k_splits:int=1, rdna4:bool=False,
+                    rows:int=0) -> UOp:
   # Q8_0 weights times f16 x on RDNA3/4 WMMA: four waves, two along tokens and two along outputs.
+  # rows: x's rows past them aren't read, the last one's again (in the caches; the outputs of the rows past them aren't used)
   # Stage activations and dequantized weights in LDS: each weight is dequantized once for token_tile tokens.
   # RDNA3 uses 16-element input fragments and interleaved accumulator rows, with LDS capped at 32 KiB.
   M, N = cast(tuple[int, int], out.shape)
@@ -1152,7 +1154,9 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   assert k_splits > 0 and M % k_splits == 0 and K % (32*k_splits) == 0
   assert k_splits == 1 or ggml_type == Q8_0 or (ggml_type == Q6_K and (K // (32*k_splits)) % 8 == 0), "a split of whole blocks"
   M //= k_splits
-  x = x.reshape(M, K)
+  # (x of fewer rows than the tiles: not padded, the rows past them read its last one)
+  if (xrows:=cast(int, x.numel()) // K) < M: rows = min(rows or xrows, xrows)
+  x = x.reshape(xrows, K)
   assert block_n in ((32, 64) if hc else (64, 128)) and token_tile >= 32 and token_tile % 32 == 0 and M % token_tile == 0
   assert not hc or (len(hc) == 1 and hc[0].shape == (M, 4*N) and k_splits == 1 and ggml_type == Q8_0)
   OW, TW, OT, groups = 2, 2, streams*block_n // 32, K // (32*k_splits)
@@ -1184,7 +1188,8 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
     for k in range((token_tile * 4 * GS + 127) // 128):
       e = tid + k * 128
       r, c = (e // (4*GS)).minimum(token_tile - 1), e % (4*GS)
-      out += [x[token_block * token_tile + r, gg * 32 + c * 8 + i].load() for i in range(8)]
+      xr = token_block * token_tile + r
+      out += [x[xr.minimum(rows-1) if rows else xr, gg * 32 + c * 8 + i].load() for i in range(8)]
     for bi in range(stage_rows * GS // 128):
       gi, wr = (bi*128 + tid) // stage_rows, (bi*128 + tid) % stage_rows
       row = (output_block * block_n + (wr % block_n if hc else wr)).minimum(N-1) + (wr // block_n * N if hc else 0)
@@ -1225,7 +1230,9 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
     for k in range((token_tile * 4 * GS + 127) // 128):
       e = tid + k * 128
       r, c = (e // (4*GS)).minimum(token_tile - 1), e % (4*GS)
-      st += [lds_x[r.valid(e < token_tile * 4 * GS), c * 8 + i].store(x[token_block * token_tile + r, g * 32 + c * 8 + i]) for i in range(8)]
+      xr = token_block * token_tile + r
+      st += [lds_x[r.valid(e < token_tile * 4 * GS), c * 8 + i].store(x[xr.minimum(rows-1) if rows else xr, g * 32 + c * 8 + i].load())
+             for i in range(8)]
     for bi in range(stage_rows * GS // 128):
       gi, wr = (bi*128 + tid) // stage_rows, (bi*128 + tid) % stage_rows
       row = (output_block * block_n + (wr % block_n if hc else wr)).minimum(N-1) + (wr // block_n * N if hc else 0)
@@ -1322,9 +1329,10 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   q6_gemm = not skinny and layer.ggml_type == Q6_K and xq is None and not split and tokens >= 17 and layer.in_features % 256 == 0
   pad = round_up(tokens, 64 if tokens > 32 else 32) if q6_gemm and tokens % (64 if tokens > 32 else 32) else \
         round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny else \
-        round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) else 0
-  if not pad and skinny and tokens % 32: pad = round_up(tokens, 32)
-  elif not pad and not rdna4 and tokens > 16 and tokens % 16 and xq is None and not split: pad = round_up(tokens, 16)
+        round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) and not skinny else 0
+  # (skinny: the gemm's tiles of 32 rows past the rows read the last row again (no padded copy of x), the outputs past them aren't summed)
+  P = round_up(tokens, 32) if skinny else tokens
+  if not pad and not skinny and not rdna4 and tokens > 16 and tokens % 16 and xq is None and not split: pad = round_up(tokens, 16)
   if pad and xq is None and not split:
     out = q8_linear(layer, x.reshape(tokens, x.shape[-1]).pad(((0, pad - tokens), (0, 0))), reduce, None, split, half_out)
     out = out[:, :tokens] if splits > 1 and not reduce else out[:tokens]
@@ -1344,15 +1352,15 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     local_rows <= 1024 and local_out <= 512 and in_features >= 4096
   if skinny:
     # (the inputs split over workgroups: a few row tiles and output blocks are few workgroups for the GPU, their partial outputs summed after)
-    groups, blocks = in_features // 32, (tokens // 32) * round_up(local_out, 64) // 64
+    groups, blocks = in_features // 32, (P // 32) * round_up(local_out, 64) // 64
     ks = [s for s in (1, 2, 4, 8, 16) if groups % s == 0 and (s == 1 or groups // s >= 8) and
           (layer.ggml_type != Q6_K or (groups // s) % 8 == 0)]
     ksplits = next((s for s in ks if blocks * s >= 192), ks[-1])
     # (a tile of up to 96 rows: the weights dequantized in LDS once for them, 3 tiles of the 192 rows of 48 sequences of 3 drafts: -2% a step)
-    tt = next(t for t in (96, 64, 32) if tokens % t == 0)
+    tt = next(t for t in (96, 64, 32) if P % t == 0)
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, block_n=64, k_splits=ksplits, rdna4=rdna4)
     srcs = (x.cast(dtypes.float16).contiguous(),)
-    out_shape = (splits*ksplits*tokens, out_features)
+    out_shape = (splits*ksplits*P, out_features)
   elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm or few_out_long) and \
        in_features % 32 == 0 and (rdna4 or local_rows >= 256 or few_out_long or q6_gemm) and \
        (tt:=next((t for t in ((192, 128, 64, 32) if q6_gemm else (96, 128, 64, 32) if rdna4 else
@@ -1385,8 +1393,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   if ksplits > 1:
     # (split: every device's rows of the partial outputs of the input splits)
     if split: result = result.reshape(n:=len(cast(tuple, x.device)), ksplits, tokens // n, out_features).sum(1).reshape(tokens, out_features)
-    elif splits > 1: result = result.reshape(splits, ksplits, tokens, out_features).sum(1).reshape(splits*tokens, out_features)
-    else: result = result.reshape(ksplits, tokens, out_features).sum(0)
+    elif splits > 1: result = result.reshape(splits, ksplits, P, out_features)[:, :, :tokens].sum(1).reshape(splits*tokens, out_features)
+    else: result = result.reshape(ksplits, P, out_features)[:, :tokens].sum(0)
+  elif P != tokens: result = result.reshape(splits, P, out_features)[:, :tokens].reshape(splits*tokens, out_features)
   # row parallel: every device wrote the partial sum of its input features, the sum over the devices is the allreduce
   if splits > 1:
     if not reduce: return result.reshape(splits, *x.shape[:-1], out_features)  # the partial sums, sharded on the device axis
