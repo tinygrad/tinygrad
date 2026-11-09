@@ -1547,7 +1547,9 @@ class MLATransformerBlock(FFNBlock):
         iq = idx.attn_q_b(q_lora).reshape(Tq, ic.n_heads, ic.head_dim)
       iw = (p if not _seq_alone() and (p:=_skinny(idx.proj, x)) is not None else idx.proj(x)) * (ic.n_heads * ic.head_dim)**-0.5
       iw = iw[0]
-    assert idx is not None, "batched decoding: the sparse attention of the indexer"
+    # (sequences sharing the caches: a layer sharing the indexer of the full layer before it (indexer_shared) takes that layer's lists)
+    shared = idx is None and sb is not None and bool(self.config.indexer_shared) and _idx_mask[0] is not None
+    assert idx is not None or shared, "batched decoding: the sparse attention of the indexer"
     def core(q:Tensor, k_store:Tensor, kg:Tensor, iq:Tensor, iw:Tensor, groups:list[tuple[UOp, int]], pf:BatchPrefill|None,
              pools:tuple[Tensor, ...]) -> tuple[Tensor, tuple[Tensor, ...]]:
       # one kernel for all the sequences (the same rows each, the caches of slot g the g-th of the pools): their positions in a tensor. returns
@@ -1557,14 +1559,18 @@ class MLATransformerBlock(FFNBlock):
       if sb is not None:
         assert pf is None and self.seq_sharded, "sequences sharing the caches: decoding steps, a sequence sharded cache"
         U, nd = REGION_ALIGN, len(cast(tuple, x.device))
-        assert U % (SEQ_BLK*nd) == 0 and U % ic.kpool == 0, f"REGION_ALIGN {U}: blocks of {SEQ_BLK} on {nd} devices"
+        assert U % (SEQ_BLK*nd) == 0 and (idx is None or U % idx.idx.kpool == 0), f"REGION_ALIGN {U}: blocks of {SEQ_BLK} on {nd} devices"
         span, rslots = -(-self.config.max_context // U), (sb.bases // U).contiguous()
-        if ic.kpool == 1:
+        if idx is None:
+          picks, pk = unwrap(_idx_mask[0]), None
+          cache = seq_store_grouped(pools[0], self._seq_rows(k_store[0, 0]), sb.positions, rslots, U // nd, span=span)
+        elif ic.kpool == 1:
           # (split keys: a region's rows on every device as the latents', U//devices a region slot; else U rows on every device)
           ku = U // nd if idx.shard else U
           pk = seq_store_grouped(pools[0], kg.half(), sb.positions, rslots, ku, span=span, split=bool(idx.shard))
-          picks = indexer_decode_index_rows(iq, pk, iw, None, None, ic.top_k, 1,
-                                            grouped=(sb.positions, ku, rslots, span))
+          # (the lists are the next shared layers' too, see FFNBlock.__call__)
+          picks = _idx_mask[1] = indexer_decode_index_rows(iq, pk, iw, None, None, ic.top_k, 1,
+                                                           grouped=(sb.positions, ku, rslots, span))
           cache = seq_store_grouped(pools[1], self._seq_rows(k_store[0, 0]), sb.positions, rslots, U // nd, span=span)
         else:
           R = int(idx.slot_ring[0].shape[0])
@@ -1575,7 +1581,8 @@ class MLATransformerBlock(FFNBlock):
           cache = seq_store_grouped(pools[2], self._seq_rows(k_store[0, 0]), sb.positions, rslots, U // nd, span=span)
         attn = mla_sparse_seq(q, cache, picks, scale, None, grouped=(sb.positions, rslots, U // nd, span),
                               dims=self.config.kv_lora_rank)
-        return attn, (pk, cache)
+        return attn, ((cache,) if pk is None else (pk, cache))
+      assert idx is not None
       positions = _group_positions(groups, x.device)
       P, R = idx.pk_slot(), int(idx.slot_ring[0].shape[0])
       # (prefills: the slots of the prompts, their token counts)
@@ -1595,8 +1602,8 @@ class MLATransformerBlock(FFNBlock):
       return attn, (pk, Tensor(pools[1].uop.after(pk.uop)), cache)
     pools:tuple[Tensor, ...]
     if sb is not None:
-      pools = (idx.cache_dk, self.cache_s) if idx.idx.kpool == 1 else (idx.cache_pk, idx.pool_ring, self.cache_s)
-    else: pools = (idx.pool_pk, idx.pool_ring, self.pool_s if self.seq_sharded else self.pool_k)
+      pools = (self.cache_s,) if idx is None else (idx.cache_dk, self.cache_s) if idx.idx.kpool == 1 else (idx.cache_pk, idx.pool_ring, self.cache_s)
+    else: pools = (unwrap(idx).pool_pk, unwrap(idx).pool_ring, self.pool_s if self.seq_sharded else self.pool_k)
     if (pf:=_batch_prefill[0]) is not None and pf.off:
       # (a mixed step: the rows of decoding, then the prompts' (their writes after the decoding's reads))
       o, nd = pf.off, len(groups) - len(pf.count_vars)
@@ -3095,11 +3102,12 @@ class Transformer(GLMSeqDriver):
     def keys(b:MLATransformerBlock) -> Tensor:
       return (b.slot_rows_view(index(b).cache_dk) if index(b).shard else index(b).cache_dk) if index(b).idx.kpool == 1 else index(b).cache_pk
     def kdiv(b:MLATransformerBlock) -> int: return nd if index(b).idx.kpool == 1 and index(b).shard else index(b).idx.kpool
-    chunk = C * sum(per_row(b.cache_s) + per_row(index(b).cache_dk if index(b).idx.kpool == 1 else index(b).cache_pk) //
-                    (1 if index(b).idx.kpool == 1 and index(b).shard else index(b).idx.kpool) for b in kb)
+    # (a layer sharing another's indexer (indexer_shared) has no keys of its own: its latents only)
+    chunk = C * sum(per_row(b.cache_s) + (per_row(index(b).cache_dk if index(b).idx.kpool == 1 else index(b).cache_pk) //
+                    (1 if index(b).idx.kpool == 1 and index(b).shard else index(b).idx.kpool) if b.indexer is not None else 0) for b in kb)
     ring = [r for _, r in self.seq_ckpt_rings]
     entry = per_row(self.seq_spec_h) + per_row(self.seq_ckpt_h) + sum(per_row(index(b).pool_ring) + per_row(r)
-              for b, r in zip([b for b in kb if index(b).idx.kpool > 1], ring))
+              for b, r in zip([b for b in kb if b.indexer is not None and b.indexer.idx.kpool > 1], ring))
     self.stash_entries = getenv("SEQ_STASH_ENTRIES", 32) if gb > 0 and chunk > 0 else 0
     self.stash_chunks = max(0, int(gb * 1e9 - self.stash_entries * entry) // chunk) if self.stash_entries else 0
     if not self.stash_chunks: self.stash_entries = 0
@@ -3108,7 +3116,7 @@ class Transformer(GLMSeqDriver):
     self._stash_kv = []
     for b in kb:
       latent = glm_seq_base._host_like([(b.slot_rows_view(b.cache_s), 0, self.stash_chunks * C // nd)])[0]
-      pools = glm_seq_base._host_like([(keys(b), 0, self.stash_chunks * C // kdiv(b))])[0]
+      pools = glm_seq_base._host_like([(keys(b), 0, self.stash_chunks * C // kdiv(b))])[0] if b.indexer is not None else None
       self._stash_kv.append((latent, pools))
     states = [self.seq_spec_h, self.seq_ckpt_h]
     self._stash_rings = list(self.seq_ckpt_rings)
@@ -3127,14 +3135,14 @@ class Transformer(GLMSeqDriver):
     nd = len(to_tuple(self.token_embd.weight.device))
     def rows(t:Tensor, at:UOp, n:int) -> Tensor: return t.shrink(((at, at+n),) + (None,)*(t.ndim-1))
     for b, st in zip([b for b in self.blk + [self.mtp] if isinstance(b, MLATransformerBlock)], self._stash_kv):
-      assert b.indexer is not None
-      idx, kp = b.indexer, b.indexer.idx.kpool
-      # (split DSA keys: a device's rows, as the latents')
-      split = kp == 1 and bool(idx.shard)
-      kd, kt = (nd, b.slot_rows_view(idx.cache_dk)) if split else (kp, idx.cache_dk if kp == 1 else idx.cache_pk)
       # Host rows come from the stash chunk; device rows come from the independently allocated region.
-      items = [(rows(st[0], chunk*(C//nd), C*chunks//nd), rows(b.slot_rows_view(b.cache_s), row//nd, C*chunks//nd)),
-               (rows(st[1], chunk*(C//kd), C*chunks//kd), rows(kt, row//kd, C*chunks//kd))]
+      items = [(rows(st[0], chunk*(C//nd), C*chunks//nd), rows(b.slot_rows_view(b.cache_s), row//nd, C*chunks//nd))]
+      if (idx:=b.indexer) is not None:
+        kp = idx.idx.kpool
+        # (split DSA keys: a device's rows, as the latents')
+        split = kp == 1 and bool(idx.shard)
+        kd, kt = (nd, b.slot_rows_view(idx.cache_dk)) if split else (kp, idx.cache_dk if kp == 1 else idx.cache_pk)
+        items.append((rows(cast(Tensor, st[1]), chunk*(C//kd), C*chunks//kd), rows(kt, row//kd, C*chunks//kd)))
       for dst, src in items:
         if save: saves.append(dst.assign(src))
         else: pairs.append((src, dst))
