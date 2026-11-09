@@ -335,7 +335,7 @@ SEQ_SPLIT_MAX = 128  # (the most real rows a device)
 HC_REAL = getenv("HC_REAL", 0)
 GDN_MERGED, HC_NORM_REAL = getenv("GDN_MERGED", 0), getenv("HC_NORM_REAL", 0)
 # QSA_ROT_FWHT: QSA_KV_ROT's rotations (keys, values, queries, the output back) by a fast Walsh-Hadamard kernel (fwht), not 256x256 matmuls
-QSA_ROT_FWHT = getenv("QSA_ROT_FWHT", 0)
+QSA_ROT_FWHT = getenv("QSA_ROT_FWHT", 1)
 def _split_rows() -> int: return round_up(_seq_split[0], 32)
 def _split_real(x:Tensor) -> Tensor:
   """(B, N*P, ...) split padded rows: the real rows (B, N*R, ...), split"""
@@ -1104,7 +1104,7 @@ def _region_rows(config:TransformerConfig) -> int:
 # a prefill chunk's rows in this many micro batches (sequence parallel: the copies of one run with the kernels of the other)
 MICRO_BATCHES = getenv("MICRO_BATCHES", 2)
 PREFILL_MB1_ROWS = getenv("PREFILL_MB1_ROWS", 0)
-PREFILL_TILE32 = getenv("PREFILL_TILE32", 0)
+PREFILL_TILE32 = getenv("PREFILL_TILE32", 1)
 # the attention cache's keys (1) and values (2) rotated, see QSABlock._rot
 QSA_KV_ROT = getenv("QSA_KV_ROT", 0)
 
