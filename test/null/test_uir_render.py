@@ -1,102 +1,26 @@
-import unittest, re, ast as pyast
-from typing import Any
+import unittest, math
+from dataclasses import replace
 from tinygrad import Tensor
-from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid
-from tinygrad.uop import Ops, GroupOp
-from tinygrad.uop.ops import AxisType, UOp, graph_rewrite, ParamArg, KernelInfo
+from tinygrad.dtype import dtypes, Invalid
+from tinygrad.uop import Ops
+from tinygrad.uop.ops import UOp, UPat, graph_rewrite, ParamArg, KernelInfo, ProgramInfo
 from tinygrad.uop.movement import mop_cleanup
-from tinygrad.uop.render import render_uir
+from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.device import Device
-from tinygrad.codegen import full_rewrite_to_sink
+from tinygrad.codegen import full_rewrite_to_sink, to_program
 from tinygrad.helpers import Context, ansistrip
-
-# ***** prototype parse for the uop v1 wire format *****
-
-_DTYPES_BY_NAME: dict[str, DType] = {d.name: d for _,v in vars(type(dtypes)).items() if isinstance(v, DType) for d in [v]}
-
-_line_re = re.compile(r"^\s*%(\d+) = (\w+)\s*(.*)$")
-_src_tok = re.compile(r"\([^()]*\)|[^,\s]+")   # a src is %N, a literal, or a flat all-const tuple
-
-def _kv(zone:str) -> dict[str, str]:
-  """the arg zone is k=v tokens"""
-  kv = {}
-  for t in zone.split():
-    k, _, v = t.partition("=")
-    kv[k] = v
-  return kv
-
-def _parse_const(tok:str) -> UOp:
-  if tok == "invalid": return UOp(Ops.CONST, src=(), arg=Invalid)
-  if tok in ("true", "false"): return UOp(Ops.CONST, src=(), arg=tok == "true")
-  if ":" in tok:
-    dt = _DTYPES_BY_NAME[d:=tok.split(":", 1)[0]]
-    return UOp(Ops.CONST, src=(), arg=dt.const(float.fromhex(tok[len(d)+1:])) if dtypes.is_float(dt) else dt.const(int(tok[len(d)+1:])))
-  if re.match(r"^-?\d+$", tok): return UOp(Ops.CONST, src=(), arg=int(tok))
-  return UOp(Ops.CONST, src=(), arg=dtypes.weakfloat.const(float(tok)))
-
-def _parse_paramarg(rest:str, name:str|None) -> ParamArg:
-  kv = _kv(rest)
-  dev = kv.get("device")
-  return ParamArg(int(kv["slot"]), _DTYPES_BY_NAME[kv["dtype"]],
-                  tuple(map(int, kv["bounds"].strip("[]").split(","))) if "bounds" in kv else None,
-                  name, AddrSpace[kv["addrspace"]] if "addrspace" in kv else AddrSpace.GLOBAL,
-                  pyast.literal_eval(dev) if dev and dev[0] in "'(" else dev, kv.get("volatile") == "true")
-
-def parse_ssa(text:str) -> UOp:
-  # the wire format carries storage declarations without runtime state: `buffer` reconstructs as an ALLOC
-  nodes, root = {}, None
-  def parse_tok(tok:str) -> UOp:
-    if tok.startswith("%"): return nodes[int(tok[1:])]
-    if tok.startswith("("): return UOp(Ops.STACK, src=tuple(parse_tok(t) for t in tok[1:-1].split(", ") if t))
-    return _parse_const(tok)
-  for raw in ansistrip(text).splitlines():   # op names may carry ANSI color from render_uir
-    line = raw.strip()
-    if not line or line.startswith(";"): continue
-    m = _line_re.match(line)
-    assert m, f"unparseable line {raw!r}"
-    n, op, rest = int(m.group(1)), Ops[m.group(2).upper()], m.group(3).strip()
-    if op is Ops.BUFFER: op = Ops.ALLOC   # the wire carries storage declarations without runtime state
-    if rest.startswith(": "): srcstr, argstr = "", rest[2:]
-    elif " : " in rest: srcstr, argstr = rest.split(" : ", 1)
-    else: srcstr, argstr = rest, ""
-    name: str|None = None
-    if argstr.startswith('"'):  # quoted param name comes first in the args
-      end = argstr.index('"', 1)
-      name, argstr = argstr[1:end], argstr[end+1:].strip()
-    srcs = [parse_tok(t) for t in _src_tok.findall(srcstr)]
-    arg: Any = None
-    if op in GroupOp.Defines: arg = _parse_paramarg(argstr, name)
-    elif op is Ops.RANGE:
-      t, *ids = argstr.split()
-      arg = (AxisType[t], *map(int, ids))
-    elif op is Ops.REDUCE:
-      kv = _kv(argstr)
-      arg = (Ops[kv["op"].upper()], int(kv["pop"]) if "pop" in kv else 0)
-    elif op in (Ops.CAST, Ops.BITCAST): arg = _DTYPES_BY_NAME[argstr]
-    elif op is Ops.SINK: arg = KernelInfo(name=argstr) if argstr else None
-    elif op in (Ops.COPY, Ops.SPECIAL): arg = argstr
-    elif argstr:
-      try: arg = pyast.literal_eval(argstr)
-      except (SyntaxError, ValueError): arg = argstr
-    if op is Ops.BUFFER: op = Ops.ALLOC
-    nodes[n] = root = UOp(op, src=tuple(srcs), arg=arg)   # root is always the last node
-  assert root is not None, "empty graph"
-  return root
+from tinygrad.renderer import Estimates
 
 def _strip_buffers(root:UOp) -> UOp:
   # realized BUFFERs carry runtime state the wire can't; a BUFFER with no binding is exactly an ALLOC
-  subs = {b: b.replace(op=Ops.ALLOC, arg=ParamArg(b.arg.slot, b.arg.dtype, b.arg.vmin_vmax,
-                                                 b.arg.name, b.arg.addrspace, b.arg.device, b.arg.volatile))
-          for b in root.toposort() if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg)}
-  return root.substitute(subs, walk=True, name="strip buffers for wire format test") if subs else root
+  subs = {b: b.replace(op=Ops.ALLOC, arg=replace(b.arg, buffer=None, spec=None))
+          for b in root.toposort(enter_calls=True) if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg) and b.arg.buffer is not None}
+  return root.substitute(subs, walk=True, enter_calls=True, name="strip buffers for wire format test") if subs else root
 
 def assert_roundtrip(case, root:UOp):
-  txt = render_uir(root)
-  parsed = parse_ssa(txt)
-  # text + structural equality, both sides stripped: realized BUFFER vs parsed ALLOC converge to the same thing
-  g1, g2 = _strip_buffers(root), _strip_buffers(parsed)
-  case.assertEqual(render_uir(g1), render_uir(g2))
-  case.assertEqual({x.tuplize for x in g1.toposort()}, {x.tuplize for x in g2.toposort()})
+  # UOps are hash-consed, so a lossless round trip gives back the identical UOp
+  g = _strip_buffers(root)
+  case.assertIs(parse_uir(render_uir(g)), g, render_uir(g))
 
 class TestSSARender(unittest.TestCase):
   def test_gemm_pre_rangeify(self):
@@ -152,10 +76,70 @@ class TestSSARender(unittest.TestCase):
     assert_roundtrip(self, o.uop)
     assert len(o.uop.toposort()) > 10  # not trivially small
 
-  def test_continue_parsing(self):
-    # lines out of order / comments tolerated, ids sparse
-    g = UOp.sink(UOp.const(1) + UOp.const(2))
-    txt = "; hand written\n" + render_uir(g) + "\n;; trailing comment\n"
-    assert_roundtrip(self, parse_ssa(txt))
+  def test_bound_variable(self):
+    v = UOp.variable("n", 1, 10).bind(3)
+    assert_roundtrip(self, (Tensor.empty(10, device="CPU")[:v] + 1).uop)
+
+  def test_multi_device(self):
+    x = Tensor.empty(4, 4, device="CPU").shard(("CPU:0", "CPU:1"), axis=0)
+    assert_roundtrip(self, (x + 1).sum().uop)
+
+  def test_quoted_args(self):
+    assert_roundtrip(self, UOp.sink(UOp.param(0, dtypes.int32, name="has space %1"), UOp.param(1, dtypes.int32, name="[x]")))
+
+  def test_program(self):
+    # SINK with applied opts, PROGRAM with params as %refs, SOURCE, BINARY bytes, Target
+    prg = to_program(self._kernel((Tensor.empty(16, device="NULL") + 1).sum()), Device["NULL"].renderer)
+    self.assertIs(prg.op, Ops.PROGRAM)
+    assert_roundtrip(self, prg)
+
+  def test_args(self):
+    # an inline root, an all-default arg isn't None, a symbolic Estimates
+    n = UOp.variable("n", 1, 64)
+    for g in [UOp.const(1), UOp.const((1, 2)), UOp(Ops.STACK), UOp(Ops.PROGRAM, (UOp.sink(arg=KernelInfo()),), ProgramInfo()),
+              UOp(Ops.PROGRAM, (UOp.sink(),)), UOp.sink(UOp.const(1), arg=KernelInfo(estimates=Estimates(ops=n*2, mem=n)))]:
+      assert_roundtrip(self, g)
+
+  def test_nan_pattern(self):
+    # the pattern compiler puts a UPat's float arg in a PYLITERAL, any nan is the same one
+    from tinygrad.uop.upat import _get_clause
+    assert_roundtrip(self, _get_clause(UPat(Ops.CONST, arg=-math.nan), UOp.custom_function("x", fmt=True).call(inline=True)))
+
+  def test_amd_instructions(self):
+    # rdna3 and rdna4 instructions have the same names, a python object is evaluated in its own module
+    from tinygrad.runtime.autogen.amd.rdna3 import ins as rdna3
+    from tinygrad.runtime.autogen.amd.rdna4 import ins as rdna4
+    for ins in (rdna3, rdna4): assert_roundtrip(self, UOp(Ops.INS, arg=(ins.v_mov_b32_e32(ins.v[1], 1.0), dtypes.void)))
+
+class TestParseUIR(unittest.TestCase):
+  def test_format(self):
+    # the exact text, and hand-written text with comments parses to the same UOp
+    a, r = UOp.param(0, dtypes.float32, (4,)), UOp.range(4, 0)
+    sink = UOp(Ops.END, (UOp(Ops.STORE, (UOp(Ops.INDEX, (a, r)), UOp.const(1.0))), r)).sink(arg=KernelInfo())
+    txt = "%0 = param 4 slot=0 dtype=f32\n%1 = range 4 slot=0\n%2 = index %0 %1\n%3 = store %2 1.0\n%4 = end %3 %1\n%5 = sink %4 name=test"
+    self.assertEqual(ansistrip(render_uir(sink)), txt)
+    self.assertIs(parse_uir("# a comment\n" + txt.replace("\n", "  # a trailing comment\n")), sink)
+
+  def test_studentgrad_syntax(self):
+    # named values, nested (op ...), [stacks] of expressions, {scoped blocks}, hex and exponent literals
+    sink = parse_uir("""
+      %buf   = param 4 slot=0 dtype=i32   # comment
+      %i     = range 4 slot=0
+      %inc   = { %one = 0x1
+                 %result = (add (index [10 20 30 40] %i) %one) }
+      %store = store (index %buf %i) (add %inc (cast 1E2 dtype=i32))
+      %end   = end %store %i
+    """)
+    buf, i = UOp.param(0, dtypes.int32, (4,)), UOp.range(4, 0)
+    vals = UOp(Ops.STACK, tuple(UOp.const(v) for v in (10, 20, 30, 40)))
+    inc = UOp(Ops.ADD, (UOp(Ops.INDEX, (vals, i)), UOp.const(1)))   # raw UOps: the parser builds exactly what is written
+    val = UOp(Ops.ADD, (inc, UOp(Ops.CAST, (UOp.const(100.0),), dtypes.int32)))
+    self.assertIs(sink, UOp(Ops.END, (UOp(Ops.STORE, (UOp(Ops.INDEX, (buf, i)), val)), i)))
+
+  def test_errors(self):
+    for txt in ["", "%0 = add %1 1", "%0 = add 1 2 x=1 4", "%0 = frob 1", "%0 = add 1 nope", "%0 = add 1 (mul 2 3", "%0 = [1 2", "%0 = add load 1",
+                "%x = 1\n%x = 2", "%x = 1 }", "%x = special name=`12", "%x = special name=)", "%x = cast 1 dtpye=i32",
+                "%x = cast 1 dtype=i32 dtype=f32", "%x = { %x = 1 }", "%x = add %x 1"]:
+      with self.assertRaises(ValueError, msg=txt): parse_uir(txt)
 
 if __name__ == '__main__': unittest.main()

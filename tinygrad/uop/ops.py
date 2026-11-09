@@ -1146,7 +1146,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ctx[s]
 
   def render_uir(self) -> str:
-    from tinygrad.uop.render import render_uir
+    from tinygrad.uop.uir import render_uir
     return render_uir(self)
 
   # *** uop high level syntactic sugar ***
@@ -1416,7 +1416,9 @@ class UPat(RandMixin):
     assert op is None or isinstance(op, (Ops, tuple, set)), f"op must be Ops or tuple of Ops, not {op!r}"
     self.op: tuple[Ops, ...]|None = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
     self.match_dtype: tuple[DType, ...]|None = (dtype,) if isinstance(dtype, DType) else (tuple(dtype) if isinstance(dtype, set) else dtype)
-    self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
+    # a float arg is stored like a CONST's arg (a ConstFloat with nan == nan), so matching nan and compiling the pattern work the same
+    self.arg = dtypes.weakfloat.const(arg) if type(arg) is float else arg
+    self.name, self._in_src, self.custom_early_reject = name, src, custom_early_reject
     self.src: Any = None
     self.is_any = is_any
     assert self.name != "ctx", "UPat can't be named ctx"
