@@ -153,17 +153,18 @@ class SeqEngine:
   def _window(self, need:int, force:bool, after:Seq|None=None) -> tuple[int, list[Seq]]|None:
     """
     a run of free rows and idle regions of need rows (after: the one right after its region), nothing moved: its first row and the idle ones
-    evicted for it (the fewest held ones, then the fewest rows of them). None: none (a held one would be lost, not forced)
+    evicted for it (no held ones if it can, the least recently used ones, the fewest rows of them). None: none (a held one would be lost,
+    not forced)
     """
     regs = sorted(self.seqs, key=lambda t: t.base)
     ends = [0] + [t.base + t.cap for t in regs]
     gaps = [t.base - ends[i] for i, t in enumerate(regs)] + [self.rows - ends[-1]]
-    best:tuple[tuple[bool, int], int, list[Seq]]|None = None
+    best:tuple[tuple[bool, float, int], int, list[Seq]]|None = None
     for a in ([regs.index(after) + 1] if after is not None else range(len(regs) + 1)):
       total, victims = 0, cast(list[Seq], [])
       for b in range(a, len(regs) + 1):
         if (total:=total + gaps[b]) >= need:
-          key = (any(self.held(v.used) for v in victims), sum(v.n for v in victims))
+          key = (any(self.held(v.used) for v in victims), max((v.used for v in victims), default=0.0), sum(v.n for v in victims))
           if (best is None or key < best[0]) and (force or self._stash_fits(victims)): best = (key, ends[a], victims)
           break
         if b == len(regs) or regs[b].active: break
