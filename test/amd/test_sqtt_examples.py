@@ -10,7 +10,8 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import SOPP
 from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp
 from tinygrad.renderer.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_RDNA4, WAVEEND, WAVEEND_RDNA4, INST, INST_RDNA4, VALUINST,
                                      IMMEDIATE, IMMEDIATE_MASK, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4, PACKET_TYPES_CDNA, CDNA_WAVESTART,
-                                     print_packets, CDNA_WAVEEND, CDNA_INST)
+                                     print_packets, CDNA_WAVEEND, CDNA_INST, NOP)
+from test.mockgpu.amd.sqtt import encode, new
 from test.amd.helpers import TARGET_TO_ARCH
 from test.amd.test_sqttmap import needs_rocprof
 
@@ -127,6 +128,13 @@ class SQTTExamplesTestBase(unittest.TestCase):
             # Use isinstance to handle layout-specific subclasses (e.g., WAVESTART_RDNA4)
             self.assertTrue(any(isinstance(pkt, cls) for cls in all_classes), f"unknown packet type {type(pkt)} in {name}")
 
+  def test_encode_roundtrip(self):
+    for name, (events, *_) in self.examples.items():
+      for i, event in enumerate(events):
+        with self.subTest(example=name, event=i):
+          packets = list(decode(event.blob))
+          self.assertEqual([(type(p), p._raw) for p in decode(encode(packets))], [(type(p), p._raw) for p in packets])
+
   def test_wave_lifecycle(self):
     for name, (events, *_) in self.examples.items():
       if "empty" in name: continue
@@ -210,6 +218,13 @@ class SQTTExamplesTestBase(unittest.TestCase):
             elif isinstance(p, IMMEDIATE_MASK):
               for _ in range(bin(p.mask).count('1')): our_insts.append(p._time)
         self.assertEqual(sorted(our_insts), sorted(roc_insts), f"instruction times mismatch in {name}")
+
+class TestSQTTEncode(unittest.TestCase):
+  def test_last_packet(self):
+    for cls in set(PACKET_TYPES_RDNA3.values()) - {LAYOUT_HEADER, NOP}:
+      for packets in ([new(LAYOUT_HEADER, layout=3), new(cls)], [new(LAYOUT_HEADER, layout=3), new(IMMEDIATE), new(cls)]):
+        with self.subTest(cls=cls.__name__, nibbles=sum(p._size_nibbles for p in packets)):
+          self.assertEqual([type(p) for p in decode(encode(packets))], [type(p) for p in packets])
 
 class TestSQTTExamplesRDNA3(SQTTExamplesTestBase):
   target = "gfx1100"

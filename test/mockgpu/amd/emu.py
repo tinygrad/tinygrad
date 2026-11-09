@@ -56,7 +56,7 @@ from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program, to_program_config
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import Context, DEV, to_mv, ContextVar, VIZ
+from tinygrad.helpers import Context, DEV, to_mv, mv_address, ContextVar, VIZ
 from tinygrad.runtime.autogen import hsa
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND, get_elf_section
 
@@ -295,6 +295,7 @@ class _Ctx:
   lds = UOp.param(3, dtypes.uint32, 16384, name="lds")
   scratch = UOp.param(4, dtypes.uint8, 1 << 30, name="scratch")
   scratch_stride = UOp.param(9, dtypes.uint32, name="scratch_stride", addrspace=AddrSpace.ALU)
+  trace = UOp.param(10, dtypes.uint32, 1 << 30, name="trace")
 
   def __init__(self, wave_size: int = 32):
     self._axis_id, self.wave_size = 0, wave_size
@@ -1728,6 +1729,18 @@ def emu_loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
   w = UOp.range(waves, 0, AxisType.LOOP, dtype=dtypes.int)
   return active[0].store(routes[w].load().eq(header).cast(dtypes.uint32).reduce(w, arg=Ops.MAX).ne(0)).sink()
 
+def trace_call(trace_words:int, pc:int, inst:Inst, vgpr:UOp, wave_size:int) -> UOp:
+  # a word count, then pc and EXEC before every instruction and the address lanes of a ds_* op. one that doesn't fit is only counted
+  trace = _Ctx.trace
+  n, words = trace.index(_c(0, dtypes.int)).load().cast(dtypes.int), 2 + wave_size * isinstance(inst, ir3.DS)
+  ok = n + words < _c(trace_words, dtypes.int)
+  stores = [trace.index((n+i+1).valid(ok)).store(v) for i,v in enumerate([_c(pc), _Ctx.sgpr.index(_c(EXEC_LO.offset, dtypes.int)).load()])]
+  if isinstance(inst, ir3.DS):
+    lane = UOp.range(wave_size, 1, AxisType.LOOP, dtype=dtypes.int)
+    addr = vgpr.index(_c((inst.addr.offset-256)*wave_size, dtypes.int)+lane).load()
+    stores.append(trace.index((n+3+lane).valid(ok)).store(addr).end(lane))
+  return lower_body(UOp.sink(*stores, trace.index(_c(0, dtypes.int)).store((n+words).cast(dtypes.uint32))), "emu_trace")
+
 def lower_body(sink:UOp, name:str) -> UOp:
   bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
   body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}, walk=True)
@@ -1863,7 +1876,7 @@ pm_render = PatternMatcher([
 ])
 
 @rewrite_group(replay="emu_process_replay")
-def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
+def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="", trace_words:int=0) -> UOp:
   insts = amd_decode(code, arch)
   for inst in insts.values():
     inst_st = getattr(inst, "op_name", "").lower()
@@ -1904,6 +1917,9 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
              ctx.lds:(lds, 0), ctx.scratch:(scratch, scratch_size*wave_size)}
   if wave_size == 64: buffers[ctx.accvgpr] = (accvgpr, 256*wave_size)
   routes = UOp.alloc((n_waves,), dtypes.int, 6, AddrSpace.REG)
+  if trace_words:  # the other workgroups share a slice nothing reads
+    other = wg.ne(0).cast(dtypes.int)*n_waves*trace_words
+    buffers[ctx.trace] = (ctx.trace.shrink(((other, other+n_waves*trace_words),)), trace_words)
   active = UOp.alloc((1,), dtypes.bool, 7, AddrSpace.REG)
   route = UOp.param(6, dtypes.int, (1,), name="route")
   taken, fallthrough = [UOp.param(i, dtypes.int, name=name, addrspace=AddrSpace.ALU) for i,name in enumerate(("taken", "fallthrough"), 7)]
@@ -1940,6 +1956,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
       inst = insts[off]
       inst_st = getattr(inst, "op_name", "").lower()
       if inst_st.startswith("s_code_end"): continue
+      if trace_words: instructions.append(trace_call(trace_words, off, inst, ctx.vgpr, wave_size))
       call, branch_cond = instruction_call(inst, arch, renderer)
       if branch_cond is not None: cond = branch_cond
       if call is not None: instructions.append(call)
@@ -1993,15 +2010,19 @@ RELIFT = ContextVar("RELIFT", 0) # lift and recompile to assembly N times
 REPLAY_EMU = ContextVar("REPLAY_EMU", 0)
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
-            scratch_size: int = 0, arch: str = "rdna3", name: str = "asm") -> int:
-  """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
+            scratch_size: int = 0, arch: str = "rdna3", name: str = "asm", trace: bytearray|None = None, simd: int = 0) -> int:
+  """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane).
+  trace comes back holding the first workgroup's SQTT, with instruction packets for the waves on simd."""
+  n_waves = (lx*ly*lz + _wave_size(arch) - 1) // _wave_size(arch)
+  words = len(trace) // 4 // (2*n_waves) if trace is not None else 0
+  if trace is not None and words == 0: raise RuntimeError(f"the trace does not fit in the {len(trace)} byte SQTT buffer, raise SQTT_BUFFER_SIZE")
   with Context(DEV=DEV.target('CPU', renderer='LLVM'), NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="",
                CAPTURE_PROCESS_REPLAY=REPLAY_EMU.value, DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1):
     code = bytes(to_mv(lib, lib_sz))
     dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size)
     renderer = Device['CPU'].renderer
-    if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
-      dispatch_cache[key] = to_program(lift(code, arch, renderer, dispatch, f"emu {name}"), renderer)
+    if (key:=(code, arch, dispatch, name, words, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
+      dispatch_cache[key] = to_program(lift(code, arch, renderer, dispatch, f"emu {name}", words), renderer)
       relift_lib = code
       for relift_count in range(1, RELIFT.value+1):
         try:
@@ -2015,6 +2036,15 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   args = [vmem_buf] * (max(p.arg.slot for p in prg.kernel_params) + 1)
   for p in prg.kernel_params:
     if p.addrspace is AddrSpace.ALU: args[p.arg.slot] = p.bind(args_ptr)
+  if trace is not None:
+    ptr = mv_address(trace)
+    args[_Ctx.trace.arg.slot] = UOp.from_buffer(Buffer('CPU', len(trace), options=BufferSpec(external_ptr=ptr), opaque=ptr), dtypes.uint32)
   with _MXCSRContext():
     run_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)), update_stats=False)
+  if trace is not None:
+    from test.mockgpu.amd.sqtt import sqtt_blob
+    with memoryview(trace).cast("I") as rec: waves = [rec[w*words:(w+1)*words].tolist() for w in range(n_waves)]
+    if any(w[0] >= words for w in waves) or len(blob:=sqtt_blob(amd_decode(code, arch), waves, simd)) > len(trace):
+      raise RuntimeError(f"the trace does not fit in the {len(trace)} byte SQTT buffer, raise SQTT_BUFFER_SIZE")
+    trace[:] = blob
   return 0
