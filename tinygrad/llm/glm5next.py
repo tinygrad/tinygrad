@@ -4334,7 +4334,6 @@ class Transformer:
       pos, R = self._stash_state_count + 2*len(self._stash_rings) + i, replay_q(self.config.spec_drafts)
       full = lambda t, start: t.shrink(((start, start+R),) + (None,)*(t.ndim-1))  # noqa: E731
       pairs.append((full(self._stash_state[pos], entry*R), full(replay, slot*R)))
-    if not save: pairs = [(x, d) for d, x in pairs]
     Tensor.realize(*[(d.assign(x) if save else x.assign(d)) for d, x in pairs])
   def _stash_state_vars(self, slot:int, entry:int, pos:int, hrow:int) -> list[UOp]:
     k = self.config.spec_drafts

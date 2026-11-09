@@ -54,16 +54,8 @@ class TestGLMStash(unittest.TestCase):
     return Tensor(np.zeros_like(tensor.numpy()), device=tensor.device)
 
   def reset_sources(self):
-    self.gdn.pool_rec = self.zero_like(self.gdn.pool_rec)
-    self.gdn.pool_conv = [self.zero_like(t) for t in self.gdn.pool_conv]
-    self.gdn.pool_rp = self.zero_like(self.gdn.pool_rp)
-    self.idx.cache_pk = self.zero_like(self.idx.cache_pk)
-    self.idx.pool_ring = self.zero_like(self.idx.pool_ring)
-    self.ckpt_ring = self.zero_like(self.ckpt_ring)
-    self.mla.cache_s = Tensor(np.zeros_like(self.mla.cache_s.numpy())).shard(self.devs, 0)
-    self.model.seq_spec_h = self.zero_like(self.model.seq_spec_h)
-    self.model.seq_ckpt_h = self.zero_like(self.model.seq_ckpt_h)
-    self.model.seq_ckpt_states = [[self.zero_like(t) for t in self.model.seq_ckpt_states[0]]]
+    # Preserve registered tensor identities (notably _stash_replays): zeroing in place catches a no-op or backwards restore.
+    for tensor in self.states: tensor.assign(self.zero_like(tensor)).realize()
 
   def fill_and_save(self):
     with patch.dict(os.environ, {"SEQ_STASH_GB": "0.000002", "SEQ_STASH_ENTRIES": "1"}):
@@ -81,8 +73,8 @@ class TestGLMStash(unittest.TestCase):
     before_reset = self.idx.cache_pk, self.mla.cache_s
     self.reset_sources()
     self.model._stash_kv_copy(False, 1, 0, 0)
-    for tensor in before_reset:
-      np.testing.assert_array_equal(tensor.numpy(), self.snapshots[tensor])
+    for original, tensor in zip(before_reset, (self.idx.cache_pk, self.mla.cache_s)):
+      np.testing.assert_array_equal(tensor.numpy(), self.snapshots[original])
 
   def test_state_and_ring_replay_roundtrip(self):
     self.fill_and_save()
@@ -91,16 +83,19 @@ class TestGLMStash(unittest.TestCase):
     self.model._stash_state_copy(True, 0, 0, 0, 0, 0)
     self.reset_sources()
     self.model._stash_state_copy(False, 1, 0, 0, 0, 0)
-    for tensor in self.states:
-      expected = values[tensor]
-      if tensor is self.idx.pool_ring:
-        expected = np.concatenate([np.zeros_like(tensor.numpy()[:2]), expected[:2]])
+    current = [self.gdn.pool_rec, *self.gdn.pool_conv, self.gdn.pool_rp, self.idx.cache_pk,
+               self.idx.pool_ring, self.ckpt_ring, self.mla.cache_s,
+               self.model.seq_spec_h, self.model.seq_ckpt_h, *self.model.seq_ckpt_states[0]]
+    for original, tensor in zip(self.states, current):
+      expected = np.zeros_like(tensor.numpy())
+      # Recurrent/conv rows and checkpoints restore slot 1, row 0 of the saved slot-0 entry. Cache_pk/cache_s are KV-only here.
+      if any(tensor is t for t in (self.gdn.pool_rec, *self.gdn.pool_conv)): expected[2] = values[original][0]
       elif tensor is self.gdn.pool_rp:
-        expected = np.concatenate([np.zeros_like(tensor.numpy()[:replay_q(2)]), expected[:replay_q(2)]])
-      elif tensor is self.model.seq_spec_h or tensor is self.model.seq_ckpt_h:
-        expected = np.concatenate([np.zeros_like(tensor.numpy()[:tensor.shape[0]//2]), expected[:tensor.shape[0]//2]])
-      else:
-        expected = values[tensor]
+        R = replay_q(2)
+        expected[R:] = values[original][:R]
+      elif tensor is self.idx.pool_ring or tensor is self.ckpt_ring: expected[2:] = values[original][:2]
+      elif tensor is self.model.seq_spec_h: expected[6] = values[original][0]
+      elif tensor is self.model.seq_ckpt_h or any(tensor is t for t in self.model.seq_ckpt_states[0]): expected[1] = values[original][0]
       np.testing.assert_array_equal(tensor.numpy(), expected)
 
 
