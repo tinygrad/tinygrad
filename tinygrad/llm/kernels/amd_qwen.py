@@ -1360,7 +1360,8 @@ def q8_linear_parts(merged:Linear, x:Tensor, n:int) -> list[Tensor]|None:
   if not isinstance(devs, tuple) or not 16 < tokens <= 96 or K % 32 or not amd_custom_kernels_supported(devs): return None
   ne = merged.out_features // n
   P = round_up(tokens, 32)
-  tt = next(t for t in (96, 64, 32) if P % t == 0)
+  # (MERGED_TT: the token tile, default the rows' (a tile of 32 more workgroups, the weights dequantized once a tile))
+  tt = next(t for t in (getenv("MERGED_TT", 96), 96, 64, 32) if P % t == 0)
   outs = [Tensor.empty(tokens, ne, dtype=dtypes.float32, device=devs, axis=1) for _ in range(n)]
   fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=Q8_0, block_n=64, k_splits=1, rdna4=_wmma_rdna4(devs), n_out=n,
                           out_features=merged.out_features // len(devs), in_features=K)
