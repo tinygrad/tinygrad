@@ -118,6 +118,9 @@ spec_shared = PatternMatcher([
   # assembly instruction
   (UPat(Ops.INS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) >= 2 and isinstance(x.arg[1], DType)),
 
+  # researching
+  (UPat(Ops.ASM, name="x"), lambda x: True),
+
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE; a STORE's value matches its target's dtype
   (UPat(Ops.STORE, src=(UPat(name="t"), UPat(name="v")), allow_any_len=True),
    lambda t,v: None if matches_dtype(v, t.dtype) or v.dtype == weak_dtype(t.dtype) else False),

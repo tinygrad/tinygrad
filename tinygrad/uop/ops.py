@@ -118,7 +118,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   if op in GroupOp.PassthroughDType: return src[0].dtype
   if op in GroupOp.PromoteDType: return promo_dtype(src)
   match op:
-    case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
+    case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | Ops.ASM | \
          Ops.BACKEDGE | Ops.BARRIER | Ops.IF | Ops.ENDIF | Ops.NOOP | \
          Ops.REWRITE_ERROR | Ops.PYLITERAL:
       # always void
@@ -330,7 +330,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.BACKEDGE | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.ASM:
         return None
 
       # INS shape is always scalar, vector width is in the instruction encoding
@@ -1344,7 +1344,7 @@ class ProgramInfo:
                        tuple(sorted(dedup(ins))), target)
 
 # the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), bulk stores, and function references
-OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION}
+OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION, Ops.ASM}
 
 # the arg of CUSTOM_FUNCTION: an external function symbol and the dtype of the value it returns
 @dataclass(frozen=True)
