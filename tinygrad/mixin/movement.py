@@ -179,14 +179,12 @@ class MovementMixin:
       new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
     if prod(self.shape) != prod(new_shape):
       raise ValueError(f"size mismatch, can't reshape ({self.shape}) -> ({new_shape})")
-    ret = self._mop(Ops.RESHAPE, arg=new_shape)
-    return self if ret.shape == self.shape else ret
+    return self._mop(Ops.RESHAPE, arg=new_shape)
 
   def pad(self, arg:tuple[tuple[sint, sint] | None, ...]) -> Self:
     if self.ndim != len(arg):
       raise ValueError(f"{self.ndim=} != {len(arg)=}")
-    ret = self._mop(Ops.PAD, tuple((x[0], s+x[0]+x[1]) if x is not None else (0, s) for x, s in zip(arg, self.shape)))
-    return self if ret.shape == self.shape else ret
+    return self._mop(Ops.PAD, tuple((x[0], s+x[0]+x[1]) if x is not None else (0, s) for x, s in zip(arg, self.shape)))
 
   def shrink(self, arg: tuple[tuple[sint, sint] | None, ...]) -> Self:
     """
@@ -207,8 +205,7 @@ class MovementMixin:
     """
     if self.ndim != len(arg):
       raise ValueError(f"{self.ndim=} != {len(arg)=}")
-    ret = self._mop(Ops.SHRINK, arg=[(x[0], x[1]-x[0]) if x is not None else (0, s) for x, s in zip(arg, self.shape)])
-    return self if ret.shape == self.shape and all(x is None or isinstance(x[0], int) for x in arg) else ret
+    return self._mop(Ops.SHRINK, arg=[(x[0], x[1]-x[0]) if x is not None else (0, s) for x, s in zip(arg, self.shape)])
 
   def permute(self, order, *args) -> Self:
     """
@@ -227,7 +224,7 @@ class MovementMixin:
     order_arg = tuple(self._resolve_dim(x) for x in argfix(order, *args))
     if sorted(order_arg) != list(range(self.ndim)):
       raise RuntimeError(f"order is not a valid permutation, getting {order_arg}")
-    return self._mop(Ops.PERMUTE, arg=order_arg) if order_arg != tuple(range(self.ndim)) else self
+    return self._mop(Ops.PERMUTE, arg=order_arg)
 
   def flip(self, axis, *args) -> Self:
     """
@@ -290,8 +287,7 @@ class MovementMixin:
     return self.shrink(tuple([None if ns is None else (0, ns) for ns in argfix(shape, *args)]))
 
   def pad_to(self, shape, *args) -> Self:
-    ret = self._mop(Ops.PAD, tuple((0, s if ns is None else ns) for s,ns in zip(self.shape, argfix(shape, *args), strict=True)))
-    return self if ret.shape == self.shape else ret
+    return self._mop(Ops.PAD, tuple((0, s if ns is None else ns) for s,ns in zip(self.shape, argfix(shape, *args), strict=True)))
 
   def view(self, shape, *args) -> Self:
     """`.view` is an alias for `.reshape`."""

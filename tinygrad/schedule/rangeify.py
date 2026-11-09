@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import prod, dedup, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
+from tinygrad.helpers import prod, dedup, VIZ, MAX_KERNEL_BUFFERS, SPEC
 from tinygrad.helpers import get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, apply_movement_op
@@ -232,12 +232,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
 def flatten_bufferize(x:UOp):
   if len(x.src) == 2: return None
   ret = x.replace(src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:]))))
-  rngs = x.src[1:]
-  ret = ret.reshape(x.shape)
-  if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
-    sym_shape = tuple([r.src[0] if r.op is not Ops.CONST else 1 for r in rngs])
-    ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
-  return ret
+  return ret.reshape(x.shape).view_as(tuple(r.src[0] if r.op is not Ops.CONST else 1 for r in x.src[1:]))
 pm_flatten_bufferize = PatternMatcher([(UPat(Ops.STAGE, name="x"), flatten_bufferize)])
 
 def is_noop_after_dep(x:UOp) -> bool:
@@ -283,10 +278,7 @@ def add_buf(ctx:LocalAddBufferContext, buf:UOp):
 
 def debuf(slot:int, buf:UOp):
   param = UOp.param(slot, buf.dtype, buf.max_numel(), addrspace=buf.addrspace, device=buf.device)
-  ret = param.reshape(buf.max_shape)
-  # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
-  if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
-  return ret
+  return param.reshape(buf.max_shape).view_as(buf.shape)
 
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
   if after.addrspace == AddrSpace.LOCAL: return None
@@ -340,7 +332,7 @@ split_kernels = PatternMatcher([
 @rewrite_group(new_ctx=False)
 def get_kernel_graph(tsink:UOp) -> UOp:
   # convert movement ops to ranges
-  tsink = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
+  tsink = run_rangeify(tsink)
 
   # cleanups for speed and runability
   tsink = graph_rewrite(tsink,

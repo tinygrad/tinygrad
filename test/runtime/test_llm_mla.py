@@ -85,8 +85,8 @@ class TestMLA(unittest.TestCase):
       np.testing.assert_allclose(out_naive.numpy(), abs_np, atol=1e-4, rtol=1e-4,
         err_msg="Absorbed MLA should match naive MLA")
     block._init_state(x_norm)
-    prefill = block._attention(x_norm[:, :3], 0).realize()
-    decode = block._attention(x_norm[:, 3:], 3).realize()
+    prefill = block._attention(x_norm[:, :3], (0,)).realize()
+    decode = block._attention(x_norm[:, 3:], (3,)).realize()
     np.testing.assert_allclose(prefill.cat(decode, dim=1).numpy(), abs_np, atol=2e-5, rtol=2e-5)
 
   def test_fp8_projections(self):

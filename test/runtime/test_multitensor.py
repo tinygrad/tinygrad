@@ -1301,7 +1301,6 @@ class TestMultiFromUnrenderable(unittest.TestCase):
     np.testing.assert_equal(ll.numpy(), np.arange(100)+1)
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
-@unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiSetitem(unittest.TestCase):
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
 

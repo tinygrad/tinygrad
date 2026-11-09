@@ -113,6 +113,14 @@ class TestMainOnnxOps(TestOnnxOps):
     def gather_jit(x, indices): return Gather(x, indices)
     self.assertEqual([gather_jit(x, Tensor(idx)).tolist() for idx in indices_list], expected)
 
+  def test_reshape_graph_input_shape_changes(self):
+    model = self.helper_build_model("Reshape", {"x": np.zeros(6, np.float32), "shape": np.array([2, 3], np.int64)}, {}, ["y"])
+    with tempfile.NamedTemporaryFile() as tmp:
+      onnx.save(model, tmp.name)
+      runner = OnnxRunner(tmp.name)
+      for shape in [[2, 3], [3, 2]]:
+        self.assertEqual(runner({"x": np.zeros(6, np.float32), "shape": np.array(shape, np.int64)})["y"].shape, tuple(shape))
+
   def test_gather_jit_const_zero_index(self):
     # Gather with const index=0 (falsy in Python) should work with JIT cache
     from tinygrad import TinyJit

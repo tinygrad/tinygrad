@@ -155,7 +155,7 @@ class TestTensorParallel(unittest.TestCase):
       temperature = Tensor([0.0]).realize()
       for pos, expected in enumerate((0, 3)):
         x, start_pos = Tensor([[pos+1]]).realize(), Variable('start_pos', 0, 3).bind(pos)
-        self.assertEqual(parallel.forward(x, start_pos, temperature).item(), expected)
+        self.assertEqual(parallel.forward(x, temperature, start_pos).item(), expected)
       # the kv cache is sharded on its heads, the gated deltanet is copied to every device
       self.assertEqual(parallel.blk[1].cache_kv.uop.axis, 2)
       for t in (parallel.blk[0].attn_qkv.weight, parallel.blk[0].recurrent_state): self.assertEqual((t.device, t.uop.axis), (DEVICES, None))

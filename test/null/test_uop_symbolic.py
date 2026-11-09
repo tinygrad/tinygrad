@@ -499,6 +499,10 @@ class TestSymbolic(unittest.TestCase):
     c = a<10
     self.helper_test_variable(c & c.logical_not(), False, False, "False")
 
+  def test_bool_and_not_or_absorption(self):
+    a, b = Variable("a", 0, 10)<5, Variable("b", 0, 10)<5
+    self.helper_test_variable((a.logical_not() | b) & a, False, True, "((b<5)&(a<5))")
+
   def test_mod_factor_negative(self):
     self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, 0, 27, "((a+27)%28)")
     self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, "((a+27)%28)")

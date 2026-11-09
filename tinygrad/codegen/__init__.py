@@ -22,8 +22,8 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.schedule.multi import multi_pm
-from tinygrad.schedule.prepare import pm_mops, expand_bitcast
-from tinygrad.schedule.indexing import _stack_select, apply_movement_op
+from tinygrad.schedule.prepare import pm_mops, expand_bitcast, _mop_index
+from tinygrad.schedule.indexing import _stack_select
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
@@ -115,10 +115,10 @@ pm_expand_broadcast = pm_wmma_add+PatternMatcher([
 ])
 
 def index_lane(x:UOp, idx:tuple[UOp, ...]) -> UOp:
-  # x.index(*idx) with the index pushed through the movement ops, like _mop_index in pm_mops
-  while x.op in GroupOp.Movement and len(idx) == len(x.shape):
-    x, idx = x.src[0], apply_movement_op(x.op, x.src[0].shape, x.marg, idx)
-  return x.index(*idx)
+  # x.index(*idx) with the index pushed through the movement ops
+  ret = x.index(*idx)
+  while ret.op is Ops.INDEX and ret.src[0].op in GroupOp.Movement and (nxt:=_mop_index(ret.src[0], ret)) is not None: ret = nxt
+  return ret
 
 def do_devectorize(b:UOp):
   if b.shape == (): return None
@@ -149,8 +149,6 @@ devectorizer2 = pm_mops+PatternMatcher([
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # reshape of a single element shaped value to scalar is an index
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
-  # a scalar index into a one-lane STACK is its lane after the index, 0 is the only in-bounds index
-  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, src=(UPat.var("x"),)), UPat.var("i"))), lambda x,i: x.after(i) if i.shape == () else None),
   # a scalar index into a STACK selects its lanes after the STACK and the index, renderers only extract lanes at const indices
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.var("i"))),
    lambda a,i: _stack_select(i, list(a.src)).after(a, i) if i.shape == () and a.ndim == 1 else None),

@@ -100,8 +100,9 @@ spec_shared = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement|GroupOp.Defines|{Ops.STAGE, Ops.INDEX, Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS,
                                                 Ops.CONST, Ops.CAST, Ops.NOOP, Ops.STACK}),),
         allow_any_len=True), lambda: True),
-  # an AFTER can wrap a scalar value (e.g. a computed RANGE bound) to order it after effect ops
-  (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True, name="x"), lambda x: x.src[0].shape == () and x.src[0].dtype is not dtypes.void),
+  # an AFTER can wrap a scalar or shaped ALU value to order it after effect ops
+  (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True, name="x"),
+   lambda x: (x.src[0].shape == () or x.addrspace is AddrSpace.ALU) and x.src[0].dtype is not dtypes.void),
 
   # a CUSTOM_FUNCTION names an external function: the arg is a CustomFunction stating the return dtype
   (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, CustomFunction)),
@@ -167,7 +168,8 @@ spec_tensor = PatternMatcher([
   # REDUCE has arg=(op, num_axes), src[1:] are ranges after lowering
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"),
    lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in GroupOp.Reduce
-   and isinstance(x.arg[1], int) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
+   and isinstance(x.arg[1], int) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])
+   and not any(y.op is Ops.RANGE and y.axis_type is AxisType.DEVICE for y in x.src[1:])),
 
   # COPY carries the DEVICE range as src[1] when the target is multi-device
   (UPat(Ops.COPY, name="copy", src=(UPat(),), allow_any_len=True), lambda copy:

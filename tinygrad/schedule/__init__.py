@@ -33,14 +33,19 @@ def create_schedule(sched_sink:UOp) -> UOp:
     # build dependency graph: kernels and buffer-state barriers
     children: dict[UOp, list[UOp]] = {}
     in_degree: dict[UOp, int] = {}
-    writes: dict[UOp, list[tuple[UOp, tuple[UOp, ...]]]] = {}  # superseded state -> (AFTER, new kernels)
+    writes: dict[UOp, tuple[UOp, tuple[UOp, ...]]] = {}  # superseded state -> (AFTER, new kernels)
     reads: list[tuple[UOp, UOp, UOp]] = []  # (reader AFTER, reader kernel, buffer state read)
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       kernels, after_deps = _split_after(u)
-      prev_state = _unwrap_src(u.src[0])
-      prev_kernels = set(_split_after(prev_state)[0]) if prev_state.op is Ops.AFTER else set()
-      writes.setdefault(prev_state, []).append((u, tuple(k for k in kernels if k not in prev_kernels)))
+      read_states = {k:[st for s in (k.src[0].src[1:] if k.op is Ops.END else k.src[1:]) for st in _states(s)] for k in kernels}
+      # the prior state is the first of its source and the same-buffer states its kernels read that is not superseded yet
+      prior_states = [_unwrap_src(u.src[0]), *[st for k in kernels for st in read_states[k] if st.storage_base is u.storage_base]]
+      prev_state = next((st for st in prior_states if st not in writes), prior_states[0])
+      # writes to one buffer are a chain of states: at most one AFTER supersedes a state
+      if prev_state in writes: raise RuntimeError("sibling AFTERs detected in assign graph")
+      new_kernels = tuple(k for k in kernels if all(a.storage_base is not u.storage_base for a in children.get(k, [])))
+      writes[prev_state] = (u, new_kernels)
       # a buffer state is a node after its prior state, its joins and its kernels, so readers inherit its history
       in_degree.setdefault(u, 0)
       for st in ([prev_state] if prev_state.op is Ops.AFTER else []) + [*after_deps, *kernels]:
@@ -49,23 +54,21 @@ def create_schedule(sched_sink:UOp) -> UOp:
       for k in kernels:
         in_degree.setdefault(k, 0)
         if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
-        kernel_deps = k.src[0].src[1:] if k.op is Ops.END else k.src[1:]
-        read_states = [st for s in kernel_deps for st in _states(s)]
-        reads += [(u, k, st) for st in read_states]
+        reads += [(u, k, st) for st in read_states[k]]
         # RAW deps: a kernel runs after the states it reads or joins
-        for st in read_states + [st for s in after_deps for st in _states(s)]:
+        for st in read_states[k] + [st for s in after_deps for st in _states(s)]:
           if st.op is Ops.AFTER:
             children.setdefault(st, []).append(k)
             in_degree[k] += 1
     # WAR deps: a kernel reading buffer state S must run before another write that supersedes S. an AFTER only
-    # supersedes its immediate prior state; join members already present in that prior state are ordering deps, not writes
+    # supersedes its immediate prior state; a kernel already on an earlier state of the same buffer is an ordering dep, not a write
     for u, k, s in reads:
-      for a, write_kernels in writes.get(s, []):
-        if a is u: continue
-        for t in write_kernels:
-          if t is not k:
-            children.setdefault(k, []).append(t)
-            in_degree[t] += 1
+      a, write_kernels = writes.get(s, (u, ()))
+      if a is u: continue
+      for t in write_kernels:
+        if t is not k:
+          children.setdefault(k, []).append(t)
+          in_degree[t] += 1
 
   with cpu_profile(TracingKey("linearize schedule")):
     queue: deque[UOp] = deque(k for k,v in in_degree.items() if v == 0)
@@ -170,12 +173,10 @@ def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   from tinygrad.schedule.prepare import pm_mops
   from tinygrad.uop.symbolic import sym
   sink = graph_rewrite(ast, sym+pm_mops+pm_flatten_range+pm_simplify_ranges, init_ctx=MapCtx, name="simplify ranges in copy")
-  return call.replace(src=(sink,) + call.src[1:])
+  # the simplified body is kept only if it is a copy, any other kernel goes to codegen unchanged
+  return pm_copy_kernel.rewrite(call.replace(src=(sink,) + call.src[1:]))
 
-pm_copy_from_store = PatternMatcher([
-  # simplify copy kernels
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
-
+pm_copy_kernel = PatternMatcher([
   # lower copy kernels to bulk STOREs
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
@@ -183,7 +184,12 @@ pm_copy_from_store = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_store),
+])
 
+pm_copy_from_store = PatternMatcher([
+  # simplify copy kernels
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
+])+pm_copy_kernel+PatternMatcher([
   # if it wasn't copy, it currently can't be cross device
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
 ])
