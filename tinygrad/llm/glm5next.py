@@ -4087,6 +4087,10 @@ class Transformer:
     def rows(t:Tensor, start:UOp|int) -> Tensor: return t.shrink(((start, start+1),) + (None,)*(t.ndim-1))
     H = 2*(self.config.spec_drafts+1)
     pairs:list[tuple[Tensor, Tensor]] = [(rows(self.seq_spec_h, slot*H + hrow), rows(self._spec_h, 0))]
+    # (save, a prompt's (hrow 0): the rest of the rows of its first step zeroed, as a fresh model's: the MTP layer's catch-up reads them (its
+    # cache rows after the prompt's, the next steps' drafts), an earlier sequence's leftovers moved C6's greedy tokens after the warmup)
+    if save and (k:=self.config.spec_drafts) and getenv("SEQ_SPEC_CLEAR", 1):
+      pairs.append(((d:=self.seq_spec_h.shrink(((slot*H + 1, slot*H + k + 1), None))), d.zeros_like()))
     for b in self.blk:
       if isinstance(b, GatedDeltaNetBlock):
         S, SC = int(b.slot_rec[0].shape[0]), int(b.slot_conv[0][0].shape[0])
