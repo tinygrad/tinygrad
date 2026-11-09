@@ -86,6 +86,9 @@ class SeqEngine:
   # (an idle conversation used in the last STICKY s is held: its agent runs a tool, its next turn comes soon. a prompt of another conversation
   # doesn't make it lost (out of the caches and the stash), unless it's forced (it waited too long, see the server's STARVE))
   STICKY = getenv("SEQ_STICKY", 180.0)
+  # (a conversation used in the last PROTECT s is never lost, even forced: its agent's next turn would come back cold, a re-prefill that makes
+  # more turns wait and lose theirs (a box's death spiral). forced, only the held ones idle longer are)
+  PROTECT = getenv("SEQ_PROTECT", 60.0)
   def __init__(self, model):
     from tinygrad.llm.qwen4exp import REGION_ALIGN
     self.model, self.k, self.align = model, model.config.spec_drafts, REGION_ALIGN
@@ -102,6 +105,9 @@ class SeqEngine:
     self.times:dict[str, float|int] = {}  # (the time of the moves, stashes and restores: see the server's status line)
 
   def held(self, used:float) -> bool: return time.perf_counter() - used < self.STICKY
+  def droppable(self, used:float, force:bool) -> bool:
+    """a conversation used then may be lost: not held, or (forced) not used in the last PROTECT s"""
+    return not self.held(used) or (force and time.perf_counter() - used >= self.PROTECT)
 
   # ** regions and slots
   def _gaps(self, skip:Seq|None=None) -> list[tuple[int, int]]:
@@ -125,13 +131,16 @@ class SeqEngine:
       out.append(v:=idle.pop(0))
       free, slots = free + v.cap, slots + 1
     return out
-  def _stash_fits(self, victims:list[Seq]) -> bool:
-    """the held ones of victims fit in the stash, no held one there dropped for them (the ones not held, the residents' copies are)"""
-    if not (held:=[v for v in victims if self.held(v.used)]): return True
-    if not self.free_entries and not self.stashed and not any(v.host for v in held): return False
-    others = [t.host for t in self.seqs if t.host is not None and t not in victims] + [x for x in self.stashed if not self.held(x.used)]
+  def _stash_fits(self, victims:list[Seq], force:bool=False) -> bool:
+    """
+    the victims that may not be lost (held ones, forced: the ones used in the last PROTECT s) fit in the stash, only droppable ones there (and
+    the residents' copies) dropped for them
+    """
+    if not (keep:=[v for v in victims if not self.droppable(v.used, force)]): return True
+    if not self.free_entries and not self.stashed and not any(v.host for v in keep): return False
+    others = [t.host for t in self.seqs if t.host is not None and t not in victims] + [x for x in self.stashed if self.droppable(x.used, force)]
     chunks, entries = len(self.free_chunks) + sum(len(x.chunks) for x in others), len(self.free_entries) + len(others)
-    for v in held:
+    for v in keep:
       have = len(v.host.chunks) if v.host is not None else 0
       chunks -= max(0, self._chunks(v.n) - have)
       entries -= v.host is None
@@ -139,9 +148,9 @@ class SeqEngine:
   def _make_room(self, rows:int, slot:bool, keep:Seq|None=None, force:bool=False) -> bool:
     """
     `rows` free rows (in all) and (slot) a free slot: the idle sequences evicted for them (into the stash, the held ones first). checked before
-    anything is evicted: False (nothing evicted) if they can't be, or a held one would be lost (not forced)
+    anything is evicted: False (nothing evicted) if they can't be, or a held one would be lost (forced: one used in the last PROTECT s)
     """
-    if (victims:=self._victims(rows, slot, keep)) is None or (not force and not self._stash_fits(victims)): return False
+    if (victims:=self._victims(rows, slot, keep)) is None or not self._stash_fits(victims, force): return False
     self._evict_all(victims, force)
     return True
   def _evict_all(self, victims:list[Seq], force:bool):
@@ -165,7 +174,7 @@ class SeqEngine:
       for b in range(a, len(regs) + 1):
         if (total:=total + gaps[b]) >= need:
           key = (any(self.held(v.used) for v in victims), max((v.used for v in victims), default=0.0), sum(v.n for v in victims))
-          if (best is None or key < best[0]) and (force or self._stash_fits(victims)): best = (key, ends[a], victims)
+          if (best is None or key < best[0]) and self._stash_fits(victims, force): best = (key, ends[a], victims)
           break
         if b == len(regs) or regs[b].active: break
         victims.append(regs[b])
@@ -194,13 +203,16 @@ class SeqEngine:
     self.times["stashed"] = self.times.get("stashed", 0) + n - keep
     self.stashed.append(Stashed(s.tokens[:s.n], chunks, entry, s.used, s.hrow, s.ckpt))
     return True
-  def _drop_one(self, held:bool=True) -> Stashed|None:
-    """the least recently used copy in the stash out (a resident's first, then the ones not held, then (held) the held ones), None if none"""
+  def _drop_one(self, force:bool=False, every:bool=False) -> Stashed|None:
+    """
+    the least recently used copy in the stash out (a resident's first, then the ones not held, then (forced) the held ones not used in the
+    last PROTECT s; every: any), None if none
+    """
     residents = [t for t in self.seqs if t.host is not None]
     if residents:
       t = min(residents, key=lambda t: t.used)
       x, t.host = cast(Stashed, t.host), None
-    elif (cands:=[x for x in self.stashed if held or not self.held(x.used)]):
+    elif (cands:=[x for x in self.stashed if every or self.droppable(x.used, force)]):
       self.stashed.remove(x:=min(cands, key=lambda x: (self.held(x.used), x.used)))
       self.lost += 1
     else: return None
@@ -436,7 +448,7 @@ class SeqEngine:
     """the idle sequences and the stash dropped (their states may be wrong): every prompt is prefilled from the start"""
     self.version += 1
     for s in [s for s in self.seqs if not s.active]: self.seqs.remove(s)
-    while self._drop_one() is not None: pass
+    while self._drop_one(every=True) is not None: pass
 
   def fits(self, length:int) -> bool: return self._need(length) <= self.rows
   def pause(self, s:Seq):

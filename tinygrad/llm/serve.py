@@ -518,6 +518,7 @@ class Request:
     # (sequences) the tokens of its prompt in the caches or the stash, and the engine's version then; the version its take last failed at, when
     # (was_hit: it continued a kept conversation when the scheduler first looked: an agent's turn, even if that's lost since)
     self.hit, self.hit_v, self.tried, self.tried_at, self.was_hit = 0, -1, -1, 0.0, False
+    self.cold = False  # (sequences) its prefill is of more than COLD_TOKENS: a cold one, see schedule_seqs
     # (decoded in a slot: a copy of the model's checkpoint at the end of its prompt, see LLMServer.ckpt_keep)
     self.ckpt_buf: typing.Any = None
     self.ckpt_tokens: list[int] = []
@@ -1226,7 +1227,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # waited. a long one isn't behind short ones that keep coming forever: one waiting past STARVE_SEQ goes first, and takes a sequence even if
   # a held conversation is lost for it (see SeqEngine.STICKY))
   PREFILL_SLICE, MAX_STALL, DECODE_SHARE = getenv("PREFILL_SLICE", 13824), getenv("MAX_STALL", 0.3), getenv("DECODE_SHARE", 0.5)
-  AGING, STARVE_SEQ, TURN_WAIT = getenv("AGING", 0), getenv("SEQ_STARVE", 120.0), getenv("SEQ_TURN_WAIT", 10.0)
+  AGING, STARVE_SEQ, TURN_WAIT = getenv("AGING", 0), getenv("SEQ_STARVE", 600.0), getenv("SEQ_TURN_WAIT", 10.0)
+  COLD_MAX, COLD_TOKENS = getenv("SEQ_COLD_MAX", 1), getenv("SEQ_COLD_TOKENS", 16384)
   # (the gpus' clocks (AM: their gfx clock's cap, see AMIdleClocks.set_caps): a few users decoding at the full clocks (a user's tokens fast),
   # more at less (the energy a token: ~0.85 J at 2000 MHz on 6x 7900 XTX, ~1.2 J at full), a prefill at a cap it isn't slower at. switched
   # CLOCK_HOLD s apart at most)
@@ -1279,8 +1281,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             if r.hit_v != eng.version: r.hit, r.hit_v = eng.cached(prompt(r), touch=True), eng.version
             r.was_hit = r.was_hit or r.hit > 0
           self.stats.add("cached", time.perf_counter() - t0)
+          # (cold ones: SEQ_COLD_MAX being prefilled at most (a cold prefill of an agent's conversation is seconds: many at once and the warm
+          # turns wait behind them, starve, lose theirs and come back cold))
+          cold = sum(r.cold for r in filling.values()) >= self.COLD_MAX
           cands += [(not starving(r), (r.st if starving(r) else len(r.ids) + len(r.generated) - r.hit - self.AGING*(now - r.st)), 1, r)
-                    for r in pending if r.tried != eng.version or now - r.tried_at > 1.0]
+                    for r in pending if (r.tried != eng.version or now - r.tried_at > 1.0) and
+                    not (cold and len(r.ids) + len(r.generated) - r.hit > self.COLD_TOKENS)]
         for _, _, _, c in sorted(cands, key=lambda x: x[:3]):
           if isinstance(c, Seq):
             job = c
@@ -1299,7 +1305,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           pending.remove(c)
           job, start, restore = got
           if not c.generated: c.cache_start, c.queued = start, time.perf_counter() - c.st
-          c.fill = (ids, start, restore)
+          c.fill, c.cold = (ids, start, restore), len(ids) - start > self.COLD_TOKENS
           filling[job] = c
           self.miss_log(ids, start)
           break
