@@ -87,6 +87,7 @@ def _reg(shape:tuple[int, ...], value:float, dep:UOp|None=None) -> UOp:
 
 # (the most rows the split-K gemm of tiles of 32 rows takes (batched decoding, the smallest prefill chunk), see q8_linear)
 SKINNY_ROWS = 256
+SKINNY_WG = getenv("SKINNY_WG", 192)
 
 def unwrap_storage_views(u:UOp) -> UOp:
   # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
@@ -1144,7 +1145,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
 @functools.cache
 def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
                     out_features:int=0, in_features:int=0, ggml_type:int=Q8_0, block_n:int=128, k_splits:int=1, rdna4:bool=False,
-                    rows:int=0, n_out:int=1) -> UOp:
+                    rows:int=0, n_out:int=1, wtile:bool=False) -> UOp:
   # n_out: the outputs are n_out tensors (the first n_out sources), of the weight's rows in n_out equal parts (projections of the same input,
   # their weights adjacent: one kernel). a workgroup's outputs are in one of them
   srcs = (out, raw, x, *hc)
@@ -1179,6 +1180,7 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
     next(gs for gs in (2, 1) if groups % gs == 0 and (block_n*gs % 128 == 0 or gs == 1) and
                         (token_tile * (32*gs + 8) <= 128 * 72 if rdna4 else (token_tile+max(block_n, 128//gs))*(32*gs+8)*2 <= 32768))
   stage_rows = max(streams*block_n, 128//GS)  # full waves stage weights, including unused rows when block_n=64 and GS=1
+  assert not wtile or (not hc and stage_rows == block_n and ggml_type == Q8_0), "tile-major weights: a stage's rows are the block's"
   assert rdna4 or (token_tile+stage_rows)*(32*GS+8)*2 <= 32768
   gr = UOp.range(groups // GS, 4, AxisType.LOOP)
   g = gr * GS + split*groups
@@ -1202,7 +1204,8 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
       if ggml_type == F32T:
         out += [raw.reshape(K*k_splits, N)[(gg + gi) * 32 + i, row].load() for i in range(32)]
         continue
-      base = (row * groups*k_splits + gg + gi) * 17
+      # (wtile: the weights tile-major: a stage's block_n rows x GS blocks contiguous, the threads' blocks one after the other)
+      base = ((((output_block*(groups*k_splits//GS) + gg//GS)*GS + gi)*block_n + wr) if wtile else (row * groups*k_splits + gg + gi)) * 17
       out += [raw[base + w].load() for w in range(17)]
     return out
   def pf_stores(vals:list[UOp], bx:UOp, bw:UOp) -> list[UOp]:
@@ -1251,7 +1254,7 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
         st += [lds_w[wr, gi * 32 + w * 4 + i].store((((words[w] >> (8*i)) & 255).cast(dtypes.int32) - 32).cast(dtypes.float16) * scales[w // 4])
                for w in range(8) for i in range(4)]
         continue
-      base = (row * groups*k_splits + g + gi) * 17
+      base = ((((output_block*(groups*k_splits//GS) + g//GS)*GS + gi)*block_n + wr) if wtile else (row * groups*k_splits + g + gi)) * 17
       scale = raw[base].load().cast(dtypes.uint16).bitcast(dtypes.float16)
       # the bytes to halves without floats (as F16_FAST_CVT): with the sign bit flipped a byte is the mantissa of the half 1024+u, minus 1152 the
       # signed byte (exact), times the scale rounds once: the same halves
@@ -1415,7 +1418,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     groups, blocks = in_features // 32, (P // 32) * round_up(local_out, 64) // 64
     ks = [s for s in (1, 2, 4, 8, 16) if groups % s == 0 and (s == 1 or groups // s >= 8) and
           (layer.ggml_type != Q6_K or (groups // s) % 8 == 0)]
-    ksplits = next((s for s in ks if blocks * s >= 192), ks[-1])
+    # (SKINNY_WG: the workgroups the splits aim for)
+    ksplits = next((s for s in ks if blocks * s >= SKINNY_WG), ks[-1])
     # (a tile of up to 96 rows: the weights dequantized in LDS once for them, 3 tiles of the 192 rows of 48 sequences of 3 drafts: -2% a step)
     tt = next(t for t in (96, 64, 32) if P % t == 0)
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, block_n=64, k_splits=ksplits, rdna4=rdna4)
