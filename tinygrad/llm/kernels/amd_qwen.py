@@ -2123,9 +2123,10 @@ def _ring_ag_kernel(out:UOp, x:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flag
     r = UOp.range(R, rid, AxisType.LOOP)
     at_round(r)
     at = [(e, e < n) for e in [((ch*R + r)*EP + i)*32 + lane for i in range(EP)]]
-    vals = [x.after(*dep, r)[0, e.valid(v)].load() for e, v in at] if first else \
+    # (x and out of any 4 byte dtype: their words as they are, bitcast here, not by copies of them)
+    vals = [x.after(*dep, r)[0, e.valid(v)].load().bitcast(dtypes.uint32) for e, v in at] if first else \
       recv(UOp.group(*dep, r), flags, inbox, s, at, mult, k if isinstance(k, int) else 1)
-    st = [out.after(*dep)[(s*n + e).valid(v)].store(w) for (e, v), w in zip(at, vals)]
+    st = [out.after(*dep)[(s*n + e).valid(v)].store(w.bitcast(out.dtype)) for (e, v), w in zip(at, vals)]
     return end_round(UOp.group(*st, send(dep, inbox_next, flags_next, s, at, vals, mult)) if not last else UOp.group(*st), r)
   # (the steps between the first and the last a loop, see _ring_rs_q8_kernel)
   prev = step(0, [], 10, True, False)
@@ -2233,8 +2234,9 @@ def ring_all_gather_words(x:Tensor) -> Tensor|None:
   if n > RING_MAXW: return None
   G, R, EP = _ring_rounds(-(-n // 32), 32, ring_g())
   if not _ring_fits(G, R, R*EP*32) or (mb:=ring_mailbox(devs)) is None: return None
-  out = Tensor.empty(len(devs)*n, dtype=dtypes.uint32, device=devs)
-  return _ring_queued(Tensor.custom_kernel(out, x.bitcast(dtypes.uint32).contiguous(), mb.counter, mb.inbox, mb.inbox_next, mb.flags,
+  # (out of x's dtype: no bitcast copies of x and out (a kernel each))
+  out = Tensor.empty(len(devs)*n, dtype=x.dtype, device=devs)
+  return _ring_queued(Tensor.custom_kernel(out, x.contiguous(), mb.counter, mb.inbox, mb.inbox_next, mb.flags,
                                           mb.flags_next, mb.dbg, fxn=functools.partial(_ring_ag_kernel, N=len(devs), n=n, G=ring_g()))[0])
 
 def ring_reduce_scatter_q8(p:Tensor, size:int, shape:tuple[int, ...]|None=None, axis:int=0) -> Tensor|None:
