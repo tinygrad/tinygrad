@@ -68,4 +68,32 @@ class TestGHCPrefill(unittest.TestCase):
       with self.subTest(split_k_iteration=iteration):
         np.testing.assert_allclose(actual, expected, rtol=.002, atol=float(np.abs(expected).max())*1e-4)
 
+  def test_tile16(self):
+    # q8_gemm's m_rows (the tiles of the first rows alone) in tiles of 16: the same bits on those rows as all of them in tiles of 32
+    if not amd_custom_kernels_supported("AMD"): self.skipTest("requires AMD custom kernels")
+    import functools
+    from tinygrad.llm.kernels.amd_qwen import _q8_gemm_kernel
+    rng = np.random.default_rng(5)
+    C, D, K, T = 4, 2560, 320, 32
+    def q8raw(rows, k):
+      scales = rng.uniform(.001, .01, size=(rows, k//32, 1)).astype(np.float16)
+      quant = rng.integers(-127, 128, size=(rows, k//32, 32), dtype=np.int8)
+      return Tensor(np.concatenate((scales.view(np.uint8), quant.view(np.uint8)), axis=-1).copy().view(np.uint16).ravel()).realize()
+    up, down = q8raw(C*D, K), q8raw(K, C*D)
+    xh = Tensor(rng.normal(size=(T, C*D)).astype(np.float16)).realize()
+    lo = Tensor(rng.normal(size=(T, K)).astype(np.float16)).realize()
+    xn = Tensor(rng.normal(size=(T, C*D)).astype(np.float32)).realize()
+    def run(tt, mr):
+      fd = functools.partial(_q8_gemm_kernel, token_tile=tt, block_n=64, k_splits=32, out_features=K, in_features=C*D, m_rows=mr)
+      d = Tensor.custom_kernel(Tensor.empty(32*T, K, dtype=dtypes.float32), down, xh, fxn=fd)[0].numpy().reshape(32, T, K)
+      fm = functools.partial(_q8_gemm_kernel, token_tile=tt, block_n=32, m_rows=mr)
+      m = Tensor.custom_kernel(Tensor.empty(T, D, dtype=dtypes.float32), up, lo, xn, fxn=fm)[0].numpy()
+      return d, m
+    d0, m0 = run(32, 0)
+    for R in (4, 16, 24):
+      d1, m1 = run(16 if R <= 16 else 32, R)
+      with self.subTest(R=R):
+        np.testing.assert_array_equal(d1[:, :R].view(np.uint32), d0[:, :R].view(np.uint32))
+        np.testing.assert_array_equal(m1[:R].view(np.uint32), m0[:R].view(np.uint32))
+
 if __name__ == "__main__": unittest.main()
