@@ -12,7 +12,7 @@ from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custo
   kda_replay, tables_ready, MOE_TILE, I8_WMMA_QUANTS, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, \
   Q8_0, IQ3_S, q8_embed, weighted_sum, ghc_decode_mix, rows_gather, rows_scatter, seq_scores, seq_index, kv_q8_pack, kv_q4_pack, \
   qsa_decode_attention, FLAG_LANE, DEC_LANE, flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, \
-  few_out_rows, index_scores, merged_linear, q8_linear_parts, after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus, \
+  few_out_rows, index_scores, fwht, merged_linear, q8_linear_parts, after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus, \
   picks_local, pool_window, seq_index_split
 from tinygrad.llm.gguf import gguf_parse, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm.direct_read import DirectFile, read_many, close_rings
@@ -334,6 +334,8 @@ SEQ_SPLIT_MAX = 128  # (the most real rows a device)
 # materialized in float (2 kernels less a sublayer): the mix's epilogue and the activation's kernel round differently (FMA, rcp: ulps)
 HC_REAL = getenv("HC_REAL", 0)
 GDN_MERGED, HC_NORM_REAL = getenv("GDN_MERGED", 0), getenv("HC_NORM_REAL", 0)
+# QSA_ROT_FWHT: QSA_KV_ROT's rotations (keys, values, queries, the output back) by a fast Walsh-Hadamard kernel (fwht), not 256x256 matmuls
+QSA_ROT_FWHT = getenv("QSA_ROT_FWHT", 0)
 def _split_rows() -> int: return round_up(_seq_split[0], 32)
 def _split_real(x:Tensor) -> Tensor:
   """(B, N*P, ...) split padded rows: the real rows (B, N*R, ...), split"""
@@ -1377,6 +1379,9 @@ class QSABlock(TransformerBlock):
     """
     if (rot:=self._rot) is not None:
       # (QSA_KV_ROT: the cache's keys and values rotated: the queries alike, the output back)
+      if QSA_ROT_FWHT and (sign:=getattr(self, "_rot_sign", None)) is not None:
+        out = self._attend_cache(fwht(q, sign) if QSA_KV_ROT & 1 else q, cache, picks, bases, compact, **kw)
+        return fwht(out, sign, transpose=True) if QSA_KV_ROT & 2 else out
       out = self._attend_cache(q.float() @ rot if QSA_KV_ROT & 1 else q, cache, picks, bases, compact, **kw)
       return out @ rot.T if QSA_KV_ROT & 2 else out
     return self._attend_cache(q, cache, picks, bases, compact, **kw)
@@ -1450,7 +1455,9 @@ class QSABlock(TransformerBlock):
     if (rot:=self._rot) is not None:
       hd = self.config.head_dim
       k, v = kv[..., :hd], kv[..., hd:]
-      kv = (k.float() @ rot if QSA_KV_ROT & 1 else k).cat(v.float() @ rot if QSA_KV_ROT & 2 else v, dim=-1)
+      if QSA_ROT_FWHT and (sign:=getattr(self, "_rot_sign", None)) is not None:
+        kv = (fwht(k, sign) if QSA_KV_ROT & 1 else k).cat(fwht(v, sign) if QSA_KV_ROT & 2 else v, dim=-1)
+      else: kv = (k.float() @ rot if QSA_KV_ROT & 1 else k).cat(v.float() @ rot if QSA_KV_ROT & 2 else v, dim=-1)
     return {4: kv_q4_pack, 8: kv_q8_pack}[b](kv) if (b:=self._kv_bits) != 16 else kv.cast(self.cache_k.dtype)
   @property
   def _rot(self) -> Tensor|None:
@@ -1478,6 +1485,7 @@ class QSABlock(TransformerBlock):
         sign = [1 if random.Random(hd + i).random() < 0.5 else -1 for i in range(hd)]
         m = [[sign[i] * (-1)**bin(i & j).count("1") * hd**-0.5 for j in range(hd)] for i in range(hd)]
         self._rot_m = Tensor(m, dtype=dtypes.float32, device="CPU").to(x.device).contiguous().realize()
+        if QSA_ROT_FWHT: self._rot_sign = Tensor([float(s) for s in sign], dtype=dtypes.float32, device="CPU").to(x.device).realize()
       self.freqs_cis = _freqs(self.config.rope_dim, self.config.max_context, self.config.rope_theta, x.device, self.config.yarn)
     if self.indexer is not None: self.indexer._init_state(x)
 

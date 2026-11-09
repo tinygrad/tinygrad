@@ -72,6 +72,35 @@ def _lane_xor(val:UOp, mask:int) -> UOp:
   else: op = f"__builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | mask<<10})"
   return _cfn(False, src=(val,), arg=(f"__builtin_bit_cast(float, {op})", dtypes.float))
 
+@functools.cache
+def _fwht_kernel(out:UOp, x:UOp, sign:UOp, *, pre:bool) -> UOp:
+  # out (n, D) = x times a Hadamard matrix of random signs (QSA_KV_ROT's rotation m[i][j] = sign[i]*(-1)^popcount(i&j)/sqrt(D)): pre, x @ m (the
+  # signs on the inputs), else x @ m.T (on the outputs). a wave a row, a lane its elements lane+32e: the butterflies of the low 5 bits across
+  # the lanes (lane_xor), of the others in registers. D log D adds, not a D x D matmul (other roundings than one: QSA_ROT_FWHT)
+  D = cast(int, out.shape[-1])
+  out, x = out.reshape(-1, D), x.reshape(-1, D)
+  n, E = cast(int, out.shape[0]), D // WARP_SIZE
+  assert D & (D - 1) == 0 and E >= 1
+  r, lane = UOp.range(n, 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  vals = [x[r, e*WARP_SIZE + lane].load().float() for e in range(E)]
+  if pre: vals = [v * sign[e*WARP_SIZE + lane].load() for e, v in enumerate(vals)]
+  for b in range(5):
+    m, hi = 1 << b, (lane & (1 << b)).ne(0)
+    vals = [hi.where(o - v, v + o) for v, o in zip(vals, [_lane_xor(v, m) for v in vals])]
+  for b in range(E.bit_length() - 1):
+    m = 1 << b
+    vals = [vals[e ^ m] - vals[e] if e & m else vals[e] + vals[e ^ m] for e in range(E)]
+  vals = [v * D**-0.5 if pre else v * D**-0.5 * sign[e*WARP_SIZE + lane].load() for e, v in enumerate(vals)]
+  return UOp.group(*[out[r, e*WARP_SIZE + lane].store(v.cast(out.dtype)) for e, v in enumerate(vals)]).end(r, lane).sink(
+    arg=KernelInfo(name="fwht", opts_to_apply=()))
+
+def fwht(x:Tensor, sign:Tensor, transpose:bool=False) -> Tensor:
+  """x (..., D) @ m (transpose: @ m.T), m = diag(sign) H / sqrt(D) (H the Hadamard matrix of D, a power of two), in float"""
+  # (every device its part of x, whatever axis it's split on: the kernel takes its rows of D)
+  xf = x.float().contiguous()
+  out = Tensor.empty(*xf.shape, dtype=dtypes.float32, device=x.device, axis=xf.uop.axis if isinstance(x.device, tuple) else None)
+  return Tensor.custom_kernel(out, xf, sign.float().contiguous(), fxn=functools.partial(_fwht_kernel, pre=not transpose))[0]
+
 def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
     if val.op is Ops.INDEX and val.addrspace == AddrSpace.REG: val = val.load()
