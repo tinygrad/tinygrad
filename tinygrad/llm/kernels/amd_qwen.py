@@ -117,6 +117,8 @@ def _reg(shape:tuple[int, ...], value:float, dep:UOp|None=None) -> UOp:
 # (the most rows the split-K gemm of tiles of 32 rows takes (batched decoding, the smallest prefill chunk), see q8_linear)
 SKINNY_ROWS = 256
 SKINNY_WG, HC_KS = getenv("SKINNY_WG", 192), getenv("HC_KS", 32)
+# TILE16: batched decoding's hyper-connection gemms (a device's few rows: 4-16 of a tile of 32) of its real rows' tiles alone, in tiles of 16
+TILE16 = getenv("TILE16", 0)
 
 def unwrap_storage_views(u:UOp) -> UOp:
   # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
@@ -1174,7 +1176,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
 @functools.cache
 def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
                     out_features:int=0, in_features:int=0, ggml_type:int=Q8_0, block_n:int=128, k_splits:int=1, rdna4:bool=False,
-                    rows:int=0, n_out:int=1, wtile:bool=False, pfd:int=0) -> UOp:
+                    rows:int=0, n_out:int=1, wtile:bool=False, pfd:int=0, m_rows:int=0) -> UOp:
   # n_out: the outputs are n_out tensors (the first n_out sources), of the weight's rows in n_out equal parts (projections of the same input,
   # their weights adjacent: one kernel). a workgroup's outputs are in one of them
   srcs = (out, raw, x, *hc)
@@ -1193,12 +1195,16 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   # (x of fewer rows than the tiles: not padded, the rows past them read its last one)
   if (xrows:=cast(int, x.numel()) // K) < M: rows = min(rows or xrows, xrows)
   x = x.reshape(xrows, K)
-  assert block_n in ((32, 64) if hc else (64, 128)) and token_tile >= 32 and token_tile % 32 == 0 and M % token_tile == 0
+  # (token_tile 16: a tile of the tensor cores' 16 rows, two waves (along the outputs) a workgroup: a device's few rows of batched decoding)
+  assert block_n in ((32, 64) if hc else (64, 128)) and token_tile in (16, *range(32, 1 << 16, 32)) and M % token_tile == 0
   assert not hc or (len(hc) == 1 and hc[0].shape == (M, 4*N) and k_splits == 1 and ggml_type == Q8_0)
-  OW, TW, OT, groups = 2, 2, streams*block_n // 32, K // (32*k_splits)
+  OW, TW, OT, groups = 2, 1 if token_tile == 16 else 2, streams*block_n // 32, K // (32*k_splits)
+  NT = 32 * OW * TW  # threads a workgroup
   TT = token_tile // (16 * TW)  # token tiles of a wave
-  # Outputs past N read the last weight row and aren't stored.
-  token_block, output_block = UOp.range(M // token_tile, 0, AxisType.GLOBAL), UOp.range(round_up(N, block_n) // block_n, 1, AxisType.GLOBAL)
+  # Outputs past N read the last weight row and aren't stored. (m_rows: the tiles of the first m_rows rows alone, the others not computed:
+  # their outputs not written)
+  m_tiles = round_up(min(m_rows, M), token_tile) // token_tile if m_rows else M // token_tile
+  token_block, output_block = UOp.range(m_tiles, 0, AxisType.GLOBAL), UOp.range(round_up(N, block_n) // block_n, 1, AxisType.GLOBAL)
   split = UOp.range(k_splits, 2, AxisType.GLOBAL)
   lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(OW * TW, 3, axis_type=AxisType.LOCAL)
   col, half = lane % 16, lane // 16
@@ -1206,9 +1212,9 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   # GS groups of 32 inputs a stage (a barrier a stage)
   # (the hyper-connections' mix of a few rows (decoding's): two groups a stage, the next group's weights prefetched)
   GS = next(gs for gs in (2 if M <= 64 else 1, 1) if groups % gs == 0) if hc else \
-    next(gs for gs in (2, 1) if groups % gs == 0 and (block_n*gs % 128 == 0 or gs == 1) and
-                        (token_tile * (32*gs + 8) <= 128 * 72 if rdna4 else (token_tile+max(block_n, 128//gs))*(32*gs+8)*2 <= 32768))
-  stage_rows = max(streams*block_n, 128//GS)  # full waves stage weights, including unused rows when block_n=64 and GS=1
+    next(gs for gs in (2, 1) if groups % gs == 0 and (block_n*gs % NT == 0 or gs == 1) and
+                        (token_tile * (32*gs + 8) <= 128 * 72 if rdna4 else (token_tile+max(block_n, NT//gs))*(32*gs+8)*2 <= 32768))
+  stage_rows = max(streams*block_n, NT//GS)  # full waves stage weights, including unused rows when block_n=64 and GS=1
   assert not wtile or (not hc and stage_rows == block_n and ggml_type == Q8_0), "tile-major weights: a stage's rows are the block's"
   assert rdna4 or (token_tile+stage_rows)*(32*GS+8)*2 <= 32768
   gr = UOp.range(groups // GS, 4, AxisType.LOOP)
@@ -1225,13 +1231,13 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   dist = pfd if prefetch and pfd > 1 and (groups // GS) % pfd == 0 and groups // GS > pfd else 0
   def pf_loads(gg:UOp) -> list[UOp]:
     out:list[UOp] = []
-    for k in range((token_tile * 4 * GS + 127) // 128):
-      e = tid + k * 128
+    for k in range((token_tile * 4 * GS + NT-1) // NT):
+      e = tid + k * NT
       r, c = (e // (4*GS)).minimum(token_tile - 1), e % (4*GS)
       xr = token_block * token_tile + r
       out += [x[xr.minimum(rows-1) if rows else xr, gg * 32 + c * 8 + i].load() for i in range(8)]
-    for bi in range(stage_rows * GS // 128):
-      gi, wr = (bi*128 + tid) // stage_rows, (bi*128 + tid) % stage_rows
+    for bi in range(stage_rows * GS // NT):
+      gi, wr = (bi*NT + tid) // stage_rows, (bi*NT + tid) % stage_rows
       row = (output_block * block_n + (wr % block_n if hc else wr)).minimum(N-1) + (wr // block_n * N if hc else 0)
       if ggml_type == F32T:
         out += [raw.reshape(K*k_splits, N)[(gg + gi) * 32 + i, row].load() for i in range(32)]
@@ -1242,13 +1248,13 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
     return out
   def pf_stores(vals:list[UOp], bx:UOp, bw:UOp) -> list[UOp]:
     out, j = [], 0
-    for k in range((token_tile * 4 * GS + 127) // 128):
-      e = tid + k * 128
+    for k in range((token_tile * 4 * GS + NT-1) // NT):
+      e = tid + k * NT
       r, c = (e // (4*GS)).minimum(token_tile - 1), e % (4*GS)
       out += [bx[r.valid(e < token_tile * 4 * GS), c * 8 + i].store(vals[j + i]) for i in range(8)]
       j += 8
-    for bi in range(stage_rows * GS // 128):
-      gi, wr = (bi*128 + tid) // stage_rows, (bi*128 + tid) % stage_rows
+    for bi in range(stage_rows * GS // NT):
+      gi, wr = (bi*NT + tid) // stage_rows, (bi*NT + tid) % stage_rows
       if ggml_type == F32T:
         out += [bw[wr, gi * 32 + i].store(vals[j + i].cast(dtypes.half)) for i in range(32)]
         j += 32
@@ -1269,14 +1275,14 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
     lds_x, lds_w = lds_x.after(first, gr), lds_w.after(first, gr)
   else:
     st = []
-    for k in range((token_tile * 4 * GS + 127) // 128):
-      e = tid + k * 128
+    for k in range((token_tile * 4 * GS + NT-1) // NT):
+      e = tid + k * NT
       r, c = (e // (4*GS)).minimum(token_tile - 1), e % (4*GS)
       xr = token_block * token_tile + r
       st += [lds_x[r.valid(e < token_tile * 4 * GS), c * 8 + i].store(x[xr.minimum(rows-1) if rows else xr, g * 32 + c * 8 + i].load())
              for i in range(8)]
-    for bi in range(stage_rows * GS // 128):
-      gi, wr = (bi*128 + tid) // stage_rows, (bi*128 + tid) % stage_rows
+    for bi in range(stage_rows * GS // NT):
+      gi, wr = (bi*NT + tid) // stage_rows, (bi*NT + tid) % stage_rows
       row = (output_block * block_n + (wr % block_n if hc else wr)).minimum(N-1) + (wr // block_n * N if hc else 0)
       if ggml_type == Q6_K:
         # (Q6_K: a group's 32 weights of a block of 256, their 6 bit values less 32 times the scale of their half (16), in half as the f16 path's)
@@ -1424,8 +1430,11 @@ def q8_linear_parts(merged:Linear, x:Tensor, n:int) -> list[Tensor]|None:
   return [r.reshape(*x.shape[:-1], ne) for r in res]
 
 def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False, half_out:bool=False,
-              rows:int=0) -> Tensor:
-  """rows (split): every device's real rows, its first ones (batched decoding's, the others padding): the others aren't read"""
+              rows:int=0, m_rows:int=0) -> Tensor:
+  """
+  rows (split): every device's real rows, its first ones (batched decoding's, the others padding): the others aren't read. m_rows (split,
+  TILE16): the outputs of the tiles of every device's first m_rows rows alone (the others' not computed: garbage), in tiles of 16 if they fit
+  """
   assert layer.ggml_type in QUANT_SIZES
   tokens = int(x.numel()) // layer.in_features
   out_features, in_features = layer.out_features, int(x.uop.shard_shape[-1])
@@ -1487,9 +1496,11 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       # (HC_KS: the splits of a few rows a device (batched decoding's hyper-connection down projection))
       ksplits = next(s for s in (HC_KS if local_rows <= 64 else 16 if local_rows <= 512 else 8, 8, 4, 2, 1) if in_features % (32*s) == 0)
       out_shape = (ksplits*tokens, out_features)
+    mr = m_rows if TILE16 and split and not rdna4 and 0 < m_rows < local_rows else 0
+    if mr and mr <= 16: tt = 16
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=rdna4,
                             block_n=128 if rdna4 or (local_out % 128 == 0 and ksplits == 1 and tt == 128) else 64, k_splits=ksplits,
-                            rows=rows if split and 0 < rows < local_rows else 0)
+                            rows=rows if split and 0 < rows < local_rows else 0, m_rows=mr)
     if q6_rows: out_shape = (splits*P, out_features)
     srcs = (x.cast(dtypes.float16).contiguous(),)
   elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None and not (tokens <= DECODE_MULTI and in_features >= 1024):
@@ -3751,10 +3762,11 @@ def ghc_prefill_norm(xs:Tensor, w:Tensor, winj:Tensor, count:int, eps:float, row
 
 def _q8_gemm_2d(out:UOp, *srcs:UOp, **kw) -> UOp: return _q8_gemm_kernel(out.reshape(-1, out.shape[-1]), *srcs, **kw)
 
-def ghc_prefill_mix(lo:Tensor, raw:Tensor, xn:Tensor, shape:tuple[int, ...]|None=None, rows:int=0) -> Tensor:
+def ghc_prefill_mix(lo:Tensor, raw:Tensor, xn:Tensor, shape:tuple[int, ...]|None=None, rows:int=0, m_rows:int=0) -> Tensor:
   """
   shape: the output's (rows its second axis, split on it: made so, a view of the (rows, D) one isn't a buffer: a copy of it). fewer rows a
-  device than lo's: its first ones. rows: a device's rows of lo and xn past them aren't read
+  device than lo's: its first ones. rows: a device's rows of lo and xn past them aren't read. m_rows (TILE16): the tiles of a device's first
+  m_rows rows alone (the other rows of the output not written), tiles of 16 if they fit
   """
   # Four stream projections in each workgroup: sigmoid and weighted mean stay in registers, not a full-size gate tensor.
   T, CD = cast(tuple[int, int], xn.shape)
@@ -3762,8 +3774,10 @@ def ghc_prefill_mix(lo:Tensor, raw:Tensor, xn:Tensor, shape:tuple[int, ...]|None
   sharded = token_sharded(xn)
   if shape is not None:
     out = Tensor.empty(*shape, dtype=dtypes.float32, device=xn.device, axis=len(shape) - 2 if sharded else None)
+    mr = m_rows if TILE16 and not _wmma_rdna4(xn.device) and 0 < m_rows < T // (len(cast(tuple, xn.device)) if sharded else 1) else 0
     return Tensor.custom_kernel(out, raw, lo.half().contiguous(), xn,
-                                fxn=functools.partial(_q8_gemm_2d, token_tile=32, block_n=32, rdna4=_wmma_rdna4(xn.device), rows=rows))[0]
+                                fxn=functools.partial(_q8_gemm_2d, token_tile=16 if mr and mr <= 16 else 32, block_n=32,
+                                                      rdna4=_wmma_rdna4(xn.device), rows=rows, m_rows=mr))[0]
   out = Tensor.empty(T, CD//4, dtype=dtypes.float32, device=xn.device, axis=0 if sharded else None)
   ret = Tensor.custom_kernel(out, raw, lo.half().contiguous(), xn,
                              fxn=functools.partial(_q8_gemm_kernel, token_tile=32, block_n=32, rdna4=_wmma_rdna4(xn.device)))[0]

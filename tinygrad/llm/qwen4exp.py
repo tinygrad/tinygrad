@@ -708,14 +708,15 @@ class GatedResidual:
       xn = (xs.float().rmsnorm(eps=self.eps) * self.norm["weight"].reshape(self.count, self.dim)).flatten(2).contiguous()
       xhalf, inj = xn.reshape(rows, -1).half().contiguous(), self.inject(xn)
     R_real = _seq_split[0] if real else 0
-    lo = q8_linear(self.down, xhalf, split=True, rows=R_real) * (1 / self.count)
+    # (m_rows: batched decoding's real rows a device, the tiles of the others not computed (TILE16))
+    lo = q8_linear(self.down, xhalf, split=True, rows=R_real, m_rows=_seq_split[0]) * (1 / self.count)
     # (HC_REAL: not materialized in float: the kernel summing the down projection's splits stores the half the mix reads (its rcp can round
     # differently))
     act = lo * lo.sigmoid() if HC_REAL else (lo * lo.sigmoid()).contiguous()
     if self.up.ggml_type == Q8_0 and self.count == 4 and self.dim % 32 == 0 and \
        int(xhalf.uop.shard_shape[0]) % 32 == 0:
       shape = (int(B), len(cast(tuple, xs.device))*R_real, self.dim) if real else (int(B), int(R), self.dim)
-      mixed = ghc_prefill_mix(act, self.up.weight, xn.reshape(rows, -1), shape, rows=R_real)
+      mixed = ghc_prefill_mix(act, self.up.weight, xn.reshape(rows, -1), shape, rows=R_real, m_rows=_seq_split[0])
     else:
       g = q8_linear(self.up, act.contiguous(), split=True).reshape(B, R, self.count, self.dim)
       mixed = (g.sigmoid() * xn.reshape(B, R, self.count, self.dim)).mean(2)
