@@ -34,7 +34,8 @@ LAST:list[str] = []
 def bench(fn, *args) -> float:
   # GPU time a call (the kernels' sum, PROFILE=1), else wall time
   for _ in range(3): fn(*args)
-  kprof.reset(dev); st = time.perf_counter()
+  kprof.reset(dev)
+  st = time.perf_counter()
   for _ in range(10): fn(*args)
   sync()
   if (ts:=kprof.times(dev)):
