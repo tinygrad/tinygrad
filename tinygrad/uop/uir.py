@@ -1,52 +1,27 @@
-"""UIR: the text form of a UOp graph. one line per UOp, `%id = op src src key=value`, like studentgrad.
-parse_uir also reads studentgrad's hand-written form: %names, nested (op ...), [stacks] of expressions, and {scoped blocks}.
+"""UIR: the text form of a UOp graph, one line per UOp: `%id = op src src key=value`, like studentgrad.
 
-  %0 = param 4 slot=0 dtype=f32 device=CPU
+  %0 = param 4 slot=0 dtype=f32
   %1 = range 4 slot=0
   %2 = index %0 %1
   %3 = store %2 1.0
   %4 = end %3 %1
   %5 = sink %4 name=test
 
-srcs are %refs or inline literals (CONSTs are never lines, all-CONST STACKs are [a b]). args come after the srcs as key=value.
-a value is a literal (1, 2.5, -inf, true), a bare word, a 'quoted string', a [list], a %ref, or a `python object` for anything else.
-parse_uir(render_uir(x)) is x: UOps are hash-consed, so a lossless round trip gives back the identical UOp. runtime state isn't
-rendered: a BUFFER's Buffer and a CALL's grad_fxn.
+srcs are %ids or literals: a CONST (1, 2.5, -inf, true, invalid) or an all-CONST STACK ([1 2]) has no line. args are key=value after the srcs.
+a value is a literal, a bare word, a 'string', a [list], a %id, or a `python object`. parse_uir(render_uir(x)) is x, since UOps are
+hash-consed, when every python object's repr evaluates back to it. runtime objects aren't rendered: a BUFFER's Buffer and a CALL's grad_fxn.
+parse_uir also reads studentgrad's hand-written UIR: %names, nested (op ...), [stacks] of expressions and {scoped blocks}.
 """
 import re, math, ast, functools, importlib
 from collections import deque
 from enum import Enum
-from dataclasses import is_dataclass, fields
+from dataclasses import fields
 from typing import Any, Callable
 from tinygrad import dtype
 from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid
 from tinygrad.uop import Ops, GroupOp, ops
 from tinygrad.uop.ops import UOp, KernelInfo, CallInfo, CustomFunction, ProgramInfo, ParamArg, AxisType
 from tinygrad.helpers import colored, ansistrip, Target
-
-# ***** python objects *****
-# an arg value with no UIR form is a `python expression`: its repr, with UOps inside it written as %refs. it's evaluated with the names in
-# tinygrad.uop.ops, and the names in the module that defines its type, written `module:expr` when that's another module (rdna3 and rdna4
-# instructions have the same names, their module says which one)
-
-def _py(v, ref:Callable[[UOp], str]) -> str:
-  if isinstance(v, UOp): return repr(v) if _inline(v) else ref(v)   # an inline CONST has no line
-  if isinstance(v, Target): return f"Target.parse({repr(v)!r})"   # a Target's repr is its string
-  if not _inside(v, (UOp, Target)): return repr(v)
-  if isinstance(v, tuple): return "(" + "".join(_py(x, ref) + ", " for x in v) + ")"
-  return f"{type(v).__name__}(" + ", ".join(f"{f.name}={_py(getattr(v, f.name), ref)}" for f in fields(v) if f.init) + ")"
-
-def _pyobj(v, ref:Callable[[UOp], str]) -> str:
-  mod = "" if type(v).__module__ in ("builtins", __name__, "tinygrad.uop.ops") else type(v).__module__ + ":"
-  return "`" + (mod + _py(v, ref)).replace("\n", " ").replace("`", "\\x60") + "`"   # newlines and backticks are only in string literals
-
-def _eval(expr:str, names:dict[str, UOp|None]) -> Any:
-  """NOTE: this is eval, only parse UIR you trust"""
-  ns = {**vars(dtype), **vars(ops), "inf": math.inf, "nan": math.nan, "__refs__": names}
-  if (m:=re.match(r"([\w.]+):(?!=)", expr)): ns, expr = {**ns, **vars(importlib.import_module(m[1])), "__refs__": names}, expr[m.end():]
-  # a %name outside a string literal is a UOp
-  expr = re.sub(r"""('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")|(%\w+)""", lambda x: x[1] or f"__refs__[{x[2]!r}]", expr)
-  return eval(expr, ns)  # pylint: disable=eval-used
 
 # ***** render *****
 
@@ -61,30 +36,13 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0",
                Ops.STAGE: "#FFC14D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46", Ops.BACKEDGE: "#464752"}
 
-def _const_str(x:UOp) -> str:
-  """CONSTs are weak or bool, so literals are bare: 1, 2.5, -inf, true, invalid. typed values are CASTs of these"""
-  if x.is_invalid: return "invalid"
-  return str(x.val).lower() if isinstance(x.val, bool) else repr(x.val) if isinstance(x.val, int) else repr(float(x.val))
-
-# keys holding an enum, dtype or Target, rendered by name: dtype=f32 addrspace=REG axis=LOOP op=add target=CPU
+# keys whose value is written by its name: dtype=f32 addrspace=REG axis=LOOP op=add target=CPU
 _named_keys = {"dtype", "addrspace", "axis", "op", "target"}
 _keywords = {"true", "false", "inf", "nan", "invalid"}
-
-def _val(v, named=False, ref:Callable[[UOp], str]=repr) -> str:
-  """an arg value: literals bare, tuples [a b], strings bare if one word else quoted, UOps in the graph as %id, other python objects as `expr`"""
-  if named and isinstance(v, (Enum, DType)): return v.name.lower() if isinstance(v, Ops) else v.name
-  if named and isinstance(v, Target): return _val(repr(v))
-  if isinstance(v, bool): return str(v).lower()
-  if type(v) in (int, float): return repr(v)   # exact types: enums and ConstFloat are python objects
-  if isinstance(v, tuple): return "[" + " ".join(_val(x, ref=ref) for x in v) + "]"
-  if isinstance(v, UOp) and not _inline(v): return ref(v)
-  if isinstance(v, str): return v if re.fullmatch(r"[A-Za-z_][\w:.,+\-]*", v) and v not in _keywords else repr(v)
-  return _pyobj(v, ref)
-
-# single-value args get a name, these ops have a dataclass arg rendered as key=value per field. runtime objects aren't rendered
+# ops whose arg is one value with a name, and ops whose arg is a dataclass written as key=value per field
 _arg_key = {Ops.CAST:"dtype", Ops.BITCAST:"dtype", Ops.COPY:"device", Ops.GETADDR:"device", Ops.SPECIAL:"name", Ops.UNSHARD:"axes",
             Ops.MSELECT:"index"}
-_skip_fields = {"buffer", "grad_fxn"}
+_skip_fields = {"buffer", "grad_fxn"}   # runtime objects
 
 @functools.cache
 def _struct_args() -> dict[Ops, type]:
@@ -92,55 +50,63 @@ def _struct_args() -> dict[Ops, type]:
   return {Ops.PARAM: ParamArg, Ops.REFPARAM: ParamArg, Ops.BUFFER: ParamArg, Ops.ALLOC: ParamArg, Ops.SINK: KernelInfo,
           Ops.CALL: CallInfo, Ops.CUSTOM_FUNCTION: CustomFunction, Ops.STAGE: BufferizeOpts, Ops.PROGRAM: ProgramInfo}
 
-def _fields_str(a, always=(), ref:Callable[[UOp], str]=repr) -> str:
-  # a value with UOps in it isn't compared to the default, UOp == builds a UOp
-  return " ".join(f"{f.name}={_val(v, f.name in _named_keys, ref)}" for f in fields(a)
-                  if f.name not in _skip_fields and (_inside(v:=getattr(a, f.name), UOp) or v != f.default or f.name in always))
-
-def _render_arg(x:UOp, ref:Callable[[UOp], str]=repr) -> str:
-  """args are key=value, written after the srcs"""
-  if (a:=x.arg) is None: return ""
-  match x.op:
-    case Ops.CONST: return _const_str(x)
-    case Ops.RANGE:   # like UOp.range, axis defaults to WEAK. flatten_range merges slots: slot=[1 2]
-      return f"slot={_val(a[1] if len(a) == 2 else a[1:])}" + (f" axis={a[0].name}" if a[0] is not AxisType.WEAK else "")
-    case Ops.REDUCE: return f"op={_val(a[0], True)}" + (f" pop={a[1]}" if a[1] else "")
-    case Ops.ALLREDUCE: return f"op={_val(a[0], True)} device={_val(a[1])}"
-  if type(a) is _struct_args().get(x.op):   # the first field is always written so a default arg isn't None, a CALL always has a CallInfo
-    return _fields_str(a, always=() if x.op is Ops.CALL else (fields(a)[0].name,), ref=ref)
-  return f"{(k:=_arg_key.get(x.op, 'arg'))}={_val(a, k in _named_keys, ref)}"
-
-# CONSTs never get lines (inline literals, no %id); concrete all-const STACKs inline into their parent as [a b]
 def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
 
-def _inside(a, t:type|tuple[type, ...]) -> list:
-  """the instances of t in an arg, looking in tuples and dataclasses"""
-  if isinstance(a, t): return [a]
-  if isinstance(a, tuple): return [x for y in a for x in _inside(y, t)]
-  if is_dataclass(a) and not isinstance(a, type): return _inside(tuple(getattr(a, f.name) for f in fields(a) if f.name not in _skip_fields), t)
-  return []
+def _const_str(x:UOp) -> str:
+  """CONSTs are weak or bool, so literals are bare. typed values are CASTs of these"""
+  if x.is_invalid: return "invalid"
+  return str(x.val).lower() if isinstance(x.val, bool) else repr(x.val) if isinstance(x.val, int) else repr(float(x.val))
 
-def uir_nodes(root:UOp|list[UOp]) -> list[UOp]:
-  """the UOps that get a line, in order. a UOp in an arg (like a symbolic size) gets its line before the UOp holding it"""
-  order: dict[UOp, None] = {}
-  def add(uops):
-    for u in uops:
-      if u in order: continue
-      for a in _inside(u.arg, UOp): add(a.toposort(enter_calls=True))
-      order[u] = None
-  add(root.toposort(enter_calls=True) if isinstance(root, UOp) else root)
-  return [u for u in order if not _inline(u)]
+def _val(v, named:bool, ref:Callable[[UOp], str|None]) -> str:
+  """literals and one-word strings are bare, tuples are [a b], a UOp with a line is its %id, any other python object is `module:repr`"""
+  if named and isinstance(v, (Enum, DType)): return v.name.lower() if isinstance(v, Ops) else v.name
+  if named and isinstance(v, Target): return _val(repr(v), False, ref)
+  if isinstance(v, bool): return str(v).lower()
+  if type(v) in (int, float): return repr(v)   # exact types, a ConstFloat or an enum is a python object
+  if isinstance(v, tuple): return "[" + " ".join(_val(x, False, ref) for x in v) + "]"
+  if isinstance(v, UOp) and (r:=ref(v)) is not None: return r
+  if isinstance(v, str): return v if re.fullmatch(r"[A-Za-z_][\w:.,+\-]*", v) and v not in _keywords else repr(v)
+  # a python object's repr is evaluated with the names in the module of its type (rdna3 and rdna4 instructions have the same names)
+  mod = "" if type(v).__module__ in ("builtins", "tinygrad.dtype", "tinygrad.uop.ops") else type(v).__module__ + ":"
+  return "`" + (mod + repr(v)).replace("\n", " ").replace("`", "\\x60") + "`"   # newlines and backticks are only in string literals
+
+def _fields_str(a, ref:Callable[[UOp], str|None], always:tuple[str, ...]) -> str:
+  ret = []
+  for f in fields(a):
+    v = getattr(a, f.name)
+    # a default is left out. compared by repr, since == of a UOp builds a UOp
+    if f.name in _skip_fields or (repr(v) == repr(f.default) and f.name not in always): continue
+    ret.append(f"{f.name}={_val(v, f.name in _named_keys, ref)}")
+  return " ".join(ret)
+
+def _render_arg(x:UOp, ref:Callable[[UOp], str|None]=lambda _: None) -> str:
+  """the args, written after the srcs"""
+  if (a:=x.arg) is None: return ""
+  if x.op is Ops.CONST: return _const_str(x)
+  if x.op is Ops.RANGE:   # like UOp.range the axis defaults to WEAK. flatten_range merges slots: slot=[1 2]
+    slot = a[1] if len(a) == 2 else a[1:]
+    return f"slot={_val(slot, False, ref)}" + ("" if a[0] is AxisType.WEAK else f" axis={a[0].name}")
+  if x.op is Ops.REDUCE: return f"op={a[0].name.lower()}" + (f" pop={a[1]}" if a[1] else "")
+  if x.op is Ops.ALLREDUCE: return f"op={a[0].name.lower()} device={_val(a[1], False, ref)}"
+  if type(a) is _struct_args().get(x.op):
+    # the first field is always written, so a default arg isn't None. a CALL's arg is always a CallInfo
+    return _fields_str(a, ref, () if x.op is Ops.CALL else (fields(a)[0].name,))
+  key = _arg_key.get(x.op, "arg")
+  return f"{key}={_val(a, key in _named_keys, ref)}"
 
 def render_uir(root:UOp|list[UOp]) -> str:
   """one line per UOp: %id = op src src key=value"""
-  nodes = uir_nodes(root)
+  nodes = [u for u in (root.toposort(enter_calls=True) if isinstance(root, UOp) else root) if not _inline(u)]
   table = {u:i for i,u in enumerate(nodes)}
   def src_str(u:UOp) -> str:
     if not _inline(u): return f"%{table[u]}"
     return _const_str(u) if u.op is Ops.CONST else "[" + " ".join(src_str(s) for s in u.src) + "]"
-  lines = [" ".join(filter(None, [f"%{i} = {colored(u.op.name.lower(), uops_colors.get(u.op))}", *map(src_str, u.src), _render_arg(u, src_str)]))
-           for i,u in enumerate(nodes)]
-  # an inline root has no line of its own, it's a literal value
+  lines = []
+  for i,u in enumerate(nodes):
+    # a UOp in an arg is its %id if it has an earlier line
+    arg = _render_arg(u, lambda v: f"%{table[v]}" if table.get(v, i) < i else None)
+    lines.append(" ".join([f"%{i} = {colored(u.op.name.lower(), uops_colors.get(u.op))}", *map(src_str, u.src)] + ([arg] if arg else [])))
+  # an inline root has no line of its own, so it's a literal value
   if isinstance(root, UOp) and _inline(root): lines.append(f"%{len(nodes)} = {src_str(root)}")
   return "\n".join(lines)
 
@@ -161,6 +127,14 @@ def _lit(t:str) -> Any:
   if re.fullmatch(r"-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?|-?inf|nan", t): return float(t)
   return t
 
+def _eval(expr:str) -> Any:
+  """a `python object`: a repr, evaluated with the names in tinygrad.dtype, tinygrad.uop.ops and the module before a ':'. NOTE: this is eval"""
+  ns = {**vars(dtype), **vars(ops), "inf": math.inf, "nan": math.nan}
+  if (m:=re.match(r"([\w.]+):(?!=)", expr)):
+    ns.update(vars(importlib.import_module(m[1])))
+    expr = expr[m.end():]
+  return eval(expr, ns)  # pylint: disable=eval-used
+
 _tuple_keys = {Ops.RANGE: {"slot", "axis"}, Ops.REDUCE: {"op", "pop"}, Ops.ALLREDUCE: {"op", "device"}}
 
 def _build(name:str, srcs:tuple[UOp, ...], kv:dict[str, Any]) -> UOp:
@@ -172,7 +146,9 @@ def _build(name:str, srcs:tuple[UOp, ...], kv:dict[str, Any]) -> UOp:
   if "target" in kv: kv["target"] = Target.parse(kv["target"])   # a Target is written as its string
   arg: Any = None
   if set(kv) == {"arg"}: arg = kv["arg"]
-  elif op is Ops.RANGE: arg = (kv.get("axis", AxisType.WEAK), *(s if isinstance(s:=kv["slot"], tuple) else (s,)))
+  elif op is Ops.RANGE:
+    slot = kv["slot"]
+    arg = (kv.get("axis", AxisType.WEAK), *(slot if isinstance(slot, tuple) else (slot,)))
   elif op is Ops.REDUCE: arg = (kv["op"], kv.get("pop", 0))
   elif op is Ops.ALLREDUCE: arg = (kv["op"], kv["device"])
   elif struct is not None and (kv or op is Ops.CALL): arg = struct(**kv)   # a CALL always has a CallInfo
@@ -194,14 +170,15 @@ def parse_uir(text:str) -> UOp:
     if (u:=names.get(t)) is None: raise ValueError(f"{t} is not defined")
     return u
   def attr(names:dict[str, UOp|None], k:str) -> Any:
-    if (t:=pop(f"a value for {k}=")) in ("(", ")", "]", "{", "}"): raise ValueError(f"expected a value for {k}=, got {t!r}")
+    t = pop(f"a value for {k}=")
+    if t in ("(", ")", "]", "{", "}"): raise ValueError(f"expected a value for {k}=, got {t!r}")
     if t[0] in "`'\"" and (len(t) < 2 or t[-1] != t[0]): raise ValueError(f"unterminated {t[0]} in {k}=")
     if t == "[":
       ret = []
       while toks and toks[0] != "]": ret.append(attr(names, k))
       pop("']'")
       return tuple(ret)
-    if t[0] == "`": return _eval(t[1:-1], names)
+    if t[0] == "`": return _eval(t[1:-1])
     if t[0] in "'\"": return ast.literal_eval(t)
     return ref(names, t) if t[0] == "%" else _named_parse.get(k, _lit)(t)
   def expr(names:dict[str, UOp|None], name:str, close:str|None) -> UOp:
@@ -209,9 +186,10 @@ def parse_uir(text:str) -> UOp:
     while not at_end() and not toks[0].endswith("="): srcs.append(value(names))
     kv: dict[str, Any] = {}
     while not at_end():
-      if not (k:=pop("key=")).endswith("="): raise ValueError(f"srcs must come before key=value args in {name}, got {k!r}")
-      if (k:=k[:-1]) in kv: raise ValueError(f"{name} has {k}= twice")
-      kv[k] = attr(names, k)
+      k = pop("key=")
+      if not k.endswith("="): raise ValueError(f"srcs must come before key=value args in {name}, got {k!r}")
+      if k[:-1] in kv: raise ValueError(f"{name} has {k} twice")
+      kv[k[:-1]] = attr(names, k[:-1])
     if close is not None and pop(repr(close)) != close: raise ValueError(f"expected {close!r} to end {name}")
     return _build(name, tuple(srcs), kv)
   def value(names:dict[str, UOp|None], bare=False) -> UOp:
@@ -232,8 +210,10 @@ def parse_uir(text:str) -> UOp:
   def scope(names:dict[str, UOp|None], close:str|None) -> UOp:
     root: UOp|None = None
     while toks and toks[0] != "}":
-      if not is_assign(t:=pop("'%name ='")): raise ValueError(f"expected '%name =', got {t!r}")
-      if (name:=t[:-1].rstrip()) in names: raise ValueError(f"{name} is already defined")
+      t = pop("'%name ='")
+      if not is_assign(t): raise ValueError(f"expected '%name =', got {t!r}")
+      name = t[:-1].rstrip()
+      if name in names: raise ValueError(f"{name} is already defined")
       names[name] = None   # defined, so its value can't define it again, but not usable until its value is parsed
       names[name] = root = value(names, bare=True)
     if (toks.popleft() if toks else None) != close: raise ValueError(f"expected {close or 'end of input'!r}")

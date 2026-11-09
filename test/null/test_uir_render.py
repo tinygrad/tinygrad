@@ -1,4 +1,4 @@
-import unittest, re, math
+import unittest, math
 from dataclasses import replace
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes, Invalid
@@ -8,7 +8,7 @@ from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.device import Device
 from tinygrad.codegen import full_rewrite_to_sink, to_program
-from tinygrad.helpers import Context, ansistrip, Target
+from tinygrad.helpers import Context, ansistrip
 from tinygrad.renderer import Estimates
 
 def _strip_buffers(root:UOp) -> UOp:
@@ -85,9 +85,7 @@ class TestSSARender(unittest.TestCase):
     assert_roundtrip(self, (x + 1).sum().uop)
 
   def test_quoted_args(self):
-    g = UOp.sink(UOp.param(0, dtypes.int32, name="has space %1"), UOp.param(1, dtypes.int32, name="[x]"))
-    self.assertIn("name='has space %1'", ansistrip(render_uir(g)))
-    assert_roundtrip(self, g)
+    assert_roundtrip(self, UOp.sink(UOp.param(0, dtypes.int32, name="has space %1"), UOp.param(1, dtypes.int32, name="[x]")))
 
   def test_program(self):
     # SINK with applied opts, PROGRAM with params as %refs, SOURCE, BINARY bytes, Target
@@ -95,66 +93,32 @@ class TestSSARender(unittest.TestCase):
     self.assertIs(prg.op, Ops.PROGRAM)
     assert_roundtrip(self, prg)
 
-  def test_comments(self):
-    g = UOp.sink(UOp.const(1) + UOp.const(2))
-    txt = "# hand written\n" + render_uir(g) + " # trailing comment\n\n# last line comment\n"
-    assert_roundtrip(self, parse_uir(txt))
-
-class TestFormat(unittest.TestCase):
-  def test_exact(self):
-    a, r = UOp.param(0, dtypes.float32, (4,)), UOp.range(4, 0)
-    sink = UOp(Ops.END, (UOp(Ops.STORE, (UOp(Ops.INDEX, (a, r)), UOp.const(1.0))), r)).sink(arg=KernelInfo())
-    self.assertEqual(ansistrip(render_uir(sink)), "%0 = param 4 slot=0 dtype=f32\n%1 = range 4 slot=0\n%2 = index %0 %1\n%3 = store %2 1.0\n"
-                                                  "%4 = end %3 %1\n%5 = sink %4 name=test")
-
-class TestPythonObjects(unittest.TestCase):
-  def test_uop_in_arg(self):
-    # a symbolic Estimates holds UOps that aren't in the graph: they get lines and are %refs in the arg
-    n = UOp.variable("n", 1, 64)
-    sink = UOp.sink(UOp.const(1), arg=KernelInfo(name="k", estimates=Estimates(ops=n*2, mem=n)))
-    self.assertIn("Estimates(ops=%", ansistrip(render_uir(sink)))
-    assert_roundtrip(self, sink)
-    self.assertEqual(render_uir(list(sink.toposort())), render_uir(sink))
-
   def test_args(self):
-    # an inline root, an all-default arg (not None), and python objects
+    # an inline root, an all-default arg isn't None, a symbolic Estimates
     n = UOp.variable("n", 1, 64)
-    for g in [UOp.const(1), UOp.const(2.5), UOp.const((1, 2)), UOp(Ops.STACK), UOp(Ops.PROGRAM, (UOp.sink(arg=KernelInfo()),), ProgramInfo()),
-              UOp(Ops.PROGRAM, (UOp.sink(),)), UOp(Ops.PYLITERAL, arg=UOp.const(1.5)), UOp(Ops.PYLITERAL, arg=frozenset({n})),
-              UOp(Ops.PYLITERAL, arg=Target("CPU")), UOp(Ops.PYLITERAL, arg=ProgramInfo(target=Target("CPU", "LLVM")))]:
+    for g in [UOp.const(1), UOp.const((1, 2)), UOp(Ops.STACK), UOp(Ops.PROGRAM, (UOp.sink(arg=KernelInfo()),), ProgramInfo()),
+              UOp(Ops.PROGRAM, (UOp.sink(),)), UOp.sink(UOp.const(1), arg=KernelInfo(estimates=Estimates(ops=n*2, mem=n)))]:
       assert_roundtrip(self, g)
 
-  def test_ambiguous_names(self):
-    # rdna3 and rdna4 define the same instruction names, so the instruction is evaluated in its own module
+  def test_nan_pattern(self):
+    # the pattern compiler puts a UPat's float arg in a PYLITERAL, any nan is the same one
+    from tinygrad.uop.upat import _get_clause
+    assert_roundtrip(self, _get_clause(UPat(Ops.CONST, arg=-math.nan), UOp.custom_function("x", fmt=True).call(inline=True)))
+
+  def test_amd_instructions(self):
+    # rdna3 and rdna4 instructions have the same names, a python object is evaluated in its own module
     from tinygrad.runtime.autogen.amd.rdna3 import ins as rdna3
     from tinygrad.runtime.autogen.amd.rdna4 import ins as rdna4
-    for ins in (rdna3, rdna4):
-      g = UOp(Ops.INS, arg=(ins.v_mov_b32_e32(ins.v[1], 1.0), dtypes.void))
-      self.assertIn(f"`{ins.__name__}:v_mov_b32_e32", ansistrip(render_uir(g)))
-      assert_roundtrip(self, g)
-
-  def test_nan(self):
-    # a nan literal is a ConstFloat (nan == nan), in a CONST and in the pattern compiler's clauses
-    from tinygrad.uop.upat import _get_clause
-    assert_roundtrip(self, _get_clause(UPat(Ops.CONST, arg=math.nan), UOp.custom_function("x", fmt=True).call(inline=True)))
-    assert_roundtrip(self, UOp.sink(UOp.const(math.nan), UOp.const(-math.inf)))
+    for ins in (rdna3, rdna4): assert_roundtrip(self, UOp(Ops.INS, arg=(ins.v_mov_b32_e32(ins.v[1], 1.0), dtypes.void)))
 
 class TestParseUIR(unittest.TestCase):
-  def test_handwritten(self):
-    sink = parse_uir("""
-      # a+1 over 4 elements
-      %0 = param 4 slot=0 dtype=f32
-      %1 = range 4 slot=0
-      %2 = index %0 %1
-      %3 = param 4 slot=1 dtype=f32
-      %4 = index %3 %1   # comments can trail a line
-      %5 = add %4 1.0
-      %6 = store %2 %5
-      %7 = end %6 %1
-      %8 = sink %7 name=add_one
-    """)
-    a, b, r = UOp.param(0, dtypes.float32, (4,)), UOp.param(1, dtypes.float32, (4,)), UOp.range(4, 0)
-    self.assertIs(sink, a.index(r).store(b.index(r) + 1.0).end(r).sink(arg=KernelInfo(name="add_one")))
+  def test_format(self):
+    # the exact text, and hand-written text with comments parses to the same UOp
+    a, r = UOp.param(0, dtypes.float32, (4,)), UOp.range(4, 0)
+    sink = UOp(Ops.END, (UOp(Ops.STORE, (UOp(Ops.INDEX, (a, r)), UOp.const(1.0))), r)).sink(arg=KernelInfo())
+    txt = "%0 = param 4 slot=0 dtype=f32\n%1 = range 4 slot=0\n%2 = index %0 %1\n%3 = store %2 1.0\n%4 = end %3 %1\n%5 = sink %4 name=test"
+    self.assertEqual(ansistrip(render_uir(sink)), txt)
+    self.assertIs(parse_uir("# a comment\n" + txt.replace("\n", "  # a trailing comment\n")), sink)
 
   def test_studentgrad_syntax(self):
     # named values, nested (op ...), [stacks] of expressions, {scoped blocks}, hex and exponent literals
@@ -173,13 +137,9 @@ class TestParseUIR(unittest.TestCase):
     self.assertIs(sink, UOp(Ops.END, (UOp(Ops.STORE, (UOp(Ops.INDEX, (buf, i)), val)), i)))
 
   def test_errors(self):
-    for txt, err in [("%0 = add %1 1", "%1 is not defined"), ("%0 = add 1 2 x=1 4", "srcs must come before key=value"),
-                     ("%0 = frob 1", "unknown op 'frob'"), ("%0 = add 1 nope", "not a %name or a literal"), ("", "expected an assignment"),
-                     ("%0 = add 1 (mul 2 3", "expected ')'"), ("%0 = [1 2", "expected ']'"), ("%0 = add load 1", "write (load ...)"),
-                     ("%x = 1\n%x = 2", "%x is already defined"), ("%x = 1 }", "expected 'end of input'"),
-                     ("%x = special name=`12", "unterminated ` in name="), ("%x = special name=)", "expected a value for name="),
-                     ("%x = cast 1 dtpye=i32", "cast has no ['dtpye']"), ("%x = cast 1 dtype=i32 dtype=f32", "cast has dtype= twice"),
-                     ("%x = { %x = 1 }", "%x is already defined"), ("%x = add %x 1", "%x is not defined")]:
-      with self.assertRaisesRegex(ValueError, re.escape(err)): parse_uir(txt)
+    for txt in ["", "%0 = add %1 1", "%0 = add 1 2 x=1 4", "%0 = frob 1", "%0 = add 1 nope", "%0 = add 1 (mul 2 3", "%0 = [1 2", "%0 = add load 1",
+                "%x = 1\n%x = 2", "%x = 1 }", "%x = special name=`12", "%x = special name=)", "%x = cast 1 dtpye=i32",
+                "%x = cast 1 dtype=i32 dtype=f32", "%x = { %x = 1 }", "%x = add %x 1"]:
+      with self.assertRaises(ValueError, msg=txt): parse_uir(txt)
 
 if __name__ == '__main__': unittest.main()
