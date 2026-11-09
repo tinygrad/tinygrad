@@ -1023,7 +1023,10 @@ class FFNBlock:
           # decoding: the device's slices of the selections in the router's kernel
           return self._experts(x, h, *moe_router_local(logits, bias, k, scale, exps.slice_table), local=True)
         sel, probs = moe_router(logits, bias, k, scale)
-        if rows is not None: sel, probs = all_gather(sel, 1), all_gather(probs, 1)
+        if rows is not None:
+          # (one exchange for both, as the softmax router's: two independent collectives would share the flag lane's state)
+          gathered = _on_lane(FLAG_LANE[0] + SEL_LANE, all_gather, sel.bitcast(dtypes.float32).stack(probs, dim=-1).contiguous(), 1)
+          sel, probs = gathered[..., 0].bitcast(dtypes.int32), gathered[..., 1]
         return self._experts(x, h, sel, probs)
       assert rows is None, "sequence parallel routing needs the router kernel"
       # fast path: without selection bias, normalized SOFTMAX is equivalent to SOFTMAX_WEIGHT
