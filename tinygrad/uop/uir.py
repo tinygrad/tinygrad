@@ -12,98 +12,38 @@ srcs are %refs or inline literals (CONSTs are never lines, all-CONST STACKs are 
 a value is a literal (1, 2.5, -inf, true), a bare word, a 'quoted string', a [list], a %ref, or a `python object` for anything else.
 parse_uir(render_uir(x)) is x: UOps are hash-consed, so a lossless round trip gives back the identical UOp.
 """
-import re, sys, math, ast, functools, importlib, pickle, base64
+import re, math, ast, functools, importlib
 from collections import deque
 from enum import Enum
 from dataclasses import is_dataclass, fields
 from typing import Any, Callable
 from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid
-from tinygrad.uop import Ops, GroupOp
+from tinygrad.uop import Ops, GroupOp, ops
 from tinygrad.uop.ops import UOp, KernelInfo, CallInfo, CustomFunction, ProgramInfo, ParamArg, AxisType
 from tinygrad.helpers import colored, ansistrip, Target
 
 # ***** python objects *****
-# an arg value with no UIR form is a `python expression`. it's built from the value's structure (containers, enums, classes, functools.partial,
-# dataclasses, UOps as %refs), and anything else is its repr, evaluated in its own module when written `module:expr`.
-# every expression is checked to rebuild the value when it's rendered, and a value no expression rebuilds is pickled.
+# an arg value with no UIR form is a `python expression`: its repr, with UOps inside it written as %refs. it's evaluated with the names in
+# tinygrad.uop.ops, and the names in the module that defines its type, written `module:expr` when that's another module (rdna3 and rdna4
+# instructions have the same names, their module says which one)
 
-_names_cache: list = [-1, {}]
-def _names_index() -> dict[str, list[Any]]:
-  """name -> the distinct objects loaded tinygrad modules define with that name, rebuilt when modules load"""
-  if _names_cache[0] != len(sys.modules):
-    idx: dict[str, dict[int, Any]] = {}
-    for m in list(sys.modules.values()):
-      if getattr(m, "__name__", "").startswith("tinygrad"):
-        for k, v in list(vars(m).items()): idx.setdefault(k, {})[id(v)] = v
-    _names_cache[:] = [len(sys.modules), {k: list(v.values()) for k,v in idx.items()}]
-  return _names_cache[1]
+def _py(v, ref:Callable[[UOp], str]) -> str:
+  if isinstance(v, UOp): return repr(v) if _inline(v) else ref(v)   # an inline CONST has no line
+  if not _arg_uops(v): return repr(v)
+  if isinstance(v, tuple): return "(" + "".join(_py(x, ref) + ", " for x in v) + ")"
+  return f"{type(v).__name__}(" + ", ".join(f"{f.name}={_py(getattr(v, f.name), ref)}" for f in fields(v) if f.init) + ")"
 
-class _Names(dict):
-  """the names an expression can use: a name defined by exactly one object in loaded tinygrad modules, or a loaded module"""
-  def __missing__(self, k:str):
-    if len(objs:=_names_index().get(k, [])) == 1: return objs[0]
-    if k in sys.modules: return sys.modules[k]
-    raise KeyError(k)   # a KeyError falls through to builtins
+def _pyobj(v, ref:Callable[[UOp], str]) -> str:
+  mod = "" if type(v).__module__ in ("builtins", __name__, "tinygrad.uop.ops") else type(v).__module__ + ":"
+  return "`" + (mod + _py(v, ref)).replace("\n", " ").replace("`", "\\x60") + "`"   # newlines and backticks are only in string literals
 
-# modules generated per target (rdna3, rdna4, ...) define the same names, so their names are always written with their module
-_per_target = "tinygrad.runtime.autogen."
-
-def _name(obj) -> str:
-  """a class or function by its name if that's unambiguous, else by its module path"""
-  if not obj.__module__.startswith(_per_target) and len(objs:=_names_index().get(obj.__name__, [])) == 1 and objs[0] is obj: return obj.__name__
-  return f"{obj.__module__}.{obj.__qualname__}"
-
-def _py(v, ref:Callable[[UOp], str|None]) -> str:
-  """the python expression for v, from its structure where it has one"""
-  if v is None or type(v) in (bool, int, float, str, bytes): return repr(v)
-  if isinstance(v, UOp): return r if (r:=ref(v)) is not None else f"UOp({_py(v.op, ref)}, {_py(v.src, ref)}, {_py(v.arg, ref)})"
-  if isinstance(v, tuple): return f"({_py(v[0], ref)},)" if len(v) == 1 else "(" + ", ".join(_py(x, ref) for x in v) + ")"
-  if isinstance(v, DType): return repr(v)
-  if isinstance(v, list): return "[" + ", ".join(_py(x, ref) for x in v) + "]"
-  if isinstance(v, (set, frozenset)): return f"{type(v).__name__}([{', '.join(sorted(_py(x, ref) for x in v))}])"
-  if isinstance(v, dict): return "{" + ", ".join(f"{_py(k, ref)}: {_py(x, ref)}" for k,x in v.items()) + "}"
-  if isinstance(v, Enum): return f"{_name(type(v))}.{v.name}"
-  if isinstance(v, (int, float)): return f"{_name(type(v))}({repr(int(v) if isinstance(v, int) else float(v))})"   # ConstFloat
-  if isinstance(v, type) or callable(v) and hasattr(v, "__qualname__") and hasattr(v, "__module__"): return _name(v)
-  if isinstance(v, functools.partial):
-    args = [_py(v.func, ref), *(_py(x, ref) for x in v.args), *(f"{k}={_py(x, ref)}" for k,x in v.keywords.items())]
-    return f"functools.partial({', '.join(args)})"
-  if is_dataclass(v):
-    kw = [f"{f.name}={_py(x, ref)}" for f in fields(v) if f.init and not _same(x:=getattr(v, f.name), f.default)]
-    return f"{_name(type(v))}({', '.join(kw)})"
-  return repr(v)
-
-def _same(a, b) -> bool:
-  """b rebuilds a: identical, or equal and of the same type, comparing structure where equality is identity"""
-  if a is b: return True
-  if type(a) is not type(b) or isinstance(a, UOp): return False
-  if isinstance(a, functools.partial): return _same(a.func, b.func) and _same(a.args, b.args) and _same(a.keywords, b.keywords)
-  if isinstance(a, (tuple, list)): return len(a) == len(b) and all(map(_same, a, b))
-  if isinstance(a, dict): return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
-  if is_dataclass(a) and type(a).__eq__ is object.__eq__: return all(_same(getattr(a, f.name), getattr(b, f.name)) for f in fields(a))
-  try: return bool(a == b)
-  except Exception: return False
-
-def _eval(expr:str, refs) -> Any:
-  """evaluate a `python expression`. NOTE: this is eval, only parse UIR you trust"""
-  ns = _Names(inf=math.inf, nan=math.nan, unpickle=lambda b: pickle.loads(base64.b64decode(b)), __refs__=refs)
-  if (m:=re.match(r"([\w.]+):(?!=)", expr)):   # module:expr evaluates in that module
-    ns.update(vars(importlib.import_module(m[1])), __refs__=refs)
-    expr = expr[m.end():]
-  # a %ref outside a string literal is a UOp
-  expr = re.sub(r"""('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")|%(\w+)""", lambda x: x[1] or f"__refs__['%{x[2]}']", expr)
-  return eval(expr, {}, ns)  # pylint: disable=eval-used
-
-def _pyobj(v, ref:Callable[[UOp], str|None], refs) -> str:
-  """the checked `python expression` for v"""
-  py = _py(v, ref).replace("\n", " ").replace("`", "\\x60")   # backticks and newlines are only inside string literals
-  mod = type(v).__module__
-  for expr in ((f"{mod}:{py}",) if mod.startswith(_per_target) else (py, f"{mod}:{py}")):
-    try:
-      if _same(v, _eval(expr, refs)): return f"`{expr}`"
-    except Exception: pass
-  try: return f"`unpickle({base64.b64encode(pickle.dumps(v)).decode()!r})`"
-  except Exception: return "`" + repr(v).replace("\n", " ").replace("`", "\\x60") + "`"   # nothing rebuilds it, show the repr
+def _eval(expr:str, names:dict[str, UOp]) -> Any:
+  """NOTE: this is eval, only parse UIR you trust"""
+  ns = {**vars(ops), "inf": math.inf, "nan": math.nan, "__refs__": names}
+  if (m:=re.match(r"([\w.]+):(?!=)", expr)): ns, expr = {**ns, **vars(importlib.import_module(m[1])), "__refs__": names}, expr[m.end():]
+  # a %name outside a string literal is a UOp
+  expr = re.sub(r"""('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")|(%\w+)""", lambda x: x[1] or f"__refs__[{x[2]!r}]", expr)
+  return eval(expr, ns)  # pylint: disable=eval-used
 
 # ***** render *****
 
@@ -127,16 +67,16 @@ def _const_str(x:UOp) -> str:
 _named_keys = {"dtype", "addrspace", "axis", "op"}
 _keywords = {"true", "false", "inf", "nan", "invalid"}
 
-def _val(v, named=False, ref:Callable[[UOp], str|None]=lambda _: None, refs=None) -> str:
+def _val(v, named=False, ref:Callable[[UOp], str]=repr) -> str:
   """an arg value: literals bare, tuples [a b], strings bare if one word else quoted, UOps in the graph as %id, other python objects as `expr`"""
   if named and isinstance(v, (Enum, DType)): return v.name.lower() if isinstance(v, Ops) else v.name
   if isinstance(v, bool): return str(v).lower()
   if type(v) in (int, float): return repr(v)   # exact types: enums and ConstFloat are python objects
-  if isinstance(v, tuple): return "[" + " ".join(_val(x, ref=ref, refs=refs) for x in v) + "]"
-  if isinstance(v, UOp) and (r:=ref(v)) is not None: return r
+  if isinstance(v, tuple): return "[" + " ".join(_val(x, ref=ref) for x in v) + "]"
+  if isinstance(v, UOp) and not _inline(v): return ref(v)
   if isinstance(v, str): return v if re.fullmatch(r"[A-Za-z_][\w:.,+\-]*", v) and v not in _keywords else repr(v)
   if isinstance(v, Target): return _val(repr(v))
-  return _pyobj(v, ref, refs)
+  return _pyobj(v, ref)
 
 # single-value args get a name, these ops have a dataclass arg rendered as key=value per field. runtime objects aren't rendered
 _arg_key = {Ops.CAST:"dtype", Ops.BITCAST:"dtype", Ops.COPY:"device", Ops.GETADDR:"device", Ops.SPECIAL:"name", Ops.UNSHARD:"axes",
@@ -149,11 +89,12 @@ def _struct_args() -> dict[Ops, type]:
   return {Ops.PARAM: ParamArg, Ops.REFPARAM: ParamArg, Ops.BUFFER: ParamArg, Ops.ALLOC: ParamArg, Ops.SINK: KernelInfo,
           Ops.CALL: CallInfo, Ops.CUSTOM_FUNCTION: CustomFunction, Ops.STAGE: BufferizeOpts, Ops.PROGRAM: ProgramInfo}
 
-def _fields_str(a, always=(), ref:Callable[[UOp], str|None]=lambda _: None, refs=None) -> str:
-  return " ".join(f"{f.name}={_val(v, f.name in _named_keys, ref, refs)}" for f in fields(a)
-                  if f.name not in _skip_fields and (not _same(v:=getattr(a, f.name), f.default) or f.name in always))
+def _fields_str(a, always=(), ref:Callable[[UOp], str]=repr) -> str:
+  # a value with UOps in it isn't compared to the default, UOp == builds a UOp
+  return " ".join(f"{f.name}={_val(v, f.name in _named_keys, ref)}" for f in fields(a)
+                  if f.name not in _skip_fields and (_arg_uops(v:=getattr(a, f.name)) or v != f.default or f.name in always))
 
-def _render_arg(x:UOp, ref:Callable[[UOp], str|None]=lambda _: None, refs=None) -> str:
+def _render_arg(x:UOp, ref:Callable[[UOp], str]=repr) -> str:
   """args are key=value, written after the srcs"""
   if (a:=x.arg) is None: return ""
   match x.op:
@@ -163,8 +104,8 @@ def _render_arg(x:UOp, ref:Callable[[UOp], str|None]=lambda _: None, refs=None) 
     case Ops.REDUCE: return f"op={_val(a[0], True)}" + (f" pop={a[1]}" if a[1] else "")
     case Ops.ALLREDUCE: return f"op={_val(a[0], True)} device={_val(a[1])}"
   if type(a) is _struct_args().get(x.op):   # name always, so a SINK's KernelInfo() is not None
-    return _fields_str(a, always=("name",) if x.op is Ops.SINK else (), ref=ref, refs=refs)
-  return f"{(k:=_arg_key.get(x.op, 'arg'))}={_val(a, k in _named_keys, ref, refs)}"
+    return _fields_str(a, always=("name",) if x.op is Ops.SINK else (), ref=ref)
+  return f"{(k:=_arg_key.get(x.op, 'arg'))}={_val(a, k in _named_keys, ref)}"
 
 # CONSTs never get lines (inline literals, no %id); concrete all-const STACKs inline into their parent as [a b]
 def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
@@ -174,7 +115,6 @@ def _arg_uops(a) -> list[UOp]:
   if isinstance(a, UOp): return [a]
   if isinstance(a, (tuple, list, set, frozenset)): return [u for x in a for u in _arg_uops(x)]
   if isinstance(a, dict): return _arg_uops(tuple(a.values()))
-  if isinstance(a, functools.partial): return _arg_uops((a.args, a.keywords))
   if is_dataclass(a) and not isinstance(a, type): return _arg_uops(tuple(getattr(a, f.name) for f in fields(a) if f.name not in _skip_fields))
   return []
 
@@ -189,15 +129,11 @@ def render_uir(root:UOp|list[UOp]) -> str:
   if isinstance(root, UOp): add(root)
   nodes = [u for u in (order if isinstance(root, UOp) else root) if not _inline(u)]
   table = {u:i for i,u in enumerate(nodes)}
-  refs = {f"%{i}":u for i,u in enumerate(nodes)}
   def src_str(u:UOp) -> str:
     if not _inline(u): return f"%{table[u]}"
     return _const_str(u) if u.op is Ops.CONST else "[" + " ".join(src_str(s) for s in u.src) + "]"
-  def line(i:int, u:UOp) -> str:
-    # a UOp in an arg is a %ref if it's an earlier line
-    arg = _render_arg(u, lambda v: f"%{table[v]}" if table.get(v, i) < i else None, refs)
-    return " ".join(filter(None, [f"%{i} = {colored(u.op.name.lower(), uops_colors.get(u.op))}", *map(src_str, u.src), arg]))
-  return "\n".join(line(i, u) for i,u in enumerate(nodes))
+  return "\n".join(" ".join(filter(None, [f"%{i} = {colored(u.op.name.lower(), uops_colors.get(u.op))}", *map(src_str, u.src),
+                                          _render_arg(u, src_str)])) for i,u in enumerate(nodes))
 
 # ***** parse *****
 

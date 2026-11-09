@@ -101,18 +101,12 @@ class TestSSARender(unittest.TestCase):
     txt = "# hand written\n" + render_uir(g) + " # trailing comment\n\n# last line comment\n"
     assert_roundtrip(self, parse_uir(txt))
 
-class LyingRepr:
-  def __init__(self, x): self.x = x
-  def __eq__(self, other): return isinstance(other, LyingRepr) and self.x == other.x
-  def __hash__(self): return hash(self.x)
-  def __repr__(self): return "LyingRepr()"
-
 class TestPythonObjects(unittest.TestCase):
   def test_uop_in_arg(self):
     # a symbolic Estimates holds UOps that aren't in the graph: they get lines and are %refs in the arg
     n = UOp.variable("n", 1, 64)
     sink = UOp.sink(UOp.const(1), arg=KernelInfo(name="k", estimates=Estimates(ops=n*2, mem=n)))
-    self.assertIn("estimates=`Estimates(ops=%", ansistrip(render_uir(sink)))
+    self.assertIn("Estimates(ops=%", ansistrip(render_uir(sink)))
     assert_roundtrip(self, sink)
 
   def test_ambiguous_names(self):
@@ -129,12 +123,6 @@ class TestPythonObjects(unittest.TestCase):
     from tinygrad.uop.upat import _get_clause
     assert_roundtrip(self, _get_clause(UPat(Ops.CONST, arg=math.nan), UOp.custom_function("x", fmt=True).call(inline=True)))
     assert_roundtrip(self, UOp.sink(UOp.const(math.nan), UOp.const(-math.inf)))
-
-  def test_pickle_fallback(self):
-    # a repr that doesn't rebuild the object is caught when rendering
-    g = UOp(Ops.PYLITERAL, arg=LyingRepr(3))
-    self.assertIn("unpickle(", render_uir(g))
-    assert_roundtrip(self, g)
 
 class TestParseUIR(unittest.TestCase):
   def test_handwritten(self):
