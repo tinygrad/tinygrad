@@ -3054,6 +3054,12 @@ class Transformer:
         units_map = {name: (expert_slices, [[max(u, 0) for u in us] for us in slicing]) for name in entries
                      if re.sub(r"^blk\.\d+\.", "", name) in exp_names}
       elif exp_count % shard == 0: ffn_rules.update({w: 0 for w in exp_names})
+      # (a hidden dim's quant block: the largest of every layer's down projection of that kind (UD quants mix types over the layers), the
+      # layers' hidden dims padded alike: one size in the config)
+      kind_block: dict[str, int] = {}
+      for name, (_, _, typ) in entries.items():
+        if (k:=re.sub(r"^blk\.\d+\.", "", name)) in ('ffn_down.weight', 'ffn_down_shexp.weight'):
+          kind_block[k] = max(kind_block.get(k, 1), _GGML_QUANT.get(typ, (1,))[0])
       for name, (_, shape, typ) in entries.items():
         if (k:=re.sub(r"^blk\.\d+\.", "", name)) in head_rules:
           axis = shard_map[name] = head_rules[k]
@@ -3063,7 +3069,8 @@ class Transformer:
           # FFN hidden dims pad to whole quant blocks of the down projection on every device
           down = entries.get(re.sub(r"ffn_(gate|up)(_shexp)?\.", r"ffn_down\2.", name), entries[name])
           # (the output rows: whole tiles of 32 on every device, the tensor cores take a few tokens' logits)
-          unit = 32 if k == 'output.weight' else 1 if '_exps' in k else _GGML_QUANT.get(down[2], (1,))[0]
+          unit = 32 if k == 'output.weight' else 1 if '_exps' in k else \
+            kind_block.get(re.sub(r"ffn_(gate|up)(_shexp)?\.", r"ffn_down\2.", k), _GGML_QUANT.get(down[2], (1,))[0])
           sizes[name] = round_up(shape[axis], shard*unit)
       pads = {k: sizes[k] for k in sizes if sizes[k] != entries[k][1][shard_map[k]]}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
