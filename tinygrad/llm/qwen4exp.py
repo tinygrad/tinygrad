@@ -1085,6 +1085,13 @@ class TransformerBlock(FFNBlock):
 # the first row of the sequence's region of the qwen sparse attention's caches (shared by sequences, see Transformer.regions) while its call is
 # traced: a bound variable (or 0), a multiple of REGION_ALIGN
 _seq_base:list[UOp|int] = [0]
+# (split indexer: the pools of a device a prefill chunk's sequence is gathered of while its call is traced, None: a context's, see
+# Transformer._pk_bucket)
+_pk_local:list[int|None] = [None]
+# PREFILL_PK_CTX: the contexts (tokens, ascending) a prefill chunk smaller than the largest is also traced for (its jit of the shortest one its
+# context fits): the split indexer's pooled keys of that many tokens gathered, not of a whole context (a small chunk's gather of 262k a
+# constant ~6 ms on tr8)
+PREFILL_PK_CTX = tuple(int(c) for c in getenv("PREFILL_PK_CTX", "").split(",") if c)
 # (a prefill chunk's time is about that of this many rows more than its padded ones: its kernels' fixed time, see Transformer._chunk_plan)
 CHUNK_FIXED_ROWS = 256
 # (a multiple of the pools of the KV heads' devices (kpool*kv_split): a region's pools on the devices as its positions)
@@ -1231,7 +1238,7 @@ class QSAIndexer:
 
   def _gathered(self, pk:Tensor, pb:int|UOp) -> Tensor:
     """the pooled keys (split) of the sequence of the region from pool pb, whole on every device: (local_pools*split, D), row p its pool p"""
-    n, L = self.split, self.local_pools
+    n, L = self.split, _pk_local[0] or self.local_pools
     at = Tensor.arange(L, dtype=dtypes.int32).to(pk.device) + (Tensor(pb // n).cast(dtypes.int32) if isinstance(pb, UOp) else pb // n)
     mine = rows_gather(pk, at.contiguous(), split=True)  # (n*L, D) split: every device its rows of the sequence's pools
     return all_gather(mine, 0).reshape(n, L, -1).permute(1, 0, 2).reshape(n * L, -1).contiguous()
@@ -1248,7 +1255,7 @@ class QSAIndexer:
     if split: xx, qf = shard_rows(xx, 0), shard_rows(qf, 0)
     q = self._queries(xx, *qf.chunk(2, dim=-1))
     # (the scores of the pools so far only, the heads' relu summed in the kernel: index_scores)
-    spk = self._static(pk) if self.split == 1 else pk[:self.max_context // idx.kpool]
+    spk = self._static(pk) if self.split == 1 else pk[:min(self.max_context // idx.kpool, int(pk.shape[0]))]
     if (scores:=index_scores(q.reshape(Tq, idx.n_heads, idx.head_dim), spk, pools, idx.head_dim**-0.5)) is None:
       sc = q.reshape(Tq*idx.n_heads, idx.head_dim).half().contiguous().matmul(spk.T, dtype=dtypes.float).contiguous()
       scores = (sc.reshape(Tq, idx.n_heads, -1).relu().sum(1) * idx.head_dim**-0.5).contiguous()
@@ -2380,11 +2387,23 @@ class Transformer:
     self._seq_ckpt_jits[save](UOp.variable("seq_slot", 0, self.seq_slots()).bind(slot), UOp.variable("seq_ps", 0, S-1).bind(pos % S),
                               UOp.variable("seq_pc", 0, SC-1).bind(pos % SC))
 
-  def _prefill_jit(self, n:int) -> Any:
-    """the jit of a prefill chunk of n tokens on a sequence's region, see __call__"""
-    jits = self.__dict__.setdefault("jits_seq", {})
-    if n not in jits: jits[n] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
-    return jits[n]
+  def _prefill_jit(self, n:int, lp:int|None=None) -> Any:
+    """the jit of a prefill chunk of n tokens on a sequence's region (lp: of a context of that many pools a device, see _pk_bucket), see __call__"""
+    jits, key = self.__dict__.setdefault("jits_seq", {}), n if lp is None else (n, lp)
+    if key not in jits: jits[key] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
+    return jits[key]
+
+  def _pk_buckets(self, n:int) -> list[int]:
+    """the pools a device of the contexts (PREFILL_PK_CTX) a prefill chunk of size n is traced for (split indexer, not the largest size)"""
+    if (idx:=unwrap(self.config.indexer)).top_k >= self.max_context or (s:=self.config.idx_split) == 1 or n >= self.prefill_chunks()[-1]: return []
+    # (whole tiles of the scores: n*lp a multiple of 128)
+    lps = [round_up(-(-c // idx.kpool // s), 128 // math.gcd(s, 128)) for c in PREFILL_PK_CTX if c < self.max_context]
+    return [lp for lp in dedup(lps) if lp < -(-self.max_context // idx.kpool // s)]
+
+  def _pk_bucket(self, n:int, end:int) -> int|None:
+    """the pools a device of the jit of a prefill chunk of size n ending at position end (None: a whole context's)"""
+    kp, s = unwrap(self.config.indexer).kpool, self.config.idx_split
+    return next((lp for lp in self._pk_buckets(n) if lp * s >= -(-end // kp)), None)
 
   def _seq_shared(self, read:bool=True):
     """the resources the jits share, made before they're captured (or loaded): the random state of the devices, the n-gram tables, the
@@ -2466,7 +2485,14 @@ class Transformer:
       if all(j is not jit for j, _ in calls.values()): calls[name] = (jit, call)
     # every chunk size's jits: of a context top_k covers (its fewest tokens from the start: a piece of a prompt it's the size for) and longer
     chunks = sorted(self.prefill_chunks(), reverse=True)
+    # (a chunk size's jits of the contexts of PREFILL_PK_CTX and of a whole one: a chunk of each)
+    pk_jits = [(c, ctx) for c in chunks if (lps:=self._pk_buckets(c)) for ctx in [self.max_context] + [lp * self.config.idx_split *
+               unwrap(self.config.indexer).kpool for lp in lps]]
+    def pk_call(c:int, ctx:int): return functools.partial(self._seq_chunk, 0, 0, min(c, top), ctx) if top + c > self.seq_rows() else \
+                                        functools.partial(self._seq_chunk, 0, top, c, ctx)
+    for c, ctx in pk_jits: add(f"prefill{c}_ctx{ctx}", self._prefill_jit(c, self._pk_bucket(c, ctx)), pk_call(c, ctx))
     for c in chunks:
+      if self._pk_buckets(c): continue
       if top + c > self.seq_rows(): add(f"prefill{c}", self._prefill_jit(c), functools.partial(self.seq_prefill, 0, 0, [0]*min(c, top), 0, 0))
       else: add(f"prefill{c}", self._prefill_jit(c), functools.partial(self.seq_prefill, 0, 0, [0]*(top+c), top, 0))
     for m in sorted(self.SEQ_SIZES, reverse=True):
@@ -2482,8 +2508,10 @@ class Transformer:
     # device work but theirs)
     par:list[tuple[Any, Callable[[], Any]]] = []
     for c in chunks:
+      if self._pk_buckets(c): continue
       par.append((self._prefill_jit(c), functools.partial(self._seq_chunk, 0, 0, min(c, top)) if top + c > self.seq_rows() else
                                        functools.partial(self._seq_chunk, 0, top, c)))
+    par += [(self._prefill_jit(c, self._pk_bucket(c, ctx)), pk_call(c, ctx)) for c, ctx in pk_jits]
     for m in self.SEQ_SIZES: par.append((jit:=self._seq_jit(m), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m)))
     # (and the copies of the states: their jits alone, not seq_move's write of the token buffer)
     for sv in (True, False):
@@ -2593,12 +2621,17 @@ class Transformer:
     for i in range(1, len(best)): best[i] = min((CHUNK_FIXED_ROWS + s + best[max(0, i - s)][0], s) for s in sizes)
     return best
 
-  def _seq_chunk(self, base:int, pos:int, n:int):
-    """a prefill chunk: the n tokens from pos of the region from base in the token buffer (the jit of the smallest chunk size of n or more)"""
+  def _seq_chunk(self, base:int, pos:int, n:int, ctx:int|None=None):
+    """
+    a prefill chunk: the n tokens from pos of the region from base in the token buffer (the jit of the smallest chunk size of n or more, and of
+    the shortest context (PREFILL_PK_CTX) ctx fits: pos+n if None)
+    """
     sizes = self.prefill_chunks()
     vb, sp = UOp.variable("seq_base", 0, self.seq_rows()).bind(base), UOp.variable("start_pos", 0, self.max_context-1).bind(pos)
-    nt = UOp.variable("toks", 1, next(s for s in sizes if n <= s)).bind(n)
-    self(self._token_buf[:, vb+sp:vb+sp+nt], sp, self._seq_pf_temp, vb)
+    nt = UOp.variable("toks", 1, c:=next(s for s in sizes if n <= s)).bind(n)
+    _pk_local[0] = self._pk_bucket(c, pos + n if ctx is None else ctx)
+    try: self(self._token_buf[:, vb+sp:vb+sp+nt], sp, self._seq_pf_temp, vb)
+    finally: _pk_local[0] = None
 
   def forward_seqs(self, *vs:UOp) -> Tensor:
     """
@@ -2741,7 +2774,8 @@ class Transformer:
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp=0) -> Tensor:
     # a view of the token buffer is already realized: no schedule for the jit input
     if (buf:=getattr(self, "_token_buf", None)) is None or tokens.uop.base is not buf.uop.base: tokens = tokens.contiguous()
-    key = int(T.vmax) if isinstance(T:=tokens.shape[1], UOp) else T
+    key:Any = int(T.vmax) if isinstance(T:=tokens.shape[1], UOp) else T
+    if _pk_local[0] is not None: key = (key, _pk_local[0])
     # (a sequence's region from a variable base: jits of their own, see seq_prefill)
     jits = self.__dict__.setdefault("jits" + ("_greedy" if temperature is None else "") + ("_seq" if isinstance(base, UOp) else ""), {})
     if (jit:=jits.get(key)) is None:
