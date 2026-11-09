@@ -897,7 +897,8 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   # grouped experts (IQ3_S, IQ4_XS) on q8_K activations: per block of 256 inputs, the int8 WMMA dots of a sub-block (32) times its integer sub-scale
   # accumulate in int32, the block is scaled once (weight d times activation d). a workgroup is a tile of MOE_TILE rows x 256 weight rows, 8
   # waves of 2 output tiles (act: the gate and up of 16 columns) by the tile's 4 token tiles. the tile's activations of a block are in LDS
-  grid_src, (rows, tiles) = (srcs[0] if ggml_type == IQ3_S else None), srcs[-2:]
+  # (IQ2_S (IQ2S_K256): a scale per 16 weights, 1+2*s of a nibble, d/8 the block's: the two halves of a sub-block scaled on their own)
+  grid_src, (rows, tiles) = (srcs[0] if ggml_type in (IQ3_S, IQ2_S) else None), srcs[-2:]
   TOK, WAVES, OT = _moe_tile((rows, tiles)), 8, 2
   TT, OUTB, blocks = TOK // 16, WAVES * OT * 16, in_features // 256
   type_words = QUANT_SIZES[ggml_type] // raw.dtype.itemsize
@@ -940,9 +941,10 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   # weights of at most 127 (IQ3_S 15) is below 2**23, a sub-scale at most 32 in magnitude, 8 of them below 2**31)
   ints = [[UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
   ints = [[r.after(r.after(b).store(zero)) for r in row] for row in ints]
-  dws = [_half(raw[base]) for base in bases]
-  def sub_scale(base:UOp, sb:UOp) -> UOp:
-    # the integer scale of sub-block sb: IQ3_S 1+2*s (odd, at most 31), IQ4_XS the 6 bits minus 32
+  dws = [_half(raw[base]) * (0.125 if ggml_type == IQ2_S else 1.0) for base in bases]
+  def sub_scale(base:UOp, sb:UOp, h:int=0) -> UOp:
+    # the integer scale of sub-block sb: IQ3_S 1+2*s (odd, at most 31), IQ4_XS the 6 bits minus 32, IQ2_S half h's 1+2*s (its nibble)
+    if ggml_type == IQ2_S: return (1 + 2*((_load_byte(raw, base, 74 + sb) >> h*4) & 15)).cast(dtypes.int32)
     if ggml_type == IQ3_S: return (1 + 2*((_load_byte(raw, base, 106 + sb//2) >> ((sb % 2) * 4).cast(dtypes.uint32)) & 15)).cast(dtypes.int32)
     header, low = raw[base].load(), raw[base+1].load()
     return (((low >> (4*sb).cast(dtypes.uint32)) & 15) | (((header >> (16+2*sb).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int32) - 32
@@ -951,16 +953,26 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   afr = [[_i8_frag(tuple(lds_q[t*16 + col, sb, c].load() for c in acols(h))) for h in range(2)] for t in range(TT)]
   sums = []
   for o, base in enumerate(bases):
-    sub = sub_scale(base, sb)
+    sub = sub_scale(base, sb) if ggml_type != IQ2_S else None
     words = _quant_frag_words(raw, base, sb, ph, ggml_type, grid, signed=signed) if rdna4 else \
       [tuple(_quant_word(raw, base, sb, h*4+i, ggml_type, grid) for i in range(4)) for h in range(2)]
     bfr = [_i8_frag(w) for w in words]
     for t in range(TT):
+      prev = ints[o][t].after(sb)
+      if ggml_type == IQ2_S:
+        # (a scale per 16: the halves' dots on their own, each times its scale (a dot of 16 products of at most 43*127, below 2**17))
+        regs = []
+        for h in range(2):
+          dreg = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
+          regs.append(dreg.after(dreg.store(UOp.wmma(afr[t][h], bfr[h], zero, *WMMA_ARG))))
+        subs = [sub_scale(base, sb, h) for h in range(2)]
+        sums.append(ints[o][t].store(UOp.stack(*[_cfn(True, src=(regs[1][j].load(), subs[1], _cfn(True, src=(regs[0][j].load(), subs[0],
+                    prev[j].load()), arg=(MAD_I24, dtypes.int32))), arg=(MAD_I24, dtypes.int32)) for j in range(8)])))
+        continue
       dot = UOp.wmma(afr[t][1], bfr[1], UOp.wmma(afr[t][0], bfr[0], zero, *WMMA_ARG), *WMMA_ARG)
       dreg = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
       dreg = dreg.after(dreg.store(dot))
-      prev = ints[o][t].after(sb)
-      sums.append(ints[o][t].store(UOp.stack(*[_cfn(True, src=(dreg[j].load(), sub, prev[j].load()), arg=(MAD_I24, dtypes.int32))
+      sums.append(ints[o][t].store(UOp.stack(*[_cfn(True, src=(dreg[j].load(), cast(UOp, sub), prev[j].load()), arg=(MAD_I24, dtypes.int32))
                                               for j in range(8)])))
   done = UOp.group(*sums).end(sb)
   new = [[UOp.stack(*(accs[o][t].after(b)[j].load() + ints[o][t].after(done)[j].load().float() *
@@ -3324,7 +3336,9 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
   out = Tensor.empty((devices*rows_out, cols), dtype=dtypes.half if act else out_dtype, device=x.device, axis=0 if devices > 1 else None)
   # (IQ4_XS too: as fast as its f16 kernel for the experts' down rows, which read their activations exactly)
   # (RDNA3 IQ4_XS: K256 too, its f16 kernel ~4x the time of an IQ3_S layer's)
-  if ggml_type in (IQ3_S,) + ((IQ4_XS,) if getenv("IQ4_K256", 0 if _wmma_rdna4(x.device) else 1) else ()) and in_features % 256 == 0 and \
+  # (IQ2S_K256=1, default off: IQ2_S too (a numerics change: q8_K activations, not q8 per 32))
+  if ggml_type in (IQ3_S,) + ((IQ4_XS,) if getenv("IQ4_K256", 0 if _wmma_rdna4(x.device) else 1) else ()) + \
+     ((IQ2_S,) if getenv("IQ2S_K256", 0) else ()) and in_features % 256 == 0 and \
      out_features % 256 == 0:
     # activations with a scale per 256 inputs (q8_K, as llama.cpp's dots of the IQ formats): the sub-blocks accumulate in int32
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
