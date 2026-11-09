@@ -512,8 +512,8 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
         from tinygrad.renderer.x86_dsl import X86DSLRenderer
         dsl, dsl_sink = X86DSLRenderer(renderer.target), full_sink
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
-      #if dsl:
-      # dsl_sink = graph_rewrite(dsl_sink, dsl.pre_isel_matcher, name=colored("dsl pre inst selection", "magenta"), bottom_up=True)
+      if dsl:
+        dsl_sink = graph_rewrite(dsl_sink, dsl.pre_isel_matcher, name=colored("dsl pre inst selection", "magenta"), bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
       if dsl:
         dsl_sink = graph_rewrite(dsl_sink, dsl.isel_matcher, ctx=IselContext(dsl_sink), name=colored("dsl inst selection", "magenta"), bottom_up=True)
