@@ -1280,7 +1280,8 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
     value = sum(_sigmoid(accs[s*(OT//streams)+o][t].after(update)[i].load()) * hc[0][r.minimum(rows-1) if rows else r, s*N+ocol(o)].load()
                 for s in range(streams)) / streams if hc else accs[o][t].after(update)[i].load()
     stores.append(out[(split*M + r).valid(r < out_rows) if out_rows < M else split*M + r, ocol(o)].store(value.cast(out.dtype)))
-  name = "q8_gemm"
+  # (LIN_NAMES: the shapes in the name, for profiles)
+  name = f"q8_gemm_{M}_{N}_{K}{'_hc' if hc else ''}_k{k_splits}_t{token_tile}_b{block_n}" if getenv("LIN_NAMES") else "q8_gemm"
   return UOp.group(*stores).end(token_block, output_block, split, lane, wave).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
 F32T = -1  # (_q8_gemm_kernel: a float weight transposed)
