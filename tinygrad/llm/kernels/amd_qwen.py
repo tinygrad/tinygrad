@@ -1151,6 +1151,8 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   # RDNA3 uses 16-element input fragments and interleaved accumulator rows, with LDS capped at 32 KiB.
   M, N = cast(tuple[int, int], out.shape)
   K, streams = cast(int, x.shape[-1]), 4 if hc else 1
+  # (hc: out may have fewer rows than x, its first ones (a device's real rows of batched decoding): the others aren't stored)
+  out_rows, M = M, (cast(int, x.numel()) // K if hc else M)
   assert k_splits > 0 and M % k_splits == 0 and K % (32*k_splits) == 0
   assert k_splits == 1 or ggml_type == Q8_0 or (ggml_type == Q6_K and (K // (32*k_splits)) % 8 == 0), "a split of whole blocks"
   M //= k_splits
@@ -1275,9 +1277,9 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   stores = []
   for o, t, i in itertools.product(range(OT//streams), range(TT), range(8)):
     r = token_block * token_tile + wt * TT * 16 + t * 16 + (half * 8 + i if rdna4 else 2*i + half)
-    value = sum(_sigmoid(accs[s*(OT//streams)+o][t].after(update)[i].load()) * hc[0][r, s*N+ocol(o)].load()
+    value = sum(_sigmoid(accs[s*(OT//streams)+o][t].after(update)[i].load()) * hc[0][r.minimum(rows-1) if rows else r, s*N+ocol(o)].load()
                 for s in range(streams)) / streams if hc else accs[o][t].after(update)[i].load()
-    stores.append(out[split*M + r, ocol(o)].store(value.cast(out.dtype)))
+    stores.append(out[(split*M + r).valid(r < out_rows) if out_rows < M else split*M + r, ocol(o)].store(value.cast(out.dtype)))
   name = "q8_gemm"
   return UOp.group(*stores).end(token_block, output_block, split, lane, wave).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
@@ -1312,7 +1314,9 @@ def f16t_gemm(x:Tensor, wt:Tensor) -> Tensor|None:
   fxn = functools.partial(_q8_gemm_kernel, token_tile=32, ggml_type=F32T, block_n=64, rdna4=_wmma_rdna4(x.device))
   return Tensor.custom_kernel(out, wt, xp.contiguous(), fxn=fxn)[0][:R]
 
-def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False, half_out:bool=False) -> Tensor:
+def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False, half_out:bool=False,
+              rows:int=0) -> Tensor:
+  """rows (split): every device's real rows, its first ones (batched decoding's, the others padding): the others aren't read"""
   assert layer.ggml_type in QUANT_SIZES
   tokens = int(x.numel()) // layer.in_features
   out_features, in_features = layer.out_features, int(x.uop.shard_shape[-1])
@@ -1373,7 +1377,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       ksplits = next(s for s in (32 if local_rows <= 64 else 16 if local_rows <= 512 else 8, 8, 4, 2, 1) if in_features % (32*s) == 0)
       out_shape = (ksplits*tokens, out_features)
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=rdna4,
-                            block_n=128 if rdna4 or (local_out % 128 == 0 and ksplits == 1 and tt == 128) else 64, k_splits=ksplits)
+                            block_n=128 if rdna4 or (local_out % 128 == 0 and ksplits == 1 and tt == 128) else 64, k_splits=ksplits,
+                            rows=rows if split and 0 < rows < local_rows else 0)
     if q6_rows: out_shape = (splits*P, out_features)
     srcs = (x.cast(dtypes.float16).contiguous(),)
   elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None and not (tokens <= DECODE_MULTI and in_features >= 1024):
@@ -3520,8 +3525,11 @@ def ghc_prefill_norm(xs:Tensor, w:Tensor, winj:Tensor, count:int, eps:float) -> 
 
 def _q8_gemm_2d(out:UOp, *srcs:UOp, **kw) -> UOp: return _q8_gemm_kernel(out.reshape(-1, out.shape[-1]), *srcs, **kw)
 
-def ghc_prefill_mix(lo:Tensor, raw:Tensor, xn:Tensor, shape:tuple[int, ...]|None=None) -> Tensor:
-  """shape: the output's (rows its second axis, split on it: made so, a view of the (rows, D) one isn't a buffer: a copy of it)"""
+def ghc_prefill_mix(lo:Tensor, raw:Tensor, xn:Tensor, shape:tuple[int, ...]|None=None, rows:int=0) -> Tensor:
+  """
+  shape: the output's (rows its second axis, split on it: made so, a view of the (rows, D) one isn't a buffer: a copy of it). fewer rows a
+  device than lo's: its first ones. rows: a device's rows of lo and xn past them aren't read
+  """
   # Four stream projections in each workgroup: sigmoid and weighted mean stay in registers, not a full-size gate tensor.
   T, CD = cast(tuple[int, int], xn.shape)
   assert CD % 128 == 0
@@ -3529,7 +3537,7 @@ def ghc_prefill_mix(lo:Tensor, raw:Tensor, xn:Tensor, shape:tuple[int, ...]|None
   if shape is not None:
     out = Tensor.empty(*shape, dtype=dtypes.float32, device=xn.device, axis=len(shape) - 2 if sharded else None)
     return Tensor.custom_kernel(out, raw, lo.half().contiguous(), xn,
-                                fxn=functools.partial(_q8_gemm_2d, token_tile=32, block_n=32, rdna4=_wmma_rdna4(xn.device)))[0]
+                                fxn=functools.partial(_q8_gemm_2d, token_tile=32, block_n=32, rdna4=_wmma_rdna4(xn.device), rows=rows))[0]
   out = Tensor.empty(T, CD//4, dtype=dtypes.float32, device=xn.device, axis=0 if sharded else None)
   ret = Tensor.custom_kernel(out, raw, lo.half().contiguous(), xn,
                              fxn=functools.partial(_q8_gemm_kernel, token_tile=32, block_n=32, rdna4=_wmma_rdna4(xn.device)))[0]

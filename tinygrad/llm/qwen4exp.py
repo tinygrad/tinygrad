@@ -327,6 +327,9 @@ _sp_rows:list[Tensor|None] = [None]
 # rows are padded to whole tiles of 32), 0: not split
 _seq_split = [0]
 SEQ_SPLIT_MAX = 128  # (the most real rows a device)
+# HC_REAL: batched decoding's hyper-connections read a device's real rows only and the mix stores them (no copy of them), its input not
+# materialized in float (2 kernels less a sublayer): the mix's epilogue and the activation's kernel round differently (FMA, rcp: ulps)
+HC_REAL = getenv("HC_REAL", 0)
 def _split_rows() -> int: return round_up(_seq_split[0], 32)
 def _split_real(x:Tensor) -> Tensor:
   """(B, N*P, ...) split padded rows: the real rows (B, N*R, ...), split"""
@@ -668,8 +671,10 @@ class GatedResidual:
     batched decoding with the streams' rows split over the devices (padded, see _seq_split): every device the mix and coefficients of its rows,
     the sublayer sees all the real rows (gathered) and returns its partial sums, every device sums its rows of them (as a prefill's phases)
     """
-    mixed, post, _ = self.pre_split(xs)
-    own = _split_real(mixed).contiguous()
+    if HC_REAL: own, post, _ = self.pre_split(xs, real=True)
+    else:
+      mixed, post, _ = self.pre_split(xs)
+      own = _split_real(mixed).contiguous()
     x = all_gather_q8(own, 1) if own.shape[-1] % 256 == 0 else all_gather(own, 1, dtypes.half)
     _partial_out[0], _sp_rows[0] = True, own
     try: out = sublayer(x)
@@ -679,10 +684,11 @@ class GatedResidual:
     out = out if done else reduce_scatter(out, 1) if out.ndim == own.ndim + 1 else shard_rows(out, 1)
     return self.post_split(_split_pad(out), post, post, xs)
 
-  def pre_split(self, xs:Tensor, norm:Callable[[Tensor], Tensor]|None=None) -> tuple[Tensor, Tensor, Tensor]:
+  def pre_split(self, xs:Tensor, norm:Callable[[Tensor], Tensor]|None=None, real:bool=False) -> tuple[Tensor, Tensor, Tensor]:
     """
     the streams' rows split over the devices (sequence parallel, static rows): the sublayer's input of every device's rows and their output
-    weights (2*sigmoid(inject)), twice (the phases' coefficients are three, see post_split)
+    weights (2*sigmoid(inject)), twice (the phases' coefficients are three, see post_split). real: the sublayer's input of every device's
+    real rows only (batched decoding's, _split_real's), the padding rows not read
     """
     B, R = xs.shape[:2]
     rows = int(B * R)
@@ -693,14 +699,19 @@ class GatedResidual:
     else:
       xn = (xs.float().rmsnorm(eps=self.eps) * self.norm["weight"].reshape(self.count, self.dim)).flatten(2).contiguous()
       xhalf, inj = xn.reshape(rows, -1).half().contiguous(), self.inject(xn)
-    lo = q8_linear(self.down, xhalf, split=True) * (1 / self.count)
-    act = (lo * lo.sigmoid()).contiguous()
+    R_real = _seq_split[0] if real else 0
+    lo = q8_linear(self.down, xhalf, split=True, rows=R_real) * (1 / self.count)
+    # (HC_REAL: not materialized in float: the kernel summing the down projection's splits stores the half the mix reads (its rcp can round
+    # differently))
+    act = lo * lo.sigmoid() if HC_REAL else (lo * lo.sigmoid()).contiguous()
     if self.up.ggml_type == Q8_0 and self.count == 4 and self.dim % 32 == 0 and \
-       int(act.uop.shard_shape[0]) % 32 == 0:
-      mixed = ghc_prefill_mix(act, self.up.weight, xn.reshape(rows, -1), (int(B), int(R), self.dim))
+       int(xhalf.uop.shard_shape[0]) % 32 == 0:
+      shape = (int(B), len(cast(tuple, xs.device))*R_real, self.dim) if real else (int(B), int(R), self.dim)
+      mixed = ghc_prefill_mix(act, self.up.weight, xn.reshape(rows, -1), shape, rows=R_real)
     else:
-      g = q8_linear(self.up, act, split=True).reshape(B, R, self.count, self.dim)
+      g = q8_linear(self.up, act.contiguous(), split=True).reshape(B, R, self.count, self.dim)
       mixed = (g.sigmoid() * xn.reshape(B, R, self.count, self.dim)).mean(2)
+      if real: mixed = _split_real(mixed).contiguous()
     post = (inj / self.count).sigmoid() * 2
     return mixed, post, post
 
