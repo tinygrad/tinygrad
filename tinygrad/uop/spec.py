@@ -25,6 +25,19 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   from tinygrad.uop.validate import validate_index_with_z3
   return validate_index_with_z3(sz, idx, gate)
 
+def is_storage_index(x:UOp) -> bool:
+  return x.op is Ops.INDEX and x.src[0].addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)
+
+def is_address(u:UOp) -> bool:
+  # casts and AFTER preserve an index into storage
+  while u.op in {Ops.CAST, Ops.BITCAST, Ops.AFTER}: u = u.src[0]
+  return is_storage_index(u)
+
+def value_srcs(x:UOp) -> tuple[UOp, ...]:
+  if x.op in {Ops.INDEX, Ops.LOAD, Ops.STORE}: return x.src[1:]
+  if x.op in {Ops.REDUCE, Ops.STAGE}: return x.src[:1]
+  return x.src
+
 def valid_device_range(device:str|tuple[str, ...]|None, src:tuple[UOp, ...]) -> bool:
   if not isinstance(device, tuple): return len(src) == 0
   if len(src) != 1: return False
@@ -39,13 +52,16 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, enter_calls=False)
       ret: bool|None = check_spec.rewrite(u)
       if ret is not True:
         if DEBUG >= 3: print(render_uir(lst))
-        raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
+        raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}"
+                           + (f": {ret}" if isinstance(ret, str) else ""))
 
 # ***** new specs *****
 def matches_dtype(x:UOp, dtype:DType) -> bool: return x.dtype == dtype or x.base.is_invalid  # Invalid matches any dtype
 p_size = UPat.any(UPat.cvar(dtype=dtypes.weakint), UPat(Ops.STACK, src=()))
 # these ops can be used in the tensor graph and programs
 spec_shared = PatternMatcher([
+  (UPat(GroupOp.ALU|{Ops.STACK, Ops.WMMA, Ops.REDUCE, Ops.STAGE, Ops.INDEX, Ops.LOAD, Ops.STORE}, name="x"), lambda x: next(
+    (f"{x.op.name} takes a value but got an address ({s.op.name}); read it with .load()" for s in value_srcs(x) if is_address(s)), None)),
   # NOTE: for testing, we let sinks be anything
   (UPat(Ops.SINK, dtypes.void), lambda: True),
 
@@ -121,9 +137,9 @@ spec_shared = PatternMatcher([
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE; a STORE's value matches its target's dtype
   (UPat(Ops.STORE, src=(UPat(name="t"), UPat(name="v")), allow_any_len=True),
    lambda t,v: None if matches_dtype(v, t.dtype) or v.dtype == weak_dtype(t.dtype) else False),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(), validate_index),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
-   lambda uidx,gate,alt,load: validate_index(uidx, gate) if matches_dtype(alt, load.dtype) else False),
+  (UPat((Ops.INDEX, Ops.SHRINK)).or_casted().load(), lambda: True),
+  (UPat((Ops.INDEX, Ops.SHRINK)).or_casted().load(UPat.var("alt"), UPat(dtype=dtypes.bool), name="load"),
+   lambda alt,load: matches_dtype(alt, load.dtype)),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
@@ -201,6 +217,10 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
+  # a tensor graph still reads through views with shaped coordinates: read bounds are checked once lowered
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(), lambda uidx: None if validate_index(uidx) else False),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(UPat(), UPat.var("gate", dtype=dtypes.bool)),
+   lambda uidx,gate: None if validate_index(uidx, gate) else False),
   # a bare CONST only appears under its width CAST or as a PARAM/BUFFER/ALLOC size
   (UPat(GroupOp.All-GroupOp.Defines, name="x"), lambda x: False if x.op is not Ops.CAST and any(s.op is Ops.CONST for s in x.src) else None),
   (UPat(GroupOp.All-{Ops.CONST}, dtypes.weaks), lambda: False),
@@ -233,7 +253,7 @@ spec_hcq = PatternMatcher([
 ])+spec_shared
 
 # these are intermediate ops. everything should be deleted from here
-spec_full = PatternMatcher([
+spec_full = PatternMatcher(spec_shared.patterns[:1]+[
   (UPat(Ops.REWRITE_ERROR, dtypes.void, name="x"), lambda x: isinstance(x.arg, str)),
 
   # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.

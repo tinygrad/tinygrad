@@ -68,7 +68,7 @@ def _valid(i:UOp) -> UOp:
   return i.get_valid()
 
 # movement op on INDEX as a PatternMatcher
-def _mop_index(r:UOp, idx:UOp):
+def move_index(r:UOp, idx:UOp, access:UOp|None=None):
   idxs, in_shape, arg = idx.src[1:], r.src[0].shape, r.marg
   if partial := len(idxs) != len(r.shape):
     src_prefix = len(in_shape) - len(r.shape[len(idxs):])
@@ -78,17 +78,23 @@ def _mop_index(r:UOp, idx:UOp):
   kept = {UOp.const(True)} | {c for i in new_idxs for c in _valid(i).split_uop(Ops.AND)}
   dropped = dedup(c for i in idxs for c in _valid(i).split_uop(Ops.AND) if c not in kept)
   if (ret := r.src[0].index(*new_idxs, arg=idx.arg)).shape != idx.shape and partial: return None
-  # the gates the movement op dropped from the indexes still gate the value
-  return dropped[0].uprod(*dropped[1:]).where(ret, ret.dtype.const(0)) if dropped else ret
+  if dropped:
+    gate = dropped[0].uprod(*dropped[1:])
+    # dropped gates mask the LOAD result, including its alternate
+    if access is not None and access.op is Ops.LOAD: ret = access.replace(src=(ret,)+access.src[1:])
+    if ret.addrspace is AddrSpace.ALU: return gate.where(ret, ret.dtype.const(0))
+    # stores keep dropped gates in the index
+    coords = ret.src[1:]
+    ret = ret.replace(src=(ret.src[0],) + (coords[:-1]+(coords[-1].valid(gate),) if coords else (UOp.const(0).valid(gate),)))
+  elif ret.shape == () and idx.shape: ret = ret.expand(idx.shape)
+  return access.replace(src=(ret,)+access.src[1:]) if access is not None else ret
 
 pm_mops = PatternMatcher([
-  # handle movement ops on INDEX
-  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index),
-  # A store through a padded view gates the destination index, not its loaded value.
-  (UPat.var("a").where(UPat.var("b").where(UPat.var("dst"), 0), UPat.var("pad")).store(UPat.var("val")),
-   lambda a,b,dst,pad,val: (a&b).where(dst, 0).store(val) if pad.is_invalid else None),
-  (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")), 0).store(UPat.var("val")),
-   lambda cond,buf,idx,val: buf.index(idx.valid(cond)).store(val)),
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),),
+        allow_any_len=True, name="access"), move_index),
+  # storage INDEX waits for LOAD or STORE to place dropped gates
+  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
+   lambda r,idx: move_index(r, idx) if idx.addrspace is AddrSpace.ALU else None),
   # storage moves movement ops and INDEX after AFTER
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg) if r.addrspace is not AddrSpace.ALU else None),
@@ -96,6 +102,11 @@ pm_mops = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="a"),), allow_any_len=True, name="x"),
    lambda a,x: a.src[0].index(*x.src[1:]).after(*a.src[1:]) if a.addrspace is AddrSpace.ALU else None),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
+])
+
+# fold remaining indexes after LOAD and STORE have placed dropped gates
+pm_mop_index = PatternMatcher([
+  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), move_index),
 ])
 
 # *****************

@@ -12,7 +12,7 @@ class TestEffectRetention(unittest.TestCase):
         def kernel(C:UOp) -> UOp:
           i = UOp.range(3, 0, AxisType.LOOP)
           cell = C.after(i)[0]
-          v = value.after(cell.store(cell + 1))
+          v = value.after(cell.store(cell.load() + 1))
           return C.after(v.reduce(i, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
         self.assertEqual(Tensor.zeros(1, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [3])
 
@@ -68,12 +68,12 @@ class TestEffectRetention(unittest.TestCase):
     self.assertEqual((a.tolist(), b.tolist()), ([1, 8], [0]))
 
   def test_fold_keeps_effect_on_unloaded_value(self):
-    def kernel(A:UOp, B:UOp): return B[0].store((A[0]+1).after(A[1].store(7)) * 0).sink(arg=KernelInfo(opts_to_apply=()))
+    def kernel(A:UOp, B:UOp): return B[0].store((A[0].load()+1).after(A[1].store(7)) * 0).sink(arg=KernelInfo(opts_to_apply=()))
     a, b = Tensor.custom_kernel(Tensor([3, 0]).contiguous(), Tensor.ones(1, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([3, 7], [0]))
 
   def test_simplify_keeps_read_after_store(self):
-    def kernel(A:UOp, B:UOp): return B[0].store((A[0].after(A[0].store(7))*2).simplify()).sink(arg=KernelInfo(opts_to_apply=()))
+    def kernel(A:UOp, B:UOp): return B[0].store((A.after(A[0].store(7))[0].load()*2).simplify()).sink(arg=KernelInfo(opts_to_apply=()))
     a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([7], [14]))
 
@@ -100,7 +100,7 @@ class TestEffectRetention(unittest.TestCase):
   def test_valid_gate_after_effect(self):
     def kernel(A:UOp, B:UOp):
       i = UOp.range(2, 0)
-      return B[i].store(A[UOp.const(0).valid(UOp.const(False).after(A[0].store(7)))]+1).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+      return B[i].store(A[UOp.const(0).valid(UOp.const(False).after(A[0].store(7)))].load()+1).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(2, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([7], [1, 1]))
 
@@ -121,7 +121,7 @@ class TestEffectOrder(unittest.TestCase):
 
   def test_store_value_behind_coalesced_store(self):
     def c(v): return UOp.const(v, dtypes.int)
-    for stores, want in ((lambda A: (A[0].store(7), A[1].store(A.after(A[0].store(7))[0]+5)), [7, 12, 5, 0]),
+    for stores, want in ((lambda A: (A[0].store(7), A[1].store(A.after(A[0].store(7))[0].load()+5)), [7, 12, 5, 0]),
                          (lambda A: (A[1].store(c(1).after(A[0].store(7)) + A[2].load()),), [7, 6, 5, 0]),
                          (lambda A: (A[1].store(c(1).after(A[2].store(2))), A[3].store(c(3).after(A[0].store(10)))), [10, 1, 2, 3])):
       out = Tensor([0, 0, 5, 0], dtype=dtypes.int).contiguous().custom_kernel(fxn=lambda A: UOp.sink(*stores(A), arg=KernelInfo(opts_to_apply=())))[0]
@@ -131,7 +131,7 @@ class TestEffectOrder(unittest.TestCase):
     # the reduce body stores, so it loops a, k, b in order, and the digits of S are the A[a*2+b] it visits
     def kernel(O:UOp, S:UOp, A:UOp) -> UOp:
       a, k, b = [UOp.range(2, n, AxisType.LOOP) for n in range(3)]
-      v = A[a*2+b].after((cell:=S.after(a, k, b)[0]).store(cell*10+A[a*2+b]))
+      v = A.after((cell:=S.after(a, k, b)[0]).store(cell.load()*10+A[a*2+b].load()))[a*2+b].load()
       return O[0].store(v.reduce(a, k, b, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
     o, s = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor.zeros(1, dtype=dtypes.int).contiguous(),
                                 Tensor([1, 2, 3, 4], dtype=dtypes.int), fxn=kernel)[:2]
@@ -142,7 +142,7 @@ class TestEffectOrder(unittest.TestCase):
     # loops nest by axis id whatever order END lists them, so x is outer and the digits of S are A[0], A[2], A[1], A[3]
     def kernel(S:UOp, A:UOp) -> UOp:
       x, y = UOp.range(2, 0, AxisType.LOOP), UOp.range(2, 1, AxisType.LOOP)
-      return (cell:=S.after(x, y)[0]).store(cell*10+A[y*2+x]).end(y, x).sink(arg=KernelInfo(opts_to_apply=()))
+      return (cell:=S.after(x, y)[0]).store(cell.load()*10+A[y*2+x].load()).end(y, x).sink(arg=KernelInfo(opts_to_apply=()))
     s = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor([1, 2, 3, 4], dtype=dtypes.int), fxn=kernel)[0]
     self.assertEqual(s.item(), 1324)
 
@@ -153,7 +153,7 @@ class TestEffectOrder(unittest.TestCase):
       t = UOp.range(8, 0, AxisType.LOCAL)
       tmp = UOp.placeholder((8,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
       st = tmp[t].store(t.cast(dtypes.int)).end(t)
-      return C[t].store(tmp.after(st)[7-t]).end(t).sink(arg=KernelInfo(opts_to_apply=()))
+      return C[t].store(tmp.after(st)[7-t].load()).end(t).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(8, dtype=dtypes.int), fxn=kernel)[0].tolist(), [7-i for i in range(8)])
 
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -164,15 +164,15 @@ class TestEffectOrder(unittest.TestCase):
       i = t0*2+t1
       tmp = UOp.placeholder((8,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
       st = tmp[i].store(i.cast(dtypes.int)).end(t0, t1)
-      return C[i].store(tmp.after(st)[t0*2+1-t1]).end(t0, t1).sink(arg=KernelInfo(opts_to_apply=()))
+      return C[i].store(tmp.after(st)[t0*2+1-t1].load()).end(t0, t1).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(8, dtype=dtypes.int), fxn=kernel)[0].tolist(), [i^1 for i in range(8)])
 
 class TestEffectFrequency(unittest.TestCase):
   def test_range_merge_keeps_after_domain(self):
     # C is read once per i or once per o, so it counts to 4, and merging o and i must not make that 16
     o, i = UOp.range(4, 0, AxisType.LOOP), UOp.range(4, 1, AxisType.LOOP)
-    stores = {"after_i": lambda C,A: (c:=C.after(i)[0]).store(c+1),
-              "after_o": lambda C,A: UOp.group((c:=C.after(o)[0]).store(c+1), A.after(o, i)[0].store(1)),
+    stores = {"after_i": lambda C,A: (c:=C.after(i)[0]).store(c.load()+1),
+              "after_o": lambda C,A: UOp.group((c:=C.after(o)[0]).store(c.load()+1), A.after(o, i)[0].store(1)),
               "load_after_o": lambda C,A: C.after(o, i)[0].store(C.after(o)[0].load()+1)}
     for name, store in stores.items():
       with self.subTest(name):
@@ -185,14 +185,14 @@ class TestEffectFrequency(unittest.TestCase):
     for name, c in {"div": o//2, "cmp": (o<2).cast(dtypes.int)}.items():
       with self.subTest(name):
         def kernel(C:UOp, B:UOp, c=c) -> UOp:
-          return UOp.group(C[c].store(C[c]+1), B[o*4+i].store(1)).end(o, i).sink(arg=KernelInfo(opts_to_apply=()))
+          return UOp.group(C[c].store(C[c].load()+1), B[o*4+i].store(1)).end(o, i).sink(arg=KernelInfo(opts_to_apply=()))
         self.assertEqual(Tensor.custom_kernel(Tensor.zeros(2).contiguous(), Tensor.zeros(16).contiguous(), fxn=kernel)[0].tolist(), [2, 2])
 
   def test_range_merge_then_shrink(self):
     # r0<2 shrinks the merged range of 8 to 4, which is the same UOp as r0, so it isn't shrunk again to 2
     def kernel(C:UOp) -> UOp:
       r0, r1 = UOp.range(4, 0, AxisType.LOOP), UOp.range(2, 1, AxisType.LOOP)
-      return (cell:=C[(r0*2+r1).valid(r0<2)]).store(cell+1).end(r0, r1).sink(arg=KernelInfo(opts_to_apply=()))
+      return (cell:=C[(r0*2+r1).valid(r0<2)]).store(cell.load()+1).end(r0, r1).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.zeros(8, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [1, 1, 1, 1, 0, 0, 0, 0])
 
   def test_shrink_range_keeps_ungated_index(self):
@@ -258,9 +258,9 @@ class TestEffectFrequency(unittest.TestCase):
     r, l = UOp.range(3, 0, AxisType.LOOP), UOp.loop(1)
     def loop_until(C:UOp) -> UOp:  # a padded iteration exits the loop: its gated reg never reaches 3 again
       reg = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG).after(r)[0].set(0)
-      nxt = reg.after(l)[0]+1
-      return C[0].store(reg.after(reg[0].store(nxt).backedge(l, nxt.ne(3)))[0])
-    stores = {"after": lambda C: (c:=C.after(r)[0]).store(c+1), "shared_load": lambda C: (c:=C[0]).store(c.load()+r.cast(dtypes.int)+1),
+      nxt = reg.after(l)[0].load()+1
+      return C[0].store(reg.after(reg[0].store(nxt).backedge(l, nxt.ne(3)))[0].load())
+    stores = {"after": lambda C: (c:=C.after(r)[0]).store(c.load()+1), "shared_load": lambda C: (c:=C[0]).store(c.load()+r.cast(dtypes.int)+1),
               "backedge": loop_until}
     for name, store in stores.items():
       with self.subTest(name):

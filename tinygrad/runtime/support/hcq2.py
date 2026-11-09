@@ -65,8 +65,9 @@ def make_submit(*cmds:UOp, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a
 def do_get_time_ms(ms:UOp) -> UOp:
   ts = UOp.placeholder((2,), dtypes.u64, addrspace=AddrSpace.REG)
   ts = ts.after(UOp.custom_function("clock_gettime", dtype=dtypes.i32).call(UOp.const(time.CLOCK_MONOTONIC, dtypes.i32), ts.index(0)))
-  return ms.index(0).store(ts[0] * 1000 + ts[1] // 1000000).sink()
-def get_time_ms(dep:UOp) -> UOp: return (ms:=UOp.placeholder((1,), dtypes.u64, addrspace=AddrSpace.REG)).after(do_get_time_ms(ms.after(dep)))[0]
+  return ms.index(0).store(ts[0].load() * 1000 + ts[1].load() // 1000000).sink()
+def get_time_ms(dep:UOp) -> UOp:
+  return (ms:=UOp.placeholder((1,), dtypes.u64, addrspace=AddrSpace.REG)).after(do_get_time_ms(ms.after(dep)))[0].load()
 
 @uopfunc
 def hcq_fence(slots:UOp, tl:UOp, last:int) -> UOp: # wait for the previous run of this schedule

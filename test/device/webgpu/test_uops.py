@@ -13,7 +13,7 @@ class TestLocalAccess(unittest.TestCase):
     uops.append(smem)
     st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.uint8, (), 42)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
-    sres = smem.after(barr).index(uop(uops, Ops.CONST, dtypes.int32, (), 0))
+    sres = smem.after(barr).index(uop(uops, Ops.CONST, dtypes.int32, (), 0)).load()
     self.assertEqual(_test_uops_result(dtypes.uint8, uops, sres), 42)
 
 if __name__ == "__main__": unittest.main()

@@ -4,6 +4,9 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, AxisType, broadcast_axes, KernelInfo
 from tinygrad.uop.symbolic import sym
 from tinygrad.codegen.simplify import pm_reduce_collapse
+from tinygrad.schedule.rangeify import pm_const_buffer_folding, pm_add_buffers, BufferizeOpts, LimitBufsContext, stage
+from tinygrad.schedule.prepare import pm_mops, pm_mop_index
+from tinygrad.schedule.indexing import run_rangeify
 from test.helpers import full_rewrite, to_uops_list
 
 simple_pm = PatternMatcher([
@@ -238,7 +241,7 @@ class TestUOpGraph(unittest.TestCase):
     d0 = UOp.param(0, dtypes.bool, 1)
     d1 = UOp.param(1, dtypes.int, 1)
     idx = UOp.const(0)
-    ld = d1.index(idx)
+    ld = d1.index(idx).load()
     alu = (ld<1).cast(dtypes.bool)
     out = d0.index(idx).store(alu)
     uops = to_uops_list([out])
@@ -248,7 +251,7 @@ class TestUOpGraph(unittest.TestCase):
     d0 = UOp.param(0, dtypes.float, 1)
     d1 = UOp.param(1, dtypes.int, 1)
     idx = UOp.const(0, dtypes.int)
-    ld = d1.index(idx)
+    ld = d1.index(idx).load()
     alu = ld.cast(dtypes.float).cast(dtypes.float)
     out = d0.index(idx).store(alu)
     uops = to_uops_list([out])
@@ -265,7 +268,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_bitcast_to_same_dtype_fold(self):
     for dt in dtypes.ints + dtypes.floats + (dtypes.bool,):
       d0 = UOp.param(0, dt, 1)
-      v = d0.index(UOp.const(0))
+      v = d0.index(UOp.const(0)).load()
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST and x.dtype is dt]), 0, f"dtype = {dt}")
 
@@ -277,7 +280,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_where_on_gated_load_fold(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp.param(0, dtypes.long, 100)
-    ld = d0.index(ridx0.valid(ridx0<50))
+    ld = d0.index(ridx0.valid(ridx0<50)).load()
     w = (ridx0<50).where(ld, 5)
     out = UOp.param(1, dtypes.long, 100)
     uops = to_uops_list([out.index(ridx0).store(w)])
@@ -289,7 +292,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_where_on_gated_load_folds_swapped_branches(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp.param(0, dtypes.long, 100)
-    ld = d0.index(ridx0.valid((ridx0<50).logical_not()))
+    ld = d0.index(ridx0.valid((ridx0<50).logical_not())).load()
     w = (ridx0<50).where(5, ld)
     uops = to_uops_list([w])
     expected = full_rewrite(UOp.const(5, dtypes.long).sink()).src[0]
@@ -300,7 +303,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_where_on_casted_gated_load_extra_cond(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp.param(0, dtypes.float, 100)
-    ld = d0.index(ridx0.valid(ridx0<50))
+    ld = d0.index(ridx0.valid(ridx0<50)).load()
     w = ((ridx0<50) & (ridx0>30)).where(ld, UOp.const(0.0)).cast(dtypes.half)
     out = UOp.param(1, dtypes.half, 100)
     uops = to_uops_list([out.index(ridx0).store(w)])
@@ -310,7 +313,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_where_on_casted_gated_load_extra_cond_swapped(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp.param(0, dtypes.float, 100)
-    ld = d0.index(ridx0.valid(ridx0<50))
+    ld = d0.index(ridx0.valid(ridx0<50)).load()
     w = ((ridx0<50) & (ridx0>30)).where(UOp.const(0.0), ld).cast(dtypes.half)
     out = UOp.param(1, dtypes.half, 100)
     uops = to_uops_list([out.index(ridx0).store(w)])
@@ -337,11 +340,11 @@ class TestUOpGraph(unittest.TestCase):
     c1 = UOp.range(UOp.const(512), 1, AxisType.WEAK)
     c2 = UOp.range(UOp.const(250), 2, AxisType.WEAK)
     c3 = UOp.param(1, dtypes.int, 512)
-    c4 = c3.index(c1)
+    c4 = c3.index(c1).load()
     c5 = UOp.range(UOp.const(240), 0)
     c6 = ((c2*UOp.const(240))+c5)
     c7 = UOp.param(2, dtypes.uchar, 60000)
-    c8 = c7.index(c6)
+    c8 = c7.index(c6).load()
     c9 = ((c4<0).where((c4+60000), c4)!=c6.cast(dtypes.int)).where(0, c8.cast(dtypes.uint).cast(dtypes.uchar)).reduce(c5, arg=Ops.ADD)
     c10 = c0.index(((c1*UOp.const(250))+c2)).store(c9).end(c1, c2)
     uops = to_uops_list([c10])
@@ -354,11 +357,11 @@ class TestUOpGraph(unittest.TestCase):
     c1 = UOp.range(UOp.const(512), 1, AxisType.WEAK)
     c2 = UOp.range(UOp.const(250), 2, AxisType.WEAK)
     c3 = UOp.param(1, dtypes.int, 512)
-    c4 = c3.index(c1)  # c4 is a load
+    c4 = c3.index(c1).load()
     c5 = UOp.range(UOp.const(240), 0)
     c6 = ((c2*UOp.const(240))+c5)
     c7 = UOp.param(2, dtypes.uchar, 60000)
-    c8 = c7.index(c6)
+    c8 = c7.index(c6).load()
     # (loaded + range) < const pattern - loaded value shouldn't be promoted to long
     loaded_idx = c4.cast(dtypes.weakint)
     comparison = (loaded_idx + c5) < UOp.const(60000)
@@ -373,8 +376,8 @@ class TestUOpGraph(unittest.TestCase):
     glbl1 = UOp.param(1, dtypes.int, 1)
     glbl2 = UOp.param(2, dtypes.int, 1)
     idx = UOp.const(0)
-    ld0 = glbl1.index(UOp.invalid())
-    ld1 = glbl2.index(idx.valid(UOp.const(True)))
+    ld0 = glbl1.index(UOp.invalid()).load()
+    ld1 = glbl2.index(idx.valid(UOp.const(True))).load()
     uops = to_uops_list([glbl0.index(idx).store(ld1+ld0)])
     # the gate and invalid value are deleted from ld1
     self.assertEqual(len([u for u in uops if u.op is Ops.LOAD]), 1)
@@ -385,8 +388,8 @@ class TestUOpGraph(unittest.TestCase):
     lidx = UOp.special(16, "lidx0")
     st = smem.index(lidx).store(glbl0.index(lidx).load())
     barrier = st.barrier()
-    ld0 = smem.after(barrier).index(UOp.invalid())
-    ld1 = smem.after(barrier).index((lidx+2).valid(UOp.const(True)))
+    ld0 = smem.after(barrier).index(UOp.invalid()).load()
+    ld1 = smem.after(barrier).index((lidx+2).valid(UOp.const(True))).load()
     uops = to_uops_list([glbl0.index(lidx).store(ld1+ld0)])
 
     # the gate and invalid value are deleted from ld1
@@ -462,11 +465,16 @@ class TestReduceCollapse(unittest.TestCase):
     self.assertIn(12.0, [u.val for u in uops if u.op is Ops.CONST])
 
 class TestMovementOps(unittest.TestCase):
+  def test_rangeify_reads_storage(self):
+    self.assertIn(Ops.LOAD, [u.op for u in run_rangeify(UOp.param(0, dtypes.float, 4).store(UOp.param(1, dtypes.float, 4)+1).sink()).toposort()])
+  def test_pm_mops_expanded_address_gate(self):
+    self.assertIs(graph_rewrite(UOp.param(0, dtypes.float, 1).expand((3,)).index(
+      UOp.range(3, 0).valid(UOp.range(3, 0).eq(0))), pm_mops).op, Ops.INDEX)
+
   def test_pm_mops_partial_reshape_index_removes_reshape(self):
-    from tinygrad.schedule.prepare import pm_mops
     src = UOp.param(0, dtypes.float, shape=(32, 4))
     r0, r1 = UOp.range(4, 0), UOp.range(8, 1)
-    result = graph_rewrite(src.reshape((4, 8, 4)).index(r0, r1), pm_mops, name="test")
+    result = graph_rewrite(src.reshape((4, 8, 4)).index(r0, r1), pm_mops+pm_mop_index, name="test")
     self.assertEqual(result.op, Ops.INDEX)
     self.assertIs(result.src[0], src)
     self.assertEqual(result.shape, (4,))
@@ -474,13 +482,22 @@ class TestMovementOps(unittest.TestCase):
     self.assertEqual([u for u in result.toposort() if u.op is Ops.RESHAPE], [src])
 
   def test_pm_mops_partial_reshape_index_suffix_mismatch_does_nothing(self):
-    from tinygrad.schedule.prepare import pm_mops
     src = UOp.param(0, dtypes.float, shape=(2, 6))
     result = graph_rewrite(src.reshape((2, 3, 2)).index(UOp.range(2, 0)), pm_mops, name="test")
     self.assertEqual(result.op, Ops.INDEX)
     self.assertEqual(result.src[0].op, Ops.RESHAPE)
 
 class TestConstBufferize(unittest.TestCase):
+  def test_staged_value_read(self): self.assertEqual(stage(LimitBufsContext(), UOp.const(1)).op, Ops.LOAD)
+
+  def test_stage_addrspace(self): self.assertEqual(UOp.const(1).bufferize(UOp.range(2, 0), arg=BufferizeOpts(None)).addrspace, AddrSpace.GLOBAL)
+
+  def test_constant_storage_read(self):
+    self.assertIs(graph_rewrite(UOp.const(1).bufferize(arg=BufferizeOpts(None)).index().load(), pm_const_buffer_folding), UOp.const(1))
+
+  def test_weak_storage_read(self):
+    self.assertEqual(graph_rewrite(UOp.param(0, dtypes.int, 2).cast(dtypes.weakint).index(0).load(), pm_add_buffers).src[0].op, Ops.LOAD)
+
   def test_const_bufferize_with_ranges(self):
     """Test that CONST.BUFFERIZE with ranges is folded correctly.
 

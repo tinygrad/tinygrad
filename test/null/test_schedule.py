@@ -813,7 +813,7 @@ class TestSchedule(unittest.TestCase):
     def named_copy(name:str):
       def fxn(out:UOp, src:UOp) -> UOp:
         i = UOp.range(src.shape[0], 0)
-        return out[i].store(src[i]).end(i).sink(arg=KernelInfo(name=name))
+        return out[i].store(src[i].load()).end(i).sink(arg=KernelInfo(name=name))
       return fxn
 
     src = Tensor.zeros(4, dtype=dtypes.float).contiguous().realize()
@@ -865,7 +865,7 @@ class TestSchedule(unittest.TestCase):
   def _copy_fxn(name:str="copy"):
     def copy_kernel(out:UOp, inp:UOp) -> UOp:
       i = UOp.range(inp.numel(), 0)
-      return UOp.group(out[i].store(inp[i])).end(i).sink(arg=KernelInfo(name=name))
+      return UOp.group(out[i].store(inp[i].load())).end(i).sink(arg=KernelInfo(name=name))
     return copy_kernel
 
   def _copy_call(self, out:Tensor, expr:Tensor, name:str="copy") -> Tensor:

@@ -5,11 +5,12 @@ from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
 from tinygrad.uop.symbolic import symbolic
+from tinygrad.uop.spec import is_storage_index
 from tinygrad.helpers import prod, dedup, VIZ, MAX_KERNEL_BUFFERS, SPEC
 from tinygrad.helpers import get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, apply_movement_op
-from tinygrad.schedule.prepare import pm_mops
+from tinygrad.schedule.prepare import pm_mops, pm_mop_index
 
 # creation can recurse a lot
 import sys
@@ -110,13 +111,15 @@ def after_all_invalid(after:UOp):
 pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
-  (UPat(Ops.INDEX, name="idx").f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_bufferize),
-  # no buffers for a const, in either spelling
+  (UPat(Ops.INDEX, name="idx").load().f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_bufferize),
+  # constant tables need no storage
   (UPat.cvar('c').or_casted().f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.val)),
+  # a read of storage that folded to its value is the value
+  (UPat.var("x").load(), lambda x: x if x.addrspace is AddrSpace.ALU else None),
   # indexing a const is the const
-  (UPat(Ops.INDEX, src=(UPat.cvar().or_casted("c"),),), lambda c: c),
+  (UPat(Ops.INDEX, src=(UPat.cvar().or_casted("c"),), allow_any_len=True), lambda c: c),
   # indexing an after with all fully invalid stores is invalid
-  (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True, name="idx"),
+  (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True).load(name="idx"),
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
   # a deviceless MSTACK src is the same value on every device, so indexing the stack is just indexing that value
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True, name="idx"),
@@ -125,9 +128,9 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
 
 pm_remove_bufferize = PatternMatcher([
   # remove reindexing with cost function
-  (UPat.var("src").f(Ops.STAGE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
+  (UPat.var("src").f(Ops.STAGE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx").load(), remove_bufferize),
   # STORE to self is NOOP
-  (UPat.var("x").store(UPat.var("x")), lambda x: UOp(Ops.NOOP)),
+  (UPat.var("x").store(UPat.var("x").load()), lambda x: UOp(Ops.NOOP)),
   # END on NOOP is NOOP
   (UPat(Ops.END, src=(UPat(Ops.NOOP, name="x"),), allow_any_len=True), lambda x: x),
 ])
@@ -137,19 +140,21 @@ def strip_zero_offset_shrink(x:UOp) -> UOp:
 
 def no_indexing_calls(u:UOp):
   new_srcs = []
-  for x in u.src:
-    if x.op is Ops.INDEX:
+  # scalar PARAMs take values; unused arguments still need their storage views normalized
+  value_args = {p.arg.slot+1 for p in u.body.toposort() if p.op is Ops.PARAM and p.addrspace is AddrSpace.ALU}
+  for i,x in enumerate(u.src):
+    if i in value_args: pass
+    # shared views may also be loaded elsewhere; CALL needs the buffer
+    elif x.op is Ops.LOAD and x.src[0].op is Ops.INDEX: x = x.src[0].src[0]
+    elif x.op is Ops.INDEX:
       # sometimes if call srcs have children the call will get an INDEX. we remove it here.
       # TODO: we should add safety checks here for contiguous
-      new_srcs.append(x.src[0])
+      x = x.src[0]
     elif x.op is Ops.SHRINK:
       # SHRINK with offset 0 is fine
-      new_srcs.append(strip_zero_offset_shrink(x))
-    elif x.op is Ops.MSTACK:
-      new_srcs.append(x.replace(src=tuple(strip_zero_offset_shrink(s) for s in x.src)))
-    else:
-      # everything else we pass through
-      new_srcs.append(x)
+      x = strip_zero_offset_shrink(x)
+    elif x.op is Ops.MSTACK: x = x.replace(src=tuple(strip_zero_offset_shrink(s) for s in x.src))
+    new_srcs.append(x)
   return u.replace(src=tuple(new_srcs))
 
 pm_no_indexing_calls = PatternMatcher([
@@ -171,7 +176,7 @@ class LimitBufsContext:
 def stage(ctx:LimitBufsContext, s:UOp) -> UOp:
   # Insert bufferize: use fresh WEAK ranges, while the DEVICE range stays a launched axis
   end_ranges = [x.replace(arg=(AxisType.WEAK, next(ctx.range_idx))) if x.axis_type is not AxisType.DEVICE else x for x in s.ranges]
-  return s.substitute(dict(zip(s.ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*s.ranges)
+  return s.substitute(dict(zip(s.ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*s.ranges).load()
 
 def _limit_bufs(ctx:LimitBufsContext, root:UOp):
   if (device:=root.device) is None: return None # no device, index related calculations
@@ -204,21 +209,21 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 
 def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
   size = prod(x.shape)
-  dtype = x.commit_dtype()  # a BUFFER is never weak: store at the committed dtype, the .cast(x.dtype) on the result keeps readers unchanged
+  dtype = x.commit_dtype()  # storage has a committed dtype; reads retain the computation dtype
   rngs = sorted(idx.ranges, key=lambda x: x.arg)
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
 
-  # AFTER: add END to the existing STORE, return buffer with kernel dependency
-  if (after:=x.src[0]).op is Ops.AFTER:
+  # storage AFTER reuses its buffer; ALU AFTER needs a new buffer
+  if (after:=x.src[0]).op is Ops.AFTER and after.addrspace is not AddrSpace.ALU:
     buf = after.src[0].buf_uop.base
     if not (stores := [s for s in after.src[1:] if s.op is Ops.STORE and s.src[0].op is Ops.INDEX]): return buf
-    # BUFFERIZE(INDEX(...)); store through the underlying global index instead.
+    # store through the underlying global index
     ended_stores = []
     for store in stores:
       store_target = store.src[0]
-      if store_target.src[0].op is Ops.STAGE and store_target.src[0].src[0].op is Ops.INDEX:
-        store_target = store_target.src[0].src[0]
-      if store.src[1] is store_target: continue  # skip self-assign
+      if store_target.src[0].op is Ops.STAGE and store_target.src[0].src[0].op is Ops.LOAD:
+        store_target = store_target.src[0].src[0].src[0]
+      if store.src[1] is store_target.load(): continue  # skip self-assign
       end_rngs = sorted(dedup(tuple(store_target.ranges) + tuple(rngs)), key=lambda x: x.arg)
       ended_stores.append(store_target.store(store.src[1]).end(*end_rngs))
     return buf.after(*ended_stores)
@@ -249,8 +254,8 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
 
   # INDEX of a buffer through the weak cast added above: index the buffer directly and cast the loaded value instead.
   # this must run in the same rewrite that adds the cast, or the expander expands the whole casted buffer into one big VECTORIZE
-  (UPat(Ops.INDEX, src=(UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat.var("buf"),)),), allow_any_len=True, name="u"),
-   lambda u,buf: u.replace(src=(buf,)+u.src[1:]).cast(u.dtype)),
+  (UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat.var("buf"),)).f(Ops.INDEX, allow_any_len=True, name="idx").load(),
+   lambda buf,idx: idx.replace(src=(buf,)+idx.src[1:]).load().cast(idx.dtype)),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
@@ -281,7 +286,8 @@ def debuf(slot:int, buf:UOp):
   return param.reshape(buf.max_shape).view_as(buf.shape)
 
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
-  if after.addrspace == AddrSpace.LOCAL: return None
+  # void AFTER only orders effects
+  if after.dtype is dtypes.void or after.addrspace == AddrSpace.LOCAL: return None
   if after.addrspace is AddrSpace.ALU: raise RuntimeError("kernel boundary requires storage")
   buf = after.buf_uop
   # NOTE: this is bottom up, so we only add it once
@@ -289,7 +295,8 @@ def handle_after(ctx:LocalAddBufferContext, after:UOp):
   return buf
 
 def check_buf_states(x:UOp):
-  idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
+  # ALU indexes have no buffer state
+  idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if is_storage_index(s)]
   read_from: dict[UOp, UOp] = {}
   if any((buf:=idx.buf_uop).op in GroupOp.Defines and read_from.setdefault(buf, state:=idx.src[0]) is not state for idx in idxs):
     raise RuntimeError(f"cycle detected while indexing {buf}")
@@ -345,7 +352,7 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   # bufferize -> store
   slots = [x.arg.slot for x in tsink.toposort() if x.op is Ops.ALLOC]
   paramarg_start: int = max([-1]+slots) + 1
-  tsink = graph_rewrite(tsink, pm_add_buffers, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")
+  tsink = graph_rewrite(tsink, pm_add_buffers+pm_mop_index, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")
   tsink = graph_rewrite(tsink, pm_no_indexing_calls, name="remove indexing from call args")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
   tsink = graph_rewrite(tsink, pm_no_views, name="remove views from the kernel graph")

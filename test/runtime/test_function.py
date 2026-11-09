@@ -523,8 +523,8 @@ class TestFunctionTuple(unittest.TestCase):
     def my_kernel(C:UOp, D:UOp, A:UOp) -> UOp:
       i = UOp.range(A.shape[0], 0)
       j = UOp.range(D.shape[0], 1)
-      store_c = C[i].store(A[i] * 2.0).end(i)
-      store_d = D[j].store(A[j]).end(j)
+      store_c = C[i].store(A[i].load() * 2.0).end(i)
+      store_d = D[j].store(A[j].load()).end(j)
       return UOp.sink(store_c, store_d, arg=KernelInfo(name="my_kernel"))
 
     def my_grad(d_c:UOp, call:UOp):
@@ -548,8 +548,8 @@ class TestFunctionTuple(unittest.TestCase):
   def test_custom_kernel_both_outputs_used(self):
     def my_kernel(C:UOp, D:UOp, A:UOp) -> UOp:
       i = UOp.range(A.shape[0], 0)
-      store_c = C[i].store(A[i] * 2.0)
-      store_d = D[i].store(A[i] * 3.0)
+      store_c = C[i].store(A[i].load() * 2.0)
+      store_d = D[i].store(A[i].load() * 3.0)
       return UOp.group(store_c, store_d).end(i).sink(arg=KernelInfo(name="my_kernel"))
 
     def my_grad(d_c:UOp, d_d:UOp, call:UOp):
@@ -572,7 +572,7 @@ class TestFunctionTuple(unittest.TestCase):
   def test_custom_kernel_precompile_no_copy_kernel(self):
     def my_kernel(C:UOp, A:UOp) -> UOp:
       i = UOp.range(A.shape[0], 0)
-      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="my_kernel"))
+      return C[i].store(A[i].load() * 2.0).end(i).sink(arg=KernelInfo(name="my_kernel"))
 
     def my_grad(d_c:UOp, call:UOp):
       return (None, (Tensor(d_c) * 2.0).uop)
@@ -606,7 +606,7 @@ class TestFunctionTuple(unittest.TestCase):
     def double_kernel(C:UOp, A:UOp) -> UOp:
       C, A = C.flatten(), A.flatten()
       i = UOp.range(A.numel(), 0)
-      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="double_kernel"))
+      return C[i].store(A[i].load() * 2.0).end(i).sink(arg=KernelInfo(name="double_kernel"))
     def double_grad(d_c:UOp, call:UOp): return (None, (Tensor(d_c) * 2.0).uop)
 
     a = Tensor.full((4, 4), 7.0).contiguous().shard(devs, axis=0).realize()
@@ -629,7 +629,7 @@ class TestFunctionTuple(unittest.TestCase):
   def test_custom_kernel_empty_is_local(self):
     def write(C:UOp, A:UOp) -> UOp:
       i = UOp.range(A.shape[0], 0)
-      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="write"))
+      return C[i].store(A[i].load() * 2.0).end(i).sink(arg=KernelInfo(name="write"))
     for precompile in (False, True):
       with self.subTest(precompile=precompile):
         @function(precompile=precompile, allow_implicit=False)
@@ -644,7 +644,7 @@ class TestFunctionTuple(unittest.TestCase):
     # a write-only custom_kernel output that is a realized buffer must be captured
     def write(C:UOp, A:UOp) -> UOp:
       i = UOp.range(A.shape[0], 0)
-      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="write"))
+      return C[i].store(A[i].load() * 2.0).end(i).sink(arg=KernelInfo(name="write"))
     for realize in (False, True):
       with self.subTest(realize=realize):
         state = Tensor.empty(4)
@@ -660,7 +660,7 @@ class TestFunctionTuple(unittest.TestCase):
     renderer = Device[Device.DEFAULT].renderer
     def prog(C:UOp, A:UOp) -> UOp:
       i = UOp.range(4, 0)
-      prg = to_program(C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="k")), renderer)
+      prg = to_program(C[i].store(A[i].load() * 2.0).end(i).sink(arg=KernelInfo(name="k")), renderer)
       sink = UOp.sink(C.base, A.base, arg=prg.src[0].arg)
       # Keep the compiled kernel, but hide its stores exactly as in an opaque external PROGRAM.
       return prg.replace(src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), *prg.src[2:]))
@@ -689,7 +689,7 @@ class TestFunctionTuple(unittest.TestCase):
     def my_kernel(C:UOp, A:UOp) -> UOp:
       C, A = C.flatten(), A.flatten()
       i = UOp.range(A.numel(), 0)
-      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="my_kernel"))
+      return C[i].store(A[i].load() * 2.0).end(i).sink(arg=KernelInfo(name="my_kernel"))
 
     @function(precompile=True)
     def f(a:Tensor):

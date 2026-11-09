@@ -5,7 +5,7 @@ from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, 
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.uir import render_uir
-from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
+from tinygrad.uop.spec import is_address, type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.x86 import ISARenderer, IselContext
 from tinygrad.dtype import dtypes, AddrSpace
@@ -22,7 +22,7 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.schedule.multi import multi_pm
-from tinygrad.schedule.prepare import pm_mops, expand_bitcast, _mop_index
+from tinygrad.schedule.prepare import pm_mops, pm_mop_index, expand_bitcast, move_index
 from tinygrad.schedule.indexing import _stack_select
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
@@ -117,16 +117,20 @@ pm_expand_broadcast = pm_wmma_add+PatternMatcher([
 def index_lane(x:UOp, idx:tuple[UOp, ...]) -> UOp:
   # x.index(*idx) with the index pushed through the movement ops
   ret = x.index(*idx)
-  while ret.op is Ops.INDEX and ret.src[0].op in GroupOp.Movement and (nxt:=_mop_index(ret.src[0], ret)) is not None: ret = nxt
+  while ret.op is Ops.INDEX and ret.src[0].op in GroupOp.Movement and (nxt:=move_index(ret.src[0], ret)) is not None: ret = nxt
   return ret
 
 def do_devectorize(b:UOp):
-  if b.shape == (): return None
+  if b.shape == () and not any(x.op is Ops.RESHAPE and x.marg == () and x.src[0].shape == (1,) for x in b.src): return None
   # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
   if not all(x.shape == b.shape or x.base.is_invalid for x in b.src): return None
   src = []
   for idx_c in itertools.product(*[[UOp.const(i) for i in range(x)] for x in b.shape]):
-    src.append(b.replace(src=tuple(x.base if x.base.is_invalid else index_lane(x, idx_c) for x in b.src)))
+    # LOAD and STORE keep their first src as an index
+    lanes = [x.base if x.base.is_invalid else index_lane(x, idx_c) for x in b.src]
+    src.append(b.replace(src=tuple(x.load() if is_address(x) and not (b.op in {Ops.LOAD, Ops.STORE} and i == 0) else x
+                                   for i,x in enumerate(lanes))))
+  if b.shape == (): return src[0]
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
@@ -135,7 +139,8 @@ def do_stack_wmma(u:UOp):
   src = []
   for b in u.src:
     if b.op != Ops.STACK:
-      src.append(UOp.stack(*[b.index(i) for i in range(b.max_numel())]))
+      # an operand held in storage is read lane by lane
+      src.append(UOp.stack(*[l.load() if is_address(l:=b.index(i)) else l for i in range(b.max_numel())]))
     else:
       src.append(b)
   return u.replace(src=tuple(src))
@@ -147,8 +152,6 @@ devectorizer2 = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # unpack WMMA
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
-  # reshape of a single element shaped value to scalar is an index
-  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
   # a scalar index into a STACK selects its lanes after the STACK and the index, renderers only extract lanes at const indices
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.var("i"))),
    lambda a,i: _stack_select(i, list(a.src)).after(a, i) if i.shape == () and a.ndim == 1 else None),
@@ -162,7 +165,7 @@ def fix_group_for_reduce(x:UOp):
   # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
   reduce_loop = [x.replace(arg=(AxisType.WEAK, x.axis_id[0]+100, *x.axis_id[1:])) for x in reduce_gfr]
-  buf = ret.bufferize(*reduce_gfr, arg=BufferizeOpts(None, AddrSpace.LOCAL)).index(*reduce_loop)
+  buf = ret.bufferize(*reduce_gfr, arg=BufferizeOpts(None, AddrSpace.LOCAL)).index(*reduce_loop).load()
 
   # do the final reduce (if/barrier are added in gpudims step)
   # NOTE: we remove all horizontal reduces here, they remain in the first reduce
@@ -199,7 +202,7 @@ def lower_reduce(ctx:itertools.count, r:UOp):
   input_ranges = tuple(x for x in inp.ranges if x not in r.src[1:])
   acc_init = acc.after(*input_ranges).store(UOp.const(identity_element(op, r.dtype)))
   acc_initted = acc.after(acc_init, *r.src[1:])
-  acc_out = acc_initted.store(acc_initted.alu(op, ret)).end(*r.src[1:])
+  acc_out = acc_initted.store(acc_initted.load().alu(op, ret)).end(*r.src[1:])
   return acc.after(acc_out).load()
 
 pm_reduce_local = pm_wmma_add+PatternMatcher([
@@ -210,18 +213,9 @@ pm_reduce_local = pm_wmma_add+PatternMatcher([
   (UPat(Ops.SINK, name="sink"), merge_reduce_ends),
 ])+pm_clean_up_group_sink
 
-def is_shape_changing_bitcast(u:UOp): return u.op is Ops.BITCAST and u.shape != u.src[0].shape
-def in_memory(u:UOp): return u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)
-def maybe_load(u:UOp): return u.load() if in_memory(u) else u
-pm_add_loads = PatternMatcher([
-  (UPat(GroupOp.Elementwise|{Ops.WMMA,Ops.STACK}, name="x"),
-   lambda x: None if is_shape_changing_bitcast(x) else x.replace(src=tuple(map(maybe_load, x.src)))),
-  (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
-])
-
 # a shape-changing bitcast of memory reinterprets the pointer, of a value it is expanded here (custom kernels bypass the scheduler)
 pm_expand_value_bitcast = PatternMatcher([
-  (UPat(Ops.BITCAST, name="bc"), lambda bc: None if in_memory(bc) else expand_bitcast(bc)),
+  (UPat(Ops.BITCAST, name="bc"), lambda bc: None if bc.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else expand_bitcast(bc)),
 ])
 
 def add_local_buffer(ctx, x:UOp):
@@ -274,7 +268,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(ast, multi_pm, name="multi_pm")
 
   # preprocess
-  sink = graph_rewrite(sink, pm_mops+pm_expand_value_bitcast, name="early movement ops", bottom_up=True)
+  sink = graph_rewrite(sink, pm_mops+pm_mop_index+pm_expand_value_bitcast, name="early movement ops", bottom_up=True)
 
   # first we optimize
   if optimize:
@@ -313,7 +307,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
+  sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast, name="*** expand broadcast")
 
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, name="devectorize2")

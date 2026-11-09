@@ -25,24 +25,24 @@ def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
   b, n = UOp.range(B, 0), UOp.range(N, 1)
   pair = UOp.range(D // 2, 2)
   even = pair * 2
-  c = freqs_cis[0, n, 0, pair, 0].cast(dtypes.float)
-  s = freqs_cis[0, n, 0, pair, 1].cast(dtypes.float)
+  c = freqs_cis[0, n, 0, pair, 0].load().cast(dtypes.float)
+  s = freqs_cis[0, n, 0, pair, 1].load().cast(dtypes.float)
   ordered:UOp|None = None
   for kvh in range(H_KV):
     q_out, k_out, v_out = (x.after(ordered) if ordered is not None else x for x in (q, k, v))
     x_in = xqkv.after(ordered) if ordered is not None else xqkv
     stores:list[UOp] = []
     for rep in range(group_size):
-      a = x_in[b, n, kvh, rep, even].cast(dtypes.float)
-      bb = x_in[b, n, kvh, rep, even + 1].cast(dtypes.float)
+      a = x_in[b, n, kvh, rep, even].load().cast(dtypes.float)
+      bb = x_in[b, n, kvh, rep, even + 1].load().cast(dtypes.float)
       h = kvh * group_size + rep
       stores += [q_out[b, n, h, even].store((a * c - bb * s).cast(q.dtype)), q_out[b, n, h, even + 1].store((a * s + bb * c).cast(q.dtype))]
-    a = x_in[b, n, kvh, group_size, even].cast(dtypes.float)
-    bb = x_in[b, n, kvh, group_size, even + 1].cast(dtypes.float)
+    a = x_in[b, n, kvh, group_size, even].load().cast(dtypes.float)
+    bb = x_in[b, n, kvh, group_size, even + 1].load().cast(dtypes.float)
     stores += [k_out[b, n, kvh, even].store((a * c - bb * s).cast(k.dtype)),
                k_out[b, n, kvh, even + 1].store((a * s + bb * c).cast(k.dtype)),
-               v_out[b, n, kvh, even].store(x_in[b, n, kvh, group_size + 1, even]),
-               v_out[b, n, kvh, even + 1].store(x_in[b, n, kvh, group_size + 1, even + 1])]
+               v_out[b, n, kvh, even].store(x_in[b, n, kvh, group_size + 1, even].load()),
+               v_out[b, n, kvh, even + 1].store(x_in[b, n, kvh, group_size + 1, even + 1].load())]
     ordered = UOp.group(*stores)
   assert ordered is not None
   return ordered.end(pair, n, b).sink(arg=KernelInfo(name="fused_qkv_rope_forward"))

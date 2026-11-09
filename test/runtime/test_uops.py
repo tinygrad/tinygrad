@@ -27,7 +27,7 @@ def _test_single_value(vals, op, dts):
   output_dtype = dtypes.bool if op in GroupOp.Comparison else dts[-1]
   buf_store = uop(uops, Ops.PARAM, output_dtype, (), 0)
   buf_loads = [uop(uops, Ops.PARAM, dtype, (), i+1) for i,dtype in enumerate(dts)]
-  loads = (buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0)) for i, dtype in enumerate(dts))
+  loads = (buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0)).load() for i, dtype in enumerate(dts))
   alu = uop(uops, op, output_dtype, loads)
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
   buf = Buffer(Device.DEFAULT, output_dtype.itemsize).allocate()
@@ -64,7 +64,7 @@ class TestBitcastBufferView(unittest.TestCase):
     src, out = UOp.param(0, dtypes.uint32, 4), UOp.param(1, dtypes.uint64, 1)
     ibuf = Buffer(Device.DEFAULT, 16, initial_value=np.array([0, 0x55667788, 0x11223344, 0], dtype=np.uint32).tobytes())
     obuf = Buffer(Device.DEFAULT, 8).allocate()
-    run_uops([out.index(0).store(src.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0))], [ibuf, obuf])
+    run_uops([out.index(0).store(src.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0).load())], [ibuf, obuf])
     self.assertEqual(np.frombuffer(obuf.as_memoryview(), dtype=np.uint64)[0], val)
 
   @Context(SPEC=2)
@@ -267,7 +267,7 @@ class TestUOpPrograms(unittest.TestCase):
     C = C[i, j].set(0.0)
 
     # Accumulate: end the store, with C.after(k) enforcing the dependency along the reduction axis
-    prog = C[i, j].store(C.after(k)[i, j] + A[i, k] * B[k, j]).end(i, j, k)
+    prog = C[i, j].store(C.after(k)[i, j].load() + A[i, k].load() * B[k, j].load()).end(i, j, k)
 
     # run program
     self._run(prog.sink(arg=KernelInfo()), a, b, c)
@@ -283,8 +283,8 @@ class TestUOpPrograms(unittest.TestCase):
     i, j, k = UOp.range(10, 0), UOp.range(10, 1), UOp.range(10, 2, axis_type=AxisType.LOOP)
 
     C = C[i, j].set(0.0)
-    C = C[i, j].set(C.after(k)[i, j] + A[i, k] * B[k, j], end=k)
-    prog = C[i, j].store(C[i, j].maximum(0.0)).end(i, j)
+    C = C[i, j].set(C.after(k)[i, j].load() + A[i, k].load() * B[k, j].load(), end=k)
+    prog = C[i, j].store(C[i, j].load().maximum(0.0)).end(i, j)
 
     self._run(prog.sink(arg=KernelInfo(opts_to_apply=())), a, b, c)
     with Context(DEBUG=0): self.assertLessEqual((c-ref).square().mean().item(), 1e-6)

@@ -2,8 +2,9 @@ import unittest
 from tinygrad import Tensor, UOp, dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.codegen.opt.postrange import Scheduler
+from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
-from tinygrad.helpers import Target
+from tinygrad.helpers import Target, Context
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 
 class TestReductionAxes(unittest.TestCase):
@@ -13,7 +14,17 @@ class TestReductionAxes(unittest.TestCase):
     # Reduction role, not numeric id, determines optimizer axis order.
     i, r = UOp.range(size, 1), UOp.range(size, 0)
     inp, out = UOp.param(0, dtypes.float, (size, size)), UOp.param(1, dtypes.float, (size,))
-    return self.scheduler(out[i].store(inp[i, r].reduce(r, arg=Ops.ADD)).end(i).sink(arg=KernelInfo())), i, r
+    return self.scheduler(out[i].store(inp[i, r].load().reduce(r, arg=Ops.ADD)).end(i).sink(arg=KernelInfo())), i, r
+
+  def test_matvec_explicit_reads(self):
+    with Context(TC=0):
+      i, r = UOp.range(128, 0), UOp.range(128, 1)
+      a, b, out = UOp.param(0, dtypes.float, 128), UOp.param(1, dtypes.float, 16384), UOp.param(2, dtypes.float, 128)
+      x, y = a.index(r).load(), b.index(i*128+r).load()
+      k = self.scheduler(out[i].store((x*y).reduce(r, arg=Ops.ADD)).end(i).sink(arg=KernelInfo()))
+      k.convert_loop_to_global()
+      self.assertEqual(hand_coded_optimizations(k).applied_opts, (
+        Opt(OptOps.SPLIT, 1, (8, AxisType.LOCAL)), Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))))
 
   def test_weak_reduction_membership(self):
     k, i, r = self.reduction()
@@ -32,11 +43,11 @@ class TestReductionAxes(unittest.TestCase):
     i = UOp.range(4, 0)
     r = UOp.range(i+1, 1)
     inp, out = UOp.param(0, dtypes.float, (4, 4)), UOp.param(1, dtypes.float, (4,))
-    k = self.scheduler(out[i].store(inp[i, r].reduce(r, arg=Ops.ADD)).end(i).sink(arg=KernelInfo()))
+    k = self.scheduler(out[i].store(inp[i, r].load().reduce(r, arg=Ops.ADD)).end(i).sink(arg=KernelInfo()))
     self.assertEqual(k.reduce_ranges, {r})
     self.assertEqual(k.axes_of(reduce=True), [1])
     k.apply_opt(Opt(OptOps.PADTO, 0, 8))
-    self.assertIs(k.reduceop.src[0].op, Ops.INDEX)  # padding a bound dependency must not mask the reduction's input
+    self.assertIs(k.reduceop.src[0].op, Ops.LOAD)  # padding a bound dependency must not mask the reduction's input
 
   def test_upcast_both_roles(self):
     k, _, _ = self.reduction()
@@ -68,7 +79,7 @@ class TestReductionAxes(unittest.TestCase):
   def test_nested_reduction_group_refused(self):
     i, r = UOp.range(8, 0), UOp.range(8, 1)
     inp, out = UOp.param(0, dtypes.float, (8, 8)), UOp.param(1, dtypes.float, (1,))
-    ast = out[0].store(inp[i, r].reduce(r, arg=Ops.ADD).reduce(i, arg=Ops.ADD)).sink(arg=KernelInfo())
+    ast = out[0].store(inp[i, r].load().reduce(r, arg=Ops.ADD).reduce(i, arg=Ops.ADD)).sink(arg=KernelInfo())
     for upcast_outer in (False, True):
       with self.subTest(upcast_outer=upcast_outer):
         k = self.scheduler(ast)
@@ -79,7 +90,7 @@ class TestReductionAxes(unittest.TestCase):
   def test_execute_upcast_reduction(self):
     def kernel(out, inp):
       i, r = UOp.range(4, 0), UOp.range(8, 1)
-      return out[i].store(inp[i, r].reduce(r, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=(
+      return out[i].store(inp[i, r].load().reduce(r, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=(
         Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)))))
     inp = Tensor([float(i) for i in range(32)], device="PYTHON").reshape(4, 8).contiguous().realize()
     out = Tensor.empty(4, device="PYTHON").custom_kernel(inp, fxn=kernel)[0]

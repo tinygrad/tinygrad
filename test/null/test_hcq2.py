@@ -19,7 +19,7 @@ def chain(x:Tensor, n:int) -> Tensor:
 
 def add_n(n:UOp, C:UOp, B:UOp) -> UOp:
   i = UOp.range(C.numel(), 0)
-  return C[i].store(B[i] + n).end(i).sink(arg=KernelInfo(name="add_n"))
+  return C[i].store(B[i].load() + n).end(i).sink(arg=KernelInfo(name="add_n"))
 
 def chain_input(value:int=2, device="NULL") -> Tensor: return Tensor.full((4,), value, dtype=dtypes.int32, device=device).contiguous().realize()
 
@@ -216,6 +216,8 @@ class TestHCQ2Profile(unittest.TestCase):
     with patch.object(Compiled, "pm_lower", pm + Compiled.pm_lower): self.test_profiling_reports_a_range_per_kernel(n=3)
 
 class TestHCQ2Link(unittest.TestCase):
+  def test_clock_value(self): self.assertIs(hcq2.get_time_ms(UOp(Ops.NOOP)).op, Ops.LOAD)
+
   def setUp(self): self.enterContext(Context(DEV="NULL"))
 
   def test_eager_templates_compile_once(self): self.assertIs(compiled_chain(3)[1], compiled_chain(3)[1])
