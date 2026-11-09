@@ -3121,8 +3121,9 @@ class Transformer(GLMSeqDriver):
     for b, st in zip([b for b in self.blk + [self.mtp] if isinstance(b, MLATransformerBlock)], self._stash_kv):
       assert b.indexer is not None
       idx, kp = b.indexer, b.indexer.idx.kpool
-      items = [(rows(st[0], row//nd, C*chunks//nd), rows(b.slot_rows_view(b.cache_s), row//nd, C*chunks//nd)),
-               (rows(st[1], row//kp, C*chunks//kp), rows(idx.cache_dk if kp == 1 else idx.cache_pk, row//kp, C*chunks//kp))]
+      # Host rows come from the stash chunk; device rows come from the independently allocated region.
+      items = [(rows(st[0], chunk*(C//nd), C*chunks//nd), rows(b.slot_rows_view(b.cache_s), row//nd, C*chunks//nd)),
+               (rows(st[1], chunk*(C//kp), C*chunks//kp), rows(idx.cache_dk if kp == 1 else idx.cache_pk, row//kp, C*chunks//kp))]
       for dst, src in items:
         if save: saves.append(dst.assign(src))
         else: pairs.append((src, dst))

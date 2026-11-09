@@ -56,13 +56,13 @@ class TestGLMDSASequence(unittest.TestCase):
       return x.shard(self.devs, axis) if axis is not None else x.to(self.devs)
 
     model = Transformer.__new__(Transformer)
-    model.config = SimpleNamespace(spec_drafts=2, cache_rows=32, kv_lora_rank=512)
+    model.config = SimpleNamespace(spec_drafts=2, cache_rows=128, kv_lora_rank=512)
     model.token_embd = SimpleNamespace(weight=SimpleNamespace(device=self.devs))
-    model.SEQ_MOVE, model.seq_rows = 32, lambda: 32
+    model.SEQ_MOVE, model.seq_rows = 32, lambda: 128
     idx = Indexer.__new__(Indexer)
-    idx.idx, idx.shard, idx.cache_dk = SimpleNamespace(kpool=1), 0, t((32, 2))
+    idx.idx, idx.shard, idx.cache_dk = SimpleNamespace(kpool=1), 0, t((128, 2))
     block = MLATransformerBlock.__new__(MLATransformerBlock)
-    block.indexer, block.cache_s = idx, t((32, 2), axis=0)
+    block.indexer, block.cache_s = idx, t((128, 2), axis=0)
     model.blk, model.mtp = [block], None
     model.seq_spec_h, model.seq_ckpt_h = t((12, 3)), t((2, 3))
     model.seq_ckpt_rings = []
@@ -76,10 +76,12 @@ class TestGLMDSASequence(unittest.TestCase):
     model._stash_kv_copy(True, 1, 0, 0)
     model._stash_state_copy(True, 0, 0, 0, 0, 0)
     for x in sources: x.assign(Tensor.zeros_like(x)).realize()
-    model._stash_kv_copy(False, 1, 0, 0)
+    model._stash_kv_copy(False, 1, 32, 0)  # region row 32 restore from host chunk 0
     model._stash_state_copy(False, 1, 0, 0, 0, 0)
-    np.testing.assert_array_equal(block.cache_s.numpy(), values[0])
-    np.testing.assert_array_equal(idx.cache_dk.numpy(), values[1])
+    for actual, saved in zip((block.cache_s, idx.cache_dk), values):
+      expected = np.zeros_like(actual.numpy())
+      expected[32:64] = saved[:32]
+      np.testing.assert_array_equal(actual.numpy(), expected)
     spec, ckpt = np.zeros((12, 3), dtype=np.float16), np.zeros((2, 3), dtype=np.float16)
     spec[6], ckpt[1] = values[2][0], values[3][0]
     np.testing.assert_array_equal(model.seq_spec_h.numpy(), spec)
