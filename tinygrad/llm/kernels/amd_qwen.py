@@ -1508,6 +1508,87 @@ def _sys(fmt:str, dtype:DType, *src:UOp) -> UOp: return _cfn(False, src=src, arg
 
 FLAG_AR_MAXN = 1 << 20  # words (two half values or one float32 each)
 
+# the collectives' mailboxes and pools (name, object), read by comm_state_report
+_COMM_STATE:list[tuple[str, int, Any]] = []
+def _peek(b:Any, off:int, n:int) -> bytes:
+  """n bytes at off of a buffer in an AM device's memory, read through its BAR (not by the device: a hung one too)"""
+  adev, out = cast(Any, Device[b.device]).iface.dev_impl, bytearray()
+  for pa, sz in b.get_storage(b.device).meta.mapping.paddrs:
+    if off >= sz:
+      off -= sz
+      continue
+    out += bytes(adev.vram.view(pa + off, min(sz - off, n - len(out)))[:])
+    off = 0
+    if len(out) >= n: break
+  return bytes(out)
+def _overlaps(b:Any, offs:list[int], n:int) -> str:
+  """the physical places of a buffer's ranges [off, off+n) and the other live buffers of its device whose memory has them (none: it's its own)"""
+  import gc
+  from tinygrad.device import Buffer
+  def phys(m:Any, off:int) -> int:
+    for pa, sz in m.paddrs:
+      if off < sz: return pa + off
+      off -= sz
+    return -1
+  m = b.get_storage(b.device).meta.mapping
+  rng = [(phys(m, o), phys(m, o) + n) for o in offs]
+  hits = []
+  for o in gc.get_objects():
+    if not isinstance(o, Buffer) or o is b or o.device != b.device or o._base is not None or not o.is_allocated(): continue
+    om = getattr(getattr(o._storage, "meta", None), "mapping", None)
+    if om is None or not hasattr(om, "paddrs") or om.aspace is not m.aspace: continue
+    for pa, sz in om.paddrs:
+      if any(pa < hi and lo < pa + sz for lo, hi in rng): hits.append(f"{o.nbytes}B {o.options} at {pa:#x}+{sz:#x}")
+  return f"phys {[hex(lo) for lo, _ in rng]} other buffers there: {hits[:6]}"
+def comm_state_report() -> str:
+  """
+  where every device's collectives are (a hang): a ring lane's epoch counters (the exchanges of a chunk done, min..max of its chunks), the
+  flags of the next exchange's parity in its inbox for the first chunk; a flag pool's counters (a workgroup's) and its flags (a sender's)
+  """
+  import struct
+  out = []
+  for name, lane, st in _COMM_STATE:
+    with contextlib.suppress(Exception):
+      N = len(st.devs)
+      if isinstance(st, RingMailbox):
+        CH = _ring_chunks(8 if lane < DEC_LANE else 32)
+        cnt = [struct.unpack(f"<{RING_CMAX+1}I", _peek(b, 0, (RING_CMAX+1)*4)) for b in st.counter_bufs]
+        line = f"{name}: chunks' epochs " + " ".join(f"d{c[RING_CMAX]}:{min(c[:CH])}..{max(c[:CH])}" for c in cnt)
+        # (the chunks a device is behind in; the first two the devices differ in (else the first one): every device's flags of its next epoch's
+        # parity, a slot's rounds run length encoded (epoch x rounds))
+        top = [max(c[i] for c in cnt) for i in range(CH)]
+        line += " | behind: " + " ".join(f"d{d}:{len(b)}{b[:6]}" for d, c in enumerate(cnt) if (b:=[i for i in range(CH) if c[i] < top[i]]))
+        if (diff:=[i for i in range(CH) if len({c[i] for c in cnt}) > 1]) or any(min(c[:CH]) != max(c[:CH]) for c in cnt):
+          for ch in (diff[:2] or [0]):
+            line += f"\n  chunk {ch}: " + " ".join(f"d{d}:{cnt[d][ch]}" for d in range(N))
+            for d, fb in enumerate(st.flag_bufs):
+              par, rle = (cnt[d][ch] + 1) & 1, []
+              for sl in range(N):
+                R = RING_CMAX // CH
+                eps = [w >> 32 for w in struct.unpack(f"<{R}Q", _peek(fb, ((par*N + sl)*RING_CMAX + ch*R)*8, R*8))]
+                rle.append(" ".join(f"{e}x{len(list(g))}" for e, g in itertools.groupby(eps)))
+              line += f"\n    d{d} flags(par {par}) " + " | ".join(f"s{sl}: {r}" for sl, r in enumerate(rle))
+              # (a device behind: its inbox's words of the chunk against the ones the device before it has of the same part (what it forwarded,
+              # an all gather's), a slot's differing words: count, first ones (word in the chunk's region))
+              if cnt[d][ch] < top[ch]:
+                W, cmp = RING_MAXW // CH, []
+                for sl in range(N):
+                  if sl in (d, (d-1) % N): continue
+                  at = ((par*N + sl)*RING_MAXW + ch*W)*4
+                  mine, prev = (struct.unpack(f"<{W}I", _peek(b, at, W*4)) for b in (st.inbox_bufs[d], st.inbox_bufs[(d-1) % N]))
+                  bad = [i for i in range(W) if mine[i] != prev[i]]
+                  cmp.append(f"s{sl}: {len(bad)} {[(i, hex(mine[i]), hex(prev[i])) for i in bad[:4]]}")
+                line += f"\n    d{d} inbox vs d{(d-1) % N}: " + " | ".join(cmp)
+                line += f"\n    d{d} {_overlaps(st.inbox_bufs[d], [((par*N + sl)*RING_MAXW + ch*W)*4 for sl in range(N)], W*4)}"
+        out.append(line)
+      elif isinstance(st, FlagAllreduce):
+        cnt = [struct.unpack(f"<{st.groups+1}I", _peek(b, 0, (st.groups+1)*4)) for b in st.counter_bufs]
+        fls = [struct.unpack(f"<{2*N}I", _peek(b, 0, 2*N*4)) for b in st.flag_bufs]
+        if any(min(c[:-1]) != max(c[:-1]) for c in cnt) or len({c[:-1] for c in cnt}) > 1 or lane == 0:
+          out.append(f"{name}: epochs " + " ".join(f"d{c[-1]}:{min(c[:-1])}..{max(c[:-1])}" for c in cnt) + " flags " +
+                     " ".join(f"d{d}:{list(f)}" for d, f in enumerate(fls)))
+  return "\n".join(out)
+
 def flag_ar_groups(n:int) -> int: return 4 if n <= 8192 else 16 if n <= 65536 else 64
 
 def _init_buffers(pairs:list[tuple[Any, bytes]]):
@@ -1552,8 +1633,10 @@ class FlagAllreduce:
       # (the values: the peers' aliases at the slot of the device (its two parities), what the send kernel writes back from the l2)
       self.vals = mapped(2*N*FLAG_AR_MAXN*4, 2*FLAG_AR_MAXN*4, 4)
       self.flags = mapped(2*N*4)
+      self.flag_bufs = [b for b, _ in inits[-N:]]
       # (an epoch counter a workgroup, then the device's index)
       counters = [Buffer(d, (groups+1)*4) for d in devs]
+      self.devs, self.groups, self.counter_bufs = devs, groups, counters
       _init_buffers(inits + [(b, bytes(groups*4) + i.to_bytes(4, "little")) for i, b in enumerate(counters)])
       (cb:=MultiBuffer.__new__(MultiBuffer)).bufs = counters
       self.counter = Tensor(UOp.from_buffer(cb, dtypes.uint32, devs))
@@ -1568,7 +1651,8 @@ def flag_allreduce(devs:tuple[str, ...], groups:int) -> FlagAllreduce|None:
 def _flag_allreduce(devs:tuple[str, ...], groups:int, lane:int=0) -> FlagAllreduce|None:
   if len(devs) < 2 or not amd_custom_kernels_supported(devs): return None
   if any(_gfx(d) not in (11, 12) for d in devs): return None
-  return FlagAllreduce(devs, groups)
+  _COMM_STATE.append((f"flag pool lane {lane} groups {groups}", lane, ret:=FlagAllreduce(devs, groups)))
+  return ret
 
 def flag_ar_shape(n:int, groups:int) -> tuple[int, int]|None:
   """(threads, words a thread) over a fixed number of workgroups (words past n masked)."""
@@ -1846,13 +1930,20 @@ class RingMailbox:
     inits:list[tuple[Buffer, bytes]] = []
     with Context(ALLOW_DEVICE_USAGE=1):
       self.inbox, self.inbox_next = mapped(2*N*RING_MAXW*4, dtypes.uint32)
+      self.inbox_bufs = [b for b, _ in inits[-N:]]
       self.flags, self.flags_next = mapped(2*N*chunks*8, dtypes.uint64)
+      self.flag_bufs = [b for b, _ in inits[-N:]]
       # (an epoch counter a chunk, then the device's place in the ring)
       counters = [Buffer(d, (chunks+1)*4) for d in devs]
+      self.devs, self.counter_bufs = devs, counters
       _init_buffers(inits + [(b, bytes(chunks*4) + i.to_bytes(4, "little")) for i, b in enumerate(counters)])
       (cb:=MultiBuffer.__new__(MultiBuffer)).bufs = counters
       self.counter = Tensor(UOp.from_buffer(cb, dtypes.uint32, devs))
-      dbg = [Buffer(d, 4) for d in devs]
+      # (RING_TIMEOUT_MS: what the waves that gave up waited for, in host memory: ring_errors reads it without the devices)
+      dbg = [Buffer(d, 64*4, options=BufferSpec(host=True, cpu_access=True)) if RING_TIMEOUT_MS else Buffer(d, 4) for d in devs]
+      if RING_TIMEOUT_MS:
+        for b in dbg: b.ensure_allocated().as_memoryview(allow_zero_copy=True)[:] = bytes(64*4)
+      self.dbg_bufs = dbg
       (db:=MultiBuffer.__new__(MultiBuffer)).bufs = dbg
       self.dbg = Tensor(UOp.from_buffer(db, dtypes.uint32, devs))
       for d in devs: Device[d].synchronize()
@@ -1887,9 +1978,27 @@ def ring_mailbox(devs:tuple[str, ...]) -> RingMailbox|None:
 def _ring_mailbox(devs:tuple[str, ...], lane:int=0) -> RingMailbox|None:
   if len(devs) < 3 or not amd_custom_kernels_supported(devs): return None
   if any(_gfx(d) not in (11, 12) for d in devs): return None
-  return RingMailbox(devs, RING_CMAX)
+  _COMM_STATE.append((f"ring lane {lane}", lane, ret:=RingMailbox(devs, RING_CMAX)))
+  return ret
 
 RING_DEADLINE:list[UOp|None] = [None]
+RING_TIMEOUT_MS = getenv("RING_TIMEOUT_MS", 0)
+def ring_errors() -> str:
+  """
+  the ring exchanges a wave gave up on (RING_TIMEOUT_MS: a peer's flag that didn't come or words that never matched its checksum, e.g. bad memory),
+  cleared: a mailbox's device and (exchange's epoch, chunk, the flag's epoch, slot | device<<24 | late<<30 | bad<<31) of a step's first wave
+  """
+  if not RING_TIMEOUT_MS: return ""
+  import struct
+  out = []
+  for name, _, st in _COMM_STATE:
+    if not isinstance(st, RingMailbox): continue
+    for d, b in zip(st.devs, st.dbg_bufs):
+      mv = b.as_memoryview(allow_zero_copy=True)
+      if any(w := struct.unpack("<64I", mv[:256])):
+        out.append(f"{name} {d}: " + " ".join(f"({w[4*k]},{w[4*k+1]:#x},{w[4*k+2]},{w[4*k+3]:#x})" for k in range(16) if any(w[4*k:4*k+4])))
+        mv[:] = bytes(64*4)
+  return "; ".join(out)
 def _ring_spin(after:UOp, loads:Callable[[UOp], list[UOp]], stale:Callable[[list[UOp]], UOp], dtype:DType) -> tuple[list[UOp], UOp]:
   # loads (of the loop) again until stale of them (the same in every lane) is false, a sleep between. (the values, still stale (RING_DEBUG))
   loop = UOp.range(UOp(Ops.NOOP).after(after), next(UOp.unique_num), dtype=dtypes.void)
@@ -1920,7 +2029,8 @@ def _ring_common(counter:UOp, N:int, dbg:UOp, G:int, tag:int=0, R:int=1, span:in
   ch = wg*W + warp
   # (the chunks' epochs: a chunk's moves with the kernels that have it, the same ones on every device)
   epoch, me = (counter[ch].load() + 1).cast(dtypes.uint32), counter[RING_CMAX].load().cast(dtypes.weakint)
-  RING_DEADLINE[0] = None
+  # (RING_TIMEOUT_MS: a wave waits at most that long for a peer's flag or words, then goes on (its wait in dbg): an error, not a hang)
+  RING_DEADLINE[0] = _sys("__builtin_readsteadycounter()", dtypes.uint64, epoch) + RING_TIMEOUT_MS * 100000 if RING_TIMEOUT_MS else None
   dbgs:list[UOp] = []
   par = (epoch & 1).cast(dtypes.weakint)
   def fslot(s:UOp|int) -> UOp: return (par*N + s)*RING_CMAX + ch*(RING_CMAX // CH) + cid[0]

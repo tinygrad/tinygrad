@@ -5,7 +5,7 @@ from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.jit import capture_parallel
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
-from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES, _wmma_rdna4
+from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES, _wmma_rdna4, ring_errors
 from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custom_kernels_supported, find_packed, moe_linear, q8_linear, \
   q8_quantize_cache_clear, moe_route, moe_grouped_linear, partial_sum, fuse_gate_up, kda_decode, pool_index_rows, slot_scatter, \
   slot_gather, moe_combine, token_sharded, shard_rows, reduce_scatter, all_gather, all_gather_q8, sharded_argmax, skinny_matmul, kda_conv, \
@@ -2067,6 +2067,8 @@ class Transformer:
         for d in devs: Device[d].synchronize()
         if isinstance(v:=get(), int) and v < 0: raise RuntimeError(f"{what}: none after the devices finished")
         break
+    # (RING_TIMEOUT_MS: an exchange a wave gave up on made garbage of the values after it: an error)
+    if (err:=ring_errors()): raise RuntimeError(f"{what}: a ring exchange timed out (RING_TIMEOUT_MS): {err}")
     return v
 
   def _ints(self, xs:tuple[UOp, ...]) -> Tensor:
