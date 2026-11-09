@@ -1377,11 +1377,13 @@ def f16t_gemm(x:Tensor, wt:Tensor) -> Tensor|None:
   K, N = int(wt.shape[0]), int(wt.shape[1])
   if (isinstance(x.device, tuple) and x.uop.axis is not None) or (isinstance(wt.device, tuple) and wt.uop.axis is not None) or N % 64 or K % 32:
     return None
-  P = round_up(R, 32)
+  # (TILE16: rows in fewer tiles of 16 than their padding to 32 (48 of 64): tiles of 16, more workgroups, the same sums)
+  t16 = TILE16 and not _wmma_rdna4(x.device) and round_up(R, 16) < round_up(R, 32)
+  P = round_up(R, 16 if t16 else 32)
   xp = x.half()
   if P != R: xp = xp.pad(((0, P - R), None))
   out = Tensor.empty(P, N, dtype=dtypes.float32, device=x.device)
-  fxn = functools.partial(_q8_gemm_kernel, token_tile=32, ggml_type=F32T, block_n=64, rdna4=_wmma_rdna4(x.device))
+  fxn = functools.partial(_q8_gemm_kernel, token_tile=16 if t16 else 32, ggml_type=F32T, block_n=64, rdna4=_wmma_rdna4(x.device))
   return Tensor.custom_kernel(out, wt, xp.contiguous(), fxn=fxn)[0][:R]
 
 def merged_linear(layers:list[Linear]) -> Linear|None:
