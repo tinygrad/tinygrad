@@ -4492,6 +4492,9 @@ class Transformer:
     self._seq_first_jit(*self._first_vars(slot, base+pos))
     return self._wait_host(lambda: self._token_host[base + pos], "the token after a prompt")
 
+  def seq_slice(self, n:int) -> int:
+    """a prefill slice of about n tokens (see the server's PREFILL_SLICE): GLM's whole chunks of generate's (its prefill the same chunks)"""
+    return n if self.config.qsa or getenv("SEQ_CHUNK_PLAN", 0) else round_up(n, self.prefill_chunks()[-1])
   def _seq_chunks(self, n:int) -> list[int]:
     """
     the chunks of a prefill of n tokens: GLM as generate's (the biggest size, the rest: the same chunks, its greedy tokens the main path's;

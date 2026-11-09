@@ -1343,7 +1343,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         if job is not None:
           req = filling[job]
           ids, pos, restore = req.fill
-          end = len(ids) if len(ids) - pos <= self.PREFILL_SLICE * 3 // 2 else pos + self.PREFILL_SLICE
+          # (a model's slices in whole prefill chunks (GLM: its greedy tokens generate's, see Transformer.seq_slice))
+          sl = f(self.PREFILL_SLICE) if callable(f:=getattr(self.model, "seq_slice", None)) else self.PREFILL_SLICE
+          end = len(ids) if len(ids) - pos <= sl * 3 // 2 else pos + sl
           st = time.perf_counter()
           try:
             if end < len(ids): eng.prefill_slice(job, ids, pos, restore, end)
