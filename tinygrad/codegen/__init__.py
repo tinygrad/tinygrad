@@ -516,7 +516,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
       # dsl_sink = graph_rewrite(dsl_sink, dsl.pre_isel_matcher, name=colored("dsl pre inst selection", "magenta"), bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
       if dsl:
-        dsl_sink = graph_rewrite(dsl_sink, dsl.isel_matcher, name=colored("dsl inst selection", "magenta"), bottom_up=True)
+        dsl_sink = graph_rewrite(dsl_sink, dsl.isel_matcher, ctx=IselContext(dsl_sink), name=colored("dsl inst selection", "magenta"), bottom_up=True)
         if VIZ: graph_rewrite(dsl_sink, PatternMatcher([]), name=colored("view dsl sink", "magenta"))
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
