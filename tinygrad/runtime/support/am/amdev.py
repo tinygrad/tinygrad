@@ -137,6 +137,22 @@ class AMPageTableEntry:
   def is_page(self, entry_id:int) -> bool: return self.lv == am.AMDGPU_VM_PTB or self.adev.gmc.is_pte_huge_page(self.lv, self.entries[entry_id])
   def supports_huge_page(self, paddr:int): return self.lv >= am.AMDGPU_VM_PDB2
 
+def bad_pages(bus:str) -> list[int]:
+  """
+  the physical VRAM addresses of a device's bad memory (a cell that doesn't keep what's written: found by extra/vram_test.py or a hang's mailbox
+  dump): entries "BUS@PADDR" (e.g. 0000:86:00.0@0x4d012bda0, the domain may be left out) in AM_BAD_PAGES (comma separated) and the lines of the
+  box's file AM_BAD_PAGES_FILE (/etc/tinygrad/am_bad_pages; '#' comments)
+  """
+  ents = [e for e in getenv("AM_BAD_PAGES", "").split(",") if e.strip()]
+  with contextlib.suppress(OSError):
+    with open(getenv("AM_BAD_PAGES_FILE", "/etc/tinygrad/am_bad_pages")) as f: ents += [l.split("#")[0] for l in f]
+  ret = []
+  for e in (e.strip() for e in ents):
+    if "@" not in e: continue
+    b, a = e.split("@", 1)
+    if bus.endswith(b.strip()): ret.append(int(a.strip(), 0))
+  return ret
+
 class AMMemoryManager(MemoryManager):
   def on_range_mapped(self):
     # Invalidate TLB after mappings.
@@ -242,6 +258,9 @@ class AMDev:
     self.mm = AMMemoryManager(self, self.vram_size - self.reserved_vram_size, boot_size=(3 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39],
       va_bits=48, first_lv=am.AMDGPU_VM_PDB2, va_base=MemoryManager.va_allocator.base, reserve_ptable=not self.large_bar,
       palloc_ranges=[(1 << (i + 12), (2 << 20) if i >= 9 else 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)])
+    # the pages of bad memory (see bad_pages) never allocated
+    if (bad:=bad_pages(self.devfmt)):
+      print(f"am {self.devfmt}: retired bad VRAM pages {[hex(pa) for pa in self.mm.retire(bad)]} of {[hex(a) for a in bad]}", flush=True)
     self.fw = AMFirmware(self)
 
     # Initialize IP blocks

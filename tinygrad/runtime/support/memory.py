@@ -1,7 +1,7 @@
 from __future__ import annotations
 import collections, functools, dataclasses, enum, struct
 from typing import Any
-from tinygrad.helpers import round_up, getenv, to_mv
+from tinygrad.helpers import round_up, getenv, to_mv, dedup
 
 class MMIOInterface:
   def __init__(self, addr:int, nbytes:int, fmt='B'): self.mv, self.addr, self.nbytes, self.fmt = to_mv(addr, nbytes).cast(fmt), addr, nbytes, fmt
@@ -88,6 +88,17 @@ class TLSFAllocator:
           if nsize > req_size: self._split_block(start, nsize, req_size)._set_free(start + req_size, nsize - req_size, True)
           return start + self.base
     raise MemoryError(f"Can't allocate {req_size} bytes")
+
+  def reserve(self, addr:int, size:int) -> bool:
+    """[addr, addr+size) taken for good (never allocated, e.g. memory that's bad), from the free block that has it: False if none has all of it"""
+    addr -= self.base
+    for start, (bsize, _, _, free) in list(self.blocks.items()):
+      if not (free and start <= addr and addr + size <= start + bsize): continue
+      self._set_free(start, bsize, False)
+      if addr > start: self._split_block(start, bsize, addr - start)._set_free(start, addr - start, True)
+      if (tail:=start + bsize - addr - size) > 0: self._split_block(addr, size + tail, size)._set_free(addr + size, tail, True)
+      return True
+    return False
 
   def free(self, start:int):
     start -= self.base
@@ -183,6 +194,10 @@ class MemoryManager:
     self.ptable_allocator = TLSFAllocator(round_up(vram_size // 512, 1 << 20) if self.reserve_ptable else 0, base=self.boot_allocator.size)
     self.pa_allocator = TLSFAllocator(vram_size - (off_sz:=self.boot_allocator.size + self.ptable_allocator.size), base=off_sz)
     self.root_page_table = pt_t(self.dev, self.palloc(0x1000, zero=not self.dev.smi_dev, boot=True), lv=first_lv)
+
+  def retire(self, paddrs:list[int], page:int=2 << 20) -> list[int]:
+    """the pages (page aligned) of these physical addresses never allocated (bad memory): the ones retired"""
+    return [pa for pa in dedup(a // page * page for a in paddrs) if self.pa_allocator.reserve(pa, page)]
 
   def _frag_size(self, va, sz, must_cover=True):
     """
