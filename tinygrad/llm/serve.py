@@ -1226,7 +1226,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # waited. a long one isn't behind short ones that keep coming forever: one waiting past STARVE_SEQ goes first, and takes a sequence even if
   # a held conversation is lost for it (see SeqEngine.STICKY))
   PREFILL_SLICE, MAX_STALL, DECODE_SHARE = getenv("PREFILL_SLICE", 13824), getenv("MAX_STALL", 0.3), getenv("DECODE_SHARE", 0.5)
-  AGING, STARVE_SEQ = getenv("AGING", 0), getenv("SEQ_STARVE", 120.0)
+  AGING, STARVE_SEQ, TURN_WAIT = getenv("AGING", 0), getenv("SEQ_STARVE", 120.0), getenv("SEQ_TURN_WAIT", 10.0)
   # (the gpus' clocks (AM: their gfx clock's cap, see AMIdleClocks.set_caps): a few users decoding at the full clocks (a user's tokens fast),
   # more at less (the energy a token: ~0.85 J at 2000 MHz on 6x 7900 XTX, ~1.2 J at full), a prefill at a cap it isn't slower at. switched
   # CLOCK_HOLD s apart at most)
@@ -1286,9 +1286,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             job = c
             break
           t0 = time.perf_counter()
-          # (a starving one loses a held conversation for its own only if it continues (continued) one (an agent's turn), or nothing else runs: a new
-          # conversation past the caches' and the stash's capacity waits for one to end, not every turn after it prefilled again)
-          force = starving(c) and (c.was_hit or not (active or filling))
+          # (an agent's turn (it continues (continued) a conversation) waiting past SEQ_TURN_WAIT s: the held conversations not waited for go to
+          # the stash for its rows, the least recently used ones there lost if it's full (an agent in a long tool call: one re-prefill later,
+          # not every waiting turn blocked by idle ones' rows). a new conversation past the caches' and the stash's capacity waits for one to
+          # end (unless starving and nothing else runs))
+          force = (c.was_hit and now - c.st > self.TURN_WAIT) or (starving(c) and not (active or filling))
           got = eng.take(ids:=prompt(c), max(0, (c.max_tokens or 0) - len(c.generated)), force=force)
           self.stats.add("take", time.perf_counter() - t0)
           if got is None:
