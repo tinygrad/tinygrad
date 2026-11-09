@@ -4453,7 +4453,7 @@ class Transformer:
       self._token_host[base+start:base+upto+1] = array.array('i', tokens[start:upto+1])
       self._seq_copy_call(False, slot, start, hrow, keep=start > 0)
       pos = start
-      for n in self._chunk_plan(upto - start):
+      for n in self._seq_chunks(upto - start):
         self._seq_chunk(base, pos, n)
         pos += n
       self._seq_copy_call(True, slot, upto, 0)
@@ -4465,7 +4465,7 @@ class Transformer:
     self._seq_copy_call(False, slot, start, hrow, keep=start > 0)
     self._seq_pf_host_temp[:2] = array.array('f', temp if isinstance(temp, tuple) else (temp, 1.0))
     pos = start
-    for n in self._chunk_plan(L - start):
+    for n in self._seq_chunks(L - start):
       self._seq_chunk(base, pos, n)
       pos += n
     self._seq_copy_call(True, slot, L, 0)
@@ -4492,6 +4492,17 @@ class Transformer:
     self._seq_first_jit(*self._first_vars(slot, base+pos))
     return self._wait_host(lambda: self._token_host[base + pos], "the token after a prompt")
 
+  def _seq_chunks(self, n:int) -> list[int]:
+    """
+    the chunks of a prefill of n tokens: GLM as generate's (the biggest size, the rest: the same chunks, its greedy tokens the main path's;
+    SEQ_CHUNK_PLAN=1 the least time's, see _chunk_plan), qwen4exp the least time's
+    """
+    if self.config.qsa or getenv("SEQ_CHUNK_PLAN", 0): return self._chunk_plan(n)
+    big, ret = self.prefill_chunks()[-1], []
+    while n > 0:
+      ret.append(min(big, n))
+      n -= ret[-1]
+    return ret
   def _chunk_plan(self, n:int) -> list[int]:
     """
     the chunks of n tokens of a prefill: the biggest size while more than twice it is left, the rest in the sizes of the least time (a chunk's
