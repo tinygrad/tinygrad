@@ -2257,7 +2257,7 @@ class MLATransformerBlock(FFNBlock):
   @staticmethod
   def slot_rows_view(t:Tensor) -> Tensor:
     """(sequence sharded) a (n*rows, D) cache or pool as (rows, n, D): its rows on every device (axis 0 isn't the split one)"""
-    n = len(cast(tuple, t.device))
+    n = len(to_tuple(t.device))
     return t.reshape(n, -1, t.shape[-1]).permute(1, 0, 2)
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k") and not hasattr(self, "cache_s"):
@@ -4166,9 +4166,11 @@ class Transformer:
     (made, allocated when used). none: an evicted sequence is prefilled again
     """
     C, gb = self.SEQ_MOVE, getenv("SEQ_STASH_GB", 4.0)
+    if self.config.cache_rows and self.config.kv_lora_rank > 0:
+      return self._seq_stash_init_glm(C, gb)
     qsa = [b for b in self.blk + [self.mtp] if isinstance(b, QSABlock)]
     if not qsa:
-      # (GLM: no stash yet, an evicted sequence is prefilled again)
+      # (other model families: no stash, an evicted sequence is prefilled again)
       self.stash_entries = self.stash_chunks = self.stash_chunk_nbytes = self.stash_entry_nbytes = 0
       return
     def per_row(t:Tensor, axis:int) -> int:
@@ -4222,10 +4224,56 @@ class Transformer:
     states = [t for b in gdn for t in (b.pool_rec, *b.pool_conv)] + [self.seq_spec_h] + \
              [t for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
     self._stash_state = _host_like([(t, 0, E) for t in states])
+    self._stash_state_count, self._stash_rings, self._stash_replays = len(states), [], []
     self._stash_calls = self._chunk_calls(min((self.seq_rows() + REGION_ALIGN) // C - 1, self.stash_chunks))
     self._stash_kv_jits = {(sv, n): TinyJit(functools.partial(self._stash_kv_copy, sv, n), capture_first=True)
                            for sv in (True, False) for n in self._stash_calls}
     self._stash_state_jits = {sv: TinyJit(functools.partial(self._stash_state_copy, sv), capture_first=True) for sv in (True, False)}
+  def _seq_stash_init_glm(self, C:int, gb:float):
+    """GLM's region stash (GLM_SEQ): position-sharded latent rows, replicated index pools, all recurrent/checkpoint/replay state."""
+    devs = cast(tuple[str, ...], self.token_embd.weight.device)
+    nd = len(devs)
+    assert nd and C % nd == 0, f"SEQ_MOVE={C} must be a multiple of the {nd} devices"
+    def per_row(t:Tensor, axis:int=0) -> int:
+      return t.nbytes() // int(t.shape[axis]) // (len(t.device) if isinstance(t.device, tuple) and t.uop.axis is not None else 1)
+    kb = [b for b in self.blk + [self.mtp] if isinstance(b, MLATransformerBlock)]
+    def index(b:MLATransformerBlock) -> Indexer:
+      assert b.indexer is not None and not b.indexer.shard, "GLM stash requires indexed, non-sharded index pools"
+      return b.indexer
+    gdn = [b for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
+    ring = [r for _, r in self.seq_ckpt_rings]
+    replay = [b.pool_rp for b in gdn if hasattr(b, "pool_rp")]
+    chunk = C * sum(per_row(b.cache_s) + per_row(index(b).cache_pk) // index(b).idx.kpool for b in kb)
+    entry = sum(per_row(t) for b in gdn for t in (b.pool_rec, *b.pool_conv)) + per_row(self.seq_spec_h) + \
+      sum(per_row(t) for c in self.seq_ckpt_states for t in c) + per_row(self.seq_ckpt_h) + \
+      sum(per_row(index(b).pool_ring) + per_row(r) for b, r in zip(kb, ring)) + sum(per_row(t) for t in replay)
+    self.stash_entries = getenv("SEQ_STASH_ENTRIES", 32) if gb > 0 and chunk > 0 else 0
+    self.stash_chunks = max(0, int(gb * 1e9 - self.stash_entries * entry) // chunk) if self.stash_entries else 0
+    if not self.stash_chunks: self.stash_entries = 0
+    self.stash_chunk_nbytes, self.stash_entry_nbytes = chunk, entry
+    if not self.stash_entries: return
+    # Latents use seq_move's (local rows, devices, features) view: C/nd rows a device. Index pools are replicated.
+    self._stash_kv = []
+    for b in kb:
+      latent = _host_like([(b.slot_rows_view(b.cache_s), 0, self.stash_chunks * C // nd)])[0]
+      pools = _host_like([(index(b).cache_pk, 0, self.stash_chunks * C // index(b).idx.kpool)])[0]
+      self._stash_kv.append((latent, pools))
+    # Whole ring/replay windows, not one position: every row after a checkpoint restore must have the same state as before eviction.
+    self._stash_rings = list(self.seq_ckpt_rings)
+    self._stash_replays = replay
+    states = [t for b in gdn for t in (b.pool_rec, *b.pool_conv)] + [self.seq_spec_h] + \
+             [t for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
+    extra:list[Tensor] = []
+    for b, ck in self._stash_rings:
+      for t in (b.pool_ring, ck): extra.append(_host_like([(t, 0, self.stash_entries * int(b.ring.shape[0]))])[0])
+    for t in replay: extra.append(_host_like([(t, 0, self.stash_entries * replay_q(self.config.spec_drafts))])[0])
+    self._stash_state = _host_like([(t, 0, self.stash_entries) for t in states]) + extra
+    self._stash_state_count = len(states)
+    self._stash_calls = self._chunk_calls(min((self.seq_rows() + REGION_ALIGN) // C - 1, self.stash_chunks))
+    self._stash_kv_jits = {(sv, n): TinyJit(functools.partial(self._stash_kv_copy, sv, n), capture_first=True)
+                           for sv in (True, False) for n in self._stash_calls}
+    self._stash_state_jits = {sv: TinyJit(functools.partial(self._stash_state_copy, sv), capture_first=True) for sv in (True, False)}
+
   STASH_CALL = (16, 4, 1)  # (the chunks a call of the stash copies: a run is copied by calls of these, the most first)
   def _chunk_calls(self, most:int) -> tuple[int, ...]:
     """the STASH_CALL counts of chunks of at most `most` (1 always)"""
@@ -4235,6 +4283,19 @@ class Transformer:
     C, pairs, saves = self.SEQ_MOVE, [], []
     devs = cast(tuple[str, ...], self.token_embd.weight.device)
     def rows(t:Tensor, at:UOp, m:int, axis:int) -> Tensor: return t.shrink(tuple((at, at+m) if i == axis else None for i in range(t.ndim)))
+    if self.config.cache_rows and self.config.kv_lora_rank > 0:
+      nd = len(devs)
+      for gb, st in zip([b for b in self.blk + [self.mtp] if isinstance(b, MLATransformerBlock)], self._stash_kv):
+        assert gb.indexer is not None
+        glm_idx, kp = gb.indexer, gb.indexer.idx.kpool
+        items = [(rows(st[0], row//nd, C*chunks//nd, 0), rows(gb.slot_rows_view(gb.cache_s), row//nd, C*chunks//nd, 0)),
+                 (rows(st[1], row//kp, C*chunks//kp, 0), rows(glm_idx.cache_pk, row//kp, C*chunks//kp, 0))]
+        for dst, src in items:
+          # The host and device have identical region-relative row layout; the grouped kernels' absolute base stays out of this copy.
+          if save: saves.append(dst.assign(src))
+          else: pairs.append((src, dst))
+      Tensor.realize(*saves, *[x.assign(d.contiguous()) for x, d in pairs])
+      return
     for b, st in zip([b for b in self.blk + [self.mtp] if isinstance(b, QSABlock)], self._stash_kv):
       ts = [(st[0], b.cache_k, row, chunk*C, C*chunks, self._stash_writers[0])]
       if (idx:=b.indexer) is not None:
@@ -4262,7 +4323,18 @@ class Transformer:
         slots += [rows(b.pool_rec, slot*S + ps)] + [rows(p, slot*SC + pc) for p in b.pool_conv]
     slots.append(rows(self.seq_spec_h, slot*H + hrow))
     slots += [rows(t, slot) for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
-    pairs = [(rows(st, entry), x) for st, x in zip(self._stash_state, slots)]
+    pairs = [(rows(st, entry), x) for st, x in zip(self._stash_state[:self._stash_state_count], slots)]
+    for gi, (idx, ck) in enumerate(self._stash_rings):
+      curr = self._stash_state_count + 2*gi
+      R = int(idx.ring.shape[0])
+      full = lambda t, start: t.shrink(((start, start+R),) + (None,)*(t.ndim-1))  # noqa: E731
+      pairs += [(full(self._stash_state[curr], entry*R), full(idx.pool_ring, slot*R)),
+                (full(self._stash_state[curr+1], entry*R), full(ck, slot*R))]
+    for i, replay in enumerate(self._stash_replays):
+      pos, R = self._stash_state_count + 2*len(self._stash_rings) + i, replay_q(self.config.spec_drafts)
+      full = lambda t, start: t.shrink(((start, start+R),) + (None,)*(t.ndim-1))  # noqa: E731
+      pairs.append((full(self._stash_state[pos], entry*R), full(replay, slot*R)))
+    if not save: pairs = [(x, d) for d, x in pairs]
     Tensor.realize(*[(d.assign(x) if save else x.assign(d)) for d, x in pairs])
   def _stash_state_vars(self, slot:int, entry:int, pos:int, hrow:int) -> list[UOp]:
     k = self.config.spec_drafts
