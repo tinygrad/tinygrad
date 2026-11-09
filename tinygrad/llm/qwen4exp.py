@@ -2687,10 +2687,13 @@ class Transformer:
         _seq_split[0] = G*(k+1) // N
         try:
           xs = mtp._project_input_split(_split_pad(shard_rows(emb, 1)).contiguous(), _split_pad(shard_rows(last.unsqueeze(0), 1)).contiguous())
-          m = all_gather(_split_real(mtp(xs, 0)).contiguous(), 1, dtypes.half).float()
+          m = all_gather(_split_real(mtp(xs, 0)).contiguous(), 1, dtypes.half)
         finally: _seq_split[0] = 0
       else: m = mtp.predict(emb, last.unsqueeze(0), 0)
-      m = Tensor.cat(*[m.shrink((None, (g*(k+1)+j, g*(k+1)+j+1), None, None)) for g, j in enumerate(js)], dim=1)
+      if gather and split:
+        # (row j of every sequence by one gather kernel (in float), not a G-way cat of variable slices)
+        m = rows_gather(m.reshape(G*(k+1), -1), self._ints(tuple(g*(k+1) + j for g, j in enumerate(js))), dtypes.float32).reshape(1, G, *m.shape[2:])
+      else: m = Tensor.cat(*[m.float().shrink((None, (g*(k+1)+j, g*(k+1)+j+1), None, None)) for g, j in enumerate(js)], dim=1)
       drafts:list[Tensor] = []
       for i in range(k):
         # (draft i of sequence g: verified at its row i, sampled with that row's noise at its temperature, not its top_p)
