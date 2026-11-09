@@ -1483,7 +1483,11 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     ksplits = next((s for s in ks if blocks * s >= SKINNY_WG), ks[-1])
     # (a tile of up to 96 rows: the weights dequantized in LDS once for them, 3 tiles of the 192 rows of 48 sequences of 3 drafts: -2% a step)
     tt = next(t for t in (96, 64, 32) if P % t == 0)
-    fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, block_n=64, k_splits=ksplits, rdna4=rdna4)
+    # (TILE16: rows in fewer whole tiles of 16 than of the padding to 32 (48 of 64: 16 sequences of 3 drafts): their tiles of 16 alone, the
+    # same splits (the same sums))
+    mr = tokens if TILE16 and not rdna4 and layer.ggml_type == Q8_0 and round_up(tokens, 16) < P else 0
+    if mr: tt = 16
+    fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, block_n=64, k_splits=ksplits, rdna4=rdna4, m_rows=mr)
     srcs = (x.cast(dtypes.float16).contiguous(),)
     out_shape = (splits*ksplits*P, out_features)
   elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm or few_out_long) and \
