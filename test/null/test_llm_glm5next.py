@@ -1,11 +1,13 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from tinygrad import Tensor
+from tinygrad import Tensor, Context
 from tinygrad.llm.glm5next import Transformer
 
 
 class TestRecurrentCheckpointReuse(unittest.TestCase):
+  def setUp(self): self.enterContext(Context(DEV="CPU"))
+
   def model(self) -> Transformer:
     model = Transformer.__new__(Transformer)
     model._cached_tokens = [1, 2, 3, 99, 98]
