@@ -341,6 +341,9 @@ HC_REAL = getenv("HC_REAL", 1)
 GDN_MERGED, HC_NORM_REAL = getenv("GDN_MERGED", 0), getenv("HC_NORM_REAL", 1)
 # QSA_ROT_FWHT: QSA_KV_ROT's rotations (keys, values, queries, the output back) by a fast Walsh-Hadamard kernel (fwht), not 256x256 matmuls
 QSA_ROT_FWHT = getenv("QSA_ROT_FWHT", 1)
+# HC_DEC: batched decoding's hyper-connections of a device's few real rows (1-8, split) by the decode kernels (ghc_pre, the decode linear,
+# ghc_decode_mix/ghc_post: the B=1 path's) instead of the prefill ones on padded tiles of 32 (numerics: the B=1 path's, q8 activations)
+HC_DEC = getenv("HC_DEC", 0)
 def _split_rows() -> int: return round_up(_seq_split[0], 32)
 def _split_real(x:Tensor) -> Tensor:
   """(B, N*P, ...) split padded rows: the real rows (B, N*R, ...), split"""
@@ -682,7 +685,8 @@ class GatedResidual:
     batched decoding with the streams' rows split over the devices (padded, see _seq_split): every device the mix and coefficients of its rows,
     the sublayer sees all the real rows (gathered) and returns its partial sums, every device sums its rows of them (as a prefill's phases)
     """
-    if HC_REAL: own, post, _ = self.pre_split(xs, real=True)
+    if HC_DEC and (dec:=self._split_dec(xs)) is not None: own, post = dec
+    elif HC_REAL: own, post, _ = self.pre_split(xs, real=True)
     else:
       mixed, post, _ = self.pre_split(xs)
       # (own: lazy, a copy only if the sublayer reads it (the router): the gather packs the real rows from mixed)
@@ -696,6 +700,22 @@ class GatedResidual:
     done = out.ndim == own.ndim and token_sharded(out)
     out = out if done else reduce_scatter(out, 1) if out.ndim == own.ndim + 1 else shard_rows(out, 1)
     return self.post_split(_split_pad(out), post, post, xs)
+
+  def _split_dec(self, xs:Tensor) -> tuple[Tensor, Tensor]|None:
+    """
+    HC_DEC: the sublayer input of every device's real rows (B, N*R, dim) and the output weights of its padded rows (B, N*P, count) by the decode
+    kernels (_fused's B*T <= 8 path on a device's R rows). None: not those rows or weights
+    """
+    R, devs = _seq_split[0], xs.device
+    if not (isinstance(devs, tuple) and 1 <= R <= 8 and self.count == 4 and self.dim % 32 == 0 and self.up.in_features % 32 == 0 and
+            0 < self.up.in_features <= 512 and self.down.ggml_type == Q8_0 and self.up.ggml_type == Q8_0 and
+            getattr(self, "_winj", None) is not None and amd_custom_kernels_supported(devs)): return None
+    B, N = int(xs.shape[0]), len(devs)
+    w = self._wnorm if self._wnorm is not None else self.norm["weight"]
+    xn, xq, part = ghc_pre(_split_real(xs).reshape(B*N*R, self.count*self.dim), w, unwrap(self._winj), self.count, self.eps)
+    down = q8_linear(self.down, xn, xq=xq, split=True)
+    mixed, inj = (ghc_decode_mix if R > 1 else ghc_post)(down, self.up.weight, xn, part, self.count)
+    return mixed.reshape(B, N*R, self.dim), _split_pad(inj.reshape(B, N*R, -1)[..., :self.count].sigmoid() * 2)
 
   def pre_split(self, xs:Tensor, norm:Callable[[Tensor], Tensor]|None=None, real:bool=False) -> tuple[Tensor, Tensor, Tensor]:
     """

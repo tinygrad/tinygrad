@@ -3830,9 +3830,11 @@ def ghc_pre(xs:Tensor, w:Tensor, winj:Tensor, count:int, eps:float) -> tuple[Ten
   """xs (T, count*D) the streams of T rows: their norms (T, count*D) half, its quantization (q8_quantize's), the inject partials (T, count, NJ)"""
   T, CD = cast(tuple[int, int], xs.shape)
   D, NJ, G = CD // count, int(winj.shape[0]), CD // Q8_GROUP_SIZE
-  outs = [Tensor.empty(T, CD, dtype=dtypes.half, device=xs.device), Tensor.empty(T, G, 8, dtype=dtypes.uint32, device=xs.device),
-          Tensor.empty(T, G, dtype=dtypes.float32, device=xs.device), Tensor.empty(T, G, 2, dtype=dtypes.float32, device=xs.device),
-          Tensor.empty(T, count, NJ, dtype=dtypes.float32, device=xs.device)]
+  # (rows split over the devices (batched decoding's, HC_DEC): every device its rows, the outputs split so)
+  ax = 0 if token_sharded(xs) else None
+  outs = [Tensor.empty(T, CD, dtype=dtypes.half, device=xs.device, axis=ax), Tensor.empty(T, G, 8, dtype=dtypes.uint32, device=xs.device, axis=ax),
+          Tensor.empty(T, G, dtype=dtypes.float32, device=xs.device, axis=ax), Tensor.empty(T, G, 2, dtype=dtypes.float32, device=xs.device, axis=ax),
+          Tensor.empty(T, count, NJ, dtype=dtypes.float32, device=xs.device, axis=ax)]
   res = Tensor.custom_kernel(*outs, xs.float().contiguous(), w.float().contiguous(), winj.float().contiguous(),
                              fxn=functools.partial(_ghc_pre_kernel, count=count, D=D, eps=eps))
   return res[0], (res[1], res[2], res[3]), res[4]
@@ -3885,7 +3887,9 @@ def ghc_post(lo:Tensor, up_raw:Tensor, xn:Tensor, part:Tensor, count:int) -> tup
   """the down outputs lo (T, R), the up projection's Q8_0 words, the norms xn and inject partials of ghc_pre: the mix (T, D), the inject (T, NJ)"""
   T, R = cast(tuple[int, int], lo.shape)
   D, NJ = int(xn.shape[1]) // count, int(part.shape[2])
-  mixed, inj = Tensor.empty(T, D, dtype=dtypes.float32, device=lo.device), Tensor.empty(T, NJ, dtype=dtypes.float32, device=lo.device)
+  ax = 0 if token_sharded(lo) else None
+  mixed = Tensor.empty(T, D, dtype=dtypes.float32, device=lo.device, axis=ax)
+  inj = Tensor.empty(T, NJ, dtype=dtypes.float32, device=lo.device, axis=ax)
   res = Tensor.custom_kernel(mixed, inj, lo.float().contiguous(), up_raw, xn, part, fxn=functools.partial(_ghc_post_kernel, count=count, D=D, R=R))
   return res[0], res[1]
 
@@ -3946,12 +3950,14 @@ def _ghc_decode_mix_kernel(mixed:UOp, inj:UOp, mq:UOp, md:UOp, ms:UOp, lo:UOp, r
 def ghc_decode_mix(lo:Tensor, up_raw:Tensor, xn:Tensor, part:Tensor, count:int) -> tuple[Tensor, Tensor]:
   T, R = cast(tuple[int, int], lo.shape)
   D, NJ = int(xn.shape[1])//count, int(part.shape[2])
-  outs = (Tensor.empty(T, D, dtype=dtypes.float32, device=lo.device), Tensor.empty(T, NJ, dtype=dtypes.float32, device=lo.device),
-          Tensor.empty(T, D//32, 8, dtype=dtypes.uint32, device=lo.device), Tensor.empty(T, D//32, dtype=dtypes.float32, device=lo.device),
-          Tensor.empty(T, D//32, 2, dtype=dtypes.float32, device=lo.device))
+  ax = 0 if (sharded:=token_sharded(lo)) else None
+  outs = (Tensor.empty(T, D, dtype=dtypes.float32, device=lo.device, axis=ax), Tensor.empty(T, NJ, dtype=dtypes.float32, device=lo.device, axis=ax),
+          Tensor.empty(T, D//32, 8, dtype=dtypes.uint32, device=lo.device, axis=ax),
+          Tensor.empty(T, D//32, dtype=dtypes.float32, device=lo.device, axis=ax),
+          Tensor.empty(T, D//32, 2, dtype=dtypes.float32, device=lo.device, axis=ax))
   ret = Tensor.custom_kernel(*outs, lo.float().contiguous(), up_raw, xn, part,
                             fxn=functools.partial(_ghc_decode_mix_kernel, count=count, D=D, R=R))[:5]
-  q8_quantize_known(ret[0], T, D, False, tuple(ret[2:]))
+  if not sharded: q8_quantize_known(ret[0], T, D, False, tuple(ret[2:]))
   return ret[0], ret[1]
 
 @functools.cache
