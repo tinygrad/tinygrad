@@ -569,6 +569,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   model's states, a step gives the next token of all of them. a request that may not fit a slot (prompt + max_tokens) waits for the model
   alone, one that fills its slot goes on alone (its tokens prefilled again)
   """
+  telemetry = Telemetry("")  # (an instance's own replaces it in __init__; servers made without __init__ (tests) observe into this one)
   def handle_error(self, request, client_address):
     # (a client gone before its reply: not an error of the server's, no traceback)
     if isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError)): return
