@@ -3569,6 +3569,14 @@ class Transformer(GLMSeqDriver):
       sizes = [tiled(n) for n in sizes]
     return tuple(sorted(set(sizes)))
 
+  def _seq_shared(self, read:bool=True):
+    """the generic driver's shared resources, and this kernel module's collectives (its own mailboxes, made before the forked captures)"""
+    super()._seq_shared(read)
+    from tinygrad.llm.kernels.amd_glm_dsa import host_allreduce, p2p_allreduce, ring_mailbox, _device_index as dsa_device_index
+    devs = cast(tuple[str, ...], self.token_embd.weight.device)
+    if isinstance(devs, tuple):
+      p2p_allreduce(devs), host_allreduce(devs), ring_mailbox(devs), dsa_device_index(devs)
+
   def warmup(self):
     """compile and capture every jit a request uses (they capture on their first call): a prompt of each prefill chunk size, decoding"""
     if self.config.cache_rows and self.seqs_supported(): return super().seq_warmup()
