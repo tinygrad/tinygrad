@@ -2663,7 +2663,12 @@ class Transformer:
     temps = self._seq_temp[:2*G].reshape(G, 2)
     def batch(pos:list[UOp], R:int) -> SeqBatch: return SeqBatch(G, R, slots, bases, self._ints(tuple(pos)))
     # the hidden states of the last step's tokens: every slot's rows of parity 1-par
-    last = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + (1-p)*(k+1), s*H + (2-p)*(k+1)), None)) for s, p in zip(sl, ps)])
+    # (the slots' rows by one gather kernel: a cat of G slices at variable rows is a kernel of G threads (221 us at G=16))
+    gather = amd_custom_kernels_supported(devs)
+    def spec_rows(par:Callable[[UOp], UOp|int]) -> Tensor:
+      return self._ints(tuple(s*H + par(p)*(k+1) + r for s, p in zip(sl, ps) for r in range(k+1)))
+    last = rows_gather(self.seq_spec_h, spec_rows(lambda p: 1-p)) if gather else \
+      Tensor.cat(*[self.seq_spec_h.shrink(((s*H + (1-p)*(k+1), s*H + (2-p)*(k+1)), None)) for s, p in zip(sl, ps)])
     # (the step's seed of the noise from the host: a random tensor of the devices is a different one on every device, a sampled token of one
     # not the others')
     seed = self._seq_temp[-1:].bitcast(dtypes.uint32)
@@ -2715,8 +2720,13 @@ class Transformer:
         if split: x = all_gather(_split_real(x).contiguous(), 1, dtypes.half).float()
       finally: _seq_split[0] = 0
       hsv = x.flatten(2)[0].float()
-      hs = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + p*(k+1), s*H + (p+1)*(k+1)), None)).assign(hsv[g*(k+1):(g+1)*(k+1)])
-                        for g, (s, p) in enumerate(zip(sl, ps))])
+      if gather:
+        # (stored by one scatter kernel and read back by a gather, not G assigns and a cat)
+        at = spec_rows(lambda p: p)
+        hs = rows_gather(rows_scatter(self.seq_spec_h, hsv.cast(self.seq_spec_h.dtype), at), at)
+      else:
+        hs = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + p*(k+1), s*H + (p+1)*(k+1)), None)).assign(hsv[g*(k+1):(g+1)*(k+1)])
+                          for g, (s, p) in enumerate(zip(sl, ps))])
       tt = temps.reshape(G, 1, 2).expand(G, k+1, 2).reshape(G*(k+1), 2)
       tok = self._sample(self._hc_out(hs.reshape(1, -1, hc.count, hs.shape[-1] // hc.count))[0], tt, y.device, (seed, Tensor.arange(G*(k+1))))
     finally: _seq_batch[0], _batch_rows[0], FLAG_LANE[0] = None, None, prev_lane
