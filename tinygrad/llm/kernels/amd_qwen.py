@@ -118,9 +118,9 @@ def _reg(shape:tuple[int, ...], value:float, dep:UOp|None=None) -> UOp:
 SKINNY_ROWS = 256
 SKINNY_WG, HC_KS = getenv("SKINNY_WG", 192), getenv("HC_KS", 32)
 # AG_FUSE: all_gather_q8's packing kernel sends the words to the peers too (the flag exchange's send kernel folded into it)
-AG_FUSE = getenv("AG_FUSE", 0)
+AG_FUSE = getenv("AG_FUSE", 1)
 # TILE16: batched decoding's hyper-connection gemms (a device's few rows: 4-16 of a tile of 32) of its real rows' tiles alone, in tiles of 16
-TILE16 = getenv("TILE16", 0)
+TILE16 = getenv("TILE16", 1)
 
 def unwrap_storage_views(u:UOp) -> UOp:
   # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
