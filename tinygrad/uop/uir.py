@@ -70,12 +70,12 @@ def _val(v, named:bool, ref:Callable[[UOp], str|None]) -> str:
   mod = "" if type(v).__module__ in ("builtins", "tinygrad.dtype", "tinygrad.uop.ops") else type(v).__module__ + ":"
   return "`" + (mod + repr(v)).replace("\n", " ").replace("`", "\\x60") + "`"   # newlines and backticks are only in string literals
 
-def _fields_str(a, ref:Callable[[UOp], str|None], always:tuple[str, ...]) -> str:
+def _fields_str(a, ref:Callable[[UOp], str|None], first:bool) -> str:
   ret = []
-  for f in fields(a):
+  for i,f in enumerate(fields(a)):
     v = getattr(a, f.name)
-    # a default is left out. compared by repr, since == of a UOp builds a UOp
-    if f.name in _skip_fields or (repr(v) == repr(f.default) and f.name not in always): continue
+    # a default is left out, except the first field if first. compared by repr, since == of a UOp builds a UOp
+    if f.name in _skip_fields or (repr(v) == repr(f.default) and not (first and i == 0)): continue
     ret.append(f"{f.name}={_val(v, f.name in _named_keys, ref)}")
   return " ".join(ret)
 
@@ -90,7 +90,7 @@ def _render_arg(x:UOp, ref:Callable[[UOp], str|None]=lambda _: None) -> str:
   if x.op is Ops.ALLREDUCE: return f"op={a[0].name.lower()} device={_val(a[1], False, ref)}"
   if type(a) is _struct_args().get(x.op):
     # the first field is always written, so a default arg isn't None. a CALL's arg is always a CallInfo
-    return _fields_str(a, ref, () if x.op is Ops.CALL else (fields(a)[0].name,))
+    return _fields_str(a, ref, first=x.op is not Ops.CALL)
   key = _arg_key.get(x.op, "arg")
   return f"{key}={_val(a, key in _named_keys, ref)}"
 
