@@ -1899,8 +1899,8 @@ class Indexer:
       return
     if hasattr(self, "cache_pk"): return
     idx, max_pools = self.idx, round_up(self.max_context, self.idx.kpool) // self.idx.kpool
-    # the sparse path (RDNA4): no mask, the pools a query picks are lists (decode) or per 16 queries (prefill, see pool_union)
-    self.sparse = x.shape[0] == 1 and amd_custom_kernels_supported(x.device) and _wmma_rdna4(x.device) and 16 % idx.kpool == 0 and \
+    # the sparse path (RDNA3/4): no mask, the pools a query picks are lists (decode) or per 16 queries (prefill, see pool_union)
+    self.sparse = x.shape[0] == 1 and amd_custom_kernels_supported(x.device) and 16 % idx.kpool == 0 and \
       idx.head_dim % 16 == 0 and max_pools % 64 == 0 and bool(getenv("INDEXER_SPARSE", 1))
     # the pooled keys, a call pools its tokens' pools only. the sparse path keeps them in half and the tokens of the last incomplete pool in a
     # ring (the last tokens: the next call can start before the end, see pool_keys), the other one every token's key and gate

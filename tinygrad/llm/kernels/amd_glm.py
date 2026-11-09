@@ -4690,14 +4690,15 @@ def _slot_of(slots:tuple[UOp, ...], g:UOp) -> UOp:
   return slots[0][g].load().cast(dtypes.weakint) if slots else g
 
 @functools.cache
-def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *grouped:UOp, scale:float, valid_len:UOp, stride:int=0) -> UOp:
-  return _mla_sparse_body(out, None, q, cache, index, grouped, scale, valid_len, stride, 1)
+def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *grouped:UOp, scale:float, valid_len:UOp, stride:int=0, rdna4:bool=True) -> UOp:
+  return _mla_sparse_body(out, None, q, cache, index, grouped, scale, valid_len, stride, 1, rdna4=rdna4)
 
 @functools.cache
-def _mla_sparse_split_kernel(out:UOp, ml:UOp, q:UOp, cache:UOp, index:UOp, scale:float, valid_len:UOp, split:int, rep:int=0) -> UOp:
+def _mla_sparse_split_kernel(out:UOp, ml:UOp, q:UOp, cache:UOp, index:UOp, scale:float, valid_len:UOp, split:int, rep:int=0,
+                             rdna4:bool=True) -> UOp:
   # a token's keys split over `split` workgroups: out (T*split*16, D) every split's output (normed by its sum), ml its rows' max and sum.
   # rep: the tokens are groups of rep with the lists of index's rep rows (every 16 heads of a token, see mla_sparse_seq)
-  return _mla_sparse_body(out, ml, q, cache, index, (), scale, valid_len, 0, split, rep)
+  return _mla_sparse_body(out, ml, q, cache, index, (), scale, valid_len, 0, split, rep, rdna4=rdna4)
 
 # ** an fp8 latent cache (SEQ_FP8): a row of 512 latent dims is 128 words of e4m3 values and 4 float scales (of 128 dims each, their absolute
 # max over 448), 528 bytes instead of 1024
@@ -4742,8 +4743,8 @@ def _fp8_frag(k:UOp, row:UOp, w0:UOp|int, half:UOp) -> UOp:
   return UOp.stack(*_fp8_halves(_word(k, row, w0 + half)), *_fp8_halves(_word(k, row, w0 + half + 2)))
 
 def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:tuple[UOp, ...], scale:float, valid_len:UOp, stride:int,
-                     split:int, rep:int=0) -> UOp:
-  # RDNA4 WMMA attention of every token on the keys of its list (pool_index_rows): a workgroup per token, its 16 (padded) heads are the rows,
+                     split:int, rep:int=0, rdna4:bool=True) -> UOp:
+  # RDNA3/4 WMMA attention of every token on the keys of its list (pool_index_rows): a workgroup per token, its 16 (padded) heads are the rows,
   # they share the keys. 4 waves own a quarter of the latent dims each: they sum their partial scores through LDS, then update their quarter of
   # the output with P (via LDS). keys past valid_len aren't seen (padding rows of a chunk past its tokens: the cache isn't written there)
   R, D = cast(tuple[int, int], q.shape)
@@ -4761,7 +4762,10 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   if grouped:
     g = tok // (T // cast(int, grouped[0].shape[0]))
     valid_len, off = grouped[0][g].load().cast(dtypes.weakint) + T // cast(int, grouped[0].shape[0]), _slot_of(grouped[1:], g) * stride
-  ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
+  # (a lane's A/B fragment: RDNA4 8 of the 16 k, two groups of four by its half of the wave, RDNA3 all 16. its accumulator's element e is the
+  # row half*8+e (RDNA4), 2e+half (RDNA3))
+  ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8)) if rdna4 else tuple(range(16))
+  def arow(e:UOp|int) -> UOp: return half*8 + e if rdna4 else half + e*2
   qfrag = [UOp.stack(*(q[tok*16 + col, dbase + kk*16 + k].load() for k in ks)) for kk in range(KT)]
   itok = tok % rep if rep else tok  # (the row of the token's list)
   count = index[itok, n_max].load().cast(dtypes.weakint).minimum(n_max)
@@ -4779,7 +4783,7 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   # (fp8 rows (SEQ_FP8): a wave's 128 dims have a scale of their own, its partial scores are scaled (and its P for the values)
   # (uint64: two words each, the whole cache of a prefill, see seq_gather)
   fp8 = cache.dtype in (dtypes.uint32, dtypes.uint64)
-  assert not fp8 or (D == 512 and DW == 128 and cast(int, cache.shape[1]) * cache.dtype.itemsize == FP8_ROW * 4), "fp8 rows: 512 dims"
+  assert not fp8 or (rdna4 and D == 512 and DW == 128 and cast(int, cache.shape[1]) * cache.dtype.itemsize == FP8_ROW * 4), "fp8 rows: 512 dims"
   def fp8_scale(k:UOp) -> UOp: return _word(cache, k, 128 + wave).bitcast(dtypes.float) * 256
   s_acc = zero8
   for kk in range(KT):
@@ -4809,12 +4813,12 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
     ps = p
     for sh in (1, 2, 4, 8): ps = ps + _swizzle_xor(ps, sh)
     a = ((m_old[i].load() - mn) * LOG2E).exp2()
-    pst += [lds_p[half*8 + e, col].store(p.cast(dtypes.half)), lds_a[(half*8 + e).valid(col.eq(0))].store(a)]
+    pst += [lds_p[arow(e), col].store(p.cast(dtypes.half)), lds_a[arow(e).valid(col.eq(0))].store(a)]
     m_new.append(mn)
     l_new.append(l_old[i].load() * a + ps)
   shared = UOp.group(*pst, m_reg.store(UOp.stack(*m_new)), l_reg.store(UOp.stack(*l_new))).barrier()
   lds_p, lds_a = lds_p.after(shared), lds_a.after(shared)
-  alpha = [lds_a[half*8 + e].load() for e in range(8)]
+  alpha = [lds_a[arow(e)].load() for e in range(8)]
   vkeys = [key_at(k) for k in ks]
   # (fp8: P times the scale of its key's values of the wave's dims, 0 past the count)
   if fp8: pfrag = UOp.stack(*(lds_p[col, k].load() * vok.where(fp8_scale(vk), UOp.const(0, dtypes.float)).cast(dtypes.half)
@@ -4832,12 +4836,12 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   # the sums of the rows of every wave (LDS)
   lds_l = UOp.alloc((16,), dtypes.float, addrspace=AddrSpace.LOCAL)
   l_fin = l_reg.after(update)
-  lds_l = lds_l.after(UOp.group(*(lds_l[(half*8 + wave*ES + i).valid(col.eq(0))].store(l_fin[i].load()) for i in range(ES))).barrier())
-  stores = [out[tg*16 + half*8 + e, dbase + dt*16 + col].store(o.after(update)[e].load() / lds_l[half*8 + e].load().maximum(1e-30))
+  lds_l = lds_l.after(UOp.group(*(lds_l[arow(wave*ES + i).valid(col.eq(0))].store(l_fin[i].load()) for i in range(ES))).barrier())
+  stores = [out[tg*16 + arow(e), dbase + dt*16 + col].store(o.after(update)[e].load() / lds_l[arow(e)].load().maximum(1e-30))
             for dt, o in enumerate(o_regs) for e in range(8)]
   if ml is not None:
     m_fin = m_reg.after(update)
-    stores += [ml[tg*16 + half*8 + wave*ES + i, UOp.const(c, dtypes.weakint).valid(col.eq(0))].store(v)
+    stores += [ml[tg*16 + arow(wave*ES + i), UOp.const(c, dtypes.weakint).valid(col.eq(0))].store(v)
                for i in range(ES) for c, v in ((0, m_fin[i].load()), (1, l_fin[i].load()))]
   # a data dependent count of keys, an upper bound estimate
   est = Estimates(4*R*n_max*D, R*D*2 + T*n_max*D*2, R*D*4)
@@ -4865,13 +4869,15 @@ def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:f
     parts = Tensor.empty(n*T*split*16, D, dtype=dtypes.float32, device=q.device, axis=0 if n > 1 else None)
     ml = Tensor.empty(n*T*split*16, 2, dtype=dtypes.float32, device=q.device, axis=0 if n > 1 else None)
     parts, ml = Tensor.custom_kernel(parts, ml, rows, cache.reshape(-1, int(cache.shape[-1])), index,
-                                     fxn=functools.partial(_mla_sparse_split_kernel, scale=scale, valid_len=vl, split=split))[:2]
+                                     fxn=functools.partial(_mla_sparse_split_kernel, scale=scale, valid_len=vl, split=split,
+                                                           rdna4=_wmma_rdna4(q.device)))[:2]
     m, l = (ml.reshape(n, T, split, 16, 2)[..., i:i+1] for i in range(2))
     w = l * (m - m.max(2, keepdim=True)).exp()
     out = ((parts.reshape(n, T, split, 16, D) * w).sum(2) / w.sum(2).maximum(1e-30)).reshape(n*T*16, D)
   else:
     out = Tensor.custom_kernel(out, rows, cache.reshape(-1, int(cache.shape[-1])), index, *extra,
-                               fxn=functools.partial(_mla_sparse_wmma_kernel, scale=scale, valid_len=vl, stride=stride))[0]
+                               fxn=functools.partial(_mla_sparse_wmma_kernel, scale=scale, valid_len=vl, stride=stride,
+                                                     rdna4=_wmma_rdna4(q.device)))[0]
   return out.reshape(n, T, 16, D)[:, :, :hl].permute(0, 2, 1, 3).reshape(1, H, T, D)
 
 # ******** the MLA latent cache split on its positions over the devices (sequence sharded): a block of SEQ_BLK positions a device in turn ********
@@ -5159,7 +5165,8 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   parts = Tensor.empty(n*nrows, D, dtype=dtypes.float32, device=devs, axis=0)
   ml = Tensor.empty(n*nrows, 2, dtype=dtypes.float32, device=devs, axis=0)
   parts, ml = Tensor.custom_kernel(parts, ml, rows, cache, index, fxn=functools.partial(_mla_sparse_split_kernel, scale=scale,
-                                   valid_len=UOp.const(int(cache.shape[0]) // n, dtypes.weakint), split=split, rep=T))[:2]
+                                   valid_len=UOp.const(int(cache.shape[0]) // n, dtypes.weakint), split=split, rep=T,
+                                   rdna4=_wmma_rdna4(devs)))[:2]
   # a device's splits combined: its output (normed by its sum), its max and sum
   m, l = (ml.reshape(n, G, T, split, 16, 2)[..., i:i+1] for i in range(2))
   if split > 1:
@@ -5693,8 +5700,8 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   return UOp.group(*state_stores).end(lane, bh_row).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
 
 @functools.cache
-def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP:int=4, shard:int=0, kpool:int=0) -> UOp:
-  # RDNA4 WMMA: out[t, p] = sum over the heads h of w[t, h] * relu(q[t, h] . k[p]). a wave per 16 tokens and G of the tiles of 16*NP
+def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP:int=4, shard:int=0, kpool:int=0, rdna4:bool=True) -> UOp:
+  # RDNA3/4 WMMA: out[t, p] = sum over the heads h of w[t, h] * relu(q[t, h] . k[p]). a wave per 16 tokens and G of the tiles of 16*NP
   # pools: it loops over the tiles g, g+G, .. of the pools (the work follows the context, not its max)
   T, H, D = cast(tuple[int, int, int], q.shape)
   P = cast(int, k.shape[0])
@@ -5706,9 +5713,12 @@ def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP
   tiles = (pools + 16*NP - 1) // (16*NP)
   active = UOp.range(((tiles - g + G - 1) // G).maximum(0), 2, AxisType.LOOP)
   t0, p0 = tt * 16, (g + active * G) * (16*NP)
-  ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
+  # (a lane's fragment: RDNA4 8 of the 16 k, RDNA3 all 16. its accumulator's element e: the row half*8+e (RDNA4), 2e+half (RDNA3))
+  ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8)) if rdna4 else tuple(range(16))
+  def arow(e:int) -> UOp: return half*8 + e if rdna4 else half + e*2
   # (fp8 pooled keys (SEQ_FP8): the scores times the scale of the key)
   fp8 = k.dtype == dtypes.uint32
+  assert rdna4 or not fp8, "fp8 pooled keys: RDNA4"
   if fp8:
     kfrags = [[_fp8_frag(k, p0 + n*16 + col, kk*4, half) for kk in range(D // 16)] for n in range(NP)]
     kscale = [k[p0 + n*16 + col, D // 4].load().bitcast(dtypes.float) * 256 for n in range(NP)]
@@ -5718,7 +5728,7 @@ def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP
   accs = [_reg((8,), 0, active) for _ in range(NP)]
   h = UOp.range(H, 3, AxisType.LOOP)
   qfrags = [UOp.stack(*(q[t0 + col, h, kk*16 + j].load() for j in ks)) for kk in range(D // 16)]
-  wt = [w[t0 + half*8 + e, h].load() for e in range(8)]
+  wt = [w[t0 + arow(e), h].load() for e in range(8)]
   updates = []
   for n in range(NP):
     s = zero8
@@ -5729,7 +5739,7 @@ def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP
     sv = [s_reg[e].load() * kscale[n] if fp8 else s_reg[e].load() for e in range(8)]
     updates.append(accs[n].store(UOp.stack(*(prev[e].load() + sv[e].maximum(0) * wt[e] for e in range(8)))))
   done = UOp.group(*updates).end(h)
-  stores = [out[t0 + half*8 + e, p0 + n*16 + col].store(accs[n].after(done)[e].load()) for n in range(NP) for e in range(8)]
+  stores = [out[t0 + arow(e), p0 + n*16 + col].store(accs[n].after(done)[e].load()) for n in range(NP) for e in range(8)]
   # a data dependent count of tiles, an upper bound estimate
   est = Estimates(2*T*H*P*D, P*D*2 + T*H*D*2, T*P*4)
   return UOp.group(*stores).end(active).end(tt, g, lane).sink(arg=KernelInfo(name="indexer_scores", opts_to_apply=(), estimates=est))
@@ -5749,7 +5759,7 @@ def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp, kpool:int=4) -> 
   kh = k if k.dtype in (dtypes.half, dtypes.uint32) else k.half().contiguous()
   if isinstance(pools, UOp): kh = Tensor(kh.uop.after(pools))
   fxn = functools.partial(_indexer_scores_kernel, pools=_unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint), shard=n,
-                          kpool=kpool)
+                          kpool=kpool, rdna4=_wmma_rdna4(q.device))
   dsrc = [_device_index(cast(tuple[str, ...], k.device))] if n else []
   return Tensor.custom_kernel(out, q.half().contiguous(), kh, w.float().contiguous(), *dsrc, fxn=fxn)[0]
 
@@ -5862,8 +5872,9 @@ def pool_keys(pk:Tensor, ring:Tensor, kg:Tensor, ape:Tensor, start_pos:UOp|None,
   return Tensor(pk.uop.after(ring.uop))
 
 @functools.cache
-def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, pools:UOp, NP:int=2, stride:int=0, kpool:int=0, shard:int=0) -> UOp:
-  # one query (RDNA4 WMMA): the heads are the rows, out[p] = sum over the heads h of w[h] * relu(q[h] . k[p]). G waves, a wave loops over the
+def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, pools:UOp, NP:int=2, stride:int=0, kpool:int=0, shard:int=0,
+                                  rdna4:bool=True) -> UOp:
+  # one query (RDNA3/4 WMMA): the heads are the rows, out[p] = sum over the heads h of w[h] * relu(q[h] . k[p]). G waves, a wave loops over the
   # tiles of 16*NP pools g, g+G, .. of the pools: the work follows the context, not its max. a few queries: q (T, H, D), w (T, H), out (T, P),
   # the waves of every query
   # grouped (positions): the queries of S sequences (T//S each, the first at positions[s]), a sequence's pools stride rows of k, its pools its own
@@ -5889,12 +5900,14 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, po
   tiles = (pools + 16*NP - 1) // (16*NP)
   active = UOp.range(((tiles - g + G - 1) // G).maximum(0), 1, AxisType.LOOP)
   p0 = (g + active * G) * (16*NP)
-  ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
+  # (a lane's fragment: RDNA4 8 of the 16 k, RDNA3 all 16. its accumulator's element e: the row half*8+e (RDNA4), 2e+half (RDNA3))
+  ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8)) if rdna4 else tuple(range(16))
+  assert rdna4 or not fp8, "fp8 pooled keys: RDNA4"
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
   totals = [UOp.const(0, dtypes.float)] * NP
   for ht in range(H // 16):
     qfrags = [UOp.stack(*(q[ht*16 + col, kk*16 + j].load() for j in ks)) for kk in range(D // 16)]
-    wt = [w[ht*16 + half*8 + e].load() for e in range(8)]
+    wt = [w[ht*16 + (half*8 + e if rdna4 else half + e*2)].load() for e in range(8)]
     for n in range(NP):
       s = zero8
       kr = koff + p0 + n*16 + col
@@ -6378,7 +6391,8 @@ def indexer_decode_index(q:Tensor, k:Tensor, w:Tensor, q_start:UOp, pools:int|UO
   if isinstance(pools, UOp): k = Tensor(k.uop.after(pools))
   pu = _unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint)
   scores = Tensor.custom_kernel(scores, q.half().contiguous(), k, w.float().contiguous(),
-                                fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu))[0]
+                                fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu,
+                                                                      rdna4=_wmma_rdna4(q.device)))[0]
   return pool_index_rows(scores.reshape(1, P), q_start, pools, top, kpool).reshape(-1)
 
 def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp|None, pools:int|UOp|None, top:int, kpool:int,
@@ -6396,7 +6410,8 @@ def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp|None, po
     (positions, stride, *slots), T, zero = grouped, int(q.shape[0]), UOp.const(0, dtypes.weakint)
     scores = Tensor.custom_kernel(empty(T, stride*SLOT_SPAN), q.half().contiguous(), k, w.float().contiguous(), positions,
                                   *[x for x in slots if x is not None],
-                                  *dsrc, fxn=functools.partial(_indexer_scores_decode_kernel, pools=zero, stride=stride, kpool=kpool, shard=n))[0]
+                                  *dsrc, fxn=functools.partial(_indexer_scores_decode_kernel, pools=zero, stride=stride, kpool=kpool, shard=n,
+                                                                        rdna4=_wmma_rdna4(q.device)))[0]
     if n: return pool_index_shard(scores, None, None, top, kpool, positions=positions)
     out = Tensor.empty(T, top*kpool + kpool + 1, dtype=dtypes.int32, device=q.device)
     return Tensor.custom_kernel(out, scores, positions, fxn=functools.partial(_pool_index_kernel, q_start=zero, pools=zero, k=top, kpool=kpool))[0]
@@ -6406,7 +6421,8 @@ def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp|None, po
   if isinstance(pools, UOp): k = Tensor(k.uop.after(pools))
   pu = _unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint)
   scores = Tensor.custom_kernel(scores, q.half().contiguous(), k, w.float().contiguous(), *dsrc,
-                                fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu, kpool=kpool, shard=n))[0]
+                                fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu, kpool=kpool, shard=n,
+                                                                      rdna4=_wmma_rdna4(q.device)))[0]
   return pool_index_shard(scores, q_start, pools, top, kpool) if n else pool_index_rows(scores, q_start, pools, top, kpool)
 
 # ******** sequences sharing the caches (each its region of rows, see Transformer.regions): rows gathered and scattered by index, the indexer's
