@@ -179,14 +179,14 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
 
 @rewrite_group(new_ctx=False)
 def run_rangeify(tsink:UOp) -> UOp:
-  rctx = IndexingContext()
+  tsink_toposort = tsink.toposort(gate_kernel_sink)
+  rctx = IndexingContext(range_idx=itertools.count(max((x.axis_id[0] for x in tsink_toposort if x.op is Ops.RANGE), default=-1) + 1))
 
   # get ops to realize
   graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx, name="get realize")
 
   # get the consumer map
   with cpu_profile("consumer map in rangeify", "TINY"):
-    tsink_toposort = tsink.toposort(gate_kernel_sink)
     consumer_map: dict[UOp, dict[UOp, None]] = {x:{} for x in tsink_toposort}
     for c in tsink_toposort:
       for x in data_srcs(c.op, c.src):

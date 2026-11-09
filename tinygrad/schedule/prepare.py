@@ -67,6 +67,12 @@ def _valid(i:UOp) -> UOp:
   if any(x.is_invalid for x in i.get_idx().backward_slice): i = graph_rewrite(i, symbolic, name="lift gates")
   return i.get_valid()
 
+def _gate(ret:UOp, idxs:tuple[UOp, ...], new_idxs:tuple[UOp, ...]) -> UOp:
+  # the gates of idxs that new_idxs dropped gate the value ret, an invalid index reads 0
+  kept = {UOp.const(True)} | {c for i in new_idxs for c in _valid(i).split_uop(Ops.AND)}
+  gates = dedup(c for i in idxs for c in _valid(i).split_uop(Ops.AND) if c not in kept)
+  return gates[0].uprod(*gates[1:]).where(ret, ret.dtype.const(0)) if gates else ret
+
 # movement op on INDEX as a PatternMatcher
 def _mop_index(r:UOp, idx:UOp):
   idxs, in_shape, arg = idx.src[1:], r.src[0].shape, r.marg
@@ -75,11 +81,8 @@ def _mop_index(r:UOp, idx:UOp):
     if r.op is not Ops.RESHAPE or src_prefix < 0 or in_shape[src_prefix:] != r.shape[len(idxs):]: return None
     in_shape, arg = in_shape[:src_prefix], r.shape[:len(idxs)]
   new_idxs = apply_movement_op(r.op, in_shape, arg, idxs)
-  kept = {UOp.const(True)} | {c for i in new_idxs for c in _valid(i).split_uop(Ops.AND)}
-  dropped = dedup(c for i in idxs for c in _valid(i).split_uop(Ops.AND) if c not in kept)
   if (ret := r.src[0].index(*new_idxs, arg=idx.arg)).shape != idx.shape and partial: return None
-  # the gates the movement op dropped from the indexes still gate the value
-  return dropped[0].uprod(*dropped[1:]).where(ret, ret.dtype.const(0)) if dropped else ret
+  return _gate(ret, idxs, new_idxs)
 
 pm_mops = PatternMatcher([
   # handle movement ops on INDEX

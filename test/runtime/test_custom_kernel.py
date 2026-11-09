@@ -3,6 +3,7 @@ from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, Variable, Tin
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 import numpy as np
+from tinygrad.helpers import prod
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
@@ -529,6 +530,32 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(A:UOp, B:UOp): return B[0].store((A.index()+1).bitcast(dtypes.uint16)[3]).sink(arg=KernelInfo(opts_to_apply=()))
     _, b = Tensor.custom_kernel(Tensor([1, 5 << 16], dtype=dtypes.uint32).contiguous(), Tensor.zeros(1, dtype=dtypes.uint16).contiguous(), fxn=kernel)
     self.assertEqual(b.tolist(), [5])
+
+  def test_index_alu_before_upcast(self):
+    for shape in ((8,), (3, 4), (2, 3, 4)):
+      for info in (None, KernelInfo(), KernelInfo(opts_to_apply=())):
+        def kernel(C:UOp, A:UOp) -> UOp:
+          ranges = [UOp.range(s, i) for i, s in enumerate(shape)]
+          return C[*ranges].store((A+1)[*ranges]).end(*ranges).sink(arg=info)
+        A = Tensor.arange(prod(shape)).float().reshape(shape).realize()
+        self.assertEqual(Tensor.custom_kernel(Tensor.empty(shape), A, fxn=kernel)[0].tolist(), (A+1).tolist())
+
+  def test_index_gated_alu(self):
+    for shape in ((8,), (3, 4)):
+      for info in (None, KernelInfo(), KernelInfo(opts_to_apply=())):
+        def kernel(C:UOp, A:UOp) -> UOp:
+          ranges = [UOp.range(s, i) for i, s in enumerate(shape)]
+          return C[*ranges].store(A.exp2()[ranges[0].valid(ranges[-1] < 2), *ranges[1:]]).end(*ranges).sink(arg=info)
+        A = Tensor.arange(prod(shape)).float().reshape(shape).realize()
+        want = (A.exp2() * (Tensor.arange(shape[-1]) < 2)).tolist()
+        self.assertEqual(Tensor.custom_kernel(Tensor.empty(shape), A, fxn=kernel)[0].tolist(), want)
+
+  def test_index_alu_scalar_load(self):
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i = UOp.range(1024, 0)
+      return C[i].store((A+A[1].load())[i]).end(i).sink(arg=KernelInfo())
+    a = Tensor.arange(1024).float().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(1024), a, fxn=kernel)[0].tolist(), (a+1).tolist())
 
   def test_index_shaped_value_after_range(self):
     def kernel(B:UOp):

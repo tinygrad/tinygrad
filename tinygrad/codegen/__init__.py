@@ -22,7 +22,7 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.schedule.multi import multi_pm
-from tinygrad.schedule.prepare import pm_mops, expand_bitcast, _mop_index
+from tinygrad.schedule.prepare import pm_mops, expand_bitcast, _mop_index, _gate
 from tinygrad.schedule.indexing import _stack_select
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
@@ -140,15 +140,25 @@ def do_stack_wmma(u:UOp):
       src.append(b)
   return u.replace(src=tuple(src))
 
-devectorizer2 = pm_mops+PatternMatcher([
+def index_elementwise(a:UOp, idx:UOp) -> UOp:
+  # indexing an elementwise value indexes its sources, the value itself is gated by all the index gates
+  ret = a.replace(src=tuple(s if s.shape == () else s.expand(a.shape).index(*idx.src[1:]) for s in a.src))
+  return _gate(ret, idx.src[1:], ())
+
+pm_codegen_mops = pm_mops+PatternMatcher([
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise-{Ops.BITCAST}, name="a"), UPat()), allow_any_len=True, name="idx"),
+   lambda a,idx: index_elementwise(a, idx) if all(i.shape == () for i in idx.src[1:]) else None),
+  # reshape of a single element shaped value to scalar is an index
+  (UPat(Ops.RESHAPE, name="x"),
+   lambda x: x.src[0].index(*[0]*x.src[0].ndim) if x.marg == () and x.src[0].ndim and x.src[0].shape == (1,)*x.src[0].ndim else None),
+])
+devectorizer2 = pm_codegen_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # unpack WMMA
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
-  # reshape of a single element shaped value to scalar is an index
-  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
   # a scalar index into a STACK selects its lanes after the STACK and the index, renderers only extract lanes at const indices
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.var("i"))),
    lambda a,i: _stack_select(i, list(a.src)).after(a, i) if i.shape == () and a.ndim == 1 else None),
@@ -274,7 +284,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(ast, multi_pm, name="multi_pm")
 
   # preprocess
-  sink = graph_rewrite(sink, pm_mops+pm_expand_value_bitcast, name="early movement ops", bottom_up=True)
+  sink = graph_rewrite(sink, pm_codegen_mops+pm_expand_value_bitcast, name="early movement ops", bottom_up=True)
 
   # first we optimize
   if optimize:
