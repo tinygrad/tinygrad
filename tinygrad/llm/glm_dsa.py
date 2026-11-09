@@ -1550,6 +1550,7 @@ class MLATransformerBlock(FFNBlock):
     # (sequences sharing the caches: a layer sharing the indexer of the full layer before it (indexer_shared) takes that layer's lists)
     shared = idx is None and sb is not None and bool(self.config.indexer_shared) and _idx_mask[0] is not None
     assert idx is not None or shared, "batched decoding: the sparse attention of the indexer"
+    if idx is None: kg = iq = iw = cast(Tensor, None)  # (a shared layer: no keys or queries of its own)
     def core(q:Tensor, k_store:Tensor, kg:Tensor, iq:Tensor, iw:Tensor, groups:list[tuple[UOp, int]], pf:BatchPrefill|None,
              pools:tuple[Tensor, ...]) -> tuple[Tensor, tuple[Tensor, ...]]:
       # one kernel for all the sequences (the same rows each, the caches of slot g the g-th of the pools): their positions in a tensor. returns
