@@ -1144,15 +1144,19 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
 @functools.cache
 def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
                     out_features:int=0, in_features:int=0, ggml_type:int=Q8_0, block_n:int=128, k_splits:int=1, rdna4:bool=False,
-                    rows:int=0) -> UOp:
+                    rows:int=0, n_out:int=1) -> UOp:
+  # n_out: the outputs are n_out tensors (the first n_out sources), of the weight's rows in n_out equal parts (projections of the same input,
+  # their weights adjacent: one kernel). a workgroup's outputs are in one of them
+  srcs = (out, raw, x, *hc)
+  outs, raw, x, hc = srcs[:n_out], srcs[n_out], srcs[n_out+1], srcs[n_out+2:]
   # Q8_0 weights times f16 x on RDNA3/4 WMMA: four waves, two along tokens and two along outputs.
   # rows: x's rows past them aren't read, the last one's again (in the caches; the outputs of the rows past them aren't used)
   # Stage activations and dequantized weights in LDS: each weight is dequantized once for token_tile tokens.
   # RDNA3 uses 16-element input fragments and interleaved accumulator rows, with LDS capped at 32 KiB.
-  M, N = cast(tuple[int, int], out.shape)
+  M, N = cast(int, out.shape[0]), n_out*cast(int, out.shape[-1])
   K, streams = cast(int, x.shape[-1]), 4 if hc else 1
   # (hc: out may have fewer rows than x, its first ones (a device's real rows of batched decoding): the others aren't stored)
-  out_rows, M = M, (cast(int, x.numel()) // K if hc else M)
+  out_rows, M = M, (cast(int, x.numel()) // K if hc else round_up(M, token_tile) if n_out > 1 else M)
   assert k_splits > 0 and M % k_splits == 0 and K % (32*k_splits) == 0
   assert k_splits == 1 or ggml_type == Q8_0 or (ggml_type == Q6_K and (K // (32*k_splits)) % 8 == 0), "a split of whole blocks"
   M //= k_splits
@@ -1279,7 +1283,11 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
     r = token_block * token_tile + wt * TT * 16 + t * 16 + (half * 8 + i if rdna4 else 2*i + half)
     value = sum(_sigmoid(accs[s*(OT//streams)+o][t].after(update)[i].load()) * hc[0][r.minimum(rows-1) if rows else r, s*N+ocol(o)].load()
                 for s in range(streams)) / streams if hc else accs[o][t].after(update)[i].load()
-    stores.append(out[(split*M + r).valid(r < out_rows) if out_rows < M else split*M + r, ocol(o)].store(value.cast(out.dtype)))
+    orow = (split*M + r).valid(r < out_rows) if out_rows < M else split*M + r
+    if n_out == 1: stores.append(out[orow, ocol(o)].store(value.cast(out.dtype)))
+    else:
+      ne, which = N // n_out, output_block * block_n // (N // n_out)
+      stores += [o_[orow, (ocol(o) - j*ne).valid(which.eq(j))].store(value.cast(o_.dtype)) for j, o_ in enumerate(outs)]
   # (LIN_NAMES: the shapes in the name, for profiles)
   name = f"q8_gemm_{M}_{N}_{K}{'_hc' if hc else ''}_k{k_splits}_t{token_tile}_b{block_n}" if getenv("LIN_NAMES") else "q8_gemm"
   return UOp.group(*stores).end(token_block, output_block, split, lane, wave).sink(arg=KernelInfo(name=name, opts_to_apply=()))
@@ -1314,6 +1322,50 @@ def f16t_gemm(x:Tensor, wt:Tensor) -> Tensor|None:
   out = Tensor.empty(P, N, dtype=dtypes.float32, device=x.device)
   fxn = functools.partial(_q8_gemm_kernel, token_tile=32, ggml_type=F32T, block_n=64, rdna4=_wmma_rdna4(x.device))
   return Tensor.custom_kernel(out, wt, xp.contiguous(), fxn=fxn)[0][:R]
+
+def merged_linear(layers:list[Linear]) -> Linear|None:
+  """
+  one Linear of the layers' rows (Q8_0, the same input, split on their outputs over the devices) if their weights are views of adjacent bytes
+  of every device's memory (the loader's): a view of them (no copy). None if not
+  """
+  from tinygrad.device import MultiBuffer
+  for l in layers:
+    if l.ggml_type is None and l.use_custom_quant and amd_custom_kernels_supported(l.weight.device): l.set_quantized(l.weight)
+  l0 = layers[0]
+  if l0.ggml_type != Q8_0 or any(l.ggml_type != Q8_0 or l.shard_axis != 0 or l.in_features != l0.in_features or l.out_features != l0.out_features
+                                 or l.bias is not None for l in layers): return None
+  # (the buffer every weight is a view of)
+  bufs = [[u.buffer for u in l.weight.uop.toposort() if u.op is Ops.BUFFER and isinstance(u.buffer, MultiBuffer)] for l in layers]
+  if any(len(b) != 1 for b in bufs): return None
+  mbs = [cast(MultiBuffer, b[0]) for b in bufs]
+  parts = []
+  for d in range(len(mbs[0].bufs)):
+    bs = [mb.bufs[d] for mb in mbs]
+    if any(x.base is not bs[0].base or x.nbytes != bs[0].nbytes or x.offset != bs[0].offset + j*bs[0].nbytes for j, x in enumerate(bs)): return None
+    parts.append(bs[0].base.view(len(bs)*bs[0].nbytes, bs[0].offset))
+  (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = parts
+  devs = cast(tuple[str, ...], l0.weight.device)
+  with Linear.empty_init(): merged = Linear(l0.in_features, l0.out_features*len(layers), bias=False)
+  merged.weight = Tensor(UOp.from_buffer(mb, dtypes.uint8, devs).reshape(1, -1).unshard(0)).flatten().bitcast(l0.weight.dtype).contiguous()
+  merged.ggml_type, merged.shard_axis = Q8_0, 0
+  return merged
+
+def q8_linear_parts(merged:Linear, x:Tensor, n:int) -> list[Tensor]|None:
+  """
+  the n projections of x of a merged Linear (merged_linear's) by one kernel (the skinny gemm, its outputs in n tensors: no split sums):
+  batched decoding's rows (17-96). None: not those rows
+  """
+  tokens = int(x.numel()) // merged.in_features
+  devs, K = x.device, merged.in_features
+  if not isinstance(devs, tuple) or not 16 < tokens <= 96 or K % 32 or not amd_custom_kernels_supported(devs): return None
+  ne = merged.out_features // n
+  P = round_up(tokens, 32)
+  tt = next(t for t in (96, 64, 32) if P % t == 0)
+  outs = [Tensor.empty(tokens, ne, dtype=dtypes.float32, device=devs, axis=1) for _ in range(n)]
+  fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=Q8_0, block_n=64, k_splits=1, rdna4=_wmma_rdna4(devs), n_out=n,
+                          out_features=merged.out_features // len(devs), in_features=K)
+  res = Tensor.custom_kernel(*outs, merged.weight, x.reshape(tokens, K).cast(dtypes.float16).contiguous(), fxn=fxn)[:n]
+  return [r.reshape(*x.shape[:-1], ne) for r in res]
 
 def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False, half_out:bool=False,
               rows:int=0) -> Tensor:

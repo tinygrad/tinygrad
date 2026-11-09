@@ -12,7 +12,8 @@ from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custo
   kda_replay, tables_ready, MOE_TILE, I8_WMMA_QUANTS, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, \
   Q8_0, IQ3_S, q8_embed, weighted_sum, ghc_decode_mix, rows_gather, rows_scatter, seq_scores, seq_index, kv_q8_pack, kv_q4_pack, \
   qsa_decode_attention, FLAG_LANE, DEC_LANE, flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, \
-  few_out_rows, index_scores, after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus, picks_local, pool_window, seq_index_split
+  few_out_rows, index_scores, merged_linear, q8_linear_parts, after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus, \
+  picks_local, pool_window, seq_index_split
 from tinygrad.llm.gguf import gguf_parse, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm.direct_read import DirectFile, read_many, close_rings
 from tinygrad.llm.gguf_load import gguf_shard_units, _disk_bytes, _disk_location
@@ -178,6 +179,8 @@ def _qwen4exp_entries(kv:dict, entries:dict[str, tuple[Tensor, tuple[int, ...], 
           t = part.to("CPU").reshape(hk*K, -1).repeat(hv // hk, 1)
           entries[blk + dst.format(c)] = (t.flatten(), (hv * K, *shape[1:]), typ)
       entries[blk + dst.format("v")] = (cut(data, 2*hk*K, n, n), (n - 2*hk*K, *shape[1:]), typ)
+    # (the output gate's weight after v: q, k, v and the gate adjacent on every device, batched decoding's one kernel of them, see merged_linear)
+    if blk + 'attn_gate.weight' in entries: entries[blk + 'attn_gate.weight'] = entries.pop(blk + 'attn_gate.weight')
   return entries, n_kv, rows
 
 def expert_slice_table(units:list[int], experts:int, slices:int) -> list[list[int]]:
@@ -330,6 +333,7 @@ SEQ_SPLIT_MAX = 128  # (the most real rows a device)
 # HC_REAL: batched decoding's hyper-connections read a device's real rows only and the mix stores them (no copy of them), its input not
 # materialized in float (2 kernels less a sublayer): the mix's epilogue and the activation's kernel round differently (FMA, rcp: ulps)
 HC_REAL = getenv("HC_REAL", 0)
+GDN_MERGED = getenv("GDN_MERGED", 0)
 def _split_rows() -> int: return round_up(_seq_split[0], 32)
 def _split_real(x:Tensor) -> Tensor:
   """(B, N*P, ...) split padded rows: the real rows (B, N*R, ...), split"""
@@ -1470,6 +1474,7 @@ class QSABlock(TransformerBlock):
 
 
 class GatedDeltaNetBlock(FFNBlock):
+  _qkvg:Linear|None = None  # (GDN_MERGED: q, k, v and the gate's weights as one, see Transformer._derive_weights)
   def __init__(self, config:TransformerConfig, ssm:SSMConfig):
     super().__init__(config)
     self.head_k_dim, self.num_k_heads, self.num_v_heads = ssm.state_size, ssm.group_count, ssm.time_step_rank
@@ -1554,7 +1559,9 @@ class GatedDeltaNetBlock(FFNBlock):
     """
     sb = cast(SeqBatch, _seq_batch[0])
     x = x.half()
-    projs, gate = [self.attn_q(x), self.attn_k(x), self.attn_v(x)], self._gate(x)
+    # (GDN_MERGED: q, k, v and the gate by one kernel (their weights adjacent: merged_linear), no split sums: the sums' order changes)
+    if (m:=getattr(self, "_qkvg", None)) is not None and (parts:=q8_linear_parts(m, x, 4)) is not None: projs, gate = parts[:3], parts[3]
+    else: projs, gate = [self.attn_q(x), self.attn_k(x), self.attn_v(x)], self._gate(x)
     alpha, beta = self._alpha(x, rows=True), self._few_rows(self.ssm_beta, x)
     weights = [w["weight"] for w in (self.ssm_conv1d_q, self.ssm_conv1d_k, self.ssm_conv1d_v)]
     S, SC, T = int(self.slot_rec[0].shape[0]), int(self.slot_conv[0][0].shape[0]), sb.R
@@ -2973,6 +2980,12 @@ class Transformer:
         g._wnorm = g.norm["weight"].float().contiguous()
         winj.append(g._wnorm)
     if winj: realize(winj)
+    # (GDN_MERGED: the gated deltanets' q, k, v and gate weights as one (adjacent, see _qwen4exp_entries): batched decoding's one kernel)
+    if GDN_MERGED:
+      for b in self.blk:
+        if isinstance(b, GatedDeltaNetBlock) and b.is_kda and hasattr(b, "attn_gate"):
+          b._qkvg = merged_linear([b.attn_q, b.attn_k, b.attn_v, b.attn_gate])
+      if DEBUG >= 1: print(f"GDN_MERGED: {sum(getattr(b, '_qkvg', None) is not None for b in self.blk)} merged q|k|v|gate weights")
 
   def sequence_parallel(self, rows:int) -> bool:
     """the hyper-connection streams of a prefill chunk of `rows` are split over the devices: tiles of 16 rows on every device"""
