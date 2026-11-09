@@ -17,9 +17,11 @@ regCOMPUTE_PGM_RSRC2 = 0x1bb3 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_TMPRING_SIZE = 0x1bb8 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_USER_DATA_0 = 0x1be0 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_NUM_THREAD_X = 0x1ba7 + amd_gpu.GC_BASE__INST0_SEG0
+regCOMPUTE_THREAD_TRACE_ENABLE = 0x1bbe + amd_gpu.GC_BASE__INST0_SEG0
 regGRBM_GFX_INDEX = 0x2200 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_BUF0_BASE = 0x39e8 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_BUF0_SIZE = {"rdna3": 0x39e9, "rdna4": 0x39e6, "cdna4": 0x39e9}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_MASK = 0x39ed + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_WPTR = 0x39ef + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_STATUS = 0x39f4 + amd_gpu.GC_BASE__INST0_SEG1
 regCP_PERFMON_CNTL = 0x3808 + amd_gpu.GC_BASE__INST0_SEG1
@@ -208,10 +210,23 @@ class PM4Executor(AMDQueue):
     scratch_size = wavesize * (16 if self.gpu.arch == "cdna" else 4)  # per-thread scratch size in bytes
 
     assert 0 < self.kernel_text_size <= prg_sz, "Invalid prg ptr or text size"
+    trace, words = None, 0
+    if MOCKGPU_ARCH == "rdna3" and self.gpu.regs.regs.get((regCOMPUTE_THREAD_TRACE_ENABLE, 0)):
+      base, size = self.gpu.regs.regs[(regSQ_THREAD_TRACE_BUF0_BASE, 0)], self.gpu.regs.regs[(regSQ_THREAD_TRACE_BUF0_SIZE, 0)]
+      trace, n_waves = memoryview(bytearray(getbits(size, 8, 29) << 12)).cast("I"), (lc[0]*lc[1]*lc[2] + 31) // 32
+      words = len(trace) // n_waves
     from test.mockgpu.amd.emu import run_asm
-    err = run_asm(prg_addr, self.kernel_text_size, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2], args_addr,
-                  rsrc2, scratch_size, self.gpu.arch, self.kernel_name)
+    err = run_asm(prg_addr, self.kernel_text_size, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2], args_addr, rsrc2, scratch_size,
+                  self.gpu.arch, self.kernel_name, trace, words)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
+    if trace is not None:
+      # only the first workgroup is traced, it goes in SE 0's buffer
+      from test.mockgpu.amd.sqtt import sqtt_blob
+      simd = getbits(self.gpu.regs[regSQ_THREAD_TRACE_MASK], 0, 1)
+      blob = sqtt_blob(bytes(to_mv(prg_addr, self.kernel_text_size)), [trace[k*words:(k+1)*words] for k in range(n_waves)], simd)
+      blob += bytes(-len(blob) % 32)  # WPTR counts 32 byte units
+      to_mv(((size&0xf)<<32|base)<<12, len(blob))[:] = blob
+      self.gpu.sqtt_size = len(blob)
 
   def _exec_indirect_buffer(self, n):
     addr_lo = self._next_dword()
@@ -237,9 +252,10 @@ class PM4Executor(AMDQueue):
             buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12
           else:
             buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_HI])<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_LO])<<12
-          wptr_val = ((buf_addr if MOCKGPU_ARCH == "rdna3" else 0) // 32) & 0x1FFFFFFF
+          wptr_val = (((buf_addr if MOCKGPU_ARCH == "rdna3" else 0) + (self.gpu.sqtt_size if se == 0 else 0)) // 32) & 0x1FFFFFFF
           self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = wptr_val
         self.gpu.regs.grbm_index = old_idx
+        self.gpu.sqtt_size = 0
       case _: pass # NOTE: for now most events aren't emulated
 
 class SDMAExecutor(AMDQueue):
@@ -341,6 +357,7 @@ class AMDGPU(VirtGPU):
     self.mapped_ranges = set()
     self.queues = []
     self.arch = "cdna" if MOCKGPU_ARCH == "cdna4" else MOCKGPU_ARCH
+    self.sqtt_size = 0
 
   def translate_addr(self, addr:int) -> int: return addr
   def map_range(self, vaddr, size): self.mapped_ranges.add((vaddr, size))

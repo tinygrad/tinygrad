@@ -56,7 +56,7 @@ from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program, to_program_config
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import Context, DEV, to_mv, ContextVar, VIZ
+from tinygrad.helpers import Context, DEV, to_mv, mv_address, ContextVar, VIZ
 from tinygrad.runtime.autogen import hsa
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND, get_elf_section
 
@@ -295,6 +295,8 @@ class _Ctx:
   lds = UOp.param(3, dtypes.uint32, 16384, name="lds")
   scratch = UOp.param(4, dtypes.uint8, 1 << 30, name="scratch")
   scratch_stride = UOp.param(9, dtypes.uint32, name="scratch_stride", addrspace=AddrSpace.ALU)
+  trace = UOp.param(10, dtypes.uint32, 1 << 30, name="trace")
+  trace_on = UOp.param(11, dtypes.bool, name="trace_on", addrspace=AddrSpace.ALU)
 
   def __init__(self, wave_size: int = 32):
     self._axis_id, self.wave_size = 0, wave_size
@@ -1728,6 +1730,17 @@ def emu_loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
   w = UOp.range(waves, 0, AxisType.LOOP, dtype=dtypes.int)
   return active[0].store(routes[w].load().eq(header).cast(dtypes.uint32).reduce(w, arg=Ops.MAX).ne(0)).sink()
 
+def trace_call(ctx:_Ctx, trace_words:int, pc:int, inst:Inst) -> UOp:
+  # a word count, then pc and EXEC for every instruction, plus the address lanes of a ds_* op. the count keeps going when it's full
+  n, words = ctx.trace.index(_c(0, dtypes.int)).load().cast(dtypes.int), 2 + (ctx.wave_size if isinstance(inst, ir3.DS) else 0)
+  ok = ctx.trace_on & (n + words < _c(trace_words, dtypes.int))
+  stores = [ctx.trace.index((n+i+1).valid(ok)).store(v) for i,v in enumerate([_c(pc), ctx.sgpr.index(_c(EXEC_LO.offset, dtypes.int)).load()])]
+  if isinstance(inst, ir3.DS):
+    lane = UOp.range(ctx.wave_size, 1, AxisType.LOOP, dtype=dtypes.int)
+    addr = ctx.vgpr.index(_c((inst.addr.offset-256)*ctx.wave_size, dtypes.int)+lane).load()
+    stores.append(ctx.trace.index((n+3+lane).valid(ok)).store(addr).end(lane))
+  return lower_body(UOp.sink(*stores, ctx.trace.index(_c(0, dtypes.int).valid(ctx.trace_on)).store((n+words).cast(dtypes.uint32))), "emu_trace")
+
 def lower_body(sink:UOp, name:str) -> UOp:
   bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
   body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}, walk=True)
@@ -1850,7 +1863,9 @@ RENDER = ContextVar("RENDER", 0) # render lifted ast back to assembly
 
 def render_call(call:UOp):
   if call.arg.name.startswith("emu_"):
-    return UOp(Ops.LINEAR, src=tuple(y for x in call.body.toposort() if x.op is Ops.LINEAR for y in x.src if y.op in {Ops.BINARY, Ops.STACK}))
+    # an empty STACK is the shape of a scalar param, not an instruction
+    lin = [y for x in call.body.toposort() if x.op is Ops.LINEAR for y in x.src]
+    return UOp(Ops.LINEAR, src=tuple(y for y in lin if y.op is Ops.BINARY or (y.op is Ops.STACK and y.src)))
   encoding = bytes.fromhex(call.arg.name.rsplit("_", 1)[1])
   words = [UOp(Ops.BINARY, arg=encoding[i:i+4]) for i in range(0, len(encoding), 4)]
   for i,x in enumerate(call.src_without_body[:len(words)]):
@@ -1863,7 +1878,7 @@ pm_render = PatternMatcher([
 ])
 
 @rewrite_group(replay="emu_process_replay")
-def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
+def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="", trace_words:int=0) -> UOp:
   insts = amd_decode(code, arch)
   for inst in insts.values():
     inst_st = getattr(inst, "op_name", "").lower()
@@ -1901,7 +1916,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   args_ptr = UOp.variable("args_ptr", 0, dtypes.uint64.max, dtypes.uint64)
   ctx = _Ctx(wave_size)
   buffers = {ctx.sgpr:(sgpr, SGPR_COUNT), ctx.vgpr:(vgpr, 256*wave_size), ctx.vmem:(ctx.vmem, 0),
-             ctx.lds:(lds, 0), ctx.scratch:(scratch, scratch_size*wave_size)}
+             ctx.lds:(lds, 0), ctx.scratch:(scratch, scratch_size*wave_size), ctx.trace:(ctx.trace, trace_words)}
   if wave_size == 64: buffers[ctx.accvgpr] = (accvgpr, 256*wave_size)
   routes = UOp.alloc((n_waves,), dtypes.int, 6, AddrSpace.REG)
   active = UOp.alloc((1,), dtypes.bool, 7, AddrSpace.REG)
@@ -1940,10 +1955,11 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
       inst = insts[off]
       inst_st = getattr(inst, "op_name", "").lower()
       if inst_st.startswith("s_code_end"): continue
+      if trace_words: instructions.append(trace_call(ctx, trace_words, off, inst))
       call, branch_cond = instruction_call(inst, arch, renderer)
       if branch_cond is not None: cond = branch_cond
       if call is not None: instructions.append(call)
-    values = {ctx.scratch_stride:_c(scratch_size)}
+    values = {ctx.scratch_stride:_c(scratch_size), ctx.trace_on:wg.eq(0)}
     if routed:
       dsts = {kind:dst for dst,kind in cfg["paths"][block_pc].items()}
       target = cond.where(taken, fallthrough) if len(dsts) == 2 else taken
@@ -1993,15 +2009,16 @@ RELIFT = ContextVar("RELIFT", 0) # lift and recompile to assembly N times
 REPLAY_EMU = ContextVar("REPLAY_EMU", 0)
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
-            scratch_size: int = 0, arch: str = "rdna3", name: str = "asm") -> int:
-  """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
+            scratch_size: int = 0, arch: str = "rdna3", name: str = "asm", trace: memoryview|None = None, trace_words: int = 0) -> int:
+  """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane).
+  trace gets what the first workgroup ran, trace_words for each of its waves (see trace_call)."""
   with Context(DEV=DEV.target('CPU', renderer='LLVM'), NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="",
                CAPTURE_PROCESS_REPLAY=REPLAY_EMU.value, DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1):
     code = bytes(to_mv(lib, lib_sz))
     dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size)
     renderer = Device['CPU'].renderer
-    if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
-      dispatch_cache[key] = to_program(lift(code, arch, renderer, dispatch, f"emu {name}"), renderer)
+    if (key:=(code, arch, dispatch, name, trace_words, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
+      dispatch_cache[key] = to_program(lift(code, arch, renderer, dispatch, f"emu {name}", trace_words), renderer)
       relift_lib = code
       for relift_count in range(1, RELIFT.value+1):
         try:
@@ -2015,6 +2032,9 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   args = [vmem_buf] * (max(p.arg.slot for p in prg.kernel_params) + 1)
   for p in prg.kernel_params:
     if p.addrspace is AddrSpace.ALU: args[p.arg.slot] = p.bind(args_ptr)
+  if trace is not None:
+    ptr = mv_address(trace)
+    args[_Ctx.trace.arg.slot] = UOp.from_buffer(Buffer('CPU', trace.nbytes, options=BufferSpec(external_ptr=ptr), opaque=ptr), dtypes.uint32)
   with _MXCSRContext():
     run_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)), update_stats=False)
   return 0
