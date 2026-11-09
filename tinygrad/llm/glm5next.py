@@ -4295,7 +4295,8 @@ class Transformer:
           # The host and device have identical region-relative row layout; the grouped kernels' absolute base stays out of this copy.
           if save: saves.append(dst.assign(src))
           else: pairs.append((src, dst))
-      Tensor.realize(*saves, *[x.assign(d.contiguous()) for x, d in pairs])
+      # (a restore's copy kernels read the host rows: no device copy of them first (a stash call's rows of every cache: ~126 MB on C5))
+      Tensor.realize(*saves, *[x.assign(d) for x, d in pairs])
       return
     for b, st in zip([b for b in self.blk + [self.mtp] if isinstance(b, QSABlock)], self._stash_kv):
       ts = [(st[0], b.cache_k, row, chunk*C, C*chunks, self._stash_writers[0])]
