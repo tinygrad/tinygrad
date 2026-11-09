@@ -10,9 +10,9 @@ from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custo
   q8_quantize_cache_clear, moe_route, moe_grouped_linear, partial_sum, fuse_gate_up, kda_decode, pool_index_rows, slot_scatter, \
   slot_gather, moe_combine, token_sharded, shard_rows, reduce_scatter, all_gather, all_gather_q8, sharded_argmax, skinny_matmul, kda_conv, \
   kda_replay, tables_ready, MOE_TILE, I8_WMMA_QUANTS, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, \
-  Q8_0, IQ3_S, q8_embed, weighted_sum, ghc_decode_mix, rows_gather, rows_scatter, seq_scores, seq_index, kv_q8_pack, qsa_decode_attention, \
-  FLAG_LANE, DEC_LANE, flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, \
-  after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus, picks_local, pool_window, seq_index_split
+  Q8_0, IQ3_S, q8_embed, weighted_sum, ghc_decode_mix, rows_gather, rows_scatter, seq_scores, seq_index, kv_q8_pack, kv_q4_pack, \
+  qsa_decode_attention, FLAG_LANE, DEC_LANE, flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, \
+  few_out_rows, index_scores, after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus, picks_local, pool_window, seq_index_split
 from tinygrad.llm.gguf import gguf_parse, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm.direct_read import DirectFile, read_many, close_rings
 from tinygrad.llm.gguf_load import gguf_shard_units, _disk_bytes, _disk_location
@@ -1076,6 +1076,8 @@ def _region_rows(config:TransformerConfig) -> int:
   return round_up(max(config.max_context, config.cache_rows), REGION_ALIGN)
 # a prefill chunk's rows in this many micro batches (sequence parallel: the copies of one run with the kernels of the other)
 MICRO_BATCHES = getenv("MICRO_BATCHES", 2)
+# the attention cache's keys (1) and values (2) rotated, see QSABlock._rot
+QSA_KV_ROT = getenv("QSA_KV_ROT", 0)
 
 @dataclass(frozen=True)
 class SeqBatch:
@@ -1347,7 +1349,15 @@ class QSABlock(TransformerBlock):
     bases: (rows, H, 1, hd). kv_split (compact lists): a device's heads (its group's) on its keys, the devices' outputs weighted by their log
     sum exps (exchanged)
     """
+    if (rot:=self._rot) is not None:
+      # (QSA_KV_ROT: the cache's keys and values rotated: the queries alike, the output back)
+      out = self._attend_cache(q.float() @ rot if QSA_KV_ROT & 1 else q, cache, picks, bases, compact, **kw)
+      return out @ rot.T if QSA_KV_ROT & 2 else out
+    return self._attend_cache(q, cache, picks, bases, compact, **kw)
+
+  def _attend_cache(self, q:Tensor, cache:Tensor, picks:Tensor, bases:Tensor, compact:bool=True, **kw) -> Tensor:
     kp, S, hd = unwrap(self.indexer).idx.kpool, self.config.kv_split, self.config.head_dim
+    kw["bits"] = self._kv_bits
     if S == 1: return cast(Tensor, qsa_decode_attention(q, cache.unsqueeze(2), picks, bases, hd**-0.5, kpool=kp if compact else 0, **kw))
     local = picks_local(picks, S, kp)
     attn, lse = cast(tuple[Tensor, Tensor], qsa_decode_attention(q, cache.unsqueeze(2), local, bases // S, hd**-0.5, kpool=kp, lse=True, **kw))
@@ -1405,20 +1415,43 @@ class QSABlock(TransformerBlock):
     return self._out_gated(attn.permute(2, 1, 0, 3), gate)
 
   @property
-  def _q8(self) -> bool: return self.cache_k.dtype == dtypes.uint32
+  def _kv_bits(self) -> int:
+    """the bits of a value of the cache: 16 (half), 8 (kv_q8_pack's int8 groups) or 4 (kv_q4_pack's, QSA_KV_BITS=4)"""
+    if self.cache_k.dtype != dtypes.uint32: return 16
+    return 4 if int(self.cache_k.shape[-1]) == 2*self.config.head_dim * 9 // 64 else 8
   def _kv_rows(self, kv:Tensor) -> Tensor:
-    """rows (..., 2*head_dim) of keys and values as the cache's (in int8 groups: SEQ_KV_Q8)"""
-    return kv_q8_pack(kv) if self._q8 else kv.cast(self.cache_k.dtype)
+    """rows (..., 2*head_dim) of keys and values as the cache's (QSA_KV_ROT: rotated, see _rot)"""
+    if (rot:=self._rot) is not None:
+      hd = self.config.head_dim
+      k, v = kv[..., :hd], kv[..., hd:]
+      kv = (k.float() @ rot if QSA_KV_ROT & 1 else k).cat(v.float() @ rot if QSA_KV_ROT & 2 else v, dim=-1)
+    return {4: kv_q4_pack, 8: kv_q8_pack}[b](kv) if (b:=self._kv_bits) != 16 else kv.cast(self.cache_k.dtype)
+  @property
+  def _rot(self) -> Tensor|None:
+    """
+    QSA_KV_ROT (1: the keys, 2: the values, 3: both): the cache's rows of them rotated (head_dim a Hadamard matrix of random signs: their
+    outliers spread over the dims of a group, quantized with less error). the queries rotated alike (the scores the same), the attention's
+    output back (the values')
+    """
+    return getattr(self, "_rot_m", None)
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k"):
       # (the rows of every sequence's region, see QSAIndexer._init_state)
       KV, N, D = self.config.n_kv_heads, (_region_rows(self.config) + REGION_ALIGN) // self.config.kv_split, 2*self.config.head_dim
-      # (zeroed: the flash kernels read whole tiles past the valid region. SEQ_KV_Q8: in int8 groups of 32 and their scales (kv_q8_pack), the
-      # bytes of a row 0.56x: more rows in memory)
-      q8 = D % 32 == 0 and amd_custom_kernels_supported(x.device)
-      self.cache_k = _zeros(KV, 1, N, D//4 + D//32 if q8 else D, dtype=dtypes.uint32 if q8 else dtypes.half, device=x.device,
+      # (zeroed: the flash kernels read whole tiles past the valid region. in int8 groups of 32 and their scales (kv_q8_pack), the bytes of a
+      # row 0.56x: more rows in memory. QSA_KV_BITS=4: in 4-bit groups (kv_q4_pack), 0.28x. 16: half)
+      bits = getenv("QSA_KV_BITS", 8) if D % 32 == 0 and amd_custom_kernels_supported(x.device) else 16
+      assert bits in (4, 8, 16) and (bits != 4 or D % 64 == 0), f"QSA_KV_BITS {bits}"
+      W = {4: D//8 + D//64, 8: D//4 + D//32, 16: D}[bits]
+      self.cache_k = _zeros(KV, 1, N, W, dtype=dtypes.half if bits == 16 else dtypes.uint32, device=x.device,
                             axis=0 if isinstance(x.device, tuple) else None)
+      if QSA_KV_ROT and bits != 16:
+        hd = self.config.head_dim
+        assert hd & (hd - 1) == 0, "QSA_KV_ROT: a Hadamard matrix of a power of two dims"
+        sign = [1 if random.Random(hd + i).random() < 0.5 else -1 for i in range(hd)]
+        m = [[sign[i] * (-1)**bin(i & j).count("1") * hd**-0.5 for j in range(hd)] for i in range(hd)]
+        self._rot_m = Tensor(m, dtype=dtypes.float32, device="CPU").to(x.device).contiguous().realize()
       self.freqs_cis = _freqs(self.config.rope_dim, self.config.max_context, self.config.rope_theta, x.device, self.config.yarn)
     if self.indexer is not None: self.indexer._init_state(x)
 
@@ -1903,6 +1936,11 @@ class Transformer:
     if hc is not None and x.ndim == 4: x = self._hc_out(x[:, -1:])
     # Only the last token needs the final stream mix and vocabulary projection.
     tok = self._sample(self.output_norm(x[:, -1:])[:, -1, :], temperature, tokens.device)
+    if (lp:=getattr(self, "_lp_buf", None)) is not None:
+      # (QSA_LP (extra/qwen_kv_quality.py): the logits of the last token into _lp_buf, its effect)
+      eff = lp.assign(self.output(self.output_norm(x[:, -1:])[:, -1, :]).float())
+      if self._effects is None: eff.realize()
+      else: self._effects.append(eff)
     q8_quantize_cache_clear()  # don't keep the graph alive
     # the tokens are a view of generate's token buffer: the sampled token goes after them unless that is a prompt token (chunked prefill)
     if (buf:=getattr(self, "_token_buf", None)) is not None and tokens.uop.base is buf.uop.base:

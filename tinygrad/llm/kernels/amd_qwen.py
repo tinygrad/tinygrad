@@ -191,8 +191,8 @@ def _amd_sudot4u(a:UOp, b:UOp, c:UOp) -> UOp:  # c + the dot of a's 4 signed byt
 _H2 = "_Float16 __attribute__((ext_vector_type(2)))"
 def _amd_pkrtz(a:UOp, b:UOp) -> UOp:  # two floats to a half2 (its bits)
   return _cfn(True, src=(a, b), arg=("__builtin_bit_cast(unsigned int, __builtin_amdgcn_cvt_pkrtz({}, {}))", dtypes.uint32))
-def _amd_fdot2_less1152(a:UOp, b:UOp, c:UOp) -> UOp:  # c + the dot of the half2s a - 1152 and b (in float)
-  return _cfn(True, src=(a, b, c), arg=(f"__builtin_amdgcn_fdot2(__builtin_bit_cast({_H2}, {{0}}) - ({_H2})((_Float16)1152.0f), "
+def _amd_fdot2_less1152(a:UOp, b:UOp, c:UOp, less:int=1152) -> UOp:  # c + the dot of the half2s a - 1152 (less) and b (in float)
+  return _cfn(True, src=(a, b, c), arg=(f"__builtin_amdgcn_fdot2(__builtin_bit_cast({_H2}, {{0}}) - ({_H2})((_Float16){less:.1f}f), "
                                              f"__builtin_bit_cast({_H2}, {{1}}), {{2}}, false)", dtypes.float))
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
@@ -3176,7 +3176,7 @@ def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, *lse:UOp, live:int|
   return UOp.group(*stores).end(lane, block_dt, block_bh).sink(arg=KernelInfo(name="flash_decode_combine", opts_to_apply=()))
 
 @functools.cache
-def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UOp, *, scale:float, W:int, kpool:int=0) -> UOp:
+def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UOp, *, scale:float, W:int, kpool:int=0, bits:int=8) -> UOp:
   # the partials (B, H, P, DV) and their (max, sum) (B, H, P, 2) of every row b's heads (q (B, H, DK): the GQA group of a KV head) on the keys
   # of its list index[b] (B, n+1, the count last), the rows of the cache (.., N, row) from bases[b]: a row's first DK dims the key, the next DV
   # the value (half, or kv_q8_pack's words). a workgroup (b, part) of W waves, a wave a tile of 32 keys a round: a lane a key, its scores of
@@ -3184,9 +3184,11 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
   B, H, P, DV = cast(tuple[int, int, int, int], out.shape)
   DK = cast(int, q.shape[-1])
   q8, N, n_max = cache.dtype == dtypes.uint32, cast(int, cache.shape[-2]), cast(int, index.shape[1]) - 1
+  # (bits 4: kv_q4_pack's rows: 4-bit values, the same groups of 32, their scales half)
+  q4 = q8 and bits == 4
   # (kpool: compact lists (pool_index_rows'): the picked pools, their count, the query's position)
   if kpool: n_max = (cast(int, index.shape[1]) - 2) * kpool + kpool
-  W4, DPL = (DK + DV) // 4, DV // WARP_SIZE
+  W4, DPL = (DK + DV) // (8 if q4 else 4), DV // WARP_SIZE
   assert DK % 32 == 0 and DV % (WARP_SIZE * 8) == 0 and DPL == 8
   cache = cache.reshape(N, cast(int, cache.shape[-1]))
   b, part = UOp.range(B, 0, AxisType.GLOBAL), UOp.range(P, 1, AxisType.GLOBAL)
@@ -3237,22 +3239,35 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
                                     tail0 + ic - npk * kpool)
   else: keyi = index[b, ic].load().cast(dtypes.weakint)
   row = (koff + keyi.maximum(0)).minimum(N - 1)
+  def gscale(r:UOp, grp:UOp|int) -> UOp:
+    # the scale of the group grp of row r (bits 4: halves, two a word)
+    if not q4: return cache[r, W4 + grp].load().bitcast(dtypes.float)
+    w = cache[r, W4 + grp // 2].load()
+    hi = w >> ((grp % 2) * 16).cast(dtypes.uint32) if isinstance(grp, UOp) else w >> ((grp % 2) * 16)
+    return hi.cast(dtypes.uint16).bitcast(dtypes.half).float()
+  def nibbles(w:UOp) -> list[UOp]:
+    # a word of 8 values of kv_q4_pack (a byte the values j, j+4 of 8) as the words of their bytes (the values + 8) in order
+    return [w & 0x0f0f0f0f, (w >> 4) & 0x0f0f0f0f]
   def vals(r:UOp, d0:UOp|int, m:int) -> list[UOp]:
-    # m values from dim d0 of row r (int8: the bytes are the values + 128, a group of 32 a scale)
+    # m values from dim d0 of row r (int8: the bytes are the values + 128, a group of 32 a scale; 4 bits: + 8)
     if not q8: return list(_vec_load(cache[r, d0], m))
-    words, sc = _amd_load(cache[r, d0 // 4], m // 4), cache[r, W4 + d0 // 32].load().bitcast(dtypes.float)
-    return [((words[j//4] >> (8*(j%4))) & 0xFF).cast(dtypes.float) * sc - sc * 128 for j in range(m)]
+    sc = gscale(r, d0 // 32)
+    wv = _amd_load(cache[r, d0 // 8], m // 8) if q4 else _amd_load(cache[r, d0 // 4], m // 4)
+    words = [x for i in range(m // 8) for x in nibbles(wv[i])] if q4 else [wv[i] for i in range(m // 4)]
+    return [((words[j//4] >> (8*(j%4))) & 0xFF).cast(dtypes.float) * sc - sc * (8 if q4 else 128) for j in range(m)]
   if dot:
     # the scores of the lane's key: its bytes (the values + 128) dotted with the int8 queries 4 a step, less 128 the queries' sum, times scales
     # (a loop over the groups: unrolled, the queries' loads would be hoisted out of the keys' loop, 256 registers)
     sacc = _reg((H,), 0, rnd)
     g = UOp.range(G, 4, AxisType.LOOP)
-    kw, ks, prev_s = _amd_load(cache[row, g * 8], 8), cache[row, W4 + g].load().bitcast(dtypes.float), sacc.after(g)
+    kv4 = _amd_load(cache[row, g * 4], 4) if q4 else _amd_load(cache[row, g * 8], 8)
+    kw = [x for i in range(4) for x in nibbles(kv4[i])] if q4 else [kv4[i] for i in range(8)]
+    ks, prev_s, bias = gscale(row, g), sacc.after(g), 8 if q4 else 128
     new_s = []
     for h in range(H):
       acc_i = functools.reduce(lambda a, w: _amd_sudot4u(qw[(h*G + g)*8 + w].load(), kw[w].bitcast(dtypes.int32), a), range(8),
                                UOp.const(0, dtypes.int32))
-      new_s.append(prev_s[h].load() + (acc_i - qsm[h*G + g].load() * 128).cast(dtypes.float) * (qsc[h*G + g].load() * ks))
+      new_s.append(prev_s[h].load() + (acc_i - qsm[h*G + g].load() * bias).cast(dtypes.float) * (qsc[h*G + g].load() * ks))
     sacc = sacc.after(sacc.store(UOp.stack(*new_s)).end(g))
     sc_ = [valid.where(sacc[h].load() * scale, UOp.const(-1e30, dtypes.float)) for h in range(H)]
   else:
@@ -3290,13 +3305,15 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
     for u in range(U):
       jj = jr * U + u
       r1, r2 = (rl[wave, 2*jj + k].load().cast(dtypes.weakint) for k in (0, 1))
-      w1, w2 = (_amd_load(cache[r, (DK + lane * DPL) // 4], DPL // 4) for r in (r1, r2))
-      s1, s2 = (cache[r, vg].load().bitcast(dtypes.float) for r in (r1, r2))
+      # (4 bits: the lane's 8 dims a word)
+      w1, w2 = (nibbles(cache[r, (DK + lane * DPL) // 8].load()) if q4 else _amd_load(cache[r, (DK + lane * DPL) // 4], DPL // 4)
+                for r in (r1, r2))
+      s1, s2 = (gscale(r, vg - W4) for r in (r1, r2))
       pp = [_amd_pkrtz(pl[wave, h, 2*jj].load() * s1, pl[wave, h, 2*jj + 1].load() * s2) for h in range(H)]
       for d in range(DPL):
         sel = (d % 4) | 0x0c00 | ((4 + d % 4) << 16) | 0x0c000000
         pair = _amd_byte_perm(w2[d // 4], w1[d // 4], UOp.const(sel, dtypes.uint32)) | 0x64006400
-        for h in range(H): o[h][d] = _amd_fdot2_less1152(pair, pp[h], o[h][d])
+        for h in range(H): o[h][d] = _amd_fdot2_less1152(pair, pp[h], o[h][d], 1032 if q4 else 1152)
     oacc = oacc.after(oacc.store(UOp.stack(*[x for oh in o for x in oh]).reshape(H, DPL)).end(jr))
     o = [[oacc[h, d].load() for d in range(DPL)] for h in range(H)]
   else:
@@ -3326,19 +3343,21 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
   M = functools.reduce(UOp.maximum, (ml[w_, hs, 0].load() for w_ in range(W)))
   L = functools.reduce(lambda a, w_: a + ((ml[w_, hs, 0].load() - M) * LOG2E).exp2() * ml[w_, hs, 1].load(), range(W), UOp.const(0.0, dtypes.float))
   final += [stats[b, hs.valid(tid < H), part, 0].store(M), stats[b, hs.valid(tid < H), part, 1].store(L)]
-  rb = (DK + DV) + (DK + DV) // 8 if q8 else (DK + DV) * 2
+  rb = ((DK + DV) // 2 + (DK + DV) // 16 if q4 else (DK + DV) + (DK + DV) // 8) if q8 else (DK + DV) * 2
   est = Estimates(4 * n_max * B * H * (DK + DV), n_max * B * rb, n_max * B * rb)
   return UOp.group(*final).end(lane, wave, part, b).sink(arg=KernelInfo(name="qsa_decode", opts_to_apply=(), estimates=est))
 
 def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, scale:float, parts:int=0, waves:int=0, kpool:int=0,
-                         lse:bool=False) -> Tensor|tuple[Tensor, Tensor]:
+                         lse:bool=False, bits:int=8) -> Tensor|tuple[Tensor, Tensor]:
   """
   q (B, H, DK) every row's heads (a KV head's group: H on a device) on the keys of its list index (B, n+1) of the cache's rows (.., N, row) from
   bases (B,): a row's first DK dims its key, the next DV its value (half, or kv_q8_pack's). returns (B, H, 1, DV). lse: and the log of the sum
-  of the exps of the scores of every (row, head) (B, H) (the keys split over devices: their outputs combined by them)
+  of the exps of the scores of every (row, head) (B, H) (the keys split over devices: their outputs combined by them). bits: of a uint32 cache's
+  values (8: kv_q8_pack's rows, 4: kv_q4_pack's)
   """
   B, H, DK = cast(tuple[int, int, int], q.shape)
-  DV = (int(cache.shape[-1]) * 32 // 9 if cache.dtype == dtypes.uint32 else int(cache.shape[-1])) - DK
+  W = int(cache.shape[-1])
+  DV = (W * 64 // 9 if bits == 4 else W * 32 // 9 if cache.dtype == dtypes.uint32 else W) - DK
   # (many rows (a prefill's): a workgroup of a wave a row, all its keys (enough workgroups, its queries loaded once, no combining))
   # (the rows of batched decoding (a few hundred): their keys split over parts and waves, a workgroup a row alone is too few for the GPU)
   many = B > 256
@@ -3348,7 +3367,7 @@ def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, sca
   partial = Tensor.empty(B, H, parts, DV, dtype=dtypes.float32, device=q.device, axis=axis)
   stats = Tensor.empty(B, H, parts, 2, dtype=dtypes.float32, device=q.device, axis=axis)
   partial, stats = Tensor.custom_kernel(partial, stats, q.half().contiguous(), cache, index, bases,
-                                        fxn=functools.partial(_qsa_decode_kernel, scale=scale, W=waves, kpool=kpool))[:2]
+                                        fxn=functools.partial(_qsa_decode_kernel, scale=scale, W=waves, kpool=kpool, bits=bits))[:2]
   out = Tensor.empty(B, H, 1, DV, dtype=dtypes.float32, device=q.device, axis=axis)
   if not lse: return Tensor.custom_kernel(out, partial, stats, fxn=functools.partial(_amd_flash_decode_combine, live=parts))[0]
   ls = Tensor.empty(B, H, dtype=dtypes.float32, device=q.device, axis=axis)
@@ -4227,6 +4246,24 @@ def _rows_gather_kernel(out:UOp, table:UOp, idx:UOp) -> UOp:
   r, blk, lane = UOp.range(n, 0, AxisType.GLOBAL), UOp.range(F // L, 1, AxisType.GLOBAL), UOp.range(L, 2, AxisType.LOCAL)
   f, row = blk * L + lane, idx[r].load().cast(dtypes.weakint).maximum(0).minimum(P-1)
   return out[r, f].store(table[row, f].load().cast(out.dtype)).end(r, blk, lane).sink(arg=KernelInfo(name="rows_gather", opts_to_apply=()))
+
+def kv_q4_pack(x:Tensor) -> Tensor:
+  """
+  rows x (..., D) as 4-bit groups of 32 (Q4_0's: the value of the largest magnitude -8, the scale its -1/8, the rest rounded into -8..7) in
+  words (..., D//8 + D//64) uint32: the values + 8, 8 a word (value j of a group: word j//8, byte j%4, its high nibble if j%8 >= 4), then the
+  groups' half scales, two a word (the attention's 4-bit cache: QSA_KV_BITS=4)
+  """
+  D = int(x.shape[-1])
+  lead = tuple(x.shape[:-1])
+  g = x.float().reshape(*lead, D//32, 32)
+  mx, mn = g.max(-1, keepdim=True), g.min(-1, keepdim=True)
+  d = ((mx >= -mn).where(mx, mn) / -8).cast(dtypes.half)
+  df = d.float()
+  q = (g * (df != 0).where(1 / df, 0)).round().clip(-8, 7).cast(dtypes.int32) + 8
+  b = q.cast(dtypes.uint32).reshape(*lead, D//8, 2, 4)
+  words = functools.reduce(lambda a, i: a | (b[..., i // 4, i % 4] << (8*(i % 4) + 4*(i // 4))), range(1, 8), b[..., 0, 0])
+  s = d.reshape(*lead, D//64, 2).bitcast(dtypes.uint16).cast(dtypes.uint32)
+  return words.cat(s[..., 0] | (s[..., 1] << 16), dim=-1)
 
 def kv_q8_pack(x:Tensor) -> Tensor:
   """
