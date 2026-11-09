@@ -1232,7 +1232,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # (the gpus' clocks (AM: their gfx clock's cap, see AMIdleClocks.set_caps): a few users decoding at the full clocks (a user's tokens fast),
   # more at less (the energy a token: ~0.85 J at 2000 MHz on 6x 7900 XTX, ~1.2 J at full), a prefill at a cap it isn't slower at. switched
   # CLOCK_HOLD s apart at most)
-  CLOCKS, FAST_USERS, CLOCK_HOLD = {"fast": "", "many": "GFXCLK=2000", "prefill": "GFXCLK=2300"}, 4, 0.5
+  # (CLOCK_FAST, CLOCK_MANY, CLOCK_PREFILL: a mode's caps from the env (e.g. "GFXCLK=1900"; "" none), a box's thermals without a code change)
+  CLOCKS = {"fast": getenv("CLOCK_FAST", ""), "many": getenv("CLOCK_MANY", "GFXCLK=2000"), "prefill": getenv("CLOCK_PREFILL", "GFXCLK=2300")}
+  FAST_USERS, CLOCK_HOLD = getenv("CLOCK_FAST_USERS", 4), 0.5
   def schedule_seqs(self):
     """
     every request has a sequence of its own (the resident one its prompt continues: an agent's turn is prefilled from its last one), prefilled
