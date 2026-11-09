@@ -105,6 +105,18 @@ class SeqEngine:
     self.free_chunks, self.free_entries = list(range(getattr(model, "stash_chunks", 0))), list(range(getattr(model, "stash_entries", 0)))
     self.stashed:list[Stashed] = []
     self.times:dict[str, float|int] = {}  # (the time of the moves, stashes and restores: see the server's status line)
+    self.telemetry = None  # optional storage_event observer, installed by LLMServer (no scheduling behavior)
+    self.last_take_stash = False
+
+  def _event(self, kind:str, **fields) -> None:
+    if self.telemetry is not None:
+      try: self.telemetry.event(kind, **fields)
+      except Exception: pass  # observability must never change serving
+
+  def _storage(self, kind:str, tokens:int, chunks:int, entry:bool, **fields) -> None:
+    if self.telemetry is not None:
+      try: self.telemetry.storage_event(kind, tokens, chunks, entry, self.model, **fields)
+      except Exception: pass
 
   def held(self, used:float) -> bool: return time.perf_counter() - used < self.STICKY
   def droppable(self, used:float, force:bool) -> bool:
@@ -159,7 +171,9 @@ class SeqEngine:
     for v in sorted(victims, key=lambda v: not self.held(v.used)):
       self.seqs.remove(v)
       self.evictions += 1
-      if not self._stash(v, force): self.lost += 1
+      stashed = self._stash(v, force)
+      if not stashed: self.lost += 1
+      self._event("eviction", cause="capacity", slot=v.slot, tokens=v.n, stashed=stashed)
     self.version += 1
   def _window(self, need:int, force:bool, after:Seq|None=None) -> tuple[int, list[Seq]]|None:
     """
@@ -203,6 +217,7 @@ class SeqEngine:
     self.model.seq_stash(True, s.slot, s.base, self._segs(chunks, keep, n), entry, s.n, s.hrow)
     self._time("stash", st)
     self.times["stashed"] = self.times.get("stashed", 0) + n - keep
+    self._storage("stash_in", max(0, s.n - keep * C), n - keep, True, slot=s.slot, entry_id=entry)
     self.stashed.append(Stashed(s.tokens[:s.n], chunks, entry, s.used, s.hrow, s.ckpt))
     return True
   def _drop_one(self, force:bool=False, every:bool=False) -> Stashed|None:
@@ -211,6 +226,7 @@ class SeqEngine:
     last PROTECT s; every: any), None if none
     """
     residents = [t for t in self.seqs if t.host is not None]
+    resident_copy = bool(residents)
     if residents:
       t = min(residents, key=lambda t: t.used)
       x, t.host = cast(Stashed, t.host), None
@@ -219,6 +235,7 @@ class SeqEngine:
       self.lost += 1
     else: return None
     self._free(x.chunks, x.entry)
+    self._event("stash_drop", tokens=len(x.tokens), chunks=len(x.chunks), resident_copy=resident_copy)
     return x
   def _take(self, n:int) -> list[int]:
     """n free chunks: consecutive ones if there are (the copies' calls are of runs)"""
@@ -339,6 +356,7 @@ class SeqEngine:
     a new one (from 0), with rows for a reply of `room` tokens (RESERVE at most, 0: RESERVE). None: no slot or region for it without losing a held
     conversation (not forced), or every slot active: nothing evicted, it waits
     """
+    self.last_take_stash = False
     if (ret:=self._take_seq(ids, room, force)) is not None:
       self.version += 1
       # (the continuations from a conversation's end and from its checkpoint (the reply not sent back as it was): see the status line)
@@ -391,6 +409,8 @@ class SeqEngine:
     self.times["restored"] = self.times.get("restored", 0) + len(stashed.chunks)
     s.host = stashed  # (its copy stays: evicted again, only what it writes since is copied)
     self.model._token_host[s.base:s.base+n] = __import__("array").array('i', stashed.tokens)
+    self._storage("stash_out", n, len(stashed.chunks), True, slot=s.slot, entry_id=stashed.entry, start=start)
+    self.last_take_stash = True
     # (as it was: prefilled from its last token's states, or its checkpoint restored)
     s.tokens, s.n, s.hrow, s.ckpt = list(stashed.tokens), n, stashed.hrow, stashed.ckpt
     return s, start, start < n or start == len(ids)
@@ -459,7 +479,9 @@ class SeqEngine:
     s.active, s.used, self.version = False, time.perf_counter(), self.version + 1
     self.seqs.remove(s)
     self.evictions += 1
-    if not self._stash(s, True): self.lost += 1
+    stashed = self._stash(s, True)
+    if not stashed: self.lost += 1
+    self._event("eviction", cause="paused_length", slot=s.slot, tokens=s.n, stashed=stashed)
 
   def stop(self, s:Seq, kept:int):
     """the end of the decoding of s: its tokens past `kept` (of its reply, after its end) aren't its"""

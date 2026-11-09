@@ -283,6 +283,23 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(data["data"][0]["id"], "test-model")
     self.assertEqual(data["data"][0]["object"], "model")
 
+  def test_telemetry_status_and_request_metadata(self):
+    import re
+    import requests
+    client = self.client.with_options(default_headers={"X-Session-ID": "audit-session", "X-Bench-Tag": "unit/swe"})
+    with patch("tinygrad.llm.serve.stderr_log") as log:
+      client.chat.completions.create(model="test-model", messages=[{"role":"user", "content":"Hello"}], stream=False)
+    lines = "\n".join(str(call.args[0]) for call in log.call_args_list)
+    self.assertIn("rid:", lines)
+    self.assertIn("sid:audit-session", lines)
+    self.assertIn("bench:unit/swe", lines)
+    self.assertRegex(lines, re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z /v1/chat/completions"))
+    data = requests.get(f"http://127.0.0.1:{self.port}/status").json()
+    self.assertIn("audit-session", self.server.telemetry.sessions)
+    self.assertEqual(data["telemetry"]["schema"], 1)
+    self.assertGreaterEqual(data["telemetry"]["requests"]["10m"]["total"]["events"], 1)
+    self.assertIn("never_seen", data["telemetry"]["cache_miss"])
+
   def test_concurrent_requests(self):
     # the server accepts and tokenizes a second request while the first is generating, but the inference loop runs them one at a time
     gate, generating, encoded, calls = threading.Event(), threading.Event(), threading.Event(), []

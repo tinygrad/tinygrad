@@ -2247,6 +2247,7 @@ class Transformer:
       (sum(per_row(t, 0) for b in gdn for t in (b.pool_rec, *b.pool_conv)) + per_row(self.seq_spec_h, 0) +
        sum(per_row(t, 0) for c in self.seq_ckpt_states for t in c) + per_row(self.seq_ckpt_h, 0) +
        sum(per_row(t, 0) for t in [idx.pool_state for idx in self._indexers()] + self.seq_ckpt_idx))
+    self.stash_chunk_nbytes, self.stash_entry_nbytes = chunk, entry  # exact host-copy units for serving telemetry
     # (the conversations the stash holds at most: SEQ_STASH_ENTRIES, by default as many as fit of SEQ_STASH_CTX tokens each (an agent's
     # conversation, 32k), at least 8)
     ctx = getenv("SEQ_STASH_CTX", 32768)

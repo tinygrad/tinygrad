@@ -4108,6 +4108,7 @@ class Transformer:
     gdn = [b for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
     entry = sum(per_row(t, 0) for b in gdn for t in (b.pool_rec, *b.pool_conv)) + per_row(self.seq_spec_h, 0) + \
             sum(per_row(t, 0) for c in self.seq_ckpt_states for t in c) + per_row(self.seq_ckpt_h, 0)
+    self.stash_chunk_nbytes, self.stash_entry_nbytes = chunk, entry  # exact host-copy units for serving telemetry
     self.stash_chunks = max(0, int(gb * 1e9 - self.stash_entries * entry) // chunk) if gb > 0 else 0
     if not self.stash_chunks: self.stash_entries = 0
     if not self.stash_entries: return

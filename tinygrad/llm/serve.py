@@ -3,6 +3,7 @@ import collections, json, math, pathlib, queue, random, re, select, socket, sock
 from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
+from tinygrad.llm.telemetry import Telemetry, utc_ms
 if TYPE_CHECKING:
   from tinygrad.llm.cli import SimpleTokenizer
   from tinygrad.llm.model import Transformer
@@ -279,10 +280,13 @@ class Handler(VizHandler):
     router = StreamRouter(sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else None, reasoning, tags)
     # the model runs on the server's thread (LLMServer.serve_forever): the request waits there, its tokens come back here
     # (no top_p: the model's own, general.sampling.top_p)
-    req = Request(ids, log, max_tokens, temperature, self.server.top_p if top_p is None else top_p)
+    def clean(value: str, limit: int) -> str:
+      return re.sub(r"\s+", "_", value)[:limit] if isinstance(value, str) else ""
+    sid = clean(self.headers.get("X-Session-ID", ""), 96)
+    bench = clean(self.headers.get("X-Bench-Tag", ""), 96)
+    req = Request(ids, log, max_tokens, temperature, self.server.top_p if top_p is None else top_p, session_id=sid, bench_tag=bench)
     # (SUPERSEDE: the same prompt again from the same session (X-Session-ID) while its request runs is a client's retry of it (a client that
     # timed out behind a proxy that doesn't close our connection): the older one stops, it isn't decoded for nobody)
-    sid = self.headers.get("X-Session-ID")
     key = (sid, len(ids), hash(tuple(ids))) if isinstance(sid, str) and sid and getenv("SUPERSEDE", 1) else None
     if key is not None:
       with self.server.keys_lock:
@@ -496,8 +500,11 @@ def trace(msg:str):
 
 class Request:
   """a request to the model: its prompt, its sampled tokens come back in out (None: the end), it's cancelled when the client goes away"""
-  def __init__(self, ids:list[int], log:str, max_tokens:int|None, temperature:float, top_p:float=1.0):
-    self.ids, self.log, self.max_tokens, self.temperature, self.top_p, self.rid = ids, log, max_tokens, temperature, top_p, next(_rids)
+  def __init__(self, ids:list[int], log:str, max_tokens:int|None, temperature:float, top_p:float=1.0,
+               session_id:str="", bench_tag:str=""):
+    self.ids, self.max_tokens, self.temperature, self.top_p, self.rid = ids, max_tokens, temperature, top_p, next(_rids)
+    self.session_id, self.bench_tag = session_id, bench_tag
+    self.log = f"{utc_ms()} {log}rid:{self.rid} sid:{session_id or '-'} bench:{bench_tag or '-'} --  "
     self.cancelled, self.finish_reason, self.checked, self.zeros, self.superseded = False, "stop", 0.0, 0, False
     self.error: Exception|None = None
     self.out: queue.Queue[int|list[int]|None] = queue.Queue()
@@ -545,7 +552,8 @@ class BatchStats:
   def step(self, running:int, waiting:int):
     if (dt:=time.perf_counter() - self.st) > self.every and self.steps:
       sep = colored('--', 'BLACK')
-      stderr_log(f"batch  {sep}  {running:3d} requests decoding, {waiting:3d} waiting  {sep}  {self.tokens/dt:5.0f} tok/s generated  {sep}  "
+      stderr_log(f"{utc_ms()} batch  {sep}  {running:3d} requests decoding, {waiting:3d} waiting  {sep}  "
+                 f"{self.tokens/dt:5.0f} tok/s generated  {sep}  "
                  f"{self.steps:4d} steps of {self.step_time/self.steps*1e3:5.1f} ms  {sep}  {self.prefills:3d} prefills ({self.prefill_time:4.1f}s, "
                  f"{self.mixed} mixed)  "
                  f"{sep}  in the last {dt:.0f}s" + "".join(f"  {sep}  {k} {v:.1f}s" if isinstance(v, float) else f"  {sep}  {k} {v}"
@@ -581,6 +589,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.temperature = temperature
     self.waiting: queue.Queue[Request] = queue.Queue()
     self.inflight = 0  # the requests taken by the model (decoded, or waiting for it): the status line's
+    self.telemetry = Telemetry(getenv("TELEMETRY_LOG", ""))
     self.stats = BatchStats()
     self.engine: typing.Any = None  # (schedule_seqs': the sequences)
     self.recent = collections.deque(maxlen=1000)
@@ -670,6 +679,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
                f"gen:{(n-1)/(et-req.pt) if n > 1 and req.pt else 0:4.0f} tok/s  {sep}  {spec}out:{n:5d}  {sep}  "
                f"{colored(total, 'red') if req.cancelled else total}\n")
     self.recent.append((time.time(), (req.pt or et) - req.st, req.max_gap, et - req.st, len(req.ids), req.cache_start, n, req.queued))
+    if (telemetry:=getattr(self, "telemetry", None)) is not None: telemetry.finish(req, et - req.st, error)
     self.flush(req)
     req.out.put(None)
     return False
@@ -677,11 +687,15 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def status(self, gpus:bool=False) -> dict:
     """the requests and the caches now (GET /status): the requests decoding, being prefilled (their tokens left) and waiting, the sequences in
     the caches and in the stash (their tokens)"""
-    now, ret = time.perf_counter(), typing.cast(dict[str, typing.Any], {"waiting": self.waiting.qsize(), "time": time.time(),
-                                                                    "generated_total": self.generated_total, "prefilled_total": self.prefilled_total})
+    now = time.perf_counter()
+    ret = typing.cast(dict[str, typing.Any], {"waiting": self.waiting.qsize(), "time": time.time(),
+                                               "generated_total": self.generated_total, "prefilled_total": self.prefilled_total})
+    if (telemetry:=getattr(self, "telemetry", None)) is not None: ret["telemetry"] = telemetry.snapshot()
     if (q:=getattr(self, "queues", None)) is not None:
       active, filling, pending = (list(x.values()) if isinstance(x, dict) else list(x) for x in q)
-      def req(r:Request) -> dict: return {"prompt": len(r.ids), "cached": r.cache_start, "generated": len(r.generated), "age": round(now - r.st, 2)}
+      def req(r:Request) -> dict: return {"request_id": r.rid, "session_id": r.session_id or None,
+                                          "bench_tag": r.bench_tag or None, "prompt": len(r.ids), "cached": r.cache_start,
+                                          "generated": len(r.generated), "age": round(now - r.st, 2)}
       # (a waiting one's hit: the tokens of its prompt the caches or the stash have)
       ret |= {"decoding": [req(r) for r in active], "prefilling": [req(r) | {"left": len(r.fill[0]) - r.fill[1]} for r in filling],
               "waiting": [req(r) | {"hit": r.hit} for r in pending] + [{}] * self.waiting.qsize()}
@@ -1125,7 +1139,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         [((batch[g].ids + batch[g].generated)[pos[g]:pos[g] + P], free[g], (batch[g].temperature, batch[g].top_p)) for g in todo]
       outs = model.batch_prefill(chunks, starts=[pos[g] for g in todo], P=P)
       for g, out in zip(todo, outs): pos[g], firsts[g] = min(lens[g], pos[g] + P), out
-    self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(batch), self.stats.prefill_time + time.perf_counter() - _p0
+    prefill_time = time.perf_counter() - _p0
+    self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(batch), self.stats.prefill_time + prefill_time
+    self.telemetry.prefill(sum(l - s for l, s in zip(lens, starts)), prefill_time,
+                           any(s or r.generated for s, r in zip(starts, batch)), len(batch))
     for g, (req, slot) in enumerate(zip(batch, free)):
       pending.remove(req)
       req.cache_start, req.pos = starts[g], lens[g]
@@ -1242,6 +1259,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """
     from tinygrad.llm.engine import SeqEngine, Seq
     eng = self.engine = SeqEngine(self.model)
+    eng.telemetry = self.telemetry
     active: dict[Seq, Request] = {}
     filling: dict[Seq, Request] = {}  # (the sequences of the prompts being prefilled: their request's fill is where)
     pending: list[Request] = []
@@ -1307,6 +1325,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           pending.remove(c)
           job, start, restore = got
           if not c.generated: c.cache_start, c.queued = start, time.perf_counter() - c.st
+          self.telemetry.cache_observe(c.session_id, len(ids), self.model.max_context, start, eng.last_take_stash)
           c.fill, c.cold = (ids, start, restore), len(ids) - start > self.COLD_TOKENS
           filling[job] = c
           self.miss_log(ids, start)
@@ -1334,7 +1353,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           slice_time = time.perf_counter() - st
           stall += slice_time
           req.prefill_time, req.slices = req.prefill_time + slice_time, req.slices + 1
-          self.prefilled_total += (end if end < len(ids) else len(ids)) - pos
+          new_slice = (end if end < len(ids) else len(ids)) - pos
+          self.telemetry.prefill(new_slice, slice_time, bool(req.cache_start or req.generated))
+          self.prefilled_total += new_slice
           self.stats.prefill_time += slice_time
           if end < len(ids): req.fill = (ids, end, False)
           else:
@@ -1360,7 +1381,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           seqs = list(active)
           st = time.perf_counter()
           outs = eng.step(seqs)
-          self.stats.step_time += time.perf_counter() - st
+          step_time = time.perf_counter() - st
+          self.stats.step_time += step_time
+          self.telemetry.step(len(seqs), max(len(r.ids) + len(r.generated) for r in active.values()), step_time,
+                              sum(len(toks) for toks in outs))
           for s, toks in zip(seqs, outs):
             req = active[s]
             req.steps += 1
@@ -1456,7 +1480,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           free = [i for i in range(slots) if i not in self.taken(active)][:len(short)]
           self.slot_taken(*free)
           firsts = model.batch_prefill([(r.ids, slot, (r.temperature, r.top_p)) for r, slot in zip(short, free)])
-          self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(short), self.stats.prefill_time + time.perf_counter() - _p0
+          prefill_time = time.perf_counter() - _p0
+          self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(short), self.stats.prefill_time + prefill_time
+          self.telemetry.prefill(sum(len(r.ids) for r in short), prefill_time, False, len(short))
           for req, slot, first in zip(short, free, firsts):
             pending.remove(req)
             req.cache_start, req.pos = 0, len(req.ids)
@@ -1475,9 +1501,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           if to is None: break
           slot = to
           _p0 = time.perf_counter()
+          req.queued = _p0 - req.st
           first = self.prefill(req, self.taken(active) | {slot} | ({slot+1} if wide else set()), slot)
           self.slot_taken(slot)
-          self.stats.prefills, self.stats.prefill_time = self.stats.prefills + 1, self.stats.prefill_time + time.perf_counter() - _p0
+          prefill_time = time.perf_counter() - _p0
+          self.stats.prefills, self.stats.prefill_time = self.stats.prefills + 1, self.stats.prefill_time + prefill_time
+          self.telemetry.prefill(len(req.ids) + len(req.generated) - req.cache_start, prefill_time, bool(req.cache_start))
           pending.remove(req)
           req.pos = len(req.ids) + len(req.generated)
           self.ckpt_keep(req)
@@ -1491,6 +1520,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           if self.emit(req, first): active[slot] = req
         if not active and not self.landing: continue
         self.stats.step(len(active), len(pending) + self.waiting.qsize())
+        step_n = len(active)
+        step_context = max(len(r.ids) + len(r.generated) for r in active.values())
         _t0 = time.perf_counter()
         # a step of every slot up to the last one used (the free ones in between are rows of nothing)
         self.inflight = len(active) + len(pending) + self.waiting.qsize() + len(self.landing)
@@ -1513,7 +1544,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         else: out = model.batch_step([(active[i].generated[-1], active[i].pos, (active[i].temperature, active[i].top_p)) if i in active else
                                       (0, 0, 0.0)
                                       for i in range(max(active)+1)])
-        self.stats.step_time += time.perf_counter() - _t0
+        step_time = time.perf_counter() - _t0
+        self.stats.step_time += step_time
+        step_tokens = 0
         for i, req in list(active.items()):
           req.steps += 1
           if k:
@@ -1522,11 +1555,13 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             j = next((t for t in range(k) if drafts[t] != sampled[t]), k)
             start = req.mtp + req.j
             req.y, req.mtp, req.j, req.par, req.pos = sampled, start + 1, j, 1 - req.par, start + j + 1
+            step_tokens += j + 1
             if not all(self.emit(req, t) for t in sampled[:j+1]):
               del active[i]
               self.slot_done(i, req, active)
               continue
           else:
+            step_tokens += 1
             req.pos += 1
             if not self.emit(req, out[i]):
               del active[i]
@@ -1543,6 +1578,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             self.slot_done(i, req, active)
             pending.insert(0, req)
         if self.landing: self.mix_done(firsts, active)
+        self.telemetry.step(step_n, step_context, step_time, step_tokens)
         # the sequences in the first slots: a step of fewer rows (the one of the last slot used is the size of every step)
         while active and (hi:=max(active)) >= len(active) and hi not in self.partner and \
               next(m for m in model.batch_sizes() if m >= hi+1) > next(m for m in model.batch_sizes() if m >= len(self.taken(active))):
