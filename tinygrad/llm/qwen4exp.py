@@ -1104,6 +1104,7 @@ def _region_rows(config:TransformerConfig) -> int:
 # a prefill chunk's rows in this many micro batches (sequence parallel: the copies of one run with the kernels of the other)
 MICRO_BATCHES = getenv("MICRO_BATCHES", 2)
 PREFILL_MB1_ROWS = getenv("PREFILL_MB1_ROWS", 0)
+PREFILL_TILE32 = getenv("PREFILL_TILE32", 0)
 # the attention cache's keys (1) and values (2) rotated, see QSABlock._rot
 QSA_KV_ROT = getenv("QSA_KV_ROT", 0)
 
@@ -3053,8 +3054,13 @@ class Transformer:
     if fast and (devs:=self.token_embd.weight.device) and isinstance(devs, tuple) and self.config.hc is not None:
       # whole tiles of 16 rows on every device, the kernels of the whole chunk on tiles of 64
       tile = math.lcm(16*len(devs), 64)
-      def tiled(n:int) -> int: return min(max(tile, round(n / tile) * tile), self.max_context // tile * tile or tile)
+      def tiled(n:int, t:int=tile) -> int: return min(max(t, round(n / t) * t), self.max_context // t * t or t)
       sizes = [tiled(n) for n in sizes]
+      # (PREFILL_TILE32: a chunk of micro batches (past PREFILL_MB1_ROWS) in whole tiles of 32 rows a device a micro batch: the sequence
+      # parallel hyper-connections' gemms take tiles of 32 rows (q8_gemm), 2112 rows (176 a device a batch) ran them on the slow f16 kernel)
+      if PREFILL_TILE32 and MICRO_BATCHES > 1:
+        t2 = math.lcm(32*len(devs)*MICRO_BATCHES, 64)
+        sizes = [tiled(n, t2) if n > PREFILL_MB1_ROWS and n % t2 else n for n in sizes]
     return tuple(sorted(set(sizes)))
 
   def warmup(self):
