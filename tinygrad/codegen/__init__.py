@@ -1,13 +1,13 @@
 from dataclasses import replace, dataclass, field
 import itertools, functools
-from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
-from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
+from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, DSL, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, colored
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
-from tinygrad.renderer.x86 import ISARenderer, IselContext
+from tinygrad.renderer.x86 import ISARenderer, IselContext, X86Renderer
 from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
@@ -507,8 +507,17 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     if renderer.packed_args and full_sink.arg.kernel: full_sink = pack_args(full_sink, prog_info.params)
     # instruction selection
     if isinstance(renderer, ISARenderer):
+      dsl = None
+      if DSL and type(renderer) is X86Renderer:
+        from tinygrad.renderer.x86_dsl import X86DSLRenderer
+        dsl, dsl_sink = X86DSLRenderer(renderer.target), full_sink
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
+      if dsl:
+        dsl_sink = graph_rewrite(dsl_sink, dsl.pre_isel_matcher, name=colored("dsl pre inst selection", "magenta"), bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
+      if dsl:
+        dsl_sink = graph_rewrite(dsl_sink, dsl.isel_matcher, name=colored("dsl inst selection", "magenta"), bottom_up=True)
+        if VIZ: graph_rewrite(dsl_sink, PatternMatcher([]), name=colored("view dsl sink", "magenta"))
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))

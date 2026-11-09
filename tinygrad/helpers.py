@@ -270,6 +270,7 @@ CPU_COUNT = _get_cpu_count()
 NULL_ALLOW_COPYOUT = ContextVar("NULL_ALLOW_COPYOUT", 0)
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
 VIZ = ContextVar("VIZ", 0)
+DSL = ContextVar("DSL", 0)
 # this PARALLEL is for BEAM and compilation, it's currently disabled if you are using VIZ
 # pytest-xdist workers share the CPU budget, explicit PARALLEL still overrides this default
 PARALLEL = ContextVar("PARALLEL", CPU_COUNT // max(1, getenv("PYTEST_XDIST_WORKER_COUNT", 1)) if VIZ == 0 else 0)
