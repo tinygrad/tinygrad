@@ -688,7 +688,8 @@ class GatedResidual:
     rows = int(B * R)
     if self._winj is not None and self.dim % 256 == 0 and amd_custom_kernels_supported(xs.device):
       xn, xhalf, part = ghc_prefill_norm(xs.reshape(rows, -1), self.norm["weight"], self._winj, self.count, self.eps)
-      inj = part.sum(1).reshape(B, R, -1)
+      # (the streams' sums added, not a reduce: no kernel of their own, the residual's kernel computes post from them, in the same order)
+      inj = functools.reduce(lambda a, b: a + b, [part[:, s] for s in range(self.count)]).reshape(B, R, -1)
     else:
       xn = (xs.float().rmsnorm(eps=self.eps) * self.norm["weight"].reshape(self.count, self.dim)).flatten(2).contiguous()
       xhalf, inj = xn.reshape(rows, -1).half().contiguous(), self.inject(xn)
