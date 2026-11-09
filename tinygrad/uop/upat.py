@@ -1,7 +1,6 @@
 from typing import Any, Callable
 import itertools, inspect, functools, types
 from tinygrad.helpers import partition, dedup, Context
-from tinygrad.dtype import ConstFloat
 from tinygrad.uop.ops import UPat, UOp, Ops, PatternMatcher, graph_rewrite, deconstruct_function
 
 class UPatCompileError(Exception): pass
@@ -26,10 +25,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
     else: and_clause.append(UOp.custom_function("{0}.op is {1}", fmt=True).call(base, UOp(Ops.PYLITERAL, arg=self.op[0])))
   if self.arg is not None:
     if isinstance(self.arg, int): and_clause.append(UOp.custom_function("{0}.arg == "+str(int(self.arg)), fmt=True).call(base))
-    else:
-      # a float is a ConstFloat like a CONST's arg: nan == nan and it hashes by its bits, so the PYLITERAL doesn't depend on which nan it got
-      lit = ConstFloat(self.arg) if type(self.arg) is float else self.arg
-      and_clause.append(UOp.custom_function("{0}.arg == {1}", fmt=True).call(base, UOp(Ops.PYLITERAL, arg=lit)))
+    else: and_clause.append(UOp.custom_function("{0}.arg == {1}", fmt=True).call(base, UOp(Ops.PYLITERAL, arg=self.arg)))
   if self.strict_length or self.required_len > 0:
     and_clause.append(UOp.custom_function("len({0}.src)"+(" == " if self.strict_length else " >= ")+str(self.required_len), fmt=True).call(base))
   if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp.custom_function(self.name, fmt=True).call(inline=True), base)))

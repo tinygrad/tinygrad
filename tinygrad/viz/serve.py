@@ -43,7 +43,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
 from tinygrad.uop.ops import KernelInfo, ParamArg, ProgramInfo
 from tinygrad.uop.render import render_index
-from tinygrad.uop.uir import render_uir, uops_colors, _inline, _render_arg
+from tinygrad.uop.uir import render_uir, uops_colors, uir_nodes, _render_arg
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
 
@@ -105,7 +105,7 @@ def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
 def canonicalize_ast(u:UOp) -> UOp: return u.replace(arg=KernelInfo()) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) else u
 
 def tokenize_uir(data:VizData, root:UOp) -> list[dict]:
-  nodes = [u for u in root.toposort(enter_calls=True) if not _inline(u)]
+  nodes = uir_nodes(root)
   refs = {f"%{i}":{"id":str(id(u))} for i,u in enumerate(nodes)}
   # quoted strings are their own tokens so a %N inside one is not a ref
   lines = [[{"st":s, **refs.get(s, {})} for s in re.split(r"""(%\d+\b|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")""", line) if s]

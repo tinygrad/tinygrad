@@ -190,6 +190,15 @@ class TestViz(unittest.TestCase):
     a2 = uop_to_json(VizData(), a)[id(a)]
     self.assertIn("colored_field='xyz12345'", ansistrip(a2["label"]).replace("\n", ""))
 
+  def test_uir_refs_with_uops_in_arg(self):
+    from tinygrad.viz.serve import tokenize_uir
+    from tinygrad.renderer import Estimates
+    from tinygrad.uop.ops import KernelInfo
+    n = UOp.variable("n", 1, 64)
+    sink = UOp.sink(UOp.const(1), arg=KernelInfo(name="k", estimates=Estimates(ops=n*2)))
+    refs = {t["st"]: t["id"] for t in tokenize_uir(VizData(), sink) if "id" in t}
+    self.assertEqual((refs["%0"], refs["%2"]), (str(id(n)), str(id(sink))))
+
   def test_index_label_large_src(self):
     x = UOp.param(0, dtypes.float, (16, 16))
     for _ in range(2_000): x = x * x

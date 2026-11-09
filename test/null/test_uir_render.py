@@ -3,12 +3,12 @@ from dataclasses import replace
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes, Invalid
 from tinygrad.uop import Ops
-from tinygrad.uop.ops import UOp, UPat, graph_rewrite, ParamArg, KernelInfo
+from tinygrad.uop.ops import UOp, UPat, graph_rewrite, ParamArg, KernelInfo, ProgramInfo
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.device import Device
 from tinygrad.codegen import full_rewrite_to_sink, to_program
-from tinygrad.helpers import Context, ansistrip
+from tinygrad.helpers import Context, ansistrip, Target
 from tinygrad.renderer import Estimates
 
 def _strip_buffers(root:UOp) -> UOp:
@@ -95,11 +95,17 @@ class TestSSARender(unittest.TestCase):
     self.assertIs(prg.op, Ops.PROGRAM)
     assert_roundtrip(self, prg)
 
-  def test_continue_parsing(self):
-    # lines out of order / comments tolerated, ids sparse
+  def test_comments(self):
     g = UOp.sink(UOp.const(1) + UOp.const(2))
     txt = "# hand written\n" + render_uir(g) + " # trailing comment\n\n# last line comment\n"
     assert_roundtrip(self, parse_uir(txt))
+
+class TestFormat(unittest.TestCase):
+  def test_exact(self):
+    a, r = UOp.param(0, dtypes.float32, (4,)), UOp.range(4, 0)
+    sink = UOp(Ops.END, (UOp(Ops.STORE, (UOp(Ops.INDEX, (a, r)), UOp.const(1.0))), r)).sink(arg=KernelInfo())
+    self.assertEqual(ansistrip(render_uir(sink)), "%0 = param 4 slot=0 dtype=f32\n%1 = range 4 slot=0\n%2 = index %0 %1\n%3 = store %2 1.0\n"
+                                                  "%4 = end %3 %1\n%5 = sink %4 name=test")
 
 class TestPythonObjects(unittest.TestCase):
   def test_uop_in_arg(self):
@@ -108,6 +114,15 @@ class TestPythonObjects(unittest.TestCase):
     sink = UOp.sink(UOp.const(1), arg=KernelInfo(name="k", estimates=Estimates(ops=n*2, mem=n)))
     self.assertIn("Estimates(ops=%", ansistrip(render_uir(sink)))
     assert_roundtrip(self, sink)
+    self.assertEqual(render_uir(list(sink.toposort())), render_uir(sink))
+
+  def test_args(self):
+    # an inline root, an all-default arg (not None), and python objects
+    n = UOp.variable("n", 1, 64)
+    for g in [UOp.const(1), UOp.const(2.5), UOp.const((1, 2)), UOp(Ops.STACK), UOp(Ops.PROGRAM, (UOp.sink(arg=KernelInfo()),), ProgramInfo()),
+              UOp(Ops.PROGRAM, (UOp.sink(),)), UOp(Ops.PYLITERAL, arg=UOp.const(1.5)), UOp(Ops.PYLITERAL, arg=frozenset({n})),
+              UOp(Ops.PYLITERAL, arg=Target("CPU")), UOp(Ops.PYLITERAL, arg=ProgramInfo(target=Target("CPU", "LLVM")))]:
+      assert_roundtrip(self, g)
 
   def test_ambiguous_names(self):
     # rdna3 and rdna4 define the same instruction names, so the instruction is evaluated in its own module
@@ -161,7 +176,10 @@ class TestParseUIR(unittest.TestCase):
     for txt, err in [("%0 = add %1 1", "%1 is not defined"), ("%0 = add 1 2 x=1 4", "srcs must come before key=value"),
                      ("%0 = frob 1", "unknown op 'frob'"), ("%0 = add 1 nope", "not a %name or a literal"), ("", "expected an assignment"),
                      ("%0 = add 1 (mul 2 3", "expected ')'"), ("%0 = [1 2", "expected ']'"), ("%0 = add load 1", "write (load ...)"),
-                     ("%x = 1\n%x = 2", "%x is already defined"), ("%x = 1 }", "expected 'end of input'")]:
+                     ("%x = 1\n%x = 2", "%x is already defined"), ("%x = 1 }", "expected 'end of input'"),
+                     ("%x = special name=`12", "unterminated ` in name="), ("%x = special name=)", "expected a value for name="),
+                     ("%x = cast 1 dtpye=i32", "cast has no ['dtpye']"), ("%x = cast 1 dtype=i32 dtype=f32", "cast has dtype= twice"),
+                     ("%x = { %x = 1 }", "%x is already defined"), ("%x = add %x 1", "%x is not defined")]:
       with self.assertRaisesRegex(ValueError, re.escape(err)): parse_uir(txt)
 
 if __name__ == '__main__': unittest.main()
