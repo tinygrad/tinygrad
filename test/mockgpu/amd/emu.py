@@ -1177,7 +1177,7 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
   def _dot_accum(acc: UOp, a_row: UOp, b_row: UOp, lane: UOp) -> UOp:
     """acc += sum_k A[a_row+k] * B[b_row+k] in order (FP-associativity matters). For scaled MFMA only the dot is scaled: D = dot*scale + C."""
     def prod(k: int) -> UOp:
-      return tmp2.index(a_row + _c(k, dtypes.int)).bitcast(acc_dt) * tmp2.index(b_row + _c(k, dtypes.int)).bitcast(acc_dt)
+      return tmp2.index(a_row + _c(k, dtypes.int)).load().bitcast(acc_dt) * tmp2.index(b_row + _c(k, dtypes.int)).load().bitcast(acc_dt)
     if not scaled:
       for k in range(K): acc = acc + prod(k)
       return acc
@@ -1258,8 +1258,8 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   read_phase = UOp.group(*(tmp.index(elem + i*256).store(v.bitcast(dtypes.uint32)) for i,v in enumerate(values))).end(elem)
   data = tmp.after(read_phase)
   n = ctx.range(16)
-  mat_d = [sum(data.index(r*16+k).bitcast(out_dt) * data.index(256+n*16+k).bitcast(out_dt) for k in range(16))
-           + data.index(512+r*16+n).bitcast(out_dt) for r in range(16)]
+  mat_d = [sum(data.index(r*16+k).load().bitcast(out_dt) * data.index(256+n*16+k).load().bitcast(out_dt) for k in range(16))
+           + data.index(512+r*16+n).load().bitcast(out_dt) for r in range(16)]
 
   def w_store(m: int, n: UOp, val: UOp, vgpr_off: int) -> UOp:  # store one output element to its (lane, vgpr) slot
     lane_i, _ = d_map(m, n)
@@ -1506,12 +1506,13 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       # Sub-dword LDS write: read-modify-write within the uint32 slot
       word_addr = addr >> addr_shift
       idx = mem.index(word_addr.valid(active))
+      old = idx.load()
       byte_pos = addr.cast(dtypes.uint32) & _c(3)
       byte_shift = byte_pos * _c(8)
       size_mask = _c(0xFF if data_bits == 8 else 0xFFFF)
       mask = size_mask << byte_shift
-      new_word = (idx & (mask ^ _c(0xFFFFFFFF))) | ((val.cast(dtypes.uint32) & size_mask) << byte_shift)
-      return idx.store(active.where(new_word, idx))
+      new_word = (old & (mask ^ _c(0xFFFFFFFF))) | ((val.cast(dtypes.uint32) & size_mask) << byte_shift)
+      return idx.store(active.where(new_word, old))
     idx = mem.index(addr >> addr_shift)
     return idx.store(active.where(val, idx.load()))
 
@@ -1668,7 +1669,7 @@ def _compile_mubuf(inst: irc.MUBUF, ctx: _Ctx) -> UOp:
       word_addr = (addr + _c(i * 4, dtypes.uint64)) >> _c(2, dtypes.uint64)
       idx = mem.index(word_addr.cast(dtypes.int64).valid(in_bounds))
       val = (ctx.raccvgpr_dyn if use_acc else ctx.rvgpr_dyn)(vdata + _c(i), lane)
-      stores.append(idx.store(in_bounds.where(_to_u32(val), idx)))
+      stores.append(idx.store(in_bounds.where(_to_u32(val), idx.load())))
   else:
     for i in range(n_dwords):
       word_addr = (addr + _c(i * 4, dtypes.uint64)) >> _c(2, dtypes.uint64)

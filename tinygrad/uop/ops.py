@@ -629,7 +629,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     return ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis)) if axis != reduce_axis else ret
   @staticmethod
   def invalid() -> UOp: return UOp.const(Invalid)
-  def valid(self, cond) -> UOp: return cond.where(self, UOp.invalid())
+  def valid(self, cond) -> UOp: return self if self.is_invalid else cond.where(self, UOp.invalid())
   def get_idx(self) -> UOp:
     if self.op is Ops.STACK: return UOp.stack(*(x.get_idx() for x in self.src))
     return self.src[1] if self.op is Ops.WHERE and self.src[2].is_invalid else self
@@ -867,6 +867,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     # anything that has dtype void has no memory backing, it lives in the ALU
     if self.dtype is dtypes.void: return AddrSpace.ALU
     if self.op in {Ops.PARAM, Ops.REFPARAM, Ops.BUFFER, Ops.ALLOC, Ops.EXTERN}: return self.arg.addrspace
+    if self.op is Ops.STAGE: return self.arg.addrspace if self.arg is not None else self.src[0].addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE, Ops.CONST}: return AddrSpace.ALU
     if self.op is Ops.BINARY: return AddrSpace.GLOBAL
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
@@ -888,7 +889,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     return s
 
   def contiguous_view(self) -> tuple[UOp, int]|None:
-    from tinygrad.codegen.prepare import pm_mops
+    from tinygrad.codegen.prepare import pm_mops, pm_mop_index
     from tinygrad.uop.symbolic import symbolic
 
     # WEBGPU and CL do not support views.
@@ -899,7 +900,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     if (dev:=self.device) is not None and any(d.startswith(("WEBGPU", "CL")) for d in to_tuple(dev)): return None
 
     rng = UOp.range(self.numel(), 0)
-    out = graph_rewrite(self.flatten().index(rng), pm_mops+symbolic, name="contiguous_view_offset")
+    out = graph_rewrite(self.flatten().index(rng), pm_mops+pm_mop_index+symbolic, name="contiguous_view_offset")
     if out.op is not Ops.INDEX or len(out.src)-1 != len((b:=out.src[0]).shape): return None
     offset = (sum(i*s for i,s in zip(out.src[1:], strides_for_shape(b.shape))) - rng).ssimplify()
     if not isinstance(offset, int): return None
@@ -1115,7 +1116,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
         return min(self.src[1].vmin, self.src[2].vmin), min(self.src[1].vmax, self.src[2].vmax)
       return rounded(self.dtype, min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax))
     # NOTE: returned UOp is assumed to be CONST
-    if self.op in GroupOp.Defines and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
+    if self.op in GroupOp.Defines-{Ops.BINARY} and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
     if self.op in (Ops.RANGE, Ops.SPECIAL) and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # an ungated load from a constant table with every coordinate valid is one of its values
@@ -1127,6 +1128,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     # PAD adds zeros, as does a read with a masked coordinate
     if self.op is Ops.PAD or (self.op is Ops.INDEX and not all(c.get_valid() is UOp.const(True) for c in self.src[1:])):
       return min(self.src[0].vmin, 0), max(self.src[0].vmax, 0)
+    if self.op is Ops.LOAD and len(self.src) == 1: return self.src[0]._min_max
     if self.op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.AFTER, Ops.DETACH, Ops.COPY, Ops.CONTIGUOUS_BACKWARD}: return self.src[0]._min_max
     if self.op is Ops.CAST and dtypes.is_float(self.dtype): return rounded(self.dtype, *self.src[0]._min_max)
     if self.op is Ops.CAST and dtypes.is_int(self.dtype):

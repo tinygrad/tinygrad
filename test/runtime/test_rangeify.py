@@ -27,6 +27,12 @@ class TestRangeifyAssign(unittest.TestCase):
     self.assertListEqual(lst2, B.permute(1, 0).tolist())
 
 class TestRangeifyEdgeCase(unittest.TestCase):
+  @unittest.expectedFailure  # TODO: preserve effects on ALU indexes
+  def test_value_index_after_store(self):
+    a, b = Tensor([0]).realize(), Tensor([0, 0, 0]).realize()
+    idx = UOp.const(1).after(a.uop.index(0).store(2))
+    self.assertEqual((Tensor(b.uop.index(idx).load()).item(), a.item()), (0, 2))
+
   def test_variable_stack_data(self):
     # a bound-Variable STACK used as data gets ranges from its graph position
     v = Variable("v", 0, 10).bind(3)
@@ -37,15 +43,15 @@ class TestRangeifyEdgeCase(unittest.TestCase):
     v = Variable("v", 0, 2).bind(1)
     self.assertEqual(Tensor(UOp.stack(*[UOp.const(x, dtypes.int) for x in (42, 43, 44)]).index(v)).item(), 43)
     self.assertEqual(Tensor((Tensor([1, 2, 3]).realize().uop + 1).index(v)).item(), 3)
-    self.assertEqual(Tensor(Tensor([1, 2, 3]).realize().uop.index(v)).item(), 2)
-    self.assertEqual(Tensor(Tensor([1, 2, 3]).realize().uop.index(Tensor([2]).realize()[0].uop % 3)).item(), 3)
+    self.assertEqual(Tensor(Tensor([1, 2, 3]).realize().uop.index(v).load()).item(), 2)
+    self.assertEqual(Tensor(Tensor([1, 2, 3]).realize().uop.index(Tensor([2]).realize().uop.index(0).load() % 3).load()).item(), 3)
     self.assertEqual([Tensor((Tensor([1, 2, 3]).realize().uop + 1).pad(((1, 1),)).index(Variable("p", 0, 4).bind(i))).item() for i in range(5)],
                      [0, 2, 3, 4, 0])
     stack = UOp.stack(UOp.const(42, dtypes.int)).pad(((1, 1),))
     self.assertEqual([Tensor(stack.index(Variable("q", 0, 2).bind(i))).item() for i in range(3)], [0, 42, 0])
-    self.assertEqual(Tensor(Tensor([[1, 2, 3]]).realize().expand(4, 3).uop.index(Variable("r", 0, 3).bind(2))).tolist(), [1, 2, 3])
+    self.assertEqual(Tensor(Tensor([[1, 2, 3]]).realize().expand(4, 3).uop.index(Variable("r", 0, 3).bind(2)).load()).tolist(), [1, 2, 3])
     self.assertEqual(Tensor((Tensor([[1, 2, 3], [4, 5, 6]]).realize().uop + 1).index(Variable("w", 0, 1).bind(1))).tolist(), [5, 6, 7])
-    self.assertEqual(Tensor(Tensor([7]).realize().expand(3).uop.index(Tensor([2, 0]).realize().uop)).tolist(), [7, 7])
+    self.assertEqual(Tensor(Tensor([7]).realize().expand(3).uop.index(Tensor([2, 0]).realize().uop.index().load()).load()).tolist(), [7, 7])
 
   def test_variable_data_and_shape(self):
     # the same Variable has a data edge through CAST and a structural edge through SHRINK

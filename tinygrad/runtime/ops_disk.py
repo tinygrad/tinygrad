@@ -90,24 +90,24 @@ def disk_read(file:UOp, srcs:UOp, counts:UOp, rings:UOp, sqes:UOp) -> UOp: # src
   file, srcs, counts, rings, sqes = (b.replace(arg=replace(b.arg, volatile=True, device=None)) for b in (file, srcs, counts, rings, sqes))
 
   # for each copy
-  src_va, nbytes = srcs[(copy:=UOp.range(srcs.max_numel() // 2, 0, dtype=dtypes.uint64)) * 2], srcs[copy * 2 + 1]
+  src_va, nbytes = srcs[(copy:=UOp.range(srcs.max_numel() // 2, 0, dtype=dtypes.uint64)) * 2].load(), srcs[copy * 2 + 1].load()
 
   # for each chunk: the next chunk n waits for the gpu to free its slot
-  n = counts.after(chunk:=UOp.range(ceildiv(nbytes, CHUNK_SZ), 1, dtype=dtypes.uint64))[0]
-  free = (copied:=counts.after(n, loop:=UOp.loop(3))[1]).backedge(loop, copied + SLOTS <= n)
-  pos = src_va + chunk * CHUNK_SZ - file[1]
+  n = counts.after(chunk:=UOp.range(ceildiv(nbytes, CHUNK_SZ), 1, dtype=dtypes.uint64))[0].load()
+  free = (copied:=counts.after(n, loop:=UOp.loop(3))[1].load()).backedge(loop, copied + SLOTS <= n)
+  pos = src_va + chunk * CHUNK_SZ - file[1].load()
   span = (pos % 4096 + (nbytes - chunk * CHUNK_SZ).minimum(CHUNK_SZ) + 4095) // 4096 * 4096
 
   # for each read: queues READ_SZ of the chunk's pages. an sqe is 8 words: fd << 32 | flags << 8 | opcode, file offset, address, bytes
-  tail, read = rings.after(free)[p.sq_off.tail // 4].cast(dtypes.uint64), UOp.range(nreads:=ceildiv(span, READ_SZ), 2, dtype=dtypes.uint64)
-  sqe = [file[0] << 32 | io_uring.IOSQE_ASYNC << 8 | io_uring.IORING_OP_READ, pos - pos % 4096 + read * READ_SZ,
+  tail, read = rings.after(free)[p.sq_off.tail // 4].load().cast(dtypes.uint64), UOp.range(nreads:=ceildiv(span, READ_SZ), 2, dtype=dtypes.uint64)
+  sqe = [file[0].load() << 32 | io_uring.IOSQE_ASYNC << 8 | io_uring.IORING_OP_READ, pos - pos % 4096 + read * READ_SZ,
          counts.getaddr(HCQ_RUNTIME_DEV.device) + 4096 + n % SLOTS * SLOT_SZ + read * READ_SZ, (span - read * READ_SZ).minimum(READ_SZ)]
   queued = UOp.group(*[sqes[(tail + read) % RING_ENTRIES * 8 + j].store(v) for j, v in enumerate(sqe)]).end(read)
 
   # submits the reads, waits for all, marks the chunk read
   to_submit = nreads.cast(dtypes.int).after(rings.after(queued)[p.sq_off.tail // 4].store((tail + nreads).cast(dtypes.uint32)))
   done = ccall(libc.syscall, io_uring.NR_io_uring_enter, fd, to_submit, to_submit, io_uring.IORING_ENTER_GETEVENTS, 0, 0)
-  reaped = rings.after(done)[p.cq_off.head // 4].store(rings.after(done)[p.cq_off.tail // 4])
+  reaped = rings.after(done)[p.cq_off.head // 4].store(rings.after(done)[p.cq_off.tail // 4].load())
   return counts.after(reaped)[0].store(n + 1).end(chunk).end(copy).sink()
 
 # *****************

@@ -1,6 +1,7 @@
 import unittest
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType
+from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType, graph_rewrite
+from tinygrad.uop.movement import mop_cleanup
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 from tinygrad.codegen import to_program
@@ -64,6 +65,24 @@ class TestLinearizer(unittest.TestCase):
     r = Tensor.stack(x.const_like(0), x, x.const_like(0)).reshape(21, 4).shrink(((4, 19), None)).contiguous()
     uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     self.assertEqual([u.op for u in uops if u.op in {Ops.DIV, Ops.MOD, Ops.TRUNCDIV, Ops.TRUNCMOD}], [])
+
+  def test_stack_reads_fold(self):
+    p, j = UOp.param(0, dtypes.int, 2), UOp.variable("j", 0, 1)
+    for explicit in (False, True):
+      with self.subTest(explicit=explicit):
+        src = p if explicit else p.index().load()
+        lanes = [src.index(i).load(arg="nontemporal") if explicit else src.index(i) for i in range(2)]
+        self.assertIs(graph_rewrite(UOp.stack(*lanes).index(j), mop_cleanup), src.index(j).load(arg="nontemporal") if explicit else src.index(j))
+
+  def test_stack_mixed_value_and_read(self):
+    p, j = UOp.param(0, dtypes.int, 2), UOp.variable("j", 0, 1)
+    expr = UOp.stack(UOp.const(0, dtypes.int), p[1].load()).index(j)
+    self.assertIs(graph_rewrite(expr, mop_cleanup), expr)
+
+  def test_stack_gated_reads_keep_alternate(self):
+    p, j, gate = UOp.param(0, dtypes.int, 2), UOp.variable("j", 0, 1), UOp.variable("gate", 0, 1).cast(dtypes.bool)
+    expr = UOp.stack(p[0].load(UOp.const(9, dtypes.int), gate), p[1].load(UOp.const(9, dtypes.int), gate)).index(j)
+    self.assertIs(graph_rewrite(expr, mop_cleanup), expr)
 
   def test_const_table_even_index(self):
     # idx*2 is even, so the gather never selects the odd entry 5 and the store folds to 0

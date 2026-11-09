@@ -832,7 +832,7 @@ class TestSchedule(unittest.TestCase):
     def named_copy(name:str):
       def fxn(out:UOp, src:UOp) -> UOp:
         i = UOp.range(src.shape[0], 0)
-        return out[i].store(src[i]).end(i).sink(arg=KernelInfo(name=name))
+        return out[i].store(src[i].load()).end(i).sink(arg=KernelInfo(name=name))
       return fxn
 
     src = Tensor.zeros(4, dtype=dtypes.float).contiguous().realize()
@@ -879,16 +879,16 @@ class TestSchedule(unittest.TestCase):
   def test_error_on_partial_copy(self):
     r = UOp.range(4, 0)
     with self.assertRaisesRegex(RuntimeError, "same device"):
-      self._lower_copy_kernel(lambda p,q: p.index(r).store(q.index(r)).end(r))
+      self._lower_copy_kernel(lambda p,q: p.index(r).store(q.index(r).load()).end(r))
 
   def test_error_on_partial_copy_gated(self):
     r = UOp.range(8, 0)
     with self.assertRaisesRegex(RuntimeError, "same device"):
-      self._lower_copy_kernel(lambda p,q: p.index(r.valid(r<4)).store(q.index(r)).end(r))
+      self._lower_copy_kernel(lambda p,q: p.index(r.valid(r<4)).store(q.index(r).load()).end(r))
 
   def test_error_on_partial_copy_zero(self):
     with self.assertRaisesRegex(RuntimeError, "same device"):
-      self._lower_copy_kernel(lambda p,q: p.index(0).store(q.index(0)))
+      self._lower_copy_kernel(lambda p,q: p.index(0).store(q.index(0).load()))
 
   def test_rand(self):
     x = Tensor.rand(32)
@@ -904,7 +904,7 @@ class TestSchedule(unittest.TestCase):
   def _copy_fxn(name:str="copy"):
     def copy_kernel(out:UOp, inp:UOp) -> UOp:
       i = UOp.range(inp.numel(), 0)
-      return UOp.group(out[i].store(inp[i])).end(i).sink(arg=KernelInfo(name=name))
+      return UOp.group(out[i].store(inp[i].load())).end(i).sink(arg=KernelInfo(name=name))
     return copy_kernel
 
   def _copy_call(self, out:Tensor, expr:Tensor, name:str="copy") -> Tensor:
