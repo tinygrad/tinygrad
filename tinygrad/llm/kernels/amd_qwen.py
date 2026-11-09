@@ -2720,7 +2720,10 @@ def few_out_rows(x:Tensor, w:Tensor) -> Tensor|None:
     return None
   if isinstance(x.device, tuple) and (x.uop.axis is not None or w.uop.axis not in (0, None)): return None
   out = Tensor.empty(R, int(w.shape[0]), dtype=dtypes.float32, device=x.device, axis=1 if isinstance(w.device, tuple) and w.uop.axis == 0 else None)
-  out = Tensor.custom_kernel(out, x.reshape(R, K).half().contiguous(), w, fxn=functools.partial(_few_out_rows_kernel, RW=4, W=8))[0]
+  # (a few hundred rows (batched decoding's): a wave a row, 4 a workgroup: 64 rows were 2 workgroups (11 us, 0.8 ms a step of 16 sequences). a
+  # row's sums are the same either way)
+  RW, W = (1, 4) if R <= 256 and R % 4 == 0 else (4, 8)
+  out = Tensor.custom_kernel(out, x.reshape(R, K).half().contiguous(), w, fxn=functools.partial(_few_out_rows_kernel, RW=RW, W=W))[0]
   return out.reshape(*x.shape[:-1], int(w.shape[0]))
 
 def skinny_matmul(x:Tensor, wt:Tensor) -> Tensor|None:
