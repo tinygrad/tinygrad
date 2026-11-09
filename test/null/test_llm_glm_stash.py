@@ -18,10 +18,10 @@ class TestGLMStash(unittest.TestCase):
       return x.shard(self.devs, axis) if axis is not None else x.to(self.devs)
 
     self.model = Transformer.__new__(Transformer)
-    self.model.config = SimpleNamespace(spec_drafts=2, cache_rows=32, kv_lora_rank=512)
+    self.model.config = SimpleNamespace(spec_drafts=2, cache_rows=128, kv_lora_rank=512)
     self.model.token_embd = SimpleNamespace(weight=SimpleNamespace(device=self.devs))
     self.model.SEQ_MOVE = 32
-    self.model.seq_rows = lambda: 32
+    self.model.seq_rows = lambda: 128
 
     self.gdn = GatedDeltaNetBlock.__new__(GatedDeltaNetBlock)
     self.gdn.pool_rec, self.gdn.pool_conv = t((4, 3)), [t((4, 2))]
@@ -30,12 +30,12 @@ class TestGLMStash(unittest.TestCase):
     self.idx = Indexer.__new__(Indexer)
     self.idx.idx = SimpleNamespace(kpool=2)
     self.idx.ring = t((2, 2, 2))
-    self.idx.cache_pk = t((16, 2))
+    self.idx.cache_pk = t((64, 2))
     self.idx.pool_ring = t((4, 2, 2))
     self.idx.shard = 0
     self.mla = MLATransformerBlock.__new__(MLATransformerBlock)
     self.mla.indexer = self.idx
-    self.mla.cache_s = t((32, 2), axis=0)
+    self.mla.cache_s = t((128, 2), axis=0)
 
     self.model.blk, self.model.mtp = [self.gdn, self.mla], self.mla
     self.model.seq_spec_h = t((12, 3))
@@ -72,9 +72,13 @@ class TestGLMStash(unittest.TestCase):
     self.model._stash_kv_copy(True, 1, 0, 0)
     before_reset = self.idx.cache_pk, self.mla.cache_s
     self.reset_sources()
-    self.model._stash_kv_copy(False, 1, 0, 0)
+    # Save region row 0 into chunk 0, then restore it into a different region; host offset must not use region row.
+    self.model._stash_kv_copy(False, 1, 32, 0)
     for original, tensor in zip(before_reset, (self.idx.cache_pk, self.mla.cache_s)):
-      np.testing.assert_array_equal(tensor.numpy(), self.snapshots[original])
+      n = 16 if tensor is self.idx.cache_pk else 32
+      expected = np.zeros_like(tensor.numpy())
+      expected[n:2*n] = self.snapshots[original][:n]
+      np.testing.assert_array_equal(tensor.numpy(), expected)
 
   def test_state_and_ring_replay_roundtrip(self):
     self.fill_and_save()
