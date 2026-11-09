@@ -1082,7 +1082,7 @@ class FFNBlock:
       x_down = self.ffn_down_exps(sel, act if INLINE_ACT else act.contiguous(),
                                   dtypes.half if _batch_rows[0] is not None and self.ffn_down_exps.slices and
                                   (_seq_batch[0] is None or getenv("SEQ_HALF_DOWN", 0)) else dtypes.float32)
-      ws = weighted_sum(x_down, probs) if _batch_rows[0] is not None else None
+      ws = weighted_sum(x_down, probs) if _batch_rows[0] is not None and not _seq_alone() else None
       out = ws if ws is not None else (x_down * probs.unsqueeze(-1)).sum(axis=-2)  # (B, T, D), expert parallel: (devices, B, T, D)
     partial = out.ndim == x.ndim + 1
     keep = partial and _partial_out[0]  # the partial sums are returned (sequence parallel)
@@ -1459,6 +1459,9 @@ class SeqBatch:
     return (self.row_positions + self.row_bases).contiguous()
 # (set while a step of sequences sharing the caches is traced)
 _seq_batch:list[SeqBatch|None] = [None]
+def _seq_alone() -> bool:
+  """a step of one sequence sharing the caches (GLM_SEQ): the kernels of the model's own step (forward_spec), its greedy tokens the same"""
+  return (sb:=_seq_batch[0]) is not None and sb.G == 1 and bool(getenv("SEQ_G1_MAIN", 1))
 
 @dataclass(frozen=True)
 class SeqPrompt:
@@ -2164,7 +2167,7 @@ class MLATransformerBlock(FFNBlock):
       ic = idx.idx
       kg = idx.k_norm(idx.attn_k(x)).stack(idx.compressor_gate(x), dim=2)[0]
       iq = idx.attn_q_b(q_lora).reshape(Tq, ic.n_heads, ic.head_dim)
-      iw = (p if (p:=_skinny(idx.proj, x)) is not None else idx.proj(x)) * (ic.n_heads * ic.head_dim)**-0.5
+      iw = (p if not _seq_alone() and (p:=_skinny(idx.proj, x)) is not None else idx.proj(x)) * (ic.n_heads * ic.head_dim)**-0.5
       iw = iw[0]
     assert idx is not None, "batched decoding: the sparse attention of the indexer"
     def core(q:Tensor, k_store:Tensor, kg:Tensor, iq:Tensor, iw:Tensor, groups:list[tuple[UOp, int]], pf:BatchPrefill|None,
