@@ -23,13 +23,14 @@ class YaRNConfig:
   orig_ctx_len: int
   beta_fast: float
   beta_slow: float
+  mscale: float|None = None
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|tuple[str, ...]|None=None, yarn:YaRNConfig|None=None) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2) / dim))
   concentration = 1.0
   if yarn is not None and yarn.factor > 1.0:
-    concentration = 0.1 * math.log(yarn.factor) + 1.0
+    concentration = 0.1 * math.log(yarn.factor) + 1.0 if yarn.mscale is None else 1.0
     d_half = dim // 2
     low = max(0, math.floor(d_half * math.log(yarn.orig_ctx_len / (yarn.beta_fast * 2 * math.pi)) / math.log(theta)))
     high = min(dim-1, math.ceil(d_half * math.log(yarn.orig_ctx_len / (yarn.beta_slow * 2 * math.pi)) / math.log(theta)))
@@ -158,6 +159,8 @@ class TransformerConfig:
   num_experts_per_tok: int = 0
   norm_topk_prob: bool = False
   expert_gating_func: ExpertGating = ExpertGating.SOFTMAX
+  expert_group_count: int = 0
+  expert_group_used: int = 0
   q_lora_rank: int = 0
   kv_lora_rank: int = 0
   shared_expert_dim: int = 0
@@ -288,7 +291,12 @@ class FFNBlock:
       elif gating == ExpertGating.SIGMOID:        scores = logits.sigmoid()
       elif gating == ExpertGating.SQRT_SOFTPLUS:  scores = logits.softplus().sqrt()
 
-      _, sel = pairwise_topk(scores if bias is None else scores + bias, self.config.num_experts_per_tok)
+      route_scores = scores if bias is None else scores + bias
+      if self.config.expert_group_count > 1:
+        groups = route_scores.unflatten(-1, (self.config.expert_group_count, -1))
+        gscore = groups.topk(1 if bias is None else 2)[0].sum(-1)
+        route_scores = (gscore >= gscore.topk(self.config.expert_group_used)[0][..., -1:]).unsqueeze(-1).where(groups, -math.inf).flatten(-2)
+      _, sel = pairwise_topk(route_scores, self.config.num_experts_per_tok)
       probs = scores.gather(-1, sel)
       # SOFTMAX_WEIGHT applies softmax after top-k selection
       if gating == ExpertGating.SOFTMAX_WEIGHT: probs = probs.softmax(-1)
@@ -525,7 +533,8 @@ class MLATransformerBlock(FFNBlock):
     k = _cache_prefix(_update_cache(self.cache_k, k_store, start_pos, 2), start_pos, T, 2)
     v = k[..., :self.config.kv_lora_rank]
 
-    attn = q @ k.transpose(-1, -2) * (1.0 / self.config.head_dim ** 0.5)
+    mscale = (self.config.yarn and self.config.yarn.mscale) or 1.0
+    attn = q @ k.transpose(-1, -2) * (mscale ** 2 / self.config.head_dim ** 0.5)
     mask = idx_mask if idx_mask is not None else _causal_mask(x, start_pos)
     if mask is not None: attn = attn + mask
     attn = attn.softmax(-1)
@@ -770,9 +779,11 @@ class Transformer:
     kv_lora_rank = kv.get(f'{arch}.attention.kv_lora_rank', 0)
     head_dim = kv.get(f'{arch}.attention.key_length_mla', kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads))
     rope_dim = kv.get(f'{arch}.rope.dimension_count', head_dim)
+    log_mul = kv.get(f'{arch}.rope.scaling.yarn_log_multiplier', 0.0)
     yarn = YaRNConfig(factor=kv[f'{arch}.rope.scaling.factor'],
                       orig_ctx_len=kv.get(f'{arch}.rope.scaling.original_context_length', kv[f'{arch}.context_length']),
                       beta_fast=kv.get(f'{arch}.rope.scaling.yarn_beta_fast', 32.0),
+                      mscale=log_mul * math.log(kv[f'{arch}.rope.scaling.factor']) + 1.0 if kv_lora_rank or arch.startswith('deepseek') else None,
                       beta_slow=kv.get(f'{arch}.rope.scaling.yarn_beta_slow', 1.0)) if kv.get(f'{arch}.rope.scaling.type') == 'yarn' else None
 
     # Permute RoPE weights from interleaved to half-split layout.
@@ -799,6 +810,7 @@ class Transformer:
       norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe', 'kimi-linear', 'qwen4exp')),
       expert_gating_func=ExpertGating(kv.get(f'{arch}.expert_gating_func',
         ExpertGating.SOFTMAX_WEIGHT if arch == 'gpt-oss' else ExpertGating.SOFTMAX)),
+      expert_group_count=kv.get(f'{arch}.expert_group_count', 0), expert_group_used=kv.get(f'{arch}.expert_group_used_count', 0),
       kv_lora_rank=kv_lora_rank, q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
       leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
       shared_expert_dim=kv.get(

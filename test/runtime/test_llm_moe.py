@@ -123,5 +123,13 @@ class TestMoEFeedForward(unittest.TestCase):
         expected = (weights * (sel + 1)).sum() / (1 + np.exp(-1))
         np.testing.assert_allclose(out, expected, rtol=1e-3)
 
+  def test_moe_feed_forward_expert_groups(self):
+    block = TransformerBlock(replace(_moe_config(), expert_gating_func=ExpertGating.SIGMOID, expert_bias=True,
+                                     expert_group_count=2, expert_group_used=1))
+    block.ffn_gate_inp.weight = Tensor([[4.0, -1.0, 3.0, 2.5]] * 8).T / 8
+    block.ffn_gate_exps.weight = Tensor([1.0, 1.0, 0.0, 0.0]).reshape(4, 1, 1).expand(4, 16, 8)
+    block.ffn_up_exps.weight, block.ffn_down_exps.weight = Tensor.ones(4, 16, 8), Tensor.ones(4, 8, 16)
+    np.testing.assert_equal(block._feed_forward(Tensor.ones(1, 1, 8)).numpy(), 0)
+
 if __name__ == '__main__':
   unittest.main()
