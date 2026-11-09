@@ -4660,6 +4660,8 @@ def seq_index(scores:Tensor, positions:Tensor, top:int, kpool:int, compact:bool=
   return Tensor.custom_kernel(out, scores, positions, fxn=fxn)[0]
 
 KDA_WAVES = 8
+# KDA_R, KDA_RW: batched decoding's kda_decode: a head's rows over KDA_R workgroups of KDA_RW waves (a row's sums the same either way)
+KDA_R, KDA_RW = getenv("KDA_R", 4), getenv("KDA_RW", 8)
 
 @functools.cache
 def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp, pv:UOp, wq:UOp, wk:UOp, wv:UOp, gate:UOp, alpha:UOp, beta:UOp,
@@ -4685,7 +4687,7 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   heads, V, K = cast(tuple[int, int, int], state.shape[-3:])
   # more tokens: more waves, a wave runs fewer rows through the tokens
   W, conv = KDA_WAVES * (1 if T == 1 else 2), cast(int, wq.shape[-1])
-  if R: W = 8
+  if R: W = KDA_RW
   assert K == V and W*32 >= K and V % W == 0 and conv == 4, "a thread per channel of q, k and v"
   assert (T <= S or rp is not None) and T < SC, "the states of the T tokens and the one before"
   state, z = state.reshape(-1, V, K), z.reshape(G*T, heads*V)
@@ -4855,7 +4857,7 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   G = groups
   axis = None if state.uop.axis is None else 2
   # (R: the rows of a head over R workgroups, the outputs normed and quantized by kda_out)
-  R = 4 if V % 32 == 0 else 0
+  R = KDA_R if V % 32 == 0 else 0
   z = Tensor.empty(1, G*T, heads*V, dtype=dtypes.float if R else dtypes.half, device=state.device, axis=axis)
   # the states are written in place
   inplace = tuple(Tensor(s.uop.after(start_pos.uop)) for s in (state, *conv_states))
