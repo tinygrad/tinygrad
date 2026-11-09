@@ -333,7 +333,7 @@ SEQ_SPLIT_MAX = 128  # (the most real rows a device)
 # HC_REAL: batched decoding's hyper-connections read a device's real rows only and the mix stores them (no copy of them), its input not
 # materialized in float (2 kernels less a sublayer): the mix's epilogue and the activation's kernel round differently (FMA, rcp: ulps)
 HC_REAL = getenv("HC_REAL", 0)
-GDN_MERGED = getenv("GDN_MERGED", 0)
+GDN_MERGED, HC_NORM_REAL = getenv("GDN_MERGED", 0), getenv("HC_NORM_REAL", 0)
 def _split_rows() -> int: return round_up(_seq_split[0], 32)
 def _split_real(x:Tensor) -> Tensor:
   """(B, N*P, ...) split padded rows: the real rows (B, N*R, ...), split"""
@@ -697,7 +697,9 @@ class GatedResidual:
     B, R = xs.shape[:2]
     rows = int(B * R)
     if self._winj is not None and self.dim % 256 == 0 and amd_custom_kernels_supported(xs.device):
-      xn, xhalf, part = ghc_prefill_norm(xs.reshape(rows, -1), self.norm["weight"], self._winj, self.count, self.eps)
+      # (HC_NORM_REAL with real: the norm of a device's real rows only)
+      xn, xhalf, part = ghc_prefill_norm(xs.reshape(rows, -1), self.norm["weight"], self._winj, self.count, self.eps,
+                                         rows=_seq_split[0] if real and HC_NORM_REAL else 0)
       # (the streams' sums added, not a reduce: no kernel of their own, the residual's kernel computes post from them, in the same order)
       inj = functools.reduce(lambda a, b: a + b, [part[:, s] for s in range(self.count)]).reshape(B, R, -1)
     else:

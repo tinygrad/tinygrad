@@ -3572,13 +3572,15 @@ def _ghc_pre_kernel(xn:UOp, q:UOp, scale:UOp, xsum:UOp, part:UOp, xs:UOp, w:UOp,
   return UOp.group(*stores).end(wg, wave, lane).sink(arg=KernelInfo(name="ghc_pre", opts_to_apply=()))
 
 @functools.cache
-def _ghc_prefill_norm_kernel(xn:UOp, xhalf:UOp, part:UOp, xs:UOp, w:UOp, winj:UOp, *, count:int, D:int, eps:float) -> UOp:
+def _ghc_prefill_norm_kernel(xn:UOp, xhalf:UOp, part:UOp, xs:UOp, w:UOp, winj:UOp, *, count:int, D:int, eps:float, rows:int=0) -> UOp:
   # Keep each normalized stream in registers for all inject dot products. Also write the half GEMM input, avoiding a separate cast.
+  # rows: the rows (of a device) past them aren't read nor their xn and xhalf stored (padding: their inject partials are zeros)
   NJ, W = cast(int, winj.shape[0]), 8
   wg, wave = UOp.range(cast(int, xs.shape[0])*count, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL)
   lane = UOp.range(WARP_SIZE, -1, AxisType.WARP)
   tok, st, t = wg // count, wg % count, wave * WARP_SIZE + lane
-  vals = [xs[tok, st*D + it*W*WARP_SIZE + t].load().float() for it in range(D // (W*WARP_SIZE))]
+  tr = tok.valid(tok < rows) if rows else tok
+  vals = [xs[tr, st*D + it*W*WARP_SIZE + t].load().float() for it in range(D // (W*WARP_SIZE))]
   red = UOp.alloc((1 + NJ, W), dtypes.float32, addrspace=AddrSpace.LOCAL)
   red = red.after(red[0, wave.valid(lane.eq(0))].store(warp_reduce(sum(v*v for v in vals), full_wave=True)).barrier())
   rinv = (sum(red[0, i].load() for i in range(W)) * (1/D) + eps).sqrt().reciprocal()
@@ -3586,14 +3588,15 @@ def _ghc_prefill_norm_kernel(xn:UOp, xhalf:UOp, part:UOp, xs:UOp, w:UOp, winj:UO
   stores:list[UOp] = []
   for it, v in enumerate(norm):
     at = st*D + it*W*WARP_SIZE + t
-    stores += [xn[tok, at].store(v), xhalf[tok, at].store(v.cast(dtypes.half))]
+    stores += [xn[tr, at].store(v), xhalf[tr, at].store(v.cast(dtypes.half))]
   ps = [red[1+j, wave.valid(lane.eq(0))].store(warp_reduce(sum(
           winj[j, st*D + it*W*WARP_SIZE + t].load().float() * v for it, v in enumerate(norm)), full_wave=True)) for j in range(NJ)]
   red2 = red.after(UOp.group(*ps).barrier())
   stores += [part[tok, st, UOp.const(j, dtypes.weakint).valid(t.eq(0))].store(sum(red2[1+j, i].load() for i in range(W))) for j in range(NJ)]
   return UOp.group(*stores).end(wg, wave, lane).sink(arg=KernelInfo(name="ghc_prefill_norm", opts_to_apply=()))
 
-def ghc_prefill_norm(xs:Tensor, w:Tensor, winj:Tensor, count:int, eps:float) -> tuple[Tensor, Tensor, Tensor]:
+def ghc_prefill_norm(xs:Tensor, w:Tensor, winj:Tensor, count:int, eps:float, rows:int=0) -> tuple[Tensor, Tensor, Tensor]:
+  """rows: a device's rows past them aren't read (batched decoding's padding: xn and xhalf not written, their inject partials zeros)"""
   T, CD = cast(tuple[int, int], xs.shape)
   D = CD // count
   assert CD % count == 0 and D % 256 == 0
@@ -3602,7 +3605,7 @@ def ghc_prefill_norm(xs:Tensor, w:Tensor, winj:Tensor, count:int, eps:float) -> 
   xhalf = Tensor.empty(T, CD, dtype=dtypes.half, device=xs.device, axis=axis)
   part = Tensor.empty(T, count, winj.shape[0], dtype=dtypes.float32, device=xs.device, axis=axis)
   res = Tensor.custom_kernel(xn, xhalf, part, xs.contiguous(), w.contiguous(), winj.contiguous(),
-                             fxn=functools.partial(_ghc_prefill_norm_kernel, count=count, D=D, eps=eps))
+                             fxn=functools.partial(_ghc_prefill_norm_kernel, count=count, D=D, eps=eps, rows=rows))
   return res[0], res[1], res[2]
 
 def _q8_gemm_2d(out:UOp, *srcs:UOp, **kw) -> UOp: return _q8_gemm_kernel(out.reshape(-1, out.shape[-1]), *srcs, **kw)
