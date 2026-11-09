@@ -94,6 +94,8 @@ class SeqEngine:
     self.model, self.k, self.align = model, model.config.spec_drafts, REGION_ALIGN
     if getenv("SEQ_TRACE"): _trace(model)
     self.rows, self.nslots = model.seq_rows(), model.seq_slots()
+    # (a sequence's positions: the model's context at most, the rows of the caches can be more (many conversations))
+    self.max_len = model.max_context
     self.seqs:list[Seq] = []
     # (the sequences decoding and prefilled at once: SEQ_MAX_ACTIVE, the largest step's by default)
     self.max_active, self.evictions, self.lost = min(max(model.SEQ_SIZES), getenv("SEQ_MAX_ACTIVE", max(model.SEQ_SIZES))), 0, 0
@@ -291,6 +293,7 @@ class SeqEngine:
     """the region of s has rows for a sequence of `length` tokens (grown in place, moved, or the regions compacted, if not): False if no region
     does (the idle sequences evicted for it, held ones too if forced: a reply decoding goes before them)"""
     need = self._need(length)
+    if length > self.max_len: return False
     if need <= s.cap: return True
     if need > self.rows: return False
     end = next((b for b, _ in sorted((t.base, t.cap) for t in self.seqs if t is not s) if b > s.base), self.rows)
@@ -358,7 +361,7 @@ class SeqEngine:
       return x.ckpt if 0 < x.ckpt <= len(ids) and starts(ids, x.tokens, x.ckpt) else 0
     stashed = max(((n, i, x) for i, x in enumerate(self.stashed) if (n:=scont(x))), default=(0, 0, None))[2]
     # (the rows of its prompt and reply. more than the active ones leave even with every idle one out: its prompt's, the reply's grown later)
-    length = len(ids) + min(room or self.RESERVE, self.RESERVE)
+    length = min(len(ids) + min(room or self.RESERVE, self.RESERVE), self.max_len)
     if self._need(length) > self.rows - sum(t.cap for t in self.seqs if t.active): length = len(ids)
     if best is not None and (stashed is None or best[1] >= scont(stashed)):
       s, start, restore = best
@@ -450,7 +453,7 @@ class SeqEngine:
     for s in [s for s in self.seqs if not s.active]: self.seqs.remove(s)
     while self._drop_one(every=True) is not None: pass
 
-  def fits(self, length:int) -> bool: return self._need(length) <= self.rows
+  def fits(self, length:int) -> bool: return length <= self.max_len and self._need(length) <= self.rows
   def pause(self, s:Seq):
     """s (decoding) out of the caches, into the stash if it fits: its slot and region free, a prompt of its tokens goes on from it"""
     s.active, s.used, self.version = False, time.perf_counter(), self.version + 1

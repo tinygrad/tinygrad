@@ -150,6 +150,19 @@ class TestSeqRegions(unittest.TestCase):
         for t in eng.seqs: self.assertEqual(model.cache[t.base:t.base+t.n], t.tokens[:t.n])
     self.assertGreater(len([c for c in model.calls if c[0] == "move"]), 0)
 
+class TestSeqMaxLen(unittest.TestCase):
+  def test_no_room_past_context(self):
+    # the caches' rows can be more than the model's context: a sequence's positions aren't (its reply ends at the context)
+    model = FakeModel()
+    model.seq_rows = lambda: 1 << 18
+    eng = SeqEngine(model)
+    ids = list(range(100, 100 + model.max_context - 100))
+    s, start, restore = eng.take(ids)
+    self.assertLessEqual(s.cap, eng._need(model.max_context))
+    self.assertTrue(eng.room(s, model.max_context))
+    self.assertFalse(eng.room(s, model.max_context + 1))
+    self.assertFalse(eng.fits(model.max_context + 1))
+
 class TestSeqTouch(unittest.TestCase):
   def test_waiting_turn_not_evicted(self):
     # a request waiting for the least recently used conversation: looked at (cached, touch), that one isn't the next evicted
