@@ -117,6 +117,8 @@ def _reg(shape:tuple[int, ...], value:float, dep:UOp|None=None) -> UOp:
 # (the most rows the split-K gemm of tiles of 32 rows takes (batched decoding, the smallest prefill chunk), see q8_linear)
 SKINNY_ROWS = 256
 SKINNY_WG, HC_KS = getenv("SKINNY_WG", 192), getenv("HC_KS", 32)
+# AG_FUSE: all_gather_q8's packing kernel sends the words to the peers too (the flag exchange's send kernel folded into it)
+AG_FUSE = getenv("AG_FUSE", 0)
 # TILE16: batched decoding's hyper-connection gemms (a device's few rows: 4-16 of a tile of 32) of its real rows' tiles alone, in tiles of 16
 TILE16 = getenv("TILE16", 0)
 
@@ -2370,6 +2372,26 @@ def _q8_pack_kernel(out:UOp, x:UOp, *add:UOp, row0:int=0) -> UOp:
   return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q8_pack", opts_to_apply=()))
 
 @functools.cache
+def _q8_pack_send_kernel(out:UOp, *args:UOp, N:int, n:int, T:int, EP:int) -> UOp:
+  # _q8_pack_kernel and _flag_send_kernel (raw words) in one: the packed words stored, and sent into this device's slot of every peer's inbox
+  # (args: the peers' inboxes 1..N-1, x, the counters). a word e is the flag exchange's workgroup e//(EP*T)'s, its parity that one's epoch's
+  vals_mb, x, counter = args[:N-1], args[N-1], args[N]
+  TT, G = cast(tuple[int, int, int], out.shape)[:2]
+  tg8, lane = UOp.range(TT*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
+  values = [x.reshape(-1, G*32)[token, group*32 + sub*8 + i].load().float() for i in range(8)]
+  words, d = _q8_pack_values(values)
+  def put(w:UOp, word:UOp, ok:UOp|None=None) -> list[UOp]:
+    e = (token*G + group)*9 + w
+    epoch = (counter[e // (EP*T)].load() + 1).cast(dtypes.uint32)
+    at = (e // 64)*128 + (epoch & 1).cast(dtypes.weakint)*64 + e % 64
+    return [out[token, group, w if ok is None else w.valid(ok)].store(word)] + \
+      [vals_mb[k][at if ok is None else at.valid(ok)].store(word) for k in range(N-1)]
+  stores = [st for w in range(2) for st in put(sub*2 + w, words[w])]
+  stores += put(sub*0 + 8, d.bitcast(dtypes.uint32), sub.eq(0))
+  return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q8_pack_send", opts_to_apply=()))
+
+@functools.cache
 def _q8_unpack_kernel(out:UOp, *parts:UOp) -> UOp:
   # the halves of the packed groups: a lane eight inputs (two words), times the group's scale. parts: the rows in that many parts (the part of
   # a row is the workgroup's: its loads from the others are skipped)
@@ -2412,6 +2434,16 @@ def all_gather_q8(x:Tensor, axis:int, real:int=0) -> Tensor:
   src = x.reshape(T, D)
   if real: T = len(devs) * real
   packed = Tensor.empty(T, D//32, 9, dtype=dtypes.uint32, device=devs, axis=0)
+  N, n = len(devs), (T // len(devs)) * (D//32) * 9
+  # AG_FUSE: the flag exchange's send in the packing kernel (one kernel less)
+  if AG_FUSE and N*n*4 < ring_min(devs) and (shape:=flag_ar_shape(n, groups:=flag_ar_groups(N*n))) is not None and \
+     (ar:=flag_allreduce(devs, groups)) is not None:
+    kw = dict(N=N, n=n, T=shape[0], EP=shape[1])
+    res = Tensor.custom_kernel(packed, *ar.vals[1:], src, ar.counter, fxn=functools.partial(_q8_pack_send_kernel, **kw))
+    words = Tensor.empty(N*n, dtype=dtypes.uint32, device=devs)
+    gath = Tensor.custom_kernel(words, res[0].reshape(N, n), ar.counter, ar.vals[0], *res[1:N], *ar.flags,
+                                fxn=functools.partial(_flag_sum_kernel, gather=N*n, gather_half=False, **kw))[0].reshape(T, D//32, 9)
+    return Tensor.custom_kernel(Tensor.empty(T, D, dtype=dtypes.half, device=devs), gath, fxn=_q8_unpack_kernel)[0].reshape(1, T, D)
   packed = Tensor.custom_kernel(packed, src, fxn=_q8_pack_kernel)[0]
   if (gathered:=flag_all_gather(packed, 0)) is not None:
     out = Tensor.empty(T, D, dtype=dtypes.half, device=devs)
