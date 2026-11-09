@@ -4288,8 +4288,9 @@ class Transformer:
       for gb, st in zip([b for b in self.blk + [self.mtp] if isinstance(b, MLATransformerBlock)], self._stash_kv):
         assert gb.indexer is not None
         glm_idx, kp = gb.indexer, gb.indexer.idx.kpool
-        items = [(rows(st[0], row//nd, C*chunks//nd, 0), rows(gb.slot_rows_view(gb.cache_s), row//nd, C*chunks//nd, 0)),
-                 (rows(st[1], row//kp, C*chunks//kp, 0), rows(glm_idx.cache_pk, row//kp, C*chunks//kp, 0))]
+        # (the stash's rows from its chunk, the caches' from the region's row: a sequence comes back to another region)
+        items = [(rows(st[0], chunk*(C//nd), C*chunks//nd, 0), rows(gb.slot_rows_view(gb.cache_s), row//nd, C*chunks//nd, 0)),
+                 (rows(st[1], chunk*(C//kp), C*chunks//kp, 0), rows(glm_idx.cache_pk, row//kp, C*chunks//kp, 0))]
         for dst, src in items:
           # The host and device have identical region-relative row layout; the grouped kernels' absolute base stays out of this copy.
           if save: saves.append(dst.assign(src))
