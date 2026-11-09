@@ -1757,7 +1757,8 @@ def _flag_sum_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:int, 
             value = (p >> (16*j)).cast(dtypes.uint16).bitcast(dtypes.half).cast(out.dtype)
             stores.append(out[(2*(s*n+e)+j).valid((e < n) & (2*(s*n+e)+j < gather))].store(value))
       else:
-        stores += [out[(s*n+e).valid((e < n) & (s*n+e < gather))].store(p.bitcast(dtypes.float32).cast(out.dtype)) for s, p in enumerate(ps)]
+        stores += [out[(s*n+e).valid((e < n) & (s*n+e < gather))].store(p.bitcast(out.dtype) if out.dtype.itemsize == 4 else
+                                                                        p.bitcast(dtypes.float32).cast(out.dtype)) for s, p in enumerate(ps)]
     else:
       values = [functools.reduce(lambda a,b: a+b, [unh(p >> (16*j)) for p in ps]) for j in (0, 1)]
       stores += [out[(2*e+j).valid(e < n)].store(v) for j, v in enumerate(values)]
@@ -1910,10 +1911,8 @@ def flag_all_gather(x:Tensor, axis:int, dtype=None) -> Tensor|None:
     wds = x.cast(dtype).reshape(len(x.device), size//len(x.device)).contiguous()
     if w == 2: wds = wds.bitcast(dtypes.uint32)
     if (r:=ring_all_gather_words(wds)) is not None: return r.bitcast(dtype).reshape(x.shape)
-  if dtype in (dtypes.int32, dtypes.uint32):
-    gathered = flag_all_gather(x.cast(dtype).bitcast(dtypes.float32), axis, dtypes.float32)
-    return None if gathered is None else gathered.bitcast(dtype)
-  if not isinstance(x.device, tuple) or x.uop.axis != axis or dtype not in (dtypes.half, dtypes.float32): return None
+  # (words (int32, uint32: the q8 packs of all_gather_q8): as float32's, the words as they are, not bitcast copies before and after)
+  if not isinstance(x.device, tuple) or x.uop.axis != axis or dtype not in (dtypes.half, dtypes.float32, dtypes.int32, dtypes.uint32): return None
   N, S = len(x.device), x.shape
   if not all(isinstance(s, int) for s in S) or prod(S[:axis]) != 1 or S[axis] % N: return None
   size, half = int(prod(S)), dtype == dtypes.half
