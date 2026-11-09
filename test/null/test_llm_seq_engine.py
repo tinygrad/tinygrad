@@ -31,6 +31,10 @@ class TestSeqEngine(unittest.TestCase):
   def setUp(self): self.model = FakeModel()
   def engine(self) -> SeqEngine: return SeqEngine(self.model)
 
+  def test_model_alignment(self):
+    self.model.REGION_ALIGN = 4096
+    self.assertEqual(self.engine().align, 4096)
+
   def test_same_prompt_again(self):
     # the same prompt after its reply: its checkpoint restored, the token after it sampled from it (nothing prefilled)
     eng, ids = self.engine(), list(range(100, 3100))
