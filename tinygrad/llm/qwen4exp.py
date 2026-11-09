@@ -341,9 +341,10 @@ HC_REAL = getenv("HC_REAL", 1)
 GDN_MERGED, HC_NORM_REAL = getenv("GDN_MERGED", 0), getenv("HC_NORM_REAL", 1)
 # QSA_ROT_FWHT: QSA_KV_ROT's rotations (keys, values, queries, the output back) by a fast Walsh-Hadamard kernel (fwht), not 256x256 matmuls
 QSA_ROT_FWHT = getenv("QSA_ROT_FWHT", 1)
-# HC_DEC: batched decoding's hyper-connections of a device's few real rows (1-8, split) by the decode kernels (ghc_pre, the decode linear,
-# ghc_decode_mix/ghc_post: the B=1 path's) instead of the prefill ones on padded tiles of 32 (numerics: the B=1 path's, q8 activations)
-HC_DEC = getenv("HC_DEC", 0)
+# HC_DEC: batched decoding's hyper-connections of a device's few real rows (1-HC_DEC_ROWS (<=16), split) by the decode kernels (ghc_pre,
+# the decode linear, ghc_decode_mix/ghc_post: the B=1 path's) instead of the prefill ones on padded tiles of 32 (numerics: the B=1 path's,
+# q8 activations)
+HC_DEC, HC_DEC_ROWS = getenv("HC_DEC", 0), getenv("HC_DEC_ROWS", 16)
 def _split_rows() -> int: return round_up(_seq_split[0], 32)
 def _split_real(x:Tensor) -> Tensor:
   """(B, N*P, ...) split padded rows: the real rows (B, N*R, ...), split"""
@@ -704,10 +705,10 @@ class GatedResidual:
   def _split_dec(self, xs:Tensor) -> tuple[Tensor, Tensor]|None:
     """
     HC_DEC: the sublayer input of every device's real rows (B, N*R, dim) and the output weights of its padded rows (B, N*P, count) by the decode
-    kernels (_fused's B*T <= 8 path on a device's R rows). None: not those rows or weights
+    kernels (_fused's few rows path on a device's R rows). None: not those rows or weights
     """
     R, devs = _seq_split[0], xs.device
-    if not (isinstance(devs, tuple) and 1 <= R <= 8 and self.count == 4 and self.dim % 32 == 0 and self.up.in_features % 32 == 0 and
+    if not (isinstance(devs, tuple) and 1 <= R <= HC_DEC_ROWS and self.count == 4 and self.dim % 32 == 0 and self.up.in_features % 32 == 0 and
             0 < self.up.in_features <= 512 and self.down.ggml_type == Q8_0 and self.up.ggml_type == Q8_0 and
             getattr(self, "_winj", None) is not None and amd_custom_kernels_supported(devs)): return None
     B, N = int(xs.shape[0]), len(devs)

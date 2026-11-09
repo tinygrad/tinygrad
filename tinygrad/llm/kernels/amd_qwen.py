@@ -3898,7 +3898,7 @@ def _ghc_decode_mix_kernel(mixed:UOp, inj:UOp, mq:UOp, md:UOp, ms:UOp, lo:UOp, r
                            *, count:int, D:int, R:int) -> UOp:
   # Quantize silu(lo/count) in LDS, share Q8 up weights across the rows, and emit the mix plus its next-layer Q8 representation.
   T, NJ, NB = int(lo.shape[0]), int(part.shape[2]), R//32
-  assert count == 4 and R % 32 == 0 and 0 < NB <= 16 and D % 32 == 0 and 1 < T <= 8 and T*NJ <= 32
+  assert count == 4 and R % 32 == 0 and 0 < NB <= 16 and D % 32 == 0 and 1 < T <= 16 and T*NJ <= 64
   blk, wave, lane = UOp.range(D//32, 0, AxisType.GLOBAL), UOp.range(16, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
   q = UOp.alloc((T, 8, 16), dtypes.uint32, addrspace=AddrSpace.LOCAL)
   scales = UOp.alloc((T, 16), dtypes.float32, addrspace=AddrSpace.LOCAL)
@@ -3942,9 +3942,11 @@ def _ghc_decode_mix_kernel(mixed:UOp, inj:UOp, mq:UOp, md:UOp, ms:UOp, lo:UOp, r
     value = sum(shared.after(only)[tok, lane, s].load() for s in range(count))*(1/count)
     stores.append(mixed[tok, blk*32+lane].store(value))
     stores.extend(_q8_narrow_stores(value, mq, md, ms, None, UOp.const(tok), blk, lane))
-  valid = blk.eq(0) & (lane < T*NJ)
-  it, j = (lane//NJ).valid(valid), lane % NJ
-  stores.append(inj[it, j].store(sum(part.after(only)[it, s, j].load() for s in range(count))*(1/count)))
+  for k in range((T*NJ + 31)//32):
+    li = lane + 32*k
+    valid = blk.eq(0) & (li < T*NJ)
+    it, j = (li//NJ).valid(valid), li % NJ
+    stores.append(inj[it, j].store(sum(part.after(only)[it, s, j].load() for s in range(count))*(1/count)))
   return UOp.group(*stores).end(only, blk, wave, lane).sink(arg=KernelInfo(name="ghc_decode_mix", opts_to_apply=()))
 
 def ghc_decode_mix(lo:Tensor, up_raw:Tensor, xn:Tensor, part:Tensor, count:int) -> tuple[Tensor, Tensor]:
