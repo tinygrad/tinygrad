@@ -3416,14 +3416,21 @@ class Transformer:
   def prefix_to_slot(self, tokens:list[int], slot:int) -> int:
     """
     the states of the longest prefix of tokens the model has (its conversation, or its checkpoint restored) into slot: the position the rest
-    starts at (a batch_prefill continues it there). at most len(tokens)-1
+    starts at (a batch_prefill continues it there, or slot_first when tokens is exactly its checkpoint).
     """
     start, restore = self._reuse(tokens) if self.has_recurrent_block else (self.get_start_pos(tokens), False)
     if restore: self._checkpoint(tokens, save=False)
-    start = min(start, len(tokens) - 1)
     self.slot_store(slot, start)
     self._slot_hist_set(slot, tokens[:start])
     return start
+
+  def slot_first(self, slot:int, temp:float|tuple[float, float]) -> int:
+    """the token after the prompt whose checkpoint is in slot: sampled from its hidden state, without another recurrent prefill"""
+    self._init_slots()
+    pair = _temp_pair(temp)
+    temperature = None if pair[0] == 0 else Tensor([pair], device=self.token_embd.weight.device)
+    hrow = self.pool_spec_h.shrink(((slot*2*(self.config.spec_drafts+1), slot*2*(self.config.spec_drafts+1)+1), None))
+    return int(self._sample(hrow, temperature, self.token_embd.weight.device).item())
 
   def _ckpt_from_slot_copy(self, slot:UOp, wp:UOp, wpc:UOp):
     """the states of a slot at a position (its recurrent ones in wp, its conv ones in wpc) as the model's checkpoint (_ckpt, in its order)"""
@@ -5167,7 +5174,7 @@ class Transformer:
     # recurrent state can't be partially reused after divergence: the cached prefix if the tokens extend it, else the checkpoint's (restored)
     cached, ckpt = self._cached_tokens, getattr(self, "_ckpt_tokens", [])
     if cached and len(cached) < len(tokens) and tokens[:len(cached)] == cached: return len(cached), False
-    if ckpt and len(ckpt) < len(tokens) and tokens[:len(ckpt)] == ckpt: return len(ckpt), True
+    if ckpt and len(ckpt) <= len(tokens) and tokens[:len(ckpt)] == ckpt: return len(ckpt), True
     return 0, False
 
   def get_start_pos(self, tokens:list[int]) -> int:
@@ -5226,7 +5233,10 @@ class Transformer:
       # the prompt in chunks (symbolic sizes), then one token at a time (the decode jit)
       sp, nt = v_start_pos.bind(start_pos), 1 if start_pos >= prompt_len else v_toks[next(n for n in sizes if n_toks <= n)].bind(n_toks)
       # with run ahead, the previous step already submitted this one
-      if not ahead: out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None or fast else out, sp, temp).realize()
+      if not ahead:
+        # the same prompt again: its checkpoint already has the last token's state and hidden state; sample its reply, don't prefill it twice
+        if not n_toks and restore: out = self._sample(self._spec_h[0:1], temp, devs).realize()
+        else: out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None or fast else out, sp, temp).realize()
       # the token is polled only if the call wrote it to the token buffer (a replaced __call__ doesn't)
       if fast and (out is None or out.uop.base is not self._token_buf.uop.base): fast = False
       start_pos += n_toks
@@ -5235,7 +5245,7 @@ class Transformer:
       # the end of the prompt: a checkpoint of the recurrent state (before any step of the reply)
       if self.has_recurrent_block and start_pos == prompt_len and getenv("CHECKPOINT", 1): self._checkpoint(tokens, save=True)
       if spec:
-        tok = self._wait_host(lambda: self._token_host[start_pos], "a token of generate")
+        tok = self._wait_host(lambda: self._token_host[start_pos], "a token of generate") if fast else int(cast(Tensor, out).item())
         tokens.append(tok)
         self._cached_tokens, self._spec_row = tokens[:-1], 0
         yield tok

@@ -1043,7 +1043,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def mix_ok(self, req:Request, busy:set[int]) -> bool:
     """(MIX) req's prompt in mixed steps: its new tokens (past what's kept of its conversation) MIX_MAX at most, in chunks of a step's"""
     n = len(req.ids) + len(req.generated)
-    return self.batchable(req) and not self.wide(req) and not req.no_mix and n - self.stash_hit(req.ids + req.generated, busy) <= self.MIX_MAX
+    new = n - self.stash_hit(req.ids + req.generated, busy)
+    return self.batchable(req) and not self.wide(req) and not req.no_mix and 0 < new <= self.MIX_MAX
   MIX_MAX = getenv("MIX_MAX", 4096)
   def mix_take(self, mixes:list[Request], active:dict, pending:list[Request], land:int):
     """
@@ -1139,10 +1140,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         [((batch[g].ids + batch[g].generated)[pos[g]:pos[g] + P], free[g], (batch[g].temperature, batch[g].top_p)) for g in todo]
       outs = model.batch_prefill(chunks, starts=[pos[g] for g in todo], P=P)
       for g, out in zip(todo, outs): pos[g], firsts[g] = min(lens[g], pos[g] + P), out
+    for g in range(len(batch)):
+      if starts[g] == lens[g]: firsts[g] = model.slot_first(free[g], (batch[g].temperature, batch[g].top_p))
     prefill_time = time.perf_counter() - _p0
     self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(batch), self.stats.prefill_time + prefill_time
-    self.telemetry.prefill(sum(l - s for l, s in zip(lens, starts)), prefill_time,
-                           any(s or r.generated for s, r in zip(starts, batch)), len(batch))
+    if (telemetry:=getattr(self, "telemetry", None)) is not None:
+      telemetry.prefill(sum(l - s for l, s in zip(lens, starts)), prefill_time, any(s or r.generated for s, r in zip(starts, batch)), len(batch))
     for g, (req, slot) in enumerate(zip(batch, free)):
       pending.remove(req)
       req.cache_start, req.pos = starts[g], lens[g]
