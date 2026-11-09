@@ -2064,6 +2064,7 @@ class Transformer:
         for d in devs:
           if (rep:=getattr(getattr(Device[d], "iface", None), "hang_report", None)) is not None:
             with contextlib.suppress(Exception): print("  " + rep(), flush=True)
+        if (err:=ring_errors()): print(f"  ring exchanges timed out (RING_TIMEOUT_MS): {err}", flush=True)
         for d in devs: Device[d].synchronize()
         if isinstance(v:=get(), int) and v < 0: raise RuntimeError(f"{what}: none after the devices finished")
         break
