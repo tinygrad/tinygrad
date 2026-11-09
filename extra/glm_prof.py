@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 GLM (glm5next / glm-dsa) single sequence decode: step time and the GPU kernel times of NSTEPS steps (PROFILE=1), at a prompt of CTXP tokens.
-env: MODEL (gguf), SHARD (6), MAXCTX (262144), CTXP (4096 prompt tokens, random), NSTEPS (64), TOP (40 kernels printed)
+env: MODEL (gguf), SHARD (6), MAXCTX (262144), CTXP (4096 prompt tokens: of CORPUS, a text file, else random), NSTEPS (64 tokens),
+TOP (40 kernels printed)
 run: PROFILE=1 PYTHONPATH=. MLA_SEQ_SHARD=1 python3 extra/glm_prof.py
 """
 import os, time, random
@@ -15,7 +16,11 @@ model, kv = Transformer.from_gguf(os.environ["MODEL"], getenv("MAXCTX", 262144),
 devs = model.token_embd.weight.device
 devs = devs if isinstance(devs, tuple) else (devs,)
 random.seed(0)
-prompt = [random.randrange(1000, 50000) for _ in range(getenv("CTXP", 4096))]
+if (cp:=os.environ.get("CORPUS")):
+  # (text: the drafts of speculative decoding accepted as in real use, random tokens' rarely)
+  from tinygrad.llm.cli import SimpleTokenizer
+  prompt = SimpleTokenizer.from_gguf_kv(kv).encode(open(cp).read()[1000:1000+getenv("CTXP", 4096)*4])[:getenv("CTXP", 4096)]
+else: prompt = [random.randrange(1000, 50000) for _ in range(getenv("CTXP", 4096))]
 NS = getenv("NSTEPS", 64)
 gen = model.generate(prompt)
 st = time.perf_counter()
