@@ -1,5 +1,5 @@
 from __future__ import annotations
-import array, contextlib, enum, functools, gc, itertools, math, os, pathlib, random, re, time
+import array, collections, contextlib, enum, functools, gc, itertools, math, os, pathlib, random, re, time
 from dataclasses import dataclass, replace, field
 from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
@@ -5263,3 +5263,25 @@ class Transformer:
       if ple: self._write_ple_rows(tokens, len(tokens) - 1)
       self._cached_tokens = tokens[:-1]
       yield tokens[-1]
+
+# KPROF=n (with PROFILE=1): every n batched decoding steps the GPU kernel times of them printed (a device's, per step), the server's real steps
+if (KPROF:=getenv("KPROF", 0)):
+  def _kprof_wrap(f:Callable) -> Callable:
+    def w(self, *args, **kwargs):
+      ret = f(self, *args, **kwargs)
+      import extra.kprof as kp
+      devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
+      c = self.__dict__.setdefault("_kprof", {"steps": 0, "st": time.perf_counter(), "names": collections.Counter()})
+      c["steps"] += 1
+      c["names"][f.__name__] += 1
+      if c["steps"] >= KPROF:
+        t, dt = kp.times(*devs), time.perf_counter() - c["st"]
+        tot = sum(us for _, us in t.values()) / len(devs) / c["steps"]
+        print(f"KPROF {c['steps']} steps {dict(c['names'])} in {dt*1e3:.0f} ms: {dt/c['steps']*1e3:.2f} ms/step, GPU {tot/1e3:.3f} ms/step/device")
+        for n, (cnt, us) in sorted(t.items(), key=lambda x: -x[1][1])[:getenv("KPROF_TOP", 30)]:
+          print(f"KPROF  {us/len(devs)/c['steps']:9.1f} us/step  {cnt/len(devs)/c['steps']:6.1f}/step  {n}")
+        kp.reset(*devs)
+        c.update(steps=0, st=time.perf_counter(), names=collections.Counter())
+      return ret
+    return w
+  for _n in ("batch_step", "batch_spec_step", "batch_mixed_step"): setattr(Transformer, _n, _kprof_wrap(getattr(Transformer, _n)))
