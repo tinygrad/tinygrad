@@ -330,6 +330,8 @@ _sp_rows:list[Tensor|None] = [None]
 # rows are padded to whole tiles of 32), 0: not split
 _seq_split = [0]
 SEQ_SPLIT_MAX = 128  # (the most real rows a device)
+# AG_REAL: batched decoding's q8 all-gather packs a device's real rows from the padded mix, not from their copy (tr8 B=8 +0.8%: off)
+AG_REAL = getenv("AG_REAL", 0)
 # HC_REAL: batched decoding's hyper-connections read a device's real rows only and the mix stores them (no copy of them), its input not
 # materialized in float (2 kernels less a sublayer): the mix's epilogue and the activation's kernel round differently (FMA, rcp: ulps)
 HC_REAL = getenv("HC_REAL", 0)
@@ -682,8 +684,8 @@ class GatedResidual:
       mixed, post, _ = self.pre_split(xs)
       # (own: lazy, a copy only if the sublayer reads it (the router): the gather packs the real rows from mixed)
       own = _split_real(mixed).contiguous()
-    x = all_gather_q8(own, 1) if HC_REAL and own.shape[-1] % 256 == 0 else all_gather_q8(mixed, 1, real=_seq_split[0]) \
-      if own.shape[-1] % 256 == 0 and mixed.shape[0] == 1 else all_gather(own, 1, dtypes.half)
+    x = all_gather_q8(mixed, 1, real=_seq_split[0]) if AG_REAL and not HC_REAL and own.shape[-1] % 256 == 0 and mixed.shape[0] == 1 else \
+      all_gather_q8(own, 1) if own.shape[-1] % 256 == 0 else all_gather(own, 1, dtypes.half)
     _partial_out[0], _sp_rows[0] = True, own
     try: out = sublayer(x)
     finally: _partial_out[0], _sp_rows[0] = False, None
