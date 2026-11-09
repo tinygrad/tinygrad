@@ -124,6 +124,7 @@ class TestMoEFeedForward(unittest.TestCase):
         np.testing.assert_allclose(out, expected, rtol=1e-3)
 
   def test_moe_feed_forward_expert_groups(self):
+    # with bias, groups rank by top-2 sum: group (2, 3) wins though expert 0 scores best, and only experts 2, 3 (zero gate) give output 0
     block = TransformerBlock(replace(_moe_config(), expert_gating_func=ExpertGating.SIGMOID, expert_bias=True,
                                      expert_group_count=2, expert_group_used=1))
     block.ffn_gate_inp.weight = Tensor([[4.0, -1.0, 3.0, 2.5]] * 8).T / 8

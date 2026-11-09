@@ -533,8 +533,7 @@ class MLATransformerBlock(FFNBlock):
     k = _cache_prefix(_update_cache(self.cache_k, k_store, start_pos, 2), start_pos, T, 2)
     v = k[..., :self.config.kv_lora_rank]
 
-    mscale = (self.config.yarn and self.config.yarn.mscale) or 1.0
-    attn = q @ k.transpose(-1, -2) * (mscale ** 2 / self.config.head_dim ** 0.5)
+    attn = q @ k.transpose(-1, -2) * ((self.config.yarn and self.config.yarn.mscale or 1.0) ** 2 / self.config.head_dim ** 0.5)
     mask = idx_mask if idx_mask is not None else _causal_mask(x, start_pos)
     if mask is not None: attn = attn + mask
     attn = attn.softmax(-1)
@@ -778,12 +777,11 @@ class Transformer:
 
     kv_lora_rank = kv.get(f'{arch}.attention.kv_lora_rank', 0)
     head_dim = kv.get(f'{arch}.attention.key_length_mla', kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads))
-    rope_dim = kv.get(f'{arch}.rope.dimension_count', head_dim)
-    log_mul = kv.get(f'{arch}.rope.scaling.yarn_log_multiplier', 0.0)
+    rope_dim, log_mul = kv.get(f'{arch}.rope.dimension_count', head_dim), kv.get(f'{arch}.rope.scaling.yarn_log_multiplier', 0.0)
+    mscale = log_mul * math.log(kv.get(f'{arch}.rope.scaling.factor', 1.0)) + 1.0 if kv_lora_rank or arch.startswith('deepseek') else None
     yarn = YaRNConfig(factor=kv[f'{arch}.rope.scaling.factor'],
                       orig_ctx_len=kv.get(f'{arch}.rope.scaling.original_context_length', kv[f'{arch}.context_length']),
-                      beta_fast=kv.get(f'{arch}.rope.scaling.yarn_beta_fast', 32.0),
-                      mscale=log_mul * math.log(kv[f'{arch}.rope.scaling.factor']) + 1.0 if kv_lora_rank or arch.startswith('deepseek') else None,
+                      beta_fast=kv.get(f'{arch}.rope.scaling.yarn_beta_fast', 32.0), mscale=mscale,
                       beta_slow=kv.get(f'{arch}.rope.scaling.yarn_beta_slow', 1.0)) if kv.get(f'{arch}.rope.scaling.type') == 'yarn' else None
 
     # Permute RoPE weights from interleaved to half-split layout.
