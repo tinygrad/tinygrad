@@ -1012,14 +1012,16 @@ class Indexer:
       # picked by the indexer kernels, the keys of one sequence (no batch axis))
       self.sparse = x.shape[0] == 1 and amd_custom_kernels_supported(x.device) and _wmma_rdna4(x.device) and self.idx.head_dim % 16 == 0 and \
         self.max_context % 64 == 0 and bool(getenv("INDEXER_SPARSE", 1))
-      # GLM_SEQ: replicated DSA keys with one region per sequence; the single-user path keeps SEQ_IDX_DSA sharding.
+      # (GLM_SEQ: the regions of the sequences sharing the keys, and the padding sequences')
       N = max(self.max_context, self.cache_rows) + (REGION_ALIGN if self.cache_rows else 0)
       shape = (N, self.idx.head_dim) if self.sparse else (x.shape[0], N, self.idx.head_dim)
-      if self.sparse and seq_sharded(x.device) and getenv("SEQ_IDX_DSA", 1) and not self.cache_rows:
+      # (SEQ_IDX_DSA_REGIONS=0: GLM_SEQ's keys replicated on every device (~14x their memory))
+      if self.sparse and seq_sharded(x.device) and getenv("SEQ_IDX_DSA", 1) and (not self.cache_rows or getenv("SEQ_IDX_DSA_REGIONS", 1)):
         # (a sequence sharded latent cache (MLA_SEQ_SHARD): the keys split on their positions as it is, a device scores its own, see
-        # pool_index_shard)
+        # pool_index_shard. a sequence's region from base: a device's rows from base//devices (base a multiple of SEQ_BLK*devices))
         self.shard = len(devs:=cast(tuple[str, ...], x.device))
-        self.cache_dk = Tensor.empty(self.shard*seq_rows(self.max_context, self.shard), self.idx.head_dim, dtype=dtypes.half, device=devs, axis=0)
+        self.cache_dk = Tensor.empty(self.shard*seq_rows(N, self.shard), self.idx.head_dim, dtype=dtypes.half, device=devs, axis=0)
+        self.dk_width = seq_rows(self.max_context, self.shard)  # (a device's keys of a sequence: the scores' columns)
         return
       self.cache_dk = Tensor.zeros(*shape, dtype=dtypes.half, device=x.device).contiguous()
       return
@@ -1101,15 +1103,14 @@ class Indexer:
     iq = self.attn_q_b(q).float().reshape(Tq, idx.n_heads, idx.head_dim).transpose(0, 1).unsqueeze(0)
     iq = apply_rope(iq[..., :R], freqs, idx.rope_interleave).cat(iq[..., R:], dim=-1)[0].transpose(0, 1)  # (Tq, H, D)
     b = _seq_base[0]
-    if self.shard:
-      assert isinstance(b, int) and b == 0, "SEQ_IDX_DSA: regions use replicated keys"
-      pk = seq_store(self.cache_dk, k.half(), start_pos, T)
-    else: pk = Tensor(self.cache_dk.uop.after(self.cache_dk[start_pos+b:S+b].uop.store(k[:T].half().uop)))
+    # (the region's keys: split, a device's rows from b//devices (its scores' columns a sequence's), else rows from b)
+    if self.shard: pk, kb, width = seq_store(self.cache_dk, k.half(), start_pos + b, T), b // self.shard, self.dk_width
+    else: pk, kb, width = Tensor(self.cache_dk.uop.after(self.cache_dk[start_pos+b:S+b].uop.store(k[:T].half().uop))), b, self.max_context
     weights = ((p if (p:=_skinny(self.proj, x)) is not None else self.proj(x)).float() * (idx.n_heads * idx.head_dim)**-0.5)[0]
     if Tq == 1 and idx.n_heads % 16 == 0:
-      return indexer_decode_index(iq[0], pk, weights[0], start_pos, S, idx.top_k, 1, pbase=b, width=self.max_context).reshape(1, -1)
+      return indexer_decode_index(iq[0], pk, weights[0], start_pos, S, idx.top_k, 1, pbase=kb, width=width).reshape(1, -1)
     if Tq <= 8 and idx.n_heads % 16 == 0:
-      return indexer_decode_index_rows(iq, pk, weights, start_pos, S, idx.top_k, 1, pbase=b, width=self.max_context)
+      return indexer_decode_index_rows(iq, pk, weights, start_pos, S, idx.top_k, 1, pbase=kb, width=width)
     # the scores on the tensor cores in blocks of rows (their memory: rows x the max context), a kernel a query picks its keys
     rows = round_up(Tq, 16)
     iq, weights = iq.pad(((0, rows-Tq), None, None)), weights.pad(((0, rows-Tq), None))
@@ -1118,7 +1119,7 @@ class Indexer:
       qb = iq[r0:r0+block].contiguous()
       if picks is not None: qb = Tensor(qb.uop.after(*picks.uop.src[1:]))  # (after the last block's lists: its scores are done)
       if picks is None: picks = Tensor.empty(rows, idx.top_k + 2, dtype=dtypes.int32, device=x.device)
-      sc = indexer_scores(qb, pk, weights[r0:r0+block], S, 1, pbase=b, width=self.max_context)
+      sc = indexer_scores(qb, pk, weights[r0:r0+block], S, 1, pbase=kb, width=width)
       picks = pool_index_shard(sc, start_pos, S, idx.top_k, 1, row0=r0, out=picks) if self.shard else \
               pool_index_rows(sc, start_pos, S, idx.top_k, 1, row0=r0, out=picks)
     return unwrap(picks)[:Tq]
@@ -1559,9 +1560,11 @@ class MLATransformerBlock(FFNBlock):
         assert U % (SEQ_BLK*nd) == 0 and U % ic.kpool == 0, f"REGION_ALIGN {U}: blocks of {SEQ_BLK} on {nd} devices"
         span, rslots = -(-self.config.max_context // U), (sb.bases // U).contiguous()
         if ic.kpool == 1:
-          pk = seq_store_grouped(pools[0], kg.half(), sb.positions, rslots, U, span=span, split=False)
+          # (split keys: a region's rows on every device as the latents', U//devices a region slot; else U rows on every device)
+          ku = U // nd if idx.shard else U
+          pk = seq_store_grouped(pools[0], kg.half(), sb.positions, rslots, ku, span=span, split=bool(idx.shard))
           picks = indexer_decode_index_rows(iq, pk, iw, None, None, ic.top_k, 1,
-                                            grouped=(sb.positions, U, rslots, span))
+                                            grouped=(sb.positions, ku, rslots, span))
           cache = seq_store_grouped(pools[1], self._seq_rows(k_store[0, 0]), sb.positions, rslots, U // nd, span=span)
         else:
           R = int(idx.slot_ring[0].shape[0])
@@ -3073,7 +3076,8 @@ class Transformer(GLMSeqDriver):
       copies.append(mv(b.slot_rows_view(b.cache_s), src // nd, dst // nd, n // nd))
       if (idx:=b.indexer) is not None:
         div = 1 if idx.idx.kpool == 1 else idx.idx.kpool
-        copies.append(mv(idx.cache_dk if div == 1 else idx.cache_pk, src // div, dst // div, n // div))
+        if idx.idx.kpool == 1 and idx.shard: copies.append(mv(b.slot_rows_view(idx.cache_dk), src // nd, dst // nd, n // nd))
+        else: copies.append(mv(idx.cache_dk if div == 1 else idx.cache_pk, src // div, dst // div, n // div))
     Tensor.realize(*copies)
 
   def _seq_stash_init(self):
@@ -3085,10 +3089,14 @@ class Transformer(GLMSeqDriver):
       return t.nbytes() // int(t.shape[0]) // (len(t.device) if isinstance(t.device, tuple) and t.uop.axis is not None else 1)
     kb = [b for b in self.blk + [self.mtp] if isinstance(b, MLATransformerBlock)]
     def index(b:MLATransformerBlock) -> Indexer:
-      assert b.indexer is not None and not b.indexer.shard, "GLM_SEQ requires replicated indexer keys"
+      assert b.indexer is not None and (not b.indexer.shard or b.indexer.idx.kpool == 1), "GLM_SEQ: split pooled keys (SEQ_IDX_SHARD)"
       return b.indexer
-    def keys(b:MLATransformerBlock) -> Tensor: return index(b).cache_dk if index(b).idx.kpool == 1 else index(b).cache_pk
-    chunk = C * sum(per_row(b.cache_s) + per_row(keys(b)) // index(b).idx.kpool for b in kb)
+    # (the keys as rows: split DSA keys a device's rows (as the latents), else the rows of every device)
+    def keys(b:MLATransformerBlock) -> Tensor:
+      return (b.slot_rows_view(index(b).cache_dk) if index(b).shard else index(b).cache_dk) if index(b).idx.kpool == 1 else index(b).cache_pk
+    def kdiv(b:MLATransformerBlock) -> int: return nd if index(b).idx.kpool == 1 and index(b).shard else index(b).idx.kpool
+    chunk = C * sum(per_row(b.cache_s) + per_row(index(b).cache_dk if index(b).idx.kpool == 1 else index(b).cache_pk) //
+                    (1 if index(b).idx.kpool == 1 and index(b).shard else index(b).idx.kpool) for b in kb)
     ring = [r for _, r in self.seq_ckpt_rings]
     entry = per_row(self.seq_spec_h) + per_row(self.seq_ckpt_h) + sum(per_row(index(b).pool_ring) + per_row(r)
               for b, r in zip([b for b in kb if index(b).idx.kpool > 1], ring))
@@ -3100,7 +3108,7 @@ class Transformer(GLMSeqDriver):
     self._stash_kv = []
     for b in kb:
       latent = glm_seq_base._host_like([(b.slot_rows_view(b.cache_s), 0, self.stash_chunks * C // nd)])[0]
-      pools = glm_seq_base._host_like([(keys(b), 0, self.stash_chunks * C // index(b).idx.kpool)])[0]
+      pools = glm_seq_base._host_like([(keys(b), 0, self.stash_chunks * C // kdiv(b))])[0]
       self._stash_kv.append((latent, pools))
     states = [self.seq_spec_h, self.seq_ckpt_h]
     self._stash_rings = list(self.seq_ckpt_rings)
@@ -3121,9 +3129,12 @@ class Transformer(GLMSeqDriver):
     for b, st in zip([b for b in self.blk + [self.mtp] if isinstance(b, MLATransformerBlock)], self._stash_kv):
       assert b.indexer is not None
       idx, kp = b.indexer, b.indexer.idx.kpool
+      # (split DSA keys: a device's rows, as the latents')
+      split = kp == 1 and bool(idx.shard)
+      kd, kt = (nd, b.slot_rows_view(idx.cache_dk)) if split else (kp, idx.cache_dk if kp == 1 else idx.cache_pk)
       # Host rows come from the stash chunk; device rows come from the independently allocated region.
       items = [(rows(st[0], chunk*(C//nd), C*chunks//nd), rows(b.slot_rows_view(b.cache_s), row//nd, C*chunks//nd)),
-               (rows(st[1], chunk*(C//kp), C*chunks//kp), rows(idx.cache_dk if kp == 1 else idx.cache_pk, row//kp, C*chunks//kp))]
+               (rows(st[1], chunk*(C//kd), C*chunks//kd), rows(kt, row//kd, C*chunks//kd))]
       for dst, src in items:
         if save: saves.append(dst.assign(src))
         else: pairs.append((src, dst))

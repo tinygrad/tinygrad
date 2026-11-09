@@ -4570,8 +4570,8 @@ def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP
   # RDNA4 WMMA: out[t, p] = sum over the heads h of w[t, h] * relu(q[t, h] . k[p]). a wave per 16 tokens and G of the tiles of 16*NP
   # pools: it loops over the tiles g, g+G, .. of the pools (the work follows the context, not its max)
   T, H, D = cast(tuple[int, int, int], q.shape)
-  # (the scores' columns: the pools of a sequence (k: its region's from pbase, see indexer_scores))
-  P = cast(int, k.shape[0]) if shard else cast(int, out.shape[-1])
+  # (the scores' columns: the pools of a sequence (k: its region's from pbase, see indexer_scores), a device's when split)
+  P = cast(int, out.shape[-1])
   # (shard: the device's pools of the pooled keys split over the devices, SEQ_IDX_SHARD)
   if shard: pools = _local_pools(pools, dev[0][0].load().cast(dtypes.weakint), shard, SEQ_BLK // kpool).minimum(P)
   G = min(64, P // (16*NP))
@@ -4627,7 +4627,8 @@ def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp, kpool:int=4, pba
   """
   T, H, D = q.shape
   P, n = k.shape[0], _idx_shard(k)
-  if width is not None and not n: P = width
+  # (width: a sequence's pools, a device's of them when split (pbase then a device's row))
+  if width is not None: P = width * (n or 1)
   # (q split on its rows over the devices: the scores of every device's rows)
   rows_axis = 0 if isinstance(q.device, tuple) and q.uop.axis == 0 else None
   out = Tensor.empty(n*T, P//n, dtype=dtypes.float32, device=q.device, axis=0) if n else \
@@ -4775,8 +4776,8 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, po
   if shard: grouped = grouped[:-1]
   T = cast(int, q.shape[0]) if len(q.shape) == 3 else 1
   H, D = cast(tuple[int, int], q.shape[-2:])
-  # (the scores' columns: the pools of a sequence (k: its region's from pbase))
-  P = stride*(span or SLOT_SPAN) or (cast(int, k.shape[0]) if shard else cast(int, out.shape[-1]))
+  # (the scores' columns: the pools of a sequence (k: its region's from pbase), a device's when split)
+  P = stride*(span or SLOT_SPAN) or cast(int, out.shape[-1])
   G = min(256, P // (16*NP))
   q, w, out = q.reshape(T, H, D), w.reshape(T, H), out.reshape(T, P)
   gr, lane = UOp.range(T*G, 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
@@ -5098,8 +5099,9 @@ def indexer_decode_index(q:Tensor, k:Tensor, w:Tensor, q_start:UOp, pools:int|UO
   keys it sees (the top pools of the scores, the tail of its own pool), the count last
   """
   if _idx_shard(k):
-    assert isinstance(pbase, int) and pbase == 0, "SEQ_IDX_SHARD: no regions"
-    return indexer_decode_index_rows(q.reshape(1, *q.shape), k, w.reshape(1, -1), q_start, pools, top, kpool).reshape(-1)
+    # (split keys: pbase and width a device's rows of the sequence's region)
+    return indexer_decode_index_rows(q.reshape(1, *q.shape), k, w.reshape(1, -1), q_start, pools, top, kpool, pbase=pbase,
+                                     width=width).reshape(-1)
   P = width or int(k.shape[0])
   scores = Tensor.empty(P, dtype=dtypes.float32, device=q.device)
   if isinstance(pools, UOp): k = Tensor(k.uop.after(pools))
@@ -5133,7 +5135,7 @@ def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp|None, po
     return Tensor.custom_kernel(out, scores, positions, fxn=functools.partial(_pool_index_kernel, q_start=zero, pools=zero, k=top, kpool=kpool))[0]
   assert q_start is not None and pools is not None
   T, P = int(q.shape[0]), int(k.shape[0]) // max(n, 1)
-  if width is not None and not n: P = width
+  if width is not None: P = width
   scores = empty(T, P)
   if isinstance(pools, UOp): k = Tensor(k.uop.after(pools))
   if isinstance(pbase, UOp): k = Tensor(k.uop.after(pbase))
