@@ -13,6 +13,10 @@ class TestGLMDSASequence(unittest.TestCase):
   def setUp(self):
     self.devs = ("CPU",)
 
+  def test_region_alignment_drives_move_chunks(self):
+    self.assertEqual(Transformer.SEQ_MOVE, Transformer.REGION_ALIGN)
+    self.assertEqual(Transformer.REGION_ALIGN % (64*14), 0)
+
   def test_direct_key_prefill_region(self):
     idx = Indexer.__new__(Indexer)
     idx.idx = SimpleNamespace(kpool=1, n_heads=16, head_dim=4, top_k=2, rope_dim=2, rope_interleave=False)

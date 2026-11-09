@@ -3014,7 +3014,7 @@ class Transformer(GLMSeqDriver):
     return [(out[g*(2*k+1):g*(2*k+1)+k+1], out[g*(2*k+1)+k+1:(g+1)*(2*k+1)]) for g in range(n)], list(self._bpf_host_out[:G])
 
   # ** GLM_SEQ on the 14-GPU DSA target: reuse the generic driver; override only DSA cache/state ownership.
-  REGION_ALIGN = REGION_ALIGN
+  REGION_ALIGN = SEQ_MOVE = REGION_ALIGN
   @property
   def _spec_dim(self) -> int: return self.config.dim
   def _derive_weights(self):
