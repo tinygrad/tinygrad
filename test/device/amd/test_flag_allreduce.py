@@ -131,7 +131,7 @@ class TestFlagAllreduce(unittest.TestCase):
     for buf in all_gather(x, 1).realize().uop.base.buffer.bufs:
       np.testing.assert_array_equal(np.frombuffer(buf.as_memoryview(), dtype=np.uint32), data.ravel())
     x = Tensor(rng.normal(size=(1, 192, 256)).astype(np.float32)).shard(devs, axis=1).contiguous().realize()
-    with patch("tinygrad.llm.kernels.amd.flag_all_gather", return_value=None):
+    with patch("tinygrad.llm.kernels.amd_qwen.flag_all_gather", return_value=None):
       getenv.cache_clear()
       reference = all_gather_q8(x, 1).realize()
     getenv.cache_clear()
