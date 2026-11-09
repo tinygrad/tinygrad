@@ -518,6 +518,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
       if dsl:
         dsl_sink = graph_rewrite(dsl_sink, dsl.isel_matcher, ctx=IselContext(dsl_sink), name=colored("dsl inst selection", "magenta"), bottom_up=True)
         if VIZ: graph_rewrite(dsl_sink, PatternMatcher([]), name=colored("view dsl sink", "magenta"))
+        if DSL >= 2: renderer, full_sink = dsl, dsl_sink
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))
@@ -526,7 +527,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   return prg
 
 # config affects generated programs and cache keys; context also carries compile-only behavior to workers
-to_program_config = (NOOPT, EMULATED_DTYPES, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32,
+to_program_config = (DSL, NOOPT, EMULATED_DTYPES, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32,
                      DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS)
 to_program_context = (*to_program_config, SPEC, DEBUG)
 def to_program_key(ast:UOp, renderer:Renderer) -> tuple:
