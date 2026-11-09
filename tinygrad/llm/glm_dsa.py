@@ -3057,6 +3057,9 @@ class Transformer(GLMSeqDriver):
              if isinstance(b, MLATransformerBlock) and b.indexer is not None and b.indexer.idx.kpool > 1] + \
            [ring for _, ring in self.seq_ckpt_rings]
     glm_seq_base._fill_zero(*todo)
+    # (the MLA caches' peer views made (allocated) before jits are captured in forked processes, see seq_gather)
+    for b in self.blk + [self.mtp]:
+      if isinstance(b, MLATransformerBlock) and b.seq_sharded: seq_views(b.cache_s)
 
   def _seq_copy(self, save:bool, slot:UOp, pm:UOp, ps:UOp, pc:UOp, hrow:UOp, keep:UOp):
     """The DSA sequence slot has hidden MTP rows; pooled-indexer rings too. Direct DSA keys stay in the region."""
