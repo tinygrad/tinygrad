@@ -4050,7 +4050,8 @@ def _seq_store_kernel(cache:UOp, k:UOp, dev:UOp, start_pos:UOp, T:UOp, n:int) ->
   return cache[row.valid(ok), d].store(k[r, d].load().cast(cache.dtype)).end(r, d).sink(arg=KernelInfo(name="seq_store", opts_to_apply=()))
 
 @functools.cache
-def _seq_store_grouped_kernel(cache:UOp, k:UOp, dev:UOp, positions:UOp, *slots:UOp, n:int, stride:int) -> UOp:
+def _seq_store_grouped_kernel(cache:UOp, k:UOp, dev:UOp, positions:UOp, *slots:UOp, n:int, stride:int, span:int=0,
+                              split:bool=True) -> UOp:
   # the rows of G sequences (k: T//G rows each, the first at positions[g]) a device has into its rows of their slots (slot g or slots[g],
   # stride rows each)
   R, D = cast(tuple[int, int], k.shape)
@@ -4060,16 +4061,21 @@ def _seq_store_grouped_kernel(cache:UOp, k:UOp, dev:UOp, positions:UOp, *slots:U
   p = positions[g].load().cast(dtypes.weakint) + r % Tg
   slot = slots[0][g].load().cast(dtypes.weakint) if slots else g
   local = (p // (SEQ_BLK*n)) * SEQ_BLK + p % SEQ_BLK
-  # (a position past the slot's rows (the slots it spans, SLOT_SPAN) isn't stored: not into the next slot or past the pool)
-  ok = ((p // SEQ_BLK) % n).eq(dev[0].load().cast(dtypes.weakint)) & (local < stride*SLOT_SPAN)
-  row = slot * stride + local
+  # (a position past the slot's rows (the slots it spans, SLOT_SPAN, or span) isn't stored: not into the next slot or past the pool)
+  own = ((p // SEQ_BLK) % n).eq(dev[0].load().cast(dtypes.weakint)) if split else (p >= 0)
+  ok = own & ((local if split else p) < stride*(span or SLOT_SPAN))
+  row = slot * stride + (local if split else p)
   return cache[row.valid(ok), d].store(k[r, d].load().cast(cache.dtype)).end(r, d).sink(arg=KernelInfo(name="seq_store_g", opts_to_apply=()))
 
-def seq_store_grouped(pool:Tensor, k:Tensor, positions:Tensor, slots:Tensor|None, stride:int) -> Tensor:
-  """the (G*T, D) rows k of G sequences (T each, the first at positions[g]) into their slots (stride rows a device) of the sequence sharded pool"""
+def seq_store_grouped(pool:Tensor, k:Tensor, positions:Tensor, slots:Tensor|None, stride:int, span:int=0, split:bool=True) -> Tensor:
+  """
+  the (G*T, D) rows k of G sequences (T each, the first at positions[g]) into their slots (stride rows a device) of the sequence sharded pool.
+  span: a sequence's slots (its rows: stride*span), default SLOT_SPAN (regions of sequences sharing the caches: slots of REGION_ALIGN rows).
+  split=False: replicated direct-key caches addressed by whole position rows instead of device-local latent rows
+  """
   devs = cast(tuple[str, ...], pool.device)
   return Tensor.custom_kernel(pool, k.contiguous(), _device_index(devs), positions, *([slots] if slots is not None else []),
-                              fxn=functools.partial(_seq_store_grouped_kernel, n=len(devs), stride=stride))[0]
+                              fxn=functools.partial(_seq_store_grouped_kernel, n=len(devs), stride=stride, span=span, split=split))[0]
 
 def seq_store(cache:Tensor, k:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
   """the (R, D) rows k (on every device, the first T the tokens at start_pos) into the sequence sharded cache (n*rows, D): the cache after"""
@@ -4080,7 +4086,8 @@ def seq_store(cache:Tensor, k:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
                                                                                                 n=len(devs)))[0]
 
 @functools.cache
-def _seq_picks_kernel(out:UOp, picks:UOp, dev:UOp, *grouped:UOp, valid_len:UOp, n:int, stride:int=0) -> UOp:
+def _seq_picks_kernel(out:UOp, picks:UOp, dev:UOp, *grouped:UOp, valid_len:UOp, n:int, stride:int=0, base:UOp|None=None,
+                      span:int=0) -> UOp:
   # a row's list of keys (pool_index_rows: positions, the count last) as the rows of the device's part of the keys on it (the count last): a
   # workgroup a row, a thread a run of the list (its keys in their order): their counts, the offsets of the threads, the keys
   T, W = cast(tuple[int, int], picks.shape)
@@ -4101,7 +4108,7 @@ def _seq_picks_kernel(out:UOp, picks:UOp, dev:UOp, *grouped:UOp, valid_len:UOp, 
     key = picks[row, i.minimum(n_max-1)].load().cast(dtypes.weakint)
     ok = (i < count) & (key >= 0) & (key < valid_len) & ((key // SEQ_BLK) % n).eq(me)
     # (grouped: a key past the slot's rows (the slots it spans) isn't seen)
-    return key, ok & ((key // (SEQ_BLK*n)) * SEQ_BLK + key % SEQ_BLK < stride*SLOT_SPAN) if grouped else ok
+    return key, ok & ((key // (SEQ_BLK*n)) * SEQ_BLK + key % SEQ_BLK < stride*(span or SLOT_SPAN)) if grouped else ok
   j1 = UOp.range(per, 2, AxisType.LOOP)
   mine = _reg_int(entry(j1)[1].cast(dtypes.int32), j1)
   lds = UOp.alloc((TH,), dtypes.int32, addrspace=AddrSpace.LOCAL)
@@ -4113,6 +4120,8 @@ def _seq_picks_kernel(out:UOp, picks:UOp, dev:UOp, *grouped:UOp, valid_len:UOp, 
   j2 = UOp.range(per, 4, AxisType.LOOP)
   key, own = entry(j2)
   cur = pos.after(j2)[0].load()
+  # (base: the sequence's region of the cache from that position, a multiple of SEQ_BLK*n: its rows from base//n on every device)
+  if base is not None: off = off + base // n
   local = off + (key // (SEQ_BLK*n)) * SEQ_BLK + key % SEQ_BLK
   keys = UOp.group(out[row, cur.cast(dtypes.weakint).valid(own)].store(local.cast(dtypes.int32)), pos[0].store(cur + own.cast(dtypes.int32))).end(j2)
   # (the count: the last thread's offset and its keys)
@@ -4120,18 +4129,23 @@ def _seq_picks_kernel(out:UOp, picks:UOp, dev:UOp, *grouped:UOp, valid_len:UOp, 
   return UOp.group(keys, out[row, UOp.const(n_max, dtypes.weakint).valid(t.eq(TH-1))].store(last)).end(row, t) \
     .sink(arg=KernelInfo(name="seq_picks", opts_to_apply=()))
 
-def seq_picks(picks:Tensor, valid_len:int|UOp|None, devs:tuple[str, ...], grouped:tuple|None=None) -> Tensor:
+def seq_picks(picks:Tensor, valid_len:int|UOp|None, devs:tuple[str, ...], grouped:tuple|None=None, base:int|UOp=0) -> Tensor:
   """
+  base: the sequence's region of the cache from that position (a multiple of SEQ_BLK*n, see Transformer.seq_rows)
   the (T, n_max+1) lists of keys (positions, on every device) as every device's rows of its keys (n*T, n_max+1) split on the devices.
-  grouped (positions, slots, stride): the rows of G sequences (batched decoding), their keys in their slots (stride rows of a device each)
+  grouped (positions, slots, stride[, span]): the rows of G sequences (batched decoding), their keys in their slots (stride rows of a device
+  each, a sequence's span of them, default SLOT_SPAN)
   """
   T, W = picks.shape
   vl = _unbind(valid_len) if isinstance(valid_len, UOp) else UOp.const(valid_len or 0, dtypes.weakint)
   if isinstance(valid_len, UOp): picks = Tensor(picks.uop.after(valid_len))
   out = Tensor.empty(len(devs)*T, W, dtype=dtypes.int32, device=devs, axis=0)
   srcs = [x for x in grouped[:2] if x is not None] if grouped is not None else []
+  if isinstance(base, UOp): picks = Tensor(picks.uop.after(base))
+  bu = _pb(base)
   return Tensor.custom_kernel(out, picks.contiguous(), _device_index(devs), *srcs, fxn=functools.partial(_seq_picks_kernel, valid_len=vl,
-                              n=len(devs), stride=grouped[2] if grouped is not None else 0))[0]
+                              n=len(devs), stride=grouped[2] if grouped is not None else 0, base=bu,
+                              span=grouped[3] if grouped is not None and len(grouped) > 3 else 0))[0]
 
 _seq_view_cache:dict[int, list[Tensor]] = {}
 def seq_views(cache:Tensor) -> list[Tensor]:
@@ -4159,25 +4173,27 @@ def seq_views(cache:Tensor) -> list[Tensor]:
   return views
 
 @functools.cache
-def _seq_gather_kernel(out:UOp, part:UOp, dev:UOp, start_pos:UOp, k:int, n:int) -> UOp:
+def _seq_gather_kernel(out:UOp, part:UOp, dev:UOp, start_pos:UOp, k:int, n:int, base:UOp|None=None) -> UOp:
   # the positions before start_pos of the part of device (me+k)%n (part: its rows, k > 0 another device's memory) into their rows of out
   rows, C = cast(tuple[int, int], part.shape)
   J = (start_pos + SEQ_BLK*n - 1) // (SEQ_BLK*n)
   j, r, c = UOp.range(J, 0, AxisType.GLOBAL), UOp.range(SEQ_BLK, 1, AxisType.GLOBAL), UOp.range(C, 2, AxisType.LOCAL)
   owner = (dev[0].load().cast(dtypes.weakint) + k) % n
   p = (j*n + owner) * SEQ_BLK + r
-  return out[p.valid(p < start_pos), c].store(part[(j*SEQ_BLK + r).minimum(rows-1), c].load()).end(j, r, c) \
+  # (base: the sequence's region from that position, its rows from base//n of every device)
+  b = base // n if base is not None else 0
+  return out[p.valid(p < start_pos), c].store(part[(b + j*SEQ_BLK + r).minimum(rows-1), c].load()).end(j, r, c) \
     .sink(arg=KernelInfo(name=f"seq_gather{k}", opts_to_apply=()))
 
 @functools.cache
-def _seq_gather_fp8_kernel(out:UOp, part:UOp, dev:UOp, start_pos:UOp, k:int, n:int) -> UOp:
+def _seq_gather_fp8_kernel(out:UOp, part:UOp, dev:UOp, start_pos:UOp, k:int, n:int, base:UOp|None=None) -> UOp:
   # _seq_gather_kernel of fp8 rows (SEQ_FP8, 132 words: 128 of 4 values, the 4 scales): their values in half (4 a word of out)
   rows, C = cast(int, part.shape[0]), cast(int, out.shape[1])
   J = (start_pos + SEQ_BLK*n - 1) // (SEQ_BLK*n)
   j, r, c = UOp.range(J, 0, AxisType.GLOBAL), UOp.range(SEQ_BLK, 1, AxisType.GLOBAL), UOp.range(C, 2, AxisType.LOCAL)
   owner = (dev[0].load().cast(dtypes.weakint) + k) % n
   p = (j*n + owner) * SEQ_BLK + r
-  row = (j*SEQ_BLK + r).minimum(rows-1)
+  row = ((base // n if base is not None else 0) + j*SEQ_BLK + r).minimum(rows-1)
   w, sc = _word(part, row, c), _word(part, row, 128 + c // 32).bitcast(dtypes.float) * 256
   vals = [(h.cast(dtypes.float) * sc).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint64) for h in _fp8_halves(w)]
   word = vals[0] | (vals[1] << 16) | (vals[2] << 32) | (vals[3] << 48)
@@ -4190,7 +4206,7 @@ def _seq_rows_kernel(out:UOp, k:UOp, start_pos:UOp, T:UOp) -> UOp:
   t, c = UOp.range(R, 0, AxisType.GLOBAL), UOp.range(C, 1, AxisType.LOCAL)
   return out[(start_pos + t).valid(t < T), c].store(k[t, c].load()).end(t, c).sink(arg=KernelInfo(name="seq_rows", opts_to_apply=()))
 
-def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int) -> Tensor:
+def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int, base:int|UOp=0) -> Tensor:
   """
   the whole cache of the positions before start_pos+T on every device (N, D): the positions before start_pos read from the devices that
   have them (peer to peer: they were written by the calls before this one, at whose end the caches are written back and invalidated), the
@@ -4202,14 +4218,16 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int) -> Tenso
   n, D, fp8 = len(devs), int(k.shape[-1]), cache.dtype == dtypes.uint32
   raw = not fp8 or bool(getenv("SEQ_GATHER_FP8", 1))
   sp, t = _unbind(start_pos), (_unbind(T) if isinstance(T, UOp) else UOp.const(T, dtypes.weakint))
+  # (base: the sequence's region of the cache from that position, see seq_picks)
+  bu = _pb(base)
   # (the words of a row of the whole one: fp8 rows' 132, else 4 halves a word)
   wdt = dtypes.uint32 if fp8 and raw else dtypes.uint64
   W = int(cache.shape[1]) if fp8 and raw else D//4
   # (after the cache's store: the rows of the tokens in the devices' parts for the calls after this one)
-  out = Tensor(Tensor.empty(N, W, dtype=wdt, device=devs).uop.after(cache.uop, *(v for v in (start_pos, T) if isinstance(v, UOp))))
+  out = Tensor(Tensor.empty(N, W, dtype=wdt, device=devs).uop.after(cache.uop, *(v for v in (start_pos, T, base) if isinstance(v, UOp))))
   for kk, part in enumerate(seq_views(cache)):
     out = Tensor.custom_kernel(out, part, _device_index(devs), fxn=functools.partial(_seq_gather_kernel if raw else _seq_gather_fp8_kernel,
-                                                                                     start_pos=sp, k=kk, n=n))[0]
+                                                                                     start_pos=sp, k=kk, n=n, base=bu))[0]
   rows = fp8_rows(k).contiguous() if fp8 and raw else k.cast(dtypes.half).contiguous().bitcast(dtypes.uint64)
   assert rows.shape[-1] == W, f"the rows of the tokens {k.shape} as {rows.shape}"
   out = Tensor.custom_kernel(out, rows, fxn=functools.partial(_seq_rows_kernel, start_pos=sp, T=t))[0]
@@ -4217,7 +4235,7 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int) -> Tenso
   return out if fp8 and raw else out.bitcast(dtypes.half)
 
 def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None,
-                   dims:int|None=None) -> Tensor:
+                   dims:int|None=None, base:int|UOp=0) -> Tensor:
   """
   the attention of the (1, H, T, D) queries (heads split over the devices) on the sequence sharded latent cache (n*rows, D), every token on the
   keys of its list (T, n_max+1, on every device): (1, H, T, D) heads split. every device attends all the heads over its keys (the queries
@@ -4244,7 +4262,7 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   else: qa = q.half()
   rows = qa.reshape(H, T, D).pad(((0, G*16 - H), None, None)).reshape(G, 16, T, D).permute(0, 2, 1, 3).reshape(G*T*16, D).contiguous()
   # every device's lists of its keys (the kernel's tokens are (16 heads, token): the list of token tok%T)
-  index = seq_picks(picks, valid_len, devs, grouped)
+  index = seq_picks(picks, valid_len, devs, grouped, base=base)
   split = getenv("MLA_SPLIT", 16) if T < 16 else 1
   nrows = G*T*split*16
   parts = Tensor.empty(n*nrows, D, dtype=dtypes.float32, device=devs, axis=0)
@@ -4547,11 +4565,13 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   return UOp.group(*state_stores).end(lane, bh_row).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
 
 @functools.cache
-def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP:int=4, shard:int=0, kpool:int=0) -> UOp:
+def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP:int=4, shard:int=0, kpool:int=0,
+                           pbase:UOp|None=None) -> UOp:
   # RDNA4 WMMA: out[t, p] = sum over the heads h of w[t, h] * relu(q[t, h] . k[p]). a wave per 16 tokens and G of the tiles of 16*NP
   # pools: it loops over the tiles g, g+G, .. of the pools (the work follows the context, not its max)
   T, H, D = cast(tuple[int, int, int], q.shape)
-  P = cast(int, k.shape[0])
+  # (the scores' columns: the pools of a sequence (k: its region's from pbase, see indexer_scores))
+  P = cast(int, k.shape[0]) if shard else cast(int, out.shape[-1])
   # (shard: the device's pools of the pooled keys split over the devices, SEQ_IDX_SHARD)
   if shard: pools = _local_pools(pools, dev[0][0].load().cast(dtypes.weakint), shard, SEQ_BLK // kpool).minimum(P)
   G = min(64, P // (16*NP))
@@ -4563,10 +4583,12 @@ def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP
   ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
   # (fp8 pooled keys (SEQ_FP8): the scores times the scale of the key)
   fp8 = k.dtype == dtypes.uint32
+  # (pbase: the sequence's pooled keys from that row (its region of the cache), its scores of its own pools)
+  kb = p0 + (pbase if pbase is not None else 0)
   if fp8:
-    kfrags = [[_fp8_frag(k, p0 + n*16 + col, kk*4, half) for kk in range(D // 16)] for n in range(NP)]
-    kscale = [k[p0 + n*16 + col, D // 4].load().bitcast(dtypes.float) * 256 for n in range(NP)]
-  else: kfrags = [[UOp.stack(*(k[p0 + n*16 + col, kk*16 + j].load() for j in ks)) for kk in range(D // 16)] for n in range(NP)]
+    kfrags = [[_fp8_frag(k, kb + n*16 + col, kk*4, half) for kk in range(D // 16)] for n in range(NP)]
+    kscale = [k[kb + n*16 + col, D // 4].load().bitcast(dtypes.float) * 256 for n in range(NP)]
+  else: kfrags = [[UOp.stack(*(k[kb + n*16 + col, kk*16 + j].load() for j in ks)) for kk in range(D // 16)] for n in range(NP)]
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
   # a loop over the heads (unrolled, the loads of all the heads would be hoisted): the sums in registers
   accs = [_reg((8,), 0, active) for _ in range(NP)]
@@ -4588,48 +4610,59 @@ def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP
   est = Estimates(2*T*H*P*D, P*D*2 + T*H*D*2, T*P*4)
   return UOp.group(*stores).end(active).end(tt, g, lane).sink(arg=KernelInfo(name="indexer_scores", opts_to_apply=(), estimates=est))
 
+def _pb(pbase:int|UOp) -> UOp|None:
+  """a pooled keys' base row as a kernel's (None: 0)"""
+  if isinstance(pbase, int): return None if pbase == 0 else UOp.const(pbase, dtypes.weakint)
+  return cast(UOp, _unbind(pbase))
+
 def _idx_shard(k:Tensor) -> int:
   """the devices the pooled keys k are split over (SEQ_IDX_SHARD: on their rows), 0 if whole on every device"""
   return len(k.device) if isinstance(k.device, tuple) and k.uop.axis == 0 else 0
 
-def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp, kpool:int=4) -> Tensor:
+def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp, kpool:int=4, pbase:int|UOp=0, width:int|None=None) -> Tensor:
   """
   q (T, H, D), k (P, D) the pooled keys (P static, the first `pools` used), w (T, H): (T, P) scores, the columns past pools unwritten.
-  k split over the devices (SEQ_IDX_SHARD): every device's scores of its pools (n*T, P/n) split on its rows
+  k split over the devices (SEQ_IDX_SHARD): every device's scores of its pools (n*T, P/n) split on its rows. pbase: a sequence's pooled keys
+  from that row of k (its region), width: the scores' columns (P: its most pools)
   """
   T, H, D = q.shape
   P, n = k.shape[0], _idx_shard(k)
+  if width is not None and not n: P = width
   # (q split on its rows over the devices: the scores of every device's rows)
   rows_axis = 0 if isinstance(q.device, tuple) and q.uop.axis == 0 else None
   out = Tensor.empty(n*T, P//n, dtype=dtypes.float32, device=q.device, axis=0) if n else \
         Tensor.empty(T, P, dtype=dtypes.float32, device=q.device, axis=rows_axis)
   kh = k if k.dtype in (dtypes.half, dtypes.uint32) else k.half().contiguous()
   if isinstance(pools, UOp): kh = Tensor(kh.uop.after(pools))
+  if isinstance(pbase, UOp): kh = Tensor(kh.uop.after(pbase))
   fxn = functools.partial(_indexer_scores_kernel, pools=_unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint), shard=n,
-                          kpool=kpool)
+                          kpool=kpool, pbase=_pb(pbase))
   dsrc = [_device_index(cast(tuple[str, ...], k.device))] if n else []
   return Tensor.custom_kernel(out, q.half().contiguous(), kh, w.float().contiguous(), *dsrc, fxn=fxn)[0]
 
 @functools.cache
 def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, *grouped:UOp, start_pos:UOp, T:UOp, stride:int=0, R:int=0, slotted:bool=False,
-                      counted:bool=False, shard:int=0) -> UOp:
+                      counted:bool=False, shard:int=0, span:int=0, ringed:bool=False, pbase:UOp|None=None) -> UOp:
   # the pooled key of every pool with a token of this call: the softmax of the gates (+ape) over the pool's tokens weighs their keys. the
   # tokens before start_pos in the first pool come from the ring (the last tokens), the others from kg (T rows of key and gate)
   # grouped (positions): G sequences (batched decoding), kg their rows (rows//G each, the first at positions[g]), their pools stride rows of pk
   # each, their rings R rows of ring each. shard: the pools split over that many devices (SEQ_IDX_SHARD, the device's index the last source)
+  # span: a sequence's slots of pk (default SLOT_SPAN), ringed: the slots of the rings their own (the last grouped source), not the pools'
   dev = grouped[-1] if shard else None
   if shard: grouped = grouped[:-1]
+  rsl = grouped[-1] if ringed else None
+  if ringed: grouped = grouped[:-1]
   P, D = cast(int, pk.shape[0]), cast(int, kg.shape[2])
   kpool, rows = cast(int, ape.shape[0]), cast(int, kg.shape[0])
   off, ring_off, kg_off, ends = UOp.const(0, dtypes.weakint), UOp.const(0, dtypes.weakint), UOp.const(0, dtypes.weakint), []
   if grouped:
     g = UOp.range(G:=cast(int, grouped[0].shape[0]), 2, AxisType.GLOBAL)
-    rows, P = rows // G, stride*SLOT_SPAN
+    rows, P = rows // G, stride*(span or SLOT_SPAN)
     # (slotted: the slots of the sequences, counted: their token counts, the rows past them aren't tokens)
     sl = _slot_of(grouped[1:2] if slotted else (), g)
     start_pos, ends = grouped[0][g].load().cast(dtypes.weakint), [g]
     T = grouped[1 + slotted][g].load().cast(dtypes.weakint) if counted else UOp.const(rows, dtypes.weakint)
-    off, ring_off, kg_off = sl*stride, sl*R, g*rows
+    off, ring_off, kg_off = sl*stride, (rsl[g].load().cast(dtypes.weakint) if rsl is not None else sl)*R, g*rows
   else: R = cast(int, ring.shape[0])
   j, d = UOp.range(rows // kpool + 1, 0, AxisType.GLOBAL), UOp.range(D, 1, AxisType.LOCAL)
   first, end = start_pos // kpool, start_pos + T
@@ -4654,6 +4687,8 @@ def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, *grouped:UOp, start_pos
     me = dev[0].load().cast(dtypes.weakint)
     lp = (pool // (PB*shard)) * PB + pool % PB
     ok = (pool * kpool < end) & ((pool // PB) % shard).eq(me) & (lp < P)
+  # (pbase: a sequence's pools from that row of pk (its region), the ring's positions its own)
+  elif pbase is not None: ok, lp = (pool * kpool < end) & (pbase + pool < P), pbase + pool
   else: ok = (pool * kpool < end) & (pool < P)
   if pk.dtype == dtypes.uint32:
     # fp8 (SEQ_FP8): the pool's absolute max (its threads' through LDS), its values over it/448 in e4m3, 4 a word, the scale the last word
@@ -4670,17 +4705,22 @@ def _pool_keys_kernel(pk:UOp, ring:UOp, kg:UOp, ape:UOp, *grouped:UOp, start_pos
   return pk[row, d_out].store(value).end(*ends, j, d).sink(arg=KernelInfo(name="pool_keys", opts_to_apply=()))
 
 @functools.cache
-def _pool_ring_kernel(ring:UOp, kg:UOp, *grouped:UOp, start_pos:UOp, T:UOp, R:int=0, slotted:bool=False, counted:bool=False) -> UOp:
+def _pool_ring_kernel(ring:UOp, kg:UOp, *grouped:UOp, start_pos:UOp, T:UOp, R:int=0, slotted:bool=False, counted:bool=False,
+                      ringed:bool=False) -> UOp:
   # the last R tokens to the ring (the token at p in p%R): the first pool of the next call needs the ones before it, it can start at any
   # position of the last R-kpool+1 (the drafts of speculative decoding that weren't accepted are taken back). grouped (positions): G
   # sequences, their rings R rows each, their rows of kg rows//G each
   _, _, D = cast(tuple[int, int, int], ring.shape)
   rows, off, kg_off, ends = cast(int, kg.shape[0]), UOp.const(0, dtypes.weakint), UOp.const(0, dtypes.weakint), []
+  # (ringed: the rings' slots the last source)
+  rsl = grouped[-1] if ringed else None
+  if ringed: grouped = grouped[:-1]
   if grouped:
     g = UOp.range(G:=cast(int, grouped[0].shape[0]), 3, AxisType.GLOBAL)
     rows = rows // G
     T = grouped[1 + slotted][g].load().cast(dtypes.weakint) if counted else UOp.const(rows, dtypes.weakint)
-    start_pos, off, kg_off, ends = grouped[0][g].load().cast(dtypes.weakint), _slot_of(grouped[1:2] if slotted else (), g)*R, g*rows, [g]
+    rs = rsl[g].load().cast(dtypes.weakint) if rsl is not None else _slot_of(grouped[1:2] if slotted else (), g)
+    start_pos, off, kg_off, ends = grouped[0][g].load().cast(dtypes.weakint), rs*R, g*rows, [g]
   else: R = cast(int, ring.shape[0])
   r, i, d = UOp.range(R, 0, AxisType.GLOBAL), UOp.range(2, 1, AxisType.GLOBAL), UOp.range(D, 2, AxisType.LOCAL)
   end = start_pos + T
@@ -4690,36 +4730,42 @@ def _pool_ring_kernel(ring:UOp, kg:UOp, *grouped:UOp, start_pos:UOp, T:UOp, R:in
   row = (off + (end + r) % R).valid(ok) if grouped else ((end + r) % R).valid(ok)
   return ring[row, i, d].store(value).end(*ends, r, i, d).sink(arg=KernelInfo(name="pool_ring", opts_to_apply=()))
 
-def pool_keys(pk:Tensor, ring:Tensor, kg:Tensor, ape:Tensor, start_pos:UOp|None, T:int|UOp, grouped:tuple|None=None) -> Tensor:
+def pool_keys(pk:Tensor, ring:Tensor, kg:Tensor, ape:Tensor, start_pos:UOp|None, T:int|UOp, grouped:tuple|None=None,
+              pbase:int|UOp=0) -> Tensor:
   """
   updates the (P, D) pooled key cache with the pools of the T tokens at start_pos (kg: their (rows, 2, D) keys and gates, rows >= T), the ring
   (R, 2, D) holds the last R tokens (R >= 2*kpool: the next call can start at most kpool positions before the end). returns the cache after
   the update. grouped (positions, stride, R): G sequences (batched decoding, kg rows//G each, the first at positions[g]), their pools stride
-  rows of pk each, their rings R rows of ring each
+  rows of pk each, their rings R rows of ring each. (positions, stride, R, slots, counts, span, ring_slots): a sequence's span slots of pk
+  (default SLOT_SPAN), its ring's slot ring_slots[g] (default its slot). pbase: the pools of a sequence from that row of pk (its region)
   """
   # (pooled keys split on their rows over the devices: SEQ_IDX_SHARD, a device stores its pools)
   shard = len(cast(tuple, pk.device)) if isinstance(pk.device, tuple) and pk.uop.axis == 0 else 0
   dsrc = [_device_index(cast(tuple[str, ...], pk.device))] if shard else []
   if grouped is not None:
     positions, stride, R, *more = grouped
-    slots, counts = (more + [None, None])[:2]
+    slots, counts, span, rslots = (more + [None, None, 0, None])[:4]
     zero, srcs = UOp.const(0, dtypes.weakint), [x for x in (positions, slots, counts) if x is not None]
-    flags = dict(slotted=slots is not None, counted=counts is not None)
+    flags = dict(slotted=slots is not None, counted=counts is not None, ringed=rslots is not None)
+    if rslots is not None: srcs.append(rslots)
     pk = Tensor.custom_kernel(pk, ring, kg.contiguous(), ape.contiguous(), *srcs, *dsrc,
-                              fxn=functools.partial(_pool_keys_kernel, start_pos=zero, T=zero, stride=stride, R=R, shard=shard, **flags))[0]
+                              fxn=functools.partial(_pool_keys_kernel, start_pos=zero, T=zero, stride=stride, R=R, shard=shard, span=span or 0,
+                                                    **flags))[0]
     ring = Tensor.custom_kernel(Tensor(ring.uop.after(pk.uop)), kg.contiguous(), *srcs,
                                 fxn=functools.partial(_pool_ring_kernel, start_pos=zero, T=zero, R=R, **flags))[0]
     return Tensor(pk.uop.after(ring.uop))
   ints = [_unbind(x) if isinstance(x, UOp) else UOp.const(x or 0, dtypes.weakint) for x in (start_pos, T)]
-  pk, ring = (Tensor(x.uop.after(*(v for v in (start_pos, T) if isinstance(v, UOp)))) for x in (pk, ring))
+  pk, ring = (Tensor(x.uop.after(*(v for v in (start_pos, T, pbase) if isinstance(v, UOp)))) for x in (pk, ring))
+  assert not shard or _pb(pbase) is None, "SEQ_IDX_SHARD: no regions"
   pk = Tensor.custom_kernel(pk, ring, kg.contiguous(), ape.contiguous(), *dsrc,
-                            fxn=functools.partial(_pool_keys_kernel, start_pos=ints[0], T=ints[1], shard=shard))[0]
+                            fxn=functools.partial(_pool_keys_kernel, start_pos=ints[0], T=ints[1], shard=shard, pbase=_pb(pbase)))[0]
   ring = Tensor(ring.uop.after(pk.uop))
   ring = Tensor.custom_kernel(ring, kg.contiguous(), fxn=functools.partial(_pool_ring_kernel, start_pos=ints[0], T=ints[1]))[0]
   return Tensor(pk.uop.after(ring.uop))
 
 @functools.cache
-def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, pools:UOp, NP:int=2, stride:int=0, kpool:int=0, shard:int=0) -> UOp:
+def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, pools:UOp, NP:int=2, stride:int=0, kpool:int=0, shard:int=0,
+                                  pbase:UOp|None=None, span:int=0) -> UOp:
   # one query (RDNA4 WMMA): the heads are the rows, out[p] = sum over the heads h of w[h] * relu(q[h] . k[p]). G waves, a wave loops over the
   # tiles of 16*NP pools g, g+G, .. of the pools: the work follows the context, not its max. a few queries: q (T, H, D), w (T, H), out (T, P),
   # the waves of every query
@@ -4729,13 +4775,14 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, po
   if shard: grouped = grouped[:-1]
   T = cast(int, q.shape[0]) if len(q.shape) == 3 else 1
   H, D = cast(tuple[int, int], q.shape[-2:])
-  P = stride*SLOT_SPAN or cast(int, k.shape[0])
+  # (the scores' columns: the pools of a sequence (k: its region's from pbase))
+  P = stride*(span or SLOT_SPAN) or (cast(int, k.shape[0]) if shard else cast(int, out.shape[-1]))
   G = min(256, P // (16*NP))
   q, w, out = q.reshape(T, H, D), w.reshape(T, H), out.reshape(T, P)
   gr, lane = UOp.range(T*G, 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   row, g = gr // G, gr % G
   q, w, out = q[row], w[row], out[row]
-  koff = UOp.const(0, dtypes.weakint)
+  koff = pbase if pbase is not None else UOp.const(0, dtypes.weakint)
   if grouped:
     seq = row // (T // cast(int, grouped[0].shape[0]))
     pools = (grouped[0][seq].load().cast(dtypes.weakint) + T // cast(int, grouped[0].shape[0]) + kpool - 1) // kpool
@@ -5044,25 +5091,30 @@ def pool_index_rows(scores:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:in
                           dev_rows=rows//n if n else 0)
   return Tensor.custom_kernel(out, sc, *([_device_index(cast(tuple[str, ...], scores.device))] if n else []), fxn=fxn)[0]
 
-def indexer_decode_index(q:Tensor, k:Tensor, w:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int) -> Tensor:
+def indexer_decode_index(q:Tensor, k:Tensor, w:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int, pbase:int|UOp=0,
+                         width:int|None=None) -> Tensor:
   """
   one query: q (H, D), the pooled keys k (P, D) half (P static, the first `pools` used), w (H,). the (top*kpool+kpool+1,) int32 list of the
   keys it sees (the top pools of the scores, the tail of its own pool), the count last
   """
-  if _idx_shard(k): return indexer_decode_index_rows(q.reshape(1, *q.shape), k, w.reshape(1, -1), q_start, pools, top, kpool).reshape(-1)
-  P = int(k.shape[0])
+  if _idx_shard(k):
+    assert isinstance(pbase, int) and pbase == 0, "SEQ_IDX_SHARD: no regions"
+    return indexer_decode_index_rows(q.reshape(1, *q.shape), k, w.reshape(1, -1), q_start, pools, top, kpool).reshape(-1)
+  P = width or int(k.shape[0])
   scores = Tensor.empty(P, dtype=dtypes.float32, device=q.device)
   if isinstance(pools, UOp): k = Tensor(k.uop.after(pools))
+  if isinstance(pbase, UOp): k = Tensor(k.uop.after(pbase))
   pu = _unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint)
   scores = Tensor.custom_kernel(scores, q.half().contiguous(), k, w.float().contiguous(),
-                                fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu))[0]
+                                fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu, pbase=_pb(pbase)))[0]
   return pool_index_rows(scores.reshape(1, P), q_start, pools, top, kpool).reshape(-1)
 
 def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp|None, pools:int|UOp|None, top:int, kpool:int,
-                              grouped:tuple|None=None) -> Tensor:
+                              grouped:tuple|None=None, pbase:int|UOp=0, width:int|None=None) -> Tensor:
   """
-  indexer_decode_index of a few queries at q_start.., q (T, H, D), w (T, H): (T, top*kpool+kpool+1) the lists. grouped (positions, stride):
-  the queries of G sequences (T//G each, the first at positions[g]), a sequence's pooled keys stride rows of k
+  indexer_decode_index of a few queries at q_start.., q (T, H, D), w (T, H): (T, top*kpool+kpool+1) the lists. grouped (positions, stride,
+  slots, span): the queries of G sequences (T//G each, the first at positions[g]), a sequence's pooled keys stride*span rows of k in slot g
+  or slots[g] (span: default SLOT_SPAN)
   """
   # (k split over the devices: SEQ_IDX_SHARD, every device scores its pools (stride: a device's rows of a sequence), see pool_index_shard)
   n = _idx_shard(k)
@@ -5070,21 +5122,39 @@ def indexer_decode_index_rows(q:Tensor, k:Tensor, w:Tensor, q_start:UOp|None, po
   def empty(T:int, P:int) -> Tensor:
     return Tensor.empty(n*T, P, dtype=dtypes.float32, device=q.device, axis=0) if n else Tensor.empty(T, P, dtype=dtypes.float32, device=q.device)
   if grouped is not None:
-    (positions, stride, *slots), T, zero = grouped, int(q.shape[0]), UOp.const(0, dtypes.weakint)
-    scores = Tensor.custom_kernel(empty(T, stride*SLOT_SPAN), q.half().contiguous(), k, w.float().contiguous(), positions,
-                                  *[x for x in slots if x is not None],
-                                  *dsrc, fxn=functools.partial(_indexer_scores_decode_kernel, pools=zero, stride=stride, kpool=kpool, shard=n))[0]
+    (positions, stride, *more), T, zero = grouped, int(q.shape[0]), UOp.const(0, dtypes.weakint)
+    slots, span = (more + [None, 0])[:2]
+    scores = Tensor.custom_kernel(empty(T, stride*(span or SLOT_SPAN)), q.half().contiguous(), k, w.float().contiguous(), positions,
+                                  *[x for x in (slots,) if x is not None],
+                                  *dsrc, fxn=functools.partial(_indexer_scores_decode_kernel, pools=zero, stride=stride, kpool=kpool, shard=n,
+                                                                        span=span or 0))[0]
     if n: return pool_index_shard(scores, None, None, top, kpool, positions=positions)
     out = Tensor.empty(T, top*kpool + kpool + 1, dtype=dtypes.int32, device=q.device)
     return Tensor.custom_kernel(out, scores, positions, fxn=functools.partial(_pool_index_kernel, q_start=zero, pools=zero, k=top, kpool=kpool))[0]
   assert q_start is not None and pools is not None
   T, P = int(q.shape[0]), int(k.shape[0]) // max(n, 1)
+  if width is not None and not n: P = width
   scores = empty(T, P)
   if isinstance(pools, UOp): k = Tensor(k.uop.after(pools))
+  if isinstance(pbase, UOp): k = Tensor(k.uop.after(pbase))
   pu = _unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint)
   scores = Tensor.custom_kernel(scores, q.half().contiguous(), k, w.float().contiguous(), *dsrc,
-                                fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu, kpool=kpool, shard=n))[0]
+                                fxn=functools.partial(_indexer_scores_decode_kernel, pools=pu, kpool=kpool, shard=n, pbase=_pb(pbase)))[0]
   return pool_index_shard(scores, q_start, pools, top, kpool) if n else pool_index_rows(scores, q_start, pools, top, kpool)
+
+@functools.cache
+def _rows_gather_kernel(out:UOp, table:UOp, idx:UOp) -> UOp:
+  # out[r] (n, F) <- table[idx[r]] (P, F), cast to out's dtype
+  n, F = cast(tuple[int, int], out.shape)
+  P, L = cast(int, table.shape[0]), math.gcd(F, 256)
+  r, blk, lane = UOp.range(n, 0, AxisType.GLOBAL), UOp.range(F // L, 1, AxisType.GLOBAL), UOp.range(L, 2, AxisType.LOCAL)
+  f, row = blk * L + lane, idx[r].load().cast(dtypes.weakint).maximum(0).minimum(P-1)
+  return out[r, f].store(table[row, f].load().cast(out.dtype)).end(r, blk, lane).sink(arg=KernelInfo(name="rows_gather", opts_to_apply=()))
+
+def rows_gather(table:Tensor, idx:Tensor, dtype:DType|None=None) -> Tensor:
+  """the rows idx (n,) int32 of table (P, F): (n, F), including per-sequence RoPE rows"""
+  out = Tensor.empty(int(idx.shape[0]), int(table.shape[1]), dtype=dtype or table.dtype, device=table.device)
+  return Tensor.custom_kernel(out, table, idx, fxn=_rows_gather_kernel)[0]
 
 KDA_WAVES = 8
 

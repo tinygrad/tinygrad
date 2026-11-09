@@ -4025,7 +4025,7 @@ class Transformer:
     return getenv("SEQ_SLOTS", 16 if self.config.kv_lora_rank and not self.config.qsa else max(self.SEQ_SIZES))
   def _token_rows(self) -> int:
     """the token buffer: a token of every row of the caches (the regions of the sequences sharing them), and one past"""
-    return max(self.max_context, self.config.cache_rows) + REGION_ALIGN + 1
+    return max(self.max_context, self.config.cache_rows) + self.REGION_ALIGN + 1
   def seq_rows(self) -> int:
     """the rows of the caches the regions of the sequences are of (the REGION_ALIGN after them: the padding sequences' region)"""
     return max(self.max_context, self.config.cache_rows)
@@ -4070,7 +4070,7 @@ class Transformer:
     self._seq_mat_jit = TinyJit(self._seq_mat, capture_first=True) if SEQ_REPLAY else None
     self._seq_kbase:dict[int, int] = {}
     # (the calls' chunk counts that fit the caches: a short max context's are a few chunks)
-    self._move_calls = self._chunk_calls((self.seq_rows() + REGION_ALIGN) // self.SEQ_MOVE - 1)
+    self._move_calls = self._chunk_calls((self.seq_rows() + self.REGION_ALIGN) // self.SEQ_MOVE - 1)
     self._seq_move_jits = {m: TinyJit(functools.partial(self._seq_move_copy, m), capture_first=True) for m in self._move_calls}
     self._seq_stash_init()
     todo = [self.seq_spec_h, self.seq_ckpt_h] + [p for b in self.blk if isinstance(b, GatedDeltaNetBlock) for p in (b.pool_rec, *b.pool_conv)] + \
@@ -4232,7 +4232,7 @@ class Transformer:
              [t for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
     self._stash_state = _host_like([(t, 0, E) for t in states])
     self._stash_state_count, self._stash_rings, self._stash_replays = len(states), [], []
-    self._stash_calls = self._chunk_calls(min((self.seq_rows() + REGION_ALIGN) // C - 1, self.stash_chunks))
+    self._stash_calls = self._chunk_calls(min((self.seq_rows() + self.REGION_ALIGN) // C - 1, self.stash_chunks))
     self._stash_kv_jits = {(sv, n): TinyJit(functools.partial(self._stash_kv_copy, sv, n), capture_first=True)
                            for sv in (True, False) for n in self._stash_calls}
     self._stash_state_jits = {sv: TinyJit(functools.partial(self._stash_state_copy, sv), capture_first=True) for sv in (True, False)}
@@ -4276,7 +4276,7 @@ class Transformer:
     for t in replay: extra.append(_host_like([(t, 0, self.stash_entries * replay_q(self.config.spec_drafts))])[0])
     self._stash_state = _host_like([(t, 0, self.stash_entries) for t in states]) + extra
     self._stash_state_count = len(states)
-    self._stash_calls = self._chunk_calls(min((self.seq_rows() + REGION_ALIGN) // C - 1, self.stash_chunks))
+    self._stash_calls = self._chunk_calls(min((self.seq_rows() + self.REGION_ALIGN) // C - 1, self.stash_chunks))
     self._stash_kv_jits = {(sv, n): TinyJit(functools.partial(self._stash_kv_copy, sv, n), capture_first=True)
                            for sv in (True, False) for n in self._stash_calls}
     self._stash_state_jits = {sv: TinyJit(functools.partial(self._stash_state_copy, sv), capture_first=True) for sv in (True, False)}
@@ -4464,13 +4464,13 @@ class Transformer:
     for m in sorted(self.SEQ_SIZES, reverse=True):
       add(f"step{m}", self._seq_jit(m), functools.partial(self.seq_step, [(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m))
     # (a mixed step's prompt: of slot 1 in the region after the sequences', a context past top_k)
-    mix_prompt = (1, REGION_ALIGN * (-(-(top + self.SEQ_MIX_ROWS) // REGION_ALIGN)), top, 1, 0.0)
+    mix_prompt = (1, self.REGION_ALIGN * (-(-(top + self.SEQ_MIX_ROWS) // self.REGION_ALIGN)), top, 1, 0.0)
     for m in self.SEQ_MIX_SIZES:
       add(f"mixed{m}", self._seq_jit(m, True), functools.partial(self.seq_step, [(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m, mix_prompt))
     for sv in (True, False):
       add(f"copy{int(sv)}", self._seq_copy_jits[sv], functools.partial(self._seq_copy_call, sv, 0, 1, 0))
       add(f"ckpt{int(sv)}", self._seq_ckpt_jits[sv], functools.partial(self.seq_ckpt, sv, 0, 1))
-    add("move", self._seq_move_jits[1], functools.partial(self.seq_move, 0, REGION_ALIGN, 1))
+    add("move", self._seq_move_jits[1], functools.partial(self.seq_move, 0, self.REGION_ALIGN, 1))
     if self._seq_mat_jit is not None and self.config.spec_drafts:
       add("mat", self._seq_mat_jit, functools.partial(lambda: cast(Any, self._seq_mat_jit)(*self._mat_vars(0, 1, 1))))
     # the prefills' and steps' jits captured and compiled at once (in forked processes, see capture_parallel): their jits called alone (no
@@ -4493,7 +4493,8 @@ class Transformer:
       par += [(self._seq_copy_jits[sv], functools.partial(self._seq_copy_call, sv, 0, 1, 0)),
               (self._seq_ckpt_jits[sv], functools.partial(self.seq_ckpt, sv, 0, 1))]
     v = functools.partial(UOp.variable, min_val=0, max_val=self.seq_rows())
-    par += [(j, functools.partial(lambda j: j(v("move_src").bind(0), v("move_dst").bind(REGION_ALIGN)), j)) for j in self._seq_move_jits.values()]
+    par += [(j, functools.partial(lambda j: j(v("move_src").bind(0), v("move_dst").bind(self.REGION_ALIGN)), j))
+            for j in self._seq_move_jits.values()]
     if self._seq_mat_jit is not None and self.config.spec_drafts:
       par.append((self._seq_mat_jit, functools.partial(lambda j: j(*self._mat_vars(0, 1, 1)), self._seq_mat_jit)))
     if self.stash_entries:
@@ -4527,7 +4528,7 @@ class Transformer:
     self._finish_load()
     self._seq_init()
     if upto is not None:
-      assert 0 <= start < upto < len(tokens) and base % REGION_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
+      assert 0 <= start < upto < len(tokens) and base % self.REGION_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
       for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
       # (the token after the slice the prompt's: the slice's sampled token isn't written over it, the next slice's tokens are its)
       self._token_host[base+start:base+upto+1] = array.array('i', tokens[start:upto+1])
@@ -4538,7 +4539,7 @@ class Transformer:
         pos += n
       self._seq_copy_call(True, slot, upto, 0)
       return None
-    assert 0 <= start < len(tokens) and base % REGION_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
+    assert 0 <= start < len(tokens) and base % self.REGION_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
     L, devs = len(tokens), to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
     for d in devs: Device[d].synchronize()  # (a step may still read the token buffer)
     self._token_host[base+start:base+L+1] = array.array('i', tokens[start:] + [-1])
