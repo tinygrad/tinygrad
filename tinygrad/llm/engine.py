@@ -379,13 +379,19 @@ class SeqEngine:
     s.tokens, s.n, s.hrow, s.ckpt = list(stashed.tokens), n, stashed.hrow, stashed.ckpt
     return s, start, start < n or start == len(ids)
 
-  def cached(self, ids:list[int]) -> int:
-    """the tokens of a prompt in the caches or the stash (about: the position take would prefill it from, no sequence taken)"""
+  def cached(self, ids:list[int], touch:bool=False) -> int:
+    """
+    the tokens of a prompt in the caches or the stash (about: the position take would prefill it from, no sequence taken). touch: the
+    conversation it continues used now (a request waits for it: the least recently used ones go before it, it isn't lost while it waits)
+    """
     def cont(tokens:list[int], n:int, ckpt:int) -> int:
       if n and n < len(ids) and starts(ids, tokens, n, exact=False): return n
       return ckpt if ckpt and ckpt <= len(ids) and starts(ids, tokens, ckpt, exact=False) else 0
-    return max([cont(s.tokens, s.n, s.ckpt) for s in self.seqs if not s.active] +
-               [cont(x.tokens, len(x.tokens), x.ckpt) for x in self.stashed], default=0)
+    cands:list[tuple[int, Seq|Stashed]] = [(cont(s.tokens, s.n, s.ckpt), s) for s in self.seqs if not s.active] + \
+                                          [(cont(x.tokens, len(x.tokens), x.ckpt), x) for x in self.stashed]
+    n, best = max(cands, key=lambda c: c[0], default=(0, None))
+    if touch and n and best is not None: best.used = time.perf_counter()
+    return n
 
   def prefill_slice(self, s:Seq, ids:list[int], start:int, restore:bool, end:int):
     """the tokens of the prompt ids from start to end prefilled in s (its checkpoint restored first): the rest is prefilled from end"""

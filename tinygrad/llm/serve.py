@@ -516,7 +516,8 @@ class Request:
     self.mtp, self.j, self.par = 0, 0, 1
     self.no_mix = False  # (MIX) prefilled before its steps, not in them (its cache was less than it seemed)
     # (sequences) the tokens of its prompt in the caches or the stash, and the engine's version then; the version its take last failed at, when
-    self.hit, self.hit_v, self.tried, self.tried_at = 0, -1, -1, 0.0
+    # (was_hit: it continued a kept conversation when the scheduler first looked: an agent's turn, even if that's lost since)
+    self.hit, self.hit_v, self.tried, self.tried_at, self.was_hit = 0, -1, -1, 0.0, False
     # (decoded in a slot: a copy of the model's checkpoint at the end of its prompt, see LLMServer.ckpt_keep)
     self.ckpt_buf: typing.Any = None
     self.ckpt_tokens: list[int] = []
@@ -1275,7 +1276,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         if len(active) + len(filling) < eng.max_active:
           t0 = time.perf_counter()
           for r in pending:
-            if r.hit_v != eng.version: r.hit, r.hit_v = eng.cached(prompt(r)), eng.version
+            if r.hit_v != eng.version: r.hit, r.hit_v = eng.cached(prompt(r), touch=True), eng.version
+            r.was_hit = r.was_hit or r.hit > 0
           self.stats.add("cached", time.perf_counter() - t0)
           cands += [(not starving(r), (r.st if starving(r) else len(r.ids) + len(r.generated) - r.hit - self.AGING*(now - r.st)), 1, r)
                     for r in pending if r.tried != eng.version or now - r.tried_at > 1.0]
@@ -1284,9 +1286,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             job = c
             break
           t0 = time.perf_counter()
-          # (a starving one loses a held conversation for its own only if it continues one (an agent's turn), or nothing else runs: a new
+          # (a starving one loses a held conversation for its own only if it continues (continued) one (an agent's turn), or nothing else runs: a new
           # conversation past the caches' and the stash's capacity waits for one to end, not every turn after it prefilled again)
-          force = starving(c) and (c.hit > 0 or not (active or filling))
+          force = starving(c) and (c.was_hit or not (active or filling))
           got = eng.take(ids:=prompt(c), max(0, (c.max_tokens or 0) - len(c.generated)), force=force)
           self.stats.add("take", time.perf_counter() - t0)
           if got is None:

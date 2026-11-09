@@ -148,6 +148,23 @@ class TestSeqRegions(unittest.TestCase):
         for t in eng.seqs: self.assertEqual(model.cache[t.base:t.base+t.n], t.tokens[:t.n])
     self.assertGreater(len([c for c in model.calls if c[0] == "move"]), 0)
 
+class TestSeqTouch(unittest.TestCase):
+  def test_waiting_turn_not_evicted(self):
+    # a request waiting for the least recently used conversation: looked at (cached, touch), that one isn't the next evicted
+    model = FakeModel()
+    eng = SeqEngine(model)
+    convs = []
+    for i in range(3):
+      ids = [100000 * (i + 1) + j for j in range(20000)]
+      s, start, restore = eng.take(ids, 100)
+      eng.prefill(s, ids, start, restore, (0.0, 1.0))
+      eng.stop(s, len(s.tokens))
+      convs.append((s, ids))
+    self.assertEqual(eng.cached(convs[0][1] + [1, 2], touch=True), len(convs[0][1]))
+    with patch.object(SeqEngine, "STICKY", 0.0): self.assertIsNotNone(eng.take(list(range(900000, 920000)), 100))
+    self.assertIn(convs[0][0], eng.seqs)
+    self.assertNotIn(convs[1][0], eng.seqs)
+
 class TestSeqWindow(unittest.TestCase):
   def test_idle_neighbor_not_moved(self):
     # rows full of A (decoding), B (idle), C (decoding): a new prompt that fits B's rows evicts B, nothing moved
