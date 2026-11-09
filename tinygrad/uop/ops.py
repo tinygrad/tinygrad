@@ -774,11 +774,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
   def _mop(self, op:Ops, arg) -> UOp:
-    # early NOOP
-    if op is Ops.EXPAND and len(arg) == 0: return self
     if op in {Ops.SHRINK, Ops.PAD} and len(arg) == 0:
       assert len(self.shape) == 0, "0 len arg only valid on zero length shape"
       return self
+    if op is Ops.PERMUTE and arg == tuple(range(self.ndim)): return self
     match op:
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
@@ -789,7 +788,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         return UOp(Ops.STACK, src=tuple(u if u.base.is_invalid else u.ccast(dtype) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
-    return UOp(op, src=(self,)+UOp.sink(*usrcs).simplify().src)
+    ret = UOp(op, src=(self,)+UOp.sink(*usrcs).simplify().src)
+    return self if op is not Ops.PERMUTE and ret.shape == self.shape and (op in {Ops.RESHAPE, Ops.EXPAND} or all(o == 0 for o,_ in ret.marg)) else ret
 
   # *** uop Buffer stuff ***
 
