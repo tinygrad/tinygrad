@@ -1145,7 +1145,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
 @functools.cache
 def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
                     out_features:int=0, in_features:int=0, ggml_type:int=Q8_0, block_n:int=128, k_splits:int=1, rdna4:bool=False,
-                    rows:int=0, n_out:int=1, wtile:bool=False) -> UOp:
+                    rows:int=0, n_out:int=1, wtile:bool=False, pfd:int=0) -> UOp:
   # n_out: the outputs are n_out tensors (the first n_out sources), of the weight's rows in n_out equal parts (projections of the same input,
   # their weights adjacent: one kernel). a workgroup's outputs are in one of them
   srcs = (out, raw, x, *hc)
@@ -1191,6 +1191,9 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   # to LDS after it (their latency hidden by it, not a stall of every group)
   # (ggml_type F32T: raw is a float weight transposed (K, N), the router's: converted to half as it's staged)
   prefetch = ggml_type in (Q8_0, F32T) and (not hc or M <= 64)
+  # pfd: a stage's loads issued pfd stages before it (the loop unrolled pfd times, a set of registers a stage): more bytes in flight than the
+  # next stage's (a stage's tensor core work is short next to the memory's latency)
+  dist = pfd if prefetch and pfd > 1 and (groups // GS) % pfd == 0 and groups // GS > pfd else 0
   def pf_loads(gg:UOp) -> list[UOp]:
     out:list[UOp] = []
     for k in range((token_tile * 4 * GS + 127) // 128):
@@ -1230,7 +1233,8 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
         out += [bw[wr, gi * 32 + w * 4 + i].store((h - 1152) * scale) for i, h in enumerate(halves)]
     return out
   lds_x0, lds_w0 = lds_x, lds_w
-  if prefetch:
+  if dist: pass
+  elif prefetch:
     first = UOp.group(*pf_stores(pf_loads(UOp.const(0, dtypes.weakint) + split*groups), lds_x, lds_w)).barrier()
     nxt_vals = pf_loads((gr + 1).minimum(groups // GS - 1) * GS + split*groups)
     lds_x, lds_w = lds_x.after(first, gr), lds_w.after(first, gr)
@@ -1268,16 +1272,35 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   ks = tuple(i % 4 + half * 4 + (i // 4) * 8 for i in range(8)) if rdna4 else tuple(range(16))
   accs = [[UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
   accs = [[acc.after(acc.store(acc.const_like(0))) for acc in row] for row in accs]
-  cur:list[list[UOp]] = [[accs[o][t].after(gr) for t in range(TT)] for o in range(OT)]
-  for kh in range(2*GS):
-    afr = [UOp.stack(*(lds_x[wt * TT * 16 + t * 16 + col, kh * 16 + i].load() for i in ks)) for t in range(TT)]
-    bfr = [UOp.stack(*(lds_w[(o//(OT//streams))*block_n + wo*(OT//streams)*16 + (o%(OT//streams))*16 + col,
-                             kh * 16 + i].load() for i in ks)) for o in range(OT)]
-    cur = [[UOp.wmma(afr[t], bfr[o], cur[o][t], *WMMA_ARG) for t in range(TT)] for o in range(OT)]
-  # (a barrier after the group's reads: the next group's stage doesn't overwrite what a slower wave still reads)
-  update = UOp.group(*(accs[o][t].store(cur[o][t]) for o in range(OT) for t in range(TT))).barrier()
-  if prefetch: update = UOp.group(*pf_stores(nxt_vals, lds_x0.after(update), lds_w0.after(update))).barrier()
-  update = update.end(gr)
+  def group_wmma(cur:list[list[UOp]], lx:UOp, lw:UOp) -> list[list[UOp]]:
+    for kh in range(2*GS):
+      afr = [UOp.stack(*(lx[wt * TT * 16 + t * 16 + col, kh * 16 + i].load() for i in ks)) for t in range(TT)]
+      bfr = [UOp.stack(*(lw[(o//(OT//streams))*block_n + wo*(OT//streams)*16 + (o%(OT//streams))*16 + col,
+                            kh * 16 + i].load() for i in ks)) for o in range(OT)]
+      cur = [[UOp.wmma(afr[t], bfr[o], cur[o][t], *WMMA_ARG) for t in range(TT)] for o in range(OT)]
+    return cur
+  if dist:
+    iters = groups // GS
+    gr = UOp.range(iters // dist, 4, AxisType.LOOP)
+    init = [pf_loads(UOp.const(d*GS, dtypes.weakint) + split*groups) for d in range(dist)]
+    regs = [[UOp.alloc((1,), v.dtype, addrspace=AddrSpace.REG) for v in vs] for vs in init]
+    regs = [[r.after(r[0].store(v)) for r, v in zip(rs, vs)] for rs, vs in zip(regs, init)]
+    update = gr
+    for d in range(dist):
+      vals = [r.after(update)[0].load() for r in regs[d]]
+      # (slot d's stage of the next iteration: loaded now, pfd stages ahead)
+      nxt = pf_loads(((gr + 1) * dist + d).minimum(iters - 1) * GS + split*groups)
+      staged = UOp.group(*pf_stores(vals, lds_x0.after(update), lds_w0.after(update))).barrier()
+      cur = group_wmma([[accs[o][t].after(update) for t in range(TT)] for o in range(OT)], lds_x0.after(staged), lds_w0.after(staged))
+      update = UOp.group(*(accs[o][t].store(cur[o][t]) for o in range(OT) for t in range(TT)),
+                         *(r.after(v)[0].store(n) for r, v, n in zip(regs[d], vals, nxt))).barrier()
+    update = update.end(gr)
+  else:
+    cur = group_wmma([[accs[o][t].after(gr) for t in range(TT)] for o in range(OT)], lds_x, lds_w)
+    # (a barrier after the group's reads: the next group's stage doesn't overwrite what a slower wave still reads)
+    update = UOp.group(*(accs[o][t].store(cur[o][t]) for o in range(OT) for t in range(TT))).barrier()
+    if prefetch: update = UOp.group(*pf_stores(nxt_vals, lds_x0.after(update), lds_w0.after(update))).barrier()
+    update = update.end(gr)
   def ocol(o:int) -> UOp:
     c = output_block * block_n + wo * (OT//streams) * 16 + o * 16 + col
     return c.valid(c < N) if N % block_n else c
@@ -1340,7 +1363,7 @@ def merged_linear(layers:list[Linear]) -> Linear|None:
   # (the buffer every weight is a view of)
   bufs = [[u.buffer for u in l.weight.uop.toposort() if u.op is Ops.BUFFER and isinstance(u.buffer, MultiBuffer)] for l in layers]
   if any(len(b) != 1 for b in bufs): return None
-  mbs = [cast(MultiBuffer, b[0]) for b in bufs]
+  mbs = [b[0] for b in bufs]
   parts = []
   for d in range(len(mbs[0].bufs)):
     bs = [mb.bufs[d] for mb in mbs]
