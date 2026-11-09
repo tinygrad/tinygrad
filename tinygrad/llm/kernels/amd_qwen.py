@@ -1327,11 +1327,13 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     16 < tokens <= SKINNY_ROWS and layer.in_features % (256 if layer.ggml_type == Q6_K else 32) == 0
   # (RDNA3: Q6_K (the output head) of many rows in the gemm, its weights dequantized once a tile of 32 or 64 rows)
   q6_gemm = not skinny and layer.ggml_type == Q6_K and xq is None and not split and tokens >= 17 and layer.in_features % 256 == 0
-  pad = round_up(tokens, 64 if tokens > 32 else 32) if q6_gemm and tokens % (64 if tokens > 32 else 32) else \
+  # (the output head of 65-95 rows (22-31 sequences of 3 drafts): a tile of 96 rows, the gemm reads the last row again past them, not 128)
+  q6_rows = q6_gemm and 64 < tokens < 96
+  pad = round_up(tokens, 64 if tokens > 32 else 32) if q6_gemm and tokens % (64 if tokens > 32 else 32) and not q6_rows else \
         round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny else \
         round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) and not skinny else 0
   # (skinny: the gemm's tiles of 32 rows past the rows read the last row again (no padded copy of x), the outputs past them aren't summed)
-  P = round_up(tokens, 32) if skinny else tokens
+  P = round_up(tokens, 32) if skinny else 96 if q6_rows else tokens
   if not pad and not skinny and not rdna4 and tokens > 16 and tokens % 16 and xq is None and not split: pad = round_up(tokens, 16)
   if pad and xq is None and not split:
     out = q8_linear(layer, x.reshape(tokens, x.shape[-1]).pad(((0, pad - tokens), (0, 0))), reduce, None, split, half_out)
@@ -1363,8 +1365,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     out_shape = (splits*ksplits*P, out_features)
   elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm or few_out_long) and \
        in_features % 32 == 0 and (rdna4 or local_rows >= 256 or few_out_long or q6_gemm) and \
-       (tt:=next((t for t in ((192, 128, 64, 32) if q6_gemm else (96, 128, 64, 32) if rdna4 else
-                              (128 if local_out % 128 == 0 and local_out >= 512 else 64, 64, 32)) if local_rows % t == 0), 0)):
+       (tt:=next((t for t in ((192, 128, 96, 64, 32) if q6_gemm else (96, 128, 64, 32) if rdna4 else
+                              (128 if local_out % 128 == 0 and local_out >= 512 else 64, 64, 32)) if (P if q6_rows else local_rows) % t == 0), 0)):
     # many tokens: the weights dequantized in LDS for token tiles of tt
     if layer.ggml_type == Q8_0 and layer.shard_axis is None and not half_out and local_rows <= 2048 and local_out <= 512 and in_features >= 4096:
       # (a few outputs of a long input: its parts on workgroups of their own, summed. 768 rows of 320 outputs are 60 tiles: 152 -> 99 us)
@@ -1372,6 +1374,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       out_shape = (ksplits*tokens, out_features)
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=rdna4,
                             block_n=128 if rdna4 or (local_out % 128 == 0 and ksplits == 1 and tt == 128) else 64, k_splits=ksplits)
+    if q6_rows: out_shape = (splits*P, out_features)
     srcs = (x.cast(dtypes.float16).contiguous(),)
   elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None and not (tokens <= DECODE_MULTI and in_features >= 1024):
     # (a few rows of a long input (batched decoding's) in the decode kernel, its weight loads shared by the rows: the f16 tensor cores' tiles of
