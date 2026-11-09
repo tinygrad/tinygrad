@@ -20,6 +20,24 @@ with Context(DEBUG=0): model.warmup()
 log(f"warmup {time.perf_counter()-st:.1f}s")
 
 eng = SeqEngine(model)
+
+# HANG_WATCH=s: a turn without progress (a prefill, a step) for that long is a hang (it can spin in a host submit without a timeout): the devices'
+# queues and collectives reported, the process exits
+busy = [time.perf_counter()]
+if (HANG_WATCH:=getenv("HANG_WATCH", 0)):
+  import threading
+  def _watch():
+    while time.sleep(2) or time.perf_counter() - busy[0] < HANG_WATCH: pass
+    from tinygrad import Device
+    from tinygrad.llm.kernels.amd_qwen import comm_state_report
+    log(f"HANG_WATCH: no progress for {HANG_WATCH} s")
+    for d in model.token_embd.weight.device:
+      try: log("hang:", Device[d].iface.hang_report())
+      except Exception as e: log(f"hang: {d}: {type(e).__name__}: {e}")
+    try: log(comm_state_report())
+    except Exception as e: log(f"comm state: {type(e).__name__}: {e}")
+    os._exit(3)
+  threading.Thread(target=_watch, daemon=True).start()
 GEN, ONLY = getenv("GEN", 48), [x for x in os.environ.get("ONLY", "").split(",") if x]
 TEMP = (0.0, 1.0)
 
@@ -37,12 +55,15 @@ def piece(at:int, n:int) -> list[int]: return corpus[at:at+n]
 
 def gen(s, first:int, n:int=GEN) -> list[int]:
   out = [first]
-  while len(out) < n: out += eng.step([s])[0]
+  while len(out) < n:
+    busy[0] = time.perf_counter()
+    out += eng.step([s])[0]
   return out
 def turn(ids:list[int], n:int=GEN, room:int=GEN+16, drop:int=0):
   got = eng.take(ids, room)
   assert got is not None, f"no room for {len(ids)}"
   s, start, restore = got
+  busy[0] = time.perf_counter()
   out = gen(s, eng.prefill(s, ids, start, restore, TEMP), n)
   # (the reply's first n tokens kept: the next prompts the same whatever the drafts accepted)
   # (tokens dropped past the last step's accepted ones: its states are of those)

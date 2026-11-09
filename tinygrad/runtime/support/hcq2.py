@@ -469,10 +469,14 @@ class HWQueue:
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
   def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin)) # submit(linear) becomes submit(cmdbuf)
 
+# AM_IB_MAP=1: the places of a queue's commands (kernels, waits, signals) in its command buffers, by (queue, bytes): a hang report names them
+IB_MAPS:dict[tuple[str, int], list[tuple[int, str]]] = {}
+
 def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|tuple[str, ...]|None=None) -> UOp:
   for u in lin.src if lin is not None else (): hq.q_rewrite.rewrite(u, ctx=hq) # the commands of the linear go to the stream
   hq.finish()
   stream = bytes(hq.blob)
+  if lin is not None and (m:=hq.__dict__.pop("ib_map", None)) is not None: IB_MAPS[(hq.queue, len(stream))] = m
 
   # loop over pathes with the same value
   rt = [(o, w) for o, w in hq.patches if isinstance(o, int) and o % 4 == 0 and w.dtype.itemsize in (4, 8) and not _is_link_patch(w)]

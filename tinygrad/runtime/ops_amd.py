@@ -85,6 +85,13 @@ def amd_sdma_submit(cmdbuf:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, hdp:U
 
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
+AM_IB_MAP = getenv("AM_IB_MAP", 0)
+def _uop_names(u:UOp) -> str:
+  """a short name of a signal or a value in a command (AM_IB_MAP): a constant's value, else the names (buffers, variables) it's of"""
+  if u.op is Ops.CONST: return str(u.arg)
+  names = [n for x in u.toposort() if isinstance(n:=(x.arg if isinstance(x.arg, str) else getattr(x.arg, "name", None)), str)]
+  return ",".join(dict.fromkeys(names)) or u.op.name
+
 def dispatch_packet(data:AMDProgramData, info:ProgramInfo, kernel_object:UOp=UOp.const(0, dtypes.uint64),
                     kernarg_address:UOp=UOp.const(0, dtypes.uint64)) -> list: # as words: the grid may be symbolic
   pkt = bytes(hsa.hsa_kernel_dispatch_packet_t(header=AQL_HDR | (hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_HEADER_TYPE),
@@ -401,7 +408,12 @@ class AMDComputeQueue(HWQueue):
     words = pack_args(layout_args(args), data.kernargs_segment_size) + (dispatch_packet(data, prg.arg) if data.enable_dispatch_ptr else [])
     return UOp(Ops.LINEAR, src=tuple(words), arg="kernargs").getaddr(self.devs)
 
+  def _mark(self, what:Callable[[], str]):
+    # (AM_IB_MAP: the command's place in the stream, see hcq2.IB_MAPS)
+    if AM_IB_MAP: self.__dict__.setdefault("ib_map", []).append((len(self.blob), what()))
+
   def exec(self, call:UOp, prg:UOp):
+    self._mark(lambda: f"K {prg.src[0].arg.name}")
     data = _amd_program_image(prg.src[3].arg, self.dev.target, self.dev.iface.props['lds_size_in_kb'])[0]
     args_addr = self.kernargs(call, prg, data)
     if self.dev.prof_enabled or self.dev.sqtt_enabled:
@@ -483,7 +495,9 @@ class AMDComputeQueue(HWQueue):
 
   def exec_barrier(self): self.barrier_pending = True
 
-  def wait(self, signal:UOp, value:UOp): self.wait_reg_mem(value.cast(dtypes.uint32), mem=signal.getaddr(self.devs))
+  def wait(self, signal:UOp, value:UOp):
+    self._mark(lambda: f"W {_uop_names(signal)} >= {_uop_names(value)}")
+    self.wait_reg_mem(value.cast(dtypes.uint32), mem=signal.getaddr(self.devs))
 
   def timestamp(self, signal:UOp):
     with self.pred_exec(xcc_mask=0b1):
@@ -491,6 +505,7 @@ class AMDComputeQueue(HWQueue):
                        self.pm4.int_sel__mec_release_mem__none)
 
   def signal(self, signal:UOp, value:UOp):
+    self._mark(lambda: f"S {_uop_names(signal)} = {_uop_names(value)}")
     with self.pred_exec(xcc_mask=0b1):
       self.release_mem(signal.getaddr(self.devs), value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
                        self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
@@ -958,12 +973,17 @@ class PCIIface(PCIIfaceBase):
   def hang_report(self) -> str:
     """where every compute queue of the device is: its ring and its command processor's place in its indirect buffer (a command buffer)"""
     out = []
-    for q in self.dev.compute_queues.values():
+    from tinygrad.runtime.support.hcq2 import IB_MAPS
+    for qi, q in self.dev.compute_queues.items():
       with contextlib.suppress(Exception):
         st = self.dev_impl.gfx.hqd_state(q.params[6])
         size, pos = (st["IB_CONTROL"] & 0xfffff) * 4, (st["IB_RPTR"] & 0xfffff) * 4
         out.append(f"hw queue {q.params[6]}: active {st['ACTIVE']} ring rptr {st['PQ_RPTR']} wptr {st['PQ_WPTR_LO']} ib {st['IB_BASE_ADDR_HI']:x}"
                    f"{st['IB_BASE_ADDR']:08x} at {pos} of {size} bytes (processing {st['IB_CONTROL'] >> 31})")
+        # (AM_IB_MAP: the commands before the command processor's place in the buffer (it fetches ahead of the one it runs), the one after it)
+        if (m:=IB_MAPS.get((f"COMPUTE:{qi}", pos + size))) is not None:
+          k = sum(1 for o, _ in m if o < pos)
+          out[-1] += f" [COMPUTE:{qi} command {k} of {len(m)}: " + " | ".join(f"{o}: {w}" for o, w in m[max(0, k-4):k+1]) + "]"
     return f"{self.dev.device}: " + "; ".join(out)
 
   def on_device_hang(self):
