@@ -5291,10 +5291,10 @@ class Transformer:
       # whole tiles of 16 rows on every device, the kernels of the whole chunk on tiles of 64
       tile = math.lcm(16*len(devs), 64)
       def tiled(n:int) -> int: return min(max(tile, round(n / tile) * tile), self.max_context // tile * tile or tile)
-      # (PREFILL_CHUNK_UP, default on RDNA4: the biggest chunk whole tiles up, not the nearest (6 devices: 4096 -> 4224, not 4032): a 4k
-      # prompt (4096 tokens and its template) one chunk, not 4032 and a padded 192)
+      # (PREFILL_CHUNK_UP, default off: the biggest chunk whole tiles up, not the nearest (6 devices: 4096 -> 4224, not 4032): a 4k
+      # prompt (4096 tokens and its template) one chunk, not 4032 and a padded 192). other chunk ends: other greedy tokens (C7 4k, 262k)
       up = [min(-(-chunk_size // tile) * tile, self.max_context // tile * tile or tile)] \
-        if getenv("PREFILL_CHUNK_UP", int(_wmma_rdna4(devs))) and not self.config.qsa else []
+        if getenv("PREFILL_CHUNK_UP", 0) and not self.config.qsa else []
       sizes = [tiled(n) for n in sizes] + up
     return tuple(sorted(set(sizes)))
 
