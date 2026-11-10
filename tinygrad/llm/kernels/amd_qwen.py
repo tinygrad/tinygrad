@@ -4692,8 +4692,8 @@ def seq_index(scores:Tensor, positions:Tensor, top:int, kpool:int, compact:bool=
   return Tensor.custom_kernel(out, scores, positions, fxn=fxn)[0]
 
 KDA_WAVES = 8
-# KDA_R, KDA_RW: batched decoding's kda_decode: a head's rows over KDA_R workgroups of KDA_RW waves (a row's sums the same either way)
-KDA_R, KDA_RW = getenv("KDA_R", 4), getenv("KDA_RW", 8)
+# KDA_R, KDA_RW: batched decoding's kda_decode: a head's rows over KDA_R workgroups of KDA_RW waves (0: 4 at 8 or more sequences, else 8)
+KDA_R, KDA_RW = getenv("KDA_R", 4), getenv("KDA_RW", 0)
 
 @functools.cache
 def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp, pv:UOp, wq:UOp, wk:UOp, wv:UOp, gate:UOp, alpha:UOp, beta:UOp,
@@ -4719,7 +4719,8 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   heads, V, K = cast(tuple[int, int, int], state.shape[-3:])
   # more tokens: more waves, a wave runs fewer rows through the tokens
   W, conv = KDA_WAVES * (1 if T == 1 else 2), cast(int, wq.shape[-1])
-  if R: W = KDA_RW
+  # (4 waves a workgroup at 8 or more sequences: faster on tr8; it rounds differently from 8 (a numerics change, checked by extra/qdecq.py))
+  if R: W = KDA_RW or (4 if G >= 8 else 8)
   assert K == V and W*32 >= K and V % W == 0 and conv == 4, "a thread per channel of q, k and v"
   assert (T <= S or rp is not None) and T < SC, "the states of the T tokens and the one before"
   state, z = state.reshape(-1, V, K), z.reshape(G*T, heads*V)

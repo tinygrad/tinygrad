@@ -337,8 +337,8 @@ QTF = getenv("QTF", 0)
 AG_REAL = getenv("AG_REAL", 0)
 # HC_REAL: batched decoding's hyper-connections read a device's real rows only and the mix stores them (no copy of them), its input not
 # materialized in float (2 kernels less a sublayer): the mix's epilogue and the activation's kernel round differently (FMA, rcp: ulps)
-HC_REAL = getenv("HC_REAL", 0)
-GDN_MERGED, HC_NORM_REAL = getenv("GDN_MERGED", 0), getenv("HC_NORM_REAL", 0)
+HC_REAL = getenv("HC_REAL", 1)
+GDN_MERGED, HC_NORM_REAL = getenv("GDN_MERGED", 0), getenv("HC_NORM_REAL", 1)
 # QSA_ROT_FWHT: QSA_KV_ROT's rotations (keys, values, queries, the output back) by a fast Walsh-Hadamard kernel (fwht), not 256x256 matmuls
 QSA_ROT_FWHT = getenv("QSA_ROT_FWHT", 1)
 def _split_rows() -> int: return round_up(_seq_split[0], 32)
@@ -717,9 +717,9 @@ class GatedResidual:
     R_real = _seq_split[0] if real else 0
     # (m_rows: batched decoding's real rows a device, the tiles of the others not computed (TILE16))
     lo = q8_linear(self.down, xhalf, split=True, rows=R_real, m_rows=_seq_split[0]) * (1 / self.count)
-    # (HC_REAL: not materialized in float: the kernel summing the down projection's splits stores the half the mix reads (its rcp can round
-    # differently))
-    act = lo * lo.sigmoid() if HC_REAL else (lo * lo.sigmoid()).contiguous()
+    # (HC_REAL, batched decoding's real rows (a prefill's bits as they were): not materialized in float: the kernel summing the down
+    # projection's splits stores the half the mix reads (its rcp can round differently))
+    act = lo * lo.sigmoid() if HC_REAL and real else (lo * lo.sigmoid()).contiguous()
     if self.up.ggml_type == Q8_0 and self.count == 4 and self.dim % 32 == 0 and \
        int(xhalf.uop.shard_shape[0]) % 32 == 0:
       shape = (int(B), len(cast(tuple, xs.device))*R_real, self.dim) if real else (int(B), int(R), self.dim)
