@@ -1429,7 +1429,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       wgs = (local_rows // tt) * -(-local_out // 64)
       ksplits = next((s for s in (1, 2, 4, 8, 16) if (in_features // 32) % (8*s) == 0 and wgs * s >= tgt),
                      next(s for s in (16, 8, 4, 2, 1) if (in_features // 32) % (8*s) == 0))
-      out_shape = (ksplits*tokens, out_features)
+      out_shape = (splits*ksplits*tokens, out_features)
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=_wmma_rdna4(x.device),
                             block_n=128 if _wmma_rdna4(x.device) else (getenv("Q8_BN_RDNA3", 128) if local_out % getenv("Q8_BN_RDNA3", 128) == 0
                                                                         and ksplits == 1 and tt == 128 else 64), k_splits=ksplits)
