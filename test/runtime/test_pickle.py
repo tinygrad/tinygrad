@@ -123,7 +123,7 @@ class TestPickle(unittest.TestCase):
     t = Tensor([1,2,3,4], device="CPU").realize()
     code = '''
 import pickle, struct, sys
-from tinygrad import Tensor, dtypes
+from tinygrad import dtypes
 from tinygrad.device import Buffer
 from tinygrad.uop.ops import UOp
 slot = int(sys.argv[1])

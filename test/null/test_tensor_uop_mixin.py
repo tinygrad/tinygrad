@@ -6,7 +6,7 @@ from tinygrad.uop.ops import ParamArg, UOp, UPat, Ops, PatternMatcher, graph_rew
 
 _strip_unique_pm = PatternMatcher([
   (UPat((Ops.BUFFER, Ops.ALLOC), name="b"), lambda b: b.replace(op=Ops.ALLOC, arg=replace(b.arg, slot=0))
-   if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL and (b.arg.slot != 0 or b.arg.slot in UOp.buffers) else None),
+   if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL and b.arg.slot != 0 else None),
 ])
 def _strip_unique(u: UOp) -> UOp: return graph_rewrite(u, _strip_unique_pm)
 

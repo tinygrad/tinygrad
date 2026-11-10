@@ -145,8 +145,8 @@ spec_tensor = PatternMatcher([
 
   # BUFFER has bound storage; ALLOC declares storage without a runtime buffer
   (UPat(Ops.BUFFER, src=(p_size,), allow_any_len=True, name="buf"), lambda buf:
-   isinstance(buf.dtype, DType) and is_device(buf.arg.device) and valid_device_range(buf.arg.device, buf.src[1:])
-   if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
+   isinstance(buf.dtype, DType) and is_device(buf.arg.device)
+   and valid_device_range(buf.arg.device, buf.src[1:]) if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
   (UPat(Ops.ALLOC, src=(p_size,), allow_any_len=True, name="buf"), lambda buf: isinstance(buf.arg, ParamArg)
    and buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)
    and (buf.arg.device is None or (buf.addrspace is AddrSpace.GLOBAL and is_device(buf.arg.device)))

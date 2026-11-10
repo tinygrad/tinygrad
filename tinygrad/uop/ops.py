@@ -967,7 +967,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       assert all_same([x.nbytes for x in ret.bufs]) and all_same([x.dtype for x in self.src]), "multibuffers mismatch buffers"
       return ret
     assert self.op is Ops.BUFFER and self.arg.addrspace is AddrSpace.GLOBAL and self.arg.slot in UOp.buffers, \
-      f"must be a realized global BUFFER {self}"
+      f"must be a realized BUFFER {self}"
     return UOp.buffers[self.arg.slot]
   @property
   def realized(self) -> Buffer|MultiBuffer|None:
@@ -1169,9 +1169,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
             spec:BufferSpec|None=None, bind_on_realize:bool=False, name:str|None=None):
-    if slot is None: slot = next(UOp.unique_num)
     ret = UOp(Ops.ALLOC, src=(shape_to_shape_arg((prod(to_max_shape(shape)),)),)+UOp.device_range_src(device),
-              arg=ParamArg(slot, strong_dtype(dtype), addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
+              arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype),
+                           addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
