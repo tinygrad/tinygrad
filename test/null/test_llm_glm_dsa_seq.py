@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
-from tinygrad import Tensor, UOp, nn, dtypes
+from tinygrad import Tensor, UOp, nn, dtypes, Context
 from tinygrad.uop.ops import Ops
 from tinygrad.llm import glm_dsa
 from tinygrad.llm.glm_dsa import Indexer, MLATransformerBlock, Transformer
@@ -12,6 +12,7 @@ from tinygrad.llm.glm_dsa import Indexer, MLATransformerBlock, Transformer
 
 class TestGLMDSASequence(unittest.TestCase):
   def setUp(self):
+    self.enterContext(Context(DEV="CPU"))
     self.devs = ("CPU",)
 
   def test_region_alignment_drives_move_chunks(self):
