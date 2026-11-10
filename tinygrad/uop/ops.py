@@ -814,14 +814,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if buffer is None: assert slot >= 0, f"unbound BUFFER needs a nonnegative slot, got {slot}"
     if buffer is not None:
       assert slot < 0 and addrspace is AddrSpace.GLOBAL and UOp.buffers.get(slot, buffer) is buffer, f"invalid realized BUFFER slot {slot}"
-      UOp.buffers[slot] = buffer
-    try:
-      ret = UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),)+UOp.device_range_src(device),
-                arg=ParamArg(slot, dtype, addrspace=addrspace, device=device))
-    except Exception:
-      if buffer is not None: UOp.buffers.pop(slot, None)
-      raise
-    if buffer is not None: UOp.buffer_slots[(buffer, dtype, device)] = weakref.ref(ret)
+    ret = UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),)+UOp.device_range_src(device),
+              arg=ParamArg(slot, dtype, addrspace=addrspace, device=device))
+    if buffer is not None:
+      UOp.buffers[slot], UOp.buffer_slots[(buffer, dtype, device)] = buffer, weakref.ref(ret)
     return ret
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType):

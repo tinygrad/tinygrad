@@ -145,8 +145,8 @@ spec_tensor = PatternMatcher([
 
   # BUFFER has bound storage; ALLOC declares storage without a runtime buffer
   (UPat(Ops.BUFFER, src=(p_size,), allow_any_len=True, name="buf"), lambda buf:
-   isinstance(buf.dtype, DType) and is_device(buf.arg.device) and buf.arg.slot in UOp.buffers
-   and valid_device_range(buf.arg.device, buf.src[1:]) if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
+   isinstance(buf.dtype, DType) and is_device(buf.arg.device) and valid_device_range(buf.arg.device, buf.src[1:])
+   if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
   (UPat(Ops.ALLOC, src=(p_size,), allow_any_len=True, name="buf"), lambda buf: isinstance(buf.arg, ParamArg)
    and buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)
    and (buf.arg.device is None or (buf.addrspace is AddrSpace.GLOBAL and is_device(buf.arg.device)))
@@ -263,8 +263,7 @@ spec_kernel_graph = PatternMatcher([
    isinstance(x.arg, ParamArg) and valid_device_range(x.arg.device, x.src[1:]) and
    (x.arg.slot in UOp.buffers if x.addrspace is AddrSpace.GLOBAL else x.addrspace in (AddrSpace.LOCAL, AddrSpace.REG))),
   (UPat(Ops.ALLOC, src=(p_size,), allow_any_len=True, name="x"), lambda x:
-   isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) and
-   valid_device_range(x.arg.device, x.src[1:])),
+   isinstance(x.arg, ParamArg) and x.addrspace is not AddrSpace.ALU and valid_device_range(x.arg.device, x.src[1:])),
   (UPat(Ops.BITCAST), lambda: True),
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
