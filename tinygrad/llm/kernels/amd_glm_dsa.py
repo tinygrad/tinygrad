@@ -4224,8 +4224,11 @@ def _seq_gather_kernel(out:UOp, part:UOp, dev:UOp, start_pos:UOp, k:int, n:int, 
   p = (j*n + owner) * SEQ_BLK + r
   # (base: the sequence's region from that position, its rows from base//n of every device)
   b = base // n if base is not None else 0
-  return out[p.valid(p < start_pos), c].store(part[(b + j*SEQ_BLK + r).minimum(rows-1), c].load()).end(j, r, c) \
-    .sink(arg=KernelInfo(name=f"seq_gather{k}", opts_to_apply=()))
+  w = part[(b + j*SEQ_BLK + r).minimum(rows-1), c].load()
+  # (a half out: the word's 4 halves at their columns)
+  st = [out[p.valid(p < start_pos), c].store(w)] if out.dtype.base == w.dtype else \
+    [out[p.valid(p < start_pos), c*4+i].store((w >> UOp.const(16*i, dtypes.uint64)).cast(dtypes.uint16).bitcast(dtypes.half)) for i in range(4)]
+  return UOp.group(*st).end(j, r, c).sink(arg=KernelInfo(name=f"seq_gather{k}", opts_to_apply=()))
 
 @functools.cache
 def _seq_gather_fp8_kernel(out:UOp, part:UOp, dev:UOp, start_pos:UOp, k:int, n:int, base:UOp|None=None) -> UOp:
@@ -4266,15 +4269,19 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int, base:int
   wdt = dtypes.uint32 if fp8 and raw else dtypes.uint64
   W = int(cache.shape[1]) if fp8 and raw else D//4
   # (after the cache's store: the rows of the tokens in the devices' parts for the calls after this one)
-  out = Tensor(Tensor.empty(N, W, dtype=wdt, device=devs).uop.after(cache.uop, *(v for v in (start_pos, T, base) if isinstance(v, UOp))))
+  # (SEQ_GATHER_HALF: half rows written as halves, the attention reads the buffer as it is: a bitcast of the uint64 one is a copy of all N rows)
+  half = not fp8 and bool(getenv("SEQ_GATHER_HALF", 1))
+  out = Tensor(Tensor.empty(N, D if half else W, dtype=dtypes.half if half else wdt, device=devs).uop.after(
+    cache.uop, *(v for v in (start_pos, T, base) if isinstance(v, UOp))))
   for kk, part in enumerate(seq_views(cache)):
     out = Tensor.custom_kernel(out, part, _device_index(devs), fxn=functools.partial(_seq_gather_kernel if raw else _seq_gather_fp8_kernel,
                                                                                      start_pos=sp, k=kk, n=n, base=bu))[0]
-  rows = fp8_rows(k).contiguous() if fp8 and raw else k.cast(dtypes.half).contiguous().bitcast(dtypes.uint64)
-  assert rows.shape[-1] == W, f"the rows of the tokens {k.shape} as {rows.shape}"
+  rows = fp8_rows(k).contiguous() if fp8 and raw else k.cast(dtypes.half).contiguous() if half else \
+    k.cast(dtypes.half).contiguous().bitcast(dtypes.uint64)
+  assert rows.shape[-1] == out.shape[-1], f"the rows of the tokens {k.shape} as {rows.shape}"
   out = Tensor.custom_kernel(out, rows, fxn=functools.partial(_seq_rows_kernel, start_pos=sp, T=t))[0]
   # (fp8: the rows as they are, the attention reads them so. a bitcast would be a copy of all of it)
-  return out if fp8 and raw else out.bitcast(dtypes.half)
+  return out if fp8 and raw or half else out.bitcast(dtypes.half)
 
 def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None,
                    dims:int|None=None, base:int|UOp=0) -> Tensor:

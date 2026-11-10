@@ -37,11 +37,26 @@ if getenv("PREFILL_PROF"):
   prompt = [t + 1 for t in prompt]  # (another prompt: nothing cached)
   if getenv("PROFILE"): kprof.reset(*devs)
   st = time.perf_counter()
-  next(model.generate(prompt))
+  tok = next(model.generate(prompt))
   sync()
   dt = time.perf_counter() - st
-  print(f"prefill {len(prompt)} tokens: {dt:.2f} s, {len(prompt)/dt:.0f} tok/s", flush=True)
+  print(f"prefill {len(prompt)} tokens: {dt:.2f} s, {len(prompt)/dt:.0f} tok/s, first token {tok}", flush=True)
   if getenv("PROFILE"): show(kprof.times(*devs), len(prompt) // 1000, "1k tokens", dt)
+  if getenv("PROFILE") and getenv("COPY_CTX"):
+    # (the kernels around the copies of COPY_CTX MB or more: the last one before a copy on its device's timeline, the first one after it)
+    import bisect, collections
+    seq = kprof.sequence_timed(*devs)
+    ks: dict[str, list] = collections.defaultdict(list)
+    for d, n, st0, du in seq:
+      if not n.startswith("copy"): ks[d].append((st0, st0 + du, n))
+    ctx: collections.Counter = collections.Counter()
+    for d, n, st0, du in seq:
+      if not n.startswith("copy") or float(n.split()[1]) < getenv("COPY_CTX", 1): continue
+      ends = [e for _, e, _ in ks[d]]
+      i = bisect.bisect_right(ends, st0) - 1
+      j = bisect.bisect_left([s for s, _, _ in ks[d]], st0 + du)
+      ctx[(n.split(",")[0], ks[d][i][2] if i >= 0 else "-", ks[d][j][2] if j < len(ks[d]) else "-")] += 1
+    for (n, a, b), c in ctx.most_common(getenv("TOP", 40)): print(f"  {c:6d}  {n:16s}  after {a:40s} before {b}")
   raise SystemExit(0)
 gen = model.generate(prompt)
 st = time.perf_counter()
