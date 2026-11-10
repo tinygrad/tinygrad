@@ -3175,8 +3175,14 @@ class Transformer(GLMSeqDriver):
 
   def _forward_seqs_glm(self, vs:tuple[UOp, ...]) -> Tensor:
     _idx_mask[0] = None  # DSA shared attention layers must never see another step's lists
+    # (SEQ_I8: the rows' activations of the dense layers int8 (as the decode kernels' of a sequence alone), the int8 tensor cores. glm5next's
+    # sets amd_glm's flag, this model's kernels read amd_glm_dsa's. the f16 rows of the row parallel layers are scaled by every row's max of
+    # all the devices: a ring of copies a layer)
+    prev, Q8_ROWS_I8[0] = Q8_ROWS_I8[0], bool(getenv("SEQ_I8", 0))
     try: return super()._forward_seqs_glm(vs)
-    finally: q8_quantize_cache_clear()
+    finally:
+      q8_quantize_cache_clear()
+      Q8_ROWS_I8[0] = prev
 
   def _init_states(self):
     """the states and caches of the blocks, realized (the jits capture on their first call: not the one time setup)"""

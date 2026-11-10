@@ -87,6 +87,20 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertRaises(AssertionError, _q8_pack_kernel, Tensor.empty(4, 18, 9, dtype="uint32").uop, Tensor.empty(4, 576, dtype="half").uop)
     self.assertRaises(AssertionError, _q8_unpack_kernel, Tensor.empty(4, 576, dtype="half").uop, Tensor.empty(4, 18, 9, dtype="uint32").uop)
 
+  def test_seq_i8_reaches_dsa_kernels(self):
+    # (glm5next's _forward_seqs_glm sets amd_glm's flag: the DSA kernels' (amd_glm_dsa's) is set by the DSA model's, restored after)
+    from tinygrad.helpers import getenv
+    from tinygrad.llm.kernels import amd_glm_dsa
+    seen = []
+    def fwd(self, vs): seen.append(amd_glm_dsa.Q8_ROWS_I8[0])
+    for env, want in (("1", True), ("0", False)):
+      with patch.dict(os.environ, {"SEQ_I8": env}), patch.object(glm_dsa.GLMSeqDriver, "_forward_seqs_glm", fwd):
+        getenv.cache_clear()
+        Transformer._forward_seqs_glm(Transformer.__new__(Transformer), ())
+      self.assertEqual(seen[-1], want)
+      self.assertFalse(amd_glm_dsa.Q8_ROWS_I8[0])
+    getenv.cache_clear()
+
   def test_half_rows_local_scales(self):
     # (a row parallel layer's input in half: every device's part its own scale, no cross device max; the same halves below HALF_ROWS_MAX)
     from tinygrad.llm.kernels.amd_glm_dsa import _half_rows, HALF_ROWS_MAX
