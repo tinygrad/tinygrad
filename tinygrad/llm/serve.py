@@ -1217,9 +1217,15 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.main_moved = False
     req.cache_start = model.get_start_pos(ids)
     spec_st = list(ss) if isinstance(ss:=getattr(model, "spec_stats", None), list) else []
+    def collect_spec():
+      nonlocal spec_st
+      if spec_st and isinstance(ss:=getattr(model, "spec_stats", None), list):
+        req.steps += ss[0] - spec_st[0]
+        spec_st = list(ss)
     g = model.generate(list(ids), temperature=req.temperature, top_p=req.top_p)
     try:
       for tok in g:
+        collect_spec()  # emit can finish immediately at max_tokens, before the finally block
         if not self.emit(req, tok): return False
         if busy is None and not self.waiting.empty() and self.batchable(req):
           # another request: this one goes on batched (the model's states after its last token's position are the slot's)
@@ -1232,12 +1238,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           self.main_moved = True
           req.spec_start(req.generated[-1], req.pos, self.spec)
           return True
-      if spec_st and isinstance(ss:=getattr(model, "spec_stats", None), list):
-        req.steps += ss[0] - spec_st[0]
-        spec_st = list(ss)  # finish logs/emits telemetry before the finally block
+      collect_spec()
       return self.finish(req)
     finally:
-      if spec_st and isinstance(ss:=getattr(model, "spec_stats", None), list): req.steps += ss[0] - spec_st[0]
+      collect_spec()
       _close(g)
       # (its positions and the drafts past them)
       self.main_writes(max(len(ids) + len(req.generated), len(getattr(model, "_cached_tokens", []))) + 64)

@@ -106,7 +106,7 @@ class TestEngineTelemetry(unittest.TestCase):
     self.assertEqual(engine.evictions, 2)
     engine.telemetry.event.assert_called_with("eviction", cause="paused_length", slot=3, tokens=2, stashed=True)
 
-  def test_run_alone_counts_spec_steps_before_finish(self):
+  def check_run_alone_spec_steps(self, finish_in_emit):
     from tinygrad.llm.serve import LLMServer, Request
 
     server, observed_steps = LLMServer.__new__(LLMServer), []
@@ -119,19 +119,25 @@ class TestEngineTelemetry(unittest.TestCase):
       server.model._cached_tokens = ids + [10]
       yield 10
 
-    def emit(req, token):
-      req.generated.append(token)
-      return True
-
     def finish(req, error=None):
       observed_steps.append(req.steps)
       return False
+
+    def emit(req, token):
+      req.generated.append(token)
+      return finish(req) if finish_in_emit else True
 
     server.model.generate, server.emit, server.finish = generate, emit, finish
     req = Request([1, 2], "", None, 0.0)
     self.assertFalse(server.run_alone(req, set()))
     self.assertEqual(observed_steps, [2])
     self.assertEqual(req.steps, 2)  # the finally block must not count them again
+
+  def test_run_alone_counts_spec_steps_before_finish(self):
+    self.check_run_alone_spec_steps(finish_in_emit=False)
+
+  def test_run_alone_counts_spec_steps_before_length_finish(self):
+    self.check_run_alone_spec_steps(finish_in_emit=True)
 
 
 if __name__ == "__main__":
