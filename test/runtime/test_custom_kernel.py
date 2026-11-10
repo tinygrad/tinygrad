@@ -548,6 +548,17 @@ class TestCustomKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.arange(N).clone("CPU"), fxn=kernel)[0]
     self.assertEqual(out.tolist(), [3, 2, 1, 0])
 
+  def test_alloc(self):
+    def kernel(out:UOp, inp:UOp):
+      # construct a buffer and alloc with the same slot
+      alloc = UOp.alloc((1,), dtypes.int, -1, addrspace=AddrSpace.REG)
+      buf = UOp._buffer(1, dtypes.int, -1, addrspace=AddrSpace.REG)
+      alloc = alloc[0].set(inp[0])
+      buf = buf.after(alloc)[0].set(inp[1])
+      return out[0].store(alloc.after(buf)[0] + buf[0]).sink(arg=KernelInfo(opts_to_apply=()))
+    out = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([2, 3]).realize(), fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [5])
+
 class TestCustomKernelArgs(unittest.TestCase):
   def test_duplicate_call_arg(self):
     x = Tensor.arange(4).clone().realize()
