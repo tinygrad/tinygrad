@@ -893,6 +893,8 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
   outs = Tensor.custom_kernel(q, scale, x, fxn=functools.partial(_q8k_quantize_kernel, tokens=tokens, in_features=in_features))
   return outs[0], outs[1]
 
+# K256_SKIP: _grouped_k256_kernel skips the WMMAs of its tiles' token tiles that are all padding (the same bits for every row that is read)
+K256_SKIP = getenv("K256_SKIP", 0)
 # K256_SIGNPERM: _grouped_k256_kernel's IQ2_S signs by one byte permute of the word and its negation (_iq_signed_word perm, the same bytes)
 K256_SIGNPERM = getenv("K256_SIGNPERM", 0)
 
@@ -958,7 +960,13 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
     return (((low >> (4*sb).cast(dtypes.uint32)) & 15) | (((header >> (16+2*sb).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int32) - 32
   sb = UOp.range(8, 5, AxisType.LOOP)
   def acols(h:int) -> tuple: return (ph*4+2*h, ph*4+2*h+1) if rdna4 else (2*h, 2*h+4, 2*h+1, 2*h+5)
-  afr = [[_i8_frag(tuple(lds_q[t*16 + col, sb, c].load() for c in acols(h))) for h in range(2)] for t in range(TT)]
+  # K256_SKIP (IQ2_S; IQ3_S's down measured no faster): a token tile of 16 rows that is all padding (an expert's rows are padded at its end:
+  # its first row is) skips its WMMAs, a loop of 0 or 1 iterations. its rows' outputs are never read (gate/up's padding rows are read only by
+  # down's padding rows, which aren't stored)
+  skip = [UOp.range((rows[token_block * TOK + t*16].load() >= 0).where(1, 0), 10+t, AxisType.LOOP)
+          if t and K256_SKIP and ggml_type == IQ2_S else None for t in range(TT)]
+  afr = [[_i8_frag(tuple(lds_q[t*16 + col + (skip[t] if skip[t] is not None else 0), sb, c].load() for c in acols(h))) for h in range(2)]
+         for t in range(TT)]
   sums = []
   for o, base in enumerate(bases):
     sub = sub_scale(base, sb) if ggml_type != IQ2_S else None
@@ -982,6 +990,9 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
       dreg = dreg.after(dreg.store(dot))
       sums.append(ints[o][t].store(UOp.stack(*[_cfn(True, src=(dreg[j].load(), cast(UOp, sub), prev[j].load()), arg=(MAD_I24, dtypes.int32))
                                               for j in range(8)])))
+  if K256_SKIP and ggml_type == IQ2_S:
+    tsums = [[x for i, x in enumerate(sums) if i % TT == t] for t in range(TT)]
+    sums = [UOp.group(*ts).end(sk) if sk is not None else UOp.group(*ts) for ts, sk in zip(tsums, skip)]
   done = UOp.group(*sums).end(sb)
   new = [[UOp.stack(*(accs[o][t].after(b)[j].load() + ints[o][t].after(done)[j].load().float() *
                       (dws[o] * lds_d[t*16 + (ph*8 + j if rdna4 else 2*j + ph)].load())
