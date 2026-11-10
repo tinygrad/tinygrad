@@ -4226,7 +4226,7 @@ def _seq_gather_kernel(out:UOp, part:UOp, dev:UOp, start_pos:UOp, k:int, n:int, 
   b = base // n if base is not None else 0
   w = part[(b + j*SEQ_BLK + r).minimum(rows-1), c].load()
   # (a half out: the word's 4 halves at their columns)
-  st = [out[p.valid(p < start_pos), c].store(w)] if out.dtype.base == w.dtype else \
+  st = [out[p.valid(p < start_pos), c].store(w)] if getattr(out.dtype, "base", out.dtype) != dtypes.half else \
     [out[p.valid(p < start_pos), c*4+i].store((w >> UOp.const(16*i, dtypes.uint64)).cast(dtypes.uint16).bitcast(dtypes.half)) for i in range(4)]
   return UOp.group(*st).end(j, r, c).sink(arg=KernelInfo(name=f"seq_gather{k}", opts_to_apply=()))
 
