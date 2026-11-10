@@ -3647,9 +3647,9 @@ QSA_PREFILL = getenv("QSA_PREFILL", 0)
 @functools.cache
 def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UOp, *, scale:float, kpool:int, rdna4:bool, ns:int=1) -> UOp:
   # as _qsa_decode_kernel (its outputs, compact lists of pools, kv_q4_pack's 4-bit cache) on the tensor cores: a workgroup a row b, its heads
-  # (at most 16) the rows of the tiles. a tile of 16*ns keys into LDS (keys: their words; values: less 8 in half, exact; scales in float), the
+  # (at most 16) the rows of the tiles. a tile of 16*ns keys into LDS (keys: their words; values: dequantized in half; scales in float), the
   # scores of a group of 32 dims a product of the half queries and those (2 WMMA), times the keys' scales of the group (a lane's key); a wave a
-  # quarter of the dims, the scores summed through LDS. the values: the weights times the keys' scales of the group (in half) by the values
+  # quarter of the dims, the scores summed through LDS. the values (times their groups' scales, in half) by the weights (in half)
   B, H, _, DV = cast(tuple[int, int, int, int], out.shape)
   DK, N = cast(int, q.shape[-1]), cast(int, cache.shape[-2])
   WAVES, D, TK = 4, DK + DV, 16 * ns
@@ -3704,14 +3704,15 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
     ws, lok = vals
     words, sws = ws[:DPT // 8], ws[DPT // 8:]
     st = []
+    scs = [lok.where((sws[gi // 2] >> (16 * (gi % 2))).cast(dtypes.uint16).bitcast(dtypes.half).float(), UOp.const(0.0, dtypes.float))
+           for gi in range(DPT // 32)]
     for wi, w in enumerate(words):
       d0 = lpart*DPT + wi*8  # (a thread's dims are all keys' or all values')
       kdim = lpart*DPT < DK
       st.append(lk[lrow, (lpart*(DPT//8) + wi).valid(kdim)].store(w))
-      st += [lv[lrow, (d0 - DK + j).valid(kdim.ne(True))].store(h_) for j, h_ in enumerate(word_halves(w))]
-    for gi in range(DPT // 32):
-      sc = (sws[gi // 2] >> (16 * (gi % 2))).cast(dtypes.uint16).bitcast(dtypes.half).float()
-      st.append(lsc[lpart * (DPT // 32) + gi, lrow].store(lok.where(sc, UOp.const(0.0, dtypes.float))))
+      # (the values times their group's scale, in half: the weights' fragments one for all the value groups)
+      st += [lv[lrow, (d0 - DK + j).valid(kdim.ne(True))].store((h_.float() * scs[wi // 4]).cast(dtypes.half)) for j, h_ in enumerate(word_halves(w))]
+    for gi in range(DPT // 32): st.append(lsc[lpart * (DPT // 32) + gi, lrow].store(scs[gi]))
     return st
   lds_k0, lds_v0, lds_sc0 = lds_k, lds_v, lds_sc
   first = UOp.group(*tile_stores(tile_loads(UOp.const(0, dtypes.weakint)), lds_k, lds_v, lds_sc)).barrier()
@@ -3766,13 +3767,12 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
   alpha = [lds_a[crow(e)].load() for e in range(8)]
   o_new = []
   # (the weights times the keys' scales of a values' group, in half: a lane's head's row of them, a subtile a WMMA; a group two dim tiles)
-  pfrags = {(vg, st_): UOp.stack(*((lds_p[col, st_*16 + k].load().float() * lds_sc.after(shared)[vg, st_*16 + k].load()).cast(dtypes.half)
-                                   for k in ks)) for vg in {(DK + wave*VW + dt*16) // 32 for dt in range(VT)} for st_ in range(ns)}
+  # (a lane's head's row of the weights, a subtile a WMMA)
+  pfrags = [UOp.stack(*(lds_p[col, st_*16 + k].load() for k in ks)) for st_ in range(ns)]
   for dt in range(VT):
-    vg = (DK + wave*VW + dt*16) // 32
     acc = UOp.stack(*(o_regs[dt].after(tile)[e].load() * alpha[e] for e in range(8)))
     for st_ in range(ns):
-      pfrag = pfrags[(vg, st_)]
+      pfrag = pfrags[st_]
       vfrag = UOp.stack(*(lds_v.after(shared)[st_*16 + k, wave*VW + dt*16 + col].load() for k in ks))
       acc = UOp.wmma(pfrag, vfrag, acc, *WMMA_ARG)
     o_new.append(acc)
