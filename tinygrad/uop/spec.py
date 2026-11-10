@@ -263,7 +263,8 @@ spec_kernel_graph = PatternMatcher([
    isinstance(x.arg, ParamArg) and valid_device_range(x.arg.device, x.src[1:]) and
    (x.arg.slot in UOp.buffers if x.addrspace is AddrSpace.GLOBAL else x.addrspace in (AddrSpace.LOCAL, AddrSpace.REG))),
   (UPat(Ops.ALLOC, src=(p_size,), allow_any_len=True, name="x"), lambda x:
-   isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL and valid_device_range(x.arg.device, x.src[1:])),
+   isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) and
+   valid_device_range(x.arg.device, x.src[1:])),
   (UPat(Ops.BITCAST), lambda: True),
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),

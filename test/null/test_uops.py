@@ -587,6 +587,12 @@ class TestUopsObject(unittest.TestCase):
     del b
     self.assertIs(a.buffer, buf)
 
+  def test_scratch_slots_are_nonnegative(self):
+    for addrspace in (AddrSpace.LOCAL, AddrSpace.REG):
+      with self.assertRaises(AssertionError): UOp.alloc((4,), dtypes.float32, -1, addrspace)
+      with self.assertRaises(AssertionError): UOp._buffer(4, dtypes.float32, -1, addrspace=addrspace)
+      self.assertIs(UOp.placeholder((4,), dtypes.float32, 0, addrspace).op, Ops.ALLOC)
+
   def test_timing(self):
     with Timing("create 10k uops:"): ret = [UOp.const(10000000+i, dtypes.int) for i in range(10000)]
     assert len(ret) == 10000

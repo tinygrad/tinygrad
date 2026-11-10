@@ -5,7 +5,7 @@ import numpy as np
 from tinygrad.engine.realize import run_linear
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import UOp
+from tinygrad.uop.ops import UOp, Ops
 
 def _allocations_of_type(t):
   ret = 0
@@ -99,11 +99,12 @@ class TestGC(unittest.TestCase):
       del key
       del real_buf
 
-  def test_scratch_buffers_do_not_unbind_globals(self):
+  def test_scratch_allocs_do_not_unbind_globals(self):
     real = UOp.new_buffer("CPU", 4, dtypes.float32)
     real_buf = real.buffer
     for addrspace in (AddrSpace.LOCAL, AddrSpace.REG):
-      scratch = UOp.placeholder((4,), dtypes.float32, real.arg.slot, addrspace)
+      scratch = UOp.placeholder((4,), dtypes.float32, 0, addrspace)
+      self.assertIs(scratch.op, Ops.ALLOC)
       del scratch
       gc.collect()
       self.assertIs(real.buffer, real_buf)

@@ -550,11 +550,9 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_alloc(self):
     def kernel(out:UOp, inp:UOp):
-      alloc = UOp.alloc((1,), dtypes.int, -1, addrspace=AddrSpace.REG)
-      buf = UOp._buffer(1, dtypes.int, -1, addrspace=AddrSpace.REG)
-      alloc = alloc[0].set(inp[0])
-      buf = buf.after(alloc)[0].set(inp[1])
-      return out[0].store(alloc.after(buf)[0] + buf[0]).sink(arg=KernelInfo(opts_to_apply=()))
+      a = UOp.alloc((1,), dtypes.int, 0, addrspace=AddrSpace.REG)[0].set(inp[0])
+      b = UOp.alloc((1,), dtypes.int, 1, addrspace=AddrSpace.REG)[0].set(inp[1])
+      return out[0].store(a[0] + b[0]).sink(arg=KernelInfo(opts_to_apply=()))
     out = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([2, 3]).realize(), fxn=kernel)[0]
     self.assertEqual(out.tolist(), [5])
 

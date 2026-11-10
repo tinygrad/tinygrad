@@ -811,6 +811,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return (UOp.range(len(device), 0, AxisType.DEVICE),) if isinstance(device, tuple) else ()
   @staticmethod
   def _buffer(size:int, dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, buffer:Buffer|MultiBuffer|None=None) -> UOp:
+    if buffer is None: assert slot >= 0, f"unbound BUFFER needs a nonnegative slot, got {slot}"
     if buffer is not None:
       assert slot < 0 and addrspace is AddrSpace.GLOBAL and UOp.buffers.get(slot, buffer) is buffer, f"invalid realized BUFFER slot {slot}"
       UOp.buffers[slot] = buffer
@@ -1170,9 +1171,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
             spec:BufferSpec|None=None, bind_on_realize:bool=False, name:str|None=None):
+    if slot is None: slot = next(UOp.unique_num)
+    if addrspace in (AddrSpace.LOCAL, AddrSpace.REG): assert slot >= 0, f"{addrspace} ALLOC needs a nonnegative slot, got {slot}"
     ret = UOp(Ops.ALLOC, src=(shape_to_shape_arg((prod(to_max_shape(shape)),)),)+UOp.device_range_src(device),
-              arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype),
-                           addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
+              arg=ParamArg(slot, strong_dtype(dtype), addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
@@ -1180,13 +1182,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL):
     dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if slot is None: slot = next(UOp.unique_num)
-    if addrspace is AddrSpace.GLOBAL:
-      ret = UOp.param(slot, dtype, prod(shape))
-    else:
-      assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
-      ret = UOp._buffer(prod(shape), dtype, slot, addrspace=addrspace)
-    if len(shape) > 1: ret = ret.reshape(shape)
-    return ret
+    if addrspace is not AddrSpace.GLOBAL: return UOp.alloc(shape, dtype, slot, addrspace)
+    ret = UOp.param(slot, dtype, prod(shape))
+    return ret.reshape(shape) if len(shape) > 1 else ret
   def placeholder_like(self, slot:int):
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
     return UOp.placeholder(self.max_shard_shape, self.dtype, slot)
@@ -1898,7 +1896,7 @@ pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])]
 
 pm_renumber_slots = PatternMatcher([
   (UPat(Ops.RANGE, name="u"), lambda ctx, u: u.replace(arg=(u.axis_type, next(ctx))+u.axis_id[1:])),
-  (UPat(Ops.BUFFER, name="u"), lambda ctx, u: u.replace(arg=replace(u.arg, slot=next(ctx))) if u.addrspace is AddrSpace.REG else None),
+  (UPat((Ops.BUFFER, Ops.ALLOC), name="u"), lambda ctx, u: u.replace(arg=replace(u.arg, slot=next(ctx))) if u.addrspace is AddrSpace.REG else None),
 ])
 
 def gate_kernel_sink(x:UOp) -> bool:

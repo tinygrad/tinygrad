@@ -190,8 +190,8 @@ def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
   sel = gate.where(addr, local_idx)
   return UOp(Ops.AFTER, src=(sel, (local_idx if x.max_numel() == 1 else local).store(alt))).load()
 
-def gated_store(addr:UOp, gate:UOp, val:UOp):
-  local = scratch_buffer(addr.src[0].dtype, val.max_numel(), -1)
+def gated_store(ctx, addr:UOp, gate:UOp, val:UOp):
+  local = scratch_buffer(addr.src[0].dtype, val.max_numel(), next(ctx))
   sel = gate.where(addr, local.index(UOp.cconst(0, dtypes.int32)))
   return UOp(Ops.AFTER, src=(sel,)).store(val)
 
