@@ -15,7 +15,9 @@ class TestGLMStash(unittest.TestCase):
 
     def t(shape, axis=None):
       x = Tensor(np.arange(math.prod(shape), dtype=np.float16).reshape(shape))
-      return x.shard(self.devs, axis) if axis is not None else x.to(self.devs)
+      # Materialize sources before capture_first warmup; otherwise earlier model tests can make captured copies
+      # leave tiny uninitialized values in the snapshots (order-dependent roundtrip failure).
+      return (x.shard(self.devs, axis) if axis is not None else x.to(self.devs)).realize()
 
     self.model = Transformer.__new__(Transformer)
     self.model.config = SimpleNamespace(spec_drafts=2, cache_rows=128, kv_lora_rank=512)
