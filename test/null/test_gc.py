@@ -85,7 +85,7 @@ class TestGC(unittest.TestCase):
     with assert_freed(real_buf):
       self.assertFalse(real_buf.is_allocated())
       a.realize()
-      self.assertIs(a.uop.arg.buffer, real_buf)
+      self.assertIs(a.uop.buffer, real_buf)
       del a.uop # the Buffer object is still held by real_buf
       del real_buf
 
