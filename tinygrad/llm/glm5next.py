@@ -1964,17 +1964,19 @@ class Indexer:
     if Tq <= 8 and idx.n_heads % 16 == 0 and getenv("INDEXER_DECODE_ROWS", 1):
       return indexer_decode_index_rows(iq, pk, weights, start_pos, pools, k, idx.kpool, pbase=pb, width=self.max_pools)
     # (IDX_SPLIT, default on: a prefill chunk's queries split on their rows over the devices (every device had all of them: the same lists six
-    # times), each device the q projection, the scores and the lists of its rows, the lists gathered. the same lists: exact)
+    # times), each device the scores and the lists of its rows, the lists gathered. the same lists: exact)
     n = len(x.device) if isinstance(x.device, tuple) else 1
     if n > 1 and getenv("IDX_SPLIT", 1) and not self.shard and Tq % (16*n) == 0 and Tq // n <= getenv("INDEXER_ROWS", 1056) and \
        idx.n_heads % 16 == 0 and amd_custom_kernels_supported(x.device):
-      lin, qs = self.attn_q_b, shard_rows(q[0], 0)
-      if lin.ggml_type is None and lin.use_custom_quant: lin.set_quantized(lin.weight)
-      # (the weight whole on every device, the rows split: q8_linear's split (Linear's call takes the rows as whole))
-      iq_s = q8_linear(lin, qs, split=True) if lin.ggml_type in QUANT_SIZES and lin.shard_axis is None else lin(qs)
-      iq_s = iq_s.reshape(Tq, idx.n_heads, idx.head_dim)
-      # (the weights of the heads: a small projection, of every row, then split)
-      w_s = shard_rows((self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5)[0].contiguous(), 0)
+      if getenv("IDX_SPLIT_QB", 0):
+        # (IDX_SPLIT_QB: the q projection of the device's rows too (q8_linear's split: the weight whole, the rows split). its kernel's tiles
+        # differ from the whole chunk's (a 32-row part is the f16 kernel's): not the same bits)
+        lin, qs = self.attn_q_b, shard_rows(q[0], 0)
+        if lin.ggml_type is None and lin.use_custom_quant: lin.set_quantized(lin.weight)
+        iq_s = q8_linear(lin, qs, split=True) if lin.ggml_type in QUANT_SIZES and lin.shard_axis is None else lin(qs)
+        iq_s = iq_s.reshape(Tq, idx.n_heads, idx.head_dim)
+      else: iq_s = shard_rows(iq.contiguous(), 0)  # (the q projection of every row as before, then split: the same queries)
+      w_s = shard_rows(weights.contiguous(), 0)
       sc = indexer_scores(iq_s, pk, w_s, pools, idx.kpool, pbase=pb, width=self.max_pools)
       # (compact: the pools gathered, a quarter of the bytes, then expanded to the keys on every device (pool_expand))
       if not getenv("IDX_SPLIT_COMPACT", 1): return all_gather(pool_index_rows(sc, start_pos, pools, k, idx.kpool), 0)[:Tq]
