@@ -1333,6 +1333,23 @@ def f16t_gemm(x:Tensor, wt:Tensor) -> Tensor|None:
   fxn = functools.partial(_q8_gemm_kernel, token_tile=32, ggml_type=F32T, rdna4=False, block_n=64)
   return Tensor.custom_kernel(out, wt, xp.contiguous(), fxn=fxn)[0][:R]
 
+def _q6_rdna4_padded_rows(local_rows:int, split_enabled:bool) -> int:
+  if not split_enabled or local_rows > 128: return local_rows
+  return next((t for t in (32, 64, 96, 128) if local_rows <= t), local_rows)
+
+
+def _q6_rdna4_token_tile(local_rows:int, split_enabled:bool) -> int:
+  tiles = (96, 128, 64, 32) if split_enabled else (96, 128, 64)
+  return next((t for t in tiles if local_rows % t == 0), 0)
+
+
+def _q6_input_splits(in_features:int, local_out:int, local_rows:int, token_tile:int, target:int, rdna4:bool) -> int:
+  """Input splits for a few-row Q6_K gemm: whole Q6_K blocks per split, at least target workgroups if possible."""
+  wgs = (local_rows // token_tile) * -(-local_out // (128 if rdna4 else 64))
+  return next((s for s in (1, 2, 4, 8, 16) if (in_features // 32) % (8*s) == 0 and wgs * s >= target),
+              next(s for s in (16, 8, 4, 2, 1) if (in_features // 32) % (8*s) == 0))
+
+
 def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False, half_out:bool=False) -> Tensor:
   assert layer.ggml_type in QUANT_SIZES
   tokens = int(x.numel()) // layer.in_features
@@ -1348,14 +1365,17 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # (Q6_GEMM_RDNA3: Q6_K (the output head) of many rows in the gemm, its weights dequantized once a tile of 32 or 64 rows)
   q6_rdna3 = not _wmma_rdna4(x.device) and layer.ggml_type == Q6_K and xq is None and not split and tokens >= getenv("Q6_GEMM_MIN", 17) and \
     layer.in_features % 256 == 0 and getenv("Q6_GEMM_RDNA3", 1)
-  pad = round_up(tokens, 64 if tokens > 32 else 32) if q6_rdna3 and tokens % (64 if tokens > 32 else 32) else \
+  q6_pad = (_q6_rdna4_padded_rows(tokens, True) - tokens if layer.ggml_type == Q6_K and xq is None and not split and
+            _wmma_rdna4(x.device) and getenv("Q6_KSPLIT", 0) else 0)
+  pad = q6_pad or (round_up(tokens, 64 if tokens > 32 else 32) if q6_rdna3 and tokens % (64 if tokens > 32 else 32) else \
         round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny else \
-        round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) else 0
+        round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) else 0)
   skinny_i8 = skinny and getenv("SKINNY_I8", 0)
   if not pad and skinny and tokens % (16 if skinny_i8 else 32): pad = round_up(tokens, 16 if skinny_i8 else 32)
   elif not pad and not _wmma_rdna4(x.device) and tokens > getenv("PAD16_ROWS", 16) and tokens % 16 and xq is None and not split:
     pad = round_up(tokens, 16)
-  if (Q8_ROWS_I8[0] or not _wmma_rdna4(x.device)) and pad and xq is None and not split and getenv("Q8_PAD_ROWS", 1):
+  if (Q8_ROWS_I8[0] or not _wmma_rdna4(x.device) or
+      (layer.ggml_type == Q6_K and getenv("Q6_KSPLIT", 0))) and pad and xq is None and not split and getenv("Q8_PAD_ROWS", 1):
     out = q8_linear(layer, x.reshape(tokens, x.shape[-1]).pad(((0, pad - tokens), (0, 0))), reduce, None, split, half_out)
     out = out[:, :tokens] if splits > 1 and not reduce else out[:tokens]
     return out.reshape(*((splits,) if splits > 1 and not reduce else ()), *x.shape[:-1], out_features)
@@ -1371,8 +1391,10 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # (Q8_0 and Q6_K (the output head) too for the rows of batched decoding, Q8_ROWS_I8: the weights are the time, the int8 tensor cores read
   # them once)
   # (Q6_GEMM: Q6_K (the output head) of the rows of batched decoding in the gemm (its weights dequantized once a tile of rows, in LDS))
-  q6_gemm = q6_rdna3 or (layer.ggml_type == Q6_K and xq is None and Q8_ROWS_I8[0] and tokens >= 32 and getenv("Q6_GEMM", 1) and \
-    _wmma_rdna4(x.device) and in_features % 256 == 0 and any(local_rows % t == 0 for t in (96, 128, 64)))
+  q6_gemm = q6_rdna3 or (layer.ggml_type == Q6_K and xq is None and
+    (Q8_ROWS_I8[0] or (getenv("Q6_KSPLIT", 0) and local_rows <= getenv("Q6_KSPLIT_ROWS", 128))) and tokens >= 32 and
+    getenv("Q6_GEMM", 1) and _wmma_rdna4(x.device) and in_features % 256 == 0 and
+    bool(_q6_rdna4_token_tile(local_rows, bool(getenv("Q6_KSPLIT", 0)))))
   few_q8 = Q8_ROWS_I8[0] and layer.ggml_type in (Q8_0, Q6_K) and tokens <= getenv("Q8_I8_ROWS", 64) and _wmma_rdna4(x.device) and not q6_gemm
   # (RDNA3: the int8 tensor cores of many rows, I8_DENSE_RDNA3)
   dense_i8 = not _wmma_rdna4(x.device) and tokens >= 64 and layer.ggml_type in (Q8_0,) and getenv("I8_DENSE_RDNA3", 0)
@@ -1411,10 +1433,11 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     out_shape = (ksplits*tokens, out_features)
   elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm or few_out_long) and \
        in_features % 32 == 0 and (_wmma_rdna4(x.device) or local_rows >= 256 or few_out_long or q6_rdna3) and \
-       (tt:=next((t for t in ((96, 128, 64) if _wmma_rdna4(x.device) else
-                              tuple(int(t) for t in str(getenv("Q6_TT", "192,128,64,32")).split(",")) if q6_rdna3 else
-                              (getenv("Q8_TT_RDNA3", 128) if local_out % 128 == 0 and local_out >= 512 else 64, 64, 32))
-                   if local_rows % t == 0), 0)) and \
+       (tt:=_q6_rdna4_token_tile(local_rows, bool(getenv("Q6_KSPLIT", 0))) if q6_gemm and _wmma_rdna4(x.device) else
+        next((t for t in ((96, 128, 64) if _wmma_rdna4(x.device) else
+                          tuple(int(t) for t in str(getenv("Q6_TT", "192,128,64,32")).split(",")) if q6_rdna3 else
+                          (getenv("Q8_TT_RDNA3", 128) if local_out % 128 == 0 and local_out >= 512 else 64, 64, 32))
+              if local_rows % t == 0), 0)) and \
        getenv("Q8_GEMM", 1):
     # many tokens: the weights dequantized in LDS for token tiles of tt
     if not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and layer.shard_axis is None and not half_out and \
@@ -1423,13 +1446,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       ksplits = next(s for s in (getenv("Q8_KSPLITS", 32 if local_rows <= 64 else 16 if local_rows <= 512 else 8), 8, 4, 2, 1)
                      if in_features % (32*s) == 0)
       out_shape = (ksplits*tokens, out_features)
-    if q6_rdna3 and not split and not half_out and (tgt:=getenv("Q6_KSPLIT", 192)) and local_rows <= getenv("Q6_KSPLIT_ROWS", 128):
-      # (Q6_KSPLIT=n (default 192, 0: off), RDNA3: a few rows (batched decoding's) of the gemm: few workgroups that loop over the whole
-      # input (a barrier a group of 32): the input split over workgroups (whole Q6_K blocks a split) until there are n workgroups or more,
-      # their partial outputs summed)
-      wgs = (local_rows // tt) * -(-local_out // 64)
-      ksplits = next((s for s in (1, 2, 4, 8, 16) if (in_features // 32) % (8*s) == 0 and wgs * s >= tgt),
-                     next(s for s in (16, 8, 4, 2, 1) if (in_features // 32) % (8*s) == 0))
+    if q6_gemm and not split and not half_out and (tgt:=getenv("Q6_KSPLIT", 192 if q6_rdna3 else 0)) and local_rows <= getenv("Q6_KSPLIT_ROWS", 128):
+      # (Q6_KSPLIT=n, default 192 on RDNA3/0 on RDNA4: split whole Q6_K blocks over workgroups and sum partial outputs)
+      ksplits = _q6_input_splits(in_features, local_out, local_rows, tt, tgt, _wmma_rdna4(x.device))
       out_shape = (splits*ksplits*tokens, out_features)
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=_wmma_rdna4(x.device),
                             block_n=128 if _wmma_rdna4(x.device) else (getenv("Q8_BN_RDNA3", 128) if local_out % getenv("Q8_BN_RDNA3", 128) == 0
