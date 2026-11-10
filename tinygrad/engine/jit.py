@@ -155,7 +155,7 @@ class _TinyJit(Generic[ReturnType]):
 
       # hold all buffers with real storage reachable from live Tensors (e.g. lazy .grad created during capture) and all buffers with
       # allocated storage in the captured linear (e.g. constants baked in by copies): the memory planner can't suballocate those
-      def _buf_or_none(u:UOp) -> Buffer|MultiBuffer|None: return u.arg.buffer if u.op is Ops.BUFFER else None
+      def _buf_or_none(u:UOp) -> Buffer|MultiBuffer|None: return UOp.buffers.get(u.arg.slot) if u.op is Ops.BUFFER else None
       held_bufs = {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if _buf_or_none(u) is not None}
       held_bufs |= {u for u in big_linear.toposort() if (b:=_buf_or_none(u)) is not None and b.is_allocated()}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops, var_vals)

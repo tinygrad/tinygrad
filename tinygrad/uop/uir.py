@@ -42,7 +42,7 @@ _keywords = {"true", "false", "inf", "nan", "invalid"}
 # ops whose arg is one value with a name, and ops whose arg is a dataclass written as key=value per field
 _arg_key = {Ops.CAST:"dtype", Ops.BITCAST:"dtype", Ops.COPY:"device", Ops.GETADDR:"device", Ops.SPECIAL:"name", Ops.UNSHARD:"axes",
             Ops.MSELECT:"index"}
-_skip_fields = {"buffer", "grad_fxn"}   # runtime objects
+_skip_fields = {"grad_fxn"}   # runtime objects
 
 @functools.cache
 def _struct_args() -> dict[Ops, type]:

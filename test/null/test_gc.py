@@ -4,6 +4,7 @@ import unittest
 import numpy as np
 from tinygrad.engine.realize import run_linear
 from tinygrad.tensor import Tensor
+from tinygrad.uop.ops import UOp
 
 def _allocations_of_type(t):
   ret = 0
@@ -82,11 +83,15 @@ class TestGC(unittest.TestCase):
   def test_buffer_ownership(self):
     a = Tensor.empty(10).realize()
     real_buf = a.uop.buffer
+    slot = a.uop.arg.slot
+    self.assertLess(slot, 0)
+    self.assertIs(UOp.buffers[slot], real_buf)
     with assert_freed(real_buf):
       self.assertFalse(real_buf.is_allocated())
       a.realize()
-      self.assertIs(a.uop.arg.buffer, real_buf)
+      self.assertIs(a.uop.buffer, real_buf)
       del a.uop # the Buffer object is still held by real_buf
+      self.assertNotIn(slot, UOp.buffers)
       del real_buf
 
   def test_assign_keeps_buffer(self):

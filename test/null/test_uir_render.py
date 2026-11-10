@@ -13,8 +13,8 @@ from tinygrad.renderer import Estimates
 
 def _strip_buffers(root:UOp) -> UOp:
   # realized BUFFERs carry runtime state the wire can't; a BUFFER with no binding is exactly an ALLOC
-  subs = {b: b.replace(op=Ops.ALLOC, arg=replace(b.arg, buffer=None, spec=None))
-          for b in root.toposort(enter_calls=True) if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg) and b.arg.buffer is not None}
+  subs = {b: b.replace(op=Ops.ALLOC, arg=replace(b.arg, spec=None))
+          for b in root.toposort(enter_calls=True) if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg) and b.arg.slot in UOp.buffers}
   return root.substitute(subs, walk=True, enter_calls=True, name="strip buffers for wire format test") if subs else root
 
 def assert_roundtrip(case, root:UOp):
