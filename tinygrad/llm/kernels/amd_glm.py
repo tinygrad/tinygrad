@@ -5846,7 +5846,10 @@ def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp, kpool:int=4, pba
   T, H, D = q.shape
   P, n = k.shape[0], _idx_shard(k)
   if width is not None and not n: P = width
-  out = Tensor.empty(n*T, P//n, dtype=dtypes.float32, device=q.device, axis=0) if n else Tensor.empty(T, P, dtype=dtypes.float32, device=q.device)
+  # (q split on its rows (IDX_SPLIT): the scores of every device's rows, split so)
+  split = not n and isinstance(q.device, tuple) and q.uop.axis == 0
+  out = Tensor.empty(n*T, P//n, dtype=dtypes.float32, device=q.device, axis=0) if n else \
+    Tensor.empty(T, P, dtype=dtypes.float32, device=q.device, axis=0 if split else None)
   kh = k if k.dtype in (dtypes.half, dtypes.uint32) else k.half().contiguous()
   if isinstance(pools, UOp): kh = Tensor(kh.uop.after(pools))
   if isinstance(pbase, UOp): kh = Tensor(kh.uop.after(pbase))

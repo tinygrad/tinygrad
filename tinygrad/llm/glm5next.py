@@ -1960,6 +1960,16 @@ class Indexer:
     # a few (the drafts of speculative decoding): the same, a row a query
     if Tq <= 8 and idx.n_heads % 16 == 0 and getenv("INDEXER_DECODE_ROWS", 1):
       return indexer_decode_index_rows(iq, pk, weights, start_pos, pools, k, idx.kpool, pbase=pb, width=self.max_pools)
+    # (IDX_SPLIT: a prefill chunk's queries split on their rows over the devices (every device had all of them: the same scores and lists six
+    # times), each device the q projection, the scores and the lists of its rows, the lists gathered. the same lists: exact)
+    n = len(x.device) if isinstance(x.device, tuple) else 1
+    if n > 1 and getenv("IDX_SPLIT", 0) and not self.shard and Tq % (16*n) == 0 and Tq // n <= getenv("INDEXER_ROWS", 1056) and \
+       idx.n_heads % 16 == 0 and amd_custom_kernels_supported(x.device):
+      xs, qs = shard_rows(x[0], 0), shard_rows(q[0], 0)
+      iq_s = self.attn_q_b(qs).reshape(Tq, idx.n_heads, idx.head_dim)
+      w_s = self.proj(xs) * (idx.n_heads * idx.head_dim)**-0.5
+      sc = indexer_scores(iq_s, pk, w_s, pools, idx.kpool, pbase=pb, width=self.max_pools)
+      return all_gather(pool_index_rows(sc, start_pos, pools, k, idx.kpool), 0)[:Tq]
     # the scores on the tensor cores (rows of 16 queries), a kernel per query picks its pools
     rows = round_up(Tq, 16)
     iq, weights = iq.pad(((0, rows-Tq), None, None)), weights.pad(((0, rows-Tq), None))
