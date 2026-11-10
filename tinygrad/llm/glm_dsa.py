@@ -1993,6 +1993,10 @@ class Transformer(GLMSeqDriver):
     self._loaded = False  # the weights are loaded (from_gguf)
     self._scratch:dict = {}  # the memory of the jits' intermediates: they run one at a time
 
+  def _main_token_rows(self) -> int:
+    # (GLM_SEQ: the token buffer is the sequences' regions' too, whichever path makes it first)
+    return self._token_rows() if self.config.cache_rows else self.max_context+1
+
   def _embed(self, tokens:Tensor) -> Tensor:
     # (GLM_SEQ: the tokens are a view of the token buffer at seq_base+start_pos, two variables: embedded from a copy. on the view the embedding
     # isn't a gather, the one-hot of the vocab is made and reduced with the whole table (2688 rows: minutes, the devices' wait times out))
@@ -3634,7 +3638,7 @@ class Transformer(GLMSeqDriver):
     from tinygrad.llm.kernels.amd_glm_dsa import host_allreduce, p2p_allreduce
     # (the device memory the jits use is made here: not in the processes)
     if isinstance(devs, tuple) and p2p_allreduce(devs) is None: host_allreduce(devs)
-    if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self.max_context+1)
+    if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self._main_token_rows())
     if getenv("LOGPROBS", 0) and not hasattr(self, "_lp_buf"):
       V = self.config.padded_vocab_size or self.config.vocab_size
       self._lp_buf = (Tensor.zeros(1, V).shard(devs, 1) if isinstance(devs, tuple) else Tensor.zeros(1, V, device=devs)).contiguous().realize()
@@ -3782,7 +3786,7 @@ class Transformer(GLMSeqDriver):
     if fast:=amd_custom_kernels_supported(self.token_embd.weight.device):
       # in host memory: every step writes its sampled token after its input tokens (see forward), the host polls it
       if not hasattr(self, "_token_buf"):
-        self._token_host, self._token_buf = _host_ints(cast(str|tuple[str, ...], self.token_embd.weight.device), self.max_context+1)
+        self._token_host, self._token_buf = _host_ints(cast(str|tuple[str, ...], self.token_embd.weight.device), self._main_token_rows())
       for d in devs: Device[d].synchronize()  # a step run ahead by the last generate may still use it
       # the prompt, then -1 (not sampled yet) up to the tokens the last generate wrote (its list grew with them, steps run ahead write a few
       # more): the whole buffer only the first time (a write of max_context ints takes ~20 ms)

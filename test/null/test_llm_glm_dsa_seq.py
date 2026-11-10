@@ -71,6 +71,15 @@ class TestGLMDSASequence(unittest.TestCase):
     stores = [u for k in kernels for u in k.src[0].toposort() if u.op is Ops.STORE]
     self.assertFalse(any(u.src[1].dtype == dtypes.bool for u in stores), "the embedding is a reduce of a one-hot of the vocabulary")
 
+  def test_main_path_token_buffer_has_the_regions(self):
+    # (the main path making the token buffer first (generate, warmup): GLM_SEQ's regions in it too, not max_context+1)
+    model = Transformer.__new__(Transformer)
+    model.max_context, model.config = 65536, SimpleNamespace(cache_rows=107520)
+    self.assertEqual(model._main_token_rows(), model._token_rows())
+    self.assertGreaterEqual(model._main_token_rows(), model.seq_rows() + Transformer.REGION_ALIGN + 1)
+    model.config = SimpleNamespace(cache_rows=0)
+    self.assertEqual(model._main_token_rows(), 65537)
+
   def test_dsa_stash_roundtrip(self):
     def t(shape, axis=None):
       x = Tensor(np.arange(np.prod(shape), dtype=np.float16).reshape(shape))
