@@ -1338,6 +1338,11 @@ def _q6_rdna4_padded_rows(local_rows:int, split_enabled:bool) -> int:
   return next((t for t in (32, 64, 96, 128) if local_rows <= t), local_rows)
 
 
+def _q6_rdna4_pad_rows(local_rows:int, split_enabled:bool) -> int:
+  target = _q6_rdna4_padded_rows(local_rows, split_enabled)
+  return target if target > local_rows else 0
+
+
 def _q6_rdna4_token_tile(local_rows:int, split_enabled:bool) -> int:
   tiles = (96, 128, 64, 32) if split_enabled else (96, 128, 64)
   return next((t for t in tiles if local_rows % t == 0), 0)
@@ -1365,7 +1370,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # (Q6_GEMM_RDNA3: Q6_K (the output head) of many rows in the gemm, its weights dequantized once a tile of 32 or 64 rows)
   q6_rdna3 = not _wmma_rdna4(x.device) and layer.ggml_type == Q6_K and xq is None and not split and tokens >= getenv("Q6_GEMM_MIN", 17) and \
     layer.in_features % 256 == 0 and getenv("Q6_GEMM_RDNA3", 1)
-  q6_pad = (_q6_rdna4_padded_rows(tokens, True) - tokens if layer.ggml_type == Q6_K and xq is None and not split and
+  q6_pad = (_q6_rdna4_pad_rows(tokens, True) if layer.ggml_type == Q6_K and xq is None and not split and
             _wmma_rdna4(x.device) and getenv("Q6_KSPLIT", 0) else 0)
   pad = q6_pad or (round_up(tokens, 64 if tokens > 32 else 32) if q6_rdna3 and tokens % (64 if tokens > 32 else 32) else \
         round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny else \

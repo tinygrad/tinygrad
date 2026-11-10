@@ -1,6 +1,6 @@
 import unittest
 
-from tinygrad.llm.kernels.amd_glm import _q6_input_splits, _q6_rdna4_padded_rows, _q6_rdna4_token_tile
+from tinygrad.llm.kernels.amd_glm import _q6_input_splits, _q6_rdna4_pad_rows, _q6_rdna4_padded_rows, _q6_rdna4_token_tile
 
 
 class TestGLMQ6InputSplits(unittest.TestCase):
@@ -20,6 +20,8 @@ class TestGLMQ6InputSplits(unittest.TestCase):
 
   def test_rdna4_padding_and_tiles_preserve_default_and_enable_small_rows(self):
     self.assertEqual([_q6_rdna4_padded_rows(r, True) for r in (24, 48, 72, 96)], [32, 64, 96, 96])
+    # Recursive q8 padding takes the target, not a delta; aligned inputs must not pad again.
+    self.assertEqual([_q6_rdna4_pad_rows(r, True) for r in (24, 32, 48, 64, 72, 96, 128)], [32, 0, 64, 0, 96, 0, 0])
     for rows in (24, 48, 72, 96):
       self.assertEqual(_q6_rdna4_padded_rows(rows, False), rows)
     self.assertEqual([_q6_rdna4_token_tile(r, True) for r in (32, 64, 96)], [32, 64, 96])
