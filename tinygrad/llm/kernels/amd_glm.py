@@ -895,6 +895,8 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
 
 # K256_SKIP: _grouped_k256_kernel skips the WMMAs of its tiles' token tiles that are all padding (the same bits for every row that is read)
 K256_SKIP = getenv("K256_SKIP", 0)
+# K256_SBU: _grouped_k256_kernel's IQ2_S sub-blocks unrolled by 1, 2 or 4 (experiment)
+K256_SBU, K256_SBU3 = getenv("K256_SBU", 1), getenv("K256_SBU3", 1)
 # K256_IDLE: _grouped_k256_kernel's tiles of no expert load no grid and store nothing (their rows are never read)
 K256_IDLE = getenv("K256_IDLE", 0)
 # K256_SIGNPERM: _grouped_k256_kernel's IQ2_S signs by one byte permute of the word and its negation (_iq_signed_word perm, the same bytes)
@@ -965,38 +967,49 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
     if ggml_type == IQ3_S: return (1 + 2*((_load_byte(raw, base, 106 + sb//2) >> ((sb % 2) * 4).cast(dtypes.uint32)) & 15)).cast(dtypes.int32)
     header, low = raw[base].load(), raw[base+1].load()
     return (((low >> (4*sb).cast(dtypes.uint32)) & 15) | (((header >> (16+2*sb).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int32) - 32
-  sb = UOp.range(8, 5, AxisType.LOOP)
+  # K256_SBU (IQ2_S): sub-blocks unrolled by this many (their weight loads issued together), each updates the int sums in turn
+  SBU = K256_SBU if ggml_type == IQ2_S else K256_SBU3 if ggml_type == IQ3_S else 1
+  sb = UOp.range(8 // SBU, 5, AxisType.LOOP)
+  sbs = [sb * SBU + u for u in range(SBU)] if SBU > 1 else [sb]
   def acols(h:int) -> tuple: return (ph*4+2*h, ph*4+2*h+1) if rdna4 else (2*h, 2*h+4, 2*h+1, 2*h+5)
   # K256_SKIP (IQ2_S; IQ3_S's down measured no faster): a token tile of 16 rows that is all padding (an expert's rows are padded at its end:
   # its first row is) skips its WMMAs, a loop of 0 or 1 iterations. its rows' outputs are never read (gate/up's padding rows are read only by
   # down's padding rows, which aren't stored)
   skip = [UOp.range((rows[token_block * TOK + t*16].load() >= 0).where(1, 0), 10+t, AxisType.LOOP)
           if t and K256_SKIP and ggml_type == IQ2_S else None for t in range(TT)]
-  afr = [[_i8_frag(tuple(lds_q[t*16 + col + (skip[t] if skip[t] is not None else 0), sb, c].load() for c in acols(h))) for h in range(2)]
-         for t in range(TT)]
-  sums = []
+  afrs = [[[_i8_frag(tuple(lds_q[t*16 + col + (skip[t] if skip[t] is not None else 0), sbu, c].load() for c in acols(h))) for h in range(2)]
+           for t in range(TT)] for sbu in sbs]
+  sums:list[UOp] = []
   for o, base in enumerate(bases):
-    sub = sub_scale(base, sb) if ggml_type != IQ2_S else None
-    words = _quant_frag_words(raw, base, sb, ph, ggml_type, grid, signed=signed, perm=bool(K256_SIGNPERM)) if rdna4 else \
-      [tuple(_quant_word(raw, base, sb, h*4+i, ggml_type, grid) for i in range(4)) for h in range(2)]
-    bfr = [_i8_frag(w) for w in words]
+    bfrs = []
+    for sbu in sbs:
+      words = _quant_frag_words(raw, base, sbu, ph, ggml_type, grid, signed=signed, perm=bool(K256_SIGNPERM)) if rdna4 else \
+        [tuple(_quant_word(raw, base, sbu, h*4+i, ggml_type, grid) for i in range(4)) for h in range(2)]
+      bfrs.append([_i8_frag(w) for w in words])
     for t in range(TT):
       prev = ints[o][t].after(sb)
       if ggml_type == IQ2_S:
         # (a scale per 16: the halves' dots on their own, each times its scale (a dot of 16 products of at most 43*127, below 2**17))
-        regs = []
-        for h in range(2):
-          dreg = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
-          regs.append(dreg.after(dreg.store(UOp.wmma(afr[t][h], bfr[h], zero, *WMMA_ARG))))
-        subs = [sub_scale(base, sb, h) for h in range(2)]
-        sums.append(ints[o][t].store(UOp.stack(*[_cfn(True, src=(regs[1][j].load(), subs[1], _cfn(True, src=(regs[0][j].load(), subs[0],
-                    prev[j].load()), arg=(MAD_I24, dtypes.int32))), arg=(MAD_I24, dtypes.int32)) for j in range(8)])))
+        for u, sbu in enumerate(sbs):
+          regs = []
+          for h in range(2):
+            dreg = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
+            regs.append(dreg.after(dreg.store(UOp.wmma(afrs[u][t][h], bfrs[u][h], zero, *WMMA_ARG))))
+          subs = [sub_scale(base, sbu, h) for h in range(2)]
+          st = ints[o][t].store(UOp.stack(*[_cfn(True, src=(regs[1][j].load(), subs[1], _cfn(True, src=(regs[0][j].load(), subs[0],
+                                prev[j].load()), arg=(MAD_I24, dtypes.int32))), arg=(MAD_I24, dtypes.int32)) for j in range(8)]))
+          prev = ints[o][t].after(st)
+        sums.append(cast(UOp, st))
         continue
-      dot = UOp.wmma(afr[t][1], bfr[1], UOp.wmma(afr[t][0], bfr[0], zero, *WMMA_ARG), *WMMA_ARG)
-      dreg = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
-      dreg = dreg.after(dreg.store(dot))
-      sums.append(ints[o][t].store(UOp.stack(*[_cfn(True, src=(dreg[j].load(), cast(UOp, sub), prev[j].load()), arg=(MAD_I24, dtypes.int32))
-                                              for j in range(8)])))
+      for u, sbu in enumerate(sbs):
+        afr, bfr = afrs[u], bfrs[u]
+        dot = UOp.wmma(afr[t][1], bfr[1], UOp.wmma(afr[t][0], bfr[0], zero, *WMMA_ARG), *WMMA_ARG)
+        dreg = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
+        dreg = dreg.after(dreg.store(dot))
+        sub = sub_scale(base, sbu)
+        st = ints[o][t].store(UOp.stack(*[_cfn(True, src=(dreg[j].load(), sub, prev[j].load()), arg=(MAD_I24, dtypes.int32)) for j in range(8)]))
+        prev = ints[o][t].after(st)
+      sums.append(cast(UOp, st))
   if K256_SKIP and ggml_type == IQ2_S:
     tsums = [[x for i, x in enumerate(sums) if i % TT == t] for t in range(TT)]
     sums = [UOp.group(*ts).end(sk) if sk is not None else UOp.group(*ts) for ts, sk in zip(tsums, skip)]

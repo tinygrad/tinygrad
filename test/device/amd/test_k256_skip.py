@@ -6,7 +6,7 @@ from tinygrad import Tensor, Device
 from tinygrad.llm.kernels import amd_glm
 from tinygrad.llm.kernels.amd_glm import moe_grouped_linear, QUANT_SIZES, IQ2_S, IQ3_S, amd_custom_kernels_supported
 
-def run(typ:int, skip:int, perm:int=0, idle:int=0, T=96, E=6, K=4, NE=12, D=512, F=256, act=True, sorted_out=False, tile=64) -> np.ndarray:
+def run(typ:int, skip:int, perm:int=0, idle:int=0, sbu:int=1, T=96, E=6, K=4, NE=12, D=512, F=256, act=True, sorted_out=False, tile=64) -> np.ndarray:
   rng = np.random.default_rng(1)
   O = 2*F if act else F
   b = rng.integers(0, 256, size=E*O*D//256*QUANT_SIZES[typ], dtype=np.uint8)
@@ -22,8 +22,8 @@ def run(typ:int, skip:int, perm:int=0, idle:int=0, T=96, E=6, K=4, NE=12, D=512,
     ent[at:at+len(idx)], til[at//tile:at//tile + -(-len(idx)//tile)] = idx, e
     at += -(-len(idx)//tile) * tile
   assert any(0 < int((ent[i*tile:(i+1)*tile] >= 0).sum()) <= tile - 16 for i in range(R // tile)), "no tile with a padding token tile"
-  saved = (amd_glm.K256_SKIP, amd_glm.K256_SIGNPERM, amd_glm.K256_IDLE)
-  amd_glm.K256_SKIP, amd_glm.K256_SIGNPERM, amd_glm.K256_IDLE = skip, perm, idle
+  saved = (amd_glm.K256_SKIP, amd_glm.K256_SIGNPERM, amd_glm.K256_IDLE, amd_glm.K256_SBU, amd_glm.K256_SBU3)
+  amd_glm.K256_SKIP, amd_glm.K256_SIGNPERM, amd_glm.K256_IDLE, amd_glm.K256_SBU, amd_glm.K256_SBU3 = skip, perm, idle, sbu, sbu
   amd_glm._grouped_k256_kernel.cache_clear()
   if sorted_out:
     x = Tensor(rng.normal(size=(R, D)).astype(np.float32)).realize()
@@ -31,7 +31,7 @@ def run(typ:int, skip:int, perm:int=0, idle:int=0, T=96, E=6, K=4, NE=12, D=512,
   else:
     x = Tensor(rng.normal(size=(T, D)).astype(np.float32)).realize()
     out = moe_grouped_linear(w, typ, E, x, Tensor(ent), Tensor(til), slots=K, act=(1.0, 0.0, 0.0) if act else None).numpy()
-  amd_glm.K256_SKIP, amd_glm.K256_SIGNPERM, amd_glm.K256_IDLE = saved
+  amd_glm.K256_SKIP, amd_glm.K256_SIGNPERM, amd_glm.K256_IDLE, amd_glm.K256_SBU, amd_glm.K256_SBU3 = saved
   amd_glm._grouped_k256_kernel.cache_clear()
   return out[ent >= 0]  # (the padding rows aren't read)
 
@@ -42,6 +42,12 @@ class TestK256Skip(unittest.TestCase):
   def test_iq2_s_act_all(self): np.testing.assert_array_equal(run(IQ2_S, 0), run(IQ2_S, 1, perm=1, idle=1))
   def test_iq2_s_down_sorted(self):
     np.testing.assert_array_equal(run(IQ2_S, 0, act=False, sorted_out=True), run(IQ2_S, 1, perm=1, idle=1, act=False, sorted_out=True))
+  def test_iq2_s_unroll(self):
+    ref = run(IQ2_S, 0)
+    for sbu in (2, 4):
+      with self.subTest(sbu=sbu): np.testing.assert_array_equal(ref, run(IQ2_S, 1, perm=1, idle=1, sbu=sbu))
+  def test_iq3_s_unroll(self):
+    np.testing.assert_array_equal(run(IQ3_S, 0, act=False, sorted_out=True), run(IQ3_S, 0, idle=1, sbu=2, act=False, sorted_out=True))
   def test_iq3_s(self):
     np.testing.assert_array_equal(run(IQ3_S, 0, act=False, sorted_out=True), run(IQ3_S, 1, perm=1, idle=1, act=False, sorted_out=True))
 
