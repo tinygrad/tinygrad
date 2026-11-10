@@ -3698,7 +3698,7 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
     return [((p_ >> sh) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.half) - 1032 for p_ in pairs for sh in (0, 16)]
   def tile_loads(t:UOp) -> tuple[list[UOp], UOp]:
     lkey, lok = key_at(t, lrow)
-    words = [w for h4 in range(DPT // 32) for w in _amd_load(cache[lkey, lpart*(DPT//8) + h4*4], 4)]
+    words = [v[i] for h4 in range(DPT // 32) if (v:=_amd_load(cache[lkey, lpart*(DPT//8) + h4*4], 4)) is not None for i in range(4)]
     return words + [cache[lkey, W4 + lpart*(DPT//64) + i].load() for i in range(DPT // 64)], lok
   def tile_stores(vals:tuple[list[UOp], UOp], lk:UOp, lv:UOp, lsc:UOp) -> list[UOp]:
     ws, lok = vals
