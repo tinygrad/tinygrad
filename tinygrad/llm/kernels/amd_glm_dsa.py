@@ -5124,11 +5124,40 @@ def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:in
   cand = Tensor.custom_kernel(cand, sc, _device_index(devs), *extra, fxn=functools.partial(_pool_cand_kernel, q_start=qs, pools=pu, k=c,
                                                                                            kpool=kpool, n=n))[0]
   flat = cand.reshape(n, rows*c*2)
+  if positions is None and rows >= 16*n and getenv("IDX_MERGE_SPLIT", 1):
+    return _pool_merge_split(cand, out, devs, rows, c, qs, pu, top, kpool, row0)
   # (a ring of copies: the peer to peer kernel is slower past a few rows' (IDX_P2P_ROWS))
   g = host_allgather(flat) if rows <= getenv("IDX_P2P_ROWS", 4) else None
   allc = g if g is not None else all_gather(flat, 0, dtypes.float32)
   return Tensor.custom_kernel(out, allc.reshape(n, rows, c, 2).contiguous(), *extra,
                               fxn=functools.partial(_pool_merge_kernel, q_start=qs, pools=pu, k=top, kpool=kpool, row0=row0))[0]
+
+@functools.cache
+def _rows_into_kernel(out:UOp, x:UOp, row0:int, rows:int) -> UOp:
+  # the first rows of x into rows row0.. of out
+  W = cast(int, out.shape[1])
+  o, s = out.flatten(), x.flatten()
+  i = UOp.range(rows*W, 0)
+  return o[row0*W + i].store(s[i].load()).end(i).sink(arg=KernelInfo(name="rows_into"))
+
+def _pool_merge_split(cand:Tensor, out:Tensor, devs:tuple[str, ...], rows:int, c:int, qs:UOp, pu:UOp, top:int, kpool:int, row0:int) -> Tensor:
+  """
+  pool_index_shard's merge split on the rows (IDX_MERGE_SPLIT): device i gets every device's candidates of its rows only (one shot), merges
+  them (the same kernel on the same candidates in the same order: the same lists), the lists gathered. every device merging every row had
+  the candidates of all of them sent around the ring (n-1 times the bytes) and n times the merges
+  """
+  n, per = len(devs), -(-rows // len(devs))
+  bnd = [(min(rows, i*per), min(rows, (i+1)*per)) for i in range(n)]
+  loc = _per_device(_materialized(cand, dtypes.float32))
+  mine = [loc.mselect(j) for j in range(n)]
+  def piece(j:int, i:int) -> UOp: return mine[j].shrink(((bnd[i][0], bnd[i][1]), (0, c), (0, 2)))
+  sent = _rotated(piece, devs)
+  def merged(i:int) -> UOp:
+    allc = Tensor.stack(*[Tensor(piece(i, i) if j == i else sent[(j, i)]) for j in range(n)]).contiguous()
+    o = Tensor.empty(per, top*kpool + kpool + 1, dtype=dtypes.int32, device=devs[i])
+    return Tensor.custom_kernel(o, allc, fxn=functools.partial(_pool_merge_kernel, q_start=qs + bnd[i][0], pools=pu, k=top, kpool=kpool))[0].uop
+  lists = all_gather(Tensor(UOp.mstack(*[merged(i) for i in range(n)]).unshard(0)), 0)
+  return Tensor.custom_kernel(out, lists, fxn=functools.partial(_rows_into_kernel, row0=row0, rows=rows))[0]
 
 def _reg_u32() -> UOp:
   ret = UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG)
