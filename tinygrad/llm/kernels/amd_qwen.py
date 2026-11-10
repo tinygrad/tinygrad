@@ -3903,7 +3903,8 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
     ok = col.eq(0) & (r < H)
     stores += [stats[b, r.valid(ok), p, 0].store(m_fin[i].load()), stats[b, r.valid(ok), p, 1].store(l_fin[i].load())]
   est = Estimates(4 * n_max * B * 16 * D, n_max * B * (D // 2 + D // 16), n_max * B * (D // 2 + D // 16))
-  return UOp.group(*stores).end(bp, wave, lane).sink(arg=KernelInfo(name="qsa_prefill" if P == 1 else "qsa_wmma_decode", opts_to_apply=(), estimates=est))
+  name = "qsa_prefill" if P == 1 else "qsa_wmma_decode"
+  return UOp.group(*stores).end(bp, wave, lane).sink(arg=KernelInfo(name=name, opts_to_apply=(), estimates=est))
 
 def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, scale:float, parts:int=0, waves:int=0, kpool:int=0,
                          lse:bool=False, bits:int=8) -> Tensor|tuple[Tensor, Tensor]:
