@@ -232,7 +232,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     try: del UOpMetaClass.ucache[(self.op, self.src, self.arg, type(self.arg))]
     except (AttributeError, KeyError): pass
     try:
-      if self.op is Ops.BUFFER and self.arg.slot < 0 and self.arg.addrspace is AddrSpace.GLOBAL:
+      if self.op is Ops.BUFFER and self.arg.slot >= 0 and self.arg.addrspace is AddrSpace.GLOBAL:
         if (buf:=UOp.buffers.pop(self.arg.slot, None)) is not None: UOp.buffer_slots.pop((buf, self.arg.dtype, self.arg.device), None)
     except AttributeError: pass
   def __reduce__(self):
@@ -795,8 +795,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop Buffer stuff ***
 
   unique_num = itertools.count(0)
-  buffer_num = itertools.count(-1, -1)
-  # Realized BUFFERs own their device Buffers through this table. Negative slots keep them out of positional parameter numbering.
+  # Realized BUFFERs own their device Buffers through this table. Nonnegative slots are bound; negative slots are unbound.
   buffers: ClassVar[dict[int, Buffer|MultiBuffer]] = {}
   buffer_slots: ClassVar[dict[tuple[Buffer|MultiBuffer, DType, str|tuple[str, ...]|None], int]] = {}
 
@@ -810,7 +809,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def _buffer(size:int, dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, buffer:Buffer|MultiBuffer|None=None) -> UOp:
     if buffer is not None:
-      assert slot < 0 and addrspace is AddrSpace.GLOBAL and UOp.buffers.get(slot, buffer) is buffer, f"invalid realized BUFFER slot {slot}"
+      assert slot >= 0 and addrspace is AddrSpace.GLOBAL and UOp.buffers.get(slot, buffer) is buffer, f"invalid realized BUFFER slot {slot}"
     ret = UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),)+UOp.device_range_src(device),
               arg=ParamArg(slot, dtype, addrspace=addrspace, device=device))
     if buffer is not None:
@@ -822,14 +821,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert dtype.itemsize > 0, f"not a storage dtype: {dtype}"
     assert isinstance(size, int), f"new_buffer size must be a concrete int, got {size}"
     buf = MultiBuffer(device, size * dtype.itemsize) if isinstance(device, tuple) else Buffer(device, size * dtype.itemsize)
-    return UOp._buffer(size, dtype, next(UOp.buffer_num), device=device, buffer=buf)
+    return UOp._buffer(size, dtype, next(UOp.unique_num), device=device, buffer=buf)
   @staticmethod
   def from_buffer(opaque:Buffer|MultiBuffer, dtype:DType, device:str|tuple[str, ...]|None=None):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
     assert dtype.itemsize > 0, f"not a storage dtype: {dtype}"
     assert opaque.nbytes % dtype.itemsize == 0, f"{opaque.nbytes} bytes is not divisible by {dtype.itemsize} for {dtype}"
     device = device or opaque.device
-    if (slot:=UOp.buffer_slots.get((opaque, dtype, device))) is None: slot = next(UOp.buffer_num)
+    if (slot:=UOp.buffer_slots.get((opaque, dtype, device))) is None: slot = next(UOp.unique_num)
     return UOp._buffer(opaque.nbytes // dtype.itemsize, dtype, slot, device=device, buffer=opaque)
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)

@@ -86,7 +86,7 @@ class TestGC(unittest.TestCase):
     real_buf = a.uop.buffer
     slot = a.uop.arg.slot
     key = (real_buf, a.uop.dtype, a.uop.device)
-    self.assertLess(slot, 0)
+    self.assertGreaterEqual(slot, 0)
     self.assertIs(UOp.buffers[slot], real_buf)
     self.assertIs(UOp.from_buffer(real_buf, a.uop.dtype, a.uop.device), a.uop)
     with assert_freed(real_buf):
