@@ -1373,9 +1373,13 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   q6_split_target = getenv("Q6_KSPLIT", 192)  # default on: RDNA3/RDNA4; Q6_KSPLIT=0 opts out
   q6_pad = (_q6_rdna4_pad_rows(tokens, True) if layer.ggml_type == Q6_K and xq is None and not split and
             _wmma_rdna4(x.device) and q6_split_target else 0)
+  # (RDNA3: a few rows of a long input that the decode kernel takes padded or not (its rows share the weight loads): not padded (9 rows
+  # computed as 16 were most of GLM_SEQ's step of 3 sequences: 25.4 -> 22.2 ms), Q8_PAD_DECODE=0 the old padding)
+  decode_rows = not _wmma_rdna4(x.device) and in_features >= getenv("DECODE_MIN_K", 1024) and round_up(tokens, 16) <= DECODE_MULTI and \
+    bool(getenv("Q8_PAD_DECODE", 1))
   pad = q6_pad or (round_up(tokens, 64 if tokens > 32 else 32) if q6_rdna3 and tokens % (64 if tokens > 32 else 32) else \
         round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny else \
-        round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) else 0)
+        round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) and not decode_rows else 0)
   skinny_i8 = skinny and getenv("SKINNY_I8", 0)
   if not pad and skinny and tokens % (16 if skinny_i8 else 32): pad = round_up(tokens, 16 if skinny_i8 else 32)
   elif not pad and not _wmma_rdna4(x.device) and tokens > getenv("PAD16_ROWS", 16) and tokens % 16 and xq is None and not split:
