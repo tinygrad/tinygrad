@@ -84,5 +84,13 @@ class TestBatchCheckpoint(unittest.TestCase):
     self.assertEqual(pending, [])
 
 
+class TestGLMQ8GatherShapes(unittest.TestCase):
+  def test_pack_needs_whole_warps_of_groups(self):
+    # MLA's 576 dims are 18 groups of 32. Eight groups are packed per warp, so the last two groups would be omitted.
+    from tinygrad.llm.kernels.amd_glm import _q8_pack_kernel, _q8_unpack_kernel
+    self.assertRaises(AssertionError, _q8_pack_kernel, Tensor.empty(4, 18, 9, dtype="uint32").uop, Tensor.empty(4, 576, dtype="half").uop)
+    self.assertRaises(AssertionError, _q8_unpack_kernel, Tensor.empty(4, 576, dtype="half").uop, Tensor.empty(4, 18, 9, dtype="uint32").uop)
+
+
 if __name__ == '__main__':
   unittest.main()
