@@ -234,7 +234,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     try:
       if self.op is Ops.BUFFER and self.arg.slot < 0: UOp.buffers.pop(self.arg.slot, None)
     except AttributeError: pass
-  def __reduce__(self): return UOp, (self.op, self.src, self.arg)
+  def __reduce__(self):
+    if self.op is Ops.BUFFER and self.arg.slot in UOp.buffers: return UOp.from_buffer, (self.buffer, self.dtype, self.device)
+    return UOp, (self.op, self.src, self.arg)
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg))
     assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
@@ -814,13 +816,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if buffer is not None: UOp.buffers.pop(slot, None)
       raise
   @staticmethod
-  def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
+  def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
     assert dtype.itemsize > 0, f"not a storage dtype: {dtype}"
     assert isinstance(size, int), f"new_buffer size must be a concrete int, got {size}"
-    slot = next(UOp.buffer_num) if num is None else num
     buf = MultiBuffer(device, size * dtype.itemsize) if isinstance(device, tuple) else Buffer(device, size * dtype.itemsize)
-    return UOp._buffer(size, dtype, slot, device=device, buffer=buf)
+    return UOp._buffer(size, dtype, next(UOp.buffer_num), device=device, buffer=buf)
   @staticmethod
   def from_buffer(opaque:Buffer|MultiBuffer, dtype:DType, device:str|tuple[str, ...]|None=None):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")

@@ -42,8 +42,6 @@ _keywords = {"true", "false", "inf", "nan", "invalid"}
 # ops whose arg is one value with a name, and ops whose arg is a dataclass written as key=value per field
 _arg_key = {Ops.CAST:"dtype", Ops.BITCAST:"dtype", Ops.COPY:"device", Ops.GETADDR:"device", Ops.SPECIAL:"name", Ops.UNSHARD:"axes",
             Ops.MSELECT:"index"}
-_skip_fields = {"grad_fxn"}   # runtime objects
-
 @functools.cache
 def _struct_args() -> dict[Ops, type]:
   from tinygrad.schedule.indexing import BufferizeOpts  # schedule imports codegen, which imports this
@@ -75,7 +73,8 @@ def _fields_str(a, ref:Callable[[UOp], str|None], first:bool) -> str:
   for i,f in enumerate(fields(a)):
     v = getattr(a, f.name)
     # a default is left out, except the first field if first. compared by repr, since == of a UOp builds a UOp
-    if f.name in _skip_fields or (repr(v) == repr(f.default) and not (first and i == 0)): continue
+    # grad_fxn is runtime state and isn't rendered
+    if f.name == "grad_fxn" or (repr(v) == repr(f.default) and not (first and i == 0)): continue
     ret.append(f"{f.name}={_val(v, f.name in _named_keys, ref)}")
   return " ".join(ret)
 
