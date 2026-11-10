@@ -1191,6 +1191,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return self._masked_merge(src, mask, (-1,))
 
   def _masked_merge(self, values:Self, mask:Self, axes:tuple[int, ...]) -> Self:
+    if any(mask.shape[dim] == 0 for dim in axes): return self
     # reduce such that if mask contains repeated indices the last one remains
     for dim in reversed(axes):
       mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
