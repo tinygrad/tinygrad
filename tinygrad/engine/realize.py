@@ -51,7 +51,6 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
 
 def estimate_uop(call:UOp) -> Estimates:
   call = call.without_after
-  if call.arg.hcq is not None: return call.arg.hcq.estimates
   if (ast:=call.body).op is Ops.PROGRAM: return ast.src[0].arg.estimates or Estimates()
   if ast.op is Ops.STORE or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "encdec"):
     return Estimates(lds=(nbytes:=prod(call.src[1].shape) * call.src[1].dtype.itemsize), mem=nbytes)
