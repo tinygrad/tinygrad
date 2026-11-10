@@ -10,6 +10,7 @@ import numpy as np
 from tinygrad.helpers import getenv
 from tinygrad.llm.model import Transformer
 from tinygrad.llm.cli import SimpleTokenizer
+from tinygrad.llm.kernels.amd_glm import q8_quantize_cache_clear
 
 model, kv = Transformer.from_gguf(os.environ["MODEL"], getenv("MAXCTX", 65536), shard=getenv("SHARD", 6))
 tok = SimpleTokenizer.from_gguf_kv(kv)
@@ -21,7 +22,10 @@ for i in range(N):
   off = 1000 + i * (len(corpus) - L - 2000) // N
   ids = corpus[off:off + L + 1]
   next(model.generate(list(ids[:L])))
+  # (the head's q8 activation cache is keyed by the input's graph: the same row read again was the first prompt's (every result the same))
+  q8_quantize_cache_clear()
   x = model.output(model._spec_h[0:1]).float().numpy()[0, :V].astype(np.float64)
+  q8_quantize_cache_clear()
   m = x.max()
   lp = x - (m + np.log(np.exp(x - m).sum()))
   best = np.argpartition(-lp, TOP)[:TOP]

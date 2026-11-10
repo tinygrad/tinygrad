@@ -25,6 +25,24 @@ ids = tok.encode(env.from_string(tok.chat_template).render(messages=msgs, tools=
 N, k = getenv("NTOK", 48), model.config.spec_drafts
 # (WARMUP=1: the jits made as a server's (model.warmup) first)
 if getenv("WARMUP", 0): model.warmup()
+# (ZERO=spec,mainspec,states,rp,rings,ckpt,caches after the warmup: the slots' state of that kind zeroed again: which leftovers change it)
+if (zero:=str(getenv("ZERO", ""))):
+  from tinygrad.llm.glm5next import GatedDeltaNetBlock, MLATransformerBlock
+  zs:list = []
+  kinds = set(zero.split(","))
+  if "spec" in kinds: zs += [model.seq_spec_h]
+  # (mainspec: the main path's hidden rows of speculative decoding (and its slots'): a step reads rows 1..k of the last one's)
+  if "mainspec" in kinds: zs += [t for n in ("_spec_h", "pool_spec_h") if (t:=getattr(model, n, None)) is not None]
+  for b in model.blk + [model.mtp]:
+    if isinstance(b, GatedDeltaNetBlock):
+      if "states" in kinds: zs += [b.pool_rec, *b.pool_conv]
+      if "rp" in kinds and hasattr(b, "pool_rp"): zs.append(b.pool_rp)
+      if "main" in kinds: zs += [b.recurrent_state, *b.conv_states]
+    if isinstance(b, MLATransformerBlock) and b.indexer is not None and "rings" in kinds: zs += [b.indexer.pool_ring, b.indexer.ring]
+  if "ckpt" in kinds: zs += [model.seq_ckpt_h] + [t for c in model.seq_ckpt_states for t in c]
+  from tinygrad import Tensor
+  Tensor.realize(*[t.assign(t.zeros_like()) for t in zs])
+  print(f"zeroed {len(zs)} buffers ({zero})", flush=True)
 # (FILL=x: the attention caches' rows (MLA latent rows, pooled keys, rings) filled with x first: tokens that change read unwritten rows)
 if (fill:=getenv("FILL", "")) != "":
   from tinygrad import Tensor
