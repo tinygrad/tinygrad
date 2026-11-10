@@ -5162,7 +5162,8 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   extra = ((positions,) if positions is not None else ()) + ((slots,) if slots is not None else ()) + \
     ((Tensor(replay.uop.after(start_pos.uop)), cast(Tensor, kbases)) if replay is not None else ())
   srcs = (z, *inplace, *projs, *conv_weights, gate, alpha, beta, dt, a, norm) + extra
-  contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
+  # (not staged: an input of elementwise ops or pads of buffers is computed by the kernel's loads, see schedule/custom_inline)
+  contig = tuple(x.uop for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
   nx = len(extra)
   pos_param = params[len(params)-nx] if positions is not None else None
