@@ -343,8 +343,8 @@ GDN_MERGED, HC_NORM_REAL = getenv("GDN_MERGED", 0), getenv("HC_NORM_REAL", 1)
 QSA_ROT_FWHT = getenv("QSA_ROT_FWHT", 1)
 # HC_DEC: batched decoding's hyper-connections of a device's few real rows (1-HC_DEC_ROWS (<=16), split) by the decode kernels (ghc_pre,
 # the decode linear, ghc_decode_mix/ghc_post: the B=1 path's) instead of the prefill ones on padded tiles of 32 (numerics: the B=1 path's,
-# q8 activations)
-HC_DEC, HC_DEC_ROWS = getenv("HC_DEC", 0), getenv("HC_DEC_ROWS", 16)
+# q8 activations). tr8 IQ4 B=8 (4 rows a device) 21.36 -> 20.61 ms, B=16 (8) +0.9%, B=32 (16) +4.4%: HC_DEC_ROWS=4)
+HC_DEC, HC_DEC_ROWS = getenv("HC_DEC", 0), getenv("HC_DEC_ROWS", 4)
 def _split_rows() -> int: return round_up(_seq_split[0], 32)
 def _split_real(x:Tensor) -> Tensor:
   """(B, N*P, ...) split padded rows: the real rows (B, N*R, ...), split"""
