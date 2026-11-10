@@ -5210,7 +5210,7 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int, base:int
   # (after the cache's store: the rows of the tokens in the devices' parts for the calls after this one)
   # (SEQ_GATHER_HALF: a half cache's whole one in half (the gather kernel stores a word's halves): its bitcast below was a copy of all of it,
   # max context x 512 halves a layer a chunk)
-  half = not fp8 and bool(getenv("SEQ_GATHER_HALF", 0))
+  half = not fp8 and bool(getenv("SEQ_GATHER_HALF", 1))
   out = Tensor(Tensor.empty(N, D if half else W, dtype=dtypes.half if half else wdt, device=devs).uop.after(
     cache.uop, *(v for v in (start_pos, T, base) if isinstance(v, UOp))))
   for kk, part in enumerate(seq_views(cache)):
