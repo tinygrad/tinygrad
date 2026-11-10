@@ -5161,7 +5161,7 @@ def _rows_into_kernel(out:UOp, x:UOp, row0:int, rows:int) -> UOp:
   i = UOp.range(rows*W, 0)
   return o[row0*W + i].store(s[i].load()).end(i).sink(arg=KernelInfo(name="rows_into"))
 
-def _pool_merge_split(cand:Tensor, out:Tensor, devs:tuple[str, ...], rows:int, c:int, qs:UOp, pu:UOp, top:int, kpool:int, row0:int) -> Tensor:
+def _pool_merge_split(cand:Tensor, out:Tensor, devs:tuple[str, ...], rows:int, c:int, qs, pu, top:int, kpool:int, row0:int) -> Tensor:
   """
   pool_index_shard's merge split on the rows (IDX_MERGE_SPLIT): device i gets every device's candidates of its rows only (one shot), merges
   them (the same kernel on the same candidates in the same order: the same lists), the lists gathered. every device merging every row had
