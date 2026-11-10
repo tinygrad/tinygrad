@@ -1,5 +1,5 @@
 # uops tests that pass on NULL backend (no copyout needed)
-import unittest, math
+import unittest, math, pickle
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context, ceildiv, Timing, cdiv, Target
@@ -587,11 +587,12 @@ class TestUopsObject(unittest.TestCase):
     del b
     self.assertIs(a.buffer, buf)
 
-  def test_scratch_slots_are_nonnegative(self):
+  def test_scratch_pickle_does_not_use_global_binding(self):
+    real = UOp.new_buffer("CPU", 4, dtypes.float32)
     for addrspace in (AddrSpace.LOCAL, AddrSpace.REG):
-      with self.assertRaises(AssertionError): UOp.alloc((4,), dtypes.float32, -1, addrspace)
-      with self.assertRaises(AssertionError): UOp._buffer(4, dtypes.float32, -1, addrspace=addrspace)
-      self.assertIs(UOp.placeholder((4,), dtypes.float32, 0, addrspace).op, Ops.ALLOC)
+      scratch = UOp.placeholder((1,), dtypes.float32, real.arg.slot, addrspace)
+      with self.assertRaises(AssertionError): _ = scratch.buffer
+      self.assertIs(pickle.loads(pickle.dumps(scratch)), scratch)
 
   def test_timing(self):
     with Timing("create 10k uops:"): ret = [UOp.const(10000000+i, dtypes.int) for i in range(10000)]

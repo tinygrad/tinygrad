@@ -5,7 +5,7 @@ import numpy as np
 from tinygrad.engine.realize import run_linear
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp
 
 def _allocations_of_type(t):
   ret = 0
@@ -88,7 +88,7 @@ class TestGC(unittest.TestCase):
     key = (real_buf, a.uop.dtype, a.uop.device)
     self.assertLess(slot, 0)
     self.assertIs(UOp.buffers[slot], real_buf)
-    self.assertIs(UOp.buffer_slots[key](), a.uop)
+    self.assertIs(UOp.buffer_slots[key][1](), a.uop)
     with assert_freed(real_buf):
       self.assertFalse(real_buf.is_allocated())
       a.realize()
@@ -99,12 +99,28 @@ class TestGC(unittest.TestCase):
       del key
       del real_buf
 
-  def test_scratch_allocs_do_not_unbind_globals(self):
+  def test_cyclic_gc_releases_buffer(self):
+    a = Tensor.empty(10).realize()
+    buf = a.uop.buffer
+    key = (buf, a.uop.dtype, a.uop.device)
+    slot = a.uop.arg.slot
+    uop_ref, buf_ref = weakref.ref(a.uop), weakref.ref(buf)
+    holder = [a]
+    holder.append(holder)
+    del a, holder
+    gc.collect()
+    self.assertIsNone(uop_ref())
+    self.assertNotIn(slot, UOp.buffers)
+    self.assertNotIn(key, UOp.buffer_slots)
+    del key, buf
+    gc.collect()
+    self.assertIsNone(buf_ref())
+
+  def test_scratch_buffers_do_not_unbind_globals(self):
     real = UOp.new_buffer("CPU", 4, dtypes.float32)
     real_buf = real.buffer
     for addrspace in (AddrSpace.LOCAL, AddrSpace.REG):
-      scratch = UOp.placeholder((4,), dtypes.float32, 0, addrspace)
-      self.assertIs(scratch.op, Ops.ALLOC)
+      scratch = UOp.placeholder((4,), dtypes.float32, real.arg.slot, addrspace)
       del scratch
       gc.collect()
       self.assertIs(real.buffer, real_buf)

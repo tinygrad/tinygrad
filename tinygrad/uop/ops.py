@@ -234,12 +234,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     try:
       if self.op is Ops.BUFFER and self.arg.slot < 0 and self.arg.addrspace is AddrSpace.GLOBAL:
         if (buf:=UOp.buffers.get(self.arg.slot)) is not None and (owner:=UOp.buffer_slots.get((buf, self.arg.dtype, self.arg.device))) is not None:
-          if owner() is self:
+          if owner[0] == id(self):
             UOp.buffers.pop(self.arg.slot, None)
             UOp.buffer_slots.pop((buf, self.arg.dtype, self.arg.device), None)
     except AttributeError: pass
   def __reduce__(self):
-    if self.op is Ops.BUFFER and self.arg.slot in UOp.buffers: return UOp.from_buffer, (self.buffer, self.dtype, self.device)
+    if self.op is Ops.BUFFER and self.arg.addrspace is AddrSpace.GLOBAL and self.arg.slot in UOp.buffers:
+      return UOp.from_buffer, (self.buffer, self.dtype, self.device)
     return UOp, (self.op, self.src, self.arg)
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg))
@@ -800,7 +801,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   buffer_num = itertools.count(-1, -1)
   # Realized BUFFERs own their device Buffers through this table. Negative slots keep them out of positional parameter numbering.
   buffers: ClassVar[dict[int, Buffer|MultiBuffer]] = {}
-  buffer_slots: ClassVar[dict[tuple[Buffer|MultiBuffer, DType, str|tuple[str, ...]|None], weakref.ReferenceType[UOp]]] = {}
+  # The owner id remains usable during cyclic GC after weak references are cleared.
+  buffer_slots: ClassVar[dict[tuple[Buffer|MultiBuffer, DType, str|tuple[str, ...]|None], tuple[int, weakref.ReferenceType[UOp]]]] = {}
 
   def getaddr(self, device=None) -> UOp:
     if self.without_after.op not in GroupOp.Defines|{Ops.SHRINK, Ops.BITCAST, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.LINEAR}: return self
@@ -811,13 +813,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return (UOp.range(len(device), 0, AxisType.DEVICE),) if isinstance(device, tuple) else ()
   @staticmethod
   def _buffer(size:int, dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, buffer:Buffer|MultiBuffer|None=None) -> UOp:
-    if buffer is None: assert slot >= 0, f"unbound BUFFER needs a nonnegative slot, got {slot}"
     if buffer is not None:
       assert slot < 0 and addrspace is AddrSpace.GLOBAL and UOp.buffers.get(slot, buffer) is buffer, f"invalid realized BUFFER slot {slot}"
     ret = UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),)+UOp.device_range_src(device),
               arg=ParamArg(slot, dtype, addrspace=addrspace, device=device))
     if buffer is not None:
-      UOp.buffers[slot], UOp.buffer_slots[(buffer, dtype, device)] = buffer, weakref.ref(ret)
+      UOp.buffers[slot], UOp.buffer_slots[(buffer, dtype, device)] = buffer, (id(ret), weakref.ref(ret))
     return ret
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType):
@@ -832,7 +833,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert dtype.itemsize > 0, f"not a storage dtype: {dtype}"
     assert opaque.nbytes % dtype.itemsize == 0, f"{opaque.nbytes} bytes is not divisible by {dtype.itemsize} for {dtype}"
     device = device or opaque.device
-    if (owner:=UOp.buffer_slots.get((opaque, dtype, device))) is not None and (ret:=owner()) is not None: return ret
+    if (owner:=UOp.buffer_slots.get((opaque, dtype, device))) is not None and (ret:=owner[1]()) is not None: return ret
     return UOp._buffer(opaque.nbytes // dtype.itemsize, dtype, next(UOp.buffer_num), device=device, buffer=opaque)
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
@@ -965,7 +966,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret.bufs = [cast(Buffer, x.buffer) for x in self.src]
       assert all_same([x.nbytes for x in ret.bufs]) and all_same([x.dtype for x in self.src]), "multibuffers mismatch buffers"
       return ret
-    assert self.op is Ops.BUFFER and self.arg.slot in UOp.buffers, f"must be a realized BUFFER {self}"
+    assert self.op is Ops.BUFFER and self.arg.addrspace is AddrSpace.GLOBAL and self.arg.slot in UOp.buffers, \
+      f"must be a realized global BUFFER {self}"
     return UOp.buffers[self.arg.slot]
   @property
   def realized(self) -> Buffer|MultiBuffer|None:
@@ -1168,7 +1170,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
             spec:BufferSpec|None=None, bind_on_realize:bool=False, name:str|None=None):
     if slot is None: slot = next(UOp.unique_num)
-    if addrspace in (AddrSpace.LOCAL, AddrSpace.REG): assert slot >= 0, f"{addrspace} ALLOC needs a nonnegative slot, got {slot}"
     ret = UOp(Ops.ALLOC, src=(shape_to_shape_arg((prod(to_max_shape(shape)),)),)+UOp.device_range_src(device),
               arg=ParamArg(slot, strong_dtype(dtype), addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
@@ -1178,9 +1179,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL):
     dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if slot is None: slot = next(UOp.unique_num)
-    if addrspace is not AddrSpace.GLOBAL: return UOp.alloc(shape, dtype, slot, addrspace)
-    ret = UOp.param(slot, dtype, prod(shape))
-    return ret.reshape(shape) if len(shape) > 1 else ret
+    if addrspace is AddrSpace.GLOBAL:
+      ret = UOp.param(slot, dtype, prod(shape))
+    else:
+      assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
+      ret = UOp._buffer(prod(shape), dtype, slot, addrspace=addrspace)
+    if len(shape) > 1: ret = ret.reshape(shape)
+    return ret
   def placeholder_like(self, slot:int):
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
     return UOp.placeholder(self.max_shard_shape, self.dtype, slot)
@@ -1892,7 +1897,7 @@ pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])]
 
 pm_renumber_slots = PatternMatcher([
   (UPat(Ops.RANGE, name="u"), lambda ctx, u: u.replace(arg=(u.axis_type, next(ctx))+u.axis_id[1:])),
-  (UPat((Ops.BUFFER, Ops.ALLOC), name="u"), lambda ctx, u: u.replace(arg=replace(u.arg, slot=next(ctx))) if u.addrspace is AddrSpace.REG else None),
+  (UPat(Ops.BUFFER, name="u"), lambda ctx, u: u.replace(arg=replace(u.arg, slot=next(ctx))) if u.addrspace is AddrSpace.REG else None),
 ])
 
 def gate_kernel_sink(x:UOp) -> bool:

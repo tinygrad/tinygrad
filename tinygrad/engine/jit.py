@@ -3,7 +3,7 @@ import functools
 from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, AddrSpace
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite
 from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
@@ -155,7 +155,8 @@ class _TinyJit(Generic[ReturnType]):
 
       # hold all buffers with real storage reachable from live Tensors (e.g. lazy .grad created during capture) and all buffers with
       # allocated storage in the captured linear (e.g. constants baked in by copies): the memory planner can't suballocate those
-      def _buf_or_none(u:UOp) -> Buffer|MultiBuffer|None: return UOp.buffers.get(u.arg.slot) if u.op is Ops.BUFFER else None
+      def _buf_or_none(u:UOp) -> Buffer|MultiBuffer|None:
+        return UOp.buffers.get(u.arg.slot) if u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL else None
       held_bufs = {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if _buf_or_none(u) is not None}
       held_bufs |= {u for u in big_linear.toposort() if (b:=_buf_or_none(u)) is not None and b.is_allocated()}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops, var_vals)
