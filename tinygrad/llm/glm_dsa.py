@@ -1993,9 +1993,15 @@ class Transformer(GLMSeqDriver):
     self._loaded = False  # the weights are loaded (from_gguf)
     self._scratch:dict = {}  # the memory of the jits' intermediates: they run one at a time
 
+  def _embed(self, tokens:Tensor) -> Tensor:
+    # (GLM_SEQ: the tokens are a view of the token buffer at seq_base+start_pos, two variables: embedded from a copy. on the view the embedding
+    # isn't a gather, the one-hot of the vocab is made and reduced with the whole table (2688 rows: minutes, the devices' wait times out))
+    tokens = tokens.to(self.token_embd.weight.device)
+    return self.token_embd(tokens.contiguous() if isinstance(_seq_base[0], UOp) else tokens).float()
+
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     _idx_mask[0] = None
-    x = emb = self.token_embd(tokens.to(self.token_embd.weight.device)).float()  # (B, T, D)
+    x = emb = self._embed(tokens)  # (B, T, D)
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     # a symbolic chunk with hyper-connections runs every block on static padded rows (their real count is T), sliced at the end
     if hc is not None and not isinstance(T:=x.shape[1], int) and amd_custom_kernels_supported(x.device) and \
@@ -2071,7 +2077,7 @@ class Transformer(GLMSeqDriver):
     self._effects = []
     ranges, T, key = self._part_ranges(), tokens.shape[1], int(cast(UOp, tokens.shape[1]).vmax)
     (a, b), bufs, mb = ranges[k], self._sp_bufs[key], len(self._sp_bufs[key][0])
-    emb = self.token_embd(tokens.to(self.token_embd.weight.device)).float()
+    emb = self._embed(tokens)
     # micro batches (GLM_MB): the rows of mb parts of the chunk's positions, a batch's blocks on a compute queue of its own (the copies of one
     # run with the kernels of the other). a batch starts at the end of the tokens before it, its block runs after the one of the batch before
     # it (it reads the caches that one writes)
