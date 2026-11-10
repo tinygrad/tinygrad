@@ -4796,9 +4796,12 @@ def _word(k:UOp, row:UOp, w:UOp|int) -> UOp:
   sh = UOp.const(32 * (w % 2), dtypes.uint64) if isinstance(w, int) else (32 * (w % 2)).cast(dtypes.uint64)
   return ((k[row, w // 2].load() >> sh) & 0xffffffff).cast(dtypes.uint32)
 
-def _fp8_frag(k:UOp, row:UOp, w0:UOp|int, half:UOp) -> UOp:
-  """the 8 halves of a lane's WMMA fragment of fp8 words (the dims of words w0+half and w0+half+2, see _fp8_halves: 2**-8 their values)"""
-  return UOp.stack(*_fp8_halves(_word(k, row, w0 + half)), *_fp8_halves(_word(k, row, w0 + half + 2)))
+def _fp8_frag(k:UOp, row:UOp, w0:UOp|int, half:UOp, rdna4:bool=True) -> UOp:
+  """the fp8 dimensions in the order the arch's WMMA fragment expects, as halves of 2**-8 their values (see _fp8_halves)."""
+  if rdna4:  # eight: the dims of words w0+half and w0+half+2
+    return UOp.stack(*_fp8_halves(_word(k, row, w0 + half)), *_fp8_halves(_word(k, row, w0 + half + 2)))
+  # RDNA3: all 16 dimensions in key order (RDNA4 has two independently addressed groups of four per half of a wave)
+  return UOp.stack(*(h for j in range(4) for h in _fp8_halves(_word(k, row, w0 + j))))
 
 def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:tuple[UOp, ...], scale:float, valid_len:UOp, stride:int,
                      split:int, rep:int=0, rdna4:bool=True) -> UOp:
@@ -4841,11 +4844,11 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   # (fp8 rows (SEQ_FP8): a wave's 128 dims have a scale of their own, its partial scores are scaled (and its P for the values)
   # (uint64: two words each, the whole cache of a prefill, see seq_gather)
   fp8 = cache.dtype in (dtypes.uint32, dtypes.uint64)
-  assert not fp8 or (rdna4 and D == 512 and DW == 128 and cast(int, cache.shape[1]) * cache.dtype.itemsize == FP8_ROW * 4), "fp8 rows: 512 dims"
+  assert not fp8 or (D == 512 and DW == 128 and cast(int, cache.shape[1]) * cache.dtype.itemsize == FP8_ROW * 4), "fp8 rows: 512 dims"
   def fp8_scale(k:UOp) -> UOp: return _word(cache, k, 128 + wave).bitcast(dtypes.float) * 256
   s_acc = zero8
   for kk in range(KT):
-    if fp8: kf = _fp8_frag(cache, key, wave*32 + kk*4, half)
+    if fp8: kf = _fp8_frag(cache, key, wave*32 + kk*4, half, rdna4)
     else: kf = UOp.stack(*(cache[key, dbase + kk*16 + k].load() for k in ks))
     s_acc = UOp.wmma(qfrag[kk], kf, s_acc, *WMMA_ARG)
   s_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
@@ -5793,11 +5796,10 @@ def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP
   def arow(e:int) -> UOp: return half*8 + e if rdna4 else half + e*2
   # (fp8 pooled keys (SEQ_FP8): the scores times the scale of the key)
   fp8 = k.dtype == dtypes.uint32
-  assert rdna4 or not fp8, "fp8 pooled keys: RDNA4"
   # (pbase: the sequence's pooled keys from that row (its region of the cache), its scores of its own pools)
   kb = p0 + (pbase if pbase is not None else 0)
   if fp8:
-    kfrags = [[_fp8_frag(k, kb + n*16 + col, kk*4, half) for kk in range(D // 16)] for n in range(NP)]
+    kfrags = [[_fp8_frag(k, kb + n*16 + col, kk*4, half, rdna4) for kk in range(D // 16)] for n in range(NP)]
     kscale = [k[kb + n*16 + col, D // 4].load().bitcast(dtypes.float) * 256 for n in range(NP)]
   else: kfrags = [[UOp.stack(*(k[kb + n*16 + col, kk*16 + j].load() for j in ks)) for kk in range(D // 16)] for n in range(NP)]
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
@@ -6003,7 +6005,6 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, po
   p0 = (g + active * G) * (16*NP)
   # (a lane's fragment: RDNA4 8 of the 16 k, RDNA3 all 16. its accumulator's element e: the row half*8+e (RDNA4), 2e+half (RDNA3))
   ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8)) if rdna4 else tuple(range(16))
-  assert rdna4 or not fp8, "fp8 pooled keys: RDNA4"
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
   totals = [UOp.const(0, dtypes.float)] * NP
   for ht in range(H // 16):
@@ -6013,7 +6014,7 @@ def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, po
       s = zero8
       kr = koff + p0 + n*16 + col
       for kk in range(D // 16):
-        kf = _fp8_frag(k, kr, kk*4, half) if fp8 else UOp.stack(*(k[kr, kk*16 + j].load() for j in ks))
+        kf = _fp8_frag(k, kr, kk*4, half, rdna4) if fp8 else UOp.stack(*(k[kr, kk*16 + j].load() for j in ks))
         s = UOp.wmma(qfrags[kk], kf, s, *WMMA_ARG)
       s_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
       s_reg = s_reg.after(s_reg.store(s))
