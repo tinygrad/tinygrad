@@ -2294,13 +2294,14 @@ def _ring(mine:list[UOp], devs:tuple[str, ...]) -> dict[tuple[int, int], UOp]:
       got[(i, (j+1) % n)] = (mine[j] if k == 1 else got[(i, j)]).copy_to_device(devs[(j+1) % n])
   return got
 
-def all_gather(x:Tensor, axis:int, dtype=None) -> Tensor:
-  """a tensor split on axis over the devices, whole on every device (in dtype): every part goes to the others peer to peer"""
+def all_gather(x:Tensor, axis:int, dtype=None, ring:bool|None=None) -> Tensor:
+  """a tensor split on axis over the devices, whole on every device (in dtype): every part goes to the others peer to peer (ring: around the
+  ring, else one shot. None: AG_RING)"""
   devs = cast(tuple[str, ...], x.device)
   local = _per_device(_materialized(x, dtype or x.dtype))
   # (the parts are sent from the buffer)
   mine, n = [local.mselect(i) for i in range(len(devs))], len(devs)
-  sent = _ring(mine, devs) if getenv("AG_RING", 1) else _rotated(lambda i, j: mine[i], devs)
+  sent = _ring(mine, devs) if (getenv("AG_RING", 1) if ring is None else ring) else _rotated(lambda i, j: mine[i], devs)
   # (every device's whole a buffer: its readers don't each make one)
   whole = [Tensor.cat(*[Tensor(mine[i] if i == j else sent[(i, j)]) for i in range(n)], dim=axis) for j in range(n)]
   return Tensor(UOp.mstack(*[w.contiguous().uop for w in whole]))
