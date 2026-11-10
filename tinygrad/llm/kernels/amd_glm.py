@@ -3336,9 +3336,9 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
   out = Tensor.empty((devices*rows_out, cols), dtype=dtypes.half if act else out_dtype, device=x.device, axis=0 if devices > 1 else None)
   # (IQ4_XS too: as fast as its f16 kernel for the experts' down rows, which read their activations exactly)
   # (RDNA3 IQ4_XS: K256 too, its f16 kernel ~4x the time of an IQ3_S layer's)
-  # (IQ2S_K256=1, default off: IQ2_S too (a numerics change: q8_K activations, not q8 per 32))
+  # (IQ2S_K256, default on: IQ2_S too (q8_K activations, not q8 per 32: prefill 1.9-2.8x on C5/C6, KL < 5e-5); IQ2S_K256=0 the old path)
   if ggml_type in (IQ3_S,) + ((IQ4_XS,) if getenv("IQ4_K256", 0 if _wmma_rdna4(x.device) else 1) else ()) + \
-     ((IQ2_S,) if getenv("IQ2S_K256", 0) else ()) and in_features % 256 == 0 and \
+     ((IQ2_S,) if getenv("IQ2S_K256", 1) else ()) and in_features % 256 == 0 and \
      out_features % 256 == 0:
     # activations with a scale per 256 inputs (q8_K, as llama.cpp's dots of the IQ formats): the sub-blocks accumulate in int32
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
