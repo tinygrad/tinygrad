@@ -89,6 +89,19 @@ class TestGC(unittest.TestCase):
       del a.uop # the Buffer object is still held by real_buf
       del real_buf
 
+  def test_cyclic_gc_releases_buffer(self):
+    a = Tensor.empty(10).realize()
+    buf = a.uop.buffer
+    uop_ref, buf_ref = weakref.ref(a.uop), weakref.ref(buf)
+    holder = [a]
+    holder.append(holder)
+    del a, holder
+    gc.collect()
+    self.assertIsNone(uop_ref())
+    del buf
+    gc.collect()
+    self.assertIsNone(buf_ref())
+
   def test_assign_keeps_buffer(self):
     a = Tensor.full((4,), 1.).contiguous()
     a.realize()
