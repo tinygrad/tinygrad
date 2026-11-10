@@ -1005,15 +1005,26 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       self.inflight = 1 + self.waiting.qsize()
       if req.cancelled and not self.finish(req): continue
       req.cache_start = self.model.get_start_pos(req.ids)
+      spec_st = list(ss) if isinstance(ss:=getattr(self.model, "spec_stats", None), list) else []
+      def collect_spec():
+        nonlocal spec_st
+        if spec_st and isinstance(ss:=getattr(self.model, "spec_stats", None), list):
+          req.steps += ss[0] - spec_st[0]
+          spec_st = list(ss)
       g = self.model.generate(list(req.ids), temperature=req.temperature)
       try:
         for tok in g:
+          collect_spec()  # emit can finish immediately at max_tokens, before request telemetry
           if not self.emit(req, tok): break
-        else: self.finish(req)
+        else:
+          collect_spec()
+          self.finish(req)
       except Exception as e:
         traceback.print_exc()
         self.finish(req, e)
-      finally: _close(g)
+      finally:
+        collect_spec()
+        _close(g)
   def ckpt_keep(self, req:Request):
     """
     (SLOT_HOST) req goes on in a slot after its prompt: the model's checkpoint (the states at its prompt's end) copied to host memory, its

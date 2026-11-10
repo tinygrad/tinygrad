@@ -139,6 +139,34 @@ class TestEngineTelemetry(unittest.TestCase):
   def test_run_alone_counts_spec_steps_before_length_finish(self):
     self.check_run_alone_spec_steps(finish_in_emit=True)
 
+  def test_schedule_alone_counts_spec_steps_before_length_finish(self):
+    from tinygrad.llm.serve import LLMServer, Request
+
+    server, observed_steps = LLMServer.__new__(LLMServer), []
+    server.model = Mock(spec_stats=[0, 0], _cached_tokens=[])
+    server.model.get_start_pos.return_value = 0
+
+    def generate(ids, **kwargs):
+      server.model.spec_stats[:] = [2, 7]
+      yield 10
+
+    def finish(req, error=None):
+      observed_steps.append(req.steps)
+      return False
+
+    def emit(req, token):
+      req.generated.append(token)
+      return finish(req)  # the max_tokens path finishes inside emit
+
+    server.model.generate, server.emit, server.finish = generate, emit, finish
+    req = Request([1, 2], "", None, 0.0)
+    server.waiting = Mock()
+    server.waiting.qsize.return_value = 0
+    server.waiting.get.side_effect = [req, KeyboardInterrupt()]
+    with self.assertRaises(KeyboardInterrupt): server.schedule_alone()
+    self.assertEqual(observed_steps, [2])
+    self.assertEqual(req.steps, 2)
+
 
 if __name__ == "__main__":
   unittest.main()
