@@ -4001,13 +4001,16 @@ def _rows_shift_kernel(out:UOp, x:UOp, bounds:UOp, carry:UOp, dev:UOp, *, lane:i
   # out row r: x's row r-1 (a device's first: the last row of the device before it (bounds (lanes*devices, W), lane-major), the first device's
   # of lane 0 the carry, of another lane the last device's of the lane before it)
   m, W = cast(int, x.shape[0]), cast(int, x.shape[1])
-  r, c = UOp.range(m, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOOP)
+  # (the columns in workgroups of 256 threads: a thread a row's W columns in a loop was 0.9 ms a 576-row prefill chunk)
+  rngs = (UOp.range(W // 256, 1, AxisType.GLOBAL), UOp.range(256, 2, AxisType.LOCAL)) if W % 256 == 0 else (UOp.range(W, 1, AxisType.LOOP),)
+  c = rngs[0] * 256 + rngs[1] if len(rngs) == 2 else rngs[0]
+  r = UOp.range(m, 0, AxisType.GLOBAL)
   d = dev[0].load().cast(dtypes.weakint)
   prev_b = (d > 0).where(lane*N + d - 1, (lane - 1)*N + N - 1) if lane else (d - 1).maximum(0)
   first = r.eq(0)
   from_carry = first & d.eq(0) & UOp.const(lane == 0, dtypes.bool)
   v = from_carry.where(carry[c].load().float(), first.where(bounds[prev_b.maximum(0), c].load().float(), x[(r - 1).maximum(0), c].load().float()))
-  return out[r, c].store(v.cast(out.dtype)).end(r, c).sink(arg=KernelInfo(name="rows_shift", opts_to_apply=()))
+  return out[r, c].store(v.cast(out.dtype)).end(r, *rngs).sink(arg=KernelInfo(name="rows_shift", opts_to_apply=()))
 
 @functools.cache
 def _last_row_kernel(out:UOp, x:UOp) -> UOp:
