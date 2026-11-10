@@ -76,7 +76,7 @@ print(t6.numpy())
 ```
 
 There are a lot more operations that can be performed on tensors, you can find them in the [Tensor Ops](tensor/ops.md) file.
-Additionally reading through [abstractions2.py](https://github.com/tinygrad/tinygrad/blob/master/docs/abstractions2.py) will help you understand how operations on these tensors make their way down to your hardware.
+Additionally reading through [abstractions3.py](https://github.com/tinygrad/tinygrad/blob/master/docs/abstractions3.py) will help you understand how operations on these tensors make their way down to your hardware.
 
 ## Models
 
