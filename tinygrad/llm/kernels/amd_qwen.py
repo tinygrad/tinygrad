@@ -946,6 +946,9 @@ K256_XH = getenv("K256_XH", 1)
 # Q8_TILES: grouped experts' sorted rows (the down's input) quantized in the rows of the tiles with an expert only
 Q8_TILES = getenv("Q8_TILES", 0 if _wmma_rdna4(Device.DEFAULT) else 1)
 K256_R4_GRID = getenv("K256_R4_GRID", 0)
+# Q8_TT96: RDNA3 q8_gemm of 768-2304 rows in token tiles of 96 (block 128, two groups a stage) when they divide them. same bits
+# (tr9 extra/q8_serial.py 1152 rows: 1024x2560 91.0 -> 86.0 us, 6144x2560 427 -> 409, 2560x1024 86.8 -> 83.8; warm 1152-row chunk -2 ms)
+Q8_TT96 = getenv("Q8_TT96", 1)
 MAD_I24 = "({{ int r_; __asm__(\"v_mad_i32_i24 %0, %1, %2, %3\" : \"=v\"(r_) : \"v\"({0}), \"v\"({1}), \"v\"({2})); r_; }})"
 
 @functools.cache
@@ -1587,6 +1590,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm or few_out_long) and \
        in_features % 32 == 0 and (rdna4 or local_rows >= 256 or few_out_long or q6_gemm) and \
        (tt:=next((t for t in ((192, 128, 96, 64, 32) if q6_gemm else (96, 128, 64, 32) if rdna4 else
+                              ((96,) if Q8_TT96 and 768 <= local_rows <= 2304 and local_out % 128 == 0 and local_out >= 512 else ()) +
                               (128 if local_out % 128 == 0 and local_out >= 512 else 64, 64, 32)) if (P if q6_rows else local_rows) % t == 0), 0)):
     # many tokens: the weights dequantized in LDS for token tiles of tt
     if layer.ggml_type == Q8_0 and layer.shard_axis is None and not half_out and local_rows <= 2048 and local_out <= 512 and in_features >= 4096:
@@ -1597,7 +1601,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     mr = m_rows if TILE16 and split and not rdna4 and 0 < m_rows < local_rows else 0
     if mr and mr <= 16: tt = 16
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=rdna4,
-                            block_n=128 if rdna4 or (local_out % 128 == 0 and ksplits == 1 and tt == 128) else 64, k_splits=ksplits,
+                            block_n=128 if rdna4 or (local_out % 128 == 0 and ksplits == 1 and tt in (96, 128)) else 64, k_splits=ksplits,
                             rows=rows if split and 0 < rows < local_rows else 0, m_rows=mr)
     if q6_rows: out_shape = (splits*P, out_features)
     srcs = (x.cast(dtypes.float16).contiguous(),)
