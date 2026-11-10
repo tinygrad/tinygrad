@@ -483,7 +483,11 @@ def _iq_even_signs(signs:UOp) -> UOp:
   parity ^= parity >> 1
   return signs | ((parity & 1) << 7)
 
-def _iq_signed_word(word:UOp, signs:UOp) -> UOp:
+def _iq_signed_word(word:UOp, signs:UOp, perm:bool=False) -> UOp:
+  if perm:
+    # (perm: a byte permute of the word and its bytes negated (~b+1: nonzero bytes don't carry), the selector byte i i+4 if sign bit i: 5 ops)
+    sel, w = (((signs & 15) * 0x00810204) & 0x04040404) | 0x03020100, word.load() if word.op is Ops.INDEX else word
+    return _amd_byte_perm((w ^ 0xffffffff) + 0x01010101, w, sel)
   # sign bit i to bit 0 of byte i (the shifted copies of the 4 bits don't overlap: no carries), all of the byte's bits for the mask
   ones = ((signs & 15) * 0x00204081) & 0x01010101
   # Grid magnitudes are nonzero and <128, so each byte can be negated without a carry into its neighbor.
@@ -491,7 +495,7 @@ def _iq_signed_word(word:UOp, signs:UOp) -> UOp:
   mask = _amd_byte_perm(UOp.const(0, dtypes.uint32), UOp.const(0, dtypes.uint32), ones + 0x0C0C0C0C)
   return (word ^ mask) + ones
 
-def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:UOp|None) -> UOp:
+def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:UOp|None, perm:bool=False) -> UOp:
   # Four packed weight bytes, shared by integer-dot decode and FP16 WMMA prefill.
   def byte(offset): return _load_byte(raw, base, offset)
   def word(offset): return _load_u32(raw, base, offset, stream=ggml_type == Q6_K)
@@ -527,9 +531,10 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
   else:
     index = byte(2+subgroup*4+i//2) | (((byte(66+subgroup) >> (2*(i//2))) & 3) << 8)
     signs = byte(34+subgroup*4+i//2)
-  return _iq_signed_word(grid[index*grid_words+i%grid_words], signs >> (4*(i%2)))
+  return _iq_signed_word(grid[index*grid_words+i%grid_words], signs >> (4*(i%2)), perm)
 
-def _quant_frag_words(raw:UOp, base:UOp, subgroup:UOp, ph:UOp, ggml_type:int, grid:UOp|None, signed:bool=False) -> list[tuple[UOp, UOp]]:
+def _quant_frag_words(raw:UOp, base:UOp, subgroup:UOp, ph:UOp, ggml_type:int, grid:UOp|None, signed:bool=False,
+                      perm:bool=False) -> list[tuple[UOp, UOp]]:
   """
   the words of a WMMA fragment's lane (half ph) of a group: (_quant_word h*4+ph, h*4+ph+2) for h 0, 1, the bytes they share loaded once (IQ3_S).
   signed: grid is the IQ3_S grid words with their signs applied (index | signs << 9, _signed_grid)
@@ -546,7 +551,7 @@ def _quant_frag_words(raw:UOp, base:UOp, subgroup:UOp, ph:UOp, ggml_type:int, gr
       if signed: return grid[index | (((signs >> (4*ph).cast(dtypes.uint32)) & 15) << 9)]
       return _iq_signed_word(grid[index], signs >> (4*ph).cast(dtypes.uint32))
     return [(word(2*h), word(2*h+1)) for h in range(2)]
-  return [tuple(_quant_word(raw, base, subgroup, h*4 + i, ggml_type, grid) for i in (ph, ph+2)) for h in range(2)]  # type: ignore[misc]
+  return [tuple(_quant_word(raw, base, subgroup, h*4 + i, ggml_type, grid, perm) for i in (ph, ph+2)) for h in range(2)]  # type: ignore[misc]
 
 def _quant_group_words(raw:UOp, base:UOp, subgroup:UOp, ggml_type:int, grid:UOp|None) -> list[UOp]:
   """the 8 words of _quant_word of a group (32 weights) of a block: the bytes they share loaded once (IQ3_S, IQ4_XS), else word by word"""
@@ -888,6 +893,9 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
   outs = Tensor.custom_kernel(q, scale, x, fxn=functools.partial(_q8k_quantize_kernel, tokens=tokens, in_features=in_features))
   return outs[0], outs[1]
 
+# K256_SIGNPERM: _grouped_k256_kernel's IQ2_S signs by one byte permute of the word and its negation (_iq_signed_word perm, the same bytes)
+K256_SIGNPERM = getenv("K256_SIGNPERM", 0)
+
 # a*b+c of the low 24 bits of a and b (a full rate multiply, the 32 bit one is quarter rate)
 MAD_I24 = "({{ int r_; __asm__(\"v_mad_i32_i24 %0, %1, %2, %3\" : \"=v\"(r_) : \"v\"({0}), \"v\"({1}), \"v\"({2})); r_; }})"
 
@@ -954,7 +962,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   sums = []
   for o, base in enumerate(bases):
     sub = sub_scale(base, sb) if ggml_type != IQ2_S else None
-    words = _quant_frag_words(raw, base, sb, ph, ggml_type, grid, signed=signed) if rdna4 else \
+    words = _quant_frag_words(raw, base, sb, ph, ggml_type, grid, signed=signed, perm=bool(K256_SIGNPERM)) if rdna4 else \
       [tuple(_quant_word(raw, base, sb, h*4+i, ggml_type, grid) for i in range(4)) for h in range(2)]
     bfr = [_i8_frag(w) for w in words]
     for t in range(TT):
