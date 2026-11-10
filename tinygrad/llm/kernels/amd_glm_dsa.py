@@ -1418,10 +1418,9 @@ class P2PAllreduce:
       for d in devs: Device[d].synchronize()
 
 P2P_AR_MAXG, P2P_AR_MAXW = getenv("P2P_AR_MAXG", 64), getenv("P2P_AR_MAXW", 4096)  # workgroups, the words of a workgroup's slot
-# the classes of words (their epochs: 32 bits of plain and half words, 16 of three halves, 8 of packed ones): every class has its regions of
-# the mailboxes and its epoch counters. a stale word of one class read by a kernel of another could look fresh (its bits where the epoch is),
-# a class whose slot wasn't used while the others' counted could see its own stale word as fresh (8 or 16 bits of the epoch): wrong values
-P2P_AR_CLASSES = 3
+# the classes of words (epochs: 32 bits of plain/half, 16 of three halves, 8 of legacy packed, 32 of SEQ-safe packed):
+# every class has regions of the mailboxes and its epoch counters. Formats with different epoch layouts must not share a class.
+P2P_AR_CLASSES = 4
 
 def p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None: return _p2p_allreduce(tuple(Device.canonicalize(d) for d in devs))
 @functools.cache
@@ -1463,18 +1462,21 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   wg, t = UOp.range(G, 0, AxisType.GLOBAL), UOp.range(T, 1, AxisType.LOCAL)
   li = [t*EP + i for i in range(EP)]
   els = [wg*T*EP + l for l in li]
-  cls = 2 if pack is not None else 1 if triple else 0  # (the class of the words: its counters, its regions)
+  # (SEQ-safe packed words: their own class, so legacy 8-bit-epoch generic allreduces can't alias their mailboxes/counters)
+  cls = 3 if pack is not None and pack[0]*pack[1] == 24 else 2 if pack is not None else 1 if triple else 0
   cw = wg + cls*P2P_AR_MAXG
   epoch, me = (counter[cw].load() + 1).cast(dtypes.uint32), counter[P2P_AR_CLASSES*P2P_AR_MAXG].load().cast(dtypes.weakint)
   deadline = _sys("__builtin_readsteadycounter()", dtypes.uint64, epoch) + int(getenv("P2P_AR_TIMEOUT_MS", 50) * 100000)  # (100 MHz)
   par = (epoch & 1).cast(dtypes.weakint)
   def reg(s:int|UOp, l:UOp) -> UOp: return ((cw*2 + par)*(N+1) + s)*P2P_AR_MAXW + l
-  # pack (W, B): W values a word, B bit integers of a shared power of two (8 bits) and the low 8 bits of the epoch (two shot: the sums of the
-  # owner are the packed ones on every device)
+  # pack (W, B): W values a word, B bit integers of a shared power of two (8 bits) and an epoch (two shot: the sums of the
+  # owner are the packed ones on every device). SEQ uses a separate class with exactly 32 epoch bits; 8 bits wrapped every 256 calls.
   W = pack[0] if pack is not None else 3 if triple else 2 if half else 1  # the values of a word
+  pack_payload, pack_epoch_shift = (pack[0]*pack[1], pack[0]*pack[1]+8) if pack is not None else (0, 0)
+  pack_epoch_mask = (1 << min(32, 64-pack_epoch_shift)) - 1 if pack is not None else 0
   assert not triple or half, "three values a word are in half"
   assert pack is None or ((two_shot or gather or scatter) and not half and pack[0]*pack[1] <= 48), \
-    "packed: two shot (or a gather/scatter), the values and the power of two in 56 bits"
+    "packed: two shot (or a gather/scatter), the values and the power of two fit with an epoch in 64 bits"
   # (in half saturated: a value past its range is the largest, not inf (inf - inf is NaN: the sums, the model's states after them))
   def sat(v:UOp) -> UOp: return v.maximum(-65504.0).minimum(65504.0)
   def h(v:UOp) -> UOp: return sat(v).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
@@ -1496,7 +1498,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
       inv = pow2(-k)
       qs = [((x * inv) + 0.5).floor().maximum(-qmax).minimum(qmax).cast(dtypes.int32) for x in v]
       bits = functools.reduce(lambda a,b: a | b, [(q.cast(dtypes.uint64) & ((1 << B) - 1)) << (B*c) for c, q in enumerate(qs)])
-      return bits | ((k + 128).cast(dtypes.uint64) << 48) | ((epoch & 0xFF).cast(dtypes.uint64) << 56)
+      return bits | ((k + 128).cast(dtypes.uint64) << pack_payload) | ((epoch & pack_epoch_mask).cast(dtypes.uint64) << pack_epoch_shift)
     if triple: return functools.reduce(lambda a,b: a | b, [h(x).cast(dtypes.uint64) << (16*c) for c, x in enumerate(v)]) | \
                       ((epoch & 0xFFFF).cast(dtypes.uint64) << 48)
     bits = (h(v[0]) | (h(v[1]) << 16)) if half else v[0].bitcast(dtypes.uint32)
@@ -1504,13 +1506,13 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   def value(w:UOp) -> list[UOp]:
     if pack is not None:
       B = pack[1]
-      scale = pow2(((w >> 48) & 255).cast(dtypes.int32) - 128)
+      scale = pow2(((w >> pack_payload) & 255).cast(dtypes.int32) - 128)
       return [((((w >> (B*c)) & ((1 << B) - 1)).cast(dtypes.int32) << (32-B)) >> (32-B)).float() * scale for c in range(W)]
     if triple: return [unh(((w >> (16*c)) & 0xFFFF).cast(dtypes.uint32)) for c in range(3)]
     lo = (w & 0xFFFFFFFF).cast(dtypes.uint32)
     return [unh(lo & 0xFFFF), unh(lo >> 16)] if half else [lo.bitcast(dtypes.float32)]
   def fresh(g:UOp) -> UOp:
-    if pack is not None: return ((g >> 56).cast(dtypes.uint32) & 0xFF).eq(epoch & 0xFF)
+    if pack is not None: return ((g >> pack_epoch_shift).cast(dtypes.uint32) & pack_epoch_mask).eq(epoch & pack_epoch_mask)
     return ((g >> 48).cast(dtypes.uint32) & 0xFFFF).eq(epoch & 0xFFFF) if triple else (g >> 32).cast(dtypes.uint32).eq(epoch)
   def push(stores:list[UOp], after:UOp|None=None) -> UOp:
     # the stores in the l2, the workgroup, the l2 written back to the others
@@ -2328,8 +2330,11 @@ def host_allgather_pack(x:Tensor, pack:tuple[int, int]) -> Tensor|None:
 
 def _seq_p2p_pack() -> tuple[int, int]|None:
   """SEQ_P2P_PACK (WxB, default 0: none): mla_sparse_seq's peer to peer query gather and output reduce scatter (a few rows) send W values of B
-  bits a word with a shared power of two (as P2P_AR_PACK), not two halves a word. 6x8: a third of the words (int8's error)"""
-  return (int((p:=v.split("x"))[0]), int(p[1])) if (v:=os.environ.get("SEQ_P2P_PACK", "0")) != "0" else None
+  bits a word with a shared power of two (8 bits), not two halves. Keep exactly 32 bits for the epoch: 3x8 or 4x6."""
+  if (v:=os.environ.get("SEQ_P2P_PACK", "0")) == "0": return None
+  pk = (int((p:=v.split("x"))[0]), int(p[1]))
+  assert pk[0]*pk[1] == 24, "SEQ_P2P_PACK requires exactly 32 epoch bits and its isolated class (use 3x8 or 4x6)"
+  return pk
 
 def host_allgather(x:Tensor) -> Tensor|None:
   """

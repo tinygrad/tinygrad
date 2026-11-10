@@ -92,18 +92,21 @@ class TestGLMDSASequence(unittest.TestCase):
     # (SEQ_P2P_PACK: mla_sparse_seq's one shot gather and reduce scatter of packed words: default off, the kernels build)
     from tinygrad.llm.kernels.amd_glm_dsa import _p2p_allreduce_kernel, _seq_p2p_pack, P2P_AR_CLASSES, P2P_AR_MAXG, P2P_AR_MAXW
     with patch.dict(os.environ, {"SEQ_P2P_PACK": "0"}): self.assertIsNone(_seq_p2p_pack())
-    with patch.dict(os.environ, {"SEQ_P2P_PACK": "6x8"}): self.assertEqual(_seq_p2p_pack(), (6, 8))
+    with patch.dict(os.environ, {"SEQ_P2P_PACK": "3x8"}): self.assertEqual(_seq_p2p_pack(), (3, 8))
     N, n = 4, 256
     mb = [Tensor.empty(P2P_AR_CLASSES*P2P_AR_MAXG*2*(N+1)*P2P_AR_MAXW, dtype="uint64") for _ in range(N)]
     counter = Tensor.empty(P2P_AR_CLASSES*P2P_AR_MAXG+1, dtype="int32")
     for kw in (dict(gather=True), dict(scatter=True)):
-      out, x = Tensor.empty(N*n*6, dtype="float32"), Tensor.empty(1, N*n*6, dtype="float32")
-      fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n, T=256, EP=1, pack=(6, 8), **kw)
+      out, x = Tensor.empty(N*n*3, dtype="float32"), Tensor.empty(1, N*n*3, dtype="float32")
+      fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n, T=256, EP=1, pack=(3, 8), **kw)
       call = Tensor.custom_kernel(out, x, counter, *mb, fxn=fxn)[0].uop.src[1]
       self.assertIs(call.src[0].op, Ops.SINK)
     with self.assertRaises(AssertionError):
-      Tensor.custom_kernel(out, x, counter, *mb, fxn=functools.partial(_p2p_allreduce_kernel, N=N, n=n, T=256, EP=1, pack=(6, 8), half=True,
+      Tensor.custom_kernel(out, x, counter, *mb, fxn=functools.partial(_p2p_allreduce_kernel, N=N, n=n, T=256, EP=1, pack=(3, 8), half=True,
                                                                        gather=True))
+    # Eight-bit epochs accepted call 1's stale word at call 257. Refuse the old SEQ formats before model construction.
+    for unsafe in ("6x8", "4x12", "3x7"):
+      with patch.dict(os.environ, {"SEQ_P2P_PACK": unsafe}), self.assertRaises(AssertionError): _seq_p2p_pack()
 
   def test_seq_i8_reaches_dsa_kernels(self):
     # (glm5next's _forward_seqs_glm sets amd_glm's flag: the DSA kernels' (amd_glm_dsa's) is set by the DSA model's, restored after)
