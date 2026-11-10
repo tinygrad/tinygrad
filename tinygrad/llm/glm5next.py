@@ -1963,10 +1963,10 @@ class Indexer:
     # a few (the drafts of speculative decoding): the same, a row a query
     if Tq <= 8 and idx.n_heads % 16 == 0 and getenv("INDEXER_DECODE_ROWS", 1):
       return indexer_decode_index_rows(iq, pk, weights, start_pos, pools, k, idx.kpool, pbase=pb, width=self.max_pools)
-    # (IDX_SPLIT: a prefill chunk's queries split on their rows over the devices (every device had all of them: the same scores and lists six
+    # (IDX_SPLIT, default on: a prefill chunk's queries split on their rows over the devices (every device had all of them: the same lists six
     # times), each device the q projection, the scores and the lists of its rows, the lists gathered. the same lists: exact)
     n = len(x.device) if isinstance(x.device, tuple) else 1
-    if n > 1 and getenv("IDX_SPLIT", 0) and not self.shard and Tq % (16*n) == 0 and Tq // n <= getenv("INDEXER_ROWS", 1056) and \
+    if n > 1 and getenv("IDX_SPLIT", 1) and not self.shard and Tq % (16*n) == 0 and Tq // n <= getenv("INDEXER_ROWS", 1056) and \
        idx.n_heads % 16 == 0 and amd_custom_kernels_supported(x.device):
       lin, qs = self.attn_q_b, shard_rows(q[0], 0)
       if lin.ggml_type is None and lin.use_custom_quant: lin.set_quantized(lin.weight)
@@ -5289,10 +5289,10 @@ class Transformer:
       # whole tiles of 16 rows on every device, the kernels of the whole chunk on tiles of 64
       tile = math.lcm(16*len(devs), 64)
       def tiled(n:int) -> int: return min(max(tile, round(n / tile) * tile), self.max_context // tile * tile or tile)
-      # (PREFILL_CHUNK_UP: the biggest chunk whole tiles up, not the nearest (6 devices: 4096 -> 4224, not 4032): a 4k prompt (4096 tokens
-      # and its template) one chunk, not 4032 and a padded 192)
-      up = [min(-(-chunk_size // tile) * tile, self.max_context // tile * tile or tile)] if getenv("PREFILL_CHUNK_UP", 0) and \
-        not self.config.qsa else []
+      # (PREFILL_CHUNK_UP, default on RDNA4: the biggest chunk whole tiles up, not the nearest (6 devices: 4096 -> 4224, not 4032): a 4k
+      # prompt (4096 tokens and its template) one chunk, not 4032 and a padded 192)
+      up = [min(-(-chunk_size // tile) * tile, self.max_context // tile * tile or tile)] \
+        if getenv("PREFILL_CHUNK_UP", int(_wmma_rdna4(devs))) and not self.config.qsa else []
       sizes = [tiled(n) for n in sizes] + up
     return tuple(sorted(set(sizes)))
 
