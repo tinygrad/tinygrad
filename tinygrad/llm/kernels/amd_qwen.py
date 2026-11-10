@@ -3748,7 +3748,8 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
 
 # QSA_PREFILL: a prefill's rows (many) on qsa_prefill's kernel (the tensor cores), not qsa_decode's (a lane a key: vector ALU bound)
 QSA_PREFILL = getenv("QSA_PREFILL", 0)
-# QSA_WMMA=P: decoding's rows on qsa_prefill's kernel, a row's keys over P workgroups (combined as qsa_decode's parts). default off
+# QSA_WMMA=P: decoding's rows on qsa_prefill's kernel, a row's keys over P workgroups (combined as qsa_decode's parts; 1: P of the rows'
+# count). default off
 QSA_WMMA = getenv("QSA_WMMA", 0)
 
 @functools.cache
@@ -3919,7 +3920,8 @@ def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, sca
   # (QSA_WMMA: decoding's rows (<= 256) on the tensor cores too, a row's keys over QSA_WMMA parts (workgroups): numerics, half queries)
   if wmma and ((QSA_PREFILL and B > 256 and not parts and not waves) or (QSA_WMMA and B <= 256)):
     # (a prefill's rows: the tensor cores, see _qsa_prefill_kernel)
-    axis, P = q.uop.axis, (QSA_WMMA if B <= 256 else 1)
+    # (QSA_WMMA=1: the parts of the rows' count, ~480 workgroups: tr8 qsabench 12 rows 16 parts, 60 rows 8, 96 rows 4; else QSA_WMMA parts)
+    axis, P = q.uop.axis, ((QSA_WMMA if QSA_WMMA > 1 else min(16, max(4, 1 << round(math.log2(480 / B))))) if B <= 256 else 1)
     out = Tensor.empty(B, H, P, DV, dtype=dtypes.float32, device=q.device, axis=axis)
     stats = Tensor.empty(B, H, P, 2, dtype=dtypes.float32, device=q.device, axis=axis)
     out, stats = Tensor.custom_kernel(out, stats, q.half().contiguous(), cache, index, bases,
