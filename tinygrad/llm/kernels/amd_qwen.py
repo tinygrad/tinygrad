@@ -3641,6 +3641,133 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
   est = Estimates(4 * n_max * B * H * (DK + DV), n_max * B * rb, n_max * B * rb)
   return UOp.group(*final).end(lane, wave, part, b).sink(arg=KernelInfo(name="qsa_decode", opts_to_apply=(), estimates=est))
 
+# QSA_PREFILL: a prefill's rows (many) on qsa_prefill's kernel (the tensor cores), not qsa_decode's (a lane a key: vector ALU bound)
+QSA_PREFILL = getenv("QSA_PREFILL", 0)
+
+@functools.cache
+def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UOp, *, scale:float, kpool:int, rdna4:bool) -> UOp:
+  # as _qsa_decode_kernel (its outputs, compact lists of pools, kv_q4_pack's 4-bit cache) on the tensor cores: a workgroup a row b, its heads
+  # (at most 16) the rows of the tiles. a tile of 16 keys into LDS (their values less 8 in half: exact, the groups' scales in float), the scores
+  # of a group of 32 dims a product of the half queries and those (2 WMMA), times the keys' scales of the group (a lane's key); a wave a
+  # quarter of the dims, the scores summed through LDS. the values: the weights times the keys' scales of the group (in half) by the values
+  B, H, _, DV = cast(tuple[int, int, int, int], out.shape)
+  DK, N = cast(int, q.shape[-1]), cast(int, cache.shape[-2])
+  WAVES, D = 4, DK + DV
+  W4 = D // 8
+  assert H <= 16 and DK % (32 * WAVES) == 0 and DV % (32 * WAVES) == 0 and cast(int, cache.shape[-1]) == W4 + D // 64
+  cache = cache.reshape(N, cast(int, cache.shape[-1]))
+  DW, VW, PAD = DK // WAVES, DV // WAVES, D + 8
+  b = UOp.range(B, 0, AxisType.GLOBAL)
+  wave, lane = UOp.range(WAVES, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  col, half, tid = lane % 16, lane // 16, wave * WARP_SIZE + lane
+  ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8)) if rdna4 else tuple(range(16))
+  def crow(e:int) -> UOp: return half * 8 + e if rdna4 else 2 * e + half  # (the row of a lane's accumulator element e)
+  # the queries' fragments of the wave's dims: a head a row (rows past H zeros)
+  qv = col < H
+  qfrag = [UOp.stack(*(qv.where(q[b, col.minimum(H-1), wave*DW + kk*16 + k].load(), UOp.const(0, dtypes.half)) for k in ks))
+           for kk in range(DW // 16)]
+  # the keys of the row's list (see _qsa_decode_kernel): its pools' kpool keys, then the ones after the last whole pool up to its position
+  kp = cast(int, index.shape[1]) - 2
+  n_max = kp * kpool + kpool
+  npk, qpos = index[b, kp].load().cast(dtypes.weakint), index[b, kp + 1].load().cast(dtypes.weakint)
+  tail0 = (qpos + 1) // kpool * kpool
+  count = (npk * kpool + qpos + 1 - tail0).minimum(n_max)
+  koff = bases[b].load().cast(dtypes.weakint)
+  ntiles = (count + 15) // 16
+  tile = UOp.range(ntiles, 2, AxisType.LOOP)
+  def key_at(t:UOp, j:UOp) -> tuple[UOp, UOp]:
+    i = t * 16 + j
+    ic = i.minimum((count - 1).maximum(0))
+    keyi = (ic < npk * kpool).where(index[b, (ic // kpool).minimum(kp - 1)].load().cast(dtypes.weakint) * kpool + ic % kpool,
+                                    tail0 + ic - npk * kpool)
+    return (koff + keyi.maximum(0)).minimum(N - 1), i < count
+  # the tile: a thread 64 dims of a key (8 words of 8 values, two groups' scales), its values less 8 in half, zeros past the count. the next
+  # tile's words loaded (registers) before this one's tensor core work, stored to LDS after it
+  lrow, lgrp = tid // 8, tid % 8
+  lds_k = UOp.alloc((16, PAD), dtypes.half, addrspace=AddrSpace.LOCAL)
+  lds_sc = UOp.alloc((16, D // 32), dtypes.float, addrspace=AddrSpace.LOCAL)
+  def tile_loads(t:UOp) -> tuple[list[UOp], UOp]:
+    lkey, lok = key_at(t, lrow)
+    words = [w for h4 in range(2) for w in _amd_load(cache[lkey, lgrp*8 + h4*4], 4)]
+    return words + [cache[lkey, W4 + lgrp].load()], lok
+  def tile_stores(vals:tuple[list[UOp], UOp], lk:UOp, lsc:UOp) -> list[UOp]:
+    (*words, sw), lok = vals
+    st = []
+    for wi, w in enumerate(words):
+      # (a word's 8 values: the nibbles into halves 1024+n (a byte the mantissa's), less 1032: n - 8 exactly)
+      nib = [w & 0x0f0f0f0f, (w >> 4) & 0x0f0f0f0f]
+      pairs = [_amd_byte_perm(UOp.const(0x64646464, dtypes.uint32), x, UOp.const(sel, dtypes.uint32)) for x in nib
+               for sel in (0x04010400, 0x04030402)]
+      halves = [((p_ >> sh) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.half) for p_ in pairs for sh in (0, 16)]
+      # (a key past the count: its values as they are (a real row's), its scales 0 and its scores masked)
+      st += [lk[lrow, lgrp*64 + wi*8 + j].store(h_ - 1032) for j, h_ in enumerate(halves)]
+    for gi in range(2):
+      sc = (sw >> (16 * gi)).cast(dtypes.uint16).bitcast(dtypes.half).float()
+      st.append(lsc[lrow, lgrp * 2 + gi].store(lok.where(sc, UOp.const(0.0, dtypes.float))))
+    return st
+  lds_k0, lds_sc0 = lds_k, lds_sc
+  first = UOp.group(*tile_stores(tile_loads(UOp.const(0, dtypes.weakint)), lds_k, lds_sc)).barrier()
+  nxt = tile_loads((tile + 1).minimum((ntiles - 1).maximum(0)))
+  lds_k, lds_sc = lds_k.after(first, tile), lds_sc.after(first, tile)
+  _, key_ok = key_at(tile, col)
+  # the wave's scores: a group's two WMMA, times the scales of the lane's key
+  zero = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
+  s_acc = [UOp.const(0, dtypes.float)] * 8
+  for gl in range(DW // 32):
+    t = zero
+    for h2 in range(2):
+      kk = gl * 2 + h2
+      t = UOp.wmma(qfrag[kk], UOp.stack(*(lds_k[col, wave*DW + kk*16 + k].load() for k in ks)), t, *WMMA_ARG)
+    treg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
+    treg = treg.after(treg.store(t))
+    ksc = lds_sc[col, (wave*DW) // 32 + gl].load()
+    s_acc = [s_acc[e] + treg[e].load() * ksc for e in range(8)]
+  lds_s = UOp.alloc((WAVES, WARP_SIZE, 8), dtypes.float, addrspace=AddrSpace.LOCAL)
+  lds_s = lds_s.after(UOp.group(*(lds_s[wave, lane, e].store(s_acc[e]) for e in range(8))).barrier())
+  VT, ES = VW // 16, 8 // WAVES
+  o_regs = [_reg((8,), 0) for _ in range(VT)]
+  m_reg, l_reg = _reg((ES,), -1e30), _reg((ES,), 0)
+  m_old, l_old = m_reg.after(tile), l_reg.after(tile)
+  lds_p = UOp.alloc((16, 16 + 2), dtypes.half, addrspace=AddrSpace.LOCAL)
+  lds_a = UOp.alloc((16,), dtypes.float, addrspace=AddrSpace.LOCAL)
+  pst, m_new, l_new = [], [], []
+  for i in range(ES):
+    e = wave * ES + i
+    s = key_ok.where(functools.reduce(lambda a, w_: a + lds_s[w_, lane, e].load(), range(1, WAVES), lds_s[0, lane, e].load()) * scale,
+                     UOp.const(-1e30, dtypes.float))
+    mx = s
+    for sh in (1, 2, 4, 8): mx = mx.maximum(_lane_xor(mx, sh))
+    mn = m_old[i].load().maximum(mx)
+    pv = key_ok.where(((s - mn) * LOG2E).exp2(), UOp.const(0, dtypes.float))
+    ps = pv
+    for sh in (1, 2, 4, 8): ps = ps + _lane_xor(ps, sh)
+    a = ((m_old[i].load() - mn) * LOG2E).exp2()
+    pst += [lds_p[crow(e), col].store(pv.cast(dtypes.half)), lds_a[crow(e).valid(col.eq(0))].store(a)]
+    m_new.append(mn)
+    l_new.append(l_old[i].load() * a + ps)
+  shared = UOp.group(*pst, m_reg.store(UOp.stack(*m_new)), l_reg.store(UOp.stack(*l_new))).barrier()
+  lds_p, lds_a = lds_p.after(shared), lds_a.after(shared)
+  alpha = [lds_a[crow(e)].load() for e in range(8)]
+  o_new = []
+  for dt in range(VT):
+    # (the weights times the keys' scales of the values' group, in half: a lane's head's row of them)
+    vg = (DK + wave*VW + dt*16) // 32
+    pfrag = UOp.stack(*((lds_p[col, k].load().float() * lds_sc.after(shared)[k, vg].load()).cast(dtypes.half) for k in ks))
+    vfrag = UOp.stack(*(lds_k.after(shared)[k, DK + wave*VW + dt*16 + col].load() for k in ks))
+    prev = o_regs[dt].after(tile)
+    o_new.append(UOp.wmma(pfrag, vfrag, UOp.stack(*(prev[e].load() * alpha[e] for e in range(8))), *WMMA_ARG))
+  update = UOp.group(*(o.store(v) for o, v in zip(o_regs, o_new)), shared).barrier()
+  update = UOp.group(*tile_stores(nxt, lds_k0.after(update), lds_sc0.after(update))).barrier().end(tile)
+  stores = [out[b, crow(e).valid(crow(e) < H), 0, wave*VW + dt*16 + col].store(o.after(update)[e].load())
+            for dt, o in enumerate(o_regs) for e in range(8)]
+  m_fin, l_fin = m_reg.after(update), l_reg.after(update)
+  for i in range(ES):
+    r = crow(wave * ES + i)
+    ok = col.eq(0) & (r < H)
+    stores += [stats[b, r.valid(ok), 0, 0].store(m_fin[i].load()), stats[b, r.valid(ok), 0, 1].store(l_fin[i].load())]
+  est = Estimates(4 * n_max * B * 16 * D, n_max * B * (D // 2 + D // 16), n_max * B * (D // 2 + D // 16))
+  return UOp.group(*stores).end(b, wave, lane).sink(arg=KernelInfo(name="qsa_prefill", opts_to_apply=(), estimates=est))
+
 def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, scale:float, parts:int=0, waves:int=0, kpool:int=0,
                          lse:bool=False, bits:int=8) -> Tensor|tuple[Tensor, Tensor]:
   """
@@ -3652,6 +3779,19 @@ def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, sca
   B, H, DK = cast(tuple[int, int, int], q.shape)
   W = int(cache.shape[-1])
   DV = (W * 64 // 9 if bits == 4 else W * 32 // 9 if cache.dtype == dtypes.uint32 else W) - DK
+  if QSA_PREFILL and B > 256 and bits == 4 and kpool and H <= 16 and not parts and not waves and amd_custom_kernels_supported(q.device):
+    # (a prefill's rows: the tensor cores, see _qsa_prefill_kernel)
+    axis = q.uop.axis
+    out = Tensor.empty(B, H, 1, DV, dtype=dtypes.float32, device=q.device, axis=axis)
+    stats = Tensor.empty(B, H, 1, 2, dtype=dtypes.float32, device=q.device, axis=axis)
+    out, stats = Tensor.custom_kernel(out, stats, q.half().contiguous(), cache, index, bases,
+                                      fxn=functools.partial(_qsa_prefill_kernel, scale=scale, kpool=kpool, rdna4=_wmma_rdna4(q.device)))[:2]
+    if not lse: return Tensor.custom_kernel(Tensor.empty(B, H, 1, DV, dtype=dtypes.float32, device=q.device, axis=axis), out, stats,
+                                            fxn=functools.partial(_amd_flash_decode_combine, live=1))[0]
+    ls = Tensor.empty(B, H, dtype=dtypes.float32, device=q.device, axis=axis)
+    res, _, _, ls = Tensor.custom_kernel(Tensor.empty(B, H, 1, DV, dtype=dtypes.float32, device=q.device, axis=axis), out, stats, ls,
+                                         fxn=functools.partial(_amd_flash_decode_combine, live=1))[:4]
+    return res, ls
   # (many rows (a prefill's): a workgroup of a wave a row, all its keys (enough workgroups, its queries loaded once, no combining))
   # (the rows of batched decoding (a few hundred): their keys split over parts and waves, a workgroup a row alone is too few for the GPU)
   many = B > 256
