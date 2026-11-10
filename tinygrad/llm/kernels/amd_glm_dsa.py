@@ -2149,6 +2149,7 @@ def _q8_pack_kernel(out:UOp, x:UOp, *add:UOp, row0:int=0) -> UOp:
   # a row's groups of 32 as q8_quantize's int8 words (rounded the same), the float scale the ninth word: a lane eight neighboring inputs.
   # x from row row0 (plus the packed add)
   T, G = cast(tuple[int, int, int], out.shape)[:2]
+  assert G % 8 == 0, f"q8_pack: {G} groups of 32 a row, not whole warps of 8 (the rest of the row would be left out)"
   tg8, lane = UOp.range(T*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
   values = [x.reshape(-1, G*32)[row0 + token, group*32 + sub*8 + i].load().float() for i in range(8)]
@@ -2167,6 +2168,7 @@ def _q4_pack_kernel(out:UOp, x:UOp, row0:int=0) -> UOp:
   # a row's groups of 32 as signed 4 bit integers (-7..7, rounded) of the group's float scale (its absolute max over 7): a group four words and the
   # scale the fifth. a lane eight neighboring inputs (a word). x from row row0
   T, G = cast(tuple[int, int, int], out.shape)[:2]
+  assert G % 8 == 0, f"q8_pack: {G} groups of 32 a row, not whole warps of 8 (the rest of the row would be left out)"
   tg8, lane = UOp.range(T*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
   values = [x.reshape(-1, G*32)[row0 + token, group*32 + sub*8 + i].load().float() for i in range(8)]
@@ -2202,6 +2204,7 @@ def _q8_unpack_kernel(out:UOp, *parts:UOp) -> UOp:
   # a row is the workgroup's: its loads from the others are skipped)
   T, D = cast(tuple[int, int], out.shape)
   G, rows = D // 32, T // len(parts)
+  assert G % 8 == 0, f"q8_unpack: {G} groups of 32 a row, not whole warps of 8 (the rest of the row would be left unwritten)"
   tg8, lane = UOp.range(T*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
   def load(w:int) -> UOp:
@@ -4251,7 +4254,9 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
     # x (n, ...) split on its leading axis: whole on every device
     if small and p2p and getenv("SEQ_P2P_GATHER", 1) and (g:=host_allgather(x.reshape(n, -1))) is not None: return g.reshape(x.shape)
     return all_gather(x, 0, dtype)
-  if q.uop.axis == 1 and getenv("SEQ_Q_Q8", 1) and not small and int(D) % 32 == 0:
+  # (q8 groups packed 8 a warp: D a multiple of 256. MLA's 576 (512 latent + 64 rope) isn't: its last 64 were never packed or unpacked, the
+  # queries' rope dims garbage in the steps of more than 16 rows)
+  if q.uop.axis == 1 and getenv("SEQ_Q_Q8", 1) and not small and int(D) % 256 == 0:
     # (SEQ_Q_Q8: the queries sent as int8 groups of 32 with their scale, about half the bytes)
     qa = all_gather_q8(q.contiguous().reshape(1, H*T, D), 1).reshape(1, H, T, D)
   elif q.uop.axis == 1:

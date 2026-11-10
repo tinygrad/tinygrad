@@ -80,6 +80,12 @@ class TestGLMDSASequence(unittest.TestCase):
     model.config = SimpleNamespace(cache_rows=0)
     self.assertEqual(model._main_token_rows(), 65537)
 
+  def test_q8_pack_needs_whole_warps_of_groups(self):
+    # (MLA's 576 dims (18 groups of 32): the kernels pack 8 groups a warp, the last 2 would be left out: refused, mla_sparse_seq sends half)
+    from tinygrad.llm.kernels.amd_glm_dsa import _q8_pack_kernel, _q8_unpack_kernel
+    self.assertRaises(AssertionError, _q8_pack_kernel, Tensor.empty(4, 18, 9, dtype="uint32").uop, Tensor.empty(4, 576, dtype="half").uop)
+    self.assertRaises(AssertionError, _q8_unpack_kernel, Tensor.empty(4, 576, dtype="half").uop, Tensor.empty(4, 18, 9, dtype="uint32").uop)
+
   def test_dsa_stash_roundtrip(self):
     def t(shape, axis=None):
       x = Tensor(np.arange(np.prod(shape), dtype=np.float16).reshape(shape))
