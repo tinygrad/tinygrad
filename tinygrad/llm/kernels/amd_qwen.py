@@ -3748,6 +3748,8 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
 
 # QSA_PREFILL: a prefill's rows (many) on qsa_prefill's kernel (the tensor cores), not qsa_decode's (a lane a key: vector ALU bound)
 QSA_PREFILL = getenv("QSA_PREFILL", 0)
+# QSA_WMMA=P: decoding's rows on qsa_prefill's kernel, a row's keys over P workgroups (combined as qsa_decode's parts). default off
+QSA_WMMA = getenv("QSA_WMMA", 0)
 
 @functools.cache
 def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UOp, *, scale:float, kpool:int, rdna4:bool, ns:int=1) -> UOp:
@@ -3755,14 +3757,17 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
   # (at most 16) the rows of the tiles. a tile of 16*ns keys into LDS (keys: their words; values: dequantized in half; scales in float), the
   # scores of a group of 32 dims a product of the half queries and those (2 WMMA), times the keys' scales of the group (a lane's key); a wave a
   # quarter of the dims, the scores summed through LDS. the values (times their groups' scales, in half) by the weights (in half)
-  B, H, _, DV = cast(tuple[int, int, int, int], out.shape)
+  # (P parts of the keys (out (B, H, P, DV), stats (B, H, P, 2), combined by _amd_flash_decode_combine): workgroup (b, p) the p-th of P runs
+  # of a row's tiles (decoding: few rows, a row's keys over P workgroups))
+  B, H, P, DV = cast(tuple[int, int, int, int], out.shape)
   DK, N = cast(int, q.shape[-1]), cast(int, cache.shape[-2])
   WAVES, D, TK = 4, DK + DV, 16 * ns
   W4, T = D // 8, WAVES * WARP_SIZE
   assert H <= 16 and DK % (32 * WAVES) == 0 and DV % (32 * WAVES) == 0 and cast(int, cache.shape[-1]) == W4 + D // 64
   cache = cache.reshape(N, cast(int, cache.shape[-1]))
   DW, VW = DK // WAVES, DV // WAVES
-  b = UOp.range(B, 0, AxisType.GLOBAL)
+  bp = UOp.range(B*P, 0, AxisType.GLOBAL)
+  b, p = (bp // P, bp % P) if P > 1 else (bp, UOp.const(0, dtypes.weakint))
   wave, lane = UOp.range(WAVES, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   col, half, tid = lane % 16, lane // 16, wave * WARP_SIZE + lane
   ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8)) if rdna4 else tuple(range(16))
@@ -3779,6 +3784,12 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
   count = (npk * kpool + qpos + 1 - tail0).minimum(n_max)
   koff = bases[b].load().cast(dtypes.weakint)
   ntiles = (count + TK - 1) // TK
+  if P > 1:
+    # (part p: tiles t0.. of the row's, at most per a part)
+    per = (ntiles + P - 1) // P
+    t0 = p * per
+    ntiles = (ntiles - t0).minimum(per).maximum(0)
+  else: t0 = UOp.const(0, dtypes.weakint)
   tile = UOp.range(ntiles, 2, AxisType.LOOP)
   def key_at(t:UOp, j:UOp) -> tuple[UOp, UOp]:
     i = t * TK + j
@@ -3820,10 +3831,10 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
     for gi in range(DPT // 32): st.append(lsc[lpart * (DPT // 32) + gi, lrow].store(scs[gi]))
     return st
   lds_k0, lds_v0, lds_sc0 = lds_k, lds_v, lds_sc
-  first = UOp.group(*tile_stores(tile_loads(UOp.const(0, dtypes.weakint)), lds_k, lds_v, lds_sc)).barrier()
-  nxt = tile_loads((tile + 1).minimum((ntiles - 1).maximum(0)))
+  first = UOp.group(*tile_stores(tile_loads(t0), lds_k, lds_v, lds_sc)).barrier()
+  nxt = tile_loads(t0 + (tile + 1).minimum((ntiles - 1).maximum(0)))
   lds_k, lds_v, lds_sc = lds_k.after(first, tile), lds_v.after(first, tile), lds_sc.after(first, tile)
-  key_ok = [key_at(tile, st_ * 16 + col)[1] for st_ in range(ns)]
+  key_ok = [key_at(t0 + tile, st_ * 16 + col)[1] for st_ in range(ns)]
   # the wave's scores of a subtile of 16 keys: a group's two WMMA, times the scales of the lane's key
   zero = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
   lds_s = UOp.alloc((WAVES, ns, WARP_SIZE, 8), dtypes.float, addrspace=AddrSpace.LOCAL)
@@ -3883,15 +3894,15 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
     o_new.append(acc)
   update = UOp.group(*(o.store(v) for o, v in zip(o_regs, o_new)), shared).barrier()
   update = UOp.group(*tile_stores(nxt, lds_k0.after(update), lds_v0.after(update), lds_sc0.after(update))).barrier().end(tile)
-  stores = [out[b, crow(e).valid(crow(e) < H), 0, wave*VW + dt*16 + col].store(o.after(update)[e].load())
+  stores = [out[b, crow(e).valid(crow(e) < H), p, wave*VW + dt*16 + col].store(o.after(update)[e].load())
             for dt, o in enumerate(o_regs) for e in range(8)]
   m_fin, l_fin = m_reg.after(update), l_reg.after(update)
   for i in range(ES):
     r = crow(wave * ES + i)
     ok = col.eq(0) & (r < H)
-    stores += [stats[b, r.valid(ok), 0, 0].store(m_fin[i].load()), stats[b, r.valid(ok), 0, 1].store(l_fin[i].load())]
+    stores += [stats[b, r.valid(ok), p, 0].store(m_fin[i].load()), stats[b, r.valid(ok), p, 1].store(l_fin[i].load())]
   est = Estimates(4 * n_max * B * 16 * D, n_max * B * (D // 2 + D // 16), n_max * B * (D // 2 + D // 16))
-  return UOp.group(*stores).end(b, wave, lane).sink(arg=KernelInfo(name="qsa_prefill", opts_to_apply=(), estimates=est))
+  return UOp.group(*stores).end(bp, wave, lane).sink(arg=KernelInfo(name="qsa_prefill" if P == 1 else "qsa_wmma_decode", opts_to_apply=(), estimates=est))
 
 def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, scale:float, parts:int=0, waves:int=0, kpool:int=0,
                          lse:bool=False, bits:int=8) -> Tensor|tuple[Tensor, Tensor]:
@@ -3904,19 +3915,21 @@ def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, sca
   B, H, DK = cast(tuple[int, int, int], q.shape)
   W = int(cache.shape[-1])
   DV = (W * 64 // 9 if bits == 4 else W * 32 // 9 if cache.dtype == dtypes.uint32 else W) - DK
-  if QSA_PREFILL and B > 256 and bits == 4 and kpool and H <= 16 and not parts and not waves and amd_custom_kernels_supported(q.device):
+  wmma = bits == 4 and kpool and H <= 16 and amd_custom_kernels_supported(q.device)
+  # (QSA_WMMA: decoding's rows (<= 256) on the tensor cores too, a row's keys over QSA_WMMA parts (workgroups): numerics, half queries)
+  if wmma and ((QSA_PREFILL and B > 256 and not parts and not waves) or (QSA_WMMA and B <= 256)):
     # (a prefill's rows: the tensor cores, see _qsa_prefill_kernel)
-    axis = q.uop.axis
-    out = Tensor.empty(B, H, 1, DV, dtype=dtypes.float32, device=q.device, axis=axis)
-    stats = Tensor.empty(B, H, 1, 2, dtype=dtypes.float32, device=q.device, axis=axis)
+    axis, P = q.uop.axis, (QSA_WMMA if B <= 256 else 1)
+    out = Tensor.empty(B, H, P, DV, dtype=dtypes.float32, device=q.device, axis=axis)
+    stats = Tensor.empty(B, H, P, 2, dtype=dtypes.float32, device=q.device, axis=axis)
     out, stats = Tensor.custom_kernel(out, stats, q.half().contiguous(), cache, index, bases,
                                       fxn=functools.partial(_qsa_prefill_kernel, scale=scale, kpool=kpool, rdna4=_wmma_rdna4(q.device),
                                                          ns=getenv("QSA_PREFILL_NS", 1)))[:2]
     if not lse: return Tensor.custom_kernel(Tensor.empty(B, H, 1, DV, dtype=dtypes.float32, device=q.device, axis=axis), out, stats,
-                                            fxn=functools.partial(_amd_flash_decode_combine, live=1))[0]
+                                            fxn=functools.partial(_amd_flash_decode_combine, live=P))[0]
     ls = Tensor.empty(B, H, dtype=dtypes.float32, device=q.device, axis=axis)
     res, _, _, ls = Tensor.custom_kernel(Tensor.empty(B, H, 1, DV, dtype=dtypes.float32, device=q.device, axis=axis), out, stats, ls,
-                                         fxn=functools.partial(_amd_flash_decode_combine, live=1))[:4]
+                                         fxn=functools.partial(_amd_flash_decode_combine, live=P))[:4]
     return res, ls
   # (many rows (a prefill's): a workgroup of a wave a row, all its keys (enough workgroups, its queries loaded once, no combining))
   # (the rows of batched decoding (a few hundred): their keys split over parts and waves, a workgroup a row alone is too few for the GPU)
