@@ -95,7 +95,7 @@ def measure(label: str, seq, tokens: list[int], start: int, restore: int):
       emit("KERNEL", {"label": label, "name": name, "count": count,
                       "us_all_devices": round(micros, 3), "us_per_device": round(micros/len(devs), 3)})
     if (match:=getenv("TIMELINE", "")) and match in label:
-      events = kprof.sequence(*devs)
+      events = kprof.sequence_timed(*devs)
       emit("TIMELINE", {"label": label, "events": [[device, round(start, 3), name, round(duration, 3)]
                                                     for device, name, start, duration in events]})
   return elapsed

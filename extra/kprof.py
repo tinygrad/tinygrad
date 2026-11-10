@@ -15,7 +15,7 @@ def reset(*devs:str):
 def times(*devs:str) -> dict[str, tuple[int, float]]:
   _collect(devs)
   c:collections.Counter = collections.Counter()
-  t:collections.Counter = collections.Counter()
+  t:dict[str, float] = collections.defaultdict(float)
   for e in Compiled.profile_events:
     if isinstance(e, ProfileGraphEvent):
       for ent in e.ents:
@@ -29,13 +29,17 @@ def times(*devs:str) -> dict[str, tuple[int, float]]:
       t[n] += float(e.en - e.st)
   return {n: (c[n], t[n]) for n in c}
 
-def sequence(*devs:str) -> list[tuple[str, str, float]]:
-  """(device, name, us) of the profiled kernels in order"""
+def sequence_timed(*devs:str) -> list[tuple[str, str, float, float]]:
+  """(device, name, start us, duration us) of the profiled kernels in order"""
   _collect(devs)
-  out = []
+  out: list[tuple[float, str, str, float]] = []
   for e in Compiled.profile_events:
     if isinstance(e, ProfileGraphEvent):
       for ent in e.ents:
         if ent.device.startswith("AMD"):
           out.append((float(e.sigs[ent.st_id]), ent.device, _name(ent.name), float(e.sigs[ent.en_id] - e.sigs[ent.st_id])))
-  return [x[1:] for x in sorted(out)]
+  return [(device, name, start, duration) for start, device, name, duration in sorted(out)]
+
+def sequence(*devs:str) -> list[tuple[str, str, float]]:
+  """(device, name, us) of the profiled kernels in order"""
+  return [(device, name, duration) for device, name, _, duration in sequence_timed(*devs)]
