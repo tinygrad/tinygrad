@@ -1968,9 +1968,13 @@ class Indexer:
     n = len(x.device) if isinstance(x.device, tuple) else 1
     if n > 1 and getenv("IDX_SPLIT", 0) and not self.shard and Tq % (16*n) == 0 and Tq // n <= getenv("INDEXER_ROWS", 1056) and \
        idx.n_heads % 16 == 0 and amd_custom_kernels_supported(x.device):
-      xs, qs = shard_rows(x[0], 0), shard_rows(q[0], 0)
-      iq_s = self.attn_q_b(qs).reshape(Tq, idx.n_heads, idx.head_dim)
-      w_s = self.proj(xs) * (idx.n_heads * idx.head_dim)**-0.5
+      lin, qs = self.attn_q_b, shard_rows(q[0], 0)
+      if lin.ggml_type is None and lin.use_custom_quant: lin.set_quantized(lin.weight)
+      # (the weight whole on every device, the rows split: q8_linear's split (Linear's call takes the rows as whole))
+      iq_s = q8_linear(lin, qs, split=True) if lin.ggml_type in QUANT_SIZES and lin.shard_axis is None else lin(qs)
+      iq_s = iq_s.reshape(Tq, idx.n_heads, idx.head_dim)
+      # (the weights of the heads: a small projection, of every row, then split)
+      w_s = shard_rows((self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5)[0].contiguous(), 0)
       sc = indexer_scores(iq_s, pk, w_s, pools, idx.kpool, pbase=pb, width=self.max_pools)
       # (compact: the pools gathered, a quarter of the bytes, then expanded to the keys on every device (pool_expand))
       if not getenv("IDX_SPLIT_COMPACT", 1): return all_gather(pool_index_rows(sc, start_pos, pools, k, idx.kpool), 0)[:Tq]
@@ -5287,7 +5291,8 @@ class Transformer:
       def tiled(n:int) -> int: return min(max(tile, round(n / tile) * tile), self.max_context // tile * tile or tile)
       # (PREFILL_CHUNK_UP: the biggest chunk whole tiles up, not the nearest (6 devices: 4096 -> 4224, not 4032): a 4k prompt (4096 tokens
       # and its template) one chunk, not 4032 and a padded 192)
-      up = [min(-(-chunk_size // tile) * tile, self.max_context // tile * tile or tile)] if getenv("PREFILL_CHUNK_UP", 0) and not self.config.qsa else []
+      up = [min(-(-chunk_size // tile) * tile, self.max_context // tile * tile or tile)] if getenv("PREFILL_CHUNK_UP", 0) and \
+        not self.config.qsa else []
       sizes = [tiled(n) for n in sizes] + up
     return tuple(sorted(set(sizes)))
 
