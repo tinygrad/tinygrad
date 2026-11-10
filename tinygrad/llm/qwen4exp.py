@@ -1084,7 +1084,9 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
     return queued(i, *block._phase_pre(hc, norm, xs[i]))
   # the batches' sublayers in step: batch i's sublayer k after batch i-1's (its states the one before wrote), the collectives of one run while
   # the other computes
-  RING_QUEUE_ON[0] = _mb_active[0] = True
+  # (RING_QUEUE_MB1=0: one micro batch's collectives on its own queue: no other batch to run under them, no waits between queues)
+  RING_QUEUE_ON[0] = len(xs) > 1 or bool(getenv("RING_QUEUE_MB1", 1))
+  _mb_active[0] = True
   deps:list[list[Tensor|None]] = [[None]*len(subs) for _ in xs]
   phases:list[tuple[Tensor, ...]] = [() for _ in xs]
   for k in range(len(subs)):
