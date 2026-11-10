@@ -1,11 +1,11 @@
 # uops tests that pass on NULL backend (no copyout needed)
-import unittest, math, pickle
+import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context, ceildiv, Timing, cdiv, Target
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device, Buffer
-from tinygrad.uop.ops import Ops, UOp, UOpMetaClass, KernelInfo, AxisType
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
@@ -586,12 +586,6 @@ class TestUopsObject(unittest.TestCase):
     b = UOp.from_buffer(buf, dtypes.int32)
     del b
     self.assertIs(a.buffer, buf)
-
-  def test_pickle_does_not_create_uops(self):
-    a = UOp.new_buffer("CPU", 4, dtypes.float32)
-    before = set(UOpMetaClass.ucache)
-    self.assertIs(pickle.loads(pickle.dumps(a)), a)
-    self.assertEqual(set(UOpMetaClass.ucache), before)
 
   def test_timing(self):
     with Timing("create 10k uops:"): ret = [UOp.const(10000000+i, dtypes.int) for i in range(10000)]

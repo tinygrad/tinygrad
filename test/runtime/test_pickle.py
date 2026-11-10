@@ -1,4 +1,4 @@
-import unittest, pickle, tracemalloc
+import unittest, pickle, tracemalloc, subprocess, sys
 import numpy as np
 from tinygrad import Tensor, Device, TinyJit, Variable, dtypes
 from tinygrad.helpers import GlobalCounters, DEV
@@ -45,10 +45,6 @@ class TestPickle(unittest.TestCase):
     t2:Tensor = pickle.loads(st)
     assert t2.uop.is_realized, f"expected {t2.uop} to be realized"
     np.testing.assert_equal(t_values, t2.numpy())
-
-  def test_pickle_buffer_uop_exact_in_process(self):
-    a = Tensor.arange(4).clone().realize().uop
-    self.assertIs(pickle.loads(pickle.dumps(a)), a)
 
   # NOTE: currently Buffer exists on the uop, not tensor
   def test_pickle_buffer_uop(self):
@@ -115,8 +111,7 @@ class TestPickle(unittest.TestCase):
   def test_pickle_no_storage_aliasing(self):
     # loading the same pickle twice gives fully independent storage: the buffers (and their BUFFER uops) are never shared
     t = Tensor([1,2,3,4]).realize()
-    st, uop = pickle.dumps(t), t.uop
-    del t, uop  # exact in-process roundtrips reuse a live binding; test independent loads after the original dies
+    st = pickle.dumps(t)
     t1, t2 = pickle.loads(st), pickle.loads(st)
     self.assertIsNot(t1.uop, t2.uop)
     self.assertIsNot(t1.uop.base.buffer, t2.uop.base.buffer)
@@ -124,15 +119,31 @@ class TestPickle(unittest.TestCase):
     self.assertListEqual(t1.tolist(), [9,9,9,9])
     self.assertListEqual(t2.tolist(), [1,2,3,4])
 
+  def test_pickle_slot_collision_in_subprocess(self):
+    t = Tensor([1,2,3,4], device="CPU").realize()
+    code = '''
+import pickle, struct, sys
+from tinygrad import Tensor, dtypes
+from tinygrad.device import Buffer
+from tinygrad.uop.ops import UOp
+slot = int(sys.argv[1])
+existing_buf = Buffer("CPU", 16, initial_value=struct.pack("4i", 9, 9, 9, 9))
+existing = UOp._buffer(4, dtypes.int32, slot, device="CPU", buffer=existing_buf)
+loaded = pickle.loads(sys.stdin.buffer.read())
+assert loaded.uop is not existing
+assert loaded.uop.buffer is not existing_buf
+assert loaded.tolist() == [1,2,3,4]
+assert existing_buf.as_memoryview().cast("i").tolist() == [9,9,9,9]
+'''
+    subprocess.run([sys.executable, "-c", code, str(t.uop.arg.slot)], input=pickle.dumps(t), check=True, capture_output=True)
+
   def test_pickle_view_is_self_contained(self):
     # a pickled graph carries its own buffer: data from earlier loads of related graphs must not leak into it
     t = Tensor([1,2,3,4]).realize()
-    view_st = pickle.dumps(t[1:3])
     t1 = pickle.loads(pickle.dumps(t))
     t1.assign(Tensor([9,9,9,9])).realize()
-    # once the original binding dies, the view must load its own pickled values, not values from an earlier related load
-    del t, t1
-    v2 = pickle.loads(view_st)
+    # loading a view of the original tensor must give the pickled values ([2,3]), not the mutated values from the other load
+    v2 = pickle.loads(pickle.dumps(t[1:3]))
     self.assertListEqual(v2.realize().tolist(), [2,3])
 
   def test_pickle_jit(self):

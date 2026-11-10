@@ -4,6 +4,7 @@ import unittest
 import numpy as np
 from tinygrad.engine.realize import run_linear
 from tinygrad.tensor import Tensor
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import UOp
 
 def _allocations_of_type(t):
@@ -84,15 +85,28 @@ class TestGC(unittest.TestCase):
     a = Tensor.empty(10).realize()
     real_buf = a.uop.buffer
     slot = a.uop.arg.slot
+    key = (real_buf, a.uop.dtype, a.uop.device)
     self.assertLess(slot, 0)
     self.assertIs(UOp.buffers[slot], real_buf)
+    self.assertIs(UOp.buffer_slots[key](), a.uop)
     with assert_freed(real_buf):
       self.assertFalse(real_buf.is_allocated())
       a.realize()
       self.assertIs(a.uop.buffer, real_buf)
       del a.uop # the Buffer object is still held by real_buf
       self.assertNotIn(slot, UOp.buffers)
+      self.assertNotIn(key, UOp.buffer_slots)
+      del key
       del real_buf
+
+  def test_scratch_buffers_do_not_unbind_globals(self):
+    real = UOp.new_buffer("CPU", 4, dtypes.float32)
+    real_buf = real.buffer
+    for addrspace in (AddrSpace.LOCAL, AddrSpace.REG):
+      scratch = UOp.placeholder((4,), dtypes.float32, real.arg.slot, addrspace)
+      del scratch
+      gc.collect()
+      self.assertIs(real.buffer, real_buf)
 
   def test_assign_keeps_buffer(self):
     a = Tensor.full((4,), 1.).contiguous()
