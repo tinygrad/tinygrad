@@ -4,7 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
-from tinygrad import Tensor
+from tinygrad import Tensor, UOp, nn, dtypes
+from tinygrad.uop.ops import Ops
 from tinygrad.llm import glm_dsa
 from tinygrad.llm.glm_dsa import Indexer, MLATransformerBlock, Transformer
 
@@ -53,6 +54,22 @@ class TestGLMDSASequence(unittest.TestCase):
       self.assertEqual(model._token_buf[0, 10].item(), 9)
       self.assertEqual(model._token_buf[0, 2].item(), -1)
     finally: glm_dsa._seq_base[0] = old_base
+
+  def test_seq_embedding_is_a_gather(self):
+    # (a view of the token buffer at seq_base+start_pos (two variables): its embedding a lookup of the rows, not a reduce over the vocabulary)
+    model = Transformer.__new__(Transformer)
+    model.token_embd = nn.Embedding(1024, 64)
+    buf = Tensor.zeros(1, 4096, dtype="int32").contiguous().realize()
+    vb, sp = UOp.variable("seq_base", 0, 2048), UOp.variable("start_pos", 0, 1023)
+    nt = UOp.variable("toks", 1, 256)
+    old_base = glm_dsa._seq_base[0]
+    glm_dsa._seq_base[0] = vb
+    try: x = model._embed(buf[:, vb+sp:vb+sp+nt])
+    finally: glm_dsa._seq_base[0] = old_base
+    kernels = [si for si in x.schedule_linear().src if si.src[0].op is Ops.SINK]
+    # (the reduce of a one-hot: the one-hot (tokens, vocabulary) of bools stored by a kernel of its own)
+    stores = [u for k in kernels for u in k.src[0].toposort() if u.op is Ops.STORE]
+    self.assertFalse(any(u.src[1].dtype == dtypes.bool for u in stores), "the embedding is a reduce of a one-hot of the vocabulary")
 
   def test_dsa_stash_roundtrip(self):
     def t(shape, axis=None):
