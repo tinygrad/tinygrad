@@ -398,10 +398,8 @@ pm_linearize_cleanups = PatternMatcher([
   (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
   (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
-   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]))
-])
-
-pm_alloc_to_buf = PatternMatcher([
+   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))])),
+  # ALLOC becomes a distinct BUFFER before rendering
   (UPat(Ops.ALLOC, name="x"), lambda ctx,x: ((buf:=x.replace(op=Ops.BUFFER, arg=replace(x.arg, slot=next(ctx)))), [buf])),
 ])
 
@@ -418,7 +416,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
 
 def linearize_cleanups(lst:list[UOp]) -> list[UOp]:
   slots = itertools.count(max([u.arg.slot+1 for u in lst if u.op is Ops.BUFFER], default=0))
-  return line_rewrite(lst, pm_linearize_cleanups+pm_alloc_to_buf, ctx=slots)
+  return line_rewrite(lst, pm_linearize_cleanups, ctx=slots)
 
 @dataclass
 class LowerCallsCtx:

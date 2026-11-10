@@ -550,7 +550,6 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_alloc(self):
     def kernel(out:UOp, inp:UOp):
-      # construct a buffer and alloc with the same slot
       alloc = UOp.alloc((1,), dtypes.int, -1, addrspace=AddrSpace.REG)
       buf = UOp._buffer(1, dtypes.int, -1, addrspace=AddrSpace.REG)
       alloc = alloc[0].set(inp[0])
