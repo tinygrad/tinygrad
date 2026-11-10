@@ -3288,7 +3288,8 @@ def _moe_bundle_atomic_kernel(bexp:UOp, brow:UOp, sel:UOp, first:UOp, experts:in
 
 def moe_bundles(sel:Tensor, first:Tensor, experts:int, M:int, N:int) -> tuple[Tensor, Tensor]:
   """the N selections sel of every device in bundles of at most M rows of an expert (_moe_bundle_kernel): (bexp, brow) of every device"""
-  NB = (N + M - 1) // M + min(experts, N)
+  # (a bundle has a row at least: at most N of them; the experts' partly filled bundles at most one each)
+  NB = min(N, (N + M - 1) // M + min(experts, N))
   devs = sel.device
   def filled(n:int) -> Tensor:
     shape, axis = ((len(devs)*n,), 0) if isinstance(devs, tuple) else ((n,), None)
