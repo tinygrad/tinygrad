@@ -1,4 +1,4 @@
-import unittest, pickle, tracemalloc
+import unittest, pickle, tracemalloc, subprocess, sys
 import numpy as np
 from tinygrad import Tensor, Device, TinyJit, Variable, dtypes
 from tinygrad.helpers import GlobalCounters, DEV
@@ -118,6 +118,24 @@ class TestPickle(unittest.TestCase):
     t1.assign(Tensor([9,9,9,9])).realize()
     self.assertListEqual(t1.tolist(), [9,9,9,9])
     self.assertListEqual(t2.tolist(), [1,2,3,4])
+
+  def test_pickle_slot_collision_in_subprocess(self):
+    t = Tensor([1,2,3,4], device="CPU").realize()
+    code = '''
+import pickle, struct, sys
+from tinygrad import dtypes
+from tinygrad.device import Buffer
+from tinygrad.uop.ops import UOp
+slot = int(sys.argv[1])
+existing_buf = Buffer("CPU", 16, initial_value=struct.pack("4i", 9, 9, 9, 9))
+existing = UOp._buffer(4, dtypes.int32, slot, device="CPU", buffer=existing_buf)
+loaded = pickle.loads(sys.stdin.buffer.read())
+assert loaded.uop is not existing
+assert loaded.uop.buffer is not existing_buf
+assert loaded.tolist() == [1,2,3,4]
+assert existing_buf.as_memoryview().cast("i").tolist() == [9,9,9,9]
+'''
+    subprocess.run([sys.executable, "-c", code, str(t.uop.arg.slot)], input=pickle.dumps(t), check=True, capture_output=True)
 
   def test_pickle_view_is_self_contained(self):
     # a pickled graph carries its own buffer: data from earlier loads of related graphs must not leak into it

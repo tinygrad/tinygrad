@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context, ceildiv, Timing, cdiv, Target
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat, Invalid  # noqa: F401
-from tinygrad.device import Device
+from tinygrad.device import Device, Buffer
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.codegen import to_program
@@ -579,6 +579,14 @@ class TestUPatHelpers(unittest.TestCase):
     self.assertNotEqual(test_upat.location[1], test_upat_named.location[1])
 
 class TestUopsObject(unittest.TestCase):
+  def test_from_buffer_identity(self):
+    buf = Buffer("CPU", 16)
+    a = UOp.from_buffer(buf, dtypes.float32)
+    self.assertIs(UOp.from_buffer(buf, dtypes.float32), a)
+    b = UOp.from_buffer(buf, dtypes.int32)
+    del b
+    self.assertIs(a.buffer, buf)
+
   def test_timing(self):
     with Timing("create 10k uops:"): ret = [UOp.const(10000000+i, dtypes.int) for i in range(10000)]
     assert len(ret) == 10000
