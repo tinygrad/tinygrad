@@ -5285,7 +5285,10 @@ class Transformer:
       # whole tiles of 16 rows on every device, the kernels of the whole chunk on tiles of 64
       tile = math.lcm(16*len(devs), 64)
       def tiled(n:int) -> int: return min(max(tile, round(n / tile) * tile), self.max_context // tile * tile or tile)
-      sizes = [tiled(n) for n in sizes]
+      # (PREFILL_CHUNK_UP: the biggest chunk whole tiles up, not the nearest (6 devices: 4096 -> 4224, not 4032): a 4k prompt (4096 tokens
+      # and its template) one chunk, not 4032 and a padded 192)
+      up = [min(-(-chunk_size // tile) * tile, self.max_context // tile * tile or tile)] if getenv("PREFILL_CHUNK_UP", 0) and not self.config.qsa else []
+      sizes = [tiled(n) for n in sizes] + up
     return tuple(sorted(set(sizes)))
 
   def warmup(self):
