@@ -76,13 +76,13 @@ st0 = time.perf_counter()
 # the quality of a batched step's kernels, e.g. a flag's A/B of seq.out files. no main path then)
 if (GB:=getenv("BATCH", 0)) > 1:
   from tinygrad.llm.glm5next import REGION_ALIGN
-  span = -(-(L + NTOK + 4*(k+1) + 64) // REGION_ALIGN) * REGION_ALIGN
+  span = -(-(L + NTOK + 512 + 64) // REGION_ALIGN) * REGION_ALIGN
   assert GB <= model.seq_slots() and GB * span <= model.seq_rows(), f"SEQ_SLOTS >= {GB}, SEQ_ROWS >= {GB*span}"
   for i0 in range(0, N, GB):
     group = []
     for g, i in enumerate(range(i0, min(N, i0 + GB))):
       off = 1000 + i * (len(corpus) - L - NTOK - 2000) // N
-      ids, T = corpus[off:off+L], corpus[off:off+L+NTOK+4*k+2]
+      ids, T = corpus[off:off+L], corpus[off:off+L+NTOK+512]  # (the others of the group step on: past NTOK)
       sq = dict(i=i, g=g, base=g*span, T=T, mtp=L, j=0, par=1, y=[T[L]] + [0]*k, out={"lp": [], "top": [], "ids": [], "lps": []})
       first = model.seq_prefill(g, sq["base"], list(ids), 0, 0)
       rec(sq["out"], (model.seq_spec_h, g*2*(k+1), g*2*(k+1)+1), T[L])
