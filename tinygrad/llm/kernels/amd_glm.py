@@ -2152,8 +2152,9 @@ def _ring_mailbox(devs:tuple[str, ...], lane:int=0) -> RingMailbox|None:
   # (not with the micro batches on queues of their own: they hang, see ring_queue)
   mb_queues = getenv("MICRO_BATCHES", 1) > 1 and getenv("MB_QUEUES", 1)
   if len(devs) < 3 or not amd_custom_kernels_supported(devs) or not getenv("RING", 0 if mb_queues else 1): return None
+  # (RING_RDNA4: the ring on RDNA4 (R9700) too, as amd_qwen's: else a prefill's gathers and scatters are rings of copies)
   with Context(ALLOW_DEVICE_USAGE=1):
-    if any(getattr(Device[d], "target", (0,))[0] != 11 for d in devs): return None
+    if any(getattr(Device[d], "target", (0,))[0] not in ((11, 12) if getenv("RING_RDNA4", 0) else (11,)) for d in devs): return None
   return RingMailbox(devs, RING_CMAX)
 
 RING_DEADLINE:list[UOp|None] = [None]
