@@ -106,6 +106,33 @@ class TestEngineTelemetry(unittest.TestCase):
     self.assertEqual(engine.evictions, 2)
     engine.telemetry.event.assert_called_with("eviction", cause="paused_length", slot=3, tokens=2, stashed=True)
 
+  def test_run_alone_counts_spec_steps_before_finish(self):
+    from tinygrad.llm.serve import LLMServer, Request
+
+    server, observed_steps = LLMServer.__new__(LLMServer), []
+    server.model = Mock(spec_stats=[0, 0], _cached_tokens=[])
+    server.miss_log, server.stash_hit, server.stash_load = Mock(), Mock(return_value=0), Mock()
+    server.main_writes = Mock()
+
+    def generate(ids, **kwargs):
+      server.model.spec_stats[:] = [2, 7]
+      server.model._cached_tokens = ids + [10]
+      yield 10
+
+    def emit(req, token):
+      req.generated.append(token)
+      return True
+
+    def finish(req, error=None):
+      observed_steps.append(req.steps)
+      return False
+
+    server.model.generate, server.emit, server.finish = generate, emit, finish
+    req = Request([1, 2], "", None, 0.0)
+    self.assertFalse(server.run_alone(req, set()))
+    self.assertEqual(observed_steps, [2])
+    self.assertEqual(req.steps, 2)  # the finally block must not count them again
+
 
 if __name__ == "__main__":
   unittest.main()

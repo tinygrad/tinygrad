@@ -1232,6 +1232,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           self.main_moved = True
           req.spec_start(req.generated[-1], req.pos, self.spec)
           return True
+      if spec_st and isinstance(ss:=getattr(model, "spec_stats", None), list):
+        req.steps += ss[0] - spec_st[0]
+        spec_st = list(ss)  # finish logs/emits telemetry before the finally block
       return self.finish(req)
     finally:
       if spec_st and isinstance(ss:=getattr(model, "spec_stats", None), list): req.steps += ss[0] - spec_st[0]
