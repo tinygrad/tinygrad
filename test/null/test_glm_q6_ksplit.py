@@ -18,6 +18,18 @@ class TestGLMQ6InputSplits(unittest.TestCase):
     # Three 32-row tiles x 24 64-wide output tiles = 72 workgroups before splitting.
     self.assertEqual(_q6_input_splits(4096, 1536, 96, 32, 192, False), 4)
 
+  def test_rdna3_matches_prior_inline_selector(self):
+    # Rebase guard: the shared helper must preserve the merged RDNA3 selector, not only its common 4096x1536 case.
+    for inc in (256, 512, 1536, 4096, 8192):
+      for out in (64, 128, 384, 512, 1536, 4096):
+        for rows in (32, 64, 96, 128):
+          for target in (1, 32, 192, 384):
+            with self.subTest(inc=inc, out=out, rows=rows, target=target):
+              wgs = (rows // 32) * -(-out // 64)
+              expected = next((s for s in (1, 2, 4, 8, 16) if (inc // 32) % (8*s) == 0 and wgs*s >= target),
+                              next(s for s in (16, 8, 4, 2, 1) if (inc // 32) % (8*s) == 0))
+              self.assertEqual(_q6_input_splits(inc, out, rows, 32, target, False), expected)
+
   def test_rdna4_padding_and_tiles_preserve_default_and_enable_small_rows(self):
     self.assertEqual([_q6_rdna4_padded_rows(r, True) for r in (24, 48, 72, 96)], [32, 64, 96, 96])
     # Recursive q8 padding takes the target, not a delta; aligned inputs must not pad again.
