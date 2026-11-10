@@ -38,9 +38,9 @@ def raw_rows(t, a:int, b:int) -> np.ndarray:
 def rec(out:dict, h, target:int):
   from tinygrad import Tensor
   t, a, b = h
-  from tinygrad.llm.kernels.amd_glm import q8_quantize_cache_clear
+  from tinygrad.llm.kernels import amd_glm, amd_glm_dsa
   x = model.output(Tensor(raw_rows(t, a, b)).to(devs)).float().numpy()[:, :V].astype(np.float64)
-  q8_quantize_cache_clear()
+  amd_glm.q8_quantize_cache_clear(), amd_glm_dsa.q8_quantize_cache_clear()  # (glm_dsa's output head quantizes with amd_glm_dsa's)
   for r, t in zip(x, target if isinstance(target, list) else [target]):
     m = r.max()
     lp = r - (m + np.log(np.exp(r - m).sum()))
