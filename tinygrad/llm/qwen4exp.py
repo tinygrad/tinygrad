@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.jit import capture_parallel
+from tinygrad.llm.kernels import amd_qwen
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
 from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES, _wmma_rdna4, ring_errors
 from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custom_kernels_supported, find_packed, moe_linear, q8_linear, \
@@ -936,6 +937,10 @@ class FFNBlock:
     # RDNA3: 32 rows for f16 and IQ3_S K256 kernels; the latter needs fewer padded rows and fits two LDS tiles per WGP.
     i8 = gate_exps.ggml_type in I8_WMMA_QUANTS and gate_exps.ggml_type != IQ3_S
     tile = MOE_TILE if _wmma_rdna4(x.device) or i8 else 32
+    # (MOE_TILE16 (RDNA3, IQ3_S gate|up with the K256 sub-blocks unrolled by XH or UNROLL): tiles of 16 rows when the experts have few
+    # rows each (a warm turn's chunk): half the tensor core work of a tile of 32 mostly padding, the same bits per row)
+    if tile == 32 and (amd_qwen.K256_XH or amd_qwen.K256_UNROLL) and gate_exps.ggml_type == IQ3_S and isinstance(T, int) and \
+       _moe_use_tile16(cast(int, B) * T * int(sel.shape[-1]), self.config.num_experts): tile = 16
     _, entries, tiles, pos = moe_route(sel, gate_exps.first, gate_exps.local_experts, tile)
     k, sel_shape = int(sel.shape[-1]), sel.shape[-3:]
     # gate and up read the token of each sorted row, down writes the row of each selection
@@ -1135,6 +1140,12 @@ def _region_rows(config:TransformerConfig) -> int:
 MICRO_BATCHES = getenv("MICRO_BATCHES", 2)
 PREFILL_MB1_ROWS = getenv("PREFILL_MB1_ROWS", 0)
 PREFILL_TILE32 = getenv("PREFILL_TILE32", 1)
+# MOE_TILE16: grouped experts in tiles of 16 rows if a chunk has at most this many selections an expert on average (see _grouped_experts)
+MOE_TILE16 = getenv("MOE_TILE16", 0)
+def _moe_use_tile16(selections:int, experts:int) -> bool:
+  """fewer padded rows and weight reads with 16-row tiles (17-32 rows/expert: both tile sizes pad to 32, so keep 32)"""
+  if not MOE_TILE16 or selections > MOE_TILE16 * experts: return False
+  return round_up(selections, 16 * experts) < round_up(selections, 32 * experts)
 PREFILL_SIZES = tuple(int(c) for c in getenv("PREFILL_SIZES", "192,512,1152,2048,4096").split(",") if c)
 # the attention cache's keys (1) and values (2) rotated, see QSABlock._rot
 QSA_KV_ROT = getenv("QSA_KV_ROT", 0)
