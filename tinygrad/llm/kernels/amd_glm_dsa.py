@@ -4321,7 +4321,8 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
     od = (parts.reshape(n, G, T, split, 16, D) * w).sum(3) / ld.maximum(1e-30)
   else: mx, ld, od = m, l.squeeze(3), parts.reshape(n, G, T, 16, D)
   # the devices' combined: weighed by their sum at the max of all of them
-  if small and getenv("SEQ_P2P_A2A", 1) and dims is not None and H % n == 0:
+  # (packed (SEQ_P2P_PACK): the stats gather and the packed reduce scatter, not the all to all of float words (measured ts5 G=1: 34.0 -> 27.8 ms))
+  if small and getenv("SEQ_P2P_A2A", 1 if _seq_p2p_pack() is None else 0) and dims is not None and H % n == 0:
     # (a few tokens: every device's outputs of the heads of a device (normed by its sum), their max and sum, to that device in one exchange;
     # combined there by their max and sum)
     hl, Dp = int(H) // n, dims + 2
