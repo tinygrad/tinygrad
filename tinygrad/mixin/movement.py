@@ -127,8 +127,8 @@ class MovementMixin:
   def _broadcast_to(self, new_shape: tuple[sint, ...]) -> Self:
     if self.shape == new_shape:
       return self
-    if self.ndim > len(new_shape):
-      raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={self.shape} to {new_shape=}")
+    # shapes align right and a missing leading dim is a 1 on either side
+    if self.ndim > len(new_shape): return self._broadcast_to(_align_left(self.shape, new_shape)[1]).reshape(new_shape)
     # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
     shape, _ = _align_left(self.shape, new_shape)
     # for each dimension, check either dim is 1, or it does not change
