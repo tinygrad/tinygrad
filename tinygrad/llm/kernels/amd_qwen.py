@@ -119,6 +119,8 @@ SKINNY_ROWS = 256
 SKINNY_WG, HC_KS = getenv("SKINNY_WG", 192), getenv("HC_KS", 32)
 # AG_FUSE: all_gather_q8's packing kernel sends the words to the peers too (the flag exchange's send kernel folded into it)
 AG_FUSE = getenv("AG_FUSE", 1)
+# XUNPACK: all_gather_q8's flag push unpacks the gathered q8 groups itself (one kernel less an all gather)
+XUNPACK = getenv("XUNPACK", 0)
 # TILE16: batched decoding's hyper-connection gemms (a device's few rows: 4-16 of a tile of 32) of its real rows' tiles alone, in tiles of 16
 TILE16 = getenv("TILE16", 1)
 
@@ -1845,7 +1847,7 @@ def _flag_poll(wg:UOp, t:UOp, epoch:UOp, me:UOp, flags_mb:tuple[UOp, ...], N:int
 
 @functools.cache
 def _flag_sum_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:int, EP:int, scatter:int=0, gather:int=0, gather_half:bool=False,
-                     broadcast:bool=False, half:bool=False) -> UOp:
+                     broadcast:bool=False, half:bool=False, gather_q8:bool=False) -> UOp:
   # half: the broadcast reduced chunk in fp16 pairs (saturating, as the partials are), gathered so (half the bytes of float32)
   vals_mb, flags_mb = mb[:N], mb[N:]
   wg, t, els, epoch, me, spos, vslot, fslot = _flag_ar_common(N, n, T, EP, counter)
@@ -1857,7 +1859,16 @@ def _flag_sum_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:int, 
     v = x[0, e.valid(e < n)].load().bitcast(dtypes.uint32) if gather and not gather_half else \
       _h2(x, me*n + e if scatter else e, scatter or n, clip=not gather_half or half)
     ps = [me.eq(s).where(v, vals_mb[0].after(arrived)[vslot(s, e)].load()) for s in range(N)]
-    if gather:
+    if gather_q8:
+      # (XUNPACK: the gathered q8 groups (8 words of 4 int8, then the float scale: q8_pack) unpacked here, as q8_unpack does: no kernel after)
+      w, e8 = e % 9, e - e % 9 + 8
+      for s, p in enumerate(ps):
+        dw = me.eq(s).where(x[0, e8.valid(e < n)].load().bitcast(dtypes.uint32), vals_mb[0].after(arrived)[vslot(s, e8)].load())
+        d = dw.bitcast(dtypes.float32)
+        for i in range(4):
+          val = ((p >> (8*i)).cast(dtypes.uint8).bitcast(dtypes.int8).float() * d).cast(dtypes.half)
+          stores.append(out[(((s*n + e)//9)*32 + w*4 + i).valid((e < n) & (w < 8))].store(val))
+    elif gather:
       if gather_half:
         for s, p in enumerate(ps):
           for j in (0, 1):
@@ -2528,6 +2539,9 @@ def all_gather_q8(x:Tensor, axis:int, real:int=0) -> Tensor:
      (ar:=flag_allreduce(devs, groups)) is not None:
     kw = dict(N=N, n=n, T=shape[0], EP=shape[1])
     res = Tensor.custom_kernel(packed, *ar.vals[1:], src, ar.counter, fxn=functools.partial(_q8_pack_send_kernel, **kw))
+    if XUNPACK:
+      return Tensor.custom_kernel(Tensor.empty(T*D, dtype=dtypes.half, device=devs), res[0].reshape(N, n), ar.counter, ar.vals[0], *res[1:N],
+                                  *ar.flags, fxn=functools.partial(_flag_sum_kernel, gather=N*n, gather_q8=True, **kw))[0].reshape(1, T, D)
     words = Tensor.empty(N*n, dtype=dtypes.uint32, device=devs)
     gath = Tensor.custom_kernel(words, res[0].reshape(N, n), ar.counter, ar.vals[0], *res[1:N], *ar.flags,
                                 fxn=functools.partial(_flag_sum_kernel, gather=N*n, gather_half=False, **kw))[0].reshape(T, D//32, 9)
