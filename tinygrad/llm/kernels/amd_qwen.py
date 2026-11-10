@@ -120,7 +120,7 @@ SKINNY_WG, HC_KS = getenv("SKINNY_WG", 192), getenv("HC_KS", 32)
 # AG_FUSE: all_gather_q8's packing kernel sends the words to the peers too (the flag exchange's send kernel folded into it)
 AG_FUSE = getenv("AG_FUSE", 1)
 # XUNPACK: all_gather_q8's flag push unpacks the gathered q8 groups itself (one kernel less an all gather)
-XUNPACK = getenv("XUNPACK", 0)
+XUNPACK = getenv("XUNPACK", 1)  # all_gather_q8 push unpacks itself (bit-exact; tr4 B=32 -0.6%, 25-min flag_stress 0 bad)
 # TILE16: batched decoding's hyper-connection gemms (a device's few rows: 4-16 of a tile of 32) of its real rows' tiles alone, in tiles of 16
 TILE16 = getenv("TILE16", 1)
 
