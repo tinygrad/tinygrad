@@ -300,7 +300,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # expand
   sink = graph_rewrite(sink, expander, ctx=build_range_map(sink), name="expander")
 
-  slots = itertools.count(max([u.arg.slot+1 for u in sink.toposort() if u.op in {Ops.BUFFER, Ops.ALLOC}], default=0))
+  slots = itertools.count(max([u.arg.slot+1 for u in sink.toposort() if u.op is Ops.ALLOC], default=0))
 
   # remove reduce
   sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=slots, name="remove reduces")
@@ -401,7 +401,9 @@ pm_linearize_cleanups = PatternMatcher([
    lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]))
 ])
 
-pm_alloc_to_buf = PatternMatcher([(UPat(Ops.ALLOC, name="x"), lambda x: ((buf:=x.replace(op=Ops.BUFFER)), [buf])),])
+pm_alloc_to_buf = PatternMatcher([
+  (UPat(Ops.ALLOC, name="x"), lambda ctx,x: ((buf:=x.replace(op=Ops.BUFFER, arg=replace(x.arg, slot=next(ctx)))), [buf])),
+])
 
 # requires lst be toposorted. like graph rewrite, but for lines
 def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
@@ -414,6 +416,10 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
     newlst.extend(ret[1])
   return newlst
 
+def linearize_cleanups(lst:list[UOp]) -> list[UOp]:
+  slots = itertools.count(max([u.arg.slot+1 for u in lst if u.op is Ops.BUFFER], default=0))
+  return line_rewrite(lst, pm_linearize_cleanups+pm_alloc_to_buf, ctx=slots)
+
 @dataclass
 class LowerCallsCtx:
   renderer: Renderer
@@ -425,8 +431,8 @@ def lower_call(ctx:LowerCallsCtx, call:UOp, b:UOp) -> UOp|None:
   ki = KernelInfo(name + (f"_{i}" if (i:=bodies.setdefault(b, len(bodies))) else ""), optimized=True, kernel=False)
   if ctx.renderer.inline_prefix:
     b = graph_rewrite(b, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
-    b = UOp(Ops.LINEAR, src=tuple(line_rewrite(list(b.src[1].src) if b.op is Ops.PROGRAM \
-        else linearize(full_rewrite_to_sink(b, ctx.renderer, optimize=False)), pm_linearize_cleanups+pm_alloc_to_buf)), arg=ki.name)
+    b = UOp(Ops.LINEAR, src=tuple(linearize_cleanups(list(b.src[1].src) if b.op is Ops.PROGRAM \
+        else linearize(full_rewrite_to_sink(b, ctx.renderer, optimize=False)))), arg=ki.name)
   else: b = to_program(b.substitute({b.src[0]:b.src[0].replace(arg=ki)}) if b.op is Ops.PROGRAM else b.replace(arg=ki), ctx.renderer)
   return call.replace(src=(b,)+call.src[1:])
 
@@ -443,7 +449,7 @@ def pack_args(sink:UOp, params:tuple[UOp, ...]) -> UOp:
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
-  lst = line_rewrite(linearize(sink), pm_linearize_cleanups+pm_alloc_to_buf)
+  lst = linearize_cleanups(linearize(sink))
   prg = prg.replace(src=(lst[-1],))
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
