@@ -72,6 +72,18 @@ class TestEffectRetention(unittest.TestCase):
     a, b = Tensor.custom_kernel(Tensor([3, 0]).contiguous(), Tensor.ones(1, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([3, 7], [0]))
 
+  def test_expand_index_keeps_dropped_coordinate_effect(self):
+    def kernel(A:UOp):
+      i = A.after(A[0].store(1))[0].load() % 3
+      return A[1].store(UOp.const(7, dtypes.int).reshape((1,)).expand((3,)).index(i)).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(2, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [1, 7])
+
+  def test_reshape_index_keeps_dropped_coordinate_effect(self):
+    def kernel(A:UOp):
+      i = UOp.const(0, dtypes.int).after(A[0].store(9))
+      return A[1].store(UOp.const(7, dtypes.int).reshape((1,)).index(i)).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.zeros(2, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [9, 7])
+
   def test_simplify_keeps_read_after_store(self):
     def kernel(A:UOp, B:UOp): return B[0].store((A[0].after(A[0].store(7))*2).simplify()).sink(arg=KernelInfo(opts_to_apply=()))
     a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
