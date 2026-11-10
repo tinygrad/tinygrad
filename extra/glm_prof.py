@@ -37,10 +37,12 @@ if getenv("PREFILL_PROF"):
   prompt = [t + 1 for t in prompt]  # (another prompt: nothing cached)
   if getenv("PROFILE"): kprof.reset(*devs)
   st = time.perf_counter()
-  tok = next(model.generate(prompt))
+  tok = next(gen:=model.generate(prompt))
   sync()
   dt = time.perf_counter() - st
   print(f"prefill {len(prompt)} tokens: {dt:.2f} s, {len(prompt)/dt:.0f} tok/s, first token {tok}", flush=True)
+  # (GREEDY: the greedy tokens after the prompt, an exactness check of A/B trees)
+  if (ng:=getenv("GREEDY", 0)) and not getenv("PROFILE"): print("greedy", [tok] + [next(gen) for _ in range(ng - 1)], flush=True)
   if getenv("PROFILE"): show(kprof.times(*devs), len(prompt) // 1000, "1k tokens", dt)
   if getenv("PROFILE") and getenv("COPY_CTX"):
     # (the kernels around the copies of COPY_CTX MB or more: the last one before a copy on its device's timeline, the first one after it)
