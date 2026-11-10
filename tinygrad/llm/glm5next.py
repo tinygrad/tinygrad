@@ -5,7 +5,7 @@ from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.jit import capture_parallel, _TinyJit
 from tinygrad.engine.realize import run_linear, compile_linear, link_linear
-from tinygrad.llm.kernels.amd_glm import rows_shifted, rows_pick
+from tinygrad.llm.kernels.amd_glm import rows_shifted, rows_pick, pool_expand
 from tinygrad.llm.kernels.amd_glm import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, hc_pre, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
@@ -1969,7 +1969,9 @@ class Indexer:
       iq_s = self.attn_q_b(qs).reshape(Tq, idx.n_heads, idx.head_dim)
       w_s = self.proj(xs) * (idx.n_heads * idx.head_dim)**-0.5
       sc = indexer_scores(iq_s, pk, w_s, pools, idx.kpool, pbase=pb, width=self.max_pools)
-      return all_gather(pool_index_rows(sc, start_pos, pools, k, idx.kpool), 0)[:Tq]
+      # (compact: the pools gathered, a quarter of the bytes, then expanded to the keys on every device (pool_expand))
+      if not getenv("IDX_SPLIT_COMPACT", 1): return all_gather(pool_index_rows(sc, start_pos, pools, k, idx.kpool), 0)[:Tq]
+      return pool_expand(all_gather(pool_index_rows(sc, start_pos, pools, k, idx.kpool, compact=True), 0), k, idx.kpool)[:Tq]
     # the scores on the tensor cores (rows of 16 queries), a kernel per query picks its pools
     rows = round_up(Tq, 16)
     iq, weights = iq.pad(((0, rows-Tq), None, None)), weights.pad(((0, rows-Tq), None))

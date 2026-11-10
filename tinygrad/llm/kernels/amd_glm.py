@@ -6471,6 +6471,27 @@ def index_scores(q:Tensor, pk:Tensor, pools:int|UOp, scale:float) -> Tensor|None
   if isinstance(pools, UOp): qh = Tensor(qh.uop.after(pools))
   return Tensor.custom_kernel(out, qh, pk.half(), fxn=functools.partial(_index_scores_kernel, H=H, scale=scale, pools=pu))[0]
 
+@functools.cache
+def _pool_expand_kernel(out:UOp, comp:UOp, k:int, kpool:int) -> UOp:
+  # a compact list (k+2: the picked pools, their count at k, the query's position at k+1) as pool_index_rows' list of keys: the keys of the
+  # pools (a pool's kpool), the tail of the query's pool after them, the count last (the entries past the count unwritten, as there)
+  rows, n_max = cast(int, out.shape[0]), cast(int, out.shape[1]) - 1
+  i = UOp.range(rows * (n_max + 1), 0, AxisType.GLOBAL)
+  row, e = i // (n_max + 1), i % (n_max + 1)
+  cnt, q = comp[row, k].load().cast(dtypes.weakint), comp[row, k+1].load().cast(dtypes.weakint)
+  tail0 = (q + 1) // kpool * kpool
+  ntail, picked = q + 1 - tail0, cnt * kpool
+  pool = comp[row, (e // kpool).minimum(k - 1)].load().cast(dtypes.weakint)
+  stores = [out[row, e.valid(e < picked)].store((pool * kpool + e % kpool).cast(dtypes.int32)),
+            out[row, e.valid((e >= picked) & (e < picked + ntail) & (e < n_max))].store((tail0 + e - picked).cast(dtypes.int32)),
+            out[row, e.valid(e.eq(n_max))].store((picked + ntail).cast(dtypes.int32))]
+  return UOp.group(*stores).end(i).sink(arg=KernelInfo(name="pool_expand", opts_to_apply=()))
+
+def pool_expand(comp:Tensor, k:int, kpool:int) -> Tensor:
+  """compact lists (rows, k+2) of pool_index_rows as its lists of keys (rows, k*kpool+kpool+1)"""
+  out = Tensor.empty(int(comp.shape[0]), k*kpool + kpool + 1, dtype=dtypes.int32, device=comp.device)
+  return Tensor.custom_kernel(out, comp.contiguous(), fxn=functools.partial(_pool_expand_kernel, k=k, kpool=kpool))[0]
+
 def pool_index_rows(scores:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int, row0:int=0, out:Tensor|None=None,
                     compact:bool=False) -> Tensor:
   """
