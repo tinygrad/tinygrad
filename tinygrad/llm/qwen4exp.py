@@ -330,6 +330,9 @@ _sp_rows:list[Tensor|None] = [None]
 # rows are padded to whole tiles of 32), 0: not split
 _seq_split = [0]
 SEQ_SPLIT_MAX = 128  # (the most real rows a device)
+# QTF: batched decoding teacher forced (a quality tool's, extra/qdecq.py): the drafts and the step's tokens forced from the host, the rows'
+# log probs written to the host
+QTF = getenv("QTF", 0)
 # AG_REAL: batched decoding's q8 all-gather packs a device's real rows from the padded mix, not from their copy (tr8 B=8 +0.8%: off)
 AG_REAL = getenv("AG_REAL", 0)
 # HC_REAL: batched decoding's hyper-connections read a device's real rows only and the mix stores them (no copy of them), its input not
@@ -2148,6 +2151,12 @@ class Transformer:
     tmv, self._seq_pf_temp = _host_buffer(devs, 8, dtypes.float32)
     self._seq_pf_host_temp = tmv.cast('f')
     self._seq_host_out, self._seq_out = _host_ints(devs[0], m*(2*k+1) + 1)
+    if QTF:
+      # (QTF: every sequence's k forced drafts and k+1 forced tokens a step, the rows' log probs out, see forward_seqs)
+      self._seq_host_tf, self._seq_tf = _host_ints(devs, m*(2*k+1))
+      V = self.config.vocab_size
+      tmv, self._seq_tfo = _host_buffer(devs[0], 4*m*(k+1)*V, dtypes.float32)
+      self._seq_host_tfo = tmv.cast('f')
     self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True) for sv in (True, False)}
     self._seq_ckpt_jits = {sv: TinyJit(functools.partial(self._seq_ckpt_copy, sv), capture_first=True) for sv in (True, False)}
     # (SEQ_REPLAY: a slot's recurrent states advanced to a position, see _seq_materialize; the position of every slot's state)
@@ -2702,6 +2711,8 @@ class Transformer:
       for i in range(k):
         # (draft i of sequence g: verified at its row i, sampled with that row's noise at its temperature, not its top_p)
         drafts.append(self._sample(mtp.head(m)[0], temps[:, :1], y.device, (seed, Tensor.arange(G) * (k+1) + i)).reshape(1, G))
+        # (QTF: the forced draft instead, the MTP layer's next pass on it)
+        if QTF: drafts[-1] = self._seq_tf[:, :G*(2*k+1)].reshape(G, 2*k+1)[:, i].reshape(1, G).to(drafts[-1].device).contiguous()
         if i < k-1:
           pos = [p + j + 1 + i for p, j in zip(mp, js)]
           _seq_batch[0], _batch_rows[0] = batch(pos, 1), [(p, 1) for p in pos]
@@ -2735,7 +2746,15 @@ class Transformer:
         hs = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + p*(k+1), s*H + (p+1)*(k+1)), None)).assign(hsv[g*(k+1):(g+1)*(k+1)])
                           for g, (s, p) in enumerate(zip(sl, ps))])
       tt = temps.reshape(G, 1, 2).expand(G, k+1, 2).reshape(G*(k+1), 2)
-      tok = self._sample(self._hc_out(hs.reshape(1, -1, hc.count, hs.shape[-1] // hc.count))[0], tt, y.device, (seed, Tensor.arange(G*(k+1))))
+      hout = self._hc_out(hs.reshape(1, -1, hc.count, hs.shape[-1] // hc.count))[0]
+      tok = self._sample(hout, tt, y.device, (seed, Tensor.arange(G*(k+1))))
+      if QTF:
+        # (QTF: the rows' log probs (the vocab's) to the host, the step's tokens the forced ones: every draft accepted)
+        V = self.config.vocab_size
+        lp = self.output(hout).to(devs[0] if isinstance(devs, tuple) else devs).float()[:, :V].log_softmax(-1)
+        lpw = self._seq_tfo[:G*(k+1)*V].assign(lp.flatten())
+        forced = self._seq_tf[:, :G*(2*k+1)].reshape(G, 2*k+1)[:, k:].reshape(G*(k+1), 1).to(tok.device)
+        tok = Tensor(forced.contiguous().uop.after(lpw.uop))
     finally: _seq_batch[0], _batch_rows[0], FLAG_LANE[0] = None, None, prev_lane
     q8_quantize_cache_clear()  # don't keep the graph alive
     out = tok.reshape(G, k+1).cat(*[d.reshape(G, 1) for d in drafts], dim=1).reshape(1, G*(2*k+1)).cast(dtypes.int32)
