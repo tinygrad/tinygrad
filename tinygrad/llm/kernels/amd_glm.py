@@ -895,6 +895,8 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
 
 # K256_SKIP: _grouped_k256_kernel skips the WMMAs of its tiles' token tiles that are all padding (the same bits for every row that is read)
 K256_SKIP = getenv("K256_SKIP", 0)
+# K256_IDLE: _grouped_k256_kernel's tiles of no expert load no grid and store nothing (their rows are never read)
+K256_IDLE = getenv("K256_IDLE", 0)
 # K256_SIGNPERM: _grouped_k256_kernel's IQ2_S signs by one byte permute of the word and its negation (_iq_signed_word perm, the same bytes)
 K256_SIGNPERM = getenv("K256_SIGNPERM", 0)
 
@@ -917,16 +919,21 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(WAVES, 3, axis_type=AxisType.LOCAL)
   col, ph, tid = lane % 16, lane // 16, wave * 32 + lane
   grid, signed = None, rdna4 and ggml_type == IQ3_S and bool(getenv("K256_SGRID", 1))
+  # K256_IDLE: a tile of no expert (the rows are sized for every selection: most tiles are idle) loads no grid and stores no output
+  live = tiles[token_block].load() >= 0
+  def gate(i:UOp) -> UOp: return i.valid(live) if K256_IDLE else i
   assert rdna4 or TOK <= 64, "RDNA3 K256 staging must fit in 32 KiB LDS"
   if grid_src is not None and signed:
     # the grid words with every one of the 16 sign patterns applied (index | signs << 9): a lookup instead of the sign math
     n = int(grid_src.numel())
     grid = UOp.alloc((n*16,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
     entries = [tid + i*256 for i in range(n*16 // 256)]
-    grid = grid.after(UOp.group(*(grid[e].store(_iq_signed_word(grid_src[e % n].load(), (e // n).cast(dtypes.uint32))) for e in entries)).barrier())
+    grid = grid.after(UOp.group(*(grid[gate(e)].store(_iq_signed_word(grid_src[gate(e % n)].load(), (e // n).cast(dtypes.uint32)))
+                                  for e in entries)).barrier())
   elif grid_src is not None:
     grid = UOp.alloc((int(grid_src.numel()),), dtypes.uint32, addrspace=AddrSpace.LOCAL)
-    grid = grid.after(UOp.group(*(grid[tid + i*256].store(grid_src[tid + i*256]) for i in range(int(grid.numel()) // 256))).barrier())
+    grid = grid.after(UOp.group(*(grid[gate(tid + i*256)].store(grid_src[gate(tid + i*256)].load())
+                                  for i in range(int(grid.numel()) // 256))).barrier())
   expert = tiles[token_block].load()
   b = UOp.range((expert >= 0).where(blocks, 0), 4, AxisType.LOOP)
   expert_base = expert.maximum(0).cast(dtypes.weakint) * expert_words
@@ -1002,7 +1009,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   def row(t:int, j:int) -> UOp: return token_block * TOK + t * 16 + (ph * 8 + j if rdna4 else 2*j + ph)
   def out_row(r:UOp) -> UOp:
     # x_div > 0: the output row is the sorted row, 0: the selection, -1: the sorted row (the padding rows aren't stored)
-    if x_div > 0: return r
+    if x_div > 0: return gate(r)
     return (e:=rows[r].load()).valid(e >= 0) if x_div == 0 else r.valid(rows[r].load() >= 0)
   def val(o:int, t:int, j:int) -> UOp: return accs[o][t].after(update)[j].load()
   if act is not None:
