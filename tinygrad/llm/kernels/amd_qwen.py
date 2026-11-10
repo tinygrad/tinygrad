@@ -3758,12 +3758,14 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
   lds_p, lds_a = lds_p.after(shared), lds_a.after(shared)
   alpha = [lds_a[crow(e)].load() for e in range(8)]
   o_new = []
+  # (the weights times the keys' scales of a values' group, in half: a lane's head's row of them, a subtile a WMMA; a group two dim tiles)
+  pfrags = {(vg, st_): UOp.stack(*((lds_p[col, st_*16 + k].load().float() * lds_sc.after(shared)[st_*16 + k, vg].load()).cast(dtypes.half)
+                                   for k in ks)) for vg in {(DK + wave*VW + dt*16) // 32 for dt in range(VT)} for st_ in range(ns)}
   for dt in range(VT):
-    # (the weights times the keys' scales of the values' group, in half: a lane's head's row of them, a subtile a WMMA)
     vg = (DK + wave*VW + dt*16) // 32
     acc = UOp.stack(*(o_regs[dt].after(tile)[e].load() * alpha[e] for e in range(8)))
     for st_ in range(ns):
-      pfrag = UOp.stack(*((lds_p[col, st_*16 + k].load().float() * lds_sc.after(shared)[st_*16 + k, vg].load()).cast(dtypes.half) for k in ks))
+      pfrag = pfrags[(vg, st_)]
       dv = DK + wave*VW + dt*16 + col
       vfrag = UOp.stack(*(nibble_half(lds_k.after(shared)[st_*16 + k, dv // 8].load(), dv % 8) for k in ks))
       acc = UOp.wmma(pfrag, vfrag, acc, *WMMA_ARG)
