@@ -3776,8 +3776,8 @@ def _slot_of(slots:tuple[UOp, ...], g:UOp) -> UOp:
   return slots[0][g].load().cast(dtypes.weakint) if slots else g
 
 @functools.cache
-def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *grouped:UOp, scale:float, valid_len:UOp, stride:int=0) -> UOp:
-  return _mla_sparse_body(out, None, q, cache, index, grouped, scale, valid_len, stride, 1)
+def _mla_sparse_wmma_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, *grouped:UOp, scale:float, valid_len:UOp, stride:int=0, hg:int=0) -> UOp:
+  return _mla_sparse_body(out, None, q, cache, index, grouped, scale, valid_len, stride, 1, hg=hg)
 
 @functools.cache
 def _mla_sparse_split_kernel(out:UOp, ml:UOp, q:UOp, cache:UOp, index:UOp, scale:float, valid_len:UOp, split:int, rep:int=0) -> UOp:
@@ -3828,7 +3828,7 @@ def _fp8_frag(k:UOp, row:UOp, w0:UOp|int, half:UOp) -> UOp:
   return UOp.stack(*_fp8_halves(_word(k, row, w0 + half)), *_fp8_halves(_word(k, row, w0 + half + 2)))
 
 def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:tuple[UOp, ...], scale:float, valid_len:UOp, stride:int,
-                     split:int, rep:int=0) -> UOp:
+                     split:int, rep:int=0, hg:int=0) -> UOp:
   # RDNA4 WMMA attention of every token on the keys of its list (pool_index_rows): a workgroup per token, its 16 (padded) heads are the rows,
   # they share the keys. 4 waves own a quarter of the latent dims each: they sum their partial scores through LDS, then update their quarter of
   # the output with P (via LDS). keys past valid_len aren't seen (padding rows of a chunk past its tokens: the cache isn't written there)
@@ -3849,7 +3849,8 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
     valid_len, off = grouped[0][g].load().cast(dtypes.weakint) + T // cast(int, grouped[0].shape[0]), _slot_of(grouped[1:], g) * stride
   ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
   qfrag = [UOp.stack(*(q[tok*16 + col, dbase + kk*16 + k].load() for k in ks)) for kk in range(KT)]
-  itok = tok % rep if rep else tok  # (the row of the token's list)
+  # (the row of the token's list. hg: the workgroups are hg groups of 16 heads of every token in turn)
+  itok = tok % rep if rep else tok // hg if hg else tok
   count = index[itok, n_max].load().cast(dtypes.weakint).minimum(n_max)
   # (split: the tiles of the keys of a token in ranges, sp's)
   tiles = (count + 15) // 16
@@ -4023,6 +4024,26 @@ def mla_sparse_tokens(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_l
   out = Tensor.custom_kernel(out, rows, cache.reshape(-1, int(D)), Tensor(index.uop.after(valid_len)),
                              fxn=functools.partial(_mla_sparse_lds_kernel, scale=scale, valid_len=_unbind(valid_len), vdims=vdims, rep=G))[0]
   return out.reshape(R, heads, vdims).permute(1, 0, 2).reshape(1, heads, R, vdims).pad((None, (0, Hp - heads), None, None))
+
+def mla_sparse_seq_tokens(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_len:UOp, vdims:int) -> Tensor:
+  """
+  amd_flash_attention_mla_sparse of the (1, H, T, D) queries split on their heads, a device's rows with every head (SEQ_ATTN_TOK): the
+  queries sent to the devices of their rows (in half, as the kernel reads them), a workgroup 16 heads of a token (all of them real, not a device's
+  few padded to 16: the keys of a token read by H/16 workgroups instead of one on every device), the outputs' first vdims dims sent back in half
+  (as the value projection reads them). the same kernel on the same rows: the same values. (1, H, T, vdims) split on its heads, half
+  """
+  devs = cast(tuple[str, ...], q.device)
+  _, H, T, D = q.shape
+  G = (H + 15) // 16
+  qt = all_to_all(q.half(), 1, 2)[0].permute(1, 0, 2)  # (T, H, D) split on its rows
+  rows = qt.pad((None, (0, G*16 - H), None)).reshape(T*G*16, D).contiguous()
+  vl = _unbind(valid_len)
+  idx = Tensor(shard_rows(index, 0).uop.after(valid_len))
+  out = Tensor.empty(T*G*16, D, dtype=dtypes.float32, device=devs, axis=0)
+  out = Tensor.custom_kernel(out, rows, cache.reshape(-1, int(cache.shape[-1])), idx,
+                             fxn=functools.partial(_mla_sparse_wmma_kernel, scale=scale, valid_len=vl, hg=G))[0]
+  o = out.reshape(T, G*16, D)[:, :H, :vdims].half().permute(1, 0, 2).reshape(1, H, T, vdims)
+  return all_to_all(o, 2, 1)
 
 def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None,
                                    vdims:int|None=None) -> Tensor:
