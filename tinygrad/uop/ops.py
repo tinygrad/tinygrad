@@ -232,10 +232,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     try: del UOpMetaClass.ucache[(self.op, self.src, self.arg, type(self.arg))]
     except (AttributeError, KeyError): pass
     try:
-      if self.op is Ops.BUFFER and self.arg.slot < 0: UOp.buffers.pop(self.arg.slot, None)
+      if self.op is Ops.BUFFER and self.arg.slot < 0:
+        if (buf:=UOp.buffers.pop(self.arg.slot, None)) is not None: UOp.buffer_slots.pop((buf, self.arg.dtype, self.arg.device), None)
     except AttributeError: pass
+  @staticmethod
+  def _from_pickle(op:Ops, src:tuple[UOp, ...], arg:ParamArg, buffer:Buffer|MultiBuffer):
+    if arg.slot not in UOp.buffers: return UOp.from_buffer(buffer, arg.dtype, arg.device)
+    return UOp(op, src, arg)
   def __reduce__(self):
-    if self.op is Ops.BUFFER and self.arg.slot in UOp.buffers: return UOp.from_buffer, (self.buffer, self.dtype, self.device)
+    if self.op is Ops.BUFFER and self.arg.slot in UOp.buffers: return UOp._from_pickle, (self.op, self.src, self.arg, self.buffer)
     return UOp, (self.op, self.src, self.arg)
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg))
@@ -796,6 +801,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   buffer_num = itertools.count(-1, -1)
   # Realized BUFFERs own their device Buffers through this table. Negative slots keep them out of positional parameter numbering.
   buffers: ClassVar[dict[int, Buffer|MultiBuffer]] = {}
+  buffer_slots: ClassVar[dict[tuple[Buffer|MultiBuffer, DType, str|tuple[str, ...]|None], int]] = {}
 
   def getaddr(self, device=None) -> UOp:
     if self.without_after.op not in GroupOp.Defines|{Ops.SHRINK, Ops.BITCAST, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.LINEAR}: return self
@@ -807,8 +813,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def _buffer(size:int, dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, buffer:Buffer|MultiBuffer|None=None) -> UOp:
     if buffer is not None:
-      assert slot < 0 and slot not in UOp.buffers, f"realized BUFFER needs a fresh negative slot, got {slot}"
-      UOp.buffers[slot] = buffer
+      assert slot < 0 and UOp.buffers.get(slot, buffer) is buffer, f"invalid realized BUFFER slot {slot}"
+      UOp.buffers[slot], UOp.buffer_slots[(buffer, dtype, device)] = buffer, slot
     try:
       return UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),)+UOp.device_range_src(device),
                  arg=ParamArg(slot, dtype, addrspace=addrspace, device=device))
@@ -827,7 +833,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
     assert dtype.itemsize > 0, f"not a storage dtype: {dtype}"
     assert opaque.nbytes % dtype.itemsize == 0, f"{opaque.nbytes} bytes is not divisible by {dtype.itemsize} for {dtype}"
-    return UOp._buffer(opaque.nbytes // dtype.itemsize, dtype, next(UOp.buffer_num), device=device or opaque.device, buffer=opaque)
+    device = device or opaque.device
+    if (slot:=UOp.buffer_slots.get((opaque, dtype, device))) is None: slot = next(UOp.buffer_num)
+    return UOp._buffer(opaque.nbytes // dtype.itemsize, dtype, slot, device=device, buffer=opaque)
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None

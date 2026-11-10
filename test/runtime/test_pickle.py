@@ -46,6 +46,10 @@ class TestPickle(unittest.TestCase):
     assert t2.uop.is_realized, f"expected {t2.uop} to be realized"
     np.testing.assert_equal(t_values, t2.numpy())
 
+  def test_pickle_buffer_uop_exact_in_process(self):
+    a = Tensor.arange(4).clone().realize().uop
+    self.assertIs(pickle.loads(pickle.dumps(a)), a)
+
   # NOTE: currently Buffer exists on the uop, not tensor
   def test_pickle_buffer_uop(self):
     t = Tensor.arange(4).clone().realize()
@@ -111,7 +115,8 @@ class TestPickle(unittest.TestCase):
   def test_pickle_no_storage_aliasing(self):
     # loading the same pickle twice gives fully independent storage: the buffers (and their BUFFER uops) are never shared
     t = Tensor([1,2,3,4]).realize()
-    st = pickle.dumps(t)
+    st, uop = pickle.dumps(t), t.uop
+    del t, uop  # exact in-process roundtrips reuse a live binding; test independent loads after the original dies
     t1, t2 = pickle.loads(st), pickle.loads(st)
     self.assertIsNot(t1.uop, t2.uop)
     self.assertIsNot(t1.uop.base.buffer, t2.uop.base.buffer)
@@ -122,10 +127,12 @@ class TestPickle(unittest.TestCase):
   def test_pickle_view_is_self_contained(self):
     # a pickled graph carries its own buffer: data from earlier loads of related graphs must not leak into it
     t = Tensor([1,2,3,4]).realize()
+    view_st = pickle.dumps(t[1:3])
     t1 = pickle.loads(pickle.dumps(t))
     t1.assign(Tensor([9,9,9,9])).realize()
-    # loading a view of the original tensor must give the pickled values ([2,3]), not the mutated values from the other load
-    v2 = pickle.loads(pickle.dumps(t[1:3]))
+    # once the original binding dies, the view must load its own pickled values, not values from an earlier related load
+    del t, t1
+    v2 = pickle.loads(view_st)
     self.assertListEqual(v2.realize().tolist(), [2,3])
 
   def test_pickle_jit(self):
