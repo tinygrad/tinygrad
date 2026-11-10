@@ -72,6 +72,38 @@ def check(name:str, out:dict, n:int, sampled:list[int]):
 
 res:dict[str, list] = {"main": [], "seq": []}
 st0 = time.perf_counter()
+# (BATCH=G: the N prompts' sequences decoded together, G at a time (seq_steps of G sequences, each forced on its own corpus continuation):
+# the quality of a batched step's kernels, e.g. a flag's A/B of seq.out files. no main path then)
+if (GB:=getenv("BATCH", 0)) > 1:
+  from tinygrad.llm.glm5next import REGION_ALIGN
+  span = -(-(L + NTOK + 4*(k+1) + 64) // REGION_ALIGN) * REGION_ALIGN
+  assert GB <= model.seq_slots() and GB * span <= model.seq_rows(), f"SEQ_SLOTS >= {GB}, SEQ_ROWS >= {GB*span}"
+  for i0 in range(0, N, GB):
+    group = []
+    for g, i in enumerate(range(i0, min(N, i0 + GB))):
+      off = 1000 + i * (len(corpus) - L - NTOK - 2000) // N
+      ids, T = corpus[off:off+L], corpus[off:off+L+NTOK+4*k+2]
+      sq = dict(i=i, g=g, base=g*span, T=T, mtp=L, j=0, par=1, y=[T[L]] + [0]*k, out={"lp": [], "top": [], "ids": [], "lps": []})
+      first = model.seq_prefill(g, sq["base"], list(ids), 0, 0)
+      rec(sq["out"], (model.seq_spec_h, g*2*(k+1), g*2*(k+1)+1), T[L])
+      check("seq", sq["out"], 1, [first])
+      model._token_host[sq["base"]+L:sq["base"]+L+1] = array.array('i', [T[L]])
+      group.append(sq)
+    while any(len(sq["out"]["lp"]) < NTOK + 1 for sq in group):
+      with Context(JIT=QJIT): outs = model.seq_step([(sq["g"], sq["base"], sq["mtp"], sq["j"], sq["par"], sq["y"], 0.0) for sq in group])
+      for sq, (sampled, drafts) in zip(group, outs):
+        T, st, H = sq["T"], sq["mtp"] + sq["j"], 2*(k+1)
+        jj = forced(T, st, drafts)
+        a = sq["g"]*H + sq["par"]*(k+1)
+        rec(sq["out"], (model.seq_spec_h, a, a+jj+1), T[st+1:st+2+jj])
+        check("seq", sq["out"], jj+1, sampled)
+        model._token_host[sq["base"]+st+1:sq["base"]+st+2+jj] = array.array('i', T[st+1:st+2+jj])
+        sq["mtp"], sq["j"], sq["par"], sq["y"] = st + 1, jj, 1 - sq["par"], [T[st+1+t] for t in range(k+1)]
+    for sq in group: res["seq"].append({"name": f"p{sq['i']}", **{kk: v[:NTOK+1] for kk, v in sq["out"].items()}})
+    print(f"group {i0//GB}: {time.perf_counter()-st0:.1f}s  rows not the step's: {bad}", file=sys.stderr, flush=True)
+  N = 0
+  with open(os.environ.get("SEQ_OUT", "seq.out"), "w") as f:
+    for r in res["seq"]: f.write("RESULT " + json.dumps(r) + "\n")
 for i in range(N):
   off = 1000 + i * (len(corpus) - L - NTOK - 2000) // N
   ids, T = corpus[off:off+L], corpus[off:off+L+NTOK+k+2]  # (T: the corpus from the prompt's start, positions as the model's)
@@ -120,6 +152,7 @@ for i in range(N):
   for name, r in (("main", m), ("seq", s)): res[name].append({"name": f"p{i}", **{kk: v[:NTOK+1] for kk, v in r.items()}})
   agree = sum(a == b for a, b in zip(m["top"], s["top"]))
   print(f"prompt {i}: {time.perf_counter()-st0:.1f}s  top-1 agree {agree}/{len(m['top'])}  rows not the step's: {bad}", file=sys.stderr, flush=True)
-for name, path in (("main", os.environ.get("MAIN_OUT", "main.out")), ("seq", os.environ.get("SEQ_OUT", "seq.out")))[:2 if SEQ else 1]:
+outs_ = (("main", os.environ.get("MAIN_OUT", "main.out")), ("seq", os.environ.get("SEQ_OUT", "seq.out")))
+for name, path in outs_[:0 if GB > 1 else 2 if SEQ else 1]:
   with open(path, "w") as f:
     for r in res[name]: f.write("RESULT " + json.dumps(r) + "\n")
