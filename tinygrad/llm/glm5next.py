@@ -4019,7 +4019,8 @@ class Transformer:
                 isinstance(devs, tuple) and amd_custom_kernels_supported(devs))
   def seq_slots(self) -> int:
     """the slots of the sequences (the one after them is the padding sequences' of a step)"""
-    return getenv("SEQ_SLOTS", max(self.SEQ_SIZES))
+    # (GLM: 16, the steps' sizes up to 8: more conversations resident than decoded at once)
+    return getenv("SEQ_SLOTS", 16 if self.config.kv_lora_rank and not self.config.qsa else max(self.SEQ_SIZES))
   def _token_rows(self) -> int:
     """the token buffer: a token of every row of the caches (the regions of the sequences sharing them), and one past"""
     return max(self.max_context, self.config.cache_rows) + REGION_ALIGN + 1
@@ -5114,6 +5115,7 @@ class Transformer:
       elif kv_lora_rank and 'attn_kv_a_mqa.weight' in name:
         state_dict[name] = permute_rope(state_dict[name], 1, state_dict[name].shape[0]-kv_lora_rank)
     swiglu_oai = arch in ('gpt-oss', 'minimax-m3')
+    glm_seq = getenv("GLM_SEQ", int(arch == "glm5-next" and mtp and shard > 1))
     config = TransformerConfig(
       num_blocks=num_blocks, dim=kv[f'{arch}.embedding_length'],
       hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', sizes.get('blk.0.ffn_gate.weight', kv.get(f'{arch}.feed_forward_length', 0))),
@@ -5148,7 +5150,9 @@ class Transformer:
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer, mtp=mtp,
       spec_drafts=getenv("SPEC_DRAFTS", 4 if arch == "qwen4exp" else 2) if mtp else 0, ple=ple, qsa=arch == 'qwen4exp', expert_pad=expert_pad,
       # (SEQ_ROWS: the rows of the caches of the sequences sharing them, past a context: more conversations kept)
-      cache_rows=round_up(getenv("SEQ_ROWS", 0), REGION_ALIGN) if arch == 'qwen4exp' or getenv("GLM_SEQ", 0) else 0)
+      # (GLM-5.3-Flash on several devices: GLM_SEQ on by default (the server's SeqEngine: conversations keep their caches, a host stash), its
+      # rows two contexts (262144: 524288 rows, with 16 slots and SEQ_STASH_GB=4 in a 6x24 GB C5's memory; C6/C7 have more))
+      cache_rows=round_up(getenv("SEQ_ROWS", 2*max_context if glm_seq else 0), REGION_ALIGN) if arch == 'qwen4exp' or glm_seq else 0)
     with Linear.empty_init(): model = Transformer(config)  # (the weights are loaded)
     # (the file's KV heads: repeated so every device holds one, device d holds head d*n//devices)
     model._kv_real = kv[f'{arch}.attention.head_count_kv']
