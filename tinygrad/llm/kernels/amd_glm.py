@@ -1423,8 +1423,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       ksplits = next(s for s in (getenv("Q8_KSPLITS", 32 if local_rows <= 64 else 16 if local_rows <= 512 else 8), 8, 4, 2, 1)
                      if in_features % (32*s) == 0)
       out_shape = (ksplits*tokens, out_features)
-    if q6_rdna3 and not split and not half_out and (tgt:=getenv("Q6_KSPLIT", 0)) and local_rows <= getenv("Q6_KSPLIT_ROWS", 128):
-      # (Q6_KSPLIT=n, RDNA3: a few rows (batched decoding's) of the gemm: few workgroups that loop over the whole input (a barrier a group of
+    if q6_rdna3 and not split and not half_out and (tgt:=getenv("Q6_KSPLIT", 192)) and local_rows <= getenv("Q6_KSPLIT_ROWS", 128):
+      # (Q6_KSPLIT=n (default 192, 0: off), RDNA3: a few rows (batched decoding's) of the gemm: few workgroups that loop over the whole input (a barrier a group of
       # 32): the input split over workgroups (whole Q6_K blocks a split) until there are n workgroups or more, their partial outputs summed)
       wgs = (local_rows // tt) * -(-local_out // 64)
       ksplits = next((s for s in (1, 2, 4, 8, 16) if (in_features // 32) % (8*s) == 0 and wgs * s >= tgt),
