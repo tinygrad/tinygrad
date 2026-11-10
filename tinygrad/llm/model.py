@@ -709,6 +709,8 @@ class Transformer:
     # TODO: remove the need for copy to default device
     kv, entries = gguf_parse(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
     arch = kv['general.architecture']
+    # kimi-k31 is kimi-k3 plus dsa indexers
+    if arch == 'kimi-k31': arch, kv = 'kimi-k3', {k.replace('kimi-k31.', 'kimi-k3.', 1): v for k, v in kv.items()}
     ple_entry = entries.pop('per_layer_token_embd.weight', None)
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
     assert shard >= 1, f"shard must be at least 1, got {shard}"
