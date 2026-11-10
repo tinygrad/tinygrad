@@ -893,14 +893,15 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
   outs = Tensor.custom_kernel(q, scale, x, fxn=functools.partial(_q8k_quantize_kernel, tokens=tokens, in_features=in_features))
   return outs[0], outs[1]
 
-# K256_SKIP: _grouped_k256_kernel skips the WMMAs of its tiles' token tiles that are all padding (the same bits for every row that is read)
-K256_SKIP = getenv("K256_SKIP", 0)
-# K256_SBU: _grouped_k256_kernel's IQ2_S sub-blocks unrolled by 1, 2 or 4 (experiment)
-K256_SBU, K256_SBU3 = getenv("K256_SBU", 1), getenv("K256_SBU3", 1)
-# K256_IDLE: _grouped_k256_kernel's tiles of no expert load no grid and store nothing (their rows are never read)
-K256_IDLE = getenv("K256_IDLE", 0)
-# K256_SIGNPERM: _grouped_k256_kernel's IQ2_S signs by one byte permute of the word and its negation (_iq_signed_word perm, the same bytes)
-K256_SIGNPERM = getenv("K256_SIGNPERM", 0)
+# _grouped_k256_kernel options, the same bits on every row that is read (-1: on RDNA4, measured on GLM Flash C6, off on RDNA3):
+# K256_SKIP: IQ2_S tiles' token tiles that are all padding skip their WMMAs
+K256_SKIP = getenv("K256_SKIP", -1)
+# K256_SBU: IQ2_S sub-blocks unrolled by this many (-1: 2 on RDNA4), K256_SBU3 IQ3_S's (no faster on C6's down)
+K256_SBU, K256_SBU3 = getenv("K256_SBU", -1), getenv("K256_SBU3", 1)
+# K256_IDLE: tiles of no expert load no grid and store nothing (their rows are never read)
+K256_IDLE = getenv("K256_IDLE", -1)
+# K256_SIGNPERM: IQ2_S signs by one byte permute of the word and its negation (_iq_signed_word perm, the same bytes)
+K256_SIGNPERM = getenv("K256_SIGNPERM", -1)
 
 # a*b+c of the low 24 bits of a and b (a full rate multiply, the 32 bit one is quarter rate)
 MAD_I24 = "({{ int r_; __asm__(\"v_mad_i32_i24 %0, %1, %2, %3\" : \"=v\"(r_) : \"v\"({0}), \"v\"({1}), \"v\"({2})); r_; }})"
@@ -923,7 +924,8 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   grid, signed = None, rdna4 and ggml_type == IQ3_S and bool(getenv("K256_SGRID", 1))
   # K256_IDLE: a tile of no expert (the rows are sized for every selection: most tiles are idle) loads no grid and stores no output
   live = tiles[token_block].load() >= 0
-  def gate(i:UOp) -> UOp: return i.valid(live) if K256_IDLE else i
+  def on(v:int) -> bool: return v > 0 or (v < 0 and rdna4)
+  def gate(i:UOp) -> UOp: return i.valid(live) if on(K256_IDLE) else i
   assert rdna4 or TOK <= 64, "RDNA3 K256 staging must fit in 32 KiB LDS"
   if grid_src is not None and signed:
     # the grid words with every one of the 16 sign patterns applied (index | signs << 9): a lookup instead of the sign math
@@ -968,7 +970,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
     header, low = raw[base].load(), raw[base+1].load()
     return (((low >> (4*sb).cast(dtypes.uint32)) & 15) | (((header >> (16+2*sb).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int32) - 32
   # K256_SBU (IQ2_S): sub-blocks unrolled by this many (their weight loads issued together), each updates the int sums in turn
-  SBU = K256_SBU if ggml_type == IQ2_S else K256_SBU3 if ggml_type == IQ3_S else 1
+  SBU = (K256_SBU if K256_SBU > 0 else 2 if rdna4 else 1) if ggml_type == IQ2_S else K256_SBU3 if ggml_type == IQ3_S else 1
   sb = UOp.range(8 // SBU, 5, AxisType.LOOP)
   sbs = [sb * SBU + u for u in range(SBU)] if SBU > 1 else [sb]
   def acols(h:int) -> tuple: return (ph*4+2*h, ph*4+2*h+1) if rdna4 else (2*h, 2*h+4, 2*h+1, 2*h+5)
@@ -976,14 +978,14 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   # its first row is) skips its WMMAs, a loop of 0 or 1 iterations. its rows' outputs are never read (gate/up's padding rows are read only by
   # down's padding rows, which aren't stored)
   skip = [UOp.range((rows[token_block * TOK + t*16].load() >= 0).where(1, 0), 10+t, AxisType.LOOP)
-          if t and K256_SKIP and ggml_type == IQ2_S else None for t in range(TT)]
+          if t and on(K256_SKIP) and ggml_type == IQ2_S else None for t in range(TT)]
   afrs = [[[_i8_frag(tuple(lds_q[t*16 + col + (skip[t] if skip[t] is not None else 0), sbu, c].load() for c in acols(h))) for h in range(2)]
            for t in range(TT)] for sbu in sbs]
   sums:list[UOp] = []
   for o, base in enumerate(bases):
     bfrs = []
     for sbu in sbs:
-      words = _quant_frag_words(raw, base, sbu, ph, ggml_type, grid, signed=signed, perm=bool(K256_SIGNPERM)) if rdna4 else \
+      words = _quant_frag_words(raw, base, sbu, ph, ggml_type, grid, signed=signed, perm=on(K256_SIGNPERM)) if rdna4 else \
         [tuple(_quant_word(raw, base, sbu, h*4+i, ggml_type, grid) for i in range(4)) for h in range(2)]
       bfrs.append([_i8_frag(w) for w in words])
     for t in range(TT):
@@ -1010,7 +1012,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
         st = ints[o][t].store(UOp.stack(*[_cfn(True, src=(dreg[j].load(), sub, prev[j].load()), arg=(MAD_I24, dtypes.int32)) for j in range(8)]))
         prev = ints[o][t].after(st)
       sums.append(cast(UOp, st))
-  if K256_SKIP and ggml_type == IQ2_S:
+  if on(K256_SKIP) and ggml_type == IQ2_S:
     tsums = [[x for i, x in enumerate(sums) if i % TT == t] for t in range(TT)]
     sums = [UOp.group(*ts).end(sk) if sk is not None else UOp.group(*ts) for ts, sk in zip(tsums, skip)]
   done = UOp.group(*sums).end(sb)
