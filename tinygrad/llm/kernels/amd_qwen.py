@@ -3916,7 +3916,9 @@ def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, sca
   B, H, DK = cast(tuple[int, int, int], q.shape)
   W = int(cache.shape[-1])
   DV = (W * 64 // 9 if bits == 4 else W * 32 // 9 if cache.dtype == dtypes.uint32 else W) - DK
-  wmma = bits == 4 and kpool and H <= 16 and amd_custom_kernels_supported(q.device)
+  # (a device's heads: q split over the devices on its heads (kv_split: a device its group's))
+  HL = int(q.uop.shard_shape[1]) if isinstance(q.device, tuple) and q.uop.axis == 1 else H
+  wmma = bits == 4 and kpool and HL <= 16 and amd_custom_kernels_supported(q.device)
   # (QSA_WMMA: decoding's rows (<= 256) on the tensor cores too, a row's keys over QSA_WMMA parts (workgroups): numerics, half queries)
   if wmma and ((QSA_PREFILL and B > 256 and not parts and not waves) or (QSA_WMMA and B <= 256)):
     # (a prefill's rows: the tensor cores, see _qsa_prefill_kernel)
