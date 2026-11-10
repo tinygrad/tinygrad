@@ -309,6 +309,27 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, 
   stores = _q8_narrow_stores(value, q, scale, xsum, sq[0] if sq else None, token, group, lane)
   return UOp.group(*stores).end(token_group, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
 
+def _q8_quantize_tiles_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, tiles:UOp, tokens:int, in_features:int, tile:int) -> UOp:
+  # as _q8_quantize_kernel (the same values) for grouped experts' sorted rows: a wave a row, rows of empty tiles skipped
+  groups = in_features//Q8_GROUP_SIZE
+  token, lane = UOp.range(tokens, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  group = UOp.range((tiles[token // tile].load() >= 0).where(groups, 0), 1, AxisType.LOOP)
+  value = x.reshape(tokens, groups, 32)[token, group, lane].load().float()
+  stores = _q8_narrow_stores(value, q, scale, xsum, None, token, group, lane)
+  est = Estimates(4*tokens*in_features, tokens*in_features*4, tokens*in_features*4)
+  return UOp.group(*stores).end(group).end(token, lane).sink(arg=KernelInfo(name="q8_quantize_tiles", opts_to_apply=(), estimates=est))
+
+def q8_quantize_tiles(x:Tensor, tokens:int, in_features:int, tiles:Tensor) -> tuple[Tensor, ...]:
+  """q8_quantize of grouped experts' sorted rows (rows of tiles without an expert aren't written)"""
+  groups = in_features//Q8_GROUP_SIZE
+  q = Tensor.empty(tokens, groups, 8, dtype=dtypes.uint32, device=x.device)
+  scale = Tensor.empty(tokens, groups, dtype=dtypes.float32, device=x.device)
+  xsum = Tensor.empty(tokens, groups, 2, dtype=dtypes.float32, device=x.device)
+  tile = tokens // int(tiles.uop.max_shard_shape[-1])
+  outs = Tensor.custom_kernel(q, scale, xsum, x, tiles, fxn=functools.partial(_q8_quantize_tiles_kernel, tokens=tokens, in_features=in_features,
+                                                                               tile=tile))
+  return tuple(outs[:3])
+
 def _q8_narrow_stores(value:UOp, q:UOp, scale:UOp, xsum:UOp, sq:UOp|None, token:UOp, group:UOp, lane:UOp) -> list[UOp]:
   # a lane's value of a group of 32 (a wave): its words, scale, sums (and squares)
   # Quantize each input once, then pack four neighboring lanes into one word.
@@ -911,6 +932,18 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
   return outs[0], outs[1]
 
 # a*b+c of the low 24 bits of a and b (a full rate multiply, the 32 bit one is quarter rate)
+# K256_UNROLL: _grouped_k256_kernel's sub-blocks unrolled (weight loads issued together): 1/8 all8 (the default-off experiment),
+# 2/4 chunks of 2/4 for fewer live registers. default 0, sum order unchanged
+K256_UNROLL = getenv("K256_UNROLL", 0)
+# K256_STAGE: _grouped_k256_kernel's block of weights staged in LDS by the workgroup (coalesced), RDNA3, default off
+K256_STAGE = getenv("K256_STAGE", 0)
+# K256_XH: RDNA3 _grouped_k256_kernel's lane halves decode one K half each, exchanged by permlanex16, and its sub-blocks unrolled. same bits;
+# iris 7900 XTX IQ3_S gate|up of 86 experts (extra/moe_prefill_bench.py): 576 tokens 573 -> 440 us, 1152 579 -> 467, 4096 1180 -> 1159,
+# 13824 3686 -> 3584; a whole layer (+ the IQ4_NL down) at 192/384/768 tokens 817/841/903 -> 648/689/713 us. IQ3_S only. default off
+K256_XH = getenv("K256_XH", 0)
+# Q8_TILES: grouped experts' sorted rows (the down's input) quantized in the rows of the tiles with an expert only
+Q8_TILES = getenv("Q8_TILES", 0)
+K256_R4_GRID = getenv("K256_R4_GRID", 0)
 MAD_I24 = "({{ int r_; __asm__(\"v_mad_i32_i24 %0, %1, %2, %3\" : \"=v\"(r_) : \"v\"({0}), \"v\"({1}), \"v\"({2})); r_; }})"
 
 @functools.cache
@@ -928,7 +961,8 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(WAVES, 3, axis_type=AxisType.LOCAL)
   col, ph, tid = lane % 16, lane // 16, wave * 32 + lane
   # (RDNA4 IQ3_S: the grid words with their signs applied, a lookup instead of the sign math)
-  grid, signed = None, rdna4 and ggml_type == IQ3_S
+  # (K256_R4_GRID: RDNA4's plain grid (2 KB) and the sign math: the signed grid's 32 KB of LDS leave one workgroup a CU)
+  grid, signed = None, rdna4 and ggml_type == IQ3_S and not K256_R4_GRID
   assert rdna4 or TOK <= 64, "RDNA3's K256 staging fits in 32 KiB of LDS"
   if grid_src is not None and signed:
     # the grid words with every one of the 16 sign patterns applied (index | signs << 9): a lookup instead of the sign math
@@ -952,10 +986,31 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
     rr, gi, wi = e // 64, (e // 8) % 8, e % 8
     st.append(lds_q[rr, gi, (wi % 2) * 4 + wi // 2].store(xq[xrow(token_block * TOK + rr), b * 8 + gi, wi].load()))
   st.append(lds_d[tid % TOK].store(xd[xrow(token_block * TOK + tid % TOK), b].load()))
+  # K256_STAGE (RDNA3): the block's weights of the workgroup's OUTB rows staged in LDS by consecutive threads (a wave's loads a few cache lines,
+  # not a line a lane: a lane's row is 16 rows from the next lane's), read from there
+  stage_w = K256_STAGE and not rdna4 and raw.dtype.itemsize == 2
+  WS = type_words + 1
+  if stage_w:
+    lds_w = UOp.alloc((OUTB * WS,), dtypes.uint16, addrspace=AddrSpace.LOCAL)
+    # (in a loop of a few loads an iteration: all of them at once are a register each, spilled)
+    n_ld = OUTB * type_words // 256
+    per = next(p for p in (11, 8, 5, 4, 2, 1) if n_ld % p == 0)
+    kk = UOp.range(n_ld // per, 6, AxisType.LOOP)
+    wst = []
+    for j in range(per):
+      e = tid + (kk * per + j) * 256
+      wr, wi = e // type_words, e % type_words
+      wst.append(lds_w[wr * WS + wi].store(raw[expert_base + (output_block * OUTB + wr) * output_words + b * type_words + wi].load()))
+    st.append(UOp.group(*wst).end(kk))
   staged = UOp.group(*st).barrier()
   lds_q, lds_d = lds_q.after(staged), lds_d.after(staged)
   outputs = [output_block * OUTB + wave * OT * 16 + o * 16 + col for o in range(OT)]
-  bases = [expert_base + output * output_words + b * type_words for output in outputs]
+  if stage_w:
+    wraw = lds_w.after(staged)
+    bases = [(wave * OT * 16 + o * 16 + col) * WS for o in range(OT)]
+  else:
+    wraw = raw
+    bases = [expert_base + output * output_words + b * type_words for output in outputs]
   zero = UOp.stack(*[UOp.const(0, dtypes.int32)]*8)
   accs = [[UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
   accs = [[acc.after(acc.store(acc.const_like(0))) for acc in row] for row in accs]
@@ -963,30 +1018,61 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   # weights of at most 127 (IQ3_S 15) is below 2**23, a sub-scale at most 32 in magnitude, 8 of them below 2**31)
   ints = [[UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
   ints = [[r.after(r.after(b).store(zero)) for r in row] for row in ints]
-  dws = [_half(raw[base]) for base in bases]
+  dws = [_half(wraw[base]) for base in bases]
   def sub_scale(base:UOp, sb:UOp) -> UOp:
     # the integer scale of sub-block sb: IQ3_S 1+2*s (odd, at most 31), IQ4_XS the 6 bits minus 32
-    if ggml_type == IQ3_S: return (1 + 2*((_load_byte(raw, base, 106 + sb//2) >> ((sb % 2) * 4).cast(dtypes.uint32)) & 15)).cast(dtypes.int32)
-    header, low = raw[base].load(), raw[base+1].load()
+    if ggml_type == IQ3_S: return (1 + 2*((_load_byte(wraw, base, 106 + sb//2) >> ((sb % 2) * 4).cast(dtypes.uint32)) & 15)).cast(dtypes.int32)
+    header, low = wraw[base].load(), wraw[base+1].load()
     return (((low >> (4*sb).cast(dtypes.uint32)) & 15) | (((header >> (16+2*sb).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int32) - 32
-  sb = UOp.range(8, 5, AxisType.LOOP)
   def acols(h:int) -> tuple: return (ph*4+2*h, ph*4+2*h+1) if rdna4 else (2*h, 2*h+4, 2*h+1, 2*h+5)
-  afr = [[_i8_frag(tuple(lds_q[t*16 + col, sb, c].load() for c in acols(h))) for h in range(2)] for t in range(TT)]
-  sums = []
-  for o, base in enumerate(bases):
-    sub = sub_scale(base, sb)
-    words = _quant_frag_words(raw, base, sb, ph, ggml_type, grid, signed=signed) if rdna4 else \
-      [tuple(_quant_word(raw, base, sb, h*4+i, ggml_type, grid) for i in range(4)) for h in range(2)]
-    bfr = [_i8_frag(w) for w in words]
-    for t in range(TT):
-      dot = UOp.wmma(afr[t][1], bfr[1], UOp.wmma(afr[t][0], bfr[0], zero, *WMMA_ARG), *WMMA_ARG)
-      dreg = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
-      dreg = dreg.after(dreg.store(dot))
-      prev = ints[o][t].after(sb)
-      sums.append(ints[o][t].store(UOp.stack(*[_cfn(True, src=(dreg[j].load(), sub, prev[j].load()), arg=(MAD_I24, dtypes.int32))
-                                              for j in range(8)])))
-  done = UOp.group(*sums).end(sb)
-  new = [[UOp.stack(*(accs[o][t].after(b)[j].load() + ints[o][t].after(done)[j].load().float() *
+  # (K256_XH: IQ3_S only, IQ4_XS's is no faster at 576 tokens and 1.4x slower at 4096+ (iris))
+  xh = bool(K256_XH) and not rdna4 and not stage_w and ggml_type == IQ3_S
+  def sub_block(sb:UOp, prevs:list[list[list[UOp]]]) -> list[list[list[UOp]]]:
+    """the int32 sums (OT, TT, 8 lanes' values) after sub-block sb, from prevs"""
+    afr = [[_i8_frag(tuple(lds_q[t*16 + col, sb, c].load() for c in acols(h))) for h in range(2)] for t in range(TT)]
+    ret = []
+    for o, base in enumerate(bases):
+      sub = sub_scale(base, sb)
+      if xh:
+        # (K256_XH: a lane's half (ph) decodes the fragment words of its K half h=ph alone, the other half's from lane ^ 16 (permlanex16): half
+        # the weight loads and grid lookups of a wave, whose two halves hold the same B fragment)
+        mine = [_quant_word(wraw, base, sb, ph*4+i, ggml_type, grid) for i in range(4)]
+        xch = [_cfn(False, src=(w,), arg=("(unsigned)__builtin_amdgcn_permlanex16(0, (int)({0}), 0x76543210, 0xfedcba98, false, false)",
+                                         dtypes.uint32)) for w in mine]
+        words = [tuple(ph.eq(h).where(m, x) for m, x in zip(mine, xch)) for h in range(2)]
+      else:
+        words = _quant_frag_words(raw, base, sb, ph, ggml_type, grid, signed=signed) if rdna4 else \
+          [tuple(_quant_word(wraw, base, sb, h*4+i, ggml_type, grid) for i in range(4)) for h in range(2)]
+      bfr = [_i8_frag(w) for w in words]
+      row = []
+      for t in range(TT):
+        dot = UOp.wmma(afr[t][1], bfr[1], UOp.wmma(afr[t][0], bfr[0], zero, *WMMA_ARG), *WMMA_ARG)
+        dreg = UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG)
+        dreg = dreg.after(dreg.store(dot))
+        row.append([_cfn(True, src=(dreg[j].load(), sub, prevs[o][t][j]), arg=(MAD_I24, dtypes.int32)) for j in range(8)])
+      ret.append(row)
+    return ret
+  # (K256_XH on RDNA3: the sub-blocks unrolled too, their sums in registers: gate|up -23% at 576 tokens of 86 experts on iris)
+  stages = K256_UNROLL if K256_UNROLL > 1 else 8 if K256_UNROLL or xh else 0
+  if stages == 8:
+    # (all sub-blocks' weight loads can be issued before the first's tensor core work, not a loop iteration's latency each)
+    vals = [[[UOp.const(0, dtypes.int32)]*8 for _ in range(TT)] for _ in range(OT)]
+    for s_ in range(8): vals = sub_block(UOp.const(s_, dtypes.weakint), vals)
+    def isum(o:int, t:int, j:int) -> UOp: return vals[o][t][j]
+  elif stages in (2, 4):
+    # (fewer live registers than all8: only a chunk's loads issue together, outer chunks retain the original sum order)
+    sb = UOp.range(8 // stages, 5, AxisType.LOOP)
+    vals = [[[ints[o][t].after(sb)[j].load() for j in range(8)] for t in range(TT)] for o in range(OT)]
+    for s_ in range(stages): vals = sub_block(sb * stages + s_, vals)
+    done = UOp.group(*(ints[o][t].store(UOp.stack(*vals[o][t])) for o in range(OT) for t in range(TT))).end(sb)
+    def isum(o:int, t:int, j:int) -> UOp: return ints[o][t].after(done)[j].load()
+  else:
+    sb = UOp.range(8, 5, AxisType.LOOP)
+    prevs = [[[ints[o][t].after(sb)[j].load() for j in range(8)] for t in range(TT)] for o in range(OT)]
+    cur = sub_block(sb, prevs)
+    done = UOp.group(*(ints[o][t].store(UOp.stack(*cur[o][t])) for o in range(OT) for t in range(TT))).end(sb)
+    def isum(o:int, t:int, j:int) -> UOp: return ints[o][t].after(done)[j].load()
+  new = [[UOp.stack(*(accs[o][t].after(b)[j].load() + isum(o, t, j).float() *
                       (dws[o] * lds_d[t*16 + (ph*8 + j if rdna4 else 2*j + ph)].load())
                       for j in range(8))) for t in range(TT)] for o in range(OT)]
   # (a barrier after the block's reads: the next block's stage doesn't overwrite what a slower wave still reads)
@@ -1074,9 +1160,11 @@ def _quant_linear_i8_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *srcs
     # every thread loads words of rows and a row's scale, unconditionally (no branches): a padding row reads row 0, the threads of the same
     # scale store the same value
     def srow(r:UOp) -> UOp: return entries[r].load().maximum(0) // x_div if x_div > 0 else r
-    assert (tile_rows*8) % threads == 0 and threads % tile_rows == 0, "whole words and scales for the threads"
-    for k in range(tile_rows*8 // threads):
-      rr, wi = (e:=tid + k*threads) // 8, (tid + k*threads) % 8
+    # (a tile of fewer words than threads (16 rows: 128 words): the first threads load them)
+    assert ((tile_rows*8) % threads == 0 or threads % (tile_rows*8) == 0) and threads % tile_rows == 0, "whole words and scales for the threads"
+    for k in range(max(1, tile_rows*8 // threads)):
+      rr, wi = (tid + k*threads) // 8, (tid + k*threads) % 8
+      if tile_rows*8 < threads: rr = rr.valid(tid < tile_rows*8)
       st.append(lds_q[par*tile_rows + rr, (wi%2)*4 + wi//2].store(xq[srow(token_block*tile_rows + rr), g, wi].load()))
     st.append(lds_d[par*tile_rows + tid % tile_rows].store(xd[srow(token_block*tile_rows + tid % tile_rows), g].load()))
     staged = UOp.group(*st).barrier()
@@ -3124,7 +3212,10 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=ggml_type, out_features=out_features, in_features=in_features,
                             expert_words=expert_words, x_div=x_div, act=act, rdna4=rdna4)
-    result = Tensor.custom_kernel(out, weight, *q8_quantize(x.contiguous(), int(x_rows), in_features)[:3], *extra, *group, fxn=fxn)[0]
+    # (Q8_TILES: the sorted rows of one device's experts quantized in the rows of their tiles only)
+    xq3 = q8_quantize_tiles(x.contiguous(), int(x_rows), in_features, group[1]) if Q8_TILES and sorted_out and \
+      (in_features // Q8_GROUP_SIZE) % 8 != 0 else q8_quantize(x.contiguous(), int(x_rows), in_features)[:3]
+    result = Tensor.custom_kernel(out, weight, *xq3, *extra, *group, fxn=fxn)[0]
     return result.reshape(devices, rows_out, cols) if devices > 1 else result
   if ggml_type == IQ4_XS: fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
   else: fxn = functools.partial(_q5_linear_f16_wmma_kernel if ggml_type in (Q4_K, Q5_K) else _quant_linear_f16_wmma_kernel, ggml_type=ggml_type)
