@@ -891,6 +891,30 @@ class TestSchedule(unittest.TestCase):
     out = Tensor.empty_like(y)
     check_schedule(self._copy_call(out, y + y), 1)
 
+  def test_custom_kernel_inplace_view_src(self):
+    # a view of a buffer the custom kernel writes in place (it may) is a copy made before: realized
+    x = Tensor.ones(64).contiguous().realize()
+    check_schedule(Tensor.custom_kernel(x, (x + 1)[::-1], fxn=self._copy_fxn())[0], 2)
+
+  def test_custom_kernel_small_reduce_src(self):
+    # a sum of a few partials (k-split) is computed by the custom kernel's loads (INLINE_REDUCE), if it loads them few times
+    from tinygrad.schedule.custom_inline import INLINE_REDUCE
+    p = Tensor.ones(8, 64).contiguous().realize()
+    with Context(INLINE_REDUCE=8):
+      check_schedule(self._copy_call(Tensor.empty(64, dtype=dtypes.half), p.sum(0).half()), 1)
+      check_schedule(self._copy_call(Tensor.empty(64), Tensor.empty(16, 64).sum(0)), 2)
+    # (off: the sum is a kernel of its own. another shape: the schedule cache doesn't key on the setting)
+    with Context(INLINE_REDUCE=0): check_schedule(self._copy_call(Tensor.empty(32, dtype=dtypes.half), p[:, :32].sum(0).half()), 2)
+    assert INLINE_REDUCE.value == 0
+
+  def test_custom_kernel_nested_index_src(self):
+    # a kernel indexing its input a dim at a time (x[r][h]) loads an elementwise input through its expression too
+    def k(out:UOp, inp:UOp) -> UOp:
+      r, h = UOp.range(4, 0), UOp.range(8, 1)
+      return UOp.group(out[r, h].store(inp[r][h].load())).end(r, h).sink(arg=KernelInfo(name="k"))
+    y = Tensor.ones(4, 8).contiguous().realize()
+    check_schedule(Tensor.custom_kernel(Tensor.empty(4, 8), y + 2, fxn=k)[0], 1)
+
   def test_custom_kernel_lazy_const_src(self):
     # a lazy const expression above the call has no buffer at all. this used to crash rangeify with a KeyError
     x = Tensor.linspace(-1.0, 1.0, 64)
@@ -902,6 +926,8 @@ class TestSchedule(unittest.TestCase):
     y = Tensor.ones(128).contiguous().realize()
     out = Tensor.empty(64)
     check_schedule(self._copy_call(out, y[16:80]), 2)
+    # (a PAD too: the loads gated, zero outside)
+    check_schedule(self._copy_call(Tensor.empty(160), y.pad((16, 16))), 1)
 
   def test_custom_kernel_computed_src_api(self):
     # computed inputs of Tensor.custom_kernel: elementwise ones are computed in the custom kernel, others get a realize kernel (a reduce here)
