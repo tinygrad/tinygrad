@@ -1135,6 +1135,7 @@ def _region_rows(config:TransformerConfig) -> int:
 MICRO_BATCHES = getenv("MICRO_BATCHES", 2)
 PREFILL_MB1_ROWS = getenv("PREFILL_MB1_ROWS", 0)
 PREFILL_TILE32 = getenv("PREFILL_TILE32", 1)
+PREFILL_SIZES = tuple(int(c) for c in getenv("PREFILL_SIZES", "192,512,2048,4096").split(",") if c)
 # the attention cache's keys (1) and values (2) rotated, see QSABlock._rot
 QSA_KV_ROT = getenv("QSA_KV_ROT", 0)
 
@@ -3110,7 +3111,8 @@ class Transformer:
     chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", 13824) if fast else 32, self.max_context)
     if self.has_recurrent_block and not fast: chunk_size = 1
     # (and smaller ones, a jit each: less padding of a prompt's last piece (the turns of agents: a few hundred tokens))
-    sizes = [chunk_size] + [min(chunk_size, n) for n in ((192, 512, 2048, 4096) if fast else ())]
+    # (PREFILL_SIZES: the smaller sizes, e.g. 192,512,1152,2048,4096: a warm turn of ~1k tokens in one chunk, not two of 576)
+    sizes = [chunk_size] + [min(chunk_size, n) for n in (PREFILL_SIZES if fast else ())]
     if fast and (devs:=self.token_embd.weight.device) and isinstance(devs, tuple) and self.config.hc is not None:
       # whole tiles of 16 rows on every device, the kernels of the whole chunk on tiles of 64
       tile = math.lcm(16*len(devs), 64)
