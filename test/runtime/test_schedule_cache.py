@@ -5,7 +5,7 @@ from tinygrad.uop.ops import KernelInfo
 from tinygrad.schedule import schedule_cache
 
 def custom_add_kernel(A:UOp, B:UOp, num:int=0) -> UOp:
-  return A[0].set(B[0] + num).sink(arg=KernelInfo(f"custom_add_{num}"))
+  return A[0].set(B[0].load() + num).sink(arg=KernelInfo(f"custom_add_{num}"))
 
 def custom_add_backward(grad_output:UOp, _) -> tuple[None, UOp]:
   grad = Tensor.invalids(*grad_output.shape, dtype=grad_output.dtype, device=grad_output.device)

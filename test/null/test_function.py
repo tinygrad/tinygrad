@@ -43,7 +43,7 @@ class TestFunctionTuple(unittest.TestCase):
     state = Tensor.empty(4)
     def inplace_add(C:UOp, A:UOp) -> UOp:
       i = UOp.range(A.shape[0], 0)
-      return C[i].store(C[i].load() + A[i]).end(i).sink(arg=KernelInfo(name="inplace_add"))
+      return C[i].store(C[i].load() + A[i].load()).end(i).sink(arg=KernelInfo(name="inplace_add"))
     @function(precompile=True, allow_implicit=False)
     def f(a:Tensor): return Tensor.custom_kernel(state, a, fxn=inplace_add)[0]
     with self.assertRaisesRegex(RuntimeError, "implicit buffer"): f(Tensor([1., 2., 3., 4.]).contiguous().realize())

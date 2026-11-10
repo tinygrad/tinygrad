@@ -7,29 +7,39 @@ from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.renderer import Target
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.codegen import to_program
+from tinygrad.schedule.indexing import IndexingContext, create_bufferize_and_index_based_on_ranges
 from test.helpers import assert_kernel_count
 
 def custom_elementwise_add_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
   C,A,B = C.flatten(), A.flatten(), B.flatten()
   i = UOp.range(C.numel(), 0)
-  return C[i].store(A[i]+B[i]).end(i).sink(arg=KernelInfo(name=f"custom_add_kernel_{C.numel()}")).simplify()
+  return C[i].store(A[i].load()+B[i].load()).end(i).sink(arg=KernelInfo(name=f"custom_add_kernel_{C.numel()}")).simplify()
 
 def custom_elementwise_addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp) -> UOp:
   C,D,A,B = C.flatten(), D.flatten(), A.flatten(), B.flatten()
   assert C.numel() == D.numel()
   i = UOp.range(C.numel(), 0)
-  store_c = C[i].store(A[i]+B[i])
-  store_d = D[i].store(A[i]*B[i])
+  store_c = C[i].store(A[i].load()+B[i].load())
+  store_d = D[i].store(A[i].load()*B[i].load())
   return UOp.group(store_c, store_d).end(i).sink(arg=KernelInfo(name=f"custom_addmul_kernel_{C.numel()}")).simplify()
 
 def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   assert A.shape[1] == B.shape[0]
   i, j, k = UOp.range(C.shape[0], 0), UOp.range(C.shape[1], 1), UOp.range(A.shape[1], 2, axis_type=AxisType.LOOP)
   C = C[i, j].set(0.0)
-  prog = C[i, j].store(C.after(k)[i, j] + A[i, k] * B[k, j]).end(k).end(i, j)
+  prog = C[i, j].store(C.after(k)[i, j].load() + A[i, k].load() * B[k, j].load()).end(k).end(i, j)
   return prog.sink(arg=KernelInfo(name=f"custom_gemm_{C.shape[0]}_{C.shape[1]}_{A.shape[1]}", opts_to_apply=()))
 
 class TestCustomKernel(unittest.TestCase):
+  def test_unshard_storage_read(self):
+    ty = UOp.range(8, 0, AxisType.LOCAL)
+    frag = UOp.placeholder((8,), dtypes.float, 0, AddrSpace.REG).unshard(0, ty)
+    value = frag.after(frag.store(1.5))
+    out, inp = UOp.param(0, dtypes.float, 64), UOp.param(1, dtypes.float, 64)
+    for v in (value, value*2.0, value+inp):
+      with self.subTest(op=v.op):
+        to_program(out.store(v).end(ty).sink(arg=KernelInfo(opts_to_apply=())), AMDLLVMRenderer(Target("AMD", arch="gfx1100")))
+
   def test_gemm_group_refused(self):
     # k is a serial LOOP: custom_gemm has no Ops.REDUCE
     a, b, c = Tensor.empty(16, 16), Tensor.empty(16, 16), Tensor.empty(16, 16)
@@ -48,7 +58,7 @@ class TestCustomKernel(unittest.TestCase):
     # j%2 splits j into two UPCAST ranges, the expander expands both, so no loop is left
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.UPCAST)
-      return C[i, j].store(A[i, j] + (j%2).cast(A.dtype)).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
+      return C[i, j].store(A[i, j].load() + (j%2).cast(A.dtype)).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
     ast = Tensor.custom_kernel(Tensor.empty(4, 8), Tensor.empty(4, 8), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.RANGE]), 0)
@@ -59,12 +69,21 @@ class TestCustomKernel(unittest.TestCase):
     i, tc = next((i, tc) for i, tc in enumerate(ren.tensor_cores) if tc.dtype_in is dtypes.half and tc.dtype_out is dtypes.float)
     def kernel(ACC:UOp, A:UOp, B:UOp) -> UOp:
       t, j, k = UOp.range(A.shape[0], 0, AxisType.LOOP), UOp.range(B.shape[1], 1), UOp.range(A.shape[1], 2)
-      mm = (A[t, k] * B[k, j]).cast(dtypes.float).reduce(k, arg=Ops.ADD)
-      return ACC[j].store(ACC.after(t)[j] + mm).end(t).end(j).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.TC, 0, (i, 0, 1)),)))
+      mm = (A[t, k].load() * B[k, j].load()).cast(dtypes.float).reduce(k, arg=Ops.ADD)
+      return ACC[j].store(ACC.after(t)[j].load() + mm).end(t).end(j).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.TC, 0, (i, 0, 1)),)))
     N, M, K = tc.dims
     a, b, acc = Tensor.empty(M, K, dtype=dtypes.half), Tensor.empty(K, N, dtype=dtypes.half), Tensor.empty(N, dtype=dtypes.float)
     ast = Tensor.custom_kernel(acc, a, b, fxn=kernel)[0].schedule_linear().src[-1].src[0]
     with self.assertRaises(KernelOptError): to_program(ast, ren)
+
+  def test_storage_index_repeated_shaped_coordinate(self):
+    p, c = UOp.param(0, dtypes.float, (4, 4)), UOp.param(1, dtypes.int, 4, addrspace=AddrSpace.ALU)
+    idx = p.index(c, c)
+    r0, r1 = UOp.range(4, 0), UOp.range(4, 1)
+    out = create_bufferize_and_index_based_on_ranges(IndexingContext(range_map={idx: ((r0, r1), (r0, r1))}), idx)
+    self.assertIs(out.src[0], p)
+    self.assertIs(out.src[1], c.index(r0))
+    self.assertIs(out.src[2], c.index(r1))
 
   def test_index_wmma_after_range(self):
     # a WMMA is a shaped value that stays shaped, its index lowers with the AFTER outside
@@ -83,8 +102,8 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(C:UOp, A:UOp) -> UOp:
       l, t = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1, AxisType.LOOP)
       tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
-      v = tmp.after(tmp[l].store(A[t%2, l]))[(l+1)%4]
-      return C[l].store(C.after(t)[l] + v).end(t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
+      v = tmp.after(tmp[l].store(A[t%2, l].load()))[(l+1)%4].load()
+      return C[l].store(C.after(t)[l].load() + v).end(t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
     ast = Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(2, 4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)
@@ -94,8 +113,8 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(C:UOp, A:UOp) -> UOp:
       l, t, k = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1, AxisType.LOOP), UOp.range(4, 2)
       tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
-      v = tmp.after(tmp[l].store(A[t, l]))[k].reduce(k, arg=Ops.ADD)
-      return C[l].store(C.after(t)[l] + v).end(t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
+      v = tmp.after(tmp[l].store(A[t, l].load()))[k].load().reduce(k, arg=Ops.ADD)
+      return C[l].store(C.after(t)[l].load() + v).end(t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
     ast = Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(8, 4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     prg = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100")))
     self.assertEqual(prg.ranges, {})
@@ -106,8 +125,8 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(C:UOp, A:UOp) -> UOp:
       k = UOp.range(4, 0, AxisType.LOOP)
       tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
-      tmp = tmp.after(k)[k].set(A[k], end=k)
-      return C[0].store(tmp[0]).sink(arg=KernelInfo(opts_to_apply=()))
+      tmp = tmp.after(k)[k].set(A[k].load(), end=k)
+      return C[0].store(tmp[0].load()).sink(arg=KernelInfo(opts_to_apply=()))
     ast = Tensor.custom_kernel(Tensor.empty(1), Tensor.empty(4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     prg = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100")))
     self.assertEqual(prg.ranges, {})

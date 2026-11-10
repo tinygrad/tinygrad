@@ -13,7 +13,7 @@ def _custom_swiglu(out:UOp, x_w13:UOp) -> UOp:
   out, x_w13 = out.reshape(n_elems), x_w13.reshape(rows, 2*hidden)
   i = UOp.range(n_elems, 0)
   row, col = i // hidden, i % hidden
-  act, gate = x_w13[row, col].cast(dtypes.float), x_w13[row, hidden+col].cast(dtypes.float)
+  act, gate = x_w13[row, col].load().cast(dtypes.float), x_w13[row, hidden+col].load().cast(dtypes.float)
   sigmoid = (1.0 + (-LOG2E * act).exp2()).reciprocal()
   store = out[i].store((act * sigmoid * gate).cast(out.dtype))
   return store.end(i).sink(arg=KernelInfo(f"swiglu_fwd_{n_elems}", estimates=Estimates(ops=5*n_elems, mem=6*n_elems)))
@@ -38,8 +38,8 @@ def _custom_swiglu_bwd(grad_out:UOp, x_w13:UOp, grad_act:UOp) -> UOp:
   grad_out, x_w13, grad_act = grad_out.reshape(rows, 2*hidden), x_w13.reshape(rows, 2*hidden), grad_act.reshape(n_elems)
   i = UOp.range(n_elems, 0)
   row, col = i // hidden, i % hidden
-  act, gate = x_w13[row, col].cast(dtypes.float), x_w13[row, hidden+col].cast(dtypes.float)
-  grad = grad_act[i].cast(dtypes.float)
+  act, gate = x_w13[row, col].load().cast(dtypes.float), x_w13[row, hidden+col].load().cast(dtypes.float)
+  grad = grad_act[i].load().cast(dtypes.float)
   sigmoid = (1.0 + (-LOG2E * act).exp2()).reciprocal()
   silu = act * sigmoid
   dact = grad_out[row, col].store((grad * (sigmoid + silu * (1.0 - sigmoid)) * gate).cast(grad_out.dtype))

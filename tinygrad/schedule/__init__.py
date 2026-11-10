@@ -179,10 +179,10 @@ def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
 pm_copy_kernel = PatternMatcher([
   # lower copy kernels to bulk STOREs
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0)).load()).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_store),
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r")).load()).end(UPat(Ops.RANGE, name="r")).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_store),
 ])
 

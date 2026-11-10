@@ -1,6 +1,6 @@
 from tinygrad.helpers import all_same, prod, getenv, ALLREDUCE_CAST
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType, graph_rewrite, broadcast_axes, _broadcast_shape, sint_to_uop
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.schedule.allreduce import handle_allreduce
 
 # ***** multi rewrite MSELECT/MSTACK *****
@@ -83,6 +83,10 @@ def shard_subview(full:UOp, multi:UOp) -> UOp:
   for ax, rng in multi.sharding: full = full._shard(ax, rng)
   return full
 
+def load_shard(x:UOp) -> UOp:
+  # device buffers are indexed by rangeify; kernel-local buffers are read here
+  return x.index().load() if x.device is None and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else x
+
 def alu_multi(root:UOp):
   target = next(m for m in root.src if m.op is Ops.UNSHARD)
   def can_handle(m:UOp) -> bool:
@@ -93,16 +97,16 @@ def alu_multi(root:UOp):
   if all(can_handle(m) for m in root.src):
     # every src either has the target sharding or is whole on every shard: run the alu per-shard
     srcs = [m.src[0] if m.op is Ops.UNSHARD else m if m.shape == () else shard_subview(m, target) for m in root.src]
-    return srcs[0].alu(root.op, *srcs[1:]).unshard(target.arg, target.src[1:])
+    return load_shard(srcs[0]).alu(root.op, *map(load_shard, srcs[1:])).unshard(target.arg, target.src[1:])
   # resharding: single-axis fallback via shard_srcs
   axis = root.axis
   assert axis is not None
   srcs = shard_srcs(root.src, axis)
-  return srcs[0].alu(root.op, *srcs[1:]).unshard(axis, target.src[1])
+  return load_shard(srcs[0]).alu(root.op, *map(load_shard, srcs[1:])).unshard(axis, target.src[1])
 
 def reduce_multi(root:UOp, multi:UOp):
   op, num_axes = root.arg
-  local = multi.src[0]._rop(op, tuple(range(num_axes)))
+  local = load_shard(multi.src[0])._rop(op, tuple(range(num_axes)))
   if any(ax < num_axes for ax in multi.arg):
     assert all(ax < num_axes for ax in multi.arg), f"partial allreduce not supported for multi-axis sharding {multi.arg}"
     # all sharded axes are reduced: full allreduce
@@ -161,11 +165,11 @@ def stack_multi(root:UOp):
   sharding = multis[0].sharding
   if all(m.sharding == sharding for m in multis):
     srcs = [m.src[0] if m.op is Ops.UNSHARD else shard_subview(m, multis[0]) for m in root.src]
-    return UOp(Ops.STACK, src=tuple(srcs)).unshard(tuple(ax+1 for ax in multis[0].arg), multis[0].src[1:])
+    return UOp(Ops.STACK, src=tuple(map(load_shard, srcs))).unshard(tuple(ax+1 for ax in multis[0].arg), multis[0].src[1:])
   # resharding: single-axis fallback
   axis = root.axis
   assert axis is not None
-  return UOp(Ops.STACK, src=tuple(shard_srcs(root.src, axis-1))).unshard(axis, multis[0].src[1])
+  return UOp(Ops.STACK, src=tuple(map(load_shard, shard_srcs(root.src, axis-1)))).unshard(axis, multis[0].src[1])
 
 def index_multi(root:UOp, multi:UOp):
   # INDEX on UNSHARD: resolve each sharded axis into this range's own contiguous block.
@@ -200,18 +204,18 @@ def copy_multi(multi:UOp, device:str | tuple[str, ...]):
     val = val.pad(tuple((0,0) if a != ax else (bsz*rng, bsz*int(rng.vmax) - bsz*rng) for a in range(len(val.shape))))
   return val.allreduce(Ops.ADD, device)
 
-def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(src.src[0])).unshard(src.arg, src.src[1:])
+def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(load_shard(src.src[0]))).unshard(src.arg, src.src[1:])
 
 def store_value_multi(dest:UOp, multi:UOp):
   # storing a sharded value into an unsharded dest: every shard stores into its own sub-view of the dest
-  return shard_subview(dest, multi).store(multi.src[0])
+  return shard_subview(dest, multi).store(load_shard(multi.src[0]))
 
 def store_dest_multi(root:UOp, multi:UOp):
   # STORE with a sharded dest: every shard stores into its own shard of the dest.
   # the value is handled like in alu_multi: UNSHARD srcs peel, full-shape values take their per-shard sub-view
   # (scalars arrive EXPANDed to the full shape by UOp.store's const_like, so they sub-view like everything else)
   srcs = [multi.src[0]] + [x.src[0] if x.op is Ops.UNSHARD else shard_subview(x, multi) if x.shape == multi.shape else x for x in root.src[1:]]
-  return UOp(root.op, src=tuple(srcs), arg=root.arg)
+  return UOp(root.op, src=(srcs[0], *map(load_shard, srcs[1:])), arg=root.arg)
 
 def passthrough_multi(root:UOp, multi:UOp):
   new_src = (multi.src[0],)+tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src[1:])

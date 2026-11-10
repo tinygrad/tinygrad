@@ -200,7 +200,8 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_lossless_cast(b.dtype, a.dtype) else None),
   # bitcast twice
   (UPat(Ops.BITCAST, name="b", src=(UPat.var('x').bitcast(),)), lambda x,b: x.bitcast(b.dtype)),
-  (UPat.var("x").cast(dtypes.bool), lambda x: x != 0),
+  # casts of storage preserve the address
+  (UPat.var("x").cast(dtypes.bool), lambda x: x != 0 if x.addrspace in (None, AddrSpace.ALU) else None),
   # ** pow **
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c")), simplify_pow),
   # positive const ** x
@@ -440,14 +441,14 @@ def where_on_load(cond:UOp, buf:UOp, idx:UOp, or_cast:UOp) -> UOp|None:
       all(u in idx_index for u in c.backward_slice_with_self if u.op is Ops.INDEX)
   moved, keep = partition([c for c in where_clauses if c not in in_load], can_move)
   if len(keep) == len(where_clauses): return None
-  idx = buf.index(idx.get_idx().valid(load_valid.uprod(*moved)))
-  ret_idx = idx.cast(or_cast.dtype) if or_cast.op is Ops.CAST else idx
-  return UOp.const(True).uprod(*keep).where(ret_idx, ret_idx.const_like(0))
+  ret = buf.index(idx.get_idx().valid(load_valid.uprod(*moved))).load()
+  ret = ret.cast(or_cast.dtype) if or_cast.op is Ops.CAST else ret
+  return UOp.const(True).uprod(*keep).where(ret, ret.const_like(0))
 
 # where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer
 pm_move_where_on_load = PatternMatcher([
-  (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")).or_casted("or_cast"), 0), where_on_load),
-  (UPat.var("cond").where(0, UPat.var("buf").index(UPat.var("idx")).or_casted("or_cast")),
+  (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")).load().or_casted("or_cast"), 0), where_on_load),
+  (UPat.var("cond").where(0, UPat.var("buf").index(UPat.var("idx")).load().or_casted("or_cast")),
    lambda cond,buf,idx,or_cast: where_on_load(cond.logical_not(),buf,idx,or_cast)),
 ])
 

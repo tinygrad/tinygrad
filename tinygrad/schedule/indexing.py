@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, replace
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
 from tinygrad.uop.ops import gate_kernel_sink
+from tinygrad.uop.spec import is_address, is_storage_index
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, Context, SPEC
 
@@ -57,26 +58,41 @@ class BufferizeOpts:
   addrspace: AddrSpace = AddrSpace.GLOBAL
   removable: bool = True
 
-def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
+def broadcast_rngs(x:UOp, i:int, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
+  src = x.src[i]
+  # each shaped index gets its own slice of the output ranges
+  if is_storage_index(x):
+    start = sum(s.ndim for s in x.src[1:i])
+    return rngs[start:start+src.ndim]
   if x.op not in GroupOp.Broadcastable: return rngs
   baxes, nleft = broadcast_axes(src.shape, x.shape), len(x.shape)-len(src.shape)
   return tuple(r.const_like(0) if j in baxes else r for j,r in enumerate(rngs) if j >= nleft)
 
 # TODO: srcs contain (real data srcs, something else, ranges) and the boundary is confusing. see range_start
-def data_srcs(op:Ops, src:tuple[UOp, ...]) -> tuple[UOp, ...]:
+def data_srcs(x:UOp) -> tuple[UOp, ...]:
+  op, src = x.op, x.src
   if op in GroupOp.Defines|{Ops.RANGE, Ops.SPECIAL}: return ()
+  if is_storage_index(x): return src[1:]
   if op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END, Ops.BACKEDGE, Ops.COPY}: return src[:1]
   return src
 
 def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   new_srcs = []
   # shape/bound/index args that are not data src should not be indexed
-  data_src_count = len(data_srcs(x.op, x.src))
+  data = data_srcs(x)
   for i, s in enumerate(x.src):
     new_src = s
-    src_rngs = broadcast_rngs(x, s, ctx.range_map[x][0]) if x in ctx.range_map else ()
-    if s.op in GroupOp.Defines|{Ops.MSTACK, Ops.MSELECT, Ops.AFTER, Ops.STAGE}:
-      if x in ctx.range_map and i < data_src_count: new_src = new_src.index(*src_rngs)
+    src_rngs = broadcast_rngs(x, i, ctx.range_map[x][0]) if x in ctx.range_map else ()
+    # index the remaining axes before realizing the buffer view
+    if x.op in {Ops.LOAD, Ops.STORE} and i == 0 and x in ctx.range_map and (s.op in GroupOp.Movement or is_address(s)):
+      from tinygrad.schedule.prepare import pm_mops, pm_mop_index
+      new_src = graph_rewrite(s.index(*src_rngs), pm_mops+pm_mop_index)
+    elif s.op in GroupOp.Defines|{Ops.MSTACK, Ops.MSELECT, Ops.AFTER, Ops.STAGE}:
+      if x in ctx.range_map and s in data:
+        new_src = new_src.index(*src_rngs)
+        # CALL arguments are normalized separately using their PARAM addrspaces
+        if (x.op not in {Ops.CALL, Ops.AFTER} and not (x.op in {Ops.LOAD, Ops.INDEX, Ops.STORE} and i == 0) and
+            (is_address(new_src) or s.op in {Ops.MSTACK, Ops.MSELECT})): new_src = new_src.load()
     elif s in ctx.realize_map:
       closed_ranges = ctx.range_map[s][1]
       if s.op is Ops.STORE:
@@ -87,7 +103,9 @@ def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
         removable = s.op not in ALWAYS_CONTIGUOUS and s not in ctx.non_removable
         opts = BufferizeOpts(device=s.device, removable=removable)
         new_src = UOp(Ops.STAGE, src=(new_src,)+closed_ranges, arg=opts)
-        if x in ctx.range_map: new_src = new_src.index(*src_rngs)
+        if x in ctx.range_map:
+          new_src = new_src.index(*src_rngs)
+          if x.op is not Ops.STORE or i != 0: new_src = new_src.load()
     new_srcs.append(new_src)
   return new_srcs
 
@@ -96,7 +114,9 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
-  if x.op is Ops.INDEX and len(ctx.range_map[x][0]) == len(ctx.range_map[x][1]): return None
+  if x.op is Ops.INDEX:
+    if is_storage_index(x): return create_bufferize_and_index_based_on_ranges(ctx, x)
+    if len(ctx.range_map[x][0]) == len(ctx.range_map[x][1]): return None
   if (bx:=create_bufferize_and_index_based_on_ranges(ctx, x)).src[0] is x: return None
   valid: UOp = UOp.const(True).uprod([r.get_valid() for r in ctx.range_map[x][0]])
   return valid.where(bx.src[0], UOp.const(x.dtype.const(0)))
@@ -123,7 +143,8 @@ def convert_stack_to_where(ctx:IndexingContext, x:UOp):
   return _stack_select(ctx.range_map[x][1][0], srcs)
 
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
-  if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
+  # INDEX and LOAD already carry the movement ranges
+  if x in ctx.range_map or x.src[0].op in {Ops.INDEX, Ops.LOAD}: return x.src[0]
 
 pm_apply_rangeify = PatternMatcher([
   # REDUCE(op, axis) -> REDUCE(op) with ranges
@@ -189,7 +210,7 @@ def run_rangeify(tsink:UOp) -> UOp:
     tsink_toposort = tsink.toposort(gate_kernel_sink)
     consumer_map: dict[UOp, dict[UOp, None]] = {x:{} for x in tsink_toposort}
     for c in tsink_toposort:
-      for x in data_srcs(c.op, c.src):
+      for x in data_srcs(c):
         if x in consumer_map: consumer_map[x][c] = None
 
   # explicit rangeify
@@ -217,7 +238,8 @@ def run_rangeify(tsink:UOp) -> UOp:
     #  2. from the single consumer if this op only has one consumer
     #  3. potentially new if this op has 2+ consumers
 
-    consumer_rngs = [broadcast_rngs(c, x, rctx.range_map[c][0]) for c in consumer_map[x] if c in rctx.range_map]
+    consumer_rngs = [broadcast_rngs(c, i, rctx.range_map[c][0]) for c in consumer_map[x] if c in rctx.range_map
+                     for i,s in enumerate(c.src) if s is x]
     if x in rctx.realize_map:
       # if this is in the realize_map, we create new ranges (at the output)
       out_rngs = tuple(rctx.new_range(s) for s in x.shape)
@@ -274,8 +296,8 @@ def run_rangeify(tsink:UOp) -> UOp:
     if x.op in GroupOp.Movement: rngs = apply_movement_op(x.op, x.src[0].shape, x.marg, rngs)
     # STACK: the leading range selects the src, srcs get the trailing ranges
     if x.op is Ops.STACK: rngs = out_rngs[1:]
-    # when the index srcs and output ranges of INDEX address every axis of its src, the index srcs select the leading axes
-    if x.op is Ops.INDEX and len(x.src)-1+len(out_rngs) == x.src[0].ndim: rngs = x.src[1:]+out_rngs
+    # for ALU INDEX, index srcs select the leading axes and output ranges select the remaining axes
+    if x.op is Ops.INDEX and not is_storage_index(x) and len(x.src)-1+len(out_rngs) == x.src[0].ndim: rngs = x.src[1:]+out_rngs
     # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
     # NOTE: this doesn't actually always end a range, but this is why convs are realized, so for now we need it
     if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape):

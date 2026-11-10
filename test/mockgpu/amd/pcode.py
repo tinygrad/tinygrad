@@ -915,10 +915,10 @@ class Parser:
         for i in range(4): val = val | (mindex(idx + _const(adt, i)).load().cast(dtypes.uint32) << _u32(i * 8))
     else:
       idx = addr >> _const(addr.dtype, 2)
-      val = mindex(idx)
+      val = mindex(idx).load()
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
         idx2 = (addr + _const(adt, 4)) >> _const(adt, 2)
-        val = val.cast(dtypes.uint64) | (mindex(idx2).cast(dtypes.uint64) << _u64(32))
+        val = val.cast(dtypes.uint64) | (mindex(idx2).load().cast(dtypes.uint64) << _u64(32))
       elif dt in (dtypes.uint8, dtypes.int8): val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8))) & _u32(0xFF)
       else:
         # Handle unaligned 16/32-bit loads: combine two consecutive dwords and shift.
@@ -927,7 +927,7 @@ class Parser:
         byte_off = (addr & _const(adt, 3)).cast(dtypes.uint32)
         idx_native = (addr >> _const(adt, 2)).cast(dtypes.int64)
         idx_hi_native = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int64)
-        hi = mindex((byte_off > _u32(4 - dt.itemsize)).where(idx_hi_native, idx_native))
+        hi = mindex((byte_off > _u32(4 - dt.itemsize)).where(idx_hi_native, idx_native)).load()
         combined = val.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(32, dtypes.uint64))
         val = (combined >> (byte_off.cast(dtypes.uint64) * UOp.const(8, dtypes.uint64))).cast(dtypes.uint32)
     return _cast_to(val, dt)

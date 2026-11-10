@@ -10,14 +10,14 @@ def _custom_fused_ce_loss_fwd(loss_out:UOp, max_out:UOp, lse_out:UOp, logits:UOp
   s = row % seq
 
   v_max = UOp.range(vocab, 1)
-  row_max = logits[b, s, v_max].cast(dtypes.float).reduce(v_max, arg=Ops.MAX)
+  row_max = logits[b, s, v_max].load().cast(dtypes.float).reduce(v_max, arg=Ops.MAX)
 
   v_lse = UOp.range(vocab, 2)
-  row_lse = (logits[b, s, v_lse].cast(dtypes.float) - row_max).exp().reduce(v_lse, arg=Ops.ADD).log() + row_max
+  row_lse = (logits[b, s, v_lse].load().cast(dtypes.float) - row_max).exp().reduce(v_lse, arg=Ops.ADD).log() + row_max
 
   v_smooth = UOp.range(vocab, 3)
-  target = logits[b, s, targets[row].cast(dtypes.weakint)].cast(dtypes.float)
-  mean_logits = logits[b, s, v_smooth].cast(dtypes.float).reduce(v_smooth, arg=Ops.ADD) / vocab
+  target = logits[b, s, targets[row].load().cast(dtypes.weakint)].load().cast(dtypes.float)
+  mean_logits = logits[b, s, v_smooth].load().cast(dtypes.float).reduce(v_smooth, arg=Ops.ADD) / vocab
   loss = row_lse - (1.0 - label_smoothing) * target - label_smoothing * mean_logits
   stores = UOp.group(loss_out[row].store(loss), max_out[row].store(row_max), lse_out[row].store(row_lse))
 
@@ -31,10 +31,10 @@ def _custom_fused_ce_loss_bwd(d_logits:UOp, logits:UOp, lse:UOp, targets:UOp, sc
   b = row // seq
   s = row % seq
 
-  prob = (logits[b, s, v].cast(dtypes.float) - lse[row]).exp()
-  target = v.eq(targets[row].cast(dtypes.weakint)).where(1.0 - label_smoothing, 0.0)
+  prob = (logits[b, s, v].load().cast(dtypes.float) - lse[row].load()).exp()
+  target = v.eq(targets[row].load().cast(dtypes.weakint)).where(1.0 - label_smoothing, 0.0)
   smooth = label_smoothing / vocab
-  grad = (prob - target - smooth) * scale[0]
+  grad = (prob - target - smooth) * scale[0].load()
 
   return d_logits[b, s, v].store(grad.cast(d_logits.dtype)).end(v, row).sink(arg=KernelInfo(f"fused_ce_loss_bwd_{rows}_{vocab}"))
 

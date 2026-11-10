@@ -189,9 +189,9 @@ Compiled.pm_encode += PatternMatcher([
 def poll_event(p:UOp, t:UOp) -> UOp|None:
   if p.arg.name != "tl" or not str(p.device).startswith("METAL"): return None
   event = mtl_handle(p.device, "event").after(t)
-  done = (r:=UOp.placeholder((1,), dtypes.uint64, None, AddrSpace.REG)).after(mtl_msg(event, "signaledValue", out=r))[0]
+  done = (r:=UOp.placeholder((1,), dtypes.uint64, None, AddrSpace.REG)).after(mtl_msg(event, "signaledValue", out=r))[0].load()
   # then mirror it into the timeline
-  return r.after(t.index(0).store(done))[0]
+  return r.after(t.index(0).store(done))[0].load()
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.PARAM, name="p").f(Ops.AFTER, allow_any_len=True, name="t").index(UPat.const(0)).load(), poll_event)])
 
 class MetalDevice(Compiled):

@@ -56,8 +56,8 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   # copy with transpose for wmma (input is k×spatial, LDS is spatial×k)
   A_copy = A_local.permute((1,0)) if use_wmma else A_local
   B_copy = B_local.permute((1,0)) if use_wmma else B_local
-  A_store = A_copy.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(a[k_tile].reshape(-1, THREADS_PER_BLOCK)[:, tid])
-  B_store = B_copy.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(b[k_tile].reshape(-1, THREADS_PER_BLOCK)[:, tid])
+  A_store = A_copy.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(a[k_tile].reshape(-1, THREADS_PER_BLOCK)[:, tid].load())
+  B_store = B_copy.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(b[k_tile].reshape(-1, THREADS_PER_BLOCK)[:, tid].load())
   # NOTE: no explicit barrier needed, the AFTER on the LOCAL buffers implies it in late codegen
   A_local, B_local = A_local.after(A_store, B_store), B_local.after(A_store, B_store)
 
@@ -73,14 +73,15 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     tile_m = UOp.range(TM // WMMA_ACC, 200)
     tile_n = UOp.range(TN, 201)
 
-    acc_frag = acc.reshape(TM // WMMA_ACC, WMMA_ACC, TN).permute(0,2,1)[tile_m, tile_n]
+    def acc_view(a:UOp) -> UOp: return a.reshape(TM // WMMA_ACC, WMMA_ACC, TN).permute(0,2,1)[tile_m, tile_n]
+    acc_frag = acc_view(acc)
     a_frag = A_local.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_K // WMMA_K, WMMA_K)[wave_m, tile_m, lane_n, k]
     b_frag = B_local.reshape(WAVES_N, TN, WMMA_N, BLOCK_K // WMMA_K, WMMA_K)[wave_n, tile_n, lane_n, k]
     if is_rdna4:
       # NOTE: since this is part of K, these 2 can be anywhere in the frags and long as a and b match
       a_frag = a_frag.reshape(2, 8)[lane_m, :]
       b_frag = b_frag.reshape(2, 8)[lane_m, :]
-    wmma = UOp.wmma(a_frag, b_frag, acc_frag.after(k), (16, 16, 16), 32)
+    wmma = UOp.wmma(a_frag.load(), b_frag.load(), acc_view(acc.after(k)).load(), (16, 16, 16), 32)
     acc_store = acc_frag.store(wmma).end(tile_m, tile_n)
   else:
     # registers for LOCAL -> REG
@@ -88,8 +89,8 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     b_frag = UOp.placeholder((TN//UNROLL_N, UNROLL_N), dtypes.float, slot=1, addrspace=AddrSpace.REG)
 
     k = UOp.range(BLOCK_K, 101, AxisType.LOOP)
-    a_frag = a_frag.after(a_frag.store(A_local[k].reshape(WAVES_M, TM//UNROLL_M, LANES_PER_WAVE_M, UNROLL_M)[wave_m, :, lane_m, :]))
-    b_frag = b_frag.after(b_frag.store(B_local[k].reshape(WAVES_N, TN//UNROLL_N, LANES_PER_WAVE_N, UNROLL_N)[wave_n, :, lane_n, :]))
+    a_frag = a_frag.after(a_frag.store(A_local[k].reshape(WAVES_M, TM//UNROLL_M, LANES_PER_WAVE_M, UNROLL_M)[wave_m, :, lane_m, :].load()))
+    b_frag = b_frag.after(b_frag.store(B_local[k].reshape(WAVES_N, TN//UNROLL_N, LANES_PER_WAVE_N, UNROLL_N)[wave_n, :, lane_n, :].load()))
 
     # FMA
     a_frag = a_frag.reshape(TM, 1).expand(TM, TN)
