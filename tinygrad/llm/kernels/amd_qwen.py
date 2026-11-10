@@ -3647,7 +3647,7 @@ QSA_PREFILL = getenv("QSA_PREFILL", 0)
 @functools.cache
 def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UOp, *, scale:float, kpool:int, rdna4:bool, ns:int=1) -> UOp:
   # as _qsa_decode_kernel (its outputs, compact lists of pools, kv_q4_pack's 4-bit cache) on the tensor cores: a workgroup a row b, its heads
-  # (at most 16) the rows of the tiles. a tile of 16*ns keys into LDS (their values less 8 in half: exact, the groups' scales in float), the
+  # (at most 16) the rows of the tiles. a tile of 16*ns keys into LDS (keys: their words; values: less 8 in half, exact; scales in float), the
   # scores of a group of 32 dims a product of the half queries and those (2 WMMA), times the keys' scales of the group (a lane's key); a wave a
   # quarter of the dims, the scores summed through LDS. the values: the weights times the keys' scales of the group (in half) by the values
   B, H, _, DV = cast(tuple[int, int, int, int], out.shape)
@@ -3685,33 +3685,38 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
   # loaded (registers) before this one's tensor core work, stored to LDS after it
   TPR = T // TK  # threads a key
   DPT = D // TPR  # dims a thread
+  assert DK % DPT == 0, "a thread's dims all keys' or all values'"
   lrow, lpart = tid // TPR, tid % TPR
-  lds_k = UOp.alloc((TK, W4 + 1), dtypes.uint32, addrspace=AddrSpace.LOCAL)  # (the keys' words as they are: a value converted when it's used)
+  # (the keys' halves: their words as they are (a value converted at its fragment); the values': n - 8 in half, a value's 16 keys strided)
+  lds_k = UOp.alloc((TK, DK // 8 + 1), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+  lds_v = UOp.alloc((TK, DV + 8), dtypes.half, addrspace=AddrSpace.LOCAL)
   lds_sc = UOp.alloc((TK, D // 32), dtypes.float, addrspace=AddrSpace.LOCAL)
-  def tile_loads(t:UOp) -> tuple[list[UOp], UOp]:
-    lkey, lok = key_at(t, lrow)
-    words = [w for h4 in range(DPT // 32) for w in _amd_load(cache[lkey, lpart*(DPT//8) + h4*4], 4)]
-    return words + [cache[lkey, W4 + lpart*(DPT//64) + i].load() for i in range(DPT // 64)], lok
-  def tile_stores(vals:tuple[list[UOp], UOp], lk:UOp, lsc:UOp) -> list[UOp]:
-    ws, lok = vals
-    words, sws = ws[:DPT // 8], ws[DPT // 8:]
-    st = [lk[lrow, lpart*(DPT//8) + wi].store(w) for wi, w in enumerate(words)]
-    for gi in range(DPT // 32):
-      sc = (sws[gi // 2] >> (16 * (gi % 2))).cast(dtypes.uint16).bitcast(dtypes.half).float()
-      st.append(lsc[lrow, lpart * (DPT // 32) + gi].store(lok.where(sc, UOp.const(0.0, dtypes.float))))
-    return st
   def word_halves(w:UOp) -> list[UOp]:
     # a word's 8 values (kv_q4_pack: byte i the values i (low nibble) and i+4) in order: the nibbles into halves 1024+n, less 1032: n - 8 exactly
     nib = [w & 0x0f0f0f0f, (w >> 4) & 0x0f0f0f0f]
     pairs = [_amd_byte_perm(UOp.const(0x64646464, dtypes.uint32), x, UOp.const(sel, dtypes.uint32)) for x in nib for sel in (0x04010400, 0x04030402)]
     return [((p_ >> sh) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.half) - 1032 for p_ in pairs for sh in (0, 16)]
-  def nibble_half(w:UOp, d:UOp) -> UOp:
-    # value d (0..7) of a word, n - 8 in half
-    return (((w >> ((d % 4) * 8 + (d // 4) * 4).cast(dtypes.uint32)) & 15).cast(dtypes.int32) - 8).cast(dtypes.half)
-  lds_k0, lds_sc0 = lds_k, lds_sc
-  first = UOp.group(*tile_stores(tile_loads(UOp.const(0, dtypes.weakint)), lds_k, lds_sc)).barrier()
+  def tile_loads(t:UOp) -> tuple[list[UOp], UOp]:
+    lkey, lok = key_at(t, lrow)
+    words = [w for h4 in range(DPT // 32) for w in _amd_load(cache[lkey, lpart*(DPT//8) + h4*4], 4)]
+    return words + [cache[lkey, W4 + lpart*(DPT//64) + i].load() for i in range(DPT // 64)], lok
+  def tile_stores(vals:tuple[list[UOp], UOp], lk:UOp, lv:UOp, lsc:UOp) -> list[UOp]:
+    ws, lok = vals
+    words, sws = ws[:DPT // 8], ws[DPT // 8:]
+    st = []
+    for wi, w in enumerate(words):
+      d0 = lpart*DPT + wi*8  # (a thread's dims are all keys' or all values')
+      kdim = lpart*DPT < DK
+      st.append(lk[lrow, (lpart*(DPT//8) + wi).valid(kdim)].store(w))
+      st += [lv[lrow, (d0 - DK + j).valid(kdim.ne(True))].store(h_) for j, h_ in enumerate(word_halves(w))]
+    for gi in range(DPT // 32):
+      sc = (sws[gi // 2] >> (16 * (gi % 2))).cast(dtypes.uint16).bitcast(dtypes.half).float()
+      st.append(lsc[lrow, lpart * (DPT // 32) + gi].store(lok.where(sc, UOp.const(0.0, dtypes.float))))
+    return st
+  lds_k0, lds_v0, lds_sc0 = lds_k, lds_v, lds_sc
+  first = UOp.group(*tile_stores(tile_loads(UOp.const(0, dtypes.weakint)), lds_k, lds_v, lds_sc)).barrier()
   nxt = tile_loads((tile + 1).minimum((ntiles - 1).maximum(0)))
-  lds_k, lds_sc = lds_k.after(first, tile), lds_sc.after(first, tile)
+  lds_k, lds_v, lds_sc = lds_k.after(first, tile), lds_v.after(first, tile), lds_sc.after(first, tile)
   key_ok = [key_at(tile, st_ * 16 + col)[1] for st_ in range(ns)]
   # the wave's scores of a subtile of 16 keys: a group's two WMMA, times the scales of the lane's key
   zero = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
@@ -3766,12 +3771,11 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
     acc = UOp.stack(*(o_regs[dt].after(tile)[e].load() * alpha[e] for e in range(8)))
     for st_ in range(ns):
       pfrag = pfrags[(vg, st_)]
-      dv = DK + wave*VW + dt*16 + col
-      vfrag = UOp.stack(*(nibble_half(lds_k.after(shared)[st_*16 + k, dv // 8].load(), dv % 8) for k in ks))
+      vfrag = UOp.stack(*(lds_v.after(shared)[st_*16 + k, wave*VW + dt*16 + col].load() for k in ks))
       acc = UOp.wmma(pfrag, vfrag, acc, *WMMA_ARG)
     o_new.append(acc)
   update = UOp.group(*(o.store(v) for o, v in zip(o_regs, o_new)), shared).barrier()
-  update = UOp.group(*tile_stores(nxt, lds_k0.after(update), lds_sc0.after(update))).barrier().end(tile)
+  update = UOp.group(*tile_stores(nxt, lds_k0.after(update), lds_v0.after(update), lds_sc0.after(update))).barrier().end(tile)
   stores = [out[b, crow(e).valid(crow(e) < H), 0, wave*VW + dt*16 + col].store(o.after(update)[e].load())
             for dt, o in enumerate(o_regs) for e in range(8)]
   m_fin, l_fin = m_reg.after(update), l_reg.after(update)
