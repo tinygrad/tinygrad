@@ -75,8 +75,8 @@ st0 = time.perf_counter()
 # (BATCH=G: the N prompts' sequences decoded together, G at a time (seq_steps of G sequences, each forced on its own corpus continuation):
 # the quality of a batched step's kernels, e.g. a flag's A/B of seq.out files. no main path then)
 if (GB:=getenv("BATCH", 0)) > 1:
-  from tinygrad.llm.glm5next import REGION_ALIGN
-  span = -(-(L + NTOK + 512 + 64) // REGION_ALIGN) * REGION_ALIGN
+  RA = model.REGION_ALIGN  # (the model's: GLM-5.3 DSA's regions are 3584-aligned, glm5next's 3072)
+  span = -(-(L + NTOK + 512 + 64) // RA) * RA
   assert GB <= model.seq_slots() and GB * span <= model.seq_rows(), f"SEQ_SLOTS >= {GB}, SEQ_ROWS >= {GB*span}"
   for i0 in range(0, N, GB):
     group = []

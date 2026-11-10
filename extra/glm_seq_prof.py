@@ -11,7 +11,6 @@ from tinygrad import Device
 from tinygrad.helpers import getenv
 from tinygrad.llm.model import Transformer
 from tinygrad.llm.cli import SimpleTokenizer
-from tinygrad.llm.glm5next import REGION_ALIGN
 import extra.kprof as kprof
 
 model, kv = Transformer.from_gguf(os.environ["MODEL"], getenv("MAXCTX", 65536), shard=getenv("SHARD", 6))
@@ -22,7 +21,7 @@ devs = devs if isinstance(devs, tuple) else (devs,)
 k, CTXP, NS = model.config.spec_drafts, getenv("CTXP", 4096), getenv("NSTEPS", 32)
 GS = [int(g) for g in str(getenv("GS", "1,8,16,32")).split(",")]
 corpus = tok.encode(open(os.environ["CORPUS"]).read()[:getenv("CHARS", 2_000_000)])
-span = -(-(CTXP + 2*NS*(k+1) + 64) // REGION_ALIGN) * REGION_ALIGN  # (a sequence's region: its prompt and the decoded tokens)
+span = -(-(CTXP + 2*NS*(k+1) + 64) // model.REGION_ALIGN) * model.REGION_ALIGN  # (a sequence's region: its prompt and the decoded tokens)
 G = max(GS)
 assert G * span <= model.seq_rows() and G <= model.seq_slots(), f"{G} regions of {span} rows: SEQ_ROWS >= {G*span}, SEQ_SLOTS >= {G}"
 def sync():
