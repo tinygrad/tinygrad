@@ -87,6 +87,26 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertRaises(AssertionError, _q8_pack_kernel, Tensor.empty(4, 18, 9, dtype="uint32").uop, Tensor.empty(4, 576, dtype="half").uop)
     self.assertRaises(AssertionError, _q8_unpack_kernel, Tensor.empty(4, 576, dtype="half").uop, Tensor.empty(4, 18, 9, dtype="uint32").uop)
 
+  def test_half_rows_local_scales(self):
+    # (a row parallel layer's input in half: every device's part its own scale, no cross device max; the same halves below HALF_ROWS_MAX)
+    from tinygrad.llm.kernels.amd_glm_dsa import _half_rows, HALF_ROWS_MAX
+    devs = ("CPU:0", "CPU:1", "CPU:2", "CPU:3")
+    a = np.random.default_rng(0).standard_normal((16, 64)).astype(np.float32) * 100
+    a[3, 40] = HALF_ROWS_MAX * 5  # (a row past half's range on device 2 only)
+    x = Tensor(a).shard(devs, axis=1).realize()
+    xh, sc = _half_rows(x, 16, 4)
+    self.assertEqual(sc.shape, (4, 16, 1))
+    self.assertEqual(sc.uop.axis, 0)
+    s = sc.numpy()
+    self.assertEqual(s[2, 3, 0], 8.0)
+    self.assertEqual(float(np.delete(s.reshape(-1), 2*16+3).max()), 1.0)
+    want = (a.reshape(16, 4, 16) / s.transpose(1, 0, 2)).astype(np.float16).reshape(16, 64)
+    np.testing.assert_array_equal(xh.numpy(), want)
+    # below the max: the global path's halves exactly
+    b = a.copy()
+    b[3, 40] = 1.0
+    np.testing.assert_array_equal(_half_rows(Tensor(b).shard(devs, axis=1), 16, 4)[0].numpy(), _half_rows(Tensor(b), 16)[0].numpy())
+
   def test_dsa_stash_roundtrip(self):
     def t(shape, axis=None):
       x = Tensor(np.arange(np.prod(shape), dtype=np.float16).reshape(shape))

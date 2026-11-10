@@ -1196,12 +1196,19 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, token_tile:int, out_features:int=0,
   return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
 HALF_ROWS_MAX = 32768.0
-def _half_rows(x:Tensor, tokens:int) -> tuple[Tensor, Tensor|None]:
+def _half_rows(x:Tensor, tokens:int, splits:int=1) -> tuple[Tensor, Tensor|None]:
   """
   x (tokens, in) in half for the f16 kernels: a row past HALF_ROWS_MAX divided by a power of two (exact) to fit (GLM-5's first tokens' activations
-  in its early layers are past half's range), the (tokens, 1) scales to multiply the outputs by (None: HALF_ROWS=0)
+  in its early layers are past half's range), the (tokens, 1) scales to multiply the outputs by (None: HALF_ROWS=0).
+  splits > 1 (x's features split over the devices, a row parallel layer's input): every device's part of a row its own scale, (splits, tokens, 1)
+  split on axis 0 as the partial outputs (the same values unless a row is past HALF_ROWS_MAX; the max of the whole row is a ring of copies)
   """
   if not getenv("HALF_ROWS", 1): return x.cast(dtypes.float16).contiguous(), None
+  if splits > 1:
+    xf = x.reshape(tokens, splits, x.shape[-1] // splits).float()
+    amax = xf.abs().max(-1, keepdim=True)  # (every device its own part's: no copies)
+    sc = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
+    return (xf / sc).cast(dtypes.float16).reshape(x.shape).contiguous(), sc.permute(1, 0, 2)
   xf = x.reshape(tokens, x.shape[-1]).float()
   amax = xf.abs().max(-1, keepdim=True)
   sc = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
@@ -1227,6 +1234,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   xh:tuple[Tensor, Tensor|None]|None = None  # (the half rows of the f16 kernels, and their scales)
   ksplits = 1  # the input groups split over workgroups, their partial outputs summed after
   extra = (_iq_grid(x.device, layer.ggml_type),) if layer.ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
+  # (a few rows (batched decoding) of a row parallel layer in half: every device's part of a row its own scale, see _half_rows)
+  local_splits = splits if splits > 1 and tokens <= getenv("HALF_LOCAL_ROWS", 64) else 1
   # (split: every device its rows, the kernels' tiles of them)
   local_rows = tokens // len(x.device) if split and isinstance(x.device, tuple) else tokens
   # the kernels write the output features of their own device
@@ -1253,7 +1262,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
        _wmma_rdna4(x.device) and (tt:=next((t for t in (96, 128, 64) if local_rows % t == 0), 0)) and getenv("Q8_GEMM", 1):
     # many tokens: the weights dequantized in LDS for token tiles of tt
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type)
-    srcs = ((xh:=_half_rows(x, tokens))[0],)
+    srcs = ((xh:=_half_rows(x, tokens, local_splits))[0],)
   elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None:
     if layer.ggml_type == IQ4_XS:
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
@@ -1261,7 +1270,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       fxn = functools.partial(_q5_linear_f16_wmma_kernel if layer.ggml_type in (Q4_K, Q5_K) else _quant_linear_f16_wmma_kernel,
                               ggml_type=layer.ggml_type)
     fxn = functools.partial(fxn, rdna4=_wmma_rdna4(x.device))
-    srcs = ((xh:=_half_rows(x, tokens))[0], *extra)
+    srcs = ((xh:=_half_rows(x, tokens, local_splits))[0], *extra)
   elif layer.ggml_type == Q8_0 and xq is None and tokens <= 8 and in_features <= getenv("DEC_F16_K", 512) and in_features % 32 == 0 and \
        layer.weight.dtype == dtypes.uint16 and _q8_key(x, tokens, in_features, False, False) not in _q8_cache and _is_buffer(x):
     # a few rows of a narrow input (decoding): the activations in half, computed by the kernel from x (not quantized by a kernel of their own)
@@ -1277,7 +1286,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   result = Tensor.custom_kernel(out, layer.weight, *srcs, fxn=functools.partial(fxn, out_features=local_out, in_features=in_features))[0]
   if xh is not None and xh[1] is not None:
     # (the rows scaled into half's range scaled back: every device's rows of its partial sums)
-    rs = xh[1].reshape(1, tokens, 1)
+    rs = xh[1] if local_splits > 1 else xh[1].reshape(1, tokens, 1)
     result = (result.reshape(splits, tokens, out_features) * rs).reshape(out_shape) if splits > 1 else result * rs[0].cast(result.dtype)
   if ksplits > 1:
     # (split: every device's rows of the partial outputs of the input splits)
