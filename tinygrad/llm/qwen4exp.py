@@ -1135,7 +1135,7 @@ def _region_rows(config:TransformerConfig) -> int:
 MICRO_BATCHES = getenv("MICRO_BATCHES", 2)
 PREFILL_MB1_ROWS = getenv("PREFILL_MB1_ROWS", 0)
 PREFILL_TILE32 = getenv("PREFILL_TILE32", 1)
-PREFILL_SIZES = tuple(int(c) for c in getenv("PREFILL_SIZES", "192,512,2048,4096").split(",") if c)
+PREFILL_SIZES = tuple(int(c) for c in getenv("PREFILL_SIZES", "192,512,1152,2048,4096").split(",") if c)
 # the attention cache's keys (1) and values (2) rotated, see QSABlock._rot
 QSA_KV_ROT = getenv("QSA_KV_ROT", 0)
 
