@@ -1102,12 +1102,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in GroupOp.Defines and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
     if self.op in (Ops.RANGE, Ops.SPECIAL) and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
-    # a load from a constant table is one of its values
-    if self.op is Ops.LOAD and (b:=self.src[0].buf_uop).op is Ops.BINARY:
+    # an ungated load from a constant table with every coordinate valid is one of its values
+    if self.op is Ops.LOAD and len(self.src) == 1 and (i:=self.src[0]).op is Ops.INDEX and (b:=i.buf_uop).op is Ops.BINARY and \
+       all(c.get_valid() is UOp.const(True) for c in i.src[1:]):
       return min(e:=memoryview(b.arg).cast(unwrap(self.dtype.fmt)).tolist()), max(e)
     # a NAN is outside every interval
     if self.op is Ops.CONST and self.val is not Invalid and not (isinstance(self.val, float) and math.isnan(self.val)): return self.val, self.val
-    if self.op is Ops.PAD: return min(self.src[0].vmin, 0), max(self.src[0].vmax, 0)  # PAD adds zeros
+    # PAD adds zeros, as does a read with a masked coordinate
+    if self.op is Ops.PAD or (self.op is Ops.INDEX and not all(c.get_valid() is UOp.const(True) for c in self.src[1:])):
+      return min(self.src[0].vmin, 0), max(self.src[0].vmax, 0)
     if self.op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.AFTER, Ops.DETACH, Ops.COPY, Ops.CONTIGUOUS_BACKWARD}: return self.src[0]._min_max
     # a cast rounds monotonically, except an int wraps past an int dtype and an inf a float dtype can't hold becomes nan
     if self.op is Ops.CAST and dtypes.is_float(self.dtype):
