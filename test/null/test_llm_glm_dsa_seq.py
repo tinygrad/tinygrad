@@ -1,4 +1,5 @@
 import os
+import functools
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -86,6 +87,23 @@ class TestGLMDSASequence(unittest.TestCase):
     from tinygrad.llm.kernels.amd_glm_dsa import _q8_pack_kernel, _q8_unpack_kernel
     self.assertRaises(AssertionError, _q8_pack_kernel, Tensor.empty(4, 18, 9, dtype="uint32").uop, Tensor.empty(4, 576, dtype="half").uop)
     self.assertRaises(AssertionError, _q8_unpack_kernel, Tensor.empty(4, 576, dtype="half").uop, Tensor.empty(4, 18, 9, dtype="uint32").uop)
+
+  def test_seq_p2p_pack_kernels(self):
+    # (SEQ_P2P_PACK: mla_sparse_seq's one shot gather and reduce scatter of packed words: default off, the kernels build)
+    from tinygrad.llm.kernels.amd_glm_dsa import _p2p_allreduce_kernel, _seq_p2p_pack, P2P_AR_CLASSES, P2P_AR_MAXG, P2P_AR_MAXW
+    with patch.dict(os.environ, {"SEQ_P2P_PACK": "0"}): self.assertIsNone(_seq_p2p_pack())
+    with patch.dict(os.environ, {"SEQ_P2P_PACK": "6x8"}): self.assertEqual(_seq_p2p_pack(), (6, 8))
+    N, n = 4, 256
+    mb = [Tensor.empty(P2P_AR_CLASSES*P2P_AR_MAXG*2*(N+1)*P2P_AR_MAXW, dtype="uint64") for _ in range(N)]
+    counter = Tensor.empty(P2P_AR_CLASSES*P2P_AR_MAXG+1, dtype="int32")
+    for kw in (dict(gather=True), dict(scatter=True)):
+      out, x = Tensor.empty(N*n*6, dtype="float32"), Tensor.empty(1, N*n*6, dtype="float32")
+      fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n, T=256, EP=1, pack=(6, 8), **kw)
+      call = Tensor.custom_kernel(out, x, counter, *mb, fxn=fxn)[0].uop.src[1]
+      self.assertIs(call.src[0].op, Ops.SINK)
+    with self.assertRaises(AssertionError):
+      Tensor.custom_kernel(out, x, counter, *mb, fxn=functools.partial(_p2p_allreduce_kernel, N=N, n=n, T=256, EP=1, pack=(6, 8), half=True,
+                                                                       gather=True))
 
   def test_seq_i8_reaches_dsa_kernels(self):
     # (glm5next's _forward_seqs_glm sets amd_glm's flag: the DSA kernels' (amd_glm_dsa's) is set by the DSA model's, restored after)

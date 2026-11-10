@@ -1473,7 +1473,8 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   # owner are the packed ones on every device)
   W = pack[0] if pack is not None else 3 if triple else 2 if half else 1  # the values of a word
   assert not triple or half, "three values a word are in half"
-  assert pack is None or (two_shot and pack[0]*pack[1] <= 48), "packed: two shot, the values and the power of two in 56 bits"
+  assert pack is None or ((two_shot or gather or scatter) and not half and pack[0]*pack[1] <= 48), \
+    "packed: two shot (or a gather/scatter), the values and the power of two in 56 bits"
   # (in half saturated: a value past its range is the largest, not inf (inf - inf is NaN: the sums, the model's states after them))
   def sat(v:UOp) -> UOp: return v.maximum(-65504.0).minimum(65504.0)
   def h(v:UOp) -> UOp: return sat(v).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
@@ -1534,10 +1535,12 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   def mine(s:int, v:list[UOp], w:UOp) -> list[UOp]: return [me.eq(s).where(a, b) for a, b in zip(v, value(w))]
   if scatter:
     # (and gather: every device's part of this device, not summed: an all to all, out (N, n))
-    assert not two_shot and pack is None, "a reduce scatter is one shot"
+    assert not two_shot, "a reduce scatter is one shot"
     sent = push([mb[k][reg(me, l)].store(word(v)) for k in range(1, N) for l, v in zip(li, vals_for((me + k) % N))])
     got = poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li])
-    parts = [[mine(s, v, got[s*EP + i]) for s in range(N)] for i, v in enumerate(vals_for(me))]
+    # (packed: the device's own part as the others' are, quantized)
+    own = [value(word(v)) for v in vals_for(me)] if pack is not None else vals_for(me)
+    parts = [[mine(s, v, got[s*EP + i]) for s in range(N)] for i, v in enumerate(own)]
     if gather: stores = [out[s*n*W + e*W + c].store(p[c]) for e, ps in zip(els, parts) for s, p in enumerate(ps) for c in range(W)]
     else: stores = [out[e*W + c].store(ordered_sum([p[c] for p in ps])) for e, ps in zip(els, parts) for c in range(W)]
   elif not two_shot:
@@ -1563,15 +1566,20 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   name = "p2p_allgather" if gather else "p2p_reduce_scatter" if scatter else "p2p_allreduce"
   return UOp.group(*stores, done).end(wg, t).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
-def p2p_reduce_scatter(p:Tensor) -> Tensor|None:
+def p2p_reduce_scatter(p:Tensor, pack:tuple[int, int]|None=None) -> Tensor|None:
   """p (devices, devices, n) partials split on the first: device i gets the sum over the devices of their part i, (devices, n) split on the
-  first. one shot peer to peer, the parts in half. None: not supported (or too big for the mailboxes)"""
+  first. one shot peer to peer, the parts in half (pack (W, B): W values of B bits a word with a shared power of two). None: not supported
+  (or too big for the mailboxes)"""
   devs = cast(tuple[str, ...], p.device)
-  N, n = len(devs), int(p.shape[-1])
-  if n % 2 or (p2p:=p2p_allreduce(devs)) is None or (shape:=p2p_ar_shape(n // 2)) is None: return None
-  out = Tensor.empty(N*n, dtype=dtypes.float32, device=devs, axis=0)
-  fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n//2, T=shape[0], EP=shape[1], half=True, scatter=True)
-  return Tensor.custom_kernel(out, p.float().reshape(N, N*n).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(N, n)
+  N, n, W = len(devs), int(p.shape[-1]), 2 if pack is None else pack[0]
+  # (packed: the parts padded to whole words of workgroups of 256)
+  m = n if pack is None else next((m for a in (256, 1024) if p2p_ar_shape((m:=round_up(n, W*a)) // W) is not None), n)
+  if m % W or (p2p:=p2p_allreduce(devs)) is None or (shape:=p2p_ar_shape(m // W)) is None: return None
+  out = Tensor.empty(N*m, dtype=dtypes.float32, device=devs, axis=0)
+  fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m//W, T=shape[0], EP=shape[1], half=pack is None, scatter=True, pack=pack)
+  x = p.float() if m == n else p.float().pad((None, None, (0, m-n)))
+  out = Tensor.custom_kernel(out, x.reshape(N, N*m).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(N, m)
+  return out if m == n else out[:, :n]
 
 def p2p_all_to_all(p:Tensor) -> Tensor|None:
   """p (devices, devices, n) floats split on the first: device i gets every device's part i, (devices, devices*n) split on the first (row i:
@@ -2305,6 +2313,23 @@ def host_allgather_half(x:Tensor) -> Tensor|None:
     fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m//2, T=shape[0], EP=shape[1], gather=True, half=True)
     return Tensor.custom_kernel(out, x.pad((None, (0, m-n))).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(N, m)[:, :n]
   return None
+
+def host_allgather_pack(x:Tensor, pack:tuple[int, int]) -> Tensor|None:
+  """x (devices, n) values: all N*n values on every device as float32, W values of B bits a word with a shared power of two (pack (W, B):
+  every device's own values quantized as the others get them)"""
+  N, n, W = int(x.shape[0]), int(x.shape[1]), pack[0]
+  if not isinstance(x.device, tuple): return None
+  m = next((m for a in (1, 4) if p2p_ar_shape((m:=round_up(n, W*HOST_AR_THREADS*a)) // W) is not None), n)
+  out = Tensor.empty(N*m, dtype=dtypes.float32, device=x.device)
+  if m % W == 0 and (p2p:=p2p_allreduce(x.device)) is not None and (shape:=p2p_ar_shape(m // W)) is not None:
+    fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m//W, T=shape[0], EP=shape[1], gather=True, pack=pack)
+    return Tensor.custom_kernel(out, x.float().pad((None, (0, m-n))).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(N, m)[:, :n]
+  return None
+
+def _seq_p2p_pack() -> tuple[int, int]|None:
+  """SEQ_P2P_PACK (WxB, default 0: none): mla_sparse_seq's peer to peer query gather and output reduce scatter (a few rows) send W values of B
+  bits a word with a shared power of two (as P2P_AR_PACK), not two halves a word. 6x8: a third of the words (int8's error)"""
+  return (int((p:=v.split("x"))[0]), int(p[1])) if (v:=os.environ.get("SEQ_P2P_PACK", "0")) != "0" else None
 
 def host_allgather(x:Tensor) -> Tensor|None:
   """
@@ -4270,7 +4295,9 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
     qa = all_gather_q8(q.contiguous().reshape(1, H*T, D), 1).reshape(1, H, T, D)
   elif q.uop.axis == 1:
     parts = q.contiguous().reshape(n, H//n, T, D)
-    if small and getenv("SEQ_P2P_Q_HALF", 1) and (hg:=host_allgather_half(parts.reshape(n, -1))) is not None:
+    if small and (pk:=_seq_p2p_pack()) is not None and (hg:=host_allgather_pack(parts.reshape(n, -1), pk)) is not None:
+      qa = hg.reshape(n, H//n, T, D).reshape(1, H, T, D).half()
+    elif small and getenv("SEQ_P2P_Q_HALF", 1) and (hg:=host_allgather_half(parts.reshape(n, -1))) is not None:
       qa = hg.reshape(n, H//n, T, D).reshape(1, H, T, D).half()
     else: qa = gather(parts, dtypes.half, bool(getenv("SEQ_P2P_Q", 1))).reshape(1, H, T, D).half()
   else: qa = q.half()
@@ -4317,7 +4344,7 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   if small and getenv("SEQ_P2P_RS", 1):
     hl = int(H) // n
     parts = contrib.reshape(n, T, n, hl, D).permute(0, 2, 1, 3, 4).reshape(n, n, T*hl*D)
-    if (rs:=p2p_reduce_scatter(parts)) is not None: return rs.reshape(n, 1, T, hl, D).permute(1, 0, 3, 2, 4).reshape(1, H, T, D)
+    if (rs:=p2p_reduce_scatter(parts, _seq_p2p_pack())) is not None: return rs.reshape(n, 1, T, hl, D).permute(1, 0, 3, 2, 4).reshape(1, H, T, D)
   if getenv("SEQ_RS_Q8", 1) and isinstance(T, int) and (T*D) % 256 == 0:
     # (the heads' rows as rows of (1, H, T*D): the int8 sums of reduce_scatter's ring, RS_Q8)
     return reduce_scatter(contrib.permute(0, 1, 3, 2, 4).reshape(n, 1, H, T*D), 1).reshape(1, H, T, D)
