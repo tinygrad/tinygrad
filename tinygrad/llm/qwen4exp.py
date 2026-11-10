@@ -1125,7 +1125,7 @@ _pk_local:list[int|None] = [None]
 # constant ~6 ms on tr8)
 PREFILL_PK_CTX = tuple(int(c) for c in getenv("PREFILL_PK_CTX", "").split(",") if c)
 # (a prefill chunk's time is about that of this many rows more than its padded ones: its kernels' fixed time, see Transformer._chunk_plan)
-CHUNK_FIXED_ROWS = 256
+CHUNK_FIXED_ROWS = getenv("CHUNK_FIXED_ROWS", 256)
 # (a multiple of the pools of the KV heads' devices (kpool*kv_split): a region's pools on the devices as its positions)
 REGION_ALIGN = 3072
 def _region_rows(config:TransformerConfig) -> int:
