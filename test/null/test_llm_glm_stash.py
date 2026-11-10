@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
-from tinygrad import Tensor
+from tinygrad import Device, Tensor
 from tinygrad.llm.glm5next import GatedDeltaNetBlock, Indexer, MLATransformerBlock, Transformer, replay_q
 
 
@@ -74,6 +74,8 @@ class TestGLMStash(unittest.TestCase):
     self.reset_sources()
     # Save region row 0 into chunk 0, then restore it into a different region; host offset must not use region row.
     self.model._stash_kv_copy(False, 1, 32, 0)
+    # The full NULL suite allocates/captures other work on this CPU device. Do not let an earlier capture's state race readback.
+    for dev in self.devs: Device[dev].synchronize()
     for original, tensor in zip(before_reset, (self.idx.cache_pk, self.mla.cache_s)):
       n = 16 if tensor is self.idx.cache_pk else 32
       expected = np.zeros_like(tensor.numpy())
@@ -87,6 +89,7 @@ class TestGLMStash(unittest.TestCase):
     self.model._stash_state_copy(True, 0, 0, 0, 0, 0)
     self.reset_sources()
     self.model._stash_state_copy(False, 1, 0, 0, 0, 0)
+    for dev in self.devs: Device[dev].synchronize()
     current = [self.gdn.pool_rec, *self.gdn.pool_conv, self.gdn.pool_rp, self.idx.cache_pk,
                self.idx.pool_ring, self.ckpt_ring, self.mla.cache_s,
                self.model.seq_spec_h, self.model.seq_ckpt_h, *self.model.seq_ckpt_states[0]]
