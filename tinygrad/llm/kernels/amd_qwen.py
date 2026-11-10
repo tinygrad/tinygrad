@@ -3751,7 +3751,7 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
   return UOp.group(*final).end(lane, wave, part, b).sink(arg=KernelInfo(name="qsa_decode", opts_to_apply=(), estimates=est))
 
 # QSA_PREFILL: a prefill's rows (many) on qsa_prefill's kernel (the tensor cores), not qsa_decode's (a lane a key: vector ALU bound)
-QSA_PREFILL = getenv("QSA_PREFILL", 0)
+QSA_PREFILL = getenv("QSA_PREFILL", 1)
 # QSA_WMMA=P: decoding's rows on qsa_prefill's kernel, a row's keys over P workgroups (combined as qsa_decode's parts; 1: P of the rows'
 # count). default off
 QSA_WMMA = getenv("QSA_WMMA", 0)
