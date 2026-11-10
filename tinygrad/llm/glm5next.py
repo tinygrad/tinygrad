@@ -4009,7 +4009,9 @@ class Transformer:
   # the recurrent states. a sequence is prefilled by the model's calls on its region (its states loaded from its slot before, stored after),
   # a step of speculative decoding takes every sequence decoding at once (forward_seqs). the regions are the caller's (see SeqEngine) ********
 
-  SEQ_SIZES = tuple(int(x) for x in str(getenv("SEQ_SIZES", "1,2,4,8")).split(","))
+  # (GLM: the steps of 3 and 6 sequences their own sizes: a step of n sequences runs the jit of the smallest size n fits (its padding
+  # sequences are rows computed for nothing): 3 sequences 22 ms, not 26 (the jit of 4))
+  SEQ_SIZES = tuple(int(x) for x in str(getenv("SEQ_SIZES", "1,2,3,4,6,8")).split(","))
   REGION_ALIGN = REGION_ALIGN  # (the alignment of the regions, see SeqEngine)
   def seqs_supported(self) -> bool:
     devs = self.token_embd.weight.device
