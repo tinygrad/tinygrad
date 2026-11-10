@@ -940,9 +940,9 @@ K256_STAGE = getenv("K256_STAGE", 0)
 # K256_XH: RDNA3 _grouped_k256_kernel's lane halves decode one K half each, exchanged by permlanex16, and its sub-blocks unrolled. same bits;
 # iris 7900 XTX IQ3_S gate|up of 86 experts (extra/moe_prefill_bench.py): 576 tokens 573 -> 440 us, 1152 579 -> 467, 4096 1180 -> 1159,
 # 13824 3686 -> 3584; a whole layer (+ the IQ4_NL down) at 192/384/768 tokens 817/841/903 -> 648/689/713 us. IQ3_S only. default off
-K256_XH = getenv("K256_XH", 0)
+K256_XH = getenv("K256_XH", 1)
 # Q8_TILES: grouped experts' sorted rows (the down's input) quantized in the rows of the tiles with an expert only
-Q8_TILES = getenv("Q8_TILES", 0)
+Q8_TILES = getenv("Q8_TILES", 0 if _wmma_rdna4(Device.DEFAULT) else 1)
 K256_R4_GRID = getenv("K256_R4_GRID", 0)
 MAD_I24 = "({{ int r_; __asm__(\"v_mad_i32_i24 %0, %1, %2, %3\" : \"=v\"(r_) : \"v\"({0}), \"v\"({1}), \"v\"({2})); r_; }})"
 

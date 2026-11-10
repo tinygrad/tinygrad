@@ -1141,7 +1141,7 @@ MICRO_BATCHES = getenv("MICRO_BATCHES", 2)
 PREFILL_MB1_ROWS = getenv("PREFILL_MB1_ROWS", 0)
 PREFILL_TILE32 = getenv("PREFILL_TILE32", 1)
 # MOE_TILE16: grouped experts in tiles of 16 rows if a chunk has at most this many selections an expert on average (see _grouped_experts)
-MOE_TILE16 = getenv("MOE_TILE16", 0)
+MOE_TILE16 = getenv("MOE_TILE16", 40)
 def _moe_use_tile16(selections:int, experts:int) -> bool:
   """fewer padded rows and weight reads with 16-row tiles (17-32 rows/expert: both tile sizes pad to 32, so keep 32)"""
   if not MOE_TILE16 or selections > MOE_TILE16 * experts: return False
