@@ -2,7 +2,7 @@ import time, inspect
 from collections import deque
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import GroupOp, remove_all_tags, UOp, Ops, UOpMetaClass, graph_rewrite, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import GroupOp, UOp, Ops, UOpMetaClass, graph_rewrite, MapCtx, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, SCACHE, BASEDIR, partition, dedup, all_int, VIZ
 from tinygrad.helpers import diskcache_get, diskcache_put, colored
@@ -11,14 +11,14 @@ from tinygrad.helpers import diskcache_get, diskcache_put, colored
 
 # unwrap VIEW/CAST/etc to find the actual data source (kernel output, buffer, or multi-device op)
 def _unwrap_src(s: UOp) -> UOp:
-  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
+  while len(s.src) and s.op not in GroupOp.Defines|{Ops.AFTER, Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
   return s
 
-# a buffer state is AFTER | BUFFER | ALLOC | PARAM. MSELECT/MSTACK join per-device states
+# a buffer state is a define or an AFTER. MSELECT/MSTACK join per-device states
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
-  assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.ALLOC, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
+  assert s.op in GroupOp.Defines|{Ops.AFTER}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
 
 def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
@@ -30,48 +30,56 @@ def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
 
 def create_schedule(sched_sink:UOp) -> UOp:
   with cpu_profile(TracingKey("toposort sched_sink")):
-    # build kernel dependency graph: edges from producer kernel to consumer kernels
+    # build dependency graph: kernels and buffer-state barriers
     children: dict[UOp, list[UOp]] = {}
     in_degree: dict[UOp, int] = {}
-    writes: dict[UOp, list[tuple[UOp, tuple[UOp, ...]]]] = {}  # superseded state -> (AFTER, new kernels)
+    writes: dict[UOp, tuple[UOp, tuple[UOp, ...]]] = {}  # superseded state -> (AFTER, new kernels)
     reads: list[tuple[UOp, UOp, UOp]] = []  # (reader AFTER, reader kernel, buffer state read)
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       kernels, after_deps = _split_after(u)
-      prev_state = _unwrap_src(u.src[0])
-      prev_kernels = set(_split_after(prev_state)[0]) if prev_state.op is Ops.AFTER else set()
-      writes.setdefault(prev_state, []).append((u, tuple(k for k in kernels if k not in prev_kernels)))
+      read_states = {k:[st for s in (k.src[0].src[1:] if k.op is Ops.END else k.src[1:]) for st in _states(s)] for k in kernels}
+      # the prior state is the first of its source and the same-buffer states its kernels read that is not superseded yet
+      prior_states = [_unwrap_src(u.src[0]), *[st for k in kernels for st in read_states[k] if st.storage_base is u.storage_base]]
+      prev_state = next((st for st in prior_states if st not in writes), prior_states[0])
+      # writes to one buffer are a chain of states: at most one AFTER supersedes a state
+      if prev_state in writes: raise RuntimeError("sibling AFTERs detected in assign graph")
+      new_kernels = tuple(k for k in kernels if all(a.storage_base is not u.storage_base for a in children.get(k, [])))
+      writes[prev_state] = (u, new_kernels)
+      # a buffer state is a node after its prior state, its joins and its kernels, so readers inherit its history
+      in_degree.setdefault(u, 0)
+      for st in ([prev_state] if prev_state.op is Ops.AFTER else []) + [*after_deps, *kernels]:
+        children.setdefault(st, []).append(u)
+        in_degree[u] += 1
       for k in kernels:
         in_degree.setdefault(k, 0)
         if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
-        kernel_deps = k.src[0].src[1:] if k.op is Ops.END else k.src[1:]
-        read_states = [st for s in kernel_deps for st in _states(s)]
-        reads += [(u, k, st) for st in read_states]
-        # RAW deps: a kernel runs after the kernels that produced the states it reads or joins
-        for st in read_states + [st for s in after_deps for st in _states(s)]:
+        reads += [(u, k, st) for st in read_states[k]]
+        # RAW deps: a kernel runs after the states it reads or joins
+        for st in read_states[k] + [st for s in after_deps for st in _states(s)]:
           if st.op is Ops.AFTER:
-            for t in _split_after(st)[0]:
-              children.setdefault(t, []).append(k)
-              in_degree[k] += 1
+            children.setdefault(st, []).append(k)
+            in_degree[k] += 1
     # WAR deps: a kernel reading buffer state S must run before another write that supersedes S. an AFTER only
-    # supersedes its immediate prior state; join members already present in that prior state are ordering deps, not writes
+    # supersedes its immediate prior state; a kernel already on an earlier state of the same buffer is an ordering dep, not a write
     for u, k, s in reads:
-      for a, write_kernels in writes.get(s, []):
-        if a is u: continue
-        for t in write_kernels:
-          if t is not k and t not in k.backward_slice:
-            children.setdefault(k, []).append(t)
-            in_degree[t] += 1
+      a, write_kernels = writes.get(s, (u, ()))
+      if a is u: continue
+      for t in write_kernels:
+        if t is not k:
+          children.setdefault(k, []).append(t)
+          in_degree[t] += 1
 
   with cpu_profile(TracingKey("linearize schedule")):
     queue: deque[UOp] = deque(k for k,v in in_degree.items() if v == 0)
     linearized: list[UOp] = []
     while len(queue):
       rk = queue.popleft()
-      k = rk.src[0] if rk.op is Ops.END else rk
-      assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-      buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
-      linearized.append(k.replace(src=(k.body, *buf_uops)))
+      if rk.op is not Ops.AFTER:
+        k = rk.src[0] if rk.op is Ops.END else rk
+        assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
+        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
+        linearized.append(k.replace(src=(k.body, *buf_uops)))
       for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
@@ -86,21 +94,19 @@ from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat
 
-def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
-  if (ret:=ctx[0].get(b, None)) is None:
-    device = b.device if b.device is not None else next(a.device for a in ctx[1] if a.device is not None)
-    ctx[0][b] = ret = UOp.new_buffer(device, b.max_numel(), b.dtype)
-  return ret
+def create_new_buffer(ctx:tuple[UOp, ...], b:UOp):
+  device = b.device if b.device is not None else next(a.device for a in ctx if a.device is not None)
+  return UOp.new_buffer(device, b.max_numel(), b.dtype)
 
 pm_post_sched_cache = PatternMatcher([
   # Resolve positional arguments outside kernel bodies; free Variables have slot -1.
-  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg.slot] if x.arg.slot >= 0 else None),
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[x.arg.slot] if x.arg.slot >= 0 else None),
   # bind ALLOCs to fresh BUFFERs for this invocation
   (UPat(Ops.ALLOC, name="b"), create_new_buffer),
 ])
 
 def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
-  linear = graph_rewrite(linear_call.body, pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
+  linear = graph_rewrite(linear_call.body, pm_post_sched_cache, ctx=linear_call.src[1:], walk=True, name="params to buffers")
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
@@ -109,7 +115,7 @@ def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
   def apply_binds(si:UOp) -> UOp:
     if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
     if si.op is Ops.CALL and si.body.op is Ops.PROGRAM: return si  # compiled parameters already have ABI slots
-    subs = {v:binds[v.arg.slot] for s in si.src for v in s.variables() if v.arg.slot in binds}
+    subs = {v:binds[v.arg.slot] for s in si.src for v in s.variables() if v.arg.name is None and v.arg.slot in binds}
     return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
   return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
 
@@ -162,17 +168,15 @@ def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # NOTE: this is a codegen for SDMA devices
-  if dst.device == src.device and not dst.on_disk(): return None
+  if dst.is_virtual or src.is_virtual or (dst.device == src.device and not dst.on_disk()): return None
   from tinygrad.codegen.simplify import pm_flatten_range, pm_simplify_ranges
   from tinygrad.schedule.prepare import pm_mops
   from tinygrad.uop.symbolic import sym
-  sink = graph_rewrite(ast, sym+pm_mops+pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges in copy")
-  return call.replace(src=(sink,) + call.src[1:])
+  sink = graph_rewrite(ast, sym+pm_mops+pm_flatten_range+pm_simplify_ranges, init_ctx=MapCtx, name="simplify ranges in copy")
+  # the simplified body is kept only if it is a copy, any other kernel goes to codegen unchanged
+  return pm_copy_kernel.rewrite(call.replace(src=(sink,) + call.src[1:]))
 
-pm_copy_from_store = PatternMatcher([
-  # simplify copy kernels
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
-
+pm_copy_kernel = PatternMatcher([
   # lower copy kernels to bulk STOREs
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
@@ -180,7 +184,12 @@ pm_copy_from_store = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_store),
+])
 
+pm_copy_from_store = PatternMatcher([
+  # simplify copy kernels
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
+])+pm_copy_kernel+PatternMatcher([
   # if it wasn't copy, it currently can't be cross device
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
 ])
@@ -202,14 +211,14 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   if buf.op is Ops.UNSHARD:
     if isinstance(c.device, str): return None
     if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
-    view = contiguous_mops_to_view(ctx, unshard.src[0], unshard.src[0])
-    return None if view is None else view.unshard(unshard.arg, unshard.src[1:])
-
-  if buf.op is not Ops.BUFFER or (cv := src.contiguous_view()) is None or cv[0].op is not Ops.BUFFER: return None
-  buf, offset = cv
-  view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
-  if ctx is not None: ctx.views.add(view)
-  view = view.reshape(c.shape)
+    if (view := contiguous_mops_to_view(ctx, unshard.src[0], unshard.src[0])) is None: return None
+    view = view.unshard(unshard.arg, unshard.src[1:])
+  elif buf.op is Ops.BUFFER and (cv := src.contiguous_view()) is not None and cv[0].op is Ops.BUFFER:
+    buf, offset = cv
+    view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
+    if ctx is not None: ctx.views.add(view)
+    view = view.reshape(c.shape)
+  else: return None
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
 def is_store_after(u:UOp) -> bool:
@@ -235,7 +244,7 @@ def canonicalize_alloc(ctx:CallifyCtx, b:UOp):
   return ctx.allocs.get(b)
 
 def canonicalize_call_body(c:UOp):
-  return c.replace(src=(graph_rewrite(c.body, pm_canonicalize_alloc, ctx=CallifyCtx(), bottom_up=True),)+c.src[1:])
+  return c.replace(src=(graph_rewrite(c.body, pm_canonicalize_alloc, init_ctx=CallifyCtx, bottom_up=True),)+c.src[1:])
 
 pm_canonicalize_alloc = PatternMatcher([
   # NOTE: lambda for late binding, canonicalize_call_body references pm_canonicalize_alloc
@@ -262,7 +271,7 @@ def transform_to_call(big_sink:UOp) -> UOp:
 
   # The tensor replacement map is collected before these rewrites change node identities.
   graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
-  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_canonicalize_alloc+pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs")
+  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_canonicalize_alloc+pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs")
   ret = ret.call(*ctx.replacements, precompile=True)
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret

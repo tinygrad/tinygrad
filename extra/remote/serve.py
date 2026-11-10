@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import socket, struct, sys, signal
+import socket, struct, sys, signal, ctypes, time, json
 from tinygrad.runtime.support.system import PCIDevice, RemoteCmd, System, REMOTE_REQ, REMOTE_RESP
 from tinygrad.runtime.support.am.amdev import AMMemoryManager
 from tinygrad.runtime.support.system import FileIOInterface
@@ -12,6 +12,7 @@ def resp_err(msg): return resp(len(err:=msg.encode()), status=1) + err
 discovered_devices: list[tuple[type, str]] = []
 opened_devices: dict[int, PCIDevice] = {}
 mapped_bars: dict[tuple[int, int], object] = {}
+sysmem_iovas: dict[int, int] = {}
 programs: list = []
 
 def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
@@ -66,6 +67,7 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
     else: bar_view[arg0:arg0+arg1] = data
   elif cmd == RemoteCmd.MAP_SYSMEM:
     memview, paddrs = System.alloc_sysmem(arg0, vaddr=arg2, contiguous=bool(arg1))
+    if System.vfio is not None: sysmem_iovas[memview.addr] = paddrs[0]
     paddrs_bytes = struct.pack(f'<{len(paddrs) + 1}Q', memview.addr, *paddrs)
     conn.sendall(resp(len(paddrs_bytes)) + paddrs_bytes)
   elif cmd == RemoteCmd.SYSMEM_READ:
@@ -73,13 +75,19 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
   elif cmd == RemoteCmd.SYSMEM_WRITE:
     to_mv(arg0, arg1)[:] = conn.recv(arg1, socket.MSG_WAITALL)
   elif cmd == RemoteCmd.UNMAP_SYSMEM:
+    if (iova:=sysmem_iovas.pop(arg0, None)) is not None: System.vfio_unmap(iova, arg1)
     FileIOInterface.munmap(arg0, arg1)
     conn.sendall(resp())
   elif cmd == RemoteCmd.LOAD_PROG:
-    programs.append(Device["CPU"].runtime(TinyELF(conn.recv(arg0, socket.MSG_WAITALL), "hcq_submit", Target("CPU"), ())))
+    lib = conn.recv(arg0, socket.MSG_WAITALL)
+    links = {n:programs[i] for n,i in json.loads(conn.recv(arg1, socket.MSG_WAITALL)).items()}
+    programs.append(Device["CPU"].runtime(TinyELF(lib, "hcq_submit", Target("CPU"), ()), links=links))
     conn.sendall(resp(len(programs) - 1))
   elif cmd == RemoteCmd.EXEC_PROG:
-    et = programs[arg0](*struct.unpack(f'<{arg1}Q', conn.recv(arg1 * 8, socket.MSG_WAITALL)), wait=bool(arg2))
+    kernargs = ctypes.create_string_buffer(conn.recv(arg1, socket.MSG_WAITALL))
+    st = time.perf_counter()
+    programs[arg0].fxn(kernargs)
+    et = time.perf_counter() - st
     if (mock:=sys.modules.get("test.mockgpu.mockgpu")) is not None: # native programs bypass the mock's memoryview hooks
       for d in mock.drivers: d._emulate_execute()
     if arg2: conn.sendall(resp(int(et * 1e9)))

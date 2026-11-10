@@ -1,4 +1,3 @@
-# on Windows -- $env:SKIP="tests,example"
 repos:
   - repo: local
     hooks:

@@ -261,7 +261,8 @@ def train_cifar():
         net_ema_param.assign(net_param.numpy())
 
     @TinyJit
-    def update(self, net, decay):
+    def update(self, net, step):
+      decay = projected_ema_decay_val*(Tensor(step)/STEPS)**hyp['ema']['decay_pow']
       for net_ema_param, (param_name, net_param) in zip(get_state_dict(self.net_ema).values(), get_state_dict(net).items()):
         # batchnorm currently is not being tracked
         if not ("num_batches_tracked" in param_name) and not ("running" in param_name):
@@ -320,6 +321,7 @@ def train_cifar():
   lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
 
   def train_step(model, optimizer, lr_scheduler, X, Y):
+    X, Y = X.shard(GPUS, axis=0), Y.shard(GPUS, axis=0)  # copies to GPUS (and back to CPU on return) happen inside the jit
     out = model(X)
     loss_batchsize_scaler = 512/BS
     loss = cross_entropy(out, Y, reduction='none', label_smoothing=hyp['opt']['label_smoothing']).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
@@ -328,16 +330,17 @@ def train_cifar():
       # index 0 for bias and 1 for non-bias
       optimizer.zero_grad()
       loss.backward()
-      return loss.realize(*optimizer.schedule_step(), *lr_scheduler[0].schedule_step(), *lr_scheduler[1].schedule_step())
-    return loss.realize()
+      loss.realize(*optimizer.schedule_step(), *lr_scheduler[0].schedule_step(), *lr_scheduler[1].schedule_step())
+    return loss.to("CPU"), optimizer[1].lr.to("CPU")
 
   train_step_jitted = TinyJit(train_step)
 
   def eval_step(model, X, Y):
+    X, Y = X.shard(GPUS, axis=0), Y.shard(GPUS, axis=0)
     out = model(X, training=False)
     loss = cross_entropy(out, Y, reduction='mean')
     correct = out.argmax(axis=1) == Y.argmax(axis=1)
-    return correct.realize(), loss.realize()
+    return correct.to("CPU"), loss.to("CPU")
   eval_step_jitted     = TinyJit(eval_step)
   eval_step_ema_jitted = TinyJit(eval_step)
 
@@ -365,10 +368,6 @@ def train_cifar():
         losses = []
         losses_ema = []
         for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
-          if len(GPUS) > 1:
-            Xt.shard_(GPUS, axis=0)
-            Yt.shard_(GPUS, axis=0)
-
           correct, loss = eval_step_jitted(model, Xt, Yt)
           losses.append(loss.numpy().tolist())
           corrects.extend(correct.numpy().tolist())
@@ -392,25 +391,21 @@ def train_cifar():
 
       with WallTimeEvent(BenchEvent.STEP):
         X, Y = next(batcher)
-        if len(GPUS) > 1:
-          X.shard_(GPUS, axis=0)
-          Y.shard_(GPUS, axis=0)
-
         with Context(BEAM=getenv("LATEBEAM", BEAM.value), WINO=getenv("LATEWINO", WINO.value)):
-          loss = train_step_jitted(model, optim.OptimizerGroup(opt_bias, opt_non_bias), [lr_sched_bias, lr_sched_non_bias], X, Y)
+          loss, lr = train_step_jitted(model, optim.OptimizerGroup(opt_bias, opt_non_bias), [lr_sched_bias, lr_sched_non_bias], X, Y)
           et = time.monotonic()
           loss_cpu = loss.numpy()
         # EMA for network weights
         if getenv("EMA") and i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
           if model_ema is None:
             model_ema = modelEMA(W, model)
-          model_ema.update(model, Tensor([projected_ema_decay_val*(i/STEPS)**hyp['ema']['decay_pow']]))
+          model_ema.update(model, Variable("step", 0, STEPS).bind(i))
 
       cl = time.monotonic()
       step_times.append((cl-st)*1000.0)
-      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+      device_str = Device.DEFAULT if len(GPUS) == 1 else f"{Device.DEFAULT} * {len(GPUS)}"
       #  53  221.74 ms run,    2.22 ms python,  219.52 ms CL,  803.39 loss, 0.000807 LR, 4.66 GB used,   3042.49 GFLOPS,    674.65 GOPS
-      print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
+      print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
       st = cl
       i += 1
 

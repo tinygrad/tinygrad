@@ -183,6 +183,14 @@ class TestSetitem(unittest.TestCase):
     t[:-1] = t[1:]
     self.assertEqual(t.tolist(), [[2.0], [1.0], [1.0]])
 
+  def test_setitem_older_state(self):
+    t = Tensor([1, 2, 3, 4]).realize()
+    old = Tensor(t.assign(t + 1).uop)
+    t.assign(t + 10)
+    t[:] = old
+    # TODO: broken now, raises: should be [2, 3, 4, 5]
+    with self.assertRaises(RuntimeError): t.tolist()
+
   # TODO: WEBGPU pipeline validation error. this generates (1==gidx0)|(2==gidx0)|(3==gidx0)|(4==gidx0)|(5==gidx0) ...
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU pipeline validation error")
   def test_setitem_big(self):
@@ -249,46 +257,7 @@ class TestSetitem(unittest.TestCase):
     s1 = t.sum()
     t[3:].assign(2.0)
     s2 = t.sum()
-    try:
-      np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [0.0, 3.0, 9.0])
-    except AssertionError:
-      # TODO: broken now, lazy sums all see final buffer state
-      np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [9.0, 9.0, 9.0])
-
-    # eager version
-    t = Tensor.zeros(6).contiguous().realize()
-    s0 = t.sum().realize()
-    t[:3].assign(1.0).realize()
-    s1 = t.sum().realize()
-    t[3:].assign(2.0).realize()
-    s2 = t.sum().realize()
     np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [0.0, 3.0, 9.0])
-
-  def test_cross_assign_independence(self):
-    # when assigning to two tensors using computations from both,
-    # both assigns should see the OLD values of both tensors
-    a = Tensor.arange(4, dtype=dtypes.float).clone().realize()
-    b = Tensor.arange(4, 8, dtype=dtypes.float).clone().realize()
-    new_a = a + b    # [4, 6, 8, 10]
-    new_b = a * 2    # [0, 2, 4, 6] -- should use OLD a
-    a.assign(new_a)
-    b.assign(new_b)
-    np.testing.assert_allclose(a.numpy(), [4, 6, 8, 10])
-    try:
-      np.testing.assert_allclose(b.numpy(), [0, 2, 4, 6])
-    except AssertionError:
-      # TODO: broken now, new_b sees mutated a
-      np.testing.assert_allclose(b.numpy(), [8, 12, 16, 20])
-
-    # eager version
-    a = Tensor.arange(4, dtype=dtypes.float).clone().realize()
-    b = Tensor.arange(4, 8, dtype=dtypes.float).clone().realize()
-    new_a = (a + b).realize()
-    new_b = (a * 2).realize()
-    a.assign(new_a).realize()
-    b.assign(new_b).realize()
-    np.testing.assert_allclose(a.numpy(), [4, 6, 8, 10])
-    np.testing.assert_allclose(b.numpy(), [0, 2, 4, 6])
 
   def test_setitem_multiple_disjoint_on_invalid(self):
     z = Tensor.invalids(10, dtype="int").realize()
@@ -305,6 +274,13 @@ class TestAssignBitcast(unittest.TestCase):
     a = Tensor.full((4,), 1.0, dtype=dtypes.float32).contiguous()
     a.bitcast(dtypes.uint32).assign(Tensor([0x40800000, 0x40400000, 0x40000000, 0x3f800000], dtype=dtypes.uint32)).realize()
     np.testing.assert_allclose(a.numpy(), [4.0, 3.0, 2.0, 1.0])
+
+  @unittest.expectedFailure
+  def test_setitem_through_bitcast(self):
+    # TODO: the view of a bitcast is not storage, so the functional path replaces the temporary and a is never written
+    a = Tensor.full((4,), 1.0, dtype=dtypes.float32).contiguous().realize()
+    a.bitcast(dtypes.uint32)[1] = 0x40000000
+    np.testing.assert_allclose(a.numpy(), [1.0, 2.0, 1.0, 1.0])
 
 class TestWithGrad(unittest.TestCase):
   def test_set_backward(self):

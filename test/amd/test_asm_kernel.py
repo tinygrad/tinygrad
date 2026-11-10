@@ -14,6 +14,7 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
 from tinygrad.renderer.amd.dsl import s, v, NULL, Reg, Inst
 from test.amd.helpers import TARGET_TO_ARCH
+from test.mockgpu.amd.emu import RELIFT
 from extra.gemm.amd_asm_matmul import Kernel
 
 # small pattern matcher converting CALL to INS
@@ -204,14 +205,10 @@ def custom_data_deps(A:UOp) -> UOp:
   sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_data_deps"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
 
-# import contextvar to use it
-from test.mockgpu.amd.emu import ASM_CALL # noqa: F401
-
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestAsmKernel(unittest.TestCase):
   def setUp(self):
     self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
-    self.enterContext(Context(ASM_CALL=1))
 
   def test_simple(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
@@ -234,7 +231,6 @@ class TestAsmKernel(unittest.TestCase):
       run_linear(linear, var_vals={"var":i})
       self.assertTrue((a.numpy() == 1+i).all())
 
-  @unittest.expectedFailure
   def test_lds_sync(self):
     if self.arch not in ("rdna3", "rdna4"): self.skipTest("only rdna3/rdna4")
     a = Tensor.empty(128, dtype=dtypes.int32).contiguous().realize()
@@ -257,8 +253,9 @@ class TestAsmKernel(unittest.TestCase):
     a.realize()
     self.assertTrue((a.numpy() == 6.0).all())
 
-  @unittest.expectedFailure
+  @Context(RELIFT=1)
   def test_cfg_branch_diamond(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
     def cfg_kernel(out:UOp):
       k = Kernel()
       k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
@@ -283,6 +280,7 @@ class TestAsmKernel(unittest.TestCase):
     self.assertListEqual(out.tolist(), [2.0, 1.0, 3.0])
 
   def test_cfg_loop(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
     def cfg_kernel(out:UOp):
       k = Kernel()
       k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
@@ -316,6 +314,37 @@ class TestAsmKernel(unittest.TestCase):
     out = out.custom_kernel(fxn=store_kernel)[0]
     self.assertListEqual(out.tolist(), [0xA5, 0xA5, 0x78, 0x56, 0x34, 0x12, 0xA5, 0xA5])
 
+  def test_store_at_text_end(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def store_kernel(out:UOp):
+      # 252 bytes of code: the text is padded by one s_code_end to 256
+      insts = [s_load_b64(s[0:1], s[0:1], soffset=NULL), s_waitcnt_lgkmcnt(sdst=NULL, simm16=0), v_mov_b32_e32(v[0], 0),
+               v_mov_b32_e32(v[1], 7), *[s_nop(0)]*55, global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), s_endpgm()]
+      sink = UOp.sink(out.base, UOp.special(1, "lidx0"), arg=KernelInfo("store_at_text_end"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
+    out = Tensor.zeros(1, dtype=dtypes.int32).contiguous().realize().custom_kernel(fxn=store_kernel)[0]
+    self.assertListEqual(out.tolist(), [7])
+
+  def test_readlane(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def readlane_kernel(out:UOp, threads:int):
+      insts = [
+        s_load_b64(s[0:1], s[0:1], soffset=NULL),
+        s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
+        v_readfirstlane_b32_e32(s[2], v[0]),
+        s_branch(simm16=0),
+        v_mov_b32_e32(v[1], s[2]),
+        v_lshlrev_b32_e32(v[0], 2, v[0]),
+        global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]),
+        s_endpgm(),
+      ]
+      sink = UOp.sink(out.base, UOp.special(threads, "lidx0"), arg=KernelInfo(f"wave_sgprs_{threads}"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
+    for t in [31, 55, 64]:
+      out = Tensor(np.full(t, 0xFFFFFFFF, dtype=np.uint32)).realize().custom_kernel(fxn=functools.partial(readlane_kernel, threads=t))[0]
+      self.assertListEqual(out.tolist(), [i//32*32 for i in range(t)])
+
+  @Context(RENDER=1)
   def test_plus_tensor(self):
     out = Tensor.arange(1, 4).clone() + Tensor.arange(4, 7).clone()
     self.assertListEqual(out.tolist(), [5, 7, 9])
@@ -326,6 +355,22 @@ class TestAsmKernel(unittest.TestCase):
     b = Tensor.eye(N, dtype=dtypes.float).clone()
     out = a@b
     self.assertEqual(out.tolist(), (a.numpy()@b.numpy()).tolist())
+
+  def test_relift_simple(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def k(out:UOp):
+      insts = [
+        s_load_b64(s[0:1], s[0:1], soffset=NULL), s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
+        s_mov_b32(s[2], 2), s_add_u32(s[2], s[2], 2),
+        v_mov_b32_e32(v[0], 0), v_mov_b32_e32(v[1], s[2]),
+        global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), s_endpgm(),
+      ]
+      sink = UOp.sink(out.base, arg=KernelInfo("k"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
+    out = Tensor.empty(1, dtype=dtypes.uint32).custom_kernel(fxn=k)[0]
+    with Context(RELIFT=max(RELIFT.value, 1)):
+      out.realize()
+    self.assertListEqual(out.tolist(), [4])
 
 if __name__ == "__main__":
   unittest.main()

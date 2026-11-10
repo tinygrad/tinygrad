@@ -1,6 +1,6 @@
 from tinygrad.dtype import DType, dtypes, truncate, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite
+from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, pm_narrow_uint
 from tinygrad.helpers import strip_parens, ceildiv
 
 # a field of `width` bits sitting in the low bits of val: shift it up to the sign bit, then let the arithmetic shift fill
@@ -16,8 +16,9 @@ def packed_store(s:UOp):
   bidx, var, *gate = s.src
   idx, shift_am, mask = packed_field(bidx, var.dtype)
   new_v, wmask = (var.cast(dtypes.uint32) & mask) << shift_am, ((mask << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
-  buf = idx.cast(dtypes.uint32).load(*((UOp.const(0, dtypes.uint32), *gate) if gate else ()))
-  return idx.store((buf & wmask) | new_v, *gate)
+  word = idx.cast(dtypes.uint32)
+  buf = word.load(*((UOp.const(0, dtypes.uint32), *gate) if gate else ()))
+  return word.store((buf & wmask) | new_v, *gate)
 
 # load for char: sign_extend(buf[idx/4] >> ((idx%4)*8))
 def packed_load(root:UOp):
@@ -45,16 +46,18 @@ wgsl_matcher = PatternMatcher([
   (UPat(Ops.STORE, name="s"), lambda s: packed_store(s) if is_packed(s) else None),
   (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
-  # fix nan check: 'a != a -> is_nan()'. the decomp rewrites (a != a).logical_not() to CMPEQ, so match both forms
-  (UPat.var("a", dtypes.floats) != UPat.var("a"), is_nan),
-  (UPat.var("a", dtypes.floats).alu(Ops.CMPEQ, UPat.var("a")), lambda a: is_nan(a).ne(True)),
+  # fix nan checks after decomp, which can emit either comparison
+  (UPat.var("a", dtypes.floats).alu(Ops.CMPNE, UPat.var("a")), is_nan),
+  (UPat.var("a", dtypes.floats).eq(UPat.var("a")), lambda a: is_nan(a).logical_not()),
+  # WGSL float != can be ordered: explicitly include unordered (NaN) operands.
+  (UPat.var("a", dtypes.floats).alu(Ops.CMPNE, UPat.var("b")), lambda a,b: (a<b)|(b<a)|is_nan(a)|is_nan(b.cast(a.dtype))),
   ])
 
 class WGSLRenderer(CStyleLanguage):
   global_max = (65535, 65535, 65535)
   local_max = (256, 256, 64)
   code_for_workitem = {"g": lambda x: f"i32(gindex.{'xyz'[int(x)]})", "l": lambda x: f"i32(lindex.{'xyz'[int(x)]})"}
-  extra_matcher = wgsl_matcher
+  extra_matcher = pm_narrow_uint + wgsl_matcher
   supports_float4 = False
   barrier = "workgroupBarrier();"
   code_for_op = {**CStyleLanguage.code_for_op, Ops.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a})"}
@@ -66,8 +69,7 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.CAST, dtype=dtypes.uint32, src=(UPat(Ops.INDEX, name="x"),)), lambda ctx,x: ctx[x] if is_packed(x) else None),
     (UPat(Ops.NEG, dtypes.uints, src=(UPat.var('x'))), lambda ctx,x: f"(0-{ctx[x]})"),
     (UPat.cvar("c").cast(dtypes.bool), lambda c: "true" if c.val else "false"),
-    (UPat.cvar("c").cast((dtypes.uchar, dtypes.ushort, dtypes.uint32)),
-     lambda c: f"bitcast<u32>({c.val})" if c.val < 0 else f"{c.val&0xFFFFFFFF}u"),
+    (UPat.cvar("c").cast((dtypes.uchar, dtypes.ushort, dtypes.uint32)), lambda c: f"{c.val&0xFFFFFFFF}u"),
     # a negative const must state its type: contextual conversion of a bare abstract int rejects it in a u32 position
     (UPat.cvar("c").cast(dtypes.int32, name="x"), lambda ctx,x,c: f"i32({v})" if (v:=truncate[x.dtype](c.val)) < 0 else f"{v}"),
     (UPat(Ops.BUFFER, name="x"), lambda ctx,x:
@@ -85,7 +87,7 @@ class WGSLRenderer(CStyleLanguage):
       lambda ctx,b,v,gate: f"select({ctx[v]}, {ctx.render_load(ctx[b], b.src[0])}, {ctx[gate]})"),
     (UPat.load(UPat.var("b")), lambda ctx, b: ctx.render_load(ctx[b], b)),
     # packed_store writes (load & wmask) | new_v: atomicAnd clears the field, atomicAdd sets it. new_v is gone when it is 0
-    (UPat.store(UPat.var("b"), UPat.any(packed_rmw, packed_rmw | UPat.var("nv"))), lambda ctx,b,wmask,nv=None:
+    (UPat.store(UPat(Ops.CAST, src=(UPat.var("b"),)), UPat.any(packed_rmw, packed_rmw | UPat.var("nv"))), lambda ctx,b,wmask,nv=None:
      f"atomicAnd(&{ctx[b]},{ctx[wmask]});"+(f"\n  atomicAdd(&{ctx[b]},{ctx[nv]});" if nv is not None else "") if is_packed(b) else None),
     (UPat.store(UPat.var("b"), UPat.var("v")), lambda ctx,b,v: f"{ctx[b]} = {ctx[v]};"),
     (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"))),

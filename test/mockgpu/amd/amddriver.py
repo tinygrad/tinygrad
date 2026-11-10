@@ -171,6 +171,7 @@ class AMDDriver(VirtDriver):
       raise RuntimeError(f"unsupported kfd ioctl, {nr} {name}")
     return 0
 
+  def progress(self): self._emulate_execute()
   def _emulate_execute(self):
     if self._executing: return  # prevent re-entrancy
     self._executing = True

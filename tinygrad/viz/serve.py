@@ -6,11 +6,12 @@ from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
-from tinygrad.helpers import colored, getenv, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
+from tinygrad.helpers import colored, getenv, unwrap, word_wrap, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.helpers import printable, Context, START_TIME, NO_COLOR, ansistrip
 from tinygrad.renderer.amd.dsl import Inst, Reg
 from tinygrad.renderer.amd import detect_format
 from tinygrad.runtime.autogen.amd.common import OpType
+from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer):
@@ -40,8 +41,9 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     except (BrokenPipeError, ConnectionResetError): source.close()
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
-from tinygrad.uop.ops import KernelInfo, ParamArg
-from tinygrad.uop.render import render_uir, render_index, uops_colors, _inline, _render_arg
+from tinygrad.uop.ops import KernelInfo, ParamArg, ProgramInfo
+from tinygrad.uop.render import render_index
+from tinygrad.uop.uir import render_uir, uops_colors, _inline, _render_arg
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
 
@@ -76,13 +78,13 @@ def load_rewrites(data:VizData) -> None:
                                trace=k.tb if j==0 else None, depth=s.depth))
       if s.name == "View Base AST": data.ref_map[canonicalize_ast(_reconstruct(data, s.sink))] = i
       # get source and binary from Ops.PROGRAM
-      if s.name == "linearize/render": lin_idx = j
-      if lin_idx is not None and (j+1 == len(rewrites) or rewrites[j+1].depth <= rewrites[lin_idx].depth):
-        steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin_idx, depth=0))
-        steps.append(create_step("View Source", ("/code", i, len(steps)), lin_idx, depth=0))
-        steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, lin_idx), depth=0))
+      if s.name == "linearize/render": lin_idx, depth = j, s.depth
+      if lin_idx is not None and (j+1 == len(rewrites) or rewrites[j+1].depth <= depth):
+        steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin_idx, depth=depth))
+        steps.append(create_step("View Source", ("/code", i, len(steps)), lin_idx, depth=depth))
+        steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, lin_idx), depth=depth))
         lin_idx = None
-      if s.name == "View Program": ki = _reconstruct(data, s.sink, depth=1).src[0].arg
+      if s.name == "View Program": ki = data.trace.uop_fields[data.trace.uop_fields[s.sink][1][0]][2]
     for key in k.keys: data.ref_map[key] = i
     data.ctxs.append({"name":k.display_name, "steps":steps, "ki":ki})
 
@@ -105,7 +107,9 @@ def canonicalize_ast(u:UOp) -> UOp: return u.replace(arg=KernelInfo()) if u.op i
 def tokenize_uir(data:VizData, root:UOp) -> list[dict]:
   nodes = [u for u in root.toposort(enter_calls=True) if not _inline(u)]
   refs = {f"%{i}":{"id":str(id(u))} for i,u in enumerate(nodes)}
-  lines = [[{"st":s, **refs.get(s, {})} for s in re.split(r"( : [^\n]*|%\d+\b)", line) if s] for line in render_uir(root).split("\n")]
+  # quoted strings are their own tokens so a %N inside one is not a ref
+  lines = [[{"st":s, **refs.get(s, {})} for s in re.split(r"""(%\d+\b|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")""", line) if s]
+           for line in render_uir(root).split("\n")]
   for u,line in zip(nodes, lines):
     if u.op is Ops.CALL and (ref:=data.ref_map.get(canonicalize_ast(u.body))) is not None:
       line.append({"st":f" # {fmt_colored(data.ctxs[ref]['name'])}"})
@@ -122,16 +126,19 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     # exclude RESHAPE/EXPAND that only serve to broadcast a CONST
     if u.op in {Ops.RESHAPE, Ops.EXPAND} and len(u.src) >= 1 and u.src[0] in excluded and u is not x: excluded.add(u)
     if u.op in {*GroupOp.Movement, Ops.PARAM}: excluded.update(s for s in u.src if s.op is Ops.STACK and all(x.op is Ops.CONST for x in s.src))
-    if u.op in {*GroupOp.Binary, *GroupOp.Ternary} and all(s.op in {Ops.CONST, Ops.PARAM} for s in u.src): excluded.update(u.src)
+    if u.op in GroupOp.Broadcastable and all(s.op in {Ops.CONST, Ops.PARAM} for s in u.src): excluded.update(u.src)
   for u in toposort:
-    argst = codecs.decode(u.arg if isinstance(u.arg, str) else _render_arg(u), "unicode_escape")
+    argst = u.arg if u.op is Ops.SOURCE else codecs.decode(u.arg if isinstance(u.arg, str) else _render_arg(u), "unicode_escape")
     with soft_err():
       if u.op in GroupOp.Movement and u.marg: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
     if u.op is Ops.BINARY: argst = f"<{len(u.arg)} bytes>"
     if u.op is Ops.CONST and dtypes.is_float(u.dtype): argst = f"{u.val:g}"
     if u.op is not Ops.SOURCE: argst = word_wrap(argst.replace(':', ''))
-    label = f"{str(u.op).split('.')[1]}{(chr(10)+argst) if argst else ''}"
-    if u.dtype != dtypes.void: label += f"\n{u.dtype}"
+    if isinstance(u.arg, ProgramInfo):
+      argst = word_wrap(repr(u.arg).replace(f"params={u.arg.params!r}", "params=(\n" + '\n'.join(render_uir(p) for p in u.arg.params) + "\n)"))
+    label = [f"{str(u.op).split('.')[1]}{(chr(10)+argst) if argst else ''}"]
+    with soft_err(lambda _: label.append("<ISSUE GETTING DTYPE>")):
+      if u.dtype != dtypes.void: label.append(str(u.dtype))
     for idx,x in enumerate(u.src[:1] if u.op in {Ops.STAGE, Ops.INDEX} else (u.src if u.op is not Ops.END else [])):
       if x in excluded:
         # walk through excluded movement ops to find the underlying CONST
@@ -139,50 +146,52 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
         while cx.op in GroupOp.Movement and len(cx.src) >= 1 and cx.src[0] in excluded: cx = cx.src[0]
         arg = f"{cx.val:g}" if cx.op is Ops.CONST and dtypes.is_float(cx.dtype) else cx.render() if cx.op is Ops.STACK \
             else cx.arg.name if isinstance(cx.arg, ParamArg) else f"{cx.arg}"
-        label += f"\n{cx.op.name}{idx} {arg}" + (f" {cx.src[0].op}" if len(cx.src) else "")
-    try:
+        label.append(f"{cx.op.name}{idx} {arg}" + (f" {cx.src[0].op}" if len(cx.src) else ""))
+    with soft_err(lambda _: label.append("<ISSUE GETTING LABEL>")):
       if len(rngs:=u.ranges):
-        label += f"\n({multirange_str(rngs, color=True)})"
+        label.append(f"({multirange_str(rngs, color=True)})")
       if u._shape is not None:
-        label += f"\n{shape_to_str(u.shape)}"
+        label.append(shape_to_str(u.shape))
       if u.op is Ops.CALL:
-        label += f"\n{u.src[0].key.hex()[:8]}\n{u.src[0].op}"
+        label += [u.src[0].key.hex()[:8], str(u.src[0].op)]
       if u.op in {Ops.INDEX, Ops.STAGE}:
         if len(u.src) > 1:
-          label += "\n"+(render_index(s.render() for s in u.src[1:]) if sum(len(s.toposort()) for s in u.src[1:]) < 50 else "INDEX TOO LARGE")
+          label.append(render_index(s.render() for s in u.src[1:]) if sum(len(s.toposort()) for s in u.src[1:]) < 50 else "INDEX TOO LARGE")
         ranges: list[UOp] = []
         for us in u.src[1:]: ranges += [s for s in us.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
-        if ranges: label += "\n"+' '.join([f"{s.render()}={s.vmax+1}" for s in ranges])
+        if ranges: label.append(' '.join([f"{s.render()}={s.vmax+1}" for s in ranges]))
       if u.op in {Ops.END, Ops.REDUCE, Ops.BACKEDGE} and len(trngs:=list(u.ended_ranges if u.op is Ops.BACKEDGE else
                                                                  UOp.sink(*u.src[range_start[u.op]:]).ranges)):
-        label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
-    except Exception:
-      label += "\n<ISSUE GETTING LABEL>"
+        label.append(' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs]))
     ref = data.ref_map.get(canonicalize_ast(u.body)) if u.op is Ops.CALL else None
-    if ref is not None: label += f"\ncodegen@{fmt_colored(data.ctxs[ref]['name'])}"
-    if TRACEMETA >= 2 and u.metadata is not None: label += "\n"+str(u.metadata)
+    if ref is not None: label.append(f"codegen@{fmt_colored(data.ctxs[ref]['name'])}")
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
     color = uops_colors.get(u.op, "#ffffff")
-    graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":color,
-                    "ref":ref, "tag":repr(u.tag) if u.tag is not None else None, "addrspace":addrspace_color}
+    graph[id(u)] = {"label":"\n".join(label), "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":color,
+                    "ref":ref, "addrspace":addrspace_color}
   return graph
 
-def _reconstruct(data:VizData, a:int, depth:int|None=None) -> UOp:
-  if depth is None and a in data.all_uops: return data.all_uops[a]
-  op, src, arg, *rest = data.trace.uop_fields[a]
-  if depth is not None and depth <= 0: return UOp(op, (), arg, *rest)
-  ret = UOp(op, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
-  if depth is None: data.all_uops[a] = ret
-  return ret
+def _reconstruct(data:VizData, a:int) -> UOp:
+  stack = [(a, False)]
+  while stack:
+    num, visited = stack.pop()
+    if num in data.all_uops: continue
+    if visited:
+      op, src, arg = data.trace.uop_fields[num]
+      data.all_uops[num] = UOp(op, tuple(data.all_uops[s] for s in src), arg)
+    else:
+      stack.append((num, True))
+      stack.extend((s, False) for s in data.trace.uop_fields[num][1])
+  return data.all_uops[a]
 
-def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
-  next_sink, err = _reconstruct(data, ctx.sink, depth=depth), False
+def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
+  next_sink, err = _reconstruct(data, ctx.sink), False
   yield {"graph":uop_to_json(data, next_sink), "uop":tokenize_uir(data, next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in ctx.matches:
     if err: break
-    replaces[u0:=_reconstruct(data, u0_num, depth=depth)] = u1 = _reconstruct(data, u1_num, depth=depth)
+    replaces[u0:=_reconstruct(data, u0_num)] = u1 = _reconstruct(data, u1_num)
     try: new_sink = next_sink.substitute(replaces, walk=ctx.walk, enter_calls=ctx.enter_calls) if update_sink else next_sink
     except RuntimeError: new_sink, err = UOp(Ops.REWRITE_ERROR, arg=traceback.format_exc()), True
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
@@ -192,11 +201,11 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
            "diff":[ansistrip(x) for x in diff if not x.startswith(("---","+++","@@"))]}
     if not ctx.bottom_up: next_sink = new_sink
 
-def get_sink_at(upats:tuple[str, ...], viz_data:VizData, kernel_idx:int, lin_idx:int, depth:int|None=None, alt:str|None=None) -> UOp|None:
+def get_sink_at(upats:tuple[str, ...], viz_data:VizData, kernel_idx:int, lin_idx:int, src:int, alt:str|None=None) -> UOp|None:
   for i in range(lin_idx+1, len(rewrites:=viz_data.trace.rewrites[kernel_idx])):
-    if (r:=rewrites[i]).name == alt: return _reconstruct(viz_data, r.sink, depth=depth)
-  for s in get_full_rewrite(viz_data, rewrites[lin_idx], depth=depth):
-    if (s["upat"] is not None and any(n in s["upat"][1] for n in upats)): return s["_sink"]
+    if (r:=rewrites[i]).name == alt: return _reconstruct(viz_data, viz_data.trace.uop_fields[r.sink][1][src])
+  for s in get_full_rewrite(viz_data, rewrites[lin_idx]):
+    if (s["upat"] is not None and any(n in s["upat"][1] for n in upats)): return u if (u:=s["_sink"]).op is Ops.REWRITE_ERROR else u.src[src]
   return None
 
 # encoder helpers
@@ -225,7 +234,6 @@ def flatten_events(profile:list[ProfileEvent], device_ts_diffs:dict[str, Decimal
     elif isinstance(e, ProfileGraphEvent):
       cpu_ts = []
       for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(device_ts_diffs, ent.device)), e.sigs[ent.en_id]+diff]
-      yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
 # normalize event timestamps and attach kernel metadata
@@ -548,14 +556,13 @@ def get_elf_section(lib:bytes, name:str):
 
 def get_arch(target:str) -> str: return "rdna3" if target.startswith("gfx11") else "rdna4" if target.startswith("gfx12") else "cdna"
 
-def amd_decode(buf:bytes, arch:str, off:int=0) -> dict[int, Inst]:
-  from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end
-  code_end = s_code_end().to_bytes()*5 if arch.startswith("rdna") else None
+def amd_decode(buf:bytes|memoryview, arch:str, off:int=0) -> dict[int, Inst]:
   addr_table:dict[int, Inst] = {}
+  code_end = s_code_end().to_bytes()
   offset, view = 0, memoryview(buf)
   while offset < len(buf):
-    if code_end is not None and buf.startswith(code_end, offset): break
     remaining = view[offset:]
+    if remaining[:4] == code_end: break
     fmt = detect_format(remaining, arch)
     decoded = fmt.from_bytes(remaining)
     addr_table[off+offset] = decoded
@@ -584,7 +591,7 @@ def get_cfg(pc_table:dict[int, Inst]) -> dict:
   for pc, inst in pc_table.items():
     op = getattr(inst, "op_name", "").lower()
     if (offset:=parse_branch(inst, op)) is not None: leaders.update((pc+inst.size()+offset, pc+inst.size()))
-    elif op in {"s_endpgm"}: leaders.add(pc+inst.size())
+    elif op in {"s_endpgm", "s_barrier", "s_barrier_wait"}: leaders.add(pc+inst.size())
   # build the cfg
   curr:int|None = None
   blocks:dict[int, list[int]] = {}
@@ -601,6 +608,9 @@ def get_cfg(pc_table:dict[int, Inst]) -> dict:
       if op == "s_branch": paths[curr][nx+offset] = UNCOND
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
     elif nx in leaders and op != "s_endpgm": paths[curr][nx] = UNCOND
+  return {"blocks":blocks, "paths":paths}
+
+def tokenize_asm(pc_table:dict[int, Inst]) -> dict:
   pc_tokens:dict[int, list[dict]] = {}
   for pc, inst in pc_table.items():
     pc_tokens[pc] = tokens = []
@@ -612,12 +622,9 @@ def get_cfg(pc_table:dict[int, Inst]) -> dict:
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
       elif name != "encoding" and val != f.default:
         tokens.append({"st":repr(val - (1 << 32) if name == "literal" and val >= (1 << 31) else val), "keys":[repr(val)], "kind":1})
-  lines:list[str] = []
   disasm = {pc:str(inst) for pc,inst in pc_table.items()}
   asm_width = max(len(asm) for asm in disasm.values())
-  for pcs in blocks.values():
-    for pc in pcs: lines.append(f"{disasm[pc]:<{asm_width}}  # {pc:012X}")
-  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines), "lang":"python"}
+  return {"data":{"pc_tokens":pc_tokens}, "src":"\n".join([f"{disasm[pc]:<{asm_width}}  # {pc:012X}" for pc in pc_table]), "lang":"python"}
 
 # ** Main render function to get the complete details about a trace event
 
@@ -627,23 +634,27 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
   data = viz_data.ctxs[i]["steps"][j]["_data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j], **kwargs), "content_type":"text/event-stream"}
   if fmt == "uops":
-    if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
+    if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, src=1, alt="View Program")) is None: return {"src":"No linear found"}
     if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
     ret:dict = {}
-    with soft_err(lambda err: ret.update(err)): ret["src"] = render_uir(list(sink.src[1].toposort(enter_calls=True))[:-1])
+    with soft_err(lambda err: ret.update(err)): ret["src"] = render_uir(list(sink.toposort(enter_calls=True))[:-1])
     return ret
   if fmt == "code":
-    if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1, alt="View Program")) is None: return {"src":"No source found"}
-    return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[2].arg, "lang":"cpp"}
+    if (sink:=get_sink_at(("do_render",), viz_data, i, data, src=2, alt="View Program")) is None: return {"src":"No source found"}
+    if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
+    ast = unwrap(get_sink_at(("do_render",), viz_data, i, data, src=0, alt="View Program"))
+    extern_srcs = [u.arg for u in ast.toposort(lambda u: u.op is not Ops.LINEAR, enter_calls=True) if u.op is Ops.SOURCE]
+    return {"src":"\n".join([sink.arg, *reversed(extern_srcs)]), "lang":"cpp"}
   if fmt == "asm":
     ret = {}
     renderer, idx = data
-    if (sink:=get_sink_at(("do_compile","do_assemble"), viz_data, i, idx, depth=1, alt="View Program")) is None: return {"src":"No binary found"}
+    if (sink:=get_sink_at(("do_compile","do_assemble"), viz_data, i, idx, src=3, alt="View Program")) is None: return {"src":"No binary found"}
     if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
-    lib:bytes = sink.src[3].arg
+    lib:bytes = sink.arg
     if (target:=renderer.target.arch).startswith("gfx"):
       with soft_err(lambda err: ret.update(err)):
-        ret.update(get_cfg(amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)))
+        ret.update(tokenize_asm(pc_table:=amd_decode((text:=get_elf_section(lib, ".text")).content, get_arch(target), text.header.sh_addr)))
+        ret["data"].update(get_cfg(pc_table))
       with soft_err(lambda err: ret.update(err)):
         from tinygrad.runtime.autogen import amdgpu_kd
         kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(get_elf_section(lib, ".rodata").content))

@@ -23,9 +23,11 @@ using namespace kittens;
 constexpr int GROUP_SIZE = ATTN_H / ATTN_H_KV;
 constexpr int HALF_D = ATTN_D / 2;
 constexpr int PACKED_H = ATTN_H_KV * (GROUP_SIZE + 2);
-// The current D=64 FA emits one dK/dV partial per query head in each GQA group.
-constexpr int KV_PARTIALS = GROUP_SIZE;
-constexpr int Q_HEADS_PER_WG = 1;
+// Full-causal FA groups two query heads; sliding-window FA groups all eight.
+#ifndef KV_PARTIALS
+#define KV_PARTIALS 4
+#endif
+constexpr int Q_HEADS_PER_WG = KV_PARTIALS == 4 ? 8 : 2;
 constexpr int Q_FIELDS = ATTN_H / Q_HEADS_PER_WG;
 constexpr int NUM_WARPS = 4;
 constexpr int TILE_N = 16;
@@ -49,7 +51,7 @@ __device__ __forceinline__ void load_fa_shuffled(RT &dst, const GL &src, const C
     #pragma unroll
     for (int j = 0; j < dst.width; j++) {
       const float4 loaded = std::bit_cast<float4>(llvm_amdgcn_raw_buffer_load_b128(
-        std::bit_cast<i32x4>(br), (i * tile_row_stride + j * tile_stride + lane * 8) * sizeof(U), 0, 0));
+        std::bit_cast<i32x4>(br), (i * tile_row_stride + j * tile_stride + lane * 8) * sizeof(U), 0, 2)); // non-temporal dQ loads
       const U2 *packed = reinterpret_cast<const U2*>(&loaded);
       #pragma unroll
       for (int k = 0; k < dst.packed_per_base_tile; k++) dst.tiles[i][j].data[k] = packed[k];

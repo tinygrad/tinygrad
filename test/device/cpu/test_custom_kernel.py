@@ -1,14 +1,13 @@
 import unittest
 from tinygrad import Tensor, UOp, Context, GlobalCounters
 from tinygrad.uop.ops import Ops, KernelInfo
-from tinygrad.renderer.cstyle import ClangRenderer
 from test.helpers import assert_kernel_count
 
 class TestCustomKernel(unittest.TestCase):
   @Context(DEV="CPU")
   def test_simple_from_source(self):
     a = Tensor.arange(4).clone().realize()
-    src = ClangRenderer.kernel_typedef + " test_src(int* restrict a) { a[0] = 1; }"
+    src = "struct args_t { int* a; }; void test_src(const struct args_t* args) { args->a[0] = 1; }"
     def custom_src_kernel(A:UOp, B:UOp) -> UOp:
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src),))
@@ -18,7 +17,7 @@ class TestCustomKernel(unittest.TestCase):
   @Context(DEV="CPU")
   def test_simple_from_source_alt(self):
     a = Tensor.arange(4).clone().realize()
-    src = ClangRenderer.kernel_typedef + " copy(int* restrict out, int* restrict in) { for (int i = 0; i < 4; i++) out[i] = in[i]; }"
+    src = "struct args_t { int* out; int* in; }; void copy(const struct args_t* args) { for (int i = 0; i < 4; i++) args->out[i] = args->in[i]; }"
     def custom_src_kernel(out:UOp, inp:UOp) -> UOp:
       sink = UOp.sink(out, inp, arg=KernelInfo(name="copy"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src),))

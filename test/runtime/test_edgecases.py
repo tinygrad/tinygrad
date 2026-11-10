@@ -129,15 +129,10 @@ class TestAssignIssues(unittest.TestCase):
     t.shrink(((1, 3), (1, 3))).assign(Tensor.ones(2, 2))
     np.testing.assert_allclose(t.numpy(), torch_tensor.numpy())
 
-  @unittest.expectedFailure
   def test_assign_broadcast(self):
-    # broadcasting during assign should behave like PyTorch
-    # NOTE: we don't want implicit dtype casting (int64 -> float32 loses precision), so this fails
-    torch_tensor = torch.zeros(3, 5)
-    torch_tensor[:] = torch.arange(5)
-    t = Tensor.zeros(3, 5)
-    t.assign(Tensor.arange(5))
-    np.testing.assert_allclose(t.numpy(), torch_tensor.numpy())
+    # assign broadcasts like PyTorch but does not cast implicitly (int -> float can lose precision), so a dtype mismatch raises
+    with self.assertRaises(RuntimeError):
+      Tensor.zeros(3, 5).assign(Tensor.arange(5))
 
 class TestUOpValidationIssue(unittest.TestCase):
   # these fail with UOp verification error.

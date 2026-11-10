@@ -364,7 +364,8 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'isEven': lambda a: (UOp(Ops.TRUNC, src=(a,)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
   'max': lambda a, b: UOp(Ops.MAX, src=(a, b)),
   'min': lambda a, b: UOp(Ops.MAX, src=(a.neg(), b.neg())).neg(),
-  'pow': lambda a, b: UOp(Ops.EXP2, src=(b.bitcast(dtypes.float32),)),
+  # pow(2.0, x): interpret the operand's float bits at its original width.
+  'pow': lambda a, b: UOp(Ops.EXP2, src=(b.bitcast({2: dtypes.half, 4: dtypes.float32, 8: dtypes.float64}[b.dtype.itemsize]),)),
   'fma': lambda a, b, c: a * b + c,
   'i32_to_f32': lambda a: a.cast(dtypes.int).cast(dtypes.float32),
   'u32_to_f32': lambda a: a.cast(dtypes.uint32).cast(dtypes.float32),
@@ -568,8 +569,9 @@ class Parser:
         if op == '*': return left * right
         return (left // right) if dtypes.is_int(left.dtype) else (left / right)
       case '**': return UOp(Ops.EXP2, src=(right.cast(left.dtype),)) if _single_value(left) == 2.0 else left
+      case '%': return left % right
 
-  _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/'), ('**',)]
+  _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/', '%'), ('**',)]
 
   def binop(self, prec: int) -> UOp:
     if prec >= len(self._PREC): return self.unary()
@@ -1449,7 +1451,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None, funcs: dic
   _, final, _ = parse_block(lines, 0, env, {**_FUNCS, **funcs} if funcs else None, assigns=assigns)
   sliced = set(d.split('[')[0] for d, _ in assigns if '[' in d)
   for var, val in final.items():
-    if var in ['D0', 'S0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA'] and isinstance(val, UOp):
+    if var in ['D0', 'S0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA', 'SDATA'] and isinstance(val, UOp):
       if var in sliced and not any(re.match(rf'{var}\.\w+\s*=', l) for l in lines): continue
       for l in lines:
         if (m := re.match(rf'{var}\.(\w+(?:\[\w+\])?)', l)):

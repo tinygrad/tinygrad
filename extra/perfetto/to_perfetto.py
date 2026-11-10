@@ -12,16 +12,12 @@ def dev_ev_to_perfetto_json(ev:ProfileDeviceEvent):
 def range_ev_to_perfetto_json(ev:ProfileRangeEvent):
   name = ev.name.display_name if isinstance(ev.name, TracingKey) else ev.name
   return [{"name": name, "ph": "X", "ts": prep_ts(ev.device, ev.st), "dur": float(ev.en-ev.st), **dev_to_pid(ev.device)}]
-def graph_ev_to_perfetto_json(ev:ProfileGraphEvent, reccnt):
+def graph_ev_to_perfetto_json(ev:ProfileGraphEvent):
   ret = []
-  for i,e in enumerate(ev.ents):
+  for e in ev.ents:
     st, en = ev.sigs[e.st_id], ev.sigs[e.en_id]
     name = e.name.display_name if isinstance(e.name, TracingKey) else e.name
     ret += [{"name": name, "ph": "X", "ts": prep_ts(e.device, st), "dur": float(en-st), **dev_to_pid(e.device)}]
-    for dep in ev.deps[i]:
-      d = ev.ents[dep]
-      ret += [{"ph": "s", **dev_to_pid(d.device), "id": reccnt+len(ret), "ts": prep_ts(d.device, ev.sigs[d.en_id]), "bp": "e"}]
-      ret += [{"ph": "f", **dev_to_pid(e.device), "id": reccnt+len(ret)-1, "ts": prep_ts(e.device, st), "bp": "e"}]
   return ret
 def to_perfetto(profile:list[ProfileEvent]):
   # Start json with devices.
@@ -30,7 +26,7 @@ def to_perfetto(profile:list[ProfileEvent]):
   prof_json = [x for ev in profile if isinstance(ev, ProfileDeviceEvent) for x in dev_ev_to_perfetto_json(ev)]
   for ev in tqdm(profile, desc="preparing profile"):
     if isinstance(ev, ProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)
-    elif isinstance(ev, ProfileGraphEvent): prof_json += graph_ev_to_perfetto_json(ev, reccnt=len(prof_json))
+    elif isinstance(ev, ProfileGraphEvent): prof_json += graph_ev_to_perfetto_json(ev)
   return {"traceEvents": prof_json}
 
 if __name__ == "__main__":

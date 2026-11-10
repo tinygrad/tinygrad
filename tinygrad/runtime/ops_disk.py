@@ -1,4 +1,4 @@
-import os, sys, mmap, io, ctypes, contextlib, pathlib, functools, collections, struct, itertools
+import os, sys, mmap, io, ctypes, contextlib, pathlib, functools, collections, struct, itertools, errno
 from dataclasses import replace
 from typing import cast
 from tinygrad.helpers import OSX, mv_address, flatten, to_tuple, unwrap, ceildiv
@@ -25,15 +25,15 @@ class DiskDevice(Compiled):
       return
     filename = self.device[len("disk:"):]
 
-    if sys.platform != "win32" and filename.startswith("shm:"):
+    if filename.startswith("shm:"):
       fd = _posixshmem.shm_open("/"+filename[4:].lstrip("/"), os.O_RDWR, 0o600)
       self.mem = mmap.mmap(fd, size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
       os.close(fd)
     else:
-      try: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT|getattr(os, "O_DIRECT", 0))
-      except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
+      try: self.fd, rdonly = os.open(filename, os.O_RDWR|os.O_CREAT|getattr(os, "O_DIRECT", 0)), False
+      except OSError as e: self.fd = os.open(filename, os.O_RDONLY if (rdonly:=e.errno in (errno.EROFS, errno.EACCES)) else os.O_RDWR|os.O_CREAT)
       if not pathlib.Path(filename).is_block_device() and os.fstat(self.fd).st_size < size: os.ftruncate(self.fd, size)
-      self.mem = mmap.mmap(self.fd, size)
+      self.mem = mmap.mmap(self.fd, size, access=mmap.ACCESS_COPY if rdonly else mmap.ACCESS_DEFAULT)
       self.info.host.view()[:16] = struct.pack("2Q", self.fd, mv_address(memoryview(self.mem)))
     self.size = size
     if hasattr(self.mem, 'madvise') and (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None:
@@ -115,39 +115,40 @@ def disk_read(file:UOp, srcs:UOp, counts:UOp, rings:UOp, sqes:UOp) -> UOp: # src
 
 def is_disk_read(c:UOp) -> bool:
   dev, src = [to_tuple(b.device)[0] for b in c.src[1:3]] if c.op is Ops.CALL and c.body.op is Ops.STORE else ("", "")
-  return src.startswith("DISK:") and not src.startswith("DISK:shm:") and Device[dev].has_copy_queue and not dev.startswith("NULL") and bool(uring())
+  return src.startswith("DISK:") and not src.startswith("DISK:shm:") and Device[dev].has_copy_queue and not dev.startswith("NULL") and bool(uring()) \
+    and not getattr(Device[dev], "is_usb", False)
 
 def disk_copy_rewriter(s:UOp) -> UOp|None:
-  lins = [submit.without_after.src[1].without_after for submit in s.src]
-  if not (copies:=[c for lin in lins for c in lin.src if is_disk_read(c)]): return None
-  rings = UOp.alloc((unwrap(uring())[2].nbytes // 4,), dtypes.uint32, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_rings")
-  sqes = UOp.alloc((8 * RING_ENTRIES,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.device).rtag("uring_sqes")
+  lin = s.without_after.body
+  if not (copies:=[c for c in lin.src if is_disk_read(c)]): return None
+  rings = UOp.alloc((unwrap(uring())[2].nbytes // 4,), dtypes.uint32, 0, device=HCQ_RUNTIME_DEV.device, name="uring_rings")
+  sqes = UOp.alloc((8 * RING_ENTRIES,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.device, name="uring_sqes")
 
   # [mmap address, bytes] per copy in a table: an arg each would hit ctypes' 1024 limit
   words = flatten((c.src[2].getaddr(HCQ_RUNTIME_DEV.device), UOp.const(c.src[2].nbytes(), dtypes.uint64)) for c in copies)
   table = UOp.alloc((8 * len(words),), dtypes.uint8, device=HCQ_RUNTIME_DEV.device)
   srcs = patch(table, [(8 * i, w) for i, w in enumerate(words)]).bitcast(dtypes.uint64)
 
-  # per gpu: [chunks read, chunks copied] at the start of its stage
-  devs = [to_tuple(c.src[1].device)[0] for c in copies]
-  counts = {d: UOp.alloc((STAGE_SZ,), dtypes.uint8, 0, device=d).rtag("disk_stage")[:16].bitcast(dtypes.uint64) for d in devs}
+  # [chunks read, chunks copied] at the start of the gpu's stage
+  dev = s.without_after.src[1].device
+  counts = UOp.alloc((STAGE_SZ,), dtypes.uint8, 0, device=dev, name="disk_stage")[:16].bitcast(dtypes.uint64)
 
   # cpu part
-  runs = [(key, list(ks)) for key, ks in itertools.groupby(range(len(copies)), lambda k: (devs[k], to_tuple(copies[k].src[2].device)[0]))]
-  done, offs, gpu_ops = s.src[-1], collections.Counter[str](), collections.defaultdict[UOp, list[UOp]](list)
-  for (dev, disk), ks in runs:
-    file = UOp.alloc((2,), dtypes.uint64, 0, device=disk).rtag("disk_info")
-    done = disk_read(file, srcs[2 * ks[0]:2 * ks[-1] + 2], counts[dev].after(done), rings, sqes)
+  done, off, gpu_ops = s, 0, collections.defaultdict[UOp, list[UOp]](list)
+  for disk, grp in itertools.groupby(range(len(copies)), lambda k: to_tuple(copies[k].src[2].device)[0]):
+    file, ks = UOp.alloc((2,), dtypes.uint64, 0, device=disk, name="disk_info"), list(grp)
+    done = disk_read(file, srcs[2 * ks[0]:2 * ks[-1] + 2], counts.after(done), rings, sqes)
 
   # gpu part
-  for k, (c, dev) in enumerate(zip(copies, devs)):
-    first, slots = counts[dev].index(0).load() + offs[dev], counts[dev].getaddr(dev) + 4096 + srcs.index(2 * k).load() % 4096
-    offs[dev] += ceildiv(c.src[2].nbytes(), CHUNK_SZ)
+  for k, c in enumerate(copies):
+    first, slots = counts.index(0).load() + off, counts.getaddr(dev) + 4096 + srcs.index(2 * k).load() % 4096
+    off += ceildiv(c.src[2].nbytes(), CHUNK_SZ)
     for chunk in range(ceildiv(c.src[2].nbytes(), CHUNK_SZ)):
       n, dst, nb = first + chunk, c.src[1].getaddr() + chunk * CHUNK_SZ, min(CHUNK_SZ, c.src[2].nbytes() - chunk * CHUNK_SZ)
-      gpu_ops[c] += [ins("wait", counts[dev], n + 1), ins("copy", dst, slots + n % SLOTS * SLOT_SZ, nb), ins("store", counts[dev][1:], n + 1)]
-  return s.replace(src=(*s.src, done)).substitute({lin: lin.replace(src=tuple(flatten(gpu_ops.get(c, [c]) for c in lin.src))) for lin in lins})
-Compiled.pm_batch = Compiled.pm_batch + PatternMatcher([(UPat(Ops.SINK, name="s"), disk_copy_rewriter)])
+      gpu_ops[c] += [ins("wait", counts, n + 1), ins("copy", dst, slots + n % SLOTS * SLOT_SZ, nb), ins("store", counts[1:], n + 1)]
+  return done.substitute({lin: lin.replace(src=tuple(flatten(gpu_ops.get(c, [c]) for c in lin.src)))}, enter_calls=True)
+Compiled.pm_encode = PatternMatcher([(UPat.sink().call(UPat(Ops.PARAM)).after(allow_any_len=True, name="s"),
+  disk_copy_rewriter)]) + Compiled.pm_encode
 
 # *****************
 # 3. bufferize
@@ -165,6 +166,5 @@ def uring() -> tuple[int, io_uring.struct_io_uring_params, Buffer, Buffer]|None:
 @functools.cache
 def _stage(dev) -> Buffer: return Buffer(Device[dev].host, STAGE_SZ, options=BufferSpec(cpu_access=True), initial_value=bytes(STAGE_SZ))
 
-Compiled.pm_bufferize += PatternMatcher([(UPat(Ops.ALLOC, tag="disk_info", name="b"), lambda b: cast(DiskDevice, Device[b.device]).info),
-  (UPat(Ops.ALLOC, tag="disk_stage", name="b"), lambda b: _stage(b.device)),
-  (UPat(Ops.ALLOC, tag="uring_rings"), lambda: unwrap(uring())[2]), (UPat(Ops.ALLOC, tag="uring_sqes"), lambda: unwrap(uring())[3])])
+Compiled.link_bufs |= {"disk_info": lambda b: cast(DiskDevice, Device[b.device]).info, "disk_stage": lambda b: _stage(b.device),
+                       "uring_rings": lambda b: unwrap(uring())[2], "uring_sqes": lambda b: unwrap(uring())[3]}

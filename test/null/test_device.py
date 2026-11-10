@@ -3,7 +3,7 @@ import unittest, os, subprocess
 from unittest.mock import patch
 from tinygrad import Tensor, dtypes
 from tinygrad.device import Device, Compiler, enumerate_devices_str
-from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, WIN, OSX, DEV
+from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, OSX, DEV, CACHELEVEL
 from tinygrad.runtime.support.c import DLL
 
 class TestDevice(unittest.TestCase):
@@ -71,7 +71,6 @@ class TestDevice(unittest.TestCase):
     result = subprocess.run(['python3', '-c', 'import runpy, tinygrad; runpy.run_module("tinygrad.device")'], capture_output=True)
     self.assertEqual(result.returncode, 0, result.stderr.decode())
 
-  @unittest.skipIf(WIN, "skipping windows test") # TODO: subprocess causes memory violation?
   def test_env_overwrite_default_compiler(self):
     if Device.DEFAULT == "CPU":
       from tinygrad.runtime.support.compiler_cpu import ClangCompiler
@@ -103,7 +102,6 @@ class TestDevice(unittest.TestCase):
                         shell=True, check=True, env={**os.environ, "DEV": "AMD:HIP"})
     else: self.skipTest("only run on CPU/AMD")
 
-  @unittest.skipIf(WIN, "skipping windows test")
   def test_env_online(self):
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
@@ -143,6 +141,12 @@ class TestDevice(unittest.TestCase):
     with Context(DEV="NULL"): self.assertEqual(Tensor.empty(1).device, "NULL")
     self.assertEqual(Tensor.empty(1).device, orig_dev)
 
+  def test_const_doesnt_need_default_device(self):
+    # finding the default device can open every device, a const (like the 1 in x+1) has no device and doesn't need it
+    with patch.object(type(Device), "DEFAULT", property(lambda _: self.fail("looked up the default device"))):
+      Tensor(1.0)
+      Tensor.empty(3, device="NULL") + 1
+
 class TestDevVar(unittest.TestCase):
   def test_parse(self):
     for d, t in [("AMD", Target(device="AMD", renderer="")), ("AMD:LLVM", Target(device="AMD", renderer="LLVM")),
@@ -176,6 +180,7 @@ class MockCompiler(Compiler):
   def compile(self, src) -> bytes: return src.encode()
 
 class TestCompiler(unittest.TestCase):
+  @unittest.skipIf(CACHELEVEL < 1, "disk cache is off")
   def test_compile_cached(self):
     diskcache_put("key", "123", None) # clear cache
     getenv.cache_clear()

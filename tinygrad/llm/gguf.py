@@ -6,6 +6,7 @@ from tinygrad.device import Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
+from tinygrad.uop.ops import UOp
 
 # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
 def _ggml_iq_grid(device: str|tuple[str, ...]|None, grid: tuple[int, ...], grid_shape: tuple[int, int]) -> Tensor:
@@ -248,12 +249,32 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   kv, entries = gguf_parse(fn)
   return kv, gguf_shard(entries, (Device.DEFAULT,))
 
+class GGUFPackedTable:
+  """
+  Quantized rows mmapped from the GGUF file: `write` copies rows into host memory slots, `read` decodes the slots on device.
+  """
+  __slots__ = ("data", "width", "typ", "row_bytes", "table", "rows")
+  def __init__(self, entry:tuple[Tensor, tuple[int, ...], int]):
+    data, (n_rows, self.width), self.typ = entry
+    self.data, self.row_bytes, self.table = data, data.nbytes() // n_rows, data._buffer().as_memoryview(allow_zero_copy=True)
+  def write(self, start:int, ids:list[list[int]], slots:int):
+    if not hasattr(self, "rows"): self.rows = Tensor.empty(slots, len(ids[0]), self.row_bytes, dtype=dtypes.uint8, device="CPU").realize()
+    rows, rb = self.rows._buffer().as_memoryview(allow_zero_copy=True), self.row_bytes
+    rows[start*len(ids[0])*rb:(start+len(ids))*len(ids[0])*rb] = b"".join(self.table[i*rb:(i+1)*rb] for slot in ids for i in slot)
+  def read(self, start:int|UOp, n:int, device:str|tuple[str, ...]|None) -> Tensor:
+    return ggml_data_to_tensor(self.rows[start:start+n].to(device).flatten(), n*int(self.rows.shape[1])*self.width, self.typ)
+
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
-               shard_map:dict[str, int]|None=None) -> dict[str, Tensor]:
+               shard_map:dict[str, int]|None=None, repeats:dict[str, int]|None=None) -> dict[str, Tensor]:
   """
   Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
+  A tensor in `repeats` is first cut into `len(devices)//repeats` row blocks that are each repeated `repeats` times.
   """
   n, packed, shard_map = len(devices), {}, shard_map or {}
+  for name, r in (repeats or {}).items():
+    data, shape, typ = entries[name]
+    if n % r or shape[0] % (n//r): raise ValueError(f"{name}: can't repeat {shape} {r} times over {n} devices")
+    entries[name] = (data.to("CPU").reshape(n//r, -1).repeat_interleave(r, 0).flatten(), (shape[0]*r, *shape[1:]), typ)
   for name, (data, shape, typ) in entries.items():
     if (axis:=shard_map.get(name)) is None: packed[name] = data.shard(devices)
     else:

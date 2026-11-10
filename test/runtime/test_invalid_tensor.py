@@ -97,6 +97,10 @@ class TestInvalidTensor(unittest.TestCase):
     out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Invalid).sum()
     self._invalid_test_helper(out, [10.0])
 
+  def test_where_reduce_identity(self):
+    out = (Tensor.arange(4) < 2).where(Tensor([-1.0, -2.0, -3.0, -4.0]), Invalid)
+    self.assertEqual([out.sum().item(), out.prod().item(), out.max().item()], [-3.0, 2.0, -1.0])
+
   def test_invalid_unary(self):
     mask = Tensor.arange(4) < 2
     out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.float, buffer=False).sqrt())

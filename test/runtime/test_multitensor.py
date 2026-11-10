@@ -91,6 +91,15 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(scalar.shape, ())
     self.assertEqual(scalar.uop.base.buffer.nbytes, scalar.dtype.itemsize)
 
+  def test_full_axis(self):
+    x = Tensor.full((4, 6), 7, device=devices_2, axis=-1).realize()
+    self.assertEqual((x.shape, x.uop.axis), ((4, 6), 1))
+    self.assertEqual(x.uop.base.buffer.nbytes, 12 * x.dtype.itemsize)
+    np.testing.assert_equal(x.numpy(), np.full((4, 6), 7))
+    z = Tensor.zeros(4, 6, device=devices_2, axis=0).realize()
+    self.assertEqual((z.uop.axis, z.uop.base.buffer.nbytes), (0, 12 * z.dtype.itemsize))
+    np.testing.assert_equal(z.numpy(), np.zeros((4, 6)))
+
   @unittest.expectedFailure # TODO: fix
   def test_shard_empty(self):
     GlobalCounters.reset()
@@ -181,6 +190,13 @@ class TestMultiTensor(unittest.TestCase):
       np.testing.assert_allclose(Tensor.stack(X, Y, Z, dim=dim).numpy(), np.stack([X.numpy(), Y.numpy(), Z.numpy()], axis=dim))
     grad = Tensor.stack(X, Y).sum().gradient(X)[0]
     np.testing.assert_allclose(grad.numpy(), 1)
+
+  def test_stack_sharded_with_replicated(self):
+    X = Tensor([[1, 2], [3, 4]]).shard(devices_2, 0)
+    Y = Tensor([[5, 6], [7, 8]]).shard(devices_2)
+    self.assertEqual(X.stack(Y).tolist(), [[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+    self.assertEqual(Y.stack(X).tolist(), [[[5, 6], [7, 8]], [[1, 2], [3, 4]]])
+    self.assertEqual(X.cat(Y, dim=1).tolist(), [[1, 2, 5, 6], [3, 4, 7, 8]])
 
   def test_allreduce_naive(self):
     with Context(RING=0):
@@ -960,6 +976,10 @@ class Test2DShard(unittest.TestCase):
     out = t.contiguous().realize()
     np.testing.assert_equal(out.numpy(), ref.numpy())
 
+  def test_2d_shard_copy_to_one(self):
+    ref = Tensor.arange(8*6).reshape(8, 6).contiguous().realize()
+    np.testing.assert_equal(self._shard_2d(ref).to(Device.DEFAULT).numpy(), ref.numpy())
+
   def test_2d_shard_clone(self):
     ref = Tensor.arange(16).reshape(4, 4).realize()
     t = self._shard_2d(ref)
@@ -1152,8 +1172,8 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       to_add.append((Tensor.ones(2, 8) * i).shard(devices))
 
     added:list[Tensor] = []
-    for bound, a in zip(x.uop.bounds, to_add):
-      added.append(x[bound[0]:bound[1]] + a)
+    for i, a in enumerate(to_add):
+      added.append(x[2*i:2*i+2] + a)
 
     output = added[0].cat(*added[1:])
     expected = np.arange(64).reshape((8,8)) + np.array([[0,0,1,1,2,2,3,3] for _ in range(8)]).T
@@ -1266,8 +1286,8 @@ class TestBatchNorm(unittest.TestCase):
         bns.append(bn)
 
       bn_ts = []
-      for bound, bn in zip(x.uop.bounds, bns):
-        bni = bn(x[bound[0]:bound[1]])
+      for i, bn in enumerate(bns):
+        bni = bn(x[2*i:2*i+2])
         bn_ts.append(bni)
 
       bn_ts[0].cat(*bn_ts[1:]).numpy()
@@ -1280,7 +1300,6 @@ class TestMultiFromUnrenderable(unittest.TestCase):
     ll = t.shard((d0, d1), axis=0) + 1
     np.testing.assert_equal(ll.numpy(), np.arange(100)+1)
 
-@unittest.skipIf(not_support_multi_device(), "need multi")
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiSetitem(unittest.TestCase):
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
@@ -1339,6 +1358,18 @@ class TestTensorOps(unittest.TestCase):
   @needs_second_gpu
   def test_bitcast(self):
     helper_test_shard_op([(256,), (256,)], lambda x: x.bitcast(dtypes.int))
+
+  @unittest.skipIf(Device.DEFAULT in {"WEBGPU", "CL"}, "no views")
+  @needs_second_gpu
+  def test_bitcast_assign(self):
+    t = Tensor([0, 0, 0, 0], dtype=dtypes.int32).shard(devices_2, axis=0).contiguous().realize()
+    t.bitcast(dtypes.uint32).assign(Tensor([1, 2, 3, 4], dtype=dtypes.uint32).shard(devices_2, axis=0))
+    self.assertEqual(t.tolist(), [1, 2, 3, 4])
+
+  @needs_second_gpu
+  def test_reshape_copy(self):
+    t = Tensor([1, 2, 3, 4]).shard(devices_2, axis=0).contiguous().realize()
+    self.assertEqual(t.reshape(2, 2).to((d3, d4)).realize().tolist(), [[1, 2], [3, 4]])
 
 if __name__ == '__main__':
   unittest.main()

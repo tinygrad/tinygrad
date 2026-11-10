@@ -1,11 +1,9 @@
 import unittest
 import multiprocessing.shared_memory as shared_memory
-from tinygrad.helpers import WIN
 from tinygrad import Tensor, Device
 import numpy as np
 
 class TestRawShmBuffer(unittest.TestCase):
-  @unittest.skipIf(WIN, "only fails on CI windows instance")
   def test_e2e(self):
     t = Tensor.randn(2, 2, 2).realize()
 

@@ -62,7 +62,11 @@ class TestCanLosslessCast(unittest.TestCase):
     self.assertFalse(can_lossless_cast(dtypes.int64, dtypes.double))
     # half has more mantissa bits
     self.assertTrue(can_lossless_cast(dtypes.int8, dtypes.half))
-    self.assertFalse(can_lossless_cast(dtypes.int8, dtypes.bfloat16))
+    self.assertTrue(can_lossless_cast(dtypes.int8, dtypes.bfloat16))
+    self.assertTrue(can_lossless_cast(dtypes.uint8, dtypes.bfloat16))
+    self.assertFalse(can_lossless_cast(dtypes.int16, dtypes.bfloat16))
+    self.assertTrue(can_lossless_cast(dtypes.fp8e4m3fnuz, dtypes.bfloat16))
+    self.assertFalse(can_lossless_cast(dtypes.fp8e4m3, dtypes.fp8e4m3fnuz))
 
 class TestInvalidSingleton(unittest.TestCase):
   def test_singleton(self):

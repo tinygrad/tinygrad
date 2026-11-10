@@ -4,9 +4,9 @@ import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
-from tinygrad.helpers import WIN, OSX
+from tinygrad.helpers import OSX
 import sysconfig, os
-dll = c.DLL('webgpu', os.path.join(sysconfig.get_paths()['purelib'], 'pydawn', 'lib', 'libwebgpu_dawn.dll') if WIN else 'webgpu_dawn')
+dll = c.DLL('webgpu', 'webgpu_dawn')
 WGPUFlags: TypeAlias = ctypes.c_uint64
 WGPUBool: TypeAlias = ctypes.c_uint32
 class struct_WGPUAdapterImpl(c.Struct): pass

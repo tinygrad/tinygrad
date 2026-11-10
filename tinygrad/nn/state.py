@@ -3,7 +3,7 @@ from collections import OrderedDict
 from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, argsort, DEBUG, Timing, GlobalCounters, tqdm, round_up, T, strides_for_shape
+from tinygrad.helpers import prod, DEBUG, Timing, GlobalCounters, tqdm, round_up, T, strides_for_shape
 
 class TensorIO(io.RawIOBase, BinaryIO):
   def __init__(self, t: Tensor):
@@ -226,19 +226,14 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
     if storage[2] not in storage_source: return None
-    byte_start, byte_end = storage_offset*storage[1].itemsize, (storage_offset + prod(size))*storage[1].itemsize
+    byte_start = storage_offset*storage[1].itemsize
+    byte_end = byte_start + (1 + sum((s-1)*st for s,st in zip(size, stride)) if prod(size) else 0)*storage[1].itemsize
     ret = storage_source[storage[2]][byte_start:byte_end].bitcast(storage[1])
 
-    # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
-    shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
-    permute_indexes = [len(shape_strides)-1-y for y in argsort([x[1] for x in shape_strides])]
-    if tuple(permute_indexes) != tuple(range(len(permute_indexes))):
-      intermediate_shape = tuple([shape_strides[x][0] for x in argsort(permute_indexes)])
-      assert tuple([shape_strides[i][1] for i in argsort(permute_indexes)]) == strides_for_shape(intermediate_shape), "nonpermutable strides"
-      if DEBUG >= 3: print(f"WARNING: this torch load is slow. to permute {intermediate_shape} with {permute_indexes}")
-      assert storage[1] != dtypes.bfloat16, "can't permute BF16"
-      # TODO: find a nice way to support all movement ops on disktensors
-      ret = ret.to(None).reshape(intermediate_shape).permute(permute_indexes)
+    if prod(size) and tuple(st for s,st in zip(size, stride) if s != 1) != strides_for_shape(tuple(s for s in size if s != 1)):
+      assert storage[1] != dtypes.bfloat16, "can't index BF16"
+      ret = ret.to(None)
+      for s,st in zip(size, stride): ret = ret.unfold(-1, ret.shape[-1]-(s-1)*st, max(st, 1))
 
     return ret.reshape(size)
 

@@ -1,11 +1,11 @@
 import unittest
 from tinygrad.device import CompileError, Device, BufferSpec
 if Device.DEFAULT=="METAL":
-  from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler
+  from tinygrad.runtime.ops_metal import MetalCompiler
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
   def test_alloc_oom(self):
-    device = MetalDevice("metal")
+    device = Device["METAL"]
     with self.assertRaises(MemoryError):
       device.allocator.alloc(10000000000000000000)
 
@@ -38,7 +38,7 @@ class TestMetal(unittest.TestCase):
     assert ret is not None
 
   def test_failed_newLibraryWithData(self):
-    device = MetalDevice("metal")
+    device = Device["METAL"]
     compiler = MetalCompiler()
     compiled = compiler.compile("""
 #include <metal_stdlib>

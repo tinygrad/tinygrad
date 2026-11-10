@@ -8,9 +8,8 @@ from dataclasses import replace
 from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import all_same, getenv, Target, IMAGE, is_image_shape, to_mv, mv_address
 from tinygrad.device import HostAllocator, Compiled, Compiler, Program, TinyELF
-from tinygrad.renderer import tc
+from tinygrad.renderer import tc, Renderer
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
-from tinygrad.renderer import Renderer
 from tinygrad.runtime.support.elf import link_sym
 from tinygrad.runtime.support.c import DLL
 
@@ -46,20 +45,18 @@ def wmma(tensor_cores:list[tc.TensorCore], arg, inp, warp_size:int):
   return out
 
 class PythonProgram(Program['PythonDevice']):
-  def __init__(self, dev:'PythonDevice', obj:TinyELF, uops:list[UOp]|None=None):
-    self.uops: list[UOp] = uops or pickle.loads(obj.lib)
-    self.fxns = {u: PythonProgram(dev, obj, list(u.body.src)) for u in self.uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR}
-    self.tensor_cores = PythonRenderer(obj.target).tensor_cores
+  def __init__(self, dev:'PythonDevice', obj:TinyELF, links:dict[str,'PythonProgram']):
+    self.uops: list[UOp] = pickle.loads(obj.lib)
+    self.tensor_cores, self.links = PythonRenderer(obj.target).tensor_cores, links
     self.uop_to_index: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
     self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op in {Ops.END, Ops.BACKEDGE}}
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
       values: dict[UOp, Any] = dict(env:=kw.get("env", ())) # a function runs with its params bound to the caller's args
-      pbufs: list[int] = list(bufs)
-      pvals: list[int] = list(vals)
+      pargs: list[int] = list(args) # the PARAMs are first in the uops, in the args' order
       exec_masks = [[True] * warp_size]
       i = 0
       while i < len(self.uops):
@@ -95,7 +92,7 @@ class PythonProgram(Program['PythonDevice']):
           i += 1
           continue
         if u.op is Ops.AFTER or (u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)): values[u] = src_values[0]
-        elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [pvals.pop(0)] * warp_size
+        elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [pargs.pop(0)] * warp_size
         elif u.op in {Ops.PARAM, Ops.BUFFER}:
           storage_fmt = storage_fmt_for_dtype(u.dtype)
           if storage_fmt is None: raise RuntimeError(f"dtype={u.dtype} is not supported")
@@ -105,7 +102,7 @@ class PythonProgram(Program['PythonDevice']):
             values[u] = [memoryview(bytearray(u.max_numel()*u.dtype.itemsize)).cast(storage_fmt) for _ in range(warp_size)]
           else:
             size = u.max_numel() * u.dtype.itemsize
-            buf = memoryview(bytearray(size)) if u.op is not Ops.PARAM else to_mv(pbufs.pop(0), size)
+            buf = memoryview(bytearray(size)) if u.op is not Ops.PARAM else to_mv(pargs.pop(0), size)
             values[u] = [buf.cast(storage_fmt)] * warp_size
         elif u.op is Ops.BINARY: values[u] = [memoryview(u.arg)] * warp_size
         elif u.op is Ops.SPECIAL:
@@ -144,7 +141,8 @@ class PythonProgram(Program['PythonDevice']):
                                for k in range(len(src_values))], j, u.dtype) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
-        elif u in self.fxns: values[u] = [self.fxns[u](env={p: values[u.src[p.arg.slot+1]] for p in u.body.src if p.op is Ops.PARAM})]
+        elif u.op is Ops.CALL and u.body.op is Ops.PROGRAM:
+          values[u] = [self.links[u.body.src[0].arg.function_name](env={p: values[u.src[p.arg.slot+1]] for p in u.body.arg.params})]
         elif u.op is Ops.CALL: # a C function by symbol, linked against the loaded libraries
           restype = None if u.dtype is dtypes.void else getattr(ctypes, f"c_{'u' if u.dtype in dtypes.uints else ''}int{u.dtype.bitsize}")
           cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.src[0].arg.name, list(DLL._loaded_.values())))

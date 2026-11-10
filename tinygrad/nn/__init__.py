@@ -313,16 +313,10 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
   if is_vocab_sharded:
     ndev = len(weight.device)
     local_vocab_size = weight.shape[0] // ndev
-    grad_weight_uop = Tensor.empty(local_vocab_size, weight.shape[1], dtype=dtypes.float, device=weight.device).uop.unshard(axis=0)
+    grad_weight_uop = Tensor.zeros(local_vocab_size, weight.shape[1], dtype=dtypes.float, device=weight.device).uop.unshard(axis=0)
   else:
     # weight is replicated (or single device), grad_weight should match
-    grad_weight_uop = Tensor.empty(weight.shape, dtype=dtypes.float, device=weight.device).uop
-
-  # TODO: how do we remove this dumb kernel and use Tensor.zeros?
-  def _zero_kernel(out:UOp) -> UOp:
-    i = UOp.range(out.numel(), 0)
-    return out.flatten()[i].store(0).end(i).sink(arg=KernelInfo(name="zero"))
-  grad_weight_uop = grad_weight_uop.custom_kernel(fxn=_zero_kernel)[0]
+    grad_weight_uop = Tensor.zeros(weight.shape, dtype=dtypes.float, device=weight.device).uop
 
   device = to_tuple(call.device)[0].split(":")[0]
 
@@ -356,8 +350,8 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"
     elif device == "AMD": atomic_arg = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
     else: raise NotImplementedError(f"no atomics for device {device}")
-    atomic = UOp(Ops.CUSTOM, src=(grad_weight.index(local_token_id, j_idx), grad_val), arg=(atomic_arg, dtypes.void))
-    return atomic.end(i, j_outer, j_inner).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
+    atomic = UOp.custom_function(atomic_arg, fmt=True).call(grad_weight.index(local_token_id, j_idx), grad_val)
+    return grad_weight.flatten().after(atomic.end(i, j_outer, j_inner)).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
 
   grad_weight_uop = grad_weight_uop.custom_kernel(grad_emb, idx, fxn=_embedding_bwd_kernel)[0]
 

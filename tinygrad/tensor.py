@@ -1,12 +1,12 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
-from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
+from typing import Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
-from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray, prod
+from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ
-from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, PatternMatcher, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
+from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars, contiguous_mops_to_view, is_store_after
 from tinygrad.device import Buffer, canonicalize_device, is_disk_device
@@ -27,8 +27,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
     new_sink = sink.substitute(applied_map, name=f"substitute {name}", walk=True)
 
     # set the relevant uop to the realized UOps
-    for t,s,ns in zip(scope_tensors, sink.src, new_sink.src):
-      if s is ns: continue
+    for t,ns in zip(scope_tensors, new_sink.src):
       t.uop = ns
 
 def _tensor_holds(u:UOp) -> bool: return any((t:=tref()) is not None and t.uop is u for tref in list(all_tensors))
@@ -36,6 +35,7 @@ def _tensor_holds(u:UOp) -> bool: return any((t:=tref()) is not None and t.uop i
 # **** Tensor helper functions ****
 
 def _fromnp(x: 'numpy.ndarray') -> UOp:
+  x = x.astype(x.dtype.newbyteorder("="), copy=False)
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
   # fake realize
   ret.buffer.allocate(x)
@@ -60,8 +60,7 @@ class Tensor(RandMixin):
       if isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
       elif isinstance(data, UOp): device = data.device
     _dtype:DType|None = to_dtype(dtype) if dtype is not None else None
-    _device:str|tuple[str, ...] = canonicalize_device(device)
-    del device, dtype
+    del dtype
 
     # tensors can have gradients if you have called .backward
     self.grad:Tensor|None = None
@@ -90,8 +89,8 @@ class Tensor(RandMixin):
     # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
-    # data might be on a different device
-    self.uop:UOp = data if data.device is None or data.device == _device else data.copy_to_device(_device)
+    # data might be on a different device. NOTE: a const has no device, it doesn't need to look up the default device
+    self.uop:UOp = data if data.device is None or data.device == (_device:=canonicalize_device(device)) else data.copy_to_device(_device)
     # cast on the target device, the source may not hold the dtype (numpy has no fp8/bfloat16) or be able to compute it (DISK)
     if _dtype is not None: self.uop = self.uop.cast(_dtype)
 
@@ -103,8 +102,7 @@ class Tensor(RandMixin):
 
   def _apply_uop(self, fxn:Callable[..., UOp], *x:Tensor, **kwargs) -> Tensor:
     srcs = (self,)+x
-    new_uop: UOp = fxn(*[t.uop for t in srcs], **kwargs)
-    if TRACEMETA >= 1 and (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = (metadata,)
+    if (new_uop:=fxn(*[t.uop for t in srcs], **kwargs)) is self.uop: return self
     # directly create the Tensor
     ret = Tensor.__new__(Tensor)
     ret.uop, ret.grad, ret.is_param = new_uop, None, True
@@ -201,8 +199,8 @@ class Tensor(RandMixin):
     sink = tensor_map.get(sink, sink)
     # Realized outputs become the storage their AFTER sequenced a store into. Compose with tensor_map before updating
     # Tensors so map values reference final storage.
-    becomes_map = {u:graph_rewrite(u.src[0], pm_drop_after, bottom_up=True, name="drop after").shrink_to(u.shape)
-                   for u in sink.toposort() if is_store_after(u)}
+    storage = graph_rewrite(stores:=UOp.sink(*(u for u in sink.toposort() if is_store_after(u))), pm_drop_after, bottom_up=True, name="drop after")
+    becomes_map = {u:s.shrink_to(u.shape) for u,s in zip(stores.src, storage.src)}
     assert not any(x in becomes_map for x in becomes_map.values())
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
@@ -234,7 +232,7 @@ class Tensor(RandMixin):
     return self
 
   def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
-    if self.dtype in dtypes.weaks: self.uop = self.uop.clone()
+    if self.dtype in dtypes.weaks: raise RuntimeError("cannot assign into a weak tensor; it has no storage")
     is_disk = self.uop.on_disk()
     if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
     if self.uop is x.uop: return self  # a self assign is a NOOP
@@ -250,28 +248,26 @@ class Tensor(RandMixin):
       (b:=self._buffer()).copy_from(Buffer("PYTHON", b.nbytes, opaque=x._data()))
       return self
     assigned_to = self.uop.storage_base
-    # assigning to a value is initialization, not a write: the whole tensor is overwritten, so the pending value is dead.
-    # a pending CONTIGUOUS counts only if it's the whole target: writes through views of it store into its storage
-    if not assigned_to.has_buffer_identity() and (assigned_to.op is not Ops.STAGE or self.uop is assigned_to):
+    views = [self.uop]
+    while views[-1].op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: views.append(views[-1].src[0])
+    # assigning to a pending value that views no other live tensor is initialization, not a write: the whole tensor is
+    # overwritten, so the pending value is dead. (a broadcast const like `const_like` is EXPAND(CONST) but views nothing)
+    if not assigned_to.has_buffer_identity() and not any(_tensor_holds(u) for u in views[1:]):
       self.uop = (x.uop.src[0] if x.uop.op is Ops.STAGE else x.uop).clone()
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
-    assign = self.uop.after(store := self.uop.store(x.uop))
-    views = [self.uop]
-    while views[-1].op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: views.append(views[-1].src[0])
     ib = next((u for u in reversed(views) if u.has_buffer_identity() and (u is self.uop or _tensor_holds(u))), views[-1])
     if ib is not self.uop:
       # a partial write needs storage to land in: a pending value gets explicit storage (a clone)
       target = ib if ib.has_buffer_identity(after_ok=True) else ib.clone()
-      if target is not ib:
-        assign = assign.substitute({ib: target}, walk=True)
-        store = assign.src[1]
+      store = self.uop.substitute({ib: target}, walk=True).store(x.uop)
       # view assign: the base reads "after the store into the view" (one AFTER level). replace the node under the
       # views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
-      _apply_map_to_tensors({ib: target.after(store)}, name="Embed View Assign")
+      for t in [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.storage_base is assigned_to]:
+        t.uop = t.uop.substitute({ib: target.after(store)}, walk=True)
     else:
       # simple assign
-      self.uop = assign
+      self.uop = self.uop.after(self.uop.store(x.uop))
     return self
 
   def _buffer(self) -> Buffer:
@@ -302,29 +298,6 @@ class Tensor(RandMixin):
     assert fmt is not None, f"no fmt dtype for {self.dtype}"
     assert fmt != "e" or sys.version_info >= (3, 12)
     return buf.as_memoryview().cast(fmt, self.shape)  # type: ignore[arg-type,return-value]
-
-  # NOTE: list[Any] because return type is recursive (list[list[...]] for higher dimensions)
-  def tolist(self) -> PyConst|list[Any]:
-    """
-    Returns the value of this tensor as a nested list.
-    Returns single value for const tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3, 4])
-    print(t.tolist())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor(5)
-    print(t.tolist())
-    ```
-    """
-    # TODO: remove half once minimum python supports it
-    if self.dtype in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s): return self.cast(dtypes.float32).tolist()
-    if 0 in self.shape:
-      assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-      def _tolist(shape:tuple[int, ...]): return [_tolist(shape[1:]) for _ in range(shape[0])]
-      return _tolist(self.shape)
-    return self.data().tolist()
 
   def numpy(self) -> 'numpy.ndarray':
     """
@@ -464,14 +437,10 @@ class Tensor(RandMixin):
     if device not in Tensor._device_seeds:
       seed = [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed]
       Tensor._device_seeds[device] = Tensor(seed, device=device, dtype=dtypes.uint32)
-      Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32)
+      Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint64)
     counter = Tensor._device_rng_counters[device]
-    new_low = counter[0:1] + (num & 0xffffffff)
-    new_high = counter[1:2] + (num >> 32) + (new_low < counter[0])
-    counter.assign(new_low.cat(new_high))
-    low = counter[0:1] - (num & 0xffffffff)
-    high = counter[1:2] - (num >> 32) - (counter[0] < (num & 0xffffffff))
-    return Tensor._device_seeds[device], low.cat(high)
+    counter.assign(counter + num)
+    return Tensor._device_seeds[device], (counter - num).bitcast(dtypes.uint32)
 
   # ***** toposort and backward pass *****
 
@@ -517,7 +486,7 @@ class Tensor(RandMixin):
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
     is_disk = self.uop.on_disk()
     advanced = any(isinstance(i, (Tensor, list, tuple)) for i in idx)
-    realized = is_disk or self.uop.base.op in {Ops.BUFFER, Ops.ALLOC} or self.uop._base_buffer_is_realized()
+    realized = is_disk or self.uop.base.op in {Ops.BUFFER, Ops.ALLOC} or self.uop.base.without_after.is_realized
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.replace(self._getitem(indices, v))
@@ -526,9 +495,7 @@ class Tensor(RandMixin):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.assign(self._getitem(indices, v))
     else: # basic setitem
-      view = self[indices]
-      if isinstance(v, Tensor) and v.uop.op is Ops.AFTER and v.uop in view.uop.base.src: return
-      view.assign(v)
+      self[indices].assign(v)
 
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
@@ -569,26 +536,14 @@ class Tensor(RandMixin):
 P = ParamSpec("P")
 T = TypeVar("T")
 
-# this tracks the tensor.py METADATA, contextvars.ContextVar was switched to this due to thread safety issues
-class _ContextVar(Generic[T]):
-  def __init__(self, default:T): self.state:T = default
-  def get(self) -> T: return self.state
-  def set(self, x:T) -> T:
-    ret, self.state = self.state, x
-    return ret
-_METADATA: _ContextVar[Metadata|None] = _ContextVar(default=None)
-
-def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
+def _profile_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
+  @functools.wraps(fn)
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-    if TRACEMETA < 1 or _METADATA.get() is not None: return fn(*args, **kwargs)
-    token = _METADATA.set(Metadata(name=fn.__name__))
+    if not PROFILE: return fn(*args, **kwargs)
     with cpu_profile(TracingKey(fn.__name__), "USER"):
-      ret = fn(*args, **kwargs)
-    _METADATA.set(token)
-    return ret
+      return fn(*args, **kwargs)
   return _wrapper
 
-if TRACEMETA >= 1:
-  for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
-    if name in ["__class__", "__del__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
-    setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
+for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
+  if name in ["__class__", "__del__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
+  setattr(Tensor, name, _profile_wrapper(fn))

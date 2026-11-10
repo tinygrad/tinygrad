@@ -11,7 +11,7 @@ from tinygrad.helpers import Context, dedup, TC_SELECT, TC_OPT, DEV
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.renderer.isa import ISARenderer
+from tinygrad.renderer.x86 import ISARenderer
 from test.helpers import replace_opts, check_schedule
 from test.runtime.test_softmax_fusion import single_kernel_softmax
 MOCKGPU = DEV.interface.startswith("MOCK")
@@ -59,9 +59,9 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx")
   def test_late_bias_load(self):
-    img = Tensor.empty(1, 3, 16, 16)
-    w = Tensor.empty(16, 3, 3, 3)
-    b = Tensor.empty(16)
+    img = Tensor.rand(1, 3, 16, 16)
+    w = Tensor.rand(16, 3, 3, 3)
+    b = Tensor.rand(16)
     out = img.conv2d(w, b)
     ast = helper_linearizer_opt(out)
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
@@ -109,7 +109,7 @@ class TestLinearizer(unittest.TestCase):
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     # LOAD -> RANGE -> LOAD -> STORE
-    assert len([x for x in uops[:ranges[0]] if x.op is Ops.LOAD]) == 1
+    assert len([x for x in uops[:ranges[0]] if x.op is Ops.LOAD and x.src[0].buf_uop.arg.name != "args"]) == 1
 
   def test_range_outer_op_before_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -122,7 +122,7 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_simple_unroll_no_between_phi_dependencies(self):
-    x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
+    x, y = Tensor.rand(64, 64), Tensor.rand(64, 64)
     r = (x@y).relu()
     opt = [Opt(OptOps.SPLIT, 2, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))]
     ast = helper_linearizer_opt(r, [opt])
@@ -203,7 +203,7 @@ class TestLinearizer(unittest.TestCase):
     simplifies to:
     *((device float4*)(data0+alu2)) = acc0;
     """
-    x, y = Tensor.empty(64,64), Tensor.empty(64,64)
+    x, y = Tensor.rand(64,64), Tensor.rand(64,64)
     out = x.matmul(y)
     with Context(TC=0):
       ast = helper_linearizer_opt(out)
@@ -226,7 +226,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_locals_and_globals(self):
-    x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
+    x, y = Tensor.rand(64, 64), Tensor.rand(64, 64)
     out = x@y
     opt = [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 3, (8, AxisType.LOCAL, True)),
             Opt(OptOps.SPLIT, 3, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),

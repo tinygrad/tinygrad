@@ -118,7 +118,7 @@ class TestTensorGradient(unittest.TestCase):
     self.assertAlmostEqual(dp.item(), 7*math.cos(0.5), places=5)
 
   def test_max_backward_many_ties(self):
-    t = Tensor.ones(70000, dtype=dtypes.half).contiguous()
+    t = Tensor.ones(70000, dtype=dtypes.bfloat16).contiguous()
     np.testing.assert_allclose(t.max().gradient(t)[0].sum().numpy(), 1.0, atol=1e-3)
 
 class TestMultiOutputGradient(unittest.TestCase):

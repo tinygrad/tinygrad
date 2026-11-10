@@ -12,6 +12,14 @@ if TYPE_CHECKING:
 def remint(u:'UOp', dt:DType) -> 'UOp':
   return u.ccast(dt) if u.op is Ops.CONST else u.replace(src=(remint(u.src[0], dt),)+u.src[1:])
 
+def _promote(t, out_dtype:DType):
+  # nothing to promote if t has the out dtype. invalid bool is weak const
+  if t.dtype is out_dtype or t._uop.base.is_invalid: return t
+  # keep weak CONST weak, might lift weakint -> weakfloat
+  if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST:
+    return t if t.dtype == (dt:=weak_dtype(out_dtype)) else t._wrap_uop(remint(t._uop, dt))
+  return t.cast(out_dtype)
+
 class ElementwiseMixin(CreationMixin):
   # required to implement
   def alu(self, op: Ops, *src: Self) -> Self:
@@ -23,15 +31,9 @@ class ElementwiseMixin(CreationMixin):
 
   def _broadcasted(self, y: 'Self|ConstType|UOp', reverse: bool = False) -> tuple[Self, Self]:
     y = self.ufix(y)
-    x, y = (self, y) if not reverse else (y, self)
+    x, y = (y.ufix(self), y) if not reverse else (y, y.ufix(self))
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
-    # keep weak CONST weak, might lift weakint -> weakfloat
-    def promote(t):
-      if t._uop.base.is_invalid: return t  # invalid bool is weak const
-      if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST:
-        return t if t.dtype == (dt:=weak_dtype(out_dtype)) else t._wrap_uop(remint(t._uop, dt))
-      return t.cast(out_dtype)
-    return promote(x), promote(y)
+    return _promote(x, out_dtype), _promote(y, out_dtype)
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)
@@ -54,7 +56,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([False, True]).logical_not().numpy())
     ```
     """
-    return self.cast(dtypes.bool).ne(True)
+    return self.cast(dtypes.bool).eq(False)
 
   def contiguous(self) -> Self:
     """
@@ -209,7 +211,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype): return a.alu(Ops.FLOORMOD, b)
+    if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype): return a.alu(Ops.MOD, b)
     return a - a.div(b, rounding_mode="floor") * b
 
   def fmod(self, x: Self | ConstType) -> Self:
@@ -222,7 +224,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     a, b = self._broadcasted(x)
-    if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype): return a.alu(Ops.CMOD, b)
+    if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype): return a.alu(Ops.TRUNCMOD, b)
     return a - a.div(b, rounding_mode="trunc") * b
 
   def div(self, x: 'Self|ConstType|UOp', reverse: bool = False, rounding_mode: Literal["trunc", "floor"] | None = None) -> Self:
@@ -247,8 +249,8 @@ class ElementwiseMixin(CreationMixin):
     """
     a, b = self._broadcasted(x, reverse)
     if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype):
-      if rounding_mode == "trunc": return a.alu(Ops.CDIV, b)
-      if rounding_mode == "floor": return a.alu(Ops.FLOORDIV, b)
+      if rounding_mode == "trunc": return a.alu(Ops.TRUNCDIV, b)
+      if rounding_mode == "floor": return a.alu(Ops.DIV, b)
     if dtypes.is_int(a.dtype) or a.dtype == dtypes.bool: a = a.cast(dtypes.default_float)
     # alu, not *: _broadcasted already promoted these, and a second promote would cast 1/b (only a weak CONST is kept weak)
     d = a.alu(Ops.MUL, b.reciprocal())
@@ -330,10 +332,10 @@ class ElementwiseMixin(CreationMixin):
     return (self > x).logical_not()
 
   def ne(self, x: Self | ConstType) -> Self:
-    return self._binop(Ops.CMPNE, x, False)
+    return self.eq(x).logical_not()
 
   def eq(self, x: Self | ConstType) -> Self:
-    return self.ne(x).logical_not()
+    return self._binop(Ops.CMPEQ, x, False)
 
   def __ne__(self, x: Self | ConstType) -> Self:  # type: ignore[override]
     return self.ne(x)
@@ -433,7 +435,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     x, y = self.ufix(x)._broadcasted(y)
-    return self.alu(Ops.WHERE, x, y)
+    return x.ufix(self).alu(Ops.WHERE, x, y)
 
   def masked_fill(self, mask:Self, value:Self|PyConst) -> Self:
     """
@@ -464,7 +466,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
     ```
     """
-    return self.alu(Ops.RECIPROCAL)
+    return self.alu(Ops.RECIP)
 
   def trunc(self) -> Self:
     """
@@ -785,7 +787,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     if approximate == "tanh":
-      return 0.5 * self * (1 + (math.sqrt(2 / math.pi) * (self + 0.044715 * self ** 3)).tanh())
+      return self * (math.sqrt(8 / math.pi) * (self + 0.044715 * self ** 3)).sigmoid()
     elif approximate == "none":
       return self * 0.5 * (1.0 + (self / math.sqrt(2)).erf())
     else:

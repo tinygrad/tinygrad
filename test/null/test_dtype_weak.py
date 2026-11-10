@@ -40,7 +40,7 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertIs(denom.dtype, dtypes.weakfloat)  # the setup: the denominator expression itself is weak
     x, y = Tensor([2048.0], dtype=dtypes.float32)._broadcasted(denom)
     self.assertIs(y.dtype, dtypes.float32)
-    recips = [u for u in (x / y)._uop.toposort() if u.op is Ops.RECIPROCAL]
+    recips = [u for u in (x / y)._uop.toposort() if u.op is Ops.RECIP]
     self.assertEqual([(u.dtype, u.src[0].dtype) for u in recips], [(dtypes.float32, dtypes.float32)])
     with Context(DEFAULT_FLOAT=dtypes.float16):
       committed = graph_rewrite((UOp.const(1).cast(dtypes.int32) + UOp.const(1.0)).cast(dtypes.float32), pm_commit_weak)
@@ -79,7 +79,7 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual((out.src[1], out.src[2]), (UOp.const(5.0, dtypes.bfloat16), gate))
 
   def test_weak_srcs_commit_only_at_a_concrete_lub(self):
-    weak_lub = UOp(Ops.ADD, src=(UOp.const(1), UOp.const(1.0)))
+    weak_lub = UOp(Ops.ADD, src=(UOp.const(2.0), UOp.const(1.0)))
     self.assertIs(graph_rewrite(weak_lub, pm_commit_weak), weak_lub)
     concrete = UOp.const(2.0).cast(dtypes.float16)
     # the weak arm stays bare: its sibling states the width, so the WHERE already derives float16 for it

@@ -78,10 +78,16 @@ class DType(metaclass=DTypeMetaClass):
     return float("inf") if dtypes.is_float(self) else True
   def const(self, val: ConstType):
     if isinstance(val, InvalidType): return val
-    # NOTE: float('nan') != float('nan'), so we canonicalize here
-    if isinstance(val, float) and math.isnan(val): val = math.nan
-    # int is the default. wrap floats in ConstFloat to distinguish -0.0 from 0.0 in cache
-    return ConstFloat(truncate.get(self, float)(float(val))) if dtypes.is_float(self) else bool(val) if dtypes.is_bool(self) else int(val)
+    if self in dtypes.ints:
+      if isinstance(val, float) and not math.isfinite(val): val = 0 if math.isnan(val) else self.max if val > 0 else self.min
+      return truncate[self](int(val))
+    if dtypes.is_float(self):
+      # NOTE: float('nan') != float('nan'), so we canonicalize here
+      if isinstance(val, float) and math.isnan(val): val = math.nan
+      # wrap floats in ConstFloat to distinguish -0.0 from 0.0 in cache
+      return ConstFloat(truncate.get(self, float)(float(val)))
+    # int is the default
+    return bool(val) if dtypes.is_bool(self) else int(val)
 
 
 class DTypes:
@@ -90,7 +96,7 @@ class DTypes:
   def is_float(x: DType) -> bool: return x in (dtypes.floats + (dtypes.weakfloat,))
   @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.cache
-  def is_int(x: DType) -> bool: return x in (dtypes.ints + (dtypes.weakint,))
+  def is_int(x: DType) -> bool: return x in dtypes.wints
   @staticmethod
   @functools.cache
   def is_unsigned(x: DType) -> bool: return x in dtypes.uints
@@ -157,6 +163,7 @@ class DTypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
+  wints = ints + (weakint,)
   weaks = (weakint, weakfloat)
   all = floats + ints + (bool,) # noqa: A003
 
@@ -202,19 +209,13 @@ def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
   # return if dt1 preserves value of dt0
   # similar to https://numpy.org/doc/stable/reference/generated/numpy.can_cast.html
   if dt0 == dt1 or dt0 == dtypes.bool: return True
-  match dt1:
-    case dtypes.weakint: return dt0 in dtypes.ints
-    case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16, *dtypes.fp8s,
-      dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
-    case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s, dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
-    case dtypes.half: return dt0 in (*dtypes.fp8s, dtypes.uint8, dtypes.int8)
-    case dtypes.uint64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8)
-    case dtypes.uint32: return dt0 in (dtypes.uint16, dtypes.uint8)
-    case dtypes.uint16: return dt0 in (dtypes.uint8,)
-    case dtypes.int64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
-    case dtypes.int32: return dt0 in (dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
-    case dtypes.int16: return dt0 in (dtypes.uint8, dtypes.int8)
-    case _: return False
+  if dtypes.is_int(dt1): return dtypes.is_int(dt0) and dt1.min <= dt0.min and dt0.max <= dt1.max
+  if dt1 not in dtypes.floats: return False
+  e1, m1 = dtypes.finfo(dt1)
+  if dtypes.is_int(dt0): return dt0.bitsize - (dt0 in dtypes.sints) <= m1 + 1
+  if dt0 not in dtypes.floats: return False
+  e0, m0 = dtypes.finfo(dt0)
+  return e0 <= e1 and m0 <= m1 and (e0, m0) != (e1, m1)
 
 def sum_acc_dtype(dt:DType):
   # default acc dtype for sum
@@ -318,12 +319,9 @@ def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] #
 def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-defined] # noqa: F821
   import numpy as np, torch
   dtype = strong_dtype(dtype)
-  if dtype == dtypes.uint64: return torch.uint64
   if dtype == dtypes.bfloat16: return torch.bfloat16
   if dtype in dtypes.fp8s: return torch.uint8
-  # NOTE: torch doesn't expose this mapping with a stable API
-  try: return torch.from_numpy(np.array([], dtype=_to_np_dtype(dtype))).dtype
-  except TypeError: return None
+  return getattr(torch, np.dtype(dtype.fmt).name, None) if dtype.fmt is not None else None
 @functools.cache
 def _from_torch_dtype(torchdtype:'torch.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
-  return {v:k for k in DTYPES_DICT.values() if (v:=_to_torch_dtype(k)) is not None}[torchdtype]
+  return DTYPES_DICT[str(torchdtype).split('.')[-1]]

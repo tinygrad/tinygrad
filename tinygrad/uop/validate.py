@@ -42,8 +42,8 @@ def z3_shift(x:UOp, a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
   return z3.If(b < 0, z3.FreshInt("invalid_shift", ctx=a.ctx), a)
 
 # handlers take (x, *src exprs): x provides vmin/vmax for the bounds-aware ops; anything not here falls back to python_alu
-z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = {Ops.CMOD: lambda _,a,b: a-z3_cdiv(a,b)*b, Ops.CDIV: lambda _,a,b: z3_cdiv(a,b),
-  Ops.FLOORDIV: lambda _,a,b: z3_floordiv(a,b), Ops.FLOORMOD: lambda _,a,b: a-z3_floordiv(a,b)*b,
+z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = {Ops.TRUNCMOD: lambda _,a,b: a-z3_cdiv(a,b)*b, Ops.TRUNCDIV: lambda _,a,b: z3_cdiv(a,b),
+  Ops.DIV: lambda _,a,b: z3_floordiv(a,b), Ops.MOD: lambda _,a,b: a-z3_floordiv(a,b)*b,
   Ops.WHERE: lambda _,c,a,b: z3.If(c,a,b), Ops.MAX: lambda _,a,b: z3.If(a<b, b, a),
   Ops.AND: z3_and, Ops.OR: z3_or, Ops.XOR: z3_xor, Ops.SHL: z3_shift, Ops.SHR: z3_shift}
 

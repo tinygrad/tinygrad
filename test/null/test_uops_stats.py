@@ -9,7 +9,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.device import Device
 from tinygrad.renderer.ptx import PTXRenderer
-from tinygrad.renderer.isa.x86 import X86Renderer
+from tinygrad.renderer.x86 import X86Renderer
 from test.helpers import replace_opts
 
 def flops_mem(uops, ignore_indexing=False):
@@ -107,6 +107,13 @@ class TestUOpsStats(unittest.TestCase):
     self.assertEqual(prg.src[0].arg.estimates.mem, 4)
     self.assertEqual(prg.src[0].arg.estimates.lds, 4)
 
+  def test_triangular_loop_estimate(self):
+    buf = UOp.param(0, dtypes.int32, 6)
+    i = UOp.range(3, 0)
+    j = UOp.range(i+1, 1)
+    prg = to_program(buf.index(i*(i+1)//2+j).store(j).end(j, i).sink(arg=KernelInfo()), X86Renderer(Target("CPU", arch="x86_64")))
+    self.assertEqual(prg.src[0].arg.estimates.lds, 3*3*4)
+
   def test_simple_add(self):
     a = Tensor.empty(100,100)
     b = Tensor.empty(100,100)
@@ -136,6 +143,9 @@ class TestUOpsStats(unittest.TestCase):
     # a mismatched piece falls back to pad+usum, which sums N zero-padded copies and pays their adds
     unequal = equal[:3] + [Tensor.empty(256, 129)]
     self.assertGreater(get_stats(Tensor.cat(*unequal, dim=1))[0], 0)
+
+  def test_xor_gather(self):
+    self.assertEqual(get_stats(Tensor.empty(32)[Tensor.arange(32) ^ 16])[0], 0)
 
   def test_simple_matmul(self, M=1024, N=1024, K=1024):
     a = Tensor.empty(M,N)

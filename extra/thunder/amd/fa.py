@@ -65,16 +65,20 @@ def custom_fused_qkv_rope_backward(dxqkv:UOp, dq:UOp, dk:UOp, dv:UOp, freqs_cis:
 
 def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp]|None:
   def unwrap_partial(x:UOp) -> UOp|None:
-    expected = (Ops.CAST, Ops.REDUCE, Ops.PERMUTE, Ops.CAST, Ops.RESHAPE, Ops.AFTER)
-    for op in expected:
-      if x.op is not op: return None
-      if op is not Ops.AFTER: x = x.src[0]
-    return x
+    for expected in ((Ops.CAST, Ops.REDUCE, Ops.PERMUTE, Ops.CAST, Ops.RESHAPE, Ops.AFTER),
+                     (Ops.CAST, Ops.RESHAPE, Ops.CAST, Ops.RESHAPE, Ops.AFTER)):
+      cur = x
+      for op in expected:
+        if cur.op is not op: break
+        if op is not Ops.AFTER: cur = cur.src[0]
+      else: return cur
+    return None
   dq_native, dk_partial, dv_partial = dq.base, unwrap_partial(dk), unwrap_partial(dv)
   if dq_native.op is not Ops.AFTER or dk_partial is None or dv_partial is None: return None
   B, N, H, D, H_KV = dq.shape[0], dq.shape[1], dq.shape[2], dq.shape[3], dk.shape[2]
-  heads_per_wg = 2 if D == 128 and (H // H_KV) % 2 == 0 else 1
-  partials = (H // H_KV) // heads_per_wg
+  if dk_partial.shape[0] % B: return None
+  partials = dk_partial.shape[0] // B
+  if partials == 0 or (H // H_KV) % partials: return None
   if dq_native.shape != (B, H, N, D) or dk_partial.shape != (B * partials, N, H_KV, D) or dv_partial.shape != dk_partial.shape: return None
   return dq_native, dk_partial, dv_partial
 
@@ -126,6 +130,12 @@ def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, h
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
 
+def _bwd_heads_per_wg(D:int, group_size:int, window:int) -> int:
+  if D == 64:
+    assert group_size == 8, "D=64 backward is specialized for GPT-OSS GQA8"
+    return 8 if window else 2
+  return 2 if D == 128 and group_size % 2 == 0 else 1
+
 def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink, window=0):
   def grad(dou:UOp, ker:UOp) -> tuple:
     do = Tensor(dou, device=dou.device)
@@ -137,7 +147,7 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
 
     dq = _sharded_empty((B, H, N, D), xq, axis=shard_axis_t)
     GROUP_SIZE = H_local // H_KV_local
-    HEADS_PER_WG = 2 if D == 128 and GROUP_SIZE % 2 == 0 else 1
+    HEADS_PER_WG = _bwd_heads_per_wg(D, GROUP_SIZE, window)
     dk_partial = _sharded_empty((B * GROUP_SIZE // HEADS_PER_WG, N, H_KV, D), xk, axis=shard_axis)
     dv_partial = _sharded_empty((B * GROUP_SIZE // HEADS_PER_WG, N, H_KV, D), xv, axis=shard_axis)
 
@@ -260,7 +270,7 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arc
   if not getenv("NO_HIPCC"):
     lib = bytearray(lib)
     rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
-    struct.pack_into('<I', lib, rodata_off, 160000)
+    struct.pack_into('<I', lib, rodata_off, 0 if D == 64 else 160000)
     lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,
@@ -268,14 +278,19 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arc
 
 @functools.cache
 def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_vec:UOp, delta_vec:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int, window:int=0):
-  code = (pathlib.Path(__file__).parent / "fa_bwd_causal.cpp").read_text()
+  source = ("fa_bwd_causal_d64_window.cpp" if window else "fa_bwd_causal_d64.cpp") if D == 64 else "fa_bwd_causal.cpp"
+  code = (pathlib.Path(__file__).parent / source).read_text()
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math",
                   f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DWINDOW={window}"]
 
   BLOCK_SIZE_KV = 256
   GROUP_SIZE = H // H_KV
-  HEADS_PER_WG = 2 if D == 128 and GROUP_SIZE % 2 == 0 else 1
+  HEADS_PER_WG = _bwd_heads_per_wg(D, GROUP_SIZE, window)
   NUM_WARPS = 4
+  if D == 64: compile_args += [f"-DBWD_HEADS_PER_WG={HEADS_PER_WG}", f"-DBWD_BLOCK_SIZE_KV={BLOCK_SIZE_KV}", f"-DNUM_WARPS={NUM_WARPS}"]
+  relax_dq_sync = bool(getenv("GPTOSS_FA_BWD_RELAX_DQ_SYNC", 0) and arch == "gfx950" and
+                       (B, N, H, H_KV, D, window) == (2, 8192, 64, 8, 64, 0))
+  if relax_dq_sync: compile_args.append("-DGPTOSS_FA_BWD_RELAX_DQ_SYNC=1")
   NUM_THREADS = 64 * NUM_WARPS
   gsz = (H // HEADS_PER_WG, N // BLOCK_SIZE_KV, B)
   lsz = (NUM_THREADS, 1, 1)
@@ -287,7 +302,7 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
   estimates = Estimates(ops=5*B*H*N*N*D, lds=mem, mem=mem)
   sink = UOp.sink(dq.base, dk.base, dv.base, do.base, q.base, k.base, v.base, l_vec.base, delta_vec.base,
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
-                  arg=KernelInfo(name="custom_fa_backward", estimates=estimates))
+                  arg=KernelInfo(name="custom_fa_backward_d64_full_rs1" if relax_dq_sync else "custom_fa_backward", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
   if not getenv("NO_HIPCC"):
