@@ -482,12 +482,12 @@ class TestCallInKernel(unittest.TestCase):
     @uopfunc
     def add(out:UOp, x:UOp) -> UOp:
       i = UOp.range(x.numel(), 0)
-      return out[i].store(x[i] + 1).end(i).sink()
+      return out[i].store(x[i].load() + 1).end(i).sink()
 
     @uopfunc
     def sum_fn(out:UOp, x:UOp) -> UOp:
       i = UOp.range(x.numel(), 0)
-      return out[0].store(x[i].reduce(i, arg=Ops.ADD)).sink()
+      return out[0].store(x[i].load().reduce(i, arg=Ops.ADD)).sink()
 
     def main(out:UOp, x:UOp) -> UOp:
       tmp0, tmp1 = (UOp.alloc_like(x, addrspace=AddrSpace.REG) for _ in range(2))
@@ -506,7 +506,7 @@ class TestCallInKernel(unittest.TestCase):
   def test_reduce_over_call_keeps_loop_order(self):
     # a call can hide stores, so the reduce loops a, k, b in order, and the digits of S are the A[a*2+b] it visits
     @uopfunc
-    def update(S:UOp, A:UOp) -> UOp: return S[0].store(S[0]*10+A[0]).sink()
+    def update(S:UOp, A:UOp) -> UOp: return S[0].store(S[0].load()*10+A[0].load()).sink()
     def kernel(O:UOp, S:UOp, A:UOp) -> UOp:
       a, k, b = [UOp.range(2, n, AxisType.LOOP) for n in range(3)]
       return O[0].store(A[a*2+b].after(update(S.after(k), A[a*2+b])).reduce(a, k, b, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
@@ -519,7 +519,7 @@ class TestCallInKernel(unittest.TestCase):
     @uopfunc
     def incr(out:UOp, A:UOp):
       i = UOp.range(A.shape[0], 0)
-      return out[i].store(A[i]+1).end(i).sink()
+      return out[i].store(A[i].load()+1).end(i).sink()
 
     @uopfunc
     def square(out:UOp, A:UOp):
@@ -528,13 +528,13 @@ class TestCallInKernel(unittest.TestCase):
       call1 = incr(tmp1, A.after(call0))
       assert call0.body is call1.body
       i = UOp.range(A.shape[0], 1)
-      return out[i].store(tmp1.after(call1)[i]**2).end(i).sink()
+      return out[i].store(tmp1.after(call1)[i].load()**2).end(i).sink()
 
     def kernel(C:UOp, A:UOp):
       tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
       call = square(tmp, A)
       i = UOp.range(A.shape[0], 2)
-      return C[i].store(tmp.after(call)[i]+10).end(i).sink(arg=KernelInfo(name="nested_calls"))
+      return C[i].store(tmp.after(call)[i].load()+10).end(i).sink(arg=KernelInfo(name="nested_calls"))
 
     a = Tensor.arange(4).clone().realize()
     out = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=kernel)[0]
@@ -542,7 +542,7 @@ class TestCallInKernel(unittest.TestCase):
 
   def test_call_loop_mini(self, opts=()):
     @uopfunc
-    def mul(p:UOp, q:UOp): return p[0].store(q[0]*3).sink()
+    def mul(p:UOp, q:UOp): return p[0].store(q[0].load()*3).sink()
 
     def kernel(C:UOp, A:UOp):
       i = UOp.range(4, 0)
@@ -555,7 +555,7 @@ class TestCallInKernel(unittest.TestCase):
   def test_call_scalar_arg(self):
     @uopfunc
     def add(out:UOp, src:UOp, val:UOp) -> UOp:
-      return out[0].store(src[0]+val).sink()
+      return out[0].store(src[0].load()+val).sink()
 
     def kernel(out:UOp, src:UOp) -> UOp:
       i = UOp.range(4, 0)
@@ -567,7 +567,7 @@ class TestCallInKernel(unittest.TestCase):
   def test_call_with_gated_store(self):
     @uopfunc
     def gated_store(out:UOp, idx:UOp):
-      i = idx[0]
+      i = idx[0].load()
       return out[i.valid((i >= 0) & (i < out.shape[0]))].store(7).sink()
 
     def kernel(C:UOp, A:UOp):
@@ -576,7 +576,7 @@ class TestCallInKernel(unittest.TestCase):
       init = tmp[i].store(0).end(i)
       call = gated_store(tmp.after(init), A)
       j = UOp.range(C.shape[0], 1)
-      return C[j].store(tmp.after(call)[j] + 1).end(j).sink(arg=KernelInfo(name="call_with_gated_store", opts_to_apply=()))
+      return C[j].store(tmp.after(call)[j].load() + 1).end(j).sink(arg=KernelInfo(name="call_with_gated_store", opts_to_apply=()))
 
     a = Tensor([2], dtype=dtypes.int).realize()
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
@@ -586,13 +586,13 @@ class TestCallInKernel(unittest.TestCase):
     @uopfunc
     def mul(out:UOp, A:UOp):
       k = UOp.range(4, 0, AxisType.LOOP)
-      return out[k].store(A[k]*3).end(k).sink()
+      return out[k].store(A[k].load()*3).end(k).sink()
 
     def kernel(C:UOp, A:UOp):
       m, i, call = UOp.range(3, 1, AxisType.LOOP), UOp.range(4, 0, AxisType.LOOP), mul(C, A)
       self.assertIn(i, call.body.toposort())
-      end_m = C.after(call)[m].store(A[m]).end(m)
-      return C.after(end_m)[i].store(A[i]+1).end(i).sink(arg=KernelInfo(name="call_body_range", opts_to_apply=()))
+      end_m = C.after(call)[m].store(A[m].load()).end(m)
+      return C.after(end_m)[i].store(A[i].load()+1).end(i).sink(arg=KernelInfo(name="call_body_range", opts_to_apply=()))
 
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
@@ -606,7 +606,7 @@ class TestCallInKernel(unittest.TestCase):
 
   def test_call_loop_pad(self):
     @uopfunc
-    def add(p:UOp, q:UOp): return p[0].store(p[0]+q[0]).sink()
+    def add(p:UOp, q:UOp): return p[0].store(p[0].load()+q[0].load()).sink()
 
     def kernel(C:UOp, A:UOp):
       i = UOp.range(3, 0)
@@ -621,7 +621,7 @@ class TestCallInKernel(unittest.TestCase):
     @uopfunc
     def axpy(out:UOp, x:UOp, a:int) -> UOp: # a is a trace-time constant: two bodies, two C functions
       i = UOp.range(x.shape[0], 0, AxisType.LOOP)
-      return out[i].store(out[i] + x[i] * a).end(i).sink()
+      return out[i].store(out[i].load() + x[i].load() * a).end(i).sink()
 
     @uopfunc
     def triple(out:UOp, x:UOp): return axpy(out, x, 3).sink()
@@ -629,7 +629,7 @@ class TestCallInKernel(unittest.TestCase):
     def kernel(C:UOp, A:UOp) -> UOp:
       C = C.after(triple(C.after(axpy(C, A, 2)), A))
       i = UOp.range(A.shape[0], 1, AxisType.LOOP) # a loop after the calls
-      return C[i].store(C[i] + 1).end(i).sink(arg=KernelInfo(name="uopfunc", opts_to_apply=()))
+      return C[i].store(C[i].load() + 1).end(i).sink(arg=KernelInfo(name="uopfunc", opts_to_apply=()))
 
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
     out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous().realize(), a, fxn=kernel)[0]
@@ -639,7 +639,7 @@ class TestCallInKernel(unittest.TestCase):
     @uopfunc
     def copy_block(dst:UOp, src:UOp) -> UOp:
       i = UOp.range(4, 0, AxisType.UPCAST)
-      return dst[i].store(src[i]).end(i).sink()
+      return dst[i].store(src[i].load()).end(i).sink()
 
     def kernel(dst:UOp, src:UOp) -> UOp:
       return copy_block(dst[1:5], src[1:5]).sink(arg=KernelInfo(opts_to_apply=()))
@@ -654,12 +654,12 @@ class TestCallInKernel(unittest.TestCase):
     @uopfunc
     def copy(out:UOp, A:UOp):
       i = UOp.range(out.shape[0], 0, AxisType.LOOP)
-      return out[i].store(A[i]).end(i).sink()
+      return out[i].store(A[i].load()).end(i).sink()
 
     def forward(out1:UOp, out2:UOp, A:UOp):
       call = copy(out1, A)
       i = UOp.range(out2.shape[0], 0, AxisType.LOOP)
-      inline = out2[i].store(A[i]).end(i).sink()
+      inline = out2[i].store(A[i].load()).end(i).sink()
       return UOp.group(call, inline).sink(arg=KernelInfo(name="forward", opts_to_apply=()))
 
     x = Tensor([1, 2, 3, 4], device="CPU").realize().to(Device.DEFAULT)
@@ -674,10 +674,10 @@ class TestCallInKernel(unittest.TestCase):
   @unittest.skipIf(Device[Device.DEFAULT].renderer.inline_prefix is not None, "backend inlines calls instead of linking")
   def test_linker(self):
     @uopfunc
-    def plus2(out:UOp, A:UOp): return out[0].store(A[0]+2).sink()
+    def plus2(out:UOp, A:UOp): return out[0].store(A[0].load()+2).sink()
 
     @uopfunc
-    def copy(out:UOp, A:UOp): return out[0].store(A[0]).sink()
+    def copy(out:UOp, A:UOp): return out[0].store(A[0].load()).sink()
 
     def kernel(A:UOp, extra=False):
       A = A.flatten()

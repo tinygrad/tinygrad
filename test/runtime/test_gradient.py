@@ -126,8 +126,8 @@ class TestMultiOutputGradient(unittest.TestCase):
   def addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp) -> UOp:
     C, D, A, B = C.flatten(), D.flatten(), A.flatten(), B.flatten()
     i = UOp.range(C.numel(), 0)
-    store_c = C[i].store(A[i] + B[i])
-    store_d = D[i].store(A[i] * B[i])
+    store_c = C[i].store(A[i].load() + B[i].load())
+    store_d = D[i].store(A[i].load() * B[i].load())
     return UOp.group(store_c, store_d).end(i).sink(arg=KernelInfo(name="addmul")).simplify()
   @staticmethod
   def backward_addmul(grad_c, grad_d, call):
@@ -152,7 +152,7 @@ class TestMultiOutputGradient(unittest.TestCase):
     def kernel(c:UOp, d:UOp, a:UOp) -> UOp:
       c, d, a = c.flatten(), d.flatten(), a.flatten()
       i = UOp.range(2, 0)
-      return UOp.group(c[i].store(a[i] * 2), d[i].store(a[i] * 3)).end(i).sink(arg=KernelInfo(name="aliased_outputs"))
+      return UOp.group(c[i].store(a[i].load() * 2), d[i].store(a[i].load() * 3)).end(i).sink(arg=KernelInfo(name="aliased_outputs"))
     def backward(grad_c:UOp, call:UOp): return (None, None, grad_c)
 
     a = Tensor([1., 2.]).contiguous().realize()
@@ -178,9 +178,9 @@ class TestMultiOutputGradient(unittest.TestCase):
     def addmulsub_kernel(C:UOp, D:UOp, E:UOp, A:UOp, B:UOp) -> UOp:
       C, D, E, A, B = C.flatten(), D.flatten(), E.flatten(), A.flatten(), B.flatten()
       i = UOp.range(C.numel(), 0)
-      store_c = C[i].store(A[i] + B[i])
-      store_d = D[i].store(A[i] * B[i])
-      store_e = E[i].store(A[i] - B[i])
+      store_c = C[i].store(A[i].load() + B[i].load())
+      store_d = D[i].store(A[i].load() * B[i].load())
+      store_e = E[i].store(A[i].load() - B[i].load())
       return UOp.group(store_c, store_d, store_e).end(i).sink(arg=KernelInfo(name="addmulsub")).simplify()
     def backward_addmulsub(grad_c, grad_d, grad_e, call):
       _c, _d, _e, a, b = call.src[1:]

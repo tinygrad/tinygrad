@@ -361,7 +361,7 @@ class TestFastIdiv(unittest.TestCase):
     for dt in (dtypes.int32, dtypes.uint32):
       g = UOp.param(0, dt, 3)
       c = UOp.const(2)
-      l = g.index(c)
+      l = g.index(c).load()
       a = UOp(Ops.TRUNCDIV, src=(l, c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       Device[Device.DEFAULT].renderer.render(uops)
@@ -374,7 +374,7 @@ class TestFastIdiv(unittest.TestCase):
     for dt in (dtypes.int32, dtypes.uint32):
       g = UOp.param(0, dt, 9)
       c = UOp.const(8)
-      a = UOp(Ops.MOD, src=(g.index(c), c))
+      a = UOp(Ops.MOD, src=(g.index(c).load(), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       ops = [x.op for x in uops]
       self.assertIn(Ops.AND, ops, f"For dtype={dt} MOD by pow2 did not simplify to AND")
@@ -383,7 +383,7 @@ class TestFastIdiv(unittest.TestCase):
 
   def test_max_keeps_bound_for_idiv(self):
     # MAX is lowered to CMPLT+WHERE only after floordiv_to_idiv, so the bound it carries still proves the division same-sign
-    x = UOp.param(0, dtypes.int32, 3).index(UOp.const(2)).maximum(0) + 1
+    x = UOp.param(0, dtypes.int32, 3).index(UOp.const(2)).load().maximum(0) + 1
     ops = [u.op for u in to_uops_list([x // 3], ren=CStyleLanguage(Target()))]
     self.assertNotIn(Ops.MAX, ops, "the renderer has no MAX")
     self.assertNotIn(Ops.TRUNCMOD, ops, "a provably positive dividend kept the round toward zero correction")
@@ -393,7 +393,7 @@ class TestFastIdiv(unittest.TestCase):
     for dt in (dtypes.int32, dtypes.uint32, dtypes.int64, dtypes.uint64):
       g = UOp.param(0, dt, 3)
       c = UOp.const(2)
-      a = UOp(Ops.DIV, src=(g.index(c), c))
+      a = UOp(Ops.DIV, src=(g.index(c).load(), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       ops = [x.op for x in uops]
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} DIV by power of two did not simplify to shift")
@@ -403,7 +403,7 @@ class TestFastIdiv(unittest.TestCase):
 
   def test_unsigned_floordiv_is_cdiv(self):
     for op in (Ops.DIV, Ops.MOD):
-      a, b = (UOp.param(i, dtypes.uint32, 3).index(UOp.const(2)) for i in range(2))
+      a, b = (UOp.param(i, dtypes.uint32, 3).index(UOp.const(2)).load() for i in range(2))
       ops = [x.op for x in to_uops_list([UOp(op, src=(a, b))], ren=Device[Device.DEFAULT].renderer)]
       self.assertNotIn(Ops.CMPLT, ops, f"{op} on unsigned kept the sign correction")
       self.assertEqual(ops.count(Ops.TRUNCDIV) + ops.count(Ops.TRUNCMOD), 1)
@@ -413,7 +413,7 @@ class TestFastIdiv(unittest.TestCase):
   def test_fast_idiv_and_mod(self):
     g = UOp.param(0, dtypes.uint32, 4)
     c = UOp.const(3)
-    l = g.index(c)
+    l = g.index(c).load()
     a = UOp(Ops.TRUNCDIV, src=(l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
@@ -440,10 +440,10 @@ class TestFastIdiv(unittest.TestCase):
   @unittest.skipUnless(dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "needs a uint64 buffer")
   def test_fast_idiv_cmod_kept_when_idiv_declines(self):
     ren = Device[Device.DEFAULT].renderer
-    d = UOp.param(0, dtypes.int32, 4).index(UOp.const(0))
+    d = UOp.param(0, dtypes.int32, 4).index(UOp.const(0)).load()
     ops = [x.op for x in to_uops_list([UOp.range(30, 0).alu(Ops.TRUNCMOD, d)], ren=ren)]
     self.assertIn(Ops.TRUNCMOD, ops, "TRUNCMOD by a non-const divisor should be left alone")
-    big = UOp.param(1, dtypes.uint64, 4).index(UOp.const(0))
+    big = UOp.param(1, dtypes.uint64, 4).index(UOp.const(0)).load()
     ops = [x.op for x in to_uops_list([big.alu(Ops.TRUNCMOD, UOp.const(3, dtypes.uint64))], ren=ren)]
     self.assertIn(Ops.TRUNCMOD, ops, "TRUNCMOD should be left alone when fast_idiv declines")
 
@@ -478,7 +478,7 @@ class TestFastIdiv(unittest.TestCase):
   def test_disable_fast_idiv(self):
     g = UOp.param(0, dtypes.uint32, 4)
     c = UOp.const(3)
-    l = g.index(c)
+    l = g.index(c).load()
     a = UOp(Ops.TRUNCDIV, src=(l, c))
     with Context(DISABLE_FAST_IDIV=1):
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -489,7 +489,7 @@ class TestFastIdiv(unittest.TestCase):
 class TestNegLowering(unittest.TestCase):
   def test_int_neg(self):
     for dt in dtypes.ints:
-      x = UOp.param(0, dt, 1).index(UOp.const(0))
+      x = UOp.param(0, dt, 1).index(UOp.const(0)).load()
       self.assertIn(Ops.NEG, [u.op for u in to_uops_list([-x], ren=CStyleLanguage(Target()))], dt)
 
 class TestUOpMethod(unittest.TestCase):
@@ -663,7 +663,7 @@ class TestAssembly(unittest.TestCase):
     out = UOp.param(1, dtypes.int32, 2)
     c1 = UOp.const(2)
     c2 = UOp.const(3)
-    l1 = g1.index(c1)
+    l1 = g1.index(c1).load()
     a1 = UOp(Ops.MUL, src=(l1, c1))
     a2 = UOp(Ops.MUL, src=(l1, c2))
     uops = to_uops_list([out.index(UOp.const(0)).store(a1), out.index(UOp.const(1)).store(a2)], ren=self.renderer)
@@ -690,7 +690,7 @@ class TestAssembly(unittest.TestCase):
     g1 = UOp.param(0, dtypes.int32, 2)
     c1 = UOp.const(0)
     c2 = UOp.const(1)
-    expr = g1.index(c1) * UOp.const(4096) + g1.index(c2)
+    expr = g1.index(c1).load() * UOp.const(4096) + g1.index(c2).load()
     uops = to_uops_list([expr], ren=self.renderer)
     self.renderer.render(uops)
     self.assertIn(Ops.MULACC, [x.op for x in uops])
@@ -698,7 +698,7 @@ class TestAssembly(unittest.TestCase):
   def test_use_cmpeq(self):
     g = UOp.param(0, dtypes.uint32, 8)
     c = UOp.const(7)
-    comp = g.index(c).ne(c).ne(True)
+    comp = g.index(c).load().ne(c).ne(True)
     uops = to_uops_list([comp], ren=self.renderer)
     self.renderer.render(uops)
     ops = [x.op for x in uops]
@@ -706,7 +706,7 @@ class TestAssembly(unittest.TestCase):
     self.assertNotIn(Ops.CMPNE, ops)
 
   def test_use_cmpne(self):
-    x = UOp.param(0, dtypes.uint32, 8).index(UOp.const(0))
+    x = UOp.param(0, dtypes.uint32, 8).index(UOp.const(0)).load()
     uops = to_uops_list([x.ne(7)], ren=self.renderer)
     self.renderer.render(uops)
     self.assertEqual(sum(u.op is Ops.CMPNE for u in uops), 1)
@@ -714,7 +714,7 @@ class TestAssembly(unittest.TestCase):
 
   def test_int_compare_without_negation(self):
     for dt in (dtypes.int32, dtypes.uint32):
-      x = UOp.param(0, dt, 8).index(UOp.const(0))
+      x = UOp.param(0, dt, 8).index(UOp.const(0)).load()
       for comp in [(x<7).ne(True), (x.const_like(7)<x).ne(True)]:
         ops = [u.op for u in to_uops_list([comp], ren=self.renderer)]
         self.assertEqual(ops.count(Ops.CMPLT), 1)
@@ -724,7 +724,7 @@ class TestAssembly(unittest.TestCase):
       self.assertNotIn(Ops.CMPLT, ops)
 
   def test_signed_compare_moves_negation(self):
-    x, y = UOp.param(0, dtypes.int32, 8).index(UOp.const(0)), UOp.param(0, dtypes.int32, 8).index(UOp.const(1))
+    x, y = UOp.param(0, dtypes.int32, 8).index(UOp.const(0)).load(), UOp.param(0, dtypes.int32, 8).index(UOp.const(1)).load()
     for comp in [(x*-1)<7, (x*-1)<(y*-1)]:
       ops = [u.op for u in to_uops_list([comp], ren=self.renderer)]
       self.assertNotIn(Ops.MUL, ops)

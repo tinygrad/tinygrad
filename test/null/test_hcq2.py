@@ -19,7 +19,7 @@ def chain(x:Tensor, n:int) -> Tensor:
 
 def add_n(n:UOp, C:UOp, B:UOp) -> UOp:
   i = UOp.range(C.numel(), 0)
-  return C[i].store(B[i] + n).end(i).sink(arg=KernelInfo(name="add_n"))
+  return C[i].store(B[i].load() + n).end(i).sink(arg=KernelInfo(name="add_n"))
 
 def chain_input(value:int=2, device="NULL") -> Tensor: return Tensor.full((4,), value, dtype=dtypes.int32, device=device).contiguous().realize()
 

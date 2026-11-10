@@ -238,7 +238,7 @@ class TestUOpGraph(unittest.TestCase):
     d0 = UOp.param(0, dtypes.bool, 1)
     d1 = UOp.param(1, dtypes.int, 1)
     idx = UOp.const(0)
-    ld = d1.index(idx)
+    ld = d1.index(idx).load()
     alu = (ld<1).cast(dtypes.bool)
     out = d0.index(idx).store(alu)
     uops = to_uops_list([out])
@@ -248,7 +248,7 @@ class TestUOpGraph(unittest.TestCase):
     d0 = UOp.param(0, dtypes.float, 1)
     d1 = UOp.param(1, dtypes.int, 1)
     idx = UOp.const(0, dtypes.int)
-    ld = d1.index(idx)
+    ld = d1.index(idx).load()
     alu = ld.cast(dtypes.float).cast(dtypes.float)
     out = d0.index(idx).store(alu)
     uops = to_uops_list([out])
@@ -265,7 +265,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_bitcast_to_same_dtype_fold(self):
     for dt in dtypes.ints + dtypes.floats + (dtypes.bool,):
       d0 = UOp.param(0, dt, 1)
-      v = d0.index(UOp.const(0))
+      v = d0.index(UOp.const(0)).load()
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST and x.dtype is dt]), 0, f"dtype = {dt}")
 
@@ -277,7 +277,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_where_on_gated_load_fold(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp.param(0, dtypes.long, 100)
-    ld = d0.index(ridx0.valid(ridx0<50))
+    ld = d0.index(ridx0.valid(ridx0<50)).load()
     w = (ridx0<50).where(ld, 5)
     out = UOp.param(1, dtypes.long, 100)
     uops = to_uops_list([out.index(ridx0).store(w)])
@@ -289,7 +289,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_where_on_gated_load_folds_swapped_branches(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp.param(0, dtypes.long, 100)
-    ld = d0.index(ridx0.valid((ridx0<50).logical_not()))
+    ld = d0.index(ridx0.valid((ridx0<50).logical_not())).load()
     w = (ridx0<50).where(5, ld)
     uops = to_uops_list([w])
     expected = full_rewrite(UOp.const(5, dtypes.long).sink()).src[0]
@@ -337,11 +337,11 @@ class TestUOpGraph(unittest.TestCase):
     c1 = UOp.range(UOp.const(512), 1, AxisType.WEAK)
     c2 = UOp.range(UOp.const(250), 2, AxisType.WEAK)
     c3 = UOp.param(1, dtypes.int, 512)
-    c4 = c3.index(c1)
+    c4 = c3.index(c1).load()
     c5 = UOp.range(UOp.const(240), 0)
     c6 = ((c2*UOp.const(240))+c5)
     c7 = UOp.param(2, dtypes.uchar, 60000)
-    c8 = c7.index(c6)
+    c8 = c7.index(c6).load()
     c9 = ((c4<0).where((c4+60000), c4)!=c6.cast(dtypes.int)).where(0, c8.cast(dtypes.uint).cast(dtypes.uchar)).reduce(c5, arg=Ops.ADD)
     c10 = c0.index(((c1*UOp.const(250))+c2)).store(c9).end(c1, c2)
     uops = to_uops_list([c10])
@@ -358,7 +358,7 @@ class TestUOpGraph(unittest.TestCase):
     c5 = UOp.range(UOp.const(240), 0)
     c6 = ((c2*UOp.const(240))+c5)
     c7 = UOp.param(2, dtypes.uchar, 60000)
-    c8 = c7.index(c6)
+    c8 = c7.index(c6).load()
     # (loaded + range) < const pattern - loaded value shouldn't be promoted to long
     loaded_idx = c4.cast(dtypes.weakint)
     comparison = (loaded_idx + c5) < UOp.const(60000)
@@ -373,8 +373,8 @@ class TestUOpGraph(unittest.TestCase):
     glbl1 = UOp.param(1, dtypes.int, 1)
     glbl2 = UOp.param(2, dtypes.int, 1)
     idx = UOp.const(0)
-    ld0 = glbl1.index(UOp.invalid())
-    ld1 = glbl2.index(idx.valid(UOp.const(True)))
+    ld0 = glbl1.index(UOp.invalid()).load()
+    ld1 = glbl2.index(idx.valid(UOp.const(True))).load()
     uops = to_uops_list([glbl0.index(idx).store(ld1+ld0)])
     # the gate and invalid value are deleted from ld1
     self.assertEqual(len([u for u in uops if u.op is Ops.LOAD]), 1)
@@ -385,8 +385,8 @@ class TestUOpGraph(unittest.TestCase):
     lidx = UOp.special(16, "lidx0")
     st = smem.index(lidx).store(glbl0.index(lidx).load())
     barrier = st.barrier()
-    ld0 = smem.after(barrier).index(UOp.invalid())
-    ld1 = smem.after(barrier).index((lidx+2).valid(UOp.const(True)))
+    ld0 = smem.after(barrier).index(UOp.invalid()).load()
+    ld1 = smem.after(barrier).index((lidx+2).valid(UOp.const(True))).load()
     uops = to_uops_list([glbl0.index(lidx).store(ld1+ld0)])
 
     # the gate and invalid value are deleted from ld1

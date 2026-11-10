@@ -531,7 +531,7 @@ class TestImageStore(unittest.TestCase):
     img = UOp.param(0, dtypes.half, 256)
     img = img.replace(arg=replace(img.arg, image=(8, 8)))
     gidx0, gidx1 = Special("gidx0", 8), Special("gidx1", 8)
-    store = graph_rewrite(img.index(gidx1, gidx0).store(UOp.param(1, dtypes.half, (64, 4)).index(gidx1*8+gidx0)), pm_simplify_add_image)
+    store = graph_rewrite(img.index(gidx1, gidx0).store(UOp.param(1, dtypes.half, (64, 4)).index(gidx1*8+gidx0).load()), pm_simplify_add_image)
     self.assertEqual([(s.op, s.shape) for s in store.src[1].src], [(Ops.CAST, ())]*4)
 
 class TestDropTrueGate(unittest.TestCase):
@@ -553,7 +553,7 @@ class TestDropTrueGate(unittest.TestCase):
     # a const clause constrains nothing, so moving it only adds "&True" to the load's valid
     r0, r1 = Range(0, 32), Range(1, 32)
     idx = UOp.param(0, dtypes.float, 1024).index((r0+r1+r1*32-31).valid((r0+r1<31).ne(True)))
-    where = UOp.const(True).where(idx, UOp.const(0.0))
+    where = UOp.const(True).where(idx.load(), UOp.const(0.0))
     self.assertIs(graph_rewrite(where, pm_move_where_on_load), where)
 
 class TestRangeShrink(unittest.TestCase):
