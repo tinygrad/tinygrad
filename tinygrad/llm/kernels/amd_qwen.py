@@ -3690,7 +3690,7 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
   # (the keys' halves: their words as they are (a value converted at its fragment); the values': n - 8 in half, a value's 16 keys strided)
   lds_k = UOp.alloc((TK, DK // 8 + 1), dtypes.uint32, addrspace=AddrSpace.LOCAL)
   lds_v = UOp.alloc((TK, DV + 8), dtypes.half, addrspace=AddrSpace.LOCAL)
-  lds_sc = UOp.alloc((TK, D // 32), dtypes.float, addrspace=AddrSpace.LOCAL)
+  lds_sc = UOp.alloc((D // 32, TK + 4), dtypes.float, addrspace=AddrSpace.LOCAL)  # (a group's keys together)
   def word_halves(w:UOp) -> list[UOp]:
     # a word's 8 values (kv_q4_pack: byte i the values i (low nibble) and i+4) in order: the nibbles into halves 1024+n, less 1032: n - 8 exactly
     nib = [w & 0x0f0f0f0f, (w >> 4) & 0x0f0f0f0f]
@@ -3711,7 +3711,7 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
       st += [lv[lrow, (d0 - DK + j).valid(kdim.ne(True))].store(h_) for j, h_ in enumerate(word_halves(w))]
     for gi in range(DPT // 32):
       sc = (sws[gi // 2] >> (16 * (gi % 2))).cast(dtypes.uint16).bitcast(dtypes.half).float()
-      st.append(lsc[lrow, lpart * (DPT // 32) + gi].store(lok.where(sc, UOp.const(0.0, dtypes.float))))
+      st.append(lsc[lpart * (DPT // 32) + gi, lrow].store(lok.where(sc, UOp.const(0.0, dtypes.float))))
     return st
   lds_k0, lds_v0, lds_sc0 = lds_k, lds_v, lds_sc
   first = UOp.group(*tile_stores(tile_loads(UOp.const(0, dtypes.weakint)), lds_k, lds_v, lds_sc)).barrier()
@@ -3735,7 +3735,7 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
         t = UOp.wmma(qfrag[kk], UOp.stack(*kf), t, *WMMA_ARG)
       treg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
       treg = treg.after(treg.store(t))
-      ksc = lds_sc[st_*16 + col, (wave*DW) // 32 + gl].load()
+      ksc = lds_sc[(wave*DW) // 32 + gl, st_*16 + col].load()
       s_acc = [s_acc[e] + treg[e].load() * ksc for e in range(8)]
     sst += [lds_s[wave, st_, lane, e].store(s_acc[e]) for e in range(8)]
   lds_s = lds_s.after(UOp.group(*sst).barrier())
@@ -3743,7 +3743,7 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
   o_regs = [_reg((8,), 0) for _ in range(VT)]
   m_reg, l_reg = _reg((ES,), -1e30), _reg((ES,), 0)
   m_old, l_old = m_reg.after(tile), l_reg.after(tile)
-  lds_p = UOp.alloc((16, TK + 2), dtypes.half, addrspace=AddrSpace.LOCAL)
+  lds_p = UOp.alloc((16, TK + 8), dtypes.half, addrspace=AddrSpace.LOCAL)
   lds_a = UOp.alloc((16,), dtypes.float, addrspace=AddrSpace.LOCAL)
   pst, m_new, l_new = [], [], []
   for i in range(ES):
@@ -3766,7 +3766,7 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
   alpha = [lds_a[crow(e)].load() for e in range(8)]
   o_new = []
   # (the weights times the keys' scales of a values' group, in half: a lane's head's row of them, a subtile a WMMA; a group two dim tiles)
-  pfrags = {(vg, st_): UOp.stack(*((lds_p[col, st_*16 + k].load().float() * lds_sc.after(shared)[st_*16 + k, vg].load()).cast(dtypes.half)
+  pfrags = {(vg, st_): UOp.stack(*((lds_p[col, st_*16 + k].load().float() * lds_sc.after(shared)[vg, st_*16 + k].load()).cast(dtypes.half)
                                    for k in ks)) for vg in {(DK + wave*VW + dt*16) // 32 for dt in range(VT)} for st_ in range(ns)}
   for dt in range(VT):
     vg = (DK + wave*VW + dt*16) // 32
