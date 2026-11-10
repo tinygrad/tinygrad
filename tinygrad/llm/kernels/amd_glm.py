@@ -1171,7 +1171,7 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
   M, N = cast(tuple[int, int], out.shape)
   K, streams = cast(int, x.shape[-1]), 4 if hc else 1
   assert k_splits > 0 and M % k_splits == 0 and K % (32*k_splits) == 0
-  assert k_splits == 1 or ggml_type == Q8_0
+  assert k_splits == 1 or ggml_type == Q8_0 or (ggml_type == Q6_K and (K // (32*k_splits)) % 8 == 0), "Q6_K splits: whole blocks"
   M //= k_splits
   x = x.reshape(M, K)
   assert block_n in ((32, 64) if hc else (64, 128)) and token_tile >= 32 and token_tile % 32 == 0 and M % token_tile == 0
@@ -1253,7 +1253,7 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *hc:UOp, token_tile:int,
       if ggml_type == Q6_K:
         # (Q6_K: a group's 32 weights of a block of 256, their 6 bit values less 32 times the scale of their half (16), in half as the f16 path's)
         gg = g + gi
-        bbase = (row * (groups // 8) + gg // 8) * (QUANT_SIZES[Q6_K] // raw.dtype.itemsize)
+        bbase = (row * (groups*k_splits // 8) + gg // 8) * (QUANT_SIZES[Q6_K] // raw.dtype.itemsize)
         words = _quant_group_words(raw, bbase, gg % 8, Q6_K, None)
         scales = [_wmma_scale(raw, bbase, gg % 8, h, Q6_K)[0].cast(dtypes.float16) for h in (0, 1)]
         st += [lds_w[wr, gi * 32 + w * 4 + i].store((((words[w] >> (8*i)) & 255).cast(dtypes.int32) - 32).cast(dtypes.float16) * scales[w // 4])
@@ -1422,6 +1422,13 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       # (a few outputs of a long input: its parts on workgroups of their own, summed. 768 rows of 320 outputs are 60 tiles: 152 -> 99 us)
       ksplits = next(s for s in (getenv("Q8_KSPLITS", 32 if local_rows <= 64 else 16 if local_rows <= 512 else 8), 8, 4, 2, 1)
                      if in_features % (32*s) == 0)
+      out_shape = (ksplits*tokens, out_features)
+    if q6_rdna3 and not split and not half_out and (tgt:=getenv("Q6_KSPLIT", 0)) and local_rows <= getenv("Q6_KSPLIT_ROWS", 128):
+      # (Q6_KSPLIT=n, RDNA3: a few rows (batched decoding's) of the gemm: few workgroups that loop over the whole input (a barrier a group of
+      # 32): the input split over workgroups (whole Q6_K blocks a split) until there are n workgroups or more, their partial outputs summed)
+      wgs = (local_rows // tt) * -(-local_out // 64)
+      ksplits = next((s for s in (1, 2, 4, 8, 16) if (in_features // 32) % (8*s) == 0 and wgs * s >= tgt),
+                     next(s for s in (16, 8, 4, 2, 1) if (in_features // 32) % (8*s) == 0))
       out_shape = (ksplits*tokens, out_features)
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=_wmma_rdna4(x.device),
                             block_n=128 if _wmma_rdna4(x.device) else (getenv("Q8_BN_RDNA3", 128) if local_out % getenv("Q8_BN_RDNA3", 128) == 0
