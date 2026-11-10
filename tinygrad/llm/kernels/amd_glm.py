@@ -1355,6 +1355,12 @@ def _q6_input_splits(in_features:int, local_out:int, local_rows:int, token_tile:
               next(s for s in (16, 8, 4, 2, 1) if (in_features // 32) % (8*s) == 0))
 
 
+def _q6_split_target(tokens:int, rdna4:bool) -> int:
+  # C6 a7 P0: K0 wins accepted/user through G=6 (18 rows); K192 is clearly better at G=8 (24 rows) and above.
+  # MIN=0 restores the previous all-row RDNA4 behavior. RDNA3 keeps its existing Q6_KSPLIT default/selector.
+  return getenv("Q6_KSPLIT", 192) if not rdna4 or tokens >= getenv("Q6_KSPLIT_MIN", 24) else 0
+
+
 def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False, half_out:bool=False) -> Tensor:
   assert layer.ggml_type in QUANT_SIZES
   tokens = int(x.numel()) // layer.in_features
@@ -1370,7 +1376,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # (Q6_GEMM_RDNA3: Q6_K (the output head) of many rows in the gemm, its weights dequantized once a tile of 32 or 64 rows)
   q6_rdna3 = not _wmma_rdna4(x.device) and layer.ggml_type == Q6_K and xq is None and not split and tokens >= getenv("Q6_GEMM_MIN", 17) and \
     layer.in_features % 256 == 0 and getenv("Q6_GEMM_RDNA3", 1)
-  q6_split_target = getenv("Q6_KSPLIT", 192)  # default on: RDNA3/RDNA4; Q6_KSPLIT=0 opts out
+  q6_split_target = _q6_split_target(tokens, _wmma_rdna4(x.device))  # RDNA4 gate from measured verify rows; 0 opts out
   q6_pad = (_q6_rdna4_pad_rows(tokens, True) if layer.ggml_type == Q6_K and xq is None and not split and
             _wmma_rdna4(x.device) and q6_split_target else 0)
   # (RDNA3: a few rows of a long input that the decode kernel takes padded or not (its rows share the weight loads): not padded (9 rows
