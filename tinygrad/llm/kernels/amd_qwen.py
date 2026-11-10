@@ -3730,7 +3730,9 @@ def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:U
         kk = gl * 2 + h2
         d0 = wave*DW + kk*16
         kh = word_halves(lds_k[st_*16 + col, d0 // 8].load()) + word_halves(lds_k[st_*16 + col, d0 // 8 + 1].load())
-        t = UOp.wmma(qfrag[kk], UOp.stack(*(kh[k] for k in ks)), t, *WMMA_ARG)
+        # (RDNA4: a lane half's 8 of the 16 dims, see ks)
+        kf = [half.eq(0).where(kh[e % 4 + (e // 4) * 8], kh[4 + e % 4 + (e // 4) * 8]) for e in range(8)] if rdna4 else kh
+        t = UOp.wmma(qfrag[kk], UOp.stack(*kf), t, *WMMA_ARG)
       treg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
       treg = treg.after(treg.store(t))
       ksc = lds_sc[st_*16 + col, (wave*DW) // 32 + gl].load()
