@@ -142,6 +142,23 @@ class TestGLMDSASequence(unittest.TestCase):
     b[3, 40] = 1.0
     np.testing.assert_array_equal(_half_rows(Tensor(b).shard(devs, axis=1), 16, 4)[0].numpy(), _half_rows(Tensor(b), 16)[0].numpy())
 
+  def test_prefill_exchange_kernels(self):
+    # (SEQ_GATHER_HALF: the gather stores halves, no bitcast copy; IDX_MERGE_SPLIT: a device's rows' merge, its lists into the block's rows;
+    # SEQ_ATTN_TOK: the wmma attention's lists of hg head groups a token)
+    from tinygrad.llm.kernels.amd_glm_dsa import _seq_gather_kernel, _rows_into_kernel, _mla_sparse_wmma_kernel
+    def sink(*ts, fxn): return Tensor.custom_kernel(*ts, fxn=fxn)[0].uop.src[1].src[0]
+    sp = UOp.const(100, dtypes.weakint)
+    part, dev = Tensor.empty(64, 144, dtype="uint64"), Tensor.empty(1, dtype="int32")
+    for dt, W in (("half", 576), ("uint64", 144)):
+      k = sink(Tensor.empty(256, W, dtype=dt), part, dev, fxn=functools.partial(_seq_gather_kernel, start_pos=sp, k=1, n=4))
+      self.assertIs(k.op, Ops.SINK)
+    self.assertIs(sink(Tensor.empty(64, 66, dtype="int32"), Tensor.empty(40, 66, dtype="int32"),
+                       fxn=functools.partial(_rows_into_kernel, row0=8, rows=30)).op, Ops.SINK)
+    q, cache, index = Tensor.empty(5*16*4, 576, dtype="half"), Tensor.empty(256, 576, dtype="half"), Tensor.empty(4, 66, dtype="int32")
+    a, b = (sink(Tensor.empty(5*16*4, 576), q, cache, index, fxn=functools.partial(_mla_sparse_wmma_kernel, scale=0.1, valid_len=sp, hg=hg))
+            for hg in (0, 5))
+    self.assertIsNot(a, b)
+
   def test_dsa_stash_roundtrip(self):
     def t(shape, axis=None):
       x = Tensor(np.arange(np.prod(shape), dtype=np.float16).reshape(shape))
