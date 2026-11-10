@@ -233,10 +233,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     except (AttributeError, KeyError): pass
     try:
       if self.op is Ops.BUFFER and self.arg.slot < 0 and self.arg.addrspace is AddrSpace.GLOBAL:
-        if (buf:=UOp.buffers.get(self.arg.slot)) is not None and (owner:=UOp.buffer_slots.get((buf, self.arg.dtype, self.arg.device))) is not None:
-          if owner[0] == id(self):
-            UOp.buffers.pop(self.arg.slot, None)
-            UOp.buffer_slots.pop((buf, self.arg.dtype, self.arg.device), None)
+        if (buf:=UOp.buffers.pop(self.arg.slot, None)) is not None: UOp.buffer_slots.pop((buf, self.arg.dtype, self.arg.device), None)
     except AttributeError: pass
   def __reduce__(self):
     if self.op is Ops.BUFFER and self.arg.addrspace is AddrSpace.GLOBAL and self.arg.slot in UOp.buffers:
@@ -801,8 +798,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   buffer_num = itertools.count(-1, -1)
   # Realized BUFFERs own their device Buffers through this table. Negative slots keep them out of positional parameter numbering.
   buffers: ClassVar[dict[int, Buffer|MultiBuffer]] = {}
-  # The owner id remains usable during cyclic GC after weak references are cleared.
-  buffer_slots: ClassVar[dict[tuple[Buffer|MultiBuffer, DType, str|tuple[str, ...]|None], tuple[int, weakref.ReferenceType[UOp]]]] = {}
+  buffer_slots: ClassVar[dict[tuple[Buffer|MultiBuffer, DType, str|tuple[str, ...]|None], int]] = {}
 
   def getaddr(self, device=None) -> UOp:
     if self.without_after.op not in GroupOp.Defines|{Ops.SHRINK, Ops.BITCAST, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.LINEAR}: return self
@@ -818,7 +814,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),)+UOp.device_range_src(device),
               arg=ParamArg(slot, dtype, addrspace=addrspace, device=device))
     if buffer is not None:
-      UOp.buffers[slot], UOp.buffer_slots[(buffer, dtype, device)] = buffer, (id(ret), weakref.ref(ret))
+      UOp.buffers[slot], UOp.buffer_slots[(buffer, dtype, device)] = buffer, slot
     return ret
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType):
@@ -833,8 +829,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert dtype.itemsize > 0, f"not a storage dtype: {dtype}"
     assert opaque.nbytes % dtype.itemsize == 0, f"{opaque.nbytes} bytes is not divisible by {dtype.itemsize} for {dtype}"
     device = device or opaque.device
-    if (owner:=UOp.buffer_slots.get((opaque, dtype, device))) is not None and (ret:=owner[1]()) is not None: return ret
-    return UOp._buffer(opaque.nbytes // dtype.itemsize, dtype, next(UOp.buffer_num), device=device, buffer=opaque)
+    if (slot:=UOp.buffer_slots.get((opaque, dtype, device))) is None: slot = next(UOp.buffer_num)
+    return UOp._buffer(opaque.nbytes // dtype.itemsize, dtype, slot, device=device, buffer=opaque)
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
