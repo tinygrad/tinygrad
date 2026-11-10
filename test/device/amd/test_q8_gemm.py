@@ -35,4 +35,20 @@ class TestQ8Gemm(unittest.TestCase):
             ref = (data.astype(np.float32) @ weights.astype(np.float32).T).astype(npdtype)
             np.testing.assert_allclose(actual, ref, rtol=0.002, atol=float(np.abs(ref).max())*0.0001)
 
+  def test_tile96_same_bits(self):
+    # Q8_TT96: token tiles of 96 (block 128, two groups a stage) give the bits of the tiles of 128 (the same sum order along K)
+    target = Device[Device.DEFAULT].target[0]
+    if target != 11: self.skipTest("requires RDNA3")
+    rng = np.random.default_rng(7)
+    for M, N, K in ((1152, 1024, 2560), (768, 512, 1024)):
+      scales = rng.uniform(0.001, 0.04, size=(N, K//32, 1)).astype(np.float16)
+      quant = rng.integers(-127, 128, size=(N, K//32, 32), dtype=np.int8)
+      tw = Tensor(np.concatenate((scales.view(np.uint8), quant.view(np.uint8)), axis=-1).copy().view(np.uint16).ravel()).realize()
+      x = Tensor(rng.normal(size=(M, K)).astype(np.float16)).realize()
+      outs = [Tensor.custom_kernel(Tensor.empty(M, N, dtype=dtype), tw, x, fxn=functools.partial(_q8_gemm_kernel, token_tile=tile, block_n=128,
+              rdna4=False))[0].numpy() for tile in (128, 96) for dtype in (dtypes.float32, dtypes.half)]
+      with self.subTest(shape=(M, N, K)):
+        np.testing.assert_array_equal(outs[0], outs[2])
+        np.testing.assert_array_equal(outs[1], outs[3])
+
 if __name__ == "__main__": unittest.main()
