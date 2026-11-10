@@ -1112,6 +1112,9 @@ class FFNBlock:
     i8 = gate_exps.ggml_type in I8_WMMA_QUANTS and gate_exps.ggml_type != IQ3_S and getenv("I8_WMMA_RDNA3", 1)
     tile = getenv("MOE_BATCH_TILE", 16) if _batch_rows[0] is not None and _batch_prefill[0] is None else \
       MOE_TILE if _wmma_rdna4(x.device) or getenv("MOE_TILE", 0) or i8 else 32
+    # (MOE_TILE32_ROWS: RDNA4 tiles of 32 rows while the experts have at most this many rows each on average (a 64-row tile mostly padding))
+    if tile == 64 and _wmma_rdna4(x.device) and isinstance(T, int) and (t32:=getenv("MOE_TILE32_ROWS", 0)) and \
+       B * T * int(sel.shape[-1]) <= t32 * self.config.num_experts: tile = 32
     _, entries, tiles, pos = moe_route(sel, gate_exps.first, gate_exps.local_experts, tile)
     k, sel_shape = int(sel.shape[-1]), sel.shape[-3:]
     # gate and up read the token of each sorted row, down writes the row of each selection
