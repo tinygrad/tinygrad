@@ -2170,6 +2170,12 @@ class TestOps(TensorTestCase):
     helper_test_op([(3,5)], lambda x: x.diagonal(offset=2))  # offset on rectangular
     self.helper_test_exception([(3,3)], lambda x: x.diagonal(dim1=0, dim2=0), expected=RuntimeError)
 
+  def test_diagonal_empty(self):
+    for shape, dim1, dim2 in [((3,5), 0, 1), ((2,3,5), -2, -1), ((3,2,5), 2, 0), ((0,5), 0, 1), ((2,3,0), -2, -1)]:
+      for offset in [-shape[dim1]-1, -shape[dim1], shape[dim2], shape[dim2]+1]:
+        with self.subTest(shape=shape, dim1=dim1, dim2=dim2, offset=offset):
+          helper_test_op([shape], lambda x: x.diagonal(offset=offset, dim1=dim1, dim2=dim2))
+
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: x.roll(1))
     helper_test_op([(2, 4)], lambda x: x.roll((1,)))
