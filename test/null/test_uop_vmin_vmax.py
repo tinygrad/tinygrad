@@ -224,6 +224,16 @@ class TestVminVmaxProperties(unittest.TestCase):
     x = UOp.const((0, 4, Invalid, Invalid))
     self.assertEqual((x.vmin, x.vmax), (0, 4))
 
+  def test_vmin_vmax_masked_read(self):
+    # a masked lane reads 0 or the load's alt, not the storage
+    p, t, r = UOp.param(0, dtypes.int, 4, vmin_vmax=(3, 7)), UOp(Ops.BINARY, arg=bytes([3, 4, 5, 6])), UOp.range(4, 0)
+    self.assertEqual(p.index(r)._min_max, (3, 7))
+    self.assertEqual(p.index(r.valid(r < 2))._min_max, (0, 7))
+    self.assertEqual(t.index(r).load()._min_max, (3, 6))
+    self.assertEqual(t.index(r.valid(r < 2)).load()._min_max, (0, 255))
+    self.assertEqual(t.index(r.valid(r < 2)).cast(dtypes.int8).load()._min_max, (-128, 127))
+    self.assertEqual(t.index(r).load(UOp.const(0, dtypes.uchar), r < 2)._min_max, (0, 255))
+
 class TestVminVmaxDivMod(unittest.TestCase):
   def test_vmin_vmax_division_positive(self):
     # vmin and vmax for division of a variable by a positive constant
