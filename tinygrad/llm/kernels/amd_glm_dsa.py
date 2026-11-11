@@ -1327,7 +1327,8 @@ def _rows_f16_config(tokens:int, out_features:int, in_features:int, ggml_type:in
   # ROWS_F16: the few rows of batched decoding (<= ROWS_F16_MAX) on _rows_f16_wmma_kernel (the same float ops as the f16 WMMA kernel)
   if not getenv("ROWS_F16", 0) or tokens > getenv("ROWS_F16_MAX", 64) or ggml_type not in (Q8_0, Q6_K) or not _wmma_rdna4(device): return None
   NG = in_features // Q8_GROUP_SIZE
-  unroll = next((u for u in (getenv("ROWS_UNROLL", 4), 4, 2, 1) if NG % u == 0), 1)
+  # (one-GPU bench, extra/glm53_rows_bench.py: 4 groups an iteration best at 16 rows, 8 at 32)
+  unroll = next((u for u in (getenv("ROWS_UNROLL", 4 if tokens <= 16 else 8), 4, 2, 1) if NG % u == 0), 1)
   tiles = next((t for t in (getenv("ROWS_TILES", 1), 1) if out_features % (16*t) == 0), 1)
   waves = next((w for w in (getenv("ROWS_WAVES", 2), 2, 1) if out_features % (16*tiles*w) == 0), 1)
   # (ROWS_CHUNK: Q8_0's blocks loaded wide, chunk groups an iteration (0: off))
@@ -1420,7 +1421,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   w = layer.weight
   if isinstance(fxn, functools.partial) and (c:=fxn.keywords.get("chunk")):
     # (the chunk path's view of the Q8_0 words: float (two words an element, wide loads of four) where the chunks' words are pairs)
-    w = w.bitcast(dtypes.float32) if getenv("ROWS_F32", 1) and (c//2*17) % 2 == 0 and (in_features*17//32) % 2 == 0 else w.bitcast(dtypes.half)
+    w = w.bitcast(dtypes.float32) if getenv("ROWS_F32", 0) and (c//2*17) % 2 == 0 and (in_features*17//32) % 2 == 0 else w.bitcast(dtypes.half)
   result = Tensor.custom_kernel(out, w, *srcs, fxn=functools.partial(fxn, out_features=local_out, in_features=in_features))[0]
   if xh is not None and xh[1] is not None:
     # (the rows scaled into half's range scaled back: every device's rows of its partial sums)
