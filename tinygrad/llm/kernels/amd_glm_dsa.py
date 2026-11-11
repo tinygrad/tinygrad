@@ -4846,17 +4846,30 @@ def _fmul_rn(a:UOp, b:UOp) -> UOp:
   """a*b rounded on its own (v_mul_f32): never contracted into an add (an fma), never re-associated with the product it's in (the renderer
   writes o*(a*b) as o*a*b, (o*a)*b in C)"""
   return _sys('__extension__({{ float _p; __asm__ volatile("v_mul_f32 %0, %1, %2" : "=v"(_p) : "v"({0}), "v"({1})); _p; }})', dtypes.float32, a, b)
+def _fma(a:UOp, b:UOp, c:UOp) -> UOp: return _sys("__builtin_fmaf({0}, {1}, {2})", dtypes.float32, a, b, c)
+def _dot_chain(xs:list[UOp], ys:list[UOp]) -> UOp:
+  """sum of x*y in order as clang compiles a C sum of products (contracted, read off the gfx1201 code): the first product rounded, every
+  next one fused into the sum (fma(x, y, sum)). explicit: the same on the scalar unit (uniform values: s_mul/s_add, not contracted)"""
+  return functools.reduce(lambda acc, xy: _fma(xy[0], xy[1], acc), list(zip(xs, ys))[1:], _fmul_rn(xs[0], ys[0]))
+def _wg_index(n:int, T:int=256) -> tuple[UOp, tuple[UOp, UOp]]:
+  """
+  an index over n (a multiple of T) in workgroups of T threads, thread t of workgroup w at t*(n/T) + w: the threads of a workgroup far apart
+  (other rows), so a row's values are a thread's own (vector registers and units, as the kernels it replaces had them), not uniform (the
+  scalar unit's float ops: not contracted, its own exp)
+  """
+  wg, t = UOp.range(n // T, 0, AxisType.GLOBAL), UOp.range(T, 1, AxisType.LOCAL)
+  return t*(n // T) + wg, (wg, t)
 
 def _seq_a2a_pay_kernel(out:UOp, parts:UOp, ml:UOp, *, G:int, T:int, S:int, hl:int, dims:int, pad_n:int) -> UOp:
   """
   mla_sparse_seq's one-user exchange payload in one kernel (SEQ_PAY_FUSED): a device's splits combined (their max, the sum of their weights,
   the outputs normed by it) written as the all to all's parts (dest, row, head, [outputs, max, sum]), the three kernels' float ops in their
-  order (max chain, the weights' products rounded (they were stored), their sum in split order, the outputs' (p*l)*e in split order times
-  the reciprocal of the sum)
+  order (max chain; the weights' products rounded (they were stored), their sum in split order from the first; the outputs' p*l rounded,
+  times e fused into the sum in split order (the first rounded); times the reciprocal of the clamped sum)
   """
   n = cast(int, out.shape[0]) // pad_n
   Dp, D = dims + 2, cast(int, parts.shape[-1])
-  i = UOp.range(n*pad_n, 0, AxisType.GLOBAL)
+  i, rng = _wg_index(n*pad_n)
   j, r = i // pad_n, i % pad_n
   ok = r < T*hl*Dp
   t, hloc, col = r // (hl*Dp) % T, r // Dp % hl, r % Dp
@@ -4871,20 +4884,20 @@ def _seq_a2a_pay_kernel(out:UOp, parts:UOp, ml:UOp, *, G:int, T:int, S:int, hl:i
   ld = functools.reduce(lambda a, b: a + b, ws[1:], ws[0])
   isod = ok & (col < dims)
   ps = [parts[rw.valid(isod), col.minimum(D-1)].load() for rw in rows]
-  od = functools.reduce(lambda a, b: a + b, [(p * l) * e for p, l, e in zip(ps, ls, es)]) * ld.maximum(1e-30).reciprocal()
+  od = _dot_chain([_fmul_rn(p, l) for p, l in zip(ps, ls)], es) * ld.maximum(1e-30).reciprocal()
   zero = UOp.const(0.0, dtypes.float32)
   val = isod.where(od, zero) + (ok & col.eq(dims)).where(mx, zero) + (ok & col.eq(dims+1)).where(ld, zero)
-  return out[i].store(val).end(i).sink(arg=KernelInfo(name="seq_a2a_pay", opts_to_apply=()))
+  return out[i].store(val).end(*rng).sink(arg=KernelInfo(name="seq_a2a_pay", opts_to_apply=()))
 
 def _seq_a2a_comb_kernel(out:UOp, g:UOp, *, n:int, T:int, hl:int, dims:int, pad_n:int) -> UOp:
   """
   mla_sparse_seq's one-user exchange combined in one kernel (SEQ_COMB_FUSED): every source's outputs of this device's heads weighed by their
-  max and sum, the three kernels' float ops in their order: the max of the sources' maxes, the sum of the weights in source order (each
-  l*e a product of its own, as the sum's kernel had them inline), the outputs' o*w in source order (w = l*e rounded: the third kernel made
-  them apart) times the reciprocal of the clamped sum
+  max and sum, the three kernels' float ops in their order (read off their gfx1201 code): the max of the sources' maxes; the sum of the
+  weights l*e in source order (contracted: the first rounded, then fma); the outputs' o*w in source order (w = l*e rounded apart, the
+  sum contracted the same way); times the reciprocal of the clamped sum
   """
   Dp = dims + 2
-  i = UOp.range(T*hl*dims, 0, AxisType.GLOBAL)
+  i, rng = _wg_index(T*hl*dims)
   row, col = i // dims, i % dims
   base = row*Dp
   ms = [g[0, j*pad_n + base + dims].load() for j in range(n)]
@@ -4892,10 +4905,9 @@ def _seq_a2a_comb_kernel(out:UOp, g:UOp, *, n:int, T:int, hl:int, dims:int, pad_
   os_ = [g[0, j*pad_n + base + col].load() for j in range(n)]
   mx = functools.reduce(lambda a, b: a.maximum(b), ms[1:], ms[0])
   es = [((m - mx) * 1.4426950216293335).exp2() for m in ms]
-  ld = functools.reduce(lambda a, b: a + b, [_sys("({0}*{1})", dtypes.float32, l, e) for l, e in zip(ls, es)])
-  # (w = l*e rounded on its own: a product the renderer inlines into o*l*e is (o*l)*e in C)
-  num = functools.reduce(lambda a, b: a + b, [o * _fmul_rn(l, e) for o, l, e in zip(os_, ls, es)])
-  return out[i].store(num * ld.maximum(1e-30).reciprocal()).end(i).sink(arg=KernelInfo(name="seq_a2a_comb", opts_to_apply=()))
+  ld = _dot_chain(ls, es)
+  num = _dot_chain(os_, [_fmul_rn(l, e) for l, e in zip(ls, es)])
+  return out[i].store(num * ld.maximum(1e-30).reciprocal()).end(*rng).sink(arg=KernelInfo(name="seq_a2a_comb", opts_to_apply=()))
 
 def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None,
                    dims:int|None=None, base:int|UOp=0) -> Tensor:
