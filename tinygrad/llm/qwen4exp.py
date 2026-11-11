@@ -554,6 +554,17 @@ def _freqs(dim:int, end:int, theta:float, device:str|tuple[str, ...]|None, yarn:
   """the rope table (one for every block of the same)"""
   return precompute_freqs_cis(dim, end, theta, device=device, yarn=yarn).realize()
 
+@functools.cache
+def _rot_host(hd:int) -> tuple[Tensor, Tensor]:
+  """QSA_KV_ROT: the randomized Hadamard matrix of hd dims and its signs (in host memory, made once: every block's the same)"""
+  sign = [1 if random.Random(hd + i).random() < 0.5 else -1 for i in range(hd)]
+  m = [[sign[i] * (-1)**bin(i & j).count("1") * hd**-0.5 for j in range(hd)] for i in range(hd)]
+  return Tensor(m, dtype=dtypes.float32, device="CPU").realize(), Tensor([float(s) for s in sign], dtype=dtypes.float32, device="CPU").realize()
+
+def _lap(what:str):
+  """DEBUG_LOAD=1: a line when loading gets past `what` (the time is the log's)"""
+  if getenv("DEBUG_LOAD"): print(f"load: {what}", flush=True)
+
 def _open_devices(devices:tuple[str, ...]):
   """the devices opened at the same time (most of opening one is waiting for it): the first alone (what they share is made once)"""
   import threading
@@ -1530,10 +1541,9 @@ class QSABlock(TransformerBlock):
       if QSA_KV_ROT and bits != 16:
         hd = self.config.head_dim
         assert hd & (hd - 1) == 0, "QSA_KV_ROT: a Hadamard matrix of a power of two dims"
-        sign = [1 if random.Random(hd + i).random() < 0.5 else -1 for i in range(hd)]
-        m = [[sign[i] * (-1)**bin(i & j).count("1") * hd**-0.5 for j in range(hd)] for i in range(hd)]
-        self._rot_m = Tensor(m, dtype=dtypes.float32, device="CPU").to(x.device).contiguous().realize()
-        if QSA_ROT_FWHT: self._rot_sign = Tensor([float(s) for s in sign], dtype=dtypes.float32, device="CPU").to(x.device).realize()
+        m, sign = _rot_host(hd)
+        self._rot_m = m.to(x.device).contiguous().realize()
+        if QSA_ROT_FWHT: self._rot_sign = sign.to(x.device).realize()
       self.freqs_cis = _freqs(self.config.rope_dim, self.config.max_context, self.config.rope_theta, x.device, self.config.yarn)
     if self.indexer is not None: self.indexer._init_state(x)
 
@@ -2164,7 +2174,9 @@ class Transformer:
     if hasattr(self, "seq_spec_h"): return
     # (the buffers freed by loading are cached for reuse: their memory is the caches')
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].allocator.free_cache()
+    _lap("seq init: cache freed")
     self._init_states()
+    _lap("seq init: states")
     k, n, devs, m = self.config.spec_drafts, self.seq_slots() + 1, cast(tuple[str, ...], self.token_embd.weight.device), max(self.SEQ_SIZES)
     # (the slots' recurrent states in float, SEQ_STATE_HALF: in half)
     for b in self.blk:
@@ -2207,11 +2219,14 @@ class Transformer:
     # (the calls' chunk counts that fit the caches: a short max context's are a few chunks)
     self._move_calls = self._chunk_calls((self.seq_rows() + REGION_ALIGN) // self.SEQ_MOVE - 1)
     self._seq_move_jits = {m: TinyJit(functools.partial(self._seq_move_copy, m), capture_first=True) for m in self._move_calls}
+    _lap("seq init: slots")
     self._seq_stash_init()
+    _lap("seq init: stash")
     todo = [self.seq_spec_h, self.seq_ckpt_h] + [p for b in self.blk if isinstance(b, GatedDeltaNetBlock) for p in (b.pool_rec, *b.pool_conv)] + \
       [b.pool_rp for b in self.blk if isinstance(b, GatedDeltaNetBlock) and hasattr(b, "pool_rp")] + \
       [t for c in self.seq_ckpt_states for t in c] + [idx.pool_state for idx in self._indexers()] + self.seq_ckpt_idx
     _fill_zero(*todo)
+    _lap("seq init: zeroed")
 
   def _seq_copy(self, save:bool, slot:UOp, pm:UOp, ps:UOp, pc:UOp, hrow:UOp, keep:UOp):
     """
@@ -2992,6 +3007,7 @@ class Transformer:
       host_embd = ggml_data_to_tensor(raw, prod(shape), typ).reshape(shape)
       if typ == Q8_0: embd_q8 = raw
     state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads, fuse, row_sel=rows_map)
+    _lap("weights")
     if host_embd is not None: state_dict['token_embd.weight'] = host_embd
     state_dict = {k:v.cast('float16') for k,v in state_dict.items()}
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
@@ -3058,6 +3074,7 @@ class Transformer:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
       Tensor.realize(*params)
     else: model.prepare()
+    _lap("prepared")
     # (the weights' memory: a walk of the model later meets the jits' and the engine's references)
     model._weight_bytes = _bytes_by_device(nn.state.get_parameters(model), devices)
     return model, kv
@@ -3102,7 +3119,9 @@ class Transformer:
         ids -= {id(p) for p in mine}
     Tensor.realize(*[p for p in small if id(p) in ids])
 
-  def _finish_load(self): self._derive_weights()
+  def _finish_load(self):
+    self._derive_weights()
+    _lap("derived")
 
   def _derive_weights(self):
     """the weights computed from the file's"""
