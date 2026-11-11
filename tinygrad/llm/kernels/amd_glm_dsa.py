@@ -1218,7 +1218,7 @@ def _rows_coop_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_fea
       cur = UOp.wmma(afrag, bfrag, cur, *WMMA_ARG)
   update = acc.store(cur)
   if NG // chunk > 1:
-    update, pf = _prefetched(update, rng, NG // chunk - 1)
+    update, pf = _prefetched(update, rng, NG // chunk - 1, (raw, x) if a_stage else None)
     update = UOp.group(update, *pf)
   update = update.end(rng)
   stores = [out[tok.valid(wave < TT), output].store(acc.after(update)[i].load().cast(out.dtype)) for i, tok in enumerate(tokens[0])]
