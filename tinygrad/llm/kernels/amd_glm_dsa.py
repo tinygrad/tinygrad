@@ -3073,13 +3073,15 @@ def moe_route(sel:Tensor, first:Tensor, experts:int, tile:int=MOE_TILE) -> tuple
 
 @functools.cache
 def _moe_combine_kernel(y:UOp, down:UOp, pos:UOp, probs:UOp, *add:UOp, k:int, by_selection:bool=False, row0:int=0,
-                        add_rows:tuple[int, ...]=()) -> UOp:
+                        add_rows:tuple[int, ...]=(), rows:UOp|None=None) -> UOp:
   # y[t] = the sum over the slots j of token t of probs[t, j] * down[pos[t, j]] (the sorted rows): a workgroup per token, a thread its columns.
   # the slots of other devices' experts (pos -1) are skipped by the whole workgroup. the tokens from row0 (of the inputs), each add from its row
   T, D = cast(tuple[int, int], y.shape)
   threads = 256
   per = D // threads
-  t, th, j = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(threads, 1, AxisType.LOCAL), UOp.range(k, 2, AxisType.LOOP)
+  # (rows: the first rows only, see GEMM_PAD)
+  t = UOp.range(T if rows is None else rows.minimum(T), 0, AxisType.GLOBAL)
+  th, j = UOp.range(threads, 1, AxisType.LOCAL), UOp.range(k, 2, AxisType.LOOP)
   p, w = pos[(t + row0) * k + j].load(), probs[(t + row0) * k + j].load()
   if by_selection: p = (p >= 0).where((t + row0) * k + j, -1)  # down has a row per selection
   accs = UOp.alloc((per,), dtypes.float32, addrspace=AddrSpace.REG)
@@ -3102,8 +3104,10 @@ def moe_combine(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Te
   D = int(down.shape[-1])
   y = Tensor.empty(devices*tokens, D, dtype=out_dtype, device=down.device, axis=0 if devices > 1 else None)
   extra = (add.reshape(-1, D).contiguous(),) if add is not None else ()
+  pad = {"rows": _unbind(rt[1])} if getenv("GEMM_PAD", 0) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and \
+    isinstance(rt[1], UOp) else {}
   y = Tensor.custom_kernel(y, down.reshape(-1, D).contiguous(), pos.reshape(-1).contiguous(), probs.float().reshape(-1).contiguous(), *extra,
-                           fxn=functools.partial(_moe_combine_kernel, k=k, by_selection=by_selection))[0]
+                           fxn=functools.partial(_moe_combine_kernel, k=k, by_selection=by_selection, **pad))[0]
   return y.reshape(devices, tokens, D) if devices > 1 else y
 
 def _lanes(t:Tensor) -> list[UOp]:
