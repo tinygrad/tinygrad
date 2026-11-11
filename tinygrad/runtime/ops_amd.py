@@ -87,6 +87,8 @@ def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize ==
 
 AM_IB_MAP = getenv("AM_IB_MAP", 0)
 AMD_SCRATCH_MIN = getenv("AMD_SCRATCH_MIN", 0)  # see AMDDevice.scratch_buffer
+AMD_SCRATCH_MAX = getenv("AMD_SCRATCH_MAX", 0)  # MB, see AMDDevice.scratch_waves
+AMD_SCRATCH_LOG = getenv("AMD_SCRATCH_LOG", 0)  # print the kernels with at least this many scratch bytes a thread
 def _uop_names(u:UOp) -> str:
   """a short name of a signal or a value in a command (AM_IB_MAP): a constant's value, else the names (buffers, variables) it's of"""
   if u.op is Ops.CONST: return str(u.arg)
@@ -543,6 +545,8 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
   def exec(self, call:UOp, prg:UOp):
     data, lib = amd_build_program(self.dev, prg, self.devs)
     self.dev.scratch_buffer(data.private_segment_size) # the queue descriptor holds the scratch
+    if AMD_SCRATCH_LOG and data.private_segment_size >= AMD_SCRATCH_LOG:
+      print(f"{self.dev.device} SCRATCH {data.private_segment_size} B {prg.arg.name}")
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.close_run(len(self.blob))
     self.pkts += [UOp.const(w, dtypes.uint32) if isinstance(w, int) else w
@@ -1198,9 +1202,18 @@ class AMDDevice(Compiled):
     max_scratch_waves = self.cu_cnt * self.iface.props['max_slots_scratch_cu'] * self.xccs
     wave_scratch = ceildiv(lanes_per_wave * size_per_thread, mem_alignment_size)
     num_waves = (size_per_xcc // (wave_scratch * mem_alignment_size)) // (self.se_cnt if self.target[0] != 9 else 1)
+    if self.target[0] != 9 and AMD_SCRATCH_MAX: num_waves = min(num_waves, self.scratch_waves(private_segment_size))
 
     tmpring_t = getattr(hsa, f'union_COMPUTE_TMPRING_SIZE{"_GFX"+str(self.target[0]) if self.target[0] != 9 else ""}_bitfields')
     return int.from_bytes(tmpring_t(WAVES=min(num_waves, max_scratch_waves), WAVESIZE=wave_scratch), 'little')
+
+  def scratch_waves(self, private_segment_size) -> int:
+    """
+    AMD_SCRATCH_MAX (MB): the waves a shader engine runs with scratch at once (TMPRING_SIZE.WAVES) for a kernel of this many bytes a thread, so that
+    a scratch is at most that size (the SPI starts no more: a kernel that spills a lot runs fewer waves at once, the same code, the same numbers)
+    """
+    wave_bytes = round_up(max(private_segment_size, 128), 4) * 64
+    return max(1, (AMD_SCRATCH_MAX << 20) // (wave_bytes * self.se_cnt))
 
   def scratch_buffer(self, private_segment_size, queue:int=0):
     # (the first queue's the largest of every device's kernels, the others' the largest of theirs)
@@ -1212,10 +1225,16 @@ class AMDDevice(Compiled):
     mem_alignment_size = 256 if self.target[0] != 9 else 1024
     size_per_thread = round_up(private_segment_size, mem_alignment_size // lanes_per_wave)
     nbytes = size_per_thread * lanes_per_wave * self.iface.props['max_slots_scratch_cu'] * self.cu_cnt * self.xccs
+    # (capped: every kernel's waves x wave bytes fit in min(this, the cap), see scratch_waves)
+    if self.target[0] != 9 and AMD_SCRATCH_MAX: nbytes = min(nbytes, max(AMD_SCRATCH_MAX << 20, self.scratch_waves(private_segment_size) *
+                                                                         self.se_cnt * size_per_thread * lanes_per_wave))
     if queue:
       if (qb:=self.queue_scratch.get(queue)) is None or qb.nbytes < nbytes:
         qb = self.queue_scratch[queue] = Buffer(self.device, nbytes, options=BufferSpec(nolru=True), preallocate=True)
       return qb
+    if self.max_private_segment_size < private_segment_size and (sc:=getattr(self, 'scratch', None)) is not None and sc.nbytes >= nbytes:
+      self.max_private_segment_size = private_segment_size  # (capped: the one there holds it)
+      if hasattr(self, 'aql_desc'): self.aql_scratch()
     if self.max_private_segment_size < private_segment_size:
       if DEBUG >= 1: print(f"{self.device}: scratch {self.max_private_segment_size} -> {private_segment_size} bytes a thread ({nbytes/1e6:.2f} MB)")
       self.scratch = Buffer(self.device, nbytes, options=BufferSpec(nolru=True), preallocate=True)
