@@ -43,7 +43,8 @@ for T, pos in [(3, 4000), (3, 65000), (3, 200000), (3, PT*KP - 8), (64, 30000), 
     if int(os.environ.get("SCORES", 1)):
       # (the split scores against the whole's, every row's pools before its query: bit-equal?)
       sw = indexer_scores(q, k_rep, w, pools, KP, width=PT).to(devs[0]).numpy()
-      ss = indexer_scores(q, k_sh, w, pools, KP, width=PT).numpy().reshape(N, T, -1)
+      ss_t = indexer_scores(q, k_sh, w, pools, KP, width=PT).realize()
+      ss = ss_t.numpy().reshape(N, T, -1)
       PL = ss.shape[2]
       lp = np.arange(PL)
       for d in range(N):
@@ -53,6 +54,22 @@ for T, pos in [(3, 4000), (3, 65000), (3, 200000), (3, PT*KP - 8), (64, 30000), 
           diff = np.nonzero(sw[r, gp[ok]].view(np.uint32) != ss[d, r, lp[ok]].view(np.uint32))[0]
           if len(diff) and r < 12: print(f"  scores dev {d} row {r}: {len(diff)} of {ok.sum()} differ, first pools {gp[ok][diff[:4]]} "
                                          f"whole {sw[r, gp[ok][diff[:2]]]} split {ss[d, r, lp[ok][diff[:2]]]}")
+      # (every device's candidates: its top TOP of a row's pools before the query, against numpy's of the split scores)
+      import functools
+      cand = Tensor.empty(N*T, TOP, 2, dtype=amd_glm.dtypes.float32, device=devs, axis=0)
+      cand = Tensor.custom_kernel(cand, Tensor(ss_t.uop.after(qs)), amd_glm._device_index(devs), fxn=functools.partial(amd_glm._pool_cand_kernel,
+        q_start=amd_glm._unbind(qs), pools=UOp.const(pools, amd_glm.dtypes.weakint), k=TOP, kpool=KP, n=N))[0].numpy().reshape(N, T, TOP, 2)
+      for d in range(N):
+        gp = (lp//PB)*(PB*N) + d*PB + lp%PB
+        for r in range(T):
+          ok = (gp + 1)*KP <= pos + r + 1
+          v = ss[d, r, lp[ok]]
+          kth = np.sort(v)[-TOP] if len(v) >= TOP else -np.inf
+          got = cand[d, r][cand[d, r, :, 1] >= 0]
+          want = set(gp[ok][v > kth].tolist())
+          have = set(got[:, 1].astype(np.int64).tolist())
+          if not want <= have or len(got) != min(TOP, len(v)) or (got[:, 0] < kth).any():
+            print(f"  cand dev {d} row {r}: valid {len(got)} of {len(v)} missing {sorted(want-have)[:4]} below k-th {(got[:, 0] < kth).sum()}")
     a = pool_index_rows(indexer_scores(q, k_rep, w, pools, KP, width=PT), qs, pools, TOP, KP)
     b = pool_index_shard(indexer_scores(q, k_sh, w, pools, KP, width=PT), qs, pools, TOP, KP, width=PT)
   la, lb = lists(a.to(devs[0]).numpy()), lists(b.to(devs[0]).numpy())
