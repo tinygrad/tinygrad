@@ -3120,7 +3120,7 @@ class Transformer(GLMSeqDriver):
     for b in self.blk + [self.mtp]:
       if isinstance(b, MLATransformerBlock) and b.seq_sharded: seq_views(b.cache_s)
     # (SEQ_Q_PRE: k_b of all the heads on every device, see MLATransformerBlock._q_pre)
-    if getenv("SEQ_Q_PRE", 0):
+    if getenv("SEQ_Q_PRE", 0) or getenv("SEQ_Q_PRE_REP", 0):
       for b in self.blk + [self.mtp]:
         if isinstance(b, MLATransformerBlock) and b.seq_sharded and (w:=b.attn_k_b["weight"]).uop.axis == 0 and w.dtype == dtypes.half:
           b._k_b_rep = w.to(devs[0]).contiguous().shard(devs).realize()
