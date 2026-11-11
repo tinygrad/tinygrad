@@ -74,8 +74,9 @@ def _mop_index(r:UOp, idx:UOp):
   # the valids of the index (the gate of a store) aren't the movement op's: it moves the address, they are put back as they were. (moved
   # with it, the reshape simplifies the address given them and drops the clauses on ranges no longer in the address)
   idxs, valid = tuple(i.get_idx() for i in idx.src[1:]), UOp.const(True).uprod(*[i.get_valid() for i in idx.src[1:]])
-  # the loaded values in the address are variables to the movement op's index math (it would rewrite the stores they are after)
-  if (hidden:=loads_as_variables(UOp.sink(*idxs))) is None: return None
+  # the loaded values in the address are variables to the movement op's index math (it would rewrite the stores they are after). (an
+  # AFTER that isn't a load, e.g. a value after a store: the index math moves as it is, its effects are kept below)
+  if (hidden:=loads_as_variables(UOp.sink(*idxs))) is None: hidden = {}
   idxs, in_shape, arg = tuple(i.substitute(hidden) for i in idxs), r.src[0].shape, r.marg
   if partial := len(idxs) != len(r.shape):
     src_prefix = len(in_shape) - len(r.shape[len(idxs):])
