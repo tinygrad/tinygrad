@@ -5102,11 +5102,16 @@ def rows_pick(xs:list[Tensor], row:UOp, var:UOp, lane0:int) -> Tensor:
     tot = g if tot is None else tot + g
   return cast(Tensor, tot)
 
-@functools.cache
+_device_indices:dict[tuple[str, ...], Tensor] = {}
 def _device_index(devs:tuple[str, ...]) -> Tensor:
-  # the index of every device on it (a kernel's own part). made once (_seq_shared, before the captures): a realize while a jit is traced
-  # walks every live tensor's graph (65 a step jit: 39 of a size-9 step's 92 profiled seconds), as amd_qwen's and amd_glm_dsa's
-  return Tensor(list(range(len(devs))), dtype=dtypes.int32).shard(devs, 0).realize()
+  # the index of every device on it (a kernel's own part). made once outside the jits' captures (_seq_shared, before them): a realize while a
+  # jit is traced walks every live tensor's graph (65 a GLM Flash step jit). one made inside a capture isn't kept: its copy is that jit's work,
+  # another jit would read its buffer before that one ran
+  from tinygrad.engine.jit import capturing
+  if (t:=_device_indices.get(devs)) is not None: return t
+  t = Tensor(list(range(len(devs))), dtype=dtypes.int32).shard(devs, 0).realize()
+  if not capturing: _device_indices[devs] = t
+  return t
 
 @functools.cache
 def _seq_store_kernel(cache:UOp, k:UOp, dev:UOp, start_pos:UOp, T:UOp, n:int) -> UOp:
