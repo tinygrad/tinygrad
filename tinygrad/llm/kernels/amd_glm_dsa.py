@@ -1130,12 +1130,15 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
 
 @functools.cache
 def _rows_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, ggml_type:int, tiles:int=1, waves:int=2,
-                          unroll:int=4, prefetch:bool=True) -> UOp:
+                          unroll:int=4, prefetch:bool=True, chunk:int=0) -> UOp:
   """
   the rows of batched decoding (16 to 64, all in every wave) on the RDNA4 f16 tensor cores: _quant_linear_f16_wmma_kernel's float ops in its
   order (every output tile's accumulator the same chain of WMMAs over the input groups, the same halves), more workgroups (`tiles` output
   tiles of 16 a wave, `waves` a workgroup) and `unroll` groups' weights loaded together, the next ones' while these compute (prefetch)
+  chunk (Q8_0): `chunk` groups a loop iteration, their blocks of a column loaded contiguous and wide by the column's two lanes (half of the
+  blocks each), the words the other lane needs swapped across the halves of the wave (permlanex16)
   """
+  if chunk: unroll = chunk
   T, NG = out.shape[0], in_features // Q8_GROUP_SIZE
   assert T % 16 == 0 and NG % unroll == 0 and out_features % (16*tiles*waves) == 0 and ggml_type not in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S)
   x = x.reshape(-1, in_features)
@@ -1159,13 +1162,43 @@ def _rows_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features
     return tuple((((word >> (b*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float()-zero)*scale-minimum).cast(dtypes.half)
                  for word in words for b in range(4))
   cur = [[acc.after(rng) for acc in output_accs] for output_accs in accs]
+  words_of:dict = {}
+  if chunk:
+    # (raw viewed as half: the loads of a few consecutive words coalesce into one wide load (u16 ones don't))
+    assert ggml_type == Q8_0 and chunk % 2 == 0 and raw.dtype == dtypes.half
+    hb = chunk // 2  # (the blocks of a lane)
+    # the u16 words of a block a lane uses: the scale, then the four u32 weight words of each WMMA half (as _quant_word's)
+    need = [[0] + [1 + 2*(hh*4 + i) + j for hh in range(2) for i in (h, h+2) for j in range(2)] for h in range(2)]
+    for ot, output in enumerate(outputs):
+      # (scalar loads of consecutive words: the coalescer makes them wide loads, _prefetched issues the next chunk's)
+      start = output*output_words + rng*(chunk*17) + physical_half*(hb*17)
+      wl = [raw[start + w].load().bitcast(dtypes.uint16) for w in range(hb*17)]
+      low = physical_half.eq(0)
+      for b in range(hb):
+        own0, own1 = [wl[17*b + n].cast(dtypes.uint32) for n in need[0]], [wl[17*b + n].cast(dtypes.uint32) for n in need[1]]
+        # (lane h=0 holds group b, h=1 group hb+b: each sends the other half's words of its block, two u16 a u32)
+        send = [low.where(own1[k], own0[k]) for k in range(9)]
+        packed = [send[k] | (send[k+1] << 16) if k+1 < 9 else send[k] for k in range(0, 9, 2)]
+        got = [_cfn(False, src=(p,), arg=("__builtin_amdgcn_permlanex16(0, {0}, 0x76543210, 0xfedcba98, false, false)", dtypes.uint32))
+               for p in packed]
+        recv = [((got[k//2] >> (16*(k%2))) & 0xffff) for k in range(9)]
+        for g, mine, own in ((b, low, own0), (hb + b, low.logical_not(), own1)):
+          ws = [mine.where(own[k], recv[k]) for k in range(9)]
+          words_of[(ot, g)] = (ws[0], [ws[1+2*k] | (ws[2+2*k] << 16) for k in range(4)])
+  def bfrag_of(ot:int, output:UOp, u:int, block:UOp, subgroup:UOp, half:int) -> UOp:
+    if not chunk: return UOp.stack(*dequant(output*output_words + block*type_words, subgroup, half))
+    d, words = words_of[(ot, u)]
+    scale = d.cast(dtypes.uint16).bitcast(dtypes.float16).float()  # (_half: _wmma_scale's)
+    zero, minimum = 0, UOp.const(0, dtypes.float)
+    return UOp.stack(*((((word >> (b*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float()-zero)*scale-minimum).cast(dtypes.half)
+                       for word in words[half*2:half*2+2] for b in range(4)))
   for u in range(unroll):
     g = rng*unroll + u
     block, subgroup = g // 8, g % 8
     for half in range(2):
       afrags = tuple(UOp.stack(*(x[tt*16 + col, g*32 + half*16 + i].cast(dtypes.float16) for i in ks)) for tt in range(T // 16))
       for ot, output in enumerate(outputs):
-        bfrag = UOp.stack(*dequant(output*output_words + block*type_words, subgroup, half))
+        bfrag = bfrag_of(ot, output, u, block, subgroup, half)
         for tt, afrag in enumerate(afrags): cur[ot][tt] = UOp.wmma(afrag, bfrag, cur[ot][tt], *WMMA_ARG)
   update = UOp.group(*(acc.store(v) for output_accs, vals in zip(accs, cur) for acc, v in zip(output_accs, vals)))
   if prefetch and NG // unroll > 1:
@@ -1283,7 +1316,9 @@ def _rows_f16_config(tokens:int, out_features:int, in_features:int, ggml_type:in
   unroll = next((u for u in (getenv("ROWS_UNROLL", 4), 4, 2, 1) if NG % u == 0), 1)
   tiles = next((t for t in (getenv("ROWS_TILES", 1), 1) if out_features % (16*t) == 0), 1)
   waves = next((w for w in (getenv("ROWS_WAVES", 2), 2, 1) if out_features % (16*tiles*w) == 0), 1)
-  return dict(tiles=tiles, waves=waves, unroll=unroll, prefetch=bool(getenv("ROWS_PF", 1)))
+  # (ROWS_CHUNK: Q8_0's blocks loaded wide, chunk groups an iteration (0: off))
+  chunk = next((c for c in (getenv("ROWS_CHUNK", 0), 8, 4, 2) if c and ggml_type == Q8_0 and NG % c == 0), 0) if getenv("ROWS_CHUNK", 0) else 0
+  return dict(tiles=tiles, waves=waves, unroll=unroll, prefetch=bool(getenv("ROWS_PF", 1)), chunk=chunk)
 
 def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False, half_out:bool=False) -> Tensor:
   assert layer.ggml_type in QUANT_SIZES
@@ -1367,7 +1402,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # half_out: q8_gemm stores the sums in half (the others in float, then cast)
   half_out = half_out and getattr(fxn, "func", None) is _q8_gemm_kernel
   out = Tensor.empty(out_shape, dtype=dtypes.half if half_out else dtypes.float32, device=x.device, axis=out_axis)
-  result = Tensor.custom_kernel(out, layer.weight, *srcs, fxn=functools.partial(fxn, out_features=local_out, in_features=in_features))[0]
+  w = layer.weight.bitcast(dtypes.half) if isinstance(fxn, functools.partial) and fxn.keywords.get("chunk") else layer.weight
+  result = Tensor.custom_kernel(out, w, *srcs, fxn=functools.partial(fxn, out_features=local_out, in_features=in_features))[0]
   if xh is not None and xh[1] is not None:
     # (the rows scaled into half's range scaled back: every device's rows of its partial sums)
     rs = xh[1] if local_splits > 1 else xh[1].reshape(1, tokens, 1)
