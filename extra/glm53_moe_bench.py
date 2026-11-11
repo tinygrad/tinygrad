@@ -34,7 +34,9 @@ def main():
       d = np.exp(rng.uniform(np.log(1e-4), np.log(0.05), (b.shape[0], 1))) * rng.choice([-1, 1], (b.shape[0], 1))
       b[:, 0:2] = d.astype(np.float16).view(np.uint8)
     # (copies past the 64 MB infinity cache)
-    ws = [Tensor(raw, device=dev).realize() for _ in range(max(1, -(-getenv("WSET_MB", 256)*10**6 // raw.nbytes)))]
+    # (IQ3_S blocks are 110 bytes: halfwords, as the model loads them)
+    wraw = raw.view(np.uint16) if typ == K.IQ3_S else raw
+    ws = [Tensor(wraw, device=dev).realize() for _ in range(max(1, -(-getenv("WSET_MB", 256)*10**6 // raw.nbytes)))]
     down = tn != "iq3_s"
     for T in toks:
       sel_np = np.stack([rng.choice(NEXP, SLOTS, replace=False) for _ in range(T)]).astype(np.int32).reshape(1, T, SLOTS)
