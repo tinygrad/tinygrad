@@ -1720,7 +1720,7 @@ _ATOMIC_LOAD = "__hip_atomic_load({0}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYST
 
 @functools.cache
 def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:int, EP:int, two_shot:bool=False, gather:bool=False,
-                          half:bool=False, triple:bool=False, pack:tuple[int, int]|None=None, scatter:bool=False) -> UOp:
+                          half:bool=False, triple:bool=False, pack:tuple[int, int]|None=None, scatter:bool=False, flag:bool=False) -> UOp:
   # half: two values a word, in half (n is the pairs): what's sent and summed, every device's own too (the same bits everywhere). triple: three
   # (n is the triples), the low 16 bits of the epoch in the word's top 16 (only the calls before and after it share the mailbox)
   # one shot: every device stores its values into its slot in the mailboxes of all the others and polls its own mailbox for theirs (gather:
@@ -1743,7 +1743,11 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   def reg(s:int|UOp, l:UOp) -> UOp: return ((cw*2 + par)*(N+1) + s)*P2P_AR_MAXW + l
   # pack (W, B): W values a word, B bit integers of a shared power of two (8 bits) and an epoch (two shot: the sums of the
   # owner are the packed ones on every device). SEQ uses a separate class with exactly 32 epoch bits; 8 bits wrapped every 256 calls.
-  W = pack[0] if pack is not None else 3 if triple else 2 if half else 1  # the values of a word
+  # flag (P2P_FLAG, half one shot gather / reduce scatter only): words of four halves, no epoch in them; a workgroup's words to a peer are
+  # followed (after the system release) by one flag word with the epoch in the slot's last word, a reader polls the flags then reads the words
+  # (its own mailbox, system scope, after an acquire): the same values, half the bytes of two halves and an epoch a word
+  assert not flag or (half and not triple and pack is None and not two_shot and (gather or scatter) and T*EP < P2P_AR_MAXW), "flagged words"
+  W = 4 if flag else pack[0] if pack is not None else 3 if triple else 2 if half else 1  # the values of a word
   pack_payload, pack_epoch_shift = (pack[0]*pack[1], pack[0]*pack[1]+8) if pack is not None else (0, 0)
   pack_epoch_mask = (1 << min(32, 64-pack_epoch_shift)) - 1 if pack is not None else 0
   assert not triple or half, "three values a word are in half"
@@ -1771,6 +1775,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
       qs = [((x * inv) + 0.5).floor().maximum(-qmax).minimum(qmax).cast(dtypes.int32) for x in v]
       bits = functools.reduce(lambda a,b: a | b, [(q.cast(dtypes.uint64) & ((1 << B) - 1)) << (B*c) for c, q in enumerate(qs)])
       return bits | ((k + 128).cast(dtypes.uint64) << pack_payload) | ((epoch & pack_epoch_mask).cast(dtypes.uint64) << pack_epoch_shift)
+    if flag: return functools.reduce(lambda a,b: a | b, [h(x).cast(dtypes.uint64) << (16*c) for c, x in enumerate(v)])
     if triple: return functools.reduce(lambda a,b: a | b, [h(x).cast(dtypes.uint64) << (16*c) for c, x in enumerate(v)]) | \
                       ((epoch & 0xFFFF).cast(dtypes.uint64) << 48)
     bits = (h(v[0]) | (h(v[1]) << 16)) if half else v[0].bitcast(dtypes.uint32)
@@ -1780,7 +1785,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
       B = pack[1]
       scale = pow2(((w >> pack_payload) & 255).cast(dtypes.int32) - 128)
       return [((((w >> (B*c)) & ((1 << B) - 1)).cast(dtypes.int32) << (32-B)) >> (32-B)).float() * scale for c in range(W)]
-    if triple: return [unh(((w >> (16*c)) & 0xFFFF).cast(dtypes.uint32)) for c in range(3)]
+    if triple or flag: return [unh(((w >> (16*c)) & 0xFFFF).cast(dtypes.uint32)) for c in range(W)]
     lo = (w & 0xFFFFFFFF).cast(dtypes.uint32)
     return [unh(lo & 0xFFFF), unh(lo >> 16)] if half else [lo.bitcast(dtypes.float32)]
   def fresh(g:UOp) -> UOp:
@@ -1807,11 +1812,18 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   if pack is not None: vals = [value(word(v)) for v in vals]
   def ordered_sum(parts:list[UOp]) -> UOp: return functools.reduce(lambda a,b: a+b, parts)
   def mine(s:int, v:list[UOp], w:UOp) -> list[UOp]: return [me.eq(s).where(a, b) for a, b in zip(v, value(w))]
+  FL = P2P_AR_MAXW - 1  # (flag: the word of a slot with the flag)
+  def flagged(sent:UOp) -> list[UOp]:
+    # the flags (the epoch) after the words, a thread of the workgroup a peer; the words once every source's flag has the epoch
+    fl = push([mb[k][reg(me, FL).valid(t.eq(k))].store(epoch.cast(dtypes.uint64) << 32) for k in range(1, N)], sent)
+    flags = poll(fl, [reg(s, FL) for s in range(N)], [me.ne(s) for s in range(N)])
+    acq = _sys('__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "");', dtypes.void, *flags)
+    return [_sys(_ATOMIC_LOAD, dtypes.uint64, mb[0].after(acq)[reg(s, l)]) for s in range(N) for l in li]
   if scatter:
     # (and gather: every device's part of this device, not summed: an all to all, out (N, n))
     assert not two_shot, "a reduce scatter is one shot"
     sent = push([mb[k][reg(me, l)].store(word(v)) for k in range(1, N) for l, v in zip(li, vals_for((me + k) % N))])
-    got = poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li])
+    got = flagged(sent) if flag else poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li])
     # (packed: the device's own part as the others' are, quantized)
     own = [value(word(v)) for v in vals_for(me)] if pack is not None else vals_for(me)
     parts = [[mine(s, v, got[s*EP + i]) for s in range(N)] for i, v in enumerate(own)]
@@ -1819,7 +1831,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     else: stores = [out[e*W + c].store(ordered_sum([p[c] for p in ps])) for e, ps in zip(els, parts) for c in range(W)]
   elif not two_shot:
     sent = push([mb[k][reg(me, l)].store(word(v)) for k in range(1, N) for l, v in zip(li, vals)])
-    got = poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li])
+    got = flagged(sent) if flag else poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li])
     parts = [[mine(s, v, got[s*EP + i]) for s in range(N)] for i, v in enumerate(vals)]
     if gather: stores = [out[s*n*W + e*W + c].store(p[c]) for e, ps in zip(els, parts) for s, p in enumerate(ps) for c in range(W)]
     else: stores = [out[e*W + c].store(ordered_sum([p[c] for p in ps])) for e, ps in zip(els, parts) for c in range(W)]
@@ -1845,12 +1857,13 @@ def p2p_reduce_scatter(p:Tensor, pack:tuple[int, int]|None=None) -> Tensor|None:
   first. one shot peer to peer, the parts in half (pack (W, B): W values of B bits a word with a shared power of two). None: not supported
   (or too big for the mailboxes)"""
   devs = cast(tuple[str, ...], p.device)
-  N, n, W = len(devs), int(p.shape[-1]), 2 if pack is None else pack[0]
+  flag = pack is None and bool(getenv("P2P_FLAG", 0))  # (four halves a word and a flag a workgroup, default off)
+  N, n, W = len(devs), int(p.shape[-1]), (4 if flag else 2) if pack is None else pack[0]
   # (packed: the parts padded to whole words of workgroups of 256)
   m = n if pack is None else next((m for a in (256, 1024) if p2p_ar_shape((m:=round_up(n, W*a)) // W) is not None), n)
-  if m % W or (p2p:=p2p_allreduce(devs)) is None or (shape:=p2p_ar_shape(m // W)) is None: return None
+  if m % W or (p2p:=p2p_allreduce(devs)) is None or (shape:=p2p_ar_shape(m // W)) is None or (flag and prod(shape) >= P2P_AR_MAXW): return None
   out = Tensor.empty(N*m, dtype=dtypes.float32, device=devs, axis=0)
-  fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m//W, T=shape[0], EP=shape[1], half=pack is None, scatter=True, pack=pack)
+  fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m//W, T=shape[0], EP=shape[1], half=pack is None, scatter=True, pack=pack, flag=flag)
   x = p.float() if m == n else p.float().pad((None, None, (0, m-n)))
   out = Tensor.custom_kernel(out, x.reshape(N, N*m).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(N, m)
   return out if m == n else out[:, :n]
@@ -2588,10 +2601,12 @@ def host_allgather_half(x:Tensor) -> Tensor|None:
   """x (devices, n) fp16 values: all N*n values on every device as float32. Paired halves halve mailbox traffic."""
   N, n = int(x.shape[0]), int(x.shape[1])
   if not isinstance(x.device, tuple) or n % 2: return None
-  m = round_up(n, 2*HOST_AR_THREADS)  # an integral number of 256-thread workgroups after pairing
+  # (P2P_FLAG, default off: four halves a word and a flag a workgroup, see _p2p_allreduce_kernel)
+  W = 4 if (flag:=bool(getenv("P2P_FLAG", 0))) else 2
+  m = round_up(n, W*HOST_AR_THREADS)  # an integral number of 256-thread workgroups after pairing
   out = Tensor.empty(N*m, dtype=dtypes.float32, device=x.device)
-  if (p2p:=p2p_allreduce(x.device)) is not None and (shape:=p2p_ar_shape(m // 2)) is not None:
-    fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m//2, T=shape[0], EP=shape[1], gather=True, half=True)
+  if (p2p:=p2p_allreduce(x.device)) is not None and (shape:=p2p_ar_shape(m // W)) is not None and (not flag or prod(shape) < P2P_AR_MAXW):
+    fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m//W, T=shape[0], EP=shape[1], gather=True, half=True, flag=flag)
     return Tensor.custom_kernel(out, x.pad((None, (0, m-n))).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(N, m)[:, :n]
   return None
 

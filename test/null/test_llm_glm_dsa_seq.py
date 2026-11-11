@@ -104,6 +104,11 @@ class TestGLMDSASequence(unittest.TestCase):
     with self.assertRaises(AssertionError):
       Tensor.custom_kernel(out, x, counter, *mb, fxn=functools.partial(_p2p_allreduce_kernel, N=N, n=n, T=256, EP=1, pack=(3, 8), half=True,
                                                                        gather=True))
+    # (P2P_FLAG: four halves a word, a flag a workgroup: the half gather and reduce scatter build)
+    for kw in (dict(gather=True), dict(scatter=True)):
+      out, x = Tensor.empty(N*n*4, dtype="float32"), Tensor.empty(1, N*n*4, dtype="float32")
+      fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n, T=256, EP=1, half=True, flag=True, **kw)
+      self.assertIs(Tensor.custom_kernel(out, x, counter, *mb, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
     # Eight-bit epochs accepted call 1's stale word at call 257. Refuse the old SEQ formats before model construction.
     for unsafe in ("6x8", "4x12", "3x7"):
       with patch.dict(os.environ, {"SEQ_P2P_PACK": unsafe}), self.assertRaises(AssertionError): _seq_p2p_pack()
