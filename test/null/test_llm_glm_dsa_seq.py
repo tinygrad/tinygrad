@@ -2,7 +2,7 @@ import os
 import functools
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 from tinygrad import Tensor, UOp, nn, dtypes, Context
@@ -81,6 +81,37 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertGreaterEqual(model._main_token_rows(), model.seq_rows() + Transformer.REGION_ALIGN + 1)
     model.config = SimpleNamespace(cache_rows=0)
     self.assertEqual(model._main_token_rows(), 65537)
+
+  def test_serial_warmup_covers_largest_prefill_chunk(self):
+    # C9 has (448, 2688): serial startup used to run only 449 and 1, leaving the first 4k request with 4.1 s of cold-JIT work.
+    model = Transformer.__new__(Transformer)
+    model.config = SimpleNamespace(cache_rows=0)
+    model.token_embd = SimpleNamespace(weight=SimpleNamespace(device="CPU"))
+    model.prefill_chunks = lambda: (448, 2688)
+    model.max_context = 262144
+    model._capture_parallel = Mock()
+    model._finish_load = Mock()
+    model.mix_landing = lambda: 0
+    model.batch_slots = lambda: 0
+    model.max_span = lambda: 1
+    model.batch_sizes = lambda: ()
+    model.batch_prefills = lambda: ()
+    model._host_rows = Mock()
+    model._cached_tokens, model._ckpt_tokens = [], []
+    calls = []
+    def generate(tokens):
+      calls.append(len(tokens))
+      yield from (1, 2)
+    model.generate = generate
+    try:
+      for parallel, want in (("0", [2689, 449, 1]), ("1", [449, 1])):
+        calls.clear(), model._capture_parallel.reset_mock()
+        with patch.dict(os.environ, {"WARMUP_PARALLEL": parallel}):
+          glm_dsa.getenv.cache_clear()
+          model.warmup()
+        self.assertEqual(calls, want)
+        self.assertEqual(model._capture_parallel.call_count, int(parallel))
+    finally: glm_dsa.getenv.cache_clear()
 
   def test_q8_pack_needs_whole_warps_of_groups(self):
     # (MLA's 576 dims (18 groups of 32): the kernels pack 8 groups a warp, the last 2 would be left out: refused, mla_sparse_seq sends half)

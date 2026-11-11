@@ -3631,7 +3631,8 @@ class Transformer(GLMSeqDriver):
     def lap(what:str):
       if getenv("DEBUG_LOAD", 1): print(f"warmup: {what} at {time.perf_counter()-st:.2f}s", flush=True)
     # (a sequence sharded cache (a long context): one after the other, the weights read before the caches are made (their memory is the device's))
-    if getenv("WARMUP_PARALLEL", 0 if seq_sharded(self.token_embd.weight.device) else 1): self._capture_parallel(sizes)
+    parallel = getenv("WARMUP_PARALLEL", 0 if seq_sharded(self.token_embd.weight.device) else 1)
+    if parallel: self._capture_parallel(sizes)
     lap("captured")
     self._finish_load()
     lap("load finished")
@@ -3641,8 +3642,10 @@ class Transformer(GLMSeqDriver):
       k = self.config.spec_drafts
       for m, G, P in sorted(itertools.product(self.mix_sizes(), range(1, land+1), self.MIX_PS), key=lambda x: -x[0]*(k+1)-x[1]*x[2]):
         self.batch_mixed_step([([0]*(k+1), 1, 0, 1, 0.0)] * m, [([0], self.decode_slots() + g, 0.0, 0) for g in range(G)], P=P)
-    # the big chunk first: its scratch memory is the most, the other jits share it. a prompt one past a size runs the next one (1: the smallest)
-    for n in sorted({1, *(s + 1 for s in sizes[:-1])}, reverse=True):
+    # The big chunk first: its scratch memory is the most, the other jits share it. A prompt one past a size runs the next one (1: smallest).
+    # Parallel capture covers every size; without it, execute the big chunk too or the first real prefill pays its JIT/allocation cost.
+    warm_chunks = sizes[:-1] if parallel else sizes
+    for n in sorted({1, *(s + 1 for s in warm_chunks)}, reverse=True):
       self._cached_tokens, self._ckpt_tokens = [], []
       list(zip(range(4), self.generate([0] * min(n, self.max_context - 8))))
       lap(f"generate {n}")
