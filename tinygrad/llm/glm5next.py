@@ -625,6 +625,14 @@ def _freqs(dim:int, end:int, theta:float, device:str|tuple[str, ...]|None, yarn:
   """the rope table (one for every block of the same)"""
   return precompute_freqs_cis(dim, end, theta, device=device, yarn=yarn).realize()
 
+_t_import = time.perf_counter()
+def _lap(what:str):
+  """DEBUG_LOAD=1: a line when loading gets past `what` (seconds since the import, the epoch: the launcher's start is known in epoch)"""
+  if getenv("DEBUG_LOAD"):
+    from tinygrad.device import alloc_stats
+    print(f"load: {what} at {time.perf_counter()-_t_import:.2f}s epoch {time.time():.2f} ({alloc_stats[0]} allocations in {alloc_stats[1]:.2f}s)",
+          flush=True)
+
 def _open_devices(devices:tuple[str, ...]):
   """the devices opened at the same time (most of opening one is waiting for it): the first alone (what they share is made once)"""
   import threading
@@ -4463,6 +4471,7 @@ class Transformer:
     # the memory of everything the jits read made first (the derived weights', the states'), the jits compiled while the weights are read and
     # what's computed from them, the states zeroed, the n-gram table copied
     st = time.perf_counter()
+    _lap("seq_warmup")
     self._derive_weights()
     with _zero_deferred() as zero_bufs: self._seq_init()
     self._seq_shared(read=False)
@@ -4547,8 +4556,10 @@ class Transformer:
       calls = {k: v for k, v in calls.items() if k.startswith(str(only))}
     if DEBUG >= 1:
       for i, (_, call) in enumerate(par): print(f"seq_warmup: jit {i}: {getattr(call, 'func', call)} {getattr(call, 'args', '')}"[:160])
+    _lap("capture_parallel")
     if getenv("WARMUP_PARALLEL", 1): capture_parallel(par, meanwhile)
     else: meanwhile(lambda j, wait=True: False)
+    _lap("captured")
     if DEBUG >= 1: print(f"seq_warmup: {len(par)} jits compiled at {time.perf_counter()-st:.2f}s")
     for name, (jit, call) in calls.items():
       if name in ran: continue
@@ -4972,6 +4983,7 @@ class Transformer:
     defer_load = False
     # TODO: remove the need for copy to default device
     kv, entries = gguf_parse(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
+    _lap("parsed")
     # deferred: the files are read ahead from now (the disk works while the model is made, the loader finds them in memory)
     # (not the n-gram table: read to host memory by its loader, see _ple_dev_init)
     if defer_load: _read_ahead(entries, skip=("per_layer_token_embd.weight",))
@@ -5064,8 +5076,10 @@ class Transformer:
       pads = {k: sizes[k] for k in sizes if sizes[k] != entries[k][1][shard_map[k]]}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
     _open_devices(devices)
+    _lap("devices opened")
     # (the compile workers started and warmed up while the weights are read)
     warm_worker_pool(devices[0])
+    _lap("pool started")
     # gate and up experts of the same format load as one (fuse_gate_up)
     # (a pair in different files of a split gguf isn't: a fused read is of the gate's file. prepare fuses it on the devices)
     def file_of(data:Tensor) -> str|None:
@@ -5085,6 +5099,7 @@ class Transformer:
     # (LOAD_DEFER: the files read while the jits compile, see seq_warmup)
     state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads if shard > 1 else {}, fuse, row_sel=rows_map,
                                   pending=pending if getenv("LOAD_DEFER", 0) else None)
+    _lap("weights")
     if host_embd is not None: state_dict['token_embd.weight'] = host_embd
 
     # all state items should be float16, not float32
@@ -5200,6 +5215,7 @@ class Transformer:
       # rows two contexts (262144: 524288 rows, with 16 slots and SEQ_STASH_GB=4 in a 6x24 GB C5's memory; C6/C7 have more))
       cache_rows=round_up(getenv("SEQ_ROWS", 2*max_context if glm_seq else 0), REGION_ALIGN) if arch == 'qwen4exp' or glm_seq else 0)
     with Linear.empty_init(): model = Transformer(config)  # (the weights are loaded)
+    _lap("model made")
     # (the file's KV heads: repeated so every device holds one, device d holds head d*n//devices)
     model._kv_real = kv[f'{arch}.attention.head_count_kv']
     # gate experts loaded with the up rows (fused): one weight of twice the rows
@@ -5212,6 +5228,7 @@ class Transformer:
         del b.ffn_up_exps
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
+    _lap("state loaded")
     model._pending_load, model._loaded = pending, True
     # (the n-gram table: the bytes in the gguf file, mmapped, or a copy in host memory)
     if ple_entry is not None:
@@ -5222,6 +5239,7 @@ class Transformer:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
       Tensor.realize(*params)
     else: model.prepare()
+    _lap("prepared")
     return model, kv
 
   def prepare(self):

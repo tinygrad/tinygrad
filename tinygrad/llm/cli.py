@@ -191,6 +191,9 @@ def main():
   parser.add_argument("--no_chat_template", action="store_true", help="Don't use the model's chat template, always use the fallback template")
   parser.add_argument("--shard", type=int, default=1, help="Tensor parallel device count")
   args = parser.parse_args()
+  if getenv("DEBUG_LOAD"):
+    import os
+    print(f"load: main at epoch {time.time():.2f} (the process made at epoch {os.stat('/proc/self').st_ctime:.2f})", flush=True)
   # (SIGTERM exits as an interrupt does: the devices are finalized (am: their queues stopped, the clocks at their lowest), not left pinned high)
   signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
   if args.benchmark: args.max_context = max(args.max_context, round_up(sum(args.benchmark)+1, 1024))
