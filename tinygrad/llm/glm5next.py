@@ -1993,7 +1993,7 @@ class Indexer:
       if picks is not None: qb = Tensor(qb.uop.after(*picks.uop.src[1:]))  # after the last block's lists: its scores are done
       if picks is None: picks = Tensor.empty(rows, k*idx.kpool + idx.kpool + 1, dtype=dtypes.int32, device=x.device)
       sc = indexer_scores(qb, pk, weights[r0:r0+block], pools, idx.kpool, pbase=pb, width=self.max_pools)
-      picks = pool_index_shard(sc, start_pos, pools, k, idx.kpool, row0=r0, out=picks) if self.shard else \
+      picks = pool_index_shard(sc, start_pos, pools, k, idx.kpool, row0=r0, out=picks, width=self.max_pools) if self.shard else \
               pool_index_rows(sc, start_pos, pools, k, idx.kpool, row0=r0, out=picks)
     return unwrap(picks)[:Tq]
 
