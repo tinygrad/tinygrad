@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""SEQ_IDX_SHARD exactness: the indexer's lists from pooled keys split over the devices (pool_index_shard) against the whole keys on every
+device (pool_index_rows), same random fp8 keys by pool. decode rows (indexer_decode_index_rows) and a prefill block (indexer_scores) at a
+few positions, with ties (TIES=1: some keys zero, their scores 0). GPU box only, all devices:
+  DEV=AMD PYTHONPATH=. python3 extra/glm_idxshard_check.py
+"""
+import os
+import numpy as np
+from tinygrad import Tensor, Device, dtypes, UOp
+from tinygrad.llm.kernels import amd_glm
+from tinygrad.llm.kernels.amd_glm import SEQ_BLK, indexer_decode_index_rows, indexer_scores, pool_index_rows, pool_index_shard
+
+N, H, D, KP, TOP = int(os.environ.get("NDEV", 6)), 32, 128, 4, 512
+PT = int(os.environ.get("PT", 66048))  # a region's pools (264,192 rows / 4)
+devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
+rng = np.random.default_rng(int(os.environ.get("SEED", 0)))
+key = (rng.integers(0, 0x7F, size=(PT, 128), dtype=np.uint8) | (rng.integers(0, 2, size=(PT, 128), dtype=np.uint8) << 7)).view(np.uint32)
+key = np.concatenate([key, np.full((PT, 1), np.array([1e-3/256], dtype=np.float32).view(np.uint32)[0], dtype=np.uint32)], axis=1)
+if int(os.environ.get("TIES", 1)): key[rng.random(PT) < 0.3, :32] = 0  # (zero keys: scores 0, ties at the k-th)
+PB = SEQ_BLK // KP
+loc = np.arange(PT // N)
+k_rep = Tensor(np.ascontiguousarray(key)).shard(devs).realize()
+k_sh = Tensor(np.ascontiguousarray(np.concatenate([key[(loc//PB)*(PB*N) + d*PB + loc%PB] for d in range(N)]))).shard(devs, axis=0).realize()
+assert amd_glm._idx_shard(k_sh) == N and not amd_glm._idx_shard(k_rep)
+
+def lists(o:np.ndarray) -> list:
+  return [(int(r[-1]), r[:r[-1]].tobytes()) for r in o]
+
+fails = 0
+for T, pos in [(3, 4000), (3, 65000), (3, 200000), (3, PT*KP - 8), (64, 30000), (64, 131000)]:
+  q = Tensor((rng.standard_normal((T, H, D)) * 0.5).astype(np.float16)).shard(devs).realize()
+  w = Tensor((rng.standard_normal((T, H)) * 0.1).astype(np.float32)).shard(devs).realize()
+  qs = UOp.variable("start_pos", 0, PT*KP).bind(pos)
+  pools = (pos + T + KP - 1) // KP
+  if T <= 8:
+    a = indexer_decode_index_rows(q, k_rep, w, qs, pools, TOP, KP, width=PT)
+    b = indexer_decode_index_rows(q, k_sh, w, qs, pools, TOP, KP, width=PT)
+  else:
+    a = pool_index_rows(indexer_scores(q, k_rep, w, pools, KP, width=PT), qs, pools, TOP, KP)
+    b = pool_index_shard(indexer_scores(q, k_sh, w, pools, KP, width=PT), qs, pools, TOP, KP, width=PT)
+  la, lb = lists(a.to(devs[0]).numpy()), lists(b.to(devs[0]).numpy())
+  bad = [i for i, (x, y) in enumerate(zip(la, lb)) if x != y]
+  fails += len(bad)
+  print(f"T={T} pos={pos}: rows {len(la)} differ {len(bad)} counts {[x[0] for x in la[:3]]} vs {[y[0] for y in lb[:3]]}", flush=True)
+  for i in bad[:2]:
+    xa, xb = np.frombuffer(la[i][1], np.int32)//KP, np.frombuffer(lb[i][1], np.int32)//KP
+    sa, sb = set(xa.tolist()), set(xb.tolist())
+    print(f"  row {i}: only whole {sorted(sa-sb)[:8]} only split {sorted(sb-sa)[:8]} same set {sa==sb}")
+print("IDXSHARD_CHECK", "PASS" if fails == 0 else f"FAIL {fails}")
