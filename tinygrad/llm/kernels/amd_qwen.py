@@ -1719,15 +1719,15 @@ def comm_state_report() -> str:
               # (a device behind: its inbox's words of the chunk against the ones the device before it has of the same part (what it forwarded,
               # an all gather's), a slot's differing words: count, first ones (word in the chunk's region))
               if cnt[d][ch] < top[ch]:
-                W, cmp = RING_MAXW // CH, []
+                W, cmp = st.maxw // CH, []
                 for sl in range(N):
                   if sl in (d, (d-1) % N): continue
-                  at = ((par*N + sl)*RING_MAXW + ch*W)*4
+                  at = ((par*N + sl)*st.maxw + ch*W)*4
                   mine, prev = (struct.unpack(f"<{W}I", _peek(b, at, W*4)) for b in (st.inbox_bufs[d], st.inbox_bufs[(d-1) % N]))
                   bad = [i for i in range(W) if mine[i] != prev[i]]
                   cmp.append(f"s{sl}: {len(bad)} {[(i, hex(mine[i]), hex(prev[i])) for i in bad[:4]]}")
                 line += f"\n    d{d} inbox vs d{(d-1) % N}: " + " | ".join(cmp)
-                line += f"\n    d{d} {_overlaps(st.inbox_bufs[d], [((par*N + sl)*RING_MAXW + ch*W)*4 for sl in range(N)], W*4)}"
+                line += f"\n    d{d} {_overlaps(st.inbox_bufs[d], [((par*N + sl)*st.maxw + ch*W)*4 for sl in range(N)], W*4)}"
         out.append(line)
       elif isinstance(st, FlagAllreduce):
         cnt = [struct.unpack(f"<{st.groups+1}I", _peek(b, 0, (st.groups+1)*4)) for b in st.counter_bufs]
@@ -2084,11 +2084,14 @@ def flag_all_gather(x:Tensor, axis:int, dtype=None) -> Tensor|None:
 
 SEL_LANE_BASE = 8  # (the lanes from it are the micro batches' second ones (model.SEL_LANE): the same queue)
 RING_MAXW = getenv("RING_MAXW", 1 << 20)  # words a part (a slot of the inbox: 4 MB, a prefill's part of 4608 rows of q8 is 2.2 MB)
+# (RING_MAXW_DEC: the decoding lanes' (from DEC_LANE) slot words: their exchanges are of a step's rows (C2, 28 sequences: <= 86k words, 352 a
+# chunk of 512): 1<<18 is 38 MB a card less, the same exchanges)
+RING_MAXW_DEC = getenv("RING_MAXW_DEC", RING_MAXW)
 
 class RingMailbox:
-  def __init__(self, devs:tuple[str, ...], chunks:int):
+  def __init__(self, devs:tuple[str, ...], chunks:int, maxw:int=RING_MAXW):
     from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
-    N = len(devs)
+    N, self.maxw = len(devs), maxw
     def mapped(nbytes:int, dtype:DType) -> tuple[Tensor, Tensor]:
       # (zeroed: a flag the last process left could have an epoch this one waits for. uncached on the device, uncached in the previous one's)
       own = [Buffer(d, nbytes, options=BufferSpec(uncached=True)).ensure_allocated() for d in devs]
@@ -2102,7 +2105,7 @@ class RingMailbox:
       return Tensor(UOp.from_buffer(m0, dtype, devs)), Tensor(UOp.from_buffer(m1, dtype, devs))
     inits:list[tuple[Buffer, bytes]] = []
     with Context(ALLOW_DEVICE_USAGE=1):
-      self.inbox, self.inbox_next = mapped(2*N*RING_MAXW*4, dtypes.uint32)
+      self.inbox, self.inbox_next = mapped(2*N*maxw*4, dtypes.uint32)
       self.inbox_bufs = [b for b, _ in inits[-N:]]
       self.flags, self.flags_next = mapped(2*N*chunks*8, dtypes.uint64)
       self.flag_bufs = [b for b, _ in inits[-N:]]
@@ -2136,9 +2139,12 @@ def ring_g(units:int=0) -> int:
 # exchanges have 32 to 64 of them: their chunks' epochs move apart, a slot shared by two chunks can be overwritten by a device a kernel ahead
 # before the next one read it: a hang). the most chunks of a lane: 8 workgroups (prefill), 64 (decoding))
 def _ring_chunks(G:int) -> int: return (G if G <= 8 else 64) * RING_W
-def _ring_fits(G:int, R:int, span:int) -> bool:
+# (a mailbox's slot words to its kernels, when not the default (the default's kernels as they were))
+def _maxw_kw(mb:RingMailbox) -> dict[str, int]: return {} if mb.maxw == RING_MAXW else {"maxw": mb.maxw}
+def ring_maxw() -> int: return RING_MAXW_DEC if FLAG_LANE[0] >= DEC_LANE else RING_MAXW
+def _ring_fits(G:int, R:int, span:int, maxw:int=RING_MAXW) -> bool:
   """the rounds and words of a chunk fit in its slots"""
-  return R <= RING_CMAX // _ring_chunks(G) and span <= RING_MAXW // _ring_chunks(G)
+  return R <= RING_CMAX // _ring_chunks(G) and span <= maxw // _ring_chunks(G)
 def _ring_rounds(units:int, per_round:int, G:int) -> tuple[int, int, int]:
   """(workgroups, rounds, units of a wave a round) of units over the waves of G workgroups (per_round: the most a wave a round)"""
   per_wave = -(-units // (G * RING_W))
@@ -2157,7 +2163,7 @@ def _ring_mailbox(devs:tuple[str, ...], lane:int=0) -> RingMailbox|None:
   if len(devs) < 3 or not amd_custom_kernels_supported(devs): return None
   if not RING_SEL and lane % DEC_LANE >= SEL_LANE_BASE: return None
   if any(_gfx(d) not in (11, 12) for d in devs): return None
-  _COMM_STATE.append((f"ring lane {lane}", lane, ret:=RingMailbox(devs, RING_CMAX)))
+  _COMM_STATE.append((f"ring lane {lane}", lane, ret:=RingMailbox(devs, RING_CMAX, RING_MAXW_DEC if lane >= DEC_LANE else RING_MAXW)))
   return ret
 
 RING_DEADLINE:list[UOp|None] = [None]
@@ -2198,11 +2204,11 @@ def _wave_sum(c:UOp) -> UOp:
 
 _LOAD_SYS64 = "__hip_atomic_load({0}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM)"
 
-def _ring_common(counter:UOp, N:int, dbg:UOp, G:int, tag:int=0, R:int=1, span:int=0):
+def _ring_common(counter:UOp, N:int, dbg:UOp, G:int, tag:int=0, R:int=1, span:int=0, maxw:int=RING_MAXW):
   # (span: the words of a chunk in the kernel's layout, from ch*span)
   W, C, CH = RING_W, G*RING_W, _ring_chunks(G)
   assert G <= 8 or 32 <= G <= 64, f"ring: {G} workgroups"
-  assert _ring_fits(G, R, span), f"ring: {R} rounds, {span} words a chunk of {CH}"
+  assert _ring_fits(G, R, span, maxw), f"ring: {R} rounds, {span} words a chunk of {CH}"
   cid = [UOp.const(0, dtypes.weakint)]  # (the round, set by the kernel)
   wg, warp, lane = UOp.range(G, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
   ch = wg*W + warp
@@ -2213,7 +2219,7 @@ def _ring_common(counter:UOp, N:int, dbg:UOp, G:int, tag:int=0, R:int=1, span:in
   dbgs:list[UOp] = []
   par = (epoch & 1).cast(dtypes.weakint)
   def fslot(s:UOp|int) -> UOp: return (par*N + s)*RING_CMAX + ch*(RING_CMAX // CH) + cid[0]
-  def islot(s:UOp|int, e:UOp, valid:UOp) -> UOp: return ((par*N + s)*RING_MAXW + ch*(RING_MAXW // CH) + (e - ch*span)).valid(valid)
+  def islot(s:UOp|int, e:UOp, valid:UOp) -> UOp: return ((par*N + s)*maxw + ch*(maxw // CH) + (e - ch*span)).valid(valid)
   def recv(after:UOp, flags:UOp, inbox:UOp, s:UOp|int, at:list[tuple[UOp, UOp]], mult:list[UOp], step:int=0) -> list[UOp]:
     # this device's inbox: the flag of slot s for the epoch, then the words at (index, valid) until their checksum is the flag's (the words
     # not valid are 0, as the sender's)
@@ -2246,10 +2252,11 @@ def _ring_common(counter:UOp, N:int, dbg:UOp, G:int, tag:int=0, R:int=1, span:in
   return C, wg, warp, lane, ch, me, recv, send, finish, at_round, end_round
 
 @functools.cache
-def _ring_ag_kernel(out:UOp, x:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flags:UOp, flags_next:UOp, dbg:UOp, *, N:int, n:int, G:int=8) -> UOp:
+def _ring_ag_kernel(out:UOp, x:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flags:UOp, flags_next:UOp, dbg:UOp, *, N:int, n:int, G:int=8,
+                    maxw:int=RING_MAXW) -> UOp:
   # out (N*n words): part s from the device at s, x (n words) this device's. a wave's words in R rounds of EP a lane
   G, R, EP = _ring_rounds(-(-n // 32), 32, G)  # (rows of 32 words: a word a lane)
-  C, wg, warp, lane, ch, me, recv, send, finish, at_round, end_round = _ring_common(counter, N, dbg, G, n << 10, R, R*EP*32)
+  C, wg, warp, lane, ch, me, recv, send, finish, at_round, end_round = _ring_common(counter, N, dbg, G, n << 10, R, R*EP*32, maxw)
   mult = [(2*(i*32 + lane) + 1).cast(dtypes.uint32) for i in range(EP)]
   def step(k:UOp|int, dep:list[UOp], rid:int, first:bool, last:bool) -> UOp:
     s = (me - k + N) % N
@@ -2274,7 +2281,7 @@ def _ring_ag_kernel(out:UOp, x:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flag
 
 @functools.cache
 def _ring_rs_q8_kernel(out:UOp, p:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flags:UOp, flags_next:UOp, dbg:UOp, *, N:int, size:int,
-                       G:int=8) -> UOp:
+                       G:int=8, maxw:int=RING_MAXW) -> UOp:
   # p (size) this device's partials, out (size/N) the sum of part me (float). in step k a device adds its partials of part me-k-1 to what
   # came (the sum of the devices before it), sends it on as int8 groups of 32 with their scale (q8_pack), the last its own. a wave's groups in
   # R rounds of EP (8 groups a wave, four lanes a group: eight values a lane)
@@ -2283,7 +2290,7 @@ def _ring_rs_q8_kernel(out:UOp, p:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, f
   out = out.reshape(-1)
   G, R, EP = _ring_rounds(-(-BG // 8), 4, G)
   C, wg, warp, lane, ch, me, recv, send, finish, at_round, end_round = _ring_common(counter, N, dbg, G, (1 << 31) | (size >> 8 << 10), R,
-                                                                                    R*EP*72)
+                                                                                    R*EP*72, maxw)
   sub = lane % 4
   def step(k:UOp|int, dep:list[UOp], rid:int, last:bool, first:bool) -> UOp:
     # step k: the partials of part me-k-1 plus what came (k > 0), sent on (or stored: the last step)
@@ -2365,13 +2372,14 @@ def ring_all_gather_words(x:Tensor) -> Tensor|None:
   """x (N, n) 32 bit words split on the devices: (N*n,) on every device, around the ring. None: not supported"""
   devs = x.device
   if not isinstance(devs, tuple) or x.uop.axis != 0 or x.ndim != 2 or x.dtype.itemsize != 4 or not isinstance(n:=x.shape[1], int): return None
-  if n > RING_MAXW: return None
+  if n > (maxw:=ring_maxw()): return None
   G, R, EP = _ring_rounds(-(-n // 32), 32, ring_g())
-  if not _ring_fits(G, R, R*EP*32) or (mb:=ring_mailbox(devs)) is None: return None
+  if not _ring_fits(G, R, R*EP*32, maxw) or (mb:=ring_mailbox(devs)) is None: return None
   # (out of x's dtype: no bitcast copies of x and out (a kernel each))
   out = Tensor.empty(len(devs)*n, dtype=x.dtype, device=devs)
   return _ring_queued(Tensor.custom_kernel(out, x.contiguous(), mb.counter, mb.inbox, mb.inbox_next, mb.flags,
-                                          mb.flags_next, mb.dbg, fxn=functools.partial(_ring_ag_kernel, N=len(devs), n=n, G=ring_g()))[0])
+                                          mb.flags_next, mb.dbg, fxn=functools.partial(_ring_ag_kernel, N=len(devs), n=n, G=ring_g(),
+                                                                                **_maxw_kw(mb)))[0])
 
 def ring_reduce_scatter_q8(p:Tensor, size:int, shape:tuple[int, ...]|None=None, axis:int=0) -> Tensor|None:
   """
@@ -2382,10 +2390,11 @@ def ring_reduce_scatter_q8(p:Tensor, size:int, shape:tuple[int, ...]|None=None, 
   if not isinstance(devs, tuple) or size % (len(devs)*256): return None
   units = -(-(size//len(devs)//32) // 8)
   G, R, EP = _ring_rounds(units, 4, ring_g(units))
-  if G*RING_W*R*EP*72 > RING_MAXW or not _ring_fits(G, R, R*EP*72) or (mb:=ring_mailbox(devs)) is None: return None
+  if G*RING_W*R*EP*72 > (maxw:=ring_maxw()) or not _ring_fits(G, R, R*EP*72, maxw) or (mb:=ring_mailbox(devs)) is None: return None
   out = Tensor.empty(*(shape or (size,)), dtype=dtypes.float32, device=devs, axis=axis if shape else 0)
   return _ring_queued(Tensor.custom_kernel(out, p.reshape(len(devs), size).contiguous(), mb.counter, mb.inbox, mb.inbox_next, mb.flags,
-                                          mb.flags_next, mb.dbg, fxn=functools.partial(_ring_rs_q8_kernel, N=len(devs), size=size, G=G))[0])
+                                          mb.flags_next, mb.dbg, fxn=functools.partial(_ring_rs_q8_kernel, N=len(devs), size=size, G=G,
+                                                                                **_maxw_kw(mb)))[0])
 
 
 # ******** sequence parallel: the rows of a tensor split over the devices ********
