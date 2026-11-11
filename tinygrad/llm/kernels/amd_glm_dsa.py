@@ -1783,6 +1783,17 @@ def p2p_ar_shape(n:int) -> tuple[int, int]|None:
     if n % (T*EP) == 0 and n // (T*EP) <= P2P_AR_MAXG: return T, EP
   return None
 
+def p2p_a2a_shape(n:int) -> tuple[int, int]|None:
+  """
+  (threads, words a thread) of a one shot all to all of n words a part: a word a thread in up to P2P_AR_MAXG workgroups (every thread's words go
+  to a different place in every peer: more threads, not more words each. measured ts5 14 R9700, 4 rows of mla_sparse_seq (10496 floats a part):
+  64x4 126.7 us, 256x1 90.5, flag 128x1 62.7), else p2p_ar_shape's
+  """
+  if getenv("P2P_A2A_EP1", 1):
+    for T in (256, 128):
+      if n % T == 0 and n // T <= P2P_AR_MAXG: return T, 1
+  return p2p_ar_shape(n)
+
 def _sys(fmt:str, dtype:DType, *src:UOp) -> UOp: return _cfn(False, src=src, arg=(fmt, dtype))
 
 _ATOMIC_LOAD = "__hip_atomic_load({0}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM)"
@@ -1960,8 +1971,8 @@ def p2p_all_to_all(p:Tensor) -> Tensor|None:
   devs = cast(tuple[str, ...], p.device)
   N, n = len(devs), int(p.shape[-1])
   # (P2P_FLAG, default off: two floats a word and a flag a workgroup, see _p2p_allreduce_kernel)
-  W = 2 if (flag:=bool(getenv("P2P_FLAG", 0)) and n % 2 == 0 and (fs:=p2p_ar_shape(n // 2)) is not None and prod(fs) < P2P_AR_MAXW) else 1
-  if (p2p:=p2p_allreduce(devs)) is None or (shape:=p2p_ar_shape(n // W)) is None: return None
+  W = 2 if (flag:=bool(getenv("P2P_FLAG", 0)) and n % 2 == 0 and (fs:=p2p_a2a_shape(n // 2)) is not None and prod(fs) < P2P_AR_MAXW) else 1
+  if (p2p:=p2p_allreduce(devs)) is None or (shape:=p2p_a2a_shape(n // W)) is None: return None
   out = Tensor.empty(N*N*n, dtype=dtypes.float32, device=devs, axis=0)
   fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n//W, T=shape[0], EP=shape[1], scatter=True, gather=True, flag=flag)
   return Tensor.custom_kernel(out, p.float().reshape(N, N*n).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(N, N*n)
