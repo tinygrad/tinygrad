@@ -230,6 +230,11 @@ def _iq4_scale(raw:UOp, base:UOp, subgroup:UOp) -> UOp:
   scale = ((low >> (4*subgroup)) & 15) | (((header >> (16+2*subgroup)) & 3) << 4)
   return _half(header) * (scale.cast(dtypes.int32)-32).float()
 
+def _iq4_scale_parts(raw:UOp, base:UOp, subgroup:UOp) -> tuple[UOp, UOp]:
+  header, low = raw[base].load(), raw[base+1].load()
+  scale = ((low >> (4*subgroup)) & 15) | (((header >> (16+2*subgroup)) & 3) << 4)
+  return _half(header), (scale.cast(dtypes.int32)-32).float()
+
 _tables:dict[tuple, Tensor] = {}
 def _table(key:tuple, device:str|tuple[str, ...]|None, values:tuple[int, ...], dtype:DType) -> Tensor:
   """
@@ -588,7 +593,10 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
       d, dmin, scale, minimum = _q5_scales(raw, base, subgroup)
       total = dots[0].float()*d*scale - (xs[token, group, 0].load()+xs[token, group, 1].load())*dmin*minimum
     elif ggml_type == IQ4_XS:
-      total = dots[0].float() * _iq4_scale(raw, base, subgroup)
+      # (the bundles: dot*d*scale left to right as the per-row kernel's code computes it (the renderer drops the parentheses of
+      # dot*(d*scale)); d*scale shared by a bundle's rows would be one value, a product rounded differently)
+      if bundle is not None: total = dots[0].float() * (parts:=_iq4_scale_parts(raw, base, subgroup))[0] * parts[1]
+      else: total = dots[0].float() * _iq4_scale(raw, base, subgroup)
     elif ggml_type == Q6_K:
       # Subtract the quant offset via the activation sums instead of unpacking signed bytes.
       scales = [(raw[base+96+subgroup] >> (h*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float() for h in range(2)]
