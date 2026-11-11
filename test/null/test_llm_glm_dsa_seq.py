@@ -409,7 +409,11 @@ class TestGLMDSASequence(unittest.TestCase):
 
   def test_moe_exact_bundles(self):
     # (MOE_EXACT_MIN: rows from it below MOE_BUNDLE_MIN in bundles of MOE_EXACT_M stored in float (the per-row kernel's values), fewer per row)
-    import tinygrad.llm.kernels.amd_glm_dsa as K
+    import tinygrad.llm.kernels.amd_glm_dsa as K_dsa, tinygrad.llm.kernels.amd_glm as K_glm
+    for K in (K_dsa, K_glm):
+      with self.subTest(K.__name__): self._moe_exact_bundles(K)
+
+  def _moe_exact_bundles(self, K):
     E, fin, fout = 4, 256, 64
     w = Tensor.empty(E*fout*fin*K.QUANT_SIZES[K.IQ4_XS]//256//4, dtype=dtypes.uint32)
     first = Tensor([0], dtype=dtypes.int32)

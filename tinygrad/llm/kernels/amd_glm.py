@@ -3374,13 +3374,17 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
   xq = q8_quantize(x, tokens*x_slots, in_features)
   wmma = bool(MOE_WMMA) and ggml_type in MOE_WMMA_QUANTS and _wmma_rdna4(x.device) and tokens >= MOE_WMMA_MIN and out_features % 32 == 0 and \
     in_features % GGML_BLOCK_SIZE == 0
-  if (M:=(16 if wmma else MOE_BUNDLE)) and tokens >= MOE_BUNDLE_MIN:
+  # (MOE_EXACT_MIN <= rows < MOE_BUNDLE_MIN: bundles of MOE_EXACT_M rows in float, every row's dot the per-row kernel's: the same values, an
+  # expert's weights read once for its rows (the per-row kernel reads them once a selection))
+  exact = not wmma and 0 < MOE_EXACT_MIN <= tokens < MOE_BUNDLE_MIN
+  if (M:=(16 if wmma else MOE_EXACT_M if exact else MOE_BUNDLE)) and (tokens >= MOE_BUNDLE_MIN or exact):
     # many rows (batched decoding): the rows of an expert in bundles of M, a bundle reads the expert's weights once
     # (the gate and up rows' bundles are the down rows' too: the same selections)
     key = (sel.uop, first.uop, experts, M)
     if (bundles:=_bundle_cache.get(key)) is None:
       bundles = _bundle_cache[key] = moe_bundles(sel, first, experts, M, tokens*int(slots))
     bexp, brow = bundles
+    if exact: out_dtype = dtypes.float32
     out = Tensor.empty(devices*tokens*slots, out_features, dtype=out_dtype, device=x.device, axis=0 if devices > 1 else None)
     out = out.zeros_like().contiguous()
     # (the int8 tensor cores: a workgroup a few blocks of outputs of a narrow input, their activations loaded once)
@@ -3402,6 +3406,8 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
 _bundle_cache:dict[tuple, tuple[Tensor, Tensor]] = {}
 # batched decoding of at least MOE_BUNDLE_MIN tokens: the rows of an expert in bundles of MOE_BUNDLE that share its weight loads
 MOE_BUNDLE, MOE_BUNDLE_MIN = getenv("MOE_BUNDLE", 4), getenv("MOE_BUNDLE_MIN", 40)
+# fewer rows (batched decoding of a few users): bundles of MOE_EXACT_M in float from MOE_EXACT_MIN rows (0: off), the per-row kernel's values
+MOE_EXACT_M, MOE_EXACT_MIN = getenv("MOE_EXACT_M", 4), getenv("MOE_EXACT_MIN", 0)
 # many more rows: bundles of 16 on the int8 tensor cores, every weight decoded once a step (_moe_bundled_wmma_kernel)
 MOE_WMMA, MOE_WMMA_MIN, MOE_WMMA_QUANTS = getenv("MOE_WMMA", 1), getenv("MOE_WMMA_MIN", 64), (IQ3_S, IQ4_XS)
 MOE_TILE = getenv("MOE_TILE", 64)  # grouped experts: rows of an expert are padded to whole tiles, a workgroup decodes an expert once per tile
