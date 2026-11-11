@@ -5918,9 +5918,10 @@ def _pb(pbase:int|UOp) -> UOp|None:
 
 def _local_width(width:int, n:int, kpool:int) -> int:
   """a device's columns of the scores of a sequence of `width` pools split over n devices (SEQ_IDX_SHARD: blocks of SEQ_BLK positions in
-  turn)"""
+  turn), whole tiles of the scores' kernels (64 pools: the model's 65,536 pools are 10,928 a device of 6, the last tile of a long context's
+  scores wrote past a row into the next one's: real 262k greedy differed)"""
   PB = SEQ_BLK // kpool
-  return (width + PB*n - 1) // (PB*n) * PB
+  return round_up((width + PB*n - 1) // (PB*n) * PB, 64)
 
 def _idx_shard(k:Tensor) -> int:
   """the devices the pooled keys k are split over (SEQ_IDX_SHARD: on their rows), 0 if whole on every device"""
