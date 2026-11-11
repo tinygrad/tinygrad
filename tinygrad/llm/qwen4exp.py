@@ -2787,7 +2787,9 @@ class Transformer:
         setattr(j, "link_later", False)
         if j.captured is not None: j.captured.linked()
       _lap("warmup: stash linked")
-    capture_parallel(par, meanwhile)
+    # (the compiles earliest first: qwen's 30 or more jits come one after another, the parent's ~1 s takes don't pile up (all-warm C2 tr8: 62.8 s,
+    # latest first 70.9 s))
+    capture_parallel(par, meanwhile, compile_fifo=True)
     _init_buffers(self.__dict__.pop("_lanes_init", []))
     if DEBUG >= 1: print(f"seq_warmup: {len(par)} jits compiled at {time.perf_counter()-st:.2f}s")
     for name, (jit, call) in calls.items():

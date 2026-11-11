@@ -308,15 +308,17 @@ def _remote_compile(qw:int, ar:int, tasks:list[tuple[bytes, bytes]]) -> list[UOp
   if isinstance(ret, str): raise RuntimeError(f"compile failed in the parent: {ret}")
   return [pickle.loads(x) for x in ret]
 
-COMPILE_FIFO = getenv("COMPILE_FIFO", 0)
+COMPILE_FIFO = getenv("COMPILE_FIFO", -1)
 class _Compiles:
   """
   the compiles of the forked processes' kernels: one a key (its bytes), on the workers of a pool, the most urgent first (no more at once than
   the pool has workers): a process's later requests (its jit's host programs: the jit is done then) before first ones, of those the latest
   first (the jits captured last, prefill's, are the longest to finish after their kernels: they don't wait behind the ones captured early).
-  COMPILE_FIFO=1: the earliest first (the processes' jits come one after another: the parent links each while the others' kernels compile)
+  fifo (capture_parallel's, COMPILE_FIFO=1/0 over it): the earliest first (the processes' jits come one after another: the parent links each while
+  the others' kernels compile)
   """
-  def __init__(self, pool):
+  def __init__(self, pool, fifo:bool=False):
+    self.fifo = bool(COMPILE_FIFO) if COMPILE_FIFO >= 0 else fifo
     self.pool, self.lock, self.results, self.stats = pool, threading.Lock(), cast(dict[bytes, concurrent.futures.Future], {}), cast(list[tuple], [])
     self.queue:list[tuple[tuple, int, bytes, bytes]] = []
     self.seq, self.running, self.timed = itertools.count(), 0, bool(getenv("STARTUP_STATS", ""))
@@ -348,7 +350,7 @@ class _Compiles:
             with open(f"{dump}.{who}", "ab") as df: pickle.dump([(k, t) for k, t in tasks if k in new], df)
           for k, t in tasks:
             if (r:=self.results.setdefault(k, concurrent.futures.Future())).running() or r.done(): continue
-            heapq.heappush(self.queue, ((n == 0, t0 if COMPILE_FIFO else -t0), next(self.seq), k, t))
+            heapq.heappush(self.queue, ((n == 0, t0 if self.fifo else -t0), next(self.seq), k, t))
           self._dispatch()
         try:
           got = [self.results[k].result() for k, _ in tasks]
@@ -400,7 +402,7 @@ def run_as_they_come(take:Callable[..., bool|None], calls:dict[str, tuple[Any, C
     warm_runs.append((name, t0, time.perf_counter()))
 
 def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[Callable[..., bool|None]], None]|None=None,
-                     taken:Callable[[_TinyJit], None]|None=None) -> list[bool]:
+                     taken:Callable[[_TinyJit], None]|None=None, compile_fifo:bool=False) -> list[bool]:
   """
   the jits captured and compiled at the same time, each in a forked process: its call (which calls the jit for its capture) runs there, the
   jit is captured and compiled but nothing runs, the parent takes the compiled jit (linked and run on its first call there). the jits share
@@ -418,7 +420,7 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
   children:list[tuple[int, int]] = []
   # the kernels of all the processes compiled by this one's workers, each once (most are in many jits): a request pipe and a reply pipe each
   pool = get_worker_pool()
-  compiles = _Compiles(pool) if pool is not None else None
+  compiles = _Compiles(pool, compile_fifo) if pool is not None else None
   for i, (jit, call) in enumerate(calls):
     if pool is not None: (qr, qw), (ar, aw) = os.pipe(), os.pipe()
     r, w = os.pipe()
