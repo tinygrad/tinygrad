@@ -1917,7 +1917,7 @@ class Indexer:
     # the pooled keys, a call pools its tokens' pools only. the sparse path keeps them in half and the tokens of the last incomplete pool in a
     # ring (the last tokens: the next call can start before the end, see pool_keys), the other one every token's key and gate
     # (SEQ_FP8 with a sequence sharded cache: fp8 pooled keys, a row of 32 words of e4m3 values and the scale)
-    fp8 = self.sparse and bool(getenv("SEQ_FP8", 0)) and seq_sharded(x.device) and idx.head_dim == 128
+    fp8 = self.sparse and bool(getenv("SEQ_FP8", 1)) and seq_sharded(x.device) and idx.head_dim == 128
     row, dt = ((IDX_FP8_ROW,), dtypes.uint32) if fp8 else ((idx.head_dim,), dtypes.half if self.sparse else dtypes.float32)
     # (GLM_SEQ: the pools of every sequence's region, and the padding sequences')
     region_pools = (max(self.max_context, self.cache_rows) + REGION_ALIGN) // idx.kpool if self.cache_rows else max_pools
@@ -2287,7 +2287,7 @@ class MLATransformerBlock(FFNBlock):
         # (MLA_SEQ_SHARD: every device the rows of its positions, see seq_store)
         devs = cast(tuple[str, ...], x.device)
         # (SEQ_FP8: a row of fp8 values and their scales, see fp8_rows: half the memory)
-        row, dt = ((FP8_ROW,), dtypes.uint32) if getenv("SEQ_FP8", 0) and D == 512 else ((D,), dtypes.half)
+        row, dt = ((FP8_ROW,), dtypes.uint32) if getenv("SEQ_FP8", 1) and D == 512 else ((D,), dtypes.half)
         if (reg:=self._regions) is not None:
           # (SLOT_ALIAS: the slots of batched decoding in the same buffer, regions of S positions: the model's first (SLOT_SPAN of them), slot
           # i's the SLOT_SPAN+i-th. the model's cache past them is the slots': a long sequence alone overwrites them, see Transformer.main_overlaps)
