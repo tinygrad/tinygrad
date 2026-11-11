@@ -15,7 +15,7 @@ from tinygrad.llm.kernels.amd_glm_dsa import Linear, gated_delta_prefill, flash_
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, SLOT_SPAN, \
   mla_bmm, bmm_wmma, weighted_sum, rows_gather, \
   nucleus, seq_store, mla_sparse_seq, seq_views, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
-from tinygrad.llm.kernels.amd_glm_dsa import host_allgather, Q8_0, mla_sparse_seq_tokens
+from tinygrad.llm.kernels.amd_glm_dsa import host_allgather, Q8_0, mla_sparse_seq_tokens, ring_all_gather_q8
 from tinygrad.llm.kernels.amd_glm_dsa import sp_reduce_scatter, all_to_all, mla_sparse_tokens, tbo_ag_parts, tbo_a2a_pre, \
   tbo_a2a_parts, tbo_a2a_post, tbo_rs_pre, tbo_rs_parts, tbo_rs_post, tbo_q8_pre, tbo_q8_post
 from tinygrad.llm.glm_dsa_gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
@@ -823,7 +823,10 @@ class FFNBlock:
   def _sp_sub(self, sub:str, hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
     """sequence parallel sublayer: hn (1, R, D) split on its rows, gathered as q8 groups, the sublayer's partial sums reduce scattered to the rows"""
     if sub == "attn" and (o:=self._sp_attn_tok(hn, start_pos, T)) is not None: return sp_reduce_scatter(_fq(o, getenv("Q4_SIM_RS", 0)).contiguous())
-    x = all_gather_q8(_fq(hn, getenv("Q4_SIM_AG", 0)).contiguous(), 1, ring=bool(getenv("GLM_SP_RING", 1)))
+    # (SP_AG_RINGK, default off, untested on 14 R9700: the q8 gather in one ring kernel a device on the compute queue (peer writes over its
+    # workgroups), not 13 steps of the device's one copy engine)
+    if not getenv("SP_AG_RINGK", 0) or (x:=ring_all_gather_q8(hn.contiguous())) is None:
+      x = all_gather_q8(_fq(hn, getenv("Q4_SIM_AG", 0)).contiguous(), 1, ring=bool(getenv("GLM_SP_RING", 1)))
     _partial_out[0], _sp_rows[0], _partial_half[0] = True, hn, False
     if sub != "attn": _ffn_rows[0] = T
     try: out = self._attention(x, start_pos, T) if sub == "attn" else self._feed_forward(x)
