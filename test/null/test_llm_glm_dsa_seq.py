@@ -175,6 +175,12 @@ class TestGLMDSASequence(unittest.TestCase):
     fxn = functools.partial(_q8_gemm_kernel, token_tile=96, out_features=N, in_features=K, rows=rows)
     k = sink(Tensor.empty(M, N), raw, xg, fxn=fxn)
     self.assertIn(rows, k.toposort())
+    from tinygrad.llm.kernels.amd_glm_dsa import _iq4_linear_f16_wmma_kernel, _q8k_quantize_kernel
+    fxn = functools.partial(_iq4_linear_f16_wmma_kernel, out_features=N, in_features=K, rdna4=True, rows=rows)
+    self.assertIn(rows, sink(Tensor.empty(M, N), Tensor.empty(N*K//2, dtype="uint32"), xg, Tensor.empty(256, dtype="uint32"), fxn=fxn).toposort())
+    qk = Tensor.custom_kernel(Tensor.empty(M, K//32, 8, dtype="uint32"), Tensor.empty(M, K//256), xg,
+                              fxn=functools.partial(_q8k_quantize_kernel, tokens=M, in_features=K, rows=rows))[0].uop.src[1].src[0]
+    self.assertIn(rows, qk.toposort())
 
   def test_lists_pad(self):
     # (LISTS_PAD: the counts of a chunk's padding rows zero, the tokens' rows as they were)

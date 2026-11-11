@@ -661,12 +661,15 @@ def _q8_decode_f16_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features
   multi = int(out.shape[0]) if 1 < out.shape[0] <= DECODE_MULTI else 1
   return _decode_linear(out, out_features, in_features//32, group_dot, "linear_q8_0_f16", multi=multi)
 
-def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, group:tuple[UOp, ...]=(), rows:int|None=None, waves:int=2):
+def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, group:tuple[UOp, ...]=(), rows:int|UOp|None=None, waves:int=2):
   # grouped experts: the token blocks cover the sorted rows (group[0]), not the output. rows: the rows of out to cover (default all)
   # output_tiles: at most that many, as many as divide the outputs
   output_tiles = next(t for t in (output_tiles, 4, 2, 1) if t <= output_tiles and out_features % (16*t) == 0)
   output_waves = next(w for w in (waves, 8, 4, 2, 1) if w <= waves and out_features % (16*output_tiles*w) == 0)
-  token_block = UOp.range((group[0].shape[0] if group else rows or out.shape[0])//token_tile, 0, AxisType.GLOBAL)
+  # (rows a variable: the token tiles of the first rows (GEMM_PAD))
+  nb = ((rows + token_tile - 1)//token_tile).minimum(out.shape[0]//token_tile) if isinstance(rows, UOp) and not group else \
+    (group[0].shape[0] if group else rows or out.shape[0])//token_tile
+  token_block = UOp.range(nb, 0, AxisType.GLOBAL)
   output_block = UOp.range(out_features//(16*output_tiles*output_waves), 1, AxisType.GLOBAL)
   # lane is a hardware WARP range (like the flash kernel): the fragment math stays visible without being
   # range-split into nested loops, which would scramble the WMMA fragment layout
@@ -797,7 +800,7 @@ def _q5_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *group:UOp, out_features
 
 @functools.cache
 def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, *group:UOp, out_features:int, in_features:int, rdna4:bool=False,
-                                expert_words:int=0, x_div:int=0, act:tuple|None=None) -> UOp:
+                                expert_words:int=0, x_div:int=0, act:tuple|None=None, rows:UOp|None=None) -> UOp:
   token_tile = 32 if out_features <= 1024 and out.shape[0] % 32 == 0 else 64 if out.shape[0] % 64 == 0 and \
     out_features <= 6144 else 128 if out.shape[0] % 128 == 0 else \
     32 if out.shape[0] % 32 == 0 else 16
@@ -805,7 +808,7 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, *group:UOp, ou
   output_tiles = 1 if out_features <= 1024 else 2 if out_features <= 6144 else 1 if out_features < 8192 else 2
   if act is not None: output_tiles = 2
   # grouped experts: eight waves share a tile's activations (through LDS)
-  layout = _wmma_layout(out, out_features, token_tile, output_tiles, group, waves=8 if group else 2)
+  layout = _wmma_layout(out, out_features, token_tile, output_tiles, group, rows=rows, waves=8 if group else 2)
   output_waves, _, _, lane, wave, half, _, _, _ = layout
   word_indices = (half, half+2) if rdna4 else tuple(range(4))
   local_lut = UOp.alloc((256,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
@@ -1286,6 +1289,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None:
     if layer.ggml_type == IQ4_XS:
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
+      if getenv("GEMM_PAD", 0) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and not split and isinstance(rt[1], UOp):
+        fxn = functools.partial(fxn, rows=_unbind(rt[1]))
     else:
       fxn = functools.partial(_q5_linear_f16_wmma_kernel if layer.ggml_type in (Q4_K, Q5_K) else _quant_linear_f16_wmma_kernel,
                               ggml_type=layer.ggml_type)
