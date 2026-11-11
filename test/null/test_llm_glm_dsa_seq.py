@@ -425,4 +425,28 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertEqual(run(4, 8), (False, dtypes.float32))   # (fewer rows: the per-row kernel)
     self.assertEqual(run(40, 8), (True, dtypes.half))      # (MOE_BUNDLE_MIN and up: as before)
 
+  def test_moe_grid_lds(self):
+    # (MOE_GRID_LDS: the per-row and the bundled MoE kernels of IQ3_S read the grid from an LDS copy (the same values))
+    import tinygrad.llm.kernels.amd_glm_dsa as K
+    from tinygrad.uop.ops import Ops, AddrSpace
+    E, fin, fout = 4, 256, 64
+    w = Tensor.empty(E*fout*fin*K.QUANT_SIZES[K.IQ3_S]//256//2, dtype=dtypes.uint16)
+    first = Tensor([0], dtype=dtypes.int32)
+    for T, exact_min in ((4, 0), (16, 8)):
+      for on in (0, 1):
+        sinks = []
+        def wrap(*a, **kw):
+          sinks.append(ret:=orig(*a, **kw))
+          return ret
+        orig = K._decode_linear
+        K._bundle_cache.clear()
+        for fn in (K._moe_decode_kernel, K._moe_bundled_kernel): fn.cache_clear()
+        sel, x = Tensor.empty(1, T, 8, dtype=dtypes.int32), Tensor.empty(1, T, 1, fin)
+        with patch.object(K, "MOE_WMMA", 0), patch.object(K, "MOE_EXACT_MIN", exact_min), patch.object(K, "MOE_GRID_LDS", on), \
+             patch.object(K, "_decode_linear", wrap):
+          K.moe_linear(w, K.IQ3_S, E, x, sel, first)
+        self.assertEqual(len(sinks), 1)
+        lds = [u for u in sinks[0].toposort() if getattr(u, "addrspace", None) == AddrSpace.LOCAL and u.op is not Ops.INDEX and u.shape == (512,)]
+        self.assertEqual(bool(lds), bool(on), (T, on))
+
 if __name__ == '__main__': unittest.main()
