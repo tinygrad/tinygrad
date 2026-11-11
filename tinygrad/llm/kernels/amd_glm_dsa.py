@@ -3323,7 +3323,7 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
       fxn = functools.partial(_moe_bundled_wmma_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type,
                               slots=int(slots), x_slots=x_slots, oloop=16 if in_features == GGML_BLOCK_SIZE else 1, P=P)
       result = Tensor.custom_kernel(out, weight, *xq, bexp, brow, *extra, bcnt, fxn=fxn)[0]
-    elif MOE_PERSIST:
+    elif not wmma and MOE_PERSIST:
       # (MOE_PERSIST: P workgroups an output block over the bundles there are, not a grid of every possible one)
       fxn = functools.partial(_moe_bundled_persist_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type,
                               slots=int(slots), x_slots=x_slots, M=M, P=MOE_PERSIST)
