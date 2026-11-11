@@ -4949,8 +4949,8 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   G = (H + 15) // 16
   # (a few tokens (decoding): the gathers and the sum in one peer to peer kernel each, the latency of a ring of copies is a few of them)
   # (packed (SEQ_P2P_PACK) the peer to peer words carry three times the values: faster than the rings up to 64 rows (measured, 14 R9700), in
-  # half words only up to 16)
-  small = isinstance(T, int) and T <= getenv("SEQ_P2P_ROWS", 16 if _seq_p2p_pack() is None else 64) and p2p_allreduce(devs) is not None
+  # half words only up to 16 before P2P_FLAG (four halves a word); with it up to 32: 8 users (32 rows) went around the rings (+q8 queries and sums))
+  small = isinstance(T, int) and T <= getenv("SEQ_P2P_ROWS", 32 if _seq_p2p_pack() is None else 64) and p2p_allreduce(devs) is not None
   def gather(x:Tensor, dtype=dtypes.float32, p2p:bool=True) -> Tensor:
     # x (n, ...) split on its leading axis: whole on every device
     if small and p2p and getenv("SEQ_P2P_GATHER", 1) and (g:=host_allgather(x.reshape(n, -1))) is not None: return g.reshape(x.shape)
