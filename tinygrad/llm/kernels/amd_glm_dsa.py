@@ -1723,9 +1723,9 @@ class P2PAllreduce:
       for d in devs: Device[d].synchronize()
 
 P2P_AR_MAXG, P2P_AR_MAXW = getenv("P2P_AR_MAXG", 64), getenv("P2P_AR_MAXW", 4096)  # workgroups, the words of a workgroup's slot
-# the classes of words (epochs: 32 bits of plain/half, 16 of three halves, 8 of legacy packed, 32 of SEQ-safe packed):
+# the classes of words (epochs: 32 bits of plain/half, 16 of three halves, 8 of legacy packed, 32 of SEQ-safe packed, flagged payload):
 # every class has regions of the mailboxes and its epoch counters. Formats with different epoch layouts must not share a class.
-P2P_AR_CLASSES = 4
+P2P_AR_CLASSES = 5  # (4: P2P_FLAG's payload-only words)
 # the epochs of fewer than 32 bits (classes 1, 2) wrap: a word that a call of more words a workgroup left (one past a wrap of the calls of fewer
 # words since) would look fresh to the next such call. in those classes a workgroup's words are in ranges (the first 128, the next 128, 256,
 # 512, ..), each with its own epoch counter, counted by the calls that write it (every call writes whole ranges): a word a reader polls is
@@ -1733,6 +1733,10 @@ P2P_AR_CLASSES = 4
 P2P_AR_RANGES = (128, 256, 512, 1024, 2048)  # (the ranges' starts past the first)
 P2P_AR_NCTR = P2P_AR_CLASSES * (len(P2P_AR_RANGES) + 1) * P2P_AR_MAXG  # (the epoch counters, then the device's index, then p2p_late's)
 def p2p_ranged(cls:int) -> bool: return cls in (1, 2)
+def p2p_class(pack:tuple[int, int]|None, triple:bool, flag:bool) -> int:
+  """the class of a p2p call's words. flag: payload-only words (no epoch in them) in a class of their own: a word of another format a call
+  left two epochs before could otherwise look fresh to an epoch-in-word reader (its high halves the epoch), and the reverse"""
+  return 4 if flag else 3 if pack is not None and pack[0]*pack[1] == 24 else 2 if pack is not None else 1 if triple else 0
 def p2p_range(l:int) -> int:
   """the range of a workgroup's word l (its epoch counter's, in the classes of fewer epoch bits)"""
   return sum(l >= b for b in P2P_AR_RANGES)
@@ -1800,7 +1804,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   li = [t*EP + i for i in range(EP)]
   els = [wg*T*EP + l for l in li]
   # (SEQ-safe packed words: their own class, so legacy 8-bit-epoch generic allreduces can't alias their mailboxes/counters)
-  cls = 3 if pack is not None and pack[0]*pack[1] == 24 else 2 if pack is not None else 1 if triple else 0
+  cls = p2p_class(pack, triple, flag)
   cw = wg + cls*P2P_AR_MAXG
   # (a thread's words are in one range: EP divides 128. the calls of ranged classes write whole ranges)
   ranged = p2p_ranged(cls)

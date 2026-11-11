@@ -119,6 +119,13 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertRaises(AssertionError, _q8_pack_kernel, Tensor.empty(4, 18, 9, dtype="uint32").uop, Tensor.empty(4, 576, dtype="half").uop)
     self.assertRaises(AssertionError, _q8_unpack_kernel, Tensor.empty(4, 576, dtype="half").uop, Tensor.empty(4, 18, 9, dtype="uint32").uop)
 
+  def test_p2p_flag_class(self):
+    # (P2P_FLAG's payload-only words: a class of their own, not shared with an epoch-in-word format)
+    from tinygrad.llm.kernels.amd_glm_dsa import p2p_class, P2P_AR_CLASSES
+    others = {p2p_class(None, False, False), p2p_class(None, True, False), p2p_class((4, 12), False, False), p2p_class((3, 8), False, False)}
+    self.assertNotIn(p2p_class(None, False, True), others)
+    self.assertLess(max(others | {p2p_class(None, False, True)}), P2P_AR_CLASSES)
+
   def test_seq_p2p_pack_kernels(self):
     # (SEQ_P2P_PACK: mla_sparse_seq's one shot gather and reduce scatter of packed words: default off, the kernels build)
     from tinygrad.llm.kernels.amd_glm_dsa import _p2p_allreduce_kernel, _seq_p2p_pack, P2P_AR_CLASSES, P2P_AR_MAXG, P2P_AR_MAXW, P2P_AR_NCTR
