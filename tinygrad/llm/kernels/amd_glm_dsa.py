@@ -1416,7 +1416,8 @@ def _half_rows(x:Tensor, tokens:int, splits:int=1) -> tuple[Tensor, Tensor|None]
   split on axis 0 as the partial outputs (the same values unless a row is past HALF_ROWS_MAX; the max of the whole row is a ring of copies)
   """
   if not getenv("HALF_ROWS", 1): return x.cast(dtypes.float16).contiguous(), None
-  if getenv("HALF_ROWS_K", 0) and x.shape[-1] % 32 == 0 and (splits == 1 or isinstance(x.device, tuple)):
+  if getenv("HALF_ROWS_K", 0) and x.shape[-1] % 32 == 0 and tokens <= 64 and \
+     (x.uop.axis is None if splits == 1 else isinstance(x.device, tuple) and x.uop.axis == len(x.shape) - 1):
     # (one kernel, the same values: HALF_ROWS_K, default off)
     multi = splits > 1
     xh = Tensor.empty(*x.shape, dtype=dtypes.float16, device=x.device, axis=x.uop.axis if isinstance(x.device, tuple) else None)
