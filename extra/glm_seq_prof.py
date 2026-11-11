@@ -158,3 +158,6 @@ for g in GS:
       seq = [(name, us) for dev, name, us in kprof.sequence(*devs) if dev == did and
              name.startswith(("q8_gemm", "linear_q6", "linear_q8_0"))][-nseq:]
       for i, (name, us) in enumerate(seq): print(f"  KSEQ {did} {i:4d} {us:9.2f} us  {name}", flush=True)
+# (the memory every device holds at the end: the caches, the weights and the jit's buffers; the headroom for more users is the card's less this)
+from tinygrad.helpers import GlobalCounters
+print("MEM_USED GB " + " ".join(f"{GlobalCounters.mem_used_per_device.get(d, 0)/1e9:.3f}" for d in devs), flush=True)
