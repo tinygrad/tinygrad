@@ -15,6 +15,7 @@ from tinygrad.llm.kernels.amd_glm_dsa import Linear, gated_delta_prefill, flash_
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, SLOT_SPAN, \
   mla_bmm, bmm_wmma, weighted_sum, rows_gather, \
   nucleus, seq_store, mla_sparse_seq, seq_views, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
+from tinygrad.llm.kernels.amd_glm_dsa import skinny_parts, skinny_sum
 from tinygrad.llm.kernels.amd_glm_dsa import p2p_check, host_allgather, Q8_0, mla_sparse_seq_tokens, ring_all_gather_q8, lists_pad, GEMM_ROWS
 from tinygrad.llm.kernels.amd_glm_dsa import host_allgather_half, _seq_p2p_pack
 from tinygrad.llm.kernels.amd_glm_dsa import sp_reduce_scatter, all_to_all, mla_sparse_tokens, tbo_ag_parts, tbo_a2a_pre, \
@@ -676,7 +677,12 @@ class FFNBlock:
       gating, normalize_topk = self.config.expert_gating_func, self.config.norm_topk_prob
       exps = self.ffn_gate_exps
       exps.set_quantized()
-      if rows is None and (lg:=_skinny(router, xr)) is not None: logits = lg
+      parts:Tensor|None = None
+      # (ROUTER_PARTS, default off: skinny_matmul's parts summed by the local router's kernel, not a kernel of their own: the same sums)
+      if rows is None and getenv("ROUTER_PARTS", 0) and (wt:=getattr(router, "weight_t", None)) is not None and isinstance(xr.shape[-2], int) \
+         and not token_sharded(xr) and (parts:=skinny_parts(xr, wt)) is not None:
+        logits = skinny_sum(parts, xr)  # (lazy: no kernel where only the router's kernel reads the parts)
+      elif rows is None and (lg:=_skinny(router, xr)) is not None: logits = lg
       elif router.ggml_type is None and router.weight.dtype == dtypes.half and router.bias is None and isinstance(xr.shape[1], int) and \
          xr.shape[1] > 32:
         # many tokens: half copies of the input and the output, a float accumulator: the tensor cores
@@ -691,7 +697,7 @@ class FFNBlock:
         exps.set_quantized()
         if rows is None and xr.shape[1] <= _decode_rows() and exps.slices and exps.ggml_type is not None and getenv("MOE_ROUTER_LOCAL", 1):
           # decoding: the device's slices of the selections in the router's kernel
-          return self._experts(x, h, *moe_router_local(logits, bias, k, scale, exps.slice_table), local=True)
+          return self._experts(x, h, *moe_router_local(logits, bias, k, scale, exps.slice_table, parts=parts), local=True)
         sel, probs = moe_router(logits, bias, k, scale)
         if rows is not None and getenv("SP_ROUTE_ONE", 0):
           # (SP_ROUTE_ONE, default off: the selections and their weights' bits in one gather: one ring, not two. 4k: 2.73 s vs 2.74, noise)
