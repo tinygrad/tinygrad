@@ -6589,12 +6589,13 @@ def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:in
                                                                                            kpool=kpool, n=n, ties=ties))[0]
   c *= 1 + ties
   flat = cand.reshape(n, rows*c*2)
-  # (IDX_P2P_ROWS: the peer to peer gather up to that many rows (the batched decode's: G=8 at 262k 54.7 -> 44.3 ms on 6x 7900 XTX, the
+  # (IDX_P2P_ROWS (default 48; was 256): the peer to peer gather up to that many rows (the ring past them: R9700 36 sequences = 108 rows at
+  # 262k 161.9 -> 150.6 ms, the same values) (the batched decode's: G=8 at 262k 54.7 -> 44.3 ms on 6x 7900 XTX, the
   # ring of copies ~0.7 ms a call), the ring past it or if the flag mailbox is too small)
   # (on a lane of its own (IDX_LANE): an exchange of the step's on the same lane's mailbox in no order with it (one sequence's 3 rows: the
   # attention's and this one both the flag exchange) was a cycle of the schedule)
   def gather(f:Tensor) -> Tensor:
-    g = host_allgather(f) if rows <= getenv("IDX_P2P_ROWS", 256) else None
+    g = host_allgather(f) if rows <= getenv("IDX_P2P_ROWS", 48) else None
     return g if g is not None else all_gather(f, 0, dtypes.float32)
   allc = _lane_call(IDX_LANE, gather, flat)
   width = (width or n*int(scores.shape[1])) if getenv("IDX_MERGE_ORDER", 1) else 0
