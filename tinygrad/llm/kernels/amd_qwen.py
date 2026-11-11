@@ -1650,6 +1650,11 @@ def _sys(fmt:str, dtype:DType, *src:UOp) -> UOp: return _cfn(False, src=src, arg
 
 # 12 MiB/pool on six devices, sized for batched decode; larger allgathers use the existing chunked/ring paths.
 FLAG_AR_MAXN = getenv("FLAG_AR_MAXN", 1 << 18)  # mailbox words/lane (two half values or one float32 each)
+# (FLAG_AR_POOLN: the words of a pool's slot (its memory: 2*N*FLAG_AR_POOLN*4 bytes a pool, 3 pools a lane), FLAG_AR_MAXN the size of a
+# chunked all gather's pieces. an exchange above the slot isn't the flag's: a gather takes the ring or the copies (the same values), a sum
+# the next path. C2's census (2304 rows, one micro batch, 24-28 sequences): the flag exchanges are of at most ~48k words, the larger ones
+# around the ring: FLAG_AR_POOLN=65536 is 113 MB a card less and the same exchanges)
+FLAG_AR_POOLN = getenv("FLAG_AR_POOLN", FLAG_AR_MAXN)
 
 # the collectives' mailboxes and pools (name, object), read by comm_state_report
 _COMM_STATE:list[tuple[str, int, Any]] = []
@@ -1790,7 +1795,7 @@ class FlagAllreduce:
     inits:list[tuple[Buffer, bytes]] = []
     with Context(ALLOW_DEVICE_USAGE=1):
       # (the values: the peers' aliases at the slot of the device (its two parities), what the send kernel writes back from the l2)
-      self.vals = mapped(2*N*FLAG_AR_MAXN*4, 2*FLAG_AR_MAXN*4, 4)
+      self.vals = mapped(2*N*FLAG_AR_POOLN*4, 2*FLAG_AR_POOLN*4, 4)
       self.flags = mapped(2*N*4)
       self.flag_bufs = [b for b, _ in inits[-N:]]
       # (an epoch counter a workgroup, then the device's index)
@@ -1816,7 +1821,7 @@ def _flag_allreduce(devs:tuple[str, ...], groups:int, lane:int=0) -> FlagAllredu
 
 def flag_ar_shape(n:int, groups:int) -> tuple[int, int]|None:
   """(threads, words a thread) over a fixed number of workgroups (words past n masked)."""
-  if n <= 0 or n > FLAG_AR_MAXN or groups <= 0: return None
+  if n <= 0 or n > FLAG_AR_POOLN or groups <= 0: return None
   T = 256 if n >= groups*256 else 128 if n >= groups*128 else 64
   return T, (n + groups*T - 1) // (groups*T)
 
@@ -1832,7 +1837,7 @@ def _flag_ar_common(N:int, n:int, T:int, EP:int, counter:UOp):
   # A sender's two parities are interleaved in blocks of 64 words.
   def pos(e:UOp) -> UOp: return (e // 64)*128 + par*64 + e % 64
   def spos(e:UOp) -> UOp: return pos(e).valid(e < n)
-  def vslot(s:UOp|int, e:UOp) -> UOp: return (pos(e) + s*2*FLAG_AR_MAXN).valid(e < n)
+  def vslot(s:UOp|int, e:UOp) -> UOp: return (pos(e) + s*2*FLAG_AR_POOLN).valid(e < n)
   def fslot(s:UOp|int) -> UOp: return par*N + s
   return wg, t, els, epoch, me, spos, vslot, fslot
 
@@ -2026,7 +2031,7 @@ def flag_reduce_scatter(p:Tensor, axis:int) -> Tensor|None:
   if size*9//8 >= ring_min(p.device) and (r:=ring_reduce_scatter_q8(p, size, tuple(int(s) for s in S), axis)) is not None: return r.reshape(S)
   if size and size % (N*256) == 0:
     qgroups, groups = size//(N*32), flag_ar_groups(size//2)
-    if qgroups*9 > FLAG_AR_MAXN or (ar:=flag_allreduce(p.device, groups)) is None: return None
+    if qgroups*9 > FLAG_AR_POOLN or (ar:=flag_allreduce(p.device, groups)) is None: return None
     xf = p.reshape(N, size).contiguous()
     sent = Tensor.custom_kernel(*ar.vals[1:], xf, ar.counter, fxn=functools.partial(_flag_q8_send_kernel, N=N, groups=qgroups))[:N-1]
     out = Tensor.empty(size, dtype=dtypes.float32, device=p.device, axis=0)
