@@ -526,11 +526,13 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
                          f"({len(out)} uops made in {t1-t0:.2f}s, linked in {time.perf_counter()-t1:.2f}s)")
   def take_jit(jit:_TinyJit, wait:bool=True) -> bool|None:
     # (meanwhile) a jit taken when it comes (waited for, not if wait is False: None if it didn't come yet): it runs now
+    # (the others that came are taken first, and while it's waited for: the parent's takes don't pile up behind a wait or a run)
     if (k:=next((k for k, (j, _) in enumerate(calls) if j is jit), None)) is None: return False # (not one of them)
-    if k in left:
-      if not wait and not came(k): return None
-      with got: got.wait_for(lambda: came(k))
-      take(k)
+    while k in left:
+      for j in sorted((j for j in left if came(j)), key=lambda j: arrived[j][-1] if arrived[j] else 0): take(j)
+      if k not in left: break
+      if not wait: return None
+      with got: got.wait_for(lambda: any(came(j) for j in left))
     return oks[k]
 
   # (meanwhile, a jit called before it's taken waits for it: it isn't captured again)
