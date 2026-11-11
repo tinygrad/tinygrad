@@ -850,10 +850,11 @@ def _i8_frag(words:tuple[UOp, ...]) -> UOp:
   return UOp.stack(*(((w >> (8*i)) & 0xff).cast(dtypes.uint8).bitcast(dtypes.int8) for w in words for i in range(4)))
 
 @functools.cache
-def _q8k_quantize_kernel(q:UOp, scale:UOp, x:UOp, tokens:int, in_features:int) -> UOp:
+def _q8k_quantize_kernel(q:UOp, scale:UOp, x:UOp, tokens:int, in_features:int, rows:UOp|None=None) -> UOp:
   # int8 groups of 32 with one scale per 256 inputs (q8_K, as the CPU dots of IQ formats): a wave a (token, block), eight inputs a lane
+  # (rows: the first rows only, see GEMM_PAD)
   blocks = in_features // 256
-  token_block, lane = UOp.range(tokens*blocks, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  token_block, lane = UOp.range((tokens if rows is None else rows.minimum(tokens))*blocks, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   token, block = token_block // blocks, token_block % blocks
   values = [x.reshape(tokens, in_features)[token, block*256 + lane*8 + i].load().float() for i in range(8)]
   local = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
@@ -868,7 +869,8 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
   """int8 groups of 32 (as q8_quantize) and one scale per 256 inputs"""
   q = Tensor.empty(tokens, in_features//32, 8, dtype=dtypes.uint32, device=x.device)
   scale = Tensor.empty(tokens, in_features//256, dtype=dtypes.float32, device=x.device)
-  outs = Tensor.custom_kernel(q, scale, x, fxn=functools.partial(_q8k_quantize_kernel, tokens=tokens, in_features=in_features))
+  pad = {"rows": _unbind(rt[1])} if getenv("GEMM_PAD", 0) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and isinstance(rt[1], UOp) else {}
+  outs = Tensor.custom_kernel(q, scale, x, fxn=functools.partial(_q8k_quantize_kernel, tokens=tokens, in_features=in_features, **pad))
   return outs[0], outs[1]
 
 # a*b+c of the low 24 bits of a and b (a full rate multiply, the 32 bit one is quarter rate)
