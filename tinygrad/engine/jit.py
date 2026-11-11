@@ -377,6 +377,8 @@ def warmup_select(calls:dict[str, tuple[Any, Callable[[], Any]]], par:list[tuple
   keep = [x for k, _ in calls.values() for x in (k if isinstance(k, list) else [k])]
   return calls, [(j, c) for j, c in par if any(j is k for k in keep)]
 
+# (STARTUP_STATS) the warm-up's runs: (name, start, end) (perf_counter)
+warm_runs:list[tuple[str, float, float]] = []
 def run_as_they_come(take:Callable[..., bool|None], calls:dict[str, tuple[Any, Callable[[], Any]]], ran:set[str],
                      idle:Callable[[], Any]|None=None):
   """
@@ -391,7 +393,9 @@ def run_as_they_come(take:Callable[..., bool|None], calls:dict[str, tuple[Any, C
       time.sleep(0.01)
       continue
     ran.add(name)
+    t0 = time.perf_counter()
     calls[name][1]()
+    warm_runs.append((name, t0, time.perf_counter()))
 
 def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[Callable[..., bool|None]], None]|None=None,
                      taken:Callable[[_TinyJit], None]|None=None) -> list[bool]:
@@ -557,5 +561,6 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     with open(path, "a") as f:
       f.write(json.dumps({"st": st, "end": time.perf_counter() - st, "wall0": time.time() - (time.perf_counter() - st), "todo": todo,
                           "names": [getattr(j.fxn, "__qualname__", str(j.fxn)) for j, _ in calls], "arrived": arrived, "taken": took,
-                          "compiles": compiles.stats if compiles is not None else []}) + "\n")
+                          "compiles": compiles.stats if compiles is not None else [],
+                          "warm": [(n, a - st, b - st) for n, a, b in warm_runs]}) + "\n")
   return [k in todo and oks[todo.index(k)] for k in range(len(every))]

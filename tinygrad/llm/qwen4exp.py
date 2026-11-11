@@ -1199,6 +1199,7 @@ def _region_rows(config:TransformerConfig) -> int:
 MICRO_BATCHES = getenv("MICRO_BATCHES", 2)
 PREFILL_MB1_ROWS = getenv("PREFILL_MB1_ROWS", 0)
 PREFILL_PARTS = getenv("PREFILL_PARTS", 1)
+WARM_ASYNC = getenv("WARM_ASYNC", 1)
 PREFILL_TILE32 = getenv("PREFILL_TILE32", 1)
 # MOE_TILE16: grouped experts in tiles of 16 rows if a chunk has at most this many selections an expert on average (see _grouped_experts)
 MOE_TILE16 = getenv("MOE_TILE16", 40)
@@ -2694,11 +2695,16 @@ class Transformer:
     for c, ctx in pk_jits: add(f"prefill{c}_ctx{ctx}", self._prefill_jit(c, self._pk_bucket(c, ctx)), pk_call(c, ctx))
     for c in chunks:
       if self._pk_buckets(c): continue
-      if top + c > self.seq_rows(): add(f"prefill{c}", self._prefill_jit(c), functools.partial(self.seq_prefill, 0, 0, [0]*min(c, top), 0, 0))
+      # (WARM_ASYNC: the warm-up's runs of the prefills and steps are their jits' calls (as their captures'), the devices not waited for: the
+      # parent takes the jits that come meanwhile. 0: a prefill and a step of the server's, their tokens read)
+      if WARM_ASYNC: add(f"prefill{c}", self._prefill_jit(c), functools.partial(self._seq_chunk, 0, 0, min(c, top)) if top + c > self.seq_rows()
+                         else functools.partial(self._seq_chunk, 0, top, c))
+      elif top + c > self.seq_rows(): add(f"prefill{c}", self._prefill_jit(c), functools.partial(self.seq_prefill, 0, 0, [0]*min(c, top), 0, 0))
       else: add(f"prefill{c}", self._prefill_jit(c), functools.partial(self.seq_prefill, 0, 0, [0]*(top+c), top, 0))
     for m in sorted(self.SEQ_SIZES, reverse=True):
       seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, float]]] = [(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m
-      add(f"step{m}", self._seq_jit(m), functools.partial(self.seq_step, seqs))
+      add(f"step{m}", jit:=self._seq_jit(m), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m) if WARM_ASYNC else
+                                             functools.partial(self.seq_step, seqs))
       # mixed admission requires another decoding sequence; a one-row forced step is unreachable and its degenerate graph fails rangeify
       if SEQ_MIX_TOKENS and m > 1:
         add(f"step{m}_forced", self._seq_jit(m, True), functools.partial(self.seq_step, seqs, forced=[[0]*(k+1)]*m))
