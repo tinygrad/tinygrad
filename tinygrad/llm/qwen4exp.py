@@ -561,11 +561,12 @@ def _rot_host(hd:int) -> tuple[Tensor, Tensor]:
   m = [[sign[i] * (-1)**bin(i & j).count("1") * hd**-0.5 for j in range(hd)] for i in range(hd)]
   return Tensor(m, dtype=dtypes.float32, device="CPU").realize(), Tensor([float(s) for s in sign], dtype=dtypes.float32, device="CPU").realize()
 
+_t_import = time.perf_counter()
 def _lap(what:str):
   """DEBUG_LOAD=1: a line when loading gets past `what` (the time is the log's)"""
   if getenv("DEBUG_LOAD"):
     from tinygrad.device import alloc_stats
-    print(f"load: {what} ({alloc_stats[0]} allocations in {alloc_stats[1]:.2f}s)", flush=True)
+    print(f"load: {what} at {time.perf_counter()-_t_import:.2f}s ({alloc_stats[0]} allocations in {alloc_stats[1]:.2f}s)", flush=True)
 
 def _open_devices(devices:tuple[str, ...]):
   """the devices opened at the same time (most of opening one is waiting for it): the first alone (what they share is made once)"""
