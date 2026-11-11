@@ -1738,7 +1738,9 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   cls = 3 if pack is not None and pack[0]*pack[1] == 24 else 2 if pack is not None else 1 if triple else 0
   cw = wg + cls*P2P_AR_MAXG
   epoch, me = (counter[cw].load() + 1).cast(dtypes.uint32), counter[P2P_AR_CLASSES*P2P_AR_MAXG].load().cast(dtypes.weakint)
-  deadline = _sys("__builtin_readsteadycounter()", dtypes.uint64, epoch) + int(getenv("P2P_AR_TIMEOUT_MS", 50) * 100000)  # (100 MHz)
+  # (2 s: a batched step's devices start its graph up to tens of ms apart (repstep, ts5: 50 ms ran out at G=8 in 11 of 11 repetitions of
+  # the same step, its hidden states different every time; 30 s: 0 of 11). a poll that runs out still ends, its values wrong)
+  deadline = _sys("__builtin_readsteadycounter()", dtypes.uint64, epoch) + int(getenv("P2P_AR_TIMEOUT_MS", 2000) * 100000)  # (100 MHz)
   par = (epoch & 1).cast(dtypes.weakint)
   def reg(s:int|UOp, l:UOp) -> UOp: return ((cw*2 + par)*(N+1) + s)*P2P_AR_MAXW + l
   # pack (W, B): W values a word, B bit integers of a shared power of two (8 bits) and an epoch (two shot: the sums of the
