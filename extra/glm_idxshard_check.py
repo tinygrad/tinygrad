@@ -6,7 +6,7 @@ few positions, with ties (TIES=1: some keys zero, their scores 0). GPU box only,
 """
 import os
 import numpy as np
-from tinygrad import Tensor, Device, dtypes, UOp
+from tinygrad import Tensor, Device, UOp
 from tinygrad.llm.kernels import amd_glm
 from tinygrad.llm.kernels.amd_glm import SEQ_BLK, indexer_decode_index_rows, indexer_scores, pool_index_rows, pool_index_shard
 
