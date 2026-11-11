@@ -153,6 +153,12 @@ for g in GS:
     print(f"  GPU kernel time per device per step: {tot/NS/1e3:.3f} ms", flush=True)
     for name, (c, us) in sorted(t.items(), key=lambda x: -x[1][1])[:getenv("TOP", 40)]:
       print(f"  {us/len(devs)/NS:9.1f} us/step  {c/len(devs)/NS:6.2f}/step  {name}", flush=True)
+    if (kdev:=getenv("KDEV", 0)):
+      # (every device's time of the top KDEV kernels: the exchanges' spread is the wait for the slowest device's work before them)
+      per = kprof.per_device(*devs)
+      print("  KDEV devices " + " ".join(sorted(per)), flush=True)
+      for name, _ in sorted(t.items(), key=lambda x: -x[1][1])[:kdev]:
+        print(f"  KDEV {name[:40]:40s} " + " ".join(f"{per[d].get(name, 0.0)/NS:8.1f}" for d in sorted(per)), flush=True)
     if (nseq:=getenv("KSEQ")):
       did = devs[getenv("KSEQ_DEV", 1)]
       seq = [(name, us) for dev, name, us in kprof.sequence(*devs) if dev == did and

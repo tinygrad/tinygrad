@@ -86,3 +86,12 @@ def busy_all(seq:list[tuple[str, str, float, float]]) -> tuple[float, float]:
   for a, b in iv:
     if b > end: tot, end = tot + b - max(a, end), b
   return (max(b for _, b in iv) - iv[0][0]) if iv else 0.0, tot
+def per_device(*devs:str) -> dict[str, dict[str, float]]:
+  """device -> kernel name -> total us (the events since the last reset(), the graphs' entries by their device)"""
+  _collect(devs)
+  t:dict[str, dict[str, float]] = collections.defaultdict(lambda: collections.defaultdict(float))
+  for e in Compiled.profile_events:
+    if isinstance(e, ProfileGraphEvent):
+      for ent in e.ents: t[ent.device][_name(ent.name)] += float(e.sigs[ent.en_id] - e.sigs[ent.st_id])
+    elif isinstance(e, ProfileRangeEvent) and e.en is not None: t[e.device][_name(e.name)] += float(e.en - e.st)
+  return t
