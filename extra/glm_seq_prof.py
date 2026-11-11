@@ -65,6 +65,7 @@ if SAMPLED and getenv("SAMPLED_FILL", 0):
   from tinygrad import Tensor, dtypes
   from tinygrad.llm.glm5next import MLATransformerBlock
   from tinygrad.llm.kernels.amd_glm import SEQ_BLK
+  from tinygrad.device import Buffer, MultiBuffer
   rng, filled, arr = np.random.default_rng(1), 0, None
   for b in model.blk + [model.mtp]:
     if not isinstance(b, MLATransformerBlock) or b.indexer is None or b.indexer.cache_pk.dtype != dtypes.uint32: continue
@@ -78,9 +79,16 @@ if SAMPLED and getenv("SAMPLED_FILL", 0):
       # (split: device d's local row l is pool (l//PB)*(PB*n) + d*PB + l%PB, see pool_index_shard)
       n, PB = len(devs), SEQ_BLK // b.indexer.idx.kpool
       l = np.arange(int(pk.shape[0]) // n)
-      src = Tensor(np.ascontiguousarray(np.concatenate([arr[(l//PB)*(PB*n) + d*PB + l%PB] for d in range(n)]))).shard(devs, axis=0)
-    else: src = Tensor(np.ascontiguousarray(arr)).shard(devs) if len(devs) > 1 else Tensor(arr, device=devs[0])
-    pk.assign(src).realize()
+      chunks = [arr[(l//PB)*(PB*n) + d*PB + l%PB] for d in range(n)]
+    else: chunks = [arr] * len(devs)
+    # (copied into the cache's buffers from the host: no device copy of the rows (39 users at 262k: a 54 MB temporary was the OOM))
+    pkb = pk.realize().uop.base.buffer
+    dbufs = pkb.bufs if isinstance(pkb, MultiBuffer) else [pkb]
+    if all(db.nbytes == c.nbytes for db, c in zip(dbufs, chunks)) and getenv("SAMPLED_FILL_DIRECT", 1):
+      for db, c in zip(dbufs, chunks): db.copy_from(Buffer("NPY", db.nbytes, opaque=memoryview(np.ascontiguousarray(c).view(np.uint8).reshape(-1))))
+    else:
+      pk.assign(Tensor(np.ascontiguousarray(np.concatenate(chunks))).shard(devs, axis=0) if pk.uop.axis == 0 else
+                Tensor(np.ascontiguousarray(arr)).shard(devs) if len(devs) > 1 else Tensor(arr, device=devs[0])).realize()
     filled += 1
   sync()
   print(f"SAMPLED_FILL {filled} pooled key caches random fp8 rows", flush=True)
