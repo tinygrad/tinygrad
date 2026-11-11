@@ -2209,11 +2209,16 @@ class Transformer(GLMSeqDriver):
       self._effects.append(self._lp_buf.assign(logits[-1:].float()))
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     if temperature is not None:
+      # (a row of temperature 0: the most likely, not scaled or noised. it was the logits / 1e-12 plus the noise: a tie a random one of them,
+      # and a u that the device's log takes to 0 an infinite noise, a random token: batched greedy decoding (GLM_SEQ: temperatures always
+      # given) differed run to run, in its drafts (~4% of the steps of 4 sequences) and its tokens)
       tp = temperature.to(logits.device).reshape(-1, temperature.shape[-1])
-      z = logits.float() / tp[:, :1].maximum(1e-12)
+      hot = tp[:, :1] > 0
+      z = hot.where(logits.float() / tp[:, :1].maximum(1e-12), logits.float())
       u = _hash_uniform(noise[0], noise[1], logits) if noise is not None else Tensor.rand_like(logits)
-      logits = z - (u.maximum(1e-12).log().neg()).log()
-      if tp.shape[1] == 2: logits = nucleus(z, self.config.vocab_size, tp[:, 1:]).where(logits, -math.inf)
+      # (-log(u) at least 1-u (it is): the device's log of a u a few ulps below 1 is 0, its noise an infinity)
+      logits = z - hot.where(u.maximum(1e-12).log().neg().maximum(1 - u).log(), 0)
+      if tp.shape[1] == 2: logits = (nucleus(z, self.config.vocab_size, tp[:, 1:]) | hot.logical_not()).where(logits, -math.inf)
     # a split output: every device takes the max of its part
     if (tok:=sharded_argmax(logits, self.config.vocab_size)) is not None: return tok
     return _argmax_rows(logits.to(device)[:, :self.config.vocab_size])

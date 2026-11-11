@@ -108,6 +108,66 @@ class TestGLMDSASequence(unittest.TestCase):
     for unsafe in ("6x8", "4x12", "3x7"):
       with patch.dict(os.environ, {"SEQ_P2P_PACK": unsafe}), self.assertRaises(AssertionError): _seq_p2p_pack()
 
+  def test_sample_greedy_rows_exact(self):
+    # (a row of temperature 0 is the argmax of its logits (the first of a tie), whatever the noise: it was logits / 1e-12 plus Gumbel noise,
+    # a tie broken by the noise and a u the device's log takes to 0 an infinite noise (batched greedy decoding differed run to run))
+    model = Transformer.__new__(Transformer)
+    model.config = SimpleNamespace(vocab_size=512)
+    lg = np.zeros((16, 512), dtype=np.float32)
+    lg[:, 7] = lg[:, 300] = 5.0  # (a tie: 7 the first)
+    lg[8:, 42] = 9.0
+    model.output = lambda h: h
+    temps = Tensor([[0.0]]*12 + [[0.7]]*4, device="CPU")
+    for seed in range(3):
+      noise = (Tensor([seed], dtype=dtypes.uint32, device="CPU"), Tensor(np.arange(16, dtype=np.int32), device="CPU"))
+      tok = model._sample(Tensor(lg, device="CPU"), temps, "CPU", noise).numpy().reshape(-1)
+      self.assertEqual(list(tok[:12]), [7]*8 + [42]*4)
+    # (top_p rows too: (temperature, top_p) pairs)
+    temps2 = Tensor([[0.0, 0.9]]*16, device="CPU")
+    tok = model._sample(Tensor(lg, device="CPU"), temps2, "CPU", noise).numpy().reshape(-1)
+    self.assertEqual(list(tok), [7]*8 + [42]*8)
+    # (a u the device's log takes to 0: -log(u) 0, its noise an infinity. as a u of 1 here: column 100's)
+    un = np.full((16, 512), 0.5, dtype=np.float32)
+    un[:, 100] = 1.0
+    with patch.object(glm_dsa, "_hash_uniform", lambda seed, keys, like: Tensor(un, device="CPU")):
+      tok = model._sample(Tensor(lg, device="CPU"), temps, "CPU", noise).numpy().reshape(-1)
+    self.assertEqual(list(tok[:12]), [7]*8 + [42]*4)
+
+  def test_p2p_late_raises(self):
+    # (a p2p poll that ran out: its sums wrong. a long wait reads the devices' notes and raises, never returns the tokens)
+    import time
+    model = Transformer.__new__(Transformer)
+    model.token_embd = SimpleNamespace(weight=SimpleNamespace(device=("NULL:0", "NULL:1")))
+    with patch.object(glm_dsa, "p2p_check", side_effect=RuntimeError("a p2p poll ran out")) as chk:
+      model._p2p_mark = time.perf_counter()
+      self.assertEqual(model._wait_host(lambda: 5, "x"), 5)
+      chk.assert_not_called()
+      model._p2p_mark = time.perf_counter() - 2*glm_dsa.P2P_CHECK_S
+      with self.assertRaises(RuntimeError): model._wait_host(lambda: 5, "x")
+    from tinygrad.llm.kernels import amd_glm_dsa
+    with patch.object(amd_glm_dsa, "p2p_late", return_value=[0, 7]), self.assertRaises(RuntimeError): amd_glm_dsa.p2p_check(("NULL:0", "NULL:1"))
+    with patch.object(amd_glm_dsa, "p2p_late", return_value=[0, 0]): amd_glm_dsa.p2p_check(("NULL:0", "NULL:1"))
+    # (the notes: the counter after the device's index, cleared)
+    from tinygrad.device import Buffer
+    from tinygrad.llm.kernels.amd_glm_dsa import P2P_AR_NCTR as NC
+    bufs = [Buffer("CPU", (NC+2)*4, initial_value=np.array([5]*NC + [d, 7*d], dtype=np.int32).tobytes()) for d in range(2)]
+    with patch.object(amd_glm_dsa, "p2p_allreduce", return_value=SimpleNamespace(counter_bufs=bufs)):
+      self.assertEqual(amd_glm_dsa.p2p_late(("CPU", "CPU"), clear=True), [0, 7])
+      self.assertEqual(amd_glm_dsa.p2p_late(("CPU", "CPU")), [0, 0])
+    self.assertEqual(list(np.frombuffer(bufs[1].as_memoryview(), dtype=np.int32)[-3:]), [5, 1, 0])
+    # (the packed allreduce's kernel builds with the ranges' counters)
+    from tinygrad.llm.kernels.amd_glm_dsa import _p2p_allreduce_kernel, P2P_AR_CLASSES, P2P_AR_MAXG, P2P_AR_MAXW, P2P_AR_NCTR
+    N = 4
+    mb = [Tensor.empty(P2P_AR_CLASSES*P2P_AR_MAXG*2*(N+1)*P2P_AR_MAXW, dtype="uint64") for _ in range(N)]
+    counter = Tensor.empty(P2P_AR_NCTR+2, dtype="int32")
+    for T, EP in ((256, 1), (512, 8)):
+      n = 2*T*EP
+      out, x = Tensor.empty(n*4, dtype="float32"), Tensor.empty(N, n*4, dtype="float32")
+      fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n, T=T, EP=EP, two_shot=True, pack=(4, 12))
+      self.assertIs(Tensor.custom_kernel(out, x, counter, *mb, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
+    with self.assertRaises(AssertionError):
+      Tensor.custom_kernel(out, x, counter, *mb, fxn=functools.partial(_p2p_allreduce_kernel, N=N, n=192, T=64, EP=1, two_shot=True, pack=(4, 12)))
+
   def test_seq_i8_reaches_dsa_kernels(self):
     # (glm5next's _forward_seqs_glm sets amd_glm's flag: the DSA kernels' (amd_glm_dsa's) is set by the DSA model's, restored after)
     from tinygrad.helpers import getenv
