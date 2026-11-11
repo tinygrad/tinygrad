@@ -217,16 +217,22 @@ class MemoryManager:
 
     assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
 
+    # (a page table with any_valid/set_entries: the entries of a range read and written at once, not one by one)
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, boot=boot, inspect=True)
     for _, pt, pte_idx, pte_cnt, _ in ctx.next(size):
+      if hasattr(pt, "any_valid") and not pt.any_valid(pte_idx, pte_cnt): continue
       for pte_off in range(pte_cnt): assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
 
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, create_pts=True, boot=boot)
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize, paddr=paddr):
+        frag = self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers)
+        if hasattr(pt, "set_entries"):
+          pt.set_entries(pte_idx, pte_cnt, paddr + off, pte_covers, uncached=uncached, aspace=aspace, snooped=snooped, frag=frag)
+          continue
         for pte_off in range(pte_cnt):
-          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, aspace=aspace, snooped=snooped,
-                       frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
+          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, aspace=aspace, snooped=snooped, frag=frag,
+                       valid=True)
 
     self.on_range_mapped()
     return VirtMapping(vaddr, size, paddrs, aspace=aspace, uncached=uncached, snooped=snooped)

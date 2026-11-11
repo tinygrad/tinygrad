@@ -129,6 +129,17 @@ class AMPageTableEntry:
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
     self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, is_sys, snooped, valid) | (paddr & 0x0000FFFFFFFFF000)
 
+  def set_entries(self, entry_id:int, cnt:int, paddr:int, covers:int, uncached=False, aspace=AddrSpace.PHYS, snooped=False, frag=0):
+    """cnt valid page entries from entry_id (set_entry's of paddr + i*covers) written at once"""
+    if aspace is AddrSpace.PHYS: paddr = self.adev.paddr2xgmi(paddr)
+    last, mask = paddr + (cnt - 1) * covers, self.adev.gmc.address_space_mask
+    assert paddr & mask == paddr and last & mask == last, f"Invalid physical address {paddr:#x}-{last:#x}"
+    flags = self.adev.gmc.get_pte_flags(self.lv, False, frag, uncached, aspace is AddrSpace.SYS, snooped, True)
+    self.entries[entry_id:entry_id+cnt] = array.array('Q', [flags | ((paddr + i * covers) & 0x0000FFFFFFFFF000) for i in range(cnt)])
+  def any_valid(self, entry_id:int, cnt:int) -> bool:
+    """any of cnt entries from entry_id valid (read at once)"""
+    return any(e & am.AMDGPU_PTE_VALID for e in self.entries[entry_id:entry_id+cnt])
+
   def entry(self, entry_id:int) -> int: return self.entries[entry_id]
   def valid(self, entry_id:int) -> bool: return (self.entries[entry_id] & am.AMDGPU_PTE_VALID) != 0
   def address(self, entry_id:int) -> int:
