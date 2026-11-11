@@ -407,5 +407,22 @@ class TestGLMDSASequence(unittest.TestCase):
     np.testing.assert_array_equal(model.seq_spec_h.numpy(), spec)
     np.testing.assert_array_equal(model.seq_ckpt_h.numpy(), ckpt)
 
+  def test_moe_exact_bundles(self):
+    # (MOE_EXACT_MIN: rows from it below MOE_BUNDLE_MIN in bundles of MOE_EXACT_M stored in float (the per-row kernel's values), fewer per row)
+    import tinygrad.llm.kernels.amd_glm_dsa as K
+    E, fin, fout = 4, 256, 64
+    w = Tensor.empty(E*fout*fin*K.QUANT_SIZES[K.IQ4_XS]//256//4, dtype=dtypes.uint32)
+    first = Tensor([0], dtype=dtypes.int32)
+    def run(T:int, exact_min:int) -> tuple[bool, object]:
+      K._bundle_cache.clear()
+      sel, x = Tensor.empty(1, T, 8, dtype=dtypes.int32), Tensor.empty(1, T, 1, fin)
+      with patch.object(K, "MOE_WMMA", 0), patch.object(K, "MOE_EXACT_MIN", exact_min), patch.object(K, "MOE_EXACT_M", 4), \
+           patch.object(K, "moe_bundles", wraps=K.moe_bundles) as mb:
+        out = K.moe_linear(w, K.IQ4_XS, E, x, sel, first, out_dtype=dtypes.half)
+      return mb.called, out.dtype
+    self.assertEqual(run(16, 0), (False, dtypes.float32))  # (off: the per-row kernel)
+    self.assertEqual(run(16, 8), (True, dtypes.float32))   # (bundles, in float whatever out_dtype)
+    self.assertEqual(run(4, 8), (False, dtypes.float32))   # (fewer rows: the per-row kernel)
+    self.assertEqual(run(40, 8), (True, dtypes.half))      # (MOE_BUNDLE_MIN and up: as before)
 
 if __name__ == '__main__': unittest.main()
