@@ -16,7 +16,7 @@ from tinygrad.llm.kernels.amd_glm import Linear, gated_delta_prefill, flash_atte
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, I8_WMMA_QUANTS, flash_attention_rows, \
   grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
   mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
-  kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, DEC_LANE, \
+  kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, DEC_LANE, IDX_LANE, \
   flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, after_kernel, \
   host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, f16t_gemm, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_views, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
@@ -4440,7 +4440,8 @@ class Transformer:
       if mb_queue(lane) and getenv("MB_QUEUES", 1):
         for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(mb_queue(lane))
       # (and the decoding steps' lanes, see DEC_LANE)
-      for ln in (lane, lane + SEL_LANE) + ((DEC_LANE, DEC_LANE + SEL_LANE) if lane == 0 and getenv("SEQ_DEC_LANE", 1) else ()):
+      for ln in (lane, lane + SEL_LANE) + ((DEC_LANE, DEC_LANE + SEL_LANE) if lane == 0 and getenv("SEQ_DEC_LANE", 1) else ()) + \
+                ((IDX_LANE,) if lane == 0 and getenv("SEQ_IDX_SHARD", 0) else ()):
         FLAG_LANE[0] = ln
         for g in (4, 16, 64): flag_allreduce(devs, g)
         # (the ring's mailbox: made before the jits are captured (in a fork, it'd be the child's))

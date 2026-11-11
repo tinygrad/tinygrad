@@ -2193,6 +2193,7 @@ RING_W, RING_CMAX = 8, 4096  # waves a workgroup (a wave a chunk), the most (chu
 # (the collectives of decoding steps on lanes of their own (from DEC_LANE): their exchanges are small, more workgroups (RING_G_DEC) move them in
 # fewer rounds. a lane's mailboxes always have the same workgroups: their epoch counters move together)
 DEC_LANE = 16
+IDX_LANE = 32  # (SEQ_IDX_SHARD's candidate exchange: a lane of its own, the decoding lanes' queue (32 % SEL_LANE_BASE == DEC_LANE's))
 def ring_g(units:int=0) -> int:
   # (the decoding steps' lanes: RING_G_DEC, more for a unit a wave (units: a reduce scatter's), two a wave are ~2.5x the time (78 sequences))
   if FLAG_LANE[0] < DEC_LANE: return getenv("RING_G", 8)
@@ -6582,8 +6583,12 @@ def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:in
   flat = cand.reshape(n, rows*c*2)
   # (IDX_P2P_ROWS: the peer to peer gather up to that many rows (the batched decode's: G=8 at 262k 54.7 -> 44.3 ms on 6x 7900 XTX, the
   # ring of copies ~0.7 ms a call), the ring past it or if the flag mailbox is too small)
-  g = host_allgather(flat) if rows <= getenv("IDX_P2P_ROWS", 256) else None
-  allc = g if g is not None else all_gather(flat, 0, dtypes.float32)
+  # (on a lane of its own (IDX_LANE): an exchange of the step's on the same lane's mailbox in no order with it (one sequence's 3 rows: the
+  # attention's and this one both the flag exchange) was a cycle of the schedule)
+  def gather(f:Tensor) -> Tensor:
+    g = host_allgather(f) if rows <= getenv("IDX_P2P_ROWS", 256) else None
+    return g if g is not None else all_gather(f, 0, dtypes.float32)
+  allc = _lane_call(IDX_LANE, gather, flat)
   width = (width or n*int(scores.shape[1])) if getenv("IDX_MERGE_ORDER", 1) else 0
   return Tensor.custom_kernel(out, allc.reshape(n, rows, c, 2).contiguous(), *extra,
                               fxn=functools.partial(_pool_merge_kernel, q_start=qs, pools=pu, k=top, kpool=kpool, row0=row0, width=width))[0]
