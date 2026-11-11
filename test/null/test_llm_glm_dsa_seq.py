@@ -446,6 +446,19 @@ class TestGLMDSASequence(unittest.TestCase):
       name = sinks[0].arg.name
       self.assertEqual(name.endswith("_p"), bool(P), name)
     bexp, brow, bcnt = K.moe_bundles(sel, first, E, 2, 16*8)
+    # (the tensor core bundles (MOE_WMMA_MIN rows and up) stay the tensor core kernel with MOE_PERSIST on and MOE_PERSIST_WMMA off)
+    sel64, x64 = Tensor.empty(1, 64, 8, dtype=dtypes.int32), Tensor.empty(1, 64, 1, fin)
+    K._bundle_cache.clear()
+    fxns = []
+    orig_ck = Tensor.custom_kernel
+    def ck(*a, fxn, **kw):
+      fxns.append(getattr(fxn, "func", fxn))
+      return orig_ck(*a, fxn=fxn, **kw)
+    with patch.object(K, "_wmma_rdna4", lambda d: True), patch.object(K, "MOE_WMMA", 1), patch.object(K, "MOE_PERSIST", 1), \
+         patch.object(Tensor, "custom_kernel", ck):
+      K.moe_linear(w, K.IQ4_XS, E, x64, sel64, first)
+    self.assertIn(K._moe_bundled_wmma_kernel, fxns)
+    self.assertNotIn(K._moe_bundled_persist_kernel, fxns)
     self.assertEqual((bexp.shape, brow.shape, bcnt.shape), ((16*8//2 + E,), ((16*8//2 + E)*2,), (1,)))
 
   def test_moe_grid_lds(self):
