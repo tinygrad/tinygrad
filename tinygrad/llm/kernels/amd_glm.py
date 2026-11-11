@@ -6123,14 +6123,15 @@ def _key_regs(key:Callable[[UOp], UOp], per:int) -> list[UOp]:
   kreg = kreg.after(UOp.group(*(kreg[c].store(key(UOp.const(c, dtypes.weakint))) for c in range(per))))
   return [kreg[c].load() for c in range(per)]
 
-def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:UOp, lane:UOp, regs:list[UOp]|None=None) -> UOp:
+def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:UOp, lane:UOp, regs:list[UOp]|None=None,
+               agg:bool|None=None) -> UOp:
   """
   the k-th largest of the keys of a workgroup's threads (key(c) a thread's of chunk c of npc, uint32, 1 at least, all of them with no more pools
   than k): a radix select, 4 passes of 8 bits from the top. a pass counts the digits of the keys whose higher digits are the prefix found (a
   histogram in LDS, atomics), one wave scans it from the top for the bin of the k-th (the keys left), the next pass that bin's. the same as a
   bisection bit by bit, 8 barriers. regs: the keys of every chunk in registers (_key_regs): the chunks unrolled (the same counts)
   """
-  zero = UOp.const(0, dtypes.int32)
+  zero, agg = UOp.const(0, dtypes.int32), bool(getenv("PIDX_AGG", 0)) if agg is None else agg
   hist = UOp.alloc((4*256,), dtypes.int32, addrspace=AddrSpace.LOCAL)
   hist = hist.after(UOp.group(*(hist[(t + i*DECODE_THREADS).valid(t + i*DECODE_THREADS < 4*256)].store(zero)
                                 for i in range((4*256 + DECODE_THREADS - 1) // DECODE_THREADS))).barrier())
@@ -6145,6 +6146,21 @@ def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:
         if d: ok = ok & (kv >> (32 - 8*d)).eq(prefix)
         adds.append(_sys(_ATOMIC_ADD1_IF, dtypes.void, hist[d*256 + ((kv >> (24 - 8*d)) & 255).cast(dtypes.weakint)], ok))
       hd = hist.after(UOp.group(*adds).barrier())
+    elif agg:
+      # (PIDX_AGG: the matching lanes of a wave with the digit of the first of them one add of their count (its lane), the others an add
+      # each: equal keys (the scores of an empty or a constant context) an add a wave, not 32 to one bin. the same counts)
+      c = UOp.range(npc, 20 + d, AxisType.LOOP)
+      kv = key(c)
+      match = (kv >> (32 - 8*d)).eq(prefix) if d else UOp.const(True, dtypes.bool)
+      digit = ((kv >> (24 - 8*d)) & 255).cast(dtypes.int32)
+      bm = _ballot(match)
+      lead = _cfn(True, src=(bm,), arg=("__builtin_ctz({0} | 0x80000000u)", dtypes.int32))
+      ldig = _bpermute(digit, lead)
+      same = _popcount(_ballot(match & digit.eq(ldig)))
+      ladd = _sys("if ({1}) __hip_atomic_fetch_add({0}, {2}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);", dtypes.void,
+                  hist[d*256 + ldig.cast(dtypes.weakint)], match & lane.eq(lead.cast(dtypes.weakint)), same)
+      oadd = _sys(_ATOMIC_ADD1_IF, dtypes.void, hist[d*256 + digit.cast(dtypes.weakint)], match & digit.ne(ldig))
+      hd = hist.after(UOp.group(ladd, oadd).end(c).barrier())
     else:
       c = UOp.range(npc, 20 + d, AxisType.LOOP)
       kv = key(c)
@@ -6170,7 +6186,7 @@ def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:
 
 @functools.cache
 def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0, dev_rows:int=0,
-                       compact:bool=False, reg:bool|None=None) -> UOp:
+                       compact:bool=False, reg:bool|None=None, agg:bool|None=None) -> UOp:
   # (compact: the list (k+2) the picked pools, their count at k, the query's position at k+1 (the keys: a pool's kpool, then the tail of the
   # query's pool: see qsa_decode's kpool))
   # a workgroup per query row of scores (the query of row r is at q_start+r, its list row row0+r of index), thread t holds pool c*THREADS + t
@@ -6201,7 +6217,7 @@ def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:U
     return ok.where(_order_key(bits), UOp.const(0, dtypes.uint32))
   # (PIDX_REG: a thread's keys loaded once into registers, the passes over them unrolled: the same counts, picks)
   regs = _key_regs(key, per) if (getenv("PIDX_REG", 0) if reg is None else reg) and getenv("PIDX_RADIX", 1) else None
-  if getenv("PIDX_RADIX", 1): thr = _radix_kth(key, npc, k, pools, t, wave, lane, regs=regs)
+  if getenv("PIDX_RADIX", 1): thr = _radix_kth(key, npc, k, pools, t, wave, lane, regs=regs, agg=agg)
   else:
     # the bisection: bit by bit from the top, no loop with no more pools than k (they are all picked)
     lds = UOp.alloc((32, W), dtypes.float32, addrspace=AddrSpace.LOCAL)
