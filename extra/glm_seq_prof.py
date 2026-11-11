@@ -41,7 +41,10 @@ def sync():
 st0 = time.perf_counter()
 seqs = []
 for g in range(G):
-  T = corpus[1000 + g*CTXP*2:1000 + g*CTXP*2 + CTXP + 3*(NS+WARM) + k + 2]
+  # (sampled: the streams' starts wrap around the corpus, many users of 262k need more than it has)
+  need, o = CTXP + 3*(NS+WARM) + k + 2, 1000 + g*CTXP*2
+  if SAMPLED and o + need > len(corpus): o = 1000 + (o * 7919) % (len(corpus) - need - 1000)
+  T = corpus[o:o + need]
   ids = T[:CTXP]
   assert len(ids) == CTXP, f"prompt {g}: got {len(ids)} tokens, need {CTXP} (increase CHARS)"
   if SAMPLED:
