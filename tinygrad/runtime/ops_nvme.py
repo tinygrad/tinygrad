@@ -86,6 +86,8 @@ class NVMEIface(PCIIfaceBase):
 
 class NVMEAllocator(Allocator['NVMEDevice']):
   lru = False
+  @functools.cached_property
+  def prp_tables(self) -> dict[int, Buffer]: return {}
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage: return BufferStorage(0)
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
   def _map(self, buf:Buffer) -> BufferStorage:
@@ -94,7 +96,10 @@ class NVMEAllocator(Allocator['NVMEDevice']):
     mapping = buf.meta.mapping
     paddrs = mapping.paddrs if mapping.aspace is AddrSpace.SYS else PCIIfaceBase.p2p_paddrs(iface, mapping.paddrs)[0]
     table = self.dev.iface.buffer(*prp_table(self.dev.nvme, [p + off for p, size in paddrs for off in range(0, size, 0x1000)]))
-    return BufferStorage(table.get_buf(buf.device), table)
+    # Root the table until _unmap; cyclic GC can finalize a Buffer held only by cached storage's metadata.
+    self.prp_tables[addr:=table.get_buf(buf.device)] = table
+    return BufferStorage(addr)
+  def _unmap(self, storage:BufferStorage): self.prp_tables.pop(storage.buf).deallocate()
 
 class NVMEDevice(Compiled):
   ifaces = [NVMEIface]
