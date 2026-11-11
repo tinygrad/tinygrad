@@ -4,6 +4,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
+from tinygrad.helpers import Context
 
 class TestEffectRetention(unittest.TestCase):
   def test_unused_reduce_dependency(self):
@@ -116,6 +117,7 @@ class TestEffectRetention(unittest.TestCase):
     a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(2, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([7], [1, 1]))
 
+  @Context(CHECK_OOB=0)
   def test_after_gated_read_coordinate(self):
     for ki in (KernelInfo(), KernelInfo(opts_to_apply=()), KernelInfo(optimized=True)):
       def kernel(A:UOp, D:UOp, B:UOp, C:UOp):
