@@ -173,12 +173,15 @@ def assert_all_same_devices(ast:UOp):
 
 def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
   if dst.device == src.device and not dst.on_disk(): return None
+  # a copy into the start of a larger destination (a contiguous view of it at offset 0) writes that range
+  if dst.device != src.device and dst.max_shape[0] != (n:=1 if r is None else int(r.vmax) + 1):
+    return copy_kernel_to_view_store(call, dst, src, r if r is not None else UOp.const(0), UOp.const(0), n)
   return call.replace(src=(dst.store(src),) + call.src[1:])
 
-def copy_kernel_to_view_store(call:UOp, dst:UOp, src:UOp, r:UOp, off:UOp):
+def copy_kernel_to_view_store(call:UOp, dst:UOp, src:UOp, r:UOp, off:UOp, n:int|None=None):
   # dst[off+i] = src[i] across devices: a STORE to the view of the destination (a copy writes a range)
   if dst.device == src.device or not isinstance(off.arg, int) or off.arg < 0: return None
-  n, args = int(r.vmax) + 1, list(call.src[1:])
+  n, args = int(r.vmax) + 1 if n is None else n, list(call.src[1:])
   args[dst.arg.slot] = args[dst.arg.slot].shrink(((off.arg, off.arg + n),))
   return call.replace(src=(UOp.param(dst.arg.slot, dst.dtype, n, dst.device).store(src),) + tuple(args))
 

@@ -804,9 +804,7 @@ class TestAssignOrdering(unittest.TestCase):
     Tensor.realize(x, y, z)
     np.testing.assert_allclose([x.item(), y.item(), z.item()], [2.0, 4.0, 15.0])
 
-  @unittest.expectedFailure
   def test_war_reader_of_disjoint_slice(self):
-    # TODO: the stale read of x[2:4] fuses into z's kernel with the new y, like the sibling. staging that read gives [18, 20]
     x = Tensor([1.0, 2.0, 3.0, 4.0]).contiguous().realize()
     y = Tensor([0.0, 0.0]).contiguous().realize()
     stale = x[2:4] + 10
