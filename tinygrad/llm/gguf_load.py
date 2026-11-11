@@ -7,7 +7,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.uop.ops import UOp
 from tinygrad.device import Device
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, round_up, Context, unwrap, dedup, DEBUG
+from tinygrad.helpers import prod, round_up, Context, unwrap, dedup, DEBUG, getenv
 from tinygrad.llm.gguf import ggml_data_to_tensor, _GGML_NATIVE, _GGML_QUANT
 from tinygrad.llm.direct_read import DirectFile, read_many, close_rings, slow_bytes, PAGE
 
@@ -175,8 +175,9 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
     from tinygrad.uop.ops import Ops
     st, slow0 = time.perf_counter(), slow_bytes[0]
     size = max(round_up(hi, PAGE) - (lo - lo % PAGE) for _, lo, hi, _ in chunks)
+    # (LOAD_HOST_BUFS: the host buffers the reads go through, fewer when the reads are deferred: they're made while the jits compile)
     hosts = [Buffer(devices[0], size, options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
-             for _ in range(min(HOST_BUFS, len(chunks)))]
+             for _ in range(min(getenv("LOAD_HOST_BUFS", 2 if pending is not None else HOST_BUFS), len(chunks)))]
     def alias(b:Buffer, d:str) -> Buffer:
       return Buffer(d, b.nbytes, opaque=BufferStorage(va:=b.get_buf(d)), options=BufferSpec(external_ptr=va)).ensure_allocated()
     views = [[h] + [alias(h, d) for d in devices[1:]] for h in hosts]

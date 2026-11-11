@@ -592,7 +592,9 @@ def _lap(what:str):
   """DEBUG_LOAD=1: a line when loading gets past `what` (the time is the log's)"""
   if getenv("DEBUG_LOAD"):
     from tinygrad.device import alloc_stats
-    print(f"load: {what} at {time.perf_counter()-_t_import:.2f}s ({alloc_stats[0]} allocations in {alloc_stats[1]:.2f}s)", flush=True)
+    try: rss = f", rss {int(open('/proc/self/statm').read().split()[1]) * 4096 / 1e9:.1f} GB"
+    except OSError: rss = ""
+    print(f"load: {what} at {time.perf_counter()-_t_import:.2f}s ({alloc_stats[0]} allocations in {alloc_stats[1]:.2f}s{rss})", flush=True)
 
 def _open_devices(devices:tuple[str, ...]):
   """the devices opened at the same time (most of opening one is waiting for it): the first alone (what they share is made once)"""
