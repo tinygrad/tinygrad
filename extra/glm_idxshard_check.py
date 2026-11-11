@@ -70,6 +70,11 @@ for T, pos in [(3, 4000), (3, 65000), (3, 200000), (3, PT*KP - 8), (64, 30000), 
           have = set(got[:, 1].astype(np.int64).tolist())
           if not want <= have or len(got) != min(TOP, len(v)) or (got[:, 0] < kth).any():
             print(f"  cand dev {d} row {r}: valid {len(got)} of {len(v)} missing {sorted(want-have)[:4]} below k-th {(got[:, 0] < kth).sum()}")
+            if r < 6:
+              g2l = {int(g): i for i, g in enumerate(gp)}
+              extra = sorted(have - set(gp[ok][v >= kth].tolist()))
+              print(f"    distinct {len(have)} >k-th {len(want)} ==k-th {(v == kth).sum()} extra {extra[:6]} their split {[float(ss[d, r, g2l[x]]) for x in extra[:3] if x in g2l]}"
+                    f" cand scores {[float(x) for x, y in got if int(y) in extra[:3]]} slots of missing? {[i for i, (x, y) in enumerate(got) if int(y) in extra[:3]][:6]}")
     a = pool_index_rows(indexer_scores(q, k_rep, w, pools, KP, width=PT), qs, pools, TOP, KP)
     b = pool_index_shard(indexer_scores(q, k_sh, w, pools, KP, width=PT), qs, pools, TOP, KP, width=PT)
   la, lb = lists(a.to(devs[0]).numpy()), lists(b.to(devs[0]).numpy())
