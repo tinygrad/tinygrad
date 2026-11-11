@@ -85,7 +85,8 @@ if SAMPLED and getenv("SAMPLED_FILL", 0):
     pkb = pk.realize().uop.base.buffer
     dbufs = pkb.bufs if isinstance(pkb, MultiBuffer) else [pkb]
     if all(db.nbytes == c.nbytes for db, c in zip(dbufs, chunks)) and getenv("SAMPLED_FILL_DIRECT", 1):
-      for db, c in zip(dbufs, chunks): db.copy_from(Buffer("NPY", db.nbytes, opaque=memoryview(np.ascontiguousarray(c).view(np.uint8).reshape(-1))))
+      for db, c in zip(dbufs, chunks):
+        db.ensure_allocated().copy_from(Buffer("NPY", db.nbytes, opaque=memoryview(np.ascontiguousarray(c).view(np.uint8).reshape(-1))))
     else:
       pk.assign(Tensor(np.ascontiguousarray(np.concatenate(chunks))).shard(devs, axis=0) if pk.uop.axis == 0 else
                 Tensor(np.ascontiguousarray(arr)).shard(devs) if len(devs) > 1 else Tensor(arr, device=devs[0])).realize()
