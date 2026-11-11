@@ -65,6 +65,10 @@ for g in range(G):
     seqs.append(dict(slot=g, base=g*span, mtp=len(ids), j=0, par=1, y=[first] + [0]*k, n=0,
                      outhash=hashlib.sha256(), stream=T))
 if getenv("MEM_TRACE"): mem_trace.report("prefill")
+if getenv("SEQ_DROP_PREFILL") and not SAMPLED:
+  # (the board harness after its donors: the prefill jits dropped, the shared arenas shrunk to the decode jits', see seq_drop_prefill)
+  print("SEQ_DROP_PREFILL", {str(k): v for k, v in model.seq_drop_prefill().items()}, flush=True)
+  if getenv("MEM_TRACE"): mem_trace.report("dropped")
 if SAMPLED: model._seq_init()  # normally seq_prefill/seq_step does this: allocate caches, slots and telemetry without filling them
 if SAMPLED and getenv("SAMPLED_FILL", 0):
   # (SAMPLED_FILL=1: the indexer's pooled keys (GLM_SEQ: cache_pk, all the regions') random fp8 rows (a real context's spread of scores,
