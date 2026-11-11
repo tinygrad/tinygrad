@@ -4715,7 +4715,7 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
 
 @functools.cache
 def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP:int=4, shard:int=0, kpool:int=0,
-                           pbase:UOp|None=None) -> UOp:
+                           pbase:UOp|None=None, rows:UOp|None=None) -> UOp:
   # RDNA4 WMMA: out[t, p] = sum over the heads h of w[t, h] * relu(q[t, h] . k[p]). a wave per 16 tokens and G of the tiles of 16*NP
   # pools: it loops over the tiles g, g+G, .. of the pools (the work follows the context, not its max)
   T, H, D = cast(tuple[int, int, int], q.shape)
@@ -4724,7 +4724,9 @@ def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP
   # (shard: the device's pools of the pooled keys split over the devices, SEQ_IDX_SHARD)
   if shard: pools = _local_pools(pools, dev[0][0].load().cast(dtypes.weakint), shard, SEQ_BLK // kpool).minimum(P)
   G = min(64, P // (16*NP))
-  tt, g, lane = UOp.range(T // 16, 0, AxisType.GLOBAL), UOp.range(G, 1, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  # (rows: the first rows only (IDX_PAD: a chunk's tokens), the others' scores unwritten)
+  tt = UOp.range(T // 16 if rows is None else ((rows + 15) // 16).minimum(T // 16), 0, AxisType.GLOBAL)
+  g, lane = UOp.range(G, 1, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   col, half = lane % 16, lane // 16
   tiles = (pools + 16*NP - 1) // (16*NP)
   active = UOp.range(((tiles - g + G - 1) // G).maximum(0), 2, AxisType.LOOP)
@@ -4768,7 +4770,8 @@ def _idx_shard(k:Tensor) -> int:
   """the devices the pooled keys k are split over (SEQ_IDX_SHARD: on their rows), 0 if whole on every device"""
   return len(k.device) if isinstance(k.device, tuple) and k.uop.axis == 0 else 0
 
-def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp, kpool:int=4, pbase:int|UOp=0, width:int|None=None) -> Tensor:
+def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp, kpool:int=4, pbase:int|UOp=0, width:int|None=None,
+                   rows:UOp|None=None) -> Tensor:
   """
   q (T, H, D), k (P, D) the pooled keys (P static, the first `pools` used), w (T, H): (T, P) scores, the columns past pools unwritten.
   k split over the devices (SEQ_IDX_SHARD): every device's scores of its pools (n*T, P/n) split on its rows. pbase: a sequence's pooled keys
@@ -4786,7 +4789,7 @@ def indexer_scores(q:Tensor, k:Tensor, w:Tensor, pools:int|UOp, kpool:int=4, pba
   if isinstance(pools, UOp): kh = Tensor(kh.uop.after(pools))
   if isinstance(pbase, UOp): kh = Tensor(kh.uop.after(pbase))
   fxn = functools.partial(_indexer_scores_kernel, pools=_unbind(pools) if isinstance(pools, UOp) else UOp.const(pools, dtypes.weakint), shard=n,
-                          kpool=kpool, pbase=_pb(pbase))
+                          kpool=kpool, pbase=_pb(pbase), **({"rows": rows} if rows is not None else {}))
   dsrc = [_device_index(cast(tuple[str, ...], k.device))] if n else []
   return Tensor.custom_kernel(out, q.half().contiguous(), kh, w.float().contiguous(), *dsrc, fxn=fxn)[0]
 
@@ -5125,13 +5128,15 @@ def _local_pools(pools:UOp, me:UOp, n:int, PB:int) -> UOp:
 def _global_pool(lp:UOp, me:UOp, n:int, PB:int) -> UOp: return (lp // PB) * (PB*n) + me*PB + lp % PB
 
 @functools.cache
-def _pool_cand_kernel(cand:UOp, scores:UOp, dev:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, n:int) -> UOp:
+def _pool_cand_kernel(cand:UOp, scores:UOp, dev:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, n:int, valid:UOp|None=None) -> UOp:
   # a workgroup per query row of the device's scores of its pools (rows, PL): its top k complete pools before the query (_pool_index_kernel's
   # selection), their (score, pool) in cand (rows, k, 2), the rest (0, -1)
   rows, PL = cast(tuple[int, int], scores.shape)
   THREADS, PB = DECODE_THREADS, SEQ_BLK // kpool
   per, W = (PL + THREADS - 1) // THREADS, THREADS // WARP_SIZE
-  row, wave, lane = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  # (valid: the first rows only (IDX_PAD), the others' candidates unwritten)
+  row = UOp.range(rows if valid is None else valid.minimum(rows), 0, AxisType.GLOBAL)
+  wave, lane = UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   t, q = wave * WARP_SIZE + lane, q_start + row
   if grouped:
     Tg = rows // cast(int, grouped[0].shape[0])
@@ -5196,7 +5201,7 @@ def _pool_merge_kernel(index:UOp, cand:UOp, *grouped:UOp, q_start:UOp, pools:UOp
   return UOp.group(*stores).end(row, wave, lane).sink(arg=KernelInfo(name="pool_merge", opts_to_apply=(), estimates=est))
 
 def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:int, kpool:int, row0:int=0, out:Tensor|None=None,
-                     positions:Tensor|None=None) -> Tensor:
+                     positions:Tensor|None=None, valid:UOp|None=None) -> Tensor:
   """
   pool_index_rows of the sharded pooled keys: scores (n*rows, PL) every device's of its pools (split on axis 0), the lists (rows,
   top*kpool+kpool+1) on every device (the same). positions: the start of every group of rows (batched decoding, as grouped)
@@ -5214,8 +5219,9 @@ def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:in
   # (a few rows (decoding): 512 a device, the merge of all of them is a kernel of a few workgroups)
   c = max(min(top, getenv("IDX_CAND", 512 if rows <= 8 else top)), (top + n - 1) // n)
   cand = Tensor.empty(n*rows, c, 2, dtype=dtypes.float32, device=devs, axis=0)
+  vk = {"valid": valid} if valid is not None else {}
   cand = Tensor.custom_kernel(cand, sc, _device_index(devs), *extra, fxn=functools.partial(_pool_cand_kernel, q_start=qs, pools=pu, k=c,
-                                                                                           kpool=kpool, n=n))[0]
+                                                                                           kpool=kpool, n=n, **vk))[0]
   flat = cand.reshape(n, rows*c*2)
   if positions is None and rows >= 16*n and getenv("IDX_MERGE_SPLIT", 1):
     return _pool_merge_split(cand, out, devs, rows, c, qs, pu, top, kpool, row0)

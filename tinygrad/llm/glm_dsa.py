@@ -1127,8 +1127,11 @@ class Indexer:
       qb = iq[r0:r0+block].contiguous()
       if picks is not None: qb = Tensor(qb.uop.after(*picks.uop.src[1:]))  # (after the last block's lists: its scores are done)
       if picks is None: picks = Tensor.empty(rows, idx.top_k + 2, dtype=dtypes.int32, device=x.device)
-      sc = indexer_scores(qb, pk, weights[r0:r0+block], S, 1, pbase=kb, width=width)
-      picks = pool_index_shard(sc, start_pos, S, idx.top_k, 1, row0=r0, out=picks) if self.shard else \
+      # (IDX_PAD (with LISTS_PAD): a block's scores and candidates of the chunk's tokens only, its padding rows' lists are emptied after)
+      rv = (T - r0).maximum(0).minimum(int(qb.shape[0])).unbind_all()[0] if getenv("IDX_PAD", 0) and getenv("LISTS_PAD", 0) and \
+        isinstance(T, UOp) and self.shard else None
+      sc = indexer_scores(qb, pk, weights[r0:r0+block], S, 1, pbase=kb, width=width, rows=rv)
+      picks = pool_index_shard(sc, start_pos, S, idx.top_k, 1, row0=r0, out=picks, valid=rv) if self.shard else \
               pool_index_rows(sc, start_pos, S, idx.top_k, 1, row0=r0, out=picks)
     return unwrap(picks)[:Tq]
 

@@ -191,6 +191,15 @@ class TestGLMDSASequence(unittest.TestCase):
     stores = [u for u in k.toposort() if u.op is Ops.STORE]
     self.assertEqual(len(stores), 1)
     self.assertIs(lists_pad(t:=Tensor.empty(8, 5, dtype="int32"), 8), t)
+    # (IDX_PAD: the indexer's scores and candidates of the first rows only)
+    from tinygrad.llm.kernels.amd_glm_dsa import _indexer_scores_kernel, _pool_cand_kernel
+    rv, sp = UOp.variable("rv", 0, 32), UOp.const(100, dtypes.weakint)
+    sc = Tensor.custom_kernel(Tensor.empty(32, 256), Tensor.empty(32, 16, 128, dtype="half"), Tensor.empty(256, 128, dtype="half"),
+                              Tensor.empty(32, 16), fxn=functools.partial(_indexer_scores_kernel, pools=sp, kpool=1, rows=rv))[0]
+    self.assertIn(rv, sc.uop.src[1].src[0].toposort())
+    cd = Tensor.custom_kernel(Tensor.empty(32, 64, 2), Tensor.empty(32, 256), Tensor.empty(1, dtype="int32"),
+                              fxn=functools.partial(_pool_cand_kernel, q_start=sp, pools=sp, k=64, kpool=1, n=4, valid=rv))[0]
+    self.assertIn(rv, cd.uop.src[1].src[0].toposort())
 
   def test_dsa_stash_roundtrip(self):
     def t(shape, axis=None):
