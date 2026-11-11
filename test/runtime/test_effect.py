@@ -4,6 +4,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
+from tinygrad.helpers import Context
 
 class TestEffectRetention(unittest.TestCase):
   def test_unused_reduce_dependency(self):
@@ -115,6 +116,16 @@ class TestEffectRetention(unittest.TestCase):
       return B[i].store(A[UOp.const(0).valid(UOp.const(False).after(A[0].store(7)))]+1).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(2, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([7], [1, 1]))
+
+  @Context(CHECK_OOB=0)
+  def test_after_gated_read_coordinate(self):
+    for ki in (KernelInfo(), KernelInfo(opts_to_apply=()), KernelInfo(optimized=True)):
+      def kernel(A:UOp, D:UOp, B:UOp, C:UOp):
+        return B[i:=UOp.range(4, 0)].store(C[A[0].valid(D[i]).after(A[0].store(1), D[i].store(i < 2))]).end(i).sink(arg=ki)
+      a, d, b, _ = Tensor.custom_kernel(Tensor([0]).contiguous(), Tensor([False]*4).contiguous(), Tensor.zeros(4, dtype=dtypes.int).contiguous(),
+                                        Tensor([13, 29]).contiguous(), fxn=kernel)
+      Tensor.realize(a, d, b)
+      self.assertEqual(b.tolist(), [29, 29, 0, 0])
 
 class TestEffectOrder(unittest.TestCase):
   def test_snapshot_before_overwrite(self):
