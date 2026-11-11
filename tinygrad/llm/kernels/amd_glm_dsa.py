@@ -1810,7 +1810,9 @@ def p2p_late(devs:tuple[str, ...], clear:bool=False) -> list[int]:
     for d in devs: Device[d].synchronize()
   return ret
 
-def P2P_AR_TIMEOUT_MS() -> int: return getenv("P2P_AR_TIMEOUT_MS", 30000)
+# (120 s (was 30): with SEQ_A2A_HALF on, ts5 s3runout2 (8e08416b8, the 64k teacher-forced harness that died at 30 s on 93e2) ran 6 of 6 prompts
+# clean at 120 s; a poll that runs out still ends (P2P_RETRY runs a prompt's chunks again))
+def P2P_AR_TIMEOUT_MS() -> int: return getenv("P2P_AR_TIMEOUT_MS", 120000)
 
 class P2PRunOut(RuntimeError):
   """a p2p poll ran out (its kernel's values are wrong): the epoch counters and the mailboxes are still consistent (every device ended the call),
