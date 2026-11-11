@@ -6,7 +6,7 @@ from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.jit import capture_parallel, warmup_select
 from tinygrad.llm.kernels import amd_qwen
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
-from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES, _wmma_rdna4, ring_errors
+from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES, _wmma_rdna4, ring_errors, init_deferred
 from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custom_kernels_supported, find_packed, moe_linear, q8_linear, \
   q8_quantize_cache_clear, moe_route, moe_grouped_linear, partial_sum, fuse_gate_up, kda_decode, pool_index_rows, slot_scatter, \
   slot_gather, moe_combine, token_sharded, shard_rows, reduce_scatter, all_gather, all_gather_q8, sharded_argmax, skinny_matmul, kda_conv, \
@@ -2506,7 +2506,13 @@ class Transformer:
     Tensor.realize(*[x for d in devs for x in (*Tensor._next_counter(d, 0), Tensor._device_rng_counters[d])])
     if self.config.ple is not None: self._ple_dev_init(read)
     _lap("shared: ple")
-    # (a lane of the collectives a micro batch, and its compute queue (MB_QUEUES), see micro_batch_blocks)
+    # (a lane of the collectives a micro batch, and its compute queue (MB_QUEUES), see micro_batch_blocks. their state copied in at once)
+    with init_deferred(): self._seq_lanes(devs)
+    _lap("shared: lanes")
+    _device_index(devs)
+    _argmax_parts(devs, (self.config.padded_vocab_size or self.config.vocab_size) // len(devs), self.config.vocab_size)
+
+  def _seq_lanes(self, devs:tuple[str, ...]):
     for lane in range(MICRO_BATCHES):
       if mb_queue(lane):
         for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(mb_queue(lane))
@@ -2521,8 +2527,6 @@ class Transformer:
     for lane in range(MICRO_BATCHES):
       if ring_queue_of(lane, any_time=True):
         for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(ring_queue_of(lane, any_time=True))
-    _device_index(devs)
-    _argmax_parts(devs, (self.config.padded_vocab_size or self.config.vocab_size) // len(devs), self.config.vocab_size)
 
   def memory_report(self) -> dict:
     """

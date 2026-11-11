@@ -1734,11 +1734,23 @@ def comm_state_report() -> str:
 
 def flag_ar_groups(n:int) -> int: return 4 if n <= 8192 else 16 if n <= 65536 else 64
 
+# (while not None: _init_buffers's pairs kept, copied in by init_deferred's end: the collectives' state made at once, not a copy and a wait each)
+_INIT_LATER:list[list[tuple[Any, bytes]]] = []
+@contextlib.contextmanager
+def init_deferred():
+  """the buffers _init_buffers initializes in the context: allocated now, their bytes copied in (one launch, one wait) at its end"""
+  _INIT_LATER.append(pairs:=cast(list[tuple[Any, bytes]], []))
+  try: yield
+  finally:
+    _INIT_LATER.pop()
+    _init_buffers(pairs)
+
 def _init_buffers(pairs:list[tuple[Any, bytes]]):
   """the buffers allocated, their bytes copied in at once: one launch of copies from host memory every device maps (not a copy each)"""
   from tinygrad.device import Buffer, BufferSpec, BufferStorage
   from tinygrad.engine.realize import run_linear
   for b, _ in pairs: b.ensure_allocated()
+  if _INIT_LATER: return _INIT_LATER[-1].extend(pairs)
   if not pairs: return
   offs = list(itertools.accumulate([round_up(len(v), 256) for _, v in pairs], initial=0))
   host = Buffer(pairs[0][0].device, offs[-1], options=BufferSpec(host=True, cpu_access=True)).ensure_allocated()
@@ -1783,7 +1795,8 @@ class FlagAllreduce:
       _init_buffers(inits + [(b, bytes(groups*4) + i.to_bytes(4, "little")) for i, b in enumerate(counters)])
       (cb:=MultiBuffer.__new__(MultiBuffer)).bufs = counters
       self.counter = Tensor(UOp.from_buffer(cb, dtypes.uint32, devs))
-      for d in devs: Device[d].synchronize()
+      if not _INIT_LATER:
+        for d in devs: Device[d].synchronize()
 
 # (the mailboxes and counters collectives use: lanes of their own (micro batches' collectives are independent, they'd write a lane's state at
 # once), see micro_batch_blocks)
@@ -2097,7 +2110,8 @@ class RingMailbox:
       self.dbg_bufs = dbg
       (db:=MultiBuffer.__new__(MultiBuffer)).bufs = dbg
       self.dbg = Tensor(UOp.from_buffer(db, dtypes.uint32, devs))
-      for d in devs: Device[d].synchronize()
+      if not _INIT_LATER:
+        for d in devs: Device[d].synchronize()
 
 RING_W, RING_CMAX = 8, 4096  # waves a workgroup (a wave a chunk), the most (chunk, round) flags of a slot
 # (the workgroups of a kernel: few, a kernel spinning with many waves on a device can keep the ones another device waits for from starting.
