@@ -1816,8 +1816,13 @@ class P2PRunOut(RuntimeError):
   """a p2p poll ran out (its kernel's values are wrong): the epoch counters and the mailboxes are still consistent (every device ended the call),
   so the work that used the wrong values can be run again"""
 
+_FAKE_RUNOUTS = [0]
 def p2p_check(devs:tuple[str, ...]) -> None:
   """raise if a p2p poll ran out since the last check (its kernel's values are wrong): a step that took P2P_AR_TIMEOUT_MS has one"""
+  # (P2P_FAKE_RUNOUT=n, a test of P2P_RETRY: the first n checks raise as a run-out would, the values right)
+  if _FAKE_RUNOUTS[0] < getenv("P2P_FAKE_RUNOUT", 0):
+    _FAKE_RUNOUTS[0] += 1
+    raise P2PRunOut(f"a fake p2p run-out ({_FAKE_RUNOUTS[0]}, P2P_FAKE_RUNOUT)")
   if any(late:=p2p_late(devs, clear=True)):
     raise P2PRunOut(f"a p2p poll ran out (P2P_AR_TIMEOUT_MS={P2P_AR_TIMEOUT_MS()}, epochs {late}): the sums of its step are wrong")
 
