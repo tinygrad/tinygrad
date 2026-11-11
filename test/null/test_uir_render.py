@@ -1,7 +1,7 @@
 import unittest, math
 from dataclasses import replace
 from tinygrad import Tensor
-from tinygrad.dtype import dtypes, Invalid
+from tinygrad.dtype import dtypes, Invalid, AddrSpace
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp, UPat, graph_rewrite, KernelInfo, ProgramInfo
 from tinygrad.uop.movement import mop_cleanup
@@ -119,6 +119,56 @@ class TestParseUIR(unittest.TestCase):
     txt = "%0 = param 4 slot=0 dtype=f32\n%1 = range 4 slot=0\n%2 = index %0 %1\n%3 = store %2 1.0\n%4 = end %3 %1\n%5 = sink %4 name=test"
     self.assertEqual(ansistrip(render_uir(sink)), txt)
     self.assertIs(parse_uir("# a comment\n" + txt.replace("\n", "  # a trailing comment\n")), sink)
+
+  def test_buffer_does_not_bind_existing_storage(self):
+    live = UOp.new_buffer("NULL", 4, dtypes.float32)
+    for size in (4, 8):
+      parsed = parse_uir(f"%0 = buffer {size} slot={live.arg.slot} dtype=f32 device=NULL")
+      self.assertNotEqual(parsed.arg.slot, live.arg.slot)
+      self.assertIsNone(parsed.slot_buffer)
+      self.assertEqual(parsed.numel(), size)
+
+  def test_buffer_does_not_capture_future_allocation(self):
+    for size, dtype in [(4, dtypes.float32), (8, dtypes.int32)]:
+      slot = next(UOp.unique_num) + 1
+      parsed = parse_uir(f"%0 = buffer 4 slot={slot} dtype=f32 device=NULL")
+      live = UOp.new_buffer("NULL", size, dtype)
+      self.assertNotEqual(parsed.arg.slot, live.arg.slot)
+      self.assertIsNone(parsed.slot_buffer)
+      self.assertIsNotNone(live.buffer)
+
+  def test_buffer_aliases_are_local_to_each_parse(self):
+    text = """
+      %a = buffer 4 slot=7 dtype=f32 device=NULL
+      %b = { %view = buffer 4 arg=`ParamArg(7, dtypes.int32, device='NULL')` }
+      %c = buffer 4 slot=8 dtype=f32 device=NULL
+      %d = buffer 4 slot=7 dtype=f32 device=NULL
+      %out = sink %a %b %c %d
+    """
+    first, second = parse_uir(text), parse_uir(text)
+    for root in (first, second):
+      a, b, c, d = root.src
+      self.assertEqual(a.arg.slot, b.arg.slot)
+      self.assertNotEqual(a.arg.slot, c.arg.slot)
+      self.assertIs(a, d)
+      for buf in root.src: self.assertIsNone(buf.slot_buffer)
+    self.assertTrue({x.arg.slot for x in first.src}.isdisjoint(x.arg.slot for x in second.src))
+
+  def test_buffer_slot_is_only_a_label(self):
+    for label in (-1, 0, 10**30):
+      expected = next(UOp.unique_num) + 1
+      parsed = parse_uir(f"%0 = buffer 4 slot={label} dtype=f32 device=NULL")
+      self.assertEqual(parsed.arg.slot, expected)
+      self.assertEqual(next(UOp.unique_num), expected + 1)
+
+  def test_scratch_and_parameter_slots_are_preserved(self):
+    for addrspace in (AddrSpace.LOCAL, AddrSpace.REG):
+      buf = UOp._buffer(4, dtypes.float32, 7, addrspace=addrspace)
+      self.assertIs(parse_uir(render_uir(buf)), buf)
+    for op in ("param", "alloc"):
+      parsed = parse_uir(f"%0 = {op} 4 slot=7 dtype=f32 device=NULL")
+      self.assertEqual(parsed.arg.slot, 7)
+      self.assertIs(parse_uir(render_uir(parsed)), parsed)
 
   def test_studentgrad_syntax(self):
     # named values, nested (op ...), [stacks] of expressions, {scoped blocks}, hex and exponent literals
