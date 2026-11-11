@@ -4296,6 +4296,23 @@ def _seq_rows_kernel(out:UOp, k:UOp, start_pos:UOp, T:UOp) -> UOp:
   t, c = UOp.range(R, 0, AxisType.GLOBAL), UOp.range(C, 1, AxisType.LOCAL)
   return out[(start_pos + t).valid(t < T), c].store(k[t, c].load()).end(t, c).sink(arg=KernelInfo(name="seq_rows", opts_to_apply=()))
 
+@functools.cache
+def _lists_pad_kernel(lists:UOp, T:UOp) -> UOp:
+  # the counts (the last column) of the rows past T zero: those rows' lists are empty
+  R, W = cast(tuple[int, int], lists.shape)
+  t = UOp.range(R, 0, AxisType.GLOBAL)
+  return lists[t.valid(t >= T), W-1].store(UOp.const(0, lists.dtype.base if hasattr(lists.dtype, "base") else lists.dtype)).end(t) \
+    .sink(arg=KernelInfo(name="lists_pad", opts_to_apply=()))
+
+def lists_pad(lists:Tensor, T:int|UOp) -> Tensor:
+  """
+  lists (R, n_max+1, the count last) of a chunk's rows with the rows past its T tokens (its padding) empty: the attention of those rows reads
+  no keys (an output of 0). the rows of the tokens are as they were: their outputs the same bits, the padding rows' are never used
+  """
+  if isinstance(T, int) and T >= int(lists.shape[0]): return lists
+  t = _unbind(T) if isinstance(T, UOp) else UOp.const(T, dtypes.weakint)
+  return Tensor.custom_kernel(lists, fxn=functools.partial(_lists_pad_kernel, T=t))[0]
+
 def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int, base:int|UOp=0, lists:Tensor|None=None) -> Tensor:
   """
   the whole cache of the positions before start_pos+T on every device (N, D): the positions before start_pos read from the devices that

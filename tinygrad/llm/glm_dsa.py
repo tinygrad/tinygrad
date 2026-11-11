@@ -15,7 +15,7 @@ from tinygrad.llm.kernels.amd_glm_dsa import Linear, gated_delta_prefill, flash_
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, SLOT_SPAN, \
   mla_bmm, bmm_wmma, weighted_sum, rows_gather, \
   nucleus, seq_store, mla_sparse_seq, seq_views, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
-from tinygrad.llm.kernels.amd_glm_dsa import host_allgather, Q8_0, mla_sparse_seq_tokens, ring_all_gather_q8
+from tinygrad.llm.kernels.amd_glm_dsa import host_allgather, Q8_0, mla_sparse_seq_tokens, ring_all_gather_q8, lists_pad
 from tinygrad.llm.kernels.amd_glm_dsa import sp_reduce_scatter, all_to_all, mla_sparse_tokens, tbo_ag_parts, tbo_a2a_pre, \
   tbo_a2a_parts, tbo_a2a_post, tbo_rs_pre, tbo_rs_parts, tbo_rs_post, tbo_q8_pre, tbo_q8_post
 from tinygrad.llm.glm_dsa_gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
@@ -1462,6 +1462,9 @@ class MLATransformerBlock(FFNBlock):
       elif self.indexer.idx.kpool == 1:
         lists = _idx_mask[1] = self.indexer.dsa_picks(x, self.attn_q_a_norm(unwrap(qa)), start_pos, freqs, T,
                                                       dec[2] if dec is not None and len(dec) > 2 else None)
+        # (LISTS_PAD: a chunk's padding rows (past its T tokens) with empty lists, their attention reads no keys (the shared layers after it
+        # take these lists too). the tokens' rows are the same: the same bits)
+        if getenv("LISTS_PAD", 0) and isinstance(Tq, int) and Tq > getenv("SEQ_GATHER_ROWS", 16): lists = _idx_mask[1] = lists_pad(lists, T)
       else: lists = self.indexer.picks(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos, T)
       scale = 1.0/self.config.head_dim**0.5
       if isinstance(Tq, int) and Tq > getenv("SEQ_GATHER_ROWS", 16) and getenv("SEQ_GATHER", 1):

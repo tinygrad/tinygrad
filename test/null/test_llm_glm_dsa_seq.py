@@ -171,6 +171,16 @@ class TestGLMDSASequence(unittest.TestCase):
       fxn = functools.partial(_q8_gemm_kernel, token_tile=96, out_features=N, in_features=K)
       self.assertIs(sink(Tensor.empty(M, N), raw, xg, *extra, fxn=fxn).op, Ops.SINK)
 
+  def test_lists_pad(self):
+    # (LISTS_PAD: the counts of a chunk's padding rows zero, the tokens' rows as they were)
+    from tinygrad.llm.kernels.amd_glm_dsa import lists_pad, _lists_pad_kernel
+    T = UOp.variable("toks", 1, 8).bind(5)
+    k = Tensor.custom_kernel(Tensor.empty(8, 5, dtype="int32"), fxn=functools.partial(_lists_pad_kernel, T=T.unbind_all()[0]))[0].uop.src[1].src[0]
+    self.assertIs(k.op, Ops.SINK)
+    stores = [u for u in k.toposort() if u.op is Ops.STORE]
+    self.assertEqual(len(stores), 1)
+    self.assertIs(lists_pad(t:=Tensor.empty(8, 5, dtype="int32"), 8), t)
+
   def test_dsa_stash_roundtrip(self):
     def t(shape, axis=None):
       x = Tensor(np.arange(np.prod(shape), dtype=np.float16).reshape(shape))
