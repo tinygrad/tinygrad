@@ -10,13 +10,13 @@ from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 
 GGML_BLOCK_SIZE, Q8_GROUP_SIZE = 256, 32
 Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K = 8, 10, 11, 12, 13, 14
-IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS = 17, 18, 20, 21, 22, 23
+IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS, MXFP4 = 17, 18, 20, 21, 22, 23, 39
 QUANT_SIZES = {Q8_0: 272, Q2_K: 84, Q3_K: 110, Q4_K: 144, Q5_K: 176, Q6_K: 210, IQ2_XS: 74,
-               IQ3_XXS: 98, IQ4_NL: 144, IQ3_S: 110, IQ2_S: 82, IQ4_XS: 136}  # bytes per 256 weights
+               IQ3_XXS: 98, IQ4_NL: 144, IQ3_S: 110, IQ2_S: 82, IQ4_XS: 136, MXFP4: 136}  # bytes per 256 weights
 HALFWORD_QUANTS = (Q8_0, Q6_K, Q2_K, Q3_K, IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S)
-SMALL_BLOCK_QUANTS = {Q8_0: 17, IQ4_NL: 9}
+SMALL_BLOCK_QUANTS = {Q8_0: 17, IQ4_NL: 9, MXFP4: 17}  # block size in packed words (halfwords, mxfp4 bytes)
 QUANT_NAMES = {Q8_0: "q8_0", Q2_K: "q2_k", Q3_K: "q3_k", Q4_K: "q4_k", Q5_K: "q5_k", Q6_K: "q6", IQ4_XS: "iq4_xs",
-               IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ4_NL: "iq4_nl", IQ3_S: "iq3_s", IQ2_S: "iq2_s"}
+               IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ4_NL: "iq4_nl", IQ3_S: "iq3_s", IQ2_S: "iq2_s", MXFP4: "mxfp4"}
 
 def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
   """(ggml type, packed words) if `decoded` is exactly the dequantization of packed ggml weights, rows of in_features"""
@@ -41,8 +41,8 @@ def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
     expected = ggml_data_to_tensor(Tensor(raw).flatten(), int(decoded.numel()), ggml_type)
     if unwrapped(decoded.uop).key == unwrapped(expected.uop).key: break
   else: return None
-  # Some blocks are only halfword-aligned; keep all formats as zero-copy views of the GGUF storage.
-  word_dtype = dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32
+  # Some blocks are only halfword-aligned (mxfp4 byte-aligned); keep all formats as zero-copy views of the GGUF storage.
+  word_dtype = dtypes.uint8 if ggml_type == MXFP4 else dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32
   raw_offset = raw.contiguous_view_offset()
   if raw_offset is None or raw_offset % word_dtype.itemsize or raw.buf_uop.dtype != dtypes.uint8: return None
   return ggml_type, Tensor(raw).flatten().bitcast(word_dtype).contiguous()
@@ -67,12 +67,21 @@ def _load_u32(raw:UOp, base:UOp, offset:int|UOp, stream:bool=False) -> UOp:
 
 def _half(value:UOp) -> UOp: return value.cast(dtypes.uint16).bitcast(dtypes.float16).float()
 
-def _iq4_bytes(packed:UOp, shift:int|UOp) -> UOp:
-  # the non-linear iq4nl table as a byte lookup: 3 byte_perms beat any arithmetic/select-tree form (~60% decode)
+# 16 entry int8 tables as the byte_perm words of _nibble_lut: entries 7-4, 3-0, 15-12, 11-8 (most significant byte first)
+IQ4NL_LUT = (0xf6eaddcf, 0xbfad9881, 0x71594535, 0x26190d01)  # -127,-104,-83,-65,-49,-35,-22,-10,1,13,25,38,53,69,89,113
+MXFP4_LUT = (0x0c080604, 0x03020100, 0xf4f8fafc, 0xfdfeff00)  # 0,1,2,3,4,6,8,12,-0,-1,-2,-3,-4,-6,-8,-12: e2m1 doubled, the scale halved
+
+def _nibble_lut(packed:UOp, shift:int|UOp, lut:tuple[int, int, int, int]=IQ4NL_LUT) -> UOp:
+  # a 16 entry int8 table looked up by the nibbles: 3 byte_perms beat any arithmetic/select-tree form (~60% decode)
   selectors = (packed >> shift) & 0x0f0f0f0f
-  low = _amd_byte_perm(UOp.const(0xf6eaddcf, dtypes.uint32), UOp.const(0xbfad9881, dtypes.uint32), selectors)
-  high = _amd_byte_perm(UOp.const(0x71594535, dtypes.uint32), UOp.const(0x26190d01, dtypes.uint32), selectors & 0x07070707)
+  low = _amd_byte_perm(UOp.const(lut[0], dtypes.uint32), UOp.const(lut[1], dtypes.uint32), selectors)
+  high = _amd_byte_perm(UOp.const(lut[2], dtypes.uint32), UOp.const(lut[3], dtypes.uint32), selectors & 0x07070707)
   return _amd_byte_perm(high, low, 0x03020100 | ((selectors & 0x08080808) >> 1))
+
+def _e8m0_halved(e:UOp) -> UOp:
+  # 2**(e-128) as float32 bits, e < 2 is a denormal
+  e = e.cast(dtypes.uint32)
+  return (e < 2).where(UOp.const(0x00200000, dtypes.uint32) << e, (e - 1) << 23).bitcast(dtypes.float32)
 
 def _q5_scales(raw:UOp, base:UOp, subgroup:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   # scales/mins (6-bit each) live in block bytes 4-15: three words total, same for the whole super-block's lanes
@@ -177,7 +186,10 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
     return weights
   if ggml_type in (IQ4_NL, IQ4_XS):
     packed = word(2+(i%4)*4) if ggml_type == IQ4_NL else _amd_load(raw[base+2+subgroup*4+i%4])
-    return _iq4_bytes(packed, 4*(i//4))
+    return _nibble_lut(packed, 4*(i//4))
+  if ggml_type == MXFP4:
+    o = 1+(i%4)*4
+    return _nibble_lut(byte(o) | byte(o+1) << 8 | byte(o+2) << 16 | byte(o+3) << 24, 4*(i//4), MXFP4_LUT)
   assert grid is not None
   grid_words = 2 if ggml_type in (IQ2_XS, IQ2_S) else 1
   if ggml_type in (IQ3_S, IQ3_XXS):
@@ -241,6 +253,7 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
     elif ggml_type in (IQ2_XS, IQ2_S):
       scales = byte((66 if ggml_type == IQ2_XS else 74)+subgroup)
       total = sum(dots[h].float() * (((scales >> (h*4)) & 15).float()+0.5) for h in range(2)) * 0.25 * _half(raw[base])
+    elif ggml_type == MXFP4: total = (dots[0]+dots[1]).float() * _e8m0_halved(byte(0))
     else:
       total = (dots[0]+dots[1]).float() * _half(raw[base])
       if ggml_type == IQ3_S: total *= (1+2*((byte(106+subgroup//2) >> ((subgroup%2)*4)) & 15)).float()
@@ -399,7 +412,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
     elif ggml_type == Q6_K:
       scale, zero = _half(raw[base+104])*byte(192+subgroup*2+half).cast(dtypes.uint8).bitcast(dtypes.int8).float(), 32
     else:
-      scale = _half(raw[base])
+      scale = _e8m0_halved(byte(0)) if ggml_type == MXFP4 else _half(raw[base])
       if ggml_type in (IQ2_XS, IQ2_S):
         sc = byte((66 if ggml_type == IQ2_XS else 74)+subgroup)
         scale *= (((sc >> (half*4)) & 15).float()+0.5)*0.25

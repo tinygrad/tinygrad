@@ -69,6 +69,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_iq4_nl_linear(self): self._test_quant_linear(20, 144, in_features=768, token_counts=(1, 3, 16))
   def test_iq3_s_linear(self): self._test_quant_linear(21, 110, in_features=768, token_counts=(1, 3, 16))
   def test_iq2_s_linear(self): self._test_quant_linear(22, 82, in_features=768, token_counts=(1, 3, 16))
+  def test_mxfp4_linear(self): self._test_quant_linear(39, 136, in_features=288, out_features=16, token_counts=(1, 3, 16))
 
   def test_wmma_linear_symbolic(self):
     with patch("tinygrad.llm.kernels.amd_gguf.q8_quantize", side_effect=AssertionError("expected WMMA")):
@@ -95,6 +96,8 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         if typ in (10, 12, 13):
           offset = 82 if typ == 10 else 2
           blocks[:, offset:offset+2] = np.resize(scales[::-1], len(blocks)).view(np.uint8).reshape(-1, 2)
+        # mxfp4 e8m0 scales from the denormal e < 2 up to the fp16 limit (12 * 2**(140-128))
+        if typ == 39: packed.reshape(-1, 17)[:, 0] = np.resize(np.array([0, 1, 2, 100, 110, 116, 120, 125, 127, 128, 131, 140], np.uint8), 48*3*8)
         expected = dequantize(packed.flatten(), GGMLQuantizationType(typ)).reshape(48, 768).astype(np.float16).astype(np.float32).T
         # Odd super-block counts and halfword-only alignment exercise both row and block offsets.
         pad = 2 if typ in HALFWORD_QUANTS else 4
