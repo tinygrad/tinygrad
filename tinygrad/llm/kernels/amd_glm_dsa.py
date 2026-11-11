@@ -1743,11 +1743,11 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   def reg(s:int|UOp, l:UOp) -> UOp: return ((cw*2 + par)*(N+1) + s)*P2P_AR_MAXW + l
   # pack (W, B): W values a word, B bit integers of a shared power of two (8 bits) and an epoch (two shot: the sums of the
   # owner are the packed ones on every device). SEQ uses a separate class with exactly 32 epoch bits; 8 bits wrapped every 256 calls.
-  # flag (P2P_FLAG, half one shot gather / reduce scatter only): words of four halves, no epoch in them; a workgroup's words to a peer are
-  # followed (after the system release) by one flag word with the epoch in the slot's last word, a reader polls the flags then reads the words
-  # (its own mailbox, system scope, after an acquire): the same values, half the bytes of two halves and an epoch a word
-  assert not flag or (half and not triple and pack is None and not two_shot and (gather or scatter) and T*EP < P2P_AR_MAXW), "flagged words"
-  W = 4 if flag else pack[0] if pack is not None else 3 if triple else 2 if half else 1  # the values of a word
+  # flag (P2P_FLAG, one shot gather / reduce scatter only): words of four halves (two floats), no epoch in them; a workgroup's words to a peer
+  # are followed (after the system release) by one flag word with the epoch in the slot's last word, a reader polls the flags then reads the
+  # words (its own mailbox, system scope, after an acquire): the same values, half the bytes of a value(s) and an epoch a word
+  assert not flag or (not triple and pack is None and not two_shot and (gather or scatter) and T*EP < P2P_AR_MAXW), "flagged words"
+  W = (4 if half else 2) if flag else pack[0] if pack is not None else 3 if triple else 2 if half else 1  # the values of a word
   pack_payload, pack_epoch_shift = (pack[0]*pack[1], pack[0]*pack[1]+8) if pack is not None else (0, 0)
   pack_epoch_mask = (1 << min(32, 64-pack_epoch_shift)) - 1 if pack is not None else 0
   assert not triple or half, "three values a word are in half"
@@ -1775,6 +1775,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
       qs = [((x * inv) + 0.5).floor().maximum(-qmax).minimum(qmax).cast(dtypes.int32) for x in v]
       bits = functools.reduce(lambda a,b: a | b, [(q.cast(dtypes.uint64) & ((1 << B) - 1)) << (B*c) for c, q in enumerate(qs)])
       return bits | ((k + 128).cast(dtypes.uint64) << pack_payload) | ((epoch & pack_epoch_mask).cast(dtypes.uint64) << pack_epoch_shift)
+    if flag and not half: return v[0].bitcast(dtypes.uint32).cast(dtypes.uint64) | (v[1].bitcast(dtypes.uint32).cast(dtypes.uint64) << 32)
     if flag: return functools.reduce(lambda a,b: a | b, [h(x).cast(dtypes.uint64) << (16*c) for c, x in enumerate(v)])
     if triple: return functools.reduce(lambda a,b: a | b, [h(x).cast(dtypes.uint64) << (16*c) for c, x in enumerate(v)]) | \
                       ((epoch & 0xFFFF).cast(dtypes.uint64) << 48)
@@ -1785,8 +1786,9 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
       B = pack[1]
       scale = pow2(((w >> pack_payload) & 255).cast(dtypes.int32) - 128)
       return [((((w >> (B*c)) & ((1 << B) - 1)).cast(dtypes.int32) << (32-B)) >> (32-B)).float() * scale for c in range(W)]
-    if triple or flag: return [unh(((w >> (16*c)) & 0xFFFF).cast(dtypes.uint32)) for c in range(W)]
+    if triple or (flag and half): return [unh(((w >> (16*c)) & 0xFFFF).cast(dtypes.uint32)) for c in range(W)]
     lo = (w & 0xFFFFFFFF).cast(dtypes.uint32)
+    if flag: return [lo.bitcast(dtypes.float32), (w >> 32).cast(dtypes.uint32).bitcast(dtypes.float32)]
     return [unh(lo & 0xFFFF), unh(lo >> 16)] if half else [lo.bitcast(dtypes.float32)]
   def fresh(g:UOp) -> UOp:
     if pack is not None: return ((g >> pack_epoch_shift).cast(dtypes.uint32) & pack_epoch_mask).eq(epoch & pack_epoch_mask)
@@ -1873,9 +1875,11 @@ def p2p_all_to_all(p:Tensor) -> Tensor|None:
   the parts of device i from devices 0..). one shot peer to peer, in float. None: not supported (or too big for the mailboxes)"""
   devs = cast(tuple[str, ...], p.device)
   N, n = len(devs), int(p.shape[-1])
-  if (p2p:=p2p_allreduce(devs)) is None or (shape:=p2p_ar_shape(n)) is None: return None
+  # (P2P_FLAG, default off: two floats a word and a flag a workgroup, see _p2p_allreduce_kernel)
+  W = 2 if (flag:=bool(getenv("P2P_FLAG", 0)) and n % 2 == 0 and (fs:=p2p_ar_shape(n // 2)) is not None and prod(fs) < P2P_AR_MAXW) else 1
+  if (p2p:=p2p_allreduce(devs)) is None or (shape:=p2p_ar_shape(n // W)) is None: return None
   out = Tensor.empty(N*N*n, dtype=dtypes.float32, device=devs, axis=0)
-  fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n, T=shape[0], EP=shape[1], scatter=True, gather=True)
+  fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n//W, T=shape[0], EP=shape[1], scatter=True, gather=True, flag=flag)
   return Tensor.custom_kernel(out, p.float().reshape(N, N*n).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(N, N*n)
 
 # ******** sequence parallel: the rows of a tensor split over the devices ********
@@ -2637,10 +2641,13 @@ def host_allgather(x:Tensor) -> Tensor|None:
   """
   N, n = int(x.shape[0]), int(x.shape[1])
   if not isinstance(x.device, tuple): return None
-  m = round_up(n, HOST_AR_THREADS)
+  # (P2P_FLAG, default off: two floats a word and a flag a workgroup, see _p2p_allreduce_kernel)
+  flag = bool(getenv("P2P_FLAG", 0)) and (fs:=p2p_ar_shape(round_up(n, 2*HOST_AR_THREADS) // 2)) is not None and prod(fs) < P2P_AR_MAXW
+  W = 2 if flag else 1
+  m = round_up(n, W*HOST_AR_THREADS)
   out = Tensor.empty(N*m, dtype=dtypes.float32, device=x.device)
-  if (p2p:=p2p_allreduce(x.device)) is not None and (shape:=p2p_ar_shape(m)) is not None:
-    fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m, T=shape[0], EP=shape[1], gather=True)
+  if (p2p:=p2p_allreduce(x.device)) is not None and (shape:=p2p_ar_shape(m // W)) is not None:
+    fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m//W, T=shape[0], EP=shape[1], gather=True, flag=flag)
     return Tensor.custom_kernel(out, x.float().pad((None, (0, m-n))).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(N, m)[:, :n]
   # (the host mailbox's values at most: more would wait for epochs no workgroup writes)
   if m > HOST_AR_MAXN or (comm:=host_allreduce(x.device)) is None: return None
