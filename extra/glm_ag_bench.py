@@ -22,6 +22,22 @@ def sync():
   for d in devs: Device[d].synchronize()
 def per_device(t:Tensor) -> list[np.ndarray]:
   return [Tensor(t.uop.mselect(i)).bitcast(dtypes.uint16).numpy() for i in range(len(devs))]
+if getenv("P2P", 0):
+  # (the copy engine's GB/s of every pair alone: a 64 MB buffer from i to j)
+  bufs = [Tensor.empty(32 << 20, dtype=dtypes.half, device=d).contiguous().realize() for d in devs]
+  for i in range(N):
+    row = []
+    for j in range(N):
+      if i == j:
+        row.append("   -  ")
+        continue
+      bufs[i].to(devs[j]).realize()
+      sync()
+      st = time.perf_counter()
+      for _ in range(3): bufs[i].to(devs[j]).realize()
+      sync()
+      row.append(f"{3*64/1024/(time.perf_counter()-st):6.1f}")
+    print(f"p2p GB/s from {i:2d}: " + " ".join(row), flush=True)
 ref = None
 for mode in getenv("MODES", "ring,oneshot,ringk").split(","):
   fn = fns[mode]
