@@ -1130,7 +1130,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
 
 @functools.cache
 def _rows_coop_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, ggml_type:int, coop:int=4, chunk:int=16,
-                               raw_stage:bool=False) -> UOp:
+                               raw_stage:bool=False, a_stage:bool=False) -> UOp:
   """
   _rows_f16_wmma_kernel with `coop` waves a workgroup for ONE output tile of 16: every wave dequantizes `chunk`/`coop` groups of a chunk's
   weights (the f16 kernel's dequant, the same halves) to LDS (two buffers: a barrier an iteration), the next chunk's loads issued meanwhile
@@ -1176,7 +1176,18 @@ def _rows_coop_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_fea
       r, c4 = (e // (RW//4)).minimum(15), e % (RW//4)
       st += [lw[r.valid(e < n4) if n4 % threads else r, c4*4 + i].store(raw[(output_block*16 + r)*output_words + rng*RW + c4*4 + i])
              for i in range(4)]
+    if a_stage:
+      # (ROWS_COOP_AS: the chunk's activations of the rows to LDS too, eight halves a thread a load: fewer loads than the fragments' (the
+      # 63 loads a wave can wait for))
+      AW = chunk*32
+      lx = UOp.alloc((T, AW + 8), dtypes.float16, addrspace=AddrSpace.LOCAL)
+      n8 = T*AW // 8
+      for k in range(-(-n8 // threads)):
+        e = tid + k*threads
+        r, c8 = (e // (AW//8)).minimum(T-1), e % (AW//8)
+        st += [lx[r.valid(e < n8) if n8 % threads else r, c8*8 + i].store(x[r, rng*AW + c8*8 + i]) for i in range(8)]
     lw = lw.after(UOp.group(*st).barrier())
+    if a_stage: lx = lx.after(lw)
     need = [[0] + [1 + 2*(hh*4 + i) + j for hh in range(2) for i in (h, h+2) for j in range(2)] for h in range(2)]
     cur = acc.after(rng)
     for u in range(chunk):
@@ -1186,7 +1197,8 @@ def _rows_coop_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_fea
       scale = wv[0].cast(dtypes.uint16).bitcast(dtypes.float16).float()
       words = [wv[1+2*q] | (wv[2+2*q] << 16) for q in range(4)]
       for half in range(2):
-        afrag = UOp.stack(*(x[tt*16 + col, g*32 + half*16 + i].cast(dtypes.float16) for i in ks))
+        afrag = UOp.stack(*((lx[tt*16 + col, u*32 + half*16 + i].load() if a_stage else x[tt*16 + col, g*32 + half*16 + i].cast(dtypes.float16))
+                            for i in ks))
         bfrag = UOp.stack(*((((word >> (b*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float()-0)*scale-UOp.const(0, dtypes.float)).cast(dtypes.half)
                             for word in words[half*2:half*2+2] for b in range(4)))
         cur = UOp.wmma(afrag, bfrag, cur, *WMMA_ARG)
@@ -1448,8 +1460,8 @@ def _rows_f16_config(tokens:int, out_features:int, in_features:int, ggml_type:in
   # (ROWS_COOP=W: W waves a workgroup load a chain's weights (_rows_coop_f16_wmma_kernel), ROWS_COOP_CHUNK groups an iteration)
   if (coop:=getenv("ROWS_COOP", 2)) and coop >= tokens // 16 and \
      (cc:=next((c for c in (getenv("ROWS_COOP_CHUNK", 16), 16, 8, 4) if NG % c == 0 and c % coop == 0), 0)):
-    return dict(coop=coop, chunk=cc, **({"raw_stage": True} if getenv("ROWS_COOP_RAW", 0) and ggml_type == Q8_0 and cc % 4 == 0 and
-                                         (in_features*17//32) % 4 == 0 else {}))
+    raw_ok = getenv("ROWS_COOP_RAW", 0) and ggml_type == Q8_0 and cc % 4 == 0 and (in_features*17//32) % 4 == 0
+    return dict(coop=coop, chunk=cc, **({"raw_stage": True, "a_stage": bool(getenv("ROWS_COOP_AS", 0))} if raw_ok else {}))
   # (ROWS_CHUNK: Q8_0's blocks loaded wide, chunk groups an iteration (0: off))
   chunk = next((c for c in (getenv("ROWS_CHUNK", 0), 8, 4, 2) if c and ggml_type == Q8_0 and NG % c == 0), 0) if getenv("ROWS_CHUNK", 0) else 0
   return dict(tiles=tiles, waves=waves, unroll=unroll, prefetch=bool(getenv("ROWS_PF", 1)), chunk=chunk,
