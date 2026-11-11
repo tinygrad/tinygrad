@@ -2505,6 +2505,7 @@ class Transformer:
     # (one realize: one walks every tensor)
     Tensor.realize(*[x for d in devs for x in (*Tensor._next_counter(d, 0), Tensor._device_rng_counters[d])])
     if self.config.ple is not None: self._ple_dev_init(read)
+    _lap("shared: ple")
     # (a lane of the collectives a micro batch, and its compute queue (MB_QUEUES), see micro_batch_blocks)
     for lane in range(MICRO_BATCHES):
       if mb_queue(lane):
@@ -2564,8 +2565,11 @@ class Transformer:
     # the memory of everything the jits read made first (the derived weights', the states'), the states zeroed by a jit compiled with the others
     st = time.perf_counter()
     self._derive_weights()
+    _lap("warmup: derived")
     with _zero_deferred() as zero_bufs: self._seq_init()
+    _lap("warmup: seq init")
     self._seq_shared()
+    _lap("warmup: shared")
     loads = [_zero_jit(dedup(zero_bufs))]
     if DEBUG >= 1: print(f"seq_warmup: memory made at {time.perf_counter()-st:.2f}s")
     def meanwhile(take:Callable[[Any], bool]):
