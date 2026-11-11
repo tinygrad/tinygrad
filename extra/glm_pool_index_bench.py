@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """GLM Flash batched decode pool selection (pool_index, grouped as GLM_SEQ's) on one device, full 262k geometry.
 
-G sequences x R query rows each, their scores over a region's pools (66,048 columns, LP active), the lists of the top TOP pools. CFGS: the
-variants "reg,agg" (PIDX_REG: a thread's keys in registers, the passes unrolled; PIDX_AGG: a wave's equal digits one atomic), every one must
-give the first one's lists. DIST: rand (a real context's scores, a few ties), zero (an unfilled cache: all the same), half (half of them 0).
+G sequences x R query rows each, their scores over a region's pools (66,048 columns, LP active), the lists of the top TOP pools.
+CFGS: variants "reg,agg" (PIDX_REG: a thread's keys in registers, the passes unrolled; PIDX_AGG: a mask of the passes where a wave's
+equal digits are one atomic), every one must give the first one's lists. DIST: rand (a real context's scores, a few ties), zero (an
+unfilled cache: all the same), half (half of them 0).
 Example (GPU box only):
   DEV=AMD G=8 DIST=zero PYTHONPATH=. python3 extra/glm_pool_index_bench.py
 """
@@ -27,7 +28,7 @@ scores = [Tensor(sc, device=dev).realize()] + [Tensor(sc + 0, device=dev).realiz
 positions = Tensor(np.full(G, LP*KP - R, dtype=np.int32), device=dev).realize()
 zero = UOp.const(0, dtypes.weakint)
 
-def lists(s:Tensor, reg:bool, agg:bool) -> Tensor:
+def lists(s:Tensor, reg:bool, agg:int) -> Tensor:
   out = Tensor.empty(G*R, TOP*KP + KP + 1, dtype=dtypes.int32, device=dev)
   return Tensor.custom_kernel(out, s, positions, fxn=functools.partial(amd_glm._pool_index_kernel, q_start=zero, pools=zero, k=TOP, kpool=KP,
                                                                          reg=reg, agg=agg))[0]
@@ -37,8 +38,8 @@ def valid(o:np.ndarray) -> list:
   return [(int(r[-1]), r[:r[-1]].tobytes()) for r in o]
 
 res: dict[str, list] = {}
-for cfg in os.environ.get("CFGS", "0,0 0,1 1,0").split():
-  reg, agg = (bool(int(x)) for x in cfg.split(","))
+for cfg in os.environ.get("CFGS", "0,0 0,1 0,3 0,15").split():
+  reg, agg = bool(int(cfg.split(",")[0])), int(cfg.split(",")[1])
   @TinyJit
   def step(): return [lists(s, reg, agg).contiguous() for s in scores]
   for _ in range(3): outs = step()

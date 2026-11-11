@@ -6124,14 +6124,14 @@ def _key_regs(key:Callable[[UOp], UOp], per:int) -> list[UOp]:
   return [kreg[c].load() for c in range(per)]
 
 def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:UOp, lane:UOp, regs:list[UOp]|None=None,
-               agg:bool|None=None) -> UOp:
+               agg:int|None=None) -> UOp:
   """
   the k-th largest of the keys of a workgroup's threads (key(c) a thread's of chunk c of npc, uint32, 1 at least, all of them with no more pools
   than k): a radix select, 4 passes of 8 bits from the top. a pass counts the digits of the keys whose higher digits are the prefix found (a
   histogram in LDS, atomics), one wave scans it from the top for the bin of the k-th (the keys left), the next pass that bin's. the same as a
   bisection bit by bit, 8 barriers. regs: the keys of every chunk in registers (_key_regs): the chunks unrolled (the same counts)
   """
-  zero, agg = UOp.const(0, dtypes.int32), bool(getenv("PIDX_AGG", 0)) if agg is None else agg
+  zero, agg = UOp.const(0, dtypes.int32), getenv("PIDX_AGG", 0) if agg is None else agg
   hist = UOp.alloc((4*256,), dtypes.int32, addrspace=AddrSpace.LOCAL)
   hist = hist.after(UOp.group(*(hist[(t + i*DECODE_THREADS).valid(t + i*DECODE_THREADS < 4*256)].store(zero)
                                 for i in range((4*256 + DECODE_THREADS - 1) // DECODE_THREADS))).barrier())
@@ -6146,9 +6146,10 @@ def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:
         if d: ok = ok & (kv >> (32 - 8*d)).eq(prefix)
         adds.append(_sys(_ATOMIC_ADD1_IF, dtypes.void, hist[d*256 + ((kv >> (24 - 8*d)) & 255).cast(dtypes.weakint)], ok))
       hd = hist.after(UOp.group(*adds).barrier())
-    elif agg:
-      # (PIDX_AGG: the matching lanes of a wave with the digit of the first of them one add of their count (its lane), the others an add
-      # each: equal keys (the scores of an empty or a constant context) an add a wave, not 32 to one bin. the same counts)
+    elif agg >> d & 1:
+      # (PIDX_AGG, a mask of the passes: the matching lanes of a wave with the digit of the first of them one add of their count (its
+      # lane), the others an add each: equal keys (the scores of an empty or a constant context) an add a wave, not 32 to one bin. the same
+      # counts)
       c = UOp.range(npc, 20 + d, AxisType.LOOP)
       kv = key(c)
       match = (kv >> (32 - 8*d)).eq(prefix) if d else UOp.const(True, dtypes.bool)
@@ -6186,7 +6187,7 @@ def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:
 
 @functools.cache
 def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0, dev_rows:int=0,
-                       compact:bool=False, reg:bool|None=None, agg:bool|None=None) -> UOp:
+                       compact:bool=False, reg:bool|None=None, agg:int|None=None) -> UOp:
   # (compact: the list (k+2) the picked pools, their count at k, the query's position at k+1 (the keys: a pool's kpool, then the tail of the
   # query's pool: see qsa_decode's kpool))
   # a workgroup per query row of scores (the query of row r is at q_start+r, its list row row0+r of index), thread t holds pool c*THREADS + t
