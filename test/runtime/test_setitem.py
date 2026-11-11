@@ -225,6 +225,15 @@ class TestSetitem(unittest.TestCase):
     n[[0, 2], :2] = [[10, 20], [30, 40]]
     np.testing.assert_equal(t.numpy(), n)
 
+  def test_setitem_tensor_indexing_broadcast(self):
+    t = Tensor.zeros(3, dtype=dtypes.int).contiguous()
+    t[Tensor([0, 1, 2])] = Tensor([[7, 8, 9]], dtype=dtypes.int)
+    n = np.zeros((3,), dtype=np.int32)
+    n[[0, 1, 2]] = [[7, 8, 9]]
+    np.testing.assert_equal(t.numpy(), n)
+    # v broadcasts to the indexed shape, not the other way
+    with self.assertRaises(ValueError): t[Tensor([0])] = Tensor([1, 2], dtype=dtypes.int)
+
   def test_setitem_2d_tensor_indexing(self):
     t = Tensor.zeros(2, dtype=dtypes.int).contiguous()
     index = Tensor([[0, 1], [1,0]])
