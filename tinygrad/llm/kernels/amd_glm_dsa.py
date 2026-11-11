@@ -3343,11 +3343,11 @@ _bundle_cache:dict[tuple, tuple[Tensor, Tensor, Tensor]] = {}
 # batched decoding of at least MOE_BUNDLE_MIN tokens: the rows of an expert in bundles of MOE_BUNDLE that share its weight loads
 MOE_BUNDLE, MOE_BUNDLE_MIN = getenv("MOE_BUNDLE", 4), getenv("MOE_BUNDLE_MIN", 40)
 # fewer rows (batched decoding of 2-9 users): bundles of MOE_EXACT_M in float from MOE_EXACT_MIN rows (0: off), the per-row kernel's values
-MOE_EXACT_M, MOE_EXACT_MIN = getenv("MOE_EXACT_M", 2), getenv("MOE_EXACT_MIN", 8)
+MOE_EXACT_M, MOE_EXACT_MIN = getenv("MOE_EXACT_M", 2), getenv("MOE_EXACT_MIN", 0)
 # the MoE decode kernels' IQ grid in LDS (copied by the workgroup first) instead of scattered global loads: the same values
 MOE_GRID_LDS = getenv("MOE_GRID_LDS", 0)
 # the bundled MoE kernels with MOE_PERSIST workgroups an output block looping over the bundles there are (0: a grid of every possible bundle)
-MOE_PERSIST = getenv("MOE_PERSIST", 1)
+MOE_PERSIST = getenv("MOE_PERSIST", 0)
 # many more rows: bundles of 16 on the int8 tensor cores, every weight decoded once a step (_moe_bundled_wmma_kernel)
 MOE_WMMA, MOE_WMMA_MIN, MOE_WMMA_QUANTS = getenv("MOE_WMMA", 1), getenv("MOE_WMMA_MIN", 64), (IQ3_S, IQ4_XS)
 MOE_TILE = getenv("MOE_TILE", 64)  # grouped experts: rows of an expert are padded to whole tiles, a workgroup decodes an expert once per tile
