@@ -6,6 +6,7 @@ from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite, UOpMetaClass
 from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, _launch_args, _compile_pickled, _compile_pickled_timed
+from tinygrad.engine.realize import startup_mark, startup_marks
 from tinygrad.engine.worker import get_worker_pool
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
@@ -30,7 +31,9 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], input_vars:d
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.max_numel(), u.device) for i,u in enumerate(input_uops)}, walk=True)
   # unbind input variables, they change every call and are read from var_vals. any other binding was fixed at capture and stays
   linear = linear.substitute({v: v.unbound() for v in linear.toposort() if v.is_bound_var and v.expr in input_vars}, walk=True)
+  startup_mark("captured")
   linear = memory_plan_rewrite(linear, held_bufs, scratch)
+  startup_mark("memory planned")
   if _forked_capture and scratch is not None and _forked_capture[0].scratch is scratch: _forked_capture[2](scratch)
   # the intermediates are allocated when the jit is linked (freed by free_intermediates), a shared scratch isn't
   shared = set(scratch.values()) if scratch is not None else set()
@@ -276,6 +279,10 @@ def _send_capture(wfd:int, reg:dict[int, Any], jit:_TinyJit, ret, linear:UOp, na
   _Pickler(rest, reg, idx).dump((ret, idx[linear], names, info))
   _send(wfd, pickle.dumps((arenas, recs.getvalue(), rest.getvalue()), protocol=pickle.HIGHEST_PROTOCOL))
   os.close(wfd)
+  if (path:=getenv("STARTUP_STATS", "")):
+    import json
+    startup_mark("sent")
+    with open(f"{path}.forks", "a") as f: f.write(json.dumps({"pid": os.getpid(), "marks": startup_marks}) + "\n")
   _exit_child(0)
 
 def _exit_child(code:int):
@@ -306,6 +313,9 @@ class _Compiles:
         t0, tasks = time.time(), pickle.loads(msg)
         with self.lock:
           new = [k for k, _ in tasks if k not in self.results]
+          if (dump:=getenv("STARTUP_DUMP", "")):
+            # (debug) the new compile tasks of this process, to replay their compiles elsewhere
+            with open(f"{dump}.{who}", "ab") as df: pickle.dump([(k, t) for k, t in tasks if k in new], df)
           res = [self.results.get(k) or self.results.setdefault(k, pool.apply_async(_compile_pickled_timed if timed else _compile_pickled, (t,)))
                  for k, t in tasks]
         try:
@@ -371,6 +381,7 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
         import tinygrad.engine.realize as realize
         for fd in (qr, aw): os.close(fd)
         realize.remote_compile = functools.partial(_remote_compile, qw, ar)
+        startup_marks[:] = [(f"start {todo[i]}", time.time())]
       # (the cores shared by the processes: more compilers than cores slow the parent's work meanwhile)
       PARALLEL.value = max(1, PARALLEL.value // len(calls))
       UOp.unique_num = itertools.count(start + (i + 1) * (1 << 40)) # (its new uops never are the parent's or another child's)

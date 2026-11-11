@@ -259,6 +259,11 @@ def _compile_pickled_timed(task:bytes) -> tuple[bytes, float, float, int, str]:
   prg = _compile_kernel(pickle.loads(task))[1]
   return pickle.dumps(prg), st, time.time(), os.getpid(), prg.src[0].arg.name
 
+# (STARTUP_STATS, a forked capture) when its steps were done (wall clock): see capture_parallel
+startup_marks:list[tuple[str, float]] = []
+def startup_mark(name:str):
+  if remote_compile is not None: startup_marks.append((name, time.time()))
+
 # (a process compiling for another: its kernels compiled there, by their keys, see capture_parallel) [(key, task)] -> their programs
 remote_compile:Callable[[list[tuple[bytes, bytes]]], list[UOp]]|None = None
 
@@ -280,7 +285,9 @@ def lower_and_compile(linear:UOp, verbose=True) -> UOp:
   if len(todo) and remote_compile is not None and not any(getattr(c.body.arg, "beam", 0) for c in ar):
     ctx = {v.key: v.value for v in to_program_context}
     if CAPTURE_PROCESS_REPLAY: ctx["PROCESS_REPLAY_LOC"] = get_process_replay_loc()
+    startup_mark(f"compile {len(todo)}")
     prgs = remote_compile([(pickle.dumps(key), pickle.dumps((0, ast_ren, ctx))) for key, ast_ren in todo])
+    startup_mark("compiled")
     for (key, _), prg in zip(todo, prgs): to_program_cache[key] = prg
   elif len(todo):
     # kernels that beam search must compile in the parent, beam needs device access to time candidates
