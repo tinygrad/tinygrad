@@ -18,6 +18,7 @@ from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custo
   picks_local, pool_window, seq_index_split
 from tinygrad.llm.gguf import gguf_parse, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm.direct_read import DirectFile, read_many, close_rings
+from tinygrad.llm import gguf_load
 from tinygrad.llm.gguf_load import gguf_shard_units, _disk_bytes, _disk_location
 from tinygrad.uop.ops import Ops, AxisType, KernelInfo
 from tinygrad.dtype import DType
@@ -459,6 +460,37 @@ def _fill_zero(*ts:Tensor):
       if _zero_later: _zero_later[-1].extend(parts)
       else:
         for x in parts: _zero_buffer(x)
+
+def _drop_jit(j:_TinyJit):
+  """a jit never called again (a derivation of weights): its capture and its function's tensors dropped"""
+  j.captured, j.fxn = None, None
+  j.__dict__.pop("_linears", None)
+
+def _drop_apart(final=True):
+  """
+  LOAD_APART: the buffers of the file's tensors the weights are derived from, freed (they are once nothing holds them: the derivations run).
+  a line of the bytes freed and held (LOAD_APART=2: who holds them); not final: tried again later if held
+  """
+  if not (refs:=gguf_load.apart_buffers): return
+  import gc
+  st = time.perf_counter()
+  nbytes = sum(b.nbytes for r in refs if (b:=r()) is not None)
+  if any(r() is not None for r in refs): gc.collect()
+  held = [b for r in refs if (b:=r()) is not None]
+  print(f"LOAD_APART: {(nbytes - sum(b.nbytes for b in held))/1e6:.1f} MB freed, {sum(b.nbytes for b in held)/1e6:.1f} MB held "
+        f"({time.perf_counter()-st:.3f}s{'' if final else ', tried again after the warm-up'})")
+  if held and getenv("LOAD_APART") >= 2:
+    # (a chain of referrers of a buffer held: the first one not a frame each)
+    import types
+    def what(o) -> str:
+      if isinstance(o, dict): return f"dict {len(o)} keys {[str(k)[:40] for k in list(o)[:4]]}"
+      return f"{type(o).__name__} {len(o)}" if isinstance(o, (list, tuple, set)) else type(o).__qualname__
+    obj, seen = held[0], {id(held)}
+    for _ in range(12):
+      if not (up:=[r for r in gc.get_referrers(obj) if id(r) not in seen and not isinstance(r, types.FrameType)]): break
+      seen.add(id(obj:=up[0]))
+      print(f"LOAD_APART: held by {what(obj)}")
+  if final or not held: refs.clear()
 
 # (while not empty: _fill_zero allocates, the buffers are zeroed later, see _zero_deferred)
 _zero_later:list[list[Buffer]] = []
@@ -2692,7 +2724,8 @@ class Transformer:
     self._seq_shared(read=False)
     _lap("warmup: shared")
     # (the computations from the weights (LOAD_DEFER) and the zeroing of the states: jits compiled with the others, run after the reads)
-    loads = [(j, j) for j in self._pending_load if isinstance(j, _TinyJit)] + [_zero_jit(dedup(zero_bufs))]
+    derive = [j for j in self._pending_load if isinstance(j, _TinyJit)]
+    loads = [(j, j) for j in derive] + [_zero_jit(dedup(zero_bufs))]
     if DEBUG >= 1: print(f"seq_warmup: memory made at {time.perf_counter()-st:.2f}s")
     ran:set[str] = set()
     def meanwhile(take:Callable[..., bool|None]):
@@ -2708,6 +2741,10 @@ class Transformer:
         if j in self._pending_load: self._pending_load.remove(j)
         take(j)
         call()
+      # (LOAD_APART: the derivations ran, their jits drop what they hold: the buffers they read freed before the warm-up's arenas are made)
+      if gguf_load.apart_buffers:
+        for j in derive: _drop_jit(j)
+        _drop_apart(final=False)
       # (the warm-up's runs as their jits come: while the others compile; the stash's jits linked meanwhile when the host memory has room)
       run_as_they_come(take, calls, ran, idle=functools.partial(link_late, take))
     top, k = unwrap(self.config.indexer).top_k, self.config.spec_drafts
@@ -2804,6 +2841,10 @@ class Transformer:
       call()
       if DEBUG >= 1: print(f"seq_warmup: {name} run in {time.perf_counter()-st:.2f}s")
     link_late()
+    # (the derivations' jits dropped: the buffers they read freed)
+    loads.clear()
+    par.clear()
+    _drop_apart()
 
   def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, float]=0.0,
                   upto:int|None=None) -> int|None:
@@ -3193,7 +3234,13 @@ class Transformer:
       if typ == Q8_0: embd_q8 = raw
     # (LOAD_DEFER (default): the weights' memory made now, the files read later: while the jits compile, see seq_warmup. 0: read now)
     pending:list[Callable[[], None]]|None = [] if getenv("LOAD_DEFER", 1) else None
-    state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads, fuse, row_sel=rows_map, pending=pending)
+    # (LOAD_APART: the file's tensors the model only derives others from in buffers of their own, freed once derived (see _drop_apart), not in
+    # the weights' buffer for good: the float ones (F32, BF16: prepare's half copies, _derive_weights' transposed and float ones) and a gate and
+    # up pair the load didn't fuse (prepare's fuse_up). C2: ~0.5 GB a device)
+    apart = ({k for k,(_,_,t) in entries.items() if t in (0, 30) and k not in ('token_embd.weight', 'output.weight')} |
+             {n for g, u in ((g, g.replace("gate", "up")) for g in units_map if g.endswith("ffn_gate_exps.weight"))
+              if g not in fuse and u in units_map and entries[g][2] == entries[u][2] for n in (g, u)}) if getenv("LOAD_APART", 0) else None
+    state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads, fuse, row_sel=rows_map, pending=pending, apart=apart)
     _lap("weights")
     if host_embd is not None: state_dict['token_embd.weight'] = host_embd
     state_dict = {k:v.cast('float16') for k,v in state_dict.items()}
@@ -3313,8 +3360,10 @@ class Transformer:
   def _finish_load(self):
     """the work left of loading: the values computed from the weights, the weights read if deferred"""
     self._derive_weights()
+    ran = bool(self._pending_load)
     while self._pending_load: self._pending_load.pop(0)()
     _lap("derived")
+    if ran: _drop_apart()
 
   def _derive_weights(self):
     """the weights computed from the file's"""
