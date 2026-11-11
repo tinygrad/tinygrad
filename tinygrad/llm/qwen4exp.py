@@ -528,6 +528,12 @@ def _zeros(*shape:int, dtype:DType=dtypes.float32, device:str|tuple[str, ...]|No
   _fill_zero(t:=_buffers(*shape, dtype=dtype, device=device, axis=axis))
   return t
 
+def _mem_available() -> int:
+  """the host memory available (bytes, MemAvailable: 0 if unknown)"""
+  try:
+    with open("/proc/meminfo") as f: return next((int(l.split()[1]) * 1024 for l in f if l.startswith("MemAvailable:")), 0)
+  except OSError: return 0
+
 def _shared_host(owner:str, devs:tuple[str, ...], nbytes:int) -> list[Buffer]:
   """nbytes of host memory (made when used) mapped on every device: its buffer of every device (the owner's, the others' its mappings)"""
   host = Buffer(owner, max(nbytes, 1), options=BufferSpec(host=True))
@@ -2668,8 +2674,8 @@ class Transformer:
         if j in self._pending_load: self._pending_load.remove(j)
         take(j)
         call()
-      # (the warm-up's runs as their jits come: while the others compile)
-      run_as_they_come(take, calls, ran)
+      # (the warm-up's runs as their jits come: while the others compile; the stash's jits linked meanwhile when the host memory has room)
+      run_as_they_come(take, calls, ran, idle=functools.partial(link_late, take))
     top, k = unwrap(self.config.indexer).top_k, self.config.spec_drafts
     calls:dict[str, tuple[Any, Callable[[], Any]]] = {}
     def add(name:str, jit:Any, call:Callable[[], Any]):
@@ -2734,6 +2740,17 @@ class Transformer:
     # processes and the compilers hold theirs, the start-up's peak of host memory)
     late = [*self._stash_kv_jits.values(), *self._stash_state_jits.values()] if self.stash_entries and getenv("STASH_LINK_LATE", 1) else []
     for j in late: setattr(j, "link_later", True)
+    # (STASH_LINK_FREE_GB: linked while the jits left compile (the parent waits for them) once the host memory available holds the stash and
+    # that many GB more, else after them)
+    need = (self.stash_chunks * self.stash_chunk_nbytes + self.stash_entries * self.stash_entry_nbytes + getenv("STASH_LINK_FREE_GB", 10) * 1e9) \
+      if late else 0
+    def link_late(take:Callable[..., bool|None]|None=None):
+      if not late or not getattr(late[0], "link_later", False): return
+      if take is not None and (_mem_available() < need or any(take(j, wait=False) is None for j in late)): return
+      for j in late:
+        setattr(j, "link_later", False)
+        if j.captured is not None: j.captured.linked()
+      _lap("warmup: stash linked")
     capture_parallel(par, meanwhile)
     if DEBUG >= 1: print(f"seq_warmup: {len(par)} jits compiled at {time.perf_counter()-st:.2f}s")
     for name, (jit, call) in calls.items():
@@ -2741,10 +2758,7 @@ class Transformer:
       st = time.perf_counter()
       call()
       if DEBUG >= 1: print(f"seq_warmup: {name} run in {time.perf_counter()-st:.2f}s")
-    for j in late:
-      setattr(j, "link_later", False)
-      if j.captured is not None: j.captured.linked()
-    _lap("warmup: stash linked")
+    link_late()
 
   def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, float]=0.0,
                   upto:int|None=None) -> int|None:

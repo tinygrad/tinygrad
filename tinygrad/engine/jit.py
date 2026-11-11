@@ -375,15 +375,17 @@ def warmup_select(calls:dict[str, tuple[Any, Callable[[], Any]]], par:list[tuple
   keep = [x for k, _ in calls.values() for x in (k if isinstance(k, list) else [k])]
   return calls, [(j, c) for j, c in par if any(j is k for k in keep)]
 
-def run_as_they_come(take:Callable[..., bool|None], calls:dict[str, tuple[Any, Callable[[], Any]]], ran:set[str]):
+def run_as_they_come(take:Callable[..., bool|None], calls:dict[str, tuple[Any, Callable[[], Any]]], ran:set[str],
+                     idle:Callable[[], Any]|None=None):
   """
   (capture_parallel's meanwhile) the calls (name -> (jit or list of jits, call)) run as their jits come (taken), each once (its name added to
-  ran): the warm-up's runs while the jits left compile. WARMUP_EARLY=0: none (the caller runs them after)
+  ran): the warm-up's runs while the jits left compile. WARMUP_EARLY=0: none (the caller runs them after). idle: called while none can run
   """
   if not getenv("WARMUP_EARLY", 1): return
   while len(ran) < len(calls):
     if (name:=next((n for n, (j, _) in calls.items() if n not in ran and
                     all(take(x, wait=False) is not None for x in (j if isinstance(j, list) else [j]))), None)) is None:
+      if idle is not None: idle()
       time.sleep(0.01)
       continue
     ran.add(name)
