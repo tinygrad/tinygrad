@@ -12,6 +12,7 @@ from tinygrad.llm.kernels.amd_glm import SEQ_BLK, indexer_decode_index_rows, ind
 
 N, H, D, KP, TOP = int(os.environ.get("NDEV", 6)), 32, 128, 4, 512
 PT = int(os.environ.get("PT", 66048))  # a region's pools (264,192 rows / 4)
+WIDTH = int(os.environ.get("WIDTH", PT))  # the scores' columns (the model's max_pools: 65,536, not a multiple of 64 a device)
 devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
 rng = np.random.default_rng(int(os.environ.get("SEED", 0)))
 key = (rng.integers(0, 0x7F, size=(PT, 128), dtype=np.uint8) | (rng.integers(0, 2, size=(PT, 128), dtype=np.uint8) << 7)).view(np.uint32)
@@ -31,7 +32,7 @@ def lists(o:np.ndarray) -> list:
   return [(int(r[-1]), r[:r[-1]].tobytes()) for r in o]
 
 fails = 0
-CASES = [(3, 4000), (3, 12000), (3, 30000), (3, 65000), (3, 200000), (3, PT*KP - 8), (64, 30000), (64, 131000), (64, 261000), (512, 200000),
+CASES = [(3, 4000), (3, 12000), (3, 30000), (3, 65000), (3, 200000), (3, WIDTH*KP - 8), (64, 30000), (64, 131000), (64, 261000), (512, 200000),
          (512, 262144 - 600)]
 for T, pos in CASES:
   q = Tensor((rng.standard_normal((T, H, D)) * 0.5).astype(np.float16)).shard(devs).realize()
@@ -39,13 +40,13 @@ for T, pos in CASES:
   qs = UOp.variable("start_pos", 0, PT*KP).bind(pos)
   pools = (pos + T + KP - 1) // KP
   if T <= 8:
-    a = indexer_decode_index_rows(q, k_rep, w, qs, pools, TOP, KP, width=PT)
-    b = indexer_decode_index_rows(q, k_sh, w, qs, pools, TOP, KP, width=PT)
+    a = indexer_decode_index_rows(q, k_rep, w, qs, pools, TOP, KP, width=WIDTH)
+    b = indexer_decode_index_rows(q, k_sh, w, qs, pools, TOP, KP, width=WIDTH)
   else:
     if int(os.environ.get("SCORES", 1)):
       # (the split scores against the whole's, every row's pools before its query: bit-equal?)
-      sw = indexer_scores(q, k_rep, w, pools, KP, width=PT).to(devs[0]).numpy()
-      ss_t = indexer_scores(q, k_sh, w, pools, KP, width=PT).realize()
+      sw = indexer_scores(q, k_rep, w, pools, KP, width=WIDTH).to(devs[0]).numpy()
+      ss_t = indexer_scores(q, k_sh, w, pools, KP, width=WIDTH).realize()
       ss = ss_t.numpy().reshape(N, T, -1)
       PL = ss.shape[2]
       lp = np.arange(PL)
@@ -75,8 +76,8 @@ for T, pos in CASES:
           have_above, have_tie = set(above[:, 1].astype(np.int64).tolist()), set(tie[:, 1].astype(np.int64).tolist())
           if want_above != have_above or want_tie != have_tie:
             print(f"  cand dev {d} row {r}: above {len(have_above)} want {len(want_above)}, ties {len(have_tie)} want {len(want_tie)}")
-    a = pool_index_rows(indexer_scores(q, k_rep, w, pools, KP, width=PT), qs, pools, TOP, KP)
-    b = pool_index_shard(indexer_scores(q, k_sh, w, pools, KP, width=PT), qs, pools, TOP, KP, width=PT)
+    a = pool_index_rows(indexer_scores(q, k_rep, w, pools, KP, width=WIDTH), qs, pools, TOP, KP)
+    b = pool_index_shard(indexer_scores(q, k_sh, w, pools, KP, width=WIDTH), qs, pools, TOP, KP, width=WIDTH)
   la, lb = lists(a.to(devs[0]).numpy()), lists(b.to(devs[0]).numpy())
   bad = [i for i, (x, y) in enumerate(zip(la, lb)) if x != y]
   fails += len(bad)
