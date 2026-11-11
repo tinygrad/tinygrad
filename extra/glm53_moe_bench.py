@@ -40,6 +40,11 @@ def main():
     down = tn != "iq3_s"
     for T in toks:
       sel_np = np.stack([rng.choice(NEXP, SLOTS, replace=False) for _ in range(T)]).astype(np.int32).reshape(1, T, SLOTS)
+      if (nl:=getenv("NLOCAL", -1)) >= 0:
+        # (NLOCAL: exactly that many local selections (the first slots of the first rows), the rest other devices' experts: the cost of the
+        # idle rows' workgroups)
+        sel_np = np.stack([rng.choice(np.arange(E, NEXP), SLOTS, replace=False) for _ in range(T)]).astype(np.int32).reshape(1, T, SLOTS)
+        for k in range(nl): sel_np[0, k % T, k // T] = k % E
       loc = sel_np[(sel_np >= 0) & (sel_np < E)]
       uniq = len(np.unique(loc))
       sel = Tensor(sel_np, device=dev).realize()
