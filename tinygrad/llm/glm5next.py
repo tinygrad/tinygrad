@@ -1927,7 +1927,9 @@ class Indexer:
     # scores its own, see pool_index_shard)
     self.shard = len(cast(tuple, x.device)) if self.sparse and bool(getenv("SEQ_IDX_SHARD", 0)) and seq_sharded(x.device) else 0
     if self.shard:
-      devs, local = cast(tuple[str, ...], x.device), seq_rows(self.max_context, self.shard) // idx.kpool
+      # (GLM_SEQ: every region's, as the cache's rows (a region's pools a device's local rows from base//kpool//n, see core's grouped))
+      rows = max(self.max_context, self.cache_rows) + REGION_ALIGN if self.cache_rows else self.max_context
+      devs, local = cast(tuple[str, ...], x.device), seq_rows(rows, self.shard) // idx.kpool
       self.cache_pk = Tensor.empty(self.shard*local, *row, dtype=dt, device=devs, axis=0)
       if (reg:=self._regions) is not None:
         n, S, R = reg
@@ -1953,8 +1955,8 @@ class Indexer:
     kg, iq = self.k_norm(self.attn_k(x)).stack(self.compressor_gate(x), dim=2), self.attn_q_b(q).reshape(Tq, idx.n_heads, idx.head_dim)
     # (_seq_base: the sequence's region of the caches, its pooled keys from b//kpool. the ring is the model's (a slot's copied, see _seq_copy))
     b = _seq_base[0]
-    assert not self.shard or (isinstance(b, int) and b == 0), "SEQ_IDX_SHARD: no regions"
-    pb = b // idx.kpool
+    # (SEQ_IDX_SHARD: a region's pools from a device's local row b//kpool//n, b a multiple of the devices' blocks (REGION_ALIGN))
+    pb = b // idx.kpool // (self.shard or 1)
     pk = pool_keys(self.cache_pk, self.ring, kg[0].half(), self.compressor_ape["weight"], start_pos, T, pbase=pb)
     weights, pools, k = (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5)[0], (S + idx.kpool - 1) // idx.kpool, idx.top_k // idx.kpool
     # one token: the heads are the rows of the scores' matmul, a kernel picks its pools
@@ -2204,9 +2206,11 @@ class MLATransformerBlock(FFNBlock):
         U, nd = REGION_ALIGN, len(cast(tuple, x.device))
         assert U % (SEQ_BLK*nd) == 0 and U % ic.kpool == 0, f"REGION_ALIGN {U}: blocks of {SEQ_BLK} on {nd} devices"
         span, R, rslots = -(-self.config.max_context // U), int(idx.slot_ring[0].shape[0]), (sb.bases // U).contiguous()
+        # (SEQ_IDX_SHARD: a region slot's pools are a device's U//kpool//nd local rows (its blocks'), not U//kpool)
+        stride = U // ic.kpool // (idx.shard or 1)
         pk = pool_keys(pools[0], pools[1], kg.half(), idx.compressor_ape["weight"], None, Tq,
-                       grouped=(sb.positions, U // ic.kpool, R, rslots, None, span, sb.slots))
-        picks = indexer_decode_index_rows(iq, pk, iw, None, None, ic.top_k // ic.kpool, ic.kpool, grouped=(sb.positions, U // ic.kpool, rslots, span))
+                       grouped=(sb.positions, stride, R, rslots, None, span, sb.slots))
+        picks = indexer_decode_index_rows(iq, pk, iw, None, None, ic.top_k // ic.kpool, ic.kpool, grouped=(sb.positions, stride, rslots, span))
         cache = seq_store_grouped(pools[2], self._seq_rows(k_store[0, 0]), sb.positions, rslots, U // nd, span=span)
         attn = mla_sparse_seq(q, cache, picks, scale, None, grouped=(sb.positions, rslots, U // nd, span), dims=self.config.kv_lora_rank)
         return attn, (pk, Tensor(pools[1].uop.after(pk.uop)), cache)
@@ -4166,7 +4170,10 @@ class Transformer:
         # (GLM: a region's rows of the MLA cache on every device (its rows from base/devices), the indexer's pools)
         nd = len(cast(tuple, b.cache_s.device))
         copies.append(mv(b.slot_rows_view(b.cache_s), src // nd, dst // nd, n // nd, 0))
-        if (gi:=b.indexer) is not None: copies.append(mv(gi.cache_pk, src // gi.idx.kpool, dst // gi.idx.kpool, n // gi.idx.kpool, 0))
+        if (gi:=b.indexer) is not None:
+          # (SEQ_IDX_SHARD: the pools split as the cache's rows, a device's local ones)
+          pk, kd = (b.slot_rows_view(gi.cache_pk), gi.idx.kpool * nd) if gi.shard else (gi.cache_pk, gi.idx.kpool)
+          copies.append(mv(pk, src // kd, dst // kd, n // kd, 0))
       if not isinstance(b, QSABlock): continue
       copies.append(mv(b.cache_k, src, dst, n, 2))
       if (idx:=b.indexer) is not None:
