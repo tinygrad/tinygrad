@@ -47,12 +47,15 @@ def main():
       line = (f"{tn:7s} {fout}x{fin} T={T:3d} local sel {len(loc):3d} uniq {uniq:2d}: roofline uniq {uniq*ebytes/BW/1e3:6.1f} us, "
               f"per sel {len(loc)*ebytes/BW/1e3:6.1f} us:")
       for name, envs in arms:
-        old, oldk = {}, {}
+        old:dict[str, str|None] = {}
+        oldk:dict[str, object] = {}
         for kv in [e for e in envs.split(",") if e]:
           k, v = kv.split("=", 1)
           old[k], os.environ[k] = os.environ.get(k), v
-          if hasattr(K, k): oldk[k], _ = getattr(K, k), setattr(K, k, type(getattr(K, k))(int(v)))
-        getenv.cache_clear()
+          if hasattr(K, k):
+            oldk[k] = getattr(K, k)
+            setattr(K, k, int(v))  # (the module's knobs are ints)
+        getattr(getenv, 'cache_clear')()
         K._bundle_cache.clear()
         for fn in vars(K).values():  # (the kernels are cached on their args, not on the env)
           if callable(getattr(fn, 'cache_clear', None)) and getattr(fn, '__module__', '') == K.__name__: fn.cache_clear()
@@ -66,11 +69,11 @@ def main():
           dt = (time.perf_counter() - st) / REPS / len(ws)
           out = o.float().numpy().reshape(T, SLOTS, fout)
         finally:
-          for k, v in old.items():
-            if v is None: os.environ.pop(k, None)
-            else: os.environ[k] = v
-          for k, v in oldk.items(): setattr(K, k, v)
-          getenv.cache_clear()
+          for ek, ev in old.items():
+            if ev is None: os.environ.pop(ek, None)
+            else: os.environ[ek] = ev
+          for mk, mv in oldk.items(): setattr(K, mk, mv)
+          getattr(getenv, 'cache_clear')()
           K._bundle_cache.clear()
         if ref is None: ref, eq = out, "ref"
         elif np.array_equal(out.view(np.uint32), ref.view(np.uint32)): eq = "EQUAL"
