@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence, Callable
 import decimal, weakref, pickle, time, os
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, unwrap
+from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, getenv, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS
@@ -263,6 +263,20 @@ def _compile_pickled_timed(task:bytes) -> tuple[bytes, float, float, int, str]:
 startup_marks:list[tuple[str, float]] = []
 def startup_mark(name:str):
   if remote_compile is not None: startup_marks.append((name, time.time()))
+
+def warm_worker_pool(device:str):
+  """
+  the worker pool started now and warmed up (a small kernel of the device compiled by each worker: its imports, its pattern matchers and its
+  compiler loaded) while the caller does other work (a model's weights read): their first real compiles aren't cold. WARM_POOL=0: not
+  """
+  if not getenv("WARM_POOL", 1) or (pool:=get_worker_pool()) is None: return
+  from tinygrad.tensor import Tensor
+  x = Tensor.empty(64, 64, device=device)
+  calls = [(c, a) for c in ((x * 2 + 1).relu().sum(1) + x.max(1)).schedule_linear().toposort() if c.op is Ops.CALL and
+           (a:=_get_call_to_compile(c)) is not None]
+  ctx = {v.key: v.value for v in to_program_context}
+  tasks = [pickle.dumps((0, a, ctx)) for _, a in calls]
+  for i in range(pool._processes): pool.apply_async(_compile_pickled, (tasks[i % len(tasks)],))
 
 # (a process compiling for another: its kernels compiled there, by their keys, see capture_parallel) [(key, task)] -> their programs
 remote_compile:Callable[[list[tuple[bytes, bytes]]], list[UOp]]|None = None

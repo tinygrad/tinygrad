@@ -3,6 +3,7 @@ import array, collections, contextlib, enum, functools, gc, itertools, math, os,
 from dataclasses import dataclass, replace, field
 from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
+from tinygrad.engine.realize import warm_worker_pool
 from tinygrad.engine.jit import capture_parallel, warmup_select, warmup_wanted, _TinyJit, run_as_they_come
 from tinygrad.engine.realize import run_linear, compile_linear, link_linear
 from tinygrad.llm.kernels.amd_glm import rows_shifted, rows_pick, pool_expand
@@ -5063,6 +5064,8 @@ class Transformer:
       pads = {k: sizes[k] for k in sizes if sizes[k] != entries[k][1][shard_map[k]]}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
     _open_devices(devices)
+    # (the compile workers started and warmed up while the weights are read)
+    warm_worker_pool(devices[0])
     # gate and up experts of the same format load as one (fuse_gate_up)
     # (a pair in different files of a split gguf isn't: a fused read is of the gate's file. prepare fuses it on the devices)
     def file_of(data:Tensor) -> str|None:

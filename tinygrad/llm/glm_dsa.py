@@ -5,7 +5,7 @@ from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.jit import capture_parallel, warmup_wanted, _TinyJit
 from tinygrad.engine import jit as jit_mod
-from tinygrad.engine.realize import run_linear, compile_linear, link_linear
+from tinygrad.engine.realize import run_linear, compile_linear, link_linear, warm_worker_pool
 from tinygrad.llm.kernels.amd_glm_dsa import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, hc_pre, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
@@ -3399,6 +3399,8 @@ class Transformer(GLMSeqDriver):
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
     lap("planned")
     _open_devices(devices)
+    # (the compile workers started and warmed up while the weights are read)
+    warm_worker_pool(devices[0])
     lap("devices open")
     # gate and up experts of the same format load as one (fuse_gate_up)
     fuse = {g: u for g in units_map if g.endswith("ffn_gate_exps.weight") and (u:=g.replace("gate", "up")) in units_map and

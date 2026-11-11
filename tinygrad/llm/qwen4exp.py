@@ -3,6 +3,7 @@ import array, contextlib, enum, functools, itertools, math, pathlib, random, re,
 from dataclasses import dataclass, replace
 from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
+from tinygrad.engine.realize import warm_worker_pool
 from tinygrad.engine.jit import capture_parallel, warmup_select, run_as_they_come
 from tinygrad.llm.kernels import amd_qwen
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
@@ -3015,6 +3016,8 @@ class Transformer:
     pads = {k: sizes[k] for k in sizes if sizes[k] != entries[k][1][shard_map[k]]}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
     _open_devices(devices)
+    # (the compile workers started and warmed up while the weights are read)
+    warm_worker_pool(devices[0])
     # (the micro batches on compute queues of their own if the devices have four)
     EXTRA_QUEUES[0] = all(getattr(Device[d], "compute_queue_count", lambda: 0)() >= 4 for d in devices)
     # gate and up experts of the same format load as one (fuse_gate_up)
