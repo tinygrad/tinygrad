@@ -872,7 +872,7 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
   """int8 groups of 32 (as q8_quantize) and one scale per 256 inputs"""
   q = Tensor.empty(tokens, in_features//32, 8, dtype=dtypes.uint32, device=x.device)
   scale = Tensor.empty(tokens, in_features//256, dtype=dtypes.float32, device=x.device)
-  pad = {"rows": _unbind(rt[1])} if getenv("GEMM_PAD", 0) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and isinstance(rt[1], UOp) else {}
+  pad = {"rows": _unbind(rt[1])} if getenv("GEMM_PAD", 1) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and isinstance(rt[1], UOp) else {}
   outs = Tensor.custom_kernel(q, scale, x, fxn=functools.partial(_q8k_quantize_kernel, tokens=tokens, in_features=in_features, **pad))
   return outs[0], outs[1]
 
@@ -1276,8 +1276,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
        _wmma_rdna4(x.device) and (tt:=next((t for t in (96, 128, 64) if local_rows % t == 0), 0)) and getenv("Q8_GEMM", 1):
     # many tokens: the weights dequantized in LDS for token tiles of tt
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type)
-    # (GEMM_PAD, default off: a prefill chunk's x (its R rows, the first T of them tokens): the token tiles of the tokens only)
-    if getenv("GEMM_PAD", 0) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and not split and isinstance(rt[1], UOp):
+    # (GEMM_PAD, default on: a prefill chunk's x (its R rows, the first T of them tokens): the token tiles of the tokens only)
+    if getenv("GEMM_PAD", 1) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and not split and isinstance(rt[1], UOp):
       fxn = functools.partial(fxn, rows=_unbind(rt[1]))
     if getenv("Q8_GEMM_SC", 0) and local_splits == 1 and getenv("HALF_ROWS", 1) and x.dtype == dtypes.half:
       # (Q8_GEMM_SC, default off: a half x's rows scaled by the gemm as it loads them, not a scaled copy of all of x (_half_rows))
@@ -1289,7 +1289,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None:
     if layer.ggml_type == IQ4_XS:
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
-      if getenv("GEMM_PAD", 0) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and not split and isinstance(rt[1], UOp):
+      if getenv("GEMM_PAD", 1) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and not split and isinstance(rt[1], UOp):
         fxn = functools.partial(fxn, rows=_unbind(rt[1]))
     else:
       fxn = functools.partial(_q5_linear_f16_wmma_kernel if layer.ggml_type in (Q4_K, Q5_K) else _quant_linear_f16_wmma_kernel,
@@ -3104,7 +3104,7 @@ def moe_combine(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Te
   D = int(down.shape[-1])
   y = Tensor.empty(devices*tokens, D, dtype=out_dtype, device=down.device, axis=0 if devices > 1 else None)
   extra = (add.reshape(-1, D).contiguous(),) if add is not None else ()
-  pad = {"rows": _unbind(rt[1])} if getenv("GEMM_PAD", 0) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and \
+  pad = {"rows": _unbind(rt[1])} if getenv("GEMM_PAD", 1) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and \
     isinstance(rt[1], UOp) else {}
   y = Tensor.custom_kernel(y, down.reshape(-1, D).contiguous(), pos.reshape(-1).contiguous(), probs.float().reshape(-1).contiguous(), *extra,
                            fxn=functools.partial(_moe_combine_kernel, k=k, by_selection=by_selection, **pad))[0]
