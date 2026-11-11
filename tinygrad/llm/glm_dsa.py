@@ -666,9 +666,8 @@ class FFNBlock:
           return self._experts(x, h, *moe_router_local(logits, bias, k, scale, exps.slice_table), local=True)
         sel, probs = moe_router(logits, bias, k, scale)
         if rows is not None and getenv("SP_ROUTE_ONE", 1):
-          # (SP_ROUTE_ONE: the selections and their weights' bits in one gather, every device's part to every other at once: the ring's 13
-          # steps of a few KB twice were a chain of latencies)
-          g = all_gather(sel.cat(probs.bitcast(dtypes.int32), dim=-1), 1, ring=False)
+          # (SP_ROUTE_ONE: the selections and their weights' bits in one gather: one ring of 13 steps of a few KB, not two)
+          g = all_gather(sel.cat(probs.bitcast(dtypes.int32), dim=-1), 1)
           sel, probs = g[..., :k].contiguous(), g[..., k:].bitcast(dtypes.float32).contiguous()
         elif rows is not None: sel, probs = all_gather(sel, 1), all_gather(probs, 1)
         return self._experts(x, h, sel, probs)
