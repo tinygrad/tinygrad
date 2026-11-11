@@ -10,6 +10,7 @@
 srcs are %ids or literals: a CONST (1, 2.5, -inf, true, invalid) or an all-CONST STACK ([1 2]) has no line. args are key=value after the srcs.
 a value is a literal, a bare word, a 'string', a [list], a %id, or a `python object`. parse_uir(render_uir(x)) is x, since UOps are
 hash-consed, when every python object's repr evaluates back to it. runtime objects aren't rendered: a BUFFER's Buffer and a CALL's grad_fxn.
+GLOBAL BUFFER slots are preserved: non-negative slots require existing storage in this process; unbound BUFFERs must use negative slots.
 parse_uir also reads studentgrad's hand-written UIR: %names, nested (op ...), [stacks] of expressions and {scoped blocks}.
 """
 import re, math, ast, functools, importlib
@@ -42,7 +43,7 @@ _keywords = {"true", "false", "inf", "nan", "invalid"}
 # ops whose arg is one value with a name, and ops whose arg is a dataclass written as key=value per field
 _arg_key = {Ops.CAST:"dtype", Ops.BITCAST:"dtype", Ops.COPY:"device", Ops.GETADDR:"device", Ops.SPECIAL:"name", Ops.UNSHARD:"axes",
             Ops.MSELECT:"index"}
-_skip_fields = {"buffer", "grad_fxn"}   # runtime objects
+_skip_fields = {"grad_fxn"}   # runtime objects
 
 @functools.cache
 def _struct_args() -> dict[Ops, type]:

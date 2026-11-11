@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final, Iterator
+from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final, Iterator, ClassVar
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections, struct
 from dataclasses import dataclass, replace
 from enum import Enum, auto
@@ -33,8 +33,6 @@ class ParamArg:
   volatile: bool = False
   # (h, w) if this is an image2d buffer, then the size CONST is h*w*4
   image: tuple[int, int]|None = None
-  # the device Buffer for a realized BUFFER. the UOp is the owner of the Buffer: they live and die together (1:1)
-  buffer: Buffer|MultiBuffer|None = None
   bind_on_realize: bool = False
   # the bound value of a Variable (an ALU PARAM with a value range); None means unbound
   val: PyConst|None = None
@@ -44,8 +42,6 @@ class ParamArg:
     fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
               ("volatile", False), ("image", None), ("bind_on_realize", False), ("val", None), ("spec", None))
     args = [repr(self.slot), repr(self.dtype)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
-    if self.buffer is not None:
-      args.append(f"buffer=UOp.new_buffer({self.device!r}, {self.buffer.nbytes // self.dtype.itemsize}, {self.dtype!r}, {self.slot}).buffer")
     return f"ParamArg({', '.join(args)})"
 axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.WEAK: "L",
                 AxisType.LOOP: "L", AxisType.UPCAST: "u"}
@@ -184,6 +180,8 @@ class UOpMetaClass(type):
     # NOTE: the key must separate nodes of different dtype: a CONST's dtype is the type of its arg, and True == 1 as dict keys
     if (wret:=UOpMetaClass.ucache.get(key:=(op, src, arg, type(arg)), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(op, src, arg))
+    # a BUFFER resolves its slot once, at creation: from then on it holds the device Buffer (see UOp.buffers)
+    if op is Ops.BUFFER: _ = created.slot_buffer
     if SPEC > 1:
       from tinygrad.uop.spec import spec_full
       if SPEC > 2:
@@ -235,7 +233,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # NOTE: getattr because this object may be partially constructed (e.g. if __init__ raised, like the BEAM timeout SIGALRM)
     try: del UOpMetaClass.ucache[(self.op, self.src, self.arg, type(self.arg))]
     except (AttributeError, KeyError): pass
-  def __reduce__(self): return UOp, (self.op, self.src, self.arg)
+  def __reduce__(self):
+    # a realized BUFFER pickles with its device Buffer, and the process that loads it binds that Buffer to a slot of its own
+    if self.op is Ops.BUFFER and (buf:=self.slot_buffer) is not None: return UOp._load_buffer, (self.src, self.arg, buf)
+    return UOp, (self.op, self.src, self.arg)
+  @staticmethod
+  def _load_buffer(src:tuple[UOp, ...], arg:ParamArg, buf:Buffer|MultiBuffer) -> UOp:
+    return UOp(Ops.BUFFER, src, replace(arg, slot=UOp.slot_for(buf)))
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg))
     assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
@@ -515,8 +519,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @recursive_property
   def trace_num(self):
     num = next(ucount)
-    # the trace must not retain the device Buffer: store a placeholder instead (the real one would pin memory and fail pickling)
-    arg = replace(self.arg, buffer=cast("Buffer", object())) if isinstance(self.arg, ParamArg) and self.arg.buffer is not None else self.arg
+    # Snapshots have no storage: negative slots keep reconstruction separate from runtime Buffer bindings.
+    arg = replace(self.arg, slot=-self.arg.slot-1) if self.op is Ops.BUFFER and self.slot_buffer is not None else self.arg
     uop_fields[num] = (self.op, tuple(s.trace_num for s in self.src), arg)
     return num
 
@@ -794,6 +798,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop Buffer stuff ***
 
   unique_num = itertools.count(0)
+  # a realized BUFFER finds its device Buffer by slot. a Buffer has one slot, and a slot is never bound to another Buffer.
+  # non-negative GLOBAL BUFFER slots must have storage; negative slots are storage-free graph data (UIR and traces).
+  # both tables are weak: the BUFFER UOps of a slot hold the Buffer, so the storage lives exactly as long as something references it
+  buffers: ClassVar[weakref.WeakValueDictionary[int, Buffer|MultiBuffer]] = weakref.WeakValueDictionary()
+  buffer_slots: ClassVar[weakref.WeakKeyDictionary[Buffer|MultiBuffer, int]] = weakref.WeakKeyDictionary()
 
   def getaddr(self, device=None) -> UOp:
     if self.without_after.op not in GroupOp.Defines|{Ops.SHRINK, Ops.BITCAST, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.LINEAR}: return self
@@ -803,24 +812,30 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # BUFFER/ALLOC/COPY carry a DEVICE range when targeting multiple devices
     return (UOp.range(len(device), 0, AxisType.DEVICE),) if isinstance(device, tuple) else ()
   @staticmethod
-  def _buffer(size:int, dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, buffer:Buffer|MultiBuffer|None=None) -> UOp:
+  def _buffer(size:int, dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None) -> UOp:
     return UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),)+UOp.device_range_src(device),
-               arg=ParamArg(slot, dtype, addrspace=addrspace, device=device, buffer=buffer))
+               arg=ParamArg(slot, dtype, addrspace=addrspace, device=device))
   @staticmethod
-  def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
+  def slot_for(buf:Buffer|MultiBuffer) -> int:
+    # the slot of a device Buffer, bound the first time it is asked for
+    if (slot:=UOp.buffer_slots.get(buf)) is None:
+      slot = UOp.buffer_slots[buf] = next(UOp.unique_num)
+      UOp.buffers[slot] = buf
+    return slot
+  @staticmethod
+  def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
     assert dtype.itemsize > 0, f"not a storage dtype: {dtype}"
     assert isinstance(size, int), f"new_buffer size must be a concrete int, got {size}"
-    slot = next(UOp.unique_num) if num is None else num
     buf = MultiBuffer(device, size * dtype.itemsize) if isinstance(device, tuple) else Buffer(device, size * dtype.itemsize)
-    return UOp._buffer(size, dtype, slot, device=device, buffer=buf)
+    return UOp._buffer(size, dtype, UOp.slot_for(buf), device=device)
   @staticmethod
   def from_buffer(opaque:Buffer|MultiBuffer, dtype:DType, device:str|tuple[str, ...]|None=None):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
     assert dtype.itemsize > 0, f"not a storage dtype: {dtype}"
     assert opaque.nbytes % dtype.itemsize == 0, f"{opaque.nbytes} bytes is not divisible by {dtype.itemsize} for {dtype}"
-    # Both storage identity and interpretation are part of the UOp key.
-    return UOp._buffer(opaque.nbytes // dtype.itemsize, dtype, -id(opaque), device=device or opaque.device, buffer=opaque)
+    # the slot is the storage identity, the dtype and device are how it is read: every view of one Buffer has the same slot
+    return UOp._buffer(opaque.nbytes // dtype.itemsize, dtype, UOp.slot_for(opaque), device=device or opaque.device)
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
@@ -929,6 +944,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if (cv := self.contiguous_view()) is None: raise RuntimeError(f"non-contiguous view is not supported for {self.device} buffer")
     return cv[0], cv[1]*cv[0].dtype.itemsize
 
+  @functools.cached_property
+  def slot_buffer(self) -> Buffer|MultiBuffer|None:
+    # the device Buffer bound to the slot of a GLOBAL BUFFER. LOCAL/REG scratch, ALLOC and PARAM slots are never looked up
+    if self.op is not Ops.BUFFER or not isinstance(self.arg, ParamArg) or self.arg.addrspace is not AddrSpace.GLOBAL: return None
+    if self.arg.slot < 0: return None
+    buf = UOp.buffers.get(self.arg.slot)
+    assert buf is not None, f"storage-free BUFFER must have a negative slot, got {self.arg.slot}"
+    return buf
+
   @property
   def buffer(self) -> Buffer|MultiBuffer:
     # a bare STAGE (same-device materialization) keeps the source's buffer
@@ -952,15 +976,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret.bufs = [cast(Buffer, x.buffer) for x in self.src]
       assert all_same([x.nbytes for x in ret.bufs]) and all_same([x.dtype for x in self.src]), "multibuffers mismatch buffers"
       return ret
-    assert self.op is Ops.BUFFER and self.arg.buffer is not None, f"must be a realized BUFFER {self}"
-    return self.arg.buffer
+    assert self.slot_buffer is not None, f"must be a realized BUFFER {self}"
+    return self.slot_buffer
   @property
   def realized(self) -> Buffer|MultiBuffer|None:
     if self.op is Ops.UNSHARD: return self.src[0].realized
     # only these can be realized
     if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
-    # LOCAL/REG scratch buffers are never realized
-    if self.op is Ops.BUFFER and self.addrspace in (AddrSpace.LOCAL, AddrSpace.REG): return None
+    # a BUFFER with nothing bound to its slot is not realized: LOCAL/REG scratch, or storage that is gone
+    if self.op is Ops.BUFFER and self.slot_buffer is None: return None
     # an ALLOC (directly or as an MSTACK source) is not realized
     if self.op_in_backward_slice_with_self(Ops.ALLOC): return None
     # NOTE: this is used by the JIT to determine which inputs we capture
