@@ -198,14 +198,24 @@ if getenv("MEM_DUMP"):
   import gc, collections
   from tinygrad.uop.ops import Ops
   from tinygrad.device import Buffer
-  from tinygrad.nn.state import get_state_dict
   d0, names = devs[0], {}
   def bufs_of(u):
     try: b = u.buffer
     except Exception: return []
     return [x.base for x in (b.bufs if hasattr(b, "bufs") else [b]) if x.device == d0]
-  for nm, t in get_state_dict(model, tensor_type=__import__("tinygrad").Tensor).items():
-    for b in bufs_of(t.uop.base): names.setdefault(id(b), nm)
+  from tinygrad import Tensor as _T
+  def walk(o, pre:str, seen:set):
+    # (the model's tensors by attribute path: its own objects only (not the jits' or the uops' graphs), each once)
+    if id(o) in seen: return
+    seen.add(id(o))
+    if isinstance(o, _T):
+      for b in bufs_of(o.uop.base): names.setdefault(id(b), pre)
+    elif isinstance(o, (list, tuple)):
+      for i, x in enumerate(o): walk(x, f"{pre}.{i}", seen)
+    elif isinstance(o, dict):
+      for kk, x in o.items(): walk(x, f"{pre}.{kk}", seen)
+    elif hasattr(o, "__dict__") and type(o).__module__.startswith(("tinygrad.llm", "tinygrad.nn")): walk(vars(o), pre, seen)
+  walk(model, "model", set())
   for kk, u in getattr(model, "_scratch", {}).items():
     for b in bufs_of(u): names.setdefault(id(b), f"scratch[{kk}]")
   from tinygrad.engine.jit import _TinyJit
@@ -224,7 +234,7 @@ if getenv("MEM_DUMP"):
     cls = "unnamed" if nm is None else "scratch" if nm.startswith("scratch") else "jit" if nm.startswith("jit") else \
       "cache" if any(w in nm for w in ("cache", "pool", "slot", "ring")) else "named"
     tot[cls] += o.nbytes
-    rest[(nm if cls in ("scratch", "cache", "jit") else cls, o.nbytes, str(getattr(o, "dtype", "")))] += 1
+    rest[(__import__("re").sub(r"\.\d+", ".*", nm) if nm is not None else cls, o.nbytes, str(getattr(o, "dtype", "")))] += 1
   print("MEM_DUMP " + " ".join(f"{c}={v/1e9:.3f}GB" for c, v in tot.most_common()), flush=True)
   for (nm, nb, dt), c in sorted(rest.items(), key=lambda x: -x[0][1]*x[1])[:getenv("MEM_DUMP")]:
     print(f"MEM_DUMP {nb*c/1e6:10.1f} MB {c:4d} x {nb:12d} B {dt:10s} {nm}", flush=True)
