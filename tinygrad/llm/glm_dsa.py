@@ -1240,12 +1240,9 @@ class MLATransformerBlock(FFNBlock):
                                   _fq(hn, getenv("Q4_SIM_AG", 0)).contiguous().reshape(R, D), fxn=_q8_pack_kernel)[0]
     xl = Tensor.custom_kernel(Tensor.empty(R, D, dtype=dtypes.half, device=devs, axis=0), packed, fxn=_q8_unpack_kernel)[0].reshape(1, R, D)
     qn = self.attn_q_a_norm(self.attn_q_a(xl)).contiguous()
-    L = int(qn.shape[-1])
-    qq = q8_quantize(qn.reshape(R, L), R, L, False, True)
-    # (the gathered rows' normed q_a: no memory (a constant), q_b's kernels read only its quantization, registered for it right before them
-    # (a layer's registration replaces the last one's: the same key))
-    qn_all = Tensor.full((1, R, L), 3.0, dtype=qn.dtype, device=devs)
-    q8_quantize_known(qn_all, R, L, False, tuple(all_gather(t, 0) for t in qq))
+    # (the gathered rows' normed q_a itself (q_b quantizes it as before, the indexer's attn_q_b reads its values): a constant placeholder with
+    # only its q8 registered gave the indexer 3.0s (wrong lists, ts5 pfx5))
+    qn_all = all_gather(qn, 1)
     # (x: hn as it is (its shape and devices; the attention reads none of it))
     pre:dict = {"x": hn, "qn": qn_all}
     kv_a = self.attn_kv_a_mqa(xl)
