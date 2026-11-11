@@ -672,8 +672,9 @@ def _is_buffer(u:UOp) -> bool:
   while u.op in (Ops.RESHAPE, Ops.UNSHARD): u = u.src[0]
   return u.op is Ops.BUFFER
 
-def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
-  """the tensors are buffers now (allocated, their devices and split kept), their values are computed by the function added to pending"""
+def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]], scratch:dict|None=None):
+  """the tensors are buffers now (allocated, their devices and split kept), their values are computed by the function added to pending
+  scratch: the jits' shared memory of intermediates (LOAD_DEFER: the values computed after the caches are made, no room for their own)"""
   pairs, ts = [], list({id(t): t for t in ts}.values())  # (a tensor of two modules once)
   # (an empty tensor is just its memory: allocated now)
   if now:=[t for t in ts if t.numel() == 0 or t.uop.base.op is Ops.ALLOC]: Tensor.realize(*now)
@@ -695,7 +696,7 @@ def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
       pairs.append((u, lazy))
   # (a jit: compiled with the model's jits, see _capture_parallel)
   def compute(): Tensor.realize(*[Tensor(u).assign(Tensor(lazy)) for u, lazy in pairs])
-  if pairs: pending.append(TinyJit(compute, capture_first=True))
+  if pairs: pending.append(TinyJit(compute, capture_first=True, scratch=scratch))
 
 def _host_ints(devs:str|tuple[str, ...], n:int) -> tuple[memoryview, Tensor]:
   """n int32 in host memory that the host polls: a (1, n) tensor every device reads and writes directly"""
@@ -4931,7 +4932,7 @@ class Transformer:
     # (and the parameters of a model initialized but not loaded. a loaded one's are: the quantized weights' are their decoding, not used)
     todo = [t for h in holders for v in vars(h).values() for t in lazy(v)] + ([] if self._loaded else lazy(nn.state.get_parameters(self)))
     # with the weights still to read: their memory now, their values after
-    if self._pending_load: _realize_later(todo, self._pending_load)
+    if self._pending_load: _realize_later(todo, self._pending_load, self._scratch)
     elif todo: Tensor.realize(*todo)
     self._states_ready = True
 
@@ -5272,7 +5273,7 @@ class Transformer:
     tables = dedup([t for m in modules([self.blk] + ([self.mtp] if hasattr(self, "mtp") else []), set()) if isinstance(m, ExpertWeights)
                     for t in (getattr(m, "first", None), getattr(m, "slice_table", None)) if t is not None and not t.uop.is_realized])
     # With the weights still to read: the small ones' memory now, their values after.
-    if self._pending_load: _realize_later(small, self._pending_load)
+    if self._pending_load: _realize_later(small, self._pending_load, self._scratch)
     Tensor.realize(*tables, *([] if self._pending_load else small))
 
   def _finish_load(self):
@@ -5283,7 +5284,7 @@ class Transformer:
   def _derive_weights(self):
     """the weights computed from the file's: their memory now, their values after the weights are read if they aren't yet (_pending_load)"""
     def realize(ts:list[Tensor]):
-      if self._pending_load: _realize_later(ts, self._pending_load)
+      if self._pending_load: _realize_later(ts, self._pending_load, self._scratch)
       else: Tensor.realize(*ts)
     # (SKINNY) the float weights of few outputs that decoding multiplies by (the routers, the indexers' head weights) stored transposed (the
     # outputs the fast axis), the Linear's a view of it: skinny_matmul reads every input's weights of all the outputs at once
