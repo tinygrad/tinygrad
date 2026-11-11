@@ -251,7 +251,12 @@ class AMDev:
     self.init_hw(self.gfx, self.sdma)
 
     if not self.is_vf: # skip in vf mode, these are pf funcs.
-      if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0: self.smu.set_power_limit(max_power)
+      # (AM_POWER_LIMITS="<pci bus>=W,...": a card's own limit over AM_POWER_LIMIT: cards that run slower at the same watts (their clocks at the
+      # cap differ, 6x R9700 at 130 W: 1,340-1,600 MHz) get more, the fast ones less, the step waits for the slowest at every exchange)
+      max_power = getenv("AM_POWER_LIMIT", 0.0)
+      for kv in str(getenv("AM_POWER_LIMITS", "")).split(","):
+        if "=" in kv and kv.split("=")[0].strip().lower() == str(self.devfmt).lower(): max_power = float(kv.split("=")[1])
+      if max_power > 0: self.smu.set_power_limit(max_power)
       # (AM_POWER_PCT: the power limit that % above (or below) the board's default, AM_VOLT_OFFSET: the gfx voltage curve that many mV lower, in
       # the board's overdrive limits)
       # (they stay set until the next one or a reset: set them every time to have them)
