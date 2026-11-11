@@ -425,6 +425,29 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertEqual(run(4, 8), (False, dtypes.float32))   # (fewer rows: the per-row kernel)
     self.assertEqual(run(40, 8), (True, dtypes.half))      # (MOE_BUNDLE_MIN and up: as before)
 
+  def test_moe_persist(self):
+    # (MOE_PERSIST: the exact bundles by P workgroups an output block looping over moe_bundles' count, not a grid of every possible bundle)
+    import tinygrad.llm.kernels.amd_glm_dsa as K
+    E, fin, fout = 4, 256, 64
+    w = Tensor.empty(E*fout*fin*K.QUANT_SIZES[K.IQ4_XS]//256//4, dtype=dtypes.uint32)
+    sel, x, first = Tensor.empty(1, 16, 8, dtype=dtypes.int32), Tensor.empty(1, 16, 1, fin), Tensor([0], dtype=dtypes.int32)
+    for P in (0, 2):
+      sinks = []
+      def wrap(*a, **kw):
+        sinks.append(ret:=orig(*a, **kw))
+        return ret
+      orig = K._decode_linear
+      K._bundle_cache.clear()
+      for fn in (K._moe_bundled_kernel, K._moe_bundled_persist_kernel): fn.cache_clear()
+      with patch.object(K, "MOE_WMMA", 0), patch.object(K, "MOE_EXACT_MIN", 8), patch.object(K, "MOE_PERSIST", P), \
+           patch.object(K, "_decode_linear", wrap):
+        out = K.moe_linear(w, K.IQ4_XS, E, x, sel, first)
+      self.assertEqual((len(sinks), out.shape), (1, (1, 16, 8, fout)))
+      name = sinks[0].arg.name
+      self.assertEqual(name.endswith("_p"), bool(P), name)
+    bexp, brow, bcnt = K.moe_bundles(sel, first, E, 2, 16*8)
+    self.assertEqual((bexp.shape, brow.shape, bcnt.shape), ((16*8//2 + E,), ((16*8//2 + E)*2,), (1,)))
+
   def test_moe_grid_lds(self):
     # (MOE_GRID_LDS: the per-row and the bundled MoE kernels of IQ3_S read the grid from an LDS copy (the same values))
     import tinygrad.llm.kernels.amd_glm_dsa as K
