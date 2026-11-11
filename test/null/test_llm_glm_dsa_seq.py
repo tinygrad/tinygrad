@@ -145,13 +145,18 @@ class TestGLMDSASequence(unittest.TestCase):
   def test_prefill_exchange_kernels(self):
     # (SEQ_GATHER_HALF: the gather stores halves, no bitcast copy; IDX_MERGE_SPLIT: a device's rows' merge, its lists into the block's rows;
     # SEQ_ATTN_TOK: the wmma attention's lists of hg head groups a token)
-    from tinygrad.llm.kernels.amd_glm_dsa import _seq_gather_kernel, _rows_into_kernel, _mla_sparse_wmma_kernel
+    from tinygrad.llm.kernels.amd_glm_dsa import _seq_gather_kernel, _rows_into_kernel, _mla_sparse_wmma_kernel, _seq_need_kernel
     def sink(*ts, fxn): return Tensor.custom_kernel(*ts, fxn=fxn)[0].uop.src[1].src[0]
     sp = UOp.const(100, dtypes.weakint)
     part, dev = Tensor.empty(64, 144, dtype="uint64"), Tensor.empty(1, dtype="int32")
     for dt, W in (("half", 576), ("uint64", 144)):
       k = sink(Tensor.empty(256, W, dtype=dt), part, dev, fxn=functools.partial(_seq_gather_kernel, start_pos=sp, k=1, n=4))
       self.assertIs(k.op, Ops.SINK)
+    # (SEQ_GATHER_UNION: the positions of the lists marked, the gather of only those)
+    need = Tensor.zeros(256, dtype="int32").contiguous()
+    self.assertIs(sink(need, Tensor.empty(8, 34, dtype="int32"), fxn=_seq_need_kernel).op, Ops.SINK)
+    self.assertIs(sink(Tensor.empty(256, 576, dtype="half"), part, dev, need, fxn=functools.partial(_seq_gather_kernel, start_pos=sp, k=1, n=4)).op,
+                  Ops.SINK)
     self.assertIs(sink(Tensor.empty(64, 66, dtype="int32"), Tensor.empty(40, 66, dtype="int32"),
                        fxn=functools.partial(_rows_into_kernel, row0=8, rows=30)).op, Ops.SINK)
     q, cache, index = Tensor.empty(5*16*4, 576, dtype="half"), Tensor.empty(256, 576, dtype="half"), Tensor.empty(4, 66, dtype="int32")

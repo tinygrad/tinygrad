@@ -1465,7 +1465,7 @@ class MLATransformerBlock(FFNBlock):
       if isinstance(Tq, int) and Tq > getenv("SEQ_GATHER_ROWS", 16) and getenv("SEQ_GATHER", 1):
         # a chunk of a prompt: the cache before it read from the devices that have it (peer to peer), the chunk's own rows (every device
         # computes them), the attention of the device's heads on the whole of it
-        whole = seq_gather(cache, k_store[0, 0], start_pos, T, round_up(self.config.max_context, 64), base=b)
+        whole = seq_gather(cache, k_store[0, 0], start_pos, T, round_up(self.config.max_context, 64), base=b, lists=lists)
         # (SEQ_ATTN_TOK: a device's rows with every head, see mla_sparse_seq_tokens)
         if getenv("SEQ_ATTN_TOK", 0) and isinstance(x.device, tuple) and Tq % len(x.device) == 0 and q.uop.axis == 1:
           attn = mla_sparse_seq_tokens(q, whole, lists, scale, start_pos+T, self.config.kv_lora_rank)
