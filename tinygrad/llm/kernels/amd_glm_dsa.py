@@ -1518,7 +1518,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
       if getenv("GEMM_PAD", 1) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and not split and isinstance(rt[1], UOp):
         fxn = functools.partial(fxn, rows=_unbind(rt[1]))
-    elif (rk:=_rows_f16_config(tokens, local_out, in_features, layer.ggml_type, x.device)) is not None:
+    elif local_rows == tokens and (rk:=_rows_f16_config(tokens, local_out, in_features, layer.ggml_type, x.device)) is not None:
       fxn = functools.partial(_rows_coop_f16_wmma_kernel if "coop" in rk else _rows_f16_wmma_kernel, ggml_type=layer.ggml_type, **rk)
     else:
       fxn = functools.partial(_q5_linear_f16_wmma_kernel if layer.ggml_type in (Q4_K, Q5_K) else _quant_linear_f16_wmma_kernel,
