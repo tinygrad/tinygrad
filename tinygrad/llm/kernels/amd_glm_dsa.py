@@ -1409,7 +1409,9 @@ def _half_rows(x:Tensor, tokens:int, splits:int=1) -> tuple[Tensor, Tensor|None]
 
 def _rows_f16_config(tokens:int, out_features:int, in_features:int, ggml_type:int, device) -> dict|None:
   # ROWS_F16: the few rows of batched decoding (<= ROWS_F16_MAX) on _rows_f16_wmma_kernel (the same float ops as the f16 WMMA kernel)
-  if not getenv("ROWS_F16", 0) or tokens > getenv("ROWS_F16_MAX", 64) or ggml_type not in (Q8_0, Q6_K) or not _wmma_rdna4(device): return None
+  # (Q6_K (the output head, a call a step): ROWS_F16_Q6=1, bit-equal on the bench, no faster)
+  if not getenv("ROWS_F16", 0) or tokens > getenv("ROWS_F16_MAX", 64) or not _wmma_rdna4(device) or \
+     ggml_type not in ((Q8_0, Q6_K) if getenv("ROWS_F16_Q6", 0) else (Q8_0,)): return None
   NG = in_features // Q8_GROUP_SIZE
   # (one-GPU bench, extra/glm53_rows_bench.py: 4 groups an iteration best at 16 rows, 8 at 32)
   unroll = next((u for u in (getenv("ROWS_UNROLL", 4 if tokens <= 16 else 8), 4, 2, 1) if NG % u == 0), 1)
