@@ -4929,7 +4929,8 @@ SEQ_SCORE_TILE = 256
 # wave's 16 bytes of 32 keys a round lose their lines in L2 before the next round), SEQ_SCORE_WG workgroups a sequence, SEQ_SCORE_LDSQ=1: the
 # queries staged in LDS (else read at addresses uniform in the workgroup: scalar loads). the same sums in the same order whatever these are
 # (tr9 B=28 at 262k, 10,923 pools a device: 308 -> 146 us a call, the scores bit-identical)
-SEQ_SCORE_U, SEQ_SCORE_WG, SEQ_SCORE_LDSQ = getenv("SEQ_SCORE_U", 4), getenv("SEQ_SCORE_WG", 64), getenv("SEQ_SCORE_LDSQ", 0)
+SEQ_SCORE_U, SEQ_SCORE_WG, SEQ_SCORE_LDSQ, SEQ_SCORE_NP = getenv("SEQ_SCORE_U", 4), getenv("SEQ_SCORE_WG", 64), getenv("SEQ_SCORE_LDSQ", 0), \
+  getenv("SEQ_SCORE_NP", 1)
 
 @functools.cache
 def _seq_scores_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *dev:UOp, R:int, kpool:int, WG:int, n:int=1) -> UOp:
@@ -4946,7 +4947,8 @@ def _seq_scores_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *dev:UO
   pools = (start + R + kpool - 1) // kpool
   if n > 1: pools = ((pools - dev[0][0].load().cast(dtypes.weakint) + n - 1) // n).maximum(0)
   pools = pools.minimum(P)
-  tiles = (pools + TILE - 1) // TILE
+  NP = SEQ_SCORE_NP  # (pools a thread: every query value loaded once for them)
+  tiles = (pools + TILE*NP - 1) // (TILE*NP)
   nq = R*H*D
   qf = q.reshape(rows*H*D)
   if SEQ_SCORE_LDSQ:
@@ -4958,20 +4960,22 @@ def _seq_scores_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *dev:UO
   else:
     def qv(i:UOp) -> UOp: return qf[g*nq + i].load()
   active = UOp.range(((tiles - w + WG - 1) // WG).maximum(0), 3, AxisType.LOOP)
-  p = (w + active * WG) * TILE + t
-  prow = (bases[g].load().cast(dtypes.weakint) // (kpool * n) + p).minimum(PT-1)
-  # the dots of every (row, head) in registers, 8*U dims of the key a round
-  acc = _reg((R*H,), 0, active)
+  ps = [(w + active * WG) * TILE * NP + k * TILE + t for k in range(NP)]
+  prows = [(bases[g].load().cast(dtypes.weakint) // (kpool * n) + p).minimum(PT-1) for p in ps]
+  # the dots of every (pool, row, head) in registers, 8*U dims of the key a round
+  acc = _reg((NP*R*H,), 0, active)
   U = SEQ_SCORE_U if D % (8*SEQ_SCORE_U) == 0 else 1
   dch = UOp.range(D // (8*U), 4, AxisType.LOOP)
-  kv = tuple(v for u in range(U) for v in _vec_load(pk[prow, (dch*U + u)*8], 8))
+  kvs = [tuple(v for u in range(U) for v in _vec_load(pk[prow, (dch*U + u)*8], 8)) for prow in prows]
   prev = acc.after(dch)
-  new = [functools.reduce(lambda a, j: a + qv(i*D + dch*8*U + j) * kv[j], range(8*U), prev[i].load()) for i in range(R*H)]
+  new = [functools.reduce(lambda a, j: a + qv(i*D + dch*8*U + j) * kv[j], range(8*U), prev[k*R*H + i].load()) for k, kv in enumerate(kvs)
+         for i in range(R*H)]
   acc = acc.after(acc.store(UOp.stack(*new)).end(dch))
   stores = []
-  for r in range(R):
-    s = functools.reduce(lambda a, h: a + acc[r*H + h].load().maximum(0), range(1, H), acc[r*H].load().maximum(0))
-    stores.append(out[g*R + r, p.valid(p < pools)].store(s * D**-0.5))
+  for k, p in enumerate(ps):
+    for r in range(R):
+      s = functools.reduce(lambda a, h: a + acc[k*R*H + r*H + h].load().maximum(0), range(1, H), acc[k*R*H + r*H].load().maximum(0))
+      stores.append(out[g*R + r, p.valid(p < pools)].store(s * D**-0.5))
   est = Estimates(2*rows*H*D*P, P*D*2*G, rows*P*4)  # (a data dependent count of tiles: an upper bound)
   return UOp.group(*stores).end(active).end(g, w, t).sink(arg=KernelInfo(name="seq_scores", opts_to_apply=(), estimates=est))
 
