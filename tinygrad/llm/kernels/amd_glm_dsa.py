@@ -4386,11 +4386,12 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int, base:int
   need = []
   if lists is not None and raw and getenv("SEQ_GATHER_UNION", 0):
     need = [Tensor.custom_kernel(Tensor.zeros(N, dtype=dtypes.int32, device=devs).contiguous(), lists, fxn=_seq_need_kernel)[0]]
-  # (SEQ_GATHER_FUSED, default off: every peer's part in one kernel, the peers read at once)
-  if raw and not fp8 and getenv("SEQ_GATHER_FUSED", 0):
+  # (SEQ_GATHER_FUSED, default on: every peer's part in one kernel, the peers read at once (one kernel a peer reads one link at a time). C9
+  # 64k prefill 41.87 -> 40.53 s, greedy 32 identical)
+  if raw and not fp8 and getenv("SEQ_GATHER_FUSED", 1):
     out = Tensor.custom_kernel(out, _device_index(devs), *seq_views(cache), *need,
                                fxn=functools.partial(_seq_gather_fused_kernel, start_pos=sp, n=n, base=bu))[0]
-  for kk, part in enumerate(seq_views(cache) if not (raw and not fp8 and getenv("SEQ_GATHER_FUSED", 0)) else []):
+  for kk, part in enumerate(seq_views(cache) if not (raw and not fp8 and getenv("SEQ_GATHER_FUSED", 1)) else []):
     out = Tensor.custom_kernel(out, part, _device_index(devs), *need, fxn=functools.partial(_seq_gather_kernel if raw else _seq_gather_fp8_kernel,
                                                                                      start_pos=sp, k=kk, n=n, base=bu))[0]
   rows = fp8_rows(k).contiguous() if fp8 and raw else k.cast(dtypes.half).contiguous() if half else \
