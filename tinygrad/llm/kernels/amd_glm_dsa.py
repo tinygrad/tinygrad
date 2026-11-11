@@ -1798,6 +1798,12 @@ def p2p_ar_shape(n:int) -> tuple[int, int]|None:
     if n % (T*EP) == 0 and n // (T*EP) <= P2P_AR_MAXG: return T, EP
   return None
 
+def p2p_flag_shape(n:int) -> tuple[int, int]|None:
+  """p2p_ar_shape's for flagged words (a workgroup's words fewer than P2P_AR_MAXW: its flag is the slot's last word): past its big shape (512x8 =
+  P2P_AR_MAXW) in workgroups of 256x4 etc. (16 users' mla_sparse_seq reduce scatter, 64 rows: 40960 words, 40 workgroups of 1024)"""
+  if (s:=p2p_ar_shape(n)) is not None and prod(s) < P2P_AR_MAXW: return s
+  return next(((T, EP) for T, EP in ((256, 4), (128, 4), (64, 4)) if n % (T*EP) == 0 and n // (T*EP) <= P2P_AR_MAXG and T*EP < P2P_AR_MAXW), None)
+
 def p2p_a2a_shape(n:int) -> tuple[int, int]|None:
   """
   (threads, words a thread) of a one shot all to all of n words a part: a word a thread in up to P2P_AR_MAXG workgroups (every thread's words go
@@ -1973,7 +1979,7 @@ def p2p_reduce_scatter(p:Tensor, pack:tuple[int, int]|None=None) -> Tensor|None:
   N, n, W = len(devs), int(p.shape[-1]), (4 if flag else 2) if pack is None else pack[0]
   # (packed: the parts padded to whole words of workgroups of 256)
   m = n if pack is None else next((m for a in (256, 1024) if p2p_ar_shape((m:=round_up(n, W*a)) // W) is not None), n)
-  if m % W or (p2p:=p2p_allreduce(devs)) is None or (shape:=p2p_ar_shape(m // W)) is None or (flag and prod(shape) >= P2P_AR_MAXW): return None
+  if m % W or (p2p:=p2p_allreduce(devs)) is None or (shape:=p2p_flag_shape(m // W) if flag else p2p_ar_shape(m // W)) is None: return None
   out = Tensor.empty(N*m, dtype=dtypes.float32, device=devs, axis=0)
   fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=m//W, T=shape[0], EP=shape[1], half=pack is None, scatter=True, pack=pack, flag=flag)
   x = p.float() if m == n else p.float().pad((None, None, (0, m-n)))

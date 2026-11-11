@@ -132,6 +132,11 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertEqual(p2p_ar_shape(32*5*512 // 4), (256, 4))
     self.assertEqual(p2p_ar_shape(32*5*576 // 4), (128, 4))
     self.assertLess(256*4, P2P_AR_MAXW)
+    # (16 users, 64 rows: the flagged reduce scatter past p2p_ar_shape's 512x8, which has no room for the flag)
+    from tinygrad.llm.kernels.amd_glm_dsa import p2p_flag_shape
+    self.assertEqual(p2p_ar_shape(64*5*512 // 4), (512, 8))
+    self.assertEqual(p2p_flag_shape(64*5*512 // 4), (256, 4))
+    self.assertEqual(p2p_flag_shape(32*5*512 // 4), (256, 4))
 
   def test_p2p_flag_class(self):
     # (P2P_FLAG's payload-only words: a class of their own, not shared with an epoch-in-word format)
