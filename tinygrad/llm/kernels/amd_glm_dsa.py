@@ -417,11 +417,11 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
     # tables (a list of the group_dot's lookup tables, the IQ grids): copied to LDS by the workgroup first, the dots read them there (the
     # same values)
     tid, nthreads = (wave*chunks + chunk)*WARP_SIZE + lane, rows*chunks*WARP_SIZE
-    for ti, t in enumerate(tables):
-      n = int(t.numel())
-      lds = UOp.alloc((n,), t.dtype, addrspace=AddrSpace.LOCAL)
+    for ti, tab in enumerate(tables):
+      n = int(tab.numel())
+      lds = UOp.alloc((n,), tab.dtype, addrspace=AddrSpace.LOCAL)
       idx = [tid + k*nthreads for k in range((n+nthreads-1)//nthreads)]
-      tables[ti] = lds.after(UOp.group(*[lds[i.valid(i < n) if n % nthreads else i].store(t[i.minimum(n-1)].load()) for i in idx]).barrier())
+      tables[ti] = lds.after(UOp.group(*[lds[i.valid(i < n) if n % nthreads else i].store(tab[i.minimum(n-1)].load()) for i in idx]).barrier())
   def dot(token:UOp, group:UOp, output:UOp=outputs[0]) -> UOp:
     return (group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32))
   if active is None:
