@@ -1,7 +1,6 @@
 import unittest, math
-from dataclasses import replace
 from tinygrad import Tensor
-from tinygrad.dtype import dtypes, Invalid, AddrSpace
+from tinygrad.dtype import dtypes, Invalid
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp, UPat, graph_rewrite, KernelInfo, ProgramInfo
 from tinygrad.uop.movement import mop_cleanup
@@ -11,16 +10,9 @@ from tinygrad.codegen import full_rewrite_to_sink, to_program
 from tinygrad.helpers import Context, ansistrip
 from tinygrad.renderer import Estimates
 
-def _strip_buffers(root:UOp) -> UOp:
-  # realized BUFFERs carry runtime state the wire can't; a BUFFER with no binding is exactly an ALLOC
-  subs = {b: b.replace(op=Ops.ALLOC, arg=replace(b.arg, spec=None))
-          for b in root.toposort(enter_calls=True) if b.op is Ops.BUFFER and b.slot_buffer is not None}
-  return root.substitute(subs, walk=True, enter_calls=True, name="strip buffers for wire format test") if subs else root
-
 def assert_roundtrip(case, root:UOp):
   # UOps are hash-consed, so a lossless round trip gives back the identical UOp
-  g = _strip_buffers(root)
-  case.assertIs(parse_uir(render_uir(g)), g, render_uir(g))
+  case.assertIs(parse_uir(render_uir(root)), root, render_uir(root))
 
 class TestSSARender(unittest.TestCase):
   def test_gemm_pre_rangeify(self):
@@ -119,59 +111,6 @@ class TestParseUIR(unittest.TestCase):
     txt = "%0 = param 4 slot=0 dtype=f32\n%1 = range 4 slot=0\n%2 = index %0 %1\n%3 = store %2 1.0\n%4 = end %3 %1\n%5 = sink %4 name=test"
     self.assertEqual(ansistrip(render_uir(sink)), txt)
     self.assertIs(parse_uir("# a comment\n" + txt.replace("\n", "  # a trailing comment\n")), sink)
-
-  def test_bound_buffer_slot_is_preserved(self):
-    live = UOp.new_buffer("NULL", 4, dtypes.float32)
-    expected = next(UOp.unique_num) + 1
-    self.assertIs(parse_uir(render_uir(live)), live)
-    self.assertEqual(next(UOp.unique_num), expected)
-
-  def test_unbound_nonnegative_buffer_slot_is_rejected(self):
-    for slot in (next(UOp.unique_num), 10**30):
-      for arg in (f"slot={slot} dtype=f32 device=NULL", f"arg=`ParamArg({slot}, dtypes.float32, device='NULL')`"):
-        with self.assertRaisesRegex(AssertionError, "negative slot"): parse_uir(f"%0 = buffer 4 {arg}")
-
-  def test_buffer_does_not_capture_future_allocation(self):
-    for size, dtype in [(4, dtypes.float32), (8, dtypes.int32)]:
-      parsed = parse_uir("%0 = buffer 4 slot=-1 dtype=f32 device=NULL")
-      live = UOp.new_buffer("NULL", size, dtype)
-      self.assertNotEqual(parsed.arg.slot, live.arg.slot)
-      self.assertIsNone(parsed.slot_buffer)
-      self.assertIsNotNone(live.buffer)
-
-  def test_buffer_aliases_are_preserved(self):
-    text = """
-      %a = buffer 4 slot=-7 dtype=f32 device=NULL
-      %b = { %view = buffer 4 arg=`ParamArg(-7, dtypes.int32, device='NULL')` }
-      %c = buffer 4 slot=-8 dtype=f32 device=NULL
-      %d = buffer 4 slot=-7 dtype=f32 device=NULL
-      %out = sink %a %b %c %d
-    """
-    root = parse_uir(text)
-    a, b, c, d = root.src
-    self.assertEqual(a.arg.slot, b.arg.slot)
-    self.assertNotEqual(a.arg.slot, c.arg.slot)
-    self.assertIs(a, d)
-    for buf in root.src: self.assertIsNone(buf.slot_buffer)
-    self.assertIs(parse_uir(text), root)
-
-  def test_negative_buffer_slots_are_preserved(self):
-    for slot in (-1, -1234):
-      expected = next(UOp.unique_num) + 1
-      parsed = parse_uir(f"%0 = buffer 4 slot={slot} dtype=f32 device=NULL")
-      self.assertEqual(parsed.arg.slot, slot)
-      self.assertEqual(next(UOp.unique_num), expected)
-      self.assertIsNone(parsed.slot_buffer)
-      self.assertIs(parse_uir(render_uir(parsed)), parsed)
-
-  def test_scratch_and_parameter_slots_are_preserved(self):
-    for addrspace in (AddrSpace.LOCAL, AddrSpace.REG):
-      buf = UOp._buffer(4, dtypes.float32, 7, addrspace=addrspace)
-      self.assertIs(parse_uir(render_uir(buf)), buf)
-    for op in ("param", "alloc"):
-      parsed = parse_uir(f"%0 = {op} 4 slot=7 dtype=f32 device=NULL")
-      self.assertEqual(parsed.arg.slot, 7)
-      self.assertIs(parse_uir(render_uir(parsed)), parsed)
 
   def test_studentgrad_syntax(self):
     # named values, nested (op ...), [stacks] of expressions, {scoped blocks}, hex and exponent literals

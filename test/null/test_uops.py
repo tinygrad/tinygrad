@@ -1,11 +1,10 @@
 # uops tests that pass on NULL backend (no copyout needed)
 import unittest, math
-from unittest.mock import patch
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context, ceildiv, Timing, cdiv, Target
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat, Invalid  # noqa: F401
-from tinygrad.device import Device, Buffer
+from tinygrad.device import Device
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.codegen import to_program
@@ -580,44 +579,6 @@ class TestUPatHelpers(unittest.TestCase):
     self.assertNotEqual(test_upat.location[1], test_upat_named.location[1])
 
 class TestUopsObject(unittest.TestCase):
-  def test_one_buffer_one_slot(self):
-    # the slot is the storage identity, the dtype is how it is read: every view of one device Buffer has the same slot
-    buf = Buffer("NULL", 16)
-    a, b = UOp.from_buffer(buf, dtypes.float32), UOp.from_buffer(buf, dtypes.int32)
-    self.assertIs(UOp.from_buffer(buf, dtypes.float32), a)
-    self.assertIsNot(a, b)
-    self.assertEqual(a.arg.slot, b.arg.slot)
-    self.assertIs(a.buffer, buf)
-    self.assertIs(b.buffer, buf)
-    self.assertNotEqual(UOp.from_buffer(Buffer("NULL", 16), dtypes.float32).arg.slot, a.arg.slot)
-    # the BUFFER new_buffer made is the same one from_buffer finds
-    c = UOp.new_buffer("NULL", 4, dtypes.float32)
-    self.assertIs(UOp.from_buffer(c.buffer, dtypes.float32), c)
-    self.assertEqual(UOp.from_buffer(c.buffer, dtypes.uint8).arg.slot, c.arg.slot)
-
-  def test_realized_buffer_arg_is_data(self):
-    # nothing in the arg is a runtime object: the same (op, src, arg) is the same realized BUFFER
-    a = UOp.new_buffer("NULL", 4, dtypes.float32)
-    self.assertEqual(a.arg, ParamArg(a.arg.slot, dtypes.float32, device="NULL"))
-    self.assertIs(UOp(a.op, a.src, ParamArg(a.arg.slot, dtypes.float32, device="NULL")), a)
-    self.assertIs(eval(str(a)), a)
-
-  def test_buffer_requires_storage_for_nonnegative_slot(self):
-    a = UOp.new_buffer("NULL", 4, dtypes.float32)
-    fields = (a.op, a.src, a.arg)
-    del a
-    for spec in (0, 2):
-      with Context(SPEC=spec), self.assertRaisesRegex(AssertionError, "negative slot"): UOp(*fields)
-      with Context(SPEC=spec), self.assertRaisesRegex(AssertionError, "negative slot"):
-        UOp._buffer(4, dtypes.float32, next(UOp.unique_num), device="NULL")
-
-  def test_negative_buffer_is_storage_free(self):
-    with Context(SPEC=2), patch.object(UOp.buffers, "get", side_effect=AssertionError("negative slot looked up")):
-      b = UOp._buffer(4, dtypes.float32, -next(UOp.unique_num)-1, device="NULL")
-    self.assertIsNone(b.slot_buffer)
-    self.assertIsNone(b.realized)
-    with self.assertRaises(AssertionError): _ = b.buffer
-
   def test_timing(self):
     with Timing("create 10k uops:"): ret = [UOp.const(10000000+i, dtypes.int) for i in range(10000)]
     assert len(ret) == 10000

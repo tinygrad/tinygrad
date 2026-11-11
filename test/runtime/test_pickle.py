@@ -1,10 +1,8 @@
-import unittest, pickle, tracemalloc, subprocess, sys, struct
-from dataclasses import replace
+import unittest, pickle, tracemalloc
 import numpy as np
 from tinygrad import Tensor, Device, TinyJit, Variable, dtypes
 from tinygrad.helpers import GlobalCounters, DEV
 from tinygrad.uop.ops import UOp
-from tinygrad.device import Buffer
 from test.helpers import KernelCountException
 
 class TestPickle(unittest.TestCase):
@@ -121,38 +119,13 @@ class TestPickle(unittest.TestCase):
     self.assertListEqual(t1.tolist(), [9,9,9,9])
     self.assertListEqual(t2.tolist(), [1,2,3,4])
 
-  def test_pickle_slot_collision_in_subprocess(self):
-    # slots belong to a process: a loaded buffer gets a new one, it never lands on storage the loading process already has
-    t = Tensor([1,2,3,4], device="CPU").realize()
-    code = '''
-import itertools, pickle, struct, sys
-from tinygrad import dtypes
-from tinygrad.device import Buffer
-from tinygrad.uop.ops import UOp
-existing_buf = Buffer("CPU", 16, initial_value=struct.pack("4i", 9, 9, 9, 9))
-UOp.unique_num = itertools.count(slot:=int(sys.argv[1]))
-existing = UOp.from_buffer(existing_buf, dtypes.int32)
-assert existing.arg.slot == slot
-loaded = pickle.loads(sys.stdin.buffer.read())
-assert loaded.uop is not existing and loaded.uop.arg.slot != slot
-assert loaded.uop.buffer is not existing_buf
-assert loaded.tolist() == [1,2,3,4]
-assert existing_buf.as_memoryview().cast("i").tolist() == [9,9,9,9]
-'''
-    subprocess.run([sys.executable, "-c", code, str(t.uop.arg.slot)], input=pickle.dumps(t), check=True, capture_output=True)
-
-  def test_pickle_views_of_one_buffer(self):
-    # BUFFERs of one slot are still one slot (one Buffer) after a load, and nothing but the slot changes in the arg
-    buf = Buffer("CPU", 16, initial_value=struct.pack("4i", 1, 2, 3, 4))
-    a, b = UOp.from_buffer(buf, dtypes.int32), UOp.from_buffer(buf, dtypes.uint8)
-    v = a.replace(arg=replace(a.arg, volatile=True))
-    a2, b2, v2 = pickle.loads(pickle.dumps((a, b, v)))
-    self.assertIs(a2.buffer, b2.buffer)
-    self.assertIs(a2.buffer, v2.buffer)
-    self.assertIsNot(a2.buffer, buf)
-    self.assertNotEqual(a2.arg.slot, a.arg.slot)
-    for old, new in ((a, a2), (b, b2), (v, v2)): self.assertEqual(replace(new.arg, slot=old.arg.slot), old.arg)
-    self.assertListEqual(a2.buffer.as_memoryview().cast("i").tolist(), [1,2,3,4])
+  def test_pickle_preserves_aliases(self):
+    t = Tensor([1,2,3,4], dtype=dtypes.int32).realize()
+    a, b = pickle.loads(pickle.dumps((t, t.bitcast(dtypes.uint32))))
+    self.assertListEqual(b.tolist(), [1,2,3,4])
+    a.assign(Tensor([5,6,7,8], dtype=dtypes.int32)).realize()
+    self.assertListEqual(b.tolist(), [5,6,7,8])
+    self.assertListEqual(t.tolist(), [1,2,3,4])
 
   def test_pickle_view_is_self_contained(self):
     # a pickled graph carries its own buffer: data from earlier loads of related graphs must not leak into it

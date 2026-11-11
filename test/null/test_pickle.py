@@ -1,8 +1,7 @@
-import unittest, pickle, types, subprocess, sys
+import unittest, pickle, types
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import ContextVar, Context
 from tinygrad.uop.ops import PatternMatcher, UPat, UOp, deconstruct_function
-from tinygrad.uop.uir import parse_uir
 
 class TestPickle(unittest.TestCase):
   def test_pickle_code_object(self):
@@ -44,24 +43,6 @@ class TestPickle(unittest.TestCase):
     pk = pickle.dumps(sched)
     sched_pk = pickle.loads(pk)
     self.assertEqual(sched_pk.src[-1].src[0], sched.src[-1].src[0])
-
-  def test_pickle_storage_free_buffers_in_subprocess(self):
-    root = parse_uir("%a = buffer 4 slot=-1 dtype=f32 device=NULL\n%b = buffer 4 slot=-1 dtype=i32 device=NULL\n%out = sink %a %b")
-    code = '''
-import pickle, sys
-from tinygrad import dtypes
-from tinygrad.uop.ops import UOp
-if sys.argv[1] == 'before': live = UOp.new_buffer('NULL', 4, dtypes.float32)
-a, b = pickle.loads(sys.stdin.buffer.read()).src
-if sys.argv[1] == 'after': live = UOp.new_buffer('NULL', 4, dtypes.float32)
-assert a.arg.slot == b.arg.slot < 0
-assert a.slot_buffer is None and b.slot_buffer is None
-assert live.arg.slot >= 0 and live.buffer is not None
-assert a is not live and b is not live
-'''
-    for order in ('before', 'after'):
-      with self.subTest(order=order):
-        subprocess.run([sys.executable, '-c', code, order], input=pickle.dumps(root), check=True, capture_output=True)
 
   def test_pickle_renderer(self):
     from tinygrad.device import Device

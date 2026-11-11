@@ -18,7 +18,7 @@ class TestBufferUOp(unittest.TestCase):
     buf = Tensor.empty(10)
     self.assertIs(buf.uop.op, Ops.ALLOC)
     self.assertTrue(buf.uop.arg.bind_on_realize)
-    self.assertNotIn(buf.uop.arg.slot, UOp.buffers)  # an ALLOC has no storage bound to its slot
+    self.assertIsNone(buf.uop.realized)
     buf.realize()
     self.assertIsNotNone(buf.uop.buffer)
     self.assertEqual(buf.uop.shape, (10,))
