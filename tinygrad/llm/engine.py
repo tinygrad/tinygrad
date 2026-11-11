@@ -59,6 +59,7 @@ class Seq:
   par:int = 1
   y:list[int] = field(default_factory=list)
   temp:tuple[float, float] = (0.0, 1.0)
+  mix:list[int] = field(default_factory=list)  # (SEQ_MIX_TOKENS) a prompt being forced through ordinary decode steps
 
 def starts(ids:list[int], toks:list[int], n:int, exact:bool=True) -> bool:
   """
@@ -452,19 +453,45 @@ class SeqEngine:
     s.mtp, s.j, s.par, s.y, s.temp = len(ids), 0, 1, [first] + [0]*self.k, temp
     return first
 
+  def mix_start(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, float]):
+    """a short prompt suffix starts forced decode steps, from its checkpoint or last token's states (no standalone prefill)"""
+    assert 0 <= start < len(ids) and len(ids) - start <= self.model.SEQ_MIX_TOKENS
+    if restore: self.model.seq_ckpt(False, s.slot, s.ckpt)
+    self.model._seq_copy_call(False, s.slot, start, 0 if restore else s.hrow, keep=start > 0)
+    # (loading a slot doesn't update SEQ_REPLAY's base; this first step has no seq_prefill copy-out to do it)
+    self.model._seq_kbase[s.slot] = start
+    # (the first suffix token is the first step's current input, as the first sampled token is after an ordinary prefill)
+    self.model._token_host[s.base + start] = ids[start]
+    s.tokens, s.n, s.hrow, s.used = ids[:start+1], start, 0, time.perf_counter()
+    s.mtp, s.j, s.par, s.y, s.temp, s.mix = start, 0, 1, [ids[start]] + [0]*self.k, temp, list(ids)
+
   def step(self, seqs:list[Seq]) -> list[list[int]]:
     """a step of decoding of the sequences: the tokens every one accepted (its caches have the ones before them)"""
-    k, out = self.k, self.model.seq_step([(s.slot, s.base, s.mtp, s.j, s.par, s.y, s.temp) for s in seqs])
+    k = self.k
+    forced = [s.mix[s.mtp+s.j+1:s.mtp+s.j+k+2] if s.mix else [] for s in seqs]
+    args = [(s.slot, s.base, s.mtp, s.j, s.par, s.y, s.temp) for s in seqs]
+    out = self.model.seq_step(args, forced=forced) if any(s.mix for s in seqs) else self.model.seq_step(args)
     ret = []
-    for s, (sampled, drafts) in zip(seqs, out):
-      j = next((i for i in range(k) if drafts[i] != sampled[i]), k)
+    for s, force, (sampled, drafts) in zip(seqs, forced, out):
       start = s.mtp + s.j
+      if s.mix:
+        # (force the suffix and enough drafts to advance over it; after it, take the first sampled token and discard later rows)
+        take = min(k+1, len(force)+1)
+        j = take - 1
+      else:
+        j = next((i for i in range(k) if drafts[i] != sampled[i]), k)
+        take = j + 1
       # (the token buffer: the accepted ones, the n-gram rows of the next step read them)
-      self.model._token_host[s.base + start + 1:s.base + start + 2 + j] = __import__("array").array('i', sampled[:j+1])
+      self.model._token_host[s.base + start + 1:s.base + start + 1 + take] = __import__("array").array('i', sampled[:take])
       s.mtp, s.j, s.par, s.y = start + 1, j, 1 - s.par, sampled
-      s.tokens += sampled[:j+1]
-      s.n, s.hrow = start + j + 1, (1 - s.par)*(k+1) + j
-      ret.append(sampled[:j+1])
+      s.tokens += sampled[:take]
+      s.n, s.hrow = start + take, (1 - s.par)*(k+1) + j
+      if s.mix and start + take == len(s.mix):
+        # (the whole prompt is cached: future turns can restore its checkpoint; only the token after the prompt goes to the client)
+        self.model.seq_ckpt(True, s.slot, len(s.mix))
+        s.ckpt, s.mix = len(s.mix), []
+        ret.append([sampled[take-1]] if len(force) < k+1 else [])
+      else: ret.append([] if s.mix else sampled[:take])
     return ret
 
   def forget(self):

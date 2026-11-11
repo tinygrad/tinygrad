@@ -6,10 +6,11 @@ from tinygrad.llm.serve import LLMServer, Request, BatchStats
 
 class FakeModel:
   """the model side of sequences sharing the caches (the seq_* calls of SeqEngine), recorded: a prefill takes `per_token` s a token"""
-  SEQ_SIZES, SEQ_MOVE = (1, 4), 2048
+  SEQ_SIZES, SEQ_MOVE, SEQ_MIX_TOKENS = (1, 4), 2048, 32
   def __init__(self, per_token:float=0.0):
     self.config, self.max_context, self.per_token = SimpleNamespace(spec_drafts=2), 1 << 16, per_token
     self._token_host = array.array('i', [0] * (self.seq_rows() + 4096))
+    self._seq_kbase:dict[int, int] = {}
     self.calls:list[tuple] = []
   def seq_rows(self) -> int: return 1 << 16
   def seq_slots(self) -> int: return 4
@@ -23,9 +24,18 @@ class FakeModel:
     return 8
   def seq_ckpt(self, save, slot, pos): self.calls.append(("ckpt", save, slot, pos))
   def seq_move(self, src, dst, n): self.calls.append(("move", src, dst, n))
-  def seq_step(self, seqs):
+  def _seq_copy_call(self, save, slot, pos, hrow, keep=True): self.calls.append(("copy", save, slot, pos, hrow, keep))
+  def seq_step(self, seqs, forced=None):
     k = self.config.spec_drafts
-    return [([5] * (k+1), [5] * k) for _ in seqs]
+    self.calls.append(("step", forced))
+    out = []
+    for i, seq in enumerate(seqs):
+      sampled, drafts = [5] * (k+1), [5] * k
+      if forced is not None:
+        f = forced[i]
+        sampled[:len(f)], drafts[:min(k, len(f))] = f, f[:k]
+      out.append((sampled, drafts))
+    return out
 
 class TestSeqEngine(unittest.TestCase):
   def setUp(self): self.model = FakeModel()
@@ -78,6 +88,83 @@ class TestSeqEngine(unittest.TestCase):
     self.assertEqual([c for c in self.model.calls if c[0] == "prefill"], [("prefill", s.slot, 0, 2000), ("prefill", s.slot, 2000, 4000),
                                                                           ("prefill", s.slot, 4000, 5000)])
     self.assertEqual((s.n, s.ckpt), (5000, 5000))
+
+  def test_mixed_short_suffix(self):
+    # eight suffix tokens: two full 3-row forced steps, then one suffix token and only the first sampled token emitted
+    eng, ids = self.engine(), list(range(100, 3100))
+    s, start, restore = eng.take(ids)
+    eng.prefill(s, ids, start, restore, (0.0, 1.0))
+    eng.step([s])
+    eng.stop(s, len(s.tokens))
+    nxt = ids + [9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008]
+    s2, start, restore = eng.take(nxt)
+    self.assertIs(s2, s)
+    self.assertEqual((start, restore), (len(ids), True))
+    self.model.calls.clear()
+    self.model._seq_kbase[s.slot] = start - 1  # stale SEQ_REPLAY metadata must not make the first mixed step replay
+    eng.mix_start(s, nxt, start, restore, (0.0, 1.0))
+    self.assertEqual(self.model._seq_kbase[s.slot], start)
+    self.assertEqual(s.y[0], 9001)
+    outs = []
+    while s.mix: outs += eng.step([s])
+    self.assertEqual(outs, [[], [], [5]])
+    self.assertEqual([c[1][0] for c in self.model.calls if c[0] == "step"], [[9002, 9003, 9004], [9005, 9006, 9007], [9008]])
+    self.assertEqual((s.tokens, s.n, s.ckpt), (nxt + [5], len(nxt), len(nxt)))
+    self.assertFalse(any(c[0] == "prefill" for c in self.model.calls))
+    self.assertIn(("copy", False, s.slot, len(ids), 0, True), self.model.calls)
+    self.assertIn(("ckpt", True, s.slot, len(nxt)), self.model.calls)
+
+  def test_mixed_exact_multiple_and_single(self):
+    # a suffix exactly filling the draft slots caches the prompt without inventing an early output; one token mixes immediately
+    for suffix in ([1, 2, 3, 4, 5, 6, 7], [1]):
+      eng, ids = self.engine(), list(range(100, 3100))
+      s, start, restore = eng.take(ids)
+      eng.prefill(s, ids, start, restore, (0.0, 1.0))
+      eng.stop(s, len(s.tokens))
+      nxt = ids + suffix
+      s, start, restore = eng.take(nxt)
+      eng.mix_start(s, nxt, start, restore, (0.0, 1.0))
+      outs = []
+      while s.mix: outs += eng.step([s])
+      if len(suffix) == 7: self.assertEqual(outs, [[], [], [5]])
+      else: self.assertEqual(outs, [[5]])
+      self.assertEqual((s.tokens, s.n, s.ckpt), (nxt + [5], len(nxt), len(nxt)))
+
+  def test_mixed_every_supported_suffix(self):
+    for n in range(1, self.model.SEQ_MIX_TOKENS + 1):
+      with self.subTest(n=n):
+        eng, ids = self.engine(), list(range(100, 3100))
+        s, start, restore = eng.take(ids)
+        eng.prefill(s, ids, start, restore, (0.0, 1.0))
+        eng.stop(s, len(s.tokens))
+        suffix = list(range(9000, 9000+n))
+        nxt = ids + suffix
+        s, start, restore = eng.take(nxt)
+        eng.mix_start(s, nxt, start, restore, (0.0, 1.0))
+        self.model.calls.clear()
+        outs, forced = [], []
+        while s.mix:
+          outs += eng.step([s])
+          forced += next(c[1][0] for c in reversed(self.model.calls) if c[0] == "step")
+        self.assertEqual(outs, [[]] * (len(outs)-1) + [[5]])
+        self.assertEqual(forced, suffix[1:])
+        self.assertEqual((s.tokens, s.n, s.ckpt), (nxt + [5], len(nxt), len(nxt)))
+        self.assertEqual(self.model._token_host[s.base + len(nxt)], 5)
+
+  def test_mixed_does_not_change_ordinary_decode(self):
+    eng = self.engine()
+    a, b = list(range(100, 3100)), list(range(5000, 8000))
+    sa, _, _ = eng.take(a)
+    eng.prefill(sa, a, 0, False, (0.0, 1.0))
+    eng.stop(sa, len(sa.tokens))
+    sb, _, _ = eng.take(b)
+    eng.prefill(sb, b, 0, False, (0.0, 1.0))
+    nxt = a + [1, 2]
+    sa, start, restore = eng.take(nxt)
+    eng.mix_start(sa, nxt, start, restore, (0.0, 1.0))
+    self.assertEqual(eng.step([sa, sb]), [[5], [5, 5, 5]])
+    self.assertEqual(sb.tokens, b + [7, 5, 5, 5])
+    with self.assertRaises(AssertionError): eng.mix_start(sa, nxt + list(range(40)), start, restore, (0.0, 1.0))
 
   def _conv(self, eng:SeqEngine, first:int, n:int=20000):
     ids = list(range(first, first + n))
@@ -248,6 +335,31 @@ class TestScheduleSeqs(unittest.TestCase):
     self.assertEqual(st["last_10m"]["requests"], 3)
     self.assertGreater(st["last_10m"]["ttft"]["max"], 0)
     self.assertEqual(st["generated_total"], 12)
+
+  @patch("tinygrad.llm.serve.stderr_log")
+  def test_short_suffix_mixed_while_other_decodes(self, _):
+    ids = list(range(100, 2100))
+    seed = Request(ids, "", 2, 0.0)
+    self.server.waiting.put(seed)
+    self.wait([seed])
+    other = Request(list(range(5000, 5700)), "", 1_000_000, 0.0)
+    self.server.waiting.put(other)
+    st = time.perf_counter()
+    while not other.generated and time.perf_counter() - st < 10: time.sleep(0.001)
+    self.assertTrue(other.generated)
+    follow = Request(ids + [9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008], "", 4, 0.0)
+    self.server.waiting.put(follow)
+    self.wait([follow])
+    self.assertEqual(follow.generated, [5] * 4)
+    self.assertEqual(follow.cache_start, len(ids))
+    self.assertEqual(follow.prefill_time, 0)
+    self.assertEqual(follow.slices, 0)
+    self.assertFalse(any(c[0] == "prefill" and c[2] == len(ids) for c in self.model.calls))
+    forced = [c[1] for c in self.model.calls if c[0] == "step" and c[1] is not None]
+    self.assertTrue(any(any(f) for f in forced))
+    self.assertEqual(self.server.stats.mixed, 1)
+    other.cancelled = True
+    self.wait([other])
 
 if __name__ == "__main__":
   unittest.main()

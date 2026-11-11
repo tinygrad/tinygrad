@@ -334,6 +334,8 @@ SEQ_SPLIT_MAX = 128  # (the most real rows a device)
 # QTF: batched decoding teacher forced (a quality tool's, extra/qdecq.py): the drafts and the step's tokens forced from the host, the rows'
 # log probs written to the host
 QTF = getenv("QTF", 0)
+# SEQ_MIX_TOKENS: a short prompt suffix forced through the ordinary decode rows, no standalone prefill (0: off)
+SEQ_MIX_TOKENS = getenv("SEQ_MIX_TOKENS", 0)
 # AG_REAL: batched decoding's q8 all-gather packs a device's real rows from the padded mix, not from their copy (tr8 B=8 +0.8%: off)
 AG_REAL = getenv("AG_REAL", 0)
 # HC_REAL: batched decoding's hyper-connections read a device's real rows only and the mix stores them (no copy of them), its input not
@@ -2137,6 +2139,7 @@ class Transformer:
 
   REGION_ALIGN = REGION_ALIGN  # expose the model's region alignment to SeqEngine rather than importing qwen4exp there
   SEQ_SIZES = tuple(int(x) for x in str(getenv("SEQ_SIZES", "1,2,4,8")).split(","))
+  SEQ_MIX_TOKENS = SEQ_MIX_TOKENS
   def clock_caps(self, default:dict[str, str]) -> dict[str, str]:
     """
     the gfx clock caps of the server's modes (fast: few users, many, prefill). RDNA4 (R9700): none, its board's power limit is the cap (at
@@ -2188,9 +2191,10 @@ class Transformer:
     tmv, self._seq_pf_temp = _host_buffer(devs, 8, dtypes.float32)
     self._seq_pf_host_temp = tmv.cast('f')
     self._seq_host_out, self._seq_out = _host_ints(devs[0], m*(2*k+1) + 1)
-    if QTF:
-      # (QTF: every sequence's k forced drafts and k+1 forced tokens a step, the rows' log probs out, see forward_seqs)
+    if QTF or SEQ_MIX_TOKENS:
+      # (QTF / SEQ_MIX_TOKENS: forced drafts and step tokens from the host; QTF also returns every row's log probs)
       self._seq_host_tf, self._seq_tf = _host_ints(devs, m*(2*k+1))
+    if QTF:
       V = self.config.vocab_size
       tmv, self._seq_tfo = _host_buffer(devs[0], 4*m*(k+1)*V, dtypes.float32)
       self._seq_host_tfo = tmv.cast('f')
@@ -2561,7 +2565,11 @@ class Transformer:
       if top + c > self.seq_rows(): add(f"prefill{c}", self._prefill_jit(c), functools.partial(self.seq_prefill, 0, 0, [0]*min(c, top), 0, 0))
       else: add(f"prefill{c}", self._prefill_jit(c), functools.partial(self.seq_prefill, 0, 0, [0]*(top+c), top, 0))
     for m in sorted(self.SEQ_SIZES, reverse=True):
-      add(f"step{m}", self._seq_jit(m), functools.partial(self.seq_step, [(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m))
+      seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, float]]] = [(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m
+      add(f"step{m}", self._seq_jit(m), functools.partial(self.seq_step, seqs))
+      # mixed admission requires another decoding sequence; a one-row forced step is unreachable and its degenerate graph fails rangeify
+      if SEQ_MIX_TOKENS and m > 1:
+        add(f"step{m}_forced", self._seq_jit(m, True), functools.partial(self.seq_step, seqs, forced=[[0]*(k+1)]*m))
     for sv in (True, False):
       add(f"copy{int(sv)}", self._seq_copy_jits[sv], functools.partial(self._seq_copy_call, sv, 0, 1, 0))
       add(f"ckpt{int(sv)}", self._seq_ckpt_jits[sv], functools.partial(self.seq_ckpt, sv, 0, 1))
@@ -2577,7 +2585,10 @@ class Transformer:
       par.append((self._prefill_jit(c), functools.partial(self._seq_chunk, 0, 0, min(c, top)) if top + c > self.seq_rows() else
                                        functools.partial(self._seq_chunk, 0, top, c)))
     par += [(self._prefill_jit(c, self._pk_bucket(c, ctx)), pk_call(c, ctx)) for c, ctx in pk_jits]
-    for m in self.SEQ_SIZES: par.append((jit:=self._seq_jit(m), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m)))
+    for m in self.SEQ_SIZES:
+      par.append((jit:=self._seq_jit(m), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m)))
+      if SEQ_MIX_TOKENS and m > 1:
+        par.append((jit:=self._seq_jit(m, True), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m)))
     # (and the copies of the states: their jits alone, not seq_move's write of the token buffer)
     for sv in (True, False):
       par += [(self._seq_copy_jits[sv], functools.partial(self._seq_copy_call, sv, 0, 1, 0)),
@@ -2698,7 +2709,9 @@ class Transformer:
     try: self(self._token_buf[:, vb+sp:vb+sp+nt], sp, self._seq_pf_temp, vb)
     finally: _pk_local[0] = None
 
-  def forward_seqs(self, *vs:UOp) -> Tensor:
+  def forward_seqs(self, *vs:UOp) -> Tensor: return self._forward_seqs(vs, False)
+  def forward_seqs_forced(self, *vs:UOp) -> Tensor: return self._forward_seqs(vs, True)
+  def _forward_seqs(self, vs:tuple[UOp, ...], mix:bool) -> Tensor:
     """
     a step of speculative decoding of G sequences sharing the caches: vs the slot, the base of the region, mtp_pos, j, par and the position of
     the recurrent state of every one, its k+1 tokens (the last step's sampled ones) in _seq_in, its temperature and top_p in _seq_temp. returns
@@ -2750,6 +2763,9 @@ class Transformer:
         drafts.append(self._sample(mtp.head(m)[0], temps[:, :1], y.device, (seed, Tensor.arange(G) * (k+1) + i)).reshape(1, G))
         # (QTF: the forced draft instead, the MTP layer's next pass on it)
         if QTF: drafts[-1] = self._seq_tf[:, :G*(2*k+1)].reshape(G, 2*k+1)[:, i].reshape(1, G).to(drafts[-1].device).contiguous()
+        elif mix:
+          f = self._seq_tf[:, :G*(2*k+1)].reshape(G, 2*k+1)[:, i].reshape(1, G).to(drafts[-1].device).contiguous()
+          drafts[-1] = (f >= 0).where(f, drafts[-1]).contiguous()
         if i < k-1:
           pos = [p + j + 1 + i for p, j in zip(mp, js)]
           _seq_batch[0], _batch_rows[0] = batch(pos, 1), [(p, 1) for p in pos]
@@ -2792,15 +2808,19 @@ class Transformer:
         lpw = self._seq_tfo[:G*(k+1)*V].assign(lp.flatten())
         forced = self._seq_tf[:, :G*(2*k+1)].reshape(G, 2*k+1)[:, k:].reshape(G*(k+1), 1).to(tok.device)
         tok = Tensor(forced.contiguous().uop.after(lpw.uop))
+      elif mix:
+        forced = self._seq_tf[:, :G*(2*k+1)].reshape(G, 2*k+1)[:, k:].reshape(G*(k+1), 1).to(tok.device).contiguous()
+        tok = (forced >= 0).where(forced, tok).contiguous()
     finally: _seq_batch[0], _batch_rows[0], FLAG_LANE[0] = None, None, prev_lane
     q8_quantize_cache_clear()  # don't keep the graph alive
     out = tok.reshape(G, k+1).cat(*[d.reshape(G, 1) for d in drafts], dim=1).reshape(1, G*(2*k+1)).cast(dtypes.int32)
     return self._seq_out[:, :G*(2*k+1)].assign(Tensor(out.uop.mselect(0)) if isinstance(out.device, tuple) else out)
 
-  def _seq_jit(self, m:int):
-    if not hasattr(self, "_seq_jits"): self._seq_jits:dict[int, Any] = {}
-    if m not in self._seq_jits: self._seq_jits[m] = TinyJit(self.forward_seqs, capture_first=True, scratch=self._scratch)
-    return self._seq_jits[m]
+  def _seq_jit(self, m:int, mix:bool=False):
+    if not hasattr(self, "_seq_jits"): self._seq_jits:dict[tuple[int, bool], Any] = {}
+    if (m, mix) not in self._seq_jits:
+      self._seq_jits[(m, mix)] = TinyJit(self.forward_seqs_forced if mix else self.forward_seqs, capture_first=True, scratch=self._scratch)
+    return self._seq_jits[(m, mix)]
   def _seq_vars(self, seqs:list[tuple[int, int, int, int, int]]) -> list[UOp]:
     k, n = self.config.spec_drafts, self.seq_slots()
     return [v for g, (sl, b, mp, j, par) in enumerate(seqs) for v in (
@@ -2812,14 +2832,23 @@ class Transformer:
     if (b:=getattr(self, "_seq_kbase", {}).get(slot)) is None or not 0 <= start - b <= self.config.spec_drafts: return start
     return b
 
-  def seq_step(self, seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, float]]]) -> list[tuple[list[int], list[int]]]:
+  def seq_step(self, seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, float]]],
+               forced:list[list[int]]|None=None) -> list[tuple[list[int], list[int]]]:
     """
     a step of speculative decoding of sequences sharing the caches: seqs (slot, base, mtp_pos, j, par, the k+1 tokens of the last step,
-    temperature) of every one, their k+1 sampled tokens and k drafts
+    temperature) of every one, their k+1 sampled tokens and k drafts. forced (SEQ_MIX_TOKENS): each one's next suffix tokens to force, at
+    most k+1; -1 in the other slots leaves their ordinary samples and drafts unchanged
     """
     self._seq_init()
     k, n = self.config.spec_drafts, len(seqs)
     m = next(s for s in self.SEQ_SIZES if s >= n)
+    if forced is not None:
+      assert SEQ_MIX_TOKENS and len(forced) == n and all(len(f) <= k+1 for f in forced)
+      rows = []
+      for f in forced + [[]] * (m-n):
+        assert all(t >= 0 for t in f)
+        rows += f[:k] + [-1]*(k-min(k, len(f))) + f + [-1]*(k+1-len(f))
+      self._seq_host_tf[:m*(2*k+1)] = array.array('i', rows)
     # (the sequences past n: the padding slot's at position 0 in the padding region)
     seqs = seqs + [(self.seq_slots(), self.seq_rows(), 0, 0, 1, [0]*(k+1), 0.0)] * (m - n)
     self._seq_host_in[:m*(k+1)] = array.array('i', [t for *_, y, _ in seqs for t in y])
@@ -2828,7 +2857,7 @@ class Transformer:
     self._seq_host_temp[-1] = array.array('f', bytes(random.getrandbits(8) for _ in range(4)))[0]
     W = m*(2*k+1)
     self._seq_host_out[:W] = array.array('i', [-1] * W)
-    jit = self._seq_jit(m)
+    jit = self._seq_jit(m, forced is not None)
     if (cap:=getattr(jit, "captured", None)) is not None:
       # (captured: the variables' values as they are, no bound variables made a step)
       cap([], {name: v for g, (sl, b, mp, j, par, _, _) in enumerate(seqs)

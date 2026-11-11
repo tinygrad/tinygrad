@@ -1287,6 +1287,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     pending: list[Request] = []
     self.queues = (active, filling, pending)
     k = eng.k
+    mix_tokens = int(getattr(self.model, "SEQ_MIX_TOKENS", 0))
     # (a paused one (see below) goes on from its tokens so far)
     def prompt(req:Request) -> list[int]: return req.ids + req.generated if req.generated else req.ids
     stall = 0.0  # (the time of the slices since the last steps)
@@ -1352,6 +1353,13 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           if not c.generated: c.cache_start, c.queued = start, time.perf_counter() - c.st
           self.telemetry.cache_observe(c.session_id, len(ids), self.model.max_context, start, eng.last_take_stash)
           c.fill, c.cold = (ids, start, restore), len(ids) - start > self.COLD_TOKENS
+          if active and 0 < len(ids) - start <= mix_tokens:
+            # (SEQ_MIX_TOKENS: force this short suffix in the draft slots of the ordinary steps, beside the other sequences)
+            eng.mix_start(job, ids, start, restore, (c.temperature, c.top_p))
+            active[job] = c
+            trace(f"seq_mix_admit req={c.rid} rows={len(ids)-start} cached={start} active={len(active)}")
+            job = None
+            break
           filling[job] = c
           self.miss_log(ids, start)
           break
@@ -1410,9 +1418,17 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         st0 = time.perf_counter()
         while active:
           seqs = list(active)
+          mixing = {s for s in seqs if s.mix}
           st = time.perf_counter()
           outs = eng.step(seqs)
           step_time = time.perf_counter() - st
+          for s in mixing:
+            if s.mix: continue
+            req, (ids, start, _) = active[s], active[s].fill
+            new = len(ids) - start
+            self.stats.prefills, self.stats.mixed = self.stats.prefills + 1, self.stats.mixed + 1
+            self.prefilled_total += new
+            trace(f"seq_mixed req={req.rid} rows={new} cached={start} active={len(active)}")
           self.stats.step_time += step_time
           step_tokens = sum(len(toks) for toks in outs)
           self.telemetry.step(len(seqs), max(len(r.ids) + len(r.generated) for r in active.values()), step_time, step_tokens)
