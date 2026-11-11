@@ -1434,7 +1434,7 @@ class MLATransformerBlock(FFNBlock):
     the 512 + 64 after it: a third of the bytes), k_b of all the heads on every device (_k_b_rep): the queries of all the heads on every device,
     the values mla_sparse_seq's gather has (the halves of the same floats: k_b's products are of the halves)
     """
-    if (kbr:=getattr(self, "_k_b_rep", None)) is None or not self.seq_sharded or q_nope.uop.axis != 1 or not isinstance(Tq:=q_nope.shape[2], int) \
+    if not getenv("SEQ_Q_PRE", 0) or (kbr:=getattr(self, "_k_b_rep", None)) is None or not self.seq_sharded or q_nope.uop.axis != 1 or not isinstance(Tq:=q_nope.shape[2], int) \
        or Tq > getenv("SEQ_P2P_ROWS", 16) or _seq_p2p_pack() is not None: return None
     n, H, nope = len(cast(tuple, q_nope.device)), int(q_nope.shape[1]), int(q_nope.shape[-1])
     D = nope + int(q_rope.shape[-1])
