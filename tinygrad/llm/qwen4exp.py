@@ -1167,7 +1167,7 @@ class TransformerBlock(FFNBlock):
 
 
 # the first row of the sequence's region of the qwen sparse attention's caches (shared by sequences, see Transformer.regions) while its call is
-# traced: a bound variable (or 0), a multiple of REGION_ALIGN
+# traced: a bound variable (or 0), a multiple of SEQ_BASE_ALIGN
 _seq_base:list[UOp|int] = [0]
 # (split indexer: the pools of a device a prefill chunk's sequence is gathered of while its call is traced, None: a context's, see
 # Transformer._pk_bucket)
@@ -1180,7 +1180,7 @@ PREFILL_PK_CTX = tuple(int(c) for c in getenv("PREFILL_PK_CTX", "").split(",") i
 CHUNK_FIXED_ROWS = getenv("CHUNK_FIXED_ROWS", 256)
 # (a multiple of the pools of the KV heads' devices (kpool*kv_split): a region's pools on the devices as its positions)
 REGION_ALIGN = 3072
-# Explicit sampled-position harnesses may pack regions to the split KV/indexer alignment; moves/stash still use REGION_ALIGN.
+# Sampled harnesses and packed serving may use the split KV/indexer alignment; moves/stash still use REGION_ALIGN.
 SEQ_BASE_ALIGN = getenv("SEQ_BASE_ALIGN", REGION_ALIGN)
 def _region_rows(config:TransformerConfig) -> int:
   """the rows of the caches the regions of the sequences are of (the REGION_ALIGN after them: the padding sequences' region)"""

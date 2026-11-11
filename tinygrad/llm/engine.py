@@ -297,7 +297,7 @@ class SeqEngine:
     st = time.perf_counter()
     if base != s.base:
       self.model.seq_move(s.base, base, s.n)
-      self.times["moved"] = self.times.get("moved", 0) + -(-s.n // self.align)  # (the chunks: see the status line)
+      self.times["moved"] = self.times.get("moved", 0) + self._chunks(s.n)  # (SEQ_MOVE chunks, not packed-base units)
     s.base = base
     self._time("move", st)
   def _compact(self) -> list[Seq]:

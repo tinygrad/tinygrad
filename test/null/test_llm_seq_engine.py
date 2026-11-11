@@ -47,6 +47,9 @@ class TestSeqEngine(unittest.TestCase):
     self.model.SEQ_BASE_ALIGN = 24
     self.assertEqual(self.engine().align, 24)
     self.assertEqual(self.model.SEQ_MOVE, 2048)
+    eng, seq = self.engine(), SimpleNamespace(base=2048, n=4097)
+    eng._move(seq, 0)
+    self.assertEqual((seq.base, eng.times["moved"]), (0, 3))
 
   def test_same_prompt_again(self):
     # the same prompt after its reply: its checkpoint restored, the token after it sampled from it (nothing prefilled)
