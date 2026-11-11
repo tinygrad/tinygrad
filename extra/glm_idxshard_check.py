@@ -18,6 +18,10 @@ key = (rng.integers(0, 0x7F, size=(PT, 128), dtype=np.uint8) | (rng.integers(0, 
 key = np.concatenate([key, np.full((PT, 1), np.array([1e-3/256], dtype=np.float32).view(np.uint32)[0], dtype=np.uint32)], axis=1)
 if int(os.environ.get("TIES", 1)): key[rng.random(PT) < 0.3, :32] = 0  # (zero keys: scores 0, ties at the k-th)
 PB = SEQ_BLK // KP
+# (e4m3 values of the bytes)
+_b = np.arange(256)
+FP8 = np.where((_b >> 3) & 15, (1 + (_b & 7)/8) * 2.0**(((_b >> 3) & 15) - 7), (_b & 7)/8 * 2.0**-6) * np.where(_b >> 7, -1, 1)
+FP8[[0x7F, 0xFF]] = np.nan
 loc = np.arange(PT // N)
 k_rep = Tensor(np.ascontiguousarray(key)).shard(devs).realize()
 k_sh = Tensor(np.ascontiguousarray(np.concatenate([key[(loc//PB)*(PB*N) + d*PB + loc%PB] for d in range(N)]))).shard(devs, axis=0).realize()
@@ -46,4 +50,12 @@ for T, pos in [(3, 4000), (3, 65000), (3, 200000), (3, PT*KP - 8), (64, 30000), 
     xa, xb = np.frombuffer(la[i][1], np.int32)//KP, np.frombuffer(lb[i][1], np.int32)//KP
     sa, sb = set(xa.tolist()), set(xb.tolist())
     print(f"  row {i}: only whole {sorted(sa-sb)[:8]} only split {sorted(sb-sa)[:8]} same set {sa==sb}")
+    # (a float64 reference of the row's scores: which list has the top pools)
+    qp, npool = pos + i, (pos + i + 1) // KP
+    kv = FP8[key[:npool, :32].view(np.uint8)].astype(np.float64) * np.float64(np.float32(1e-3/256)) * 256
+    qn, wn = q.to(devs[0]).numpy()[i].astype(np.float64), w.to(devs[0]).numpy()[i].astype(np.float64)
+    ref = (np.maximum(kv @ qn.T, 0) * wn).sum(-1)
+    kth = np.sort(ref)[-TOP]
+    print(f"  ref k-th {kth:.6g}: whole picks >= it {int((ref[[p for p in sa if p < npool]] >= kth).sum())}, split "
+          f"{int((ref[[p for p in sb if p < npool]] >= kth).sum())}; split-only scores {ref[sorted(sb-sa)[:4]]} q {qp}")
 print("IDXSHARD_CHECK", "PASS" if fails == 0 else f"FAIL {fails}")
