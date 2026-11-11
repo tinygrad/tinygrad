@@ -61,6 +61,17 @@ if getenv("PREFILL_PROF"):
       j = bisect.bisect_left([s for s, _, _ in ks[d]], st0 + du)
       ctx[(n.split(",")[0], ks[d][i][2] if i >= 0 else "-", ks[d][j][2] if j < len(ks[d]) else "-")] += 1
     for (n, a, b), c in ctx.most_common(getenv("TOP", 40)): print(f"  {c:6d}  {n:16s}  after {a:40s} before {b}")
+    # (a device's timeline: its span, the union of its kernels' and of its copies' intervals: the idle rest is waits on the others)
+    def union(iv:list) -> float:
+      tot, end = 0.0, float("-inf")
+      for a, b in sorted(iv):
+        if b > end: tot, end = tot + b - max(a, end), b
+      return tot
+    for d in sorted({d for d, *_ in seq}):
+      kk = [(st0, st0 + du) for dd, n, st0, du in seq if dd == d and not n.startswith("copy")]
+      cc = [(st0, st0 + du) for dd, n, st0, du in seq if dd == d and n.startswith("copy")]
+      span = max(b for _, b in kk + cc) - min(a for a, _ in kk + cc)
+      print(f"  {d:8s} span {span/1e3:8.1f} ms  kernels {union(kk)/1e3:8.1f}  copies {union(cc)/1e3:8.1f}  either {union(kk + cc)/1e3:8.1f}")
   raise SystemExit(0)
 gen = model.generate(prompt)
 st = time.perf_counter()
