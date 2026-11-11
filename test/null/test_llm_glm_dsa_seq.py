@@ -463,7 +463,7 @@ class TestGLMDSASequence(unittest.TestCase):
           return ret
         orig = K._decode_linear
         K._bundle_cache.clear()
-        for fn in (K._moe_decode_kernel, K._moe_bundled_kernel): fn.cache_clear()
+        for fn in (K._moe_decode_kernel, K._moe_bundled_kernel, K._moe_bundled_persist_kernel): fn.cache_clear()
         sel, x = Tensor.empty(1, T, 8, dtype=dtypes.int32), Tensor.empty(1, T, 1, fin)
         with patch.object(K, "MOE_WMMA", 0), patch.object(K, "MOE_EXACT_MIN", exact_min), patch.object(K, "MOE_GRID_LDS", on), \
              patch.object(K, "_decode_linear", wrap):
