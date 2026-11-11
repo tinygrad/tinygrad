@@ -4292,6 +4292,26 @@ def _seq_gather_kernel(out:UOp, part:UOp, dev:UOp, *need:UOp, start_pos:UOp, k:i
   return UOp.group(*st).end(j, r, c).sink(arg=KernelInfo(name=f"seq_gather{k}", opts_to_apply=()))
 
 @functools.cache
+def _seq_gather_fused_kernel(out:UOp, dev:UOp, *srcs:UOp, start_pos:UOp, n:int, base:UOp|None=None) -> UOp:
+  # _seq_gather_kernel of every part in one kernel (SEQ_GATHER_FUSED): srcs the n parts (seq_views) and need (optional). the reads of all the
+  # peers at once (one kernel a peer: one link at a time), the same words to the same rows
+  parts, need = srcs[:n], srcs[n:]
+  rows, C = cast(tuple[int, int], parts[0].shape)
+  J = (start_pos + SEQ_BLK*n - 1) // (SEQ_BLK*n)
+  j, r, c = UOp.range(J, 0, AxisType.GLOBAL), UOp.range(SEQ_BLK, 1, AxisType.GLOBAL), UOp.range(C, 2, AxisType.LOCAL)
+  kk = UOp.range(n, 3, AxisType.GLOBAL)
+  owner = (dev[0].load().cast(dtypes.weakint) + kk) % n
+  p = (j*n + owner) * SEQ_BLK + r
+  ok = p < start_pos
+  if need: ok = ok & need[0][p.valid(ok)].load().ne(0)
+  b = base // n if base is not None else 0
+  row = (b + j*SEQ_BLK + r).minimum(rows-1)
+  w = functools.reduce(lambda x, y: x | y, [parts[k][row.valid(ok & kk.eq(k)), c].load() for k in range(n)])
+  st = [out[p.valid(ok), c].store(w)] if getattr(out.dtype, "base", out.dtype) != dtypes.half else \
+    [out[p.valid(ok), c*4+i].store((w >> UOp.const(16*i, dtypes.uint64)).cast(dtypes.uint16).bitcast(dtypes.half)) for i in range(4)]
+  return UOp.group(*st).end(kk, j, r, c).sink(arg=KernelInfo(name="seq_gather_all", opts_to_apply=()))
+
+@functools.cache
 def _seq_need_kernel(need:UOp, index:UOp) -> UOp:
   # the positions of the lists (T, n_max+1, the count last) marked in need (N,)
   T, n_max, N = cast(int, index.shape[0]), cast(int, index.shape[1]) - 1, cast(int, need.shape[0])
@@ -4366,7 +4386,11 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int, base:int
   need = []
   if lists is not None and raw and getenv("SEQ_GATHER_UNION", 0):
     need = [Tensor.custom_kernel(Tensor.zeros(N, dtype=dtypes.int32, device=devs).contiguous(), lists, fxn=_seq_need_kernel)[0]]
-  for kk, part in enumerate(seq_views(cache)):
+  # (SEQ_GATHER_FUSED, default off: every peer's part in one kernel, the peers read at once)
+  if raw and not fp8 and getenv("SEQ_GATHER_FUSED", 0):
+    out = Tensor.custom_kernel(out, _device_index(devs), *seq_views(cache), *need,
+                               fxn=functools.partial(_seq_gather_fused_kernel, start_pos=sp, n=n, base=bu))[0]
+  for kk, part in enumerate(seq_views(cache) if not (raw and not fp8 and getenv("SEQ_GATHER_FUSED", 0)) else []):
     out = Tensor.custom_kernel(out, part, _device_index(devs), *need, fxn=functools.partial(_seq_gather_kernel if raw else _seq_gather_fp8_kernel,
                                                                                      start_pos=sp, k=kk, n=n, base=bu))[0]
   rows = fp8_rows(k).contiguous() if fp8 and raw else k.cast(dtypes.half).contiguous() if half else \

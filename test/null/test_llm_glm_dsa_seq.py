@@ -152,6 +152,11 @@ class TestGLMDSASequence(unittest.TestCase):
     for dt, W in (("half", 576), ("uint64", 144)):
       k = sink(Tensor.empty(256, W, dtype=dt), part, dev, fxn=functools.partial(_seq_gather_kernel, start_pos=sp, k=1, n=4))
       self.assertIs(k.op, Ops.SINK)
+    # (SEQ_GATHER_FUSED: every part in one kernel)
+    from tinygrad.llm.kernels.amd_glm_dsa import _seq_gather_fused_kernel
+    k = sink(Tensor.empty(256, 576, dtype="half"), dev, *[Tensor.empty(64, 144, dtype="uint64") for _ in range(4)],
+             fxn=functools.partial(_seq_gather_fused_kernel, start_pos=sp, n=4))
+    self.assertIs(k.op, Ops.SINK)
     # (SEQ_GATHER_UNION: the positions of the lists marked, the gather of only those)
     need = Tensor.zeros(256, dtype="int32").contiguous()
     self.assertIs(sink(need, Tensor.empty(8, 34, dtype="int32"), fxn=_seq_need_kernel).op, Ops.SINK)
