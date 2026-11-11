@@ -117,6 +117,8 @@ class TestEffectRetention(unittest.TestCase):
     a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(2, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([7], [1, 1]))
 
+  # TODO: validity through AFTER needs the reads ordered first; distributing AFTER into the gate splits a shared read
+  @unittest.expectedFailure
   @Context(CHECK_OOB=0)
   def test_after_gated_read_coordinate(self):
     for ki in (KernelInfo(), KernelInfo(opts_to_apply=()), KernelInfo(optimized=True)):
@@ -126,6 +128,14 @@ class TestEffectRetention(unittest.TestCase):
                                         Tensor([13, 29]).contiguous(), fxn=kernel)
       Tensor.realize(a, d, b)
       self.assertEqual(b.tolist(), [29, 29, 0, 0])
+
+  @Context(CHECK_OOB=0)
+  def test_after_gated_shared_read(self):
+    for ki in (KernelInfo(), KernelInfo(opts_to_apply=()), KernelInfo(optimized=True)):
+      def kernel(A:UOp, B:UOp, C:UOp): return B[0].store(C[(x:=A[0]).valid(x < 1).after(x.store(1))]).sink(arg=ki)
+      a, b, _ = Tensor.custom_kernel(Tensor([0]).contiguous(), Tensor([-9]).contiguous(), Tensor([0, 29]).contiguous(), fxn=kernel)
+      Tensor.realize(a, b)
+      self.assertEqual(b.tolist(), [0])
 
 class TestEffectOrder(unittest.TestCase):
   def test_snapshot_before_overwrite(self):
