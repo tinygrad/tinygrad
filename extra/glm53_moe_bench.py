@@ -54,6 +54,8 @@ def main():
           if hasattr(K, k): oldk[k], _ = getattr(K, k), setattr(K, k, type(getattr(K, k))(int(v)))
         getenv.cache_clear()
         K._bundle_cache.clear()
+        for fn in vars(K).values():  # (the kernels are cached on their args, not on the env)
+          if callable(getattr(fn, 'cache_clear', None)) and getattr(fn, '__module__', '') == K.__name__: fn.cache_clear()
         try:
           f = TinyJit(lambda s, v: [K.moe_linear(w, typ, E, v, s, first).realize() for w in ws][0])
           for _ in range(3): o = f(sel, x)
