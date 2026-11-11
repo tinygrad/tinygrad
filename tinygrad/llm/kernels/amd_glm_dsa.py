@@ -4962,7 +4962,7 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
     if getenv("SEQ_PAY_FUSED", 0) and not a2a_half and split > 1:
       # (SEQ_PAY_FUSED: the splits' combine and the payload in one kernel, not three: the same floats)
       pay = Tensor.custom_kernel(Tensor.empty(n*n*pad_n, dtype=dtypes.float32, device=devs, axis=0), parts, ml,
-                                 fxn=functools.partial(_seq_a2a_pay_kernel, G=G, T=Ti, S=split, hl=hl, dims=dims, pad_n=pad_n))[0]
+                                 fxn=functools.partial(_seq_a2a_pay_kernel, G=cast(int, G), T=Ti, S=split, hl=hl, dims=dims, pad_n=pad_n))[0]
       pay = pay.reshape(n, n, pad_n)
     else:
       pay = odp.cat(mx.squeeze(3), ld, dim=-1).permute(0, 2, 1, 3, 4).reshape(n, T, G*16, Dp)[:, :, :H]
