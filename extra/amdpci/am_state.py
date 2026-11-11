@@ -48,6 +48,10 @@ def main():
     m = d.smu.smu_mod
     booted = d.am_version & ~(3 << 16) == AMDev.Version
     line += f" am_ver={d.am_version:#x}{'' if booted else '(not AM)'} am_err={d.am_err}"
+    if not booted:
+      # (no smu message to a card no AM booted: its firmware's driver mailbox may not run, a query times out; this stays a pure read)
+      print(line + f" mp1_resp={d.mmMP1_SMN_C2PMSG_90.read():#x} mp1_msg={d.mmMP1_SMN_C2PMSG_66.read():#x}", flush=True)
+      continue
     try:
       lo = d.smu._send_msg(m.PPSMC_MSG_GetRunningSmuFeaturesLow, 0, read_back_arg=True, timeout=1000)
       hi = d.smu._send_msg(m.PPSMC_MSG_GetRunningSmuFeaturesHigh, 0, read_back_arg=True, timeout=1000)
