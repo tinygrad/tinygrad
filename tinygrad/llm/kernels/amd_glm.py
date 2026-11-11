@@ -6114,12 +6114,21 @@ def _wave_scan(x:UOp, lane:UOp) -> UOp:
   for d in (1, 2, 4, 8, 16): x = x + (lane >= d).where(_bpermute(x, (lane - d).maximum(0)), UOp.const(0, dtypes.int32))
   return x
 
-def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:UOp, lane:UOp) -> UOp:
+_ATOMIC_ADD1_IF = "if ({1}) __hip_atomic_fetch_add({0}, 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);"
+
+def _key_regs(key:Callable[[UOp], UOp], per:int) -> list[UOp]:
+  """a thread's keys of all its chunks (key(c) of chunk c, the ones past the pools 0) loaded at once into registers: their loads in flight
+  together, not a chunk's at a time (a pass over the chunks waited on every load: the select of a long context's pools a latency bound)"""
+  kreg = UOp.alloc((per,), dtypes.uint32, addrspace=AddrSpace.REG)
+  kreg = kreg.after(UOp.group(*(kreg[c].store(key(UOp.const(c, dtypes.weakint))) for c in range(per))))
+  return [kreg[c].load() for c in range(per)]
+
+def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:UOp, lane:UOp, regs:list[UOp]|None=None) -> UOp:
   """
   the k-th largest of the keys of a workgroup's threads (key(c) a thread's of chunk c of npc, uint32, 1 at least, all of them with no more pools
   than k): a radix select, 4 passes of 8 bits from the top. a pass counts the digits of the keys whose higher digits are the prefix found (a
   histogram in LDS, atomics), one wave scans it from the top for the bin of the k-th (the keys left), the next pass that bin's. the same as a
-  bisection bit by bit, 8 barriers
+  bisection bit by bit, 8 barriers. regs: the keys of every chunk in registers (_key_regs): the chunks unrolled (the same counts)
   """
   zero = UOp.const(0, dtypes.int32)
   hist = UOp.alloc((4*256,), dtypes.int32, addrspace=AddrSpace.LOCAL)
@@ -6128,13 +6137,22 @@ def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:
   res = UOp.alloc((4, 2), dtypes.int32, addrspace=AddrSpace.LOCAL)
   prefix, left = UOp.const(0, dtypes.uint32), UOp.const(k, dtypes.int32)
   for d in range(4):
-    c = UOp.range(npc, 20 + d, AxisType.LOOP)
-    kv = key(c)
-    match = (kv >> (32 - 8*d)).eq(prefix) if d else UOp.const(True, dtypes.bool)
-    digit = ((kv >> (24 - 8*d)) & 255).cast(dtypes.weakint)
-    add = _sys("__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);", dtypes.void, hist[d*256 + digit],
-               match.cast(dtypes.int32))
-    hd = hist.after(UOp.group(add).end(c).barrier())
+    if regs is not None:
+      # (the chunks of the pools only, as the loop's: an add of a key whose higher digits are the prefix)
+      adds = []
+      for c, kv in enumerate(regs):
+        ok = UOp.const(c, dtypes.weakint) < npc
+        if d: ok = ok & (kv >> (32 - 8*d)).eq(prefix)
+        adds.append(_sys(_ATOMIC_ADD1_IF, dtypes.void, hist[d*256 + ((kv >> (24 - 8*d)) & 255).cast(dtypes.weakint)], ok))
+      hd = hist.after(UOp.group(*adds).barrier())
+    else:
+      c = UOp.range(npc, 20 + d, AxisType.LOOP)
+      kv = key(c)
+      match = (kv >> (32 - 8*d)).eq(prefix) if d else UOp.const(True, dtypes.bool)
+      digit = ((kv >> (24 - 8*d)) & 255).cast(dtypes.weakint)
+      add = _sys("__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);", dtypes.void, hist[d*256 + digit],
+                 match.cast(dtypes.int32))
+      hd = hist.after(UOp.group(add).end(c).barrier())
     # lane L the bins 255-8L-j (j 0..7): from the top
     bins = [hd[d*256 + 255 - lane*8 - j].load() for j in range(8)]
     lane_sum = functools.reduce(lambda a, b: a + b, bins)
@@ -6152,7 +6170,7 @@ def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:
 
 @functools.cache
 def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0, dev_rows:int=0,
-                       compact:bool=False) -> UOp:
+                       compact:bool=False, reg:bool|None=None) -> UOp:
   # (compact: the list (k+2) the picked pools, their count at k, the query's position at k+1 (the keys: a pool's kpool, then the tail of the
   # query's pool: see qsa_decode's kpool))
   # a workgroup per query row of scores (the query of row r is at q_start+r, its list row row0+r of index), thread t holds pool c*THREADS + t
@@ -6181,7 +6199,9 @@ def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:U
     ok = (p < pools) & ((p + 1) * kpool <= q + 1)
     bits = scores[row, p.minimum(P-1).valid(ok)].load().bitcast(dtypes.uint32)
     return ok.where(_order_key(bits), UOp.const(0, dtypes.uint32))
-  if getenv("PIDX_RADIX", 1): thr = _radix_kth(key, npc, k, pools, t, wave, lane)
+  # (PIDX_REG: a thread's keys loaded once into registers, the passes over them unrolled: the same counts, picks)
+  regs = _key_regs(key, per) if (getenv("PIDX_REG", 0) if reg is None else reg) and getenv("PIDX_RADIX", 1) else None
+  if getenv("PIDX_RADIX", 1): thr = _radix_kth(key, npc, k, pools, t, wave, lane, regs=regs)
   else:
     # the bisection: bit by bit from the top, no loop with no more pools than k (they are all picked)
     lds = UOp.alloc((32, W), dtypes.float32, addrspace=AddrSpace.LOCAL)
@@ -6200,7 +6220,7 @@ def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:U
     p = t + c3 * THREADS
     if compact: return index[row, pos.valid(pk & (pos < k))].store(p.cast(dtypes.int32))
     return UOp.group(*(index[row, (pos * kpool + j).valid(pk & (pos < k))].store((p * kpool + j).cast(dtypes.int32)) for j in range(kpool)))
-  stores, picked = _pick_stores(key, npc, per, thr, t, wave, lane, write)
+  stores, picked = _pick_stores(key, npc, per, thr, t, wave, lane, write, regs=regs)
   total_picked = picked.minimum(k)  # the count of picked pools
   if compact:
     stores += [index[row, UOp.const(k, dtypes.weakint).valid(t.eq(0))].store(total_picked.cast(dtypes.int32)),
@@ -6215,7 +6235,7 @@ def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:U
   return UOp.group(*stores).end(row, wave, lane).sink(arg=KernelInfo(name="pool_index", opts_to_apply=(), estimates=est))
 
 def _pick_stores(key:Callable[[UOp], UOp], npc:UOp, per:int, thr:UOp, t:UOp, wave:UOp, lane:UOp,
-                 write:Callable[[UOp, UOp, UOp], UOp]) -> tuple[list[UOp], UOp]:
+                 write:Callable[[UOp, UOp, UOp], UOp], regs:list[UOp]|None=None) -> tuple[list[UOp], UOp]:
   """
   the elements (thread t of chunk c of a workgroup of DECODE_THREADS, npc chunks of the per) whose key is at least thr, in their order:
   write(c, pos, picked) the stores of a chunk's (pos: its offset). the stores and the count. (the picks of every (chunk, wave) by ballots,
@@ -6225,10 +6245,18 @@ def _pick_stores(key:Callable[[UOp], UOp], npc:UOp, per:int, thr:UOp, t:UOp, wav
   # the picks of every (chunk, wave): the counts of a ballot
   wc = UOp.alloc((per, W), dtypes.int32, addrspace=AddrSpace.LOCAL)
   ballots = UOp.alloc((per, W), dtypes.uint32, addrspace=AddrSpace.LOCAL)
-  c2 = UOp.range(npc, 5, AxisType.LOOP)
-  bits = _ballot(key(c2) >= thr)
-  init = UOp.group(wc[c2, wave.valid(lane.eq(0))].store(_popcount(bits)),
-                   ballots[c2, wave.valid(lane.eq(0))].store(bits)).end(c2).barrier()
+  if regs is not None:
+    # (the keys in registers (_key_regs): the chunks unrolled, the ones of the pools stored)
+    st = []
+    for c, kv in enumerate(regs):
+      bits, ok = _ballot(kv >= thr), lane.eq(0) & (UOp.const(c, dtypes.weakint) < npc)
+      st += [wc[c, wave.valid(ok)].store(_popcount(bits)), ballots[c, wave.valid(ok)].store(bits)]
+    init = UOp.group(*st).barrier()
+  else:
+    c2 = UOp.range(npc, 5, AxisType.LOOP)
+    bits = _ballot(key(c2) >= thr)
+    init = UOp.group(wc[c2, wave.valid(lane.eq(0))].store(_popcount(bits)),
+                     ballots[c2, wave.valid(lane.eq(0))].store(bits)).end(c2).barrier()
   wc, ballots = wc.after(init), ballots.after(init)
   # the offsets of the (chunk, wave)s in pool order: in every chunk a scan of its waves' counts (a wave per chunk), then a scan of the
   # chunks' totals (one wave). the chunks without pools count 0
