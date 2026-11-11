@@ -474,8 +474,9 @@ def _read_ahead(entries:dict):
     finally: os.close(fd)
   for path in paths: threading.Thread(target=run, args=(path,), daemon=True, name="read_ahead").start()
 
-def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
-  """the tensors are buffers now (allocated, their devices and split kept), their values are computed by the function added to pending"""
+def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]], scratch:dict|None=None):
+  """the tensors are buffers now (allocated, their devices and split kept), their values are computed by the function added to pending
+  scratch: the jits' shared memory of intermediates (LOAD_DEFER: the values computed after the caches are made, no room for their own)"""
   pairs, ts = [], list({id(t): t for t in ts}.values())  # (a tensor of two modules once)
   # (an empty tensor is just its memory: allocated now)
   if now:=[t for t in ts if t.numel() == 0 or t.uop.base.op is Ops.ALLOC]: Tensor.realize(*now)
@@ -497,7 +498,7 @@ def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
       pairs.append((u, lazy))
   # (a jit: compiled with the model's jits, see _capture_parallel)
   def compute(): Tensor.realize(*[Tensor(u).assign(Tensor(lazy)) for u, lazy in pairs])
-  if pairs: pending.append(TinyJit(compute, capture_first=True))
+  if pairs: pending.append(TinyJit(compute, capture_first=True, scratch=scratch))
 
 def _host_ints(devs:str|tuple[str, ...], n:int) -> tuple[memoryview, Tensor]:
   """n int32 in host memory that the host polls: a (1, n) tensor every device reads and writes directly"""
@@ -3363,7 +3364,7 @@ class Transformer(GLMSeqDriver):
     # (and the parameters of a model initialized but not loaded. a loaded one's are: the quantized weights' are their decoding, not used)
     todo = [t for h in holders for v in vars(h).values() for t in lazy(v)] + ([] if self._loaded else lazy(nn.state.get_parameters(self)))
     # with the weights still to read: their memory now, their values after
-    if self._pending_load: _realize_later(todo, self._pending_load)
+    if self._pending_load: _realize_later(todo, self._pending_load, self._scratch)
     else: Tensor.realize(*todo)
     # (a sequence sharded cache: the views of the other devices' parts (peer mappings) made here, not in the processes that capture the jits)
     for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []):
@@ -3409,8 +3410,8 @@ class Transformer(GLMSeqDriver):
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
-                realize=bool(getenv("REALIZE", 0)), shard:int=1, defer_load:bool=False) -> tuple[Transformer, dict]:
-    """defer_load: the weights are read later (warmup compiles meanwhile), before the first call"""
+                realize=bool(getenv("REALIZE", 0)), shard:int=1, defer_load:bool=bool(getenv("LOAD_DEFER", 0))) -> tuple[Transformer, dict]:
+    """defer_load (LOAD_DEFER, default off): the weights are read later (warmup compiles meanwhile), before the first call"""
     # TODO: remove the need for copy to default device
     st = time.perf_counter()
     def lap(what:str):
@@ -3662,7 +3663,7 @@ class Transformer(GLMSeqDriver):
     tables = dedup([t for m in modules([self.blk] + ([self.mtp] if hasattr(self, "mtp") else []), set()) if isinstance(m, ExpertWeights)
                     for t in (getattr(m, "first", None), getattr(m, "slice_table", None)) if t is not None and not t.uop.is_realized])
     # with the weights still to read: the small ones' memory now, their values after
-    if self._pending_load: _realize_later(small, self._pending_load)
+    if self._pending_load: _realize_later(small, self._pending_load, self._scratch)
     if (todo:=[*tables, *([] if self._pending_load else small)]): Tensor.realize(*todo)
     self._prepare_dproj()
 

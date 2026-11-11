@@ -16,6 +16,15 @@ class TestGLMDSASequence(unittest.TestCase):
     self.enterContext(Context(DEV="CPU"))
     self.devs = ("CPU",)
 
+  def test_deferred_realize_shares_scratch(self):
+    pending, scratch = [], {}
+    t = Tensor([1.0, 2.0]) + 1
+    glm_dsa._realize_later([t], pending, scratch)
+    self.assertEqual(len(pending), 1)
+    self.assertIs(getattr(pending[0], "scratch"), scratch)
+    pending.pop(0)()
+    np.testing.assert_array_equal(t.numpy(), np.array([2.0, 3.0]))
+
   def test_region_alignment_drives_move_chunks(self):
     self.assertEqual(Transformer.SEQ_MOVE, Transformer.REGION_ALIGN)
     self.assertEqual(Transformer.REGION_ALIGN % (64*14), 0)
