@@ -286,6 +286,9 @@ def _send_capture(wfd:int, reg:dict[int, Any], jit:_TinyJit, ret, linear:UOp, na
   if (path:=getenv("STARTUP_STATS", "")):
     import json
     startup_mark("sent")
+    for pr in [x for x in _forked_capture[3:] if hasattr(x, "dump_stats")]:
+      pr.disable()
+      pr.dump_stats(f"{path}.{os.getpid()}.prof")
     with open(f"{path}.forks", "a") as f: f.write(json.dumps({"pid": os.getpid(), "marks": startup_marks}) + "\n")
   _exit_child(0)
 
@@ -428,6 +431,11 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
       PARALLEL.value = max(1, PARALLEL.value // len(calls))
       UOp.unique_num = itertools.count(start + (i + 1) * (1 << 40)) # (its new uops never are the parent's or another child's)
       _forked_capture[:] = [jit, functools.partial(_send_capture, w, reg, jit), functools.partial(_send_arenas, w)]
+      if (prof:=getenv("STARTUP_PROFILE", "")) and str(todo[i]) in prof.split(","):
+        # (debug) the process's work profiled: <STARTUP_STATS>.<jit>.prof (pstats)
+        import cProfile
+        (pr:=cProfile.Profile()).enable()
+        _forked_capture.append(pr)
       try:
         call()
         print(f"capture_parallel: jit {todo[i]} wasn't captured by its call (cnt {jit.cnt})", file=sys.stderr)
@@ -476,9 +484,16 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
 
   oks, left, took = [False] * len(children), set(range(len(children))), cast(dict[int, tuple[float, float, float]], {})
   def came(k:int) -> bool: return len(msgs[k]) >= 2 or (len(msgs[k]) == 1 and msgs[k][0] == b"")
+  # (debug) STARTUP_PROFILE with "parent": the parent's takes profiled to <STARTUP_STATS>.parent.prof
+  ppr = __import__("cProfile").Profile() if "parent" in str(getenv("STARTUP_PROFILE", "")).split(",") else None
   @disable_gc()
   def take(k:int):
     # a jit that came: its uops made, linked
+    if ppr is not None: ppr.enable()
+    try: _take(k)
+    finally:
+      if ppr is not None: ppr.disable()
+  def _take(k:int):
     left.discard(k)
     if (status:=os.waitpid(children[k][0], 0)[1]) != 0 or len(msgs[k]) < 2 or not msgs[k][1]:
       if DEBUG >= 1: print(f"capture_parallel: jit {todo[k]} not captured (exit status {status:#x}), captured on its call")
@@ -532,6 +547,7 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     take(min((k for k in left if came(k)), key=lambda k: arrived[k][-1] if arrived[k] else 0))
   if (path:=getenv("STARTUP_STATS", "")):
     import json
+    if ppr is not None: ppr.dump_stats(f"{path}.parent.prof")
     with open(path, "a") as f:
       f.write(json.dumps({"st": st, "end": time.perf_counter() - st, "wall0": time.time() - (time.perf_counter() - st), "todo": todo,
                           "names": [getattr(j.fxn, "__qualname__", str(j.fxn)) for j, _ in calls], "arrived": arrived, "taken": took,
