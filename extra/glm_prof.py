@@ -36,10 +36,25 @@ if getenv("PREFILL_PROF"):
   print(f"warm prefill {len(prompt)} tokens: {time.perf_counter()-st:.1f} s (jits made)", flush=True)
   prompt = [t + 1 for t in prompt]  # (another prompt: nothing cached)
   if getenv("PROFILE"): kprof.reset(*devs)
+  # (HOSTT: the host time of every jit call of the timed prefill: the host's launches vs the wall)
+  hostt: list[tuple[str, float, float]] = []
+  if getenv("HOSTT"):
+    from tinygrad.engine.jit import _TinyJit
+    _call = _TinyJit.__call__
+    def _timed(self, *a, **k):
+      t = time.perf_counter()
+      try: return _call(self, *a, **k)
+      finally: hostt.append((getattr(self, "cache_name", "jit"), t, time.perf_counter()))
+    _TinyJit.__call__ = _timed  # type: ignore[method-assign]
   st = time.perf_counter()
   tok = next(gen:=model.generate(prompt))
+  t_host = time.perf_counter()
   sync()
   dt = time.perf_counter() - st
+  if getenv("HOSTT"):
+    _TinyJit.__call__ = _call  # type: ignore[method-assign]
+    print(f"host: {len(hostt)} jit calls, {sum(b-a for _, a, b in hostt)*1e3:.1f} ms in them, token at {(t_host-st)*1e3:.1f} ms, wall {dt*1e3:.1f}")
+    for n, a, b in hostt: print(f"  host {n:20s} at {(a-st)*1e3:8.1f} ms  {(b-a)*1e3:8.1f} ms")
   print(f"prefill {len(prompt)} tokens: {dt:.2f} s, {len(prompt)/dt:.0f} tok/s, first token {tok}", flush=True)
   # (GREEDY: the greedy tokens after the prompt, an exactness check of A/B trees)
   if (ng:=getenv("GREEDY", 0)) and not getenv("PROFILE"): print("greedy", [tok] + [next(gen) for _ in range(ng - 1)], flush=True)
