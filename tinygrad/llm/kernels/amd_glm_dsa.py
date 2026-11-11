@@ -1758,8 +1758,12 @@ def p2p_late(devs:tuple[str, ...], clear:bool=False) -> list[int]:
   i, ret = P2P_AR_NCTR + 1, []
   from tinygrad.device import Buffer
   for b in p2p.counter_bufs:
-    ret.append(int((mv:=b.as_memoryview()).cast("i")[i]))
-    if clear: b.copy_from(Buffer("NPY", b.nbytes, opaque=memoryview(bytearray(mv[:i*4]) + bytes(4))).ensure_allocated())
+    ret.append(int(b.as_memoryview().cast("i")[i]))
+    # (cleared: that word only. a copy of the whole buffer wrote back the epoch counters as read: a kernel that ran before its copy landed
+    # had its counters set back (that device's next calls a few epochs behind its peers': polls that run out, or old words taken as fresh))
+    if clear and ret[-1]: b.view(4, i*4).ensure_allocated().copy_from(Buffer("NPY", 4, opaque=memoryview(bytearray(4))).ensure_allocated())
+  if clear and any(ret):
+    for d in devs: Device[d].synchronize()
   return ret
 
 def P2P_AR_TIMEOUT_MS() -> int: return getenv("P2P_AR_TIMEOUT_MS", 30000)

@@ -245,6 +245,19 @@ class TestGLMDSASequence(unittest.TestCase):
       self.assertEqual(amd_glm_dsa.p2p_late(("CPU", "CPU"), clear=True), [0, 7])
       self.assertEqual(amd_glm_dsa.p2p_late(("CPU", "CPU")), [0, 0])
     self.assertEqual(list(np.frombuffer(bufs[1].as_memoryview(), dtype=np.int32)[-3:]), [5, 1, 0])
+    # (the clear writes the note only: a kernel that advanced an epoch counter after the notes were read keeps it (a whole buffer's copy of
+    # what was read set it back: that device's next calls behind its peers'))
+    bufs = [Buffer("CPU", (NC+2)*4, initial_value=np.array([5]*NC + [d, 7], dtype=np.int32).tobytes()) for d in range(2)]
+    orig = Buffer.as_memoryview
+    def read_then_run(self, *a, **k):
+      mv = orig(self, *a, **k)
+      src = Buffer("NPY", 4, opaque=memoryview(bytearray(np.array([6], dtype=np.int32).tobytes()))).ensure_allocated()
+      self.view(4, 0).ensure_allocated().copy_from(src)  # (a kernel's epoch after the read)
+      return mv
+    with patch.object(amd_glm_dsa, "p2p_allreduce", return_value=SimpleNamespace(counter_bufs=bufs)), \
+         patch.object(Buffer, "as_memoryview", read_then_run):
+      self.assertEqual(amd_glm_dsa.p2p_late(("CPU", "CPU"), clear=True), [7, 7])
+    for b in bufs: self.assertEqual(list(np.frombuffer(b.as_memoryview(), dtype=np.int32)[[0, -1]]), [6, 0])
     # (the packed allreduce's kernel builds with the ranges' counters)
     from tinygrad.llm.kernels.amd_glm_dsa import _p2p_allreduce_kernel, P2P_AR_CLASSES, P2P_AR_MAXG, P2P_AR_MAXW, P2P_AR_NCTR
     N = 4
