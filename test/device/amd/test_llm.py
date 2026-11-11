@@ -1,11 +1,12 @@
 import unittest
+from functools import partialmethod
 from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.helpers import DEV
 from tinygrad.llm.kernels.amd import (Linear, ExpertWeights, amd_custom_kernels_supported, flash_attention, gated_delta_prefill,
                                       _is_rdna4, _is_cdna)
-from tinygrad.llm.kernels.amd_gguf import q8_quantize, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, Q4_K, IQ3_S
+from tinygrad.llm.kernels.amd_gguf import q8_quantize, QUANT_SIZES, QUANT_NAMES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, Q4_K, IQ3_S
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.runtime.test_llm_quantized import QuantLinearMixin
 
@@ -70,15 +71,14 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_iq3_s_linear(self): self._test_quant_linear(21, 110, in_features=768, token_counts=(1, 3, 16))
   def test_iq2_s_linear(self): self._test_quant_linear(22, 82, in_features=768, token_counts=(1, 3, 16))
 
-  def test_wmma_linear_symbolic(self):
+  def _test_wmma_linear_symbolic(self, typ):
     with patch("tinygrad.llm.kernels.amd_gguf.q8_quantize", side_effect=AssertionError("expected WMMA")):
-      for typ in QUANT_SIZES:
-        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=48, token_counts=(3, 17), bias=True, symbolic=True)
+      self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=48, token_counts=(3, 17), bias=True, symbolic=True)
 
-  def test_mixed_quant_linear_wmma_tiles(self):
+  def _test_mixed_quant_linear_wmma_tiles(self, typ):
     with patch("tinygrad.llm.kernels.amd_gguf.q8_quantize", side_effect=AssertionError("expected WMMA")):
-      for typ in HALFWORD_QUANTS:
-        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=768, out_features=64, token_counts=(16, 32, 64), bias=True)
+      # One quant block suffices for tile coverage; test_wmma_dequantization_basis covers multi-block addressing.
+      self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=64, token_counts=(16, 32, 64), bias=True)
 
   def test_wmma_dequantization_basis(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
@@ -452,5 +452,12 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     values = np.concatenate([old_kv[1, 0, 0], new_kv[1, 0, 0]]).astype(np.float16).astype(np.float32)
     expected = np.stack([values[:start_pos+i+1].mean(0) for i in range(32)])[None, None].repeat(8, axis=1)
     np.testing.assert_allclose(out.numpy(), expected, rtol=2e-3, atol=2e-3)
+
+# Each format gets its own timeout and can run on a separate xdist worker.
+for typ in QUANT_SIZES:
+  setattr(TestQ8Quantize, f"test_wmma_linear_symbolic_{QUANT_NAMES[typ]}", partialmethod(TestQ8Quantize._test_wmma_linear_symbolic, typ))
+for typ in HALFWORD_QUANTS:
+  setattr(TestQ8Quantize, f"test_mixed_quant_linear_wmma_tiles_{QUANT_NAMES[typ]}",
+          partialmethod(TestQ8Quantize._test_mixed_quant_linear_wmma_tiles, typ))
 
 if __name__ == "__main__": unittest.main()
