@@ -4837,6 +4837,36 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int, base:int
   # (fp8: the rows as they are, the attention reads them so. a bitcast would be a copy of all of it)
   return out if fp8 and raw or half else out.bitcast(dtypes.half)
 
+@functools.cache
+def _seq_a2a_pay_kernel(out:UOp, parts:UOp, ml:UOp, *, G:int, T:int, S:int, hl:int, dims:int, pad_n:int) -> UOp:
+  """
+  mla_sparse_seq's one-user exchange payload in one kernel (SEQ_PAY_FUSED): a device's splits combined (their max, the sum of their weights,
+  the outputs normed by it) written as the all to all's parts (dest, row, head, [outputs, max, sum]), the three kernels' float ops in their
+  order (max chain, the weights' products rounded (they were stored), their sum in split order, the outputs' (p*l)*e in split order times
+  the reciprocal of the sum)
+  """
+  n = cast(int, out.shape[0]) // pad_n
+  Dp, D = dims + 2, cast(int, parts.shape[-1])
+  i = UOp.range(n*pad_n, 0, AxisType.GLOBAL)
+  j, r = i // pad_n, i % pad_n
+  ok = r < T*hl*Dp
+  t, hloc, col = r // (hl*Dp) % T, r // Dp % hl, r % Dp
+  h = j*hl + hloc
+  g, h16 = h // 16, h % 16
+  rows = [((g*T + t)*S + s)*16 + h16 for s in range(S)]
+  ms = [ml[rw.valid(ok), 0].load() for rw in rows]
+  ls = [ml[rw.valid(ok), 1].load() for rw in rows]
+  mx = functools.reduce(lambda a, b: a.maximum(b), ms[1:], ms[0])
+  es = [((m - mx) * 1.4426950216293335).exp2() for m in ms]
+  ws = [_sys("__fmul_rn({0}, {1})", dtypes.float32, l, e) for l, e in zip(ls, es)]
+  ld = functools.reduce(lambda a, b: a + b, ws[1:], ws[0])
+  isod = ok & (col < dims)
+  ps = [parts[rw.valid(isod), col.minimum(D-1)].load() for rw in rows]
+  od = functools.reduce(lambda a, b: a + b, [(p * l) * e for p, l, e in zip(ps, ls, es)]) * ld.maximum(1e-30).reciprocal()
+  zero = UOp.const(0.0, dtypes.float32)
+  val = isod.where(od, zero) + (ok & col.eq(dims)).where(mx, zero) + (ok & col.eq(dims+1)).where(ld, zero)
+  return out[i].store(val).end(i).sink(arg=KernelInfo(name="seq_a2a_pay", opts_to_apply=()))
+
 def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None,
                    dims:int|None=None, base:int|UOp=0) -> Tensor:
   """
@@ -4897,11 +4927,17 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
     if a2a_half: odp = odp.maximum(-65504.0).minimum(65504.0).cast(dtypes.half).contiguous().bitcast(dtypes.float32)
     Dv = dims // 2 if a2a_half else dims
     hl, Dp = int(H) // n, Dv + 2
-    pay = odp.cat(mx.squeeze(3), ld, dim=-1).permute(0, 2, 1, 3, 4).reshape(n, T, G*16, Dp)[:, :, :H]
-    pay = pay.reshape(n, T, n, hl, Dp).permute(0, 2, 1, 3, 4).reshape(n, n, T*hl*Dp)
     Ti = cast(int, T)
     pad_n = round_up(Ti*hl*Dp, 256)
-    if (g:=p2p_all_to_all(pay.pad((None, None, (0, pad_n - Ti*hl*Dp))))) is not None:
+    if getenv("SEQ_PAY_FUSED", 0) and not a2a_half and split > 1:
+      # (SEQ_PAY_FUSED: the splits' combine and the payload in one kernel, not three: the same floats)
+      pay = Tensor.custom_kernel(Tensor.empty(n*n*pad_n, dtype=dtypes.float32, device=devs, axis=0), parts, ml,
+                                 fxn=functools.partial(_seq_a2a_pay_kernel, G=G, T=Ti, S=split, hl=hl, dims=dims, pad_n=pad_n))[0]
+      pay = pay.reshape(n, n, pad_n)
+    else:
+      pay = odp.cat(mx.squeeze(3), ld, dim=-1).permute(0, 2, 1, 3, 4).reshape(n, T, G*16, Dp)[:, :, :H]
+      pay = pay.reshape(n, T, n, hl, Dp).permute(0, 2, 1, 3, 4).reshape(n, n, T*hl*Dp).pad((None, None, (0, pad_n - Ti*hl*Dp)))
+    if (g:=p2p_all_to_all(pay)) is not None:
       g = g.reshape(n, n, pad_n)[:, :, :T*hl*Dp].reshape(n, n, T, hl, Dp)
       gm, gl, go = g[..., Dv:Dv+1], g[..., Dv+1:Dv+2], g[..., :Dv]
       if a2a_half: go = go.contiguous().bitcast(dtypes.half).float()
