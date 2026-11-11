@@ -3755,6 +3755,25 @@ def _mla_bmm_kernel(out:UOp, x:UOp, w:UOp) -> UOp:
   return out[h, t, o].store(acc[0].load()).end(e, tl).sink(arg=KernelInfo(name="mla_bmm", opts_to_apply=()))
 
 @functools.cache
+def _mla_bmm_rows_kernel(out:UOp, x:UOp, w:UOp) -> UOp:
+  # _mla_bmm_kernel's values (every output the half products in the order of i, from 0), a thread an output column (h, o) for all the T rows:
+  # w read once (all the heads on every device: SEQ_Q_PRE)
+  H, T, I = cast(tuple[int, int, int], x.shape)
+  O = cast(int, w.shape[1])
+  e, tl = UOp.range(H*O // 64, 0, AxisType.GLOBAL), UOp.range(64, 1, AxisType.LOCAL)
+  idx = e * 64 + tl
+  h, o = idx // O, idx % O
+  acc = _reg((T,), 0)
+  i = UOp.range(I // 4, 2, AxisType.LOOP)
+  ws = [w[h, o, i*4 + j].load() for j in range(4)]
+  upd = []
+  for t in range(T):
+    prods = [(x[h, t, i*4 + j].load().cast(dtypes.half) * ws[j]).cast(dtypes.float) for j in range(4)]
+    upd.append(acc[t].store(functools.reduce(lambda a, b: a + b, prods, acc.after(i)[t].load())))
+  acc = acc.after(UOp.group(*upd).end(i))
+  return UOp.group(*[out[h, t, o].store(acc[t].load()) for t in range(T)]).end(e, tl).sink(arg=KernelInfo(name="mla_bmm_rows", opts_to_apply=()))
+
+@functools.cache
 def _mla_bmm_wave_kernel(out:UOp, x:UOp, w:UOp) -> UOp:
   # out[h, t, o] = sum over i of x[h, t, i] * w[h, o, i] (half products summed in float): a wave a row (h, o) of w, a lane 8 inputs of it
   # a load (coalesced), the dots of all the tokens summed over the lanes
@@ -3860,7 +3879,7 @@ def weighted_sum(x:Tensor, p:Tensor) -> Tensor|None:
   res = Tensor.custom_kernel(out, x.reshape(n*R, int(S), int(D)), p.reshape(n*R, int(S)), fxn=_weighted_sum_kernel)[0]
   return res.reshape(*lead, int(D))
 
-def mla_bmm(x:Tensor, w:Tensor) -> Tensor:
+def mla_bmm(x:Tensor, w:Tensor, rows:bool=False) -> Tensor:
   """(B=1, H, T, I) @ (H, O, I)^T in half products summed in float, (1, H, T, O): x.half().matmul(w.transpose(-1, -2), dtype=float)'s values"""
   B, H, T, I = x.shape
   O = w.shape[1]
@@ -3869,7 +3888,9 @@ def mla_bmm(x:Tensor, w:Tensor) -> Tensor:
   # (a wave a row up to MLA_BMM_WAVE_T tokens: speculative decoding, batched too)
   wave = getenv("MLA_BMM_WAVE", 1) and int(I) % (WARP_SIZE*8) == 0 and (int(H)*int(O)) % 4 == 0 and int(T) <= getenv("MLA_BMM_WAVE_T", 32) and \
     w.dtype == dtypes.half
-  fxn = _mla_bmm_wave_kernel if wave else _mla_bmm_kernel
+  # (rows: a thread a column of w for every row, the weights read once: the same values as a thread an output)
+  rows = not wave and rows and int(T) <= 8 and (int(H)*int(O)) % 64 == 0 and int(I) % 4 == 0
+  fxn = _mla_bmm_wave_kernel if wave else _mla_bmm_rows_kernel if rows else _mla_bmm_kernel
   xin = x.reshape(H, T, I).cast(dtypes.half) if wave else x.reshape(H, T, I).contiguous()
   return Tensor.custom_kernel(out, xin, w, fxn=fxn)[0].reshape(B, H, T, O)
 

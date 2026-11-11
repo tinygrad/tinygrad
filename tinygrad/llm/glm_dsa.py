@@ -16,6 +16,7 @@ from tinygrad.llm.kernels.amd_glm_dsa import Linear, gated_delta_prefill, flash_
   mla_bmm, bmm_wmma, weighted_sum, rows_gather, \
   nucleus, seq_store, mla_sparse_seq, seq_views, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
 from tinygrad.llm.kernels.amd_glm_dsa import p2p_check, host_allgather, Q8_0, mla_sparse_seq_tokens, ring_all_gather_q8, lists_pad, GEMM_ROWS
+from tinygrad.llm.kernels.amd_glm_dsa import host_allgather_half, _seq_p2p_pack
 from tinygrad.llm.kernels.amd_glm_dsa import sp_reduce_scatter, all_to_all, mla_sparse_tokens, tbo_ag_parts, tbo_a2a_pre, \
   tbo_a2a_parts, tbo_a2a_post, tbo_rs_pre, tbo_rs_parts, tbo_rs_post, tbo_q8_pre, tbo_q8_post
 from tinygrad.llm.glm_dsa_gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
@@ -1427,6 +1428,21 @@ class MLATransformerBlock(FFNBlock):
     offs = list(itertools.accumulate(sizes, initial=0))
     return tuple(full[..., a:b] for a, b in zip(offs, offs[1:]))
 
+  def _q_pre(self, q_nope:Tensor, q_rope:Tensor) -> Tensor|None:
+    """
+    SEQ_Q_PRE (a few rows, sequence sharded cache): the queries of every device's heads gathered before k_b (128 + 64 halves a head and row, not
+    the 512 + 64 after it: a third of the bytes), k_b of all the heads on every device (_k_b_rep): the queries of all the heads on every device,
+    the values mla_sparse_seq's gather has (the halves of the same floats: k_b's products are of the halves)
+    """
+    if (kbr:=getattr(self, "_k_b_rep", None)) is None or not self.seq_sharded or q_nope.uop.axis != 1 or not isinstance(Tq:=q_nope.shape[2], int) \
+       or Tq > getenv("SEQ_P2P_ROWS", 16) or _seq_p2p_pack() is not None: return None
+    n, H, nope = len(cast(tuple, q_nope.device)), int(q_nope.shape[1]), int(q_nope.shape[-1])
+    D = nope + int(q_rope.shape[-1])
+    parts = q_nope.half().cat(q_rope.half(), dim=-1).contiguous().reshape(n, H//n, Tq, D)
+    if (g:=host_allgather_half(parts.reshape(n, -1))) is None: return None
+    full = g.reshape(n, H//n, Tq, D).reshape(1, H, Tq, D)
+    return mla_bmm(full[..., :nope], kbr, rows=True).cat(full[..., nope:], dim=-1)
+
   def _attention_rows(self, x:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
     # x has Tq rows, the first T are the tokens at start_pos
     B, Tq, _ = x.shape
@@ -1444,9 +1460,11 @@ class MLATransformerBlock(FFNBlock):
     k_b, half = self.attn_k_b["weight"].transpose(-1, -2), self.attn_k_b["weight"].dtype == dtypes.half and (not isinstance(Tq, int) or Tq > 1)
     # a few tokens: a thread an output (the same values)
     bmm = half and B == 1 and isinstance(Tq, int) and Tq <= 8 and amd_custom_kernels_supported(x.device) and bool(getenv("MLA_BMM", 1))
-    if bmm: q_nope = mla_bmm(q_nope, self.attn_k_b["weight"])
-    else: q_nope = q_nope.half().contiguous().matmul(k_b, dtype=dtypes.float).contiguous() if half else q_nope @ k_b
-    q = q_nope.cat(q_rope.cast(q_nope.dtype), dim=-1)
+    if bmm and (qp:=self._q_pre(q_nope, q_rope)) is not None: q = qp
+    else:
+      if bmm: q_nope = mla_bmm(q_nope, self.attn_k_b["weight"])
+      else: q_nope = q_nope.half().contiguous().matmul(k_b, dtype=dtypes.float).contiguous() if half else q_nope @ k_b
+      q = q_nope.cat(q_rope.cast(q_nope.dtype), dim=-1)
 
     kv_a = dec[1] if dec is not None else self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
@@ -3101,6 +3119,11 @@ class Transformer(GLMSeqDriver):
     # (the MLA caches' peer views made (allocated) before jits are captured in forked processes, see seq_gather)
     for b in self.blk + [self.mtp]:
       if isinstance(b, MLATransformerBlock) and b.seq_sharded: seq_views(b.cache_s)
+    # (SEQ_Q_PRE: k_b of all the heads on every device, see MLATransformerBlock._q_pre)
+    if getenv("SEQ_Q_PRE", 0):
+      for b in self.blk + [self.mtp]:
+        if isinstance(b, MLATransformerBlock) and b.seq_sharded and (w:=b.attn_k_b["weight"]).uop.axis == 0 and w.dtype == dtypes.half:
+          b._k_b_rep = w.to(devs[0]).contiguous().shard(devs).realize()
 
   def _seq_copy(self, save:bool, slot:UOp, pm:UOp, ps:UOp, pc:UOp, hrow:UOp, keep:UOp):
     """The DSA sequence slot has hidden MTP rows; pooled-indexer rings too. Direct DSA keys stay in the region."""
