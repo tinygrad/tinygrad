@@ -5102,8 +5102,10 @@ def rows_pick(xs:list[Tensor], row:UOp, var:UOp, lane0:int) -> Tensor:
     tot = g if tot is None else tot + g
   return cast(Tensor, tot)
 
+@functools.cache
 def _device_index(devs:tuple[str, ...]) -> Tensor:
-  # the index of every device on it (a kernel's own part)
+  # the index of every device on it (a kernel's own part). made once (_seq_shared, before the captures): a realize while a jit is traced
+  # walks every live tensor's graph (65 a step jit: 39 of a size-9 step's 92 profiled seconds), as amd_qwen's and amd_glm_dsa's
   return Tensor(list(range(len(devs))), dtype=dtypes.int32).shard(devs, 0).realize()
 
 @functools.cache
