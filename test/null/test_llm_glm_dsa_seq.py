@@ -163,6 +163,13 @@ class TestGLMDSASequence(unittest.TestCase):
     a, b = (sink(Tensor.empty(5*16*4, 576), q, cache, index, fxn=functools.partial(_mla_sparse_wmma_kernel, scale=0.1, valid_len=sp, hg=hg))
             for hg in (0, 5))
     self.assertIsNot(a, b)
+    # (Q8_GEMM_SC: the gemm scales x's rows as it loads them)
+    from tinygrad.llm.kernels.amd_glm_dsa import _q8_gemm_kernel
+    M, N, K = 96, 128, 256
+    raw, xg, scg = Tensor.empty(N*(K//32)*17, dtype="uint16"), Tensor.empty(M, K, dtype="half"), Tensor.empty(M, 1)
+    for extra in ((), (scg,)):
+      fxn = functools.partial(_q8_gemm_kernel, token_tile=96, out_features=N, in_features=K)
+      self.assertIs(sink(Tensor.empty(M, N), raw, xg, *extra, fxn=fxn).op, Ops.SINK)
 
   def test_dsa_stash_roundtrip(self):
     def t(shape, axis=None):

@@ -1124,7 +1124,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
                             layout, dequant, f"linear_{QUANT_NAMES[ggml_type]}_f16_wmma", rdna4, group, expert_words, x_div, act)
 
 @functools.cache
-def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, token_tile:int, out_features:int=0, in_features:int=0, ggml_type:int=Q8_0) -> UOp:
+def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *sc:UOp, token_tile:int, out_features:int=0, in_features:int=0, ggml_type:int=Q8_0) -> UOp:
   # Q8_0 weights (rows of 32 weight blocks of 17 halfwords) times f16 x on RDNA4 WMMA: a workgroup computes token_tile tokens x 128 outputs with
   # 4 waves, two of the tokens by two of the outputs (4 tiles of 16 outputs each). per group of 32 inputs the workgroup puts the tokens' x and
   # the dequantized weights (a block a thread) in LDS: a weight is dequantized once for token_tile tokens, x is loaded once for 128 outputs
@@ -1149,7 +1149,10 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, token_tile:int, out_features:int=0,
   for k in range((token_tile * 4 * GS + 127) // 128):
     e = tid + k * 128
     r, c = (e // (4*GS)).minimum(token_tile - 1), e % (4*GS)
-    st += [lds_x[r.valid(e < token_tile * 4 * GS), c * 8 + i].store(x[token_block * token_tile + r, g * 32 + c * 8 + i]) for i in range(8)]
+    # (sc: x's rows over their power of two (Q8_GEMM_SC, see _half_rows) as they are loaded: the same float ops as the copy's)
+    xs = [x[token_block * token_tile + r, g * 32 + c * 8 + i] for i in range(8)]
+    if sc: xs = [(v.load().cast(dtypes.float) / sc[0][token_block * token_tile + r, 0].load()).cast(dtypes.float16) for v in xs]
+    st += [lds_x[r.valid(e < token_tile * 4 * GS), c * 8 + i].store(xs[i]) for i in range(8)]
   for gi in range(GS):
     if ggml_type == Q6_K:
       # (Q6_K: a group's 32 weights of a block of 256, their 6 bit values less 32 times the scale of their half (16), in half as the f16 path's)
@@ -1262,7 +1265,13 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
        _wmma_rdna4(x.device) and (tt:=next((t for t in (96, 128, 64) if local_rows % t == 0), 0)) and getenv("Q8_GEMM", 1):
     # many tokens: the weights dequantized in LDS for token tiles of tt
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type)
-    srcs = ((xh:=_half_rows(x, tokens, local_splits))[0],)
+    if getenv("Q8_GEMM_SC", 0) and local_splits == 1 and getenv("HALF_ROWS", 1) and x.dtype == dtypes.half:
+      # (Q8_GEMM_SC, default off: a half x's rows scaled by the gemm as it loads them, not a scaled copy of all of x (_half_rows))
+      xr = x.reshape(tokens, x.shape[-1])
+      amax = xr.float().abs().max(-1, keepdim=True)
+      sc = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
+      srcs, xh = (xr.contiguous(), sc), (xr, sc)
+    else: srcs = ((xh:=_half_rows(x, tokens, local_splits))[0],)
   elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None:
     if layer.ggml_type == IQ4_XS:
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
