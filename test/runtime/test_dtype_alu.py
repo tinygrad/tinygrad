@@ -335,6 +335,10 @@ class TestDTypeALU(unittest.TestCase):
     self.assertEqual(((t+t*(2**31-1))//2).tolist(), [-2**30, 0])
     self.assertEqual((((u+t*(2**31-1))+t)//2).tolist(), [-2**30, 0])
 
+  def test_add_right_operand_no_overflow(self):
+    self.assertEqual((2**30+(2**30+Tensor([-5], dtype=dtypes.int32))).tolist(), [2**31-5])
+    self.assertEqual((2**62+(2**62+Tensor([-5], dtype=dtypes.int64))).tolist(), [2**63-5])
+
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, CUDARenderer), "nvrtc 11.5 reassociates (x+c)+y<d and folds it to True")
   def test_reassociate_no_overflow(self):
     t, c = Tensor.arange(3, dtype=dtypes.int32), Tensor([False, True])
@@ -353,6 +357,9 @@ class TestDTypeALU(unittest.TestCase):
     self.assertEqual(((Tensor([1.])+(z:=Tensor([1e38]))*4)+z*-3).tolist(), [math.inf])
     self.assertEqual(((Tensor([1.])+z*-3.5)+z).tolist(), [-math.inf])
     self.assertEqual(((Tensor([1.])+c.where(1e8, x))+c.where(-1e8, x)).tolist(), [0.])
+
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer), "backend compiler reassociates floats")
+  def test_float_reassociate_consts(self): self.assertEqual(((Tensor([1.])+1e8)-1e8).tolist(), [0.])
 
   def test_fused_div_matches_unfused(self):
     x, y, z = Tensor([3e38, 1e30, 1.7]), Tensor([1e20, 1e30, 1.3]), Tensor([1e20, 1e10, 3.1])
@@ -429,6 +436,11 @@ class TestDTypeALU(unittest.TestCase):
 
   def test_shl(self): self._test_shl()
   def test_shr(self): self._test_shr()
+  def test_shr_long_of_small_value(self):
+    self.assertEqual((Tensor([-1, 5], dtype=dtypes.int8).cast(dtypes.int64) >> 32).tolist(), [-1, 0])
+  def test_mod_long_of_int_min(self):
+    a, b = Tensor([-2**31, 5], dtype=dtypes.int32).cast(dtypes.int64), Tensor([-1, -2], dtype=dtypes.int8).minimum(-1).cast(dtypes.int64)
+    self.assertEqual((a % b).tolist(), [0, -1])
 
   @Context(EMULATED_DTYPES="long")
   def test_emulated_shl(self): self._test_shl()

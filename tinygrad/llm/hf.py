@@ -67,6 +67,6 @@ def hf_load(path:pathlib.Path, devices:tuple[str, ...], names:dict[str, str|list
     if scale is not None and use_fnuz:
       w, scale = e4m3fn_to_fnuz(w, scale)
       Tensor.realize(w, scale)
-    state_dict[name] = w
+    state_dict[name] = w.realize()
     if scale is not None: state_dict[name + "_scale_inv"] = scale
   return state_dict

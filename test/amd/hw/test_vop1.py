@@ -1258,7 +1258,7 @@ class TestF16EdgeCases(unittest.TestCase):
 
 
 class TestExpEdgeCases(unittest.TestCase):
-  """Additional edge cases for V_EXP_F32."""
+  """Tests for V_EXP_F32 and V_EXP_F16."""
 
   def test_v_exp_f32_zero(self):
     """V_EXP_F32 of 0.0 returns 1.0 (2^0 = 1)."""
@@ -1286,6 +1286,19 @@ class TestExpEdgeCases(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.5, places=5)
+
+  def test_v_exp_f16(self):
+    """V_EXP_F16 computes 2^x in half precision: 2^3 = 8, 2^-1 = 0.5."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(3.0)),
+      s_mov_b32(s[1], f32_to_f16(-1.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[2], s[1]),
+      v_exp_f16_e32(v[1], v[0]),
+      v_exp_f16_e32(v[3], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual((f16(st.vgpr[0][1]), f16(st.vgpr[0][3])), (8.0, 0.5))
 
   def test_v_exp_f32_inf(self):
     """V_EXP_F32 of +inf returns +inf."""

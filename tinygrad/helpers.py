@@ -277,7 +277,6 @@ PROFILE = ContextVar("PROFILE", abs(VIZ.value))
 SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed
 CHECK_OOB = ContextVar("CHECK_OOB", 0)
-DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
 # set to 1, this uses tuplize in the linearizer sort order
 TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
 # set to 0 to disable the compiler cache
@@ -424,17 +423,14 @@ def diskcache_get(table:str, key:dict|str|int) -> Any:
   if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
   return None
 
-_db_tables: set[str] = set()
 def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
   if CACHELEVEL < 1: return val
   if isinstance(key, (str,int)): key = {"key": key}
   conn = db_connection()
   cur = conn.cursor()
-  if table not in _db_tables:
-    TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
-    ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
-    cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
-    _db_tables.add(table)
+  TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
+  ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
+  cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
   cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key))}, ?)",
               tuple(key.values()) + (val if prepickled else pickle.dumps(val),))
   conn.commit()

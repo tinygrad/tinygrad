@@ -1,9 +1,10 @@
 from dataclasses import replace
-from tinygrad.dtype import dtypes, to_dtype
+from tinygrad.dtype import AddrSpace, dtypes, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp
 from tinygrad.uop.ops import graph_rewrite, MapCtx, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
-from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
+from tinygrad.uop.symbolic import symbolic
+from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort, dedup
 from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
@@ -61,16 +62,25 @@ pm_fold_moved_after = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
+def _valid(i:UOp) -> UOp:
+  # an index is invalid where its valid is false, the gates inside the index math are lifted out first
+  if any(x.is_invalid for x in i.get_idx().backward_slice): i = graph_rewrite(i, symbolic, name="lift gates")
+  return i.get_valid()
+
 # movement op on INDEX as a PatternMatcher
 def _mop_index(r:UOp, idx:UOp):
-  idxs = idx.src[1:]
-  if len(idxs) == len(r.shape):
-    return r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idxs), arg=idx.arg)
-  if r.op is Ops.RESHAPE:
-    src_prefix = len(r.src[0].shape) - len(r.shape[len(idxs):])
-    if src_prefix >= 0 and r.src[0].shape[src_prefix:] == r.shape[len(idxs):]:
-      ret = r.src[0].index(*apply_movement_op(r.op, r.src[0].shape[:src_prefix], r.shape[:len(idxs)], idxs), arg=idx.arg)
-      return ret if ret.shape == idx.shape else None
+  idxs, in_shape, arg = idx.src[1:], r.src[0].shape, r.marg
+  if partial := len(idxs) != len(r.shape):
+    src_prefix = len(in_shape) - len(r.shape[len(idxs):])
+    if r.op is not Ops.RESHAPE or src_prefix < 0 or in_shape[src_prefix:] != r.shape[len(idxs):]: return None
+    in_shape, arg = in_shape[:src_prefix], r.shape[:len(idxs)]
+  new_idxs = apply_movement_op(r.op, in_shape, arg, idxs)
+  kept = {UOp.const(True)} | {c for i in new_idxs for c in _valid(i).split_uop(Ops.AND)}
+  dropped = dedup(c for i in idxs for c in _valid(i).split_uop(Ops.AND) if c not in kept)
+  if (ret := r.src[0].index(*new_idxs, arg=idx.arg)).shape != idx.shape and partial: return None
+  # the gates the movement op dropped from the indexes still gate the value
+  if dropped: ret = dropped[0].uprod(*dropped[1:]).where(ret, ret.dtype.const(0))
+  return ret.after(*[i for i in idxs if i.op_in_backward_slice_with_self(*GroupOp.Effect)])
 
 pm_mops = PatternMatcher([
   # handle movement ops on INDEX
@@ -80,9 +90,12 @@ pm_mops = PatternMatcher([
    lambda a,b,dst,pad,val: (a&b).where(dst, 0).store(val) if pad.is_invalid else None),
   (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")), 0).store(UPat.var("val")),
    lambda cond,buf,idx,val: buf.index(idx.valid(cond)).store(val)),
-  # move movement ops and INDEX after AFTER
+  # storage moves movement ops and INDEX after AFTER
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
-   lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
+   lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg) if r.addrspace is not AddrSpace.ALU else None),
+  # a value keeps AFTER outside INDEX
+  (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="a"),), allow_any_len=True, name="x"),
+   lambda a,x: a.src[0].index(*x.src[1:]).after(*a.src[1:]) if a.addrspace is AddrSpace.ALU else None),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
 ])
 
@@ -159,10 +172,12 @@ def copy_to_anon_store(x:UOp, copy:UOp):
   return buf.after(buf.store(x)).shrink_to(copy.shape)
 
 def stage_to_anon_store(x:UOp, stg:UOp):
+  if stg.arg is not None and stg.arg.addrspace is not AddrSpace.GLOBAL: return None
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp.alloc(x.max_shape, stg.dtype, device=x.device)
+  buf = UOp.alloc(stg.max_shape, stg.dtype, device=x.device)
   view = buf.shrink_to(stg.shape)
-  return view.after(view.store(x))
+  dst = view.index(*stg.src[1:]) if len(stg.src) > 1 else view
+  return view.after(dst.store(x).end(*stg.src[1:]))
 
 def materialize_cross_device_src(dest:UOp, src:UOp):
   # cross-device copies must read a whole buffer (SDMA can't do offset copies)
@@ -176,11 +191,11 @@ pm_inline_calls = PatternMatcher([
 
 pm_disk_copy = PatternMatcher([
   # remove contiguous on movement ops before a copy on disk
-  (UPat(GroupOp.Movement, name="x").f(Ops.STAGE).f(Ops.COPY, name="copy"), lambda x,copy:
+  (UPat(GroupOp.Movement | {Ops.BITCAST}, name="x").f(Ops.STAGE).f(Ops.COPY, name="copy"), lambda x,copy:
    copy.replace(src=(x,)) if x.on_disk() else None),
   # push all movement ops to the destination: views exposed here are no longer normalized into input PARAMs,
   # so leaving SHRINK/RESHAPE behind can cause materialize_cross_device_src to allocate a temporary on disk
-  (UPat(GroupOp.Movement, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
+  (UPat(GroupOp.Movement | {Ops.BITCAST}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
    x.replace(src=(copy.replace(src=(x.src[0],)),)+x.src[1:]) if x.on_disk() else None),
 ])
 
@@ -212,8 +227,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.STAGE, src=(UPat.var("x"),)),
    lambda x: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY else None),
 
-  # a bare STAGE is an anonymous same-device materialization: realize it as a STORE into a fresh call-local buffer
-  (UPat(Ops.STAGE, src=(UPat.var("x"),), name="stg"), stage_to_anon_store),
+  # a GLOBAL STAGE stores each value slice at its leading range coordinates in a fresh call-local buffer
+  (UPat(Ops.STAGE, src=(UPat.var("x"),), allow_any_len=True, name="stg"), stage_to_anon_store),
 
   # reshaping on STORE can be a NOOP
   (UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),

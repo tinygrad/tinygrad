@@ -185,6 +185,9 @@ def __getattr__(nm):
                   args=["-Du8=unsigned char", "-Du16=unsigned short", "-Du32=unsigned int", "-Du64=unsigned long long",
                         "-D__be16=unsigned short", "-D__be32=unsigned int", "-D__be64=unsigned long long", f"-I{kh}"],
                   preprocess=_extract_deb)
+    case "nvme":
+      kh = "{}/usr/src/linux-headers-6.18.9+deb14-common/include"
+      return load("nvme", [f"{kh}/linux/nvme.h"], srcs=linux_headers_kern_deb, args=["-D__KERNEL__", f"-I{kh}"], preprocess=_extract_deb)
     case "bnxt":
       kh = "{}/usr/src/linux-headers-6.18.9+deb14-common/include"
       return load("bnxt", [f"{kh}/linux/bnxt/hsi.h", *[f"{{}}/{s.split('/')[-1].split('?')[0]}" for s in bnxt_src]],

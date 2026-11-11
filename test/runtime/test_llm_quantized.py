@@ -2,8 +2,8 @@ import gc, itertools, unittest, weakref
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, function, Device, TinyJit
 from tinygrad.helpers import Context
-from tinygrad.llm.kernels.amd import (Linear, fp8_matmul, amd_custom_kernels_supported, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS,
-                                      iq4_half_lut, _iq_grid)
+from tinygrad.llm.kernels.amd import Linear, fp8_matmul, amd_custom_kernels_supported
+from tinygrad.llm.kernels.amd_gguf import QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, iq4_half_lut, _iq_grid
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.llm.model import ExpertWeights
 from tinygrad.llm.hf import e4m3fn_to_fnuz

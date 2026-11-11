@@ -4,7 +4,7 @@ import fcntl
 from tinygrad.device import BufferStorage, Buffer, Device
 from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize, DEV
 from tinygrad.runtime.autogen import libc, pci, vfio
-from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator, MMIOInterface, TLSFAllocator
+from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator, MMIOInterface, TLSFAllocator, MemoryManager
 from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, USBMMIOInterface
 
 def filter_visible_devices(devs, device):
@@ -79,6 +79,16 @@ class _System:
 
   def lock_memory(self, addr:int, size:int):
     if libc.mlock(ctypes.c_void_p(addr), size): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
+
+  @functools.cache
+  def vfio_group(self, grp:str) -> FileIOInterface:
+    for dev in FileIOInterface(f"/sys/kernel/iommu_groups/{grp}/devices").listdir():
+      if FileIOInterface.exists(drv:=f"/sys/bus/pci/devices/{dev}/driver") and not FileIOInterface.readlink(drv).endswith(("/vfio-pci", "/pcieport")):
+        FileIOInterface(f"{drv}/unbind", os.O_WRONLY).write(dev)
+    self.vfio = self.vfio or FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
+    vfio.VFIO_GROUP_SET_CONTAINER(group:=FileIOInterface(f"/dev/vfio/{grp}", os.O_RDWR), ctypes.c_int(self.vfio.fd))
+    with contextlib.suppress(OSError): vfio.VFIO_SET_IOMMU(self.vfio, vfio.VFIO_TYPE1v2_IOMMU) # set iommu works only once for the fd.
+    return group
 
   def vfio_map(self, vaddr:int, size:int, align:int=1) -> int:
     iova = self.iova.alloc(size, align)
@@ -217,16 +227,12 @@ class PCIDevice:
     for fn in range(1, 8):
       if FileIOInterface.exists(sib:=f"/sys/bus/pci/devices/{self.pcibus[:-1]}{fn}"): FileIOInterface(f"{sib}/remove", os.O_WRONLY).write("1")
 
-    if FileIOInterface.exists(grp:=f"/sys/bus/pci/devices/{self.pcibus}/iommu_group") and FileIOInterface(f"{grp}/type").read().strip() != "identity":
+    if FileIOInterface.exists(grp:=f"/sys/bus/pci/devices/{self.pcibus}/iommu_group"):
       if not FileIOInterface.exists("/sys/module/vfio_pci"): raise RuntimeError("IOMMU is on: run `sudo modprobe vfio-pci disable_idle_d3=1`")
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
       FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
-      vfio_fd = System.vfio = System.vfio or FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
-      self.vfio_group = FileIOInterface(f"/dev/vfio/{FileIOInterface.readlink(grp).split('/')[-1]}", os.O_RDWR)
-      vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(vfio_fd.fd))
-
-      with contextlib.suppress(OSError): vfio.VFIO_SET_IOMMU(vfio_fd, vfio.VFIO_TYPE1v2_IOMMU) # set iommu works only once for the fd.
-      self.vfio_dev = FileIOInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode())))
+      group = System.vfio_group(FileIOInterface.readlink(grp).split('/')[-1])
+      self.vfio_dev = FileIOInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(group, ctypes.create_string_buffer(self.pcibus.encode())))
 
       self.irq_fd = FileIOInterface.eventfd(0, 0)
       self.irq_poller = select.poll()
@@ -335,6 +341,13 @@ class PCIIfaceBase:
 
   def p2p_paddrs(self, paddrs:list[tuple[int,int]]) -> tuple[list[tuple[int,int]], AddrSpace]:
     return [(p + self.pci_dev.bar_info(self.vram_bar)[0], sz) for p, sz in paddrs], AddrSpace.SYS
+
+  def storage(self, mem:MMIOInterface, paddrs:list[int], snooped:bool=True) -> BufferStorage:
+    va = MemoryManager.alloc_vaddr(size:=round_up(mem.nbytes, 0x1000), 0x1000)
+    mapping = VirtMapping(va, size, [(p, 0x1000) for p in paddrs], AddrSpace.SYS, uncached=True, snooped=snooped)
+    return BufferStorage(va, PCIAllocationMeta(mapping, True), mem)
+  def buffer(self, mem:MMIOInterface, paddrs:list[int], snooped:bool=True) -> Buffer:
+    return Buffer(self.dev.device, mem.nbytes, opaque=self.storage(mem, paddrs, snooped))
 
   def map(self, b:Buffer) -> BufferStorage:
     if (host:=b.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}):

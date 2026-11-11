@@ -393,6 +393,10 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_equal(t.tolist(), data)
     np.testing.assert_equal((t+1).tolist(), data+1)
 
+  def test_from_numpy_big_endian(self):
+    self.assertEqual(Tensor(np.array([1, 2, 3], dtype=">i4")).tolist(), [1, 2, 3])
+    self.assertEqual(Tensor(np.array([1.5, 2.5], dtype=">f8")).tolist(), [1.5, 2.5])
+
   # Regression test for https://github.com/tinygrad/tinygrad/issues/1751
   def test_copy_from_numpy_unaligned(self):
     # 2**15 is the minimum for repro
@@ -438,6 +442,12 @@ class TestTinygrad(unittest.TestCase):
     self.assertListEqual(t.shrink_to(None, 2).tolist(), t.shrink_to(4, 2).tolist())
     with self.assertRaises(ValueError): t.shrink_to(2)
     with self.assertRaises(ValueError): t.shrink_to(2, 2, 2)
+
+  def test_identity_movement_is_self(self):
+    t = Tensor.empty(2, 3)
+    for x in (t.reshape(2, 3), t.pad(((0,0),(0,0))), t.shrink(((0,2),(0,3))), t.permute(0, 1), t.pad_to(2, 3), t.expand(2, 3)): assert x is t
+    t = Tensor.empty(v:=UOp.variable("v", 1, 10).bind(4), 3)
+    assert t.shrink(((0, v), None)) is t and t.reshape(v, 3) is t
 
 @unittest.skip("this test is just flaky, sync issue")
 class TestMoveTensor(unittest.TestCase):

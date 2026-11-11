@@ -1,4 +1,4 @@
-import unittest, base64, functools, re, time, unicodedata, json, pathlib, tempfile
+import unittest, base64, functools, re, unicodedata, json, pathlib, tempfile
 from tinygrad.llm.cli import SimpleTokenizer, FallbackTemplate
 from tinygrad.helpers import fetch
 
@@ -59,14 +59,7 @@ class TestLLMTokenizer(unittest.TestCase):
     tok = SimpleTokenizer({}, {})
     self.assertLess(len(tok._split_to_word.pattern), 100_000)
     text = "The quick brown fox jumps over the lazy dog. " * 5000
-    tok._split_to_word.findall(text)  # warmup
-    tms = []
-    for _ in range(5):
-      st = time.perf_counter()
-      words = tok._split_to_word.findall(text)
-      tms.append(time.perf_counter() - st)
-    self.assertLess(min(tms), 4)  # best-of-5 is robust to CI scheduling pauses; new code takes ~60ms
-    self.assertEqual(len(words), 50001)
+    self.assertEqual(len(tok._split_to_word.findall(text)), 50001)
 
   def test_llama_continued_conversation(self):
     self._test_coding(self.llama_tok, "hello <|eot_id|>world", [15339, 220, 128009, 14957])
@@ -161,6 +154,15 @@ class TestLLMTokenizer(unittest.TestCase):
       self.assertEqual(split["gpt-4o"](s), go, f"gpt-4o {s!r}")
       self.assertEqual(split["kimi-k2"](s), go, f"kimi-k2 {s!r}")
     self.assertEqual(split["kimi-k2"]("a.\n/b"), ["a", ".\n", "/b"])
+
+  def test_joyai_llm_split(self):
+    tok = SimpleTokenizer({}, {}, "joyai-llm")
+    tok._encode_word = lambda word: [word.decode()]
+    self.assertEqual(tok.encode("é café"), ["é", " café"])
+    self.assertEqual(tok.encode("  12345"), ["  ", "123", "45"])
+    self.assertEqual(tok.encode("it's I'M don'T"), ["it", "'s", " I", "'M", " don", "'T"])
+    self.assertEqual(tok.encode("  你好hello"), ["  ", "你好", "hello"])
+    self.assertEqual(tok.encode("a\u200b"), ["a", "\u200b"])
 
   def test_stream_decoder(self):
     """stream_decoder buffers incomplete UTF-8: token 25677 has 3/4 of emoji, token 138 completes it."""

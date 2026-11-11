@@ -416,7 +416,7 @@ Compiled.pm_encode = PatternMatcher([(UPat.sink().call(UPat(Ops.PARAM)).after(al
 Compiled.pm_lower += PatternMatcher([
   # the gpu's memory is reached over usb
   (UPat.custom_function("memcpy", dtypes.uint64).call(UPat.var("dst"), UPat.var("src"), UPat.var("n")), usb_memcpy),
-  (UPat.custom_function("memset", dtypes.uint64).call(UPat.var("dst"), UPat.const(0), UPat.var("n")),
+  (UPat.custom_function("memset", dtypes.uint64).call(UPat.var("dst"), UPat.const(0).or_casted(), UPat.var("n")),
    lambda dst, n: usb_memcpy(dst, usb_zeros(dst.src[0].device).index(0), n, fill=True)),
   (UPat.var("b").index(UPat.var("idx")).store(UPat.var("v")), lambda b, idx, v: usb_store(b, idx, v) if is_remote(b) else None),
   (UPat.var("b").index(UPat.var("idx")).load(name="ld"), lambda b, idx, ld: usb_load(b, idx, ld) if is_remote(b) else None),

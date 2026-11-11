@@ -78,13 +78,16 @@ class DType(metaclass=DTypeMetaClass):
     return float("inf") if dtypes.is_float(self) else True
   def const(self, val: ConstType):
     if isinstance(val, InvalidType): return val
-    if self in dtypes.ints and isinstance(val, float) and not math.isfinite(val):
-      val = 0 if math.isnan(val) else self.max if val > 0 else self.min
-    if self in dtypes.ints: return truncate[self](int(val))
-    # NOTE: float('nan') != float('nan'), so we canonicalize here
-    if isinstance(val, float) and math.isnan(val): val = math.nan
-    # int is the default. wrap floats in ConstFloat to distinguish -0.0 from 0.0 in cache
-    return ConstFloat(truncate.get(self, float)(float(val))) if dtypes.is_float(self) else bool(val) if dtypes.is_bool(self) else int(val)
+    if self in dtypes.ints:
+      if isinstance(val, float) and not math.isfinite(val): val = 0 if math.isnan(val) else self.max if val > 0 else self.min
+      return truncate[self](int(val))
+    if dtypes.is_float(self):
+      # NOTE: float('nan') != float('nan'), so we canonicalize here
+      if isinstance(val, float) and math.isnan(val): val = math.nan
+      # wrap floats in ConstFloat to distinguish -0.0 from 0.0 in cache
+      return ConstFloat(truncate.get(self, float)(float(val)))
+    # int is the default
+    return bool(val) if dtypes.is_bool(self) else int(val)
 
 
 class DTypes:
@@ -316,12 +319,9 @@ def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] #
 def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-defined] # noqa: F821
   import numpy as np, torch
   dtype = strong_dtype(dtype)
-  if dtype == dtypes.uint64: return torch.uint64
   if dtype == dtypes.bfloat16: return torch.bfloat16
   if dtype in dtypes.fp8s: return torch.uint8
-  # NOTE: torch doesn't expose this mapping with a stable API
-  try: return torch.from_numpy(np.array([], dtype=_to_np_dtype(dtype))).dtype
-  except TypeError: return None
+  return getattr(torch, np.dtype(dtype.fmt).name, None) if dtype.fmt is not None else None
 @functools.cache
 def _from_torch_dtype(torchdtype:'torch.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
-  return {v:k for k in DTYPES_DICT.values() if (v:=_to_torch_dtype(k)) is not None}[torchdtype]
+  return DTYPES_DICT[str(torchdtype).split('.')[-1]]

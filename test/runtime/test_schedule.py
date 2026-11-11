@@ -6,7 +6,7 @@ import unittest
 import numpy as np
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
-from tinygrad.uop.ops import Ops, UPat
+from tinygrad.uop.ops import Ops, UPat, UOp
 from tinygrad.helpers import DEV, GlobalCounters, Context, temp
 from tinygrad.engine.realize import run_linear
 from test.helpers import check_schedule, assert_kernel_count
@@ -45,6 +45,17 @@ class TestSchedule(unittest.TestCase):
     out = s1 + s2
     run_linear(*check_schedule(out, 1))
     np.testing.assert_allclose(out.numpy(), 2*np.pad(b.numpy(), ((1, 1), (0, 0))).sum(axis=1), rtol=1e-6)
+
+  def test_reduce_order_dependency(self):
+    a = Tensor([2, 3], dtype=dtypes.int32).realize()
+    c = Tensor([7], dtype=dtypes.int32).realize()
+    s = a.sum()
+    self.assertEqual((s + Tensor(c.uop.after(s.uop))[0]).item(), 12)
+
+  def test_value_order_dependency_requires_storage(self):
+    c = Tensor([0], dtype=dtypes.int32).realize()
+    with self.assertRaisesRegex(RuntimeError, "kernel boundary requires storage"):
+      Tensor(UOp.const(1, dtypes.int32).after(c.uop.index(0).store(5))).item()
 
   def test_cumsum_parallel_reduce_fused(self):
     # two-stage cumsum + ops triggers parallel REDUCEs in one kernel that must share an END (same nesting context = should merge)

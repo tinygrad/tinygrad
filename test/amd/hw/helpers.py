@@ -136,6 +136,7 @@ def get_prologue_epilogue(n_lanes: int) -> tuple[list, list]:
   for i in range(N_SGPRS):
     prologue.append(s_mov_b32(s[i], 0))
   prologue.append(s_mov_b32(VCC_LO, 0))
+  prologue.append(s_cmp_eq_u32(0, 1))  # initialize SCC independently of the emulator/runtime's entry state
 
   epilogue = [
     s_mov_b32(s[90], VCC_LO),

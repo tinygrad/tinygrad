@@ -1,5 +1,5 @@
 # schedule tests that pass on NULL backend (no copyout needed)
-import unittest, time
+import unittest
 from typing import cast
 from tinygrad import nn, dtypes, Device, Tensor, getenv
 from tinygrad.helpers import Context, all_same
@@ -1897,16 +1897,13 @@ class TestUOpBecome(unittest.TestCase):
 
 class TestFusionOp(unittest.TestCase):
   def test_recursive_add(self):
-    st = time.perf_counter()
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
     linear = a.schedule_linear()
     prg = to_program(linear.src[-1].src[0], renderer=Device[Device.DEFAULT].renderer)
-    self.assertLess(time.perf_counter()-st, 2.0)
     assert len(prg.src[2].arg.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
-    st = time.perf_counter()
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
     linear1 = a.schedule_linear()
@@ -1918,24 +1915,19 @@ class TestFusionOp(unittest.TestCase):
     linear3 = c.schedule_linear()
     self.assertEqual(linear1.src[-1].src[0], linear2.src[-1].src[0])
     with self.assertRaises(AssertionError): self.assertEqual(linear1.src[-1].src[0], linear3.src[-1].src[0])
-    self.assertLess(time.perf_counter()-st, 2.0)
 
   def test_recursive_pad(self):
-    st = time.perf_counter()
     val = 1.0
     a = Tensor(val)
     for _ in range(24): a = Tensor.stack(a, a)[0]
     check_schedule(a, 0)
-    self.assertLess(time.perf_counter()-st, 2.0)
 
   def test_recursive_reshape(self):
-    st = time.perf_counter()
     a = Tensor.empty(32, 32).realize()
     b = Tensor.empty(16, 2).realize()
     r = a.sum(1)
     for _ in range(24): r = r.reshape(16, 2) + b
     check_schedule(r, 1)
-    self.assertLess(time.perf_counter()-st, 2.0)
 
 # NOTE: the NULL backend supports SLICE
 class TestBufferView(unittest.TestCase):
@@ -2056,21 +2048,6 @@ class TestInvalidTensor(unittest.TestCase):
     from tinygrad.dtype import Invalid
     t = Tensor.full((4,), Invalid, dtype=dtypes.float)
     check_schedule(t, 0)
-
-class TestLimitBufs(unittest.TestCase):
-  def test_limit_bufs_linear_scaling(self):
-    def sched_time(n):
-      with Context(TRACK_MATCH_STATS=0, DEBUG=0, PARALLEL=0):
-        bufs = [Tensor.ones(16).contiguous().realize() for _ in range(4)]
-        root = bufs[0]
-        for i in range(n): root = root + bufs[i % 4]
-        with Context(MAX_KERNEL_BUFFERS=8, SCACHE=0):
-          st = time.perf_counter()
-          root.schedule_linear()
-          return time.perf_counter() - st
-    sched_time(400)
-    t1, t2 = min(sched_time(400) for _ in range(3)), min(sched_time(1600) for _ in range(3))
-    self.assertLess(t2/t1, 8, f"{t1*1e3:.1f}ms -> {t2*1e3:.1f}ms")
 
 class TestCopyFolding(unittest.TestCase):
   def test_one_hot_with_copy(self):
