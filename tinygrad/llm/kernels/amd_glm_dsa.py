@@ -5443,7 +5443,7 @@ def _wave_scan(x:UOp, lane:UOp) -> UOp:
 
 # (RADIX_AGG: a wave's lanes of the same digit counted by one atomic (ballots): the keys of a long context's scores share a few top digits, their
 # atomics on one LDS bin wait on each other. the same counts)
-RADIX_AGG = getenv("RADIX_AGG", 0)
+RADIX_AGG, IDX_CAND_REG = getenv("RADIX_AGG", 0), getenv("IDX_CAND_REG", 0)
 _RADIX_AGG_ADD = ("{{ unsigned _a = __builtin_amdgcn_ballot_w32({2}); while (_a) {{ int _l = __builtin_ctz(_a); "
                   "int _dl = __builtin_amdgcn_readlane({1}, _l); unsigned _s = __builtin_amdgcn_ballot_w32(({2}) && ({1}) == _dl); "
                   "if (__builtin_amdgcn_mbcnt_lo(~0u, 0u) == (unsigned)_l) "
@@ -5617,6 +5617,12 @@ def _pool_cand_kernel(cand:UOp, scores:UOp, dev:UOp, *grouped:UOp, q_start:UOp, 
     p = _global_pool(lp, me, n, PB)
     ok = (lp < npl) & (p < pools) & ((p + 1) * kpool <= q + 1)
     return ok.where(_order_key(scores[row, lp.minimum(PL-1).valid(ok)].load().bitcast(dtypes.uint32)), UOp.const(0, dtypes.uint32))
+  if IDX_CAND_REG:
+    # (IDX_CAND_REG: a thread's keys loaded once (all of them at once) into registers, the passes read them there: the same keys)
+    kreg = UOp.alloc((per,), dtypes.uint32, addrspace=AddrSpace.REG)
+    kreg = kreg.after(UOp.group(*(kreg[c].store((UOp.const(c, dtypes.weakint) < npc).where(key(UOp.const(c, dtypes.weakint)),
+                                                                                            UOp.const(0, dtypes.uint32))) for c in range(per))))
+    key = lambda c: kreg[c].load()  # noqa: E731
   thr = _radix_kth(key, npc, k, npl, t, wave, lane)
   def write(c3:UOp, pos:UOp, pk:UOp) -> UOp:
     lp, ok = t + c3 * THREADS, pk & (pos < k)
