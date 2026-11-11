@@ -25,6 +25,7 @@ from tinygrad.uop.ops import resolve, Ops
 from tinygrad.dtype import DType
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup
 from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
+from tinygrad.llm.kernels.amd_glm_dsa import P2PRunOut
 
 class ExpertGating(enum.IntEnum):
   SOFTMAX = 1
@@ -3943,6 +3944,7 @@ class Transformer(GLMSeqDriver):
       # (in a jit: a realize outside one walks every tensor of the model)
       if start_pos == 0 or self._spec_row: self._spec_row0(0 if start_pos == 0 else self._spec_row)
     out, prompt_len, ahead = None, len(tokens), False
+    start0, row0, retries = start_pos, getattr(self, "_spec_row", 0), 0
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)
       # the prompt in chunks (symbolic sizes), then one token at a time (the decode jit)
@@ -3957,7 +3959,17 @@ class Transformer(GLMSeqDriver):
       # the end of the prompt: a checkpoint of the recurrent state (before any step of the reply)
       if self.has_recurrent_block and start_pos == prompt_len and getenv("CHECKPOINT", 1): self._checkpoint(tokens, save=True)
       if spec:
-        tok = self._wait_host(lambda: self._token_host[start_pos], "a token of generate")
+        try: tok = self._wait_host(lambda: self._token_host[start_pos], "a token of generate")
+        except P2PRunOut as e:
+          # (P2P_RETRY, default 2: a p2p poll that ran out in the prompt's chunks (a long prompt's first check, the stall of the deadline):
+          # the prompt's chunks again from the same place, every cache row they wrote written again; the epochs and mailboxes are consistent)
+          if start_pos != prompt_len or (retries:=retries+1) > getenv("P2P_RETRY", 2): raise
+          print(f"generate: {e}: the prompt again ({retries})", flush=True)
+          for d in devs: Device[d].synchronize()
+          self._token_host[prompt_len:end] = array.array('i', [-1] * (end - prompt_len))
+          start_pos, self._spec_row = start0, row0
+          if start0 == 0 or row0: self._spec_row0(row0)
+          continue
         tokens.append(tok)
         self._cached_tokens, self._spec_row = tokens[:-1], 0
         yield tok

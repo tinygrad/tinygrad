@@ -119,6 +119,13 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertRaises(AssertionError, _q8_pack_kernel, Tensor.empty(4, 18, 9, dtype="uint32").uop, Tensor.empty(4, 576, dtype="half").uop)
     self.assertRaises(AssertionError, _q8_unpack_kernel, Tensor.empty(4, 576, dtype="half").uop, Tensor.empty(4, 18, 9, dtype="uint32").uop)
 
+  def test_p2p_runout_is_retryable(self):
+    # (P2P_RETRY: generate catches a run-out of the prompt's chunks by its type; an old caller catching RuntimeError still does)
+    from tinygrad.llm.kernels.amd_glm_dsa import P2PRunOut
+    import tinygrad.llm.glm_dsa as M
+    self.assertTrue(issubclass(P2PRunOut, RuntimeError))
+    self.assertIs(M.P2PRunOut, P2PRunOut)
+
   def test_p2p_a2a_shape(self):
     # (the one shot all to all a word a thread: mla_sparse_seq's 4 rows (10496 floats a part, 5248 flagged words) in 256x1 / 128x1, not 64x4)
     from tinygrad.llm.kernels.amd_glm_dsa import p2p_a2a_shape

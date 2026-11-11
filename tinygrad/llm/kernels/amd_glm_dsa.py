@@ -1812,10 +1812,14 @@ def p2p_late(devs:tuple[str, ...], clear:bool=False) -> list[int]:
 
 def P2P_AR_TIMEOUT_MS() -> int: return getenv("P2P_AR_TIMEOUT_MS", 30000)
 
+class P2PRunOut(RuntimeError):
+  """a p2p poll ran out (its kernel's values are wrong): the epoch counters and the mailboxes are still consistent (every device ended the call),
+  so the work that used the wrong values can be run again"""
+
 def p2p_check(devs:tuple[str, ...]) -> None:
   """raise if a p2p poll ran out since the last check (its kernel's values are wrong): a step that took P2P_AR_TIMEOUT_MS has one"""
   if any(late:=p2p_late(devs, clear=True)):
-    raise RuntimeError(f"a p2p poll ran out (P2P_AR_TIMEOUT_MS={P2P_AR_TIMEOUT_MS()}, epochs {late}): the sums of its step are wrong")
+    raise P2PRunOut(f"a p2p poll ran out (P2P_AR_TIMEOUT_MS={P2P_AR_TIMEOUT_MS()}, epochs {late}): the sums of its step are wrong")
 
 def p2p_ar_shape(n:int) -> tuple[int, int]|None:
   """(threads, values a thread) of a p2p allreduce of n values: a workgroup's at most P2P_AR_MAXW, at most P2P_AR_MAXG of them"""
