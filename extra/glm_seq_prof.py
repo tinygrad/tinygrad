@@ -22,6 +22,9 @@ if getenv("MEM_TRACE"):
   import extra.mem_trace as mem_trace
   mem_trace.install()
 
+# (the sampling's random state seeded: SAMPLE_TEMP / PF_TOPP runs repeat (tinygrad's default seed is the time), as the board harness)
+from tinygrad import Tensor
+Tensor.manual_seed(getenv("SAMPLE_SEED", 1))
 model, kv = Transformer.from_gguf(os.environ["MODEL"], getenv("MAXCTX", 65536), shard=getenv("SHARD", 6))
 # (the derived weights as a server's warmup makes them: the routers' transposed float weights (skinny_matmul), else the routers of many
 # rows run a generic kernel ~30x slower: 13.8 ms a step at 28 users)
