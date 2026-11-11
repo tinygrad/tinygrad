@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Tensor
+from tinygrad.dtype import dtypes, Invalid
 
 class TestAfterCounterexamples(unittest.TestCase):
   def test_ordered_writes_allowed(self):
@@ -17,11 +18,16 @@ class TestAfterCounterexamples(unittest.TestCase):
 
   def test_sibling_afters_rejected(self):
     x = Tensor([0.]).realize().uop
+    with self.assertRaises(RuntimeError):
+      Tensor.realize(Tensor(x.after(x.store(1))) + 0, Tensor(x.after(x.store(2))) + 0)
+
+  def test_write_into_newer_state_allowed(self):
+    x = Tensor([0.]).realize().uop
     first = x.store(1)
     a = x.after(first)
-    # a and x.after(second) both supersede x, the chain is a.after(second)
-    with self.assertRaises(RuntimeError):
-      Tensor.realize(Tensor(x.after(a.store(2))) + 0, Tensor(a) + 0)
+    p, q = Tensor(x.after(a.store(2))) + 0, Tensor(a) + 0
+    Tensor.realize(p, q)
+    self.assertEqual((p.tolist(), q.tolist()), ([2.], [1.]))
 
   def test_shared_readers_after_older_dependency(self):
     x = Tensor([0.]).realize().uop
@@ -114,6 +120,30 @@ class TestAfterCounterexamples(unittest.TestCase):
     # No ordering between the writes. Currently succeeds with [2.].
     with self.assertRaises(RuntimeError):
       Tensor(x.after(x.store(1), x.store(2))).realize()
+
+  def test_store_broadcasts_value_to_target(self):
+    def stored(shape:tuple[int, ...], y:Tensor) -> list:
+      x = Tensor.zeros(*shape, dtype=dtypes.int).contiguous().realize().uop
+      return Tensor(x.after(x.store(y.contiguous().realize().uop))).tolist()
+    self.assertEqual(stored((2, 3), Tensor([[3], [5]])), [[3, 3, 3], [5, 5, 5]])
+    self.assertEqual(stored((2, 3), Tensor([1, 2, 3])), [[1, 2, 3], [1, 2, 3]])
+    with self.assertRaises(RuntimeError): stored((3,), Tensor([[7, 8, 9]]))
+
+class TestAfterInvalidStore(unittest.TestCase):
+  def test_partial_invalid_store_keeps_uncovered_reads(self):
+    x = Tensor([10., 20., 30., 40.]).realize()
+    after = x.uop.after(x.uop.shrink(((0, 2),)).store(Invalid))
+    self.assertEqual(Tensor(after).contiguous().tolist(), [10., 20., 30., 40.])
+
+  def test_multi_after_invalid_store_dep_removed(self):
+    x = Tensor.empty(4).uop
+    self.assertEqual(Tensor(x.after(x.store(5), x.store(Invalid))).tolist(), [5]*4)
+
+  def test_expand_view_invalid_assign_keeps_uncovered_reads(self):
+    x = Tensor([[10., 11., 12., 13.], [20., 21., 22., 23.], [30., 31., 32., 33.], [40., 41., 42., 43.]]).realize()
+    v = x[:1, :].expand(4, 4)
+    v.assign(Tensor.invalids(4, 4, dtype=dtypes.float))
+    self.assertEqual(v.contiguous().tolist(), [[10., 11., 12., 13.]]*4)
 
 if __name__ == "__main__":
   unittest.main()

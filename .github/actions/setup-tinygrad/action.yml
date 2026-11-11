@@ -68,6 +68,7 @@ runs:
         fi
         echo "VIRTUAL_ENV=/opt/venv/${{ inputs.python-version }}" >> "$GITHUB_ENV"
         echo "UV_PYTHON_INSTALL_DIR=/opt/python" >> "$GITHUB_ENV"
+        echo "TCC_COMMIT=aade7bafb59641660bc9a0e21ad0a9a4a1ed346e" >> "$GITHUB_ENV"
 
     - name: Set up uv
       uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
@@ -296,6 +297,26 @@ runs:
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
       run: brew install llvm@20
+
+    - name: Cache libtcc (PR)
+      if: runner.os == 'Linux' && github.event_name == 'pull_request' && runner.environment == 'github-hosted'
+      uses: actions/cache/restore@v5
+      with:
+        path: ~/.cache/tinycc
+        key: tcc-${{ runner.arch }}-${{ env.TCC_COMMIT }}
+    - name: Cache libtcc
+      if: runner.os == 'Linux' && github.event_name != 'pull_request' && runner.environment == 'github-hosted'
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/tinycc
+        key: tcc-${{ runner.arch }}-${{ env.TCC_COMMIT }}
+    - name: Install libtcc
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        [ -f ~/.cache/tinycc/libtcc.so ] || (curl -fL https://github.com/TinyCC/tinycc/archive/$TCC_COMMIT.tar.gz | tar -xz -C /tmp && cd /tmp/tinycc-$TCC_COMMIT &&
+          ./configure --disable-static && make -j$(nproc) libtcc.so && install -D libtcc.so ~/.cache/tinycc/libtcc.so)
+        sudo install ~/.cache/tinycc/libtcc.so /usr/local/lib/ && sudo ldconfig
 
     # *** OpenCL ***
     - name: Install rusticl

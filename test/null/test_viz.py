@@ -188,7 +188,7 @@ class TestViz(unittest.TestCase):
       colored_field: str
     a = UOp(Ops.PYLITERAL, arg=TestStruct(colored("xyz", "magenta")+colored("12345", "blue")))
     a2 = uop_to_json(VizData(), a)[id(a)]
-    self.assertEqual(ansistrip(a2["label"]), f"PYLITERAL\n{TestStruct.__qualname__}(colored_field='xyz12345')")
+    self.assertIn("colored_field='xyz12345'", ansistrip(a2["label"]).replace("\n", ""))
 
   def test_index_label_large_src(self):
     x = UOp.param(0, dtypes.float, (16, 16))

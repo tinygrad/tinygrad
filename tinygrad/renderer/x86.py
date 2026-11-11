@@ -499,23 +499,23 @@ def flag_rematerialize(ctx:X86LinearContext, x:UOp):
 
 # the address of a stack buffer keeps the buffer's dtype so the element size of loads and stores through it is known
 def alloc_buffer(ctx:X86LinearContext, x:UOp):
-  nx = UOp(Ops.INS, fold_address(stack_pointer().index(UOp.cconst(ctx.stack_size, dtypes.uint32))),
-           (X86Ops.LEA, x.dtype, Register(f"s{ctx.stack_size}", 0, WGPR, 8)))
+  nx = x.ins(X86Ops.LEA, Register(f"s{ctx.stack_size}", 0, WGPR, 8),
+             src=fold_address(stack_pointer().index(UOp.cconst(ctx.stack_size, dtypes.uint32))))
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
   return nx, [stack_pointer(), nx]
 
 # TODO: control flow should be overhauled so that this isn't necessary
 # a LABEL marks its src: the start of a loop its RANGE, the exit of a loop the start LABEL. a jump's first src is what its LABEL marks
-def label(x:UOp) -> UOp: return UOp(Ops.INS, arg=(X86Ops.LABEL, dtypes.void), src=(x,))
+def label(x:UOp) -> UOp: return x.ins(X86Ops.LABEL, dtype=dtypes.void, src=(x,))
 
 # a loop's LABEL follows its RANGE. a bounded RANGE's index is a register named by the RANGE, 0 before the loop, compared to the bound
 # after the LABEL and incremented before the END, the body reads it as AFTER(index, RANGE)
 def lower_range(x:UOp) -> tuple[UOp, list[UOp]]:
   if x.dtype is dtypes.void: return x, [x, label(x)]
   bound, deps = (x.src[0].src[0], x.src[0].src[1:]) if x.src[0].op is Ops.AFTER else (x.src[0], ())
-  idx = UOp(Ops.INS, arg=(X86Ops.MOVi, x.dtype, regbuf_reg(x)), src=(imm(x.dtype, 0),) + deps)
-  cmp = UOp(Ops.INS, arg=(X86Ops.CMPi if is_imm(bound) else X86Ops.CMP, dtypes.void), src=(idx, bound))
-  return idx.after(x), [idx, x, start:=label(x), cmp, UOp(Ops.INS, arg=(X86Ops.JGE, dtypes.void), src=(start, cmp))]
+  idx = x.ins(X86Ops.MOVi, regbuf_reg(x), src=(imm(x.dtype, 0),) + deps)
+  cmp = x.ins(X86Ops.CMPi if is_imm(bound) else X86Ops.CMP, dtype=dtypes.void, src=(idx, bound))
+  return idx.after(x), [idx, x, start:=label(x), cmp, x.ins(X86Ops.JGE, dtype=dtypes.void, src=(start, cmp))]
 
 def lower_end(x:UOp, c:UOp) -> tuple[UOp, list[UOp]]:
   return (end:=x.replace(src=(x.src[0], c.src[1]))), [c.ins(X86Ops.ADDi, *regs(c.src[0]), src=(c, imm(c.dtype, 1))), end]
@@ -532,7 +532,7 @@ pre_regalloc_matcher = PatternMatcher([
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(X86Ops.RET)])),
   # an END jumps back to its loop's LABEL and labels the loop's exit
-  (UPat(Ops.END, name="x"), lambda x: (x, [UOp(Ops.INS, arg=(X86Ops.JMP, dtypes.void), src=(x.src[1],)), label(label(x.src[1]))])),
+  (UPat(Ops.END, name="x"), lambda x: (x, [x.ins(X86Ops.JMP, dtype=dtypes.void, src=(x.src[1],)), label(label(x.src[1]))])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
    [ctx.ren.copy(x.src[0], rdef(x)), nx] if rdef(x) != rdef(x.src[0]) else [nx]) if x.arg[0] in X86GroupOp.TwoAddress else None),
@@ -749,11 +749,11 @@ class X86Renderer(ISARenderer):
   def spill(self, spill_slot:int, x:UOp) -> UOp:
     op = X86Ops.VMOVUPSm if rdef(x).cons[0] in XMM else X86Ops.MOVm
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp(Ops.INS, src=fold_address(stack_pointer().index(disp)) + (x,), arg=(op, dtypes.void))
+    return x.ins(op, dtype=dtypes.void, src=fold_address(stack_pointer().index(disp)) + (x,))
 
   def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp:
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp(Ops.INS, src=fold_address(stack_pointer().index(disp)), arg=(X86Ops.VMOVUPS if reg.cons[0] in XMM else X86Ops.MOV, x.dtype, reg))
+    return x.ins(X86Ops.VMOVUPS if reg.cons[0] in XMM else X86Ops.MOV, reg, src=fold_address(stack_pointer().index(disp)))
 
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg[0]))[-1] in ('i', 'm') else o[7:]).lower():7s}"

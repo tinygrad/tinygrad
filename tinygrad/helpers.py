@@ -3,7 +3,7 @@ import time
 START_TIME = time.perf_counter()
 import os, functools, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc, threading
 from collections import defaultdict
-import platform, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, difflib
+import shutil, math, types, copyreg, inspect, importlib, decimal, itertools, difflib
 from dataclasses import dataclass, field, replace
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
@@ -165,6 +165,8 @@ def getenv(key:str, default:Any=0): return type(default)(os.getenv(key, default)
 def temp(x:str, append_user:bool=False) -> str:
   return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{getpass.getuser()}" if append_user else x)).as_posix()
 
+def _has_lib(nm:str): return os.getenv(f"{nm.upper()}_PATH") or any(os.path.isfile(f"/usr/{d}/lib{nm}.so") for d in ("lib", "lib64", "local/lib"))
+
 def stderr_log(msg:str): print(msg, end='', file=sys.stderr, flush=True)
 
 class Context(contextlib.ContextDecorator):
@@ -246,11 +248,7 @@ RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0),
 ALLREDUCE_NODE_NDEVS = ContextVar("ALLREDUCE_NODE_NDEVS", 0) # gpus per node, the nodes cabled gpu k to gpu k
 CACHELEVEL, IGNORE_BEAM_CACHE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0)
 VALIDATE_WITH_CPU = ContextVar("VALIDATE_WITH_CPU", 0)
-def _has_libtcc() -> bool:
-  try: return not OSX and platform.machine().lower() in ("x86_64", "amd64") and bool(ctypes.CDLL("libtcc.so"))
-  except OSError: return False
-# the HCQ host programs (large and straight line, run once a submit): libtcc compiles them in milliseconds, LLVM in seconds
-HCQ_RUNTIME_DEV = _DEV("HCQ_RUNTIME_DEV", "CPU:TCC" if _has_libtcc() else "CPU:LLVM")
+HCQ_RUNTIME_DEV = _DEV("HCQ_RUNTIME_DEV", "CPU:TCC" if sys.platform == "linux" and _has_lib("tcc") else "CPU:LLVM")
 # TODO: this is broken for some indexing
 DISABLE_FAST_IDIV = ContextVar("DISABLE_FAST_IDIV", 1)
 FUSE_OPTIM = ContextVar("FUSE_OPTIM", 0)

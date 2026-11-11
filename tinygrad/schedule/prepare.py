@@ -3,7 +3,8 @@ from tinygrad.dtype import AddrSpace, dtypes, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp
 from tinygrad.uop.ops import graph_rewrite, MapCtx, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
-from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
+from tinygrad.uop.symbolic import symbolic
+from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort, dedup
 from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.uop.symbolic import loads_as_variables
 from tinygrad.schedule.allreduce import create_allreduce_function
@@ -63,6 +64,11 @@ pm_fold_moved_after = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
+def _valid(i:UOp) -> UOp:
+  # an index is invalid where its valid is false, the gates inside the index math are lifted out first
+  if any(x.is_invalid for x in i.get_idx().backward_slice): i = graph_rewrite(i, symbolic, name="lift gates")
+  return i.get_valid()
+
 # movement op on INDEX as a PatternMatcher
 def _mop_index(r:UOp, idx:UOp):
   # the valids of the index (the gate of a store) aren't the movement op's: it moves the address, they are put back as they were. (moved
@@ -70,19 +76,26 @@ def _mop_index(r:UOp, idx:UOp):
   idxs, valid = tuple(i.get_idx() for i in idx.src[1:]), UOp.const(True).uprod(*[i.get_valid() for i in idx.src[1:]])
   # the loaded values in the address are variables to the movement op's index math (it would rewrite the stores they are after)
   if (hidden:=loads_as_variables(UOp.sink(*idxs))) is None: return None
-  idxs = tuple(i.substitute(hidden) for i in idxs)
-  def gated(moved:tuple[UOp, ...]) -> tuple[UOp, ...]:
-    moved = tuple(m.substitute({v:k for k,v in hidden.items()}) for m in moved)
-    if valid.op is Ops.CONST or not moved: return moved
-    return moved[:-1] + ((valid & moved[-1].get_valid()).where(moved[-1].get_idx(), UOp.invalid()),)
-  if len(idxs) == len(r.shape):
-    return r.src[0].index(*gated(apply_movement_op(r.op, r.src[0].shape, r.marg, idxs)), arg=idx.arg)
-  if r.op is Ops.RESHAPE:
-    src_prefix = len(r.src[0].shape) - len(r.shape[len(idxs):])
-    if src_prefix >= 0 and r.src[0].shape[src_prefix:] == r.shape[len(idxs):]:
-      if src_prefix == 0: return r.src[0] if valid.op is Ops.CONST else None
-      ret = r.src[0].index(*gated(apply_movement_op(r.op, r.src[0].shape[:src_prefix], r.shape[:len(idxs)], idxs)), arg=idx.arg)
-      return ret if ret.shape == idx.shape else None
+  idxs, in_shape, arg = tuple(i.substitute(hidden) for i in idxs), r.src[0].shape, r.marg
+  if partial := len(idxs) != len(r.shape):
+    src_prefix = len(in_shape) - len(r.shape[len(idxs):])
+    if r.op is not Ops.RESHAPE or src_prefix < 0 or in_shape[src_prefix:] != r.shape[len(idxs):]: return None
+    if src_prefix == 0: return r.src[0] if valid.op is Ops.CONST else None
+    in_shape, arg = in_shape[:src_prefix], r.shape[:len(idxs)]
+  new_idxs = tuple(m.substitute({v:k for k,v in hidden.items()}) for m in apply_movement_op(r.op, in_shape, arg, idxs))
+  if valid.op is not Ops.CONST and new_idxs:
+    new_idxs = new_idxs[:-1] + ((valid & new_idxs[-1].get_valid()).where(new_idxs[-1].get_idx(), UOp.invalid()),)
+  if (ret := r.src[0].index(*new_idxs, arg=idx.arg)).shape != idx.shape and partial: return None
+  # the gates the movement op dropped from the indexes (none above, unless the index is a scalar's or a gate is inside the index math)
+  # still gate the value
+  kept = {UOp.const(True)} | {c for i in new_idxs for c in _valid(i).split_uop(Ops.AND)}
+  if dropped := dedup(c for i in idx.src[1:] for c in _valid(i).split_uop(Ops.AND) if c not in kept):
+    ret = dropped[0].uprod(*dropped[1:]).where(ret, ret.dtype.const(0))
+  # and the effects (stores) of the dropped indexes still happen before
+  if effs := [i for i in idx.src[1:] if i.op_in_backward_slice_with_self(*GroupOp.Effect)]:
+    kept_slice = UOp.sink(*new_idxs).backward_slice_with_self if new_idxs else {}
+    ret = ret.after(*[i for i in effs if any(x.op in GroupOp.Effect and x not in kept_slice for x in i.toposort())])
+  return ret
 
 pm_mops = PatternMatcher([
   # handle movement ops on INDEX

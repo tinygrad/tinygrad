@@ -58,7 +58,7 @@ class BufferizeOpts:
   removable: bool = True
 
 def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
-  if x.op not in GroupOp.Broadcastable: return rngs
+  if x.op not in GroupOp.Broadcastable|{Ops.STORE}: return rngs
   baxes, nleft = broadcast_axes(src.shape, x.shape), len(x.shape)-len(src.shape)
   return tuple(r.const_like(0) if j in baxes else r for j,r in enumerate(rngs) if j >= nleft)
 

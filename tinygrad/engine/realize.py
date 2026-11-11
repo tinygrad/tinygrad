@@ -4,7 +4,7 @@ import decimal, weakref, pickle
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
-from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
+from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS
 import tinygrad.device as device_mod
 from tinygrad.dtype import AddrSpace
@@ -136,14 +136,10 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
   bufs = [b.buffer for b in resolved]
   if not any(isinstance(b, MultiBuffer) for b in bufs): yield cast(list[Buffer], bufs), {}
   else:
-    # the DEVICE axis is bound per device at launch: it's a RANGE in the AST and the _device_num variable after codegen
-    # on x86 the params aren't PARAMs in the body, so also check the PROGRAM's kernel_params
-    has_dnum = ((isinstance(call.body.arg, ProgramInfo) and any(p.arg.name == '_device_num' for p in call.body.kernel_params)) or
-                any((x.op is Ops.RANGE and x.axis_type is AxisType.DEVICE) or (x.op is Ops.PARAM and x.arg.name == '_device_num')
-                    for x in call.body.toposort()))
+    # the DEVICE axis is bound per device at launch as _device_num
     lanes = max(len(b.bufs) for b in bufs if isinstance(b, MultiBuffer)) # a single buffer is shared by every lane
     per_lane = [b.bufs if isinstance(b, MultiBuffer) else (b,)*lanes for b in bufs]
-    for j, per_dev in enumerate(zip(*per_lane)): yield list(per_dev), {"_device_num": j} if has_dnum else {}
+    for j, per_dev in enumerate(zip(*per_lane)): yield list(per_dev), {"_device_num": j}
 
 def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):

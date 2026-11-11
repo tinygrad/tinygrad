@@ -1,5 +1,5 @@
-import subprocess
-from tinygrad.device import Compiler
+import subprocess, tempfile, pathlib, os
+from tinygrad.device import Compiler, CompileError
 from tinygrad.helpers import getenv, capstone_flatdump, cpu_objdump
 
 class ClangCompiler(Compiler):
@@ -23,6 +23,17 @@ class ClangCompiler(Compiler):
 
   def disassemble(self, lib: bytes): cpu_objdump(lib)
 
+class TCCCompiler(ClangCompiler):
+  def compile(self, src:str) -> bytes:
+    from tinygrad.runtime.autogen import tcc
+    # (the object to a tmpfs file: libtcc writes no other output, and /tmp is a slow USB drive on some boxes)
+    with tempfile.NamedTemporaryFile(suffix=".o", dir="/dev/shm" if os.path.isdir("/dev/shm") else None) as f:
+      # (no .eh_frame: nothing unwinds the HCQ host programs)
+      tcc.tcc_set_options(s:=tcc.tcc_new(), b"-nostdlib -w -fno-asynchronous-unwind-tables")
+      tcc.tcc_set_output_type(s, tcc.TCC_OUTPUT_OBJ)
+      err = tcc.tcc_compile_string(s, src.encode()) or tcc.tcc_output_file(s, f.name.encode())
+      if tcc.tcc_delete(s) or err: raise CompileError("tcc")
+      return pathlib.Path(f.name).read_bytes()
 
 class X86Compiler(Compiler):
   def __init__(self): super().__init__(None)

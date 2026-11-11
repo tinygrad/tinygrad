@@ -719,7 +719,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis)) if axis != reduce_axis else ret
   @staticmethod
   def invalid() -> UOp: return UOp.const(Invalid)
-  def valid(self, cond) -> UOp: return cond.where(self, self.const_like(Invalid))
+  def valid(self, cond) -> UOp: return cond.where(self, UOp.invalid())
   def get_idx(self) -> UOp:
     if self.op is Ops.STACK: return UOp.stack(*(x.get_idx() for x in self.src))
     return self.src[1] if self.op is Ops.WHERE and self.src[2].is_invalid else self
@@ -861,11 +861,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
   def _mop(self, op:Ops, arg) -> UOp:
-    # early NOOP
-    if op is Ops.EXPAND and len(arg) == 0: return self
     if op in {Ops.SHRINK, Ops.PAD} and len(arg) == 0:
       assert len(self.shape) == 0, "0 len arg only valid on zero length shape"
       return self
+    if op is Ops.PERMUTE and arg == tuple(range(self.ndim)): return self
     match op:
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
@@ -877,8 +876,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
     # NOTE: const shape args are what the simplify returns, without making a SINK for it
-    if all(u.op is Ops.CONST or (u.op is Ops.STACK and all(x.op is Ops.CONST for x in u.src)) for u in usrcs): return UOp(op, src=(self, *usrcs))
-    return UOp(op, src=(self,)+UOp.sink(*usrcs).simplify().src)
+    if all(u.op is Ops.CONST or (u.op is Ops.STACK and all(x.op is Ops.CONST for x in u.src)) for u in usrcs): ret = UOp(op, src=(self, *usrcs))
+    else: ret = UOp(op, src=(self,)+UOp.sink(*usrcs).simplify().src)
+    return self if op is not Ops.PERMUTE and ret.shape == self.shape and (op in {Ops.RESHAPE, Ops.EXPAND} or all(o == 0 for o,_ in ret.marg)) else ret
 
   # *** uop Buffer stuff ***
 
@@ -1215,12 +1215,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in GroupOp.Defines and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
     if self.op in (Ops.RANGE, Ops.SPECIAL) and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
-    # a load from a constant table is one of its values
-    if self.op is Ops.LOAD and (b:=self.src[0].buf_uop).op is Ops.BINARY:
+    # an ungated load from a constant table with every coordinate valid is one of its values
+    if self.op is Ops.LOAD and len(self.src) == 1 and (i:=self.src[0]).op is Ops.INDEX and (b:=i.buf_uop).op is Ops.BINARY and \
+       all(c.get_valid() is UOp.const(True) for c in i.src[1:]):
       return min(e:=memoryview(b.arg).cast(unwrap(self.dtype.fmt)).tolist()), max(e)
     # a NAN is outside every interval
     if self.op is Ops.CONST and self.val is not Invalid and not (isinstance(self.val, float) and math.isnan(self.val)): return self.val, self.val
-    if self.op is Ops.PAD: return min(self.src[0].vmin, 0), max(self.src[0].vmax, 0)  # PAD adds zeros
+    # PAD adds zeros, as does a read with a masked coordinate
+    if self.op is Ops.PAD or (self.op is Ops.INDEX and not all(c.get_valid() is UOp.const(True) for c in self.src[1:])):
+      return min(self.src[0].vmin, 0), max(self.src[0].vmax, 0)
     if self.op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.AFTER, Ops.DETACH, Ops.COPY, Ops.CONTIGUOUS_BACKWARD}: return self.src[0]._min_max
     # a cast rounds monotonically, except an int wraps past an int dtype and an inf a float dtype can't hold becomes nan
     if self.op is Ops.CAST and dtypes.is_float(self.dtype):
@@ -1259,7 +1262,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ctx[s]
 
   def render_uir(self) -> str:
-    from tinygrad.uop.render import render_uir
+    from tinygrad.uop.uir import render_uir
     return render_uir(self)
 
   # *** uop high level syntactic sugar ***
@@ -1531,7 +1534,9 @@ class UPat(RandMixin):
     assert op is None or isinstance(op, (Ops, tuple, set)), f"op must be Ops or tuple of Ops, not {op!r}"
     self.op: tuple[Ops, ...]|None = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
     self.match_dtype: tuple[DType, ...]|None = (dtype,) if isinstance(dtype, DType) else (tuple(dtype) if isinstance(dtype, set) else dtype)
-    self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
+    # a float arg is stored like a CONST's arg (a ConstFloat with nan == nan), so matching nan and compiling the pattern work the same
+    self.arg = dtypes.weakfloat.const(arg) if type(arg) is float else arg
+    self.name, self._in_src, self.custom_early_reject = name, src, custom_early_reject
     self.src: Any = None
     self.is_any = is_any
     assert self.name != "ctx", "UPat can't be named ctx"

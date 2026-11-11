@@ -38,7 +38,11 @@ def create_schedule(sched_sink:UOp) -> UOp:
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       kernels, after_deps = _split_after(u)
-      prev_state = _unwrap_src(u.src[0])
+      read_states = {k:[st for s in (k.src[0].src[1:] if k.op is Ops.END else k.src[1:]) for st in _states(s)] for k in kernels}
+      # the prior state is the first of its source and the same-buffer states its kernels read that is not superseded yet
+      prior_states = [_unwrap_src(u.src[0]), *[st for k in kernels for st in read_states[k] if st.storage_base is u.storage_base]]
+      prev_state = next((st for st in prior_states if st not in writes), prior_states[0])
+      # (sibling AFTERs of a state are allowed: redflash's in place kda state updates. the writes are the kernels not in the prior state)
       prev_kernels = set(_split_after(prev_state)[0]) if prev_state.op is Ops.AFTER else set()
       writes.setdefault(prev_state, []).append((u, tuple(k for k in kernels if k not in prev_kernels)))
       # a buffer state is a node after its prior state, its joins and its kernels, so readers inherit its history
@@ -49,11 +53,9 @@ def create_schedule(sched_sink:UOp) -> UOp:
       for k in kernels:
         in_degree.setdefault(k, 0)
         if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
-        kernel_deps = k.src[0].src[1:] if k.op is Ops.END else k.src[1:]
-        read_states = [st for s in kernel_deps for st in _states(s)]
-        reads += [(u, k, st) for st in read_states]
+        reads += [(u, k, st) for st in read_states[k]]
         # RAW deps: a kernel runs after the states it reads or joins
-        for st in read_states + [st for s in after_deps for st in _states(s)]:
+        for st in read_states[k] + [st for s in after_deps for st in _states(s)]:
           if st.op is Ops.AFTER:
             children.setdefault(st, []).append(k)
             in_degree[k] += 1

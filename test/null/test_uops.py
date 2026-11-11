@@ -177,6 +177,9 @@ class TestConstFloatEq(unittest.TestCase):
     for compiled in (False, True):
       pm = PatternMatcher([(UPat(Ops.CONST, arg=math.nan), lambda: True)], compiled=compiled)
       self.assertTrue(pm.rewrite(n), f"{compiled=}")
+      # a raw float nan arg (not a CONST's ConstFloat) matches too
+      pm = PatternMatcher([(UPat(Ops.PYLITERAL, arg=float("nan")), lambda: True)], compiled=compiled)
+      self.assertTrue(pm.rewrite(UOp(Ops.PYLITERAL, arg=-math.nan)), f"{compiled=}")
 
 class TestExecALU(unittest.TestCase):
   def test_sqrt(self):
