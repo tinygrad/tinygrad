@@ -114,6 +114,19 @@ class _System:
   def lock_memory(self, addr:int, size:int):
     if libc.mlock(ctypes.c_void_p(addr), size): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
 
+  @staticmethod
+  def populate(addr:int, size:int):
+    # the pages made (the kernel zeroes them, a core ~10 GB/s): pieces of a big range by threads at once (SYSMEM_POPULATE_THREADS, madvise
+    # doesn't hold the GIL)
+    n = max(1, min(getenv("SYSMEM_POPULATE_THREADS", 16), size >> 28))
+    if n == 1:
+      libc.madvise(addr, size, libc.MADV_POPULATE_WRITE)
+      return
+    import concurrent.futures
+    step = round_up(-(-size // n), 2 << 20)
+    with concurrent.futures.ThreadPoolExecutor(n) as ex:
+      list(ex.map(lambda o: libc.madvise(addr + o, min(step, size - o), libc.MADV_POPULATE_WRITE), range(0, size, step)))
+
   def system_paddrs(self, vaddr:int, size:int) -> list[int]:
     self.pagemap.seek(vaddr // mmap.PAGESIZE * 8)
     # the page frame numbers: the flags (bits 55-63) cleared bytewise (not an and of every entry)
@@ -130,7 +143,7 @@ class _System:
       # behind the iommu the pages are pinned by it, else locked. (then no khugepaged: it moves pages it collapses, a device would miss them)
       va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS|flags, 0)
       libc.madvise(va, size, libc.MADV_HUGEPAGE)
-      libc.madvise(va, size, libc.MADV_POPULATE_WRITE)
+      System.populate(va, size)
       System.lock_memory(va, size)
       if not iommu: libc.madvise(va, size, libc.MADV_NOHUGEPAGE)
     else:
