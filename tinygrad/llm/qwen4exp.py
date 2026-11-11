@@ -3076,8 +3076,8 @@ class Transformer:
       mv[:] = data.to("CPU").data()
       host_embd = ggml_data_to_tensor(raw, prod(shape), typ).reshape(shape)
       if typ == Q8_0: embd_q8 = raw
-    # (LOAD_DEFER: the weights' memory made now, the files read later: while the jits compile, see seq_warmup)
-    pending:list[Callable[[], None]]|None = [] if getenv("LOAD_DEFER", 0) else None
+    # (LOAD_DEFER (default): the weights' memory made now, the files read later: while the jits compile, see seq_warmup. 0: read now)
+    pending:list[Callable[[], None]]|None = [] if getenv("LOAD_DEFER", 1) else None
     state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads, fuse, row_sel=rows_map, pending=pending)
     _lap("weights")
     if host_embd is not None: state_dict['token_embd.weight'] = host_embd
