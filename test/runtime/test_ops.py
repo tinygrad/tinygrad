@@ -1342,6 +1342,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(3,4), (4,5)], lambda a,b: torch.einsum('jk,ki->ji', a,b), lambda a,b: Tensor.einsum('jk,ki->ji', a, b))
     # dot product
     helper_test_op([(5),(5)], lambda a,b: torch.einsum('i,i->i', [a,b]), lambda a,b: Tensor.einsum('i,i->i', [a,b]))
+    helper_test_op(None, lambda x,y: x*y, lambda x,y: Tensor.einsum('i,i->i', x,y), vals=[[True,False],[2.,3.]], forward_only=True)
     # hadamard product
     helper_test_op([(5,6),(5,6)], lambda a,b: torch.einsum('ij,ij->ij', a,b), lambda a,b: Tensor.einsum('ij,ij->ij', a,b))
     # outer product
@@ -2855,6 +2856,7 @@ class TestOps(TensorTestCase):
       a.cat(a)
 
   def test_multicat(self):
+    helper_test_op(None, lambda x,y: torch.cat((x,y)), lambda x,y: x.cat(y), vals=[[True],[2.,3.]], forward_only=True)
     for dim in range(-1, 2):
       helper_test_op([(45,65), (45,65), (45,65)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
 
