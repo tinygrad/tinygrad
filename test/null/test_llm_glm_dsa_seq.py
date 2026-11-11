@@ -109,6 +109,17 @@ class TestGLMDSASequence(unittest.TestCase):
       out, x = Tensor.empty(N*n*4, dtype="float32"), Tensor.empty(1, N*n*4, dtype="float32")
       fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n, T=256, EP=1, half=True, flag=True, **kw)
       self.assertIs(Tensor.custom_kernel(out, x, counter, *mb, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
+    # (IDX_SPLIT: the indexer's merge of a device's rows of the split, its rows from its index)
+    from tinygrad.llm.kernels.amd_glm_dsa import _pool_merge_kernel
+    from tinygrad import dtypes
+    from tinygrad.uop.ops import UOp
+    devs = tuple(f"NULL:{i}" for i in range(N))
+    loc = Tensor.empty(N*2, 66, dtype="int32", device=devs, axis=0)
+    mine, pos, dev = Tensor.empty(N*N, 2, 64, 2, device=devs, axis=0), Tensor.empty(7, dtype="int32", device=devs), \
+      Tensor.empty(N, dtype="int32", device=devs, axis=0)
+    fxn = functools.partial(_pool_merge_kernel, q_start=UOp.const(0, dtypes.weakint), pools=UOp.const(0, dtypes.weakint), k=64, kpool=1,
+                            split_rows=7)
+    self.assertIs(Tensor.custom_kernel(loc, mine, pos, dev, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
     # (and two floats a word: the float gathers and all to all)
     for kw in (dict(gather=True), dict(scatter=True, gather=True)):
       out, x = Tensor.empty(N*N*n*2, dtype="float32"), Tensor.empty(1, N*n*2, dtype="float32")
