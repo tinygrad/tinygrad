@@ -2528,13 +2528,13 @@ def sp_reduce_scatter(p:Tensor, fmt:str|None=None) -> Tensor:
   if (f:=(fmt or str(getenv("SP_RS", "q4")))) in ("q8", "q4") and D % 256 == 0:
     # (q4 (SP_RS=q4): 4 bit integers of the groups, five words a group: ~half the bytes of q8)
     W, pack_k, sum_k = (5, _q4_pack_kernel, _q4_sum_kernel) if f == "q4" else (9, _q8_pack_kernel, _q8_sum_kernel)
-    # (SP_RS_DIRECT, default off: partials that are a kernel's output split on the devices (float or half) read as they are by the pack and
+    # (SP_RS_DIRECT, default on: partials that are a kernel's output split on the devices (float or half) read as they are by the pack and
     # sum kernels (they load them as float): no kernel copying all of them to float first. the same values)
     # (a contiguous of a kernel's output is a STAGE of it: the same buffer, its view read as it is)
     u = p.uop
     while u.op in (Ops.RESHAPE, Ops.STAGE): u = u.src[0]
     direct = p.dtype in (dtypes.float32, dtypes.half) and u.op is Ops.AFTER and u.src[0].op is Ops.UNSHARD and \
-      u.src[0].src[0].max_numel() == R*D and p.uop.axis == 0 and bool(getenv("SP_RS_DIRECT", 0))
+      u.src[0].src[0].max_numel() == R*D and p.uop.axis == 0 and bool(getenv("SP_RS_DIRECT", 1))
     loc = _per_device(Tensor(u)) if direct else _per_device(_materialized(p.reshape(n, R, D), dtypes.float32))
     xs = [Tensor(loc.mselect(j)).reshape(R, D) for j in range(n)]
     pks = [Tensor.custom_kernel(Tensor.empty(R, D//32, W, dtype=dtypes.uint32, device=devs[j]), xs[j], fxn=pack_k)[0].uop
