@@ -4875,6 +4875,44 @@ def _fp8_byte_half(w:UOp, j:UOp) -> UOp:
   x = _amd_byte_perm(UOp.const(0, dtypes.uint32), w, UOp.const(0x0c0c000c, dtypes.uint32) | (j.cast(dtypes.uint32) << 8))
   return (_fp8_bits(x) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.half)
 
+# ** a 4-bit latent cache (SEQ_KV4, default off, a numerics change): a row of 512 dims is 64 words of 4-bit values (8 a word, dim j at bits 4j,
+# the value + 8), 4 words of the 16 groups' (32 dims) 6-bit multipliers (a byte each) and the 4 float scales of the 128 dims of a wave: a dim is
+# (q - 8) * m * s. 288 bytes instead of fp8's 528. the attention's fragments are the integers (q - 8) * m in half (exact), its partial scores
+# and P scaled by s as fp8's
+
+Q4_ROW = 72  # (the words of a row)
+
+def q4_rows(k:Tensor) -> Tensor:
+  """the (R, 512) rows k as 4-bit rows (R, 72) uint32 (see Q4_ROW)"""
+  R, D = k.shape
+  assert D == 512, f"4-bit rows of {D} dims"
+  g = k.float().reshape(R, 4, 4, 32)
+  a = g.abs().max(-1)  # (R, 4, 4) every group's absolute max
+  sc = a.max(-1, keepdim=True).maximum(1e-20) / (7 * 63)  # (R, 4, 1) a wave's 128 dims
+  m = (a / (7 * sc)).ceil().clip(1, 63)  # (R, 4, 4) the groups' multipliers: |x| / (m * sc) <= 7
+  q = (g / (m * sc).unsqueeze(-1)).round().clip(-8, 7).cast(dtypes.int32) + 8
+  b = q.cast(dtypes.uint32).reshape(R, 64, 8)
+  words = functools.reduce(lambda w, i: w | (b[..., i] << (4*i)), range(1, 8), b[..., 0])
+  mb = m.cast(dtypes.uint32).reshape(R, 4, 4)
+  mw = mb[..., 0] | (mb[..., 1] << 8) | (mb[..., 2] << 16) | (mb[..., 3] << 24)
+  return words.cat(mw, sc.reshape(R, 4).bitcast(dtypes.uint32), dim=-1)
+
+def _q4_mult(k:UOp, row:UOp, g:UOp|int) -> UOp:
+  """the multiplier of group g (32 dims) of a 4-bit row, int32"""
+  sh = UOp.const(8 * (g % 4), dtypes.uint32) if isinstance(g, int) else (8 * (g % 4)).cast(dtypes.uint32)
+  return ((_word(k, row, 64 + g // 4) >> sh) & 255).cast(dtypes.int32)
+
+def _q4_half(w:UOp, nib:UOp|int, m:UOp) -> UOp:
+  """nibble nib of a word of 4-bit values as the half (q - 8) * m (exact)"""
+  sh = UOp.const(4 * nib, dtypes.uint32) if isinstance(nib, int) else (4 * nib).cast(dtypes.uint32)
+  return ((((w >> sh) & 15).cast(dtypes.int32) - 8) * m).cast(dtypes.half)
+
+def _q4_frag(k:UOp, row:UOp, w0:UOp, m:UOp, half:UOp, rdna4:bool=True) -> UOp:
+  """16 dims of a 4-bit row (words w0, w0+1) in the order of the arch's WMMA fragment, as halves (q - 8) * m"""
+  lo, hi = _word(k, row, w0), _word(k, row, w0 + 1)
+  if rdna4: return UOp.stack(*(_q4_half(w, half * 4 + i, m) for w in (lo, hi) for i in range(4)))
+  return UOp.stack(*(_q4_half(w, i, m) for w in (lo, hi) for i in range(8)))
+
 IDX_FP8_ROW = 33  # (an fp8 pooled key of the indexer (SEQ_FP8): 32 words of its 128 dims, its scale)
 
 def _word(k:UOp, row:UOp, w:UOp|int) -> UOp:
@@ -4931,11 +4969,16 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   # (fp8 rows (SEQ_FP8): a wave's 128 dims have a scale of their own, its partial scores are scaled (and its P for the values)
   # (uint64: two words each, the whole cache of a prefill, see seq_gather)
   fp8 = cache.dtype in (dtypes.uint32, dtypes.uint64)
-  assert not fp8 or (D == 512 and DW == 128 and cast(int, cache.shape[1]) * cache.dtype.itemsize == FP8_ROW * 4), "fp8 rows: 512 dims"
-  def fp8_scale(k:UOp) -> UOp: return _word(cache, k, 128 + wave).bitcast(dtypes.float) * 256
+  # (4-bit rows (SEQ_KV4, see q4_rows): the same, the fragments (q - 8) * m)
+  q4 = fp8 and cast(int, cache.shape[1]) * cache.dtype.itemsize == Q4_ROW * 4
+  assert not fp8 or (D == 512 and DW == 128 and cast(int, cache.shape[1]) * cache.dtype.itemsize in (FP8_ROW * 4, Q4_ROW * 4)), \
+    "fp8 / 4-bit rows: 512 dims"
+  def fp8_scale(k:UOp) -> UOp:
+    return _word(cache, k, 68 + wave).bitcast(dtypes.float) if q4 else _word(cache, k, 128 + wave).bitcast(dtypes.float) * 256
   s_acc = zero8
   for kk in range(KT):
-    if fp8: kf = _fp8_frag(cache, key, wave*32 + kk*4, half, rdna4)
+    if q4: kf = _q4_frag(cache, key, wave*16 + kk*2, _q4_mult(cache, key, wave*4 + kk//2), half, rdna4)
+    elif fp8: kf = _fp8_frag(cache, key, wave*32 + kk*4, half, rdna4)
     else: kf = UOp.stack(*(cache[key, dbase + kk*16 + k].load() for k in ks))
     s_acc = UOp.wmma(qfrag[kk], kf, s_acc, *WMMA_ARG)
   s_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
@@ -4975,7 +5018,9 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   o_new = []
   for dt in range(KT):
     # (keys past the count are zero: p is 0 there, but 0*nan)
-    if fp8: vfrag = UOp.stack(*(vok.where(_fp8_byte_half(_word(cache, vk, wave*32 + dt*4 + col//4), col % 4),
+    if q4: vfrag = UOp.stack(*(vok.where(_q4_half(_word(cache, vk, wave*16 + dt*2 + col//8), col % 8, _q4_mult(cache, vk, wave*4 + dt//2)),
+                                         UOp.const(0, dtypes.half)) for vk, vok in vkeys))
+    elif fp8: vfrag = UOp.stack(*(vok.where(_fp8_byte_half(_word(cache, vk, wave*32 + dt*4 + col//4), col % 4),
                                           UOp.const(0, dtypes.half)) for vk, vok in vkeys))
     else: vfrag = UOp.stack(*(vok.where(cache[vk, dbase + dt*16 + col].load(), UOp.const(0, dtypes.half)) for vk, vok in vkeys))
     prev = o_regs[dt].after(n_tile_r)
@@ -5307,7 +5352,8 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int, base:int
   for kk, part in enumerate(seq_views(cache)):
     out = Tensor.custom_kernel(out, part, _device_index(devs), fxn=functools.partial(_seq_gather_kernel if raw else _seq_gather_fp8_kernel,
                                                                                      start_pos=sp, k=kk, n=n, base=bu))[0]
-  rows = fp8_rows(k).contiguous() if fp8 and raw else k.cast(dtypes.half).contiguous() if half else \
+  assert raw or int(cache.shape[1]) != Q4_ROW, "4-bit rows: SEQ_GATHER_FP8=1"
+  rows = (q4_rows(k) if W == Q4_ROW else fp8_rows(k)).contiguous() if fp8 and raw else k.cast(dtypes.half).contiguous() if half else \
     k.cast(dtypes.half).contiguous().bitcast(dtypes.uint64)
   assert rows.shape[-1] == (D if half else W), f"the rows of the tokens {k.shape} as {rows.shape}"
   out = Tensor.custom_kernel(out, rows, fxn=functools.partial(_seq_rows_kernel, start_pos=sp, T=t))[0]

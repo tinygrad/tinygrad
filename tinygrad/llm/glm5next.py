@@ -20,7 +20,8 @@ from tinygrad.llm.kernels.amd_glm import Linear, gated_delta_prefill, flash_atte
   kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, DEC_LANE, IDX_LANE, \
   flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, after_kernel, \
   host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, f16t_gemm, \
-  nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_views, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
+  nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_views, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, q4_rows, Q4_ROW, \
+  pool_index_shard
 from tinygrad.llm.gguf import gguf_parse, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm.gguf_load import gguf_shard_units, _disk_bytes, _disk_location
 from tinygrad.uop.ops import resolve, Ops, AxisType, KernelInfo
@@ -2285,7 +2286,8 @@ class MLATransformerBlock(FFNBlock):
   def seq_sharded(self) -> bool: return hasattr(self, "cache_s")
   def _seq_rows(self, k:Tensor) -> Tensor:
     """the rows of the tokens as the sequence sharded cache's: half, or fp8 (SEQ_FP8, see fp8_rows)"""
-    return fp8_rows(k) if self.cache_s.dtype == dtypes.uint32 else k
+    if self.cache_s.dtype != dtypes.uint32: return k
+    return q4_rows(k) if int(self.cache_s.shape[-1]) == Q4_ROW else fp8_rows(k)
   def slot_rows(self) -> int:
     """(sequence sharded) the rows of a device of a slot"""
     return int(self.slot_s[0].shape[0]) // len(cast(tuple, self.cache_s.device))
@@ -2301,7 +2303,8 @@ class MLATransformerBlock(FFNBlock):
         # (MLA_SEQ_SHARD: every device the rows of its positions, see seq_store)
         devs = cast(tuple[str, ...], x.device)
         # (SEQ_FP8: a row of fp8 values and their scales, see fp8_rows: half the memory)
-        row, dt = ((FP8_ROW,), dtypes.uint32) if getenv("SEQ_FP8", 1) and D == 512 else ((D,), dtypes.half)
+        # (SEQ_KV4 (default off, a numerics change): 4-bit rows, see q4_rows: 288 bytes instead of 528)
+        row, dt = ((Q4_ROW if getenv("SEQ_KV4", 0) else FP8_ROW,), dtypes.uint32) if getenv("SEQ_FP8", 1) and D == 512 else ((D,), dtypes.half)
         if (reg:=self._regions) is not None:
           # (SLOT_ALIAS: the slots of batched decoding in the same buffer, regions of S positions: the model's first (SLOT_SPAN of them), slot
           # i's the SLOT_SPAN+i-th. the model's cache past them is the slots': a long sequence alone overwrites them, see Transformer.main_overlaps)
