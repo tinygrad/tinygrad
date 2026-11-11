@@ -1129,6 +1129,64 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
                             layout, dequant, f"linear_{QUANT_NAMES[ggml_type]}_f16_wmma", rdna4, group, expert_words, x_div, act)
 
 @functools.cache
+def _rows_coop_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, ggml_type:int, coop:int=4, chunk:int=16) -> UOp:
+  """
+  _rows_f16_wmma_kernel with `coop` waves a workgroup for ONE output tile of 16: every wave dequantizes `chunk`/`coop` groups of a chunk's
+  weights (the f16 kernel's dequant, the same halves) to LDS (two buffers: a barrier an iteration), the next chunk's loads issued meanwhile
+  (prefetch), and the waves of the token tiles run the tile's WMMA chains from LDS in the f16 kernel's order (more loads in flight a chain)
+  """
+  T, NG = out.shape[0], in_features // Q8_GROUP_SIZE
+  TT = T // 16
+  assert T % 16 == 0 and NG % chunk == 0 and chunk % coop == 0 and out_features % 16 == 0 and coop >= TT and \
+    ggml_type not in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S)
+  x = x.reshape(-1, in_features)
+  type_words = QUANT_SIZES[ggml_type] // raw.dtype.itemsize
+  output_words = in_features * type_words // GGML_BLOCK_SIZE
+  output_block = UOp.range(out_features // 16, 0, AxisType.GLOBAL)
+  lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(coop, 3, axis_type=AxisType.LOCAL)
+  col, physical_half = lane % 16, lane // 16
+  output = output_block*16 + col
+  tt = wave % TT  # (the token tile of a wave: the waves past TT compute a copy, not stored)
+  tokens = (tuple(tt*16 + physical_half*8 + i for i in range(8)),)
+  acc = UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG)
+  acc = acc.after(acc.store(acc.const_like(0)))
+  rng = UOp.range(NG // chunk, 4, AxisType.LOOP)
+  ks = tuple(i%4 + physical_half*4 + (i//4)*8 for i in range(8))
+  word_indices = (physical_half, physical_half+2)
+  def dequant(base:UOp, subgroup:UOp, half:int) -> tuple[UOp, ...]:
+    # (as _quant_linear_f16_wmma_kernel's)
+    if ggml_type in SMALL_BLOCK_QUANTS: base += subgroup*SMALL_BLOCK_QUANTS[ggml_type]
+    words = tuple(_quant_word(raw, base, subgroup, half*4+i, ggml_type, None) for i in word_indices)
+    scale, zero, minimum = _wmma_scale(raw, base, subgroup, half, ggml_type)
+    return tuple((((word >> (b*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float()-zero)*scale-minimum).cast(dtypes.half)
+                 for word in words for b in range(4))
+  lds = UOp.alloc((2, chunk, 2, WARP_SIZE, 8), dtypes.float16, addrspace=AddrSpace.LOCAL)
+  buf = rng % 2
+  st = []
+  for k in range(chunk // coop):
+    gl = wave*(chunk // coop) + k  # (a wave's groups of the chunk: consecutive)
+    g = rng*chunk + gl
+    for half in range(2):
+      vals = dequant(output*output_words + (g // 8)*type_words, g % 8, half)
+      st += [lds[buf, gl, half, lane, i].store(v) for i, v in enumerate(vals)]
+  lds = lds.after(UOp.group(*st).barrier())
+  cur = acc.after(rng)
+  for u in range(chunk):
+    g = rng*chunk + u
+    for half in range(2):
+      afrag = UOp.stack(*(x[tt*16 + col, g*32 + half*16 + i].cast(dtypes.float16) for i in ks))
+      bfrag = UOp.stack(*(lds[buf, u, half, lane, i].load() for i in range(8)))
+      cur = UOp.wmma(afrag, bfrag, cur, *WMMA_ARG)
+  update = acc.store(cur)
+  if NG // chunk > 1:
+    update, pf = _prefetched(update, rng, NG // chunk - 1)
+    update = UOp.group(update, *pf)
+  update = update.end(rng)
+  stores = [out[tok.valid(wave < TT), output].store(acc.after(update)[i].load().cast(out.dtype)) for i, tok in enumerate(tokens[0])]
+  return UOp.group(*stores).end(output_block, lane, wave).sink(
+    arg=KernelInfo(name=f"linear_{QUANT_NAMES[ggml_type]}_rows_coop_f16_wmma", opts_to_apply=()))
+
+@functools.cache
 def _rows_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, ggml_type:int, tiles:int=1, waves:int=2,
                           unroll:int=4, prefetch:bool=True, chunk:int=0, pkh:bool=False) -> UOp:
   """
@@ -1331,6 +1389,10 @@ def _rows_f16_config(tokens:int, out_features:int, in_features:int, ggml_type:in
   unroll = next((u for u in (getenv("ROWS_UNROLL", 4 if tokens <= 16 else 8), 4, 2, 1) if NG % u == 0), 1)
   tiles = next((t for t in (getenv("ROWS_TILES", 1), 1) if out_features % (16*t) == 0), 1)
   waves = next((w for w in (getenv("ROWS_WAVES", 2), 2, 1) if out_features % (16*tiles*w) == 0), 1)
+  # (ROWS_COOP=W: W waves a workgroup load a chain's weights (_rows_coop_f16_wmma_kernel), ROWS_COOP_CHUNK groups an iteration)
+  if (coop:=getenv("ROWS_COOP", 0)) and coop >= tokens // 16 and \
+     (cc:=next((c for c in (getenv("ROWS_COOP_CHUNK", 16), 16, 8, 4) if NG % c == 0 and c % coop == 0), 0)):
+    return dict(coop=coop, chunk=cc)
   # (ROWS_CHUNK: Q8_0's blocks loaded wide, chunk groups an iteration (0: off))
   chunk = next((c for c in (getenv("ROWS_CHUNK", 0), 8, 4, 2) if c and ggml_type == Q8_0 and NG % c == 0), 0) if getenv("ROWS_CHUNK", 0) else 0
   return dict(tiles=tiles, waves=waves, unroll=unroll, prefetch=bool(getenv("ROWS_PF", 1)), chunk=chunk,
@@ -1400,11 +1462,11 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       if getenv("GEMM_PAD", 1) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and not split and isinstance(rt[1], UOp):
         fxn = functools.partial(fxn, rows=_unbind(rt[1]))
     elif (rk:=_rows_f16_config(tokens, local_out, in_features, layer.ggml_type, x.device)) is not None:
-      fxn = functools.partial(_rows_f16_wmma_kernel, ggml_type=layer.ggml_type, **rk)
+      fxn = functools.partial(_rows_coop_f16_wmma_kernel if "coop" in rk else _rows_f16_wmma_kernel, ggml_type=layer.ggml_type, **rk)
     else:
       fxn = functools.partial(_q5_linear_f16_wmma_kernel if layer.ggml_type in (Q4_K, Q5_K) else _quant_linear_f16_wmma_kernel,
                               ggml_type=layer.ggml_type)
-    if getattr(fxn, "func", None) is not _rows_f16_wmma_kernel: fxn = functools.partial(fxn, rdna4=_wmma_rdna4(x.device))
+    if getattr(fxn, "func", None) not in (_rows_f16_wmma_kernel, _rows_coop_f16_wmma_kernel): fxn = functools.partial(fxn, rdna4=_wmma_rdna4(x.device))
     srcs = ((xh:=_half_rows(x, tokens, local_splits))[0], *extra)
   elif layer.ggml_type == Q8_0 and xq is None and tokens <= 8 and in_features <= getenv("DEC_F16_K", 512) and in_features % 32 == 0 and \
        layer.weight.dtype == dtypes.uint16 and _q8_key(x, tokens, in_features, False, False) not in _q8_cache and _is_buffer(x):
@@ -1419,7 +1481,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   half_out = half_out and getattr(fxn, "func", None) is _q8_gemm_kernel
   out = Tensor.empty(out_shape, dtype=dtypes.half if half_out else dtypes.float32, device=x.device, axis=out_axis)
   w = layer.weight
-  if isinstance(fxn, functools.partial) and (c:=fxn.keywords.get("chunk")):
+  if isinstance(fxn, functools.partial) and fxn.func is _rows_f16_wmma_kernel and (c:=fxn.keywords.get("chunk")):
     # (the chunk path's view of the Q8_0 words: float (two words an element, wide loads of four) where the chunks' words are pairs)
     w = w.bitcast(dtypes.float32) if getenv("ROWS_F32", 0) and (c//2*17) % 2 == 0 and (in_features*17//32) % 2 == 0 else w.bitcast(dtypes.half)
   result = Tensor.custom_kernel(out, w, *srcs, fxn=functools.partial(fxn, out_features=local_out, in_features=in_features))[0]
