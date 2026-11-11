@@ -321,6 +321,8 @@ _partial_half = [True]  # (and in half: sent so. GLM's sequence parallel sends t
 _sp_route:list[tuple[Tensor, Tensor]|None] = [None]
 # and the sublayer's input rows of this device (before the gather): per token work (the router) runs on them, its results are gathered
 _sp_rows:list[Tensor|None] = [None]
+# (SP_ROWPROJ: a sequence parallel attention sublayer's row projections made on the rows' own device, gathered: see _sp_rowproj)
+_sp_pre:list[dict|None] = [None]
 # the tokens of a prefill chunk (its rows past them are padding): the experts don't take the padding rows
 _ffn_rows:list[UOp|int|None] = [None]
 def _out(layer:Linear, x:Tensor) -> Tensor:
@@ -826,19 +828,24 @@ class FFNBlock:
     if sub == "attn" and (o:=self._sp_attn_tok(hn, start_pos, T)) is not None: return sp_reduce_scatter(_fq(o, getenv("Q4_SIM_RS", 0)).contiguous())
     # (SP_AG_RINGK, default off, untested on 14 R9700: the q8 gather in one ring kernel a device on the compute queue (peer writes over its
     # workgroups), not 13 steps of the device's one copy engine)
-    if not getenv("SP_AG_RINGK", 0) or (x:=ring_all_gather_q8(hn.contiguous())) is None:
+    if sub == "attn" and getenv("SP_ROWPROJ", 0) and (pre:=self._sp_rowproj(hn, start_pos, T)) is not None: x, _sp_pre[0] = pre.pop("x"), pre
+    elif not getenv("SP_AG_RINGK", 0) or (x:=ring_all_gather_q8(hn.contiguous())) is None:
       x = all_gather_q8(_fq(hn, getenv("Q4_SIM_AG", 0)).contiguous(), 1, ring=bool(getenv("GLM_SP_RING", 1)))
     _partial_out[0], _sp_rows[0], _partial_half[0] = True, hn, False
     if sub != "attn": _ffn_rows[0] = T
     if isinstance(R:=x.shape[1], int): GEMM_ROWS[0] = (R, T)
     try: out = self._attention(x, start_pos, T) if sub == "attn" else self._feed_forward(x)
-    finally: _partial_out[0], _sp_rows[0], _ffn_rows[0], _partial_half[0], GEMM_ROWS[0] = False, None, None, True, None
+    finally: _partial_out[0], _sp_rows[0], _ffn_rows[0], _partial_half[0], GEMM_ROWS[0], _sp_pre[0] = False, None, None, True, None, None
     if out.ndim == hn.ndim and token_sharded(out): return out
     # (the partial sums in float, sent as half rows with a power of two of each: the range of GLM-5's activations past half's)
     return sp_reduce_scatter(_fq(out, getenv("Q4_SIM_RS", 0)).contiguous()) if out.ndim == hn.ndim + 1 else shard_rows(out, 1)
 
   def _sp_attn_tok(self, hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor|None:
     """the attention of sequence parallel blocks with the heads of its rows on every device (MLATransformerBlock), None if it hasn't one"""
+    return None
+
+  def _sp_rowproj(self, hn:Tensor, start_pos:int|UOp, T:int|UOp) -> dict|None:
+    """the row projections of a sequence parallel attention made on the rows' devices (MLATransformerBlock), None if it hasn't them"""
     return None
 
   def sp_block(self, xs:Tensor, start_pos:int|UOp, T:int|UOp, queue:str|None=None) -> Tensor:
@@ -1100,7 +1107,8 @@ class Indexer:
               pool_index_rows(sc, start_pos, pools, k, idx.kpool, row0=r0, out=picks)
     return unwrap(picks)[:Tq]
 
-  def dsa_picks(self, x:Tensor, q:Tensor, start_pos:UOp, freqs:Tensor, T:int|UOp|None=None, k_raw:Tensor|None=None) -> Tensor:
+  def dsa_picks(self, x:Tensor, q:Tensor, start_pos:UOp, freqs:Tensor, T:int|UOp|None=None, k_raw:Tensor|None=None,
+                w_raw:Tensor|None=None) -> Tensor:
     """
     DSA, the sparse path: x has Tq rows, the first T the tokens at start_pos. the lists (Tq, top_k+2) of the keys every query sees, count last.
     k_raw: attn_k(x) made already
@@ -1116,7 +1124,8 @@ class Indexer:
     # (the region's keys: split, a device's rows from b//devices (its scores' columns a sequence's), else rows from b)
     if self.shard: pk, kb, width = seq_store(self.cache_dk, k.half(), start_pos + b, T), b // self.shard, self.dk_width
     else: pk, kb, width = Tensor(self.cache_dk.uop.after(self.cache_dk[start_pos+b:S+b].uop.store(k[:T].half().uop))), b, self.max_context
-    weights = ((p if (p:=_skinny(self.proj, x)) is not None else self.proj(x)).float() * (idx.n_heads * idx.head_dim)**-0.5)[0]
+    w = w_raw if w_raw is not None else p if (p:=_skinny(self.proj, x)) is not None else self.proj(x)
+    weights = (w.float() * (idx.n_heads * idx.head_dim)**-0.5)[0]
     if Tq == 1 and idx.n_heads % 16 == 0:
       return indexer_decode_index(iq[0], pk, weights[0], start_pos, S, idx.top_k, 1, pbase=kb, width=width).reshape(1, -1)
     if Tq <= 8 and idx.n_heads % 16 == 0:
@@ -1212,6 +1221,46 @@ class MLATransformerBlock(FFNBlock):
     # a symbolic chunk computes padded to its max size (static shapes), it stores and attends with its real tokens
     if flash and not isinstance(T:=x.shape[1], int): return self._attention_rows(x.pad_to(x.max_shape), start_pos, T)[:, :T]
     return self._attention_rows(x, start_pos, x.shape[1])
+
+  def _sp_rowproj(self, hn:Tensor, start_pos:int|UOp, T:int|UOp) -> dict|None:
+    """
+    SP_ROWPROJ (sequence sharded cache, sequence parallel prefill): the attention's row projections (attn_q_a, attn_kv_a_mqa, the indexer's
+    attn_k and proj) of a device's OWN rows, not of all the rows on every device (14x the work), their outputs gathered, not hn (6144 wide).
+    The same values: the projections' input is what every device unpacked of the row before (hn packed and unpacked as all_gather_q8 does),
+    q_b's int8 groups of the normed q_a those the row's device made (registered for the gathered rows), the rest gathered in float.
+    returns the gathered tensors and x: a placeholder of the gathered hn's shape (never read)
+    """
+    cfg, ind = self.config, self.indexer
+    devs = hn.device
+    if not (self.seq_sharded and cfg.q_lora_rank > 0 and isinstance(devs, tuple) and isinstance(R:=hn.shape[1], int) and hn.ndim == 3 and
+            hn.uop.axis == 1 and (ind is None or ind.idx.kpool == 1)): return None
+    D = int(hn.shape[-1])
+    from tinygrad.llm.kernels.amd_glm_dsa import _q8_pack_kernel, _q8_unpack_kernel
+    packed = Tensor.custom_kernel(Tensor.empty(R, D//32, 9, dtype=dtypes.uint32, device=devs, axis=0),
+                                  _fq(hn, getenv("Q4_SIM_AG", 0)).contiguous().reshape(R, D), fxn=_q8_pack_kernel)[0]
+    xl = Tensor.custom_kernel(Tensor.empty(R, D, dtype=dtypes.half, device=devs, axis=0), packed, fxn=_q8_unpack_kernel)[0].reshape(1, R, D)
+    qn = self.attn_q_a_norm(self.attn_q_a(xl)).contiguous()
+    L = int(qn.shape[-1])
+    qq = q8_quantize(qn.reshape(R, L), R, L, False, True)
+    # (the gathered rows' normed q_a: no memory (a constant), q_b's kernels read only its quantization, registered for it right before them
+    # (a layer's registration replaces the last one's: the same key))
+    qn_all = Tensor.full((1, R, L), 3.0, dtype=qn.dtype, device=devs)
+    q8_quantize_known(qn_all, R, L, False, tuple(all_gather(t, 0) for t in qq))
+    # (x: hn as it is (its shape and devices; the attention reads none of it))
+    pre:dict = {"x": hn, "qn": qn_all}
+    kv_a = self.attn_kv_a_mqa(xl)
+    if self.cache_s.dtype == dtypes.half:
+      # (the latent and rope key of the device's rows (the same norm and rope a row), sent in half as the cache and the gather keep them)
+      lora, rope = cfg.kv_lora_rank, cfg.rope_dim
+      freqs_own = shard_rows(self.freqs_cis[start_pos:start_pos+T].pad_to((R, *self.freqs_cis.shape[1:])).contiguous(), 0)
+      c_kv = self.attn_kv_a_norm(kv_a[..., :lora])
+      k_rope = apply_rope(kv_a[..., lora:].reshape(1, R, 1, rope).transpose(1, 2), freqs_own, cfg.rope_interleave)
+      pre["k_store"] = all_gather(c_kv.reshape(1, R, lora).cat(k_rope.reshape(1, R, rope), dim=-1).half().contiguous(), 1)
+    else: pre["kv_a"] = all_gather(kv_a.contiguous(), 1)
+    if ind is not None:
+      pre["k"] = all_gather(ind.attn_k(xl).contiguous(), 1)
+      pre["w"] = all_gather((p if (p:=_skinny(ind.proj, xl)) is not None else ind.proj(xl)).contiguous(), 1)
+    return pre
 
   def _sp_attn_tok(self, hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor|None:
     """
@@ -1447,9 +1496,10 @@ class MLATransformerBlock(FFNBlock):
     # x has Tq rows, the first T are the tokens at start_pos
     B, Tq, _ = x.shape
     q_nope_head_dim = self.config.head_dim - self.config.rope_dim
-    dec = self._dec_proj(x)
-    qa = (dec[0] if dec is not None else self.attn_q_a(x)) if self.config.q_lora_rank > 0 else None
-    q_proj = self.attn_q_b(self.attn_q_a_norm(qa)) if qa is not None else self.attn_q(x)
+    pre = _sp_pre[0]
+    dec = self._dec_proj(x) if pre is None else None
+    qa = (dec[0] if dec is not None else self.attn_q_a(x)) if self.config.q_lora_rank > 0 and pre is None else None
+    q_proj = self.attn_q_b(pre["qn"]) if pre is not None else self.attn_q_b(self.attn_q_a_norm(qa)) if qa is not None else self.attn_q(x)
     q = q_proj.reshape(B, Tq, self.config.n_heads, self.config.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
     freqs = self.freqs_cis[start_pos:start_pos+T]
@@ -1466,13 +1516,14 @@ class MLATransformerBlock(FFNBlock):
       else: q_nope = q_nope.half().contiguous().matmul(k_b, dtype=dtypes.float).contiguous() if half else q_nope @ k_b
       q = q_nope.cat(q_rope.cast(q_nope.dtype), dim=-1)
 
-    kv_a = dec[1] if dec is not None else self.attn_kv_a_mqa(x)
-    c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
-    k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, Tq, 1, self.config.rope_dim).transpose(1, 2)
-    if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, freqs, self.config.rope_interleave)
     self._freqs_rows = freqs  # (the indexer's rope: the same frequencies)
-
-    k_store = c_kv.reshape(B, 1, Tq, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, Tq, self.config.rope_dim), dim=-1)
+    if pre is not None and (ks:=pre.get("k_store")) is not None: k_store = ks.reshape(B, 1, Tq, -1)  # (SP_ROWPROJ: made on the rows' devices)
+    else:
+      kv_a = pre["kv_a"] if pre is not None else dec[1] if dec is not None else self.attn_kv_a_mqa(x)
+      c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
+      k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, Tq, 1, self.config.rope_dim).transpose(1, 2)
+      if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, freqs, self.config.rope_interleave)
+      k_store = c_kv.reshape(B, 1, Tq, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, Tq, self.config.rope_dim), dim=-1)
     if self.seq_sharded:
       # the cache split on its positions over the devices (MLA_SEQ_SHARD): every device stores its rows of the tokens, attends all the heads
       # over its keys (the indexer's lists of every token: the pooled keys are on every device), the outputs combined on the devices of the heads
@@ -1483,8 +1534,9 @@ class MLATransformerBlock(FFNBlock):
         # (DSA, a shared layer: the lists of the full layer before it)
         lists = unwrap(_idx_mask[0])
       elif self.indexer.idx.kpool == 1:
-        lists = _idx_mask[1] = self.indexer.dsa_picks(x, self.attn_q_a_norm(unwrap(qa)), start_pos, freqs, T,
-                                                      dec[2] if dec is not None and len(dec) > 2 else None)
+        lists = _idx_mask[1] = self.indexer.dsa_picks(x, pre["qn"] if pre is not None else self.attn_q_a_norm(unwrap(qa)), start_pos, freqs, T,
+                                                      pre["k"] if pre is not None else dec[2] if dec is not None and len(dec) > 2 else None,
+                                                      pre["w"] if pre is not None else None)
         # (LISTS_PAD, default on: a chunk's padding rows (past its T tokens) with empty lists, their attention reads no keys (the shared layers
         # after it take these lists too). the tokens' rows are the same: the same bits. 4k: 2.74 -> 2.55 s)
         if getenv("LISTS_PAD", 1) and isinstance(Tq, int) and Tq > getenv("SEQ_GATHER_ROWS", 16): lists = _idx_mask[1] = lists_pad(lists, T)
