@@ -1129,7 +1129,8 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
                             layout, dequant, f"linear_{QUANT_NAMES[ggml_type]}_f16_wmma", rdna4, group, expert_words, x_div, act)
 
 @functools.cache
-def _rows_coop_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, ggml_type:int, coop:int=4, chunk:int=16) -> UOp:
+def _rows_coop_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, ggml_type:int, coop:int=4, chunk:int=16,
+                               raw_stage:bool=False) -> UOp:
   """
   _rows_f16_wmma_kernel with `coop` waves a workgroup for ONE output tile of 16: every wave dequantizes `chunk`/`coop` groups of a chunk's
   weights (the f16 kernel's dequant, the same halves) to LDS (two buffers: a barrier an iteration), the next chunk's loads issued meanwhile
@@ -1163,15 +1164,41 @@ def _rows_coop_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_fea
   lds = UOp.alloc((2, chunk, 2, WARP_SIZE, 8), dtypes.float16, addrspace=AddrSpace.LOCAL)
   buf = rng % 2
   st = []
-  for k in range(chunk // coop):
+  if raw_stage:
+    # (ROWS_COOP_RAW: the tile's raw Q8_0 words of the chunk copied to LDS by all the waves (wide loads, nothing computed on them while in
+    # flight), the chain's waves dequantize their lanes' words from LDS (as the chunk path's, the same halves))
+    assert ggml_type == Q8_0 and raw.dtype == dtypes.half and chunk % 4 == 0 and output_words % 4 == 0
+    RW, threads, tid = chunk*17, coop*WARP_SIZE, wave*WARP_SIZE + lane
+    lw = UOp.alloc((16, RW + 4), dtypes.float16, addrspace=AddrSpace.LOCAL)
+    n4 = 16*RW // 4
+    for k in range(-(-n4 // threads)):
+      e = tid + k*threads
+      r, c4 = (e // (RW//4)).minimum(15), e % (RW//4)
+      st += [lw[r.valid(e < n4) if n4 % threads else r, c4*4 + i].store(raw[(output_block*16 + r)*output_words + rng*RW + c4*4 + i])
+             for i in range(4)]
+    lw = lw.after(UOp.group(*st).barrier())
+    need = [[0] + [1 + 2*(hh*4 + i) + j for hh in range(2) for i in (h, h+2) for j in range(2)] for h in range(2)]
+    cur = acc.after(rng)
+    for u in range(chunk):
+      g = rng*chunk + u
+      wv = [physical_half.eq(0).where(lw[col, u*17 + a].load().bitcast(dtypes.uint16), lw[col, u*17 + b].load().bitcast(dtypes.uint16))
+            .cast(dtypes.uint32) for a, b in zip(need[0], need[1])]
+      scale = wv[0].cast(dtypes.uint16).bitcast(dtypes.float16).float()
+      words = [wv[1+2*q] | (wv[2+2*q] << 16) for q in range(4)]
+      for half in range(2):
+        afrag = UOp.stack(*(x[tt*16 + col, g*32 + half*16 + i].cast(dtypes.float16) for i in ks))
+        bfrag = UOp.stack(*((((word >> (b*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float()-0)*scale-UOp.const(0, dtypes.float)).cast(dtypes.half)
+                            for word in words[half*2:half*2+2] for b in range(4)))
+        cur = UOp.wmma(afrag, bfrag, cur, *WMMA_ARG)
+  for k in range(0 if raw_stage else chunk // coop):
     gl = wave*(chunk // coop) + k  # (a wave's groups of the chunk: consecutive)
     g = rng*chunk + gl
     for half in range(2):
       vals = dequant(output*output_words + (g // 8)*type_words, g % 8, half)
       st += [lds[buf, gl, half, lane, i].store(v) for i, v in enumerate(vals)]
-  lds = lds.after(UOp.group(*st).barrier())
-  cur = acc.after(rng)
-  for u in range(chunk):
+  if not raw_stage: lds = lds.after(UOp.group(*st).barrier())
+  if not raw_stage: cur = acc.after(rng)
+  for u in range(0 if raw_stage else chunk):
     g = rng*chunk + u
     for half in range(2):
       afrag = UOp.stack(*(x[tt*16 + col, g*32 + half*16 + i].cast(dtypes.float16) for i in ks))
@@ -1420,7 +1447,8 @@ def _rows_f16_config(tokens:int, out_features:int, in_features:int, ggml_type:in
   # (ROWS_COOP=W: W waves a workgroup load a chain's weights (_rows_coop_f16_wmma_kernel), ROWS_COOP_CHUNK groups an iteration)
   if (coop:=getenv("ROWS_COOP", 2)) and coop >= tokens // 16 and \
      (cc:=next((c for c in (getenv("ROWS_COOP_CHUNK", 16), 16, 8, 4) if NG % c == 0 and c % coop == 0), 0)):
-    return dict(coop=coop, chunk=cc)
+    return dict(coop=coop, chunk=cc, **({"raw_stage": True} if getenv("ROWS_COOP_RAW", 0) and ggml_type == Q8_0 and cc % 4 == 0 and
+                                         (in_features*17//32) % 4 == 0 else {}))
   # (ROWS_CHUNK: Q8_0's blocks loaded wide, chunk groups an iteration (0: off))
   chunk = next((c for c in (getenv("ROWS_CHUNK", 0), 8, 4, 2) if c and ggml_type == Q8_0 and NG % c == 0), 0) if getenv("ROWS_CHUNK", 0) else 0
   return dict(tiles=tiles, waves=waves, unroll=unroll, prefetch=bool(getenv("ROWS_PF", 1)), chunk=chunk,
@@ -1510,6 +1538,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   half_out = half_out and getattr(fxn, "func", None) is _q8_gemm_kernel
   out = Tensor.empty(out_shape, dtype=dtypes.half if half_out else dtypes.float32, device=x.device, axis=out_axis)
   w = layer.weight
+  if isinstance(fxn, functools.partial) and fxn.func is _rows_coop_f16_wmma_kernel and fxn.keywords.get("raw_stage"): w = w.bitcast(dtypes.half)
   if isinstance(fxn, functools.partial) and fxn.func is _rows_f16_wmma_kernel and (c:=fxn.keywords.get("chunk")):
     # (the chunk path's view of the Q8_0 words: float (two words an element, wide loads of four) where the chunks' words are pairs)
     w = w.bitcast(dtypes.float32) if getenv("ROWS_F32", 0) and (c//2*17) % 2 == 0 and (in_features*17//32) % 2 == 0 else w.bitcast(dtypes.half)
