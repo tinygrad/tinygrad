@@ -163,6 +163,10 @@ class _TinyJit(Generic[ReturnType]):
       with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
         ret = self.fxn(*args, **kwargs)
         if len(params:=get_parameters(ret)): Tensor.realize(*params)
+    elif self.cnt == 1 and (pending:=self.__dict__.pop("_pending_take", None)) is not None and pending():
+      # (capture_parallel's meanwhile: a jit a forked process captures, called here, waited for and taken: it runs)
+      assert self.captured is not None
+      ret = self.captured(input_buf_uops, var_vals)
     elif self.cnt == 1:
       # jit capture
       assert self.fxn is not None
@@ -368,7 +372,21 @@ def warmup_select(calls:dict[str, tuple[Any, Callable[[], Any]]], par:list[tuple
   keep = [x for k, _ in calls.values() for x in (k if isinstance(k, list) else [k])]
   return calls, [(j, c) for j, c in par if any(j is k for k in keep)]
 
-def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[Callable[[_TinyJit], bool]], None]|None=None,
+def run_as_they_come(take:Callable[..., bool|None], calls:dict[str, tuple[Any, Callable[[], Any]]], ran:set[str]):
+  """
+  (capture_parallel's meanwhile) the calls (name -> (jit or list of jits, call)) run as their jits come (taken), each once (its name added to
+  ran): the warm-up's runs while the jits left compile. WARMUP_EARLY=0: none (the caller runs them after)
+  """
+  if not getenv("WARMUP_EARLY", 1): return
+  while len(ran) < len(calls):
+    if (name:=next((n for n, (j, _) in calls.items() if n not in ran and
+                    all(take(x, wait=False) is not None for x in (j if isinstance(j, list) else [j]))), None)) is None:
+      time.sleep(0.01)
+      continue
+    ran.add(name)
+    calls[name][1]()
+
+def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[Callable[..., bool|None]], None]|None=None,
                      taken:Callable[[_TinyJit], None]|None=None) -> list[bool]:
   """
   the jits captured and compiled at the same time, each in a forked process: its call (which calls the jit for its capture) runs there, the
@@ -380,7 +398,7 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
   """
   todo = [k for k, (j, _) in enumerate(calls) if j.cnt == 1 and j.captured is None and j.fxn is not None]
   if not todo or not hasattr(os, "fork"):
-    if meanwhile is not None: meanwhile(lambda jit: False)
+    if meanwhile is not None: meanwhile(lambda jit, wait=True: False)
     return [False] * len(calls)
   every, calls = list(calls), [calls[k] for k in todo]
   st, reg, start = time.perf_counter(), _prefork_buffers(), next(UOp.unique_num)
@@ -491,15 +509,21 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     if taken is not None: taken(jit)
     if DEBUG >= 1: print(f"capture_parallel: jit {k} came at {', '.join(f'{t:.2f}' for t in arrived[k])}s, taken at {time.perf_counter()-st:.2f}s "
                          f"({len(out)} uops made in {t1-t0:.2f}s, linked in {time.perf_counter()-t1:.2f}s)")
-  def take_jit(jit:_TinyJit) -> bool:
-    # (meanwhile) a jit taken when it comes (waited for): it runs now
-    k = next(k for k, (j, _) in enumerate(calls) if j is jit)
+  def take_jit(jit:_TinyJit, wait:bool=True) -> bool|None:
+    # (meanwhile) a jit taken when it comes (waited for, not if wait is False: None if it didn't come yet): it runs now
+    if (k:=next((k for k, (j, _) in enumerate(calls) if j is jit), None)) is None: return False # (not one of them)
     if k in left:
+      if not wait and not came(k): return None
       with got: got.wait_for(lambda: came(k))
       take(k)
     return oks[k]
 
-  if meanwhile is not None: meanwhile(take_jit)
+  # (meanwhile, a jit called before it's taken waits for it: it isn't captured again)
+  for jit, _ in calls: jit.__dict__["_pending_take"] = functools.partial(take_jit, jit)
+  try:
+    if meanwhile is not None: meanwhile(take_jit)
+  finally:
+    for jit, _ in calls: jit.__dict__.pop("_pending_take", None)
   if DEBUG >= 1: print(f"capture_parallel: the work meanwhile done at {time.perf_counter()-st:.2f}s")
   # every jit left as it comes: taken and linked
   while left:

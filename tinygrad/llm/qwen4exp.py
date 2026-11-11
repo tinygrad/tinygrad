@@ -3,7 +3,7 @@ import array, contextlib, enum, functools, itertools, math, pathlib, random, re,
 from dataclasses import dataclass, replace
 from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
-from tinygrad.engine.jit import capture_parallel, warmup_select
+from tinygrad.engine.jit import capture_parallel, warmup_select, run_as_they_come
 from tinygrad.llm.kernels import amd_qwen
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
 from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES, _wmma_rdna4, ring_errors, init_deferred
@@ -2576,10 +2576,13 @@ class Transformer:
     _lap("warmup: shared")
     loads = [_zero_jit(dedup(zero_bufs))]
     if DEBUG >= 1: print(f"seq_warmup: memory made at {time.perf_counter()-st:.2f}s")
-    def meanwhile(take:Callable[[Any], bool]):
+    ran:set[str] = set()
+    def meanwhile(take:Callable[..., bool|None]):
       for j, call in loads:
         take(j)
         call()
+      # (the warm-up's runs as their jits come: while the others compile)
+      run_as_they_come(take, calls, ran)
     top, k = unwrap(self.config.indexer).top_k, self.config.spec_drafts
     calls:dict[str, tuple[Any, Callable[[], Any]]] = {}
     def add(name:str, jit:Any, call:Callable[[], Any]):
@@ -2640,6 +2643,7 @@ class Transformer:
     capture_parallel(par, meanwhile)
     if DEBUG >= 1: print(f"seq_warmup: {len(par)} jits compiled at {time.perf_counter()-st:.2f}s")
     for name, (jit, call) in calls.items():
+      if name in ran: continue
       st = time.perf_counter()
       call()
       if DEBUG >= 1: print(f"seq_warmup: {name} run in {time.perf_counter()-st:.2f}s")

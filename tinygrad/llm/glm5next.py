@@ -3,7 +3,7 @@ import array, collections, contextlib, enum, functools, gc, itertools, math, os,
 from dataclasses import dataclass, replace, field
 from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
-from tinygrad.engine.jit import capture_parallel, warmup_select, warmup_wanted, _TinyJit
+from tinygrad.engine.jit import capture_parallel, warmup_select, warmup_wanted, _TinyJit, run_as_they_come
 from tinygrad.engine.realize import run_linear, compile_linear, link_linear
 from tinygrad.llm.kernels.amd_glm import rows_shifted, rows_pick, pool_expand
 from tinygrad.llm.kernels.amd_glm import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
@@ -4468,7 +4468,8 @@ class Transformer:
     # (the computations from the weights and the zeroing of the states: jits compiled with the others, run when the weights are read)
     loads = [(j, j) for j in self._pending_load if isinstance(j, _TinyJit)] + [_zero_jit(dedup(zero_bufs))]
     if DEBUG >= 1: print(f"seq_warmup: memory made at {time.perf_counter()-st:.2f}s")
-    def meanwhile(take:Callable[[Any], bool]):
+    ran:set[str] = set()
+    def meanwhile(take:Callable[..., bool|None]):
       # the files' reads (the weights', then the n-gram table's while the values are computed from the weights: not at once, the reads of
       # both are slower than one after the other)
       while self._pending_load and not isinstance(self._pending_load[0], _TinyJit): self._pending_load.pop(0)()
@@ -4482,6 +4483,8 @@ class Transformer:
       if DEBUG >= 1: print(f"seq_warmup: weights and zeros at {time.perf_counter()-st:.2f}s")
       self._ple_dev_wait()
       if DEBUG >= 1: print(f"seq_warmup: loaded at {time.perf_counter()-st:.2f}s")
+      # (the warm-up's runs as their jits come: while the others compile)
+      run_as_they_come(take, calls, ran)
     top, k = unwrap(self.config.indexer).top_k, self.config.spec_drafts
     calls:dict[str, tuple[Any, Callable[[], Any]]] = {}
     def add(name:str, jit:Any, call:Callable[[], Any]):
@@ -4544,9 +4547,10 @@ class Transformer:
     if DEBUG >= 1:
       for i, (_, call) in enumerate(par): print(f"seq_warmup: jit {i}: {getattr(call, 'func', call)} {getattr(call, 'args', '')}"[:160])
     if getenv("WARMUP_PARALLEL", 1): capture_parallel(par, meanwhile)
-    else: meanwhile(lambda j: False)
+    else: meanwhile(lambda j, wait=True: False)
     if DEBUG >= 1: print(f"seq_warmup: {len(par)} jits compiled at {time.perf_counter()-st:.2f}s")
     for name, (jit, call) in calls.items():
+      if name in ran: continue
       st = time.perf_counter()
       call()
       if DEBUG >= 1: print(f"seq_warmup: {name} run in {time.perf_counter()-st:.2f}s")
