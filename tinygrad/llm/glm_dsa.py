@@ -828,7 +828,7 @@ class FFNBlock:
     if sub == "attn" and (o:=self._sp_attn_tok(hn, start_pos, T)) is not None: return sp_reduce_scatter(_fq(o, getenv("Q4_SIM_RS", 0)).contiguous())
     # (SP_AG_RINGK, default off, untested on 14 R9700: the q8 gather in one ring kernel a device on the compute queue (peer writes over its
     # workgroups), not 13 steps of the device's one copy engine)
-    if sub == "attn" and getenv("SP_ROWPROJ", 0) and (pre:=self._sp_rowproj(hn, start_pos, T)) is not None: x, _sp_pre[0] = pre.pop("x"), pre
+    if sub == "attn" and getenv("SP_ROWPROJ", 1) and (pre:=self._sp_rowproj(hn, start_pos, T)) is not None: x, _sp_pre[0] = pre.pop("x"), pre
     elif not getenv("SP_AG_RINGK", 0) or (x:=ring_all_gather_q8(hn.contiguous())) is None:
       x = all_gather_q8(_fq(hn, getenv("Q4_SIM_AG", 0)).contiguous(), 1, ring=bool(getenv("GLM_SP_RING", 1)))
     _partial_out[0], _sp_rows[0], _partial_half[0] = True, hn, False
