@@ -1563,6 +1563,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       amax = xr.float().abs().max(-1, keepdim=True)
       sc = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
       srcs, xh = (xr.contiguous(), sc), (xr, sc)
+      if not half_out and getenv("GEMM_OSC", 1): fxn, srcs, xh = functools.partial(fxn, osc=True), (*srcs, sc), None
     else:
       srcs = ((xh:=_half_rows(x, tokens, local_splits))[0],)
       # (GEMM_OSC: float sums scaled back by the gemm as it stores them, not by a kernel reading and writing all of them after)
