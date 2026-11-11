@@ -90,12 +90,12 @@ class TestGLMDSASequence(unittest.TestCase):
 
   def test_seq_p2p_pack_kernels(self):
     # (SEQ_P2P_PACK: mla_sparse_seq's one shot gather and reduce scatter of packed words: default off, the kernels build)
-    from tinygrad.llm.kernels.amd_glm_dsa import _p2p_allreduce_kernel, _seq_p2p_pack, P2P_AR_CLASSES, P2P_AR_MAXG, P2P_AR_MAXW
+    from tinygrad.llm.kernels.amd_glm_dsa import _p2p_allreduce_kernel, _seq_p2p_pack, P2P_AR_CLASSES, P2P_AR_MAXG, P2P_AR_MAXW, P2P_AR_NCTR
     with patch.dict(os.environ, {"SEQ_P2P_PACK": "0"}): self.assertIsNone(_seq_p2p_pack())
     with patch.dict(os.environ, {"SEQ_P2P_PACK": "3x8"}): self.assertEqual(_seq_p2p_pack(), (3, 8))
     N, n = 4, 256
     mb = [Tensor.empty(P2P_AR_CLASSES*P2P_AR_MAXG*2*(N+1)*P2P_AR_MAXW, dtype="uint64") for _ in range(N)]
-    counter = Tensor.empty(P2P_AR_CLASSES*P2P_AR_MAXG+2, dtype="int32")
+    counter = Tensor.empty(P2P_AR_NCTR+2, dtype="int32")
     for kw in (dict(gather=True), dict(scatter=True)):
       out, x = Tensor.empty(N*n*3, dtype="float32"), Tensor.empty(1, N*n*3, dtype="float32")
       fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n, T=256, EP=1, pack=(3, 8), **kw)
@@ -128,6 +128,31 @@ class TestGLMDSASequence(unittest.TestCase):
     # Eight-bit epochs accepted call 1's stale word at call 257. Refuse the old SEQ formats before model construction.
     for unsafe in ("6x8", "4x12", "3x7"):
       with patch.dict(os.environ, {"SEQ_P2P_PACK": unsafe}), self.assertRaises(AssertionError): _seq_p2p_pack()
+
+  def test_p2p_epochs_never_alias(self):
+    # (batched decoding's packed allreduce (class 2, 8 bit epochs) of 4 rows a sequence: 256 words a workgroup at 1 sequence, 4096 at 8. a
+    # word of a G=8 call, then 255 calls of G=1 (or 254, 256: any count), then G=8 again: with one counter a workgroup the old word's epoch
+    # equals the new call's mod 256 (a reader takes it if it polls before its writer). the words' ranges' counters: never)
+    from tinygrad.llm.kernels.amd_glm_dsa import p2p_counter_index, P2P_AR_RANGES
+    words = sorted({0, 4095} | {x for r in P2P_AR_RANGES for x in (r-1, r)})  # (a word's fate is its range's)
+    def aliases(index, bits:int, between:int) -> bool:
+      ctr:dict[int, int] = {}
+      tag:dict[tuple[int, int], int] = {}  # (parity slot, word) -> the epoch it holds
+      for size in [4096] + [256]*between + [1024, 4096]:
+        for l in [l for l in words if l < size]:
+          e = ctr.get(index(l), 0) + 1
+          if (old:=tag.get((e & 1, l))) is not None and old != e and old % (1 << bits) == e % (1 << bits): return True
+          tag[(e & 1, l)] = e
+        for ci in {index(l) for l in words if l < size}: ctr[ci] = ctr.get(ci, 0) + 1
+      return False
+    # (one counter a workgroup: a stale word looks fresh)
+    self.assertTrue(aliases(lambda l: 0, 8, 255))
+    for cls, bits in ((2, 8), (1, 16)):
+      for between in (253, 254, 255, 256, 510, 65534, 65535):
+        self.assertFalse(aliases(functools.partial(p2p_counter_index, cls, 0), bits, between), (cls, between))
+    # (the 32 bit classes keep one counter a workgroup)
+    self.assertEqual(p2p_counter_index(0, 3, 0), p2p_counter_index(0, 3, 4095))
+    self.assertEqual(p2p_counter_index(3, 3, 0), p2p_counter_index(3, 3, 4095))
 
   def test_sample_greedy_rows_exact(self):
     # (a row of temperature 0 is the argmax of its logits (the first of a tie), whatever the noise: it was logits / 1e-12 plus Gumbel noise,

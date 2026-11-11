@@ -1683,7 +1683,7 @@ class P2PAllreduce:
         (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [own[d] if k == 0 else alias(own[(d+k) % N], devs[d]) for d in range(N)]
         self.mboxes.append(Tensor(UOp.from_buffer(mb, dtypes.uint64, devs)))
       # the epoch counter of every workgroup, then the device's index, then the epoch of the last poll that ran out (0: none, p2p_late)
-      counters = [Buffer(d, (P2P_AR_CLASSES*P2P_AR_MAXG+2)*4, initial_value=bytes(P2P_AR_CLASSES*P2P_AR_MAXG*4)+i.to_bytes(4, "little")+bytes(4))
+      counters = [Buffer(d, (P2P_AR_NCTR+2)*4, initial_value=bytes(P2P_AR_NCTR*4)+i.to_bytes(4, "little")+bytes(4))
                   for i,d in enumerate(devs)]
       (cb:=MultiBuffer.__new__(MultiBuffer)).bufs = counters
       self.counter, self.counter_bufs = Tensor(UOp.from_buffer(cb, dtypes.int32, devs)), counters
@@ -1693,6 +1693,19 @@ P2P_AR_MAXG, P2P_AR_MAXW = getenv("P2P_AR_MAXG", 64), getenv("P2P_AR_MAXW", 4096
 # the classes of words (epochs: 32 bits of plain/half, 16 of three halves, 8 of legacy packed, 32 of SEQ-safe packed):
 # every class has regions of the mailboxes and its epoch counters. Formats with different epoch layouts must not share a class.
 P2P_AR_CLASSES = 4
+# the epochs of fewer than 32 bits (classes 1, 2) wrap: a word that a call of more words a workgroup left (one past a wrap of the calls of fewer
+# words since) would look fresh to the next such call. in those classes a workgroup's words are in ranges (the first 128, the next 128, 256,
+# 512, ..), each with its own epoch counter, counted by the calls that write it (every call writes whole ranges): a word a reader polls is
+# never older than two of its range's epochs
+P2P_AR_RANGES = (128, 256, 512, 1024, 2048)  # (the ranges' starts past the first)
+P2P_AR_NCTR = P2P_AR_CLASSES * (len(P2P_AR_RANGES) + 1) * P2P_AR_MAXG  # (the epoch counters, then the device's index, then p2p_late's)
+def p2p_ranged(cls:int) -> bool: return cls in (1, 2)
+def p2p_range(l:int) -> int:
+  """the range of a workgroup's word l (its epoch counter's, in the classes of fewer epoch bits)"""
+  return sum(l >= b for b in P2P_AR_RANGES)
+def p2p_counter_index(cls:int, wg:int, l:int) -> int:
+  """the epoch counter of word l of workgroup wg of class cls"""
+  return (cls*(len(P2P_AR_RANGES) + 1) + (p2p_range(l) if p2p_ranged(cls) else 0))*P2P_AR_MAXG + wg
 
 def p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None: return _p2p_allreduce(tuple(Device.canonicalize(d) for d in devs))
 @functools.cache
@@ -1705,11 +1718,18 @@ def p2p_late(devs:tuple[str, ...], clear:bool=False) -> list[int]:
   (or cleared)"""
   if (p2p:=p2p_allreduce(devs)) is None: return []
   for d in devs: Device[d].synchronize()
-  i, ret = P2P_AR_CLASSES*P2P_AR_MAXG + 1, []
+  i, ret = P2P_AR_NCTR + 1, []
   for b in p2p.counter_bufs:
     ret.append(int(memoryview(b.as_buffer()).cast("i")[i]))
     if clear: b.copyin(memoryview(bytearray(b.as_buffer())[:i*4] + bytes(4)))
   return ret
+
+def P2P_AR_TIMEOUT_MS() -> int: return getenv("P2P_AR_TIMEOUT_MS", 30000)
+
+def p2p_check(devs:tuple[str, ...]) -> None:
+  """raise if a p2p poll ran out since the last check (its kernel's values are wrong): a step that took P2P_AR_TIMEOUT_MS has one"""
+  if any(late:=p2p_late(devs, clear=True)):
+    raise RuntimeError(f"a p2p poll ran out (P2P_AR_TIMEOUT_MS={P2P_AR_TIMEOUT_MS()}, epochs {late}): the sums of its step are wrong")
 
 def p2p_ar_shape(n:int) -> tuple[int, int]|None:
   """(threads, values a thread) of a p2p allreduce of n values: a workgroup's at most P2P_AR_MAXW, at most P2P_AR_MAXG of them"""
@@ -1748,10 +1768,16 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   # (SEQ-safe packed words: their own class, so legacy 8-bit-epoch generic allreduces can't alias their mailboxes/counters)
   cls = 3 if pack is not None and pack[0]*pack[1] == 24 else 2 if pack is not None else 1 if triple else 0
   cw = wg + cls*P2P_AR_MAXG
-  epoch, me = (counter[cw].load() + 1).cast(dtypes.uint32), counter[P2P_AR_CLASSES*P2P_AR_MAXG].load().cast(dtypes.weakint)
-  # (2 s: a batched step's devices start its graph up to tens of ms apart (repstep, ts5: 50 ms ran out at G=8 in 11 of 11 repetitions of
-  # the same step, its hidden states different every time; 30 s: 0 of 11). a poll that runs out still ends, its values wrong)
-  deadline = _sys("__builtin_readsteadycounter()", dtypes.uint64, epoch) + int(getenv("P2P_AR_TIMEOUT_MS", 2000) * 100000)  # (100 MHz)
+  # (a thread's words are in one range: EP divides 128. the calls of ranged classes write whole ranges)
+  ranged = p2p_ranged(cls)
+  assert not ranged or (T*EP in (128,) + P2P_AR_RANGES[1:] + (4096,) and T*EP <= P2P_AR_MAXW and 128 % EP == 0), f"ranged words of {T}x{EP}"
+  rng = functools.reduce(lambda a,b: a+b, [(t*EP >= b).cast(dtypes.weakint) for b in P2P_AR_RANGES]) if ranged else UOp.const(0, dtypes.weakint)
+  ci = (rng + cls*(len(P2P_AR_RANGES) + 1))*P2P_AR_MAXG + wg
+  epoch, me = (counter[ci].load() + 1).cast(dtypes.uint32), counter[P2P_AR_NCTR].load().cast(dtypes.weakint)
+  # (30 s: a batched step's devices start its graph up to tens of ms apart, and a jit's first two runs (not a graph, launched kernel by kernel)
+  # seconds (repstep, ts5, G=8: 50 ms and 2 s ran out, the step's hidden states different from its replays'; 30 s: never). a poll that runs
+  # out still ends, its values wrong: p2p_check (after a long step) raises)
+  deadline = _sys("__builtin_readsteadycounter()", dtypes.uint64, epoch) + int(P2P_AR_TIMEOUT_MS() * 100000)  # (100 MHz)
   par = (epoch & 1).cast(dtypes.weakint)
   def reg(s:int|UOp, l:UOp) -> UOp: return ((cw*2 + par)*(N+1) + s)*P2P_AR_MAXW + l
   # pack (W, B): W values a word, B bit integers of a shared power of two (8 bits) and an epoch (two shot: the sums of the
@@ -1826,7 +1852,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     out = [words[i].load() for i in range(len(slots))]
     # (a thread whose words are still stale ran out: its epoch noted, see p2p_late)
     late = functools.reduce(lambda a,b: a | b, [w & fresh(g).logical_not() for g, w in zip(out, waits)])
-    lates.append(counter[UOp.const(P2P_AR_CLASSES*P2P_AR_MAXG + 1, dtypes.weakint).valid(late)].store(epoch.cast(dtypes.int32)))
+    lates.append(counter[UOp.const(P2P_AR_NCTR + 1, dtypes.weakint).valid(late)].store(epoch.cast(dtypes.int32)))
     return out
   # (packed: a device's own values as the others get them, the sums don't depend on which device sums them)
   if pack is not None: vals = [value(word(v)) for v in vals]
@@ -1868,7 +1894,9 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     got2 = poll(published, [reg(N, l) for l in li], [is_owner.logical_not() for _ in li])
     stores = [out[e*W + c].store(is_owner.where(sm[c], value(g)[c])) for e, sm, g in zip(els, sums, got2) for c in range(W)]
   # the next epoch, once every thread of the workgroup read the counter
-  done = counter.after(UOp.group(*stores).barrier())[cw.valid(t.eq(0))].store(epoch.cast(dtypes.int32))
+  # (ranged: the first thread of every range stores its counter)
+  first = functools.reduce(lambda a,b: a | b, [(t*EP).eq(b) for b in P2P_AR_RANGES], t.eq(0)) if ranged else t.eq(0)
+  done = counter.after(UOp.group(*stores).barrier())[ci.valid(first)].store(epoch.cast(dtypes.int32))
   name = "p2p_allgather" if gather else "p2p_reduce_scatter" if scatter else "p2p_allreduce"
   return UOp.group(*stores, done, *lates).end(wg, t).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 

@@ -15,7 +15,7 @@ from tinygrad.llm.kernels.amd_glm_dsa import Linear, gated_delta_prefill, flash_
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, SLOT_SPAN, \
   mla_bmm, bmm_wmma, weighted_sum, rows_gather, \
   nucleus, seq_store, mla_sparse_seq, seq_views, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, pool_index_shard
-from tinygrad.llm.kernels.amd_glm_dsa import host_allgather, Q8_0, mla_sparse_seq_tokens, ring_all_gather_q8, lists_pad, GEMM_ROWS
+from tinygrad.llm.kernels.amd_glm_dsa import p2p_check, host_allgather, Q8_0, mla_sparse_seq_tokens, ring_all_gather_q8, lists_pad, GEMM_ROWS
 from tinygrad.llm.kernels.amd_glm_dsa import sp_reduce_scatter, all_to_all, mla_sparse_tokens, tbo_ag_parts, tbo_a2a_pre, \
   tbo_a2a_parts, tbo_a2a_post, tbo_rs_pre, tbo_rs_parts, tbo_rs_post, tbo_q8_pre, tbo_q8_post
 from tinygrad.llm.glm_dsa_gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
@@ -330,6 +330,7 @@ def _identity(x:Tensor) -> Tensor: return x
 
 # the experts of a few tokens are the ones of every token (a decode kernel each), more are grouped by expert (prefill)
 MOE_DECODE_ROWS = getenv("MOE_DECODE_ROWS", 96)
+P2P_CHECK_S = getenv("P2P_CHECK_S", 1.0)  # (a wait this long after the last: the p2p polls' notes read, see _wait_host)
 # batched decoding: rows of experts decoded (in bundles) up to this many, grouped (the prefill kernels) past it
 MOE_BATCH_ROWS = getenv("MOE_BATCH_ROWS", 512)
 def _skinny(lin:Linear, x:Tensor) -> Tensor|None:
@@ -2316,7 +2317,14 @@ class Transformer(GLMSeqDriver):
         for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
         if isinstance(v:=get(), int) and v < 0: raise RuntimeError(f"{what}: none after the devices finished")
         break
+    # (a p2p poll that runs out (P2P_AR_TIMEOUT_MS) ends with wrong sums: the time since the last wait is at least that long then. after a long
+    # one the devices' notes are read (p2p_check): an error, not the tokens of wrong sums. the steps of a graph are far shorter: no reads)
+    if (now:=time.perf_counter()) - self._p2p_mark > P2P_CHECK_S:
+      p2p_check(cast(tuple[str, ...], to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))))
+      now = time.perf_counter()
+    self._p2p_mark = now
     return v
+  _p2p_mark = 0.0
 
   def _spec_steps(self, tokens:list[int], temperature:Tensor) -> Iterator[int]:
     """speculative decoding after a prefill: tokens[-1] is the sampled token after the prompt"""
