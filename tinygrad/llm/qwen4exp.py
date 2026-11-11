@@ -2572,12 +2572,16 @@ class Transformer:
     _lap("warmup: derived")
     with _zero_deferred() as zero_bufs: self._seq_init()
     _lap("warmup: seq init")
-    self._seq_shared()
+    # (the n-gram table read while the jits compile: its buffers made, the jits that read it capture before)
+    self._seq_shared(read=False)
     _lap("warmup: shared")
     loads = [_zero_jit(dedup(zero_bufs))]
     if DEBUG >= 1: print(f"seq_warmup: memory made at {time.perf_counter()-st:.2f}s")
     ran:set[str] = set()
     def meanwhile(take:Callable[..., bool|None]):
+      if self.config.ple is not None:
+        self._ple_dev_read()
+        _lap("warmup: n-gram table read")
       for j, call in loads:
         take(j)
         call()
