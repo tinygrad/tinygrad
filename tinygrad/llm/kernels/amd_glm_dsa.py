@@ -5030,8 +5030,9 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   if small and getenv("SEQ_P2P_A2A", 1 if _seq_p2p_pack() is None else 0) and dims is not None and H % n == 0:
     # (a few tokens: every device's outputs of the heads of a device (normed by its sum), their max and sum, to that device in one exchange;
     # combined there by their max and sum)
-    # (SEQ_A2A_HALF, default off, a numerics change: the outputs in half, two a float word (half the bytes), their max and sum in float)
-    a2a_half = bool(getenv("SEQ_A2A_HALF", 0)) and dims % 2 == 0
+    # (SEQ_A2A_HALF, default on (quality bar q-ah3), a numerics change: the outputs in half, two a float word (half the bytes), their max and sum
+    # in float. SEQ_A2A_HALF=0: the float words)
+    a2a_half = bool(getenv("SEQ_A2A_HALF", 1)) and dims % 2 == 0
     odp = od[..., :dims]
     if a2a_half: odp = odp.maximum(-65504.0).minimum(65504.0).cast(dtypes.half).contiguous().bitcast(dtypes.float32)
     Dv = dims // 2 if a2a_half else dims
