@@ -183,6 +183,11 @@ class _TinyJit(Generic[ReturnType]):
 
   @disable_gc()
   def __call__(self, *args, **kwargs) -> ReturnType:
+    lap_name = getattr(self, "warmup_name", None) if getenv("DEBUG_LOAD", 0) else None
+    lap_st, lap_kind = time.perf_counter(), "capture" if self.cnt == 1 and self.captured is None else "run"
+    def lap(kind:str):
+      if lap_name is not None: print(f"warmup jit {lap_name}: {kind} at +{time.perf_counter()-lap_st:.2f}s", flush=True)
+    lap(f"{lap_kind} begin")
     input_buf_uops, var_vals, names, expected_input_info = _prepare_jit_inputs(args, kwargs)
     if not JIT or self.cnt == 0:
       # jit ignore
@@ -230,7 +235,9 @@ class _TinyJit(Generic[ReturnType]):
       for j in list(_scratch_jits.get(id(self.scratch), ())) if grown else []:
         if j is not self and j.captured is not None: j.captured.rebase(grown)
       del before, grown
-      if _forked_capture and _forked_capture[0] is self: _forked_capture[1](ret, linear, names, expected_input_info) # (doesn't return)
+      if _forked_capture and _forked_capture[0] is self:
+        lap("capture end")  # a forked capture exits here, not through the return
+        _forked_capture[1](ret, linear, names, expected_input_info) # (doesn't return)
       # drop the pre-planning graph: it keeps the whole capture-time working set allocated (big_linear) or referenced (held_bufs).
       # the planned linear only uses the arena/held buffers, so the intermediates must be freed before linking and first exec
       del big_linear, held_bufs
@@ -245,6 +252,7 @@ class _TinyJit(Generic[ReturnType]):
       ret = self.captured(input_buf_uops, var_vals)
 
     if JIT: self.cnt += 1
+    lap(f"{lap_kind} end")
     return ret
 
 # overload signatures support both @TinyJit and @TinyJit(prune=True) syntax

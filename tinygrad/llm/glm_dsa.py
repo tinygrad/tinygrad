@@ -2346,7 +2346,9 @@ class Transformer(GLMSeqDriver):
     self._spec_h[0:1].assign(self._spec_h.shrink(((row, row+1), None)).contiguous() * Tensor(keep).cast(dtypes.float)).realize()
   def _spec_row0(self, row:int):
     """the hidden state of the position before a prompt (row 0 of _spec_h): the one of row `row` (the last accepted token), 0: none (zero)"""
-    if not hasattr(self, "_spec_row0_jit"): self._spec_row0_jit = TinyJit(self._spec_row0_copy, capture_first=True)
+    if not hasattr(self, "_spec_row0_jit"):
+      self._spec_row0_jit = TinyJit(self._spec_row0_copy, capture_first=True)
+      setattr(self._spec_row0_jit, "warmup_name", "copy/spec_row0")
     k = self.config.spec_drafts
     self._spec_row0_jit(UOp.variable("spec_row", 0, 2*k+1).bind(row), UOp.variable("spec_keep", 0, 1).bind(int(row != 0)))
 
@@ -2400,8 +2402,9 @@ class Transformer(GLMSeqDriver):
   def _spec_call(self, mtp_pos:int, j:int, par:int, temperature:Tensor):
     """a step of speculative decoding (forward_spec, its jit)"""
     k, pos = self.config.spec_drafts, mtp_pos + j
-    if not hasattr(self, "_spec_jit"): self._spec_jit = TinyJit(self.forward_spec, capture_first=getattr(self, "_states_ready", False),
-                                                                scratch=self._scratch)
+    if not hasattr(self, "_spec_jit"):
+      self._spec_jit = TinyJit(self.forward_spec, capture_first=getattr(self, "_states_ready", False), scratch=self._scratch)
+      setattr(self._spec_jit, "warmup_name", "step/spec")
     if not hasattr(self, "_spec_vars"):
       # (made once: a step binds them)
       pos_var = functools.partial(UOp.variable, min_val=0, max_val=self.max_context-1)
@@ -2615,10 +2618,14 @@ class Transformer(GLMSeqDriver):
     if not hasattr(self, "_slot_jit"): self._slot_jit = TinyJit(self._slot_copy, capture_first=True, scratch=self._scratch)
     if not hasattr(self, "_slot_move_jit"): self._slot_move_jit = TinyJit(self._slot_move_copy, capture_first=True, scratch=self._scratch)
     if not hasattr(self, "_slot_load_jit"): self._slot_load_jit = TinyJit(self._slot_load_copy, capture_first=True, scratch=self._scratch)
+    for name, j in zip(("slot/store", "slot/move", "copy/load"), (self._slot_jit, self._slot_move_jit, self._slot_load_jit)):
+      setattr(j, "warmup_name", name)
     # (the copies of a sequence spanning more slots, see slot_span)
     if not hasattr(self, "_slot_span_jits"):
       self._slot_span_jits = {n: tuple(TinyJit(functools.partial(f, span=n), capture_first=True, scratch=self._scratch)
                                        for f in (self._slot_copy, self._slot_load_copy, self._slot_move_copy)) for n in range(2, self.max_span()+1)}
+      for n, js in self._slot_span_jits.items():
+        for name, j in zip(("slot/store", "copy/load", "slot/move"), js): setattr(j, "warmup_name", f"{name}_span{n}")
   def main_own(self) -> int:
     """(aliased) the positions of the model's cache that aren't a slot's (SLOT_SPAN slots' worth)"""
     return SLOT_SPAN*self.batch_ctx()
@@ -2668,7 +2675,9 @@ class Transformer(GLMSeqDriver):
     checkpoint of a prompt prefilled in a slot, see the server's ckpt_keep
     """
     if not hasattr(self, "_ckpt"): return
-    if not hasattr(self, "_ckpt_slot_jit"): self._ckpt_slot_jit = TinyJit(self._ckpt_from_slot_copy, capture_first=True)
+    if not hasattr(self, "_ckpt_slot_jit"):
+      self._ckpt_slot_jit = TinyJit(self._ckpt_from_slot_copy, capture_first=True)
+      setattr(self._ckpt_slot_jit, "warmup_name", "copy/ckpt_from_slot")
     v = self._slot_store_vars(i, length, 0)
     self._ckpt_slot_jit(v[0], v[2], v[3])
 
@@ -2755,6 +2764,7 @@ class Transformer(GLMSeqDriver):
     if not hasattr(self, "_hrows"):
       self._hrows = [v.clone().realize() for v in self._ckpt_views(states, slot)]
       self._hrow_jits = {sv: TinyJit(functools.partial(self._hrow_copy, sv), capture_first=True) for sv in (True, False)}
+      for sv, j in self._hrow_jits.items(): setattr(j, "warmup_name", f"stash/host_{'save' if sv else 'load'}")
     if length is not None: self._hrow_jits[save](slot)
     return self._hrows
   def _hrow_copy(self, save:bool, slot:UOp):
@@ -2867,7 +2877,9 @@ class Transformer(GLMSeqDriver):
 
   def _batch_jit(self, m:int):
     if not hasattr(self, "_batch_jits"): self._batch_jits:dict[int, Any] = {}
-    if m not in self._batch_jits: self._batch_jits[m] = TinyJit(self.forward_batch, capture_first=True, scratch=self._scratch)
+    if m not in self._batch_jits:
+      self._batch_jits[m] = TinyJit(self.forward_batch, capture_first=True, scratch=self._scratch)
+      self._batch_jits[m].warmup_name = f"step/{m}"
     return self._batch_jits[m]
   def _batch_positions(self, positions:list[int]) -> list[UOp]:
     return [UOp.variable(f"batch_pos{i}", 0, SLOT_SPAN*self.batch_ctx()-1).bind(pos) for i, pos in enumerate(positions)]
@@ -3031,6 +3043,7 @@ class Transformer(GLMSeqDriver):
     if not hasattr(self, "_bpf_jits"): self._bpf_jits:dict[tuple[int, int], Any] = {}
     if (key:=(G or self.BPF_G, P or self.BPF_P)) not in self._bpf_jits:
       self._bpf_jits[key] = TinyJit(functools.partial(self.forward_batch_prefill, P=key[1]), capture_first=True, scratch=self._scratch)
+      self._bpf_jits[key].warmup_name = f"step/bpf{key[1]}_{key[0]}"
     return self._bpf_jits[key]
   def _bpf_vars(self, counts:list[int], slots:list[int], starts:list[int]|None=None) -> list[UOp]:
     return [UOp.variable(f"bpf_count{g}", 1, max(self.BPF_P, *self.MIX_PS)).bind(c) for g, c in enumerate(counts)] + \
@@ -3064,7 +3077,9 @@ class Transformer(GLMSeqDriver):
 
   def _bspec_jit(self, m:int):
     if not hasattr(self, "_bspec_jits"): self._bspec_jits:dict[int, Any] = {}
-    if m not in self._bspec_jits: self._bspec_jits[m] = TinyJit(self.forward_batch_spec, capture_first=True, scratch=self._scratch)
+    if m not in self._bspec_jits:
+      self._bspec_jits[m] = TinyJit(self.forward_batch_spec, capture_first=True, scratch=self._scratch)
+      self._bspec_jits[m].warmup_name = f"step/{m}"
     return self._bspec_jits[m]
   def _bspec_vars(self, seqs:list[tuple[int, int, int]]) -> list[UOp]:
     k, ctx = self.config.spec_drafts, SLOT_SPAN*self.batch_ctx()
@@ -3115,6 +3130,7 @@ class Transformer(GLMSeqDriver):
     if not hasattr(self, "_mix_jits"): self._mix_jits:dict[tuple[int, int, int], Any] = {}
     if (key:=(m, G, P)) not in self._mix_jits:
       self._mix_jits[key] = TinyJit(functools.partial(self.forward_batch_spec, prompts=(G, P)), capture_first=True, scratch=self._scratch)
+      self._mix_jits[key].warmup_name = f"step/mixed{m}_{G}_{P}"
     return self._mix_jits[key]
 
   def batch_mixed_step(self, seqs:list[tuple[list[int], int, int, int, float|tuple[float, float]]],
@@ -3363,6 +3379,7 @@ class Transformer(GLMSeqDriver):
       if (jit:=jits.get(key)) is None:
         self._init_states()
         jit = jits[key] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
+        setattr(jit, "warmup_name", f"prefill{key}/seq")
       return jit(tokens, start_pos, temperature, base)[0]
     if self._sp_tokens(tokens):
       jits = self._part_jits(key)
@@ -3376,6 +3393,7 @@ class Transformer(GLMSeqDriver):
       # the states and caches are set up before: a jit captures on its first call
       self._init_states()
       jit = self.jits[key] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
+      setattr(jit, "warmup_name", "step/decode" if key == 1 else f"prefill{key}")
     return jit(tokens, start_pos, temperature)[0]
 
   def _new_jit(self, rows:int) -> Any:
@@ -3742,6 +3760,14 @@ class Transformer(GLMSeqDriver):
     sizes, st = self.prefill_chunks(), time.perf_counter()
     def lap(what:str):
       if getenv("DEBUG_LOAD", 1): print(f"warmup: {what} at {time.perf_counter()-st:.2f}s", flush=True)
+    def run(what:str, call:Callable[[], Any]) -> Any:
+      if not getenv("DEBUG_LOAD", 1): return call()
+      began = time.perf_counter()
+      lap(f"{what} begin")
+      try: return call()
+      finally: lap(f"{what} end (+{time.perf_counter()-began:.2f}s)")
+    def warm_generate(n:int):
+      return list(zip(range(4), self.generate([0] * min(n, self.max_context - 8))))
     # (a sequence sharded cache (a long context): one after the other, the weights read before the caches are made (their memory is the device's))
     parallel = getenv("WARMUP_PARALLEL", 0 if seq_sharded(self.token_embd.weight.device) else 1)
     if parallel: self._capture_parallel(sizes)
@@ -3754,7 +3780,8 @@ class Transformer(GLMSeqDriver):
       k = self.config.spec_drafts
       for m, G, P in sorted(itertools.product(self.mix_sizes(), range(1, land+1), self.MIX_PS), key=lambda x: -x[0]*(k+1)-x[1]*x[2]):
         if not warmup_wanted(f"mixed{m}_{G}_{P}"): continue
-        self.batch_mixed_step([([0]*(k+1), 1, 0, 1, 0.0)] * m, [([0], self.decode_slots() + g, 0.0, 0) for g in range(G)], P=P)
+        run(f"step/mixed{m}_{G}_{P}", functools.partial(self.batch_mixed_step,
+          [([0]*(k+1), 1, 0, 1, 0.0)] * m, [([0], self.decode_slots() + g, 0.0, 0) for g in range(G)], P=P))
     # The big chunk first: its scratch memory is the most, the other jits share it. A prompt one past a size runs the next one (1: smallest).
     # Parallel capture covers every size; without it, execute the big chunk too or the first real prefill pays its JIT/allocation cost.
     warm_chunks = sizes[:-1] if parallel else sizes
@@ -3763,29 +3790,33 @@ class Transformer(GLMSeqDriver):
       # bpf<P>_<G>, slots (the copies of the slots), host (the staging rows'); the others captured on their first call)
       if not warmup_wanted(f"prefill{next((s for s in sizes if s >= n), sizes[-1])}"): continue
       self._cached_tokens, self._ckpt_tokens = [], []
-      list(zip(range(4), self.generate([0] * min(n, self.max_context - 8))))
-      lap(f"generate {n}")
-    if self._ckpt_tokens: self._checkpoint(self._ckpt_tokens, save=False)  # and a checkpoint's restore
+      run(f"generate {n}", functools.partial(warm_generate, n))
+    if self._ckpt_tokens: run("copy/ckpt_restore", functools.partial(self._checkpoint, self._ckpt_tokens, save=False))
     # batched decoding: the slots' memory, a copy into a slot, a move between two and a step of every size (their jits linked)
-    self._alloc_slots()
+    run("slot/alloc", self._alloc_slots)
     slots = self.batch_slots() if warmup_wanted("slots") else 0
-    if slots: self.slot_store(0, 1)
-    if slots > 1: self.slot_move(1, 0)
+    if slots: run("slot/store", functools.partial(self.slot_store, 0, 1))
+    if slots > 1: run("slot/move", functools.partial(self.slot_move, 1, 0))
     # (and the copies of a sequence spanning more slots)
     for n in range(2, self.max_span()+1 if slots else 0):
-      self.slot_store(0, (n-1)*self.batch_ctx() + 1), self.slot_load(0, (n-1)*self.batch_ctx() + 1)
-      if self.batch_slots() > 2*n: self.slot_move(n, 0, span=n)
+      pos = (n-1)*self.batch_ctx() + 1
+      run(f"slot/store_span{n}", functools.partial(self.slot_store, 0, pos))
+      run(f"copy/load_span{n}", functools.partial(self.slot_load, 0, pos))
+      if self.batch_slots() > 2*n: run(f"slot/move_span{n}", functools.partial(self.slot_move, n, 0, span=n))
     for m in self.batch_sizes():
       if m > self.batch_slots() or not warmup_wanted(f"step{m}"): continue
-      if self.config.spec_drafts: self.batch_spec_step([([0]*(self.config.spec_drafts+1), 1, 0, 1, 0.0)] * m)
-      else: self.batch_step([(0, 1, 0.0)] * m)
+      if self.config.spec_drafts:
+        run(f"step/{m}", functools.partial(self.batch_spec_step, [([0]*(self.config.spec_drafts+1), 1, 0, 1, 0.0)] * m))
+      else: run(f"step/{m}", functools.partial(self.batch_step, [(0, 1, 0.0)] * m))
     if self.batch_prefills():
       for P in self.BPF_PS:
         for G in self.bpf_sizes(P):
-          if warmup_wanted(f"bpf{P}_{G}"): self.batch_prefill([([0], 0, 0.0)] * G, P=P)
-    if (self.batch_prefills() or land) and slots: self.ckpt_from_slot(0, 1)  # (a prompt prefilled in a slot: its checkpoint, see the server)
+          if warmup_wanted(f"bpf{P}_{G}"): run(f"step/bpf{P}_{G}", functools.partial(self.batch_prefill, [([0], 0, 0.0)] * G, P=P))
+    if (self.batch_prefills() or land) and slots: run("copy/ckpt_from_slot", functools.partial(self.ckpt_from_slot, 0, 1))
     # (the staging rows of host_save and host_load: their copies captured)
-    if warmup_wanted("host"): self._host_rows(1, True), self._host_rows(1, False)
+    if warmup_wanted("host"):
+      run("stash/host_save", functools.partial(self._host_rows, 1, True))
+      run("stash/host_load", functools.partial(self._host_rows, 1, False))
     self._cached_tokens, self._ckpt_tokens = [], []
 
   def _capture_parallel(self, sizes:tuple[int, ...]):
@@ -3850,7 +3881,7 @@ class Transformer(GLMSeqDriver):
       if slots > 1: calls += [(self._slot_move_jit, lambda: self._slot_move_jit(*self._slot_move_vars(1, 0)))]
       for j in (self._slot_jit, self._slot_move_jit, self._slot_load_jit):
         setattr(j, "link_later", True)
-        setattr(j, "warmup_name", "slots")
+        setattr(j, "warmup_group", "slots")
       # (and the mixed steps)
       for m, G, P in itertools.product(self.mix_sizes(), range(1, self.mix_landing()+1), self.MIX_PS):
         mix = self._mix_jit(m, G, P)
@@ -3886,7 +3917,7 @@ class Transformer(GLMSeqDriver):
       for j, _ in calls:
         if j.captured is None and getattr(j, "link_later", False): j.link_later = False
     # (WARMUP_JITS: the jits of the names wanted (see warmup), the others captured on their first call; the loads' always)
-    calls = [(j, c) for j, c in calls if j in load_jits or warmup_wanted(getattr(j, "warmup_name", ""))]
+    calls = [(j, c) for j, c in calls if j in load_jits or warmup_wanted(getattr(j, "warmup_group", getattr(j, "warmup_name", "")))]
     capture_parallel(calls, meanwhile, taken)
 
   def _recurrent_states(self) -> list[tuple[Tensor, bool]]:
@@ -3911,6 +3942,7 @@ class Transformer(GLMSeqDriver):
       self._ckpt = [v.clone().realize() for v in self._ckpt_views(states, slot)]
       # (a jit each: a request saves one, they're launched, not scheduled and linked every time)
       self._ckpt_jits = {sv: TinyJit(functools.partial(self._ckpt_copy, sv), capture_first=True) for sv in (True, False)}
+      for sv, j in self._ckpt_jits.items(): setattr(j, "warmup_name", f"copy/ckpt_{'save' if sv else 'restore'}")
     self._ckpt_jits[save](slot)
     if save: self._ckpt_tokens = tokens[:]
 
