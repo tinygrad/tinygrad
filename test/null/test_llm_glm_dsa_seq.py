@@ -119,6 +119,12 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertRaises(AssertionError, _q8_pack_kernel, Tensor.empty(4, 18, 9, dtype="uint32").uop, Tensor.empty(4, 576, dtype="half").uop)
     self.assertRaises(AssertionError, _q8_unpack_kernel, Tensor.empty(4, 576, dtype="half").uop, Tensor.empty(4, 18, 9, dtype="uint32").uop)
 
+  def test_p2p_a2a_shape(self):
+    # (the one shot all to all a word a thread: mla_sparse_seq's 4 rows (10496 floats a part, 5248 flagged words) in 256x1 / 128x1, not 64x4)
+    from tinygrad.llm.kernels.amd_glm_dsa import p2p_a2a_shape
+    self.assertEqual(p2p_a2a_shape(10496), (256, 1))
+    self.assertEqual(p2p_a2a_shape(5248), (128, 1))
+
   def test_p2p_flag_class(self):
     # (P2P_FLAG's payload-only words: a class of their own, not shared with an epoch-in-word format)
     from tinygrad.llm.kernels.amd_glm_dsa import p2p_class, P2P_AR_CLASSES
