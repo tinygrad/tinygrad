@@ -19,6 +19,9 @@ from tinygrad.llm.glm5next import REGION_ALIGN
 import extra.kprof as kprof
 
 model, kv = Transformer.from_gguf(os.environ["MODEL"], getenv("MAXCTX", 65536), shard=getenv("SHARD", 6))
+# (the derived weights as a server's warmup makes them: the routers' transposed float weights (skinny_matmul), else the routers of many
+# rows run a generic kernel ~30x slower: 13.8 ms a step at 28 users)
+if hasattr(model, "_finish_load"): model._finish_load()
 assert model.config.cache_rows, "GLM_SEQ=1 SEQ_ROWS=..."
 tok = SimpleTokenizer.from_gguf_kv(kv)
 devs = model.token_embd.weight.device
