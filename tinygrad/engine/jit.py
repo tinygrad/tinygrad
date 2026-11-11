@@ -1,5 +1,5 @@
 from typing import TypeVar, Generic, Callable, Any, Sequence, overload, cast
-import functools, fnmatch, os, io, pickle, itertools, threading, warnings, time, weakref, sys
+import functools, fnmatch, os, io, pickle, itertools, threading, warnings, time, weakref, sys, heapq, concurrent.futures
 from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc, dedup, unwrap
 from tinygrad.device import Buffer, MultiBuffer
@@ -302,25 +302,48 @@ def _remote_compile(qw:int, ar:int, tasks:list[tuple[bytes, bytes]]) -> list[UOp
   return [pickle.loads(x) for x in ret]
 
 class _Compiles:
-  """the compiles of the forked processes' kernels: one a key (its bytes), on the workers of a pool"""
-  def __init__(self):
-    self.lock, self.results, self.stats = threading.Lock(), cast(dict[bytes, Any], {}), cast(list[tuple], [])
-  def serve(self, pool, qr:int, aw:int, who:int=-1):
+  """
+  the compiles of the forked processes' kernels: one a key (its bytes), on the workers of a pool, the most urgent first (no more at once than
+  the pool has workers): a process's later requests (its jit's host programs: the jit is done then) before first ones, of those the latest
+  first (the jits captured last, prefill's, are the longest to finish after their kernels: they don't wait behind the ones captured early)
+  """
+  def __init__(self, pool):
+    self.pool, self.lock, self.results, self.stats = pool, threading.Lock(), cast(dict[bytes, concurrent.futures.Future], {}), cast(list[tuple], [])
+    self.queue:list[tuple[tuple, int, bytes, bytes]] = []
+    self.seq, self.running, self.timed = itertools.count(), 0, bool(getenv("STARTUP_STATS", ""))
+  def _dispatch(self):
+    # (lock held) the most urgent waiting compiles started while workers are free
+    while self.running < self.pool._processes and self.queue:
+      k, t = (x:=heapq.heappop(self.queue))[2], x[3]
+      if (r:=self.results[k]).running() or r.done(): continue # (started already: it was asked for again, more urgently)
+      r.set_running_or_notify_cancel()
+      self.running += 1
+      self.pool.apply_async(_compile_pickled_timed if self.timed else _compile_pickled, (t,), callback=functools.partial(self._done, k),
+                            error_callback=functools.partial(self._done, k, failed=True))
+  def _done(self, k:bytes, res, failed=False):
+    with self.lock:
+      self.running -= 1
+      self._dispatch()
+    if failed: self.results[k].set_exception(res)
+    else: self.results[k].set_result(res)
+  def serve(self, qr:int, aw:int, who:int=-1):
     # (bytes only here: the workers unpickle the kernels and pickle their programs)
-    timed = bool(getenv("STARTUP_STATS", ""))
     with os.fdopen(qr, "rb") as f:
-      while (msg:=_recv(f)) is not None:
+      for n in itertools.count():
+        if (msg:=_recv(f)) is None: break
         t0, tasks = time.time(), pickle.loads(msg)
         with self.lock:
           new = [k for k, _ in tasks if k not in self.results]
           if (dump:=getenv("STARTUP_DUMP", "")):
             # (debug) the new compile tasks of this process, to replay their compiles elsewhere
             with open(f"{dump}.{who}", "ab") as df: pickle.dump([(k, t) for k, t in tasks if k in new], df)
-          res = [self.results.get(k) or self.results.setdefault(k, pool.apply_async(_compile_pickled_timed if timed else _compile_pickled, (t,)))
-                 for k, t in tasks]
+          for k, t in tasks:
+            if (r:=self.results.setdefault(k, concurrent.futures.Future())).running() or r.done(): continue
+            heapq.heappush(self.queue, ((n == 0, -t0), next(self.seq), k, t))
+          self._dispatch()
         try:
-          got = [r.get() for r in res]
-          if timed:
+          got = [self.results[k].result() for k, _ in tasks]
+          if self.timed:
             self.stats.append((who, t0, time.time(), len(tasks), len(new), [g[1:] for g, (k, _) in zip(got, tasks) if k in new]))
             got = [g[0] for g in got]
           _send(aw, pickle.dumps(got))
@@ -363,7 +386,8 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
   st, reg, start = time.perf_counter(), _prefork_buffers(), next(UOp.unique_num)
   children:list[tuple[int, int]] = []
   # the kernels of all the processes compiled by this one's workers, each once (most are in many jits): a request pipe and a reply pipe each
-  pool, compiles = get_worker_pool(), _Compiles()
+  pool = get_worker_pool()
+  compiles = _Compiles(pool) if pool is not None else None
   for i, (jit, call) in enumerate(calls):
     if pool is not None: (qr, qw), (ar, aw) = os.pipe(), os.pipe()
     r, w = os.pipe()
@@ -398,7 +422,7 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     children.append((pid, r))
     if pool is not None:
       for fd in (qw, ar): os.close(fd)
-      threading.Thread(target=compiles.serve, args=(pool, qr, aw, todo[i]), daemon=True).start()
+      threading.Thread(target=unwrap(compiles).serve, args=(qr, aw, todo[i]), daemon=True).start()
 
   # read the pipes at once (a child blocks on a full pipe): the arena sizes, then the jit
   msgs:list[list[bytes]] = [[] for _ in children]
@@ -487,5 +511,5 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     with open(path, "a") as f:
       f.write(json.dumps({"st": st, "end": time.perf_counter() - st, "wall0": time.time() - (time.perf_counter() - st), "todo": todo,
                           "names": [getattr(j.fxn, "__qualname__", str(j.fxn)) for j, _ in calls], "arrived": arrived, "taken": took,
-                          "compiles": compiles.stats}) + "\n")
+                          "compiles": compiles.stats if compiles is not None else []}) + "\n")
   return [k in todo and oks[todo.index(k)] for k in range(len(every))]
