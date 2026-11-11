@@ -563,7 +563,9 @@ def _rot_host(hd:int) -> tuple[Tensor, Tensor]:
 
 def _lap(what:str):
   """DEBUG_LOAD=1: a line when loading gets past `what` (the time is the log's)"""
-  if getenv("DEBUG_LOAD"): print(f"load: {what}", flush=True)
+  if getenv("DEBUG_LOAD"):
+    from tinygrad.device import alloc_stats
+    print(f"load: {what} ({alloc_stats[0]} allocations in {alloc_stats[1]:.2f}s)", flush=True)
 
 def _open_devices(devices:tuple[str, ...]):
   """the devices opened at the same time (most of opening one is waiting for it): the first alone (what they share is made once)"""

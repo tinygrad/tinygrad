@@ -255,6 +255,8 @@ class Buffer:
 DeviceType = TypeVar('DeviceType', bound='Compiled')
 
 # TODO: size, dest, src are the same type. can we enforce this?
+# (the allocations a device's allocator made (not from its cache) and their seconds, every device's: see DEBUG_LOAD)
+alloc_stats:list = [0, 0.0]
 class Allocator(Generic[DeviceType]):
   lru = True
 
@@ -272,9 +274,10 @@ class Allocator(Generic[DeviceType]):
        all(dev.timeline.host.view(fmt='Q')[0] >= freed_at for dev, freed_at in c[0][1].items()):
       return c.pop(0)[0]
 
-    spec = options if options is not None else BufferSpec()
+    spec, st = options if options is not None else BufferSpec(), time.perf_counter()
     try: return self._alloc(size, spec)
     except (RuntimeError, MemoryError): self.free_cache()
+    finally: alloc_stats[0], alloc_stats[1] = alloc_stats[0] + 1, alloc_stats[1] + time.perf_counter() - st
     try: return self._alloc(size, spec)
     except (RuntimeError, MemoryError) as e: raise MemoryError(f"Allocation of {size_to_str(size)} failed on {self.dev.device}. "
                                                                f"Used: {size_to_str(GlobalCounters.mem_used_per_device[self.dev.device])}") from e
