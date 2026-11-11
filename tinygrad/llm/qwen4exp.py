@@ -1180,6 +1180,8 @@ PREFILL_PK_CTX = tuple(int(c) for c in getenv("PREFILL_PK_CTX", "").split(",") i
 CHUNK_FIXED_ROWS = getenv("CHUNK_FIXED_ROWS", 256)
 # (a multiple of the pools of the KV heads' devices (kpool*kv_split): a region's pools on the devices as its positions)
 REGION_ALIGN = 3072
+# Explicit sampled-position harnesses may pack regions to the split KV/indexer alignment; moves/stash still use REGION_ALIGN.
+SEQ_BASE_ALIGN = getenv("SEQ_BASE_ALIGN", REGION_ALIGN)
 def _region_rows(config:TransformerConfig) -> int:
   """the rows of the caches the regions of the sequences are of (the REGION_ALIGN after them: the padding sequences' region)"""
   return round_up(max(config.max_context, config.cache_rows), REGION_ALIGN)
@@ -2707,7 +2709,7 @@ class Transformer:
     self._seq_init()
     devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
     if upto is not None:
-      assert 0 <= start < upto < len(tokens) and base % REGION_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
+      assert 0 <= start < upto < len(tokens) and base % SEQ_BASE_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
       # (the token after the slice the prompt's: the slice's sampled token isn't written over it, the next slice's tokens are its)
       self._token_host[base+start:base+upto+1] = array.array('i', tokens[start:upto+1])
       self._seq_copy_call(False, slot, start, hrow, keep=start > 0)
@@ -2719,7 +2721,7 @@ class Transformer:
       self._slice_wait()
       self._slice_done = [(t:=Device[d].timeline.host.view(fmt='Q'), t[1]) for d in devs]
       return None
-    assert 0 <= start < len(tokens) and base % REGION_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
+    assert 0 <= start < len(tokens) and base % SEQ_BASE_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
     L = len(tokens)
     for d in devs: Device[d].synchronize()  # (a step may still read the token buffer)
     self._slice_done = []
