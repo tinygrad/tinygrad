@@ -3325,7 +3325,7 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
   result = Tensor.custom_kernel(out, weight, *xq, sel.cast(dtypes.int32).flatten(), first, *extra, fxn=fxn)[0]
   return result.reshape(*((devices,) if devices > 1 else ()), B, T, slots, out_features)
 
-_bundle_cache:dict[tuple, tuple[Tensor, Tensor]] = {}
+_bundle_cache:dict[tuple, tuple[Tensor, Tensor, Tensor]] = {}
 # batched decoding of at least MOE_BUNDLE_MIN tokens: the rows of an expert in bundles of MOE_BUNDLE that share its weight loads
 MOE_BUNDLE, MOE_BUNDLE_MIN = getenv("MOE_BUNDLE", 4), getenv("MOE_BUNDLE_MIN", 40)
 # fewer rows (batched decoding of a few users): bundles of MOE_EXACT_M in float from MOE_EXACT_MIN rows (0: off), the per-row kernel's values
