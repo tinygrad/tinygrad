@@ -6429,9 +6429,12 @@ def _local_pools(pools:UOp, me:UOp, n:int, PB:int) -> UOp:
 def _global_pool(lp:UOp, me:UOp, n:int, PB:int) -> UOp: return (lp // PB) * (PB*n) + me*PB + lp % PB
 
 @functools.cache
-def _pool_cand_kernel(cand:UOp, scores:UOp, dev:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, n:int) -> UOp:
+def _pool_cand_kernel(cand:UOp, scores:UOp, dev:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, n:int, ties:bool=False) -> UOp:
   # a workgroup per query row of the device's scores of its pools (rows, PL): its top k complete pools before the query (_pool_index_kernel's
   # selection), their (score, pool) in cand (rows, k, 2), the rest (0, -1)
+  # ties (cand (rows, 2k, 2)): the ones above its k-th (fewer than k) from slot 0, the first k equal to it (pool order) from slot k. the
+  # first k of the pools at least the k-th of all devices (_pool_index_kernel's list) are among them: a device's first k at least its own
+  # k-th (no ties) would lose its later pools above it to its earlier ties when the k-th of all is higher
   rows, PL = cast(tuple[int, int], scores.shape)
   THREADS, PB = DECODE_THREADS, SEQ_BLK // kpool
   per, W = (PL + THREADS - 1) // THREADS, THREADS // WARP_SIZE
@@ -6450,13 +6453,29 @@ def _pool_cand_kernel(cand:UOp, scores:UOp, dev:UOp, *grouped:UOp, q_start:UOp, 
     ok = (lp < npl) & (p < pools) & ((p + 1) * kpool <= q + 1)
     return ok.where(_order_key(scores[row, lp.minimum(PL-1).valid(ok)].load().bitcast(dtypes.uint32)), UOp.const(0, dtypes.uint32))
   thr = _radix_kth(key, npc, k, npl, t, wave, lane)
-  def write(c3:UOp, pos:UOp, pk:UOp) -> UOp:
-    lp, ok = t + c3 * THREADS, pk & (pos < k)
-    return UOp.group(cand[row, pos.valid(ok), 0].store(scores[row, lp.minimum(PL-1)].load()),
-                     cand[row, pos.valid(ok), 1].store(_global_pool(lp, me, n, PB).cast(dtypes.float32)))
-  stores, picked = _pick_stores(key, npc, per, thr, t, wave, lane, write)
-  fill = (t < k) & (t >= picked.minimum(k))
-  stores += [cand[row, t.valid(fill), 0].store(UOp.const(0.0, dtypes.float32)), cand[row, t.valid(fill), 1].store(UOp.const(-1.0, dtypes.float32))]
+  def writer(off:int) -> Callable[[UOp, UOp, UOp], UOp]:
+    def write(c3:UOp, pos:UOp, pk:UOp) -> UOp:
+      lp, ok, slot = t + c3 * THREADS, pk & (pos < k), pos + off
+      return UOp.group(cand[row, slot.valid(ok), 0].store(scores[row, lp.minimum(PL-1)].load()),
+                       cand[row, slot.valid(ok), 1].store(_global_pool(lp, me, n, PB).cast(dtypes.float32)))
+    return write
+  one = UOp.const(1, dtypes.uint32)
+  if ties:
+    above = lambda c: (key(c) > thr).cast(dtypes.uint32)  # noqa: E731
+    equal = lambda c: key(c).eq(thr).cast(dtypes.uint32)  # noqa: E731
+    stores, n_above = _pick_stores(above, npc, per, one, t, wave, lane, writer(0))
+    st_eq, n_eq = _pick_stores(equal, npc, per, one, t, wave, lane, writer(k))
+    stores += st_eq
+    regions = [(0, n_above.minimum(k)), (k, n_eq.minimum(k))]
+  else:
+    stores, picked = _pick_stores(key, npc, per, thr, t, wave, lane, writer(0))
+    regions = [(0, picked.minimum(k))]
+  for off, cnt in regions:
+    for i in range((k + THREADS - 1) // THREADS):
+      s = t + i * THREADS
+      fill = (s < k) & (s >= cnt)
+      stores += [cand[row, (s + off).valid(fill), 0].store(UOp.const(0.0, dtypes.float32)),
+                 cand[row, (s + off).valid(fill), 1].store(UOp.const(-1.0, dtypes.float32))]
   est = Estimates(rows*PL*32, rows*PL*4*4, rows*k*8)  # data dependent loops: an upper bound
   return UOp.group(*stores).end(row, wave, lane).sink(arg=KernelInfo(name="pool_cand", opts_to_apply=(), estimates=est))
 
@@ -6536,9 +6555,13 @@ def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:in
   # (every device's top c (IDX_CAND, at least top/n): the top k of all are among them unless a device has more of them than c, its pools
   # are blocks of SEQ_BLK positions in turn)
   c = max(min(top, getenv("IDX_CAND", top)), (top + n - 1) // n)
-  cand = Tensor.empty(n*rows, c, 2, dtype=dtypes.float32, device=devs, axis=0)
+  # (IDX_TIES: a device's candidates the ones above its k-th and its first k ties, 2c slots: the lists exactly pool_index_rows's with ties
+  # at the k-th. 0: its first c at least its k-th, wrong with ties)
+  ties = bool(getenv("IDX_TIES", 1))
+  cand = Tensor.empty(n*rows, c*(1+ties), 2, dtype=dtypes.float32, device=devs, axis=0)
   cand = Tensor.custom_kernel(cand, sc, _device_index(devs), *extra, fxn=functools.partial(_pool_cand_kernel, q_start=qs, pools=pu, k=c,
-                                                                                           kpool=kpool, n=n))[0]
+                                                                                           kpool=kpool, n=n, ties=ties))[0]
+  c *= 1 + ties
   flat = cand.reshape(n, rows*c*2)
   # (IDX_P2P_ROWS: the peer to peer gather up to that many rows (the batched decode's: G=8 at 262k 54.7 -> 44.3 ms on 6x 7900 XTX, the
   # ring of copies ~0.7 ms a call), the ring past it or if the flag mailbox is too small)

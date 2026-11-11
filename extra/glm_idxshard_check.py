@@ -31,7 +31,7 @@ def lists(o:np.ndarray) -> list:
   return [(int(r[-1]), r[:r[-1]].tobytes()) for r in o]
 
 fails = 0
-for T, pos in [(3, 4000), (3, 65000), (3, 200000), (3, PT*KP - 8), (64, 30000), (64, 131000)]:
+for T, pos in [(3, 4000), (3, 12000), (3, 30000), (3, 65000), (3, 200000), (3, PT*KP - 8), (64, 30000), (64, 131000)]:
   q = Tensor((rng.standard_normal((T, H, D)) * 0.5).astype(np.float16)).shard(devs).realize()
   w = Tensor((rng.standard_normal((T, H)) * 0.1).astype(np.float32)).shard(devs).realize()
   qs = UOp.variable("start_pos", 0, PT*KP).bind(pos)
@@ -56,25 +56,22 @@ for T, pos in [(3, 4000), (3, 65000), (3, 200000), (3, PT*KP - 8), (64, 30000), 
                                          f"whole {sw[r, gp[ok][diff[:2]]]} split {ss[d, r, lp[ok][diff[:2]]]}")
       # (every device's candidates: its top TOP of a row's pools before the query, against numpy's of the split scores)
       import functools
-      cand = Tensor.empty(N*T, TOP, 2, dtype=amd_glm.dtypes.float32, device=devs, axis=0)
+      cand = Tensor.empty(N*T, 2*TOP, 2, dtype=amd_glm.dtypes.float32, device=devs, axis=0)
       cand = Tensor.custom_kernel(cand, Tensor(ss_t.uop.after(qs)), amd_glm._device_index(devs), fxn=functools.partial(amd_glm._pool_cand_kernel,
-        q_start=amd_glm._unbind(qs), pools=UOp.const(pools, amd_glm.dtypes.weakint), k=TOP, kpool=KP, n=N))[0].numpy().reshape(N, T, TOP, 2)
+        q_start=amd_glm._unbind(qs), pools=UOp.const(pools, amd_glm.dtypes.weakint), k=TOP, kpool=KP, n=N, ties=True))[0].numpy()
+      cand = cand.reshape(N, T, 2*TOP, 2)
       for d in range(N):
         gp = (lp//PB)*(PB*N) + d*PB + lp%PB
         for r in range(T):
           ok = (gp + 1)*KP <= pos + r + 1
-          v = ss[d, r, lp[ok]]
+          v, g = ss[d, r, lp[ok]], gp[ok]
           kth = np.sort(v)[-TOP] if len(v) >= TOP else -np.inf
-          got = cand[d, r][cand[d, r, :, 1] >= 0]
-          want = set(gp[ok][v > kth].tolist())
-          have = set(got[:, 1].astype(np.int64).tolist())
-          if not want <= have or len(got) != min(TOP, len(v)) or (got[:, 0] < kth).any():
-            print(f"  cand dev {d} row {r}: valid {len(got)} of {len(v)} missing {sorted(want-have)[:4]} below k-th {(got[:, 0] < kth).sum()}")
-            if r < 6:
-              g2l = {int(g): i for i, g in enumerate(gp)}
-              extra = sorted(have - set(gp[ok][v >= kth].tolist()))
-              print(f"    distinct {len(have)} >k-th {len(want)} ==k-th {(v == kth).sum()} extra {extra[:6]} their split {[float(ss[d, r, g2l[x]]) for x in extra[:3] if x in g2l]}"
-                    f" cand scores {[float(x) for x, y in got if int(y) in extra[:3]]} slots of missing? {[i for i, (x, y) in enumerate(got) if int(y) in extra[:3]][:6]}")
+          above = cand[d, r, :TOP][cand[d, r, :TOP, 1] >= 0]
+          tie = cand[d, r, TOP:][cand[d, r, TOP:, 1] >= 0]
+          want_above, want_tie = set(g[v > kth].tolist()), set(g[v == kth][:TOP].tolist())
+          have_above, have_tie = set(above[:, 1].astype(np.int64).tolist()), set(tie[:, 1].astype(np.int64).tolist())
+          if want_above != have_above or want_tie != have_tie:
+            print(f"  cand dev {d} row {r}: above {len(have_above)} want {len(want_above)}, ties {len(have_tie)} want {len(want_tie)}")
     a = pool_index_rows(indexer_scores(q, k_rep, w, pools, KP, width=PT), qs, pools, TOP, KP)
     b = pool_index_shard(indexer_scores(q, k_sh, w, pools, KP, width=PT), qs, pools, TOP, KP, width=PT)
   la, lb = lists(a.to(devs[0]).numpy()), lists(b.to(devs[0]).numpy())
