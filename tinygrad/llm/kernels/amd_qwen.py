@@ -4979,9 +4979,9 @@ def _seq_scores_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *dev:UO
   est = Estimates(2*rows*H*D*P, P*D*2*G, rows*P*4)  # (a data dependent count of tiles: an upper bound)
   return UOp.group(*stores).end(active).end(g, w, t).sink(arg=KernelInfo(name="seq_scores", opts_to_apply=(), estimates=est))
 
-# SEQ_SCORE_QV=1: seq_scores by _seq_scores_qv_kernel (a lane a (pool, head), its query in registers: no query loads a pool), SEQ_SCORE_QV_NG
-# groups of pools a workgroup, SEQ_SCORE_QV_WG workgroups a sequence
-SEQ_SCORE_QV, SEQ_SCORE_QV_NG, SEQ_SCORE_QV_WG = getenv("SEQ_SCORE_QV", 0), getenv("SEQ_SCORE_QV_NG", 2), getenv("SEQ_SCORE_QV_WG", 32)
+# SEQ_SCORE_QV (default 1; 0: _seq_scores_kernel): seq_scores by _seq_scores_qv_kernel (a lane a (pool, head), its query in registers: no
+# query loads a pool), SEQ_SCORE_QV_NG groups of pools a workgroup, SEQ_SCORE_QV_WG workgroups a sequence
+SEQ_SCORE_QV, SEQ_SCORE_QV_NG, SEQ_SCORE_QV_WG = getenv("SEQ_SCORE_QV", 1), getenv("SEQ_SCORE_QV_NG", 2), getenv("SEQ_SCORE_QV_WG", 32)
 
 @functools.cache
 def _seq_scores_qv_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *dev:UOp, R:int, kpool:int, WG:int, n:int=1) -> UOp:
