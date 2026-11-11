@@ -1,6 +1,6 @@
 import multiprocessing, multiprocessing.util, atexit, signal, sys, os, threading, contextlib, subprocess, importlib
 from multiprocessing.context import SpawnContext, SpawnProcess
-from tinygrad.helpers import Context, getenv, PARALLEL
+from tinygrad.helpers import Context, getenv, PARALLEL, BEAM
 
 # generic pool of worker processes for parallel compilation, shared by kernel lowering and BEAM search
 
@@ -40,7 +40,8 @@ def get_worker_pool():
   global worker_pool
   if multiprocessing.current_process().daemon or PARALLEL == 0: return None
   if worker_pool is None:
-    worker_pool = _WorkerContext().Pool(PARALLEL.value, _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
+    # (BEAM's workers are replaced every 16 tasks (their memory); compiling's live on: a new one starts cold (its pattern matchers compiled again))
+    worker_pool = _WorkerContext().Pool(PARALLEL.value, _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16 if BEAM.value else 0) or None)
     @atexit.register
     def close_pool(pool=worker_pool): pool.close()
   return worker_pool
