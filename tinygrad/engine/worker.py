@@ -8,6 +8,8 @@ from tinygrad.helpers import Context, getenv, PARALLEL, BEAM
 def _init_worker():
   Context(ALLOW_DEVICE_USAGE=0, VIZ=0, TRACK_MATCH_STATS=0).__enter__()
   signal.signal(signal.SIGINT, signal.SIG_IGN)
+  # (below the processes they compile for: their work waits for the compiles, a compile doesn't wait for theirs)
+  if (nice:=getenv("WORKER_NICE", 10)) and hasattr(os, "nice"): os.nice(nice)
 
 # spawn reimports the user's __main__ before _init_worker, replaying top-level code and potentially creating pools recursively.
 # A spec named "__main__" makes multiprocessing.spawn skip that import.
