@@ -449,6 +449,8 @@ class AMDComputeQueue(HWQueue):
     self._after_ring = prg.src[0].arg.name.startswith("ring_")  # (as _exec)
 
   def _exec(self, prg:UOp, data:AMDProgramData, lib:UOp, args_addr:UOp):
+    if AMD_SCRATCH_LOG and data.private_segment_size >= AMD_SCRATCH_LOG:
+      print(f"{self.dev.device} SCRATCH {data.private_segment_size} B {prg.src[0].arg.name}")
     prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
     # (a compute queue's own scratch past the first: kernels of two queues run at once, one ring would have both's spills)
     qi = int(self.queue.split(":")[1]) if self.queue.startswith("COMPUTE:") else 0
@@ -545,8 +547,6 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
   def exec(self, call:UOp, prg:UOp):
     data, lib = amd_build_program(self.dev, prg, self.devs)
     self.dev.scratch_buffer(data.private_segment_size) # the queue descriptor holds the scratch
-    if AMD_SCRATCH_LOG and data.private_segment_size >= AMD_SCRATCH_LOG:
-      print(f"{self.dev.device} SCRATCH {data.private_segment_size} B {prg.arg.name}")
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.close_run(len(self.blob))
     self.pkts += [UOp.const(w, dtypes.uint32) if isinstance(w, int) else w
