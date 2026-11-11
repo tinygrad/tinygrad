@@ -17,6 +17,10 @@ from tinygrad.llm.model import Transformer
 from tinygrad.llm.cli import SimpleTokenizer
 from tinygrad.llm.glm5next import REGION_ALIGN
 import extra.kprof as kprof
+if getenv("MEM_TRACE"):
+  # (the AM driver's live VRAM allocations by call site, see extra/mem_trace.py: after the prefills and at the end)
+  import extra.mem_trace as mem_trace
+  mem_trace.install()
 
 model, kv = Transformer.from_gguf(os.environ["MODEL"], getenv("MAXCTX", 65536), shard=getenv("SHARD", 6))
 # (the derived weights as a server's warmup makes them: the routers' transposed float weights (skinny_matmul), else the routers of many
@@ -54,9 +58,11 @@ for g in range(G):
     seqs.append(dict(slot=g, base=g*span, mtp=CTXP, j=0, par=1, y=T[CTXP:CTXP+k+1], n=0,
                      outhash=hashlib.sha256(), stream=T))
   else:
-    first = model.seq_prefill(g, g*span, list(ids), 0, 0)
+    # (PF_TOPP: the prefill's first token sampled at temperature 1 and this top_p, as the board harness's donor prefill)
+    first = model.seq_prefill(g, g*span, list(ids), 0, 0, (1.0, float(os.environ["PF_TOPP"])) if "PF_TOPP" in os.environ else 0.0)
     seqs.append(dict(slot=g, base=g*span, mtp=len(ids), j=0, par=1, y=[first] + [0]*k, n=0,
                      outhash=hashlib.sha256(), stream=T))
+if getenv("MEM_TRACE"): mem_trace.report("prefill")
 if SAMPLED: model._seq_init()  # normally seq_prefill/seq_step does this: allocate caches, slots and telemetry without filling them
 if SAMPLED and getenv("SAMPLED_FILL", 0):
   # (SAMPLED_FILL=1: the indexer's pooled keys (GLM_SEQ: cache_pk, all the regions') random fp8 rows (a real context's spread of scores,
@@ -192,6 +198,7 @@ for g in GS:
 # (the memory every device holds at the end: the caches, the weights and the jit's buffers; the headroom for more users is the card's less this)
 from tinygrad.helpers import GlobalCounters
 print("MEM_USED GB " + " ".join(f"{GlobalCounters.mem_used_per_device.get(d, 0)/1e9:.3f}" for d in devs), flush=True)
+if getenv("MEM_TRACE"): mem_trace.report("end")
 if getenv("MEM_DUMP"):
   # (every device's VRAM free in its allocator, as qwen4exp's memory_report: tinygrad's MEM_USED counts host buffers too)
   def _vfree(d:str) -> float:
