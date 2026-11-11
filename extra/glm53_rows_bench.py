@@ -49,7 +49,9 @@ def main():
       layer.weight = Tensor(raw.reshape(-1).view(np.uint16), device=dev).realize()
       layers.append(layer)
     for T in toks:
-      x = Tensor(rng.standard_normal((T, fin), dtype=np.float32), device=dev).realize()
+      xn = rng.standard_normal((T, fin), dtype=np.float32)
+      xn[1] *= 1e5  # (a row past half's range: HALF_ROWS scales it)
+      x = Tensor(xn, device=dev).realize()
       ref, line = None, f"{fout:6d}x{fin:<6d}{'q6' if typ == K.Q6_K else 'q8'} T={T:3d} {nbytes/1e6:6.2f} MB (roofline {nbytes/BW/1e3:6.1f} us):"
       for name, envs in arms:
         old = {}

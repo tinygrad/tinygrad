@@ -1363,6 +1363,24 @@ HALF_ROWS_MAX = 32768.0
 # (the rows R of a sequence parallel prefill chunk's gathered x and its T tokens (the rows after them are padding), see GEMM_PAD)
 GEMM_ROWS:list[tuple[int, UOp|int]|None] = [None]
 
+@functools.cache
+def _half_rows_kernel(xh:UOp, sc:UOp, x:UOp) -> UOp:
+  # _half_rows in one kernel (HALF_ROWS_K): a wave a row (its device's part), the max of its abs, the scale (the same float ops) and the halves
+  N = xh.shape[-1]
+  R = int(prod(xh.shape)) // N
+  assert N % 32 == 0
+  x, xh, sc = x.reshape(R, N), xh.reshape(R, N), sc.reshape(R)
+  row, lane = UOp.range(R, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  j = UOp.range(N // 32, 1, AxisType.LOOP)
+  m = _reg((1,), 0.0)
+  m = m.after(m[0].store(m.after(j)[0].load().maximum(x[row, j*32 + lane].load().float().abs())).end(j))
+  amax = warp_reduce(m[0].load(), maximum=True, full_wave=True)
+  s = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0)
+  j2 = UOp.range(N // 32, 2, AxisType.LOOP)
+  stores = [xh[row, j2*32 + lane].store((x[row, j2*32 + lane].load().float() / s).cast(dtypes.float16)).end(j2),
+            sc[row.valid(lane.eq(0))].store(s)]
+  return UOp.group(*stores).end(row, lane).sink(arg=KernelInfo(name="half_rows", opts_to_apply=()))
+
 def _half_rows(x:Tensor, tokens:int, splits:int=1) -> tuple[Tensor, Tensor|None]:
   """
   x (tokens, in) in half for the f16 kernels: a row past HALF_ROWS_MAX divided by a power of two (exact) to fit (GLM-5's first tokens' activations
@@ -1371,6 +1389,14 @@ def _half_rows(x:Tensor, tokens:int, splits:int=1) -> tuple[Tensor, Tensor|None]
   split on axis 0 as the partial outputs (the same values unless a row is past HALF_ROWS_MAX; the max of the whole row is a ring of copies)
   """
   if not getenv("HALF_ROWS", 1): return x.cast(dtypes.float16).contiguous(), None
+  if getenv("HALF_ROWS_K", 0) and x.shape[-1] % 32 == 0 and (splits == 1 or isinstance(x.device, tuple)):
+    # (one kernel, the same values: HALF_ROWS_K, default off)
+    multi = splits > 1
+    xh = Tensor.empty(*x.shape, dtype=dtypes.float16, device=x.device, axis=x.uop.axis if isinstance(x.device, tuple) else None)
+    sc = Tensor.empty(*((splits,) if multi else ()), tokens, 1, dtype=dtypes.float32, device=x.device,
+                      axis=0 if multi else None)
+    xh, sc = Tensor.custom_kernel(xh, sc, x, fxn=_half_rows_kernel)[:2]
+    return xh, sc
   if splits > 1:
     xf = x.reshape(tokens, splits, x.shape[-1] // splits).float()
     amax = xf.abs().max(-1, keepdim=True)  # (every device its own part's: no copies)
