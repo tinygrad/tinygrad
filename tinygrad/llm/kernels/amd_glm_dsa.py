@@ -5514,8 +5514,9 @@ def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:in
   flat = cand.reshape(n, rows*c*2)
   if positions is None and rows >= 16*n and getenv("IDX_MERGE_SPLIT", 1):
     return _pool_merge_split(cand, out, devs, rows, c, qs, pu, top, kpool, row0)
-  # (a ring of copies: the peer to peer kernel is slower past a few rows' (IDX_P2P_ROWS))
-  g = host_allgather(flat) if rows <= getenv("IDX_P2P_ROWS", 4) else None
+  # (one shot peer to peer up to IDX_P2P_ROWS rows (the mailbox holds 32 rows of 2048 candidates), the same floats as the ring of copies: a ring
+  # is 13 copies in turn, a step of 8 rows paid ~22 of them)
+  g = host_allgather(flat) if rows <= getenv("IDX_P2P_ROWS", 64) else None
   allc = g if g is not None else all_gather(flat, 0, dtypes.float32)
   return Tensor.custom_kernel(out, allc.reshape(n, rows, c, 2).contiguous(), *extra,
                               fxn=functools.partial(_pool_merge_kernel, q_start=qs, pools=pu, k=top, kpool=kpool, row0=row0))[0]
