@@ -1408,9 +1408,9 @@ def _half_rows(x:Tensor, tokens:int, splits:int=1) -> tuple[Tensor, Tensor|None]
   return (xf / sc).cast(dtypes.float16).reshape(x.shape).contiguous(), sc
 
 def _rows_f16_config(tokens:int, out_features:int, in_features:int, ggml_type:int, device) -> dict|None:
-  # ROWS_F16: the few rows of batched decoding (<= ROWS_F16_MAX) on _rows_f16_wmma_kernel (the same float ops as the f16 WMMA kernel)
+  # ROWS_F16 (default on): the few rows of batched decoding (<= ROWS_F16_MAX) on _rows_f16_wmma_kernel (the same float ops as the f16 WMMA kernel)
   # (Q6_K (the output head, a call a step): ROWS_F16_Q6=1, bit-equal on the bench, no faster)
-  if not getenv("ROWS_F16", 0) or tokens > getenv("ROWS_F16_MAX", 64) or not _wmma_rdna4(device) or \
+  if not getenv("ROWS_F16", 1) or tokens > getenv("ROWS_F16_MAX", 64) or not _wmma_rdna4(device) or \
      ggml_type not in ((Q8_0, Q6_K) if getenv("ROWS_F16_Q6", 0) else (Q8_0,)): return None
   NG = in_features // Q8_GROUP_SIZE
   # (one-GPU bench, extra/glm53_rows_bench.py: 4 groups an iteration best at 16 rows, 8 at 32)
@@ -1418,7 +1418,7 @@ def _rows_f16_config(tokens:int, out_features:int, in_features:int, ggml_type:in
   tiles = next((t for t in (getenv("ROWS_TILES", 1), 1) if out_features % (16*t) == 0), 1)
   waves = next((w for w in (getenv("ROWS_WAVES", 2), 2, 1) if out_features % (16*tiles*w) == 0), 1)
   # (ROWS_COOP=W: W waves a workgroup load a chain's weights (_rows_coop_f16_wmma_kernel), ROWS_COOP_CHUNK groups an iteration)
-  if (coop:=getenv("ROWS_COOP", 0)) and coop >= tokens // 16 and \
+  if (coop:=getenv("ROWS_COOP", 2)) and coop >= tokens // 16 and \
      (cc:=next((c for c in (getenv("ROWS_COOP_CHUNK", 16), 16, 8, 4) if NG % c == 0 and c % coop == 0), 0)):
     return dict(coop=coop, chunk=cc)
   # (ROWS_CHUNK: Q8_0's blocks loaded wide, chunk groups an iteration (0: off))
@@ -1494,7 +1494,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     else:
       fxn = functools.partial(_q5_linear_f16_wmma_kernel if layer.ggml_type in (Q4_K, Q5_K) else _quant_linear_f16_wmma_kernel,
                               ggml_type=layer.ggml_type)
-    if getattr(fxn, "func", None) not in (_rows_f16_wmma_kernel, _rows_coop_f16_wmma_kernel): fxn = functools.partial(fxn, rdna4=_wmma_rdna4(x.device))
+    if getattr(fxn, "func", None) not in (_rows_f16_wmma_kernel, _rows_coop_f16_wmma_kernel):
+      fxn = functools.partial(fxn, rdna4=_wmma_rdna4(x.device))
     srcs = ((xh:=_half_rows(x, tokens, local_splits))[0], *extra)
   elif layer.ggml_type == Q8_0 and xq is None and tokens <= 8 and in_features <= getenv("DEC_F16_K", 512) and in_features % 32 == 0 and \
        layer.weight.dtype == dtypes.uint16 and _q8_key(x, tokens, in_features, False, False) not in _q8_cache and _is_buffer(x):

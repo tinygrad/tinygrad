@@ -183,13 +183,18 @@ class TestGLMDSASequence(unittest.TestCase):
     getenv.cache_clear()
 
   def test_rows_f16_kernels(self):
-    # (ROWS_F16: the f16 WMMA rows of batched decoding on _rows_f16_wmma_kernel, default off; the kernels build for Q8_0 (wide chunks) and Q6_K)
+    # (ROWS_F16: the f16 WMMA rows of batched decoding on _rows_coop_f16_wmma_kernel (default) or _rows_f16_wmma_kernel; the kernels build)
     from tinygrad.helpers import getenv
     from tinygrad.llm.kernels import amd_glm_dsa as K
     getenv.cache_clear()
     with patch.object(K, "_wmma_rdna4", lambda d: True):
-      self.assertIsNone(K._rows_f16_config(16, 2048, 6144, K.Q8_0, "NULL"))
-      with patch.dict(os.environ, {"ROWS_F16": "1", "ROWS_CHUNK": "8"}):
+      self.assertEqual(K._rows_f16_config(16, 2048, 6144, K.Q8_0, "NULL"), dict(coop=2, chunk=16))  # (the default)
+      self.assertEqual(K._rows_f16_config(48, 2048, 6144, K.Q8_0, "NULL")["unroll"], 8)  # (3 token tiles: past ROWS_COOP=2's waves)
+      self.assertIsNone(K._rows_f16_config(16, 11072, 6144, K.Q6_K, "NULL"))
+      with patch.dict(os.environ, {"ROWS_F16": "0"}):
+        getenv.cache_clear()
+        self.assertIsNone(K._rows_f16_config(16, 2048, 6144, K.Q8_0, "NULL"))
+      with patch.dict(os.environ, {"ROWS_F16": "1", "ROWS_COOP": "0", "ROWS_CHUNK": "8"}):
         getenv.cache_clear()
         self.assertEqual(K._rows_f16_config(16, 2048, 6144, K.Q8_0, "NULL")["chunk"], 8)
         self.assertEqual(K._rows_f16_config(16, 6144, 160, K.Q8_0, "NULL")["chunk"], 0)  # (5 groups)
@@ -200,6 +205,9 @@ class TestGLMDSASequence(unittest.TestCase):
       out, x = Tensor.empty(32, 64, dtype="float32"), Tensor.empty(32, 256, dtype="half")
       fxn = functools.partial(K._rows_f16_wmma_kernel, out_features=64, in_features=256, ggml_type=typ, chunk=chunk, pkh=pkh)
       self.assertIs(Tensor.custom_kernel(out, raw, x, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
+    out, x, raw = Tensor.empty(32, 64, dtype="float32"), Tensor.empty(32, 512, dtype="half"), Tensor.empty(64*512*17//32, dtype="uint16")
+    fxn = functools.partial(K._rows_coop_f16_wmma_kernel, out_features=64, in_features=512, ggml_type=K.Q8_0, coop=2, chunk=16)
+    self.assertIs(Tensor.custom_kernel(out, raw, x, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
 
   def test_half_rows_local_scales(self):
     # (a row parallel layer's input in half: every device's part its own scale, no cross device max; the same halves below HALF_ROWS_MAX)
