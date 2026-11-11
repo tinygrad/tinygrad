@@ -1447,7 +1447,12 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   if not pad and skinny and tokens % (16 if skinny_i8 else 32): pad = round_up(tokens, 16 if skinny_i8 else 32)
   elif not pad and not _wmma_rdna4(x.device) and tokens > getenv("PAD16_ROWS", 16) and tokens % 16 and xq is None and not split:
     pad = round_up(tokens, 16)
-  if (Q8_ROWS_I8[0] or not _wmma_rdna4(x.device) or
+  # (Q8_PAD_RDNA4 (default off, a numerics change): RDNA4's Q8_0 rows of batched decoding that aren't whole tiles of 32 (36 sequences: 108)
+  # padded to the gemm's tiles (the per-row decode kernel of int8 inputs otherwise, 30-40x slower): the gemm's sums as of 96 rows)
+  pad_q8_rdna4 = _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and tokens > 64 and pad % 32 == 0 and layer.in_features % 32 == 0 and \
+    (out_features // len(cast(tuple, layer.weight.device)) if isinstance(layer.weight.device, tuple) and layer.shard_axis == 0 else
+     out_features) % 128 == 0 and bool(getenv("Q8_PAD_RDNA4", 0))
+  if (Q8_ROWS_I8[0] or not _wmma_rdna4(x.device) or pad_q8_rdna4 or
       (layer.ggml_type == Q6_K and q6_split_target)) and pad and xq is None and not split and getenv("Q8_PAD_ROWS", 1):
     out = q8_linear(layer, x.reshape(tokens, x.shape[-1]).pad(((0, pad - tokens), (0, 0))), reduce, None, split, half_out)
     out = out[:, :tokens] if splits > 1 and not reduce else out[:tokens]
