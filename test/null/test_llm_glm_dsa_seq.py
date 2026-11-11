@@ -125,6 +125,19 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertEqual(p2p_a2a_shape(10496), (256, 1))
     self.assertEqual(p2p_a2a_shape(5248), (128, 1))
 
+  def test_seq_p2p_32_rows(self):
+    # (SEQ_P2P_ROWS=32: mla_sparse_seq of 8 users (32 rows, 5 heads a device) in one shot: the flagged reduce scatter (512 dims) and query
+    # gather (576 halves) have shapes, not the rings of copies)
+    from tinygrad.llm.kernels.amd_glm_dsa import p2p_ar_shape, P2P_AR_MAXW
+    self.assertEqual(p2p_ar_shape(32*5*512 // 4), (256, 4))
+    self.assertEqual(p2p_ar_shape(32*5*576 // 4), (128, 4))
+    self.assertLess(256*4, P2P_AR_MAXW)
+    # (16 users, 64 rows: the flagged reduce scatter past p2p_ar_shape's 512x8, which has no room for the flag)
+    from tinygrad.llm.kernels.amd_glm_dsa import p2p_flag_shape
+    self.assertEqual(p2p_ar_shape(64*5*512 // 4), (512, 8))
+    self.assertEqual(p2p_flag_shape(64*5*512 // 4), (256, 4))
+    self.assertEqual(p2p_flag_shape(32*5*512 // 4), (256, 4))
+
   def test_p2p_flag_class(self):
     # (P2P_FLAG's payload-only words: a class of their own, not shared with an epoch-in-word format)
     from tinygrad.llm.kernels.amd_glm_dsa import p2p_class, P2P_AR_CLASSES

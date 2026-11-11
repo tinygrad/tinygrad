@@ -1497,7 +1497,9 @@ class MLATransformerBlock(FFNBlock):
         # (SEQ_ATTN_TOK: a device's rows with every head, see mla_sparse_seq_tokens)
         if getenv("SEQ_ATTN_TOK", 0) and isinstance(x.device, tuple) and Tq % len(x.device) == 0 and q.uop.axis == 1:
           attn = mla_sparse_seq_tokens(q, whole, lists, scale, start_pos+T, self.config.kv_lora_rank)
-        else: attn = flash_attention_mla_sparse(q, whole.reshape(1, 1, 1, -1, whole.shape[-1]), lists, scale, start_pos+T)
+        # (SEQ_ATTN_LDS: the values' dims only, the kernel that reads a tile of keys into LDS in whole rows: the same values)
+        else: attn = flash_attention_mla_sparse(q, whole.reshape(1, 1, 1, -1, whole.shape[-1]), lists, scale, start_pos+T,
+                                                vdims=self.config.kv_lora_rank if getenv("SEQ_ATTN_LDS", 1) else None)
       else: attn = mla_sparse_seq(q, cache, lists, scale, start_pos+T, dims=self.config.kv_lora_rank, base=b)
       v_b, attn = self.attn_v_b["weight"].transpose(-1, -2), attn[..., :self.config.kv_lora_rank]
       if bmm: attn = mla_bmm(attn, self.attn_v_b["weight"])
