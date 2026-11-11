@@ -1434,8 +1434,8 @@ class MLATransformerBlock(FFNBlock):
     the 512 + 64 after it: a third of the bytes), k_b of all the heads on every device (_k_b_rep): the queries of all the heads on every device,
     the values mla_sparse_seq's gather has (the halves of the same floats: k_b's products are of the halves)
     """
-    if not getenv("SEQ_Q_PRE", 0) or (kbr:=getattr(self, "_k_b_rep", None)) is None or not self.seq_sharded or q_nope.uop.axis != 1 or not isinstance(Tq:=q_nope.shape[2], int) \
-       or Tq > getenv("SEQ_P2P_ROWS", 16) or _seq_p2p_pack() is not None: return None
+    if not getenv("SEQ_Q_PRE", 0) or (kbr:=getattr(self, "_k_b_rep", None)) is None or not self.seq_sharded or q_nope.uop.axis != 1 or \
+       not isinstance(Tq:=q_nope.shape[2], int) or Tq > getenv("SEQ_P2P_ROWS", 16) or _seq_p2p_pack() is not None: return None
     n, H, nope = len(cast(tuple, q_nope.device)), int(q_nope.shape[1]), int(q_nope.shape[-1])
     D = nope + int(q_rope.shape[-1])
     parts = q_nope.half().cat(q_rope.half(), dim=-1).contiguous().reshape(n, H//n, Tq, D)
@@ -1559,10 +1559,12 @@ class MLATransformerBlock(FFNBlock):
     if freqs is not None: q_rope = apply_rope(q_rope, freqs, self.config.rope_interleave)
     # (many rows: the tensor cores)
     tc = Tq > getenv("MLA_BMM_ROWS", 32) and self.attn_k_b["weight"].dtype == dtypes.half
+    qp:Tensor|None = None
     if (qb:=bmm_wmma(q_nope, self.attn_k_b["weight"])) is not None: q = qb
     elif tc: q = q_nope.half().contiguous().matmul(self.attn_k_b["weight"].transpose(-1, -2), dtype=dtypes.float).contiguous()
+    elif (qp:=self._q_pre(q_nope, q_rope)) is not None: q = qp  # (a few rows: the queries before k_b gathered, SEQ_Q_PRE)
     else: q = mla_bmm(q_nope, self.attn_k_b["weight"])
-    q = q.cat(q_rope.cast(q.dtype), dim=-1)
+    if qp is None: q = q.cat(q_rope.cast(q.dtype), dim=-1)
     kv_a = self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
     k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, Tq, 1, self.config.rope_dim).transpose(1, 2)
@@ -3123,7 +3125,7 @@ class Transformer(GLMSeqDriver):
     if getenv("SEQ_Q_PRE", 0) or getenv("SEQ_Q_PRE_REP", 0):
       for b in self.blk + [self.mtp]:
         if isinstance(b, MLATransformerBlock) and b.seq_sharded and (w:=b.attn_k_b["weight"]).uop.axis == 0 and w.dtype == dtypes.half:
-          b._k_b_rep = w.to(devs[0]).contiguous().shard(devs).realize()
+          b._k_b_rep = w.to(devs[0]).contiguous().shard(devs).realize()  # type: ignore[attr-defined]
 
   def _seq_copy(self, save:bool, slot:UOp, pm:UOp, ps:UOp, pc:UOp, hrow:UOp, keep:UOp):
     """The DSA sequence slot has hidden MTP rows; pooled-indexer rings too. Direct DSA keys stay in the region."""

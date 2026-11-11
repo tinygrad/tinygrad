@@ -3904,7 +3904,7 @@ def mla_bmm(x:Tensor, w:Tensor, rows:bool=False) -> Tensor:
   wave = getenv("MLA_BMM_WAVE", 1) and int(I) % (WARP_SIZE*8) == 0 and (int(H)*int(O)) % 4 == 0 and int(T) <= getenv("MLA_BMM_WAVE_T", 32) and \
     w.dtype == dtypes.half
   # (rows: a thread a column of w for every row, the weights read once: the same values as a thread an output)
-  rows = not wave and rows and int(T) <= 8 and (int(H)*int(O)) % 64 == 0 and int(I) % 4 == 0
+  rows = not wave and rows and int(T) <= 16 and (int(H)*int(O)) % 64 == 0 and int(I) % 4 == 0
   fxn = _mla_bmm_wave_kernel if wave else _mla_bmm_rows_kernel if rows else _mla_bmm_kernel
   xin = x.reshape(H, T, I).cast(dtypes.half) if wave else x.reshape(H, T, I).contiguous()
   return Tensor.custom_kernel(out, xin, w, fxn=fxn)[0].reshape(B, H, T, O)
