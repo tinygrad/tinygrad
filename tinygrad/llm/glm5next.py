@@ -5082,7 +5082,9 @@ class Transformer:
       mv[:] = data.to("CPU").data()
       host_embd = ggml_data_to_tensor(raw, prod(shape), typ).reshape(shape)
     pending:list[Callable[[], None]] = []
-    state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads if shard > 1 else {}, fuse, row_sel=rows_map)
+    # (LOAD_DEFER: the files read while the jits compile, see seq_warmup)
+    state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads if shard > 1 else {}, fuse, row_sel=rows_map,
+                                  pending=pending if getenv("LOAD_DEFER", 0) else None)
     if host_embd is not None: state_dict['token_embd.weight'] = host_embd
 
     # all state items should be float16, not float32
