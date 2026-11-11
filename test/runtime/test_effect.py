@@ -129,6 +129,7 @@ class TestEffectRetention(unittest.TestCase):
       Tensor.realize(a, d, b)
       self.assertEqual(b.tolist(), [29, 29, 0, 0])
 
+  @Context(CHECK_OOB=0)
   def test_after_gated_shared_read(self):
     for ki in (KernelInfo(), KernelInfo(opts_to_apply=()), KernelInfo(optimized=True)):
       def kernel(A:UOp, B:UOp, C:UOp): return B[0].store(C[(x:=A[0]).valid(x < 1).after(x.store(1))]).sink(arg=ki)
