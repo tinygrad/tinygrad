@@ -163,6 +163,27 @@ for g in GS:
       print("  KDEV devices " + " ".join(sorted(per)), flush=True)
       for name, _ in sorted(t.items(), key=lambda x: -x[1][1])[:kdev]:
         print(f"  KDEV {name[:40]:40s} " + " ".join(f"{per[d].get(name, 0.0)/NS:8.1f}" for d in sorted(per)), flush=True)
+    if (nc:=getenv("CRIT", 0)):
+      # (CRIT=n: the timeline of n more steps: every device's span and busy time, the time no device ran anything (the host: PROFILE=1
+      # syncs a step's start on its launch), the critical path (kernels, copies, waits on another lane) and its kernels)
+      kprof.reset(*devs)
+      for _ in range(nc): step(group)
+      sync()
+      tl = kprof.sequence_timed(*devs)
+      for d in sorted({d for d, *_ in tl}):
+        ev = [(st0, st0 + du, n.startswith("copy")) for dd, n, st0, du in tl if dd == d]
+        kk, cc = [(a, b) for a, b, c in ev if not c], [(a, b) for a, b, c in ev if c]
+        span, _ = kprof.busy_all([(d, "", a, b - a) for a, b, _ in ev])
+        print(f"  CRIT {d:8s} span {span/nc/1e3:7.2f} ms/step  kernels {kprof.busy_all([(d, '', a, b-a) for a, b in kk])[1]/nc/1e3:7.2f}"
+              f"  copies {kprof.busy_all([(d, '', a, b-a) for a, b in cc])[1]/nc/1e3 if cc else 0.0:7.2f}", flush=True)
+      span, busy = kprof.busy_all(tl)
+      print(f"  CRIT all: span {span/nc/1e3:.2f} ms/step, some device busy {busy/nc/1e3:.2f}, none busy {(span-busy)/nc/1e3:.2f}", flush=True)
+      cp = kprof.critical_path(tl)
+      print(f"  CRIT path {cp['wall']/nc/1e3:.2f} ms/step = kernels {cp['kernels']/nc/1e3:.2f} + copies {cp['copies']/nc/1e3:.2f} + waits "
+            f"{cp['wait']/nc/1e3:.2f} + lead {cp['lead']/nc/1e3:.2f}, {cp['switches']/nc:.0f} lane switches; waits "
+            f"{dict((kk, round(v/nc/1e3, 2)) for kk, v in cp['waits'].items())}", flush=True)
+      for (d, c), us in cp["devs"].most_common(12): print(f"  CRIT on {d:8s} {'copies ' if c else 'kernels'} {us/nc/1e3:7.2f} ms/step", flush=True)
+      for n, us in cp["names"].most_common(getenv("TOP", 40)): print(f"  CRIT path {us/nc/1e3:7.2f} ms/step  {n}", flush=True)
     if (nseq:=getenv("KSEQ")):
       did = devs[getenv("KSEQ_DEV", 1)]
       seq = [(name, us) for dev, name, us in kprof.sequence(*devs) if dev == did and
