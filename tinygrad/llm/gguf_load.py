@@ -89,10 +89,11 @@ CHUNK, HOST_BUFS, COPY_WINDOW, TABLES = 2 << 30, 4, 1 << 30, 16 << 20
 
 def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...], shard_map:dict[str, int],
                    units:dict[str, tuple[int, list[list[int]]]], pads:dict[str, int], fuse:dict[str, str],
-                   row_sel:dict[str, tuple[int, list[tuple[int, int]]]]|None=None) -> dict[str, Tensor]|None:
+                   row_sel:dict[str, tuple[int, list[tuple[int, int]]]]|None=None, pending:list|None=None) -> dict[str, Tensor]|None:
   """
   the files read in chunks (in their order, io_uring and O_DIRECT, see direct_read) into host buffers every device maps, every device takes its
   parts of a chunk (its tensors, its experts' units, its columns: a copy kernel of ranges from the host buffer) while the next ones are read
+  pending: the reads not done now (the buffers made): their function added to it, called later (e.g. while a model's jits compile)
   """
   import time
   from tinygrad.device import Buffer, BufferSpec, MultiBuffer
@@ -275,7 +276,8 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
       total, dt = sum(hi - lo for _, lo, hi, _ in chunks), time.perf_counter() - st
       print(f"weights read: {total/1e9:.1f} GB in {dt:.2f} s ({total/1e9/dt:.1f} GB/s), {len(chunks)} chunks, "
             f"{(slow_bytes[0]-slow0)/1e6:.1f} MB through the page cache")
-  fill_all()
+  if pending is not None: pending.append(fill_all)
+  else: fill_all()
   packed:dict[str, Tensor] = {}
   for name, parts in plan.items():
     (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [bufs[i].view(nb, offsets[name][i]).ensure_allocated() for i,(nb,_) in enumerate(parts)]
@@ -316,8 +318,9 @@ def _gather_units(data:Tensor, E:int, rows:int, slices:int, units:list[int], by_
 def gguf_shard_units(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
                shard_map:dict[str, int]|None=None, repeats:dict[str, int]|None=None, units:dict[str, tuple[int, list[list[int]]]]|None=None,
                pads:dict[str, int]|None=None, fuse:dict[str, str]|None=None,
-               row_sel:dict[str, tuple[int, list[tuple[int, int]]]]|None=None) -> dict[str, Tensor]:
+               row_sel:dict[str, tuple[int, list[tuple[int, int]]]]|None=None, pending:list|None=None) -> dict[str, Tensor]:
   """
+  pending: the file's direct reads left to do (see _parallel_load), their function added to it
   Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
   a tensor (E, rows, cols) in `units` (slices, per device unit lists) is cut in E*slices units: unit e*slices+j is expert e's rows j*rows/slices..
   (its columns for the down projection). every device gets its units in order, a tensor (devices*units, unit rows, unit cols)
@@ -339,7 +342,7 @@ def gguf_shard_units(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], dev
   # the tensors of the files are read straight into the devices' memory, the others (made from them: a model's layout of them) copied
   row_sel = row_sel or {}
   disk = {k:v for k,v in entries.items() if _disk_bytes(v[0]) is not None}
-  direct = _parallel_load(disk, devices, shard_map, units, pads, fuse, row_sel) if disk else None
+  direct = _parallel_load(disk, devices, shard_map, units, pads, fuse, row_sel, pending) if disk else None
   if direct is not None:
     packed = direct
     entries_left = {k:gguf_pad(v, unwrap(shard_map.get(k)), pads[k]) if k in pads else v for k,v in entries.items() if k not in disk}

@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.realize import warm_worker_pool
-from tinygrad.engine.jit import capture_parallel, warmup_select, run_as_they_come
+from tinygrad.engine.jit import capture_parallel, warmup_select, run_as_they_come, _TinyJit
 from tinygrad.llm.kernels import amd_qwen
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
 from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES, _wmma_rdna4, ring_errors, init_deferred
@@ -457,6 +457,31 @@ def _fill_zero(*ts:Tensor):
 
 # (while not empty: _fill_zero allocates, the buffers are zeroed later, see _zero_deferred)
 _zero_later:list[list[Buffer]] = []
+def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
+  """the tensors are buffers now (allocated, their devices and split kept), their values are computed by the function added to pending"""
+  pairs, ts = [], list({id(t): t for t in ts}.values())  # (a tensor of two modules once)
+  # (an empty tensor is just its memory: allocated now)
+  if now:=[t for t in ts if t.numel() == 0 or t.uop.base.op is Ops.ALLOC]: Tensor.realize(*now)
+  # one allocation of the devices of a group (one each is slow: a device's page tables are flushed after every one), the tensors' views of it
+  groups:dict[str|tuple[str, ...], list[Tensor]] = {}
+  for t in ts:
+    if t.numel() > 0 and not any(t is x for x in now): groups.setdefault(cast(str|tuple[str, ...], t.device), []).append(t)
+  for devs, grp in groups.items():
+    def shard(t:Tensor) -> tuple[int, ...]:
+      return cast(tuple[int, ...], t.uop.shard_shape if isinstance(devs, tuple) and t.uop.axis is not None else t.shape)
+    sizes = [round_up(prod(shard(t)) * t.dtype.itemsize, 256) for t in grp]
+    big = [Buffer(d, sum(sizes)).ensure_allocated() for d in to_tuple(devs)]
+    for t, off in zip(grp, itertools.accumulate([0] + sizes[:-1])):
+      views = [b.view(prod(shape:=shard(t)) * t.dtype.itemsize, off).ensure_allocated() for b in big]
+      if isinstance(devs, tuple): (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = views
+      u = UOp.from_buffer(mb if isinstance(devs, tuple) else views[0], t.dtype, devs).reshape(shape)
+      lazy, u = t.uop, u.unshard(t.uop.axis) if isinstance(devs, tuple) and t.uop.axis is not None else u
+      t.replace(Tensor(u))
+      pairs.append((u, lazy))
+  # (a jit: compiled with the model's jits, see _capture_parallel)
+  def compute(): Tensor.realize(*[Tensor(u).assign(Tensor(lazy)) for u, lazy in pairs])
+  if pairs: pending.append(TinyJit(compute, capture_first=True))
+
 @contextlib.contextmanager
 def _zero_deferred():
   """the buffers _fill_zero allocates in the context: not zeroed, the list it yields (see _zero_jit)"""
@@ -1883,6 +1908,7 @@ class Transformer:
     # for a big one
     self.jits:dict[int, Any] = {}
     self._loaded = False  # the weights are loaded (from_gguf)
+    self._pending_load:list[Callable[[], None]] = []  # the work left of loading (from_gguf with LOAD_DEFER)
     self._scratch:dict = {}  # the memory of the jits' intermediates: they run one at a time
 
   @property
@@ -2577,14 +2603,19 @@ class Transformer:
     # (the n-gram table read while the jits compile: its buffers made, the jits that read it capture before)
     self._seq_shared(read=False)
     _lap("warmup: shared")
-    loads = [_zero_jit(dedup(zero_bufs))]
+    # (the computations from the weights (LOAD_DEFER) and the zeroing of the states: jits compiled with the others, run after the reads)
+    loads = [(j, j) for j in self._pending_load if isinstance(j, _TinyJit)] + [_zero_jit(dedup(zero_bufs))]
     if DEBUG >= 1: print(f"seq_warmup: memory made at {time.perf_counter()-st:.2f}s")
     ran:set[str] = set()
     def meanwhile(take:Callable[..., bool|None]):
+      # the files' reads first (LOAD_DEFER: the weights'), then the n-gram table's, then what's computed from them
+      while self._pending_load and not isinstance(self._pending_load[0], _TinyJit): self._pending_load.pop(0)()
+      _lap("warmup: weights read")
       if self.config.ple is not None:
         self._ple_dev_read()
         _lap("warmup: n-gram table read")
       for j, call in loads:
+        if j in self._pending_load: self._pending_load.remove(j)
         take(j)
         call()
       # (the warm-up's runs as their jits come: while the others compile)
@@ -3035,7 +3066,9 @@ class Transformer:
       mv[:] = data.to("CPU").data()
       host_embd = ggml_data_to_tensor(raw, prod(shape), typ).reshape(shape)
       if typ == Q8_0: embd_q8 = raw
-    state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads, fuse, row_sel=rows_map)
+    # (LOAD_DEFER: the weights' memory made now, the files read later: while the jits compile, see seq_warmup)
+    pending:list[Callable[[], None]]|None = [] if getenv("LOAD_DEFER", 0) else None
+    state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads, fuse, row_sel=rows_map, pending=pending)
     _lap("weights")
     if host_embd is not None: state_dict['token_embd.weight'] = host_embd
     state_dict = {k:v.cast('float16') for k,v in state_dict.items()}
@@ -3092,7 +3125,7 @@ class Transformer:
         del b.ffn_up_exps
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
-    model._loaded = True
+    model._loaded, model._pending_load = True, pending or []
     model._embd_q8 = embd_q8
     # (the n-gram table: the bytes in the gguf file, mmapped, or a copy in host memory)
     if ple_entry is not None:
@@ -3134,12 +3167,16 @@ class Transformer:
         del b.ffn_up_exps
         packed.add(id(g.weight))
         fused.append(g.weight)
-    if fused: Tensor.realize(*fused)
+    if fused:
+      if self._pending_load: _realize_later(fused, self._pending_load)
+      else: Tensor.realize(*fused)
     small = [p for p in nn.state.get_parameters(self) if id(p) not in packed and p is not self.token_embd.weight and not p.uop.is_realized]
     for p in small: p.replace(p.contiguous())
     tables = dedup([t for m in modules([self.blk] + ([self.mtp] if hasattr(self, "mtp") else []), set()) if isinstance(m, ExpertWeights)
                     for t in (getattr(m, "first", None), getattr(m, "slice_table", None)) if t is not None and not t.uop.is_realized])
     Tensor.realize(*tables)
+    # (the weights still to read: the small ones' memory now, their values after)
+    if self._pending_load: return _realize_later(small, self._pending_load)
     # (a block's at a time: the blocks' graphs are the same, scheduled once (the schedule cache), not one graph of all of them)
     ids = {id(p) for p in small}
     for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []):
@@ -3149,12 +3186,16 @@ class Transformer:
     Tensor.realize(*[p for p in small if id(p) in ids])
 
   def _finish_load(self):
+    """the work left of loading: the values computed from the weights, the weights read if deferred"""
     self._derive_weights()
+    while self._pending_load: self._pending_load.pop(0)()
     _lap("derived")
 
   def _derive_weights(self):
     """the weights computed from the file's"""
-    def realize(ts:list[Tensor]): Tensor.realize(*ts)
+    def realize(ts:list[Tensor]):
+      if self._pending_load: _realize_later(ts, self._pending_load)
+      else: Tensor.realize(*ts)
     # (SKINNY) the float weights of few outputs that decoding multiplies by (the routers, the indexers' head weights) stored transposed (the
     # outputs the fast axis), the Linear's a view of it: skinny_matmul reads every input's weights of all the outputs at once
     blocks = self.blk + ([self.mtp] if hasattr(self, "mtp") else [])
