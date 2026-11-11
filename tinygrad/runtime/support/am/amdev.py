@@ -136,6 +136,13 @@ class AMPageTableEntry:
     assert paddr & mask == paddr and last & mask == last, f"Invalid physical address {paddr:#x}-{last:#x}"
     flags = self.adev.gmc.get_pte_flags(self.lv, False, frag, uncached, aspace is AddrSpace.SYS, snooped, True)
     self.entries[entry_id:entry_id+cnt] = array.array('Q', [flags | ((paddr + i * covers) & 0x0000FFFFFFFFF000) for i in range(cnt)])
+  def clear_entries(self, entry_id:int, cnt:int):
+    """cnt entries from entry_id made invalid at once (set_entry(i, 0x0, valid=False)'s)"""
+    val = self.adev.gmc.get_pte_flags(self.lv, False, 0, False, False, False, False) | (self.adev.paddr2xgmi(0) & 0x0000FFFFFFFFF000)
+    self.entries[entry_id:entry_id+cnt] = array.array('Q', [val] * cnt)
+  def all_valid(self, entry_id:int, cnt:int) -> bool:
+    """all of cnt entries from entry_id valid (read at once)"""
+    return all(e & am.AMDGPU_PTE_VALID for e in self.entries[entry_id:entry_id+cnt])
   def any_valid(self, entry_id:int, cnt:int) -> bool:
     """any of cnt entries from entry_id valid (read at once)"""
     return any(e & am.AMDGPU_PTE_VALID for e in self.entries[entry_id:entry_id+cnt])

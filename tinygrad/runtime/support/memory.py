@@ -148,7 +148,9 @@ class PageTableTraverseContext:
 
   def _try_free_pt(self) -> bool:
     pt, _, _ = self.pt_stack[-1]
-    if self.free_pts and pt != self.dev.mm.root_page_table and all(not pt.valid(i) for i in range(self._pt_pte_cnt(self.pt_stack[-1][0].lv))):
+    cnt = self._pt_pte_cnt(pt.lv)
+    if self.free_pts and pt != self.dev.mm.root_page_table and \
+       (not pt.any_valid(0, cnt) if hasattr(pt, "any_valid") else all(not pt.valid(i) for i in range(cnt))):
       self.dev.mm.pfree(pt.paddr, ptable=True)
       parent_pt, parent_pte_idx, _ = self.pt_stack[-2]
       parent_pt.set_entry(parent_pte_idx, 0x0, valid=False)
@@ -242,6 +244,9 @@ class MemoryManager:
 
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, free_pts=True)
     for _, pt, pte_idx, pte_cnt, _ in ctx.next(size):
+      if hasattr(pt, "clear_entries") and pt.all_valid(pte_idx, pte_cnt):
+        pt.clear_entries(pte_idx, pte_cnt)
+        continue
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
         assert pt.valid(pte_id), f"PTE not mapped: {pt.entry(pte_id):#x}"
         pt.set_entry(pte_id, paddr=0x0, valid=False)
