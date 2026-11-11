@@ -5,7 +5,7 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv,
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite, UOpMetaClass
-from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, _launch_args, _compile_pickled
+from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, _launch_args, _compile_pickled, _compile_pickled_timed
 from tinygrad.engine.worker import get_worker_pool
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
@@ -296,14 +296,24 @@ def _remote_compile(qw:int, ar:int, tasks:list[tuple[bytes, bytes]]) -> list[UOp
 
 class _Compiles:
   """the compiles of the forked processes' kernels: one a key (its bytes), on the workers of a pool"""
-  def __init__(self): self.lock, self.results = threading.Lock(), cast(dict[bytes, Any], {})
-  def serve(self, pool, qr:int, aw:int):
+  def __init__(self):
+    self.lock, self.results, self.stats = threading.Lock(), cast(dict[bytes, Any], {}), cast(list[tuple], [])
+  def serve(self, pool, qr:int, aw:int, who:int=-1):
     # (bytes only here: the workers unpickle the kernels and pickle their programs)
+    timed = bool(getenv("STARTUP_STATS", ""))
     with os.fdopen(qr, "rb") as f:
       while (msg:=_recv(f)) is not None:
+        t0, tasks = time.time(), pickle.loads(msg)
         with self.lock:
-          res = [self.results.get(k) or self.results.setdefault(k, pool.apply_async(_compile_pickled, (t,))) for k, t in pickle.loads(msg)]
-        try: _send(aw, pickle.dumps([r.get() for r in res]))
+          new = [k for k, _ in tasks if k not in self.results]
+          res = [self.results.get(k) or self.results.setdefault(k, pool.apply_async(_compile_pickled_timed if timed else _compile_pickled, (t,)))
+                 for k, t in tasks]
+        try:
+          got = [r.get() for r in res]
+          if timed:
+            self.stats.append((who, t0, time.time(), len(tasks), len(new), [g[1:] for g, (k, _) in zip(got, tasks) if k in new]))
+            got = [g[0] for g in got]
+          _send(aw, pickle.dumps(got))
         # (the worker's traceback: the pool's exception holds it as its cause)
         except Exception as e: _send(aw, pickle.dumps(f"{type(e).__name__}: {e}{chr(10) + str(e.__cause__) if e.__cause__ else ''}"))
     os.close(aw)
@@ -377,7 +387,7 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     children.append((pid, r))
     if pool is not None:
       for fd in (qw, ar): os.close(fd)
-      threading.Thread(target=compiles.serve, args=(pool, qr, aw), daemon=True).start()
+      threading.Thread(target=compiles.serve, args=(pool, qr, aw, todo[i]), daemon=True).start()
 
   # read the pipes at once (a child blocks on a full pipe): the arena sizes, then the jit
   msgs:list[list[bytes]] = [[] for _ in children]
@@ -411,7 +421,7 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
       for x in (b.bufs if isinstance(b, MultiBuffer) else [b]): x.ensure_allocated()
     arenas_made[0] = True
 
-  oks, left = [False] * len(children), set(range(len(children)))
+  oks, left, took = [False] * len(children), set(range(len(children))), cast(dict[int, tuple[float, float, float]], {})
   def came(k:int) -> bool: return len(msgs[k]) >= 2 or (len(msgs[k]) == 1 and msgs[k][0] == b"")
   @disable_gc()
   def take(k:int):
@@ -442,6 +452,7 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     # (a jit whose memory isn't made yet is linked on its first call)
     if not getattr(jit, "link_later", False): jit.captured.linked()
     oks[k] = True
+    took[k] = (t0 - st, t1 - st, time.perf_counter() - st)
     if taken is not None: taken(jit)
     if DEBUG >= 1: print(f"capture_parallel: jit {k} came at {', '.join(f'{t:.2f}' for t in arrived[k])}s, taken at {time.perf_counter()-st:.2f}s "
                          f"({len(out)} uops made in {t1-t0:.2f}s, linked in {time.perf_counter()-t1:.2f}s)")
@@ -460,4 +471,10 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     with got: got.wait_for(lambda: any(came(k) for k in left))
     # (the first to have come: one done long ago isn't left behind ones that just came)
     take(min((k for k in left if came(k)), key=lambda k: arrived[k][-1] if arrived[k] else 0))
+  if (path:=getenv("STARTUP_STATS", "")):
+    import json
+    with open(path, "a") as f:
+      f.write(json.dumps({"st": st, "end": time.perf_counter() - st, "wall0": time.time() - (time.perf_counter() - st), "todo": todo,
+                          "names": [getattr(j.fxn, "__qualname__", str(j.fxn)) for j, _ in calls], "arrived": arrived, "taken": took,
+                          "compiles": compiles.stats}) + "\n")
   return [k in todo and oks[todo.index(k)] for k in range(len(every))]

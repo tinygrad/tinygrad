@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence, Callable
-import decimal, weakref, pickle
+import decimal, weakref, pickle, time, os
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
@@ -253,6 +253,11 @@ pm_beam = PatternMatcher([
 def _compile_kernel(x:tuple[int, tuple[UOp, Renderer], dict]) -> tuple[int, UOp]:
   with Context(**x[2]): return x[0], to_program(*x[1])
 def _compile_pickled(task:bytes) -> bytes: return pickle.dumps(_compile_kernel(pickle.loads(task))[1])
+def _compile_pickled_timed(task:bytes) -> tuple[bytes, float, float, int, str]:
+  # (STARTUP_STATS) the program, when its compile started and ended (wall clock), the worker's pid, the kernel's name
+  st = time.time()
+  prg = _compile_kernel(pickle.loads(task))[1]
+  return pickle.dumps(prg), st, time.time(), os.getpid(), prg.src[0].arg.name
 
 # (a process compiling for another: its kernels compiled there, by their keys, see capture_parallel) [(key, task)] -> their programs
 remote_compile:Callable[[list[tuple[bytes, bytes]]], list[UOp]]|None = None
