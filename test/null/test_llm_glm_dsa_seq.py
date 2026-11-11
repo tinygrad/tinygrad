@@ -182,6 +182,24 @@ class TestGLMDSASequence(unittest.TestCase):
       self.assertFalse(amd_glm_dsa.Q8_ROWS_I8[0])
     getenv.cache_clear()
 
+  def test_rows_f16_kernels(self):
+    # (ROWS_F16: the f16 WMMA rows of batched decoding on _rows_f16_wmma_kernel, default off; the kernels build for Q8_0 (wide chunks) and Q6_K)
+    from tinygrad.helpers import getenv
+    from tinygrad.llm.kernels import amd_glm_dsa as K
+    getenv.cache_clear()
+    with patch.object(K, "_wmma_rdna4", lambda d: True):
+      self.assertIsNone(K._rows_f16_config(16, 2048, 6144, K.Q8_0, "NULL"))
+      with patch.dict(os.environ, {"ROWS_F16": "1", "ROWS_CHUNK": "8"}):
+        getenv.cache_clear()
+        self.assertEqual(K._rows_f16_config(16, 2048, 6144, K.Q8_0, "NULL")["chunk"], 8)
+        self.assertEqual(K._rows_f16_config(16, 6144, 160, K.Q8_0, "NULL")["chunk"], 0)  # (5 groups)
+        self.assertIsNone(K._rows_f16_config(128, 2048, 6144, K.Q8_0, "NULL"))
+      getenv.cache_clear()
+    for typ, raw, chunk in ((K.Q8_0, Tensor.empty(64*256*17//32, dtype="half"), 8), (K.Q6_K, Tensor.empty(64*105, dtype="uint16"), 0)):
+      out, x = Tensor.empty(32, 64, dtype="float32"), Tensor.empty(32, 256, dtype="half")
+      fxn = functools.partial(K._rows_f16_wmma_kernel, out_features=64, in_features=256, ggml_type=typ, chunk=chunk)
+      self.assertIs(Tensor.custom_kernel(out, raw, x, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
+
   def test_half_rows_local_scales(self):
     # (a row parallel layer's input in half: every device's part its own scale, no cross device max; the same halves below HALF_ROWS_MAX)
     from tinygrad.llm.kernels.amd_glm_dsa import _half_rows, HALF_ROWS_MAX

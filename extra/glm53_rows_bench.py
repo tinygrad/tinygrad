@@ -71,7 +71,8 @@ def main():
             else: os.environ[k] = v
           getenv.cache_clear()
         if ref is None: ref, eq = out, "ref"
-        else: eq = "EQUAL" if np.array_equal(out.view(np.uint32), ref.view(np.uint32)) else f"DIFF max {np.abs(out-ref).max():.3g} (|ref| {np.abs(ref).max():.3g})"
+        elif np.array_equal(out.view(np.uint32), ref.view(np.uint32)): eq = "EQUAL"
+        else: eq = f"DIFF max {np.abs(out-ref).max():.3g} (|ref| {np.abs(ref).max():.3g})"
         tot[name] += dt
         line += f"  {name} {dt*1e6:7.1f} us {nbytes/dt/1e9:5.0f} GB/s {eq}"
       print(line, flush=True)
