@@ -32,7 +32,7 @@ def invalid_outputs(uret:UOp) -> set[UOp]:
 
 def renumber_invalid_outputs(uret:UOp) -> UOp:
   invalid = invalid_outputs(uret)
-  return uret.substitute({b:b.replace(op=Ops.ALLOC, arg=replace(b.arg, slot=i, bind_on_realize=False))
+  return uret.substitute({b:b.replace(op=Ops.ALLOC, arg=replace(b.arg, slot=i, buffer=None, bind_on_realize=False))
                           for i,b in enumerate(x for x in uret.toposort() if x in invalid)})
 
 ReturnType = TypeVar('ReturnType')

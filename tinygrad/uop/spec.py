@@ -143,13 +143,13 @@ spec_tensor = PatternMatcher([
   (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIP), src=(UPat(),), name="u"),
    lambda u: dtypes.is_float(u.dtype) or u.src[0].base.is_invalid),
 
-  # BUFFER names bound storage by slot; ALLOC declares storage without a runtime buffer
-  # NOTE: the binding is runtime state, not part of the graph. it's checked in spec_kernel_graph and where the buffer is used
+  # BUFFER has bound storage; ALLOC declares storage without a runtime buffer
   (UPat(Ops.BUFFER, src=(p_size,), allow_any_len=True, name="buf"), lambda buf:
-   isinstance(buf.dtype, DType) and is_device(buf.arg.device)
+   isinstance(buf.dtype, DType) and is_device(buf.arg.device) and buf.arg.buffer is not None
    and valid_device_range(buf.arg.device, buf.src[1:]) if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
   (UPat(Ops.ALLOC, src=(p_size,), allow_any_len=True, name="buf"), lambda buf: isinstance(buf.arg, ParamArg)
    and buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)
+   and buf.arg.buffer is None
    and (buf.arg.device is None or (buf.addrspace is AddrSpace.GLOBAL and is_device(buf.arg.device)))
    and valid_device_range(buf.arg.device, buf.src[1:])),
 
@@ -262,9 +262,9 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, src=(p_size,), allow_any_len=True, name="x"), lambda x:
    isinstance(x.arg, ParamArg) and valid_device_range(x.arg.device, x.src[1:]) and
-   (x.slot_buffer is not None if x.addrspace is AddrSpace.GLOBAL else x.addrspace in (AddrSpace.LOCAL, AddrSpace.REG))),
+   (x.arg.buffer is not None if x.addrspace is AddrSpace.GLOBAL else x.addrspace in (AddrSpace.LOCAL, AddrSpace.REG))),
   (UPat(Ops.ALLOC, src=(p_size,), allow_any_len=True, name="x"), lambda x:
-   isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL and valid_device_range(x.arg.device, x.src[1:])),
+   isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL and x.arg.buffer is None and valid_device_range(x.arg.device, x.src[1:])),
   (UPat(Ops.BITCAST), lambda: True),
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
