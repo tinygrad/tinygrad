@@ -174,11 +174,12 @@ class MetalAllocator(Allocator['MetalDevice']):
           self.dev.sysdevice.newBufferWithLength_options(size, metal.MTLResourceStorageModeShared)
     if mtl.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     self.dev.mark_resident(mtl, True)
+    # Cached storage can survive Buffer finalization; release its MTLBuffer only in _free, not during Python GC.
+    setattr(mtl, 'retain', False)
     return BufferStorage(mtl.gpuAddress(), mtl, MMIOInterface(c, size) if (c:=mtl.contents()) else None)
   def _free(self, storage:BufferStorage, options:BufferSpec): # metal doesn't track what a kernel reaches
     self.dev.synchronize()
     self.dev.mark_resident(storage.meta, False)
-    storage.meta.retain = False
     storage.meta.release()
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
 
