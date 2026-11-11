@@ -3,7 +3,7 @@ import array, collections, contextlib, enum, functools, gc, itertools, math, os,
 from dataclasses import dataclass, replace, field
 from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
-from tinygrad.engine.jit import capture_parallel, warmup_select, _TinyJit
+from tinygrad.engine.jit import capture_parallel, warmup_select, warmup_wanted, _TinyJit
 from tinygrad.engine.realize import run_linear, compile_linear, link_linear
 from tinygrad.llm.kernels.amd_glm import rows_shifted, rows_pick, pool_expand
 from tinygrad.llm.kernels.amd_glm import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
@@ -5314,28 +5314,35 @@ class Transformer:
       self._alloc_slots()
       k = self.config.spec_drafts
       for m, G, P in sorted(itertools.product(self.mix_sizes(), range(1, land+1), self.MIX_PS), key=lambda x: -x[0]*(k+1)-x[1]*x[2]):
+        if not warmup_wanted(f"mixed{m}_{G}_{P}"): continue
         self.batch_mixed_step([([0]*(k+1), 1, 0, 1, 0.0)] * m, [([0], self.decode_slots() + g, 0.0, 0) for g in range(G)], P=P)
     # the big chunk first: its scratch memory is the most, the other jits share it. a prompt one past a size runs the next one (1: the smallest)
     for n in sorted({1, *(s + 1 for s in sizes[:-1])}, reverse=True):
+      # (WARMUP_JITS names: prefill<chunk> (the chunk a prompt of n runs: n=1 the smallest, its decoding too), step<m>, mixed<m>_<G>_<P>,
+      # bpf<P>_<G>, slots (the copies of the slots), host (the staging rows'); the others captured on their first call)
+      if not warmup_wanted(f"prefill{next((s for s in sizes if s >= n), sizes[-1])}"): continue
       self._cached_tokens, self._ckpt_tokens = [], []
       list(zip(range(4), self.generate([0] * min(n, self.max_context - 8))))
     if self._ckpt_tokens: self._checkpoint(self._ckpt_tokens, save=False)  # and a checkpoint's restore
     # batched decoding: the slots' memory, a copy into a slot, a move between two and a step of every size (their jits linked)
     self._alloc_slots()
-    if self.batch_slots(): self.slot_store(0, 1)
-    if self.batch_slots() > 1: self.slot_move(1, 0)
+    slots = self.batch_slots() if warmup_wanted("slots") else 0
+    if slots: self.slot_store(0, 1)
+    if slots > 1: self.slot_move(1, 0)
     # (and the copies of a sequence spanning more slots)
-    for n in range(2, self.max_span()+1): self.slot_store(0, (n-1)*self.batch_ctx() + 1), self.slot_load(0, (n-1)*self.batch_ctx() + 1)
+    for n in range(2, self.max_span()+1 if slots else 0):
+      self.slot_store(0, (n-1)*self.batch_ctx() + 1), self.slot_load(0, (n-1)*self.batch_ctx() + 1)
     for m in self.batch_sizes():
-      if m > self.batch_slots(): continue
+      if m > self.batch_slots() or not warmup_wanted(f"step{m}"): continue
       if self.config.spec_drafts: self.batch_spec_step([([0]*(self.config.spec_drafts+1), 1, 0, 1, 0.0)] * m)
       else: self.batch_step([(0, 1, 0.0)] * m)
     if self.batch_prefills():
       for P in self.BPF_PS:
-        for G in self.bpf_sizes(P): self.batch_prefill([([0], 0, 0.0)] * G, P=P)
-    if self.batch_prefills() or land: self.ckpt_from_slot(0, 1)  # (a prompt prefilled in a slot: its checkpoint, see the server)
+        for G in self.bpf_sizes(P):
+          if warmup_wanted(f"bpf{P}_{G}"): self.batch_prefill([([0], 0, 0.0)] * G, P=P)
+    if (self.batch_prefills() or land) and slots: self.ckpt_from_slot(0, 1)  # (a prompt prefilled in a slot: its checkpoint, see the server)
     # (the staging rows of host_save and host_load: their copies captured)
-    self._host_rows(1, True), self._host_rows(1, False)
+    if warmup_wanted("host"): self._host_rows(1, True), self._host_rows(1, False)
     self._cached_tokens, self._ckpt_tokens = [], []
 
   def _capture_parallel(self, sizes:tuple[int, ...]):
@@ -5358,15 +5365,18 @@ class Transformer:
       sp, nt = v_start_pos.bind(0), UOp.variable("toks", 1, n).bind(n)
       jits = self.__dict__.setdefault("jits" + ("_dense" if self._dense_ctx(sp, nt) else "") + "_greedy", {})
       if n not in jits: jits[n] = TinyJit(self._forward_effects, capture_first=True, scratch=self._scratch)
+      setattr(jits[n], "warmup_name", f"prefill{n}")
       calls.append((jits[n], functools.partial(self, self._token_buf[:, sp:sp+nt], sp, None)))
     # the computations left of loading (their jits) too: run after the weights are read
     calls += [(j, j) for j in self._pending_load if isinstance(j, _TinyJit)]
     if self.config.spec_drafts > 0:
       self._spec_init()
       if not hasattr(self, "_spec_jit_greedy"): self._spec_jit_greedy = TinyJit(self.forward_spec, capture_first=True, scratch=self._scratch)
+      setattr(self._spec_jit_greedy, "warmup_name", "spec")
       # (and the one of a context the qwen sparse attention's top_k covers, see _qsa_dense)
       if self._dense_ctx(0, 1):
         self._spec_jit_dense_greedy = TinyJit(self.forward_spec, capture_first=True, scratch=self._scratch)
+        setattr(self._spec_jit_dense_greedy, "warmup_name", "spec_dense")
         calls.append((self._spec_jit_dense_greedy, functools.partial(self._spec_call, 0, 0, 1, None)))
         if (top:=unwrap(self.config.indexer).top_k) + 2*self.config.spec_drafts + 2 < self.max_context:
           calls.append((self._spec_jit_greedy, functools.partial(self._spec_call, top, 0, 1, None)))
@@ -5382,18 +5392,22 @@ class Transformer:
         jit = self._bspec_jit(m) if self.config.spec_drafts else self._batch_jit(m)
         if m <= slots: calls.append((jit, step(m)))
         jit.link_later = True
+        setattr(jit, "warmup_name", f"step{m}")
       # (and the copies into a slot, back from one and between two)
       self._slot_jits()
       calls += [(self._slot_jit, lambda: self._slot_jit(*self._slot_store_vars(0, 1, 0))),
                 (self._slot_load_jit, lambda: self._slot_load_jit(*self._slot_store_vars(0, 1, 0)))]
       if slots > 1: calls += [(self._slot_move_jit, lambda: self._slot_move_jit(*self._slot_move_vars(1, 0)))]
-      for j in (self._slot_jit, self._slot_move_jit, self._slot_load_jit): setattr(j, "link_later", True)
+      for j in (self._slot_jit, self._slot_move_jit, self._slot_load_jit):
+        setattr(j, "link_later", True)
+        setattr(j, "warmup_name", "slots")
       # (and the mixed steps)
       for m, G, P in itertools.product(self.mix_sizes(), range(1, self.mix_landing()+1), self.MIX_PS):
         mix = self._mix_jit(m, G, P)
         calls.append((mix, functools.partial(mix, *self._bspec_vars([(0, 0, 1)]*m),
                                              *self._bpf_vars([1]*G, [self.decode_slots() + g for g in range(G)], [0]*G))))
         mix.link_later = True
+        setattr(mix, "warmup_name", f"mixed{m}_{G}_{P}")
       # (and the prefills of several prompts)
       if self.batch_prefills():
         for P in self.BPF_PS:
@@ -5401,6 +5415,7 @@ class Transformer:
             bpf = self._bpf_jit(G, P)
             calls.append((bpf, functools.partial(bpf, *self._bpf_vars([1]*G, [0]*G, [0]*G))))
             bpf.link_later = True
+            setattr(bpf, "warmup_name", f"bpf{P}_{G}")
     # the weights are read (and what's computed from them) while the jits compile, and a checkpoint is saved and restored (its kernels)
     def meanwhile(take):
       # (the jits of the computations left run after: they're compiled meanwhile)
@@ -5420,6 +5435,8 @@ class Transformer:
       self._alloc_slots()
       for j, _ in calls:
         if j.captured is None and getattr(j, "link_later", False): j.link_later = False
+    # (WARMUP_JITS: the jits of the names wanted (see warmup), the others captured on their first call; the loads' always)
+    calls = [(j, c) for j, c in calls if j in load_jits or warmup_wanted(getattr(j, "warmup_name", ""))]
     capture_parallel(calls, meanwhile, taken)
 
   def _recurrent_states(self) -> list[tuple[Tensor, bool]]:
