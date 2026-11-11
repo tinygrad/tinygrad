@@ -639,6 +639,29 @@ class FFNBlock:
       self.ffn_up      = Linear(config.dim, config.hidden_dim, bias=False)
       self.ffn_down    = Linear(config.hidden_dim, config.dim, bias=False)
 
+  def _shexp_gate_up(self, x:Tensor) -> tuple[Tensor, Tensor]:
+    """the shared expert's gate and up of x: one kernel of both (SHEXP_FUSED, _shexp_fuse: every device's rows of the two side by side, a
+    row's dot the same: the decode kernel's reduction doesn't depend on the outputs' count), else two"""
+    if (fl:=getattr(self, "_shexp_gu", None)) is not None and getenv("SHEXP_FUSED", 0) and isinstance(x.numel(), int):
+      out, O, n = fl(x), self.ffn_gate_shexp.out_features, len(cast(tuple, fl.weight.device))
+      gu = out.reshape(*out.shape[:-1], n, 2, O // n)
+      return gu[..., 0, :].flatten(-2), gu[..., 1, :].flatten(-2)
+    return self.ffn_gate_shexp(x), self.ffn_up_shexp(x)
+  def _shexp_fuse(self) -> None:
+    """SHEXP_FUSED: the shared expert's gate and up weights side by side on every device (its gate rows, then its up rows), one Linear"""
+    g, u = getattr(self, "ffn_gate_shexp", None), getattr(self, "ffn_up_shexp", None)
+    if g is None or u is None or not isinstance(devs:=g.weight.device, tuple): return
+    for lin in (g, u):
+      if lin.ggml_type is None and lin.use_custom_quant and amd_custom_kernels_supported(devs): lin.set_quantized(lin.weight)
+    if g.ggml_type is None or g.ggml_type != u.ggml_type or g.shard_axis != 0 or u.shard_axis != 0 or g.bias is not None or \
+       g.out_features != u.out_features or g.out_features % (n:=len(devs)): return
+    O = g.out_features
+    w = g.weight.reshape(n, O // n, -1).cat(u.weight.reshape(n, O // n, -1), dim=1).reshape(2*O, -1).contiguous().realize()
+    if w.uop.axis != 0: return
+    fl = Linear.__new__(Linear)
+    fl.in_features, fl.out_features, fl.weight, fl.bias = g.in_features, 2*O, w, None
+    fl.ggml_type, fl.shard_axis, fl.use_custom_quant = g.ggml_type, 0, True
+    self._shexp_gu = fl
   def _feed_forward(self, x:Tensor) -> Tensor:
     # a symbolic token count runs the MoE padded to the max size: static shapes, the garbage tokens are sliced off
     if hasattr(self, 'ffn_gate_exps') and not isinstance(x.shape[1], int) and amd_custom_kernels_supported(x.device):
@@ -734,7 +757,7 @@ class FFNBlock:
     if shexp is not None:
       if partial and not keep: out = partial_sum(out)
     elif hasattr(self, 'ffn_gate_shexp'):
-      shexp_act = gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit)
+      shexp_act = gated_activation(*self._shexp_gate_up(x), limit=self.config.swiglu_limit)
       if not INLINE_ACT: shexp_act = shexp_act.contiguous()
       # a row parallel shared expert adds its partial sums to the ones of the experts: one allreduce for both
       shexp = self.ffn_down_shexp.partial(shexp_act) if partial else self.ffn_down_shexp(shexp_act)
@@ -3173,6 +3196,10 @@ class Transformer(GLMSeqDriver):
     # (the MLA caches' peer views made (allocated) before jits are captured in forked processes, see seq_gather)
     for b in self.blk + [self.mtp]:
       if isinstance(b, MLATransformerBlock) and b.seq_sharded: seq_views(b.cache_s)
+    # (SHEXP_FUSED: the shared experts' gate and up weights side by side, see FFNBlock._shexp_gate_up)
+    if getenv("SHEXP_FUSED", 0) or getenv("SHEXP_FUSED_REP", 0):
+      for b in self.blk + [self.mtp]:
+        if isinstance(b, FFNBlock): b._shexp_fuse()
     # (SEQ_Q_PRE: k_b of all the heads on every device, see MLATransformerBlock._q_pre)
     if getenv("SEQ_Q_PRE", 0) or getenv("SEQ_Q_PRE_REP", 0):
       for b in self.blk + [self.mtp]:
