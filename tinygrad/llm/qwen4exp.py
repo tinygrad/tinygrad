@@ -2172,6 +2172,13 @@ class Transformer:
 
   def _seq_init(self):
     if hasattr(self, "seq_spec_h"): return
+    if _zero_later: return self._seq_init_states()
+    # (the states zeroed by one jit (a kernel a buffer), not by a jit's call a chunk of every buffer)
+    with _zero_deferred() as zero_bufs: self._seq_init_states()
+    _zero_jit(dedup(zero_bufs))[1]()
+    _lap("seq init: zeroed by a jit")
+
+  def _seq_init_states(self):
     # (the buffers freed by loading are cached for reuse: their memory is the caches')
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].allocator.free_cache()
     _lap("seq init: cache freed")
