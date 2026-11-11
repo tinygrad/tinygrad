@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from dataclasses import replace
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
 from tinygrad.llm.model import ExpertGating, TransformerBlock, TransformerConfig
 
 def _moe_config(dim=8, hidden=16, n_heads=2, num_experts=4, num_experts_per_tok=2):
@@ -131,6 +131,17 @@ class TestMoEFeedForward(unittest.TestCase):
     block.ffn_gate_exps.weight = Tensor([0.0, 0.0, 1.0, 1.0]).reshape(4, 1, 1).expand(4, 16, 8)
     block.ffn_up_exps.weight, block.ffn_down_exps.weight = Tensor.ones(4, 16, 8), Tensor.ones(4, 8, 16)
     np.testing.assert_equal(block._feed_forward(Tensor.ones(1, 1, 8)).numpy(), 0)
+
+  def test_moe_feed_forward_expert_hash(self):
+    # hash routed: the experts come from tid2eid by token, the router (tied scores) is ignored, only experts 2 and 3 have a nonzero gate
+    block = TransformerBlock(replace(_moe_config(), expert_gating_func=ExpertGating.SQRT_SOFTPLUS, norm_topk_prob=True, expert_hash=True))
+    block.ffn_gate_inp.weight = Tensor.zeros(4, 8)
+    block.ffn_gate_tid2eid["weight"] = Tensor.zeros(100, 2, dtype=dtypes.int32).contiguous()
+    block.ffn_gate_tid2eid["weight"][5] = Tensor([3, 2], dtype=dtypes.int32)
+    block.ffn_gate_exps.weight = Tensor([0.0, 0.0, 1.0, 1.0]).reshape(4, 1, 1).expand(4, 16, 8)
+    block.ffn_up_exps.weight, block.ffn_down_exps.weight = Tensor.ones(4, 16, 8), Tensor.ones(4, 8, 16)
+    out = block._feed_forward(Tensor.ones(1, 2, 8), Tensor([[5, 7]])).numpy()
+    np.testing.assert_allclose(out[0, :, 0], [Tensor(8.0).silu().item() * 8 * 16, 0], rtol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()

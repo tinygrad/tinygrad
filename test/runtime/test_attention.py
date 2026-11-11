@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Tensor, dtypes, nn, UOp, TinyJit
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig, MLATransformerBlock, Indexer, IndexerConfig,
-  HyperConnection, HCConfig, AttentionResidual, GatedResidual, PLELayer, PLEConfig,
+  HyperConnection, HCConfig, AttentionResidual, GatedResidual, PLELayer, PLEConfig, Compressor,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk, short_conv,
 )
 from tinygrad.llm.gguf import GGUFPackedTable
@@ -177,6 +177,19 @@ class TestAttention(unittest.TestCase):
     freqs = Tensor([[1., 0.], [0., 1.], [-1., 0.], [0., -1.]])
     allowed = [[1, 0, 0, 0], [1, 1, 0, 0], [1, 1, 1, 0], [0, 0, 1, 1]]
     np.testing.assert_array_equal(indexer(x, q, (0,), freqs).numpy(), np.where(allowed, 0., -np.inf)[None, None])
+
+  def test_compressor(self):
+    # ratio 2 (no overlap): each pool is the rmsnorm of the softmax(gate + ape) weighted sum of its 2 keys, fed in chunks crossing a pool boundary
+    comp, rng = Compressor(self._make_config(dim=2, max_context=8), 2, 2), np.random.default_rng(0)
+    wkv, wg, ape, x = (rng.standard_normal(s).astype(np.float32) for s in ((2, 2), (2, 2), (2, 2), (1, 6, 2)))
+    comp.kv.weight, comp.gate.weight, comp.ape["weight"] = Tensor(wkv), Tensor(wg), Tensor(ape)
+    xt, freqs = Tensor(x), Tensor([[1., 0.]] * 8)  # identity rope
+    comp._init_state(xt)
+    comp(xt[:, :3], (0,), freqs).realize()
+    out = comp(xt[:, 3:], (3,), freqs).numpy()[0, :3]
+    kv, g = (x[0] @ wkv.T).reshape(3, 2, 2), (x[0] @ wg.T).reshape(3, 2, 2) + ape
+    pools = (np.exp(g) / np.exp(g).sum(1, keepdims=True) * kv).sum(1)
+    np.testing.assert_allclose(out, pools / np.sqrt((pools ** 2).mean(-1, keepdims=True) + 1e-5), rtol=2e-3, atol=2e-3)
 
   def test_mla_indexer_mask(self):
     idx = IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=2, norm_eps=1e-6)
