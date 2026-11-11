@@ -1719,9 +1719,10 @@ def p2p_late(devs:tuple[str, ...], clear:bool=False) -> list[int]:
   if (p2p:=p2p_allreduce(devs)) is None: return []
   for d in devs: Device[d].synchronize()
   i, ret = P2P_AR_NCTR + 1, []
+  from tinygrad.device import Buffer
   for b in p2p.counter_bufs:
-    ret.append(int(memoryview(b.as_buffer()).cast("i")[i]))
-    if clear: b.copyin(memoryview(bytearray(b.as_buffer())[:i*4] + bytes(4)))
+    ret.append(int((mv:=b.as_memoryview()).cast("i")[i]))
+    if clear: b.copy_from(Buffer("NPY", b.nbytes, opaque=memoryview(bytearray(mv[:i*4]) + bytes(4))).ensure_allocated())
   return ret
 
 def P2P_AR_TIMEOUT_MS() -> int: return getenv("P2P_AR_TIMEOUT_MS", 30000)
@@ -1779,7 +1780,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   # out still ends, its values wrong: p2p_check (after a long step) raises)
   deadline = _sys("__builtin_readsteadycounter()", dtypes.uint64, epoch) + int(P2P_AR_TIMEOUT_MS() * 100000)  # (100 MHz)
   par = (epoch & 1).cast(dtypes.weakint)
-  def reg(s:int|UOp, l:UOp) -> UOp: return ((cw*2 + par)*(N+1) + s)*P2P_AR_MAXW + l
+  def reg(s:int|UOp, l:UOp|int) -> UOp: return ((cw*2 + par)*(N+1) + s)*P2P_AR_MAXW + l
   # pack (W, B): W values a word, B bit integers of a shared power of two (8 bits) and an epoch (two shot: the sums of the
   # owner are the packed ones on every device). SEQ uses a separate class with exactly 32 epoch bits; 8 bits wrapped every 256 calls.
   # flag (P2P_FLAG, one shot gather / reduce scatter only): words of four halves (two floats), no epoch in them; a workgroup's words to a peer
