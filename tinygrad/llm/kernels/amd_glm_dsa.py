@@ -3318,9 +3318,10 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
                             slots=int(slots), x_slots=x_slots, oloop=16 if in_features == GGML_BLOCK_SIZE else 1) if wmma else \
           functools.partial(_moe_bundled_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type, slots=int(slots),
                             x_slots=x_slots, M=M)
-    if wmma and MOE_PERSIST:
+    if wmma and (P:=getenv("MOE_PERSIST_WMMA", 0)):
+      # (the tensor core bundles are few and long: persistent ones measured 5-10% slower (mbench-m7, T=32/64), off by default)
       fxn = functools.partial(_moe_bundled_wmma_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type,
-                              slots=int(slots), x_slots=x_slots, oloop=16 if in_features == GGML_BLOCK_SIZE else 1, P=MOE_PERSIST)
+                              slots=int(slots), x_slots=x_slots, oloop=16 if in_features == GGML_BLOCK_SIZE else 1, P=P)
       result = Tensor.custom_kernel(out, weight, *xq, bexp, brow, *extra, bcnt, fxn=fxn)[0]
     elif MOE_PERSIST:
       # (MOE_PERSIST: P workgroups an output block over the bundles there are, not a grid of every possible one)
