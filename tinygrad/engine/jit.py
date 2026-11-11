@@ -308,11 +308,13 @@ def _remote_compile(qw:int, ar:int, tasks:list[tuple[bytes, bytes]]) -> list[UOp
   if isinstance(ret, str): raise RuntimeError(f"compile failed in the parent: {ret}")
   return [pickle.loads(x) for x in ret]
 
+COMPILE_FIFO = getenv("COMPILE_FIFO", 0)
 class _Compiles:
   """
   the compiles of the forked processes' kernels: one a key (its bytes), on the workers of a pool, the most urgent first (no more at once than
   the pool has workers): a process's later requests (its jit's host programs: the jit is done then) before first ones, of those the latest
-  first (the jits captured last, prefill's, are the longest to finish after their kernels: they don't wait behind the ones captured early)
+  first (the jits captured last, prefill's, are the longest to finish after their kernels: they don't wait behind the ones captured early).
+  COMPILE_FIFO=1: the earliest first (the processes' jits come one after another: the parent links each while the others' kernels compile)
   """
   def __init__(self, pool):
     self.pool, self.lock, self.results, self.stats = pool, threading.Lock(), cast(dict[bytes, concurrent.futures.Future], {}), cast(list[tuple], [])
@@ -346,7 +348,7 @@ class _Compiles:
             with open(f"{dump}.{who}", "ab") as df: pickle.dump([(k, t) for k, t in tasks if k in new], df)
           for k, t in tasks:
             if (r:=self.results.setdefault(k, concurrent.futures.Future())).running() or r.done(): continue
-            heapq.heappush(self.queue, ((n == 0, -t0), next(self.seq), k, t))
+            heapq.heappush(self.queue, ((n == 0, t0 if COMPILE_FIFO else -t0), next(self.seq), k, t))
           self._dispatch()
         try:
           got = [self.results[k].result() for k, _ in tasks]
