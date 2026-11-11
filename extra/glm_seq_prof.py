@@ -45,6 +45,7 @@ G = max(GS)
 assert G * span <= model.seq_rows() and G <= model.seq_slots(), f"{G} regions of {span} rows: SEQ_ROWS >= {G*span}, SEQ_SLOTS >= {G}"
 def sync():
   for d in devs: Device[d].synchronize()
+if getenv("MEM_TRACE"): mem_trace.report("load")
 st0 = time.perf_counter()
 seqs = []
 for g in range(G):
@@ -60,6 +61,7 @@ for g in range(G):
   else:
     # (PF_TOPP: the prefill's first token sampled at temperature 1 and this top_p, as the board harness's donor prefill)
     first = model.seq_prefill(g, g*span, list(ids), 0, 0, (1.0, float(os.environ["PF_TOPP"])) if "PF_TOPP" in os.environ else 0.0)
+    if getenv("MEM_TRACE") and g == 0: mem_trace.report("prefill1")
     seqs.append(dict(slot=g, base=g*span, mtp=len(ids), j=0, par=1, y=[first] + [0]*k, n=0,
                      outhash=hashlib.sha256(), stream=T))
 if getenv("MEM_TRACE"): mem_trace.report("prefill")
