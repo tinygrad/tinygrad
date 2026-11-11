@@ -127,6 +127,7 @@ for g in GS:
   n0 = sum(s["n"] for s in group)
   if CYCLE: restore(group)
   if getenv("PROFILE"): kprof.reset(*devs)
+  if hasattr(model, "step_times"): model.step_times[:] = [0.0]*len(model.step_times)
   wall0 = time.time()
   decode_dt = 0.0
   done = 0
@@ -147,6 +148,9 @@ for g in GS:
   for s in group: outhash.update(bytes.fromhex(s["outhash"].hexdigest()))
   print(f"G={g}: {decode_dt/NS*1e3:.2f} ms/step, {toks/NS/g:.2f} tok/step/seq, {toks/dt:.0f} tok/s aggregate, "
         f"{toks/dt/g:.1f} tok/s/seq, outhash {outhash.hexdigest()[:16]}", flush=True)
+  if hasattr(model, "step_times"):
+    # (the host's part of a step: the jit's launch (its kernels queued; the devices run meanwhile), then the wait for the sampled tokens)
+    print(f"STEP_HOST launch {model.step_times[0]/NS*1e3:.2f} ms/step, wait {model.step_times[1]/NS*1e3:.2f} ms/step", flush=True)
   if getenv("PROFILE"):
     t = kprof.times(*devs)
     tot = sum(v[1] for v in t.values()) / len(devs)
