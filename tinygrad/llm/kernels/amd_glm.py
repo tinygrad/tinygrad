@@ -6540,8 +6540,9 @@ def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:in
   cand = Tensor.custom_kernel(cand, sc, _device_index(devs), *extra, fxn=functools.partial(_pool_cand_kernel, q_start=qs, pools=pu, k=c,
                                                                                            kpool=kpool, n=n))[0]
   flat = cand.reshape(n, rows*c*2)
-  # (a ring of copies: the peer to peer kernel is slower past a few rows' (IDX_P2P_ROWS))
-  g = host_allgather(flat) if rows <= getenv("IDX_P2P_ROWS", 4) else None
+  # (IDX_P2P_ROWS: the peer to peer gather up to that many rows (the batched decode's: G=8 at 262k 54.7 -> 44.3 ms on 6x 7900 XTX, the
+  # ring of copies ~0.7 ms a call), the ring past it or if the flag mailbox is too small)
+  g = host_allgather(flat) if rows <= getenv("IDX_P2P_ROWS", 256) else None
   allc = g if g is not None else all_gather(flat, 0, dtypes.float32)
   width = (width or n*int(scores.shape[1])) if getenv("IDX_MERGE_ORDER", 1) else 0
   return Tensor.custom_kernel(out, allc.reshape(n, rows, c, 2).contiguous(), *extra,
