@@ -86,6 +86,7 @@ def amd_sdma_submit(cmdbuf:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, hdp:U
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
 AM_IB_MAP = getenv("AM_IB_MAP", 0)
+AMD_SCRATCH_MIN = getenv("AMD_SCRATCH_MIN", 0)  # see AMDDevice.scratch_buffer
 def _uop_names(u:UOp) -> str:
   """a short name of a signal or a value in a command (AM_IB_MAP): a constant's value, else the names (buffers, variables) it's of"""
   if u.op is Ops.CONST: return str(u.arg)
@@ -1203,8 +1204,10 @@ class AMDDevice(Compiled):
 
   def scratch_buffer(self, private_segment_size, queue:int=0):
     # (the first queue's the largest of every device's kernels, the others' the largest of theirs)
+    # (AMD_SCRATCH_MIN: the first queue's at least this (bytes a thread, e.g. the largest a model's kernels have): a scratch that grows stays
+    # allocated as the old one too while the jits linked before it run (each a scratch more a device), one made at the size once doesn't)
     if queue: private_segment_size = max(private_segment_size, 128)
-    else: AMDDevice.max_scratch_psize = private_segment_size = max(private_segment_size, 128, AMDDevice.max_scratch_psize)
+    else: AMDDevice.max_scratch_psize = private_segment_size = max(private_segment_size, 128, AMDDevice.max_scratch_psize, AMD_SCRATCH_MIN)
     lanes_per_wave = 64 # wave64
     mem_alignment_size = 256 if self.target[0] != 9 else 1024
     size_per_thread = round_up(private_segment_size, mem_alignment_size // lanes_per_wave)
@@ -1214,6 +1217,7 @@ class AMDDevice(Compiled):
         qb = self.queue_scratch[queue] = Buffer(self.device, nbytes, options=BufferSpec(nolru=True), preallocate=True)
       return qb
     if self.max_private_segment_size < private_segment_size:
+      if DEBUG >= 1: print(f"{self.device}: scratch {self.max_private_segment_size} -> {private_segment_size} bytes a thread ({nbytes/1e6:.2f} MB)")
       self.scratch = Buffer(self.device, nbytes, options=BufferSpec(nolru=True), preallocate=True)
       self.max_private_segment_size = private_segment_size
       if hasattr(self, 'aql_desc'): self.aql_scratch()
