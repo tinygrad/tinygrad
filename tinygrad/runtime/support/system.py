@@ -23,10 +23,10 @@ class FileIOInterface:
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset): return FileIOInterface._mmap(start, sz, prot, flags, self.fd, offset)
   def read(self, size=None, binary=False, offset=None):
-    if offset is not None: self.seek(offset)
+    if offset is not None: return os.pread(self.fd, size, offset)
     with open(self.fd, "rb" if binary else "r", closefd=False) as file: return file.read(size)
   def write(self, content, binary=False, offset=None):
-    if offset is not None: self.seek(offset)
+    if offset is not None: return os.pwrite(self.fd, content, offset)
     with open(self.fd, "wb" if binary else "w", closefd=False) as file: file.write(content)
   def listdir(self): return os.listdir(self.path)
   def seek(self, offset): os.lseek(self.fd, offset, os.SEEK_SET)
@@ -244,21 +244,22 @@ class PCIDevice:
       vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, (ctypes.c_byte * irqs.argsz).from_buffer(bytearray(bytes(irqs)) + struct.pack('i', self.irq_fd.fd)))
     else: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR).write("1")
 
-    self.cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
-
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     return System.alloc_sysmem(size, vaddr, contiguous)
 
-  def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
-  def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
-  def write_config(self, offset:int, value:int, size:int): self.cfg_fd.write(value.to_bytes(size, byteorder='little'), binary=True, offset=offset)
+  def reset(self):
+    if hasattr(self, "vfio_dev"): return vfio.VFIO_DEVICE_RESET(self.vfio_dev)
+    os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
+  def read_config(self, offset:int, size:int): return int.from_bytes((r:=self.region())[0].read(size, True, r[1]+offset), 'little')
+  def write_config(self, offset:int, value:int, size:int): (r:=self.region())[0].write(value.to_bytes(size, 'little'), True, r[1]+offset)
   def write_config_flush(self, offset:int, value:int, size:int):
     self.write_config(offset, value, size)
     self.read_config(offset, size)
 
   @functools.cache
-  def bar_fd(self, bar_idx:int) -> FileIOInterface:
-    return FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar_idx}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
+  def region(self, idx:int=vfio.VFIO_PCI_CONFIG_REGION_INDEX) -> tuple[FileIOInterface, int]: # fd and offset of a bar or the config space
+    if hasattr(self, "vfio_dev"): return self.vfio_dev, idx << 40 # VFIO_PCI_OFFSET_SHIFT
+    return FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/{f'resource{idx}' if idx < 6 else 'config'}", os.O_RDWR|os.O_SYNC|os.O_CLOEXEC), 0
   @functools.cache
   def bar_info(self, bar_idx:int) -> tuple[int, int]:
     s, e, _ = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()[bar_idx].split()
@@ -266,8 +267,8 @@ class PCIDevice:
     if hasattr(self, "vfio_dev"): addr = System.vfio_map(self.map_bar(bar_idx, size=sz).addr, sz, sz)
     return addr, sz
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
-    fd, sz = self.bar_fd(bar), size or (self.bar_info(bar)[1] - off)
-    libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
+    (fd, base), sz = self.region(bar), size or (self.bar_info(bar)[1] - off)
+    libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|(MAP_FIXED if addr else 0), base+off), sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
   def resize_bar(self, bar_idx:int):
     rpath = f"/sys/bus/pci/devices/{self.pcibus}/resource{bar_idx}_resize"
