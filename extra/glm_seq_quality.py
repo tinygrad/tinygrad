@@ -12,6 +12,8 @@ import os, sys, json, time, array
 import numpy as np
 from tinygrad import Device
 from tinygrad.helpers import getenv, Context
+# (WARMUP_JITS: the warm-up makes the memory, the jits are captured on their first call (a run uses a few); WARMUP_JITS=all as a server)
+os.environ.setdefault("WARMUP_JITS", "none")
 from tinygrad.llm.model import Transformer
 from tinygrad.llm.cli import SimpleTokenizer
 

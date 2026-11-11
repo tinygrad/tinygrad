@@ -7,6 +7,8 @@ env: MODEL, SHARD=6, MAXCTX=262144, LENS=4096,65536,262000 (the long prompts), G
 """
 import os, sys, json, time, pathlib
 from tinygrad.helpers import getenv, Context
+# (WARMUP_JITS: the warm-up makes the memory, the jits are captured on their first call (a run uses a few); WARMUP_JITS=all as a server)
+os.environ.setdefault("WARMUP_JITS", "none")
 from tinygrad.llm.model import Transformer
 from tinygrad.llm.cli import SimpleTokenizer
 from tinygrad.llm.engine import SeqEngine
