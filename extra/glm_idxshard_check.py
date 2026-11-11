@@ -40,6 +40,19 @@ for T, pos in [(3, 4000), (3, 65000), (3, 200000), (3, PT*KP - 8), (64, 30000), 
     a = indexer_decode_index_rows(q, k_rep, w, qs, pools, TOP, KP, width=PT)
     b = indexer_decode_index_rows(q, k_sh, w, qs, pools, TOP, KP, width=PT)
   else:
+    if int(os.environ.get("SCORES", 1)):
+      # (the split scores against the whole's, every row's pools before its query: bit-equal?)
+      sw = indexer_scores(q, k_rep, w, pools, KP, width=PT).to(devs[0]).numpy()
+      ss = indexer_scores(q, k_sh, w, pools, KP, width=PT).numpy().reshape(N, T, -1)
+      PL = ss.shape[2]
+      lp = np.arange(PL)
+      for d in range(N):
+        gp = (lp//PB)*(PB*N) + d*PB + lp%PB
+        for r in range(T):
+          ok = (gp + 1)*KP <= pos + r + 1
+          diff = np.nonzero(sw[r, gp[ok]].view(np.uint32) != ss[d, r, lp[ok]].view(np.uint32))[0]
+          if len(diff) and r < 12: print(f"  scores dev {d} row {r}: {len(diff)} of {ok.sum()} differ, first pools {gp[ok][diff[:4]]} "
+                                         f"whole {sw[r, gp[ok][diff[:2]]]} split {ss[d, r, lp[ok][diff[:2]]]}")
     a = pool_index_rows(indexer_scores(q, k_rep, w, pools, KP, width=PT), qs, pools, TOP, KP)
     b = pool_index_shard(indexer_scores(q, k_sh, w, pools, KP, width=PT), qs, pools, TOP, KP, width=PT)
   la, lb = lists(a.to(devs[0]).numpy()), lists(b.to(devs[0]).numpy())
