@@ -539,6 +539,17 @@ class TestAssign(unittest.TestCase):
     expected = np.array([[1., 2., 3., 4., 5.]] * 3)
     np.testing.assert_allclose(a.numpy(), expected)
 
+  def test_write_broadcast_leading_ones(self):
+    writes = [lambda a,v: a.__setitem__(..., v), lambda a,v: a.assign(v), lambda a,v: a.__iadd__(v)]
+    for fresh in (lambda: Tensor.zeros(3).contiguous(), lambda: Tensor.zeros(3).contiguous().realize()):
+      for write in writes:
+        write(a:=fresh(), Tensor([[7., 8., 9.]]))
+        self.assertEqual(a.tolist(), [7., 8., 9.])
+        with self.assertRaises(ValueError): write(fresh(), Tensor.ones(2, 3))
+      a = fresh()
+      a[0] = Tensor([7.])
+      self.assertEqual(a.tolist(), [7., 0., 0.])
+
   def test_disk_assignment(self):
     a = Tensor.empty(5, device=f"disk:{temp('disk_assignment')}").assign(Tensor.ones(5)).numpy()
     np.testing.assert_equal(a, np.ones(5))

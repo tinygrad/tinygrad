@@ -79,7 +79,8 @@ def _mop_index(r:UOp, idx:UOp):
   dropped = dedup(c for i in idxs for c in _valid(i).split_uop(Ops.AND) if c not in kept)
   if (ret := r.src[0].index(*new_idxs, arg=idx.arg)).shape != idx.shape and partial: return None
   # the gates the movement op dropped from the indexes still gate the value
-  return dropped[0].uprod(*dropped[1:]).where(ret, ret.dtype.const(0)) if dropped else ret
+  if dropped: ret = dropped[0].uprod(*dropped[1:]).where(ret, ret.dtype.const(0))
+  return ret.after(*[i for i in idxs if i.op_in_backward_slice_with_self(*GroupOp.Effect)])
 
 pm_mops = PatternMatcher([
   # handle movement ops on INDEX
