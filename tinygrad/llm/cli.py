@@ -28,8 +28,7 @@ class SimpleTokenizer:
       runs = [list(g) for _, g in itertools.groupby(cps, lambda e: e[1]-e[0])]
       return "".join(re.escape(chr(g[0][1])) + (f"-{re.escape(chr(g[-1][1]))}" if len(g) > 1 else "") for g in runs)
     r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
-    contr, r_l = "(?i:'s|'t|'re|'ve|'m|'ll|'d)", f"[^\\r\\n{r_p_N}{r_p_L}]?"
-    r_n = f"[{r_p_N}]" if preset in ("tekken", "bailingmoe2") else f"[{r_p_N}]{{1,3}}"
+    contr, r_l, r_n = "(?i:'s|'t|'re|'ve|'m|'ll|'d)", f"[^\\r\\n{r_p_N}{r_p_L}]?", f"[{r_p_N}]" if preset == "tekken" else f"[{r_p_N}]{{1,3}}"
     r_p, r_w, r_t = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*", f"{contr}|{r_l}[{r_p_L}]+", f"[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+"
     if preset in ("tekken", "gpt-4o", "kimi-k2"):
       r_up, r_lo = ucat_range(("Lu","Lt","Lm","Lo","M")), ucat_range(("Ll","Lm","Lo","M"))

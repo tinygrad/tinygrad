@@ -512,7 +512,8 @@ class MLATransformerBlock(FFNBlock):
     self.attn_v_b = {"weight": Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)}
     self.attn_output = Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
     self.indexer = Indexer(config) if config.indexer else None
-    if config.attn_output_gate: self.attn_gate = Linear(config.dim, config.n_heads * (1 if config.attn_head_gate else config.v_head_dim), bias=False)
+    if config.attn_output_gate: self.attn_gate = Linear(config.dim, config.n_heads * config.v_head_dim, bias=False)
+    if config.attn_head_gate: self.attn_gate = Linear(config.dim, config.n_heads, bias=False)
 
   def _attention(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None=None) -> Tensor:
     B, T, _ = x.shape
@@ -544,8 +545,9 @@ class MLATransformerBlock(FFNBlock):
     if 'weight_scale_inv' in self.attn_v_b:
       attn = fp8_matmul(attn, self.attn_v_b['weight'], self.attn_v_b['weight_scale_inv'], self.kv_b_block_size)
     else: attn = attn @ self.attn_v_b['weight'].transpose(-1, -2)
-    attn = attn.transpose(1, 2)  # (B, T, H, V), the gate is per channel or per head
-    return self.attn_output((attn * self.attn_gate(x).sigmoid().reshape(*attn.shape[:3], -1) if self.config.attn_output_gate else attn).flatten(2))
+    attn = attn.transpose(1, 2).reshape(B, T, -1)
+    if self.config.attn_head_gate: return self.attn_output(attn * self.attn_gate(x).sigmoid().repeat_interleave(self.config.v_head_dim, -1))
+    return self.attn_output(attn * self.attn_gate(x).sigmoid() if self.config.attn_output_gate else attn)
 
   def _indexer_mask(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None) -> Tensor|None:
     # a full indexer layer selects the top-k tokens for itself and the shared layers after it
@@ -822,8 +824,8 @@ class Transformer:
         kv.get(f'{arch}.expert_shared_count', 0) * kv.get(f'{arch}.expert_feed_forward_length', 0)),
       shared_expert_gate=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_inp_shexp.weight" in state_dict,
       dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
-      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_head_gate=arch == 'bailingmoe3', rope_interleave=arch == 'bailingmoe3',
-      ssm=ssm, ssm_layers=ssm_layers, attn_output_gate=arch in ('qwen35', 'qwen35moe', 'kimi-k3', 'qwen4exp', 'bailingmoe3'), mla_nope=mla_nope,
+      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe', 'kimi-k3', 'qwen4exp'),
+      ssm=ssm, ssm_layers=ssm_layers, attn_head_gate=arch == 'bailingmoe3', rope_interleave=arch == 'bailingmoe3', mla_nope=mla_nope,
       qkv_bias='blk.0.attn_q.bias' in state_dict,
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict,
       expert_proj_bias='blk.0.ffn_gate_exps.bias' in state_dict, attn_output_bias='blk.0.attn_output.bias' in state_dict,
