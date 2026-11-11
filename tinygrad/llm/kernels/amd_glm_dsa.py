@@ -4842,6 +4842,11 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int, base:int
   return out if fp8 and raw or half else out.bitcast(dtypes.half)
 
 @functools.cache
+def _fmul_rn(a:UOp, b:UOp) -> UOp:
+  """a*b rounded on its own (v_mul_f32): never contracted into an add (an fma), never re-associated with the product it's in (the renderer
+  writes o*(a*b) as o*a*b, (o*a)*b in C)"""
+  return _sys('__extension__({{ float _p; __asm__ volatile("v_mul_f32 %0, %1, %2" : "=v"(_p) : "v"({0}), "v"({1})); _p; }})', dtypes.float32, a, b)
+
 def _seq_a2a_pay_kernel(out:UOp, parts:UOp, ml:UOp, *, G:int, T:int, S:int, hl:int, dims:int, pad_n:int) -> UOp:
   """
   mla_sparse_seq's one-user exchange payload in one kernel (SEQ_PAY_FUSED): a device's splits combined (their max, the sum of their weights,
@@ -4862,7 +4867,7 @@ def _seq_a2a_pay_kernel(out:UOp, parts:UOp, ml:UOp, *, G:int, T:int, S:int, hl:i
   ls = [ml[rw.valid(ok), 1].load() for rw in rows]
   mx = functools.reduce(lambda a, b: a.maximum(b), ms[1:], ms[0])
   es = [((m - mx) * 1.4426950216293335).exp2() for m in ms]
-  ws = [_sys("__fmul_rn({0}, {1})", dtypes.float32, l, e) for l, e in zip(ls, es)]
+  ws = [_fmul_rn(l, e) for l, e in zip(ls, es)]
   ld = functools.reduce(lambda a, b: a + b, ws[1:], ws[0])
   isod = ok & (col < dims)
   ps = [parts[rw.valid(isod), col.minimum(D-1)].load() for rw in rows]
@@ -4870,6 +4875,27 @@ def _seq_a2a_pay_kernel(out:UOp, parts:UOp, ml:UOp, *, G:int, T:int, S:int, hl:i
   zero = UOp.const(0.0, dtypes.float32)
   val = isod.where(od, zero) + (ok & col.eq(dims)).where(mx, zero) + (ok & col.eq(dims+1)).where(ld, zero)
   return out[i].store(val).end(i).sink(arg=KernelInfo(name="seq_a2a_pay", opts_to_apply=()))
+
+def _seq_a2a_comb_kernel(out:UOp, g:UOp, *, n:int, T:int, hl:int, dims:int, pad_n:int) -> UOp:
+  """
+  mla_sparse_seq's one-user exchange combined in one kernel (SEQ_COMB_FUSED): every source's outputs of this device's heads weighed by their
+  max and sum, the three kernels' float ops in their order: the max of the sources' maxes, the sum of the weights in source order (each
+  l*e a product of its own, as the sum's kernel had them inline), the outputs' o*w in source order (w = l*e rounded: the third kernel made
+  them apart) times the reciprocal of the clamped sum
+  """
+  Dp = dims + 2
+  i = UOp.range(T*hl*dims, 0, AxisType.GLOBAL)
+  row, col = i // dims, i % dims
+  base = row*Dp
+  ms = [g[0, j*pad_n + base + dims].load() for j in range(n)]
+  ls = [g[0, j*pad_n + base + dims + 1].load() for j in range(n)]
+  os_ = [g[0, j*pad_n + base + col].load() for j in range(n)]
+  mx = functools.reduce(lambda a, b: a.maximum(b), ms[1:], ms[0])
+  es = [((m - mx) * 1.4426950216293335).exp2() for m in ms]
+  ld = functools.reduce(lambda a, b: a + b, [_sys("({0}*{1})", dtypes.float32, l, e) for l, e in zip(ls, es)])
+  # (w = l*e rounded on its own: a product the renderer inlines into o*l*e is (o*l)*e in C)
+  num = functools.reduce(lambda a, b: a + b, [o * _fmul_rn(l, e) for o, l, e in zip(os_, ls, es)])
+  return out[i].store(num * ld.maximum(1e-30).reciprocal()).end(i).sink(arg=KernelInfo(name="seq_a2a_comb", opts_to_apply=()))
 
 def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None,
                    dims:int|None=None, base:int|UOp=0) -> Tensor:
@@ -4942,6 +4968,11 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
       pay = odp.cat(mx.squeeze(3), ld, dim=-1).permute(0, 2, 1, 3, 4).reshape(n, T, G*16, Dp)[:, :, :H]
       pay = pay.reshape(n, T, n, hl, Dp).permute(0, 2, 1, 3, 4).reshape(n, n, T*hl*Dp).pad((None, None, (0, pad_n - Ti*hl*Dp)))
     if (g:=p2p_all_to_all(pay)) is not None:
+      if getenv("SEQ_COMB_FUSED", 0) and not a2a_half:
+        # (SEQ_COMB_FUSED: the sources' combine in one kernel, not three: the same floats)
+        res = Tensor.custom_kernel(Tensor.empty(n*Ti*hl*dims, dtype=dtypes.float32, device=devs, axis=0), g.reshape(n, n*pad_n),
+                                   fxn=functools.partial(_seq_a2a_comb_kernel, n=n, T=Ti, hl=hl, dims=dims, pad_n=pad_n))[0]
+        return res.reshape(n, 1, T, hl, dims).permute(1, 0, 3, 2, 4).reshape(1, H, T, dims)
       g = g.reshape(n, n, pad_n)[:, :, :T*hl*Dp].reshape(n, n, T, hl, Dp)
       gm, gl, go = g[..., Dv:Dv+1], g[..., Dv+1:Dv+2], g[..., :Dv]
       if a2a_half: go = go.contiguous().bitcast(dtypes.half).float()
