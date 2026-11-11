@@ -1128,7 +1128,7 @@ class Indexer:
       if picks is not None: qb = Tensor(qb.uop.after(*picks.uop.src[1:]))  # (after the last block's lists: its scores are done)
       if picks is None: picks = Tensor.empty(rows, idx.top_k + 2, dtype=dtypes.int32, device=x.device)
       # (IDX_PAD (with LISTS_PAD): a block's scores and candidates of the chunk's tokens only, its padding rows' lists are emptied after)
-      rv = (T - r0).maximum(0).minimum(int(qb.shape[0])).unbind_all()[0] if getenv("IDX_PAD", 0) and getenv("LISTS_PAD", 0) and \
+      rv = (T - r0).maximum(0).minimum(int(qb.shape[0])).unbind_all()[0] if getenv("IDX_PAD", 0) and getenv("LISTS_PAD", 1) and \
         isinstance(T, UOp) and self.shard else None
       sc = indexer_scores(qb, pk, weights[r0:r0+block], S, 1, pbase=kb, width=width, rows=rv)
       picks = pool_index_shard(sc, start_pos, S, idx.top_k, 1, row0=r0, out=picks, valid=rv) if self.shard else \
@@ -1466,9 +1466,9 @@ class MLATransformerBlock(FFNBlock):
       elif self.indexer.idx.kpool == 1:
         lists = _idx_mask[1] = self.indexer.dsa_picks(x, self.attn_q_a_norm(unwrap(qa)), start_pos, freqs, T,
                                                       dec[2] if dec is not None and len(dec) > 2 else None)
-        # (LISTS_PAD: a chunk's padding rows (past its T tokens) with empty lists, their attention reads no keys (the shared layers after it
-        # take these lists too). the tokens' rows are the same: the same bits)
-        if getenv("LISTS_PAD", 0) and isinstance(Tq, int) and Tq > getenv("SEQ_GATHER_ROWS", 16): lists = _idx_mask[1] = lists_pad(lists, T)
+        # (LISTS_PAD, default on: a chunk's padding rows (past its T tokens) with empty lists, their attention reads no keys (the shared layers
+        # after it take these lists too). the tokens' rows are the same: the same bits. 4k: 2.74 -> 2.55 s)
+        if getenv("LISTS_PAD", 1) and isinstance(Tq, int) and Tq > getenv("SEQ_GATHER_ROWS", 16): lists = _idx_mask[1] = lists_pad(lists, T)
       else: lists = self.indexer.picks(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos, T)
       scale = 1.0/self.config.head_dim**0.5
       if isinstance(Tq, int) and Tq > getenv("SEQ_GATHER_ROWS", 16) and getenv("SEQ_GATHER", 1):
