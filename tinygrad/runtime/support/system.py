@@ -231,6 +231,7 @@ class PCIDevice:
       if not FileIOInterface.exists("/sys/module/vfio_pci"): raise RuntimeError("IOMMU is on: run `sudo modprobe vfio-pci disable_idle_d3=1`")
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
       FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
+      if devpref == "AM": FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/reset_method", os.O_WRONLY).write("bus") # no flr on amd
       group = System.vfio_group(FileIOInterface.readlink(grp).split('/')[-1])
       self.vfio_dev = FileIOInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(group, ctypes.create_string_buffer(self.pcibus.encode())))
 
