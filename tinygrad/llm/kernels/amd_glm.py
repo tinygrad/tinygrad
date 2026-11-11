@@ -1880,7 +1880,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
 # polls this device's inbox for the peers' flags, then sums in device order (the same bits everywhere). a device is at most one call ahead
 # of the others: two parities. Each pool has a fixed workgroup count so all its epoch counters move together across varying payload sizes.
 
-FLAG_AR_MAXN = 1 << 20  # words (two half values or one float32 each)
+FLAG_AR_MAXN = getenv("FLAG_AR_MAXN", 1 << 20)  # words (two half values or one float32 each)
 
 def flag_ar_groups(n:int) -> int: return 4 if n <= 8192 else 16 if n <= 65536 else 64
 
