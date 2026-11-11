@@ -4262,6 +4262,10 @@ class Transformer:
     devs = cast(tuple[str, ...], self.token_embd.weight.device)
     nd = len(devs)
     assert nd and C % nd == 0, f"SEQ_MOVE={C} must be a multiple of the {nd} devices"
+    if gb <= 0:
+      # (no stash (SEQ_STASH_GB=0): nothing to size, e.g. the pooled keys split over the devices (SEQ_IDX_SHARD), not stashed)
+      self.stash_entries = self.stash_chunks = self.stash_chunk_nbytes = self.stash_entry_nbytes = 0
+      return
     def per_row(t:Tensor, axis:int=0) -> int:
       return t.nbytes() // int(t.shape[axis]) // (len(t.device) if isinstance(t.device, tuple) and t.uop.axis is not None else 1)
     kb = [b for b in self.blk + [self.mtp] if isinstance(b, MLATransformerBlock)]
