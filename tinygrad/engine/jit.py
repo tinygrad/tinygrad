@@ -368,13 +368,15 @@ def warmup_wanted(name:str) -> bool:
   if (sel:=str(getenv("WARMUP_JITS", "all"))) == "all": return True
   return any(fnmatch.fnmatchcase(name, p.strip()) for p in sel.split(",") if p.strip() not in ("", "none"))
 
-def warmup_select(calls:dict[str, tuple[Any, Callable[[], Any]]], par:list[tuple[Any, Callable[[], Any]]]) \
+def warmup_select(calls:dict[str, tuple[Any, Callable[[], Any]]], par:list[tuple[Any, Callable[[], Any]]],
+                  named:dict[str, list[Any]]|None = None) \
     -> tuple[dict[str, tuple[Any, Callable[[], Any]]], list[tuple[Any, Callable[[], Any]]]]:
-  """a warm-up's named calls (name -> (jit, call)) and its jits to capture at once, of the names WARMUP_JITS wants (see warmup_wanted)"""
+  """a warm-up's named calls and capture-only named jits, filtered by WARMUP_JITS (default: everything unchanged)"""
   if getenv("WARMUP_JITS", "all") == "all": return calls, par
   calls = {n: c for n, c in calls.items() if warmup_wanted(n)}
-  # (a call's jit can be a list: the jits of its parts)
+  # (a call's jit can be a list: the jits of its parts. named adds capture-only jits without running them, e.g. stash copies)
   keep = [x for k, _ in calls.values() for x in (k if isinstance(k, list) else [k])]
+  keep += [x for name, jits in (named or {}).items() if warmup_wanted(name) for x in jits]
   return calls, [(j, c) for j, c in par if any(j is k for k in keep)]
 
 # (STARTUP_STATS) the warm-up's runs: (name, start, end) (perf_counter)

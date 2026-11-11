@@ -2747,12 +2747,15 @@ class Transformer:
     par.append((self._seq_first_jit, functools.partial(lambda j: j(*self._first_vars(0, 1)), self._seq_first_jit)))
     if self._seq_mat_jit is not None and self.config.spec_drafts:
       par.append((self._seq_mat_jit, functools.partial(lambda j: j(*self._mat_vars(0, 1, 1)), self._seq_mat_jit)))
+    warm_named:dict[str, list[Any]] = {}
     if self.stash_entries:
       for sv in (True, False):
         par += [(j:=self._stash_kv_jits[(sv, n)], functools.partial(lambda j: j(*self._stash_kv_vars(0, 0)), j)) for n in self._stash_calls]
         par.append((self._stash_state_jits[sv], functools.partial(lambda j: j(*self._stash_state_vars(0, 0, 0, 0)), self._stash_state_jits[sv])))
-    # (WARMUP_JITS: the ones of the names wanted, the others captured on their first call)
-    calls, par = warmup_select(calls, par)
+        warm_named |= {f"stash{int(sv)}_kv{n}": [self._stash_kv_jits[(sv, n)]] for n in self._stash_calls}
+        warm_named[f"stash{int(sv)}_state"] = [self._stash_state_jits[sv]]
+    # (WARMUP_JITS: named calls and capture-only named jits (stash copies), the others captured on their first call)
+    calls, par = warmup_select(calls, par, warm_named)
     par += loads
     # (STASH_LINK_LATE: the stash's jits linked after the others are compiled: its host memory (SEQ_STASH_GB) isn't made while the capturing
     # processes and the compilers hold theirs, the start-up's peak of host memory)
