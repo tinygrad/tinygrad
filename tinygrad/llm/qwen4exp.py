@@ -2679,6 +2679,10 @@ class Transformer:
     # (WARMUP_JITS: the ones of the names wanted, the others captured on their first call)
     calls, par = warmup_select(calls, par)
     par += loads
+    # (STASH_LINK_LATE: the stash's jits linked after the others are compiled: its host memory (SEQ_STASH_GB) isn't made while the capturing
+    # processes and the compilers hold theirs, the start-up's peak of host memory)
+    late = [*self._stash_kv_jits.values(), *self._stash_state_jits.values()] if self.stash_entries and getenv("STASH_LINK_LATE", 1) else []
+    for j in late: setattr(j, "link_later", True)
     capture_parallel(par, meanwhile)
     if DEBUG >= 1: print(f"seq_warmup: {len(par)} jits compiled at {time.perf_counter()-st:.2f}s")
     for name, (jit, call) in calls.items():
@@ -2686,6 +2690,10 @@ class Transformer:
       st = time.perf_counter()
       call()
       if DEBUG >= 1: print(f"seq_warmup: {name} run in {time.perf_counter()-st:.2f}s")
+    for j in late:
+      setattr(j, "link_later", False)
+      if j.captured is not None: j.captured.linked()
+    _lap("warmup: stash linked")
 
   def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, float]=0.0,
                   upto:int|None=None) -> int|None:
