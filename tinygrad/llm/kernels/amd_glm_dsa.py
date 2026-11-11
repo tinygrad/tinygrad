@@ -1557,8 +1557,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     # (GEMM_PAD, default on: a prefill chunk's x (its R rows, the first T of them tokens): the token tiles of the tokens only)
     if getenv("GEMM_PAD", 1) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and not split and isinstance(rt[1], UOp):
       fxn = functools.partial(fxn, rows=_unbind(rt[1]))
-    if getenv("Q8_GEMM_SC", 0) and local_splits == 1 and getenv("HALF_ROWS", 1) and x.dtype == dtypes.half:
-      # (Q8_GEMM_SC, default off: a half x's rows scaled by the gemm as it loads them, not a scaled copy of all of x (_half_rows))
+    if getenv("Q8_GEMM_SC", 1) and local_splits == 1 and getenv("HALF_ROWS", 1) and x.dtype == dtypes.half:
+      # (Q8_GEMM_SC, default on: a half x's rows scaled by the gemm as it loads them, not a scaled copy of all of x (_half_rows))
       xr = x.reshape(tokens, x.shape[-1])
       amax = xr.float().abs().max(-1, keepdim=True)
       sc = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
