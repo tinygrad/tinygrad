@@ -1,5 +1,5 @@
-import subprocess
-from tinygrad.device import Compiler
+import subprocess, tempfile, pathlib
+from tinygrad.device import Compiler, CompileError
 from tinygrad.helpers import getenv, capstone_flatdump, cpu_objdump
 
 class ClangCompiler(Compiler):
@@ -23,6 +23,14 @@ class ClangCompiler(Compiler):
 
   def disassemble(self, lib: bytes): cpu_objdump(lib)
 
+class TCCCompiler(ClangCompiler):
+  def compile(self, src:str) -> bytes:
+    from tinygrad.runtime.autogen import tcc
+    with tempfile.NamedTemporaryFile() as f:
+      tcc.tcc_set_output_type(s:=tcc.tcc_new(), tcc.TCC_OUTPUT_OBJ)
+      err = tcc.tcc_compile_string(s, src.encode()) or tcc.tcc_output_file(s, f.name.encode())
+      if tcc.tcc_delete(s) or err: raise CompileError("tcc")
+      return pathlib.Path(f.name).read_bytes()
 
 class X86Compiler(Compiler):
   def __init__(self): super().__init__(None)
