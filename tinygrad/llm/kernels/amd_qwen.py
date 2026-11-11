@@ -1737,13 +1737,17 @@ def flag_ar_groups(n:int) -> int: return 4 if n <= 8192 else 16 if n <= 65536 el
 # (while not None: _init_buffers's pairs kept, copied in by init_deferred's end: the collectives' state made at once, not a copy and a wait each)
 _INIT_LATER:list[list[tuple[Any, bytes]]] = []
 @contextlib.contextmanager
-def init_deferred():
-  """the buffers _init_buffers initializes in the context: allocated now, their bytes copied in (one launch, one wait) at its end"""
+def init_deferred(later:list[tuple[Any, bytes]]|None=None):
+  """the buffers _init_buffers initializes in the context: allocated now, their bytes copied in (one launch, one wait) at its end (later: allocated
+  at its end, the pairs added to later: copied in by the caller's _init_buffers(later))"""
   _INIT_LATER.append(pairs:=cast(list[tuple[Any, bytes]], []))
   try: yield
   finally:
     _INIT_LATER.pop()
-    _init_buffers(pairs)
+    if later is None: _init_buffers(pairs)
+    else:
+      for b, _ in pairs: b.ensure_allocated()
+      later.extend(pairs)
 
 def _init_buffers(pairs:list[tuple[Any, bytes]]):
   """the buffers allocated, their bytes copied in at once: one launch of copies from host memory every device maps (not a copy each)"""

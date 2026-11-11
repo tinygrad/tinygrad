@@ -7,7 +7,7 @@ from tinygrad.engine.realize import warm_worker_pool
 from tinygrad.engine.jit import capture_parallel, warmup_select, run_as_they_come, _TinyJit
 from tinygrad.llm.kernels import amd_qwen
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
-from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES, _wmma_rdna4, ring_errors, init_deferred
+from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES, _wmma_rdna4, ring_errors, init_deferred, _init_buffers
 from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custom_kernels_supported, find_packed, moe_linear, q8_linear, \
   q8_quantize_cache_clear, moe_route, moe_grouped_linear, partial_sum, fuse_gate_up, kda_decode, pool_index_rows, slot_scatter, \
   slot_gather, moe_combine, token_sharded, shard_rows, reduce_scatter, all_gather, all_gather_q8, sharded_argmax, skinny_matmul, kda_conv, \
@@ -1216,6 +1216,7 @@ MICRO_BATCHES = getenv("MICRO_BATCHES", 2)
 PREFILL_MB1_ROWS = getenv("PREFILL_MB1_ROWS", 0)
 PREFILL_PARTS = getenv("PREFILL_PARTS", 1)
 WARM_ASYNC = getenv("WARM_ASYNC", 1)
+LANES_LATE = getenv("LANES_LATE", 1)
 PREFILL_TILE32 = getenv("PREFILL_TILE32", 1)
 # MOE_TILE16: grouped experts in tiles of 16 rows if a chunk has at most this many selections an expert on average (see _grouped_experts)
 MOE_TILE16 = getenv("MOE_TILE16", 40)
@@ -2615,7 +2616,8 @@ class Transformer:
     if self.config.ple is not None: self._ple_dev_init(read)
     _lap("shared: ple")
     # (a lane of the collectives a micro batch, and its compute queue (MB_QUEUES), see micro_batch_blocks. their state copied in at once)
-    with init_deferred(): self._seq_lanes(devs)
+    # (LANES_LATE, in seq_warmup: their memory made now, their state copied in first in the start-up's window, not before the forks)
+    with init_deferred(self.__dict__.setdefault("_lanes_init", []) if not read and LANES_LATE else None): self._seq_lanes(devs)
     _lap("shared: lanes")
     _device_index(devs)
     _argmax_parts(devs, (self.config.padded_vocab_size or self.config.vocab_size) // len(devs), self.config.vocab_size)
@@ -2688,6 +2690,8 @@ class Transformer:
     if DEBUG >= 1: print(f"seq_warmup: memory made at {time.perf_counter()-st:.2f}s")
     ran:set[str] = set()
     def meanwhile(take:Callable[..., bool|None]):
+      # (LANES_LATE: the collectives' state first: no jit runs before)
+      _init_buffers(self.__dict__.pop("_lanes_init", []))
       # the files' reads first (LOAD_DEFER: the weights'), then the n-gram table's, then what's computed from them
       while self._pending_load and not isinstance(self._pending_load[0], _TinyJit): self._pending_load.pop(0)()
       _lap("warmup: weights read")
@@ -2784,6 +2788,7 @@ class Transformer:
         if j.captured is not None: j.captured.linked()
       _lap("warmup: stash linked")
     capture_parallel(par, meanwhile)
+    _init_buffers(self.__dict__.pop("_lanes_init", []))
     if DEBUG >= 1: print(f"seq_warmup: {len(par)} jits compiled at {time.perf_counter()-st:.2f}s")
     for name, (jit, call) in calls.items():
       if name in ran: continue
