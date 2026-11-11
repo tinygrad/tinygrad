@@ -1958,7 +1958,7 @@ def p2p_reduce_scatter(p:Tensor, pack:tuple[int, int]|None=None) -> Tensor|None:
   first. one shot peer to peer, the parts in half (pack (W, B): W values of B bits a word with a shared power of two). None: not supported
   (or too big for the mailboxes)"""
   devs = cast(tuple[str, ...], p.device)
-  flag = pack is None and bool(getenv("P2P_FLAG", 0))  # (four halves a word and a flag a workgroup, default off)
+  flag = pack is None and bool(getenv("P2P_FLAG", 1))  # (four halves a word and a flag a workgroup, default on)
   N, n, W = len(devs), int(p.shape[-1]), (4 if flag else 2) if pack is None else pack[0]
   # (packed: the parts padded to whole words of workgroups of 256)
   m = n if pack is None else next((m for a in (256, 1024) if p2p_ar_shape((m:=round_up(n, W*a)) // W) is not None), n)
@@ -1974,8 +1974,8 @@ def p2p_all_to_all(p:Tensor) -> Tensor|None:
   the parts of device i from devices 0..). one shot peer to peer, in float. None: not supported (or too big for the mailboxes)"""
   devs = cast(tuple[str, ...], p.device)
   N, n = len(devs), int(p.shape[-1])
-  # (P2P_FLAG, default off: two floats a word and a flag a workgroup, see _p2p_allreduce_kernel)
-  W = 2 if (flag:=bool(getenv("P2P_FLAG", 0)) and n % 2 == 0 and (fs:=p2p_a2a_shape(n // 2)) is not None and prod(fs) < P2P_AR_MAXW) else 1
+  # (P2P_FLAG, default on: two floats a word and a flag a workgroup, see _p2p_allreduce_kernel)
+  W = 2 if (flag:=bool(getenv("P2P_FLAG", 1)) and n % 2 == 0 and (fs:=p2p_a2a_shape(n // 2)) is not None and prod(fs) < P2P_AR_MAXW) else 1
   if (p2p:=p2p_allreduce(devs)) is None or (shape:=p2p_a2a_shape(n // W)) is None: return None
   out = Tensor.empty(N*N*n, dtype=dtypes.float32, device=devs, axis=0)
   fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n//W, T=shape[0], EP=shape[1], scatter=True, gather=True, flag=flag)
@@ -2704,8 +2704,8 @@ def host_allgather_half(x:Tensor) -> Tensor|None:
   """x (devices, n) fp16 values: all N*n values on every device as float32. Paired halves halve mailbox traffic."""
   N, n = int(x.shape[0]), int(x.shape[1])
   if not isinstance(x.device, tuple) or n % 2: return None
-  # (P2P_FLAG, default off: four halves a word and a flag a workgroup, see _p2p_allreduce_kernel)
-  W = 4 if (flag:=bool(getenv("P2P_FLAG", 0))) else 2
+  # (P2P_FLAG, default on: four halves a word and a flag a workgroup, see _p2p_allreduce_kernel)
+  W = 4 if (flag:=bool(getenv("P2P_FLAG", 1))) else 2
   m = round_up(n, W*HOST_AR_THREADS)  # an integral number of 256-thread workgroups after pairing
   out = Tensor.empty(N*m, dtype=dtypes.float32, device=x.device)
   if (p2p:=p2p_allreduce(x.device)) is not None and (shape:=p2p_ar_shape(m // W)) is not None and (not flag or prod(shape) < P2P_AR_MAXW):
@@ -2740,8 +2740,8 @@ def host_allgather(x:Tensor) -> Tensor|None:
   """
   N, n = int(x.shape[0]), int(x.shape[1])
   if not isinstance(x.device, tuple): return None
-  # (P2P_FLAG, default off: two floats a word and a flag a workgroup, see _p2p_allreduce_kernel)
-  flag = bool(getenv("P2P_FLAG", 0)) and (fs:=p2p_ar_shape(round_up(n, 2*HOST_AR_THREADS) // 2)) is not None and prod(fs) < P2P_AR_MAXW
+  # (P2P_FLAG, default on: two floats a word and a flag a workgroup, see _p2p_allreduce_kernel)
+  flag = bool(getenv("P2P_FLAG", 1)) and (fs:=p2p_ar_shape(round_up(n, 2*HOST_AR_THREADS) // 2)) is not None and prod(fs) < P2P_AR_MAXW
   W = 2 if flag else 1
   m = round_up(n, W*HOST_AR_THREADS)
   out = Tensor.empty(N*m, dtype=dtypes.float32, device=x.device)
