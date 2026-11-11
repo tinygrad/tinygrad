@@ -6,7 +6,7 @@ import numpy as np
 from tinygrad.engine.realize import run_linear
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, uop_fields
 
 def _allocations_of_type(t):
   ret = 0
@@ -124,6 +124,20 @@ class TestGC(unittest.TestCase):
     self.assertIs(b.buffer, buf_ref())
     del b
     self.assertIsNone(buf_ref())
+
+  def test_trace_buffers_do_not_hold_storage(self):
+    a = UOp.new_buffer("NULL", 4, dtypes.float32)
+    b = UOp.from_buffer(a.buffer, dtypes.int32)
+    with assert_freed(a.buffer):
+      traced = []
+      for u in (a, b):
+        op, _, arg = uop_fields[u.trace_num]
+        self.assertLess(arg.slot, 0)
+        traced.append(data:=UOp(op, u.src, arg))
+        self.assertIsNone(data.slot_buffer)
+        self.assertEqual(uop_fields[data.trace_num][2], arg) # tracing an unbound node keeps its negative slot
+      self.assertEqual(traced[0].arg.slot, traced[1].arg.slot)
+      del a, b, u
 
   def test_only_global_buffers_look_up_slots(self):
     # scratch BUFFERs, ALLOCs and PARAMs number their slots on their own: a slot they share with a realized BUFFER is not its storage

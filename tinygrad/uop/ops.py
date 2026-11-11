@@ -519,7 +519,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @recursive_property
   def trace_num(self):
     num = next(ucount)
-    uop_fields[num] = (self.op, tuple(s.trace_num for s in self.src), self.arg)
+    # Snapshots have no storage: negative slots keep reconstruction separate from runtime Buffer bindings.
+    arg = replace(self.arg, slot=-self.arg.slot-1) if self.op is Ops.BUFFER and self.slot_buffer is not None else self.arg
+    uop_fields[num] = (self.op, tuple(s.trace_num for s in self.src), arg)
     return num
 
   # *** uop syntactic sugar ***
@@ -797,6 +799,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   unique_num = itertools.count(0)
   # a realized BUFFER finds its device Buffer by slot. a Buffer has one slot, and a slot is never bound to another Buffer.
+  # non-negative GLOBAL BUFFER slots must have storage; negative slots are storage-free graph data (UIR and traces).
   # both tables are weak: the BUFFER UOps of a slot hold the Buffer, so the storage lives exactly as long as something references it
   buffers: ClassVar[weakref.WeakValueDictionary[int, Buffer|MultiBuffer]] = weakref.WeakValueDictionary()
   buffer_slots: ClassVar[weakref.WeakKeyDictionary[Buffer|MultiBuffer, int]] = weakref.WeakKeyDictionary()
@@ -945,7 +948,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def slot_buffer(self) -> Buffer|MultiBuffer|None:
     # the device Buffer bound to the slot of a GLOBAL BUFFER. LOCAL/REG scratch, ALLOC and PARAM slots are never looked up
     if self.op is not Ops.BUFFER or not isinstance(self.arg, ParamArg) or self.arg.addrspace is not AddrSpace.GLOBAL: return None
-    return UOp.buffers.get(self.arg.slot)
+    if self.arg.slot < 0: return None
+    buf = UOp.buffers.get(self.arg.slot)
+    assert buf is not None, f"storage-free BUFFER must have a negative slot, got {self.arg.slot}"
+    return buf
 
   @property
   def buffer(self) -> Buffer|MultiBuffer:

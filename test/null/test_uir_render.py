@@ -120,46 +120,49 @@ class TestParseUIR(unittest.TestCase):
     self.assertEqual(ansistrip(render_uir(sink)), txt)
     self.assertIs(parse_uir("# a comment\n" + txt.replace("\n", "  # a trailing comment\n")), sink)
 
-  def test_buffer_does_not_bind_existing_storage(self):
+  def test_bound_buffer_slot_is_preserved(self):
     live = UOp.new_buffer("NULL", 4, dtypes.float32)
-    for size in (4, 8):
-      parsed = parse_uir(f"%0 = buffer {size} slot={live.arg.slot} dtype=f32 device=NULL")
-      self.assertNotEqual(parsed.arg.slot, live.arg.slot)
-      self.assertIsNone(parsed.slot_buffer)
-      self.assertEqual(parsed.numel(), size)
+    expected = next(UOp.unique_num) + 1
+    self.assertIs(parse_uir(render_uir(live)), live)
+    self.assertEqual(next(UOp.unique_num), expected)
+
+  def test_unbound_nonnegative_buffer_slot_is_rejected(self):
+    for slot in (next(UOp.unique_num), 10**30):
+      for arg in (f"slot={slot} dtype=f32 device=NULL", f"arg=`ParamArg({slot}, dtypes.float32, device='NULL')`"):
+        with self.assertRaisesRegex(AssertionError, "negative slot"): parse_uir(f"%0 = buffer 4 {arg}")
 
   def test_buffer_does_not_capture_future_allocation(self):
     for size, dtype in [(4, dtypes.float32), (8, dtypes.int32)]:
-      slot = next(UOp.unique_num) + 1
-      parsed = parse_uir(f"%0 = buffer 4 slot={slot} dtype=f32 device=NULL")
+      parsed = parse_uir("%0 = buffer 4 slot=-1 dtype=f32 device=NULL")
       live = UOp.new_buffer("NULL", size, dtype)
       self.assertNotEqual(parsed.arg.slot, live.arg.slot)
       self.assertIsNone(parsed.slot_buffer)
       self.assertIsNotNone(live.buffer)
 
-  def test_buffer_aliases_are_local_to_each_parse(self):
+  def test_buffer_aliases_are_preserved(self):
     text = """
-      %a = buffer 4 slot=7 dtype=f32 device=NULL
-      %b = { %view = buffer 4 arg=`ParamArg(7, dtypes.int32, device='NULL')` }
-      %c = buffer 4 slot=8 dtype=f32 device=NULL
-      %d = buffer 4 slot=7 dtype=f32 device=NULL
+      %a = buffer 4 slot=-7 dtype=f32 device=NULL
+      %b = { %view = buffer 4 arg=`ParamArg(-7, dtypes.int32, device='NULL')` }
+      %c = buffer 4 slot=-8 dtype=f32 device=NULL
+      %d = buffer 4 slot=-7 dtype=f32 device=NULL
       %out = sink %a %b %c %d
     """
-    first, second = parse_uir(text), parse_uir(text)
-    for root in (first, second):
-      a, b, c, d = root.src
-      self.assertEqual(a.arg.slot, b.arg.slot)
-      self.assertNotEqual(a.arg.slot, c.arg.slot)
-      self.assertIs(a, d)
-      for buf in root.src: self.assertIsNone(buf.slot_buffer)
-    self.assertTrue({x.arg.slot for x in first.src}.isdisjoint(x.arg.slot for x in second.src))
+    root = parse_uir(text)
+    a, b, c, d = root.src
+    self.assertEqual(a.arg.slot, b.arg.slot)
+    self.assertNotEqual(a.arg.slot, c.arg.slot)
+    self.assertIs(a, d)
+    for buf in root.src: self.assertIsNone(buf.slot_buffer)
+    self.assertIs(parse_uir(text), root)
 
-  def test_buffer_slot_is_only_a_label(self):
-    for label in (-1, 0, 10**30):
+  def test_negative_buffer_slots_are_preserved(self):
+    for slot in (-1, -1234):
       expected = next(UOp.unique_num) + 1
-      parsed = parse_uir(f"%0 = buffer 4 slot={label} dtype=f32 device=NULL")
-      self.assertEqual(parsed.arg.slot, expected)
-      self.assertEqual(next(UOp.unique_num), expected + 1)
+      parsed = parse_uir(f"%0 = buffer 4 slot={slot} dtype=f32 device=NULL")
+      self.assertEqual(parsed.arg.slot, slot)
+      self.assertEqual(next(UOp.unique_num), expected)
+      self.assertIsNone(parsed.slot_buffer)
+      self.assertIs(parse_uir(render_uir(parsed)), parsed)
 
   def test_scratch_and_parameter_slots_are_preserved(self):
     for addrspace in (AddrSpace.LOCAL, AddrSpace.REG):

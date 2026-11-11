@@ -1,5 +1,6 @@
 # uops tests that pass on NULL backend (no copyout needed)
 import unittest, math
+from unittest.mock import patch
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context, ceildiv, Timing, cdiv, Target
@@ -601,12 +602,19 @@ class TestUopsObject(unittest.TestCase):
     self.assertIs(UOp(a.op, a.src, ParamArg(a.arg.slot, dtypes.float32, device="NULL")), a)
     self.assertIs(eval(str(a)), a)
 
-  def test_buffer_outlives_storage_as_data(self):
-    # the binding is runtime state, not part of the graph: a BUFFER with no storage is still a valid UOp (viz rebuilds traces of them)
+  def test_buffer_requires_storage_for_nonnegative_slot(self):
     a = UOp.new_buffer("NULL", 4, dtypes.float32)
     fields = (a.op, a.src, a.arg)
     del a
-    with Context(SPEC=2): b = UOp(*fields)
+    for spec in (0, 2):
+      with Context(SPEC=spec), self.assertRaisesRegex(AssertionError, "negative slot"): UOp(*fields)
+      with Context(SPEC=spec), self.assertRaisesRegex(AssertionError, "negative slot"):
+        UOp._buffer(4, dtypes.float32, next(UOp.unique_num), device="NULL")
+
+  def test_negative_buffer_is_storage_free(self):
+    with Context(SPEC=2), patch.object(UOp.buffers, "get", side_effect=AssertionError("negative slot looked up")):
+      b = UOp._buffer(4, dtypes.float32, -next(UOp.unique_num)-1, device="NULL")
+    self.assertIsNone(b.slot_buffer)
     self.assertIsNone(b.realized)
     with self.assertRaises(AssertionError): _ = b.buffer
 

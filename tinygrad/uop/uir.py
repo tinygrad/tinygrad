@@ -9,14 +9,14 @@
 
 srcs are %ids or literals: a CONST (1, 2.5, -inf, true, invalid) or an all-CONST STACK ([1 2]) has no line. args are key=value after the srcs.
 a value is a literal, a bare word, a 'string', a [list], a %id, or a `python object`. parse_uir(render_uir(x)) is x, since UOps are
-hash-consed, when every python object's repr evaluates back to it and x has no GLOBAL BUFFERs. GLOBAL BUFFER slots are document-local
-labels, remapped to fresh, unbound slots when parsed. runtime objects aren't rendered: a BUFFER's Buffer and a CALL's grad_fxn.
+hash-consed, when every python object's repr evaluates back to it. runtime objects aren't rendered: a BUFFER's Buffer and a CALL's grad_fxn.
+GLOBAL BUFFER slots are preserved: non-negative slots require existing storage in this process; unbound BUFFERs must use negative slots.
 parse_uir also reads studentgrad's hand-written UIR: %names, nested (op ...), [stacks] of expressions and {scoped blocks}.
 """
 import re, math, ast, functools, importlib
 from collections import deque
 from enum import Enum
-from dataclasses import fields, replace
+from dataclasses import fields
 from typing import Any, Callable
 from tinygrad import dtype
 from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid
@@ -138,7 +138,7 @@ def _eval(expr:str) -> Any:
 
 _tuple_keys = {Ops.RANGE: {"slot", "axis"}, Ops.REDUCE: {"op", "pop"}, Ops.ALLREDUCE: {"op", "device"}}
 
-def _build(name:str, srcs:tuple[UOp, ...], kv:dict[str, Any], buffer_slots:dict[int, int]) -> UOp:
+def _build(name:str, srcs:tuple[UOp, ...], kv:dict[str, Any]) -> UOp:
   """make the UOp for `name srcs key=value`. any op's arg can be a lone arg="""
   if (op:=_ops.get(name)) is None: raise ValueError(f"unknown op {name!r}")
   struct = _struct_args().get(op)
@@ -154,9 +154,6 @@ def _build(name:str, srcs:tuple[UOp, ...], kv:dict[str, Any], buffer_slots:dict[
   elif op is Ops.ALLREDUCE: arg = (kv["op"], kv["device"])
   elif struct is not None and (kv or op is Ops.CALL): arg = struct(**kv)   # a CALL always has a CallInfo
   elif kv: arg = kv[_arg_key[op]]
-  if op is Ops.BUFFER and isinstance(arg, ParamArg) and arg.addrspace is AddrSpace.GLOBAL:
-    if arg.slot not in buffer_slots: buffer_slots[arg.slot] = next(UOp.unique_num)
-    arg = replace(arg, slot=buffer_slots[arg.slot])
   return UOp(op, srcs, arg)
 
 def parse_uir(text:str) -> UOp:
@@ -165,7 +162,6 @@ def parse_uir(text:str) -> UOp:
   `(op srcs key=value)`, `[values]` for a STACK, `{assignments}` for the last of a scoped block, a %name, or a literal.
   NOTE: a `python object` is eval'd, only parse UIR you trust"""
   toks = deque(t for t in _tokens.findall(ansistrip(text)) if not t.startswith("#"))   # op names may carry ANSI color from render_uir
-  buffer_slots:dict[int, int] = {}
   def is_assign(t:str) -> bool: return t[0] == "%" and t[-1] == "="
   def at_end() -> bool: return not toks or toks[0] in (")", "]", "}") or is_assign(toks[0])
   def pop(what:str) -> str:
@@ -196,7 +192,7 @@ def parse_uir(text:str) -> UOp:
       if k[:-1] in kv: raise ValueError(f"{name} has {k} twice")
       kv[k[:-1]] = attr(names, k[:-1])
     if close is not None and pop(repr(close)) != close: raise ValueError(f"expected {close!r} to end {name}")
-    return _build(name, tuple(srcs), kv, buffer_slots)
+    return _build(name, tuple(srcs), kv)
   def value(names:dict[str, UOp|None], bare=False) -> UOp:
     t = pop("a value")
     if t == "{": return scope(dict(names), "}")
