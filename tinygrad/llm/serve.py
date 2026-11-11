@@ -1340,7 +1340,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           # end (unless starving and nothing else runs))
           force = (c.was_hit and now - c.st > self.TURN_WAIT) or (starving(c) and not (active or filling))
           got = eng.take(ids:=prompt(c), max(0, (c.max_tokens or 0) - len(c.generated)), force=force)
-          self.stats.add("take", time.perf_counter() - t0)
+          take_time = time.perf_counter() - t0
+          self.stats.add("take", take_time)
+          trace(f"seq_take at={t0:.6f} ms={take_time*1e3:.3f} success={got is not None} "
+                f"active={len(active)} pending={len(pending)} filling={len(filling)}")
           if got is None:
             c.tried, c.tried_at = eng.version, now
             continue
@@ -1378,6 +1381,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           stall += slice_time
           req.prefill_time, req.slices = req.prefill_time + slice_time, req.slices + 1
           new_slice = (end if end < len(ids) else len(ids)) - pos
+          trace(f"seq_prefill at={st:.6f} ms={slice_time*1e3:.3f} rows={new_slice} cached={pos} "
+                f"active={len(active)} pending={len(pending)} filling={len(filling)}")
           self.telemetry.prefill(new_slice, slice_time, bool(req.cache_start or req.generated))
           self.prefilled_total += new_slice
           self.stats.prefill_time += slice_time
@@ -1395,7 +1400,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           # (the slice queued last done: its time the prefill's, not the steps')
           st = time.perf_counter()
           eng.settle()
-          stall += time.perf_counter() - st
+          settle_time = time.perf_counter() - st
+          stall += settle_time
+          trace(f"seq_settle at={st:.6f} ms={settle_time*1e3:.3f} active={len(active)}")
         # (the waiting ones that can't take a sequence now (no room) don't count: their prefill isn't the steps' time)
         can = len(filling) + sum(r.tried != eng.version for r in pending)
         share = min(self.DECODE_SHARE, max(0.1, len(active) / max(1, len(active) + can)))
@@ -1407,8 +1414,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           outs = eng.step(seqs)
           step_time = time.perf_counter() - st
           self.stats.step_time += step_time
-          self.telemetry.step(len(seqs), max(len(r.ids) + len(r.generated) for r in active.values()), step_time,
-                              sum(len(toks) for toks in outs))
+          step_tokens = sum(len(toks) for toks in outs)
+          self.telemetry.step(len(seqs), max(len(r.ids) + len(r.generated) for r in active.values()), step_time, step_tokens)
+          trace(f"seq_step at={st:.6f} ms={step_time*1e3:.3f} rows={len(seqs)} tokens={step_tokens} "
+                f"active={len(active)} pending={len(pending)} filling={len(filling)}")
           for s, toks in zip(seqs, outs):
             req = active[s]
             req.steps += 1
