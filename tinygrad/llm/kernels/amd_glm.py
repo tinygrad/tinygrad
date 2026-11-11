@@ -6046,13 +6046,14 @@ def pool_keys(pk:Tensor, ring:Tensor, kg:Tensor, ape:Tensor, start_pos:UOp|None,
   return Tensor(pk.uop.after(ring.uop))
 
 @functools.cache
-def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, pools:UOp, NP:int=2, stride:int=0, kpool:int=0, shard:int=0,
+def _indexer_scores_decode_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *grouped:UOp, pools:UOp, NP:int=-1, stride:int=0, kpool:int=0, shard:int=0,
                                   rdna4:bool=True, pbase:UOp|None=None, span:int=0) -> UOp:
   # one query (RDNA3/4 WMMA): the heads are the rows, out[p] = sum over the heads h of w[h] * relu(q[h] . k[p]). G waves, a wave loops over the
   # tiles of 16*NP pools g, g+G, .. of the pools: the work follows the context, not its max. a few queries: q (T, H, D), w (T, H), out (T, P),
   # the waves of every query
   # grouped (positions): the queries of S sequences (T//S each, the first at positions[s]), a sequence's pools stride rows of k, its pools its own
   # shard: the pooled keys split over that many devices (SEQ_IDX_SHARD, the device's index the last source): its pools (local rows, scores)
+  NP = getenv("SEQ_SCORE_NP", 1) if NP < 0 else NP
   dev = grouped[-1] if shard else None
   if shard: grouped = grouped[:-1]
   T = cast(int, q.shape[0]) if len(q.shape) == 3 else 1
