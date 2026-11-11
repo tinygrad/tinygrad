@@ -406,11 +406,13 @@ def slot_states(k:int) -> tuple[int, int]:
   return (k + 1 if k else k + 2), k + 2
 
 
-def _slot_pool(n:int, like:Tensor, shape:tuple[int|UOp, ...]|None=None, dtype:DType|None=None, host:bool=False) -> tuple[Tensor, list[Tensor]]:
+def _slot_pool(n:int, like:Tensor, shape:tuple[int|UOp, ...]|None=None, dtype:DType|None=None, host:bool=False,
+               views:int|None=None) -> tuple[Tensor, list[Tensor]]:
   """
   n slots of a state like `like` (of shape, or like's, of dtype or like's) in one buffer of every device, made but not allocated (a jit
   captured before its memory is holds it): the pool (n*shape[0], ...) and the n slots, views of it (buffers of their own: a kernel writes one
-  in place). host: in host memory (every device its part), the devices read and write it directly
+  in place). host: in host memory (every device its part), the devices read and write it directly. views: only the first that many slots
+  (the kernels index the pool: a view a slot is python before the start-up's forks, thousands of them, not used)
   """
   shape, devs, axis = tuple(int(x) for x in (shape or like.shape)), cast(str|tuple[str, ...], like.device), like.uop.axis
   local = tuple(x//len(devs) if isinstance(devs, tuple) and i == axis else x for i, x in enumerate(shape))
@@ -428,7 +430,7 @@ def _slot_pool(n:int, like:Tensor, shape:tuple[int|UOp, ...]|None=None, dtype:DT
     if not isinstance(b:=base.buffer, MultiBuffer): return b.view(size * item, i * size * item)
     (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [x.view(size * item, i * size * item) for x in b.bufs]
     return mb
-  return tensor(base, n), [tensor(UOp.from_buffer(view(i), dtype, devs), 1) for i in range(n)]
+  return tensor(base, n), [tensor(UOp.from_buffer(view(i), dtype, devs), 1) for i in range(n if views is None else min(views, n))]
 
 
 def _host_buffer(devs:str|tuple[str, ...], nbytes:int, dtype=dtypes.uint8) -> tuple[memoryview, Tensor]:
@@ -1283,7 +1285,7 @@ class QSAIndexer:
   def _init_slots(self, n:int):
     """the states of n sequences of batched decoding (a slot each): SC of them a slot, the one of a position p is p%SC (made, not zeroed)"""
     if hasattr(self, "pool_state") and int(self.pool_state.shape[0]) >= n * self.SC: return
-    self.pool_state = _slot_pool(n, self.state, (self.SC, *self.state.shape[1:]))[0]
+    self.pool_state = _slot_pool(n, self.state, (self.SC, *self.state.shape[1:]), views=0)[0]
 
   def _pooled(self, keys:Tensor, cos:Tensor, sin:Tensor) -> Tensor:
     """keys (..., pools, kpool, D): the pooled keys (..., pools, D), roped with cos and sin (pools, rope/2) of the pools' first positions"""
@@ -1709,20 +1711,23 @@ class GatedDeltaNetBlock(FFNBlock):
     the states of n sequences of batched decoding (one slot each): S of each state, the one of a position p is p%S (see slot_states). replay:
     one recurrent state a slot and the replayed inputs (see SEQ_REPLAY)
     """
-    if len(getattr(self, "slot_rec", [])) >= n: return
+    if getattr(self, "_slots_n", 0) >= n: return
+    self._slots_n = n
     S, SC = slot_states(self.config.spec_drafts)
     if replay:
       S = 1
       K, V = self.head_k_dim, self.head_v_dim
       # (a row of a head: its k, decay, v and beta)
       self.pool_rp = _slot_pool(n, self.recurrent_state, (replay_q(self.config.spec_drafts), *self.recurrent_state.shape[1:3], 2*K + V + 1),
-                                dtypes.float32)[0]
+                                dtypes.float32, views=0)[0]
     # (in one buffer of every device: slot_store writes what a step reads)
     # (in float as the model's: a step reads and writes it, in half its rounding adds up over a long reply. in half for many slots
     # (SLOT_STATE_HALF, default past 8): their memory, a long context's model and 32 slots of it don't fit)
-    self.pool_rec, self.slot_rec = _slot_pool(n, self.recurrent_state, (S, *self.recurrent_state.shape[1:]), dtypes.half if half else None)
-    pools = [_slot_pool(n, c, (SC, *c.shape[1:])) for c in self.conv_states]
-    self.pool_conv, self.slot_conv = [p for p, _ in pools], [[slots[i] for _, slots in pools] for i in range(n)]
+    # (slot_rec / slot_conv: the first slot's views only, their shapes read)
+    self.pool_rec, self.slot_rec = _slot_pool(n, self.recurrent_state, (S, *self.recurrent_state.shape[1:]), dtypes.half if half else None,
+                                              views=1)
+    pools = [_slot_pool(n, c, (SC, *c.shape[1:]), views=1) for c in self.conv_states]
+    self.pool_conv, self.slot_conv = [p for p, _ in pools], [[slots[0] for _, slots in pools]]
 
   def _attention(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
     if (groups:=_batch_rows[0]) is not None: return self._attention_batch(x, groups)
@@ -2298,10 +2303,11 @@ class Transformer:
     # every slot's checkpoint: its states of a position (the end of its last prompt), the hidden state of the last token
     self.seq_ckpt_h = _zeros(n, self._spec_dim, device=devs)
     # (the checkpoints' recurrent states in host memory: a copy a turn, the device memory more slots')
-    self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]), host=True)[0]] +
-                            [_slot_pool(n, p, (1, *p.shape[1:]))[0] for p in b.pool_conv] for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
+    self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]), host=True, views=0)[0]] +
+                            [_slot_pool(n, p, (1, *p.shape[1:]), views=0)[0] for p in b.pool_conv]
+                            for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
     # (and the indexers' states)
-    self.seq_ckpt_idx = [_slot_pool(n, idx.pool_state, (1, *idx.pool_state.shape[1:]))[0] for idx in self._indexers()]
+    self.seq_ckpt_idx = [_slot_pool(n, idx.pool_state, (1, *idx.pool_state.shape[1:]), views=0)[0] for idx in self._indexers()]
     self._spec_init()
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self._token_rows())
     # in host memory: a step's input tokens, the temperature and top_p of every sequence, its sampled tokens and drafts (written by one device)
