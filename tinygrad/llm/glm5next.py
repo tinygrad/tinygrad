@@ -4269,20 +4269,17 @@ class Transformer:
     devs = cast(tuple[str, ...], self.token_embd.weight.device)
     nd = len(devs)
     assert nd and C % nd == 0, f"SEQ_MOVE={C} must be a multiple of the {nd} devices"
-    if gb <= 0:
-      # (no stash (SEQ_STASH_GB=0): nothing to size, e.g. the pooled keys split over the devices (SEQ_IDX_SHARD), not stashed)
-      self.stash_entries = self.stash_chunks = self.stash_chunk_nbytes = self.stash_entry_nbytes = 0
-      return
     def per_row(t:Tensor, axis:int=0) -> int:
       return t.nbytes() // int(t.shape[axis]) // (len(t.device) if isinstance(t.device, tuple) and t.uop.axis is not None else 1)
     kb = [b for b in self.blk + [self.mtp] if isinstance(b, MLATransformerBlock)]
     def index(b:MLATransformerBlock) -> Indexer:
-      assert b.indexer is not None and not b.indexer.shard, "GLM stash requires indexed, non-sharded index pools"
+      assert b.indexer is not None, "GLM stash requires indexed pools"
       return b.indexer
     gdn = [b for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
     ring = [r for _, r in self.seq_ckpt_rings]
     replay = [b.pool_rp for b in gdn if hasattr(b, "pool_rp")]
-    chunk = C * sum(per_row(b.cache_s) + per_row(index(b).cache_pk) // index(b).idx.kpool for b in kb)
+    # (a card's bytes of C positions: its latent rows, its pools (split over the cards (SEQ_IDX_SHARD): a card's part of every pool's))
+    chunk = sum(C * per_row(b.cache_s) + C * per_row(index(b).cache_pk) // index(b).idx.kpool for b in kb)
     entry = sum(per_row(t) for b in gdn for t in (b.pool_rec, *b.pool_conv)) + per_row(self.seq_spec_h) + \
       sum(per_row(t) for c in self.seq_ckpt_states for t in c) + per_row(self.seq_ckpt_h) + \
       sum(per_row(index(b).pool_ring) + per_row(r) for b, r in zip(kb, ring)) + sum(per_row(t) for t in replay)
@@ -4291,6 +4288,8 @@ class Transformer:
     if not self.stash_chunks: self.stash_entries = 0
     self.stash_chunk_nbytes, self.stash_entry_nbytes = chunk, entry
     if not self.stash_entries: return
+    # (the stash copies a region's pools whole on every card: not the split ones)
+    assert not any(index(b).shard for b in kb), "GLM stash with SEQ_IDX_SHARD: no (SEQ_STASH_GB=0)"
     # Latents use seq_move's (local rows, devices, features) view: C/nd rows a device. Index pools are replicated.
     self._stash_kv = []
     for b in kb:
