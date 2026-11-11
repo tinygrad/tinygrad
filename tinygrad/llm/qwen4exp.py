@@ -2664,10 +2664,16 @@ class Transformer:
     def vram(d:str) -> int:
       try: return int(Device[d].iface.dev_impl.vram_size)  # type: ignore[attr-defined]
       except Exception: return 0
+    # (cached: the device memory of the buffers freed into the allocator's cache (LRU), reused by a buffer of their size and freed when an
+    # allocation fails: free to the server too. card 0 holds ~90 MB of them after the start-up (the load's), the others few)
+    def cached(d:str) -> int:
+      try: return sum(sz*len(c) for (sz, o), c in Device[d].allocator.cache.items() if o is None or not o.host)  # type: ignore[attr-defined]
+      except Exception: return 0
     grp = cast(dict[str, dict[str, int]], rep["groups"])
     per = {d: {k: gb(v[d]) for k, v in grp.items()} for d in devs}
     # (the rest of the memory: the activations, the collectives' buffers, the jits')
-    for d in devs: per[d] |= {"workspace": gb(vram(d) - free(d) - sum(v[d] for v in grp.values())), "free": gb(free(d))}
+    for d in devs:
+      per[d] |= {"workspace": gb(vram(d) - free(d) - cached(d) - sum(v[d] for v in grp.values())), "free": gb(free(d)), "cached": gb(cached(d))}
     return {"devices": per, "rows": rep["rows"], "bytes_per_token": rep["bytes_per_token"], "full_contexts": rep["full_contexts"],
             "kv_split": self.config.kv_split}
 
