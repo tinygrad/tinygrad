@@ -37,12 +37,18 @@ def raw_rows(t, a:int, b:int) -> np.ndarray:
   buf = buf.bufs[0] if hasattr(buf, "bufs") else buf
   return np.frombuffer(bytearray(buf.as_memoryview()), dtype=np.float32).reshape(-1, t.shape[-1])[a:b].copy()
 
-def rec(out:dict, h, target:int):
+def head(rows:np.ndarray) -> np.ndarray:
+  """the output head's logits of rows (n, D) (float64, the vocab's)"""
   from tinygrad import Tensor
-  t, a, b = h
   from tinygrad.llm.kernels import amd_glm, amd_glm_dsa
-  x = model.output(Tensor(raw_rows(t, a, b)).to(devs)).float().numpy()[:, :V].astype(np.float64)
+  x = model.output(Tensor(rows).to(devs)).float().numpy()[:, :V].astype(np.float64)
   amd_glm.q8_quantize_cache_clear(), amd_glm_dsa.q8_quantize_cache_clear()  # (glm_dsa's output head quantizes with amd_glm_dsa's)
+  return x
+
+def rec(out:dict, h, target:int|list[int], x:np.ndarray|None=None):
+  if x is None:
+    t, a, b = h
+    x = head(raw_rows(t, a, b))
   for r, t in zip(x, target if isinstance(target, list) else [target]):
     m = r.max()
     lp = r - (m + np.log(np.exp(r - m).sum()))
@@ -93,11 +99,21 @@ if (GB:=getenv("BATCH", 0)) > 1:
       group.append(sq)
     while any(len(sq["out"]["lp"]) < NTOK + 1 for sq in group):
       with Context(JIT=QJIT): outs = model.seq_step([(sq["g"], sq["base"], sq["mtp"], sq["j"], sq["par"], sq["y"], 0.0) for sq in group])
+      # (the group's rows of the step through the head at once (QREC_BATCH=0: a head call a sequence), padded to a fixed count: one jit-free
+      # graph shape, a read of the state's buffer a step)
+      H, spans = 2*(k+1), []
       for sq, (sampled, drafts) in zip(group, outs):
-        T, st, H = sq["T"], sq["mtp"] + sq["j"], 2*(k+1)
-        jj = forced(T, st, drafts)
-        a = sq["g"]*H + sq["par"]*(k+1)
-        rec(sq["out"], (model.seq_spec_h, a, a+jj+1), T[st+1:st+2+jj])
+        st = sq["mtp"] + sq["j"]
+        jj = forced(sq["T"], st, drafts)
+        spans.append((st, jj, sq["g"]*H + sq["par"]*(k+1)))
+      if getenv("QREC_BATCH", 1):
+        allrows = raw_rows(model.seq_spec_h, 0, model.seq_spec_h.shape[0])
+        sel = np.concatenate([allrows[a:a+jj+1] for _, jj, a in spans])
+        logits = head(np.concatenate([sel, np.zeros((len(group)*(k+1) - len(sel), sel.shape[1]), np.float32)]))
+        offs = np.cumsum([0] + [jj+1 for _, jj, _ in spans])
+      for n, (sq, (sampled, drafts)) in enumerate(zip(group, outs)):
+        T, (st, jj, a) = sq["T"], spans[n]
+        rec(sq["out"], (model.seq_spec_h, a, a+jj+1), T[st+1:st+2+jj], logits[offs[n]:offs[n+1]] if getenv("QREC_BATCH", 1) else None)
         check("seq", sq["out"], jj+1, sampled)
         model._token_host[sq["base"]+st+1:sq["base"]+st+2+jj] = array.array('i', T[st+1:st+2+jj])
         sq["mtp"], sq["j"], sq["par"], sq["y"] = st + 1, jj, 1 - sq["par"], [T[st+1+t] for t in range(k+1)]
