@@ -1524,9 +1524,10 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       ksplits = _q6_input_splits(in_features, local_out, local_rows, tt, tgt, _wmma_rdna4(x.device))
       out_shape = (splits*ksplits*tokens, out_features)
     bn4 = 128
-    if _wmma_rdna4(x.device) and not q6_gemm and ksplits == 1 and (wgs:=getenv("Q8_WGS_RDNA4", 0)):
-      # (Q8_WGS_RDNA4=n: the tiles of the fewest workgroups that are at least n (a few rows of a narrow output were 12 workgroups of 64 CUs):
-      # an output's sums over the input as with any tiles)
+    if _wmma_rdna4(x.device) and not q6_gemm and ksplits == 1 and (wgs:=getenv("Q8_WGS_RDNA4", 48)) and \
+       (local_rows // tt) * (-(-local_out // 128)) < wgs:
+      # (Q8_WGS_RDNA4=n (default 48, 0: off): fewer workgroups than n: the tiles of the fewest at least n (128 rows of 1536 outputs were 12
+      # workgroups of 64 CUs: R9700 0.152 -> 0.065 ms, 7 shapes bit-equal): an output's sums over the input as with any tiles)
       tiles = sorted(((local_rows // t) * (local_out // b), -t, -b) for t in (128, 96, 64, 32) for b in (128, 64)
                      if local_rows % t == 0 and local_out % b == 0)
       if tiles:
