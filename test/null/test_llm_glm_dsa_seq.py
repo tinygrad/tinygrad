@@ -95,7 +95,7 @@ class TestGLMDSASequence(unittest.TestCase):
     with patch.dict(os.environ, {"SEQ_P2P_PACK": "3x8"}): self.assertEqual(_seq_p2p_pack(), (3, 8))
     N, n = 4, 256
     mb = [Tensor.empty(P2P_AR_CLASSES*P2P_AR_MAXG*2*(N+1)*P2P_AR_MAXW, dtype="uint64") for _ in range(N)]
-    counter = Tensor.empty(P2P_AR_CLASSES*P2P_AR_MAXG+1, dtype="int32")
+    counter = Tensor.empty(P2P_AR_CLASSES*P2P_AR_MAXG+2, dtype="int32")
     for kw in (dict(gather=True), dict(scatter=True)):
       out, x = Tensor.empty(N*n*3, dtype="float32"), Tensor.empty(1, N*n*3, dtype="float32")
       fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=n, T=256, EP=1, pack=(3, 8), **kw)

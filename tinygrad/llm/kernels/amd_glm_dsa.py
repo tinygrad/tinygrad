@@ -1682,11 +1682,11 @@ class P2PAllreduce:
       for k in range(N):
         (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [own[d] if k == 0 else alias(own[(d+k) % N], devs[d]) for d in range(N)]
         self.mboxes.append(Tensor(UOp.from_buffer(mb, dtypes.uint64, devs)))
-      # the epoch counter of every workgroup, then the device's index
-      counters = [Buffer(d, (P2P_AR_CLASSES*P2P_AR_MAXG+1)*4, initial_value=bytes(P2P_AR_CLASSES*P2P_AR_MAXG*4)+i.to_bytes(4, "little"))
+      # the epoch counter of every workgroup, then the device's index, then the epoch of the last poll that ran out (0: none, p2p_late)
+      counters = [Buffer(d, (P2P_AR_CLASSES*P2P_AR_MAXG+2)*4, initial_value=bytes(P2P_AR_CLASSES*P2P_AR_MAXG*4)+i.to_bytes(4, "little")+bytes(4))
                   for i,d in enumerate(devs)]
       (cb:=MultiBuffer.__new__(MultiBuffer)).bufs = counters
-      self.counter = Tensor(UOp.from_buffer(cb, dtypes.int32, devs))
+      self.counter, self.counter_bufs = Tensor(UOp.from_buffer(cb, dtypes.int32, devs)), counters
       for d in devs: Device[d].synchronize()
 
 P2P_AR_MAXG, P2P_AR_MAXW = getenv("P2P_AR_MAXG", 64), getenv("P2P_AR_MAXW", 4096)  # workgroups, the words of a workgroup's slot
@@ -1699,6 +1699,17 @@ def p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None: return _p2p_allred
 def _p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None:
   if not getenv("P2P_ALLREDUCE", 1) or len(devs) < 2 or not amd_custom_kernels_supported(devs): return None
   return P2PAllreduce(devs)
+
+def p2p_late(devs:tuple[str, ...], clear:bool=False) -> list[int]:
+  """every device's epoch of its last p2p poll that ran out (P2P_AR_TIMEOUT_MS: its values wrong), 0: none since the mailboxes were made
+  (or cleared)"""
+  if (p2p:=p2p_allreduce(devs)) is None: return []
+  for d in devs: Device[d].synchronize()
+  i, ret = P2P_AR_CLASSES*P2P_AR_MAXG + 1, []
+  for b in p2p.counter_bufs:
+    ret.append(int(memoryview(b.as_buffer()).cast("i")[i]))
+    if clear: b.copyin(memoryview(bytearray(b.as_buffer())[:i*4] + bytes(4)))
+  return ret
 
 def p2p_ar_shape(n:int) -> tuple[int, int]|None:
   """(threads, values a thread) of a p2p allreduce of n values: a workgroup's at most P2P_AR_MAXW, at most P2P_AR_MAXG of them"""
@@ -1802,6 +1813,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     # (one wave writes the l2 back: a loop that runs once in it, not at all in the others)
     once = UOp.range((t < 32).where(1, 0), next(UOp.unique_num), AxisType.LOOP)
     return UOp.group(UOp.group(_sys('__builtin_amdgcn_fence(__ATOMIC_RELEASE, "");', dtypes.void, once, bar)).end(once)).barrier()
+  lates:list[UOp] = []
   def poll(after:UOp, slots:list[UOp], waits:list[UOp]) -> list[UOp]:
     # the words of the slots (system scope loads of this device's mailbox, all of them in an iteration) until those it waits for have the epoch
     loop = UOp.range(UOp(Ops.NOOP).after(after), next(UOp.unique_num), dtype=dtypes.void)
@@ -1811,7 +1823,11 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     stale = functools.reduce(lambda a,b: a | b, [w & fresh(g).logical_not() for g, w in zip(got, waits)])
     waiting = stale & (_sys("__builtin_readsteadycounter()", dtypes.uint64, stale) < deadline)
     words = words.after(_cfn(False, src=(waiting,), arg=("", dtypes.void)).backedge(loop, waiting))
-    return [words[i].load() for i in range(len(slots))]
+    out = [words[i].load() for i in range(len(slots))]
+    # (a thread whose words are still stale ran out: its epoch noted, see p2p_late)
+    late = functools.reduce(lambda a,b: a | b, [w & fresh(g).logical_not() for g, w in zip(out, waits)])
+    lates.append(counter[UOp.const(P2P_AR_CLASSES*P2P_AR_MAXG + 1, dtypes.weakint).valid(late)].store(epoch.cast(dtypes.int32)))
+    return out
   # (packed: a device's own values as the others get them, the sums don't depend on which device sums them)
   if pack is not None: vals = [value(word(v)) for v in vals]
   def ordered_sum(parts:list[UOp]) -> UOp: return functools.reduce(lambda a,b: a+b, parts)
@@ -1854,7 +1870,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   # the next epoch, once every thread of the workgroup read the counter
   done = counter.after(UOp.group(*stores).barrier())[cw.valid(t.eq(0))].store(epoch.cast(dtypes.int32))
   name = "p2p_allgather" if gather else "p2p_reduce_scatter" if scatter else "p2p_allreduce"
-  return UOp.group(*stores, done).end(wg, t).sink(arg=KernelInfo(name=name, opts_to_apply=()))
+  return UOp.group(*stores, done, *lates).end(wg, t).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
 def p2p_reduce_scatter(p:Tensor, pack:tuple[int, int]|None=None) -> Tensor|None:
   """p (devices, devices, n) partials split on the first: device i gets the sum over the devices of their part i, (devices, n) split on the
