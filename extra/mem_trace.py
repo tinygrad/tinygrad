@@ -10,14 +10,15 @@ import sys, os, traceback, collections, runpy, gc
 
 _live:dict[int, dict[int, tuple[int, str]]] = collections.defaultdict(dict)  # (id of a MemoryManager: paddr -> (size, site))
 _mms:dict[int, object] = {}
-_SKIP = ("runtime/support/memory.py", "runtime/support/system.py", "runtime/support/am/", "/contextlib.py", "/runpy.py", "mem_trace.py")
+_SKIP = ("runtime/support/memory.py", "runtime/support/system.py", "runtime/support/am/",
+         "/contextlib.py", "/runpy.py", "mem_trace.py", "tinygrad/device.py")
 
 def _site() -> str:
-  # (the innermost frames outside the allocator: two of the runtime's and the first of the model's or a script's)
+  # (the innermost frames outside the allocator: three of the runtime's and the first of the model's or a script's)
   fr = [f for f in traceback.extract_stack(limit=40)[:-2] if not any(s in f.filename for s in _SKIP)][::-1]
   def fmt(f) -> str: return f"{f.filename.rsplit('/', 1)[-1]}:{f.lineno} {f.name}"
-  inner = [fmt(f) for f in fr[:2]]
-  outer = next((fmt(f) for f in fr[2:] if "/tinygrad/llm/" in f.filename or "/extra/" in f.filename or "/tinygrad/" not in f.filename), "")
+  inner = [fmt(f) for f in fr[:3]]
+  outer = next((fmt(f) for f in fr[3:] if "/tinygrad/llm/" in f.filename or "/extra/" in f.filename or "/tinygrad/" not in f.filename), "")
   return " < ".join(inner + ([outer] if outer else []))
 
 def install() -> None:
