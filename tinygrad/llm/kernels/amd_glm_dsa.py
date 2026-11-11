@@ -4407,14 +4407,16 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   return UOp.group(*stores).end(tg, wave, lane).sink(arg=KernelInfo(name="mla_sparse_wmma", opts_to_apply=(), estimates=est))
 
 @functools.cache
-def _mla_sparse_lds_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, valid_len:UOp, vdims:int, rep:int=1) -> UOp:
+def _mla_sparse_lds_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, valid_len:UOp, vdims:int, rep:int=1, hl:int=0) -> UOp:
   """
   the attention of every token on the keys of its list (as _mla_sparse_body, half cache, a workgroup a token, its 16 heads the rows): a tile of
   16 keys is read once into LDS (16 byte loads of whole rows, zeros past the count), the waves take their fragments of the keys and of the
   values from there. the scores: a wave a quarter of the dims (summed in LDS), the values: a wave a quarter of the first vdims (the rest 0).
   rep: a token's heads are rep workgroups (its list the row tok // rep of index)
+  hl: q is (hl, T, D) (any float, cast to half as loaded), the rows past hl zero, out (hl, T, vdims) the real rows only (cast as stored)
   """
-  R, D = cast(tuple[int, int], q.shape)
+  if hl: R, D = cast(int, q.shape[1]) * 16, cast(int, q.shape[2])
+  else: R, D = cast(tuple[int, int], q.shape)
   T, n_max, N, WAVES = R // 16, cast(int, index.shape[1]) - 1, cache.shape[0], 4
   DW, VW = D // WAVES, vdims // WAVES
   KT, VT, G8, PAD = DW // 16, VW // 16, D // 8, D + 8
@@ -4422,7 +4424,11 @@ def _mla_sparse_lds_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, va
   wave, lane = UOp.range(WAVES, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   col, half, tid = lane % 16, lane // 16, wave * WARP_SIZE + lane
   ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
-  qfrag = [UOp.stack(*(q[tok*16 + col, wave*DW + kk*16 + k].load() for k in ks)) for kk in range(KT)]
+  if hl:
+    zh = UOp.const(0, dtypes.half)
+    qfrag = [UOp.stack(*((col < hl).where(q[col.minimum(hl-1), tok, wave*DW + kk*16 + k].load().cast(dtypes.half), zh) for k in ks))
+             for kk in range(KT)]
+  else: qfrag = [UOp.stack(*(q[tok*16 + col, wave*DW + kk*16 + k].load() for k in ks)) for kk in range(KT)]
   itok = tok // rep if rep > 1 else tok
   count = index[itok, n_max].load().cast(dtypes.weakint).minimum(n_max)
   n_tile_r = UOp.range((count + 15) // 16, 2, AxisType.LOOP)
@@ -4481,8 +4487,10 @@ def _mla_sparse_lds_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, va
   lds_l = UOp.alloc((16,), dtypes.float, addrspace=AddrSpace.LOCAL)
   l_fin = l_reg.after(update)
   lds_l = lds_l.after(UOp.group(*(lds_l[(half*8 + wave*ES + i).valid(col.eq(0))].store(l_fin[i].load()) for i in range(ES))).barrier())
-  stores = [out[tok*16 + half*8 + e, wave*VW + dt*16 + col].store(o.after(update)[e].load() / lds_l[half*8 + e].load().maximum(1e-30))
-            for dt, o in enumerate(o_regs) for e in range(8)]
+  def oval(o:UOp, e:int) -> UOp: return o.after(update)[e].load() / lds_l[half*8 + e].load().maximum(1e-30)
+  if hl: stores = [out[(half*8 + e).valid(half*8 + e < hl), tok, wave*VW + dt*16 + col].store(oval(o, e).cast(out.dtype))
+                   for dt, o in enumerate(o_regs) for e in range(8)]
+  else: stores = [out[tok*16 + half*8 + e, wave*VW + dt*16 + col].store(oval(o, e)) for dt, o in enumerate(o_regs) for e in range(8)]
   est = Estimates(4*R*n_max*D, R*D*2 + T*n_max*D*2, R*vdims*4)
   return UOp.group(*stores).end(tok, wave, lane).sink(arg=KernelInfo(name="mla_sparse_lds", opts_to_apply=(), estimates=est))
 
@@ -4549,6 +4557,13 @@ def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:f
     w = l * (m - m.max(2, keepdim=True)).exp()
     out = ((parts.reshape(n, T, split, 16, D) * w).sum(2) / w.sum(2).maximum(1e-30)).reshape(n*T*16, D)
   elif grouped is None and vdims is not None and getenv("MLA_LDS", 1) and cache.dtype == dtypes.half and D % 64 == 0 and vdims % 64 == 0:
+    if getenv("MLA_LDS_HEADS", 1):
+      # (the device's hl heads of q as they are, its outputs in half (the caller takes them so): no padded half copy of the queries in, no
+      # float rows of 16 heads out. the same values)
+      oh = Tensor.empty(H, T, vdims, dtype=dtypes.half, device=q.device, axis=0 if n > 1 else None)
+      oh = Tensor.custom_kernel(oh, q.reshape(H, T, D).contiguous(), cache.reshape(-1, int(cache.shape[-1])), index,
+                                fxn=functools.partial(_mla_sparse_lds_kernel, scale=scale, valid_len=vl, vdims=vdims, hl=hl))[0]
+      return oh.reshape(1, H, T, vdims)
     # (the values' dims only: the rest isn't the caller's)
     out = Tensor.empty(n*T*16, vdims, dtype=dtypes.float32, device=q.device, axis=0 if n > 1 else None)
     out = Tensor.custom_kernel(out, rows, cache.reshape(-1, int(cache.shape[-1])), index,
