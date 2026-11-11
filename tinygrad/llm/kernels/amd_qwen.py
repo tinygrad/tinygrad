@@ -4925,6 +4925,11 @@ def rows_scatter(buf:Tensor, rows:Tensor, idx:Tensor) -> Tensor:
   return Tensor.custom_kernel(buf, rows.contiguous(), idx, fxn=_rows_scatter_kernel)[0]
 
 SEQ_SCORE_TILE = 256
+# seq_scores: SEQ_SCORE_U loads of 8 dims of a key a round (a round waits for its loads: 16 rounds of one 16 byte load are 16 waits, and a
+# wave's 16 bytes of 32 keys a round lose their lines in L2 before the next round), SEQ_SCORE_WG workgroups a sequence, SEQ_SCORE_LDSQ=1: the
+# queries staged in LDS (else read at addresses uniform in the workgroup: scalar loads). the same sums in the same order whatever these are
+# (tr9 B=28 at 262k, 10,923 pools a device: 308 -> 146 us a call, the scores bit-identical)
+SEQ_SCORE_U, SEQ_SCORE_WG, SEQ_SCORE_LDSQ = getenv("SEQ_SCORE_U", 4), getenv("SEQ_SCORE_WG", 64), getenv("SEQ_SCORE_LDSQ", 0)
 
 @functools.cache
 def _seq_scores_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *dev:UOp, R:int, kpool:int, WG:int, n:int=1) -> UOp:
@@ -4932,7 +4937,7 @@ def _seq_scores_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *dev:UO
   # its pools, column lp its pool lp*n+device)
   # out[g*R + r, p] (rows, P) = sum over the heads h of relu(q[g*R+r, h] . pk[bases[g]//kpool + p]) * D**-0.5, for the pools p of sequence g up
   # to its last row's (the rows of g at positions[g]..; the others aren't written). WG workgroups a sequence loop over its tiles of pools, a
-  # thread a pool (its key in registers), the sequence's queries in LDS
+  # thread a pool (its key in registers), the sequence's queries in LDS or scalar registers
   rows, P = cast(tuple[int, int], out.shape)
   _, H, D = cast(tuple[int, int, int], q.shape)
   PT, G, TILE = cast(int, pk.shape[0]), rows // R, SEQ_SCORE_TILE
@@ -4943,20 +4948,25 @@ def _seq_scores_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *dev:UO
   pools = pools.minimum(P)
   tiles = (pools + TILE - 1) // TILE
   nq = R*H*D
-  ql = UOp.alloc((nq,), dtypes.float, addrspace=AddrSpace.LOCAL)
   qf = q.reshape(rows*H*D)
-  ld = [ql[(t + i*TILE).valid(t + i*TILE < nq)].store(qf[g*nq + (t + i*TILE).minimum(nq-1)].load().float())
-        for i in range((nq + TILE - 1) // TILE)]
-  ql = ql.after(UOp.group(*ld).barrier())
+  if SEQ_SCORE_LDSQ:
+    ql = UOp.alloc((nq,), dtypes.float, addrspace=AddrSpace.LOCAL)
+    ld = [ql[(t + i*TILE).valid(t + i*TILE < nq)].store(qf[g*nq + (t + i*TILE).minimum(nq-1)].load().float())
+          for i in range((nq + TILE - 1) // TILE)]
+    ql = ql.after(UOp.group(*ld).barrier())
+    def qv(i:UOp) -> UOp: return ql[i].load()
+  else:
+    def qv(i:UOp) -> UOp: return qf[g*nq + i].load()
   active = UOp.range(((tiles - w + WG - 1) // WG).maximum(0), 3, AxisType.LOOP)
   p = (w + active * WG) * TILE + t
   prow = (bases[g].load().cast(dtypes.weakint) // (kpool * n) + p).minimum(PT-1)
-  # the dots of every (row, head) in registers, 8 dims of the key a round
+  # the dots of every (row, head) in registers, 8*U dims of the key a round
   acc = _reg((R*H,), 0, active)
-  dch = UOp.range(D // 8, 4, AxisType.LOOP)
-  kv = _vec_load(pk[prow, dch*8], 8)
+  U = SEQ_SCORE_U if D % (8*SEQ_SCORE_U) == 0 else 1
+  dch = UOp.range(D // (8*U), 4, AxisType.LOOP)
+  kv = tuple(v for u in range(U) for v in _vec_load(pk[prow, (dch*U + u)*8], 8))
   prev = acc.after(dch)
-  new = [functools.reduce(lambda a, j: a + ql[i*D + dch*8 + j].load() * kv[j], range(8), prev[i].load()) for i in range(R*H)]
+  new = [functools.reduce(lambda a, j: a + qv(i*D + dch*8*U + j) * kv[j], range(8*U), prev[i].load()) for i in range(R*H)]
   acc = acc.after(acc.store(UOp.stack(*new)).end(dch))
   stores = []
   for r in range(R):
@@ -4975,9 +4985,9 @@ def seq_scores(q:Tensor, pk:Tensor, bases:Tensor, positions:Tensor, R:int, kpool
   if n == 1:
     out = Tensor.empty(rows, P, dtype=dtypes.float32, device=devs)
     return Tensor.custom_kernel(out, q.float().contiguous(), pk, bases, positions, fxn=functools.partial(_seq_scores_kernel, R=R, kpool=kpool,
-                                                                                                        WG=16))[0]
+                                                                                                        WG=SEQ_SCORE_WG))[0]
   out = Tensor.empty(n*rows, (P + n - 1) // n, dtype=dtypes.float32, device=devs, axis=0)
-  fxn = functools.partial(_seq_scores_kernel, R=R, kpool=kpool, WG=16, n=n)
+  fxn = functools.partial(_seq_scores_kernel, R=R, kpool=kpool, WG=SEQ_SCORE_WG, n=n)
   return Tensor.custom_kernel(out, q.float().contiguous(), pk, bases, positions, _device_index(cast(tuple[str, ...], devs)), fxn=fxn)[0]
 
 def seq_index(scores:Tensor, positions:Tensor, top:int, kpool:int, compact:bool=False) -> Tensor:
