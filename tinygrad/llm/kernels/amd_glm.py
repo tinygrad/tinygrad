@@ -1520,8 +1520,17 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       # (Q6_KSPLIT=n, default 192 on RDNA3/RDNA4: split whole Q6_K blocks over workgroups and sum partial outputs)
       ksplits = _q6_input_splits(in_features, local_out, local_rows, tt, tgt, _wmma_rdna4(x.device))
       out_shape = (splits*ksplits*tokens, out_features)
+    bn4 = 128
+    if _wmma_rdna4(x.device) and not q6_gemm and ksplits == 1 and (wgs:=getenv("Q8_WGS_RDNA4", 0)):
+      # (Q8_WGS_RDNA4=n: the tiles of the fewest workgroups that are at least n (a few rows of a narrow output were 12 workgroups of 64 CUs):
+      # an output's sums over the input as with any tiles)
+      tiles = sorted(((local_rows // t) * (local_out // b), -t, -b) for t in (128, 96, 64, 32) for b in (128, 64)
+                     if local_rows % t == 0 and local_out % b == 0)
+      if tiles:
+        pick = next((c for c in tiles if c[0] >= wgs), tiles[-1])
+        tt, bn4 = -pick[1], -pick[2]
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=_wmma_rdna4(x.device),
-                            block_n=128 if _wmma_rdna4(x.device) else (getenv("Q8_BN_RDNA3", 128) if local_out % getenv("Q8_BN_RDNA3", 128) == 0
+                            block_n=bn4 if _wmma_rdna4(x.device) else (getenv("Q8_BN_RDNA3", 128) if local_out % getenv("Q8_BN_RDNA3", 128) == 0
                                                                         and ksplits == 1 and tt == 128 else 64), k_splits=ksplits)
     srcs = (x.cast(dtypes.float16).contiguous(),)
   elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None and \
