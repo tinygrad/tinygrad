@@ -1648,7 +1648,7 @@ def _sys(fmt:str, dtype:DType, *src:UOp) -> UOp: return _cfn(False, src=src, arg
 # polls this device's inbox for the peers' flags, then sums in device order (the same bits everywhere). a device is at most one call ahead
 # of the others: two parities. Each pool has a fixed workgroup count so all its epoch counters move together across varying payload sizes.
 
-FLAG_AR_MAXN = 1 << 20  # words (two half values or one float32 each)
+FLAG_AR_MAXN = getenv("FLAG_AR_MAXN", 1 << 20)  # mailbox words/lane (smaller canaries trade large-payload fallbacks for VRAM)
 
 # the collectives' mailboxes and pools (name, object), read by comm_state_report
 _COMM_STATE:list[tuple[str, int, Any]] = []
