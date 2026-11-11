@@ -1164,15 +1164,20 @@ def _rows_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features
   cur = [[acc.after(rng) for acc in output_accs] for output_accs in accs]
   words_of:dict = {}
   if chunk:
-    # (raw viewed as half: the loads of a few consecutive words coalesce into one wide load (u16 ones don't))
-    assert ggml_type == Q8_0 and chunk % 2 == 0 and raw.dtype == dtypes.half
+    # (raw viewed as half or float (pairs of words): the loads of a few consecutive elements coalesce into one wide load (u16 ones don't))
+    assert ggml_type == Q8_0 and chunk % 2 == 0 and raw.dtype in (dtypes.half, dtypes.float32)
     hb = chunk // 2  # (the blocks of a lane)
+    per = raw.dtype.itemsize // 2  # (words an element)
+    assert (hb*17) % per == 0 and output_words % per == 0
     # the u16 words of a block a lane uses: the scale, then the four u32 weight words of each WMMA half (as _quant_word's)
     need = [[0] + [1 + 2*(hh*4 + i) + j for hh in range(2) for i in (h, h+2) for j in range(2)] for h in range(2)]
     for ot, output in enumerate(outputs):
       # (scalar loads of consecutive words: the coalescer makes them wide loads, _prefetched issues the next chunk's)
-      start = output*output_words + rng*(chunk*17) + physical_half*(hb*17)
-      wl = [raw[start + w].load().bitcast(dtypes.uint16) for w in range(hb*17)]
+      start = (output*output_words + rng*(chunk*17) + physical_half*(hb*17)) // per
+      if per == 1: wl = [raw[start + w].load().bitcast(dtypes.uint16) for w in range(hb*17)]
+      else:
+        el = [raw[start + e].load().bitcast(dtypes.uint32) for e in range(hb*17 // 2)]
+        wl = [(el[w // 2] >> (16*(w % 2))) & 0xffff for w in range(hb*17)]
       low = physical_half.eq(0)
       for b in range(hb):
         own0, own1 = [wl[17*b + n].cast(dtypes.uint32) for n in need[0]], [wl[17*b + n].cast(dtypes.uint32) for n in need[1]]
@@ -1412,7 +1417,10 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   # half_out: q8_gemm stores the sums in half (the others in float, then cast)
   half_out = half_out and getattr(fxn, "func", None) is _q8_gemm_kernel
   out = Tensor.empty(out_shape, dtype=dtypes.half if half_out else dtypes.float32, device=x.device, axis=out_axis)
-  w = layer.weight.bitcast(dtypes.half) if isinstance(fxn, functools.partial) and fxn.keywords.get("chunk") else layer.weight
+  w = layer.weight
+  if isinstance(fxn, functools.partial) and (c:=fxn.keywords.get("chunk")):
+    # (the chunk path's view of the Q8_0 words: float (two words an element, wide loads of four) where the chunks' words are pairs)
+    w = w.bitcast(dtypes.float32) if getenv("ROWS_F32", 1) and (c//2*17) % 2 == 0 and (in_features*17//32) % 2 == 0 else w.bitcast(dtypes.half)
   result = Tensor.custom_kernel(out, w, *srcs, fxn=functools.partial(fxn, out_features=local_out, in_features=in_features))[0]
   if xh is not None and xh[1] is not None:
     # (the rows scaled into half's range scaled back: every device's rows of its partial sums)
