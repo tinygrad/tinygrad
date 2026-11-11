@@ -597,6 +597,12 @@ def _rot_host(hd:int) -> tuple[Tensor, Tensor]:
   m = [[sign[i] * (-1)**bin(i & j).count("1") * hd**-0.5 for j in range(hd)] for i in range(hd)]
   return Tensor(m, dtype=dtypes.float32, device="CPU").realize(), Tensor([float(s) for s in sign], dtype=dtypes.float32, device="CPU").realize()
 
+@functools.cache
+def _rot_dev(hd:int, device:str|tuple[str, ...]) -> tuple[Tensor, Tensor]:
+  """_rot_host's matrix and signs on the devices (made once: every block's the same, not a copy a block)"""
+  m, sign = _rot_host(hd)
+  return m.to(device).contiguous().realize(), sign.to(device).realize()
+
 _t_import = time.perf_counter()
 def _process_age() -> float:
   """the seconds since this process started (its start in /proc), 0 if unknown"""
@@ -1594,9 +1600,8 @@ class QSABlock(TransformerBlock):
       if QSA_KV_ROT and bits != 16:
         hd = self.config.head_dim
         assert hd & (hd - 1) == 0, "QSA_KV_ROT: a Hadamard matrix of a power of two dims"
-        m, sign = _rot_host(hd)
-        self._rot_m = m.to(x.device).contiguous().realize()
-        if QSA_ROT_FWHT: self._rot_sign = sign.to(x.device).realize()
+        self._rot_m = _rot_dev(hd, x.device)[0]
+        if QSA_ROT_FWHT: self._rot_sign = _rot_dev(hd, x.device)[1]
       self.freqs_cis = _freqs(self.config.rope_dim, self.config.max_context, self.config.rope_theta, x.device, self.config.yarn)
     if self.indexer is not None: self.indexer._init_state(x)
 
