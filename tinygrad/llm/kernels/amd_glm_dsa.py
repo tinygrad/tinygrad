@@ -1459,6 +1459,40 @@ def _half_rows_kernel(xh:UOp, sc:UOp, x:UOp) -> UOp:
             sc[row.valid(lane.eq(0))].store(s)]
   return UOp.group(*stores).end(row, lane).sink(arg=KernelInfo(name="half_rows", opts_to_apply=()))
 
+@functools.cache
+def _row_scale_kernel(sc:UOp, x:UOp, amax_only:bool=False) -> UOp:
+  # Q8_GEMM_SC's row scales in one kernel (Q8_SC_K): a wave a row, a lane 8 halves at a time, the max of their abs (a max in any order is the
+  # same), the scale with _half_rows' float ops. (the reduce it replaces is a thread a row: 2688 threads looping over the row)
+  # (amax_only: sc (1, R, 1) the max of the device's part of every row)
+  R, N = cast(tuple[int, int], x.shape)
+  W = next(w for w in (4, 2, 1) if R % w == 0)
+  assert N % 256 == 0
+  if amax_only: sc = sc.reshape(R, 1)
+  blk, wave, lane = UOp.range(R // W, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  row = blk * W + wave
+  j = UOp.range(N // 256, 2, AxisType.LOOP)
+  m = _reg((1,), 0.0)
+  vals = [x[row, j*256 + lane*8 + i].load().float().abs() for i in range(8)]
+  m = m.after(m[0].store(functools.reduce(lambda a, b: a.maximum(b), vals, m.after(j)[0].load())).end(j))
+  amax = warp_reduce(m[0].load(), maximum=True, full_wave=True)
+  s = amax if amax_only else (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0)
+  return sc[row.valid(lane.eq(0)), 0].store(s).end(blk, wave, lane).sink(arg=KernelInfo(name="row_scale", opts_to_apply=()))
+
+def _row_scale(xr:Tensor) -> Tensor:
+  """the (rows, 1) float scales of x (rows, n) half into half's range (see _half_rows)"""
+  # (not a row split over the devices (a row parallel layer's input): its max is the whole row's, a reduce over the devices)
+  multi = isinstance(xr.device, tuple)
+  if getenv("Q8_SC_K", 1) and xr.shape[-1] % 256 == 0 and xr.dtype == dtypes.half and (not multi or xr.uop.axis in (None, 0)):
+    sc = Tensor.empty(xr.shape[0], 1, dtype=dtypes.float32, device=xr.device, axis=xr.uop.axis if multi else None)
+    return Tensor.custom_kernel(sc, xr.contiguous(), fxn=_row_scale_kernel)[0]
+  if getenv("Q8_SC_K", 1) and isinstance(devs:=xr.device, tuple) and xr.uop.axis == 1 and xr.dtype == dtypes.half and \
+     int(xr.shape[-1]) // len(devs) % 256 == 0:
+    # (a row split over the devices: every device the max of its part, the max of those over the devices)
+    parts = Tensor.empty(len(devs), xr.shape[0], 1, dtype=dtypes.float32, device=xr.device, axis=0)
+    amax = Tensor.custom_kernel(parts, xr.contiguous(), fxn=functools.partial(_row_scale_kernel, amax_only=True))[0].max(0)
+  else: amax = xr.float().abs().max(-1, keepdim=True)
+  return (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
+
 def _half_rows(x:Tensor, tokens:int, splits:int=1) -> tuple[Tensor, Tensor|None]:
   """
   x (tokens, in) in half for the f16 kernels: a row past HALF_ROWS_MAX divided by a power of two (exact) to fit (GLM-5's first tokens' activations
@@ -1560,8 +1594,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     if getenv("Q8_GEMM_SC", 1) and local_splits == 1 and getenv("HALF_ROWS", 1) and x.dtype == dtypes.half:
       # (Q8_GEMM_SC, default on: a half x's rows scaled by the gemm as it loads them, not a scaled copy of all of x (_half_rows))
       xr = x.reshape(tokens, x.shape[-1])
-      amax = xr.float().abs().max(-1, keepdim=True)
-      sc = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
+      sc = _row_scale(xr)
       srcs, xh = (xr.contiguous(), sc), (xr, sc)
       if not half_out and getenv("GEMM_OSC", 1): fxn, srcs, xh = functools.partial(fxn, osc=True), (*srcs, sc), None
     else:
