@@ -193,12 +193,18 @@ for g in GS:
 from tinygrad.helpers import GlobalCounters
 print("MEM_USED GB " + " ".join(f"{GlobalCounters.mem_used_per_device.get(d, 0)/1e9:.3f}" for d in devs), flush=True)
 if getenv("MEM_DUMP"):
+  # (every device's VRAM free in its allocator, as qwen4exp's memory_report: tinygrad's MEM_USED counts host buffers too)
+  def _vfree(d:str) -> float:
+    try: return sum(sz for sz, _, _, f in Device[d].iface.dev_impl.mm.pa_allocator.blocks.values() if f) / 1e9  # type: ignore[attr-defined]
+    except Exception: return float("nan")
+  print("MEM_VRAM_FREE GB " + " ".join(f"{_vfree(d):.3f}" for d in devs), flush=True)
+if getenv("MEM_DUMP"):
   # (MEM_DUMP=n: device 0's allocated buffers by owner: the model's named tensors (weights, caches), the jits' shared scratch, the rest
   # by size (the n largest): where a user's memory outside the cache goes)
   import gc, collections
   from tinygrad.uop.ops import Ops
   from tinygrad.device import Buffer
-  d0, names = devs[0], {}
+  d0, names = devs[getenv("MEM_DEV", 0)], {}  # (MEM_DEV=i: device i's)
   def bufs_of(u):
     try: b = u.buffer
     except Exception: return []
