@@ -460,7 +460,7 @@ def _fill_zero(*ts:Tensor):
 
 # (while not empty: _fill_zero allocates, the buffers are zeroed later, see _zero_deferred)
 _zero_later:list[list[Buffer]] = []
-ZERO_ALLOC_LATE = getenv("ZERO_ALLOC_LATE", 0)
+ZERO_ALLOC_LATE = getenv("ZERO_ALLOC_LATE", 1)
 def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
   """the tensors are buffers now (allocated, their devices and split kept), their values are computed by the function added to pending"""
   pairs, ts = [], list({id(t): t for t in ts}.values())  # (a tensor of two modules once)
