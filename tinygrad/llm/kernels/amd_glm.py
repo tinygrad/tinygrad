@@ -650,6 +650,11 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
                                estimates=None if active is None else Estimates(2*weights, nbytes, nbytes))
   # a few tokens share the weight loads
   multi = int(out.shape[0]) if gate is None and xtoken is None and 1 < out.shape[0] <= DECODE_MULTI else 1
+  # (DECODE_BUNDLE: more rows than that (RDNA4's batched decoding of 28 sequences: 84 rows) in bundles of the most rows that divide them, up
+  # to DECODE_MULTI: a bundle's rows share the weight loads, every row's sums as its own kernel's: the same values, not a read a row)
+  if multi == 1 and gate is None and xtoken is None and (rows:=int(out.shape[0])) > DECODE_MULTI and getenv("DECODE_BUNDLE", 1) and \
+     (m:=max(d for d in range(1, DECODE_MULTI + 1) if rows % d == 0)) >= getenv("DECODE_BUNDLE_MIN", 4):
+    return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type], multi=m, bundles=(rows // m, lambda t: t))
   return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type], multi=multi)
 
 def _is_buffer(x:Tensor) -> bool:
