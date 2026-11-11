@@ -3044,6 +3044,8 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
     if (bundles:=_bundle_cache.get(key)) is None:
       bundles = _bundle_cache[key] = moe_bundles(sel, first, experts, M, tokens*int(slots))
     bexp, brow = bundles
+    # (MOE_BUNDLE_F32: the bundles' rows stored in float as the per-row kernel's: the same dots, the same values downstream)
+    if not wmma and getenv("MOE_BUNDLE_F32", 0): out_dtype = dtypes.float32
     out = Tensor.empty(devices*tokens*slots, out_features, dtype=out_dtype, device=x.device, axis=0 if devices > 1 else None)
     out = out.zeros_like().contiguous()
     # (the int8 tensor cores: a workgroup a few blocks of outputs of a narrow input, their activations loaded once)
