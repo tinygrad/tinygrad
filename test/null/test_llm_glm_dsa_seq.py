@@ -195,9 +195,10 @@ class TestGLMDSASequence(unittest.TestCase):
         self.assertEqual(K._rows_f16_config(16, 6144, 160, K.Q8_0, "NULL")["chunk"], 0)  # (5 groups)
         self.assertIsNone(K._rows_f16_config(128, 2048, 6144, K.Q8_0, "NULL"))
       getenv.cache_clear()
-    for typ, raw, chunk in ((K.Q8_0, Tensor.empty(64*256*17//32, dtype="half"), 8), (K.Q6_K, Tensor.empty(64*105, dtype="uint16"), 0)):
+    for typ, raw, chunk, pkh in ((K.Q8_0, Tensor.empty(64*256*17//32, dtype="half"), 8, False), (K.Q8_0, Tensor.empty(64*256*17//64), 8, True),
+                                 (K.Q6_K, Tensor.empty(64*105, dtype="uint16"), 0, False)):
       out, x = Tensor.empty(32, 64, dtype="float32"), Tensor.empty(32, 256, dtype="half")
-      fxn = functools.partial(K._rows_f16_wmma_kernel, out_features=64, in_features=256, ggml_type=typ, chunk=chunk)
+      fxn = functools.partial(K._rows_f16_wmma_kernel, out_features=64, in_features=256, ggml_type=typ, chunk=chunk, pkh=pkh)
       self.assertIs(Tensor.custom_kernel(out, raw, x, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
 
   def test_half_rows_local_scales(self):
