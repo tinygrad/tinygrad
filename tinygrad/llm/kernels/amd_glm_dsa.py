@@ -4891,14 +4891,20 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   if small and getenv("SEQ_P2P_A2A", 1 if _seq_p2p_pack() is None else 0) and dims is not None and H % n == 0:
     # (a few tokens: every device's outputs of the heads of a device (normed by its sum), their max and sum, to that device in one exchange;
     # combined there by their max and sum)
-    hl, Dp = int(H) // n, dims + 2
-    pay = od[..., :dims].cat(mx.squeeze(3), ld, dim=-1).permute(0, 2, 1, 3, 4).reshape(n, T, G*16, Dp)[:, :, :H]
+    # (SEQ_A2A_HALF, default off, a numerics change: the outputs in half, two a float word (half the bytes), their max and sum in float)
+    a2a_half = bool(getenv("SEQ_A2A_HALF", 0)) and dims % 2 == 0
+    odp = od[..., :dims]
+    if a2a_half: odp = odp.maximum(-65504.0).minimum(65504.0).cast(dtypes.half).contiguous().bitcast(dtypes.float32)
+    Dv = dims // 2 if a2a_half else dims
+    hl, Dp = int(H) // n, Dv + 2
+    pay = odp.cat(mx.squeeze(3), ld, dim=-1).permute(0, 2, 1, 3, 4).reshape(n, T, G*16, Dp)[:, :, :H]
     pay = pay.reshape(n, T, n, hl, Dp).permute(0, 2, 1, 3, 4).reshape(n, n, T*hl*Dp)
     Ti = cast(int, T)
     pad_n = round_up(Ti*hl*Dp, 256)
     if (g:=p2p_all_to_all(pay.pad((None, None, (0, pad_n - Ti*hl*Dp))))) is not None:
       g = g.reshape(n, n, pad_n)[:, :, :T*hl*Dp].reshape(n, n, T, hl, Dp)
-      gm, gl, go = g[..., dims:dims+1], g[..., dims+1:dims+2], g[..., :dims]
+      gm, gl, go = g[..., Dv:Dv+1], g[..., Dv+1:Dv+2], g[..., :Dv]
+      if a2a_half: go = go.contiguous().bitcast(dtypes.half).float()
       Mx = gm.max(1, keepdim=True)
       w = gl * (gm - Mx).exp()
       res = (go * w).sum(1) / w.sum(1).maximum(1e-30)
