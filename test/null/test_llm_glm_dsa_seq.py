@@ -170,6 +170,11 @@ class TestGLMDSASequence(unittest.TestCase):
     for extra in ((), (scg,)):
       fxn = functools.partial(_q8_gemm_kernel, token_tile=96, out_features=N, in_features=K)
       self.assertIs(sink(Tensor.empty(M, N), raw, xg, *extra, fxn=fxn).op, Ops.SINK)
+    # (GEMM_PAD: the token tiles of a chunk's tokens only)
+    rows = UOp.variable("toks", 1, M)
+    fxn = functools.partial(_q8_gemm_kernel, token_tile=96, out_features=N, in_features=K, rows=rows)
+    k = sink(Tensor.empty(M, N), raw, xg, fxn=fxn)
+    self.assertIn(rows, k.toposort())
 
   def test_lists_pad(self):
     # (LISTS_PAD: the counts of a chunk's padding rows zero, the tokens' rows as they were)

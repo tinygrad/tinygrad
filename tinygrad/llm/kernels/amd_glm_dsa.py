@@ -1124,7 +1124,8 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
                             layout, dequant, f"linear_{QUANT_NAMES[ggml_type]}_f16_wmma", rdna4, group, expert_words, x_div, act)
 
 @functools.cache
-def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *sc:UOp, token_tile:int, out_features:int=0, in_features:int=0, ggml_type:int=Q8_0) -> UOp:
+def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *sc:UOp, token_tile:int, out_features:int=0, in_features:int=0, ggml_type:int=Q8_0,
+                    rows:UOp|None=None) -> UOp:
   # Q8_0 weights (rows of 32 weight blocks of 17 halfwords) times f16 x on RDNA4 WMMA: a workgroup computes token_tile tokens x 128 outputs with
   # 4 waves, two of the tokens by two of the outputs (4 tiles of 16 outputs each). per group of 32 inputs the workgroup puts the tokens' x and
   # the dequantized weights (a block a thread) in LDS: a weight is dequantized once for token_tile tokens, x is loaded once for 128 outputs
@@ -1134,7 +1135,9 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *sc:UOp, token_tile:int, out_featur
   OW, TW, OT, groups = 2, 2, 4, K // 32
   TT = token_tile // (16 * TW)  # token tiles of a wave
   # outputs past N (a last partial block of 128): their weights are the last row's and they aren't stored
-  token_block, output_block = UOp.range(M // token_tile, 0, AxisType.GLOBAL), UOp.range((N + 127) // 128, 1, AxisType.GLOBAL)
+  # (rows: the token tiles of the first rows only (GEMM_PAD: a prefill chunk's tokens, its padding rows after them aren't written))
+  tblocks = M // token_tile if rows is None else ((rows + token_tile - 1) // token_tile).minimum(M // token_tile)
+  token_block, output_block = UOp.range(tblocks, 0, AxisType.GLOBAL), UOp.range((N + 127) // 128, 1, AxisType.GLOBAL)
   lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(OW * TW, 3, axis_type=AxisType.LOCAL)
   col, half = lane % 16, lane // 16
   wt, wo, tid = wave // OW, wave % OW, wave * 32 + lane
@@ -1199,6 +1202,9 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *sc:UOp, token_tile:int, out_featur
   return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
 HALF_ROWS_MAX = 32768.0
+# (the rows R of a sequence parallel prefill chunk's gathered x and its T tokens (the rows after them are padding), see GEMM_PAD)
+GEMM_ROWS:list[tuple[int, UOp|int]|None] = [None]
+
 def _half_rows(x:Tensor, tokens:int, splits:int=1) -> tuple[Tensor, Tensor|None]:
   """
   x (tokens, in) in half for the f16 kernels: a row past HALF_ROWS_MAX divided by a power of two (exact) to fit (GLM-5's first tokens' activations
@@ -1265,6 +1271,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
        _wmma_rdna4(x.device) and (tt:=next((t for t in (96, 128, 64) if local_rows % t == 0), 0)) and getenv("Q8_GEMM", 1):
     # many tokens: the weights dequantized in LDS for token tiles of tt
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type)
+    # (GEMM_PAD, default off: a prefill chunk's x (its R rows, the first T of them tokens): the token tiles of the tokens only)
+    if getenv("GEMM_PAD", 0) and (rt:=GEMM_ROWS[0]) is not None and rt[0] == tokens and not split and isinstance(rt[1], UOp):
+      fxn = functools.partial(fxn, rows=_unbind(rt[1]))
     if getenv("Q8_GEMM_SC", 0) and local_splits == 1 and getenv("HALF_ROWS", 1) and x.dtype == dtypes.half:
       # (Q8_GEMM_SC, default off: a half x's rows scaled by the gemm as it loads them, not a scaled copy of all of x (_half_rows))
       xr = x.reshape(tokens, x.shape[-1])
