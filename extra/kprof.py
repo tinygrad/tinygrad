@@ -43,3 +43,46 @@ def sequence_timed(*devs:str) -> list[tuple[str, str, float, float]]:
 def sequence(*devs:str) -> list[tuple[str, str, float]]:
   """(device, name, us) of the profiled kernels in order"""
   return [(device, name, duration) for device, name, _, duration in sequence_timed(*devs)]
+
+def critical_path(seq:list[tuple[str, str, float, float]], eps:float=2.0) -> dict:
+  """
+  the critical path of a timeline (sequence_timed): from the last event back, an event's predecessor is the one before it on its lane (device,
+  kernels or copies) if that one ended within eps us of its start (the lane was busy), else the event of any lane that ended last before
+  its start (what it waited for). returns the path's time by kind/name, its waits (gaps) and lane switches
+  """
+  import bisect
+  ev = sorted(((st, st + du, d, n, n.startswith("copy")) for d, n, st, du in seq), key=lambda e: e[1])
+  ends = [e[1] for e in ev]
+  lanes: dict = collections.defaultdict(list)
+  for e in sorted(ev): lanes[(e[2], e[4])].append(e)
+  lane_st = {k: [e[0] for e in v] for k, v in lanes.items()}
+  t0 = min(e[0] for e in ev)
+  cur, out = ev[-1], {"wall": ev[-1][1] - t0, "kernels": 0.0, "copies": 0.0, "wait": 0.0, "switches": 0, "names": collections.Counter(),
+                      "devs": collections.Counter(), "waits": collections.Counter()}
+  while True:
+    out["copies" if cur[4] else "kernels"] += cur[1] - cur[0]
+    out["names"][cur[3] if not cur[4] else " ".join(cur[3].split()[:3])] += cur[1] - cur[0]
+    out["devs"][(cur[2], cur[4])] += cur[1] - cur[0]
+    k = (cur[2], cur[4])
+    i = bisect.bisect_left(lane_st[k], cur[0]) - 1
+    prev = lanes[k][i] if i >= 0 else None
+    if prev is not None and prev[1] >= cur[0] - eps: nxt = prev
+    else:
+      j = bisect.bisect_right(ends, cur[0]) - 1
+      while j >= 0 and ev[j] is cur: j -= 1
+      if j < 0: break
+      nxt = ev[j]
+      out["wait"] += max(0.0, cur[0] - nxt[1])
+      out["waits"][("copy" if nxt[4] else "kern") + "->" + ("copy" if cur[4] else "kern")] += max(0.0, cur[0] - nxt[1])
+      if (nxt[2], nxt[4]) != k: out["switches"] += 1
+    cur = nxt
+  out["lead"] = cur[0] - t0
+  return out
+
+def busy_all(seq:list[tuple[str, str, float, float]]) -> tuple[float, float]:
+  """(span, the union of every device's events): span - union is the time no device ran anything (host, launch)"""
+  iv = sorted((st, st + du) for _, _, st, du in seq)
+  tot, end = 0.0, float("-inf")
+  for a, b in iv:
+    if b > end: tot, end = tot + b - max(a, end), b
+  return (max(b for _, b in iv) - iv[0][0]) if iv else 0.0, tot

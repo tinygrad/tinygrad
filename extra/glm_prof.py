@@ -72,6 +72,14 @@ if getenv("PREFILL_PROF"):
       cc = [(st0, st0 + du) for dd, n, st0, du in seq if dd == d and n.startswith("copy")]
       span = max(b for _, b in kk + cc) - min(a for a, _ in kk + cc)
       print(f"  {d:8s} span {span/1e3:8.1f} ms  kernels {union(kk)/1e3:8.1f}  copies {union(cc)/1e3:8.1f}  either {union(kk + cc)/1e3:8.1f}")
+    # (the critical path: what the last event waited for, back to the first; no device busy = host)
+    span, busy = kprof.busy_all(seq)
+    print(f"all devices: span {span/1e3:.1f} ms, some device busy {busy/1e3:.1f} ms, none busy {(span-busy)/1e3:.1f} ms")
+    cp = kprof.critical_path(seq)
+    print(f"critical path: {cp['wall']/1e3:.1f} ms = kernels {cp['kernels']/1e3:.1f} + copies {cp['copies']/1e3:.1f} + waits {cp['wait']/1e3:.1f}"
+          f" + lead {cp['lead']/1e3:.1f} ms, {cp['switches']} lane switches; waits {dict((k, round(v/1e3, 1)) for k, v in cp['waits'].items())}")
+    for (d, c), us in cp["devs"].most_common(16): print(f"  path on {d:8s} {'copies ' if c else 'kernels'} {us/1e3:8.1f} ms")
+    for n, us in cp["names"].most_common(getenv("TOP", 40)): print(f"  path {us/1e3:8.1f} ms  {n}")
   raise SystemExit(0)
 gen = model.generate(prompt)
 st = time.perf_counter()
