@@ -1355,7 +1355,10 @@ def _rows_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features
 
 @functools.cache
 def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *sc:UOp, token_tile:int, out_features:int=0, in_features:int=0, ggml_type:int=Q8_0,
-                    rows:UOp|None=None) -> UOp:
+                    rows:UOp|None=None, osc:bool=False) -> UOp:
+  # (osc: the last source is the rows' (M, 1) float scales the sums are multiplied by as they are stored (GEMM_OSC, see _half_rows): the
+  # float multiply of the kernel that did it after, the same values)
+  osc_s, sc = (sc[-1], sc[:-1]) if osc else (None, sc)
   # Q8_0 weights (rows of 32 weight blocks of 17 halfwords) times f16 x on RDNA4 WMMA: a workgroup computes token_tile tokens x 128 outputs with
   # 4 waves, two of the tokens by two of the outputs (4 tiles of 16 outputs each). per group of 32 inputs the workgroup puts the tokens' x and
   # the dequantized weights (a block a thread) in LDS: a weight is dequantized once for token_tile tokens, x is loaded once for 128 outputs
@@ -1426,8 +1429,11 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *sc:UOp, token_tile:int, out_featur
   def ocol(o:int) -> UOp:
     c = output_block * 128 + wo * OT * 16 + o * 16 + col
     return c.valid(c < N) if N % 128 else c
-  stores = [out[token_block * token_tile + wt * TT * 16 + t * 16 + half * 8 + i, ocol(o)].store(
-              accs[o][t].after(update)[i].load().cast(out.dtype)) for o in range(OT) for t in range(TT) for i in range(8)]
+  def orow(t:int, i:int) -> UOp: return token_block * token_tile + wt * TT * 16 + t * 16 + half * 8 + i
+  def oval(o:int, t:int, i:int) -> UOp:
+    v = accs[o][t].after(update)[i].load()
+    return (v * osc_s[orow(t, i), 0].load() if osc_s is not None else v).cast(out.dtype)
+  stores = [out[orow(t, i), ocol(o)].store(oval(o, t, i)) for o in range(OT) for t in range(TT) for i in range(8)]
   name = f"q8_gemm_{M}_{N}_{K}" if getenv("LIN_NAMES") else "q8_gemm"  # (profiling: the shapes)
   return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
@@ -1557,7 +1563,11 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
       amax = xr.float().abs().max(-1, keepdim=True)
       sc = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
       srcs, xh = (xr.contiguous(), sc), (xr, sc)
-    else: srcs = ((xh:=_half_rows(x, tokens, local_splits))[0],)
+    else:
+      srcs = ((xh:=_half_rows(x, tokens, local_splits))[0],)
+      # (GEMM_OSC: float sums scaled back by the gemm as it stores them, not by a kernel reading and writing all of them after)
+      if xh[1] is not None and local_splits == 1 and not half_out and getenv("GEMM_OSC", 1):
+        fxn, srcs, xh = functools.partial(fxn, osc=True), (*srcs, xh[1].reshape(tokens, 1)), None
   elif tokens % 16 == 0 and local_out % 16 == 0 and xq is None:
     if layer.ggml_type == IQ4_XS:
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
