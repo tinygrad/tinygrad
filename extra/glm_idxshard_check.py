@@ -31,7 +31,9 @@ def lists(o:np.ndarray) -> list:
   return [(int(r[-1]), r[:r[-1]].tobytes()) for r in o]
 
 fails = 0
-for T, pos in [(3, 4000), (3, 12000), (3, 30000), (3, 65000), (3, 200000), (3, PT*KP - 8), (64, 30000), (64, 131000), (64, 261000), (512, 200000), (512, 262144 - 600)]:
+CASES = [(3, 4000), (3, 12000), (3, 30000), (3, 65000), (3, 200000), (3, PT*KP - 8), (64, 30000), (64, 131000), (64, 261000), (512, 200000),
+         (512, 262144 - 600)]
+for T, pos in CASES:
   q = Tensor((rng.standard_normal((T, H, D)) * 0.5).astype(np.float16)).shard(devs).realize()
   w = Tensor((rng.standard_normal((T, H)) * 0.1).astype(np.float32)).shard(devs).realize()
   qs = UOp.variable("start_pos", 0, PT*KP).bind(pos)
@@ -52,7 +54,8 @@ for T, pos in [(3, 4000), (3, 12000), (3, 30000), (3, 65000), (3, 200000), (3, P
         for r in range(T):
           ok = (gp + 1)*KP <= pos + r + 1
           diff = np.nonzero(sw[r, gp[ok]].view(np.uint32) != ss[d, r, lp[ok]].view(np.uint32))[0]
-          if len(diff) and (r < 12 or r % 97 == 0): print(f"  scores dev {d} row {r}: {len(diff)} of {ok.sum()} differ, first pools {gp[ok][diff[:4]]} "
+          if len(diff) and (r < 12 or r % 97 == 0):
+            print(f"  scores dev {d} row {r}: {len(diff)} of {ok.sum()} differ, first pools {gp[ok][diff[:4]]} "
                                          f"whole {sw[r, gp[ok][diff[:2]]]} split {ss[d, r, lp[ok][diff[:2]]]}")
       # (every device's candidates: its top TOP of a row's pools before the query, against numpy's of the split scores)
       import functools
