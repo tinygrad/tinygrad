@@ -1,5 +1,5 @@
 from __future__ import annotations
-import array, contextlib, enum, functools, itertools, math, pathlib, random, re, time
+import array, contextlib, enum, functools, itertools, math, os, pathlib, random, re, time
 from dataclasses import dataclass, replace
 from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
@@ -598,6 +598,14 @@ def _rot_host(hd:int) -> tuple[Tensor, Tensor]:
   return Tensor(m, dtype=dtypes.float32, device="CPU").realize(), Tensor([float(s) for s in sign], dtype=dtypes.float32, device="CPU").realize()
 
 _t_import = time.perf_counter()
+def _process_age() -> float:
+  """the seconds since this process started (its start in /proc), 0 if unknown"""
+  try:
+    with open("/proc/self/stat") as f: start = int(f.read().rsplit(")", 1)[1].split()[19])
+    with open("/proc/uptime") as f: return float(f.read().split()[0]) - start / os.sysconf("SC_CLK_TCK")
+  except (OSError, ValueError, IndexError): return 0.0
+# (DEBUG_LOAD: where the clock of the laps starts: the process's age then and the wall clock, for the launcher's time before it)
+if getenv("DEBUG_LOAD"): print(f"load: qwen4exp imported at process age {_process_age():.2f}s, epoch {time.time():.3f}", flush=True)
 def _lap(what:str):
   """DEBUG_LOAD=1: a line when loading gets past `what` (the time is the log's)"""
   if getenv("DEBUG_LOAD"):
