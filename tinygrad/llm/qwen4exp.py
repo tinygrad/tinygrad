@@ -3342,6 +3342,9 @@ class Transformer:
     if fused:
       if self._pending_load: _realize_later(fused, self._pending_load)
       else: Tensor.realize(*fused)
+    # (LOAD_APART: the skinny Linears' weights not copied here: _derive_weights' transposed copy is made from the file's, the same values (a
+    # cast, then the copy), the copy here held dead in its group's buffer (C2: ~180 MB a device))
+    if getenv("LOAD_APART", 0): packed |= {id(l.weight) for l in self._skinny_lins()}
     small = [p for p in nn.state.get_parameters(self) if id(p) not in packed and p is not self.token_embd.weight and not p.uop.is_realized]
     for p in small: p.replace(p.contiguous())
     tables = dedup([t for m in modules([self.blk] + ([self.mtp] if hasattr(self, "mtp") else []), set()) if isinstance(m, ExpertWeights)
@@ -3365,6 +3368,15 @@ class Transformer:
     _lap("derived")
     if ran: _drop_apart()
 
+  def _skinny_lins(self) -> list[Linear]:
+    """the Linears of float weights _derive_weights stores transposed (weight_t) for skinny_matmul"""
+    blocks = self.blk + ([self.mtp] if hasattr(self, "mtp") else [])
+    return [l for b in blocks for l in (getattr(b, "ffn_gate_inp", None), getattr(getattr(b, "indexer", None), "proj", None),
+                                        *(getattr(getattr(b, "indexer", None), p, None) for p in ("q_proj", "k_proj")),
+                                        *(getattr(getattr(b, h, None), "inject", None) for h in ("hc_attn", "hc_ffn")))
+            if isinstance(l, Linear) and l.ggml_type is None and l.weight.dtype in (dtypes.float32, dtypes.half) and l.weight.ndim == 2 and
+            getattr(l, "bias", None) is None and not hasattr(l, "weight_t") and amd_custom_kernels_supported(l.weight.device)]
+
   def _derive_weights(self):
     """the weights computed from the file's"""
     def realize(ts:list[Tensor]):
@@ -3373,12 +3385,7 @@ class Transformer:
     # (SKINNY) the float weights of few outputs that decoding multiplies by (the routers, the indexers' head weights) stored transposed (the
     # outputs the fast axis), the Linear's a view of it: skinny_matmul reads every input's weights of all the outputs at once
     blocks = self.blk + ([self.mtp] if hasattr(self, "mtp") else [])
-    lins = [l for b in blocks for l in (getattr(b, "ffn_gate_inp", None), getattr(getattr(b, "indexer", None), "proj", None),
-                                        *(getattr(getattr(b, "indexer", None), p, None) for p in ("q_proj", "k_proj")),
-                                        *(getattr(getattr(b, h, None), "inject", None) for h in ("hc_attn", "hc_ffn")))
-            if isinstance(l, Linear) and l.ggml_type is None and l.weight.dtype in (dtypes.float32, dtypes.half) and l.weight.ndim == 2 and
-            getattr(l, "bias", None) is None and not hasattr(l, "weight_t") and amd_custom_kernels_supported(l.weight.device)]
-    if lins:
+    if lins:=self._skinny_lins():
       realize(wts:=[l.weight.T.contiguous() for l in dedup(lins)])
       for l, wt in zip(dedup(lins), wts): l.weight_t, l.weight = wt, wt.T
     # (gated hyper-connections: the inject weights in float for ghc_pre, zeros without (a mix alone))
