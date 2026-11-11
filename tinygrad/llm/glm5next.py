@@ -4112,10 +4112,12 @@ class Transformer:
     tmv, self._seq_pf_temp = _host_buffer(devs, 8, dtypes.float32)
     self._seq_pf_host_temp = tmv.cast('f')
     self._seq_host_out, self._seq_out = _host_ints(devs[0], m*(2*k+1) + 1)
-    self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True) for sv in (True, False)}
-    self._seq_ckpt_jits = {sv: TinyJit(functools.partial(self._seq_ckpt_copy, sv), capture_first=True) for sv in (True, False)}
+    # (SEQ_COPY_SCRATCH=1: their intermediates in the jits' shared arenas, not their own (~140 MB a card at 30 slots): one runs at a time)
+    sc:dict|None = self._scratch if getenv("SEQ_COPY_SCRATCH", 0) else None
+    self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True, scratch=sc) for sv in (True, False)}
+    self._seq_ckpt_jits = {sv: TinyJit(functools.partial(self._seq_ckpt_copy, sv), capture_first=True, scratch=sc) for sv in (True, False)}
     # (SEQ_REPLAY: a slot's recurrent states advanced to a position, see _seq_materialize; the position of every slot's state)
-    self._seq_mat_jit = TinyJit(self._seq_mat, capture_first=True) if SEQ_REPLAY else None
+    self._seq_mat_jit = TinyJit(self._seq_mat, capture_first=True, scratch=sc) if SEQ_REPLAY else None
     self._seq_kbase:dict[int, int] = {}
     # (the calls' chunk counts that fit the caches: a short max context's are a few chunks)
     self._move_calls = self._chunk_calls((self.seq_rows() + self.REGION_ALIGN) // self.SEQ_MOVE - 1)
