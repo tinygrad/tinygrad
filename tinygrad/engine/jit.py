@@ -1,5 +1,5 @@
 from typing import TypeVar, Generic, Callable, Any, Sequence, overload, cast
-import functools, os, io, pickle, itertools, threading, warnings, time, weakref, sys
+import functools, fnmatch, os, io, pickle, itertools, threading, warnings, time, weakref, sys
 from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc, dedup, unwrap
 from tinygrad.device import Buffer, MultiBuffer
@@ -307,6 +307,23 @@ class _Compiles:
         # (the worker's traceback: the pool's exception holds it as its cause)
         except Exception as e: _send(aw, pickle.dumps(f"{type(e).__name__}: {e}{chr(10) + str(e.__cause__) if e.__cause__ else ''}"))
     os.close(aw)
+
+def warmup_wanted(name:str) -> bool:
+  """
+  WARMUP_JITS: the jits a model's warm-up captures and runs, comma separated patterns (fnmatch) of their names (e.g. "step1,prefill192*"; the
+  default "all"; "none": no jit, the memory only). the others are captured on their first call (a run that uses a few doesn't wait for all)
+  """
+  if (sel:=str(getenv("WARMUP_JITS", "all"))) == "all": return True
+  return any(fnmatch.fnmatchcase(name, p.strip()) for p in sel.split(",") if p.strip() not in ("", "none"))
+
+def warmup_select(calls:dict[str, tuple[Any, Callable[[], Any]]], par:list[tuple[Any, Callable[[], Any]]]) \
+    -> tuple[dict[str, tuple[Any, Callable[[], Any]]], list[tuple[Any, Callable[[], Any]]]]:
+  """a warm-up's named calls (name -> (jit, call)) and its jits to capture at once, of the names WARMUP_JITS wants (see warmup_wanted)"""
+  if getenv("WARMUP_JITS", "all") == "all": return calls, par
+  calls = {n: c for n, c in calls.items() if warmup_wanted(n)}
+  # (a call's jit can be a list: the jits of its parts)
+  keep = [x for k, _ in calls.values() for x in (k if isinstance(k, list) else [k])]
+  return calls, [(j, c) for j, c in par if any(j is k for k in keep)]
 
 def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[Callable[[_TinyJit], bool]], None]|None=None,
                      taken:Callable[[_TinyJit], None]|None=None) -> list[bool]:

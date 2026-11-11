@@ -3,7 +3,7 @@ import array, collections, contextlib, enum, functools, gc, itertools, math, os,
 from dataclasses import dataclass, replace, field
 from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
-from tinygrad.engine.jit import capture_parallel, _TinyJit
+from tinygrad.engine.jit import capture_parallel, warmup_select, _TinyJit
 from tinygrad.engine.realize import run_linear, compile_linear, link_linear
 from tinygrad.llm.kernels.amd_glm import rows_shifted, rows_pick, pool_expand
 from tinygrad.llm.kernels.amd_glm import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
@@ -4522,6 +4522,8 @@ class Transformer:
       for sv in (True, False):
         par += [(j:=self._stash_kv_jits[(sv, n)], functools.partial(lambda j: j(*self._stash_kv_vars(0, 0)), j)) for n in self._stash_calls]
         par.append((self._stash_state_jits[sv], functools.partial(lambda j: j(*self._stash_state_vars(0, 0, 0, 0)), self._stash_state_jits[sv])))
+    # (WARMUP_JITS: the ones of the names wanted, the others captured on their first call)
+    calls, par = warmup_select(calls, par)
     par += loads
     # (SEQ_WARMUP_ONLY=step: the steps' jits only (experiments: the others captured when first called))
     if (only:=getenv("SEQ_WARMUP_ONLY", "")):

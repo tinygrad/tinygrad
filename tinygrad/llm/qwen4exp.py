@@ -3,7 +3,7 @@ import array, contextlib, enum, functools, itertools, math, pathlib, random, re,
 from dataclasses import dataclass, replace
 from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
-from tinygrad.engine.jit import capture_parallel
+from tinygrad.engine.jit import capture_parallel, warmup_select
 from tinygrad.llm.kernels import amd_qwen
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
 from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES, _wmma_rdna4, ring_errors
@@ -2602,6 +2602,8 @@ class Transformer:
       for sv in (True, False):
         par += [(j:=self._stash_kv_jits[(sv, n)], functools.partial(lambda j: j(*self._stash_kv_vars(0, 0)), j)) for n in self._stash_calls]
         par.append((self._stash_state_jits[sv], functools.partial(lambda j: j(*self._stash_state_vars(0, 0, 0, 0)), self._stash_state_jits[sv])))
+    # (WARMUP_JITS: the ones of the names wanted, the others captured on their first call)
+    calls, par = warmup_select(calls, par)
     par += loads
     capture_parallel(par, meanwhile)
     if DEBUG >= 1: print(f"seq_warmup: {len(par)} jits compiled at {time.perf_counter()-st:.2f}s")
