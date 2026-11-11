@@ -2873,6 +2873,9 @@ def _p2p_half_sum(x:Tensor, W:int, pack:tuple[int, int]|None=None, exact:bool=Fa
   """
   n, devs = int(prod(x.shape[1:])), cast(tuple[str, ...], x.device)
   shape, p2p = p2p_ar_shape(n // W), p2p_allreduce(devs)
+  # (P2P_HS_SHAPE TxEP, default none: the shape of these allreduces where it fits (a step A/B: the same sums, the owners of other words))
+  if (hs:=os.environ.get("P2P_HS_SHAPE")) and (n // W) % prod(fs:=tuple(int(v) for v in hs.split("x"))) == 0 and \
+     (n // W) // prod(fs) <= P2P_AR_MAXG and prod(fs) <= P2P_AR_MAXW: shape = cast(tuple[int, int], fs)
   assert shape is not None and p2p is not None
   out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
   # (one shot: a few rows, the values to every device, one round over the links: P2P_AR_HALF_ONESHOT words at most)
