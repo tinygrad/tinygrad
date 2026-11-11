@@ -53,7 +53,9 @@ if getenv("PREFILL_PROF"):
       if not n.startswith("copy"): ks[d].append((st0, st0 + du, n))
     ctx: collections.Counter = collections.Counter()
     for d, n, st0, du in seq:
-      if not n.startswith("copy") or float(n.split()[1]) < getenv("COPY_CTX", 1): continue
+      if not n.startswith("copy"): continue
+      size, unit = n.split()[1], n.split()[2].rstrip(",")
+      if float(size) * {"B": 1/2**20, "KB": 1/1024, "MB": 1, "GB": 1024}.get(unit, 1) < getenv("COPY_CTX", 1): continue
       ends = [e for _, e, _ in ks[d]]
       i = bisect.bisect_right(ends, st0) - 1
       j = bisect.bisect_left([s for s, _, _ in ks[d]], st0 + du)
