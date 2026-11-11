@@ -1130,7 +1130,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *srcs:UOp,
 
 @functools.cache
 def _rows_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, ggml_type:int, tiles:int=1, waves:int=2,
-                          unroll:int=4, prefetch:bool=True, chunk:int=0) -> UOp:
+                          unroll:int=4, prefetch:bool=True, chunk:int=0, pkh:bool=False) -> UOp:
   """
   the rows of batched decoding (16 to 64, all in every wave) on the RDNA4 f16 tensor cores: _quant_linear_f16_wmma_kernel's float ops in its
   order (every output tile's accumulator the same chain of WMMAs over the input groups, the same halves), more workgroups (`tiles` output
@@ -1188,6 +1188,15 @@ def _rows_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features
   def bfrag_of(ot:int, output:UOp, u:int, block:UOp, subgroup:UOp, half:int) -> UOp:
     if not chunk: return UOp.stack(*dequant(output*output_words + block*type_words, subgroup, half))
     d, words = words_of[(ot, u)]
+    if pkh:
+      # the bytes to halves without floats (as IQ3_S's F16_FAST_CVT: 1024+u, minus 1152 the signed byte, exact), times the half scale in half:
+      # q*d is exact in float, so its one rounding to half is the f32 path's cast
+      dh = d.cast(dtypes.uint16).bitcast(dtypes.float16)
+      def halves(word:UOp) -> list[UOp]:
+        pairs = [_amd_byte_perm(UOp.const(0x64646464, dtypes.uint32), word ^ 0x80808080, UOp.const(sel, dtypes.uint32))
+                 for sel in (0x04010400, 0x04030402)]
+        return [((p >> sh) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.half) for p in pairs for sh in (0, 16)]
+      return UOp.stack(*((h - 1152) * dh for word in words[half*2:half*2+2] for h in halves(word)))
     scale = d.cast(dtypes.uint16).bitcast(dtypes.float16).float()  # (_half: _wmma_scale's)
     zero, minimum = 0, UOp.const(0, dtypes.float)
     return UOp.stack(*((((word >> (b*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float()-zero)*scale-minimum).cast(dtypes.half)
@@ -1318,7 +1327,8 @@ def _rows_f16_config(tokens:int, out_features:int, in_features:int, ggml_type:in
   waves = next((w for w in (getenv("ROWS_WAVES", 2), 2, 1) if out_features % (16*tiles*w) == 0), 1)
   # (ROWS_CHUNK: Q8_0's blocks loaded wide, chunk groups an iteration (0: off))
   chunk = next((c for c in (getenv("ROWS_CHUNK", 0), 8, 4, 2) if c and ggml_type == Q8_0 and NG % c == 0), 0) if getenv("ROWS_CHUNK", 0) else 0
-  return dict(tiles=tiles, waves=waves, unroll=unroll, prefetch=bool(getenv("ROWS_PF", 1)), chunk=chunk)
+  return dict(tiles=tiles, waves=waves, unroll=unroll, prefetch=bool(getenv("ROWS_PF", 1)), chunk=chunk,
+              pkh=bool(chunk and getenv("ROWS_PKH", 0)))
 
 def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|None=None, split:bool=False, half_out:bool=False) -> Tensor:
   assert layer.ggml_type in QUANT_SIZES

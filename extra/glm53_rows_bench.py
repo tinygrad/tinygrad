@@ -25,7 +25,8 @@ def blocks(rows:int, cols:int, typ:int) -> np.ndarray:
     b[:, 208:210] = np.full((n, 1), 0.002, np.float16).view(np.uint8)
   else:  # 8 x (d (f16), qs[32] int8)
     b = rng.integers(0, 256, (n, 8, 34), dtype=np.uint8)
-    b[:, :, 0:2] = rng.uniform(0.002, 0.02, (n, 8, 1)).astype(np.float16).view(np.uint8)
+    # (scales log-uniform 1e-7..0.05, either sign: products in half's subnormal range too)
+    b[:, :, 0:2] = (np.exp(rng.uniform(np.log(1e-7), np.log(0.05), (n, 8, 1))) * rng.choice([-1, 1], (n, 8, 1))).astype(np.float16).view(np.uint8)
     b = b.reshape(n, 272)
   assert b.shape[1] == K.QUANT_SIZES[typ]
   return b
