@@ -2078,7 +2078,7 @@ def flag_all_gather(x:Tensor, axis:int, dtype=None) -> Tensor|None:
 # (more waves: no progress at all). a device is at most one exchange ahead of the next one: two parities of the inbox
 
 SEL_LANE_BASE = 8  # (the lanes from it are the micro batches' second ones (model.SEL_LANE): the same queue)
-RING_MAXW = 1 << 20  # words a part (a slot of the inbox: 4 MB, a prefill's part of 4608 rows of q8 is 2.2 MB)
+RING_MAXW = getenv("RING_MAXW", 1 << 20)  # words a part (a slot of the inbox: 4 MB, a prefill's part of 4608 rows of q8 is 2.2 MB)
 
 class RingMailbox:
   def __init__(self, devs:tuple[str, ...], chunks:int):
