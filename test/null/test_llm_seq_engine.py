@@ -44,6 +44,9 @@ class TestSeqEngine(unittest.TestCase):
   def test_model_alignment(self):
     self.model.REGION_ALIGN = 4096
     self.assertEqual(self.engine().align, 4096)
+    self.model.SEQ_BASE_ALIGN = 24
+    self.assertEqual(self.engine().align, 24)
+    self.assertEqual(self.model.SEQ_MOVE, 2048)
 
   def test_same_prompt_again(self):
     # the same prompt after its reply: its checkpoint restored, the token after it sampled from it (nothing prefilled)

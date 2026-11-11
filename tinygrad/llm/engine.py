@@ -91,8 +91,9 @@ class SeqEngine:
   # more turns wait and lose theirs (a box's death spiral). forced, only the held ones idle longer are)
   PROTECT = getenv("SEQ_PROTECT", 60.0)
   def __init__(self, model):
-    # every model defines the row/device alignment of a sequence region (a mock may use 1 for simple unit-test arithmetic)
-    self.model, self.k, self.align = model, model.config.spec_drafts, getattr(model, "REGION_ALIGN", 1)
+    # models may pack region bases more tightly than their move/stash chunks (a mock may use 1 for simple unit-test arithmetic)
+    self.model, self.k = model, model.config.spec_drafts
+    self.align = getattr(model, "SEQ_BASE_ALIGN", getattr(model, "REGION_ALIGN", 1))
     if getenv("SEQ_TRACE"): _trace(model)
     self.rows, self.nslots = model.seq_rows(), model.seq_slots()
     # (a sequence's positions: the model's context at most, the rows of the caches can be more (many conversations))

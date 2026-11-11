@@ -2181,7 +2181,8 @@ class Transformer:
   # the recurrent states. a sequence is prefilled by the model's calls on its region (its states loaded from its slot before, stored after),
   # a step of speculative decoding takes every sequence decoding at once (forward_seqs). the regions are the caller's (see SeqEngine) ********
 
-  REGION_ALIGN = REGION_ALIGN  # expose the model's region alignment to SeqEngine rather than importing qwen4exp there
+  REGION_ALIGN = REGION_ALIGN  # expose the model's move/stash alignment to SeqEngine rather than importing qwen4exp there
+  SEQ_BASE_ALIGN = SEQ_BASE_ALIGN  # region allocation may be packed more tightly than whole moves/stash chunks
   SEQ_SIZES = tuple(int(x) for x in str(getenv("SEQ_SIZES", "1,2,4,8")).split(","))
   SEQ_MIX_TOKENS = SEQ_MIX_TOKENS
   def clock_caps(self, default:dict[str, str]) -> dict[str, str]:
