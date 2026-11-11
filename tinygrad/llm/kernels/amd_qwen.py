@@ -2143,9 +2143,14 @@ def _ring_rounds(units:int, per_round:int, G:int) -> tuple[int, int, int]:
 
 def ring_mailbox(devs:tuple[str, ...]) -> RingMailbox|None:
   return _ring_mailbox(tuple(Device.canonicalize(d) for d in devs), FLAG_LANE[0])
+# (RING_SEL=0: no ring on the selections' lanes (from SEL_LANE_BASE, of the prefill's and of the decoding steps', see DEC_LANE): their gathers
+# (the experts' picks of a micro batch, rows picked) take the one exchange with every peer, the same values. 7900 XTX: they are below
+# RING_MIN (512 KB) up to ~6500 rows a micro batch (80 bytes a row) and ~50 sequences picked: no ring ran there, 2 mailboxes (100 MB a card) not made)
+RING_SEL = getenv("RING_SEL", 1)
 @functools.cache
 def _ring_mailbox(devs:tuple[str, ...], lane:int=0) -> RingMailbox|None:
   if len(devs) < 3 or not amd_custom_kernels_supported(devs): return None
+  if not RING_SEL and lane % DEC_LANE >= SEL_LANE_BASE: return None
   if any(_gfx(d) not in (11, 12) for d in devs): return None
   _COMM_STATE.append((f"ring lane {lane}", lane, ret:=RingMailbox(devs, RING_CMAX)))
   return ret
