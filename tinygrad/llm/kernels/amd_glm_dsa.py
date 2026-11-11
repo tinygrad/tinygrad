@@ -4558,9 +4558,9 @@ def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:f
     out = ((parts.reshape(n, T, split, 16, D) * w).sum(2) / w.sum(2).maximum(1e-30)).reshape(n*T*16, D)
   elif grouped is None and vdims is not None and getenv("MLA_LDS", 1) and cache.dtype == dtypes.half and D % 64 == 0 and vdims % 64 == 0:
     if getenv("MLA_LDS_HEADS", 1):
-      # (the device's hl heads of q as they are, its outputs in half (the caller takes them so): no padded half copy of the queries in, no
-      # float rows of 16 heads out. the same values)
-      oh = Tensor.empty(H, T, vdims, dtype=dtypes.half, device=q.device, axis=0 if n > 1 else None)
+      # (the device's hl heads of q as they are, its real heads' outputs: no padded half copy of the queries in, no rows of 16 heads out.
+      # the same values)
+      oh = Tensor.empty(H, T, vdims, dtype=dtypes.float32, device=q.device, axis=0 if n > 1 else None)
       oh = Tensor.custom_kernel(oh, q.reshape(H, T, D).contiguous(), cache.reshape(-1, int(cache.shape[-1])), index,
                                 fxn=functools.partial(_mla_sparse_lds_kernel, scale=scale, valid_len=vl, vdims=vdims, hl=hl))[0]
       return oh.reshape(1, H, T, vdims)
