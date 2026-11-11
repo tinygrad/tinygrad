@@ -3105,7 +3105,7 @@ def _moe_bundled_persist_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, bexp:U
 
 @functools.cache
 def _moe_bundled_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, bexp:UOp, brow:UOp, *grids:UOp, out_features:int, in_features:int,
-                             ggml_type:int, slots:int, x_slots:int, waves:int=2, oloop:int=1) -> UOp:
+                             ggml_type:int, slots:int, x_slots:int, waves:int=2, oloop:int=1, P:int=0) -> UOp:
   # the bundles of moe_bundles (16 rows of an expert each) on the int8 tensor cores: a workgroup a bundle and oloop blocks of 16*waves outputs
   # (a wave 16 of a block) in a loop. per block of 256 inputs the threads decode the outputs' weights (a thread a group's 8 words: the loads of a
   # row's block are coalesced) and their scales to LDS once for the bundle's rows, then a wave's fragments are its outputs' words (as
@@ -3113,7 +3113,14 @@ def _moe_bundled_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, bexp:UOp,
   # none)
   NB, OB, threads = cast(int, bexp.shape[0]), 16*waves, 32*waves
   RS = GGML_BLOCK_SIZE // 4 + 1  # a row's words in LDS (+1: the 16 rows of a fragment's lanes on different banks)
-  bundle, output_block = UOp.range(NB, 0, AxisType.GLOBAL), UOp.range(out_features // (OB*oloop), 1, AxisType.GLOBAL)
+  output_block = UOp.range(out_features // (OB*oloop), 1, AxisType.GLOBAL)
+  if P:
+    # (MOE_PERSIST: P workgroups an output block over the bundles there are, the count after the bundles (grids[-1]))
+    grids, bcnt = grids[:-1], grids[-1]
+    gslot = UOp.range(P, 0, AxisType.GLOBAL)
+    it = UOp.range(((bcnt[0].load().cast(dtypes.weakint) - gslot + (P-1)) // P).maximum(0), 9, AxisType.LOOP)
+    bundle = gslot + it*P
+  else: bundle = UOp.range(NB, 0, AxisType.GLOBAL)
   lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(waves, 3, axis_type=AxisType.LOCAL)
   tid, col, ph = wave*32 + lane, lane % 16, lane // 16
   grid = None
@@ -3160,6 +3167,8 @@ def _moe_bundled_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, bexp:UOp,
   stores = [out[(r:=srow(ph*8 + j)).maximum(0), output.valid(r >= 0)].store(acc.after(update)[j].load().cast(out.dtype)) for j in range(8)]
   weights = NB*16*out_features*in_features
   est = Estimates(2*weights, weights*type_words*2//16//GGML_BLOCK_SIZE, 0)  # (an upper bound: every bundle used)
+  if P: return UOp.group(*stores).end(ob).barrier().end(it).end(gslot, output_block, lane, wave).sink(arg=KernelInfo(
+    name=f"moe_bundled_{QUANT_NAMES[ggml_type]}_wmma_p", opts_to_apply=(), estimates=est))
   return UOp.group(*stores).end(ob).end(bundle, output_block, lane, wave).sink(arg=KernelInfo(
     name=f"moe_bundled_{QUANT_NAMES[ggml_type]}_wmma", opts_to_apply=(), estimates=est))
 
@@ -3309,7 +3318,11 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
                             slots=int(slots), x_slots=x_slots, oloop=16 if in_features == GGML_BLOCK_SIZE else 1) if wmma else \
           functools.partial(_moe_bundled_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type, slots=int(slots),
                             x_slots=x_slots, M=M)
-    if not wmma and MOE_PERSIST:
+    if wmma and MOE_PERSIST:
+      fxn = functools.partial(_moe_bundled_wmma_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type,
+                              slots=int(slots), x_slots=x_slots, oloop=16 if in_features == GGML_BLOCK_SIZE else 1, P=MOE_PERSIST)
+      result = Tensor.custom_kernel(out, weight, *xq, bexp, brow, *extra, bcnt, fxn=fxn)[0]
+    elif MOE_PERSIST:
       # (MOE_PERSIST: P workgroups an output block over the bundles there are, not a grid of every possible one)
       fxn = functools.partial(_moe_bundled_persist_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type,
                               slots=int(slots), x_slots=x_slots, M=M, P=MOE_PERSIST)
