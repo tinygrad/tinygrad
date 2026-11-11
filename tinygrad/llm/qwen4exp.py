@@ -450,13 +450,17 @@ def _fill_zero(*ts:Tensor):
   for t in ts:
     for u in t.uop.toposort():
       if u.op is not Ops.BUFFER or (b:=u.buffer) is None: continue
-      for x in (parts:=b.bufs if isinstance(b, MultiBuffer) else [b]): x.ensure_allocated()
+      parts = b.bufs if isinstance(b, MultiBuffer) else [b]
+      # (ZERO_ALLOC_LATE: deferred zeroing allocates them later too: when a jit is linked or the zeroing runs (in the start-up's window))
+      if not (_zero_later and ZERO_ALLOC_LATE):
+        for x in parts: x.ensure_allocated()
       if _zero_later: _zero_later[-1].extend(parts)
       else:
         for x in parts: _zero_buffer(x)
 
 # (while not empty: _fill_zero allocates, the buffers are zeroed later, see _zero_deferred)
 _zero_later:list[list[Buffer]] = []
+ZERO_ALLOC_LATE = getenv("ZERO_ALLOC_LATE", 0)
 def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
   """the tensors are buffers now (allocated, their devices and split kept), their values are computed by the function added to pending"""
   pairs, ts = [], list({id(t): t for t in ts}.values())  # (a tensor of two modules once)
