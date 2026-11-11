@@ -2031,12 +2031,23 @@ class Transformer:
     return [(i*n//k, (i+1)*n//k) for i in range(k)]
 
   def _carry(self, rows:int) -> list[Tensor]:
-    """the streams of every micro batch of a prefill chunk of rows between its parts (made before the jits are captured)"""
+    """the streams of every micro batch of a prefill chunk of rows between its parts (made before the jits are captured): views of one buffer a
+    micro batch, of the most rows of the chunk sizes (the chunks run one at a time; a part writes them before the next reads them)"""
     carry = self.__dict__.setdefault("_pf_carry", {})
     if rows not in carry:
       hc, mb, devs = unwrap(self.config.hc), self._prefill_mb(rows), cast(tuple[str, ...], self.token_embd.weight.device)
-      carry[rows] = [Tensor.zeros(1, rows // mb, hc.count, self.config.dim, dtype=dtypes.half).shard(devs, axis=1).contiguous().realize()
-                     for _ in range(mb)]
+      # (the elements a device has of a micro batch's stream of a chunk of r rows)
+      def local(r:int) -> int: return r // self._prefill_mb(r) // len(devs) * hc.count * self.config.dim
+      if (bases:=self.__dict__.get("_pf_carry_bases")) is None:
+        sizes = [r for r in self.prefill_chunks() if len(self.prefill_parts(r)) > 1] + [rows]
+        n, lanes = max(local(r) for r in sizes), max(self._prefill_mb(r) for r in sizes)
+        bases = self._pf_carry_bases = [Tensor.zeros(len(devs) * n, dtype=dtypes.half).shard(devs, axis=0).contiguous().realize()
+                                        for _ in range(lanes)]
+      def view(base:Tensor) -> Tensor:
+        (m:=MultiBuffer.__new__(MultiBuffer)).bufs = [b.view(local(rows) * 2, 0).ensure_allocated()
+                                                      for b in cast(MultiBuffer, base.uop.base.buffer).bufs]
+        return Tensor(UOp.from_buffer(m, dtypes.half, devs).reshape(1, rows // mb // len(devs), hc.count, self.config.dim).unshard(1))
+      carry[rows] = [view(bases[k]) for k in range(mb)]
     return carry[rows]
 
   def _new_prefill_jit(self, rows:int) -> Any:
