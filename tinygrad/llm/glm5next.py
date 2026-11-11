@@ -4057,6 +4057,16 @@ class Transformer:
     glm = bool(self.config.cache_rows and self.config.kv_lora_rank and not self.config.qsa and seq_sharded(devs))
     return bool((self.config.qsa and self.gated or glm) and self.config.spec_drafts and self.config.indexer is not None and
                 isinstance(devs, tuple) and amd_custom_kernels_supported(devs))
+  def seq_drop_prefill(self) -> dict:
+    """
+    the prefill chunks' jits dropped and the jits' shared arenas (_scratch) shrunk to what the other jits use: a process that prefills no more
+    (the board harness after its donors: the arenas a 2304-row chunk grew stay with the decode jits otherwise). a later prefill captures its
+    jit again. no numerics change: a jit's buffers keep their offsets in a smaller arena. returns {arena key: (bytes before, after)}
+    """
+    from tinygrad.engine.jit import shrink_scratch
+    for k in [k for k in self.__dict__ if k.startswith("jits")] + ["_pf_carry"]: self.__dict__.pop(k, None)
+    gc.collect()
+    return shrink_scratch(self._scratch)
   def seq_slots(self) -> int:
     """the slots of the sequences (the one after them is the padding sequences' of a step)"""
     # (GLM: 16, the steps' sizes up to 8: more conversations resident than decoded at once)

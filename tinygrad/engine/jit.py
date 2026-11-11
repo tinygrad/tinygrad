@@ -1,7 +1,7 @@
 from typing import TypeVar, Generic, Callable, Any, Sequence, overload, cast
-import functools, fnmatch, os, io, pickle, itertools, threading, warnings, time, weakref, sys, heapq, concurrent.futures
+import gc, functools, fnmatch, os, io, pickle, itertools, threading, warnings, time, weakref, sys, heapq, concurrent.futures
 from tinygrad.tensor import Tensor, all_tensors
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc, dedup, unwrap
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc, dedup, unwrap, round_up
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite, UOpMetaClass
@@ -104,6 +104,33 @@ def _input_info(u:UOp) -> tuple[UOp, dict[Variable, int], DType, str|tuple[str, 
   # the view of an input without its buffer, its bound variables, dtype and device: the same for every call with it (not kept alive by it)
   if (ret:=_input_infos.get(u)) is None:
     ret = _input_infos[u] = (*u.substitute({u.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all(), u.dtype, u.device)
+  return ret
+
+def shrink_scratch(scratch:dict) -> dict:
+  """
+  the arenas of a shared scratch shrunk to what its live jits use (a jit sharing it that is gone grew them): a jit's buffers keep their offsets.
+  returns {key: (bytes before, after)} of the arenas shrunk
+  """
+  gc.collect()
+  jits = [j for j in _scratch_jits.get(id(scratch), ()) if j.captured is not None]
+  def extent(lin:UOp, arena:UOp) -> int:
+    # (the end of the last byte of the arena the linear's views use: all of it if one uses it other than as a constant shrink)
+    end = 0
+    for u in lin.toposort():
+      if arena not in u.src: continue
+      if u.op is Ops.SHRINK and len(u.src) == 3 and all(s.op is Ops.CONST for s in u.src[1:]): end = max(end, u.src[1].arg + u.src[2].arg)
+      else: return arena.max_numel()
+    return end
+  ret, new = {}, {}
+  for key, arena in list(scratch.items()):
+    need = round_up(max([extent(j.captured._linear, arena) for j in jits] + [256]), 256)
+    if need >= arena.max_numel() - (1 << 20): continue
+    scratch[key] = new[arena] = UOp.new_buffer(arena.device, need, arena.dtype)
+    ret[key] = (arena.max_numel(), need)
+  if new:
+    for j in jits: j.captured.rebase(new)
+  del new
+  gc.collect()
   return ret
 
 def _prepare_jit_inputs(args, kwargs):
