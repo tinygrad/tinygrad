@@ -18,6 +18,11 @@ class TestTensorGradient(unittest.TestCase):
     w = Tensor.randn((3,))
     self.assertListEqual(x.sum().gradient(w)[0].tolist(), [0.0, 0.0, 0.0])
 
+  def test_cast_gradient(self):
+    x = Tensor([-1.3, 0.4, 2.6])
+    z = (x + (2*x).int().float() + (2*x).bool().float() + (3*x).half().float()).sum()
+    self.assertListEqual(z.gradient(x)[0].tolist(), [4.0, 4.0, 4.0])
+
   def test_with_custom_gradient(self):
     x = Tensor([1.0, 2.0, 3.0])
     z = (x * x).sum()

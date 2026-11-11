@@ -70,7 +70,6 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.EXP2, name="ret"), lambda ctx, ret: (ret * ctx * math.log(2),)),
   (UPat(Ops.SQRT, name="ret"), lambda ctx, ret: (ctx / (ret*2),)),
   (UPat(Ops.TRUNC), lambda ctx: (ctx.const_like(0),)),
-  (UPat((Ops.CMPLT, Ops.CMPEQ)), lambda: (None, None)),
   (UPat(Ops.ADD), lambda ctx: (ctx, ctx)),
   (UPat(Ops.POW, name="ret", src=(UPat.var("b"), UPat.var("e"))), lambda ctx, ret, b, e:
     (ctx * e.eq(0).where(e, e*b.pow(e-1)), ctx * b.eq(0).where((e<0).where(ret.const_like(-math.inf), 0), ret*b.log2()*math.log(2.0)))),
@@ -125,7 +124,8 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
     if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}\n\nin {str(t0)[0:1000]}...")
     assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
     for k,v in zip(t0.src, lgrads):
-      if v is None: continue
+      # an int or bool value has no gradient
+      if v is None or dtypes.is_int(k.dtype) or dtypes.is_bool(k.dtype): continue
       # a shaped edge's gradient is summed to its source's shape
       if k._shape is not None and v._shape is not None and k._shape != v._shape:
         v = v.cast(sum_acc_dtype(v.dtype))._rop(Ops.ADD, broadcast_axes(k.shape, v.shape)).reshape(k.shape).cast(v.dtype)
