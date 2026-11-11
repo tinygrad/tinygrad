@@ -5877,7 +5877,9 @@ def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:in
   # (every device's top c (IDX_CAND, at least top/n): the top k of all are among them unless a device has more of them than c, its pools
   # are blocks of SEQ_BLK positions in turn)
   # (a few rows (decoding): 512 a device, the merge of all of them is a kernel of a few workgroups)
-  c = max(min(top, getenv("IDX_CAND", 512 if rows <= 8 else top)), (top + n - 1) // n)
+  # (IDX_CAND_ROWS (default 32, was 8): 512 a device up to 8 users (32 rows) too: from 16 rows the 2048 a row (4x the bytes) went around a ring
+  # of 13 copies (22 a step); with 512 one shot (IDX_P2P_ROWS 32): ts5 s3bars5 4 users 68.00 -> 62.36 ms, 8 users 109.11 -> 99.84)
+  c = max(min(top, getenv("IDX_CAND", 512 if rows <= getenv("IDX_CAND_ROWS", 32) else top)), (top + n - 1) // n)
   cand = Tensor.empty(n*rows, c, 2, dtype=dtypes.float32, device=devs, axis=0)
   vk = {"valid": valid} if valid is not None else {}
   cand = Tensor.custom_kernel(cand, sc, _device_index(devs), *extra, fxn=functools.partial(_pool_cand_kernel, q_start=qs, pools=pu, k=c,
@@ -5889,8 +5891,8 @@ def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:in
     return _pool_merge_split(cand, out, devs, rows, c, qs, pu, top, kpool, row0)
   # (one shot peer to peer up to IDX_P2P_ROWS rows (the mailbox holds 32 rows of 2048 candidates), the same floats as the ring of copies: a ring
   # is 13 copies in turn, a step of 8 rows paid ~22 of them; from 16 rows (2048 candidates a row, 4x the bytes) the ring is faster: s3ab4 G=4
-  # 72.9 -> 69.3 ms, G=8 149.7 -> ~142.8)
-  g = host_allgather(flat) if rows <= getenv("IDX_P2P_ROWS", 8) else None
+  # 72.9 -> 69.3 ms, G=8 149.7 -> ~142.8); with 512 candidates up to 32 rows (IDX_CAND_ROWS) one shot wins again)
+  g = host_allgather(flat) if rows <= getenv("IDX_P2P_ROWS", 32) else None
   allc = g if g is not None else all_gather(flat, 0, dtypes.float32)
   return Tensor.custom_kernel(out, allc.reshape(n, rows, c, 2).contiguous(), *extra,
                               fxn=functools.partial(_pool_merge_kernel, q_start=qs, pools=pu, k=top, kpool=kpool, row0=row0))[0]
