@@ -3430,8 +3430,14 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
     in_features % GGML_BLOCK_SIZE == 0
   # (MOE_EXACT_MIN <= rows < MOE_BUNDLE_MIN: bundles of MOE_EXACT_M rows in float, every row's dot the per-row kernel's: the same values, an
   # expert's weights read once for its rows (the per-row kernel reads them once a selection))
-  exact = not wmma and 0 < MOE_EXACT_MIN <= tokens < MOE_BUNDLE_MIN
-  if (M:=(16 if wmma else MOE_EXACT_M if exact else MOE_BUNDLE)) and (tokens >= MOE_BUNDLE_MIN or exact):
+  # (per projection (all exact: a bundle's values are the per-row kernel's): the gate/up rows (x shared by the slots) bundled from
+  # MOE_GU_BUNDLE_MIN rows in bundles of MOE_GU_BUNDLE, the down rows (x a slot's) from MOE_DOWN_BUNDLE_MIN; unset: MOE_BUNDLE_MIN, MOE_BUNDLE.
+  # RDNA3 G (sliced experts, 16 local slots): the down projection's per-row kernel beats its bundles up to 72 rows, gate/up's bundles of 2 beat 4)
+  down = x_slots == slots and slots > 1
+  bmin = getenv("MOE_DOWN_BUNDLE_MIN", MOE_BUNDLE_MIN) if down else getenv("MOE_GU_BUNDLE_MIN", MOE_BUNDLE_MIN)
+  exact = not wmma and 0 < MOE_EXACT_MIN <= tokens < bmin
+  if (M:=(16 if wmma else MOE_EXACT_M if exact else MOE_BUNDLE if down else getenv("MOE_GU_BUNDLE", MOE_BUNDLE))) and \
+     (tokens >= bmin or exact):
     # many rows (batched decoding): the rows of an expert in bundles of M, a bundle reads the expert's weights once
     # (the gate and up rows' bundles are the down rows' too: the same selections)
     key = (sel.uop, first.uop, experts, M)
