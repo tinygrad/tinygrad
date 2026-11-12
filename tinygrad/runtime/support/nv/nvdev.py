@@ -99,6 +99,17 @@ class NVDev:
     self.include("dev_fb", "tu102")
     self.include("dev_gc6_island", "ga102")
 
+    # Which chip this is comes first, because the WPR2 probe below reads a Turing-era offset through the
+    # dev_fb/tu102 map. On older parts that offset is undecoded and reads back PRI poison, and poison is
+    # nonzero, so a chip we can't drive would be "reset" (a PCIe FLR) here. A FLR that doesn't return - behind
+    # a Thunderbolt enclosure, for instance - leaves the card unusable until the enclosure is power cycled.
+    self.chip_id = self.reg("NV_PMC_BOOT_0").read()
+    self.chip_details = self.reg("NV_PMC_BOOT_42").read_bitfields()
+    chip_names = {0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}
+    if self.chip_details['architecture'] not in chip_names:
+      raise RuntimeError(f"nv {self.devfmt}: unsupported chip architecture {self.chip_details['architecture']:#x} " +
+                         f"(chip_id {self.chip_id:#x}), needs Ampere (0x17) or newer")
+
     if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
       if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.", flush=True)
@@ -106,9 +117,7 @@ class NVDev:
       time.sleep(0.1) # wait until device can respond again
 
     self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
-    self.chip_id = self.reg("NV_PMC_BOOT_0").read()
-    self.chip_details = self.reg("NV_PMC_BOOT_42").read_bitfields()
-    self.chip_name = {0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}[self.chip_details['architecture']] + f"{self.chip_details['implementation']:02d}"
+    self.chip_name = chip_names[self.chip_details['architecture']] + f"{self.chip_details['implementation']:02d}"
     self.fw_name = {"GB2": "gb202", "AD1": "ad102", "GA1": "ga102"}[self.chip_name[:3]]
     self.mmu_ver, self.fmc_boot = (3, True) if self.chip_details['architecture'] >= 0x1a else (2, False)
 
