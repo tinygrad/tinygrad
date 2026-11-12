@@ -1770,7 +1770,17 @@ P2P_AR_MAXG, P2P_AR_MAXW = getenv("P2P_AR_MAXG", 64), getenv("P2P_AR_MAXW", 4096
 # a class whose slot wasn't used while the others' counted could see its own stale word as fresh (8 or 16 bits of the epoch): wrong values
 P2P_AR_CLASSES = 3
 
-def p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None: return _p2p_allreduce(tuple(Device.canonicalize(d) for d in devs))
+_P2P_OFF_SEEN:set[str] = set()
+def p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None:
+  # (P2P_GLM5_OFF (default off): this module's mailboxes not made (189 MB a device at 14 devices: a model with a kernel module of its own,
+  # GLM-DSA, made both), None as without p2p. every caller printed once: a caller past the warmup's is a user of them)
+  if getenv("P2P_GLM5_OFF", 0):
+    import traceback
+    if (site:=" < ".join(f"{f.name}:{f.lineno}" for f in traceback.extract_stack(limit=4)[:-1][::-1])) not in _P2P_OFF_SEEN:
+      _P2P_OFF_SEEN.add(site)
+      print(f"P2P_GLM5_OFF: amd_glm p2p_allreduce asked by {site}", flush=True)
+    return None
+  return _p2p_allreduce(tuple(Device.canonicalize(d) for d in devs))
 @functools.cache
 def _p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None:
   if len(devs) < 2 or not amd_custom_kernels_supported(devs): return None
