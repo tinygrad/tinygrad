@@ -1267,6 +1267,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # a held conversation is lost for it (see SeqEngine.STICKY))
   PREFILL_SLICE, MAX_STALL, DECODE_SHARE = getenv("PREFILL_SLICE", 13824), getenv("MAX_STALL", 0.3), getenv("DECODE_SHARE", 0.5)
   AGING, STARVE_SEQ, TURN_WAIT = getenv("AGING", 0), getenv("SEQ_STARVE", 600.0), getenv("SEQ_TURN_WAIT", 10.0)
+  # (SEQ_STARVE_ALT: after a slice of a starving prompt the next one is the best of the others (a waiting one admitted, a warm turn's short
+  # suffix): a long cold prompt past STARVE takes every other slice, not all of them while every other request waits behind it)
+  STARVE_ALT = getenv("SEQ_STARVE_ALT", 0)
   COLD_MAX, COLD_TOKENS = getenv("SEQ_COLD_MAX", 1), getenv("SEQ_COLD_TOKENS", 16384)
   # (the gpus' clocks (AM: their gfx clock's cap, see AMIdleClocks.set_caps): a few users decoding at the full clocks (a user's tokens fast),
   # more at less (the energy a token: ~0.85 J at 2000 MHz on 6x 7900 XTX, ~1.2 J at full), a prefill at a cap it isn't slower at. switched
@@ -1291,6 +1294,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     # (a paused one (see below) goes on from its tokens so far)
     def prompt(req:Request) -> list[int]: return req.ids + req.generated if req.generated else req.ids
     stall = 0.0  # (the time of the slices since the last steps)
+    starved_last = False  # (the last slice was a starving prompt's, see STARVE_ALT)
     clocks = f(self.CLOCKS) if callable(f:=getattr(self.model, "clock_caps", None)) else self.CLOCKS
     try:
       from tinygrad.runtime.ops_amd import AMIdleClocks
@@ -1330,9 +1334,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           cands += [(not starving(r), (r.st if starving(r) else len(r.ids) + len(r.generated) - r.hit - self.AGING*(now - r.st)), 1, r)
                     for r in pending if (r.tried != eng.version or now - r.tried_at > 1.0) and
                     not (cold and len(r.ids) + len(r.generated) - r.hit > self.COLD_TOKENS)]
-        for _, _, _, c in sorted(cands, key=lambda x: x[:3]):
+        order = sorted(cands, key=lambda x: x[:3])
+        if self.STARVE_ALT and starved_last: order = [x for x in order if x[0]] + [x for x in order if not x[0]]
+        starved_last = False
+        for fresh, _, _, c in order:
           if isinstance(c, Seq):
-            job = c
+            job, starved_last = c, not fresh
             break
           t0 = time.perf_counter()
           # (an agent's turn (it continues (continued) a conversation) waiting past SEQ_TURN_WAIT s: the held conversations not waited for go to
@@ -1362,6 +1369,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             break
           filling[job] = c
           self.miss_log(ids, start)
+          starved_last = not fresh
           break
         for name, t in eng.times.items(): self.stats.add(name, t)
         eng.times.clear()

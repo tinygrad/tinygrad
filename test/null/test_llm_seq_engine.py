@@ -367,5 +367,28 @@ class TestScheduleSeqs(unittest.TestCase):
     other.cancelled = True
     self.wait([other])
 
+  def _starving_case(self, alt:int) -> tuple[Request, Request]:
+    # (G113 g2 08:27: a cold prompt past SEQ_STARVE (cache lost) while a warm turn waits: the turn waited the whole cold prefill)
+    self.server.STARVE_SEQ, self.server.STARVE_ALT = 0.1, alt
+    long = Request(list(range(100, 40100)), "", 2, 0.0)
+    self.server.waiting.put(long)
+    time.sleep(0.25)
+    short = Request(list(range(50000, 50050)), "", 2, 0.0)
+    self.server.waiting.put(short)
+    self.wait([long, short])
+    return long, short
+
+  @patch("tinygrad.llm.serve.stderr_log")
+  def test_starving_blocks_others(self, _):
+    long, short = self._starving_case(0)
+    self.assertEqual(self.done, [long, short])
+
+  @patch("tinygrad.llm.serve.stderr_log")
+  def test_starving_takes_every_other_slice(self, _):
+    long, short = self._starving_case(1)
+    self.assertEqual(self.done, [short, long])
+    self.assertEqual(len(short.generated), 2)
+    self.assertEqual(len(long.generated), 2)
+
 if __name__ == "__main__":
   unittest.main()

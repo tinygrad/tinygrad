@@ -1,7 +1,7 @@
 from __future__ import annotations
 import contextlib, functools, itertools, math, os
 from dataclasses import replace
-from typing import Callable, cast
+from typing import Callable, Sequence, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.dtype import AddrSpace, DType, dtypes
@@ -912,8 +912,15 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
 # _grouped_k256_kernel options, the same bits on every row that is read (-1: on RDNA4, measured on GLM Flash C6, off on RDNA3):
 # K256_SKIP: IQ2_S tiles' token tiles that are all padding skip their WMMAs
 K256_SKIP = getenv("K256_SKIP", -1)
-# K256_SBU: IQ2_S sub-blocks unrolled by this many (-1: 2 on RDNA4), K256_SBU3 IQ3_S's (no faster on C6's down)
-K256_SBU, K256_SBU3 = getenv("K256_SBU", -1), getenv("K256_SBU3", 1)
+# K256_SKIP_RDNA3: K256_SKIP's default on RDNA3 too (GLM Flash C5 prefill: the IQ2_S gate/up 2.1x at 192 rows on a 7900 XTX, the same bits)
+K256_SKIP_RDNA3 = getenv("K256_SKIP_RDNA3", 1)
+# K256_XH_GLM: RDNA3 lane halves decode one K half each, exchanged by permlanex16 (amd_qwen's K256_XH), IQ2_S and IQ3_S. the same bits;
+# with K256_SBU3 2 on RDNA3: C5 chunks 192/384/768 rows 3-5% faster on a 7900 XTX (6 blocks)
+K256_XH_GLM = getenv("K256_XH_GLM", 1)
+# K256_SKIP3: IQ3_S's too (the down's tiles at a few rows an expert: small prefill chunks on RDNA3)
+K256_SKIP3 = getenv("K256_SKIP3", 0)
+# K256_SBU: IQ2_S sub-blocks unrolled by this many (-1: 2), K256_SBU3 IQ3_S's (-1: 1 on RDNA4 (no faster on C6's down), 2 on RDNA3)
+K256_SBU, K256_SBU3 = getenv("K256_SBU", -1), getenv("K256_SBU3", -1)
 # K256_IDLE: tiles of no expert load no grid and store nothing (their rows are never read)
 K256_IDLE = getenv("K256_IDLE", -1)
 # K256_SIGNPERM: IQ2_S signs by one byte permute of the word and its negation (_iq_signed_word perm, the same bytes)
@@ -986,7 +993,9 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
     header, low = raw[base].load(), raw[base+1].load()
     return (((low >> (4*sb).cast(dtypes.uint32)) & 15) | (((header >> (16+2*sb).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int32) - 32
   # K256_SBU (IQ2_S): sub-blocks unrolled by this many (their weight loads issued together), each updates the int sums in turn
-  SBU = (K256_SBU if K256_SBU > 0 else 2 if rdna4 else 1) if ggml_type == IQ2_S else K256_SBU3 if ggml_type == IQ3_S else 1
+  # (RDNA3 2 too: GLM Flash C5 192-row chunks 64.4 -> 59.4 ms on a 7900 XTX (6 blocks), the same bits; 4 no faster)
+  SBU = (K256_SBU if K256_SBU > 0 else 2) if ggml_type == IQ2_S else (K256_SBU3 if K256_SBU3 > 0 else 1 if rdna4 else 2) \
+    if ggml_type == IQ3_S else 1
   sb = UOp.range(8 // SBU, 5, AxisType.LOOP)
   sbs = [sb * SBU + u for u in range(SBU)] if SBU > 1 else [sb]
   def acols(h:int) -> tuple: return (ph*4+2*h, ph*4+2*h+1) if rdna4 else (2*h, 2*h+4, 2*h+1, 2*h+5)
@@ -994,15 +1003,24 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   # its first row is) skips its WMMAs, a loop of 0 or 1 iterations. its rows' outputs are never read (gate/up's padding rows are read only by
   # down's padding rows, which aren't stored)
   skip = [UOp.range((rows[token_block * TOK + t*16].load() >= 0).where(1, 0), 10+t, AxisType.LOOP)
-          if t and on(K256_SKIP) and ggml_type == IQ2_S else None for t in range(TT)]
+          if t and (((on(K256_SKIP) or (K256_SKIP < 0 and K256_SKIP_RDNA3)) and ggml_type == IQ2_S) or
+                    (K256_SKIP3 > 0 and ggml_type == IQ3_S)) else None for t in range(TT)]
   afrs = [[[_i8_frag(tuple(lds_q[t*16 + col + (skip[t] if skip[t] is not None else 0), sbu, c].load() for c in acols(h))) for h in range(2)]
            for t in range(TT)] for sbu in sbs]
   sums:list[UOp] = []
   for o, base in enumerate(bases):
     bfrs = []
     for sbu in sbs:
-      words = _quant_frag_words(raw, base, sbu, ph, ggml_type, grid, signed=signed, perm=on(K256_SIGNPERM)) if rdna4 else \
-        [tuple(_quant_word(raw, base, sbu, h*4+i, ggml_type, grid) for i in range(4)) for h in range(2)]
+      words:Sequence[tuple[UOp, ...]]
+      if rdna4: words = _quant_frag_words(raw, base, sbu, ph, ggml_type, grid, signed=signed, perm=on(K256_SIGNPERM))
+      elif K256_XH_GLM and ggml_type in (IQ2_S, IQ3_S):
+        # (K256_XH_GLM, as amd_qwen's K256_XH: a lane's half (ph) decodes the words of its K half h=ph alone, the other half's from lane ^ 16
+        # (permlanex16): RDNA3's two lane halves hold the same B fragment, so half the weight loads and grid lookups of a wave)
+        mine = [_quant_word(raw, base, sbu, ph*4+i, ggml_type, grid) for i in range(4)]
+        xch = [_cfn(False, src=(w,), arg=("(unsigned)__builtin_amdgcn_permlanex16(0, (int)({0}), 0x76543210, 0xfedcba98, false, false)",
+                                         dtypes.uint32)) for w in mine]
+        words = [tuple(ph.eq(h).where(m, x) for m, x in zip(mine, xch)) for h in range(2)]
+      else: words = [tuple(_quant_word(raw, base, sbu, h*4+i, ggml_type, grid) for i in range(4)) for h in range(2)]
       bfrs.append([_i8_frag(w) for w in words])
     for t in range(TT):
       prev = ints[o][t].after(sb)
@@ -1028,7 +1046,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
         st = ints[o][t].store(UOp.stack(*[_cfn(True, src=(dreg[j].load(), sub, prev[j].load()), arg=(MAD_I24, dtypes.int32)) for j in range(8)]))
         prev = ints[o][t].after(st)
       sums.append(cast(UOp, st))
-  if on(K256_SKIP) and ggml_type == IQ2_S:
+  if any(sk is not None for sk in skip):
     tsums = [[x for i, x in enumerate(sums) if i % TT == t] for t in range(TT)]
     sums = [UOp.group(*ts).end(sk) if sk is not None else UOp.group(*ts) for ts, sk in zip(tsums, skip)]
   done = UOp.group(*sums).end(sb)

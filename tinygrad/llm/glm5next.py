@@ -1133,6 +1133,10 @@ class FFNBlock:
     # (MOE_TILE32_ROWS: RDNA4 tiles of 32 rows while the experts have at most this many rows each on average (a 64-row tile mostly padding))
     if tile == 64 and _wmma_rdna4(x.device) and isinstance(T, int) and (t32:=getenv("MOE_TILE32_ROWS", 0)) and \
        B * T * int(sel.shape[-1]) <= t32 * self.config.num_experts: tile = 32
+    # (MOE_TILE32_TOKENS: RDNA3 tiles of 32 rows for a chunk of at most this many tokens (192: ~5 rows an expert, a 64-row tile mostly
+    #  padding: the MoE layer 1.8x faster on a 7900 XTX at 192, 1.3x at 384, a chunk 4% at 768 and 1% at 1152, the same bits). 0: off)
+    Tm = T if isinstance(T, int) else int(T.vmax)
+    if tile == 64 and not _wmma_rdna4(x.device) and not getenv("MOE_TILE", 0) and B * Tm <= getenv("MOE_TILE32_TOKENS", 1152): tile = 32
     _, entries, tiles, pos = moe_route(sel, gate_exps.first, gate_exps.local_experts, tile)
     k, sel_shape = int(sel.shape[-1]), sel.shape[-3:]
     # gate and up read the token of each sorted row, down writes the row of each selection
@@ -5052,6 +5056,8 @@ class Transformer:
     # the next token prediction (MTP) layers: the first is loaded with MTP=1 (model.mtp), the others aren't used
     num_blocks = kv[f'{arch}.block_count'] - kv.get(f'{arch}.nextn_predict_layers', 0)
     mtp = bool(getenv("MTP", int(arch == "glm5-next"))) and kv.get(f"{arch}.nextn_predict_layers", 0) > 0
+    # (NUM_BLOCKS: only the first blocks for small-kernel profiling, no MTP; unset keeps the exact deployed model)
+    if (nb:=getenv("NUM_BLOCKS", 0)) and nb < num_blocks: num_blocks, mtp = nb, False
     # (qwen4exp: the MTP layer in a gguf of its own (its block after the model's), found next to the model's)
     if arch == 'qwen4exp' and getenv("MTP", 1) and not isinstance(gguf, Tensor) and (mf:=_qwen_mtp_file(pathlib.Path(gguf))) is not None:
       mkv, mentries = gguf_parse(mf)
