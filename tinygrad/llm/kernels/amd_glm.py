@@ -386,7 +386,7 @@ def _prefetched(body:UOp, rng:UOp, last:UOp|int, params:tuple[UOp, ...]|None=Non
   return body.substitute(repl), stores
 
 def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str, active:Callable|None=None,
-                   estimates:Estimates|None=None, multi:int=1, bundles:tuple[int, Callable]|None=None) -> UOp:
+                   estimates:Estimates|None=None, multi:int=1, bundles:tuple[int, Callable]|None=None, tables:list[UOp]|None=None) -> UOp:
   if getenv("LIN_NAMES"): name = f"{name}_{out.shape[0] if len(out.shape) > 1 else 1}x{out_features}x{group_count*32}"  # (profiling: the shapes)
   # One wave per output/chunk of 32 groups; group neighboring rows to amortize workgroup scheduling. the waves of the chunks of an output
   # share the workgroup: they add up their sums in LDS
@@ -420,6 +420,15 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
   outputs = [t % out_features for t in token_outputs]
   tokens = [token_outputs[0] // out_features] if multi == 1 else [UOp.const(t, dtypes.weakint) for t in range(multi)]
   if bundles: tokens = [token_outputs[0] // out_features * multi + t for t in range(multi)]
+  if tables:
+    # tables (a list of the group_dot's lookup tables, the IQ grids): copied to LDS by the workgroup first, the dots read them there (the
+    # same values; as amd_glm_dsa's)
+    tid, nthreads = (wave*chunks + chunk)*WARP_SIZE + lane, rows*chunks*WARP_SIZE
+    for ti, tab in enumerate(tables):
+      n = int(tab.numel())
+      lds = UOp.alloc((n,), tab.dtype, addrspace=AddrSpace.LOCAL)
+      idx = [tid + k*nthreads for k in range((n+nthreads-1)//nthreads)]
+      tables[ti] = lds.after(UOp.group(*[lds[i.valid(i < n) if n % nthreads else i].store(tab[i.minimum(n-1)].load()) for i in idx]).barrier())
   def dot(token:UOp, group:UOp, output:UOp=outputs[0]) -> UOp:
     return (group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32))
   if active is None:
@@ -585,6 +594,7 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
                        gate:Callable|None=None, xtoken:Callable|None=None, name:str="linear_", active:Callable|None=None,
                        bundle:tuple[int, int, Callable]|None=None) -> UOp:
   # gate(token, output, base) -> base: moves (and predicates) the weight rows, xtoken(token) -> the activation row of an output row
+  gl = list(grids)  # (the lookup tables group_dot reads: _decode_linear may move them to LDS, MOE_GRID_LDS)
   def group_dot(token:UOp, output:UOp, group:UOp) -> UOp:
     block, subgroup = group//8, group%8
     base = (output*in_features//256 + block) * (QUANT_SIZES[ggml_type]//raw.dtype.itemsize)
@@ -596,7 +606,7 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
     # One accumulator per scale group: 32 weights for Q4/Q5/IQ4_XS/Q8_0, two groups of 16 otherwise.
     dots = [UOp.const(0, dtypes.int32)] * (1 if ggml_type in (Q4_K, Q5_K, IQ4_XS, Q8_0) else 2)
     for i in range(8):
-      weights = _quant_word(raw, base, subgroup, i, ggml_type, grids[0] if grids else None)
+      weights = _quant_word(raw, base, subgroup, i, ggml_type, gl[0] if gl else None)
       acc = i//(8//len(dots))
       dots[acc] = _amd_dp4a(weights, xwords[i], dots[acc])
     if xtoken is not None: token = xtoken(token)
@@ -637,12 +647,13 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
     # bundles of rows of an expert (moe_bundles): the rows of a bundle share the weight loads
     bw = bundle[0]*out_features*in_features
     return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type], active=active, multi=bundle[1],
-                          bundles=(bundle[0], bundle[2]), estimates=Estimates(2*bw*bundle[1], bw*QUANT_SIZES[ggml_type]//256, 0))
+                          bundles=(bundle[0], bundle[2]), estimates=Estimates(2*bw*bundle[1], bw*QUANT_SIZES[ggml_type]//256, 0),
+                          tables=gl if MOE_GRID_LDS and gl else None)
   if len(out.shape) == 2 and active is not None:
     # moe on a grid: a row per (token, slot), inactive rows skip their loop. an upper bound estimate
     weights, nbytes = (w:=out.shape[0]*out_features*in_features), w*QUANT_SIZES[ggml_type]//256
     return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type], active=active,
-                          estimates=Estimates(2*weights, nbytes, nbytes))
+                          estimates=Estimates(2*weights, nbytes, nbytes), tables=gl if MOE_GRID_LDS and gl else None)
   if len(out.shape) == 3 and out.shape[2] == out_features:
     # an upper bound: the rows of inactive experts are skipped
     weights, nbytes = (w:=out.shape[0]*out.shape[1]*out_features*in_features), w*QUANT_SIZES[ggml_type]//256
@@ -3470,6 +3481,8 @@ MOE_BUNDLE, MOE_BUNDLE_MIN = getenv("MOE_BUNDLE", 4), getenv("MOE_BUNDLE_MIN", 4
 MOE_EXACT_M, MOE_EXACT_MIN = getenv("MOE_EXACT_M", 4), getenv("MOE_EXACT_MIN", 0)
 # many more rows: bundles of 16 on the int8 tensor cores, every weight decoded once a step (_moe_bundled_wmma_kernel)
 MOE_WMMA, MOE_WMMA_MIN, MOE_WMMA_QUANTS = getenv("MOE_WMMA", 1), getenv("MOE_WMMA_MIN", 64), (IQ3_S, IQ4_XS)
+# (MOE_GRID_LDS (default off): the per-row and bundled MoE decode kernels of the IQ types read their grid from an LDS copy (the same values))
+MOE_GRID_LDS = getenv("MOE_GRID_LDS", 0)
 MOE_TILE = getenv("MOE_TILE", 64)  # grouped experts: rows of an expert are padded to whole tiles, a workgroup decodes an expert once per tile
 def _moe_tile(group:tuple[UOp, ...]) -> int:
   """the rows of a tile of grouped experts (moe_route): its rows (entries) over its tiles"""
