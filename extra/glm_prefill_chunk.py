@@ -52,7 +52,7 @@ print(f"WARM chunk={NJ} elapsed_s={time.perf_counter()-st:.3f}", flush=True)
 mem("warmed")
 toks = [random.randrange(1000, 50000) for _ in range(max(POS) + NJ + 1)]
 model._token_host[:len(toks)] = __import__("array").array("i", toks)
-temp = model._temps[(0.0, 1.0)]
+temp = None  # GLM5Next uses None for exact greedy sampling (not the older GLM DSA tensor pair)
 v_start_pos, v_toks = UOp.variable("start_pos", 0, model.max_context-1), UOp.variable("toks", 1, NJ)
 res: dict[int, list[float]] = collections.defaultdict(list)
 for pos in POS:
