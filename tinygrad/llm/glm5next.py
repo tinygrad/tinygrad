@@ -5057,7 +5057,13 @@ class Transformer:
     num_blocks = kv[f'{arch}.block_count'] - kv.get(f'{arch}.nextn_predict_layers', 0)
     mtp = bool(getenv("MTP", int(arch == "glm5-next"))) and kv.get(f"{arch}.nextn_predict_layers", 0) > 0
     # (NUM_BLOCKS: only the first blocks for small-kernel profiling, no MTP; unset keeps the exact deployed model)
-    if (nb:=getenv("NUM_BLOCKS", 0)) and nb < num_blocks: num_blocks, mtp = nb, False
+    # (NUM_BLOCKS_MTP=1: the MTP layer kept, as the block after the first NUM_BLOCKS: a decode step's rows (drafts) as deployed)
+    if (nb:=getenv("NUM_BLOCKS", 0)) and nb < num_blocks:
+      if mtp and getenv("NUM_BLOCKS_MTP", 0):
+        entries = {re.sub(rf"^blk\.{num_blocks}\.", f"blk.{nb}.", k):v for k,v in entries.items()
+                   if not ((m:=re.match(r"blk\.(\d+)\.", k)) and nb <= int(m.group(1)) < num_blocks)}
+        num_blocks = nb
+      else: num_blocks, mtp = nb, False
     # (qwen4exp: the MTP layer in a gguf of its own (its block after the model's), found next to the model's)
     if arch == 'qwen4exp' and getenv("MTP", 1) and not isinstance(gguf, Tensor) and (mf:=_qwen_mtp_file(pathlib.Path(gguf))) is not None:
       mkv, mentries = gguf_parse(mf)
