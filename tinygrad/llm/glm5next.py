@@ -4125,7 +4125,7 @@ class Transformer:
     # (a prefill's temperature and top_p: in host memory, a new value isn't a new tensor (its realize walks every tensor of the model))
     tmv, self._seq_pf_temp = _host_buffer(devs, 8, dtypes.float32)
     self._seq_pf_host_temp = tmv.cast('f')
-    self._seq_host_out, self._seq_out = _host_ints(devs[0], m*(2*k+1) + 1)
+    self._seq_host_out, self._seq_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, m*(2*k+1) + 1)
     # (SEQ_COPY_SCRATCH=1: their intermediates in the jits' shared arenas, not their own (~140 MB a card at 30 slots): one runs at a time)
     sc:dict|None = self._scratch if getenv("SEQ_COPY_SCRATCH", 0) else None
     self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True, scratch=sc) for sv in (True, False)}

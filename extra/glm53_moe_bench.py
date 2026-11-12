@@ -12,32 +12,35 @@ import os, time
 import numpy as np
 from tinygrad import Tensor, TinyJit, Device, dtypes
 from tinygrad.helpers import getenv
-import tinygrad.llm.kernels.amd_glm_dsa as K
+import importlib
+# (MOD=amd_glm: GLM Flash's kernels (glm5next), e.g. G: MOD=amd_glm NEXP=288 E=48 SHAPES=4096x4096xiq2_sxg,4096x2048xiq3_sxd)
+K = importlib.import_module(f"tinygrad.llm.kernels.{os.environ.get('MOD', 'amd_glm_dsa')}")
 
-TYPES = {"iq3_s": K.IQ3_S, "iq4_xs": K.IQ4_XS, "q8_0": K.Q8_0}
+TYPES = {"iq3_s": K.IQ3_S, "iq4_xs": K.IQ4_XS, "q8_0": K.Q8_0, "iq2_s": K.IQ2_S}
 
 def main():
-  dev, REPS, BW, E, SLOTS, NEXP = Device.DEFAULT, getenv("REPS", 20), getenv("BW", 640), getenv("E", 19), 8, 256
+  dev, REPS, BW, E, SLOTS, NEXP = Device.DEFAULT, getenv("REPS", 20), getenv("BW", 640), getenv("E", 19), 8, getenv("NEXP", 256)
   rng = np.random.default_rng(getenv("SEED", 0))
   arms = [a.split(":", 1) for a in os.environ.get("ARMS", "row:MOE_BUNDLE_MIN=100000").split(";") if a]
   toks = [int(t) for t in str(getenv("TOKENS", "16,32")).split(",")]
   tot = {name: 0.0 for name, _ in arms}
   first = Tensor([0], dtype=dtypes.int32, device=dev).realize()
   for shape in os.environ.get("SHAPES", "4096x6144xiq3_s,6144x2048xiq4_xs").split(","):
-    fo, fi, tn = shape.split("x", 2)
+    # (a 4th field g / d: the gate+up (x shared by the slots) or the down (x a slot's); default: iq3_s gate+up, else down)
+    fo, fi, tn, *fl = shape.split("x")
     fout, fin, typ = int(fo), int(fi), TYPES[tn]
     ebytes = fout * fin * K.QUANT_SIZES[typ] // 256
     raw = rng.integers(0, 2**32, E * ebytes // 4, dtype=np.uint32)
-    if typ in (K.IQ4_XS, K.Q8_0, K.IQ3_S):
+    if typ in (K.IQ4_XS, K.Q8_0, K.IQ3_S, K.IQ2_S):
       # (sane scales: the block's f16 d at its start, small, either sign)
       b = raw.view(np.uint8).reshape(-1, K.QUANT_SIZES[typ] if typ != K.Q8_0 else 34)
       d = np.exp(rng.uniform(np.log(1e-4), np.log(0.05), (b.shape[0], 1))) * rng.choice([-1, 1], (b.shape[0], 1))
       b[:, 0:2] = d.astype(np.float16).view(np.uint8)
     # (copies past the 64 MB infinity cache)
     # (IQ3_S blocks are 110 bytes: halfwords, as the model loads them)
-    wraw = raw.view(np.uint16) if typ == K.IQ3_S else raw
+    wraw = raw.view(np.uint16) if typ in (K.IQ3_S, K.IQ2_S) else raw
     ws = [Tensor(wraw, device=dev).realize() for _ in range(max(1, -(-getenv("WSET_MB", 256)*10**6 // raw.nbytes)))]
-    down = tn != "iq3_s"
+    down = fl[0] == "d" if fl else tn != "iq3_s"
     for T in toks:
       sel_np = np.stack([rng.choice(NEXP, SLOTS, replace=False) for _ in range(T)]).astype(np.int32).reshape(1, T, SLOTS)
       if (nl:=getenv("NLOCAL", -1)) >= 0:
