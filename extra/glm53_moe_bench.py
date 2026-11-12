@@ -19,7 +19,8 @@ K = importlib.import_module(f"tinygrad.llm.kernels.{os.environ.get('MOD', 'amd_g
 TYPES = {"iq3_s": K.IQ3_S, "iq4_xs": K.IQ4_XS, "q8_0": K.Q8_0, "iq2_s": K.IQ2_S}
 
 def main():
-  dev, REPS, BW, E, SLOTS, NEXP = Device.DEFAULT, getenv("REPS", 20), getenv("BW", 640), getenv("E", 19), 16 if getenv("SLICES", 1) > 1 else 8, getenv("NEXP", 256)
+  dev, REPS, BW, E, NEXP = Device.DEFAULT, getenv("REPS", 20), getenv("BW", 640), getenv("E", 19), getenv("NEXP", 256)
+  SLOTS = 16 if getenv("SLICES", 1) > 1 else 8
   rng = np.random.default_rng(getenv("SEED", 0))
   arms = [a.split(":", 1) for a in os.environ.get("ARMS", "row:MOE_BUNDLE_MIN=100000").split(";") if a]
   toks = [int(t) for t in str(getenv("TOKENS", "16,32")).split(",")]
@@ -43,10 +44,11 @@ def main():
     down = fl[0] == "d" if fl else tn != "iq3_s"
     for T in toks:
       sel_np = np.stack([rng.choice(NEXP, SLOTS, replace=False) for _ in range(T)]).astype(np.int32).reshape(1, T, SLOTS)
-      if (S:=getenv("SLICES", 1)) > 1:
+      if getenv("SLICES", 1) > 1:
         # (SLICES=S: G's sliced experts (glm5next expert_slices, moe_router_local): every device E of the NEXP*S units of hidden/S, an expert's
         # 1 or 2 of them here (E = NEXP + the experts with 2); a row's 8 experts are 8*2 local slots, -1 where the expert has one slice here)
-        cnt = np.ones(NEXP, np.int64); cnt[rng.choice(NEXP, E - NEXP, replace=False)] = 2
+        cnt = np.ones(NEXP, np.int64)
+        cnt[rng.choice(NEXP, E - NEXP, replace=False)] = 2
         start = np.concatenate([[0], np.cumsum(cnt)[:-1]])
         ex = np.stack([rng.choice(NEXP, 8, replace=False) for _ in range(T)])
         sel_np = np.where(np.arange(2) < cnt[ex][..., None], start[ex][..., None] + np.arange(2), -1).astype(np.int32).reshape(1, T, 16)
