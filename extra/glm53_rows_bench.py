@@ -11,7 +11,9 @@ import os, time
 import numpy as np
 from tinygrad import Tensor, TinyJit, Device
 from tinygrad.helpers import getenv
-import tinygrad.llm.kernels.amd_glm_dsa as K
+import importlib
+# (MOD=amd_glm: GLM Flash's kernels (glm5next))
+K = importlib.import_module(f"tinygrad.llm.kernels.{os.environ.get('MOD', 'amd_glm_dsa')}")
 
 SHAPES = os.environ.get("SHAPES", "2048x6144,576x6144,128x6144,160x6144,896x6144,1280x2048,4096x2048,6144x160,6144x896,6144x1280,"
                                   "6144x12288,11072x6144xq6")
