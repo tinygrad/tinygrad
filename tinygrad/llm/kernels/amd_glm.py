@@ -912,6 +912,8 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
 # _grouped_k256_kernel options, the same bits on every row that is read (-1: on RDNA4, measured on GLM Flash C6, off on RDNA3):
 # K256_SKIP: IQ2_S tiles' token tiles that are all padding skip their WMMAs
 K256_SKIP = getenv("K256_SKIP", -1)
+# K256_SKIP3: IQ3_S's too (the down's tiles at a few rows an expert: small prefill chunks on RDNA3)
+K256_SKIP3 = getenv("K256_SKIP3", 0)
 # K256_SBU: IQ2_S sub-blocks unrolled by this many (-1: 2 on RDNA4), K256_SBU3 IQ3_S's (no faster on C6's down)
 K256_SBU, K256_SBU3 = getenv("K256_SBU", -1), getenv("K256_SBU3", 1)
 # K256_IDLE: tiles of no expert load no grid and store nothing (their rows are never read)
@@ -994,7 +996,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   # its first row is) skips its WMMAs, a loop of 0 or 1 iterations. its rows' outputs are never read (gate/up's padding rows are read only by
   # down's padding rows, which aren't stored)
   skip = [UOp.range((rows[token_block * TOK + t*16].load() >= 0).where(1, 0), 10+t, AxisType.LOOP)
-          if t and on(K256_SKIP) and ggml_type == IQ2_S else None for t in range(TT)]
+          if t and ((on(K256_SKIP) and ggml_type == IQ2_S) or (K256_SKIP3 > 0 and ggml_type == IQ3_S)) else None for t in range(TT)]
   afrs = [[[_i8_frag(tuple(lds_q[t*16 + col + (skip[t] if skip[t] is not None else 0), sbu, c].load() for c in acols(h))) for h in range(2)]
            for t in range(TT)] for sbu in sbs]
   sums:list[UOp] = []
@@ -1028,7 +1030,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
         st = ints[o][t].store(UOp.stack(*[_cfn(True, src=(dreg[j].load(), sub, prev[j].load()), arg=(MAD_I24, dtypes.int32)) for j in range(8)]))
         prev = ints[o][t].after(st)
       sums.append(cast(UOp, st))
-  if on(K256_SKIP) and ggml_type == IQ2_S:
+  if any(sk is not None for sk in skip):
     tsums = [[x for i, x in enumerate(sums) if i % TT == t] for t in range(TT)]
     sums = [UOp.group(*ts).end(sk) if sk is not None else UOp.group(*ts) for ts, sk in zip(tsums, skip)]
   done = UOp.group(*sums).end(sb)
