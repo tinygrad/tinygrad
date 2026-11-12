@@ -14,8 +14,8 @@ from tinygrad.llm.kernels.amd_glm_dsa import Linear, gated_delta_prefill, flash_
   all_gather, all_gather_q8, sharded_argmax, skinny_matmul, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, SLOT_SPAN, \
   mla_bmm, bmm_wmma, weighted_sum, rows_gather, \
-  nucleus, seq_store, mla_sparse_seq, seq_views, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, fp8_rows, FP8_ROW, \
-  FP8_ROPE_ROW, IDX_FP8_ROW, pool_index_shard
+  nucleus, seq_store, mla_sparse_seq, seq_views, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, FP8_ROW, \
+  FP8_ROPE_ROW, IDX_FP8_ROW, pool_index_shard, Q4_ROW, Q4_ROPE_ROW, reduced_rows
 from tinygrad.llm.kernels.amd_glm_dsa import skinny_parts, skinny_sum
 from tinygrad.llm.kernels.amd_glm_dsa import p2p_check, host_allgather, Q8_0, mla_sparse_seq_tokens, ring_all_gather_q8, lists_pad, GEMM_ROWS
 from tinygrad.llm.kernels.amd_glm_dsa import host_allgather_half, _seq_p2p_pack
@@ -1289,7 +1289,7 @@ class MLATransformerBlock(FFNBlock):
     # (x: hn as it is (its shape and devices; the attention reads none of it))
     pre:dict = {"x": hn, "qn": qn_all}
     kv_a = self.attn_kv_a_mqa(xl)
-    if self.cache_s.dtype == dtypes.half or int(self.cache_s.shape[-1]) == FP8_ROPE_ROW:
+    if self.cache_s.dtype == dtypes.half or int(self.cache_s.shape[-1]) in (FP8_ROPE_ROW, Q4_ROPE_ROW):
       # (the latent and rope key of the device's rows (the same norm and rope a row), sent in half as the cache and the gather keep them)
       lora, rope = cfg.kv_lora_rank, cfg.rope_dim
       freqs_own = shard_rows(self.freqs_cis[start_pos:start_pos+T].pad_to((R, *self.freqs_cis.shape[1:])).contiguous(), 0)
@@ -1788,8 +1788,8 @@ class MLATransformerBlock(FFNBlock):
   @property
   def seq_sharded(self) -> bool: return hasattr(self, "cache_s")
   def _seq_rows(self, k:Tensor) -> Tensor:
-    """the rows of the tokens as the sequence sharded cache's: half, or fp8 (SEQ_FP8, see fp8_rows)"""
-    return fp8_rows(k) if self.cache_s.dtype == dtypes.uint32 else k
+    """the rows of the tokens as the sequence sharded cache's: half, or fp8 / 4-bit (SEQ_FP8 / SEQ_KV4, see fp8_rows / q4_rows)"""
+    return reduced_rows(k, int(self.cache_s.shape[-1])) if self.cache_s.dtype == dtypes.uint32 else k
   def slot_rows(self) -> int:
     """(sequence sharded) the rows of a device of a slot"""
     return int(self.slot_s[0].shape[0]) // len(cast(tuple, self.cache_s.device))
@@ -1805,8 +1805,10 @@ class MLATransformerBlock(FFNBlock):
         # (MLA_SEQ_SHARD: every device the rows of its positions, see seq_store)
         devs = cast(tuple[str, ...], x.device)
         # (SEQ_FP8: a row of fp8 values and their scales, see fp8_rows: half the memory. 576 dims (C9): the rope dims in half, 656 bytes)
-        fp8 = getenv("SEQ_FP8", 0) and D in (512, 576)
-        row, dt = ((FP8_ROW if D == 512 else FP8_ROPE_ROW,), dtypes.uint32) if fp8 else ((D,), dtypes.half)
+        # (SEQ_KV4 with it: 4-bit rows, see q4_rows: 416 bytes)
+        fp8, q4 = getenv("SEQ_FP8", 0) and D in (512, 576), getenv("SEQ_KV4", 0)
+        W = (Q4_ROW if q4 else FP8_ROW) if D == 512 else (Q4_ROPE_ROW if q4 else FP8_ROPE_ROW)
+        row, dt = ((W,), dtypes.uint32) if fp8 else ((D,), dtypes.half)
         if (reg:=self._regions) is not None:
           # (SLOT_ALIAS: the slots of batched decoding in the same buffer, regions of S positions: the model's first (SLOT_SPAN of them), slot
           # i's the SLOT_SPAN+i-th. the model's cache past them is the slots': a long sequence alone overwrites them, see Transformer.main_overlaps)
