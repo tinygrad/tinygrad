@@ -30,7 +30,7 @@ import extra.kprof as kprof
 # This is process-local profiling instrumentation, not a model/runtime change.
 _original_sparse = g5.flash_attention_mla_sparse
 def _profile_sparse(q: Tensor, cache: Tensor, index: Tensor, scale: float, valid_len, grouped=None):
-  if q.shape[1] <= 16: return _original_sparse(q, cache, index, scale, valid_len, grouped)
+  if q.shape[1] <= 16 or isinstance(q.device, tuple): return _original_sparse(q, cache, index, scale, valid_len, grouped)
   return Tensor.cat(*[_original_sparse(q[:, a:min(a+16, q.shape[1])], cache, index, scale, valid_len, grouped)
                       for a in range(0, q.shape[1], 16)], dim=1)
 g5.flash_attention_mla_sparse = _profile_sparse
