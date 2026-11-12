@@ -14,6 +14,7 @@ from tinygrad.helpers import colored, ansilen, printable, Target, is_image_shape
 if TYPE_CHECKING:
   from tinygrad.renderer import Estimates
   from tinygrad.runtime.support.hcq2 import HCQInfo
+  from tinygrad.renderer.x86 import Register
 
 class AxisType(Enum):
   def __repr__(self): return str(self)
@@ -40,6 +41,8 @@ class ParamArg:
   val: PyConst|None = None
   # the memory the linker gives an ALLOC
   spec: BufferSpec|None = None
+  # optional register constraints on this allocation, for assembly backends
+  reg: Register|None = None
   def __repr__(self):
     fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
               ("volatile", False), ("image", None), ("bind_on_realize", False), ("val", None), ("spec", None))
