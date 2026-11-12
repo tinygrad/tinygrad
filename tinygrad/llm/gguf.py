@@ -276,11 +276,12 @@ def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:t
     if n % r or shape[0] % (n//r): raise ValueError(f"{name}: can't repeat {shape} {r} times over {n} devices")
     entries[name] = (data.to("CPU").reshape(n//r, -1).repeat_interleave(r, 0).flatten(), (shape[0]*r, *shape[1:]), typ)
   for name, (data, shape, typ) in entries.items():
+    data = data.to(devices[0])
     if (axis:=shard_map.get(name)) is None: packed[name] = data.shard(devices)
     else:
       if shape[axis] % n or (axis == len(shape)-1 and shape[axis]//n % _GGML_QUANT.get(typ, (1,))[0]):
         raise ValueError(f"{name}: can't split {shape} on axis {axis} over {n} devices")
-      parts = (data.to("CPU") if prod(shape[:axis]) > 1 else data).reshape(*shape[:axis], n, -1)
+      parts = data.reshape(*shape[:axis], n, -1)
       packed[name] = parts.permute(axis, *range(axis), axis+1).shard(devices, 0)
   # TODO: shard copies the full tensor to every device
   for t in packed.values(): t.realize()
