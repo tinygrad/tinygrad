@@ -47,7 +47,8 @@ def main():
         # (SLICES=S: G's sliced experts (glm5next expert_slices): a row's 8 experts are 8*S units of hidden/S, the units spread at random
         # over the devices (this one holds E of NEXP*S))
         perm = rng.permutation(NEXP*S)
-        sel_np = perm[np.stack([rng.choice(NEXP, 8, replace=False) for _ in range(T)])[..., None]*S + np.arange(S)].astype(np.int32).reshape(1, T, SLOTS)
+        ex = np.stack([rng.choice(NEXP, 8, replace=False) for _ in range(T)])
+        sel_np = perm[ex[..., None]*S + np.arange(S)].astype(np.int32).reshape(1, T, SLOTS)
       if (nl:=getenv("NLOCAL", -1)) >= 0:
         # (NLOCAL: exactly that many local selections (the first slots of the first rows), the rest other devices' experts: the cost of the
         # idle rows' workgroups)
