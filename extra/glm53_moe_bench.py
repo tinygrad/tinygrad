@@ -81,6 +81,15 @@ def main():
           for _ in range(REPS): o = f(sel, x)
           Device[dev].synchronize()
           dt = (time.perf_counter() - st) / REPS / len(ws)
+          if getenv("KPROF"):
+            # (KPROF=1 with PROFILE=1: the kernels of a call, us (PROFILE syncs every kernel: the wall time is not the step's))
+            import extra.kprof as kprof
+            kprof.reset(dev)
+            f(sel, x)
+            Device[dev].synchronize()
+            kt = kprof.times(dev)
+            ks = sorted(kt.items(), key=lambda v: -v[1][1])
+            print(f"  KPROF {tn} T={T} {name}: " + "  ".join(f"{n[:40]} {us/len(ws):.1f}" for n, (c, us) in ks), flush=True)
           out = o.float().numpy().reshape(T, SLOTS, fout)
         finally:
           for ek, ev in old.items():
