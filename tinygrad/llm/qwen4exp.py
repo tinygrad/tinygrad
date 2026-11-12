@@ -521,7 +521,9 @@ def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
       u = UOp.from_buffer(mb if isinstance(devs, tuple) else views[0], t.dtype, devs).reshape(shape)
       lazy, u = t.uop, u.unshard(t.uop.axis) if isinstance(devs, tuple) and t.uop.axis is not None else u
       t.replace(Tensor(u))
-      pairs.append((u, lazy))
+      # (LOAD_APART: a contiguous computed straight into its buffer, not into the jit's own one then copied: the jit's memory the size of
+      # what it makes (C2: ~336 MB a device at once, the start-up's peak with the apart buffers), the same values)
+      pairs.append((u, lazy.src[0] if getenv("LOAD_APART", 0) and lazy.op is Ops.STAGE and lazy.arg is None else lazy))
   # (a jit: compiled with the model's jits, see _capture_parallel)
   def compute(): Tensor.realize(*[Tensor(u).assign(Tensor(lazy)) for u, lazy in pairs])
   if pairs: pending.append(TinyJit(compute, capture_first=True))
