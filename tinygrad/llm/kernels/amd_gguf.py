@@ -60,18 +60,19 @@ def _load_byte(raw:UOp, base:UOp, offset:int|UOp) -> UOp:
   size = raw.dtype.itemsize
   return (raw[base + offset//size].cast(dtypes.uint32) >> ((offset%size)*8)) & 255
 def _load_u32(raw:UOp, base:UOp, offset:int|UOp, stream:bool=False) -> UOp:
-  # Halfword-aligned formats cannot load u32 directly.
-  lo, hi = (raw[base+offset//2+i] for i in range(2))
-  if stream: lo, hi = _amd_load(lo), _amd_load(hi)
-  return lo.cast(dtypes.uint32) | (hi.cast(dtypes.uint32) << 16)
+  # Halfword-aligned (mxfp4 byte-aligned) formats cannot load u32 directly.
+  size = raw.dtype.itemsize
+  parts = [raw[base+offset//size+i] for i in range(4//size)]
+  if stream: parts = [_amd_load(p) for p in parts]
+  return functools.reduce(lambda x,y: x|y, (p.cast(dtypes.uint32) << (8*size*i) for i,p in enumerate(parts)))
 
 def _half(value:UOp) -> UOp: return value.cast(dtypes.uint16).bitcast(dtypes.float16).float()
 
-# 16 entry int8 tables as the byte_perm words of _nibble_lut: entries 7-4, 3-0, 15-12, 11-8 (most significant byte first)
-IQ4NL_LUT = (0xf6eaddcf, 0xbfad9881, 0x71594535, 0x26190d01)  # -127,-104,-83,-65,-49,-35,-22,-10,1,13,25,38,53,69,89,113
-MXFP4_LUT = (0x0c080604, 0x03020100, 0xf4f8fafc, 0xfdfeff00)  # 0,1,2,3,4,6,8,12,-0,-1,-2,-3,-4,-6,-8,-12: e2m1 doubled, the scale halved
+# 16 int8 entries for _nibble_lut, packed as words of entries 7-4, 3-0, 15-12, 11-8
+IQ4NL_LUT = (0xf6eaddcf, 0xbfad9881, 0x71594535, 0x26190d01)  # kvalues_iq4nl
+MXFP4_LUT = (0x0c080604, 0x03020100, 0xf4f8fafc, 0xfdfeff00)  # e2m1 doubled
 
-def _nibble_lut(packed:UOp, shift:int|UOp, lut:tuple[int, int, int, int]=IQ4NL_LUT) -> UOp:
+def _nibble_lut(packed:UOp, shift:int|UOp, lut:tuple[int, int, int, int]) -> UOp:
   # a 16 entry int8 table looked up by the nibbles: 3 byte_perms beat any arithmetic/select-tree form (~60% decode)
   selectors = (packed >> shift) & 0x0f0f0f0f
   low = _amd_byte_perm(UOp.const(lut[0], dtypes.uint32), UOp.const(lut[1], dtypes.uint32), selectors)
@@ -81,7 +82,7 @@ def _nibble_lut(packed:UOp, shift:int|UOp, lut:tuple[int, int, int, int]=IQ4NL_L
 def _e8m0_halved(e:UOp) -> UOp:
   # 2**(e-128) as float32 bits, e < 2 is a denormal
   e = e.cast(dtypes.uint32)
-  return (e < 2).where(UOp.const(0x00200000, dtypes.uint32) << e, (e - 1) << 23).bitcast(dtypes.float32)
+  return (e < 2).where(UOp.const(0x00200000, dtypes.uint32) << (e & 1), (e - 1) << 23).bitcast(dtypes.float32)
 
 def _q5_scales(raw:UOp, base:UOp, subgroup:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   # scales/mins (6-bit each) live in block bytes 4-15: three words total, same for the whole super-block's lanes
@@ -184,12 +185,9 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
     weights = (word(offset) >> ((subgroup%4)*2)) & 0x03030303
     if ggml_type == Q3_K: weights |= ((word(i*4) >> subgroup) & 0x01010101) << 2
     return weights
-  if ggml_type in (IQ4_NL, IQ4_XS):
-    packed = word(2+(i%4)*4) if ggml_type == IQ4_NL else _amd_load(raw[base+2+subgroup*4+i%4])
-    return _nibble_lut(packed, 4*(i//4))
-  if ggml_type == MXFP4:
-    o = 1+(i%4)*4
-    return _nibble_lut(byte(o) | byte(o+1) << 8 | byte(o+2) << 16 | byte(o+3) << 24, 4*(i//4), MXFP4_LUT)
+  if ggml_type in (IQ4_NL, IQ4_XS, MXFP4):
+    packed = _amd_load(raw[base+2+subgroup*4+i%4]) if ggml_type == IQ4_XS else word((1 if ggml_type == MXFP4 else 2)+(i%4)*4)
+    return _nibble_lut(packed, 4*(i//4), MXFP4_LUT if ggml_type == MXFP4 else IQ4NL_LUT)
   assert grid is not None
   grid_words = 2 if ggml_type in (IQ2_XS, IQ2_S) else 1
   if ggml_type in (IQ3_S, IQ3_XXS):
@@ -253,9 +251,8 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
     elif ggml_type in (IQ2_XS, IQ2_S):
       scales = byte((66 if ggml_type == IQ2_XS else 74)+subgroup)
       total = sum(dots[h].float() * (((scales >> (h*4)) & 15).float()+0.5) for h in range(2)) * 0.25 * _half(raw[base])
-    elif ggml_type == MXFP4: total = (dots[0]+dots[1]).float() * _e8m0_halved(byte(0))
     else:
-      total = (dots[0]+dots[1]).float() * _half(raw[base])
+      total = (dots[0]+dots[1]).float() * (_e8m0_halved(raw[base]) if ggml_type == MXFP4 else _half(raw[base]))
       if ggml_type == IQ3_S: total *= (1+2*((byte(106+subgroup//2) >> ((subgroup%2)*4)) & 15)).float()
       if ggml_type == IQ3_XXS: total *= ((word(66+subgroup*4) >> 28).float()+0.5)*0.5
     return total * xd[token, group]
@@ -412,7 +409,7 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
     elif ggml_type == Q6_K:
       scale, zero = _half(raw[base+104])*byte(192+subgroup*2+half).cast(dtypes.uint8).bitcast(dtypes.int8).float(), 32
     else:
-      scale = _e8m0_halved(byte(0)) if ggml_type == MXFP4 else _half(raw[base])
+      scale = _e8m0_halved(raw[base]) if ggml_type == MXFP4 else _half(raw[base])
       if ggml_type in (IQ2_XS, IQ2_S):
         sc = byte((66 if ggml_type == IQ2_XS else 74)+subgroup)
         scale *= (((sc >> (half*4)) & 15).float()+0.5)*0.25

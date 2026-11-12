@@ -21,7 +21,10 @@ def random_data(shape:tuple[int, ...], typ:Q, seed=0) -> np.ndarray:
   rng = np.random.default_rng(seed)
   if typ == Q.F32: return rng.normal(size=shape).astype(np.float32)
   block, size = GGML_QUANT_SIZES[typ]
-  return rng.integers(0, 0x3c, (*shape[:-1], shape[-1]//block*size), dtype=np.uint8)
+  data = rng.integers(0, 256 if typ == Q.MXFP4 else 0x3c, (*shape[:-1], shape[-1]//block*size), dtype=np.uint8)
+  # mxfp4: any nibble, e8m0 scales near 1 (e < 0x3c would round every weight to 0 in fp16)
+  if typ == Q.MXFP4: data.reshape(-1, size)[:, 0] = rng.integers(122, 128, data.size//size)
+  return data
 
 @unittest.skipIf(not_support_multi_device(), "no multi")
 class TestGGUFShard(unittest.TestCase):
@@ -58,7 +61,7 @@ class TestGGUFShard(unittest.TestCase):
   def test_quantized_shards(self):
     # the shards are still recognized as packed quantized weights, and keep the direction of their split
     if Tensor.empty(1, device=DEVICES[0]).uop.contiguous_view() is None: self.skipTest("requires buffer views")
-    for typ, axis in itertools.product((Q.Q4_K, Q.Q6_K, Q.IQ4_XS), (0, 1, None)):
+    for typ, axis in itertools.product((Q.Q4_K, Q.Q6_K, Q.IQ4_XS, Q.MXFP4), (0, 1, None)):
       with self.subTest(typ=typ.name, axis=axis):
         data = Tensor(random_data((8, 1024), typ).reshape(-1), device='CPU')
         layer = Linear(1024, 8, bias=False)
@@ -93,10 +96,10 @@ class TestTensorParallel(unittest.TestCase):
       out = parallel.blk[0]._feed_forward(x.shard(DEVICES)).to(Device.DEFAULT).numpy()
       np.testing.assert_allclose(out, ref, atol=2e-3, rtol=2e-3)
 
-  def test_quantized_linear(self):
+  def _test_quantized_linear(self, types:tuple[Q, ...], axes:tuple[int, ...]):
     # the AMD kernels on the packed shards: decode (1 token) and WMMA (16 tokens), output and input features split
     if not amd_custom_kernels_supported(DEVICES[0]): self.skipTest("needs the AMD custom kernels")
-    for typ, axis, tokens in itertools.product((Q.Q4_K, Q.Q6_K), (0, 1), (1, 16)):
+    for typ, axis, tokens in itertools.product(types, axes, (1, 16)):
       with self.subTest(typ=typ.name, axis=axis, tokens=tokens):
         data = random_data((64, 1024), typ).reshape(-1)
         layer = Linear(1024, 64, bias=False)
@@ -108,11 +111,13 @@ class TestTensorParallel(unittest.TestCase):
         got = layer(Tensor(x).shard(DEVICES, 2 if axis == 1 else None)).float().to(Device.DEFAULT).numpy()
         np.testing.assert_allclose(got, ref, rtol=2e-2, atol=2e-2*np.abs(ref).max())
 
-  def test_quantized_experts(self):
+  def test_quantized_linear(self): self._test_quantized_linear((Q.Q4_K, Q.Q6_K), (0, 1))
+  def test_quantized_linear_mxfp4(self): self._test_quantized_linear((Q.MXFP4,), (1,))  # byte offsets of the split input features
+
+  def _test_quantized_experts(self, typ:Q, shape:tuple[int, int, int]):
     # the moe decode kernel on the packed shards: gate/up split the output features, down splits the input features
     if not amd_custom_kernels_supported(DEVICES[0]): self.skipTest("needs the AMD custom kernels")
-    E, O, I = shape = (4, 8, 512)
-    typ = Q.Q4_K
+    E, O, I = shape
     data = random_data(shape, typ).reshape(-1)
     w = ggml_data_to_tensor(Tensor(data, device='CPU'), E*O*I, typ).reshape(shape).float().numpy()
     sel, T = np.array([[[3, 1], [0, 2]]], dtype=np.int32), Variable('T', 1, 2).bind(1)
@@ -127,6 +132,9 @@ class TestTensorParallel(unittest.TestCase):
         if axis == 0: got = got.sum(0)
         self.assertEqual(layer.ggml_type, typ)
         np.testing.assert_allclose(got[0, 0], ref, rtol=2e-2, atol=2e-2*np.abs(ref).max())
+
+  def test_quantized_experts(self): self._test_quantized_experts(Q.Q4_K, (4, 8, 512))
+  def test_quantized_experts_mxfp4(self): self._test_quantized_experts(Q.MXFP4, (4, 8, 2880))  # gpt-oss rows: 45 blocks a device, a ragged split-K
 
   @unittest.skipIf(DEV.interface.startswith("MOCK"), "too heavy for mock GPUs")
   def test_model(self):
