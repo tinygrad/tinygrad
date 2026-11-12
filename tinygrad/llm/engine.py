@@ -181,7 +181,8 @@ class SeqEngine:
       self.evictions += 1
       stashed = self._stash(v, force)
       if not stashed: self.lost += 1
-      self._event("eviction", cause="capacity", slot=v.slot, tokens=v.n, stashed=stashed, session_ids=sorted(v.sessions))
+      self._event("eviction", cause="capacity", slot=v.slot, tokens=v.n, stashed=stashed,
+                    **({"session_ids": sorted(v.sessions)} if v.sessions else {}))
     self.version += 1
   def _window(self, need:int, force:bool, after:Seq|None=None) -> tuple[int, list[Seq]]|None:
     """
@@ -243,7 +244,8 @@ class SeqEngine:
       self.lost += 1
     else: return None
     self._free(x.chunks, x.entry)
-    self._event("stash_drop", tokens=len(x.tokens), chunks=len(x.chunks), resident_copy=resident_copy, session_ids=sorted(x.sessions))
+    self._event("stash_drop", tokens=len(x.tokens), chunks=len(x.chunks), resident_copy=resident_copy,
+                **({"session_ids": sorted(x.sessions)} if x.sessions else {}))
     return x
   def _take(self, n:int) -> list[int]:
     """n free chunks: consecutive ones if there are (the copies' calls are of runs)"""
@@ -521,7 +523,8 @@ class SeqEngine:
     self.evictions += 1
     stashed = self._stash(s, True)
     if not stashed: self.lost += 1
-    self._event("eviction", cause="paused_length", slot=s.slot, tokens=s.n, stashed=stashed, session_ids=sorted(s.sessions))
+    self._event("eviction", cause="paused_length", slot=s.slot, tokens=s.n, stashed=stashed,
+                  **({"session_ids": sorted(s.sessions)} if s.sessions else {}))
 
   def stop(self, s:Seq, kept:int):
     """the end of the decoding of s: its tokens past `kept` (of its reply, after its end) aren't its"""

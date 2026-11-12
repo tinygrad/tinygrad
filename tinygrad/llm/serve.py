@@ -398,13 +398,17 @@ class Handler(VizHandler):
     request_st = time.perf_counter()
     log = f"{self.path}  {colored('--', 'BLACK')}  "
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-    # (a body that isn't a JSON object, messages the template can't render: a 400, not the handler's exception (the connection dropped))
+    path = self.path.split("?")[0]
+    # (the path-form session end needs no request body. The body-form alias accepts its session_id in JSON.)
     try:
-      body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
+      if not raw_body.strip() and path.startswith("/v1/sessions/"):
+        body: dict[str, typing.Any] = {}
+      else:
+        body = json.loads(raw_body.decode("utf-8"))
       if not isinstance(body, dict): raise ValueError("the body is not a JSON object")
     except Exception as e: return self.bad_request(f"invalid request body: {e}")
     if DEBUG >= 1: print(json.dumps(body, indent=2))
-    if (path:=self.path.split("?")[0]) in ("/v1/messages", "/v1/messages/count_tokens"): return self.anthropic(path, body, log, request_st)
+    if path in ("/v1/messages", "/v1/messages/count_tokens"): return self.anthropic(path, body, log, request_st)
     if path == "/v1/sessions/end": return self.session_end(body.get("session_id", ""))
     if path.startswith("/v1/sessions/") and path.endswith("/end"):
       from urllib.parse import unquote
