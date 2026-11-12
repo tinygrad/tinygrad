@@ -474,9 +474,11 @@ def _drop_apart(final=True):
   if not (refs:=gguf_load.apart_buffers): return
   import gc
   st = time.perf_counter()
-  nbytes = sum(b.nbytes for r in refs if (b:=r()) is not None)
-  if any(r() is not None for r in refs): gc.collect()
-  held = [b for r in refs if (b:=r()) is not None]
+  # (no buffer in a variable of this function's: a comprehension's walrus would keep one in a cell)
+  def alive() -> list[Buffer]: return [x for x in (r() for r in refs) if x is not None]
+  nbytes = sum(x.nbytes for x in alive())
+  if nbytes: gc.collect()
+  held = alive()
   print(f"LOAD_APART: {(nbytes - sum(b.nbytes for b in held))/1e6:.1f} MB freed, {sum(b.nbytes for b in held)/1e6:.1f} MB held "
         f"({time.perf_counter()-st:.3f}s{'' if final else ', tried again after the warm-up'})")
   if held and getenv("LOAD_APART") >= 2:
@@ -2747,7 +2749,7 @@ class Transformer:
       if gguf_load.apart_buffers:
         for j in derive: _drop_jit(j)
         # (capture_parallel's registry of the buffers at its fork holds them too: no jit still to take reads them)
-        prefork_forget([b for r in gguf_load.apart_buffers if (b:=r()) is not None])
+        prefork_forget([x for x in (r() for r in gguf_load.apart_buffers) if x is not None])
         _drop_apart(final=False)
       # (the warm-up's runs as their jits come: while the others compile; the stash's jits linked meanwhile when the host memory has room)
       run_as_they_come(take, calls, ran, idle=functools.partial(link_late, take))
