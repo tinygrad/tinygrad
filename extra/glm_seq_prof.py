@@ -49,7 +49,8 @@ REAL_STREAM = bool(getenv("REAL_STREAM", SAMPLED))
 TEMP = getenv("SAMPLE_TEMP", 1.0 if SAMPLED else 0.0)
 assert not SAMPLED or not CYCLE, "sampled unfilled contexts have no real checkpoint to restore"
 room = min(NS, CYCLE) if CYCLE else NS + max(0, WARM-3)
-span = -(-(CTXP + 2*room*(k+1) + 64) // REGION_ALIGN) * REGION_ALIGN  # (CYCLE: prompt checkpoints bound the rows too)
+RA = getattr(model, "REGION_ALIGN", REGION_ALIGN)  # (the model's: GLM-5.3's 3584, glm5next's 3072)
+span = -(-(CTXP + 2*room*(k+1) + 64) // RA) * RA  # (CYCLE: prompt checkpoints bound the rows too)
 G = max(GS)
 assert G * span <= model.seq_rows() and G <= model.seq_slots(), f"{G} regions of {span} rows: SEQ_ROWS >= {G*span}, SEQ_SLOTS >= {G}"
 def sync():
