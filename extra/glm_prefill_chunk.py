@@ -87,8 +87,10 @@ def check(pos:int, rep:int, out) -> None:
   h, nd, p = hashlib.sha256(), len(devs), Tensor.arange(pos, pos+N).to(devs[0])
   for blk in model.blk:
     if isinstance(blk, MLATransformerBlock) and hasattr(blk, "cache_s"):
-      cs = blk.cache_s.reshape(nd, -1, blk.cache_s.shape[-1])
-      h.update(cs[(p//SEQ_BLK) % nd, (p//(SEQ_BLK*nd))*SEQ_BLK + p % SEQ_BLK].numpy().tobytes())
+      if nd == 1:
+        cs = blk.cache_s.reshape(nd, -1, blk.cache_s.shape[-1])
+        h.update(cs[(p//SEQ_BLK) % nd, (p//(SEQ_BLK*nd))*SEQ_BLK + p % SEQ_BLK].numpy().tobytes())
+      else: h.update(blk.cache_s.numpy().tobytes())  # (sharded rows: the whole cache, every row written so far)
     elif isinstance(blk, MLATransformerBlock) and hasattr(blk, "cache_k"): h.update(blk.cache_k[:, :, pos:pos+N].numpy().tobytes())
     elif isinstance(blk, GatedDeltaNetBlock) and hasattr(blk, "recurrent_state"): h.update(blk.recurrent_state.numpy().tobytes())
   tok = out.numpy().tobytes() if isinstance(out, Tensor) else repr(out).encode()
