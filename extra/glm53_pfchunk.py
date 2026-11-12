@@ -69,6 +69,15 @@ for pos in POS:
     dt = time.perf_counter() - st
     res[pos].append(dt)
     # (a p2p poll that ran out (P2P_AR_TIMEOUT_MS) in the chunk: its values wrong; the server's generate would run the prompt again)
+    if getenv("CHECK"):
+      # (an exactness check of A/B trees: the sampled token and the last block's latent cache rows of the chunk's positions)
+      import hashlib, numpy as np
+      from tinygrad.llm.kernels.amd_glm_dsa import SEQ_BLK
+      blk, n = model.blk[-1], len(devs)
+      arr = blk.cache_s.numpy().reshape(n, -1, blk.cache_s.shape[-1])
+      p = np.arange(pos, pos + N)
+      rows = arr[(p // SEQ_BLK) % n, (p // (SEQ_BLK*n))*SEQ_BLK + p % SEQ_BLK]
+      print(f"CHECK pos {pos} rep {r}: token {model._token_host[pos+N]} cache {hashlib.sha256(rows.tobytes()).hexdigest()[:16]}", flush=True)
     if any(late:=p2p_late(devs, clear=True)): print(f"P2P RUNOUT at pos {pos} rep {r}: epochs {late}", flush=True)
     print(f"chunk {N} at {pos:7d} rep {r}: {dt*1e3:8.1f} ms (host {t_host*1e3:.1f} ms)" +
           (f" parts {' '.join(f'{p*1e3:.1f}' for p in parts_t)}" if parts_t else ""), flush=True)
