@@ -31,9 +31,12 @@ class IselContext:
     return Register(f"v{next(self.reg_n)}", 0, cons, size or cons[0].size)
 
 # the registers an INS defines follow its opcode and dtype in its arg
-def regs(u:UOp) -> tuple[Register, ...]: return u.arg[2:] if u.op is Ops.INS else ()
+def regs(u:UOp) -> tuple[Register, ...]:
+  if u.op in {Ops.BUFFER, Ops.ALLOC}: return (u.arg.reg,) if u.arg.reg is not None else ()
+  return u.arg[2:] if u.op is Ops.INS else ()
 def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp:
   assert u.dtype != dtypes.void, "void cannot have output registers"
+  if u.op in {Ops.BUFFER, Ops.ALLOC}: return u.replace(arg=replace(u.arg, reg=r[0]))
   return u.replace(arg=u.arg[:2]+r)
 
 def rdef(u:UOp):
@@ -63,7 +66,7 @@ class ISARenderer(Renderer):
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
   # these aren't real instructions
-  LABEL = auto(); IMM = auto(); REG = auto()
+  LABEL = auto(); IMM = auto()
   # index
   LEA = auto()
   # register / memory / immediate moves
@@ -240,13 +243,14 @@ reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, 
         **{f"r{i}": {4:f"r{i}d", 2:f"r{i}w", 1:f"r{i}b"} for i in range(8, 16)}}
 
 # a register defined outside the instruction stream: the stack pointer, the args pointer, a callee saved register
-def reg(dt:DType, r:Register) -> UOp: return UOp(Ops.INS, arg=(X86Ops.REG, dt, r))
+def reg(dt:DType, r:Register) -> UOp: return UOp.placeholder((1,), dt, slot=-1, addrspace=AddrSpace.REG, reg=r)
 def stack_pointer() -> UOp: return reg(dtypes.uint64, RSP)
 def args_pointer() -> UOp: return reg(dtypes.uint64, RDI)
 
 # ***** X86 instruction selection *****
 # a register buffer is its own virtual register, named by its identity
-def regbuf_reg(x:UOp) -> Register: return Register(f"b{x.key.hex()}", 0, *((XMM, 16) if x.dtype in dtypes.floats else (WGPR, x.dtype.itemsize)))
+def regbuf_reg(x:UOp) -> Register:
+  return rdef(x) or Register(f"b{x.key.hex()}", 0, *((XMM, 16) if x.dtype in dtypes.floats else (WGPR, x.dtype.itemsize)))
 # a value moved into a register constrained to cons
 def pin(ctx:IselContext, x:UOp, cons:Register|tuple[Register, ...]) -> UOp:
   return with_regs(x.ins(X86Ops.MOV, src=(x,)), (ctx.vreg(cons, x.dtype.itemsize),))
@@ -342,8 +346,9 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if x.dtype is dtypes.void: return None
   # already allocated vregs
   if regs(x) and regs(x)[0]._cons: return None
-  # a register buffer is a REG, a stack buffer becomes the LEA of its address before regalloc
-  if x.op in {Ops.BUFFER, Ops.ALLOC}: return reg(x.dtype, regbuf_reg(x)) if x.addrspace is AddrSpace.REG else None
+  # a register buffer is a BUFFER, a stack buffer becomes the LEA of its address before regalloc
+  if x.op in {Ops.BUFFER, Ops.ALLOC}:
+    return with_regs(x, (ctx.vreg(regs(x), x.dtype.itemsize) if regs(x) else regbuf_reg(x),)) if x.addrspace is AddrSpace.REG else None
   if regs(x): defs = [ctx.vreg(regs(x), x.dtype.itemsize)]
   elif x.dtype in dtypes.floats or x.arg[0] in XMM_OPS: defs = [ctx.vreg(XMM)]
   else: defs = [ctx.vreg(WGPR, x.dtype.itemsize)]
@@ -775,7 +780,7 @@ class X86Renderer(ISARenderer):
 
     asm = [f".{function_name}:"]
     for u in uops:
-      if u.op is not Ops.INS or u.arg[0] in {X86Ops.IMM, X86Ops.REG}: continue
+      if u.op is not Ops.INS or is_imm(u): continue
       if u.arg[0] is X86Ops.LABEL: asm.append(f".L{uops.index(u)}:")
       elif u.arg[0] is X86Ops.RET: asm.append(_format_op(u))
       elif u.arg[0] in X86GroupOp.Jump: asm.append(_format_op(u) + f" .L{uops.index(label(u.src[0]))}")
@@ -787,7 +792,7 @@ class X86Renderer(ISARenderer):
     jumps: dict[UOp, int] = {}
     binary = bytearray()
     for u in uops:
-      if u.op is not Ops.INS or u.arg[0] in {X86Ops.IMM, X86Ops.REG}: continue
+      if u.op is not Ops.INS or is_imm(u): continue
       if u.arg[0] is X86Ops.LABEL:
         targets[u.src[0]] = len(binary)
         continue

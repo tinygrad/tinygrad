@@ -10,6 +10,7 @@ if not int(os.getenv("ASSERT_PROCESS_REPLAY", "1")): ASSERT_DIFF = 0
 
 try:
   from tinygrad.renderer import Renderer
+  from tinygrad.renderer.x86 import X86Renderer
   from tinygrad.codegen import to_program
   from tinygrad.uop.ops import UOp, Ops
   from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
@@ -53,6 +54,9 @@ def replay_to_program(p:UOp, ast:UOp, renderer:Renderer) -> tuple[str, str, tupl
   device = renderer.target.device
   def to_str(ret:UOp) -> str:
     src = next(x.arg for x in ret.src if x.op is Ops.SOURCE)
+    if isinstance(renderer, X86Renderer):
+      import capstone
+      return "\n".join(f"{i.mnemonic} {i.op_str}" for i in capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64).disasm(bytes.fromhex(src), 0))
     # PYTHON renderer pickles UOps, first unpickle and decode here
     # a nested PROGRAM prints its LINEAR, its SOURCE/BINARY are pickles of that LINEAR whose bytes depend on object identity
     if device.startswith("PYTHON"):
