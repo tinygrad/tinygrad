@@ -188,9 +188,7 @@ class USBMMIOInterface(MMIOInterface):
       assert sz % 4 == 0 and off % 4 == 0, f"pcie_mem_read requires 4-byte aligned access, got off={off}, sz={sz}"
       data = self.usb.pcie_mem_read(self.addr + off, sz)
     else: data = self.usb.read(self.addr + off, sz)
-    if isinstance(index, slice):
-      return data if self.fmt == 'B' else memoryview(data).cast(self.fmt).tolist()
-    else: return int.from_bytes(data, "little")
+    return (data if self.fmt == 'B' else memoryview(data).cast(self.fmt).tolist()) if isinstance(index, slice) else int.from_bytes(data, "little")
 
   def __setitem__(self, index, data):
     off, _ = self._off_from_index(index)
