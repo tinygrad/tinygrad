@@ -19,6 +19,7 @@ cudart_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cud
 nvrtc_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-12.0.140-archive.tar.xz"
 opencl_src = "https://github.com/KhronosGroup/OpenCL-Headers/archive/2e30669d48718fd460f085b4b35b160dad51ce9d.tar.gz"
 comgr_2_src = "https://repo.radeon.com/rocm/apt/6.2/pool/main/c/comgr/comgr_2.8.0.60200-66~24.04_amd64.deb"
+tcc_src = "https://github.com/TinyCC/tinycc/archive/aade7bafb59641660bc9a0e21ad0a9a4a1ed346e.tar.gz"
 def macossdk(): return system("xcrun --show-sdk-path")
 
 llvm_lib = (
@@ -114,6 +115,7 @@ def __getattr__(nm):
     case "webgpu": return load("webgpu", [root/"extra/webgpu/webgpu.h"], dll=webgpu_lib,
                                prolog=["from tinygrad.helpers import OSX", "import sysconfig, os"])
     case "libusb": return load("libusb", ["/usr/include/libusb-1.0/libusb.h"], dll="'usb-1.0'")
+    case "tcc": return load("tcc", ["{}/libtcc.h"], dll="'tcc'", srcs=tcc_src)
     case "hip": return load("hip", ["/opt/rocm/include/hip/hip_ext.h", "/opt/rocm/include/hip/hiprtc.h",
                                     "/opt/rocm/include/hip/hip_runtime_api.h", "/opt/rocm/include/hip/driver_types.h"],
                             dll="os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so'",

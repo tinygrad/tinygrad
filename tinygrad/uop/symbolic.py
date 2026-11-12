@@ -406,9 +406,9 @@ def simplify_valid(valid:UOp) -> UOp|None:
   valids = list(valid.split_uop(Ops.AND))
   valids = sorted(valids, key=lambda v: _valid_priority(v, valids))
   for stmt in dedup(valids):
-    if ret: stmt = uop_given_valid(UOp.uprod(*ret), stmt)
+    if ret: stmt = uop_given_valid(UOp.uand(*ret), stmt)
     ret.append(stmt)
-  return UOp.uprod(*ret) if ret != valids else None
+  return UOp.uand(*ret) if ret != valids else None
 
 # ******** phase 3 is the complete symbolic ********
 

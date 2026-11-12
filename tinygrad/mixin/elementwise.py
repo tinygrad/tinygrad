@@ -39,8 +39,9 @@ class ElementwiseMixin(CreationMixin):
     lhs, rhs = self._broadcasted(x, reverse)
     return lhs.alu(op, rhs)
 
-  def usum(self, *uops) -> Self: return functools.reduce(operator.or_ if self.dtype is dtypes.bool else operator.add, argfix(*uops), self)
-  def uprod(self, *uops) -> Self: return functools.reduce(operator.and_ if self.dtype is dtypes.bool else operator.mul, argfix(*uops), self)
+  def usum(self, *uops) -> Self: return functools.reduce(operator.add, argfix(*uops), self)
+  def uprod(self, *uops) -> Self: return functools.reduce(operator.mul, argfix(*uops), self)
+  def uand(self, *uops) -> Self: return functools.reduce(operator.and_, argfix(*uops), self)
 
   def detach(self) -> Self:
     """

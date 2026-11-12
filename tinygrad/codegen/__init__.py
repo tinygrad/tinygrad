@@ -1,6 +1,6 @@
 from dataclasses import replace, dataclass, field
 import itertools, functools
-from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
+from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
@@ -217,6 +217,7 @@ pm_add_loads = PatternMatcher([
   (UPat(GroupOp.Elementwise|{Ops.WMMA,Ops.STACK}, name="x"),
    lambda x: None if is_shape_changing_bitcast(x) else x.replace(src=tuple(map(maybe_load, x.src)))),
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
+  (UPat(Ops.INDEX, name="x"), lambda x: x.replace(src=(x.src[0], *map(maybe_load, x.src[1:])))),
 ])
 
 # a shape-changing bitcast of memory reinterprets the pointer, of a value it is expanded here (custom kernels bypass the scheduler)
@@ -523,7 +524,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
 # config affects generated programs and cache keys; context also carries compile-only behavior to workers
 to_program_config = (NOOPT, EMULATED_DTYPES, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32,
                      DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS)
-to_program_context = (*to_program_config, SPEC, DEBUG)
+to_program_context = (*to_program_config, SPEC, CHECK_OOB, DEBUG)
 def to_program_key(ast:UOp, renderer:Renderer) -> tuple:
   return (ast.key, type(renderer), renderer.target, *[x.value for x in to_program_config])
 

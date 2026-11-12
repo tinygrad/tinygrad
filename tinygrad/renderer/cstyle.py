@@ -330,6 +330,16 @@ class ClangRenderer(CStyleLanguage):
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     self.compiler = ClangCompiler(target.arch.split(","))
 
+class TCCRenderer(ClangRenderer):
+  supports_float4 = False
+  string_rewrite = PatternMatcher([(UPat(Ops.BITCAST, name="x"), lambda ctx,x: None if x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else
+    f"(union {{{ctx.render_type(x.src[0])} a; {ctx.render_type(x)} b;}}){{{ctx[x.src[0]]}}}.b")]) + base_rewrite
+  def __init__(self, target:Target):
+    super().__init__(target)
+    from tinygrad.runtime.support.compiler_cpu import TCCCompiler
+    self.compiler = TCCCompiler(arch:=target.arch.split(","), "compile_tcc_obj")
+    self.barrier = f'__asm__ volatile("{dict(x86_64="mfence", arm64="dmb ish")[arch[0]]}":::"memory");'
+
 class OpenCLRenderer(CStyleLanguage):
   # language options
   kernel_typedef = "__kernel void"
