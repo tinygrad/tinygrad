@@ -115,6 +115,7 @@ for pos in POS:
         print(f"  {d} kernel_union_ms={union(kk)/1e3:.3f} copy_union_ms={union(cc)/1e3:.3f} "
               f"either_union_ms={union(kk+cc)/1e3:.3f}", flush=True)
 for pos, vals in res.items():
-  print(f"RESULT N={N} NJ={NJ} pos={pos} blocks={len(model.blk)} min_ms={min(vals)*1e3:.3f} "
-        f"med_ms={sorted(vals)[len(vals)//2]*1e3:.3f} max_ms={max(vals)*1e3:.3f}", flush=True)
+  warm = vals[1:] if len(vals) > 1 else vals  # the first invocation includes this chunk size's one-time JIT capture
+  print(f"RESULT N={N} NJ={NJ} pos={pos} blocks={len(model.blk)} warm_min_ms={min(warm)*1e3:.3f} "
+        f"warm_med_ms={sorted(warm)[len(warm)//2]*1e3:.3f} all_max_ms={max(vals)*1e3:.3f}", flush=True)
 mem("end")
