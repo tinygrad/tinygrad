@@ -1127,9 +1127,9 @@ class FFNBlock:
     if tile == 64 and _wmma_rdna4(x.device) and isinstance(T, int) and (t32:=getenv("MOE_TILE32_ROWS", 0)) and \
        B * T * int(sel.shape[-1]) <= t32 * self.config.num_experts: tile = 32
     # (MOE_TILE32_TOKENS: RDNA3 tiles of 32 rows for a chunk of at most this many tokens (192: ~5 rows an expert, a 64-row tile mostly
-    #  padding: the MoE layer 1.8x faster on a 7900 XTX at 192, 1.3x at 384, the same bits). 0: off)
+    #  padding: the MoE layer 1.8x faster on a 7900 XTX at 192, 1.3x at 384, a chunk 4% at 768 and 1% at 1152, the same bits). 0: off)
     Tm = T if isinstance(T, int) else int(T.vmax)
-    if tile == 64 and not _wmma_rdna4(x.device) and not getenv("MOE_TILE", 0) and B * Tm <= getenv("MOE_TILE32_TOKENS", 384): tile = 32
+    if tile == 64 and not _wmma_rdna4(x.device) and not getenv("MOE_TILE", 0) and B * Tm <= getenv("MOE_TILE32_TOKENS", 1152): tile = 32
     _, entries, tiles, pos = moe_route(sel, gate_exps.first, gate_exps.local_experts, tile)
     k, sel_shape = int(sel.shape[-1]), sel.shape[-3:]
     # gate and up read the token of each sorted row, down writes the row of each selection
