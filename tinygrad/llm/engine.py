@@ -40,6 +40,7 @@ class Stashed:
   used:float
   hrow:int
   ckpt:int
+  sessions:set[str] = field(default_factory=set)  # proxy identities retained for payload/log evidence at every move
 
 @dataclass(eq=False)
 class Seq:
@@ -60,6 +61,10 @@ class Seq:
   y:list[int] = field(default_factory=list)
   temp:tuple[float, float] = (0.0, 1.0)
   mix:list[int] = field(default_factory=list)  # (SEQ_MIX_TOKENS) a prompt being forced through ordinary decode steps
+  sessions:set[str] = field(default_factory=set)
+
+class SessionInFlight(ValueError):
+  """Ending this identity would interrupt its active request (the proxy retries after it finishes)."""
 
 def starts(ids:list[int], toks:list[int], n:int, exact:bool=True) -> bool:
   """
@@ -109,6 +114,7 @@ class SeqEngine:
     self.times:dict[str, float|int] = {}  # (the time of the moves, stashes and restores: see the server's status line)
     self.telemetry = None  # optional storage_event observer, installed by LLMServer (no scheduling behavior)
     self.last_take_stash = False
+    self.end_resident_dropped, self.end_stash_dropped = 0, 0
 
   def _event(self, kind:str, **fields) -> None:
     if self.telemetry is not None:
@@ -175,7 +181,8 @@ class SeqEngine:
       self.evictions += 1
       stashed = self._stash(v, force)
       if not stashed: self.lost += 1
-      self._event("eviction", cause="capacity", slot=v.slot, tokens=v.n, stashed=stashed)
+      self._event("eviction", cause="capacity", slot=v.slot, tokens=v.n, stashed=stashed,
+                    **({"session_ids": sorted(v.sessions)} if v.sessions else {}))
     self.version += 1
   def _window(self, need:int, force:bool, after:Seq|None=None) -> tuple[int, list[Seq]]|None:
     """
@@ -220,7 +227,7 @@ class SeqEngine:
     self._time("stash", st)
     self.times["stashed"] = self.times.get("stashed", 0) + n - keep
     self._storage("stash_in", max(0, s.n - keep * C), n - keep, True, slot=s.slot, entry_id=entry)
-    self.stashed.append(Stashed(s.tokens[:s.n], chunks, entry, s.used, s.hrow, s.ckpt))
+    self.stashed.append(Stashed(s.tokens[:s.n], chunks, entry, s.used, s.hrow, s.ckpt, sessions=s.sessions.copy()))
     return True
   def _drop_one(self, force:bool=False, every:bool=False) -> Stashed|None:
     """
@@ -237,7 +244,8 @@ class SeqEngine:
       self.lost += 1
     else: return None
     self._free(x.chunks, x.entry)
-    self._event("stash_drop", tokens=len(x.tokens), chunks=len(x.chunks), resident_copy=resident_copy)
+    self._event("stash_drop", tokens=len(x.tokens), chunks=len(x.chunks), resident_copy=resident_copy,
+                **({"session_ids": sorted(x.sessions)} if x.sessions else {}))
     return x
   def _take(self, n:int) -> list[int]:
     """n free chunks: consecutive ones if there are (the copies' calls are of runs)"""
@@ -352,14 +360,19 @@ class SeqEngine:
     return True
 
   # ** a prompt's sequence
-  def take(self, ids:list[int], room:int=0, force:bool=False) -> tuple[Seq, int, bool]|None:
+  def take(self, ids:list[int], room:int=0, force:bool=False, session_id:str="") -> tuple[Seq, int, bool]|None:
     """
     the sequence of a prompt and the position its prefill starts at, and whether that's its checkpoint (restored): an idle one it continues, else
     a new one (from 0), with rows for a reply of `room` tokens (RESERVE at most, 0: RESERVE). None: no slot or region for it without losing a held
     conversation (not forced), or every slot active: nothing evicted, it waits
     """
     self.last_take_stash = False
-    if (ret:=self._take_seq(ids, room, force)) is not None:
+    ret = self._take_seq(ids, room, force)
+    if ret is not None and session_id:
+      seq = ret[0]
+      seq.sessions.add(session_id)
+      if seq.host is not None: seq.host.sessions.add(session_id)
+    if ret is not None:
       self.version += 1
       # (the continuations from a conversation's end and from its checkpoint (the reply not sent back as it was): see the status line)
       if ret[1]: self.times["from_ckpt" if ret[2] else "from_end"] = self.times.get("from_ckpt" if ret[2] else "from_end", 0) + 1
@@ -510,7 +523,8 @@ class SeqEngine:
     self.evictions += 1
     stashed = self._stash(s, True)
     if not stashed: self.lost += 1
-    self._event("eviction", cause="paused_length", slot=s.slot, tokens=s.n, stashed=stashed)
+    self._event("eviction", cause="paused_length", slot=s.slot, tokens=s.n, stashed=stashed,
+                  **({"session_ids": sorted(s.sessions)} if s.sessions else {}))
 
   def stop(self, s:Seq, kept:int):
     """the end of the decoding of s: its tokens past `kept` (of its reply, after its end) aren't its"""
@@ -522,3 +536,34 @@ class SeqEngine:
     s.active, s.used = False, time.perf_counter()
     # (idle: its region no longer than its tokens and the room of a turn need, the rest free)
     s.cap = min(s.cap, self._need(len(s.tokens) + self.ROOM))
+
+  def end_session(self, session_id:str) -> dict:
+    """Free one idle proxy conversation without losing capacity evictions or the stash of others (model thread only)."""
+    assert session_id
+    if any(session_id in s.sessions and s.active for s in self.seqs): raise SessionInFlight(session_id)
+    resident = [s for s in self.seqs if s.sessions == {session_id}]
+    stash = [x for x in self.stashed if x.sessions == {session_id}]
+    for shared_seq in [s for s in self.seqs if session_id in s.sessions and s.sessions != {session_id}]:
+      shared_seq.sessions.remove(session_id)
+      self._event("session_release", scope="shared_resident", tokens=shared_seq.n, session_ids=sorted(shared_seq.sessions))
+    for shared_stash in [x for x in self.stashed if session_id in x.sessions and x.sessions != {session_id}]:
+      shared_stash.sessions.remove(session_id)
+      self._event("session_release", scope="shared_stash", tokens=len(shared_stash.tokens), session_ids=sorted(shared_stash.sessions))
+    stash_dropped = len(stash)
+    for s in resident:
+      self.seqs.remove(s)
+      if s.host is not None:
+        x = s.host
+        s.host = None
+        self._free(x.chunks, x.entry)
+        stash_dropped += 1
+        self._event("session_end", scope="stash", tokens=len(x.tokens), chunks=len(x.chunks), session_ids=sorted(x.sessions))
+      self.end_resident_dropped += 1
+      self._event("session_end", scope="resident", tokens=s.n, slot=s.slot, session_ids=sorted(s.sessions))
+    for x in stash:
+      if x in self.stashed: self.stashed.remove(x)
+      self._free(x.chunks, x.entry)
+      self._event("session_end", scope="stash", tokens=len(x.tokens), chunks=len(x.chunks), session_ids=sorted(x.sessions))
+    self.end_stash_dropped += stash_dropped
+    if resident or stash: self.version += 1
+    return {"resident_dropped": len(resident), "stash_dropped": stash_dropped, "dropped": len(resident) + stash_dropped}
