@@ -914,6 +914,8 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
 K256_SKIP = getenv("K256_SKIP", -1)
 # K256_SKIP_RDNA3: K256_SKIP's default on RDNA3 too (GLM Flash C5 prefill: the IQ2_S gate/up 2.1x at 192 rows on a 7900 XTX, the same bits)
 K256_SKIP_RDNA3 = getenv("K256_SKIP_RDNA3", 1)
+# K256_XH_GLM: RDNA3 lane halves decode one K half each, exchanged by permlanex16 (amd_qwen's K256_XH), IQ2_S and IQ3_S. the same bits
+K256_XH_GLM = getenv("K256_XH_GLM", 0)
 # K256_SKIP3: IQ3_S's too (the down's tiles at a few rows an expert: small prefill chunks on RDNA3)
 K256_SKIP3 = getenv("K256_SKIP3", 0)
 # K256_SBU: IQ2_S sub-blocks unrolled by this many (-1: 2), K256_SBU3 IQ3_S's (no faster on C6's down)
@@ -1007,8 +1009,15 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   for o, base in enumerate(bases):
     bfrs = []
     for sbu in sbs:
-      words = _quant_frag_words(raw, base, sbu, ph, ggml_type, grid, signed=signed, perm=on(K256_SIGNPERM)) if rdna4 else \
-        [tuple(_quant_word(raw, base, sbu, h*4+i, ggml_type, grid) for i in range(4)) for h in range(2)]
+      if rdna4: words = _quant_frag_words(raw, base, sbu, ph, ggml_type, grid, signed=signed, perm=on(K256_SIGNPERM))
+      elif K256_XH_GLM and ggml_type in (IQ2_S, IQ3_S):
+        # (K256_XH_GLM, as amd_qwen's K256_XH: a lane's half (ph) decodes the words of its K half h=ph alone, the other half's from lane ^ 16
+        # (permlanex16): RDNA3's two lane halves hold the same B fragment, so half the weight loads and grid lookups of a wave)
+        mine = [_quant_word(raw, base, sbu, ph*4+i, ggml_type, grid) for i in range(4)]
+        xch = [_cfn(False, src=(w,), arg=("(unsigned)__builtin_amdgcn_permlanex16(0, (int)({0}), 0x76543210, 0xfedcba98, false, false)",
+                                         dtypes.uint32)) for w in mine]
+        words = [tuple(ph.eq(h).where(m, x) for m, x in zip(mine, xch)) for h in range(2)]
+      else: words = [tuple(_quant_word(raw, base, sbu, h*4+i, ggml_type, grid) for i in range(4)) for h in range(2)]
       bfrs.append([_i8_frag(w) for w in words])
     for t in range(TT):
       prev = ints[o][t].after(sb)
