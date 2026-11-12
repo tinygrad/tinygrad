@@ -13,6 +13,7 @@ from tinygrad import Device, UOp
 from tinygrad.helpers import getenv
 from tinygrad.llm.model import Transformer
 import extra.kprof as kprof
+from tinygrad.llm.kernels.amd_glm_dsa import p2p_late
 
 t0 = time.perf_counter()
 model, kv = Transformer.from_gguf(os.environ["MODEL"], getenv("MAXCTX", 262144), shard=getenv("SHARD", 14))
@@ -67,6 +68,8 @@ for pos in POS:
     sync()
     dt = time.perf_counter() - st
     res[pos].append(dt)
+    # (a p2p poll that ran out (P2P_AR_TIMEOUT_MS) in the chunk: its values wrong; the server's generate would run the prompt again)
+    if any(late:=p2p_late(devs, clear=True)): print(f"P2P RUNOUT at pos {pos} rep {r}: epochs {late}", flush=True)
     print(f"chunk {N} at {pos:7d} rep {r}: {dt*1e3:8.1f} ms (host {t_host*1e3:.1f} ms)" +
           (f" parts {' '.join(f'{p*1e3:.1f}' for p in parts_t)}" if parts_t else ""), flush=True)
   if getenv("PROFILE"):
