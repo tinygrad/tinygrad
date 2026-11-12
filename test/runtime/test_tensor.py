@@ -443,6 +443,12 @@ class TestTinygrad(unittest.TestCase):
     with self.assertRaises(ValueError): t.shrink_to(2)
     with self.assertRaises(ValueError): t.shrink_to(2, 2, 2)
 
+  def test_identity_movement_is_self(self):
+    t = Tensor.empty(2, 3)
+    for x in (t.reshape(2, 3), t.pad(((0,0),(0,0))), t.shrink(((0,2),(0,3))), t.permute(0, 1), t.pad_to(2, 3), t.expand(2, 3)): assert x is t
+    t = Tensor.empty(v:=UOp.variable("v", 1, 10).bind(4), 3)
+    assert t.shrink(((0, v), None)) is t and t.reshape(v, 3) is t
+
 @unittest.skip("this test is just flaky, sync issue")
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"

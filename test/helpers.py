@@ -11,7 +11,7 @@ from tinygrad.dtype import DType, truncate, AddrSpace
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import T, Target, DEV, DEBUG, Context, GlobalCounters
 from tinygrad.renderer import Renderer
-from tinygrad.codegen import full_rewrite_to_sink, line_rewrite, pm_linearize_cleanups
+from tinygrad.codegen import full_rewrite_to_sink, linearize_cleanups
 from tinygrad.codegen.late.linearizer import linearize
 from tinygrad.engine.realize import compile_linear
 
@@ -27,7 +27,7 @@ def full_rewrite(sink:UOp, ren:Renderer|None=None) -> UOp:
 def get_uops(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   """Extract linearized UOps from a sink. Test helper that only does linearization (no render)."""
   full_sink = full_rewrite(sink, ren)
-  return line_rewrite(linearize(full_sink), pm_linearize_cleanups)
+  return linearize_cleanups(linearize(full_sink))
 
 def replace_opts(ast:UOp, opts:list) -> UOp: return ast.replace(arg=replace(ast.arg, opts_to_apply=tuple(opts)))
 

@@ -40,7 +40,7 @@ class CLCompiler(Compiler):
 def cl_run(buf:UOp, cmds:tuple) -> UOp: # one in-order queue, every call after the last
   cb = buf
   for fn, *args in cmds:
-    h = ccall(fn, *[cb.index(a[0]) if isinstance(a, tuple) else a if isinstance(a, UOp) else cb.bitcast(dtypes.uint64).index(a).load() for a in args])
+    h = ccall(fn, *[cb.index(a[0]) if isinstance(a, tuple) else cb.bitcast(dtypes.uint64).index(a).load() if isinstance(a, int) else a for a in args])
     if fn is cl.clCreateImage: h = buf.bitcast(dtypes.uint64).index(args[-1][0] // 8).store(h) # the image replaces its errcode, not chained
     cb = cb.after(h)
   return cb.sink()
@@ -48,7 +48,8 @@ def cl_run(buf:UOp, cmds:tuple) -> UOp: # one in-order queue, every call after t
 class CLQueue(HWQueue):
   dev:CLDevice
   def q64(self, *vals) -> int: return self.q(*[UOp.const(v, dtypes.uint64) if isinstance(v, int) else v.cast(dtypes.uint64) for v in vals])
-  def call(self, fn, *args): self.cmds.append((fn, *[UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args]))
+  def call(self, fn, *args):
+    self.cmds.append((fn, *[UOp.const(a, dtypes.uint64) if isinstance(a, int) else self.q64(a) // 8 - 1 if isinstance(a, UOp) else a for a in args]))
 
   def exec(self, call:UOp, prg:UOp):
     args, images = get_call_kernel_args(call, prg, self.devs), []

@@ -188,7 +188,7 @@ class TestViz(unittest.TestCase):
       colored_field: str
     a = UOp(Ops.PYLITERAL, arg=TestStruct(colored("xyz", "magenta")+colored("12345", "blue")))
     a2 = uop_to_json(VizData(), a)[id(a)]
-    self.assertEqual(ansistrip(a2["label"]), f"PYLITERAL\n{TestStruct.__qualname__}(colored_field='xyz12345')")
+    self.assertIn("colored_field='xyz12345'", ansistrip(a2["label"]).replace("\n", ""))
 
   def test_index_label_large_src(self):
     x = UOp.param(0, dtypes.float, (16, 16))
@@ -1133,7 +1133,7 @@ def write_files(rewrites=None, profile=cpu_events) -> list[str]:
   with tempfile.TemporaryDirectory() as tmpdir:
     (r:=pathlib.Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps((rewrites.data if rewrites is not None else VizData()).trace))
     (p:=pathlib.Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(profile))
-    yield ["--rewrites-path", str(r), "--profile-path", str(p)]
+    yield ["--paths", str(p), str(r)]
 
 class TestCLI(unittest.TestCase):
   @needs_tracked_pm

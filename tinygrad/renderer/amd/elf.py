@@ -49,7 +49,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
 
   # ** pad text to ISA alignment
   padding_inst = (s_nop_cdna(0) if is_cdna else s_code_end()).to_bytes()
-  text = code_bytes + padding_inst * ((hsa.AMD_ISA_ALIGN_BYTES - len(code_bytes) % hsa.AMD_ISA_ALIGN_BYTES) % hsa.AMD_ISA_ALIGN_BYTES)
+  text = code_bytes + padding_inst * (-len(code_bytes) % hsa.AMD_ISA_ALIGN_BYTES // len(padding_inst))
   text_offset = round_up(ctypes.sizeof(libc.Elf64_Ehdr), hsa.AMD_ISA_ALIGN_BYTES)
 
   # ** pack kernel descriptor (rodata)

@@ -42,7 +42,8 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
 from tinygrad.uop.ops import KernelInfo, ParamArg, ProgramInfo
-from tinygrad.uop.render import render_uir, render_index, uops_colors, _inline, _render_arg
+from tinygrad.uop.render import render_index
+from tinygrad.uop.uir import render_uir, uops_colors, _inline, _render_arg
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
 
@@ -106,7 +107,9 @@ def canonicalize_ast(u:UOp) -> UOp: return u.replace(arg=KernelInfo()) if u.op i
 def tokenize_uir(data:VizData, root:UOp) -> list[dict]:
   nodes = [u for u in root.toposort(enter_calls=True) if not _inline(u)]
   refs = {f"%{i}":{"id":str(id(u))} for i,u in enumerate(nodes)}
-  lines = [[{"st":s, **refs.get(s, {})} for s in re.split(r"( : [^\n]*|%\d+\b)", line) if s] for line in render_uir(root).split("\n")]
+  # quoted strings are their own tokens so a %N inside one is not a ref
+  lines = [[{"st":s, **refs.get(s, {})} for s in re.split(r"""(%\d+\b|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")""", line) if s]
+           for line in render_uir(root).split("\n")]
   for u,line in zip(nodes, lines):
     if u.op is Ops.CALL and (ref:=data.ref_map.get(canonicalize_ast(u.body))) is not None:
       line.append({"st":f" # {fmt_colored(data.ctxs[ref]['name'])}"})
@@ -731,15 +734,16 @@ def reloader():
 T = TypeVar("T")
 # unpickling may load libraries, turn off DEBUG=3 output
 @Context(DEBUG=0)
-def load_pickle(path:str, default:T) -> T:
-  if not os.path.exists(path): return default
+def load_pickle(path:str|None, default:T) -> T:
+  if path is None or not os.path.exists(path): return default
   with open(path, "rb") as f: return pickle.load(f)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument('--rewrites-path', type=str, help='Path to rewrites', default=temp("rewrites.pkl", append_user=True))
-  parser.add_argument('--profile-path', type=str, help='Path to profile', default=temp("profile.pkl", append_user=True))
+  parser.add_argument('--paths', nargs='+', metavar=('PROFILE', 'REWRITES'), help='Paths to profile and optional rewrites (default: latest files)',
+                      default=[temp("profile.pkl", append_user=True), temp("rewrites.pkl", append_user=True)])
   args = parser.parse_args()
+  if len(args.paths) == 1: args.paths.append(None)
 
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     if s.connect_ex(((HOST:="http://127.0.0.1").replace("http://", ""), PORT:=getenv("PORT", 8000))) == 0:
@@ -750,9 +754,9 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  data = VizData(load_pickle(args.rewrites_path, default=RewriteTrace([], [], {})))
+  data = VizData(load_pickle(args.paths[1], default=RewriteTrace([], [], {})))
   load_rewrites(data)
-  profile_ret = get_profile(data, load_pickle(args.profile_path, default=[]))
+  profile_ret = get_profile(data, load_pickle(args.paths[0], default=[]))
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)

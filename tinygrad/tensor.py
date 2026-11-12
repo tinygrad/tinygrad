@@ -102,7 +102,7 @@ class Tensor(RandMixin):
 
   def _apply_uop(self, fxn:Callable[..., UOp], *x:Tensor, **kwargs) -> Tensor:
     srcs = (self,)+x
-    new_uop: UOp = fxn(*[t.uop for t in srcs], **kwargs)
+    if (new_uop:=fxn(*[t.uop for t in srcs], **kwargs)) is self.uop: return self
     # directly create the Tensor
     ret = Tensor.__new__(Tensor)
     ret.uop, ret.grad, ret.is_param = new_uop, None, True

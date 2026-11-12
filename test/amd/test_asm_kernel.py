@@ -314,6 +314,17 @@ class TestAsmKernel(unittest.TestCase):
     out = out.custom_kernel(fxn=store_kernel)[0]
     self.assertListEqual(out.tolist(), [0xA5, 0xA5, 0x78, 0x56, 0x34, 0x12, 0xA5, 0xA5])
 
+  def test_store_at_text_end(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def store_kernel(out:UOp):
+      # 252 bytes of code: the text is padded by one s_code_end to 256
+      insts = [s_load_b64(s[0:1], s[0:1], soffset=NULL), s_waitcnt_lgkmcnt(sdst=NULL, simm16=0), v_mov_b32_e32(v[0], 0),
+               v_mov_b32_e32(v[1], 7), *[s_nop(0)]*55, global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), s_endpgm()]
+      sink = UOp.sink(out.base, UOp.special(1, "lidx0"), arg=KernelInfo("store_at_text_end"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
+    out = Tensor.zeros(1, dtype=dtypes.int32).contiguous().realize().custom_kernel(fxn=store_kernel)[0]
+    self.assertListEqual(out.tolist(), [7])
+
   def test_readlane(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     def readlane_kernel(out:UOp, threads:int):
