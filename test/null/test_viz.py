@@ -1133,7 +1133,7 @@ def write_files(rewrites=None, profile=cpu_events) -> list[str]:
   with tempfile.TemporaryDirectory() as tmpdir:
     (r:=pathlib.Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps((rewrites.data if rewrites is not None else VizData()).trace))
     (p:=pathlib.Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(profile))
-    yield ["--rewrites-path", str(r), "--profile-path", str(p)]
+    yield ["--paths", str(p), str(r)]
 
 class TestCLI(unittest.TestCase):
   @needs_tracked_pm

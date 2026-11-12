@@ -121,6 +121,14 @@ class TestAfterCounterexamples(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       Tensor(x.after(x.store(1), x.store(2))).realize()
 
+  def test_store_broadcasts_value_to_target(self):
+    def stored(shape:tuple[int, ...], y:Tensor) -> list:
+      x = Tensor.zeros(*shape, dtype=dtypes.int).contiguous().realize().uop
+      return Tensor(x.after(x.store(y.contiguous().realize().uop))).tolist()
+    self.assertEqual(stored((2, 3), Tensor([[3], [5]])), [[3, 3, 3], [5, 5, 5]])
+    self.assertEqual(stored((2, 3), Tensor([1, 2, 3])), [[1, 2, 3], [1, 2, 3]])
+    with self.assertRaises(RuntimeError): stored((3,), Tensor([[7, 8, 9]]))
+
 class TestAfterInvalidStore(unittest.TestCase):
   def test_partial_invalid_store_keeps_uncovered_reads(self):
     x = Tensor([10., 20., 30., 40.]).realize()

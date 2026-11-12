@@ -1,7 +1,9 @@
-import unittest
-from tinygrad.device import CompileError, Device, BufferSpec
+import gc, unittest
+from unittest.mock import patch
+from tinygrad.device import CompileError, Device, Buffer, BufferSpec
+from tinygrad.helpers import Context
 if Device.DEFAULT=="METAL":
-  from tinygrad.runtime.ops_metal import MetalCompiler
+  from tinygrad.runtime.ops_metal import MetalAllocator, MetalCompiler
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
   def test_alloc_oom(self):
@@ -49,6 +51,29 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
     with self.assertRaises(RuntimeError):
       compiled = compiled[:40] # corrupt the compiled program
       device.pipeline(compiled, "r_5")
+
+  def test_cyclic_gc_keeps_cached_storage(self):
+    device = Device['METAL']
+    device.synchronize()
+    gc.collect()
+    allocator = MetalAllocator(device)
+    with Context(LRU=1):
+      # Like an LRU hit, storage predates its new Buffer and can be finalized first by cyclic GC.
+      storage = allocator.alloc(4096)
+      with patch.object(allocator, 'alloc', return_value=storage):
+        buf = Buffer('METAL', 4096, allocator=allocator, preallocate=True)
+      del storage
+      holder = [buf]
+      holder.append(holder)
+      try:
+        # Intercept release so a failing test doesn't leave a freed native resource in the allocator cache.
+        with patch.object(type(buf.meta), 'release', autospec=True) as release:
+          del buf, holder
+          gc.collect()
+          release.assert_not_called()
+        self.assertEqual(len(allocator.cache[(4096, BufferSpec())]), 1)
+      finally:
+        allocator.free_cache()
 
   def test_free(self):
     size = 2**16
