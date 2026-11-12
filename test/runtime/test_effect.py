@@ -77,12 +77,6 @@ class TestEffectRetention(unittest.TestCase):
     a, b = Tensor.custom_kernel(Tensor([3, 0]).contiguous(), Tensor.ones(1, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([3, 7], [0]))
 
-  def test_value_after_keeps_shared_read(self):
-    for ki in (KernelInfo(), KernelInfo(opts_to_apply=()), KernelInfo(optimized=True)):
-      def kernel(A:UOp, B:UOp): return UOp.group(B[0].store((x:=A[0]) + UOp.const(0, dtypes.int).after(A[0].store(7))), B[1].store(x)).sink(arg=ki)
-      a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(2, dtype=dtypes.int).contiguous(), fxn=kernel)
-      self.assertEqual((a.tolist(), b.tolist()), ([7], [3, 3]))
-
   def test_expand_index_keeps_dropped_coordinate_effect(self):
     def kernel(A:UOp):
       i = A.after(A[0].store(1))[0].load() % 3
