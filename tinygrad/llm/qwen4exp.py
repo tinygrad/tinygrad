@@ -2747,7 +2747,8 @@ class Transformer:
         _lap("warmup: n-gram table read")
       for k, (j, call) in enumerate(loads):
         if j in self._pending_load: self._pending_load.remove(j)
-        take(j)
+        # (LOAD_APART: a derivation's jit taken alone: the others' memory (the caches') made after the apart buffers are freed)
+        take(j, alone=k < len(derive) and bool(gguf_load.apart_buffers))
         call()
         # (LOAD_APART: the derivations ran, their jits drop what they hold: the buffers they read freed before the zeroing's jit links the
         # states' memory (the caches') and the warm-up's arenas are made)

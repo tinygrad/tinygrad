@@ -468,7 +468,7 @@ def _capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwh
   """
   todo = [k for k, (j, _) in enumerate(calls) if j.cnt == 1 and j.captured is None and j.fxn is not None]
   if not todo or not hasattr(os, "fork"):
-    if meanwhile is not None: meanwhile(lambda jit, wait=True: False)
+    if meanwhile is not None: meanwhile(lambda jit, wait=True, alone=False: False)
     return [False] * len(calls)
   every, calls = list(calls), [calls[k] for k in todo]
   st, reg, start = time.perf_counter(), _prefork_buffers(), next(UOp.unique_num)
@@ -592,12 +592,13 @@ def _capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwh
     if taken is not None: taken(jit)
     if DEBUG >= 1: print(f"capture_parallel: jit {k} came at {', '.join(f'{t:.2f}' for t in arrived[k])}s, taken at {time.perf_counter()-st:.2f}s "
                          f"({len(out)} uops made in {t1-t0:.2f}s, linked in {time.perf_counter()-t1:.2f}s)")
-  def take_jit(jit:_TinyJit, wait:bool=True) -> bool|None:
+  def take_jit(jit:_TinyJit, wait:bool=True, alone:bool=False) -> bool|None:
     # (meanwhile) a jit taken when it comes (waited for, not if wait is False: None if it didn't come yet): it runs now
     # (the others that came are taken first, and while it's waited for: the parent's takes don't pile up behind a wait or a run)
+    # (alone: only it, the others not linked yet: their memory not made before it runs)
     if (k:=next((k for k, (j, _) in enumerate(calls) if j is jit), None)) is None: return False # (not one of them)
     while k in left:
-      for j in sorted((j for j in left if came(j)), key=lambda j: arrived[j][-1] if arrived[j] else 0): take(j)
+      for j in sorted((j for j in left if came(j) and (not alone or j == k)), key=lambda j: arrived[j][-1] if arrived[j] else 0): take(j)
       if k not in left: break
       if not wait: return None
       with got: got.wait_for(lambda: any(came(j) for j in left))
