@@ -1273,7 +1273,17 @@ class MLATransformerBlock(FFNBlock):
     qn = self.attn_q_a_norm(self.attn_q_a(xl)).contiguous()
     # (the gathered rows' normed q_a itself (q_b quantizes it as before, the indexer's attn_q_b reads its values): a constant placeholder with
     # only its q8 registered gave the indexer 3.0s (wrong lists, ts5 pfx5))
-    qn_all = all_gather(qn, 1)
+    if getenv("SP_QN_HALF", 1):
+      # (SP_QN_HALF: its readers (the q8 gemms of attn_q_b and of the indexer's attn_q_b) read it as _half_rows does: a row's halves of qn/s,
+      # s a power of two (1 unless the row is past HALF_ROWS_MAX), the outputs times s. sent so, half the bytes of the float rows: the gathered
+      # rows h*s give the same halves and scale (s exact, h*s/s = h; s=1: |h| <= HALF_ROWS_MAX), the same values)
+      from tinygrad.llm.kernels.amd_glm_dsa import HALF_ROWS_MAX
+      amax = qn.abs().max(-1, keepdim=True)
+      s = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).float()
+      g = all_gather((qn / s).cast(dtypes.half).cat(s.bitcast(dtypes.half), dim=-1).contiguous(), 1)
+      L = int(qn.shape[-1])
+      qn_all = g[..., :L].float() * g[..., L:].bitcast(dtypes.float32)
+    else: qn_all = all_gather(qn, 1)
     # (x: hn as it is (its shape and devices; the attention reads none of it))
     pre:dict = {"x": hn, "qn": qn_all}
     kv_a = self.attn_kv_a_mqa(xl)
