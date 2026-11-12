@@ -28,6 +28,15 @@ if getenv("MEM_TRACE"):
 # (the sampling's random state seeded: SAMPLE_TEMP / PF_TOPP runs repeat (tinygrad's default seed is the time), as the board harness)
 from tinygrad import Tensor
 Tensor.manual_seed(getenv("SAMPLE_SEED", 1))
+if getenv("SHARD", 6) == 1:
+  # (SHARD=1: one card, glm5next's own loader (NUM_BLOCKS, NUM_BLOCKS_MTP) and the 64 heads in <=16-head groups, as extra/glm_prefill_chunk.py)
+  import tinygrad.llm.glm5next as g5
+  _sparse = g5.flash_attention_mla_sparse
+  def _sparse16(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_len, grouped=None):
+    if q.shape[1] <= 16 or isinstance(q.device, tuple): return _sparse(q, cache, index, scale, valid_len, grouped)
+    return Tensor.cat(*[_sparse(q[:, a:min(a+16, q.shape[1])], cache, index, scale, valid_len, grouped) for a in range(0, q.shape[1], 16)], dim=1)
+  g5.flash_attention_mla_sparse = _sparse16
+  Transformer = g5.Transformer  # type: ignore[misc]
 model, kv = Transformer.from_gguf(os.environ["MODEL"], getenv("MAXCTX", 65536), shard=getenv("SHARD", 6))
 # (the derived weights as a server's warmup makes them: the routers' transposed float weights (skinny_matmul), else the routers of many
 # rows run a generic kernel ~30x slower: 13.8 ms a step at 28 users)
