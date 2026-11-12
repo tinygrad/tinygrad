@@ -2187,6 +2187,9 @@ def flag_all_gather(x:Tensor, axis:int, dtype=None) -> Tensor|None:
 # (more waves: no progress at all). a device is at most one exchange ahead of the next one: two parities of the inbox
 
 SEL_LANE_BASE = 8  # (the lanes from it are the micro batches' second ones (model.SEL_LANE): the same queue)
+# RING_RS_LIKE_COPIES: the ring's reduce-scatter sums as the ring of copies it replaces (partials in half, q8 by division): a config that raises
+# RING_MAXW so that its prefill's scatters take the ring (C5: 32768 -> 147456) keeps its bits. default off: the configs on the ring keep theirs
+RING_RS_LIKE_COPIES = getenv("RING_RS_LIKE_COPIES", 0)
 RING_MAXW = getenv("RING_MAXW", 1 << 20)  # words a part (a slot of the inbox: 4 MB, a prefill's part of 4608 rows of q8 is 2.2 MB)
 
 class RingMailbox:
@@ -2348,6 +2351,7 @@ def _ring_ag_kernel(out:UOp, x:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flag
 
 @functools.cache
 def _ring_rs_q8_kernel(out:UOp, p:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flags:UOp, flags_next:UOp, dbg:UOp, *, N:int, size:int,
+                       like_copies:bool=False,
                        G:int=8) -> UOp:
   # p (size) this device's partials, out (size/N) the sum of part me (float). in step k a device adds its partials of part me-k-1 to what
   # came (the sum of the devices before it), sends it on as int8 groups of 32 with their scale (q8_pack), the last its own. a wave's groups in
@@ -2373,7 +2377,9 @@ def _ring_rs_q8_kernel(out:UOp, p:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, f
          [(b0 + 64 + lane//4, (g < BG) & sub.eq(0)) for b0, g in zip(base, groups)]
     mult = [(2*(j*32 + lane) + 1).cast(dtypes.uint32) for j in range(len(at))]
     # (the partials loaded after the round before: not all of them at the start, in registers)
-    acc = [[p.after(*dep).reshape(-1)[(b*blk + g*32 + sub*8 + j).valid(g < BG)].load().float() for j in range(8)] for g in groups]
+    # (like_copies: the partials in half and the int8 values divided by the scale, as reduce_scatter's ring of copies (RS_Q8): the same bits)
+    acc = [[(v.cast(dtypes.half) if like_copies and v.dtype != dtypes.half else v).float()
+            for v in (p.after(*dep).reshape(-1)[(b*blk + g*32 + sub*8 + j).valid(g < BG)].load() for j in range(8))] for g in groups]
     if not first:
       # (the partials' loads before the wait for what came: their latency in it)
       got = recv(UOp.group(*dep, *[a for g in acc for a in g]) if getenv("RING_PREFETCH", 1) else UOp.group(*dep), flags, inbox, k-1, at, mult,
@@ -2385,7 +2391,7 @@ def _ring_rs_q8_kernel(out:UOp, p:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, f
         ws = got[2*i:2*i+2]
         acc[i] = [a + (ws[j//4] >> (8*(j%4))).cast(dtypes.uint8).bitcast(dtypes.int8).float()*d for j, a in enumerate(acc[i])]
     if not last:
-      packed = [_q8_pack_values(a, recip=True) for a in acc]
+      packed = [_q8_pack_values(a, recip=not like_copies) for a in acc]
       words = [ws[w] for ws, _ in packed for w in range(2)] + [d.bitcast(dtypes.uint32) for _, d in packed]
       return end_round(send(dep, inbox_next, flags_next, k, at, words, mult), r)
     outs = [out.after(*dep)[(g*32 + sub*8 + j).valid(g < BG)].store(a[j]) for g, a in zip(groups, acc) for j in range(8)]
@@ -2460,7 +2466,8 @@ def ring_reduce_scatter_q8(p:Tensor, size:int, shape:tuple[int, ...]|None=None, 
   if G*RING_W*R*EP*72 > RING_MAXW or not _ring_fits(G, R, R*EP*72) or (mb:=ring_mailbox(devs)) is None: return None
   out = Tensor.empty(*(shape or (size,)), dtype=dtypes.float32, device=devs, axis=axis if shape else 0)
   return _ring_queued(Tensor.custom_kernel(out, p.reshape(len(devs), size).contiguous(), mb.counter, mb.inbox, mb.inbox_next, mb.flags,
-                                          mb.flags_next, mb.dbg, fxn=functools.partial(_ring_rs_q8_kernel, N=len(devs), size=size, G=G))[0])
+                                          mb.flags_next, mb.dbg, fxn=functools.partial(_ring_rs_q8_kernel, N=len(devs), size=size, G=G,
+                                          like_copies=bool(RING_RS_LIKE_COPIES)))[0])
 
 def p2p_reduce_scatter(p:Tensor) -> Tensor|None:
   """p (devices, devices, n) partials split on the first: device i gets the sum over the devices of their part i, (devices, n) split on the
