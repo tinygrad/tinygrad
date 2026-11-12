@@ -59,6 +59,28 @@ def mem(tag: str, pos: int|None = None) -> None:
 sync()
 mem("loaded")
 random.seed(0)
+# SEQ_ONLY=1: the server's path instead (Transformer.seq_prefill: the region's jits, the slot's states, the env's cache formats): a prompt of
+# SEQ_TOKENS (default 10 chunks of N) prefilled from 0, REPS times; the ms a chunk = its time over its chunks. PROFILE=1: the census of the last
+if getenv("SEQ_ONLY"):
+  assert model.seqs_supported(), "SEQ_ONLY: the server's sequences are not supported with this env/devices"
+  L = getenv("SEQ_TOKENS", N * 10)
+  stoks = [random.randrange(1000, 50000) for _ in range(L)]
+  model.seq_prefill(0, 0, stoks, 0, 0)  # (the jits captured)
+  sync()
+  for rep in range(REPS):
+    last = rep == REPS-1
+    if last and getenv("PROFILE"): kprof.reset(*devs)
+    st = time.perf_counter()
+    tok = model.seq_prefill(0, 0, stoks, 0, 0)
+    dt = time.perf_counter() - st
+    print(f"SEQ L={L} N={N} rep={rep} ms={dt*1e3:.3f} ms_per_chunk={dt*1e3/(L/N):.3f} tok={tok}", flush=True)
+  if getenv("PROFILE"):
+    times = kprof.times(*devs)
+    print(f"PROFILE seq gpu_ms_per_chunk={sum(v[1] for v in times.values())/len(devs)/1e3/(L/N):.3f}", flush=True)
+    for name, (count, us) in sorted(times.items(), key=lambda kv: -kv[1][1])[:getenv("TOP", 60)]:
+      print(f"  {us/len(devs)/1e3/(L/N):9.3f} ms {count/len(devs)/(L/N):8.1f}x {name}", flush=True)
+  mem("end")
+  raise SystemExit(0)
 prompt = [random.randrange(1000, 50000) for _ in range(NJ)]
 st = time.perf_counter()
 next(model.generate(prompt))
