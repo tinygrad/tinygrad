@@ -131,6 +131,18 @@ for pos in POS:
         cc = [(s, s+du) for dd, name, s, du in seq if dd == d and name.startswith("copy")]
         print(f"  {d} kernel_union_ms={union(kk)/1e3:.3f} copy_union_ms={union(cc)/1e3:.3f} "
               f"either_union_ms={union(kk+cc)/1e3:.3f}", flush=True)
+# BURST=n: n chunks back to back (one sync at the end, as a server's consecutive chunks), the mean of BURST_REPS bursts
+if (nb:=getenv("BURST", 0)):
+  for pos in POS:
+    sp, nt, bursts = v_start_pos.bind(pos), UOp.variable("toks", 1, NJ).bind(N), []
+    for _ in range(getenv("BURST_REPS", 3)):
+      sync()
+      st = time.perf_counter()
+      for _ in range(nb): model(model._token_buf[:, sp:sp+nt], sp, temp)
+      sync()
+      bursts.append((time.perf_counter()-st)/nb)
+    print(f"BURST N={N} pos={pos} n={nb} ms_per_chunk={' '.join(f'{b*1e3:.3f}' for b in bursts)} "
+          f"min={min(bursts)*1e3:.3f}", flush=True)
 for pos, vals in res.items():
   warm = vals[1:] if len(vals) > 1 else vals  # the first invocation includes this chunk size's one-time JIT capture
   print(f"RESULT N={N} NJ={NJ} pos={pos} blocks={len(model.blk)} warm_min_ms={min(warm)*1e3:.3f} "
