@@ -1,9 +1,11 @@
 from __future__ import annotations
-import collections, json, math, pathlib, queue, random, re, select, socket, socketserver, sys, threading, time, traceback, typing, uuid
+import collections, json, math, os, pathlib, queue, random, re, select, socket, socketserver, sys, threading, time, traceback, typing, uuid
+from dataclasses import dataclass, field as DataField
 from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
 from tinygrad.llm.telemetry import Telemetry, utc_ms
+from tinygrad.llm.engine import SessionInFlight
 if TYPE_CHECKING:
   from tinygrad.llm.cli import SimpleTokenizer
   from tinygrad.llm.model import Transformer
@@ -282,7 +284,7 @@ class Handler(VizHandler):
     # (no top_p: the model's own, general.sampling.top_p)
     def clean(value: str, limit: int) -> str:
       return re.sub(r"\s+", "_", value)[:limit] if isinstance(value, str) else ""
-    sid = clean(self.headers.get("X-Session-ID", ""), 96)
+    sid = clean(self.headers.get("X-Session-ID", ""), 4096)
     bench = clean(self.headers.get("X-Bench-Tag", ""), 96)
     req = Request(ids, log, max_tokens, temperature, self.server.top_p if top_p is None else top_p, session_id=sid, bench_tag=bench)
     # (SUPERSEDE: the same prompt again from the same session (X-Session-ID) while its request runs is a client's retry of it (a client that
@@ -373,6 +375,25 @@ class Handler(VizHandler):
     return self.send_data(json.dumps({"error": {"message": msg, "type": "invalid_request_error", "code": "invalid_request"}}).encode(),
                           status_code=400)
 
+  def session_end(self, session_id: str):
+    if not isinstance(session_id, str) or not session_id.strip(): return self.bad_request("session_id must be a nonempty string")
+    session_id = re.sub(r"\s+", "_", session_id)[:4096]
+    expected = os.getenv("SESSION_END_TOKEN", "")
+    if not expected:
+      return self.send_data(json.dumps({"error": "backend_session_end_disabled", "session_id": session_id}).encode(), status_code=403)
+    if self.headers.get("Authorization") != f"Bearer {expected}":
+      return self.send_data(json.dumps({"error": "unauthorized", "session_id": session_id}).encode(), status_code=401)
+    answer = SessionEndResponse()
+    self.server.end_requests.put((session_id, answer))
+    wake = Request([], "", 0, self.server.temperature, session_id="session-end-wake")
+    wake.cancelled = True  # wake an idle scheduler from its pending queue wait; this is never a generation request
+    self.server.waiting.put(wake)
+    if not answer.event.wait(30):
+      return self.send_data(json.dumps({"error": "session_end_timeout", "session_id": session_id}).encode(), status_code=503)
+    result, status = answer.result, answer.status
+    stderr_log(f"session_end sid={session_id} status={status} result={json.dumps(result, sort_keys=True)}\n")
+    return self.send_data(json.dumps(result).encode(), status_code=status)
+
   def do_POST(self):
     request_st = time.perf_counter()
     log = f"{self.path}  {colored('--', 'BLACK')}  "
@@ -384,6 +405,10 @@ class Handler(VizHandler):
     except Exception as e: return self.bad_request(f"invalid request body: {e}")
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if (path:=self.path.split("?")[0]) in ("/v1/messages", "/v1/messages/count_tokens"): return self.anthropic(path, body, log, request_st)
+    if path == "/v1/sessions/end": return self.session_end(body.get("session_id", ""))
+    if path.startswith("/v1/sessions/") and path.endswith("/end"):
+      from urllib.parse import unquote
+      return self.session_end(unquote(path[len("/v1/sessions/"):-len("/end")]))
     if self.path == "/v1/chat/completions":
       # render and tokenize
       try:
@@ -562,6 +587,12 @@ class BatchStats:
       self.reset()
     self.steps += 1
 
+@dataclass
+class SessionEndResponse:
+  result:dict = DataField(default_factory=dict)
+  status:int = 200
+  event:threading.Event = DataField(default_factory=threading.Event)
+
 class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   """
   requests come in on threads of their own, the model runs on the server's thread: one request alone is decoded as before (speculative
@@ -593,6 +624,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.telemetry = Telemetry(getenv("TELEMETRY_LOG", ""))
     self.stats = BatchStats()
     self.engine: typing.Any = None  # (schedule_seqs': the sequences)
+    self.end_requests: queue.Queue[tuple[str, SessionEndResponse]] = queue.Queue()
+    self.ended_sessions: set[str] = set()
+    self.ended_dropped = 0
     self.recent = collections.deque(maxlen=1000)
     # the slots of batched decoding (none: one request at a time)
     # (the slots past them: the landing slots of mixed steps, see Transformer.batch_mixed_step)
@@ -715,6 +749,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         from tinygrad.runtime.ops_amd import AMIdleClocks
         ret["gpus"] = AMIdleClocks.metrics()
       except Exception as e: ret["gpus"] = str(e)
+    ret["ended_dropped"] = self.ended_dropped
     if (eng:=self.engine) is not None:
       # (held: the idle conversations of agents mid task, see SeqEngine.STICKY. capacity: the tokens the caches and the stash hold, the
       # conversations the stash holds; lost: the conversations out of both)
@@ -1277,6 +1312,29 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # (CLOCK_FAST, CLOCK_MANY, CLOCK_PREFILL: a mode's caps from the env (e.g. "GFXCLK=1900"; "" none), a box's thermals without a code change)
   CLOCKS = {"fast": getenv("CLOCK_FAST", ""), "many": getenv("CLOCK_MANY", "GFXCLK=2000"), "prefill": getenv("CLOCK_PREFILL", "GFXCLK=2300")}
   FAST_USERS, CLOCK_HOLD = getenv("CLOCK_FAST_USERS", 4), 0.5
+  def process_session_ends(self):
+    """Execute end requests only on the model's scheduler thread; a current HTTP response is never cancelled."""
+    if not hasattr(self, "end_requests"): self.end_requests = queue.Queue()
+    if not hasattr(self, "ended_sessions"): self.ended_sessions = set()
+    if not hasattr(self, "ended_dropped"): self.ended_dropped = 0
+    while not self.end_requests.empty():
+      session_id, answer = self.end_requests.get_nowait()
+      if session_id in self.ended_sessions:
+        result = {"session_id": session_id, "already_ended": True, "dropped": 0, "resident_dropped": 0, "stash_dropped": 0}
+      else:
+        try:
+          result = self.engine.end_session(session_id)
+          self.ended_dropped += result["dropped"]
+          self.ended_sessions.add(session_id)
+          result.update({"session_id": session_id, "already_ended": False})
+        except SessionInFlight:
+          result = {"session_id": session_id, "already_ended": False, "active": True,
+                    "dropped": 0, "resident_dropped": 0, "stash_dropped": 0}
+      result.setdefault("active", False)
+      result["ended_dropped"] = self.ended_dropped
+      answer.result, answer.status = result, 409 if result["active"] else 200
+      answer.event.set()
+
   def schedule_seqs(self):
     """
     every request has a sequence of its own (the resident one its prompt continues: an agent's turn is prefilled from its last one), prefilled
@@ -1303,6 +1361,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     clock_mode, clock_at = "", 0.0
     while True:
       try:
+        self.process_session_ends()
         while not active and not pending and not filling:
           try: pending.append(self.waiting.get(timeout=0.2))
           except queue.Empty: pass
@@ -1347,7 +1406,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           # not every waiting turn blocked by idle ones' rows). a new conversation past the caches' and the stash's capacity waits for one to
           # end (unless starving and nothing else runs))
           force = (c.was_hit and now - c.st > self.TURN_WAIT) or (starving(c) and not (active or filling))
-          got = eng.take(ids:=prompt(c), max(0, (c.max_tokens or 0) - len(c.generated)), force=force)
+          got = eng.take(ids:=prompt(c), max(0, (c.max_tokens or 0) - len(c.generated)), force=force, session_id=c.session_id)
           take_time = time.perf_counter() - t0
           self.stats.add("take", take_time)
           trace(f"seq_take at={t0:.6f} ms={take_time*1e3:.3f} success={got is not None} "

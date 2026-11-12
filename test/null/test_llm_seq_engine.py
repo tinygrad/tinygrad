@@ -1,8 +1,9 @@
-import array, threading, time, unittest
+import array, json, threading, time, unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from tinygrad.llm.engine import SeqEngine
-from tinygrad.llm.serve import LLMServer, Request, BatchStats
+from tinygrad.llm.serve import LLMServer, Request, BatchStats, Handler, SessionEndResponse
+from tinygrad.llm.engine import SessionInFlight
 
 class FakeModel:
   """the model side of sequences sharing the caches (the seq_* calls of SeqEngine), recorded: a prefill takes `per_token` s a token"""
@@ -23,6 +24,7 @@ class FakeModel:
     self.calls.append(("first", slot, pos))
     return 8
   def seq_ckpt(self, save, slot, pos): self.calls.append(("ckpt", save, slot, pos))
+  def seq_stash(self, save, slot, pos, segments, entry, n, hrow=0): self.calls.append(("stash", save, slot, n, entry, hrow))
   def seq_move(self, src, dst, n): self.calls.append(("move", src, dst, n))
   def _seq_copy_call(self, save, slot, pos, hrow, keep=True): self.calls.append(("copy", save, slot, pos, hrow, keep))
   def seq_step(self, seqs, forced=None):
@@ -389,6 +391,125 @@ class TestScheduleSeqs(unittest.TestCase):
     self.assertEqual(self.done, [short, long])
     self.assertEqual(len(short.generated), 2)
     self.assertEqual(len(long.generated), 2)
+
+class TestSessionLifecycle(TestScheduleSeqs):
+  def setUp(self):
+    super().setUp()
+    self.eng = SeqEngine(self.model)
+  def engine(self): return SeqEngine(self.model)
+
+  def _prime_engine_session(self, n=2000):
+    ids = list(range(100, 100+n))
+    s, _, _ = self.eng.take(ids, session_id="agent-A")
+    self.eng.prefill(s, ids, 0, False, (0.0, 1.0))
+    self.eng.stop(s, len(s.tokens))
+    return s, ids
+
+  def test_session_ids_survive_stash_restore_and_end(self):
+    self.model.stash_chunks, self.model.stash_entries = 8, 4
+    self.eng = self.engine()
+    events = []
+    self.eng.telemetry = SimpleNamespace(event=lambda kind, **fields: events.append((kind, fields)))
+    s, ids = self._prime_engine_session()
+    self.eng._evict_all([s], True)
+    self.assertEqual(self.eng.stashed[0].sessions, {"agent-A"})
+    restored, start, restore = self.eng.take(ids, session_id="agent-A")
+    self.assertTrue(restore)
+    self.assertEqual(start, len(ids))
+    self.assertIn("agent-A", restored.sessions)
+    self.eng.stop(restored, len(restored.tokens))
+    result = self.eng.end_session("agent-A")
+    self.assertEqual((result["resident_dropped"], result["stash_dropped"]), (1, 1))
+    self.assertEqual((len(self.eng.seqs), len(self.eng.stashed), self.eng.lost), (0, 0, 0))
+    self.assertEqual((len(self.eng.free_chunks), len(self.eng.free_entries)), (8, 4))
+    self.assertEqual(self.eng.end_resident_dropped, 1)
+    self.assertEqual(self.eng.end_stash_dropped, 1)
+    self.assertEqual(self.eng.end_session("agent-A"), {"resident_dropped": 0, "stash_dropped": 0, "dropped": 0})
+    capacity = next(fields for kind, fields in events if kind == "eviction")
+    self.assertEqual(capacity["session_ids"], ["agent-A"])
+
+  def test_session_end_defers_active_and_preserves_shared_cache(self):
+    s, ids = self._prime_engine_session()
+    other, start, _ = self.eng.take(ids, session_id="agent-B")
+    self.eng.stop(other, len(other.tokens))
+    self.assertIs(other, s)
+    self.assertEqual(s.sessions, {"agent-A", "agent-B"})
+    self.assertEqual(self.eng.end_session("agent-A"), {"resident_dropped": 0, "stash_dropped": 0, "dropped": 0})
+    self.assertEqual(s.sessions, {"agent-B"})
+    s.active = True
+    with self.assertRaises(SessionInFlight): self.eng.end_session("agent-B")
+    self.assertIn(s, self.eng.seqs)
+    s.active = False
+    result = self.eng.end_session("agent-B")
+    self.assertEqual(result["resident_dropped"], 1)
+    self.assertEqual((len(self.eng.seqs), self.eng.lost), (0, 0))
+
+  def _serve_end(self, session_id):
+    answer = SessionEndResponse()
+    self.server.end_requests.put((session_id, answer))
+    wake = Request([], "", 0, 0.0, session_id="session-end-wake")
+    wake.cancelled = True
+    self.server.waiting.put(wake)
+    self.assertTrue(answer.event.wait(3), session_id)
+    return answer
+
+  @patch("tinygrad.llm.serve.stderr_log")
+  def test_queued_session_end_idempotent_counts_and_active_defer(self, _):
+    for sid, first in (("agent-A", 100), ("agent-B", 2000)):
+      self.server.waiting.put(Request(list(range(first, first+1000)), "", 2, 0.0, session_id=sid))
+    active = Request(list(range(5000, 6000)), "", 1_000_000, 0.0, session_id="live-task")
+    self.server.waiting.put(active)
+    until = time.perf_counter() + 3
+    while not active.generated and time.perf_counter() < until: time.sleep(0.005)
+    self.assertTrue(active.generated)
+    defer = self._serve_end("live-task")
+    self.assertTrue(defer.result["active"])
+    self.assertEqual(defer.status, 409)
+    ended = self._serve_end("agent-A")
+    self.assertEqual(ended.status, 200)
+    self.assertEqual(ended.result["resident_dropped"], 1)
+    again = self._serve_end("agent-A")
+    self.assertTrue(again.result["already_ended"])
+    self.assertEqual(self.server.ended_dropped, 1)
+    unknown = self._serve_end("unknown")
+    self.assertEqual(unknown.result["dropped"], 0)
+    self.assertEqual(self.server.ended_dropped, 1)
+    status = self.server.status()
+    self.assertEqual(self.server.engine.lost, 0)
+    self.assertEqual(status["ended_dropped"], 1)
+    active.cancelled = True
+    self.wait([active])
+    live = self._serve_end("live-task")
+    self.assertFalse(live.result.get("active", False))
+    self.assertGreaterEqual(live.result["resident_dropped"], 1)
+    self.server.waiting.put(Request(list(range(2000, 3000)), "", 2, 0.0, session_id="agent-B"))
+    self.wait(self.done[-2:])
+    self.assertGreater(self.server.engine.cached(list(range(2000, 3000))), 0)
+
+  def test_session_endpoint_token_and_http_contract(self):
+    self.server.waiting.put(Request(list(range(100, 1100)), "", 2, 0.0, session_id="agent-B"))
+    self.wait(self.done[-1:])
+    responses = []
+    handler = Handler.__new__(Handler)
+    handler.headers = {"Authorization": "Bearer secret"}
+    handler.server = SimpleNamespace(end_requests=self.server.end_requests, waiting=self.server.waiting, temperature=0.0)
+    handler.send_data = lambda data, status_code=200: responses.append((status_code, json.loads(data)))
+    with patch.dict("os.environ", {"SESSION_END_TOKEN": "secret"}):
+      handler.session_end("unknown-session")
+      self.assertEqual(responses[-1][0], 200)
+      self.assertEqual(responses[-1][1]["session_id"], "unknown-session")
+      self.assertEqual(responses[-1][1]["already_ended"], False)
+      alive = self._serve_end("agent-B")
+      self.assertGreaterEqual(alive.result["dropped"], 1)
+      handler.session_end("unknown-session")
+      self.assertTrue(responses[-1][1]["already_ended"])
+    with patch.dict("os.environ", {}, clear=True):
+      handler.session_end("unknown-session")
+    self.assertEqual(responses[-1][0], 403)
+    handler.headers["Authorization"] = "Bearer wrong"
+    with patch.dict("os.environ", {"SESSION_END_TOKEN": "secret"}):
+      handler.session_end("unknown-session")
+    self.assertEqual(responses[-1][0], 401)
 
 if __name__ == "__main__":
   unittest.main()
