@@ -278,6 +278,19 @@ def _prefork_buffers() -> dict[int, Buffer|MultiBuffer]:
     elif x._base is not None: stack.append(x._base)
   return reg
 
+# (the registries of the capture_parallel calls running)
+_prefork_regs:list[dict[int, Buffer|MultiBuffer]] = []
+
+def prefork_forget(bases:Sequence[Buffer]):
+  """
+  the buffers of these bases (they, their views, the multi buffers of them) out of the running capture_parallel's registries: freed once nothing
+  else holds them (e.g. the buffers only jits taken already read). a forked process's jit that refers to one isn't taken (KeyError)
+  """
+  ids = {id(b) for b in bases}
+  def of(x:Buffer|MultiBuffer) -> bool: return any(of(b) for b in x.bufs) if isinstance(x, MultiBuffer) else id(x.base) in ids
+  for reg in _prefork_regs:
+    for k in [k for k, x in reg.items() if of(x)]: del reg[k]
+
 class _Pickler(pickle.Pickler):
   def __init__(self, f, reg:dict[int, Any], idx:dict[UOp, int]|None):
     super().__init__(f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -452,6 +465,7 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
     return [False] * len(calls)
   every, calls = list(calls), [calls[k] for k in todo]
   st, reg, start = time.perf_counter(), _prefork_buffers(), next(UOp.unique_num)
+  _prefork_regs.append(reg)
   children:list[tuple[int, int]] = []
   # the kernels of all the processes compiled by this one's workers, each once (most are in many jits): a request pipe and a reply pipe each
   pool = get_worker_pool()
@@ -602,4 +616,5 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
                           "names": [getattr(j.fxn, "__qualname__", str(j.fxn)) for j, _ in calls], "arrived": arrived, "taken": took,
                           "compiles": compiles.stats if compiles is not None else [],
                           "warm": [(n, a - st, b - st) for n, a, b in warm_runs]}) + "\n")
+  _prefork_regs[:] = [r for r in _prefork_regs if r is not reg]
   return [k in todo and oks[todo.index(k)] for k in range(len(every))]

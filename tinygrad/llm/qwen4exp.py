@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.realize import warm_worker_pool
-from tinygrad.engine.jit import capture_parallel, warmup_select, run_as_they_come, _TinyJit
+from tinygrad.engine.jit import capture_parallel, warmup_select, run_as_they_come, _TinyJit, prefork_forget
 from tinygrad.llm.kernels import amd_qwen
 from tinygrad.llm.kernels.amd_qwen import rows_shifted, rows_pick
 from tinygrad.llm.kernels.amd_qwen import EXTRA_QUEUES, _wmma_rdna4, ring_errors, init_deferred, _init_buffers
@@ -485,10 +485,12 @@ def _drop_apart(final=True):
     def what(o) -> str:
       if isinstance(o, dict): return f"dict {len(o)} keys {[str(k)[:40] for k in list(o)[:4]]}"
       return f"{type(o).__name__} {len(o)}" if isinstance(o, (list, tuple, set)) else type(o).__qualname__
-    obj, seen = held[0], {id(held)}
+    obj, seen, ups = held[0], {id(held)}, cast(list[list], [])
     for _ in range(12):
+      seen.add(id(ups))
       if not (up:=[r for r in gc.get_referrers(obj) if id(r) not in seen and not isinstance(r, types.FrameType)]): break
-      seen.add(id(obj:=up[0]))
+      ups.append(up)
+      seen |= {id(up), id(obj:=up[0])}
       print(f"LOAD_APART: held by {what(obj)}")
   if final or not held: refs.clear()
 
@@ -2744,6 +2746,8 @@ class Transformer:
       # (LOAD_APART: the derivations ran, their jits drop what they hold: the buffers they read freed before the warm-up's arenas are made)
       if gguf_load.apart_buffers:
         for j in derive: _drop_jit(j)
+        # (capture_parallel's registry of the buffers at its fork holds them too: no jit still to take reads them)
+        prefork_forget([b for r in gguf_load.apart_buffers if (b:=r()) is not None])
         _drop_apart(final=False)
       # (the warm-up's runs as their jits come: while the others compile; the stash's jits linked meanwhile when the host memory has room)
       run_as_they_come(take, calls, ran, idle=functools.partial(link_late, take))
