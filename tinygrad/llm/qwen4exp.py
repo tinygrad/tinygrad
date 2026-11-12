@@ -2343,12 +2343,14 @@ class Transformer:
     self.seq_spec_h = _zeros(n*2*(k+1), self._spec_dim, device=devs)
     # every slot's checkpoint: its states of a position (the end of its last prompt), the hidden state of the last token
     self.seq_ckpt_h = _zeros(n, self._spec_dim, device=devs)
-    # (the checkpoints' recurrent states in host memory: a copy a turn, the device memory more slots')
+    # (the checkpoints' recurrent states in host memory: a copy a turn, the device memory more slots'. SEQ_CKPT_HOST=1 (default off): their
+    # conv states' and the indexers' too (C2: ~5 MB a slot a device), the same copies)
+    ckpt_host = bool(getenv("SEQ_CKPT_HOST", 0))
     self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]), host=True, views=0)[0]] +
-                            [_slot_pool(n, p, (1, *p.shape[1:]), views=0)[0] for p in b.pool_conv]
+                            [_slot_pool(n, p, (1, *p.shape[1:]), host=ckpt_host, views=0)[0] for p in b.pool_conv]
                             for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
     # (and the indexers' states)
-    self.seq_ckpt_idx = [_slot_pool(n, idx.pool_state, (1, *idx.pool_state.shape[1:]), views=0)[0] for idx in self._indexers()]
+    self.seq_ckpt_idx = [_slot_pool(n, idx.pool_state, (1, *idx.pool_state.shape[1:]), host=ckpt_host, views=0)[0] for idx in self._indexers()]
     self._spec_init()
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self._token_rows())
     # in host memory: a step's input tokens, the temperature and top_p of every sequence, its sampled tokens and drafts (written by one device)
