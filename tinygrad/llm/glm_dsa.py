@@ -273,6 +273,8 @@ class TransformerConfig:
   mtp: bool = False  # the next token prediction layer (MTPBlock)
   rope_interleave: bool = False  # the rope dims rotate adjacent pairs (the gguf's layout of a deepseek style model, not permuted)
   spec_drafts: int = 0  # speculative decoding: the tokens the MTP layer drafts for every step of the model
+  # (SPEC_DRAFTS_BY_SIZE: the drafts of a step of m sequences (GLM_SEQ), (m, drafts) a size; spec_drafts the most of them: the layouts')
+  spec_by_size: tuple[tuple[int, int], ...] = ()
   @property
   def rewind(self) -> int:
     """
@@ -3591,6 +3593,9 @@ class Transformer(GLMSeqDriver):
         state_dict[name] = permute_rope(state_dict[name], n_kv_heads, state_dict[name].shape[0]//n_kv_heads)
       elif kv_lora_rank and 'attn_kv_a_mqa.weight' in name:
         state_dict[name] = permute_rope(state_dict[name], 1, state_dict[name].shape[0]-kv_lora_rank)
+    # (SPEC_DRAFTS_BY_SIZE=1:2,4:3,...: a step of m sequences drafts that many, the sizes not listed SPEC_DRAFTS)
+    spec = getenv("SPEC_DRAFTS", 3 if arch == "glm-dsa" else 2)
+    by_size = glm_seq_base.spec_by_size(spec, glm_seq_base.Transformer.SEQ_SIZES)
     config = TransformerConfig(
       num_blocks=num_blocks, dim=kv[f'{arch}.embedding_length'],
       hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', sizes.get('blk.0.ffn_gate.weight', kv.get(f'{arch}.feed_forward_length', 0))),
@@ -3622,7 +3627,7 @@ class Transformer(GLMSeqDriver):
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer, mtp=mtp,
-      spec_drafts=getenv("SPEC_DRAFTS", 3 if arch == "glm-dsa" else 2) if mtp else 0, rope_interleave=arch == 'glm-dsa',
+      spec_drafts=max([spec, *(d for _, d in by_size)]) if mtp else 0, spec_by_size=by_size if mtp else (), rope_interleave=arch == 'glm-dsa',
       indexer_shared=indexer_shared,
       expert_units=expert_units,
       cache_rows=round_up(getenv("SEQ_ROWS", 0), REGION_ALIGN) if getenv("GLM_SEQ", 0) else 0)

@@ -480,7 +480,8 @@ class SeqEngine:
         take = min(k+1, len(force)+1)
         j = take - 1
       else:
-        j = next((i for i in range(k) if drafts[i] != sampled[i]), k)
+        # (the step's drafts: the size's (SPEC_DRAFTS_BY_SIZE), k the most of them (the hidden states' layout))
+        j = next((i for i in range(len(drafts)) if drafts[i] != sampled[i]), len(drafts))
         take = j + 1
       # (the token buffer: the accepted ones, the n-gram rows of the next step read them)
       self.model._token_host[s.base + start + 1:s.base + start + 1 + take] = __import__("array").array('i', sampled[:take])

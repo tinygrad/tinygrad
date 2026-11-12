@@ -441,6 +441,13 @@ def _batch_attention(x:Tensor, groups:list[tuple[UOp, int]], fn:Callable[[Tensor
 # by the next step (see kda_decode): a step writes one state, not k+1 (their memory and their writes)
 SEQ_REPLAY = getenv("SEQ_REPLAY", 1)
 def replay_q(k:int) -> int: return 2*(k+1)
+def spec_by_size(base:int, sizes:tuple[int, ...], v:str|None=None) -> tuple[tuple[int, int], ...]:
+  """SPEC_DRAFTS_BY_SIZE=m:d,... (or v): the drafts of a step of every size of sizes (the ones not listed: base), () if not set"""
+  if not (v:=str(getenv("SPEC_DRAFTS_BY_SIZE", "")) if v is None else v): return ()
+  by = {int(m): int(d) for m, d in (x.split(":") for x in v.split(",") if x)}
+  assert all(d >= 1 for d in by.values()), f"SPEC_DRAFTS_BY_SIZE={v}: a step drafts one token at least"
+  return tuple((m, by.get(m, base)) for m in sizes)
+
 def slot_states(k:int) -> tuple[int, int]:
   """
   the S of a slot's recurrent states and of its conv states (the state of a position p is p%S, see kda_decode): a step of k+1 tokens reads
@@ -4051,6 +4058,9 @@ class Transformer:
   # sequences are rows computed for nothing): 3 sequences 22 ms, not 26 (the jit of 4))
   SEQ_SIZES = tuple(int(x) for x in str(getenv("SEQ_SIZES", "1,2,3,4,6,8")).split(","))
   REGION_ALIGN = REGION_ALIGN  # (the alignment of the regions, see SeqEngine)
+  def drafts_of(self, m:int) -> int:
+    """the drafts of a step of m sequences (SPEC_DRAFTS_BY_SIZE, see spec_by_size): the layouts of the states are spec_drafts' (the most)"""
+    return dict(getattr(self.config, "spec_by_size", ())).get(m, self.config.spec_drafts)
   def seqs_supported(self) -> bool:
     devs = self.token_embd.weight.device
     # (GLM (GLM_SEQ): MLA with the sparse indexer on a sequence sharded cache, speculative decoding)
@@ -4524,6 +4534,8 @@ class Transformer:
         add(f"prefill{c}_sparse", self._prefill_jit(c, False), functools.partial(self.seq_prefill, 0, 0, [0]*(top+c), top, 0))
     for m in sorted(self.SEQ_SIZES, reverse=True):
       add(f"step{m}", self._seq_jit(m), functools.partial(self.seq_step, [(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m))
+      for d in self._step_drafts(m)[1:]:
+        add(f"step{m}k{d}", self._seq_jit(m, k=d), functools.partial(self.seq_step, [(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m, drafts=d))
     # (a mixed step's prompt: of slot 1 in the region after the sequences', a context past top_k)
     mix_prompt = (1, self.REGION_ALIGN * (-(-(top + self.SEQ_MIX_ROWS) // self.REGION_ALIGN)), top, 1, 0.0)
     for m in self.SEQ_MIX_SIZES:
@@ -4544,7 +4556,9 @@ class Transformer:
       if self._dense_ctx(0, n) or top + c > self.seq_rows():
         pf(self._prefill_jit(c, self._dense_ctx(0, n)), functools.partial(self._seq_chunk, 0, 0, n))
       if top + c <= self.seq_rows(): pf(self._prefill_jit(c, False), functools.partial(self._seq_chunk, 0, top, c))
-    for m in self.SEQ_SIZES: par.append((jit:=self._seq_jit(m), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m)))
+    for m in self.SEQ_SIZES:
+      for d in self._step_drafts(m):
+        par.append((jit:=self._seq_jit(m, k=d), functools.partial(lambda j, m, d: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m, d)), jit, m, d)))
     mp_vars = dict(zip(("seqp_slot", "seqp_base", "seqp_start", "seqp_count"), mix_prompt[:4]))
     for m in self.SEQ_MIX_SIZES:
       par.append((jit:=self._seq_jit(m, True), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m), *self._prompt_vars(mp_vars)),
@@ -4567,7 +4581,7 @@ class Transformer:
     par += loads
     # (SEQ_WARMUP_ONLY=step: the steps' jits only (experiments: the others captured when first called))
     if (only:=getenv("SEQ_WARMUP_ONLY", "")):
-      steps = {self._seq_jit(m) for m in self.SEQ_SIZES}
+      steps = {self._seq_jit(m, k=d) for m in self.SEQ_SIZES for d in self._step_drafts(m)}
       par = [(j, c) for j, c in par if j in steps or any(j is lj for lj, _ in loads)]
       calls = {k: v for k, v in calls.items() if k.startswith(str(only))}
     if DEBUG >= 1:
@@ -4686,13 +4700,17 @@ class Transformer:
     forward_seqs of GLM (MLA with the indexer, KDA blocks, the MTP layer; no hyper-connections' streams, no n-gram rows): as forward_batch_spec,
     a sequence's caches its region (its base), its states its slot's. the hidden states kept are the normed ones (as forward_spec's)
     """
-    k, G, devs = self.config.spec_drafts, len(vs) // 6, self.token_embd.weight.device
+    k, G, devs = self.config.spec_drafts if self._step_k is None else self._step_k, len(vs) // 6, self.token_embd.weight.device
     sl, bs, mp, js, ps, kbs = (list(vs[i::6]) for i in range(6))
-    slots, bases, H = self._ints(tuple(sl)), self._ints(tuple(bs)), 2*(k+1)
+    # (the hidden states' layout: K+1 rows a parity (spec_drafts, the most drafts of a step), a step of k drafts its first k+1)
+    K = self.config.spec_drafts
+    slots, bases, H = self._ints(tuple(sl)), self._ints(tuple(bs)), 2*(K+1)
     y = self._seq_in[:, :G*(k+1)]
     temps = self._seq_temp[:2*G].reshape(G, 2)
     def batch(pos:list[UOp], R:int) -> SeqBatch: return SeqBatch(G, R, slots, bases, self._ints(tuple(pos)))
-    last = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + (1-p)*(k+1), s*H + (2-p)*(k+1)), None)) for s, p in zip(sl, ps)])
+    # (k == K: the expressions as before, the same graph)
+    last = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + (1-p)*(K+1), s*H + ((2-p)*(K+1) if k == K else (1-p)*(K+1) + k+1)), None))
+                        for s, p in zip(sl, ps)])
     seed = self._seq_temp[-1:].bitcast(dtypes.uint32)
     Q8_ROWS_I8[0] = bool(getenv("SEQ_I8", 0))
     try:
@@ -4720,7 +4738,8 @@ class Transformer:
       for block in self.blk: x = block(x, 0)
       if hc is not None: x = x.mean(2)
       hn_all = self.output_norm(x)[0].float()
-      hs = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + p*(k+1), s*H + (p+1)*(k+1)), None)).assign(hn_all[g*(k+1):(g+1)*(k+1)])
+      hs = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + p*(K+1), s*H + ((p+1)*(K+1) if k == K else p*(K+1) + k+1)), None))
+                        .assign(hn_all[g*(k+1):(g+1)*(k+1)])
                         for g, (s, p) in enumerate(zip(sl, ps))])
       tt = temps.reshape(G, 1, 2).expand(G, k+1, 2).reshape(G*(k+1), 2)
       tok = self._sample(hs, tt, y.device, (seed, Tensor.arange(G*(k+1))))
@@ -4851,11 +4870,28 @@ class Transformer:
     if effects: Tensor.realize(ret, *effects)
     return ret
 
-  def _seq_jit(self, m:int, mixed:bool=False):
-    if not hasattr(self, "_seq_jits"): self._seq_jits:dict[tuple[int, bool], Any] = {}
-    if (m, mixed) not in self._seq_jits:
-      self._seq_jits[(m, mixed)] = TinyJit(self.forward_seqs_mixed if mixed else self.forward_seqs, capture_first=True, scratch=self._scratch)
-    return self._seq_jits[(m, mixed)]
+  _step_k:int|None = None  # (the drafts of the step being captured, see _seq_jit)
+  def _step_drafts(self, m:int) -> list[int]:
+    """the drafts of the steps of m sequences: the size's, then the ones of a sequence whose last step (of another size) drafted more"""
+    d = self.drafts_of(m)
+    return [d] + [x for x in sorted({self.drafts_of(s) for s in self.SEQ_SIZES}) if x > d]
+  def _seq_jit(self, m:int, mixed:bool=False, k:int|None=None):
+    """the jit of a step of m sequences and k drafts (default the size's, see drafts_of)"""
+    if not hasattr(self, "_seq_jits"): self._seq_jits:dict[tuple, Any] = {}
+    k = self.drafts_of(m) if k is None else k
+    # (a step of fewer drafts than the layouts': captured with _step_k set)
+    key = (m, mixed) if k == self.config.spec_drafts else (m, mixed, k)
+    if key not in self._seq_jits:
+      fn = self.forward_seqs_mixed if mixed else self.forward_seqs
+      if k != self.config.spec_drafts:
+        assert not mixed and not self.has_recurrent_block, "SPEC_DRAFTS_BY_SIZE: GLM_SEQ steps of MLA models only (no mixed steps, no replay)"
+        def forward_seqs_k(*vs:UOp, fn=fn, k=k) -> Tensor:
+          self._step_k = k
+          try: return fn(*vs)
+          finally: self._step_k = None
+        fn = forward_seqs_k
+      self._seq_jits[key] = TinyJit(fn, capture_first=True, scratch=self._scratch)
+    return self._seq_jits[key]
   # (mixed steps: a prompt's chunk of SEQ_MIX_ROWS rows at most with a step of the sequences, padded to one of SEQ_MIX_SIZES, see seq_step)
   SEQ_MIX_ROWS = getenv("SEQ_MIX_ROWS", 576)
   SEQ_MIX_SIZES = tuple(int(x) for x in str(getenv("SEQ_MIX_SIZES", "")).split(",") if x)
@@ -4863,8 +4899,8 @@ class Transformer:
     """the size of a mixed step of n sequences and a prompt of count tokens from start, None: not one (its own prefill)"""
     if count > self.SEQ_MIX_ROWS or start < unwrap(self.config.indexer).top_k or count < 1: return None
     return next((m for m in self.SEQ_MIX_SIZES if n <= m <= 2*max(n, 4)), None)
-  def _seq_vars(self, seqs:list[tuple[int, int, int, int, int]]) -> list[UOp]:
-    k, n = self.config.spec_drafts, self.seq_slots()
+  def _seq_vars(self, seqs:list[tuple[int, int, int, int, int]], k:int|None=None) -> list[UOp]:
+    k, n = self.config.spec_drafts if k is None else k, self.seq_slots()
     return [v for g, (sl, b, mp, j, par) in enumerate(seqs) for v in (
       UOp.variable(f"seq_slot{g}", 0, n).bind(sl), UOp.variable(f"seq_base{g}", 0, self.seq_rows()).bind(b),
       UOp.variable(f"seq_mtp{g}", 0, self.max_context-1).bind(mp), UOp.variable(f"seq_j{g}", 0, k).bind(j),
@@ -4876,19 +4912,26 @@ class Transformer:
 
   step_times = [0.0, 0.0, 0.0]  # (the launches' and the waits' time of the steps, see the server's status line)
   def seq_step(self, seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, float]]],
-               prompt:tuple[int, int, int, int, float|tuple[float, float]]|None=None) -> list[tuple[list[int], list[int]]]:
+               prompt:tuple[int, int, int, int, float|tuple[float, float]]|None=None, drafts:int|None=None) -> list[tuple[list[int], list[int]]]:
     """
     a step of speculative decoding of sequences sharing the caches: seqs (slot, base, mtp_pos, j, par, the k+1 tokens of the last step,
     temperature) of every one (see _spec_steps), their k+1 sampled tokens and k drafts. prompt (a mixed step, see mix_size): (slot, base, start,
     count, temperature) of a sequence whose count tokens from start (in the token buffer) are prefilled with the step (on the model's states:
     the host copies its slot's in before, out after), the token sampled after them the step's prompt_token
+    drafts: the step's (default the size's, see drafts_of); a sequence's j past them (its last step drafted more): the step drafts j or more
+    (its MTP catches up on j+1 tokens, see _step_drafts), y as long as the step's k+1 (the tokens past j not read). the layouts of the
+    states are spec_drafts'
     """
     self._seq_init()
-    k, n = self.config.spec_drafts, len(seqs)
+    n = len(seqs)
     m = next(s for s in self.SEQ_SIZES if s >= n) if prompt is None else cast(int, self.mix_size(n, prompt[3], prompt[2]))
+    k = max([self.drafts_of(m) if drafts is None else drafts, *(j for _, _, _, j, *_ in seqs)])
+    # (more than the size's: the fewest of the warmed steps' that are enough)
+    if drafts is None: k = next((d for d in self._step_drafts(m) if d >= k), k)
+    assert k <= self.config.spec_drafts, f"a step of {k} drafts, the layouts have {self.config.spec_drafts}"
     # (the sequences past n: the padding slot's at position 0 in the padding region)
     seqs = seqs + [(self.seq_slots(), self.seq_rows(), 0, 0, 1, [0]*(k+1), 0.0)] * (m - n)
-    self._seq_host_in[:m*(k+1)] = array.array('i', [t for *_, y, _ in seqs for t in y])
+    self._seq_host_in[:m*(k+1)] = array.array('i', [t for *_, y, _ in seqs for t in (list(y) + [0]*k)[:k+1]])
     self._seq_host_temp[:2*m] = array.array('f', [v for *_, temp in seqs for v in (temp if isinstance(temp, tuple) else (temp, 1.0))])
     # (the step's seed, see forward_seqs)
     self._seq_host_temp[-1] = array.array('f', bytes(random.getrandbits(8) for _ in range(4)) if not getenv("SEQ_SEED") else
@@ -4900,13 +4943,13 @@ class Transformer:
       psl, pb, pst, pcnt, ptemp = prompt
       self._seq_host_temp[2*self._seq_m:2*self._seq_m+2] = array.array('f', ptemp if isinstance(ptemp, tuple) else (ptemp, 1.0))
       pvals = {"seqp_slot": psl, "seqp_base": pb, "seqp_start": pst, "seqp_count": pcnt}
-    jit, st = self._seq_jit(m, prompt is not None), time.perf_counter()
+    jit, st = self._seq_jit(m, prompt is not None, k), time.perf_counter()
     if (cap:=getattr(jit, "captured", None)) is not None:
       # (captured: the variables' values as they are, no bound variables made a step)
       cap([], {**{name: v for g, (sl, b, mp, j, par, _, _) in enumerate(seqs)
                   for name, v in ((f"seq_slot{g}", sl), (f"seq_base{g}", b), (f"seq_mtp{g}", mp), (f"seq_j{g}", j), (f"seq_par{g}", par),
                                   (f"seq_kb{g}", self._kbase_of(sl, mp + j)))}, **pvals})
-    else: jit(*self._seq_vars([(sl, b, mp, j, par) for sl, b, mp, j, par, _, _ in seqs]), *self._prompt_vars(pvals))
+    else: jit(*self._seq_vars([(sl, b, mp, j, par) for sl, b, mp, j, par, _, _ in seqs], k), *self._prompt_vars(pvals))
     # (SEQ_REPLAY: every sequence's recurrent states now the ones after its step's first token)
     if SEQ_REPLAY:
       for sl, _, mp, j, _, _, _ in seqs[:n]: self._seq_kbase[sl] = mp + j + 1
