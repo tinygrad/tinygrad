@@ -133,6 +133,20 @@ for pos in POS:
         cc = [(s, s+du) for dd, name, s, du in seq if dd == d and name.startswith("copy")]
         print(f"  {d} kernel_union_ms={union(kk)/1e3:.3f} copy_union_ms={union(cc)/1e3:.3f} "
               f"either_union_ms={union(kk+cc)/1e3:.3f}", flush=True)
+# PYPROF=1: the host side of one chunk call (cProfile, the top functions by own time), after the timed reps
+if getenv("PYPROF"):
+  import cProfile, pstats, io
+  pos = POS[0]
+  sp, nt = v_start_pos.bind(pos), UOp.variable("toks", 1, NJ).bind(N)
+  sync()
+  pr = cProfile.Profile()
+  pr.enable()
+  model(model._token_buf[:, sp:sp+nt], sp, temp)
+  pr.disable()
+  sync()
+  buf = io.StringIO()
+  pstats.Stats(pr, stream=buf).sort_stats("tottime").print_stats(25)
+  print("PYPROF\n" + buf.getvalue(), flush=True)
 # BURST=n: n chunks back to back (one sync at the end, as a server's consecutive chunks), the mean of BURST_REPS bursts
 if (nb:=getenv("BURST", 0)):
   for pos in POS:
