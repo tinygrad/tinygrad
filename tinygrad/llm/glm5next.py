@@ -5009,6 +5009,8 @@ class Transformer:
     # the next token prediction (MTP) layers: the first is loaded with MTP=1 (model.mtp), the others aren't used
     num_blocks = kv[f'{arch}.block_count'] - kv.get(f'{arch}.nextn_predict_layers', 0)
     mtp = bool(getenv("MTP", int(arch == "glm5-next"))) and kv.get(f"{arch}.nextn_predict_layers", 0) > 0
+    # (NUM_BLOCKS: only the first blocks for small-kernel profiling, no MTP; unset keeps the exact deployed model)
+    if (nb:=getenv("NUM_BLOCKS", 0)) and nb < num_blocks: num_blocks, mtp = nb, False
     # (qwen4exp: the MTP layer in a gguf of its own (its block after the model's), found next to the model's)
     if arch == 'qwen4exp' and getenv("MTP", 1) and not isinstance(gguf, Tensor) and (mf:=_qwen_mtp_file(pathlib.Path(gguf))) is not None:
       mkv, mentries = gguf_parse(mf)
