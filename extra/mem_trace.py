@@ -53,6 +53,9 @@ def report(tag:str="end") -> None:
     lru = sum(sz * len(v) for (sz, o), v in Device[d].allocator.cache.items() if not (o is not None and o.host))  # type: ignore[attr-defined]
     print(f"MEM_TRACE {tag} {d}: phys_used={(mm.vram_size - free)/1e9:.3f} free={free/1e9:.3f} counted_vram={vram[d]/1e9:.3f} "
           f"counted_host={host[d]/1e9:.3f} lru_cached_vram={lru/1e9:.3f} traced_live={traced/1e9:.3f} n={len(_live[id(mm)])}", flush=True)
+    if lru:
+      by = collections.Counter({sz: len(v) for (sz, o), v in Device[d].allocator.cache.items() if v and not (o is not None and o.host)})  # type: ignore[attr-defined]
+      print(f"MEM_TRACE {tag} {d}: lru " + " ".join(f"{n}x{sz/1e6:.2f}MB" for sz, n in sorted(by.items(), key=lambda x: -x[0]*x[1])[:16]), flush=True)
     c = sites[d] = collections.Counter()
     for s, site in _live[id(mm)].values(): c[site] += s
   a, b = [devs[int(os.environ.get(f"MEM_TRACE_{k}", i))] for k, i in (("A", 0), ("B", 1))] if len(devs) > 1 else (devs[0], devs[0])
