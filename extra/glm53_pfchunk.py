@@ -36,6 +36,11 @@ sync()
 print(f"warm chunk {NJ} at 0 (jits made): {time.perf_counter()-st:.1f} s", flush=True)
 # every position's tokens in the token buffer (generate wrote the prompt's)
 toks = [random.randrange(1000, 50000) for _ in range(max(POS) + NJ + 1)]
+# (QTEXT=file: the tokens of its text instead (repeated to length): real rows for QDUMP)
+if (qt:=getenv("QTEXT", "")):
+  from tinygrad.llm.cli import SimpleTokenizer
+  tt = SimpleTokenizer.from_gguf_kv(kv).encode(open(qt).read())
+  toks = (tt * ((len(toks) + len(tt) - 1) // len(tt)))[:len(toks)]
 model._token_host[:len(toks)] = __import__("array").array('i', toks)
 temp = model._temps[(0.0, 1.0)]
 v_start_pos, v_toks = UOp.variable("start_pos", 0, model.max_context-1), UOp.variable("toks", 1, NJ)
@@ -82,6 +87,13 @@ for pos in POS:
       p = np.arange(getenv("CHECK_FROM", pos), pos + NL[pos])
       rows = arr[(p // SEQ_BLK) % n, (p // (SEQ_BLK*n))*SEQ_BLK + p % SEQ_BLK]
       print(f"CHECK pos {pos} rep {r}: token {model._token_host[pos+NL[pos]]} cache {hashlib.sha256(rows.tobytes()).hexdigest()[:16]}", flush=True)
+      # (QDUMP=dir: every block's latent cache rows of the chunk's positions, .npy a block (the real rows, for reduced-bit formats offline))
+      if (qd:=getenv("QDUMP", "")) and r == 0:
+        os.makedirs(qd, exist_ok=True)
+        for bi, b in enumerate(model.blk):
+          if not hasattr(b, "cache_s"): continue
+          a = b.cache_s.numpy().reshape(n, -1, b.cache_s.shape[-1])
+          np.save(f"{qd}/rows_b{bi}_p{pos}.npy", a[(p // SEQ_BLK) % n, (p // (SEQ_BLK*n))*SEQ_BLK + p % SEQ_BLK])
     if any(late:=p2p_late(devs, clear=True)): print(f"P2P RUNOUT at pos {pos} rep {r}: epochs {late}", flush=True)
     print(f"chunk {N}/{NJ} at {pos:7d} rep {r}: {dt*1e3:8.1f} ms (host {t_host*1e3:.1f} ms)" +
           (f" parts {' '.join(f'{p*1e3:.1f}' for p in parts_t)}" if parts_t else ""), flush=True)

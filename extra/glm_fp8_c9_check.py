@@ -46,7 +46,7 @@ def lists(T:int, N:int, n_max:int) -> Tensor:
 
 def main(fmt:str) -> None:
   enc, dec_rows, W = (fp8_rows, fp8_dequant, FP8_ROPE_ROW) if fmt == "fp8" else (q4_rows, q4_dequant, Q4_ROPE_ROW)
-  qt = 0.1 if fmt == "fp8" else 0.3
+  qt = 0.1 if fmt == "fp8" else 0.4  # (4-bit: a format error of ~17% RMS on rows with outliers, see QDUMP for real rows)
   print(f"=== {fmt} rows ({W} words)", flush=True)
   N, n_max, scale = 4096, 2048, 192**-0.5
   k = Tensor(rows(N), device=DEV).realize()
