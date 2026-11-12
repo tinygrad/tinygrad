@@ -79,6 +79,16 @@ if getenv("SEQ_ONLY"):
     tok = model.seq_prefill(0, 0, stoks, 0, 0)
     dt = time.perf_counter() - st
     print(f"SEQ L={L} N={N} rep={rep} ms={dt*1e3:.3f} ms_per_chunk={dt*1e3/(L/N):.3f} tok={tok}", flush=True)
+    if rep == 0 and getenv("CHECK"):
+      import hashlib
+      from tinygrad.llm.glm5next import GatedDeltaNetBlock
+      h = hashlib.sha256()
+      # (the deltanet states of every block and the last token's hidden state (it read every layer's attention over all the rows); the
+      # caches themselves are GBs here)
+      for blk in model.blk:
+        if isinstance(blk, GatedDeltaNetBlock) and hasattr(blk, "recurrent_state"): h.update(blk.recurrent_state.numpy().tobytes())
+      h.update(model.seq_spec_h.numpy().tobytes())
+      print(f"SEQCHECK sha256={h.hexdigest()[:24]}", flush=True)
   if getenv("PROFILE"):
     times = kprof.times(*devs)
     print(f"PROFILE seq gpu_ms_per_chunk={sum(v[1] for v in times.values())/len(devs)/1e3/(L/N):.3f}", flush=True)
