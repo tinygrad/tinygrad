@@ -4339,15 +4339,31 @@ def _mla_sparse_split_kernel(out:UOp, ml:UOp, q:UOp, cache:UOp, index:UOp, scale
 # max over 448), 528 bytes instead of 1024
 
 FP8_ROW = 132  # (the words of a row)
+# (a row of 576 dims, 512 latent and 64 rope ones (C9): the 132 words of the latent dims, the rope dims in half (32 words): 656 bytes, not 1152.
+# DeepSeek V3.2's fp8 cache row)
+FP8_ROPE_ROW = 164
 
 def fp8_rows(k:Tensor) -> Tensor:
-  """the (R, 512) rows k as fp8 rows (R, 132) uint32: the values over their scale in e4m3 (rounded to nearest), the 4 scales"""
+  """
+  the (R, 512) rows k as fp8 rows (R, 132) uint32: the values over their scale in e4m3 (rounded to nearest), the 4 scales. (R, 576) rows: the
+  first 512 dims so, the last 64 (rope) as they are in half: (R, 164)
+  """
   R, D = k.shape
-  assert D == 512, f"fp8 rows of {D} dims"
-  x = k.float().reshape(R, 4, 128)
+  assert D in (512, 576), f"fp8 rows of {D} dims"
+  x = k[:, :512].float().reshape(R, 4, 128)
   s = x.abs().max(-1, keepdim=True).maximum(1e-20) / 448
-  q = (x / s).cast(dtypes.fp8e4m3).bitcast(dtypes.uint8).reshape(R, D).contiguous().bitcast(dtypes.uint32)
-  return q.cat(s.reshape(R, 4).bitcast(dtypes.uint32), dim=-1)
+  q = (x / s).cast(dtypes.fp8e4m3).bitcast(dtypes.uint8).reshape(R, 512).contiguous().bitcast(dtypes.uint32)
+  q = q.cat(s.reshape(R, 4).bitcast(dtypes.uint32), dim=-1)
+  return q if D == 512 else q.cat(k[:, 512:].cast(dtypes.half).contiguous().bitcast(dtypes.uint32), dim=-1)
+
+def fp8_dequant(r:Tensor) -> Tensor:
+  """the fp8 rows r (R, 132 or 164) as half rows (R, 512 or 576): the values the kernels read (e4m3 times its scale, rounded to half)"""
+  R, W = r.shape
+  v = r[:, :128].contiguous().bitcast(dtypes.uint8).bitcast(dtypes.fp8e4m3).float().reshape(R, 4, 128)
+  x = (v * r[:, 128:132].contiguous().bitcast(dtypes.float32).reshape(R, 4, 1)).cast(dtypes.half).reshape(R, 512)
+  return x if W == FP8_ROW else x.cat(r[:, 132:].contiguous().bitcast(dtypes.half), dim=-1)
+
+def _fp8_rope(cache:Tensor) -> bool: return cache.dtype == dtypes.uint32 and int(cache.shape[-1]) == FP8_ROPE_ROW
 
 def _fp8_bits(x:UOp) -> UOp:
   """bytes at bits 8 and 24 of x (the others 0) as the halves of a word of 2**-8 their e4m3 values (exact: the sign, exponent and mantissa
@@ -4385,7 +4401,14 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   R, D = cast(tuple[int, int], q.shape)
   T, n_max = R // 16, cast(int, index.shape[1]) - 1
   N, WAVES = cache.shape[0], 4
-  DW = D // WAVES
+  # (fp8 rows (SEQ_FP8): a wave's 128 latent dims have a scale of their own, its partial scores are scaled (and its P for the values). rope:
+  # rows of 576 dims, a wave's 16 rope dims (half, unscaled) a score of their own, its outputs of the rope dims 0)
+  # (uint64: two words each, the whole cache of a prefill, see seq_gather)
+  fp8 = cache.dtype in (dtypes.uint32, dtypes.uint64)
+  rope = fp8 and D == 576
+  assert not fp8 or (D in (512, 576) and cast(int, cache.shape[1]) * cache.dtype.itemsize == (FP8_ROPE_ROW if rope else FP8_ROW) * 4), \
+    f"fp8 rows of {D} dims"
+  DW = 128 if fp8 else D // WAVES
   KT = DW // 16
   tg = UOp.range(T*split, 0, AxisType.GLOBAL)
   tok, sp = tg // split, tg % split
@@ -4413,10 +4436,6 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
     return off + key.maximum(0).minimum((stride*SLOT_SPAN or N)-1), (i < count) & (key < valid_len)
   key, key_ok = key_at(col)
   zero8 = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
-  # (fp8 rows (SEQ_FP8): a wave's 128 dims have a scale of their own, its partial scores are scaled (and its P for the values)
-  # (uint64: two words each, the whole cache of a prefill, see seq_gather)
-  fp8 = cache.dtype in (dtypes.uint32, dtypes.uint64)
-  assert not fp8 or (D == 512 and DW == 128 and cast(int, cache.shape[1]) * cache.dtype.itemsize == FP8_ROW * 4), "fp8 rows: 512 dims"
   def fp8_scale(k:UOp) -> UOp: return _word(cache, k, 128 + wave).bitcast(dtypes.float) * 256
   s_acc = zero8
   for kk in range(KT):
@@ -4425,9 +4444,15 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
     s_acc = UOp.wmma(qfrag[kk], kf, s_acc, *WMMA_ARG)
   s_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
   s_reg = s_reg.after(s_reg.store(s_acc))
+  if rope:
+    rq = UOp.stack(*(q[tok*16 + col, 512 + wave*16 + k].load() for k in ks))
+    rk = UOp.stack(*(((_word(cache, key, 132 + wave*8 + k//2) >> (16*(k % 2))) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.half) for k in ks))
+    r_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
+    r_reg = r_reg.after(r_reg.store(UOp.wmma(rq, rk, zero8, *WMMA_ARG)))
   sk = fp8_scale(key) if fp8 else UOp.const(1.0, dtypes.float)
+  def score(e:int) -> UOp: return (s_reg[e].load() * sk + r_reg[e].load() if rope else s_reg[e].load() * sk) if fp8 else s_reg[e].load()
   lds_s = UOp.alloc((WAVES, WARP_SIZE, 8), dtypes.float, addrspace=AddrSpace.LOCAL)
-  lds_s = lds_s.after(UOp.group(*(lds_s[wave, lane, e].store(s_reg[e].load() * sk if fp8 else s_reg[e].load()) for e in range(8))).barrier())
+  lds_s = lds_s.after(UOp.group(*(lds_s[wave, lane, e].store(score(e)) for e in range(8))).barrier())
   o_regs = [_reg((8,), 0) for _ in range(KT)]
   # the softmax of rows e (of both halves) in ES = 8//WAVES of them a wave: its running max and sum, P and the rescale of the rows to LDS
   ES = 8 // WAVES
@@ -4472,6 +4497,7 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   lds_l = lds_l.after(UOp.group(*(lds_l[(half*8 + wave*ES + i).valid(col.eq(0))].store(l_fin[i].load()) for i in range(ES))).barrier())
   stores = [out[tg*16 + half*8 + e, dbase + dt*16 + col].store(o.after(update)[e].load() / lds_l[half*8 + e].load().maximum(1e-30))
             for dt, o in enumerate(o_regs) for e in range(8)]
+  if rope: stores += [out[tg*16 + half*8 + e, 512 + wave*16 + col].store(UOp.const(0, dtypes.float)) for e in range(8)]
   if ml is not None:
     m_fin = m_reg.after(update)
     stores += [ml[tg*16 + half*8 + wave*ES + i, UOp.const(c, dtypes.weakint).valid(col.eq(0))].store(v)
@@ -4515,7 +4541,21 @@ def _mla_sparse_lds_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, va
   lkey, lok = key_at(lrow)
   lds_k = UOp.alloc((16, PAD), dtypes.half, addrspace=AddrSpace.LOCAL)
   tstores = []
-  for i in range((G8 + 7) // 8):
+  # (fp8 rows (SEQ_FP8, see fp8_rows): the same tile, the values times their scale in half (fp8_dequant's): a thread 4 words of the latent
+  # dims at a time (16 of them, group lgrp+8i has scale i), then 4 of the rope halves)
+  fp8 = cache.dtype == dtypes.uint32
+  if fp8:
+    assert D == 576 and cache.shape[1] == FP8_ROPE_ROW, f"fp8 rows of {D} dims"
+    zw = UOp.const(0, dtypes.uint32)
+    for i in range(4):
+      sc = lok.where(cache[lkey, 128 + i].load(), zw).bitcast(dtypes.float) * 256
+      for w in range(4):
+        hs = _fp8_halves(lok.where(cache[lkey, (lgrp + i*8)*4 + w].load(), zw))
+        tstores += [lds_k[lrow, (lgrp + i*8)*16 + w*4 + e].store((h.cast(dtypes.float) * sc).cast(dtypes.half)) for e, h in enumerate(hs)]
+    for w in range(4):
+      rw = lok.where(cache[lkey, 132 + lgrp*4 + w].load(), zw)
+      tstores += [lds_k[lrow, 512 + lgrp*8 + w*2 + e].store(((rw >> (16*e)) & 0xffff).cast(dtypes.uint16).bitcast(dtypes.half)) for e in range(2)]
+  for i in range((G8 + 7) // 8 if not fp8 else 0):
     g = lgrp + i*8
     if (i+1)*8 > G8: g = g.valid(g < G8)
     vals = [lok.where(cache[lkey, g*8 + e].load(), UOp.const(0, dtypes.half)) for e in range(8)]
@@ -4630,7 +4670,8 @@ def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:f
     m, l = (ml.reshape(n, T, split, 16, 2)[..., i:i+1] for i in range(2))
     w = l * (m - m.max(2, keepdim=True)).exp()
     out = ((parts.reshape(n, T, split, 16, D) * w).sum(2) / w.sum(2).maximum(1e-30)).reshape(n*T*16, D)
-  elif grouped is None and vdims is not None and getenv("MLA_LDS", 1) and cache.dtype == dtypes.half and D % 64 == 0 and vdims % 64 == 0:
+  elif grouped is None and vdims is not None and getenv("MLA_LDS", 1) and (cache.dtype == dtypes.half or _fp8_rope(cache)) and D % 64 == 0 \
+      and vdims % 64 == 0:
     if getenv("MLA_LDS_HEADS", 1):
       # (the device's hl heads of q as they are, its real heads' outputs: no padded half copy of the queries in, no rows of 16 heads out.
       # the same values)
@@ -4899,6 +4940,7 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int, base:int
   # the tokens' quantized: half the memory and the reads, the attention reads fp8 rows), else in half (SEQ_GATHER_FP8=0)
   n, D, fp8 = len(devs), int(k.shape[-1]), cache.dtype == dtypes.uint32
   raw = not fp8 or bool(getenv("SEQ_GATHER_FP8", 1))
+  assert raw or int(cache.shape[1]) == FP8_ROW, "fp8 rows with rope dims are gathered as they are"
   sp, t = _unbind(start_pos), (_unbind(T) if isinstance(T, UOp) else UOp.const(T, dtypes.weakint))
   # (base: the sequence's region of the cache from that position, see seq_picks)
   bu = _pb(base)
@@ -4917,10 +4959,10 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int, base:int
     need = [Tensor.custom_kernel(Tensor.zeros(N, dtype=dtypes.int32, device=devs).contiguous(), lists, fxn=_seq_need_kernel)[0]]
   # (SEQ_GATHER_FUSED, default on: every peer's part in one kernel, the peers read at once (one kernel a peer reads one link at a time). C9
   # 64k prefill 41.87 -> 40.53 s, greedy 32 identical)
-  if raw and not fp8 and getenv("SEQ_GATHER_FUSED", 1):
+  if raw and getenv("SEQ_GATHER_FUSED", 1):
     out = Tensor.custom_kernel(out, _device_index(devs), *seq_views(cache), *need,
                                fxn=functools.partial(_seq_gather_fused_kernel, start_pos=sp, n=n, base=bu))[0]
-  for kk, part in enumerate(seq_views(cache) if not (raw and not fp8 and getenv("SEQ_GATHER_FUSED", 1)) else []):
+  for kk, part in enumerate(seq_views(cache) if not (raw and getenv("SEQ_GATHER_FUSED", 1)) else []):
     out = Tensor.custom_kernel(out, part, _device_index(devs), *need, fxn=functools.partial(_seq_gather_kernel if raw else _seq_gather_fp8_kernel,
                                                                                      start_pos=sp, k=kk, n=n, base=bu))[0]
   rows = fp8_rows(k).contiguous() if fp8 and raw else k.cast(dtypes.half).contiguous() if half else \
