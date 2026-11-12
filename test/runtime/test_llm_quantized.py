@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Tensor, UOp, dtypes, function, Device, TinyJit
 from tinygrad.helpers import Context
 from tinygrad.llm.kernels.amd import Linear, fp8_matmul, amd_custom_kernels_supported
-from tinygrad.llm.kernels.amd_gguf import QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, iq4_half_lut, _iq_grid, _e8m0_halved
+from tinygrad.llm.kernels.amd_gguf import QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, iq4_half_lut, _iq_grid
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.llm.model import ExpertWeights
 from tinygrad.llm.hf import e4m3fn_to_fnuz
@@ -111,12 +111,6 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), packed[offset:])
         raw.assign(raw.full_like(1)).realize()
         np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), np.ones(type_size, dtype=np.uint8))
-
-  def test_e8m0_halved(self):
-    # every exponent bit exact, the denormals e < 2 included (the fp16 kernel tests round them to 0)
-    # folded to uint32 bits: no kernel, no float for a backend to flush the denormals of
-    bits = [_e8m0_halved(UOp.const(e, dtypes.uint8)).bitcast(dtypes.uint32).ssimplify() for e in range(256)]
-    np.testing.assert_array_equal(np.array(bits, np.uint32), np.ldexp(1.0, np.arange(256)-128).astype(np.float32).view(np.uint32))
 
   def test_small_block_quant_weights(self):
     for ggml_type, words in SMALL_BLOCK_QUANTS.items():

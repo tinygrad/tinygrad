@@ -68,15 +68,14 @@ def _load_u32(raw:UOp, base:UOp, offset:int|UOp, stream:bool=False) -> UOp:
 
 def _half(value:UOp) -> UOp: return value.cast(dtypes.uint16).bitcast(dtypes.float16).float()
 
-# 16 int8 entries for _nibble_lut, packed as words of entries 7-4, 3-0, 15-12, 11-8
-IQ4NL_LUT = (0xf6eaddcf, 0xbfad9881, 0x71594535, 0x26190d01)  # kvalues_iq4nl
-MXFP4_LUT = (0x0c080604, 0x03020100, 0xf4f8fafc, 0xfdfeff00)  # e2m1 doubled
+IQ4NL_LUT = (0xbfad9881, 0xf6eaddcf, 0x26190d01, 0x71594535)
+MXFP4_LUT = (0x03020100, 0x0c080604, 0xfdfeff00, 0xf4f8fafc)  # e2m1 doubled
 
 def _nibble_lut(packed:UOp, shift:int|UOp, lut:tuple[int, int, int, int]) -> UOp:
   # a 16 entry int8 table looked up by the nibbles: 3 byte_perms beat any arithmetic/select-tree form (~60% decode)
   selectors = (packed >> shift) & 0x0f0f0f0f
-  low = _amd_byte_perm(UOp.const(lut[0], dtypes.uint32), UOp.const(lut[1], dtypes.uint32), selectors)
-  high = _amd_byte_perm(UOp.const(lut[2], dtypes.uint32), UOp.const(lut[3], dtypes.uint32), selectors & 0x07070707)
+  low = _amd_byte_perm(UOp.const(lut[1], dtypes.uint32), UOp.const(lut[0], dtypes.uint32), selectors)
+  high = _amd_byte_perm(UOp.const(lut[3], dtypes.uint32), UOp.const(lut[2], dtypes.uint32), selectors & 0x07070707)
   return _amd_byte_perm(high, low, 0x03020100 | ((selectors & 0x08080808) >> 1))
 
 def _e8m0_halved(e:UOp) -> UOp:

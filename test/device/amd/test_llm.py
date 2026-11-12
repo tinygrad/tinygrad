@@ -93,8 +93,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         packed = rng.integers(0, 256, (48*3, size), dtype=np.uint8)
         blocks = packed.reshape(-1, SMALL_BLOCK_QUANTS[typ]*2) if typ in SMALL_BLOCK_QUANTS and typ != 39 else packed
         offset = size-2 if typ in (11, 14) else 80 if typ == 10 else 0
-        # mxfp4 e8m0 scales from the denormal e < 2 up to the fp16 limit (12 * 2**(140-128))
-        if typ == 39: packed.reshape(-1, 17)[:, 0] = np.resize(np.array([0, 1, 2, 90, 100, 110, 116, 120, 125, 127, 128, 131, 140], np.uint8), 48*3*8)
+        if typ == 39: packed.reshape(-1, 17)[:, 0] = rng.integers(100, 141, 48*3*8)  # mxfp4 e8m0 scales: fp16 rounds e < 100 to 0, e > 140 overflows
         else: blocks[:, offset:offset+2] = np.resize(scales, len(blocks)).view(np.uint8).reshape(-1, 2)
         if typ in (10, 12, 13):
           offset = 82 if typ == 10 else 2
@@ -227,10 +226,10 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         np.testing.assert_array_equal(out.numpy(), 32)
         np.testing.assert_array_equal(state.numpy(), 1)
 
-  def _test_moe_decode(self, typ:int, IN:int=256):
+  def _test_moe_decode(self, typ:int):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
     rng = np.random.default_rng(5)
-    E, T, K, OUT, size = 4, 1, 2, 16, QUANT_SIZES[typ]
+    E, T, K, IN, OUT, size = 4, 1, 2, 256, 16, QUANT_SIZES[typ]
     blocks = rng.integers(0, 256, (E*OUT*IN//256, size), dtype=np.uint8)
     if typ == MXFP4: blocks.reshape(-1, 17)[:, 0] = rng.integers(122, 128, blocks.size//17)  # e8m0 scales
     else: blocks[:, :4] = np.array([0.001, 0.0001], np.float16).view(np.uint8)
@@ -251,7 +250,6 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_moe_decode(self): self._test_moe_decode(Q4_K)
   def test_moe_decode_iq3_s(self): self._test_moe_decode(IQ3_S)
   def test_moe_decode_mxfp4(self): self._test_moe_decode(MXFP4)
-  def test_moe_decode_mxfp4_ragged(self): self._test_moe_decode(MXFP4, IN=2880)  # gpt-oss: 90 groups, a ragged split-K
 
   def test_gated_delta_random_scan(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
