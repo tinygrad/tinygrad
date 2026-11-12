@@ -7,6 +7,9 @@ env: MODEL, CORPUS, SHARD (6), MAXCTX (65536), GS (1,8,16,32: the step sizes mea
      SAMPLED=1: position sequences at CTXP with allocated but unfilled caches; feed distinct real corpus streams (temperature 1).
      Use WARMUP_STEPS=50 NSTEPS=300 for the board sampled test. Full real prompt fills remain the default.
      KSEQ=600 (last N dense kernels in step order), KSEQ_DEV=1 (device index)
+     KS=2,3,4: every size measured with each of these draft counts (seq_step(drafts=), see SPEC_DRAFTS_BY_SIZE); default the model's own
+     count of the size. CYCLE=NSTEPS: the window starts at the prompt's checkpoint: its WHASH (the window's samples and drafts) is the same
+     whatever ran before, the exactness check of two builds or two settings
 Prints a rolling SHA256 over every target sample and draft, in order, for exact A/B trajectory comparisons.
 run: PROFILE=1 PYTHONPATH=. MLA_SEQ_SHARD=1 GLM_SEQ=1 SEQ_ROWS=... SEQ_SLOTS=32 SEQ_SIZES=1,2,4,8,16,32 python3 extra/glm_seq_prof.py
 """
@@ -35,6 +38,9 @@ devs = model.token_embd.weight.device
 devs = devs if isinstance(devs, tuple) else (devs,)
 k, CTXP, NS = model.config.spec_drafts, getenv("CTXP", 4096), getenv("NSTEPS", 32)
 GS = [int(g) for g in str(getenv("GS", "1,8,16,32")).split(",")]
+KS = [int(x) for x in str(getenv("KS", "")).split(",") if x]
+def drafts_of(g:int) -> int: return model.drafts_of(next(s for s in model.SEQ_SIZES if s >= g)) if hasattr(model, "drafts_of") else k
+if KS: k = max(KS + [k])
 corpus = tok.encode(open(os.environ["CORPUS"]).read()[:getenv("CHARS", 2_000_000)])
 CYCLE = getenv("CYCLE", 0)
 SAMPLED = bool(getenv("SAMPLED", 0))
@@ -115,32 +121,37 @@ else: print(f"{G} prompts of {CTXP} prefilled in {time.perf_counter()-st0:.1f}s"
 print(f"RESIDENCY rows={model.seq_rows()} slots={model.seq_slots()} span={span} "
       f"{'positioned_rows' if SAMPLED else 'prompt_rows'}={G*CTXP} kv_bytes_per_row_card={kv_card} "
       f"kv_bytes_per_row_box={kv_card*len(devs)} stash_gb={getenv('SEQ_STASH_GB', 4.0)}", flush=True)
+kk = k  # (the draft count of the group being measured)
 def restore(group:list[dict]):
   # Restore the actual prompt checkpoint, not cached/short prompt contents. Generated rows past the prompt are not read after this reset.
   for s in group:
     model._seq_copy_call(False, s["slot"], CTXP, 0)
     first = model.seq_first(s["slot"], s["base"], CTXP, 0.0)
-    s["mtp"], s["j"], s["par"], s["y"] = CTXP, 0, 1, [first] + [0]*k
+    s["mtp"], s["j"], s["par"], s["y"] = CTXP, 0, 1, [first] + [0]*kk
 
 def step(group:list[dict]):
-  outs = model.seq_step([(s["slot"], s["base"], s["mtp"], s["j"], s["par"], s["y"], TEMP) for s in group])
+  args = [(s["slot"], s["base"], s["mtp"], s["j"], s["par"], s["y"] + [0]*max(0, kk+1-len(s["y"])), TEMP) for s in group]
+  outs = model.seq_step(args, drafts=kk) if KS else model.seq_step(args)
   for s, (sampled, drafts) in zip(group, outs):
     s["outhash"].update(array.array('i', [*sampled, *drafts]).tobytes())  # every target sample and draft, in order
-    j = next((i for i in range(k) if drafts[i] != sampled[i]), k)
+    whash.update(array.array('i', [*sampled, *drafts]).tobytes())
+    j = next((i for i in range(kk) if drafts[i] != sampled[i]), kk)
     st = s["mtp"] + s["j"]
     incoming = s["stream"][st+1:st+2+j] if REAL_STREAM else sampled[:j+1]
     model._token_host[s["base"] + st + 1:s["base"] + st + 2 + j] = array.array('i', incoming)
-    y = [s["stream"][st+1+t] for t in range(k+1)] if REAL_STREAM else sampled
+    y = [s["stream"][st+1+t] for t in range(kk+1)] if REAL_STREAM else sampled
     s["mtp"], s["j"], s["par"], s["y"], s["n"] = st + 1, j, 1 - s["par"], y, s["n"] + j + 1
-for g in GS:
+whash = hashlib.sha256()
+for g, kk in [(g, x) for g in GS for x in (KS or [drafts_of(g)])]:
   group = seqs[:g]
   if SAMPLED:
     for s in group:
-      s["mtp"], s["j"], s["par"], s["y"] = CTXP, 0, 1, s["stream"][CTXP:CTXP+k+1]
+      s["mtp"], s["j"], s["par"], s["y"] = CTXP, 0, 1, s["stream"][CTXP:CTXP+kk+1]
   for _ in range(WARM): step(group)  # (its jit captured)
   sync()
   n0 = sum(s["n"] for s in group)
   if CYCLE: restore(group)
+  whash = hashlib.sha256()
   if getenv("PROFILE"): kprof.reset(*devs)
   if hasattr(model, "step_times"): model.step_times[:] = [0.0]*len(model.step_times)
   wall0 = time.time()
@@ -163,6 +174,8 @@ for g in GS:
   for s in group: outhash.update(bytes.fromhex(s["outhash"].hexdigest()))
   print(f"G={g}: {decode_dt/NS*1e3:.2f} ms/step, {toks/NS/g:.2f} tok/step/seq, {toks/dt:.0f} tok/s aggregate, "
         f"{toks/dt/g:.1f} tok/s/seq, outhash {outhash.hexdigest()[:16]}", flush=True)
+  print(f"DRAFTS G={g} k={kk}: {decode_dt/NS*1e3:.2f} ms/step, {toks/NS/g:.3f} tok/step/seq, {toks/decode_dt/g:.2f} tok/s/seq (decode), "
+        f"whash {whash.hexdigest()[:16]}", flush=True)
   if hasattr(model, "step_times"):
     # (the host's part of a step: the jit's launch (its kernels queued; the devices run meanwhile), then the wait for the sampled tokens)
     print(f"STEP_HOST launch {model.step_times[0]/NS*1e3:.2f} ms/step, wait {model.step_times[1]/NS*1e3:.2f} ms/step", flush=True)
