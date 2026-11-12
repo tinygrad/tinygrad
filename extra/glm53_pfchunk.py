@@ -5,6 +5,7 @@ on the first NUM_BLOCKS blocks of the model (a load of minutes, not of the 79 bl
 reads what is there): the kernels' and the exchanges' times are a filled cache's, the indexer's lists are not real ones.
 env: MODEL, SHARD (14), MAXCTX (262144), NUM_BLOCKS (8), N (2688 tokens a chunk), POS (0,65536,131072,258048 start positions), REPS (3),
      PARTS_T=1: every part jit synchronized and timed alone (the parts' GPU times; the wall of a chunk is then a little longer),
+     DECODE=n: n one-token decode steps after the chunk at every position (step ms, the same tokens every arm),
      PROFILE=1: kernel classes of the last rep at every position (TOP), COPY_SPLIT=1: a device's kernels / copies / idle on its timeline
 run: PYTHONPATH=. MLA_SEQ_SHARD=1 NUM_BLOCKS=8 python3 extra/glm53_pfchunk.py
 """
@@ -97,6 +98,27 @@ for pos in POS:
     if any(late:=p2p_late(devs, clear=True)): print(f"P2P RUNOUT at pos {pos} rep {r}: epochs {late}", flush=True)
     print(f"chunk {N}/{NJ} at {pos:7d} rep {r}: {dt*1e3:8.1f} ms (host {t_host*1e3:.1f} ms)" +
           (f" parts {' '.join(f'{p*1e3:.1f}' for p in parts_t)}" if parts_t else ""), flush=True)
+  if (nd:=getenv("DECODE", 0)):
+    # (decode steps after the chunk, at its end: generate's one-token step (rollout jit), the same token and position every step and every
+    # arm (a greedy-agnostic step time). nd steps synchronized one by one (min / median), then nd back to back (the mean: launch overlapped))
+    dsp = v_start_pos.bind(pos + NL[pos])
+    def dstep(): model(model._token_buf[:, dsp:dsp+1], dsp, temp)
+    for _ in range(3): dstep()
+    sync()
+    dt1 = []
+    for _ in range(nd):
+      st = time.perf_counter()
+      dstep()
+      sync()
+      dt1.append(time.perf_counter() - st)
+    st = time.perf_counter()
+    for _ in range(nd): dstep()
+    sync()
+    dtb = (time.perf_counter() - st) / nd
+    if any(late:=p2p_late(devs, clear=True)): print(f"P2P RUNOUT in decode at pos {pos}: epochs {late}", flush=True)
+    dt1.sort()
+    print(f"DECODE pos={pos + NL[pos]} b={len(model.blk)} steps={nd} min_ms={dt1[0]*1e3:.2f} med_ms={dt1[nd//2]*1e3:.2f} "
+          f"b2b_ms={dtb*1e3:.2f}", flush=True)
   if getenv("PROFILE"):
     t = kprof.times(*devs)
     tot = sum(v[1] for v in t.values()) / len(devs)
