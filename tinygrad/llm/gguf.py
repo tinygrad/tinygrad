@@ -25,7 +25,7 @@ _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtype
 _GGML_QUANT = {2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
                10:(256,84), 11:(256,110), 12:(256,144), 13:(256,176), 14:(256,210),
                16:(256,66), 17:(256,74), 18:(256,98), 19:(256,50), 20:(32,18), 21:(256,110), 22:(256,82), 23:(256,136),
-               29:(256,56), 39:(32,17), 41:(128,18)}
+               29:(256,56), 39:(32,17), 41:(128,18), 42:(64,18)}
 
 def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """
@@ -36,7 +36,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q5_0 (id: 6),
   Q5_1 (id: 7), Q8_0 (id: 8), Q2_K (id: 10), Q3_K (id: 11), Q4_K (id: 12), Q5_K (id: 13),
   Q6_K (id: 14), IQ2_XXS (id: 16), IQ2_XS (id: 17), IQ3_XXS (id: 18), IQ1_S (id: 19),
-  IQ4_NL (id: 20), IQ3_S (id: 21), IQ2_S (id: 22), IQ4_XS (id: 23), IQ1_M (id: 29), MXFP4 (id: 39), Q1_0 (id: 41)
+  IQ4_NL (id: 20), IQ3_S (id: 21), IQ2_S (id: 22), IQ4_XS (id: 23), IQ1_M (id: 29), MXFP4 (id: 39), Q1_0 (id: 41), Q2_0 (id: 42)
   """
   # https://github.com/ggerganov/ggml/blob/323951f1bdcdfbd5b5ff3a9a7c3770e63b1a560e/include/ggml.h#L356
 
@@ -179,10 +179,10 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
                       dtype=dtypes.float32, device=t.device)
       fp4_val = fp4_lut[codes]
       return (fp4_val * d).flatten(-2)[:n]
-    if ggml_type == 41:
-      d = blocks[:,:2].bitcast(dtypes.float16)
-      bits = q_to_uint8(blocks[:,2:], 1).reshape(-1, 8, 16).transpose(-1, -2).flatten(-2).bitcast(dtypes.int8)
-      return d * (bits * 2 - 1)
+    if ggml_type in (41, 42):  # Q1_0, Q2_0: 1 or 2 bit values in element order
+      d, b = blocks[:,:2].bitcast(dtypes.float16), ggml_type - 40
+      bits = q_to_uint8(blocks[:,2:], b).reshape(-1, 8 // b, 16).transpose(-1, -2).flatten(-2).bitcast(dtypes.int8)
+      return d * (bits * 2 - 1 if b == 1 else bits - 1)
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
 def _read_unpack(fmt: str, n: int, r:io.BufferedIOBase): return struct.unpack(fmt, r.read(n))[0]

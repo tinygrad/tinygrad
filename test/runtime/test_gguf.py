@@ -205,6 +205,14 @@ class TestGGUF(unittest.TestCase):
     # TODO: replace 41 with GGMLQuantizationType.Q1_0.value on next gguf-py release
     np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 128, 41).numpy().flatten(), expected)
 
+  def test_dequantization_q2_0(self):
+    # Q2_0: 2 bytes fp16 scale + 16 bytes (64 2-bit values, low bits first), 0..3 means -1..2
+    q = np.random.randint(0, 4, size=64)
+    qs = (q.reshape(16, 4) << np.arange(0, 8, 2)).sum(1).astype(np.uint8)
+    block = np.frombuffer(np.float16(2.0).tobytes() + qs.tobytes(), dtype=np.uint8).copy()
+    # TODO: replace 42 with GGMLQuantizationType.Q2_0.value on next gguf-py release
+    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 64, 42).numpy().flatten(), np.float16(2.0) * (q - 1))
+
   @staticmethod
   def _build_gguf(tensors, kvs):
     # [header] [kv_data] [tensor_infos] [padding] [tensor_data_blob]
