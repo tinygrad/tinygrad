@@ -386,7 +386,7 @@ def _prefetched(body:UOp, rng:UOp, last:UOp|int, params:tuple[UOp, ...]|None=Non
   return body.substitute(repl), stores
 
 def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str, active:Callable|None=None,
-                   estimates:Estimates|None=None, multi:int=1, bundles:tuple[int, Callable]|None=None, loop_rows:bool=False) -> UOp:
+                   estimates:Estimates|None=None, multi:int=1, bundles:tuple[int, Callable]|None=None, loop_rows:int=0) -> UOp:
   if getenv("LIN_NAMES"): name = f"{name}_{out.shape[0] if len(out.shape) > 1 else 1}x{out_features}x{group_count*32}"  # (profiling: the shapes)
   # One wave per output/chunk of 32 groups; group neighboring rows to amortize workgroup scheduling. the waves of the chunks of an output
   # share the workgroup: they add up their sums in LDS
@@ -421,26 +421,27 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
   tokens = [token_outputs[0] // out_features] if multi == 1 else [UOp.const(t, dtypes.weakint) for t in range(multi)]
   if bundles: tokens = [token_outputs[0] // out_features * multi + t for t in range(multi)]
   # loop_rows (the unit-major MoE kernel, bundles of at most `multi` rows of a unit): a loop over the bundle's rows (store_row >= 0: the first
-  # ones), a row the per-row kernel's sums. its weight loads and decode don't depend on the row: done once a bundle, outside the loop
+  # ones), a row the per-row kernel's sums. its weight loads and decode don't depend on the row: done once a bundle, outside the loop.
+  # loop_rows rows an iteration (their loads in flight together; a padded row's store is skipped)
   rloop = gloop = None
   if loop_rows:
-    assert bundles is not None and chunks == 1, "loop_rows: bundles, a wave an output's groups"
+    assert bundles is not None and chunks == 1 and multi % loop_rows == 0, "loop_rows: bundles, a wave an output's groups"
     b = token_outputs[0] // out_features
     n = functools.reduce(lambda a, c: a + c, [(bundles[1](b*multi + t) >= 0).cast(dtypes.int32) for t in range(multi)])
     # (empty bundles (moe_bundles' grid has every possible one) skip the decode too: it is in a loop of min(n, 1) iterations, its index the
     # weights' offset (0); an opaque count, else the loop of at most one iteration folds away)
     gloop = UOp.range(_cfn(True, src=(n.minimum(1),), arg=("{0}", dtypes.int32)).cast(dtypes.weakint), 7, AxisType.LOOP)
-    rloop = UOp.range(n.cast(dtypes.weakint), 6, AxisType.LOOP)
-    tokens = [b*multi + rloop]
+    rloop = UOp.range(((n + (loop_rows-1)) // loop_rows).cast(dtypes.weakint), 6, AxisType.LOOP)
+    tokens = [b*multi + rloop*loop_rows + t for t in range(loop_rows)]
   def dot(token:UOp, group:UOp, output:UOp=outputs[0]) -> UOp:
     return (group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32))
   if rloop is not None:
     # (the sums in a register from 0, as the per-row kernel's loop: the compiler contracts every add of a product as it does there)
-    acc = _reg((rep,), 0, rloop)
+    acc = _reg((rep*len(tokens),), 0, rloop)
     for s in range(per):
-      acc = acc.after(UOp.group(*[acc[r].store(acc[r].load() + dot(tokens[0], sub+(chunk*per+s)*lanes, outputs[r] + gloop))
-                                  for r in range(rep)]))
-    totals = [acc[r].load() for r in range(rep)]
+      acc = acc.after(UOp.group(*[acc[t*rep+r].store(acc[t*rep+r].load() + dot(tok, sub+(chunk*per+s)*lanes, outputs[r] + gloop))
+                                  for t, tok in enumerate(tokens) for r in range(rep)]))
+    totals = [acc[i].load() for i in range(rep*len(tokens))]
   elif active is None:
     totals = [functools.reduce(lambda a,s: a + dot(t, sub+(chunk*per+s)*lanes), range(1, per), dot(t, sub+chunk*per*lanes)) for t in tokens]
   else:
@@ -658,7 +659,7 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
     bw = bundle[0]*out_features*in_features
     return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type], active=active, multi=bundle[1],
                           bundles=(bundle[0], bundle[2]), estimates=Estimates(2*bw*bundle[1], bw*QUANT_SIZES[ggml_type]//256, 0),
-                          loop_rows=len(bundle) > 3 and bool(bundle[3]))
+                          loop_rows=bundle[3] if len(bundle) > 3 else 0)
   if len(out.shape) == 2 and active is not None:
     # moe on a grid: a row per (token, slot), inactive rows skip their loop. an upper bound estimate
     weights, nbytes = (w:=out.shape[0]*out_features*in_features), w*QUANT_SIZES[ggml_type]//256
@@ -3256,9 +3257,9 @@ def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, first:
 
 @functools.cache
 def _moe_bundled_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, bexp:UOp, brow:UOp, *grids:UOp,
-                        out_features:int, in_features:int, ggml_type:int, slots:int, x_slots:int, M:int, unit:bool=False) -> UOp:
+                        out_features:int, in_features:int, ggml_type:int, slots:int, x_slots:int, M:int, unit:int=0) -> UOp:
   # the bundles of moe_bundles: a bundle's M rows (selections) of an expert read its weights once, a row is stored to its selection's row
-  # (unit: the unit-major kernel, a loop over the bundle's rows (at most M), every row's sums the per-row kernel's: the same values)
+  # (unit: the unit-major kernel, a loop over the bundle's rows (at most M) `unit` at a time, every row's sums the per-row kernel's: the same values)
   expert_words = out_features * in_features * QUANT_SIZES[ggml_type] // 256 // raw.dtype.itemsize
   def gate(token:UOp, output:UOp, base:UOp) -> UOp: return base + bexp[token // M].load().cast(dtypes.weakint).maximum(0) * expert_words
   def xtoken(token:UOp) -> UOp: return brow[token].load().cast(dtypes.weakint).maximum(0) // (1 if x_slots == slots else slots)
@@ -3478,7 +3479,7 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
     fxn = functools.partial(_moe_bundled_wmma_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type,
                             slots=int(slots), x_slots=x_slots, oloop=16 if in_features == GGML_BLOCK_SIZE else 1) if wmma else \
           functools.partial(_moe_bundled_kernel, out_features=out_features, in_features=in_features, ggml_type=ggml_type, slots=int(slots),
-                            x_slots=x_slots, M=M, unit=unit)
+                            x_slots=x_slots, M=M, unit=MOE_UNIT_R if unit else 0)
     result = Tensor.custom_kernel(out, weight, *xq, bexp, brow, *extra, fxn=fxn)[0]
     return result.reshape(*((devices,) if devices > 1 else ()), B, T, slots, out_features)
   # a grid over the (token, slot) rows, or a workgroup loops over the slots of a token
@@ -3496,7 +3497,7 @@ MOE_BUNDLE, MOE_BUNDLE_MIN = getenv("MOE_BUNDLE", 4), getenv("MOE_BUNDLE_MIN", 4
 # fewer rows (batched decoding of a few users): bundles of MOE_EXACT_M in float from MOE_EXACT_MIN rows (0: off), the per-row kernel's values
 MOE_EXACT_M, MOE_EXACT_MIN = getenv("MOE_EXACT_M", 4), getenv("MOE_EXACT_MIN", 0)
 # unit-major (from MOE_UNIT_MIN rows, 0: off): bundles of at most MOE_UNIT_M rows of a unit, its weights decoded once, a loop over the rows
-MOE_UNIT_M, MOE_UNIT_MIN = getenv("MOE_UNIT_M", 16), getenv("MOE_UNIT_MIN", 0)
+MOE_UNIT_M, MOE_UNIT_MIN, MOE_UNIT_R = getenv("MOE_UNIT_M", 16), getenv("MOE_UNIT_MIN", 0), getenv("MOE_UNIT_R", 1)  # (R: rows an iteration)
 # many more rows: bundles of 16 on the int8 tensor cores, every weight decoded once a step (_moe_bundled_wmma_kernel)
 MOE_WMMA, MOE_WMMA_MIN, MOE_WMMA_QUANTS = getenv("MOE_WMMA", 1), getenv("MOE_WMMA_MIN", 64), (IQ3_S, IQ4_XS)
 MOE_TILE = getenv("MOE_TILE", 64)  # grouped experts: rows of an expert are padded to whole tiles, a workgroup decodes an expert once per tile
