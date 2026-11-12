@@ -20,21 +20,22 @@ model, kv = Transformer.from_gguf(os.environ["MODEL"], getenv("MAXCTX", 262144),
 devs = model.token_embd.weight.device
 devs = devs if isinstance(devs, tuple) else (devs,)
 N, REPS = getenv("N", 2688), getenv("REPS", 3)
+NJ = getenv("NJ", N)  # (the chunk size of the jit: N tokens of it real)
 POS = [int(p) for p in str(getenv("POS", "0,65536,131072,258048")).split(",")]
 print(f"loaded {len(model.blk)} blocks in {time.perf_counter()-t0:.1f} s, devices {len(devs)}, sizes {model.prefill_chunks()}", flush=True)
 def sync():
   for d in devs: Device[d].synchronize()
 random.seed(0)
-prompt = [random.randrange(1000, 50000) for _ in range(N)]
+prompt = [random.randrange(1000, 50000) for _ in range(NJ)]
 st = time.perf_counter()
 next(model.generate(prompt))
 sync()
-print(f"warm chunk {N} at 0 (jits made): {time.perf_counter()-st:.1f} s", flush=True)
+print(f"warm chunk {NJ} at 0 (jits made): {time.perf_counter()-st:.1f} s", flush=True)
 # every position's tokens in the token buffer (generate wrote the prompt's)
-toks = [random.randrange(1000, 50000) for _ in range(max(POS) + N + 1)]
+toks = [random.randrange(1000, 50000) for _ in range(max(POS) + NJ + 1)]
 model._token_host[:len(toks)] = __import__("array").array('i', toks)
 temp = model._temps[(0.0, 1.0)]
-v_start_pos, v_toks = UOp.variable("start_pos", 0, model.max_context-1), UOp.variable("toks", 1, N)
+v_start_pos, v_toks = UOp.variable("start_pos", 0, model.max_context-1), UOp.variable("toks", 1, NJ)
 
 parts_t:list[float] = []
 if getenv("PARTS_T"):
@@ -79,7 +80,7 @@ for pos in POS:
       rows = arr[(p // SEQ_BLK) % n, (p // (SEQ_BLK*n))*SEQ_BLK + p % SEQ_BLK]
       print(f"CHECK pos {pos} rep {r}: token {model._token_host[pos+N]} cache {hashlib.sha256(rows.tobytes()).hexdigest()[:16]}", flush=True)
     if any(late:=p2p_late(devs, clear=True)): print(f"P2P RUNOUT at pos {pos} rep {r}: epochs {late}", flush=True)
-    print(f"chunk {N} at {pos:7d} rep {r}: {dt*1e3:8.1f} ms (host {t_host*1e3:.1f} ms)" +
+    print(f"chunk {N}/{NJ} at {pos:7d} rep {r}: {dt*1e3:8.1f} ms (host {t_host*1e3:.1f} ms)" +
           (f" parts {' '.join(f'{p*1e3:.1f}' for p in parts_t)}" if parts_t else ""), flush=True)
   if getenv("PROFILE"):
     t = kprof.times(*devs)
@@ -101,4 +102,4 @@ for pos in POS:
         # (ksum > kernels: kernels ran at the same time (two compute queues))
         print(f"  {d:8s} span {span/1e3:8.1f} ms  kernels {union(kk)/1e3:8.1f}  copies {union(cc)/1e3:8.1f}  either {union(kk+cc)/1e3:8.1f}"
               f"  ksum {sum(b-a for a, b in kk)/1e3:8.1f}  csum {sum(b-a for a, b in cc)/1e3:8.1f}")
-for pos, v in res.items(): print(f"RESULT N={N} pos={pos} blocks={len(model.blk)} min_ms={min(v)*1e3:.1f} med_ms={sorted(v)[len(v)//2]*1e3:.1f}")
+for pos, v in res.items(): print(f"RESULT N={N} NJ={NJ} pos={pos} b={len(model.blk)} min_ms={min(v)*1e3:.1f} med_ms={sorted(v)[len(v)//2]*1e3:.1f}")
