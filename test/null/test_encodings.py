@@ -3,12 +3,12 @@ from dataclasses import replace
 from tinygrad.helpers import Target
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes, DType
-from tinygrad.renderer.x86 import Register, X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm
+from tinygrad.renderer.x86 import Register, X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm, reg as reg_buf
 
 # the operand width is carried by the register, not by the dtype
 def reg(r:Register, size:int) -> Register: return replace(r, size=size)
 def ins(op, dt, src, r:Register|None=None): return UOp(Ops.INS, arg=(op, dt) + ((r,) if r is not None else ()), src=src)
-def reg_placeholder(r:Register): return UOp(Ops.INS, arg=(X86Ops.REG, dtypes.uint64, r))
+def reg_placeholder(r:Register): return reg_buf(dtypes.uint64, r)
 def alloc(dt:DType, r:Register): return reg_placeholder(r)
 
 class TestEncodingsX86(unittest.TestCase):
