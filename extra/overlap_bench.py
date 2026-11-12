@@ -33,7 +33,7 @@ def both():
 
 # two chains of matmuls on one device: on one compute queue, and on COMPUTE:0 and COMPUTE:1 (glm_dsa._on_queue: the call's queue)
 x2 = Tensor.rand(N, N, dtype=dtypes.half, device=d1).realize()
-@function(precompile=True)
+@function(precompile=True, allow_implicit=True)
 def chain(a:Tensor) -> Tensor:
   for k in range(KS): a = (a @ w[k]).contiguous()
   return a
