@@ -451,6 +451,13 @@ def run_as_they_come(take:Callable[..., bool|None], calls:dict[str, tuple[Any, C
 
 def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[Callable[..., bool|None]], None]|None=None,
                      taken:Callable[[_TinyJit], None]|None=None, compile_fifo:bool=False) -> list[bool]:
+  # (its registry of the buffers at its fork (prefork_forget's) dropped however it ends)
+  n = len(_prefork_regs)
+  try: return _capture_parallel(calls, meanwhile, taken, compile_fifo)
+  finally: del _prefork_regs[n:]
+
+def _capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhile:Callable[[Callable[..., bool|None]], None]|None=None,
+                      taken:Callable[[_TinyJit], None]|None=None, compile_fifo:bool=False) -> list[bool]:
   """
   the jits captured and compiled at the same time, each in a forked process: its call (which calls the jit for its capture) runs there, the
   jit is captured and compiled but nothing runs, the parent takes the compiled jit (linked and run on its first call there). the jits share
@@ -616,5 +623,4 @@ def capture_parallel(calls:Sequence[tuple[_TinyJit, Callable[[], Any]]], meanwhi
                           "names": [getattr(j.fxn, "__qualname__", str(j.fxn)) for j, _ in calls], "arrived": arrived, "taken": took,
                           "compiles": compiles.stats if compiles is not None else [],
                           "warm": [(n, a - st, b - st) for n, a, b in warm_runs]}) + "\n")
-  _prefork_regs[:] = [r for r in _prefork_regs if r is not reg]
   return [k in todo and oks[todo.index(k)] for k in range(len(every))]
