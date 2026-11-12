@@ -17,7 +17,7 @@ import time
 
 from tinygrad import Device, UOp
 from tinygrad.helpers import getenv, GlobalCounters
-from tinygrad.llm.glm5next import Transformer
+from tinygrad.llm.glm5next import Transformer, MLATransformerBlock
 import extra.kprof as kprof
 
 started = time.perf_counter()
@@ -72,11 +72,15 @@ for pos in POS:
       import hashlib
       import numpy as np
       from tinygrad.llm.kernels.amd_glm import SEQ_BLK
-      blk, nd = model.blk[-1], len(devs)
-      arr = blk.cache_s.numpy().reshape(nd, -1, blk.cache_s.shape[-1])
-      p = np.arange(pos, pos+N)
-      rows = arr[(p//SEQ_BLK) % nd, (p//(SEQ_BLK*nd))*SEQ_BLK + p % SEQ_BLK]
-      print(f"CHECK pos={pos} rep={rep} sha256={hashlib.sha256(rows.tobytes()).hexdigest()[:24]}", flush=True)
+      mlas = [b for b in model.blk if isinstance(b, MLATransformerBlock)]
+      if not mlas:
+        print(f"CHECK pos={pos} rep={rep} skipped=no_MLA_block", flush=True)
+      else:
+        blk, nd = mlas[-1], len(devs)
+        arr = blk.cache_s.numpy().reshape(nd, -1, blk.cache_s.shape[-1])
+        p = np.arange(pos, pos+N)
+        rows = arr[(p//SEQ_BLK) % nd, (p//(SEQ_BLK*nd))*SEQ_BLK + p % SEQ_BLK]
+        print(f"CHECK pos={pos} rep={rep} sha256={hashlib.sha256(rows.tobytes()).hexdigest()[:24]}", flush=True)
     print(f"CHUNK N={N} NJ={NJ} pos={pos} rep={rep} wall_ms={dt*1e3:.3f} host_ms={t_host*1e3:.3f}", flush=True)
     mem("chunk", pos)
   if getenv("PROFILE"):
