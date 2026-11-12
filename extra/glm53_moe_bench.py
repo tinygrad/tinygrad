@@ -19,7 +19,7 @@ K = importlib.import_module(f"tinygrad.llm.kernels.{os.environ.get('MOD', 'amd_g
 TYPES = {"iq3_s": K.IQ3_S, "iq4_xs": K.IQ4_XS, "q8_0": K.Q8_0, "iq2_s": K.IQ2_S}
 
 def main():
-  dev, REPS, BW, E, SLOTS, NEXP = Device.DEFAULT, getenv("REPS", 20), getenv("BW", 640), getenv("E", 19), 8*getenv("SLICES", 1), getenv("NEXP", 256)
+  dev, REPS, BW, E, SLOTS, NEXP = Device.DEFAULT, getenv("REPS", 20), getenv("BW", 640), getenv("E", 19), 16 if getenv("SLICES", 1) > 1 else 8, getenv("NEXP", 256)
   rng = np.random.default_rng(getenv("SEED", 0))
   arms = [a.split(":", 1) for a in os.environ.get("ARMS", "row:MOE_BUNDLE_MIN=100000").split(";") if a]
   toks = [int(t) for t in str(getenv("TOKENS", "16,32")).split(",")]
@@ -44,16 +44,12 @@ def main():
     for T in toks:
       sel_np = np.stack([rng.choice(NEXP, SLOTS, replace=False) for _ in range(T)]).astype(np.int32).reshape(1, T, SLOTS)
       if (S:=getenv("SLICES", 1)) > 1:
-        # (SLICES=S: G's sliced experts (glm5next expert_slices): a row's 8 experts are 8*S units of hidden/S, the units spread at random
-        # over the devices (this one holds E of NEXP*S))
-        perm = rng.permutation(NEXP*S)
+        # (SLICES=S: G's sliced experts (glm5next expert_slices, moe_router_local): every device E of the NEXP*S units of hidden/S, an expert's
+        # 1 or 2 of them here (E = NEXP + the experts with 2); a row's 8 experts are 8*2 local slots, -1 where the expert has one slice here)
+        cnt = np.ones(NEXP, np.int64); cnt[rng.choice(NEXP, E - NEXP, replace=False)] = 2
+        start = np.concatenate([[0], np.cumsum(cnt)[:-1]])
         ex = np.stack([rng.choice(NEXP, 8, replace=False) for _ in range(T)])
-        sel_np = perm[ex[..., None]*S + np.arange(S)].astype(np.int32).reshape(1, T, SLOTS)
-      if (nl:=getenv("NLOCAL", -1)) >= 0:
-        # (NLOCAL: exactly that many local selections (the first slots of the first rows), the rest other devices' experts: the cost of the
-        # idle rows' workgroups)
-        sel_np = np.stack([rng.choice(np.arange(E, NEXP), SLOTS, replace=False) for _ in range(T)]).astype(np.int32).reshape(1, T, SLOTS)
-        for k in range(nl): sel_np[0, k % T, k // T] = k % E
+        sel_np = np.where(np.arange(2) < cnt[ex][..., None], start[ex][..., None] + np.arange(2), -1).astype(np.int32).reshape(1, T, 16)
       loc = sel_np[(sel_np >= 0) & (sel_np < E)]
       uniq = len(np.unique(loc))
       sel = Tensor(sel_np, device=dev).realize()
