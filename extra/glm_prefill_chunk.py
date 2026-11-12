@@ -15,10 +15,21 @@ import os
 import random
 import time
 
-from tinygrad import Device, UOp
+from tinygrad import Device, Tensor, UOp
 from tinygrad.helpers import getenv, GlobalCounters
 from tinygrad.llm.glm5next import Transformer, MLATransformerBlock
+import tinygrad.llm.glm5next as g5
 import extra.kprof as kprof
+
+# A production shard holds ~11 of these 64 heads, where <=16 is supported. On one
+# physical card evaluate all64 using that same kernel in four <=16 head groups.
+# This is process-local profiling instrumentation, not a model/runtime change.
+_original_sparse = g5.flash_attention_mla_sparse
+def _profile_sparse(q: Tensor, cache: Tensor, index: Tensor, scale: float, valid_len, grouped=None):
+  if q.shape[1] <= 16: return _original_sparse(q, cache, index, scale, valid_len, grouped)
+  return Tensor.cat(*[_original_sparse(q.shrink(((a, min(a+16, q.shape[1])),) + (None,)*3), cache, index, scale, valid_len, grouped)
+                      for a in range(0, q.shape[1], 16)], dim=1)
+g5.flash_attention_mla_sparse = _profile_sparse
 
 started = time.perf_counter()
 model, kv = Transformer.from_gguf(os.environ["MODEL"], getenv("MAXCTX", 65536), shard=getenv("SHARD", 1))
