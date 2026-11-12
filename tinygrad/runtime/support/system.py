@@ -214,24 +214,25 @@ System = _System()
 class PCIDevice:
   def __init__(self, devpref:str, pcibus:str):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
-    self.pcibus, self.irq_poller = pcibus, None
+    self.pcibus, self.irq_poller, is_vfio = pcibus, None, FileIOInterface.exists(f"/sys/bus/pci/drivers/vfio-pci/{pcibus}") # no root needed
 
-    try: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR)
+    try: is_vfio or FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR)
     except PermissionError: raise PermissionError(f"Cannot access PCI device {pcibus}: run `extra/amdpci/setup_python_cap.sh` or use sudo")
 
-    if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
+    if not is_vfio and FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
-    if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"): raise RuntimeError(f"Driver is bound to {pcibus}")
+    if not is_vfio and FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"): raise RuntimeError(f"Driver is bound to {pcibus}")
 
     # remove sibling functions of the gpu, if any
-    for fn in range(1, 8):
+    for fn in () if is_vfio else range(1, 8):
       if FileIOInterface.exists(sib:=f"/sys/bus/pci/devices/{self.pcibus[:-1]}{fn}"): FileIOInterface(f"{sib}/remove", os.O_WRONLY).write("1")
 
-    if FileIOInterface.exists(grp:=f"/sys/bus/pci/devices/{self.pcibus}/iommu_group"):
+    if FileIOInterface.exists(grp:=f"/sys/bus/pci/devices/{self.pcibus}/iommu_group") and not is_vfio:
       if not FileIOInterface.exists("/sys/module/vfio_pci"): raise RuntimeError("IOMMU is on: run `sudo modprobe vfio-pci disable_idle_d3=1`")
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
       FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
       if devpref == "AM": FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/reset_method", os.O_WRONLY).write("bus") # no flr on amd
+    if FileIOInterface.exists(grp):
       group = System.vfio_group(FileIOInterface.readlink(grp).split('/')[-1])
       self.vfio_dev = FileIOInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(group, ctypes.create_string_buffer(self.pcibus.encode())))
 
