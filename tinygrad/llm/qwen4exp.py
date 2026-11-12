@@ -2745,16 +2745,17 @@ class Transformer:
       if self.config.ple is not None:
         self._ple_dev_read()
         _lap("warmup: n-gram table read")
-      for j, call in loads:
+      for k, (j, call) in enumerate(loads):
         if j in self._pending_load: self._pending_load.remove(j)
         take(j)
         call()
-      # (LOAD_APART: the derivations ran, their jits drop what they hold: the buffers they read freed before the warm-up's arenas are made)
-      if gguf_load.apart_buffers:
-        for j in derive: _drop_jit(j)
-        # (capture_parallel's registry of the buffers at its fork holds them too: no jit still to take reads them)
-        prefork_forget([x for x in (r() for r in gguf_load.apart_buffers) if x is not None])
-        _drop_apart(final=False)
+        # (LOAD_APART: the derivations ran, their jits drop what they hold: the buffers they read freed before the zeroing's jit links the
+        # states' memory (the caches') and the warm-up's arenas are made)
+        if k == len(derive) - 1 and gguf_load.apart_buffers:
+          for d in derive: _drop_jit(d)
+          # (capture_parallel's registry of the buffers at its fork holds them too: no jit still to take reads them)
+          prefork_forget([x for x in (r() for r in gguf_load.apart_buffers) if x is not None])
+          _drop_apart(final=False)
       # (the warm-up's runs as their jits come: while the others compile; the stash's jits linked meanwhile when the host memory has room)
       run_as_they_come(take, calls, ran, idle=functools.partial(link_late, take))
     top, k = unwrap(self.config.indexer).top_k, self.config.spec_drafts
