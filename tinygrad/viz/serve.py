@@ -734,15 +734,16 @@ def reloader():
 T = TypeVar("T")
 # unpickling may load libraries, turn off DEBUG=3 output
 @Context(DEBUG=0)
-def load_pickle(path:str, default:T) -> T:
-  if not os.path.exists(path): return default
+def load_pickle(path:str|None, default:T) -> T:
+  if path is None or not os.path.exists(path): return default
   with open(path, "rb") as f: return pickle.load(f)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument('--rewrites-path', type=str, help='Path to rewrites', default=temp("rewrites.pkl", append_user=True))
-  parser.add_argument('--profile-path', type=str, help='Path to profile', default=temp("profile.pkl", append_user=True))
+  parser.add_argument('--paths', nargs='+', metavar=('PROFILE', 'REWRITES'), help='Paths to profile and optional rewrites (default: latest files)',
+                      default=[temp("profile.pkl", append_user=True), temp("rewrites.pkl", append_user=True)])
   args = parser.parse_args()
+  if len(args.paths) == 1: args.paths.append(None)
 
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     if s.connect_ex(((HOST:="http://127.0.0.1").replace("http://", ""), PORT:=getenv("PORT", 8000))) == 0:
@@ -753,9 +754,9 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  data = VizData(load_pickle(args.rewrites_path, default=RewriteTrace([], [], {})))
+  data = VizData(load_pickle(args.paths[1], default=RewriteTrace([], [], {})))
   load_rewrites(data)
-  profile_ret = get_profile(data, load_pickle(args.profile_path, default=[]))
+  profile_ret = get_profile(data, load_pickle(args.paths[0], default=[]))
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
