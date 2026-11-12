@@ -6,6 +6,10 @@ Measures one real chunk per arm at one context position, warmups excluded.
 Env: MODEL, SHARD=1, MAXCTX=65536, NUM_BLOCKS=8, N=192, POS=0, REPS=3,
      PROFILE=1 (last rep's GPU classes), COPY_SPLIT=1 (timeline idle by class),
      CHECK=1 (cache-row hash evidence), TOP=60.
+     CHECK hashes after the untimed first rep: the chunk's MLA cache rows (indexed on device), every gated deltanet
+     block's recurrent state (they read the MoE outputs of the blocks before them) and the returned token.
+     FILL=1: the context before POS is prefilled first (chunks of NJ, the same random tokens): the chunk at POS attends
+     to real rows, not to an unwritten cache.
 Run on the assigned card: AM_POWER_LIMIT=200 PYTHONPATH=. python3 extra/glm_prefill_chunk.py
 """
 from __future__ import annotations
@@ -66,34 +70,45 @@ model._token_host[:len(toks)] = __import__("array").array("i", toks)
 temp = None  # GLM5Next uses None for exact greedy sampling (not the older GLM DSA tensor pair)
 v_start_pos, v_toks = UOp.variable("start_pos", 0, model.max_context-1), UOp.variable("toks", 1, NJ)
 res: dict[int, list[float]] = collections.defaultdict(list)
+def fill(pos:int) -> None:
+  st, p = time.perf_counter(), 0
+  while p < pos:
+    n = min(NJ, pos-p)
+    sp = v_start_pos.bind(p)
+    model(model._token_buf[:, sp:sp+UOp.variable("toks", 1, NJ).bind(n)], sp, temp)
+    p += n
+  sync()
+  print(f"FILL pos={pos} elapsed_s={time.perf_counter()-st:.3f}", flush=True)
+
+def check(pos:int, rep:int, out) -> None:
+  import hashlib
+  from tinygrad.llm.kernels.amd_glm import SEQ_BLK
+  from tinygrad.llm.glm5next import GatedDeltaNetBlock
+  h, nd, p = hashlib.sha256(), len(devs), Tensor.arange(pos, pos+N, device=devs[0] if len(devs) == 1 else None)
+  for blk in model.blk:
+    if isinstance(blk, MLATransformerBlock) and hasattr(blk, "cache_s"):
+      cs = blk.cache_s.reshape(nd, -1, blk.cache_s.shape[-1])
+      h.update(cs[(p//SEQ_BLK) % nd, (p//(SEQ_BLK*nd))*SEQ_BLK + p % SEQ_BLK].numpy().tobytes())
+    elif isinstance(blk, MLATransformerBlock) and hasattr(blk, "cache_k"): h.update(blk.cache_k[:, :, pos:pos+N].numpy().tobytes())
+    elif isinstance(blk, GatedDeltaNetBlock) and hasattr(blk, "recurrent_state"): h.update(blk.recurrent_state.numpy().tobytes())
+  tok = out.numpy().tobytes() if isinstance(out, Tensor) else repr(out).encode()
+  print(f"CHECK pos={pos} rep={rep} sha256={h.hexdigest()[:24]} tok={hashlib.sha256(tok).hexdigest()[:12]}", flush=True)
+
 for pos in POS:
   assert pos + N <= model.max_context
+  if getenv("FILL") and pos: fill(pos)
   for rep in range(REPS):
     last = rep == REPS-1
     if last and getenv("PROFILE"): kprof.reset(*devs)
     sp, nt = v_start_pos.bind(pos), UOp.variable("toks", 1, NJ).bind(N)
     sync()
     st = time.perf_counter()
-    model(model._token_buf[:, sp:sp+nt], sp, temp)
+    out = model(model._token_buf[:, sp:sp+nt], sp, temp)
     t_host = time.perf_counter()-st
     sync()
     dt = time.perf_counter()-st
     res[pos].append(dt)
-    if getenv("CHECK"):
-      import hashlib
-      import numpy as np
-      from tinygrad.llm.kernels.amd_glm import SEQ_BLK
-      mlas = [b for b in model.blk if isinstance(b, MLATransformerBlock)]
-      if not mlas:
-        print(f"CHECK pos={pos} rep={rep} skipped=no_MLA_block", flush=True)
-      else:
-        blk, nd = mlas[-1], len(devs)
-        p = np.arange(pos, pos+N)
-        if hasattr(blk, "cache_s"):
-          arr = blk.cache_s.numpy().reshape(nd, -1, blk.cache_s.shape[-1])
-          rows = arr[(p//SEQ_BLK) % nd, (p//(SEQ_BLK*nd))*SEQ_BLK + p % SEQ_BLK]
-        else: rows = blk.cache_k.numpy()[:, :, p, :]
-        print(f"CHECK pos={pos} rep={rep} sha256={hashlib.sha256(rows.tobytes()).hexdigest()[:24]}", flush=True)
+    if getenv("CHECK") and rep == 0: check(pos, rep, out)
     print(f"CHUNK N={N} NJ={NJ} pos={pos} rep={rep} wall_ms={dt*1e3:.3f} host_ms={t_host*1e3:.3f}", flush=True)
     mem("chunk", pos)
   if getenv("PROFILE"):
