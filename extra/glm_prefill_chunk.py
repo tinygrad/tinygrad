@@ -84,7 +84,7 @@ def check(pos:int, rep:int, out) -> None:
   import hashlib
   from tinygrad.llm.kernels.amd_glm import SEQ_BLK
   from tinygrad.llm.glm5next import GatedDeltaNetBlock
-  h, nd, p = hashlib.sha256(), len(devs), Tensor.arange(pos, pos+N, device=devs[0] if len(devs) == 1 else None)
+  h, nd, p = hashlib.sha256(), len(devs), Tensor.arange(pos, pos+N).to(devs[0])
   for blk in model.blk:
     if isinstance(blk, MLATransformerBlock) and hasattr(blk, "cache_s"):
       cs = blk.cache_s.reshape(nd, -1, blk.cache_s.shape[-1])
@@ -108,7 +108,9 @@ for pos in POS:
     sync()
     dt = time.perf_counter()-st
     res[pos].append(dt)
-    if getenv("CHECK") and rep == 0: check(pos, rep, out)
+    if getenv("CHECK") and rep == 0:
+      try: check(pos, rep, out)
+      except Exception as e: print(f"CHECK pos={pos} failed: {e!r}", flush=True)
     print(f"CHUNK N={N} NJ={NJ} pos={pos} rep={rep} wall_ms={dt*1e3:.3f} host_ms={t_host*1e3:.3f}", flush=True)
     mem("chunk", pos)
   if getenv("PROFILE"):
