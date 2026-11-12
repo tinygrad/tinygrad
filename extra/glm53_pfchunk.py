@@ -22,6 +22,8 @@ devs = devs if isinstance(devs, tuple) else (devs,)
 N, REPS = getenv("N", 2688), getenv("REPS", 3)
 NJ = getenv("NJ", N)  # (the chunk size of the jit: N tokens of it real)
 POS = [int(p) for p in str(getenv("POS", "0,65536,131072,258048")).split(",")]
+# (NLIST: the real tokens of the chunk at every position (else N), CHECK_FROM: CHECK hashes the cache rows from there to the chunk's end)
+NL = dict(zip(POS, [int(x) for x in str(getenv("NLIST", "")).split(",") if x] or [N]*len(POS)))
 print(f"loaded {len(model.blk)} blocks in {time.perf_counter()-t0:.1f} s, devices {len(devs)}, sizes {model.prefill_chunks()}", flush=True)
 def sync():
   for d in devs: Device[d].synchronize()
@@ -61,7 +63,7 @@ for pos in POS:
     last = r == REPS - 1
     if last and getenv("PROFILE"): kprof.reset(*devs)
     parts_t.clear()
-    sp, nt = v_start_pos.bind(pos), v_toks.bind(N)
+    sp, nt = v_start_pos.bind(pos), v_toks.bind(NL[pos])
     sync()
     st = time.perf_counter()
     model(model._token_buf[:, sp:sp+nt], sp, temp)
@@ -76,9 +78,9 @@ for pos in POS:
       from tinygrad.llm.kernels.amd_glm_dsa import SEQ_BLK
       blk, n = model.blk[-1], len(devs)
       arr = blk.cache_s.numpy().reshape(n, -1, blk.cache_s.shape[-1])
-      p = np.arange(pos, pos + N)
+      p = np.arange(getenv("CHECK_FROM", pos), pos + NL[pos])
       rows = arr[(p // SEQ_BLK) % n, (p // (SEQ_BLK*n))*SEQ_BLK + p % SEQ_BLK]
-      print(f"CHECK pos {pos} rep {r}: token {model._token_host[pos+N]} cache {hashlib.sha256(rows.tobytes()).hexdigest()[:16]}", flush=True)
+      print(f"CHECK pos {pos} rep {r}: token {model._token_host[pos+NL[pos]]} cache {hashlib.sha256(rows.tobytes()).hexdigest()[:16]}", flush=True)
     if any(late:=p2p_late(devs, clear=True)): print(f"P2P RUNOUT at pos {pos} rep {r}: epochs {late}", flush=True)
     print(f"chunk {N}/{NJ} at {pos:7d} rep {r}: {dt*1e3:8.1f} ms (host {t_host*1e3:.1f} ms)" +
           (f" parts {' '.join(f'{p*1e3:.1f}' for p in parts_t)}" if parts_t else ""), flush=True)
