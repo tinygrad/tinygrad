@@ -98,5 +98,7 @@ for pos in POS:
         kk = [(s, s + du) for dd, n, s, du in seq if dd == d and not n.startswith("copy")]
         cc = [(s, s + du) for dd, n, s, du in seq if dd == d and n.startswith("copy")]
         span = max(b for _, b in kk + cc) - min(a for a, _ in kk + cc)
-        print(f"  {d:8s} span {span/1e3:8.1f} ms  kernels {union(kk)/1e3:8.1f}  copies {union(cc)/1e3:8.1f}  either {union(kk+cc)/1e3:8.1f}")
+        # (ksum > kernels: kernels ran at the same time (two compute queues))
+        print(f"  {d:8s} span {span/1e3:8.1f} ms  kernels {union(kk)/1e3:8.1f}  copies {union(cc)/1e3:8.1f}  either {union(kk+cc)/1e3:8.1f}"
+              f"  ksum {sum(b-a for a, b in kk)/1e3:8.1f}  csum {sum(b-a for a, b in cc)/1e3:8.1f}")
 for pos, v in res.items(): print(f"RESULT N={N} pos={pos} blocks={len(model.blk)} min_ms={min(v)*1e3:.1f} med_ms={sorted(v)[len(v)//2]*1e3:.1f}")
