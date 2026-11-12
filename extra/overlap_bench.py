@@ -6,7 +6,7 @@ env: MB (64), N (4096: the matmul's size, half), REPS (20), KS (matmuls in the j
 run: DEV=PCI+AMD VFIO=1 PYTHONPATH=. python3 extra/overlap_bench.py
 """
 import time
-from tinygrad import Tensor, Device, TinyJit, dtypes
+from tinygrad import Tensor, Device, TinyJit, dtypes, function
 from tinygrad.helpers import getenv
 
 d0, d1 = Device.DEFAULT, f"{Device.DEFAULT}:1"
@@ -31,7 +31,20 @@ def both():
   for k in range(KS): y = (y @ w[k]).contiguous()
   return Tensor.realize(c, y)
 
-for name, f in (("copy", copy_only), ("matmul", mm_only), ("both", both)):
+# two chains of matmuls on one device: on one compute queue, and on COMPUTE:0 and COMPUTE:1 (glm_dsa._on_queue: the call's queue)
+x2 = Tensor.rand(N, N, dtype=dtypes.half, device=d1).realize()
+@function(precompile=True)
+def chain(a:Tensor) -> Tensor:
+  for k in range(KS): a = (a @ w[k]).contiguous()
+  return a
+@TinyJit
+def two_one_queue(): return Tensor.realize(chain(x), chain(x2))
+@TinyJit
+def two_queues():
+  from tinygrad.llm.glm_dsa import _on_queue
+  Device[d1].compute_queue_n(1)
+  return Tensor.realize(chain(x), *_on_queue((chain(x2),), "COMPUTE:1"))
+for name, f in (("copy", copy_only), ("matmul", mm_only), ("both", both), ("2chain1q", two_one_queue), ("2chain2q", two_queues)):
   for _ in range(3): f()
   sync()
   st = time.perf_counter()
