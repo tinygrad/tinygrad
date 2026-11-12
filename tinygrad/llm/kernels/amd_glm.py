@@ -914,12 +914,13 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
 K256_SKIP = getenv("K256_SKIP", -1)
 # K256_SKIP_RDNA3: K256_SKIP's default on RDNA3 too (GLM Flash C5 prefill: the IQ2_S gate/up 2.1x at 192 rows on a 7900 XTX, the same bits)
 K256_SKIP_RDNA3 = getenv("K256_SKIP_RDNA3", 1)
-# K256_XH_GLM: RDNA3 lane halves decode one K half each, exchanged by permlanex16 (amd_qwen's K256_XH), IQ2_S and IQ3_S. the same bits
-K256_XH_GLM = getenv("K256_XH_GLM", 0)
+# K256_XH_GLM: RDNA3 lane halves decode one K half each, exchanged by permlanex16 (amd_qwen's K256_XH), IQ2_S and IQ3_S. the same bits;
+# with K256_SBU3 2 on RDNA3: C5 chunks 192/384/768 rows 3-5% faster on a 7900 XTX (6 blocks)
+K256_XH_GLM = getenv("K256_XH_GLM", 1)
 # K256_SKIP3: IQ3_S's too (the down's tiles at a few rows an expert: small prefill chunks on RDNA3)
 K256_SKIP3 = getenv("K256_SKIP3", 0)
-# K256_SBU: IQ2_S sub-blocks unrolled by this many (-1: 2), K256_SBU3 IQ3_S's (no faster on C6's down)
-K256_SBU, K256_SBU3 = getenv("K256_SBU", -1), getenv("K256_SBU3", 1)
+# K256_SBU: IQ2_S sub-blocks unrolled by this many (-1: 2), K256_SBU3 IQ3_S's (-1: 1 on RDNA4 (no faster on C6's down), 2 on RDNA3)
+K256_SBU, K256_SBU3 = getenv("K256_SBU", -1), getenv("K256_SBU3", -1)
 # K256_IDLE: tiles of no expert load no grid and store nothing (their rows are never read)
 K256_IDLE = getenv("K256_IDLE", -1)
 # K256_SIGNPERM: IQ2_S signs by one byte permute of the word and its negation (_iq_signed_word perm, the same bytes)
@@ -993,7 +994,8 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
     return (((low >> (4*sb).cast(dtypes.uint32)) & 15) | (((header >> (16+2*sb).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int32) - 32
   # K256_SBU (IQ2_S): sub-blocks unrolled by this many (their weight loads issued together), each updates the int sums in turn
   # (RDNA3 2 too: GLM Flash C5 192-row chunks 64.4 -> 59.4 ms on a 7900 XTX (6 blocks), the same bits; 4 no faster)
-  SBU = (K256_SBU if K256_SBU > 0 else 2) if ggml_type == IQ2_S else K256_SBU3 if ggml_type == IQ3_S else 1
+  SBU = (K256_SBU if K256_SBU > 0 else 2) if ggml_type == IQ2_S else (K256_SBU3 if K256_SBU3 > 0 else 1 if rdna4 else 2) \
+    if ggml_type == IQ3_S else 1
   sb = UOp.range(8 // SBU, 5, AxisType.LOOP)
   sbs = [sb * SBU + u for u in range(SBU)] if SBU > 1 else [sb]
   def acols(h:int) -> tuple: return (ph*4+2*h, ph*4+2*h+1) if rdna4 else (2*h, 2*h+4, 2*h+1, 2*h+5)
