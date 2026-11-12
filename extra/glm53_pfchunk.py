@@ -23,6 +23,7 @@ N, REPS = getenv("N", 2688), getenv("REPS", 3)
 NJ = getenv("NJ", N)  # (the chunk size of the jit: N tokens of it real)
 POS = [int(p) for p in str(getenv("POS", "0,65536,131072,258048")).split(",")]
 # (NLIST: the real tokens of the chunk at every position (else N), CHECK_FROM: CHECK hashes the cache rows from there to the chunk's end)
+NJL = dict(zip(POS, [int(x) for x in str(getenv("NJLIST", "")).split(",") if x] or [getenv("NJ", getenv("N", 2688))]*len(POS)))
 NL = dict(zip(POS, [int(x) for x in str(getenv("NLIST", "")).split(",") if x] or [N]*len(POS)))
 print(f"loaded {len(model.blk)} blocks in {time.perf_counter()-t0:.1f} s, devices {len(devs)}, sizes {model.prefill_chunks()}", flush=True)
 def sync():
@@ -63,7 +64,7 @@ for pos in POS:
     last = r == REPS - 1
     if last and getenv("PROFILE"): kprof.reset(*devs)
     parts_t.clear()
-    sp, nt = v_start_pos.bind(pos), v_toks.bind(NL[pos])
+    sp, nt = v_start_pos.bind(pos), UOp.variable("toks", 1, NJL[pos]).bind(NL[pos])
     sync()
     st = time.perf_counter()
     model(model._token_buf[:, sp:sp+nt], sp, temp)
