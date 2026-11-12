@@ -88,9 +88,11 @@ for pos in POS:
         print(f"CHECK pos={pos} rep={rep} skipped=no_MLA_block", flush=True)
       else:
         blk, nd = mlas[-1], len(devs)
-        arr = blk.cache_s.numpy().reshape(nd, -1, blk.cache_s.shape[-1])
         p = np.arange(pos, pos+N)
-        rows = arr[(p//SEQ_BLK) % nd, (p//(SEQ_BLK*nd))*SEQ_BLK + p % SEQ_BLK]
+        if hasattr(blk, "cache_s"):
+          arr = blk.cache_s.numpy().reshape(nd, -1, blk.cache_s.shape[-1])
+          rows = arr[(p//SEQ_BLK) % nd, (p//(SEQ_BLK*nd))*SEQ_BLK + p % SEQ_BLK]
+        else: rows = blk.cache_k.numpy()[p]
         print(f"CHECK pos={pos} rep={rep} sha256={hashlib.sha256(rows.tobytes()).hexdigest()[:24]}", flush=True)
     print(f"CHUNK N={N} NJ={NJ} pos={pos} rep={rep} wall_ms={dt*1e3:.3f} host_ms={t_host*1e3:.3f}", flush=True)
     mem("chunk", pos)
