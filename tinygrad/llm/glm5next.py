@@ -4065,13 +4065,16 @@ class Transformer:
     if not self.stash_chunks: self.stash_entries = 0
     self.stash_chunk_nbytes, self.stash_entry_nbytes = chunk, entry
     if not self.stash_entries: return
-    # (the stash copies a region's pools whole on every card: not the split ones)
-    assert not any(index(b).shard for b in kb), "GLM stash with SEQ_IDX_SHARD: no (SEQ_STASH_GB=0)"
-    # Latents use seq_move's (local rows, devices, features) view: C/nd rows a device. Index pools are replicated.
+    # Latents and split indices use seq_move's (local rows, devices, features) view on every card.
+    # A device saves/restores only its own index strip, exactly the ownership used by the attention kernels.
     self._stash_kv = []
     for b in kb:
-      latent = _host_like([(b.slot_rows_view(b.cache_s), 0, self.stash_chunks * C // nd)])[0]
-      pools = _host_like([(index(b).cache_pk, 0, self.stash_chunks * C // index(b).idx.kpool)])[0]
+      gi = index(b)
+      init_latent = b.slot_rows_view(b.cache_s)
+      init_pk = b.slot_rows_view(gi.cache_pk) if gi.shard else gi.cache_pk
+      pk_div = gi.idx.kpool * (nd if gi.shard else 1)
+      latent = _host_like([(init_latent, 0, self.stash_chunks * C // nd)])[0]
+      pools = _host_like([(init_pk, 0, self.stash_chunks * C // pk_div)])[0]
       self._stash_kv.append((latent, pools))
     # Whole ring/replay windows, not one position: every row after a checkpoint restore must have the same state as before eviction.
     self._stash_rings = list(self.seq_ckpt_rings)
@@ -4102,10 +4105,12 @@ class Transformer:
       nd = len(devs)
       for gb, st in zip([b for b in self.blk + [self.mtp] if isinstance(b, MLATransformerBlock)], self._stash_kv):
         assert gb.indexer is not None
-        glm_idx, kp = gb.indexer, gb.indexer.idx.kpool
+        glm_idx, kd = gb.indexer, gb.indexer.idx.kpool
+        pk = gb.slot_rows_view(glm_idx.cache_pk) if glm_idx.shard else glm_idx.cache_pk
+        if glm_idx.shard: kd *= nd
         # (the stash's rows from its chunk, the caches' from the region's row: a sequence comes back to another region)
         items = [(rows(st[0], chunk*(C//nd), C*chunks//nd, 0), rows(gb.slot_rows_view(gb.cache_s), row//nd, C*chunks//nd, 0)),
-                 (rows(st[1], chunk*(C//kp), C*chunks//kp, 0), rows(glm_idx.cache_pk, row//kp, C*chunks//kp, 0))]
+                 (rows(st[1], chunk*(C//kd), C*chunks//kd, 0), rows(pk, row//kd, C*chunks//kd, 0))]
         for dst, src in items:
           # The host and device have identical region-relative row layout; the grouped kernels' absolute base stays out of this copy.
           if save: saves.append(dst.assign(src))
