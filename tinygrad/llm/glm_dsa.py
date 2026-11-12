@@ -3358,6 +3358,22 @@ class Transformer(GLMSeqDriver):
       q8_quantize_cache_clear()
       Q8_ROWS_I8[0] = prev
 
+  def _freqs_host(self, devs:tuple[str, ...]):
+    """
+    FREQS_HOST (default off): the rope table of the attention blocks (max_context x rope_dim float32: 268 MB a device at 1M, the same on
+    every device) in ONE host buffer every device reads directly, not a copy in every device's memory. its values as before: computed on
+    the first device by the same kernels, copied out (a chunk reads its T rows over the bus: ~0.7 MB a layer at 2688 rows)
+    """
+    blocks = [b for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []) if isinstance(getattr(b, "freqs_cis", None), Tensor)]
+    if not blocks or blocks[0].freqs_cis.uop.is_realized: return
+    c = self.config
+    table = precompute_freqs_cis(c.rope_dim, c.max_context, c.rope_theta, device=devs[0], yarn=c.yarn).realize()
+    mv, host = _host_buffer(devs, table.nbytes(), table.dtype)
+    mv[:] = table.uop.buffer.as_memoryview()
+    del table
+    host = host.reshape(c.max_context, -1)
+    for b in blocks: b.freqs_cis = host
+
   def _init_states(self):
     """the states and caches of the blocks, realized (the jits capture on their first call: not the one time setup)"""
     if getattr(self, "_states_ready", False): return
@@ -3375,6 +3391,7 @@ class Transformer(GLMSeqDriver):
     for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []):
       b._init_state(x)
       holders += [b] + ([idx] if (idx:=getattr(b, "indexer", None)) is not None else [])
+    if getenv("FREQS_HOST", 0) and isinstance(devs, tuple): self._freqs_host(devs)
     def lazy(v) -> list[Tensor]:
       if isinstance(v, Tensor): return [v] if not v.uop.is_realized else []
       return [t for x in v for t in lazy(x)] if isinstance(v, (list, tuple)) else []
