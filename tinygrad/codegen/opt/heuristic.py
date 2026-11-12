@@ -80,10 +80,13 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
             return k
 
   # are we grouping? (requires local shape support)
-  if resolve(prod(k.full_shape[i] for i in k.upcastable_dims()) <= (240 if k.ren.target.device == "QCOM" else 2048), False):
-    for axis in k.axes_of(AxisType.WEAK, reduce=True)[:3]:
+  if resolve((outs:=prod(k.full_shape[i] for i in k.upcastable_dims())) <= (240 if k.ren.target.device == "QCOM" else 2048), False):
+    # (GROUP_WIDE=n (default off): a reduce of at most GROUP_WIDE_OUTS outputs (a decode step's norms of a few rows) grouped n wide first: its
+    # few workgroups of 16 threads ran 384 loads each. changes the sum's order: numerics)
+    wide = getenv("GROUP_WIDE", 0) if resolve(outs <= getenv("GROUP_WIDE_OUTS", 64), False) else 0
+    for axis, sz in itertools.product(k.axes_of(AxisType.WEAK, reduce=True)[:3], ((wide, 16) if wide else (16,))):
       try:
-        k.apply_opt(Opt(OptOps.SPLIT, axis, (16, AxisType.LOCAL, True)))
+        k.apply_opt(Opt(OptOps.SPLIT, axis, (sz, AxisType.LOCAL, True)))
         break
       except KernelOptError: pass
 
