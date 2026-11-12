@@ -59,6 +59,11 @@ def mem(tag: str, pos: int|None = None) -> None:
 sync()
 mem("loaded")
 random.seed(0)
+# CLOCKCAP="GFXCLK=2300": the gfx clock cap the server sets for prefill (serve.py CLOCKS, AMIdleClocks.set_caps); unset: none (the default)
+if (cap:=getenv("CLOCKCAP", "")):
+  from tinygrad.runtime.ops_amd import AMIdleClocks
+  AMIdleClocks.set_caps(cap)
+  print(f"CLOCKCAP {cap} devs={len(AMIdleClocks.devs)}", flush=True)
 # SEQ_ONLY=1: the server's path instead (Transformer.seq_prefill: the region's jits, the slot's states, the env's cache formats): a prompt of
 # SEQ_TOKENS (default 10 chunks of N) prefilled from 0, REPS times; the ms a chunk = its time over its chunks. PROFILE=1: the census of the last
 if getenv("SEQ_ONLY"):
