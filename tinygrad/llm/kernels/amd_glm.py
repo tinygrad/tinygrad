@@ -1,7 +1,7 @@
 from __future__ import annotations
 import contextlib, functools, itertools, math, os
 from dataclasses import replace
-from typing import Callable, cast
+from typing import Callable, Sequence, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.dtype import AddrSpace, DType, dtypes
@@ -1009,6 +1009,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   for o, base in enumerate(bases):
     bfrs = []
     for sbu in sbs:
+      words:Sequence[tuple[UOp, ...]]
       if rdna4: words = _quant_frag_words(raw, base, sbu, ph, ggml_type, grid, signed=signed, perm=on(K256_SIGNPERM))
       elif K256_XH_GLM and ggml_type in (IQ2_S, IQ3_S):
         # (K256_XH_GLM, as amd_qwen's K256_XH: a lane's half (ph) decodes the words of its K half h=ph alone, the other half's from lane ^ 16
