@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import numpy as np
-from tinygrad import Tensor, UOp, nn, dtypes, Context
+from tinygrad import Tensor, UOp, nn, dtypes, Context, Device
 from tinygrad.uop.ops import Ops
 from tinygrad.llm import glm_dsa
 from tinygrad.llm.glm_dsa import Indexer, MLATransformerBlock, Transformer
@@ -507,6 +507,22 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertEqual(run(36, False, knobs), 2)
     self.assertEqual(run(30, False, knobs), None)
     self.assertEqual(run(54, True, knobs), None)
+    # (MOE_UNIT_MIN: the unit-major kernel, bundles of MOE_UNIT_M rows, from its row count; per projection MOE_GU_UNIT_MIN / MOE_DOWN_UNIT_MIN)
+    for down in (False, True): self.assertEqual(run(12, down, {"MOE_GU_UNIT_MIN": "8", "MOE_DOWN_UNIT_MIN": "8"}), 16)
+    self.assertEqual(run(6, False, {"MOE_GU_UNIT_MIN": "8"}), None)
+    self.assertEqual(run(12, True, {"MOE_GU_UNIT_MIN": "8"}), None)
+
+  def test_moe_unit_kernel(self):
+    # (the unit-major kernel's graph builds (it lowers with the HIP renderer only: DEV=NULL:HIP:gfx1100; the NULL one has no local dims))
+    import tinygrad.llm.kernels.amd_glm as K
+    E, fin, fout, T = 4, 4096, 64, 12
+    w = Tensor.empty(E*fout*fin*K.QUANT_SIZES[K.IQ2_S]//256//2, dtype=dtypes.uint16)
+    sel, x, first = Tensor.empty(1, T, 8, dtype=dtypes.int32), Tensor.empty(1, T, 1, fin), Tensor([0], dtype=dtypes.int32)
+    K._bundle_cache.clear()
+    with patch.object(K, "MOE_WMMA", 0), patch.object(K, "MOE_UNIT_MIN", 8):
+      out = K.moe_linear(w, K.IQ2_S, E, x, sel, first)
+      self.assertEqual(out.shape, (1, T, 8, fout))
+      if Device.DEFAULT.startswith("NULL:HIP"): out.realize()
 
   def test_moe_persist(self):
     # (MOE_PERSIST: the exact bundles by P workgroups an output block looping over moe_bundles' count, not a grid of every possible bundle)

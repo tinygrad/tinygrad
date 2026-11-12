@@ -50,7 +50,8 @@ def main():
         cnt = np.ones(NEXP, np.int64)
         cnt[rng.choice(NEXP, E - NEXP, replace=False)] = 2
         start = np.concatenate([[0], np.cumsum(cnt)[:-1]])
-        ex = np.stack([rng.choice(NEXP, 8, replace=False) for _ in range(T)])
+        # (HOT=k: the rows' experts from the first k only: every unit re-read by many rows (the kernels' compute floor))
+        ex = np.stack([rng.choice(getenv("HOT", NEXP), 8, replace=False) for _ in range(T)])
         sel_np = np.where(np.arange(2) < cnt[ex][..., None], start[ex][..., None] + np.arange(2), -1).astype(np.int32).reshape(1, T, 16)
       loc = sel_np[(sel_np >= 0) & (sel_np < E)]
       uniq = len(np.unique(loc))
