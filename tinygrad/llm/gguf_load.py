@@ -16,6 +16,7 @@ from tinygrad.llm.direct_read import DirectFile, read_many, close_rings, slow_by
 decoded_weights:weakref.WeakKeyDictionary[UOp, tuple[int, UOp]] = weakref.WeakKeyDictionary()
 # the apart tensors' buffers (see _parallel_load's apart), until they're freed
 apart_buffers:list[weakref.ReferenceType] = []
+apart_nbytes:list[int] = []
 
 def _remember_decoded(decoded:Tensor, typ:int, packed:UOp):
   from tinygrad.llm.kernels.amd_qwen import unwrap_storage_views
@@ -158,6 +159,7 @@ def _parallel_load(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devic
               for d,t in zip(devices, sums[g])] if any(sums[g])
              else [] for g in range(2)]
   apart_buffers.extend(weakref.ref(b) for b in gbufs[1])
+  apart_nbytes.extend(b.nbytes for b in gbufs[1])
   # the files in chunks (in their order, every tensor whole in one, a fused gate with its up): a chunk read once (io_uring, O_DIRECT: the drives'
   # rate) into a host buffer every device maps, the devices take their parts of it (a kernel of the copies a device, the gathers) while the
   # next ones are read

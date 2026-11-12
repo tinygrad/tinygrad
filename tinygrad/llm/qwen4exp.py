@@ -476,8 +476,8 @@ def _drop_apart(final=True):
   st = time.perf_counter()
   # (no buffer in a variable of this function's: a comprehension's walrus would keep one in a cell)
   def alive() -> list[Buffer]: return [x for x in (r() for r in refs) if x is not None]
-  nbytes = sum(x.nbytes for x in alive())
-  if nbytes: gc.collect()
+  nbytes = sum(gguf_load.apart_nbytes)
+  if alive(): gc.collect()
   held = alive()
   print(f"LOAD_APART: {(nbytes - sum(b.nbytes for b in held))/1e6:.1f} MB freed, {sum(b.nbytes for b in held)/1e6:.1f} MB held "
         f"({time.perf_counter()-st:.3f}s{'' if final else ', tried again after the warm-up'})")
@@ -494,7 +494,9 @@ def _drop_apart(final=True):
       ups.append(up)
       seen |= {id(up), id(obj:=up[0])}
       print(f"LOAD_APART: held by {what(obj)}")
-  if final or not held: refs.clear()
+  if final or not held:
+    refs.clear()
+    gguf_load.apart_nbytes.clear()
 
 # (while not empty: _fill_zero allocates, the buffers are zeroed later, see _zero_deferred)
 _zero_later:list[list[Buffer]] = []
