@@ -28,7 +28,10 @@ def run(typ:int, skip:int, perm:int=0, idle:int=0, sbu:int=1, T=96, E=6, K=4, NE
    amd_glm.K256_SKIP3) = skip, perm, idle, sbu, sbu, skip3
   amd_glm._grouped_k256_kernel.cache_clear()
   if sorted_out:
-    x = Tensor(rng.normal(size=(R, D)).astype(np.float32)).realize()
+    # (a row per sorted row: the selections' rows from one draw, so another tile size has the same inputs on its rows)
+    xs, xr = rng.normal(size=(len(sel), D)).astype(np.float32), np.zeros((R, D), np.float32)
+    xr[ent >= 0] = xs[ent[ent >= 0]]
+    x = Tensor(xr).realize()
     out = moe_grouped_linear(w, typ, E, x, Tensor(ent), Tensor(til), selections=len(sel), sorted_out=True).numpy()
   else:
     x = Tensor(rng.normal(size=(T, D)).astype(np.float32)).realize()
