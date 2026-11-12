@@ -1,4 +1,3 @@
-from __future__ import annotations
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
 import struct, functools, itertools
@@ -15,7 +14,7 @@ from dataclasses import dataclass, field, replace
 class Register:
   name: str
   index: int
-  _cons: tuple[Register, ...] = field(default_factory=tuple)
+  _cons: tuple["Register", ...] = field(default_factory=tuple)
   size: int = 8
   @property
   def cons(self): return self._cons or (self,)
@@ -42,7 +41,7 @@ def rdef(u:UOp):
   return r[0] if (r:=regs(u)) else None
 
 class LinearContext:
-  def __init__(self, ren:ISARenderer):
+  def __init__(self, ren:'ISARenderer'):
     self.ren, self.stack_size = ren, 0
   def insert_linearized(self, uops:list[UOp]) -> list[UOp]: return uops
   def assign_spill_slot(self, r:Register, u:UOp) -> Any: raise NotImplementedError("arch specific")
@@ -493,7 +492,7 @@ isel_matcher = PatternMatcher([
 # the flags belong to the last instruction that wrote them. x86 has no good way to store/restore them (then regalloc would
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
-def flag_rematerialize(ctx:X86LinearContext, x:UOp):
+def flag_rematerialize(ctx:'X86LinearContext', x:UOp):
   if x.op in (Ops.RANGE, Ops.END) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
   elif x.arg[0] in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
     ctx.lock = flag_def
@@ -501,7 +500,7 @@ def flag_rematerialize(ctx:X86LinearContext, x:UOp):
   return None
 
 # the address of a stack buffer keeps the buffer's dtype so the element size of loads and stores through it is known
-def alloc_buffer(ctx:X86LinearContext, x:UOp):
+def alloc_buffer(ctx:'X86LinearContext', x:UOp):
   dst = Register(f"s{ctx.stack_size}", 0, WGPR, 8)
   nx = with_regs(x.ins(X86Ops.LEA, src=fold_address(stack_pointer().index(UOp.cconst(ctx.stack_size, dtypes.uint32)))), (dst,))
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
@@ -706,7 +705,7 @@ encodings = {
 }
 
 class X86LinearContext(LinearContext):
-  def __init__(self, ren:X86Renderer):
+  def __init__(self, ren:'X86Renderer'):
     super().__init__(ren)
     self.lock: UOp|None = None
 
