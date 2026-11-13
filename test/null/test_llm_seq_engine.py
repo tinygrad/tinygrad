@@ -354,6 +354,49 @@ class TestSeqCkpt2(unittest.TestCase):
       self.run_turn(eng, p2)
       self.assertEqual(eng.cached(p3), len(p1))
     with patch.object(SeqEngine, "CKPT2", 0): self.assertEqual(eng.cached(p3), 0)
+class TestSeqCompact(unittest.TestCase):
+  """SEQ_COMPACT: a region the free rows in all are enough for is made by moving regions, nothing evicted (default off: the idle ones evicted)"""
+  def layout(self):
+    # A, B, C idle, B's conversation ended: a gap in the middle and the tail, no gap of 24K, 25.5K free in all
+    model = CacheModel()
+    model.seq_slots = lambda: 8
+    eng = SeqEngine(model)
+    seqs = []
+    for i in range(3):
+      ids = [100000 * (i + 1) + j for j in range(18000)]
+      s, start, restore = eng.take(ids, 100, session_id=f"s{i}")
+      eng.prefill(s, ids, start, restore, (0.0, 1.0))
+      seqs.append(s)
+    for s in seqs: eng.stop(s, len(s.tokens))
+    eng.end_session("s1")
+    self.assertGreater(eng.rows - sum(s.cap for s in eng.seqs), 24100)
+    self.assertLess(max(c for _, c in eng._gaps()), 24100)
+    return model, eng, seqs
+  def test_off_evicts(self):
+    model, eng, seqs = self.layout()
+    with patch.object(SeqEngine, "STICKY", 0.0), patch.object(SeqEngine, "COMPACT", 0):
+      s, _, _ = eng.take(list(range(900000, 924000)), 100)
+    self.assertEqual(eng.evictions, 1)
+  def test_compact_moves_instead(self):
+    model, eng, seqs = self.layout()
+    with patch.object(SeqEngine, "STICKY", 0.0), patch.object(SeqEngine, "COMPACT", 1):
+      new = list(range(900000, 924000))
+      s, _, _ = eng.take(new, 100)
+    self.assertEqual((eng.evictions, eng.lost), (0, 0))
+    self.assertIn(seqs[0], eng.seqs)
+    self.assertIn(seqs[2], eng.seqs)
+    self.assertTrue([c for c in model.calls if c[0] == "move"])
+    # every resident region still holds its tokens' rows (the moves are copies), and the regions do not overlap
+    for t in (seqs[0], seqs[2]): self.assertEqual(model.cache[t.base:t.base + t.n], t.tokens[:t.n])
+    self.assertIn(s, eng.seqs)
+    regs = sorted((t.base, t.base + t.cap) for t in eng.seqs)
+    self.assertTrue(all(a[1] <= b[0] for a, b in zip(regs, regs[1:])))
+  def test_compact_rows_cap(self):
+    # more rows to move than SEQ_COMPACT_ROWS: the old path (evict)
+    model, eng, seqs = self.layout()
+    with patch.object(SeqEngine, "STICKY", 0.0), patch.object(SeqEngine, "COMPACT", 1), patch.object(SeqEngine, "COMPACT_ROWS", 100):
+      eng.take(list(range(900000, 924000)), 100)
+    self.assertEqual(eng.evictions, 1)
 
 class TestScheduleSeqs(unittest.TestCase):
   """the server's scheduling of sequences (schedule_seqs) on a fake model"""
