@@ -155,6 +155,7 @@ class AMDev:
 
   def __init__(self, pci_dev:PCIDevice, reset_mode=False):
     self.pci_dev, self.devfmt = pci_dev, pci_dev.pcibus
+    pci_dev.reset_lock()
     self._disable_aspm()
     self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
 
@@ -221,6 +222,7 @@ class AMDev:
       self.reg("regSCRATCH_REG7").write(AMDev.Version)
       self.reg("regSCRATCH_REG6").write(1) # set initialized state.
 
+    pci_dev.reset_lock(False)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def init_sw(self, smi_dev=False):
