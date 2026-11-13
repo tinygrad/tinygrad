@@ -1,14 +1,11 @@
 import unittest
-from dataclasses import replace
 from tinygrad.helpers import Target
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes, DType
-from tinygrad.renderer.x86 import Register, X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm
+from tinygrad.renderer.x86 import Register, X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm, reg as reg_buf
 
-# the operand width is carried by the register, not by the dtype
-def reg(r:Register, size:int) -> Register: return replace(r, size=size)
 def ins(op, dt, src, r:Register|None=None): return UOp(Ops.INS, arg=(op, dt) + ((r,) if r is not None else ()), src=src)
-def reg_placeholder(r:Register): return UOp(Ops.INS, arg=(X86Ops.REG, dtypes.uint64, r))
+def reg_placeholder(r:Register, dt:DType=dtypes.uint64): return reg_buf(dt, r)
 def alloc(dt:DType, r:Register): return reg_placeholder(r)
 
 class TestEncodingsX86(unittest.TestCase):
@@ -18,83 +15,83 @@ class TestEncodingsX86(unittest.TestCase):
 
   # displacement of 0 isn't emitted
   def test_base_address(self):
-    load = ins(X86Ops.MOV, dtypes.int32, (alloc(dtypes.int32, RDI), UOp(Ops.NOOP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), reg(RDI, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, (alloc(dtypes.int32, RDI), UOp(Ops.NOOP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), RDI)
     # mov edi, dword ptr [rdi]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 3F"))
 
   # rsp/r12 require a sib byte when used as base memory address
   def test_rsp_base_address(self):
-    load = ins(X86Ops.MOV, dtypes.int32, (alloc(dtypes.int32, RSP), UOp(Ops.NOOP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), reg(RSP, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, (alloc(dtypes.int32, RSP), UOp(Ops.NOOP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), RSP)
     # mov esp, dword ptr [rsp]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 24 24"))
 
   # rbp/r13 require a displacement when used as base memory address
   def test_rbp_base_address(self):
-    load = ins(X86Ops.MOV, dtypes.int32, (alloc(dtypes.int32, RBP), UOp(Ops.NOOP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), reg(RBP, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, (alloc(dtypes.int32, RBP), UOp(Ops.NOOP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), RBP)
     # mov ebp, dword ptr [rbp + 0]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 6D 00"))
 
   # test [base + index*scale]
   def test_base_index_address(self):
-    load = ins(X86Ops.MOV, dtypes.int32, (alloc(dtypes.int32, RAX), reg_placeholder(RDX), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), reg(RAX, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, (alloc(dtypes.int32, RAX), reg_placeholder(RDX), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), RAX)
     # mov eax, dword ptr [rax + rdx*4]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 04 90"))
 
   # rsp as index means no index
   def test_rsp_index_address(self):
-    load = ins(X86Ops.MOV, dtypes.int32, (alloc(dtypes.int32, RAX), reg_placeholder(RSP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), reg(RAX, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, (alloc(dtypes.int32, RAX), reg_placeholder(RSP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), RAX)
     # mov eax, dword ptr [rax]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 00"))
 
   # however r12 is a valid index
   def test_r12_index_address(self):
     address = (alloc(dtypes.int32, RAX), reg_placeholder(GPR[12]), imm(dtypes.int8, 0), imm(dtypes.uint8, 4))
-    load = ins(X86Ops.MOV, dtypes.int32, address, reg(RAX, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, address, RAX)
     # mov eax, dword ptr [rax + r12*4]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("42 8B 04 A0"))
 
   # test [base + index*scale + 8bit disp]
   def test_complex_address_8bit_disp(self):
     address = (alloc(dtypes.int32, RDI), reg_placeholder(RSI), imm(dtypes.int8, 10), imm(dtypes.uint8, 4))
-    load = ins(X86Ops.MOV, dtypes.int32, address, reg(RDI, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, address, RDI)
     # mov edi, dword ptr [rdi + rsi*4 + 0xa]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 7C B7 0A"))
 
   # test [base + index*scale + 32bit disp]
   def test_complex_address_32bit_disp(self):
     address = (alloc(dtypes.int32, RDI), reg_placeholder(RSI), imm(dtypes.int32, 10000), imm(dtypes.uint8, 4))
-    load = ins(X86Ops.MOV, dtypes.int32, address, reg(RDI, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, address, RDI)
     # mov edi, dword ptr [rdi + rsi*4 + 0x2710]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B BC B7 10 27 00 00"))
 
   # 8bit variants of legacy instructions subtract 1 from opcode
   def test_8bit_legacy_encoding(self):
-    cast = ins(X86Ops.MOVSX, dtypes.int32, (reg_placeholder(reg(RDX,1)),), reg(RAX, 4))
+    cast = ins(X86Ops.MOVSX, dtypes.int32, (reg_placeholder(RDX, dtypes.uint8),), RAX)
     # movsx eax, dl
     self.assertEqual(bytes.fromhex(self.encode(cast)), bytes.fromhex("0F BE C2"))
 
   # accessing lower 8 bits of rsp, rbp, rsi, rdi requires rex prefix
   def test_lower_8bits_reg(self):
-    cast = ins(X86Ops.MOVSX, dtypes.int32, (reg_placeholder(reg(RDI,1)),), reg(RAX, 4))
+    cast = ins(X86Ops.MOVSX, dtypes.int32, (reg_placeholder(RDI, dtypes.uint8),), RAX)
     # movsx eax, dil
     self.assertEqual(bytes.fromhex(self.encode(cast)), bytes.fromhex("40 0F BE C7"))
 
   # test 16 bit variant of legacy instruction
   def test_16bit_legacy_encoding(self):
-    cast = ins(X86Ops.MOVSX, dtypes.int16, (reg_placeholder(reg(RDX,1)),), reg(RAX, 2))
+    cast = ins(X86Ops.MOVSX, dtypes.int16, (reg_placeholder(RDX, dtypes.uint8),), RAX)
     # movsx ax, dl
     self.assertEqual(bytes.fromhex(self.encode(cast)), bytes.fromhex("66 0F BE C2"))
 
   # test 64 bit variant of legacy instruction
   def test_64bit_legacy_encoding(self):
-    cast = ins(X86Ops.MOVSX, dtypes.int64, (reg_placeholder(reg(RDX, 1)),), reg(RAX, 8))
+    cast = ins(X86Ops.MOVSX, dtypes.int64, (reg_placeholder(RDX, dtypes.uint8),), RAX)
     # movsx rax, dl
     self.assertEqual(bytes.fromhex(self.encode(cast)), bytes.fromhex("48 0F BE C2"))
 
-  # the width comes from the register, the dtype doesn't take part in the encoding
-  def test_width_from_register(self):
-    for size, expected in ((1, "8A C2"), (2, "66 8B C2"), (4, "8B C2"), (8, "48 8B C2")):
-      mov = ins(X86Ops.MOV, dtypes.float32, (reg_placeholder(reg(RDX, size)),), reg(RAX, size))
+  # the operand dtype determines the register width
+  def test_width_from_dtype(self):
+    for dt, expected in ((dtypes.uint8, "8A C2"), (dtypes.uint16, "66 8B C2"), (dtypes.uint32, "8B C2"), (dtypes.uint64, "48 8B C2")):
+      mov = ins(X86Ops.MOV, dt, (reg_placeholder(RDX, dt),), RAX)
       self.assertEqual(bytes.fromhex(self.encode(mov)), bytes.fromhex(expected))
 
   # test compact vex encoding
@@ -129,7 +126,7 @@ class TestEncodingsX86(unittest.TestCase):
   # test two address instruction with fused load works
   def test_two_address_load(self):
     address = (alloc(dtypes.int32, RDI), reg_placeholder(RSI), imm(dtypes.int8, 10), imm(dtypes.uint8, 4))
-    cmove = ins(X86Ops.CMOVE, dtypes.int32, address, reg(RAX, 4))
+    cmove = ins(X86Ops.CMOVE, dtypes.int32, address, RAX)
     # cmove eax, dword ptr [rdi + rsi*4 + 0xa]
     self.assertEqual(bytes.fromhex(self.encode(cmove)), bytes.fromhex("0F 44 44 B7 0A"))
 
@@ -141,13 +138,13 @@ class TestEncodingsX86(unittest.TestCase):
     self.assertEqual(bytes.fromhex(self.encode(mov)), bytes.fromhex("40 C6 44 37 0A 0A"))
 
     address = (alloc(dtypes.int32, RDI), reg_placeholder(RSI), imm(dtypes.int32, 10), imm(dtypes.uint8, 4))
-    imul = ins(X86Ops.IMULi, dtypes.int32, address + (imm(dtypes.int32, 10),), reg(RDI, 4))
+    imul = ins(X86Ops.IMULi, dtypes.int32, address + (imm(dtypes.int32, 10),), RDI)
     # imul edi, dword ptr [rdi + rsi*4 + 0xa], 0xa
     self.assertEqual(bytes.fromhex(self.encode(imul)), bytes.fromhex("69 BC B7 0A 00 00 00 0A 00 00 00"))
 
   # cmoves have the cmp as the last src even though it is not explicitly used, the cmp doesn't define a reg and is ignored in the encoding
   def test_cmove_ignore_cmp(self):
-    cmove = ins(X86Ops.CMOVE, dtypes.int32, (reg_placeholder(reg(RAX, 4)), UOp(Ops.INS, arg=(X86Ops.CMP, dtypes.void))), reg(RDX, 4))
+    cmove = ins(X86Ops.CMOVE, dtypes.int32, (reg_placeholder(RAX, dtypes.int32), UOp(Ops.INS, arg=(X86Ops.CMP, dtypes.void))), RDX)
     # cmove edx, eax
     self.assertEqual(bytes.fromhex(self.encode(cmove)), bytes.fromhex("0F 44 D0"))
 

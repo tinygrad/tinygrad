@@ -5,7 +5,7 @@ from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.helpers import DEV
 from tinygrad.llm.kernels.amd import (Linear, ExpertWeights, amd_custom_kernels_supported, flash_attention, gated_delta_prefill,
                                       _is_rdna4, _is_cdna)
-from tinygrad.llm.kernels.amd_gguf import q8_quantize, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, Q4_K, IQ3_S
+from tinygrad.llm.kernels.amd_gguf import q8_quantize, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, Q4_K, IQ3_S, MXFP4
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.runtime.test_llm_quantized import QuantLinearMixin
 
@@ -69,6 +69,8 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_iq4_nl_linear(self): self._test_quant_linear(20, 144, in_features=768, token_counts=(1, 3, 16))
   def test_iq3_s_linear(self): self._test_quant_linear(21, 110, in_features=768, token_counts=(1, 3, 16))
   def test_iq2_s_linear(self): self._test_quant_linear(22, 82, in_features=768, token_counts=(1, 3, 16))
+  def test_mxfp4_linear(self): self._test_quant_linear(39, 136, in_features=288, token_counts=(1, 3))
+  def test_mxfp4_linear_wmma(self): self._test_quant_linear(39, 136, in_features=288, token_counts=(16,))
 
   def test_wmma_linear_symbolic(self):
     with patch("tinygrad.llm.kernels.amd_gguf.q8_quantize", side_effect=AssertionError("expected WMMA")):
@@ -89,15 +91,16 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     for typ, size in QUANT_SIZES.items():
       with self.subTest(ggml_type=typ):
         packed = rng.integers(0, 256, (48*3, size), dtype=np.uint8)
-        blocks = packed.reshape(-1, SMALL_BLOCK_QUANTS[typ]*2) if typ in SMALL_BLOCK_QUANTS else packed
+        blocks = packed.reshape(-1, SMALL_BLOCK_QUANTS[typ]*2) if typ in SMALL_BLOCK_QUANTS and typ != 39 else packed
         offset = size-2 if typ in (11, 14) else 80 if typ == 10 else 0
-        blocks[:, offset:offset+2] = np.resize(scales, len(blocks)).view(np.uint8).reshape(-1, 2)
+        if typ == 39: packed.reshape(-1, 17)[:, 0] = rng.integers(100, 141, 48*3*8)  # mxfp4 e8m0 scales: fp16 rounds e < 100 to 0, e > 140 overflows
+        else: blocks[:, offset:offset+2] = np.resize(scales, len(blocks)).view(np.uint8).reshape(-1, 2)
         if typ in (10, 12, 13):
           offset = 82 if typ == 10 else 2
           blocks[:, offset:offset+2] = np.resize(scales[::-1], len(blocks)).view(np.uint8).reshape(-1, 2)
         expected = dequantize(packed.flatten(), GGMLQuantizationType(typ)).reshape(48, 768).astype(np.float16).astype(np.float32).T
-        # Odd super-block counts and halfword-only alignment exercise both row and block offsets.
-        pad = 2 if typ in HALFWORD_QUANTS else 4
+        # Odd super-block counts and halfword-only (mxfp4 byte-only) alignment exercise both row and block offsets.
+        pad = 1 if typ == 39 else 2 if typ in HALFWORD_QUANTS else 4
         raw = Tensor(np.pad(packed.flatten(), (pad, 0))).realize()[pad:]
         linear = Linear(768, 48, bias=False)
         linear.weight = ggml_data_to_tensor(raw, 48*768, typ).reshape(48, 768)
@@ -125,7 +128,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         self.assertIsNone(linear.ggml_type)
 
   def test_mixed_quant_linear_split_k(self):
-    for typ in (10, 11, 17, 18, 20, 21, 22):
+    for typ in (10, 11, 17, 18, 20, 21, 22, 39):
       with self.subTest(ggml_type=typ):
         self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=3, token_counts=(1,))
 
@@ -228,8 +231,8 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     rng = np.random.default_rng(5)
     E, T, K, IN, OUT, size = 4, 1, 2, 256, 16, QUANT_SIZES[typ]
     blocks = rng.integers(0, 256, (E*OUT*IN//256, size), dtype=np.uint8)
-    blocks[:, :2] = np.array([0.001], np.float16).view(np.uint8)
-    blocks[:, 2:4] = np.array([0.0001], np.float16).view(np.uint8)
+    if typ == MXFP4: blocks.reshape(-1, 17)[:, 0] = rng.integers(122, 128, blocks.size//17)  # e8m0 scales
+    else: blocks[:, :4] = np.array([0.001, 0.0001], np.float16).view(np.uint8)
     decoded = ggml_data_to_tensor(Tensor(blocks.flatten()).contiguous().realize(), E*OUT*IN, typ).reshape(E, OUT, IN)
     w = decoded.numpy()
     act = rng.standard_normal((1, T, K, IN)).astype(np.float32)
@@ -246,6 +249,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
 
   def test_moe_decode(self): self._test_moe_decode(Q4_K)
   def test_moe_decode_iq3_s(self): self._test_moe_decode(IQ3_S)
+  def test_moe_decode_mxfp4(self): self._test_moe_decode(MXFP4)
 
   def test_gated_delta_random_scan(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
