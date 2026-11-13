@@ -807,9 +807,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # BUFFER/ALLOC/COPY carry a DEVICE range when targeting multiple devices
     return (UOp.range(len(device), 0, AxisType.DEVICE),) if isinstance(device, tuple) else ()
   @staticmethod
-  def _buffer(size:int, dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, buffer:Buffer|MultiBuffer|None=None,
+  def _buffer(size:int|None, dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, buffer:Buffer|MultiBuffer|None=None,
               reg:Register|None=None) -> UOp:
-    return UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),)+UOp.device_range_src(device),
+    return UOp(Ops.BUFFER, src=(shape_to_shape_arg(() if size is None else (size,)),)+UOp.device_range_src(device),
                arg=ParamArg(slot, dtype, addrspace=addrspace, device=device, buffer=buffer, reg=reg))
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
@@ -1162,10 +1162,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
             spec:BufferSpec|None=None, bind_on_realize:bool=False, name:str|None=None):
-    ret = UOp(Ops.ALLOC, src=(shape_to_shape_arg((prod(to_max_shape(shape)),)),)+UOp.device_range_src(device),
+    ret = UOp(Ops.ALLOC, src=(shape_to_shape_arg((prod(to_max_shape(shape)),) if shape else ()),)+UOp.device_range_src(device),
               arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype),
                            addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
-    return ret.reshape(()) if not shape else ret.view_as(shape, axis)
+    return ret.view_as(shape, axis)
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
   @staticmethod
@@ -1176,7 +1176,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret = UOp.param(slot, dtype, prod(shape))
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
-      ret = UOp._buffer(prod(shape), dtype, slot, addrspace=addrspace, reg=reg)
+      ret = UOp._buffer(prod(shape) if shape else None, dtype, slot, addrspace=addrspace, reg=reg)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
   def placeholder_like(self, slot:int):
