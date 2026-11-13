@@ -564,6 +564,16 @@ class TestCustomKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([2, 3]).realize(), fxn=kernel)[0]
     self.assertEqual(out.tolist(), [5])
 
+  def test_store_value_broadcasts_to_target(self):
+    def stored(shape:tuple[int, ...]) -> list:
+      def kernel(out:UOp, inp:UOp):
+        reg = UOp.alloc((2,), dtypes.int, addrspace=AddrSpace.REG)
+        reg = reg.after(reg.store(inp.reshape(shape)))
+        return UOp.sink(out[0].store(reg[0]), out[1].store(reg[1]), arg=KernelInfo(opts_to_apply=()))
+      return Tensor.custom_kernel(Tensor.empty(2, dtype=dtypes.int), Tensor([2, 3]).realize(), fxn=kernel)[0].tolist()
+    self.assertEqual(stored((1, 2)), [2, 3])
+    with self.assertRaises(ValueError): stored((2, 1))
+
 class TestCustomKernelArgs(unittest.TestCase):
   def test_duplicate_call_arg(self):
     x = Tensor.arange(4).clone().realize()

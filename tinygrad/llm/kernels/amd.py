@@ -356,7 +356,7 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   tile_max = m_ij.reshape(TM, 1).expand(TM, TN).maximum(-1e30)
   S_reg = S_reg.after(S_reg.store(((S_reg - tile_max) * LOG2E).exp2()))
   p_local, ri_ws = _reg((TM,), 0, n_tile), UOp.range(TM, 295)
-  p_sum = p_local.after(p_local[ri_ws].store(sum((warp_reduce(S_reg[ri_ws, rn]) for rn in range(TN)), S_reg.const_like(0))).end(ri_ws))
+  p_sum = p_local.after(p_local[ri_ws].store(sum(warp_reduce(S_reg[ri_ws, rn]) for rn in range(TN))).end(ri_ws))
   P_lds = QP_lds.flatten()[:WAVES_N * BLOCK_M * BLOCK_N].reshape(WAVES_N, BLOCK_M, BLOCK_N)
   # gfx11 distributes even/odd rows between half-waves; gfx12 distributes the low/high eight rows.
   row_shape = (LANES_PER_WAVE_M, TM) if rdna4 else (TM, LANES_PER_WAVE_M)

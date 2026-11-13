@@ -585,6 +585,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.STACK, src=(self,)*count)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, src:UOp|ConstType, gate:UOp|None=None):
+    # a value broadcasts to its target, a shapeless payload (LINEAR, PROGRAM) is stored as is
+    if isinstance(src, UOp) and src._shape is not None: src = src._broadcast_to(self.shape)
     srcs = (self, self.const_like(src) if not isinstance(src, UOp) else src) + ((gate,) if gate is not None else ())
     return UOp(Ops.STORE, src=srcs)
   def end(self, *src:UOp): return UOp(Ops.END, src=(self,)+src) if len(src) else self
