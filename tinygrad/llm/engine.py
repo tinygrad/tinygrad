@@ -51,6 +51,11 @@ class Seq:
   n:int = 0  # the tokens in the caches
   hrow:int = 0  # the slot's row of the hidden state of the last one in the caches
   ckpt:int = 0  # the position of its checkpoint (the end of its last prompt, the states there kept), 0: none
+  # (SEQ_CKPT2: a second checkpoint, the one before (the end of the prompt before the last): ckpt2 its position, 0: none. the two are in two
+  # buffers a slot, written alternately: cpar the buffer of ckpt. a prompt that diverges before ckpt (the agent drops a malformed reply and
+  # sends its user message: the generation prompt at the end of the last prompt is not shared) resumes from ckpt2 instead of from 0)
+  ckpt2:int = 0
+  cpar:int = 0
   used:float = 0.0
   active:bool = False
   host:Stashed|None = None  # (its copy in the stash: of the prefix of its tokens it shares)
@@ -89,6 +94,12 @@ class SeqEngine:
   # (the room for a reply a region has past its prompt when it's made (a request's max_tokens, RESERVE at most: more is made as it's needed),
   # and an idle one's for its next turn)
   ROOM, RESERVE = 2048, getenv("SEQ_RESERVE", 4096)
+  # (SEQ_CKPT2=1: two checkpoints a sequence, see Seq.ckpt2: +~115 MB of host memory a slot)
+  CKPT2 = getenv("SEQ_CKPT2", 0)
+  # (SEQ_COMPACT: a region the free rows IN ALL are enough for is made by moving regions (the rows copied on the device, bit for bit: _pack /
+  # _place) before any idle conversation is evicted for a window of its size: an eviction is a copy to the host and later back, or a re-prefill
+  # if the stash is full. at most SEQ_COMPACT_ROWS rows moved for one region (the copies take the model thread: 130K rows ~ a few ms))
+  COMPACT, COMPACT_ROWS = getenv("SEQ_COMPACT", 0), getenv("SEQ_COMPACT_ROWS", 1_500_000)
   # (an idle conversation used in the last STICKY s is held: its agent runs a tool, its next turn comes soon. a prompt of another conversation
   # doesn't make it lost (out of the caches and the stash), unless it's forced (it waited too long, see the server's STARVE))
   STICKY = getenv("SEQ_STICKY", 180.0)
@@ -223,7 +234,7 @@ class SeqEngine:
         return False
     chunks, entry = chunks + self._take(n - len(chunks)), entry if entry >= 0 else self.free_entries.pop()
     st = time.perf_counter()
-    self.model.seq_stash(True, s.slot, s.base, self._segs(chunks, keep, n), entry, s.n, s.hrow)
+    self.model.seq_stash(True, s.slot, s.base, self._segs(chunks, keep, n), entry, s.n, s.hrow, **({"ckpt_par": s.cpar} if self.CKPT2 else {}))
     self._time("stash", st)
     self.times["stashed"] = self.times.get("stashed", 0) + n - keep
     self._storage("stash_in", max(0, s.n - keep * C), n - keep, True, slot=s.slot, entry_id=entry)
@@ -331,8 +342,9 @@ class SeqEngine:
       self._move(s, base)
       s.cap = need
       return True
-    # (idle ones right after it evicted, nothing moved)
-    if (win:=self._window(need - s.cap, force, after=s)) is not None:
+    # (idle ones right after it evicted, nothing moved. SEQ_COMPACT: not if the free rows in all are enough: the regions moved below instead)
+    enough = self.COMPACT and need - s.cap <= self.rows - sum(t.cap for t in self.seqs)
+    if not enough and (win:=self._window(need - s.cap, force, after=s)) is not None:
       self._evict_all(win[1], force)
       s.cap = need
       return True
@@ -386,6 +398,8 @@ class SeqEngine:
       if s.n and s.n < len(ids) and starts(ids, s.tokens, s.n): cand = (s, s.n, False)
       # (its checkpoint: a prompt that continues it, or is it (the same prompt again: the token after it sampled from it, nothing prefilled))
       elif s.ckpt and s.ckpt <= len(ids) and starts(ids, s.tokens, s.ckpt): cand = (s, s.ckpt, True)
+      # (SEQ_CKPT2: the one before it: the prompt shares the conversation up to there, not to the end of the last prompt)
+      elif self.CKPT2 and s.ckpt2 and s.ckpt2 <= len(ids) and starts(ids, s.tokens, s.ckpt2): cand = (s, s.ckpt2, True)
       else: continue
       if best is None or cand[1] > best[1]: best = cand
     # (a stashed one it continues further: back from host memory, prefilled from its end, or its checkpoint)
@@ -399,7 +413,10 @@ class SeqEngine:
     if best is not None and (stashed is None or best[1] >= scont(stashed)):
       s, start, restore = best
       s.active = True  # (not evicted for its own room)
-      if self.room(s, length, force): return best
+      if self.room(s, length, force):
+        # (resumed from the older checkpoint: it is the newest now, the other buffer is the next one to be written)
+        if self.CKPT2 and start == s.ckpt2 and start != s.ckpt: s.ckpt, s.ckpt2, s.cpar = s.ckpt2, s.ckpt, 1 - s.cpar
+        return best
       s.active = False
       return None
     # (the stashed one out of the stash while its slot and region are made: the evictions don't stash over it)
@@ -407,7 +424,12 @@ class SeqEngine:
     if stashed is not None: self.stashed.remove(stashed)
     # (a run of free rows and idle ones evicted, nothing moved: else the least recently used ones evicted, the fewest rows moved for a region)
     need, base = self._need(length), None
-    if need <= self.rows and (win:=self._window(need, force)) is not None and (win[1] or len(self.seqs) < self.nslots):
+    win = self._window(need, force) if need <= self.rows else None
+    # (SEQ_COMPACT: no gap of its size (a window with idle ones in it), but the free rows in all are enough: the regions moved, nothing evicted)
+    packed = self.COMPACT and (win is None or win[1]) and len(self.seqs) < self.nslots and need <= self.rows - sum(t.cap for t in self.seqs) and \
+             (pk:=self._pack(need)) is not None and pk[0] <= self.COMPACT_ROWS
+    if packed: pass
+    elif win is not None and (win[1] or len(self.seqs) < self.nslots):
       self._evict_all(win[1], force)
       base = win[0]
     elif need > self.rows or not self._make_room(need, True, None, force):
@@ -427,7 +449,8 @@ class SeqEngine:
     self._storage("stash_out", n, len(stashed.chunks), True, slot=s.slot, entry_id=stashed.entry, start=start)
     self.last_take_stash = True
     # (as it was: prefilled from its last token's states, or its checkpoint restored)
-    s.tokens, s.n, s.hrow, s.ckpt = list(stashed.tokens), n, stashed.hrow, stashed.ckpt
+    # (a restore writes the checkpoint to buffer 0, no older one)
+    s.tokens, s.n, s.hrow, s.ckpt, s.ckpt2, s.cpar = list(stashed.tokens), n, stashed.hrow, stashed.ckpt, 0, 0
     return s, start, start < n or start == len(ids)
 
   def cached(self, ids:list[int], touch:bool=False) -> int:
@@ -438,15 +461,33 @@ class SeqEngine:
     def cont(tokens:list[int], n:int, ckpt:int) -> int:
       if n and n < len(ids) and starts(ids, tokens, n, exact=False): return n
       return ckpt if ckpt and ckpt <= len(ids) and starts(ids, tokens, ckpt, exact=False) else 0
-    cands:list[tuple[int, Seq|Stashed]] = [(cont(s.tokens, s.n, s.ckpt), s) for s in self.seqs if not s.active] + \
+    cands:list[tuple[int, Seq|Stashed]] = [(max(cont(s.tokens, s.n, s.ckpt), cont(s.tokens, 0, s.ckpt2) if self.CKPT2 else 0), s)
+                                           for s in self.seqs if not s.active] + \
                                           [(cont(x.tokens, len(x.tokens), x.ckpt), x) for x in self.stashed]
     n, best = max(cands, key=lambda c: c[0], default=(0, None))
     if touch and n and best is not None: best.used = time.perf_counter()
     return n
 
+  def _ckpt_restore(self, s:Seq):
+    """the states of the checkpoint of s (the newest, in its buffer) restored"""
+    if self.CKPT2: self.model.seq_ckpt(False, s.slot, s.ckpt, par=s.cpar)
+    else: self.model.seq_ckpt(False, s.slot, s.ckpt)
+
+  def _ckpt_save(self, s:Seq, pos:int, resumed:bool):
+    """the checkpoint of s at pos saved. SEQ_CKPT2: into the buffer the newest one is not in if the conversation goes on (resumed: from a
+    checkpoint or its end: the newest is then a valid older one of it), else (a new conversation) into the first, no older one"""
+    if not self.CKPT2:
+      self.model.seq_ckpt(True, s.slot, pos)
+      s.ckpt = pos
+      return
+    keep = resumed and s.ckpt > 0
+    par = 1 - s.cpar if keep else 0
+    self.model.seq_ckpt(True, s.slot, pos, par=par)
+    s.ckpt2, s.ckpt, s.cpar = s.ckpt if keep else 0, pos, par
+
   def prefill_slice(self, s:Seq, ids:list[int], start:int, restore:bool, end:int):
     """the tokens of the prompt ids from start to end prefilled in s (its checkpoint restored first): the rest is prefilled from end"""
-    if restore: self.model.seq_ckpt(False, s.slot, s.ckpt)
+    if restore: self._ckpt_restore(s)
     self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, upto=end)
     s.tokens, s.n, s.hrow, s.used = ids[:end], end, 0, time.perf_counter()
 
@@ -456,13 +497,13 @@ class SeqEngine:
 
   def prefill(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, ...]) -> int:
     """the prompt ids prefilled in s from start (its checkpoint restored first): the token sampled after it"""
-    if restore: self.model.seq_ckpt(False, s.slot, s.ckpt)
+    if restore: self._ckpt_restore(s)
     # (a prompt that is its checkpoint: the token after it from the hidden state of its last token, restored)
     if restore and start == len(ids): first = self.model.seq_first(s.slot, s.base, start, temp)
     else:
       first = self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, temp)
       # (the end of the prompt: the checkpoint of the states there)
-      self.model.seq_ckpt(True, s.slot, len(ids))
+      self._ckpt_save(s, len(ids), restore or start > 0)
     s.tokens, s.n, s.hrow, s.ckpt, s.used = ids + [first], len(ids), 0, len(ids), time.perf_counter()
     s.mtp, s.j, s.par, s.y, s.temp = len(ids), 0, 1, [first] + [0]*self.k, temp
     return first
@@ -470,7 +511,7 @@ class SeqEngine:
   def mix_start(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, ...]):
     """a short prompt suffix starts forced decode steps, from its checkpoint or last token's states (no standalone prefill)"""
     assert 0 <= start < len(ids) and len(ids) - start <= self.model.SEQ_MIX_TOKENS
-    if restore: self.model.seq_ckpt(False, s.slot, s.ckpt)
+    if restore: self._ckpt_restore(s)
     self.model._seq_copy_call(False, s.slot, start, 0 if restore else s.hrow, keep=start > 0)
     # (loading a slot doesn't update SEQ_REPLAY's base; this first step has no seq_prefill copy-out to do it)
     self.model._seq_kbase[s.slot] = start
@@ -503,8 +544,8 @@ class SeqEngine:
       s.n, s.hrow = start + take, (1 - s.par)*(k+1) + j
       if s.mix and start + take == len(s.mix):
         # (the whole prompt is cached: future turns can restore its checkpoint; only the token after the prompt goes to the client)
-        self.model.seq_ckpt(True, s.slot, len(s.mix))
-        s.ckpt, s.mix = len(s.mix), []
+        self._ckpt_save(s, len(s.mix), 0 < s.ckpt <= len(s.mix))
+        s.mix = []
         ret.append([sampled[take-1]] if len(force) < k+1 else [])
       else: ret.append([] if s.mix else sampled[:take])
     return ret

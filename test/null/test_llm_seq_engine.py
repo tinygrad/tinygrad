@@ -23,8 +23,8 @@ class FakeModel:
   def seq_first(self, slot, base, pos, temp=0.0) -> int:
     self.calls.append(("first", slot, pos))
     return 8
-  def seq_ckpt(self, save, slot, pos): self.calls.append(("ckpt", save, slot, pos))
-  def seq_stash(self, save, slot, pos, segments, entry, n, hrow=0): self.calls.append(("stash", save, slot, n, entry, hrow))
+  def seq_ckpt(self, save, slot, pos, par=None): self.calls.append(("ckpt", save, slot, pos) + ((par,) if par is not None else ()))
+  def seq_stash(self, save, slot, pos, segments, entry, n, hrow=0, ckpt_par=None): self.calls.append(("stash", save, slot, n, entry, hrow))
   def seq_move(self, src, dst, n): self.calls.append(("move", src, dst, n))
   def _seq_copy_call(self, save, slot, pos, hrow, keep=True): self.calls.append(("copy", save, slot, pos, hrow, keep))
   def seq_step(self, seqs, forced=None):
@@ -296,6 +296,107 @@ class TestSeqWindow(unittest.TestCase):
     self.assertEqual([c for c in model.calls if c[0] == "move"], [])
     self.assertNotIn(seqs[1], eng.seqs)
     self.assertEqual(s.base, seqs[0].base + seqs[0].cap)
+
+class TestSeqCkpt2(unittest.TestCase):
+  """SEQ_CKPT2: two checkpoints a sequence: a prompt that diverges just before the end of the last prompt (the agent dropped a malformed reply
+  and sent a user message: the generation prompt at the end of the cached prompt is not shared) resumes from the older one, not from 0"""
+  GP = [900001, 900002, 900003, 900004]  # (the generation prompt: <|im_start|>assistant\n<think>\n)
+  def turns(self):
+    model = FakeModel()
+    eng = SeqEngine(model)
+    body1 = list(range(1000, 4000))
+    p1 = body1 + self.GP
+    p2 = p1 + list(range(5000, 5600)) + self.GP               # p1, then the reply (re-rendered) + an observation: it goes on from p1's end
+    p3 = p2[:-4] + list(range(7000, 7115)) + self.GP          # the reply dropped: a user error message after the tool message
+    return model, eng, p1, p2, p3
+  def run_turn(self, eng, ids):
+    s, start, restore = eng.take(ids, 100)
+    eng.prefill(s, ids, start, restore, (0.0, 1.0))
+    eng.step([s])
+    eng.stop(s, len(s.tokens))
+    return s, start, restore
+  def test_off_goes_cold(self):
+    model, eng, p1, p2, p3 = self.turns()
+    with patch.object(SeqEngine, "CKPT2", 0):
+      s1, *_ = self.run_turn(eng, p1)
+      s2, start2, _ = self.run_turn(eng, p2)
+      self.assertEqual((s2, start2), (s1, len(p1)))
+      s3, start3, restore3 = self.run_turn(eng, p3)
+    self.assertIsNot(s3, s2)
+    self.assertEqual((start3, restore3), (0, False))
+  def test_on_resumes_from_the_older_checkpoint(self):
+    model, eng, p1, p2, p3 = self.turns()
+    with patch.object(SeqEngine, "CKPT2", 1):
+      s1, *_ = self.run_turn(eng, p1)
+      self.assertEqual((s1.ckpt, s1.ckpt2, s1.cpar), (len(p1), 0, 0))
+      s2, start2, _ = self.run_turn(eng, p2)
+      self.assertEqual((s2, start2, s2.ckpt, s2.ckpt2, s2.cpar), (s1, len(p1), len(p2), len(p1), 1))
+      model.calls.clear()
+      s3, start3, restore3 = self.run_turn(eng, p3)
+    self.assertIs(s3, s2)
+    self.assertEqual((start3, restore3), (len(p1), True))
+    # the older checkpoint (buffer 0) restored, the new one written to the stale newest's buffer (1), the restored one kept as the older
+    self.assertEqual([c for c in model.calls if c[0] == "ckpt"], [("ckpt", False, s3.slot, len(p1), 0), ("ckpt", True, s3.slot, len(p3), 1)])
+    self.assertEqual((s3.ckpt, s3.ckpt2, s3.cpar), (len(p3), len(p1), 1))
+    self.assertEqual([c for c in model.calls if c[0] == "prefill"][0][2:], (len(p1), len(p3)))  # (only the rest prefilled)
+  def test_on_normal_turn_alternates(self):
+    model, eng, p1, p2, p3 = self.turns()
+    with patch.object(SeqEngine, "CKPT2", 1):
+      s, *_ = self.run_turn(eng, p1)
+      self.run_turn(eng, p2)
+      p4 = p2 + list(range(8000, 8300)) + self.GP
+      s4, start4, restore4 = self.run_turn(eng, p4)
+    self.assertEqual((s4, start4, restore4, s4.ckpt, s4.ckpt2, s4.cpar), (s, len(p2), True, len(p4), len(p2), 0))
+  def test_cached_sees_the_older_checkpoint(self):
+    model, eng, p1, p2, p3 = self.turns()
+    with patch.object(SeqEngine, "CKPT2", 1):
+      self.run_turn(eng, p1)
+      self.run_turn(eng, p2)
+      self.assertEqual(eng.cached(p3), len(p1))
+    with patch.object(SeqEngine, "CKPT2", 0): self.assertEqual(eng.cached(p3), 0)
+class TestSeqCompact(unittest.TestCase):
+  """SEQ_COMPACT: a region the free rows in all are enough for is made by moving regions, nothing evicted (default off: the idle ones evicted)"""
+  def layout(self):
+    # A, B, C idle, B's conversation ended: a gap in the middle and the tail, no gap of 24K, 25.5K free in all
+    model = CacheModel()
+    model.seq_slots = lambda: 8
+    eng = SeqEngine(model)
+    seqs = []
+    for i in range(3):
+      ids = [100000 * (i + 1) + j for j in range(18000)]
+      s, start, restore = eng.take(ids, 100, session_id=f"s{i}")
+      eng.prefill(s, ids, start, restore, (0.0, 1.0))
+      seqs.append(s)
+    for s in seqs: eng.stop(s, len(s.tokens))
+    eng.end_session("s1")
+    self.assertGreater(eng.rows - sum(s.cap for s in eng.seqs), 24100)
+    self.assertLess(max(c for _, c in eng._gaps()), 24100)
+    return model, eng, seqs
+  def test_off_evicts(self):
+    model, eng, seqs = self.layout()
+    with patch.object(SeqEngine, "STICKY", 0.0), patch.object(SeqEngine, "COMPACT", 0):
+      s, _, _ = eng.take(list(range(900000, 924000)), 100)
+    self.assertEqual(eng.evictions, 1)
+  def test_compact_moves_instead(self):
+    model, eng, seqs = self.layout()
+    with patch.object(SeqEngine, "STICKY", 0.0), patch.object(SeqEngine, "COMPACT", 1):
+      new = list(range(900000, 924000))
+      s, _, _ = eng.take(new, 100)
+    self.assertEqual((eng.evictions, eng.lost), (0, 0))
+    self.assertIn(seqs[0], eng.seqs)
+    self.assertIn(seqs[2], eng.seqs)
+    self.assertTrue([c for c in model.calls if c[0] == "move"])
+    # every resident region still holds its tokens' rows (the moves are copies), and the regions do not overlap
+    for t in (seqs[0], seqs[2]): self.assertEqual(model.cache[t.base:t.base + t.n], t.tokens[:t.n])
+    self.assertIn(s, eng.seqs)
+    regs = sorted((t.base, t.base + t.cap) for t in eng.seqs)
+    self.assertTrue(all(a[1] <= b[0] for a, b in zip(regs, regs[1:])))
+  def test_compact_rows_cap(self):
+    # more rows to move than SEQ_COMPACT_ROWS: the old path (evict)
+    model, eng, seqs = self.layout()
+    with patch.object(SeqEngine, "STICKY", 0.0), patch.object(SeqEngine, "COMPACT", 1), patch.object(SeqEngine, "COMPACT_ROWS", 100):
+      eng.take(list(range(900000, 924000)), 100)
+    self.assertEqual(eng.evictions, 1)
 
 class TestScheduleSeqs(unittest.TestCase):
   """the server's scheduling of sequences (schedule_seqs) on a fake model"""
