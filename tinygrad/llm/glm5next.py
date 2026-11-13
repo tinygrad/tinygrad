@@ -21,7 +21,7 @@ from tinygrad.llm.kernels.amd_glm import Linear, gated_delta_prefill, flash_atte
   flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, few_out_rows, index_scores, after_kernel, \
   host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, f16t_gemm, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_views, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, q4_rows, Q4_ROW, \
-  pool_index_shard
+  pool_index_shard, top_k_mask
 from tinygrad.llm.gguf import gguf_parse, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm.gguf_load import gguf_shard_units, _disk_bytes, _disk_location
 from tinygrad.uop.ops import resolve, Ops, AxisType, KernelInfo
@@ -711,9 +711,18 @@ def _host_ints(devs:str|tuple[str, ...], n:int) -> tuple[memoryview, Tensor]:
   mv, t = _host_buffer(devs, 4*n, dtypes.int32)
   return mv.cast('i'), t[None]
 
-def _temp_pair(t:float|tuple[float, float]) -> array.array:
+def _temp_pair(t:float|tuple[float, ...]) -> array.array:
   """a row's temperature and top_p (a temperature alone: top_p 1) for a step's host buffer"""
-  return array.array('f', t if isinstance(t, tuple) else (t, 1.0))
+  return array.array('f', t[:2] if isinstance(t, tuple) else (t, 1.0))  # (a top_k: the batch steps have none)
+
+def _temp_row(t:float|tuple[float, ...]) -> array.array:
+  """a row's temperature, top_p and top_k (a temperature alone: top_p 1; no top_k: 0, none) for the seq steps' host buffers (TEMP_W a row)"""
+  t = t if isinstance(t, tuple) else (t, 1.0)
+  return array.array('f', (*t, 0.0)[:TEMP_W] if len(t) < TEMP_W else t[:TEMP_W])
+TEMP_W = 3  # (the floats of a row of the seq steps' temperatures: temperature, top_p, top_k)
+# (SAMPLE_TOP_K: the sampled steps' graphs take their rows' top_k (8 rounds of counts over the vocabulary, exchanged when it's split): on
+# with a server's TOP_K, off (no cost, a request's top_k ignored) without)
+SAMPLE_TOP_K = getenv("SAMPLE_TOP_K", int(getenv("TOP_K", 0) > 0))
 
 def _hash_uniform(seed:Tensor, keys:Tensor, like:Tensor) -> Tensor:
   """
@@ -3104,7 +3113,11 @@ class Transformer:
       u = _hash_uniform(noise[0], noise[1], logits) if noise is not None else Tensor.rand_like(logits)
       # -log(u) at least 1-u (it is): the device's log of a u a few ulps below 1 is 0, its noise an infinity (a random token sampled)
       logits = z - hot.where(u.maximum(1e-12).log().neg().maximum(1 - u).log(), 0)
-      if tp.shape[1] == 2: logits = (nucleus(z, self.config.vocab_size, tp[:, 1:]) | hot.logical_not()).where(logits, -math.inf)
+      if tp.shape[1] >= 3 and SAMPLE_TOP_K:
+        # (a row's top_k (0: none) first, as HF's warpers: the nucleus is the top_p of the top k's distribution)
+        keep = top_k_mask(z, self.config.vocab_size, tp[:, 2:3]) | hot.logical_not()
+        z, logits = keep.where(z, -math.inf), keep.where(logits, -math.inf)
+      if tp.shape[1] >= 2: logits = (nucleus(z, self.config.vocab_size, tp[:, 1:2]) | hot.logical_not()).where(logits, -math.inf)
     # a split output: every device takes the max of its part
     if (tok:=sharded_argmax(logits, self.config.vocab_size)) is not None: return tok
     return _argmax_rows(logits.to(device)[:, :self.config.vocab_size])
@@ -3513,7 +3526,7 @@ class Transformer:
     self._slot_hist_set(slot, tokens[:start])
     return start
 
-  def slot_first(self, slot:int, temp:float|tuple[float, float]) -> int:
+  def slot_first(self, slot:int, temp:float|tuple[float, ...]) -> int:
     """the token after the prompt whose checkpoint is in slot: sampled from its hidden state, without another recurrent prefill"""
     self._init_slots()
     pair = _temp_pair(temp)
@@ -3752,7 +3765,7 @@ class Transformer:
   def _batch_positions(self, positions:list[int]) -> list[UOp]:
     return [UOp.variable(f"batch_pos{i}", 0, SLOT_SPAN*self.batch_ctx()-1).bind(pos) for i, pos in enumerate(positions)]
 
-  def batch_step(self, rows:list[tuple[int, int, float|tuple[float, float]]]) -> list[int]:
+  def batch_step(self, rows:list[tuple[int, int, float|tuple[float, ...]]]) -> list[int]:
     """
     a step of batched decoding: rows (token, position, temperature (or temperature and top_p)) of the slots 0..len(rows)-1, their sampled tokens
     """
@@ -3935,7 +3948,7 @@ class Transformer:
     return [UOp.variable(f"bpf_count{g}", 1, max(self.BPF_P, *self.MIX_PS)).bind(c) for g, c in enumerate(counts)] + \
            [UOp.variable(f"bpf_slot{g}", 0, self.batch_slots()-1).bind(s) for g, s in enumerate(slots)] + \
            [UOp.variable(f"bpf_start{g}", 0, SLOT_SPAN*self.batch_ctx()-1).bind(st) for g, st in enumerate(starts or [0]*len(counts))]
-  def batch_prefill(self, prompts:list[tuple[list[int], int, float|tuple[float, float]]], starts:list[int]|None=None, P:int|None=None) -> list[int]:
+  def batch_prefill(self, prompts:list[tuple[list[int], int, float|tuple[float, ...]]], starts:list[int]|None=None, P:int|None=None) -> list[int]:
     """
     prefills of prompts (tokens, slot, temperature) (at most BPF_G of BPF_P tokens) into their slots in one step: the token after every one.
     starts: the positions they start at (a conversation continued from its states in the slot at the position), None: 0. P: the step's rows
@@ -3970,7 +3983,7 @@ class Transformer:
     return [v for g, (mp, j, par) in enumerate(seqs) for v in (UOp.variable(f"bspec_mtp{g}", 0, ctx-1).bind(mp),
             UOp.variable(f"bspec_j{g}", 0, k).bind(j), UOp.variable(f"bspec_par{g}", 0, 1).bind(par))]
 
-  def batch_spec_step(self, seqs:list[tuple[list[int], int, int, int, float|tuple[float, float]]]) -> list[tuple[list[int], list[int]]]:
+  def batch_spec_step(self, seqs:list[tuple[list[int], int, int, int, float|tuple[float, ...]]]) -> list[tuple[list[int], list[int]]]:
     """
     a step of batched speculative decoding of the slots 0..len(seqs)-1: seqs (the k+1 tokens of the last step, mtp_pos, j, par, temperature)
     of every one (see _spec_steps), their k+1 sampled tokens and k drafts
@@ -3984,7 +3997,7 @@ class Transformer:
     seqs = seqs + [([0]*(k+1), 0, 0, 1, 0.0)] * (m - n)
     # (the step's tokens and temperatures written at once, the host's time is the devices' idle time between steps)
     self._bspec_host_in[:m*(k+1)] = array.array('i', [t for y, _, _, _, _ in seqs for t in y])
-    self._batch_host_temp[:2*m] = array.array('f', [v for *_, temp in seqs for v in (temp if isinstance(temp, tuple) else (temp, 1.0))])
+    self._batch_host_temp[:2*m] = array.array('f', [v for *_, temp in seqs for v in _temp_pair(temp)])
     self._bspec_host_out[:m*(2*k+1)] = array.array('i', [-1] * (m*(2*k+1)))
     jit = self._bspec_jit(m)
     if (cap:=getattr(jit, "captured", None)) is not None and getenv("BSPEC_FAST_CALL", 1):
@@ -4016,8 +4029,8 @@ class Transformer:
       self._mix_jits[key] = TinyJit(functools.partial(self.forward_batch_spec, prompts=(G, P)), capture_first=True, scratch=self._scratch)
     return self._mix_jits[key]
 
-  def batch_mixed_step(self, seqs:list[tuple[list[int], int, int, int, float|tuple[float, float]]],
-                       prompts:list[tuple[list[int], int, float|tuple[float, float], int]], P:int|None=None) \
+  def batch_mixed_step(self, seqs:list[tuple[list[int], int, int, int, float|tuple[float, ...]]],
+                       prompts:list[tuple[list[int], int, float|tuple[float, ...], int]], P:int|None=None) \
                        -> tuple[list[tuple[list[int], list[int]]], list[int]]:
     """
     a step of batched speculative decoding (as batch_spec_step's) with the prefills of prompts (tokens, slot, temperature, start): their
@@ -4031,7 +4044,7 @@ class Transformer:
     P = P or cast(int, self.mix_class(max(len(t) for t, _, _, _ in prompts)))
     assert 0 < G <= self.mix_landing() and all(0 < len(t) <= P and st + P <= self.batch_ctx() for t, _, _, st in prompts)
     seqs = seqs + [([0]*(k+1), 0, 0, 1, 0.0)] * (m - n)
-    def pair(temp:float|tuple[float, float]) -> tuple[float, float]: return temp if isinstance(temp, tuple) else (temp, 1.0)
+    def pair(temp:float|tuple[float, ...]) -> tuple[float, ...]: return temp[:2] if isinstance(temp, tuple) else (temp, 1.0)
     self._bspec_host_in[:m*(k+1)] = array.array('i', [t for y, _, _, _, _ in seqs for t in y])
     self._batch_host_temp[:2*(m+G)] = array.array('f', [v for *_, temp in seqs for v in pair(temp)] + [v for _, _, temp, _ in prompts
                                                                                                      for v in pair(temp)])
@@ -4120,10 +4133,10 @@ class Transformer:
     self._seq_host_in, self._seq_in = _host_ints(devs, m*(k+1))
     # (a mixed step's prompt's at 2m, the step's seed last)
     self._seq_m = m
-    tmv, self._seq_temp = _host_buffer(devs, 8*m + 12, dtypes.float32)
+    tmv, self._seq_temp = _host_buffer(devs, 4*TEMP_W*(m + 1) + 4, dtypes.float32)
     self._seq_host_temp = tmv.cast('f')
     # (a prefill's temperature and top_p: in host memory, a new value isn't a new tensor (its realize walks every tensor of the model))
-    tmv, self._seq_pf_temp = _host_buffer(devs, 8, dtypes.float32)
+    tmv, self._seq_pf_temp = _host_buffer(devs, 4*TEMP_W, dtypes.float32)
     self._seq_pf_host_temp = tmv.cast('f')
     self._seq_host_out, self._seq_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, m*(2*k+1) + 1)
     # (SEQ_COPY_SCRATCH=1: their intermediates in the jits' shared arenas, not their own (~140 MB a card at 30 slots): one runs at a time)
@@ -4601,7 +4614,7 @@ class Transformer:
       call()
       if DEBUG >= 1: print(f"seq_warmup: {name} run in {time.perf_counter()-st:.2f}s")
 
-  def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, float]=0.0,
+  def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, ...]=0.0,
                   upto:int|None=None) -> int|None:
     """
     the tokens from start of the sequence of slot `slot` (its region of the caches from base) prefilled, from its states of position start (the
@@ -4628,7 +4641,7 @@ class Transformer:
     for d in devs: Device[d].synchronize()  # (a step may still read the token buffer)
     self._token_host[base+start:base+L+1] = array.array('i', tokens[start:] + [-1])
     self._seq_copy_call(False, slot, start, hrow, keep=start > 0)
-    self._seq_pf_host_temp[:2] = array.array('f', temp if isinstance(temp, tuple) else (temp, 1.0))
+    self._seq_pf_host_temp[:TEMP_W] = _temp_row(temp)
     pos = start
     for n in self._seq_chunks(L - start):
       self._seq_chunk(base, pos, n)
@@ -4643,7 +4656,7 @@ class Transformer:
     self._token_buf[:, at:at+1].assign(tok.reshape(1, 1).cast(self._token_buf.dtype)).realize()
   def _first_vars(self, slot:int, at:int) -> list[UOp]:
     return [UOp.variable("first_slot", 0, self.seq_slots()).bind(slot), UOp.variable("first_at", 0, self._token_rows()-1).bind(at)]
-  def seq_first(self, slot:int, base:int, pos:int, temp:float|tuple[float, float]=0.0) -> int:
+  def seq_first(self, slot:int, base:int, pos:int, temp:float|tuple[float, ...]=0.0) -> int:
     """
     the token after the sequence of slot `slot` (its region from base) of pos tokens, from its states there (its hidden state of the last token
     its row 0: a prompt's checkpoint restored, see SeqEngine.prefill): a prompt that is all in the caches has no token to prefill
@@ -4653,7 +4666,7 @@ class Transformer:
     if not hasattr(self, "_seq_first_jit"): self._seq_first_jit = TinyJit(self._seq_first, capture_first=True)
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (a step may read the token buffer)
     self._token_host[base+pos] = -1
-    self._seq_pf_host_temp[:2] = array.array('f', temp if isinstance(temp, tuple) else (temp, 1.0))
+    self._seq_pf_host_temp[:TEMP_W] = _temp_row(temp)
     self._seq_first_jit(*self._first_vars(slot, base+pos))
     return self._wait_host(lambda: self._token_host[base + pos], "the token after a prompt")
 
@@ -4710,7 +4723,7 @@ class Transformer:
     K = self.config.spec_drafts
     slots, bases, H = self._ints(tuple(sl)), self._ints(tuple(bs)), 2*(K+1)
     y = self._seq_in[:, :G*(k+1)]
-    temps = self._seq_temp[:2*G].reshape(G, 2)
+    temps = self._seq_temp[:TEMP_W*G].reshape(G, TEMP_W)
     def batch(pos:list[UOp], R:int) -> SeqBatch: return SeqBatch(G, R, slots, bases, self._ints(tuple(pos)))
     # (k == K: the expressions as before, the same graph)
     last = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + (1-p)*(K+1), s*H + ((2-p)*(K+1) if k == K else (1-p)*(K+1) + k+1)), None))
@@ -4745,7 +4758,7 @@ class Transformer:
       hs = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + p*(K+1), s*H + ((p+1)*(K+1) if k == K else p*(K+1) + k+1)), None))
                         .assign(hn_all[g*(k+1):(g+1)*(k+1)])
                         for g, (s, p) in enumerate(zip(sl, ps))])
-      tt = temps.reshape(G, 1, 2).expand(G, k+1, 2).reshape(G*(k+1), 2)
+      tt = temps.reshape(G, 1, TEMP_W).expand(G, k+1, TEMP_W).reshape(G*(k+1), TEMP_W)
       tok = self._sample(hs, tt, y.device, (seed, Tensor.arange(G*(k+1))))
     finally: _seq_batch[0], _batch_rows[0], Q8_ROWS_I8[0] = None, None, False
     q8_quantize_cache_clear()  # don't keep the graph alive
@@ -4769,7 +4782,7 @@ class Transformer:
     sl, bs, mp, js, ps, kbs = (list(vs[i::6]) for i in range(6))
     slots, bases, H = self._ints(tuple(sl)), self._ints(tuple(bs)), 2*(k+1)
     y = self._seq_in[:, :G*(k+1)]
-    temps = self._seq_temp[:2*G].reshape(G, 2)
+    temps = self._seq_temp[:TEMP_W*G].reshape(G, TEMP_W)
     def batch(pos:list[UOp], R:int) -> SeqBatch: return SeqBatch(G, R, slots, bases, self._ints(tuple(pos)))
     # the hidden states of the last step's tokens: every slot's rows of parity 1-par
     last = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + (1-p)*(k+1), s*H + (2-p)*(k+1)), None)) for s, p in zip(sl, ps)])
@@ -4856,12 +4869,12 @@ class Transformer:
       hsv = x.flatten(2)[0].float()
       hs = Tensor.cat(*[self.seq_spec_h.shrink(((s*H + p*(k+1), s*H + (p+1)*(k+1)), None)).assign(hsv[g*(k+1):(g+1)*(k+1)])
                         for g, (s, p) in enumerate(zip(sl, ps))])
-      tt = temps.reshape(G, 1, 2).expand(G, k+1, 2).reshape(G*(k+1), 2)
+      tt = temps.reshape(G, 1, TEMP_W).expand(G, k+1, TEMP_W).reshape(G*(k+1), TEMP_W)
       hrows, keys = hs, Tensor.arange(G*(k+1))
       if pv:
         # (the prompt's at its temperature, the noise of a row of no sequence's)
         hrows, keys = hs.cat(last), Tensor.arange(G*(k+1) + 1)
-        tt = tt.cat(self._seq_temp[2*self._seq_m:2*self._seq_m+2].reshape(1, 2))
+        tt = tt.cat(self._seq_temp[TEMP_W*self._seq_m:TEMP_W*(self._seq_m+1)].reshape(1, TEMP_W))
       tok = self._sample(self._hc_out(hrows.reshape(1, -1, hc.count, hrows.shape[-1] // hc.count))[0], tt, y.device, (seed, keys))
     finally: _seq_batch[0], _batch_rows[0], _seq_prompt[0], Q8_ROWS_I8[0], FLAG_LANE[0] = None, None, None, False, prev_lane
     q8_quantize_cache_clear()  # don't keep the graph alive
@@ -4915,8 +4928,8 @@ class Transformer:
     return b
 
   step_times = [0.0, 0.0, 0.0]  # (the launches' and the waits' time of the steps, see the server's status line)
-  def seq_step(self, seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, float]]],
-               prompt:tuple[int, int, int, int, float|tuple[float, float]]|None=None, drafts:int|None=None) -> list[tuple[list[int], list[int]]]:
+  def seq_step(self, seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, ...]]],
+               prompt:tuple[int, int, int, int, float|tuple[float, ...]]|None=None, drafts:int|None=None) -> list[tuple[list[int], list[int]]]:
     """
     a step of speculative decoding of sequences sharing the caches: seqs (slot, base, mtp_pos, j, par, the k+1 tokens of the last step,
     temperature) of every one (see _spec_steps), their k+1 sampled tokens and k drafts. prompt (a mixed step, see mix_size): (slot, base, start,
@@ -4936,7 +4949,7 @@ class Transformer:
     # (the sequences past n: the padding slot's at position 0 in the padding region)
     seqs = seqs + [(self.seq_slots(), self.seq_rows(), 0, 0, 1, [0]*(k+1), 0.0)] * (m - n)
     self._seq_host_in[:m*(k+1)] = array.array('i', [t for *_, y, _ in seqs for t in (list(y) + [0]*k)[:k+1]])
-    self._seq_host_temp[:2*m] = array.array('f', [v for *_, temp in seqs for v in (temp if isinstance(temp, tuple) else (temp, 1.0))])
+    self._seq_host_temp[:TEMP_W*m] = array.array('f', [v for *_, temp in seqs for v in _temp_row(temp)])
     # (the step's seed, see forward_seqs)
     self._seq_host_temp[-1] = array.array('f', bytes(random.getrandbits(8) for _ in range(4)) if not getenv("SEQ_SEED") else
                                           int(getenv("SEQ_SEED")).to_bytes(4, "little"))[0]
@@ -4945,7 +4958,7 @@ class Transformer:
     pvals:dict[str, int] = {}
     if prompt is not None:
       psl, pb, pst, pcnt, ptemp = prompt
-      self._seq_host_temp[2*self._seq_m:2*self._seq_m+2] = array.array('f', ptemp if isinstance(ptemp, tuple) else (ptemp, 1.0))
+      self._seq_host_temp[TEMP_W*self._seq_m:TEMP_W*(self._seq_m+1)] = _temp_row(ptemp)
       pvals = {"seqp_slot": psl, "seqp_base": pb, "seqp_start": pst, "seqp_count": pcnt}
     jit, st = self._seq_jit(m, prompt is not None, k), time.perf_counter()
     if (cap:=getattr(jit, "captured", None)) is not None:

@@ -257,6 +257,12 @@ def sampling_params(body:dict, temperature:float) -> tuple[int|None, float, floa
     raise ValueError(f"max_tokens must be an integer >= 1, not {mt!r}")
   return mt, t if (t:=num("temperature", 0, 100)) is not None else temperature, num("top_p", 0, 1)
 
+def sampling_top_k(body:dict) -> int|None:
+  """a request's top_k checked (None: the server's, TOP_K; 0 or -1: none, as vLLM's -1)"""
+  if (v:=body.get("top_k")) is None: return None
+  if isinstance(v, bool) or not isinstance(v, int) or v < -1: raise ValueError(f"top_k must be an integer >= -1, not {v!r}")
+  return max(v, 0)
+
 class Handler(VizHandler):
   server: LLMServer
   def log_request(self, code='-', size='-'): pass
@@ -266,7 +272,8 @@ class Handler(VizHandler):
     elif self.path.startswith("/assets/"): super().do_GET()
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
-                reasoning:bool=False, log:str="", keepalive:float|None=None, top_p:float|None=None, continuous_usage:bool=False):
+                reasoning:bool=False, log:str="", keepalive:float|None=None, top_p:float|None=None, continuous_usage:bool=False,
+                top_k:int|None=None):
     tok = self.server.tok
     prompt_tokens = len(ids)
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
@@ -286,7 +293,11 @@ class Handler(VizHandler):
       return re.sub(r"\s+", "_", value)[:limit] if isinstance(value, str) else ""
     sid = clean(self.headers.get("X-Session-ID", ""), 4096)
     bench = clean(self.headers.get("X-Bench-Tag", ""), 96)
-    req = Request(ids, log, max_tokens, temperature, self.server.top_p if top_p is None else top_p, session_id=sid, bench_tag=bench)
+    if top_k and not self.server.sample_top_k:
+      if not self.server._top_k_said: stderr_log(f"top_k {top_k} ignored: the server runs without SAMPLE_TOP_K\n")
+      self.server._top_k_said, top_k = True, 0
+    req = Request(ids, log, max_tokens, temperature, self.server.top_p if top_p is None else top_p, session_id=sid, bench_tag=bench,
+                  top_k=self.server.top_k if top_k is None else top_k)
     # (SUPERSEDE: the same prompt again from the same session (X-Session-ID) while its request runs is a client's retry of it (a client that
     # timed out behind a proxy that doesn't close our connection): the older one stops, it isn't decoded for nobody)
     key = (sid, len(ids), hash(tuple(ids))) if isinstance(sid, str) and sid and getenv("SUPERSEDE", 1) else None
@@ -428,14 +439,14 @@ class Handler(VizHandler):
           status_code=400)
 
       # reply
-      try: max_tokens, temperature, top_p = sampling_params(body, self.server.temperature)
+      try: (max_tokens, temperature, top_p), top_k = sampling_params(body, self.server.temperature), sampling_top_k(body)
       except ValueError as e: return self.bad_request(str(e))
       hold = 0.0 if body.get("stream") else HOLD_JSON
       include_usage = not body.get("stream") or (body.get("stream_options") or {}).get("include_usage", False)
       chunks = self.run_model(ids, str(body.get("model") or self.server.model_name), include_usage,
                               continuous_usage=include_usage and bool((body.get("stream_options") or {}).get("continuous_usage_stats", False)),
                               max_tokens=max_tokens, temperature=temperature, reasoning=rendered.rstrip().endswith(THINK_STARTS), log=log,
-                              top_p=top_p, keepalive=hold or None)
+                              top_p=top_p, top_k=top_k, keepalive=hold or None)
       if body.get("stream"): self.stream_json(chunks)
       else:
         held = False
@@ -487,7 +498,7 @@ class Handler(VizHandler):
       normalize_messages(msgs)
       rendered = self.render(msgs, tools, body)
       # (the API's default temperature is 1)
-      max_tokens, temperature, top_p = sampling_params(body, 1.0)
+      (max_tokens, temperature, top_p), top_k = sampling_params(body, 1.0), sampling_top_k(body)
     except Exception as err:
       return self.send_data(json.dumps({"type": "error", "error": {"type": "invalid_request_error", "message": f"{type(err).__name__}: {err}"}})
                             .encode(), status_code=400)
@@ -501,7 +512,7 @@ class Handler(VizHandler):
                                         "message": f"prompt is too long: {len(ids)} tokens > {n-1} maximum"}}).encode(), status_code=400)
     chunks = self.run_model(ids, str(body.get("model") or self.server.model_name), True, max_tokens=max_tokens, temperature=temperature,
                             reasoning=rendered.rstrip().endswith(THINK_STARTS), log=log, keepalive=KEEPALIVE if body.get("stream") else None,
-                            top_p=top_p)
+                            top_p=top_p, top_k=top_k)
     events = anthropic_events(chunks, str(body.get("model") or self.server.model_name), len(ids))
     try:
       if body.get("stream"):
@@ -530,8 +541,9 @@ def trace(msg:str):
 class Request:
   """a request to the model: its prompt, its sampled tokens come back in out (None: the end), it's cancelled when the client goes away"""
   def __init__(self, ids:list[int], log:str, max_tokens:int|None, temperature:float, top_p:float=1.0,
-               session_id:str="", bench_tag:str=""):
+               session_id:str="", bench_tag:str="", top_k:int=0):
     self.ids, self.max_tokens, self.temperature, self.top_p, self.rid = ids, max_tokens, temperature, top_p, next(_rids)
+    self.top_k = top_k
     self.session_id, self.bench_tag = session_id, bench_tag
     self.log = f"{utc_ms()} {log}rid:{self.rid} sid:{session_id or '-'} bench:{bench_tag or '-'} --  "
     self.cancelled, self.finish_reason, self.checked, self.zeros, self.superseded = False, "stop", 0.0, 0, False
@@ -558,6 +570,10 @@ class Request:
     # (decoded in a slot: a copy of the model's checkpoint at the end of its prompt, see LLMServer.ckpt_keep)
     self.ckpt_buf: typing.Any = None
     self.ckpt_tokens: list[int] = []
+  @property
+  def sampling(self) -> tuple[float, ...]:
+    """its temperature, top_p and (if it has one) top_k: the model's row of them (the seq steps take a top_k, the batch steps don't)"""
+    return (self.temperature, self.top_p, float(self.top_k)) if self.top_k > 0 else (self.temperature, self.top_p)
   def spec_start(self, first:int, pos:int, k:int):
     """the slot's state after a prefill (or the model alone): the token at pos is the next step's input"""
     self.y, self.mtp, self.j, self.par, self.pos = [first] + [0]*k, pos, 0, 1, pos
@@ -623,6 +639,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.model: typing.Any = model
     self.model_name, self.tok, self.template, self.top_p = model_name, tok, template, top_p
     self.temperature = temperature
+    self.top_k = max(getenv("TOP_K", 0), 0)  # a request's without one (TOP_K: the config's, e.g. Qwen's 20; 0: none)
+    # (the models' graphs take a top_k with SAMPLE_TOP_K (on with TOP_K): without it a request's top_k is ignored, said once)
+    self.sample_top_k, self._top_k_said = bool(getenv("SAMPLE_TOP_K", int(self.top_k > 0))), False
     self.waiting: queue.Queue[Request] = queue.Queue()
     self.inflight = 0  # the requests taken by the model (decoded, or waiting for it): the status line's
     self.telemetry = Telemetry(getenv("TELEMETRY_LOG", ""))
@@ -1120,10 +1139,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       pending.remove(req)
       self.landing.append((req, landing, start, start))
       busy.add(landing)
-  def mix_prompts(self) -> list[tuple[list[int], int, float|tuple[float, float], int]]:
+  def mix_prompts(self) -> list[tuple[list[int], int, float|tuple[float, ...], int]]:
     """(MIX) the prompts of a mixed step: the next chunk of every landing one (as many tokens as the model's largest prompt of a step)"""
     most = max(self.model.MIX_PS)
-    return [((req.ids + req.generated)[pos:pos+most], landing, (req.temperature, req.top_p), pos) for req, landing, _, pos in self.landing]
+    return [((req.ids + req.generated)[pos:pos+most], landing, req.sampling, pos) for req, landing, _, pos in self.landing]
   def mix_done(self, firsts:list[int], active:dict):
     """(MIX) the chunks of a mixed step done: the prompts done from their landing slots into free ones, decoded from their first tokens"""
     model, k, most, left = self.model, self.spec, max(self.model.MIX_PS), []
@@ -1187,12 +1206,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     # (the steps' rows: the class of the most new tokens, BPF_P if past them (chunks of it))
     P = c if callable(getattr(model, "bpf_class", None)) and (c:=model.bpf_class(max(l - s for l, s in zip(lens, starts)))) else model.BPF_P
     while (todo:=[g for g in range(len(batch)) if pos[g] < lens[g]]):
-      chunks:list[tuple[list[int], int, float|tuple[float, float]]] = \
-        [((batch[g].ids + batch[g].generated)[pos[g]:pos[g] + P], free[g], (batch[g].temperature, batch[g].top_p)) for g in todo]
+      chunks:list[tuple[list[int], int, float|tuple[float, ...]]] = \
+        [((batch[g].ids + batch[g].generated)[pos[g]:pos[g] + P], free[g], batch[g].sampling) for g in todo]
       outs = model.batch_prefill(chunks, starts=[pos[g] for g in todo], P=P)
       for g, out in zip(todo, outs): pos[g], firsts[g] = min(lens[g], pos[g] + P), out
     for g in range(len(batch)):
-      if starts[g] == lens[g]: firsts[g] = model.slot_first(free[g], (batch[g].temperature, batch[g].top_p))
+      if starts[g] == lens[g]: firsts[g] = model.slot_first(free[g], batch[g].sampling)
     prefill_time = time.perf_counter() - _p0
     self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(batch), self.stats.prefill_time + prefill_time
     if (telemetry:=getattr(self, "telemetry", None)) is not None:
@@ -1425,7 +1444,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           c.fill, c.cold = (ids, start, restore), len(ids) - start > self.COLD_TOKENS
           if active and 0 < len(ids) - start <= mix_tokens:
             # (SEQ_MIX_TOKENS: force this short suffix in the draft slots of the ordinary steps, beside the other sequences)
-            eng.mix_start(job, ids, start, restore, (c.temperature, c.top_p))
+            eng.mix_start(job, ids, start, restore, c.sampling)
             active[job] = c
             trace(f"seq_mix_admit req={c.rid} rows={len(ids)-start} cached={start} active={len(active)}")
             job = None
@@ -1449,7 +1468,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           st = time.perf_counter()
           try:
             if end < len(ids): eng.prefill_slice(job, ids, pos, restore, end)
-            else: first = eng.prefill(job, ids, pos, restore, (req.temperature, req.top_p))
+            else: first = eng.prefill(job, ids, pos, restore, req.sampling)
           except Exception as e:
             traceback.print_exc()
             del filling[job]
@@ -1599,7 +1618,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           _p0 = time.perf_counter()
           free = [i for i in range(slots) if i not in self.taken(active)][:len(short)]
           self.slot_taken(*free)
-          firsts = model.batch_prefill([(r.ids, slot, (r.temperature, r.top_p)) for r, slot in zip(short, free)])
+          firsts = model.batch_prefill([(r.ids, slot, r.sampling) for r, slot in zip(short, free)])
           prefill_time = time.perf_counter() - _p0
           self.stats.prefills, self.stats.prefill_time = self.stats.prefills + len(short), self.stats.prefill_time + prefill_time
           self.telemetry.prefill(sum(len(r.ids) for r in short), prefill_time, False, len(short))
@@ -1653,15 +1672,15 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           hi = max(active, default=-1) + 1
           if self.partner: hi = next(m for m in model.batch_sizes() if m >= max(hi, max(self.partner.values()) + 1))
           if self.landing and self.partner: hi = max(model.mix_sizes())
-          seqs:list[tuple[list[int], int, int, int, float|tuple[float, float]]] = \
-            [(active[i].y, active[i].mtp, active[i].j, active[i].par, (active[i].temperature, active[i].top_p)) if i in active else
+          seqs:list[tuple[list[int], int, int, int, float|tuple[float, ...]]] = \
+            [(active[i].y, active[i].mtp, active[i].j, active[i].par, active[i].sampling) if i in active else
              ([0]*(k+1), model.batch_ctx() - k - 2 if i in self.partner.values() else 0, 0, 1, 0.0) for i in range(hi)]
           if self.landing:
             prompts = self.mix_prompts()
             trace("mix step " + " ".join(f"{r.rid}@{pos}+{len(t)}" for (r, _, _, pos), (t, *_) in zip(self.landing, prompts)))
             spec, firsts = model.batch_mixed_step(seqs, prompts)
           else: spec = model.batch_spec_step(seqs)
-        else: out = model.batch_step([(active[i].generated[-1], active[i].pos, (active[i].temperature, active[i].top_p)) if i in active else
+        else: out = model.batch_step([(active[i].generated[-1], active[i].pos, active[i].sampling) if i in active else
                                       (0, 0, 0.0)
                                       for i in range(max(active)+1)])
         step_time = time.perf_counter() - _t0
