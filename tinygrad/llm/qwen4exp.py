@@ -2362,15 +2362,18 @@ class Transformer:
     # every slot's hidden states (the streams) of the last step's tokens, two parities of k+1
     self.seq_spec_h = _zeros(n*2*(k+1), self._spec_dim, device=devs)
     # every slot's checkpoint: its states of a position (the end of its last prompt), the hidden state of the last token
-    self.seq_ckpt_h = _zeros(n, self._spec_dim, device=devs)
+    # (SEQ_CKPT2: two checkpoints a slot, in two buffers: the pools have 2 rows a slot, buffer par at row slot*2+par, see SeqEngine.CKPT2)
+    CK = 2 if getenv("SEQ_CKPT2", 0) else 1
+    self.seq_ckpt_h = _zeros(n*CK, self._spec_dim, device=devs)
     # (the checkpoints' recurrent states in host memory: a copy a turn, the device memory more slots'. SEQ_CKPT_HOST=1 (default off): their
     # conv states' and the indexers' too (C2: ~5 MB a slot a device), the same copies)
     ckpt_host = bool(getenv("SEQ_CKPT_HOST", 0))
-    self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]), host=True, views=0)[0]] +
-                            [_slot_pool(n, p, (1, *p.shape[1:]), host=ckpt_host, views=0)[0] for p in b.pool_conv]
+    self.seq_ckpt_states = [[_slot_pool(n*CK, b.pool_rec, (1, *b.pool_rec.shape[1:]), host=True, views=0)[0]] +
+                            [_slot_pool(n*CK, p, (1, *p.shape[1:]), host=ckpt_host, views=0)[0] for p in b.pool_conv]
                             for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
     # (and the indexers' states)
-    self.seq_ckpt_idx = [_slot_pool(n, idx.pool_state, (1, *idx.pool_state.shape[1:]), host=ckpt_host, views=0)[0] for idx in self._indexers()]
+    self.seq_ckpt_idx = [_slot_pool(n*CK, idx.pool_state, (1, *idx.pool_state.shape[1:]), host=ckpt_host, views=0)[0] for idx in self._indexers()]
+    self._seq_ckpt_ck = CK
     self._spec_init()
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self._token_rows())
     # in host memory: a step's input tokens, the temperature and top_p of every sequence, its sampled tokens and drafts (written by one device)
@@ -2592,7 +2595,7 @@ class Transformer:
           pairs.append((rows(dst.reshape(N, -1, int(dst.shape[-1])), c, n, 1), rows(src.reshape(N, -1, int(src.shape[-1])), r, n, 1)))
         else: pairs.append((rows(dst, c, n, axis), rows(src, r, n, axis)))
     Tensor.realize(*saves, *[x.assign(d) for d, x in pairs])
-  def _stash_state_copy(self, save:bool, slot:UOp, entry:UOp, ps:UOp, pc:UOp, hrow:UOp):
+  def _stash_state_copy(self, save:bool, slot:UOp, entry:UOp, ps:UOp, pc:UOp, hrow:UOp, cslot:UOp):
     """the states of slot of a position (its rows ps of the recurrent states, pc of the conv ones, hrow of the hidden states) and its checkpoint
     into entry of the stash (save), or back"""
     def rows(t:Tensor, at:UOp) -> Tensor: return t.shrink(((at, at+1),) + (None,)*(t.ndim-1))
@@ -2602,20 +2605,22 @@ class Transformer:
         S, SC = int(b.slot_rec[0].shape[0]), int(b.slot_conv[0][0].shape[0])
         slots += [rows(b.pool_rec, slot*S + ps)] + [rows(p, slot*SC + pc) for p in b.pool_conv]
     slots.append(rows(self.seq_spec_h, slot*H + hrow))
-    slots += [rows(t, slot) for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
+    slots += [rows(t, cslot) for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
     # (the indexers' states of the position, and of the checkpoint)
-    slots += [rows(idx.pool_state, slot*idx.SC + pc) for idx in self._indexers()] + [rows(t, slot) for t in self.seq_ckpt_idx]
+    slots += [rows(idx.pool_state, slot*idx.SC + pc) for idx in self._indexers()] + [rows(t, cslot) for t in self.seq_ckpt_idx]
     pairs = [(rows(st, entry), x) for st, x in zip(self._stash_state, slots)]
     Tensor.realize(*[(d.assign(x) if save else x.assign(d)) for d, x in pairs])
-  def _stash_state_vars(self, slot:int, entry:int, pos:int, hrow:int) -> list[UOp]:
+  def _stash_state_vars(self, slot:int, entry:int, pos:int, hrow:int, ckpt_par:int=0) -> list[UOp]:
     k = self.config.spec_drafts
     S, SC = self._seq_S()
+    CK = self._seq_ckpt_ck
     return [UOp.variable("stash_slot", 0, self.seq_slots()).bind(slot), UOp.variable("stash_entry", 0, self.stash_entries - 1).bind(entry),
             UOp.variable("stash_ps", 0, S-1).bind(pos % S), UOp.variable("stash_pc", 0, SC-1).bind(pos % SC),
-            UOp.variable("stash_hrow", 0, 2*k+1).bind(hrow)]
+            UOp.variable("stash_hrow", 0, 2*k+1).bind(hrow),
+            UOp.variable("stash_cslot", 0, (self.seq_slots() + 1) * CK - 1).bind(slot * CK + ckpt_par)]
   def _stash_kv_vars(self, row:int, chunk:int) -> list[UOp]:
     return [UOp.variable("stash_row", 0, self.seq_rows()).bind(row), UOp.variable("stash_chunk", 0, self.stash_chunks - 1).bind(chunk)]
-  def seq_stash(self, save:bool, slot:int, base:int, segs:list[tuple[int, int, int]], entry:int, pos:int, hrow:int):
+  def seq_stash(self, save:bool, slot:int, base:int, segs:list[tuple[int, int, int]], entry:int, pos:int, hrow:int, ckpt_par:int=0):
     """
     the sequence of slot (its region at base) of pos tokens into the stash: its segments of chunks (a chunk SEQ_MOVE rows) (its chunk, the
     stash's, count) and entry (its states of pos, its hidden state row hrow), or back
@@ -2627,29 +2632,32 @@ class Transformer:
         i, c, n = i + m, c + m, n - m
     if save: self._seq_materialize(slot, pos)
     else: self._seq_kbase[slot] = pos
-    self._stash_state_jits[save](*self._stash_state_vars(slot, entry, pos, hrow))
+    self._stash_state_jits[save](*self._stash_state_vars(slot, entry, pos, hrow, ckpt_par))
 
-  def _seq_ckpt_copy(self, save:bool, slot:UOp, ps:UOp, pc:UOp):
-    """the checkpoint of slot `slot`: its recurrent states (rows ps, the conv ones pc) and its hidden state of row 0 (save), or back"""
+  def _seq_ckpt_copy(self, save:bool, slot:UOp, ps:UOp, pc:UOp, cslot:UOp):
+    """the checkpoint of slot `slot` (its buffer's row cslot: slot*2+par with SEQ_CKPT2): its recurrent states (rows ps, the conv ones pc) and
+    its hidden state of row 0 (save), or back"""
     def rows(t:Tensor, start:UOp|int) -> Tensor: return t.shrink(((start, start+1),) + (None,)*(t.ndim-1))
     H = 2*(self.config.spec_drafts+1)
-    pairs:list[tuple[Tensor, Tensor]] = [(rows(self.seq_ckpt_h, slot), rows(self.seq_spec_h, slot*H))]
+    pairs:list[tuple[Tensor, Tensor]] = [(rows(self.seq_ckpt_h, cslot), rows(self.seq_spec_h, slot*H))]
     for b, c in zip([b for b in self.blk if isinstance(b, GatedDeltaNetBlock)], self.seq_ckpt_states):
       S, SC = int(b.slot_rec[0].shape[0]), int(b.slot_conv[0][0].shape[0])
-      pairs += [(rows(c[0], slot), rows(b.pool_rec, slot*S + ps))] + [(rows(d, slot), rows(p, slot*SC + pc)) for d, p in zip(c[1:], b.pool_conv)]
-    pairs += [(rows(c, slot), rows(idx.pool_state, slot*idx.SC + pc)) for c, idx in zip(self.seq_ckpt_idx, self._indexers())]
+      pairs += [(rows(c[0], cslot), rows(b.pool_rec, slot*S + ps))] + [(rows(d, cslot), rows(p, slot*SC + pc)) for d, p in zip(c[1:], b.pool_conv)]
+    pairs += [(rows(c, cslot), rows(idx.pool_state, slot*idx.SC + pc)) for c, idx in zip(self.seq_ckpt_idx, self._indexers())]
     Tensor.realize(*[(d.assign(s) if save else s.assign(d)) for d, s in pairs])
   def _seq_S(self) -> tuple[int, int]:
     """the S of a sequence slot's recurrent states (one with SEQ_REPLAY) and of its conv states"""
     S, SC = slot_states(self.config.spec_drafts)
     return 1, SC
-  def seq_ckpt(self, save:bool, slot:int, pos:int):
-    """the checkpoint of slot `slot`: its states of position pos (and the hidden state of row 0) saved, or restored"""
+  def seq_ckpt(self, save:bool, slot:int, pos:int, par:int=0):
+    """the checkpoint of slot `slot`: its states of position pos (and the hidden state of row 0) saved, or restored (SEQ_CKPT2: buffer par)"""
     S, SC = self._seq_S()
     if save: self._seq_materialize(slot, pos)
     else: self._seq_kbase[slot] = pos
+    CK = self._seq_ckpt_ck
     self._seq_ckpt_jits[save](UOp.variable("seq_slot", 0, self.seq_slots()).bind(slot), UOp.variable("seq_ps", 0, S-1).bind(pos % S),
-                              UOp.variable("seq_pc", 0, SC-1).bind(pos % SC))
+                              UOp.variable("seq_pc", 0, SC-1).bind(pos % SC),
+                              UOp.variable("seq_cslot", 0, (self.seq_slots() + 1) * CK - 1).bind(slot * CK + par))
 
   def _prefill_jit(self, n:int, lp:int|None=None) -> Any:
     """the jit of a prefill chunk of n tokens on a sequence's region (lp: of a context of that many pools a device, see _pk_bucket), see __call__"""
