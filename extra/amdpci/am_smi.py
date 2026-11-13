@@ -5,7 +5,7 @@ from tinygrad.helpers import DEBUG, NO_COLOR, colored, ansilen
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.memory import MMIOInterface
-from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager, AMPageTableEntry
+from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager, AMPageTableEntry, card_lock
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 def bold(s): return s if NO_COLOR else f"\033[1m{s}\033[0m"
@@ -129,8 +129,9 @@ class SMICtx:
         return MMIOInterface(libc.mmap(0, bar_size[bar], mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, bar_fds[bar], 0), bar_size[bar], fmt)
       self.opened_pci_resources[pcibus] = (map_pci_range(0), None, map_pci_range(5, 'I'))
 
+    # (every look at a card under its lock (amdev.CardLock): never while its owner resets it, a VM dies of that; held: skipped this round)
     try:
-      self.devs.append(AMSMI(pcibus, *self.opened_pci_resources[pcibus]))
+      with card_lock(pcibus).hold(wait=0.5): self.devs.append(AMSMI(pcibus, *self.opened_pci_resources[pcibus]))
     except Exception as e:
       if DEBUG >= 2: print(f"Failed to open AM device {pcibus}: {e}")
       return
@@ -147,12 +148,15 @@ class SMICtx:
         self._open_am_device(d)
 
     for d in self.devs:
-      if d.read_pci_state() != d.pci_state:
-        d.pci_state = d.read_pci_state()
-        if d.pci_state == "D0": d._init_from_d0()
-        os.system('clear')
-
-      if d.pci_state == "D0" and d.reg("regSCRATCH_REG7").read() & ~(3 << 16) != AMDev.Version:
+      try:
+        with d.card_lock.hold(wait=0.5):
+          if d.read_pci_state() != d.pci_state:
+            d.pci_state = d.read_pci_state()
+            if d.pci_state == "D0": d._init_from_d0()
+            os.system('clear')
+          gone = d.pci_state == "D0" and d.reg("regSCRATCH_REG7").read() & ~(3 << 16) != AMDev.Version
+      except TimeoutError: continue
+      if gone:
         self.devs.remove(d)
         self.opened_pcidevs.remove(d.pcibus)
         os.system('clear')
@@ -165,7 +169,11 @@ class SMICtx:
         case (13,0,6): table_t = dev.smu.smu_mod.MetricsTableV0_t
         case (13,0,12): table_t = dev.smu.smu_mod.MetricsTable_t
         case _: table_t = dev.smu.smu_mod.SmuMetricsExternal_t
-      tables[dev] = dev.smu.read_table(table_t, getattr(dev.smu.smu_mod, "TABLE_SMU_METRICS", dev.smu.smu_mod.SMU_TABLE_SMU_METRICS)) if dev.pci_state == "D0" else None
+      try:
+        with dev.card_lock.hold(wait=0.5):
+          tables[dev] = dev.smu.read_table(table_t, getattr(dev.smu.smu_mod, "TABLE_SMU_METRICS", dev.smu.smu_mod.SMU_TABLE_SMU_METRICS)) \
+            if dev.pci_state == "D0" else None
+      except TimeoutError: tables[dev] = None
     return tables
 
   def _pick_nonzero_avg(self, vals) -> int:

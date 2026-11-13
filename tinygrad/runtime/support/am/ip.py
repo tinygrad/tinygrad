@@ -307,7 +307,8 @@ class AM_SMU(AM_IP):
   def msg_lock(self) -> threading.RLock: return threading.RLock()  # (a message and its response: not interleaved with another thread's)
 
   def _send_msg(self, msg:int, param:int, read_back_arg=False, timeout=10000, debug=False): # default timeout is 10 seconds
-    with self.msg_lock:
+    # (the card's lock across processes too (see amdev.CardLock): a monitor (smi_dev) waits half a second at most, then skips the card)
+    with self.msg_lock, self.adev.card_lock.hold(wait=0.5 if getattr(self.adev, "smi_dev", False) else None):
       self._smu_cmn_send_msg(msg, param, debug=debug)
       wait_cond((self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).read, value=1, timeout_ms=timeout,
         msg=f"SMU msg {msg:#x} timeout")
