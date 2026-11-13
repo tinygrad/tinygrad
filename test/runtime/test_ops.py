@@ -3251,6 +3251,7 @@ class TestOps(TensorTestCase):
                    lambda x: x.log_softmax(axis=1).nll_loss(Tensor(target)))
 
   def test_nll_loss_reductions(self):
+    self.assertAlmostEqual(Tensor([-1.3862944, -0.2876821]).nll_loss(Tensor(1)).item(), 0.2876821)
     target = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
     for kwargs in ({}, {"reduction": "sum"}, {"reduction": "none"}):
       helper_test_op([(32,10)],
