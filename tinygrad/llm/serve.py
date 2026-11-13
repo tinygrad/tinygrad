@@ -111,8 +111,8 @@ def anthropic_messages(body:dict) -> tuple[list[dict], list[dict]|None]:
 STOP_REASONS = {"tool_calls": "tool_use", "length": "max_tokens"}
 # (a reply not streamed and not done in HOLD_JSON seconds: its headers then, and a space every HOLD_JSON seconds until it's done (whitespace
 # before JSON is JSON): a proxy that drops a connection quiet for a while doesn't drop it, a client doesn't ask again. a stream: a ping after
-# KEEPALIVE seconds without a chunk)
-HOLD_JSON, KEEPALIVE = 5.0, 15.0
+# KEEPALIVE seconds without a chunk (env KEEPALIVE, default 15))
+HOLD_JSON, KEEPALIVE = 5.0, getenv("KEEPALIVE", 15.0)
 PING = -1  # (Handler.next_token: no token for a while)
 
 def starts(ids:list[int], t:list[int], n:int|None=None) -> bool:
@@ -311,8 +311,12 @@ def partial_tool_call(s:str, tags:dict[str, str]=TEXT_TAGS) -> tuple[str, str]|N
   return unmark(name), "{" + ", ".join(parts)
 
 def api_keys() -> list[str]:
-  """API_KEY (comma separated): the keys a request to /v1/ must carry (Authorization: Bearer <key>, or x-api-key); none set: no check"""
-  return [k.strip() for k in os.getenv("API_KEY", "").split(",") if k.strip()]
+  """API_KEY (comma separated) and the keys in the file API_KEY_FILE (one a line, or comma separated; read at every request: a key is changed
+  without a restart, and is not in the server's argv or environment listing): the keys a request to /v1/ must carry (Authorization: Bearer
+  <key>, or x-api-key); none set: no check"""
+  text = os.getenv("API_KEY", "")
+  if kf:=os.getenv("API_KEY_FILE"): text += "," + pathlib.Path(kf).read_text().replace("\n", ",")
+  return [k.strip() for k in text.split(",") if k.strip()]
 
 class Handler(VizHandler):
   server: LLMServer
