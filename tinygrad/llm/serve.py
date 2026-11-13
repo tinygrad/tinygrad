@@ -263,26 +263,124 @@ def sampling_top_k(body:dict) -> int|None:
   if isinstance(v, bool) or not isinstance(v, int) or v < -1: raise ValueError(f"top_k must be an integer >= -1, not {v!r}")
   return max(v, 0)
 
+class StopFilter:
+  """
+  a request's stop strings over the reply's text (reasoning too, as the reference API): feed() returns the text safe to send (a tail that
+  could start a stop string held back) and the stop string found (the text before it sent, the rest not)
+  """
+  def __init__(self, stops:list[str]): self.stops, self.held = [x for x in stops if x], ""
+  def feed(self, piece:str, final:bool=False) -> tuple[str, str|None]:
+    t = self.held + piece
+    if (hits:=sorted((t.find(x), x) for x in self.stops if x in t)):
+      self.held = ""
+      return t[:hits[0][0]], hits[0][1]
+    hold = 0 if final else max((k for k in range(1, len(t)+1) if any(x.startswith(t[-k:]) and x != t[-k:] for x in self.stops)), default=0)
+    self.held = t[len(t)-hold:]
+    return t[:len(t)-hold], None
+
+def stop_strings(body:dict) -> list[str]:
+  """a request's stop (a string or a list of up to 16): a ValueError the request's 400"""
+  if (v:=body.get("stop")) is None: return []
+  if isinstance(v, str): v = [v]
+  if not isinstance(v, list) or len(v) > 16 or not all(isinstance(x, str) for x in v): raise ValueError("stop must be a string or a list of strings")
+  return [x for x in v if x]
+
+def strip_json_fence(s:str) -> str:
+  """the reply of a JSON response_format as a bare document: a Markdown code fence around it removed (```json ... ```)"""
+  return m[1] if (m:=re.fullmatch(r"\s*```[a-zA-Z]*\s*\n?(.*?)\s*```\s*", s, re.DOTALL)) else s.strip()
+
+def partial_tool_call(s:str, tags:dict[str, str]=TEXT_TAGS) -> tuple[str, str]|None:
+  """
+  a tool call the token cap cut (no end tag): its name and its arguments as far as they came, a JSON text cut there (as the reference API
+  returns one), None without a name. GLM's name<arg_key>k</arg_key><arg_value>v..., hermes' {"name": ..., "arguments": ..., XML's <function=
+  """
+  s = s.strip()
+  if s.startswith("{"):
+    if not (m:=re.match(r'\{\s*"name"\s*:\s*"([^"]+)"', s)): return None
+    return m[1], a[1] if (a:=re.search(r'"(?:arguments|parameters)"\s*:\s*(.*)$', s, re.DOTALL)) else "{"
+  ak, akc, av, avc = (re.escape(tags[t]) for t in ("<arg_key>", "</arg_key>", "<arg_value>", "</arg_value>"))
+  if (fm:=re.match(r"<function=([^>]+)>(.*)$", s, re.DOTALL)): name, body, pair = fm[1], fm[2], r"<parameter=([^>]+)>(.*?)(?:</parameter>|$)"
+  elif (fm:=re.match(r"([\w.-]+)(.*)$", s, re.DOTALL)): name, body, pair = fm[1], fm[2], rf"{ak}(.+?){akc}\s*{av}(.*?)(?:{avc}|$)"
+  else: return None
+  parts = []
+  for pm in re.finditer(pair, body, re.DOTALL):
+    value = re.sub(r"^\r?\n|\r?\n\Z", "", unmark(pm[2]))
+    try: text = json.dumps(json.loads(value), ensure_ascii=False)
+    except json.JSONDecodeError: text = value if pm.end() == len(body) and value[:1] in '{["0123456789-tfn' else json.dumps(value, ensure_ascii=False)
+    parts.append(f"{json.dumps(unmark(pm[1]), ensure_ascii=False)}: {text}")
+  return unmark(name), "{" + ", ".join(parts)
+
+def api_keys() -> list[str]:
+  """API_KEY (comma separated): the keys a request to /v1/ must carry (Authorization: Bearer <key>, or x-api-key); none set: no check"""
+  return [k.strip() for k in os.getenv("API_KEY", "").split(",") if k.strip()]
+
 class Handler(VizHandler):
   server: LLMServer
   def log_request(self, code='-', size='-'): pass
+  def end_headers(self):
+    # (every response carries the request's id, X-Request-Id, as the reference API's: a client quotes it in a report)
+    self.send_header("X-Request-Id", getattr(self, "request_id", "") or uuid.uuid4().hex)
+    super().end_headers()
+  def api_error(self, status:int, message:str, code:str|None, param:str|None=None):
+    err = {"message": message, "type": "invalid_request_error", "code": code, **({"param": param} if param else {})}
+    return self.send_data(json.dumps({"error": err}).encode(), status_code=status)
+  def authorized(self) -> bool:
+    """a request to /v1/ (but the session end, its own token) with one of the API keys, when the server has any (API_KEY)"""
+    if not (keys:=api_keys()) or not self.path.startswith("/v1/") or self.path.startswith("/v1/sessions/"): return True
+    auth = self.headers.get("Authorization", "")
+    got = auth[len("Bearer "):].strip() if auth.startswith("Bearer ") else (self.headers.get("x-api-key") or "").strip()
+    return got in keys
+  def model_ids(self) -> list[str]:
+    """the model's names a request may ask for: the server's and MODEL_ALIASES (comma separated, e.g. the reference API's zai-org/GLM-5.3)"""
+    return [self.server.model_name] + [a.strip() for a in os.getenv("MODEL_ALIASES", "").split(",") if a.strip()]
+  def known_model(self, name:typing.Any) -> bool:
+    """MODEL_CHECK=1 (default off: our harnesses send any name): only the model's names (any case) or none"""
+    if os.getenv("MODEL_CHECK", "0") in ("", "0"): return True
+    return not name or (isinstance(name, str) and name.lower() in {m.lower() for m in self.model_ids()})
+  def stream_json(self, source:typing.Generator):
+    """the chunks as server-sent events, a keepalive ping as an SSE comment (': keepalive': a client with a read timeout stays)"""
+    try:
+      self.send_response(200)
+      self.send_header("Content-Type", "text/event-stream")
+      self.send_header("Cache-Control", "no-cache")
+      self.end_headers()
+      for r in source:
+        data = json.dumps({k:v for k,v in r.items() if not k.startswith("_")})
+        self.wfile.write(b": keepalive\n\n" if r.get("ping") else f"data: {data}\n\n".encode("utf-8"))
+        self.wfile.flush()
+      self.wfile.write(b"data: [DONE]\n\n")
+    except (BrokenPipeError, ConnectionResetError): source.close()
   def do_GET(self):
-    if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
+    self.request_id = uuid.uuid4().hex
+    if not self.authorized(): return self.api_error(401, "Invalid API key provided.", "invalid_api_key")
+    if self.path == "/v1/models":
+      owner = os.getenv("MODEL_OWNED_BY", "tinygrad")
+      self.send_data(json.dumps({"object":"list", "data":[{"id":m, "object":"model", "created":0, "owned_by":owner} for m in self.model_ids()]})
+                     .encode())
     elif self.path.split("?")[0] == "/status": self.send_data(json.dumps(self.server.status(gpus="gpus" in self.path)).encode())
     elif self.path.startswith("/assets/"): super().do_GET()
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
                 reasoning:bool=False, log:str="", keepalive:float|None=None, top_p:float|None=None, continuous_usage:bool=False,
-                top_k:int|None=None):
+                top_k:int|None=None, stop:list[str]|None=None, json_mode:bool=False):
     tok = self.server.tok
     prompt_tokens = len(ids)
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
     # (cached_tokens: the prompt's tokens that were in the caches, not prefilled)
+    # (reasoning_tokens: the reply's tokens of its reasoning, as the reference API's usage (and OpenAI's completion_tokens_details))
     def usage() -> dict: return {"prompt_tokens": prompt_tokens, "completion_tokens": len(out), "total_tokens": prompt_tokens + len(out),
-                                 "prompt_tokens_details": {"cached_tokens": req.cache_start}}
+                                 "prompt_tokens_details": {"cached_tokens": req.cache_start}, "reasoning_tokens": n_reasoning[0],
+                                 "completion_tokens_details": {"reasoning_tokens": n_reasoning[0]}}
+    n_reasoning = [0]
     # (continuous_usage: the usage so far in every chunk, stream_options.continuous_usage_stats as vLLM's)
-    def chunk(d:dict, finish_reason:str|None=None) -> dict:
-      return {"choices": [{"index":0, "delta":d, "finish_reason":finish_reason}], **tmpl, **({"usage": usage()} if continuous_usage else {})}
+    def chunk(d:dict, finish_reason:str|None=None, **extra) -> dict:
+      return {"choices": [{"index":0, "delta":d, "finish_reason":finish_reason, **extra}], **tmpl,
+              **({"usage": usage()} if continuous_usage else {})}
+    # (stop: the reply ends at a stop string, matched_stop it; json_mode: the content held to its end, sent as a bare JSON document)
+    stopf, matched, json_parts = StopFilter(stop or []), typing.cast(str|None, None), typing.cast(list[str], [])
+    def emit(field:str, delta:str) -> typing.Iterator[dict]:
+      if json_mode and field == "content": json_parts.append(delta)
+      else: yield chunk({field:delta})
     out: list[int] = []
     dec = tok.stream_decoder()
     tags, sentinels = markup_tags(sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {})
@@ -323,9 +421,15 @@ class Handler(VizHandler):
         out.append(next_id)
         if next_id in odd:
           stderr_log(log + colored(f"odd token {next_id} after {len(out)} tokens of the reply\n", "red"))
-        for field, delta in router.route(sentinels[next_id] if next_id in sentinels else dec(next_id)):
-          yield chunk({field:delta})
+        text, matched = stopf.feed(sentinels[next_id] if next_id in sentinels else dec(next_id))
+        routed = list(router.route(text, final=matched is not None))
+        if any(f == "reasoning_content" for f, _ in routed) or (not routed and router.mode == "reasoning"): n_reasoning[0] += 1
+        for field, delta in routed:
+          yield from emit(field, delta)
           last = time.perf_counter()
+        if matched is not None:
+          req.cancelled = True  # (the model stops at its next token)
+          break
         if keepalive is not None and time.perf_counter() - last > keepalive:
           yield {"ping": True}
           last = time.perf_counter()
@@ -333,10 +437,18 @@ class Handler(VizHandler):
         msg = f"{type(req.error).__name__}: {req.error}" if req.error is not None else "superseded by the same request again"
         yield {"error":{"message":msg, "type":"server_error", "code":"generation_failed"}}
         return
-      finish_reason = req.finish_reason
-      for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
+      finish_reason = "stop" if matched is not None else req.finish_reason
+      if matched is None:
+        for field, delta in router.route(stopf.feed(dec(), final=True)[0], final=True): yield from emit(field, delta)
+      if json_parts: yield chunk({"content":strip_json_fence("".join(json_parts))})
       tool_calls: list[dict] = []
       for m in re.finditer(router.call, router.buf, re.DOTALL):
+        # (a call the token cap cut: its name and arguments as far as they came, not its markup in the content)
+        if finish_reason == "length" and not m.group(0).rstrip().endswith(tags["</tool_call>"]):
+          if (cut := partial_tool_call(m.group(1), tags)) is not None:
+            tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
+                               "function":{"name":cut[0], "arguments":cut[1]}})
+          continue
         if (parsed := parse_tool_call(m.group(1), tags)) is None:
           stderr_log(f"failed to parse tool call: {unmark(m.group(1))[:200]}\n")
           yield chunk({"content":unmark(m.group(0))})  # don't silently drop output the client can't use
@@ -348,7 +460,7 @@ class Handler(VizHandler):
       if tool_calls:
         yield chunk({"tool_calls":tool_calls})
         if finish_reason == "stop": finish_reason = "tool_calls"
-      yield chunk({}, finish_reason)
+      yield chunk({}, finish_reason, **({"matched_stop": matched} if matched is not None else {}))
       if include_usage: yield {"choices": [], "usage": usage(), **tmpl}
     finally:
       req.cancelled = True  # (a client gone: the model stops at its next token)
@@ -374,7 +486,7 @@ class Handler(VizHandler):
           req.cancelled = True
           return None
       if req.rx: return req.rx.pop(0)
-      try: item = req.out.get(timeout=1.0)
+      try: item = req.out.get(timeout=min(1.0, keepalive or 1.0))
       except queue.Empty: continue
       # (a step's tokens come at once, see LLMServer.flush)
       if not isinstance(item, list): return item
@@ -407,6 +519,7 @@ class Handler(VizHandler):
 
   def do_POST(self):
     request_st = time.perf_counter()
+    self.request_id = uuid.uuid4().hex
     log = f"{self.path}  {colored('--', 'BLACK')}  "
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     path = self.path.split("?")[0]
@@ -419,12 +532,16 @@ class Handler(VizHandler):
       if not isinstance(body, dict): raise ValueError("the body is not a JSON object")
     except Exception as e: return self.bad_request(f"invalid request body: {e}")
     if DEBUG >= 1: print(json.dumps(body, indent=2))
+    if not self.authorized(): return self.api_error(401, "Invalid API key provided.", "invalid_api_key")
     if path in ("/v1/messages", "/v1/messages/count_tokens"): return self.anthropic(path, body, log, request_st)
     if path == "/v1/sessions/end": return self.session_end(body.get("session_id", ""))
     if path.startswith("/v1/sessions/") and path.endswith("/end"):
       from urllib.parse import unquote
       return self.session_end(unquote(path[len("/v1/sessions/"):-len("/end")]))
     if self.path == "/v1/chat/completions":
+      # (a model the server doesn't serve: 404, as the reference API (MODEL_CHECK: its name or an alias, any case, or none: the server's))
+      if not self.known_model(body.get("model")):
+        return self.api_error(404, f"The model '{body.get('model')}' does not exist.", "model_not_found", "model")
       # render and tokenize
       try:
         normalize_messages(body["messages"])
@@ -439,21 +556,24 @@ class Handler(VizHandler):
           status_code=400)
 
       # reply
-      try: (max_tokens, temperature, top_p), top_k = sampling_params(body, self.server.temperature), sampling_top_k(body)
+      try: (max_tokens, temperature, top_p), top_k, stops = sampling_params(body, self.server.temperature), sampling_top_k(body), \
+        stop_strings(body)
       except ValueError as e: return self.bad_request(str(e))
+      json_mode = isinstance(rf:=body.get("response_format"), dict) and rf.get("type") in ("json_object", "json_schema")
       hold = 0.0 if body.get("stream") else HOLD_JSON
       include_usage = not body.get("stream") or (body.get("stream_options") or {}).get("include_usage", False)
       chunks = self.run_model(ids, str(body.get("model") or self.server.model_name), include_usage,
                               continuous_usage=include_usage and bool((body.get("stream_options") or {}).get("continuous_usage_stats", False)),
                               max_tokens=max_tokens, temperature=temperature, reasoning=rendered.rstrip().endswith(THINK_STARTS), log=log,
-                              top_p=top_p, top_k=top_k, keepalive=hold or None)
+                              top_p=top_p, top_k=top_k, keepalive=hold or (KEEPALIVE if body.get("stream") else None), stop=stops,
+                              json_mode=json_mode)
       if body.get("stream"): self.stream_json(chunks)
       else:
         held = False
         def reply(data:bytes, status_code:int=200):
           if held: self.wfile.write(data)
           else: self.send_data(data, status_code=status_code)
-        out, reasoning, tool_calls, finish_reason, last = [], [], [], "stop", time.perf_counter()
+        out, reasoning, tool_calls, finish_reason, last, extra = [], [], [], "stop", time.perf_counter(), {}
         for c in chunks:
           if hold and time.perf_counter() - last > hold:
             if not held:
@@ -471,12 +591,15 @@ class Handler(VizHandler):
           if (delta := choice.get("delta", {})):
             if delta.get("content"): out.append(delta["content"])
             if delta.get("reasoning_content"): reasoning.append(delta["reasoning_content"])
-            tool_calls += [{k:v for k, v in tc.items() if k != "index"} for tc in delta.get("tool_calls", [])]
+            tool_calls += delta.get("tool_calls", [])
           if choice.get("finish_reason"): finish_reason = choice["finish_reason"]
-        message: dict[str, typing.Any] = {"role":"assistant", "content":"".join(out) or None}
+          if "matched_stop" in choice: extra["matched_stop"] = choice["matched_stop"]
+        # (no content: "", as the reference API's (not null))
+        message: dict[str, typing.Any] = {"role":"assistant", "content":"".join(out)}
         if reasoning: message["reasoning_content"] = "".join(reasoning)
         if tool_calls: message["tool_calls"] = tool_calls
-        reply(json.dumps({**c, "object":"chat.completion", "choices":[{"index":0, "message":message, "finish_reason":finish_reason}]}).encode())
+        choice = {"index":0, "message":message, "finish_reason":finish_reason, **extra}
+        reply(json.dumps({**c, "object":"chat.completion", "choices":[choice]}).encode())
     else:
       self.send_data(json.dumps({"error": {"message": f"unknown path {self.path}", "type": "invalid_request_error", "code": "not_found"}}).encode(),
                      status_code=404)

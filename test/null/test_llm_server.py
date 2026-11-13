@@ -1,4 +1,4 @@
-import unittest, threading, time, json
+import unittest, threading, time, json, typing
 from unittest.mock import Mock, patch
 from tinygrad.llm.model import Transformer, TransformerConfig
 from tinygrad.llm.serve import StreamRouter, parse_tool_call
@@ -632,6 +632,158 @@ class TestLLMToolCalls(unittest.TestCase):
     calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
     self.assertEqual([(tc.function.name, json.loads(tc.function.arguments)) for tc in calls], [('read', {'x"y':'\n</tool_call>\n', 'n':3})])
     self.assertEqual(chunks[-1].choices[0].finish_reason, 'tool_calls')
+
+class TestAPIParity(unittest.TestCase):
+  """the API surface of the replacement checklist: auth, model ids, request ids, usage.reasoning_tokens, empty content"""
+  @classmethod
+  def setUpClass(cls):
+    cls.mock_tok = Mock()
+    cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
+    cls.mock_tok.decode = Mock(return_value="")
+    cls.mock_tok._special_tokens = {}
+    cls.mock_tok.preset = "qwen2"
+    cls.mock_tok.bos_id, cls.mock_tok.eos_id, cls.mock_tok.eot_id = None, 999, None
+    cls.mock_tok.is_end = Mock(return_value=False)
+    cls.mock_model = Mock()
+    cls.mock_model.max_context = 4
+    cls.mock_model.get_start_pos = Mock(return_value=0)
+    from tinygrad.llm.serve import LLMServer
+    import jinja2
+    cls.server = LLMServer(('127.0.0.1', 0), cls.mock_model, "api-model", cls.mock_tok, jinja2.Template("{{ messages[-1].content }}"))
+    cls.port = cls.server.server_address[1]
+    threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+    time.sleep(0.1)
+
+  @classmethod
+  def tearDownClass(cls):
+    cls.server.shutdown()
+    cls.server.server_close()
+
+  def set_output(self, text:str):
+    pieces = dict(enumerate(text, 1))
+    self.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: pieces[tid] if tid is not None else "")
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter(pieces))
+
+  def http(self, path:str, body:dict|None=None, headers:dict|None=None) -> tuple[int, dict, typing.Any]:
+    import urllib.request, urllib.error
+    req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=None if body is None else json.dumps(body).encode(),
+                                 headers={"Content-Type":"application/json", **(headers or {})})
+    try:
+      with urllib.request.urlopen(req) as resp: status, hdrs, raw = resp.status, dict(resp.headers), resp.read()
+    except urllib.error.HTTPError as e: status, hdrs, raw = e.code, dict(e.headers), e.read()
+    if raw.startswith(b"data:"): return status, hdrs, [json.loads(l[6:]) for l in raw.decode().split("\n") if l.startswith("data: {")]
+    return status, hdrs, json.loads(raw)
+
+  def chat(self, **kw) -> dict: return {"messages":[{"role":"user", "content":"hi"}], **kw}
+
+  def test_models_ids_aliases_owner(self):
+    with patch.dict("os.environ", {"MODEL_ALIASES":"zai-org/GLM-5.3", "MODEL_OWNED_BY":"ts5"}):
+      status, _, r = self.http("/v1/models")
+    self.assertEqual(status, 200)
+    self.assertEqual([(m["id"], m["owned_by"], m["object"]) for m in r["data"]], [("api-model", "ts5", "model"), ("zai-org/GLM-5.3", "ts5", "model")])
+
+  def test_unknown_model_404(self):
+    self.set_output("ok")
+    with patch.dict("os.environ", {"MODEL_CHECK":"1", "MODEL_ALIASES":"zai-org/GLM-5.3"}):
+      status, _, r = self.http("/v1/chat/completions", self.chat(model="no-such-model"))
+      self.assertEqual((status, r["error"]["code"], r["error"]["type"]), (404, "model_not_found", "invalid_request_error"))
+      for ok in ("zai-org/glm-5.3", "api-model", None):
+        status, _, r = self.http("/v1/chat/completions", self.chat(**({"model":ok} if ok else {})))
+        self.assertEqual(status, 200, ok)
+        if ok: self.assertEqual(r["model"], ok)
+    # (without MODEL_CHECK any name is served: the harnesses send their own)
+    self.assertEqual(self.http("/v1/chat/completions", self.chat(model="no-such-model"))[0], 200)
+
+  def test_api_key_401(self):
+    self.set_output("ok")
+    with patch.dict("os.environ", {"API_KEY":"k1,k2"}):
+      for path, body in (("/v1/models", None), ("/v1/chat/completions", self.chat())):
+        status, _, r = self.http(path, body)
+        self.assertEqual((status, r["error"]["code"]), (401, "invalid_api_key"), path)
+        self.assertEqual(self.http(path, body, {"Authorization":"Bearer wrong"})[0], 401, path)
+        self.assertEqual(self.http(path, body, {"Authorization":"Bearer k2"})[0], 200, path)
+        self.assertEqual(self.http(path, body, {"x-api-key":"k1"})[0], 200, path)
+    self.assertEqual(self.http("/v1/models")[0], 200)
+
+  def test_request_id_header(self):
+    self.set_output("ok")
+    ids = set()
+    for path, body in (("/v1/models", None), ("/v1/chat/completions", self.chat()), ("/v1/chat/completions", self.chat(stream=True))):
+      _, hdrs, _ = self.http(path, body)
+      self.assertRegex(hdrs.get("X-Request-Id", ""), r"^[0-9a-f]{32}$")
+      ids.add(hdrs["X-Request-Id"])
+    self.assertEqual(len(ids), 3)
+
+  def test_reasoning_tokens_and_empty_content(self):
+    self.set_output("<think>abc</think>")
+    status, _, r = self.http("/v1/chat/completions", self.chat())
+    msg, usage = r["choices"][0]["message"], r["usage"]
+    self.assertEqual((status, msg["content"], msg.get("reasoning_content")), (200, "", "abc"))
+    self.assertTrue(3 <= usage["reasoning_tokens"] <= usage["completion_tokens"] == len("<think>abc</think>"))
+    self.assertEqual(usage["completion_tokens_details"]["reasoning_tokens"], usage["reasoning_tokens"])
+    status, _, chunks = self.http("/v1/chat/completions", self.chat(stream=True, stream_options={"include_usage":True}))
+    self.assertEqual(chunks[-1]["usage"]["reasoning_tokens"], usage["reasoning_tokens"])
+    self.set_output("plain")
+    self.assertEqual(self.http("/v1/chat/completions", self.chat())[2]["usage"]["reasoning_tokens"], 0)
+
+  def test_stop_string_in_reasoning(self):
+    self.set_output("<think>alpha, beta, gamma</think>done")
+    status, _, r = self.http("/v1/chat/completions", self.chat(stop=["beta"]))
+    choice = r["choices"][0]
+    self.assertEqual((status, choice["message"]["reasoning_content"], choice["message"]["content"]), (200, "alpha, ", ""))
+    self.assertEqual((choice["finish_reason"], choice["matched_stop"]), ("stop", "beta"))
+    _, _, chunks = self.http("/v1/chat/completions", self.chat(stop="beta", stream=True))
+    self.assertEqual("".join(c["choices"][0]["delta"].get("reasoning_content") or "" for c in chunks if c["choices"]), "alpha, ")
+    self.assertEqual(chunks[-1]["choices"][0]["matched_stop"], "beta")
+
+  def test_stop_string_in_content(self):
+    self.set_output("hello world")
+    choice = self.http("/v1/chat/completions", self.chat(stop=["wor", "zzz"]))[2]["choices"][0]
+    self.assertEqual((choice["message"]["content"], choice["finish_reason"], choice["matched_stop"]), ("hello ", "stop", "wor"))
+    self.assertEqual(self.http("/v1/chat/completions", self.chat(stop=[1]))[0], 400)
+    self.assertNotIn("matched_stop", self.http("/v1/chat/completions", self.chat(stop=["zzz"]))[2]["choices"][0])
+
+  def test_json_response_format_unfenced(self):
+    self.set_output('<think>plan</think>```json\n{"ok": true}\n```')
+    for fmt in ({"type":"json_object"}, {"type":"json_schema", "json_schema":{"name":"x", "schema":{"type":"object"}}}):
+      msg = self.http("/v1/chat/completions", self.chat(response_format=fmt))[2]["choices"][0]["message"]
+      self.assertEqual((json.loads(msg["content"]), msg["reasoning_content"]), ({"ok": True}, "plan"))
+      chunks = self.http("/v1/chat/completions", self.chat(response_format=fmt, stream=True))[2]
+      self.assertEqual(json.loads("".join(c["choices"][0]["delta"].get("content") or "" for c in chunks if c["choices"])), {"ok": True})
+    # (without a JSON response_format the fence stays: the model's text)
+    self.assertTrue(self.http("/v1/chat/completions", self.chat())[2]["choices"][0]["message"]["content"].startswith("```json"))
+
+  def test_tool_call_cut_by_the_cap(self):
+    text = '<tool_call>lookup<arg_key>query</arg_key><arg_value>tr4</arg_value><arg_key>filters</arg_key><arg_value>{"limit": 2'
+    self.set_output(text)
+    tools = [{"type":"function", "function":{"name":"lookup", "parameters":{"type":"object"}}}]
+    for stream in (False, True):
+      status, _, r = self.http("/v1/chat/completions", self.chat(tools=tools, max_tokens=len(text), stream=stream))
+      if stream:
+        calls = [tc for c in r if c["choices"] for tc in c["choices"][0]["delta"].get("tool_calls") or []]
+        content = "".join(c["choices"][0]["delta"].get("content") or "" for c in r if c["choices"])
+        finish = [c["choices"][0]["finish_reason"] for c in r if c["choices"] and c["choices"][0]["finish_reason"]][-1]
+      else: calls, content, finish = r["choices"][0]["message"]["tool_calls"], r["choices"][0]["message"]["content"], r["choices"][0]["finish_reason"]
+      self.assertEqual((status, content, finish, len(calls)), (200, "", "length", 1), stream)
+      self.assertEqual((calls[0]["function"]["name"], calls[0]["function"]["arguments"]), ("lookup", '{"query": "tr4", "filters": {"limit": 2'))
+      self.assertEqual(calls[0]["index"], 0)
+
+  def test_stream_keepalive_comments(self):
+    import urllib.request
+    def slow(ids, **kwargs):
+      for i in range(1, 3):
+        time.sleep(0.35)
+        yield i
+    self.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: "ab"[tid-1] if tid is not None else "")
+    self.mock_model.generate = Mock(side_effect=slow)
+    with patch("tinygrad.llm.serve.KEEPALIVE", 0.1):
+      req = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/chat/completions", data=json.dumps(self.chat(stream=True)).encode(),
+                                   headers={"Content-Type":"application/json"})
+      raw = urllib.request.urlopen(req).read().decode()
+    self.assertIn(": keepalive\n\n", raw)
+    self.assertNotIn('"ping"', raw)
+    self.assertEqual("".join(json.loads(l[6:])["choices"][0]["delta"].get("content") or "" for l in raw.split("\n")
+                             if l.startswith("data: {") and json.loads(l[6:])["choices"]), "ab")
 
 class TestKept(unittest.TestCase):
   """the kept conversations' tokens (LLMServer.kept, reuse_tokens) and the caches dropped (drop_caches)"""
