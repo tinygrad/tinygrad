@@ -20,17 +20,14 @@ class Register:
 
 class IselContext:
   def __init__(self): self.reg_n = itertools.count()
-
-  def vreg(self, cons:tuple[Register, ...]|Register):
-    cons = cons if isinstance(cons, tuple) else (cons,)
-    return Register(f"v{next(self.reg_n)}", 0, cons)
+  def vreg(self, cons:tuple[Register, ...]|Register): return Register(f"v{next(self.reg_n)}", 0, cons if isinstance(cons, tuple) else (cons,))
 
 # the registers an INS defines follow its opcode and dtype in its arg
 def regs(u:UOp) -> tuple[Register, ...]:
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return (u.arg.reg,) if u.arg.reg is not None else ()
   return u.arg[2:] if u.op is Ops.INS else ()
 def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp:
-  assert u.dtype != dtypes.void, "void cannot have output registers"
+  assert u.dtype is not dtypes.void, "void cannot have output registers"
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return u.replace(arg=replace(u.arg, reg=r[0]))
   return u.replace(arg=u.arg[:2]+r)
 
@@ -174,7 +171,7 @@ extra_matcher = PatternMatcher([
    lambda m,a,b,w: m.cast(w.dtype).ne(UOp.cconst(0, w.dtype)).where(a, b)
     if w.dtype in dtypes.floats and promo_dtype(m.src) is not w.dtype else None),
   # rewrite -x -> -0.0 - x
-  (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, src=(x.const_like(-0.0),) + x.src)),
+  (UPat(Ops.NEG, name="x"), lambda x: x.const_like(-0.0).alu(Ops.SUB, *x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
   (UPat(Ops.TRUNCMOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.TRUNCDIV, y)),
   # scalar reg gated mops become cmovs
@@ -192,7 +189,7 @@ def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
   local_idx = local.index(UOp.cconst(0, dtypes.int32))
   # the AFTER orders the load after the scratch store
   sel = gate.where(addr, local_idx)
-  return UOp(Ops.AFTER, src=(sel, (local_idx if x.max_numel() == 1 else local).store(alt))).load()
+  return sel.after((local_idx if x.max_numel() == 1 else local).store(alt)).load()
 
 def gated_store(addr:UOp, gate:UOp, val:UOp):
   local = scratch_buffer(addr.src[0].dtype, val.max_numel(), -1)
@@ -249,11 +246,9 @@ def args_pointer() -> UOp: return reg(dtypes.uint64, RDI)
 
 # ***** X86 instruction selection *****
 # a register buffer is its own virtual register, named by its identity
-def regbuf_reg(x:UOp) -> Register:
-  return rdef(x) or Register(f"b{x.key.hex()}", 0, XMM if x.dtype in dtypes.floats else WGPR)
+def regbuf_reg(x:UOp) -> Register: return rdef(x) or Register(f"b{x.key.hex()}", 0, XMM if x.dtype in dtypes.floats else WGPR)
 # a value moved into a register constrained to cons
-def pin(ctx:IselContext, x:UOp, cons:Register|tuple[Register, ...]) -> UOp:
-  return with_regs(x.ins(X86Ops.MOV, src=(x,)), (ctx.vreg(cons),))
+def pin(ctx:IselContext, x:UOp, cons:Register|tuple[Register, ...]) -> UOp: return with_regs(x.ins(X86Ops.MOV, src=(x,)), (ctx.vreg(cons),))
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
 def lane(x:UOp, i:int) -> int: return s.src[1].src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
@@ -390,7 +385,7 @@ isel_matcher = PatternMatcher([
    a.ins(X86Ops.VBLENDVPD, src=(b, a, mask(m)))),
   # in this case we have a mask producing comparison whose user expects a bool, so we convert to bool
   (UPat(GroupOp.Comparison, src=(UPat.var("y", (dtypes.float32, dtypes.float64)), UPat()), name="x"), lambda y,x:
-   UOp(Ops.AND, src=(mask(x).bitcast(dt:=to_int(y.dtype)), UOp.cconst(1, dt))).bitcast(dtypes.bool)),
+   (mask(x).bitcast(dt:=to_int(y.dtype)) & UOp.cconst(1, dt)).bitcast(dtypes.bool)),
   # conditional moves that use flags
   # TODO: remove this once we allow all flag producing ops in cmove
   # the blends took every float gate a mask can serve, so a gate that is still not an integer comparison becomes one here
