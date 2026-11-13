@@ -1,9 +1,9 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import Target, Context
-from tinygrad.codegen import to_program
+from tinygrad.codegen import to_program, pack_args
 from tinygrad.uop import Ops
-from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
+from tinygrad.uop.ops import UOp, dtypes, graph_rewrite, ProgramInfo
 from tinygrad.renderer.x86 import X86Renderer, X86Ops, IselContext
 
 # INDEX on a register value with a constant index extracts a single element (the old GEP)
@@ -11,7 +11,8 @@ def lane(y:UOp, i:int) -> UOp: return y.index(UOp.cconst(i, dtypes.int))
 
 class TestIselX86(unittest.TestCase):
   def isel_rewrite(self, x:UOp):
-    return graph_rewrite(x, X86Renderer(Target(device="CPU", arch="x86_64")).isel_matcher, IselContext(x), bottom_up=True)
+    x = pack_args(x, ProgramInfo.from_sink(x).params)
+    return graph_rewrite(x, X86Renderer(Target(device="CPU", arch="x86_64")).isel_matcher, IselContext(), bottom_up=True)
 
   def _check_op(self, dt_op, expr):
     nargs = expr.__code__.co_argcount
