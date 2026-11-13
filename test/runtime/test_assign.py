@@ -46,6 +46,27 @@ class TestAssign(unittest.TestCase):
     b[1:3] += 10
     self.assertListEqual(a.tolist(), [1, 2, 3, 4, 5, 6])
 
+  @unittest.expectedFailure
+  def test_partial_assign_keeps_realized_identical_tensor(self):
+    # TODO: broken now, the write into b also changes a
+    x = Tensor([0, 1, 2, 3, 4, 5])
+    a = x + 1
+    b = x + 1
+    b.realize()
+    b[1:3] += 10
+    self.assertListEqual(a.tolist(), [1, 2, 3, 4, 5, 6])
+
+  @unittest.expectedFailure
+  def test_assign_keeps_realized_identical_tensor(self):
+    # TODO: broken now, the write into b also changes a
+    x = Tensor([0, 1, 2, 3, 4, 5])
+    a = x + 1
+    b = x + 1
+    b.realize()
+    b += 10
+    b.realize()
+    self.assertListEqual(a.tolist(), [1, 2, 3, 4, 5, 6])
+
   @unittest.skip("no longer folds")
   def test_assign_copy(self):
     a = Tensor([1.,2,3], device="PYTHON")
