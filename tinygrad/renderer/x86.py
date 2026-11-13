@@ -15,7 +15,6 @@ class Register:
   name: str
   index: int
   _cons: tuple["Register", ...] = field(default_factory=tuple)
-  size: int = 8
   @property
   def cons(self): return self._cons or (self,)
   def __repr__(self): return self.name
@@ -26,9 +25,9 @@ class IselContext:
     params = sorted([u for u in sink.toposort() if u.op is Ops.PARAM], key=lambda u: u.arg.slot)
     self.arg_offsets = {u: o for u, (o, _) in zip(params, TinyELF.iter_sig(tuple((None, u.addrspace, u.dtype, ()) for u in params)))}
 
-  def vreg(self, cons:tuple[Register, ...]|Register, size:int=0):
+  def vreg(self, cons:tuple[Register, ...]|Register):
     cons = cons if isinstance(cons, tuple) else (cons,)
-    return Register(f"v{next(self.reg_n)}", 0, cons, size or cons[0].size)
+    return Register(f"v{next(self.reg_n)}", 0, cons)
 
 # the registers an INS defines follow its opcode and dtype in its arg
 def regs(u:UOp) -> tuple[Register, ...]:
@@ -237,7 +236,7 @@ RBP = Register("rbp", 5)
 RSI = Register("rsi", 6)
 RDI = Register("rdi", 7)
 GPR = (RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI) + tuple(Register(f"r{i}", i) for i in range(8, 16))
-XMM = tuple(Register(f"xmm{i}", i, size=16) for i in range(16))
+XMM = tuple(Register(f"xmm{i}", i) for i in range(16))
 # gprs you can write to
 WGPR = tuple(r for r in GPR if r != RSP)
 
@@ -255,10 +254,10 @@ def args_pointer() -> UOp: return reg(dtypes.uint64, RDI)
 # ***** X86 instruction selection *****
 # a register buffer is its own virtual register, named by its identity
 def regbuf_reg(x:UOp) -> Register:
-  return rdef(x) or Register(f"b{x.key.hex()}", 0, *((XMM, 16) if x.dtype in dtypes.floats else (WGPR, x.dtype.itemsize)))
+  return rdef(x) or Register(f"b{x.key.hex()}", 0, XMM if x.dtype in dtypes.floats else WGPR)
 # a value moved into a register constrained to cons
 def pin(ctx:IselContext, x:UOp, cons:Register|tuple[Register, ...]) -> UOp:
-  return with_regs(x.ins(X86Ops.MOV, src=(x,)), (ctx.vreg(cons, x.dtype.itemsize),))
+  return with_regs(x.ins(X86Ops.MOV, src=(x,)), (ctx.vreg(cons),))
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
 def lane(x:UOp, i:int) -> int: return s.src[1].src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
@@ -300,7 +299,7 @@ def idiv(ctx:IselContext, x:UOp) -> UOp:
   ext = [] if x.dtype in dtypes.int8s else [pin(ctx, val, RDX)]
   dividend_dtype = dtypes.int16 if x.dtype in dtypes.int8s else x.dtype
   dividend = pin(ctx, x.src[0].cast(dividend_dtype), RAX)
-  defs = [ctx.vreg(RAX, x.dtype.itemsize), ctx.vreg(RDX, x.dtype.itemsize)][:1+(x.dtype not in dtypes.int8s)]
+  defs = [ctx.vreg(RAX), ctx.vreg(RDX)][:1+(x.dtype not in dtypes.int8s)]
   divisor = pin(ctx, x.src[1], tuple(r for r in WGPR if r not in (RAX, RDX)))
   idiv = with_regs(x.ins(op, src=(dividend, divisor) + tuple(ext)), tuple(defs))
   # this move "cleanses" the register constraints (rax/rdx) of idiv
@@ -351,10 +350,10 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if regs(x) and regs(x)[0]._cons: return None
   # a register buffer is a BUFFER, a stack buffer becomes the LEA of its address before regalloc
   if x.op in {Ops.BUFFER, Ops.ALLOC}:
-    return with_regs(x, (ctx.vreg(regs(x), x.dtype.itemsize) if regs(x) else regbuf_reg(x),)) if x.addrspace is AddrSpace.REG else None
-  if regs(x): defs = [ctx.vreg(regs(x), x.dtype.itemsize)]
+    return with_regs(x, (ctx.vreg(regs(x)) if regs(x) else regbuf_reg(x),)) if x.addrspace is AddrSpace.REG else None
+  if regs(x): defs = [ctx.vreg(regs(x))]
   elif x.dtype in dtypes.floats or x.arg[0] in XMM_OPS: defs = [ctx.vreg(XMM)]
-  else: defs = [ctx.vreg(WGPR, x.dtype.itemsize)]
+  else: defs = [ctx.vreg(WGPR)]
   # TODO: add this once the scheduler can track register pressure
   # if x.arg[0] in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
   return with_regs(x, tuple(defs))
@@ -519,10 +518,10 @@ def flag_rematerialize(ctx:'X86LinearContext', x:UOp):
     return (x, [flag_def, x])
   return None
 
-# the address of a stack buffer keeps the buffer's dtype so the element size of loads and stores through it is known
+# the element size of loads and stores is already captured by fold_address before stack buffers become 64-bit pointers
 def alloc_buffer(ctx:'X86LinearContext', x:UOp):
-  dst = Register(f"s{ctx.stack_size}", 0, WGPR, 8)
-  nx = with_regs(x.ins(X86Ops.LEA, src=fold_address(stack_pointer().index(UOp.cconst(ctx.stack_size, dtypes.uint32)))), (dst,))
+  dst = Register(f"s{ctx.stack_size}", 0, WGPR)
+  nx = with_regs(x.ins(X86Ops.LEA, dtype=dtypes.uint64, src=fold_address(stack_pointer().index(UOp.cconst(ctx.stack_size, dtypes.uint32)))), (dst,))
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
   return nx, [stack_pointer(), nx]
 
@@ -573,11 +572,9 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     reg = cast(int, cast(Register, rdef(reg_uop)).index if reg_uop is not None else reg)
     rm = cast(Register, rdef(rm_uop)).index
     idx = cast(Register, rdef(idx_uop)).index if idx_uop is not None and rdef(idx_uop) is not None else 4
-    # TODO: shouldn't rely on bitcast to convey encoding info
-    def _sz(x:UOp): return x.dtype.itemsize if x.op is Ops.BITCAST else rdef(x).size
     # for a memory operand the rm size is the element size carried by the address, otherwise it's the size of the value in the register
-    rm_sz = scale_uop.src[0].val if scale_uop is not None else _sz(rm_uop)
-    reg_sz = _sz(reg_uop) if reg_uop is not None else 0
+    rm_sz = scale_uop.src[0].val if scale_uop is not None else rm_uop.dtype.itemsize
+    reg_sz = reg_uop.dtype.itemsize if reg_uop is not None else 0
     sz = reg_sz or rm_sz
 
     # encode instruction
@@ -747,7 +744,7 @@ class X86LinearContext(LinearContext):
     return before + uops[:-1] + after + [uops[-1]]
 
   def assign_spill_slot(self, r:Register, u:UOp) -> int:
-    sz = r.cons[0].size
+    sz = 16 if r.cons[0] in XMM else 8
     offset = self.stack_size + (sz - self.stack_size % sz) %sz
     self.stack_size = offset + sz
     return offset
@@ -784,7 +781,7 @@ class X86Renderer(ISARenderer):
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg[0]))[-1] in ('i', 'm') else o[7:]).lower():7s}"
     def _format_operands(x:UOp) -> str:
       def _format(src:tuple[UOp, ...]) -> list[str]:
-        return [str(s.src[0].val) if is_imm(s) else reg_strs[o].get(rdef(s).size, o) if \
+        return [str(s.src[0].val) if is_imm(s) else reg_strs[o].get(s.dtype.itemsize, o) if \
                 (o:=str(rdef(s))) in reg_strs else o for s in src if is_imm(s) or rdef(s) is not None]
       def _mem_adress(base:UOp, idx:UOp, disp:UOp, scale:UOp) -> list[str]:
         return [f"[{rdef(base)}" + (f" + {rdef(idx)}*{scale.src[0].val}" if rdef(idx) else "") + (f" + {d}" if (d:=disp.src[0].val) else "") + "]"]
