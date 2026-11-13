@@ -194,7 +194,7 @@ def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
 def gated_store(addr:UOp, gate:UOp, val:UOp):
   local = scratch_buffer(addr.src[0].dtype, val.max_numel(), -1)
   sel = gate.where(addr, local.index(UOp.cconst(0, dtypes.int32)))
-  return sel.store(val)
+  return UOp(Ops.AFTER, src=(sel,)).store(val)
 
 # a gate the flags can be picked with, or the bool compared to zero that replaces one they can't: only an integer
 # comparison sets the flags, see cmp. NOTE: the 0 is int so the bool zero-extends and compares as int (a byte compare renders
