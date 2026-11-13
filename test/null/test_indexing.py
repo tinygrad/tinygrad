@@ -124,5 +124,13 @@ class TestUnitIndexing(unittest.TestCase):
       with self.assertRaises(IndexError):
         t.gather(7, indices)
 
+  def test_gather_negative_indices(self):
+    # negative indices wrap around, like __getitem__
+    self.assertEqual(Tensor([10, 20, 30]).gather(0, Tensor([-1, 0, -3])).numpy().tolist(), [30, 10, 10])
+    self.assertEqual(Tensor([[1, 2], [3, 4]]).gather(1, Tensor([[-1, 0], [0, -2]])).numpy().tolist(), [[2, 1], [3, 3]])
+    self.assertEqual(Tensor([[1, 2], [3, 4]]).gather(-1, Tensor([[-1], [0]])).numpy().tolist(), [[2], [3]])
+    # positive indices are unchanged
+self.assertEqual(Tensor([10, 20, 30]).gather(0, Tensor([0, 2])).numpy().tolist(), [10, 30])
+
 if __name__ == '__main__':
   unittest.main()
