@@ -59,7 +59,7 @@ class Seq:
   j:int = 0
   par:int = 1
   y:list[int] = field(default_factory=list)
-  temp:tuple[float, float] = (0.0, 1.0)
+  temp:tuple[float, ...] = (0.0, 1.0)
   mix:list[int] = field(default_factory=list)  # (SEQ_MIX_TOKENS) a prompt being forced through ordinary decode steps
   sessions:set[str] = field(default_factory=set)
 
@@ -454,7 +454,7 @@ class SeqEngine:
     """the last slice of a prefill (prefill_slice: not waited for) done"""
     if (wait:=getattr(self.model, "_slice_wait", None)) is not None: wait()
 
-  def prefill(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, float]) -> int:
+  def prefill(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, ...]) -> int:
     """the prompt ids prefilled in s from start (its checkpoint restored first): the token sampled after it"""
     if restore: self.model.seq_ckpt(False, s.slot, s.ckpt)
     # (a prompt that is its checkpoint: the token after it from the hidden state of its last token, restored)
@@ -467,7 +467,7 @@ class SeqEngine:
     s.mtp, s.j, s.par, s.y, s.temp = len(ids), 0, 1, [first] + [0]*self.k, temp
     return first
 
-  def mix_start(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, float]):
+  def mix_start(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, ...]):
     """a short prompt suffix starts forced decode steps, from its checkpoint or last token's states (no standalone prefill)"""
     assert 0 <= start < len(ids) and len(ids) - start <= self.model.SEQ_MIX_TOKENS
     if restore: self.model.seq_ckpt(False, s.slot, s.ckpt)

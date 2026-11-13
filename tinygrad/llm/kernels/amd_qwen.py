@@ -2816,6 +2816,38 @@ def nucleus(z:Tensor, n:int, top_p:Tensor, rounds:int|None=None, G:int|None=None
     lo, w = lo + w * (k - 1).float() / G, w / G
   return ((zl >= lo.reshape(B, 1, 1)) | (top_p.reshape(-1, 1, 1) >= 1)).reshape(B, V)
 
+def top_k_mask(z:Tensor, n:int, top_k:Tensor, rounds:int=8, G:int=16) -> Tensor:
+  """
+  the tokens (B, V) of z[:, :n] at least as large as its top_k-th largest (top-k sampling; ties at the k-th all in, as HF's top-k), exact: the
+  k-th largest is found on the floats' order-preserving uint32 keys, G**rounds of them (16**8: every bit), a round the counts of the keys at
+  or above G candidates. z split on its last axis over the devices: every device counts its part, the counts are exchanged (host_allgather).
+  top_k (B, 1) or (1, 1), a float: 0 (or below 1, or n and more): every token
+  """
+  assert G ** rounds == 1 << 32 and G & (G - 1) == 0
+  B, V = int(z.shape[0]), int(z.shape[1])
+  z = (Tensor.arange(V).to(z.device) < n).where(z, -math.inf)
+  split = isinstance(devs:=z.device, tuple) and z.uop.axis == 1
+  N = len(devs) if isinstance(devs, tuple) and split else 1
+  u = z.float().contiguous().bitcast(dtypes.uint32)
+  # (a float's bits flipped where negative, the sign bit set where not: the keys in the order of the floats; -inf the least but 0x007fffff)
+  key = ((u >> 31) == 1).where(u.bitwise_xor(0xFFFFFFFF), u.bitwise_or(0x80000000)).reshape(B, N, V // N)
+  def parts(part:Tensor) -> Tensor:
+    if not split: return part.permute(1, 0, *range(2, part.ndim))
+    g = host_allgather(part.permute(1, 0, *range(2, part.ndim)).reshape(N, -1))
+    assert g is not None, "no host_allgather on these devices"
+    return g.reshape(N, *part.shape[:1], *part.shape[2:])
+  k = top_k.reshape(-1, 1).float()
+  bits = G.bit_length() - 1
+  t = Tensor.zeros(B, 1, dtype=dtypes.uint32, device=z.device).contiguous()
+  steps = Tensor.arange(G).reshape(1, G).cast(dtypes.uint32).to(z.device)
+  for r in range(rounds):
+    shift = 32 - bits*(r+1)
+    cand = t + steps * (1 << shift)  # (B, G) up from t (the keys at or above t are at least k)
+    count = parts((key.unsqueeze(2) >= cand.reshape(B, 1, G, 1)).sum(-1, dtype=dtypes.int32)).sum(0)  # (B, G)
+    j = (count.float() >= k).sum(-1, keepdim=True, dtype=dtypes.int32).maximum(1) - 1
+    t = t + j.cast(dtypes.uint32) * (1 << shift)
+  return ((key >= t.reshape(B, 1, 1)) | (k.reshape(-1, 1, 1) < 1) | (k.reshape(-1, 1, 1) >= n)).reshape(B, V)
+
 
 def partial_sum(x:Tensor) -> Tensor:
   """the sum over the leading device axis (an allreduce). many tokens (prefill) are summed in half: the transfers are half the size"""
