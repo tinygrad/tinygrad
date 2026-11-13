@@ -726,6 +726,65 @@ class TestAPIParity(unittest.TestCase):
     self.set_output("plain")
     self.assertEqual(self.http("/v1/chat/completions", self.chat())[2]["usage"]["reasoning_tokens"], 0)
 
+  def test_stop_string_in_reasoning(self):
+    self.set_output("<think>alpha, beta, gamma</think>done")
+    status, _, r = self.http("/v1/chat/completions", self.chat(stop=["beta"]))
+    choice = r["choices"][0]
+    self.assertEqual((status, choice["message"]["reasoning_content"], choice["message"]["content"]), (200, "alpha, ", ""))
+    self.assertEqual((choice["finish_reason"], choice["matched_stop"]), ("stop", "beta"))
+    _, _, chunks = self.http("/v1/chat/completions", self.chat(stop="beta", stream=True))
+    self.assertEqual("".join(c["choices"][0]["delta"].get("reasoning_content") or "" for c in chunks if c["choices"]), "alpha, ")
+    self.assertEqual(chunks[-1]["choices"][0]["matched_stop"], "beta")
+
+  def test_stop_string_in_content(self):
+    self.set_output("hello world")
+    choice = self.http("/v1/chat/completions", self.chat(stop=["wor", "zzz"]))[2]["choices"][0]
+    self.assertEqual((choice["message"]["content"], choice["finish_reason"], choice["matched_stop"]), ("hello ", "stop", "wor"))
+    self.assertEqual(self.http("/v1/chat/completions", self.chat(stop=[1]))[0], 400)
+    self.assertNotIn("matched_stop", self.http("/v1/chat/completions", self.chat(stop=["zzz"]))[2]["choices"][0])
+
+  def test_json_response_format_unfenced(self):
+    self.set_output('<think>plan</think>```json\n{"ok": true}\n```')
+    for fmt in ({"type":"json_object"}, {"type":"json_schema", "json_schema":{"name":"x", "schema":{"type":"object"}}}):
+      msg = self.http("/v1/chat/completions", self.chat(response_format=fmt))[2]["choices"][0]["message"]
+      self.assertEqual((json.loads(msg["content"]), msg["reasoning_content"]), ({"ok": True}, "plan"))
+      chunks = self.http("/v1/chat/completions", self.chat(response_format=fmt, stream=True))[2]
+      self.assertEqual(json.loads("".join(c["choices"][0]["delta"].get("content") or "" for c in chunks if c["choices"])), {"ok": True})
+    # (without a JSON response_format the fence stays: the model's text)
+    self.assertTrue(self.http("/v1/chat/completions", self.chat())[2]["choices"][0]["message"]["content"].startswith("```json"))
+
+  def test_tool_call_cut_by_the_cap(self):
+    text = '<tool_call>lookup<arg_key>query</arg_key><arg_value>tr4</arg_value><arg_key>filters</arg_key><arg_value>{"limit": 2'
+    self.set_output(text)
+    tools = [{"type":"function", "function":{"name":"lookup", "parameters":{"type":"object"}}}]
+    for stream in (False, True):
+      status, _, r = self.http("/v1/chat/completions", self.chat(tools=tools, max_tokens=len(text), stream=stream))
+      if stream:
+        calls = [tc for c in r if c["choices"] for tc in c["choices"][0]["delta"].get("tool_calls") or []]
+        content = "".join(c["choices"][0]["delta"].get("content") or "" for c in r if c["choices"])
+        finish = [c["choices"][0]["finish_reason"] for c in r if c["choices"] and c["choices"][0]["finish_reason"]][-1]
+      else: calls, content, finish = r["choices"][0]["message"]["tool_calls"], r["choices"][0]["message"]["content"], r["choices"][0]["finish_reason"]
+      self.assertEqual((status, content, finish, len(calls)), (200, "", "length", 1), stream)
+      self.assertEqual((calls[0]["function"]["name"], calls[0]["function"]["arguments"]), ("lookup", '{"query": "tr4", "filters": {"limit": 2'))
+      self.assertEqual(calls[0]["index"], 0)
+
+  def test_stream_keepalive_comments(self):
+    import urllib.request
+    def slow(ids, **kwargs):
+      for i in range(1, 3):
+        time.sleep(0.35)
+        yield i
+    self.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: "ab"[tid-1] if tid is not None else "")
+    self.mock_model.generate = Mock(side_effect=slow)
+    with patch("tinygrad.llm.serve.KEEPALIVE", 0.1):
+      req = urllib.request.Request(f"http://127.0.0.1:{self.port}/v1/chat/completions", data=json.dumps(self.chat(stream=True)).encode(),
+                                   headers={"Content-Type":"application/json"})
+      raw = urllib.request.urlopen(req).read().decode()
+    self.assertIn(": keepalive\n\n", raw)
+    self.assertNotIn('"ping"', raw)
+    self.assertEqual("".join(json.loads(l[6:])["choices"][0]["delta"].get("content") or "" for l in raw.split("\n")
+                             if l.startswith("data: {") and json.loads(l[6:])["choices"]), "ab")
+
 class TestKept(unittest.TestCase):
   """the kept conversations' tokens (LLMServer.kept, reuse_tokens) and the caches dropped (drop_caches)"""
   def setUp(self):
