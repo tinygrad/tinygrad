@@ -55,14 +55,14 @@ class TestNaNEdgeCases(unittest.TestCase):
     idx = Tensor(arr).argmax().item()
     self.assertEqual(idx, torch_idx)
 
-  @unittest.expectedFailure
   def test_sort_with_nan(self):
-    # Sorting a tensor containing NaN should keep NaN at the end like PyTorch.
-    arr = [1.0, float('nan'), 3.0]
-    torch_vals, torch_idxs = torch.tensor(arr).sort()
-    vals, idxs = Tensor(arr).sort()
-    np.testing.assert_equal(vals.numpy(), torch_vals.numpy())
-    np.testing.assert_equal(idxs.numpy(), torch_idxs.numpy().astype(np.int32))
+    # NaNs sort above numbers, with ties ordered by original position.
+    for arr in [[1.0, float('nan'), 3.0], [float('nan'), 1.0, float('nan'), float('inf'), float('-inf'), 1.0]]:
+      for descending in [False, True]:
+        torch_vals, torch_idxs = torch.tensor(arr).sort(descending=descending, stable=True)
+        vals, idxs = Tensor(arr).sort(descending=descending)
+        np.testing.assert_equal(vals.numpy(), torch_vals.numpy())
+        np.testing.assert_equal(idxs.numpy(), torch_idxs.numpy().astype(np.int32))
 
 class TestEmptyTensorEdgeCases(unittest.TestCase):
   # we don't need more of these

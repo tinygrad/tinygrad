@@ -1285,6 +1285,10 @@ class TestOps(TensorTestCase):
       helper_test_op(None, lambda x: torch_sort(x, descending=descending), lambda x: x.sort(descending=descending),
                      forward_only=True, vals=[[0, 1] * 9])
 
+  def test_sort_tie_gradient(self):
+    helper_test_op(None, lambda x: x.sort(stable=True)[0] * torch.tensor([1.0, 2.0, 4.0]), lambda x: x.sort()[0] * Tensor([1.0, 2.0, 4.0]),
+                   vals=[[1.0, 1.0, 0.5]])
+
   def test_sort_independent_outputs(self):
     for output in [0, 1]:
       helper_test_op(None, lambda x: x.sort(stable=True).values if output == 0 else x.sort(stable=True).indices.int(),
