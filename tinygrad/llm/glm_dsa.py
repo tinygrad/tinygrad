@@ -3217,9 +3217,10 @@ class Transformer(GLMSeqDriver):
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self._token_rows())
     self._seq_host_in, self._seq_in = _host_ints(devs, m*(k+1))
     self._seq_m = m
-    tmv, self._seq_temp = _host_buffer(devs, 8*m + 12, dtypes.float32)
+    # (the rows of the shared seq steps, glm5next's: TEMP_W floats a sequence (temperature, top_p, top_k), a mixed step's prompt's, the seed)
+    tmv, self._seq_temp = _host_buffer(devs, 4*glm_seq_base.TEMP_W*(m + 1) + 4, dtypes.float32)
     self._seq_host_temp = tmv.cast('f')
-    tmv, self._seq_pf_temp = _host_buffer(devs, 8, dtypes.float32)
+    tmv, self._seq_pf_temp = _host_buffer(devs, 4*glm_seq_base.TEMP_W, dtypes.float32)
     self._seq_pf_host_temp = tmv.cast('f')
     self._seq_host_out, self._seq_out = _host_ints(devs[0], m*(2*k+1) + 1)
     self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True) for sv in (True, False)}
