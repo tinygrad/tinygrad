@@ -1,4 +1,4 @@
-import unittest, threading, time, json, typing
+import unittest, threading, time, json, typing, tempfile, pathlib, subprocess, sys, os
 from unittest.mock import Mock, patch
 from tinygrad.llm.model import Transformer, TransformerConfig
 from tinygrad.llm.serve import StreamRouter, parse_tool_call
@@ -704,6 +704,26 @@ class TestAPIParity(unittest.TestCase):
         self.assertEqual(self.http(path, body, {"Authorization":"Bearer k2"})[0], 200, path)
         self.assertEqual(self.http(path, body, {"x-api-key":"k1"})[0], 200, path)
     self.assertEqual(self.http("/v1/models")[0], 200)
+
+  def test_api_key_file(self):
+    self.set_output("ok")
+    with tempfile.TemporaryDirectory() as d:
+      kf = pathlib.Path(d) / "keys"
+      kf.write_text("k1\nk2\n")
+      with patch.dict("os.environ", {"API_KEY_FILE":str(kf)}):
+        self.assertEqual(self.http("/v1/models")[0], 401)
+        self.assertEqual(self.http("/v1/models", None, {"Authorization":"Bearer k2"})[0], 200)
+        kf.write_text("k3\n")  # (read again at every request)
+        self.assertEqual(self.http("/v1/models", None, {"Authorization":"Bearer k2"})[0], 401)
+        self.assertEqual(self.http("/v1/models", None, {"x-api-key":"k3"})[0], 200)
+
+  def test_keepalive_env(self):
+    def keepalive(**env) -> float:
+      out = subprocess.run([sys.executable, "-c", "from tinygrad.llm.serve import KEEPALIVE; print(KEEPALIVE)"], capture_output=True, text=True,
+                           env={**os.environ, "DEV":"NULL", "PYTHONPATH":".", **env}, check=True)
+      return float(out.stdout.strip().splitlines()[-1])
+    self.assertEqual(keepalive(KEEPALIVE="2.5"), 2.5)
+    self.assertEqual(keepalive(), 15.0)
 
   def test_request_id_header(self):
     self.set_output("ok")
