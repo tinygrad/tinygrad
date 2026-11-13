@@ -127,7 +127,8 @@ class TestAfterCounterexamples(unittest.TestCase):
       return Tensor(x.after(x.store(y.contiguous().realize().uop))).tolist()
     self.assertEqual(stored((2, 3), Tensor([[3], [5]])), [[3, 3, 3], [5, 5, 5]])
     self.assertEqual(stored((2, 3), Tensor([1, 2, 3])), [[1, 2, 3], [1, 2, 3]])
-    with self.assertRaises(RuntimeError): stored((3,), Tensor([[7, 8, 9]]))
+    self.assertEqual(stored((3,), Tensor([[7, 8, 9]])), [7, 8, 9])
+    with self.assertRaises(ValueError): stored((2, 1), Tensor([[1, 2, 3], [4, 5, 6]]))
 
 class TestAfterInvalidStore(unittest.TestCase):
   def test_partial_invalid_store_keeps_uncovered_reads(self):
