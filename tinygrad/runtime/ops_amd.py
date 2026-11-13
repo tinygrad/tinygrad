@@ -391,7 +391,7 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
-    self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, self.dev.tmpring_size(data.private_segment_size))
+    self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, waves=self.dev.scratch_waves, wavesize=self.dev.scratch_wavesize(data.private_segment_size))
     for xcc_id in range(self.dev.xccs): # architected flat scratch: each xcc gets its part
       with self.pred_exec(xcc_mask=1 << xcc_id):
         self.wreg(self.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, (scratch_addr + data.private_segment_size // self.dev.xccs * xcc_id) >> 8)
@@ -861,6 +861,7 @@ class AMDDevice(Compiled):
 
     # Scratch setup
     self.max_private_segment_size = 0
+    self.scratch_waves = (self.iface.props['max_slots_scratch_cu'] * self.cu_cnt // (self.se_cnt if self.target[0] != 9 else 1)) & 0xfff
     # the ring and its pointers of every queue it can make, made on first use
     queues = {"COMPUTE:0": lambda: self.compute_queue} | {f"COPY:{i}": functools.partial(self.sdma_queue, i) for i in range(8)}
     names = ("ring", "write_ptr", "doorbell", "put_value")
@@ -937,21 +938,8 @@ class AMDDevice(Compiled):
       self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 16 << 20, idx=idx)
     return self.sdma_queues.get(idx, None)
 
-  def tmpring_size(self, private_segment_size):
-    private_segment_size = max(private_segment_size, 128)
-
-    lanes_per_wave = 64 # wave64
-    mem_alignment_size = 256 if self.target[0] != 9 else 1024
-    size_per_thread = round_up(private_segment_size, mem_alignment_size // lanes_per_wave)
-    size_per_xcc = size_per_thread * lanes_per_wave * self.iface.props['max_slots_scratch_cu'] * self.cu_cnt
-
-    # NOTE: xcc logic is correct only for GFX9.
-    max_scratch_waves = self.cu_cnt * self.iface.props['max_slots_scratch_cu'] * self.xccs
-    wave_scratch = ceildiv(lanes_per_wave * size_per_thread, mem_alignment_size)
-    num_waves = (size_per_xcc // (wave_scratch * mem_alignment_size)) // (self.se_cnt if self.target[0] != 9 else 1)
-
-    tmpring_t = getattr(hsa, f'union_COMPUTE_TMPRING_SIZE{"_GFX"+str(self.target[0]) if self.target[0] != 9 else ""}_bitfields')
-    return int.from_bytes(tmpring_t(WAVES=min(num_waves, max_scratch_waves), WAVESIZE=wave_scratch), 'little')
+  def scratch_wavesize(self, private_segment_size:int) -> int: # the scratch of a wave (64 lanes), in units of 256 bytes (1024 on gfx9)
+    return ceildiv(max(private_segment_size, 128) * 64, 256 if self.target[0] != 9 else 1024)
 
   def scratch_buffer(self, private_segment_size):
     AMDDevice.max_scratch_psize = private_segment_size = max(private_segment_size, 128, AMDDevice.max_scratch_psize)
@@ -977,7 +965,8 @@ class AMDDevice(Compiled):
     self.aql_desc.scratch_wave64_lane_byte_size = self.max_private_segment_size
     self.aql_desc.scratch_resource_descriptor[:] = [lo32(base), int.from_bytes(rsrc1_t(BASE_ADDRESS_HI=hi32(base), SWIZZLE_ENABLE=1), 'little'),
                                                     lo32(self.scratch.nbytes // self.xccs), int.from_bytes(bytes(rsrc3_t(**rsrc)), 'little')]
-    self.aql_desc.compute_tmpring_size = self.tmpring_size(self.max_private_segment_size)
+    self.aql_desc.compute_tmpring_size = self.gc.regCOMPUTE_TMPRING_SIZE.encode(waves=self.scratch_waves,
+                                                                                wavesize=self.scratch_wavesize(self.max_private_segment_size))
     self.aql_gart.host.view(fmt='B')[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
 
   def _prof_buffer(self, size:int, dtype, host:bool=True) -> Buffer:
