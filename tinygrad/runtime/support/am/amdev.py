@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, dataclasses, functools, hashlib, array, contextlib, time
+import ctypes, collections, dataclasses, functools, hashlib, array, contextlib, time, os, fcntl, threading
 from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw, to_mv, wait_cond
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am, fw
@@ -183,6 +183,46 @@ def card_power_limit(pcibus:str, default:float, limits:str) -> float:
     if "=" in kv and kv.split("=")[0].strip().lower() == pcibus.lower(): return float(kv.split("=")[1])
   return default
 
+class CardLock:
+  """
+  a card's SMU mailbox and its resets across processes: an flock on /tmp/am_<bus>.smu.lock, held by the owner around every SMU message and
+  its whole full boot (mode1 reset included), and by a monitor (am_smi) around every look at the card. a second process's MMIO access while
+  the owner's mode1 reset has the card off the bus kills a VM (VFIO: the guest's BAR page is gone, KVM fails the access: "kvm run failed
+  Bad address"; on bare metal a dropped write), and two processes' messages in the one mailbox read each other's answers
+  """
+  def __init__(self, bus:str): self.path, self.fd, self.depth, self.lock = f"/tmp/am_{bus}.smu.lock", -1, 0, threading.RLock()
+  @contextlib.contextmanager
+  def hold(self, wait:float|None=None):
+    """the lock (re-entrant in a process); wait: at most that many seconds (a TimeoutError), None: as long as it takes"""
+    with self.lock:
+      if self.depth == 0:
+        if self.fd < 0:
+          self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o666)
+          with contextlib.suppress(OSError): os.fchmod(self.fd, 0o666)  # (the server and a monitor can be different users)
+        st = time.perf_counter()
+        while True:
+          try:
+            fcntl.flock(self.fd, fcntl.LOCK_EX | (fcntl.LOCK_NB if wait is not None else 0))
+            break
+          except BlockingIOError:
+            if time.perf_counter() - st > (wait or 0.0): raise TimeoutError(f"{self.path} is held by another process")
+            time.sleep(0.01)
+      self.depth += 1
+      try: yield
+      finally:
+        self.depth -= 1
+        if self.depth == 0: fcntl.flock(self.fd, fcntl.LOCK_UN)
+
+@functools.cache
+def card_lock(bus:str) -> CardLock: return CardLock(bus)
+
+@functools.cache
+def in_vm() -> bool:
+  """a virtual machine (the cpu's hypervisor flag): a card in reset there takes the VM with it if anything touches its BARs"""
+  try:
+    with open("/proc/cpuinfo") as f: return " hypervisor" in f.read()
+  except OSError: return False
+
 class AMDev:
   Version = 0xA000000E
 
@@ -233,11 +273,20 @@ class AMDev:
     # aqua (gc 9.5.0): full boot over live state can kill the fabric (power cycle recovers); partial boot+reset_mec is the deepest safe reset
     if self.ip_ver[am.GC_HWIP] == (9,5,0) and self.reg("regSCRATCH_REG7").read() == AMDev.Version: self.partial_boot = True
 
-    # Init hw for IP blocks where it is needed
+    # Init hw for IP blocks where it is needed (a full boot: the card's lock held throughout, no other process looks at it meanwhile)
     if not self.partial_boot:
+      self._boot_lock = contextlib.ExitStack()
+      self._boot_lock.enter_context(self.card_lock.hold())
       if not self.is_vf and self.psp.is_sos_alive() and self.smu.is_smu_alive(): # skip in vf mode, these are pf funcs.
+        # (in a VM a mode1 reset can take the VM with it (see CardLock): a card left initialised by a process that didn't finalize is
+        # reset only with AM_VM_RESET=1; else recreate the VM, its cards come clean)
+        if in_vm() and not getenv("AM_VM_RESET", 0) and not reset_mode:
+          self._boot_lock.close()
+          raise RuntimeError(f"am {self.devfmt}: the card needs a mode1 reset (left initialised by a process that did not finalize). In a VM "
+                             "that can kill the VM: recreate the VM (its cards come clean), or AM_VM_RESET=1 to reset anyway")
         self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
         if self.is_hive():
+          self._boot_lock.close()
           if reset_mode: return # in reset mode, do not raise
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
         # Quiesce first: mode1 reset over live engines can wedge the GPU until power cycled.
@@ -248,6 +297,7 @@ class AMDev:
         self.smu.mode1_reset()
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
       self.init_hw(self.soc, self.gmc, self.ih, *(() if self.is_vf else (self.psp, self.smu)))
+      self._boot_lock.close()
     elif not self.is_vf: self.psp._tmr_init()
 
     # Booting done
@@ -277,6 +327,9 @@ class AMDev:
       self.reg("regSCRATCH_REG6").write(1) # set initialized state.
 
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
+
+  @functools.cached_property
+  def card_lock(self) -> CardLock: return card_lock(str(self.devfmt))
 
   def init_sw(self, smi_dev=False):
     self.smi_dev, self.is_err_state = smi_dev, False
