@@ -140,9 +140,9 @@ class X86GroupOp:
            X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI, X86Ops.VCVTPH2PS, X86Ops.CMPi, X86Ops.IMULi, X86Ops.LEA, X86Ops.VPSRLDQ} | (Rm2nd & TwoAddress)
 
   # X86Ops whose last operand is an immediate
-  Immediate = {X86Ops.MOVi, X86Ops.MOVABS, X86Ops.ADDi, X86Ops.SUBi, X86Ops.IMULi, X86Ops.ANDi, X86Ops.ORi, X86Ops.XORi,
-               X86Ops.SHLi, X86Ops.SHRi, X86Ops.SARi, X86Ops.CMPi, X86Ops.VCMPSS, X86Ops.VCMPSD, X86Ops.VROUNDSS, X86Ops.VROUNDSD,
-               X86Ops.VINSERTPS, X86Ops.VPSRLDQ, X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VPINSRW, X86Ops.VPINSRD, X86Ops.VCVTPS2PH}
+  Immediate = {X86Ops.MOVi, X86Ops.MOVABS, X86Ops.ADDi, X86Ops.SUBi, X86Ops.IMULi, X86Ops.ANDi, X86Ops.ORi, X86Ops.XORi, X86Ops.SHLi, X86Ops.SHRi,
+               X86Ops.SARi, X86Ops.CMPi, X86Ops.VCMPSS, X86Ops.VCMPSD, X86Ops.VROUNDSS, X86Ops.VROUNDSD, X86Ops.VINSERTPS, X86Ops.VPSRLDQ,
+               X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VPINSRW, X86Ops.VPINSRD, X86Ops.VCVTPS2PH}
 
 # ***** X86 legalization *****
 def is_regbuf(x:UOp) -> bool: return x.without_after.addrspace is AddrSpace.REG and x.max_numel() == 1
@@ -263,7 +263,7 @@ def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX 
 def lane(x:UOp, i:int) -> int: return s.src[1].src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
 def imm(dt:DType, v:int) -> UOp: return UOp.cconst(truncate[dt](v), dt)
-def is_imm(x:UOp) -> bool: return x.op is Ops.CAST and x.src[0].op is Ops.CONST and x.dtype in dtypes.ints+(dtypes.bool,)
+def is_imm(x:UOp) -> bool: return x.op is Ops.CAST and x.src[0].op is Ops.CONST and x.dtype not in dtypes.floats
 def to_imm(c:UOp) -> UOp|None:
   if not (c.op is Ops.CAST and (v:=c.src[0]).op is Ops.CONST): return None
   if c.dtype in dtypes.int64s: return imm(dtypes.int32, v.val) if not v.overflows(dtypes.int32) else None
@@ -366,14 +366,10 @@ def mov_op(s:UOp) -> UOp:
   if s.op is Ops.AFTER: return s.replace(src=(mov_op(s.src[0]),)+s.src[1:])
   return s.ins(X86Ops.MOVABS if s.dtype in dtypes.int64s else X86Ops.MOVi, src=(imm(s.dtype, s.src[0].val),)) if is_imm(s) else s
 
-def load_const(x:UOp) -> UOp|None:
+def load_const(x:UOp) -> UOp:
   op, n = x.arg[0], len(x.src)
-  immediate = {n-1} if op in X86GroupOp.Immediate else set()
-  if op in X86GroupOp.WriteMem and n > 4: immediate.update((2, 3))
-  elif op in X86GroupOp.Rm2nd and n > 4: immediate.update((3, 4))
-  elif op in X86GroupOp.Rm1st and n > 3: immediate.update((2, 3))
-  src = tuple(s if i in immediate else mov_op(s) for i,s in enumerate(x.src))
-  return x.replace(src=src) if src != x.src else None
+  m = (2,3) if op in X86GroupOp.WriteMem and n>4 else (3,4) if op in X86GroupOp.Rm2nd and n>4 else ((2,3) if op in X86GroupOp.Rm1st and n>3 else ())
+  return x.replace(src=tuple(s if i in m or (i == n-1 and op in X86GroupOp.Immediate) else mov_op(s) for i,s in enumerate(x.src)))
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
@@ -534,9 +530,9 @@ def label(x:UOp) -> UOp: return x.ins(X86Ops.LABEL, dtype=dtypes.void, src=(x,))
 def lower_range(x:UOp) -> tuple[UOp, list[UOp]]:
   if x.dtype is dtypes.void: return x, [x, label(x)]
   bound = x.src[0]
-  deps: list[UOp] = []
-  while bound.op is Ops.AFTER: deps.extend(bound.src[1:]); bound = bound.src[0]
-  idx = with_regs(x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + tuple(deps)), (regbuf_reg(x),))
+  deps: tuple[UOp, ...] = ()
+  while bound.op is Ops.AFTER: bound, deps = bound.src[0], deps + bound.src[1:]
+  idx = with_regs(x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + deps), (regbuf_reg(x),))
   cmp = x.ins(X86Ops.CMPi if is_imm(bound) else X86Ops.CMP, dtype=dtypes.void, src=(idx, bound))
   return idx.after(x), [idx, x, start:=label(x), cmp, x.ins(X86Ops.JGE, dtype=dtypes.void, src=(start, cmp))]
 
