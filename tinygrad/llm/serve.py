@@ -1466,6 +1466,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           sl = f(self.PREFILL_SLICE) if callable(f:=getattr(self.model, "seq_slice", None)) else self.PREFILL_SLICE
           end = len(ids) if len(ids) - pos <= sl * 3 // 2 else pos + sl
           st = time.perf_counter()
+          self.model._pf_alone = not active  # (PREFILL_BIG_ALONE: the biggest prefill chunks only while nobody decodes, see _seq_chunks)
           try:
             if end < len(ids): eng.prefill_slice(job, ids, pos, restore, end)
             else: first = eng.prefill(job, ids, pos, restore, req.sampling)

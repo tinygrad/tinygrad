@@ -4680,6 +4680,9 @@ class Transformer:
     """
     if self.config.qsa or getenv("SEQ_CHUNK_PLAN", 0): return self._chunk_plan(n)
     big, ret = self.prefill_chunks()[-1], []
+    # (PREFILL_BIG_ALONE=1, default off: the biggest chunk size only while no other sequence decodes (the server sets _pf_alone before a
+    # slice), else the next size: a long chunk is a long wait for the decoding ones. the chunks then depend on the load: a reorder)
+    if getenv("PREFILL_BIG_ALONE", 0) and not getattr(self, "_pf_alone", True) and len(sizes:=self.prefill_chunks()) > 1: big = sizes[-2]
     while n > 0:
       ret.append(min(big, n))
       n -= ret[-1]
