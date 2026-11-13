@@ -6,7 +6,6 @@ from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
 from tinygrad.renderer import Renderer
-from tinygrad.device import TinyELF
 from tinygrad.helpers import unwrap, Target
 from dataclasses import dataclass, field, replace
 
@@ -20,10 +19,7 @@ class Register:
   def __repr__(self): return self.name
 
 class IselContext:
-  def __init__(self, sink:UOp):
-    self.reg_n = itertools.count()
-    params = sorted([u for u in sink.toposort() if u.op is Ops.PARAM], key=lambda u: u.arg.slot)
-    self.arg_offsets = {u: o for u, (o, _) in zip(params, TinyELF.iter_sig(tuple((None, u.addrspace, u.dtype, ()) for u in params)))}
+  def __init__(self): self.reg_n = itertools.count()
 
   def vreg(self, cons:tuple[Register, ...]|Register):
     cons = cons if isinstance(cons, tuple) else (cons,)
@@ -327,15 +323,13 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
 
 # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
 def lea(x:UOp) -> UOp: return x.ins(X86Ops.LEA, src=fold_address(x), dtype=dtypes.uint64)
-def abi(ctx:IselContext, x:UOp) -> UOp:
-  src = fold_address(args_pointer().index(UOp.cconst(ctx.arg_offsets[x], dtypes.uint32)))
-  return x.ins(X86Ops.MOV, dtype=x.dtype if x.addrspace is AddrSpace.ALU else dtypes.uint64, src=src)
 
 GPR_DEST_OPS = {X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI, X86Ops.VMOVDm, X86Ops.VMOVQm}
 XMM_OPS = {op for op in X86Ops if op.name.startswith('V')} - GPR_DEST_OPS
 
 def _is_vec_xmm(y: UOp) -> bool:
-  return (y.op is Ops.INS and y.arg[0] in XMM_OPS) or (y.op not in (Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.AFTER, Ops.INS) and y.max_numel() > 1)
+  return (y.op is Ops.INS and y.arg[0] in XMM_OPS) or (y.op not in (Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.REFPARAM, Ops.AFTER, Ops.INS) \
+      and y.max_numel() > 1)
 
 def _xmm_sz(x: UOp) -> X86Ops:
   bits = x.max_numel() * x.dtype.itemsize
@@ -381,7 +375,8 @@ isel_matcher = PatternMatcher([
    Ops.CMPNE: X86Ops.JNE, Ops.CMPLT: X86Ops.JB if y.src[0].dtype in dtypes.uints else X86Ops.JL}[y.op], src=(x.src[1], x.src[0], cmp(y)))),
   # **** Op -> X86Op ****
   # function abi constraints
-  (UPat(Ops.PARAM, name="x"), abi),
+  (UPat(Ops.PARAM), args_pointer),
+  (UPat(Ops.REFPARAM, name="x"), lambda x: x.src[1]),
   # conditional moves between addresses, lea both srcs
   (UPat.var("m").where(UPat((Ops.INDEX, Ops.SHRINK), name="a"), UPat((Ops.INDEX, Ops.SHRINK), name="b")), lambda m,a,b:
    m.where(lea(a), lea(b)) if not _is_vec_xmm(a.src[0]) else None),
@@ -751,6 +746,7 @@ class X86LinearContext(LinearContext):
 
 class X86Renderer(ISARenderer):
   device = "CPU"
+  packed_args = True
   has_local = False
   global_max = (1, 0, 0)
   extra_matcher = extra_matcher
