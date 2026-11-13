@@ -1438,6 +1438,7 @@ class QSAIndexer:
 
 
 class QSABlock(TransformerBlock):
+  layer_index:int = -1  # (the block's index in the model, set by Transformer; QSA_KV_BITS4_LAYERS)
   cache_k:Tensor
   """
   qwen sparse attention: gated GQA attention on the keys its indexer picks. the heads split over the devices with one KV head each (repeated at
@@ -1645,6 +1646,9 @@ class QSABlock(TransformerBlock):
       # (zeroed: the flash kernels read whole tiles past the valid region. in int8 groups of 32 and their scales (kv_q8_pack), the bytes of a
       # row 0.56x: more rows in memory. QSA_KV_BITS=4: in 4-bit groups (kv_q4_pack), 0.28x. 16: half)
       bits = getenv("QSA_KV_BITS", 8) if D % 32 == 0 and amd_custom_kernels_supported(x.device) else 16
+      # (QSA_KV_BITS4_LAYERS=3,7,..: these attention blocks (by block index; the MTP block is num_blocks) in 4-bit rows, the others in
+      # QSA_KV_BITS: a cache's bits are read from its shape, so a mix works as is. 4-bit rows are half the bytes of 8-bit: more rows)
+      if bits == 8 and self.layer_index in {int(x) for x in str(getenv("QSA_KV_BITS4_LAYERS", "")).split(",") if x}: bits = 4
       assert bits in (4, 8, 16) and (bits != 4 or D % 64 == 0), f"QSA_KV_BITS {bits}"
       W = {4: D//8 + D//64, 8: D//4 + D//32, 16: D}[bits]
       self.cache_k = _zeros(KV, 1, N, W, dtype=dtypes.half if bits == 16 else dtypes.uint32, device=x.device,
@@ -1974,12 +1978,15 @@ class Transformer:
       if config.sliding_window_pattern != 0 and (i+1) % config.sliding_window_pattern == 0: c = replace(c, sliding_window=0)
       if config.indexer_shared and config.indexer_shared[i]: c = replace(c, indexer=None)
       if config.ple is not None and i != config.ple.layer: c = replace(c, ple=None)
-      self.blk.append(GatedDeltaNetBlock(c, config.ssm) if config.ssm and config.ssm_layers[i] else QSABlock(c))
+      self.blk.append(b:=GatedDeltaNetBlock(c, config.ssm) if config.ssm and config.ssm_layers[i] else QSABlock(c))
+      if isinstance(b, QSABlock): b.layer_index = i
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     # (gated hyper-connections: the last mix of the streams norms them)
     self.gated, self.output_norm, self.output_hc = True, _identity, GatedResidual(config, inject=False)
     self.output = Linear(config.dim, config.padded_vocab_size or config.vocab_size, bias=False)
-    if config.mtp: self.mtp = QwenMTPBlock(config)
+    if config.mtp:
+      self.mtp = QwenMTPBlock(config)
+      self.mtp.layer_index = config.num_blocks  # (QSA_KV_BITS4_LAYERS names it by this index)
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
