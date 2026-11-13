@@ -4388,7 +4388,8 @@ def q4_dequant(r:Tensor) -> Tensor:
   """the 4-bit rows r (R, 72 or 104) as half rows (R, 512 or 576): the values the prefill attention reads (((q - 8) * m) * s in half)"""
   R, W = r.shape
   nib = ((r[:, :64].reshape(R, 64, 1) >> Tensor([4*i for i in range(8)], dtype=dtypes.uint32, device=r.device)) & 15).cast(dtypes.int32) - 8
-  m = ((r[:, 64:68].reshape(R, 4, 1) >> Tensor([8*i for i in range(4)], dtype=dtypes.uint32, device=r.device)) & 255).cast(dtypes.int32).reshape(R, 16, 1)
+  sh = Tensor([8*i for i in range(4)], dtype=dtypes.uint32, device=r.device)
+  m = ((r[:, 64:68].reshape(R, 4, 1) >> sh) & 255).cast(dtypes.int32).reshape(R, 16, 1)
   qm = (nib.reshape(R, 16, 32) * m).cast(dtypes.half).reshape(R, 4, 128)
   x = (qm.float() * r[:, 68:72].contiguous().bitcast(dtypes.float32).reshape(R, 4, 1)).cast(dtypes.half).reshape(R, 512)
   return x if W == Q4_ROW else x.cat(r[:, 72:].contiguous().bitcast(dtypes.half), dim=-1)
