@@ -82,6 +82,20 @@ class TestGLMDSASequence(unittest.TestCase):
     stores = [u for k in kernels for u in k.src[0].toposort() if u.op is Ops.STORE]
     self.assertFalse(any(u.src[1].dtype == dtypes.bool for u in stores), "the embedding is a reduce of a one-hot of the vocabulary")
 
+  def test_prefill_big_alone(self):
+    # (PREFILL_BIG_ALONE: the biggest chunk size only while nobody else decodes (serve sets _pf_alone), else the next size)
+    from tinygrad.helpers import getenv
+    model = Transformer.__new__(Transformer)
+    model.config = SimpleNamespace(qsa=False, cache_rows=0)
+    model.prefill_chunks = lambda: (1344, 2688, 4032)
+    for flag, alone, want in (("0", False, [4032, 4032, 2000]), ("1", True, [4032, 4032, 2000]), ("1", False, [2688, 2688, 2688, 2000]),
+                              ("2", False, [2688, 2688, 2688, 2000])):
+      with patch.dict(os.environ, {"PREFILL_BIG_ALONE": flag, "SEQ_CHUNK_PLAN": "0"}):
+        getenv.cache_clear()
+        model._pf_alone = alone
+        self.assertEqual(model._seq_chunks(10064), want, (flag, alone))
+    getenv.cache_clear()
+
   def test_main_path_token_buffer_has_the_regions(self):
     # (the main path making the token buffer first (generate, warmup): GLM_SEQ's regions in it too, not max_context+1)
     model = Transformer.__new__(Transformer)
