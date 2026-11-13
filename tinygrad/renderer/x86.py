@@ -368,8 +368,12 @@ def mov_op(s:UOp) -> UOp:
 
 def load_const(x:UOp) -> UOp:
   op, n = x.arg[0], len(x.src)
-  m = (2,3) if op in X86GroupOp.WriteMem and n>4 else (3,4) if op in X86GroupOp.Rm2nd and n>4 else ((2,3) if op in X86GroupOp.Rm1st and n>3 else ())
-  return x.replace(src=tuple(s if i in m or (i == n-1 and op in X86GroupOp.Immediate) else mov_op(s) for i,s in enumerate(x.src)))
+  # keep the instruction's immediate operand as a constant
+  immediate = {n-1} if op in X86GroupOp.Immediate else set()
+  # memory addresses are (base, index, displacement, scale), keep displacement and scale constant too
+  immediate |= {2,3} if op in X86GroupOp.WriteMem and n>4 else {3,4} if op in X86GroupOp.Rm2nd and n>4 else \
+      ({2,3} if op in X86GroupOp.Rm1st and n>3 else set())
+  return x.replace(src=tuple(s if i in immediate else mov_op(s) for i,s in enumerate(x.src)))
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
@@ -498,8 +502,9 @@ isel_matcher = PatternMatcher([
   (UPat.var("a").store(UPat.var("b", dtypes.ints+(dtypes.bool,)), name="x"), lambda a,b,x: None if a.addrspace is AddrSpace.REG else
    x.ins(X86Ops[_xmm_sz(b).name+"m"], src=fold_address(a) + (b,)) if b.max_numel() > 1 else
    x.ins(X86Ops.MOVm, src=fold_address(a) + (b,)) if (i:=to_imm(b)) is None else x.ins(X86Ops.MOVi, src=fold_address(a) + (i,))),
-  # allocate virtual registers
+  # move const to registers for instructions that don't support immediate operands
   (UPat(Ops.INS, name="x"), load_const),
+  # allocate virtual registers
   (UPat((Ops.INS, Ops.BUFFER, Ops.ALLOC), name="x"), alloc_vregs),
 ])
 
