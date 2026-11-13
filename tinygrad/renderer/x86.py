@@ -20,10 +20,7 @@ class Register:
 
 class IselContext:
   def __init__(self): self.reg_n = itertools.count()
-
-  def vreg(self, cons:tuple[Register, ...]|Register):
-    cons = cons if isinstance(cons, tuple) else (cons,)
-    return Register(f"v{next(self.reg_n)}", 0, cons)
+  def vreg(self, cons:tuple[Register, ...]|Register): return Register(f"v{next(self.reg_n)}", 0, cons if isinstance(cons, tuple) else (cons,))
 
 # the registers an INS defines follow its opcode and dtype in its arg
 def regs(u:UOp) -> tuple[Register, ...]:
