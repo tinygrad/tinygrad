@@ -1060,6 +1060,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if index.ndim != self.ndim: raise RuntimeError(f"self.ndim must equal index.ndim, {self.ndim=}, {index.ndim=}")
     dim = self._resolve_dim(dim)
     assert all(s >= i for d,(s,i) in enumerate(zip(self.shape, index.shape)) if d != dim), "requires self.shape[d] >= index.shape[d] for all d != dim"
+    # negative indices wrap around, like __getitem__ (see _parse_view_index).
+    # only normalize int indices: non-int dtypes must still reach _one_hot_along_dim so its dtype check fires
+    if dtypes.is_int(index.dtype): index = (index < 0).where(index + self.shape[dim], index)  # type: ignore[operator]
     x = self.shrink_to(tuple(i if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).where(x, 0)).sum(-1, dtype=self.dtype)
 
