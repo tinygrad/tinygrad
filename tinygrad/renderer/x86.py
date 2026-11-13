@@ -27,7 +27,7 @@ def regs(u:UOp) -> tuple[Register, ...]:
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return (u.arg.reg,) if u.arg.reg is not None else ()
   return u.arg[2:] if u.op is Ops.INS else ()
 def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp:
-  assert u.dtype != dtypes.void, "void cannot have output registers"
+  assert u.dtype is not dtypes.void, "void cannot have output registers"
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return u.replace(arg=replace(u.arg, reg=r[0]))
   return u.replace(arg=u.arg[:2]+r)
 
@@ -189,12 +189,12 @@ def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
   local_idx = local.index(UOp.cconst(0, dtypes.int32))
   # the AFTER orders the load after the scratch store
   sel = gate.where(addr, local_idx)
-  return UOp(Ops.AFTER, src=(sel, (local_idx if x.max_numel() == 1 else local).store(alt))).load()
+  return sel.after((local_idx if x.max_numel() == 1 else local).store(alt)).load()
 
 def gated_store(addr:UOp, gate:UOp, val:UOp):
   local = scratch_buffer(addr.src[0].dtype, val.max_numel(), -1)
   sel = gate.where(addr, local.index(UOp.cconst(0, dtypes.int32)))
-  return UOp(Ops.AFTER, src=(sel,)).store(val)
+  return sel.after().store(val)
 
 # a gate the flags can be picked with, or the bool compared to zero that replaces one they can't: only an integer
 # comparison sets the flags, see cmp. NOTE: the 0 is int so the bool zero-extends and compares as int (a byte compare renders
