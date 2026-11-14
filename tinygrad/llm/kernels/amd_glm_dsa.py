@@ -4727,10 +4727,18 @@ _UNION_INS = ("{{ if ({2}) {{ unsigned _k = (unsigned)({1}) + 1u, _h = (_k * 265
               "if ((_e & 0xFFFFFFu) == _k) {{ __hip_atomic_fetch_or(({0}) + _h, @BIT@, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP); break; }} "
               "_h = (_h + 1u) & 8191u; }} }} }}")
 
+# the word of a key in the set (read only, after the inserts) if the key is in no list of an earlier token of the group ({3} = the token), else 0
+_UNION_FIRST = ("({{ unsigned _r = 0u; if ({2}) {{ unsigned _k = (unsigned)({1}) + 1u, _h = (_k * 2654435761u) >> 19; for (;;) {{ "
+                "unsigned _e = ({0})[_h]; if ((_e & 0xFFFFFFu) == _k) {{ if (((_e >> 24) & ((1u << ({3})) - 1u)) == 0u) _r = _e; break; }} "
+                "if (_e == 0u) break; _h = (_h + 1u) & 8191u; }} }} _r; }})")
+
 @functools.cache
 def _union_hash_kernel(uidx:UOp, index:UOp, grp:int) -> UOp:
-  # a workgroup a group of grp adjacent tokens: the keys of their lists into a hash set in LDS (no scratch in global memory), then its words in slot
-  # order (the order of the keys is free) into the row of the group by a scan of the slots' counts (waves, then the waves' totals), the count last
+  # a workgroup a group of grp adjacent tokens: the keys of their lists into a hash set in LDS (no scratch in global memory), then the group's
+  # entries in list order (token 0's list, then token 1's, ...) each looked up in the set: an entry is written (key and the tokens that have it)
+  # if no earlier token of the group has its key, at its place by a scan of the counts (waves, then the waves' totals), the count last. the order
+  # is the lists' (not the slots': a slot depends on which insert won its compare-and-swap), so the attention's summation order is the same
+  # every run
   T, W = cast(tuple[int, int], index.shape)
   K, TG, THREADS = W - 1, cast(int, uidx.shape[0]), DECODE_THREADS
   M, NW, TS = grp * K, THREADS // WARP_SIZE, 8192
@@ -4748,7 +4756,14 @@ def _union_hash_kernel(uidx:UOp, index:UOp, grp:int) -> UOp:
       i = t + c * THREADS
       ins.append(_sys(_UNION_INS.replace("@BIT@", f"(1u << {24 + j})"), dtypes.void, tab[0], index[tk.minimum(T-1), i.minimum(K-1)].load(), i < cnt))
   tb = tab.after(UOp.group(*ins).barrier())
-  vals = [tb[t*per + e].load() for e in range(per)]
+  per = (M + THREADS - 1) // THREADS
+  vals = []
+  for e in range(per):
+    n = t*per + e
+    j, i = n // K, n % K
+    tk = g * grp + j
+    cnt = (tk < T).where(index[tk.minimum(T-1), W-1].load().cast(dtypes.weakint).minimum(K), UOp.const(0, dtypes.weakint))
+    vals.append(_sys(_UNION_FIRST, dtypes.uint32, tb[0], index[tk.minimum(T-1), i].load(), (n < M) & (i < cnt), j.cast(dtypes.uint32)))
   nz = [v.ne(0).cast(dtypes.int32) for v in vals]
   mine = functools.reduce(lambda a, b: a + b, nz)
   incl = _wave_scan(mine, lane)
@@ -4767,7 +4782,7 @@ def union_lists(index:Tensor, grp:int) -> Tensor:
   """
   index (T, K+1) int32: a token's list of K distinct keys at most (pool_index_rows: its count in the last column).
   for every group of grp adjacent tokens (TG, grp*K+1): the union of their lists, a word a key (bits 0-23 the key, bit 24 + j set: the group's
-  j-th token has it), in no order, the count last
+  j-th token has it), in the lists' order (token 0's keys, then the keys of token 1 not in token 0's list, ...), the count last
   """
   T, W = index.shape
   K, TG = int(W) - 1, (int(T) + grp - 1) // grp
