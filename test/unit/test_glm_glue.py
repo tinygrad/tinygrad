@@ -125,8 +125,12 @@ class TestSpRsSkip(unittest.TestCase):
         outs.append(amd_glm_dsa.sp_reduce_scatter(p, fmt).realize())
     self.assertEqual(outs[1].shape, (1, 48, 256))
     np.testing.assert_array_equal(_bits(outs[1]), _bits(outs[0]))
-    # (and near the float sum: the others' parts quantized)
-    np.testing.assert_allclose(outs[1].numpy(), p.numpy().sum(0), rtol=0.2, atol=0.3 * np.abs(p.numpy()).max(-1, keepdims=True).sum(0))
+    # (and near the float sum: the others' parts quantized, a value at most half a step of its group (q4: amax / 7, q8: amax / 127) off)
+    pn = p.numpy()[:, 0]
+    groups = np.abs(pn.reshape(3, 48, 8, 32)).max(-1, keepdims=True)
+    bound = (groups / (14 if fmt == "q4" else 254)).sum(0).repeat(32, -1).reshape(48, 256) * 1.01 + 1e-5
+    err = np.abs(outs[1].numpy()[0] - pn.sum(0))
+    self.assertTrue((err <= bound).all(), f"max err / bound {(err / bound).max()}")
   def test_q4(self): self._check("q4")
   def test_q8(self): self._check("q8")
 
