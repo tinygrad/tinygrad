@@ -283,7 +283,7 @@ class VisionTower:
   def _ln(self, x:Tensor, w:Tensor, b:Tensor) -> Tensor: return x.layernorm(eps=self.eps) * w.float() + b.float()
 
   def _lin(self, x:Tensor, w:Tensor, b:Tensor) -> Tensor:
-    if self.kernels: return x.half().matmul(w.T, dtype=dtypes.float) + b.float()
+    if self.kernels: return x.half().matmul(w.half().T, dtype=dtypes.float) + b.float()  # (an F32 mmproj's weights: F16 here)
     return x @ w.float().T + b.float()
 
   def _attn_fused(self, q:Tensor, k:Tensor, v:Tensor, km:Tensor) -> Tensor:
@@ -293,6 +293,7 @@ class VisionTower:
     -60000 / sqrt(96), exp 0), not causal (the queries placed after every key: q_start = n). q prescaled: the kernel divides by sqrt(96)
     """
     H, n, hd = q.shape
+    assert n % 32 == 0, f"the kernel loads key tiles of 32 unmasked: n {n} must be a multiple (a bucket is)"
     qh, kv = attn_pack(q, k, v, km)
     out = Tensor.empty(H, n, int(qh.shape[-1]), dtype=dtypes.float32, device=q.device)
     fxn = functools.partial(_amd_flash_attention, valid_kv_len=n, q_start=n, rdna4=_is_rdna4(q.device))
@@ -309,7 +310,6 @@ class VisionTower:
     def rope(t:Tensor) -> Tensor:  # (heads, n, hd)
       t1, t2 = t[..., :hd // 2], t[..., hd // 2:]
       return t * cos + (-t2).cat(t1, dim=-1) * sin
-    qc = min(n, max(64, 1 << int(math.log2(ATTN_SCORES // (self.heads * n)))))
     h = self._ln(x, b["ln1.weight"], b["ln1.bias"])
     qkv = self._lin(h, b["attn_qkv.weight"], b["attn_qkv.bias"])
     if self.kernels: qkv = qkv.contiguous()  # (one WMMA matmul, not three narrow ones each fused with its rope)
@@ -318,7 +318,9 @@ class VisionTower:
     # (queries in chunks: the scores of a 16,384-patch picture would be 17 GB at once; padded keys masked, padded queries' rows unused)
     # (each chunk realized: the jit's memory plan reuses one chunk's scores for the next, not all of them at once)
     if self.kernels: a = self._attn_fused(q, k, v, km).realize()
-    else: a = Tensor.cat(*[self._attn(q[:, i:i+qc], k, v, km).realize() for i in range(0, n, qc)], dim=1)
+    else:
+      qc = min(n, max(64, 1 << int(math.log2(ATTN_SCORES // (self.heads * n)))))
+      a = Tensor.cat(*[self._attn(q[:, i:i+qc], k, v, km).realize() for i in range(0, n, qc)], dim=1)
     a = a.transpose(0, 1).reshape(n, self.width)
     if self.kernels: a = a.half().contiguous()  # (the heads' rows side by side in F16: attn_out's matmul on the WMMA path)
     x = x + self._lin(a, b["attn_out.weight"], b["attn_out.bias"])
@@ -336,7 +338,7 @@ class VisionTower:
       xs = x.reshape(n, 3, TEMPORAL, PATCH * PATCH)
       if self.kernels:  # (each frame's patches F16 contiguous first: a strided operand keeps the matmul off the WMMA path)
         f0, f1 = (xs[:, :, t].reshape(n, -1).half().contiguous() for t in range(TEMPORAL))
-        x = self._lin(f0, self.patch_w[0], self.patch_b) + f1.matmul(self.patch_w[1].T, dtype=dtypes.float) + posx
+        x = self._lin(f0, self.patch_w[0], self.patch_b) + f1.matmul(self.patch_w[1].half().T, dtype=dtypes.float) + posx
       else: x = xs[:, :, 0].reshape(n, -1) @ self.patch_w[0].float().T + xs[:, :, 1].reshape(n, -1) @ self.patch_w[1].float().T + \
           self.patch_b.float() + posx
     km = kmask.reshape(1, 1, n)
