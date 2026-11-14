@@ -32,6 +32,19 @@ class TestWarmupRunAgain(unittest.TestCase):
     self.assertEqual(_run_again({"late": (late, call_late), "never": (never, call_never)}, {late}), [])
     self.assertEqual((call_late.call_count, call_never.call_count), (0, 0))  # (the stash's jits: link_late's; a jit never captured: none)
 
+  def test_parts_list_jit(self):
+    # (PREFILL_PARTS: a prefill chunk's jit is a list of its parts' jits: run again (one unlinked part: unlinked), never a TypeError; g4 Nov 14)
+    sc:dict = {}
+    p0, p1, big = TinyJit(f, scratch=sc), TinyJit(f, scratch=sc), TinyJit(f, scratch=sc)
+    call_parts = Mock(side_effect=lambda: [p(Tensor.ones(4, 4).contiguous().realize()) for p in (p0, p1)])
+    call_big = Mock(side_effect=lambda: big(Tensor.ones(256, 256).contiguous().realize()))
+    for _ in range(3): call_parts()
+    for _ in range(3): call_big()
+    self.assertEqual(_run_again({"prefill192": ([p0, p1], call_parts), "big": (big, call_big)}, set()), ["prefill192"])
+    self.assertTrue(p0.captured._linears and p1.captured._linears)
+    self.assertEqual(_run_again({"prefill192": ([p0, p1], call_parts)}, {p0, p1}), [])  # (every part skipped: not called)
+    self.assertEqual(call_parts.call_count, 4)
+
 class TestVisionRunAgain(unittest.TestCase):
   def test_every_bucket_once(self):
     # (VISION: the tower's jits share the model's scratch: after the model's warm-up a blank picture of every bucket links them again)

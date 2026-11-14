@@ -476,8 +476,10 @@ def _run_again(calls:dict[str, tuple[Any, Callable[[], Any]]], skip:set) -> list
   it (CapturedJit.rebase: their links and every jit's launch arguments dropped), so a jit run before it would link again on its first call in
   serving (+0.5-1 s on a start's first requests: g2 Nov 14). the same calls as the warm-up's: the same bits. returns the jits' names it found unlinked
   """
-  todo = [(n, j, call) for n, (j, call) in calls.items() if j not in skip and getattr(j, "captured", None) is not None]
-  unlinked = [n for n, j, _ in todo if not j.captured._linears]
+  # (a call's jit can be a list: the jits of a prefill chunk's parts (PREFILL_PARTS); skip by identity, a list isn't hashable)
+  todo = [(n, js, call) for n, (j, call) in calls.items()
+          if (js:=[x for x in (j if isinstance(j, list) else [j]) if all(x is not s for s in skip) and getattr(x, "captured", None) is not None])]
+  unlinked = [n for n, js, _ in todo if any(not x.captured._linears for x in js)]
   for _, _, call in todo: call()
   return unlinked
 
