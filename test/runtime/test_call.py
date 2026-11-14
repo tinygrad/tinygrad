@@ -545,7 +545,7 @@ class TestCallInKernel(unittest.TestCase):
     def mul(p:UOp, q:UOp): return p[0].store(q[0]*3).sink()
 
     def kernel(C:UOp, A:UOp):
-      i = UOp.range(4, 0)
+      i = UOp.range(4, 0, AxisType.WEAK)
       call = mul(C[i], A[i])
       return call.end(i).sink(arg=KernelInfo(name="call_loop_mini", opts_to_apply=opts))
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()

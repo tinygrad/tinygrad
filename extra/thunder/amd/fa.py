@@ -6,7 +6,7 @@ from tinygrad.helpers import DEBUG, getenv
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 
 def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None=None) -> Tensor:
   dtype = dtype or ref.dtype
@@ -22,8 +22,8 @@ def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
   group_size = H // H_KV
   q, k, v = q.reshape(B, N, H, D), k.reshape(B, N, H_KV, D), v.reshape(B, N, H_KV, D)
   xqkv = xqkv.reshape(B, N, H_KV, group_size + 2, D)
-  b, n = UOp.range(B, 0), UOp.range(N, 1)
-  pair = UOp.range(D // 2, 2)
+  b, n = UOp.range(B, 0, AxisType.WEAK), UOp.range(N, 1, AxisType.WEAK)
+  pair = UOp.range(D // 2, 2, AxisType.WEAK)
   even = pair * 2
   c = freqs_cis[0, n, 0, pair, 0].cast(dtypes.float)
   s = freqs_cis[0, n, 0, pair, 1].cast(dtypes.float)

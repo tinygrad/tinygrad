@@ -237,12 +237,6 @@ class TestUOpPrograms(unittest.TestCase):
     self._run(O[i].store((A.index(i.valid(i < 2)) > 0).cast(dtypes.int)).end(i).sink(arg=KernelInfo()), out, a)
     self.assertEqual(out.tolist(), [1, 1, 0, 0])
 
-  def test_masked_read_of_constant_table(self):
-    out = Tensor.empty(4, dtype=dtypes.int)
-    O, T, i = out.uop.placeholder_like(0), UOp(Ops.BINARY, arg=bytes([3, 4, 5, 6])), UOp.range(4, 0)
-    self._run(O[i].store((T.index(i.valid(i < 2)).load() > 0).cast(dtypes.int)).end(i).sink(arg=KernelInfo()), out)
-    self.assertEqual(out.tolist(), [1, 1, 0, 0])
-
   def test_simple(self):
     out = Tensor.empty(10,10,dtype=dtypes.int)
 

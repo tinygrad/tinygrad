@@ -1,6 +1,6 @@
 from typing import Callable, Any
 from tinygrad import Tensor, dtypes, nn, UOp
-from tinygrad.uop.ops import KernelInfo, Ops
+from tinygrad.uop.ops import KernelInfo, Ops, AxisType
 
 def quantize_to_fp8(x: Tensor, dtype=dtypes.fp8e4m3):
   fp8_min = -448.0 if dtype == dtypes.fp8e4m3 else -57344.0
@@ -18,10 +18,10 @@ def custom_matmul(output: UOp, inp: UOp, weight: UOp) -> UOp:
   SEQ = inp.shape[1]
   OUT = weight.shape[0]
   IN = weight.shape[-1]
-  seq_idx = UOp.range(SEQ, 2)
-  out_idx = UOp.range(OUT, 3)
-  batch_idx = UOp.range(output.size//SEQ//OUT, 1)
-  reduce_idx = UOp.range(IN, 0)
+  seq_idx = UOp.range(SEQ, 2, AxisType.WEAK)
+  out_idx = UOp.range(OUT, 3, AxisType.WEAK)
+  batch_idx = UOp.range(output.size//SEQ//OUT, 1, AxisType.WEAK)
+  reduce_idx = UOp.range(IN, 0, AxisType.WEAK)
   product = (inp.index((seq_idx*IN+reduce_idx+batch_idx*IN*SEQ)) * weight.index((out_idx*IN+reduce_idx))).cast(dtypes.float)
   reduced = product.reduce(reduce_idx, arg=Ops.ADD)
   store_op = output.index((seq_idx*OUT+out_idx+batch_idx*OUT*SEQ)).store(reduced).end(batch_idx, seq_idx, out_idx)
