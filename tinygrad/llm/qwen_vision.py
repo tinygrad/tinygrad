@@ -236,6 +236,7 @@ class VisionTower:
     its own: TinyJit's scratch), else every bucket's jit its own
     """
     self.scratch = scratch
+    self._jobs:dict[int, TowerJob] = {}  # (every bucket's last job: one unfinished at most, see start)
     self.depth, self.width = int(kv["clip.vision.block_count"]), int(kv["clip.vision.embedding_length"])
     self.heads, self.eps = int(kv["clip.vision.attention.head_count"]), float(kv["clip.vision.attention.layer_norm_epsilon"])
     from tinygrad import Device
@@ -352,12 +353,14 @@ class VisionTower:
     inputs and carries are its own)"""
     n = grid[0] * grid[1]
     npad = bucket(n)
+    assert (j:=self._jobs.get(npad)) is None or j.done, f"a tower job of the {npad}-patch bucket is in progress: finish it first"
     if npad not in self._inputs:
       self._inputs[npad] = [Tensor.empty(*a.shape, dtype=dtypes.float32, device=self.devices[0]).realize() for a in self.inputs(px, grid, npad)]
     for t, a in zip(self._inputs[npad], self.inputs(px, grid, npad)):
       dst = cast(Buffer, t.uop.buffer).ensure_allocated()
       dst.copy_from(Buffer("NPY", dst.nbytes, opaque=memoryview(bytearray(np.ascontiguousarray(a, np.float32).tobytes()))))
-    return TowerJob(self, npad, n // (MERGE * MERGE), self._plans.get(npad, [(0, self.depth)]))
+    self._jobs[npad] = job = TowerJob(self, npad, n // (MERGE * MERGE), self._plans.get(npad, [(0, self.depth)]))
+    return job
 
   def __call__(self, px:np.ndarray, grid:tuple[int, int]) -> np.ndarray:
     """

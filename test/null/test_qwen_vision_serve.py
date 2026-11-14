@@ -168,6 +168,56 @@ class TestTowerSlices(unittest.TestCase):
     req.fill = (ids, len(ids) - 4, False)
     self.assertIsNone(s.tower_slice(req))
 
+  def test_fallback_finishes_the_job_in_progress(self):
+    # (CTO review round 4 item 15) picture_rows' fallback (rows dropped by the LRU: the whole tower in the prefill) while a sliced job of ANOTHER
+    # picture of the same bucket is in progress: that job is finished first and keeps ITS rows, then the fallback's picture runs. The fake tower
+    # shares a bucket's input as the real one does: a job's rows are of the input there at its last slice
+    import collections
+    import numpy as np
+    from tinygrad.llm.serve import LLMServer, Request
+    from tinygrad.llm.qwen_vision import picture_ids
+    class Tower:
+      cur = None
+      def start(self, px, grid):
+        self.cur = float(px[0, 0])
+        return Job(self, grid[0] * grid[1] // 4)
+      def __call__(self, px, grid):
+        job = self.start(px, grid)
+        while (r:=job.step()) is None: pass
+        return r
+    class Job:
+      def __init__(self, t, n): self.t, self.n, self.left = t, n, 3
+      def step(self):
+        self.left -= 1
+        return np.full((self.n, 4), self.t.cur, np.float32) if self.left == 0 else None
+    pics = [types.SimpleNamespace(digest=bytes([k]) * 32, rgb=np.full((32 * 8, 32 * 8, 3), 60 * k, np.uint8)) for k in (1, 2)]
+    from tinygrad.llm.qwen_vision import patches
+    tags = [float(patches(p.rgb)[0][0, 0]) for p in pics]
+    self.assertNotEqual(tags[0], tags[1])
+    s = LLMServer.__new__(LLMServer)
+    s.vision, s._pic_rows, s._tower_job = Tower(), collections.OrderedDict(), None
+    a = picture_ids(pics[0].digest, 8, 8)
+    req = Request.__new__(Request)
+    req.fill, req.pics = ([5, VS] + a + [VE, 1, 2, 3, 4], 0, False), {a[0]: pics[0]}
+    self.assertIsInstance(s.tower_slice(req), float)  # (picture 0's job: one slice of three run)
+    self.assertIsNotNone(s._tower_job)
+    rows1 = s.picture_rows(pics[1])  # (picture 1's rows not kept: the fallback)
+    self.assertTrue((rows1 == tags[1]).all())
+    self.assertIsNone(s._tower_job)
+    self.assertTrue((s._pic_rows[pics[0].digest] == tags[0]).all(), "picture 0 kept its own rows")
+    # (and the fallback for the picture whose job is in progress: its job finished, its rows)
+    s._pic_rows.clear()
+    self.assertIsInstance(s.tower_slice(req), float)
+    self.assertTrue((s.picture_rows(pics[0]) == tags[0]).all())
+
+  def test_start_asserts_one_job_a_bucket(self):
+    # (round 4 item 15) VisionTower.start refuses a second job of a bucket while one is unfinished (its inputs and carries are the bucket's)
+    import numpy as np
+    from tinygrad.llm.qwen_vision import VisionTower, TowerJob
+    t = VisionTower.__new__(VisionTower)
+    t._jobs = {256: TowerJob(t, 256, 64, [(0, 9), (9, 27)])}
+    with self.assertRaises(AssertionError): t.start(np.zeros((256, 1536), np.float32), (16, 16))
+
 class TestDecodeGate(unittest.TestCase):
   def test_busy(self):
     from tinygrad.llm import qwen_vision as qv

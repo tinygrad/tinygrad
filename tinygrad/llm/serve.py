@@ -1146,7 +1146,14 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if (r:=self._pic_rows.get(pic.digest)) is not None:
       self._pic_rows.move_to_end(pic.digest)
       return r
-    # (not kept (tower_slice made them first, an LRU dropped them since): the whole tower now, in the prefill)
+    # (not kept (tower_slice made them first, an LRU dropped them since): the whole tower now, in the prefill. a sliced job in progress (another
+    # picture's, maybe of the same bucket: its inputs and carries) is finished first and its rows kept)
+    if self._tower_job is not None:
+      jp, job = self._tower_job
+      while (rows:=job.step()) is None: pass
+      self._tower_job = None
+      self._keep_rows(jp.digest, rows)
+      if (r:=self._pic_rows.get(pic.digest)) is not None: return r
     from tinygrad.llm.qwen_vision import patches
     self._keep_rows(pic.digest, r:=self.vision(*patches(pic.rgb)))
     return r
