@@ -538,6 +538,20 @@ class TestGLMDSASequence(unittest.TestCase):
       self.assertEqual(out.shape, (1, T, 8, fout))
       if Device.DEFAULT.startswith("NULL:HIP"): out.realize()
 
+  def test_attn_group_union(self):
+    # (GLM_ATTN_GRP: the union of the lists of 3 adjacent tokens (a workgroup a group, LDS hash set) and the attention of their heads in one tile
+    # build and lower (the HIP renderer only: DEV=NULL:HIP:gfx1100); the values are checked on a card by extra/glm_attn3_bench.py)
+    import tinygrad.llm.kernels.amd_glm_dsa as K
+    T, hl, n_max, N = 9, 5, 2048, 4096
+    index = Tensor.empty(T, n_max + 1, dtype=dtypes.int32)
+    u = K.union_lists(index, 3)
+    self.assertEqual(u.shape, (3, 3*n_max + 1))
+    out = Tensor.custom_kernel(Tensor.empty(hl, T, 512), Tensor.empty(hl, T, 576, dtype=dtypes.half), Tensor.empty(N, 576, dtype=dtypes.half), u,
+                               fxn=functools.partial(K._mla_sparse_lds_kernel, scale=0.1, valid_len=UOp.const(N, dtypes.weakint), vdims=512,
+                                                     hl=hl, grp=3))[0]
+    self.assertEqual(out.shape, (hl, T, 512))
+    if Device.DEFAULT.startswith("NULL:HIP"): out.realize()
+
   def test_moe_persist(self):
     # (MOE_PERSIST: the exact bundles by P workgroups an output block looping over moe_bundles' count, not a grid of every possible bundle)
     import tinygrad.llm.kernels.amd_glm_dsa as K

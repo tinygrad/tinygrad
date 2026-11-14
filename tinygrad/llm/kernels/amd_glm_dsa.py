@@ -4564,24 +4564,33 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   return UOp.group(*stores).end(tg, wave, lane).sink(arg=KernelInfo(name="mla_sparse_wmma", opts_to_apply=(), estimates=est))
 
 @functools.cache
-def _mla_sparse_lds_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, valid_len:UOp, vdims:int, rep:int=1, hl:int=0) -> UOp:
+def _mla_sparse_lds_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, valid_len:UOp, vdims:int, rep:int=1, hl:int=0, grp:int=1) -> UOp:
   """
   the attention of every token on the keys of its list (as _mla_sparse_body, half cache, a workgroup a token, its 16 heads the rows): a tile of
   16 keys is read once into LDS (16 byte loads of whole rows, zeros past the count), the waves take their fragments of the keys and of the
   values from there. the scores: a wave a quarter of the dims (summed in LDS), the values: a wave a quarter of the first vdims (the rest 0).
   rep: a token's heads are rep workgroups (its list the row tok // rep of index)
   hl: q is (hl, T, D) (any float, cast to half as loaded), the rows past hl zero, out (hl, T, vdims) the real rows only (cast as stored)
+  grp (with hl and mask): a workgroup is grp ADJACENT tokens (rows = token * hl + head, grp*hl <= 16) over the union of their lists (index row = the
+  group's, from union_lists: a word a key in any order, bits 0-23 the key, bit 24 + t set = token t of the group has it in its list; the count last)
   """
   if hl: R, D = cast(int, q.shape[1]) * 16, cast(int, q.shape[2])
   else: R, D = cast(tuple[int, int], q.shape)
   T, n_max, N, WAVES = R // 16, cast(int, index.shape[1]) - 1, cache.shape[0], 4
   DW, VW = D // WAVES, vdims // WAVES
   KT, VT, G8, PAD = DW // 16, VW // 16, D // 8, D + 8
+  TQ = T
+  if grp > 1: T = (T + grp - 1) // grp
   tok = UOp.range(T, 0, AxisType.GLOBAL)
   wave, lane = UOp.range(WAVES, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   col, half, tid = lane % 16, lane // 16, wave * WARP_SIZE + lane
   ks = tuple(e % 4 + half * 4 + (e // 4) * 8 for e in range(8))
-  if hl:
+  if hl and grp > 1:
+    zh = UOp.const(0, dtypes.half)
+    qtok = tok * grp + col // hl
+    qfrag = [UOp.stack(*(((col < grp*hl) & (qtok < TQ)).where(q[col % hl, qtok.minimum(TQ-1), wave*DW + kk*16 + k].load().cast(dtypes.half), zh)
+                         for k in ks)) for kk in range(KT)]
+  elif hl:
     zh = UOp.const(0, dtypes.half)
     qfrag = [UOp.stack(*((col < hl).where(q[col.minimum(hl-1), tok, wave*DW + kk*16 + k].load().cast(dtypes.half), zh) for k in ks))
              for kk in range(KT)]
@@ -4592,6 +4601,7 @@ def _mla_sparse_lds_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, va
   def key_at(j) -> tuple[UOp, UOp]:
     i = n_tile_r * 16 + j
     key = index[itok, i.minimum(n_max-1)].load().cast(dtypes.weakint)
+    if grp > 1: key = key & 0xffffff
     return key.maximum(0).minimum(N-1), (i < count) & (key < valid_len)
   # the tile: a thread 8 halves of a row at a time (8 threads a row, 16 bytes each, the row's groups in turn)
   lrow, lgrp = tid // 8, tid % 8
@@ -4630,6 +4640,7 @@ def _mla_sparse_lds_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, va
     tstores += [lds_k[lrow, g*8 + e].store(v) for e, v in enumerate(vals)]
   lds_k = lds_k.after(UOp.group(*tstores).barrier())
   key, key_ok = key_at(col)
+  kmask = index[itok, (n_tile_r*16 + col).minimum(n_max-1)].load().cast(dtypes.int32) >> 24 if grp > 1 else None
   s_acc = UOp.stack(*[UOp.const(0, dtypes.float)]*8)
   for kk in range(KT): s_acc = UOp.wmma(qfrag[kk], UOp.stack(*(lds_k[col, wave*DW + kk*16 + k].load() for k in ks)), s_acc, *WMMA_ARG)
   s_reg = UOp.alloc((8,), dtypes.float, addrspace=AddrSpace.REG)
@@ -4645,11 +4656,12 @@ def _mla_sparse_lds_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, va
   pst, m_new, l_new = [], [], []
   for i in range(ES):
     e = wave * ES + i
-    s = key_ok.where(sum((lds_s[w, lane, e].load() for w in range(WAVES)), UOp.const(0, dtypes.float)) * scale, UOp.const(-1e30, dtypes.float))
+    row_ok = key_ok if grp == 1 else key_ok & (((cast(UOp, kmask) >> ((half*8 + e) // hl)) & 1).ne(0))
+    s = row_ok.where(sum((lds_s[w, lane, e].load() for w in range(WAVES)), UOp.const(0, dtypes.float)) * scale, UOp.const(-1e30, dtypes.float))
     mx = s
     for sh in (1, 2, 4, 8): mx = mx.maximum(_swizzle_xor(mx, sh))
     mn = m_old[i].load().maximum(mx)
-    p = key_ok.where(((s - mn) * LOG2E).exp2(), UOp.const(0, dtypes.float))
+    p = row_ok.where(((s - mn) * LOG2E).exp2(), UOp.const(0, dtypes.float))
     ps = p
     for sh in (1, 2, 4, 8): ps = ps + _swizzle_xor(ps, sh)
     a = ((m_old[i].load() - mn) * LOG2E).exp2()
@@ -4670,11 +4682,75 @@ def _mla_sparse_lds_kernel(out:UOp, q:UOp, cache:UOp, index:UOp, scale:float, va
   l_fin = l_reg.after(update)
   lds_l = lds_l.after(UOp.group(*(lds_l[(half*8 + wave*ES + i).valid(col.eq(0))].store(l_fin[i].load()) for i in range(ES))).barrier())
   def oval(o:UOp, e:int) -> UOp: return o.after(update)[e].load() / lds_l[half*8 + e].load().maximum(1e-30)
-  if hl: stores = [out[(half*8 + e).valid(half*8 + e < hl), tok, wave*VW + dt*16 + col].store(oval(o, e).cast(out.dtype))
+  if hl and grp > 1:
+    stores = [out[((half*8 + e) % hl).valid(((half*8 + e) < grp*hl) & ((tok*grp + (half*8 + e) // hl) < TQ)),
+                  (tok*grp + (half*8 + e) // hl).minimum(TQ-1),
+                  wave*VW + dt*16 + col].store(oval(o, e).cast(out.dtype)) for dt, o in enumerate(o_regs) for e in range(8)]
+  elif hl: stores = [out[(half*8 + e).valid(half*8 + e < hl), tok, wave*VW + dt*16 + col].store(oval(o, e).cast(out.dtype))
                    for dt, o in enumerate(o_regs) for e in range(8)]
   else: stores = [out[tok*16 + half*8 + e, wave*VW + dt*16 + col].store(oval(o, e)) for dt, o in enumerate(o_regs) for e in range(8)]
   est = Estimates(4*R*n_max*D, R*D*2 + T*n_max*D*2, R*vdims*4)
   return UOp.group(*stores).end(tok, wave, lane).sink(arg=KernelInfo(name="mla_sparse_lds", opts_to_apply=(), estimates=est))
+
+# ******** the union of the lists of GRP adjacent tokens (the attention of GRP tokens in the 16 rows of one tile: _mla_sparse_lds_kernel grp) ********
+
+# the insert of a key of token j (bit 24 + j) in the workgroup's hash set (LDS, 8192 words: key + 1 in bits 0-23, the tokens that have it above):
+# a slot
+# is taken by a compare-and-swap of 0, a slot of the same key gets the token's bit (atomic or), another key: the next slot
+_UNION_INS = ("{{ if ({2}) {{ unsigned _k = (unsigned)({1}) + 1u, _h = (_k * 2654435761u) >> 19, _d = _k | @BIT@; for (;;) {{ unsigned _e = 0; "
+              "if (__hip_atomic_compare_exchange_strong(({0}) + _h, &_e, _d, __ATOMIC_RELAXED, __ATOMIC_RELAXED, "
+              "__HIP_MEMORY_SCOPE_WORKGROUP)) break; "
+              "if ((_e & 0xFFFFFFu) == _k) {{ __hip_atomic_fetch_or(({0}) + _h, @BIT@, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP); break; }} "
+              "_h = (_h + 1u) & 8191u; }} }} }}")
+
+@functools.cache
+def _union_hash_kernel(uidx:UOp, index:UOp, grp:int) -> UOp:
+  # a workgroup a group of grp adjacent tokens: the keys of their lists into a hash set in LDS (no scratch in global memory), then its words in slot
+  # order (the order of the keys is free) into the row of the group by a scan of the slots' counts (waves, then the waves' totals), the count last
+  T, W = cast(tuple[int, int], index.shape)
+  K, TG, THREADS = W - 1, cast(int, uidx.shape[0]), DECODE_THREADS
+  M, NW, TS = grp * K, THREADS // WARP_SIZE, 8192
+  per = TS // THREADS
+  assert uidx.shape[1] == M + 1 and M < TS and NW == WARP_SIZE and grp <= 4, (uidx.shape, M)
+  g, wave, lane = UOp.range(TG, 0, AxisType.GLOBAL), UOp.range(NW, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  t = wave * WARP_SIZE + lane
+  tab = UOp.alloc((TS,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+  tab = tab.after(UOp.group(*(tab[t + i*THREADS].store(UOp.const(0, dtypes.uint32)) for i in range(per))).barrier())
+  ins = []
+  for j in range(grp):
+    tk = g * grp + j
+    cnt = (tk < T).where(index[tk.minimum(T-1), W-1].load().cast(dtypes.weakint).minimum(K), UOp.const(0, dtypes.weakint))
+    for c in range((K + THREADS - 1) // THREADS):
+      i = t + c * THREADS
+      ins.append(_sys(_UNION_INS.replace("@BIT@", f"(1u << {24 + j})"), dtypes.void, tab[0], index[tk.minimum(T-1), i.minimum(K-1)].load(), i < cnt))
+  tb = tab.after(UOp.group(*ins).barrier())
+  vals = [tb[t*per + e].load() for e in range(per)]
+  nz = [v.ne(0).cast(dtypes.int32) for v in vals]
+  mine = functools.reduce(lambda a, b: a + b, nz)
+  incl = _wave_scan(mine, lane)
+  wsum = UOp.alloc((NW,), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  wsum = wsum.after(UOp.group(wsum[wave.valid(lane.eq(31))].store(incl)).barrier())
+  wincl = _wave_scan(wsum[lane].load(), lane)
+  pos = (wave > 0).where(_bpermute(wincl, (wave - 1).maximum(0)), UOp.const(0, dtypes.int32)) + incl - mine
+  stores = []
+  for e in range(per):
+    stores.append(uidx[g, pos.cast(dtypes.weakint).valid(vals[e].ne(0))].store((vals[e] - 1).cast(dtypes.int32)))
+    pos = pos + nz[e]
+  stores.append(uidx[g, UOp.const(M, dtypes.weakint).valid(t.eq(0))].store(_readlane(wincl, 31)))
+  return UOp.group(*stores).end(g, wave, lane).sink(arg=KernelInfo(name="union_hash", opts_to_apply=()))
+
+def union_lists(index:Tensor, grp:int) -> Tensor:
+  """
+  index (T, K+1) int32: a token's list of K distinct keys at most (pool_index_rows: its count in the last column).
+  for every group of grp adjacent tokens (TG, grp*K+1): the union of their lists, a word a key (bits 0-23 the key, bit 24 + j set: the group's
+  j-th token has it), in no order, the count last
+  """
+  T, W = index.shape
+  K, TG = int(W) - 1, (int(T) + grp - 1) // grp
+  uidx = Tensor.empty(TG, grp * K + 1, dtype=dtypes.int32, device=index.device)
+  return Tensor.custom_kernel(uidx, index, fxn=functools.partial(_union_hash_kernel, grp=grp))[0]
+
+GLM_ATTN_GRP = getenv("GLM_ATTN_GRP", 1)
 
 def mla_sparse_tokens(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_len:UOp, vdims:int, heads:int) -> Tensor:
   """
@@ -4744,8 +4820,11 @@ def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:f
       # (the device's hl heads of q as they are, its real heads' outputs: no padded half copy of the queries in, no rows of 16 heads out.
       # the same values)
       oh = Tensor.empty(H, T, vdims, dtype=dtypes.float32, device=q.device, axis=0 if n > 1 else None)
+      # (GLM_ATTN_GRP, default 1 = off: grp adjacent tokens' heads in one tile over the union of their lists, see _mla_sparse_lds_kernel grp)
+      grp = GLM_ATTN_GRP if hl * GLM_ATTN_GRP <= 16 and T >= 64 else 1
+      if grp > 1: index = union_lists(index, grp)
       oh = Tensor.custom_kernel(oh, q.reshape(H, T, D).contiguous(), cache.reshape(-1, int(cache.shape[-1])), index,
-                                fxn=functools.partial(_mla_sparse_lds_kernel, scale=scale, valid_len=vl, vdims=vdims, hl=hl))[0]
+                                fxn=functools.partial(_mla_sparse_lds_kernel, scale=scale, valid_len=vl, vdims=vdims, hl=hl, grp=grp))[0]
       return oh.reshape(1, H, T, vdims)
     # (the values' dims only: the rest isn't the caller's)
     out = Tensor.empty(n*T*16, vdims, dtype=dtypes.float32, device=q.device, axis=0 if n > 1 else None)
