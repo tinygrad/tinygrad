@@ -53,12 +53,14 @@ class TestSeqRunAgain(unittest.TestCase):
     step, late, tower = TinyJit(f, scratch=sc), TinyJit(f, scratch=sc), TinyJit(f, scratch=sc)
     call_step, call_late = Mock(side_effect=lambda: step(Tensor.ones(4, 4).contiguous().realize())), Mock()
     for _ in range(3): call_step()
-    model = Mock(_warm_calls=({"step24": (step, call_step), "stash": (late, call_late)}, {late}))
+    model = Mock()
+    model.__dict__["_warm_calls"] = ({"step24": (step, call_step), "stash": (late, call_late)}, {late})
     for _ in range(3): tower(Tensor.ones(256, 256).contiguous().realize())
     self.assertFalse(step.captured._linears)
     self.assertEqual(Transformer.seq_run_again(model), ["step24"])
     self.assertTrue(step.captured._linears)
     self.assertEqual((call_step.call_count, call_late.call_count), (4, 0))
+    self.assertNotIn("_warm_calls", model.__dict__)  # (dropped: the warm-up's calls not kept for the process's life)
 
 class TestVisionRunAgain(unittest.TestCase):
   def test_every_bucket_once(self):
