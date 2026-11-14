@@ -141,5 +141,6 @@ class TestReference(unittest.TestCase):
     b = extract_pictures(m)
     self.assertIs(a[0], b[0])
     self.assertEqual(m[0]["content"][1], {"type": "image"})
-    with self.assertRaises(PictureNotCached): extract_pictures(msgs(part(REF_PREFIX + "00" * 32)))
+    with self.assertRaises(PictureNotCached) as cm: extract_pictures(msgs(part(REF_PREFIX + "00" * 32)))
+    self.assertIn("please retry your request", str(cm.exception))  # (pi's auto-retry matches these words: its retry sends the pictures in full)
     with self.assertRaises(PictureError): extract_pictures(msgs(part(REF_PREFIX + "xyz")))

@@ -62,7 +62,8 @@ def decode_picture(url:Any, deadline:float, max_tokens:int=VISION_MAX_TOKENS) ->
     except ValueError: ref = b""
     if len(ref) != 32: raise PictureError(f"a picture reference is {REF_PREFIX}<the sha256 of its data: URL in 64 hex digits>")
     with _url_lock:
-      if (pic:=_url_cache.pop((ref, max_tokens), None)) is None: raise PictureNotCached("picture_not_cached: send its data: URL again")
+      if (pic:=_url_cache.pop((ref, max_tokens), None)) is None: raise PictureNotCached(
+        "picture_not_cached: this server no longer holds the referenced picture; send its data: URL again and please retry your request")
       _url_cache[(ref, max_tokens)] = pic
     return pic
   key = (hashlib.sha256(url.encode("utf-8", "surrogatepass")).digest(), max_tokens) if isinstance(url, str) and VISION_URL_CACHE_MB > 0 else None
@@ -93,7 +94,10 @@ class Picture:
   def grid(self) -> tuple[int, int]: return self.rgb.shape[0] // FACTOR, self.rgb.shape[1] // FACTOR  # (its rows' rows and columns)
   @property
   def tokens(self) -> int: return self.grid[0] * self.grid[1]
-  def ids(self) -> list[int]: return picture_ids(self.digest, *self.grid)
+  def ids(self) -> list[int]:
+    # (made once a picture: the URL cache returns the same Picture every request (a Pokemon prompt has ~900: 7 ms); the callers don't change it)
+    if (ret:=self.__dict__.get("_ids")) is None: object.__setattr__(self, "_ids", ret:=picture_ids(self.digest, *self.grid))
+    return ret
 
 def data_url_bytes(url:Any) -> bytes:
   """the file of a data: URL of an image (base64); anything else a PictureError (the server fetches no http(s) URL, reads no path)"""
