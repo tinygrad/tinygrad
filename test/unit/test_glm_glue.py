@@ -70,6 +70,14 @@ class TestHalfRowsG(unittest.TestCase):
     x = Tensor.randn(1, 512, 2*2816) * Tensor([1.0, 3e5, 1e-3, 7e4] * 128).reshape(1, 512, 1)
     self._vs_one(x.shard(devs, 2).realize(), 512, 2, 11)
 
+  def test_row_split_parts(self):
+    # (a row split over the devices (axis 1): G parts of every device's part (11 of 2816), then the max over the devices: the one reduce's bits)
+    Tensor.manual_seed(8)
+    devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    x = Tensor.randn(1, 512, 2*2816) * Tensor([1.0, 3e5, 1e-3, 7e4] * 128).reshape(1, 512, 1)
+    self._vs_one(x.shard(devs, 2).realize(), 512, 1, 16)
+    self.assertEqual(amd_glm_dsa._half_rows_parts(512, 2816), 11)
+
   def test_row_split_unchanged(self):
     # (a row split over the devices (axis 1): the one-reduce path, the reshape into parts would move items between shards)
     devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))

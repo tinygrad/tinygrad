@@ -1530,6 +1530,11 @@ def _half_rows(x:Tensor, tokens:int, splits:int=1) -> tuple[Tensor, Tensor|None]
   if (G:=_half_rows_parts(tokens, xf.shape[-1])) > 1 and \
      (not isinstance(xf.device, tuple) or xf.uop.axis in (None, 0)):  # (not a row split over the devices)
     amax = xf.abs().reshape(tokens, G, xf.shape[-1] // G).max(-1).contiguous().max(-1, keepdim=True)
+  elif isinstance(devs:=xf.device, tuple) and xf.uop.axis == 1 and xf.shape[-1] % len(devs) == 0 and \
+       (G:=_half_rows_parts(tokens, xf.shape[-1] // len(devs))) > 1:
+    # (a row split over the devices (the attention's heads before attn_output): G parts of every device's part, their max on the device,
+    # then the max of the row's parts over the devices (as the one reduce did with every device's max))
+    amax = xf.abs().reshape(tokens, len(devs) * G, xf.shape[-1] // (len(devs) * G)).max(-1).contiguous().max(-1, keepdim=True)
   else: amax = xf.abs().max(-1, keepdim=True)
   sc = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
   return (xf / sc).cast(dtypes.float16).reshape(x.shape).contiguous(), sc
