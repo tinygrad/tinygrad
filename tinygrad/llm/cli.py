@@ -232,6 +232,25 @@ def main():
       template = env.from_string(ct)
     except ImportError: print("warning: jinja2 is not installed, the model's chat template is disabled")
 
+  # VISION_MMPROJ: the mmproj GGUF of the model's vision tower (qwen4exp's sequences): chat requests' data: URL images are pictures the model
+  # sees (see serve.extract_pictures). the tower's weights on the model's devices before its caches are made
+  vision = None
+  if (mmproj:=getenv("VISION_MMPROJ", "")):
+    from tinygrad.llm.qwen_vision import VisionTower
+    from tinygrad.helpers import to_tuple
+    assert getattr(model, "seqs_supported", lambda: False)() and getattr(model, "image_pad_id", -1) >= 0, "VISION: qwen4exp's sequence engine"
+    # (decoding the pictures: pillow in the server's environment, said at the start; 10.0.1 and later have libwebp's CVE-2023-4863 fixed)
+    import PIL
+    assert tuple(int(x) for x in re.findall(r"\d+", PIL.__version__)[:3]) >= (10, 0, 1), f"VISION: pillow {PIL.__version__}, 10.0.1 or later needed"
+    setattr(model, "vision", True)
+    # (its jits' intermediates in the model's scratch: the tower runs between the model's jits, in its thread)
+    vision = VisionTower.from_gguf(mmproj, devices=to_tuple(typing.cast(str|tuple[str, ...], model.token_embd.weight.device)),
+                                   scratch=getattr(model, "_scratch", None))
+    # (every bucket's jit compiled and its buffers made before the caches: VISION_MAX_TOKENS)
+    from tinygrad.llm.qwen_vision import VISION_MAX_TOKENS
+    with Timing(f"vision: {mmproj} on {len(vision.devices)} devices, its jits up to {VISION_MAX_TOKENS} rows a picture: "):
+      vision.warmup(VISION_MAX_TOKENS)
+
   # warmup the JIT
   if args.warmup or args.serve:
     try:
@@ -245,7 +264,8 @@ def main():
   if args.serve:
     print(f"ready: serving on port {args.serve}", flush=True)
     # (a request's top_p without one: the model's recommended one)
-    LLMServer(('', args.serve), model, model_name, tok, template, top_p=float(kv.get("general.sampling.top_p", 1.0))).serve_forever()
+    LLMServer(('', args.serve), model, model_name, tok, template, top_p=float(kv.get("general.sampling.top_p", 1.0)),
+              vision=vision).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
