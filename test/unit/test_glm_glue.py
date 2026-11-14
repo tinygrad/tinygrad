@@ -1,0 +1,90 @@
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+import numpy as np
+from tinygrad import Tensor, dtypes, UOp, Device
+from tinygrad.llm import glm_dsa
+from tinygrad.llm.glm_dsa import apply_rope, mla_q_cat, Indexer
+from tinygrad.llm.kernels import amd_glm_dsa
+
+def _bits(t:Tensor) -> np.ndarray: return t.numpy().view(np.uint32 if t.dtype == dtypes.float32 else np.uint16)
+
+class TestMlaQCat(unittest.TestCase):
+  # (MLA_QCAT: the matmul and the roped q_rope stored into one buffer's slices = the cat of the realized matmul, bit for bit)
+  def _check(self, devs):
+    Tensor.manual_seed(3)
+    H, R, nope, rope, L, M = 2*len(devs or (1,)), 40, 24, 8, 32, 256
+    q = Tensor.randn(1, R, H*(nope+rope)).cast(dtypes.half)
+    kb, fc = Tensor.randn(H, L, nope).cast(dtypes.half), Tensor.randn(M, rope)
+    if devs: q, kb, fc = q.shard(devs, 2), kb.shard(devs, 0), fc.shard(devs, None)
+    sp, T = UOp.variable("start_pos", 0, M-1).bind(7), UOp.variable("toks", 1, R).bind(R-3)
+    qh = q.reshape(1, R, H, nope+rope).transpose(1, 2)
+    q_rope = apply_rope(qh[..., nope:].float(), fc[sp:sp+T].pad_to((R, rope)), True)
+    def mm() -> Tensor: return qh[..., :nope].half().contiguous().matmul(kb.transpose(-1, -2), dtype=dtypes.float)
+    ref = mm().contiguous().cat(q_rope.cast(dtypes.float), dim=-1).contiguous().realize()
+    new = mla_q_cat(mm(), q_rope).contiguous().realize()
+    self.assertEqual(new.shape, (1, H, R, L+rope))
+    np.testing.assert_array_equal(_bits(new), _bits(ref))
+  def test_one_device(self): self._check(None)
+  def test_sharded_heads(self): self._check(tuple(f"{Device.DEFAULT}:{i}" for i in range(2)))
+
+class TestHalfRowsG(unittest.TestCase):
+  # (HALF_ROWS_G: the row max in G parts, then of the parts: the same scales and halves as one reduce, rows past HALF_ROWS_MAX included)
+  def test_same_bits(self):
+    Tensor.manual_seed(5)
+    x = (Tensor.randn(1, 1024, 1024) * Tensor([1.0, 3e5, 1e-3, 7e4] * 256).reshape(1, 1024, 1)).realize()
+    g0 = amd_glm_dsa.HALF_ROWS_G
+    try:
+      amd_glm_dsa.HALF_ROWS_G = 1
+      h1, s1 = (t.realize() for t in amd_glm_dsa._half_rows(x, 1024))
+      for g in (16, 4):
+        amd_glm_dsa.HALF_ROWS_G = g
+        h2, s2 = amd_glm_dsa._half_rows(x, 1024)
+        np.testing.assert_array_equal(_bits(s2.realize()), _bits(s1))
+        np.testing.assert_array_equal(_bits(h2.realize()), _bits(h1))
+    finally: amd_glm_dsa.HALF_ROWS_G = g0
+    self.assertTrue((s1.numpy() > 1).any())
+
+  def test_row_split_unchanged(self):
+    # (a row split over the devices (axis 1): the one-reduce path, the reshape into parts would move items between shards)
+    devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    x = Tensor.randn(1, 512, 2048).shard(devs, 2).realize()
+    h, s = amd_glm_dsa._half_rows(x, 512)
+    np.testing.assert_array_equal(_bits(h.realize()), _bits((x.float() / s).cast(dtypes.half).realize()))
+
+class TestIdxQBlk(unittest.TestCase):
+  # (IDX_QBLK: every block of the indexer's queries roped from the projection's rows = the block of all of them roped: the same float ops;
+  # on the CPU the compiler contracts the rope's mul-sub into fma differently in the two kernels (1 ulp), the device's bits: the CHECK hashes)
+  def _blocks(self, qblk:int, Tq:int):
+    Tensor.manual_seed(9)
+    idx = Indexer.__new__(Indexer)
+    idx.idx = SimpleNamespace(kpool=1, n_heads=4, head_dim=8, top_k=2, rope_dim=4, rope_interleave=True)
+    idx.max_context, idx.shard, idx.cache_dk = 2048, 0, Tensor.zeros(2048, 8, dtype="half").contiguous().realize()
+    idx.k_norm = lambda x: x
+    idx.attn_k = lambda x: x[..., :8]
+    idx.attn_q_b = lambda q: q
+    idx.proj = lambda x: x[..., :4]
+    x, q = Tensor.randn(1, Tq, 8).realize(), Tensor.randn(1, Tq, 32).realize()
+    freqs = Tensor.randn(Tq, 4).realize()
+    got:list[np.ndarray] = []
+    def scores(qb, *a, **kw):
+      got.append(qb.numpy())
+      return Tensor.zeros(qb.shape[0], 4)
+    real_getenv = glm_dsa.getenv
+    with patch.object(glm_dsa, "indexer_scores", side_effect=scores), \
+         patch.object(glm_dsa, "pool_index_rows", side_effect=lambda sc, *a, out=None, **kw: out), \
+         patch.object(glm_dsa, "getenv", side_effect=lambda k, d=0: qblk if k == "IDX_QBLK" else real_getenv(k, d)):
+      idx.dsa_picks(x, q, 0, freqs)
+    return got
+  def test_same_bits(self):
+    for Tq in (1100, 2200):
+      a, b = self._blocks(0, Tq), self._blocks(1, Tq)
+      self.assertEqual(len(a), len(b))
+      self.assertGreater(len(a), 1)
+      for u, v in zip(a, b):
+        np.testing.assert_array_equal(u[..., 4:].view(np.uint32), v[..., 4:].view(np.uint32))  # (the unroped dims: copies)
+        np.testing.assert_allclose(u, v, rtol=1e-6, atol=1e-7)
+      self.assertTrue((b[-1][Tq - 1056*(len(b)-1):] == 0).all() and len(b[-1]) > Tq - 1056*(len(b)-1))  # (the padding rows: 0)
+
+if __name__ == "__main__":
+  unittest.main()
