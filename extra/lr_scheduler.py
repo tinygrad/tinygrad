@@ -25,9 +25,7 @@ class MultiStepLR(LR_Scheduler):
     self.gamma = gamma
 
   def get_lr(self) -> Tensor:
-    if self.epoch_counter.numpy()[0] not in self.milestones:
-      return self.optimizer.lr
-    return self.optimizer.lr * self.gamma
+    return self.optimizer.lr * self.gamma**self.milestones.count(self.epoch_counter.numpy()[0])
 
 class ReduceLROnPlateau(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, mode="min", factor=0.1, patience=10, threshold=1e-4, threshold_mode="rel"):
