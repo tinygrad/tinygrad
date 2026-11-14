@@ -282,7 +282,7 @@ class FFNBlock:
     if config.num_experts > 0:
       self.ffn_gate_inp = Linear(config.dim, config.num_experts, bias=config.expert_proj_bias)  # router
       if config.expert_bias: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
-      if config.expert_hash: self.ffn_gate_tid2eid = {"weight": Tensor.zeros(config.vocab_size, config.num_experts_per_tok, dtype=dtypes.int32)}
+      if config.expert_hash: self.ffn_gate_tid2eid = {"weight": Tensor.zeros(config.vocab_size, config.num_experts_per_tok)}
       expert_dim = config.expert_latent_dim or config.dim
       self.ffn_gate_exps = ExpertWeights(config.num_experts, expert_dim, config.hidden_dim, bias=config.expert_proj_bias)
       self.ffn_up_exps = ExpertWeights(config.num_experts, expert_dim, config.hidden_dim, bias=config.expert_proj_bias)
@@ -489,24 +489,25 @@ class Indexer:
 
   def __call__(self, x:Tensor, q:Tensor, start_pos:StartPos, freqs:Tensor|None=None) -> Tensor:
     (B, T, _), idx, S = x.shape, self.idx, ssimplify(smax(start_pos) + x.shape[1])
-    if idx.rope_dim: rot = Tensor.stack(*(unwrap(freqs)[p:p+T] for p in start_pos))
+    if hasattr(self, "compressor"): k = self.compressor(x, start_pos, unwrap(freqs)).float()  # pooled, roped and cached
+    else: k = self.attn_k(x) if idx.qsa else self.k_norm(self.attn_k(x))
     iq = self.attn_q_b(q).reshape(B, T, idx.n_heads, idx.head_dim)
     if idx.msa or idx.qsa: iq = self.q_norm(iq)
-    if idx.rope_dim: iq = apply_rope(iq.transpose(1, 2), rot, idx.rope_interleave, hasattr(self, "compressor")).transpose(1, 2)
-    if hasattr(self, "compressor"): k = self.compressor(x, start_pos, unwrap(freqs)).float()
-    else:
-      k = self.attn_k(x) if idx.qsa else self.k_norm(self.attn_k(x))
-      if idx.rope_dim and not idx.qsa: k = apply_rope(k.unsqueeze(1), rot, idx.rope_interleave).squeeze(1)
-      if hasattr(self, "compressor_gate"):
-        # cache an indexer key and a pooling gate per token, a pool's key is the gate softmax weighted sum of its keys
-        kg = k.stack(self.compressor_gate(x), dim=2)  # (B, T, kpool, 2, D)
-        kg = _update_cache(self.cache_kg, kg, start_pos, 1).float().reshape(B, -1, idx.kpool, 2, idx.head_dim)
-        k = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2)  # (B, S, D)
-      else:
-        k = _update_cache(self.cache_kg, k, start_pos, 1).float()  # (B, S, D)
-      if idx.qsa:
-        k, rot = self.k_norm(k.reshape(B, -1, idx.kpool, idx.head_dim).mean(2)), unwrap(freqs)[:self.max_context:idx.kpool]
-        k = apply_rope(k.unsqueeze(1), rot, idx.rope_interleave).squeeze(1)
+    if idx.rope_dim:
+      rot = Tensor.stack(*(unwrap(freqs)[p:p+T] for p in start_pos))
+      if not (idx.qsa or hasattr(self, "compressor")):
+        k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), rot, idx.rope_interleave).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
+      iq = apply_rope(iq.transpose(1, 2), rot, idx.rope_interleave, hasattr(self, "compressor")).transpose(1, 2)
+    if hasattr(self, "compressor_gate"):
+      # cache an indexer key and a pooling gate per token, a pool's key is the gate softmax weighted sum of its keys
+      kg = k.stack(self.compressor_gate(x), dim=2)  # (B, T, kpool, 2, D)
+      kg = _update_cache(self.cache_kg, kg, start_pos, 1).float().reshape(B, -1, idx.kpool, 2, idx.head_dim)
+      k = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2)  # (B, S, D)
+    elif not hasattr(self, "compressor"):
+      k = _update_cache(self.cache_kg, k, start_pos, 1).float()  # (B, S, D)
+    if idx.qsa:
+      k, rot = self.k_norm(k.reshape(B, -1, idx.kpool, idx.head_dim).mean(2)), unwrap(freqs)[:self.max_context:idx.kpool]
+      k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), rot, idx.rope_interleave).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
     scores = iq @ k.transpose(-1, -2).unsqueeze(1)
     if idx.msa:   scores = scores.reshape(B, T, idx.n_heads, scores.shape[-1] // idx.kpool, idx.kpool).max(-1).transpose(1, 2)
     elif idx.qsa: scores = (scores.relu() * idx.head_dim**-0.5).sum(2).unsqueeze(1)
