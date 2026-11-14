@@ -1,8 +1,16 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, GlobalCounters
+from tinygrad import Tensor, GlobalCounters, dtypes
 
 class TestGetitemOps(unittest.TestCase):
+  def test_empty_tensor_setitem(self):
+    for index_shape in [(0,), (2, 0)]:
+      x = Tensor.arange(6).reshape(2, 3).contiguous()
+      index = Tensor.empty(index_shape, dtype=dtypes.int32)
+      x[index] = -1
+      x[:, index] = Tensor.empty(2, *index_shape, dtype=x.dtype)
+      self.assertEqual(x.tolist(), [[0, 1, 2], [3, 4, 5]])
+
   def test_two_tensor_indices(self):
     # linear indexing is O(idx_size), one-hot masks is O(idx_size * src_size)
     src_np = np.random.rand(10, 100, 200).astype(np.float32)
