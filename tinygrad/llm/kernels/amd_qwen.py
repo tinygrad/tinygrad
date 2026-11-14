@@ -953,8 +953,8 @@ K256_XH = getenv("K256_XH", 1)
 # K256_IQ3XXS: RDNA3 grouped IQ3_XXS experts (the V3.1 file's gate|up of 28 layers) in _grouped_k256_kernel (q8_K activations, as IQ3_S) instead
 # of the int8 tensor cores' kernel on q8 activations: other numerics (the activations' scale a block of 256, not 32). default off
 K256_IQ3XXS = getenv("K256_IQ3XXS", 0)
-# K256_XH_IQ4: K256_XH for IQ4_XS too (same bits). default off
-K256_XH_IQ4 = getenv("K256_XH_IQ4", 0)
+# K256_XH_IQ4: K256_XH for IQ4_XS too (same bits; k1 one card 86 experts x 5 slices, 1152 rows 1009 -> 615 us, 2304 1006 -> 877). default on
+K256_XH_IQ4 = getenv("K256_XH_IQ4", 1)
 def k256_types(rdna4:bool) -> tuple[int, ...]:
   """the grouped experts' types of _grouped_k256_kernel"""
   return (IQ3_S,) if rdna4 else (IQ3_S, IQ4_XS, IQ3_XXS) if K256_IQ3XXS else (IQ3_S, IQ4_XS)
