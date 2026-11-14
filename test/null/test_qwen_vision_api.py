@@ -109,3 +109,38 @@ class TestExpand(unittest.TestCase):
     self.assertEqual(m[0]["content"], "ab")
 
 if __name__ == "__main__": unittest.main()
+
+@unittest.skipIf(Image is None, "pillow")
+class TestUrlCache(unittest.TestCase):
+  def test_same_bytes_decoded_once(self):
+    # (a conversation sends its every earlier picture again each request: the same data: URL's picture comes from the cache, not decoded again)
+    from unittest.mock import patch
+    import tinygrad.llm.qwen_vision as qv
+    u1, u2 = url(png(64, 48)), url(png(64, 48, color=(1, 2, 3)))
+    with patch.object(qv, "load_picture", wraps=qv.load_picture) as lp:
+      a = extract_pictures(msgs(part(u1), part(u2)))
+      b = extract_pictures(msgs(part(u1), part(u2)))
+    self.assertEqual(lp.call_count, 2)
+    self.assertTrue(all(x is y for x, y in zip(a, b)) and a[0].digest != a[1].digest)
+    self.assertFalse(a[0].rgb.flags.writeable)
+    # (the cache's bytes bounded: VISION_URL_CACHE_MB)
+    with patch.object(qv, "VISION_URL_CACHE_MB", 0):
+      with patch.object(qv, "load_picture", wraps=qv.load_picture) as lp: extract_pictures(msgs(part(u1)))
+    self.assertEqual(lp.call_count, 1)
+
+@unittest.skipIf(Image is None, "pillow")
+class TestReference(unittest.TestCase):
+  def test_reference_is_the_cached_picture(self):
+    # (a picture sent before, sent as its reference (sha256 of its data: URL): the same picture, its bytes not uploaded again)
+    import hashlib
+    from tinygrad.llm.qwen_vision import REF_PREFIX, PictureNotCached
+    u = url(png(64, 48, color=(9, 8, 7)))
+    ref = REF_PREFIX + hashlib.sha256(u.encode()).hexdigest()
+    a = extract_pictures(msgs(part(u)))
+    m = msgs(part(ref), role="tool")
+    b = extract_pictures(m)
+    self.assertIs(a[0], b[0])
+    self.assertEqual(m[0]["content"][1], {"type": "image"})
+    with self.assertRaises(PictureNotCached) as cm: extract_pictures(msgs(part(REF_PREFIX + "00" * 32)))
+    self.assertIn("please retry your request", str(cm.exception))  # (pi's auto-retry matches these words: its retry sends the pictures in full)
+    with self.assertRaises(PictureError): extract_pictures(msgs(part(REF_PREFIX + "xyz")))

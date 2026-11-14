@@ -82,20 +82,30 @@ def extract_pictures(messages:list[dict]) -> list:
       url = u.get("url") if isinstance(u:=part.get("image_url"), dict) else u
       try: pics.append(decode_picture(url, deadline))
       except PictureBusy: raise
-      except PictureError as e: raise PictureError(f"image {len(pics) + 1}: {e}") from None
+      except PictureError as e: raise type(e)(f"image {len(pics) + 1}: {e}") from None
       c[i] = {"type": "image"}
   return pics
 
 def expand_pictures(ids:list[int], pics:list, pad:int) -> tuple[list[int], dict[int, typing.Any]]:
   """the prompt's image pads (one a picture, in order) made the pictures' rows' ids, and the pictures by their first row's id"""
   from tinygrad.llm.qwen_vision import PictureError
-  slots = [i for i, t in enumerate(ids) if t == pad]
+  slots = positions(ids, pad)
   if len(slots) != len(pics): raise PictureError(f"the prompt has {len(slots)} image slots for {len(pics)} images (an image token in the text?)")
-  out, at, by_id = [], 0, {}
+  out:list[int] = []
+  at, by_id = 0, {}
   for i, pic in zip(slots, pics):
-    out += ids[at:i] + (pid:=pic.ids())
+    out.extend(ids[at:i])
+    out.extend(pid:=pic.ids())
     by_id[pid[0]], at = pic, i + 1
-  return out + ids[at:], by_id
+  out.extend(ids[at:])
+  return out, by_id
+
+def positions(ids:list[int], x:int) -> list[int]:
+  """the indices of x in ids (list.index's scan: a Pokemon prompt of 300K tokens in ~1 ms, not ~10 ms a Python loop)"""
+  ret, i = [], -1
+  try:
+    while True: ret.append(i:=ids.index(x, i + 1))
+  except ValueError: return ret
 
 def redacted(body:typing.Any) -> typing.Any:
   """a request body to print: every data: URL a placeholder of its length (no picture's bytes in a log)"""
@@ -187,7 +197,7 @@ def common_prefix_pictures(t:list[int], ids:list[int], pad:int, pads:list[int]|N
   binary search (its ids are consecutive)
   """
   from tinygrad.llm.qwen_vision import ID_BITS
-  if pads is None: pads = [k for k, x in enumerate(ids) if x == pad]
+  if pads is None: pads = positions(ids, pad)
   mask, i, j = (1 << ID_BITS) - 1, 0, 0
   for p in pads + [len(ids)]:
     if (a:=t[j:j + p - i]) != (b:=ids[i:p]): return i + (k:=common_prefix(a, b)), j + k
@@ -632,7 +642,7 @@ class Handler(VizHandler):
       if not self.known_model(body.get("model")):
         return self.api_error(404, f"The model '{body.get('model')}' does not exist.", "model_not_found", "model")
       # render and tokenize (VISION: the pictures decoded first, their image pads then their rows' ids)
-      from tinygrad.llm.qwen_vision import PictureError, PictureBusy
+      from tinygrad.llm.qwen_vision import PictureError, PictureBusy, PictureNotCached
       pictures:list = []
       by_id:dict[int, typing.Any] = {}
       try:
@@ -640,6 +650,7 @@ class Handler(VizHandler):
         normalize_messages(body["messages"], images=bool(pictures))
         rendered = self.render(body["messages"], body.get("tools"), body)
       except PictureBusy as e: return self.api_error(503, str(e), "server_busy")
+      except PictureNotCached as e: return self.api_error(400, str(e), "picture_not_cached")
       except PictureError as e: return self.bad_request(str(e))
       except Exception as e: return self.bad_request(f"{type(e).__name__}: {e}")
       ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
@@ -1225,7 +1236,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """
     pad, info, walks, exact = getattr(getattr(self, "model", None), "image_pad_id", -1), [], {}, 0
     if not ids: return ids
-    pads = [k for k, x in enumerate(ids) if x == pad]
+    pads = positions(ids, pad)
     for t, n in self.kept():
       if not 0 < n <= len(t) or not (t[0] == ids[0] or (t[0] < 0 and ids[0] == pad)): continue
       if id(t) not in walks: walks[id(t)] = common_prefix_pictures(t, ids, pad, pads)
