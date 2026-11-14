@@ -1,5 +1,5 @@
 from __future__ import annotations
-import collections, json, math, os, pathlib, queue, random, re, select, socket, socketserver, sys, threading, time, traceback, typing, uuid
+import collections, functools, json, math, os, pathlib, queue, random, re, select, socket, socketserver, sys, threading, time, traceback, typing, uuid
 from dataclasses import dataclass, field as DataField
 from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log, getenv
@@ -61,7 +61,51 @@ MEDIA_KINDS = {"image": "image", "image_url": "image", "video": "video", "video_
                "input_audio": "audio", "document": "document"}
 def media_note(part:dict) -> str: return MEDIA_NOTE.format(kind=MEDIA_KINDS.get(part.get("type", ""), part.get("type", "content")))
 
-def normalize_messages(messages:list[dict]) -> None:
+# ** VISION (VISION_MMPROJ, see cli.py): a chat request's image_url parts (data: URLs) are pictures the model sees: their parts the template's
+# image parts, its one image pad of each the picture's rows (their ids: qwen_vision.picture_ids), the tower's rows of them in the prefill
+# (a picture is resized down to at most VISION_MAX_TOKENS rows of 32 x 32 pixels: 1,024 by default = about one megapixel, the details of a
+# larger one are lost; the usage's prompt_tokens count its rows)
+
+def extract_pictures(messages:list[dict]) -> list:
+  """the pictures of a request's messages in order, each part made the template's image part; a qwen_vision.PictureError (a 400) for one it can't
+  have (not a data: URL, not an image, too large or too many, in a system message), PictureBusy (a 503) if the process's decoders were busy for
+  VISION_DECODE_WAIT seconds"""
+  from tinygrad.llm.qwen_vision import PictureError, PictureBusy, VISION_MAX_IMAGES, VISION_DECODE_WAIT, decode_picture
+  pics:list = []
+  deadline = time.monotonic() + VISION_DECODE_WAIT
+  for m in messages:
+    if not isinstance(c:=m.get("content"), list): continue
+    for i, part in enumerate(c):
+      if not isinstance(part, dict) or part.get("type") != "image_url": continue
+      if m.get("role") == "system": raise PictureError("a system message cannot contain images")
+      if len(pics) == VISION_MAX_IMAGES: raise PictureError(f"more than {VISION_MAX_IMAGES} images in a request")
+      url = u.get("url") if isinstance(u:=part.get("image_url"), dict) else u
+      try: pics.append(decode_picture(url, deadline))
+      except PictureBusy: raise
+      except PictureError as e: raise PictureError(f"image {len(pics) + 1}: {e}") from None
+      c[i] = {"type": "image"}
+  return pics
+
+def expand_pictures(ids:list[int], pics:list, pad:int) -> tuple[list[int], dict[int, typing.Any]]:
+  """the prompt's image pads (one a picture, in order) made the pictures' rows' ids, and the pictures by their first row's id"""
+  from tinygrad.llm.qwen_vision import PictureError
+  slots = [i for i, t in enumerate(ids) if t == pad]
+  if len(slots) != len(pics): raise PictureError(f"the prompt has {len(slots)} image slots for {len(pics)} images (an image token in the text?)")
+  out, at, by_id = [], 0, {}
+  for i, pic in zip(slots, pics):
+    out += ids[at:i] + (pid:=pic.ids())
+    by_id[pid[0]], at = pic, i + 1
+  return out + ids[at:], by_id
+
+def redacted(body:typing.Any) -> typing.Any:
+  """a request body to print: every data: URL a placeholder of its length (no picture's bytes in a log)"""
+  if isinstance(body, dict): return {k: redacted(v) for k, v in body.items()}
+  if isinstance(body, list): return [redacted(v) for v in body]
+  if isinstance(body, str) and body.startswith("data:"): return f"data:...({len(body)} chars)"
+  return body
+
+def normalize_messages(messages:list[dict], images:bool=False) -> None:
+  # (images: VISION's image parts (see extract_pictures) stay the template's)
   # chat templates expect tool_call arguments as dicts (OpenAI clients send JSON strings)
   for m in messages:
     for tc in m.get("tool_calls") or []:
@@ -71,7 +115,8 @@ def normalize_messages(messages:list[dict]) -> None:
     # string-only templates need text parts joined and explicit null content emptied
     if m.get("content", "") is None: m["content"] = ""
     elif isinstance(c := m.get("content"), list):
-      c = m["content"] = [p if not isinstance(p, dict) or p.get("type") not in MEDIA_KINDS else {"type": "text", "text": media_note(p)} for p in c]
+      c = m["content"] = [p if not isinstance(p, dict) or p.get("type") not in MEDIA_KINDS or (images and p.get("type") == "image") else
+                          {"type": "text", "text": media_note(p)} for p in c]
       if all(isinstance(p, dict) and p.get("type") == "text" for p in c): m["content"] = "".join(p["text"] for p in c)
 
 # ** the Anthropic Messages API (/v1/messages): requests as the chat completions' messages and tools, replies as its content blocks and events
@@ -366,7 +411,7 @@ class Handler(VizHandler):
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
                 reasoning:bool=False, log:str="", keepalive:float|None=None, top_p:float|None=None, continuous_usage:bool=False,
-                top_k:int|None=None, stop:list[str]|None=None, json_mode:bool=False):
+                top_k:int|None=None, stop:list[str]|None=None, json_mode:bool=False, pictures:dict|None=None):
     tok = self.server.tok
     prompt_tokens = len(ids)
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
@@ -400,6 +445,9 @@ class Handler(VizHandler):
       self.server._top_k_said, top_k = True, 0
     req = Request(ids, log, max_tokens, temperature, self.server.top_p if top_p is None else top_p, session_id=sid, bench_tag=bench,
                   top_k=self.server.top_k if top_k is None else top_k)
+    # (VISION: the request holds its pictures until its prompt is prefilled, nothing else does: their pixels freed then)
+    if pictures: req.pictures, req.pics = {k: functools.partial(self.server.picture_rows, p) for k, p in pictures.items()}, dict(pictures)
+    pictures = None
     # (SUPERSEDE: the same prompt again from the same session (X-Session-ID) while its request runs is a client's retry of it (a client that
     # timed out behind a proxy that doesn't close our connection): the older one stops, it isn't decoded for nobody)
     key = (sid, len(ids), hash(tuple(ids))) if isinstance(sid, str) and sid and getenv("SUPERSEDE", 1) else None
@@ -525,7 +573,15 @@ class Handler(VizHandler):
     request_st = time.perf_counter()
     self.request_id = uuid.uuid4().hex
     log = f"{self.path}  {colored('--', 'BLACK')}  "
-    raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+    # (VISION: a body larger than VISION_MAX_BODY_MB isn't kept: 413, read away in pieces of 1 MB (at most 256 MB: then the connection closes) so
+    # the client gets the answer, not a broken pipe)
+    n = int(self.headers.get("Content-Length", "0"))
+    if getattr(self.server, "vision", None) is not None and n > getenv("VISION_MAX_BODY_MB", 32) * 2**20:
+      left = min(n, 2**28)
+      while left > 0 and (got:=len(self.rfile.read(min(2**20, left)))): left -= got
+      self.close_connection = True
+      return self.api_error(413, f"request body larger than {getenv('VISION_MAX_BODY_MB', 32)} MB", "request_too_large")
+    raw_body = self.rfile.read(n)
     path = self.path.split("?")[0]
     # (the path-form session end needs no request body. The body-form alias accepts its session_id in JSON.)
     try:
@@ -533,9 +589,10 @@ class Handler(VizHandler):
         body: dict[str, typing.Any] = {}
       else:
         body = json.loads(raw_body.decode("utf-8"))
+      del raw_body
       if not isinstance(body, dict): raise ValueError("the body is not a JSON object")
     except Exception as e: return self.bad_request(f"invalid request body: {e}")
-    if DEBUG >= 1: print(json.dumps(body, indent=2))
+    if DEBUG >= 1: print(json.dumps(redacted(body), indent=2))
     if not self.authorized(): return self.api_error(401, "Invalid API key provided.", "invalid_api_key")
     if path in ("/v1/messages", "/v1/messages/count_tokens"): return self.anthropic(path, body, log, request_st)
     if path == "/v1/sessions/end": return self.session_end(body.get("session_id", ""))
@@ -546,12 +603,21 @@ class Handler(VizHandler):
       # (a model the server doesn't serve: 404, as the reference API (MODEL_CHECK: its name or an alias, any case, or none: the server's))
       if not self.known_model(body.get("model")):
         return self.api_error(404, f"The model '{body.get('model')}' does not exist.", "model_not_found", "model")
-      # render and tokenize
+      # render and tokenize (VISION: the pictures decoded first, their image pads then their rows' ids)
+      from tinygrad.llm.qwen_vision import PictureError, PictureBusy
+      pictures:list = []
+      by_id:dict[int, typing.Any] = {}
       try:
-        normalize_messages(body["messages"])
+        if getattr(self.server, "vision", None) is not None: pictures = extract_pictures(body["messages"])
+        normalize_messages(body["messages"], images=bool(pictures))
         rendered = self.render(body["messages"], body.get("tools"), body)
+      except PictureBusy as e: return self.api_error(503, str(e), "server_busy")
+      except PictureError as e: return self.bad_request(str(e))
       except Exception as e: return self.bad_request(f"{type(e).__name__}: {e}")
       ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
+      if pictures:
+        try: ids, by_id = expand_pictures(ids, pictures, self.server.model.image_pad_id)
+        except PictureError as e: return self.bad_request(str(e))
       log += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
       if len(ids) >= self.server.model.max_context:
         stderr_log(log + f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{self.server.model.max_context:5d}\n")
@@ -570,7 +636,8 @@ class Handler(VizHandler):
                               continuous_usage=include_usage and bool((body.get("stream_options") or {}).get("continuous_usage_stats", False)),
                               max_tokens=max_tokens, temperature=temperature, reasoning=rendered.rstrip().endswith(THINK_STARTS), log=log,
                               top_p=top_p, top_k=top_k, keepalive=hold or (KEEPALIVE if body.get("stream") else None), stop=stops,
-                              json_mode=json_mode)
+                              json_mode=json_mode, pictures=by_id)
+      del pictures, by_id
       if body.get("stream"): self.stream_json(chunks)
       else:
         held = False
@@ -697,6 +764,8 @@ class Request:
     # (decoded in a slot: a copy of the model's checkpoint at the end of its prompt, see LLMServer.ckpt_keep)
     self.ckpt_buf: typing.Any = None
     self.ckpt_tokens: list[int] = []
+    self.pictures: dict[int, typing.Callable] = {}  # (VISION: its pictures' rows by their first row's id, see Transformer.seq_prefill)
+    self.pics: dict[int, typing.Any] = {}  # (VISION: its pictures (qwen_vision.Picture) by their first row's id: the tower's slices, see tower_slice)
   @property
   def sampling(self) -> tuple[float, ...]:
     """its temperature, top_p and (if it has one) top_k: the model's row of them (the seq steps take a top_k, the batch steps don't)"""
@@ -760,12 +829,15 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   recent: collections.deque = collections.deque(maxlen=1000)
   temperature = 0.0  # a chat completion's without one
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any, top_p:float=1.0,
-               temperature:float=0.0):
+               temperature:float=0.0, vision:typing.Any=None):
     # top_p: a request's without one (the model's recommended, general.sampling.top_p of its gguf); temperature: a chat completion's
     # (the model: master's Transformer, or a tensor parallel implementation of its own with more (qwen4exp's sequences, glm5next's batch slots))
     self.model: typing.Any = model
     self.model_name, self.tok, self.template, self.top_p = model_name, tok, template, top_p
     self.temperature = temperature
+    # (VISION: the vision tower (qwen_vision.VisionTower), the rows of the last pictures it made (VISION_CACHE_MB))
+    self.vision, self._pic_rows = vision, collections.OrderedDict[bytes, typing.Any]()
+    self._tower_job: tuple[typing.Any, typing.Any]|None = None  # (VISION: the picture whose tower runs in slices, and its TowerJob)
     self.top_k = max(getenv("TOP_K", 0), 0)  # a request's without one (TOP_K: the config's, e.g. Qwen's 20; 0: none)
     # (the models' graphs take a top_k with SAMPLE_TOP_K (on with TOP_K): without it a request's top_k is ignored, said once)
     self.sample_top_k, self._top_k_said = bool(getenv("SAMPLE_TOP_K", int(self.top_k > 0))), False
@@ -1045,6 +1117,40 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       ret += [p for x in list(eng.stashed) for p in ((x.tokens, len(x.tokens)), (x.tokens, x.ckpt))]
     return ret + [(t, len(t)) for t, _ in list(getattr(self, "stash", {}).values())] + \
       [(e.tokens, len(e.tokens)) for e in list(getattr(self, "host", []))]
+  def tower_slice(self, req:Request) -> float|None:
+    """
+    VISION: one slice of the tower (seconds) for the pictures the next prefill of req reads whose rows aren't kept: the job in progress
+    (whoever's), else the first such picture's. None: none left (its prefill reads kept rows, the tower doesn't run inside it)
+    """
+    if self._tower_job is None:
+      from tinygrad.llm.qwen_vision import picture_runs, patches
+      ids, pos, _ = req.fill
+      need = [req.pics[first] for start, n, _, first in (picture_runs(ids) if req.pics else []) if start + n > pos and first in req.pics]
+      pic = next((p for p in need if p.digest not in self._pic_rows), None)
+      if pic is None: return None
+      self._tower_job = (pic, self.vision.start(*patches(pic.rgb)))
+    st = time.perf_counter()
+    pic, job = self._tower_job
+    if (rows:=job.step()) is not None:
+      self._tower_job = None
+      self._keep_rows(pic.digest, rows)
+    return time.perf_counter() - st
+
+  def _keep_rows(self, digest:bytes, rows:typing.Any):
+    self._pic_rows[digest] = rows
+    while sum(x.nbytes for x in self._pic_rows.values()) > getenv("VISION_CACHE_MB", 512) * 2**20 and len(self._pic_rows) > 1:
+      self._pic_rows.popitem(last=False)
+
+  def picture_rows(self, pic:typing.Any) -> typing.Any:
+    """VISION: a picture's rows (n, dim) float32 by the tower (the model's thread, between its prefill chunks); the last ones' kept"""
+    if (r:=self._pic_rows.get(pic.digest)) is not None:
+      self._pic_rows.move_to_end(pic.digest)
+      return r
+    # (not kept (tower_slice made them first, an LRU dropped them since): the whole tower now, in the prefill)
+    from tinygrad.llm.qwen_vision import patches
+    self._keep_rows(pic.digest, r:=self.vision(*patches(pic.rgb)))
+    return r
+
   def reuse_tokens(self, rendered:str, ids:list[int]) -> list[int]:
     """
     the tokens of a prompt that continues a kept conversation as its text but not its tokens (the model's reply tokenized again differently):
@@ -1059,7 +1165,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     own = [t[:n] for t, n in cands if n > exact and t[:(m:=min(2048, n // 2, len(ids) // 2))] == ids[:m]]
     for t in sorted(own, key=lambda t: common_prefix(t, ids), reverse=True)[:2]:
       # (VISION: not one with pictures (their rows' ids aren't text): its prompt is the tokens of its text and pictures as they are)
-      if getattr(self, "vision", None) is not None and min(t) < 0: continue
+      if getattr(self, "vision", None) is not None and min(t, default=0) < 0: continue
       if rendered.startswith(text:=self.tok.decode(t)): return t + self.tok.encode(rendered[len(text):])
     return ids
 
@@ -1571,7 +1677,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           if not c.generated: c.cache_start, c.queued = start, time.perf_counter() - c.st
           self.telemetry.cache_observe(c.session_id, len(ids), self.model.max_context, start, eng.last_take_stash)
           c.fill, c.cold = (ids, start, restore), len(ids) - start > self.COLD_TOKENS
-          if active and 0 < len(ids) - start <= mix_tokens and min(ids[start:]) >= 0:
+          if active and 0 < len(ids) - start <= mix_tokens and min(ids[start:], default=0) >= 0:
             # (SEQ_MIX_TOKENS: force this short suffix in the draft slots of the ordinary steps, beside the other sequences)
             eng.mix_start(job, ids, start, restore, c.sampling)
             active[job] = c
@@ -1588,6 +1694,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
            and time.perf_counter() - clock_at >= self.CLOCK_HOLD:
           set_caps(clocks[mode])
           clock_mode, clock_at = mode, time.perf_counter()
+        # (VISION: the rows of the pictures a prefill will read are made before it, one slice of the tower (qwen_vision.TowerJob) a turn of
+        # this loop instead of a prefill slice: the others' decoding steps between them as between prefill slices)
+        if job is not None and getattr(self, "vision", None) is not None and filling[job].pics and (tsl:=self.tower_slice(filling[job])) is not None:
+          stall += tsl
+          trace(f"tower_slice ms={tsl*1e3:.3f} active={len(active)}")
+          job = None
         if job is not None:
           req = filling[job]
           ids, pos, restore = req.fill
@@ -1598,8 +1710,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           # (PREFILL_BIG_ALONE: the biggest prefill chunks only while nobody decodes (=2: and no other request waits or prefills), see _seq_chunks)
           self.model._pf_alone = not active and (getenv("PREFILL_BIG_ALONE", 0) != 2 or (not pending and len(filling) <= 1))
           try:
-            if end < len(ids): eng.prefill_slice(job, ids, pos, restore, end)
+            if req.pictures: (eng.prefill_slice(job, ids, pos, restore, end, pictures=req.pictures) if end < len(ids) else
+                              (first:=eng.prefill(job, ids, pos, restore, req.sampling, pictures=req.pictures)))
+            elif end < len(ids): eng.prefill_slice(job, ids, pos, restore, end)
             else: first = eng.prefill(job, ids, pos, restore, req.sampling)
+            if end == len(ids): req.pictures, req.pics = {}, {}
           except Exception as e:
             traceback.print_exc()
             del filling[job]
