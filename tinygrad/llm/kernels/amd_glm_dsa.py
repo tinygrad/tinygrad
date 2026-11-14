@@ -1494,6 +1494,12 @@ def _row_scale(xr:Tensor) -> Tensor:
   else: amax = xr.float().abs().max(-1, keepdim=True)
   return (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
 
+def _half_rows_parts(tokens, width) -> int:
+  # the parts of a row for _half_rows' max: the most up to HALF_ROWS_G that divide it in whole 32s (2816 = 11 x 256: 11), 1 = one reduce
+  if not isinstance(tokens, int) or not isinstance(width, int) or width % 32 != 0: return 1
+  G = next((g for g in range(min(HALF_ROWS_G, width // 32), 1, -1) if width % (g * 32) == 0), 1)
+  return G if tokens * G >= 4096 else 1
+
 def _half_rows(x:Tensor, tokens:int, splits:int=1) -> tuple[Tensor, Tensor|None]:
   """
   x (tokens, in) in half for the f16 kernels: a row past HALF_ROWS_MAX divided by a power of two (exact) to fit (GLM-5's first tokens' activations
@@ -1512,16 +1518,23 @@ def _half_rows(x:Tensor, tokens:int, splits:int=1) -> tuple[Tensor, Tensor|None]
     xh, sc = Tensor.custom_kernel(xh, sc, x, fxn=_half_rows_kernel)[:2]
     return xh, sc
   if splits > 1:
-    xf = x.reshape(tokens, splits, x.shape[-1] // splits).float()
-    amax = xf.abs().max(-1, keepdim=True)  # (every device its own part's: no copies)
+    xf = x.reshape(tokens, splits, w:=x.shape[-1] // splits).float()
+    # (every device its own part's: no copies; in G parts as below: the parts inside a device's own part)
+    if (G:=_half_rows_parts(tokens, w)) > 1: amax = xf.abs().reshape(tokens, splits, G, w // G).max(-1).contiguous().max(-1, keepdim=True)
+    else: amax = xf.abs().max(-1, keepdim=True)
     sc = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
     return (xf / sc).cast(dtypes.float16).reshape(x.shape).contiguous(), sc.permute(1, 0, 2)
   xf = x.reshape(tokens, x.shape[-1]).float()
   # (HALF_ROWS_G, default 16: the max of a row's abs in G parts first, a kernel of tokens x G threads, then of the G: the same max in any order.
   # one reduce is a thread a row: 2688 threads over 2048 values, 0.16 ms a call on ts1)
-  if (G:=HALF_ROWS_G) > 1 and isinstance(tokens, int) and tokens * G >= 4096 and xf.shape[-1] % (G * 32) == 0 and \
+  if (G:=_half_rows_parts(tokens, xf.shape[-1])) > 1 and \
      (not isinstance(xf.device, tuple) or xf.uop.axis in (None, 0)):  # (not a row split over the devices)
     amax = xf.abs().reshape(tokens, G, xf.shape[-1] // G).max(-1).contiguous().max(-1, keepdim=True)
+  elif isinstance(devs:=xf.device, tuple) and xf.uop.axis == 1 and xf.shape[-1] % len(devs) == 0 and \
+       (G:=_half_rows_parts(tokens, xf.shape[-1] // len(devs))) > 1:
+    # (a row split over the devices (the attention's heads before attn_output): G parts of every device's part, their max on the device,
+    # then the max of the row's parts over the devices (as the one reduce did with every device's max))
+    amax = xf.abs().reshape(tokens, len(devs) * G, xf.shape[-1] // (len(devs) * G)).max(-1).contiguous().max(-1, keepdim=True)
   else: amax = xf.abs().max(-1, keepdim=True)
   sc = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
   return (xf / sc).cast(dtypes.float16).reshape(x.shape).contiguous(), sc
@@ -2593,9 +2606,12 @@ def sp_reduce_scatter(p:Tensor, fmt:str|None=None) -> Tensor:
       u.src[0].src[0].max_numel() == R*D and p.uop.axis == 0 and bool(getenv("SP_RS_DIRECT", 1))
     loc = _per_device(Tensor(u)) if direct else _per_device(_materialized(p.reshape(n, R, D), dtypes.float32))
     xs = [Tensor(loc.mselect(j)).reshape(R, D) for j in range(n)]
-    pks = [Tensor.custom_kernel(Tensor.empty(R, D//32, W, dtype=dtypes.uint32, device=devs[j]), xs[j], fxn=pack_k)[0].uop
-           for j in range(n)]
-    sent = _rotated(lambda j, i: pks[j].shrink(((i*size, (i+1)*size), (0, D//32), (0, W))), devs)
+    # (SP_RS_SKIP, default on, the same values: a device's own rows are summed from xs, never sent: not packed. pks[j] the rows of the others)
+    sk = bool(getenv("SP_RS_SKIP", 1)) and n > 1
+    pks = [Tensor.custom_kernel(Tensor.empty(R - size*sk, D//32, W, dtype=dtypes.uint32, device=devs[j]), xs[j],
+                                fxn=functools.partial(pack_k, skip=(j*size, size)) if sk else pack_k)[0].uop for j in range(n)]
+    def pk_row(j:int, i:int): return (i - int(sk and i > j)) * size
+    sent = _rotated(lambda j, i: pks[j].shrink(((pk_row(j, i), pk_row(j, i) + size), (0, D//32), (0, W))), devs)
     def summed(i:int) -> UOp:
       others = [Tensor(sent[(j, i)]) for j in range(n) if j != i]
       return Tensor.custom_kernel(Tensor.empty(size, D, dtype=dtypes.float32, device=devs[i]), xs[i], *others,
@@ -2626,14 +2642,15 @@ def _q8_unpacked(pk:UOp, token:UOp, group:UOp, sub:UOp) -> list[UOp]:
   return [(words[i//4] >> (8*(i%4))).cast(dtypes.uint8).bitcast(dtypes.int8).float() * d for i in range(8)]
 
 @functools.cache
-def _q8_pack_kernel(out:UOp, x:UOp, *add:UOp, row0:int=0) -> UOp:
+def _q8_pack_kernel(out:UOp, x:UOp, *add:UOp, row0:int=0, skip:tuple[int, int]=(0, 0)) -> UOp:
   # a row's groups of 32 as q8_quantize's int8 words (rounded the same), the float scale the ninth word: a lane eight neighboring inputs.
-  # x from row row0 (plus the packed add)
+  # x from row row0 (plus the packed add); skip (start, rows): x's rows from start on one block of rows later (they are not packed)
   T, G = cast(tuple[int, int, int], out.shape)[:2]
   assert G % 8 == 0, f"q8_pack: {G} groups of 32 a row, not whole warps of 8 (the rest of the row would be left out)"
   tg8, lane = UOp.range(T*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
-  values = [x.reshape(-1, G*32)[row0 + token, group*32 + sub*8 + i].load().float() for i in range(8)]
+  xrow = row0 + token + ((token < skip[0]).where(0, skip[1]) if skip[1] else 0)
+  values = [x.reshape(-1, G*32)[xrow, group*32 + sub*8 + i].load().float() for i in range(8)]
   if add: values = [a + b for a, b in zip(_q8_unpacked(add[0], token, group, sub), values)]
   mx = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
   for off in (1, 2): mx = mx.maximum(_lane_xor(mx, off))
@@ -2645,14 +2662,15 @@ def _q8_pack_kernel(out:UOp, x:UOp, *add:UOp, row0:int=0) -> UOp:
   return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q8_pack", opts_to_apply=()))
 
 @functools.cache
-def _q4_pack_kernel(out:UOp, x:UOp, row0:int=0) -> UOp:
+def _q4_pack_kernel(out:UOp, x:UOp, row0:int=0, skip:tuple[int, int]=(0, 0)) -> UOp:
   # a row's groups of 32 as signed 4 bit integers (-7..7, rounded) of the group's float scale (its absolute max over 7): a group four words and the
   # scale the fifth. a lane eight neighboring inputs (a word). x from row row0
   T, G = cast(tuple[int, int, int], out.shape)[:2]
   assert G % 8 == 0, f"q8_pack: {G} groups of 32 a row, not whole warps of 8 (the rest of the row would be left out)"
   tg8, lane = UOp.range(T*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
-  values = [x.reshape(-1, G*32)[row0 + token, group*32 + sub*8 + i].load().float() for i in range(8)]
+  xrow = row0 + token + ((token < skip[0]).where(0, skip[1]) if skip[1] else 0)
+  values = [x.reshape(-1, G*32)[xrow, group*32 + sub*8 + i].load().float() for i in range(8)]
   mx = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
   for off in (1, 2): mx = mx.maximum(_lane_xor(mx, off))
   d = _cfn(False, src=(mx,), arg=("({0}/7.0f)", dtypes.float)).maximum(1e-20)
