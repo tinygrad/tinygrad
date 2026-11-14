@@ -16,19 +16,19 @@ WAVES_M, WAVES_N, LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 2, 2, 16
 WMMA_ACC, THREADS_PER_BLOCK = WMMA_M // LANES_PER_WAVE_M, WARP_SIZE * WAVES_M * WAVES_N
 LDS_PAD, WMMA_ARG, LOG2E = 4, ((WMMA_N, WMMA_M, WMMA_K), 32), math.log2(math.e)
 GGML_BLOCK_SIZE, Q8_GROUP_SIZE = 256, 32
-Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K = 8, 10, 11, 12, 13, 14
+Q5_0, Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K = 6, 8, 10, 11, 12, 13, 14
 IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS, Q2_0 = 17, 18, 20, 21, 22, 23, 42
 QUANT_SIZES = {Q8_0: 272, Q2_K: 84, Q3_K: 110, Q4_K: 144, Q5_K: 176, Q6_K: 210, IQ2_XS: 74,
-               IQ3_XXS: 98, IQ4_NL: 144, IQ3_S: 110, IQ2_S: 82, IQ4_XS: 136, Q2_0: 72}  # bytes per 256 weights
-HALFWORD_QUANTS = (Q8_0, Q6_K, Q2_K, Q3_K, IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S, Q2_0)
+               IQ3_XXS: 98, IQ4_NL: 144, IQ3_S: 110, IQ2_S: 82, IQ4_XS: 136, Q2_0: 72, Q5_0: 176}  # bytes per 256 weights
+HALFWORD_QUANTS = (Q8_0, Q6_K, Q2_K, Q3_K, IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S, Q2_0, Q5_0)
 # formats of independent blocks of 32 or 64 weights: (halfwords, weights) of a block. a device may hold part of a 256 weight row group
-SMALL_BLOCK_QUANTS = {Q8_0: (17, 32), IQ4_NL: (9, 32), Q2_0: (9, 64)}
+SMALL_BLOCK_QUANTS = {Q8_0: (17, 32), IQ4_NL: (9, 32), Q2_0: (9, 64), Q5_0: (11, 32)}
 def _small_block(ggml_type:int, group:UOp|int) -> UOp|int:
   """the halfword offset of the block of the 32 weight group `group` (of a row, or of a 256 weight group) of a small block format"""
   hw, w = SMALL_BLOCK_QUANTS[ggml_type]
   return group // (w // 32) * hw
 QUANT_NAMES = {Q8_0: "q8_0", Q2_K: "q2_k", Q3_K: "q3_k", Q4_K: "q4_k", Q5_K: "q5_k", Q6_K: "q6", IQ4_XS: "iq4_xs",
-               IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ4_NL: "iq4_nl", IQ3_S: "iq3_s", IQ2_S: "iq2_s", Q2_0: "q2_0"}
+               IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ4_NL: "iq4_nl", IQ3_S: "iq3_s", IQ2_S: "iq2_s", Q2_0: "q2_0", Q5_0: "q5_0"}
 
 def _unbind(v:int|UOp) -> int|UOp: return v.unbind_all()[0] if isinstance(v, UOp) else v
 
@@ -57,7 +57,7 @@ def _wmma_rdna4(device:str|tuple[str, ...]|None) -> bool:
 # int8 WMMA on q8 activations pays a rescale per 32 inputs of every output: it wins where the f16 decode is expensive, the grid formats
 I8_WMMA_QUANTS = (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S)
 # formats with a single scale per 32 weights and no offset
-GROUP_SCALE_QUANTS = (Q8_0, IQ4_NL, IQ4_XS, IQ3_S, IQ3_XXS, Q4_K, Q5_K, Q2_0)
+GROUP_SCALE_QUANTS = (Q8_0, IQ4_NL, IQ4_XS, IQ3_S, IQ3_XXS, Q4_K, Q5_K, Q2_0, Q5_0)
 
 def _cfn(inline:bool, src:tuple[UOp, ...], arg:tuple[str, DType]) -> UOp:
   """a call of inline C (the old CUSTOM (a statement, or a value in a variable) and CUSTOMI (inline=True: an expression)): arg (format, dtype)"""
@@ -575,6 +575,13 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
   if ggml_type in (IQ4_NL, IQ4_XS):
     packed = word(2+(i%4)*4) if ggml_type == IQ4_NL else _amd_load(raw[base+2+subgroup*4+i%4])
     return _iq4_bytes(packed, 4*(i//4))
+  if ggml_type == Q5_0:
+    # (base: the 32 weight block, 22 bytes: d, qh (4 bytes), qs (16)) weights 4i..4i+3 of the group: the low nibbles of qs word i%4 (i < 4) or its
+    # high nibbles, bit 4 from the bits 4i..4i+3 of qh (a multiply spreads the 4 bits to the bytes); q-16 signed: +0x70 then ^0x80 a byte (no carries)
+    shift = (i//4)*4
+    qs = (word(6+(i%4)*4) >> (shift.cast(dtypes.uint32) if isinstance(shift, UOp) else shift)) & 0x0f0f0f0f
+    qh = (word(2) >> ((4*i).cast(dtypes.uint32) if isinstance(i, UOp) else 4*i)) & 15
+    return ((qs | (((qh * 0x00204081) & 0x01010101) << 4)) + 0x70707070) ^ 0x80808080
   if ggml_type == Q2_0:
     # (base: the 64 weight block, the group its half) four 2 bit q of a byte as bytes, q-1 signed: +0x7f then ^0x80 a byte (no carries)
     q = byte(2 + (subgroup%2)*8 + i)
@@ -3295,8 +3302,8 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
                             expert_words=expert_words, x_div=x_div, act=act, rdna4=rdna4)
     result = Tensor.custom_kernel(out, weight, xq, xd, *extra, *group, fxn=fxn)[0]
     return result.reshape(devices, rows_out, cols) if devices > 1 else result
-  # (the int8 tensor cores: the grid formats, IQ4_NL and Q2_0)
-  if ggml_type in I8_WMMA_QUANTS or ggml_type in (IQ4_NL, Q2_0):
+  # (the int8 tensor cores: the grid formats, IQ4_NL, Q2_0 and Q5_0)
+  if ggml_type in I8_WMMA_QUANTS or ggml_type in (IQ4_NL, Q2_0, Q5_0):
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=ggml_type, out_features=out_features, in_features=in_features,
                             expert_words=expert_words, x_div=x_div, act=act, rdna4=rdna4)
