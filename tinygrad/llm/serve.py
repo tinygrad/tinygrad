@@ -1193,11 +1193,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     the tokens of a prompt that continues a kept conversation as its text but not its tokens (the model's reply tokenized again differently):
     the kept ones and the rest's, so the cache holds it
     """
-    # (VISION: a request with a picture, or one whose candidates hold a kept list with pictures (only if a picture was ever served: a text
-    # fleet scans nothing): _reuse_pictures; every other one (a text-only request on a VISION server) the path of before, the same code)
+    # (VISION: a request with a picture, or one whose candidates hold a kept list with pictures that starts as it does (only if a picture was
+    # ever served: a text fleet scans nothing; another conversation's pictures don't send every text request the slower way: g2 Nov 14, 0.1 s
+    # a request): _reuse_pictures; every other one (a text-only request on a VISION server) the path of before, the same code)
     if getattr(self, "vision", None) is not None and \
        (getattr(getattr(self, "model", None), "image_pad_id", -1) in ids or (getattr(self, "pictures_served", False) and
-        any(min(t, default=0) < 0 for t, n in self.kept() if 1000 <= n < len(ids) + 1000 and n <= len(t)))):
+        any(same_start(t, ids) and min(t, default=0) < 0 for t, n in self.kept() if 1000 <= n < len(ids) + 1000 and n <= len(t)))):
       return self._reuse_pictures(rendered, ids)
     return self._reuse_text(rendered, ids)
 
