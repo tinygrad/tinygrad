@@ -214,7 +214,7 @@ class AttentionResidual:
 class HyperConnection:
   def __init__(self, config:TransformerConfig, head:bool=False):
     self.count, self.eps, self.iters, self.norm_eps = (hc:=unwrap(config.hc)).count, hc.eps, hc.sinkhorn_iters, config.norm_eps
-    self.fn = Linear(self.count * config.dim, (n:=self.count if head else (2 + self.count) * self.count), bias=False)
+    self.fn = Linear(self.count * config.dim, (n:=self.count * (1 if head else 2 + self.count)), bias=False)
     self.base, self.scale = {"weight": Tensor.zeros(n)}, {"weight": Tensor.zeros(1 if head else 3)}
 
   def mix(self, xs:Tensor) -> tuple[Tensor, Tensor]:
