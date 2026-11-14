@@ -5013,7 +5013,7 @@ def seq_views(cache:Tensor) -> list[Tensor]:
   return views
 
 @functools.cache
-def _seq_gather_kernel(out:UOp, part:UOp, dev:UOp, *need:UOp, start_pos:UOp, k:int, n:int, base:UOp|None=None) -> UOp:
+def _seq_gather_kernel(out:UOp, part:UOp, dev:UOp, *need:UOp, start_pos:UOp, k:int, n:int, base:UOp|None=None, thr:int=0) -> UOp:
   # the positions before start_pos of the part of device (me+k)%n (part: its rows, k > 0 another device's memory) into their rows of out
   # (need: only the positions marked in it (SEQ_GATHER_UNION, see _seq_need_kernel), the others not read)
   rows, C = cast(tuple[int, int], part.shape)
@@ -5022,7 +5022,8 @@ def _seq_gather_kernel(out:UOp, part:UOp, dev:UOp, *need:UOp, start_pos:UOp, k:i
   owner = (dev[0].load().cast(dtypes.weakint) + k) % n
   p = (j*n + owner) * SEQ_BLK + r
   ok = p < start_pos
-  if need: ok = ok & need[0][p.valid(ok)].load().ne(0)
+  # (thr: before position thr every position (need is not marked there))
+  if need: ok = ok & (need[0][p.valid(ok)].load().ne(0) | (start_pos < thr) if thr else need[0][p.valid(ok)].load().ne(0))
   # (base: the sequence's region from that position, its rows from base//n of every device)
   b = base // n if base is not None else 0
   row = (b + j*SEQ_BLK + r).minimum(rows-1)
@@ -5033,7 +5034,7 @@ def _seq_gather_kernel(out:UOp, part:UOp, dev:UOp, *need:UOp, start_pos:UOp, k:i
   return UOp.group(*st).end(j, r, c).sink(arg=KernelInfo(name=f"seq_gather{k}", opts_to_apply=()))
 
 @functools.cache
-def _seq_gather_fused_kernel(out:UOp, dev:UOp, *srcs:UOp, start_pos:UOp, n:int, base:UOp|None=None) -> UOp:
+def _seq_gather_fused_kernel(out:UOp, dev:UOp, *srcs:UOp, start_pos:UOp, n:int, base:UOp|None=None, thr:int=0) -> UOp:
   # _seq_gather_kernel of every part in one kernel (SEQ_GATHER_FUSED): srcs the n parts (seq_views) and need (optional). the reads of all the
   # peers at once (one kernel a peer: one link at a time), the same words to the same rows
   parts, need = srcs[:n], srcs[n:]
@@ -5044,7 +5045,8 @@ def _seq_gather_fused_kernel(out:UOp, dev:UOp, *srcs:UOp, start_pos:UOp, n:int, 
   owner = (dev[0].load().cast(dtypes.weakint) + kk) % n
   p = (j*n + owner) * SEQ_BLK + r
   ok = p < start_pos
-  if need: ok = ok & need[0][p.valid(ok)].load().ne(0)
+  # (thr: before position thr every position (need is not marked there))
+  if need: ok = ok & (need[0][p.valid(ok)].load().ne(0) | (start_pos < thr) if thr else need[0][p.valid(ok)].load().ne(0))
   b = base // n if base is not None else 0
   row = (b + j*SEQ_BLK + r).minimum(rows-1)
   w = functools.reduce(lambda x, y: x | y, [parts[k][row.valid(ok & kk.eq(k)), c].load() for k in range(n)])
@@ -5053,10 +5055,12 @@ def _seq_gather_fused_kernel(out:UOp, dev:UOp, *srcs:UOp, start_pos:UOp, n:int, 
   return UOp.group(*st).end(kk, j, r, c).sink(arg=KernelInfo(name="seq_gather_all", opts_to_apply=()))
 
 @functools.cache
-def _seq_need_kernel(need:UOp, index:UOp) -> UOp:
-  # the positions of the lists (T, n_max+1, the count last) marked in need (N,)
+def _seq_need_kernel(need:UOp, index:UOp, start_pos:UOp|None=None, thr:int=0) -> UOp:
+  # the positions of the lists (T, n_max+1, the count last) marked in need (N,). thr: none marked before position thr (the gathers take all)
   T, n_max, N = cast(int, index.shape[0]), cast(int, index.shape[1]) - 1, cast(int, need.shape[0])
-  t, i = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(n_max, 1, AxisType.GLOBAL)
+  t = UOp.range((start_pos >= thr).where(UOp.const(T, dtypes.weakint), UOp.const(0, dtypes.weakint)) if thr and start_pos is not None else T, 0,
+                AxisType.GLOBAL)
+  i = UOp.range(n_max, 1, AxisType.GLOBAL)
   key = index[t, i].load().cast(dtypes.weakint)
   ok = (i < index[t, n_max].load().cast(dtypes.weakint)) & (key >= 0) & (key < N)
   return need[key.valid(ok)].store(UOp.const(1, need.dtype.base if hasattr(need.dtype, "base") else need.dtype)).end(t, i) \
@@ -5125,17 +5129,20 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int, base:int
     cache.uop, *(v for v in (start_pos, T, base) if isinstance(v, UOp))))
   # (SEQ_GATHER_UNION (lists: the chunk's, on every device): only the positions some token's list has, the attention reads no others. a long
   # context's whole cache before the chunk was read from the peers every layer)
-  need = []
-  if lists is not None and raw and getenv("SEQ_GATHER_UNION", 0):
-    need = [Tensor.custom_kernel(Tensor.zeros(N, dtype=dtypes.int32, device=devs).contiguous(), lists, fxn=_seq_need_kernel)[0]]
+  # (SEQ_GATHER_UNION=p > 1: from position p on (a chunk at an earlier one gathers all: the marking costs more than it saves there))
+  need, gu = [], getenv("SEQ_GATHER_UNION", 0)
+  thr = gu if gu > 1 else 0
+  if lists is not None and raw and gu:
+    need = [Tensor.custom_kernel(Tensor.zeros(N, dtype=dtypes.int32, device=devs).contiguous(), lists,
+                                 fxn=functools.partial(_seq_need_kernel, start_pos=sp, thr=thr))[0]]
   # (SEQ_GATHER_FUSED, default on: every peer's part in one kernel, the peers read at once (one kernel a peer reads one link at a time). C9
   # 64k prefill 41.87 -> 40.53 s, greedy 32 identical)
   if raw and getenv("SEQ_GATHER_FUSED", 1):
     out = Tensor.custom_kernel(out, _device_index(devs), *seq_views(cache), *need,
-                               fxn=functools.partial(_seq_gather_fused_kernel, start_pos=sp, n=n, base=bu))[0]
+                               fxn=functools.partial(_seq_gather_fused_kernel, start_pos=sp, n=n, base=bu, thr=thr if need else 0))[0]
   for kk, part in enumerate(seq_views(cache) if not (raw and getenv("SEQ_GATHER_FUSED", 1)) else []):
-    out = Tensor.custom_kernel(out, part, _device_index(devs), *need, fxn=functools.partial(_seq_gather_kernel if raw else _seq_gather_fp8_kernel,
-                                                                                     start_pos=sp, k=kk, n=n, base=bu))[0]
+    gk = functools.partial(_seq_gather_kernel if raw else _seq_gather_fp8_kernel, start_pos=sp, k=kk, n=n, base=bu, **({"thr": thr} if need else {}))
+    out = Tensor.custom_kernel(out, part, _device_index(devs), *need, fxn=gk)[0]
   rows = reduced_rows(k, int(cache.shape[1])).contiguous() if fp8 and raw else k.cast(dtypes.half).contiguous() if half else \
     k.cast(dtypes.half).contiguous().bitcast(dtypes.uint64)
   assert rows.shape[-1] == out.shape[-1], f"the rows of the tokens {k.shape} as {rows.shape}"
