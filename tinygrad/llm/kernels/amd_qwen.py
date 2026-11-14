@@ -16,19 +16,19 @@ WAVES_M, WAVES_N, LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 2, 2, 16
 WMMA_ACC, THREADS_PER_BLOCK = WMMA_M // LANES_PER_WAVE_M, WARP_SIZE * WAVES_M * WAVES_N
 LDS_PAD, WMMA_ARG, LOG2E = 4, ((WMMA_N, WMMA_M, WMMA_K), 32), math.log2(math.e)
 GGML_BLOCK_SIZE, Q8_GROUP_SIZE = 256, 32
-Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K = 8, 10, 11, 12, 13, 14
+Q5_0, Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K = 6, 8, 10, 11, 12, 13, 14
 IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS, Q2_0 = 17, 18, 20, 21, 22, 23, 42
 QUANT_SIZES = {Q8_0: 272, Q2_K: 84, Q3_K: 110, Q4_K: 144, Q5_K: 176, Q6_K: 210, IQ2_XS: 74,
-               IQ3_XXS: 98, IQ4_NL: 144, IQ3_S: 110, IQ2_S: 82, IQ4_XS: 136, Q2_0: 72}  # bytes per 256 weights
-HALFWORD_QUANTS = (Q8_0, Q6_K, Q2_K, Q3_K, IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S, Q2_0)
+               IQ3_XXS: 98, IQ4_NL: 144, IQ3_S: 110, IQ2_S: 82, IQ4_XS: 136, Q2_0: 72, Q5_0: 176}  # bytes per 256 weights
+HALFWORD_QUANTS = (Q8_0, Q6_K, Q2_K, Q3_K, IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S, Q2_0, Q5_0)
 # formats of independent blocks of 32 or 64 weights: (halfwords, weights) of a block. a device may hold part of a 256 weight row group
-SMALL_BLOCK_QUANTS = {Q8_0: (17, 32), IQ4_NL: (9, 32), Q2_0: (9, 64)}
+SMALL_BLOCK_QUANTS = {Q8_0: (17, 32), IQ4_NL: (9, 32), Q2_0: (9, 64), Q5_0: (11, 32)}
 def _small_block(ggml_type:int, group:UOp|int) -> UOp|int:
   """the halfword offset of the block of the 32 weight group `group` (of a row, or of a 256 weight group) of a small block format"""
   hw, w = SMALL_BLOCK_QUANTS[ggml_type]
   return group // (w // 32) * hw
 QUANT_NAMES = {Q8_0: "q8_0", Q2_K: "q2_k", Q3_K: "q3_k", Q4_K: "q4_k", Q5_K: "q5_k", Q6_K: "q6", IQ4_XS: "iq4_xs",
-               IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ4_NL: "iq4_nl", IQ3_S: "iq3_s", IQ2_S: "iq2_s", Q2_0: "q2_0"}
+               IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ4_NL: "iq4_nl", IQ3_S: "iq3_s", IQ2_S: "iq2_s", Q2_0: "q2_0", Q5_0: "q5_0"}
 
 def _unbind(v:int|UOp) -> int|UOp: return v.unbind_all()[0] if isinstance(v, UOp) else v
 
@@ -57,7 +57,7 @@ def _wmma_rdna4(device:str|tuple[str, ...]|None) -> bool:
 # int8 WMMA on q8 activations pays a rescale per 32 inputs of every output: it wins where the f16 decode is expensive, the grid formats
 I8_WMMA_QUANTS = (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S)
 # formats with a single scale per 32 weights and no offset
-GROUP_SCALE_QUANTS = (Q8_0, IQ4_NL, IQ4_XS, IQ3_S, IQ3_XXS, Q4_K, Q5_K, Q2_0)
+GROUP_SCALE_QUANTS = (Q8_0, IQ4_NL, IQ4_XS, IQ3_S, IQ3_XXS, Q4_K, Q5_K, Q2_0, Q5_0)
 
 def _cfn(inline:bool, src:tuple[UOp, ...], arg:tuple[str, DType]) -> UOp:
   """a call of inline C (the old CUSTOM (a statement, or a value in a variable) and CUSTOMI (inline=True: an expression)): arg (format, dtype)"""
@@ -575,6 +575,13 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
   if ggml_type in (IQ4_NL, IQ4_XS):
     packed = word(2+(i%4)*4) if ggml_type == IQ4_NL else _amd_load(raw[base+2+subgroup*4+i%4])
     return _iq4_bytes(packed, 4*(i//4))
+  if ggml_type == Q5_0:
+    # (base: the 32 weight block, 22 bytes: d, qh (4 bytes), qs (16)) weights 4i..4i+3 of the group: the low nibbles of qs word i%4 (i < 4) or its
+    # high nibbles, bit 4 from the bits 4i..4i+3 of qh (a multiply spreads the 4 bits to the bytes); q-16 signed: +0x70 then ^0x80 a byte (no carries)
+    shift = (i//4)*4
+    qs = (word(6+(i%4)*4) >> (shift.cast(dtypes.uint32) if isinstance(shift, UOp) else shift)) & 0x0f0f0f0f
+    qh = (word(2) >> ((4*i).cast(dtypes.uint32) if isinstance(i, UOp) else 4*i)) & 15
+    return ((qs | (((qh * 0x00204081) & 0x01010101) << 4)) + 0x70707070) ^ 0x80808080
   if ggml_type == Q2_0:
     # (base: the 64 weight block, the group its half) four 2 bit q of a byte as bytes, q-1 signed: +0x7f then ^0x80 a byte (no carries)
     q = byte(2 + (subgroup%2)*8 + i)
@@ -3295,8 +3302,8 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
                             expert_words=expert_words, x_div=x_div, act=act, rdna4=rdna4)
     result = Tensor.custom_kernel(out, weight, xq, xd, *extra, *group, fxn=fxn)[0]
     return result.reshape(devices, rows_out, cols) if devices > 1 else result
-  # (the int8 tensor cores: the grid formats, IQ4_NL and Q2_0)
-  if ggml_type in I8_WMMA_QUANTS or ggml_type in (IQ4_NL, Q2_0):
+  # (the int8 tensor cores: the grid formats, IQ4_NL, Q2_0 and Q5_0)
+  if ggml_type in I8_WMMA_QUANTS or ggml_type in (IQ4_NL, Q2_0, Q5_0):
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=ggml_type, out_features=out_features, in_features=in_features,
                             expert_words=expert_words, x_div=x_div, act=act, rdna4=rdna4)
@@ -4965,6 +4972,35 @@ def q8_embed(raw:Tensor, ids:Tensor, dim:int) -> Tensor:
   """the rows ids (n,) of the Q8_0 table raw (uint8, rows of dim) as float (n, dim)"""
   out = Tensor.empty(int(ids.shape[0]), dim, dtype=dtypes.float32, device=ids.device)
   return Tensor.custom_kernel(out, raw, ids.cast(dtypes.int32).contiguous(), fxn=_q8_embed_kernel)[0]
+
+def _iq4xs_value(raw:UOp, base:UOp, ib:UOp, lane:UOp) -> UOp:
+  # value `lane` (0..31) of sub-block ib (0..7) of the IQ4_XS block at byte `base` of raw, in float as the gguf loader computes it:
+  # (d * (scale - 32)) * kvalues_iq4nl[nibble], d the f16 at the block's start, scales_h (u16) and scales_l (4 bytes) the 6-bit scales, then
+  # 128 bytes of nibbles: sub-block ib's 16 bytes at 8 + 16 ib, the low nibbles are its values 0..15, the high ones 16..31
+  from tinygrad.runtime.autogen.ggml_common import kvalues_iq4nl
+  d = (raw[base].load().cast(dtypes.uint16) | (raw[base+1].load().cast(dtypes.uint16) << 8)).bitcast(dtypes.half).float()
+  sh = raw[base+2].load().cast(dtypes.uint32) | (raw[base+3].load().cast(dtypes.uint32) << 8)
+  sl = (raw[base+4+ib//2].load().cast(dtypes.uint32) >> ((ib % 2) * 4).cast(dtypes.uint32)) & 15
+  scale = (sl | (((sh >> (ib * 2).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int32) - 32
+  nib = (raw[base+8+ib*16+lane%16].load().cast(dtypes.uint32) >> ((lane // 16) * 4).cast(dtypes.uint32)) & 15
+  val = UOp.const(float(kvalues_iq4nl[15]), dtypes.float)
+  for i in range(14, -1, -1): val = nib.eq(i).where(UOp.const(float(kvalues_iq4nl[i]), dtypes.float), val)
+  return ((d*scale.float())*val).cast(dtypes.half).float()
+
+@functools.cache
+def _iq4xs_embed_kernel(out:UOp, raw:UOp, ids:UOp) -> UOp:
+  # out (R, D) <- the rows ids (R,) of an IQ4_XS table raw (bytes: 136 a block of 256), dequantized as the gguf loader does (then half)
+  R, D = cast(tuple[int, int], out.shape)
+  r, blk, ib, lane = (UOp.range(R, 0, AxisType.GLOBAL), UOp.range(D//256, 1, AxisType.GLOBAL), UOp.range(8, 2, AxisType.GLOBAL),
+                      UOp.range(32, 3, AxisType.LOCAL))
+  base = ids[r].load().cast(dtypes.weakint)*(D//256*136) + blk*136
+  return out[r, blk*256+ib*32+lane].store(_iq4xs_value(raw, base, ib, lane)).end(r, blk, ib, lane).sink(
+    arg=KernelInfo(name="iq4xs_embed", opts_to_apply=()))
+
+def iq4xs_embed(raw:Tensor, ids:Tensor, dim:int) -> Tensor:
+  """the rows ids (n,) of the IQ4_XS table raw (uint8, rows of dim) as float (n, dim)"""
+  out = Tensor.empty(int(ids.shape[0]), dim, dtype=dtypes.float32, device=ids.device)
+  return Tensor.custom_kernel(out, raw, ids.cast(dtypes.int32).contiguous(), fxn=_iq4xs_embed_kernel)[0]
 
 def rows_gather(table:Tensor, idx:Tensor, dtype:DType|None=None, const:bool=False, split:bool=False) -> Tensor:
   """

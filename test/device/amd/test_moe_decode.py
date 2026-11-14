@@ -3,7 +3,8 @@ import numpy as np
 from tinygrad import Tensor, TinyJit, Device, UOp, dtypes
 from tinygrad.helpers import getenv
 from tinygrad.llm.gguf import ggml_data_to_tensor
-from tinygrad.llm.kernels.amd_qwen import moe_linear, q8_quantize, q8_quantize_cache_clear, _quant_decode_kernel, IQ3_S, IQ4_NL, Q8_0
+from tinygrad.llm.kernels.amd_qwen import moe_linear, q8_quantize, q8_quantize_cache_clear, _quant_decode_kernel
+from tinygrad.llm.kernels.amd_qwen import IQ3_S, IQ4_NL, Q8_0, Q5_0, IQ3_XXS, IQ2_S, IQ4_XS
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD")
 class TestMoEDecode(unittest.TestCase):
@@ -17,8 +18,10 @@ class TestMoEDecode(unittest.TestCase):
       a = a.reshape(-1, 32)
       d = np.maximum(np.abs(a).max(1, keepdims=True)/127, 1e-8)
       return (np.rint(a/d).clip(-127, 127)*d).reshape(-1, K)
+    # (V3.1 UD-IQ4_XS: gate / up IQ3_XXS, IQ4_XS, IQ2_S; down Q5_0, IQ4_NL)
     for typ, K, N, block, size, XS in ((IQ3_S, 2560, 256, 256, 110, 1), (IQ4_NL, 128, 2560, 32, 18, S),
-                                      (Q8_0, 128, 2560, 32, 34, S)):
+                                      (Q8_0, 128, 2560, 32, 34, S), (Q5_0, 128, 2560, 32, 22, S), (IQ3_XXS, 2560, 256, 256, 98, 1),
+                                      (IQ4_XS, 2560, 256, 256, 136, 1), (IQ2_S, 2560, 256, 256, 82, 1)):
       raw = rng.integers(0, 256, (E*N*K//block, size), dtype=np.uint8)
       raw[:, :2] = rng.uniform(.001, .02, (len(raw), 1)).astype(np.float16).view(np.uint8)
       weights = ggml_data_to_tensor(Tensor(raw.ravel(), device="CPU"), E*N*K, typ).numpy().reshape(E, N, K)

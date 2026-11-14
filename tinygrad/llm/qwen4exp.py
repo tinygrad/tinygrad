@@ -12,7 +12,8 @@ from tinygrad.llm.kernels.amd_qwen import Linear, gated_delta_prefill, amd_custo
   q8_quantize_cache_clear, moe_route, moe_grouped_linear, partial_sum, fuse_gate_up, kda_decode, pool_index_rows, slot_scatter, \
   slot_gather, moe_combine, token_sharded, shard_rows, reduce_scatter, all_gather, all_gather_q8, sharded_argmax, skinny_matmul, kda_conv, \
   kda_replay, tables_ready, MOE_TILE, I8_WMMA_QUANTS, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, \
-  Q8_0, IQ3_S, q8_embed, weighted_sum, ghc_decode_mix, rows_gather, rows_scatter, seq_scores, seq_index, kv_q8_pack, kv_q4_pack, \
+  Q8_0, IQ3_S, IQ4_XS, q8_embed, iq4xs_embed, weighted_sum, ghc_decode_mix, rows_gather, rows_scatter, seq_scores, seq_index, kv_q8_pack, \
+  kv_q4_pack, \
   qsa_decode_attention, FLAG_LANE, DEC_LANE, flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, state_token, f32t_gemm, \
   few_out_rows, index_scores, fwht, merged_linear, q8_linear_parts, after_kernel, _argmax_parts, _device_index, _unbind, f16t_gemm, nucleus, \
   picks_local, pool_window, seq_index_split, top_k_mask
@@ -443,6 +444,14 @@ def _host_buffer(devs:str|tuple[str, ...], nbytes:int, dtype=dtypes.uint8) -> tu
   aliases = [Buffer(d, nbytes, opaque=BufferStorage(a:=host.get_buf(d)), options=BufferSpec(external_ptr=a)) for d in devs[1:]]
   (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [host] + aliases
   return host.as_memoryview(allow_zero_copy=True), Tensor(UOp.from_buffer(mb, dtype, devs))
+
+def _dequant_rows_half(raw:Tensor, rows:int, dim:int, typ:int, out:memoryview, chunk:int=8192):
+  """the rows (rows, dim) of a ggml table raw (flat uint8, on the CPU) dequantized as the gguf loader does (float, then half) into out (bytes)"""
+  block, size = _GGML_QUANT[typ]
+  row_bytes = dim // block * size
+  for r in range(0, rows, chunk):
+    n = min(chunk, rows - r)
+    out[r*dim*2:(r+n)*dim*2] = ggml_data_to_tensor(raw[r*row_bytes:(r+n)*row_bytes], n*dim, typ).cast(dtypes.float16).numpy().tobytes()
 
 _zero_jits:dict[Any, Any] = {}
 def _fill_zero(*ts:Tensor):
@@ -1967,6 +1976,7 @@ class QwenMTPBlock(QSABlock):
 
 class Transformer:
   _embd_q8:Tensor|None = None  # (the token embedding's Q8_0 bytes in host memory, see _embed)
+  _embd_iq4xs:Tensor|None = None  # (or its IQ4_XS bytes: the Unsloth V3.1 file's table)
   _weight_bytes:dict[str, int] = {}  # (the weights' memory of every device, see from_gguf)
   def __init__(self, config:TransformerConfig):
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
@@ -2220,9 +2230,12 @@ class Transformer:
     return ((Tensor.arange(n) + Tensor(start - k)).to(buf.device) >= 0).where(win, ple.eos)
 
   def _embed(self, tokens:Tensor) -> Tensor:
-    """the embeddings (..., dim) in float of tokens on the devices: a Q8_0 table in host memory read by its rows (not the generic gather)"""
-    if (raw:=getattr(self, "_embd_q8", None)) is not None and amd_custom_kernels_supported(tokens.device) and isinstance(tokens.numel(), int):
-      return q8_embed(raw, tokens.reshape(-1), self.config.dim).reshape(*tokens.shape, self.config.dim)
+    """the embeddings (..., dim) in float of tokens on the devices: a Q8_0 or IQ4_XS table in host memory read by its rows (not the generic gather)"""
+    if amd_custom_kernels_supported(tokens.device) and isinstance(tokens.numel(), int):
+      if (raw:=getattr(self, "_embd_q8", None)) is not None:
+        return q8_embed(raw, tokens.reshape(-1), self.config.dim).reshape(*tokens.shape, self.config.dim)
+      if (raw:=getattr(self, "_embd_iq4xs", None)) is not None:
+        return iq4xs_embed(raw, tokens.reshape(-1), self.config.dim).reshape(*tokens.shape, self.config.dim)
     return self.token_embd(tokens).float()
 
   def _sample(self, h:Tensor, temperature:Tensor|None, device:str|tuple[str, ...]|None, noise:tuple[Tensor, Tensor]|None=None) -> Tensor:
@@ -3267,13 +3280,22 @@ class Transformer:
     fuse = {g: u for g in units_map if g.endswith("ffn_gate_exps.weight") and (u:=g.replace("gate", "up")) in units_map and
             entries[g][2] == entries[u][2] and file_of(entries[g][0]) == file_of(entries[u][0])}
     # a token embedding copied to every device (a vocab that doesn't split) stays in host memory: a call looks up a few of its rows
-    host_embd, embd_q8 = None, None
+    host_embd, embd_q8, embd_iq4xs = None, None, None
     if 'token_embd.weight' not in shard_map and 'output.weight' in entries:
       data, shape, typ = entries.pop('token_embd.weight')
       mv, raw = _host_buffer(devices, int(data.nbytes()))
       mv[:] = data.to("CPU").data()
-      host_embd = ggml_data_to_tensor(raw, prod(shape), typ).reshape(shape)
-      if typ == Q8_0: embd_q8 = raw
+      if typ == IQ4_XS:
+        # (the V3.1 file's table: its lazy dequantization does not fuse into the gather, the whole table (2.4 GiB in float) would be an intermediate
+        # of every prefill jit: dequantized once, on the host, into a half buffer of its own (1.3 GB of host memory) the jits read as it is. The
+        # decode steps' rows come from the IQ4_XS bytes (iq4xs_embed))
+        embd_iq4xs = raw
+        mv16, half = _host_buffer(devices, 2*prod(shape), dtypes.float16)
+        _dequant_rows_half(data.to("CPU"), int(shape[0]), int(shape[1]), typ, mv16)
+        host_embd = half.reshape(shape)
+      else:
+        host_embd = ggml_data_to_tensor(raw, prod(shape), typ).reshape(shape)
+        if typ == Q8_0: embd_q8 = raw
     # (LOAD_DEFER (default): the weights' memory made now, the files read later: while the jits compile, see seq_warmup. 0: read now)
     pending:list[Callable[[], None]]|None = [] if getenv("LOAD_DEFER", 1) else None
     # (LOAD_APART: the file's tensors the model only derives others from in buffers of their own, freed once derived (see _drop_apart), not in
@@ -3341,6 +3363,7 @@ class Transformer:
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     model._loaded, model._pending_load = True, pending or []
     model._embd_q8 = embd_q8
+    model._embd_iq4xs = embd_iq4xs
     # (the n-gram table: the bytes in the gguf file, mmapped, or a copy in host memory)
     if ple_entry is not None:
       model.ple_table = _disk_bytes(ple_entry[0]) or cast(Buffer, ple_entry[0].to("CPU").realize().uop.base.buffer).as_memoryview()
