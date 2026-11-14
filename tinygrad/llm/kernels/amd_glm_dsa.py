@@ -5844,14 +5844,6 @@ def _wave_scan(x:UOp, lane:UOp) -> UOp:
   for d in (1, 2, 4, 8, 16): x = x + (lane >= d).where(_bpermute(x, (lane - d).maximum(0)), UOp.const(0, dtypes.int32))
   return x
 
-# (RADIX_AGG: a wave's lanes of the same digit counted by one atomic (ballots): the keys of a long context's scores share a few top digits, their
-# atomics on one LDS bin wait on each other. the same counts)
-RADIX_AGG, IDX_CAND_REG = getenv("RADIX_AGG", 0), getenv("IDX_CAND_REG", 0)
-_RADIX_AGG_ADD = ("{{ unsigned _a = __builtin_amdgcn_ballot_w32({2}); while (_a) {{ int _l = __builtin_ctz(_a); "
-                  "int _dl = __builtin_amdgcn_readlane({1}, _l); unsigned _s = __builtin_amdgcn_ballot_w32(({2}) && ({1}) == _dl); "
-                  "if (__builtin_amdgcn_mbcnt_lo(~0u, 0u) == (unsigned)_l) "
-                  "__hip_atomic_fetch_add(({0}) + _dl, (int)__builtin_popcount(_s), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP); "
-                  "_a &= ~_s; }} }}")
 def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:UOp, lane:UOp) -> UOp:
   """
   the k-th largest of the keys of a workgroup's threads (key(c) a thread's of chunk c of npc, uint32, 1 at least, all of them with no more pools
@@ -5870,9 +5862,8 @@ def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:
     kv = key(c)
     match = (kv >> (32 - 8*d)).eq(prefix) if d else UOp.const(True, dtypes.bool)
     digit = ((kv >> (24 - 8*d)) & 255).cast(dtypes.weakint)
-    if RADIX_AGG: add = _sys(_RADIX_AGG_ADD, dtypes.void, hist[d*256], digit.cast(dtypes.int32), match)
-    else: add = _sys("__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);", dtypes.void, hist[d*256 + digit],
-                     match.cast(dtypes.int32))
+    add = _sys("__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);", dtypes.void, hist[d*256 + digit],
+               match.cast(dtypes.int32))
     hd = hist.after(UOp.group(add).end(c).barrier())
     # lane L the bins 255-8L-j (j 0..7): from the top
     bins = [hd[d*256 + 255 - lane*8 - j].load() for j in range(8)]
@@ -6020,12 +6011,6 @@ def _pool_cand_kernel(cand:UOp, scores:UOp, dev:UOp, *grouped:UOp, q_start:UOp, 
     p = _global_pool(lp, me, n, PB)
     ok = (lp < npl) & (p < pools) & ((p + 1) * kpool <= q + 1)
     return ok.where(_order_key(scores[row, lp.minimum(PL-1).valid(ok)].load().bitcast(dtypes.uint32)), UOp.const(0, dtypes.uint32))
-  if IDX_CAND_REG:
-    # (IDX_CAND_REG: a thread's keys loaded once (all of them at once) into registers, the passes read them there: the same keys)
-    kreg = UOp.alloc((per,), dtypes.uint32, addrspace=AddrSpace.REG)
-    kreg = kreg.after(UOp.group(*(kreg[c].store((UOp.const(c, dtypes.weakint) < npc).where(key(UOp.const(c, dtypes.weakint)),
-                                                                                            UOp.const(0, dtypes.uint32))) for c in range(per))))
-    key = lambda c: kreg[c].load()  # noqa: E731
   thr = _radix_kth(key, npc, k, npl, t, wave, lane)
   def write(c3:UOp, pos:UOp, pk:UOp) -> UOp:
     lp, ok = t + c3 * THREADS, pk & (pos < k)
