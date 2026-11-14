@@ -107,6 +107,68 @@ class TestGuards(unittest.TestCase):
     eng.model = types.SimpleNamespace(vision=True)
     self.assertEqual(eng._delta([]), 0)
 
+  def test_returning_turn_with_a_picture_reuses_the_kept_tokens(self):
+    # (g4 08:30: a picture conversation's second turn had cached_tokens 0: in thinking mode the first turn's prompt ends '<think>\n' and the
+    # second turn's text continues '\n</think>': its own tokenization differs at that last token ('\n\n' one token), the kept conversation's
+    # checkpoint at the end of the first prompt not a prefix. reuse_tokens repairs that for text by the kept tokens + the rest's; with
+    # pictures it now compares the kept tokens as the template's text has them (a picture one image pad), its pads expanded again after)
+    from tinygrad.llm.serve import LLMServer, expand_pictures, collapse_pictures
+    from tinygrad.llm.qwen_vision import picture_ids
+    pic = types.SimpleNamespace(ids=lambda: picture_ids(b"\x07" * 32, 30, 40))
+    # (the tokenizer: a token a character, '\n\n' one token (1001) as the model's)
+    def enc(text:str) -> list[int]: return encode(text.replace("\n\n", "\x01"))
+    def dec(t:list[int]) -> str:
+      return "".join({VS: "<|vision_start|>", PAD: "<|image_pad|>", VE: "<|vision_end|>", 1001: "\n\n"}.get(x) or chr(x - 1000) for x in t)
+    turn1 = "<|im_start|>system\n" + "x" * 900 + "<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>What?<|im_end|>\n" \
+            "<|im_start|>assistant\n<think>\n"
+    p1, _ = expand_pictures(enc(turn1), [pic], PAD)
+    kept = p1 + [2001, 2002]  # (the first prompt, then the model's own tokens)
+    rendered = turn1 + "\n</think>\n\nHELLO<|im_end|>\n<|im_start|>user\nAnd?<|im_end|>\n<|im_start|>assistant\n<think>\n"
+    own, _ = expand_pictures(enc(rendered), [pic], PAD)
+    self.assertNotEqual(own[:len(p1)], p1, "the second turn's own tokens are not the first prompt's (the case)")
+    s = LLMServer.__new__(LLMServer)
+    s.vision, s.model = object(), types.SimpleNamespace(image_pad_id=PAD)
+    s.kept = lambda: [(kept, len(kept)), (kept, len(p1))]  # (its tokens, and its checkpoint at the end of the first prompt)
+    s.tok = types.SimpleNamespace(encode=enc, decode=dec)
+    ids = s.reuse_tokens(rendered, enc(rendered))
+    full, _ = expand_pictures(ids, [pic], PAD)
+    self.assertEqual(full[:len(p1)], p1, "the second turn starts with the first prompt's tokens, its picture's rows the same ids")
+    self.assertEqual(dec(collapse_pictures(full, PAD)), rendered)
+    # (a short picture chat (a 64-row picture, under 1,000 tokens): the same)
+    small = types.SimpleNamespace(ids=lambda: picture_ids(b"\x08" * 32, 8, 8))
+    t1 = "<|vision_start|><|image_pad|><|vision_end|>What?<|im_end|>\n<|im_start|>assistant\n<think>\n"  # (the picture in the first 8 tokens)
+    q1, _ = expand_pictures(enc(t1), [small], PAD)
+    r2 = t1 + "\n</think>\n\nHELLO<|im_end|>\n<|im_start|>user\nAnd?<|im_end|>\n<|im_start|>assistant\n<think>\n"
+    s.kept = lambda: [(q1 + [2001], len(q1) + 1), (q1 + [2001], len(q1))]
+    self.assertEqual(expand_pictures(s.reuse_tokens(r2, enc(r2)), [small], PAD)[0][:len(q1)], q1)
+    # (without vision: the old path, a list with pictures not reused)
+    s.vision = None
+    self.assertEqual(s.reuse_tokens(rendered, enc(rendered)), enc(rendered))
+
+  def test_text_requests_take_the_old_reuse_path(self):
+    # (CTO vision-reuse round 1) on a VISION server a text-only request takes the reuse_tokens path of before (the same code, _reuse_text), not
+    # _reuse_pictures: unless it has an image pad, or a picture was served and a kept list with pictures is among its candidates
+    from tinygrad.llm.serve import LLMServer
+    from tinygrad.llm.qwen_vision import picture_ids
+    calls:list = []
+    s = LLMServer.__new__(LLMServer)
+    s.vision, s.model, s.tok = object(), types.SimpleNamespace(image_pad_id=PAD), types.SimpleNamespace(encode=encode, decode=lambda t: "")
+    s._reuse_text = lambda r, ids: calls.append("text") or ids  # type: ignore
+    s._reuse_pictures = lambda r, ids: calls.append("pictures") or ids  # type: ignore
+    text = [1000 + k % 50 for k in range(3000)]
+    with_pic = text[:1500] + picture_ids(b"\x09" * 32, 4, 4) + text[1500:2000]
+    s.kept = lambda: [(text, 3000), (with_pic, len(with_pic))]
+    ids = text[:2500]
+    s.reuse_tokens("", ids)  # (no pad; no picture served yet: the scan isn't even made)
+    s.pictures_served = True
+    s.kept = lambda: [(text, 3000)]
+    s.reuse_tokens("", ids)  # (a picture served, no kept list with pictures among the candidates)
+    self.assertEqual(calls, ["text", "text"])
+    s.kept = lambda: [(text, 3000), (with_pic, len(with_pic))]
+    s.reuse_tokens("", ids)  # (a kept list with pictures among the candidates)
+    s.reuse_tokens("", ids[:100] + [PAD] + ids[100:])  # (a picture in the request)
+    self.assertEqual(calls, ["text", "text", "pictures", "pictures"])
+
   def test_text_ids_with_a_pad_take_no_vision_variant(self):
     # Transformer.seq_prefill on ids with a literal image pad and no picture: every chunk the text jits', the pad id in the token buffer
     import array

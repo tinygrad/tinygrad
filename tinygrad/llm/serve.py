@@ -173,6 +173,34 @@ def same_start(a:list[int], b:list[int], n:int=2048) -> bool:
   n = min(n, len(a) // 2, len(b) // 2)
   return a[:n] == b[:n]
 
+def collapse_pictures(t:list[int], pad:int) -> list[int]:
+  """VISION: a token list with a picture's rows (negative ids, qwen_vision.picture_ids) as the template's text has it: each picture one image pad"""
+  if min(t, default=0) >= 0: return t
+  from tinygrad.llm.qwen_vision import ID_BITS
+  mask = (1 << ID_BITS) - 1
+  return [x if x >= 0 else pad for x in t if x >= 0 or (-x - 1) & mask == 0]
+
+def common_prefix_pictures(t:list[int], ids:list[int], pad:int, pads:list[int]|None=None) -> tuple[int, int]:
+  """
+  VISION: the tokens t (with pictures' rows) and ids (a pad a picture) start with as text: (the count in ids, the count in t). pads: the
+  positions of the pads in ids (made once for many t). compared a stretch between two pictures at a time; a picture's rows skipped by a
+  binary search (its ids are consecutive)
+  """
+  from tinygrad.llm.qwen_vision import ID_BITS
+  if pads is None: pads = [k for k, x in enumerate(ids) if x == pad]
+  mask, i, j = (1 << ID_BITS) - 1, 0, 0
+  for p in pads + [len(ids)]:
+    if (a:=t[j:j + p - i]) != (b:=ids[i:p]): return i + (k:=common_prefix(a, b)), j + k
+    i, j = p, j + p - i
+    if p == len(ids) or j >= len(t) or (x:=t[j]) >= 0 or (-x - 1) & mask: return i, j
+    lo, hi = 1, min(len(t) - j, 1 << ID_BITS)
+    while lo < hi:
+      mid = (lo + hi + 1) // 2
+      if t[j + mid - 1] == x - (mid - 1): lo = mid
+      else: hi = mid - 1
+    i, j = i + 1, j + lo
+  return i, j
+
 def common_prefix(a:list[int], b:list[int]) -> int:
   """the tokens a and b start with (the lists compared in slices: a loop over a long conversation's tokens is slow)"""
   lo, hi = 0, min(len(a), len(b))
@@ -618,6 +646,7 @@ class Handler(VizHandler):
       if pictures:
         try: ids, by_id = expand_pictures(ids, pictures, self.server.model.image_pad_id)
         except PictureError as e: return self.bad_request(str(e))
+        self.server.pictures_served = True  # (reuse_tokens: kept lists may hold pictures from now on)
       log += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
       if len(ids) >= self.server.model.max_context:
         stderr_log(log + f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{self.server.model.max_context:5d}\n")
@@ -838,6 +867,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     # (VISION: the vision tower (qwen_vision.VisionTower), the rows of the last pictures it made (VISION_CACHE_MB))
     self.vision, self._pic_rows = vision, collections.OrderedDict[bytes, typing.Any]()
     self._tower_job: tuple[typing.Any, typing.Any]|None = None  # (VISION: the picture whose tower runs in slices, and its TowerJob)
+    self.pictures_served = False  # (VISION: a request with pictures was served: kept lists may hold pictures, see reuse_tokens)
     self.top_k = max(getenv("TOP_K", 0), 0)  # a request's without one (TOP_K: the config's, e.g. Qwen's 20; 0: none)
     # (the models' graphs take a top_k with SAMPLE_TOP_K (on with TOP_K): without it a request's top_k is ignored, said once)
     self.sample_top_k, self._top_k_said = bool(getenv("SAMPLE_TOP_K", int(self.top_k > 0))), False
@@ -1163,6 +1193,16 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     the tokens of a prompt that continues a kept conversation as its text but not its tokens (the model's reply tokenized again differently):
     the kept ones and the rest's, so the cache holds it
     """
+    # (VISION: a request with a picture, or one whose candidates hold a kept list with pictures (only if a picture was ever served: a text
+    # fleet scans nothing): _reuse_pictures; every other one (a text-only request on a VISION server) the path of before, the same code)
+    if getattr(self, "vision", None) is not None and \
+       (getattr(getattr(self, "model", None), "image_pad_id", -1) in ids or (getattr(self, "pictures_served", False) and
+        any(min(t, default=0) < 0 for t, n in self.kept() if 1000 <= n < len(ids) + 1000 and n <= len(t)))):
+      return self._reuse_pictures(rendered, ids)
+    return self._reuse_text(rendered, ids)
+
+  def _reuse_text(self, rendered:str, ids:list[int]) -> list[int]:
+    """reuse_tokens of a request without pictures (and no kept list with pictures among its candidates): see reuse_tokens"""
     cands = [(t, n) for t, n in self.kept() if 1000 <= n < len(ids) + 1000 and n <= len(t)]
     # (one the prompt's tokens continue: the cache has it. a longer one the prompt's text continues: the ones sharing the most tokens with it
     # (an agent's own conversation, not the others' with the same system prompt), however early they differ: a sampled token of an early
@@ -1174,6 +1214,29 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       # (VISION: not one with pictures (their rows' ids aren't text): its prompt is the tokens of its text and pictures as they are)
       if getattr(self, "vision", None) is not None and min(t, default=0) < 0: continue
       if rendered.startswith(text:=self.tok.decode(t)): return t + self.tok.encode(rendered[len(text):])
+    return ids
+
+  def _reuse_pictures(self, rendered:str, ids:list[int]) -> list[int]:
+    """
+    VISION: reuse_tokens with the kept conversations that have pictures, compared as the template's text has them (a picture one image pad:
+    ids are the request's tokens before its pads are expanded; a kept list returned so is expanded again to the same rows' ids by the same
+    pictures). a short one too (a two-turn picture chat). the kept lists compared in slices between their pictures, collapsed only to return.
+    """
+    pad, info, walks, exact = getattr(getattr(self, "model", None), "image_pad_id", -1), [], {}, 0
+    if not ids: return ids
+    pads = [k for k, x in enumerate(ids) if x == pad]
+    for t, n in self.kept():
+      if not 0 < n <= len(t) or not (t[0] == ids[0] or (t[0] < 0 and ids[0] == pad)): continue
+      if id(t) not in walks: walks[id(t)] = common_prefix_pictures(t, ids, pad, pads)
+      i, j = walks[id(t)]
+      # (text ones as reuse_tokens takes them: 1,000 tokens at least and not 1,000 more than the prompt)
+      if min(t[:max(j, 1)]) >= 0 and not 1000 <= n < len(ids) + 1000: continue
+      if j >= n: exact = max(exact, n)
+      info.append((t, n, i, j))
+    # (n - (j - i): its length as text, the rows of its pictures in the shared part one pad each)
+    own = [(t, n, i) for t, n, i, j in info if n > exact and i >= min(2048, (n - (j - i)) // 2, len(ids) // 2)]
+    for t, n, i in sorted(own, key=lambda x: x[2], reverse=True)[:2]:
+      if rendered.startswith(text:=self.tok.decode(c:=collapse_pictures(t[:n], pad))): return c + self.tok.encode(rendered[len(text):])
     return ids
 
   def miss_log(self, ids:list[int], start:int):
