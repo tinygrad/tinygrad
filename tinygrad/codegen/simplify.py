@@ -60,8 +60,8 @@ def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|No
 pm_simplify_ranges = PatternMatcher([
   (UPat(Ops.SINK, name="u"), merge_ranges),
   (UPat({Ops.INDEX}|GroupOp.Effect, name="u"), mark_gated),
-  # reduce ranges can't be shrunk
-  (UPat(Ops.REDUCE, name="red"), lambda ctx, red: ctx.update({r:r.src[0] for r in red.src[1:]})),
+  # reduce and stage ranges can't be shrunk
+  (UPat((Ops.REDUCE, Ops.STAGE), name="x"), lambda ctx, x: ctx.update({r:r.src[0] for e in x.ended_ranges for r in e.ranges})),
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, lambda r,c: r.replace(src=(c,)))),
 ])
 
