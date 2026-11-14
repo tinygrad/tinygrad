@@ -105,8 +105,7 @@ def rolling_window(state:Tensor, x:Tensor, initial:Tensor) -> tuple[Tensor, UOp]
 
 def short_conv(state:Tensor, x:Tensor, weight:Tensor, initial:Tensor, dilation:int=1) -> tuple[Tensor, UOp]:
   assert state.shape[1] == (weight.shape[1]-1)*dilation, f"state has {state.shape[1]} rows, expected {(weight.shape[1]-1)*dilation}"
-  window, store = rolling_window(state, x, initial)
-  T_pad = x.max_shape[1]
+  (window, store), T_pad = rolling_window(state, x, initial), x.max_shape[1]
   return functools.reduce(lambda a,b: a+b, (window[:, i*dilation:i*dilation+T_pad] * weight[:, i] for i in range(weight.shape[1]))).silu(), store
 
 @dataclass(frozen=True)
@@ -226,7 +225,7 @@ class AttentionResidual:
 class HyperConnection:
   def __init__(self, config:TransformerConfig, head:bool=False):
     self.count, self.eps, self.iters, self.norm_eps = (hc:=unwrap(config.hc)).count, hc.eps, hc.sinkhorn_iters, config.norm_eps
-    self.fn = Linear(self.count * config.dim, (n:=self.count if head else (2 + self.count) * self.count), bias=False)
+    self.fn = Linear(self.count * config.dim, (n:=self.count * (1 if head else 2 + self.count)), bias=False)
     self.base, self.scale = {"weight": Tensor.zeros(n)}, {"weight": Tensor.zeros(1 if head else 3)}
 
   def mix(self, xs:Tensor) -> tuple[Tensor, Tensor]:
