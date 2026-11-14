@@ -46,8 +46,25 @@ _url_cache:dict[tuple[bytes, int], Picture] = {}
 _url_cache_bytes = [0]
 _url_lock = threading.Lock()
 
+# (a picture sent before may come as its REFERENCE: data:image/x-sha256;base64,<the sha256 of its data: URL, 64 hex digits>: the cached picture,
+# not its bytes again (a client re-sending a conversation's every screenshot each request uploads ~7.6 KB a 320x288 PNG); one the cache doesn't
+# have: PictureNotCached (a 400 with error.code "picture_not_cached": the client sends the request again with the pictures' data: URLs)
+REF_PREFIX = "data:image/x-sha256;base64,"
+
+class PictureNotCached(PictureError):
+  """a picture's reference the server's picture cache doesn't have (any more)"""
+
 def decode_picture(url:Any, deadline:float, max_tokens:int=VISION_MAX_TOKENS) -> Picture:
-  """a data: URL's picture (data_url_bytes, load_picture) by one of the process's decoders, waited for until deadline (time.monotonic())"""
+  """a data: URL's picture (data_url_bytes, load_picture) by one of the process's decoders, waited for until deadline (time.monotonic()); a
+  reference's (REF_PREFIX) from the cache"""
+  if isinstance(url, str) and url.startswith(REF_PREFIX):
+    try: ref = bytes.fromhex(url[len(REF_PREFIX):])
+    except ValueError: ref = b""
+    if len(ref) != 32: raise PictureError(f"a picture reference is {REF_PREFIX}<the sha256 of its data: URL in 64 hex digits>")
+    with _url_lock:
+      if (pic:=_url_cache.pop((ref, max_tokens), None)) is None: raise PictureNotCached("picture_not_cached: send its data: URL again")
+      _url_cache[(ref, max_tokens)] = pic
+    return pic
   key = (hashlib.sha256(url.encode("utf-8", "surrogatepass")).digest(), max_tokens) if isinstance(url, str) and VISION_URL_CACHE_MB > 0 else None
   if key is not None:
     with _url_lock:

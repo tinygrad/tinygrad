@@ -82,7 +82,7 @@ def extract_pictures(messages:list[dict]) -> list:
       url = u.get("url") if isinstance(u:=part.get("image_url"), dict) else u
       try: pics.append(decode_picture(url, deadline))
       except PictureBusy: raise
-      except PictureError as e: raise PictureError(f"image {len(pics) + 1}: {e}") from None
+      except PictureError as e: raise type(e)(f"image {len(pics) + 1}: {e}") from None
       c[i] = {"type": "image"}
   return pics
 
@@ -632,7 +632,7 @@ class Handler(VizHandler):
       if not self.known_model(body.get("model")):
         return self.api_error(404, f"The model '{body.get('model')}' does not exist.", "model_not_found", "model")
       # render and tokenize (VISION: the pictures decoded first, their image pads then their rows' ids)
-      from tinygrad.llm.qwen_vision import PictureError, PictureBusy
+      from tinygrad.llm.qwen_vision import PictureError, PictureBusy, PictureNotCached
       pictures:list = []
       by_id:dict[int, typing.Any] = {}
       try:
@@ -640,6 +640,7 @@ class Handler(VizHandler):
         normalize_messages(body["messages"], images=bool(pictures))
         rendered = self.render(body["messages"], body.get("tools"), body)
       except PictureBusy as e: return self.api_error(503, str(e), "server_busy")
+      except PictureNotCached as e: return self.api_error(400, str(e), "picture_not_cached")
       except PictureError as e: return self.bad_request(str(e))
       except Exception as e: return self.bad_request(f"{type(e).__name__}: {e}")
       ids: list[int] = self.server.reuse_tokens(rendered, self.server.tok.encode(rendered))
