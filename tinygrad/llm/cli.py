@@ -143,6 +143,29 @@ models = {
   "glm-4.7-flash": "https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/resolve/main/GLM-4.7-Flash-Q4_K_M.gguf",
 }
 
+def chat_template(ct:str, tok:SimpleTokenizer) -> jinja2.Template:
+  """a model's chat template (jinja2; an ImportError without it)"""
+  import jinja2
+  dict_attrs = frozenset(dir(dict))
+  class ChatEnvironment(jinja2.Environment):
+    # (message.role of a plain dict: its item at once, the value jinja2's getattr gives after the attribute lookup failed (a dict's own
+    # attributes, items / get / ..., still first): the same text, without an AttributeError raised a message's every field (a Pokemon prompt
+    # of ~1,800 messages: ~80K of them))
+    def getattr(self, obj:typing.Any, attribute:str) -> typing.Any:
+      if type(obj) is dict and attribute not in dict_attrs:
+        try: return obj[attribute]
+        except KeyError: return self.undefined(obj=obj, name=attribute)
+      return super().getattr(obj, attribute)
+  # chat templates are written for the environment of HF apply_chat_template: the newline after a block tag and the whitespace before it
+  # aren't output (a model generates what it was trained on: re-rendered history then matches its tokens, its cache is reused)
+  env = ChatEnvironment(trim_blocks=True, lstrip_blocks=True, extensions=['jinja2.ext.loopcontrols'])  # (for {% break %})
+  env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj, **kwargs)  # jinja2's tojson escapes <>& for HTML safety
+  env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
+  env.globals['strftime_now'] = lambda fmt: time.strftime(fmt)
+  env.globals['bos_token'] = tok.decode([tok.bos_id]) if tok.bos_id is not None else ""
+  env.globals['eos_token'] = tok.decode([tok.eos_id])
+  return env.from_string(ct)
+
 class FallbackTemplate:
   # minimal jinja2.Template-compatible chat template without jinja2, no tool calling support
   def __init__(self, tok:SimpleTokenizer): self.tok = tok
@@ -220,16 +243,7 @@ def main():
   template: jinja2.Template|FallbackTemplate = FallbackTemplate(tok)
   if not args.no_chat_template and (ct := tok.chat_template) is not None:
     try:
-      import jinja2
-      # chat templates are written for the environment of HF apply_chat_template: the newline after a block tag and the whitespace before it
-      # aren't output (a model generates what it was trained on: re-rendered history then matches its tokens, its cache is reused)
-      env = jinja2.Environment(trim_blocks=True, lstrip_blocks=True, extensions=['jinja2.ext.loopcontrols'])  # (for {% break %})
-      env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj, **kwargs)  # jinja2's tojson escapes <>& for HTML safety
-      env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
-      env.globals['strftime_now'] = lambda fmt: time.strftime(fmt)
-      env.globals['bos_token'] = tok.decode([tok.bos_id]) if tok.bos_id is not None else ""
-      env.globals['eos_token'] = tok.decode([tok.eos_id])
-      template = env.from_string(ct)
+      template = chat_template(ct, tok)
     except ImportError: print("warning: jinja2 is not installed, the model's chat template is disabled")
 
   # VISION_MMPROJ: the mmproj GGUF of the model's vision tower (qwen4exp's sequences): chat requests' data: URL images are pictures the model
