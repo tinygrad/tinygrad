@@ -27,7 +27,7 @@ def _dispatch_gather(out:UOp, x:UOp, dest_row:UOp, src_row:UOp) -> UOp:
   assert x.dtype == out.dtype and x.dtype.itemsize == 1
   block = _blk_for(hidden)
   g, row = UOp.range(groups, 0, AxisType.GLOBAL), UOp.range(rows, 1, AxisType.GLOBAL)
-  outer, inner = UOp.range(hidden//block, 2), UOp.range(block, 3, AxisType.LOCAL)
+  outer, inner = UOp.range(hidden//block, 2, AxisType.WEAK), UOp.range(block, 3, AxisType.LOCAL)
   col = outer*block + inner
   source = src_row.index(g, row).load().cast(dtypes.weakint)
   anchor = dest_row.index(g, 0).load() >= 0

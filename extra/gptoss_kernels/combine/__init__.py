@@ -1,6 +1,6 @@
 import functools, pathlib
 from tinygrad import Tensor, dtypes, function
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from extra.llama_kernels import alloc_like, compile_hip
 
 @functools.cache
@@ -32,7 +32,7 @@ def _combine_weights_backward(out:UOp, z:UOp, gradient:UOp, dest_row:UOp) -> UOp
 @functools.cache
 def _inverse_rows(out:UOp, dest_row:UOp) -> UOp:
   groups, entries = dest_row.shape
-  g, i = UOp.range(groups, 0), UOp.range(entries, 1)
+  g, i = UOp.range(groups, 0, AxisType.WEAK), UOp.range(entries, 1, AxisType.WEAK)
   row = dest_row.index(g, i).load().cast(dtypes.weakint)
   return out.index(g, row).store(i.cast(dtypes.int32)).end(g, i).sink(arg=KernelInfo("gptoss_combine_inverse", opts_to_apply=()))
 

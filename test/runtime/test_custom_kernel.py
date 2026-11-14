@@ -336,14 +336,21 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_split_range_id_free_of_loop(self):
     # the UPCAST range minted by the split gets a fresh id, the while loop's id 1 is taken
+    # cnt is set before r, so the UPCAST lanes of r only load it
     def kernel(C:UOp, A:UOp) -> UOp:
-      r, l = UOp.range(4, 0), UOp.loop(1)
+      r, l = UOp.range(4, 0, AxisType.WEAK), UOp.loop(1)
       cnt = UOp.placeholder((1,), dtypes.int, slot=0, addrspace=AddrSpace.REG)
-      cnt = cnt.after(r)[0].set(0)
+      cnt = cnt[0].set(0)
       cnt = cnt.after(cnt[0].store(nxt:=cnt.after(l)[0] + 1).backedge(l, nxt < 3))
       return C[r].set(A[r] + cnt[0].cast(C.dtype), end=r).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)),)))
     a = Tensor([1., 2, 3, 4])
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), [4., 5, 6, 7])
+
+  def test_default_range_runs_in_order(self):
+    # a default range is a LOOP: each iteration loads what earlier ones stored, with or without opts
+    def shift(A:UOp, ki:KernelInfo) -> UOp: return A[(i:=UOp.range(4, 0))+1].store(A[i]).end(i).sink(arg=ki)
+    for ki in (KernelInfo(), KernelInfo(opts_to_apply=()), KernelInfo(optimized=True)):
+      self.assertEqual(Tensor.custom_kernel(Tensor([1, 2, 3, 4, 5]).contiguous(), fxn=functools.partial(shift, ki=ki))[0].tolist(), [1]*5)
 
   def test_range_bound_after_outer_range(self):
     def kernel(C:UOp) -> UOp:
@@ -645,7 +652,7 @@ class TestCustomKernelArgs(unittest.TestCase):
   def test_variable_arg_is_not_copy(self):
     # a buffer and a Variable aren't a copy kernel, so the ranges merge in codegen after the split, and SPLIT sees one axis of 8
     def kernel(D:UOp, N:UOp) -> UOp:
-      a, b = UOp.range(2, 0), UOp.range(4, 1)
+      a, b = UOp.range(2, 0, AxisType.WEAK), UOp.range(4, 1, AxisType.WEAK)
       i = a*4+b
       return D[i].store((i%2+N).cast(dtypes.int)).end(a, b).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.SPLIT, 0, (8, AxisType.UPCAST)),)))
     d = Tensor.custom_kernel(Tensor.empty(8, dtype=dtypes.int), Tensor(Variable("n", 1, 8, dtypes.int).bind(2)), fxn=kernel)[0]

@@ -64,9 +64,9 @@ def _blk_for(D:int) -> int:
   return blk
 
 def _kv_ranges(G, N, D, BLK):
-  g = UOp.range(G, 0)
-  m = UOp.range(N, 1)
-  jo = UOp.range(D // BLK, 2)
+  g = UOp.range(G, 0, AxisType.WEAK)
+  m = UOp.range(N, 1, AxisType.WEAK)
+  jo = UOp.range(D // BLK, 2, AxisType.WEAK)
   ji = UOp.range(BLK, 3, AxisType.LOCAL)
   return g, m, jo * BLK + ji, jo, ji
 
@@ -79,7 +79,7 @@ def _ggather_fwd_kernel(out:UOp, table:UOp, idx:UOp) -> UOp:
     arg=KernelInfo(name=f"ggather_fwd_{M}_{D}", opts_to_apply=()))
 
 def _ggather_zero_kernel(out:UOp) -> UOp:
-  i = UOp.range(out.numel(), 0)
+  i = UOp.range(out.numel(), 0, AxisType.WEAK)
   return out.flatten().index(i).store(UOp.const(0.0, out.dtype)).end(i).sink(arg=KernelInfo(name="ggather_zero"))
 
 def _sharded_zeros(shape:tuple[int, ...], dtype, device) -> Tensor:

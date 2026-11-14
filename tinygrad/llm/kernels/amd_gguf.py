@@ -293,7 +293,8 @@ def _wmma_words(lane_group:UOp, kgroups:int) -> tuple[UOp|int, ...]:
 def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, lanes:int):
   if out_features % (16*output_tiles): output_tiles = 1
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
-  token_block, output_block = UOp.range(out.shape[0]//token_tile, 0), UOp.range(out_features//(16*output_tiles*output_waves), 1)
+  token_block = UOp.range(out.shape[0]//token_tile, 0, AxisType.GLOBAL)
+  output_block = UOp.range(out_features//(16*output_tiles*output_waves), 1, AxisType.GLOBAL)
   # lane is a hardware WARP range (like the flash kernel): the fragment math stays visible without being
   # range-split into nested loops, which would scramble the WMMA fragment layout
   lane, wave = UOp.range(lanes, -1, axis_type=AxisType.WARP), UOp.range(output_waves, 3, axis_type=AxisType.LOCAL)

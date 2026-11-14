@@ -1,6 +1,6 @@
 import functools, math, pathlib
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
 from extra.llama_kernels import alloc_like, compile_hip
 
@@ -11,7 +11,7 @@ def _custom_swiglu(out:UOp, x_w13:UOp) -> UOp:
   rows, hidden = math.prod(x_w13.shape[:-1]), x_w13.shape[-1]//2
   n_elems = rows * hidden
   out, x_w13 = out.reshape(n_elems), x_w13.reshape(rows, 2*hidden)
-  i = UOp.range(n_elems, 0)
+  i = UOp.range(n_elems, 0, AxisType.WEAK)
   row, col = i // hidden, i % hidden
   act, gate = x_w13[row, col].cast(dtypes.float), x_w13[row, hidden+col].cast(dtypes.float)
   sigmoid = (1.0 + (-LOG2E * act).exp2()).reciprocal()
@@ -36,7 +36,7 @@ def _custom_swiglu_bwd(grad_out:UOp, x_w13:UOp, grad_act:UOp) -> UOp:
   rows, hidden = math.prod(x_w13.shape[:-1]), x_w13.shape[-1]//2
   n_elems = rows * hidden
   grad_out, x_w13, grad_act = grad_out.reshape(rows, 2*hidden), x_w13.reshape(rows, 2*hidden), grad_act.reshape(n_elems)
-  i = UOp.range(n_elems, 0)
+  i = UOp.range(n_elems, 0, AxisType.WEAK)
   row, col = i // hidden, i % hidden
   act, gate = x_w13[row, col].cast(dtypes.float), x_w13[row, hidden+col].cast(dtypes.float)
   grad = grad_act[i].cast(dtypes.float)

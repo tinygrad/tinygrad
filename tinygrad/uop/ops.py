@@ -20,6 +20,7 @@ class AxisType(Enum):
   def __repr__(self): return str(self)
   def __lt__(self, other:AxisType): return self.value < other.value
   # Nesting order: RANGE args sort by axis type, then axis id.
+  # LOOP iterations run in order. WEAK ones may run in parallel or be upcast
   DEVICE = auto(); GLOBAL = auto(); LOCAL = auto(); WARP = auto(); WEAK = auto(); LOOP = auto() # noqa: E702
   UPCAST = auto(); PLACEHOLDER = auto() # noqa: E702
 
@@ -616,7 +617,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def cconst(b:ConstLike, dtype:DType): return UOp(Ops.CAST, src=(UOp.const(b),), arg=dtype)
   @staticmethod
-  def range(end:sint, axis_id, axis_type=AxisType.WEAK, *, dtype=dtypes.weakint):
+  def range(end:sint, axis_id, axis_type=AxisType.LOOP, *, dtype=dtypes.weakint):
     return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),), arg=(axis_type, axis_id))
   @staticmethod
   def loop(axis_id:int): return UOp(Ops.RANGE, src=(UOp(Ops.NOOP),), arg=(AxisType.WEAK, axis_id))
