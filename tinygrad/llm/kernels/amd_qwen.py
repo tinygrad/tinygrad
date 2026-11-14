@@ -950,21 +950,42 @@ K256_STAGE = getenv("K256_STAGE", 0)
 # iris 7900 XTX IQ3_S gate|up of 86 experts (extra/moe_prefill_bench.py): 576 tokens 573 -> 440 us, 1152 579 -> 467, 4096 1180 -> 1159,
 # 13824 3686 -> 3584; a whole layer (+ the IQ4_NL down) at 192/384/768 tokens 817/841/903 -> 648/689/713 us. IQ3_S only. default off
 K256_XH = getenv("K256_XH", 1)
+# K256_IQ3XXS: RDNA3 grouped IQ3_XXS experts (the V3.1 file's gate|up of 28 layers) in _grouped_k256_kernel (q8_K activations, as IQ3_S) instead
+# of the int8 tensor cores' kernel on q8 activations: other numerics (the activations' scale a block of 256, not 32). default off
+K256_IQ3XXS = getenv("K256_IQ3XXS", 0)
+# K256_XH_IQ4: K256_XH for IQ4_XS too (same bits; k1 one card 86 experts x 5 slices, 1152 rows 1009 -> 615 us, 2304 1006 -> 877). default on
+K256_XH_IQ4 = getenv("K256_XH_IQ4", 1)
+def k256_types(rdna4:bool) -> tuple[int, ...]:
+  """the grouped experts' types of _grouped_k256_kernel"""
+  return (IQ3_S,) if rdna4 else (IQ3_S, IQ4_XS, IQ3_XXS) if K256_IQ3XXS else (IQ3_S, IQ4_XS)
+def k256_xh(ggml_type:int) -> bool:
+  """K256_XH applies to ggml_type (RDNA3)"""
+  return bool(K256_XH) and (ggml_type in (IQ3_S, IQ3_XXS) or (ggml_type == IQ4_XS and bool(K256_XH_IQ4)))
 # Q8_TILES: grouped experts' sorted rows (the down's input) quantized in the rows of the tiles with an expert only
 Q8_TILES = getenv("Q8_TILES", 0 if _wmma_rdna4(Device.DEFAULT) else 1)
 K256_R4_GRID = getenv("K256_R4_GRID", 0)
 # Q8_TT96: RDNA3 q8_gemm of 768-2304 rows in token tiles of 96 (block 128, two groups a stage) when they divide them. same bits
 # (tr9 extra/q8_serial.py 1152 rows: 1024x2560 91.0 -> 86.0 us, 6144x2560 427 -> 409, 2560x1024 86.8 -> 83.8; warm 1152-row chunk -2 ms)
 Q8_TT96 = getenv("Q8_TT96", 1)
+# Q6K_TILES: RDNA3 Q6_K gemm of many rows (the V3.1 file's attention, gated deltanet and shared expert projections; not the output head) in the
+# first token tile / output block of Q6K_TILE_ORDER with Q6K_WG workgroups or more (else 32 x 64), not the output head's 192 first. same bits
+# (the sums along K in the same order). k1 one card (results/w-gpf/pf/out-k1-2157): 2304 rows 2560 -> 1024 284 -> 240 us, 2560 -> 128 163 ->
+# 109; 1152 rows 2560 -> 128 158 -> 96, 2560 -> 2048 295 -> 243
+Q6K_TILES, Q6K_WG = getenv("Q6K_TILES", 1), getenv("Q6K_WG", 128)
+Q6K_TILE_ORDER = ((96, 128), (128, 128), (96, 64), (128, 64), (64, 64), (32, 64))
+def q6k_tile(rows:int, out:int) -> tuple[int, int]|None:
+  """the token tile and output block of the Q6_K gemm of rows x out (see Q6K_TILES), None: no tile of the order fits"""
+  fits = [(t, bn) for t, bn in Q6K_TILE_ORDER if rows % t == 0 and out % bn == 0]
+  return next(((t, bn) for t, bn in fits if rows // t * (out // bn) >= Q6K_WG), fits[-1] if fits else None)
 MAD_I24 = "({{ int r_; __asm__(\"v_mad_i32_i24 %0, %1, %2, %3\" : \"=v\"(r_) : \"v\"({0}), \"v\"({1}), \"v\"({2})); r_; }})"
 
 @functools.cache
 def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_features:int, in_features:int, ggml_type:int, expert_words:int,
                          x_div:int, act:tuple|None=None, rdna4:bool=False) -> UOp:
-  # grouped experts (IQ3_S, IQ4_XS) on q8_K activations: per block of 256 inputs, the int8 WMMA dots of a sub-block (32) times its integer sub-scale
-  # accumulate in int32, the block is scaled once (weight d times activation d). a workgroup is a tile of MOE_TILE rows x 256 weight rows, 8
+  # grouped experts (IQ3_S, IQ4_XS, IQ3_XXS) on q8_K activations: per block of 256 inputs, the int8 WMMA dots of a sub-block (32) times its integer
+  # sub-scale accumulate in int32, the block is scaled once (weight d times activation d). a workgroup is a tile of MOE_TILE rows x 256 weight rows, 8
   # waves of 2 output tiles (act: the gate and up of 16 columns) by the tile's 4 token tiles. the tile's activations of a block are in LDS
-  grid_src, (rows, tiles) = (srcs[0] if ggml_type == IQ3_S else None), srcs[-2:]
+  grid_src, (rows, tiles) = (srcs[0] if ggml_type in (IQ3_S, IQ3_XXS) else None), srcs[-2:]
   TOK, WAVES, OT = _moe_tile((rows, tiles)), 8, 2
   TT, OUTB, blocks = TOK // 16, WAVES * OT * 16, in_features // 256
   type_words = QUANT_SIZES[ggml_type] // raw.dtype.itemsize
@@ -1030,15 +1051,17 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   # weights of at most 127 (IQ3_S 15) is below 2**23, a sub-scale at most 32 in magnitude, 8 of them below 2**31)
   ints = [[UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
   ints = [[r.after(r.after(b).store(zero)) for r in row] for row in ints]
-  dws = [_half(wraw[base]) for base in bases]
+  # (IQ3_XXS: d (s + 1/2) / 2 = d/4 (1 + 2s): the integer sub-scale of IQ3_S's form, d/4 the block's)
+  dws = [_half(wraw[base]) * (0.25 if ggml_type == IQ3_XXS else 1.0) for base in bases]
   def sub_scale(base:UOp, sb:UOp) -> UOp:
-    # the integer scale of sub-block sb: IQ3_S 1+2*s (odd, at most 31), IQ4_XS the 6 bits minus 32
+    # the integer scale of sub-block sb: IQ3_S / IQ3_XXS 1+2*s (odd, at most 31), IQ4_XS the 6 bits minus 32
     if ggml_type == IQ3_S: return (1 + 2*((_load_byte(wraw, base, 106 + sb//2) >> ((sb % 2) * 4).cast(dtypes.uint32)) & 15)).cast(dtypes.int32)
+    if ggml_type == IQ3_XXS: return (1 + 2*(_load_u32(wraw, base, 66 + sb*4) >> 28)).cast(dtypes.int32)
     header, low = wraw[base].load(), wraw[base+1].load()
     return (((low >> (4*sb).cast(dtypes.uint32)) & 15) | (((header >> (16+2*sb).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int32) - 32
   def acols(h:int) -> tuple: return (ph*4+2*h, ph*4+2*h+1) if rdna4 else (2*h, 2*h+4, 2*h+1, 2*h+5)
-  # (K256_XH: IQ3_S only, IQ4_XS's is no faster at 576 tokens and 1.4x slower at 4096+ (iris))
-  xh = bool(K256_XH) and not rdna4 and not stage_w and ggml_type == IQ3_S
+  # (K256_XH: IQ3_S, IQ3_XXS; IQ4_XS's is no faster at 576 tokens and 1.4x slower at 4096+ (iris): K256_XH_IQ4)
+  xh = k256_xh(ggml_type) and not rdna4 and not stage_w
   def sub_block(sb:UOp, prevs:list[list[list[UOp]]]) -> list[list[list[UOp]]]:
     """the int32 sums (OT, TT, 8 lanes' values) after sub-block sb, from prevs"""
     afr = [[_i8_frag(tuple(lds_q[t*16 + col, sb, c].load() for c in acols(h))) for h in range(2)] for t in range(TT)]
@@ -1490,15 +1513,15 @@ def f16t_gemm(x:Tensor, wt:Tensor) -> Tensor|None:
 
 def merged_linear(layers:list[Linear]) -> Linear|None:
   """
-  one Linear of the layers' rows (Q8_0, the same input, split on their outputs over the devices) if their weights are views of adjacent bytes
-  of every device's memory (the loader's): a view of them (no copy). None if not
+  one Linear of the layers' rows (Q8_0 or Q6_K, all of one type, the same input, split on their outputs over the devices) if their weights are
+  views of adjacent bytes of every device's memory (the loader's): a view of them (no copy). None if not
   """
   from tinygrad.device import MultiBuffer
   for l in layers:
     if l.ggml_type is None and l.use_custom_quant and amd_custom_kernels_supported(l.weight.device): l.set_quantized(l.weight)
   l0 = layers[0]
-  if l0.ggml_type != Q8_0 or any(l.ggml_type != Q8_0 or l.shard_axis != 0 or l.in_features != l0.in_features or l.out_features != l0.out_features
-                                 or l.bias is not None for l in layers): return None
+  if l0.ggml_type not in (Q8_0, Q6_K) or any(l.ggml_type != l0.ggml_type or l.shard_axis != 0 or l.in_features != l0.in_features or
+                                             l.out_features != l0.out_features or l.bias is not None for l in layers): return None
   # (the buffer every weight is a view of)
   bufs = [[u.buffer for u in l.weight.uop.toposort() if u.op is Ops.BUFFER and isinstance(u.buffer, MultiBuffer)] for l in layers]
   if any(len(b) != 1 for b in bufs): return None
@@ -1512,7 +1535,7 @@ def merged_linear(layers:list[Linear]) -> Linear|None:
   devs = cast(tuple[str, ...], l0.weight.device)
   with Linear.empty_init(): merged = Linear(l0.in_features, l0.out_features*len(layers), bias=False)
   merged.weight = Tensor(UOp.from_buffer(mb, dtypes.uint8, devs).reshape(1, -1).unshard(0)).flatten().bitcast(l0.weight.dtype).contiguous()
-  merged.ggml_type, merged.shard_axis = Q8_0, 0
+  merged.ggml_type, merged.shard_axis = l0.ggml_type, 0
   return merged
 
 def q8_linear_parts(merged:Linear, x:Tensor, n:int) -> list[Tensor]|None:
@@ -1522,13 +1545,14 @@ def q8_linear_parts(merged:Linear, x:Tensor, n:int) -> list[Tensor]|None:
   """
   tokens = int(x.numel()) // merged.in_features
   devs, K = x.device, merged.in_features
-  if not isinstance(devs, tuple) or not 16 < tokens <= 96 or K % 32 or not amd_custom_kernels_supported(devs): return None
+  if not isinstance(devs, tuple) or not 16 < tokens <= 96 or K % (256 if merged.ggml_type == Q6_K else 32) or \
+     not amd_custom_kernels_supported(devs): return None
   ne = merged.out_features // n
   P = round_up(tokens, 32)
   # (MERGED_TT: the token tile, default the rows' (a tile of 32 more workgroups, the weights dequantized once a tile))
   tt = next(t for t in (getenv("MERGED_TT", 96), 96, 64, 32) if P % t == 0)
   outs = [Tensor.empty(tokens, ne, dtype=dtypes.float32, device=devs, axis=1) for _ in range(n)]
-  fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=Q8_0, block_n=64, k_splits=1, rdna4=_wmma_rdna4(devs), n_out=n,
+  fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=merged.ggml_type, block_n=64, k_splits=1, rdna4=_wmma_rdna4(devs), n_out=n,
                           out_features=merged.out_features // len(devs), in_features=K)
   res = Tensor.custom_kernel(*outs, merged.weight, x.reshape(tokens, K).cast(dtypes.float16).contiguous(), fxn=fxn)[:n]
   return [r.reshape(*x.shape[:-1], ne) for r in res]
@@ -1555,6 +1579,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   q6_gemm = not skinny and layer.ggml_type == Q6_K and xq is None and not split and tokens >= 17 and layer.in_features % 256 == 0
   # (the output head of 65-96 rows (22-32 sequences of 3 drafts): a tile of 96 rows, the gemm reads the last row again past them, not 128)
   q6_rows = q6_gemm and 64 < tokens <= 96
+  # (Q6K_TILES: the tile by the workgroups of the shape, the projections' few outputs a device; the output head as before)
+  q6_shape = q6k_tile(round_up(tokens, 64 if tokens > 32 else 32), dev_out) if Q6K_TILES and q6_gemm and not q6_rows and not rdna4 and \
+    dev_out <= 16384 else None
   pad = round_up(tokens, 64 if tokens > 32 else 32) if q6_gemm and tokens % (64 if tokens > 32 else 32) and not q6_rows else \
         round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny and not q6_rows else \
         round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) and not skinny else 0
@@ -1596,7 +1623,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     out_shape = (splits*ksplits*P, out_features)
   elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm or few_out_long) and \
        in_features % 32 == 0 and (rdna4 or local_rows >= 256 or few_out_long or q6_gemm) and \
-       (tt:=next((t for t in ((192, 128, 96, 64, 32) if q6_gemm else (96, 128, 64, 32) if rdna4 else
+       (tt:=next((t for t in ((q6_shape[0],) if q6_shape else (192, 128, 96, 64, 32) if q6_gemm else (96, 128, 64, 32) if rdna4 else
                               ((96,) if Q8_TT96 and 768 <= local_rows <= 2304 and local_out % 128 == 0 and local_out >= 512 else ()) +
                               (128 if local_out % 128 == 0 and local_out >= 512 else 64, 64, 32)) if (P if q6_rows else local_rows) % t == 0), 0)):
     # many tokens: the weights dequantized in LDS for token tiles of tt
@@ -1608,7 +1635,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     mr = m_rows if TILE16 and split and not rdna4 and 0 < m_rows < local_rows else 0
     if mr and mr <= 16: tt = 16
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=rdna4,
-                            block_n=128 if rdna4 or (local_out % 128 == 0 and ksplits == 1 and tt in (96, 128)) else 64, k_splits=ksplits,
+                            block_n=q6_shape[1] if q6_shape else 128 if rdna4 or (local_out % 128 == 0 and ksplits == 1 and tt in (96, 128)) else 64,
+                            k_splits=ksplits,
                             rows=rows if split and 0 < rows < local_rows else 0, m_rows=mr)
     if q6_rows: out_shape = (splits*P, out_features)
     srcs = (x.cast(dtypes.float16).contiguous(),)
@@ -3294,7 +3322,7 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
   rdna4 = _wmma_rdna4(x.device)
   # (IQ4_XS too: as fast as its f16 kernel for the experts' down rows, which read their activations exactly)
   # (RDNA3 IQ4_XS: K256 too, its f16 kernel ~4x the time of an IQ3_S layer's. RDNA4: IQ3_S only)
-  if ggml_type in ((IQ3_S,) if rdna4 else (IQ3_S, IQ4_XS)) and in_features % 256 == 0 and out_features % 256 == 0:
+  if ggml_type in k256_types(rdna4) and in_features % 256 == 0 and out_features % 256 == 0:
     # activations with a scale per 256 inputs (q8_K, as llama.cpp's dots of the IQ formats): the sub-blocks accumulate in int32
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
     xq, xd = q8k_quantize(x.contiguous(), int(x_rows), in_features)

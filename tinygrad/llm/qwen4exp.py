@@ -1063,11 +1063,12 @@ class FFNBlock:
     gate_exps, down_exps = self.ffn_gate_exps, self.ffn_down_exps
     # (batched decoding: a few rows an expert, small tiles)
     # RDNA3: 32 rows for f16 and IQ3_S K256 kernels; the latter needs fewer padded rows and fits two LDS tiles per WGP.
-    i8 = gate_exps.ggml_type in I8_WMMA_QUANTS and gate_exps.ggml_type != IQ3_S
+    i8 = gate_exps.ggml_type in I8_WMMA_QUANTS and gate_exps.ggml_type not in amd_qwen.k256_types(_wmma_rdna4(x.device))
     tile = MOE_TILE if _wmma_rdna4(x.device) or i8 else 32
     # (MOE_TILE16 (RDNA3, IQ3_S gate|up with the K256 sub-blocks unrolled by XH or UNROLL): tiles of 16 rows when the experts have few
     # rows each (a warm turn's chunk): half the tensor core work of a tile of 32 mostly padding, the same bits per row)
-    if tile == 32 and (amd_qwen.K256_XH or amd_qwen.K256_UNROLL) and gate_exps.ggml_type == IQ3_S and isinstance(T, int) and \
+    if tile == 32 and (amd_qwen.k256_xh(unwrap(gate_exps.ggml_type)) or (amd_qwen.K256_UNROLL and gate_exps.ggml_type == IQ3_S)) and \
+       gate_exps.ggml_type in amd_qwen.k256_types(False) and gate_exps.ggml_type != IQ4_XS and isinstance(T, int) and \
        _moe_use_tile16(cast(int, B) * T * int(sel.shape[-1]), self.config.num_experts): tile = 16
     _, entries, tiles, pos = moe_route(sel, gate_exps.first, gate_exps.local_experts, tile)
     k, sel_shape = int(sel.shape[-1]), sel.shape[-3:]
