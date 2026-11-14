@@ -950,6 +950,17 @@ K256_STAGE = getenv("K256_STAGE", 0)
 # iris 7900 XTX IQ3_S gate|up of 86 experts (extra/moe_prefill_bench.py): 576 tokens 573 -> 440 us, 1152 579 -> 467, 4096 1180 -> 1159,
 # 13824 3686 -> 3584; a whole layer (+ the IQ4_NL down) at 192/384/768 tokens 817/841/903 -> 648/689/713 us. IQ3_S only. default off
 K256_XH = getenv("K256_XH", 1)
+# K256_IQ3XXS: RDNA3 grouped IQ3_XXS experts (the V3.1 file's gate|up of 28 layers) in _grouped_k256_kernel (q8_K activations, as IQ3_S) instead
+# of the int8 tensor cores' kernel on q8 activations: other numerics (the activations' scale a block of 256, not 32). default off
+K256_IQ3XXS = getenv("K256_IQ3XXS", 0)
+# K256_XH_IQ4: K256_XH for IQ4_XS too (same bits). default off
+K256_XH_IQ4 = getenv("K256_XH_IQ4", 0)
+def k256_types(rdna4:bool) -> tuple[int, ...]:
+  """the grouped experts' types of _grouped_k256_kernel"""
+  return (IQ3_S,) if rdna4 else (IQ3_S, IQ4_XS, IQ3_XXS) if K256_IQ3XXS else (IQ3_S, IQ4_XS)
+def k256_xh(ggml_type:int) -> bool:
+  """K256_XH applies to ggml_type (RDNA3)"""
+  return bool(K256_XH) and (ggml_type in (IQ3_S, IQ3_XXS) or (ggml_type == IQ4_XS and bool(K256_XH_IQ4)))
 # Q8_TILES: grouped experts' sorted rows (the down's input) quantized in the rows of the tiles with an expert only
 Q8_TILES = getenv("Q8_TILES", 0 if _wmma_rdna4(Device.DEFAULT) else 1)
 K256_R4_GRID = getenv("K256_R4_GRID", 0)
@@ -961,10 +972,10 @@ MAD_I24 = "({{ int r_; __asm__(\"v_mad_i32_i24 %0, %1, %2, %3\" : \"=v\"(r_) : \
 @functools.cache
 def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_features:int, in_features:int, ggml_type:int, expert_words:int,
                          x_div:int, act:tuple|None=None, rdna4:bool=False) -> UOp:
-  # grouped experts (IQ3_S, IQ4_XS) on q8_K activations: per block of 256 inputs, the int8 WMMA dots of a sub-block (32) times its integer sub-scale
-  # accumulate in int32, the block is scaled once (weight d times activation d). a workgroup is a tile of MOE_TILE rows x 256 weight rows, 8
+  # grouped experts (IQ3_S, IQ4_XS, IQ3_XXS) on q8_K activations: per block of 256 inputs, the int8 WMMA dots of a sub-block (32) times its integer
+  # sub-scale accumulate in int32, the block is scaled once (weight d times activation d). a workgroup is a tile of MOE_TILE rows x 256 weight rows, 8
   # waves of 2 output tiles (act: the gate and up of 16 columns) by the tile's 4 token tiles. the tile's activations of a block are in LDS
-  grid_src, (rows, tiles) = (srcs[0] if ggml_type == IQ3_S else None), srcs[-2:]
+  grid_src, (rows, tiles) = (srcs[0] if ggml_type in (IQ3_S, IQ3_XXS) else None), srcs[-2:]
   TOK, WAVES, OT = _moe_tile((rows, tiles)), 8, 2
   TT, OUTB, blocks = TOK // 16, WAVES * OT * 16, in_features // 256
   type_words = QUANT_SIZES[ggml_type] // raw.dtype.itemsize
@@ -1030,15 +1041,17 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   # weights of at most 127 (IQ3_S 15) is below 2**23, a sub-scale at most 32 in magnitude, 8 of them below 2**31)
   ints = [[UOp.alloc((8,), dtypes.int32, addrspace=AddrSpace.REG) for _ in range(TT)] for _ in range(OT)]
   ints = [[r.after(r.after(b).store(zero)) for r in row] for row in ints]
-  dws = [_half(wraw[base]) for base in bases]
+  # (IQ3_XXS: d (s + 1/2) / 2 = d/4 (1 + 2s): the integer sub-scale of IQ3_S's form, d/4 the block's)
+  dws = [_half(wraw[base]) * (0.25 if ggml_type == IQ3_XXS else 1.0) for base in bases]
   def sub_scale(base:UOp, sb:UOp) -> UOp:
-    # the integer scale of sub-block sb: IQ3_S 1+2*s (odd, at most 31), IQ4_XS the 6 bits minus 32
+    # the integer scale of sub-block sb: IQ3_S / IQ3_XXS 1+2*s (odd, at most 31), IQ4_XS the 6 bits minus 32
     if ggml_type == IQ3_S: return (1 + 2*((_load_byte(wraw, base, 106 + sb//2) >> ((sb % 2) * 4).cast(dtypes.uint32)) & 15)).cast(dtypes.int32)
+    if ggml_type == IQ3_XXS: return (1 + 2*(_load_u32(wraw, base, 66 + sb*4) >> 28)).cast(dtypes.int32)
     header, low = wraw[base].load(), wraw[base+1].load()
     return (((low >> (4*sb).cast(dtypes.uint32)) & 15) | (((header >> (16+2*sb).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int32) - 32
   def acols(h:int) -> tuple: return (ph*4+2*h, ph*4+2*h+1) if rdna4 else (2*h, 2*h+4, 2*h+1, 2*h+5)
-  # (K256_XH: IQ3_S only, IQ4_XS's is no faster at 576 tokens and 1.4x slower at 4096+ (iris))
-  xh = bool(K256_XH) and not rdna4 and not stage_w and ggml_type == IQ3_S
+  # (K256_XH: IQ3_S, IQ3_XXS; IQ4_XS's is no faster at 576 tokens and 1.4x slower at 4096+ (iris): K256_XH_IQ4)
+  xh = k256_xh(ggml_type) and not rdna4 and not stage_w
   def sub_block(sb:UOp, prevs:list[list[list[UOp]]]) -> list[list[list[UOp]]]:
     """the int32 sums (OT, TT, 8 lanes' values) after sub-block sb, from prevs"""
     afr = [[_i8_frag(tuple(lds_q[t*16 + col, sb, c].load() for c in acols(h))) for h in range(2)] for t in range(TT)]
@@ -3295,7 +3308,7 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
   rdna4 = _wmma_rdna4(x.device)
   # (IQ4_XS too: as fast as its f16 kernel for the experts' down rows, which read their activations exactly)
   # (RDNA3 IQ4_XS: K256 too, its f16 kernel ~4x the time of an IQ3_S layer's. RDNA4: IQ3_S only)
-  if ggml_type in ((IQ3_S,) if rdna4 else (IQ3_S, IQ4_XS)) and in_features % 256 == 0 and out_features % 256 == 0:
+  if ggml_type in k256_types(rdna4) and in_features % 256 == 0 and out_features % 256 == 0:
     # activations with a scale per 256 inputs (q8_K, as llama.cpp's dots of the IQ formats): the sub-blocks accumulate in int32
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
     xq, xd = q8k_quantize(x.contiguous(), int(x_rows), in_features)
