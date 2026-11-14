@@ -82,6 +82,8 @@ def permute_rope(w:Tensor, n_heads:int, rope_dim:int) -> Tensor:
   prefix = x.shape[1]-rope_dim
   return x[:, :prefix].cat(x[:, prefix:].rearrange("n (h two) d -> n (two h) d", two=2), dim=1).reshape(w.shape)
 
+def topk_mask(x:Tensor, k:int) -> Tensor: return x.zeros_like(dtype=dtypes.bool).scatter(-1, x.topk(k)[1], True)
+
 def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   n = x.shape[-1]
   vals = Tensor.arange(n).reshape(1,1,n).cast(x.dtype).expand(x.shape)
@@ -90,13 +92,16 @@ def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   sel = x.const_like(0).scatter(-1, cmp.sum(axis=-1).cast('int32'), vals)[:,:,n-k:].cast('int32')
   return x.gather(-1, sel), sel
 
+def rolling_window(state:Tensor, x:Tensor, initial:Tensor) -> tuple[Tensor, UOp]:
+  # assemble the window in a static-size buffer: [state | x rows | zero-pad], state is zeroed when initial
+  T, T_pad = x.shape[1], x.max_shape[1]
+  window = initial.where(0, state).cat(x.cast(state.dtype), dim=1).pad_to((x.shape[0], state.shape[1] + T_pad, *x.shape[2:])).contiguous()
+  # the last state.shape[1] rows before the padding become the next state
+  return window, state.uop.store(window[:, T:T+state.shape[1]].uop)
+
 def short_conv(state:Tensor, x:Tensor, weight:Tensor, initial:Tensor, dilation:int=1) -> tuple[Tensor, UOp]:
   assert state.shape[1] == (weight.shape[1]-1)*dilation, f"state has {state.shape[1]} rows, expected {(weight.shape[1]-1)*dilation}"
-  # assemble the conv window in a static-size buffer: [state | x rows | zero-pad], state is zeroed when initial
-  T, T_pad = x.shape[1], x.max_shape[1]
-  window = initial.where(0, state).cat(x.cast(state.dtype), dim=1).pad_to((x.shape[0], state.shape[1] + T_pad, x.shape[-1])).contiguous()
-  # the last state.shape[1] rows before the padding become the next state
-  store = state.uop.store(window[:, T:T+state.shape[1]].uop)
+  (window, store), T_pad = rolling_window(state, x, initial), x.max_shape[1]
   return functools.reduce(lambda a,b: a+b, (window[:, i*dilation:i*dilation+T_pad] * weight[:, i] for i in range(weight.shape[1]))).silu(), store
 
 @dataclass(frozen=True)
@@ -207,20 +212,24 @@ class AttentionResidual:
     return (xs.cat(out.unsqueeze(2), dim=2) if self.new_block else xs[:, :, :-1].cat(xs[:, :, -1:] + out.unsqueeze(2), dim=2)), aux
 
 class HyperConnection:
-  def __init__(self, config:TransformerConfig):
+  def __init__(self, config:TransformerConfig, head:bool=False):
     self.count, self.eps, self.iters, self.norm_eps = (hc:=unwrap(config.hc)).count, hc.eps, hc.sinkhorn_iters, config.norm_eps
-    self.fn = Linear(self.count * config.dim, (2 + self.count) * self.count, bias=False)
-    self.base, self.scale = {"weight": Tensor.zeros((2 + self.count) * self.count)}, {"weight": Tensor.zeros(3)}
+    self.fn = Linear(self.count * config.dim, (n:=self.count if head else (2 + self.count) * self.count), bias=False)
+    self.base, self.scale = {"weight": Tensor.zeros(n)}, {"weight": Tensor.zeros(1 if head else 3)}
+
+  def mix(self, xs:Tensor) -> tuple[Tensor, Tensor]:
+    base, scale, mix = self.base["weight"], self.scale["weight"], self.fn(xs.flatten(2).rmsnorm(eps=self.norm_eps))
+    pre  = (mix[..., :self.count] * scale[0] + base[:self.count]).sigmoid() + self.eps
+    return (xs * pre.unsqueeze(-1)).sum(2), mix
 
   def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], tuple[Tensor, Tensor|None]]) -> tuple[Tensor, Tensor|None]:
     """mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb"""
-    base, scale, mix = self.base["weight"], self.scale["weight"], self.fn(xs.flatten(2).rmsnorm(eps=self.norm_eps))
-    pre  = (mix[..., :self.count] * scale[0] + base[:self.count]).sigmoid() + self.eps
+    (mixed, mix), base, scale = self.mix(xs), self.base["weight"], self.scale["weight"]
     post = (mix[..., self.count:2*self.count] * scale[1] + base[self.count:2*self.count]).sigmoid() * 2
     comb = (mix[..., 2*self.count:] * scale[2] + base[2*self.count:]).reshape(*mix.shape[:-1], self.count, self.count).softmax(-1) + self.eps
     # sinkhorn: normalize the columns then the rows, alternating, to make comb doubly stochastic
     for i in range(2 * self.iters - 1): comb = comb / (comb.sum(-1 if i % 2 else -2, keepdim=True) + self.eps)
-    out, aux = sublayer((xs * pre.unsqueeze(-1)).sum(2))
+    out, aux = sublayer(mixed)
     return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs), aux
 
 class GroupedRMSNorm:  # x: (B, T, count, dim), w: (count*dim,)
@@ -297,7 +306,7 @@ class FFNBlock:
       if self.config.expert_group_count > 1:
         groups = route_scores.unflatten(-1, (self.config.expert_group_count, -1))
         gscore = groups.topk(1 if bias is None else 2)[0].sum(-1)
-        keep = gscore.zeros_like(dtype=dtypes.bool).scatter(-1, gscore.topk(self.config.expert_group_used)[1], True)
+        keep = topk_mask(gscore, self.config.expert_group_used)
         route_scores = keep.unsqueeze(-1).where(groups, -math.inf).flatten(-2)
       _, sel = pairwise_topk(route_scores, self.config.num_experts_per_tok)
       probs = scores.gather(-1, sel)
@@ -489,9 +498,8 @@ class Indexer:
     k_pos = Tensor.arange(S)
     scores = ((Tensor.arange(scores.shape[-1]) + 1) * idx.kpool <= q_pos + 1).where(scores, -math.inf)
     if idx.msa: scores = (Tensor.arange(scores.shape[-1]) == q_pos // idx.kpool).where(math.inf, scores)
-    _, sel = scores.topk(idx.top_k // idx.kpool)
     # selected incomplete pools add only tail/future tokens, handled by the final tail and causal mask
-    picked = scores.zeros_like(dtype=dtypes.bool).scatter(-1, sel, True).repeat_interleave(idx.kpool, dim=-1)[..., :S]
+    picked = topk_mask(scores, idx.top_k // idx.kpool).repeat_interleave(idx.kpool, dim=-1)[..., :S]
     return ((picked | (k_pos >= (q_pos + 1) // idx.kpool * idx.kpool)) & (k_pos <= q_pos)).where(0.0, -math.inf).cast(x.dtype)
 
 
@@ -694,7 +702,7 @@ class Transformer:
     elif self.config.attn_res_block_size: x = x.unsqueeze(2)
     idx_mask = None
     for block in self.blk: x, idx_mask = block(x, start_pos, idx_mask)
-    if hc is not None: x = self.output_hc.mix(x)[0] if hc.low_rank else x.mean(2)
+    if hc is not None: x = self.output_hc.mix(x)[0] if hasattr(self, 'output_hc') else x.mean(2)
     elif self.config.attn_res_block_size: x = self.output_res_score.mix(x)
     # only run the output projection on the last token
     logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :].to(tokens.device)
