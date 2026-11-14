@@ -524,29 +524,30 @@ class Indexer:
 
 class Compressor:
   def __init__(self, config:TransformerConfig, ratio:int, dim:int):
-    self.ratio, self.coff, self.dim, self.max_context = ratio, 1 + (ratio == 4), dim, config.max_context
-    self.kv, self.gate = (Linear(config.dim, dim * self.coff, bias=False) for _ in range(2))
-    self.ape, self.norm = {"weight": Tensor.zeros(ratio, dim * self.coff)}, nn.RMSNorm(dim, config.norm_eps)
+    self.ratio, self.span, self.dim, self.max_context = ratio, 1 + (ratio == 4), dim, config.max_context
+    self.kv, self.gate = (Linear(config.dim, dim * self.span, bias=False) for _ in range(2))
+    self.ape, self.norm = {"weight": Tensor.zeros(ratio, dim * self.span)}, nn.RMSNorm(dim, config.norm_eps)
 
   def _init_state(self, x:Tensor):
-    if not hasattr(self, "cache_p"):
-      self.cache_c = Tensor.empty(x.shape[0], self.ratio * self.coff, 2, self.dim * self.coff, device=x.device)
+    if not hasattr(self, "cache_pools"):
+      self.cache_kg = Tensor.empty(x.shape[0], self.ratio * self.span, 2, self.dim * self.span, device=x.device)
       # zeroed: a NaN in the masked incomplete pools would still poison the attention
-      self.cache_p = Tensor.zeros(x.shape[0], ceildiv(self.max_context + x.max_shape[1], self.ratio) + 2, self.dim,
-                                  dtype=dtypes.half, device=x.device).clone()
+      self.cache_pools = Tensor.zeros(x.shape[0], ceildiv(self.max_context + x.max_shape[1], self.ratio) + 2, self.dim,
+                                      dtype=dtypes.half, device=x.device).clone()
 
   def __call__(self, x:Tensor, start_pos:StartPos, freqs:Tensor) -> Tensor:
     B, d, r, pos = x.shape[0], self.dim, self.ratio, start_pos[0]
-    kg, store = rolling_window(self.cache_c, self.kv(x).stack(self.gate(x), dim=2), Tensor(pos).eq(0))
-    g0, m, n = pos // r, pos % r, ceildiv(x.max_shape[1] + r - 1, r)
-    kg = Tensor(kg.uop.after(store)).pad_to((B, self.cache_c.shape[1] + n*r, *kg.shape[2:]))[:, r-m:r-m+(n+self.coff-1)*r]
-    kg, bias = kg.reshape(B, -1, r, 2, kg.shape[-1]), self.ape["weight"]
-    if self.coff > 1:
-      none = Tensor([0.0, -math.inf], device=kg.device).reshape(2, 1)
-      first = ((Tensor.arange(n) == 0) & (Tensor(pos) < r)).reshape(1, n, 1, 1, 1).where(none, kg[:, :-1, ..., :d])
-      kg, bias = first.cat(kg[:, 1:, ..., d:], dim=2), bias[:, :d].cat(bias[:, d:])
-    pools = self.norm(((kg[..., 1, :] + bias).softmax(2) * kg[..., 0, :]).sum(2))
-    return _update_cache(self.cache_p, apply_rope(pools.unsqueeze(1), freqs[::r][g0:g0+n], True, True).squeeze(1), (g0,), 1)
+    kg, store = rolling_window(self.cache_kg, self.kv(x).stack(self.gate(x), dim=2), Tensor(pos).eq(0))
+    first_pool, n_pools = pos // r, ceildiv(x.max_shape[1] + r - 1, r)
+    kg = Tensor(kg.uop.after(store)).pad_to((B, self.cache_kg.shape[1] + n_pools*r, *kg.shape[2:]))
+    groups, ape = kg[:, r-pos%r:r-pos%r+(n_pools+self.span-1)*r].reshape(B, -1, r, 2, kg.shape[-1]), self.ape["weight"]
+    if self.span > 1:
+      empty = Tensor([0.0, -math.inf], device=kg.device).reshape(2, 1)
+      prev = ((Tensor.arange(n_pools) == 0) & (Tensor(pos) < r)).reshape(1, n_pools, 1, 1, 1).where(empty, groups[:, :-1, ..., :d])
+      groups, ape = prev.cat(groups[:, 1:, ..., d:], dim=2), ape[:, :d].cat(ape[:, d:])
+    pools = self.norm(((groups[..., 1, :] + ape).softmax(2) * groups[..., 0, :]).sum(2))
+    rot = freqs[::r][first_pool:first_pool+n_pools]
+    return _update_cache(self.cache_pools, apply_rope(pools.unsqueeze(1), rot, True, True).squeeze(1), (first_pool,), 1)
 
 class MLATransformerBlock(FFNBlock):
   kv_b_block_size:tuple[int, int] = (128, 128)
