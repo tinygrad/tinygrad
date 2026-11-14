@@ -1778,8 +1778,9 @@ class P2PAllreduce:
       for k in range(N):
         (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [own[d] if k == 0 else alias(own[(d+k) % N], devs[d]) for d in range(N)]
         self.mboxes.append(Tensor(UOp.from_buffer(mb, dtypes.uint64, devs)))
-      # the epoch counter of every workgroup, then the device's index, then the epoch of the last poll that ran out (0: none, p2p_late)
-      counters = [Buffer(d, (P2P_AR_NCTR+2)*4, initial_value=bytes(P2P_AR_NCTR*4)+i.to_bytes(4, "little")+bytes(4))
+      # the epoch counter of every workgroup, then the device's index, then the epoch of the last poll that ran out (0: none, p2p_late), then
+      # that epoch for every source whose words were still stale at its end (N+1: the devices, then a two-shot step's owner: p2p_stale)
+      counters = [Buffer(d, (P2P_AR_NCTR+2+N+1)*4, initial_value=bytes(P2P_AR_NCTR*4)+i.to_bytes(4, "little")+bytes(4*(N+2)))
                   for i,d in enumerate(devs)]
       (cb:=MultiBuffer.__new__(MultiBuffer)).bufs = counters
       self.counter, self.counter_bufs = Tensor(UOp.from_buffer(cb, dtypes.int32, devs)), counters
@@ -1829,6 +1830,21 @@ def p2p_late(devs:tuple[str, ...], clear:bool=False) -> list[int]:
     for d in devs: Device[d].synchronize()
   return ret
 
+def p2p_stale(devs:tuple[str, ...], clear:bool=False) -> list[list[int]]:
+  """for every device the sources (device indices; len(devs): a two-shot step's owner) whose words a poll of it was still waiting for when it
+  ran out (since the mailboxes were made or cleared): which card-to-card writes never arrived"""
+  if (p2p:=p2p_allreduce(devs)) is None: return []
+  for d in devs: Device[d].synchronize()
+  from tinygrad.device import Buffer
+  ret, i0, n = [], P2P_AR_NCTR + 2, len(devs) + 1
+  for b in p2p.counter_bufs:
+    v = b.as_memoryview().cast("i")[i0:i0+n]
+    ret.append([s for s in range(n) if v[s]])
+    if clear and any(v): b.view(4*n, i0*4).ensure_allocated().copy_from(Buffer("NPY", 4*n, opaque=memoryview(bytearray(4*n))).ensure_allocated())
+  if clear and any(ret):
+    for d in devs: Device[d].synchronize()
+  return ret
+
 # (120 s (was 30): with SEQ_A2A_HALF on, ts5 s3runout2 (8e08416b8, the 64k teacher-forced harness that died at 30 s on 93e2) ran 6 of 6 prompts
 # clean at 120 s; a poll that runs out still ends (P2P_RETRY runs a prompt's chunks again))
 def P2P_AR_TIMEOUT_MS() -> int: return getenv("P2P_AR_TIMEOUT_MS", 120000)
@@ -1845,7 +1861,9 @@ def p2p_check(devs:tuple[str, ...]) -> None:
     _FAKE_RUNOUTS[0] += 1
     raise P2PRunOut(f"a fake p2p run-out ({_FAKE_RUNOUTS[0]}, P2P_FAKE_RUNOUT)")
   if any(late:=p2p_late(devs, clear=True)):
-    raise P2PRunOut(f"a p2p poll ran out (P2P_AR_TIMEOUT_MS={P2P_AR_TIMEOUT_MS()}, epochs {late}): the sums of its step are wrong")
+    stale = p2p_stale(devs, clear=True)
+    raise P2PRunOut(f"a p2p poll ran out (P2P_AR_TIMEOUT_MS={P2P_AR_TIMEOUT_MS()}, epochs {late}, stale sources by device {stale}): the sums of its "
+                    "step are wrong")
 
 def p2p_ar_shape(n:int) -> tuple[int, int]|None:
   """(threads, values a thread) of a p2p allreduce of n values: a workgroup's at most P2P_AR_MAXW, at most P2P_AR_MAXG of them"""
@@ -1973,7 +1991,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     once = UOp.range((t < 32).where(1, 0), next(UOp.unique_num), AxisType.LOOP)
     return UOp.group(UOp.group(_sys('__builtin_amdgcn_fence(__ATOMIC_RELEASE, "");', dtypes.void, once, bar)).end(once)).barrier()
   lates:list[UOp] = []
-  def poll(after:UOp, slots:list[UOp], waits:list[UOp]) -> list[UOp]:
+  def poll(after:UOp, slots:list[UOp], waits:list[UOp], srcs:list[int]) -> list[UOp]:
     # the words of the slots (system scope loads of this device's mailbox, all of them in an iteration) until those it waits for have the epoch
     loop = UOp.range(UOp(Ops.NOOP).after(after), next(UOp.unique_num), dtype=dtypes.void)
     words = UOp.alloc((len(slots),), dtypes.uint64, addrspace=AddrSpace.REG)
@@ -1986,6 +2004,10 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     # (a thread whose words are still stale ran out: its epoch noted, see p2p_late)
     late = functools.reduce(lambda a,b: a | b, [w & fresh(g).logical_not() for g, w in zip(out, waits)])
     lates.append(counter[UOp.const(P2P_AR_NCTR + 1, dtypes.weakint).valid(late)].store(epoch.cast(dtypes.int32)))
+    # (and every source still stale: which writes never came, p2p_stale)
+    for src in sorted(set(srcs)):
+      ls = functools.reduce(lambda a,b: a | b, [w & fresh(g).logical_not() for g, w, s_ in zip(out, waits, srcs) if s_ == src])
+      lates.append(counter[UOp.const(P2P_AR_NCTR + 2 + src, dtypes.weakint).valid(ls)].store(epoch.cast(dtypes.int32)))
     return out
   # (packed: a device's own values as the others get them, the sums don't depend on which device sums them)
   if pack is not None: vals = [value(word(v)) for v in vals]
@@ -1995,14 +2017,15 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   def flagged(sent:UOp) -> list[UOp]:
     # the flags (the epoch) after the words, a thread of the workgroup a peer; the words once every source's flag has the epoch
     fl = push([mb[k][reg(me, FL).valid(t.eq(k))].store(epoch.cast(dtypes.uint64) << 32) for k in range(1, N)], sent)
-    flags = poll(fl, [reg(s, FL) for s in range(N)], [me.ne(s) for s in range(N)])
+    flags = poll(fl, [reg(s, FL) for s in range(N)], [me.ne(s) for s in range(N)], list(range(N)))
     acq = _sys('__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "");', dtypes.void, *flags)
     return [_sys(_ATOMIC_LOAD, dtypes.uint64, mb[0].after(acq)[reg(s, l)]) for s in range(N) for l in li]
   if scatter:
     # (and gather: every device's part of this device, not summed: an all to all, out (N, n))
     assert not two_shot, "a reduce scatter is one shot"
     sent = push([mb[k][reg(me, l)].store(word(v)) for k in range(1, N) for l, v in zip(li, vals_for((me + k) % N))])
-    got = flagged(sent) if flag else poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li])
+    got = flagged(sent) if flag else poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li],
+                                                      [s for s in range(N) for _ in li])
     # (packed: the device's own part as the others' are, quantized)
     own = [value(word(v)) for v in vals_for(me)] if pack is not None else vals_for(me)
     parts = [[mine(s, v, got[s*EP + i]) for s in range(N)] for i, v in enumerate(own)]
@@ -2010,7 +2033,8 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     else: stores = [out[e*W + c].store(ordered_sum([p[c] for p in ps])) for e, ps in zip(els, parts) for c in range(W)]
   elif not two_shot:
     sent = push([mb[k][reg(me, l)].store(word(v)) for k in range(1, N) for l, v in zip(li, vals)])
-    got = flagged(sent) if flag else poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li])
+    got = flagged(sent) if flag else poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li],
+                                                      [s for s in range(N) for _ in li])
     parts = [[mine(s, v, got[s*EP + i]) for s in range(N)] for i, v in enumerate(vals)]
     if gather: stores = [out[s*n*W + e*W + c].store(p[c]) for e, ps in zip(els, parts) for s, p in enumerate(ps) for c in range(W)]
     else: stores = [out[e*W + c].store(ordered_sum([p[c] for p in ps])) for e, ps in zip(els, parts) for c in range(W)]
@@ -2018,13 +2042,14 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     owner = (wg % N).cast(dtypes.weakint)
     k_owner, is_owner = (owner - me + N) % N, owner.eq(me)
     sent = push([mb[k][reg(me, l).valid(k_owner.eq(k))].store(word(v)) for k in range(1, N) for l, v in zip(li, vals)])
-    got = poll(sent, [reg(s, l) for s in range(N) for l in li], [is_owner & me.ne(s) for s in range(N) for _ in li])
+    got = poll(sent, [reg(s, l) for s in range(N) for l in li], [is_owner & me.ne(s) for s in range(N) for _ in li],
+               [s for s in range(N) for _ in li])
     sums = [[ordered_sum([mine(s, v, got[s*EP + i])[c] for s in range(N)]) for c in range(W)] for i, v in enumerate(vals)]
     # (half: the sums in half on the owner too, packed: the packed ones)
     if pack is not None: sums = [value(word(sm)) for sm in sums]
     elif half: sums = [[sat(x).cast(dtypes.half).float() for x in sm] for sm in sums]
     published = push([mb[k][reg(N, l).valid(is_owner)].store(word(sm)) for k in range(1, N) for l, sm in zip(li, sums)], sent)
-    got2 = poll(published, [reg(N, l) for l in li], [is_owner.logical_not() for _ in li])
+    got2 = poll(published, [reg(N, l) for l in li], [is_owner.logical_not() for _ in li], [N for _ in li])
     stores = [out[e*W + c].store(is_owner.where(sm[c], value(g)[c])) for e, sm, g in zip(els, sums, got2) for c in range(W)]
   # the next epoch, once every thread of the workgroup read the counter
   # (ranged: the first thread of every range stores its counter)
