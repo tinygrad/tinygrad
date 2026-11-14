@@ -4973,6 +4973,35 @@ def q8_embed(raw:Tensor, ids:Tensor, dim:int) -> Tensor:
   out = Tensor.empty(int(ids.shape[0]), dim, dtype=dtypes.float32, device=ids.device)
   return Tensor.custom_kernel(out, raw, ids.cast(dtypes.int32).contiguous(), fxn=_q8_embed_kernel)[0]
 
+def _iq4xs_value(raw:UOp, base:UOp, ib:UOp, lane:UOp) -> UOp:
+  # value `lane` (0..31) of sub-block ib (0..7) of the IQ4_XS block at byte `base` of raw, in float as the gguf loader computes it:
+  # (d * (scale - 32)) * kvalues_iq4nl[nibble], d the f16 at the block's start, scales_h (u16) and scales_l (4 bytes) the 6-bit scales, then
+  # 128 bytes of nibbles: sub-block ib's 16 bytes at 8 + 16 ib, the low nibbles are its values 0..15, the high ones 16..31
+  from tinygrad.runtime.autogen.ggml_common import kvalues_iq4nl
+  d = (raw[base].load().cast(dtypes.uint16) | (raw[base+1].load().cast(dtypes.uint16) << 8)).bitcast(dtypes.half).float()
+  sh = raw[base+2].load().cast(dtypes.uint32) | (raw[base+3].load().cast(dtypes.uint32) << 8)
+  sl = (raw[base+4+ib//2].load().cast(dtypes.uint32) >> ((ib % 2) * 4).cast(dtypes.uint32)) & 15
+  scale = (sl | (((sh >> (ib * 2).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int32) - 32
+  nib = (raw[base+8+ib*16+lane%16].load().cast(dtypes.uint32) >> ((lane // 16) * 4).cast(dtypes.uint32)) & 15
+  val = UOp.const(float(kvalues_iq4nl[15]), dtypes.float)
+  for i in range(14, -1, -1): val = nib.eq(i).where(UOp.const(float(kvalues_iq4nl[i]), dtypes.float), val)
+  return ((d*scale.float())*val).cast(dtypes.half).float()
+
+@functools.cache
+def _iq4xs_embed_kernel(out:UOp, raw:UOp, ids:UOp) -> UOp:
+  # out (R, D) <- the rows ids (R,) of an IQ4_XS table raw (bytes: 136 a block of 256), dequantized as the gguf loader does (then half)
+  R, D = cast(tuple[int, int], out.shape)
+  r, blk, ib, lane = (UOp.range(R, 0, AxisType.GLOBAL), UOp.range(D//256, 1, AxisType.GLOBAL), UOp.range(8, 2, AxisType.GLOBAL),
+                      UOp.range(32, 3, AxisType.LOCAL))
+  base = ids[r].load().cast(dtypes.weakint)*(D//256*136) + blk*136
+  return out[r, blk*256+ib*32+lane].store(_iq4xs_value(raw, base, ib, lane)).end(r, blk, ib, lane).sink(
+    arg=KernelInfo(name="iq4xs_embed", opts_to_apply=()))
+
+def iq4xs_embed(raw:Tensor, ids:Tensor, dim:int) -> Tensor:
+  """the rows ids (n,) of the IQ4_XS table raw (uint8, rows of dim) as float (n, dim)"""
+  out = Tensor.empty(int(ids.shape[0]), dim, dtype=dtypes.float32, device=ids.device)
+  return Tensor.custom_kernel(out, raw, ids.cast(dtypes.int32).contiguous(), fxn=_iq4xs_embed_kernel)[0]
+
 def rows_gather(table:Tensor, idx:Tensor, dtype:DType|None=None, const:bool=False, split:bool=False) -> Tensor:
   """
   the rows idx (n,) int32 of table (P, F): (n, F) (a table split on its rows: every device's of its own). const: the table isn't written while
