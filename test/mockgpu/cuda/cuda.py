@@ -1,9 +1,15 @@
 # the cuda driver api in python: the runtime reaches it through function pointers, kernels run on gpuocelot
+import tinygrad.runtime.support.system  # noqa: F401  # pylint: disable=unused-import
+from test.mockgpu.mockgpu import pfuncs
+from tinygrad.runtime.support.memory import MMIOInterface
+from tinygrad.device import Compiled
 import ctypes, re
 from typing import Any, Callable
 from tinygrad.runtime.autogen import cuda
-from tinygrad.helpers import mv_address, round_up
+from tinygrad.helpers import mv_address, round_up, getenv
 from test.mockgpu.helpers import ptx_run
+
+MOCKGPU_ASYNC = getenv("MOCKGPU_ASYNC", 0)
 
 memory:dict[int, bytearray] = {}
 modules:list[ctypes.Array] = [] # a function handle is the address of its module's ptx
@@ -14,15 +20,25 @@ def out(p, value, t=ctypes.c_uint64) -> int:
   return cuda.CUDA_SUCCESS
 def handle(p) -> int: return ctypes.cast(p, ctypes.c_void_p).value or 0
 
+def srun() -> bool:
+  progress = False
+  for q in streams.values():
+    while q and q[0]():
+      q.pop(0)
+      progress = True
+  return progress
+
+cwait = Compiled._wait_signal
+def _wait_signal(self:Compiled, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
+  while sig[0] < value and srun(): pass
+  return cwait(self, sig, value, timeout)
+if MOCKGPU_ASYNC:
+  Compiled._wait_signal = _wait_signal # type: ignore[method-assign]
+  pfuncs.append(srun)
+
 def enqueue(stream, work:Callable[[], Any]) -> int:
   streams[handle(stream)].append(work)
-  progress = True
-  while progress: # run whatever can proceed, a stream waits at its head
-    progress = False
-    for q in streams.values():
-      while q and q[0]():
-        q.pop(0)
-        progress = True
+  while not MOCKGPU_ASYNC and srun(): pass # run whatever can proceed, a stream waits at its head
   return cuda.CUDA_SUCCESS
 
 def alloc(p, size:int) -> int:
@@ -51,7 +67,9 @@ def cuDeviceGet(device, ordinal): return out(device, ordinal, ctypes.c_int32)
 def cuDeviceComputeCapability(major, minor, dev): return out(major, 3, ctypes.c_int32) or out(minor, 5, ctypes.c_int32)
 def cuCtxCreate_v2(pctx, flags, dev): return out(pctx, dev + 1)
 def cuCtxSetCurrent(ctx): return cuda.CUDA_SUCCESS
-def cuCtxSynchronize(): return cuda.CUDA_SUCCESS
+def cuCtxSynchronize():
+  while MOCKGPU_ASYNC and srun(): pass
+  return cuda.CUDA_SUCCESS
 def cuStreamCreate(pstream, flags):
   streams[sid:=len(streams) + 1] = []
   return out(pstream, sid)
@@ -70,8 +88,9 @@ def cuModuleLoadData(module, image):
 def cuModuleGetFunction(hfunc, hmod, name): return out(hfunc, handle(hmod))
 
 def cuLaunchKernel(f, gx, gy, gz, lx, ly, lz, smem, stream, params, extra):
-  args, size = extra[1], ctypes.c_size_t.from_address(extra[3]).value # CU_LAUNCH_PARAM_BUFFER_POINTER, CU_LAUNCH_PARAM_BUFFER_SIZE
-  return enqueue(stream, lambda: run_kernel(handle(f), args, size, gx, gy, gz, lx, ly, lz, smem))
+  size = ctypes.c_size_t.from_address(extra[3]).value # CU_LAUNCH_PARAM_BUFFER_SIZE
+  args = ctypes.create_string_buffer(ctypes.string_at(extra[1], size), size) # CU_LAUNCH_PARAM_BUFFER_POINTER
+  return enqueue(stream, lambda: run_kernel(handle(f), ctypes.addressof(args), size, gx, gy, gz, lx, ly, lz, smem))
 def cuLaunchHostFunc(stream, fn, data): return enqueue(stream, lambda: fn(data) or True)
 def cuMemcpyAsync(dst, src, size, stream): return enqueue(stream, lambda: ctypes.memmove(dst, src, size) or True)
 def cuStreamWriteValue64_v2(stream, address, value, flags): return enqueue(stream, lambda: out(address, value) == 0)

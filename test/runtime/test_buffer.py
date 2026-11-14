@@ -43,4 +43,10 @@ class TestBuffer(unittest.TestCase):
         b.deallocate()
         self.assertEqual(b._buf is buf, opaque is None)
 
+  def test_lru_allocation_racing(self):
+    with Context(LRU=1):
+      a = Buffer(Device.DEFAULT, 4, initial_value=b"aaaa")
+      b = Buffer(Device.DEFAULT, 4, initial_value=b"bbbb")
+      self.assertEqual((bytes(a.as_memoryview()), bytes(b.as_memoryview())), (b"aaaa", b"bbbb"))
+
 if __name__ == "__main__": unittest.main()
