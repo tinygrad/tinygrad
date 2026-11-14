@@ -445,6 +445,14 @@ def _host_buffer(devs:str|tuple[str, ...], nbytes:int, dtype=dtypes.uint8) -> tu
   (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = [host] + aliases
   return host.as_memoryview(allow_zero_copy=True), Tensor(UOp.from_buffer(mb, dtype, devs))
 
+def _dequant_rows_half(raw:Tensor, rows:int, dim:int, typ:int, out:memoryview, chunk:int=8192):
+  """the rows (rows, dim) of a ggml table raw (flat uint8, on the CPU) dequantized as the gguf loader does (float, then half) into out (bytes)"""
+  block, size = _GGML_QUANT[typ]
+  row_bytes = dim // block * size
+  for r in range(0, rows, chunk):
+    n = min(chunk, rows - r)
+    out[r*dim*2:(r+n)*dim*2] = ggml_data_to_tensor(raw[r*row_bytes:(r+n)*row_bytes], n*dim, typ).cast(dtypes.float16).numpy().tobytes()
+
 _zero_jits:dict[Any, Any] = {}
 def _fill_zero(*ts:Tensor):
   """
@@ -2147,10 +2155,7 @@ class Transformer:
   def _forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp, part:int|None=None) -> Tensor:
     # (a view of the token buffer from a variable base: copied, the lookup of the embedding's rows of a view at two variables is a reduce over
     # the vocabulary)
-    tokens = (tokens.contiguous() if isinstance(base, UOp) else tokens).to(self.token_embd.weight.device)
-    # (an IQ4_XS table (the V3.1 file's): its lazy dequantization does not fuse into the gather: the whole table (2.4 GiB in float) would be a
-    # jit intermediate of every prefill chunk size. The Q8_0 one fuses: unchanged)
-    x = emb = (self._embed(tokens) if getattr(self, "_embd_iq4xs", None) is not None else self.token_embd(tokens).float())  # (B, T, D)
+    x = emb = self.token_embd((tokens.contiguous() if isinstance(base, UOp) else tokens).to(self.token_embd.weight.device)).float()  # (B, T, D)
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     ple = None
     if (pc:=self.config.ple) is not None:
@@ -3280,9 +3285,17 @@ class Transformer:
       data, shape, typ = entries.pop('token_embd.weight')
       mv, raw = _host_buffer(devices, int(data.nbytes()))
       mv[:] = data.to("CPU").data()
-      host_embd = ggml_data_to_tensor(raw, prod(shape), typ).reshape(shape)
-      if typ == Q8_0: embd_q8 = raw
-      if typ == IQ4_XS: embd_iq4xs = raw
+      if typ == IQ4_XS:
+        # (the V3.1 file's table: its lazy dequantization does not fuse into the gather, the whole table (2.4 GiB in float) would be an intermediate
+        # of every prefill jit: dequantized once, on the host, into a half buffer of its own (1.3 GB of host memory) the jits read as it is. The
+        # decode steps' rows come from the IQ4_XS bytes (iq4xs_embed))
+        embd_iq4xs = raw
+        mv16, half = _host_buffer(devices, 2*prod(shape), dtypes.float16)
+        _dequant_rows_half(data.to("CPU"), int(shape[0]), int(shape[1]), typ, mv16)
+        host_embd = half.reshape(shape)
+      else:
+        host_embd = ggml_data_to_tensor(raw, prod(shape), typ).reshape(shape)
+        if typ == Q8_0: embd_q8 = raw
     # (LOAD_DEFER (default): the weights' memory made now, the files read later: while the jits compile, see seq_warmup. 0: read now)
     pending:list[Callable[[], None]]|None = [] if getenv("LOAD_DEFER", 1) else None
     # (LOAD_APART: the file's tensors the model only derives others from in buffers of their own, freed once derived (see _drop_apart), not in
