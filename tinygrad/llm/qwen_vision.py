@@ -5,11 +5,13 @@ The vision tower of Qwen 3.8 Flash Next (the mmproj GGUF, projector qwen3vl_merg
 resized bilinearly, then the 2 x 2 merger (LayerNorm, 4608 -> 4608 -> GELU -> 2560). No deepstack. Float32 throughout.
 """
 from __future__ import annotations
-import base64, binascii, hashlib, io, math, threading, time
+import base64, binascii, functools, hashlib, io, math, pathlib, threading, time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 import numpy as np
-from tinygrad import getenv
+from tinygrad import Tensor, TinyJit, getenv, dtypes
+from tinygrad.device import Buffer
+from tinygrad.llm.gguf import gguf_load
 
 PATCH, MERGE, TEMPORAL = 16, 2, 2
 FACTOR = PATCH * MERGE
@@ -137,3 +139,193 @@ def patches(rgb:np.ndarray) -> tuple[np.ndarray, tuple[int, int]]:
   x = x.reshape(TEMPORAL, 3, gh // MERGE, MERGE, PATCH, gw // MERGE, MERGE, PATCH)
   x = x.transpose(2, 5, 3, 6, 1, 0, 4, 7)                               # (gh/2, gw/2, 2, 2, c, t, py, px)
   return np.ascontiguousarray(x.reshape(gh * gw, 3 * TEMPORAL * PATCH * PATCH)), (gh, gw)
+
+# ******** the tower ********
+
+VISION_SLICE_MS = getenv("VISION_SLICE_MS", 300)  # a bucket whose tower takes longer runs in slices of about this long (see TowerJob)
+ATTN_SCORES = 1 << 25  # the attention's scores of a chunk of queries at most (32M floats = 128 MB: 2,048 queries of 1,024 patches, 128 of 16,384)
+
+def bucket(n:int) -> int:
+  """the padded patch count of a picture with n patches: 256 x a power of 2 (one compiled tower a bucket; at most 2x the work)"""
+  b = 256
+  while b < n: b *= 2
+  return b
+
+def _block_major(a:np.ndarray, gh:int, gw:int) -> np.ndarray:
+  return a.reshape(gh // MERGE, MERGE, gw // MERGE, MERGE, *a.shape[2:]).swapaxes(1, 2).reshape(gh * gw, *a.shape[2:])
+
+def pos_interp(gh:int, gw:int, side:int) -> tuple[np.ndarray, np.ndarray]:
+  """the 4 bilinear corners (indices into the side x side table) and weights of every patch, block major (HF's)"""
+  hg, wg = np.linspace(0, side - 1, gh, dtype=np.float32), np.linspace(0, side - 1, gw, dtype=np.float32)
+  hf, wf = hg.astype(np.int64), wg.astype(np.int64)
+  hc, wc = np.minimum(hf + 1, side - 1), np.minimum(wf + 1, side - 1)
+  dh, dw = hg - hf, wg - wf
+  idx = [hf[:, None] * side + wf[None], hf[:, None] * side + wc[None], hc[:, None] * side + wf[None], hc[:, None] * side + wc[None]]
+  wt = [(1 - dh)[:, None] * (1 - dw)[None], (1 - dh)[:, None] * dw[None], dh[:, None] * (1 - dw)[None], dh[:, None] * dw[None]]
+  return np.stack([_block_major(i, gh, gw) for i in idx]), np.stack([_block_major(x.astype(np.float32), gh, gw) for x in wt])
+
+def rope_cos_sin(gh:int, gw:int, head_dim:int, theta:float=10000.0) -> tuple[np.ndarray, np.ndarray]:
+  """the 2D rotary embedding of the patches (block major): half the head's frequencies of the row, half of the column, as HF"""
+  rd = head_dim // 2
+  inv = 1.0 / (theta ** (np.arange(0, rd, 2, dtype=np.float32) / rd))
+  hp, wp = np.meshgrid(np.arange(gh), np.arange(gw), indexing="ij")
+  hp, wp = _block_major(hp[..., None], gh, gw)[:, 0], _block_major(wp[..., None], gh, gw)[:, 0]
+  f = np.concatenate([hp[:, None] * inv[None], wp[:, None] * inv[None]], axis=-1).astype(np.float32)   # (n, head_dim/2)
+  emb = np.concatenate([f, f], axis=-1)
+  return np.cos(emb), np.sin(emb)
+
+class VisionTower:
+  def __init__(self, state:dict[str, Tensor], kv:dict, devices:tuple[str, ...]|None=None, scratch:dict|None=None):
+    """
+    the weights stay F16 (0.90 GB), cast to float in the kernels that read them; the blocks spread over devices in contiguous runs (the
+    picture's rows go device to device: 9.4 MB a hop at 4,096 patches), the patch embedding on the first, the merger on the last. scratch:
+    the memory of the jits' intermediates, shared with other jits that never run at the same time (a model's that runs the tower between
+    its own: TinyJit's scratch), else every bucket's jit its own
+    """
+    self.scratch = scratch
+    self.depth, self.width = int(kv["clip.vision.block_count"]), int(kv["clip.vision.embedding_length"])
+    self.heads, self.eps = int(kv["clip.vision.attention.head_count"]), float(kv["clip.vision.attention.layer_norm_epsilon"])
+    from tinygrad import Device
+    self.devices = devices or (Device.DEFAULT,)
+    self.block_dev = [self.devices[i * len(self.devices) // self.depth] for i in range(self.depth)]
+    def g(k:str, d:str) -> Tensor: return state[k].to(d).realize()
+    d0, dl = self.devices[0], self.devices[-1]
+    # (the two temporal slices of the patch kernel: a still picture's two frames are the same)
+    self.patch_w = [g("v.patch_embd.weight", d0).reshape(self.width, -1), g("v.patch_embd.weight.1", d0).reshape(self.width, -1)]
+    self.patch_b, self.pos = g("v.patch_embd.bias", d0), g("v.position_embd.weight", d0)
+    self.side = int(round(math.sqrt(self.pos.shape[0])))
+    self.blocks = [{f"{n}.{w}": g(f"v.blk.{i}.{n}.{w}", self.block_dev[i]) for n in ("ln1", "ln2", "attn_qkv", "attn_out", "ffn_up", "ffn_down")
+                    for w in ("weight", "bias")} for i in range(self.depth)]
+    self.post_w, self.post_b = g("v.post_ln.weight", dl), g("v.post_ln.bias", dl)
+    self.mm = [(g("mm.0.weight", dl), g("mm.0.bias", dl)), (g("mm.2.weight", dl), g("mm.2.bias", dl))]
+    self._pos_np:np.ndarray|None = None
+    self._jits:dict[tuple[int, int, int], Any] = {}
+    self._inputs:dict[int, list[Tensor]] = {}
+    self._carries:dict[tuple[int, str], Tensor] = {}
+    self._plans:dict[int, list[tuple[int, int]]] = {}
+
+  @staticmethod
+  def from_gguf(path:str|pathlib.Path, devices:tuple[str, ...]|None=None, scratch:dict|None=None, **kw) -> VisionTower:
+    kv, state = gguf_load(str(path))
+    assert kv.get("clip.projector_type") == "qwen3vl_merger", f"not a qwen3vl_merger mmproj: {kv.get('clip.projector_type')}"
+    return VisionTower(state, kv, devices, scratch, **kw)
+
+  def _ln(self, x:Tensor, w:Tensor, b:Tensor) -> Tensor: return x.layernorm(eps=self.eps) * w.float() + b.float()
+
+  def _lin(self, x:Tensor, w:Tensor, b:Tensor) -> Tensor:
+    return x @ w.float().T + b.float()
+
+  def _attn(self, q:Tensor, k:Tensor, v:Tensor, km:Tensor) -> Tensor:
+    return q.scaled_dot_product_attention(k, v, attn_mask=km)
+
+  def _block(self, i:int, x:Tensor, cos:Tensor, sin:Tensor, km:Tensor) -> Tensor:
+    """block i of x (N, width) on its device, cos / sin (N, hd), km (1, 1, N) 0 for a real patch, -1e30 for padding"""
+    b, dev, n, hd = self.blocks[i], self.block_dev[i], int(x.shape[0]), self.width // self.heads
+    if x.device != dev: x = x.to(dev)
+    cos, sin, km = cos.to(dev), sin.to(dev), km.to(dev)
+    def rope(t:Tensor) -> Tensor:  # (heads, n, hd)
+      t1, t2 = t[..., :hd // 2], t[..., hd // 2:]
+      return t * cos + (-t2).cat(t1, dim=-1) * sin
+    qc = min(n, max(64, 1 << int(math.log2(ATTN_SCORES // (self.heads * n)))))
+    h = self._ln(x, b["ln1.weight"], b["ln1.bias"])
+    qkv = self._lin(h, b["attn_qkv.weight"], b["attn_qkv.bias"]).reshape(n, 3, self.heads, hd).permute(1, 2, 0, 3)
+    q, k, v = rope(qkv[0]).contiguous().realize(), rope(qkv[1]).contiguous().realize(), qkv[2].contiguous().realize()
+    # (queries in chunks: the scores of a 16,384-patch picture would be 17 GB at once; padded keys masked, padded queries' rows unused)
+    # (each chunk realized: the jit's memory plan reuses one chunk's scores for the next, not all of them at once)
+    a = Tensor.cat(*[self._attn(q[:, i:i+qc], k, v, km).realize() for i in range(0, n, qc)], dim=1)
+    x = x + self._lin(a.transpose(0, 1).reshape(n, self.width), b["attn_out.weight"], b["attn_out.bias"])
+    h = self._ln(x, b["ln2.weight"], b["ln2.bias"])
+    return (x + self._lin(self._lin(h, b["ffn_up.weight"], b["ffn_up.bias"]).gelu(), b["ffn_down.weight"], b["ffn_down.bias"])).realize()
+
+  def _stage(self, a:int, b:int, x:Tensor, posx:Tensor, cos:Tensor, sin:Tensor, kmask:Tensor) -> Tensor:
+    """
+    the blocks a..b-1 of a picture: x its patches (a = 0: the patch embedding and posx first) or the rows after block a-1 (a carry buffer);
+    the rows after block b-1 into the carry buffer of its device, or (b = depth) the merger's (N/4, 2560)
+    """
+    n = int(x.shape[0])
+    if a == 0:
+      # (Conv3d over the 2 frames = the two slices' sums, as llama.cpp: each frame's patch times its slice)
+      xs = x.reshape(n, 3, TEMPORAL, PATCH * PATCH)
+      x = xs[:, :, 0].reshape(n, -1) @ self.patch_w[0].float().T + xs[:, :, 1].reshape(n, -1) @ self.patch_w[1].float().T + \
+          self.patch_b.float() + posx
+    km = kmask.reshape(1, 1, n)
+    for i in range(a, b): x = self._block(i, x, cos, sin, km)
+    if b < self.depth: return self._carry(n, self.block_dev[b - 1]).assign(x).realize()
+    x = self._ln(x.to(self.devices[-1]), self.post_w, self.post_b).reshape(n // (MERGE * MERGE), -1)
+    h = self._lin(x, *self.mm[0])
+    h = 0.5 * h * (1 + (h / math.sqrt(2)).erf())   # (HF nn.GELU(): the erf form)
+    return self._lin(h, *self.mm[1]).realize()
+
+  def _carry(self, n:int, dev:str) -> Tensor:
+    """the buffer of the rows between two slices of a bucket of n patches on a device (one a bucket and device, made once)"""
+    if (key:=(n, dev)) not in self._carries: self._carries[key] = Tensor.empty(n, self.width, dtype=dtypes.float32, device=dev).realize()
+    return self._carries[key]
+
+  def inputs(self, px:np.ndarray, grid:tuple[int, int], npad:int) -> list[np.ndarray]:
+    """the tower's inputs of one picture padded to npad patches: the picture's size is DATA (one compiled graph a bucket)"""
+    gh, gw = grid
+    n = gh * gw
+    assert px.shape[0] == n and npad >= n and npad % (MERGE * MERGE) == 0, (px.shape, grid, npad)
+    idx, wt = pos_interp(gh, gw, self.side)
+    if self._pos_np is None: self._pos_np = self.pos.float().numpy()
+    posx = sum((self._pos_np[idx[k]] * wt[k][:, None] for k in range(4)), np.zeros((n, self.width), np.float32))
+    cos, sin = rope_cos_sin(gh, gw, self.width // self.heads)
+    def pad(a:np.ndarray, v:float=0.0) -> np.ndarray: return np.concatenate([a, np.full((npad - n, *a.shape[1:]), v, a.dtype)])
+    kmask = np.concatenate([np.zeros(n, np.float32), np.full(npad - n, -1e30, np.float32)])
+    return [pad(px.astype(np.float32)), pad(posx.astype(np.float32)), pad(cos, 1.0), pad(sin), kmask]
+
+  def warmup(self, max_tokens:int):
+    """
+    every bucket's jits of pictures up to max_tokens rows compiled and captured (calls of a blank picture of its size): a server's first
+    picture of a size isn't the compile's wait of everyone's prefill. a bucket whose tower takes longer than VISION_SLICE_MS runs in slices
+    of k blocks (k from its measured time): a server runs one slice between the other sessions' decoding steps (see TowerJob)
+    """
+    b = bucket(1)
+    while b <= bucket(max_tokens * MERGE * MERGE):
+      blank = (np.zeros((b, 3 * TEMPORAL * PATCH * PATCH), np.float32), (16, b // 16))
+      for _ in range(2): self(*blank)
+      st = time.perf_counter()
+      self(*blank)
+      ms = (time.perf_counter() - st) * 1e3
+      if ms > VISION_SLICE_MS:
+        k = max(1, int(self.depth * VISION_SLICE_MS / ms))
+        self._plans[b] = [(a, min(a + k, self.depth)) for a in range(0, self.depth, k)]
+        self._jits.pop((b, 0, self.depth), None)
+        for _ in range(2): self(*blank)
+      b *= 2
+
+  def start(self, px:np.ndarray, grid:tuple[int, int]) -> TowerJob:
+    """a picture's tower as a job of slices (TowerJob.step): its patches (n, 1536) (see patches), grid (gh, gw). (one job at a time: a bucket's
+    inputs and carries are its own)"""
+    n = grid[0] * grid[1]
+    npad = bucket(n)
+    if npad not in self._inputs:
+      self._inputs[npad] = [Tensor.empty(*a.shape, dtype=dtypes.float32, device=self.devices[0]).realize() for a in self.inputs(px, grid, npad)]
+    for t, a in zip(self._inputs[npad], self.inputs(px, grid, npad)):
+      dst = cast(Buffer, t.uop.buffer).ensure_allocated()
+      dst.copy_from(Buffer("NPY", dst.nbytes, opaque=memoryview(bytearray(np.ascontiguousarray(a, np.float32).tobytes()))))
+    return TowerJob(self, npad, n // (MERGE * MERGE), self._plans.get(npad, [(0, self.depth)]))
+
+  def __call__(self, px:np.ndarray, grid:tuple[int, int]) -> np.ndarray:
+    """
+    px (n, 1536) normalized patches (see patches), grid (gh, gw) -> (n/4, 2560) float32 the picture's rows, in host memory, all its slices at
+    once. (no card memory a call: every bucket's inputs are buffers of its own, written from the host; its output read to the host)
+    """
+    job = self.start(px, grid)
+    while (rows:=job.step()) is None: pass
+    return rows
+
+class TowerJob:
+  """a picture's tower in slices of blocks: step() runs the next one (its rows (n, 2560) in host memory after the last, else None)"""
+  def __init__(self, tower:VisionTower, npad:int, rows:int, plan:list[tuple[int, int]]):
+    self.tower, self.npad, self.rows, self.plan, self.k = tower, npad, rows, plan, 0
+  @property
+  def done(self) -> bool: return self.k == len(self.plan)
+  def step(self) -> np.ndarray|None:
+    t, (a, b) = self.tower, self.plan[self.k]
+    if (jit:=t._jits.get(key:=(self.npad, a, b))) is None: jit = t._jits[key] = TinyJit(functools.partial(t._stage, a, b), scratch=t.scratch)
+    px, posx, cos, sin, kmask = t._inputs[self.npad]
+    x = px if a == 0 else t._carry(self.npad, t.block_dev[a - 1])
+    out = jit(x, posx, cos, sin, kmask)
+    self.k += 1
+    return out.numpy()[:self.rows] if self.done else None
