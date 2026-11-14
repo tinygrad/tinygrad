@@ -255,6 +255,9 @@ def main():
   if args.warmup or args.serve:
     try:
       with Context(DEBUG=max(DEBUG.value, 1)): model.warmup()
+      # (VISION: the model's captures grew the scratch the tower shares: its jits linked again by a blank picture of every bucket)
+      if vision is not None:
+        with Timing("vision: every bucket run again after the model's warm-up: "): vision.run_again(VISION_MAX_TOKENS)
     except MemoryError:
       if mem_trace: mt.report("oom")
       raise

@@ -388,6 +388,16 @@ class VisionTower:
         for _ in range(2): self(*blank)
       b *= 2
 
+  def run_again(self, max_tokens:int):
+    """
+    every bucket's tower once more with a blank picture, after the model's warm-up: its captures grow the scratch the tower's jits share and
+    rebase them (their links dropped): a server's first picture of a size would link them again
+    """
+    b = bucket(1)
+    while b <= bucket(max_tokens * MERGE * MERGE):
+      self(np.zeros((b, 3 * TEMPORAL * PATCH * PATCH), np.float32), (16, b // 16))
+      b *= 2
+
   def start(self, px:np.ndarray, grid:tuple[int, int]) -> TowerJob:
     """a picture's tower as a job of slices (TowerJob.step): its patches (n, 1536) (see patches), grid (gh, gw). (one job at a time: a bucket's
     inputs and carries are its own)"""
