@@ -55,5 +55,9 @@ class TestCStyleFailures(unittest.TestCase):
     ret = _setup_and_test_alu(Ops.MAX, 1, UOp.const(dtypes.int.min+1).cast(dtypes.int))
     self.assertEqual(ret[0], 1)
 
+  def test_sub_negative_const(self):
+    self.assertEqual(_setup_and_test_alu(Ops.SUB, 1.0, UOp.const(-1.0).cast(dtypes.float))[0], 2.0)
+    self.assertEqual(_setup_and_test_alu(Ops.SUB, 1, UOp.const(-1).cast(dtypes.int))[0], 2)
+
 if __name__ == '__main__':
   unittest.main()
