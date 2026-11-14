@@ -470,6 +470,17 @@ def _fill_zero(*ts:Tensor):
       else:
         for x in parts: _zero_buffer(x)
 
+def _run_again(calls:dict[str, tuple[Any, Callable[[], Any]]], skip:set) -> list[str]:
+  """
+  the warm-up's calls run once more, after its last capture (the jits in skip not): a capture that grows a shared arena rebases the jits sharing
+  it (CapturedJit.rebase: their links and every jit's launch arguments dropped), so a jit run before it would link again on its first call in
+  serving (+0.5-1 s on a start's first requests: g2 Nov 14). the same calls as the warm-up's: the same bits. returns the jits' names it found unlinked
+  """
+  todo = [(n, j, call) for n, (j, call) in calls.items() if j not in skip and getattr(j, "captured", None) is not None]
+  unlinked = [n for n, j, _ in todo if not j.captured._linears]
+  for _, _, call in todo: call()
+  return unlinked
+
 def _drop_jit(j:_TinyJit):
   """a jit never called again (a derivation of weights): its capture and its function's tensors dropped"""
   j.captured, j.fxn = None, None
@@ -2990,6 +3001,10 @@ class Transformer:
     loads.clear()
     par.clear()
     _drop_apart()
+    st = time.perf_counter()
+    unlinked = _run_again(calls, set(late))
+    _lap("warmup: run again")
+    if DEBUG >= 1: print(f"seq_warmup: {len(calls)} calls run again in {time.perf_counter()-st:.2f}s ({len(unlinked)} jits had been unlinked)")
 
   def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, ...]=0.0,
                   upto:int|None=None, pictures:dict[int, Callable[[], Any]]|None=None) -> int|None:
