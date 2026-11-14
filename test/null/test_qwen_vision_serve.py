@@ -168,6 +168,11 @@ class TestGuards(unittest.TestCase):
     s.reuse_tokens("", ids)  # (a kept list with pictures among the candidates)
     s.reuse_tokens("", ids[:100] + [PAD] + ids[100:])  # (a picture in the request)
     self.assertEqual(calls, ["text", "text", "pictures", "pictures"])
+    # (another conversation's pictures (it starts otherwise: another task) send no text request the slower way: g2 Nov 14)
+    other = [2000 + k % 50 for k in range(1500)] + picture_ids(b"\x0a" * 32, 4, 4) + text[1500:2000]
+    s.kept = lambda: [(text, 3000), (other, len(other))]
+    s.reuse_tokens("", ids)
+    self.assertEqual(calls[-1], "text")
 
   def test_text_ids_with_a_pad_take_no_vision_variant(self):
     # Transformer.seq_prefill on ids with a literal image pad and no picture: every chunk the text jits', the pad id in the token buffer
