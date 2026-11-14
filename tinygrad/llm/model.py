@@ -55,7 +55,8 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False, last:bool=Fal
   if interleaved: x = x.rearrange("b h t (d two) -> b h t (two d)", two=2)
   cos, sin = freqs_cis.unsqueeze(-3).chunk(2, dim=-1)
   x1, x2 = x.chunk(2, dim=-1)
-  return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
+  x = (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
+  return x.rearrange("b h t (two d) -> b h t (d two)", two=2) if interleaved else x
 
 def _update_cache(cache:Tensor, value:Tensor, start_pos:StartPos, dim:int) -> Tensor:
   def store(c:Tensor, v:Tensor, pos:int|UOp) -> UOp:
@@ -617,6 +618,7 @@ class MLATransformerBlock(FFNBlock):
     if self.indexer: self.indexer._init_state(x)
 
 class CompressedAttentionBlock(FFNBlock):
+  _indexer_mask = MLATransformerBlock._indexer_mask
   def __init__(self, config:TransformerConfig, ratio:int):
     super().__init__(config)
     self.ratio, self.attn_sinks = ratio, {"weight": Tensor.zeros(config.n_heads)}
@@ -629,33 +631,28 @@ class CompressedAttentionBlock(FFNBlock):
     self.indexer = Indexer(config, Compressor(config, ratio, config.indexer.head_dim)) if config.indexer and ratio == config.indexer.kpool else None
 
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len if prefix_len == cached_len else 0
-  def _indexer_mask(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None) -> Tensor|None:
-    if self.indexer is None or self.config.max_context <= self.indexer.idx.top_k: return idx_mask
-    return self.indexer(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos, self.freqs_cis)
 
   def _attention(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None=None) -> Tensor:
     assert len(start_pos) == 1, "independent positions are not supported for compressed attention"
-    (B, T, _), cfg, pos = x.shape, self.config, start_pos[0]
+    (B, T, _), cfg, pos, S = x.shape, self.config, start_pos[0], self.config.sliding_window
     freqs = Tensor.stack(*(self.freqs_cis[p:p+T] for p in start_pos))
-    q = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))).reshape(B, T, cfg.n_heads, -1).transpose(1, 2)
-    q = apply_rope(q.rmsnorm(eps=cfg.norm_eps), freqs, True, True)
-    kv = apply_rope(self.attn_kv_a_norm(self.attn_kv(x)).unsqueeze(1), freqs, True, True)
-    (window, store), S = rolling_window(self.cache_kv, kv.squeeze(1), Tensor(pos).eq(0)), cfg.sliding_window
+    q = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))).reshape(B, T, cfg.n_heads, -1).transpose(1, 2).rmsnorm(eps=cfg.norm_eps)
+    q, kv = apply_rope(q, freqs, True, True), apply_rope(self.attn_kv_a_norm(self.attn_kv(x)).unsqueeze(1), freqs, True, True)
+    window, store = rolling_window(self.cache_kv, kv.squeeze(1), Tensor(pos).eq(0))
     k = Tensor(window.uop.after(store))[:, :S+T].unsqueeze(1)
     mask = (unwrap(_causal_mask(x, (S,), S)) + Tensor.full((1, 1, 1, S+T), -math.inf, buffer=False).tril(S-pos-1)).expand(B, 1, T, -1)
     if self.ratio:
-      k = k.cat((pools:=self.attn_compressor(x, start_pos, self.freqs_cis)).unsqueeze(1).cast(k.dtype), dim=2)
+      k = k.cat(pools:=self.attn_compressor(x, start_pos, self.freqs_cis).unsqueeze(1), dim=2)  # (B, 1, S+T+P, Hd): window tokens then all pools
       # a block without its own indexer ignores the mask of the block before
       if self.indexer is None or idx_mask is None:
-        idx_mask = (Tensor.arange(pools.shape[1]) + 1) * self.ratio <= Tensor.arange(T).reshape(T, 1) + Tensor(pos) + 1
+        idx_mask = (Tensor.arange(pools.shape[-2]) + 1) * self.ratio <= Tensor.arange(T).reshape(T, 1) + Tensor(pos) + 1
       mask = mask.cat(idx_mask.where(0.0, -math.inf).expand(B, 1, T, -1), dim=-1)
     # the attention sink: a zero key with a learned logit per head
     k = k.cat(k[..., :1, :].const_like(0), dim=-2)
     mask = mask.expand(B, cfg.n_heads, T, -1).cat(self.attn_sinks["weight"].reshape(1, -1, 1, 1).expand(B, -1, T, 1), dim=-1)
-    # the values are the keys: undo the rotation of the query position, back in the interleaved layout of the weights
-    (cos, sin), n = freqs.chunk(2, dim=-1), cfg.rope_dim
-    o = apply_rope(q.scaled_dot_product_attention(k, k, attn_mask=mask, enable_gqa=True), cos.cat(-sin, dim=-1), last=True)
-    o = o[..., :-n].cat(o[..., -n:].rearrange("b h t (two d) -> b h t (d two)", two=2), dim=-1).transpose(1, 2)
+    # the values are the keys: undo the rotation of the query position
+    cos, sin = freqs.chunk(2, dim=-1)
+    o = apply_rope(q.scaled_dot_product_attention(k, k, attn_mask=mask, enable_gqa=True), cos.cat(-sin, dim=-1), True, True).transpose(1, 2)
     o = o.reshape(B, T, cfg.o_groups, 1, -1) @ self.attn_output_a["weight"].reshape(cfg.o_groups, cfg.o_lora_rank, -1).transpose(-1, -2)
     return self.attn_output_b(o.reshape(B, T, -1))
 
