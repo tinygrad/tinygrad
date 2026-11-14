@@ -5879,21 +5879,22 @@ def _wave_scan(x:UOp, lane:UOp) -> UOp:
   for d in (1, 2, 4, 8, 16): x = x + (lane >= d).where(_bpermute(x, (lane - d).maximum(0)), UOp.const(0, dtypes.int32))
   return x
 
-def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:UOp, lane:UOp) -> UOp:
+def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int|UOp, pools:UOp, t:UOp, wave:UOp, lane:UOp, ties:bool=False, axis:int=20):
   """
   the k-th largest of the keys of a workgroup's threads (key(c) a thread's of chunk c of npc, uint32, 1 at least, all of them with no more pools
   than k): a radix select, 4 passes of 8 bits from the top. a pass counts the digits of the keys whose higher digits are the prefix found (a
   histogram in LDS, atomics), one wave scans it from the top for the bin of the k-th (the keys left), the next pass that bin's. the same as a
-  bisection bit by bit, 8 barriers
+  bisection bit by bit, 8 barriers. ties: (the k-th, 0 with no more pools than k (no maximum), the count of the keys equal to it the top k
+  takes, the count of them)
   """
   zero = UOp.const(0, dtypes.int32)
   hist = UOp.alloc((4*256,), dtypes.int32, addrspace=AddrSpace.LOCAL)
   hist = hist.after(UOp.group(*(hist[(t + i*DECODE_THREADS).valid(t + i*DECODE_THREADS < 4*256)].store(zero)
                                 for i in range((4*256 + DECODE_THREADS - 1) // DECODE_THREADS))).barrier())
-  res = UOp.alloc((4, 2), dtypes.int32, addrspace=AddrSpace.LOCAL)
-  prefix, left = UOp.const(0, dtypes.uint32), UOp.const(k, dtypes.int32)
+  res = UOp.alloc((4, 3 if ties else 2), dtypes.int32, addrspace=AddrSpace.LOCAL)
+  prefix, left = UOp.const(0, dtypes.uint32), k.cast(dtypes.int32) if isinstance(k, UOp) else UOp.const(k, dtypes.int32)
   for d in range(4):
-    c = UOp.range(npc, 20 + d, AxisType.LOOP)
+    c = UOp.range(npc, axis + d, AxisType.LOOP)
     kv = key(c)
     match = (kv >> (32 - 8*d)).eq(prefix) if d else UOp.const(True, dtypes.bool)
     digit = ((kv >> (24 - 8*d)) & 255).cast(dtypes.weakint)
@@ -5904,19 +5905,43 @@ def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:
     bins = [hd[d*256 + 255 - lane*8 - j].load() for j in range(8)]
     lane_sum = functools.reduce(lambda a, b: a + b, bins)
     incl = _wave_scan(lane_sum, lane)
-    cum, dsel, before = incl - lane_sum, zero, zero
+    cum, dsel, before, nsel = incl - lane_sum, zero, zero, zero
     for j in range(8):
       hit = (cum < left) & (cum + bins[j] >= left)
-      dsel, before = hit.where((255 - lane*8 - j).cast(dtypes.int32), dsel), hit.where(cum, before)
+      dsel, before, nsel = hit.where((255 - lane*8 - j).cast(dtypes.int32), dsel), hit.where(cum, before), hit.where(bins[j], nsel)
       cum = cum + bins[j]
     found = ((incl - lane_sum) < left) & (incl >= left) & wave.eq(0)
-    res = res.after(UOp.group(res[d, UOp.const(0, dtypes.weakint).valid(found)].store(dsel),
-                              res[d, UOp.const(1, dtypes.weakint).valid(found)].store(left - before)).barrier())
+    st = [res[d, UOp.const(0, dtypes.weakint).valid(found)].store(dsel), res[d, UOp.const(1, dtypes.weakint).valid(found)].store(left - before)]
+    if ties: st.append(res[d, UOp.const(2, dtypes.weakint).valid(found)].store(nsel))
+    res = res.after(UOp.group(*st).barrier())
     prefix, left = (prefix << 8) | res[d, 0].load().cast(dtypes.uint32), res[d, 1].load()
-  return (pools > k).where(prefix, UOp.const(0, dtypes.uint32)).maximum(1)
+  kth = (pools > k).where(prefix, UOp.const(0, dtypes.uint32))
+  return (kth, left, res[3, 2].load()) if ties else kth.maximum(1)
+
+IDX_EXACT = getenv("IDX_EXACT", 0)
+
+def _topk_pick(key:Callable[[UOp], UOp], order:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:UOp, lane:UOp,
+               exact:bool) -> Callable[[UOp], UOp]:
+  """
+  the predicate of the picked ones of the top k keys (key(c) a thread's of chunk c, 0 for none). not exact: every key at least the k-th
+  (with ties at the k-th more than k: the callers keep the first k in their order, and so can lose keys above the k-th to ties before
+  them). exact (IDX_EXACT): the keys above the k-th and of the ones equal to it the ones the top k needs with the lowest order(c) (uint32,
+  distinct: a second radix select over them; skipped (a loop of 0) when every one equal to the k-th is needed)
+  """
+  if not exact:
+    thr = _radix_kth(key, npc, k, pools, t, wave, lane)
+    return lambda c: key(c) >= thr
+  kth, need, tied = _radix_kth(key, npc, k, pools, t, wave, lane, ties=True)
+  cut = kth.ne(0) & (tied > need)
+  inv = lambda c: order(c) ^ 0xFFFFFFFF  # noqa: E731
+  last = _radix_kth(lambda c: (key(c).eq(kth) & cut).where(inv(c), UOp.const(0, dtypes.uint32)), cut.where(npc, 0), need, need + 1, t, wave,
+                    lane, ties=True, axis=24)[0]
+  thr = kth.maximum(1)
+  return lambda c: cut.where((key(c) > kth) | (key(c).eq(kth) & (inv(c) >= last)), key(c) >= thr)
 
 @functools.cache
-def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0, dev_rows:int=0) -> UOp:
+def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0, dev_rows:int=0,
+                       exact:bool=bool(IDX_EXACT)) -> UOp:
   # a workgroup per query row of scores (the query of row r is at q_start+r, its list row row0+r of index), thread t holds pool c*THREADS + t
   # of every chunk c of THREADS pools. the
   # key of the k-th best by a bisection (the counts of keys >= a candidate: per thread, the waves' through LDS), then the picked pools in
@@ -5942,7 +5967,7 @@ def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:U
     ok = (p < pools) & ((p + 1) * kpool <= q + 1)
     bits = scores[row, p.minimum(P-1).valid(ok)].load().bitcast(dtypes.uint32)
     return ok.where(_order_key(bits), UOp.const(0, dtypes.uint32))
-  if getenv("PIDX_RADIX", 1): thr = _radix_kth(key, npc, k, pools, t, wave, lane)
+  if getenv("PIDX_RADIX", 1): pick = _topk_pick(key, lambda c: (t + c * THREADS).cast(dtypes.uint32), npc, k, pools, t, wave, lane, exact)
   else:
     # the bisection: bit by bit from the top, no loop with no more pools than k (they are all picked)
     lds = UOp.alloc((32, W), dtypes.float32, addrspace=AddrSpace.LOCAL)
@@ -5957,10 +5982,11 @@ def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:U
     stage = lds.after(lds[bit, wave.valid(lane.eq(0))].store(warp_reduce(cnt, full_wave=True)).barrier())
     total = warp_reduce(stage[bit, lane % W].load() * (lane < W).cast(dtypes.float32), full_wave=True)  # the sum of the waves' counts
     thr = thr_reg.after(thr_reg[0].store((total >= k).where(cand, prev)).end(bit))[0].load().maximum(1)
+    pick = lambda c: key(c) >= thr  # noqa: E731
   def write(c3:UOp, pos:UOp, pk:UOp) -> UOp:
     p = t + c3 * THREADS
     return UOp.group(*(index[row, (pos * kpool + j).valid(pk & (pos < k))].store((p * kpool + j).cast(dtypes.int32)) for j in range(kpool)))
-  stores, picked = _pick_stores(key, npc, per, thr, t, wave, lane, write)
+  stores, picked = _pick_stores(pick, npc, per, t, wave, lane, write)
   total_picked = picked.minimum(k)  # the count of picked pools
   tail0 = (q + 1) // kpool * kpool
   ntail = q + 1 - tail0
@@ -5969,10 +5995,10 @@ def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:U
   est = Estimates(rows*P*32, rows*P*4*4, rows*(k+1)*kpool*4)  # data dependent loops: an upper bound
   return UOp.group(*stores).end(row, wave, lane).sink(arg=KernelInfo(name="pool_index", opts_to_apply=(), estimates=est))
 
-def _pick_stores(key:Callable[[UOp], UOp], npc:UOp, per:int, thr:UOp, t:UOp, wave:UOp, lane:UOp,
+def _pick_stores(pick:Callable[[UOp], UOp], npc:UOp, per:int, t:UOp, wave:UOp, lane:UOp,
                  write:Callable[[UOp, UOp, UOp], UOp]) -> tuple[list[UOp], UOp]:
   """
-  the elements (thread t of chunk c of a workgroup of DECODE_THREADS, npc chunks of the per) whose key is at least thr, in their order:
+  the elements (thread t of chunk c of a workgroup of DECODE_THREADS, npc chunks of the per) pick(c) takes, in their order:
   write(c, pos, picked) the stores of a chunk's (pos: its offset). the stores and the count. (the picks of every (chunk, wave) by ballots,
   scans of them for their offsets)
   """
@@ -5980,7 +6006,7 @@ def _pick_stores(key:Callable[[UOp], UOp], npc:UOp, per:int, thr:UOp, t:UOp, wav
   # the picks of every (chunk, wave): the counts of a ballot
   wc = UOp.alloc((per, W), dtypes.int32, addrspace=AddrSpace.LOCAL)
   c2 = UOp.range(npc, 5, AxisType.LOOP)
-  wc = wc.after(wc[c2, wave.valid(lane.eq(0))].store(_popcount(_ballot(key(c2) >= thr))).end(c2).barrier())
+  wc = wc.after(wc[c2, wave.valid(lane.eq(0))].store(_popcount(_ballot(pick(c2)))).end(c2).barrier())
   # the offsets of the (chunk, wave)s in pool order: in every chunk a scan of its waves' counts (a wave per chunk), then a scan of the
   # chunks' totals (one wave). the chunks without pools count 0
   # (the offsets of the waves in place of their counts: a thread reads its count, then writes its offset. LDS for a long context's pools)
@@ -6005,7 +6031,7 @@ def _pick_stores(key:Callable[[UOp], UOp], npc:UOp, per:int, thr:UOp, t:UOp, wav
   cb = cb.after(UOp.group(*st_b).barrier())
   # the picked ones of every chunk at their offsets
   c3 = UOp.range(npc, 6, AxisType.LOOP)
-  pk = key(c3) >= thr
+  pk = pick(c3)
   pos = cb[c3].load() + wpre[c3, wave].load() + _popcount(_ballot(pk) & ((UOp.const(1, dtypes.uint32) << lane.cast(dtypes.uint32)) - 1))
   return [write(c3, pos, pk).end(c3)], cb[per].load()
 
@@ -6024,7 +6050,8 @@ def _local_pools(pools:UOp, me:UOp, n:int, PB:int) -> UOp:
 def _global_pool(lp:UOp, me:UOp, n:int, PB:int) -> UOp: return (lp // PB) * (PB*n) + me*PB + lp % PB
 
 @functools.cache
-def _pool_cand_kernel(cand:UOp, scores:UOp, dev:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, n:int, valid:UOp|None=None) -> UOp:
+def _pool_cand_kernel(cand:UOp, scores:UOp, dev:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, n:int, valid:UOp|None=None,
+                      exact:bool=bool(IDX_EXACT)) -> UOp:
   # a workgroup per query row of the device's scores of its pools (rows, PL): its top k complete pools before the query (_pool_index_kernel's
   # selection), their (score, pool) in cand (rows, k, 2), the rest (0, -1)
   rows, PL = cast(tuple[int, int], scores.shape)
@@ -6046,12 +6073,13 @@ def _pool_cand_kernel(cand:UOp, scores:UOp, dev:UOp, *grouped:UOp, q_start:UOp, 
     p = _global_pool(lp, me, n, PB)
     ok = (lp < npl) & (p < pools) & ((p + 1) * kpool <= q + 1)
     return ok.where(_order_key(scores[row, lp.minimum(PL-1).valid(ok)].load().bitcast(dtypes.uint32)), UOp.const(0, dtypes.uint32))
-  thr = _radix_kth(key, npc, k, npl, t, wave, lane)
+  # (exact: ties at the k-th the lowest pools first: lp is in the global pools' order)
+  pick = _topk_pick(key, lambda c: (t + c * THREADS).cast(dtypes.uint32), npc, k, npl, t, wave, lane, exact)
   def write(c3:UOp, pos:UOp, pk:UOp) -> UOp:
     lp, ok = t + c3 * THREADS, pk & (pos < k)
     return UOp.group(cand[row, pos.valid(ok), 0].store(scores[row, lp.minimum(PL-1)].load()),
                      cand[row, pos.valid(ok), 1].store(_global_pool(lp, me, n, PB).cast(dtypes.float32)))
-  stores, picked = _pick_stores(key, npc, per, thr, t, wave, lane, write)
+  stores, picked = _pick_stores(pick, npc, per, t, wave, lane, write)
   # (the rest (0, -1): k can be more than the threads, a position of every one of them)
   for c4 in range((k + THREADS - 1) // THREADS):
     fp = t + c4 * THREADS
@@ -6062,7 +6090,8 @@ def _pool_cand_kernel(cand:UOp, scores:UOp, dev:UOp, *grouped:UOp, q_start:UOp, 
   return UOp.group(*stores).end(row, wave, lane).sink(arg=KernelInfo(name="pool_cand", opts_to_apply=(), estimates=est))
 
 @functools.cache
-def _pool_merge_kernel(index:UOp, cand:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0, split_rows:int=0) -> UOp:
+def _pool_merge_kernel(index:UOp, cand:UOp, *grouped:UOp, q_start:UOp, pools:UOp, k:int, kpool:int, row0:int=0, split_rows:int=0,
+                       exact:bool=bool(IDX_EXACT)) -> UOp:
   # the lists of _pool_index_kernel from the candidates of every device (n, rows, c, 2): the top k of all of them, the tail, the count
   # (split_rows: the rows split over the devices (IDX_SPLIT), grouped is (positions, the device's index): this device's rows of the
   # split_rows are rows dev*rows.., the ones past split_rows padding)
@@ -6085,13 +6114,17 @@ def _pool_merge_kernel(index:UOp, cand:UOp, *grouped:UOp, q_start:UOp, pools:UOp
     j, m, inb = at(ci)
     ok = inb & (cand[j, row, m, 1].load() >= 0)
     return ok.where(_order_key(cand[j, row, m, 0].load().bitcast(dtypes.uint32)), UOp.const(0, dtypes.uint32))
+  def order(ci:UOp) -> UOp:
+    j, m, _ = at(ci)
+    return cand[j, row, m, 1].load().cast(dtypes.int32).cast(dtypes.uint32)
   npc = UOp.const(per, dtypes.weakint)
-  thr = _radix_kth(key, npc, k, pools, t, wave, lane)
+  # (exact: ties at the k-th the lowest pools first, the devices' candidates the same: the lists of _pool_index_kernel's exact top k)
+  pick = _topk_pick(key, order, npc, k, pools, t, wave, lane, exact)
   def write(c3:UOp, pos:UOp, pk:UOp) -> UOp:
     j, m, _ = at(c3)
     p = cand[j, row, m, 1].load().cast(dtypes.int32)
     return UOp.group(*(index[row, (pos * kpool + jj).valid(pk & (pos < k))].store(p * kpool + jj) for jj in range(kpool)))
-  stores, picked = _pick_stores(key, npc, per, thr, t, wave, lane, write)
+  stores, picked = _pick_stores(pick, npc, per, t, wave, lane, write)
   total_picked = picked.minimum(k)
   tail0 = (q + 1) // kpool * kpool
   ntail = q + 1 - tail0
