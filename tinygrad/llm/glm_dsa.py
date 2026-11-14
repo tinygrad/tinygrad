@@ -163,6 +163,16 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False) -> Tensor:
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
+def mla_q_cat(q_nope:Tensor, q_rope:Tensor) -> Tensor:
+  """
+  q_nope.cat(q_rope, dim=-1) with q_nope (a matmul's output, lazy) and q_rope stored into the two slices of one buffer of q_nope's dtype
+  (MLA_QCAT, default on: the same values; not the matmul's buffer and a copy of both into the cat's, 0.3 ms a layer of a 2688-token chunk)
+  """
+  lora = q_nope.shape[-1]
+  qb = Tensor.empty(*q_nope.shape[:-1], lora + q_rope.shape[-1], dtype=q_nope.dtype, device=q_nope.device,
+                    axis=q_nope.uop.axis if isinstance(q_nope.device, tuple) else None)
+  return Tensor(qb.uop.after(qb[..., :lora].uop.store(q_nope.uop), qb[..., lora:].uop.store(q_rope.cast(q_nope.dtype).uop)))
+
 def permute_rope(w:Tensor, n_heads:int, rope_dim:int) -> Tensor:
   x = w.reshape(n_heads, w.shape[0]//n_heads, -1)
   prefix = x.shape[1]-rope_dim
@@ -1555,8 +1565,9 @@ class MLATransformerBlock(FFNBlock):
     if bmm and (qp:=self._q_pre(q_nope, q_rope)) is not None: q = qp
     else:
       if bmm: q_nope = mla_bmm(q_nope, self.attn_k_b["weight"])
-      else: q_nope = q_nope.half().contiguous().matmul(k_b, dtype=dtypes.float).contiguous() if half else q_nope @ k_b
-      q = q_nope.cat(q_rope.cast(q_nope.dtype), dim=-1)
+      else: q_nope = q_nope.half().contiguous().matmul(k_b, dtype=dtypes.float) if half else q_nope @ k_b
+      q = mla_q_cat(q_nope, q_rope) if half and getenv("MLA_QCAT", 1) else \
+        (q_nope.contiguous() if half else q_nope).cat(q_rope.cast(q_nope.dtype), dim=-1)
 
     self._freqs_rows = freqs  # (the indexer's rope: the same frequencies)
     if pre is not None and (ks:=pre.get("k_store")) is not None: k_store = ks.reshape(B, 1, Tq, -1)  # (SP_ROWPROJ: made on the rows' devices)

@@ -1438,6 +1438,7 @@ def _q8_gemm_kernel(out:UOp, raw:UOp, x:UOp, *sc:UOp, token_tile:int, out_featur
   return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
 HALF_ROWS_MAX = 32768.0
+HALF_ROWS_G = getenv("HALF_ROWS_G", 16)  # (see _half_rows)
 # (the rows R of a sequence parallel prefill chunk's gathered x and its T tokens (the rows after them are padding), see GEMM_PAD)
 GEMM_ROWS:list[tuple[int, UOp|int]|None] = [None]
 
@@ -1516,7 +1517,12 @@ def _half_rows(x:Tensor, tokens:int, splits:int=1) -> tuple[Tensor, Tensor|None]
     sc = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
     return (xf / sc).cast(dtypes.float16).reshape(x.shape).contiguous(), sc.permute(1, 0, 2)
   xf = x.reshape(tokens, x.shape[-1]).float()
-  amax = xf.abs().max(-1, keepdim=True)
+  # (HALF_ROWS_G, default 16: the max of a row's abs in G parts first, a kernel of tokens x G threads, then of the G: the same max in any order.
+  # one reduce is a thread a row: 2688 threads over 2048 values, 0.16 ms a call on ts1)
+  if (G:=HALF_ROWS_G) > 1 and isinstance(tokens, int) and tokens * G >= 4096 and xf.shape[-1] % (G * 32) == 0 and \
+     (not isinstance(xf.device, tuple) or xf.uop.axis in (None, 0)):  # (not a row split over the devices)
+    amax = xf.abs().reshape(tokens, G, xf.shape[-1] // G).max(-1).contiguous().max(-1, keepdim=True)
+  else: amax = xf.abs().max(-1, keepdim=True)
   sc = (amax > HALF_ROWS_MAX).where((amax / HALF_ROWS_MAX).log2().ceil().exp2(), 1.0).contiguous()
   return (xf / sc).cast(dtypes.float16).reshape(x.shape).contiguous(), sc
 
