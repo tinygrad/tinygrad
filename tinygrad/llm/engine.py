@@ -67,6 +67,7 @@ class Seq:
   temp:tuple[float, ...] = (0.0, 1.0)
   mix:list[int] = field(default_factory=list)  # (SEQ_MIX_TOKENS) a prompt being forced through ordinary decode steps
   sessions:set[str] = field(default_factory=set)
+  delta:int = 0  # (VISION: the rope delta of its pictures: its decoding rows' rope positions are their positions minus it)
 
 class SessionInFlight(ValueError):
   """Ending this identity would interrupt its active request (the proxy retries after it finishes)."""
@@ -445,7 +446,7 @@ class SeqEngine:
     self._time("restore", st)
     self.times["restored"] = self.times.get("restored", 0) + len(stashed.chunks)
     s.host = stashed  # (its copy stays: evicted again, only what it writes since is copied)
-    self.model._token_host[s.base:s.base+n] = __import__("array").array('i', stashed.tokens)
+    self.model._token_host[s.base:s.base+n] = self._dev_ids(stashed.tokens)
     self._storage("stash_out", n, len(stashed.chunks), True, slot=s.slot, entry_id=stashed.entry, start=start)
     self.last_take_stash = True
     # (as it was: prefilled from its last token's states, or its checkpoint restored)
@@ -485,23 +486,38 @@ class SeqEngine:
     self.model.seq_ckpt(True, s.slot, pos, par=par)
     s.ckpt2, s.ckpt, s.cpar = s.ckpt if keep else 0, pos, par
 
-  def prefill_slice(self, s:Seq, ids:list[int], start:int, restore:bool, end:int):
-    """the tokens of the prompt ids from start to end prefilled in s (its checkpoint restored first): the rest is prefilled from end"""
+  def _dev_ids(self, ids:list[int]):
+    """the model's token buffer's ids of a token list (VISION: a picture's rows are negative ids here, the image pad id there)"""
+    dev = getattr(self.model, "_dev_ids", None)
+    return dev(ids) if dev is not None else __import__("array").array('i', ids)
+
+  def _delta(self, ids:list[int]) -> int:
+    """VISION: the rope delta after the pictures of a token list (0 without)"""
+    if not getattr(self.model, "vision", False) or min(ids, default=0) >= 0: return 0
+    from tinygrad.llm.qwen_vision import picture_runs, rope_delta
+    return rope_delta(picture_runs(ids))
+
+  def prefill_slice(self, s:Seq, ids:list[int], start:int, restore:bool, end:int, pictures:dict|None=None):
+    """the tokens of the prompt ids from start to end prefilled in s (its checkpoint restored first): the rest is prefilled from end.
+    pictures (VISION): the rows of the prompt's pictures, see Transformer.seq_prefill"""
     if restore: self._ckpt_restore(s)
-    self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, upto=end)
+    if pictures: self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, upto=end, pictures=pictures)
+    else: self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, upto=end)
     s.tokens, s.n, s.hrow, s.used = ids[:end], end, 0, time.perf_counter()
 
   def settle(self):
     """the last slice of a prefill (prefill_slice: not waited for) done"""
     if (wait:=getattr(self.model, "_slice_wait", None)) is not None: wait()
 
-  def prefill(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, ...]) -> int:
-    """the prompt ids prefilled in s from start (its checkpoint restored first): the token sampled after it"""
+  def prefill(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, ...], pictures:dict|None=None) -> int:
+    """the prompt ids prefilled in s from start (its checkpoint restored first): the token sampled after it. pictures: see prefill_slice"""
     if restore: self._ckpt_restore(s)
+    s.delta = self._delta(ids)
     # (a prompt that is its checkpoint: the token after it from the hidden state of its last token, restored)
     if restore and start == len(ids): first = self.model.seq_first(s.slot, s.base, start, temp)
     else:
-      first = self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, temp)
+      first = self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, temp, pictures=pictures) if pictures else \
+        self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, temp)
       # (the end of the prompt: the checkpoint of the states there)
       self._ckpt_save(s, len(ids), restore or start > 0)
     s.tokens, s.n, s.hrow, s.ckpt, s.used = ids + [first], len(ids), 0, len(ids), time.perf_counter()
@@ -511,6 +527,8 @@ class SeqEngine:
   def mix_start(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, ...]):
     """a short prompt suffix starts forced decode steps, from its checkpoint or last token's states (no standalone prefill)"""
     assert 0 <= start < len(ids) and len(ids) - start <= self.model.SEQ_MIX_TOKENS
+    assert min(ids[start:], default=0) >= 0, "a suffix with a picture's rows: prefilled, not forced"
+    s.delta = self._delta(ids)
     if restore: self._ckpt_restore(s)
     self.model._seq_copy_call(False, s.slot, start, 0 if restore else s.hrow, keep=start > 0)
     # (loading a slot doesn't update SEQ_REPLAY's base; this first step has no seq_prefill copy-out to do it)
@@ -525,7 +543,8 @@ class SeqEngine:
     k = self.k
     forced = [s.mix[s.mtp+s.j+1:s.mtp+s.j+k+2] if s.mix else [] for s in seqs]
     args = [(s.slot, s.base, s.mtp, s.j, s.par, s.y, s.temp) for s in seqs]
-    out = self.model.seq_step(args, forced=forced) if any(s.mix for s in seqs) else self.model.seq_step(args)
+    kw:dict = {"deltas": [s.delta for s in seqs]} if any(s.delta for s in seqs) else {}
+    out = self.model.seq_step(args, forced=forced, **kw) if any(s.mix for s in seqs) else self.model.seq_step(args, **kw)
     ret = []
     for s, force, (sampled, drafts) in zip(seqs, forced, out):
       start = s.mtp + s.j

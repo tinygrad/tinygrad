@@ -1295,12 +1295,17 @@ class SeqBatch:
   """
   G:int; R:int; slots:Tensor; bases:Tensor; positions:Tensor # noqa: E702
   kbases:Tensor|None = None  # (SEQ_REPLAY: the positions of the slots' recurrent states, see kda_decode)
+  rdelta:Tensor|None = None  # (VISION: every sequence's rope delta: a row's rope position is its position minus it, see Transformer._vis_embed)
   def _rows(self, t:Tensor) -> Tensor: return t.reshape(self.G, 1).expand(self.G, self.R).reshape(-1)
   @property
   def row_positions(self) -> Tensor:
     """(G*R,) the position of every row"""
     ar = Tensor.arange(self.R, dtype=dtypes.int32).reshape(1, self.R).expand(self.G, self.R).reshape(-1)
     return (self._rows(self.positions) + ar.to(self.positions.device)).contiguous()
+  @property
+  def row_rope(self) -> Tensor:
+    """(G*R,) the rope position of every row (VISION: minus its sequence's delta)"""
+    return self.row_positions if self.rdelta is None else (self.row_positions - self._rows(self.rdelta)).contiguous()
   @property
   def row_bases(self) -> Tensor: return self._rows(self.bases).contiguous()
   @property
@@ -1309,6 +1314,37 @@ class SeqBatch:
     return (self.row_positions + self.row_bases).contiguous()
 # (set while a step of sequences sharing the caches is traced)
 _seq_batch:list[SeqBatch|None] = [None]
+# VISION (see Transformer._vis_embed): _vis_on set while the vision variant of a prefill chunk is traced (a chunk with a picture's rows or rows
+# after one); _vis_rope the rope rows (W, rope) of the positions from the chunk's start - VIS_PAD (their M-RoPE positions) and that start
+_vis_on:list[bool] = [False]
+_vis_rope:list[tuple[Tensor, UOp]|None] = [None]
+VIS_PAD = 4  # (the rows of the window before a chunk's start: its first pool starts up to kpool-1 rows before it)
+
+def _rope_rows(table:Tensor, start_pos:int|UOp, T:int|UOp, Tq:int|UOp) -> Tensor:
+  """the rope rows (Tq, rope) of the T positions from start_pos (zero rows after them): the table's, or the picture window's (VISION)"""
+  if (v:=_vis_rope[0]) is None: return table.shrink(((start_pos, start_pos + T), None)).pad_to((Tq, table.shape[-1]))
+  win, s0 = v
+  return win.shrink(((a:=start_pos - s0 + VIS_PAD, a + T), None)).pad_to((Tq, win.shape[-1]))
+
+def imrope_mix(t:Tensor, h:Tensor, w:Tensor, sections:tuple[int, ...]) -> Tensor:
+  """
+  VISION: the rope rows (n, rope) of n M-RoPE positions from the table's rows t, h, w (n, rope) of their three positions (cos then sin halves,
+  a column of pair p = column % (rope/2)): pair p of h if p%3 == 1 and p < 3*sections[1], of w if p%3 == 2 and p < 3*sections[2], else of t
+  (ggml's interleaved IMROPE)
+  """
+  F = int(t.shape[-1])
+  s0, s1, s2 = (tuple(sections) + (0, 0, 0))[:3]
+  assert all((p % 3 == 1 and p < 3*s1) or (p % 3 == 2 and p < 3*s2) or (p % 3 == 0 and p < 3*s0) for p in range(F // 2)), \
+    f"the M-RoPE sections {sections}: every pair of t, h or w (no fourth position)"
+  p = Tensor.arange(F, dtype=dtypes.int32).to(t.device) % (F // 2)
+  return ((p % 3 == 1) & (p < 3*s1)).where(h, ((p % 3 == 2) & (p < 3*s2)).where(w, t))
+
+def _vis_pools(kp:int, first:int|UOp, n:int|UOp) -> Tensor:
+  """VISION: the rope rows (n, rope) of the first positions of the n pools from pool first (kp rows a pool), from the picture window"""
+  # (a chunk's first pool starts up to kp-1 rows before it: the window holds VIS_PAD rows before the chunk)
+  assert kp - 1 <= VIS_PAD, f"the indexer's pools of {kp} rows: the vision window has {VIS_PAD} rows before a chunk"
+  win, s0 = unwrap(_vis_rope[0])
+  return win.shrink(((a:=first * kp - s0 + VIS_PAD, a + n * kp), None)).reshape(n, kp, win.shape[-1])[:, 0]
 
 
 def _rope(x:Tensor, cos:Tensor, sin:Tensor) -> Tensor:
@@ -1393,11 +1429,12 @@ class QSAIndexer:
     # (pooled after the state is written: the next micro batch waits for the pooled keys (see micro_batch_blocks), the state then too)
     at = kp - 1 - start_pos % kp
     keys_p = Tensor(window.uop.after(store)).shrink(((at, at + Tq + kp), None)).reshape(Tq // kp + 1, kp, idx.head_dim)
-    pf = freqs.reshape(-1, kp, freqs.shape[-1])[:, 0].shrink(((first, first + new), None))
+    pf = freqs.reshape(-1, kp, freqs.shape[-1])[:, 0].shrink(((first, first + new), None)) if _vis_rope[0] is None else _vis_pools(kp, first, new)
     pools = (S + kp - 1) // kp
     if self.split > 1:
       # (every pool of the chunk (whole chunks of them), the ones of the tokens into their devices' rows)
-      pf = freqs.reshape(-1, kp, freqs.shape[-1])[:, 0].pad(((0, Tq // kp + 1), None)).shrink(((first, first + Tq // kp + 1), None))
+      pf = freqs.reshape(-1, kp, freqs.shape[-1])[:, 0].pad(((0, Tq // kp + 1), None)).shrink(((first, first + Tq // kp + 1), None)) \
+        if _vis_rope[0] is None else _vis_pools(kp, first, Tq // kp + 1)
       pk_all = self._pooled(keys_p, *pf.chunk(2, dim=-1))
       j = Tensor.arange(Tq // kp + 1, dtype=dtypes.int32).to(x.device)
       p0 = pb + first
@@ -1432,7 +1469,7 @@ class QSAIndexer:
     """
     idx, Tq = self.idx, cast(int, x.shape[1])
     pk, pools = self.update(x, start_pos, T, freqs)
-    qf = freqs.shrink(((start_pos, start_pos+T), None)).pad_to((Tq, freqs.shape[-1])).reshape(Tq, 1, -1)
+    qf = _rope_rows(freqs, start_pos, T, Tq).reshape(Tq, 1, -1)
     xx, split = x[0], isinstance(x.device, tuple) and Tq % (32*len(x.device)) == 0
     if split: xx, qf = shard_rows(xx, 0), shard_rows(qf, 0)
     q = self._queries(xx, *qf.chunk(2, dim=-1))
@@ -1501,7 +1538,7 @@ class QSABlock(TransformerBlock):
     # x has Tq rows, the first T are the tokens at start_pos
     B, Tq, _ = x.shape
     hd = self.config.head_dim
-    freqs = self.freqs_cis.shrink(((start_pos, start_pos + T), None)).pad_to((Tq, self.freqs_cis.shape[-1]))
+    freqs = _rope_rows(self.freqs_cis, start_pos, T, Tq)
     cos, sin = (f.reshape(1, 1, Tq, -1) for f in freqs.chunk(2, dim=-1))
     q, gate, k, v = self._qkv(x, cos, sin)
     b = _seq_base[0]  # (the sequence's region of the cache)
@@ -1592,8 +1629,8 @@ class QSABlock(TransformerBlock):
     G, R, hd = sb.G, sb.R, self.config.head_dim
     rows, idx, ic = G*R, self.indexer, self.indexer.idx
     kp = ic.kpool
-    pos, phys = sb.row_positions, sb.row_phys
-    freqs = rows_gather(self.freqs_cis, pos, const=True)  # (rows, rope)
+    phys = sb.row_phys
+    freqs = rows_gather(self.freqs_cis, sb.row_rope, const=True)  # (rows, rope)
     cos, sin = (f.reshape(1, 1, rows, -1) for f in freqs.chunk(2, dim=-1))
     q, gate, k, v = self._qkv(x, cos, sin)
     # the keys and values of the rows into their rows of the cache (a device's of its KV head)
@@ -1610,7 +1647,8 @@ class QSABlock(TransformerBlock):
     pkeys = pkeys.reshape(G*NP, kp, ic.head_dim)
     pools = ((sb.positions // kp).reshape(G, 1) + Tensor.arange(NP, dtype=dtypes.int32).reshape(1, NP).to(x.device)).reshape(-1)  # (G*NP,)
     pbase = sb.bases.reshape(G, 1).expand(G, NP).reshape(-1) // kp
-    pf = rows_gather(self.freqs_cis, (pools * kp).contiguous(), const=True)
+    first = pools * kp if sb.rdelta is None else pools * kp - sb.rdelta.reshape(G, 1).expand(G, NP).reshape(-1)  # (VISION: rope positions)
+    pf = rows_gather(self.freqs_cis, first.contiguous(), const=True)
     pooled = idx._pooled(pkeys, *pf.chunk(2, dim=-1))
     pk = Tensor(rows_scatter(idx.cache_pk, pooled.half(), idx._pk_index((pbase + pools).contiguous())).uop.after(pool_after.uop))
     # every query's scores of its sequence's pools, the lists of the keys it sees
@@ -1965,7 +2003,7 @@ class QwenMTPBlock(QSABlock):
 
   def _cache_input(self, x:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
     Tq = x.shape[1]
-    freqs = self.freqs_cis.shrink(((start_pos, start_pos + T), None)).pad_to((Tq, self.freqs_cis.shape[-1]))
+    freqs = _rope_rows(self.freqs_cis, start_pos, T, Tq)
     k, v = self._kv(x, *(f.reshape(1, 1, Tq, -1) for f in freqs.chunk(2, dim=-1)))
     cache = self._cache_store(k, v, start_pos, T)
     if self.indexer is None: return cache
@@ -1979,6 +2017,11 @@ class Transformer:
   _embd_q8:Tensor|None = None  # (the token embedding's Q8_0 bytes in host memory, see _embed)
   _embd_iq4xs:Tensor|None = None  # (or its IQ4_XS bytes: the Unsloth V3.1 file's table)
   _weight_bytes:dict[str, int] = {}  # (the weights' memory of every device, see from_gguf)
+  # VISION (set before the sequence engine's buffers are made: pictures' rows in prefills, rope deltas in steps); the M-RoPE sections of the
+  # rope's pairs (the file's rope.dimension_sections)
+  vision:bool = False
+  rope_sections:tuple[int, ...] = ()
+  image_pad_id:int = -1
   def __init__(self, config:TransformerConfig):
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
@@ -2113,7 +2156,36 @@ class Transformer:
     """base: the first row of the sequence's region of the caches (and of the token buffer), see regions. part: of a prefill in parts"""
     _seq_base[0] = base
     try: return self._forward(tokens, start_pos, temperature, base, part)
-    finally: _seq_base[0] = 0
+    finally: _seq_base[0], _vis_rope[0] = 0, None
+
+  # ******** VISION: a prefill chunk with a picture's rows, or rows after one, runs the vision variant of the chunk's jit (Transformer.__call__
+  # keys it apart; text-only chunks run the jits of before, unchanged). its inputs are in host memory, written by the host before the chunk
+  # (vis_chunk): the picture rows of the chunk's rows (the tower's, in place of the token's embedding where the row mask is set) and the
+  # M-RoPE positions (t, h, w) of the rows from its start - VIS_PAD: a picture's row (r, c) at (s, s+r, s+c), a row after pictures at its
+  # position minus their delta (sum of n - max(rows, cols) of each). the rope rows of a position are the table's rows of its three positions
+  # mixed by the pairs' sections (interleaved: pair p of h if p%3 == 1 and p < 3*sections[1], of w if p%3 == 2 and p < 3*sections[2], else
+  # of t; ggml's IMROPE): a text row's are its own row of the table, the same values ********
+  def _vis_init(self, devs:tuple[str, ...]):
+    # (a -1 in the token buffer ends a sequence: never a picture's row; the rope's sections of the file: the M-RoPE rows of a window)
+    assert self.image_pad_id >= 0 and len(self.rope_sections) >= 3, \
+      f"VISION: the GGUF's ple.image_token_id ({self.image_pad_id}) and rope.dimension_sections ({self.rope_sections})"
+    self._vis_rows_max = self.prefill_chunks()[-1]
+    W, D = self._vis_rows_max + 3*VIS_PAD, self.config.dim
+    mv, self._vis_rows = _host_buffer(devs, 4*self._vis_rows_max*D, dtypes.float32)
+    self._vis_host_rows = mv.cast('f')
+    self._vis_host_mask, self._vis_mask = _host_ints(devs, self._vis_rows_max)
+    self._vis_host_pos, self._vis_pos = _host_ints(devs, 3*W)
+
+  def _vis_embed(self, emb:Tensor, start_pos:UOp) -> Tensor:
+    """the vision variant: emb (1, T, dim) with the picture rows of the chunk's rows; the window of rope rows set (_vis_rope)"""
+    T, D, M = emb.shape[1], self.config.dim, self._vis_rows_max
+    rows = self._vis_rows.reshape(M, D).shrink(((0, T), None)).reshape(1, T, D)
+    emb = (self._vis_mask[0].shrink(((0, T),)).reshape(1, T, 1) != 0).where(rows, emb)
+    table = next(b.freqs_cis for b in self.blk if isinstance(b, QSABlock))
+    W = M + 3*VIS_PAD
+    t, h, w = (rows_gather(table, self._vis_pos[0].shrink(((i*W, (i+1)*W),)).contiguous()) for i in range(3))
+    _vis_rope[0] = (imrope_mix(t, h, w, self.rope_sections).contiguous(), start_pos)
+    return emb
 
   # ******** PREFILL_PARTS (as glm5next's): a prefill chunk's jit in parts of the blocks, jits captured at once in processes of their own (a
   # jit's capture is ~30 s of python for all the blocks). the streams of the micro batches between parts in buffers of the model (in half, as
@@ -2157,6 +2229,7 @@ class Transformer:
     # (a view of the token buffer from a variable base: copied, the lookup of the embedding's rows of a view at two variables is a reduce over
     # the vocabulary)
     x = emb = self.token_embd((tokens.contiguous() if isinstance(base, UOp) else tokens).to(self.token_embd.weight.device)).float()  # (B, T, D)
+    if _vis_on[0]: x = emb = self._vis_embed(emb, cast(UOp, start_pos))
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     ple = None
     if (pc:=self.config.ple) is not None:
@@ -2392,6 +2465,10 @@ class Transformer:
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self._token_rows())
     # in host memory: a step's input tokens, the temperature and top_p of every sequence, its sampled tokens and drafts (written by one device)
     self._seq_host_in, self._seq_in = _host_ints(devs, m*(k+1))
+    # (VISION: a step's rope delta of every sequence, see seq_step; the vision variant's inputs of a prefill chunk, see _vis_embed)
+    if self.vision:
+      self._seq_host_rd, self._seq_rd = _host_ints(devs, m)
+      self._vis_init(devs)
     # (a mixed step's prompt's at 2m, the step's seed last)
     self._seq_m = m
     tmv, self._seq_temp = _host_buffer(devs, 4*TEMP_W*(m + 1) + 4, dtypes.float32)
@@ -2673,9 +2750,10 @@ class Transformer:
                               UOp.variable("seq_pc", 0, SC-1).bind(pos % SC),
                               UOp.variable("seq_cslot", 0, (self.seq_slots() + 1) * CK - 1).bind(slot * CK + par))
 
-  def _prefill_jit(self, n:int, lp:int|None=None) -> Any:
-    """the jit of a prefill chunk of n tokens on a sequence's region (lp: of a context of that many pools a device, see _pk_bucket), see __call__"""
-    jits, key = self.__dict__.setdefault("jits_seq", {}), n if lp is None else (n, lp)
+  def _prefill_jit(self, n:int, lp:int|None=None, vis:bool=False) -> Any:
+    """the jit of a prefill chunk of n tokens on a sequence's region (lp: of a context of that many pools a device, see _pk_bucket; vis: its
+    vision variant), see __call__"""
+    jits, key = self.__dict__.setdefault("jits_seq" + ("_vis" if vis else ""), {}), n if lp is None else (n, lp)
     if key not in jits: jits[key] = self._new_prefill_jit(n)
     return jits[key]
 
@@ -2823,6 +2901,17 @@ class Transformer:
                          else functools.partial(self._seq_chunk, 0, top, c))
       elif top + c > self.seq_rows(): add(f"prefill{c}", self._prefill_jit(c), functools.partial(self.seq_prefill, 0, 0, [0]*min(c, top), 0, 0))
       else: add(f"prefill{c}", self._prefill_jit(c), functools.partial(self.seq_prefill, 0, 0, [0]*(top+c), top, 0))
+    if self.vision:
+      # (VISION: every prefill jit's vision variant too, a chunk of text rows run through it)
+      novis:tuple[list, dict] = ([], {})
+      for c, ctx in pk_jits:
+        pos, n = (0, min(c, top)) if top + c > self.seq_rows() else (top, c)
+        add(f"vis_prefill{c}_ctx{ctx}", self._prefill_jit(c, self._pk_bucket(c, ctx), vis=True),
+            functools.partial(self._seq_chunk, 0, pos, n, ctx, vis=novis))
+      for c in chunks:
+        if self._pk_buckets(c): continue
+        pos, n = (0, min(c, top)) if top + c > self.seq_rows() else (top, c)
+        add(f"vis_prefill{c}", self._prefill_jit(c, vis=True), functools.partial(self._seq_chunk, 0, pos, n, vis=novis))
     for m in sorted(self.SEQ_SIZES, reverse=True):
       seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, ...]]] = [(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m
       add(f"step{m}", jit:=self._seq_jit(m), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m) if WARM_ASYNC else
@@ -2903,24 +2992,33 @@ class Transformer:
     _drop_apart()
 
   def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, ...]=0.0,
-                  upto:int|None=None) -> int|None:
+                  upto:int|None=None, pictures:dict[int, Callable[[], Any]]|None=None) -> int|None:
     """
     the tokens from start of the sequence of slot `slot` (its region of the caches from base) prefilled, from its states of position start (the
     slot's, and its row hrow the hidden state of the token before it; start 0: none): its states of position len(tokens) into the slot (the
     hidden state of the last token its row 0). returns the token sampled after the last. upto: only the tokens up to upto (a slice of the
-    prompt, the rest from there): None returned, the devices not waited for (the slice before it is: one slice queued while one runs)
+    prompt, the rest from there): None returned, the devices not waited for (the slice before it is: one slice queued while one runs).
+    VISION: a picture's rows are its ids (qwen_vision.picture_ids, negative), pictures the rows (n, dim) float32 of every picture of the
+    prompt by its first row's id (a function: computed when a chunk needs them)
     """
     self._finish_load()
     self._seq_init()
     devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
+    runs = []
+    if self.vision and min(tokens, default=0) < 0:
+      from tinygrad.llm.qwen_vision import picture_runs
+      runs = picture_runs(tokens)
+    assert not runs or len(tokens) - (runs[-1][0] + runs[-1][1]) >= VIS_PAD, "a prompt ends with text rows after its last picture"
+    def chunk(pos:int, n:int):
+      self._seq_chunk(base, pos, n, vis=(runs, pictures or {}) if runs and pos + n > runs[0][0] else None)
     if upto is not None:
       assert 0 <= start < upto < len(tokens) and base % SEQ_BASE_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
       # (the token after the slice the prompt's: the slice's sampled token isn't written over it, the next slice's tokens are its)
-      self._token_host[base+start:base+upto+1] = array.array('i', tokens[start:upto+1])
+      self._token_host[base+start:base+upto+1] = self._dev_ids(tokens[start:upto+1])
       self._seq_copy_call(False, slot, start, hrow, keep=start > 0)
       pos = start
       for n in self._chunk_plan(upto - start):
-        self._seq_chunk(base, pos, n)
+        chunk(pos, n)
         pos += n
       self._seq_copy_call(True, slot, upto, 0)
       self._slice_wait()
@@ -2930,12 +3028,12 @@ class Transformer:
     L = len(tokens)
     for d in devs: Device[d].synchronize()  # (a step may still read the token buffer)
     self._slice_done = []
-    self._token_host[base+start:base+L+1] = array.array('i', tokens[start:] + [-1])
+    self._token_host[base+start:base+L+1] = self._dev_ids(tokens[start:]) + array.array('i', [-1])
     self._seq_copy_call(False, slot, start, hrow, keep=start > 0)
     self._seq_pf_host_temp[:TEMP_W] = _temp_row(temp)
     pos = start
     for n in self._chunk_plan(L - start):
-      self._seq_chunk(base, pos, n)
+      chunk(pos, n)
       pos += n
     self._seq_copy_call(True, slot, L, 0)
     return self._wait_host(lambda: self._token_host[base + L], "the token after a prefill")
@@ -2989,17 +3087,45 @@ class Transformer:
     for i in range(1, len(best)): best[i] = min((CHUNK_FIXED_ROWS + s + best[max(0, i - s)][0], s) for s in sizes)
     return best
 
-  def _seq_chunk(self, base:int, pos:int, n:int, ctx:int|None=None, part:int|None=None):
+  def _seq_chunk(self, base:int, pos:int, n:int, ctx:int|None=None, part:int|None=None,
+                 vis:tuple[list[tuple[int, int, int, int]], dict[int, Callable[[], Any]]]|None=None):
     """
     a prefill chunk: the n tokens from pos of the region from base in the token buffer (the jit of the smallest chunk size of n or more, and of
-    the shortest context (PREFILL_PK_CTX) ctx fits: pos+n if None)
+    the shortest context (PREFILL_PK_CTX) ctx fits: pos+n if None). vis (VISION): the prompt's pictures (runs, rows): the vision variant
     """
     sizes = self.prefill_chunks()
     vb, sp = UOp.variable("seq_base", 0, self.seq_rows()).bind(base), UOp.variable("start_pos", 0, self.max_context-1).bind(pos)
     nt = UOp.variable("toks", 1, c:=next(s for s in sizes if n <= s)).bind(n)
     _pk_local[0] = self._pk_bucket(c, pos + n if ctx is None else ctx)
+    if vis is not None: self._vis_fill(*vis, pos, n)
+    _vis_on[0] = vis is not None
     try: self(self._token_buf[:, vb+sp:vb+sp+nt], sp, self._seq_pf_temp, vb, part)
-    finally: _pk_local[0] = None
+    finally: _pk_local[0], _vis_on[0] = None, False
+
+  def _dev_ids(self, ids:list[int]) -> array.array:
+    """the token buffer's ids of a token list: a picture's rows (VISION: negative ids) the image pad id"""
+    if not self.vision: return array.array('i', ids)
+    return array.array('i', [t if t >= 0 else self.image_pad_id for t in ids])
+
+  def _vis_fill(self, runs:list[tuple[int, int, int, int]], pictures:dict[int, Callable[[], Any]], pos:int, n:int):
+    """VISION: the vision variant's host inputs of the chunk of n rows from pos: the picture rows there, the M-RoPE positions of its window"""
+    # (the chunk before may still read them)
+    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
+    M, D = self._vis_rows_max, self.config.dim
+    assert n <= M, f"a vision chunk of {n} rows (at most {M})"
+    from tinygrad.llm.qwen_vision import rope_positions
+    mask = array.array('i', bytes(4*M))
+    for start, cnt, _, first in runs:
+      a, b = max(start, pos), min(start + cnt, pos + n)
+      if a >= b: continue
+      assert first in pictures, f"the rows of the picture at row {start} (id {first}): not given"
+      pic = pictures[first]()
+      assert pic.shape == (cnt, D) and pic.dtype.itemsize == 4, f"the picture at row {start}: rows {pic.shape} {pic.dtype}, its ids {cnt} x {D}"
+      self._vis_host_rows[(a-pos)*D:(b-pos)*D] = memoryview(pic[a-start:b-start].astype('float32').reshape(-1))
+      mask[a-pos:b-pos] = array.array('i', [1]*(b-a))
+    self._vis_host_mask[:M] = mask
+    W = M + 3*VIS_PAD
+    self._vis_host_pos[:3*W] = array.array('i', rope_positions(runs, pos - VIS_PAD, pos - VIS_PAD + W).astype('int32').tobytes())
 
   def forward_seqs(self, *vs:UOp) -> Tensor: return self._forward_seqs(vs, False)
   def forward_seqs_forced(self, *vs:UOp) -> Tensor: return self._forward_seqs(vs, True)
@@ -3016,7 +3142,9 @@ class Transformer:
     slots, bases, H = self._ints(tuple(sl)), self._ints(tuple(bs)), 2*(k+1)
     y = self._seq_in[:, :G*(k+1)]
     temps = self._seq_temp[:TEMP_W*G].reshape(G, TEMP_W)
-    def batch(pos:list[UOp], R:int) -> SeqBatch: return SeqBatch(G, R, slots, bases, self._ints(tuple(pos)))
+    # (VISION: every sequence's rope delta from the host, see seq_step)
+    rd = self._seq_rd[0, :G] if self.vision else None
+    def batch(pos:list[UOp], R:int) -> SeqBatch: return SeqBatch(G, R, slots, bases, self._ints(tuple(pos)), rdelta=rd)
     # the hidden states of the last step's tokens: every slot's rows of parity 1-par
     # (the slots' rows by one gather kernel: a cat of G slices at variable rows is a kernel of G threads (221 us at G=16))
     gather = amd_custom_kernels_supported(devs)
@@ -3125,11 +3253,11 @@ class Transformer:
     return b
 
   def seq_step(self, seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, ...]]],
-               forced:list[list[int]]|None=None) -> list[tuple[list[int], list[int]]]:
+               forced:list[list[int]]|None=None, deltas:list[int]|None=None) -> list[tuple[list[int], list[int]]]:
     """
     a step of speculative decoding of sequences sharing the caches: seqs (slot, base, mtp_pos, j, par, the k+1 tokens of the last step,
     temperature) of every one, their k+1 sampled tokens and k drafts. forced (SEQ_MIX_TOKENS): each one's next suffix tokens to force, at
-    most k+1; -1 in the other slots leaves their ordinary samples and drafts unchanged
+    most k+1; -1 in the other slots leaves their ordinary samples and drafts unchanged. deltas (VISION): every one's rope delta (0: no picture)
     """
     self._seq_init()
     k, n = self.config.spec_drafts, len(seqs)
@@ -3144,6 +3272,8 @@ class Transformer:
     # (the sequences past n: the padding slot's at position 0 in the padding region)
     seqs = seqs + [(self.seq_slots(), self.seq_rows(), 0, 0, 1, [0]*(k+1), 0.0)] * (m - n)
     self._seq_host_in[:m*(k+1)] = array.array('i', [t for *_, y, _ in seqs for t in y])
+    if self.vision: self._seq_host_rd[:m] = array.array('i', (deltas or [0]*n) + [0]*(m-n))
+    else: assert not any(deltas or []), "a rope delta: a picture's sequence without VISION"
     self._seq_host_temp[:TEMP_W*m] = array.array('f', [v for *_, temp in seqs for v in _temp_row(temp)])
     # (the step's seed, see forward_seqs)
     self._seq_host_temp[-1] = array.array('f', bytes(random.getrandbits(8) for _ in range(4)))[0]
@@ -3186,7 +3316,9 @@ class Transformer:
     key:Any = int(T.vmax) if isinstance(T:=tokens.shape[1], UOp) else T
     if _pk_local[0] is not None: key = (key, _pk_local[0])
     # (a sequence's region from a variable base: jits of their own, see seq_prefill)
-    jits = self.__dict__.setdefault("jits" + ("_greedy" if temperature is None else "") + ("_seq" if isinstance(base, UOp) else ""), {})
+    # (VISION: the vision variant of a chunk, see _vis_embed)
+    jits = self.__dict__.setdefault("jits" + ("_greedy" if temperature is None else "") + ("_seq" if isinstance(base, UOp) else "") +
+                                    ("_vis" if _vis_on[0] else ""), {})
     if (jit:=jits.get(key)) is None:
       # the states and caches are set up before: a jit captures on its first call
       self._init_states()
@@ -3350,6 +3482,8 @@ class Transformer:
       # (SEQ_ROWS: the rows of the caches of the sequences sharing them, past a context: more conversations kept)
       cache_rows=round_up(getenv("SEQ_ROWS", 0), REGION_ALIGN), kv_split=kv_split, idx_split=idx_split)
     with Linear.empty_init(): model = Transformer(config)  # (the weights are loaded)
+    model.rope_sections = tuple(int(x) for x in kv.get(f'{arch}.rope.dimension_sections', ()))
+    model.image_pad_id = int(kv.get(f'{arch}.ple.image_token_id', -1))
     # (the file's KV heads: repeated so every device holds one, device d holds head d*n//devices)
     model._kv_real = kv[f'{arch}.attention.head_count_kv']
     # gate experts loaded with the up rows (fused): one weight of twice the rows

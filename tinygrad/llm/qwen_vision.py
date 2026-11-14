@@ -169,6 +169,30 @@ def picture_runs(ids:list[int]) -> list[tuple[int, int, int, int]]:
     i = j
   return ret
 
+def rope_positions(runs:list[tuple[int, int, int, int]], lo:int, hi:int) -> np.ndarray:
+  """
+  the M-RoPE positions (3, hi-lo) (t, h, w) int32 of the rows lo..hi-1 of a prompt with the pictures runs (HF get_rope_index, llama.cpp mtmd):
+  a text row at its row minus the delta of the pictures before it (sum of n - max(rows, cols)), a picture's row (r, c) at (s, s+r, s+c), s its
+  first row's text position. rows before 0 are at 0, rows past the prompt text rows
+  """
+  rows = np.arange(lo, hi, dtype=np.int64)
+  t, hp, wp = rows.copy(), rows.copy(), rows.copy()
+  d = 0
+  for start, n, cols, _ in runs:
+    s = start - d
+    inside = (rows >= start) & (rows < start + n)
+    k = rows[inside] - start
+    t[inside], hp[inside], wp[inside] = s, s + k // cols, s + k % cols
+    after = rows >= start + n
+    d += n - max(n // cols, cols)
+    t[after], hp[after], wp[after] = rows[after] - d, rows[after] - d, rows[after] - d
+  out = np.stack([t, hp, wp]).clip(0, None)
+  return out.astype(np.int32)
+
+def rope_delta(runs:list[tuple[int, int, int, int]]) -> int:
+  """the rope delta after the pictures runs: a later row's position is its row minus it"""
+  return sum(n - max(n // cols, cols) for _, n, cols, _ in runs)
+
 # ******** the tower ********
 
 VISION_SLICE_MS = getenv("VISION_SLICE_MS", 300)  # a bucket whose tower takes longer runs in slices of about this long (see TowerJob)
