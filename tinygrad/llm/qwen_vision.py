@@ -39,12 +39,34 @@ class PictureBusy(PictureError):
 # VISION_DECODERS of them at once in the process, whatever the requests)
 _decoders = threading.BoundedSemaphore(VISION_DECODERS)
 
+# (a picture a request sends again (a conversation's every earlier screenshot, each request) isn't decoded again: the decoded pictures of the
+# last VISION_URL_CACHE_MB of pixels by the sha256 of their data: URL (the same bytes: the same picture). 0: none kept)
+VISION_URL_CACHE_MB = getenv("VISION_URL_CACHE_MB", 256)
+_url_cache:dict[tuple[bytes, int], Picture] = {}
+_url_cache_bytes = [0]
+_url_lock = threading.Lock()
+
 def decode_picture(url:Any, deadline:float, max_tokens:int=VISION_MAX_TOKENS) -> Picture:
   """a data: URL's picture (data_url_bytes, load_picture) by one of the process's decoders, waited for until deadline (time.monotonic())"""
+  key = (hashlib.sha256(url.encode("utf-8", "surrogatepass")).digest(), max_tokens) if isinstance(url, str) and VISION_URL_CACHE_MB > 0 else None
+  if key is not None:
+    with _url_lock:
+      if (pic:=_url_cache.pop(key, None)) is not None:
+        _url_cache[key] = pic
+        return pic
   if not _decoders.acquire(timeout=max(0.0, deadline - time.monotonic())):
     raise PictureBusy(f"the server is decoding other images: retry later (waited {VISION_DECODE_WAIT} s)")
-  try: return load_picture(data_url_bytes(url), max_tokens)
+  try: pic = load_picture(data_url_bytes(url), max_tokens)
   finally: _decoders.release()
+  if key is not None:
+    pic.rgb.setflags(write=False)
+    with _url_lock:
+      if key not in _url_cache:
+        _url_cache[key] = pic
+        _url_cache_bytes[0] += pic.rgb.nbytes
+      while _url_cache_bytes[0] > VISION_URL_CACHE_MB * 2**20 and _url_cache:
+        _url_cache_bytes[0] -= _url_cache.pop(next(iter(_url_cache))).rgb.nbytes
+  return pic
 
 @dataclass(frozen=True)
 class Picture:

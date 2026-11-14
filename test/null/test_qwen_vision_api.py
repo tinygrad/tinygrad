@@ -109,3 +109,21 @@ class TestExpand(unittest.TestCase):
     self.assertEqual(m[0]["content"], "ab")
 
 if __name__ == "__main__": unittest.main()
+
+@unittest.skipIf(Image is None, "pillow")
+class TestUrlCache(unittest.TestCase):
+  def test_same_bytes_decoded_once(self):
+    # (a conversation sends its every earlier picture again each request: the same data: URL's picture comes from the cache, not decoded again)
+    from unittest.mock import patch
+    import tinygrad.llm.qwen_vision as qv
+    u1, u2 = url(png(64, 48)), url(png(64, 48, color=(1, 2, 3)))
+    with patch.object(qv, "load_picture", wraps=qv.load_picture) as lp:
+      a = extract_pictures(msgs(part(u1), part(u2)))
+      b = extract_pictures(msgs(part(u1), part(u2)))
+    self.assertEqual(lp.call_count, 2)
+    self.assertTrue(all(x is y for x, y in zip(a, b)) and a[0].digest != a[1].digest)
+    self.assertFalse(a[0].rgb.flags.writeable)
+    # (the cache's bytes bounded: VISION_URL_CACHE_MB)
+    with patch.object(qv, "VISION_URL_CACHE_MB", 0):
+      with patch.object(qv, "load_picture", wraps=qv.load_picture) as lp: extract_pictures(msgs(part(u1)))
+    self.assertEqual(lp.call_count, 1)
