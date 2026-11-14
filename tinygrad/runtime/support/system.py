@@ -248,6 +248,7 @@ class PCIDevice:
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     return System.alloc_sysmem(size, vaddr, contiguous)
 
+  def reset_lock(self, lock=True): fcntl.lockf(self.lock_fd, fcntl.LOCK_EX if lock else fcntl.LOCK_UN)
   def reset(self):
     if hasattr(self, "vfio_dev"): return vfio.VFIO_DEVICE_RESET(self.vfio_dev)
     os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
@@ -457,6 +458,7 @@ class RemotePCIDevice(PCIDevice):
     return self.cpu_view(host_va, size), paddrs
   def free_sysmem(self, view:MMIOInterface): self.rpc(RemoteCmd.UNMAP_SYSMEM, view.addr, view.nbytes)
   def cpu_view(self, addr:int, size:int) -> MMIOInterface: return RemoteMMIOInterface(self, 0, addr, size, sysmem=True)
+  def reset_lock(self, lock=True): pass # no local lock for a remote device
   def reset(self): self.rpc(RemoteCmd.RESET)
   def read_config(self, offset:int, size:int): return self.rpc(RemoteCmd.CFG_READ, offset, size)[0]
   def write_config(self, offset:int, value:int, size:int): self.rpc(RemoteCmd.CFG_WRITE, offset, size, value)
