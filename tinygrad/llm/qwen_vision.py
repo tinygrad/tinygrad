@@ -12,6 +12,7 @@ import numpy as np
 from tinygrad import Tensor, TinyJit, getenv, dtypes
 from tinygrad.device import Buffer
 from tinygrad.llm.gguf import gguf_load
+from tinygrad.llm.kernels.amd import _amd_flash_attention, _is_rdna4, amd_custom_kernels_supported
 
 PATCH, MERGE, TEMPORAL = 16, 2, 2
 FACTOR = PATCH * MERGE
@@ -196,6 +197,10 @@ def rope_delta(runs:list[tuple[int, int, int, int]]) -> int:
 # ******** the tower ********
 
 VISION_SLICE_MS = getenv("VISION_SLICE_MS", 300)  # a bucket whose tower takes longer runs in slices of about this long (see TowerJob)
+# the tower's kernels (results/w-pf53/vision): 0 = all float (HF's numerics); 1 (AMD only) = the cards' WMMA: the attention as one fused
+# kernel a block (F16 q / k / v, float sums and softmax: amd.py's flash attention, head 72 padded to 96) and every matmul on F16 activations
+# against the F16 weights with float sums (as llama.cpp); the softmax, norms, rope, GELU and the residual stream stay float
+VISION_KERNELS = getenv("VISION_KERNELS", 0)
 ATTN_SCORES = 1 << 25  # the attention's scores of a chunk of queries at most (32M floats = 128 MB: 2,048 queries of 1,024 patches, 128 of 16,384)
 
 def bucket(n:int) -> int:
@@ -227,6 +232,16 @@ def rope_cos_sin(gh:int, gw:int, head_dim:int, theta:float=10000.0) -> tuple[np.
   emb = np.concatenate([f, f], axis=-1)
   return np.cos(emb), np.sin(emb)
 
+def attn_pack(q:Tensor, k:Tensor, v:Tensor, km:Tensor) -> tuple[Tensor, Tensor]:
+  """the fused attention's inputs (see VisionTower._attn_fused): q (heads, n, D) F16, kv (2, 1, heads, n, D) F16, D = hd + 1 up to 32's"""
+  H, n, hd = q.shape
+  D = -(-(hd + 1) // 32) * 32
+  kb = (km.reshape(1, n, 1) < -1).where(-60000.0, 0.0).expand(H, n, 1)
+  qh = Tensor.cat(q * math.sqrt(D / hd), q.ones_like()[..., :1], q.zeros_like()[..., :D - hd - 1], dim=-1).half()
+  kh = Tensor.cat(k, kb, k.zeros_like()[..., :D - hd - 1], dim=-1).half()
+  vh = v.pad(((0, 0), (0, 0), (0, D - hd))).half()
+  return qh.contiguous(), Tensor.stack(kh, vh).reshape(2, 1, H, n, D).contiguous()
+
 class VisionTower:
   def __init__(self, state:dict[str, Tensor], kv:dict, devices:tuple[str, ...]|None=None, scratch:dict|None=None):
     """
@@ -257,6 +272,7 @@ class VisionTower:
     self._inputs:dict[int, list[Tensor]] = {}
     self._carries:dict[tuple[int, str], Tensor] = {}
     self._plans:dict[int, list[tuple[int, int]]] = {}
+    self.kernels = bool(VISION_KERNELS) and amd_custom_kernels_supported(self.devices[0])
 
   @staticmethod
   def from_gguf(path:str|pathlib.Path, devices:tuple[str, ...]|None=None, scratch:dict|None=None, **kw) -> VisionTower:
@@ -267,7 +283,20 @@ class VisionTower:
   def _ln(self, x:Tensor, w:Tensor, b:Tensor) -> Tensor: return x.layernorm(eps=self.eps) * w.float() + b.float()
 
   def _lin(self, x:Tensor, w:Tensor, b:Tensor) -> Tensor:
+    if self.kernels: return x.half().matmul(w.T, dtype=dtypes.float) + b.float()
     return x @ w.float().T + b.float()
+
+  def _attn_fused(self, q:Tensor, k:Tensor, v:Tensor, km:Tensor) -> Tensor:
+    """
+    q, k, v (heads, n, hd) float, km (1, 1, n) 0 / -1e30: one WMMA flash kernel (no scores in memory). The kernel wants a head of a
+    multiple of 32: hd 72 -> 96 with zeros, and the padded keys masked by a spare column (q 1, k -60000 for a padded key: its score
+    -60000 / sqrt(96), exp 0), not causal (the queries placed after every key: q_start = n). q prescaled: the kernel divides by sqrt(96)
+    """
+    H, n, hd = q.shape
+    qh, kv = attn_pack(q, k, v, km)
+    out = Tensor.empty(H, n, int(qh.shape[-1]), dtype=dtypes.float32, device=q.device)
+    fxn = functools.partial(_amd_flash_attention, valid_kv_len=n, q_start=n, rdna4=_is_rdna4(q.device))
+    return Tensor.custom_kernel(out, qh, kv, fxn=fxn)[0][..., :hd]
 
   def _attn(self, q:Tensor, k:Tensor, v:Tensor, km:Tensor) -> Tensor:
     return q.scaled_dot_product_attention(k, v, attn_mask=km)
@@ -282,12 +311,17 @@ class VisionTower:
       return t * cos + (-t2).cat(t1, dim=-1) * sin
     qc = min(n, max(64, 1 << int(math.log2(ATTN_SCORES // (self.heads * n)))))
     h = self._ln(x, b["ln1.weight"], b["ln1.bias"])
-    qkv = self._lin(h, b["attn_qkv.weight"], b["attn_qkv.bias"]).reshape(n, 3, self.heads, hd).permute(1, 2, 0, 3)
+    qkv = self._lin(h, b["attn_qkv.weight"], b["attn_qkv.bias"])
+    if self.kernels: qkv = qkv.contiguous()  # (one WMMA matmul, not three narrow ones each fused with its rope)
+    qkv = qkv.reshape(n, 3, self.heads, hd).permute(1, 2, 0, 3)
     q, k, v = rope(qkv[0]).contiguous().realize(), rope(qkv[1]).contiguous().realize(), qkv[2].contiguous().realize()
     # (queries in chunks: the scores of a 16,384-patch picture would be 17 GB at once; padded keys masked, padded queries' rows unused)
     # (each chunk realized: the jit's memory plan reuses one chunk's scores for the next, not all of them at once)
-    a = Tensor.cat(*[self._attn(q[:, i:i+qc], k, v, km).realize() for i in range(0, n, qc)], dim=1)
-    x = x + self._lin(a.transpose(0, 1).reshape(n, self.width), b["attn_out.weight"], b["attn_out.bias"])
+    if self.kernels: a = self._attn_fused(q, k, v, km).realize()
+    else: a = Tensor.cat(*[self._attn(q[:, i:i+qc], k, v, km).realize() for i in range(0, n, qc)], dim=1)
+    a = a.transpose(0, 1).reshape(n, self.width)
+    if self.kernels: a = a.half().contiguous()  # (the heads' rows side by side in F16: attn_out's matmul on the WMMA path)
+    x = x + self._lin(a, b["attn_out.weight"], b["attn_out.bias"])
     h = self._ln(x, b["ln2.weight"], b["ln2.bias"])
     return (x + self._lin(self._lin(h, b["ffn_up.weight"], b["ffn_up.bias"]).gelu(), b["ffn_down.weight"], b["ffn_down.bias"])).realize()
 
@@ -300,12 +334,16 @@ class VisionTower:
     if a == 0:
       # (Conv3d over the 2 frames = the two slices' sums, as llama.cpp: each frame's patch times its slice)
       xs = x.reshape(n, 3, TEMPORAL, PATCH * PATCH)
-      x = xs[:, :, 0].reshape(n, -1) @ self.patch_w[0].float().T + xs[:, :, 1].reshape(n, -1) @ self.patch_w[1].float().T + \
+      if self.kernels:  # (each frame's patches F16 contiguous first: a strided operand keeps the matmul off the WMMA path)
+        f0, f1 = (xs[:, :, t].reshape(n, -1).half().contiguous() for t in range(TEMPORAL))
+        x = self._lin(f0, self.patch_w[0], self.patch_b) + f1.matmul(self.patch_w[1].T, dtype=dtypes.float) + posx
+      else: x = xs[:, :, 0].reshape(n, -1) @ self.patch_w[0].float().T + xs[:, :, 1].reshape(n, -1) @ self.patch_w[1].float().T + \
           self.patch_b.float() + posx
     km = kmask.reshape(1, 1, n)
     for i in range(a, b): x = self._block(i, x, cos, sin, km)
     if b < self.depth: return self._carry(n, self.block_dev[b - 1]).assign(x).realize()
     x = self._ln(x.to(self.devices[-1]), self.post_w, self.post_b).reshape(n // (MERGE * MERGE), -1)
+    if self.kernels: x = x.half().contiguous()
     h = self._lin(x, *self.mm[0])
     h = 0.5 * h * (1 + (h / math.sqrt(2)).erf())   # (HF nn.GELU(): the erf form)
     return self._lin(h, *self.mm[1]).realize()
