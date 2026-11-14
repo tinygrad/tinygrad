@@ -1163,8 +1163,11 @@ class Indexer:
     R = idx.rope_dim
     k = self.k_norm((k_raw if k_raw is not None else self.attn_k(x)).float())[0]
     k = apply_rope(k[:, :R].reshape(1, 1, Tq, R), freqs, idx.rope_interleave).reshape(Tq, R).cat(k[:, R:], dim=-1)
-    iq = self.attn_q_b(q).float().reshape(Tq, idx.n_heads, idx.head_dim).transpose(0, 1).unsqueeze(0)
-    iq = apply_rope(iq[..., :R], freqs, idx.rope_interleave).cat(iq[..., R:], dim=-1)[0].transpose(0, 1)  # (Tq, H, D)
+    iq_raw = self.attn_q_b(q).float().reshape(Tq, idx.n_heads, idx.head_dim)
+    def roped(raw:Tensor, fr:Tensor) -> Tensor:
+      x = raw.transpose(0, 1).unsqueeze(0)
+      return apply_rope(x[..., :R], fr, idx.rope_interleave).cat(x[..., R:], dim=-1)[0].transpose(0, 1)  # (rows, H, D)
+    iq = roped(iq_raw, freqs)
     b = _seq_base[0]
     # (the region's keys: split, a device's rows from b//devices (its scores' columns a sequence's), else rows from b)
     if self.shard: pk, kb, width = seq_store(self.cache_dk, k.half(), start_pos + b, T), b // self.shard, self.dk_width
@@ -1179,8 +1182,12 @@ class Indexer:
     rows = round_up(Tq, 16)
     iq, weights = iq.pad(((0, rows-Tq), None, None)), weights.pad(((0, rows-Tq), None))
     block, picks = round_up(min(rows, getenv("INDEXER_ROWS", 1056)), 16), None
+    # (IDX_QBLK, default on, the same values: a block's queries roped from the projection's rows, not a copy of the block from all of them roped
+    # into a buffer (a float copy of the chunk's queries in every layer); the padding rows 0 either way)
+    qblk = getenv("IDX_QBLK", 1) and rows // block > 1
+    if qblk: raw_p, fr_p = iq_raw.pad(((0, rows-Tq), None, None)), freqs.reshape(Tq, -1).pad(((0, rows-Tq), None))
     for r0 in range(0, rows, block):
-      qb = iq[r0:r0+block].contiguous()
+      qb = (roped(raw_p[r0:r0+block], fr_p[r0:r0+block]) if qblk else iq[r0:r0+block]).contiguous()
       if picks is not None: qb = Tensor(qb.uop.after(*picks.uop.src[1:]))  # (after the last block's lists: its scores are done)
       if picks is None: picks = Tensor.empty(rows, idx.top_k + 2, dtype=dtypes.int32, device=x.device)
       # (IDX_PAD (with LISTS_PAD): a block's scores and candidates of the chunk's tokens only, its padding rows' lists are emptied after)
