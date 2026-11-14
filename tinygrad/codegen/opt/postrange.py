@@ -1,7 +1,8 @@
 from __future__ import annotations
 import itertools
+from dataclasses import replace
 from typing import cast
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element
+from tinygrad.uop.ops import Ops, GroupOp, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element
 from tinygrad.uop.ops import axis_colors
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
@@ -17,9 +18,11 @@ split_targets = {AxisType.UPCAST: (AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEA
 class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
     self.ast, self.ren = graph_rewrite(ast, pm_flatten_range), ren
-    self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
+    if self.ast.arg is None: self.ast = self.ast.replace(arg=KernelInfo())
     self.opt_range = count(start=max([x.axis_id[0] for x in self.ast.backward_slice if x.op is Ops.RANGE], default=0)+1)
 
+  @property
+  def applied_opts(self) -> tuple[Opt, ...]: return self.ast.arg.applied_opts
   @property
   def rngs(self):
     # Keep serial/vectorized reduction axes last, deriving their role from REDUCE rather than the axis type.
@@ -36,9 +39,7 @@ class Scheduler:
   def axis_types(self) -> list[AxisType]: return [x.axis_type for x in self.rngs]
 
   def copy(self) -> Scheduler:
-    ret = Scheduler(self.ast, self.ren)
-    ret.applied_opts = self.applied_opts[:]
-    return ret
+    return Scheduler(self.ast, self.ren)
 
   def get_optimized_ast(self, name_override:str|None=None) -> UOp:
     if name_override is not None: name = name_override
@@ -47,7 +48,7 @@ class Scheduler:
       special_uops = sorted([x for x in self.ast.backward_slice if x.op is Ops.SPECIAL], key=lambda x: x.arg)
       special_ops = [colored(str(x.vmax+1), "blue" if x.arg[0] == "g" else "cyan") for x in special_uops]
       name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
-    return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), optimized=True))
+    return self.ast.replace(arg=KernelInfo(name=name, applied_opts=self.applied_opts, optimized=True))
 
   def convert_loop_to_global(self) -> None:
     if not self.ren.has_local: return
@@ -134,8 +135,15 @@ class Scheduler:
       replaced_rng = rng.replace(src=(rng.src[0].const_like(new_sz),))
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
+      def gate(b:UOp) -> UOp: return b.replace(src=(b.src[0], b.src[1].get_idx().valid(valid&b.src[1].get_valid())))
       for b in self.bufs:
-        if rng in (i:=b.src[1]).ranges: replaces[b] = b.replace(src=(b.src[0], i.get_idx().valid(valid&i.get_valid())))
+        if rng in b.src[1].ranges: replaces[b] = gate(b)
+      # the padded iterations are no-ops: their INDEXes, indexed STOREs and BACKEDGEs are gated and their REDUCEs add the identity
+      for u in self.ast.backward_slice:
+        if u.op in GroupOp.Effect|{Ops.BACKEDGE} and rng in u.ranges:
+          if u.op is Ops.STORE and u.src[0].op is Ops.INDEX: replaces[u] = u.replace(src=(gate(u.src[0]),)+u.src[1:])
+          elif u.op is Ops.BACKEDGE: replaces[u] = u.replace(src=u.src[:2]+(valid&u.src[2],))
+          else: check(u.op is Ops.BARRIER, f"cannot gate {u.op} in a padded range")
       for r in self.reduceops:
         if rng in r.src[1:]:
           replaces[r] = r.replace(src=(valid.where(r.src[0], UOp.const(identity_element(r.arg[0], r.dtype), r.dtype)),)+r.src[1:])
@@ -151,7 +159,7 @@ class Scheduler:
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
 
-    if append_opt: self.applied_opts.append(opt)
+    if append_opt: self.ast = self.ast.replace(arg=replace(self.ast.arg, applied_opts=self.applied_opts+(opt,)))
     return ret
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> None|list[UOp]:
@@ -240,17 +248,17 @@ def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   if ast.arg is not None and ast.arg.optimized: return ast
   k = Scheduler(ast, ren)
   k.convert_loop_to_global()
-  if ast.arg is not None and ast.arg.opts_to_apply is not None:
-    for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
+  if (ki:=k.ast.arg).opts_to_apply is not None:
+    for opt in ki.opts_to_apply: k.apply_opt(opt)
   elif beam >= 1:
     from tinygrad.codegen.opt.search import beam_search
     rawbufs, var_vals = args_from_ast(ast, ren.target.device)
     # beam search may open devices
     with Context(ALLOW_DEVICE_USAGE=1):
       k = beam_search(k, rawbufs, var_vals, beam, bool(getenv("BEAM_ESTIMATE", 1)))
-  elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
+  elif not NOOPT and ki.applied_opts == ():
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
     if not any(u.op is Ops.STAGE for u in ast.backward_slice):
       k = hand_coded_optimizations(k)
-  return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
+  return k.get_optimized_ast(name_override=ki.name if ki.name != "test" else None)

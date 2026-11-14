@@ -135,7 +135,7 @@
     stroke-width: 0.7;
     stroke-linejoin: miter;
   }
-  .label :is(text, p) {
+  .label text {
     font-weight: 300;
   }
   g.node rect {
@@ -167,7 +167,7 @@
     color: #a0a6b8;
   }
   .uir-ref.highlight {
-    background-color: #456f70;
+    background-color: #3d425c;
   }
   #insts .line {
     display: flex;
@@ -214,7 +214,7 @@
     position: relative;
     height: 100%;
   }
-  .metadata > * + *, .info > * + *, .rewrite-container > * + *, .ctx-list > * + * {
+  .metadata > * + *, .info > * + *, .ctx-list > * + * {
     margin-top: 12px;
   }
   ul > * + *, .args > * + * {
@@ -228,7 +228,6 @@
   #profiler, #custom {
     flex: 1 1 auto;
     min-width: 0;
-    width: 100%;
     height: calc(100% - 50px);
     margin-top: 50px;
     margin-left: 15%;
@@ -238,7 +237,6 @@
     scrollbar-gutter: stable;
   }
   #custom {
-    z-index: 1;
     margin-inline: 0;
   }
   #profiler {
@@ -294,7 +292,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    text-decoration: none;
   }
   .btn:hover {
     background-color: #2a2b36;
@@ -302,7 +299,7 @@
   .collapsed .container {
     display: none;
   }
-  .collapsed #profiler, .collapsed #custom {
+  .collapsed #profiler {
     margin-left: 0;
     margin-right: 0;
   }

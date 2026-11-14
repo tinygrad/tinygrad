@@ -12,6 +12,14 @@ if TYPE_CHECKING:
 def remint(u:'UOp', dt:DType) -> 'UOp':
   return u.ccast(dt) if u.op is Ops.CONST else u.replace(src=(remint(u.src[0], dt),)+u.src[1:])
 
+def _promote(t, out_dtype:DType):
+  # nothing to promote if t has the out dtype. invalid bool is weak const
+  if t.dtype is out_dtype or t._uop.base.is_invalid: return t
+  # keep weak CONST weak, might lift weakint -> weakfloat
+  if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST:
+    return t if t.dtype == (dt:=weak_dtype(out_dtype)) else t._wrap_uop(remint(t._uop, dt))
+  return t.cast(out_dtype)
+
 class ElementwiseMixin(CreationMixin):
   # required to implement
   def alu(self, op: Ops, *src: Self) -> Self:
@@ -23,22 +31,17 @@ class ElementwiseMixin(CreationMixin):
 
   def _broadcasted(self, y: 'Self|ConstType|UOp', reverse: bool = False) -> tuple[Self, Self]:
     y = self.ufix(y)
-    x, y = (self, y) if not reverse else (y, self)
+    x, y = (y.ufix(self), y) if not reverse else (y, y.ufix(self))
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
-    # keep weak CONST weak, might lift weakint -> weakfloat
-    def promote(t):
-      if t._uop.base.is_invalid: return t  # invalid bool is weak const
-      if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST:
-        return t if t.dtype == (dt:=weak_dtype(out_dtype)) else t._wrap_uop(remint(t._uop, dt))
-      return t.cast(out_dtype)
-    return promote(x), promote(y)
+    return _promote(x, out_dtype), _promote(y, out_dtype)
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)
     return lhs.alu(op, rhs)
 
-  def usum(self, *uops) -> Self: return functools.reduce(operator.or_ if self.dtype is dtypes.bool else operator.add, argfix(*uops), self)
-  def uprod(self, *uops) -> Self: return functools.reduce(operator.and_ if self.dtype is dtypes.bool else operator.mul, argfix(*uops), self)
+  def usum(self, *uops) -> Self: return functools.reduce(operator.add, argfix(*uops), self)
+  def uprod(self, *uops) -> Self: return functools.reduce(operator.mul, argfix(*uops), self)
+  def uand(self, *uops) -> Self: return functools.reduce(operator.and_, argfix(*uops), self)
 
   def detach(self) -> Self:
     """
@@ -433,7 +436,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     x, y = self.ufix(x)._broadcasted(y)
-    return self.alu(Ops.WHERE, x, y)
+    return x.ufix(self).alu(Ops.WHERE, x, y)
 
   def masked_fill(self, mask:Self, value:Self|PyConst) -> Self:
     """
@@ -785,7 +788,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     if approximate == "tanh":
-      return 0.5 * self * (1 + (math.sqrt(2 / math.pi) * (self + 0.044715 * self ** 3)).tanh())
+      return self * (math.sqrt(8 / math.pi) * (self + 0.044715 * self ** 3)).sigmoid()
     elif approximate == "none":
       return self * 0.5 * (1.0 + (self / math.sqrt(2)).erf())
     else:

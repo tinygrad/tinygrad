@@ -1,8 +1,14 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, function, Device
-from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, uopfunc
+from tinygrad.engine.realize import run_linear, get_runtime
+from tinygrad.codegen import to_program
+from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
+from tinygrad.helpers import getenv
+from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.renderer.llvmir import LLVMRenderer
 from tinygrad.schedule import transform_to_call
 
 def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop)).body.key
@@ -465,6 +471,239 @@ class TestCallMultiSharded(unittest.TestCase):
     out = f(x[:, :toks]).realize()
     self.assertEqual(out.uop.axis, 2)
     np.testing.assert_equal(out[:1, :2].to(devs[0]).numpy(), np.arange(16, dtype=np.float32).reshape(1, 2, 2, 4))
+
+@unittest.skipUnless((Device.DEFAULT == "CPU" and isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer)))
+                     or Device.DEFAULT == "AMD" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage),
+                     "calls in kernel not implemented in this renderer")
+class TestCallInKernel(unittest.TestCase):
+  def test_simple(self):
+    N = getenv("N", 4)
+
+    @uopfunc
+    def add(out:UOp, x:UOp) -> UOp:
+      i = UOp.range(x.numel(), 0)
+      return out[i].store(x[i] + 1).end(i).sink()
+
+    @uopfunc
+    def sum_fn(out:UOp, x:UOp) -> UOp:
+      i = UOp.range(x.numel(), 0)
+      return out[0].store(x[i].reduce(i, arg=Ops.ADD)).sink()
+
+    def main(out:UOp, x:UOp) -> UOp:
+      tmp0, tmp1 = (UOp.alloc_like(x, addrspace=AddrSpace.REG) for _ in range(2))
+      call0 = add(tmp0, x)
+      call1 = add(tmp1, tmp0.after(call0))
+      return sum_fn(out, tmp1.after(call1)).sink(arg=KernelInfo(name="test_simple"))
+
+    x = Tensor.arange(N).clone().realize()
+    out = Tensor.custom_kernel(Tensor.empty_like(x), x, fxn=lambda out,x: add(out, x).sink(arg=KernelInfo(name="add_kernel")))[0]
+    out = Tensor.custom_kernel(Tensor.empty(1, dtype=x.dtype), out,
+                               fxn=lambda out,x: sum_fn(out, x).sink(arg=KernelInfo(name="sum_kernel")))[0]
+    self.assertEqual(out.tolist(), [N*(N+1)//2])
+    out2 = Tensor.custom_kernel(Tensor.empty(1, dtype=x.dtype), x, fxn=main)[0]
+    self.assertEqual(out2.tolist(), [N*(N+3)//2])
+
+  def test_reduce_over_call_keeps_loop_order(self):
+    # a call can hide stores, so the reduce loops a, k, b in order, and the digits of S are the A[a*2+b] it visits
+    @uopfunc
+    def update(S:UOp, A:UOp) -> UOp: return S[0].store(S[0]*10+A[0]).sink()
+    def kernel(O:UOp, S:UOp, A:UOp) -> UOp:
+      a, k, b = [UOp.range(2, n, AxisType.LOOP) for n in range(3)]
+      return O[0].store(A[a*2+b].after(update(S.after(k), A[a*2+b])).reduce(a, k, b, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+    o, s = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor.zeros(1, dtype=dtypes.int).contiguous(),
+                                Tensor([1, 2, 3, 4], dtype=dtypes.int), fxn=kernel)[:2]
+    Tensor.realize(o, s)
+    self.assertEqual(s.item(), 12123434)
+
+  def test_nested_call(self):
+    @uopfunc
+    def incr(out:UOp, A:UOp):
+      i = UOp.range(A.shape[0], 0)
+      return out[i].store(A[i]+1).end(i).sink()
+
+    @uopfunc
+    def square(out:UOp, A:UOp):
+      tmp0, tmp1 = (UOp.alloc_like(A, addrspace=AddrSpace.REG) for _ in range(2))
+      call0 = incr(tmp0, A)
+      call1 = incr(tmp1, A.after(call0))
+      assert call0.body is call1.body
+      i = UOp.range(A.shape[0], 1)
+      return out[i].store(tmp1.after(call1)[i]**2).end(i).sink()
+
+    def kernel(C:UOp, A:UOp):
+      tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
+      call = square(tmp, A)
+      i = UOp.range(A.shape[0], 2)
+      return C[i].store(tmp.after(call)[i]+10).end(i).sink(arg=KernelInfo(name="nested_calls"))
+
+    a = Tensor.arange(4).clone().realize()
+    out = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [11, 14, 19, 26])
+
+  def test_call_loop_mini(self, opts=()):
+    @uopfunc
+    def mul(p:UOp, q:UOp): return p[0].store(q[0]*3).sink()
+
+    def kernel(C:UOp, A:UOp):
+      i = UOp.range(4, 0)
+      call = mul(C[i], A[i])
+      return call.end(i).sink(arg=KernelInfo(name="call_loop_mini", opts_to_apply=opts))
+    a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [3, 6, 9, 12])
+
+  def test_call_scalar_arg(self):
+    @uopfunc
+    def add(out:UOp, src:UOp, val:UOp) -> UOp:
+      return out[0].store(src[0]+val).sink()
+
+    def kernel(out:UOp, src:UOp) -> UOp:
+      i = UOp.range(4, 0)
+      return add(out[i], src[i], i).end(i).sink(arg=KernelInfo(name="call_scalar_arg", opts_to_apply=()))
+
+    x = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    self.assertEqual(Tensor.empty_like(x).custom_kernel(x, fxn=kernel)[0].tolist(), [1, 3, 5, 7])
+
+  def test_call_with_gated_store(self):
+    @uopfunc
+    def gated_store(out:UOp, idx:UOp):
+      i = idx[0]
+      return out[i.valid((i >= 0) & (i < out.shape[0]))].store(7).sink()
+
+    def kernel(C:UOp, A:UOp):
+      tmp = UOp.alloc_like(C, addrspace=AddrSpace.REG)
+      i = UOp.range(C.shape[0], 0)
+      init = tmp[i].store(0).end(i)
+      call = gated_store(tmp.after(init), A)
+      j = UOp.range(C.shape[0], 1)
+      return C[j].store(tmp.after(call)[j] + 1).end(j).sink(arg=KernelInfo(name="call_with_gated_store", opts_to_apply=()))
+
+    a = Tensor([2], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [1, 1, 8, 1])
+
+  def test_call_body_range_is_not_ours(self):
+    @uopfunc
+    def mul(out:UOp, A:UOp):
+      k = UOp.range(4, 0, AxisType.LOOP)
+      return out[k].store(A[k]*3).end(k).sink()
+
+    def kernel(C:UOp, A:UOp):
+      m, i, call = UOp.range(3, 1, AxisType.LOOP), UOp.range(4, 0, AxisType.LOOP), mul(C, A)
+      self.assertIn(i, call.body.toposort())
+      end_m = C.after(call)[m].store(A[m]).end(m)
+      return C.after(end_m)[i].store(A[i]+1).end(i).sink(arg=KernelInfo(name="call_body_range", opts_to_apply=()))
+
+    a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [2, 3, 4, 5])
+
+  @unittest.expectedFailure
+  def test_call_loop_mini_opts(self): self.test_call_loop_mini(opts=None)
+
+  @unittest.expectedFailure
+  def test_call_loop_split(self): self.test_call_loop_mini((Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),))
+
+  def test_call_loop_pad(self):
+    @uopfunc
+    def add(p:UOp, q:UOp): return p[0].store(p[0]+q[0]).sink()
+
+    def kernel(C:UOp, A:UOp):
+      i = UOp.range(3, 0)
+      call = add(C[i], A[i])
+      return call.end(i).sink(arg=KernelInfo(name="call_loop_padto", opts_to_apply=(Opt(OptOps.PADTO, 0, 4),)))
+
+    a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    # the CALL body can't be gated, so padding i is refused
+    with self.assertRaises(KernelOptError): Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).clone().realize(), a, fxn=kernel)[0].realize()
+
+  def test_uopfunc(self):
+    @uopfunc
+    def axpy(out:UOp, x:UOp, a:int) -> UOp: # a is a trace-time constant: two bodies, two C functions
+      i = UOp.range(x.shape[0], 0, AxisType.LOOP)
+      return out[i].store(out[i] + x[i] * a).end(i).sink()
+
+    @uopfunc
+    def triple(out:UOp, x:UOp): return axpy(out, x, 3).sink()
+
+    def kernel(C:UOp, A:UOp) -> UOp:
+      C = C.after(triple(C.after(axpy(C, A, 2)), A))
+      i = UOp.range(A.shape[0], 1, AxisType.LOOP) # a loop after the calls
+      return C[i].store(C[i] + 1).end(i).sink(arg=KernelInfo(name="uopfunc", opts_to_apply=()))
+
+    a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous().realize(), a, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [6, 11, 16, 21])
+
+  def test_copy_offset_slices(self):
+    @uopfunc
+    def copy_block(dst:UOp, src:UOp) -> UOp:
+      i = UOp.range(4, 0, AxisType.UPCAST)
+      return dst[i].store(src[i]).end(i).sink()
+
+    def kernel(dst:UOp, src:UOp) -> UOp:
+      return copy_block(dst[1:5], src[1:5]).sink(arg=KernelInfo(opts_to_apply=()))
+
+    src = Tensor([0., 1., 2., 3., 4.]).realize()
+    dst = Tensor([-1.] * 6).realize()
+    out = dst.custom_kernel(src, fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [-1., 1., 2., 3., 4., -1.])
+
+  @unittest.skipIf(Device.DEFAULT == "CPU", "test needs to copy from CPU to another device")
+  def test_call_to_copy(self):
+    @uopfunc
+    def copy(out:UOp, A:UOp):
+      i = UOp.range(out.shape[0], 0, AxisType.LOOP)
+      return out[i].store(A[i]).end(i).sink()
+
+    def forward(out1:UOp, out2:UOp, A:UOp):
+      call = copy(out1, A)
+      i = UOp.range(out2.shape[0], 0, AxisType.LOOP)
+      inline = out2[i].store(A[i]).end(i).sink()
+      return UOp.group(call, inline).sink(arg=KernelInfo(name="forward", opts_to_apply=()))
+
+    x = Tensor([1, 2, 3, 4], device="CPU").realize().to(Device.DEFAULT)
+    y, z = x.empty_like(), x.empty_like()
+    y, z, _ = Tensor.custom_kernel(y, z, x, fxn=forward)
+    y, z = y.to("CPU"), z.to("CPU")
+    Tensor.realize(y, z)
+
+    self.assertEqual(y.tolist(), z.tolist())
+    self.assertEqual(x.tolist(), z.tolist())
+
+  @unittest.skipIf(Device[Device.DEFAULT].renderer.inline_prefix is not None, "backend inlines calls instead of linking")
+  def test_linker(self):
+    @uopfunc
+    def plus2(out:UOp, A:UOp): return out[0].store(A[0]+2).sink()
+
+    @uopfunc
+    def copy(out:UOp, A:UOp): return out[0].store(A[0]).sink()
+
+    def kernel(A:UOp, extra=False):
+      A = A.flatten()
+      i = UOp.range(A.shape[0], 0)
+      tmp = UOp.alloc_like(A, addrspace=AddrSpace.REG)
+      if extra: tmp = tmp.after(copy(tmp[i], A[i]))
+      return A[i].store(tmp[i].after(plus2(tmp[i], A[i]))).end(i).sink(arg=KernelInfo(name="test_kernel", opts_to_apply=()))
+
+    x = Tensor.custom_kernel(Tensor.arange(4).clone().realize(), fxn=kernel)[0]
+    run_linear(lin:=x.schedule_linear())
+
+    prg = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer)
+    assert "+2" not in prg.src[2].arg, f"found callee body in caller kernel {prg.src[2].arg}"
+    call = next(u for u in prg.src[1].src if u.op is Ops.CALL)
+    first_binary = call.body.src[3]
+    call_runtime = get_runtime(Device.DEFAULT, call.body)
+    self.assertListEqual(x.tolist(), Tensor.arange(4).add(2).tolist())
+
+    # launch a different caller with the same callee
+    x = Tensor.custom_kernel(Tensor.arange(5).clone().realize(), fxn=lambda A: kernel(A, extra=True))[0]
+    run_linear(lin:=x.schedule_linear())
+    prg2 = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer).src[1]
+    self.assertIs(call.body, next(u.body for u in prg2.src if u.op is Ops.CALL and u.arg.name == "plus2"))
+    self.assertIs(first_binary, next(u.body.src[3] for u in prg2.src if u.op is Ops.CALL and u.arg.name == "plus2"))
+    self.assertIs(call_runtime, get_runtime(Device.DEFAULT, call.body))
+    self.assertListEqual(x.tolist(), Tensor.arange(5).add(2).tolist())
 
 if __name__ == '__main__':
   unittest.main()

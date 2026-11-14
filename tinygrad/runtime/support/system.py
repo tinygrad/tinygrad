@@ -4,7 +4,7 @@ import fcntl
 from tinygrad.device import BufferStorage, Buffer, Device
 from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize, DEV
 from tinygrad.runtime.autogen import libc, pci, vfio
-from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator, MMIOInterface, TLSFAllocator
+from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator, MMIOInterface, TLSFAllocator, MemoryManager
 from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, USBMMIOInterface
 
 def filter_visible_devices(devs, device):
@@ -23,10 +23,10 @@ class FileIOInterface:
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset): return FileIOInterface._mmap(start, sz, prot, flags, self.fd, offset)
   def read(self, size=None, binary=False, offset=None):
-    if offset is not None: self.seek(offset)
+    if offset is not None: return os.pread(self.fd, size, offset)
     with open(self.fd, "rb" if binary else "r", closefd=False) as file: return file.read(size)
   def write(self, content, binary=False, offset=None):
-    if offset is not None: self.seek(offset)
+    if offset is not None: return os.pwrite(self.fd, content, offset)
     with open(self.fd, "wb" if binary else "w", closefd=False) as file: file.write(content)
   def listdir(self): return os.listdir(self.path)
   def seek(self, offset): os.lseek(self.fd, offset, os.SEEK_SET)
@@ -79,6 +79,16 @@ class _System:
 
   def lock_memory(self, addr:int, size:int):
     if libc.mlock(ctypes.c_void_p(addr), size): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
+
+  @functools.cache
+  def vfio_group(self, grp:str) -> FileIOInterface:
+    for dev in FileIOInterface(f"/sys/kernel/iommu_groups/{grp}/devices").listdir():
+      if FileIOInterface.exists(drv:=f"/sys/bus/pci/devices/{dev}/driver") and not FileIOInterface.readlink(drv).endswith(("/vfio-pci", "/pcieport")):
+        FileIOInterface(f"{drv}/unbind", os.O_WRONLY).write(dev)
+    self.vfio = self.vfio or FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
+    vfio.VFIO_GROUP_SET_CONTAINER(group:=FileIOInterface(f"/dev/vfio/{grp}", os.O_RDWR), ctypes.c_int(self.vfio.fd))
+    with contextlib.suppress(OSError): vfio.VFIO_SET_IOMMU(self.vfio, vfio.VFIO_TYPE1v2_IOMMU) # set iommu works only once for the fd.
+    return group
 
   def vfio_map(self, vaddr:int, size:int, align:int=1) -> int:
     iova = self.iova.alloc(size, align)
@@ -204,29 +214,27 @@ System = _System()
 class PCIDevice:
   def __init__(self, devpref:str, pcibus:str):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
-    self.pcibus, self.irq_poller = pcibus, None
+    self.pcibus, self.irq_poller, is_vfio = pcibus, None, FileIOInterface.exists(f"/sys/bus/pci/drivers/vfio-pci/{pcibus}") # no root needed
 
-    try: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR)
+    try: is_vfio or FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR)
     except PermissionError: raise PermissionError(f"Cannot access PCI device {pcibus}: run `extra/amdpci/setup_python_cap.sh` or use sudo")
 
-    if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
+    if not is_vfio and FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
-    if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"): raise RuntimeError(f"Driver is bound to {pcibus}")
+    if not is_vfio and FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"): raise RuntimeError(f"Driver is bound to {pcibus}")
 
     # remove sibling functions of the gpu, if any
-    for fn in range(1, 8):
+    for fn in () if is_vfio else range(1, 8):
       if FileIOInterface.exists(sib:=f"/sys/bus/pci/devices/{self.pcibus[:-1]}{fn}"): FileIOInterface(f"{sib}/remove", os.O_WRONLY).write("1")
 
-    if FileIOInterface.exists(grp:=f"/sys/bus/pci/devices/{self.pcibus}/iommu_group") and FileIOInterface(f"{grp}/type").read().strip() != "identity":
+    if FileIOInterface.exists(grp:=f"/sys/bus/pci/devices/{self.pcibus}/iommu_group") and not is_vfio:
       if not FileIOInterface.exists("/sys/module/vfio_pci"): raise RuntimeError("IOMMU is on: run `sudo modprobe vfio-pci disable_idle_d3=1`")
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
       FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
-      vfio_fd = System.vfio = System.vfio or FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
-      self.vfio_group = FileIOInterface(f"/dev/vfio/{FileIOInterface.readlink(grp).split('/')[-1]}", os.O_RDWR)
-      vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(vfio_fd.fd))
-
-      with contextlib.suppress(OSError): vfio.VFIO_SET_IOMMU(vfio_fd, vfio.VFIO_TYPE1v2_IOMMU) # set iommu works only once for the fd.
-      self.vfio_dev = FileIOInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode())))
+      if devpref == "AM": FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/reset_method", os.O_WRONLY).write("bus") # no flr on amd
+    if FileIOInterface.exists(grp):
+      group = System.vfio_group(FileIOInterface.readlink(grp).split('/')[-1])
+      self.vfio_dev = FileIOInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(group, ctypes.create_string_buffer(self.pcibus.encode())))
 
       self.irq_fd = FileIOInterface.eventfd(0, 0)
       self.irq_poller = select.poll()
@@ -237,21 +245,23 @@ class PCIDevice:
       vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, (ctypes.c_byte * irqs.argsz).from_buffer(bytearray(bytes(irqs)) + struct.pack('i', self.irq_fd.fd)))
     else: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR).write("1")
 
-    self.cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
-
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     return System.alloc_sysmem(size, vaddr, contiguous)
 
-  def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
-  def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
-  def write_config(self, offset:int, value:int, size:int): self.cfg_fd.write(value.to_bytes(size, byteorder='little'), binary=True, offset=offset)
+  def reset_lock(self, lock=True): fcntl.lockf(self.lock_fd, fcntl.LOCK_EX if lock else fcntl.LOCK_UN)
+  def reset(self):
+    if hasattr(self, "vfio_dev"): return vfio.VFIO_DEVICE_RESET(self.vfio_dev)
+    os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
+  def read_config(self, offset:int, size:int): return int.from_bytes((r:=self.region())[0].read(size, True, r[1]+offset), 'little')
+  def write_config(self, offset:int, value:int, size:int): (r:=self.region())[0].write(value.to_bytes(size, 'little'), True, r[1]+offset)
   def write_config_flush(self, offset:int, value:int, size:int):
     self.write_config(offset, value, size)
     self.read_config(offset, size)
 
   @functools.cache
-  def bar_fd(self, bar_idx:int) -> FileIOInterface:
-    return FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar_idx}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
+  def region(self, idx:int=vfio.VFIO_PCI_CONFIG_REGION_INDEX) -> tuple[FileIOInterface, int]: # fd and offset of a bar or the config space
+    if hasattr(self, "vfio_dev"): return self.vfio_dev, idx << 40 # VFIO_PCI_OFFSET_SHIFT
+    return FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/{f'resource{idx}' if idx < 6 else 'config'}", os.O_RDWR|os.O_SYNC|os.O_CLOEXEC), 0
   @functools.cache
   def bar_info(self, bar_idx:int) -> tuple[int, int]:
     s, e, _ = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()[bar_idx].split()
@@ -259,8 +269,8 @@ class PCIDevice:
     if hasattr(self, "vfio_dev"): addr = System.vfio_map(self.map_bar(bar_idx, size=sz).addr, sz, sz)
     return addr, sz
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
-    fd, sz = self.bar_fd(bar), size or (self.bar_info(bar)[1] - off)
-    libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
+    (fd, base), sz = self.region(bar), size or (self.bar_info(bar)[1] - off)
+    libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|(MAP_FIXED if addr else 0), base+off), sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
   def resize_bar(self, bar_idx:int):
     rpath = f"/sys/bus/pci/devices/{self.pcibus}/resource{bar_idx}_resize"
@@ -335,6 +345,13 @@ class PCIIfaceBase:
 
   def p2p_paddrs(self, paddrs:list[tuple[int,int]]) -> tuple[list[tuple[int,int]], AddrSpace]:
     return [(p + self.pci_dev.bar_info(self.vram_bar)[0], sz) for p, sz in paddrs], AddrSpace.SYS
+
+  def storage(self, mem:MMIOInterface, paddrs:list[int], snooped:bool=True) -> BufferStorage:
+    va = MemoryManager.alloc_vaddr(size:=round_up(mem.nbytes, 0x1000), 0x1000)
+    mapping = VirtMapping(va, size, [(p, 0x1000) for p in paddrs], AddrSpace.SYS, uncached=True, snooped=snooped)
+    return BufferStorage(va, PCIAllocationMeta(mapping, True), mem)
+  def buffer(self, mem:MMIOInterface, paddrs:list[int], snooped:bool=True) -> Buffer:
+    return Buffer(self.dev.device, mem.nbytes, opaque=self.storage(mem, paddrs, snooped))
 
   def map(self, b:Buffer) -> BufferStorage:
     if (host:=b.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}):
@@ -441,6 +458,7 @@ class RemotePCIDevice(PCIDevice):
     return self.cpu_view(host_va, size), paddrs
   def free_sysmem(self, view:MMIOInterface): self.rpc(RemoteCmd.UNMAP_SYSMEM, view.addr, view.nbytes)
   def cpu_view(self, addr:int, size:int) -> MMIOInterface: return RemoteMMIOInterface(self, 0, addr, size, sysmem=True)
+  def reset_lock(self, lock=True): pass # no local lock for a remote device
   def reset(self): self.rpc(RemoteCmd.RESET)
   def read_config(self, offset:int, size:int): return self.rpc(RemoteCmd.CFG_READ, offset, size)[0]
   def write_config(self, offset:int, value:int, size:int): self.rpc(RemoteCmd.CFG_WRITE, offset, size, value)

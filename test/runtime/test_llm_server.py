@@ -18,6 +18,16 @@ class TestTransformerGenerate(unittest.TestCase):
     model.warmup()
     self.assertIsInstance(next(model.generate([5, 6, 7, 8])), int)
 
+  def test_fixed_position_count(self):
+    model = Transformer(TEST_CONFIG)
+    tokens, temperature = Tensor([[1], [2]]), Tensor([0.0])
+    for positions in [(0, 0), (1, 1), (2, 0)]:
+      model(tokens, positions, temperature).realize()
+    self.assertEqual(model.rollout_jit.cnt, 3)
+    self.assertIsNotNone(model.rollout_jit.captured)
+    with self.assertRaisesRegex(AssertionError, "position count is fixed"):
+      model(tokens, (3,), temperature)
+
   def test_first_recurrent_generate_before_state_init(self):
     model = Transformer(TEST_CONFIG)
     model.has_recurrent_block = True
@@ -36,7 +46,7 @@ class TestTransformerGenerate(unittest.TestCase):
     with patch.object(Transformer, '__call__', mock_call):
       next(model.generate([1, 2, 3, 4, 5, 42, 10]))
     # resumes from the reused state at position 5 and consumes the 2 new tokens (one chunk or two decode steps)
-    self.assertEqual(calls[0][1], V_START_POS.bind(5))
+    self.assertEqual(calls[0][1], (V_START_POS.bind(5),))
     def ntok(shape): return shape[1] if isinstance(shape[1], int) else shape[1].unbind()[1]
     self.assertEqual(sum(ntok(c[0]) for c in calls), 2)
 
@@ -47,7 +57,7 @@ class TestTransformerGenerate(unittest.TestCase):
       calls.append(start_pos)
       return Tensor([[42]])
     with patch.object(Transformer, '__call__', mock_call): next(model.generate([1, 2, 10, 11]))
-    self.assertEqual(calls[0], V_START_POS.bind(0))
+    self.assertEqual(calls[0], (V_START_POS.bind(0),))
 
   def test_kv_cache_reuse(self):
     """Test that generate reuses the KV cache when tokens extend the cached prefix."""
@@ -72,7 +82,7 @@ class TestTransformerGenerate(unittest.TestCase):
       next(gen)
 
     # should process tokens[6:] = [42, 10, 11, 12] since first 6 have cached k/v
-    self.assertEqual(captured_inputs, [((1, V_TOKS.bind(4)), V_START_POS.bind(6))])
+    self.assertEqual(captured_inputs, [((1, V_TOKS.bind(4)), (V_START_POS.bind(6),))])
 
   def test_kv_cache_invalidation(self):
     """Test that generate invalidates the KV cache when tokens diverge from the cached prefix."""
@@ -94,7 +104,7 @@ class TestTransformerGenerate(unittest.TestCase):
       next(gen)
 
     # should process all 3 tokens from start
-    self.assertEqual(captured_inputs, [((1, V_TOKS.bind(3)), V_START_POS.bind(0))])
+    self.assertEqual(captured_inputs, [((1, V_TOKS.bind(3)), (V_START_POS.bind(0),))])
 
   def test_two_prompts_schedule_cache(self):
     """Third prompt should hit the schedule cache, not miss (first two warm up both jits: prefill + decode)."""
@@ -204,7 +214,7 @@ class TestTransformerGenerate(unittest.TestCase):
   def test_recurrent_temperature_high_produces_variety(self):
     model = Transformer(TEST_CONFIG)
     model.has_recurrent_block = True
-    outputs = {model.forward(Tensor([[1]]), 0, Tensor([2.0])).item() for _ in range(5)}
+    outputs = {model.forward(Tensor([[1]]), Tensor([2.0]), 0).item() for _ in range(5)}
     self.assertGreater(len(outputs), 1)
 
   def test_temperature_passed_to_forward(self):

@@ -138,7 +138,6 @@ class TestFp8sConversions(unittest.TestCase):
     # e4m3 and the fnuz fp8s have no inf, so their extremes (the MAX/MIN reduce identities) are finite values that round trip
     for dt in dtypes.fp8s: self.assertEqual(Tensor([dt.min, dt.max], dtype=dt).float().tolist(), [dt.min, dt.max])
 
-  @Context(EMULATED_DTYPES="fp8e4m3,fp8e5m2,fp8e4m3fnuz,fp8e5m2fnuz")
   def test_cast_rounds(self):
     for dt in dtypes.fp8s: self.assertEqual(Tensor([1.0625]).cast(dt).float().tolist(), [1.0])
 
@@ -146,6 +145,14 @@ class TestFp8sConversions(unittest.TestCase):
   def test_cast_nonfinite(self):
     x = [math.inf, -math.inf, math.nan]
     for dt in dtypes.fp8s: self.assertEqual(Tensor(x).cast(dt).bitcast(dtypes.uint8).tolist(), [float_to_fp8(v, dt) for v in x])
+
+  def test_nan_compare(self):
+    for dt in dtypes.fp8s:
+      self.assertEqual((Tensor([math.nan]).cast(dt).float() < 1e6).tolist(), [False])
+      self.assertEqual((Tensor([math.nan]).cast(dt).realize().float() < 1e6).tolist(), [False])
+      x = Tensor([True, False]).where(-math.inf, 0.).cast(dt)
+      fused = (x.float() < 1).tolist()
+      self.assertEqual(fused, (x.realize().float() < 1).tolist())
 
   @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E4M3_MAX, max_value=FP8E4M3_MAX))
   def test_float_to_fp8e4m3(self, x):
@@ -338,6 +345,9 @@ class TestUint8DType(TestDType):
   @unittest.skipIf(Device.DEFAULT == "CUDA" or isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "cuda saturation works differently")
   def test_uint8_to_int8_overflow(self):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
+  @unittest.skipIf(Device.DEFAULT == "CUDA" or isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "cuda saturation works differently")
+  def test_uint8_to_int8_overflow_compare(self):
+    self.assertEqual((Tensor([128, 5], dtype=dtypes.uint8).cast(dtypes.int8) < 0).tolist(), [True, False])
 
 class TestBitCast(unittest.TestCase):
   def test_subword_slice(self):

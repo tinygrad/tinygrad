@@ -392,35 +392,6 @@ jobs:
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
-  testusbgpu:
-    name: UsbGPU Benchmark
-    runs-on: [self-hosted, macOS]
-    timeout-minutes: 3
-    defaults:
-      run:
-        shell: bash -e -o pipefail {0}
-    if: github.repository_owner == 'tinygrad'
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: setup staging db
-      if: github.ref == 'refs/heads/update_benchmark_staging'
-      run: |
-        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
-        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
-    - name: Kill stale pids
-      run: |
-        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
-        ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
-    - name: reset chestnut
-      run: python3 extra/usbgpu/debug.py -rnw
-    - name: UsbGPU boot time
-      run: GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3.11 test/test_tiny.py TestTiny.test_plus
-    - name: UsbGPU tiny tests
-      run: GMMU=0 DEV=USB+AMD python3.11 test/test_tiny.py
-    - name: UsbGPU copy speeds
-      run: SIZE=64000000 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py
-
   testcomma:
     strategy:
       matrix:
@@ -433,7 +404,7 @@ jobs:
             timing: 12
       fail-fast: false
     name: openpilot ${{ matrix.model }} (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, Linux, comma4]
+    runs-on: comma
     timeout-minutes: 5
     defaults:
       run:
@@ -453,8 +424,6 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
-    - name: reset process replay
-      run: test/external/process_replay/reset.py
     - name: compile
       run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/${{ matrix.model }}.onnx" openpilot.pkl
     - name: run pickle
@@ -473,7 +442,7 @@ jobs:
 
   testqualcommdsp:
     name: DSP Benchmark
-    runs-on: [self-hosted, Linux, comma4]
+    runs-on: comma
     timeout-minutes: 5
     defaults:
       run:
@@ -487,25 +456,23 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
-    - name: reset process replay
-      run: test/external/process_replay/reset.py
     - name: benchmark MobileNetV2 on DSP
       run: |
         # generate quantized weights
-        ln -s ~/tinygrad/extra/datasets/imagenet extra/datasets/imagenet
-        ln -s ~/tinygrad/testsig-*.so .
+        ln -s /data/imagenet extra/datasets/imagenet
+        ln -s /data/testsig-*.so .
         PYTHONPATH=. DEV=CPU QUANT=1 CNT=0 python3 examples/test_onnx_imagenet.py https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx /tmp/model.quant.onnx
         # benchmark on DSP with NOOPT=1, the devectorizer has issues
         PYTHONPATH=. DEV=DSP NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
-  testcommausbgpubenchmark:
-    name: openpilot UsbGPU Benchmark
+  testusbgpu:
+    name: UsbGPU Benchmark
     env:
       LFS_SHA: "51b12d20a25b76fa8a5717c2e5af01f148e469e2"
     runs-on: usb3-9060
-    timeout-minutes: 14
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -520,6 +487,10 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset chestnut
       run: python3 extra/usbgpu/debug.py -rnw
+    - name: UsbGPU boot time
+      run: GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3 test/test_tiny.py TestTiny.test_plus
+    - name: UsbGPU tiny tests
+      run: GMMU=0 DEV=USB+AMD python3 test/test_tiny.py
     - name: openpilot compile big_driving_supercombo
       run: |
         GMMU=0 DEV=USB+AMD:LLVM python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx" openpilot.pkl --out-of-band --retargetable
@@ -535,7 +506,7 @@ jobs:
 
   drivertests:
     name: PCI Driver Tests (DEV=${{ matrix.dev }})
-    runs-on: ${{ matrix.dev == 'AMD' && '9060xt' || '3080' }}
+    runs-on: ${{ matrix.dev == 'AMD' && '9060xt' || '5060' }}
     strategy:
       fail-fast: false
       matrix:

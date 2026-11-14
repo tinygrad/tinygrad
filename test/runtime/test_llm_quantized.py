@@ -2,8 +2,8 @@ import gc, itertools, unittest, weakref
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, function, Device, TinyJit
 from tinygrad.helpers import Context
-from tinygrad.llm.kernels.amd import (Linear, fp8_matmul, amd_custom_kernels_supported, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS,
-                                      iq4_half_lut, _iq_grid)
+from tinygrad.llm.kernels.amd import Linear, fp8_matmul, amd_custom_kernels_supported
+from tinygrad.llm.kernels.amd_gguf import QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, iq4_half_lut, _iq_grid
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.llm.model import ExpertWeights
 from tinygrad.llm.hf import e4m3fn_to_fnuz
@@ -19,6 +19,7 @@ class QuantLinearMixin:
     elif ggml_type == 10:
       packed[:, 80:82] = np.array([0.001], dtype=np.float16).view(np.uint8)
       packed[:, 82:84] = np.array([0.0002], dtype=np.float16).view(np.uint8)
+    elif ggml_type == 39: packed.reshape(-1, 17)[:, 0] = rng.integers(122, 128, packed.size//17)  # mxfp4 e8m0 scales
     elif ggml_type in SMALL_BLOCK_QUANTS:
       packed.reshape(-1, SMALL_BLOCK_QUANTS[ggml_type]*2)[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
     else: packed[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
@@ -105,16 +106,16 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         linear.set_quantized(decoded)
         linear.weight.realize()
         self.assertEqual(linear.ggml_type, ggml_type)
-        self.assertEqual(linear.weight.dtype, dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32)
+        self.assertEqual(linear.weight.dtype, dtypes.uint8 if ggml_type == 39 else dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32)
         self.assertEqual(linear.weight.nbytes(), type_size)
         np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), packed[offset:])
         raw.assign(raw.full_like(1)).realize()
         np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), np.ones(type_size, dtype=np.uint8))
 
   def test_small_block_quant_weights(self):
-    for ggml_type, halfwords in SMALL_BLOCK_QUANTS.items():
+    for ggml_type, words in SMALL_BLOCK_QUANTS.items():
       with self.subTest(ggml_type=ggml_type):
-        packed = np.arange(25*halfwords*2, dtype=np.uint8)
+        packed = np.arange(25*words*(1 if ggml_type == 39 else 2), dtype=np.uint8)
         raw = Tensor(packed).realize()[0:]
         if raw.uop.contiguous_view() is None: self.skipTest("requires buffer views")
         linear = Linear(800, 1, bias=False)

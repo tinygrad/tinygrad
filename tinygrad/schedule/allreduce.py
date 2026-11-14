@@ -44,11 +44,11 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
       chunks_on_i = [buf.mselect(j).reshape((numel,)).shrink(((s,e),)).copy_to_device(buf.device[i]) for j in range(ndev)]
       reduced_chunks.append(functools.reduce(lambda x,y: x.alu(op, y), chunks_on_i))
     else:
-      chunk, reduced = buf.reshape((numel,)).shrink(((s,e),)), buf.reshape((numel,)).shrink(((s,e),))
+      chunk = reduced = buf.reshape((numel,)).shrink(((s,e),))
       for step in range(ndev-1):
         src, dest = (i+step)%ndev, (i+step+1)%ndev
         cp = (reduced.mselect(src) if isinstance(reduced.device, tuple) else reduced).copy_to_device(buf.device[dest])
-        reduced = cp.alu(op, chunk.mselect(dest).copy_to_device(buf.device[dest]))
+        reduced = cp.alu(op, chunk.mselect(dest))
       reduced_chunks.append(reduced)
 
   # allgather

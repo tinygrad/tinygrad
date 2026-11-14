@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, pathlib, re, time, typing, uuid
+import functools, json, pathlib, queue, re, socket, socketserver, threading, time, traceback, typing, uuid
 from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
@@ -9,6 +9,13 @@ if TYPE_CHECKING:
 
 def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
   s = s.strip()
+  # Kimi-K3 format: tool="name" index="1"<|sep|><|open|>argument key="key" type="string"<|sep|>value<|close|>argument<|sep|>...
+  if (m := re.fullmatch(r'tool="([^"]+)"(?: index="\d+")?<\|sep\|>(.*)', s, re.DOTALL)):
+    pattern = r'<\|open\|>argument key="([^"]+)" type="([^"]+)"<\|sep\|>(.*?)<\|close\|>argument<\|sep\|>'
+    if re.sub(pattern, '', m[2], flags=re.DOTALL).strip(): return None
+    def unescape(v:str) -> str: return v.replace('&quot;', '"').replace('&amp;', '&')
+    try: return unescape(m[1]), {unescape(a[1]): a[3] if a[2] == "string" else json.loads(a[3]) for a in re.finditer(pattern, m[2], re.DOTALL)}
+    except json.JSONDecodeError: return None
   if s.startswith("{"):  # hermes JSON format: {"name": ..., "arguments": {...}}
     try:
       call = json.loads(s)
@@ -40,9 +47,21 @@ def normalize_messages(messages:list[dict]) -> None:
     if m.get("content", "") is None: m["content"] = ""
     elif isinstance(c := m.get("content"), list) and all(p.get("type") == "text" for p in c): m["content"] = "".join(p["text"] for p in c)
 
+def disconnected(conn:socket.socket) -> bool:
+  # non-blocking peek, b'' means the client closed (or half-closed). assumes no socket timeout is set.
+  try: return conn.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT) == b''
+  except BlockingIOError: return False
+  except OSError: return True
+
 class StreamRouter:
   # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse
-  def __init__(self, reasoning:bool=False):
+  # (start think, end think, end content, tool call)
+  FORMATS = (("<think>", "</think>", "<tool_call>", r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)"),
+             ("<|open|>think<|sep|>", "<|close|>think<|sep|><|open|>response<|sep|>", "<|close|>response<|sep|>",
+              r"<\|open\|>call \s*(.*?)\s*(?:<\|close\|>call<\|sep\|>|$)"))
+  def __init__(self, special_tokens:dict[str, int], reasoning:bool=False):
+    self.think, self.end_think, self.end_content, self.call = next((f for f in self.FORMATS if any(f[2].startswith(t) for t in special_tokens)),
+                                                                   self.FORMATS[0])
     self.buf = ""
     self.mode = "reasoning" if reasoning else "undecided"  # output inside a think block is sent as reasoning_content
   def split(self, tag:str, final:bool) -> tuple[str, bool]:
@@ -56,17 +75,25 @@ class StreamRouter:
   def route(self, piece:str, final:bool=False) -> typing.Iterator[tuple[str, str]]:
     self.buf += piece
     if self.mode == "undecided":  # decide whether the output starts with a think block
-      if not final and len(self.buf) < len("<think>") and "<think>".startswith(self.buf): return
-      self.mode, self.buf = ("reasoning", self.buf[len("<think>"):]) if self.buf.startswith("<think>") else ("content", self.buf)
+      if not final and len(self.buf) < len(self.think) and self.think.startswith(self.buf): return
+      self.mode, self.buf = ("reasoning", self.buf[len(self.think):]) if self.buf.startswith(self.think) else ("content", self.buf)
     if self.mode == "reasoning":
-      emit, done = self.split("</think>", final)
+      emit, done = self.split(self.end_think, final)
       if emit: yield "reasoning_content", emit
       if not done: return
       self.mode = "content"
     if self.mode == "tool": return
-    emit, found = self.split("<tool_call>", final)
+    emit, found = self.split(self.end_content, final)
     if emit: yield "content", emit
-    if found: self.mode, self.buf = "tool", "<tool_call>" + self.buf
+    if found: self.mode, self.buf = "tool", self.end_content + self.buf
+
+class Request:
+  def __init__(self, ids:list[int], disconnected:typing.Callable[[], bool], max_tokens:int|None=None, temperature:float=0.0, log_prefix:str=""):
+    self.ids, self.disconnected, self.max_tokens, self.temperature, self.log_prefix = ids, disconnected, max_tokens, temperature, log_prefix
+    self.finish_reason = "stop"
+    self.cached_tokens = 0
+    self.error: Exception|None = None
+    self.out: queue.Queue[int|None] = queue.Queue()
 
 class Handler(VizHandler):
   server: LLMServer
@@ -75,62 +102,47 @@ class Handler(VizHandler):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     elif self.path.startswith("/assets/"): super().do_GET()
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
-  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0,
-                reasoning:bool=False):
-    model, tok = self.server.model, self.server.tok
-    prompt_tokens = len(ids)
-    cache_start_pos = model.get_start_pos(ids)
-    stderr_log(f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
+  def run_model(self, req:Request, model_name:str, include_usage:bool=False, reasoning:bool=False, continuous_usage:bool=False):
+    tok = self.server.tok
+    prompt_tokens = len(req.ids)
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
-    def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
     out: list[int] = []
-    finish_reason = "stop"
-    st = pt = time.perf_counter()
+    def usage():
+      return {"prompt_tokens": prompt_tokens, "completion_tokens": len(out), "total_tokens": prompt_tokens + len(out),
+              "prompt_tokens_details": {"cached_tokens": req.cached_tokens}}
+    def chunk(d:dict, finish_reason:str|None=None):
+      ret = {"choices": [{"index":0, "delta":d, "finish_reason":finish_reason}], **tmpl}
+      if continuous_usage: ret["usage"] = usage()
+      return ret
     dec = tok.stream_decoder()
-    router = StreamRouter(reasoning)
-    def log_stats(interrupted:bool=False):
-      et = time.perf_counter()
-      total = f"total:{et-st:6.2f}s"
-      stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
-                 f"out:{len(out):5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if interrupted else total}\n")
-    completed = False
-    try:
-      yield chunk({"role":"assistant", "content":""})
-      for next_id in model.generate(ids, temperature=temperature):
-        if len(out) == 0:
-          stderr_log(f"prefill:{(prompt_tokens-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-        if tok.is_end(next_id): break
-        out.append(next_id)
-        for field, delta in router.route(dec(next_id)): yield chunk({field:delta})
-        if max_tokens is not None and len(out) >= max_tokens:
-          finish_reason = "length"
-          break
-      for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
-      tool_calls: list[dict] = []
-      for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
-        if (parsed := parse_tool_call(m.group(1))) is None:
-          stderr_log(f"failed to parse tool call: {m.group(1)[:200]}")
-          yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
-        else:
-          name, args = parsed
-          tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
-                             "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
-      if tool_calls:
-        yield chunk({"tool_calls":tool_calls})
-        if finish_reason == "stop": finish_reason = "tool_calls"
-      completed = True
-      yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
-      if include_usage:
-        yield {"choices": [], "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(out),
-                                        "total_tokens": prompt_tokens + len(out)}, **tmpl}
-      log_stats()
-    except GeneratorExit:
-      if not completed: log_stats(interrupted=True)
-      raise
-
+    router = StreamRouter(tok._special_tokens, reasoning)
+    self.server.waiting.put(req)
+    yield chunk({"role":"assistant", "content":""})
+    while (next_id := req.out.get()) is not None:
+      out.append(next_id)
+      for field, delta in router.route(dec(next_id)): yield chunk({field:delta})
+    if req.error is not None:
+      yield {"error":{"message":f"{type(req.error).__name__}: {req.error}", "type":"server_error", "code":"generation_failed"}}
+      return
+    finish_reason = req.finish_reason
+    for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
+    tool_calls: list[dict] = []
+    for m in re.finditer(router.call, router.buf, re.DOTALL):
+      if (parsed := parse_tool_call(m.group(1))) is None:
+        stderr_log(f"{colored('failed to parse tool call', 'red')}: {m.group(1)[:200]}\n")
+        yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
+      else:
+        name, args = parsed
+        tool_calls.append({"index":len(tool_calls), "id":f"call_{uuid.uuid4().hex[:24]}", "type":"function",
+                           "function":{"name":name, "arguments":args if isinstance(args, str) else json.dumps(args)}})
+    if tool_calls:
+      yield chunk({"tool_calls":tool_calls})
+      if finish_reason == "stop": finish_reason = "tool_calls"
+    yield chunk({}, finish_reason)
+    if include_usage: yield {"choices": [], "usage": usage(), **tmpl}
   def do_POST(self):
     request_st = time.perf_counter()
-    stderr_log(f"{self.path}  {colored('--', 'BLACK')}  ")
+    log_prefix = f"{self.path}  {colored('--', 'BLACK')}  "
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
@@ -139,22 +151,27 @@ class Handler(VizHandler):
       normalize_messages(body["messages"])
       rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True, preserve_thinking=True)
       ids: list[int] = self.server.tok.encode(rendered)
-      stderr_log(f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  ")
+      log_prefix += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
       if len(ids) >= self.server.model.max_context:
-        stderr_log(f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{self.server.model.max_context:5d}\n")
+        stderr_log(log_prefix + f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{self.server.model.max_context:5d}\n")
         return self.send_data(json.dumps({"error":{"message":f"prompt has {len(ids)} tokens, but the model context is "
           f"{self.server.model.max_context}", "type":"invalid_request_error", "param":"messages", "code":"context_length_exceeded"}}).encode(),
           status_code=400)
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
-      chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
-                              reasoning=rendered.rstrip().endswith("<think>"))
+      req = Request(ids, functools.partial(disconnected, self.connection), max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
+                    log_prefix=log_prefix)
+      stream_options = body.get("stream_options", {})
+      include_usage = not body.get("stream") or stream_options.get("include_usage", False)
+      continuous_usage = include_usage and stream_options.get("continuous_usage_stats", False)
+      chunks = self.run_model(req, body["model"], include_usage, continuous_usage=continuous_usage,
+                              reasoning=rendered.rstrip().endswith(tuple(f[0] for f in StreamRouter.FORMATS)))
       if body.get("stream"): self.stream_json(chunks)
       else:
         out, reasoning, tool_calls, finish_reason = [], [], [], "stop"
         for c in chunks:
+          if "error" in c: return self.send_data(json.dumps(c).encode(), status_code=500)
           if not c["choices"]: continue
           choice = c["choices"][0]
           if (delta := choice.get("delta", {})):
@@ -165,12 +182,57 @@ class Handler(VizHandler):
         message: dict[str, typing.Any] = {"role":"assistant", "content":"".join(out) or None}
         if reasoning: message["reasoning_content"] = "".join(reasoning)
         if tool_calls: message["tool_calls"] = tool_calls
-        self.send_data(json.dumps({**c, "object":"chat.completion",
-          "choices":[{"index":0, "message":message, "finish_reason":finish_reason}]}).encode())
+        try:
+          self.send_data(json.dumps({**c, "object":"chat.completion",
+            "choices":[{"index":0, "message":message, "finish_reason":finish_reason}]}).encode())
+        except (BrokenPipeError, ConnectionResetError): pass
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
-class LLMServer(TCPServerWithReuse):
+class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
+  daemon_threads = True
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any):
     self.model, self.model_name, self.tok, self.template = model, model_name, tok, template
+    self.waiting: queue.Queue[Request|None] = queue.Queue()
     super().__init__(server_address, Handler)
+
+  def serve_forever(self, poll_interval:float=0.5):
+    # inference runs on the caller's thread: BEAM with PARALLEL=0 uses SIGALRM, which only works on the main thread
+    threading.Thread(target=super().serve_forever, args=(poll_interval,), daemon=True, name="HTTPServer").start()
+    while (req := self.waiting.get()) is not None:
+      try:
+        if req.disconnected(): stderr_log(req.log_prefix + f"{colored('cancelled while queued', 'red')}\n")
+        else:
+          for next_id in self.generate(req): req.out.put(next_id)  # TODO: batch decodes across requests (batched_step)
+      except Exception as e:
+        traceback.print_exc()
+        req.error = e
+      req.out.put(None)
+
+  def shutdown(self):
+    # a request queued after the sentinel is never picked up, so its handler thread waits forever. fine since handlers are daemon threads
+    super().shutdown()
+    self.waiting.put(None)
+
+  def generate(self, req:Request):
+    n, finished = 0, False
+    req.cached_tokens = cache_start_pos = self.model.get_start_pos(req.ids)
+    stderr_log(req.log_prefix + f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(req.ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
+    prompt_tokens = len(req.ids)
+    st = pt = time.perf_counter()
+    try:
+      for next_id in self.model.generate(req.ids, temperature=req.temperature):
+        if n == 0: stderr_log(f"prefill:{(prompt_tokens-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
+        if self.tok.is_end(next_id): break
+        if req.disconnected(): return
+        yield next_id
+        n += 1
+        if req.max_tokens is not None and n >= req.max_tokens:
+          req.finish_reason = "length"
+          break
+      finished = True
+    finally:
+      et = time.perf_counter()
+      total = f"total:{et-st:6.2f}s"
+      stderr_log(f"gen:{n/(et-pt) if n > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
+                 f"out:{n:5d}  {colored('--', 'BLACK')}  {colored(total, 'red') if not finished else total}\n")

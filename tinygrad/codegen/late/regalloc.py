@@ -3,7 +3,6 @@ from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.x86 import ISARenderer, Register, rdef, regs, with_regs, LinearContext
 from typing import Any
-from dataclasses import replace
 
 PSEUDO_OPS = {Ops.CONST, Ops.CAST, Ops.BITCAST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.STACK}
 
@@ -105,20 +104,20 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   for j,s in enumerate(x.src):
     # v here is the virtual defined by the original s as s is the rewritten version
     if (v:=rdef(ctx.uops[i].src[j])) in ctx.reals.get(i, {}):
-      reg = replace(ctx.reals[i][v], size=v.size)
+      reg = ctx.reals[i][v]
       if v in ctx.spills:
         fill = ctx.ren.fill(ctx.spills[v], ctx.vdef(v), reg)
         # an AFTER-wrapped value (e.g. a RANGE bound) keeps its ordering deps around the fill
         nsrc.append(s.replace(src=(fill,)+s.src[1:]) if s.op is Ops.AFTER else fill)
       else: nsrc.append(retag(s, reg))
     else: nsrc.append(s)
-  nx = with_regs(x.replace(src=tuple(nsrc)), tuple(replace(ctx.reals[i][v], size=v.size) for v in regs(x))) if regs(x) else x.replace(src=tuple(nsrc))
+  nx = with_regs(x.replace(src=tuple(nsrc)), tuple(ctx.reals[i][v] for v in regs(x))) if regs(x) else x.replace(src=tuple(nsrc))
 
-  before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), replace(r, size=v.size)) for v,r in ctx.insert_before.get(i, [])]
+  before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), r) for v,r in ctx.insert_before.get(i, [])]
   after = [ctx.ren.spill(ctx.spills[v], nx) for v in regs(x) if v in ctx.spills]
 
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END} | PSEUDO_OPS, name="x"), regalloc_rewrite),
+  (UPat({Ops.INS, Ops.BUFFER, Ops.ALLOC, Ops.RANGE, Ops.END} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])

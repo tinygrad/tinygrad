@@ -19,6 +19,9 @@ mop_cleanup = PatternMatcher([
   # const INDEX into STACK is src
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i")), name="idx", allow_any_len=True),
    lambda a,i,idx: a.src[i.val] if len(idx.src) <= 2 else a.src[i.val].index(*idx.src[2:])),
+  # INDEX into STACK past the first axis indexes each lane, then selects
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.var("i")), name="idx", allow_any_len=True),
+   lambda a,i,idx: None if len(idx.src) <= 2 else a.replace(src=tuple(x.index(*idx.src[2:]) for x in a.src)).index(i)),
   # INDEX on INDEX is INDEX
   (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, name="idx1"),), allow_any_len=True, name="idx2"),
    lambda idx1,idx2: idx1.src[0].index(*idx1.src[1:], *idx2.src[1:]) if all(x.shape == () for x in idx1.src[1:]+idx2.src[1:]) else None),

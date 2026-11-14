@@ -66,6 +66,18 @@ class TestCustomKernel(unittest.TestCase):
     ast = Tensor.custom_kernel(acc, a, b, fxn=kernel)[0].schedule_linear().src[-1].src[0]
     with self.assertRaises(KernelOptError): to_program(ast, ren)
 
+  def test_index_wmma_after_range(self):
+    # a WMMA is a shaped value that stays shaped, its index lowers with the AFTER outside
+    ren = AMDLLVMRenderer(Target("AMD", arch="gfx1100"))
+    tc = ren.tensor_cores[0]
+    def kernel(B:UOp) -> UOp:
+      lane = UOp.range(tc.threads, 0, AxisType.LOCAL)
+      a, b = (UOp.const((1,)*2**len(f[1]), tc.dtype_in) for f in (tc.frag_a, tc.frag_b))
+      c = UOp.const((0,)*2**len(tc.frag_c[1]), tc.dtype_out)
+      return B[lane].store(UOp.wmma(a, b, c, tc.dims, tc.threads).after(lane).index(0)).end(lane).sink(arg=KernelInfo(opts_to_apply=()))
+    ast = Tensor.custom_kernel(Tensor.empty(tc.threads, dtype=tc.dtype_out), fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    self.assertEqual(len([u for u in to_program(ast, ren).src[1].src if u.op is Ops.WMMA]), 1)
+
   def test_split_loop_local_barrier(self):
     # t%2 splits the t loop. tmp is stored and loaded in the loop, so the end of the loop still needs a barrier
     def kernel(C:UOp, A:UOp) -> UOp:

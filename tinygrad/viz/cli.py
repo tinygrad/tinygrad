@@ -80,7 +80,8 @@ def fmt_all(k:dict) -> str:
 
 @Context(ALLOW_DEVICE_USAGE=0)
 def main(args) -> None:
-  viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
+  if len(args.paths) == 1: args.paths.append(None)
+  viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.paths[1], default=RewriteTrace([], [], {}))))
 
   def emit(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
@@ -96,8 +97,8 @@ def main(args) -> None:
           for line in m["diff"]: print(emit(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
     if data.get("src") is not None: print(emit(data["src"]))
 
-  profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
-  if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
+  profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.paths[0], default=[]))
+  if profile_bytes is None: raise RuntimeError(f"empty profile in {args.paths[0]}")
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["_data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
@@ -226,10 +227,8 @@ def get_arg_parser() -> argparse.ArgumentParser:
   parser.add_argument("--interval", nargs="+", metavar=("START", "END"), help="Optional start and end marker")
   parser.add_argument("-t", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
   parser.add_argument("-q", "--query", nargs="+", default=[], metavar="REGEX", help="Search query")
-  parser.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
-                      default=temp("profile.pkl", append_user=True))
-  parser.add_argument("--rewrites-path", type=str, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
-                      default=temp("rewrites.pkl", append_user=True))
+  parser.add_argument("--paths", nargs="+", metavar=("PROFILE", "REWRITES"), help="Paths to profile and optional rewrites (default: latest files)",
+                      default=[temp("profile.pkl", append_user=True), temp("rewrites.pkl", append_user=True)])
   parser.add_argument("--json", action="store_true", help="Emit profiler output as JSON")
   return parser
 

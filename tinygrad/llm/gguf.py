@@ -6,6 +6,7 @@ from tinygrad.device import Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
+from tinygrad.uop.ops import UOp
 
 # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
 def _ggml_iq_grid(device: str|tuple[str, ...]|None, grid: tuple[int, ...], grid_shape: tuple[int, int]) -> Tensor:
@@ -170,12 +171,11 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       return (dl * (grid + delta)).flatten(-4)
     if ggml_type == 39:
       e = blocks[:, 0].cast(dtypes.uint32)
-      small_bits = Tensor([0x00200000, 0x00400000], dtype=dtypes.uint32, device=t.device)[e.clip(0, 1).cast(dtypes.int32)] # e = 0 or e = 1 case
+      small_bits = Tensor.const((0x00200000, 0x00400000), dtypes.uint32).to(t.device, force=True)[e.clip(0, 1).cast(dtypes.int32)] # e < 2
       d = (e < 2).where(small_bits, (e - 1) * 0x00800000).bitcast(dtypes.float32).unsqueeze(-1)
       codes = q_to_uint8(blocks[:, 1:17], 4)
-      fp4_lut = Tensor([0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0,
-                       -0.0,-1.0,-2.0,-3.0,-4.0,-6.0,-8.0,-12.0],
-                      dtype=dtypes.float32, device=t.device)
+      fp4_lut = Tensor.const((0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0,
+                             -0.0,-1.0,-2.0,-3.0,-4.0,-6.0,-8.0,-12.0), dtypes.float32).to(t.device, force=True)
       fp4_val = fp4_lut[codes]
       return (fp4_val * d).flatten(-2)[:n]
     if ggml_type == 41:
@@ -248,12 +248,32 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   kv, entries = gguf_parse(fn)
   return kv, gguf_shard(entries, (Device.DEFAULT,))
 
+class GGUFPackedTable:
+  """
+  Quantized rows mmapped from the GGUF file: `write` copies rows into host memory slots, `read` decodes the slots on device.
+  """
+  __slots__ = ("data", "width", "typ", "row_bytes", "table", "rows")
+  def __init__(self, entry:tuple[Tensor, tuple[int, ...], int]):
+    data, (n_rows, self.width), self.typ = entry
+    self.data, self.row_bytes, self.table = data, data.nbytes() // n_rows, data._buffer().as_memoryview(allow_zero_copy=True)
+  def write(self, start:int, ids:list[list[int]], slots:int):
+    if not hasattr(self, "rows"): self.rows = Tensor.empty(slots, len(ids[0]), self.row_bytes, dtype=dtypes.uint8, device="CPU").realize()
+    rows, rb = self.rows._buffer().as_memoryview(allow_zero_copy=True), self.row_bytes
+    rows[start*len(ids[0])*rb:(start+len(ids))*len(ids[0])*rb] = b"".join(self.table[i*rb:(i+1)*rb] for slot in ids for i in slot)
+  def read(self, start:int|UOp, n:int, device:str|tuple[str, ...]|None) -> Tensor:
+    return ggml_data_to_tensor(self.rows[start:start+n].to(device).flatten(), n*int(self.rows.shape[1])*self.width, self.typ)
+
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
-               shard_map:dict[str, int]|None=None) -> dict[str, Tensor]:
+               shard_map:dict[str, int]|None=None, repeats:dict[str, int]|None=None) -> dict[str, Tensor]:
   """
   Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
+  A tensor in `repeats` is first cut into `len(devices)//repeats` row blocks that are each repeated `repeats` times.
   """
   n, packed, shard_map = len(devices), {}, shard_map or {}
+  for name, r in (repeats or {}).items():
+    data, shape, typ = entries[name]
+    if n % r or shape[0] % (n//r): raise ValueError(f"{name}: can't repeat {shape} {r} times over {n} devices")
+    entries[name] = (data.to("CPU").reshape(n//r, -1).repeat_interleave(r, 0).flatten(), (shape[0]*r, *shape[1:]), typ)
   for name, (data, shape, typ) in entries.items():
     if (axis:=shard_map.get(name)) is None: packed[name] = data.shard(devices)
     else:
