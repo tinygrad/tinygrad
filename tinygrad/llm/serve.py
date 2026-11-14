@@ -1058,6 +1058,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     # (an agent's own ones: the others' differ in their task, at the start)
     own = [t[:n] for t, n in cands if n > exact and t[:(m:=min(2048, n // 2, len(ids) // 2))] == ids[:m]]
     for t in sorted(own, key=lambda t: common_prefix(t, ids), reverse=True)[:2]:
+      # (VISION: not one with pictures (their rows' ids aren't text): its prompt is the tokens of its text and pictures as they are)
+      if getattr(self, "vision", None) is not None and min(t) < 0: continue
       if rendered.startswith(text:=self.tok.decode(t)): return t + self.tok.encode(rendered[len(text):])
     return ids
 
@@ -1066,7 +1068,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     kept = [t for t, n in self.kept() if n == len(t) >= start + 2000 <= len(ids) and t[start+1999] == ids[start+1999]]
     n, t = max(((common_prefix(t, ids), t) for t in kept if same_start(t, ids)), key=lambda x: x[0], default=(0, []))
     if n - start < 2000: return
-    dec = self.tok.decode
+    def dec(t:list[int]) -> str: return self.tok.decode([x for x in t if x >= 0])  # (VISION: a picture's rows aren't text)
     stderr_log(colored(f"cache miss: prefilled from {start}, shares {n} of {len(t)} kept tokens: kept {dec(t[max(0,n-30):n+30])!r} "
                        f"vs {dec(ids[max(0,n-30):n+30])!r}\n", "yellow"))
 
@@ -1569,7 +1571,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           if not c.generated: c.cache_start, c.queued = start, time.perf_counter() - c.st
           self.telemetry.cache_observe(c.session_id, len(ids), self.model.max_context, start, eng.last_take_stash)
           c.fill, c.cold = (ids, start, restore), len(ids) - start > self.COLD_TOKENS
-          if active and 0 < len(ids) - start <= mix_tokens:
+          if active and 0 < len(ids) - start <= mix_tokens and min(ids[start:]) >= 0:
             # (SEQ_MIX_TOKENS: force this short suffix in the draft slots of the ordinary steps, beside the other sequences)
             eng.mix_start(job, ids, start, restore, c.sampling)
             active[job] = c

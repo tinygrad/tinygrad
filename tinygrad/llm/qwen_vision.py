@@ -53,6 +53,7 @@ class Picture:
   def grid(self) -> tuple[int, int]: return self.rgb.shape[0] // FACTOR, self.rgb.shape[1] // FACTOR  # (its rows' rows and columns)
   @property
   def tokens(self) -> int: return self.grid[0] * self.grid[1]
+  def ids(self) -> list[int]: return picture_ids(self.digest, *self.grid)
 
 def data_url_bytes(url:Any) -> bytes:
   """the file of a data: URL of an image (base64); anything else a PictureError (the server fetches no http(s) URL, reads no path)"""
@@ -139,6 +140,34 @@ def patches(rgb:np.ndarray) -> tuple[np.ndarray, tuple[int, int]]:
   x = x.reshape(TEMPORAL, 3, gh // MERGE, MERGE, PATCH, gw // MERGE, MERGE, PATCH)
   x = x.transpose(2, 5, 3, 6, 1, 0, 4, 7)                               # (gh/2, gw/2, 2, 2, c, t, py, px)
   return np.ascontiguousarray(x.reshape(gh * gw, 3 * TEMPORAL * PATCH * PATCH)), (gh, gw)
+
+# ******** a picture in the prompt: the ids of its rows in the host's token lists (the prefix cache, the checkpoints and the stash match them; the
+# device's token buffer has the image pad id there), and the M-RoPE positions of a prompt's rows ********
+# a row's id: -(1 + (H << 28 | cols << 14 | k)), H 60 bits of the picture's sha256, cols its rows' columns (the merged grid's width), k the row
+# (0 .. n-1): a picture's rows are the same ids only for the same picture (and size), and the ids say where a picture starts and its grid. (the
+# ids are Python ints of the host's lists only (88 bits): the device's token buffer has the image pad there, see Transformer._dev_ids)
+ID_BITS, H_BITS = 14, 60
+
+def picture_ids(digest:bytes, rows:int, cols:int) -> list[int]:
+  """the ids of the rows x cols rows of a picture whose sha256 (of the pixels, and the resize bounds) is digest"""
+  assert 0 < cols < 1 << ID_BITS and 0 < rows * cols <= 1 << ID_BITS, f"a picture of {rows} x {cols} rows"
+  base = (int.from_bytes(digest[:8], "little") & ((1 << H_BITS) - 1)) << (2 * ID_BITS) | cols << ID_BITS
+  return [-(1 + (base | k)) for k in range(rows * cols)]
+
+def picture_runs(ids:list[int]) -> list[tuple[int, int, int, int]]:
+  """the pictures of a token list: (first row, rows count n, cols, first row's id) each (a run of a picture's ids, k from 0 counting up)"""
+  ret, i, L, mask = [], 0, len(ids), (1 << ID_BITS) - 1
+  while i < L:
+    if ids[i] >= 0:
+      i += 1
+      continue
+    v = -ids[i] - 1
+    assert v & mask == 0, f"a picture's rows from its first one: id {ids[i]} at {i}"
+    j = i + 1
+    while j < L and ids[j] == -(1 + (v | (j - i))): j += 1
+    ret.append((i, j - i, (v >> ID_BITS) & mask, ids[i]))
+    i = j
+  return ret
 
 # ******** the tower ********
 
