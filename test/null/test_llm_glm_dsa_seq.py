@@ -266,6 +266,26 @@ class TestGLMDSASequence(unittest.TestCase):
       tok = model._sample(Tensor(lg, device="CPU"), temps, "CPU", noise).numpy().reshape(-1)
     self.assertEqual(list(tok[:12]), [7]*8 + [42]*4)
 
+  def test_seq_prefill_runout_retried(self):
+    # (P2P_RETRY: the engine's prefill after a p2p run-out runs the prompt again (same args); slices (upto) and a third run-out raise)
+    from tinygrad.llm.kernels.amd_glm_dsa import P2PRunOut
+    model = Transformer.__new__(Transformer)
+    model.token_embd = SimpleNamespace(weight=SimpleNamespace(device=("NULL:0", "NULL:1")))
+    calls = []
+    def base(self, *a):
+      calls.append(a)
+      if len(calls) == 1: raise P2PRunOut("ran out")
+      return 77
+    with patch.object(glm_dsa.GLMSeqDriver, "seq_prefill", base), patch.object(glm_dsa.Device, "__getitem__", lambda self, d: Mock()):
+      self.assertEqual(model.seq_prefill(3, 0, [1, 2, 3], 0, 0), 77)
+      self.assertEqual(len(calls), 2)
+      self.assertEqual(calls[0], calls[1])
+      calls.clear()
+      with self.assertRaises(P2PRunOut): model.seq_prefill(3, 0, [1, 2, 3], 0, 0, 0.0, 2)
+    def always(self, *a): raise P2PRunOut("ran out")
+    with patch.object(glm_dsa.GLMSeqDriver, "seq_prefill", always), patch.object(glm_dsa.Device, "__getitem__", lambda self, d: Mock()):
+      with self.assertRaises(P2PRunOut): model.seq_prefill(3, 0, [1, 2, 3], 0, 0)
+
   def test_p2p_late_raises(self):
     # (a p2p poll that ran out: its sums wrong. a long wait reads the devices' notes and raises, never returns the tokens)
     import time

@@ -2431,6 +2431,28 @@ class Transformer(GLMSeqDriver):
     v_mtp, v_j, v_pos, v_par, v_chain = self._spec_vars
     self._spec_jit(v_mtp.bind(mtp_pos), v_j.bind(j), v_pos.bind(pos), v_par.bind(par), temperature, *(v.bind(pos+1+i) for i,v in enumerate(v_chain)))
 
+  def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, ...]=0.0,
+                  upto:int|None=None) -> int|None:
+    """
+    the sequence engine's prefill (glm5next), its p2p run-out retried (P2P_RETRY, default 2): a p2p poll that ran out in the prompt's chunks
+    (P2P_AR_TIMEOUT_MS: a stalled exchange; the sums of its step wrong, P2PRunOut at the wait for the token) runs the prompt from start again:
+    every cache row from start written again, the token buffer reset, the same values (the epochs and mailboxes are consistent after a
+    run-out). its slot's states read at start (hrow, keep) are the ones the failed run wrote back: only the first token's draft (MTP) can differ.
+    slices (upto: not waited for) are not retried: a run-out there is seen by a later wait. P2P_RETRY_TEST=1: the first prefill's token taken
+    as a run-out (the retry's path without a stalled card)
+    """
+    retries = 0
+    while True:
+      try:
+        out = super().seq_prefill(slot, base, tokens, start, hrow, temp, upto)
+        if upto is None and getenv("P2P_RETRY_TEST", 0) and retries == 0: raise P2PRunOut("P2P_RETRY_TEST: the first prefill taken as a run-out")
+        return out
+      except P2PRunOut as e:
+        if upto is not None or (retries:=retries+1) > getenv("P2P_RETRY", 2): raise
+        print(f"seq_prefill: {e}: the prompt again from {start} ({retries})", flush=True)
+        for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
+        self._p2p_mark = time.perf_counter()
+
   def _wait_host(self, get:Callable[[], Any], what:str) -> Any:
     """the value a step writes to host memory (polled: -1 until then). a step that doesn't come (the devices' errors): an error, not a hang"""
     st = time.perf_counter()
