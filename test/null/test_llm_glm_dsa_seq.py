@@ -576,6 +576,26 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertEqual(out.shape, (hl, T, 512))
     if Device.DEFAULT.startswith("NULL:HIP"): out.realize()
 
+  def test_indexer_exact_topk(self):
+    # (IDX_EXACT: the indexer's exact top k: with ties at the k-th the keys above it all, the tied ones by the lowest pools. a second radix
+    # select (its 4 passes) in the 3 kernels; default off: one. build and lower (DEV=NULL:HIP:gfx1100); the values with ties at the cut
+    # against numpy on a card: results/w-pf53/cand512/exact_check.py)
+    import tinygrad.llm.kernels.amd_glm_dsa as K
+    self.assertEqual(K.IDX_EXACT, 0)
+    P, k, c, n, rows, Q = 4096, 2048, 512, 4, 8, UOp.const(1 << 20, dtypes.weakint)
+    def passes(t:Tensor) -> int: return sum(1 for u in t.uop.src[1].src[0].toposort() if u.op is Ops.RANGE and 20 <= u.axis_id[0] < 28)
+    for exact in (False, True):
+      common = dict(q_start=Q, pools=UOp.const(P, dtypes.weakint), kpool=1, exact=exact)
+      pi = Tensor.custom_kernel(Tensor.empty(rows, k + 1, dtype=dtypes.int32), Tensor.empty(rows, P),
+                                fxn=functools.partial(K._pool_index_kernel, k=k, **common))[0]
+      cd = Tensor.custom_kernel(Tensor.empty(rows, c, 2), Tensor.empty(rows, P // n), Tensor.empty(1, dtype=dtypes.int32),
+                                fxn=functools.partial(K._pool_cand_kernel, k=c, n=n, **common))[0]
+      mg = Tensor.custom_kernel(Tensor.empty(rows, k + 1, dtype=dtypes.int32), Tensor.empty(n, rows, c, 2),
+                                fxn=functools.partial(K._pool_merge_kernel, k=k, **common))[0]
+      for t in (pi, cd, mg):
+        self.assertEqual(passes(t), 8 if exact else 4)
+        if Device.DEFAULT.startswith("NULL:HIP"): t.realize()
+
   def test_moe_persist(self):
     # (MOE_PERSIST: the exact bundles by P workgroups an output block looping over moe_bundles' count, not a grid of every possible bundle)
     import tinygrad.llm.kernels.amd_glm_dsa as K
