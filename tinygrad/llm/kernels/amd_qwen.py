@@ -1490,15 +1490,15 @@ def f16t_gemm(x:Tensor, wt:Tensor) -> Tensor|None:
 
 def merged_linear(layers:list[Linear]) -> Linear|None:
   """
-  one Linear of the layers' rows (Q8_0, the same input, split on their outputs over the devices) if their weights are views of adjacent bytes
-  of every device's memory (the loader's): a view of them (no copy). None if not
+  one Linear of the layers' rows (Q8_0 or Q6_K, all of one type, the same input, split on their outputs over the devices) if their weights are
+  views of adjacent bytes of every device's memory (the loader's): a view of them (no copy). None if not
   """
   from tinygrad.device import MultiBuffer
   for l in layers:
     if l.ggml_type is None and l.use_custom_quant and amd_custom_kernels_supported(l.weight.device): l.set_quantized(l.weight)
   l0 = layers[0]
-  if l0.ggml_type != Q8_0 or any(l.ggml_type != Q8_0 or l.shard_axis != 0 or l.in_features != l0.in_features or l.out_features != l0.out_features
-                                 or l.bias is not None for l in layers): return None
+  if l0.ggml_type not in (Q8_0, Q6_K) or any(l.ggml_type != l0.ggml_type or l.shard_axis != 0 or l.in_features != l0.in_features or
+                                             l.out_features != l0.out_features or l.bias is not None for l in layers): return None
   # (the buffer every weight is a view of)
   bufs = [[u.buffer for u in l.weight.uop.toposort() if u.op is Ops.BUFFER and isinstance(u.buffer, MultiBuffer)] for l in layers]
   if any(len(b) != 1 for b in bufs): return None
@@ -1512,7 +1512,7 @@ def merged_linear(layers:list[Linear]) -> Linear|None:
   devs = cast(tuple[str, ...], l0.weight.device)
   with Linear.empty_init(): merged = Linear(l0.in_features, l0.out_features*len(layers), bias=False)
   merged.weight = Tensor(UOp.from_buffer(mb, dtypes.uint8, devs).reshape(1, -1).unshard(0)).flatten().bitcast(l0.weight.dtype).contiguous()
-  merged.ggml_type, merged.shard_axis = Q8_0, 0
+  merged.ggml_type, merged.shard_axis = l0.ggml_type, 0
   return merged
 
 def q8_linear_parts(merged:Linear, x:Tensor, n:int) -> list[Tensor]|None:
@@ -1522,13 +1522,14 @@ def q8_linear_parts(merged:Linear, x:Tensor, n:int) -> list[Tensor]|None:
   """
   tokens = int(x.numel()) // merged.in_features
   devs, K = x.device, merged.in_features
-  if not isinstance(devs, tuple) or not 16 < tokens <= 96 or K % 32 or not amd_custom_kernels_supported(devs): return None
+  if not isinstance(devs, tuple) or not 16 < tokens <= 96 or K % (256 if merged.ggml_type == Q6_K else 32) or \
+     not amd_custom_kernels_supported(devs): return None
   ne = merged.out_features // n
   P = round_up(tokens, 32)
   # (MERGED_TT: the token tile, default the rows' (a tile of 32 more workgroups, the weights dequantized once a tile))
   tt = next(t for t in (getenv("MERGED_TT", 96), 96, 64, 32) if P % t == 0)
   outs = [Tensor.empty(tokens, ne, dtype=dtypes.float32, device=devs, axis=1) for _ in range(n)]
-  fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=Q8_0, block_n=64, k_splits=1, rdna4=_wmma_rdna4(devs), n_out=n,
+  fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=merged.ggml_type, block_n=64, k_splits=1, rdna4=_wmma_rdna4(devs), n_out=n,
                           out_features=merged.out_features // len(devs), in_features=K)
   res = Tensor.custom_kernel(*outs, merged.weight, x.reshape(tokens, K).cast(dtypes.float16).contiguous(), fxn=fxn)[:n]
   return [r.reshape(*x.shape[:-1], ne) for r in res]
