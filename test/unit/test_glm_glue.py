@@ -144,3 +144,20 @@ class TestSpRsSkip(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
+
+@unittest.skipUnless(Device.DEFAULT == "AMD", "the pack / unpack kernels are wave kernels (lane exchanges): AMD only")
+class TestAgQ4(unittest.TestCase):
+  # (AG_Q4: the all-gather's rows as q4 groups: every value within half a step (its group's absolute max / 14) of the float row, all devices alike)
+  def test_within_step(self):
+    Tensor.manual_seed(12)
+    devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(3))
+    x = (Tensor.randn(1, 48, 256) * Tensor([1.0, 3e3, 1e-3] * 16).reshape(1, 48, 1)).realize()
+    real_getenv = amd_glm_dsa.getenv
+    with patch.object(amd_glm_dsa, "getenv", side_effect=lambda k, d=0: 1 if k == "AG_Q4" else real_getenv(k, d)):
+      g = amd_glm_dsa.all_gather_q8(x.shard(devs, 1).realize(), 1).realize()
+    xn = x.numpy()[0]
+    step = np.abs(xn.reshape(48, 8, 32)).max(-1, keepdims=True).repeat(32, -1).reshape(48, 256) / 14
+    bound = step * 1.01 + 1e-3 * np.abs(xn).max(-1, keepdims=True)
+    for dev in devs:
+      err = np.abs(g.to(dev).numpy()[0].astype(np.float32) - xn)
+      self.assertTrue((err <= bound).all(), f"{dev}: max err / bound {(err / bound).max()}")
