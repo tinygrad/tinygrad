@@ -1067,8 +1067,8 @@ class FFNBlock:
     tile = MOE_TILE if _wmma_rdna4(x.device) or i8 else 32
     # (MOE_TILE16 (RDNA3, IQ3_S gate|up with the K256 sub-blocks unrolled by XH or UNROLL): tiles of 16 rows when the experts have few
     # rows each (a warm turn's chunk): half the tensor core work of a tile of 32 mostly padding, the same bits per row)
-    if tile == 32 and (amd_qwen.k256_xh(gate_exps.ggml_type) or (amd_qwen.K256_UNROLL and gate_exps.ggml_type == IQ3_S)) and \
-       gate_exps.ggml_type in amd_qwen.k256_types(False) and isinstance(T, int) and \
+    if tile == 32 and (amd_qwen.k256_xh(unwrap(gate_exps.ggml_type)) or (amd_qwen.K256_UNROLL and gate_exps.ggml_type == IQ3_S)) and \
+       gate_exps.ggml_type in amd_qwen.k256_types(False) and gate_exps.ggml_type != IQ4_XS and isinstance(T, int) and \
        _moe_use_tile16(cast(int, B) * T * int(sel.shape[-1]), self.config.num_experts): tile = 16
     _, entries, tiles, pos = moe_route(sel, gate_exps.first, gate_exps.local_experts, tile)
     k, sel_shape = int(sel.shape[-1]), sel.shape[-3:]

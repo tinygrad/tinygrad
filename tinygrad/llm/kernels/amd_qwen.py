@@ -967,6 +967,16 @@ K256_R4_GRID = getenv("K256_R4_GRID", 0)
 # Q8_TT96: RDNA3 q8_gemm of 768-2304 rows in token tiles of 96 (block 128, two groups a stage) when they divide them. same bits
 # (tr9 extra/q8_serial.py 1152 rows: 1024x2560 91.0 -> 86.0 us, 6144x2560 427 -> 409, 2560x1024 86.8 -> 83.8; warm 1152-row chunk -2 ms)
 Q8_TT96 = getenv("Q8_TT96", 1)
+# Q6K_TILES: RDNA3 Q6_K gemm of many rows (the V3.1 file's attention, gated deltanet and shared expert projections; not the output head) in the
+# first token tile / output block of Q6K_TILE_ORDER with Q6K_WG workgroups or more (else 32 x 64), not the output head's 192 first. same bits
+# (the sums along K in the same order). k1 one card (results/w-gpf/pf/out-k1-2157): 2304 rows 2560 -> 1024 284 -> 240 us, 2560 -> 128 163 ->
+# 109; 1152 rows 2560 -> 128 158 -> 96, 2560 -> 2048 295 -> 243
+Q6K_TILES, Q6K_WG = getenv("Q6K_TILES", 1), getenv("Q6K_WG", 128)
+Q6K_TILE_ORDER = ((96, 128), (128, 128), (96, 64), (128, 64), (64, 64), (32, 64))
+def q6k_tile(rows:int, out:int) -> tuple[int, int]|None:
+  """the token tile and output block of the Q6_K gemm of rows x out (see Q6K_TILES), None: no tile of the order fits"""
+  fits = [(t, bn) for t, bn in Q6K_TILE_ORDER if rows % t == 0 and out % bn == 0]
+  return next(((t, bn) for t, bn in fits if rows // t * (out // bn) >= Q6K_WG), fits[-1] if fits else None)
 MAD_I24 = "({{ int r_; __asm__(\"v_mad_i32_i24 %0, %1, %2, %3\" : \"=v\"(r_) : \"v\"({0}), \"v\"({1}), \"v\"({2})); r_; }})"
 
 @functools.cache
@@ -1569,6 +1579,9 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   q6_gemm = not skinny and layer.ggml_type == Q6_K and xq is None and not split and tokens >= 17 and layer.in_features % 256 == 0
   # (the output head of 65-96 rows (22-32 sequences of 3 drafts): a tile of 96 rows, the gemm reads the last row again past them, not 128)
   q6_rows = q6_gemm and 64 < tokens <= 96
+  # (Q6K_TILES: the tile by the workgroups of the shape, the projections' few outputs a device; the output head as before)
+  q6_shape = q6k_tile(round_up(tokens, 64 if tokens > 32 else 32), dev_out) if Q6K_TILES and q6_gemm and not q6_rows and not rdna4 and \
+    dev_out <= 16384 else None
   pad = round_up(tokens, 64 if tokens > 32 else 32) if q6_gemm and tokens % (64 if tokens > 32 else 32) and not q6_rows else \
         round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny and not q6_rows else \
         round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) and not skinny else 0
@@ -1610,7 +1623,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     out_shape = (splits*ksplits*P, out_features)
   elif (layer.ggml_type == Q8_0 or q6_gemm) and xq is None and (local_out % 128 == 0 or tokens >= 1024 or q6_gemm or few_out_long) and \
        in_features % 32 == 0 and (rdna4 or local_rows >= 256 or few_out_long or q6_gemm) and \
-       (tt:=next((t for t in ((192, 128, 96, 64, 32) if q6_gemm else (96, 128, 64, 32) if rdna4 else
+       (tt:=next((t for t in ((q6_shape[0],) if q6_shape else (192, 128, 96, 64, 32) if q6_gemm else (96, 128, 64, 32) if rdna4 else
                               ((96,) if Q8_TT96 and 768 <= local_rows <= 2304 and local_out % 128 == 0 and local_out >= 512 else ()) +
                               (128 if local_out % 128 == 0 and local_out >= 512 else 64, 64, 32)) if (P if q6_rows else local_rows) % t == 0), 0)):
     # many tokens: the weights dequantized in LDS for token tiles of tt
@@ -1622,7 +1635,8 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     mr = m_rows if TILE16 and split and not rdna4 and 0 < m_rows < local_rows else 0
     if mr and mr <= 16: tt = 16
     fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=layer.ggml_type, rdna4=rdna4,
-                            block_n=128 if rdna4 or (local_out % 128 == 0 and ksplits == 1 and tt in (96, 128)) else 64, k_splits=ksplits,
+                            block_n=q6_shape[1] if q6_shape else 128 if rdna4 or (local_out % 128 == 0 and ksplits == 1 and tt in (96, 128)) else 64,
+                            k_splits=ksplits,
                             rows=rows if split and 0 < rows < local_rows else 0, m_rows=mr)
     if q6_rows: out_shape = (splits*P, out_features)
     srcs = (x.cast(dtypes.float16).contiguous(),)
