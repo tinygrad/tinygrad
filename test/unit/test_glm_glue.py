@@ -45,6 +45,31 @@ class TestHalfRowsG(unittest.TestCase):
     finally: amd_glm_dsa.HALF_ROWS_G = g0
     self.assertTrue((s1.numpy() > 1).any())
 
+  def _vs_one(self, x:Tensor, tokens:int, splits:int, G:int):
+    g0 = amd_glm_dsa.HALF_ROWS_G
+    try:
+      amd_glm_dsa.HALF_ROWS_G = 1
+      h1, s1 = (t.realize() for t in amd_glm_dsa._half_rows(x, tokens, splits))
+      amd_glm_dsa.HALF_ROWS_G = 16
+      self.assertEqual(amd_glm_dsa._half_rows_parts(tokens, x.shape[-1] // splits), G)
+      h2, s2 = amd_glm_dsa._half_rows(x, tokens, splits)
+      np.testing.assert_array_equal(_bits(s2.realize()), _bits(s1))
+      np.testing.assert_array_equal(_bits(h2.realize()), _bits(h1))
+    finally: amd_glm_dsa.HALF_ROWS_G = g0
+    self.assertTrue((s1.numpy() > 1).any())
+
+  def test_parts_divide_width(self):
+    # (a width not of 16 x 32s: the most parts that divide it, 2816 = 11 x 256)
+    Tensor.manual_seed(6)
+    self._vs_one((Tensor.randn(1, 512, 2816) * Tensor([1.0, 3e5, 1e-3, 7e4] * 128).reshape(1, 512, 1)).realize(), 512, 1, 11)
+
+  def test_splits_parts(self):
+    # (a row parallel layer's input: every device's part of a row its own scale, the parts inside the device's part)
+    Tensor.manual_seed(7)
+    devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    x = Tensor.randn(1, 512, 2*2816) * Tensor([1.0, 3e5, 1e-3, 7e4] * 128).reshape(1, 512, 1)
+    self._vs_one(x.shard(devs, 2).realize(), 512, 2, 11)
+
   def test_row_split_unchanged(self):
     # (a row split over the devices (axis 1): the one-reduce path, the reshape into parts would move items between shards)
     devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
@@ -85,6 +110,25 @@ class TestIdxQBlk(unittest.TestCase):
         np.testing.assert_array_equal(u[..., 4:].view(np.uint32), v[..., 4:].view(np.uint32))  # (the unroped dims: copies)
         np.testing.assert_allclose(u, v, rtol=1e-6, atol=1e-7)
       self.assertTrue((b[-1][Tq - 1056*(len(b)-1):] == 0).all() and len(b[-1]) > Tq - 1056*(len(b)-1))  # (the padding rows: 0)
+
+@unittest.skipUnless(Device.DEFAULT == "AMD", "the pack / sum kernels are wave kernels (lane exchanges): AMD only")
+class TestSpRsSkip(unittest.TestCase):
+  # (SP_RS_SKIP: a device packs only the rows it sends, not its own (summed from its float partial): the same sums, bit for bit)
+  def _check(self, fmt:str):
+    Tensor.manual_seed(11)
+    devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(3))
+    p = (Tensor.randn(3, 1, 48, 256) * Tensor([1.0, 3e3, 1e-3] * 16).reshape(1, 1, 48, 1)).shard(devs, 0).realize()
+    outs = []
+    real_getenv = amd_glm_dsa.getenv
+    for sk in (0, 1):
+      with patch.object(amd_glm_dsa, "getenv", side_effect=lambda k, d=0, sk=sk: sk if k == "SP_RS_SKIP" else real_getenv(k, d)):
+        outs.append(amd_glm_dsa.sp_reduce_scatter(p, fmt).realize())
+    self.assertEqual(outs[1].shape, (1, 48, 256))
+    np.testing.assert_array_equal(_bits(outs[1]), _bits(outs[0]))
+    # (and near the float sum: the others' parts quantized)
+    np.testing.assert_allclose(outs[1].numpy(), p.numpy().sum(0), rtol=0.2, atol=0.3 * np.abs(p.numpy()).max(-1, keepdims=True).sum(0))
+  def test_q4(self): self._check("q4")
+  def test_q8(self): self._check("q8")
 
 if __name__ == "__main__":
   unittest.main()
