@@ -153,6 +153,8 @@ class TestCeilDiv(unittest.TestCase):
     v = Variable('v', 11, 100)
     result = ceildiv(v - 5, 6)
     self.assertEqual(result.render(), "(v//6)")
+  def test_float(self):
+    self.assertEqual(ceildiv(3, 0.6), 5)
 
 class TestCount(unittest.TestCase):
   def test_count_basic(self):
