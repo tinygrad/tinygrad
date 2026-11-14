@@ -2147,7 +2147,10 @@ class Transformer:
   def _forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None, base:int|UOp, part:int|None=None) -> Tensor:
     # (a view of the token buffer from a variable base: copied, the lookup of the embedding's rows of a view at two variables is a reduce over
     # the vocabulary)
-    x = emb = self.token_embd((tokens.contiguous() if isinstance(base, UOp) else tokens).to(self.token_embd.weight.device)).float()  # (B, T, D)
+    tokens = (tokens.contiguous() if isinstance(base, UOp) else tokens).to(self.token_embd.weight.device)
+    # (an IQ4_XS table (the V3.1 file's): its lazy dequantization does not fuse into the gather: the whole table (2.4 GiB in float) would be a
+    # jit intermediate of every prefill chunk size. The Q8_0 one fuses: unchanged)
+    x = emb = (self._embed(tokens) if getattr(self, "_embd_iq4xs", None) is not None else self.token_embd(tokens).float())  # (B, T, D)
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     ple = None
     if (pc:=self.config.ple) is not None:
