@@ -395,6 +395,10 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertIs(sink(need, Tensor.empty(8, 34, dtype="int32"), fxn=_seq_need_kernel).op, Ops.SINK)
     self.assertIs(sink(Tensor.empty(256, 576, dtype="half"), part, dev, need, fxn=functools.partial(_seq_gather_kernel, start_pos=sp, k=1, n=4)).op,
                   Ops.SINK)
+    # (SEQ_GATHER_UNION=p: from position p on, before it every position)
+    self.assertIs(sink(need, Tensor.empty(8, 34, dtype="int32"), fxn=functools.partial(_seq_need_kernel, start_pos=sp, thr=65536)).op, Ops.SINK)
+    self.assertIs(sink(Tensor.empty(256, 576, dtype="half"), dev, *[Tensor.empty(64, 144, dtype="uint64") for _ in range(4)], need,
+                       fxn=functools.partial(_seq_gather_fused_kernel, start_pos=sp, n=4, thr=65536)).op, Ops.SINK)
     self.assertIs(sink(Tensor.empty(64, 66, dtype="int32"), Tensor.empty(40, 66, dtype="int32"),
                        fxn=functools.partial(_rows_into_kernel, row0=8, rows=30)).op, Ops.SINK)
     q, cache, index = Tensor.empty(5*16*4, 576, dtype="half"), Tensor.empty(256, 576, dtype="half"), Tensor.empty(4, 66, dtype="int32")
