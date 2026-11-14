@@ -235,7 +235,7 @@ def rope_cos_sin(gh:int, gw:int, head_dim:int, theta:float=10000.0) -> tuple[np.
 def attn_pack(q:Tensor, k:Tensor, v:Tensor, km:Tensor) -> tuple[Tensor, Tensor]:
   """the fused attention's inputs (see VisionTower._attn_fused): q (heads, n, D) F16, kv (2, 1, heads, n, D) F16, D = hd + 1 up to 32's"""
   H, n, hd = q.shape
-  D = -(-(hd + 1) // 32) * 32
+  D = -(-(int(hd) + 1) // 32) * 32
   kb = (km.reshape(1, n, 1) < -1).where(-60000.0, 0.0).expand(H, n, 1)
   qh = Tensor.cat(q * math.sqrt(D / hd), q.ones_like()[..., :1], q.zeros_like()[..., :D - hd - 1], dim=-1).half()
   kh = Tensor.cat(k, kb, k.zeros_like()[..., :D - hd - 1], dim=-1).half()
@@ -282,8 +282,8 @@ class VisionTower:
 
   def _ln(self, x:Tensor, w:Tensor, b:Tensor) -> Tensor: return x.layernorm(eps=self.eps) * w.float() + b.float()
 
-  def _lin(self, x:Tensor, w:Tensor, b:Tensor) -> Tensor:
-    if self.kernels: return x.half().matmul(w.half().T, dtype=dtypes.float) + b.float()  # (an F32 mmproj's weights: F16 here)
+  def _lin(self, x:Tensor, w:Tensor, b:Tensor, wmma:bool=True) -> Tensor:
+    if self.kernels and wmma: return x.half().matmul(w.half().T, dtype=dtypes.float) + b.float()  # (an F32 mmproj's weights: F16 here)
     return x @ w.float().T + b.float()
 
   def _attn_fused(self, q:Tensor, k:Tensor, v:Tensor, km:Tensor) -> Tensor:
@@ -345,10 +345,10 @@ class VisionTower:
     for i in range(a, b): x = self._block(i, x, cos, sin, km)
     if b < self.depth: return self._carry(n, self.block_dev[b - 1]).assign(x).realize()
     x = self._ln(x.to(self.devices[-1]), self.post_w, self.post_b).reshape(n // (MERGE * MERGE), -1)
-    if self.kernels: x = x.half().contiguous()
-    h = self._lin(x, *self.mm[0])
+    # (the merger in float: its WMMA matmul at the small buckets spills 632 B a thread: a scratch on the last card the model doesn't have)
+    h = self._lin(x, *self.mm[0], wmma=False)
     h = 0.5 * h * (1 + (h / math.sqrt(2)).erf())   # (HF nn.GELU(): the erf form)
-    return self._lin(h, *self.mm[1]).realize()
+    return self._lin(h, *self.mm[1], wmma=False).realize()
 
   def _carry(self, n:int, dev:str) -> Tensor:
     """the buffer of the rows between two slices of a bucket of n patches on a device (one a bucket and device, made once)"""
