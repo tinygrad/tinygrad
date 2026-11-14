@@ -47,7 +47,7 @@ class TestCustomKernel(unittest.TestCase):
   def test_upcast_split_range(self):
     # j%2 splits j into two UPCAST ranges, the expander expands both, so no loop is left
     def kernel(C:UOp, A:UOp) -> UOp:
-      i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.UPCAST)
+      i, j = UOp.range(4, 0, AxisType.WEAK), UOp.range(8, 1, AxisType.UPCAST)
       return C[i, j].store(A[i, j] + (j%2).cast(A.dtype)).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
     ast = Tensor.custom_kernel(Tensor.empty(4, 8), Tensor.empty(4, 8), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
@@ -58,7 +58,7 @@ class TestCustomKernel(unittest.TestCase):
     ren = AMDLLVMRenderer(Target("AMD", arch="gfx1100"))
     i, tc = next((i, tc) for i, tc in enumerate(ren.tensor_cores) if tc.dtype_in is dtypes.half and tc.dtype_out is dtypes.float)
     def kernel(ACC:UOp, A:UOp, B:UOp) -> UOp:
-      t, j, k = UOp.range(A.shape[0], 0, AxisType.LOOP), UOp.range(B.shape[1], 1), UOp.range(A.shape[1], 2)
+      t, j, k = UOp.range(A.shape[0], 0, AxisType.LOOP), UOp.range(B.shape[1], 1, AxisType.WEAK), UOp.range(A.shape[1], 2, AxisType.WEAK)
       mm = (A[t, k] * B[k, j]).cast(dtypes.float).reduce(k, arg=Ops.ADD)
       return ACC[j].store(ACC.after(t)[j] + mm).end(t).end(j).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.TC, 0, (i, 0, 1)),)))
     N, M, K = tc.dims

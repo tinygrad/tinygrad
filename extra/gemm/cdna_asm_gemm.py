@@ -144,8 +144,8 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   K2, N = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2
-  m = UOp.range(M, 1)
-  n = UOp.range(N, 2)
+  m = UOp.range(M, 1, AxisType.WEAK)
+  n = UOp.range(N, 2, AxisType.WEAK)
   k = UOp.range(K, 0, AxisType.LOOP)
   mul = (A.flatten().index((m*UOp.const(K)+k))*
          B.flatten().index((k*UOp.const(N)+n))).cast(dtypes.float32)

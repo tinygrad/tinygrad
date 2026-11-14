@@ -83,9 +83,9 @@ def _render_arg(x:UOp, ref:Callable[[UOp], str|None]=lambda _: None) -> str:
   """the args, written after the srcs"""
   if (a:=x.arg) is None: return ""
   if x.op is Ops.CONST: return _const_str(x)
-  if x.op is Ops.RANGE:   # like UOp.range the axis defaults to WEAK. flatten_range merges slots: slot=[1 2]
+  if x.op is Ops.RANGE:   # like UOp.range the axis defaults to LOOP. flatten_range merges slots: slot=[1 2]
     slot = a[1] if len(a) == 2 else a[1:]
-    return f"slot={_val(slot, False, ref)}" + ("" if a[0] is AxisType.WEAK else f" axis={a[0].name}")
+    return f"slot={_val(slot, False, ref)}" + ("" if a[0] is AxisType.LOOP else f" axis={a[0].name}")
   if x.op is Ops.REDUCE: return f"op={a[0].name.lower()}" + (f" pop={a[1]}" if a[1] else "")
   if x.op is Ops.ALLREDUCE: return f"op={a[0].name.lower()} device={_val(a[1], False, ref)}"
   if type(a) is _struct_args().get(x.op):
@@ -148,7 +148,7 @@ def _build(name:str, srcs:tuple[UOp, ...], kv:dict[str, Any]) -> UOp:
   if set(kv) == {"arg"}: arg = kv["arg"]
   elif op is Ops.RANGE:
     slot = kv["slot"]
-    arg = (kv.get("axis", AxisType.WEAK), *(slot if isinstance(slot, tuple) else (slot,)))
+    arg = (kv.get("axis", AxisType.LOOP), *(slot if isinstance(slot, tuple) else (slot,)))
   elif op is Ops.REDUCE: arg = (kv["op"], kv.get("pop", 0))
   elif op is Ops.ALLREDUCE: arg = (kv["op"], kv["device"])
   elif struct is not None and (kv or op is Ops.CALL): arg = struct(**kv)   # a CALL always has a CallInfo
