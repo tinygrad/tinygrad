@@ -2718,6 +2718,24 @@ def _q8_unpack_kernel(out:UOp, *parts:UOp) -> UOp:
   return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q8_unpack", opts_to_apply=()))
 
 @functools.cache
+def _q4_unpack_kernel(out:UOp, *parts:UOp) -> UOp:
+  # the halves of the q4 groups (q4_pack): a lane eight inputs (a word), times the group's scale. parts: the rows in that many parts
+  T, D = cast(tuple[int, int], out.shape)
+  G, rows = D // 32, T // len(parts)
+  assert G % 8 == 0, f"q4_unpack: {G} groups of 32 a row, not whole warps of 8 (the rest of the row would be left unwritten)"
+  tg8, lane = UOp.range(T*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
+  def load(w:UOp|int) -> UOp:
+    if len(parts) == 1: return parts[0][token, group, w].load()
+    pt, r = token // rows, token % rows
+    return functools.reduce(lambda a, b: a + b, [(pt.eq(i)).where(p.reshape(rows, G, 5)[r.valid(pt.eq(i)), group, w].load(), 0)
+                                                 for i, p in enumerate(parts)])
+  d, word = load(4).bitcast(dtypes.float32), load(sub)
+  vals = [(((((word >> (4*i)) & 0xF).cast(dtypes.int32) ^ 8) - 8).float() * d).cast(dtypes.half) for i in range(8)]
+  stores = [out[token, group*32 + sub*8 + i].store(vals[i]) for i in range(8)]
+  return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q4_unpack", opts_to_apply=()))
+
+@functools.cache
 def _q8_sum_kernel(out:UOp, mine:UOp, *packed:UOp, row0:int=0) -> UOp:
   # the packed groups (q8_pack) of the others plus mine (from row row0), in float: a lane eight inputs
   T, D = cast(tuple[int, int], out.shape)
@@ -2737,8 +2755,10 @@ def all_gather_q8(x:Tensor, axis:int, ring:bool|None=None) -> Tensor:
   """
   assert axis == 1 and x.ndim == 3 and x.shape[0] == 1
   devs, (T, D) = cast(tuple[str, ...], x.device), cast(tuple[int, int], x.shape[1:])
-  packed = Tensor.empty(T, D//32, 9, dtype=dtypes.uint32, device=devs, axis=0)
-  packed = Tensor.custom_kernel(packed, x.reshape(T, D), fxn=_q8_pack_kernel)[0]
+  # (AG_Q4, default 0, NUMERICS: the rows sent as q4 groups of 32 (_q4_pack_kernel, five words a group), ~0.56x the bytes of q8)
+  W, pack_k, unpack_k = (5, _q4_pack_kernel, _q4_unpack_kernel) if getenv("AG_Q4", 0) else (9, _q8_pack_kernel, _q8_unpack_kernel)
+  packed = Tensor.empty(T, D//32, W, dtype=dtypes.uint32, device=devs, axis=0)
+  packed = Tensor.custom_kernel(packed, x.reshape(T, D), fxn=pack_k)[0]
   if ring is None: ring = bool(getenv("AG_RING", 1))
   if not ring and getenv("AG_Q8_ONESHOT", 1):
     # (one shot: every device's packed part copied to every other one at once, every device unpacks them)
@@ -2747,18 +2767,18 @@ def all_gather_q8(x:Tensor, axis:int, ring:bool|None=None) -> Tensor:
     sent = {(i, j): mine[i].copy_to_device(devs[j]) for i in range(n) for j in range(n) if i != j}
     def unpacked1(j:int) -> UOp:
       parts = [Tensor(mine[i] if i == j else sent[(i, j)]) for i in range(n)]
-      return Tensor.custom_kernel(Tensor.empty(T, D, dtype=dtypes.half, device=devs[j]), *parts, fxn=_q8_unpack_kernel)[0].reshape(1, T, D).uop
+      return Tensor.custom_kernel(Tensor.empty(T, D, dtype=dtypes.half, device=devs[j]), *parts, fxn=unpack_k)[0].reshape(1, T, D).uop
     return Tensor(UOp.mstack(*[unpacked1(j) for j in range(n)]))
   if not getenv("AG_Q8_PARTS", 1) or not ring:
     out = Tensor.empty(T, D, dtype=dtypes.half, device=devs)
-    return Tensor.custom_kernel(out, all_gather(packed, 0), fxn=_q8_unpack_kernel)[0].reshape(1, T, D)
+    return Tensor.custom_kernel(out, all_gather(packed, 0), fxn=unpack_k)[0].reshape(1, T, D)
   # the parts around the ring from the packed buffers, every device unpacks them as they are (no buffer of the whole packed)
   local = _per_device(packed)
   mine, n = [local.mselect(i) for i in range(len(devs))], len(devs)
   sent = _ring(mine, devs)
   def unpacked(j:int) -> UOp:
     parts = [Tensor(mine[i] if i == j else sent[(i, j)]) for i in range(n)]
-    return Tensor.custom_kernel(Tensor.empty(T, D, dtype=dtypes.half, device=devs[j]), *parts, fxn=_q8_unpack_kernel)[0].reshape(1, T, D).uop
+    return Tensor.custom_kernel(Tensor.empty(T, D, dtype=dtypes.half, device=devs[j]), *parts, fxn=unpack_k)[0].reshape(1, T, D).uop
   outs = [unpacked(j) for j in range(n)]
   return Tensor(UOp.mstack(*outs))
 
