@@ -53,6 +53,11 @@ class GlmVisionTower(VisionTower):
   def _weights(self, state:dict[str, Tensor]):
     def g(k:str, d:str) -> Tensor: return state[k].to(d).realize()
     d0, dl = self.devices[0], self.devices[-1]
+    # (the projector (~0.35 GB F16) on the last card, the blocks on the others, the first (the inputs' buffers) the fewest: the card memory
+    # the tower takes, at most ~0.44 GB a card instead of 0.67 on the last)
+    if (m:=len(self.devices) - 1) >= 2:
+      cnt = [self.depth // m + (j >= m - self.depth % m) for j in range(m)]
+      self.block_dev = [self.devices[j] for j in range(m) for _ in range(cnt[j])]
     kv = self._kv
     self.mean, self.std = tuple(kv.get("clip.vision.image_mean", MEAN)), tuple(kv.get("clip.vision.image_std", STD))
     self.clamp = float(kv.get("clip.vision.swiglu_clamp", 0.0))

@@ -97,3 +97,27 @@ class TestGlmVisionPrefill(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
+
+class TestGlmTowerPlacement(unittest.TestCase):
+  def test_projector_card_takes_no_block(self):
+    # (6 cards: the projector alone on the last, 24 blocks over the other 5, the first (the inputs) the fewest; order kept: block i+1 never on
+    # an earlier card than block i)
+    from tinygrad.llm.glm_vision import GlmVisionTower
+    w, depth = 8, 24
+    kv = {"clip.projector_type": "glm5v", "clip.vision.block_count": depth, "clip.vision.embedding_length": w,
+          "clip.vision.attention.head_count": 2, "clip.vision.attention.layer_norm_epsilon": 1e-5}
+    st = {"v.patch_embd.weight": Tensor.zeros(w, 3, 14, 14), "v.patch_embd.weight.1": Tensor.zeros(w, 3, 14, 14),
+          "v.patch_embd.bias": Tensor.zeros(w),
+          "v.post_ln.weight": Tensor.zeros(w), "mm.patch_merger.weight": Tensor.zeros(w, w, 2, 2), "mm.patch_merger.bias": Tensor.zeros(w),
+          "mm.model.fc.weight": Tensor.zeros(w, w), "mm.post_norm.weight": Tensor.zeros(w), "mm.post_norm.bias": Tensor.zeros(w),
+          "mm.up.weight": Tensor.zeros(w, w), "mm.gate.weight": Tensor.zeros(w, w), "mm.down.weight": Tensor.zeros(w, w)}
+    for i in range(depth):
+      for n in ("ln1.weight", "ln2.weight", "attn_q_norm.weight", "attn_k_norm.weight"): st[f"v.blk.{i}.{n}"] = Tensor.zeros(w)
+      for n in ("attn_qkv", "attn_out", "ffn_up", "ffn_gate", "ffn_down"):
+        st[f"v.blk.{i}.{n}.weight"], st[f"v.blk.{i}.{n}.bias"] = Tensor.zeros(w, w), Tensor.zeros(w)
+    devs = ("NULL",) + tuple(f"NULL:{i}" for i in range(1, 6))
+    t = GlmVisionTower(st, kv, devs)
+    self.assertEqual([t.block_dev.count(d) for d in devs], [4, 5, 5, 5, 5, 0])
+    self.assertEqual(t.block_dev, sorted(t.block_dev, key=devs.index))
+    self.assertEqual(t.blocks[23]["ffn_down.weight"].device, "NULL:4")
+    self.assertEqual(t.down_w.device, "NULL:5")
