@@ -146,6 +146,16 @@ class TestLLMTokenizer(unittest.TestCase):
       (path / "chat_template.jinja").write_text("{{ messages[0].content }}")
       self.assertEqual(SimpleTokenizer.from_hf(path, preset="llama3").chat_template, "{{ messages[0].content }}")
 
+  def test_gguf_end_tokens(self):
+    # (Qwen 3.x GGUF: eos <|im_end|>, no eot / eom: <|endoftext|> must end a reply too; GLM's own eom stays)
+    toks = ["a", "<|endoftext|>", "<|im_start|>", "<|im_end|>", "<|observation|>"]
+    kv = {"tokenizer.ggml.tokens": toks, "tokenizer.ggml.token_type": [1, 3, 3, 3, 3], "tokenizer.ggml.pre": "qwen2",
+          "tokenizer.ggml.eos_token_id": 3}
+    tok = SimpleTokenizer.from_gguf_kv(kv)
+    self.assertEqual([t for t in range(5) if tok.is_end(t)], [1, 3])
+    tok = SimpleTokenizer.from_gguf_kv({**kv, "tokenizer.ggml.eos_token_id": 1, "tokenizer.ggml.eom_token_id": 4})
+    self.assertEqual([t for t in range(5) if tok.is_end(t)], [1, 3, 4])
+
   def test_tekken_gpt4o_split(self):
     split = {p: SimpleTokenizer({}, {}, p)._split_to_word.findall for p in ("tekken", "gpt-4o", "kimi-k2")}
     shared = {
