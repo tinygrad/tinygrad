@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # C9 NULL/CPU model-load/JIT harness, NOT a production start mode. No picture-engine claim is made.
-# C9 production is held pending an approved projector and GLM-5.3 picture integration. Power is separately held here too.
+# C9 production is text-only with no compatible projector; this harness does not validate its separate power gate.
 set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 source "$ROOT/extra/llm_service/glm_kv_profiles.sh"

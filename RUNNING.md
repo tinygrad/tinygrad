@@ -1,6 +1,6 @@
 # Running the three production inference services
 
-Supported baseline: `redqwenflash` at `dd14c4748c0c02a962b622ea7447b63c8b7c5cd5`, including the delivery commits accompanying this document. Production deployments must record the exact commit in `DEPLOYED_COMMIT`. There are three product configurations:
+Supported baseline: `redqwenflash` at `f3f31afb6c5268640d1602f371b406321c3732a9`, including the delivery commits accompanying this document. Production deployments must record the exact commit in `DEPLOYED_COMMIT`. There are three product configurations:
 
 | Service | Model | Hardware | Context | Devices |
 |---|---|---|---:|---|
@@ -127,9 +127,25 @@ With `SESSION_END_TOKEN` unset (the default), explicit backend session-end calls
 
 **GLM-5.3 is text-only under the 12:00 product decision.** It has no compatible vision encoder or projector. C9's launcher forces `VISION_MMPROJ` empty, including when the parent shell supplied another value; the generic CLI requires a projector only for the supported Qwen and GLM Flash vision models. Do not substitute GLM Flash's incompatible tower or claim that a file gives C9 vision.
 
-The nine model-shard hashes above are the complete service input. `--print-command` requires no image file and is safe for review; set `GLM53_POWER_LIMIT` only from the completed power qualification before `start`. That separate power gate and the owner-only host controls remain unchanged. This prompt-config change authorizes no launch and makes no hardware, memory, quality or multiuser claim.
+The nine model-shard hashes above are the complete service input. `--print-command` requires no image file and is safe for review. Set the power value only from the completed power qualification; the launcher deliberately has no numeric default:
 
-**Profiles stay independent of vision policy.** The default is half-cache. The 1M candidate remains `GLM_KV=q4`, `--max_context 1048576`, `SEQ_ROWS=1048576`, `SEQ_SLOTS=16`, `SEQ_MAX_ACTIVE=16`, `P2P_GLM5_OFF=1`, `FREQS_HOST=1`, `AMD_SCRATCH_MAX=64`, `SEQ_COPY_SCRATCH=1` and `LOAD_DEFER=1`. As before, the launcher expands q4 to `SEQ_FP8=1`, `SEQ_FP8_IDX=0`, `SEQ_KV4=1`; `GLM_KV=fp8` is a separate mode. Real 14-card start, capacity and correctness checks remain required for both configurations.
+```bash
+bash extra/llm_service/glm_14xr9700.sh --print-command
+GLM53_POWER_LIMIT=<validated-watts> bash extra/llm_service/glm_14xr9700.sh start
+```
+
+That power gate and the owner-only host controls remain unchanged. This documentation authorizes no launch and makes no hardware, memory, quality or multiuser claim.
+
+**Profiles stay independent of vision policy.** The default is half-cache. The explicit 1M candidate command is:
+
+```bash
+GLM53_POWER_LIMIT=<validated-watts> GLM_KV=q4 MAX_CONTEXT=1048576 \
+  SEQ_ROWS=1048576 SEQ_SLOTS=16 SEQ_MAX_ACTIVE=16 \
+  P2P_GLM5_OFF=1 FREQS_HOST=1 AMD_SCRATCH_MAX=64 SEQ_COPY_SCRATCH=1 LOAD_DEFER=1 \
+  bash extra/llm_service/glm_14xr9700.sh start
+```
+
+The launcher expands q4 to `SEQ_FP8=1`, `SEQ_FP8_IDX=0`, `SEQ_KV4=1`; `GLM_KV=fp8` is a separate mode. Real 14-card start, capacity and correctness checks remain required for both configurations.
 
 ## Pokemon workflow profiles (RUN 14 and G3)
 
