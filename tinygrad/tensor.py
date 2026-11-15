@@ -162,9 +162,12 @@ class Tensor(RandMixin):
     """
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
-  @rewrite_group(lambda *tensors,ret: f"Schedule {len(tensors)} -> {len(ret[0].src)}")
-  def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
-    """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
+  @rewrite_group(lambda *tensors,bind=True,ret: f"Schedule {len(tensors)} -> {len(ret[0].src)}")
+  def linear_with_vars(self, *lst:Tensor, bind:bool=True) -> tuple[UOp, dict[str, int]]:
+    """
+    Creates the LINEAR UOp needed to realize these Tensor(s), with Variables.
+    With bind=False, the storage local to the schedule stays unbound ALLOCs, bound when the LINEAR is run.
+    """
     sink = UOp.sink(*[t.uop for t in (self,)+lst])
     if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Tensor Graph")
     # weakness ends where storage begins
@@ -205,7 +208,7 @@ class Tensor(RandMixin):
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
 
-    return create_linear_with_vars(sink)
+    return create_linear_with_vars(sink, bind=bind)
 
   def schedule_linear(self, *lst:Tensor) -> UOp:
     """Creates the schedule needed to realize these Tensor(s)."""
@@ -218,7 +221,7 @@ class Tensor(RandMixin):
     """Triggers the computation needed to create these Tensor(s)."""
     to_realize = [x for x in (self,)+lst if x.uop.base.needs_storage()]
     if len(to_realize):
-      linear, var_vals = Tensor.linear_with_vars(*to_realize)
+      linear, var_vals = Tensor.linear_with_vars(*to_realize, bind=False)
       run_linear(linear, var_vals, update_stats=do_update_stats)
     return self
 

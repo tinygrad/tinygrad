@@ -1,11 +1,12 @@
+import itertools
 from collections import defaultdict
 from tinygrad.helpers import NO_MEMORY_PLANNER, DEBUG, round_up, to_tuple
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.runtime.support.memory import TLSFAllocator
 
 def _collect_bufs(u:UOp) -> list[UOp]:
-  if u.op is Ops.BUFFER: return [u]
+  if u.op is Ops.BUFFER or (u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL): return [u]
   if u.op in {Ops.MSELECT, Ops.MSTACK}: return [b for s in u.src for b in _collect_bufs(s)]
   return []
 
@@ -52,7 +53,11 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
   arena_sizes = {key: round_up(peak, block_size) for key, (peak, _) in peaks.items()}
 
   # build replace_map: each buffer becomes a SHRINK/BITCAST into a shared per-device-lane arena
-  arenas = {key: UOp.new_buffer(key[0], sz, dtypes.int8) for key, sz in arena_sizes.items()}
+  # unbound storage (ALLOCs) is planned into ALLOC arenas, bound once linked. ALLOC slots stay distinct and deterministic
+  bound_lanes = {_key(b) for b in first_appearance if b.op is Ops.BUFFER} - {_key(b) for b in first_appearance if b.op is Ops.ALLOC}
+  slots = itertools.count(max([u.arg.slot+1 for u in linear.toposort() if u.op is Ops.ALLOC], default=0))
+  arenas = {key: UOp.new_buffer(key[0], sz, dtypes.int8) if key in bound_lanes else UOp.alloc((sz,), dtypes.int8, slot=next(slots), device=key[0])
+            for key, sz in arena_sizes.items()}
   replace_map = {buf_uop:arenas[_key(buf_uop)][offset:offset+buf_uop.nbytes()].bitcast(buf_uop.dtype) for buf_uop, offset in offsets.items()}
 
   if DEBUG >= 1 and (omem:=sum(nbytes.values()) / 1e6) != (nmem:=sum(arena_sizes.values()) / 1e6):

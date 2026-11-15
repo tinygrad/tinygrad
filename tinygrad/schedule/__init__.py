@@ -1,4 +1,5 @@
-import time, inspect
+import time, inspect, itertools
+from typing import Iterator
 from collections import deque
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import AddrSpace
@@ -94,26 +95,37 @@ from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat
 
-def create_new_buffer(ctx:tuple[UOp, ...], b:UOp):
-  device = b.device if b.device is not None else next(a.device for a in ctx if a.device is not None)
-  return UOp.new_buffer(device, b.max_numel(), b.dtype)
+@dataclass
+class ResolveCtx:
+  args: tuple[UOp, ...]
+  slots: Iterator[int]
+
+def fresh_alloc(ctx:ResolveCtx, b:UOp) -> UOp:
+  # every invocation gets its own storage. ALLOCs stay unbound until link, numbered in schedule order so a schedule always
+  # resolves to the same linear
+  device = b.device if b.device is not None else next(a.device for a in ctx.args if a.device is not None)
+  return UOp.alloc((b.max_numel(),), b.dtype, slot=next(ctx.slots), device=device)
 
 pm_post_sched_cache = PatternMatcher([
   # Resolve positional arguments outside kernel bodies; free Variables have slot -1.
-  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[x.arg.slot] if x.arg.slot >= 0 else None),
-  # bind ALLOCs to fresh BUFFERs for this invocation
-  (UPat(Ops.ALLOC, name="b"), create_new_buffer),
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx.args[x.arg.slot] if x.arg.slot >= 0 else None),
+  # give ALLOCs fresh slots for this invocation
+  (UPat(Ops.ALLOC, name="b"), fresh_alloc),
 ])
 
-def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
-  linear = graph_rewrite(linear_call.body, pm_post_sched_cache, ctx=linear_call.src[1:], walk=True, name="params to buffers")
+# the JIT captures linears with bound storage
+pm_allocs_to_buffers = PatternMatcher([(UPat(Ops.ALLOC, name="b"), lambda b: UOp.new_buffer(b.device, b.max_numel(), b.dtype))])
+
+def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None, slots:Iterator[int]|None=None):
+  if slots is None: slots = itertools.count()
+  linear = graph_rewrite(linear_call.body, pm_post_sched_cache, ctx=ResolveCtx(linear_call.src[1:], slots), walk=True, name="params to buffers")
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
            **{i:x.unbound() if x.is_variable else x for i,x in enumerate(linear_call.src[1:])
               if x.op is Ops.PARAM and x.addrspace is AddrSpace.ALU}}
   def apply_binds(si:UOp) -> UOp:
-    if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
+    if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds, slots)
     if si.op is Ops.CALL and si.body.op is Ops.PROGRAM: return si  # compiled parameters already have ABI slots
     subs = {v:binds[v.arg.slot] for s in si.src for v in s.variables() if v.arg.name is None and v.arg.slot in binds}
     return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
@@ -313,7 +325,7 @@ def transform_to_call(big_sink:UOp) -> UOp:
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret
 
-def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
+def create_linear_with_vars(big_sink:UOp, bind:bool=True) -> tuple[UOp, dict[str, int]]:
   big_sink = transform_to_call(big_sink)
   # big_sink srcs are all the Tensors
   linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
@@ -335,10 +347,12 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
       if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val
 
-  # jit captures this schedule, no need to execute.
+  # jit captures this schedule with bound storage, no need to execute.
   if len(capturing) and CAPTURING:
-    capturing[0].add_linear(linear)
+    capturing[0].add_linear(graph_rewrite(linear, pm_allocs_to_buffers, walk=True, name="allocs to buffers"))
     return UOp(Ops.LINEAR, src=()), var_vals
 
   held_bufs = {b for b in linear_call.src[1:] if b.op is Ops.BUFFER}
-  return memory_plan_rewrite(linear, held_bufs), var_vals
+  linear = memory_plan_rewrite(linear, held_bufs)
+  # binding late lets the linear be run more than once. bound storage is shared by every piece of the linear, even if run separately
+  return graph_rewrite(linear, pm_allocs_to_buffers, walk=True, name="allocs to buffers") if bind else linear, var_vals
