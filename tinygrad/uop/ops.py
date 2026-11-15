@@ -995,7 +995,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # EXTERNs have no name, they are identified by their unique slot
     return f"e{self.arg.slot}" if self.op is Ops.EXTERN else unwrap(self.arg.name)
   def bind(self, val:int|UOp):
-    assert self.is_variable and not self.is_bound_var, f"op is {self.op}, need an unbound Variable"
+    # EXTERNs have no runtime state, their values are bound at the call site
+    assert self.op is Ops.PARAM and self.is_variable and not self.is_bound_var, f"op is {self.op}, need an unbound Variable"
     uval = UOp.const(val) if isinstance(val, int) else val
     assert uval.op is Ops.CONST, f"bind value must be a CONST, not {uval.op}"
     assert self.vmin <= uval.vmin and uval.vmax <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
