@@ -131,7 +131,8 @@ The nine model-shard hashes above are the complete service input. `--print-comma
 
 ```bash
 bash extra/llm_service/glm_14xr9700.sh --print-command
-GLM53_POWER_LIMIT=<validated-watts> bash extra/llm_service/glm_14xr9700.sh start
+GLM53_POWER_LIMIT=<W> AM_PERF_LEVEL=high CLOCK_PREFILL=GFXCLK=2300 \
+  bash extra/llm_service/glm_14xr9700.sh start
 ```
 
 That power gate and the owner-only host controls remain unchanged. This documentation authorizes no launch and makes no hardware, memory, quality or multiuser claim.
@@ -139,11 +140,14 @@ That power gate and the owner-only host controls remain unchanged. This document
 **Profiles stay independent of vision policy.** The default is half-cache. The explicit 1M candidate command is:
 
 ```bash
-GLM53_POWER_LIMIT=<validated-watts> GLM_KV=q4 MAX_CONTEXT=1048576 PREFILL_CHUNK=2688 \
-  SEQ_ROWS=1048576 SEQ_SLOTS=16 SEQ_MAX_ACTIVE=16 \
-  P2P_GLM5_OFF=1 FREQS_HOST=1 AMD_SCRATCH_MAX=64 SEQ_COPY_SCRATCH=1 LOAD_DEFER=1 \
+GLM53_POWER_LIMIT=<W> AM_PERF_LEVEL=high CLOCK_PREFILL=GFXCLK=2300 \
+  GLM_KV=q4 MAX_CONTEXT=1048576 SEQ_ROWS=1048576 SEQ_SLOTS=16 SEQ_MAX_ACTIVE=16 \
+  P2P_GLM5_OFF=1 FREQS_HOST=1 AMD_SCRATCH_MAX=64 SEQ_COPY_SCRATCH=1 \
+  PREFILL_CHUNK=2688 PREFILL_SIZES=1344,2688 \
   bash extra/llm_service/glm_14xr9700.sh start
 ```
+
+`<W>` = the ts5 power ladder's setting (PENDING: w-pf53's uladder-1, ~15:45 Nov 15). The clock knobs are part of that power setting (decode uncapped, prefill capped at 2300 MHz, perf level high); the launcher forwards them but sets none, so they belong on the start line. At 1M the launcher's default `PREFILL_CHUNK=4032` does not fit on card 0 (warm-up OOM): 2688. `SEQ_COPY_SCRATCH=1` keeps ~0.2-0.5 GB a card of the move jits' own arenas free (the 1M start runs with ~0.48 GB a card free with it). Measured at 1M: one 1,020,637-token request, first token 885 s, decode 47 tok/s. One 1M conversation at a time beside short ones; a second 1M request waits. `AM_FIRST_START=1` only on the first start after a reboot.
 
 The launcher expands q4 to `SEQ_FP8=1`, `SEQ_FP8_IDX=0`, `SEQ_KV4=1`; `GLM_KV=fp8` is a separate mode. Real 14-card start, capacity and correctness checks remain required for both configurations.
 
