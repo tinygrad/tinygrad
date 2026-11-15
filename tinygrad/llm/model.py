@@ -626,7 +626,7 @@ class CompressedAttentionBlock(FFNBlock):
     self.attn_kv, self.attn_kv_a_norm = Linear(config.dim, config.head_dim, bias=False), nn.RMSNorm(config.head_dim, config.norm_eps)
     self.attn_output_a = {"weight": Tensor.zeros(config.o_groups * config.o_lora_rank, config.n_heads * config.head_dim // config.o_groups)}
     self.attn_output_b = Linear(config.o_groups * config.o_lora_rank, config.dim, bias=False)
-    if ratio: self.attn_compressor = Compressor(config, ratio, config.head_dim)
+    if ratio: self.attn_compressor = Compressor(config, ratio, config.head_dim)  # CSA (ratio 4) or HCA (ratio 128)
     self.indexer = Indexer(config, Compressor(config, ratio, config.indexer.head_dim)) if config.indexer and ratio == config.indexer.kpool else None
 
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len if prefix_len == cached_len else 0

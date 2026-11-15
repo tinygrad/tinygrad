@@ -35,6 +35,12 @@ class TestAttention(unittest.TestCase):
     out = apply_rope_new(x, freqs)
     np.testing.assert_array_equal(out.numpy(), [[[[1., 0.]]], [[[0., 1.]]]])
 
+  def test_rope_layouts(self):
+    # 4 of 6 dims rotated, the first frequency by 90 degrees and the second by 0: split pairs (i, i+2) or adjacent pairs, leading or trailing dims
+    x, freqs = Tensor([[[[1., 2., 3., 4., 5., 6.]]]]), Tensor([[0., 1., 1., 0.]])
+    out = Tensor.stack(*(apply_rope_new(x, freqs, interleaved, last) for interleaved in (False, True) for last in (False, True))).numpy()
+    np.testing.assert_array_equal(out[:, 0, 0, 0], [[-3, 2, 1, 4, 5, 6], [1, 2, -5, 4, 3, 6], [-2, 1, 3, 4, 5, 6], [1, 2, -4, 3, 5, 6]])
+
   def test_independent_positions_jit(self):
     block = TransformerBlock(self._make_config(dim=2, hidden_dim=2, n_heads=1))
     block.attn_q.weight = block.attn_k.weight = Tensor.zeros(2, 2)
@@ -186,15 +192,18 @@ class TestAttention(unittest.TestCase):
     np.testing.assert_array_equal(indexer(x, q, (0,), freqs).numpy(), np.where(allowed, 0., -np.inf)[None, None])
 
   def test_compressor(self):
-    # ratio 2 (no overlap): each pool is the rmsnorm of the softmax(gate + ape) weighted sum of its 2 keys, fed in chunks crossing a pool boundary
-    comp, rng = Compressor(self._make_config(dim=2, max_context=8), 2, 2), np.random.default_rng(0)
-    wkv, wg, ape, x = (rng.standard_normal(s).astype(np.float32) for s in ((2, 2), (2, 2), (2, 2), (1, 6, 2)))
+    # ratio 4 (overlap): pool j weighs the first half of pool j-1's keys and the second half of its own, tokens 0-1 come from the rolling state
+    comp, rng = Compressor(self._make_config(dim=2, max_context=12), 4, 2), np.random.default_rng(0)
+    wkv, wg, ape, x = (rng.standard_normal(s).astype(np.float32) for s in ((4, 2), (4, 2), (4, 4), (1, 12, 2)))
     comp.kv.weight, comp.gate.weight, comp.ape["weight"] = Tensor(wkv), Tensor(wg), Tensor(ape)
-    xt, freqs = Tensor(x), Tensor([[1., 0.]] * 8)  # identity rope
-    comp._init_state(xt)
-    comp(xt[:, :3], (0,), freqs).realize()
-    out = comp(xt[:, 3:], (3,), freqs).numpy()[0, :3]
-    kv, g = (x[0] @ wkv.T).reshape(3, 2, 2), (x[0] @ wg.T).reshape(3, 2, 2) + ape
+    kvg = np.stack([x[0] @ wkv.T, x[0] @ wg.T], 1)  # (12, 2, 4)
+    comp._init_state(xt:=Tensor(x))
+    comp.cache_kg = Tensor(np.concatenate([np.zeros((6, 2, 4), np.float32), kvg[:2]])[None]).realize()
+    out = comp(xt[:, 2:], (2,), Tensor([[1., 0.]] * 16)).numpy()[0, :3]  # identity rope
+    np.testing.assert_allclose(comp.cache_kg.numpy()[0], kvg[4:], rtol=1e-6)  # the next state holds the last 8 tokens
+    kv, g = kvg[:, 0].reshape(3, 4, 4), kvg[:, 1].reshape(3, 4, 4) + ape
+    prev_kv, prev_g = np.concatenate([np.zeros((1, 4, 2)), kv[:-1, :, :2]]), np.concatenate([np.full((1, 4, 2), -np.inf), g[:-1, :, :2]])
+    kv, g = np.concatenate([prev_kv, kv[:, :, 2:]], 1), np.concatenate([prev_g, g[:, :, 2:]], 1)
     pools = (np.exp(g) / np.exp(g).sum(1, keepdims=True) * kv).sum(1)
     np.testing.assert_allclose(out, pools / np.sqrt((pools ** 2).mean(-1, keepdims=True) + 1e-5), rtol=2e-3, atol=2e-3)
 
