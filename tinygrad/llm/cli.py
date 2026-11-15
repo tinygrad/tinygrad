@@ -254,9 +254,7 @@ def main():
 
   # VISION_MMPROJ: the mmproj GGUF of the model's vision tower (qwen4exp's sequences): chat requests' data: URL images are pictures the model
   # sees (see serve.extract_pictures). the tower's weights on the model's devices before its caches are made (a start fails at the tower's load)
-  # VISION_LATE=1: the tower's weights and buffers made AFTER the model's warm-up (its caches mapped first, in the free memory of the cards);
-  # its warm-up then grows the scratch the model shares: the model's warm-up calls run again (default 0: the tower first)
-  vision, vision_late = None, getenv("VISION_LATE", 0)
+  vision = None
   def load_vision(mmproj:str):
     from tinygrad.llm import qwen_vision
     from tinygrad.llm.qwen_vision import VisionTower, VISION_MAX_TOKENS
@@ -280,17 +278,13 @@ def main():
     import PIL
     assert tuple(int(x) for x in re.findall(r"\d+", PIL.__version__)[:3]) >= (10, 0, 1), f"VISION: pillow {PIL.__version__}, 10.0.1 or later needed"
     setattr(model, "vision", True)
-    assert not vision_late or hasattr(model, "seq_run_again"), "VISION_LATE: qwen4exp only (the model's warm-up calls run again)"
-    if not vision_late: vision = load_vision(mmproj)
+    vision = load_vision(mmproj)
 
   # warmup the JIT
   if args.warmup or args.serve:
     try:
       with Context(DEBUG=max(DEBUG.value, 1)): model.warmup()
-      # (VISION_LATE: the tower after the caches; its captures grew the scratch: the model's calls run again)
-      if mmproj and vision_late:
-        vision = load_vision(mmproj)
-        with Context(DEBUG=max(DEBUG.value, 1)): typing.cast(typing.Any, model).seq_run_again()
+
       # (VISION: the model's captures grew the scratch the tower shares: its jits linked again by a blank picture of every bucket)
       if vision is not None:
         from tinygrad.llm.qwen_vision import VISION_MAX_TOKENS

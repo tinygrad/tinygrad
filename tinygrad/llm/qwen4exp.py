@@ -2976,8 +2976,6 @@ class Transformer:
     unlinked = _run_again(calls, set(late))
     _lap("warmup: run again")
     if DEBUG >= 1: print(f"seq_warmup: {len(calls)} calls run again in {time.perf_counter()-st:.2f}s ({len(unlinked)} jits had been unlinked)")
-    # (VISION_LATE: kept for seq_run_again (the tower's captures after the warm-up rebase them again), dropped there)
-    if self.vision and getenv("VISION_LATE", 0): self._warm_calls = (calls, set(late))
 
   def seq_run_again(self) -> list[str]:
     """the warm-up's calls once more (see _run_again), after a later capture in the scratch the model shares; the jits' names found unlinked"""
