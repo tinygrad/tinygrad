@@ -288,6 +288,19 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
 
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does not support dynamic register indexing")
+  def test_reg_stage_of_padded_value(self):
+    # the STAGE writes every lane, the padding included, though the padded value's index gates r (also once r%2 splits r)
+    a = Tensor.arange(4, dtype=dtypes.int).contiguous().realize()
+    for n, pad, split, want in ((6, (1, 1), False, [3, 5, 2]), (8, (0, 4), True, [1, 4, 3, 6])):
+      def kernel(C:UOp, A:UOp) -> UOp:
+        r, i = UOp.range(n, 1, AxisType.LOOP), UOp.range(n//2, 0, AxisType.LOOP)
+        v = (A+1).pad((pad,)).index(r)
+        s = (v + (r%2).cast(dtypes.int) if split else v).bufferize(r, arg=BufferizeOpts(None, AddrSpace.REG))
+        return C[i].store(s[i] + s[i+n//2]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+      with self.subTest(split=split):
+        self.assertEqual(Tensor.custom_kernel(Tensor.empty(n//2, dtype=dtypes.int), a, fxn=kernel)[0].tolist(), want)
+
   def test_reg_placeholder_then_reduce(self):
     # the accumulator of the reduce does not reuse the slot of a REG placeholder in the kernel
     def kernel(C:UOp, A:UOp) -> UOp:

@@ -157,6 +157,18 @@ class TestSetitem(unittest.TestCase):
       n[2:4, 3:5] = np.full((2, 2), i)
       np.testing.assert_allclose(t.numpy(), n)
 
+  def test_jit_setitem_after_assign(self):
+    @TinyJit
+    def f(t:Tensor):
+      t += 1
+      t[0] = 5
+      return t
+
+    for i in range(3):
+      t = Tensor.full((3,), float(i)).contiguous().realize()
+      f(t)
+      self.assertEqual(t.tolist(), [5, i+1, i+1])
+
   def test_jit_setitem_variable_offset(self):
     @TinyJit
     def f(t:Tensor, a:Tensor, v:Variable):
@@ -172,6 +184,13 @@ class TestSetitem(unittest.TestCase):
       f(t, a, v)
       np.testing.assert_allclose(t.numpy(), n)
     np.testing.assert_allclose(t.numpy(), [[1,1,1,1,1,1],[2,2,2,2,2,2],[3,3,3,3,3,3],[4,4,4,4,4,4],[5,5,5,5,5,5],[6,6,6,6,6,6]])
+
+  def test_setitem_view_after_assign(self):
+    t = Tensor([0.0, 0.0, 0.0, 0.0]).contiguous().realize()
+    t += 1
+    v = t[1:3]
+    v[0] = 5
+    self.assertEqual(t.tolist(), [1, 5, 1, 1])
 
   def test_setitem_overlapping_inplace1(self):
     t = Tensor([[3.0], [2.0], [1.0]]).contiguous()

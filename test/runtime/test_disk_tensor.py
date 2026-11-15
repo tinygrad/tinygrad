@@ -324,6 +324,11 @@ class TestDiskTensor(TempDirTestCase):
     dt[1] = [3]
     self.assertEqual(dt.tolist(), [[1], [3]])
 
+  def test_simple_setitem_float(self):
+    dt = Tensor.empty(4, device=f"disk:{self.tmp('dt_simple_setitem_float')}")
+    dt[1] = 3.0
+    self.assertEqual(dt.tolist(), [0.0, 3.0, 0.0, 0.0])
+
   def test_strided_setitem(self):
     # test non-contiguous (strided) setitem raises
     dt = Tensor([1, 2, 3, 4, 5, 6]).to(f"disk:{self.tmp('dt_strided_setitem')}")
