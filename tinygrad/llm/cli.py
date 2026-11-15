@@ -52,7 +52,8 @@ class FallbackTemplate:
     if self.tok.preset == 'tekken': return "[/INST]"
     return self.tok.decode([self.tok.eos_id])
   def render(self, messages:list[dict], tools=None, add_generation_prompt:bool=True, preserve_thinking:bool=False) -> str:
-    out = self.tok.decode([] if self.tok.bos_id is None else [self.tok.bos_id]) + ("<sop>" if self.tok.preset == 'glm4' else "")
+    out = self.tok.decode([self.tok.bos_id] if self.tok.add_bos and self.tok.bos_id is not None else [])
+    out += "<sop>" if self.tok.preset == 'glm4' else ""
     for msg in messages:
       out += self.role(msg["role"])
       content = msg.get("content")

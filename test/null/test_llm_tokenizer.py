@@ -98,6 +98,15 @@ class TestLLMTokenizer(unittest.TestCase):
     self.assertTrue(tok.is_end(0))  # eom ends generation
     self.assertFalse(tok.is_end(2))
 
+  def test_gguf_bos_without_add_bos(self):
+    # add_bos_token=False only stops the fallback template from adding BOS, chat templates still get it as bos_token
+    kv = { "tokenizer.ggml.tokens": ["<s>", "</s>", "hi"], "tokenizer.ggml.token_type": [3, 3, 1], "tokenizer.ggml.pre": "llama3",
+           "tokenizer.ggml.bos_token_id": 0, "tokenizer.ggml.eos_token_id": 1 }
+    for add_bos in (True, False):
+      tok = SimpleTokenizer.from_gguf_kv(kv | {"tokenizer.ggml.add_bos_token": add_bos})
+      self.assertEqual(tok.bos_id, 0)
+      self.assertEqual(FallbackTemplate(tok).render([{"role":"user", "content":"hi"}]).startswith("<s>"), add_bos)
+
   def test_hf_tokens(self):
     with tempfile.TemporaryDirectory() as folder:
       path = pathlib.Path(folder)
