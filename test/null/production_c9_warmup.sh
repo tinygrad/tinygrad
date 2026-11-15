@@ -3,6 +3,8 @@
 # C9 production is held pending an approved projector and GLM-5.3 picture integration. Power is separately held here too.
 set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+source "$ROOT/extra/llm_service/glm_kv_profiles.sh"
+apply_glm_kv_profile || exit 2
 cd "$ROOT"
 if [[ -n ${GLM_KV:-} ]]; then
   export GLM_KV FREQS_HOST P2P_GLM5_OFF AMD_SCRATCH_MAX AMD_SCRATCH_MIN SEQ_COPY_SCRATCH LOAD_DEFER

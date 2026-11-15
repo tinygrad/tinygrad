@@ -1753,8 +1753,7 @@ class MLATransformerBlock(FFNBlock):
         devs = cast(tuple[str, ...], x.device)
         # (SEQ_FP8: a row of fp8 values and their scales, see fp8_rows: half the memory. 576 dims (C9): the rope dims in half, 656 bytes)
         # (SEQ_KV4 with it: 4-bit rows, see q4_rows: 416 bytes)
-        q4 = bool(getenv("SEQ_KV4", 0)) or getenv("GLM_KV", "") == "q4"
-        fp8 = (bool(getenv("SEQ_FP8", 0)) or getenv("GLM_KV", "") == "fp8") and D in (512, 576)
+        fp8, q4 = getenv("SEQ_FP8", 0) and D in (512, 576), getenv("SEQ_KV4", 0)
         W = (Q4_ROW if q4 else FP8_ROW) if D == 512 else (Q4_ROPE_ROW if q4 else FP8_ROPE_ROW)
         row, dt = ((W,), dtypes.uint32) if fp8 else ((D,), dtypes.half)
         if (reg:=self._regions) is not None:
@@ -3321,6 +3320,7 @@ class Transformer(GLMSeqDriver):
     for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []):
       b._init_state(x)
       holders += [b] + ([idx] if (idx:=getattr(b, "indexer", None)) is not None else [])
+    if getenv("FREQS_HOST", 0) and isinstance(devs, tuple): self._freqs_host(devs)
     def lazy(v) -> list[Tensor]:
       if isinstance(v, Tensor): return [v] if not v.uop.is_realized else []
       return [t for x in v for t in lazy(x)] if isinstance(v, (list, tuple)) else []

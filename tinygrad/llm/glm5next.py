@@ -657,7 +657,7 @@ def _temp_row(t:float|tuple[float, ...]) -> array.array:
 TEMP_W = 3  # (the floats of a row of the seq steps' temperatures: temperature, top_p, top_k)
 # (SAMPLE_TOP_K: the sampled steps' graphs take their rows' top_k (8 rounds of counts over the vocabulary, exchanged when it's split): on
 # with a server's TOP_K, off (no cost, a request's top_k ignored) without)
-SAMPLE_TOP_K = (1)
+SAMPLE_TOP_K = getenv("SAMPLE_TOP_K", int(getenv("TOP_K", 0) > 0))
 
 def _hash_uniform(seed:Tensor, keys:Tensor, like:Tensor) -> Tensor:
   """
@@ -1790,7 +1790,7 @@ class Indexer:
     # the pooled keys, a call pools its tokens' pools only. the sparse path keeps them in half and the tokens of the last incomplete pool in a
     # ring (the last tokens: the next call can start before the end, see pool_keys), the other one every token's key and gate
     # (SEQ_FP8 with a sequence sharded cache: fp8 pooled keys, a row of 32 words of e4m3 values and the scale)
-    fp8 = self.sparse and bool((1)) and seq_sharded(x.device) and idx.head_dim == 128
+    fp8 = self.sparse and bool(getenv("SEQ_FP8", 1)) and seq_sharded(x.device) and idx.head_dim == 128
     row, dt = ((IDX_FP8_ROW,), dtypes.uint32) if fp8 else ((idx.head_dim,), dtypes.half if self.sparse else dtypes.float32)
     # (GLM_SEQ: the pools of every sequence's region, and the padding sequences')
     region_pools = (max(self.max_context, self.cache_rows) + REGION_ALIGN) // idx.kpool if self.cache_rows else max_pools
@@ -1798,7 +1798,7 @@ class Indexer:
     ring = round_up(max(2*idx.kpool, self.rewind + idx.kpool - 1), idx.kpool)
     # (SEQ_IDX_SHARD with a sequence sharded cache: the pooled keys split on their pools as the cache on its positions, a device stores and
     # scores its own, see pool_index_shard)
-    self.shard = len(cast(tuple, x.device)) if self.sparse and bool((1)) and seq_sharded(x.device) else 0
+    self.shard = len(cast(tuple, x.device)) if self.sparse and bool(getenv("SEQ_IDX_SHARD", 0)) and seq_sharded(x.device) else 0
     if self.shard:
       # (GLM_SEQ: every region's, as the cache's rows (a region's pools a device's local rows from base//kpool//n, see core's grouped))
       rows = max(self.max_context, self.cache_rows) + REGION_ALIGN if self.cache_rows else self.max_context
@@ -2158,7 +2158,7 @@ class MLATransformerBlock(FFNBlock):
         devs = cast(tuple[str, ...], x.device)
         # (SEQ_FP8: a row of fp8 values and their scales, see fp8_rows: half the memory)
         # (SEQ_KV4 (default off, a numerics change): 4-bit rows, see q4_rows: 288 bytes instead of 528)
-        row, dt = ((Q4_ROW if (0) else FP8_ROW,), dtypes.uint32) if (1) and D == 512 else ((D,), dtypes.half)
+        row, dt = ((Q4_ROW if getenv("SEQ_KV4", 0) else FP8_ROW,), dtypes.uint32) if getenv("SEQ_FP8", 1) and D == 512 else ((D,), dtypes.half)
         if (reg:=self._regions) is not None:
           # (SLOT_ALIAS: the slots of batched decoding in the same buffer, regions of S positions: the model's first (SLOT_SPAN of them), slot
           # i's the SLOT_SPAN+i-th. the model's cache past them is the slots': a long sequence alone overwrites them, see Transformer.main_overlaps)
@@ -4219,7 +4219,7 @@ class Transformer:
         for d in devs: getattr(Device[d], "compute_queue_n", lambda i: None)(mb_queue(lane))
       # (and the decoding steps' lanes, see DEC_LANE)
       for ln in (lane, lane + SEL_LANE) + ((DEC_LANE, DEC_LANE + SEL_LANE) if lane == 0 and (1) else ()) + \
-                ((IDX_LANE,) if lane == 0 and (0) else ()):
+                ((IDX_LANE,) if lane == 0 and getenv("SEQ_IDX_SHARD", 0) else ()):
         FLAG_LANE[0] = ln
         for g in (4, 16, 64): flag_allreduce(devs, g)
         # (the ring's mailbox: made before the jits are captured (in a fork, it'd be the child's))

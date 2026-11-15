@@ -1751,14 +1751,22 @@ P2P_AR_MAXG, P2P_AR_MAXW = (64), (4096)  # workgroups, the words of a workgroup'
 # a class whose slot wasn't used while the others' counted could see its own stale word as fresh (8 or 16 bits of the epoch): wrong values
 P2P_AR_CLASSES = 3
 
+_P2P_OFF_SEEN:set[str] = set()
 def p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None:
+  # (P2P_GLM5_OFF (default off): this module's mailboxes not made, None as without P2P, so explicit profile memory is not charged.
+  if getenv("P2P_GLM5_OFF", 0):
+    import traceback
+    if (site:=" < ".join(f"{f.name}:{f.lineno}" for f in traceback.extract_stack(limit=4)[:-1][::-1])) not in _P2P_OFF_SEEN:
+      _P2P_OFF_SEEN.add(site)
+      print(f"P2P_GLM5_OFF: amd_glm p2p_allreduce asked by {site}", flush=True)
+    return None
   return _p2p_allreduce(tuple(Device.canonicalize(d) for d in devs))
 @functools.cache
 def _p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None:
   if len(devs) < 2 or not amd_custom_kernels_supported(devs): return None
   # off by default on RDNA3: the mailboxes' writes to the peers don't arrive (every poll ran to its deadline, wrong values: 6x 7900 XTX)
   with Context(ALLOW_DEVICE_USAGE=1): rdna3 = all(getattr(Device[d], "target")[0] == 11 for d in devs)
-  if not (int(not rdna3)): return None
+  if not getenv("P2P_ALLREDUCE", int(not rdna3)): return None
   return P2PAllreduce(devs)
 
 def p2p_ar_shape(n:int) -> tuple[int, int]|None:
