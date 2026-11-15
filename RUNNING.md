@@ -134,7 +134,9 @@ sudo -n env HOME="$HOME" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED
 
 C9 therefore uses 14 shards, exact half cache rows and the `zai-org/GLM-5.3` alias. Require all 14 cards, expected effective env, `GET /v1/models`, healthy `GET /status`, then a small text request. The supported wrapper is `GLM53_POWER_LIMIT=$GLM53_POWER_LIMIT extra/llm_service/glm_14xr9700.sh start`; its `stop` action SIGTERMs the recorded process group and confirms exit. Rollback uses the previous immutable tree and matching validated profile.
 
-## Production environment contract (77 names)
+## API and production environment contract (77 names)
+
+API sampling: a request without a temperature uses the model's GGUF `general.sampling.temp` and `top_p` (Qwen 3.8 Flash: 1.0 / 0.95); absent sampling metadata keeps the previous greedy behavior, explicit request values are unchanged, and startup logs report the defaults.
 
 There are 58 settings from the C2/C9 cleanup survival registry plus 19 exposed by the C5/D34 production contract. Count: 39 launcher-contract settings, 26 operator knobs, 12 short diagnostics (77 total, under the 80-name target).
 
