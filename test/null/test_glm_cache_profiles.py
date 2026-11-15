@@ -45,6 +45,7 @@ class TestCacheFormatProfiles(unittest.TestCase):
     self.assertEqual((shape[-1], dt), (512, dtypes.f16))
 
   def test_c9_default_is_half_and_q4_is_opt_in(self):
+    self.assertFalse(getenv_calls(ast.parse(inspect.getsource(full)), 'GLM_KV'))
     shape, dt = select_dtype(full.MLATransformerBlock, {}, dim=576)
     self.assertEqual((shape[-1], dt), (576, dtypes.f16))
     for env in ({'GLM_KV': 'q4', 'SEQ_FP8': 1, 'SEQ_FP8_IDX': 0, 'SEQ_KV4': 1}, {'SEQ_FP8': 1, 'SEQ_FP8_IDX': 0, 'SEQ_KV4': 1}):
