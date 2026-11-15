@@ -201,7 +201,6 @@ class CallifyCtx:
   replacements: list[UOp] = field(default_factory=list)
   allocs: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
-  stores: list[UOp] = field(default_factory=list)
 
 def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
@@ -224,17 +223,11 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
 def is_store_after(u:UOp) -> bool:
   return u.op is Ops.AFTER and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE)
 
-def collect_stores(ctx:CallifyCtx, u:UOp):
-  if is_store_after(u): ctx.stores.append(u)
-
 # NOTE: scheduling rewrites belong in prepare; only storage/interface normalization belongs here.
 pm_callify_ctx_collect = PatternMatcher([
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.STAGE), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), allow_any_len=True, name="c"), contiguous_mops_to_view),
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
-
-  # Collect effects after their sources have been rewritten, without entering call bodies.
-  (UPat(Ops.AFTER, name="u"), collect_stores),
 ])
 
 # ALLOCs get canonical scope-local id slots here so structurally identical calls hash identically for the
@@ -284,8 +277,8 @@ def transform_to_call(big_sink:UOp) -> UOp:
   if SPEC: type_verify(big_sink, spec_tensor)
 
   # The tensor replacement map is collected before these rewrites change node identities.
-  graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
-  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs")
+  fn = graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
+  ret = graph_rewrite(fn, pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs")
   ret = ret.call(*ctx.replacements, precompile=True)
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret

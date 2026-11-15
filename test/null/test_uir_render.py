@@ -1,21 +1,18 @@
 import unittest, math
-from dataclasses import replace
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes, Invalid
 from tinygrad.uop import Ops
-from tinygrad.uop.ops import UOp, UPat, graph_rewrite, ParamArg, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import UOp, UPat, graph_rewrite, KernelInfo, ProgramInfo
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.device import Device
+from tinygrad.schedule import CallifyCtx, pm_export
 from tinygrad.codegen import full_rewrite_to_sink, to_program
 from tinygrad.helpers import Context, ansistrip
 from tinygrad.renderer import Estimates
 
 def _strip_buffers(root:UOp) -> UOp:
-  # realized BUFFERs carry runtime state the wire can't; a BUFFER with no binding is exactly an ALLOC
-  subs = {b: b.replace(op=Ops.ALLOC, arg=replace(b.arg, buffer=None, spec=None))
-          for b in root.toposort(enter_calls=True) if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg) and b.arg.buffer is not None}
-  return root.substitute(subs, walk=True, enter_calls=True, name="strip buffers for wire format test") if subs else root
+  return graph_rewrite(root, pm_export, ctx=CallifyCtx(), bottom_up=True, name="strip buffers for wire format test")
 
 def assert_roundtrip(case, root:UOp):
   # UOps are hash-consed, so a lossless round trip gives back the identical UOp

@@ -191,6 +191,7 @@ def parse_uir(text:str) -> UOp:
       if k[:-1] in kv: raise ValueError(f"{name} has {k} twice")
       kv[k[:-1]] = attr(names, k[:-1])
     if close is not None and pop(repr(close)) != close: raise ValueError(f"expected {close!r} to end {name}")
+    kv = {k:v for k,v in kv.items() if k not in _skip_fields}
     return _build(name, tuple(srcs), kv)
   def value(names:dict[str, UOp|None], bare=False) -> UOp:
     t = pop("a value")
