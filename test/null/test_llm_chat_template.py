@@ -44,6 +44,16 @@ def picture_conversation(steps:int) -> list[dict]:
     ms.append({"role": "tool", "tool_call_id": f"t{i}", "content": [{"type": "text", "text": f"pressed up ({i})"}, {"type": "image"}]})
   return ms
 
+def pi_picture_conversation(steps:int) -> list[dict]:
+  """Pokemon as pi sends it (openai-completions): a tool's screenshot goes in a user message after the tool's text, every step"""
+  ms:list[dict] = [{"role": "user", "content": "Beat the game."}]
+  for i in range(steps):
+    ms.append({"role": "assistant", "content": "", "reasoning_content": f"I see the map {i}.",
+               "tool_calls": [{"id": f"t{i}", "type": "function", "function": {"name": "press", "arguments": json.dumps({"button": "up"})}}]})
+    ms.append({"role": "tool", "tool_call_id": f"t{i}", "content": f"pressed up ({i})"})
+    ms.append({"role": "user", "content": [{"type": "text", "text": "Attached image(s) from tool result:"}, {"type": "image"}]})
+  return ms
+
 class TestChatTemplate(unittest.TestCase):
   def same(self, ct:str, messages:list[dict], **kw):
     a, b = copy.deepcopy(messages), copy.deepcopy(messages)
@@ -104,6 +114,11 @@ class TestRenderCache(unittest.TestCase):
     # text: those requests render in full; tool-only steps between them hit)
     rc = self.grow(QWEN, agent_conversation(40), step=1, preserve_thinking=False)
     self.assertGreater(rc.hits, 30)
+  def test_pi_pictures(self):
+    # (a user message every step: hits where the template renders older turns the same after it (preserve_thinking=True), else every request
+    # in full)
+    self.assertGreater(self.grow(QWEN, pi_picture_conversation(60), step=3).hits, 55)
+    self.assertEqual(self.grow(QWEN, pi_picture_conversation(20), step=3, preserve_thinking=False).hits, 0)
   def test_arguments(self):
     self.assertGreater(self.grow(QWEN, picture_conversation(20), enable_thinking=False).hits, 10)
     self.assertGreater(self.grow(QWEN, agent_conversation(10), step=1, reasoning_effort="low").hits, 10)

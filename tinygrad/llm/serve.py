@@ -119,15 +119,28 @@ class RenderCache:
   and adds no user message renders only the ones after it (a Pokemon step at 250K: the template over ~2,500 messages, ~80 ms, every request).
   The text after the cut is the template's over the conversation's start (its system messages and first user message) and the new messages,
   less the start's own text: the same text where a message renders from itself, its neighbours' roles and the last user message (Qwen 3.x,
-  GLM 5.x). A new user message (a template may then render older turns differently: preserve_thinking=False, clear_thinking), a template
-  argument not in ARGS (add_vision_id: pictures numbered over the conversation): the full render. Checked: a cut is made only where the full
+  GLM 5.x). A new user message (a template may then render older turns differently: preserve_thinking=False, clear_thinking): the full
+  render, unless the template with these arguments renders an assistant turn the same with a user message after it (probed once: pi sends a
+  tool's screenshot as a user message after the tool's, every Pokemon step). A template argument not in ARGS (add_vision_id: pictures
+  numbered over the conversation): the full render. Checked: a cut is made only where the full
   text ends with that tail, and every SERVE_RENDER_CHECK-th (64) cached render is compared with the full one (a difference: logged, the cache
   off). Its renders run under its lock (the template holds the GIL anyway)"""
   ARGS = frozenset({"tools", "preserve_thinking", "reasoning_effort", "enable_thinking", "clear_thinking"})
   def __init__(self, template:typing.Any, size:int=64, check:int=64):
     self.template, self.size, self.check, self.on, self.hits = template, size, check, True, 0
     self.entries:list[tuple[str, list[dict], int, int, str]] = []  # (arguments' key, messages, start's length, cut, text before the cut)
-    self.lock = threading.Lock()
+    self.lock, self.user_stable = threading.Lock(), typing.cast(dict[str, bool], {})
+
+  def stable(self, key:str, kw:dict) -> bool:
+    """the template with these arguments renders an assistant turn (its reasoning, a tool call) the same when a user message follows it"""
+    if (ret:=self.user_stable.get(key)) is None:
+      a:dict = {"role": "assistant", "content": "a", "reasoning_content": "r",
+           "tool_calls": [{"id": "c", "type": "function", "function": {"name": "f", "arguments": {}}}]}
+      ms:list[dict] = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}, a, {"role": "tool", "tool_call_id": "c", "content": "t"}]
+      try: ret = self.full(ms + [{"role": "user", "content": "v"}], kw).startswith(self.full(ms, kw, False))
+      except Exception: ret = False
+      self.user_stable[key] = ret
+    return ret
 
   def full(self, messages:list[dict], kw:dict, gen:bool=True) -> str:
     return self.template.render(messages=messages, add_generation_prompt=gen, **kw)
@@ -156,7 +169,7 @@ class RenderCache:
       hit = max((e for e in self.entries if e[0] == key and e[2] == s and e[3] < len(messages) and messages[:e[3]] == e[1][:e[3]]),
                 key=lambda e: e[3], default=None)
       text = None
-      if hit is not None and all(m.get("role") != "user" for m in messages[hit[3]:]) and \
+      if hit is not None and (all(m.get("role") != "user" for m in messages[hit[3]:]) or self.stable(key, kw)) and \
          (t:=self.tail(messages[:s], messages[hit[3]:], kw)) is not None:
         text, self.hits = hit[4] + t, self.hits + 1
         if self.check and self.hits % self.check == 0 and text != (want:=self.full(messages, kw)):
