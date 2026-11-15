@@ -484,6 +484,18 @@ class TestLLMToolCalls(unittest.TestCase):
     self.assertEqual([(tc.function.name, json.loads(tc.function.arguments)) for tc in calls], [('read', {'x"y':'\n</tool_call>\n', 'n':3})])
     self.assertEqual(chunks[-1].choices[0].finish_reason, 'tool_calls')
 
+  def test_dsml_tool_call(self):
+    self.set_output('a\n\n<｜DSML｜tool_calls>\n<｜DSML｜invoke name="read">\n<｜DSML｜parameter name="path" string="true">3</｜DSML｜parameter>\n'
+      '<｜DSML｜parameter name="n" string="false">3</｜DSML｜parameter>\n</｜DSML｜invoke>\n'
+      '<｜DSML｜invoke name="ping">\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>')
+    with patch.object(self.mock_tok, "_special_tokens", {"｜DSML｜": 0}):
+      chunks = list(self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"hi"}], tools=self.tools(),
+                                                       stream=True))
+    self.assertEqual(''.join(c.choices[0].delta.content or '' for c in chunks if c.choices), 'a')
+    calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
+    self.assertEqual([(tc.function.name, json.loads(tc.function.arguments)) for tc in calls], [('read', {'path':'3', 'n':3}), ('ping', {})])
+    self.assertEqual(chunks[-1].choices[0].finish_reason, 'tool_calls')
+
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):
     model, calls = Transformer(TEST_CONFIG), []
