@@ -39,6 +39,9 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     self.assertNotIn("00001-of-00003.gguf", cmd)
     self.assertNotIn("AM_VM_RESET=1", cmd)
     self.assertNotIn("SEQ_STASH_ENTRIES=", cmd)
+    pokemon = self.command("qwen_6x7900xtx.sh", {"SPEC_DRAFTS": "3", "SERVE_RENDER_CACHE": "1", "VISION_BUCKETS": "384"})
+    for required in ("SPEC_DRAFTS=3", "SERVE_RENDER_CACHE=1", "VISION_BUCKETS=384", "TOP_K=20"):
+      self.assertIn(required, pokemon)
 
   def test_glm_production_environment_and_power_guard(self):
     cmd = self.command("glm_14xr9700.sh")

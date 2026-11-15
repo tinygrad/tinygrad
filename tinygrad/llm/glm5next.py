@@ -1798,7 +1798,7 @@ class Indexer:
     ring = round_up(max(2*idx.kpool, self.rewind + idx.kpool - 1), idx.kpool)
     # (SEQ_IDX_SHARD with a sequence sharded cache: the pooled keys split on their pools as the cache on its positions, a device stores and
     # scores its own, see pool_index_shard)
-    self.shard = len(cast(tuple, x.device)) if self.sparse and bool((0)) and seq_sharded(x.device) else 0
+    self.shard = len(cast(tuple, x.device)) if self.sparse and bool((1)) and seq_sharded(x.device) else 0
     if self.shard:
       # (GLM_SEQ: every region's, as the cache's rows (a region's pools a device's local rows from base//kpool//n, see core's grouped))
       rows = max(self.max_context, self.cache_rows) + REGION_ALIGN if self.cache_rows else self.max_context
@@ -3114,7 +3114,7 @@ class Transformer:
   def batch_slots(self) -> int:
     """the slots for sequence states and warmed decode steps"""
     if not (self.has_recurrent_block and self.config.kv_lora_rank > 0) or self.config.cache_rows: return 0
-    return min((80 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES))
+    return min(getenv("BATCH_SLOTS", 80 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES))
   def decode_slots(self) -> int:
     return self.batch_slots()
   def batch_ctx(self) -> int:
@@ -3865,7 +3865,7 @@ class Transformer:
     self._seq_pf_host_temp = tmv.cast('f')
     self._seq_host_out, self._seq_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, m*(2*k+1) + 1)
     # (SEQ_COPY_SCRATCH=1: their intermediates in the jits' shared arenas, not their own (~140 MB a card at 30 slots): one runs at a time)
-    sc:dict|None = self._scratch if (0) else None
+    sc:dict|None = self._scratch if (1) else None
     self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True, scratch=sc) for sv in (True, False)}
     self._seq_ckpt_jits = {sv: TinyJit(functools.partial(self._seq_ckpt_copy, sv), capture_first=True, scratch=sc) for sv in (True, False)}
     # (SEQ_REPLAY: a slot's recurrent states advanced to a position, see _seq_materialize; the position of every slot's state)
@@ -4784,7 +4784,7 @@ class Transformer:
     pending:list[Callable[[], None]] = []
     # (LOAD_DEFER: the files read while the jits compile, see seq_warmup)
     state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads if shard > 1 else {}, fuse, row_sel=rows_map,
-                                  pending=pending if (0) else None)
+                                  pending=pending if (1) else None)
     _lap("weights")
     if host_embd is not None: state_dict['token_embd.weight'] = host_embd
 

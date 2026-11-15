@@ -708,9 +708,7 @@ def _temp_row(t:float|tuple[float, ...]) -> array.array:
   t = t if isinstance(t, tuple) else (t, 1.0)
   return array.array('f', (*t, 0.0)[:TEMP_W] if len(t) < TEMP_W else t[:TEMP_W])
 TEMP_W = 3  # (the floats of a row of the seq steps' temperatures: temperature, top_p, top_k)
-# (SAMPLE_TOP_K: the sampled steps' graphs take their rows' top_k (8 rounds of counts over the vocabulary, exchanged when it's split): on
-# with a server's TOP_K, off (no cost, a request's top_k ignored) without)
-SAMPLE_TOP_K = int(20 > 0)
+SAMPLE_TOP_K = 1
 
 def _hash_uniform(seed:Tensor, keys:Tensor, like:Tensor) -> Tensor:
   """
@@ -2976,13 +2974,6 @@ class Transformer:
     unlinked = _run_again(calls, set(late))
     _lap("warmup: run again")
     if DEBUG >= 1: print(f"seq_warmup: {len(calls)} calls run again in {time.perf_counter()-st:.2f}s ({len(unlinked)} jits had been unlinked)")
-
-  def seq_run_again(self) -> list[str]:
-    """the warm-up's calls once more (see _run_again), after a later capture in the scratch the model shares; the jits' names found unlinked"""
-    calls, skip = self.__dict__.pop("_warm_calls")
-    st, unlinked = time.perf_counter(), _run_again(calls, skip)
-    if DEBUG >= 1: print(f"seq_warmup: {len(calls)} calls run again in {time.perf_counter()-st:.2f}s ({len(unlinked)} jits had been unlinked)")
-    return unlinked
 
   def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, ...]=0.0,
                   upto:int|None=None, pictures:dict[int, Callable[[], Any]]|None=None) -> int|None:

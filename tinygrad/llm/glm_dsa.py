@@ -14,8 +14,8 @@ from tinygrad.llm.kernels.amd_glm_dsa import Linear, gated_delta_prefill, flash_
   all_gather, all_gather_q8, sharded_argmax, skinny_matmul, moe_combine_scatter, kda_conv, tables_ready, moe_router_local, hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, SLOT_SPAN, \
   mla_bmm, bmm_wmma, weighted_sum, rows_gather, \
-  nucleus, seq_store, mla_sparse_seq, seq_views, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, \
-  FP8_ROPE_ROW, IDX_FP8_ROW, pool_index_shard, Q4_ROPE_ROW, reduced_rows
+  nucleus, seq_store, mla_sparse_seq, seq_views, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, FP8_ROW, FP8_ROPE_ROW, \
+  IDX_FP8_ROW, pool_index_shard, Q4_ROW, Q4_ROPE_ROW, reduced_rows
 from tinygrad.llm.kernels.amd_glm_dsa import p2p_check, host_allgather, Q8_0, lists_pad, GEMM_ROWS
 from tinygrad.llm.kernels.amd_glm_dsa import sp_reduce_scatter, all_to_all, mla_sparse_tokens, tbo_ag_parts, tbo_a2a_pre, \
   tbo_a2a_parts, tbo_a2a_post, tbo_rs_pre, tbo_rs_parts, tbo_rs_post, tbo_q8_pre, tbo_q8_post
@@ -1042,7 +1042,7 @@ class Indexer:
     # ring (the last tokens: the next call can start before the end, see pool_keys), the other one every token's key and gate
     # (SEQ_FP8 with a sequence sharded cache: fp8 pooled keys, a row of 32 words of e4m3 values and the scale. SEQ_FP8_IDX=0: the latent
     # cache's rows fp8, the indexer's not)
-    fp8 = self.sparse and bool((getenv("SEQ_FP8", 0))) and seq_sharded(x.device) and idx.head_dim == 128
+    fp8 = self.sparse and bool(getenv("SEQ_FP8_IDX", getenv("SEQ_FP8", 0))) and seq_sharded(x.device) and idx.head_dim == 128
     row, dt = ((IDX_FP8_ROW,), dtypes.uint32) if fp8 else ((idx.head_dim,), dtypes.half if self.sparse else dtypes.float32)
     region_pools = (max(self.max_context, self.cache_rows) + REGION_ALIGN) // idx.kpool if self.cache_rows else max_pools
     self.cache_pk = Tensor.zeros(*(() if self.sparse else (x.shape[0],)), region_pools, *row, dtype=dt, device=x.device).contiguous()
@@ -1753,7 +1753,10 @@ class MLATransformerBlock(FFNBlock):
         devs = cast(tuple[str, ...], x.device)
         # (SEQ_FP8: a row of fp8 values and their scales, see fp8_rows: half the memory. 576 dims (C9): the rope dims in half, 656 bytes)
         # (SEQ_KV4 with it: 4-bit rows, see q4_rows: 416 bytes)
-        row, dt = ((D,), dtypes.half)
+        q4 = bool(getenv("SEQ_KV4", 0))
+        fp8 = bool(getenv("SEQ_FP8", 0)) and D in (512, 576)
+        W = (Q4_ROW if q4 else FP8_ROW) if D == 512 else (Q4_ROPE_ROW if q4 else FP8_ROPE_ROW)
+        row, dt = ((W,), dtypes.uint32) if fp8 else ((D,), dtypes.half)
         if (reg:=self._regions) is not None:
           # (SLOT_ALIAS: the slots of batched decoding in the same buffer, regions of S positions: the model's first (SLOT_SPAN of them), slot
           # i's the SLOT_SPAN+i-th. the model's cache past them is the slots': a long sequence alone overwrites them, see Transformer.main_overlaps)
@@ -3369,7 +3372,7 @@ class Transformer(GLMSeqDriver):
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
-                realize=bool((0)), shard:int=1, defer_load:bool=bool((0))) -> tuple[Transformer, dict]:
+                realize=bool((0)), shard:int=1, defer_load:bool=bool(getenv("LOAD_DEFER", 0))) -> tuple[Transformer, dict]:
     """defer_load (LOAD_DEFER, default off): the weights are read later (warmup compiles meanwhile), before the first call"""
     # TODO: remove the need for copy to default device
     st = time.perf_counter()
