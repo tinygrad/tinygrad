@@ -6,6 +6,7 @@ from tinygrad.helpers import DEBUG, colored, stderr_log, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
 from tinygrad.llm.telemetry import Telemetry, utc_ms
 from tinygrad.llm.engine import SessionInFlight
+if typing.TYPE_CHECKING: from tinygrad.llm.engine import SeqEngine, Seq
 if TYPE_CHECKING:
   from tinygrad.llm.cli import SimpleTokenizer
   from tinygrad.llm.model import Transformer
@@ -1395,6 +1396,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if callable(f:=getattr(self.model, "main_overlaps", None)) and isinstance(gone:=f(length), list) and gone:
       trace(f"main_writes {length}: slots {gone} gone")
       self.slot_taken(*gone)
+  def seq_end(self, eng:"SeqEngine", s:"Seq", req:Request, kept:int):
+    """the end of req's decoding in sequence s: kept for a next turn, unless it failed (emit's guard: its states went wrong, the retry is
+    prefilled from the start, not continued from them)"""
+    if req.error is not None: eng.drop(s)
+    else: eng.stop(s, kept)
   def drop_caches(self):
     """the kept conversations forgotten (their states may be wrong): every request is prefilled from the start"""
     if (eng:=getattr(self, "engine", None)) is not None: eng.forget()
@@ -1888,7 +1894,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             del filling[job]
             self.stats.prefills += 1
             if self.emit(req, first): active[job] = req
-            else: eng.stop(job, len(job.tokens))
+            else: self.seq_end(eng, job, req, len(job.tokens))
         # (requests that can't take a sequence yet, none decoding: not a busy loop)
         if job is None and not active: time.sleep(0.005)
         # the steps of the decoding ones: one, or their share of the time of the slices
@@ -1929,7 +1935,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
             for i, t in enumerate(toks):
               if not self.emit(req, t, hold=True):
                 # (its tokens up to this one: the ones after it aren't the conversation's)
-                eng.stop(s, len(s.tokens) - (len(toks) - 1 - i))
+                self.seq_end(eng, s, req, len(s.tokens) - (len(toks) - 1 - i))
                 del active[s]
                 break
             else:
