@@ -287,8 +287,7 @@ class TestGLMDSASequence(unittest.TestCase):
       with self.assertRaises(P2PRunOut): model.seq_prefill(3, 0, [1, 2, 3], 0, 0)
 
   def test_seq_step_runout_retried(self):
-    # (P2P_RETRY: a decode step after a p2p run-out runs again (same args, the replayed states' positions as before it); not after an unwaited
-    # prompt slice (the run-out can be the slice's), not a third time)
+    # (P2P_RETRY: a decode step after a p2p run-out runs again (same args, the replayed states' positions as before it), not a third time)
     from tinygrad.llm.kernels.amd_glm_dsa import P2PRunOut
     model = Transformer.__new__(Transformer)
     model.token_embd = SimpleNamespace(weight=SimpleNamespace(device=("NULL:0", "NULL:1")))
@@ -312,14 +311,42 @@ class TestGLMDSASequence(unittest.TestCase):
       self.assertEqual(len(calls), 2)
       self.assertEqual(calls[0], calls[1])
       self.assertEqual(kb, [{5: 10}, {5: 10}])
-      calls.clear()
-      model._p2p_unwaited = True
-      with self.assertRaises(P2PRunOut): model.seq_step(seqs)
-      self.assertEqual(len(calls), 1)
     def always(self, *a, **kw): raise P2PRunOut("ran out")
     model._p2p_unwaited = False
     with patch.object(glm_dsa.GLMSeqDriver, "seq_step", always), patch.object(glm_dsa.Device, "__getitem__", lambda self, d: Mock()):
       with self.assertRaises(P2PRunOut): model.seq_step(seqs)
+
+  def test_runout_after_unwaited_slices_redoes_them(self):
+    # (ts5 Nov 15: a decode step's run-out after a prompt slice (not waited for) ended the 4 streams of the step: the slices since the last
+    # wait run again in their order (same args), then the step; a prefill's retry does the same; a wait clears them)
+    from tinygrad.llm.kernels.amd_glm_dsa import P2PRunOut
+    model = Transformer.__new__(Transformer)
+    model.token_embd = SimpleNamespace(weight=SimpleNamespace(device=("NULL:0", "NULL:1")))
+    model._seq_kbase = {}
+    log = []
+    def pf(self, slot, base, tokens, start, hrow, temp=0.0, upto=None):
+      log.append(("pf", slot, start, upto))
+      if upto is None and sum(1 for x in log if x[0] == "pf" and x[3] is None) == 1: raise P2PRunOut("ran out")
+      if upto is None: self._p2p_unwaited, self._p2p_slices = False, []
+      return None if upto is not None else 42
+    def st(self, seqs, *a, **kw):
+      log.append(("st",))
+      if log.count(("st",)) == 1: raise P2PRunOut("ran out")
+      self._p2p_unwaited, self._p2p_slices = False, []
+      return [([1], [2])]
+    with patch.object(glm_dsa.GLMSeqDriver, "seq_prefill", pf), patch.object(glm_dsa.GLMSeqDriver, "seq_step", st), \
+         patch.object(glm_dsa.Device, "__getitem__", lambda self, d: Mock()):
+      model.seq_prefill(3, 0, [1, 2, 3, 4], 0, 5, 0.0, 2)
+      model.seq_prefill(4, 64, [9, 9, 9], 0, 6, 0.0, 1)
+      self.assertTrue(model._p2p_unwaited)
+      self.assertEqual(model.seq_step([(5, 0, 10, 0, 1, [7], 0.0)]), [([1], [2])])
+      self.assertEqual(log, [("pf", 3, 0, 2), ("pf", 4, 0, 1), ("st",), ("pf", 3, 0, 2), ("pf", 4, 0, 1), ("st",)])
+      self.assertEqual((model._p2p_unwaited, model._p2p_slices), (False, []))
+      log.clear()
+      model.seq_prefill(3, 0, [1, 2, 3, 4], 0, 5, 0.0, 2)
+      self.assertEqual(model.seq_prefill(3, 0, [1, 2, 3, 4], 2, 0), 42)
+      self.assertEqual(log, [("pf", 3, 0, 2), ("pf", 3, 2, None), ("pf", 3, 0, 2), ("pf", 3, 2, None)])
+      self.assertEqual(model._p2p_slices, [])
 
   def test_p2p_late_raises(self):
     # (a p2p poll that ran out: its sums wrong. a long wait reads the devices' notes and raises, never returns the tokens)
