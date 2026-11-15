@@ -16,8 +16,7 @@ class Ops(FastEnum):
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
 
-  # BUFFER references bound storage; ALLOC declares unbound global storage
-  # EXTERN is an input from outside an exported function: storage (GLOBAL) or a scalar (ALU), with no runtime state
+  # BUFFER references bound storage; ALLOC declares unbound global storage; EXTERN is storage from outside an exported function
   BUFFER = auto(); ALLOC = auto(); EXTERN = auto()
 
   # ** 2 -- non op uops **
@@ -112,7 +111,7 @@ class GroupOp:
 
   Defines = {Ops.PARAM, Ops.REFPARAM, Ops.BUFFER, Ops.ALLOC, Ops.EXTERN, Ops.BINARY}
 
-  Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM, Ops.EXTERN, Ops.GETADDR}
+  Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM, Ops.GETADDR}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK}
   # ops with a shape from the shape of src[0] and the arg
   ShapeChanging = Movement | {Ops.UNSHARD, Ops.REDUCE}

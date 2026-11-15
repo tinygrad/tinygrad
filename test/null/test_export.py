@@ -1,7 +1,8 @@
 import unittest
 from tinygrad import Tensor, Variable, dtypes
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop import Ops
-from tinygrad.uop.ops import UOp
+from tinygrad.uop.ops import UOp, ParamArg
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.function import function
 import tinygrad.schedule as schedule
@@ -23,21 +24,18 @@ def buf(n=4, dtype=dtypes.float32) -> Tensor: return Tensor.empty(n, dtype=dtype
 
 class TestExport(unittest.TestCase):
   def assert_exportable(self, fn:UOp, externs:tuple[UOp, ...]):
-    schedule.assert_exportable(fn)
+    for u in fn.toposort(enter_calls=True):
+      self.assertFalse(u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL)
+      if isinstance(u.arg, ParamArg): self.assertTrue(u.arg.buffer is None and u.arg.val is None, f"runtime state in {u}")
+      if u.op is Ops.ALLOC: self.assertLess(u.arg.slot, 0, "ALLOCs are canonical")
+      if u.op is Ops.EXTERN: self.assertEqual((u.dtype, u.device), (externs[u.arg.slot].dtype, externs[u.arg.slot].device))
     # UOps are hash-consed, so a lossless round trip through the wire format gives back the identical UOp
     self.assertIs(parse_uir(render_uir(fn)), fn)
-    ext = sorted({u.arg.slot:u for u in fn.toposort(enter_calls=True) if u.op is Ops.EXTERN}.items())
-    self.assertEqual([s for s,_ in ext], list(range(len(externs))), "EXTERN slots are dense")
-    for (_, e), x in zip(ext, externs):
-      self.assertIsNone(e.arg.name)
-      self.assertEqual((e.dtype, e.addrspace, e.device), (x.dtype, x.addrspace, x.device))
 
   def test_add(self):
     a, b = buf(), buf()
     fn, externs = exported(a+b)
     self.assert_exportable(fn, externs)
-    self.assertEqual(len(externs), 3)
-    self.assertTrue(all(e.op is Ops.BUFFER and e.arg.buffer is not None for e in externs))
     self.assertTrue({a.uop.buf_uop, b.uop.buf_uop} <= set(externs))
     self.assertNotIn(Ops.BUFFER, {u.op for u in fn.toposort()})
 
@@ -49,18 +47,13 @@ class TestExport(unittest.TestCase):
     a, b = buf(), buf()
     self.assertIsNot(exported(a+b)[0], exported(a*b)[0])
 
-  def test_variable_loses_value_and_name(self):
+  def test_variable_loses_value(self):
     a = buf()
-    v, w = Variable("v", 1, 4), Variable("w", 1, 4)
+    v = Variable("v", 1, 4)
     fn, externs = exported(a*v.bind(2))
     self.assert_exportable(fn, externs)
-    ext = [u for u in fn.toposort() if u.op is Ops.EXTERN and u.arg.vmin_vmax is not None]
-    self.assertEqual(len(ext), 1)
-    self.assertEqual(ext[0].arg.vmin_vmax, (1, 4))
     self.assertIn(v.bind(2), externs)
-    # the value and the name are not part of the function, the range is
     self.assertIs(fn, exported(a*v.bind(3))[0])
-    self.assertIs(fn, exported(a*w.bind(3))[0])
     self.assertIsNot(fn, exported(a*Variable("v", 1, 5).bind(3))[0])
 
   def test_symbolic_shape(self):
@@ -72,13 +65,10 @@ class TestExport(unittest.TestCase):
 
   def test_view_input(self):
     a = Tensor.empty(8, device="NULL").realize()
-    fn, externs = exported(a[2:6].contiguous()+1)
-    self.assert_exportable(fn, externs)
+    self.assert_exportable(*exported(a[2:6].contiguous()+1))
 
   def test_bitcast_input(self):
-    a = buf()
-    fn, externs = exported(a.bitcast(dtypes.int32)+1)
-    self.assert_exportable(fn, externs)
+    self.assert_exportable(*exported(buf().bitcast(dtypes.int32)+1))
 
   def test_assign(self):
     a = buf()
@@ -87,8 +77,7 @@ class TestExport(unittest.TestCase):
     self.assertEqual(externs, (a.uop.buf_uop,))
 
   def test_rand(self):
-    fn, externs = exported(Tensor.rand(4, device="NULL"))
-    self.assert_exportable(fn, externs)
+    self.assert_exportable(*exported(Tensor.rand(4, device="NULL")))
 
   def test_multi(self):
     a = Tensor.empty(4, 4, device="NULL").shard(("NULL:0", "NULL:1"), axis=0).realize()
@@ -99,64 +88,40 @@ class TestExport(unittest.TestCase):
   def test_function(self):
     @function
     def f(x, y): return (x*y+1).contiguous()
-    a, b = buf(), buf()
-    fn, externs = exported(f(a, b))
+    fn, externs = exported(f(buf(), buf()))
     self.assert_exportable(fn, externs)
     self.assertIn(Ops.CALL, {u.op for u in fn.toposort()})
 
   def test_precompiled_function(self):
     @function(precompile=True)
     def f(x, y): return (x*y+1).contiguous()
-    a, b = buf(), buf()
-    fn, externs = exported(f(a, b))
-    self.assert_exportable(fn, externs)
+    self.assert_exportable(*exported(f(buf(), buf())))
 
   def test_alloc_is_canonical(self):
     @function
     def f(x): return (x+1).contiguous()*2
-    a, b = buf(), buf()
-    fn, _ = exported(f(a))
-    self.assertIs(fn, exported(f(b))[0])
+    self.assertIs(exported(f(buf()))[0], exported(f(buf()))[0])
 
-class TestLinearTemplate(unittest.TestCase):
-  def template(self, *tensors:Tensor) -> tuple[UOp, dict[str, int], tuple[UOp, ...]]: return Tensor._linear(*tensors, bind=False)
-
-  def assert_no_runtime_state(self, linear:UOp):
-    for u in linear.toposort(enter_calls=True):
-      self.assertIsNot(u.op, Ops.BUFFER)
-      self.assertFalse(u.is_bound_var)
-
-  def test_template(self):
-    a, b = buf(), buf()
-    linear, var_vals, inputs = self.template((a+b).contiguous()*2)
-    self.assert_no_runtime_state(linear)
-    self.assertEqual(var_vals, {})
-    self.assertTrue({a.uop.buf_uop, b.uop.buf_uop} <= set(inputs))
-    # storage local to the schedule is unbound until the linear is linked
-    self.assertIn(Ops.ALLOC, {u.op for u in linear.toposort()})
-    self.assertIn(Ops.EXTERN, {u.op for u in linear.toposort()})
-
-  def test_template_cached(self):
+class TestExportCache(unittest.TestCase):
+  def test_cached(self):
     v = Variable("v", 1, 4)
     a, b, c, d = buf(), buf(), buf(), buf()
-    l1, vv1, in1 = self.template((a+b)*v.bind(2))
-    l2, vv2, in2 = self.template((c+d)*v.bind(3))
-    self.assertIs(l1, l2)
-    self.assert_no_runtime_state(l1)
-    self.assertEqual((vv1, vv2), ({"v": 2}, {"v": 3}))
-    self.assertNotEqual(in1, in2)
-
-  def test_bind_mismatch(self):
-    v = Variable("v", 0, 3)
-    a = Tensor.empty(4, 4, device="NULL").realize()
-    with self.assertRaisesRegex(RuntimeError, "bind mismatch"): self.template(a[v.bind(1)].cat(a[v.bind(2)]))
-
-  def test_bound(self):
-    # linear_with_vars binds its storage
-    a, b = buf(), buf()
-    linear, _ = ((a+b).contiguous()*2).linear_with_vars()
+    (a+b).contiguous().mul(v.bind(2)).linear_with_vars()
+    n = len(schedule.export_cache)
+    linear, var_vals = (c+d).contiguous().mul(v.bind(3)).linear_with_vars()
+    self.assertEqual(len(schedule.export_cache), n)
+    self.assertEqual(var_vals, {"v": 3})
+    # the cached linear is mapped back to this storage
+    self.assertTrue({c.uop.buf_uop, d.uop.buf_uop} <= set(linear.toposort()))
     self.assertNotIn(Ops.EXTERN, {u.op for u in linear.toposort()})
     self.assertNotIn(Ops.ALLOC, {u.op for u in linear.toposort()})
+
+  def test_no_runtime_state(self):
+    Tensor.rand(4, device="NULL").add(buf()).contiguous().sum().linear_with_vars()
+    for linear in schedule.export_cache.values():
+      for u in linear.toposort(enter_calls=True):
+        self.assertIsNot(u.op, Ops.BUFFER)
+        self.assertFalse(u.is_bound_var)
 
 if __name__ == "__main__":
   unittest.main()

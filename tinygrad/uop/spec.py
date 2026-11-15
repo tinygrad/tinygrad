@@ -153,10 +153,8 @@ spec_tensor = PatternMatcher([
    and (buf.arg.device is None or (buf.addrspace is AddrSpace.GLOBAL and is_device(buf.arg.device)))
    and valid_device_range(buf.arg.device, buf.src[1:])),
 
-  # EXTERN is an input to an exported function: storage or a scalar with no runtime state and no name
   (UPat(Ops.EXTERN, src=(p_size,), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.arg.buffer is None
-   and x.arg.val is None and x.arg.name is None and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.ALU) and valid_device_range(x.arg.device, x.src[1:])),
-
+   and x.addrspace is AddrSpace.GLOBAL and valid_device_range(x.arg.device, x.src[1:])),
   # a Variable is a scalar ALU PARAM with a value range and no device
   (UPat(Ops.PARAM, src=(UPat(Ops.STACK, src=()),), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
 

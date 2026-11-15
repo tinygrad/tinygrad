@@ -166,11 +166,7 @@ def replace_buffer(ctx:tuple[list[UOp], dict[UOp, int]], b:UOp) -> UOp:
   bufs, slots = ctx
   if slots.setdefault(b, len(bufs)) == len(bufs): bufs.append(b)
   return UOp.param(slots[b], b.dtype, b.max_numel(), b.device, name="lt_input")
-pm_replace_buffers = PatternMatcher([
-  (UPat(Ops.BUFFER, name="b"), lambda ctx, b: replace_buffer(ctx, b)),
-  # an EXTERN is already a link time input, the input_uops start with what the EXTERNs stand for
-  (UPat(Ops.EXTERN, name="e"), lambda e: UOp.param(e.arg.slot, e.dtype, e.max_numel(), e.device, name="lt_input")),
-])
+pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b: replace_buffer(ctx, b))])
 
 def unwrap_call(call:UOp) -> UOp|None:
   if not get_enqueue_devs(call) or (n:=max(len(to_tuple(a.device)) for a in get_call_arg_uops(call))) == 1: return None
@@ -555,7 +551,6 @@ pm_resolve_link = PatternMatcher([
   # an alloc and a link time input become buffers
   (UPat(Ops.ALLOC, name="b"), bufferize_buf),
   (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.inputs[b.arg.slot] if b.arg.name == "lt_input" else None),
-  (UPat(Ops.EXTERN, name="b"), lambda ctx, b: ctx.inputs[b.arg.slot]),
   # the address of a buffer is a const
   (UPat(Ops.GETADDR, name="g"), resolve_getaddr),
   # math on consts is a const
