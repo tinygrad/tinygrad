@@ -72,5 +72,14 @@ class TestVisionRunAgain(unittest.TestCase):
     self.assertTrue(all(c.args[1] == (16, c.args[0].shape[0] // 16) and c.args[0].shape[0] == bucket(c.args[0].shape[0])
                         for c in tower.call_args_list))
 
+  def test_extra_bucket_warmed(self):
+    # (VISION_BUCKETS=576: its jit made at the warm-up and linked again after the model's, in size order)
+    from unittest.mock import patch
+    from tinygrad.llm import qwen_vision
+    tower = Mock(patch_dim=1536)
+    with patch.object(qwen_vision, "VISION_BUCKETS", (576,)): qwen_vision.VisionTower.run_again(tower, 1024)
+    self.assertEqual([c.args[0].shape[0] for c in tower.call_args_list], [256, 512, 576, 1024, 2048, 4096])
+    self.assertEqual(tower.call_args_list[2].args[1], (16, 36))
+
 if __name__ == "__main__":
   unittest.main()

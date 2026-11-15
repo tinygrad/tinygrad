@@ -6,7 +6,7 @@ import numpy as np
 from tinygrad import Tensor, UOp
 from tinygrad.llm import qwen4exp as q
 from tinygrad.llm.qwen4exp import precompute_freqs_cis, imrope_mix, _rope_rows, _vis_pools, VIS_PAD
-from tinygrad.llm.qwen_vision import smart_resize, picture_ids, picture_runs, rope_positions, rope_delta, patches, bucket
+from tinygrad.llm.qwen_vision import smart_resize, picture_ids, picture_runs, rope_positions, rope_delta, patches, bucket, buckets
 
 SECTIONS = (11, 11, 10)
 
@@ -56,6 +56,14 @@ class TestPatches(unittest.TestCase):
 
   def test_bucket(self):
     self.assertEqual([bucket(n) for n in (1, 256, 257, 1024, 1025, 16384)], [256, 256, 512, 1024, 2048, 16384])
+
+  def test_extra_buckets(self):
+    # (VISION_BUCKETS: a 320x288 screenshot = 528 GLM patches -> 576, 360 Qwen ones -> 384; the others as before)
+    self.assertEqual([bucket(n, (384, 576)) for n in (1, 256, 257, 360, 385, 512, 513, 528, 576, 577, 4096)],
+                     [256, 256, 384, 384, 512, 512, 576, 576, 576, 1024, 4096])
+    self.assertEqual(buckets(528, (576,)), [256, 512, 576])
+    self.assertEqual(buckets(4096, (576, 8192)), [256, 512, 576, 1024, 2048, 4096])
+    self.assertEqual(buckets(4096, ()), [256, 512, 1024, 2048, 4096])
 
 class TestPictureIds(unittest.TestCase):
   def test_runs(self):
