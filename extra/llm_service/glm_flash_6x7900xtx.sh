@@ -30,10 +30,17 @@ for _name in API_KEY API_KEY_FILE MODEL_ALIASES MODEL_OWNED_BY KEEPALIVE ENC_CAC
   if [[ -n ${!_name+x} ]]; then SERVER_ENV+=("$_name=${!_name}"); fi
 done
 COMMAND=(python3 -m tinygrad.llm --model "$MODEL" --shard 6 --max_context 524288 --serve "${PORT:-8000}")
+if [[ -n ${VISION_MMPROJ:-} ]]; then
+  SERVER_ENV+=(VISION_MMPROJ="$VISION_MMPROJ" VISION_KERNELS=1 VISION_SLICE_MS=200 VISION_MAX_TOKENS=1024
+               VISION_MAX_IMAGES=2048 VISION_CACHE_MB=2048 VISION_URL_CACHE_MB=512 VISION_BUCKETS=576 SERVE_RENDER_CACHE=1)
+fi
 
 check_weights() {
   command -v sha256sum >/dev/null
   (cd "$GLM_FLASH_WEIGHTS" && sha256sum -c "$ROOT/extra/llm_service/glm-flash-iq3xxs.sha256")
+  if [[ -n ${VISION_MMPROJ:-} ]]; then
+    printf '%s %s\n' '922b809664d6a89cc1e40bfeaa63618000edc6651baf4082ce0718a784adf947' "$VISION_MMPROJ" | sha256sum -c -
+  fi
 }
 if [[ $ACTION == --print-command ]]; then
   printf '%q ' "${SERVER_ENV[@]}" "${COMMAND[@]}"; printf '\n'
@@ -66,6 +73,7 @@ else
   cat >&2 <<'USAGE'
 Usage: glm_flash_6x7900xtx.sh start|stop|status|check-weights|--print-command
 D34 ran at 225 W/card with 18 seats of 262144 context (524288 server context).
+Optional picture tower: VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf $0 start (unset = text only).
 AM_FIRST_START=1 enables the single controlled AM reset. No process or GPU is touched by --print-command.
 USAGE
   [[ $ACTION == --help || $ACTION == -h ]] && exit 0

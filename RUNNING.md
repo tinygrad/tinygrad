@@ -55,6 +55,8 @@ a4dba331fe92ffbd71317839cc1452c57f0b5b3f971a9e96ee5107f9a615cdac  GLM-5.3-Flash-
 
 These four SHA-256 values were computed from deployment files and match the independent Phase-2 reference. The recorded g1 production start selects this same four-shard model path; an argv path is not itself a fresh file hash, so verify the manifest before every start. Do not substitute the similarly named IQ4_XS five-shard or IQ1_M three-shard checkpoints.
 
+The optional GLM Flash picture tower uses `mmproj-F16.gguf` from the published `unsloth/GLM-5.3-Flash-GGUF` main branch: **1,128,047,296 bytes**, SHA-256 `922b809664d6a89cc1e40bfeaa63618000edc6651baf4082ce0718a784adf947`. A fresh picture VM copies it to `/home/runner/glmvis/mmproj-F16.gguf` (it is not under `/weights`); a different installation path is valid only if that byte content matches. Verify it before every picture start.
+
 ### GLM C9 production set
 
 Directory: `/raid/weights/GLM-5.3-UD-IQ4_XS/` on ts5. `MODEL=/raid/weights/GLM-5.3-UD-IQ4_XS/GLM-5.3-UD-IQ4_XS-00001-of-00009.gguf`; all nine shards must be present.
@@ -109,7 +111,13 @@ bash extra/llm_service/glm_flash_6x7900xtx.sh --print-command
 bash extra/llm_service/glm_flash_6x7900xtx.sh start
 ```
 
-The fixed engine invocation is `python3 -m tinygrad.llm --model /weights/GLM-5.3-Flash-UD-IQ3_XXS/GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf --shard 6 --max_context 524288 --serve 8000`. D34 ran at 225 W/card. Leave `SPEC_DRAFTS` and `SPEC_DRAFTS_BY_SIZE` unset: this model inherits two drafts. Use `AM_FIRST_START=1` only for the first controlled start, not ordinary restarts. `status` and `stop` use the launcher's state dir. This tree's C5 endpoint is **text-only**; do not add Qwen's picture tower settings.
+The fixed engine invocation is `python3 -m tinygrad.llm --model /weights/GLM-5.3-Flash-UD-IQ3_XXS/GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf --shard 6 --max_context 524288 --serve 8000`. D34 ran at 225 W/card. Leave `SPEC_DRAFTS` and `SPEC_DRAFTS_BY_SIZE` unset: D34 inherits two drafts. Use `AM_FIRST_START=1` only for the first controlled start, not ordinary restarts. `status` and `stop` use the launcher's state dir. With `VISION_MMPROJ` unset or empty, this tree's C5 endpoint is **text-only**. Picture support is opt-in, with unchanged capacity `SEQ_ROWS=3916800` for 18 slots:
+
+```bash
+VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf extra/llm_service/glm_flash_6x7900xtx.sh start
+```
+
+The opt-in path sets `VISION_KERNELS=1`, `VISION_SLICE_MS=200`, `VISION_MAX_TOKENS=1024`, `VISION_MAX_IMAGES=2048`, `VISION_CACHE_MB=2048`, `VISION_URL_CACHE_MB=512`, `VISION_BUCKETS=576`, and `SERVE_RENDER_CACHE=1`. `VISION_LATE` stays 0/off: it is Qwen-only, absent from all serving lines and unmeasured. The shared-arena relink/run-again machinery stays enabled independently of it. Only the optional picture profile adds tower, graph and picture-cache memory; it does not change rows or draft counts.
 
 With `SESSION_END_TOKEN` unset (the default), explicit backend session-end calls return the expected **403 `backend_session_end_disabled`**, not generation failures. An integrated proxy releases its own session bookkeeping, while backend conversations remain in bounded 18-slot residency until reuse, NONDROP eviction or restart; `ended_dropped=0` only counts processed explicit ends and is **not** proof of backend memory release. Actual coordinated cleanup requires a matching out-of-band token on proxy and backends plus active/completed/duplicate-end tests (including resident/stash drops, `already_ended` and later admissions); never expose the secret in `--print-command`, and enabling the endpoint alone does not move model-seat release before verifier execution.
 
@@ -212,18 +220,18 @@ Any setting not listed here is not supported: its production value is compiled i
 | `SEQ_STASH_CTX` | 32768 | Minimum context eligible for stash retention. |
 | `SEQ_STICKY` | 180 s | Idle-conversation residency grace period. |
 | `SESSION_END_TOKEN` | required for admin endpoint | Bearer credential for session termination. |
-| `SERVE_RENDER_CACHE` | 0/off | Optional chat-template render cache; memoized renders can change server-side cache behavior, so enable only with output-identical API tests and expected cache controls. |
-| `VISION_BUCKETS` | empty (normal power-of-two shapes) | Additional picture-token tower buckets for frequent image sizes. Every extra bucket adds warm-up time and graph memory; run every bucket again and leave unset unless measured useful. |
-| `VISION_CACHE_MB` | dedicated picture profile 1024 | Maximum host RAM for cached picture rows/profile features: this many MB stays resident when full, in addition to decoded pictures and engine state. Size a shared service from measured RSS, not this dedicated-box profile. |
+| `SERVE_RENDER_CACHE` | 0/off; C5 tower 1 | Optional chat-template render cache; memoized renders can change server-side cache behavior, so enable only with output-identical API tests and expected cache controls. |
+| `VISION_BUCKETS` | unset otherwise; C5 tower 576 | Additional picture-token tower buckets for frequent image sizes. Every extra bucket adds warm-up time and graph memory; run every bucket again and leave unset unless measured useful. |
+| `VISION_CACHE_MB` | C2 profile 1024; optional C5 tower 2048 | Maximum host RAM for cached picture rows/profile features: this many MB stays resident when full, in addition to decoded pictures and engine state. Size a shared service from measured RSS, not either dedicated-box profile. |
 | `VISION_URL_CACHE_MB` | dedicated picture profile 512 | Maximum host RAM for decoded pictures keyed by data-URL hash: up to this many MB avoids repeated decoding but remains resident beside the row cache and engine state. Reduce it for a shared service after measuring its working set. |
 | `VISION_DECODERS` | 2 | Concurrent picture decode workers. |
 | `VISION_DECODE_WAIT` | 30 s | Picture decode deadline. |
 | `VISION_MAX_BODY_MB` | 32 | HTTP request body cap. |
 | `VISION_MAX_BYTES` | 20000000 | Encoded bytes allowed for one picture. |
-| `VISION_MAX_IMAGES` | dedicated picture profile 1024; many-customer default 8, typical explicit limit 8–32 | Maximum pictures per request. Each can consume up to the byte/pixel/token caps plus decode, tower and queue work; the dedicated 1024 limit admits far more concurrent work and cache pressure. |
+| `VISION_MAX_IMAGES` | C2 1024; optional C5 tower 2048; many-customer default 8, typical explicit limit 8–32 | Maximum pictures per request. Each can consume up to the byte/pixel/token caps plus decode, tower and queue work; the dedicated 1024 limit admits far more concurrent work and cache pressure. |
 | `VISION_MAX_PIXELS` | 40000000 | Decoded pixel cap per picture. |
 | `VISION_MAX_TOKENS` | 1024 | Picture token-row/tower memory cap. |
-| `VISION_SLICE_MS` | 300 default; validated service overrides exist | Target picture work per scheduler slice. |
+| `VISION_SLICE_MS` | 200 in validated picture services; generic default 300 | Target picture work per scheduler slice. |
 | `WARMUP_JITS` | C5/D34 `all` | Named start-time JIT subset; `all` warms every supported production graph. |
 
 ### Short diagnostics list (13)

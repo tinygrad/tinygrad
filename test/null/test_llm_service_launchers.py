@@ -5,10 +5,10 @@ SCRIPTS = ROOT / "extra/llm_service"
 
 
 class TestLLMServiceLaunchers(unittest.TestCase):
-  def command(self, script: str) -> str:
-    return subprocess.check_output(
-      [SCRIPTS / script, "--print-command"], cwd=ROOT, text=True, env={"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}
-    )
+  def command(self, script: str, extra_env: dict|None = None) -> str:
+    env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"], "VISION_MMPROJ": ""}
+    if extra_env is not None: env.update(extra_env)
+    return subprocess.check_output([SCRIPTS / script, "--print-command"], cwd=ROOT, text=True, env=env)
 
   def test_scripts_parse_and_help(self):
     self.assertTrue(all(p.stat().st_mode & 0o111 for p in SCRIPTS.glob("*.sh")))
@@ -86,6 +86,12 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     self.assertIn("GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf", cmd)
     self.assertNotIn("SPEC_DRAFTS=", cmd)  # D34 inherits GLM's default of two drafts.
     self.assertNotIn("AM_VM_RESET=1", cmd)
+    self.assertNotIn("VISION_MMPROJ=", cmd)  # Text-only by default.
+    picture = self.command("glm_flash_6x7900xtx.sh", {"VISION_MMPROJ": "/home/runner/glmvis/mmproj-F16.gguf"})
+    for required in ("VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf", "VISION_KERNELS=1", "VISION_SLICE_MS=200",
+                     "VISION_MAX_TOKENS=1024", "VISION_MAX_IMAGES=2048", "VISION_CACHE_MB=2048",
+                     "VISION_URL_CACHE_MB=512", "VISION_BUCKETS=576", "SERVE_RENDER_CACHE=1"):
+      self.assertIn(required, picture)
     failed = subprocess.run(
       [SCRIPTS / "glm_flash_6x7900xtx.sh", "start"], env={**os.environ, "AM_POWER_LIMIT": "251"},
       cwd=ROOT, text=True, capture_output=True,
