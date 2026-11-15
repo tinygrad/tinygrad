@@ -128,8 +128,6 @@ pm_remove_bufferize = PatternMatcher([
   (UPat.var("src").f(Ops.STAGE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
   # STORE to self is NOOP
   (UPat.var("x").store(UPat.var("x")), lambda x: UOp(Ops.NOOP)),
-  # END on NOOP is NOOP
-  (UPat(Ops.END, src=(UPat(Ops.NOOP, name="x"),), allow_any_len=True), lambda x: x),
 ])
 
 def strip_zero_offset_shrink(x:UOp) -> UOp:
@@ -255,9 +253,6 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
    lambda m: m.replace(src=tuple([x.src[0].base for x in m.src])).reshape(m.shape)),
-
-  # remove any RESHAPEs on KERNEL
-  (UPat(Ops.CALL, name="k"), lambda k: k.replace(src=tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src))),
 
   # remove invalid writes
   (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONST, arg=Invalid))), lambda: UOp(Ops.NOOP)),
