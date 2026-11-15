@@ -93,7 +93,7 @@ class PythonProgram(Program['PythonDevice']):
           continue
         if u.op is Ops.AFTER or (u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)): values[u] = src_values[0]
         elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [pargs.pop(0)] * warp_size
-        elif u.op in {Ops.PARAM, Ops.BUFFER}:
+        elif u.op in {Ops.PARAM, Ops.BUFFER, Ops.EXTERN}:
           storage_fmt = storage_fmt_for_dtype(u.dtype)
           if storage_fmt is None: raise RuntimeError(f"dtype={u.dtype} is not supported")
           if TYPE_CHECKING or sys.version_info < (3, 12): assert storage_fmt != "e"

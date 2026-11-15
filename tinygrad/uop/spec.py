@@ -88,10 +88,14 @@ spec_shared = PatternMatcher([
   (UPat(Ops.BACKEDGE, dtypes.void, src=(UPat(), UPat(Ops.RANGE, dtypes.void), UPat(dtype=dtypes.bool)), name="x"),
    lambda x: x.arg is None and x.src[2].shape == () and not x.src[2].base.is_invalid),
 
-  # PARAM/BUFFER carry a size CONST or an empty STACK for scalars
+  # storage declarations carry a size CONST or an empty STACK for scalars
   (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.REFPARAM, src=(p_size, UPat(dtype=dtypes.uint64)), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
+  # EXTERN is a processed BUFFER; the runtime buffer must have been removed
+  (UPat(Ops.EXTERN, src=(p_size,), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.arg.buffer is None
+   and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)
+   and (x.arg.device is None or is_device(x.arg.device) and valid_device_range(x.arg.device, x.src[1:]))),
 
   (UPat(Ops.BINARY, dtypes.uint8, src=(), name="x"), lambda x: isinstance(x.arg, bytes)),
 
@@ -201,7 +205,7 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
-  # a bare CONST only appears under its width CAST or as a PARAM/BUFFER/ALLOC size
+  # a bare CONST only appears under its width CAST or as a storage declaration's size
   (UPat(GroupOp.All-GroupOp.Defines, name="x"), lambda x: False if x.op is not Ops.CAST and any(s.op is Ops.CONST for s in x.src) else None),
   (UPat(GroupOp.All-{Ops.CONST}, dtypes.weaks), lambda: False),
 
@@ -211,8 +215,9 @@ spec_program = PatternMatcher([
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),
 
-  # REG/LOCAL buffer
-  (UPat((Ops.BUFFER, Ops.ALLOC), src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
+  # REG/LOCAL storage
+  (UPat((Ops.BUFFER, Ops.EXTERN, Ops.ALLOC), src=(p_size,), name="x"),
+   lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL) or None),
 
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),

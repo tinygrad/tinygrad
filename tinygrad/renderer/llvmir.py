@@ -193,7 +193,7 @@ class LLVMRenderer(Renderer):
       if u.op is Ops.PARAM:
         r[u] = f"%data{u.arg.slot}"
         args.append((r[u], u))
-      elif u.op is Ops.BUFFER:
+      elif u.op in {Ops.BUFFER, Ops.EXTERN}:
         r[u] = f"%{'local' if u.addrspace == AddrSpace.LOCAL else 'reg'}_{str(u.arg.slot)}"
         size = u.max_numel()
         if u.addrspace == AddrSpace.REG:

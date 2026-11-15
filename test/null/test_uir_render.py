@@ -1,9 +1,8 @@
 import unittest, math
-from dataclasses import replace
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes, Invalid
 from tinygrad.uop import Ops
-from tinygrad.uop.ops import UOp, UPat, graph_rewrite, ParamArg, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import UOp, UPat, graph_rewrite, pm_to_extern, KernelInfo, ProgramInfo
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.device import Device
@@ -12,10 +11,7 @@ from tinygrad.helpers import Context, ansistrip
 from tinygrad.renderer import Estimates
 
 def _strip_buffers(root:UOp) -> UOp:
-  # realized BUFFERs carry runtime state the wire can't; a BUFFER with no binding is exactly an ALLOC
-  subs = {b: b.replace(op=Ops.ALLOC, arg=replace(b.arg, buffer=None, spec=None))
-          for b in root.toposort(enter_calls=True) if b.op is Ops.BUFFER and isinstance(b.arg, ParamArg) and b.arg.buffer is not None}
-  return root.substitute(subs, walk=True, enter_calls=True, name="strip buffers for wire format test") if subs else root
+  return graph_rewrite(root, pm_to_extern, walk=True, name="strip buffers for wire format test")
 
 def assert_roundtrip(case, root:UOp):
   # UOps are hash-consed, so a lossless round trip gives back the identical UOp
@@ -28,6 +24,14 @@ class TestSSARender(unittest.TestCase):
     b = Tensor.rand(256, 256, device="CPU").realize()
     root = graph_rewrite((a.reshape(256,256,1) * b.reshape(256,1,256)).sum(0).uop, mop_cleanup)
     assert_roundtrip(self, root)
+
+  def test_buffer_to_extern_before_processing(self):
+    buf = UOp.new_buffer("NULL", 4, dtypes.float32)
+    sink = full_rewrite_to_sink(buf.store(1.0).sink(arg=KernelInfo()), Device["NULL"].renderer, optimize=False)
+    extern = next(u for u in sink.toposort() if u.op is Ops.EXTERN)
+    self.assertIsNone(extern.arg.buffer)
+    self.assertEqual((extern.arg.slot, extern.dtype, extern.device, extern.shape), (buf.arg.slot, buf.dtype, buf.device, buf.shape))
+    self.assertNotIn(Ops.BUFFER, {u.op for u in sink.toposort()})
 
   def _kernel(self, t:Tensor) -> UOp:
     lin, _ = Tensor.linear_with_vars(t)

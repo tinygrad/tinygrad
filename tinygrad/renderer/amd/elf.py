@@ -41,7 +41,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   wave32 = not is_cdna
   for u in sink.toposort():
     if u.op is Ops.PARAM: param_sizes[u.arg.slot] = u.dtype.itemsize if u.addrspace is AddrSpace.ALU else 8
-    elif u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL: lds_size += u.max_numel() * u.dtype.itemsize
+    elif u.op in {Ops.BUFFER, Ops.EXTERN} and u.addrspace is AddrSpace.LOCAL: lds_size += u.max_numel() * u.dtype.itemsize
     elif u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL and u.arg.name == "scratch": scratch_size += u.max_numel() * u.dtype.itemsize
     elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
     elif u.op is Ops.RANGE and u.axis_type is AxisType.WARP and u.src[0].arg == 64: wave32 = True

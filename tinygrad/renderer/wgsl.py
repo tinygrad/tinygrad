@@ -72,7 +72,7 @@ class WGSLRenderer(CStyleLanguage):
     (UPat.cvar("c").cast((dtypes.uchar, dtypes.ushort, dtypes.uint32)), lambda c: f"{c.val&0xFFFFFFFF}u"),
     # a negative const must state its type: contextual conversion of a bare abstract int rejects it in a u32 position
     (UPat.cvar("c").cast(dtypes.int32, name="x"), lambda ctx,x,c: f"i32({v})" if (v:=truncate[x.dtype](c.val)) < 0 else f"{v}"),
-    (UPat(Ops.BUFFER, name="x"), lambda ctx,x:
+    (UPat((Ops.BUFFER, Ops.EXTERN), name="x"), lambda ctx,x:
      f"var{'<workgroup>' if x.addrspace == AddrSpace.LOCAL else ''} {ctx[x]}: array<{ctx.buf_map(x)},{_packed_size(x)}>;"),
     (UPat(Ops.BITCAST, dtype=dtypes.half, name="x", src=(UPat(dtype=(dtypes.short, dtypes.ushort, dtypes.uint32),),)),
      lambda ctx,x: f"bitcast<vec2<f16>>({ctx[x.src[0]]})[0]"),
