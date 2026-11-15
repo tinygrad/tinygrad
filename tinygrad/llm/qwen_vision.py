@@ -291,11 +291,24 @@ VISION_SLICE_MS = getenv("VISION_SLICE_MS", 300)  # a bucket whose tower takes l
 VISION_KERNELS = getenv("VISION_KERNELS", 0)
 ATTN_SCORES = 1 << 25  # the attention's scores of a chunk of queries at most (32M floats = 128 MB: 2,048 queries of 1,024 patches, 128 of 16,384)
 
-def bucket(n:int) -> int:
-  """the padded patch count of a picture with n patches: 256 x a power of 2 (one compiled tower a bucket; at most 2x the work)"""
+# VISION_BUCKETS=576,...: buckets of their own between the powers of 2 (patch counts, multiples of 64) for a frequent picture size: a
+# 320x288 screenshot is 528 GLM patches (576, not 1,024) or 360 Qwen ones (384, not 512). the padding is masked: a picture's rows are
+# the next power's (the fused attention adds exact zeros); a bucket costs its jits at the warm-up and its input buffers
+VISION_BUCKETS = tuple(sorted({int(x) for x in str(getenv("VISION_BUCKETS", "")).split(",") if x.strip()}))
+assert all(b > 0 and b % 64 == 0 for b in VISION_BUCKETS), f"VISION_BUCKETS={VISION_BUCKETS}: patch counts, multiples of 64"
+
+def bucket(n:int, extra:tuple[int, ...]|None=None) -> int:
+  """the padded patch count of a picture with n patches: 256 x a power of 2 (one compiled tower a bucket; at most 2x the work), or the
+  smallest of VISION_BUCKETS between n and it"""
   b = 256
   while b < n: b *= 2
-  return b
+  return min([e for e in (VISION_BUCKETS if extra is None else extra) if n <= e < b], default=b)
+
+def buckets(n:int, extra:tuple[int, ...]|None=None) -> list[int]:
+  """every bucket up to the one of n patches, smallest first (the warm-up's)"""
+  top = bucket(n, extra)
+  powers = {256 << k for k in range(32) if 256 << k <= top}
+  return sorted(powers | {e for e in (VISION_BUCKETS if extra is None else extra) if e <= top})
 
 def _block_major(a:np.ndarray, gh:int, gw:int) -> np.ndarray:
   return a.reshape(gh // MERGE, MERGE, gw // MERGE, MERGE, *a.shape[2:]).swapaxes(1, 2).reshape(gh * gw, *a.shape[2:])
@@ -471,8 +484,7 @@ class VisionTower:
     picture of a size isn't the compile's wait of everyone's prefill. a bucket whose tower takes longer than VISION_SLICE_MS runs in slices
     of k blocks (k from its measured time): a server runs one slice between the other sessions' decoding steps (see TowerJob)
     """
-    b = bucket(1)
-    while b <= bucket(max_tokens * MERGE * MERGE):
+    for b in buckets(max_tokens * MERGE * MERGE):
       blank = (np.zeros((b, self.patch_dim), np.float32), (16, b // 16))
       for _ in range(2): self(*blank)
       st = time.perf_counter()
@@ -483,17 +495,13 @@ class VisionTower:
         self._plans[b] = [(a, min(a + k, self.depth)) for a in range(0, self.depth, k)]
         self._jits.pop((b, 0, self.depth), None)
         for _ in range(2): self(*blank)
-      b *= 2
 
   def run_again(self, max_tokens:int):
     """
     every bucket's tower once more with a blank picture, after the model's warm-up: its captures grow the scratch the tower's jits share and
     rebase them (their links dropped): a server's first picture of a size would link them again
     """
-    b = bucket(1)
-    while b <= bucket(max_tokens * MERGE * MERGE):
-      self(np.zeros((b, self.patch_dim), np.float32), (16, b // 16))
-      b *= 2
+    for b in buckets(max_tokens * MERGE * MERGE): self(np.zeros((b, self.patch_dim), np.float32), (16, b // 16))
 
   def start(self, px:np.ndarray, grid:tuple[int, int]) -> TowerJob:
     """a picture's tower as a job of slices (TowerJob.step): its patches (n, 1536) (see patches), grid (gh, gw). (one job at a time: a bucket's
