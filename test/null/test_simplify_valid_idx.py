@@ -19,6 +19,9 @@ def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp.param(0, dtypes.float, 1024).index(idx.valid(valid)).load()
 
+def get_gated_store_uop(valid:UOp, idx:UOp):
+  return UOp.param(0, dtypes.float, 1024).index(idx.valid(valid)).store(1.0)
+
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
   return UOp.param(0, dtypes.float, image_shape).index(idx[1].valid(valid), idx[0].valid(valid)).load()
 
@@ -570,46 +573,53 @@ class TestRangeShrink(unittest.TestCase):
   def test_range_shrink_single_guard(self):
     # range 0..203 guarded by r < 4 everywhere -> shrink to 0..3
     r = Range(0, 204)
-    load = get_gated_load_uop(r < UOp.const(4), r)
-    ranges = self.get_ranges(load.sink())
+    store = get_gated_store_uop(r < UOp.const(4), r)
+    ranges = self.get_ranges(store.sink())
     self.assert_range_end(ranges, 4)
 
   def test_range_shrink_picks_max_guard(self):
-    # two loads guard the same range with r < 4 and r < 8 -> shrink to max(4, 8) = 8
+    # two stores guard the same range with r < 4 and r < 8 -> shrink to max(4, 8) = 8
     r = Range(0, 204)
-    load1 = get_gated_load_uop(r < UOp.const(4), r)
-    load2 = get_gated_load_uop(r < UOp.const(8), r)
-    ranges = self.get_ranges(UOp.sink(load1, load2))
+    store1 = get_gated_store_uop(r < UOp.const(4), r)
+    store2 = UOp.param(1, dtypes.float, 1024).index(r.valid(r < UOp.const(8))).store(1.0)
+    ranges = self.get_ranges(UOp.sink(store1, store2))
     self.assert_range_end(ranges, 8)
 
   def test_range_no_shrink_guard_ge_max(self):
     # guard r < 300 with range max 204 -> no shrink (guard doesn't constrain)
     r = Range(0, 204)
-    load = get_gated_load_uop(r < UOp.const(300), r)
-    ranges = self.get_ranges(load.sink())
+    store = get_gated_store_uop(r < UOp.const(300), r)
+    ranges = self.get_ranges(store.sink())
     self.assert_range_end(ranges, 204)
 
   def test_range_no_shrink_when_unguarded_elsewhere(self):
-    # one load guards r < 4, but another load uses r without a gate -> no shrink
+    # one store guards r < 4, but another store uses r without a gate -> no shrink
     r = Range(0, 204)
-    load1 = get_gated_load_uop(r < UOp.const(4), r)
-    load2 = UOp.param(1, dtypes.float, 204).index(r).load()
-    ranges = self.get_ranges(UOp.sink(load1, load2))
+    store1 = get_gated_store_uop(r < UOp.const(4), r)
+    store2 = UOp.param(1, dtypes.float, 204).index(r).store(1.0)
+    ranges = self.get_ranges(UOp.sink(store1, store2))
     self.assert_range_end(ranges, 204)
 
-  def test_range_no_shrink_when_used_in_reduce(self):
-    # range used in both a gated load AND directly in the reduce expression -> no shrink
+  def test_range_shrink_ignores_ungated_read(self):
+    # the store guards r < 4 and its value reads r without a gate -> shrink to 0..3
     r = Range(0, 204)
-    gated_load = get_gated_load_uop(r < UOp.const(4), r)
-    red = (r.cast(dtypes.float) + gated_load).reduce(r, arg=Ops.ADD)
-    ranges = self.get_ranges(red.sink())
+    store = UOp.param(0, dtypes.float, 1024).index(r.valid(r < UOp.const(4))).store(UOp.param(1, dtypes.float, 204).index(r).load())
+    ranges = self.get_ranges(store.sink())
+    self.assert_range_end(ranges, 4)
+
+  def test_range_no_shrink_when_used_in_reduce(self):
+    # a gated store inside the reduce guards r < 4, but the reduce sums every iteration -> no shrink
+    r = Range(0, 204)
+    gated_store = get_gated_store_uop(r < UOp.const(4), r)
+    red = r.cast(dtypes.float).after(gated_store).reduce(r, arg=Ops.ADD)
+    ranges = self.get_ranges(UOp.param(1, dtypes.float, 1)[0].store(red).sink())
     self.assert_range_end(ranges, 204)
 
   def test_range_shrink_to_single_iteration(self):
     # guard r < 1 shrinks range to 1 -> single iteration, range eliminated entirely
     r = Range(0, 204)
-    load = get_gated_load_uop(r < UOp.const(1), r)
-    ranges = self.get_ranges(load.sink())
+    store = get_gated_store_uop(r < UOp.const(1), r)
+    ranges = self.get_ranges(store.sink())
     self.assertEqual(len(ranges), 0)
 
   def test_range_shrink_store_where_invalid(self):
