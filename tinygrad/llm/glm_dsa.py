@@ -3440,12 +3440,13 @@ class Transformer(GLMSeqDriver):
     """
     FREQS_HOST (default off): the rope table of the attention blocks (max_context x rope_dim float32: 268 MB a device at 1M, the same on
     every device) in ONE host buffer every device reads directly, not a copy in every device's memory. its values as before: computed on
-    the first device by the same kernels, copied out (a chunk reads its T rows over the bus: ~0.7 MB a layer at 2688 rows)
+    the first device by the same kernels, copied out (a chunk reads its T rows over the bus: ~0.7 MB a layer at 2688 rows). the table is
+    made by the function under the cache (__wrapped__): the cached one stayed realized on the first device for the life of the process
     """
     blocks:list[Any] = [b for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []) if isinstance(getattr(b, "freqs_cis", None), Tensor)]
     if not blocks or blocks[0].freqs_cis.uop.is_realized: return
     c = self.config
-    table = precompute_freqs_cis(c.rope_dim, c.max_context, c.rope_theta, device=devs[0], yarn=c.yarn).realize()
+    table = precompute_freqs_cis.__wrapped__(c.rope_dim, c.max_context, c.rope_theta, device=devs[0], yarn=c.yarn).realize()
     mv, host = _host_buffer(devs, table.nbytes(), table.dtype)
     mv[:] = cast(Buffer, table.uop.buffer).as_memoryview()
     del table

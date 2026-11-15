@@ -2,6 +2,7 @@ import os
 import functools
 import unittest
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock, patch
 
 import numpy as np
@@ -15,6 +16,17 @@ class TestGLMDSASequence(unittest.TestCase):
   def setUp(self):
     self.enterContext(Context(DEV="CPU"))
     self.devs = ("CPU",)
+
+  def test_freqs_host_leaves_no_device_table(self):
+    # FREQS_HOST: the table goes to one host buffer; the first device must not keep a realized copy in precompute_freqs_cis's cache
+    c = SimpleNamespace(rope_dim=8, max_context=16, rope_theta=10000.0, yarn=None)
+    blk = [SimpleNamespace(freqs_cis=glm_dsa.precompute_freqs_cis(8, 16, 10000.0, device=self.devs))]
+    fake = SimpleNamespace(blk=blk, config=c)
+    Transformer._freqs_host(cast(Transformer, fake), self.devs)
+    self.assertTrue(blk[0].freqs_cis.uop.is_realized)
+    cached = glm_dsa.precompute_freqs_cis(8, 16, 10000.0, device=self.devs[0], yarn=None)
+    self.assertFalse(cached.uop.is_realized)
+    np.testing.assert_array_equal(blk[0].freqs_cis.numpy(), cached.numpy())
 
   def test_deferred_realize_shares_scratch(self):
     pending, scratch = [], {}
