@@ -1463,6 +1463,9 @@ class TransformerBlock(FFNBlock):
 
 # set while a call whose context the indexer's top_k covers is traced (its jit): the qwen sparse attention attends all the keys (see QSABlock)
 _qsa_dense:list[bool] = [False]
+# VISION (GLM 5.3 Flash's pictures, see Transformer._vis_embed): set while the vision variant of a prefill chunk (a chunk with a picture's rows)
+# is traced
+_vis_on:list[bool] = [False]
 # the first row of the sequence's region of the qwen sparse attention's caches (shared by sequences, see Transformer.regions) while its call is
 # traced: a bound variable (or 0), a multiple of REGION_ALIGN
 _seq_base:list[UOp|int] = [0]
@@ -2802,6 +2805,10 @@ class QwenMTPBlock(QSABlock):
     return self.hc_head.mixed(streams)
 
 class Transformer:
+  # (VISION: the server's VISION_MMPROJ sets vision (glm_vision's tower makes the pictures' rows); image_pad_id the template's <|image|>)
+  vision:bool = False
+  image_pad_id:int = -1
+  vision_mrope = False  # (a picture's rows at plain positions: the text model has no rope, no M-RoPE delta (engine's _delta))
   def __init__(self, config:TransformerConfig):
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
@@ -3020,6 +3027,7 @@ class Transformer:
     # (a view of the token buffer from a variable base: copied, the lookup of the embedding's rows of a view at two variables is a reduce over
     # the vocabulary)
     x = emb = self.token_embd((tokens.contiguous() if isinstance(base, UOp) else tokens).to(self.token_embd.weight.device)).float()  # (B, T, D)
+    if _vis_on[0]: x = emb = self._vis_embed(emb)
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     ple = None
     if (pc:=self.config.ple) is not None:
@@ -4131,6 +4139,7 @@ class Transformer:
     if not hasattr(self, "_token_buf"): self._token_host, self._token_buf = _host_ints(devs, self._token_rows())
     # in host memory: a step's input tokens, the temperature and top_p of every sequence, its sampled tokens and drafts (written by one device)
     self._seq_host_in, self._seq_in = _host_ints(devs, m*(k+1))
+    if self.vision: self._vis_init(devs)
     # (a mixed step's prompt's at 2m, the step's seed last)
     self._seq_m = m
     tmv, self._seq_temp = _host_buffer(devs, 4*TEMP_W*(m + 1) + 4, dtypes.float32)
@@ -4474,9 +4483,10 @@ class Transformer:
     self._seq_ckpt_jits[save](UOp.variable("seq_slot", 0, self.seq_slots()).bind(slot), UOp.variable("seq_ps", 0, S-1).bind(pos % S),
                               UOp.variable("seq_pc", 0, SC-1).bind(pos % SC))
 
-  def _prefill_jit(self, n:int, dense:bool) -> Any:
-    """the jit of a prefill chunk of n tokens on a sequence's region (dense: a context the indexer's top_k covers), see __call__"""
-    jits = self.__dict__.setdefault("jits" + ("_dense" if dense else "") + "_seq", {})
+  def _prefill_jit(self, n:int, dense:bool, vis:bool=False) -> Any:
+    """the jit of a prefill chunk of n tokens on a sequence's region (dense: a context the indexer's top_k covers; vis: VISION's variant), see
+    __call__"""
+    jits = self.__dict__.setdefault("jits" + ("_dense" if dense else "") + "_seq" + ("_vis" if vis else ""), {})
     if n not in jits: jits[n] = self._new_jit(n)
     return jits[n]
 
@@ -4549,6 +4559,14 @@ class Transformer:
         add(f"prefill{c}", self._prefill_jit(c, self._dense_ctx(0, n)), functools.partial(self.seq_prefill, 0, 0, [0]*n, 0, 0))
       if top + c <= self.seq_rows():
         add(f"prefill{c}_sparse", self._prefill_jit(c, False), functools.partial(self.seq_prefill, 0, 0, [0]*(top+c), top, 0))
+    if self.vision:
+      # (VISION: every prefill jit's vision variant too, a chunk of text rows run through it)
+      novis:tuple[list, dict] = ([], {})
+      for c, n in chunks:
+        if self._dense_ctx(0, n) or top + c > self.seq_rows():
+          add(f"vis_prefill{c}", self._prefill_jit(c, self._dense_ctx(0, n), vis=True), functools.partial(self._seq_chunk, 0, 0, n, vis=novis))
+        if top + c <= self.seq_rows():
+          add(f"vis_prefill{c}_sparse", self._prefill_jit(c, False, vis=True), functools.partial(self._seq_chunk, 0, top, c, vis=novis))
     for m in sorted(self.SEQ_SIZES, reverse=True):
       add(f"step{m}", self._seq_jit(m), functools.partial(self.seq_step, [(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m))
       for d in self._step_drafts(m)[1:]:
@@ -4615,36 +4633,45 @@ class Transformer:
       if DEBUG >= 1: print(f"seq_warmup: {name} run in {time.perf_counter()-st:.2f}s")
 
   def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, ...]=0.0,
-                  upto:int|None=None) -> int|None:
+                  upto:int|None=None, pictures:dict[int, Callable[[], Any]]|None=None) -> int|None:
     """
     the tokens from start of the sequence of slot `slot` (its region of the caches from base) prefilled, from its states of position start (the
     slot's, and its row hrow the hidden state of the token before it; start 0: none): its states of position len(tokens) into the slot (the
     hidden state of the last token its row 0). returns the token sampled after the last. upto: only the tokens up to upto (a slice of the
-    prompt, the rest from there): None returned
+    prompt, the rest from there): None returned.
+    VISION: a picture's rows are its ids (qwen_vision.picture_ids, negative), pictures the rows (n, dim) float32 of every picture of the
+    prompt by its first row's id (a function: computed when a chunk needs them); a chunk with a picture's rows runs the vision variant
     """
     self._finish_load()
     self._seq_init()
+    runs = []
+    if self.vision and min(tokens, default=0) < 0:
+      from tinygrad.llm.qwen_vision import picture_runs
+      runs = picture_runs(tokens)
+    def chunk(pos:int, n:int):
+      vis = [r for r in runs if r[0] < pos + n and r[0] + r[1] > pos]
+      self._seq_chunk(base, pos, n, vis=(vis, pictures or {}) if vis else None)
     if upto is not None:
       assert 0 <= start < upto < len(tokens) and base % self.REGION_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
       for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
       # (the token after the slice the prompt's: the slice's sampled token isn't written over it, the next slice's tokens are its)
-      self._token_host[base+start:base+upto+1] = array.array('i', tokens[start:upto+1])
+      self._token_host[base+start:base+upto+1] = self._dev_ids(tokens[start:upto+1])
       self._seq_copy_call(False, slot, start, hrow, keep=start > 0)
       pos = start
       for n in self._seq_chunks(upto - start):
-        self._seq_chunk(base, pos, n)
+        chunk(pos, n)
         pos += n
       self._seq_copy_call(True, slot, upto, 0)
       return None
     assert 0 <= start < len(tokens) and base % self.REGION_ALIGN == 0 and base + len(tokens) <= self.seq_rows()
     L, devs = len(tokens), to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
     for d in devs: Device[d].synchronize()  # (a step may still read the token buffer)
-    self._token_host[base+start:base+L+1] = array.array('i', tokens[start:] + [-1])
+    self._token_host[base+start:base+L+1] = self._dev_ids(tokens[start:]) + array.array('i', [-1])
     self._seq_copy_call(False, slot, start, hrow, keep=start > 0)
     self._seq_pf_host_temp[:TEMP_W] = _temp_row(temp)
     pos = start
     for n in self._seq_chunks(L - start):
-      self._seq_chunk(base, pos, n)
+      chunk(pos, n)
       pos += n
     self._seq_copy_call(True, slot, L, 0)
     return self._wait_host(lambda: self._token_host[base + L], "the token after a prefill")
@@ -4704,12 +4731,57 @@ class Transformer:
       n -= ret[-1]
     return ret
 
-  def _seq_chunk(self, base:int, pos:int, n:int, part:int|None=None):
-    """a prefill chunk: the n tokens from pos of the region from base in the token buffer (the jit of the smallest chunk size of n or more)"""
+  def _seq_chunk(self, base:int, pos:int, n:int, part:int|None=None,
+                 vis:tuple[list[tuple[int, int, int, int]], dict[int, Callable[[], Any]]]|None=None):
+    """
+    a prefill chunk: the n tokens from pos of the region from base in the token buffer (the jit of the smallest chunk size of n or more).
+    vis (VISION): the pictures with rows in the chunk (runs, their rows by first id): the vision variant
+    """
     sizes = self.prefill_chunks()
     vb, sp = UOp.variable("seq_base", 0, self.seq_rows()).bind(base), UOp.variable("start_pos", 0, self.max_context-1).bind(pos)
     nt = UOp.variable("toks", 1, next(s for s in sizes if n <= s)).bind(n)
-    self(self._token_buf[:, vb+sp:vb+sp+nt], sp, self._seq_pf_temp, vb, part)
+    if vis is not None: self._vis_fill(*vis, pos, n)
+    _vis_on[0] = vis is not None
+    try: self(self._token_buf[:, vb+sp:vb+sp+nt], sp, self._seq_pf_temp, vb, part)
+    finally: _vis_on[0] = False
+
+  # ******** VISION: a prefill chunk with a picture's rows runs the vision variant of the chunk's jit (__call__ keys it apart; text-only chunks
+  # run the jits of before, unchanged): the chunk's embedding with the tower's rows (host memory, written before the chunk: _vis_fill) where
+  # the row mask is set, the MTP layer's input too. no positions to change: GLM's text model has no rope ********
+  def _vis_init(self, devs:tuple[str, ...]):
+    assert self.image_pad_id >= 0, "VISION: the tokenizer's <|image|> token"
+    self._vis_rows_max = self.prefill_chunks()[-1]
+    mv, self._vis_rows = _host_buffer(devs, 4*self._vis_rows_max*self.config.dim, dtypes.float32)
+    self._vis_host_rows = mv.cast('f')
+    self._vis_host_mask, self._vis_mask = _host_ints(devs, self._vis_rows_max)
+
+  def _vis_embed(self, emb:Tensor) -> Tensor:
+    """the vision variant: emb (1, T, dim) with the picture rows of the chunk's rows"""
+    T, D, M = emb.shape[1], self.config.dim, self._vis_rows_max
+    rows = self._vis_rows.reshape(M, D).shrink(((0, T), None)).reshape(1, T, D)
+    return (self._vis_mask[0].shrink(((0, T),)).reshape(1, T, 1) != 0).where(rows, emb)
+
+  def _vis_fill(self, runs:list[tuple[int, int, int, int]], pictures:dict[int, Callable[[], Any]], pos:int, n:int):
+    """VISION: the vision variant's host inputs of the chunk of n rows from pos: the picture rows there and their mask"""
+    # (the chunk before may still read them)
+    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
+    M, D = self._vis_rows_max, self.config.dim
+    assert n <= M, f"a vision chunk of {n} rows (at most {M})"
+    mask = array.array('i', bytes(4*M))
+    for start, cnt, _, first in runs:
+      a, b = max(start, pos), min(start + cnt, pos + n)
+      if a >= b: continue
+      assert first in pictures, f"the rows of the picture at row {start} (id {first}): not given"
+      pic = pictures[first]()
+      assert pic.shape == (cnt, D) and pic.dtype.itemsize == 4, f"the picture at row {start}: rows {pic.shape} {pic.dtype}, its ids {cnt} x {D}"
+      self._vis_host_rows[(a-pos)*D:(b-pos)*D] = memoryview(pic[a-start:b-start].astype('float32').reshape(-1))
+      mask[a-pos:b-pos] = array.array('i', [1]*(b-a))
+    self._vis_host_mask[:M] = mask
+
+  def _dev_ids(self, ids:list[int]) -> array.array:
+    """the token buffer's ids of a token list: a picture's rows (VISION: negative ids) the image pad id"""
+    if not self.vision: return array.array('i', ids)
+    return array.array('i', [t if t >= 0 else self.image_pad_id for t in ids])
 
   def forward_seqs(self, *vs:UOp) -> Tensor: return self._forward_seqs(vs, ())
   def forward_seqs_mixed(self, *vs:UOp) -> Tensor:
@@ -5021,8 +5093,9 @@ class Transformer:
     # (a context the qwen sparse attention's top_k covers: the jits of all the keys, see _qsa_dense)
     dense = self._dense_ctx(start_pos, T)
     # (a sequence's region from a variable base: jits of their own, see seq_prefill)
+    # (VISION: the vision variant of a chunk, see _vis_embed)
     jits = self.__dict__.setdefault("jits" + ("_dense" if dense else "") + ("_greedy" if temperature is None else "") +
-                                    ("_seq" if isinstance(base, UOp) else ""), {})
+                                    ("_seq" if isinstance(base, UOp) else "") + ("_vis" if _vis_on[0] else ""), {})
     if (jit:=jits.get(key)) is None:
       # the states and caches are set up before: a jit captures on its first call
       self._init_states()
@@ -5317,6 +5390,8 @@ class Transformer:
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     _lap("state loaded")
     model._pending_load, model._loaded = pending, True
+    # (VISION: GLM 5.3 Flash's image pad: the chat template's <|image|> between <|begin_of_image|> and <|end_of_image|>)
+    if arch == 'glm5-next' and '<|image|>' in (toks:=kv.get('tokenizer.ggml.tokens', [])): model.image_pad_id = toks.index('<|image|>')
     # (the n-gram table: the bytes in the gguf file, mmapped, or a copy in host memory)
     if ple_entry is not None:
       model.ple_table = _disk_bytes(ple_entry[0]) or cast(Buffer, ple_entry[0].to("CPU").realize().uop.base.buffer).as_memoryview()

@@ -230,7 +230,9 @@ class TestTowerSlices(unittest.TestCase):
         return np.zeros((self.n, 4), np.float32) if self.left == 0 else None
     pics = [types.SimpleNamespace(digest=bytes([k]) * 32, rgb=np.zeros((32 * 8, 32 * 8, 3), np.uint8)) for k in (1, 2)]
     s = LLMServer.__new__(LLMServer)
-    s.vision, s._pic_rows, s._tower_job = types.SimpleNamespace(start=lambda px, grid: Job(grid[0] * grid[1] // 4)), collections.OrderedDict(), None
+    from tinygrad.llm.qwen_vision import patches
+    s.vision, s._pic_rows, s._tower_job = types.SimpleNamespace(start=lambda px, grid: Job(grid[0] * grid[1] // 4), patches=patches), \
+      collections.OrderedDict(), None
     a, b = picture_ids(pics[0].digest, 8, 8), picture_ids(pics[1].digest, 8, 8)
     ids = [5, VS] + a + [VE, 6, VS] + b + [VE, 1, 2, 3, 4]
     req = Request.__new__(Request)
@@ -253,6 +255,7 @@ class TestTowerSlices(unittest.TestCase):
     from tinygrad.llm.qwen_vision import picture_ids
     class Tower:
       cur = None
+      def patches(self, rgb): return patches(rgb)
       def start(self, px, grid):
         self.cur = float(px[0, 0])
         return Job(self, grid[0] * grid[1] // 4)
