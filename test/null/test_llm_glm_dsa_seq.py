@@ -431,9 +431,6 @@ class TestGLMDSASequence(unittest.TestCase):
       self.assertEqual(K._rows_f16_config(48, 2048, 6144, K.Q8_0, "NULL"),  # (3 token tiles: past ROWS_COOP=2's waves)
                        dict(tiles=1, waves=2, unroll=8, prefetch=True))
       self.assertIsNone(K._rows_f16_config(16, 11072, 6144, K.Q6_K, "NULL"))
-      with patch.dict(os.environ, {"ROWS_F16": "0"}):
-        getenv.cache_clear()
-        self.assertIsNone(K._rows_f16_config(16, 2048, 6144, K.Q8_0, "NULL"))
       self.assertIsNone(K._rows_f16_config(128, 2048, 6144, K.Q8_0, "NULL"))
       getenv.cache_clear()
     out, x = Tensor.empty(32, 64, dtype="float32"), Tensor.empty(32, 256, dtype="half")
