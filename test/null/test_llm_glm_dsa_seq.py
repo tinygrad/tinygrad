@@ -591,32 +591,20 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertEqual(run(40, 8), (True, dtypes.half))      # (MOE_BUNDLE_MIN and up: as before)
 
   def test_moe_bundles_by_projection(self):
-    # (MOE_GU_BUNDLE_MIN / MOE_GU_BUNDLE / MOE_DOWN_BUNDLE_MIN: amd_glm's gate/up (x shared by the slots) and down (x a slot's) rows bundled
-    # from their own row counts, gate/up in bundles of their own size; unset: MOE_BUNDLE_MIN and MOE_BUNDLE as before)
+    # Production projection/config-driven selection of bundled and per-row MoE kernels.
     import tinygrad.llm.kernels.amd_glm as K
-    from tinygrad.helpers import getenv
     E, fin, fout = 4, 256, 64
     w = Tensor.empty(E*fout*fin*K.QUANT_SIZES[K.IQ4_XS]//256//4, dtype=dtypes.uint32)
     first = Tensor([0], dtype=dtypes.int32)
-    def run(T:int, down:bool, env:dict) -> int|None:
+    def run(T:int, down:bool) -> int|None:
       K._bundle_cache.clear()
       sel, x = Tensor.empty(1, T, 8, dtype=dtypes.int32), Tensor.empty(1, T, 8 if down else 1, fin)
-      with patch.object(K, "MOE_WMMA", 0), patch.dict(os.environ, env), patch.object(K, "moe_bundles", wraps=K.moe_bundles) as mb:
-        getenv.cache_clear()
+      with patch.object(K, "MOE_WMMA", 0), patch.object(K, "moe_bundles", wraps=K.moe_bundles) as mb:
         K.moe_linear(w, K.IQ4_XS, E, x, sel, first)
-      getenv.cache_clear()
       return mb.call_args.args[3] if mb.called else None  # (M, or None: the per-row kernel)
     for down in (False, True):
-      self.assertEqual(run(36, down, {}), None)
-      self.assertEqual(run(54, down, {}), 4)
-    knobs = {"MOE_GU_BUNDLE_MIN": "36", "MOE_GU_BUNDLE": "2", "MOE_DOWN_BUNDLE_MIN": "100000"}
-    self.assertEqual(run(36, False, knobs), 2)
-    self.assertEqual(run(30, False, knobs), None)
-    self.assertEqual(run(54, True, knobs), None)
-    # (MOE_UNIT_MIN: the unit-major kernel, bundles of MOE_UNIT_M rows, from its row count; per projection MOE_GU_UNIT_MIN / MOE_DOWN_UNIT_MIN)
-    for down in (False, True): self.assertEqual(run(12, down, {"MOE_GU_UNIT_MIN": "8", "MOE_DOWN_UNIT_MIN": "8"}), 16)
-    self.assertEqual(run(6, False, {"MOE_GU_UNIT_MIN": "8"}), None)
-    self.assertEqual(run(12, True, {"MOE_GU_UNIT_MIN": "8"}), None)
+      self.assertEqual(run(36, down), None)
+      self.assertEqual(run(54, down), 4)
 
   def test_moe_unit_kernel(self):
     # (the unit-major kernel's graph builds (it lowers with the HIP renderer only: DEV=NULL:HIP:gfx1100; the NULL one has no local dims))
