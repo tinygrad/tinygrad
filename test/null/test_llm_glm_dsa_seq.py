@@ -286,6 +286,41 @@ class TestGLMDSASequence(unittest.TestCase):
     with patch.object(glm_dsa.GLMSeqDriver, "seq_prefill", always), patch.object(glm_dsa.Device, "__getitem__", lambda self, d: Mock()):
       with self.assertRaises(P2PRunOut): model.seq_prefill(3, 0, [1, 2, 3], 0, 0)
 
+  def test_seq_step_runout_retried(self):
+    # (P2P_RETRY: a decode step after a p2p run-out runs again (same args, the replayed states' positions as before it); not after an unwaited
+    # prompt slice (the run-out can be the slice's), not a third time)
+    from tinygrad.llm.kernels.amd_glm_dsa import P2PRunOut
+    model = Transformer.__new__(Transformer)
+    model.token_embd = SimpleNamespace(weight=SimpleNamespace(device=("NULL:0", "NULL:1")))
+    model._seq_kbase, model._p2p_unwaited = {5: 10}, False
+    calls = []
+    def base(self, seqs, *a, **kw):
+      calls.append((seqs, a, kw))
+      self._seq_kbase[5] = 99
+      if len(calls) == 1: raise P2PRunOut("ran out")
+      self._p2p_unwaited = False
+      return [([1], [2])]
+    seqs = [(5, 0, 10, 0, 1, [7], 0.0)]
+    with patch.object(glm_dsa.GLMSeqDriver, "seq_step", base), patch.object(glm_dsa.Device, "__getitem__", lambda self, d: Mock()):
+      kb = []
+      orig = base
+      def spy(self, seqs, *a, **kw):
+        kb.append(dict(self._seq_kbase))
+        return orig(self, seqs, *a, **kw)
+      with patch.object(glm_dsa.GLMSeqDriver, "seq_step", spy):
+        self.assertEqual(model.seq_step(seqs), [([1], [2])])
+      self.assertEqual(len(calls), 2)
+      self.assertEqual(calls[0], calls[1])
+      self.assertEqual(kb, [{5: 10}, {5: 10}])
+      calls.clear()
+      model._p2p_unwaited = True
+      with self.assertRaises(P2PRunOut): model.seq_step(seqs)
+      self.assertEqual(len(calls), 1)
+    def always(self, *a, **kw): raise P2PRunOut("ran out")
+    model._p2p_unwaited = False
+    with patch.object(glm_dsa.GLMSeqDriver, "seq_step", always), patch.object(glm_dsa.Device, "__getitem__", lambda self, d: Mock()):
+      with self.assertRaises(P2PRunOut): model.seq_step(seqs)
+
   def test_p2p_late_raises(self):
     # (a p2p poll that ran out: its sums wrong. a long wait reads the devices' notes and raises, never returns the tokens)
     import time

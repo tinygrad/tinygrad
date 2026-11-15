@@ -2463,6 +2463,7 @@ class Transformer(GLMSeqDriver):
     while True:
       try:
         out = super().seq_prefill(slot, base, tokens, start, hrow, temp, upto)
+        if upto is not None: self._p2p_unwaited = True
         if upto is None and getenv("P2P_RETRY_TEST", 0) and retries == 0: raise P2PRunOut("P2P_RETRY_TEST: the first prefill taken as a run-out")
         return out
       except P2PRunOut as e:
@@ -2484,9 +2485,28 @@ class Transformer(GLMSeqDriver):
     if (now:=time.perf_counter()) - self._p2p_mark > P2P_CHECK_S:
       p2p_check(cast(tuple[str, ...], to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))))
       now = time.perf_counter()
-    self._p2p_mark = now
+    self._p2p_mark, self._p2p_unwaited = now, False
     return v
-  _p2p_mark = 0.0
+  _p2p_mark, _p2p_unwaited = 0.0, False
+
+  def seq_step(self, seqs, *args, **kwargs):
+    """
+    a step of the sequences (glm5next), its p2p run-out retried (P2P_RETRY, default 2): the same step again, its cache rows written again at the
+    same positions (the epochs and mailboxes are consistent after a run-out), the replayed states' positions as before it. not when a prompt's
+    slice (not waited for) ran since the last wait: the run-out can be the slice's (its rows wrong), the error is raised as before
+    """
+    retries, kbase = 0, dict(getattr(self, "_seq_kbase", {}))
+    while True:
+      unwaited = self._p2p_unwaited
+      try: return super().seq_step(seqs, *args, **kwargs)
+      except P2PRunOut as e:
+        if unwaited or (retries:=retries+1) > getenv("P2P_RETRY", 2): raise
+        print(f"seq_step: {e}: the step of {len(seqs)} sequences again ({retries})", flush=True)
+        for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
+        if hasattr(self, "_seq_kbase"):
+          self._seq_kbase.clear()
+          self._seq_kbase.update(kbase)
+        self._p2p_mark = time.perf_counter()
 
   def _spec_steps(self, tokens:list[int], temperature:Tensor) -> Iterator[int]:
     """speculative decoding after a prefill: tokens[-1] is the sampled token after the prompt"""
