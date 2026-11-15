@@ -540,7 +540,7 @@ class Compressor:
     B, d, r, pos = x.shape[0], self.dim, self.ratio, start_pos[0]
     kg, store = rolling_window(self.cache_kg, self.kv(x).stack(self.gate(x), dim=2), Tensor(pos).eq(0))
     first_pool, n_pools = pos // r, ceildiv(x.max_shape[1] + r - 1, r)
-    kg = Tensor(kg.uop.after(store)).pad_to((B, self.cache_kg.shape[1] + n_pools*r, *kg.shape[2:]))
+    kg = Tensor(kg.uop.after(store)).pad_to((B, self.cache_kg.shape[1] + n_pools*r, *kg.shape[2:])) # (B, r*span + n_pools*r, 2, d*span)
     groups, ape = kg[:, r-pos%r:r-pos%r+(n_pools+self.span-1)*r].reshape(B, -1, r, 2, kg.shape[-1]), self.ape["weight"]
     if self.span > 1:
       empty = Tensor([0.0, -math.inf], device=kg.device).reshape(2, 1)
@@ -618,7 +618,6 @@ class MLATransformerBlock(FFNBlock):
     if self.indexer: self.indexer._init_state(x)
 
 class CompressedAttentionBlock(FFNBlock):
-  _indexer_mask = MLATransformerBlock._indexer_mask
   def __init__(self, config:TransformerConfig, ratio:int):
     super().__init__(config)
     self.ratio, self.attn_sinks = ratio, {"weight": Tensor.zeros(config.n_heads)}
@@ -640,27 +639,26 @@ class CompressedAttentionBlock(FFNBlock):
     q, kv = apply_rope(q, freqs, True, True), apply_rope(self.attn_kv_a_norm(self.attn_kv(x)).unsqueeze(1), freqs, True, True)
     window, store = rolling_window(self.cache_kv, kv.squeeze(1), Tensor(pos).eq(0))
     k = Tensor(window.uop.after(store))[:, :S+T].unsqueeze(1)
-    mask = (unwrap(_causal_mask(x, (S,), S)) + Tensor.full((1, 1, 1, S+T), -math.inf, buffer=False).tril(S-pos-1)).expand(B, 1, T, -1)
     if self.ratio:
       k = k.cat(pools:=self.attn_compressor(x, start_pos, self.freqs_cis).unsqueeze(1), dim=2)  # (B, 1, S+T+P, Hd): window tokens then all pools
-      # a block without its own indexer ignores the mask of the block before
-      if self.indexer is None or idx_mask is None:
-        idx_mask = (Tensor.arange(pools.shape[-2]) + 1) * self.ratio <= Tensor.arange(T).reshape(T, 1) + Tensor(pos) + 1
-      mask = mask.cat(idx_mask.where(0.0, -math.inf).expand(B, 1, T, -1), dim=-1)
-    # the attention sink: a zero key with a learned logit per head
+      if idx_mask is None: idx_mask = (Tensor.arange(pools.shape[-2]) + 1) * self.ratio <= Tensor.arange(T).reshape(T, 1) + Tensor(pos) + 1
     k = k.cat(k[..., :1, :].const_like(0), dim=-2)
+    mask = (unwrap(_causal_mask(x, (S,), S)) + Tensor.full((1, 1, 1, S+T), -math.inf, buffer=False).tril(S-pos-1)).expand(B, 1, T, -1)
+    if self.ratio: mask = mask.cat(unwrap(idx_mask).where(0.0, -math.inf).expand(B, 1, T, -1), dim=-1)
     mask = mask.expand(B, cfg.n_heads, T, -1).cat(self.attn_sinks["weight"].reshape(1, -1, 1, 1).expand(B, -1, T, 1), dim=-1)
-    # the values are the keys: undo the rotation of the query position
     cos, sin = freqs.chunk(2, dim=-1)
     o = apply_rope(q.scaled_dot_product_attention(k, k, attn_mask=mask, enable_gqa=True), cos.cat(-sin, dim=-1), True, True).transpose(1, 2)
     o = o.reshape(B, T, cfg.o_groups, 1, -1) @ self.attn_output_a["weight"].reshape(cfg.o_groups, cfg.o_lora_rank, -1).transpose(-1, -2)
     return self.attn_output_b(o.reshape(B, T, -1))
 
+  def _indexer_mask(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None) -> Tensor|None:
+    if self.indexer is None or self.config.max_context <= self.indexer.idx.top_k: return None
+    return self.indexer(x, self.attn_q_a_norm(self.attn_q_a(x)), start_pos, self.freqs_cis)
+
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
-      cfg, R = self.config, max(self.config.compress_ratios)
+      R, (theta, yarn) = max((cfg:=self.config).compress_ratios), (cfg.compress_rope_theta, cfg.yarn) if self.ratio else (cfg.rope_theta, None)
       self.cache_kv = Tensor.empty(x.shape[0], cfg.sliding_window, cfg.head_dim, dtype=dtypes.half, device=x.device)
-      theta, yarn = (cfg.compress_rope_theta, cfg.yarn) if self.ratio else (cfg.rope_theta, None)
       self.freqs_cis = precompute_freqs_cis(cfg.rope_dim, round_up(cfg.max_context + x.max_shape[1], R) + 2*R, theta, device=x.device, yarn=yarn)
     if self.ratio: self.attn_compressor._init_state(x)
     if self.indexer: self.indexer._init_state(x)
@@ -865,7 +863,7 @@ class Transformer:
                             kv[f'{arch}.attention.indexer.top_k'], kpool,
                             kv.get(f'{arch}.attention.layer_norm_epsilon') or kv[f'{arch}.attention.layer_norm_rms_epsilon']) if kpool else None
     if indexer is not None: state_dict = {k.replace('.indexer_compressor_', '.indexer.compressor_'):v for k,v in state_dict.items()}
-    if arch == 'deepseek4': state_dict = {re.sub(r'(attn_compressor|indexer\.compressor)_', r'\1.', k):v for k,v in state_dict.items()}
+    if arch == 'deepseek4': state_dict = {k.replace('compressor_', 'compressor.'):v for k,v in state_dict.items()}
     if arch == 'glm-dsa': indexer = replace(unwrap(indexer), rope_dim=kv[f'{arch}.rope.dimension_count'], norm_eps=1e-6)
     if arch == 'deepseek4': indexer = replace(idx:=unwrap(indexer), kpool=4, top_k=idx.top_k * 4, rope_dim=kv[f'{arch}.rope.dimension_count'])
     if arch in ('minimax-m3', 'qwen4exp'):
