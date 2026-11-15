@@ -16,7 +16,7 @@ Only a machine's owner starts/stops service and only one GPU workload may use a 
 
 1. Use the supported Python installed by the operations image, an immutable checkout, and `python3 -m pip install pillow>=10.0.1` for picture requests. Keep weights read-only and verify every hash below before a start.
 2. Record a writable tinygrad cache (`XDG_CACHE_HOME`), persistent state/log directory, and ownership of the box. Never expose `SESSION_END_TOKEN` or API keys in argv, commits or logs. The HTTP service is loopback HTTP; TLS and external access belong to the front proxy.
-3. Check all expected cards and free device/host memory. R9700 limit: **PENDING: power verification is in progress; the former launcher default 210 W is NOT safe. `GLM53_POWER_LIMIT` is required, with no numeric default until verification establishes one.** Qwen ran at **250 W/card** and GLM Flash D34 at **225 W/card**; use **225 W for Qwen on a hot host**, keep every hotspot **under 100 C**, and log it. A dropped/hung card is an incident, not a reset loop.
+3. Check all expected cards and free device/host memory. R9700 limit: **170 W a card on ts5 (GLM 5.3, 14 cards: ts5 power ladder Nov 15, below); the former launcher default 210 W is NOT safe. `GLM53_POWER_LIMIT` is required (the launcher has no numeric default).** Qwen ran at **250 W/card** and GLM Flash D34 at **225 W/card**; use **225 W for Qwen on a hot host**, keep every hotspot **under 100 C**, and log it. A dropped/hung card is an incident, not a reset loop.
 
 ## Immutable weights and hashes
 
@@ -131,7 +131,7 @@ The nine model-shard hashes above are the complete service input. `--print-comma
 
 ```bash
 bash extra/llm_service/glm_14xr9700.sh --print-command
-GLM53_POWER_LIMIT=<W> AM_PERF_LEVEL=high CLOCK_PREFILL=GFXCLK=2300 \
+GLM53_POWER_LIMIT=170 AM_PERF_LEVEL=high CLOCK_PREFILL=GFXCLK=2300 \
   bash extra/llm_service/glm_14xr9700.sh start
 ```
 
@@ -140,14 +140,14 @@ That power gate and the owner-only host controls remain unchanged. This document
 **Profiles stay independent of vision policy.** The default is half-cache. The explicit 1M candidate command is:
 
 ```bash
-GLM53_POWER_LIMIT=<W> AM_PERF_LEVEL=high CLOCK_PREFILL=GFXCLK=2300 \
+GLM53_POWER_LIMIT=170 AM_PERF_LEVEL=high CLOCK_PREFILL=GFXCLK=2300 \
   GLM_KV=q4 MAX_CONTEXT=1048576 SEQ_ROWS=1048576 SEQ_SLOTS=16 SEQ_MAX_ACTIVE=16 \
   P2P_GLM5_OFF=1 FREQS_HOST=1 AMD_SCRATCH_MAX=64 SEQ_COPY_SCRATCH=1 \
   PREFILL_CHUNK=2688 PREFILL_SIZES=1344,2688 \
   bash extra/llm_service/glm_14xr9700.sh start
 ```
 
-`<W>` = the ts5 power ladder's setting (PENDING: w-pf53's uladder-1, ~15:45 Nov 15). The clock knobs are part of that power setting (decode uncapped, prefill capped at 2300 MHz, perf level high); the launcher forwards them but sets none, so they belong on the start line. At 1M the launcher's default `PREFILL_CHUNK=4032` does not fit on card 0 (warm-up OOM): 2688. `SEQ_COPY_SCRATCH=1` keeps ~0.2-0.5 GB a card of the move jits' own arenas free (the 1M start runs with ~0.48 GB a card free with it). Measured at 1M: one 1,020,637-token request, first token 885 s, decode 47 tok/s. One 1M conversation at a time beside short ones; a second 1M request waits. `AM_FIRST_START=1` only on the first start after a reboot.
+`GLM53_POWER_LIMIT=170` = the ts5 power setting from w-pf53's uniform ladder uladder-1 (Nov 15, ended 23:50 UTC): all five rungs 140-180 W passed by events (no traceback / 5xx / p2p run-out / link drop); the setting is one rung below the top (170 W), the 6-h soak at 170 W is its proof (results/w-pf53/ts5-acceptance.md). The clock knobs are part of that power setting (decode uncapped, prefill capped at 2300 MHz, perf level high); the launcher forwards them but sets none, so they belong on the start line. At 1M the launcher's default `PREFILL_CHUNK=4032` does not fit on card 0 (warm-up OOM): 2688. `SEQ_COPY_SCRATCH=1` keeps ~0.2-0.5 GB a card of the move jits' own arenas free (the 1M start runs with ~0.48 GB a card free with it). Measured at 1M: one 1,020,637-token request, first token 885 s, decode 47 tok/s. One 1M conversation at a time beside short ones; a second 1M request waits. `AM_FIRST_START=1` only on the first start after a reboot.
 
 The launcher expands q4 to `SEQ_FP8=1`, `SEQ_FP8_IDX=0`, `SEQ_KV4=1`; `GLM_KV=fp8` is a separate mode. Real 14-card start, capacity and correctness checks remain required for both configurations.
 
@@ -219,7 +219,7 @@ Two draft tokens a step (three measured slower for Pokemon).
 
 **GLM C9 (ts5):** text only: GLM-5.3 has no vision tower; a picture is refused. The 1M-token profile serves ONE 1M conversation at a
 time beside short ones (a second one waits); its first token at ~1M context takes ~15 minutes (885 s measured). Its power setting is
-the PSU's limit (<W>), not the cards' maximum; the bars against tinyamd1 are in the company repo `results/w-pf53/ts5-acceptance.md`.
+the PSU's limit (170 W a card), not the cards' maximum; the bars against tinyamd1 are in the company repo `results/w-pf53/ts5-acceptance.md`.
 
 ## API and production environment contract (76 names)
 
