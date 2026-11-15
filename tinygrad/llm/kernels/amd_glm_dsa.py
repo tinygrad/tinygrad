@@ -4301,6 +4301,11 @@ def _q4_mult(k:UOp, row:UOp, g:UOp|int) -> UOp:
 def _q4_half(w:UOp, nib:UOp|int, m:UOp) -> UOp:
   """nibble nib of a word of 4-bit values as the half (q - 8) * m (exact)"""
   sh = UOp.const(4 * nib, dtypes.uint32) if isinstance(nib, int) else (4 * nib).cast(dtypes.uint32)
+  # (SEQ_KV4_FAST (default off, the same bits): the nibble as the half 1024 + q (its bits or'ed into 0x6400's mantissa), then (h - 1032) * m in
+  # half: two half ops, both exact (|q - 8| <= 8, m <= 63), not an int multiply (quarter rate) and two conversions)
+  if getenv("SEQ_KV4_FAST", 0):
+    h = (((w >> sh) & 15) | 0x6400).cast(dtypes.uint16).bitcast(dtypes.half)
+    return (h - 1032.0) * m.cast(dtypes.half)
   return ((((w >> sh) & 15).cast(dtypes.int32) - 8) * m).cast(dtypes.half)
 
 def _q4_frag(k:UOp, row:UOp, w0:UOp|int, m:UOp, half:UOp) -> UOp:
@@ -4439,8 +4444,12 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   o_new = []
   for dt in range(KT):
     # (keys past the count are zero: p is 0 there, but 0*nan)
-    if q4: vfrag = UOp.stack(*(vok.where(_q4_half(_word(cache, vk, wave*16 + dt*2 + col//8), col % 8, _q4_mult(cache, vk, wave*4 + dt//2)),
-                                         UOp.const(0, dtypes.half)) for vk, vok in vkeys))
+    # (SEQ_KV4_FAST: 4-bit values are always finite (|q - 8| * m <= 504, the row a real one: key_at clamps), p times the scale is 0 past the
+    # count: no select)
+    if q4 and getenv("SEQ_KV4_FAST", 0):
+      vfrag = UOp.stack(*(_q4_half(_word(cache, vk, wave*16 + dt*2 + col//8), col % 8, _q4_mult(cache, vk, wave*4 + dt//2)) for vk, _ in vkeys))
+    elif q4: vfrag = UOp.stack(*(vok.where(_q4_half(_word(cache, vk, wave*16 + dt*2 + col//8), col % 8, _q4_mult(cache, vk, wave*4 + dt//2)),
+                                           UOp.const(0, dtypes.half)) for vk, vok in vkeys))
     elif fp8: vfrag = UOp.stack(*(vok.where(_fp8_byte_half(_word(cache, vk, wave*32 + dt*4 + col//4), col % 4),
                                           UOp.const(0, dtypes.half)) for vk, vok in vkeys))
     else: vfrag = UOp.stack(*(vok.where(cache[vk, dbase + dt*16 + col].load(), UOp.const(0, dtypes.half)) for vk, vok in vkeys))
