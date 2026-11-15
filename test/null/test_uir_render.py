@@ -12,7 +12,7 @@ from tinygrad.helpers import Context, ansistrip
 from tinygrad.renderer import Estimates
 
 def _strip_buffers(root:UOp) -> UOp:
-  return graph_rewrite(root, pm_export, ctx=CallifyCtx(), bottom_up=True, name="strip buffers for wire format test")
+  return graph_rewrite(root, pm_export, ctx=CallifyCtx(), bottom_up=True, enter_calls=True, name="strip buffers for wire format test")
 
 def assert_roundtrip(case, root:UOp):
   # UOps are hash-consed, so a lossless round trip gives back the identical UOp
@@ -47,6 +47,11 @@ class TestSSARender(unittest.TestCase):
     n = UOp.variable("n", 1, 64)
     g = UOp.sink(((n + 1) * 2) % 7, (n % 5) + UOp.const(Invalid))
     assert_roundtrip(self, g)
+
+  def test_buffer_in_call_body(self):
+    b = Tensor.empty(8, device="NULL").realize().uop.buf_uop
+    p = UOp.param(0, b.dtype, 8, "NULL")
+    assert_roundtrip(self, UOp.sink(UOp.sink(p.store(p + b)).call(Tensor.empty(8, device="NULL").realize().uop.buf_uop)))
 
   def test_const_typing(self):
     g = UOp.sink(UOp.const(True), UOp.const(1), UOp.const(-5, dtypes.int32), UOp.const(2.0, dtypes.float32),
