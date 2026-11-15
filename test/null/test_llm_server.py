@@ -375,6 +375,12 @@ class TestLLMServer(unittest.TestCase):
         urllib.request.urlopen(req).read()
     self.assertEqual(seen, [1.0, 1.0, 0.3])
 
+  def test_server_sampling_from_gguf(self):
+    # the server's default temperature / top_p: the gguf's general.sampling.* (Qwen 3.8 Flash: 1.0 / 0.95); without them greedy, top_p 1
+    from tinygrad.llm.cli import server_sampling
+    self.assertEqual(server_sampling({"general.sampling.temp": 1.0, "general.sampling.top_p": 0.95}), {"temperature": 1.0, "top_p": 0.95})
+    self.assertEqual(server_sampling({}), {"temperature": 0.0, "top_p": 1.0})
+
   def test_slow_reply_held(self):
     # a reply not streamed and slow: spaces while it's made (a proxy doesn't drop the quiet connection), then its JSON
     import urllib.request

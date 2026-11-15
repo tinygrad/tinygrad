@@ -202,6 +202,10 @@ class FallbackTemplate:
 
 from tinygrad.llm.serve import LLMServer
 
+def server_sampling(kv:dict) -> dict[str, float]:
+  """a request's temperature and top_p without its own: the model's recommended ones (general.sampling.* of its gguf; none: greedy, top_p 1)"""
+  return {"temperature": float(kv.get("general.sampling.temp", 0.0)), "top_p": float(kv.get("general.sampling.top_p", 1.0))}
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--model", "-m", default=list(models.keys())[0],
@@ -290,9 +294,10 @@ def main():
   # start server
   if args.serve:
     print(f"ready: serving on port {args.serve}", flush=True)
-    # (a request's top_p without one: the model's recommended one)
-    LLMServer(('', args.serve), model, model_name, tok, template, top_p=float(kv.get("general.sampling.top_p", 1.0)),
-              vision=vision).serve_forever()
+    sampling = server_sampling(kv)
+    print(f"sampling: a request without its own gets temperature {sampling['temperature']} top_p {sampling['top_p']} "
+          f"(the gguf's general.sampling.*; none: greedy)", flush=True)
+    LLMServer(('', args.serve), model, model_name, tok, template, **sampling, vision=vision).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
