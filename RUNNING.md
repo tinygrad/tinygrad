@@ -139,7 +139,7 @@ That power gate and the owner-only host controls remain unchanged. This document
 **Profiles stay independent of vision policy.** The default is half-cache. The explicit 1M candidate command is:
 
 ```bash
-GLM53_POWER_LIMIT=<validated-watts> GLM_KV=q4 MAX_CONTEXT=1048576 \
+GLM53_POWER_LIMIT=<validated-watts> GLM_KV=q4 MAX_CONTEXT=1048576 PREFILL_CHUNK=2688 \
   SEQ_ROWS=1048576 SEQ_SLOTS=16 SEQ_MAX_ACTIVE=16 \
   P2P_GLM5_OFF=1 FREQS_HOST=1 AMD_SCRATCH_MAX=64 SEQ_COPY_SCRATCH=1 LOAD_DEFER=1 \
   bash extra/llm_service/glm_14xr9700.sh start
