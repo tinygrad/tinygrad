@@ -1,4 +1,4 @@
-import os, pathlib, subprocess, unittest
+import os, pathlib, re, subprocess, unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "extra/llm_service"
@@ -28,7 +28,6 @@ class TestLLMServiceLaunchers(unittest.TestCase):
       "QSA_KV_BITS4_LAYERS=39\\,43\\,47\\,48",
       "VISION_MAX_IMAGES=1024",
       "VISION_URL_CACHE_MB=512",
-      "VISION_KERNELS=1",
       "VISION_MM" + "PROJ=/weights/Qwen3.8-Flash-Next-UD-IQ4_XS-V31/mmproj/mmproj-F16.gguf",
       "--shard 6",
       "--max_context 262144",
@@ -50,10 +49,7 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     for required in (
       "DEV=PCI+AMD",
       "VFIO=1",
-      "MLA_SEQ_SHARD=1",
       "SPEC_DRAFTS_BY_SIZE=1:2\\,2:2\\,4:3\\,8:3\\,16:3",
-      "GLM_SEQ=1",
-      "GLM_ATTN_GRP=3",
       "SEQ_GATHER_UNION=65536",
       "SEQ_STASH_GB=0",
       "PREFILL_CHUNK=4032",
@@ -96,14 +92,13 @@ class TestLLMServiceLaunchers(unittest.TestCase):
       "DEV=AMD", "AM_POWER_LIMIT=225", "BATCH_SLOTS=8", "SEQ_KV4=1", "SEQ_ROWS=3916800",
       "SEQ_SIZES=1\\,2\\,4\\,8\\,12\\,13\\,18", "SEQ_STASH_GB=0", "SEQ_IDX_SHARD=1",
       "PREFILL_CHUNK=768", "PREFILL_SIZES=192\\,768", "PREFILL_MB1_ROWS=1200", "PREFILL_SLICE=1536",
-      "SEQ_STARVE_ALT=1", "RING_MAXW=32768", "RING_RS_LIKE_COPIES=0", "--shard 6", "--max_context 524288",
+      "SEQ_STARVE_ALT=1", "--shard 6", "--max_context 524288",
     ):
       self.assertIn(required, cmd)
     self.assertIn("GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf", cmd)
     self.assertNotIn("SPEC_DRAFTS=", cmd)  # D34 inherits GLM's default of two drafts.
     self.assertNotIn("AM_VM_RESET=1", cmd)
     self.assertIn("VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf", cmd)
-    self.assertIn("VISION_KERNELS=1", cmd)
     self.assertIn("VISION_BUCKETS=576", cmd)
     for optional in ("VISION_SLICE_MS", "VISION_MAX_TOKENS", "VISION_MAX_IMAGES", "VISION_CACHE_MB",
                      "VISION_URL_CACHE_MB", "SERVE_RENDER_CACHE"):
@@ -111,7 +106,7 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     picture = self.command("glm_flash_6x7900xtx.sh", {"VISION_SLICE_MS": "200", "VISION_MAX_TOKENS": "1024",
                                                        "VISION_MAX_IMAGES": "2048", "VISION_CACHE_MB": "2048",
                                                        "VISION_URL_CACHE_MB": "512", "SERVE_RENDER_CACHE": "1"})
-    for required in ("VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf", "VISION_KERNELS=1", "VISION_SLICE_MS=200",
+    for required in ("VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf", "VISION_SLICE_MS=200",
                      "VISION_MAX_TOKENS=1024", "VISION_MAX_IMAGES=2048", "VISION_CACHE_MB=2048",
                      "VISION_URL_CACHE_MB=512", "VISION_BUCKETS=576", "SERVE_RENDER_CACHE=1"):
       self.assertIn(required, picture)
@@ -124,7 +119,7 @@ class TestLLMServiceLaunchers(unittest.TestCase):
 
   def test_c5_null_harness_keeps_benchmark_defaults(self):
     body = (ROOT / "test/null/production_c5_warmup.sh").read_text()
-    self.assertIn("export VISION_MMPROJ VISION_KERNELS=1 VISION_BUCKETS=576", body)
+    self.assertIn("export VISION_MMPROJ VISION_BUCKETS=576", body)
     for optional in ("VISION_SLICE_MS", "VISION_MAX_TOKENS", "VISION_MAX_IMAGES", "VISION_CACHE_MB",
                      "VISION_URL_CACHE_MB", "SERVE_RENDER_CACHE"):
       self.assertNotIn(optional + "=", body)
@@ -132,6 +127,20 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     for name in ("VISION_SLICE_MS", "VISION_MAX_TOKENS", "VISION_MAX_IMAGES", "VISION_CACHE_MB",
                  "VISION_URL_CACHE_MB", "SERVE_RENDER_CACHE"):
       self.assertIn(name, body)
+
+  def test_launch_files_do_not_set_folded_controls(self):
+    obsolete = (
+      "FLAG_AR_POOLN", "LOAD_APART", "MICRO_BATCHES", "QSA_IDX_SPLIT", "QSA_KV_BITS", "QSA_KV_ROT",
+      "QSA_KV_SPLIT", "RING_MAXW_DEC", "RING_SEL", "VISION_KERNELS", "FLAG_AR_MAXN", "IQ2S_K256",
+      "MLA_SEQ_SHARD", "RING_MAXW", "RING_RS_LIKE_COPIES", "SEQ_WARMUP_ONLY", "WARMUP_PARALLEL",
+      "GLM_ATTN_GRP", "GLM_SEQ",
+    )
+    files = [SCRIPTS / name for name in ("qwen_6x7900xtx.sh", "glm_flash_6x7900xtx.sh", "glm_14xr9700.sh")]
+    files += [ROOT / "test/null" / f"production_{name}_warmup.sh" for name in ("c2", "c5", "c9")]
+    for path in files + [ROOT / "RUNNING.md"]:
+      body = path.read_text()
+      for name in obsolete:
+        self.assertNotRegex(body, rf"(?<![A-Z0-9_]){re.escape(name)}=", f"{path}: folded control {name}")
 
   def test_manifests_match_runbook(self):
     runbook = (ROOT / "RUNNING.md").read_text()
