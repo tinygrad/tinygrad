@@ -1696,6 +1696,9 @@ def p2p_late(devs:tuple[str, ...], clear:bool=False) -> list[int]:
     for d in devs: Device[d].synchronize()
   return ret
 
+# (the p2p polls' per-source stale notes only in kernels of at most this many words a workgroup, see poll in _p2p_allreduce_kernel)
+P2P_STALE_WORDS = 1024
+
 def p2p_stale(devs:tuple[str, ...], clear:bool=False) -> list[list[int]]:
   """for every device the sources (device indices; len(devs): a two-shot step's owner) whose words a poll of it was still waiting for when it
   ran out (since the mailboxes were made or cleared): which card-to-card writes never arrived"""
@@ -1869,8 +1872,10 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
     # (a thread whose words are still stale ran out: its epoch noted, see p2p_late)
     late = functools.reduce(lambda a,b: a | b, [w & fresh(g).logical_not() for g, w in zip(out, waits)])
     lates.append(counter[UOp.const(P2P_AR_NCTR + 1, dtypes.weakint).valid(late)].store(epoch.cast(dtypes.int32)))
-    # (and every source still stale: which writes never came, p2p_stale)
-    for src in sorted(set(srcs)):
+    # (and every source still stale: which writes never came, p2p_stale. not in the variants of more than 1024 words a workgroup (512x8: the
+    # batched decode steps of 8+ sequences): there the notes' 15 lane masks spilled the SGPRs to memory and the steps came out as token 0 for
+    # every row (ts5 Nov 15, bisected to f34c8a7e5); their run-outs report the epochs only)
+    for src in (sorted(set(srcs)) if T*EP <= P2P_STALE_WORDS else []):
       ls = functools.reduce(lambda a,b: a | b, [w & fresh(g).logical_not() for g, w, s_ in zip(out, waits, srcs) if s_ == src])
       lates.append(counter[UOp.const(P2P_AR_NCTR + 2 + src, dtypes.weakint).valid(ls)].store(epoch.cast(dtypes.int32)))
     return out

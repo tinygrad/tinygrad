@@ -168,6 +168,31 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertEqual(p2p_flag_shape(64*5*512 // 4), (256, 4))
     self.assertEqual(p2p_flag_shape(32*5*512 // 4), (256, 4))
 
+  def test_p2p_stale_notes_not_in_512x8(self):
+    # (ts5 Nov 15: the per-source stale notes in the 512x8 variant (8+ sequences' decode steps) spilled its SGPRs to memory and every row came
+    # out as token 0: the notes only in variants of at most P2P_STALE_WORDS words a workgroup; the late epoch note in every variant)
+    from tinygrad.llm.kernels.amd_glm_dsa import _p2p_allreduce_kernel, P2P_AR_CLASSES, P2P_AR_MAXG, P2P_AR_MAXW, P2P_AR_NCTR, P2P_STALE_WORDS
+    N = 14
+    mb = [Tensor.empty(P2P_AR_CLASSES*P2P_AR_MAXG*2*(N+1)*P2P_AR_MAXW, dtype="uint64") for _ in range(N)]
+    counter = Tensor.empty(P2P_AR_NCTR+2+N+1, dtype="int32")
+    def counter_stores(T:int, EP:int, **kw) -> set[int]:
+      out, x = Tensor.empty(T*EP*4, dtype="float32"), Tensor.empty(1, T*EP*4, dtype="float32")
+      fxn = functools.partial(_p2p_allreduce_kernel, N=N, n=T*EP, T=T, EP=EP, half=True, **kw)
+      sink = Tensor.custom_kernel(out, x, counter, *mb, fxn=fxn)[0].uop.src[1].src[0]
+      idx = set()
+      for u in sink.toposort():
+        # (the counter is the third parameter; a note's index is a WHERE(cond, the constant index, invalid))
+        if u.op is Ops.STORE and (ix:=u.src[0]).op is Ops.INDEX and ix.src[0].op is Ops.PARAM and ix.src[0].arg.slot == 2:
+          i = ix.src[1].src[1] if ix.src[1].op is Ops.WHERE else ix.src[1]
+          if i.op is Ops.CONST: idx.add(int(i.arg))
+      return idx
+    self.assertLessEqual(256*4, P2P_STALE_WORDS)
+    for kw in (dict(), dict(two_shot=True)):
+      small, big = counter_stores(256, 4, **kw), counter_stores(512, 8, **kw)
+      self.assertIn(P2P_AR_NCTR + 1, small & big)
+      self.assertTrue(any(i >= P2P_AR_NCTR + 2 for i in small), (kw, small))
+      self.assertFalse(any(i >= P2P_AR_NCTR + 2 for i in big), (kw, big))
+
   def test_p2p_flag_class(self):
     # (P2P_FLAG's payload-only words: a class of their own, not shared with an epoch-in-word format)
     from tinygrad.llm.kernels.amd_glm_dsa import p2p_class, P2P_AR_CLASSES
