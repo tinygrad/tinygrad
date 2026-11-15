@@ -1776,10 +1776,10 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if Y.device is not None and self.device is not None and Y.device != self.device:
       raise RuntimeError(f"expected Y and self on the same device, {Y.device=}, {self.device=}")
     log_probs = self.log_softmax()
-    loss_mask = Y.ne(ignore_index) if ignore_index != -1 else Y.const_like(True, dtypes.bool)
-    y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)
-    smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
-    unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
+    loss_mask = Y.ne(ignore_index)
+    y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1)
+    smoothing = label_smoothing * log_probs.mean(-1)
+    unreduced = loss_mask.where((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing, 0)
     return -unreduced.sum() / loss_mask.sum() if reduction == "mean" else -unreduced._do_reduction(reduction)
 
   def cross_entropy(self, Y:Self, reduction:ReductionStr="mean", label_smoothing:float=0.0) -> Self:
