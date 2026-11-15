@@ -88,14 +88,14 @@ Work from the immutable tinygrad checkout. This is the full environment from the
 ```bash
 setsid env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED=1 HOME="$HOME" \
   DEV=AMD AM_MEC_PIPES=2 AM_IDLE_MS=1000 AM_POWER_LIMIT=250 \
-  SPEC_DRAFTS=2 QSA_KV_BITS=8 QSA_KV_ROT=3 QSA_KV_SPLIT=1 QSA_IDX_SPLIT=1 QSA_KV_BITS4_LAYERS=39,43,47,48 \
+  SPEC_DRAFTS=2 QSA_KV_BITS4_LAYERS=39,43,47,48 \
   SEQ_ROWS=4310016 SEQ_SLOTS=64 SEQ_SIZES=1,8,16,24,30 SEQ_MAX_ACTIVE=30 SEQ_STASH_GB=46 \
   SEQ_CKPT_HOST=1 SEQ_CKPT2=1 SEQ_BASE_ALIGN=24 \
   PREFILL_CHUNK=2304 PREFILL_SIZES=1152 PREFILL_PARTS=2 PREFILL_MB1_ROWS=1200 PREFILL_PK_CTX=131072 \
-  MICRO_BATCHES=1 PARALLEL=40 RING_SEL=0 FLAG_AR_POOLN=65536 RING_MAXW_DEC=262144 LOAD_APART=1 TOP_K=20 \
+  PARALLEL=40 TOP_K=20 \
   CLOCK_FAST=2000 CLOCK_MANY=1900 CLOCK_PREFILL=2000 \
   VISION_MMPROJ=/weights/Qwen3.8-Flash-Next-UD-IQ4_XS-V31/mmproj/mmproj-F16.gguf \
-  VISION_KERNELS=1 VISION_SLICE_MS=200 VISION_MAX_IMAGES=1024 VISION_CACHE_MB=1024 VISION_URL_CACHE_MB=512 \
+  VISION_SLICE_MS=200 VISION_MAX_IMAGES=1024 VISION_CACHE_MB=1024 VISION_URL_CACHE_MB=512 \
   XDG_CACHE_HOME=/home/runner/vm-cache \
   python3 -m tinygrad.llm \
   --model /weights/Qwen3.8-Flash-Next-UD-IQ4_XS-V31/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00004.gguf \
@@ -119,7 +119,7 @@ The fixed engine invocation is `python3 -m tinygrad.llm --model /weights/GLM-5.3
 VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf extra/llm_service/glm_flash_6x7900xtx.sh start
 ```
 
-The mandatory C5 baseline sets **`VISION_MMPROJ`, `VISION_KERNELS=1`, and `VISION_BUCKETS=576` only**. The benchmark's validated `/proc` limits leave `VISION_SLICE_MS`, `VISION_MAX_TOKENS`, `VISION_MAX_IMAGES`, `VISION_CACHE_MB`, `VISION_URL_CACHE_MB` and `SERVE_RENDER_CACHE` unset, using their engine defaults. Only the explicitly named Pokemon G3 profile forwards those six values (`200`, `1024`, `2048`, `2048`, `512`, `1`); they are not injected into the benchmark/deploy default. `VISION_LATE` is removed: model-first tower setup and independent relink/run-again remain. Mandatory tower memory/warm-up does not change model rows or draft counts. Flash's solo evidence establishes this launch configuration and picture availability, not a new multiuser or exactness pass.
+The mandatory C5 baseline sets **`VISION_MMPROJ` and `VISION_BUCKETS=576` only**. The benchmark's validated `/proc` limits leave `VISION_SLICE_MS`, `VISION_MAX_TOKENS`, `VISION_MAX_IMAGES`, `VISION_CACHE_MB`, `VISION_URL_CACHE_MB` and `SERVE_RENDER_CACHE` unset, using their engine defaults. Only the explicitly named Pokemon G3 profile forwards those six values (`200`, `1024`, `2048`, `2048`, `512`, `1`); they are not injected into the benchmark/deploy default. `VISION_LATE` and `VISION_KERNELS` no longer select runtime behavior: both are folded into the active production path; independent relink/run-again remains. Mandatory tower memory/warm-up does not change model rows or draft counts. Flash's solo evidence establishes this launch configuration and picture availability, not a new multiuser or exactness pass.
 
 With `SESSION_END_TOKEN` unset (the default), explicit backend session-end calls return the expected **403 `backend_session_end_disabled`**, not generation failures. An integrated proxy releases its own session bookkeeping, while backend conversations remain in bounded 18-slot residency until reuse, NONDROP eviction or restart; `ended_dropped=0` only counts processed explicit ends and is **not** proof of backend memory release. Actual coordinated cleanup requires a matching out-of-band token on proxy and backends plus active/completed/duplicate-end tests (including resident/stash drops, `already_ended` and later admissions); never expose the secret in `--print-command`, and enabling the endpoint alone does not move model-seat release before verifier execution.
 
@@ -200,11 +200,11 @@ The six R2 sentences:
 - If the screen keeps coming back to the same few views, what you are doing does not work: try a wall, an edge or a direction you have not tried yet.
 - Read to the end everything a person says: it often says where to go next.
 
-## API and production environment contract (83 names)
+## API and production environment contract (76 names)
 
 API sampling: a request without a temperature uses the model's GGUF `general.sampling.temp` and `top_p` (Qwen 3.8 Flash: 1.0 / 0.95); absent sampling metadata keeps the previous greedy behavior, explicit request values are unchanged, and startup logs report the defaults.
 
-There are 58 settings from the C2/C9 cleanup survival registry plus 19 exposed by the C5/D34 production contract and 3 rendering/bucket controls. Count: 39 launch options, 31 operator knobs, 13 short diagnostics (83 total; three live controls above the prior target).
+Count: **33 launch options, 31 operator knobs and 12 short diagnostics (76 total)**. Kernel/model/scheduler decisions already folded into the implementation are not exposed as launch assignments; the launchers and NULL harnesses no longer pass those obsolete names.
 
 Any setting not listed here is not supported: its production value is compiled into the tree. Values below are launch defaults/current validated profiles, not permission to run arbitrary combinations. Capacity, sharding and cache-format changes require their own real-memory and text gates. Empty means disabled/unset.
 
@@ -235,18 +235,14 @@ Any setting not listed here is not supported: its production value is compiled i
 | `AM_VM_RESET` | controlled first start only | controlled first start only | controlled first start only | Permission to reset AM hardware once; ordinary starts forbid it. |
 | `VISION_MMPROJ` | required, verified nonempty file | required, verified nonempty file | unsupported and forced empty | Picture-projection GGUF on C2/C5; intentionally not present on C9. |
 
-### Additional C5/D34 hardware/model contracts (17)
+### Additional C5/D34 hardware/model contracts (11)
 
 | Name | D34 value | Operator changes |
 |---|---|---|
-| `MLA_SEQ_SHARD` | 1 | Shard MLA sequence work over the six devices. |
-| `WARMUP_PARALLEL` | 1 | Parallelism for start-time JIT compilation. |
-| `IQ2S_K256` | 1 | Model-specific IQ2 kernel packing selection. |
 | `SLOT_HOST` | 1 | Host placement policy for sequence slots. |
 | `SLOT_CKPT` | 1 | Checkpoint placement policy for sequence slots. |
 | `BATCH_SLOTS` | 8 | Scheduler batch-slot capacity on this RDNA3 profile. |
 | `LOAD_DEFER` | 1 | Deferred weight-load schedule used by these GLM profiles. |
-| `FLAG_AR_MAXN` | 32768 | Collective mailbox allocation for this model/device profile. |
 | `AMD_SCRATCH_MIN` | 576 | Minimum AM scratch reservation on this profile. |
 | `AMD_SCRATCH_MAX` | 64 | Maximum AM scratch reservation on this profile. |
 | `SEQ_COPY_SCRATCH` | 1 | Scratch capacity for host/device sequence copies. |
@@ -254,8 +250,6 @@ Any setting not listed here is not supported: its production value is compiled i
 | `SEQ_KV4` | 1 | Four-bit latent-KV cache format selected by D34. |
 | `PREFILL_SLICE` | 1536 | Rows allowed in one scheduled prefill slice. |
 | `SEQ_STARVE_ALT` | 1 | Alternative anti-starvation scheduling policy. |
-| `RING_MAXW` | 32768 | Ring collective window for this six-card profile. |
-| `RING_RS_LIKE_COPIES` | 0 | Copy routing around reduce-scatter-like collectives. |
 
 ### Operator knobs documented for operations (31)
 
@@ -293,11 +287,11 @@ Any setting not listed here is not supported: its production value is compiled i
 | `VISION_SLICE_MS` | 200 in validated picture services; generic default 300 | Target picture work per scheduler slice. |
 | `WARMUP_JITS` | C5/D34 `all` | Named start-time JIT subset; `all` warms every supported production graph. |
 
-### Short diagnostics list (13)
+### Short diagnostics list (12)
 
 These are off unless diagnosing or validating. `SERVE_RENDER_CHECK=64` checks that many cached chat-template renders byte for byte; compare ordinary and cached modes before enabling `SERVE_RENDER_CACHE`. Keep those validation runs separate from the shared picture service.
 
-These are off unless diagnosing or validating. Never enable fault injection in customer service. `DEBUG_LOAD`, `MEM_TRACE`, `AMD_SCRATCH_LOG`, `KPROF` (with `KPROF_TOP=30`), `LIN_NAMES`, `TELEMETRY_LOG=<jsonl-path>`, `SERVE_TRACE=<trace-path>`, `DISABLE_AMD_KERNELS=1` for generic-kernel reference runs, `RING_RDNA4=1` only on an owned RDNA4 validation job, `SEQ_WARMUP_ONLY=<named-subset>` only for startup diagnosis (empty performs the full production warm-up), and `P2P_FAKE_RUNOUT=1` only for fault-injection tests.
+These are off unless diagnosing or validating. Never enable fault injection in customer service. `DEBUG_LOAD`, `MEM_TRACE`, `AMD_SCRATCH_LOG`, `KPROF` (with `KPROF_TOP=30`), `LIN_NAMES`, `TELEMETRY_LOG=<jsonl-path>`, `SERVE_TRACE=<trace-path>`, `DISABLE_AMD_KERNELS=1` for generic-kernel reference runs, `RING_RDNA4=1` only on an owned RDNA4 validation job, `P2P_FAKE_RUNOUT=1` only for fault-injection tests.
 
 ## Gates for every change
 
