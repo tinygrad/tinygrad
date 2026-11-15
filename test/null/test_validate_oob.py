@@ -184,6 +184,18 @@ class TestValidateOOB(unittest.TestCase):
       with self.assertRaises(RuntimeError):
         to_uops_list([buf.index(r.cast(dtypes.float).bitcast(dtypes.int)).load()])
 
+  def test_wrapping_int_in_index(self):
+    with Context(CHECK_OOB=1, SPEC=2):
+      buf = UOp.param(0, dtypes.int, 2)
+      c = UOp.variable("x", 256, 257, dtypes.int).cast(dtypes.uchar).cast(dtypes.int)  # wraps to 0..1
+      to_uops_list([buf.index(c).load()])
+      with self.assertRaises(RuntimeError):
+        to_uops_list([buf.index(c-256).load()])  # -256..-255 oob
+      # unsigned arithmetic wraps: u=1 gives y=0, so the index is 5
+      y = UOp.variable("u", 0, 1, dtypes.uchar) + UOp.const(255, dtypes.uchar)
+      with self.assertRaises(RuntimeError):
+        to_uops_list([buf.index((y < UOp.const(128, dtypes.uchar)).where(5, 0).cast(dtypes.int)).load()])
+
   def test_bool_cast_in_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, 1)
