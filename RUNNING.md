@@ -146,6 +146,26 @@ C9 therefore uses 14 shards and the `zai-org/GLM-5.3` alias.
 
 Owner-supplied **Phase-4 item 7 candidate (not a validated 1M deployment):** `GLM_KV=q4` with `--max_context 1048576`, `SEQ_ROWS=1048576`, `SEQ_SLOTS=16`, `SEQ_MAX_ACTIVE=16`, `P2P_GLM5_OFF=1`, `FREQS_HOST=1`, `AMD_SCRATCH_MAX=64`, `SEQ_COPY_SCRATCH=1` and `LOAD_DEFER=1`; `MAX_CONTEXT=1048576` to the launcher. These profile values must pass new-device start, memory, q4 greedy and 4k/64k/262k checks. Keep individual `GLM_KV`, `SEQ_FP8`, and `SEQ_KV4` toggles owner-controlled, including the half and fp8 alternatives. Do not apply this profile to a default C9 server or claim a 1M result. The existing validated start remains 262144 per user, and power remains **PENDING** until its soak verification. Require all 14 cards, expected effective env, `GET /v1/models`, healthy `GET /status`, then a small text request. The supported wrapper is `GLM53_POWER_LIMIT=$GLM53_POWER_LIMIT extra/llm_service/glm_14xr9700.sh start`; its `stop` action SIGTERMs the recorded process group and confirms exit. Rollback uses the previous immutable tree and matching validated profile.
 
+## Pokemon opt-in profiles (RUN 14 and G3)
+
+Use one fresh six-card 7900 XTX VM and **one server start per boot**; changing a profile requires a fresh VM. These are owner-proven launch profiles, not replacements for the validated C2/D34 defaults.
+
+**Qwen RUN 14:** start the C2 launcher with `SPEC_DRAFTS=3`, `VISION_MAX_IMAGES=2048`, `VISION_CACHE_MB=2048`, `SERVE_RENDER_CACHE=1` and `PREFILL_SIZES=192,384,1152`. Keep `VISION_KERNELS=1`, `VISION_MMPROJ=/weights/Qwen3.8-Flash-Next-UD-IQ4_XS-V31/mmproj/mmproj-F16.gguf`, 262144 max_context and the rest of the C2 line. `SESSION_END_TOKEN` comes from the VM's mode-600 secret file and is never printed. Qwen's published vision buckets remain the power-of-two buckets plus any optional measured addition, not an assumed 384.
+
+**GLM RUN G3:** use the C5 tower opt-in `/home/runner/glmvis/mmproj-F16.gguf`, `VISION_KERNELS=1`, `VISION_SLICE_MS=200`, `VISION_MAX_TOKENS=1024`, `VISION_MAX_IMAGES=2048`, `VISION_CACHE_MB=2048`, `VISION_URL_CACHE_MB=512`, `VISION_BUCKETS=576`, `SERVE_RENDER_CACHE=1` and `AM_POWER_LIMIT=250` on this host. Capacity remains `SEQ_ROWS=3916800`, 18 slots/18 max active and default draft 2. The real served value comes before raw rendering cache experiments, so future Pokemon phase defaults should only be enabled after their matched correctness checks.
+
+Game harness on teeny (separate install, commit 08ffddb):
+
+```bash
+cd ~/fun/pi_plays_pokemon
+# Qwen
+PI_QWEN_BASE_URL=http://127.0.0.1:18105/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_FRESH=1 PI_IMAGE_SCALE=2 PI_IMAGE_REFS=1 PI_TEMPERATURE=1.0 .venv/bin/python campaign.py --full-context --run <id>
+# GLM
+PI_GLM_BASE_URL=http://127.0.0.1:18104/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_FRESH=1 PI_IMAGE_SCALE=2 PI_IMAGE_REFS=1 PI_TEMPERATURE=1.0 PI_TOP_P=0.95 .venv/bin/python campaign.py --full-context --provider local-glm-flash --model "GLM 5.3 Flash" --run <id>
+```
+
+The line ends at `stop_reason=full_context`: `speed.py results/pokemon/full-context.jsonl`, details via `speed.py --breakdown runs/<id>/steps.jsonl`. A prefill with zero generation for more than 5 minutes is a stalled run, not a speed measurement. VM IDs, tunnel ports and session secrets remain deployment-specific; no server or proxy restart is implied by this document.
+
 ## API and production environment contract (80 names)
 
 API sampling: a request without a temperature uses the model's GGUF `general.sampling.temp` and `top_p` (Qwen 3.8 Flash: 1.0 / 0.95); absent sampling metadata keeps the previous greedy behavior, explicit request values are unchanged, and startup logs report the defaults.
