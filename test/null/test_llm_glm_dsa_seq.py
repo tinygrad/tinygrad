@@ -29,6 +29,27 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertEqual(Transformer.SEQ_MOVE, Transformer.REGION_ALIGN)
     self.assertEqual(Transformer.REGION_ALIGN % (64*14), 0)
 
+  def test_move_jit_shared_scratch(self):
+    # (SEQ_COPY_SCRATCH: a region move's contiguous intermediate in an arena another jit overwrites between the moves)
+    from tinygrad.engine.jit import TinyJit
+    C, D = Transformer.SEQ_MOVE, 4
+    blk = MLATransformerBlock.__new__(MLATransformerBlock)
+    blk.indexer = None
+    blk.cache_s = Tensor(np.arange(3*C*D, dtype=np.float32).reshape(3*C, D)).contiguous().realize()
+    model = Transformer.__new__(Transformer)
+    model.blk, model.mtp = [blk], None
+    scratch:dict = {}
+    move = TinyJit(functools.partial(Transformer._seq_move_copy, model, 1), capture_first=True, scratch=scratch)
+    other = TinyJit(lambda x: ((x * 3).contiguous() - 1).sum().realize(), scratch=scratch)
+    v = functools.partial(UOp.variable, min_val=0, max_val=3*C)
+    want = blk.cache_s.numpy().copy()
+    for src, dst in ((0, C), (2*C, 0), (C, 2*C)):
+      for _ in range(2): other(Tensor.full((3*C, D), 7.0).contiguous().realize())
+      move(v("move_src").bind(src), v("move_dst").bind(dst))
+      want[dst:dst+C] = want[src:src+C]
+      np.testing.assert_array_equal(blk.cache_s.numpy(), want)
+    self.assertEqual(len(scratch), 1)  # (one arena: the move's intermediate where the other jit's was)
+
   def test_direct_key_prefill_region(self):
     idx = Indexer.__new__(Indexer)
     idx.idx = SimpleNamespace(kpool=1, n_heads=16, head_dim=4, top_k=2, rope_dim=2, rope_interleave=False)
