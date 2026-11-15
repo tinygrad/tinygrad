@@ -4,25 +4,6 @@ from dataclasses import dataclass, field
 from typing import cast
 from tinygrad.helpers import round_up, getenv
 
-def _trace(model):
-  """(SEQ_TRACE) every seq_ call of the model printed when it starts and ends (the last one started of a hang is its)"""
-  import functools, sys
-  def short(a):
-    if isinstance(a, list) and a and isinstance(a[0], tuple) and len(a[0]) >= 4:
-      return f"[{len(a)} seqs: " + " ".join(f"{t[0]}@{t[2]}+{t[3]}" for t in a) + "]"
-    if isinstance(a, list): return f"<{len(a)} ints>"
-    return repr(a)
-  for name in [n for n in dir(model) if n.startswith("seq_") and callable(getattr(model, n))]:
-    fn = getattr(model, name)
-    @functools.wraps(fn)
-    def w(*a, _fn=fn, _name=name, **kw):
-      st = time.perf_counter()
-      print(f"TRACE {st:.3f} {_name}({', '.join(short(x) for x in a)}{', ' if kw else ''}{kw or ''})", file=sys.stderr, flush=True)
-      r = _fn(*a, **kw)
-      print(f"TRACE {time.perf_counter():.3f} {_name} done {1000*(time.perf_counter()-st):.1f} ms", file=sys.stderr, flush=True)
-      return r
-    setattr(model, name, w)
-
 # ******** sequences sharing the model's caches (Transformer.seq_*): the host's side ********
 # every resident sequence (a conversation) has a slot of the recurrent states and a region of rows of the attention caches. a prompt continues
 # the idle sequence it extends (prefilled from its end, or from its checkpoint: the end of its last prompt), else a new one, the least recently
@@ -97,10 +78,6 @@ class SeqEngine:
   ROOM, RESERVE = 2048, getenv("SEQ_RESERVE", 4096)
   # (SEQ_CKPT2=1: two checkpoints a sequence, see Seq.ckpt2: +~115 MB of host memory a slot)
   CKPT2 = getenv("SEQ_CKPT2", 0)
-  # (SEQ_COMPACT: a region the free rows IN ALL are enough for is made by moving regions (the rows copied on the device, bit for bit: _pack /
-  # _place) before any idle conversation is evicted for a window of its size: an eviction is a copy to the host and later back, or a re-prefill
-  # if the stash is full. at most SEQ_COMPACT_ROWS rows moved for one region (the copies take the model thread: 130K rows ~ a few ms))
-  COMPACT, COMPACT_ROWS = getenv("SEQ_COMPACT", 0), getenv("SEQ_COMPACT_ROWS", 1_500_000)
   # (an idle conversation used in the last STICKY s is held: its agent runs a tool, its next turn comes soon. a prompt of another conversation
   # doesn't make it lost (out of the caches and the stash), unless it's forced (it waited too long, see the server's STARVE))
   STICKY = getenv("SEQ_STICKY", 180.0)
@@ -111,7 +88,6 @@ class SeqEngine:
     # models may pack region bases more tightly than their move/stash chunks (a mock may use 1 for simple unit-test arithmetic)
     self.model, self.k = model, model.config.spec_drafts
     self.align = getattr(model, "SEQ_BASE_ALIGN", getattr(model, "REGION_ALIGN", 1))
-    if getenv("SEQ_TRACE"): _trace(model)
     self.rows, self.nslots = model.seq_rows(), model.seq_slots()
     # (a sequence's positions: the model's context at most, the rows of the caches can be more (many conversations))
     self.max_len = model.max_context
@@ -343,9 +319,8 @@ class SeqEngine:
       self._move(s, base)
       s.cap = need
       return True
-    # (idle ones right after it evicted, nothing moved. SEQ_COMPACT: not if the free rows in all are enough: the regions moved below instead)
-    enough = self.COMPACT and need - s.cap <= self.rows - sum(t.cap for t in self.seqs)
-    if not enough and (win:=self._window(need - s.cap, force, after=s)) is not None:
+    # (idle ones right after it evicted, nothing moved)
+    if (win:=self._window(need - s.cap, force, after=s)) is not None:
       self._evict_all(win[1], force)
       s.cap = need
       return True
@@ -426,11 +401,7 @@ class SeqEngine:
     # (a run of free rows and idle ones evicted, nothing moved: else the least recently used ones evicted, the fewest rows moved for a region)
     need, base = self._need(length), None
     win = self._window(need, force) if need <= self.rows else None
-    # (SEQ_COMPACT: no gap of its size (a window with idle ones in it), but the free rows in all are enough: the regions moved, nothing evicted)
-    packed = self.COMPACT and (win is None or win[1]) and len(self.seqs) < self.nslots and need <= self.rows - sum(t.cap for t in self.seqs) and \
-             (pk:=self._pack(need)) is not None and pk[0] <= self.COMPACT_ROWS
-    if packed: pass
-    elif win is not None and (win[1] or len(self.seqs) < self.nslots):
+    if win is not None and (win[1] or len(self.seqs) < self.nslots):
       self._evict_all(win[1], force)
       base = win[0]
     elif need > self.rows or not self._make_room(need, True, None, force):
