@@ -334,12 +334,12 @@ _sp_rows:list[Tensor|None] = [None]
 # rows are padded to whole tiles of 32), 0: not split
 _seq_split = [0]
 SEQ_SPLIT_MAX = 128  # (the most real rows a device)
-# QTF: batched decoding teacher forced (a quality tool's, extra/qdecq.py): the drafts and the step's tokens forced from the host, the rows'
+# QTF: host-token teacher forcing for batched decoding, with drafts and step tokens supplied by the caller; the rows'
 # log probs written to the host
 QTF = getenv("QTF", 0)
 # SEQ_MIX_TOKENS: a short prompt suffix forced through the ordinary decode rows, no standalone prefill (0: off)
 SEQ_MIX_TOKENS = getenv("SEQ_MIX_TOKENS", 0)
-# AG_REAL: batched decoding's q8 all-gather packs a device's real rows from the padded mix, not from their copy (tr8 B=8 +0.8%: off)
+# AG_REAL: batched decoding's q8 all-gather packs a device's real rows from the padded mix, not from their copy.
 AG_REAL = getenv("AG_REAL", 0)
 # HC_REAL: batched decoding's hyper-connections read a device's real rows only and the mix stores them (no copy of them), its input not
 # materialized in float (2 kernels less a sublayer): the mix's epilogue and the activation's kernel round differently (FMA, rcp: ulps)
@@ -349,8 +349,8 @@ GDN_MERGED, HC_NORM_REAL = getenv("GDN_MERGED", 0), getenv("HC_NORM_REAL", 1)
 QSA_ROT_FWHT = getenv("QSA_ROT_FWHT", 1)
 # HC_DEC: batched decoding's hyper-connections of a device's few real rows (1-HC_DEC_ROWS (<=16), split) by the decode kernels (ghc_pre,
 # the decode linear, ghc_decode_mix/ghc_post: the B=1 path's) instead of the prefill ones on padded tiles of 32 (numerics: the B=1 path's,
-# q8 activations). tr8 IQ4 with the default numerics (HC_REAL): B=4 (2 rows a device) 16.59 -> 16.24 ms, B=8 (4) 0%: HC_DEC_ROWS=2.
-# extra/qdecq.py vs HC_DEC=0: G=4 NLL -0.008 KL 0.021 top-1 95.6%, G=8 NLL +0.014 KL 0.026 top-1 94.4%)
+# q8 activations). IQ4 with the default numerics (HC_REAL): B=4 (2 rows a device) 16.59 -> 16.24 ms, B=8 (4) 0%: HC_DEC_ROWS=2.
+# Measured against HC_DEC=0: G=4 NLL -0.008 KL 0.021 top-1 95.6%, G=8 NLL +0.014 KL 0.026 top-1 94.4%)
 HC_DEC, HC_DEC_ROWS = getenv("HC_DEC", 1), getenv("HC_DEC_ROWS", 2)
 def _split_rows() -> int: return round_up(_seq_split[0], 32)
 def _split_real(x:Tensor) -> Tensor:
@@ -474,7 +474,7 @@ def _run_again(calls:dict[str, tuple[Any, Callable[[], Any]]], skip:set) -> list
   """
   the warm-up's calls run once more, after its last capture (the jits in skip not): a capture that grows a shared arena rebases the jits sharing
   it (CapturedJit.rebase: their links and every jit's launch arguments dropped), so a jit run before it would link again on its first call in
-  serving (+0.5-1 s on a start's first requests: g2 Nov 14). the same calls as the warm-up's: the same bits. returns the jits' names it found unlinked
+  serving (+0.5-1 s on a start's first requests). the same calls as the warm-up's: the same bits. returns the jits' names it found unlinked
   """
   # (a call's jit can be a list: the jits of a prefill chunk's parts (PREFILL_PARTS); skip by identity, a list isn't hashable)
   todo = [(n, js, call) for n, (j, call) in calls.items()
@@ -1226,7 +1226,7 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
     return queued(i, *block._phase_pre(hc, norm, xs[i]))
   # the batches' sublayers in step: batch i's sublayer k after batch i-1's (its states the one before wrote), the collectives of one run while
   # the other computes
-  # (one micro batch: its collectives on its compute queue, nothing to run under them: no waits between queues (tr9 576/1152-row warm
+  # (one micro batch: its collectives on its compute queue, nothing to run under them: no waits between queues (576/1152-row warm
   # chunks -7%/-5%). RING_QUEUE_MB1=1: on their own queue as two batches' are)
   RING_QUEUE_ON[0] = len(xs) > 1 or bool(getenv("RING_QUEUE_MB1", 0))
   _mb_active[0] = True
@@ -1272,7 +1272,7 @@ _seq_base:list[UOp|int] = [0]
 _pk_local:list[int|None] = [None]
 # PREFILL_PK_CTX: the contexts (tokens, ascending) a prefill chunk smaller than the largest is also traced for (its jit of the shortest one its
 # context fits): the split indexer's pooled keys of that many tokens gathered, not of a whole context (a small chunk's gather of 262k a
-# constant ~6 ms on tr8)
+# constant ~6 ms for the prefill chunk)
 PREFILL_PK_CTX = tuple(int(c) for c in getenv("PREFILL_PK_CTX", "").split(",") if c)
 # (a prefill chunk's time is about that of this many rows more than its padded ones: its kernels' fixed time, see Transformer._chunk_plan)
 CHUNK_FIXED_ROWS = getenv("CHUNK_FIXED_ROWS", 256)
@@ -2988,7 +2988,7 @@ class Transformer:
         setattr(j, "link_later", False)
         if j.captured is not None: j.captured.linked()
       _lap("warmup: stash linked")
-    # (the compiles earliest first: qwen's 30 or more jits come one after another, the parent's ~1 s takes don't pile up (all-warm C2 tr8: 62.8 s,
+    # (the compiles earliest first: qwen's 30 or more jits come one after another, the parent's ~1 s takes don't pile up (all-warm C2: 62.8 s,
     # latest first 70.9 s))
     capture_parallel(par, meanwhile, compile_fifo=True)
     _init_buffers(self.__dict__.pop("_lanes_init", []))

@@ -120,7 +120,7 @@ SKINNY_WG, HC_KS = getenv("SKINNY_WG", 192), getenv("HC_KS", 32)
 # AG_FUSE: all_gather_q8's packing kernel sends the words to the peers too (the flag exchange's send kernel folded into it)
 AG_FUSE = getenv("AG_FUSE", 1)
 # XUNPACK: all_gather_q8's flag push unpacks the gathered q8 groups itself (one kernel less an all gather)
-XUNPACK = getenv("XUNPACK", 1)  # all_gather_q8 push unpacks itself (bit-exact; tr4 B=32 -0.6%, 25-min flag_stress 0 bad)
+XUNPACK = getenv("XUNPACK", 1)  # all_gather_q8 push unpacks itself (bit-exact, stress-tested with zero mismatches)
 # TILE16: batched decoding's hyper-connection gemms (a device's few rows: 4-16 of a tile of 32) of its real rows' tiles alone, in tiles of 16
 TILE16 = getenv("TILE16", 1)
 
@@ -947,10 +947,10 @@ K256_UNROLL = getenv("K256_UNROLL", 0)
 # K256_STAGE: _grouped_k256_kernel's block of weights staged in LDS by the workgroup (coalesced), RDNA3, default off
 K256_STAGE = getenv("K256_STAGE", 0)
 # K256_XH: RDNA3 _grouped_k256_kernel's lane halves decode one K half each, exchanged by permlanex16, and its sub-blocks unrolled. same bits;
-# iris 7900 XTX IQ3_S gate|up of 86 experts (extra/moe_prefill_bench.py): 576 tokens 573 -> 440 us, 1152 579 -> 467, 4096 1180 -> 1159,
+# 7900 XTX IQ3_S gate|up of 86 experts: 576 tokens 573 -> 440 us, 1152 579 -> 467, 4096 1180 -> 1159,
 # 13824 3686 -> 3584; a whole layer (+ the IQ4_NL down) at 192/384/768 tokens 817/841/903 -> 648/689/713 us. IQ3_S only. default off
 K256_XH = getenv("K256_XH", 1)
-# K256_XH_IQ4: K256_XH for IQ4_XS too (same bits; k1 one card 86 experts x 5 slices, 1152 rows 1009 -> 615 us, 2304 1006 -> 877). default on
+# K256_XH_IQ4: K256_XH for IQ4_XS too (same bits; 86 experts x 5 slices, 1152 rows 1009 -> 615 us, 2304 1006 -> 877). default on
 K256_XH_IQ4 = getenv("K256_XH_IQ4", 1)
 def k256_types(rdna4:bool) -> tuple[int, ...]:
   """the grouped experts' types of _grouped_k256_kernel"""
@@ -962,11 +962,11 @@ def k256_xh(ggml_type:int) -> bool:
 Q8_TILES = getenv("Q8_TILES", 0 if _wmma_rdna4(Device.DEFAULT) else 1)
 K256_R4_GRID = getenv("K256_R4_GRID", 0)
 # Q8_TT96: RDNA3 q8_gemm of 768-2304 rows in token tiles of 96 (block 128, two groups a stage) when they divide them. same bits
-# (tr9 extra/q8_serial.py 1152 rows: 1024x2560 91.0 -> 86.0 us, 6144x2560 427 -> 409, 2560x1024 86.8 -> 83.8; warm 1152-row chunk -2 ms)
+# (1152 rows: 1024x2560 91.0 -> 86.0 us, 6144x2560 427 -> 409, 2560x1024 86.8 -> 83.8; warm 1152-row chunk -2 ms)
 Q8_TT96 = getenv("Q8_TT96", 1)
 # Q6K_TILES: RDNA3 Q6_K gemm of many rows (the V3.1 file's attention, gated deltanet and shared expert projections; not the output head) in the
 # first token tile / output block of Q6K_TILE_ORDER with Q6K_WG workgroups or more (else 32 x 64), not the output head's 192 first. same bits
-# (the sums along K in the same order). k1 one card (results/w-gpf/pf/out-k1-2157): 2304 rows 2560 -> 1024 284 -> 240 us, 2560 -> 128 163 ->
+# (the sums along K in the same order). 2304 rows 2560 -> 1024 284 -> 240 us, 2560 -> 128 163 ->
 # 109; 1152 rows 2560 -> 128 158 -> 96, 2560 -> 2048 295 -> 243
 Q6K_TILES, Q6K_WG = getenv("Q6K_TILES", 1), getenv("Q6K_WG", 128)
 Q6K_TILE_ORDER = ((96, 128), (128, 128), (96, 64), (128, 64), (64, 64), (32, 64))
@@ -1057,7 +1057,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
     header, low = wraw[base].load(), wraw[base+1].load()
     return (((low >> (4*sb).cast(dtypes.uint32)) & 15) | (((header >> (16+2*sb).cast(dtypes.uint32)) & 3) << 4)).cast(dtypes.int32) - 32
   def acols(h:int) -> tuple: return (ph*4+2*h, ph*4+2*h+1) if rdna4 else (2*h, 2*h+4, 2*h+1, 2*h+5)
-  # (K256_XH: IQ3_S, IQ3_XXS; IQ4_XS's is no faster at 576 tokens and 1.4x slower at 4096+ (iris): K256_XH_IQ4)
+  # (K256_XH: IQ3_S, IQ3_XXS; IQ4_XS's is no faster at 576 tokens and 1.4x slower at 4096+: K256_XH_IQ4)
   xh = k256_xh(ggml_type) and not rdna4 and not stage_w
   def sub_block(sb:UOp, prevs:list[list[list[UOp]]]) -> list[list[list[UOp]]]:
     """the int32 sums (OT, TT, 8 lanes' values) after sub-block sb, from prevs"""
@@ -1084,7 +1084,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
         row.append([_cfn(True, src=(dreg[j].load(), sub, prevs[o][t][j]), arg=(MAD_I24, dtypes.int32)) for j in range(8)])
       ret.append(row)
     return ret
-  # (K256_XH on RDNA3: the sub-blocks unrolled too, their sums in registers: gate|up -23% at 576 tokens of 86 experts on iris)
+  # (K256_XH on RDNA3: the sub-blocks unrolled too, their sums in registers: gate|up -23% at 576 tokens of 86 experts)
   stages = K256_UNROLL if K256_UNROLL > 1 else 8 if K256_UNROLL or xh else 0
   if stages == 8:
     # (all sub-blocks' weight loads can be issued before the first's tensor core work, not a loop iteration's latency each)
@@ -4029,7 +4029,7 @@ def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, sca
   # (QSA_WMMA: decoding's rows (<= 256) on the tensor cores too, a row's keys over QSA_WMMA parts (workgroups): numerics, half queries)
   if wmma and ((QSA_PREFILL and B > 256 and not parts and not waves) or (QSA_WMMA and B <= 256)):
     # (a prefill's rows: the tensor cores, see _qsa_prefill_kernel)
-    # (QSA_WMMA=1: the parts of the rows' count, ~480 workgroups: tr8 qsabench 12 rows 16 parts, 60 rows 8, 96 rows 4; else QSA_WMMA parts)
+    # (QSA_WMMA=1: the parts of the rows' count, ~480 workgroups: 12 rows 16 parts, 60 rows 8, 96 rows 4; else QSA_WMMA parts)
     axis, P = q.uop.axis, ((QSA_WMMA if QSA_WMMA > 1 else min(16, max(4, 1 << round(math.log2(480 / B))))) if B <= 256 else 1)
     out = Tensor.empty(B, H, P, DV, dtype=dtypes.float32, device=q.device, axis=axis)
     stats = Tensor.empty(B, H, P, 2, dtype=dtypes.float32, device=q.device, axis=axis)
@@ -5059,7 +5059,7 @@ SEQ_SCORE_TILE = 256
 # seq_scores: SEQ_SCORE_U loads of 8 dims of a key a round (a round waits for its loads: 16 rounds of one 16 byte load are 16 waits, and a
 # wave's 16 bytes of 32 keys a round lose their lines in L2 before the next round), SEQ_SCORE_WG workgroups a sequence, SEQ_SCORE_LDSQ=1: the
 # queries staged in LDS (else read at addresses uniform in the workgroup: scalar loads). the same sums in the same order whatever these are
-# (tr9 B=28 at 262k, 10,923 pools a device: 308 -> 146 us a call, the scores bit-identical)
+# (B=28 at 262k, 10,923 pools a device: 308 -> 146 us a call, the scores bit-identical)
 SEQ_SCORE_U, SEQ_SCORE_WG, SEQ_SCORE_LDSQ, SEQ_SCORE_NP = getenv("SEQ_SCORE_U", 4), getenv("SEQ_SCORE_WG", 64), getenv("SEQ_SCORE_LDSQ", 0), \
   getenv("SEQ_SCORE_NP", 1)
 
@@ -5119,7 +5119,7 @@ def _seq_scores_qv_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *dev
   # _seq_scores_kernel's scores, the same sums in the same order: a wave PW = 32//H pools of one row, a lane (pool j, head h) the dot of its
   # head's query (D floats in registers, loaded once) with the pool's key (the H lanes of a pool load the same bytes), a workgroup NG groups
   # of PW pools x the R rows (a wave a (group, row)), WG workgroups a sequence loop over its groups. the lane of head 0 sums the heads' relus
-  # in order (the others' dots by DPP). (tr9 G=28, 10,923 pools: 145 -> 136 us warm, 178 -> 144 us cold, the scores bit-identical)
+  # in order (the others' dots by DPP). (G=28, 10,923 pools: 145 -> 136 us warm, 178 -> 144 us cold, the scores bit-identical)
   rows, P = cast(tuple[int, int], out.shape)
   _, H, D = cast(tuple[int, int, int], q.shape)
   PT, G, NG, PW = cast(int, pk.shape[0]), rows // R, SEQ_SCORE_QV_NG, WARP_SIZE // H
@@ -5205,7 +5205,7 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
   heads, V, K = cast(tuple[int, int, int], state.shape[-3:])
   # more tokens: more waves, a wave runs fewer rows through the tokens
   W, conv = KDA_WAVES * (1 if T == 1 else 2), cast(int, wq.shape[-1])
-  # (4 waves a workgroup at 8 or more sequences: faster on tr8; it rounds differently from 8 (a numerics change, checked by extra/qdecq.py))
+  # (4 waves a workgroup at 8 or more sequences: faster on the serving profile; it rounds differently from 8 (a quality-tested numerics change))
   if R: W = KDA_RW or (4 if G >= 8 else 8)
   assert K == V and W*32 >= K and V % W == 0 and conv == 4, "a thread per channel of q, k and v"
   assert (T <= S or rp is not None) and T < SC, "the states of the T tokens and the one before"

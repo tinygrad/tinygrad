@@ -1408,7 +1408,7 @@ def _half_rows(x:Tensor, tokens:int, splits:int=1) -> tuple[Tensor, Tensor|None]
     return (xf / sc).cast(dtypes.float16).reshape(x.shape).contiguous(), sc.permute(1, 0, 2)
   xf = x.reshape(tokens, x.shape[-1]).float()
   # (HALF_ROWS_G, default 16: the max of a row's abs in G parts first, a kernel of tokens x G threads, then of the G: the same max in any order.
-  # one reduce is a thread a row: 2688 threads over 2048 values, 0.16 ms a call on ts1)
+  # one reduce is a thread a row: 2688 threads over 2048 values, 0.16 ms a call)
   if (G:=_half_rows_parts(tokens, xf.shape[-1])) > 1 and \
      (not isinstance(xf.device, tuple) or xf.uop.axis in (None, 0)):  # (not a row split over the devices)
     amax = xf.abs().reshape(tokens, G, xf.shape[-1] // G).max(-1).contiguous().max(-1, keepdim=True)
@@ -1425,7 +1425,7 @@ def _rows_f16_config(tokens:int, out_features:int, in_features:int, ggml_type:in
   # ROWS_F16 (default on): the few rows of batched decoding (<= ROWS_F16_MAX) on _rows_f16_wmma_kernel (the same float ops as the f16 WMMA kernel)
   if not getenv("ROWS_F16", 1) or tokens > getenv("ROWS_F16_MAX", 64) or not _wmma_rdna4(device) or ggml_type != Q8_0: return None
   NG = in_features // Q8_GROUP_SIZE
-  # (one-GPU bench, extra/glm53_rows_bench.py: 4 groups an iteration best at 16 rows, 8 at 32)
+  # (one-GPU measurement: 4 groups an iteration best at 16 rows, 8 at 32)
   unroll = next((u for u in (getenv("ROWS_UNROLL", 4 if tokens <= 16 else 8), 4, 2, 1) if NG % u == 0), 1)
   tiles = next((t for t in (getenv("ROWS_TILES", 1), 1) if out_features % (16*t) == 0), 1)
   waves = next((w for w in (getenv("ROWS_WAVES", 2), 2, 1) if out_features % (16*tiles*w) == 0), 1)
@@ -1717,7 +1717,7 @@ def p2p_stale(devs:tuple[str, ...], clear:bool=False) -> list[list[int]]:
     for d in devs: Device[d].synchronize()
   return ret
 
-# (120 s (was 30): with SEQ_A2A_HALF on, ts5 s3runout2 (8e08416b8, the 64k teacher-forced harness that died at 30 s on 93e2) ran 6 of 6 prompts
+# (120 s (was 30): with SEQ_A2A_HALF on, the 64k teacher-forced regression ran 6 of 6 prompts
 # clean at 120 s; a poll that runs out still ends (P2P_RETRY runs a prompt's chunks again))
 def P2P_AR_TIMEOUT_MS() -> int: return getenv("P2P_AR_TIMEOUT_MS", 120000)
 
@@ -1759,7 +1759,7 @@ def p2p_flag_shape(n:int) -> tuple[int, int]|None:
 def p2p_a2a_shape(n:int) -> tuple[int, int]|None:
   """
   (threads, words a thread) of a one shot all to all of n words a part: a word a thread in up to P2P_AR_MAXG workgroups (every thread's words go
-  to a different place in every peer: more threads, not more words each. measured ts5 14 R9700, 4 rows of mla_sparse_seq (10496 floats a part):
+  to a different place in every peer: more threads, not more words each. measured on 14 R9700, 4 rows of mla_sparse_seq (10496 floats a part):
   64x4 126.7 us, 256x1 90.5, flag 128x1 62.7), else p2p_ar_shape's
   """
   if getenv("P2P_A2A_EP1", 1):
@@ -1797,7 +1797,7 @@ def _p2p_allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, N:int, n:int, T:
   ci = (rng + cls*(len(P2P_AR_RANGES) + 1))*P2P_AR_MAXG + wg
   epoch, me = (counter[ci].load() + 1).cast(dtypes.uint32), counter[P2P_AR_NCTR].load().cast(dtypes.weakint)
   # (30 s: a batched step's devices start its graph up to tens of ms apart, and a jit's first two runs (not a graph, launched kernel by kernel)
-  # seconds (repstep, ts5, G=8: 50 ms and 2 s ran out, the step's hidden states different from its replays'; 30 s: never). a poll that runs
+  # seconds (G=8: 50 ms and 2 s ran out, the step's hidden states different from its replays'; 30 s: never). a poll that runs
   # out still ends, its values wrong: p2p_check (after a long step) raises)
   deadline = _sys("__builtin_readsteadycounter()", dtypes.uint64, epoch) + int(P2P_AR_TIMEOUT_MS() * 100000)  # (100 MHz)
   par = (epoch & 1).cast(dtypes.weakint)
@@ -3356,7 +3356,7 @@ MOE_BUNDLE, MOE_BUNDLE_MIN = getenv("MOE_BUNDLE", 4), getenv("MOE_BUNDLE_MIN", 4
 # fewer rows (batched decoding of 2-9 users): bundles of MOE_EXACT_M in float from MOE_EXACT_MIN rows (0: off), the per-row kernel's values
 MOE_EXACT_M, MOE_EXACT_MIN = getenv("MOE_EXACT_M", 2), getenv("MOE_EXACT_MIN", 8)
 # the bundled MoE kernels with MOE_PERSIST workgroups an output block looping over the bundles there are (0: a grid of every possible bundle;
-# 1 runs a device's few bundles one after another: slower in the step, s3ab8; 4-8: s3ab10 G=8 -6.8 ms)
+# 1 runs a device's few bundles one after another: slower in the step; 4-8: G=8 -6.8 ms)
 MOE_PERSIST = getenv("MOE_PERSIST", 8)
 # many more rows: bundles of 16 on the int8 tensor cores, every weight decoded once a step (_moe_bundled_wmma_kernel)
 MOE_WMMA, MOE_WMMA_MIN, MOE_WMMA_QUANTS = getenv("MOE_WMMA", 1), getenv("MOE_WMMA_MIN", 64), (IQ3_S, IQ4_XS)
@@ -5087,7 +5087,7 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
   # (a few tokens (decoding): the gathers and the sum in one peer to peer kernel each, the latency of a ring of copies is a few of them)
   # (packed (SEQ_P2P_PACK) the peer to peer words carry three times the values: faster than the rings up to 64 rows (measured, 14 R9700), in
   # half words only up to 16 before P2P_FLAG (four halves a word); with it up to 64 (p2p_flag_shape): 8 / 16 users (32 / 64 rows) went around the
-  # rings (+q8 queries and sums): ts5 s3p2p48 8 users 135.9 -> 107.5 ms, 16 users 186.4 -> 170.2 ms)
+  # rings (+q8 queries and sums): 8 users 135.9 -> 107.5 ms, 16 users 186.4 -> 170.2 ms)
   small = isinstance(T, int) and T <= getenv("SEQ_P2P_ROWS", 64) and p2p_allreduce(devs) is not None
   def gather(x:Tensor, dtype=dtypes.float32, p2p:bool=True) -> Tensor:
     # x (n, ...) split on its leading axis: whole on every device
@@ -5124,7 +5124,7 @@ def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:
     od = (parts.reshape(n, G, T, split, 16, D) * w).sum(3) / ld.maximum(1e-30)
   else: mx, ld, od = m, l.squeeze(3), parts.reshape(n, G, T, 16, D)
   # the devices' combined: weighed by their sum at the max of all of them
-  # (packed (SEQ_P2P_PACK): the stats gather and the packed reduce scatter, not the all to all of float words (measured ts5 G=1: 34.0 -> 27.8 ms))
+  # (packed (SEQ_P2P_PACK): the stats gather and the packed reduce scatter, not the all to all of float words (G=1: 34.0 -> 27.8 ms))
   if small and getenv("SEQ_P2P_A2A", 1 if _seq_p2p_pack() is None else 0) and dims is not None and H % n == 0:
     # (a few tokens: every device's outputs of the heads of a device (normed by its sum), their max and sum, to that device in one exchange;
     # combined there by their max and sum)
@@ -5958,7 +5958,7 @@ def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:in
   # are blocks of SEQ_BLK positions in turn)
   # (a few rows (decoding): 512 a device, the merge of all of them is a kernel of a few workgroups)
   # (IDX_CAND_ROWS (default 32, was 8): 512 a device up to 8 users (32 rows) too: from 16 rows the 2048 a row (4x the bytes) went around a ring
-  # of 13 copies (22 a step); with 512 one shot (IDX_P2P_ROWS 32): ts5 s3bars5 4 users 68.00 -> 62.36 ms, 8 users 109.11 -> 99.84)
+  # of 13 copies (22 a step); with 512 one shot (IDX_P2P_ROWS 32): 4 users 68.00 -> 62.36 ms, 8 users 109.11 -> 99.84)
   c = max(min(top, getenv("IDX_CAND", 512 if rows <= getenv("IDX_CAND_ROWS", 32) else top)), (top + n - 1) // n)
   cand = Tensor.empty(n*rows, c, 2, dtype=dtypes.float32, device=devs, axis=0)
   vk = {"valid": valid} if valid is not None else {}
@@ -5968,7 +5968,7 @@ def pool_index_shard(scores:Tensor, q_start:UOp|None, pools:int|UOp|None, top:in
   if positions is None and rows >= 16*n and getenv("IDX_MERGE_SPLIT", 1):
     return _pool_merge_split(cand, out, devs, rows, c, qs, pu, top, kpool, row0)
   # (one shot peer to peer up to IDX_P2P_ROWS rows (the mailbox holds 32 rows of 2048 candidates), the same floats as the ring of copies: a ring
-  # is 13 copies in turn, a step of 8 rows paid ~22 of them; from 16 rows (2048 candidates a row, 4x the bytes) the ring is faster: s3ab4 G=4
+  # is 13 copies in turn, a step of 8 rows paid ~22 of them; from 16 rows (2048 candidates a row, 4x the bytes) the ring is faster: G=4
   # 72.9 -> 69.3 ms, G=8 149.7 -> ~142.8); with 512 candidates up to 32 rows (IDX_CAND_ROWS) one shot wins again)
   g = host_allgather(flat) if rows <= getenv("IDX_P2P_ROWS", 32) else None
   allc = g if g is not None else all_gather(flat, 0, dtypes.float32)

@@ -6,7 +6,7 @@ One prompt (CORPUS from OFFSET, L tokens) prefilled into B slots (copies: the sa
 For every B of BATCHES (a fresh prefill each) the step rows' hidden states of every slot are saved (OUT_<B>.npy, plus the prefill's last row),
 and compared: slot s vs slot 0 inside a step (a row's place), and slot 0 vs B=1 (the step's size), for the steps whose drafts agree.
 Rows a step = B*(k+1) (padded to the next SEQ_SIZES). One card: SHARD=1 NUM_BLOCKS=6 NUM_BLOCKS_MTP=1 (the MTP layer kept: drafts as deployed),
-the sparse attention's heads in groups of 16 (as extra/glm_prefill_chunk.py).
+the sparse attention's heads in groups of 16.
 env: MODEL, CORPUS, SHARD (1), MAXCTX (65536), L (2048), OFFSET (1000), STEPS (12), BATCHES (1,2,4,18), OUT (bn), PREFILL_ONLY (0)
 """
 import os, array, json

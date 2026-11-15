@@ -411,7 +411,7 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
   while rows > 1 and rows*chunks > (32 if active is not None else 16): rows //= 2
   assert multi == 1 or bundles is not None or (active is None and out.shape[0] == multi), "multi: every row of out, no inactive tokens"
   # rep: the outputs a lane computes (active rows: a wave reads more than the few hundred bytes of one output of a narrow input; the
-  # unit-major kernel MOE_UNIT_REP: 4 (k1 moe-u7: down 299 -> 280 us at 54 rows, gate/up the same))
+  # unit-major kernel MOE_UNIT_REP: 4 (down 299 -> 280 us at 54 rows, gate/up the same))
   rep = (getenv("MOE_UNIT_REP", 4) if loop_rows else getenv("MOE_REP", 2)) if active is not None else 1
   while rep > 1 and out_features % (rows*outs_per_wave*rep): rep //= 2
   row = UOp.range((bundles[0] if bundles else out.shape[0]//multi)*out_features//(rows*outs_per_wave*rep), 0, AxisType.GLOBAL)

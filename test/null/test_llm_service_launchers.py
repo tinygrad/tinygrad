@@ -109,7 +109,7 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     self.assertNotIn("operations `results/", runbook)
     self.assertNotIn("tools/launch/", runbook)
     self.assertNotIn("results/w-gpf/", runbook)
-    for service in ("c2", "c9"):
+    for service in ("c2", "c5", "c9"):
       script = ROOT / f"test/null/production_{service}_warmup.sh"
       harness = ROOT / f"test/null/production_{service}_warmup.py"
       self.assertTrue(script.stat().st_mode & 0o111)

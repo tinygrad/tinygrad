@@ -29,7 +29,7 @@ if getenv("MEM_TRACE"):
 from tinygrad import Tensor
 Tensor.manual_seed(getenv("SAMPLE_SEED", 1))
 if getenv("SHARD", 6) == 1:
-  # (SHARD=1: one card, glm5next's own loader (NUM_BLOCKS, NUM_BLOCKS_MTP) and the 64 heads in <=16-head groups, as extra/glm_prefill_chunk.py)
+  # (SHARD=1: one card, glm5next's own loader (NUM_BLOCKS, NUM_BLOCKS_MTP) and the 64 heads in <=16-head groups)
   import tinygrad.llm.glm5next as g5
   _sparse = g5.flash_attention_mla_sparse
   def _sparse16(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_len, grouped=None):
