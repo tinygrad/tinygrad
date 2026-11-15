@@ -142,7 +142,9 @@ sudo -n env HOME="$HOME" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED
   --shard 14 --max_context 262144 --serve 8000
 ```
 
-C9 therefore uses 14 shards, exact half cache rows and the `zai-org/GLM-5.3` alias. Require all 14 cards, expected effective env, `GET /v1/models`, healthy `GET /status`, then a small text request. The supported wrapper is `GLM53_POWER_LIMIT=$GLM53_POWER_LIMIT extra/llm_service/glm_14xr9700.sh start`; its `stop` action SIGTERMs the recorded process group and confirms exit. Rollback uses the previous immutable tree and matching validated profile.
+C9 therefore uses 14 shards and the `zai-org/GLM-5.3` alias.
+
+Owner-supplied **Phase-4 item 7 candidate (not a validated 1M deployment):** `GLM_KV=q4` with `--max_context 1048576`, `SEQ_ROWS=1048576`, `SEQ_SLOTS=16`, `SEQ_MAX_ACTIVE=16`, `P2P_GLM5_OFF=1`, `FREQS_HOST=1`, `AMD_SCRATCH_MAX=64`, `SEQ_COPY_SCRATCH=1` and `LOAD_DEFER=1`; `MAX_CONTEXT=1048576` to the launcher. These profile values must pass new-device start, memory, q4 greedy and 4k/64k/262k checks. Keep individual `GLM_KV`, `SEQ_FP8`, and `SEQ_KV4` toggles owner-controlled, including the half and fp8 alternatives. Do not apply this profile to a default C9 server or claim a 1M result. The existing validated start remains 262144 per user, and power remains **PENDING** until its soak verification. Require all 14 cards, expected effective env, `GET /v1/models`, healthy `GET /status`, then a small text request. The supported wrapper is `GLM53_POWER_LIMIT=$GLM53_POWER_LIMIT extra/llm_service/glm_14xr9700.sh start`; its `stop` action SIGTERMs the recorded process group and confirms exit. Rollback uses the previous immutable tree and matching validated profile.
 
 ## API and production environment contract (80 names)
 

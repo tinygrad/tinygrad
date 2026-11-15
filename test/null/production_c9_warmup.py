@@ -104,5 +104,6 @@ def done(self, *args, **kwargs):
 
 
 serve.LLMServer.serve_forever = done
-sys.argv = ["tinygrad.llm", "--model", os.environ["MODEL"], "--shard", "14", "--max_context", "262144", "--serve", "18998"]
+sys.argv = ["tinygrad.llm", "--model", os.environ["MODEL"], "--shard", "14",
+            "--max_context", os.environ.get("MAX_CONTEXT", "262144"), "--serve", "18998"]
 runpy.run_module("tinygrad.llm", run_name="__main__")
