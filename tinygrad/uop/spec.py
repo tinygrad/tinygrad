@@ -147,14 +147,16 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.BUFFER, src=(p_size,), allow_any_len=True, name="buf"), lambda buf:
    isinstance(buf.dtype, DType) and is_device(buf.arg.device) and buf.arg.buffer is not None
    and valid_device_range(buf.arg.device, buf.src[1:]) if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
+  # EXTERN is storage without a runtime buffer or a bound Variable without a value, from outside a function
+  (UPat(Ops.EXTERN, src=(p_size,), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.arg.buffer is None and x.arg.val is None
+   and (is_device(x.arg.device) if x.addrspace is AddrSpace.GLOBAL else x.addrspace is AddrSpace.ALU and x.arg.device is None)
+   and valid_device_range(x.arg.device, x.src[1:])),
   (UPat(Ops.ALLOC, src=(p_size,), allow_any_len=True, name="buf"), lambda buf: isinstance(buf.arg, ParamArg)
    and buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)
    and buf.arg.buffer is None
    and (buf.arg.device is None or (buf.addrspace is AddrSpace.GLOBAL and is_device(buf.arg.device)))
    and valid_device_range(buf.arg.device, buf.src[1:])),
 
-  (UPat(Ops.EXTERN, src=(p_size,), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.arg.buffer is None
-   and x.addrspace is AddrSpace.GLOBAL and valid_device_range(x.arg.device, x.src[1:])),
   # a Variable is a scalar ALU PARAM with a value range and no device
   (UPat(Ops.PARAM, src=(UPat(Ops.STACK, src=()),), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
 

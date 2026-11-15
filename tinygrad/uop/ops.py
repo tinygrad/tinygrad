@@ -1203,8 +1203,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret.view_as(shape)
   def param_like(self, slot:int, name:str|None=None):
     # Scalar arguments bind by slot; names and values stay at the call site, not in schedule cache keys.
-    if self.op is Ops.PARAM and self.addrspace is AddrSpace.ALU:
-      return self.replace(arg=replace(self.arg, slot=slot, name=name, val=None))
+    if self.op in {Ops.PARAM, Ops.EXTERN} and self.addrspace is AddrSpace.ALU:
+      return self.replace(op=Ops.PARAM, arg=replace(self.arg, slot=slot, name=name, val=None))
     # multi-device values become a per-shard sized param wrapped in UNSHARD: the sharding lives in the graph, not the arg
     if self.axis is not None and isinstance(self.device, tuple):
       return UOp.param(slot, self.dtype, prod(to_max_shape(self.shard_shape)), self.device, name=name).view_as(self.shard_shape, self.axis)

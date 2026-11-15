@@ -32,18 +32,15 @@ class TestExport(unittest.TestCase):
       # UOps are hash-consed, so a lossless round trip through the wire format gives back the identical UOp
       self.assertIs(parse_uir(render_uir(fn)), fn)
 
-  def test_cached(self):
+  def test_same_function(self):
     v = Variable("v", 1, 4)
     a, b, c, d = buf(), buf(), buf(), buf()
     fn, _ = exported((a+b).contiguous()*v.bind(2))
     self.assertIs(fn, exported((c+d).contiguous()*v.bind(3))[0])
-    n = len(schedule.export_cache)
+    # mapped back to this storage and these values
     linear, var_vals = ((c+d).contiguous()*v.bind(3)).linear_with_vars()
-    self.assertEqual(len(schedule.export_cache), n)
-    # the cached linear is mapped back to this storage and these values
     self.assertEqual(var_vals, {"v": 3})
     self.assertTrue({c.uop.buf_uop, d.uop.buf_uop} <= set(linear.toposort()))
-    self.assertFalse({Ops.EXTERN, Ops.ALLOC} & {u.op for u in linear.toposort()})
 
 if __name__ == "__main__":
   unittest.main()
