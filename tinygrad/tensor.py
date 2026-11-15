@@ -487,7 +487,7 @@ class Tensor(RandMixin):
     is_disk = self.uop.on_disk()
     advanced = any(isinstance(i, (Tensor, list, tuple)) for i in idx)
     realized = is_disk or self.uop.base.op in {Ops.BUFFER, Ops.ALLOC} or self.uop.base.without_after.is_realized
-    if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
+    if not realized and (self.is_floating_point() or not advanced):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.replace(self._getitem(indices, v))
     elif advanced: # advanced setitem
