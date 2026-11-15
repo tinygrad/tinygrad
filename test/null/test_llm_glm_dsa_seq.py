@@ -90,7 +90,7 @@ class TestGLMDSASequence(unittest.TestCase):
     model.prefill_chunks = lambda: (1344, 2688, 4032)
     for flag, alone, want in (("0", False, [4032, 4032, 2000]), ("1", True, [4032, 4032, 2000]), ("1", False, [2688, 2688, 2688, 2000]),
                               ("2", False, [2688, 2688, 2688, 2000])):
-      with patch.dict(os.environ, {"PREFILL_BIG_ALONE": flag, "SEQ_CHUNK_PLAN": "0"}):
+      with patch.dict(os.environ, {"PREFILL_BIG_ALONE": flag}):
         getenv.cache_clear()
         model._pf_alone = alone
         self.assertEqual(model._seq_chunks(10064), want, (flag, alone))
@@ -428,22 +428,18 @@ class TestGLMDSASequence(unittest.TestCase):
     getenv.cache_clear()
     with patch.object(K, "_wmma_rdna4", lambda d: True):
       self.assertEqual(K._rows_f16_config(16, 2048, 6144, K.Q8_0, "NULL"), dict(coop=2, chunk=16))  # (the default)
-      self.assertEqual(K._rows_f16_config(48, 2048, 6144, K.Q8_0, "NULL")["unroll"], 8)  # (3 token tiles: past ROWS_COOP=2's waves)
+      self.assertEqual(K._rows_f16_config(48, 2048, 6144, K.Q8_0, "NULL"),  # (3 token tiles: past ROWS_COOP=2's waves)
+                       dict(tiles=1, waves=2, unroll=8, prefetch=True))
       self.assertIsNone(K._rows_f16_config(16, 11072, 6144, K.Q6_K, "NULL"))
       with patch.dict(os.environ, {"ROWS_F16": "0"}):
         getenv.cache_clear()
         self.assertIsNone(K._rows_f16_config(16, 2048, 6144, K.Q8_0, "NULL"))
-      with patch.dict(os.environ, {"ROWS_F16": "1", "ROWS_COOP": "0", "ROWS_CHUNK": "8"}):
-        getenv.cache_clear()
-        self.assertEqual(K._rows_f16_config(16, 2048, 6144, K.Q8_0, "NULL")["chunk"], 8)
-        self.assertEqual(K._rows_f16_config(16, 6144, 160, K.Q8_0, "NULL")["chunk"], 0)  # (5 groups)
-        self.assertIsNone(K._rows_f16_config(128, 2048, 6144, K.Q8_0, "NULL"))
+      self.assertIsNone(K._rows_f16_config(128, 2048, 6144, K.Q8_0, "NULL"))
       getenv.cache_clear()
-    for typ, raw, chunk, pkh in ((K.Q8_0, Tensor.empty(64*256*17//32, dtype="half"), 8, False), (K.Q8_0, Tensor.empty(64*256*17//64), 8, True),
-                                 (K.Q6_K, Tensor.empty(64*105, dtype="uint16"), 0, False)):
-      out, x = Tensor.empty(32, 64, dtype="float32"), Tensor.empty(32, 256, dtype="half")
-      fxn = functools.partial(K._rows_f16_wmma_kernel, out_features=64, in_features=256, ggml_type=typ, chunk=chunk, pkh=pkh)
-      self.assertIs(Tensor.custom_kernel(out, raw, x, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
+    out, x = Tensor.empty(32, 64, dtype="float32"), Tensor.empty(32, 256, dtype="half")
+    raw = Tensor.empty(64*256*17//32, dtype="half")
+    fxn = functools.partial(K._rows_f16_wmma_kernel, out_features=64, in_features=256, ggml_type=K.Q8_0)
+    self.assertIs(Tensor.custom_kernel(out, raw, x, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
     out, x, raw = Tensor.empty(32, 64, dtype="float32"), Tensor.empty(32, 512, dtype="half"), Tensor.empty(64*512*17//32, dtype="uint16")
     fxn = functools.partial(K._rows_coop_f16_wmma_kernel, out_features=64, in_features=512, ggml_type=K.Q8_0, coop=2, chunk=16)
     self.assertIs(Tensor.custom_kernel(out, raw, x, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
@@ -575,9 +571,8 @@ class TestGLMDSASequence(unittest.TestCase):
 
   def test_moe_exact_bundles(self):
     # (MOE_EXACT_MIN: rows from it below MOE_BUNDLE_MIN in bundles of MOE_EXACT_M stored in float (the per-row kernel's values), fewer per row)
-    import tinygrad.llm.kernels.amd_glm_dsa as K_dsa, tinygrad.llm.kernels.amd_glm as K_glm
-    for K in (K_dsa, K_glm):
-      with self.subTest(K.__name__): self._moe_exact_bundles(K)
+    import tinygrad.llm.kernels.amd_glm_dsa as K_dsa
+    self._moe_exact_bundles(K_dsa)
 
   def _moe_exact_bundles(self, K):
     E, fin, fout = 4, 256, 64
@@ -690,7 +685,7 @@ class TestGLMDSASequence(unittest.TestCase):
       name = sinks[0].arg.name
       self.assertEqual(name.endswith("_p"), bool(P), name)
     bexp, brow, bcnt = K.moe_bundles(sel, first, E, 2, 16*8)
-    # (the tensor core bundles (MOE_WMMA_MIN rows and up) stay the tensor core kernel with MOE_PERSIST on and MOE_PERSIST_WMMA off)
+    # (the tensor core bundles keep the ordinary tensor core kernel when non-WMMA persistence is enabled)
     sel64, x64 = Tensor.empty(1, 64, 8, dtype=dtypes.int32), Tensor.empty(1, 64, 1, fin)
     K._bundle_cache.clear()
     fxns = []
@@ -704,29 +699,5 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertIn(K._moe_bundled_wmma_kernel, fxns)
     self.assertNotIn(K._moe_bundled_persist_kernel, fxns)
     self.assertEqual((bexp.shape, brow.shape, bcnt.shape), ((16*8//2 + E,), ((16*8//2 + E)*2,), (1,)))
-
-  def test_moe_grid_lds(self):
-    # (MOE_GRID_LDS: the per-row and the bundled MoE kernels of IQ3_S read the grid from an LDS copy (the same values))
-    import tinygrad.llm.kernels.amd_glm_dsa as K
-    from tinygrad.uop.ops import Ops, AddrSpace
-    E, fin, fout = 4, 256, 64
-    w = Tensor.empty(E*fout*fin*K.QUANT_SIZES[K.IQ3_S]//256//2, dtype=dtypes.uint16)
-    first = Tensor([0], dtype=dtypes.int32)
-    for T, exact_min in ((4, 0), (16, 8)):
-      for on in (0, 1):
-        sinks = []
-        def wrap(*a, **kw):
-          sinks.append(ret:=orig(*a, **kw))
-          return ret
-        orig = K._decode_linear
-        K._bundle_cache.clear()
-        for fn in (K._moe_decode_kernel, K._moe_bundled_kernel, K._moe_bundled_persist_kernel): fn.cache_clear()
-        sel, x = Tensor.empty(1, T, 8, dtype=dtypes.int32), Tensor.empty(1, T, 1, fin)
-        with patch.object(K, "MOE_WMMA", 0), patch.object(K, "MOE_EXACT_MIN", exact_min), patch.object(K, "MOE_GRID_LDS", on), \
-             patch.object(K, "_decode_linear", wrap):
-          K.moe_linear(w, K.IQ3_S, E, x, sel, first)
-        self.assertEqual(len(sinks), 1)
-        lds = [u for u in sinks[0].toposort() if getattr(u, "addrspace", None) == AddrSpace.LOCAL and u.op is not Ops.INDEX and u.shape == (512,)]
-        self.assertEqual(bool(lds), bool(on), (T, on))
 
 if __name__ == '__main__': unittest.main()

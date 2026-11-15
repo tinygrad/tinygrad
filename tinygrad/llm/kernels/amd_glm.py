@@ -940,8 +940,6 @@ K256_SKIP_RDNA3 = getenv("K256_SKIP_RDNA3", 1)
 # K256_XH_GLM: RDNA3 lane halves decode one K half each, exchanged by permlanex16 (amd_qwen's K256_XH), IQ2_S and IQ3_S. the same bits;
 # with K256_SBU3 2 on RDNA3: C5 chunks 192/384/768 rows 3-5% faster on a 7900 XTX (6 blocks)
 K256_XH_GLM = getenv("K256_XH_GLM", 1)
-# K256_SKIP3: IQ3_S's too (the down's tiles at a few rows an expert: small prefill chunks on RDNA3)
-K256_SKIP3 = getenv("K256_SKIP3", 0)
 # K256_SBU: IQ2_S sub-blocks unrolled by this many (-1: 2), K256_SBU3 IQ3_S's (-1: 1 on RDNA4 (no faster on C6's down), 2 on RDNA3)
 K256_SBU, K256_SBU3 = getenv("K256_SBU", -1), getenv("K256_SBU3", -1)
 # K256_IDLE: tiles of no expert load no grid and store nothing (their rows are never read)
@@ -1026,8 +1024,7 @@ def _grouped_k256_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, *srcs:UOp, out_featur
   # its first row is) skips its WMMAs, a loop of 0 or 1 iterations. its rows' outputs are never read (gate/up's padding rows are read only by
   # down's padding rows, which aren't stored)
   skip = [UOp.range((rows[token_block * TOK + t*16].load() >= 0).where(1, 0), 10+t, AxisType.LOOP)
-          if t and (((on(K256_SKIP) or (K256_SKIP < 0 and K256_SKIP_RDNA3)) and ggml_type == IQ2_S) or
-                    (K256_SKIP3 > 0 and ggml_type == IQ3_S)) else None for t in range(TT)]
+          if t and (on(K256_SKIP) or (K256_SKIP < 0 and K256_SKIP_RDNA3)) and ggml_type == IQ2_S else None for t in range(TT)]
   afrs = [[[_i8_frag(tuple(lds_q[t*16 + col + (skip[t] if skip[t] is not None else 0), sbu, c].load() for c in acols(h))) for h in range(2)]
            for t in range(TT)] for sbu in sbs]
   sums:list[UOp] = []
@@ -1484,8 +1481,7 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   pad = q6_pad or (round_up(tokens, 64 if tokens > 32 else 32) if q6_rdna3 and tokens % (64 if tokens > 32 else 32) else \
         round_up(tokens, 64) if tokens > 64 and tokens % 64 and not skinny else \
         round_up(tokens, 16) if 8 < tokens < 64 and tokens % 16 and layer.ggml_type in (Q8_0, Q6_K) and not decode_rows else 0)
-  skinny_i8 = skinny and getenv("SKINNY_I8", 0)
-  if not pad and skinny and tokens % (16 if skinny_i8 else 32): pad = round_up(tokens, 16 if skinny_i8 else 32)
+  if not pad and skinny and tokens % 32: pad = round_up(tokens, 32)
   elif not pad and not _wmma_rdna4(x.device) and tokens > getenv("PAD16_ROWS", 16) and tokens % 16 and xq is None and not split:
     pad = round_up(tokens, 16)
   # (Q8_PAD_RDNA4 (default on, a numerics change: teacher-forced NLL inside noise at 36 sequences): RDNA4's Q8_0 rows of batched decoding
@@ -1520,30 +1516,20 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
     getenv("Q6_GEMM", 1) and _wmma_rdna4(x.device) and in_features % 256 == 0 and
     bool(_q6_rdna4_token_tile(local_rows, bool(q6_split_target))))
   few_q8 = Q8_ROWS_I8[0] and layer.ggml_type in (Q8_0, Q6_K) and tokens <= getenv("Q8_I8_ROWS", 64) and _wmma_rdna4(x.device) and not q6_gemm
-  # (RDNA3: the int8 tensor cores of many rows, I8_DENSE_RDNA3)
-  dense_i8 = not _wmma_rdna4(x.device) and tokens >= 64 and layer.ggml_type in (Q8_0,) and getenv("I8_DENSE_RDNA3", 0)
-  # (RDNA3: the hyper-connections' projections of a device's rows (few outputs of a long input, or a short input): the int8 tensor cores
-  # read the weights as they are, the f16 ones dequantize them for every 64 rows)
-  if not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and split and local_rows % 64 == 0 and layer.shard_axis is None and \
-     ((local_out <= 512 and in_features >= 4096) or in_features <= 512) and getenv("I8_HC", 0): dense_i8 = True
   # (RDNA3: a few outputs of a long input (a hyper-connection's down projection) of a few rows a device (a small prefill's): the gemm with the
   # input split over workgroups, the tensor cores' tiles of them are a few workgroups that loop over the whole input)
   few_out_long = not _wmma_rdna4(x.device) and layer.ggml_type == Q8_0 and layer.shard_axis is None and not half_out and local_rows % 32 == 0 \
     and local_rows <= 1024 and local_out <= 512 and in_features >= 4096 and getenv("Q8_FEW_OUT", 1)
   if skinny:
     # (the inputs split over workgroups: a few row tiles and output blocks are few workgroups for the GPU, their partial outputs summed after)
-    tile = (64 if tokens % 64 == 0 else 32 if tokens % 32 == 0 else 16) if skinny_i8 else 32
+    tile = 32
     groups, blocks = in_features // 32, (tokens // tile) * round_up(local_out, 64) // 64
     ks = [s for s in (1, 2, 4, 8, 16) if groups % s == 0 and (s == 1 or groups // s >= 8)]
     ksplits = next((s for s in ks if blocks * s >= getenv("SKINNY_WGS", 192)), ks[-1])
-    if skinny_i8:
-      fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=Q8_0, splits=ksplits, rdna4=False)
-      srcs = tuple(q8_quantize(x, tokens, in_features)[:3])
-    else:
-      fxn = functools.partial(_q8_gemm_kernel, token_tile=32, ggml_type=Q8_0, rdna4=False, block_n=64, k_splits=ksplits)
-      srcs = (x.cast(dtypes.float16).contiguous(),)
+    fxn = functools.partial(_q8_gemm_kernel, token_tile=32, ggml_type=Q8_0, rdna4=False, block_n=64, k_splits=ksplits)
+    srcs = (x.cast(dtypes.float16).contiguous(),)
     out_shape = (splits*ksplits*tokens, out_features)
-  elif tokens % 16 == 0 and local_out % 32 == 0 and xq is None and (_use_i8_wmma(x.device, layer.ggml_type) or few_q8 or dense_i8):
+  elif tokens % 16 == 0 and local_out % 32 == 0 and xq is None and (_use_i8_wmma(x.device, layer.ggml_type) or few_q8):
     # (a few rows: the inputs split over the waves of a workgroup, more of them read the weights)
     kwaves = next((k for k in (getenv("I8_KWAVES", 2), 1) if few_q8 and (in_features // Q8_GROUP_SIZE) % k == 0), 1)
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=layer.ggml_type, kwaves=kwaves, rdna4=_wmma_rdna4(x.device))
@@ -1791,7 +1777,6 @@ def _p2p_allreduce(devs:tuple[str, ...]) -> P2PAllreduce|None:
 
 def p2p_ar_shape(n:int) -> tuple[int, int]|None:
   """(threads, values a thread) of a p2p allreduce of n values: a workgroup's at most P2P_AR_MAXW, at most P2P_AR_MAXG of them"""
-  if (T:=getenv("P2P_AR_T")) and n % (T*(EP:=getenv("P2P_AR_EP", 1))) == 0 and n // (T*EP) <= P2P_AR_MAXG and T*EP <= P2P_AR_MAXW: return T, EP
   # (measured: a whole step's rows in one allreduce of workgroups of 512 threads, 8 words each: ~0.65x the time of 4 parts of 256x4. its
   # workgroups have to run at once on every device (a polling one waits for its peers' of the same index): 1024 threads each (as fast)
   # left some waiting for compute units in a server, every device's poll ran to its deadline (50 ms, its sums wrong) in a step of four)
@@ -2441,15 +2426,6 @@ def _ring_rs_q8_kernel(out:UOp, p:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, f
   assert prev is not None
   return UOp.group(prev, finish(prev)).end(wg, warp, lane).sink(arg=KernelInfo(name=f"ring_reduce_scatter_q8_{size}", opts_to_apply=()))
 
-def ring_queue() -> int:
-  """
-  RING_QUEUE: the compute queue of the ring collectives (0: the calls' own), a queue of their own for the micro batches on queues of theirs (a
-  kernel that spins on its peers holds its queue and its waves: two at once on a device (one a batch) can wait on each other through the
-  devices' queues. on one queue they run one at a time, in the same order on every device). it needs AM_MEC_PIPES past it. TODO: it still
-  hangs (a flag the previous device wrote isn't seen), the ring is off for micro batches on queues without it
-  """
-  return getenv("RING_QUEUE", 0)
-
 def _queue_list(name:str) -> list[int]: return [int(v) for v in str(getenv(name, "")).split(",") if v != ""]
 def mb_queue(i:int) -> int:
   """the compute queue of micro batch i (MB_QUEUE_OF: a list, else i)"""
@@ -2459,7 +2435,7 @@ def ring_queue_of(lane:int, any_time:bool=False) -> int:
   """the queue of a lane's collectives (RING_QUEUES: a list a micro batch, else RING_QUEUE (+ the lane, RING_QUEUE_LANES)), 0: the calls' own"""
   if not (any_time or RING_QUEUE_ON[0]): return 0
   if (qs:=_queue_list("RING_QUEUES")): return qs[lane % len(qs)]
-  return ring_queue() + (lane if ring_queue() and getenv("RING_QUEUE_LANES", 1) else 0)
+  return 0
 
 def _comm_queued(outs:list[Tensor]) -> list[Tensor]:
   """the outputs of a collective's kernel that spins on its peers, its call on the comm queue of the lane (a micro batch's own: lane i on
@@ -2927,9 +2903,7 @@ def _p2p_half_sum(x:Tensor, W:int, pack:tuple[int, int]|None=None) -> Tensor:
   shape, p2p = p2p_ar_shape(n // W), p2p_allreduce(devs)
   assert shape is not None and p2p is not None
   out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
-  # (one shot: a few rows, the values to every device, one round over the links: P2P_AR_HALF_ONESHOT words at most)
-  one = pack is None and n // W <= getenv("P2P_AR_HALF_ONESHOT", 0)
-  fxn = functools.partial(_p2p_allreduce_kernel, N=len(devs), n=n//W, T=shape[0], EP=shape[1], two_shot=not one, half=pack is None, triple=W == 3,
+  fxn = functools.partial(_p2p_allreduce_kernel, N=len(devs), n=n//W, T=shape[0], EP=shape[1], two_shot=True, half=pack is None, triple=W == 3,
                           pack=pack)
   return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), p2p.counter, *p2p.mboxes, fxn=fxn)[0].reshape(x.shape[1:])
 
@@ -3494,28 +3468,23 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
   xq = q8_quantize(x, tokens*x_slots, in_features)
   wmma = bool(MOE_WMMA) and ggml_type in MOE_WMMA_QUANTS and _wmma_rdna4(x.device) and tokens >= MOE_WMMA_MIN and out_features % 32 == 0 and \
     in_features % GGML_BLOCK_SIZE == 0
-  # (MOE_EXACT_MIN <= rows < MOE_BUNDLE_MIN: bundles of MOE_EXACT_M rows in float, every row's dot the per-row kernel's: the same values, an
-  # expert's weights read once for its rows (the per-row kernel reads them once a selection))
-  # (per projection (all exact: a bundle's values are the per-row kernel's): the gate/up rows (x shared by the slots) bundled from
+  # (per projection (a bundle's values are the per-row kernel's): the gate/up rows (x shared by the slots) bundled from
   # MOE_GU_BUNDLE_MIN rows in bundles of MOE_GU_BUNDLE, the down rows (x a slot's) from MOE_DOWN_BUNDLE_MIN; unset: MOE_BUNDLE_MIN, MOE_BUNDLE.
   # RDNA3 G (sliced experts, 16 local slots): the down projection's per-row kernel beats its bundles up to 72 rows, gate/up's bundles of 2 beat 4)
   down = x_slots == slots and slots > 1
   bmin = getenv("MOE_DOWN_BUNDLE_MIN", MOE_BUNDLE_MIN) if down else getenv("MOE_GU_BUNDLE_MIN", MOE_BUNDLE_MIN)
-  exact = not wmma and 0 < MOE_EXACT_MIN <= tokens < bmin
   # (MOE_UNIT_MIN <= rows (0: off; MOE_GU_UNIT_MIN / MOE_DOWN_UNIT_MIN per projection): the unit-major kernel, a unit's rows in bundles of at
   # most MOE_UNIT_M, a bundle's weights read and decoded once, a loop over its rows: every row's values the per-row kernel's)
   umin = getenv("MOE_DOWN_UNIT_MIN" if down else "MOE_GU_UNIT_MIN", MOE_UNIT_MIN)
   unit = not wmma and 0 < umin <= tokens
-  if unit: exact = False
-  if (M:=(16 if wmma else MOE_UNIT_M if unit else MOE_EXACT_M if exact else MOE_BUNDLE if down else getenv("MOE_GU_BUNDLE", MOE_BUNDLE))) and \
-     (tokens >= bmin or exact or unit):
+  if (M:=(16 if wmma else MOE_UNIT_M if unit else MOE_BUNDLE if down else getenv("MOE_GU_BUNDLE", MOE_BUNDLE))) and (tokens >= bmin or unit):
     # many rows (batched decoding): the rows of an expert in bundles of M, a bundle reads the expert's weights once
     # (the gate and up rows' bundles are the down rows' too: the same selections)
     key = (sel.uop, first.uop, experts, M)
     if (bundles:=_bundle_cache.get(key)) is None:
       bundles = _bundle_cache[key] = moe_bundles(sel, first, experts, M, tokens*int(slots))
     bexp, brow = bundles
-    if exact or unit: out_dtype = dtypes.float32
+    if unit: out_dtype = dtypes.float32
     out = Tensor.empty(devices*tokens*slots, out_features, dtype=out_dtype, device=x.device, axis=0 if devices > 1 else None)
     out = out.zeros_like().contiguous()
     # (the int8 tensor cores: a workgroup a few blocks of outputs of a narrow input, their activations loaded once)
@@ -3537,8 +3506,6 @@ def moe_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, sel:Tensor, 
 _bundle_cache:dict[tuple, tuple[Tensor, Tensor]] = {}
 # batched decoding of at least MOE_BUNDLE_MIN tokens: the rows of an expert in bundles of MOE_BUNDLE that share its weight loads
 MOE_BUNDLE, MOE_BUNDLE_MIN = getenv("MOE_BUNDLE", 4), getenv("MOE_BUNDLE_MIN", 40)
-# fewer rows (batched decoding of a few users): bundles of MOE_EXACT_M in float from MOE_EXACT_MIN rows (0: off), the per-row kernel's values
-MOE_EXACT_M, MOE_EXACT_MIN = getenv("MOE_EXACT_M", 4), getenv("MOE_EXACT_MIN", 0)
 # unit-major (from MOE_UNIT_MIN rows, 0: off): bundles of at most MOE_UNIT_M rows of a unit, its weights decoded once, a loop over the rows
 MOE_UNIT_M, MOE_UNIT_MIN, MOE_UNIT_R = getenv("MOE_UNIT_M", 16), getenv("MOE_UNIT_MIN", 0), getenv("MOE_UNIT_R", 1)  # (R: rows an iteration)
 # many more rows: bundles of 16 on the int8 tensor cores, every weight decoded once a step (_moe_bundled_wmma_kernel)
@@ -3582,9 +3549,7 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
                             expert_words=expert_words, x_div=x_div, act=act, rdna4=_wmma_rdna4(x.device))
     result = Tensor.custom_kernel(out, weight, xq, xd, *extra, *group, fxn=fxn)[0]
     return result.reshape(devices, rows_out, cols) if devices > 1 else result
-  rdna3_i8 = not _wmma_rdna4(x.device) and (ggml_type in I8_WMMA_QUANTS or (ggml_type == IQ4_NL and getenv("I8_IQ4NL", 0)) or
-                                            (ggml_type == IQ4_XS and getenv("I8_IQ4XS", 0)) or (ggml_type == Q8_0 and getenv("I8_Q80", 0))) and \
-    getenv("I8_WMMA_RDNA3", 1)
+  rdna3_i8 = not _wmma_rdna4(x.device) and ggml_type in I8_WMMA_QUANTS and getenv("I8_WMMA_RDNA3", 1)
   if _use_i8_wmma(x.device, ggml_type) or rdna3_i8:
     x_rows = int(x.uop.shard_shape[0]) if x.ndim == 2 else prod(x.uop.shard_shape[:-1])
     fxn = functools.partial(_quant_linear_i8_wmma_kernel, ggml_type=ggml_type, out_features=out_features, in_features=in_features,
@@ -5762,18 +5727,8 @@ def _gated_delta_prefill_lds_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alp
     out += [(lds_s, (tid.valid(tid < TC), UOp.const(0, dtypes.weakint)), beta[bh, c*TC + tid.minimum(TC-1)].load()),
             (lds_s, (tid.valid(tid < TC), UOp.const(1, dtypes.weakint)), kq[bh, c*TC + tid.minimum(TC-1)].load())]
     return out
-  # GD_PREFETCH: the next chunk's operands loaded into registers before this chunk's tokens, stored after them (no faster: the scan is bound by
-  # its arithmetic on the compute units its workgroups have, not the loads)
-  prefetch = bool(getenv("GD_PREFETCH", 0))
-  bufs = (lds_k, lds_q, lds_a, lds_v, lds_s)
-  if prefetch:
-    # (the first chunk's operands before the loop: the reads of a chunk are after them, or after the stores of the chunk before it, in order)
-    first = UOp.group(*[l[i].store(val) for l, i, val in stage(UOp.const(0, dtypes.weakint))]).barrier()
-    nxt = stage((chunk + 1).minimum(tokens//TC - 1))
-    lds_k, lds_q, lds_a, lds_v, lds_s = (x.after(first, chunk) for x in bufs)
-  else:
-    staged = UOp.group(*[l[i].store(val) for l, i, val in stage(chunk)]).barrier()
-    lds_k, lds_q, lds_a, lds_v, lds_s = (x.after(staged) for x in bufs)
+  staged = UOp.group(*[l[i].store(val) for l, i, val in stage(chunk)]).barrier()
+  lds_k, lds_q, lds_a, lds_v, lds_s = (x.after(staged) for x in (lds_k, lds_q, lds_a, lds_v, lds_s))
   t = UOp.range(TC, 3, AxisType.LOOP)
   token = chunk*TC + t
   keys = tuple(lds_k[t, col].load() for col in cols)
@@ -5791,204 +5746,10 @@ def _gated_delta_prefill_lds_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alp
     delta = (lds_v[t, wrow + row_idx].load() - state_k) * bv
     updates += [x + delta*y for x,y in zip(decayed, keys)]
     stores.append(core[bh, token, row.valid(kl.eq(0))].store(state_q + delta*lds_s[t, 1].load()))
-  if prefetch:
-    done = UOp.group(*stores, current.store(UOp.stack(*updates))).end(t).barrier()
-    step = UOp.group(*[l.after(done)[i].store(val) for l, i, val in nxt]).barrier().end(chunk)
-  else: step = UOp.group(*stores, current.store(UOp.stack(*updates))).end(t).barrier().end(chunk)
+  step = UOp.group(*stores, current.store(UOp.stack(*updates))).end(t).barrier().end(chunk)
   state_stores = (state[write_off+bh, row, col].store(current.after(step)[row_idx*per+i].load().cast(state.dtype))
                   for row_idx,row in enumerate(rows) for i,col in enumerate(cols))
   return UOp.group(*state_stores).end(lane, wave, bh_blk).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
-
-# ******** gated delta rule prefill in chunks: the tokens of a chunk at once from the state before it (exact in float) ********
-# within a chunk of C tokens from the state S0 (rows the values, columns the keys), with G_t the sums of log2 alpha of its tokens to t (every
-# key its own) and u_t the update of token t (its delta): u = P (v - W), W_t = S0 (exp2(G_t) k_t), the outputs o = Q + R (v - W) with
-# Q_t = S0 (exp2(G_t) q_t), the state after it S0 exp2(G_C) + sum_t u_t (k_t exp2(G_C - G_t)). P = (I + diag(beta) A)^-1 diag(beta) and R = B P
-# of A_tj = sum_c k_t k_j exp2(G_t - G_j) (j < t), B_tj = sum_c q_t k_j exp2(G_t - G_j) (j < t, B_tt = q_t k_t): every exponent at most 0
-
-GD_C = 16
-
-@functools.cache
-def _gated_delta_chunk_prep_kernel(pr:UOp, q:UOp, k:UOp, beta:UOp, alpha:UOp, kq:UOp) -> UOp:
-  # P and R (pr (BH, chunks, 2, C, C)) of every chunk of every head: a workgroup of 4 waves a chunk
-  BH, chunks, C = cast(int, pr.shape[0]), cast(int, pr.shape[1]), GD_C
-  K, AD = cast(int, k.shape[-1]), cast(int, alpha.shape[-1])
-  bc, wave, lane = UOp.range(BH*chunks, 0, AxisType.GLOBAL), UOp.range(4, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
-  bh, ch, tid = bc // chunks, bc % chunks, wave * WARP_SIZE + lane
-  t0 = ch * C
-  # the sums of log2 alpha (a thread a key), the keys and queries of the chunk in LDS
-  lg, lk, lq = (UOp.alloc((C, K), dtypes.float32, addrspace=AddrSpace.LOCAL) for _ in range(3))
-  st = []
-  for e0 in range(0, C*K, 128):
-    e = tid + e0
-    st += [lk[e // K, e % K].store(k[bh, t0 + e // K, e % K].load()), lq[e // K, e % K].store(q[bh, t0 + e // K, e % K].load())]
-  col = tid.minimum(K - 1)
-  g = UOp.const(0.0, dtypes.float32)
-  for t in range(C):
-    g = g + alpha[bh, t0 + t, col if AD > 1 else 0].load().log2()
-    st.append(lg[t, col.valid(tid < K)].store(g))
-  lg, lk, lq = (x.after(UOp.group(*st).barrier()) for x in (lg, lk, lq))
-  # A and B (j < t) in LDS: a wave a pair (t, j) of its quarter, the keys over its lanes
-  la, lb = UOp.alloc((C, C), dtypes.float32, addrspace=AddrSpace.LOCAL), UOp.alloc((C, C), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  pairs = [(t, j) for t in range(C) for j in range(t)]
-  st = []
-  for i, (t, j) in enumerate(pairs):
-    if i % 4: continue
-    # (4 pairs at once, one a wave)
-    quad = pairs[i:i+4]
-    def pick(n:int) -> UOp:
-      return functools.reduce(lambda a, x: wave.eq(x[0]).where(UOp.const(x[1][n], dtypes.weakint), a), enumerate(quad),
-                              UOp.const(quad[0][n], dtypes.weakint))
-    tt, jj = pick(0), pick(1)
-    sa = sb = UOp.const(0.0, dtypes.float32)
-    for c0 in range(0, K, WARP_SIZE):
-      c = lane + c0
-      e = (lg[tt, c].load() - lg[jj, c].load()).exp2()
-      kj = lk[jj, c].load() * e
-      sa, sb = sa + lk[tt, c].load() * kj, sb + lq[tt, c].load() * kj
-    sa, sb = warp_reduce(sa, full_wave=True), warp_reduce(sb, full_wave=True)
-    ok = lane.eq(0) & (wave < len(quad))
-    st += [la[tt.valid(ok), jj].store(sa), lb[tt.valid(ok), jj].store(sb)]
-  la, lb = la.after(UOp.group(*st).barrier()), lb.after(UOp.group(*st).barrier())
-  # P and R by columns: lane j of the first wave its column j (C lanes)
-  j = lane.minimum(C - 1)
-  Pc:list[UOp] = []
-  for t in range(C):
-    bt = beta[bh, t0 + t].load()
-    acc = functools.reduce(lambda a, m: a + la[t, m].load() * Pc[m], range(t), UOp.const(0.0, dtypes.float32))
-    Pc.append(j.eq(t).where(bt, (j < t).where(-bt * acc, UOp.const(0.0, dtypes.float32))))
-  zero = UOp.const(0.0, dtypes.float32)
-  Rc = [functools.reduce(lambda a, m: a + (kq[bh, t0 + t].load() if m == t else lb[t, m].load()) * Pc[m], range(t + 1), zero) for t in range(C)]
-  mine = wave.eq(0) & (lane < C)
-  stores = [pr[bh, ch, 0, t, j.valid(mine)].store(Pc[t]) for t in range(C)] + [pr[bh, ch, 1, t, j.valid(mine)].store(Rc[t]) for t in range(C)]
-  return UOp.group(*stores).end(bc, wave, lane).sink(arg=KernelInfo(name="gated_delta_chunk_prep", opts_to_apply=()))
-
-@functools.cache
-def _gated_delta_chunk_kernel(core:UOp, q:UOp, k:UOp, v:UOp, alpha:UOp, state:UOp, pr:UOp, start_pos:UOp|None=None, end_pos:UOp|None=None,
-                              W:int=4, L:int=16, RT:int=2) -> UOp:
-  # the state's rows over the workgroups (as _gated_delta_prefill_lds_kernel), the chunks in order: a chunk's operands in LDS, every lane its
-  # rows' dots with the chunk's decayed keys and queries (independent: not a token after another), u and the outputs, then the state
-  batch, heads, tokens, value_dim = cast(tuple[int, int, int, int], core.shape)
-  K, AD, C = cast(int, q.shape[-1]), cast(int, alpha.shape[-1]) if len(alpha.shape) == 4 else 1, GD_C
-  BH = batch*heads
-  core, v = core.reshape(BH, tokens, value_dim), v.reshape(BH, tokens, value_dim)
-  q, k, alpha = q.reshape(BH, tokens, K), k.reshape(BH, tokens, K), alpha.reshape(BH, tokens, AD)
-  S = cast(int, state.shape[0]) if end_pos is not None else 1
-  read_off, write_off = (0, 0) if end_pos is None else ((cast(UOp, start_pos) % S) * BH, (end_pos % S) * BH)
-  state = state.reshape(-1, value_dim, K)
-  RW, per = W * (32 // L) * RT, K // L
-  bh_blk = UOp.range(BH*value_dim//RW, 0, AxisType.GLOBAL)
-  wave, lane = UOp.range(W, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
-  bh, blk_row = bh_blk // (value_dim//RW), (bh_blk % (value_dim//RW))*RW
-  tid, kl, rsub = wave*32 + lane, lane % L, lane // L
-  wrow = (wave * (32 // L) + rsub) * RT
-  rows = tuple(blk_row + wrow + i for i in range(RT))
-  cols = tuple(kl*per + i for i in range(per))  # (contiguous: vector loads of LDS)
-  def lane_sum(x:UOp) -> UOp:
-    for off in (16, 8, 4, 2, 1):
-      if off < L: x = x + _lane_xor(x, off)
-    return x
-  cur = UOp.alloc((RT*per,), dtypes.float32, addrspace=AddrSpace.REG)
-  initial = None if start_pos is None else start_pos.eq(0)
-  cur = cur.after(cur.store(UOp.stack(*(state[read_off+bh, r, c].float() if initial is None else
-    initial.where(0, state[read_off+bh, r, c].float()) for r in rows for c in cols))))
-  chunk = UOp.range(tokens // C, 2, AxisType.LOOP)
-  t0 = chunk * C
-  # the chunk's decayed keys (kg), queries (qg), keys to its end (kd), the decay of all of it (gc), its values and P, R
-  lkg, lqg, lkd = (UOp.alloc((C, K), dtypes.float32, addrspace=AddrSpace.LOCAL) for _ in range(3))
-  lgc, lv = UOp.alloc((K,), dtypes.float32, addrspace=AddrSpace.LOCAL), UOp.alloc((C, RW), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  lpr = UOp.alloc((2, C, C), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  threads = W*32
-  def loads(cc:UOp) -> list[UOp]:
-    # the chunk's operands from global memory (a thread's: its key's alpha, k, q of the tokens, then values and P, R)
-    t0c, out = cc * C, []
-    for kc0 in range(0, K, threads):
-      c = (tid + kc0).minimum(K - 1)
-      out += [alpha[bh, t0c + t, c if AD > 1 else 0].load() for t in range(C)] + [k[bh, t0c + t, c].load() for t in range(C)] + \
-             [q[bh, t0c + t, c].load() for t in range(C)]
-    for e0 in range(0, C*RW, threads):
-      e = tid + e0
-      out.append(v[bh, t0c + (e // RW).minimum(C-1), blk_row + e % RW].load())
-    for e0 in range(0, 2*C*C, threads):
-      e = tid + e0
-      out.append(pr[bh, cc, (e // (C*C)).minimum(1), (e // C) % C, e % C].load())
-    return out
-  def stores(vals:list[UOp], dep:UOp|None=None) -> list[UOp]:
-    # the decays (G: sums of log2 alpha), the decayed keys and queries, the keys decayed to the end, the values and P, R to LDS
-    bufs = [(x if dep is None else x.after(dep)) for x in (lkg, lqg, lkd, lgc, lv, lpr)]
-    bkg, bqg, bkd, bgc, bv, bpr = bufs
-    st, i = [], 0
-    for kc0 in range(0, K, threads):
-      kc = tid + kc0
-      ok, c = kc < K, kc.minimum(K - 1)
-      al, kk, qq = vals[i:i+C], vals[i+C:i+2*C], vals[i+2*C:i+3*C]
-      i += 3*C
-      gs, g = [], UOp.const(0.0, dtypes.float32)
-      for t in range(C):
-        g = g + al[t].log2()
-        gs.append(g)
-      for t in range(C):
-        eg = gs[t].exp2()
-        st += [bkg[t, c.valid(ok)].store(kk[t] * eg), bqg[t, c.valid(ok)].store(qq[t] * eg),
-               bkd[t, c.valid(ok)].store(kk[t] * (gs[-1] - gs[t]).exp2())]
-      st.append(bgc[c.valid(ok)].store(gs[-1].exp2()))
-    for e0 in range(0, C*RW, threads):
-      e = tid + e0
-      st.append(bv[(e // RW).valid(e < C*RW), e % RW].store(vals[i]))
-      i += 1
-    for e0 in range(0, 2*C*C, threads):
-      e = tid + e0
-      st.append(bpr[(e // (C*C)).valid(e < 2*C*C), (e // C) % C, e % C].store(vals[i]))
-      i += 1
-    return st
-  # (the first chunk's before the loop, every chunk loads the next one's before its arithmetic and stores them after it: their latency hidden)
-  first = UOp.group(*stores(loads(UOp.const(0, dtypes.weakint)))).barrier()
-  nxt_vals = loads((chunk + 1).minimum(tokens // C - 1))
-  lkg, lqg, lkd, lgc, lv, lpr = (x.after(first, chunk) for x in (lkg, lqg, lkd, lgc, lv, lpr))
-  prev = cur.after(chunk)
-  # 1. every row's dots with the chunk's tokens (a loop: their operands not all at once in registers), v - W and Q of a token in LDS
-  lx, lq2, lu = (UOp.alloc((C, RW), dtypes.float32, addrspace=AddrSpace.LOCAL) for _ in range(3))
-  def tree(xs:list[UOp]) -> UOp:
-    while len(xs) > 1: xs = [xs[i] + xs[i+1] if i+1 < len(xs) else xs[i] for i in range(0, len(xs), 2)]
-    return xs[0]
-  U1, U3 = getenv("GD_U1", 4), getenv("GD_U3", 4)
-  t1r = UOp.range(C // U1, 3, AxisType.LOOP)
-  st1 = []
-  for uu in range(U1):
-    t1 = t1r * U1 + uu
-    kg1, qg1 = [lkg[t1, c].load() for c in cols], [lqg[t1, c].load() for c in cols]
-    for ri in range(RT):
-      srow = [prev[ri*per + i].load() for i in range(per)]
-      w = lane_sum(tree([srow[i] * kg1[i] for i in range(per)]))
-      qs = lane_sum(tree([srow[i] * qg1[i] for i in range(per)]))
-      st1 += [lx[t1, (wrow + ri).valid(kl.eq(0))].store(lv[t1, wrow + ri].load() - w), lq2[t1, (wrow + ri).valid(kl.eq(0))].store(qs)]
-  done1 = UOp.group(*st1).end(t1r).barrier()
-  lx, lq2 = lx.after(done1), lq2.after(done1)
-  # 2. lane kl (C == L) token kl's update u (to LDS) and output (stored)
-  tl = kl.minimum(C - 1)
-  st2 = []
-  for ri, r in enumerate(rows):
-    xs = [lx[j, wrow + ri].load() for j in range(C)]
-    u = functools.reduce(lambda a, j: a + lpr[0, tl, j].load() * xs[j], range(1, C), lpr[0, tl, 0].load() * xs[0])
-    o = functools.reduce(lambda a, j: a + lpr[1, tl, j].load() * xs[j], range(C), lq2[tl, wrow + ri].load())
-    st2 += [lu[tl, (wrow + ri).valid(kl < C)].store(u), core[bh, t0 + tl, r.valid(kl < C)].store(o)]
-  done2 = UOp.group(*st2).barrier()
-  lu = lu.after(done2)
-  # 3. the state: decayed to the chunk's end, plus every token's update times its key decayed to the end
-  nxt = UOp.alloc((RT*per,), dtypes.float32, addrspace=AddrSpace.REG)
-  nxt = nxt.after(nxt.after(done2).store(UOp.stack(*[prev[ri*per + i].load() * lgc[c].load() for ri in range(RT) for i, c in enumerate(cols)])))
-  t3r = UOp.range(C // U3, 4, AxisType.LOOP)
-  pn = nxt.after(t3r)
-  upd = [pn[ri*per + i].load() for ri in range(RT) for i in range(per)]
-  for uu in range(U3):
-    t3 = t3r * U3 + uu
-    kd3 = [lkd[t3, c].load() for c in cols]
-    upd = [upd[ri*per + i] + lu[t3, wrow + ri].load() * kd3[i] for ri in range(RT) for i in range(per)]
-  nxt = nxt.after(nxt.store(UOp.stack(*upd)).end(t3r))
-  done3 = cur.store(UOp.stack(*[nxt[i].load() for i in range(RT*per)])).barrier()
-  step = UOp.group(*stores(nxt_vals, done3)).barrier().end(chunk)
-  state_stores = (state[write_off+bh, r, c].store(cur.after(step)[ri*per+i].load().cast(state.dtype))
-                  for ri, r in enumerate(rows) for i, c in enumerate(cols))
-  return UOp.group(*state_stores).end(lane, wave, bh_blk).sink(arg=KernelInfo(name="gated_delta_chunk", opts_to_apply=()))
 
 @functools.cache
 def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None,
@@ -6324,7 +6085,7 @@ def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:
   histogram in LDS, atomics), one wave scans it from the top for the bin of the k-th (the keys left), the next pass that bin's. the same as a
   bisection bit by bit, 8 barriers. regs: the keys of every chunk in registers (_key_regs): the chunks unrolled (the same counts)
   """
-  zero, agg = UOp.const(0, dtypes.int32), getenv("PIDX_AGG", 0) if agg is None else agg
+  zero, agg = UOp.const(0, dtypes.int32), 0 if agg is None else agg
   hist = UOp.alloc((4*256,), dtypes.int32, addrspace=AddrSpace.LOCAL)
   hist = hist.after(UOp.group(*(hist[(t + i*DECODE_THREADS).valid(t + i*DECODE_THREADS < 4*256)].store(zero)
                                 for i in range((4*256 + DECODE_THREADS - 1) // DECODE_THREADS))).barrier())
@@ -6340,7 +6101,7 @@ def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:
         adds.append(_sys(_ATOMIC_ADD1_IF, dtypes.void, hist[d*256 + ((kv >> (24 - 8*d)) & 255).cast(dtypes.weakint)], ok))
       hd = hist.after(UOp.group(*adds).barrier())
     elif agg >> d & 1:
-      # (PIDX_AGG, a mask of the passes: the matching lanes of a wave with the digit of the first of them one add of their count (its
+      # (aggregated passes: the matching lanes of a wave with the digit of the first of them one add of their count (its
       # lane), the others an add each: equal keys (the scores of an empty or a constant context) an add a wave, not 32 to one bin. the same
       # counts)
       c = UOp.range(npc, 20 + d, AxisType.LOOP)
@@ -6409,8 +6170,7 @@ def _pool_index_kernel(index:UOp, scores:UOp, *grouped:UOp, q_start:UOp, pools:U
     ok = (p < pools) & ((p + 1) * kpool <= q + 1)
     bits = scores[row, p.minimum(P-1).valid(ok)].load().bitcast(dtypes.uint32)
     return ok.where(_order_key(bits), UOp.const(0, dtypes.uint32))
-  # (PIDX_REG: a thread's keys loaded once into registers, the passes over them unrolled: the same counts, picks)
-  regs = _key_regs(key, per) if (getenv("PIDX_REG", 0) if reg is None else reg) and getenv("PIDX_RADIX", 1) else None
+  regs = _key_regs(key, per) if reg is not None and reg and getenv("PIDX_RADIX", 1) else None
   if getenv("PIDX_RADIX", 1): thr = _radix_kth(key, npc, k, pools, t, wave, lane, regs=regs, agg=agg)
   else:
     # the bisection: bit by bit from the top, no loop with no more pools than k (they are all picked)
@@ -7325,19 +7085,6 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
   end = None if end_pos is None else end_pos.unbind_all()[0] if isinstance(end_pos, UOp) else UOp.const(end_pos, dtypes.weakint)
   sp = None if start_pos is None else start_pos.uop.unbind_all()[0]
-  # GD_CHUNK: in chunks of GD_C tokens (the dots of a chunk's tokens at once, exact: ~1.0 ms for 4608 tokens, the chain of tokens 0.78)
-  if getenv("GD_CHUNK", 0) and tokens % GD_C == 0 and value_dim % 32 == 0 and key_dim % 16 == 0 and tokens >= 256:
-    pr = Tensor.empty(batch*heads, tokens // GD_C, 2, GD_C, GD_C, dtype=dtypes.float32, device=q.device,
-                      axis=0 if isinstance(q.device, tuple) else None)
-    bh_view = lambda x, d: x.reshape(batch*heads, tokens, d) if d else x.reshape(batch*heads, tokens)  # noqa: E731
-    pr = Tensor.custom_kernel(pr, bh_view(srcs[1], key_dim), bh_view(srcs[2], key_dim), bh_view(srcs[4], 0),
-                              bh_view(srcs[5], int(alpha.shape[-1]) if len(alpha.shape) == 4 else 1), bh_view(srcs[7], 0),
-                              fxn=_gated_delta_chunk_prep_kernel)[0]
-    pr_u = pr.uop.contiguous()
-    params2 = (*[UOp.placeholder_like(x, slot=i) for i, x in enumerate(contig[:4])], UOp.placeholder_like(contig[5], slot=4),
-               UOp.placeholder_like(contig[6], slot=5), UOp.placeholder_like(pr_u, slot=6))
-    call = _gated_delta_chunk_kernel(*params2, sp, end).call(*contig[:4], contig[5], contig[6], pr_u)
-    return Tensor(contig[0].after(call))
   # many tokens: the waves of a head share the operands of 16 of them through LDS
   W = getenv("GD_LDS", 4)
   if W and tokens % 16 == 0 and value_dim % (32*W) == 0 and key_dim % 32 == 0:

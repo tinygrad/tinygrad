@@ -950,14 +950,11 @@ K256_STAGE = getenv("K256_STAGE", 0)
 # iris 7900 XTX IQ3_S gate|up of 86 experts (extra/moe_prefill_bench.py): 576 tokens 573 -> 440 us, 1152 579 -> 467, 4096 1180 -> 1159,
 # 13824 3686 -> 3584; a whole layer (+ the IQ4_NL down) at 192/384/768 tokens 817/841/903 -> 648/689/713 us. IQ3_S only. default off
 K256_XH = getenv("K256_XH", 1)
-# K256_IQ3XXS: RDNA3 grouped IQ3_XXS experts (the V3.1 file's gate|up of 28 layers) in _grouped_k256_kernel (q8_K activations, as IQ3_S) instead
-# of the int8 tensor cores' kernel on q8 activations: other numerics (the activations' scale a block of 256, not 32). default off
-K256_IQ3XXS = getenv("K256_IQ3XXS", 0)
 # K256_XH_IQ4: K256_XH for IQ4_XS too (same bits; k1 one card 86 experts x 5 slices, 1152 rows 1009 -> 615 us, 2304 1006 -> 877). default on
 K256_XH_IQ4 = getenv("K256_XH_IQ4", 1)
 def k256_types(rdna4:bool) -> tuple[int, ...]:
   """the grouped experts' types of _grouped_k256_kernel"""
-  return (IQ3_S,) if rdna4 else (IQ3_S, IQ4_XS, IQ3_XXS) if K256_IQ3XXS else (IQ3_S, IQ4_XS)
+  return (IQ3_S,) if rdna4 else (IQ3_S, IQ4_XS)
 def k256_xh(ggml_type:int) -> bool:
   """K256_XH applies to ggml_type (RDNA3)"""
   return bool(K256_XH) and (ggml_type in (IQ3_S, IQ3_XXS) or (ggml_type == IQ4_XS and bool(K256_XH_IQ4)))

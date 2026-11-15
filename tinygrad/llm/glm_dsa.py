@@ -16,9 +16,7 @@ from tinygrad.llm.kernels.amd_glm_dsa import Linear, gated_delta_prefill, flash_
   mla_bmm, bmm_wmma, weighted_sum, rows_gather, \
   nucleus, seq_store, mla_sparse_seq, seq_views, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, FP8_ROW, \
   FP8_ROPE_ROW, IDX_FP8_ROW, pool_index_shard, Q4_ROW, Q4_ROPE_ROW, reduced_rows
-from tinygrad.llm.kernels.amd_glm_dsa import skinny_parts, skinny_sum
-from tinygrad.llm.kernels.amd_glm_dsa import p2p_check, host_allgather, Q8_0, mla_sparse_seq_tokens, ring_all_gather_q8, lists_pad, GEMM_ROWS
-from tinygrad.llm.kernels.amd_glm_dsa import host_allgather_half, _seq_p2p_pack
+from tinygrad.llm.kernels.amd_glm_dsa import p2p_check, host_allgather, Q8_0, mla_sparse_seq_tokens, lists_pad, GEMM_ROWS
 from tinygrad.llm.kernels.amd_glm_dsa import sp_reduce_scatter, all_to_all, mla_sparse_tokens, tbo_ag_parts, tbo_a2a_pre, \
   tbo_a2a_parts, tbo_a2a_post, tbo_rs_pre, tbo_rs_parts, tbo_rs_post, tbo_q8_pre, tbo_q8_post
 from tinygrad.llm.glm_dsa_gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
@@ -307,14 +305,6 @@ REGION_ALIGN = 3584
 
 # set while a block's rows are split over the devices (sequence parallel prefill): the sublayers return their partial sums (a leading device
 # axis), the hyper-connection sums each device's rows of them (reduce_scatter) instead of all of them on every device
-def _fq(x:Tensor, bits:int) -> Tensor:
-  """(Q4_SIM, an experiment) x as signed `bits` integers in groups of 32 of its last axis with a float scale each, back: the error of sending it so"""
-  if not bits: return x
-  D, qm = x.shape[-1], 2**(bits-1) - 1
-  g = x.float().reshape(*x.shape[:-1], D // 32, 32)
-  sc = g.abs().max(-1, keepdim=True).maximum(1e-20) / qm
-  return ((g / sc).round().clip(-qm, qm) * sc).reshape(x.shape).cast(x.dtype)
-
 def _f8_pack(x:Tensor) -> Tensor:
   """x's rows (last axis) as e4m3 bytes of a scale a row (its absolute max over 448) and the scale's 4 bytes after them: (..., D+4) uint8"""
   sc = x.float().abs().max(-1, keepdim=True).maximum(1e-20) / 448
@@ -323,12 +313,6 @@ def _f8_pack(x:Tensor) -> Tensor:
 def _f8_unpack(p:Tensor, D:int) -> Tensor:
   """the half rows of _f8_pack's"""
   return (p[..., :D].bitcast(dtypes.fp8e4m3).float() * p[..., D:D+4].contiguous().bitcast(dtypes.float32)).half()
-
-def _f8(x:Tensor) -> Tensor:
-  """(F8_SIM, an experiment) x as e4m3 of a scale a row of its last axis (its absolute max over 448), back"""
-  if not getenv("F8_SIM", 0): return x
-  sc = x.float().abs().max(-1, keepdim=True).maximum(1e-20) / 448
-  return ((x.float() / sc).cast(dtypes.fp8e4m3).float() * sc).cast(x.dtype)
 
 _partial_out = [False]
 _partial_half = [True]  # (and in half: sent so. GLM's sequence parallel sends them as half rows with a scale, from float)
@@ -655,28 +639,7 @@ class FFNBlock:
       self.ffn_down    = Linear(config.hidden_dim, config.dim, bias=False)
 
   def _shexp_gate_up(self, x:Tensor) -> tuple[Tensor, Tensor]:
-    """the shared expert's gate and up of x: one kernel of both (SHEXP_FUSED, _shexp_fuse: every device's rows of the two side by side, a
-    row's dot the same: the decode kernel's reduction doesn't depend on the outputs' count), else two"""
-    if (fl:=getattr(self, "_shexp_gu", None)) is not None and getenv("SHEXP_FUSED", 0) and isinstance(x.numel(), int):
-      out, O, n = fl(x), self.ffn_gate_shexp.out_features, len(cast(tuple, fl.weight.device))
-      gu = out.reshape(*out.shape[:-1], n, 2, O // n)
-      return gu[..., 0, :].flatten(-2), gu[..., 1, :].flatten(-2)
     return self.ffn_gate_shexp(x), self.ffn_up_shexp(x)
-  def _shexp_fuse(self) -> None:
-    """SHEXP_FUSED: the shared expert's gate and up weights side by side on every device (its gate rows, then its up rows), one Linear"""
-    g, u = getattr(self, "ffn_gate_shexp", None), getattr(self, "ffn_up_shexp", None)
-    if g is None or u is None or not isinstance(devs:=g.weight.device, tuple): return
-    for lin in (g, u):
-      if lin.ggml_type is None and lin.use_custom_quant and amd_custom_kernels_supported(devs): lin.set_quantized(lin.weight)
-    if g.ggml_type is None or g.ggml_type != u.ggml_type or g.shard_axis != 0 or u.shard_axis != 0 or g.bias is not None or \
-       g.out_features != u.out_features or g.out_features % (n:=len(devs)): return
-    O = g.out_features
-    w = g.weight.reshape(n, O // n, -1).cat(u.weight.reshape(n, O // n, -1), dim=1).reshape(2*O, -1).contiguous().realize()
-    if w.uop.axis != 0: return
-    fl = Linear.__new__(Linear)
-    fl.in_features, fl.out_features, fl.weight, fl.bias = g.in_features, 2*O, w, None
-    fl.ggml_type, fl.shard_axis, fl.use_custom_quant = g.ggml_type, 0, True
-    self._shexp_gu = fl
   def _feed_forward(self, x:Tensor) -> Tensor:
     # a symbolic token count runs the MoE padded to the max size: static shapes, the garbage tokens are sliced off
     if hasattr(self, 'ffn_gate_exps') and not isinstance(x.shape[1], int) and amd_custom_kernels_supported(x.device):
@@ -692,11 +655,7 @@ class FFNBlock:
       exps = self.ffn_gate_exps
       exps.set_quantized()
       parts:Tensor|None = None
-      # (ROUTER_PARTS, default off: skinny_matmul's parts summed by the local router's kernel, not a kernel of their own: the same sums)
-      if rows is None and getenv("ROUTER_PARTS", 0) and (wt:=getattr(router, "weight_t", None)) is not None and isinstance(xr.shape[-2], int) \
-         and not token_sharded(xr) and (parts:=skinny_parts(xr, wt)) is not None:
-        logits = skinny_sum(parts, xr)  # (lazy: no kernel where only the router's kernel reads the parts)
-      elif rows is None and (lg:=_skinny(router, xr)) is not None: logits = lg
+      if rows is None and (lg:=_skinny(router, xr)) is not None: logits = lg
       elif router.ggml_type is None and router.weight.dtype == dtypes.half and router.bias is None and isinstance(xr.shape[1], int) and \
          xr.shape[1] > 32:
         # many tokens: half copies of the input and the output, a float accumulator: the tensor cores
@@ -713,11 +672,7 @@ class FFNBlock:
           # decoding: the device's slices of the selections in the router's kernel
           return self._experts(x, h, *moe_router_local(logits, bias, k, scale, exps.slice_table, parts=parts), local=True)
         sel, probs = moe_router(logits, bias, k, scale)
-        if rows is not None and getenv("SP_ROUTE_ONE", 0):
-          # (SP_ROUTE_ONE, default off: the selections and their weights' bits in one gather: one ring, not two. 4k: 2.73 s vs 2.74, noise)
-          g = all_gather(sel.cat(probs.bitcast(dtypes.int32), dim=-1), 1)
-          sel, probs = g[..., :k].contiguous(), g[..., k:].bitcast(dtypes.float32).contiguous()
-        elif rows is not None: sel, probs = all_gather(sel, 1), all_gather(probs, 1)
+        if rows is not None: sel, probs = all_gather(sel, 1), all_gather(probs, 1)
         return self._experts(x, h, sel, probs)
       assert rows is None, "sequence parallel routing needs the router kernel"
       # fast path: without selection bias, normalized SOFTMAX is equivalent to SOFTMAX_WEIGHT
@@ -811,9 +766,8 @@ class FFNBlock:
     tokens, k = int(prod(sel_shape[:-1])), int(sel_shape[-1])
     # (MOE_SORTED_DOWN: a row per sorted row, the selections read through pos: the rows written are together, not spread over every selection's)
     sorted_down = bool(getenv("MOE_SORTED_DOWN", 1))
-    # (MOE_DOWN_HALF: the rows in half (a model's activations of a few tokens can be past its range: GLM-5's first tokens))
     down = down_exps.grouped(act.contiguous(), entries, tiles, selections=tokens*k,
-                             out_dtype=dtypes.half if down_exps.slices and getenv("MOE_DOWN_HALF", 0) else
+                             out_dtype=
                              dtypes.bfloat16 if getenv("MOE_DOWN_BF16", 1) else dtypes.float32, sorted_out=sorted_down)
     # sequence parallel: summed over the devices and split on the tokens around the ring as they're combined
     if half and gate_exps.expert_parallel and _sp_rows[0] is not None and isinstance(T, int) and tokens % len(cast(tuple, x.device)) == 0 and \
@@ -869,12 +823,9 @@ class FFNBlock:
 
   def _sp_sub(self, sub:str, hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
     """sequence parallel sublayer: hn (1, R, D) split on its rows, gathered as q8 groups, the sublayer's partial sums reduce scattered to the rows"""
-    if sub == "attn" and (o:=self._sp_attn_tok(hn, start_pos, T)) is not None: return sp_reduce_scatter(_fq(o, getenv("Q4_SIM_RS", 0)).contiguous())
-    # (SP_AG_RINGK, default off, untested on 14 R9700: the q8 gather in one ring kernel a device on the compute queue (peer writes over its
-    # workgroups), not 13 steps of the device's one copy engine)
+    if sub == "attn" and (o:=self._sp_attn_tok(hn, start_pos, T)) is not None: return sp_reduce_scatter(o.contiguous())
     if sub == "attn" and getenv("SP_ROWPROJ", 1) and (pre:=self._sp_rowproj(hn, start_pos, T)) is not None: x, _sp_pre[0] = pre.pop("x"), pre
-    elif not getenv("SP_AG_RINGK", 0) or (x:=ring_all_gather_q8(hn.contiguous())) is None:
-      x = all_gather_q8(_fq(hn, getenv("Q4_SIM_AG", 0)).contiguous(), 1, ring=bool(getenv("GLM_SP_RING", 1)))
+    else: x = all_gather_q8(hn.contiguous(), 1, ring=bool(getenv("GLM_SP_RING", 1)))
     _partial_out[0], _sp_rows[0], _partial_half[0] = True, hn, False
     if sub != "attn": _ffn_rows[0] = T
     if isinstance(R:=x.shape[1], int): GEMM_ROWS[0] = (R, T)
@@ -882,7 +833,7 @@ class FFNBlock:
     finally: _partial_out[0], _sp_rows[0], _ffn_rows[0], _partial_half[0], GEMM_ROWS[0], _sp_pre[0] = False, None, None, True, None, None
     if out.ndim == hn.ndim and token_sharded(out): return out
     # (the partial sums in float, sent as half rows with a power of two of each: the range of GLM-5's activations past half's)
-    return sp_reduce_scatter(_fq(out, getenv("Q4_SIM_RS", 0)).contiguous()) if out.ndim == hn.ndim + 1 else shard_rows(out, 1)
+    return sp_reduce_scatter(out.contiguous()) if out.ndim == hn.ndim + 1 else shard_rows(out, 1)
 
   def _sp_attn_tok(self, hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor|None:
     """the attention of sequence parallel blocks with the heads of its rows on every device (MLATransformerBlock), None if it hasn't one"""
@@ -1289,7 +1240,7 @@ class MLATransformerBlock(FFNBlock):
     D = int(hn.shape[-1])
     from tinygrad.llm.kernels.amd_glm_dsa import _q8_pack_kernel, _q8_unpack_kernel
     packed = Tensor.custom_kernel(Tensor.empty(R, D//32, 9, dtype=dtypes.uint32, device=devs, axis=0),
-                                  _fq(hn, getenv("Q4_SIM_AG", 0)).contiguous().reshape(R, D), fxn=_q8_pack_kernel)[0]
+                                  hn.contiguous().reshape(R, D), fxn=_q8_pack_kernel)[0]
     xl = Tensor.custom_kernel(Tensor.empty(R, D, dtype=dtypes.half, device=devs, axis=0), packed, fxn=_q8_unpack_kernel)[0].reshape(1, R, D)
     qn = self.attn_q_a_norm(self.attn_q_a(xl)).contiguous()
     # (the gathered rows' normed q_a itself (q_b quantizes it as before, the indexer's attn_q_b reads its values): a constant placeholder with
@@ -1346,7 +1297,7 @@ class MLATransformerBlock(FFNBlock):
       ik = apply_rope(ik[:, :ir].reshape(1, 1, R, ir), freqs_own, idx.rope_interleave).reshape(R, ir).cat(ik[:, ir:], dim=-1)
       rows.append(ik.half())
     whole = all_gather(Tensor.cat(*rows, dim=-1).contiguous(), 0)
-    qa_all = all_gather_q8(_fq(qa, getenv("Q4_SIM_AG", 0)).contiguous(), 1, ring=bool(getenv("GLM_SP_RING", 1))) if getenv("SP_QA_Q8", 1) else \
+    qa_all = all_gather_q8(qa.contiguous(), 1, ring=bool(getenv("GLM_SP_RING", 1))) if getenv("SP_QA_Q8", 1) else \
       all_gather(qa.half(), 1)
     # the caches of the chunk's tokens on every device
     cache = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(
@@ -1368,11 +1319,11 @@ class MLATransformerBlock(FFNBlock):
     q = q_nope.cat(q_rope.cast(q_nope.dtype), dim=-1)
     # (SP_A2A_F8: the queries and the outputs sent as e4m3 rows with a scale: half the bytes)
     if getenv("SP_A2A_F8", 1): q = _f8_unpack(all_to_all(_f8_pack(q).contiguous(), 1, 2), int(q.shape[-1]))
-    else: q = all_to_all(_f8(q).half(), 1, 2)
+    else: q = all_to_all(q.half(), 1, 2)
     attn = mla_sparse_tokens(q, cache.reshape(1, 1, *cache.shape[2:]), picks, 1.0/cfg.head_dim**0.5, cast(UOp, start_pos+T), lora,
                              cfg.real_heads or cfg.n_heads)
     if getenv("SP_A2A_F8", 1): attn = _f8_unpack(all_to_all(_f8_pack(attn).contiguous(), 2, 1), int(attn.shape[-1]))
-    else: attn = all_to_all(_f8(attn).half(), 2, 1)
+    else: attn = all_to_all(attn.half(), 2, 1)
     v_b = self.attn_v_b["weight"].transpose(-1, -2)
     attn = attn.contiguous().matmul(v_b, dtype=dtypes.float).contiguous() if v_b.dtype == dtypes.half else attn.float() @ v_b
     return self.attn_output.partial(attn.transpose(1, 2).reshape(B, R, -1))
@@ -1536,21 +1487,6 @@ class MLATransformerBlock(FFNBlock):
     offs = list(itertools.accumulate(sizes, initial=0))
     return tuple(full[..., a:b] for a, b in zip(offs, offs[1:]))
 
-  def _q_pre(self, q_nope:Tensor, q_rope:Tensor) -> Tensor|None:
-    """
-    SEQ_Q_PRE (a few rows, sequence sharded cache): the queries of every device's heads gathered before k_b (128 + 64 halves a head and row, not
-    the 512 + 64 after it: a third of the bytes), k_b of all the heads on every device (_k_b_rep): the queries of all the heads on every device,
-    the values mla_sparse_seq's gather has (the halves of the same floats: k_b's products are of the halves)
-    """
-    if not getenv("SEQ_Q_PRE", 0) or (kbr:=getattr(self, "_k_b_rep", None)) is None or not self.seq_sharded or q_nope.uop.axis != 1 or \
-       not isinstance(Tq:=q_nope.shape[2], int) or Tq > getenv("SEQ_P2P_ROWS", 16) or _seq_p2p_pack() is not None: return None
-    n, H, nope = len(cast(tuple, q_nope.device)), int(q_nope.shape[1]), int(q_nope.shape[-1])
-    D = nope + int(q_rope.shape[-1])
-    parts = q_nope.half().cat(q_rope.half(), dim=-1).contiguous().reshape(n, H//n, Tq, D)
-    if (g:=host_allgather_half(parts.reshape(n, -1))) is None: return None
-    full = g.reshape(n, H//n, Tq, D).reshape(1, H, Tq, D)
-    return mla_bmm(full[..., :nope], kbr, rows=True).cat(full[..., nope:], dim=-1)
-
   def _attention_rows(self, x:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
     # x has Tq rows, the first T are the tokens at start_pos
     B, Tq, _ = x.shape
@@ -1569,12 +1505,10 @@ class MLATransformerBlock(FFNBlock):
     k_b, half = self.attn_k_b["weight"].transpose(-1, -2), self.attn_k_b["weight"].dtype == dtypes.half and (not isinstance(Tq, int) or Tq > 1)
     # a few tokens: a thread an output (the same values)
     bmm = half and B == 1 and isinstance(Tq, int) and Tq <= 8 and amd_custom_kernels_supported(x.device) and bool(getenv("MLA_BMM", 1))
-    if bmm and (qp:=self._q_pre(q_nope, q_rope)) is not None: q = qp
-    else:
-      if bmm: q_nope = mla_bmm(q_nope, self.attn_k_b["weight"])
-      else: q_nope = q_nope.half().contiguous().matmul(k_b, dtype=dtypes.float) if half else q_nope @ k_b
-      q = mla_q_cat(q_nope, q_rope) if half and getenv("MLA_QCAT", 1) else \
-        (q_nope.contiguous() if half else q_nope).cat(q_rope.cast(q_nope.dtype), dim=-1)
+    if bmm: q_nope = mla_bmm(q_nope, self.attn_k_b["weight"])
+    else: q_nope = q_nope.half().contiguous().matmul(k_b, dtype=dtypes.float) if half else q_nope @ k_b
+    q = mla_q_cat(q_nope, q_rope) if half and getenv("MLA_QCAT", 1) else \
+      (q_nope.contiguous() if half else q_nope).cat(q_rope.cast(q_nope.dtype), dim=-1)
 
     self._freqs_rows = freqs  # (the indexer's rope: the same frequencies)
     if pre is not None and (ks:=pre.get("k_store")) is not None: k_store = ks.reshape(B, 1, Tq, -1)  # (SP_ROWPROJ: made on the rows' devices)
@@ -1673,12 +1607,10 @@ class MLATransformerBlock(FFNBlock):
     if freqs is not None: q_rope = apply_rope(q_rope, freqs, self.config.rope_interleave)
     # (many rows: the tensor cores)
     tc = Tq > getenv("MLA_BMM_ROWS", 32) and self.attn_k_b["weight"].dtype == dtypes.half
-    qp:Tensor|None = None
     if (qb:=bmm_wmma(q_nope, self.attn_k_b["weight"])) is not None: q = qb
     elif tc: q = q_nope.half().contiguous().matmul(self.attn_k_b["weight"].transpose(-1, -2), dtype=dtypes.float).contiguous()
-    elif (qp:=self._q_pre(q_nope, q_rope)) is not None: q = qp  # (a few rows: the queries before k_b gathered, SEQ_Q_PRE)
     else: q = mla_bmm(q_nope, self.attn_k_b["weight"])
-    if qp is None: q = q.cat(q_rope.cast(q.dtype), dim=-1)
+    q = q.cat(q_rope.cast(q.dtype), dim=-1)
     kv_a = self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
     k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, Tq, 1, self.config.rope_dim).transpose(1, 2)
@@ -2276,8 +2208,7 @@ class Transformer(GLMSeqDriver):
     mb, last = len(xs), cast(list[Tensor|None], [self._tbo_token])
     def called(out):
       o = out[0] if isinstance(out, tuple) else out
-      if not getenv("TBO_NODEP", 0) and o.uop.op is Ops.AFTER and o.uop.src[1].op is Ops.CALL:
-        last[0] = Tensor(self._tbo_token.uop.after(*o.uop.src[1:]))
+      if o.uop.op is Ops.AFTER and o.uop.src[1].op is Ops.CALL: last[0] = Tensor(self._tbo_token.uop.after(*o.uop.src[1:]))
       return out
     rs:list[tuple] = [() for _ in range(mb)]
     for blk in blocks:
@@ -2556,19 +2487,12 @@ class Transformer(GLMSeqDriver):
   # sequences of the slots 0..n-1 (the rows of a step), the projections, experts and the head read their weights once for all of them
 
   BATCH_SIZES = tuple(int(x) for x in str(getenv("BATCH_SIZES", "1,2,4,16,32,64,80")).split(","))
-  # (MIX: the landing slots of mixed steps past the slots decoded, see batch_mixed_step)
-  MIX = getenv("MIX", 0)
   def batch_slots(self) -> int:
-    """the slots: the ones decoded (decode_slots) and the landing ones of mixed steps"""
-    # (the memory of the slots: a shorter context of the model's own frees some)
+    """the slots for sequence states and warmed decode steps"""
     if not (self.has_recurrent_block and self.config.kv_lora_rank > 0) or self.config.cache_rows: return 0
-    return min(getenv("BATCH_SLOTS", 80 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES)) + self.mix_landing()
-  def mix_landing(self) -> int:
-    """the landing slots of mixed steps (MIX of them, with speculative decoding): a step's prompts prefilled into them, then moved"""
-    return self.MIX if self.config.spec_drafts and self.has_recurrent_block and self.config.kv_lora_rank > 0 else 0
+    return min(getenv("BATCH_SLOTS", 80 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES))
   def decode_slots(self) -> int:
-    """the slots of the sequences decoded (the first ones)"""
-    return n - self.mix_landing() if (n:=self.batch_slots()) else 0
+    return self.batch_slots()
   def batch_ctx(self) -> int:
     ctx = min(getenv("BATCH_CTX", 2048), self.max_context)
     # (aliased: whole blocks of the split sequence, the slots' regions are the model's cache's positions)
@@ -2615,12 +2539,12 @@ class Transformer(GLMSeqDriver):
       # in host memory: the tokens and temperatures of a step's rows (the host writes them), the sampled tokens (one device writes them)
       self._batch_host_in, self._batch_in = _host_ints(devs, max(self.BATCH_SIZES))
       # (a row's temperature and top_p)
-      tmv, self._batch_temp = _host_buffer(devs, 8*max(max(self.BATCH_SIZES) + self.mix_landing(), self.BPF_G), dtypes.float32)
+      tmv, self._batch_temp = _host_buffer(devs, 8*max(max(self.BATCH_SIZES), self.BPF_G), dtypes.float32)
       self._batch_host_temp = tmv.cast('f')
       self._batch_host_out, self._batch_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, max(self.BATCH_SIZES))
       # prefills in a step: the tokens of the prompts, the token after each
-      self._bpf_host_in, self._bpf_in = _host_ints(devs, max(self.BPF_G * self.BPF_P, self.mix_landing() * max(self.MIX_PS)))
-      self._bpf_host_out, self._bpf_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, max(self.BPF_G, self.mix_landing()))
+      self._bpf_host_in, self._bpf_in = _host_ints(devs, self.BPF_G * self.BPF_P)
+      self._bpf_host_out, self._bpf_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, self.BPF_G)
     if alloc: self._alloc_slots()
 
   def _alloc_slots(self):
@@ -3125,12 +3049,10 @@ class Transformer(GLMSeqDriver):
       self.max_context <= getenv("BPF_MAX_CONTEXT", 65536) else 0
   def bpf_sizes(self, P:int|None=None) -> tuple[int, ...]:
     """
-    the prompts of a batch_prefill step of prompts of P rows (a jit each): BPF_GS (sizes up to BPF_G, at most BPF_ROWS rows), a batch of n runs
-    the smallest one of n or more
+    the prompts of a batch_prefill step of prompts of P rows (a jit each), using BPF_G when it fits BPF_ROWS (or one prompt otherwise)
     """
     P = P or min(self.BPF_PS)
-    gs = {g for g in (int(x) for x in str(getenv("BPF_GS", "")).split(",") if x) if 0 < g <= self.BPF_G} | {self.BPF_G}
-    return tuple(sorted({g for g in gs if g * P <= self.BPF_ROWS and self.sequence_parallel(g * P)} or {1}))
+    return (self.BPF_G,) if self.BPF_G * P <= self.BPF_ROWS and self.sequence_parallel(self.BPF_G * P) else (1,)
   def bpf_class(self, n:int) -> int|None:
     """the rows of the batch_prefill steps of prompts of n tokens at most (the smallest of BPF_PS), None: more than BPF_P"""
     return next((p for p in self.BPF_PS if p >= n), None)
@@ -3141,7 +3063,7 @@ class Transformer(GLMSeqDriver):
       self._bpf_jits[key].warmup_name = f"step/bpf{key[1]}_{key[0]}"
     return self._bpf_jits[key]
   def _bpf_vars(self, counts:list[int], slots:list[int], starts:list[int]|None=None) -> list[UOp]:
-    return [UOp.variable(f"bpf_count{g}", 1, max(self.BPF_P, *self.MIX_PS)).bind(c) for g, c in enumerate(counts)] + \
+    return [UOp.variable(f"bpf_count{g}", 1, self.BPF_P).bind(c) for g, c in enumerate(counts)] + \
            [UOp.variable(f"bpf_slot{g}", 0, self.batch_slots()-1).bind(s) for g, s in enumerate(slots)] + \
            [UOp.variable(f"bpf_start{g}", 0, SLOT_SPAN*self.batch_ctx()-1).bind(st) for g, st in enumerate(starts or [0]*len(counts))]
   def batch_prefill(self, prompts:list[tuple[list[int], int, float|tuple[float, float]]], starts:list[int]|None=None, P:int|None=None) -> list[int]:
@@ -3212,60 +3134,6 @@ class Transformer(GLMSeqDriver):
     out = list(self._bspec_host_out[:n*(2*k+1)])
     return [(out[g*(2*k+1):g*(2*k+1)+k+1], out[g*(2*k+1)+k+1:(g+1)*(2*k+1)]) for g in range(n)]
 
-  # (mixed steps: the rows of a prompt (a jit each, a step's prompts padded to the smallest that fits them), the steps of decoding they're of)
-  MIX_PS = tuple(sorted({int(x) for x in str(getenv("MIX_PS", "192,384")).split(",") if x}))
-  def mix_sizes(self) -> tuple[int, ...]:
-    """the sizes of the steps of decoding with mixed steps (MIX_SIZES, default the largest): fewer sequences step without prompts"""
-    sizes = self.batch_sizes()
-    return tuple(sorted({int(x) for x in str(getenv("MIX_SIZES", "")).split(",") if x and int(x) in sizes} or set(sizes[-1:])))
-  def mix_class(self, n:int) -> int|None:
-    """the rows of the mixed step of a prompt of n tokens (the smallest of MIX_PS), None: more"""
-    return next((p for p in self.MIX_PS if p >= n), None)
-  def _mix_jit(self, m:int, G:int, P:int):
-    if not hasattr(self, "_mix_jits"): self._mix_jits:dict[tuple[int, int, int], Any] = {}
-    if (key:=(m, G, P)) not in self._mix_jits:
-      self._mix_jits[key] = TinyJit(functools.partial(self.forward_batch_spec, prompts=(G, P)), capture_first=True, scratch=self._scratch)
-      self._mix_jits[key].warmup_name = f"step/mixed{m}_{G}_{P}"
-    return self._mix_jits[key]
-
-  def batch_mixed_step(self, seqs:list[tuple[list[int], int, int, int, float|tuple[float, float]]],
-                       prompts:list[tuple[list[int], int, float|tuple[float, float], int]], P:int|None=None) \
-                       -> tuple[list[tuple[list[int], list[int]]], list[int]]:
-    """
-    a step of batched speculative decoding (as batch_spec_step's) with the prefills of prompts (tokens, slot, temperature, start): their
-    conversations continued from their states in the slots at start (landing slots, see mix_landing). returns the sequences' step and the
-    token after every prompt. P: the rows of a prompt, None: the smallest of MIX_PS that fits them
-    """
-    self._init_slots()
-    self._slot_writes()
-    k, n, G = self.config.spec_drafts, len(seqs), len(prompts)
-    m = next(s for s in self.mix_sizes() if s >= n)
-    P = P or cast(int, self.mix_class(max(len(t) for t, _, _, _ in prompts)))
-    assert 0 < G <= self.mix_landing() and all(0 < len(t) <= P and st + P <= self.batch_ctx() for t, _, _, st in prompts)
-    seqs = seqs + [([0]*(k+1), 0, 0, 1, 0.0)] * (m - n)
-    def pair(temp:float|tuple[float, float]) -> tuple[float, float]: return temp if isinstance(temp, tuple) else (temp, 1.0)
-    self._bspec_host_in[:m*(k+1)] = array.array('i', [t for y, _, _, _, _ in seqs for t in y])
-    self._batch_host_temp[:2*(m+G)] = array.array('f', [v for *_, temp in seqs for v in pair(temp)] + [v for _, _, temp, _ in prompts
-                                                                                                     for v in pair(temp)])
-    for g, (toks, _, _, _) in enumerate(prompts): self._bpf_host_in[g*P:(g+1)*P] = array.array('i', toks + [0] * (P - len(toks)))
-    self._bspec_host_out[:m*(2*k+1)] = array.array('i', [-1] * (m*(2*k+1)))
-    self._bpf_host_out[:G] = array.array('i', [-1] * G)
-    jit = self._mix_jit(m, G, P)
-    pvals = [len(t) for t, _, _, _ in prompts] + [s for _, s, _, _ in prompts] + [st for _, _, _, st in prompts]
-    if (cap:=getattr(jit, "captured", None)) is not None and getenv("BSPEC_FAST_CALL", 1):
-      names = [f"bpf_{x}{g}" for x in ("count", "slot", "start") for g in range(G)]
-      cap([], {name: v for g, (_, mp, j, par, _) in enumerate(seqs)
-               for name, v in ((f"bspec_mtp{g}", mp), (f"bspec_j{g}", j), (f"bspec_par{g}", par))} | dict(zip(names, pvals)))
-    else: jit(*self._bspec_vars([(mp, j, par) for _, mp, j, par, _ in seqs]), *self._bpf_vars(pvals[:G], pvals[G:2*G], pvals[2*G:]))
-    st = time.perf_counter()
-    while min(self._bspec_host_out[:m*(2*k+1)]) < 0 or min(self._bpf_host_out[:G]) < 0:
-      if time.perf_counter() - st > 10:
-        for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
-        if min(self._bspec_host_out[:m*(2*k+1)]) < 0 or min(self._bpf_host_out[:G]) < 0:
-          raise RuntimeError(f"mixed step of {m} sequences: no tokens after the devices finished")
-    out = list(self._bspec_host_out[:n*(2*k+1)])
-    return [(out[g*(2*k+1):g*(2*k+1)+k+1], out[g*(2*k+1)+k+1:(g+1)*(2*k+1)]) for g in range(n)], list(self._bpf_host_out[:G])
-
   # ** GLM_SEQ on the 14-GPU DSA target: reuse the generic driver; override only DSA cache/state ownership.
   REGION_ALIGN = SEQ_MOVE = REGION_ALIGN
   @property
@@ -3314,15 +3182,6 @@ class Transformer(GLMSeqDriver):
     # (the MLA caches' peer views made (allocated) before jits are captured in forked processes, see seq_gather)
     for b in self.blk + [self.mtp]:
       if isinstance(b, MLATransformerBlock) and b.seq_sharded: seq_views(b.cache_s)
-    # (SHEXP_FUSED: the shared experts' gate and up weights side by side, see FFNBlock._shexp_gate_up)
-    if getenv("SHEXP_FUSED", 0) or getenv("SHEXP_FUSED_REP", 0):
-      for b in self.blk + [self.mtp]:
-        if isinstance(b, FFNBlock): b._shexp_fuse()
-    # (SEQ_Q_PRE: k_b of all the heads on every device, see MLATransformerBlock._q_pre)
-    if getenv("SEQ_Q_PRE", 0) or getenv("SEQ_Q_PRE_REP", 0):
-      for b in self.blk + [self.mtp]:
-        if isinstance(b, MLATransformerBlock) and b.seq_sharded and (w:=b.attn_k_b["weight"]).uop.axis == 0 and w.dtype == dtypes.half:
-          b._k_b_rep = w.to(devs[0]).contiguous().shard(devs).realize()  # type: ignore[attr-defined]
 
   def _seq_copy(self, save:bool, slot:UOp, pm:UOp, ps:UOp, pc:UOp, hrow:UOp, keep:UOp):
     """The DSA sequence slot has hidden MTP rows; pooled-indexer rings too. Direct DSA keys stay in the region."""
@@ -3788,12 +3647,6 @@ class Transformer(GLMSeqDriver):
     devs = self.token_embd.weight.device
     if not isinstance(devs, tuple) or not getenv("DEC_SPLIT", 1): return
     N = len(devs)
-    # (ROUTER_HALF: the routers' float weights in half, read by every device every step: half the bytes)
-    for b in (self.blk + ([self.mtp] if hasattr(self, "mtp") else [])) if getenv("ROUTER_HALF", 0) else []:
-      if isinstance(r:=getattr(b, "ffn_gate_inp", None), Linear) and r.ggml_type is None and r.weight.dtype == dtypes.float32 and r.bias is None:
-        wh = Tensor.empty(*r.weight.shape, dtype=dtypes.half, device=r.weight.device).realize()
-        self._dproj_fill.append((wh, r.weight.cast(dtypes.half)))
-        r.weight = wh
     for b in self.blk + ([self.mtp] if hasattr(self, "mtp") else []):
       maybe = [getattr(b, "attn_q_a", None), getattr(b, "attn_kv_a_mqa", None)] + \
               ([ind.attn_k] if (ind:=getattr(b, "indexer", None)) is not None and getenv("DEC_SPLIT_IDX", 1) else [])
@@ -3890,20 +3743,11 @@ class Transformer(GLMSeqDriver):
     lap("captured")
     self._finish_load()
     lap("load finished")
-    # (mixed steps first, the most rows first: their scratch memory can be more than a prefill's (the slots' memory made for them))
-    if (land:=self.mix_landing()):
-      self._alloc_slots()
-      k = self.config.spec_drafts
-      for m, G, P in sorted(itertools.product(self.mix_sizes(), range(1, land+1), self.MIX_PS), key=lambda x: -x[0]*(k+1)-x[1]*x[2]):
-        if not warmup_wanted(f"mixed{m}_{G}_{P}"): continue
-        run(f"step/mixed{m}_{G}_{P}", functools.partial(self.batch_mixed_step,
-          [([0]*(k+1), 1, 0, 1, 0.0)] * m, [([0], self.decode_slots() + g, 0.0, 0) for g in range(G)], P=P))
     # The big chunk first: its scratch memory is the most, the other jits share it. A prompt one past a size runs the next one (1: smallest).
     # Parallel capture covers every size; without it, execute the big chunk too or the first real prefill pays its JIT/allocation cost.
     warm_chunks = sizes[:-1] if parallel else sizes
     for n in sorted({1, *(s + 1 for s in warm_chunks)}, reverse=True):
-      # (WARMUP_JITS names: prefill<chunk> (the chunk a prompt of n runs: n=1 the smallest, its decoding too), step<m>, mixed<m>_<G>_<P>,
-      # bpf<P>_<G>, slots (the copies of the slots), host (the staging rows'); the others captured on their first call)
+      # (WARMUP_JITS names: prefill<chunk>, step<m>, bpf<P>_<G>, slots and host; other graphs are captured on their first call)
       if not warmup_wanted(f"prefill{next((s for s in sizes if s >= n), sizes[-1])}"): continue
       self._cached_tokens, self._ckpt_tokens = [], []
       run(f"generate {n}", functools.partial(warm_generate, n))
@@ -3928,7 +3772,7 @@ class Transformer(GLMSeqDriver):
       for P in self.BPF_PS:
         for G in self.bpf_sizes(P):
           if warmup_wanted(f"bpf{P}_{G}"): run(f"step/bpf{P}_{G}", functools.partial(self.batch_prefill, [([0], 0, 0.0)] * G, P=P))
-    if (self.batch_prefills() or land) and slots: run("copy/ckpt_from_slot", functools.partial(self.ckpt_from_slot, 0, 1))
+    if self.batch_prefills() and slots: run("copy/ckpt_from_slot", functools.partial(self.ckpt_from_slot, 0, 1))
     # (the staging rows of host_save and host_load: their copies captured)
     if warmup_wanted("host"):
       run("stash/host_save", functools.partial(self._host_rows, 1, True))
@@ -3998,13 +3842,6 @@ class Transformer(GLMSeqDriver):
       for j in (self._slot_jit, self._slot_move_jit, self._slot_load_jit):
         setattr(j, "link_later", True)
         setattr(j, "warmup_group", "slots")
-      # (and the mixed steps)
-      for m, G, P in itertools.product(self.mix_sizes(), range(1, self.mix_landing()+1), self.MIX_PS):
-        mix = self._mix_jit(m, G, P)
-        calls.append((mix, functools.partial(mix, *self._bspec_vars([(0, 0, 1)]*m),
-                                             *self._bpf_vars([1]*G, [self.decode_slots() + g for g in range(G)], [0]*G))))
-        mix.link_later = True
-        setattr(mix, "warmup_name", f"mixed{m}_{G}_{P}")
       # (and the prefills of several prompts)
       if self.batch_prefills():
         for P in self.BPF_PS:
