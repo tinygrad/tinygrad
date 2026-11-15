@@ -2,8 +2,8 @@
 # jinja2's own (a stock Environment with the same settings) on the model's template (Qwen 3.8 Flash's, qwen38_chat_template.jinja: from the
 # GGUF's tokenizer.chat_template) for a text-only agent conversation (DeepSWE's shape) and a picture one (Pokemon's), and on a template that
 # reads a dict's own attribute names (items / get / keys / values / pop: the attribute first, as jinja2) and missing fields (undefined)
-import unittest, json, time, pathlib, types, copy
-from tinygrad.llm.cli import chat_template
+import unittest, json, time, pathlib, types, copy, random
+from tinygrad.llm.cli import chat_template, SimpleTokenizer
 from tinygrad.llm.serve import normalize_messages, RenderCache
 
 QWEN = (pathlib.Path(__file__).parent / "qwen38_chat_template.jinja").read_text()
@@ -167,6 +167,61 @@ class TestRenderCache(unittest.TestCase):
     rc.entries[0] = rc.entries[0][:4] + ("stale",)
     self.assertEqual(rc.render(conv[:7], tools=TOOLS), t.render(messages=conv[:7], tools=TOOLS, add_generation_prompt=True))
     self.assertFalse(rc.on)
+
+class TestPromptCacheRandom(unittest.TestCase):
+  # random conversations (Qwen preserve_thinking true / false, GLM clear_thinking true / false; pictures, tools, user messages, retries of a
+  # step, several at once sharing a system prompt) through one RenderCache and one tokenizer (each keeps its cache): every prompt's text is
+  # the full render's and its tokens a fresh tokenizer's, token for token, 1,000 prompts or more
+  WORDS = ["the", "map", "door", "north", " ", "\n", "\n\n", "def", "f(x):", "  return", "é", "日本語", "🙂", "123", "4.5", "{", "}", "\"q\"",
+           "<think>", "</think>", "<tool_call>", "<|im_end|>", "<|user|>", "<tool_response>", "Ash", "PIKACHU", "--", "\t", "x" * 40]
+  def text(self, rng:random.Random, n:int) -> str: return "".join(rng.choice(self.WORDS) + rng.choice(["", " ", " ", "\n"]) for _ in range(n))
+
+  def test_random_conversations(self):
+    from test.null.test_llm_tokenizer import TestLLMTokenizer
+    base = TestLLMTokenizer().llama_tok
+    specials = ["<|im_start|>", "<|im_end|>", "<think>", "</think>", "<tool_call>", "</tool_call>", "<tool_response>", "</tool_response>",
+                "<|vision_start|>", "<|image_pad|>", "<|vision_end|>", "[gMASK]", "<sop>", "<|system|>", "<|user|>", "<|assistant|>",
+                "<|observation|>", "<|begin_of_image|>", "<|image|>", "<|end_of_image|>", "<arg_key>", "</arg_key>", "<arg_value>", "</arg_value>"]
+    enc = {b: c for c, b in base._byte_decoder.items()}
+    tok = SimpleTokenizer({"".join(enc[b] for b in w): i for w, i in base._normal_tokens.items()}, {t: 200000 + i for i, t in enumerate(specials)})
+    def fresh(text:str) -> list[int]:
+      (c:=copy.copy(tok))._enc_cache = []
+      return c.encode(text)
+    rng = random.Random(1234)
+    variants = [(QWEN, {"preserve_thinking": True}), (QWEN, {"preserve_thinking": False}), (GLM, {"clear_thinking": True}),
+                (GLM, {"clear_thinking": False})]
+    checked = 0
+    for ct, kw in variants:
+      t = chat_template(ct, TOK)
+      rc = RenderCache(t, check=0)
+      systems = [self.text(rng, 30), self.text(rng, 30)]
+      convs:list[list[dict]] = [[{"role": "system", "content": rng.choice(systems)}, {"role": "user", "content": self.text(rng, 8)}]
+                                for _ in range(6)]
+      for _ in range(200):
+        ms = rng.choice(convs)
+        if rng.random() < 0.1 and len(ms) > 4 and ms[-1]["role"] != "assistant":
+          # (a retry: the step again from its last assistant message on, another reply)
+          del ms[max(i for i, m in enumerate(ms) if m["role"] == "assistant"):]
+        calls = [{"id": f"c{len(ms)}{j}", "type": "function", "function": {"name": rng.choice(["bash", "press"]),
+                  "arguments": json.dumps({"command": self.text(rng, 3)})}} for j in range(rng.choice([0, 1, 1, 2]))]
+        ms.append({"role": "assistant", "content": self.text(rng, rng.choice([0, 3, 10])),
+                   "reasoning_content": self.text(rng, rng.choice([0, 5, 20])), **({"tool_calls": calls} if calls else {})})
+        for c in calls:
+          ms.append({"role": "tool", "tool_call_id": c["id"], "content": [{"type": "text", "text": self.text(rng, 6)}, {"type": "image"}]
+                     if rng.random() < 0.3 else self.text(rng, 6)})
+        if not calls or rng.random() < 0.5:
+          ms.append({"role": "user", "content": [{"type": "text", "text": "Attached image(s) from tool result:"}, {"type": "image"}]
+                     if rng.random() < 0.5 else self.text(rng, 5)})
+        req = copy.deepcopy(ms)
+        normalize_messages(req, images=True)
+        tools = TOOLS if rng.random() < 0.9 else None
+        for _ in range(rng.choice([1, 1, 1, 2])):  # (sometimes the same prompt twice)
+          text = rc.render(copy.deepcopy(req), tools=tools, **kw)
+          self.assertEqual(text, t.render(messages=req, tools=tools, add_generation_prompt=True, **kw))
+          self.assertEqual(tok.encode(text), fresh(text), (kw, len(req)))
+          checked += 1
+      self.assertGreater(rc.hits, 100)
+    self.assertGreaterEqual(checked, 1000)
 
 if __name__ == "__main__":
   unittest.main()
