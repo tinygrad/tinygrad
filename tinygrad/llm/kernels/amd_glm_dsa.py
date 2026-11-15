@@ -4664,7 +4664,7 @@ def union_lists(index:Tensor, grp:int) -> Tensor:
   uidx = Tensor.empty(TG, grp * K + 1, dtype=dtypes.int32, device=index.device)
   return Tensor.custom_kernel(uidx, index, fxn=functools.partial(_union_hash_kernel, grp=grp))[0]
 
-GLM_ATTN_GRP = (3)
+GLM_ATTN_GRP = 3
 
 def mla_sparse_tokens(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_len:UOp, vdims:int, heads:int) -> Tensor:
   """
@@ -4734,7 +4734,7 @@ def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:f
       # (the device's hl heads of q as they are, its real heads' outputs: no padded half copy of the queries in, no rows of 16 heads out.
       # the same values)
       oh = Tensor.empty(H, T, vdims, dtype=dtypes.float32, device=q.device, axis=0 if n > 1 else None)
-      # (GLM_ATTN_GRP, default 1 = off: grp adjacent tokens' heads in one tile over the union of their lists, see _mla_sparse_lds_kernel grp)
+      # (GLM_ATTN_GRP, 3 (C9): grp adjacent tokens' heads in one tile over the union of their lists, see _mla_sparse_lds_kernel grp)
       grp = GLM_ATTN_GRP if hl * GLM_ATTN_GRP <= 16 and T >= 64 else 1
       if grp > 1: index = union_lists(index, grp)
       oh = Tensor.custom_kernel(oh, q.reshape(H, T, D).contiguous(), cache.reshape(-1, int(cache.shape[-1])), index,
