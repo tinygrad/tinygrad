@@ -91,14 +91,19 @@ class TestRenderCache(unittest.TestCase):
     for n in range(s, len(conv)+1, step):
       if conv[n-1]["role"] == "assistant": continue
       ms = copy.deepcopy(conv[:n])  # (a new request: new objects, equal messages)
-      self.assertEqual(rc.render(ms, tools=TOOLS, preserve_thinking=True, **kw), t.render(messages=ms, tools=TOOLS, add_generation_prompt=True,
-                                                                                         preserve_thinking=True, **kw), n)
+      kw = {"preserve_thinking": True, **kw}
+      self.assertEqual(rc.render(ms, tools=TOOLS, **kw), t.render(messages=ms, tools=TOOLS, add_generation_prompt=True, **kw), n)
     return rc
 
   def test_pictures(self):
     self.assertGreater(self.grow(QWEN, picture_conversation(120)).hits, 100)
   def test_agent(self):
-    self.assertGreater(self.grow(QWEN, agent_conversation(40), step=1).hits, 60)
+    self.assertGreater(self.grow(QWEN, agent_conversation(40), step=1).hits, 40)
+  def test_new_user_message(self):
+    # (preserve_thinking=False: the reasoning of turns before the last user message is dropped, so a new user message changes old turns'
+    # text: those requests render in full; tool-only steps between them hit)
+    rc = self.grow(QWEN, agent_conversation(40), step=1, preserve_thinking=False)
+    self.assertGreater(rc.hits, 30)
   def test_arguments(self):
     self.assertGreater(self.grow(QWEN, picture_conversation(20), enable_thinking=False).hits, 10)
     self.assertGreater(self.grow(QWEN, agent_conversation(10), step=1, reasoning_effort="low").hits, 10)

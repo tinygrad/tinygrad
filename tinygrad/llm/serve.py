@@ -116,12 +116,15 @@ def redacted(body:typing.Any) -> typing.Any:
 
 class RenderCache:
   """(SERVE_RENDER_CACHE=0: off) a conversation's rendered text up to its last assistant message, kept: a request that repeats those messages
-  renders only the ones after it (a Pokemon step at 250K: the template over ~2,500 messages, ~80 ms, every request). The text after the cut is
-  the template's over the conversation's start (its system messages and first user message) and the new messages, less the start's own text: the
-  same text where a message renders from itself and its neighbours' roles (Qwen 3.x: preserve_thinking, no add_vision_id). Checked: a cut is
-  made only where the full text ends with that tail, and every SERVE_RENDER_CHECK-th (64) cached render is compared with the full one (a
-  difference: logged, the cache off)"""
-  def __init__(self, template:typing.Any, size:int=8, check:int=64):
+  and adds no user message renders only the ones after it (a Pokemon step at 250K: the template over ~2,500 messages, ~80 ms, every request).
+  The text after the cut is the template's over the conversation's start (its system messages and first user message) and the new messages,
+  less the start's own text: the same text where a message renders from itself, its neighbours' roles and the last user message (Qwen 3.x,
+  GLM 5.x). A new user message (a template may then render older turns differently: preserve_thinking=False, clear_thinking), a template
+  argument not in ARGS (add_vision_id: pictures numbered over the conversation): the full render. Checked: a cut is made only where the full
+  text ends with that tail, and every SERVE_RENDER_CHECK-th (64) cached render is compared with the full one (a difference: logged, the cache
+  off). Its renders run under its lock (the template holds the GIL anyway)"""
+  ARGS = frozenset({"tools", "preserve_thinking", "reasoning_effort", "enable_thinking", "clear_thinking"})
+  def __init__(self, template:typing.Any, size:int=64, check:int=64):
     self.template, self.size, self.check, self.on, self.hits = template, size, check, True, 0
     self.entries:list[tuple[str, list[dict], int, int, str]] = []  # (arguments' key, messages, start's length, cut, text before the cut)
     self.lock = threading.Lock()
@@ -143,15 +146,18 @@ class RenderCache:
   def render(self, messages:list[dict], template:typing.Any=None, /, **kw) -> str:
     # (another template (the server's changed): its own entries)
     if template is not None and template is not self.template: self.template, self.entries = template, []
-    if not self.on or kw.get("add_vision_id"): return self.full(messages, kw)
+    if not self.on or not self.ARGS.issuperset(kw): return self.full(messages, kw)
     key = json.dumps(kw, sort_keys=True, default=str)
     # (the start: the leading system messages and the first user message)
     s = next((i+1 for i, m in enumerate(messages) if m.get("role") not in ("system", "developer")), 0)
     if not s or messages[s-1].get("role") != "user": return self.full(messages, kw)
     with self.lock:
-      hit = next((e for e in self.entries if e[0] == key and e[2] == s and e[3] < len(messages) and messages[:e[3]] == e[1][:e[3]]), None)
+      # (the entry with the longest kept text this request repeats, if no user message came after it)
+      hit = max((e for e in self.entries if e[0] == key and e[2] == s and e[3] < len(messages) and messages[:e[3]] == e[1][:e[3]]),
+                key=lambda e: e[3], default=None)
       text = None
-      if hit is not None and (t:=self.tail(messages[:s], messages[hit[3]:], kw)) is not None:
+      if hit is not None and all(m.get("role") != "user" for m in messages[hit[3]:]) and \
+         (t:=self.tail(messages[:s], messages[hit[3]:], kw)) is not None:
         text, self.hits = hit[4] + t, self.hits + 1
         if self.check and self.hits % self.check == 0 and text != (want:=self.full(messages, kw)):
           stderr_log(colored(f"render cache: a cached render differs from the full one ({len(messages)} messages): cache off\n", "red"))
