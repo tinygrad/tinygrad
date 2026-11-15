@@ -2456,20 +2456,40 @@ class Transformer(GLMSeqDriver):
     (P2P_AR_TIMEOUT_MS: a stalled exchange; the sums of its step wrong, P2PRunOut at the wait for the token) runs the prompt from start again:
     every cache row from start written again, the token buffer reset, the same values (the epochs and mailboxes are consistent after a
     run-out). its slot's states read at start (hrow, keep) are the ones the failed run wrote back: only the first token's draft (MTP) can differ.
-    slices (upto: not waited for) are not retried: a run-out there is seen by a later wait. P2P_RETRY_TEST=1: the first prefill's token taken
-    as a run-out (the retry's path without a stalled card)
+    slices (upto: not waited for) are not retried here: a run-out there is seen by a later wait, which runs them again first (_p2p_slices).
+    P2P_RETRY_TEST=1: the first prefill's token taken as a run-out (the retry's path without a stalled card)
     """
-    retries = 0
+    retries, slices = 0, list(self._p2p_slices)
     while True:
       try:
         out = super().seq_prefill(slot, base, tokens, start, hrow, temp, upto)
+        if upto is not None: self._p2p_unwaited, self._p2p_slices = True, [*self._p2p_slices, (slot, base, list(tokens), start, hrow, temp, upto)]
         if upto is None and getenv("P2P_RETRY_TEST", 0) and retries == 0: raise P2PRunOut("P2P_RETRY_TEST: the first prefill taken as a run-out")
         return out
       except P2PRunOut as e:
         if upto is not None or (retries:=retries+1) > getenv("P2P_RETRY", 2): raise
-        print(f"seq_prefill: {e}: the prompt again from {start} ({retries})", flush=True)
-        for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
-        self._p2p_mark = time.perf_counter()
+        print(f"seq_prefill: {e}: the prompt again from {start} ({retries}), {len(slices)} unwaited slices first", flush=True)
+        self._p2p_redo(slices)
+
+  def seq_first(self, *args, **kwargs) -> int:
+    """the token after a prompt that is its checkpoint (glm5next), its p2p run-out retried as seq_step's (only reads the slot's states)"""
+    retries, slices = 0, list(self._p2p_slices)
+    while True:
+      try: return super().seq_first(*args, **kwargs)
+      except P2PRunOut as e:
+        if (retries:=retries+1) > getenv("P2P_RETRY", 2): raise
+        print(f"seq_first: {e}: again ({retries}), {len(slices)} unwaited slices first", flush=True)
+        self._p2p_redo(slices)
+
+  def _p2p_redo(self, slices:list[tuple]) -> None:
+    """after a run-out: the devices finished, then the prompt slices since the last wait run again in their order (the run-out can be one
+    of theirs: their rows written again at the same positions, the same values); the caller runs its own work again after this"""
+    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
+    self._p2p_slices = []
+    for a in slices:
+      super().seq_prefill(*a)
+      self._p2p_unwaited, self._p2p_slices = True, [*self._p2p_slices, a]
+    self._p2p_mark = time.perf_counter()
 
   def _wait_host(self, get:Callable[[], Any], what:str) -> Any:
     """the value a step writes to host memory (polled: -1 until then). a step that doesn't come (the devices' errors): an error, not a hang"""
@@ -2484,9 +2504,26 @@ class Transformer(GLMSeqDriver):
     if (now:=time.perf_counter()) - self._p2p_mark > P2P_CHECK_S:
       p2p_check(cast(tuple[str, ...], to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))))
       now = time.perf_counter()
-    self._p2p_mark = now
+    self._p2p_mark, self._p2p_unwaited, self._p2p_slices = now, False, []
     return v
-  _p2p_mark = 0.0
+  _p2p_mark, _p2p_unwaited, _p2p_slices = 0.0, False, cast(list[tuple], [])
+
+  def seq_step(self, seqs, *args, **kwargs):
+    """
+    a step of the sequences (glm5next), its p2p run-out retried (P2P_RETRY, default 2): the same step again, its cache rows written again at the
+    same positions (the epochs and mailboxes are consistent after a run-out), the replayed states' positions as before it. the prompt slices
+    since the last wait (not waited for: the run-out can be one of theirs) run again first (ts5 Nov 15: such a run-out ended 4 streams)
+    """
+    retries, kbase, slices = 0, dict(getattr(self, "_seq_kbase", {})), list(self._p2p_slices)
+    while True:
+      try: return super().seq_step(seqs, *args, **kwargs)
+      except P2PRunOut as e:
+        if (retries:=retries+1) > getenv("P2P_RETRY", 2): raise
+        print(f"seq_step: {e}: the step of {len(seqs)} sequences again ({retries}), {len(slices)} unwaited slices first", flush=True)
+        self._p2p_redo(slices)
+        if hasattr(self, "_seq_kbase"):
+          self._seq_kbase.clear()
+          self._seq_kbase.update(kbase)
 
   def _spec_steps(self, tokens:list[int], temperature:Tensor) -> Iterator[int]:
     """speculative decoding after a prefill: tokens[-1] is the sampled token after the prompt"""
