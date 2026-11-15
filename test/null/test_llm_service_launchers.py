@@ -122,6 +122,17 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     self.assertEqual(failed.returncode, 2)
     self.assertIn("225", failed.stderr)
 
+  def test_c5_null_harness_keeps_benchmark_defaults(self):
+    body = (ROOT / "test/null/production_c5_warmup.sh").read_text()
+    self.assertIn("export VISION_MMPROJ VISION_KERNELS=1 VISION_BUCKETS=576", body)
+    for optional in ("VISION_SLICE_MS", "VISION_MAX_TOKENS", "VISION_MAX_IMAGES", "VISION_CACHE_MB",
+                     "VISION_URL_CACHE_MB", "SERVE_RENDER_CACHE"):
+      self.assertNotIn(optional + "=", body)
+    self.assertIn('export "$_extra"', body)
+    for name in ("VISION_SLICE_MS", "VISION_MAX_TOKENS", "VISION_MAX_IMAGES", "VISION_CACHE_MB",
+                 "VISION_URL_CACHE_MB", "SERVE_RENDER_CACHE"):
+      self.assertIn(name, body)
+
   def test_manifests_match_runbook(self):
     runbook = (ROOT / "RUNNING.md").read_text()
     for manifest, count in (("qwen-v31.sha256", 6), ("glm-flash-iq3xxs.sha256", 4), ("glm53-iq4xs.sha256", 9)):

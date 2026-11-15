@@ -5,9 +5,12 @@ set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 if [[ -n ${VISION_MMPROJ:-} ]]; then
-  export VISION_MMPROJ VISION_KERNELS=1 VISION_SLICE_MS=200 VISION_MAX_TOKENS=1024 VISION_BUCKETS=576 SERVE_RENDER_CACHE=1
-  export VISION_MAX_IMAGES=2048 VISION_CACHE_MB=2048 VISION_URL_CACHE_MB=512
+  export VISION_MMPROJ VISION_KERNELS=1 VISION_BUCKETS=576
 fi
+# Match the launcher: the benchmark/default leaves these unset; the explicit G3 profile supplies them.
+for _extra in VISION_SLICE_MS VISION_MAX_TOKENS VISION_MAX_IMAGES VISION_CACHE_MB VISION_URL_CACHE_MB SERVE_RENDER_CACHE; do
+  [[ -z ${!_extra+x} ]] || export "$_extra"
+done
 MODEL=${MODEL:-/weights/GLM-5.3-Flash-UD-IQ3_XXS/GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf} \
 XDG_CACHE_HOME=${XDG_CACHE_HOME:-$PWD/.llm/null-c5-cache} \
 DEV=${NULLDEV:-NULL:HIP:gfx1100} PYTHONPATH="$ROOT" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 HOME="$HOME" \
