@@ -40,6 +40,9 @@ def cleanup_dead_axes(b:UOp):
   if hit:
     return b.replace(src=b.src[0:1]+tuple(new_rng)).reshape(tuple(reshape)).expand(b.shape)
 
+def gate_substitute(ctx, b:UOp) -> None:
+  if not any(r in b.ranges for r in ctx.keys()): raise BottomUpGate()
+pm_gate_substitute = PatternMatcher([(UPat(GroupOp.All, name="b"), gate_substitute)], compiled=False)
 # if a buffer is being stored just for permutes or something, remove it
 # we want to reexpress the indexes of idx2 in terms of the implied b1
 def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
@@ -91,7 +94,11 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # this is the ranges replaced
   # NOTE: if buf src is a const, we don't replace it. if idx is Invalid (dead load), don't replace it either
   replaced = {k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST and not (v.op is Ops.CONST and v.val is Invalid)}
-  return src.substitute(replaced)
+  return src.substitute(replaced, extra_pm=pm_gate_substitute)
+
+def remove_noop_bufferize(idx,b2):
+  if idx.src[1:] != b2.src[1:]: return None
+  return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
 
 def after_all_invalid(after:UOp):
   buf = after.src[0].buf_uop
@@ -102,11 +109,18 @@ def after_all_invalid(after:UOp):
 
 pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
+  # remove noop buffers. if we look at the next index we can remove even more of these
+  (UPat(Ops.INDEX, name="idx").f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_bufferize),
+  # no buffers for a const, in either spelling
+  (UPat.cvar('c').or_casted().f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.val)),
   # indexing a const is the const
   (UPat(Ops.INDEX, src=(UPat.cvar().or_casted("c"),),), lambda c: c),
   # indexing an after with all fully invalid stores is invalid
   (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True, name="idx"),
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
+  # a deviceless MSTACK src is the same value on every device, so indexing the stack is just indexing that value
+  (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True, name="idx"),
+   lambda s,idx: idx.replace(src=(s,)+idx.src[1:]) if s.device is None else None),
 ])
 
 pm_remove_bufferize = PatternMatcher([

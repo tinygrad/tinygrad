@@ -55,6 +55,7 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
 
 # *** fold moved AFTERs (hack for openpilot) ***
 pm_fold_moved_after = PatternMatcher([
+  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src")))), name="after"), found_after),
   # contiguous is also a materialization point (it bufferizes in the scheduler)
   (UPat(Ops.STAGE, src=(UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src"),), name="after"), found_after),
   # replace ALU sources with AFTER versions found above
