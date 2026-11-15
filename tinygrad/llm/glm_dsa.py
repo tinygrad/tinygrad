@@ -3300,12 +3300,16 @@ class Transformer(GLMSeqDriver):
     tmv, self._seq_pf_temp = _host_buffer(devs, 4*glm_seq_base.TEMP_W, dtypes.float32)
     self._seq_pf_host_temp = tmv.cast('f')
     self._seq_host_out, self._seq_out = _host_ints(devs[0], m*(2*k+1) + 1)
-    self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True) for sv in (True, False)}
-    self._seq_ckpt_jits = {sv: TinyJit(functools.partial(self._seq_ckpt_copy, sv), capture_first=True) for sv in (True, False)}
+    # (SEQ_COPY_SCRATCH=1: the slot copy / checkpoint / region move jits' intermediates in the jits' shared arenas, not their own (one runs at a
+    # time): a move's cache rows go through a contiguous copy, ~520 MB a card of the moves' own arenas at C9's 268,800 rows)
+    sc:dict|None = self._scratch if getenv("SEQ_COPY_SCRATCH", 0) else None
+    self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True, scratch=sc) for sv in (True, False)}
+    self._seq_ckpt_jits = {sv: TinyJit(functools.partial(self._seq_ckpt_copy, sv), capture_first=True, scratch=sc) for sv in (True, False)}
     self._seq_mat_jit = None  # no KDA recurrent state or replay on the DSA target
     self._seq_kbase:dict[int, int] = {}
     self._move_calls = self._chunk_calls((self.seq_rows() + self.REGION_ALIGN) // self.SEQ_MOVE - 1)
-    self._seq_move_jits = {chunks: TinyJit(functools.partial(self._seq_move_copy, chunks), capture_first=True) for chunks in self._move_calls}
+    self._seq_move_jits = {chunks: TinyJit(functools.partial(self._seq_move_copy, chunks), capture_first=True, scratch=sc)
+                           for chunks in self._move_calls}
     self._seq_stash_init()
     todo = [self.seq_spec_h, self.seq_ckpt_h] + [b.indexer.pool_ring for b in self.blk + [self.mtp]
              if isinstance(b, MLATransformerBlock) and b.indexer is not None and b.indexer.idx.kpool > 1] + \
