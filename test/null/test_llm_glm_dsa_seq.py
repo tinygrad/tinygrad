@@ -105,8 +105,8 @@ class TestGLMDSASequence(unittest.TestCase):
     model.config = SimpleNamespace(cache_rows=0)
     self.assertEqual(model._main_token_rows(), 65537)
 
-  def test_serial_warmup_covers_largest_prefill_chunk(self):
-    # C9 has (448, 2688): serial startup used to run only 449 and 1, leaving the first 4k request with 4.1 s of cold-JIT work.
+  def test_parallel_warmup_covers_requested_shapes(self):
+    # Parallel production warm-up covers the requested prefill shapes without the obsolete serial alternative.
     model = Transformer.__new__(Transformer)
     model.config = SimpleNamespace(cache_rows=0)
     model.token_embd = SimpleNamespace(weight=SimpleNamespace(device="CPU"))
@@ -127,7 +127,7 @@ class TestGLMDSASequence(unittest.TestCase):
       yield from (1, 2)
     model.generate = generate
     try:
-      for parallel, want in (("0", [2689, 449, 1]), ("1", [449, 1])):
+      for parallel, want in (("1", [449, 1]),):
         calls.clear(), model._capture_parallel.reset_mock()
         with patch.dict(os.environ, {"WARMUP_PARALLEL": parallel}):
           glm_dsa.getenv.cache_clear()
@@ -413,7 +413,7 @@ class TestGLMDSASequence(unittest.TestCase):
     from tinygrad.llm.kernels import amd_glm_dsa
     seen = []
     def fwd(self, vs): seen.append(amd_glm_dsa.Q8_ROWS_I8[0])
-    for env, want in (("1", True), ("0", False)):
+    for env, want in (("0", False),):
       with patch.dict(os.environ, {"SEQ_I8": env}), patch.object(glm_dsa.GLMSeqDriver, "_forward_seqs_glm", fwd):
         getenv.cache_clear()
         Transformer._forward_seqs_glm(Transformer.__new__(Transformer), ())
