@@ -882,10 +882,10 @@ class Request:
     self.y, self.mtp, self.j, self.par, self.pos = [first] + [0]*k, pos, 0, 1, pos
 
 # short prompts prefilled together (Transformer.batch_prefill) from this many: a step of them costs about what three alone do
-BATCH_PREFILL_MIN = getenv("BATCH_PREFILL_MIN", 3)
+BATCH_PREFILL_MIN = 3
 # (BCP) requests prefilled together from this many: continuations of their conversations, the rest of each prompt in its slot (see Transformer.
 # batch_prefill's starts): a step of the model's weights for all of them, not one each. fewer: one at a time (a step is G of P rows)
-BCP_MIN = getenv("BCP_MIN", 2)
+BCP_MIN = 2
 
 class BatchStats:
   """batched decoding's status line every few seconds while it runs: the requests decoding and waiting now, the tokens generated a second and
@@ -2015,17 +2015,17 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         # (BCP) new requests into free slots, prefilled together: each one's conversation from the model's or a kept one into its slot, the rest
         # of its prompt (in chunks of P) continued there
         if (G:=model.batch_prefills()) and getenv("BCP", 0) and callable(getattr(model, "prefix_to_slot", None)) and not drain:
-          room, most = model.batch_ctx() - model.BPF_P, getenv("BCP_MAX_NEW", 1536)
+          room, most = model.batch_ctx() - model.BPF_P, 1536
           # (a prompt of many new tokens: alone, in big chunks (the prefill's chunks of up to 1536 rows run faster than a batch's of P))
           def cont(r:Request) -> bool:
             n = len(r.ids) + len(r.generated)
             return self.batchable(r) and n <= room and n - self.stash_hit(r.ids + r.generated, set(active)) <= most
           # (fewer than a step's worth while others decode: they wait BCP_WAIT seconds at most for more, agents' turns come one at a time)
           while len(batch:=self.bcp_batch([r for r in pending if cont(r)], min(G, self.free_slots(active)), set(active))) >= BCP_MIN and \
-                (len(batch) >= G or not active or time.perf_counter() - min(r.st for r in batch) > getenv("BCP_WAIT", 1.5)):
+                (len(batch) >= G or not active or time.perf_counter() - min(r.st for r in batch) > 1.5):
             self.batch_continue(batch, active, pending)
           # (the ones that wait for more: not prefilled alone meanwhile. one that waited long enough is, if no others came)
-          waiting_bcp = {r for r in pending if cont(r) and time.perf_counter() - r.st <= getenv("BCP_WAIT", 1.5)} if active else set()
+          waiting_bcp = {r for r in pending if cont(r) and time.perf_counter() - r.st <= 1.5} if active else set()
         else: waiting_bcp = set()
         # new requests into free slots: short prompts prefilled together into theirs, (the others) prefilled, their states copied into the slot
         def shorts() -> list[Request]: return [r for r in pending if self.batchable(r) and not r.generated and len(r.ids) <= model.BPF_P]
