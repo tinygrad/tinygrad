@@ -3233,9 +3233,9 @@ class TestOps(TensorTestCase):
                                 lambda x: x.sparse_categorical_crossentropy(Tensor(classes), reduction=r))
 
   def test_sparse_categorical_crossentropy_ignore_index(self):
-    classes = [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
     for i in (-1, 0, 3):
-      helper_test_op([(12,10)], lambda x: torch.nn.CrossEntropyLoss(ignore_index=i)(x, torch.tensor(classes)),
+      for classes in ([i, 1], [i, i]):
+        helper_test_op([(2,4)], lambda x: torch.nn.CrossEntropyLoss(ignore_index=i)(x, torch.tensor(classes)),
                                 lambda x: x.sparse_categorical_crossentropy(Tensor(classes), ignore_index=i))
 
   def test_sparse_categorical_crossentropy_label_smoothing(self):
