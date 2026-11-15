@@ -4,7 +4,7 @@
 # reads a dict's own attribute names (items / get / keys / values / pop: the attribute first, as jinja2) and missing fields (undefined)
 import unittest, json, time, pathlib, types, copy
 from tinygrad.llm.cli import chat_template
-from tinygrad.llm.serve import normalize_messages
+from tinygrad.llm.serve import normalize_messages, RenderCache
 
 QWEN = (pathlib.Path(__file__).parent / "qwen38_chat_template.jinja").read_text()
 TOK = types.SimpleNamespace(bos_id=None, eos_id=0, decode=lambda ids: "<|im_end|>")
@@ -78,6 +78,56 @@ class TestChatTemplate(unittest.TestCase):
     ms = [{"role": "user", "content": "x", "items": [1, 2], "get": "g", "keys": "k", "pop": None},
           {"role": "tool", "content": {"text": "mapped", "values": 3}}, {"content": None}]
     self.same(ct, ms)
+
+class TestRenderCache(unittest.TestCase):
+  # RenderCache: a conversation that grows a step at a time renders, at every step, the text of the full render (the cut after the last
+  # assistant message), and from the cache (hits); a changed old message, other arguments, add_vision_id: the full render
+  def grow(self, ct:str, conv:list[dict], step:int=2, **kw) -> RenderCache:
+    conv = copy.deepcopy(conv)
+    normalize_messages(conv, images=True)
+    t = chat_template(ct, TOK)
+    rc = RenderCache(t, check=0)
+    s = next(i+1 for i, m in enumerate(conv) if m["role"] == "user")
+    for n in range(s, len(conv)+1, step):
+      if conv[n-1]["role"] == "assistant": continue
+      ms = copy.deepcopy(conv[:n])  # (a new request: new objects, equal messages)
+      self.assertEqual(rc.render(ms, tools=TOOLS, preserve_thinking=True, **kw), t.render(messages=ms, tools=TOOLS, add_generation_prompt=True,
+                                                                                         preserve_thinking=True, **kw), n)
+    return rc
+
+  def test_pictures(self):
+    self.assertGreater(self.grow(QWEN, picture_conversation(120)).hits, 100)
+  def test_agent(self):
+    self.assertGreater(self.grow(QWEN, agent_conversation(40), step=1).hits, 60)
+  def test_arguments(self):
+    self.assertGreater(self.grow(QWEN, picture_conversation(20), enable_thinking=False).hits, 10)
+    self.assertGreater(self.grow(QWEN, agent_conversation(10), step=1, reasoning_effort="low").hits, 10)
+    self.assertEqual(self.grow(QWEN, picture_conversation(20), add_vision_id=True).hits, 0)
+  def test_rewritten_history(self):
+    conv = picture_conversation(30)
+    normalize_messages(conv, images=True)
+    t = chat_template(QWEN, TOK)
+    rc = RenderCache(t, check=0)
+    rc.render(copy.deepcopy(conv[:41]), tools=TOOLS)
+    ms = copy.deepcopy(conv)
+    ms[5]["reasoning_content"] = "changed"
+    self.assertEqual(rc.render(ms, tools=TOOLS), t.render(messages=ms, tools=TOOLS, add_generation_prompt=True))
+    self.assertEqual(rc.hits, 0)
+    self.assertEqual(rc.render(copy.deepcopy(conv), tools=None), t.render(messages=conv, tools=None, add_generation_prompt=True))
+    self.assertEqual(rc.hits, 0)
+  def test_not_local(self):
+    # (a template whose header counts the messages, one that numbers them: no cut is ever made; a cached text that differs: the check turns
+    # the cache off, the full text served)
+    self.assertEqual(self.grow("{{ messages|length }}{% for m in messages %}<{{ m.role }}>{% endfor %}", picture_conversation(10)).hits, 0)
+    self.assertEqual(self.grow("{% for m in messages %}{{ loop.index }}{{ m.role }}{% endfor %}", picture_conversation(10)).hits, 0)
+    conv = picture_conversation(10)
+    normalize_messages(conv, images=True)
+    t = chat_template(QWEN, TOK)
+    rc = RenderCache(t, check=1)
+    rc.render(conv[:5], tools=TOOLS)
+    rc.entries[0] = rc.entries[0][:4] + ("stale",)
+    self.assertEqual(rc.render(conv[:7], tools=TOOLS), t.render(messages=conv[:7], tools=TOOLS, add_generation_prompt=True))
+    self.assertFalse(rc.on)
 
 if __name__ == "__main__":
   unittest.main()

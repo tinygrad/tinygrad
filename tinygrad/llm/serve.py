@@ -114,6 +114,53 @@ def redacted(body:typing.Any) -> typing.Any:
   if isinstance(body, str) and body.startswith("data:"): return f"data:...({len(body)} chars)"
   return body
 
+class RenderCache:
+  """(SERVE_RENDER_CACHE=0: off) a conversation's rendered text up to its last assistant message, kept: a request that repeats those messages
+  renders only the ones after it (a Pokemon step at 250K: the template over ~2,500 messages, ~80 ms, every request). The text after the cut is
+  the template's over the conversation's start (its system messages and first user message) and the new messages, less the start's own text: the
+  same text where a message renders from itself and its neighbours' roles (Qwen 3.x: preserve_thinking, no add_vision_id). Checked: a cut is
+  made only where the full text ends with that tail, and every SERVE_RENDER_CHECK-th (64) cached render is compared with the full one (a
+  difference: logged, the cache off)"""
+  def __init__(self, template:typing.Any, size:int=8, check:int=64):
+    self.template, self.size, self.check, self.on, self.hits = template, size, check, True, 0
+    self.entries:list[tuple[str, list[dict], int, int, str]] = []  # (arguments' key, messages, start's length, cut, text before the cut)
+    self.lock = threading.Lock()
+
+  def full(self, messages:list[dict], kw:dict, gen:bool=True) -> str:
+    return self.template.render(messages=messages, add_generation_prompt=gen, **kw)
+
+  def tail(self, start:list[dict], new:list[dict], kw:dict) -> str|None:
+    """the text the messages new add after a conversation's messages that begin with start and end with an assistant message"""
+    base, text = self.full(start, kw, False), self.full(start + new, kw)
+    return text[len(base):] if text.startswith(base) else None
+
+  def entry(self, key:str, kw:dict, messages:list[dict], s:int, text:str) -> tuple|None:
+    """the entry of messages (rendered: text) at their last cut (after an assistant message, past the start), if the text's end is its tail"""
+    k = next((k for k in range(len(messages)-1, s, -1) if messages[k-1].get("role") == "assistant"), None)
+    if k is None or (t:=self.tail(messages[:s], messages[k:], kw)) is None or not text.endswith(t): return None
+    return (key, list(messages), s, k, text[:len(text)-len(t)])
+
+  def render(self, messages:list[dict], template:typing.Any=None, /, **kw) -> str:
+    # (another template (the server's changed): its own entries)
+    if template is not None and template is not self.template: self.template, self.entries = template, []
+    if not self.on or kw.get("add_vision_id"): return self.full(messages, kw)
+    key = json.dumps(kw, sort_keys=True, default=str)
+    # (the start: the leading system messages and the first user message)
+    s = next((i+1 for i, m in enumerate(messages) if m.get("role") not in ("system", "developer")), 0)
+    if not s or messages[s-1].get("role") != "user": return self.full(messages, kw)
+    with self.lock:
+      hit = next((e for e in self.entries if e[0] == key and e[2] == s and e[3] < len(messages) and messages[:e[3]] == e[1][:e[3]]), None)
+      text = None
+      if hit is not None and (t:=self.tail(messages[:s], messages[hit[3]:], kw)) is not None:
+        text, self.hits = hit[4] + t, self.hits + 1
+        if self.check and self.hits % self.check == 0 and text != (want:=self.full(messages, kw)):
+          stderr_log(colored(f"render cache: a cached render differs from the full one ({len(messages)} messages): cache off\n", "red"))
+          self.on, text = False, want
+      if text is None: text = self.full(messages, kw)
+      if self.on and (e:=self.entry(key, kw, messages, s, text)) is not None:
+        self.entries = [e] + [x for x in self.entries if x is not hit][:self.size-1]
+    return text
+
 def normalize_messages(messages:list[dict], images:bool=False) -> None:
   # (images: VISION's image parts (see extract_pictures) stay the template's)
   # chat templates expect tool_call arguments as dicts (OpenAI clients send JSON strings)
@@ -720,8 +767,8 @@ class Handler(VizHandler):
     effort = body.get("reasoning_effort") or (body.get("output_config") or {}).get("effort")
     # (the template's own arguments a request asks for, e.g. enable_thinking: chat_template_kwargs as vLLM's)
     extra = {k: v for k, v in (body.get("chat_template_kwargs") or {}).items() if k not in ("messages", "tools", "add_generation_prompt")}
-    text = self.server.template.render(**{"messages": messages, "tools": tools, "add_generation_prompt": True, "preserve_thinking": True,
-                                          **({"reasoning_effort": effort} if effort else {}), **extra})
+    kw = {"tools": tools, "preserve_thinking": True, **({"reasoning_effort": effort} if effort else {}), **extra}
+    text = self.server.render_cache.render(messages, self.server.template, **kw)
     # (JSON can have lone surrogates ("\ud800"), not text the tokenizer can encode: a replacement character)
     return text.encode("utf-8", "surrogatepass").decode("utf-8", "replace")
 
@@ -875,6 +922,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.model: typing.Any = model
     self.model_name, self.tok, self.template, self.top_p = model_name, tok, template, top_p
     self.temperature = temperature
+    self.render_cache = RenderCache(template, check=getenv("SERVE_RENDER_CHECK", 64))
+    self.render_cache.on = bool(getenv("SERVE_RENDER_CACHE", 1))
     # (VISION: the vision tower (qwen_vision.VisionTower), the rows of the last pictures it made (VISION_CACHE_MB))
     self.vision, self._pic_rows = vision, collections.OrderedDict[bytes, typing.Any]()
     self._tower_job: tuple[typing.Any, typing.Any]|None = None  # (VISION: the picture whose tower runs in slices, and its TowerJob)
