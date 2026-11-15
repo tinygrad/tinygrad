@@ -2,7 +2,7 @@ import time, inspect
 from collections import deque
 from dataclasses import dataclass, field, replace
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import GroupOp, UOp, Ops, UOpMetaClass, graph_rewrite, MapCtx, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import GroupOp, UOp, Ops, UOpMetaClass, graph_rewrite, MapCtx, gate_kernel_sink, KernelInfo, ParamArg
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, SCACHE, BASEDIR, partition, dedup, all_int, VIZ
 from tinygrad.helpers import diskcache_get, diskcache_put, colored
@@ -204,7 +204,7 @@ class CallifyCtx:
   stores: list[UOp] = field(default_factory=list)
 
 def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
-  """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
+  """MOPS(BUFFER/EXTERN) → SHRINK when movement ops collapse to a contiguous range."""
   if not all_int(c.shape): return None
   buf = src.base
   while buf.op is Ops.BITCAST: buf = buf.src[0].base
@@ -213,7 +213,7 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
     if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
     if (view := contiguous_mops_to_view(ctx, unshard.src[0], unshard.src[0])) is None: return None
     view = view.unshard(unshard.arg, unshard.src[1:])
-  elif buf.op is Ops.BUFFER and (cv := src.contiguous_view()) is not None and cv[0].op is Ops.BUFFER:
+  elif buf.op in {Ops.BUFFER, Ops.EXTERN} and (cv := src.contiguous_view()) is not None and cv[0].op in {Ops.BUFFER, Ops.EXTERN}:
     buf, offset = cv
     view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
     if ctx is not None: ctx.views.add(view)
@@ -252,27 +252,64 @@ pm_canonicalize_alloc = PatternMatcher([
   (UPat(Ops.ALLOC, name="b"), canonicalize_alloc),
 ])
 
+# **** export: the minimum processing to make a tensor graph a function with no runtime state
+# The exported function references everything from outside through EXTERN(slot); externs[slot] is the map back.
+# Storage loses its Buffer, bound Variables lose their value and name (keeping their range), ALLOCs get canonical slots.
+
+@dataclass
+class ExportCtx:
+  externs: list[UOp] = field(default_factory=list)
+  allocs: dict[UOp, UOp] = field(default_factory=dict)
+
+def to_extern(ctx:ExportCtx, x:UOp) -> UOp|None:
+  if x.op is Ops.BUFFER and x.addrspace is not AddrSpace.GLOBAL: return None
+  if x.op is Ops.PARAM and not x.is_bound_var: return None
+  ctx.externs.append(x)
+  return x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=len(ctx.externs)-1, buffer=None, name=None, val=None))
+
+pm_export = PatternMatcher([(UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern)])+pm_canonicalize_alloc
+
+def assert_exportable(fn:UOp):
+  for u in fn.toposort(enter_calls=True):
+    if u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL: raise RuntimeError(f"exported function has a GLOBAL BUFFER {u.arg}")
+    if isinstance(u.arg, ParamArg):
+      if u.arg.buffer is not None or u.arg.val is not None: raise RuntimeError(f"exported function has runtime state in {u.op} {u.arg}")
+      if u.op is Ops.ALLOC and u.arg.slot >= 0: raise RuntimeError(f"exported function has a non canonical ALLOC {u.arg}")
+
+def export(big_sink:UOp) -> tuple[UOp, tuple[UOp, ...]]:
+  """export the stores of a tensor graph as a function: EXTERN(slot) in the function stands for externs[slot]"""
+  stores = UOp.sink(*(u for u in big_sink.toposort() if is_store_after(u)))
+  fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, name="export")
+  if SPEC:
+    type_verify(fn, spec_tensor)
+    assert_exportable(fn)
+  return fn, tuple(ctx.externs)
+
+pm_import = PatternMatcher([(UPat(Ops.EXTERN, name="e"), lambda ctx,e: ctx[e.arg.slot])])
+
 def replace_input_buffer(ctx:CallifyCtx, b:UOp):
   ctx.replacements.append(b)
   return b.param_like(len(ctx.replacements)-1)
 
 pm_replace_buf = PatternMatcher([
-  # replace GLOBAL BUFFERs with PARAMs for cache key normalization (Variables are ALU PARAMs, they don't match this)
-  (UPat(Ops.BUFFER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL else None),
+  # replace EXTERNs (storage and bound Variables) with PARAMs for cache key normalization
+  (UPat(Ops.EXTERN, name="b"), replace_input_buffer),
   # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
   (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
-  # replace bound Variables with renamed value-stripped PARAMs for cache key normalization, so different values hit same cache
-  (UPat(Ops.PARAM, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
 ])
 
 def transform_to_call(big_sink:UOp) -> UOp:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
 
+  fn, externs = export(big_sink)
+
   # The tensor replacement map is collected before these rewrites change node identities.
-  graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
-  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_canonicalize_alloc+pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs")
-  ret = ret.call(*ctx.replacements, precompile=True)
+  graph_rewrite(fn, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
+  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs")
+  # map back: the call args are what the EXTERNs stand for
+  args = graph_rewrite(UOp.sink(*ctx.replacements), pm_import, ctx=externs, walk=True, name="import externs").src
+  ret = ret.call(*args, precompile=True)
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret
 
