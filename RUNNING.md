@@ -111,6 +111,8 @@ bash extra/llm_service/glm_flash_6x7900xtx.sh start
 
 The fixed engine invocation is `python3 -m tinygrad.llm --model /weights/GLM-5.3-Flash-UD-IQ3_XXS/GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf --shard 6 --max_context 524288 --serve 8000`. D34 ran at 225 W/card. Leave `SPEC_DRAFTS` and `SPEC_DRAFTS_BY_SIZE` unset: this model inherits two drafts. Use `AM_FIRST_START=1` only for the first controlled start, not ordinary restarts. `status` and `stop` use the launcher's state dir. This tree's C5 endpoint is **text-only**; do not add Qwen's picture tower settings.
 
+With `SESSION_END_TOKEN` unset (the default), explicit backend session-end calls return the expected **403 `backend_session_end_disabled`**, not generation failures. An integrated proxy releases its own session bookkeeping, while backend conversations remain in bounded 18-slot residency until reuse, NONDROP eviction or restart; `ended_dropped=0` only counts processed explicit ends and is **not** proof of backend memory release. Actual coordinated cleanup requires a matching out-of-band token on proxy and backends plus active/completed/duplicate-end tests (including resident/stash drops, `already_ended` and later admissions); never expose the secret in `--print-command`, and enabling the endpoint alone does not move model-seat release before verifier execution.
+
 ### GLM C9, on ts5
 
 The validated start below is 262144 context per user. Phase 4 requires 1048576 context per user, but that capacity profile, its power limit and its quality/stability gates are still owner work; do not claim this command is a validated 1M deployment. Do not start C9 with the former 210 W default. Set the power value only after the completed verification establishes it, then run the complete environment:
