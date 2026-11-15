@@ -1164,12 +1164,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     (whoever's), else the first such picture's. None: none left (its prefill reads kept rows, the tower doesn't run inside it)
     """
     if self._tower_job is None:
-      from tinygrad.llm.qwen_vision import picture_runs, patches
+      from tinygrad.llm.qwen_vision import picture_runs
       ids, pos, _ = req.fill
       need = [req.pics[first] for start, n, _, first in (picture_runs(ids) if req.pics else []) if start + n > pos and first in req.pics]
       pic = next((p for p in need if p.digest not in self._pic_rows), None)
       if pic is None: return None
-      self._tower_job = (pic, self.vision.start(*patches(pic.rgb)))
+      self._tower_job = (pic, self.vision.start(*self.vision.patches(pic.rgb)))
     st = time.perf_counter()
     pic, job = self._tower_job
     if (rows:=job.step()) is not None:
@@ -1195,8 +1195,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       self._tower_job = None
       self._keep_rows(jp.digest, rows)
       if (r:=self._pic_rows.get(pic.digest)) is not None: return r
-    from tinygrad.llm.qwen_vision import patches
-    self._keep_rows(pic.digest, r:=self.vision(*patches(pic.rgb)))
+    self._keep_rows(pic.digest, r:=self.vision(*self.vision.patches(pic.rgb)))
     return r
 
   def reuse_tokens(self, rendered:str, ids:list[int]) -> list[int]:
@@ -1431,7 +1430,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     """(MIX) req's prompt in mixed steps: its new tokens (past what's kept of its conversation) MIX_MAX at most, in chunks of a step's"""
     n = len(req.ids) + len(req.generated)
     new = n - self.stash_hit(req.ids + req.generated, busy)
-    return self.batchable(req) and not self.wide(req) and not req.no_mix and 0 < new <= self.MIX_MAX
+    # (VISION: a prompt with pictures prefilled before its steps: a mixed step's prompt rows have no picture rows)
+    return self.batchable(req) and not self.wide(req) and not req.no_mix and not req.pics and 0 < new <= self.MIX_MAX
   MIX_MAX = getenv("MIX_MAX", 4096)
   def mix_take(self, mixes:list[Request], active:dict, pending:list[Request], land:int):
     """

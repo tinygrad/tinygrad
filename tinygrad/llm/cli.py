@@ -252,10 +252,17 @@ def main():
   # its warm-up then grows the scratch the model shares: the model's warm-up calls run again (default 0: the tower first)
   vision, vision_late = None, getenv("VISION_LATE", 0)
   def load_vision(mmproj:str):
+    from tinygrad.llm import qwen_vision
     from tinygrad.llm.qwen_vision import VisionTower, VISION_MAX_TOKENS
+    from tinygrad.llm.gguf import gguf_load
     from tinygrad.helpers import to_tuple
+    # (the tower of the mmproj's projector: qwen3vl_merger (Qwen 3.8 Flash) or glm5v (GLM 5.3 Flash: glm_vision, its picture sizing))
+    tower:type[VisionTower] = VisionTower
+    if gguf_load(mmproj)[0].get("clip.projector_type") == "glm5v":
+      from tinygrad.llm.glm_vision import GlmVisionTower
+      tower, qwen_vision.SIZING[0] = GlmVisionTower, "glm5v"
     # (its jits' intermediates in the model's scratch: the tower runs between the model's jits, in its thread)
-    vision = VisionTower.from_gguf(mmproj, devices=to_tuple(typing.cast(str|tuple[str, ...], model.token_embd.weight.device)),
+    vision = tower.from_gguf(mmproj, devices=to_tuple(typing.cast(str|tuple[str, ...], model.token_embd.weight.device)),
                                    scratch=getattr(model, "_scratch", None))
     # (every bucket's jit compiled and its buffers made before serving: VISION_MAX_TOKENS)
     with Timing(f"vision: {mmproj} on {len(vision.devices)} devices, its jits up to {VISION_MAX_TOKENS} rows a picture: "):
@@ -267,6 +274,7 @@ def main():
     import PIL
     assert tuple(int(x) for x in re.findall(r"\d+", PIL.__version__)[:3]) >= (10, 0, 1), f"VISION: pillow {PIL.__version__}, 10.0.1 or later needed"
     setattr(model, "vision", True)
+    assert not vision_late or hasattr(model, "seq_run_again"), "VISION_LATE: qwen4exp only (the model's warm-up calls run again)"
     if not vision_late: vision = load_vision(mmproj)
 
   # warmup the JIT

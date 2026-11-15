@@ -90,8 +90,9 @@ def decode_picture(url:Any, deadline:float, max_tokens:int=VISION_MAX_TOKENS) ->
 class Picture:
   rgb:np.ndarray  # (h, w, 3) uint8 at its tower size
   digest:bytes    # sha256 of its pixels and size
+  factor:int = FACTOR  # (the pixels of a row each way: 32 Qwen, 28 GLM 5.3 Flash)
   @property
-  def grid(self) -> tuple[int, int]: return self.rgb.shape[0] // FACTOR, self.rgb.shape[1] // FACTOR  # (its rows' rows and columns)
+  def grid(self) -> tuple[int, int]: return self.rgb.shape[0] // self.factor, self.rgb.shape[1] // self.factor  # (its rows' rows and columns)
   @property
   def tokens(self) -> int: return self.grid[0] * self.grid[1]
   def ids(self) -> list[int]:
@@ -112,6 +113,18 @@ def data_url_bytes(url:Any) -> bytes:
   try: return base64.b64decode(data, validate=True)
   except (binascii.Error, ValueError) as e: raise PictureError(f"image_url data: URL is not valid base64 ({e})") from None
 
+# the tower's picture sizing (the server's: cli sets it with the tower): "qwen" (smart_resize, factor 32) or "glm5v" (glm_vision.canvas_size: the
+# picture at the top left of a black canvas aligned to 28, never upscaled; alpha dropped as llama.cpp's)
+SIZING:list[str] = ["qwen"]
+
+def tower_size(h:int, w:int, max_tokens:int) -> tuple[int, int, int, int, int]:
+  """a h x w picture's (canvas h, canvas w, content h, content w, factor) for the tower of SIZING with at most max_tokens rows"""
+  if SIZING[0] == "glm5v":
+    from tinygrad.llm.glm_vision import canvas_size, FACTOR as GF, MAX_PIXELS as GMAX
+    return (*canvas_size(h, w, max_pixels=min(GMAX, max_tokens * GF * GF)), GF)
+  hb, wb = smart_resize(h, w, max_pixels=max_tokens * FACTOR * FACTOR)
+  return hb, wb, hb, wb, FACTOR
+
 def load_picture(data:bytes, max_tokens:int=VISION_MAX_TOKENS) -> Picture:
   """
   a picture's file -> the picture at its tower size (64 .. max_tokens rows). its memory: the decoded file (3 or 4 bytes a pixel, at most
@@ -128,18 +141,18 @@ def load_picture(data:bytes, max_tokens:int=VISION_MAX_TOKENS) -> Picture:
       if max(h, w) / min(h, w) > 200: raise PictureError(f"image aspect ratio over 200: {w} x {h}")
       if getattr(f, "n_frames", 1) > 1: raise PictureError("animated images are not supported")
       # (the tower size of the file's orientation: an EXIF rotation swaps both)
-      hb, wb = smart_resize(h, w, max_pixels=max_tokens * FACTOR * FACTOR)
+      _, _, hb, wb, _ = tower_size(h, w, max_tokens)
       if f.format == "JPEG" and w >= 2 * wb and h >= 2 * hb: f.draft("RGB", (wb, hb))
       w, h = f.size
       if w * h > VISION_MAX_PIXELS: raise PictureError(f"image of {w} x {h} pixels: at most {VISION_MAX_PIXELS} pixels (the model sees a picture "
-                                                         f"resized to at most {max_tokens * FACTOR * FACTOR:,} pixels)")
+                                                         f"resized to at most {max_tokens * tower_size(h, w, max_tokens)[4] ** 2:,} pixels)")
       # (an image object no longer needed is closed: its pixels freed at once, not when the request ends)
       im:Image.Image = f
       if f.getexif().get(0x0112, 1) in (2, 3, 4, 5, 6, 7, 8):
         im = ImageOps.exif_transpose(f)
         f.close()
       # (transparency on white, as Qwen's own qwen-vl-utils to_rgb: HF's convert_rgb and llama.cpp drop alpha and keep the stored colour)
-      if im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info):
+      if SIZING[0] == "qwen" and (im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info)):
         rgba = im if im.mode == "RGBA" else im.convert("RGBA")
         if rgba is not im: im.close()
         alpha = rgba.getchannel("A")
@@ -152,12 +165,16 @@ def load_picture(data:bytes, max_tokens:int=VISION_MAX_TOKENS) -> Picture:
         im.close()
         im = rgb_im
       w, h = im.size
-      hb, wb = smart_resize(h, w, max_pixels=max_tokens * FACTOR * FACTOR)
+      ch, cw, hb, wb, factor = tower_size(h, w, max_tokens)
       rgb = np.ascontiguousarray(np.asarray(im.resize((wb, hb), Image.Resampling.BICUBIC) if (wb, hb) != (w, h) else im, dtype=np.uint8))
       im.close()
+      if (ch, cw) != (hb, wb):  # (glm5v: on a black canvas, at the top left)
+        canvas = np.zeros((ch, cw, 3), np.uint8)
+        canvas[:hb, :wb] = rgb
+        rgb = canvas
   except PictureError: raise
   except Exception as e: raise PictureError(f"image could not be decoded ({type(e).__name__}: {e})") from None
-  return Picture(rgb, hashlib.sha256(f"{hb}x{wb}:".encode() + rgb.tobytes()).digest())
+  return Picture(rgb, hashlib.sha256(f"{ch}x{cw}:".encode() + rgb.tobytes()).digest(), factor)
 
 def smart_resize(h:int, w:int, min_pixels:int=MIN_PIXELS, max_pixels:int=MAX_PIXELS, factor:int=FACTOR) -> tuple[int, int]:
   """the picture's size for the tower (HF smart_resize): sides multiples of factor, the area within the bounds, the aspect kept"""
@@ -171,19 +188,20 @@ def smart_resize(h:int, w:int, min_pixels:int=MIN_PIXELS, max_pixels:int=MAX_PIX
     hb, wb = math.ceil(h * beta / factor) * factor, math.ceil(w * beta / factor) * factor
   return hb, wb
 
-def patches(rgb:np.ndarray) -> tuple[np.ndarray, tuple[int, int]]:
+def patches(rgb:np.ndarray, patch:int=PATCH, mean:tuple[float, ...]=(0.5,)*3, std:tuple[float, ...]=(0.5,)*3) -> tuple[np.ndarray, tuple[int, int]]:
   """
-  rgb (h, w, 3) uint8 at its tower size -> (patches, grid): every 16 x 16 patch of the normalized picture as (c, t, py, px) (the 2 frames
-  of a still picture the same), the patches in 2 x 2 merge groups (HF's pixel_values order), grid (h/16, w/16)
+  rgb (h, w, 3) uint8 at its tower size -> (patches, grid): every patch x patch patch of the normalized picture as (c, t, py, px) (the 2
+  frames of a still picture the same), the patches in 2 x 2 merge groups (HF's pixel_values order), grid (h/patch, w/patch). Qwen: patch 16,
+  mean = std = 0.5; GLM 5.3 Flash (glm_vision): patch 14, CLIP's mean / std
   """
   h, w, _ = rgb.shape
-  assert h % FACTOR == 0 and w % FACTOR == 0, f"not a tower size: {w} x {h}"
-  x = (rgb.astype(np.float32) / 255.0 - 0.5) / 0.5                     # (h, w, c), mean = std = 0.5
-  gh, gw = h // PATCH, w // PATCH
+  assert h % (patch * MERGE) == 0 and w % (patch * MERGE) == 0, f"not a tower size: {w} x {h}"
+  x = (rgb.astype(np.float32) / 255.0 - np.array(mean, np.float32)) / np.array(std, np.float32)   # (h, w, c)
+  gh, gw = h // patch, w // patch
   x = x.transpose(2, 0, 1)[None].repeat(TEMPORAL, 0)                    # (t, c, h, w)
-  x = x.reshape(TEMPORAL, 3, gh // MERGE, MERGE, PATCH, gw // MERGE, MERGE, PATCH)
+  x = x.reshape(TEMPORAL, 3, gh // MERGE, MERGE, patch, gw // MERGE, MERGE, patch)
   x = x.transpose(2, 5, 3, 6, 1, 0, 4, 7)                               # (gh/2, gw/2, 2, 2, c, t, py, px)
-  return np.ascontiguousarray(x.reshape(gh * gw, 3 * TEMPORAL * PATCH * PATCH)), (gh, gw)
+  return np.ascontiguousarray(x.reshape(gh * gw, 3 * TEMPORAL * patch * patch)), (gh, gw)
 
 # ******** a picture in the prompt: the ids of its rows in the host's token lists (the prefix cache, the checkpoints and the stash match them; the
 # device's token buffer has the image pad id there), and the M-RoPE positions of a prompt's rows ********
@@ -286,6 +304,7 @@ def attn_pack(q:Tensor, k:Tensor, v:Tensor, km:Tensor) -> tuple[Tensor, Tensor]:
   return qh.contiguous(), Tensor.stack(kh, vh).reshape(2, 1, H, n, D).contiguous()
 
 class VisionTower:
+  patch = PATCH
   def __init__(self, state:dict[str, Tensor], kv:dict, devices:tuple[str, ...]|None=None, scratch:dict|None=None):
     """
     the weights stay F16 (0.90 GB), cast to float in the kernels that read them; the blocks spread over devices in contiguous runs (the
@@ -300,6 +319,19 @@ class VisionTower:
     from tinygrad import Device
     self.devices = devices or (Device.DEFAULT,)
     self.block_dev = [self.devices[i * len(self.devices) // self.depth] for i in range(self.depth)]
+    self._jits:dict[tuple[int, int, int], Any] = {}
+    self._inputs:dict[int, list[Tensor]] = {}
+    self._carries:dict[tuple[int, str], Tensor] = {}
+    self._plans:dict[int, list[tuple[int, int]]] = {}
+    self.kernels = bool(VISION_KERNELS) and amd_custom_kernels_supported(self.devices[0])
+    self._weights(state)
+
+  @property
+  def patch_dim(self) -> int: return 3 * TEMPORAL * self.patch * self.patch
+
+  def patches(self, rgb:np.ndarray) -> tuple[np.ndarray, tuple[int, int]]: return patches(rgb)
+
+  def _weights(self, state:dict[str, Tensor]):
     def g(k:str, d:str) -> Tensor: return state[k].to(d).realize()
     d0, dl = self.devices[0], self.devices[-1]
     # (the two temporal slices of the patch kernel: a still picture's two frames are the same)
@@ -311,11 +343,6 @@ class VisionTower:
     self.post_w, self.post_b = g("v.post_ln.weight", dl), g("v.post_ln.bias", dl)
     self.mm = [(g("mm.0.weight", dl), g("mm.0.bias", dl)), (g("mm.2.weight", dl), g("mm.2.bias", dl))]
     self._pos_np:np.ndarray|None = None
-    self._jits:dict[tuple[int, int, int], Any] = {}
-    self._inputs:dict[int, list[Tensor]] = {}
-    self._carries:dict[tuple[int, str], Tensor] = {}
-    self._plans:dict[int, list[tuple[int, int]]] = {}
-    self.kernels = bool(VISION_KERNELS) and amd_custom_kernels_supported(self.devices[0])
 
   @staticmethod
   def from_gguf(path:str|pathlib.Path, devices:tuple[str, ...]|None=None, scratch:dict|None=None, **kw) -> VisionTower:
@@ -419,7 +446,7 @@ class VisionTower:
     """
     b = bucket(1)
     while b <= bucket(max_tokens * MERGE * MERGE):
-      blank = (np.zeros((b, 3 * TEMPORAL * PATCH * PATCH), np.float32), (16, b // 16))
+      blank = (np.zeros((b, self.patch_dim), np.float32), (16, b // 16))
       for _ in range(2): self(*blank)
       st = time.perf_counter()
       self(*blank)
@@ -438,7 +465,7 @@ class VisionTower:
     """
     b = bucket(1)
     while b <= bucket(max_tokens * MERGE * MERGE):
-      self(np.zeros((b, 3 * TEMPORAL * PATCH * PATCH), np.float32), (16, b // 16))
+      self(np.zeros((b, self.patch_dim), np.float32), (16, b // 16))
       b *= 2
 
   def start(self, px:np.ndarray, grid:tuple[int, int]) -> TowerJob:

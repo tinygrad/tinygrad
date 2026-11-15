@@ -493,7 +493,7 @@ class SeqEngine:
 
   def _delta(self, ids:list[int]) -> int:
     """VISION: the rope delta after the pictures of a token list (0 without)"""
-    if not getattr(self.model, "vision", False) or min(ids, default=0) >= 0: return 0
+    if not getattr(self.model, "vision", False) or not getattr(self.model, "vision_mrope", True) or min(ids, default=0) >= 0: return 0
     from tinygrad.llm.qwen_vision import picture_runs, rope_delta
     return rope_delta(picture_runs(ids))
 

@@ -66,7 +66,7 @@ class TestVisionRunAgain(unittest.TestCase):
   def test_every_bucket_once(self):
     # (VISION: the tower's jits share the model's scratch: after the model's warm-up a blank picture of every bucket links them again)
     from tinygrad.llm.qwen_vision import VisionTower, bucket
-    tower = Mock()
+    tower = Mock(patch_dim=1536)
     VisionTower.run_again(tower, 1024)
     self.assertEqual([c.args[0].shape[0] for c in tower.call_args_list], [256, 512, 1024, 2048, 4096])
     self.assertTrue(all(c.args[1] == (16, c.args[0].shape[0] // 16) and c.args[0].shape[0] == bucket(c.args[0].shape[0])
