@@ -200,6 +200,27 @@ The six R2 sentences:
 - If the screen keeps coming back to the same few views, what you are doing does not work: try a wall, an edge or a direction you have not tried yet.
 - Read to the end everything a person says: it often says where to go next.
 
+## What each configuration cannot do
+
+**All three:** one server process a box and one start per VM boot; no second model beside it. The context is per conversation; a
+conversation longer than its window is refused, not truncated. Sampling is the model's own (temperature, top-p, top-k 20 for Qwen); no
+grammar-constrained decoding beyond the server's JSON `response_format` unfencing.
+
+**Qwen C2 and GLM Flash C5, pictures:** only `data:` URLs (base64) in `image_url` parts; an `http(s)` URL, a picture in a system message, a
+file over 20 MB or over 40 megapixels decoded, or more pictures a request than `VISION_MAX_IMAGES` (C2 1024, Pokemon 2048) is refused with a
+400 and its reason. A picture is resized to at most 1,024 rows of the model (about one megapixel); larger pictures lose detail, they are
+not tiled. No video, no audio.
+
+**Qwen C2:** 30 conversations a box at 262,144 tokens each. DeepSWE v1.1 58.05% (published 58.7%) and SWE-bench Pro: the table below.
+One request decodes at roughly 40 tokens a second on a full box (30 users), more on an idle one; not the 60 the board asked for.
+
+**GLM Flash C5:** 18 conversations a box (262,144 tokens each; the server's cap 524,288 is for scheduling, not one longer conversation).
+Two draft tokens a step (three measured slower for Pokemon).
+
+**GLM C9 (ts5):** text only: GLM-5.3 has no vision tower; a picture is refused. The 1M-token profile serves ONE 1M conversation at a
+time beside short ones (a second one waits); its first token at ~1M context takes ~15 minutes (885 s measured). Its power setting is
+the PSU's limit (<W>), not the cards' maximum; the bars against tinyamd1 are in the company repo `results/w-pf53/ts5-acceptance.md`.
+
 ## API and production environment contract (76 names)
 
 API sampling: a request without a temperature uses the model's GGUF `general.sampling.temp` and `top_p` (Qwen 3.8 Flash: 1.0 / 0.95); absent sampling metadata keeps the previous greedy behavior, explicit request values are unchanged, and startup logs report the defaults.
