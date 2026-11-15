@@ -115,8 +115,8 @@ def redacted(body:typing.Any) -> typing.Any:
   return body
 
 class RenderCache:
-  """(SERVE_RENDER_CACHE=0: off) a conversation's rendered text up to its last assistant message, kept: a request that repeats those messages
-  and adds no user message renders only the ones after it (a Pokemon step at 250K: the template over ~2,500 messages, ~80 ms, every request).
+  """(SERVE_RENDER_CACHE=1, off by default) a conversation's rendered text up to its last assistant message, kept: a request that repeats
+  those messages and adds no user message renders only the ones after it (a Pokemon step at 250K: the template over ~2,500 messages, ~80 ms).
   The text after the cut is the template's over the conversation's start (its system messages and first user message) and the new messages,
   less the start's own text: the same text where a message renders from itself, its neighbours' roles and the last user message (Qwen 3.x,
   GLM 5.x). A new user message (a template may then render older turns differently: preserve_thinking=False, clear_thinking): the full
@@ -942,7 +942,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.model_name, self.tok, self.template, self.top_p = model_name, tok, template, top_p
     self.temperature = temperature
     self.render_cache = RenderCache(template, check=getenv("SERVE_RENDER_CHECK", 64))
-    self.render_cache.on = bool(getenv("SERVE_RENDER_CACHE", 1))
+    self.render_cache.on = bool(getenv("SERVE_RENDER_CACHE", 0))
     # (VISION: the vision tower (qwen_vision.VisionTower), the rows of the last pictures it made (VISION_CACHE_MB))
     self.vision, self._pic_rows = vision, collections.OrderedDict[bytes, typing.Any]()
     self._tower_job: tuple[typing.Any, typing.Any]|None = None  # (VISION: the picture whose tower runs in slices, and its TowerJob)
