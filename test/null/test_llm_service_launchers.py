@@ -8,7 +8,7 @@ class TestLLMServiceLaunchers(unittest.TestCase):
   def command(self, script: str, extra_env: dict|None = None) -> str:
     env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"], "VISION_MMPROJ": ""}
     if extra_env is not None: env.update(extra_env)
-    return subprocess.check_output([SCRIPTS / script, "--print-command"], cwd=ROOT, text=True, env=env)
+    return subprocess.check_output([SCRIPTS / script, "--print-command"], cwd=ROOT, text=True, env=env, stderr=subprocess.STDOUT)
 
   def test_scripts_parse_and_help(self):
     self.assertTrue(all(p.stat().st_mode & 0o111 for p in SCRIPTS.glob("*.sh")))
@@ -44,7 +44,9 @@ class TestLLMServiceLaunchers(unittest.TestCase):
       self.assertIn(required, pokemon)
 
   def test_glm_production_environment_and_power_guard(self):
-    cmd = self.command("glm_14xr9700.sh")
+    cmd = self.command("glm_14xr9700.sh", {"VISION_MMPROJ": "/test-only/mmproj-F16.gguf"})
+    self.assertIn("VISION_MMPROJ=/test-only/mmproj-F16.gguf", cmd)
+    self.assertIn("PENDING: preview only", cmd)
     for required in (
       "DEV=PCI+AMD",
       "VFIO=1",
@@ -70,7 +72,7 @@ class TestLLMServiceLaunchers(unittest.TestCase):
                                                "FREQS_HOST": "1", "AMD_SCRATCH_MAX": "64", "SEQ_COPY_SCRATCH": "1",
                                                "LOAD_DEFER": "1", "AM_PERF_LEVEL": "high", "AM_CLOCKS": "GFXCLK=2000",
                                                "CLOCK_FAST": "GFXCLK=2000", "CLOCK_MANY": "GFXCLK=2000",
-                                               "CLOCK_PREFILL": "GFXCLK=2000"})
+                                               "CLOCK_PREFILL": "GFXCLK=2000", "VISION_MMPROJ": "/test-only/mmproj-F16.gguf"})
     for required in ("GLM_KV=q4", "--max_context 1048576", "SEQ_ROWS=1048576", "SEQ_SLOTS=16", "SEQ_MAX_ACTIVE=16",
                        "P2P_GLM5_OFF=1", "FREQS_HOST=1", "AMD_SCRATCH_MAX=64", "SEQ_COPY_SCRATCH=1", "LOAD_DEFER=1",
                        "AM_PERF_LEVEL=high", "AM_CLOCKS=GFXCLK=2000", "CLOCK_FAST=GFXCLK=2000",
@@ -100,8 +102,9 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     self.assertIn("GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf", cmd)
     self.assertNotIn("SPEC_DRAFTS=", cmd)  # D34 inherits GLM's default of two drafts.
     self.assertNotIn("AM_VM_RESET=1", cmd)
-    self.assertNotIn("VISION_MMPROJ=", cmd)  # Text-only by default.
+    self.assertIn("VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf", cmd)
     picture = self.command("glm_flash_6x7900xtx.sh", {"VISION_MMPROJ": "/home/runner/glmvis/mmproj-F16.gguf"})
+    self.assertEqual(picture, cmd)  # Empty/unset cannot produce a text-only production profile.
     for required in ("VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf", "VISION_KERNELS=1", "VISION_SLICE_MS=200",
                      "VISION_MAX_TOKENS=1024", "VISION_MAX_IMAGES=2048", "VISION_CACHE_MB=2048",
                      "VISION_URL_CACHE_MB=512", "VISION_BUCKETS=576", "SERVE_RENDER_CACHE=1"):

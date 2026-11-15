@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# C5/D34 production start-line NULL gate. Power is inert here; HIP-NULL supplies the RDNA3 renderer without an accelerator.
+# C5/D34 NULL-test harness. Text-only VISION_MMPROJ-unset loading is allowed only for this NULL/CPU test case.
+# Production C5 always requires the verified projector file; the service launcher and CLI have no text-only startup mode.
 set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"

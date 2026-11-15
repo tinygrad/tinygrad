@@ -10,7 +10,7 @@ XDG_CACHE_HOME=${XDG_CACHE_HOME:-$STATE_DIR/cache}
 PIDFILE=$STATE_DIR/service.pid
 LOGFILE=$STATE_DIR/service.log
 MODEL=$QWEN_WEIGHTS/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00004.gguf
-MMPROJ=$QWEN_WEIGHTS/mmproj/mmproj-F16.gguf
+MMPROJ=${VISION_MMPROJ:-$QWEN_WEIGHTS/mmproj/mmproj-F16.gguf}
 SERVER_ENV=(
   PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED=1 HOME="$HOME"
   DEV=AMD AM_MEC_PIPES=2 AM_IDLE_MS=1000 AM_POWER_LIMIT="$AM_POWER_LIMIT"
@@ -35,8 +35,10 @@ done
 COMMAND=(python3 -m tinygrad.llm --model "$MODEL" --shard 6 --max_context 262144 --serve "${PORT:-8000}")
 
 check_weights() {
+  [[ -s $MMPROJ ]] || { echo "VISION_MMPROJ is mandatory: no readable nonempty projector at $MMPROJ" >&2; return 2; }
   command -v sha256sum >/dev/null
   (cd "$QWEN_WEIGHTS" && sha256sum -c "$ROOT/extra/llm_service/qwen-v31.sha256")
+  printf '%s %s\n' '1f7b7f0b984cf065c604360c29c8098362ed61b290db0ff12c6f360bb1a8a980' "$MMPROJ" | sha256sum -c -
 }
 if [[ $ACTION == --print-command ]]; then
   printf '%q ' "${SERVER_ENV[@]}" "${COMMAND[@]}"; printf '\n'
@@ -68,6 +70,7 @@ elif [[ $ACTION == check-weights ]]; then
 else
   cat >&2 <<'USAGE'
 Usage: qwen_6x7900xtx.sh start|stop|status|check-weights|--print-command
+Vision is mandatory. The projector path/hash is checked before any model process is started.
 Defaults are the validated V3.1 six-card production profile. Overrides use the RUNNING.md contract.
 AM_FIRST_START=1 enables the single controlled AM reset. No process or GPU is touched by --print-command.
 USAGE

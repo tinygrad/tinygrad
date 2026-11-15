@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# New C9 NULL start-line gate. Power is inert here; production requires a separately verified value.
+# C9 NULL/CPU model-load/JIT harness, NOT a production start mode. No picture-engine claim is made.
+# C9 production is held pending an approved projector and GLM-5.3 picture integration. Power is separately held here too.
 set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"

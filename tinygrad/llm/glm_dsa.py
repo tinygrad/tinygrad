@@ -2416,7 +2416,6 @@ class Transformer(GLMSeqDriver):
       self._p2p_unwaited, self._p2p_slices = True, [*self._p2p_slices, a]
     self._p2p_mark = time.perf_counter()
 
-
   def _wait_host(self, get:Callable[[], Any], what:str) -> Any:
     """the value a step writes to host memory (polled: -1 until then). a step that doesn't come (the devices' errors): an error, not a hang"""
     st = time.perf_counter()

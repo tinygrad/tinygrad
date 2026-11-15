@@ -208,6 +208,16 @@ def server_sampling(kv:dict) -> dict[str, float]:
   """a request's temperature and top_p without its own: the model's recommended ones (general.sampling.* of its gguf; none: greedy, top_p 1)"""
   return {"temperature": float(kv.get("general.sampling.temp", 0.0)), "top_p": float(kv.get("general.sampling.top_p", 1.0))}
 
+def _production_vision_projector_missing() -> bool:
+  """Production has no text-only mode. The no-tower path is only for explicit NULL/CPU tests; unknown DEV fails closed."""
+  if all(d.strip().split(":", 1)[0].upper() in {"NULL", "CPU"} for d in getenv("DEV", "").split(",")):
+    return False
+  if not (mmproj := getenv("VISION_MMPROJ", "")): return True
+  try:
+    path = pathlib.Path(mmproj)
+    return not path.is_file() or path.stat().st_size == 0
+  except OSError: return True
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--model", "-m", default=list(models.keys())[0],
@@ -220,6 +230,9 @@ def main():
   parser.add_argument("--no_chat_template", action="store_true", help="Don't use the model's chat template, always use the fallback template")
   parser.add_argument("--shard", type=int, default=1, help="Tensor parallel device count")
   args = parser.parse_args()
+  if _production_vision_projector_missing():
+    parser.error("VISION_MMPROJ must name a nonempty projector file for every production engine instance; "
+                 "unset is only for explicit DEV=NULL or DEV=CPU tests")
   # (MEM_TRACE=1, a tree with extra/: the AM driver's live VRAM allocations by call site after the warmup (the server's workspace), or at an OOM)
   if (mem_trace:=getenv("MEM_TRACE")):
     import extra.mem_trace as mt

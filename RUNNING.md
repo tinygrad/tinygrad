@@ -1,12 +1,14 @@
 # Running the three production inference services
 
-Supported tree: `redqwenflash`, beginning at `5ce1f87eb2857a8c8d8cb3602dc7418f0fec4a79`; production deployments must record the exact commit in `DEPLOYED_COMMIT`. There are three products:
+Supported baseline: `redqwenflash` at `dd14c4748c0c02a962b622ea7447b63c8b7c5cd5`, including the delivery commits accompanying this document. Production deployments must record the exact commit in `DEPLOYED_COMMIT`. There are three product configurations:
 
 | Service | Model | Hardware | Context | Devices |
 |---|---|---|---:|---|
 | Qwen C2 | Qwen3.8 Flash Next UD-IQ4_XS **V3.1** + separate MTP + picture tower | 6x AMD 7900 XTX (RDNA3) | 262144 | `DEV=AMD`, 6 shards |
-| GLM Flash C5 | GLM-5.3 Flash UD-IQ3_XXS, D34 quality configuration | 6x AMD 7900 XTX (RDNA3) | 18 x 262144; 524288 server cap | `DEV=AMD`, 6 shards |
-| GLM C9 | GLM-5.3 UD-IQ4_XS | 14x AMD R9700 (RDNA4), ts5 | 262144 validated; 1048576 Phase-4 target pending | `DEV=PCI+AMD`, `VFIO=1`, 14 shards |
+| GLM Flash C5 | GLM-5.3 Flash UD-IQ3_XXS, D34 quality configuration + mandatory picture tower | 6x AMD 7900 XTX (RDNA3) | 18 x 262144; 524288 server cap | `DEV=AMD`, 6 shards |
+| GLM C9 | GLM-5.3 UD-IQ4_XS; **start held pending picture encoder/integration** | 14x AMD R9700 (RDNA4), ts5 | 262144 / 1048576 candidate contexts held pending vision | `DEV=PCI+AMD`, `VFIO=1`, 14 shards |
+
+**Vision is mandatory.** Every production engine instance loads its picture projector and handles picture requests. There is no production text-only option or `--no-vision` fallback. The launchers and CLI reject a missing or empty projector before model initialization. Leaving `VISION_MMPROJ` unset is permitted **only for tests with explicit `DEV=NULL` or `DEV=CPU`**; it is not an undocumented production mode.
 
 Only a machine's owner starts/stops service and only one GPU workload may use a box. Do not load the `amdgpu` kernel driver and do not run `modprobe`/DKMS: tinygrad's AM support drives the hardware. GPU jobs on shared infrastructure use its queue/ownership protocol. The three production launchers are `extra/llm_service/qwen_6x7900xtx.sh`, `glm_flash_6x7900xtx.sh` and `glm_14xr9700.sh` in this repository. VM/tunnel/proxy infrastructure is separate.
 
@@ -55,7 +57,7 @@ a4dba331fe92ffbd71317839cc1452c57f0b5b3f971a9e96ee5107f9a615cdac  GLM-5.3-Flash-
 
 These four SHA-256 values were computed from deployment files and match the independent Phase-2 reference. The recorded g1 production start selects this same four-shard model path; an argv path is not itself a fresh file hash, so verify the manifest before every start. Do not substitute the similarly named IQ4_XS five-shard or IQ1_M three-shard checkpoints.
 
-The optional GLM Flash picture tower uses `mmproj-F16.gguf` from the published `unsloth/GLM-5.3-Flash-GGUF` main branch: **1,128,047,296 bytes**, SHA-256 `922b809664d6a89cc1e40bfeaa63618000edc6651baf4082ce0718a784adf947`. A fresh picture VM copies it to `/home/runner/glmvis/mmproj-F16.gguf` (it is not under `/weights`); a different installation path is valid only if that byte content matches. Verify it before every picture start.
+The mandatory GLM Flash picture tower uses `mmproj-F16.gguf` from the published `unsloth/GLM-5.3-Flash-GGUF` main branch: **1,128,047,296 bytes**, SHA-256 `922b809664d6a89cc1e40bfeaa63618000edc6651baf4082ce0718a784adf947`. A fresh picture VM copies it to `/home/runner/glmvis/mmproj-F16.gguf` (it is not under `/weights`); a different installation path is valid only if that byte content matches. Verify it before every production start.
 
 ### GLM C9 production set
 
@@ -111,48 +113,33 @@ bash extra/llm_service/glm_flash_6x7900xtx.sh --print-command
 bash extra/llm_service/glm_flash_6x7900xtx.sh start
 ```
 
-The fixed engine invocation is `python3 -m tinygrad.llm --model /weights/GLM-5.3-Flash-UD-IQ3_XXS/GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf --shard 6 --max_context 524288 --serve 8000`. D34 ran at 225 W/card. Leave `SPEC_DRAFTS` and `SPEC_DRAFTS_BY_SIZE` unset: D34 inherits two drafts. Use `AM_FIRST_START=1` only for the first controlled start, not ordinary restarts. `status` and `stop` use the launcher's state dir. With `VISION_MMPROJ` unset or empty, this tree's C5 endpoint is **text-only**. Picture support is opt-in, with unchanged capacity `SEQ_ROWS=3916800` for 18 slots:
+The fixed engine invocation is `python3 -m tinygrad.llm --model /weights/GLM-5.3-Flash-UD-IQ3_XXS/GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf --shard 6 --max_context 524288 --serve 8000`. D34 ran at 225 W/card. Leave `SPEC_DRAFTS` and `SPEC_DRAFTS_BY_SIZE` unset: D34 inherits two drafts. Use `AM_FIRST_START=1` only for the first controlled start, not ordinary restarts. `status` and `stop` use the launcher's state dir. Every C5 start requires `VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf` (or the byte-identical file at another installation path), with unchanged capacity `SEQ_ROWS=3916800` for 18 slots:
 
 ```bash
 VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf extra/llm_service/glm_flash_6x7900xtx.sh start
 ```
 
-The opt-in path sets `VISION_KERNELS=1`, `VISION_SLICE_MS=200`, `VISION_MAX_TOKENS=1024`, `VISION_MAX_IMAGES=2048`, `VISION_CACHE_MB=2048`, `VISION_URL_CACHE_MB=512`, `VISION_BUCKETS=576`, and `SERVE_RENDER_CACHE=1`. `VISION_LATE` is removed: the unmeasured alternate startup order is gone. Model-first tower setup and the independent relink/run-again machinery remain. Only the optional picture profile adds tower, graph and cache memory; it does not change rows or draft counts.
+Every start sets `VISION_KERNELS=1`, `VISION_SLICE_MS=200`, `VISION_MAX_TOKENS=1024`, `VISION_MAX_IMAGES=2048`, `VISION_CACHE_MB=2048`, `VISION_URL_CACHE_MB=512`, `VISION_BUCKETS=576`, and `SERVE_RENDER_CACHE=1`. `VISION_LATE` is removed: the unmeasured alternate startup order is gone. Model-first tower setup and the independent relink/run-again machinery remain. This mandatory profile adds tower, graph and cache memory to every start; it does not change rows or draft counts.
 
 With `SESSION_END_TOKEN` unset (the default), explicit backend session-end calls return the expected **403 `backend_session_end_disabled`**, not generation failures. An integrated proxy releases its own session bookkeeping, while backend conversations remain in bounded 18-slot residency until reuse, NONDROP eviction or restart; `ended_dropped=0` only counts processed explicit ends and is **not** proof of backend memory release. Actual coordinated cleanup requires a matching out-of-band token on proxy and backends plus active/completed/duplicate-end tests (including resident/stash drops, `already_ended` and later admissions); never expose the secret in `--print-command`, and enabling the endpoint alone does not move model-seat release before verifier execution.
 
-### GLM C9, on ts5
+### GLM C9, on ts5 — held pending mandatory vision
 
-The validated start below is 262144 context per user. Phase 4 requires 1048576 context per user, but that capacity profile, its power limit and its quality/stability gates are still owner work; do not claim this command is a validated 1M deployment. Do not start C9 with the former 210 W default. Set the power value only after the completed verification establishes it, then run the complete environment:
+**C9 cannot currently satisfy the mandatory picture contract.** The publisher/compatible projector file and hash are not yet established, and `glm_dsa` has no approved picture-input integration. No production start recipe is offered. The launcher rejects missing/empty/nonexistent projectors and still refuses start with an arbitrary file until that integration is approved and verified. `--print-command` requires the path and emits `PENDING: preview only` on stderr; it is not a runnable deployment command. Do not substitute the GLM Flash projector or infer that supplying a file gives full GLM-5.3 picture support.
 
-```bash
-export GLM53_POWER_LIMIT=<GLM_OWNER_VERIFIED_WATTS>
-sudo -n env HOME="$HOME" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED=1 \
-  DEV=PCI+AMD VFIO=1 AM_POWER_LIMIT="$GLM53_POWER_LIMIT" \
-  MLA_SEQ_SHARD=1 WARMUP_PARALLEL=1 IQ2S_K256=1 \
-  HOST_STASH=0 HOST_MIN=4096 SLOT_HOST=1 SLOT_CKPT=1 \
-  SPEC_DRAFTS=2 SPEC_DRAFTS_BY_SIZE=1:2,2:2,4:3,8:3,16:3 SEQ_WARMUP_ONLY= \
-  GLM_SEQ=1 GLM_ATTN_GRP=3 SEQ_GATHER_UNION=65536 P2P_AR_TIMEOUT_MS=20000 \
-  SEQ_ROWS=268800 SEQ_SLOTS=32 SEQ_SIZES=1,4,8,16 SEQ_MAX_ACTIVE=32 \
-  SEQ_STASH_GB=0 SEQ_STASH_ENTRIES=128 LOAD_DEFER=1 \
-  PREFILL_CHUNK=4032 PREFILL_SIZES=1344,2688 PREFILL_BIG_ALONE=2 \
-  MODEL_ALIASES=zai-org/GLM-5.3 MODEL_OWNED_BY=tinygrad XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache/tinygrad}" \
-  python3 -m tinygrad.llm \
-  --model /raid/weights/GLM-5.3-UD-IQ4_XS/GLM-5.3-UD-IQ4_XS-00001-of-00009.gguf \
-  --shard 14 --max_context 262144 --serve 8000
-```
+The nine model-shard hashes above remain the required immutable text-model inputs. A valid projector hash/file and picture-row memory budget will be added here only after the encoder and engine facts are established. Production must then verify a real picture request, text identity, effective environment and memory on all 14 cards before release.
 
-C9 therefore uses 14 shards and the `zai-org/GLM-5.3` alias.
+The power gate also remains: never use the former 210 W default. `GLM53_POWER_LIMIT` has no accepted numeric default until the owner's verification completes. These are independent blockers, not permission to fall back to text-only serving.
 
-Owner-supplied **Phase-4 item 7 candidate (not a validated 1M deployment):** `GLM_KV=q4` with `--max_context 1048576`, `SEQ_ROWS=1048576`, `SEQ_SLOTS=16`, `SEQ_MAX_ACTIVE=16`, `P2P_GLM5_OFF=1`, `FREQS_HOST=1`, `AMD_SCRATCH_MAX=64`, `SEQ_COPY_SCRATCH=1` and `LOAD_DEFER=1`; `MAX_CONTEXT=1048576` to the launcher. These profile values must pass new-device start, memory, q4 greedy and 4k/64k/262k checks. Keep individual `GLM_KV`, `SEQ_FP8`, and `SEQ_KV4` toggles owner-controlled, including the half and fp8 alternatives. Do not apply this profile to a default C9 server or claim a 1M result. The existing validated start remains 262144 per user, and power remains **PENDING** until its soak verification. Require all 14 cards, expected effective env, `GET /v1/models`, healthy `GET /status`, then a small text request. The supported wrapper is `GLM53_POWER_LIMIT=$GLM53_POWER_LIMIT extra/llm_service/glm_14xr9700.sh start`; its `stop` action SIGTERMs the recorded process group and confirms exit. Rollback uses the previous immutable tree and matching validated profile.
+The cache/profile work is preserved for integration and tests, not removed. The owner-supplied **Phase-4 item 7 candidate (not a validated 1M deployment)** is `GLM_KV=q4`, with `--max_context 1048576`, `SEQ_ROWS=1048576`, `SEQ_SLOTS=16`, `SEQ_MAX_ACTIVE=16`, `P2P_GLM5_OFF=1`, `FREQS_HOST=1`, `AMD_SCRATCH_MAX=64`, `SEQ_COPY_SCRATCH=1` and `LOAD_DEFER=1`; `MAX_CONTEXT=1048576` forwards to the launcher. Default C9 remains half when `GLM_KV` is unset, and `SEQ_KV4` remains another explicit q4 selector. Keep `GLM_KV`, `SEQ_FP8` and `SEQ_KV4` individual rather than globally forcing one format. Both the 262144 and candidate 1048576 contexts still require new hardware memory, greedy 4k/64k/262k and multiuser checks once picture support exists. NULL direct-model/JIT tests do not validate those results.
 
-## Pokemon opt-in profiles (RUN 14 and G3)
+## Pokemon workflow profiles (RUN 14 and G3)
 
-Use one fresh six-card 7900 XTX VM and **one server start per boot**; changing a profile requires a fresh VM. These are owner-proven launch profiles, not replacements for the validated C2/D34 defaults.
+These are workflow opt-ins (the games), **not opt-in vision**. Vision is mandatory in every production start. Use one fresh six-card 7900 XTX VM and **one server start per boot**; changing a profile requires a fresh VM. These are owner-proven launch profiles, not replacements for the validated C2/D34 defaults.
 
 **Qwen RUN 14:** start the C2 launcher with `SPEC_DRAFTS=3`, `VISION_MAX_IMAGES=2048`, `VISION_CACHE_MB=2048`, `SERVE_RENDER_CACHE=1`, `PREFILL_SIZES=192,384,1152`, plus **`VISION_SLICE_MS=300` and `VISION_URL_CACHE_MB=256`**. These two values are RUN 14's unset/code defaults; they are not C2's validated `VISION_SLICE_MS=200` and `VISION_URL_CACHE_MB=512`. Keep `VISION_KERNELS=1`, `VISION_MMPROJ=/weights/Qwen3.8-Flash-Next-UD-IQ4_XS-V31/mmproj/mmproj-F16.gguf`, 262144 max_context and the rest of the C2 line. `SESSION_END_TOKEN` comes from the VM's mode-600 secret file and is never printed. Qwen's published vision buckets remain the power-of-two buckets plus any optional measured addition, not an assumed 384.
 
-**GLM RUN G3:** use the C5 tower opt-in `/home/runner/glmvis/mmproj-F16.gguf`, `VISION_KERNELS=1`, `VISION_SLICE_MS=200`, `VISION_MAX_TOKENS=1024`, `VISION_MAX_IMAGES=2048`, `VISION_CACHE_MB=2048`, `VISION_URL_CACHE_MB=512`, `VISION_BUCKETS=576`, `SERVE_RENDER_CACHE=1` and `AM_POWER_LIMIT=250` on this host. Capacity remains `SEQ_ROWS=3916800`, 18 slots/18 max active and default draft 2. The real served value comes before raw rendering cache experiments, so future Pokemon phase defaults should only be enabled after their matched correctness checks.
+**GLM RUN G3:** keep the mandatory C5 tower at `/home/runner/glmvis/mmproj-F16.gguf`, `VISION_KERNELS=1`, `VISION_SLICE_MS=200`, `VISION_MAX_TOKENS=1024`, `VISION_MAX_IMAGES=2048`, `VISION_CACHE_MB=2048`, `VISION_URL_CACHE_MB=512`, `VISION_BUCKETS=576`, `SERVE_RENDER_CACHE=1` and `AM_POWER_LIMIT=250` on this host. Capacity remains `SEQ_ROWS=3916800`, 18 slots/18 max active and default draft 2. The real served value comes before raw rendering cache experiments, so future Pokemon phase defaults should only be enabled after their matched correctness checks.
 
 Game harness on teeny (separate install, commit 08ffddb):
 
@@ -199,7 +186,7 @@ Any setting not listed here is not supported: its production value is compiled i
 | `SPEC_DRAFTS_BY_SIZE` | empty | empty | 1:2,2:2,4:3,8:3,16:3 | Draft count by active batch size. |
 | `VFIO` | auto/unset | auto/unset | 1 | Device pass-through mode. |
 | `AM_VM_RESET` | controlled first start only | controlled first start only | controlled first start only | Permission to reset AM hardware once; ordinary starts forbid it. |
-| `VISION_MMPROJ` | picture servers set path | unset; text-only | n/a | Picture-projection GGUF location. |
+| `VISION_MMPROJ` | required, verified nonempty file | required, verified nonempty file | required future projector; engine/start held | Mandatory picture-projection GGUF; no production text-only mode. |
 
 ### Additional C5/D34 hardware/model contracts (17)
 
@@ -244,13 +231,13 @@ Any setting not listed here is not supported: its production value is compiled i
 | `SESSION_END_TOKEN` | required for admin endpoint | Bearer credential for session termination. |
 | `SERVE_RENDER_CACHE` | 0/off; C5 tower 1 | Optional chat-template render cache; memoized renders can change server-side cache behavior, so enable only with output-identical API tests and expected cache controls. |
 | `VISION_BUCKETS` | unset otherwise; C5 tower 576 | Additional picture-token tower buckets for frequent image sizes. Every extra bucket adds warm-up time and graph memory; run every bucket again and leave unset unless measured useful. |
-| `VISION_CACHE_MB` | C2 profile 1024; optional C5 tower 2048 | Maximum host RAM for cached picture rows/profile features: this many MB stays resident when full, in addition to decoded pictures and engine state. Size a shared service from measured RSS, not either dedicated-box profile. |
+| `VISION_CACHE_MB` | C2 profile 1024; C5 required tower 2048 | Maximum host RAM for cached picture rows/profile features: this many MB stays resident when full, in addition to decoded pictures and engine state. Size a shared service from measured RSS, not either dedicated-box profile. |
 | `VISION_URL_CACHE_MB` | dedicated picture profile 512 | Maximum host RAM for decoded pictures keyed by data-URL hash: up to this many MB avoids repeated decoding but remains resident beside the row cache and engine state. Reduce it for a shared service after measuring its working set. |
 | `VISION_DECODERS` | 2 | Concurrent picture decode workers. |
 | `VISION_DECODE_WAIT` | 30 s | Picture decode deadline. |
 | `VISION_MAX_BODY_MB` | 32 | HTTP request body cap. |
 | `VISION_MAX_BYTES` | 20000000 | Encoded bytes allowed for one picture. |
-| `VISION_MAX_IMAGES` | C2 1024; optional C5 tower 2048; many-customer default 8, typical explicit limit 8–32 | Maximum pictures per request. Each can consume up to the byte/pixel/token caps plus decode, tower and queue work; the dedicated 1024 limit admits far more concurrent work and cache pressure. |
+| `VISION_MAX_IMAGES` | C2 1024; C5 required tower 2048; many-customer default 8, typical explicit limit 8–32 | Maximum pictures per request. Each can consume up to the byte/pixel/token caps plus decode, tower and queue work; the dedicated 1024 limit admits far more concurrent work and cache pressure. |
 | `VISION_MAX_PIXELS` | 40000000 | Decoded pixel cap per picture. |
 | `VISION_MAX_TOKENS` | 1024 | Picture token-row/tower memory cap. |
 | `VISION_SLICE_MS` | 200 in validated picture services; generic default 300 | Target picture work per scheduler slice. |
