@@ -61,8 +61,10 @@ cuda_81616 = [mma(16,di,do) for di,do in [(dtypes.half,dtypes.float),(dtypes.bfl
 cuda_81632_f8 = [mma(32,di,dtypes.float) for di in [dtypes.fp8e4m3, dtypes.fp8e5m2]]
 cuda_8168_f16 = [mma(8,dtypes.half,do) for do in [dtypes.float, dtypes.half]]
 cuda_8168_tf32 = [mma(8,dtypes.float,dtypes.float)]
+# mma.sync m16n8k16 with s8 inputs / s32 accumulate, supported from sm_80
+cuda_81616_i8 = [mma(16,dtypes.int8,dtypes.int32)]
 cuda_sm75: list[TensorCore] = cuda_8168_f16
-cuda_sm80: list[TensorCore] = cuda_81616 + cuda_8168_f16 + cuda_8168_tf32
+cuda_sm80: list[TensorCore] = cuda_81616 + cuda_81616_i8 + cuda_8168_f16 + cuda_8168_tf32
 cuda_sm89: list[TensorCore] = cuda_sm80 + cuda_81632_f8
 
 def get_cuda(arch): return cuda_sm89 if (ver:=int(arch[3:])) >= 89 else cuda_sm80 if ver >= 80 else cuda_sm75 if ver >= 75 else []
