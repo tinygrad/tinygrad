@@ -1241,6 +1241,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       if not 0 < n <= len(t) or not (t[0] == ids[0] or (t[0] < 0 and ids[0] == pad)): continue
       if id(t) not in walks: walks[id(t)] = common_prefix_pictures(t, ids, pad, pads)
       i, j = walks[id(t)]
+      # (one that goes on past the whole prompt (i: all of ids shared) is longer than its text: never its prefix. Not decoded (g5 Nov 14: a
+      # finished run of the same game kept, every request of the next run decoded its 260K tokens to fail: +0.08 s prep a step))
+      if i == len(ids) and j < n: continue
       # (text ones as reuse_tokens takes them: 1,000 tokens at least and not 1,000 more than the prompt)
       if min(t[:max(j, 1)]) >= 0 and not 1000 <= n < len(ids) + 1000: continue
       if j >= n: exact = max(exact, n)
