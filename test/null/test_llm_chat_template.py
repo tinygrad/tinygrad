@@ -7,6 +7,7 @@ from tinygrad.llm.cli import chat_template
 from tinygrad.llm.serve import normalize_messages, RenderCache
 
 QWEN = (pathlib.Path(__file__).parent / "qwen38_chat_template.jinja").read_text()
+GLM = (pathlib.Path(__file__).parent / "glm53_chat_template.jinja").read_text()
 TOK = types.SimpleNamespace(bos_id=None, eos_id=0, decode=lambda ids: "<|im_end|>")
 
 def stock(ct:str):
@@ -118,7 +119,25 @@ class TestRenderCache(unittest.TestCase):
     # (a user message every step: hits where the template renders older turns the same after it (preserve_thinking=True), else every request
     # in full)
     self.assertGreater(self.grow(QWEN, pi_picture_conversation(60), step=3).hits, 55)
-    self.assertEqual(self.grow(QWEN, pi_picture_conversation(20), step=3, preserve_thinking=False).hits, 0)
+    # (preserve_thinking=False / clear_thinking: the turns before the last cut had a user message after them in the kept request too: hits)
+    self.assertEqual(self.grow(QWEN, pi_picture_conversation(20), step=3, preserve_thinking=False).hits, 19)
+    self.assertEqual(self.grow(GLM, pi_picture_conversation(20), step=3, preserve_thinking=None, clear_thinking=True).hits, 19)
+    self.assertEqual(self.grow(GLM, pi_picture_conversation(20), step=3, preserve_thinking=None, clear_thinking=False).hits, 19)
+  def test_user_message_gone(self):
+    # (the kept request had a user message after its cut, this one has none (a tool's message instead): its last turn keeps its reasoning
+    # with preserve_thinking=False: the full render; the tool's response wrapped in a user message: Qwen does not count it as one)
+    conv = pi_picture_conversation(5)
+    normalize_messages(conv, images=True)
+    t = chat_template(QWEN, TOK)
+    for last in ({"role": "tool", "tool_call_id": "t3", "content": "again"}, {"role": "user", "content": "<tool_response>x</tool_response>"}):
+      rc = RenderCache(t, check=0)
+      rc.render(copy.deepcopy(conv[:13]), tools=TOOLS, preserve_thinking=False)
+      ms = copy.deepcopy(conv[:12]) + [last]
+      self.assertEqual(rc.render(ms, tools=TOOLS, preserve_thinking=False),
+                       t.render(messages=ms, tools=TOOLS, add_generation_prompt=True, preserve_thinking=False))
+      self.assertEqual(rc.hits, 0)
+  def test_glm_agent(self):
+    self.assertGreater(self.grow(GLM, agent_conversation(30), step=1, preserve_thinking=None, clear_thinking=True).hits, 35)
   def test_arguments(self):
     self.assertGreater(self.grow(QWEN, picture_conversation(20), enable_thinking=False).hits, 10)
     self.assertGreater(self.grow(QWEN, agent_conversation(10), step=1, reasoning_effort="low").hits, 10)
