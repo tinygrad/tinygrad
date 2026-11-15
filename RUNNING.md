@@ -136,11 +136,11 @@ sudo -n env HOME="$HOME" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED
 
 C9 therefore uses 14 shards, exact half cache rows and the `zai-org/GLM-5.3` alias. Require all 14 cards, expected effective env, `GET /v1/models`, healthy `GET /status`, then a small text request. The supported wrapper is `GLM53_POWER_LIMIT=$GLM53_POWER_LIMIT extra/llm_service/glm_14xr9700.sh start`; its `stop` action SIGTERMs the recorded process group and confirms exit. Rollback uses the previous immutable tree and matching validated profile.
 
-## API and production environment contract (77 names)
+## API and production environment contract (80 names)
 
 API sampling: a request without a temperature uses the model's GGUF `general.sampling.temp` and `top_p` (Qwen 3.8 Flash: 1.0 / 0.95); absent sampling metadata keeps the previous greedy behavior, explicit request values are unchanged, and startup logs report the defaults.
 
-There are 58 settings from the C2/C9 cleanup survival registry plus 19 exposed by the C5/D34 production contract. Count: 39 launcher-contract settings, 26 operator knobs, 12 short diagnostics (77 total, under the 80-name target).
+There are 58 settings from the C2/C9 cleanup survival registry plus 19 exposed by the C5/D34 production contract and 3 rendering/bucket controls. Count: 39 launcher-contract settings, 28 operator knobs, 13 short diagnostics (80 total, at the 80-name limit).
 
 Any setting not listed here is not supported: its production value is compiled into the tree. Values below are launch defaults/current validated profiles, not permission to run arbitrary combinations. Capacity, sharding and cache-format changes require their own real-memory and text gates. Empty means disabled/unset.
 
@@ -193,7 +193,7 @@ Any setting not listed here is not supported: its production value is compiled i
 | `RING_MAXW` | 32768 | Ring collective window for this six-card profile. |
 | `RING_RS_LIKE_COPIES` | 0 | Copy routing around reduce-scatter-like collectives. |
 
-### Operator knobs documented for operations (26)
+### Operator knobs documented for operations (28)
 
 | Name | Default/profile | Purpose |
 |---|---|---|
@@ -212,6 +212,8 @@ Any setting not listed here is not supported: its production value is compiled i
 | `SEQ_STASH_CTX` | 32768 | Minimum context eligible for stash retention. |
 | `SEQ_STICKY` | 180 s | Idle-conversation residency grace period. |
 | `SESSION_END_TOKEN` | required for admin endpoint | Bearer credential for session termination. |
+| `SERVE_RENDER_CACHE` | 0/off | Optional chat-template render cache; memoized renders can change server-side cache behavior, so enable only with output-identical API tests and expected cache controls. |
+| `VISION_BUCKETS` | empty (normal power-of-two shapes) | Additional picture-token tower buckets for frequent image sizes. Every extra bucket adds warm-up time and graph memory; run every bucket again and leave unset unless measured useful. |
 | `VISION_CACHE_MB` | dedicated picture profile 1024 | Maximum host RAM for cached picture rows/profile features: this many MB stays resident when full, in addition to decoded pictures and engine state. Size a shared service from measured RSS, not this dedicated-box profile. |
 | `VISION_URL_CACHE_MB` | dedicated picture profile 512 | Maximum host RAM for decoded pictures keyed by data-URL hash: up to this many MB avoids repeated decoding but remains resident beside the row cache and engine state. Reduce it for a shared service after measuring its working set. |
 | `VISION_DECODERS` | 2 | Concurrent picture decode workers. |
@@ -224,7 +226,9 @@ Any setting not listed here is not supported: its production value is compiled i
 | `VISION_SLICE_MS` | 300 default; validated service overrides exist | Target picture work per scheduler slice. |
 | `WARMUP_JITS` | C5/D34 `all` | Named start-time JIT subset; `all` warms every supported production graph. |
 
-### Short diagnostics list (12)
+### Short diagnostics list (13)
+
+These are off unless diagnosing or validating. `SERVE_RENDER_CHECK=64` checks that many cached chat-template renders byte for byte; compare ordinary and cached modes before enabling `SERVE_RENDER_CACHE`. Keep those validation runs separate from the shared picture service.
 
 These are off unless diagnosing or validating. Never enable fault injection in customer service. `DEBUG_LOAD`, `MEM_TRACE`, `AMD_SCRATCH_LOG`, `KPROF` (with `KPROF_TOP=30`), `LIN_NAMES`, `TELEMETRY_LOG=<jsonl-path>`, `SERVE_TRACE=<trace-path>`, `DISABLE_AMD_KERNELS=1` for generic-kernel reference runs, `RING_RDNA4=1` only on an owned RDNA4 validation job, `SEQ_WARMUP_ONLY=<named-subset>` only for startup diagnosis (empty performs the full production warm-up), and `P2P_FAKE_RUNOUT=1` only for fault-injection tests.
 
