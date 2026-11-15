@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.dtype import DType
-from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite
 from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
@@ -20,6 +20,13 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
       needed |= si_bufs
     else: onetime.append(si)
   return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
+
+# a var bound inside the jitted function can't change, so it's a const in that call's kernel
+def bake_binds(ctx:dict[str, int], call:UOp, sink:UOp) -> UOp:
+  vals = {s.expr:s.arg.val for s in call.src[1:] if s.is_bound_var and s.expr not in ctx}
+  consts = {p:p.const_like(vals[p.expr]) for p in sink.toposort() if p.is_variable and p.expr in vals}
+  return call.replace(src=(sink.substitute(consts), *call.src[1:]))
+pm_bake_binds = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), bake_binds)])
 
 @rewrite_group(lambda linear,held_bufs,input_uops,input_vars,ret=(): f"JIT {pluralize('call', len(linear.src))}")
 def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], input_vars:dict[str, int]) -> UOp:
@@ -145,6 +152,7 @@ class _TinyJit(Generic[ReturnType]):
 
       # combine all captured linears into one, memory plan, and compile
       big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
+      big_linear = graph_rewrite(big_linear, pm_bake_binds, ctx=var_vals, walk=True)
       del self._linears
 
       if self.prune:
