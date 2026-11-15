@@ -119,7 +119,7 @@ The fixed engine invocation is `python3 -m tinygrad.llm --model /weights/GLM-5.3
 VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf extra/llm_service/glm_flash_6x7900xtx.sh start
 ```
 
-Every start sets `VISION_KERNELS=1`, `VISION_SLICE_MS=200`, `VISION_MAX_TOKENS=1024`, `VISION_MAX_IMAGES=2048`, `VISION_CACHE_MB=2048`, `VISION_URL_CACHE_MB=512`, `VISION_BUCKETS=576`, and `SERVE_RENDER_CACHE=1`. `VISION_LATE` is removed: the unmeasured alternate startup order is gone. Model-first tower setup and the independent relink/run-again machinery remain. This mandatory profile adds tower, graph and cache memory to every start; it does not change rows or draft counts.
+The mandatory C5 baseline sets **`VISION_MMPROJ`, `VISION_KERNELS=1`, and `VISION_BUCKETS=576` only**. The benchmark's validated `/proc` limits leave `VISION_SLICE_MS`, `VISION_MAX_TOKENS`, `VISION_MAX_IMAGES`, `VISION_CACHE_MB`, `VISION_URL_CACHE_MB` and `SERVE_RENDER_CACHE` unset, using their engine defaults. Only the explicitly named Pokemon G3 profile forwards those six values (`200`, `1024`, `2048`, `2048`, `512`, `1`); they are not injected into the benchmark/deploy default. `VISION_LATE` is removed: model-first tower setup and independent relink/run-again remain. Mandatory tower memory/warm-up does not change model rows or draft counts. Flash's solo evidence establishes this launch configuration and picture availability, not a new multiuser or exactness pass.
 
 With `SESSION_END_TOKEN` unset (the default), explicit backend session-end calls return the expected **403 `backend_session_end_disabled`**, not generation failures. An integrated proxy releases its own session bookkeeping, while backend conversations remain in bounded 18-slot residency until reuse, NONDROP eviction or restart; `ended_dropped=0` only counts processed explicit ends and is **not** proof of backend memory release. Actual coordinated cleanup requires a matching out-of-band token on proxy and backends plus active/completed/duplicate-end tests (including resident/stash drops, `already_ended` and later admissions); never expose the secret in `--print-command`, and enabling the endpoint alone does not move model-seat release before verifier execution.
 
@@ -229,15 +229,15 @@ Any setting not listed here is not supported: its production value is compiled i
 | `SEQ_STASH_CTX` | 32768 | Minimum context eligible for stash retention. |
 | `SEQ_STICKY` | 180 s | Idle-conversation residency grace period. |
 | `SESSION_END_TOKEN` | required for admin endpoint | Bearer credential for session termination. |
-| `SERVE_RENDER_CACHE` | 0/off; C5 tower 1 | Optional chat-template render cache; memoized renders can change server-side cache behavior, so enable only with output-identical API tests and expected cache controls. |
+| `SERVE_RENDER_CACHE` | unset in the C5 benchmark default; explicit G3 opt-in 1 | Optional chat-template render cache; memoized renders can change server-side cache behavior, so enable only with output-identical API tests and expected cache controls. |
 | `VISION_BUCKETS` | unset otherwise; C5 tower 576 | Additional picture-token tower buckets for frequent image sizes. Every extra bucket adds warm-up time and graph memory; run every bucket again and leave unset unless measured useful. |
-| `VISION_CACHE_MB` | C2 profile 1024; C5 required tower 2048 | Maximum host RAM for cached picture rows/profile features: this many MB stays resident when full, in addition to decoded pictures and engine state. Size a shared service from measured RSS, not either dedicated-box profile. |
+| `VISION_CACHE_MB` | C2 profile 1024; unset in the C5 benchmark/default; explicit G3 opt-in 2048 | Maximum host RAM for cached picture rows/profile features: this many MB stays resident when full, in addition to decoded pictures and engine state. Size a shared service from measured RSS, not either dedicated-box profile. |
 | `VISION_URL_CACHE_MB` | dedicated picture profile 512 | Maximum host RAM for decoded pictures keyed by data-URL hash: up to this many MB avoids repeated decoding but remains resident beside the row cache and engine state. Reduce it for a shared service after measuring its working set. |
 | `VISION_DECODERS` | 2 | Concurrent picture decode workers. |
 | `VISION_DECODE_WAIT` | 30 s | Picture decode deadline. |
 | `VISION_MAX_BODY_MB` | 32 | HTTP request body cap. |
 | `VISION_MAX_BYTES` | 20000000 | Encoded bytes allowed for one picture. |
-| `VISION_MAX_IMAGES` | C2 1024; C5 required tower 2048; many-customer default 8, typical explicit limit 8–32 | Maximum pictures per request. Each can consume up to the byte/pixel/token caps plus decode, tower and queue work; the dedicated 1024 limit admits far more concurrent work and cache pressure. |
+| `VISION_MAX_IMAGES` | C2 1024; C5 benchmark/engine default; explicit G3 opt-in 2048; many-customer default 8, typical explicit limit 8–32 | Maximum pictures per request. Each can consume up to the byte/pixel/token caps plus decode, tower and queue work; the dedicated 1024 limit admits far more concurrent work and cache pressure. |
 | `VISION_MAX_PIXELS` | 40000000 | Decoded pixel cap per picture. |
 | `VISION_MAX_TOKENS` | 1024 | Picture token-row/tower memory cap. |
 | `VISION_SLICE_MS` | 200 in validated picture services; generic default 300 | Target picture work per scheduler slice. |

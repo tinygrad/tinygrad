@@ -103,8 +103,14 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     self.assertNotIn("SPEC_DRAFTS=", cmd)  # D34 inherits GLM's default of two drafts.
     self.assertNotIn("AM_VM_RESET=1", cmd)
     self.assertIn("VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf", cmd)
-    picture = self.command("glm_flash_6x7900xtx.sh", {"VISION_MMPROJ": "/home/runner/glmvis/mmproj-F16.gguf"})
-    self.assertEqual(picture, cmd)  # Empty/unset cannot produce a text-only production profile.
+    self.assertIn("VISION_KERNELS=1", cmd)
+    self.assertIn("VISION_BUCKETS=576", cmd)
+    for optional in ("VISION_SLICE_MS", "VISION_MAX_TOKENS", "VISION_MAX_IMAGES", "VISION_CACHE_MB",
+                     "VISION_URL_CACHE_MB", "SERVE_RENDER_CACHE"):
+      self.assertNotIn(optional + "=", cmd)  # The benchmark default, not the Pokemon G3 opt-in.
+    picture = self.command("glm_flash_6x7900xtx.sh", {"VISION_SLICE_MS": "200", "VISION_MAX_TOKENS": "1024",
+                                                       "VISION_MAX_IMAGES": "2048", "VISION_CACHE_MB": "2048",
+                                                       "VISION_URL_CACHE_MB": "512", "SERVE_RENDER_CACHE": "1"})
     for required in ("VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf", "VISION_KERNELS=1", "VISION_SLICE_MS=200",
                      "VISION_MAX_TOKENS=1024", "VISION_MAX_IMAGES=2048", "VISION_CACHE_MB=2048",
                      "VISION_URL_CACHE_MB=512", "VISION_BUCKETS=576", "SERVE_RENDER_CACHE=1"):

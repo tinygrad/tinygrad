@@ -27,12 +27,12 @@ SERVER_ENV=(
 )
 for _name in API_KEY API_KEY_FILE MODEL_ALIASES MODEL_OWNED_BY KEEPALIVE ENC_CACHE \
   SEQ_RESERVE SEQ_PROTECT SEQ_STICKY SEQ_STASH_CTX \
+  VISION_SLICE_MS VISION_MAX_TOKENS VISION_MAX_IMAGES VISION_CACHE_MB VISION_URL_CACHE_MB SERVE_RENDER_CACHE \
   MEM_TRACE DEBUG_LOAD AMD_SCRATCH_LOG KPROF KPROF_TOP LIN_NAMES TELEMETRY_LOG SERVE_TRACE DISABLE_AMD_KERNELS; do
   if [[ -n ${!_name+x} ]]; then SERVER_ENV+=("$_name=${!_name}"); fi
 done
 COMMAND=(python3 -m tinygrad.llm --model "$MODEL" --shard 6 --max_context 524288 --serve "${PORT:-8000}")
-SERVER_ENV+=(VISION_MMPROJ="$MMPROJ" VISION_KERNELS=1 VISION_SLICE_MS=200 VISION_MAX_TOKENS=1024
-             VISION_MAX_IMAGES=2048 VISION_CACHE_MB=2048 VISION_URL_CACHE_MB=512 VISION_BUCKETS=576 SERVE_RENDER_CACHE=1)
+SERVER_ENV+=(VISION_MMPROJ="$MMPROJ" VISION_KERNELS=1 VISION_BUCKETS=576)
 
 check_weights() {
   [[ -s $MMPROJ ]] || { echo "VISION_MMPROJ is mandatory: no readable nonempty projector at $MMPROJ" >&2; return 2; }
@@ -73,6 +73,7 @@ Usage: glm_flash_6x7900xtx.sh start|stop|status|check-weights|--print-command
 D34 ran at 225 W/card with 18 seats of 262144 context (524288 server context).
 Vision is mandatory, never text-only. Default projector: /home/runner/glmvis/mmproj-F16.gguf.
 Another installation path is accepted only for the byte-identical checked projector.
+The benchmark/default leaves other picture limits unset; only the named G3 profile forwards its six extra knobs.
 AM_FIRST_START=1 enables the single controlled AM reset. No process or GPU is touched by --print-command.
 USAGE
   [[ $ACTION == --help || $ACTION == -h ]] && exit 0
