@@ -1,0 +1,122 @@
+import os, pathlib, subprocess, unittest
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+SCRIPTS = ROOT / "extra/llm_service"
+
+
+class TestLLMServiceLaunchers(unittest.TestCase):
+  def command(self, script: str) -> str:
+    return subprocess.check_output(
+      [SCRIPTS / script, "--print-command"], cwd=ROOT, text=True, env={"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}
+    )
+
+  def test_scripts_parse_and_help(self):
+    self.assertTrue(all(p.stat().st_mode & 0o111 for p in SCRIPTS.glob("*.sh")))
+    for script in ("qwen_6x7900xtx.sh", "glm_flash_6x7900xtx.sh", "glm_14xr9700.sh"):
+      subprocess.run(["bash", "-n", SCRIPTS / script], check=True)
+      help_text = subprocess.check_output([SCRIPTS / script, "--help"], text=True, stderr=subprocess.STDOUT)
+      self.assertIn("--print-command", help_text)
+
+  def test_qwen_v31_production_environment(self):
+    cmd = self.command("qwen_6x7900xtx.sh")
+    for required in (
+      "DEV=AMD",
+      "AM_MEC_PIPES=2",
+      "AM_POWER_LIMIT=250",
+      "SEQ_ROWS=4310016",
+      "SEQ_STASH_GB=46",
+      "QSA_KV_BITS4_LAYERS=39\\,43\\,47\\,48",
+      "VISION_MAX_IMAGES=1024",
+      "VISION_URL_CACHE_MB=512",
+      "VISION_KERNELS=1",
+      "VISION_MM" + "PROJ=/weights/Qwen3.8-Flash-Next-UD-IQ4_XS-V31/mmproj/mmproj-F16.gguf",
+      "--shard 6",
+      "--max_context 262144",
+      "--serve 8000",
+    ):
+      self.assertIn(required, cmd)
+    self.assertIn("Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00004.gguf", cmd)
+    self.assertNotIn("00001-of-00003.gguf", cmd)
+    self.assertNotIn("AM_VM_RESET=1", cmd)
+    self.assertNotIn("SEQ_STASH_ENTRIES=", cmd)
+
+  def test_glm_production_environment_and_power_guard(self):
+    cmd = self.command("glm_14xr9700.sh")
+    for required in (
+      "DEV=PCI+AMD",
+      "VFIO=1",
+      "MLA_SEQ_SHARD=1",
+      "SPEC_DRAFTS_BY_SIZE=1:2\\,2:2\\,4:3\\,8:3\\,16:3",
+      "GLM_SEQ=1",
+      "GLM_ATTN_GRP=3",
+      "SEQ_GATHER_UNION=65536",
+      "SEQ_STASH_GB=0",
+      "PREFILL_CHUNK=4032",
+      "PREFILL_SIZES=1344\\,2688",
+      "MODEL_ALIASES=zai-org/GLM-5.3",
+      "--shard 14",
+      "--max_context 262144",
+      "--serve 8000",
+    ):
+      self.assertIn(required, cmd)
+    self.assertIn("PENDING_POWER_VERIFICATION", cmd)
+    self.assertIn("GLM-5.3-UD-IQ4_XS-00001-of-00009.gguf", cmd)
+    self.assertNotIn("PREFILL_MB1_ROWS=", cmd)
+    failed = subprocess.run([SCRIPTS / "glm_14xr9700.sh", "start"], cwd=ROOT, text=True, capture_output=True)
+    self.assertEqual(failed.returncode, 2)
+    self.assertIn("PENDING", failed.stderr)
+    self.assertIn("210 W is not safe", failed.stderr)
+
+  def test_qwen_power_guard(self):
+    proc = subprocess.run(
+      [SCRIPTS / "qwen_6x7900xtx.sh", "start"], env={**os.environ, "AM_POWER_LIMIT": "251"}, cwd=ROOT, text=True, capture_output=True
+    )
+    self.assertEqual(proc.returncode, 2)
+    self.assertIn("225", proc.stderr)
+
+  def test_glm_flash_d34_environment_and_power_guard(self):
+    cmd = self.command("glm_flash_6x7900xtx.sh")
+    for required in (
+      "DEV=AMD", "AM_POWER_LIMIT=225", "BATCH_SLOTS=8", "SEQ_KV4=1", "SEQ_ROWS=3916800",
+      "SEQ_SIZES=1\\,2\\,4\\,8\\,12\\,13\\,18", "SEQ_STASH_GB=0", "SEQ_IDX_SHARD=1",
+      "PREFILL_CHUNK=768", "PREFILL_SIZES=192\\,768", "PREFILL_MB1_ROWS=1200", "PREFILL_SLICE=1536",
+      "SEQ_STARVE_ALT=1", "RING_MAXW=32768", "RING_RS_LIKE_COPIES=0", "--shard 6", "--max_context 524288",
+    ):
+      self.assertIn(required, cmd)
+    self.assertIn("GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf", cmd)
+    self.assertNotIn("SPEC_DRAFTS=", cmd)  # D34 inherits GLM's default of two drafts.
+    self.assertNotIn("AM_VM_RESET=1", cmd)
+    failed = subprocess.run(
+      [SCRIPTS / "glm_flash_6x7900xtx.sh", "start"], env={**os.environ, "AM_POWER_LIMIT": "251"},
+      cwd=ROOT, text=True, capture_output=True,
+    )
+    self.assertEqual(failed.returncode, 2)
+    self.assertIn("225", failed.stderr)
+
+  def test_manifests_match_runbook(self):
+    runbook = (ROOT / "RUNNING.md").read_text()
+    for manifest, count in (("qwen-v31.sha256", 6), ("glm-flash-iq3xxs.sha256", 4), ("glm53-iq4xs.sha256", 9)):
+      lines = (SCRIPTS / manifest).read_text().strip().splitlines()
+      self.assertEqual(len(lines), count)
+      for line in lines:
+        digest, path = line.split()
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
+        self.assertIn(path, runbook)
+        self.assertEqual(runbook.count(digest), 1, path)
+
+  def test_runbook_and_null_warmups_are_self_contained(self):
+    runbook = (ROOT / "RUNNING.md").read_text()
+    self.assertNotIn("operations `results/", runbook)
+    self.assertNotIn("tools/launch/", runbook)
+    self.assertNotIn("results/w-gpf/", runbook)
+    for service in ("c2", "c9"):
+      script = ROOT / f"test/null/production_{service}_warmup.sh"
+      harness = ROOT / f"test/null/production_{service}_warmup.py"
+      self.assertTrue(script.stat().st_mode & 0o111)
+      self.assertTrue(harness.is_file())
+      subprocess.run(["bash", "-n", script], check=True)
+      self.assertIn(f"test/null/production_{service}_warmup.sh", runbook)
+
+
+if __name__ == "__main__":
+  unittest.main()
