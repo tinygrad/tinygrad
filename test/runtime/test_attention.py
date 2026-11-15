@@ -110,6 +110,13 @@ class TestAttention(unittest.TestCase):
         self.assertIs(returned_mask, mask)
         np.testing.assert_allclose(actual.numpy(), expected, rtol=1e-6, atol=1e-7)
 
+  def test_hyperconnection_head(self):
+    # the output head only mixes: pre weights [1/2, 3/4] sum the streams [1, 3] to 11/4
+    hc = HyperConnection(self._make_config(dim=1, hc=HCConfig(count=2, sinkhorn_iters=1, eps=0.0)), head=True)
+    self.assertEqual((hc.fn.weight.shape, hc.base["weight"].shape, hc.scale["weight"].shape), ((2, 2), (2,), (1,)))
+    hc.fn.weight, hc.base["weight"] = Tensor.zeros(2, 2), Tensor([0., float(np.log(3))])
+    np.testing.assert_allclose(hc.mix(Tensor([[[[1.], [3.]]]]))[0].numpy().flatten(), [11/4], rtol=1e-6)
+
   def test_attention_residual(self):
     # rmsnorm makes the streams [1, -3] into scores [log 3, -log 3], softmax [9/10, 1/10] mixes them to 0.6, the sublayer squares it
     for new_block, expected in ((True, [1, -3, 0.36]), (False, [1, -3 + 0.36])):

@@ -40,16 +40,15 @@ def merge_ranges(u:UOp) -> UOp|None:
 
 def mark_gated(ctx, u:UOp):
   # a STORE is the only effect with an index of its own
-  idx = u.src[0] if u.op is Ops.STORE else u
-  if idx.op is Ops.INDEX and len(idx.src) > 1 and idx.src[1].op is Ops.WHERE:
-    x, cond = idx.src[1].get_idx(), idx.src[1].get_valid()
+  if u.op is Ops.STORE and (idx:=u.src[0]).op is Ops.INDEX and len(idx.src) > 1 and idx.src[1].op is Ops.WHERE:
+    cond = idx.src[1].get_valid()
     # get all ranges r with guards "r < c" for some const c
     guards = {r:c for v in cond.split_uop(Ops.AND) if v.op is Ops.CMPLT and (r:=v.src[0]).op is Ops.RANGE and (c:=v.src[1]).op is Ops.CONST}
-  else: x, guards = idx, {}
+  else: guards = {}
   # ensure that we choose max(c_i) for all i where r < c_i
   ctx |= {r:c.minimum(r.src[0]) for r,c in guards.items() if (r not in ctx or ctx[r].vmax < c.val)}
-  # but if a range is ever ungated, we cannot shrink it, and an effect runs every iteration of a range its index doesn't gate
-  ctx |= {r:r.src[0] for r in (x if u.op is Ops.INDEX else u).ranges if r not in guards}
+  # but an effect runs every iteration of a range its index doesn't gate
+  ctx |= {r:r.src[0] for r in u.ranges if r not in guards}
 
 def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
   # Only the kernel root: rewriting a nested SINK would leave its enclosing END's binders unchanged.
@@ -59,9 +58,10 @@ def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|No
 
 pm_simplify_ranges = PatternMatcher([
   (UPat(Ops.SINK, name="u"), merge_ranges),
-  (UPat({Ops.INDEX}|GroupOp.Effect, name="u"), mark_gated),
-  # reduce ranges can't be shrunk
-  (UPat(Ops.REDUCE, name="red"), lambda ctx, red: ctx.update({r:r.src[0] for r in red.src[1:]})),
+  # only an effect makes an iteration observable, a read is gated by what consumes it
+  (UPat(GroupOp.Effect, name="u"), mark_gated),
+  # reduce and stage ranges can't be shrunk
+  (UPat((Ops.REDUCE, Ops.STAGE), name="x"), lambda ctx, x: ctx.update({r:r.src[0] for e in x.ended_ranges for r in e.ranges})),
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, lambda r,c: r.replace(src=(c,)))),
 ])
 
