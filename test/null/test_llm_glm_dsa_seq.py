@@ -347,6 +347,17 @@ class TestGLMDSASequence(unittest.TestCase):
       self.assertEqual(model.seq_prefill(3, 0, [1, 2, 3, 4], 2, 0), 42)
       self.assertEqual(log, [("pf", 3, 0, 2), ("pf", 3, 2, None), ("pf", 3, 0, 2), ("pf", 3, 2, None)])
       self.assertEqual(model._p2p_slices, [])
+    def first(self, slot, base, pos, temp=0.0):
+      log.append(("first", slot))
+      if log.count(("first", slot)) == 1: raise P2PRunOut("ran out")
+      self._p2p_unwaited, self._p2p_slices = False, []
+      return 9
+    log.clear()
+    with patch.object(glm_dsa.GLMSeqDriver, "seq_prefill", pf), patch.object(glm_dsa.GLMSeqDriver, "seq_first", first, create=True), \
+         patch.object(glm_dsa.Device, "__getitem__", lambda self, d: Mock()):
+      model.seq_prefill(4, 64, [9, 9, 9], 0, 6, 0.0, 1)
+      self.assertEqual(model.seq_first(2, 0, 5), 9)
+      self.assertEqual(log, [("pf", 4, 0, 1), ("first", 2), ("pf", 4, 0, 1), ("first", 2)])
 
   def test_p2p_late_raises(self):
     # (a p2p poll that ran out: its sums wrong. a long wait reads the devices' notes and raises, never returns the tokens)

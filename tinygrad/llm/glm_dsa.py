@@ -2471,6 +2471,16 @@ class Transformer(GLMSeqDriver):
         print(f"seq_prefill: {e}: the prompt again from {start} ({retries}), {len(slices)} unwaited slices first", flush=True)
         self._p2p_redo(slices)
 
+  def seq_first(self, *args, **kwargs) -> int:
+    """the token after a prompt that is its checkpoint (glm5next), its p2p run-out retried as seq_step's (only reads the slot's states)"""
+    retries, slices = 0, list(self._p2p_slices)
+    while True:
+      try: return super().seq_first(*args, **kwargs)
+      except P2PRunOut as e:
+        if (retries:=retries+1) > getenv("P2P_RETRY", 2): raise
+        print(f"seq_first: {e}: again ({retries}), {len(slices)} unwaited slices first", flush=True)
+        self._p2p_redo(slices)
+
   def _p2p_redo(self, slices:list[tuple]) -> None:
     """after a run-out: the devices finished, then the prompt slices since the last wait run again in their order (the run-out can be one
     of theirs: their rows written again at the same positions, the same values); the caller runs its own work again after this"""
