@@ -146,6 +146,15 @@ class TestSchedulerProfileControls(unittest.TestCase):
     self.assertEqual(value({'SAMPLE_TOP_K': '1'}), 1)
     self.assertEqual(value({'TOP_K': '20', 'SAMPLE_TOP_K': '0'}), 0)
 
+class TestC9WarmupOverrides(unittest.TestCase):
+  ROOT = TestC9LauncherProfiles.ROOT
+
+  def test_defaults_do_not_override_owner_capacity(self):
+    src = (TestC9LauncherProfiles.ROOT / 'test/null/production_c9_warmup.sh').read_text()
+    for flag, default in (('SEQ_ROWS', '268800'), ('SEQ_SLOTS', '32'), ('SEQ_MAX_ACTIVE', '32')):
+      self.assertIn(f'{flag}=${{{flag}:-{default}}}', src)
+    subprocess.run(['bash', '-n', self.ROOT / 'test/null/production_c9_warmup.sh'], check=True)
+
 class TestMemoryLevers(unittest.TestCase):
   def test_p2p_default_keeps_normal_dispatch(self):
     with patch.object(amd_glm, '_p2p_allreduce', return_value='normal') as wrapped, \
