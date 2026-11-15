@@ -147,6 +147,12 @@ class TestSchedulerProfileControls(unittest.TestCase):
     self.assertEqual(value({'TOP_K': '20', 'SAMPLE_TOP_K': '0'}), 0)
 
 class TestMemoryLevers(unittest.TestCase):
+  def test_p2p_default_keeps_normal_dispatch(self):
+    with patch.object(amd_glm, '_p2p_allreduce', return_value='normal') as wrapped, \
+         patch.object(amd_glm, 'getenv', side_effect=lambda key, default=0: default if key == 'P2P_GLM5_OFF' else 1):
+      self.assertEqual(amd_glm.p2p_allreduce(('NULL', 'NULL:1')), 'normal')
+    wrapped.assert_called_once()
+
   def test_freqs_host_enabled_only_with_tuple_and_flag(self):
     calls = []
     owner = SimpleNamespace(_freqs_host=lambda devs: calls.append(devs))
