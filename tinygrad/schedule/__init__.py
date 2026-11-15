@@ -5,7 +5,7 @@ from dataclasses import dataclass, field, replace
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import GroupOp, UOp, Ops, UOpMetaClass, graph_rewrite, MapCtx, gate_kernel_sink, KernelInfo, ParamArg
 from tinygrad.uop.spec import type_verify, spec_tensor
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, SCACHE, BASEDIR, partition, dedup, all_int, VIZ
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, SCACHE, BASEDIR, partition, dedup, all_int, VIZ, NO_MEMORY_PLANNER
 from tinygrad.helpers import diskcache_get, diskcache_put, colored
 
 # **** schedule linearizer
@@ -310,49 +310,79 @@ pm_replace_buf = PatternMatcher([
   (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
 ])
 
-def transform_to_call(big_sink:UOp) -> UOp:
-  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Graph")
-  if SPEC: type_verify(big_sink, spec_tensor)
+def late_imports(fn:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, ...]:
+  # storage EXTERNs stay in the linear until it's linked. scalar EXTERNs are unbound Variables, read from var_vals by name when run
+  exts = {u.arg.slot:u for u in fn.toposort() if u.op is Ops.EXTERN}
+  return tuple(e.unbound() if e.is_bound_var else exts[i] for i,e in enumerate(externs))
 
-  fn, externs = export(big_sink)
-
+def callify(fn:UOp, imports:tuple[UOp, ...]) -> UOp:
+  """make an exported function a CALL with its inputs as PARAMs, EXTERN(slot) is passed as imports[slot]"""
   # The tensor replacement map is collected before these rewrites change node identities.
   graph_rewrite(fn, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
   ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs")
-  # map back: the call args are what the EXTERNs stand for
-  args = graph_rewrite(UOp.sink(*ctx.replacements), pm_import, ctx=externs, walk=True, name="import externs").src
+  args = graph_rewrite(UOp.sink(*ctx.replacements), pm_import, ctx=imports, walk=True, name="import externs").src
   ret = ret.call(*args, precompile=True)
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret
 
-def create_linear_with_vars(big_sink:UOp, bind:bool=True) -> tuple[UOp, dict[str, int]]:
-  big_sink = transform_to_call(big_sink)
+def transform_to_call(big_sink:UOp) -> UOp:
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Graph")
+  if SPEC: type_verify(big_sink, spec_tensor)
+  # map back early: the call args are what the EXTERNs stand for
+  return callify(*export(big_sink))
+
+def schedule_call(call:UOp) -> UOp:
   # big_sink srcs are all the Tensors
-  linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
-
-  # this recursively resolves the linear_call and allocates buffers
+  linear_call = graph_rewrite(call, pm_schedule, name="schedule to linear", enter_calls=True)
+  # this recursively resolves the linear_call and gives its ALLOCs slots
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
-
   # create copies
-  linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
+  return graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
 
+def bound_var_vals(linear:UOp, args:tuple[UOp, ...]) -> dict[str, int]:
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
   # get var_vals from the bound Variables in the call args
   var_vals: dict[str, int] = {}
-  for b in big_sink.src[1:]:
+  for b in args:
     if b.is_bound_var:
       nm, val = b.expr, b.arg.val
       if nm not in used_vars: continue
       if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val
+  return var_vals
 
-  # jit captures this schedule with bound storage, no need to execute.
-  if len(capturing) and CAPTURING:
-    capturing[0].add_linear(graph_rewrite(linear, pm_allocs_to_buffers, walk=True, name="allocs to buffers"))
-    return UOp(Ops.LINEAR, src=()), var_vals
+# a linear with no runtime state for each exported function: EXTERNs, unbound ALLOCs and unbound Variables.
+# the runtime reads Variables by name, so their names are part of the key (but not of the exported function)
+export_cache: dict[tuple, UOp] = {}
+def linear_template(fn:UOp, externs:tuple[UOp, ...]) -> UOp:
+  key = (fn.key, tuple(e.expr if e.is_bound_var else None for e in externs), NO_MEMORY_PLANNER.value)
+  if SCACHE and (ret:=export_cache.get(key)) is not None: return ret
+  # EXTERNs are never memory planned
+  ret = memory_plan_rewrite(schedule_call(callify(fn, late_imports(fn, externs))))
+  if SCACHE: export_cache[key] = ret
+  return ret
 
-  held_bufs = {b for b in linear_call.src[1:] if b.op is Ops.BUFFER}
-  linear = memory_plan_rewrite(linear, held_bufs)
-  # binding late lets the linear be run more than once. bound storage is shared by every piece of the linear, even if run separately
-  return graph_rewrite(linear, pm_allocs_to_buffers, walk=True, name="allocs to buffers") if bind else linear, var_vals
+def create_linear_with_vars(big_sink:UOp, bind:bool=True) -> tuple[UOp, dict[str, int], tuple[UOp, ...]]:
+  """
+  The LINEAR to realize big_sink, its var_vals and its input_uops.
+  With bind, its storage is bound and there are no input_uops. Else, it's a cached template mapped back when it's linked and run:
+  EXTERN(slot) is input_uops[slot] and ALLOCs get storage.
+  """
+  # the jit captures this schedule with bound storage, no need to execute
+  if bind or (len(capturing) and CAPTURING):
+    call = transform_to_call(big_sink)
+    linear = schedule_call(call)
+    var_vals = bound_var_vals(linear, call.src[1:])
+    if len(capturing) and CAPTURING:
+      capturing[0].add_linear(graph_rewrite(linear, pm_allocs_to_buffers, walk=True, name="allocs to buffers"))
+      return UOp(Ops.LINEAR, src=()), var_vals, ()
+    linear = memory_plan_rewrite(linear, {b for b in call.src[1:] if b.op is Ops.BUFFER})
+    # bound storage is shared by every piece of the linear, even if run separately
+    return graph_rewrite(linear, pm_allocs_to_buffers, walk=True, name="allocs to buffers"), var_vals, ()
+
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Graph")
+  if SPEC: type_verify(big_sink, spec_tensor)
+  fn, externs = export(big_sink)
+  linear = linear_template(fn, externs)
+  return linear, bound_var_vals(linear, externs), externs

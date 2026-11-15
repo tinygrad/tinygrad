@@ -118,5 +118,45 @@ class TestExport(unittest.TestCase):
     fn, _ = exported(f(a))
     self.assertIs(fn, exported(f(b))[0])
 
+class TestLinearTemplate(unittest.TestCase):
+  def template(self, *tensors:Tensor) -> tuple[UOp, dict[str, int], tuple[UOp, ...]]: return Tensor._linear(*tensors, bind=False)
+
+  def assert_no_runtime_state(self, linear:UOp):
+    for u in linear.toposort(enter_calls=True):
+      self.assertIsNot(u.op, Ops.BUFFER)
+      self.assertFalse(u.is_bound_var)
+
+  def test_template(self):
+    a, b = buf(), buf()
+    linear, var_vals, inputs = self.template((a+b).contiguous()*2)
+    self.assert_no_runtime_state(linear)
+    self.assertEqual(var_vals, {})
+    self.assertTrue({a.uop.buf_uop, b.uop.buf_uop} <= set(inputs))
+    # storage local to the schedule is unbound until the linear is linked
+    self.assertIn(Ops.ALLOC, {u.op for u in linear.toposort()})
+    self.assertIn(Ops.EXTERN, {u.op for u in linear.toposort()})
+
+  def test_template_cached(self):
+    v = Variable("v", 1, 4)
+    a, b, c, d = buf(), buf(), buf(), buf()
+    l1, vv1, in1 = self.template((a+b)*v.bind(2))
+    l2, vv2, in2 = self.template((c+d)*v.bind(3))
+    self.assertIs(l1, l2)
+    self.assert_no_runtime_state(l1)
+    self.assertEqual((vv1, vv2), ({"v": 2}, {"v": 3}))
+    self.assertNotEqual(in1, in2)
+
+  def test_bind_mismatch(self):
+    v = Variable("v", 0, 3)
+    a = Tensor.empty(4, 4, device="NULL").realize()
+    with self.assertRaisesRegex(RuntimeError, "bind mismatch"): self.template(a[v.bind(1)].cat(a[v.bind(2)]))
+
+  def test_bound(self):
+    # linear_with_vars binds its storage
+    a, b = buf(), buf()
+    linear, _ = ((a+b).contiguous()*2).linear_with_vars()
+    self.assertNotIn(Ops.EXTERN, {u.op for u in linear.toposort()})
+    self.assertNotIn(Ops.ALLOC, {u.op for u in linear.toposort()})
+
 if __name__ == "__main__":
   unittest.main()
