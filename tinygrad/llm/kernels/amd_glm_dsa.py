@@ -4311,7 +4311,25 @@ def _q4_half(w:UOp, nib:UOp|int, m:UOp) -> UOp:
 def _q4_frag(k:UOp, row:UOp, w0:UOp|int, m:UOp, half:UOp) -> UOp:
   """16 dims of a 4-bit row (words w0, w0+1) in the order of RDNA4's WMMA fragment, as halves (q - 8) * m"""
   lo, hi = _word(k, row, w0), _word(k, row, w0 + 1)
+  if getenv("SEQ_KV4_FAST", 0):
+    return UOp.stack(*(h for w in (lo, hi) for h in _q4_quad(w, half, m.cast(dtypes.half))))
   return UOp.stack(*(_q4_half(w, half * 4 + i, m) for w in (lo, hi) for i in range(4)))
+
+def _q4_pair(n2:UOp, mh:UOp) -> list[UOp]:
+  """two 4-bit values of one multiplier as the halves (q - 8) * m, two at a time (SEQ_KV4_FAST, the bits of _q4_half): n2 holds 0x6400 | q
+  in both halves (the half 1024 + q), mh the half m; (n - 1032) * m as one packed subtraction and one packed product, both exact"""
+  h2 = "_Float16 __attribute__((ext_vector_type(2)))"
+  fmt = f"__builtin_bit_cast(unsigned int, (__builtin_bit_cast({h2}, {{0}}) - ({h2}){{{{1032.0f16, 1032.0f16}}}}) * " \
+        f"({h2}){{{{{{1}}, {{1}}}}}})"
+  v = _cfn(True, (n2, mh), (fmt, dtypes.uint32))
+  return [(v >> s).cast(dtypes.uint16).bitcast(dtypes.half) for s in (0, 16)]
+
+def _q4_quad(w:UOp, half:UOp|int, mh:UOp) -> list[UOp]:
+  """nibbles 4*half .. 4*half+3 of a word of 4-bit values as halves (q - 8) * m (see _q4_pair; x | x << 12 puts nibble 1 at bit 16 and
+  nibble 3 at bit 24)"""
+  x = (w >> (16 * half if isinstance(half, int) else (16 * half).cast(dtypes.uint32))) & 0xffff
+  z = x | (x << 12)
+  return [h for p in (z, z >> 8) for h in _q4_pair((p & 0x000f000f) | 0x64006400, mh)]
 
 def reduced_rows(k:Tensor, W:int) -> Tensor:
   """the rows k in the reduced-bit format of W words a row (fp8 or 4-bit, see fp8_rows / q4_rows)"""
