@@ -64,7 +64,9 @@ class SimpleTokenizer:
     return SimpleTokenizer(dict(normal_tokens), special_tokens_dict, kv["tokenizer.ggml.pre"],
       bos_id=kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None,
       eos_id=kv.get('tokenizer.ggml.eos_token_id', 0), eot_id=kv.get('tokenizer.ggml.eot_token_id', special_tokens_dict.get('<|im_end|>')),
-      eom_id=kv.get('tokenizer.ggml.eom_token_id'), chat_template=kv.get('tokenizer.chat_template'))
+      # (a GGUF without an eom: <|endoftext|> ends a reply too, as llama.cpp's end-of-generation set and the models' generation_config
+      # (Qwen 3.x: eos <|im_end|> 248046 and <|endoftext|> 248044): else a reply the model ends with it decodes on into '<|im_start|>...')
+      eom_id=kv.get('tokenizer.ggml.eom_token_id', special_tokens_dict.get('<|endoftext|>')), chat_template=kv.get('tokenizer.chat_template'))
 
   @staticmethod
   def from_hf(path:str|pathlib.Path, preset:str):
