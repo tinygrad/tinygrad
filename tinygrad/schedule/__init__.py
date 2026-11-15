@@ -246,6 +246,12 @@ pm_canonicalize_alloc = PatternMatcher([
   (UPat(Ops.ALLOC, name="b"), canonicalize_alloc),
 ])
 
+# realized storage and bound Variables are runtime state, export turns them into EXTERNs
+def has_runtime_state(x:UOp) -> bool: return x.is_bound_var or (x.op is Ops.BUFFER and x.addrspace is AddrSpace.GLOBAL)
+
+def assert_exported(x:UOp) -> None:
+  assert not has_runtime_state(x), f"transform_to_call takes an exported function, call export first. runtime state in {x.op}"
+
 def replace_input_buffer(ctx:CallifyCtx, b:UOp):
   ctx.replacements.append(b)
   return b.param_like(len(ctx.replacements)-1)
@@ -255,12 +261,14 @@ pm_replace_buf = PatternMatcher([
   (UPat(Ops.EXTERN, name="b"), replace_input_buffer),
   # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
   (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
+  # the body of the call must have no runtime state
+  (UPat((Ops.BUFFER, Ops.PARAM), name="x"), assert_exported),
 ])
 
 # **** export: the stores of a tensor graph as a function with no runtime state. storage becomes EXTERN(slot), bound Variables lose
 # their value and ALLOCs get canonical slots. ctx.replacements is what's mapped back
 def to_extern(ctx:CallifyCtx, x:UOp) -> UOp|None:
-  if not (x.is_bound_var or (x.op is Ops.BUFFER and x.addrspace is AddrSpace.GLOBAL)): return None
+  if not has_runtime_state(x): return None
   ctx.replacements.append(x)
   return x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=len(ctx.replacements)-1, buffer=None, name=None, val=None))
 

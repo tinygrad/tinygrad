@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Variable, dtypes
 from tinygrad.uop import Ops
-from tinygrad.uop.ops import UOp, ParamArg
+from tinygrad.uop.ops import UOp, ParamArg, AddrSpace
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.function import function
 import tinygrad.schedule as schedule
@@ -29,8 +29,24 @@ class TestExport(unittest.TestCase):
         self.assertIsNot(u.op, Ops.BUFFER)
         if isinstance(u.arg, ParamArg): self.assertTrue(u.arg.buffer is None and u.arg.val is None, f"runtime state in {u}")
         if u.op is Ops.EXTERN: self.assertEqual(u.device, externs[u.arg.slot].device)
+      # EXTERNs have no names, each one has a unique slot
+      self.assertEqual(sorted(u.arg.slot for u in fn.toposort(enter_calls=True) if u.op is Ops.EXTERN), list(range(len(externs))))
       # UOps are hash-consed, so a lossless round trip through the wire format gives back the identical UOp
       self.assertIs(parse_uir(render_uir(fn)), fn)
+
+  def test_symbolic_extern(self):
+    v = Variable("v", 1, 8)
+    fn, externs = exported(buf()[:v.bind(3)].contiguous()*v.bind(3))
+    e = next(u for u in fn.toposort() if u.op is Ops.EXTERN and u.addrspace is AddrSpace.ALU)
+    self.assertTrue(e.is_variable and not e.is_bound_var)
+    self.assertEqual(externs[e.arg.slot].arg.val, 3)
+    self.assertEqual(e.expr, f"e{e.arg.slot}")
+    self.assertEqual((e*2+1).render(), f"({e.expr}*2+1)")
+    self.assertEqual((e*2+1).sym_infer({e.expr: 3}), 7)
+    self.assertEqual(fn.variables(), [e])
+
+  def test_transform_to_call_needs_export(self):
+    with self.assertRaises(AssertionError): schedule.transform_to_call(UOp.sink((buf()+1).contiguous().uop))
 
   def test_same_function(self):
     v = Variable("v", 1, 4)

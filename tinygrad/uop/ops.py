@@ -983,16 +983,17 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), addrspace=AddrSpace.ALU))
   @property
   def is_variable(self) -> bool:
-    # a Variable is a scalar ALU PARAM that carries a value range
-    return self.op is Ops.PARAM and self.arg.vmin_vmax is not None and self.arg.addrspace is AddrSpace.ALU and self._shape == ()
+    # a Variable is a scalar ALU PARAM (or EXTERN) that carries a value range
+    return self.op in {Ops.PARAM, Ops.EXTERN} and self.arg.vmin_vmax is not None and self.arg.addrspace is AddrSpace.ALU and self._shape == ()
   @property
   def is_bound_var(self) -> bool:
     # a bound Variable is a Variable with the val payload set
     return self.is_variable and self.arg.val is not None
   @property
   def expr(self) -> str:
-    assert self.op in {Ops.PARAM, Ops.BUFFER}
-    return unwrap(self.arg.name)
+    assert self.op in {Ops.PARAM, Ops.BUFFER, Ops.EXTERN}
+    # EXTERNs have no name, they are identified by their unique slot
+    return f"e{self.arg.slot}" if self.op is Ops.EXTERN else unwrap(self.arg.name)
   def bind(self, val:int|UOp):
     assert self.is_variable and not self.is_bound_var, f"op is {self.op}, need an unbound Variable"
     uval = UOp.const(val) if isinstance(val, int) else val
@@ -1011,7 +1012,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def variables(self) -> list[Variable]:
     ret = set()
     for x in self.backward_slice_with_self:
-      if x.op is Ops.PARAM and x.addrspace is AddrSpace.ALU:
+      if x.op in {Ops.PARAM, Ops.EXTERN} and x.addrspace is AddrSpace.ALU:
         ret.add(x.unbound() if x.is_variable else x)
       elif x.op is Ops.RANGE and x.axis_type is AxisType.DEVICE:
         ret.add(UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype))
@@ -1135,7 +1136,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _sym_fxn(self):
     from tinygrad.uop.render import _render_with_splits, renderer_infer
     sself = self.simplify()
-    varnames = tuple(dedup(x.expr for x in sself.toposort() if x.op is Ops.PARAM and x.arg.addrspace == AddrSpace.ALU))
+    varnames = tuple(dedup(x.expr for x in sself.toposort() if x.op in {Ops.PARAM, Ops.EXTERN} and x.arg.addrspace == AddrSpace.ALU))
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
     lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
