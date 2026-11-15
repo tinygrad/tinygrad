@@ -155,6 +155,11 @@ class TestLLMTokenizer(unittest.TestCase):
       self.assertEqual(split["kimi-k2"](s), go, f"kimi-k2 {s!r}")
     self.assertEqual(split["kimi-k2"]("a.\n/b"), ["a", ".\n", "/b"])
 
+  def test_qwen35_split_marks(self):
+    split = SimpleTokenizer({}, {}, "qwen35")._split_to_word.findall
+    self.assertEqual(split("नमस्ते दुनिया"), ["नमस्ते", " दुनिया"])
+    self.assertEqual(split("!!\u0301"), ["!!", "\u0301"])
+
   def test_joyai_llm_split(self):
     tok = SimpleTokenizer({}, {}, "joyai-llm")
     tok._encode_word = lambda word: [word.decode()]
