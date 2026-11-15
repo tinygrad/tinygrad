@@ -147,27 +147,54 @@ GLM53_POWER_LIMIT=<validated-watts> GLM_KV=q4 MAX_CONTEXT=1048576 \
 
 The launcher expands q4 to `SEQ_FP8=1`, `SEQ_FP8_IDX=0`, `SEQ_KV4=1`; `GLM_KV=fp8` is a separate mode. Real 14-card start, capacity and correctness checks remain required for both configurations.
 
-## Pokemon workflow profiles (RUN 14 and G3)
+## Pokemon (one game through a whole 262,144-token window, screenshots in every turn)
 
-These are workflow opt-ins (the games), **not opt-in vision**. The supported C2/C5 vision path remains mandatory; C9 is not one of these image-serving configurations. Use one fresh six-card 7900 XTX VM and **one server start per boot**; changing a profile requires a fresh VM. These are owner-proven launch profiles, not replacements for the validated C2/D34 defaults.
+A game is a workflow on the normal C2 / C5 servers with a few settings changed; vision stays mandatory. One fresh six-card 7900 XTX VM,
+**one server start per boot**; a changed setting needs a fresh VM. Speed and parcel counts: `results/pokemon/SPEED.md` and `PARCEL.md`
+in the company repo (final rows 21:00 Nov 15).
 
-**Qwen RUN 14:** start the C2 launcher with `SPEC_DRAFTS=3`, `VISION_MAX_IMAGES=2048`, `VISION_CACHE_MB=2048`, `SERVE_RENDER_CACHE=1`, `PREFILL_SIZES=192,384,1152`, plus **`VISION_SLICE_MS=300` and `VISION_URL_CACHE_MB=256`**. These two values are RUN 14's unset/code defaults; they are not C2's validated `VISION_SLICE_MS=200` and `VISION_URL_CACHE_MB=512`. Keep `VISION_KERNELS=1`, `VISION_MMPROJ=/weights/Qwen3.8-Flash-Next-UD-IQ4_XS-V31/mmproj/mmproj-F16.gguf`, 262144 max_context and the rest of the C2 line. `SESSION_END_TOKEN` comes from the VM's mode-600 secret file and is never printed. Qwen's published vision buckets remain the power-of-two buckets plus any optional measured addition, not an assumed 384.
+**Qwen server** (the C2 launcher with six overrides; the game sends `preserve_thinking=false`, so `SEQ_CKPT_TAIL=1` is required:
+without it every turn re-reads the whole conversation from token 0):
 
-**Qwen clients that drop old reasoning** (`chat_template_kwargs: {preserve_thinking: false}`, the Pokemon arms P / RP): add `SEQ_CKPT_TAIL=1` to the Qwen launcher, or every turn re-reads the whole conversation from 0 (the old turn renders without `<think>\n`, before the end checkpoint). Default off; a client that sends nothing gets preserve_thinking=true and reuses its cache without it.
+```bash
+SPEC_DRAFTS=3 PREFILL_SIZES=192,384,1152 VISION_MAX_IMAGES=2048 VISION_CACHE_MB=2048 SERVE_RENDER_CACHE=1 SEQ_CKPT_TAIL=1 \
+  bash extra/llm_service/qwen_6x7900xtx.sh start
+```
 
-**GLM RUN G3:** keep the mandatory C5 tower at `/home/runner/glmvis/mmproj-F16.gguf`, `VISION_KERNELS=1`, `VISION_SLICE_MS=200`, `VISION_MAX_TOKENS=1024`, `VISION_MAX_IMAGES=2048`, `VISION_CACHE_MB=2048`, `VISION_URL_CACHE_MB=512`, `VISION_BUCKETS=576`, `SERVE_RENDER_CACHE=1` and `AM_POWER_LIMIT=250` on this host. Capacity remains `SEQ_ROWS=3916800`, 18 slots/18 max active and default draft 2. The real served value comes before raw rendering cache experiments, so future Pokemon phase defaults should only be enabled after their matched correctness checks.
+**GLM Flash server** (the C5 launcher with the picture limits raised and the render cache on; `VISION_BUCKETS=576` is already C5's):
 
-Game harness on teeny (separate install, commit 08ffddb):
+```bash
+VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf VISION_SLICE_MS=200 VISION_MAX_TOKENS=1024 VISION_MAX_IMAGES=2048 VISION_CACHE_MB=2048 \
+  VISION_URL_CACHE_MB=512 SERVE_RENDER_CACHE=1 AM_POWER_LIMIT=250 bash extra/llm_service/glm_flash_6x7900xtx.sh start
+```
+
+**Qwen clients that drop old reasoning** in general (`chat_template_kwargs: {preserve_thinking: false}`): the same `SEQ_CKPT_TAIL=1`.
+A client that sends nothing gets `preserve_thinking=true` and reuses its cache without it. Default off.
+
+**The game harness** (teeny, `~/fun/pi_plays_pokemon` at `b1e297d`): prompt "Beat the game." plus the six sentences of arm R2
+(`.pi/RULES_R2.md`, below); no history rewrite (every screenshot and message stays); the run ends at the window's compaction point.
 
 ```bash
 cd ~/fun/pi_plays_pokemon
 # Qwen
-PI_QWEN_BASE_URL=http://127.0.0.1:18105/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_FRESH=1 PI_IMAGE_SCALE=2 PI_IMAGE_REFS=1 PI_TEMPERATURE=1.0 .venv/bin/python campaign.py --full-context --run <id>
-# GLM
-PI_GLM_BASE_URL=http://127.0.0.1:18104/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_FRESH=1 PI_IMAGE_SCALE=2 PI_IMAGE_REFS=1 PI_TEMPERATURE=1.0 PI_TOP_P=0.95 .venv/bin/python campaign.py --full-context --provider local-glm-flash --model "GLM 5.3 Flash" --run <id>
+EMU_TEXT_SETTLE=1 PI_ACT_SEQ=1 PI_IMAGE_SIZE=240x216 PI_PRESERVE_THINKING=0 PI_RULES=R2 \
+PI_QWEN_BASE_URL=http://127.0.0.1:<qwen tunnel>/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_FRESH=1 PI_IMAGE_SCALE=2 PI_IMAGE_REFS=0 \
+PI_TEMPERATURE=1.0 EMU_PORT=8900 EMU_URL=http://127.0.0.1:8900 \
+.venv/bin/python campaign.py --full-context --block-minutes 900 --run qwen38-flash-full-NNN --change "<label>"
+# GLM Flash
+PI_IMAGE_SIZE=240x216 PI_RULES=R2 \
+PI_GLM_BASE_URL=http://127.0.0.1:<glm tunnel>/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_FRESH=1 PI_IMAGE_SCALE=2 PI_IMAGE_REFS=1 \
+PI_TEMPERATURE=1.0 PI_TOP_P=0.95 EMU_PORT=8901 EMU_URL=http://127.0.0.1:8901 \
+.venv/bin/python campaign.py --full-context --block-minutes 900 --provider local-glm-flash --model "GLM 5.3 Flash" --run glm53-flash-full-NNN --change "<label>"
 ```
 
-The line ends at `stop_reason=full_context`: `speed.py results/pokemon/full-context.jsonl`, details via `speed.py --breakdown runs/<id>/steps.jsonl`. A prefill with zero generation for more than 5 minutes is a stalled run, not a speed measurement. VM IDs, tunnel ports and session secrets remain deployment-specific; no server or proxy restart is implied by this document.
+The six R2 sentences:
+- In a new town, enter every building that has a door before you leave the town.
+- When a person asks you to do something, or gives you something to take to someone, do that next, before you explore further.
+- If a person blocks your way and talking to them does not open it, something elsewhere must be done first: go back and finish what you have not finished.
+- When you are given something to take to someone, go back the way you came to where you met that person, and talk to them.
+- If the screen keeps coming back to the same few views, what you are doing does not work: try a wall, an edge or a direction you have not tried yet.
+- Read to the end everything a person says: it often says where to go next.
 
 ## API and production environment contract (83 names)
 
