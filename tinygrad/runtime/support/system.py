@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, struct, socket, enum, itertools, signal, threading
+import os, time, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, struct, socket, enum, itertools, signal, threading
 import fcntl
 from tinygrad.device import BufferStorage, Buffer, Device
 from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize, DEV
@@ -278,48 +278,61 @@ class PCIDevice:
     try: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR)
     except PermissionError: raise PermissionError(f"Cannot access PCI device {pcibus}: run `extra/amdpci/setup_python_cap.sh` or use sudo")
 
-    if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
-      # Another device in the same IOMMU group may concurrently unbind this one.
-      with contextlib.suppress(OSError): FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
-    if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"): raise RuntimeError(f"Driver is bound to {pcibus}")
-
-    # remove sibling functions of the gpu, if any
-    for fn in range(1, 8):
-      if FileIOInterface.exists(sib:=f"/sys/bus/pci/devices/{self.pcibus[:-1]}{fn}"): FileIOInterface(f"{sib}/remove", os.O_WRONLY).write("1")
-
     # behind an iommu the device is driven through vfio: its dma goes through the container's io addresses (host memory, the others' bars)
     self.iommu = bool(getenv("VFIO", int(FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group")))) and System.vfio is not None
-    if self.iommu and (vfio_fd:=System.vfio) is not None:
-      # vfio resets the device when the process closes it: it must be idle by then (a reset with transactions in flight floods the root port with
-      # errors). a terminated process exits normally, the devices are finalized (their queues stopped) first
-      for sig in (signal.SIGTERM, signal.SIGHUP):
-        if threading.current_thread() is threading.main_thread() and signal.getsignal(sig) is signal.SIG_DFL:
-          signal.signal(sig, lambda signum, _: sys.exit(128 + signum))
-      FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
-      FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
-      iommu_group = FileIOInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
+    # (an iommu group's cards are opened by threads at once: this card's unbind, its bind to vfio-pci and the group's attach all under one lock: a
+    # group attached while a sibling is between drivers isn't viable (VFIO_GROUP_SET_CONTAINER EPERM) and the card's open then fails on its own
+    # lock file: ts5 Nov 14 15:23, 0000:89:00.0 of group 10 (89 + 8c), opened at once)
+    with PCIDevice._vfio_lock if self.iommu else contextlib.nullcontext():
+      if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
+        # Another device in the same IOMMU group may concurrently unbind this one.
+        with contextlib.suppress(OSError): FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
+      if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"): raise RuntimeError(f"Driver is bound to {pcibus}")
 
-      # Open a group once per process: all of a root port's endpoints share it. Bring sibling endpoints to vfio before attaching it.
-      with PCIDevice._vfio_lock:
+      # remove sibling functions of the gpu, if any
+      for fn in range(1, 8):
+        if FileIOInterface.exists(sib:=f"/sys/bus/pci/devices/{self.pcibus[:-1]}{fn}"): FileIOInterface(f"{sib}/remove", os.O_WRONLY).write("1")
+
+      if self.iommu and (vfio_fd:=System.vfio) is not None:
+        # vfio resets the device when the process closes it: it must be idle by then (a reset with transactions in flight floods the root port with
+        # errors). a terminated process exits normally, the devices are finalized (their queues stopped) first
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+          if threading.current_thread() is threading.main_thread() and signal.getsignal(sig) is signal.SIG_DFL:
+            signal.signal(sig, lambda signum, _: sys.exit(128 + signum))
+        FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
+        FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
+        iommu_group = FileIOInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
+
+        # Open a group once per process: all of a root port's endpoints share it. Bring sibling endpoints to vfio before attaching it.
         if (grp:=PCIDevice._vfio_groups.get(iommu_group)) is None:
           for d in os.listdir(gdir:=f"/sys/kernel/iommu_groups/{iommu_group}/devices"):
             if d == self.pcibus or open(f"{gdir}/{d}/class").read().strip().startswith("0x0604"): continue  # bridges stay bound
             if os.path.exists(drv:=f"{gdir}/{d}/driver") and os.path.basename(os.readlink(drv)) != "vfio-pci":
               with contextlib.suppress(OSError): FileIOInterface(f"{drv}/unbind", os.O_WRONLY).write(d)
-          grp = PCIDevice._vfio_groups[iommu_group] = FileIOInterface(f"/dev/vfio/{iommu_group}", os.O_RDWR)
-          vfio.VFIO_GROUP_SET_CONTAINER(grp, ctypes.c_int(vfio_fd.fd))
+          grp = FileIOInterface(f"/dev/vfio/{iommu_group}", os.O_RDWR)
+          # (not viable for a moment (a sibling's driver still releasing it): EPERM; a few tries, then the drivers of the group in the error)
+          for i in range(VFIO_ATTACH_TRIES:=20):
+            try:
+              vfio.VFIO_GROUP_SET_CONTAINER(grp, ctypes.c_int(vfio_fd.fd))
+              break
+            except PermissionError:
+              if i == VFIO_ATTACH_TRIES - 1:
+                drvs = {d: os.path.basename(os.readlink(dv)) if os.path.exists(dv:=f"{gdir}/{d}/driver") else None for d in os.listdir(gdir)}
+                raise RuntimeError(f"iommu group {iommu_group} of {self.pcibus} not viable (VFIO_GROUP_SET_CONTAINER EPERM): its drivers {drvs}")
+              time.sleep(0.1)
+          PCIDevice._vfio_groups[iommu_group] = grp
           with contextlib.suppress(OSError): vfio.VFIO_SET_IOMMU(vfio_fd, vfio.VFIO_TYPE1v2_IOMMU) # set iommu works only once for the fd.
-      self.vfio_group = grp
-      self.vfio_dev = FileIOInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode())))
+        self.vfio_group = grp
+        self.vfio_dev = FileIOInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode())))
 
-      self.irq_fd = FileIOInterface.eventfd(0, 0)
-      self.irq_poller = select.poll()
-      self.irq_poller.register(self.irq_fd.fd, select.POLLIN)
+        self.irq_fd = FileIOInterface.eventfd(0, 0)
+        self.irq_poller = select.poll()
+        self.irq_poller.register(self.irq_fd.fd, select.POLLIN)
 
-      irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
-        argsz=ctypes.sizeof(vfio.struct_vfio_irq_set) + ctypes.sizeof(ctypes.c_int), count=1)
-      vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, (ctypes.c_byte * irqs.argsz).from_buffer(bytearray(bytes(irqs)) + struct.pack('i', self.irq_fd.fd)))
-    else: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR).write("1")
+        irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
+          argsz=ctypes.sizeof(vfio.struct_vfio_irq_set) + ctypes.sizeof(ctypes.c_int), count=1)
+        vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, (ctypes.c_byte * irqs.argsz).from_buffer(bytearray(bytes(irqs)) + struct.pack('i', self.irq_fd.fd)))
+      else: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR).write("1")
 
     self.cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
 
