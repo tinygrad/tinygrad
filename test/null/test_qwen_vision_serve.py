@@ -245,6 +245,49 @@ class TestTowerSlices(unittest.TestCase):
     req.fill = (ids, len(ids) - 4, False)
     self.assertIsNone(s.tower_slice(req))
 
+  def test_more_pictures_than_the_cache_holds(self):
+    # a prompt whose pictures' rows don't all fit VISION_CACHE_MB: the tower runs ahead of the prefill up to half the cache (at least one
+    # picture), so each picture is made ONCE as the prefill moves on. (making them all first evicted the first ones and made them again: never
+    # done) 12 pictures of 64 rows x 4096 float32 (1 MB each) in an 8 MB cache, the prefill 100 rows a slice
+    import collections, os
+    import unittest.mock
+    import numpy as np
+    from tinygrad.helpers import getenv
+    from tinygrad.llm.serve import LLMServer, Request
+    from tinygrad.llm.qwen_vision import picture_ids, patches, picture_runs
+    made:list = []
+    class Job:
+      def __init__(self, n): self.n = n
+      def step(self): return np.zeros((self.n, 4096), np.float32)
+    pics = [types.SimpleNamespace(digest=bytes([k + 1]) * 32, rgb=np.zeros((32 * 8, 32 * 8, 3), np.uint8)) for k in range(12)]
+    s = LLMServer.__new__(LLMServer)
+    s.vision, s._pic_rows, s._tower_job = types.SimpleNamespace(start=lambda px, grid: Job(grid[0] * grid[1] // 4), patches=patches), \
+      collections.OrderedDict(), None
+    keep = s._keep_rows
+    s._keep_rows = lambda d, r: (made.append(d), keep(d, r))  # type: ignore[method-assign]
+    ids, first = [5], {}
+    for p in pics:
+      pid = picture_ids(p.digest, 8, 8)
+      first[pid[0]] = p
+      ids += [VS] + pid + [VE, 6]
+    ids += [1, 2, 3, 4]
+    req = Request.__new__(Request)
+    req.fill, req.pics = (ids, 0, False), first
+    getenv.cache_clear()
+    self.addCleanup(getenv.cache_clear)
+    with unittest.mock.patch.dict(os.environ, {"VISION_CACHE_MB": "8"}):
+      pos = 0
+      for _ in range(200):
+        for _ in range(50):
+          if s.tower_slice(req) is None: break
+        else: self.fail(f"the tower ahead of the prefill at {pos} never done")
+        # (the prefill: reads the kept rows of the pictures in its next slice of 100 rows, as picture_rows does)
+        for start, n, _, f in picture_runs(ids):
+          if pos < start + n and start < pos + 100: self.assertIsNotNone(s.picture_rows(first[f]), f"picture at {start} kept")
+        if (pos:=pos + 100) >= len(ids): break
+        req.fill = (ids, pos, False)
+    self.assertEqual(sorted(made), sorted(p.digest for p in pics), "each picture made once")
+
   def test_fallback_finishes_the_job_in_progress(self):
     # (CTO review round 4 item 15) picture_rows' fallback (rows dropped by the LRU: the whole tower in the prefill) while a sliced job of ANOTHER
     # picture of the same bucket is in progress: that job is finished first and keeps ITS rows, then the fallback's picture runs. The fake tower

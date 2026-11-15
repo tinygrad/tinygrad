@@ -1230,13 +1230,24 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def tower_slice(self, req:Request) -> float|None:
     """
     VISION: one slice of the tower (seconds) for the pictures the next prefill of req reads whose rows aren't kept: the job in progress
-    (whoever's), else the first such picture's. None: none left (its prefill reads kept rows, the tower doesn't run inside it)
+    (whoever's), else the first such picture's. None: none left (its prefill reads kept rows, the tower doesn't run inside it).
+    (the pictures ahead of the prefill are made up to half of VISION_CACHE_MB, at least one, and kept at the young end of the cache: a prompt
+    with more pictures than the cache holds gets the rest as its prefill moves on. making them all first evicted the first ones and made them
+    again: 1,100 screenshots of 2.2 MB in 2,048 MB never prefilled)
     """
     if self._tower_job is None:
       from tinygrad.llm.qwen_vision import picture_runs
       ids, pos, _ = req.fill
-      need = [req.pics[first] for start, n, _, first in (picture_runs(ids) if req.pics else []) if start + n > pos and first in req.pics]
-      pic = next((p for p in need if p.digest not in self._pic_rows), None)
+      budget, ahead, pic = getenv("VISION_CACHE_MB", 512) * 2**20 // 2, 0, None
+      row = (r.nbytes // max(1, r.shape[0])) if (r:=next(iter(self._pic_rows.values()), None)) is not None else 0
+      for start, n, _, first in (picture_runs(ids) if req.pics else []):
+        if start + n <= pos or (p:=req.pics.get(first)) is None: continue
+        if ahead and (ahead + n) * row > budget: break
+        ahead += n
+        if p.digest not in self._pic_rows:
+          pic = p
+          break
+        self._pic_rows.move_to_end(p.digest)
       if pic is None: return None
       self._tower_job = (pic, self.vision.start(*self.vision.patches(pic.rgb)))
     st = time.perf_counter()
