@@ -81,6 +81,27 @@ static int send_response(int fd, response_t *resp, int send_fd) {
   return sendmsg(fd, &msg, 0) > 0 ? 0 : -1;
 }
 
+static int send_response_data(int fd, response_t *resp, const void *data, size_t len) {
+  struct iovec iov[2] = {{resp, sizeof(*resp)}, {(void*)data, len}};
+  struct msghdr msg = {.msg_iov = iov, .msg_iovlen = len ? 2 : 1};
+  while (msg.msg_iovlen) {
+    ssize_t n = sendmsg(fd, &msg, 0);
+    if (n < 0 && errno == EINTR) continue;
+    if (n <= 0) return -1;
+    size_t sent = n;
+    while (msg.msg_iovlen && sent >= msg.msg_iov->iov_len) {
+      sent -= msg.msg_iov->iov_len;
+      msg.msg_iov++;
+      msg.msg_iovlen--;
+    }
+    if (msg.msg_iovlen) {
+      msg.msg_iov->iov_base = (uint8_t*)msg.msg_iov->iov_base + sent;
+      msg.msg_iov->iov_len -= sent;
+    }
+  }
+  return 0;
+}
+
 static void send_error(int fd, const char *msg) {
   response_t resp = {.status = RESP_ERR, .resp0 = strlen(msg)};
   send_response(fd, &resp, -1);
@@ -186,6 +207,8 @@ static void handle_client(int fd) {
   int bufsize = BULK_BUF_SIZE;
   setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bufsize, sizeof(bufsize));
   setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
+  int no_sigpipe = 1;
+  setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe));
   printf("client connected\n");
 
   g_conn = open_tinygpu();
@@ -236,8 +259,7 @@ static void handle_client(int fd) {
       if (validate_bar(req.bar, req.arg0, req.arg1)) { resp.status = 1; break; }
       mmio_copy(g_bulk_buf, (void*)(g_bars[req.bar].addr + req.arg0), req.arg1);
       resp.resp0 = req.arg1;
-      send_response(fd, &resp, -1);
-      send(fd, g_bulk_buf, req.arg1, 0);
+      if (send_response_data(fd, &resp, g_bulk_buf, req.arg1)) goto disconnected;
       continue;
 
     case CMD_MMIO_WRITE:
@@ -252,6 +274,7 @@ static void handle_client(int fd) {
     send_response(fd, &resp, -1);
   }
 
+disconnected:
   printf("client disconnected\n");
   cleanup();
 }
