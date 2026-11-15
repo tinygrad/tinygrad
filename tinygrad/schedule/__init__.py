@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, replace
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import GroupOp, UOp, Ops, UOpMetaClass, graph_rewrite, MapCtx, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, SCACHE, BASEDIR, partition, dedup, all_int, VIZ, NO_MEMORY_PLANNER
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, SCACHE, BASEDIR, partition, dedup, all_int, VIZ
 from tinygrad.helpers import diskcache_get, diskcache_put, colored
 
 # **** schedule linearizer
@@ -101,7 +101,7 @@ def new_alloc(ctx:tuple[UOp, ...], b:UOp):
 pm_post_sched_cache = PatternMatcher([
   # Resolve positional arguments outside kernel bodies; free Variables have slot -1.
   (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[x.arg.slot] if x.arg.slot >= 0 else None),
-  # a fresh ALLOC for this invocation
+  # a cached schedule has the same (canonical) ALLOCs every time it's called, each invocation gets distinct ones
   (UPat(Ops.ALLOC, name="b"), new_alloc),
 ])
 
@@ -273,9 +273,11 @@ def to_extern(ctx:CallifyCtx, x:UOp) -> UOp|None:
   ctx.replacements.append(x)
   return ret
 
+pm_export = PatternMatcher([(UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern)])+pm_canonicalize_alloc
+
 def export(big_sink:UOp) -> tuple[UOp, tuple[UOp, ...]]:
-  pm_export = PatternMatcher([(UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern)])+pm_canonicalize_alloc
-  fn = graph_rewrite(UOp.sink(*(u for u in big_sink.toposort() if is_store_after(u))), pm_export, ctx=(ctx:=CallifyCtx()), bottom_up=True)
+  stores = UOp.sink(*(u for u in big_sink.toposort() if is_store_after(u)))
+  fn = graph_rewrite(stores, pm_export, ctx=(ctx:=CallifyCtx()), bottom_up=True, name="export")
   return fn, tuple(ctx.replacements)
 
 pm_map_back = PatternMatcher([
@@ -284,27 +286,27 @@ pm_map_back = PatternMatcher([
   (UPat(Ops.ALLOC, name="b"), lambda b: UOp.new_buffer(b.device, b.max_numel(), b.dtype)),
 ])
 
-def transform_to_call(fn:UOp) -> UOp:
-  if VIZ: graph_rewrite(fn, PatternMatcher([]), name="View Graph")
-  if SPEC: type_verify(fn, spec_tensor)
+def transform_to_call(big_sink:UOp) -> UOp:
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Graph")
+  if SPEC: type_verify(big_sink, spec_tensor)
 
   # The tensor replacement map is collected before these rewrites change node identities.
-  graph_rewrite(fn, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
+  graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
   ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs")
   ret = ret.call(*ctx.replacements, precompile=True)
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret
 
-export_cache: dict[tuple[bytes, int], UOp] = {}
+export_cache: dict[bytes, UOp] = {}
 def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   fn, externs = export(big_sink)
   # the linear of the exported function has no runtime state, it's cached
-  if not SCACHE or (linear:=export_cache.get(key:=(fn.key, NO_MEMORY_PLANNER.value))) is None:
+  if not SCACHE or (linear:=export_cache.get(key:=fn.key)) is None:
     linear_call = graph_rewrite(transform_to_call(fn), pm_schedule, name="schedule to linear", enter_calls=True)
     # this recursively resolves the linear_call
     linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
     # create copies
-    linear = memory_plan_rewrite(graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls"))
+    linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
     if SCACHE: export_cache[key] = linear
 
   # vars used in the schedule
@@ -324,4 +326,5 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   if len(capturing) and CAPTURING:
     capturing[0].add_linear(linear)
     return UOp(Ops.LINEAR, src=()), var_vals
-  return linear, var_vals
+
+  return memory_plan_rewrite(linear, {b for b in externs if b.op is Ops.BUFFER}), var_vals
