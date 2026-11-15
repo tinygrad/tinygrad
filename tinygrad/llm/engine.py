@@ -97,6 +97,11 @@ class SeqEngine:
   ROOM, RESERVE = 2048, getenv("SEQ_RESERVE", 4096)
   # (SEQ_CKPT2=1: two checkpoints a sequence, see Seq.ckpt2: +~115 MB of host memory a slot)
   CKPT2 = getenv("SEQ_CKPT2", 0)
+  # (SEQ_CKPT_TAIL (the server sets TAIL: the text's tokens, e.g. '<think>\n'): a prompt that ends with them keeps its checkpoint before
+  # them, not at its end. a template that renders an old turn without its reasoning (Qwen 3.x preserve_thinking=false) renders the turn of the
+  # last prompt's generation prompt '<|im_start|>assistant\n<think>\n' as '<|im_start|>assistant\n...': the next prompt diverges in the tail,
+  # before the end's checkpoint, and a hybrid model (its recurrent states only at the checkpoint) prefills it all again)
+  TAIL: list[int] = []
   # (SEQ_COMPACT: a region the free rows IN ALL are enough for is made by moving regions (the rows copied on the device, bit for bit: _pack /
   # _place) before any idle conversation is evicted for a window of its size: an eviction is a copy to the host and later back, or a re-prefill
   # if the stash is full. at most SEQ_COMPACT_ROWS rows moved for one region (the copies take the model thread: 130K rows ~ a few ms))
@@ -515,6 +520,15 @@ class SeqEngine:
     s.delta = self._delta(ids)
     # (a prompt that is its checkpoint: the token after it from the hidden state of its last token, restored)
     if restore and start == len(ids): first = self.model.seq_first(s.slot, s.base, start, temp)
+    elif (cut:=self._tail_cut(ids)) and start <= cut:
+      # (SEQ_CKPT_TAIL: to the tail, its checkpoint there (not restored from it: kept), then the tail and the token after it)
+      kw:dict = {"pictures": pictures} if pictures else {}
+      if start < cut: self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, upto=cut, **kw)
+      if not (restore and start == cut): self._ckpt_save(s, cut, restore or start > 0)
+      first = self.model.seq_prefill(s.slot, s.base, ids, cut, s.hrow if start == cut and not restore else 0, temp, **kw)
+      s.tokens, s.n, s.hrow, s.ckpt, s.used = ids + [first], len(ids), 0, cut, time.perf_counter()
+      s.mtp, s.j, s.par, s.y, s.temp = len(ids), 0, 1, [first] + [0]*self.k, temp
+      return first
     else:
       first = self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, temp, pictures=pictures) if pictures else \
         self.model.seq_prefill(s.slot, s.base, ids, start, 0 if restore else s.hrow, temp)
@@ -523,6 +537,11 @@ class SeqEngine:
     s.tokens, s.n, s.hrow, s.ckpt, s.used = ids + [first], len(ids), 0, len(ids), time.perf_counter()
     s.mtp, s.j, s.par, s.y, s.temp = len(ids), 0, 1, [first] + [0]*self.k, temp
     return first
+
+  def _tail_cut(self, ids:list[int]) -> int:
+    """SEQ_CKPT_TAIL: where the checkpoint of the prompt ids is kept, before its tail (0: at its end)"""
+    t = len(self.TAIL)
+    return len(ids) - t if t and len(ids) > t and ids[-t:] == self.TAIL else 0
 
   def mix_start(self, s:Seq, ids:list[int], start:int, restore:bool, temp:tuple[float, ...]):
     """a short prompt suffix starts forced decode steps, from its checkpoint or last token's states (no standalone prefill)"""

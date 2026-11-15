@@ -935,6 +935,23 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # (the requests that ended (when, ttft, longest wait for a token, total, prompt, cached, generated, queued): the latencies of status)
   recent: collections.deque = collections.deque(maxlen=1000)
   temperature = 0.0  # a chat completion's without one
+  def ckpt_tail(self) -> str:
+    """
+    the text of the generation prompt after the role header an assistant turn renders with (Qwen 3.x: '<think>\\n' of
+    '<|im_start|>assistant\\n<think>\\n': an old turn without its reasoning renders '<|im_start|>assistant\\n' + its text)
+    """
+    # (the turn as it renders with a user message after it, its reasoning not kept (Qwen 3.x preserve_thinking, GLM 5.x clear_thinking))
+    ms:list[dict] = [{"role": "user", "content": "u"}]
+    kw = {"preserve_thinking": False, "clear_thinking": True}
+    gen = self.template.render(messages=ms, add_generation_prompt=True, **kw)
+    start = self.template.render(messages=ms, add_generation_prompt=False, **kw)
+    turn = self.template.render(messages=ms + [{"role": "assistant", "content": "\x00"}, {"role": "user", "content": "v"}],
+                                add_generation_prompt=False, **kw)
+    if not (gen.startswith(start) and turn.startswith(start)): return ""
+    gen, turn = gen[len(start):], turn[len(start):]
+    n = next((i for i in range(min(len(gen), len(turn))) if gen[i] != turn[i]), min(len(gen), len(turn)))
+    return gen[n:]
+
   def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, template:typing.Any, top_p:float=1.0,
                temperature:float=0.0, vision:typing.Any=None):
     # top_p: a request's without one (the model's recommended, general.sampling.top_p of its gguf); temperature: a chat completion's
@@ -1771,6 +1788,8 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     from tinygrad.llm.engine import SeqEngine, Seq
     eng = self.engine = SeqEngine(self.model)
     eng.telemetry = self.telemetry
+    # (SEQ_CKPT_TAIL=1: a prompt's checkpoint kept before the tail of the generation prompt, see SeqEngine.TAIL and ckpt_tail)
+    if getenv("SEQ_CKPT_TAIL", 0): eng.TAIL = self.tok.encode(self.ckpt_tail())
     active: dict[Seq, Request] = {}
     filling: dict[Seq, Request] = {}  # (the sequences of the prompts being prefilled: their request's fill is where)
     pending: list[Request] = []
