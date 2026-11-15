@@ -5,7 +5,7 @@ The vision tower of Qwen 3.8 Flash Next (the mmproj GGUF, projector qwen3vl_merg
 resized bilinearly, then the 2 x 2 merger (LayerNorm, 4608 -> 4608 -> GELU -> 2560). No deepstack. Float32 throughout.
 """
 from __future__ import annotations
-import base64, binascii, functools, hashlib, io, math, pathlib, threading, time
+import base64, binascii, collections, functools, hashlib, io, itertools, math, pathlib, threading, time
 from dataclasses import dataclass
 from typing import Any, cast
 import numpy as np
@@ -216,9 +216,36 @@ def picture_ids(digest:bytes, rows:int, cols:int) -> list[int]:
   base = (int.from_bytes(digest[:8], "little") & ((1 << H_BITS) - 1)) << (2 * ID_BITS) | cols << ID_BITS
   return [-(1 + (base | k)) for k in range(rows * cols)]
 
+_RUNS_SEEN: collections.OrderedDict[int, tuple[list[int], list[tuple[int, int, int, int]]]] = collections.OrderedDict()
+_RUNS_LOCK, _RUNS_KEYS = threading.Lock(), itertools.count()
+
 def picture_runs(ids:list[int]) -> list[tuple[int, int, int, int]]:
-  """the pictures of a token list: (first row, rows count n, cols, first row's id) each (a run of a picture's ids, k from 0 counting up)"""
-  ret, i, L, mask = [], 0, len(ids), (1 << ID_BITS) - 1
+  """
+  the pictures of a token list: (first row, rows count n, cols, first row's id) each (a run of a picture's ids, k from 0 counting up).
+  (a prompt is mostly the one before it and more: the runs of the last token lists seen (a copy of each) that are a prefix of ids are kept, the
+  scan goes on from the end of the last one that ends before the prefix does (a run touching its end may go on). the prefix test is one list
+  comparison in C: 1-2 ms at 300K tokens where the scan is 20-40 ms; the result is the scan's, the same function of the ids)
+  """
+  L, best = len(ids), None
+  with _RUNS_LOCK:
+    for key, (c, runs) in reversed(_RUNS_SEEN.items()):
+      if (n:=len(c)) <= L and (best is None or n > len(best[0])) and c[-1] == ids[n-1] and c[0] == ids[0] and c == ids[:n]: best = (c, runs, key)
+    if best is not None: _RUNS_SEEN.move_to_end(best[2])
+  if best is None: ret = _scan_runs(ids, 0, [])
+  elif len(best[0]) == L: return list(best[1])
+  else:
+    # (after the prefix's last run its ids are text: the scan goes on at the prefix's end, or at that run's start if it reaches the end)
+    c, runs, _ = best
+    ret = _scan_runs(ids, runs[-1][0], runs[:-1]) if runs and runs[-1][0] + runs[-1][1] == len(c) else _scan_runs(ids, len(c), list(runs))
+  if L:
+    with _RUNS_LOCK:
+      _RUNS_SEEN[next(_RUNS_KEYS)] = (list(ids), ret)
+      while len(_RUNS_SEEN) > 8: _RUNS_SEEN.popitem(last=False)
+  return list(ret)
+
+def _scan_runs(ids:list[int], i:int, ret:list[tuple[int, int, int, int]]) -> list[tuple[int, int, int, int]]:
+  """picture_runs' scan of ids from i (not inside a picture's rows), appending to ret"""
+  L, mask = len(ids), (1 << ID_BITS) - 1
   while i < L:
     if ids[i] >= 0:
       i += 1
@@ -504,4 +531,4 @@ class TowerJob:
     x = px if a == 0 else t._carry(self.npad, t.block_dev[a - 1])
     out = jit(x, posx, cos, sin, kmask)
     self.k += 1
-    return out.numpy()[:self.rows] if self.done else None
+    return out[:self.rows].numpy() if self.done else None  # (only its rows to the host: not the bucket's padding)

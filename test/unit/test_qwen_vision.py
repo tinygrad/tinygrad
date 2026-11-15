@@ -67,6 +67,33 @@ class TestPictureIds(unittest.TestCase):
     # (the same picture twice in a row, markers between: two runs)
     self.assertEqual(len(picture_runs([248053] + a + [248054, 248053] + a + [248054])), 2)
 
+  def test_runs_of_a_longer_prompt(self):
+    # picture_runs keeps the runs of token lists it saw and goes on from a prefix: always the plain scan's answer (growing prompts, a prompt that
+    # ends inside a picture and goes on with it, edits in the middle, the same picture twice in a row, a picture cut short, a shorter prompt)
+    import random
+    from tinygrad.llm.qwen_vision import _scan_runs, _RUNS_SEEN
+    rng, pics = random.Random(3), [picture_ids(bytes([i]) * 32, r, c) for i, (r, c) in enumerate([(1, 1), (2, 3), (4, 4), (3, 5)])]
+    def both(ids):
+      out = []
+      for f in (picture_runs, lambda x: _scan_runs(x, 0, [])):
+        try: out.append(f(ids))
+        except AssertionError: out.append("not a picture's first row")
+      return out
+    _RUNS_SEEN.clear()
+    for _ in range(300):
+      ids: list[int] = []
+      for _ in range(rng.randrange(1, 12)):
+        ids += [rng.randrange(9) for _ in range(rng.randrange(0, 3))]
+        p = rng.choice(pics)
+        ids += p if rng.random() < 0.85 else p[:rng.randrange(1, len(p) + 1)]
+        for n in sorted(rng.sample(range(1, len(ids) + 1), min(4, len(ids)))):
+          self.assertEqual(*both(ids[:n]))
+        self.assertEqual(*both(ids))
+      if rng.random() < 0.3 and len(ids) > 2:
+        k = rng.randrange(len(ids))
+        ids[k] = rng.randrange(9) if ids[k] < 0 else ids[k]
+        self.assertEqual(*both(ids))
+
   def test_size_in_ids(self):
     self.assertNotEqual(picture_ids(b"\x01" * 32, 8, 9)[0], picture_ids(b"\x01" * 32, 9, 8)[0])
     with self.assertRaises(AssertionError): picture_ids(b"\x01" * 32, 1, 1 << 14)
