@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Callable
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.llm.kernels.amd import Linear, ExpertWeights, fp8_matmul, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
-from tinygrad.llm.gguf import gguf_parse, gguf_shard, GGUFPackedTable, _GGML_QUANT
+from tinygrad.llm.gguf import gguf_parse, gguf_shard, gguf_can_split, GGUFPackedTable
 from tinygrad.llm.hf import hf_load
 from tinygrad.uop.ops import resolve, smax, ssimplify
 from tinygrad.helpers import unwrap, round_up, get_child
@@ -745,8 +745,11 @@ class Transformer:
         'ssm_conv1d_v.weight', 'ssm_dt.bias', 'ssm_a', 'ssm_beta.weight', 'ssm_f_b.weight', 'ssm_g.weight', 'ssm_g_b.weight', 'attn_gate.weight')})
       shard_map = {name: rules[k] for name in entries if (k:=re.sub(r"^blk\.\d+\.", "", name)) in rules}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
-    ep = any(shape[-1] % (shard*_GGML_QUANT.get(typ, (1,))[0]) for k,(_,shape,typ) in entries.items() if 'ffn_down_exps.' in k)
-    state_dict = gguf_shard(entries, devices, {k: 0 if ep and '_exps.' in k else v for k,v in shard_map.items()}, repeats)
+    ep = any(not gguf_can_split(shape, typ, 2, shard) for k,(_,shape,typ) in entries.items() if 'ffn_down_exps.' in k)
+    expert_pad = round_up(n_exp:=kv.get(f'{arch}.expert_count', 0), shard) - n_exp if ep else 0
+    shard_map = {k: 0 if ep and '_exps.' in k else v for k,v in shard_map.items()
+                 if '_exps.' in k or k in repeats or gguf_can_split(entries[k][1], entries[k][2], v, shard)}
+    state_dict = gguf_shard(entries, devices, shard_map, repeats, {k: expert_pad for k in shard_map if '_exps.' in k})
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
@@ -852,6 +855,7 @@ class Transformer:
       situ=(kv[f'{arch}.activation.situ_beta'], kv[f'{arch}.activation.situ_linear_beta']) if f'{arch}.activation.situ_beta' in kv else None)
     model = Transformer(config)
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
+    for k in [k for k in state_dict if expert_pad and '_exps.' in k]: setattr(get_child(model, (kp:=k.rsplit('.', 1))[0]), kp[1], state_dict[k])
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:

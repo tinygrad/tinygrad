@@ -1,6 +1,6 @@
 import itertools, pathlib, tempfile, unittest
 import numpy as np
-from gguf import GGUFWriter, GGMLQuantizationType as Q, GGML_QUANT_SIZES
+from gguf import GGUFWriter, GGMLQuantizationType as Q, GGML_QUANT_SIZES, dequantize
 from tinygrad import Device, Tensor, Variable, nn
 from tinygrad.helpers import DEV
 from tinygrad.llm.model import Transformer, TransformerConfig, SSMConfig
@@ -50,6 +50,14 @@ class TestGGUFShard(unittest.TestCase):
     np.testing.assert_array_equal(out.to(Device.DEFAULT).numpy(), full.reshape(2, 4, 512).repeat(2, 0).reshape(16, 512))
     with self.assertRaises(ValueError): gguf_shard({'w': entry}, devices, {'w': 0}, {'w': 3})
 
+  def test_pad(self):
+    data = random_data((3, 32), Q.Q8_0)
+    entry = (Tensor(data.reshape(-1), device='CPU').realize(), (3, 32), Q.Q8_0)
+    out = gguf_shard({'w': entry}, DEVICES, {'w': 0}, pads={'w': 1})['w']
+    self.assertEqual((out.shape, out.device, out.uop.axis), ((4, 32), DEVICES, 0))
+    np.testing.assert_array_equal(out.to(Device.DEFAULT).numpy(), np.concatenate([dequantize(data, Q.Q8_0), np.zeros((1, 32), np.float32)]))
+    with self.assertRaises(ValueError): gguf_shard({'w': entry}, DEVICES, {'w': 0}, pads={'w': 2})
+
   def test_split_quantization_block(self):
     # two devices would each get one and a half Q4_K blocks of every row
     data = Tensor(random_data((8, 768), Q.Q4_K).reshape(-1), device='CPU')
@@ -92,6 +100,31 @@ class TestTensorParallel(unittest.TestCase):
       ref = single.blk[0]._feed_forward(x).numpy()
       out = parallel.blk[0]._feed_forward(x.shard(DEVICES)).to(Device.DEFAULT).numpy()
       np.testing.assert_allclose(out, ref, atol=2e-3, rtol=2e-3)
+
+  def test_moe_padded(self):
+    if not amd_custom_kernels_supported(DEVICES[0]): self.skipTest("needs the AMD custom kernels")
+    with tempfile.TemporaryDirectory() as folder:
+      config = TransformerConfig(num_blocks=1, dim=256, hidden_dim=768, n_heads=4, n_kv_heads=4, norm_eps=1e-5,
+        vocab_size=33, head_dim=2, v_head_dim=2, rope_theta=10000, rope_dim=2, max_context=16, num_experts=3, num_experts_per_tok=2)
+      writer = GGUFWriter(path:=pathlib.Path(folder)/'model.gguf', 'deepseek2')
+      for key,value in {'context_length':16, 'embedding_length':256, 'expert_feed_forward_length':768, 'block_count':1,
+                        'attention.head_count':4, 'attention.head_count_kv':4, 'attention.key_length':2,
+                        'rope.dimension_count':2, 'expert_count':3, 'expert_used_count':2}.items(): writer.add_uint32('deepseek2.'+key, value)
+      writer.add_float32('deepseek2.rope.freq_base', 10000)
+      writer.add_float32('deepseek2.attention.layer_norm_rms_epsilon', 1e-5)
+      writer.add_array('tokenizer.ggml.tokens', [str(i) for i in range(33)])
+      rng, exps = np.random.default_rng(42), {}
+      for name,weight in nn.state.get_state_dict(Transformer(config)).items():
+        if '_exps.' in name: writer.add_tensor(name, exps.setdefault(name, random_data(weight.shape, Q.Q4_K)), raw_dtype=Q.Q4_K)
+        else: writer.add_tensor(name, rng.normal(1 if name.endswith('norm.weight') else 0, .1, weight.shape).astype(np.float32))
+      write_gguf(writer)
+      model = Transformer.from_gguf(path, 16, shard=2)[0]
+      down = model.blk[0].ffn_down_exps
+      self.assertEqual((down.weight.shape, down.weight.uop.axis, model.output.weight.uop.axis), ((4, 256, 768), 0, None))
+      sel, x = np.array([[[2, 0], [1, 2]]], dtype=np.int32), rng.normal(size=(1, 2, 2, 768)).astype(np.float16)
+      ref = np.einsum('btkoi,btki->btko', dequantize(exps['blk.0.ffn_down_exps.weight'], Q.Q4_K)[sel], x.astype(np.float32))
+      got = down(Tensor(sel).shard(DEVICES), Tensor(x).shard(DEVICES)).sum(0).float().to(Device.DEFAULT).numpy()
+      np.testing.assert_allclose(got, ref, rtol=2e-2, atol=2e-2*np.abs(ref).max())
 
   def test_quantized_linear(self):
     # the AMD kernels on the packed shards: decode (1 token) and WMMA (16 tokens), output and input features split
