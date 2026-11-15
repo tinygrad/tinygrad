@@ -354,6 +354,74 @@ class TestSeqCkpt2(unittest.TestCase):
       self.run_turn(eng, p2)
       self.assertEqual(eng.cached(p3), len(p1))
     with patch.object(SeqEngine, "CKPT2", 0): self.assertEqual(eng.cached(p3), 0)
+class TestSeqCkptTail(unittest.TestCase):
+  """SEQ_CKPT_TAIL: a prompt that ends with the tail ('<think>\\n') keeps its checkpoint before it: the next prompt, rendered with the old turn
+  without its reasoning (Qwen 3.x preserve_thinking=false: '<|im_start|>assistant\\n' + its text, no '<think>'), diverges in the tail and
+  resumes from there instead of from 0 (a hybrid model's states are only at the checkpoint)"""
+  HDR, TAIL = [900001, 900002], [900003, 900004]  # (<|im_start|>assistant\n, <think>\n)
+  def turns(self):
+    model = FakeModel()
+    eng = SeqEngine(model)
+    p1 = list(range(1000, 4000)) + self.HDR + self.TAIL
+    p2 = p1[:-2] + list(range(5000, 5100)) + list(range(6000, 6600)) + self.HDR + self.TAIL  # the reply without its reasoning + a tool turn
+    return model, eng, p1, p2
+  run_turn = TestSeqCkpt2.run_turn
+  def test_off_goes_cold(self):
+    model, eng, p1, p2 = self.turns()
+    s1, *_ = self.run_turn(eng, p1)
+    s2, start2, restore2 = self.run_turn(eng, p2)
+    self.assertEqual((start2, restore2), (0, False))
+  def test_on_resumes_before_the_tail(self):
+    model, eng, p1, p2 = self.turns()
+    with patch.object(eng, "TAIL", self.TAIL):
+      s1, *_ = self.run_turn(eng, p1)
+      self.assertEqual(s1.ckpt, len(p1) - 2)
+      self.assertIn(("ckpt", True, s1.slot, len(p1) - 2), model.calls)
+      self.assertNotIn(("ckpt", True, s1.slot, len(p1)), model.calls)
+      model.calls.clear()
+      s2, start2, restore2 = self.run_turn(eng, p2)
+    self.assertIs(s2, s1)
+    self.assertEqual((start2, restore2, s2.ckpt), (len(p1) - 2, True, len(p2) - 2))
+    # (the checkpoint restored, the prompt to its tail, the new checkpoint there, then the tail with the token after it)
+    self.assertEqual([c for c in model.calls if c[0] in ("ckpt", "prefill")], [("ckpt", False, s2.slot, len(p1) - 2),
+      ("prefill", s2.slot, len(p1) - 2, len(p2) - 2), ("ckpt", True, s2.slot, len(p2) - 2), ("prefill", s2.slot, len(p2) - 2, len(p2))])
+  def test_on_same_prompt_again(self):
+    model, eng, p1, _ = self.turns()
+    with patch.object(eng, "TAIL", self.TAIL):
+      s1, *_ = self.run_turn(eng, p1)
+      model.calls.clear()
+      s2, start2, restore2 = self.run_turn(eng, p1)
+    self.assertEqual((s2, start2, restore2, s2.ckpt), (s1, len(p1) - 2, True, len(p1) - 2))
+    # (only the tail prefilled, the kept checkpoint not written again)
+    self.assertEqual([c for c in model.calls if c[0] in ("ckpt", "prefill")],
+                     [("ckpt", False, s2.slot, len(p1) - 2), ("prefill", s2.slot, len(p1) - 2, len(p1))])
+  def test_on_slice_ends_at_the_cut(self):
+    model, eng, p1, _ = self.turns()
+    with patch.object(eng, "TAIL", self.TAIL):
+      s, start, restore = eng.take(p1, 100)
+      eng.prefill_slice(s, p1, start, restore, len(p1) - 2)
+      eng.prefill(s, p1, len(p1) - 2, False, (0.0, 1.0))
+    self.assertEqual([c for c in model.calls if c[0] in ("ckpt", "prefill")],
+                     [("prefill", s.slot, 0, len(p1) - 2), ("ckpt", True, s.slot, len(p1) - 2), ("prefill", s.slot, len(p1) - 2, len(p1))])
+  def test_on_prompt_without_the_tail(self):
+    model, eng, p1, _ = self.turns()
+    with patch.object(eng, "TAIL", self.TAIL):
+      s1, *_ = self.run_turn(eng, p1[:-2])
+    self.assertEqual(s1.ckpt, len(p1) - 2)
+    self.assertEqual([c for c in model.calls if c[0] == "prefill"], [("prefill", s1.slot, 0, len(p1) - 2)])
+
+  def test_tail_of_the_templates(self):
+    from tinygrad.llm.serve import LLMServer
+    class T:  # (Qwen 3.x: an old turn without its reasoning renders no <think>; GLM 5.x: '<think></think>' kept, no tail)
+      def __init__(self, glm): self.glm = glm
+      def render(self, messages, add_generation_prompt, preserve_thinking=True, clear_thinking=False):
+        hdr = "<|assistant|>" if self.glm else "<|im_start|>assistant\n"
+        out = "".join(hdr + ("<think></think>" if self.glm else "") + m["content"] if m["role"] == "assistant" else f"<{m['role']}>{m['content']}"
+                      for m in messages)
+        return out + (hdr + ("<think>" if self.glm else "<think>\n") if add_generation_prompt else "")
+    self.assertEqual(LLMServer.ckpt_tail(SimpleNamespace(template=T(False))), "<think>\n")
+    self.assertEqual(LLMServer.ckpt_tail(SimpleNamespace(template=T(True))), "")
+
 class TestScheduleSeqs(unittest.TestCase):
   """the server's scheduling of sequences (schedule_seqs) on a fake model"""
   def setUp(self):

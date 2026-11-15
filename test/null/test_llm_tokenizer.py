@@ -51,6 +51,23 @@ class TestLLMTokenizer(unittest.TestCase):
       self.assertEqual(tok.encode(conv), fresh(conv))
     self.assertEqual(tok._enc_cache[-1][0], conv[:conv.rindex(h) + len(h)])
     self.assertEqual(tok.encode(f"{h}other"), fresh(f"{h}other"))
+  def test_encode_cache_shared(self):
+    # a prompt that leaves the kept text part way (the generation prompt's text replaced by the turn, older reasoning dropped): the tokens to
+    # the last special token they share kept, the rest encoded (the same tokens); the kept one replaced (it shares more than half), another
+    # conversation's with the same start kept
+    tok, h, e = self.llama_tok, "<|start_header_id|>", "<|eot_id|>"
+    def fresh(text:str) -> list[int]:
+      (c:=copy.copy(tok))._enc_cache = []
+      return c.encode(text)
+    other = f"<|begin_of_text|>{h}system be brief{e}{h}user something else entirely, and at length{e}{h}assistant"
+    self.assertEqual(tok.encode(other), fresh(other))
+    conv = f"<|begin_of_text|>{h}system be brief{e}{h}user hello world{e}"
+    for i in range(4):
+      for text in (conv + f"{h}assistant thinking {i}", conv + f"{h}assistant answer {i}{e}{h}user more {i}{e}"):
+        self.assertEqual(tok.encode(text), fresh(text))
+      conv = text
+    self.assertEqual([t for t, _, _ in tok._enc_cache], [other[:other.rindex(h) + len(h)], conv])
+    self.assertEqual([n for _, n in tok._enc_cache[-1][2]], [i+1 for i, t in enumerate(tok.encode(conv)) if t >= 128000])
 
   def test_llama_control_char(self): self._test_coding(self.llama_tok, " \x850", [ 220, 116360, 15 ])
   def test_llama_bytes(self): self._test_coding(self.llama_tok, " \xec\x8b\xa4\xed", [ 1717, 105, 116174, 82638, 2483 ])

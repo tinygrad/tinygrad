@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, signal, argparse, codecs, itertools, typing, re, string, unicodedata, json, time, pathlib, threading
+import sys, signal, argparse, bisect, codecs, itertools, typing, re, string, unicodedata, json, time, pathlib, threading
 from typing import TYPE_CHECKING
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
@@ -14,7 +14,8 @@ ENC_CACHE = getenv("ENC_CACHE", 256)
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
                bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None, eom_id:int|None=None, chat_template:str|None=None):
-    self._enc_cache: list[tuple[str, list[int]]] = []  # (see encode)
+    # (text, its tokens, (each special token's end, the tokens to it)) (see encode)
+    self._enc_cache: list[tuple[str, list[int], list[tuple[int, int]]]] = []
     self._enc_lock = threading.Lock()
     preset = {"qwen35":"qwen2","qwen35moe":"qwen2","minimax-m2":"gpt-4o","deepseek-v3":"joyai-llm"}.get(preset, preset)
     if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4","gpt-4o","joyai-llm"):
@@ -99,21 +100,36 @@ class SimpleTokenizer:
   def encode(self, text:str) -> list[int]:
     """
     the tokens of text. the text up to its last special token is kept with its tokens (the last ENC_CACHE ones): a text that starts with one encodes
-    only what follows (the text between special tokens is encoded on its own: the same tokens). a conversation's prompts grow
+    only what follows (the text between special tokens is encoded on its own: the same tokens). a conversation's prompts grow. one that leaves a
+    kept text part way (a template that renders older turns otherwise once a user message follows them: Qwen preserve_thinking=False, GLM
+    clear_thinking, every Pokemon step) starts at the kept text's last special token before they differ (its tokens there: the ends kept); the
+    kept one goes if they share more than half of it (the conversation's previous prompt)
     """
     with self._enc_lock:
-      base, tokens = max(((t, ids) for t, ids in self._enc_cache if text.startswith(t)), key=lambda e: len(e[0]), default=("", []))
-    tokens, pos, cut, cut_n = list(tokens), len(base), None, 0
+      base, tokens, ends, src = "", [], [], None
+      for t, ids, e in self._enc_cache[::-1]:
+        if len(t) <= len(base) or not text.startswith(t[:(k:=min(4096, len(t)))]): continue
+        if text.startswith(t): base, tokens, ends, src = t, ids, e, None
+        else:
+          # (the characters they share, then the last special token's end within them, past the best start yet)
+          lo, hi = k, min(len(t), len(text))
+          while lo < hi:
+            if text[:(mid:=(lo + hi + 1) // 2)] == t[:mid]: lo = mid
+            else: hi = mid - 1
+          if (i:=bisect.bisect_right(e, (lo, sys.maxsize))) and e[i-1][0] > len(base):
+            base, tokens, ends, src = t[:e[i-1][0]], ids[:e[i-1][1]], e[:i], (t if e[i-1][0] * 2 > len(t) else None)
+    tokens, ends, pos, cut, cut_n = list(tokens), list(ends), len(base), None, 0
     for match in self._split_to_sentence.finditer(text, pos):
       tokens.extend(self._encode_sentence(text[pos:match.start(0)]) + [self._special_tokens[text[match.start(0):match.end(0)]]])
       pos = cut = match.end(0)
       cut_n = len(tokens)
+      ends.append((cut, cut_n))
     if cut is not None:
       with self._enc_lock:
         # (a conversation's own each: a server's clients (agents and their side requests) are dozens, a 250k token prompt encoded again takes
         # seconds. one is a few MB)
-        keep = [e for e in self._enc_cache if not text[:cut].startswith(e[0])]
-        self._enc_cache = keep[len(keep)-(ENC_CACHE-1):] + [(text[:cut], tokens[:cut_n])]
+        keep = [e for e in self._enc_cache if not text[:cut].startswith(e[0]) and e[0] is not src]
+        self._enc_cache = keep[len(keep)-(ENC_CACHE-1):] + [(text[:cut], tokens[:cut_n], ends)]
     return tokens + self._encode_sentence(text[pos:])
 
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
