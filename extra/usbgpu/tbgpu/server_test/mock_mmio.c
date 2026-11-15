@@ -4,7 +4,7 @@
 #include <string.h>
 #include <errno.h>
 
-static size_t remaining;
+static size_t remaining, sent_bytes;
 static int finished, interrupted;
 
 ssize_t mock_mmio_sendmsg(int fd, const struct msghdr *msg, int flags) {
@@ -19,7 +19,8 @@ ssize_t mock_mmio_sendmsg(int fd, const struct msghdr *msg, int flags) {
     char byte;
     while (recv(fd, &byte, 1, MSG_PEEK) < 0 && errno == EINTR);
   }
-  if (getenv("MOCK_MMIO_EINTR") && !interrupted) {
+  const char *interrupt_after = getenv("MOCK_MMIO_EINTR");
+  if (interrupt_after && !interrupted && sent_bytes >= strtoul(interrupt_after, NULL, 10)) {
     interrupted = 1;
     errno = EINTR;
     return -1;
@@ -44,6 +45,7 @@ ssize_t mock_mmio_sendmsg(int fd, const struct msghdr *msg, int flags) {
   }
   ssize_t sent = sendmsg(fd, &limited, flags);
   if (sent > 0) {
+    sent_bytes += (size_t)sent;
     remaining -= (size_t)sent;
     if (!remaining) finished = 1;
   } else if (sent == 0 || errno != EINTR) {

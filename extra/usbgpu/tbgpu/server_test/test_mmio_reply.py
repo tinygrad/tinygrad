@@ -1,4 +1,4 @@
-import glob, os, socket, struct, subprocess, sys, tempfile, time, unittest
+import os, socket, struct, subprocess, sys, tempfile, time, unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -8,25 +8,13 @@ PATTERN = bytes((i * 7 + 3) & 255 for i in range(4096))
 
 
 def build_server(binary:Path):
-  compilers = [["xcrun", "clang"]]
-  clt = "/Library/Developer/CommandLineTools"
-  if sdks := sorted(glob.glob(f"{clt}/SDKs/MacOSX*.sdk")):
-    compilers.append([f"{clt}/usr/bin/clang", "-isysroot", sdks[-1]])
-  errors = []
-  for compiler in compilers:
-    commands = [
-      [*compiler, "-O2", "-include", str(HERE / "mock_mmio.h"), "-c", SERVER, "-o", str(binary) + ".o"],
-      [*compiler, "-O2", str(binary) + ".o", *(str(HERE / name) for name in ("mock_iokit.c", "mock_main.c", "mock_mmio.c")),
-       "-o", str(binary)],
-    ]
-    for command in commands:
-      result = subprocess.run(command, capture_output=True, text=True)
-      if result.returncode:
-        errors.append(result.stderr)
-        break
-    else:
-      return
-  raise RuntimeError("cannot build the isolated server:\n" + "\n".join(errors))
+  commands = [
+    ["xcrun", "clang", "-O2", "-include", str(HERE / "mock_mmio.h"), "-c", SERVER, "-o", str(binary) + ".o"],
+    ["xcrun", "clang", "-O2", str(binary) + ".o",
+     *(str(HERE / name) for name in ("mock_mmio_iokit.c", "mock_main.c", "mock_mmio.c")), "-o", str(binary)],
+  ]
+  for command in commands:
+    subprocess.run(command, check=True)
 
 
 @unittest.skipUnless(sys.platform == "darwin", "TinyGPU server uses macOS headers")
@@ -98,10 +86,13 @@ class TestMMIOReply(unittest.TestCase):
         connection.close()
 
   def test_interrupted_reply(self):
-    connection = self.start(MOCK_MMIO_EINTR="1", MOCK_MMIO_LIMIT="19")
-    self.write_pattern(connection)
-    self.assertEqual(self.read(connection, len(PATTERN)), PATTERN)
-    self.assertEqual(self.read(connection, 4), PATTERN[:4])
+    for limit, after in ((19, 0), (3, 3), (19, 19)):
+      with self.subTest(after=after):
+        connection = self.start(MOCK_MMIO_EINTR=str(after), MOCK_MMIO_LIMIT=str(limit))
+        self.write_pattern(connection)
+        self.assertEqual(self.read(connection, len(PATTERN)), PATTERN)
+        self.assertEqual(self.read(connection, 4), PATTERN[:4])
+        connection.close()
 
   def check_failed_reply(self, **env):
     connection = self.start(**env)
