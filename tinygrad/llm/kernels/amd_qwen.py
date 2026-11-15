@@ -116,13 +116,13 @@ def _reg(shape:tuple[int, ...], value:float, dep:UOp|None=None) -> UOp:
 
 # (the most rows the split-K gemm of tiles of 32 rows takes (batched decoding, the smallest prefill chunk), see q8_linear)
 SKINNY_ROWS = 256
-SKINNY_WG, HC_KS = getenv("SKINNY_WG", 192), getenv("HC_KS", 32)
+SKINNY_WG, HC_KS = 192, 32
 # AG_FUSE: all_gather_q8's packing kernel sends the words to the peers too (the flag exchange's send kernel folded into it)
-AG_FUSE = getenv("AG_FUSE", 1)
+AG_FUSE = 1
 # XUNPACK: all_gather_q8's flag push unpacks the gathered q8 groups itself (one kernel less an all gather)
-XUNPACK = getenv("XUNPACK", 1)  # all_gather_q8 push unpacks itself (bit-exact, stress-tested with zero mismatches)
+XUNPACK = 1  # all_gather_q8 push unpacks itself (bit-exact, stress-tested with zero mismatches)
 # TILE16: batched decoding's hyper-connection gemms (a device's few rows: 4-16 of a tile of 32) of its real rows' tiles alone, in tiles of 16
-TILE16 = getenv("TILE16", 1)
+TILE16 = 1
 
 def unwrap_storage_views(u:UOp) -> UOp:
   # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
@@ -943,15 +943,15 @@ def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]
 # a*b+c of the low 24 bits of a and b (a full rate multiply, the 32 bit one is quarter rate)
 # K256_UNROLL: _grouped_k256_kernel's sub-blocks unrolled (weight loads issued together): 1/8 all8 (the default-off experiment),
 # 2/4 chunks of 2/4 for fewer live registers. default 0, sum order unchanged
-K256_UNROLL = getenv("K256_UNROLL", 0)
+K256_UNROLL = 0
 # K256_STAGE: _grouped_k256_kernel's block of weights staged in LDS by the workgroup (coalesced), RDNA3, default off
-K256_STAGE = getenv("K256_STAGE", 0)
+K256_STAGE = 0
 # K256_XH: RDNA3 _grouped_k256_kernel's lane halves decode one K half each, exchanged by permlanex16, and its sub-blocks unrolled. same bits;
 # 7900 XTX IQ3_S gate|up of 86 experts: 576 tokens 573 -> 440 us, 1152 579 -> 467, 4096 1180 -> 1159,
 # 13824 3686 -> 3584; a whole layer (+ the IQ4_NL down) at 192/384/768 tokens 817/841/903 -> 648/689/713 us. IQ3_S only. default off
-K256_XH = getenv("K256_XH", 1)
+K256_XH = 1
 # K256_XH_IQ4: K256_XH for IQ4_XS too (same bits; 86 experts x 5 slices, 1152 rows 1009 -> 615 us, 2304 1006 -> 877). default on
-K256_XH_IQ4 = getenv("K256_XH_IQ4", 1)
+K256_XH_IQ4 = 1
 def k256_types(rdna4:bool) -> tuple[int, ...]:
   """the grouped experts' types of _grouped_k256_kernel"""
   return (IQ3_S,) if rdna4 else (IQ3_S, IQ4_XS)
@@ -959,16 +959,16 @@ def k256_xh(ggml_type:int) -> bool:
   """K256_XH applies to ggml_type (RDNA3)"""
   return bool(K256_XH) and (ggml_type in (IQ3_S, IQ3_XXS) or (ggml_type == IQ4_XS and bool(K256_XH_IQ4)))
 # Q8_TILES: grouped experts' sorted rows (the down's input) quantized in the rows of the tiles with an expert only
-Q8_TILES = getenv("Q8_TILES", 0 if _wmma_rdna4(Device.DEFAULT) else 1)
-K256_R4_GRID = getenv("K256_R4_GRID", 0)
+Q8_TILES = 0 if _wmma_rdna4(Device.DEFAULT) else 1
+K256_R4_GRID = 0
 # Q8_TT96: RDNA3 q8_gemm of 768-2304 rows in token tiles of 96 (block 128, two groups a stage) when they divide them. same bits
 # (1152 rows: 1024x2560 91.0 -> 86.0 us, 6144x2560 427 -> 409, 2560x1024 86.8 -> 83.8; warm 1152-row chunk -2 ms)
-Q8_TT96 = getenv("Q8_TT96", 1)
+Q8_TT96 = 1
 # Q6K_TILES: RDNA3 Q6_K gemm of many rows (the V3.1 file's attention, gated deltanet and shared expert projections; not the output head) in the
 # first token tile / output block of Q6K_TILE_ORDER with Q6K_WG workgroups or more (else 32 x 64), not the output head's 192 first. same bits
 # (the sums along K in the same order). 2304 rows 2560 -> 1024 284 -> 240 us, 2560 -> 128 163 ->
 # 109; 1152 rows 2560 -> 128 158 -> 96, 2560 -> 2048 295 -> 243
-Q6K_TILES, Q6K_WG = getenv("Q6K_TILES", 1), getenv("Q6K_WG", 128)
+Q6K_TILES, Q6K_WG = 1, 128
 Q6K_TILE_ORDER = ((96, 128), (128, 128), (96, 64), (128, 64), (64, 64), (32, 64))
 def q6k_tile(rows:int, out:int) -> tuple[int, int]|None:
   """the token tile and output block of the Q6_K gemm of rows x out (see Q6K_TILES), None: no tile of the order fits"""
@@ -1547,7 +1547,7 @@ def q8_linear_parts(merged:Linear, x:Tensor, n:int) -> list[Tensor]|None:
   ne = merged.out_features // n
   P = round_up(tokens, 32)
   # (MERGED_TT: the token tile, default the rows' (a tile of 32 more workgroups, the weights dequantized once a tile))
-  tt = next(t for t in (getenv("MERGED_TT", 96), 96, 64, 32) if P % t == 0)
+  tt = next(t for t in (96, 96, 64, 32) if P % t == 0)
   outs = [Tensor.empty(tokens, ne, dtype=dtypes.float32, device=devs, axis=1) for _ in range(n)]
   fxn = functools.partial(_q8_gemm_kernel, token_tile=tt, ggml_type=merged.ggml_type, block_n=64, k_splits=1, rdna4=_wmma_rdna4(devs), n_out=n,
                           out_features=merged.out_features // len(devs), in_features=K)
@@ -1681,12 +1681,12 @@ def _sys(fmt:str, dtype:DType, *src:UOp) -> UOp: return _cfn(False, src=src, arg
 # of the others: two parities. Each pool has a fixed workgroup count so all its epoch counters move together across varying payload sizes.
 
 # 12 MiB/pool on six devices, sized for batched decode; larger allgathers use the existing chunked/ring paths.
-FLAG_AR_MAXN = getenv("FLAG_AR_MAXN", 1 << 18)  # mailbox words/lane (two half values or one float32 each)
+FLAG_AR_MAXN = 1 << 18  # mailbox words/lane (two half values or one float32 each)
 # (FLAG_AR_POOLN: the words of a pool's slot (its memory: 2*N*FLAG_AR_POOLN*4 bytes a pool, 3 pools a lane), FLAG_AR_MAXN the size of a
 # chunked all gather's pieces. an exchange above the slot isn't the flag's: a gather takes the ring or the copies (the same values), a sum
 # the next path. C2's census (2304 rows, one micro batch, 24-28 sequences): the flag exchanges are of at most ~48k words, the larger ones
 # around the ring: FLAG_AR_POOLN=65536 is 113 MB a card less and the same exchanges)
-FLAG_AR_POOLN = getenv("FLAG_AR_POOLN", FLAG_AR_MAXN)
+FLAG_AR_POOLN = 65536
 
 # the collectives' mailboxes and pools (name, object), read by comm_state_report
 _COMM_STATE:list[tuple[str, int, Any]] = []
@@ -2050,7 +2050,7 @@ def ring_min(devs:str|tuple[str, ...]) -> int:
   of 16/32/48 sequences: 31.3/37.3/46.7 -> 25.8/35.5/45.9 ms; a ring's ~70 us of latency is more than the links' time of its bytes), RDNA4
   (R9700, its one exchange slow): 64 KB
   """
-  return getenv("RING_MIN", (1 << 16) if _wmma_rdna4(devs) else (1 << 19))
+  return (1 << 16) if _wmma_rdna4(devs) else (1 << 19)
 
 def flag_reduce_scatter(p:Tensor, axis:int) -> Tensor|None:
   """One P2P exchange: each rank receives its contiguous chunk, summed in float32 from Q8 (or unaligned fp16) partials."""
@@ -2115,10 +2115,10 @@ def flag_all_gather(x:Tensor, axis:int, dtype=None) -> Tensor|None:
 # (more waves: no progress at all). a device is at most one exchange ahead of the next one: two parities of the inbox
 
 SEL_LANE_BASE = 8  # (the lanes from it are the micro batches' second ones (model.SEL_LANE): the same queue)
-RING_MAXW = getenv("RING_MAXW", 1 << 20)  # words a part (a slot of the inbox: 4 MB, a prefill's part of 4608 rows of q8 is 2.2 MB)
+RING_MAXW = 1 << 20  # words a part (a slot of the inbox: 4 MB, a prefill's part of 4608 rows of q8 is 2.2 MB)
 # (RING_MAXW_DEC: the decoding lanes' (from DEC_LANE) slot words: their exchanges are of a step's rows (C2, 28 sequences: <= 86k words, 352 a
 # chunk of 512): 1<<18 is 38 MB a card less, the same exchanges)
-RING_MAXW_DEC = getenv("RING_MAXW_DEC", RING_MAXW)
+RING_MAXW_DEC = 262144
 
 class RingMailbox:
   def __init__(self, devs:tuple[str, ...], chunks:int, maxw:int=RING_MAXW):
@@ -2189,7 +2189,7 @@ def ring_mailbox(devs:tuple[str, ...]) -> RingMailbox|None:
 # (RING_SEL=0: no ring on the selections' lanes (from SEL_LANE_BASE, of the prefill's and of the decoding steps', see DEC_LANE): their gathers
 # (the experts' picks of a micro batch, rows picked) take the one exchange with every peer, the same values. 7900 XTX: they are below
 # RING_MIN (512 KB) up to ~6500 rows a micro batch (80 bytes a row) and ~50 sequences picked: no ring ran there, 2 mailboxes (100 MB a card) not made)
-RING_SEL = getenv("RING_SEL", 1)
+RING_SEL = 0
 @functools.cache
 def _ring_mailbox(devs:tuple[str, ...], lane:int=0) -> RingMailbox|None:
   if len(devs) < 3 or not amd_custom_kernels_supported(devs): return None
@@ -2199,7 +2199,7 @@ def _ring_mailbox(devs:tuple[str, ...], lane:int=0) -> RingMailbox|None:
   return ret
 
 RING_DEADLINE:list[UOp|None] = [None]
-RING_TIMEOUT_MS = getenv("RING_TIMEOUT_MS", 0)
+RING_TIMEOUT_MS = 0
 def ring_errors() -> str:
   """
   the ring exchanges a wave gave up on (RING_TIMEOUT_MS: a peer's flag that didn't come or words that never matched its checksum, e.g. bad memory),
@@ -2225,7 +2225,7 @@ def _ring_spin(after:UOp, loads:Callable[[UOp], list[UOp]], stale:Callable[[list
   got = [reg.after(loaded)[i].load() for i in range(len(ld))]
   st = stale(got)
   if (dl:=RING_DEADLINE[0]) is not None: st = st & (_sys("__builtin_readsteadycounter()", dtypes.uint64, st) < dl)
-  s = _sys(f"({{0}} ? (__builtin_amdgcn_s_sleep({getenv('RING_SLEEP', 16)}), true) : false)", dtypes.bool, st)
+  s = _sys("({0} ? (__builtin_amdgcn_s_sleep(16), true) : false)", dtypes.bool, st)
   reg = reg.after(_cfn(False, src=(s,), arg=("", dtypes.void)).backedge(loop, s))
   vals = [reg[i].load() for i in range(len(ld))]
   return vals, stale(vals)
@@ -3588,8 +3588,8 @@ def weighted_sum(x:Tensor, p:Tensor) -> Tensor|None:
   p_all = dev_axis and tuple(p.shape) == tuple(x.shape[1:-1]) and isinstance(p.device, tuple) and p.uop.axis is None
   if isinstance(x.device, tuple) and x.uop.axis not in (0, None) or (tuple(p.shape) != tuple(x.shape[:-1]) and not p_all): return None
   R = int(prod(lead[1:] if dev_axis else lead))
-  if not all(isinstance(v, int) for v in (*lead, S, D)) or int(D) % 8 or (R * int(D) // 8) % 256 or not amd_custom_kernels_supported(x.device) or \
-     not getenv("WEIGHTED_SUM", 1): return None
+  if not all(isinstance(v, int) for v in (*lead, S, D)) or int(D) % 8 or (R * int(D) // 8) % 256 or not amd_custom_kernels_supported(x.device): \
+    return None
   n = len(cast(tuple, x.device)) if dev_axis else 1
   out = Tensor.empty(n*R, int(D), dtype=dtypes.float32, device=x.device, axis=0 if dev_axis else None)
   res = Tensor.custom_kernel(out, x.reshape(n*R, int(S), int(D)), p.reshape(R if p_all else n*R, int(S)), fxn=_weighted_sum_kernel)[0]
@@ -3853,10 +3853,10 @@ def _qsa_decode_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UO
   return UOp.group(*final).end(lane, wave, part, b).sink(arg=KernelInfo(name="qsa_decode", opts_to_apply=(), estimates=est))
 
 # QSA_PREFILL: a prefill's rows (many) on qsa_prefill's kernel (the tensor cores), not qsa_decode's (a lane a key: vector ALU bound)
-QSA_PREFILL = getenv("QSA_PREFILL", 1)
+QSA_PREFILL = 1
 # QSA_WMMA=P: decoding's rows on qsa_prefill's kernel, a row's keys over P workgroups (combined as qsa_decode's parts; 1: P of the rows'
 # count). default off
-QSA_WMMA = getenv("QSA_WMMA", 0)
+QSA_WMMA = 0
 
 @functools.cache
 def _qsa_prefill_kernel(out:UOp, stats:UOp, q:UOp, cache:UOp, index:UOp, bases:UOp, *, scale:float, kpool:int, rdna4:bool, ns:int=1) -> UOp:
@@ -4035,7 +4035,7 @@ def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, sca
     stats = Tensor.empty(B, H, P, 2, dtype=dtypes.float32, device=q.device, axis=axis)
     out, stats = Tensor.custom_kernel(out, stats, q.half().contiguous(), cache, index, bases,
                                       fxn=functools.partial(_qsa_prefill_kernel, scale=scale, kpool=kpool, rdna4=_wmma_rdna4(q.device),
-                                                         ns=getenv("QSA_PREFILL_NS", 1)))[:2]
+                                                         ns=1))[:2]
     if not lse: return Tensor.custom_kernel(Tensor.empty(B, H, 1, DV, dtype=dtypes.float32, device=q.device, axis=axis), out, stats,
                                             fxn=functools.partial(_amd_flash_decode_combine, live=P))[0]
     ls = Tensor.empty(B, H, dtype=dtypes.float32, device=q.device, axis=axis)
@@ -5060,8 +5060,7 @@ SEQ_SCORE_TILE = 256
 # wave's 16 bytes of 32 keys a round lose their lines in L2 before the next round), SEQ_SCORE_WG workgroups a sequence, SEQ_SCORE_LDSQ=1: the
 # queries staged in LDS (else read at addresses uniform in the workgroup: scalar loads). the same sums in the same order whatever these are
 # (B=28 at 262k, 10,923 pools a device: 308 -> 146 us a call, the scores bit-identical)
-SEQ_SCORE_U, SEQ_SCORE_WG, SEQ_SCORE_LDSQ, SEQ_SCORE_NP = getenv("SEQ_SCORE_U", 4), getenv("SEQ_SCORE_WG", 64), getenv("SEQ_SCORE_LDSQ", 0), \
-  getenv("SEQ_SCORE_NP", 1)
+SEQ_SCORE_U, SEQ_SCORE_WG, SEQ_SCORE_LDSQ, SEQ_SCORE_NP = 4, 64, 0, 1
 
 @functools.cache
 def _seq_scores_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *dev:UOp, R:int, kpool:int, WG:int, n:int=1) -> UOp:
@@ -5112,7 +5111,7 @@ def _seq_scores_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *dev:UO
 
 # SEQ_SCORE_QV (default 1; 0: _seq_scores_kernel): seq_scores by _seq_scores_qv_kernel (a lane a (pool, head), its query in registers: no
 # query loads a pool), SEQ_SCORE_QV_NG groups of pools a workgroup, SEQ_SCORE_QV_WG workgroups a sequence
-SEQ_SCORE_QV, SEQ_SCORE_QV_NG, SEQ_SCORE_QV_WG = getenv("SEQ_SCORE_QV", 1), getenv("SEQ_SCORE_QV_NG", 2), getenv("SEQ_SCORE_QV_WG", 32)
+SEQ_SCORE_QV, SEQ_SCORE_QV_NG, SEQ_SCORE_QV_WG = 1, 2, 32
 
 @functools.cache
 def _seq_scores_qv_kernel(out:UOp, q:UOp, pk:UOp, bases:UOp, positions:UOp, *dev:UOp, R:int, kpool:int, WG:int, n:int=1) -> UOp:
@@ -5179,7 +5178,7 @@ def seq_index(scores:Tensor, positions:Tensor, top:int, kpool:int, compact:bool=
 
 KDA_WAVES = 8
 # KDA_R, KDA_RW: batched decoding's kda_decode: a head's rows over KDA_R workgroups of KDA_RW waves (0: 4 at 8 or more sequences, else 8)
-KDA_R, KDA_RW = getenv("KDA_R", 4), getenv("KDA_RW", 0)
+KDA_R, KDA_RW = 4, 0
 
 @functools.cache
 def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp, pv:UOp, wq:UOp, wk:UOp, wv:UOp, gate:UOp, alpha:UOp, beta:UOp,
