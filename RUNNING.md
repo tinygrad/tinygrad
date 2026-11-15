@@ -6,9 +6,9 @@ Supported baseline: `redqwenflash` at `dd14c4748c0c02a962b622ea7447b63c8b7c5cd5`
 |---|---|---|---:|---|
 | Qwen C2 | Qwen3.8 Flash Next UD-IQ4_XS **V3.1** + separate MTP + picture tower | 6x AMD 7900 XTX (RDNA3) | 262144 | `DEV=AMD`, 6 shards |
 | GLM Flash C5 | GLM-5.3 Flash UD-IQ3_XXS, D34 quality configuration + mandatory picture tower | 6x AMD 7900 XTX (RDNA3) | 18 x 262144; 524288 server cap | `DEV=AMD`, 6 shards |
-| GLM C9 | GLM-5.3 UD-IQ4_XS; **text-only; start held pending picture policy** | 14x AMD R9700 (RDNA4), ts5 | 262144 / 1048576 candidate contexts held pending approved picture handling | `DEV=PCI+AMD`, `VFIO=1`, 14 shards |
+| GLM C9 | GLM-5.3 UD-IQ4_XS; **text-only, no vision tower** | 14x AMD R9700 (RDNA4), ts5 | 262144 / 1048576 candidate pending compute validation | `DEV=PCI+AMD`, `VFIO=1`, 14 shards |
 
-**Vision is mandatory.** Every production engine instance loads its picture projector and handles picture requests. There is no production text-only option or `--no-vision` fallback. The launchers and CLI reject a missing or empty projector before model initialization. Leaving `VISION_MMPROJ` unset is permitted **only for tests with explicit `DEV=NULL` or `DEV=CPU`**; it is not an undocumented production mode.
+**Vision is mandatory on Qwen C2 and GLM Flash C5, whose models support it.** Their launchers verify the picture file and its hash before start; the CLI also checks the loaded model architecture and rejects a missing/empty working image path. **C9 has no compatible vision tower and is explicitly text-only per the 12:00 decision.** Its launcher always clears `VISION_MMPROJ`; this is intentional, not an unset production option. On C2/C5, no-projector launches remain strictly limited to the offline test configurations, never a deployed service.
 
 Only a machine's owner starts/stops service and only one GPU workload may use a box. Do not load the `amdgpu` kernel driver and do not run `modprobe`/DKMS: tinygrad's AM support drives the hardware. GPU jobs on shared infrastructure use its queue/ownership protocol. The three production launchers are `extra/llm_service/qwen_6x7900xtx.sh`, `glm_flash_6x7900xtx.sh` and `glm_14xr9700.sh` in this repository. VM/tunnel/proxy infrastructure is separate.
 
@@ -123,19 +123,17 @@ The mandatory C5 baseline sets **`VISION_MMPROJ`, `VISION_KERNELS=1`, and `VISIO
 
 With `SESSION_END_TOKEN` unset (the default), explicit backend session-end calls return the expected **403 `backend_session_end_disabled`**, not generation failures. An integrated proxy releases its own session bookkeeping, while backend conversations remain in bounded 18-slot residency until reuse, NONDROP eviction or restart; `ended_dropped=0` only counts processed explicit ends and is **not** proof of backend memory release. Actual coordinated cleanup requires a matching out-of-band token on proxy and backends plus active/completed/duplicate-end tests (including resident/stash drops, `already_ended` and later admissions); never expose the secret in `--print-command`, and enabling the endpoint alone does not move model-seat release before verifier execution.
 
-### GLM C9, on ts5 — held pending mandatory vision
+### GLM C9, on ts5 — text-only; no vision tower
 
-**GLM-5.3 has no native picture encoder.** Publisher config/metadata identify `glm_moe_dsa` / `text-generation`, and its GGUF repository supplies no compatible projector. Flash's glm5v projector is **not** a substitute: its 4096-wide rows differ from the full model's 6144 width. A compatible encoder would require separate research integration; it is not a file-configuration change. Consequently C9 cannot currently satisfy literal model-vision, and no production start recipe is offered. The launcher rejects missing/empty/nonexistent projectors and still refuses start with an arbitrary file until that integration is approved and verified. `--print-command` requires the path and emits `PENDING: preview only` on stderr; it is not a runnable deployment command. Do not substitute the GLM Flash projector or infer that supplying a file gives full GLM-5.3 picture support.
+**GLM-5.3 is text-only under the 12:00 product decision.** It has no compatible vision encoder or projector. C9's launcher forces `VISION_MMPROJ` empty, including when the parent shell supplied another value; the generic CLI requires a projector only for the supported Qwen and GLM Flash vision models. Do not substitute GLM Flash's incompatible tower or claim that a file gives C9 vision.
 
-The nine model-shard hashes above remain the required immutable text-model inputs. A proposed fallback is to accept picture requests and return HTTP 200 with the publisher's inability-to-process reminder. That is an inability/caption response, **not vision**, and requires an explicit product-policy approval; the alternative is a separately designed two-model picture-description pipeline. Until that decision and a verified implementation, the launcher holds all production starts. There is no nonexistent projector default or invented hash to set. Once a path is approved, require its actual request behavior, text identity, effective environment and memory on all 14 cards before release.
+The nine model-shard hashes above are the complete service input. `--print-command` requires no image file and is safe for review; set `GLM53_POWER_LIMIT` only from the completed power qualification before `start`. That separate power gate and the owner-only host controls remain unchanged. This prompt-config change authorizes no launch and makes no hardware, memory, quality or multiuser claim.
 
-The power gate also remains: never use the former 210 W default. `GLM53_POWER_LIMIT` has no accepted numeric default until the owner's verification completes. These are independent blockers, not permission to fall back to text-only serving.
-
-The cache/profile work is preserved for integration and tests, not removed. The owner-supplied **Phase-4 item 7 q4 candidate is not a deployment claim**: `GLM_KV=q4`, `--max_context 1048576`, `SEQ_ROWS=1048576`, `SEQ_SLOTS=16`, `SEQ_MAX_ACTIVE=16`, `P2P_GLM5_OFF=1`, `FREQS_HOST=1`, `AMD_SCRATCH_MAX=64`, `SEQ_COPY_SCRATCH=1`, `LOAD_DEFER=1`. The launcher normalizes the alias to **`SEQ_FP8=1`, `SEQ_FP8_IDX=0`, `SEQ_KV4=1`**. `GLM_KV=fp8` maps to `SEQ_FP8=1` and an index-off default. Default C9 is half when `GLM_KV`/q4 selectors are unset. Raw `GLM_KV` alone is not a packed-cache selector; a direct CLI profile must use these exact sequence flags and verify emitted process environment, just as the owner confirmed. The `GLM_KV`, `SEQ_FP8`, `SEQ_FP8_IDX` and `SEQ_KV4` controls remain individual, not a global one-format substitution. `FREQS_HOST` and `P2P_GLM5_OFF` remain default-off runtime memory controls rather than deleted branches; real hardware must verify those savings and results. Keep `GLM_KV`, `SEQ_FP8` and `SEQ_KV4` individual rather than globally forcing one format. Both the 262144 and candidate 1048576 contexts still require new hardware memory, greedy 4k/64k/262k and multiuser checks once picture support exists. NULL direct-model/JIT tests do not validate those results.
+**Profiles stay independent of vision policy.** The default is half-cache. The 1M candidate remains `GLM_KV=q4`, `--max_context 1048576`, `SEQ_ROWS=1048576`, `SEQ_SLOTS=16`, `SEQ_MAX_ACTIVE=16`, `P2P_GLM5_OFF=1`, `FREQS_HOST=1`, `AMD_SCRATCH_MAX=64`, `SEQ_COPY_SCRATCH=1` and `LOAD_DEFER=1`. As before, the launcher expands q4 to `SEQ_FP8=1`, `SEQ_FP8_IDX=0`, `SEQ_KV4=1`; `GLM_KV=fp8` is a separate mode. Real 14-card start, capacity and correctness checks remain required for both configurations.
 
 ## Pokemon workflow profiles (RUN 14 and G3)
 
-These are workflow opt-ins (the games), **not opt-in vision**. Vision is mandatory in every production start. Use one fresh six-card 7900 XTX VM and **one server start per boot**; changing a profile requires a fresh VM. These are owner-proven launch profiles, not replacements for the validated C2/D34 defaults.
+These are workflow opt-ins (the games), **not opt-in vision**. The supported C2/C5 vision path remains mandatory; C9 is not one of these image-serving configurations. Use one fresh six-card 7900 XTX VM and **one server start per boot**; changing a profile requires a fresh VM. These are owner-proven launch profiles, not replacements for the validated C2/D34 defaults.
 
 **Qwen RUN 14:** start the C2 launcher with `SPEC_DRAFTS=3`, `VISION_MAX_IMAGES=2048`, `VISION_CACHE_MB=2048`, `SERVE_RENDER_CACHE=1`, `PREFILL_SIZES=192,384,1152`, plus **`VISION_SLICE_MS=300` and `VISION_URL_CACHE_MB=256`**. These two values are RUN 14's unset/code defaults; they are not C2's validated `VISION_SLICE_MS=200` and `VISION_URL_CACHE_MB=512`. Keep `VISION_KERNELS=1`, `VISION_MMPROJ=/weights/Qwen3.8-Flash-Next-UD-IQ4_XS-V31/mmproj/mmproj-F16.gguf`, 262144 max_context and the rest of the C2 line. `SESSION_END_TOKEN` comes from the VM's mode-600 secret file and is never printed. Qwen's published vision buckets remain the power-of-two buckets plus any optional measured addition, not an assumed 384.
 
@@ -155,11 +153,11 @@ PI_GLM_BASE_URL=http://127.0.0.1:18104/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_F
 
 The line ends at `stop_reason=full_context`: `speed.py results/pokemon/full-context.jsonl`, details via `speed.py --breakdown runs/<id>/steps.jsonl`. A prefill with zero generation for more than 5 minutes is a stalled run, not a speed measurement. VM IDs, tunnel ports and session secrets remain deployment-specific; no server or proxy restart is implied by this document.
 
-## API and production environment contract (80 names)
+## API and production environment contract (83 names)
 
 API sampling: a request without a temperature uses the model's GGUF `general.sampling.temp` and `top_p` (Qwen 3.8 Flash: 1.0 / 0.95); absent sampling metadata keeps the previous greedy behavior, explicit request values are unchanged, and startup logs report the defaults.
 
-There are 58 settings from the C2/C9 cleanup survival registry plus 19 exposed by the C5/D34 production contract and 3 rendering/bucket controls. Count: 39 launcher-contract settings, 28 operator knobs, 13 short diagnostics (80 total, at the 80-name limit).
+There are 58 settings from the C2/C9 cleanup survival registry plus 19 exposed by the C5/D34 production contract and 3 rendering/bucket controls. Count: 39 launch options, 31 operator knobs, 13 short diagnostics (83 total; three live controls above the prior target).
 
 Any setting not listed here is not supported: its production value is compiled into the tree. Values below are launch defaults/current validated profiles, not permission to run arbitrary combinations. Capacity, sharding and cache-format changes require their own real-memory and text gates. Empty means disabled/unset.
 
@@ -188,7 +186,7 @@ Any setting not listed here is not supported: its production value is compiled i
 | `SPEC_DRAFTS_BY_SIZE` | empty | empty | 1:2,2:2,4:3,8:3,16:3 | Draft count by active batch size. |
 | `VFIO` | auto/unset | auto/unset | 1 | Device pass-through mode. |
 | `AM_VM_RESET` | controlled first start only | controlled first start only | controlled first start only | Permission to reset AM hardware once; ordinary starts forbid it. |
-| `VISION_MMPROJ` | required, verified nonempty file | required, verified nonempty file | required future projector; engine/start held | Mandatory picture-projection GGUF; no production text-only mode. |
+| `VISION_MMPROJ` | required, verified nonempty file | required, verified nonempty file | unsupported and forced empty | Picture-projection GGUF on C2/C5; intentionally not present on C9. |
 
 ### Additional C5/D34 hardware/model contracts (17)
 
@@ -212,7 +210,7 @@ Any setting not listed here is not supported: its production value is compiled i
 | `RING_MAXW` | 32768 | Ring collective window for this six-card profile. |
 | `RING_RS_LIKE_COPIES` | 0 | Copy routing around reduce-scatter-like collectives. |
 
-### Operator knobs documented for operations (28)
+### Operator knobs documented for operations (31)
 
 | Name | Default/profile | Purpose |
 |---|---|---|
@@ -231,6 +229,9 @@ Any setting not listed here is not supported: its production value is compiled i
 | `SEQ_STASH_CTX` | 32768 | Minimum context eligible for stash retention. |
 | `SEQ_STICKY` | 180 s | Idle-conversation residency grace period. |
 | `SESSION_END_TOKEN` | required for admin endpoint | Bearer credential for session termination. |
+| `AGING` | 0 | Per-second urgency used by the waiting-request scheduler; changing it affects convoy avoidance. |
+| `SEQ_STARVE` | 600 seconds | Wait threshold granting starvation priority; use a measured workload-specific override such as 30 only explicitly. |
+| `SEQ_CKPT_TAIL` | 0 (off) | Keep a prior-generation boundary checkpoint when clients discard old reasoning, preventing whole-conversation recompute. |
 | `SERVE_RENDER_CACHE` | unset in the C5 benchmark default; explicit G3 opt-in 1 | Optional chat-template render cache; memoized renders can change server-side cache behavior, so enable only with output-identical API tests and expected cache controls. |
 | `VISION_BUCKETS` | unset otherwise; C5 tower 576 | Additional picture-token tower buckets for frequent image sizes. Every extra bucket adds warm-up time and graph memory; run every bucket again and leave unset unless measured useful. |
 | `VISION_CACHE_MB` | C2 profile 1024; unset in the C5 benchmark/default; explicit G3 opt-in 2048 | Maximum host RAM for cached picture rows/profile features: this many MB stays resident when full, in addition to decoded pictures and engine state. Size a shared service from measured RSS, not either dedicated-box profile. |

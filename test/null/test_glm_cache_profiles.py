@@ -62,10 +62,9 @@ class TestC9LauncherProfiles(unittest.TestCase):
   ROOT = pathlib.Path(__file__).resolve().parents[2]
 
   def command(self, profile):
-    env = {'PATH': os.environ['PATH'], 'HOME': os.environ['HOME'], 'VISION_MMPROJ': '/test-only/mmproj-F16.gguf', **profile}
+    env = {'PATH': os.environ['PATH'], 'HOME': os.environ['HOME'], **profile}
     p = subprocess.run([self.ROOT / 'extra/llm_service/glm_14xr9700.sh', '--print-command'], cwd=self.ROOT, capture_output=True, text=True, env=env)
     self.assertEqual(p.returncode, 0, p.stderr)
-    self.assertIn('PENDING: preview only', p.stderr)
     tokens = shlex.split(p.stdout)
     assert '--max_context' in tokens
     self.assertEqual(tokens[tokens.index('--max_context') + 1], profile.get('MAX_CONTEXT', '262144'))
@@ -98,7 +97,7 @@ class TestC9LauncherProfiles(unittest.TestCase):
     self.assertEqual((shape[-1], dt), (FP8_ROPE_ROW, dtypes.u32))
 
   def test_invalid_profile_cannot_produce_a_command(self):
-    env = dict(PATH=os.environ['PATH'], HOME=os.environ['HOME'], GLM_KV='q4', SEQ_FP8='0', VISION_MMPROJ='/test-only/mmproj-F16.gguf')
+    env = dict(PATH=os.environ['PATH'], HOME=os.environ['HOME'], GLM_KV='q4', SEQ_FP8='0')
     result = subprocess.run([self.ROOT / 'extra/llm_service/glm_14xr9700.sh', '--print-command'],
                             cwd=self.ROOT, text=True, capture_output=True, env=env)
     self.assertEqual(result.returncode, 2)
@@ -156,6 +155,14 @@ class TestC9WarmupOverrides(unittest.TestCase):
     subprocess.run(['bash', '-n', self.ROOT / 'test/null/production_c9_warmup.sh'], check=True)
 
 class TestMemoryLevers(unittest.TestCase):
+  def test_c5_shared_scratch_and_deferred_load_remain_configurable(self):
+    startup = ast.parse(textwrap.dedent(inspect.getsource(flash.Transformer._seq_init)))
+    self.assertTrue(getenv_calls(startup, 'SEQ_COPY_SCRATCH'))
+    loader = ast.parse(inspect.getsource(flash.Transformer))
+    self.assertTrue(getenv_calls(loader, 'LOAD_DEFER'))
+    full_loader = ast.parse(inspect.getsource(full.Transformer))
+    self.assertTrue(getenv_calls(full_loader, 'LOAD_DEFER'))
+
   def test_p2p_default_keeps_normal_dispatch(self):
     with patch.object(amd_glm, '_p2p_allreduce', return_value='normal') as wrapped, \
          patch.object(amd_glm, 'getenv', side_effect=lambda key, default=0: default if key == 'P2P_GLM5_OFF' else 1):

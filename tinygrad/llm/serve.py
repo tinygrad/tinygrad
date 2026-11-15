@@ -1770,9 +1770,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # prompt's with the fewest tokens left to prefill (a short one, an agent's turn, isn't behind a long one), less AGING tokens a second it
   # waited. a long one isn't behind short ones that keep coming forever: one waiting past STARVE_SEQ goes first, and takes a sequence even if
   # a held conversation is lost for it (see SeqEngine.STICKY))
-  # (PREFILL_SLICE and SEQ_STARVE_ALT are live profile overrides: C5 uses 1536 and 1.)
+  # (PREFILL_SLICE, AGING, SEQ_STARVE and SEQ_STARVE_ALT are live profile overrides: C5 uses 1536 and STARVE_ALT 1.)
   PREFILL_SLICE, MAX_STALL, DECODE_SHARE = getenv("PREFILL_SLICE", 13824), 0.3, 0.5
-  AGING, STARVE_SEQ, TURN_WAIT = 0, 600.0, 10.0
+  AGING, STARVE_SEQ, TURN_WAIT = getenv("AGING", 0), getenv("SEQ_STARVE", 600.0), 10.0
   # (SEQ_STARVE_ALT: after a slice of a starving prompt the next one is the best of the others (a waiting one admitted, a warm turn's short
   # suffix): a long cold prompt past STARVE takes every other slice, not all of them while every other request waits behind it)
   STARVE_ALT = getenv("SEQ_STARVE_ALT", 0)

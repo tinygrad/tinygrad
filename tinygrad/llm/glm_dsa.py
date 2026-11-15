@@ -3371,7 +3371,7 @@ class Transformer(GLMSeqDriver):
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
-                realize=bool((0)), shard:int=1, defer_load:bool=bool(getenv("LOAD_DEFER", 0))) -> tuple[Transformer, dict]:
+                realize=False, shard:int=1, defer_load:bool=bool(getenv("LOAD_DEFER", 0))) -> tuple[Transformer, dict]:
     """defer_load (LOAD_DEFER, default off): the weights are read later (warmup compiles meanwhile), before the first call"""
     # TODO: remove the need for copy to default device
     st = time.perf_counter()

@@ -3865,7 +3865,7 @@ class Transformer:
     self._seq_pf_host_temp = tmv.cast('f')
     self._seq_host_out, self._seq_out = _host_ints(devs[0] if isinstance(devs, tuple) else devs, m*(2*k+1) + 1)
     # (SEQ_COPY_SCRATCH=1: their intermediates in the jits' shared arenas, not their own (~140 MB a card at 30 slots): one runs at a time)
-    sc:dict|None = self._scratch if (1) else None
+    sc:dict|None = self._scratch if getenv("SEQ_COPY_SCRATCH", 0) else None
     self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True, scratch=sc) for sv in (True, False)}
     self._seq_ckpt_jits = {sv: TinyJit(functools.partial(self._seq_ckpt_copy, sv), capture_first=True, scratch=sc) for sv in (True, False)}
     # (SEQ_REPLAY: a slot's recurrent states advanced to a position, see _seq_materialize; the position of every slot's state)
@@ -4671,7 +4671,7 @@ class Transformer:
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
-                realize=bool((0)), shard:int=1, defer_load:bool=False) -> tuple[Transformer, dict]:
+                realize=False, shard:int=1, defer_load:bool=False) -> tuple[Transformer, dict]:
     """defer_load: ignored, the weights are read before the warmup (no loading in the background)"""
     defer_load = False
     # TODO: remove the need for copy to default device
@@ -4784,7 +4784,7 @@ class Transformer:
     pending:list[Callable[[], None]] = []
     # (LOAD_DEFER: the files read while the jits compile, see seq_warmup)
     state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads if shard > 1 else {}, fuse, row_sel=rows_map,
-                                  pending=pending if (1) else None)
+                                  pending=pending if getenv("LOAD_DEFER", 0) else None)
     _lap("weights")
     if host_embd is not None: state_dict['token_embd.weight'] = host_embd
 

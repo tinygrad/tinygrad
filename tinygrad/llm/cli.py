@@ -224,8 +224,9 @@ def server_sampling(kv:dict) -> dict[str, float]:
   """a request's temperature and top_p without its own: the model's recommended ones (general.sampling.* of its gguf; none: greedy, top_p 1)"""
   return {"temperature": float(kv.get("general.sampling.temp", 0.0)), "top_p": float(kv.get("general.sampling.top_p", 1.0))}
 
-def _production_vision_projector_missing() -> bool:
-  """Production has no text-only mode. The no-tower path is only for explicit NULL/CPU tests; unknown DEV fails closed."""
+def _production_vision_projector_missing(architecture:str) -> bool:
+  """Qwen and GLM Flash production have no text-only mode. C9 and unknown-model text runs have no mandatory tower."""
+  if architecture not in ("qwen4exp", "glm5-next"): return False
   if all(d.strip().split(":", 1)[0].upper() in {"NULL", "CPU"} for d in getenv("DEV", "").split(",")):
     return False
   if not (mmproj := getenv("VISION_MMPROJ", "")): return True
@@ -246,9 +247,6 @@ def main():
   parser.add_argument("--no_chat_template", action="store_true", help="Don't use the model's chat template, always use the fallback template")
   parser.add_argument("--shard", type=int, default=1, help="Tensor parallel device count")
   args = parser.parse_args()
-  if _production_vision_projector_missing():
-    parser.error("VISION_MMPROJ must name a nonempty projector file for every production engine instance; "
-                 "unset is only for explicit DEV=NULL or DEV=CPU tests")
   # (MEM_TRACE=1, a tree with extra/: the AM driver's live VRAM allocations by call site after the warmup (the server's workspace), or at an OOM)
   if (mem_trace:=getenv("MEM_TRACE")):
     import extra.mem_trace as mt
@@ -265,6 +263,9 @@ def main():
   with Context(DEBUG=max(DEBUG.value, 1 if args.serve else 0)):
     path = fetch(models.get(args.model, args.model))
     model, kv = (Transformer.from_hf if path.is_dir() else Transformer.from_gguf)(path, args.max_context, shard=args.shard)
+  if _production_vision_projector_missing(kv.get("general.architecture", "")):
+    parser.error("VISION_MMPROJ must name a nonempty projector file for Qwen and GLM Flash production; "
+                 "unset is only for explicit DEV=NULL or DEV=CPU tests")
   model_name = kv.get('general.name') or kv.get('general.basename') or kv.get('_name_or_path') or args.model
   file_sizes = [y.nbytes()*args.shard for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
   print(f"loaded model \"{model_name}\" at {sum(file_sizes)*1e-9/(time.perf_counter()-st):.2f} GB/s with {sum(file_sizes):,} bytes "
@@ -281,8 +282,8 @@ def main():
       template = chat_template(ct, tok)
     except ImportError: print("warning: jinja2 is not installed, the model's chat template is disabled")
 
-  # VISION_MMPROJ: the mmproj GGUF of the model's vision tower (qwen4exp's sequences): chat requests' data: URL images are pictures the model
-  # sees (see serve.extract_pictures). the tower's weights on the model's devices before its caches are made (a start fails at the tower's load)
+  # VISION_MMPROJ: Qwen / GLM Flash's mmproj GGUF (their sequence engines). GLM-5.3 itself has no compatible vision tower,
+  # and leaves this empty. Data-URL images are seen by supported models (see serve.extract_pictures). Load before caches are made.
   vision = None
   def load_vision(mmproj:str):
     from tinygrad.llm import qwen_vision

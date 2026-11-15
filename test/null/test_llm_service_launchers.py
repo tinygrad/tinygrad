@@ -45,9 +45,8 @@ class TestLLMServiceLaunchers(unittest.TestCase):
       self.assertIn(required, pokemon)
 
   def test_glm_production_environment_and_power_guard(self):
-    cmd = self.command("glm_14xr9700.sh", {"VISION_MMPROJ": "/test-only/mmproj-F16.gguf"})
-    self.assertIn("VISION_MMPROJ=/test-only/mmproj-F16.gguf", cmd)
-    self.assertIn("PENDING: preview only", cmd)
+    cmd = self.command("glm_14xr9700.sh")
+    self.assertIn("VISION_MMPROJ=", cmd)
     for required in (
       "DEV=PCI+AMD",
       "VFIO=1",
@@ -73,7 +72,7 @@ class TestLLMServiceLaunchers(unittest.TestCase):
                                                "FREQS_HOST": "1", "AMD_SCRATCH_MAX": "64", "SEQ_COPY_SCRATCH": "1",
                                                "LOAD_DEFER": "1", "AM_PERF_LEVEL": "high", "AM_CLOCKS": "GFXCLK=2000",
                                                "CLOCK_FAST": "GFXCLK=2000", "CLOCK_MANY": "GFXCLK=2000",
-                                               "CLOCK_PREFILL": "GFXCLK=2000", "VISION_MMPROJ": "/test-only/mmproj-F16.gguf"})
+                                               "CLOCK_PREFILL": "GFXCLK=2000"})
     for required in ("GLM_KV=q4", "--max_context 1048576", "SEQ_ROWS=1048576", "SEQ_SLOTS=16", "SEQ_MAX_ACTIVE=16",
                        "P2P_GLM5_OFF=1", "FREQS_HOST=1", "AMD_SCRATCH_MAX=64", "SEQ_COPY_SCRATCH=1", "LOAD_DEFER=1",
                        "AM_PERF_LEVEL=high", "AM_CLOCKS=GFXCLK=2000", "CLOCK_FAST=GFXCLK=2000",
