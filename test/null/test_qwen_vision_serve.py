@@ -141,6 +141,14 @@ class TestGuards(unittest.TestCase):
     r2 = t1 + "\n</think>\n\nHELLO<|im_end|>\n<|im_start|>user\nAnd?<|im_end|>\n<|im_start|>assistant\n<think>\n"
     s.kept = lambda: [(q1 + [2001], len(q1) + 1), (q1 + [2001], len(q1))]
     self.assertEqual(expand_pictures(s.reuse_tokens(r2, enc(r2)), [small], PAD)[0][:len(q1)], q1)
+    # (a kept conversation that goes on past the whole prompt (an earlier run of the same game, longer): never decoded, the same tokens)
+    calls:list[int] = []
+    s.tok = types.SimpleNamespace(encode=enc, decode=lambda t: calls.append(len(t)) or dec(t))
+    ghost = own + [2001, 2002] * 600
+    s.kept = lambda: [(kept, len(kept)), (kept, len(p1)), (ghost, len(ghost))]
+    self.assertEqual(expand_pictures(s.reuse_tokens(rendered, enc(rendered)), [pic], PAD)[0][:len(p1)], p1)
+    self.assertNotIn(len(ghost), calls, "the longer kept conversation is not decoded")
+    s.tok = types.SimpleNamespace(encode=enc, decode=dec)
     # (without vision: the old path, a list with pictures not reused)
     s.vision = None
     self.assertEqual(s.reuse_tokens(rendered, enc(rendered)), enc(rendered))
