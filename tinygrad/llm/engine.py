@@ -586,6 +586,15 @@ class SeqEngine:
     self._event("eviction", cause="paused_length", slot=s.slot, tokens=s.n, stashed=stashed,
                   **({"session_ids": sorted(s.sessions)} if s.sessions else {}))
 
+  def drop(self, s:Seq):
+    """s out of the caches and not kept (its states went wrong): a prompt of its tokens is prefilled from the start"""
+    self.version += 1
+    s.active = False
+    if s in self.seqs: self.seqs.remove(s)
+    if s.host is not None:
+      x, s.host = s.host, None
+      self._free(x.chunks, x.entry)
+
   def stop(self, s:Seq, kept:int):
     """the end of the decoding of s: its tokens past `kept` (of its reply, after its end) aren't its"""
     self.version += 1

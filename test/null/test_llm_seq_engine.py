@@ -493,6 +493,24 @@ class TestScheduleSeqs(unittest.TestCase):
     self.assertEqual(len(short.generated), 2)
     self.assertEqual(len(long.generated), 2)
 
+  @patch("tinygrad.llm.serve.stderr_log")
+  def test_wrong_states_not_continued(self, _):
+    # a reply whose states went wrong (token 0 again and again: NaN) fails; its sequence isn't kept: the retry is prefilled from the start
+    # (it continued the wrong states before: every retry failed again)
+    ids, step = list(range(100, 3100)), self.model.seq_step
+    self.model.seq_step = lambda seqs, forced=None: [([0] * len(s), [0] * len(d)) for s, d in step(seqs, forced)]
+    bad = Request(list(ids), "", 40, 0.0)
+    self.server.waiting.put(bad)
+    self.wait([bad])
+    self.assertIsNotNone(bad.error)
+    self.model.seq_step = step
+    again = Request(list(ids), "", 4, 0.0)
+    self.server.waiting.put(again)
+    self.wait([again])
+    self.assertIsNone(again.error)
+    self.assertEqual(again.cache_start, 0)
+    self.assertEqual(len(again.generated), 4)
+
 class TestSessionLifecycle(TestScheduleSeqs):
   def setUp(self):
     super().setUp()
