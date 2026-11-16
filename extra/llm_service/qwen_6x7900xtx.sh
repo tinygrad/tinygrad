@@ -66,7 +66,7 @@ elif [[ $ACTION == start ]]; then
   cd "$ROOT"
   if [[ ${AM_FIRST_START:-0} == 1 ]]; then SERVER_ENV+=(AM_VM_RESET=1); fi
   [[ ! -e $PIDFILE ]] || { echo "PID file already exists: $PIDFILE (check status first)" >&2; exit 2; }
-  echo "start $(git rev-parse HEAD) model=$MODEL power=${AM_POWER_LIMIT}W" >> "$LOGFILE"
+  echo "start $(git rev-parse HEAD 2>/dev/null || cat DEPLOYED_COMMIT 2>/dev/null) model=$MODEL power=${AM_POWER_LIMIT}W" >> "$LOGFILE"
   setsid env "${SERVER_ENV[@]}" "${COMMAND[@]}" >> "$LOGFILE" 2>&1 & child=$!
   echo "$child" > "$PIDFILE"
   echo "Qwen started pid=$child log=$LOGFILE"
