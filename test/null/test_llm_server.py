@@ -136,6 +136,14 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(last_chunk.usage.completion_tokens, 2)
     self.assertEqual(last_chunk.usage.total_tokens, 5)
 
+  def test_stream_with_continuous_usage(self):
+    # (master's test: stream_options.continuous_usage_stats puts the usage so far in every chunk)
+    with patch.object(self.mock_model, "generate", side_effect=lambda ids, **kwargs: iter([300, 301, 999])):
+      chunks = list(self.client.chat.completions.create(model="test", messages=[{"role": "user", "content": "Hello"}],
+                                                        stream=True, stream_options={"include_usage": True, "continuous_usage_stats": True}))
+    self.assertTrue(all(c.usage is not None for c in chunks))
+    self.assertEqual([c.usage.completion_tokens for c in chunks], [0, 1, 2, 2, 2])
+
   def test_multi_turn_conversation(self):
     stream = self.client.chat.completions.create(
       model="test",
@@ -346,6 +354,16 @@ class TestLLMServer(unittest.TestCase):
       gate.set()
       self.assertTrue(done.wait(2))
     self.assertEqual(generated_tokens, [300, 301, 302])
+
+  def test_disconnected_while_queued(self):
+    # (master's test) a request whose client went away while it was still queued must not reach the model
+    from tinygrad.llm.serve import Request
+    req = Request([200, 201, 202], "", None, 0.0)
+    req.cancelled = True
+    with patch.object(self.mock_model, "generate") as generate:
+      self.server.waiting.put(req)
+      self.assertIsNone(req.out.get(timeout=2))
+    generate.assert_not_called()
 
   def test_model_generation_failure(self):
     from openai import APIError, InternalServerError
