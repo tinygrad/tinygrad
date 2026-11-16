@@ -62,5 +62,13 @@ class TestCStyleFailures(unittest.TestCase):
       sink = UOp(Ops.SINK, src=(UOp.store(a.index(UOp.const(0)), f(b.index(UOp.const(0)).load())),), arg=KernelInfo())
       self.assertEqual(_test_uop_result([Tensor([5], dtype=dtypes.int)], sink)[0][0], expected)
 
+  def test_sub_negative_const(self):
+    # "x--1" is a decrement too
+    for dt, v, c in [(dtypes.int, 5, -1), (dtypes.float, 5.0, -1.0)]:
+      a, b = UOp.param(0, dt, 1), UOp.param(1, dt, 1)
+      out = b.index(UOp.const(0)).load().alu(Ops.SUB, UOp.const(c).cast(dt))
+      sink = UOp(Ops.SINK, src=(UOp.store(a.index(UOp.const(0)), out),), arg=KernelInfo())
+      self.assertEqual(_test_uop_result([Tensor([v], dtype=dt)], sink)[0][0], v+1)
+
 if __name__ == '__main__':
   unittest.main()
