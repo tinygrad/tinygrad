@@ -2969,7 +2969,8 @@ def state_token(like:Tensor, deps:list[Tensor]) -> Tensor:
 def after_kernel(x:Tensor, dep:Tensor) -> Tensor:
   """x, after the call of dep (a kernel that reads a value of it): a micro batch's order on another queue (see micro_batch_blocks)"""
   out = Tensor.empty(*x.shape, dtype=x.dtype, device=x.device, axis=x.uop.axis)
-  return Tensor.custom_kernel(out, x.contiguous(), dep, fxn=_after_kernel)[0]
+  # (x's state after dep: dep may be the write of x's buffer (a reader of x's old state that also waits for dep is a cycle))
+  return Tensor.custom_kernel(out, Tensor(x.contiguous().uop.after(dep.uop)), dep, fxn=_after_kernel)[0]
 
 def few_out_rows(x:Tensor, w:Tensor) -> Tensor|None:
   """
