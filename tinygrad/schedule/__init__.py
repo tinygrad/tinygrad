@@ -280,6 +280,9 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   # create copies
   linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
 
+  # plan the storage the function allocates. the jit plans all its captured calls together instead
+  if not (capturing and CAPTURING): linear = memory_plan_rewrite(linear)
+
   # map back: the EXTERNs become the storage and the bound Variables of this invocation, ALLOCs get fresh storage
   linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, enter_calls=True, name="map back")
 
@@ -296,5 +299,4 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
     capturing[0].add_linear(linear, var_vals)
     return UOp(Ops.LINEAR, src=()), var_vals
 
-  held_bufs = {b for b in externs if b.op is Ops.BUFFER}
-  return memory_plan_rewrite(linear, held_bufs), var_vals
+  return linear, var_vals
