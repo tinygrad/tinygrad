@@ -273,7 +273,6 @@ class TransformerConfig:
 # Share the generic GLM SeqEngine driver's traced state, not its model block types.
 _seq_base = glm_seq_base._seq_base
 _seq_batch = glm_seq_base._seq_batch
-SeqBatch = glm_seq_base.SeqBatch
 def _seq_alone() -> bool: return glm_seq_base._seq_alone()
 # A whole SEQ_BLK block on every device of the 14-GPU target, and a multiple of every supported indexer pool size.
 REGION_ALIGN = 3584
@@ -300,8 +299,6 @@ _ffn_rows:list[UOp|int|None] = [None]
 def _out(layer:Linear, x:Tensor) -> Tensor:
   """a sublayer's output projection: its partial sums if they are kept (_partial_out), in half (they're sent so)"""
   return layer.partial(x, half=_partial_half[0]) if _partial_out[0] else layer(x)
-
-def _identity(x:Tensor) -> Tensor: return x
 
 # the experts of a few tokens are the ones of every token (a decode kernel each), more are grouped by expert (prefill)
 MOE_DECODE_ROWS = (96)
@@ -352,13 +349,6 @@ def _batch_attention(x:Tensor, groups:list[tuple[UOp, int]], fn:Callable[[Tensor
     pre = fn(x[:, pf.off:], groups[nd:])
   finally: _batch_prefill[0] = pf
   return dec.cat(pre, dim=1)
-
-def slot_states(k:int) -> tuple[int, int]:
-  """
-  the S of a slot's recurrent states and of its conv states (the state of a position p is p%S, see kda_decode): a step of k+1 tokens reads
-  one and writes k+1, the recurrent ones can overwrite the one read (SLOT_STATES_TIGHT: a quarter less memory, more slots)
-  """
-  return (k + 1 if k and (1) else k + 2), k + 2
 
 def _group_positions(groups:list[tuple[UOp, int]], device:str|tuple[str, ...]|None) -> Tensor:
   """the start positions of the groups of batched decoding (their variables) as an int32 tensor on device"""
