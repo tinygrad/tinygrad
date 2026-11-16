@@ -28,5 +28,5 @@ class TestSchedulerProfileDefaults(unittest.TestCase):
     self.assertTrue(100.01 - requests[0].st > 1.5)
     source = inspect.getsource(LLMServer)
     self.assertIn('getenv("BATCH_DECODE", 1)', source)
-    self.assertIn('getenv("BATCH_LAST_ALONE", 1)', source)
+    self.assertIn('not k and len(active) == 1 and not pending and self.waiting.empty()', source)
     self.assertIn('getenv("BCP", 0)', source)
