@@ -136,7 +136,10 @@ The fixed engine invocation is `python3 -m tinygrad.llm --model /weights/GLM-5.3
 VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf extra/llm_service/glm_flash_6x7900xtx.sh start
 ```
 
-The mandatory C5 baseline sets **`VISION_MMPROJ` and `VISION_BUCKETS=576` only**. The benchmark's validated `/proc` limits leave `VISION_SLICE_MS`, `VISION_MAX_TOKENS`, `VISION_MAX_IMAGES`, `VISION_CACHE_MB`, `VISION_URL_CACHE_MB` and `SERVE_RENDER_CACHE` unset, using their engine defaults. Only the explicitly named Pokemon G3 profile forwards those six values (`200`, `1024`, `2048`, `2048`, `512`, `1`); they are not injected into the benchmark/deploy default. `VISION_LATE` and `VISION_KERNELS` no longer select runtime behavior: both are folded into the active production path; independent relink/run-again remains. Mandatory tower memory/warm-up does not change model rows or draft counts. Flash's solo evidence establishes this launch configuration and picture availability, not a new multiuser or exactness pass.
+The C5 launcher's default line (since da35e3273, Nov 15) carries the picture limits itself: `VISION_SLICE_MS=200`,
+`VISION_MAX_IMAGES=2048`, `VISION_CACHE_MB=2048`, `VISION_URL_CACHE_MB=512`, `SERVE_RENDER_CACHE=1` and `VISION_BUCKETS=320,576` (`VISION_MAX_TOKENS` stays at the engine's 1024); each can be
+overridden by setting it before `start` (`--print-command` shows the resolved values). The benchmark runs before Nov 15 used the older
+baseline (`VISION_MMPROJ` and `VISION_BUCKETS=576` only, the rest at engine defaults). `VISION_LATE` and `VISION_KERNELS` no longer select runtime behavior: both are folded into the active production path; independent relink/run-again remains. Mandatory tower memory/warm-up does not change model rows or draft counts. Flash's solo evidence establishes this launch configuration and picture availability, not a new multiuser or exactness pass.
 
 With `SESSION_END_TOKEN` unset (the default), explicit backend session-end calls return the expected **403 `backend_session_end_disabled`**, not generation failures. An integrated proxy releases its own session bookkeeping, while backend conversations remain in bounded 18-slot residency until reuse, NONDROP eviction or restart; `ended_dropped=0` only counts processed explicit ends and is **not** proof of backend memory release. Actual coordinated cleanup requires a matching out-of-band token on proxy and backends plus active/completed/duplicate-end tests (including resident/stash drops, `already_ended` and later admissions); never expose the secret in `--print-command`, and enabling the endpoint alone does not move model-seat release before verifier execution.
 
@@ -219,8 +222,11 @@ without it every turn re-reads the whole conversation from token 0):
 
 ```bash
 SPEC_DRAFTS=3 PREFILL_SIZES=192,384,1152 VISION_MAX_IMAGES=2048 VISION_CACHE_MB=2048 SERVE_RENDER_CACHE=1 SEQ_CKPT_TAIL=1 \
-  bash extra/llm_service/qwen_6x7900xtx.sh start
+  VISION_MAX_BODY_MB=64 VISION_URL_CACHE_MB=4608 SEQ_STASH_GB=41 bash extra/llm_service/qwen_6x7900xtx.sh start
 ```
+
+(The last three since Nov 16 02:4x, g4: the game resends every screenshot each turn, ~33.6 MB at ~840 turns, over the 32 MB default;
+the URL cache keeps every decoded screenshot of 12 games, paid from the host stash, 46 -> 41 GB.)
 
 **GLM Flash server** (the C5 launcher: since Nov 15 22:3x its default line carries all of the values below; the line is kept as the record of the R2 games; `VISION_BUCKETS=320,576` adds a
 320-patch bucket for the game's 240x216 screenshot (72 rows = 288 patches; C5's own 576 alone pads it to 576); the GLM R2 games ran this line):
@@ -230,6 +236,9 @@ VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf VISION_SLICE_MS=200 VISION_MAX
   VISION_URL_CACHE_MB=512 VISION_BUCKETS=320,576 SERVE_RENDER_CACHE=1 AM_POWER_LIMIT=250 bash extra/llm_service/glm_flash_6x7900xtx.sh start
 ```
 
+The GLM arm of Nov 16 (g1, 8 games at 480x432 + 8 at 360x324) adds `VISION_MAX_BODY_MB=64 VISION_URL_CACHE_MB=7168 SEQ_STASH_GB=6`:
+a decoded screenshot is 677,376 B at 480x432 and 366,912 B at 360x324, 16 games x 800 = 6.7 GB, paid from the stash (16 games fit the
+18 slots; with many other conversations the smaller stash makes a new one wait behind 180-s sticky ones).
 A game that resends every screenshot of the window in each request needs a body cap above the 32 MB default once its screenshots are
 larger than 240x216: 842 PNG screenshots at 360x324 (~38.9 KB each) are ~32.7 MB, a 413. For those add `VISION_MAX_BODY_MB=64` to the
 line (both launchers pass it; the Qwen Pokemon line on g4 runs with 64 since Nov 16 02:4x).
@@ -373,15 +382,15 @@ Any setting not listed here is not supported: its production value is compiled i
 | `AGING` | 0 | Per-second urgency used by the waiting-request scheduler; changing it affects convoy avoidance. |
 | `SEQ_STARVE` | 600 seconds | Wait threshold granting starvation priority; use a measured workload-specific override such as 30 only explicitly. |
 | `SEQ_CKPT_TAIL` | 0 (off) | Keep a prior-generation boundary checkpoint when clients discard old reasoning, preventing whole-conversation recompute. |
-| `SERVE_RENDER_CACHE` | unset in the C5 benchmark default; explicit G3 opt-in 1 | Optional chat-template render cache; memoized renders can change server-side cache behavior, so enable only with output-identical API tests and expected cache controls. |
-| `VISION_BUCKETS` | unset otherwise; C5 tower 576 | Additional picture-token tower buckets for frequent image sizes. Every extra bucket adds warm-up time and graph memory; run every bucket again and leave unset unless measured useful. |
-| `VISION_CACHE_MB` | C2 profile 1024; unset in the C5 benchmark/default; explicit G3 opt-in 2048 | Maximum host RAM for cached picture rows/profile features: this many MB stays resident when full, in addition to decoded pictures and engine state. Size a shared service from measured RSS, not either dedicated-box profile. |
-| `VISION_URL_CACHE_MB` | dedicated picture profile 512 | Maximum host RAM for decoded pictures keyed by data-URL hash: up to this many MB avoids repeated decoding but remains resident beside the row cache and engine state. Reduce it for a shared service after measuring its working set. |
+| `SERVE_RENDER_CACHE` | 1 in the C5 launcher's default; Qwen C2: off unless set (its Pokemon and picture lines above set 1) | Optional chat-template render cache; memoized renders can change server-side cache behavior, so enable only with output-identical API tests and expected cache controls. |
+| `VISION_BUCKETS` | C5 launcher default 320,576 (older C5 benchmark runs: 576); unset on C2 | Additional picture-token tower buckets for frequent image sizes. Every extra bucket adds warm-up time and graph memory; run every bucket again and leave unset unless measured useful. |
+| `VISION_CACHE_MB` | C2 launcher default 1024; C5 launcher default 2048 (older C5 benchmark runs: engine default) | Maximum host RAM for cached picture rows/profile features: this many MB stays resident when full, in addition to decoded pictures and engine state. Size a shared service from measured RSS, not either dedicated-box profile. |
+| `VISION_URL_CACHE_MB` | C2 and C5 launcher default 512; Pokemon lines 4608 (Qwen) / 7168 (GLM, Nov 16) | Maximum host RAM for decoded pictures keyed by data-URL hash: up to this many MB avoids repeated decoding but remains resident beside the row cache and engine state. Reduce it for a shared service after measuring its working set. |
 | `VISION_DECODERS` | 2 | Concurrent picture decode workers. |
 | `VISION_DECODE_WAIT` | 30 s | Picture decode deadline. |
 | `VISION_MAX_BODY_MB` | 32 | HTTP request body cap (413 above it); 64 for full-resend games with 360x324 screenshots. |
 | `VISION_MAX_BYTES` | 20000000 | Encoded bytes allowed for one picture. |
-| `VISION_MAX_IMAGES` | C2 1024; C5 benchmark/engine default; explicit G3 opt-in 2048; many-customer default 8, typical explicit limit 8–32 | Maximum pictures per request. Each can consume up to the byte/pixel/token caps plus decode, tower and queue work; the dedicated 1024 limit admits far more concurrent work and cache pressure. |
+| `VISION_MAX_IMAGES` | C2 launcher default 1024; C5 launcher default 2048 (older C5 benchmark runs: the engine's 8); Pokemon 2048; bare engine default 8, typical explicit limit 8–32 | Maximum pictures per request. Each can consume up to the byte/pixel/token caps plus decode, tower and queue work; the dedicated 1024 limit admits far more concurrent work and cache pressure. |
 | `VISION_MAX_PIXELS` | 40000000 | Decoded pixel cap per picture. |
 | `VISION_MAX_TOKENS` | 1024 | Picture token-row/tower memory cap. |
 | `VISION_SLICE_MS` | 200 in validated picture services; generic default 300 | Target picture work per scheduler slice. |
