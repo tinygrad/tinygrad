@@ -6,7 +6,7 @@ from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.llm.kernels.amd_glm import _nucleus_round_kernel, _local_argmax_kernel, _argmax_parts, _moe_softmax_router_kernel, \
   _moe_softmax_router_bitonic_kernel, _moe_bundle_atomic_kernel, _route_place_kernel, _ghc_post_kernel, _ghc_pre_kernel, \
-  _gated_delta_prefill_kernel
+  _gated_delta_prefill_kernel, _moe_combine_kernel, _route_count_kernel, _kda_replay_kernel, _kda_conv_kernel
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import prod, getenv, round_up, unwrap, dedup
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
@@ -3229,32 +3229,6 @@ def _route_expert(sel:UOp, first:UOp, i:UOp, N:int, experts:int) -> tuple[UOp, U
   e = (sel.reshape(-1)[i.minimum(N-1)].load() - first.reshape(-1)[0].load()).cast(dtypes.weakint)
   return e.maximum(0).minimum(experts-1), (i < N) & (e >= 0) & (e < experts)
 
-@functools.cache
-def _route_count_kernel(rank:UOp, counts:UOp, sel:UOp, first:UOp, *, experts:int) -> UOp:
-  # the rank of every selection among its expert's (a workgroup's in LDS, its workgroup's base from the global counts)
-  N = int(prod(rank.shape))
-  Q = (N + ROUTE_G*ROUTE_T - 1) // (ROUTE_G*ROUTE_T)
-  per = (experts + ROUTE_T - 1) // ROUTE_T
-  wg, t = UOp.range(ROUTE_G, 0, AxisType.GLOBAL), UOp.range(ROUTE_T, 1, AxisType.LOCAL)
-  hist = UOp.alloc((per*ROUTE_T,), dtypes.int32, addrspace=AddrSpace.LOCAL)
-  hist = hist.after(UOp.group(*(hist[t*per + m].store(UOp.const(0, dtypes.int32)) for m in range(per))).barrier())
-  locs = []
-  for q in range(Q):
-    e, ok = _route_expert(sel, first, i:=(wg*Q + q)*ROUTE_T + t, N, experts)
-    locs.append(_sys("__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP)", dtypes.int32, hist[e],
-                     ok.cast(dtypes.int32)))
-  hist = hist.after(UOp.group(*locs).barrier())
-  base = UOp.alloc((per*ROUTE_T,), dtypes.int32, addrspace=AddrSpace.LOCAL)
-  bst = [base[t*per + m].store(_sys("__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT)", dtypes.int32,
-                                    counts.reshape(-1)[(t*per + m).minimum(experts-1)], (t*per + m < experts).where(hist[t*per + m].load(), 0)))
-         for m in range(per)]
-  base = base.after(UOp.group(*bst).barrier())
-  stores = []
-  for q, loc in enumerate(locs):
-    e, ok = _route_expert(sel, first, i:=(wg*Q + q)*ROUTE_T + t, N, experts)
-    stores.append(rank.reshape(-1)[i.valid(i < N)].store(ok.where(base[e].load() + loc, -1)))
-  return UOp.group(*stores).end(wg, t).sink(arg=KernelInfo(name="route_count", opts_to_apply=(), estimates=Estimates()))
-
 def _moe_route_sort(sel:Tensor, first:Tensor, experts:int, tile:int) -> tuple[Tensor, Tensor, Tensor]|None:
   """moe_route's entries, tiles and pos of many tokens by the counting sort (None: not those shapes)"""
   if not amd_custom_kernels_supported(sel.device) or experts > 2048: return None
@@ -3309,36 +3283,6 @@ def moe_route(sel:Tensor, first:Tensor, experts:int, tile:int=MOE_TILE) -> tuple
   inside = (offsets.unsqueeze(1) <= start.unsqueeze(-1)) & (start.unsqueeze(-1) < (offsets + padded).unsqueeze(1))
   tiles = inside.where(Tensor.arange(experts, dtype=dtypes.int32) + 1, 0).sum(-1) - 1
   return valid.reshape(-1, N), entries, tiles.cast(dtypes.int32), pos.cast(dtypes.int32)
-
-@functools.cache
-def _moe_combine_kernel(y:UOp, down:UOp, pos:UOp, probs:UOp, *add:UOp, k:int, by_selection:bool=False, row0:int=0,
-                        add_rows:tuple[int, ...]=(), add_scale:bool=False) -> UOp:
-  # (add_scale: the last src the scale (T,) of the first add's rows (a gated shared expert's))
-  scale_src, add = (add[-1], add[:-1]) if add_scale else (None, add)
-  # y[t] = the sum over the slots j of token t of probs[t, j] * down[pos[t, j]] (the sorted rows): a workgroup per token, a thread its columns.
-  # the slots of other devices' experts (pos -1) are skipped by the whole workgroup. the tokens from row0 (of the inputs), each add from its row
-  T, D = cast(tuple[int, int], y.shape)
-  threads = 128 if D == 2560 else 256
-  per = D // threads
-  t, th, j = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(threads, 1, AxisType.LOCAL), UOp.range(k, 2, AxisType.LOOP)
-  p, w = pos[(t + row0) * k + j].load(), probs[(t + row0) * k + j].load()
-  if by_selection: p = (p >= 0).where((t + row0) * k + j, -1)  # down has a row per selection
-  accs = UOp.alloc((per,), dtypes.float32, addrspace=AddrSpace.REG)
-  accs = accs.after(accs.store(UOp.stack(*[UOp.const(0, dtypes.float)]*per)))
-  vals = [(p >= 0).where(down[p.valid(p >= 0), th * per + c].load().float() * w, UOp.const(0, dtypes.float)) for c in range(per)]
-  step = accs.store(UOp.stack(*[accs.after(j)[c].load() + v for c, v in enumerate(vals)]))
-  if D == 2560:
-    # Aligned eight-byte loads per lane, pipelined across the independently gathered expert rows.
-    step, prefetch = _prefetched(step, j, k-1, (down, pos, probs))
-    step = UOp.group(step, *prefetch)
-  accs = accs.after(step.end(j))
-  def plus(c:int) -> UOp:
-    def term(i:int, a:UOp) -> UOp:
-      v = a[t + (add_rows[i] if add_rows else 0), th * per + c].load().float()
-      return v * scale_src.reshape(-1)[t + row0].load().float() if scale_src is not None and i == 0 else v
-    return functools.reduce(lambda a, b: a + b, [term(i, a) for i, a in enumerate(add)], UOp.const(0, dtypes.float))
-  return UOp.group(*[y[t, th * per + c].store((accs[c].load() + plus(c)).cast(y.dtype)) for c in range(per)]).end(t, th).sink(
-    arg=KernelInfo(name="moe_combine", opts_to_apply=()))
 
 def moe_combine(down:Tensor, pos:Tensor, probs:Tensor, tokens:int, k:int, add:Tensor|None=None, out_dtype=dtypes.float32,
                 by_selection:bool=False, add_scale:Tensor|None=None) -> Tensor:
@@ -4991,33 +4935,6 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
     zs.append(z[grp*T + t, (h*V + r).valid(tid < V)].store(out.cast(z.dtype)))
   return UOp.group(*zs, *sstores, *istores).end(ghr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
 
-def _kda_replay_kernel(state:UOp, rp:UOp, slot:UOp, base:UOp, n:UOp, *, T:int, Q:int, W:int=8) -> UOp:
-  """
-  replay (SEQ_REPLAY): the state of slot `slot` (S=1, the one at base) after its n (< T) next tokens of its inputs in rp, written back: the
-  state of position base+n (see _kda_decode_kernel)
-  """
-  heads, V, K = cast(tuple[int, int, int], state.shape[-3:])
-  state = state.reshape(-1, V, K)
-  RW = cast(int, rp.shape[-1])
-  rp = rp.reshape(-1, RW)
-  hw, lane = UOp.range(heads * (V // W), 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
-  h, r = hw // (V // W), hw % (V // W) * W
-  cols = [lane + 32*i for i in range(K // 32)]
-  def dot(x:list[UOp], y:list[UOp]) -> UOp: return warp_reduce(functools.reduce(lambda s,ab: s + ab[0]*ab[1], zip(x[1:], y[1:]), x[0]*y[0]),
-                                                               full_wave=True)
-  stores = []
-  for j in range(W):
-    row = [state[slot*heads + h, r + j, c].load().float() for c in cols]
-    for tt in range(T-1):
-      at = (slot*Q + (base + tt) % Q)*heads + h
-      kk, dd = [rp[at, c].load() for c in cols], [rp[at, K + c].load() for c in cols]
-      decayed = [x * d for x, d in zip(row, dd)]
-      delta = (rp[at, 2*K + r + j].load() - dot(decayed, kk)) * rp[at, 2*K + V].load()
-      on = n > tt
-      row = [on.where(x + delta * k_, o) for x, k_, o in zip(decayed, kk, row)]
-    stores += [state[slot*heads + h, r + j, c].store(x.cast(state.dtype)) for c, x in zip(cols, row)]
-  return UOp.group(*stores).end(hw, lane).sink(arg=KernelInfo(name="kda_replay", opts_to_apply=()))
-
 def kda_replay(state:Tensor, rp:Tensor, slot:UOp, base:UOp, n:UOp, T:int, Q:int) -> Tensor:
   """the state of a slot (replay's, see _kda_replay_kernel) advanced n tokens from its base: the state after the kernel"""
   # (the variables bound by the state input: its kernel the unbound ones)
@@ -5095,32 +5012,6 @@ def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_
   zh = outs[0].reshape(1, T, n)
   q8_quantize_known(zh, T, local, False, (outs[1], outs[2], outs[3]))
   return zh
-
-@functools.cache
-def _kda_conv_kernel(q:UOp, k:UOp, v:UOp, kq:UOp, sq:UOp, sk:UOp, sv:UOp, pq:UOp, pk:UOp, pv:UOp, cq:UOp, ck:UOp, cv:UOp, taps:int,
-                     qscale:float) -> UOp:
-  """
-  the short convolutions of q, k and v (their windows: the conv states s (taps-1, H*K) then the projections p (T, H*K), weights (H*K, taps))
-  and their silu, q and k l2 normed (q scaled by qscale): (H, T, K) floats, and kq (H, T) the dot of q and k. a wave per head and token, a
-  lane 4 channels
-  """
-  H, T, K = cast(tuple[int, int, int], q.shape)
-  per = K // WARP_SIZE
-  t, h, lane = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(H, 1, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
-  def conv(st:UOp, pr:UOp, cw:UOp, j:int) -> UOp:
-    c = h * K + lane * per + j
-    def win(r:UOp) -> UOp:  # the window's row r: the state's, then the projection's
-      return (r < taps - 1).where(st[r.valid(r < taps - 1), c].load().float(), pr[(r - (taps - 1)).valid(r >= taps - 1), c].load().float())
-    x = functools.reduce(lambda a, b: a + b, [win(t + i) * cw[c, i].load().float() for i in range(taps)])
-    return x * (1 + (x * -LOG2E).exp2()).reciprocal()
-  qs, ks, vs = ([conv(st, pr, cw, j) for j in range(per)] for st, pr, cw in ((sq, pq, cq), (sk, pk, ck), (sv, pv, cv)))
-  def total(xs:list[UOp]) -> UOp: return warp_reduce(functools.reduce(lambda a, b: a + b, xs), full_wave=True)
-  qn, kn = (total([x * x for x in qs]) + 1e-6).rsqrt() * qscale, (total([x * x for x in ks]) + 1e-6).rsqrt()
-  qs, ks = [x * qn for x in qs], [x * kn for x in ks]
-  dot = total([a * b for a, b in zip(qs, ks)])
-  stores = [o[h, t, lane * per + j].store(xs[j]) for o, xs in ((q, qs), (k, ks), (v, vs)) for j in range(per)]
-  stores.append(kq[h, t.valid(lane.eq(0))].store(dot))
-  return UOp.group(*stores).end(t, h, lane).sink(arg=KernelInfo(name="kda_conv", opts_to_apply=()))
 
 def kda_conv(states:list[Tensor], projs:list[Tensor], weights:list[Tensor], dim:int, qscale:float) -> tuple[Tensor, ...]:
   """
