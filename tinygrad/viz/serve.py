@@ -146,7 +146,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
         cx = x
         while cx.op in {*GroupOp.Movement, Ops.CAST} and len(cx.src) >= 1 and cx.src[0] in excluded: cx = cx.src[0]
         arg = (f"{cx.val:g}" if cx.op is Ops.CONST and dtypes.is_float(cx.dtype) else cx.render() if cx.op is Ops.STACK \
-            else cx.arg.name if isinstance(cx.arg, ParamArg) else f"{cx.arg}")+(f" {x.dtype}" if x.op is Ops.CAST else "")
+            else str(cx.arg.name) if isinstance(cx.arg, ParamArg) else f"{cx.arg}")+(f" {x.dtype}" if x.op is Ops.CAST else "")
         label.append(f"{cx.op.name}{idx} {arg}" + (f" {cx.src[0].op}" if len(cx.src) else ""))
     with soft_err(lambda _: label.append("<ISSUE GETTING LABEL>")):
       if len(rngs:=u.ranges):
