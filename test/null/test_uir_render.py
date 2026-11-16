@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, UPat, graph_rewrite, KernelInfo, ProgramInfo
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.device import Device
-from tinygrad.schedule import ExportCtx, pm_export
+from tinygrad.tensor import ExportCtx, pm_export
 from tinygrad.codegen import full_rewrite_to_sink, to_program
 from tinygrad.helpers import Context, ansistrip
 from tinygrad.renderer import Estimates

@@ -1884,6 +1884,11 @@ def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot] if p.arg.slot >= 0 else None)])
+# flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
+pm_flatten_linear = PatternMatcher([
+  (UPat(Ops.LINEAR, custom_early_reject={Ops.LINEAR}, name="lin"),
+   lambda lin: lin.replace(src=tuple(flatten(c.src if c.op is Ops.LINEAR else (c,) for c in lin.src)))),
+])
 
 def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
   """Extract a call output's matching store, preserving writes to the enclosing scope's storage (PARAMs and EXTERNs)."""
