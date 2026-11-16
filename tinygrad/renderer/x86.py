@@ -1,7 +1,7 @@
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
 import struct, functools, itertools
-from typing import Any, cast
+from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
@@ -39,7 +39,7 @@ class LinearContext:
   def __init__(self, ren:'ISARenderer'):
     self.ren, self.stack_size = ren, 0
   def insert_linearized(self, uops:list[UOp]) -> list[UOp]: return uops
-  def assign_spill_slot(self, r:Register, u:UOp) -> Any: raise NotImplementedError("arch specific")
+  def assign_spill_slot(self, r:Register, u:UOp) -> int: raise NotImplementedError("arch specific")
 
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
@@ -49,8 +49,8 @@ class ISARenderer(Renderer):
   linear_ctx_type: type = LinearContext
 
   def is_two_address(self, x:UOp) -> bool: return False
-  def spill(self, spill_slot:Any, x:UOp) -> UOp: raise NotImplementedError("arch specific")
-  def fill(self, spill_slot:Any, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
+  def spill(self, spill_slot:int, x:UOp) -> UOp: raise NotImplementedError("arch specific")
+  def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
 
 # ***** X86 Ops *****
