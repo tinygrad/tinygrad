@@ -13,11 +13,16 @@ import sys, json, re, time, random, base64, io, argparse, collections, urllib.re
 from concurrent.futures import ThreadPoolExecutor
 
 ap = argparse.ArgumentParser()
-ap.add_argument("url"); ap.add_argument("--slots", type=int, default=64); ap.add_argument("--rows-4k", type=int, default=0)
-ap.add_argument("--no-pictures", action="store_true"); ap.add_argument("--draws", type=int, default=300)
+ap.add_argument("url")
+ap.add_argument("--slots", type=int, default=64)
+ap.add_argument("--rows-4k", type=int, default=0)
+ap.add_argument("--no-pictures", action="store_true")
+ap.add_argument("--draws", type=int, default=300)
 ap.add_argument("--max-tokens", type=int, default=4000, help="max_tokens of the part a chats")
 ap.add_argument("--ret-max-tokens", type=int, default=48, help="max_tokens of a part c reply (thinking off)")
-ap.add_argument("--no-reasoning", action="store_true"); ap.add_argument("--only", default="abcd"); ap.add_argument("--seed", type=int, default=0)
+ap.add_argument("--no-reasoning", action="store_true")
+ap.add_argument("--only", default="abcd")
+ap.add_argument("--seed", type=int, default=0)
 args = ap.parse_args()
 URL = args.url.rstrip("/") + "/v1/chat/completions"
 NOTHINK = {"chat_template_kwargs": {"enable_thinking": False}}
@@ -33,7 +38,9 @@ def post(body:dict, timeout:float=900) -> tuple[int, dict]:
 def content(r:dict) -> str: return ((r.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
 def say(*a): print(*a, flush=True)
 def data_url(im) -> str:
-  b = io.BytesIO(); im.save(b, "PNG"); return "data:image/png;base64," + base64.b64encode(b.getvalue()).decode()
+  b = io.BytesIO()
+  im.save(b, "PNG")
+  return "data:image/png;base64," + base64.b64encode(b.getvalue()).decode()
 STRAY = re.compile(r"[\u0400-\u04FF\u0600-\u06FF\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF]")
 
 if "a" in args.only:
@@ -65,7 +72,8 @@ if "b" in args.only:
   tail, acc = set(), 0
   for tok, k in sorted(p1.items(), key=lambda x: x[1]):
     if acc + k > 0.05 * n1: break
-    acc += k; tail.add(tok)
+    acc += k
+    tail.add(tok)
   out, allow = sum(k for tok, k in arms["P95"].items() if tok in tail), max(2, int(0.01 * args.draws))
   code, _r = post({"messages": msgs, "max_tokens": 4, "top_k": 20, "temperature": 0.7, "frobnicate": True})
   say(f"B sampler: {args.draws} draws an arm; P1 distinct {len(p1)}, its 5% tail {len(tail)} tokens ({acc} draws); P95 draws in that tail: {out} "
@@ -95,12 +103,14 @@ if "c" in args.only:
     from PIL import Image, ImageDraw, ImageFont
     font = ImageFont.load_default(size=28)
     def bars(vals):
-      im = Image.new("RGB", (640, 480), (255, 255, 255)); d = ImageDraw.Draw(im)
+      im = Image.new("RGB", (640, 480), (255, 255, 255))
+      d = ImageDraw.Draw(im)
       d.line((60, 420, 600, 420), fill=(0, 0, 0), width=3)
       for i, (lab, v) in enumerate(zip("ABC", vals)):
         x = 110 + i * 170
         d.rectangle((x, 420 - v * 3, x + 100, 420), fill=(40, 90, 200))
-        d.text((x + 30, 430), lab, fill=(0, 0, 0), font=font); d.text((x + 25, 420 - v * 3 - 36), str(v), fill=(0, 0, 0), font=font)
+        d.text((x + 30, 430), lab, fill=(0, 0, 0), font=font)
+        d.text((x + 25, 420 - v * 3 - 36), str(v), fill=(0, 0, 0), font=font)
       return im
     vs = [[rng.randrange(10, 99) for _ in range(3)] for _ in range(n)]
     pconvs: list = [[{"role": "user", "content": [{"type": "image_url", "image_url": {"url": data_url(bars(v))}},
@@ -112,12 +122,15 @@ if "d" in args.only and not args.no_pictures:
   from PIL import Image, ImageDraw
   pics = []
   for i in range(10):
-    im = Image.new("RGB", (320, 288), (255, 255, 255)); ImageDraw.Draw(im).text((20, 120), f"picture {i}", fill=(0, 0, 0)); pics.append(data_url(im))
+    im = Image.new("RGB", (320, 288), (255, 255, 255))
+    ImageDraw.Draw(im).text((20, 120), f"picture {i}", fill=(0, 0, 0))
+    pics.append(data_url(im))
   q10 = [{"type": "image_url", "image_url": {"url": u}} for u in pics] + [{"type": "text", "text": "How many pictures did I send? Number only."}]
   code, r = post({"messages": [{"role": "user", "content": q10}], "max_tokens": 8, **NOTHINK})
   say(f"D 10 pictures in one request: HTTP {code} answer {content(r)!r}")
   if code != 200: fails.append("d-10")
-  im = Image.new("RGB", (3840, 2160), (40, 90, 160)); ImageDraw.Draw(im).rectangle((1000, 600, 2800, 1500), fill=(240, 220, 20))
+  im = Image.new("RGB", (3840, 2160), (40, 90, 160))
+  ImageDraw.Draw(im).rectangle((1000, 600, 2800, 1500), fill=(240, 220, 20))
   text = {"type": "text", "text": "What colour is the rectangle? One word."}
   q4k = [{"type": "image_url", "image_url": {"url": data_url(im)}}, text]
   code, r = post({"messages": [{"role": "user", "content": q4k}], "max_tokens": 4, **NOTHINK})
