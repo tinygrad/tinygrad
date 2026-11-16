@@ -285,10 +285,9 @@ def rope_delta(runs:list[tuple[int, int, int, int]]) -> int:
 # ******** the tower ********
 
 VISION_SLICE_MS = getenv("VISION_SLICE_MS", 300)  # a bucket whose tower takes longer runs in slices of about this long (see TowerJob)
-# the tower's kernels (results/w-pf53/vision): 0 = all float (HF's numerics); 1 (AMD only) = the cards' WMMA: the attention as one fused
-# kernel a block (F16 q / k / v, float sums and softmax: amd.py's flash attention, head 72 padded to 96) and every matmul on F16 activations
-# against the F16 weights with float sums (as llama.cpp); the softmax, norms, rope, GELU and the residual stream stay float
-VISION_KERNELS = getenv("VISION_KERNELS", 0)
+# Production AMD tower: fused F16 attention and F16 WMMA matmuls, with float normalization, softmax, rope, GELU and residual work.
+# The generic float implementation remains available for CPU and reference validation.
+VISION_KERNELS = 1
 ATTN_SCORES = 1 << 25  # the attention's scores of a chunk of queries at most (32M floats = 128 MB: 2,048 queries of 1,024 patches, 128 of 16,384)
 
 # VISION_BUCKETS=576,...: buckets of their own between the powers of 2 (patch counts, multiples of 64) for a frequent picture size: a

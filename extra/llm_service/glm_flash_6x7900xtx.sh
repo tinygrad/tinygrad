@@ -10,30 +10,47 @@ XDG_CACHE_HOME=${XDG_CACHE_HOME:-$STATE_DIR/cache}
 PIDFILE=$STATE_DIR/service.pid
 LOGFILE=$STATE_DIR/service.log
 MODEL=$GLM_FLASH_WEIGHTS/GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf
+MMPROJ=${VISION_MMPROJ:-/home/runner/glmvis/mmproj-F16.gguf}
+# a picture cap above 1,024 rows keeps its tower's bigger buffers on every card: it is paid in resident cache rows (the stash keeps
+# the rest). Measured pairs (GLM: g3 serve + g2 NLL gate, card 0 0.15 GB free, w-gpf Nov 15, results/w-gpf/*/publisher/): 8000 -> 1505280; any other cap needs SEQ_ROWS set by hand.
+case "${VISION_MAX_TOKENS:-1024}" in
+  1024) ;;
+  8000) SEQ_ROWS="${SEQ_ROWS:-1505280}" ;;
+  *) [[ -n ${SEQ_ROWS:-} ]] || { echo "VISION_MAX_TOKENS=$VISION_MAX_TOKENS needs SEQ_ROWS (measured: 8000 -> 1505280)" >&2; exit 2; } ;;
+esac
 SERVER_ENV=(
   HOME="$HOME" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED=1
   DEV=AMD AM_POWER_LIMIT="$AM_POWER_LIMIT"
-  MLA_SEQ_SHARD=1 WARMUP_PARALLEL=1 IQ2S_K256=1
+
   HOST_STASH=0 HOST_MIN=4096 SLOT_HOST=1 SLOT_CKPT=1 BATCH_SLOTS=8
-  SEQ_WARMUP_ONLY= SEQ_IDX_SHARD=1 SEQ_KV4=1
+  SEQ_IDX_SHARD=1 SEQ_KV4=1
   PREFILL_PARTS=4 LOAD_DEFER=1 WARMUP_JITS=all
   SEQ_ROWS="${SEQ_ROWS:-3916800}" SEQ_SLOTS="${SEQ_SLOTS:-18}" SEQ_MAX_ACTIVE="${SEQ_MAX_ACTIVE:-18}"
-  SEQ_SIZES="${SEQ_SIZES:-1,2,4,8,12,13,18}" SEQ_STASH_GB="${SEQ_STASH_GB:-0}" SEQ_STASH_ENTRIES=128
-  FLAG_AR_MAXN=32768 AMD_SCRATCH_MIN=576 AMD_SCRATCH_MAX=64 SEQ_COPY_SCRATCH=1
+  SEQ_SIZES="${SEQ_SIZES:-1,2,4,8,12,13,18}" SEQ_STASH_GB="${SEQ_STASH_GB:-0}" SEQ_STASH_ENTRIES="${SEQ_STASH_ENTRIES:-128}"
+  AMD_SCRATCH_MIN=576 AMD_SCRATCH_MAX=64 SEQ_COPY_SCRATCH=1
   PREFILL_CHUNK="${PREFILL_CHUNK:-768}" PREFILL_SIZES="${PREFILL_SIZES:-192,768}" PREFILL_MB1_ROWS=1200
-  PREFILL_SLICE=1536 SEQ_STARVE_ALT=1 RING_MAXW=32768 RING_RS_LIKE_COPIES=0
+  PREFILL_SLICE=1536 SEQ_STARVE_ALT=1
   XDG_CACHE_HOME="$XDG_CACHE_HOME"
 )
 for _name in API_KEY API_KEY_FILE MODEL_ALIASES MODEL_OWNED_BY KEEPALIVE ENC_CACHE \
-  SEQ_RESERVE SEQ_PROTECT SEQ_STICKY SEQ_STASH_CTX \
+  SEQ_RESERVE SEQ_PROTECT SEQ_STICKY SEQ_STASH_CTX AGING SEQ_STARVE \
+  VISION_SLICE_MS VISION_MAX_TOKENS VISION_MAX_IMAGES VISION_CACHE_MB VISION_URL_CACHE_MB SERVE_RENDER_CACHE \
   MEM_TRACE DEBUG_LOAD AMD_SCRATCH_LOG KPROF KPROF_TOP LIN_NAMES TELEMETRY_LOG SERVE_TRACE DISABLE_AMD_KERNELS; do
   if [[ -n ${!_name+x} ]]; then SERVER_ENV+=("$_name=${!_name}"); fi
 done
+# a parked conversation's states take ~57.9 MB a card before any 3,072-token chunk (results/w-gpf/stash/stash_sizes.py):
+# a stash too small for its entries silently holds 0 chunks, so refuse it (the qualified stash profile is 12 GB / 64 entries)
+if ! awk -v gb="${SEQ_STASH_GB:-0}" -v n="${SEQ_STASH_ENTRIES:-128}" 'BEGIN{exit !(gb == 0 || gb * 1000 >= n * 57.9 + 100)}'; then
+  echo "SEQ_STASH_GB=${SEQ_STASH_GB} holds no chunk beside SEQ_STASH_ENTRIES=${SEQ_STASH_ENTRIES:-128} entries of 57.9 MB a card" >&2; exit 2
+fi
 COMMAND=(python3 -m tinygrad.llm --model "$MODEL" --shard 6 --max_context 524288 --serve "${PORT:-8000}")
+SERVER_ENV+=(VISION_MMPROJ="$MMPROJ" VISION_BUCKETS="${VISION_BUCKETS:-576}")
 
 check_weights() {
+  [[ -s $MMPROJ ]] || { echo "VISION_MMPROJ is mandatory: no readable nonempty projector at $MMPROJ" >&2; return 2; }
   command -v sha256sum >/dev/null
   (cd "$GLM_FLASH_WEIGHTS" && sha256sum -c "$ROOT/extra/llm_service/glm-flash-iq3xxs.sha256")
+  printf '%s %s\n' '922b809664d6a89cc1e40bfeaa63618000edc6651baf4082ce0718a784adf947' "$MMPROJ" | sha256sum -c -
 }
 if [[ $ACTION == --print-command ]]; then
   printf '%q ' "${SERVER_ENV[@]}" "${COMMAND[@]}"; printf '\n'
@@ -66,6 +83,9 @@ else
   cat >&2 <<'USAGE'
 Usage: glm_flash_6x7900xtx.sh start|stop|status|check-weights|--print-command
 D34 ran at 225 W/card with 18 seats of 262144 context (524288 server context).
+Vision is mandatory, never text-only. Default projector: /home/runner/glmvis/mmproj-F16.gguf.
+Another installation path is accepted only for the byte-identical checked projector.
+The benchmark/default leaves other picture limits unset; only the named G3 profile forwards its six extra knobs.
 AM_FIRST_START=1 enables the single controlled AM reset. No process or GPU is touched by --print-command.
 USAGE
   [[ $ACTION == --help || $ACTION == -h ]] && exit 0

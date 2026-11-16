@@ -27,7 +27,5 @@ class TestKVMix(unittest.TestCase):
   def test_mix(self):
     w = self.widths({"QSA_KV_BITS": "8", "QSA_KV_BITS4_LAYERS": "3,48"}, [3, 7, 48])
     self.assertEqual(w, {3: (72, 4), 7: (144, 8), 48: (72, 4)})  # (4-bit: half the bytes of a row)
-  def test_16_unchanged(self):
-    self.assertEqual(self.widths({"QSA_KV_BITS": "16", "QSA_KV_BITS4_LAYERS": "3"}, [3]), {3: (512, 16)})
 
 if __name__ == "__main__": unittest.main()

@@ -907,10 +907,10 @@ class Request:
     self.y, self.mtp, self.j, self.par, self.pos = [first] + [0]*k, pos, 0, 1, pos
 
 # short prompts prefilled together (Transformer.batch_prefill) from this many: a step of them costs about what three alone do
-BATCH_PREFILL_MIN = getenv("BATCH_PREFILL_MIN", 3)
+BATCH_PREFILL_MIN = 3
 # (BCP) requests prefilled together from this many: continuations of their conversations, the rest of each prompt in its slot (see Transformer.
 # batch_prefill's starts): a step of the model's weights for all of them, not one each. fewer: one at a time (a step is G of P rows)
-BCP_MIN = getenv("BCP_MIN", 2)
+BCP_MIN = 2
 
 class BatchStats:
   """batched decoding's status line every few seconds while it runs: the requests decoding and waiting now, the tokens generated a second and
@@ -1770,12 +1770,13 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # prompt's with the fewest tokens left to prefill (a short one, an agent's turn, isn't behind a long one), less AGING tokens a second it
   # waited. a long one isn't behind short ones that keep coming forever: one waiting past STARVE_SEQ goes first, and takes a sequence even if
   # a held conversation is lost for it (see SeqEngine.STICKY))
-  PREFILL_SLICE, MAX_STALL, DECODE_SHARE = getenv("PREFILL_SLICE", 13824), getenv("MAX_STALL", 0.3), getenv("DECODE_SHARE", 0.5)
-  AGING, STARVE_SEQ, TURN_WAIT = getenv("AGING", 0), getenv("SEQ_STARVE", 600.0), getenv("SEQ_TURN_WAIT", 10.0)
+  # (PREFILL_SLICE, AGING, SEQ_STARVE and SEQ_STARVE_ALT are live profile overrides: C5 uses 1536 and STARVE_ALT 1.)
+  PREFILL_SLICE, MAX_STALL, DECODE_SHARE = getenv("PREFILL_SLICE", 13824), 0.3, 0.5
+  AGING, STARVE_SEQ, TURN_WAIT = getenv("AGING", 0), getenv("SEQ_STARVE", 600.0), 10.0
   # (SEQ_STARVE_ALT: after a slice of a starving prompt the next one is the best of the others (a waiting one admitted, a warm turn's short
   # suffix): a long cold prompt past STARVE takes every other slice, not all of them while every other request waits behind it)
   STARVE_ALT = getenv("SEQ_STARVE_ALT", 0)
-  COLD_MAX, COLD_TOKENS = getenv("SEQ_COLD_MAX", 1), getenv("SEQ_COLD_TOKENS", 16384)
+  COLD_MAX, COLD_TOKENS = 1, 16384
   # (the gpus' clocks (AM: their gfx clock's cap, see AMIdleClocks.set_caps): a few users decoding at the full clocks (a user's tokens fast),
   # more at less (the energy a token: ~0.85 J at 2000 MHz on 6x 7900 XTX, ~1.2 J at full), a prefill at a cap it isn't slower at. switched
   # CLOCK_HOLD s apart at most)
@@ -2058,17 +2059,17 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         # (BCP) new requests into free slots, prefilled together: each one's conversation from the model's or a kept one into its slot, the rest
         # of its prompt (in chunks of P) continued there
         if (G:=model.batch_prefills()) and getenv("BCP", 0) and callable(getattr(model, "prefix_to_slot", None)) and not drain:
-          room, most = model.batch_ctx() - model.BPF_P, getenv("BCP_MAX_NEW", 1536)
+          room, most = model.batch_ctx() - model.BPF_P, 1536
           # (a prompt of many new tokens: alone, in big chunks (the prefill's chunks of up to 1536 rows run faster than a batch's of P))
           def cont(r:Request) -> bool:
             n = len(r.ids) + len(r.generated)
             return self.batchable(r) and n <= room and n - self.stash_hit(r.ids + r.generated, set(active)) <= most
           # (fewer than a step's worth while others decode: they wait BCP_WAIT seconds at most for more, agents' turns come one at a time)
           while len(batch:=self.bcp_batch([r for r in pending if cont(r)], min(G, self.free_slots(active)), set(active))) >= BCP_MIN and \
-                (len(batch) >= G or not active or time.perf_counter() - min(r.st for r in batch) > getenv("BCP_WAIT", 1.5)):
+                (len(batch) >= G or not active or time.perf_counter() - min(r.st for r in batch) > 1.5):
             self.batch_continue(batch, active, pending)
           # (the ones that wait for more: not prefilled alone meanwhile. one that waited long enough is, if no others came)
-          waiting_bcp = {r for r in pending if cont(r) and time.perf_counter() - r.st <= getenv("BCP_WAIT", 1.5)} if active else set()
+          waiting_bcp = {r for r in pending if cont(r) and time.perf_counter() - r.st <= 1.5} if active else set()
         else: waiting_bcp = set()
         # new requests into free slots: short prompts prefilled together into theirs, (the others) prefilled, their states copied into the slot
         def shorts() -> list[Request]: return [r for r in pending if self.batchable(r) and not r.generated and len(r.ids) <= model.BPF_P]

@@ -1,4 +1,4 @@
-# the V3.1 file's speed paths: the merged Q6_K projection (decode), the Q6_K gemm tiles (Q6K_TILES), IQ3_XXS experts in K256 (K256_IQ3XXS)
+# the V3.1 file's speed paths: the merged Q6_K projection (decode) and the Q6_K gemm tiles (Q6K_TILES)
 # the V3.1 file's GDN q / k / v / gate are Q6_K: batched decoding's merged projection (merged_linear, q8_linear_parts) takes them as one Q6_K
 # Linear; its gemm (n_out 4, no split sums) renders for RDNA3 (gfx1100) at one device's real shape (2560 -> 4 x 1024)
 import functools, unittest
@@ -42,28 +42,5 @@ class TestQ6KTiles(unittest.TestCase):
         res = Tensor.custom_kernel(Tensor.empty(M, N), raw, Tensor.empty(M, K, dtype=dtypes.float16), fxn=fxn)[0]
         ast = res.schedule_linear().src[-1].src[0]
         self.assertGreater(len(to_program(ast, ren).src[1].src), 100)
-
-class TestK256IQ3XXS(unittest.TestCase):
-  # K256_IQ3XXS: the V3.1 file's IQ3_XXS gate|up experts in the K256 kernel (with XH): renders for gfx1100, dispatched only with the flag
-  def test_renders(self):
-    from tinygrad.llm.kernels import amd_qwen
-    from tinygrad.llm.kernels.amd_qwen import moe_grouped_linear, IQ3_XXS
-    ren = HIPRenderer(Target("AMD", arch="gfx1100"))
-    E, D, F, T, K, tile = 4, 512, 256, 64, 2, 32
-    names = {}
-    for flag in (0, 1):
-      amd_qwen.K256_IQ3XXS = flag
-      try:
-        w = Tensor.empty(E*2*F*D//256*QUANT_SIZES[IQ3_XXS]//2, dtype=dtypes.uint16)
-        R = T*K + (tile-1)*E
-        R += -R % tile
-        ent, til = Tensor.empty(R, dtype=dtypes.int32), Tensor.empty(R//tile, dtype=dtypes.int32)
-        out = moe_grouped_linear(w, IQ3_XXS, E, Tensor.empty(T, D), ent, til, slots=K, act=(1.0, 0.0, 0.0))
-        asts = [u.src[0] for u in out.schedule_linear().src if u.src and "grouped" in str(getattr(u.src[0].arg, "name", ""))]
-        names[flag] = [a.arg.name for a in asts]
-        if flag: self.assertGreater(len(to_program(asts[0], ren).src[1].src), 100)
-      finally: amd_qwen.K256_IQ3XXS = 0
-    self.assertEqual(names[1], ["grouped_iq3_xxs_k256"])
-    self.assertNotIn("grouped_iq3_xxs_k256", names[0])
 
 if __name__ == "__main__": unittest.main()

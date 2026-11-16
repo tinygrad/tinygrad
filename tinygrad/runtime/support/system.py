@@ -116,9 +116,8 @@ class _System:
 
   @staticmethod
   def populate(addr:int, size:int):
-    # the pages made (the kernel zeroes them, a core ~10 GB/s): pieces of a big range by threads at once (SYSMEM_POPULATE_THREADS, madvise
-    # doesn't hold the GIL)
-    n = max(1, min(getenv("SYSMEM_POPULATE_THREADS", 16), size >> 28))
+    # the pages made (the kernel zeroes them, a core ~10 GB/s): pieces of a big range by 16 threads at most (madvise doesn't hold the GIL)
+    n = max(1, min(16, size >> 28))
     if n == 1:
       libc.madvise(addr, size, libc.MADV_POPULATE_WRITE)
       return

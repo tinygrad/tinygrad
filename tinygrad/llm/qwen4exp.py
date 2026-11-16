@@ -334,24 +334,19 @@ _sp_rows:list[Tensor|None] = [None]
 # rows are padded to whole tiles of 32), 0: not split
 _seq_split = [0]
 SEQ_SPLIT_MAX = 128  # (the most real rows a device)
-# QTF: batched decoding teacher forced (a quality tool's, extra/qdecq.py): the drafts and the step's tokens forced from the host, the rows'
-# log probs written to the host
-QTF = getenv("QTF", 0)
-# SEQ_MIX_TOKENS: a short prompt suffix forced through the ordinary decode rows, no standalone prefill (0: off)
-SEQ_MIX_TOKENS = getenv("SEQ_MIX_TOKENS", 0)
-# AG_REAL: batched decoding's q8 all-gather packs a device's real rows from the padded mix, not from their copy (tr8 B=8 +0.8%: off)
-AG_REAL = getenv("AG_REAL", 0)
+# AG_REAL: batched decoding's q8 all-gather packs a device's real rows from the padded mix, not from their copy.
+AG_REAL = 0
 # HC_REAL: batched decoding's hyper-connections read a device's real rows only and the mix stores them (no copy of them), its input not
 # materialized in float (2 kernels less a sublayer): the mix's epilogue and the activation's kernel round differently (FMA, rcp: ulps)
-HC_REAL = getenv("HC_REAL", 1)
-GDN_MERGED, HC_NORM_REAL = getenv("GDN_MERGED", 0), getenv("HC_NORM_REAL", 1)
+HC_REAL = 1
+GDN_MERGED, HC_NORM_REAL = 0, 1
 # QSA_ROT_FWHT: QSA_KV_ROT's rotations (keys, values, queries, the output back) by a fast Walsh-Hadamard kernel (fwht), not 256x256 matmuls
-QSA_ROT_FWHT = getenv("QSA_ROT_FWHT", 1)
+QSA_ROT_FWHT = 1
 # HC_DEC: batched decoding's hyper-connections of a device's few real rows (1-HC_DEC_ROWS (<=16), split) by the decode kernels (ghc_pre,
 # the decode linear, ghc_decode_mix/ghc_post: the B=1 path's) instead of the prefill ones on padded tiles of 32 (numerics: the B=1 path's,
-# q8 activations). tr8 IQ4 with the default numerics (HC_REAL): B=4 (2 rows a device) 16.59 -> 16.24 ms, B=8 (4) 0%: HC_DEC_ROWS=2.
-# extra/qdecq.py vs HC_DEC=0: G=4 NLL -0.008 KL 0.021 top-1 95.6%, G=8 NLL +0.014 KL 0.026 top-1 94.4%)
-HC_DEC, HC_DEC_ROWS = getenv("HC_DEC", 1), getenv("HC_DEC_ROWS", 2)
+# q8 activations). IQ4 with the default numerics (HC_REAL): B=4 (2 rows a device) 16.59 -> 16.24 ms, B=8 (4) 0%: HC_DEC_ROWS=2.
+# Measured against HC_DEC=0: G=4 NLL -0.008 KL 0.021 top-1 95.6%, G=8 NLL +0.014 KL 0.026 top-1 94.4%)
+HC_DEC, HC_DEC_ROWS = 1, 2
 def _split_rows() -> int: return round_up(_seq_split[0], 32)
 def _split_real(x:Tensor) -> Tensor:
   """(B, N*P, ...) split padded rows: the real rows (B, N*R, ...), split"""
@@ -474,7 +469,7 @@ def _run_again(calls:dict[str, tuple[Any, Callable[[], Any]]], skip:set) -> list
   """
   the warm-up's calls run once more, after its last capture (the jits in skip not): a capture that grows a shared arena rebases the jits sharing
   it (CapturedJit.rebase: their links and every jit's launch arguments dropped), so a jit run before it would link again on its first call in
-  serving (+0.5-1 s on a start's first requests: g2 Nov 14). the same calls as the warm-up's: the same bits. returns the jits' names it found unlinked
+  serving (+0.5-1 s on a start's first requests). the same calls as the warm-up's: the same bits. returns the jits' names it found unlinked
   """
   # (a call's jit can be a list: the jits of a prefill chunk's parts (PREFILL_PARTS); skip by identity, a list isn't hashable)
   todo = [(n, js, call) for n, (j, call) in calls.items()
@@ -491,7 +486,7 @@ def _drop_jit(j:_TinyJit):
 def _drop_apart(final=True):
   """
   LOAD_APART: the buffers of the file's tensors the weights are derived from, freed (they are once nothing holds them: the derivations run).
-  a line of the bytes freed and held (LOAD_APART=2: who holds them); not final: tried again later if held
+  a line of the bytes freed and held; not final: tried again later if held
   """
   if not (refs:=gguf_load.apart_buffers): return
   import gc
@@ -503,26 +498,13 @@ def _drop_apart(final=True):
   held = alive()
   print(f"LOAD_APART: {(nbytes - sum(b.nbytes for b in held))/1e6:.1f} MB freed, {sum(b.nbytes for b in held)/1e6:.1f} MB held "
         f"({time.perf_counter()-st:.3f}s{'' if final else ', tried again after the warm-up'})")
-  if held and getenv("LOAD_APART") >= 2:
-    # (a chain of referrers of a buffer held: the first one not a frame each)
-    import types
-    def what(o) -> str:
-      if isinstance(o, dict): return f"dict {len(o)} keys {[str(k)[:40] for k in list(o)[:4]]}"
-      return f"{type(o).__name__} {len(o)}" if isinstance(o, (list, tuple, set)) else type(o).__qualname__
-    obj, seen, ups = held[0], {id(held)}, cast(list[list], [])
-    for _ in range(12):
-      seen.add(id(ups))
-      if not (up:=[r for r in gc.get_referrers(obj) if id(r) not in seen and not isinstance(r, types.FrameType)]): break
-      ups.append(up)
-      seen |= {id(up), id(obj:=up[0])}
-      print(f"LOAD_APART: held by {what(obj)}")
   if final or not held:
     refs.clear()
     gguf_load.apart_nbytes.clear()
 
 # (while not empty: _fill_zero allocates, the buffers are zeroed later, see _zero_deferred)
 _zero_later:list[list[Buffer]] = []
-ZERO_ALLOC_LATE = getenv("ZERO_ALLOC_LATE", 1)
+ZERO_ALLOC_LATE = 1
 def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
   """the tensors are buffers now (allocated, their devices and split kept), their values are computed by the function added to pending"""
   pairs, ts = [], list({id(t): t for t in ts}.values())  # (a tensor of two modules once)
@@ -545,7 +527,7 @@ def _realize_later(ts:list[Tensor], pending:list[Callable[[], None]]):
       t.replace(Tensor(u))
       # (LOAD_APART: a contiguous computed straight into its buffer, not into the jit's own one then copied: the jit's memory the size of
       # what it makes (C2: ~336 MB a device at once, the start-up's peak with the apart buffers), the same values)
-      pairs.append((u, lazy.src[0] if getenv("LOAD_APART", 0) and lazy.op is Ops.STAGE and lazy.arg is None else lazy))
+      pairs.append((u, lazy.src[0] if lazy.op is Ops.STAGE and lazy.arg is None else lazy))
   # (a jit: compiled with the model's jits, see _capture_parallel)
   def compute(): Tensor.realize(*[Tensor(u).assign(Tensor(lazy)) for u, lazy in pairs])
   if pairs: pending.append(TinyJit(compute, capture_first=True))
@@ -726,9 +708,7 @@ def _temp_row(t:float|tuple[float, ...]) -> array.array:
   t = t if isinstance(t, tuple) else (t, 1.0)
   return array.array('f', (*t, 0.0)[:TEMP_W] if len(t) < TEMP_W else t[:TEMP_W])
 TEMP_W = 3  # (the floats of a row of the seq steps' temperatures: temperature, top_p, top_k)
-# (SAMPLE_TOP_K: the sampled steps' graphs take their rows' top_k (8 rounds of counts over the vocabulary, exchanged when it's split): on
-# with a server's TOP_K, off (no cost, a request's top_k ignored) without)
-SAMPLE_TOP_K = getenv("SAMPLE_TOP_K", int(getenv("TOP_K", 0) > 0))
+SAMPLE_TOP_K = 1
 
 def _hash_uniform(seed:Tensor, keys:Tensor, like:Tensor) -> Tensor:
   """
@@ -1226,9 +1206,9 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
     return queued(i, *block._phase_pre(hc, norm, xs[i]))
   # the batches' sublayers in step: batch i's sublayer k after batch i-1's (its states the one before wrote), the collectives of one run while
   # the other computes
-  # (one micro batch: its collectives on its compute queue, nothing to run under them: no waits between queues (tr9 576/1152-row warm
+  # (one micro batch: its collectives on its compute queue, nothing to run under them: no waits between queues (576/1152-row warm
   # chunks -7%/-5%). RING_QUEUE_MB1=1: on their own queue as two batches' are)
-  RING_QUEUE_ON[0] = len(xs) > 1 or bool(getenv("RING_QUEUE_MB1", 0))
+  RING_QUEUE_ON[0] = len(xs) > 1
   _mb_active[0] = True
   deps:list[list[Tensor|None]] = [[None]*len(subs) for _ in xs]
   phases:list[tuple[Tensor, ...]] = [() for _ in xs]
@@ -1272,10 +1252,10 @@ _seq_base:list[UOp|int] = [0]
 _pk_local:list[int|None] = [None]
 # PREFILL_PK_CTX: the contexts (tokens, ascending) a prefill chunk smaller than the largest is also traced for (its jit of the shortest one its
 # context fits): the split indexer's pooled keys of that many tokens gathered, not of a whole context (a small chunk's gather of 262k a
-# constant ~6 ms on tr8)
+# constant ~6 ms for the prefill chunk)
 PREFILL_PK_CTX = tuple(int(c) for c in getenv("PREFILL_PK_CTX", "").split(",") if c)
 # (a prefill chunk's time is about that of this many rows more than its padded ones: its kernels' fixed time, see Transformer._chunk_plan)
-CHUNK_FIXED_ROWS = getenv("CHUNK_FIXED_ROWS", 256)
+CHUNK_FIXED_ROWS = 256
 # (a multiple of the pools of the KV heads' devices (kpool*kv_split): a region's pools on the devices as its positions)
 REGION_ALIGN = 3072
 # Sampled harnesses and packed serving may use the split KV/indexer alignment; moves/stash still use REGION_ALIGN.
@@ -1284,21 +1264,20 @@ def _region_rows(config:TransformerConfig) -> int:
   """the rows of the caches the regions of the sequences are of (the REGION_ALIGN after them: the padding sequences' region)"""
   return round_up(max(config.max_context, config.cache_rows), REGION_ALIGN)
 # a prefill chunk's rows in this many micro batches (sequence parallel: the copies of one run with the kernels of the other)
-MICRO_BATCHES = getenv("MICRO_BATCHES", 2)
+MICRO_BATCHES = 1
 PREFILL_MB1_ROWS = getenv("PREFILL_MB1_ROWS", 0)
 PREFILL_PARTS = getenv("PREFILL_PARTS", 1)
-WARM_ASYNC = getenv("WARM_ASYNC", 1)
-LANES_LATE = getenv("LANES_LATE", 1)
-PREFILL_TILE32 = getenv("PREFILL_TILE32", 1)
+WARM_ASYNC = 1
+LANES_LATE = 1
 # MOE_TILE16: grouped experts in tiles of 16 rows if a chunk has at most this many selections an expert on average (see _grouped_experts)
-MOE_TILE16 = getenv("MOE_TILE16", 40)
+MOE_TILE16 = 40
 def _moe_use_tile16(selections:int, experts:int) -> bool:
   """fewer padded rows and weight reads with 16-row tiles (17-32 rows/expert: both tile sizes pad to 32, so keep 32)"""
   if not MOE_TILE16 or selections > MOE_TILE16 * experts: return False
   return round_up(selections, 16 * experts) < round_up(selections, 32 * experts)
 PREFILL_SIZES = tuple(int(c) for c in getenv("PREFILL_SIZES", "192,512,1152,2048,4096").split(",") if c)
 # the attention cache's keys (1) and values (2) rotated, see QSABlock._rot
-QSA_KV_ROT = getenv("QSA_KV_ROT", 0)
+QSA_KV_ROT = 3
 
 @dataclass(frozen=True)
 class SeqBatch:
@@ -1706,7 +1685,7 @@ class QSABlock(TransformerBlock):
       KV, N, D = self.config.n_kv_heads, (_region_rows(self.config) + REGION_ALIGN) // self.config.kv_split, 2*self.config.head_dim
       # (zeroed: the flash kernels read whole tiles past the valid region. in int8 groups of 32 and their scales (kv_q8_pack), the bytes of a
       # row 0.56x: more rows in memory. QSA_KV_BITS=4: in 4-bit groups (kv_q4_pack), 0.28x. 16: half)
-      bits = getenv("QSA_KV_BITS", 8) if D % 32 == 0 and amd_custom_kernels_supported(x.device) else 16
+      bits = 8 if D % 32 == 0 and amd_custom_kernels_supported(x.device) else 16
       # (QSA_KV_BITS4_LAYERS=3,7,..: these attention blocks (by block index; the MTP block is num_blocks) in 4-bit rows, the others in
       # QSA_KV_BITS: a cache's bits are read from its shape, so a mix works as is. 4-bit rows are half the bytes of 8-bit: more rows)
       if bits == 8 and self.layer_index in {int(x) for x in str(getenv("QSA_KV_BITS4_LAYERS", "")).split(",") if x}: bits = 4
@@ -2204,7 +2183,7 @@ class Transformer:
   # jit's capture is ~30 s of python for all the blocks). the streams of the micro batches between parts in buffers of the model (in half, as
   # the blocks keep them) ********
 
-  def _prefill_mb(self, rows:int) -> int: return 1 if rows <= PREFILL_MB1_ROWS else MICRO_BATCHES
+  def _prefill_mb(self, rows:int) -> int: return 1
   def prefill_parts(self, rows:int) -> list[tuple[int, int]]:
     """the blocks of the parts of a prefill chunk of rows (one part: not split)"""
     k, n, mb = PREFILL_PARTS, len(self.blk), self._prefill_mb(rows)
@@ -2419,7 +2398,7 @@ class Transformer:
   REGION_ALIGN = REGION_ALIGN  # expose the model's move/stash alignment to SeqEngine rather than importing qwen4exp there
   SEQ_BASE_ALIGN = SEQ_BASE_ALIGN  # region allocation may be packed more tightly than whole moves/stash chunks
   SEQ_SIZES = tuple(int(x) for x in str(getenv("SEQ_SIZES", "1,2,4,8")).split(","))
-  SEQ_MIX_TOKENS = SEQ_MIX_TOKENS
+  SEQ_MIX_TOKENS = 0
   def clock_caps(self, default:dict[str, str]) -> dict[str, str]:
     """
     the gfx clock caps of the server's modes (fast: few users, many, prefill). RDNA4 (R9700): none, its board's power limit is the cap (at
@@ -2490,13 +2469,6 @@ class Transformer:
     tmv, self._seq_pf_temp = _host_buffer(devs, 4*TEMP_W, dtypes.float32)
     self._seq_pf_host_temp = tmv.cast('f')
     self._seq_host_out, self._seq_out = _host_ints(devs[0], m*(2*k+1) + 1)
-    if QTF or SEQ_MIX_TOKENS:
-      # (QTF / SEQ_MIX_TOKENS: forced drafts and step tokens from the host; QTF also returns every row's log probs)
-      self._seq_host_tf, self._seq_tf = _host_ints(devs, m*(2*k+1))
-    if QTF:
-      V = self.config.vocab_size
-      tmv, self._seq_tfo = _host_buffer(devs[0], 4*m*(k+1)*V, dtypes.float32)
-      self._seq_host_tfo = tmv.cast('f')
     self._seq_copy_jits = {sv: TinyJit(functools.partial(self._seq_copy, sv), capture_first=True) for sv in (True, False)}
     self._seq_ckpt_jits = {sv: TinyJit(functools.partial(self._seq_ckpt_copy, sv), capture_first=True) for sv in (True, False)}
     # (SEQ_REPLAY: a slot's recurrent states advanced to a position, see _seq_materialize; the position of every slot's state)
@@ -2929,9 +2901,6 @@ class Transformer:
       seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, ...]]] = [(0, 0, 1, 0, 1, [0]*(k+1), 0.0)] * m
       add(f"step{m}", jit:=self._seq_jit(m), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m) if WARM_ASYNC else
                                              functools.partial(self.seq_step, seqs))
-      # mixed admission requires another decoding sequence; a one-row forced step is unreachable and its degenerate graph fails rangeify
-      if SEQ_MIX_TOKENS and m > 1:
-        add(f"step{m}_forced", self._seq_jit(m, True), functools.partial(self.seq_step, seqs, forced=[[0]*(k+1)]*m))
     for sv in (True, False):
       add(f"copy{int(sv)}", self._seq_copy_jits[sv], functools.partial(self._seq_copy_call, sv, 0, 1, 0))
       add(f"ckpt{int(sv)}", self._seq_ckpt_jits[sv], functools.partial(self.seq_ckpt, sv, 0, 1))
@@ -2952,8 +2921,6 @@ class Transformer:
                                             [(jit, call)])]
     for m in self.SEQ_SIZES:
       par.append((jit:=self._seq_jit(m), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m)))
-      if SEQ_MIX_TOKENS and m > 1:
-        par.append((jit:=self._seq_jit(m, True), functools.partial(lambda j, m: j(*self._seq_vars([(0, 0, 1, 0, 1)]*m)), jit, m)))
     # (and the copies of the states: their jits alone, not seq_move's write of the token buffer)
     for sv in (True, False):
       par += [(self._seq_copy_jits[sv], functools.partial(self._seq_copy_call, sv, 0, 1, 0)),
@@ -2975,11 +2942,11 @@ class Transformer:
     par += loads
     # (STASH_LINK_LATE: the stash's jits linked after the others are compiled: its host memory (SEQ_STASH_GB) isn't made while the capturing
     # processes and the compilers hold theirs, the start-up's peak of host memory)
-    late = [*self._stash_kv_jits.values(), *self._stash_state_jits.values()] if self.stash_entries and getenv("STASH_LINK_LATE", 1) else []
+    late = [*self._stash_kv_jits.values(), *self._stash_state_jits.values()] if self.stash_entries else []
     for j in late: setattr(j, "link_later", True)
     # (STASH_LINK_FREE_GB: linked while the jits left compile (the parent waits for them) once the host memory available holds the stash and
     # that many GB more, else after them)
-    need = (self.stash_chunks * self.stash_chunk_nbytes + self.stash_entries * self.stash_entry_nbytes + getenv("STASH_LINK_FREE_GB", 10) * 1e9) \
+    need = (self.stash_chunks * self.stash_chunk_nbytes + self.stash_entries * self.stash_entry_nbytes + 10 * 1e9) \
       if late else 0
     def link_late(take:Callable[..., bool|None]|None=None):
       if not late or not getattr(late[0], "link_later", False): return
@@ -2988,7 +2955,7 @@ class Transformer:
         setattr(j, "link_later", False)
         if j.captured is not None: j.captured.linked()
       _lap("warmup: stash linked")
-    # (the compiles earliest first: qwen's 30 or more jits come one after another, the parent's ~1 s takes don't pile up (all-warm C2 tr8: 62.8 s,
+    # (the compiles earliest first: qwen's 30 or more jits come one after another, the parent's ~1 s takes don't pile up (all-warm C2: 62.8 s,
     # latest first 70.9 s))
     capture_parallel(par, meanwhile, compile_fifo=True)
     _init_buffers(self.__dict__.pop("_lanes_init", []))
@@ -3007,15 +2974,6 @@ class Transformer:
     unlinked = _run_again(calls, set(late))
     _lap("warmup: run again")
     if DEBUG >= 1: print(f"seq_warmup: {len(calls)} calls run again in {time.perf_counter()-st:.2f}s ({len(unlinked)} jits had been unlinked)")
-    # (VISION_LATE: kept for seq_run_again (the tower's captures after the warm-up rebase them again), dropped there)
-    if self.vision and getenv("VISION_LATE", 0): self._warm_calls = (calls, set(late))
-
-  def seq_run_again(self) -> list[str]:
-    """the warm-up's calls once more (see _run_again), after a later capture in the scratch the model shares; the jits' names found unlinked"""
-    calls, skip = self.__dict__.pop("_warm_calls")
-    st, unlinked = time.perf_counter(), _run_again(calls, skip)
-    if DEBUG >= 1: print(f"seq_warmup: {len(calls)} calls run again in {time.perf_counter()-st:.2f}s ({len(unlinked)} jits had been unlinked)")
-    return unlinked
 
   def seq_prefill(self, slot:int, base:int, tokens:list[int], start:int, hrow:int, temp:float|tuple[float, ...]=0.0,
                   upto:int|None=None, pictures:dict[int, Callable[[], Any]]|None=None) -> int|None:
@@ -3153,9 +3111,8 @@ class Transformer:
     W = M + 3*VIS_PAD
     self._vis_host_pos[:3*W] = array.array('i', rope_positions(runs, pos - VIS_PAD, pos - VIS_PAD + W).astype('int32').tobytes())
 
-  def forward_seqs(self, *vs:UOp) -> Tensor: return self._forward_seqs(vs, False)
-  def forward_seqs_forced(self, *vs:UOp) -> Tensor: return self._forward_seqs(vs, True)
-  def _forward_seqs(self, vs:tuple[UOp, ...], mix:bool) -> Tensor:
+  def forward_seqs(self, *vs:UOp) -> Tensor: return self._forward_seqs(vs)
+  def _forward_seqs(self, vs:tuple[UOp, ...]) -> Tensor:
     """
     a step of speculative decoding of G sequences sharing the caches: vs the slot, the base of the region, mtp_pos, j, par and the position of
     the recurrent state of every one, its k+1 tokens (the last step's sampled ones) in _seq_in, its temperature and top_p in _seq_temp. returns
@@ -3207,11 +3164,6 @@ class Transformer:
       for i in range(k):
         # (draft i of sequence g: verified at its row i, sampled with that row's noise at its temperature, not its top_p)
         drafts.append(self._sample(mtp.head(m)[0], temps[:, :1], y.device, (seed, Tensor.arange(G) * (k+1) + i)).reshape(1, G))
-        # (QTF: the forced draft instead, the MTP layer's next pass on it)
-        if QTF: drafts[-1] = self._seq_tf[:, :G*(2*k+1)].reshape(G, 2*k+1)[:, i].reshape(1, G).to(drafts[-1].device).contiguous()
-        elif mix:
-          f = self._seq_tf[:, :G*(2*k+1)].reshape(G, 2*k+1)[:, i].reshape(1, G).to(drafts[-1].device).contiguous()
-          drafts[-1] = (f >= 0).where(f, drafts[-1]).contiguous()
         if i < k-1:
           pos = [p + j + 1 + i for p, j in zip(mp, js)]
           _seq_batch[0], _batch_rows[0] = batch(pos, 1), [(p, 1) for p in pos]
@@ -3247,26 +3199,16 @@ class Transformer:
       tt = temps.reshape(G, 1, TEMP_W).expand(G, k+1, TEMP_W).reshape(G*(k+1), TEMP_W)
       hout = self._hc_out(hs.reshape(1, -1, hc.count, hs.shape[-1] // hc.count))[0]
       tok = self._sample(hout, tt, y.device, (seed, Tensor.arange(G*(k+1))))
-      if QTF:
-        # (QTF: the rows' log probs (the vocab's) to the host, the step's tokens the forced ones: every draft accepted)
-        V = self.config.vocab_size
-        lp = self.output(hout).to(devs[0] if isinstance(devs, tuple) else devs).float()[:, :V].log_softmax(-1)
-        lpw = self._seq_tfo[:G*(k+1)*V].assign(lp.flatten())
-        forced = self._seq_tf[:, :G*(2*k+1)].reshape(G, 2*k+1)[:, k:].reshape(G*(k+1), 1).to(tok.device)
-        tok = Tensor(forced.contiguous().uop.after(lpw.uop))
-      elif mix:
-        forced = self._seq_tf[:, :G*(2*k+1)].reshape(G, 2*k+1)[:, k:].reshape(G*(k+1), 1).to(tok.device).contiguous()
-        tok = (forced >= 0).where(forced, tok).contiguous()
     finally: _seq_batch[0], _batch_rows[0], FLAG_LANE[0] = None, None, prev_lane
     q8_quantize_cache_clear()  # don't keep the graph alive
     out = tok.reshape(G, k+1).cat(*[d.reshape(G, 1) for d in drafts], dim=1).reshape(1, G*(2*k+1)).cast(dtypes.int32)
     return self._seq_out[:, :G*(2*k+1)].assign(Tensor(out.uop.mselect(0)) if isinstance(out.device, tuple) else out)
 
-  def _seq_jit(self, m:int, mix:bool=False):
-    if not hasattr(self, "_seq_jits"): self._seq_jits:dict[tuple[int, bool], Any] = {}
-    if (m, mix) not in self._seq_jits:
-      self._seq_jits[(m, mix)] = TinyJit(self.forward_seqs_forced if mix else self.forward_seqs, capture_first=True, scratch=self._scratch)
-    return self._seq_jits[(m, mix)]
+  def _seq_jit(self, m:int):
+    if not hasattr(self, "_seq_jits"): self._seq_jits:dict[int, Any] = {}
+    if m not in self._seq_jits:
+      self._seq_jits[m] = TinyJit(self.forward_seqs, capture_first=True, scratch=self._scratch)
+    return self._seq_jits[m]
   def _seq_vars(self, seqs:list[tuple[int, int, int, int, int]]) -> list[UOp]:
     k, n = self.config.spec_drafts, self.seq_slots()
     return [v for g, (sl, b, mp, j, par) in enumerate(seqs) for v in (
@@ -3279,22 +3221,14 @@ class Transformer:
     return b
 
   def seq_step(self, seqs:list[tuple[int, int, int, int, int, list[int], float|tuple[float, ...]]],
-               forced:list[list[int]]|None=None, deltas:list[int]|None=None) -> list[tuple[list[int], list[int]]]:
+               deltas:list[int]|None=None) -> list[tuple[list[int], list[int]]]:
     """
     a step of speculative decoding of sequences sharing the caches: seqs (slot, base, mtp_pos, j, par, the k+1 tokens of the last step,
-    temperature) of every one, their k+1 sampled tokens and k drafts. forced (SEQ_MIX_TOKENS): each one's next suffix tokens to force, at
-    most k+1; -1 in the other slots leaves their ordinary samples and drafts unchanged. deltas (VISION): every one's rope delta (0: no picture)
+    temperature) of every one, their k+1 sampled tokens and k drafts. deltas (VISION): every one's rope delta (0: no picture).
     """
     self._seq_init()
     k, n = self.config.spec_drafts, len(seqs)
     m = next(s for s in self.SEQ_SIZES if s >= n)
-    if forced is not None:
-      assert SEQ_MIX_TOKENS and len(forced) == n and all(len(f) <= k+1 for f in forced)
-      rows = []
-      for f in forced + [[]] * (m-n):
-        assert all(t >= 0 for t in f)
-        rows += f[:k] + [-1]*(k-min(k, len(f))) + f + [-1]*(k+1-len(f))
-      self._seq_host_tf[:m*(2*k+1)] = array.array('i', rows)
     # (the sequences past n: the padding slot's at position 0 in the padding region)
     seqs = seqs + [(self.seq_slots(), self.seq_rows(), 0, 0, 1, [0]*(k+1), 0.0)] * (m - n)
     self._seq_host_in[:m*(k+1)] = array.array('i', [t for *_, y, _ in seqs for t in y])
@@ -3305,7 +3239,7 @@ class Transformer:
     self._seq_host_temp[-1] = array.array('f', bytes(random.getrandbits(8) for _ in range(4)))[0]
     W = m*(2*k+1)
     self._seq_host_out[:W] = array.array('i', [-1] * W)
-    jit = self._seq_jit(m, forced is not None)
+    jit = self._seq_jit(m)
     if (cap:=getattr(jit, "captured", None)) is not None:
       # (captured: the variables' values as they are, no bound variables made a step)
       cap([], {name: v for g, (sl, b, mp, j, par, _, _) in enumerate(seqs)
@@ -3365,7 +3299,7 @@ class Transformer:
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
-                realize=bool(getenv("REALIZE", 0)), shard:int=1, parsed:tuple[dict, dict]|None=None) -> tuple[Transformer, dict]:
+                realize=False, shard:int=1, parsed:tuple[dict, dict]|None=None) -> tuple[Transformer, dict]:
     """the qwen4exp model of a gguf file on `shard` devices (its weights read, the n-gram table too). parsed: the file's (kv, entries)"""
     kv, entries = parsed if parsed is not None else gguf_parse(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
     arch = kv['general.architecture']
@@ -3384,9 +3318,9 @@ class Transformer:
     ple_entry = entries.pop('per_layer_token_embd.weight', None)
     # (QSA_KV_SPLIT: the rows of a KV head split over its devices, see TransformerConfig.kv_split)
     kv_real = n_kv_heads
-    kv_split = shard // kv_real if getenv("QSA_KV_SPLIT", 0) and shard > kv_real and shard % kv_real == 0 else 1
+    kv_split = shard // kv_real if shard > kv_real and shard % kv_real == 0 else 1
     # (QSA_IDX_SPLIT: the indexer's pooled keys split over the devices, see TransformerConfig.idx_split)
-    idx_split = shard if getenv("QSA_IDX_SPLIT", 0) and REGION_ALIGN % (4 * shard) == 0 else 1
+    idx_split = shard if REGION_ALIGN % (4 * shard) == 0 else 1
     entries, n_kv_heads, rows_map = _qwen4exp_entries(kv, entries, shard, kv_split)
     units_map:dict[str, tuple[int, list[list[int]]]] = {}
     repeats:dict[str, int] = {}
@@ -3456,13 +3390,13 @@ class Transformer:
         host_embd = ggml_data_to_tensor(raw, prod(shape), typ).reshape(shape)
         if typ == Q8_0: embd_q8 = raw
     # (LOAD_DEFER (default): the weights' memory made now, the files read later: while the jits compile, see seq_warmup. 0: read now)
-    pending:list[Callable[[], None]]|None = [] if getenv("LOAD_DEFER", 1) else None
+    pending:list[Callable[[], None]]|None = []
     # (LOAD_APART: the file's tensors the model only derives others from in buffers of their own, freed once derived (see _drop_apart), not in
     # the weights' buffer for good: the float ones (F32, BF16: prepare's half copies, _derive_weights' transposed and float ones) and a gate and
     # up pair the load didn't fuse (prepare's fuse_up). C2: ~0.5 GB a device)
     apart = ({k for k,(_,_,t) in entries.items() if t in (0, 30) and k not in ('token_embd.weight', 'output.weight')} |
              {n for g, u in ((g, g.replace("gate", "up")) for g in units_map if g.endswith("ffn_gate_exps.weight"))
-              if g not in fuse and u in units_map and entries[g][2] == entries[u][2] for n in (g, u)}) if getenv("LOAD_APART", 0) else None
+              if g not in fuse and u in units_map and entries[g][2] == entries[u][2] for n in (g, u)})
     state_dict = gguf_shard_units(entries, devices, shard_map, repeats, units_map, pads, fuse, row_sel=rows_map, pending=pending, apart=apart)
     _lap("weights")
     if host_embd is not None: state_dict['token_embd.weight'] = host_embd
@@ -3570,7 +3504,7 @@ class Transformer:
       else: Tensor.realize(*fused)
     # (LOAD_APART: the skinny Linears' weights not copied here: _derive_weights' transposed copy is made from the file's, the same values (a
     # cast, then the copy), the copy here held dead in its group's buffer (C2: ~180 MB a device))
-    if getenv("LOAD_APART", 0): packed |= {id(l.weight) for l in self._skinny_lins()}
+    packed |= {id(l.weight) for l in self._skinny_lins()}
     small = [p for p in nn.state.get_parameters(self) if id(p) not in packed and p is not self.token_embd.weight and not p.uop.is_realized]
     for p in small: p.replace(p.contiguous())
     tables = dedup([t for m in modules([self.blk] + ([self.mtp] if hasattr(self, "mtp") else []), set()) if isinstance(m, ExpertWeights)
@@ -3659,11 +3593,6 @@ class Transformer:
       tile = math.lcm(16*len(devs), 64)
       def tiled(n:int, t:int=tile) -> int: return min(max(t, round(n / t) * t), self.max_context // t * t or t)
       sizes = [tiled(n) for n in sizes]
-      # (PREFILL_TILE32: a chunk of micro batches (past PREFILL_MB1_ROWS) in whole tiles of 32 rows a device a micro batch: the sequence
-      # parallel hyper-connections' gemms take tiles of 32 rows (q8_gemm), 2112 rows (176 a device a batch) ran them on the slow f16 kernel)
-      if PREFILL_TILE32 and MICRO_BATCHES > 1:
-        t2 = math.lcm(32*len(devs)*MICRO_BATCHES, 64)
-        sizes = [tiled(n, t2) if n > PREFILL_MB1_ROWS and n % t2 else n for n in sizes]
     return tuple(sorted(set(sizes)))
 
   def warmup(self):

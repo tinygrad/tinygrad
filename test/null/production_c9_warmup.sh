@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
-# New C9 NULL start-line gate. Power is inert here; production requires a separately verified value.
+# C9 NULL/CPU model-load/JIT harness, NOT a production start mode. No picture-engine claim is made.
+# C9 production is text-only with no compatible projector; this harness does not validate its separate power gate.
 set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+source "$ROOT/extra/llm_service/glm_kv_profiles.sh"
+apply_glm_kv_profile || exit 2
 cd "$ROOT"
+if [[ -n ${GLM_KV:-} ]]; then
+  export GLM_KV FREQS_HOST P2P_GLM5_OFF AMD_SCRATCH_MAX AMD_SCRATCH_MIN SEQ_COPY_SCRATCH LOAD_DEFER
+fi
 MODEL=${MODEL:-/raid/weights/GLM-5.3-UD-IQ4_XS/GLM-5.3-UD-IQ4_XS-00001-of-00009.gguf} \
 XDG_CACHE_HOME=${XDG_CACHE_HOME:-$PWD/.llm/null-c9-cache} \
 DEV=${NULLDEV:-NULL:HIP:gfx1201} VFIO=1 PYTHONPATH=. PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 HOME="$HOME" \
 AM_POWER_LIMIT=${GLM53_POWER_LIMIT:-PENDING_POWER_VERIFICATION} \
-MLA_SEQ_SHARD=1 WARMUP_PARALLEL=1 IQ2S_K256=1 \
+\
 HOST_STASH=0 HOST_MIN=4096 SLOT_HOST=1 SLOT_CKPT=1 \
-SPEC_DRAFTS=2 SPEC_DRAFTS_BY_SIZE=1:2,2:2,4:3,8:3,16:3 SEQ_WARMUP_ONLY= \
-GLM_SEQ=1 GLM_ATTN_GRP=3 SEQ_GATHER_UNION=65536 P2P_AR_TIMEOUT_MS=20000 \
-SEQ_ROWS=268800 SEQ_SLOTS=32 SEQ_SIZES=1,4,8,16 SEQ_MAX_ACTIVE=32 \
+SPEC_DRAFTS=2 SPEC_DRAFTS_BY_SIZE=1:2,2:2,4:3,8:3,16:3 \
+SEQ_GATHER_UNION=65536 P2P_AR_TIMEOUT_MS=20000 \
+SEQ_ROWS=${SEQ_ROWS:-268800} SEQ_SLOTS=${SEQ_SLOTS:-32} SEQ_SIZES=1,4,8,16 SEQ_MAX_ACTIVE=${SEQ_MAX_ACTIVE:-32} \
 SEQ_STASH_GB=0 SEQ_STASH_ENTRIES=128 LOAD_DEFER=1 \
 PREFILL_CHUNK=4032 PREFILL_SIZES=1344,2688 PREFILL_BIG_ALONE=2 \
 MODEL_ALIASES=zai-org/GLM-5.3 MODEL_OWNED_BY=tinygrad \

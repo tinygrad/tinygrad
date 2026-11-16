@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Launch GLM-5.3 on fourteen R9700 devices. PENDING is never accepted as power.
+# Launch text-only GLM-5.3 on fourteen R9700 devices. PENDING is never accepted as power.
 set -euo pipefail
 ACTION=${1:---help}
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+source "$ROOT/extra/llm_service/glm_kv_profiles.sh"
+apply_glm_kv_profile || exit 2
 STATE_DIR=${STATE_DIR:-$PWD/.llm/glm-c9}
 GLM_WEIGHTS=${GLM_WEIGHTS:-/raid/weights}
 GLM53_POWER_LIMIT=${GLM53_POWER_LIMIT:-PENDING_POWER_VERIFICATION}
@@ -13,21 +15,23 @@ MODEL=$GLM_WEIGHTS/GLM-5.3-UD-IQ4_XS/GLM-5.3-UD-IQ4_XS-00001-of-00009.gguf
 SERVER_ENV=(
   HOME="$HOME" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED=1
   DEV=PCI+AMD VFIO=1 AM_POWER_LIMIT="$GLM53_POWER_LIMIT"
-  MLA_SEQ_SHARD=1 WARMUP_PARALLEL=1 IQ2S_K256=1
   HOST_STASH=0 HOST_MIN=4096 SLOT_HOST=1 SLOT_CKPT=1
-  SPEC_DRAFTS=2 SPEC_DRAFTS_BY_SIZE=1:2,2:2,4:3,8:3,16:3 SEQ_WARMUP_ONLY=
-  GLM_SEQ=1 GLM_ATTN_GRP=3 SEQ_GATHER_UNION=65536 P2P_AR_TIMEOUT_MS=20000
+  SPEC_DRAFTS=2 SPEC_DRAFTS_BY_SIZE=1:2,2:2,4:3,8:3,16:3
+  SEQ_GATHER_UNION=65536 P2P_AR_TIMEOUT_MS=20000
   SEQ_ROWS="${SEQ_ROWS:-268800}" SEQ_SLOTS="${SEQ_SLOTS:-32}" SEQ_SIZES="${SEQ_SIZES:-1,4,8,16}" SEQ_MAX_ACTIVE="${SEQ_MAX_ACTIVE:-32}"
   SEQ_STASH_GB="${SEQ_STASH_GB:-0}" SEQ_STASH_ENTRIES="${SEQ_STASH_ENTRIES:-128}" LOAD_DEFER=1
   PREFILL_CHUNK="${PREFILL_CHUNK:-4032}" PREFILL_SIZES="${PREFILL_SIZES:-1344,2688}" PREFILL_BIG_ALONE="${PREFILL_BIG_ALONE:-2}"
-  MODEL_ALIASES=zai-org/GLM-5.3 MODEL_OWNED_BY="${MODEL_OWNED_BY:-tinygrad}" XDG_CACHE_HOME="$XDG_CACHE_HOME"
+  MODEL_ALIASES=zai-org/GLM-5.3 MODEL_OWNED_BY="${MODEL_OWNED_BY:-tinygrad}"
+  VISION_MMPROJ="" XDG_CACHE_HOME="$XDG_CACHE_HOME"
 )
-for _name in API_KEY API_KEY_FILE KEEPALIVE ENC_CACHE \
-  SEQ_RESERVE SEQ_PROTECT SEQ_STICKY SEQ_STASH_CTX \
+for _name in API_KEY API_KEY_FILE KEEPALIVE ENC_CACHE GLM_KV FREQS_HOST P2P_GLM5_OFF AMD_SCRATCH_MAX AMD_SCRATCH_MIN SEQ_COPY_SCRATCH \
+  SEQ_FP8 SEQ_FP8_IDX SEQ_KV4 \
+  AM_PERF_LEVEL AM_CLOCKS CLOCK_FAST CLOCK_MANY CLOCK_PREFILL \
+  SEQ_RESERVE SEQ_PROTECT SEQ_STICKY SEQ_STASH_CTX AGING SEQ_STARVE SERVE_RENDER_CACHE \
   MEM_TRACE DEBUG_LOAD AMD_SCRATCH_LOG KPROF KPROF_TOP LIN_NAMES TELEMETRY_LOG SERVE_TRACE DISABLE_AMD_KERNELS; do
   if [[ -n ${!_name+x} ]]; then SERVER_ENV+=("$_name=${!_name}"); fi
 done
-COMMAND=(python3 -m tinygrad.llm --model "$MODEL" --shard 14 --max_context 262144 --serve "${PORT:-8000}")
+COMMAND=(python3 -m tinygrad.llm --model "$MODEL" --shard 14 --max_context "${MAX_CONTEXT:-262144}" --serve "${PORT:-8000}")
 
 check_weights() {
   command -v sha256sum >/dev/null
@@ -45,7 +49,6 @@ elif [[ $ACTION == start ]]; then
   echo "start $(git rev-parse HEAD) model=$MODEL power=${GLM53_POWER_LIMIT}W" >> "$LOGFILE"
   setsid sudo -n env "${SERVER_ENV[@]}" "${COMMAND[@]}" >> "$LOGFILE" 2>&1 & child=$!
   echo "$child" > "$PIDFILE"
-  echo "GLM started pid=$child log=$LOGFILE"
 elif [[ $ACTION == stop ]]; then
   [[ -r $PIDFILE ]] || { echo 'GLM is not running (no PID file)' >&2; exit 1; }
   pid=$(cat "$PIDFILE")
@@ -62,7 +65,8 @@ elif [[ $ACTION == check-weights ]]; then
 else
   cat >&2 <<'USAGE'
 Usage: glm_14xr9700.sh start|stop|status|check-weights|--print-command
-GLM53_POWER_LIMIT is required for start; PENDING is rejected. The former 210 W default is unsafe.
+C9 is text-only: there is no GLM-5.3 vision tower, and VISION_MMPROJ is forced empty.
+GLM53_POWER_LIMIT is also required for a future start; PENDING is rejected. The former 210 W default is unsafe.
 AM_FIRST_START=1 enables the single controlled AM reset. No process or GPU is touched by --print-command.
 USAGE
   [[ $ACTION == --help || $ACTION == -h ]] && exit 0

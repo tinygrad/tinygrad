@@ -123,7 +123,7 @@ class TestGLMDSASequence(unittest.TestCase):
     model.prefill_chunks = lambda: (1344, 2688, 4032)
     for flag, alone, want in (("0", False, [4032, 4032, 2000]), ("1", True, [4032, 4032, 2000]), ("1", False, [2688, 2688, 2688, 2000]),
                               ("2", False, [2688, 2688, 2688, 2000])):
-      with patch.dict(os.environ, {"PREFILL_BIG_ALONE": flag, "SEQ_CHUNK_PLAN": "0"}):
+      with patch.dict(os.environ, {"PREFILL_BIG_ALONE": flag}):
         getenv.cache_clear()
         model._pf_alone = alone
         self.assertEqual(model._seq_chunks(10064), want, (flag, alone))
@@ -138,8 +138,8 @@ class TestGLMDSASequence(unittest.TestCase):
     model.config = SimpleNamespace(cache_rows=0)
     self.assertEqual(model._main_token_rows(), 65537)
 
-  def test_serial_warmup_covers_largest_prefill_chunk(self):
-    # C9 has (448, 2688): serial startup used to run only 449 and 1, leaving the first 4k request with 4.1 s of cold-JIT work.
+  def test_parallel_warmup_covers_requested_shapes(self):
+    # Parallel production warm-up covers the requested prefill shapes without the obsolete serial alternative.
     model = Transformer.__new__(Transformer)
     model.config = SimpleNamespace(cache_rows=0)
     model.token_embd = SimpleNamespace(weight=SimpleNamespace(device="CPU"))
@@ -160,7 +160,7 @@ class TestGLMDSASequence(unittest.TestCase):
       yield from (1, 2)
     model.generate = generate
     try:
-      for parallel, want in (("0", [2689, 449, 1]), ("1", [449, 1])):
+      for parallel, want in (("1", [449, 1]),):
         calls.clear(), model._capture_parallel.reset_mock()
         with patch.dict(os.environ, {"WARMUP_PARALLEL": parallel}):
           glm_dsa.getenv.cache_clear()
@@ -471,7 +471,7 @@ class TestGLMDSASequence(unittest.TestCase):
     from tinygrad.llm.kernels import amd_glm_dsa
     seen = []
     def fwd(self, vs): seen.append(amd_glm_dsa.Q8_ROWS_I8[0])
-    for env, want in (("1", True), ("0", False)):
+    for env, want in (("0", False),):
       with patch.dict(os.environ, {"SEQ_I8": env}), patch.object(glm_dsa.GLMSeqDriver, "_forward_seqs_glm", fwd):
         getenv.cache_clear()
         Transformer._forward_seqs_glm(Transformer.__new__(Transformer), ())
@@ -486,22 +486,15 @@ class TestGLMDSASequence(unittest.TestCase):
     getenv.cache_clear()
     with patch.object(K, "_wmma_rdna4", lambda d: True):
       self.assertEqual(K._rows_f16_config(16, 2048, 6144, K.Q8_0, "NULL"), dict(coop=2, chunk=16))  # (the default)
-      self.assertEqual(K._rows_f16_config(48, 2048, 6144, K.Q8_0, "NULL")["unroll"], 8)  # (3 token tiles: past ROWS_COOP=2's waves)
+      self.assertEqual(K._rows_f16_config(48, 2048, 6144, K.Q8_0, "NULL"),  # (3 token tiles: past ROWS_COOP=2's waves)
+                       dict(tiles=1, waves=2, unroll=8, prefetch=True))
       self.assertIsNone(K._rows_f16_config(16, 11072, 6144, K.Q6_K, "NULL"))
-      with patch.dict(os.environ, {"ROWS_F16": "0"}):
-        getenv.cache_clear()
-        self.assertIsNone(K._rows_f16_config(16, 2048, 6144, K.Q8_0, "NULL"))
-      with patch.dict(os.environ, {"ROWS_F16": "1", "ROWS_COOP": "0", "ROWS_CHUNK": "8"}):
-        getenv.cache_clear()
-        self.assertEqual(K._rows_f16_config(16, 2048, 6144, K.Q8_0, "NULL")["chunk"], 8)
-        self.assertEqual(K._rows_f16_config(16, 6144, 160, K.Q8_0, "NULL")["chunk"], 0)  # (5 groups)
-        self.assertIsNone(K._rows_f16_config(128, 2048, 6144, K.Q8_0, "NULL"))
+      self.assertIsNone(K._rows_f16_config(128, 2048, 6144, K.Q8_0, "NULL"))
       getenv.cache_clear()
-    for typ, raw, chunk, pkh in ((K.Q8_0, Tensor.empty(64*256*17//32, dtype="half"), 8, False), (K.Q8_0, Tensor.empty(64*256*17//64), 8, True),
-                                 (K.Q6_K, Tensor.empty(64*105, dtype="uint16"), 0, False)):
-      out, x = Tensor.empty(32, 64, dtype="float32"), Tensor.empty(32, 256, dtype="half")
-      fxn = functools.partial(K._rows_f16_wmma_kernel, out_features=64, in_features=256, ggml_type=typ, chunk=chunk, pkh=pkh)
-      self.assertIs(Tensor.custom_kernel(out, raw, x, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
+    out, x = Tensor.empty(32, 64, dtype="float32"), Tensor.empty(32, 256, dtype="half")
+    raw = Tensor.empty(64*256*17//32, dtype="half")
+    fxn = functools.partial(K._rows_f16_wmma_kernel, out_features=64, in_features=256, ggml_type=K.Q8_0)
+    self.assertIs(Tensor.custom_kernel(out, raw, x, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
     out, x, raw = Tensor.empty(32, 64, dtype="float32"), Tensor.empty(32, 512, dtype="half"), Tensor.empty(64*512*17//32, dtype="uint16")
     fxn = functools.partial(K._rows_coop_f16_wmma_kernel, out_features=64, in_features=512, ggml_type=K.Q8_0, coop=2, chunk=16)
     self.assertIs(Tensor.custom_kernel(out, raw, x, fxn=fxn)[0].uop.src[1].src[0].op, Ops.SINK)
@@ -633,9 +626,8 @@ class TestGLMDSASequence(unittest.TestCase):
 
   def test_moe_exact_bundles(self):
     # (MOE_EXACT_MIN: rows from it below MOE_BUNDLE_MIN in bundles of MOE_EXACT_M stored in float (the per-row kernel's values), fewer per row)
-    import tinygrad.llm.kernels.amd_glm_dsa as K_dsa, tinygrad.llm.kernels.amd_glm as K_glm
-    for K in (K_dsa, K_glm):
-      with self.subTest(K.__name__): self._moe_exact_bundles(K)
+    import tinygrad.llm.kernels.amd_glm_dsa as K_dsa
+    self._moe_exact_bundles(K_dsa)
 
   def _moe_exact_bundles(self, K):
     E, fin, fout = 4, 256, 64
@@ -654,32 +646,20 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertEqual(run(40, 8), (True, dtypes.half))      # (MOE_BUNDLE_MIN and up: as before)
 
   def test_moe_bundles_by_projection(self):
-    # (MOE_GU_BUNDLE_MIN / MOE_GU_BUNDLE / MOE_DOWN_BUNDLE_MIN: amd_glm's gate/up (x shared by the slots) and down (x a slot's) rows bundled
-    # from their own row counts, gate/up in bundles of their own size; unset: MOE_BUNDLE_MIN and MOE_BUNDLE as before)
+    # Production projection/config-driven selection of bundled and per-row MoE kernels.
     import tinygrad.llm.kernels.amd_glm as K
-    from tinygrad.helpers import getenv
     E, fin, fout = 4, 256, 64
     w = Tensor.empty(E*fout*fin*K.QUANT_SIZES[K.IQ4_XS]//256//4, dtype=dtypes.uint32)
     first = Tensor([0], dtype=dtypes.int32)
-    def run(T:int, down:bool, env:dict) -> int|None:
+    def run(T:int, down:bool) -> int|None:
       K._bundle_cache.clear()
       sel, x = Tensor.empty(1, T, 8, dtype=dtypes.int32), Tensor.empty(1, T, 8 if down else 1, fin)
-      with patch.object(K, "MOE_WMMA", 0), patch.dict(os.environ, env), patch.object(K, "moe_bundles", wraps=K.moe_bundles) as mb:
-        getenv.cache_clear()
+      with patch.object(K, "MOE_WMMA", 0), patch.object(K, "moe_bundles", wraps=K.moe_bundles) as mb:
         K.moe_linear(w, K.IQ4_XS, E, x, sel, first)
-      getenv.cache_clear()
       return mb.call_args.args[3] if mb.called else None  # (M, or None: the per-row kernel)
     for down in (False, True):
-      self.assertEqual(run(36, down, {}), None)
-      self.assertEqual(run(54, down, {}), 4)
-    knobs = {"MOE_GU_BUNDLE_MIN": "36", "MOE_GU_BUNDLE": "2", "MOE_DOWN_BUNDLE_MIN": "100000"}
-    self.assertEqual(run(36, False, knobs), 2)
-    self.assertEqual(run(30, False, knobs), None)
-    self.assertEqual(run(54, True, knobs), None)
-    # (MOE_UNIT_MIN: the unit-major kernel, bundles of MOE_UNIT_M rows, from its row count; per projection MOE_GU_UNIT_MIN / MOE_DOWN_UNIT_MIN)
-    for down in (False, True): self.assertEqual(run(12, down, {"MOE_GU_UNIT_MIN": "8", "MOE_DOWN_UNIT_MIN": "8"}), 16)
-    self.assertEqual(run(6, False, {"MOE_GU_UNIT_MIN": "8"}), None)
-    self.assertEqual(run(12, True, {"MOE_GU_UNIT_MIN": "8"}), None)
+      self.assertEqual(run(36, down), None)
+      self.assertEqual(run(54, down), 4)
 
   def test_moe_unit_kernel(self):
     # (the unit-major kernel's graph builds (it lowers with the HIP renderer only: DEV=NULL:HIP:gfx1100; the NULL one has no local dims))
@@ -748,7 +728,7 @@ class TestGLMDSASequence(unittest.TestCase):
       name = sinks[0].arg.name
       self.assertEqual(name.endswith("_p"), bool(P), name)
     bexp, brow, bcnt = K.moe_bundles(sel, first, E, 2, 16*8)
-    # (the tensor core bundles (MOE_WMMA_MIN rows and up) stay the tensor core kernel with MOE_PERSIST on and MOE_PERSIST_WMMA off)
+    # (the tensor core bundles keep the ordinary tensor core kernel when non-WMMA persistence is enabled)
     sel64, x64 = Tensor.empty(1, 64, 8, dtype=dtypes.int32), Tensor.empty(1, 64, 1, fin)
     K._bundle_cache.clear()
     fxns = []
@@ -762,29 +742,5 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertIn(K._moe_bundled_wmma_kernel, fxns)
     self.assertNotIn(K._moe_bundled_persist_kernel, fxns)
     self.assertEqual((bexp.shape, brow.shape, bcnt.shape), ((16*8//2 + E,), ((16*8//2 + E)*2,), (1,)))
-
-  def test_moe_grid_lds(self):
-    # (MOE_GRID_LDS: the per-row and the bundled MoE kernels of IQ3_S read the grid from an LDS copy (the same values))
-    import tinygrad.llm.kernels.amd_glm_dsa as K
-    from tinygrad.uop.ops import Ops, AddrSpace
-    E, fin, fout = 4, 256, 64
-    w = Tensor.empty(E*fout*fin*K.QUANT_SIZES[K.IQ3_S]//256//2, dtype=dtypes.uint16)
-    first = Tensor([0], dtype=dtypes.int32)
-    for T, exact_min in ((4, 0), (16, 8)):
-      for on in (0, 1):
-        sinks = []
-        def wrap(*a, **kw):
-          sinks.append(ret:=orig(*a, **kw))
-          return ret
-        orig = K._decode_linear
-        K._bundle_cache.clear()
-        for fn in (K._moe_decode_kernel, K._moe_bundled_kernel, K._moe_bundled_persist_kernel): fn.cache_clear()
-        sel, x = Tensor.empty(1, T, 8, dtype=dtypes.int32), Tensor.empty(1, T, 1, fin)
-        with patch.object(K, "MOE_WMMA", 0), patch.object(K, "MOE_EXACT_MIN", exact_min), patch.object(K, "MOE_GRID_LDS", on), \
-             patch.object(K, "_decode_linear", wrap):
-          K.moe_linear(w, K.IQ3_S, E, x, sel, first)
-        self.assertEqual(len(sinks), 1)
-        lds = [u for u in sinks[0].toposort() if getattr(u, "addrspace", None) == AddrSpace.LOCAL and u.op is not Ops.INDEX and u.shape == (512,)]
-        self.assertEqual(bool(lds), bool(on), (T, on))
 
 if __name__ == '__main__': unittest.main()

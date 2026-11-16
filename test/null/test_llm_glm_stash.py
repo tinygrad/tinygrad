@@ -11,7 +11,7 @@ from tinygrad.llm.glm5next import GatedDeltaNetBlock, Indexer, MLATransformerBlo
 
 class TestGLMStash(unittest.TestCase):
   def setUp(self):
-    self.devs = ("CPU",)
+    self.devs: tuple[str, ...] = ("CPU",)
 
     def t(shape, axis=None):
       x = Tensor(np.arange(math.prod(shape), dtype=np.float16).reshape(shape))
@@ -53,7 +53,8 @@ class TestGLMStash(unittest.TestCase):
     self.snapshots = {}
 
   def zero_like(self, tensor):
-    return Tensor(np.zeros_like(tensor.numpy()), device=tensor.device)
+    if tensor.uop.axis is None: return Tensor(np.zeros_like(tensor.numpy()), device=tensor.device)
+    return Tensor(np.zeros_like(tensor.numpy()), device=tensor.device[0]).shard(tensor.device, axis=tensor.uop.axis)
 
   def reset_sources(self):
     # Preserve registered tensor identities (notably _stash_replays): zeroing in place catches a no-op or backwards restore.
@@ -83,6 +84,33 @@ class TestGLMStash(unittest.TestCase):
       expected = np.zeros_like(tensor.numpy())
       expected[n:2*n] = self.snapshots[original][:n]
       np.testing.assert_array_equal(tensor.numpy(), expected)
+
+  def test_sharded_index_kv_roundtrip(self):
+    self.devs = ("CPU:0", "CPU:1")
+    self.model.token_embd = SimpleNamespace(weight=SimpleNamespace(device=self.devs))
+    def t(shape):
+      x = Tensor(np.arange(math.prod(shape), dtype=np.float16).reshape(shape))
+      return x.shard(self.devs, axis=0).realize()
+    self.idx.cache_pk = t((64, 2))
+    self.idx.shard = 2
+    self.mla.cache_s = t((128, 2))
+    self.states[3], self.states[6] = self.idx.cache_pk, self.mla.cache_s
+    self.fill_and_save()
+    self.model._stash_kv_copy(True, 1, 0, 0)
+    self.reset_sources()
+    self.model._stash_kv_copy(False, 1, 32, 0)
+    for dev in self.devs: Device[dev].synchronize()
+    # Each card's own index strip moves independently: 8 pooled rows for 32 source tokens at kpool=2.
+    expected = np.zeros_like(self.idx.cache_pk.numpy())
+    saved = self.snapshots[self.idx.cache_pk].reshape(2, 32, 2)
+    view = expected.reshape(2, 32, 2)
+    view[:, 8:16] = saved[:, :8]
+    np.testing.assert_array_equal(self.idx.cache_pk.numpy(), expected)
+    expected_latent = np.zeros_like(self.mla.cache_s.numpy())
+    saved_latent = self.snapshots[self.mla.cache_s].reshape(2, 64, 2)
+    view_latent = expected_latent.reshape(2, 64, 2)
+    view_latent[:, 16:32] = saved_latent[:, :16]
+    np.testing.assert_array_equal(self.mla.cache_s.numpy(), expected_latent)
 
   def test_state_and_ring_replay_roundtrip(self):
     self.fill_and_save()
