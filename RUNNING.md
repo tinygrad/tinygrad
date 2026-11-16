@@ -222,8 +222,11 @@ without it every turn re-reads the whole conversation from token 0):
 
 ```bash
 SPEC_DRAFTS=3 PREFILL_SIZES=192,384,1152 VISION_MAX_IMAGES=2048 VISION_CACHE_MB=2048 SERVE_RENDER_CACHE=1 SEQ_CKPT_TAIL=1 \
-  bash extra/llm_service/qwen_6x7900xtx.sh start
+  VISION_MAX_BODY_MB=64 VISION_URL_CACHE_MB=4608 SEQ_STASH_GB=41 bash extra/llm_service/qwen_6x7900xtx.sh start
 ```
+
+(The last three since Nov 16 02:4x, g4: the game resends every screenshot each turn, ~33.6 MB at ~840 turns, over the 32 MB default;
+the URL cache keeps every decoded screenshot of 12 games, paid from the host stash, 46 -> 41 GB.)
 
 **GLM Flash server** (the C5 launcher: since Nov 15 22:3x its default line carries all of the values below; the line is kept as the record of the R2 games; `VISION_BUCKETS=320,576` adds a
 320-patch bucket for the game's 240x216 screenshot (72 rows = 288 patches; C5's own 576 alone pads it to 576); the GLM R2 games ran this line):
@@ -233,6 +236,9 @@ VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf VISION_SLICE_MS=200 VISION_MAX
   VISION_URL_CACHE_MB=512 VISION_BUCKETS=320,576 SERVE_RENDER_CACHE=1 AM_POWER_LIMIT=250 bash extra/llm_service/glm_flash_6x7900xtx.sh start
 ```
 
+The GLM arm of Nov 16 (g1, 8 games at 480x432 + 8 at 360x324) adds `VISION_MAX_BODY_MB=64 VISION_URL_CACHE_MB=7168 SEQ_STASH_GB=6`:
+a decoded screenshot is 677,376 B at 480x432 and 366,912 B at 360x324, 16 games x 800 = 6.7 GB, paid from the stash (16 games fit the
+18 slots; with many other conversations the smaller stash makes a new one wait behind 180-s sticky ones).
 A game that resends every screenshot of the window in each request needs a body cap above the 32 MB default once its screenshots are
 larger than 240x216: 842 PNG screenshots at 360x324 (~38.9 KB each) are ~32.7 MB, a 413. For those add `VISION_MAX_BODY_MB=64` to the
 line (both launchers pass it; the Qwen Pokemon line on g4 runs with 64 since Nov 16 02:4x).
