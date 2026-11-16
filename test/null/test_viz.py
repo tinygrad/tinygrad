@@ -255,7 +255,7 @@ class TestViz(unittest.TestCase):
       z = UOp.const(0)
       y = UOp.const(math.pi)
       alu = a*z
-      cc =UOp.cconst(1, dtypes.int) 
+      cc = UOp.cconst(1, dtypes.int)
       alu2 = cc + a
       ret = exec_rewrite(sink:=UOp.sink(alu, alu2, y), [sym])
     lst = viz.list_items()
