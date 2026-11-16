@@ -291,7 +291,9 @@ One request decodes at roughly 40 tokens a second on a full box (30 users), more
 **GLM Flash C5:** 18 conversations a box, each up to 262,144 tokens from the shared 3,916,800-token pool (14 at full length at once; the server's cap 524,288 is for scheduling, not one longer conversation).
 Two draft tokens a step (three measured slower for Pokemon).
 
-**GLM C9 (ts5):** text only: GLM-5.3 has no vision tower; a picture is refused. The 1M-token profile serves ONE 1M conversation at a
+**GLM C9 (ts5):** text only: GLM-5.3 has no vision tower. A request with a picture is NOT rejected: it is answered 200 with a text reply
+that the server cannot see images (the publisher's behaviour for a text-only model; w-pf53's smoke on ee9eee4a8, Nov 16). A client that
+needs an error must check for pictures itself. The 1M-token profile serves ONE 1M conversation at a
 time beside short ones (a second one waits); its first token at ~1M context takes ~12 minutes (705.9 s at 180 W on the FINAL-2 line; 739 s at 170 W and 885 s at 120 W on older lines). Its power setting is
 180 W a card (the board's choice), not the cards' maximum; the bars against tinyamd1 are in the company repo `results/w-pf53/ts5-acceptance.md`.
 A finished conversation keeps its slot 30 s (the launcher's SEQ_STICKY=30; with 180 s and no stash, 16 short chats in 3 minutes made
