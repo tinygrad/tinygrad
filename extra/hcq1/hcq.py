@@ -4,10 +4,9 @@ import contextlib, decimal, statistics, time, ctypes, array, collections, iterto
 from tinygrad.helpers import PROFILE, getenv, from_mv, cpu_profile, ProfileRangeEvent, unwrap
 from tinygrad.helpers import suppress_finalizing, TracingKey
 from tinygrad.device import BufferStorage, Buffer, BufferSpec, Compiled, Allocator, ProfileDeviceEvent, ProfileProgramEvent, Program
-from tinygrad.renderer import TinyELF
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, TinyELF
 
 SignalType = TypeVar('SignalType', bound='HCQSignal')
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQCompiled')

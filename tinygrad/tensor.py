@@ -19,15 +19,13 @@ from tinygrad.device import Buffer
 
 @dataclass
 class ExportCtx:
-  # each piece of runtime state is one EXTERN everywhere it's used, the slot is its position in externs
   externs: dict[UOp, UOp] = field(default_factory=dict)
   allocs: dict[UOp, UOp] = field(default_factory=dict)
 
 def to_extern(ctx:ExportCtx, x:UOp) -> UOp|None:
   # realized storage and bound Variables are runtime state
   if not (x.is_bound_var or (x.op is Ops.BUFFER and x.addrspace is AddrSpace.GLOBAL)): return None
-  if x not in ctx.externs: ctx.externs[x] = x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=len(ctx.externs), buffer=None, name=None, val=None))
-  return ctx.externs[x]
+  return ctx.externs.setdefault(x, x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=len(ctx.externs), buffer=None, name=None, val=None)))
 
 # ALLOCs get canonical scope-local id slots so structurally identical calls hash identically for the schedule cache
 # (fresh slots are all positive from the global counter; negative slots are already canonical)
