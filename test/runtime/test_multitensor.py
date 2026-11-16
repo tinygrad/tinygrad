@@ -842,6 +842,8 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(t.uop.axis, t2.uop.axis)
     t2.realize()
   def test_full_like_on_shard_axis(self): self.test_full_like_on_shard(0)
+  def test_full_like_on_shard_no_buffer(self):
+    self.assertEqual(Tensor.ones(8, device=devices_2, axis=0).full_like(7, buffer=False).tolist(), [7]*8)
 
   def test_dropout_on_shard(self):
     with Context(TRAINING=1):
