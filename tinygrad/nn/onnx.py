@@ -514,7 +514,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if value is None: value = Tensor(0, dtype=dtypes.float32)
     return value.reshape(()).expand(shape)
 
-  def Size(data:Tensor): return data.numel()
+  def Size(data:Tensor): return Tensor(data.numel(), dtype=dtypes.int64, device=data.device)
   def Shape(data:Tensor, end:int|None=None, start:int=0): return Tensor(data.shape[start:end], dtype=dtypes.int64, device=data.device)
 
   # ***** Unary Ops (math) *****

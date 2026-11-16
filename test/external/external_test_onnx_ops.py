@@ -96,6 +96,9 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["y"]
     self.helper_test_single_op("Gather", inputs, attributes, outputs)
 
+  def test_size_output(self):
+    self.helper_test_single_op("Size", {"x": np.random.randn(2, 3, 4).astype(np.float32)}, {}, ["y"])
+
   def test_gather_jit_different_indices(self):
     # Gather should not assume indices is const when it can change at runtime
     from tinygrad import TinyJit
