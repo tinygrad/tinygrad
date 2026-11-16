@@ -3140,7 +3140,7 @@ class Transformer:
   def batch_sizes(self) -> tuple[int, ...]:
     """
     the rows of the steps of batched decoding (a jit each): the sizes below the slots and the slots (BATCH_SLOTS of another size). none with
-    BATCH_DECODE=0 (no batched decoding, the slots only keep conversations: its steps aren't captured)
+    There are no batches without decode slots.
     """
     return tuple(sorted({s for s in self.BATCH_SIZES if s < n} | {n})) if (n:=self.decode_slots()) else ()
 
@@ -3297,21 +3297,13 @@ class Transformer:
   def prefix_to_slot(self, tokens:list[int], slot:int) -> int:
     """
     the states of the longest prefix of tokens the model has (its conversation, or its checkpoint restored) into slot: the position the rest
-    starts at (a batch_prefill continues it there, or slot_first when tokens is exactly its checkpoint).
+    starts at when a batch prefills the remainder there.
     """
     start, restore = self._reuse(tokens) if self.has_recurrent_block else (self.get_start_pos(tokens), False)
     if restore: self._checkpoint(tokens, save=False)
     self.slot_store(slot, start)
     self._slot_hist_set(slot, tokens[:start])
     return start
-
-  def slot_first(self, slot:int, temp:float|tuple[float, ...]) -> int:
-    """the token after the prompt whose checkpoint is in slot: sampled from its hidden state, without another recurrent prefill"""
-    self._init_slots()
-    pair = _temp_pair(temp)
-    temperature = None if pair[0] == 0 else Tensor([pair], device=self.token_embd.weight.device)
-    hrow = self.pool_spec_h.shrink(((slot*2*(self.config.spec_drafts+1), slot*2*(self.config.spec_drafts+1)+1), None))
-    return int(self._sample(hrow, temperature, self.token_embd.weight.device).item())
 
   def _ckpt_from_slot_copy(self, slot:UOp, wp:UOp, wpc:UOp):
     """the states of a slot at a position (its recurrent ones in wp, its conv ones in wpc) as the model's checkpoint (_ckpt, in its order)"""
