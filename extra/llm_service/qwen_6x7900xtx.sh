@@ -11,6 +11,13 @@ PIDFILE=$STATE_DIR/service.pid
 LOGFILE=$STATE_DIR/service.log
 MODEL=$QWEN_WEIGHTS/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00004.gguf
 MMPROJ=${VISION_MMPROJ:-$QWEN_WEIGHTS/mmproj/mmproj-F16.gguf}
+# a picture cap above 1,024 rows keeps its tower's bigger buffers on every card: it is paid in resident cache rows (the stash keeps
+# the rest). Measured pairs (Qwen: g2 serve, w-gpf Nov 15, results/w-gpf/*/publisher/): 8192 -> 3299328; any other cap needs SEQ_ROWS set by hand.
+case "${VISION_MAX_TOKENS:-1024}" in
+  1024) ;;
+  8192) SEQ_ROWS="${SEQ_ROWS:-3299328}" ;;
+  *) [[ -n ${SEQ_ROWS:-} ]] || { echo "VISION_MAX_TOKENS=$VISION_MAX_TOKENS needs SEQ_ROWS (measured: 8192 -> 3299328)" >&2; exit 2; } ;;
+esac
 SERVER_ENV=(
   PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED=1 HOME="$HOME"
   DEV=AMD AM_MEC_PIPES=2 AM_IDLE_MS=1000 AM_POWER_LIMIT="$AM_POWER_LIMIT"

@@ -126,6 +126,17 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     self.assertEqual(e.exception.returncode, 2)
     self.assertIn("holds no chunk", e.exception.output)
 
+  def test_picture_cap_is_paid_in_rows(self):
+    # (a cap above 1,024 rows: the tower's buffers grow on every card; the measured pairs set SEQ_ROWS, any other cap needs it by hand)
+    for script, cap, rows in (("glm_flash_6x7900xtx.sh", "8000", "1505280"), ("qwen_6x7900xtx.sh", "8192", "3299328")):
+      cmd = self.command(script, {"VISION_MAX_TOKENS": cap})
+      self.assertIn(f"SEQ_ROWS={rows}", cmd)
+      self.assertIn(f"VISION_MAX_TOKENS={cap}", cmd)
+      self.assertIn("SEQ_ROWS=1234560", self.command(script, {"VISION_MAX_TOKENS": cap, "SEQ_ROWS": "1234560"}))
+      with self.assertRaises(subprocess.CalledProcessError) as e: self.command(script, {"VISION_MAX_TOKENS": "4096"})
+      self.assertIn("needs SEQ_ROWS", e.exception.output)
+      self.assertNotIn("VISION_MAX_TOKENS=", self.command(script))  # (the default stays the benchmark's 1,024)
+
   def test_c5_null_harness_keeps_benchmark_defaults(self):
     body = (ROOT / "test/null/production_c5_warmup.sh").read_text()
     self.assertIn("export VISION_MMPROJ VISION_BUCKETS=576", body)

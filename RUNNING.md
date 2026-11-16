@@ -125,16 +125,27 @@ With `SESSION_END_TOKEN` unset (the default), explicit backend session-end calls
 
 **C5 stash profile (36 conversations on 18 seats).** `SEQ_STASH_GB=12 SEQ_STASH_ENTRIES=64 extra/llm_service/glm_flash_6x7900xtx.sh start`
 adds a host-RAM stash: a conversation pushed out of the 18 device slots parks its states and cache in host memory and comes back without
-a re-prefill. Sizes (NULL C5, `results/w-gpf/stash/stashsize-null-c5-gb12e64.txt`): a card holds 57.9 MB an entry and 1.97 MB a
+a re-prefill. Sizes (a NULL C5 start; the company repo's stash qualification, Nov 15): a card holds 57.9 MB an entry and 1.97 MB a
 3,072-token chunk; 12 GB / 64 entries = 4,205 chunks a card = 12,917,760 tokens beside the 3,916,800 pooled rows (64 parked
 conversations of ~200K, 49 at a full 262K). The stash is allocated at warm-up: x6 cards = ~72 GB of host RAM (guest MemAvailable
 94.5 -> ~23 GB on a 109 GB VM; leave it at least 8 GB). The launcher refuses a `SEQ_STASH_GB` too small for its entries (it would
 silently hold no chunk). Conversations under `SEQ_STASH_CTX` (32,768 tokens) are not parked; they re-prefill. Proof (g1, tree
-03896ef29, `results/w-gpf/stash/`): greedy 4K / 64K / 262K equal to the reference; a 100K, a 262K and a 40K-with-pictures conversation
+03896ef29, the company repo's stash qualification): greedy 4K / 64K / 262K equal to the reference; a 100K, a 262K and a 40K-with-pictures conversation
 parked by 21 others resumed with the same 64-token greedy continuation as a never-parked twin and 0 tokens re-prefilled; 36
 conversations on 18 seats for 33.7 min: 690 requests, 0 errors, 0 lost, every return from cache or stash. Its cost is the wait at
 the seat: a cold first prompt of 34-90K tokens queues behind returning turns (all 36 first replies took 32 min). The proxy carries
 it as one backend of 18 running / 36 resident / 36 live with a client timeout of at least 1,800 s.
+
+**Picture size (both six-card models).** By default a picture is downscaled to at most 1,024 tower rows (`VISION_MAX_TOKENS`, about
+0.8 MP for GLM's 28-pixel rows, 1 MP for Qwen's 32-pixel rows); the publishers allow 8,000 (GLM, `max_image_tokens`) and 16,384 (Qwen).
+A higher cap keeps a bigger tower bucket's buffers on every card and is paid in resident cache rows; the launchers set the measured pair
+when only `VISION_MAX_TOKENS` is given and refuse any other cap without `SEQ_ROWS`:
+`VISION_MAX_TOKENS=8000` (GLM) -> `SEQ_ROWS=1505280` (card 0 ~0.15 GB free after warm-up; tower ~2 s at 1,768 rows, ~5.5 s at 4,070,
+~15 s at 7,973); `VISION_MAX_TOKENS=8192` (Qwen) -> `SEQ_ROWS=3299328` (tower ~10 s for a 4K picture). Proof (Nov 15): GLM at 8,000 rows:
+text greedy 4K / 64K / 262K equal; 13 pictures up to 3840x2160 (7,973 rows, a 67x119 grid) within 0.02 nats of llama.cpp's
+log-likelihood; Qwen at 8,192: greedy 4K / 64K equal to the production boots, 4K pictures described right. Qwen's 16,384 needs about
+4 GB more a card (~2.2M rows): not run. Fewer resident rows serve the same seats through the host stash (parks and restores), at a
+throughput cost that was not measured; the benchmark numbers in this file were measured at 1,024.
 
 ### GLM C9, on ts5 — text-only; no vision tower
 

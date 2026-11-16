@@ -11,6 +11,13 @@ PIDFILE=$STATE_DIR/service.pid
 LOGFILE=$STATE_DIR/service.log
 MODEL=$GLM_FLASH_WEIGHTS/GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf
 MMPROJ=${VISION_MMPROJ:-/home/runner/glmvis/mmproj-F16.gguf}
+# a picture cap above 1,024 rows keeps its tower's bigger buffers on every card: it is paid in resident cache rows (the stash keeps
+# the rest). Measured pairs (GLM: g3 serve + g2 NLL gate, card 0 0.15 GB free, w-gpf Nov 15, results/w-gpf/*/publisher/): 8000 -> 1505280; any other cap needs SEQ_ROWS set by hand.
+case "${VISION_MAX_TOKENS:-1024}" in
+  1024) ;;
+  8000) SEQ_ROWS="${SEQ_ROWS:-1505280}" ;;
+  *) [[ -n ${SEQ_ROWS:-} ]] || { echo "VISION_MAX_TOKENS=$VISION_MAX_TOKENS needs SEQ_ROWS (measured: 8000 -> 1505280)" >&2; exit 2; } ;;
+esac
 SERVER_ENV=(
   HOME="$HOME" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED=1
   DEV=AMD AM_POWER_LIMIT="$AM_POWER_LIMIT"
