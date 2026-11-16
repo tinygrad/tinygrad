@@ -2444,9 +2444,9 @@ class Transformer:
     # (SEQ_CKPT2: two checkpoints a slot, in two buffers: the pools have 2 rows a slot, buffer par at row slot*2+par, see SeqEngine.CKPT2)
     CK = 2 if getenv("SEQ_CKPT2", 0) else 1
     self.seq_ckpt_h = _zeros(n*CK, self._spec_dim, device=devs)
-    # (the checkpoints' recurrent states in host memory: a copy a turn, the device memory more slots'. SEQ_CKPT_HOST=1 (default off): their
+    # (the checkpoints' recurrent states in host memory: a copy a turn, the device memory more slots'
     # conv states' and the indexers' too (C2: ~5 MB a slot a device), the same copies)
-    ckpt_host = bool(getenv("SEQ_CKPT_HOST", 0))
+    ckpt_host = True
     self.seq_ckpt_states = [[_slot_pool(n*CK, b.pool_rec, (1, *b.pool_rec.shape[1:]), host=True, views=0)[0]] +
                             [_slot_pool(n*CK, p, (1, *p.shape[1:]), host=ckpt_host, views=0)[0] for p in b.pool_conv]
                             for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
