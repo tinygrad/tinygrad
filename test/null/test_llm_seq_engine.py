@@ -291,6 +291,28 @@ class TestSeqChunkCopies(unittest.TestCase):
             for t in eng.seqs: self.assertEqual(model.cache[t.base:t.base+t.n], t.tokens[:t.n], f"align {align}: a resident one's rows overwritten")
       self.assertGreater(len([c for c in model.calls if c[0] == "stash" and not c[1]]), 0)  # (restores happened)
 
+  def test_moves_keep_the_neighbours_rows(self):
+    # (the same with moves only, no stash: an idle region shrunk at its stop (ROOM past its tokens) moved by a whole-chunk copy wrote over the
+    # first rows of the region after its new place) growing conversations, new ones, regions moved and compacted: every resident one's rows
+    import random
+    for align in (24, 3072):
+      rng, model = random.Random(19), ChunkModel(align)
+      # (chunks longer than the room an idle region keeps (ROOM 2,048), as qwen4exp's 3,072: a moved idle region's last chunk passes its cap)
+      model.SEQ_MOVE, model.stash_chunks, model.stash_entries = 3072, 0, 0
+      eng, convs = SeqEngine(model), []
+      with patch.object(SeqEngine, "STICKY", 0.0):
+        for it in range(400):
+          if convs and rng.random() < 0.7: ids = convs.pop(rng.randrange(len(convs))) + [rng.randrange(1000) for _ in range(rng.randrange(1, 900))]
+          else: ids = [it * 100000 + i for i in range(rng.randrange(100, 3000))]
+          if len(ids) > 12000 or (got:=eng.take(ids, rng.choice([0, 64, 3000]))) is None: continue
+          s, start, restore = got
+          self.assertEqual(model.cache[s.base:s.base+start], ids[:start], f"align {align}: another one's rows")
+          eng.prefill(s, ids, start, restore, (0.0, 1.0))
+          eng.stop(s, len(s.tokens))
+          convs.append(ids)
+          for t in eng.seqs: self.assertEqual(model.cache[t.base:t.base+t.n], t.tokens[:t.n], f"align {align}: a resident one's rows overwritten")
+      self.assertGreater(len([c for c in model.calls if c[0] == "move"]), 0)
+
 class TestSeqMaxLen(unittest.TestCase):
   def test_no_room_past_context(self):
     # the caches' rows can be more than the model's context: a sequence's positions aren't (its reply ends at the context)
