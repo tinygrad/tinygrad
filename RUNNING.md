@@ -226,6 +226,19 @@ The seven R3 sentences (picture references on for both models: `PI_IMAGE_REFS=1`
 - Read to the end everything a person says: it often says where to go next.
 - To leave a room, walk onto its stairs, door or mat and keep pressing the same direction until the screen changes.
 
+## Benchmarks (source: the company repo's results/phase4/benchmarks.md, copied 21:34 Nov 15)
+
+| Configuration | Benchmark | Resolved / valid | Accuracy (95% interval) | Published | Serving tree | Seats a box |
+|---|---|---:|---|---:|---|---:|
+| Qwen C2 (6x 7900 XTX, 262,144 a user) | DeepSWE v1.1 | 656 / 1,130 (ten runs of 113) | 58.05% (55.15-60.90) | 58.7% | 774202f33, 5de5e797f | 30 |
+| GLM Flash C5 (6x 7900 XTX, 262,144 a user) | DeepSWE v1.1 | 276 / 452 (four runs) | 61.06% (56.49-65.45) | 63.4% | 542faaa80 .. 5ce1f87eb | 18 |
+| Qwen C2 | SWE-bench Pro (642 public tasks) | 618 / 642 | 96.26% (94.50-97.48) | ~62% (other harness; the gap is not explained) | 5ce1f87eb | 30 |
+| GLM Flash C5 | SWE-bench Pro | pending at 21:34 Nov 15 | | | | 18 |
+
+The benchmark runs were served by the trees named, not by this branch's head: this branch's proof is the identity gates
+(greedy token-for-token equality at 4K / 64K / 262K and picture NLL against llama.cpp within 0.02 nats).
+GLM 5.3 C9 (ts5): its bars against tinyamd1 are in the company repo, results/w-pf53/ts5-acceptance.md.
+
 ## What each configuration cannot do
 
 **All three:** one server process a box and one start per VM boot; no second model beside it. The context is per conversation; a
