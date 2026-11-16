@@ -14,17 +14,16 @@ from tinygrad.llm.kernels.amd_glm import Linear, gated_delta_prefill, flash_atte
   indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, moe_combine, token_sharded, shard_rows, reduce_scatter, \
   all_gather, all_gather_q8, sharded_argmax, skinny_matmul, moe_combine_scatter, kda_conv, kda_replay, tables_ready, moe_router_local, \
   hc_post_quant, \
-  indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, I8_WMMA_QUANTS, flash_attention_rows, \
-  grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
-  mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, qsa_sparse_prefill, rows_gather, rows_scatter, seq_scores, seq_index, \
-  kv_q8_pack, kv_q8_unpack, qsa_decode_attention, FLAG_LANE, DEC_LANE, IDX_LANE, \
+  indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, I8_WMMA_QUANTS, grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, \
+  ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
+  mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, FLAG_LANE, DEC_LANE, IDX_LANE, \
   flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, f32t_gemm, few_out_rows, index_scores, \
-  host_allreduce, p2p_allreduce, _argmax_parts, _device_index, _unbind, f16t_gemm, \
+  host_allreduce, p2p_allreduce, _argmax_parts, _device_index, f16t_gemm, \
   nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_views, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, q4_rows, Q4_ROW, \
   pool_index_shard, top_k_mask
 from tinygrad.llm.gguf import gguf_parse, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm.gguf_load import gguf_shard_units, _disk_bytes, _disk_location
-from tinygrad.uop.ops import resolve, Ops, AxisType, KernelInfo
+from tinygrad.uop.ops import resolve, Ops
 from tinygrad.dtype import DType
 from tinygrad.helpers import unwrap, round_up, to_tuple, prod, dedup, DEBUG
 from tinygrad.device import Buffer, BufferSpec, BufferStorage, MultiBuffer
@@ -289,7 +288,7 @@ class TransformerConfig:
   indexer_shared: tuple[bool, ...] = ()
   mtp: bool = False  # the next token prediction layer (MTPBlock)
   ple: PLEConfig|None = None
-  qsa: bool = False  # the attention layers are qwen sparse attention (QSABlock)
+  qsa: bool = False  # qwen4exp sparse attention (rejected here; use qwen4exp.py)
   expert_pad: int = 0  # the experts padded to this many (never selected) so their slices spread evenly over the devices (expert_slicing)
   spec_drafts: int = 0  # speculative decoding: the tokens the MTP layer drafts for every step of the model
   @property
@@ -516,31 +515,6 @@ def _zeros(*shape:int, dtype:DType=dtypes.float32, device:str|tuple[str, ...]|No
   _fill_zero(t:=_buffers(*shape, dtype=dtype, device=device, axis=axis))
   return t
 
-def _shared_host(owner:str, devs:tuple[str, ...], nbytes:int) -> list[Buffer]:
-  """nbytes of host memory (made when used) mapped on every device: its buffer of every device (the owner's, the others' its mappings)"""
-  host = Buffer(owner, max(nbytes, 1), options=BufferSpec(host=True))
-  class _Alias(Buffer):
-    # (the owner's mapping on another device: allocated with the owner's)
-    def allocate(self, opaque=None, external_ptr=None):
-      a = host.ensure_allocated().get_buf(self.device)
-      return super().allocate(opaque=BufferStorage(a), external_ptr=a)
-  return [host if d == owner else _Alias(d, max(nbytes, 1)) for d in devs]
-
-@functools.cache
-def _stash_save_kernel(dst:UOp, src:UOp, dev:UOp, row:UOp, at:UOp, n:int, writers:int) -> UOp:
-  # rows row..row+n of a cache (a device's: (.., rows, D)) into rows at.. of its copy in host memory, by the devices of writers (8 bits a device:
-  # its part and the count of the devices that write the copy (0: none), a row of every count of them by each)
-  D = cast(int, src.shape[-1])
-  def flat(t:UOp) -> UOp: return t.reshape(prod(cast(tuple[int, ...], t.shape)))
-  s, d = flat(src), flat(dst)
-  # (a thread 16 bytes next to each other: a wave's stores whole lines of the host memory (wider ones are split, half lines it writes slowly))
-  V = 16 // src.dtype.itemsize if D % (16 // src.dtype.itemsize) == 0 else 1
-  r, w = UOp.range(n, 0, AxisType.GLOBAL), UOp.range(D // V, 1, AxisType.LOCAL)
-  code = (UOp.const(writers, dtypes.int64) >> (dev[0].load().cast(dtypes.int64) * 8)) & 0xFF
-  part, count = (code & 0xF).cast(dtypes.weakint), (code >> 4).cast(dtypes.weakint)
-  ok = count.ne(0) & ((r % count.maximum(1)).eq(part))
-  stores = [d[((at + r) * D + w * V + j).valid(ok)].store(s[(row + r) * D + w * V + j].load()) for j in range(V)]
-  return UOp.group(*stores).end(r, w).sink(arg=KernelInfo(name="stash_save", opts_to_apply=()))
 
 def _host_like(specs:list[tuple[Tensor, int, int]]) -> list[Tensor]:
   """
@@ -1271,7 +1245,7 @@ class TransformerBlock(FFNBlock):
     self.attn_output = Linear(config.head_dim * config.n_heads, config.dim, bias=config.attn_output_bias)
     if config.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(config.qk_norm, config.norm_eps), nn.RMSNorm(config.qk_norm, config.norm_eps)
     if config.attn_sinks: self.attn_sinks = {"weight": Tensor.zeros(config.n_heads)}
-    self.indexer:Indexer|None = Indexer(config) if config.indexer and not isinstance(self, QSABlock) else None
+    self.indexer:Indexer|None = Indexer(config) if config.indexer else None
 
   def _attention(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
     assert T is None, "rows mode is for MLA and gated deltanet blocks"
@@ -1333,7 +1307,7 @@ class TransformerBlock(FFNBlock):
                                             device=x.device, yarn=self.config.yarn)
     if self.indexer: self.indexer._init_state(x)
 
-# set while a call whose context the indexer's top_k covers is traced (its jit): the qwen sparse attention attends all the keys (see QSABlock)
+# set while a qwen sparse-attention context is traced (its jit attends all keys covered by the indexer's top_k)
 _qsa_dense:list[bool] = [False]
 # VISION (GLM 5.3 Flash's pictures, see Transformer._vis_embed): set while the vision variant of a prefill chunk (a chunk with a picture's rows)
 # is traced
@@ -1391,7 +1365,7 @@ class QSAIndexer:
   qwen sparse attention's indexer: the keys of a pool of kpool tokens are averaged, normed and roped at the pool's first position, a query's (its
   heads normed and roped) score of a pool is the sum of its heads' rectified dots. its cache holds every token's key (the pools are made of them)
   """
-  pool_k:Tensor  # batched decoding: the keys of every slot, their pooled keys (QSABlock._init_slots)
+  pool_k:Tensor  # batched decoding: every slot's keys and their pooled keys
   pool_pk:Tensor
   def __init__(self, config:TransformerConfig):
     self.idx, self.max_context, self.cache_rows = (idx:=unwrap(config.indexer)), config.max_context, config.cache_rows
@@ -1511,239 +1485,6 @@ class QSAIndexer:
     scores = scores.pad_to((scores.shape[0], self.max_context // self.idx.kpool)).contiguous()
     return pool_index_rows(scores, start_pos, pools, self.idx.top_k // self.idx.kpool, self.idx.kpool)
 
-class QSABlock(TransformerBlock):
-  cache_k:Tensor
-  """
-  qwen sparse attention: gated GQA attention on the keys its indexer picks. the heads split over the devices with one KV head each (repeated at
-  load), so a device's cache is the shared row [k|v] of its KV head (2*head_dim) and its queries [q|0]: the MLA flash kernels' latent attention
-  (their output's second half is the attention's). the cache (KV, B, N, 2*head_dim) split on KV: a device's (1, B, N, D) is the latent cache
-  (1, B, 1, N, D) of the kernels. batched decoding: the caches of the slots (KV, n, ctx, D), the slot of a group its index
-  """
-  pool_k:Tensor
-  indexer:QSAIndexer|None  # type: ignore[assignment]  # (its own indexer, not TransformerBlock's)
-  def __init__(self, config:TransformerConfig):
-    super().__init__(config)
-    self.indexer = QSAIndexer(config) if config.indexer else None
-
-  @property
-  def sparse(self) -> bool: return self.indexer is not None and self.config.max_context > self.indexer.idx.top_k
-  def _flash(self, x:Tensor) -> bool:
-    return amd_custom_kernels_supported(x.device) and isinstance(x.device, tuple) and self.config.n_kv_heads == len(x.device)
-
-  def _qkv(self, x:Tensor, cos:Tensor, sin:Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    """x (B, Tq, dim): q (B, H, Tq, hd), the output gate (B, Tq, H*hd), k and v (B, KV, Tq, hd); roped with cos and sin broadcast to them"""
-    B, Tq, _ = x.shape
-    H, hd, rd = self.config.n_heads, self.config.head_dim, self.config.rope_dim
-    qg = self.attn_q(x).reshape(B, Tq, H, 2, hd)
-    q, gate = qg[:, :, :, 0, :], qg[:, :, :, 1, :].reshape(B, Tq, H * hd)
-    q = self.attn_q_norm(q).transpose(1, 2)
-    q = _rope(q[..., :rd], cos, sin).cat(q[..., rd:], dim=-1)
-    k, v = self._kv(x, cos, sin)
-    return q, gate, k, v
-
-  def _kv(self, x:Tensor, cos:Tensor, sin:Tensor) -> tuple[Tensor, Tensor]:
-    B, Tq, _ = x.shape
-    KV, hd, rd = self.config.n_kv_heads, self.config.head_dim, self.config.rope_dim
-    k, v = self.attn_k(x).reshape(B, Tq, KV, hd), self.attn_v(x).reshape(B, Tq, KV, hd)
-    k = self.attn_k_norm(k).transpose(1, 2)
-    return _rope(k[..., :rd], cos, sin).cat(k[..., rd:], dim=-1), v.transpose(1, 2)
-
-  def _out_gated(self, attn:Tensor, gate:Tensor) -> Tensor:
-    """the attention (B, H, Tq, hd) gated, through the output projection"""
-    B, H, Tq, hd = attn.shape
-    return _out(self.attn_output, attn.transpose(1, 2).reshape(B, Tq, H * hd) * gate.sigmoid())
-
-  def _attention(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
-    if (sb:=_seq_batch[0]) is not None: return self._attention_seqs(x, sb)
-    if (groups:=_batch_rows[0]) is not None: return self._attention_batch(x, groups)
-    if T is not None: return self._attention_rows(x, start_pos, T)
-    # a symbolic chunk computes padded to its max size (static shapes), it stores and attends with its real tokens
-    if not isinstance(T:=x.shape[1], int): return self._attention_rows(x.pad_to(x.max_shape), start_pos, T)[:, :T]
-    return self._attention_rows(x, start_pos, T)
-
-  def _attention_rows(self, x:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
-    # x has Tq rows, the first T are the tokens at start_pos
-    B, Tq, _ = x.shape
-    hd, N = self.config.head_dim, self.config.max_context
-    freqs = self.freqs_cis.shrink(((start_pos, start_pos + T), None)).pad_to((Tq, self.freqs_cis.shape[-1]))
-    cos, sin = (f.reshape(1, 1, Tq, -1) for f in freqs.chunk(2, dim=-1))
-    q, gate, k, v = self._qkv(x, cos, sin)
-    # (decoding with the indexer: the lists of the keys a query sees, the attention reads only them)
-    picks = mask = tile_mask = row_picks = None
-    upd:Tensor|None = None
-    if self.indexer is not None and self._flash(x) and _qsa_dense[0]:
-      # (a context the top_k covers: every key is seen, causal attention. the indexer's caches kept for a longer one)
-      upd = self.indexer.update(x, start_pos, T, self.freqs_cis)[0]
-    elif self.sparse and self.indexer is not None:
-      if B == 1 and isinstance(Tq, int) and Tq % 32 == 0 and isinstance(start_pos, UOp) and self._flash(x) and self.indexer.idx.kpool == 4 and \
-         2*hd == (self.cache_k.shape[-1]*32//9 if self._q8 else self.cache_k.shape[-1]) and hd == 256 and (1):
-        # (every query on the keys of its list (qsa_decode's kernel): its keys alone are read, not the tiles of every key of its block's)
-        row_picks = self.indexer.prefill_picks(x, start_pos, T, self.freqs_cis)
-      elif B == 1 and isinstance(Tq, int) and Tq % 32 == 0 and N % 128 == 0 and 64 <= hd <= 256 and hd % 32 == 0 and \
-         isinstance(start_pos, UOp) and self._flash(x) and not _wmma_rdna4(x.device) and self.indexer.idx.kpool == 4:
-        tile_mask = self.indexer.prefill_mask(x, start_pos, T, self.freqs_cis)
-      elif isinstance(Tq, int) and Tq <= (8) and self._flash(x) and isinstance(start_pos, UOp) and (1):
-        picks = self.indexer.picks(x, start_pos, T, self.freqs_cis)
-      else: mask = self.indexer.mask(x, start_pos, T, self.freqs_cis)
-    b = _seq_base[0]  # (the sequence's region of the cache)
-    if not self._flash(x):
-      # (the generic path: the cache's halves are the keys and the values)
-      rows = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1).cast(self.cache_k.dtype)
-      store = self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(rows.uop)
-      cache = Tensor(self.cache_k.uop.after(store)).shrink((None, None, (b, b+start_pos+T), None)).transpose(0, 1).float()
-      causal = Tensor.full((1, 1, Tq, start_pos+T), float("-inf")).triu(start_pos+1)
-      attn = q.scaled_dot_product_attention(cache[..., :hd], cache[..., hd:], attn_mask=causal if mask is None else causal + mask, enable_gqa=True)
-      return self._out_gated(attn, gate)
-    k_store = k.cat(v, dim=-1)[:, :, :T].transpose(0, 1)  # (KV, B, T, 2*hd)
-    store = self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(self._kv_rows(k_store).uop)
-    cache = Tensor(self.cache_k.uop.after(store))
-    _state_written(cache)
-    if row_picks is not None:
-      bases = (Tensor.zeros(Tq, dtype=dtypes.int32, device=x.device) + (Tensor(b).cast(dtypes.int32) if isinstance(b, UOp) else b)).contiguous()
-      attn = qsa_decode_attention(q[0].transpose(0, 1), cache.unsqueeze(2), row_picks, bases, hd**-0.5,
-                                  kpool=self.indexer.idx.kpool if self.indexer is not None and (1) else 0)  # (Tq, H, 1, hd)
-      return self._out_gated(attn.permute(2, 1, 0, 3), gate)
-    if tile_mask is not None:
-      return self._out_gated(qsa_sparse_prefill(q, cache, tile_mask, cast(UOp, start_pos), start_pos+T, unwrap(self.indexer).idx.kpool,
-                                                base=b, N=N), gate)
-    if upd is not None and isinstance(Tq, int) and Tq >= 32 and Tq % 32 == 0 and self.indexer is not None and (1):
-      # (a chunk of a prompt the top_k covers: its keys are the first top_k positions of the cache. their keys and values apart, the tensor
-      # cores' flash attention of the GQA heads)
-      top = self.indexer.idx.top_k
-      kvc = Tensor(cache.uop.after(upd.uop)).shrink((None, None, (b, b+top), None)).transpose(0, 1)  # (B, KV, top, 2*hd)
-      if self._q8: kvc = kv_q8_unpack(kvc)
-      kv = Tensor.stack(kvc[..., :hd], kvc[..., hd:]).contiguous()
-      if (fa:=flash_attention_rows(q, kv, start_pos, start_pos+T)) is not None: return self._out_gated(fa, gate)
-    latent, q, scale = cache.unsqueeze(2), q.cat(q.zeros_like(), dim=-1), hd**-0.5
-    assert not self._q8, "an int8 cache: the sparse prefill, the dense prefill's flash kernel and the steps of sequences only"
-    if upd is not None: latent = Tensor(latent.uop.after(upd.uop))
-    if picks is not None:
-      # (a few queries (the drafts of speculative decoding): every one on the keys of its list, a decode each)
-      attn = Tensor.cat(*[flash_attention_decode(q[:, :, r:r+1].half(), latent, start_pos+T, N, shared=True, scale=scale,
-                                                 index=picks[r].contiguous(), base=b) for r in range(Tq)], dim=2)
-    elif Tq == 1:
-      if mask is not None: mask = mask.reshape(B, -1).pad_to((B, N)).float().contiguous()
-      attn = flash_attention_decode(q.half(), latent, start_pos+T, N, shared=True, scale=scale, mask=mask, base=b)
-    else:
-      if mask is not None: mask = mask.reshape(B, Tq, -1).pad_to((B, Tq, N)).float().contiguous()
-      # (the region's keys: a copy of them from its first row)
-      if not (isinstance(b, int) and b == 0):
-        latent = latent.shrink((None, None, None, (b, b+start_pos+T), None))
-        latent = latent.pad_to(latent.shape[:3] + (N,) + latent.shape[4:]).contiguous()
-      attn = flash_attention_mla_prefill(q, latent, start_pos, start_pos+T, N, scale, mask)
-    return self._out_gated(attn[..., hd:], gate)
-
-  def _attention_seqs(self, x:Tensor, sb:SeqBatch) -> Tensor:
-    """
-    a step of G sequences sharing the caches (each its region of rows from its base): R rows of every one from its position, every query on
-    the keys of its region its indexer picks (every key before it with a context of top_k or less)
-    """
-    assert self.indexer is not None and self._flash(x), "sequences sharing the caches: the indexer's and the flash kernels"
-    G, R, hd = sb.G, sb.R, self.config.head_dim
-    rows, idx, ic = G*R, self.indexer, self.indexer.idx
-    kp = ic.kpool
-    pos, phys = sb.row_positions, sb.row_phys
-    freqs = rows_gather(self.freqs_cis, pos)  # (rows, rope)
-    cos, sin = (f.reshape(1, 1, rows, -1) for f in freqs.chunk(2, dim=-1))
-    q, gate, k, v = self._qkv(x, cos, sin)
-    # the keys and values of the rows into their rows of the cache (a device's of its KV head)
-    W = int(self.cache_k.shape[-1])
-    kv = self._kv_rows(k.cat(v, dim=-1).transpose(0, 1).reshape(-1, 2*hd))
-    cache = rows_scatter(self.cache_k.reshape(-1, W), kv, phys).reshape(self.cache_k.shape)
-    # the indexer: the keys of the rows, then the pools they're in (NP from a sequence's first row's, the ones past its last row's are
-    # incomplete: never picked, made again when they are) pooled from the cached keys
-    ck = rows_scatter(idx.cache_k, idx._proj(idx.k_proj, x[0]).half(), phys)
-    NP = (R - 1) // kp + 2
-    pools = ((sb.positions // kp).reshape(G, 1) + Tensor.arange(NP, dtype=dtypes.int32).reshape(1, NP).to(x.device)).reshape(-1)  # (G*NP,)
-    pbase = sb.bases.reshape(G, 1).expand(G, NP).reshape(-1) // kp
-    krows = (((pbase + pools) * kp).reshape(-1, 1) + Tensor.arange(kp, dtype=dtypes.int32).reshape(1, kp).to(x.device)).reshape(-1)
-    pkeys = rows_gather(ck, krows.contiguous()).reshape(G*NP, kp, ic.head_dim)
-    pf = rows_gather(self.freqs_cis, (pools * kp).contiguous())
-    pooled = idx._pooled(pkeys, *pf.chunk(2, dim=-1))
-    pk = rows_scatter(idx.cache_pk, pooled.half(), (pbase + pools).contiguous())
-    self._seq_written = (cache, ck, pk)
-    # every query's scores of its sequence's pools, the lists of the keys it sees
-    iq = idx._queries(x[0], *(f.reshape(rows, 1, -1) for f in freqs.chunk(2, dim=-1)))  # (rows, H, D)
-    scores = seq_scores(iq, pk, sb.bases, sb.positions, R, kp, self.config.max_context // kp)
-    picks = seq_index(scores, sb.positions, ic.top_k // kp, kp)
-    # every row its own list of the keys of its region: [q|0] on the latent [k|v] rows (the second half of the output is the attention's)
-    qr = q.permute(2, 1, 0, 3)  # (rows, H, 1, hd)
-    latent = Tensor(cache.uop.after(pk.uop)).unsqueeze(2)
-    # (a lane a key: its scores of the heads without reductions over the lanes, the value half only of the rows read for the output)
-    attn = qsa_decode_attention(qr[:, :, 0], latent, picks, sb.row_bases, hd**-0.5, parts=(8), waves=(4))
-    return self._out_gated(attn.permute(2, 1, 0, 3), gate)
-
-  def _attention_batch(self, x:Tensor, groups:list[tuple[UOp, int]]) -> Tensor:
-    """batched decoding: a row a sequence at its position, its caches in its slot (slot g the group g's), one kernel for all of them"""
-    assert all(t == 1 for _, t in groups) and _batch_prefill[0] is None, "batched qwen sparse attention: a token a sequence"
-    G, hd, ctx = len(groups), self.config.head_dim, int(self.pool_k.shape[2])
-    positions = _group_positions(groups, x.device)
-    freqs = self.freqs_cis[:ctx][positions.cast(dtypes.int32)]  # (G, rope)
-    cos, sin = (f.reshape(G, 1, 1, -1) for f in freqs.chunk(2, dim=-1))
-    q, gate, k, v = self._qkv(x.reshape(G, 1, -1), cos, sin)
-    # the rows into the slots (a device's rows of its KV head: (n*ctx, D) of every device)
-    rows = k.cat(v, dim=-1).permute(1, 0, 2, 3).reshape(-1, 2*hd).cast(self.pool_k.dtype)
-    pool = grouped_rows(self.pool_k.reshape(-1, 2*hd), rows, positions, ctx)
-    k_pos, q_pos = Tensor.arange(ctx).reshape(1, ctx), positions.reshape(G, 1).cast(dtypes.int32)
-    if self.indexer is not None:
-      idx, ic = self.indexer, self.indexer.idx
-      keys = grouped_rows(idx.pool_k.reshape(-1, ic.head_dim), idx.k_proj(x)[0].half(), positions, ctx).reshape(idx.pool_k.shape)
-      # (the pool of every group's token pooled again from its keys, into its slot's pooled keys: the model's when a slot is loaded back)
-      P, kp = ctx // ic.kpool, ic.kpool
-      pidx = (positions.cast(dtypes.int32) // kp).reshape(G, 1)
-      onehot = (pidx == Tensor.arange(P, dtype=dtypes.int32).reshape(1, P)).cast(dtypes.half)  # (G, P)
-      grp = (onehot.unsqueeze(-1) * keys[:G].reshape(G, P, kp * ic.head_dim)).sum(1).reshape(G, 1, kp, ic.head_dim)
-      pc = (onehot.float() @ self.freqs_cis[:ctx].reshape(P, kp, -1)[:, 0]).reshape(G, 1, -1)
-      pooled = idx._pooled(grp, *pc.chunk(2, dim=-1)).reshape(G, ic.head_dim)
-      pks = grouped_rows(idx.pool_pk.reshape(-1, ic.head_dim), pooled.half(), positions // kp, P)
-      keys = Tensor(keys.uop.after(pks.uop))
-    if self.indexer is not None and ctx > ic.top_k:
-      pf = self.freqs_cis[:ctx].reshape(ctx // ic.kpool, ic.kpool, -1)[:, 0]
-      pk = idx._pooled(keys[:G].reshape(G, -1, ic.kpool, ic.head_dim), *pf.chunk(2, dim=-1))  # (G, pools, D)
-      iq = idx._queries(x[0], *(f.reshape(G, 1, -1) for f in freqs.chunk(2, dim=-1)))  # (G, H, D)
-      scores = (iq @ pk.transpose(-1, -2)).relu().sum(1) * ic.head_dim**-0.5  # (G, pools)
-      mask = _pool_select(scores, q_pos, k_pos, ic)
-    else:
-      mask = (k_pos <= q_pos).where(0.0, -math.inf)
-      if self.indexer is not None: pool = Tensor(pool.uop.after(keys.uop))
-    latent = pool.reshape(self.pool_k.shape)[:, :G].unsqueeze(2)  # (KV, G, 1, ctx, D): a device's (1, G, 1, ctx, D)
-    attn = flash_attention_decode(q.cat(q.zeros_like(), dim=-1).half(), latent, ctx, ctx, shared=True, scale=hd**-0.5, mask=mask.float().contiguous())
-    return self._out_gated(attn[..., hd:], gate.reshape(G, 1, -1)).reshape(1, G, -1)
-
-  def _init_slots(self, n:int, ctx:int):
-    """the caches of n sequences of batched decoding of at most ctx tokens (one slot each)"""
-    if hasattr(self, "pool_k") and int(self.pool_k.shape[1]) >= n: return
-    KV, D, devs = self.config.n_kv_heads, 2*self.config.head_dim, self.cache_k.device
-    self.pool_k = _unallocated(KV, n, ctx, D, dtype=dtypes.half, device=devs, axis=0 if isinstance(devs, tuple) else None)
-    if (idx:=self.indexer) is not None:
-      idx.pool_k = _unallocated(n, ctx, idx.idx.head_dim, dtype=dtypes.half, device=devs)
-      idx.pool_pk = _unallocated(n, ctx // idx.idx.kpool, idx.idx.head_dim, dtype=dtypes.half, device=devs)
-
-  _seq_written:tuple[Tensor, Tensor, Tensor]  # (the caches after a step's writes: the attention's, the indexer's keys and pooled keys)
-  @contextlib.contextmanager
-  def caches_set(self, cache:Tensor, ck:Tensor, pk:Tensor):
-    """the attention and indexer caches as these (a step's written ones: a mixed step's prompt's writes and reads after the step's)"""
-    idx = unwrap(self.indexer)
-    saved = (self.cache_k, idx.cache_k, idx.cache_pk)
-    self.cache_k, idx.cache_k, idx.cache_pk = cache, ck, pk
-    try: yield
-    finally: self.cache_k, idx.cache_k, idx.cache_pk = saved
-
-  @property
-  def _q8(self) -> bool: return self.cache_k.dtype == dtypes.uint32
-  def _kv_rows(self, kv:Tensor) -> Tensor:
-    """rows (..., 2*head_dim) of keys and values as the cache's (in int8 groups: SEQ_KV_Q8)"""
-    return kv_q8_pack(kv) if self._q8 else kv.cast(self.cache_k.dtype)
-
-  def _init_state(self, x:Tensor):
-    if not hasattr(self, "cache_k"):
-      # (the rows of every sequence's region, see QSAIndexer._init_state)
-      KV, N, D = self.config.n_kv_heads, max(self.config.max_context, self.config.cache_rows) + REGION_ALIGN, 2*self.config.head_dim
-      # (zeroed: the flash kernels read whole tiles past the valid region. SEQ_KV_Q8: in int8 groups of 32 and their scales (kv_q8_pack), the
-      # bytes of a row 0.56x: more rows in memory)
-      self.cache_k = _zeros(KV, 1, N, D, dtype=dtypes.half, device=x.device, axis=0 if isinstance(x.device, tuple) else None)
-      self.freqs_cis = _freqs(self.config.rope_dim, self.config.max_context, self.config.rope_theta, x.device, self.config.yarn)
-    if self.indexer is not None: self.indexer._init_state(x)
 
 class Indexer:
   _regions:tuple[int, int, int]|None = None  # (SLOT_ALIAS: the slots, their positions, the regions of the cache, see _region_views)
@@ -2537,78 +2278,6 @@ class MTPBlock(MLATransformerBlock):
     """emb (B, T, dim) the embeddings of the next tokens, h (B, T, dim) the hidden states: the normed hidden states of the predictions"""
     return self.shared_head_norm(self(self.eh_proj(self.enorm(emb).cat(self.hnorm(h), dim=-1)), start_pos))
 
-class QwenMTPBlock(QSABlock):
-  """
-  qwen4exp's next token prediction: every stream of the model's residual (before its last mix) normed (hnorm) next to the normed embedding of the
-  next token (enorm), projected (eh_proj) into the streams of a qwen sparse attention block with gated hyper-connections; its streams are the
-  next prediction's input, their mix (hc_head) the output head's
-  """
-  def __init__(self, config:TransformerConfig):
-    super().__init__(replace(config, ple=None))
-    self.eh_proj = Linear(2 * config.dim, config.dim, bias=False)
-    self.enorm = nn.RMSNorm(config.dim, config.norm_eps)
-    self.hnorm = {"weight": Tensor.zeros(unwrap(config.hc).count * config.dim)}
-    self.hc_head = GatedResidual(config, inject=False)
-  def _project_input_split(self, emb:Tensor, h:Tensor) -> Tensor:
-    """_project_input of rows split over the devices (the projection a device's rows: q8_linear split)"""
-    count, dim = unwrap(self.config.hc).count, self.config.dim
-    hs = h.reshape(*h.shape[:2], count, dim).float()
-    hn = hs.rmsnorm(eps=self.config.norm_eps) * self.hnorm["weight"].reshape(count, dim)
-    en = self.enorm(emb.float()).unsqueeze(2).expand(*hn.shape)
-    inp = en.cat(hn, dim=-1)
-    B, R = int(inp.shape[0]), int(inp.shape[1])
-    return q8_linear(self.eh_proj, inp.reshape(B*R*count, 2*dim).half().contiguous(), split=True).reshape(B, R, count, dim)
-
-  def _project_input(self, emb:Tensor, h:Tensor) -> Tensor:
-    count, dim = unwrap(self.config.hc).count, self.config.dim
-    hs = h.reshape(*h.shape[:2], count, dim).float()
-    hn = hs.rmsnorm(eps=self.config.norm_eps) * self.hnorm["weight"].reshape(count, dim)
-    en = self.enorm(emb.float()).unsqueeze(2).expand(*hn.shape)
-    return self.eh_proj(en.cat(hn, dim=-1))
-
-  def predict(self, emb:Tensor, h:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor:
-    """emb (B, Tq, dim) the embeddings of the next tokens, h (B, Tq, count*dim) the streams of their positions: the streams (B, Tq, count, dim)"""
-    return self(self._project_input(emb, h), start_pos, T)
-
-  def prefill_cache(self, emb:Tensor, h:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
-    # Prompt outputs are unused. KV/indexer caches depend only on the attention input, not Q, attention output, or the stateless FFN.
-    xs = self._project_input(emb, h)
-    self._init_state(xs)
-    return self._cache_input(cast(GatedResidual, self.hc_attn).mixed(xs), start_pos, T)
-
-  def _cache_input(self, x:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
-    Tq = x.shape[1]
-    freqs = self.freqs_cis.shrink(((start_pos, start_pos + T), None)).pad_to((Tq, self.freqs_cis.shape[-1]))
-    k, v = self._kv(x, *(f.reshape(1, 1, Tq, -1) for f in freqs.chunk(2, dim=-1)))
-    kv, b = self._kv_rows(k.cat(v, dim=-1)[:, :, :T].transpose(0, 1)), _seq_base[0]
-    deps = [self.cache_k.shrink((None, None, (b+start_pos, b+start_pos+T), None)).uop.store(kv.uop)]
-    if self.indexer is not None: deps.append(self.indexer.update(x, start_pos, T, self.freqs_cis)[0].uop)
-    return Tensor(self.cache_k.uop.after(*deps))
-
-  def predict_selected(self, emb:Tensor, h:Tensor, start_pos:int|UOp, row:int|UOp) -> Tensor:
-    # Catch up all KV/indexer rows, but only the accepted position needs Q, attention output, and the stateless FFN.
-    if not (_qsa_dense[0] and self._flash(emb)):
-      return self.predict(emb, h, start_pos).shrink((None, (row, row+1), None, None))
-    xs = self._project_input(emb, h)
-    self._init_state(xs)
-    hc = cast(GatedResidual, self.hc_attn)
-    if (fused:=hc._fused(xs)) is not None: mixed, inj = fused
-    else:
-      mixed, xn = hc.mix(xs)
-      inj = (s if (s:=_skinny(hc.inject, xn)) is not None else hc.inject(xn)) / hc.count
-    cache = self._cache_input(mixed, start_pos, mixed.shape[1])
-    pos, hd = start_pos + row, self.config.head_dim
-    freqs = self.freqs_cis.shrink(((pos, pos+1), None)).reshape(1, 1, 1, -1)
-    q, gate, _, _ = self._qkv(mixed[:, row:row+1], *freqs.chunk(2, dim=-1))
-    attn = flash_attention_decode(q.cat(q.zeros_like(), dim=-1).half(), cache.unsqueeze(2), pos+1,
-                                  self.config.max_context, shared=True, scale=hd**-0.5, base=_seq_base[0])
-    out = self._out_gated(attn[..., hd:], gate)
-    x = xs[:, row:row+1] + out.unsqueeze(2) * (inj[:, row:row+1].sigmoid()*2).unsqueeze(-1)
-    return self.hc_ffn(x, self._feed_forward, self.ffn_norm)
-
-  def head(self, streams:Tensor) -> Tensor:
-    """the streams' mix: the output head's input"""
-    return self.hc_head.mixed(streams)
 
 class Transformer:
   # (VISION: the server's VISION_MMPROJ sets vision (glm_vision's tower makes the pictures' rows); image_pad_id the template's <|image|>)
@@ -2616,6 +2285,7 @@ class Transformer:
   image_pad_id:int = -1
   vision_mrope = False  # (a picture's rows at plain positions: the text model has no rope, no M-RoPE delta (engine's _delta))
   def __init__(self, config:TransformerConfig):
+    assert not config.qsa, "qwen4exp: use tinygrad.llm.qwen4exp"
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
     self.config = config
@@ -2633,7 +2303,7 @@ class Transformer:
     self.output_norm:Callable[[Tensor], Tensor] = _identity if self.gated else nn.RMSNorm(config.dim, config.norm_eps)
     if self.gated: self.output_hc = GatedResidual(config, inject=False)
     self.output = Linear(config.dim, config.padded_vocab_size or config.vocab_size, bias=False)
-    if config.mtp: self.mtp = QwenMTPBlock(config) if config.qsa else MTPBlock(config)
+    if config.mtp: self.mtp = MTPBlock(config)
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
@@ -2846,7 +2516,7 @@ class Transformer:
       else: ple = self._ple_emb(self._ple_buf.reshape(-1, width).shrink(((start_pos, start_pos + R), None)).unsqueeze(0))
     # a symbolic chunk with hyper-connections runs every block on static padded rows (their real count is T), sliced at the end
     if hc is not None and not isinstance(T:=x.shape[1], int) and amd_custom_kernels_supported(x.device) and \
-       all(isinstance(b, (MLATransformerBlock, GatedDeltaNetBlock, QSABlock)) for b in self.blk):
+       all(isinstance(b, (MLATransformerBlock, GatedDeltaNetBlock)) for b in self.blk):
       x = x.pad_to(x.max_shape).contiguous()
       R = int(x.shape[1])
       # sequence parallel: every device keeps the streams of its rows, the blocks gather and scatter the sublayers' inputs and outputs
@@ -2962,7 +2632,7 @@ class Transformer:
   def _mtp_prefill_rows(self, emb:Tensor, xs:list[Tensor], start_pos:UOp, T:UOp, n:int) -> Tensor:
     """_mtp_prefill (gated) of the micro batches' streams xs (1, n, count, dim) split on the rows. returns (1, T, count, dim) whose last row is
     the last row's streams (the others zeros: only the last one is read)"""
-    qm, hc, mb = cast(QwenMTPBlock, self.mtp), unwrap(self.config.hc), len(xs)
+    qm, hc, mb = cast(Any, self.mtp), unwrap(self.config.hc), len(xs)
     W = hc.count * self.config.dim
     flat = [x.reshape(n, W) for x in xs]
     prev = rows_shifted(flat, self._spec_h[0])
@@ -2989,7 +2659,7 @@ class Transformer:
       # (the streams of every position: the MTP layer's input of the next one, the ones before the chunk's first in _spec_h's row 0)
       hs = x.flatten(2).float()
       emb, carry = emb.pad_to((1, x.shape[1], emb.shape[-1])), self._spec_h[0:1].unsqueeze(0).contiguous()
-      qm, R = cast(QwenMTPBlock, self.mtp), int(x.shape[1])
+      qm, R = cast(Any, self.mtp), int(x.shape[1])
       if (1) and self.sequence_parallel(R) and amd_custom_kernels_supported(x.device):
         # (the MTP layer's input projection and mix of every device's rows only (of the gathered streams: its part kept), its mixed input
         # gathered for the caches: not the projections of every row on every device)
@@ -3006,7 +2676,7 @@ class Transformer:
     hn = self.output_norm(x).float()
     emb, carry = emb.pad_to((1, x.shape[1], emb.shape[-1])), self._spec_h[0:1].unsqueeze(0).contiguous()
     # the MTP layer reads the carry before it's written (the schedule orders an assign after the reads). realized with the call's output
-    inp = self.mtp.enorm(emb).cat(cast(MTPBlock, self.mtp).hnorm(carry.cat(hn[:, :-1], dim=1)), dim=-1)
+    inp = self.mtp.enorm(emb).cat(self.mtp.hnorm(carry.cat(hn[:, :-1], dim=1)), dim=-1)
     if sp and (1):
       # sequence parallel (as the blocks): every device its rows (the projection of the input too), the sublayers on all of them
       mtp, h = self.mtp, q8_linear(self.mtp.eh_proj, shard_rows(inp.contiguous(), 1), split=True)
@@ -3178,7 +2848,6 @@ class Transformer:
       if isinstance(blk, GatedDeltaNetBlock): todo += [blk.pool_rec, *blk.pool_conv]
       if isinstance(blk, MLATransformerBlock):
         todo += [blk.pool_s if blk.seq_sharded else blk.pool_k] + ([blk.indexer.pool_pk, blk.indexer.pool_ring] if blk.indexer is not None else [])
-      if isinstance(blk, QSABlock): todo += [blk.pool_k] + ([blk.indexer.pool_k, blk.indexer.pool_pk] if blk.indexer is not None else [])
     for t in todo:
       for u in t.uop.toposort():
         if u.op is Ops.BUFFER:
@@ -3212,12 +2881,6 @@ class Transformer:
           P, R = idx.pk_slot(), int(idx.slot_ring[0].shape[0])
           copies += [rows(idx.pk_rows(idx.pool_pk), slot*P, span*P).assign(rows(idx.pk_rows(idx.cache_pk), 0, span*P)),
                      rows(idx.pool_ring, slot*R, R).assign(idx.ring)]
-      if isinstance(b, QSABlock):
-        ctx = int(b.pool_k.shape[2])
-        copies.append(b.pool_k.shrink((None, (slot, slot+1), None, None)).assign(b.cache_k[:, :, :ctx]))
-        if (qi:=b.indexer) is not None:
-          copies += [rows(qi.pool_k, slot).assign(qi.cache_k[:ctx].unsqueeze(0)),
-                     rows(qi.pool_pk, slot).assign(qi.cache_pk[:ctx // qi.idx.kpool].unsqueeze(0))]
     Tensor.realize(*copies)
 
   def _slot_load_copy(self, slot:UOp, rp:UOp, wp:UOp, wpc:UOp, hrow:UOp, span:int=1):
@@ -3242,11 +2905,6 @@ class Transformer:
           P, R = idx.pk_slot(), int(idx.slot_ring[0].shape[0])
           copies += [rows(idx.pk_rows(idx.cache_pk), 0, span*P).assign(rows(idx.pk_rows(idx.pool_pk), slot*P, span*P)),
                      idx.ring.assign(rows(idx.pool_ring, slot*R, R))]
-      if isinstance(b, QSABlock):
-        ctx = int(b.pool_k.shape[2])
-        copies.append(b.cache_k[:, :, :ctx].assign(b.pool_k.shrink((None, (slot, slot+1), None, None))))
-        if (qi:=b.indexer) is not None:
-          copies += [qi.cache_k[:ctx].assign(rows(qi.pool_k, slot)[0]), qi.cache_pk[:ctx // qi.idx.kpool].assign(rows(qi.pool_pk, slot)[0])]
     Tensor.realize(*copies)
 
   def _slot_pools(self) -> list[tuple[Tensor, int]]:
@@ -3258,9 +2916,6 @@ class Transformer:
       if isinstance(b, MLATransformerBlock):
         pools.append((b.slot_rows_view(b.pool_s), b.slot_rows()) if b.seq_sharded else (b.pool_k, 1))
         if (idx:=b.indexer) is not None: pools += [(idx.pk_rows(idx.pool_pk), idx.pk_slot()), (idx.pool_ring, int(idx.slot_ring[0].shape[0]))]
-      if isinstance(b, QSABlock):
-        pools.append((b.pool_k.permute(1, 0, 2, 3), 1))
-        if b.indexer is not None: pools += [(b.indexer.pool_k, 1), (b.indexer.pool_pk, 1)]
     return pools
   def _slot_move_copy(self, src:UOp, dst:UOp):
     def rows(t:Tensor, start:UOp, n:int) -> Tensor: return t.shrink(((start, start+n),) + (None,)*(t.ndim-1))
@@ -3383,9 +3038,6 @@ class Transformer:
           if idx.shard: pools = (rows + SEQ_BLK*idx.shard - 1) // (SEQ_BLK*idx.shard) * (SEQ_BLK // idx.idx.kpool)
           if idx.sparse: add(idx.cache_pk, 0, pools), add(idx.ring)
           else: add(idx.cache_pk, 1, pools), add(idx.cache_kg, 1, pools * idx.idx.kpool)
-      if isinstance(b, QSABlock):
-        add(b.cache_k, 2, rows)
-        if b.indexer is not None: add(b.indexer.cache_k, 0, rows), add(b.indexer.cache_pk, 0, (rows + b.indexer.idx.kpool - 1) // b.indexer.idx.kpool)
     # (the recurrent states' row of the end only: through the staging rows, see _host_rows)
     for t in self._host_rows(): add(t)
     if ckpt:
@@ -3650,7 +3302,7 @@ class Transformer:
     """
     G, P, k = len(pf.count_vars), pf.P, self.config.spec_drafts
     before = hn.reshape(G, P, -1)[:, :P-1].pad(((0, 0), (1, 0), (0, 0))).reshape(1, G*P, -1)
-    if k: pf.effects.append(self.mtp(self.mtp.eh_proj(self.mtp.enorm(emb).cat(cast(MTPBlock, self.mtp).hnorm(before), dim=-1)), 0)[:, :1, :1]
+    if k: pf.effects.append(self.mtp(self.mtp.eh_proj(self.mtp.enorm(emb).cat(self.mtp.hnorm(before), dim=-1)), 0)[:, :1, :1]
                             .contiguous())
     last = Tensor.cat(*[hn.shrink(((g*P + c - 1, g*P + c), None)) for g, c in enumerate(pf.count_vars)])
     if k: pf.effects.extend([self.pool_spec_h.shrink(((sl*2*(k+1), sl*2*(k+1)+1), None)).assign(last[g:g+1]) for g, sl in enumerate(pf.slot_vars)])
@@ -3941,11 +3593,6 @@ class Transformer:
           # (SEQ_IDX_SHARD: the pools split as the cache's rows, a device's local ones)
           pk, kd = (b.slot_rows_view(gi.cache_pk), gi.idx.kpool * nd) if gi.shard else (gi.cache_pk, gi.idx.kpool)
           copies.append(mv(pk, src // kd, dst // kd, n // kd, 0))
-      if not isinstance(b, QSABlock): continue
-      copies.append(mv(b.cache_k, src, dst, n, 2))
-      if (idx:=b.indexer) is not None:
-        kp = idx.idx.kpool
-        copies += [mv(idx.cache_k, src, dst, n, 0), mv(idx.cache_pk, src // kp, dst // kp, n // kp, 0)]
     Tensor.realize(*copies)
   SEQ_MOVE = REGION_ALIGN
   def seq_move(self, src:int, dst:int, n:int):
@@ -3970,67 +3617,8 @@ class Transformer:
     C, gb = self.SEQ_MOVE, getenv("SEQ_STASH_GB", 4.0)
     if self.config.cache_rows and self.config.kv_lora_rank > 0:
       return self._seq_stash_init_glm(C, gb)
-    qsa = [b for b in self.blk + [self.mtp] if isinstance(b, QSABlock)]
-    if not qsa:
-      # (other model families: no stash, an evicted sequence is prefilled again)
-      self.stash_entries = self.stash_chunks = self.stash_chunk_nbytes = self.stash_entry_nbytes = 0
-      return
-    def per_row(t:Tensor, axis:int) -> int:
-      # (a device's bytes of a row: split over the devices or not)
-      return t.nbytes() // int(t.shape[axis]) // (len(t.device) if isinstance(t.device, tuple) and t.uop.axis is not None else 1)
-    # (the host memory of a chunk: every distinct KV head's rows and the indexers' (see below))
-    kvr = self._kv_real
-    chunk = C * sum(kvr * per_row(b.cache_k, 2) + (per_row(b.indexer.cache_k, 0) + per_row(b.indexer.cache_pk, 0) // b.indexer.idx.kpool
-                                                    if b.indexer is not None else 0) for b in qsa)
-    self.stash_entries = getenv("SEQ_STASH_ENTRIES", 32) if gb > 0 else 0
-    gdn = [b for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
-    entry = sum(per_row(t, 0) for b in gdn for t in (b.pool_rec, *b.pool_conv)) + per_row(self.seq_spec_h, 0) + \
-            sum(per_row(t, 0) for c in self.seq_ckpt_states for t in c) + per_row(self.seq_ckpt_h, 0)
-    self.stash_chunk_nbytes, self.stash_entry_nbytes = chunk, entry  # exact host-copy units for serving telemetry
-    self.stash_chunks = max(0, int(gb * 1e9 - self.stash_entries * entry) // chunk) if gb > 0 else 0
-    if not self.stash_chunks: self.stash_entries = 0
-    if not self.stash_entries: return
-    H, E = self.stash_chunks * C, self.stash_entries
-    # (the attention caches: a copy of every distinct one in host memory every device maps, written by one device: the KV heads repeated over
-    # the devices are the same, the indexers' caches are on every device)
-    devs, kvr = cast(tuple[str, ...], self.token_embd.weight.device), self._kv_real
-    head = [d * kvr // len(devs) for d in range(len(devs))]
-    # (the devices of a copy write their part of its rows: SEQ_STASH_SPLIT of them at most)
-    def code(group:list[list[int]]) -> int:
-      ret = 0
-      for g in group:
-        g = g[:max(1, (3))]
-        for i, d in enumerate(g): ret |= (i | (len(g) << 4)) << (8*d)
-      return ret
-    self._stash_writers = code([[d for d in range(len(devs)) if head[d] == h] for h in range(kvr)]), code([list(range(len(devs)))])
-    self._stash_kv = []
-    kv_specs = [[(b.cache_k, H)] + ([(b.indexer.cache_k, H), (b.indexer.cache_pk, H // b.indexer.idx.kpool)] if b.indexer is not None else [])
-                for b in qsa]
-    owners = [devs[head.index(h)] for h in range(kvr)] + [devs[0]]
-    def row_bytes(t:Tensor) -> int: return per_row(t, 2 if t is not None and t.ndim == 4 else 0)
-    sizes = [sum(round_up(rows * row_bytes(t), 4096) for b in kv_specs for t, rows in b[:1]) for _ in range(kvr)] + \
-            [sum(round_up(rows * row_bytes(t), 4096) for b in kv_specs for t, rows in b[1:])]
-    arenas = [_shared_host(o, devs, sz) for o, sz in zip(owners, sizes)]
-    offs = [0] * len(arenas)
-    def take(t:Tensor, rows:int, arena_of_dev:list[int]) -> Tensor:
-      local = (rows, *[int(x) for x in t.shape[3 if t.ndim == 4 else 1:]]) if t.ndim == 4 else (rows, *[int(x) for x in t.shape[1:]])
-      nb, views = prod(local) * t.dtype.itemsize, []
-      for d in range(len(devs)): views.append(arenas[arena_of_dev[d]][d].view(nb, offs[arena_of_dev[d]]))
-      for a in set(arena_of_dev): offs[a] += round_up(nb, 4096)
-      (mb:=MultiBuffer.__new__(MultiBuffer)).bufs = views
-      u = UOp.from_buffer(mb, t.dtype, devs).reshape((1, 1, *local) if t.ndim == 4 else local)
-      return Tensor(u.unshard(0) if t.ndim == 4 else u)
-    for b in kv_specs:
-      self._stash_kv.append(tuple(take(t, rows, head if i == 0 else [kvr]*len(devs)) for i, (t, rows) in enumerate(b)))
-    # (a sequence's states of its last position: the recurrent and conv ones, the hidden state of its last token. and its checkpoint's)
-    states = [t for b in gdn for t in (b.pool_rec, *b.pool_conv)] + [self.seq_spec_h] + \
-             [t for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
-    self._stash_state = _host_like([(t, 0, E) for t in states])
-    self._stash_state_count, self._stash_rings, self._stash_replays = len(states), [], []
-    self._stash_calls = self._chunk_calls(min((self.seq_rows() + self.REGION_ALIGN) // C - 1, self.stash_chunks))
-    self._stash_kv_jits = {(sv, n): TinyJit(functools.partial(self._stash_kv_copy, sv, n), capture_first=True)
-                           for sv in (True, False) for n in self._stash_calls}
-    self._stash_state_jits = {sv: TinyJit(functools.partial(self._stash_state_copy, sv), capture_first=True) for sv in (True, False)}
+    # Other model families have no stash: an evicted sequence is prefilled again.
+    self.stash_entries = self.stash_chunks = self.stash_chunk_nbytes = self.stash_entry_nbytes = 0
   def _seq_stash_init_glm(self, C:int, gb:float):
     """GLM's region stash (GLM_SEQ): position-sharded latent rows, replicated index pools, all recurrent/checkpoint/replay state."""
     devs = cast(tuple[str, ...], self.token_embd.weight.device)
@@ -4072,8 +3660,8 @@ class Transformer:
     states = [t for b in gdn for t in (b.pool_rec, *b.pool_conv)] + [self.seq_spec_h] + \
              [t for c in self.seq_ckpt_states + [[self.seq_ckpt_h]] for t in c]
     extra:list[Tensor] = []
-    for b, ck in self._stash_rings:
-      for t in (b.pool_ring, ck): extra.append(_host_like([(t, 0, self.stash_entries * int(b.ring.shape[0]))])[0])
+    for idx, ck in self._stash_rings:
+      for t in (idx.pool_ring, ck): extra.append(_host_like([(t, 0, self.stash_entries * int(idx.ring.shape[0]))])[0])
     for t in replay: extra.append(_host_like([(t, 0, self.stash_entries * replay_q(self.config.spec_drafts))])[0])
     self._stash_state = _host_like([(t, 0, self.stash_entries) for t in states]) + extra
     self._stash_state_count = len(states)
@@ -4108,22 +3696,6 @@ class Transformer:
       # (a restore's copy kernels read the host rows: no device copy of them first (a stash call's rows of every cache: ~126 MB on C5))
       Tensor.realize(*saves, *[x.assign(d) for x, d in pairs])
       return
-    for b, st in zip([b for b in self.blk + [self.mtp] if isinstance(b, QSABlock)], self._stash_kv):
-      ts = [(st[0], b.cache_k, row, chunk*C, C*chunks, self._stash_writers[0])]
-      if (idx:=b.indexer) is not None:
-        kp = idx.idx.kpool
-        ts += [(st[1], idx.cache_k, row, chunk*C, C*chunks, self._stash_writers[1]),
-               (st[2], idx.cache_pk, row//kp, chunk*(C//kp), (C//kp)*chunks, self._stash_writers[1])]
-      for dst, src, r, c, n, writers in ts:
-        axis = 2 if src.ndim == 4 else 0
-        if save:
-          # (a device of every distinct copy writes it: the host memory takes a few GB/s of the devices' writes at once)
-          # (the row and chunk: bound on an input, the kernel's variables)
-          s = Tensor(src.uop.after(r, c))
-          saves.append(Tensor.custom_kernel(dst, s, _device_index(devs), fxn=functools.partial(_stash_save_kernel, row=_unbind(r), at=_unbind(c),
-                                                                                              n=n, writers=writers))[0])
-        else: pairs.append((rows(dst, c, n, axis), rows(src, r, n, axis)))
-    Tensor.realize(*saves, *[x.assign(d) for d, x in pairs])
   def _stash_state_copy(self, save:bool, slot:UOp, entry:UOp, ps:UOp, pc:UOp, hrow:UOp):
     """the states of slot of a position (its rows ps of the recurrent states, pc of the conv ones, hrow of the hidden states) and its checkpoint
     into entry of the stash (save), or back"""
