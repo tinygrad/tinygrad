@@ -226,6 +226,7 @@ class TestBFloat16DType(unittest.TestCase):
     assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
 
   def test_bf16_floor(self): self.assertEqual(Tensor([-1.5, 2.5], dtype=dtypes.bfloat16).floor().tolist(), [-2., 2.])
+  def test_bool_to_bf16(self): self.assertEqual(Tensor([True, False]).cast(dtypes.bfloat16).realize().tolist(), [1., 0.])
 
 class TestBFloat16DTypeCast(unittest.TestCase):
   def test_f16_to_bf16_conversion(self):

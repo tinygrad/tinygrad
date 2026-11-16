@@ -113,6 +113,9 @@ pm_manual_bf16_cast = PatternMatcher([
    lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
   (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)), cast_float_to_bf16),
 ])
+# AMDGPU in LLVM < 21 can't select uitofp i1 to bfloat (llvm/llvm-project#130831)
+pm_bool_to_bf16 = PatternMatcher([
+  (UPat.var("x", dtypes.bool).cast(dtypes.bfloat16, name="c"), lambda x,c: x.where(c.const_like(1), c.const_like(0)))])
 # a bfloat16 stored as ushort renders its const as the bit pattern
 pm_bf16_ushort_const = PatternMatcher([(UPat.cvar("c").cast(dtypes.bfloat16), lambda ctx,c: f"{to_storage_scalar(c.val, dtypes.bfloat16)}u")])
 
@@ -556,7 +559,7 @@ class HIPRenderer(CStyleLanguage):
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
   type_map = {**CStyleLanguage.type_map, **{d: ("hip_fp8", "hip_bf8")[fp8_index(d)] for d in dtypes.fp8s}}
-  extra_matcher = pm_narrow_uint + create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s))
+  extra_matcher = pm_narrow_uint + pm_bool_to_bf16 + create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s))
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     from tinygrad.renderer.amd.elf import assemble_linear
