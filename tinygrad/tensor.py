@@ -165,6 +165,10 @@ class Tensor(RandMixin):
   @rewrite_group(lambda *tensors,ret: f"Schedule {len(tensors)} -> {len(ret[0].src)}")
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
+    return create_linear_with_vars(self._bufferize(*lst))
+
+  def _bufferize(self, *lst:Tensor) -> UOp:
+    """Gives these Tensor(s) storage. Returns the graph of the stores into it, the Tensors now reference the storage."""
     sink = UOp.sink(*[t.uop for t in (self,)+lst])
     if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Tensor Graph")
     # weakness ends where storage begins
@@ -204,8 +208,7 @@ class Tensor(RandMixin):
     assert not any(x in becomes_map for x in becomes_map.values())
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
-
-    return create_linear_with_vars(sink)
+    return sink
 
   def schedule_linear(self, *lst:Tensor) -> UOp:
     """Creates the schedule needed to realize these Tensor(s)."""

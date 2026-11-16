@@ -202,7 +202,6 @@ class CallifyCtx:
   replacements: list[UOp] = field(default_factory=list)
   allocs: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
-  stores: list[UOp] = field(default_factory=list)
 
 def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
@@ -214,7 +213,7 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
     if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
     if (view := contiguous_mops_to_view(ctx, unshard.src[0], unshard.src[0])) is None: return None
     view = view.unshard(unshard.arg, unshard.src[1:])
-  elif buf.op is Ops.BUFFER and (cv := src.contiguous_view()) is not None and cv[0].op is Ops.BUFFER:
+  elif buf.op in {Ops.BUFFER, Ops.EXTERN} and (cv := src.contiguous_view()) is not None and cv[0].op in {Ops.BUFFER, Ops.EXTERN}:
     buf, offset = cv
     view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
     if ctx is not None: ctx.views.add(view)
@@ -225,17 +224,11 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
 def is_store_after(u:UOp) -> bool:
   return u.op is Ops.AFTER and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE)
 
-def collect_stores(ctx:CallifyCtx, u:UOp):
-  if is_store_after(u): ctx.stores.append(u)
-
 # NOTE: scheduling rewrites belong in prepare; only storage/interface normalization belongs here.
 pm_callify_ctx_collect = PatternMatcher([
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.STAGE), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), allow_any_len=True, name="c"), contiguous_mops_to_view),
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
-
-  # Collect effects after their sources have been rewritten, without entering call bodies.
-  (UPat(Ops.AFTER, name="u"), collect_stores),
 ])
 
 # ALLOCs get canonical scope-local id slots here so structurally identical calls hash identically for the
@@ -253,32 +246,57 @@ pm_canonicalize_alloc = PatternMatcher([
   (UPat(Ops.ALLOC, name="b"), canonicalize_alloc),
 ])
 
+# realized storage and bound Variables are runtime state, export turns them into EXTERNs
+def has_runtime_state(x:UOp) -> bool: return x.is_bound_var or (x.op is Ops.BUFFER and x.addrspace is AddrSpace.GLOBAL)
+
+def assert_exported(x:UOp) -> None:
+  assert not has_runtime_state(x), f"transform_to_call takes an exported function, call export first. runtime state in {x.op}"
+
 def replace_input_buffer(ctx:CallifyCtx, b:UOp):
   ctx.replacements.append(b)
   return b.param_like(len(ctx.replacements)-1)
 
 pm_replace_buf = PatternMatcher([
-  # replace GLOBAL BUFFERs with PARAMs for cache key normalization (Variables are ALU PARAMs, they don't match this)
-  (UPat(Ops.BUFFER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL else None),
+  # replace EXTERNs (storage and bound Variables) with PARAMs for cache key normalization
+  (UPat(Ops.EXTERN, name="b"), replace_input_buffer),
   # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
   (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
-  # replace bound Variables with renamed value-stripped PARAMs for cache key normalization, so different values hit same cache
-  (UPat(Ops.PARAM, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
+  # the body of the call must have no runtime state
+  (UPat((Ops.BUFFER, Ops.PARAM), name="x"), assert_exported),
 ])
+
+# **** export: the stores of a tensor graph as a function with no runtime state. storage becomes EXTERN(slot), bound Variables lose
+# their value and ALLOCs get canonical slots. ctx.replacements is what's mapped back
+def to_extern(ctx:CallifyCtx, x:UOp) -> UOp|None:
+  if not has_runtime_state(x): return None
+  ctx.replacements.append(x)
+  return x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=len(ctx.replacements)-1, buffer=None, name=None, val=None))
+
+pm_export = PatternMatcher([(UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern)])+pm_canonicalize_alloc
+
+def export(big_sink:UOp) -> tuple[UOp, tuple[UOp, ...]]:
+  stores = UOp.sink(*(u for u in big_sink.toposort() if is_store_after(u)))
+  fn = graph_rewrite(stores, pm_export, ctx=(ctx:=CallifyCtx()), bottom_up=True, name="export")
+  return fn, tuple(ctx.replacements)
+
+pm_map_back = PatternMatcher([(UPat(Ops.EXTERN, name="e"), lambda ctx,e: ctx[e.arg.slot])])
 
 def transform_to_call(big_sink:UOp) -> UOp:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
 
   # The tensor replacement map is collected before these rewrites change node identities.
-  graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
-  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_canonicalize_alloc+pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs")
+  fn = graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
+  ret = graph_rewrite(fn, pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs")
   ret = ret.call(*ctx.replacements, precompile=True)
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret
 
 def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
-  big_sink = transform_to_call(big_sink)
+  fn, externs = export(big_sink)
+  # the call has no runtime state, its args are mapped back to the storage and the bound Variables
+  big_sink = transform_to_call(fn)
+  big_sink = big_sink.replace(src=(big_sink.body, *graph_rewrite(UOp.sink(*big_sink.src[1:]), pm_map_back, ctx=externs, walk=True).src))
   # big_sink srcs are all the Tensors
   linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
 
