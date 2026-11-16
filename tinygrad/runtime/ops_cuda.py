@@ -109,6 +109,7 @@ class CUDADevice(Compiled):
 
   def get_arch(self, device_id:int) -> str:
     check(cuda.cuDeviceComputeCapability(ctypes.byref(major:=ctypes.c_int()), ctypes.byref(minor:=ctypes.c_int()), device_id))
+    assert major.value >= 8 or DEV.target("CUDA").interface == "MOCK", f"Unsupported arch: sm_{major.value}{minor.value}, must be sm_80+"
     return f"sm_{major.value}{minor.value}"
 
   @functools.cache
