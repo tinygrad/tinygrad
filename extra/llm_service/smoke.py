@@ -4,7 +4,7 @@
 #  a  20 chats with NO sampling parameters: status 200, stray-script characters in content = 0, no <think> in content, reasoning in
 #     reasoning_content on every reply (--no-reasoning for a model that does not think), five printed for the eye
 #  b  sampling honoured: one-token draws at T 1 / top_p 1 and T 1 / top_p 0.95: the top_p 0.95 arm draws (almost) nothing from the
-#     top_p 1 arm's last 5% tail; a request with top_k and an unknown field is answered (200)
+#     top_p 1 arm's last 5% tail (fails if that tail is empty); a request with top_k and an unknown field is answered (200)
 #  c  returning turns under pressure: N = max(80, 1.25 x slots) conversations, a secret each, then every one returns and must answer its
 #     OWN secret (100%); text, then one picture each
 #  d  10 pictures in one request accepted; a 3840x2160 picture's prompt tokens (checked against --rows-4k if given)
@@ -20,6 +20,8 @@ ap.add_argument("--no-pictures", action="store_true")
 ap.add_argument("--draws", type=int, default=300)
 ap.add_argument("--max-tokens", type=int, default=4000, help="max_tokens of the part a chats")
 ap.add_argument("--ret-max-tokens", type=int, default=48, help="max_tokens of a part c reply (thinking off)")
+ap.add_argument("--draw-prompt", default="Name one fruit. Reply with the fruit's name only, no other words.",
+                help="part b's prompt: its first generated token must have a spread (a tail) at temperature 1")
 ap.add_argument("--no-reasoning", action="store_true")
 ap.add_argument("--only", default="abcd")
 ap.add_argument("--seed", type=int, default=0)
@@ -61,12 +63,14 @@ if "a" in args.only:
   if len(ok) != len(topics) or stray or think or empty or (not args.no_reasoning and reasoning != len(ok)): fails.append("a")
 
 if "b" in args.only:
-  msgs = [{"role": "user", "content": "Name one fruit. Reply with the fruit's name only, no other words."}]
+  msgs = [{"role": "user", "content": args.draw_prompt}]
   def draw(kw): return post({"messages": msgs, "max_tokens": 1, **NOTHINK, **kw})
+  # the first generated token: in content, or in reasoning_content for a model that always thinks (GLM 5.3 Flash ignores enable_thinking)
+  def first(r:dict) -> str: return content(r) or ((r.get("choices") or [{}])[0].get("message") or {}).get("reasoning_content") or ""
   arms = {}
   for name, kw in (("P1", {"temperature": 1.0, "top_p": 1.0}), ("P95", {"temperature": 1.0, "top_p": 0.95})):
     with ThreadPoolExecutor(8) as ex: rs = list(ex.map(draw, [kw] * args.draws))
-    arms[name] = collections.Counter(content(r) for c, r in rs if c == 200 and r.get("choices"))
+    arms[name] = collections.Counter(first(r) for c, r in rs if c == 200 and r.get("choices") and first(r))
   p1, n1 = arms["P1"], sum(arms["P1"].values())
   # the P1 arm's tail: its rarest tokens, holding its last 5% of draws (an estimate: a few draws of a borderline token are allowed)
   tail, acc = set(), 0
@@ -78,7 +82,9 @@ if "b" in args.only:
   code, _r = post({"messages": msgs, "max_tokens": 4, "top_k": 20, "temperature": 0.7, "frobnicate": True})
   say(f"B sampler: {args.draws} draws an arm; P1 distinct {len(p1)}, its 5% tail {len(tail)} tokens ({acc} draws); P95 draws in that tail: {out} "
       f"(allow {allow}); top P1 {p1.most_common(4)} P95 {arms['P95'].most_common(4)}; top_k + unknown field: HTTP {code}")
-  if out > allow or code != 200 or min(sum(a.values()) for a in arms.values()) < args.draws * 0.9: fails.append("b")
+  # (no tail = no power: the arm cannot show a top_p that is ignored; pick a --draw-prompt with a spread instead of passing)
+  if not tail: say("B has NO POWER: the P1 arm has no 5% tail (its first token is too certain): use a --draw-prompt with a spread")
+  if out > allow or code != 200 or not tail or min(sum(a.values()) for a in arms.values()) < args.draws * 0.9: fails.append("b")
 
 if "c" in args.only:
   n = max(80, int(1.25 * args.slots + 0.999))
