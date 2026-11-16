@@ -167,11 +167,6 @@ def mla_q_cat(q_nope:Tensor, q_rope:Tensor) -> Tensor:
                     axis=q_nope.uop.axis if isinstance(q_nope.device, tuple) else None)
   return Tensor(qb.uop.after(qb[..., :lora].uop.store(q_nope.uop), qb[..., lora:].uop.store(q_rope.cast(q_nope.dtype).uop)))
 
-def permute_rope(w:Tensor, n_heads:int, rope_dim:int) -> Tensor:
-  x = w.reshape(n_heads, w.shape[0]//n_heads, -1)
-  prefix = x.shape[1]-rope_dim
-  return x[:, :prefix].cat(x[:, prefix:].rearrange("n (h two) d -> n (two h) d", two=2), dim=1).reshape(w.shape)
-
 def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   n = x.shape[-1]
   vals = Tensor.arange(n).reshape(1,1,n).cast(x.dtype).expand(x.shape)
@@ -202,16 +197,6 @@ def topk_mask(x:Tensor, k:int) -> Tensor:
     cand = thr | (1 << bit)
     thr = ((key >= cand).sum(-1, keepdim=True) >= k).where(cand, thr)
   return key >= thr
-
-@dataclass(frozen=True)
-class SSMConfig:
-  conv_kernel: int
-  state_size: int
-  group_count: int
-  time_step_rank: int
-  inner_size: int
-  kda: bool = False
-  gate_lower_bound: float|None = None  # kda: bounded decay gate
 
 @dataclass(frozen=True)
 class IndexerConfig:  # select top_k tokens by scoring individual keys or pools of kpool keys
@@ -246,11 +231,11 @@ class TransformerConfig:
   q_lora_rank: int = 0
   kv_lora_rank: int = 0
   shared_expert_dim: int = 0
-  ssm_layers: tuple[bool, ...] = ()
+  ssm_layers: tuple[bool, ...] = ()  # (glm-dsa: no recurrent blocks; glm5next's shared methods read it)
   attn_output_gate: bool = False
   attn_output_bias: bool = False
   attn_sinks: bool = False
-  ssm: SSMConfig|None = None
+  ssm: None = None  # (glm-dsa: no recurrent blocks)
   shared_expert_gate: bool = True
   leading_dense_blocks: int = 0
   dense_hidden_dim: int = 0
@@ -1081,7 +1066,7 @@ class MLATransformerBlock(FFNBlock):
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
     freqs = self.freqs_cis[start_pos:start_pos+T]
     if Tq is not T: freqs = freqs.pad_to((Tq, freqs.shape[1]))
-    if not self.config.ssm or not self.config.ssm.kda: q_rope = apply_rope(q_rope, freqs, self.config.rope_interleave)
+    q_rope = apply_rope(q_rope, freqs, self.config.rope_interleave)
     # half weights: half copies of the input and the output and a float accumulator use the tensor cores (casts or permutes fused into the
     # matmul don't)
     k_b, half = self.attn_k_b["weight"].transpose(-1, -2), self.attn_k_b["weight"].dtype == dtypes.half and (not isinstance(Tq, int) or Tq > 1)
@@ -1098,7 +1083,7 @@ class MLATransformerBlock(FFNBlock):
       kv_a = pre["kv_a"] if pre is not None else dec[1] if dec is not None else self.attn_kv_a_mqa(x)
       c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
       k_rope = kv_a[..., self.config.kv_lora_rank:].reshape(B, Tq, 1, self.config.rope_dim).transpose(1, 2)
-      if not self.config.ssm or not self.config.ssm.kda: k_rope = apply_rope(k_rope, freqs, self.config.rope_interleave)
+      k_rope = apply_rope(k_rope, freqs, self.config.rope_interleave)
       k_store = c_kv.reshape(B, 1, Tq, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, Tq, self.config.rope_dim), dim=-1)
     if self.seq_sharded:
       # the cache split on its positions over the devices (MLA_SEQ_SHARD): every device stores its rows of the tokens, attends all the heads
@@ -1178,7 +1163,7 @@ class MLATransformerBlock(FFNBlock):
     """batched decoding: a group of rows a sequence at its positions, its caches in its slot (the projections of all of them in one kernel each)"""
     B, Tq, _ = x.shape
     sb = _seq_batch[0]
-    assert self.config.rope_dim == 0 or (self.config.ssm is not None and self.config.ssm.kda) or sb is not None, \
+    assert self.config.rope_dim == 0 or sb is not None, \
       "grouped MLA rope needs per-sequence positions"
     q_nope_head_dim = self.config.head_dim - self.config.rope_dim
     freqs = rows_gather(self.freqs_cis, sb.row_positions) if sb is not None and self.config.rope_dim else None
@@ -1371,9 +1356,8 @@ class Transformer(GLMSeqDriver):
   SAMPLE_TOP_K = False
   def __init__(self, config:TransformerConfig):
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
-    if config.ssm: config = replace(config, qk_norm=config.head_dim)
     self.config = config
-    assert config.kv_lora_rank > 0 and config.ssm is None, "glm_dsa runs GLM-5.3 (glm-dsa): MLA blocks only, no recurrent or plain attention blocks"
+    assert config.kv_lora_rank > 0, "glm_dsa runs GLM-5.3 (glm-dsa): MLA blocks only, no recurrent or plain attention blocks"
     self.blk:list[FFNBlock] = []
     for i in range(config.num_blocks):
       c = dense_config if i < config.leading_dense_blocks else config
@@ -1964,35 +1948,31 @@ class Transformer(GLMSeqDriver):
     # deferred: the files are read ahead from now (the disk works while the model is made, the loader finds them in memory)
     if defer_load: _read_ahead(entries)
     arch = kv['general.architecture']
+    assert arch == 'glm-dsa', f"glm_dsa loads GLM-5.3 (glm-dsa) only, got {arch}"
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
     assert shard >= 1, f"shard must be at least 1, got {shard}"
     # the next token prediction (MTP) layers: the first is loaded with MTP=1 (model.mtp), the others aren't used
     num_blocks = kv[f'{arch}.block_count'] - kv.get(f'{arch}.nextn_predict_layers', 0)
-    mtp = bool((int(arch in ("glm5-next", "glm-dsa")))) and kv.get(f"{arch}.nextn_predict_layers", 0) > 0
+    mtp = kv.get(f"{arch}.nextn_predict_layers", 0) > 0
     # (NUM_BLOCKS: only the first blocks (debugging: a small model of the same kernels), no MTP layer)
     entries = {k:v for k,v in entries.items() if not ((m:=re.match(r"blk\.(\d+)\.", k)) and int(m.group(1)) >= num_blocks + mtp)}
-    indexer_shared:tuple[bool, ...] = ()
-    if arch == 'glm-dsa':
-      # (GLM-5: the indexers of the first 3 layers and every 4th one after, the layers between use the last one's picks (the MTP layer has its own))
-      freq, skip = (4), (3)
-      indexer_shared = tuple(not (i < skip or (i - skip + 1) % freq == 0) for i in range(num_blocks))
-      entries = {k:v for k,v in entries.items() if not ((m:=re.match(r"blk\.(\d+)\.indexer\.", k)) and int(m.group(1)) < num_blocks and
-                                                         indexer_shared[int(m.group(1))])}
+    # (GLM-5: the indexers of the first 3 layers and every 4th one after, the layers between use the last one's picks (the MTP layer has its own))
+    freq, skip = (4), (3)
+    indexer_shared:tuple[bool, ...] = tuple(not (i < skip or (i - skip + 1) % freq == 0) for i in range(num_blocks))
+    entries = {k:v for k,v in entries.items() if not ((m:=re.match(r"blk\.(\d+)\.indexer\.", k)) and int(m.group(1)) < num_blocks and
+                                                       indexer_shared[int(m.group(1))])}
     shard_map:dict[str, int] = {}
     units_map:dict[str, tuple[int, list[list[int]]]] = {}
     pads:dict[str, int] = {}
     padded_heads, sizes, expert_slices, expert_units = n_heads, {}, 0, 0
     if shard > 1:
       # MLA and kda attention split all their tensors by the n_heads heads: those are zero padded to a multiple of the devices
-      pad_heads = bool(kv.get(f'{arch}.attention.kv_lora_rank')) or arch in ('kimi-linear', 'glm5-next')
+      pad_heads = bool(kv.get(f'{arch}.attention.kv_lora_rank'))
       if not pad_heads: assert n_kv_heads % shard == 0, f"tensor parallel needs the attention heads to split over {shard} devices"
       padded_heads = round_up(n_heads, shard) if pad_heads else n_heads
       # shard heads, FFNs and routed experts while replicating latent projections, KV cache and the small kda projections
       head_rules = {**{w: 0 for w in ('attn_q.weight', 'attn_k.weight', 'attn_v.weight', 'attn_q_b.weight', 'attn_k_b.weight', 'attn_v_b.weight')},
                     'attn_output.weight': 1}
-      # the kda layers split by heads too (the gated deltanet of qwen3.5 is copied to every device)
-      if arch in ('kimi-linear', 'glm5-next'): head_rules.update({w: 0 for w in ('ssm_conv1d_q.weight', 'ssm_conv1d_k.weight', 'ssm_conv1d_v.weight',
-        'ssm_dt.bias', 'ssm_a', 'ssm_beta.weight', 'ssm_f_b.weight', 'ssm_g_b.weight')})
       ffn_rules = {**{w: 0 for w in ('ffn_gate.weight', 'ffn_up.weight', 'ffn_gate_shexp.weight', 'ffn_up_shexp.weight', 'output.weight')},
                    **{w: 1 for w in ('ffn_down.weight', 'ffn_down_shexp.weight')}}
       if len(kv['tokenizer.ggml.tokens']) % shard == 0: ffn_rules['token_embd.weight'] = 0
@@ -2061,34 +2041,13 @@ class Transformer(GLMSeqDriver):
 
     assert f'{arch}.hyper_connection.count' not in kv, "hyper-connections: not supported (GLM-5.3 has none)"
 
+    if f'{arch}.attention.indexer.kpool' in kv:
+      state_dict = {k.replace('.indexer_compressor_', '.indexer.compressor_'):v for k,v in state_dict.items()}
     indexer = IndexerConfig(kv[f'{arch}.attention.indexer.head_count'], kv[f'{arch}.attention.indexer.key_length'],
-                            kv[f'{arch}.attention.indexer.top_k'], kv[f'{arch}.attention.indexer.kpool'],
-                            kv[f'{arch}.attention.layer_norm_epsilon']) if f'{arch}.attention.indexer.kpool' in kv else None
-    if indexer is not None: state_dict = {k.replace('.indexer_compressor_', '.indexer.compressor_'):v for k,v in state_dict.items()}
-    if arch == 'glm-dsa':
-      indexer = IndexerConfig(kv[f'{arch}.attention.indexer.head_count'], kv[f'{arch}.attention.indexer.key_length'],
-                              kv[f'{arch}.attention.indexer.top_k'], 1, 1e-6, rope_dim=kv[f'{arch}.rope.dimension_count'], rope_interleave=True)
+                            kv[f'{arch}.attention.indexer.top_k'], 1, 1e-6, rope_dim=kv[f'{arch}.rope.dimension_count'], rope_interleave=True)
     if mtp: state_dict = {re.sub(rf"^blk\.{num_blocks}\.(nextn\.)?", "mtp.", k):v for k,v in state_dict.items()}
 
     max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
-
-    ssm = None
-    ssm_layers: tuple[bool, ...] = ()
-    if arch in ('qwen35', 'qwen35moe'):
-      ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')})
-      ssm_layers = tuple((i+1) % kv[f'{arch}.full_attention_interval'] != 0 for i in range(num_blocks))
-    elif arch in ('kimi-linear', 'glm5-next'):
-      ssm_layers = tuple(x == 0 for x in n_kv_heads)[:num_blocks]
-      n_kv_heads = max(n_kv_heads)
-      ssm = SSMConfig(kv[f'{arch}.ssm.conv_kernel'], kv[f'{arch}.kda.head_dim'], padded_heads, padded_heads,
-                      padded_heads*kv[f'{arch}.kda.head_dim'], kda=True, gate_lower_bound=kv.get(f'{arch}.kda.gate_lower_bound'))
-      for i, is_ssm in enumerate(ssm_layers):
-        if not is_ssm: continue
-        state_dict[f"blk.{i}.ssm_a"] = state_dict[f"blk.{i}.ssm_a"].reshape(padded_heads, 1)
-        for c in "qkv": state_dict[f"blk.{i}.ssm_conv1d_{c}.weight"] = state_dict[f"blk.{i}.ssm_conv1d_{c}.weight"].squeeze(1)
-        state_dict[f"blk.{i}.ssm_out.weight"] = state_dict.pop(f"blk.{i}.attn_output.weight")
-    if arch in ('qwen35', 'qwen35moe', 'glm4moe', 'gpt-oss'):
-      state_dict = {k.replace('post_attention_norm', 'ffn_norm'):v for k,v in state_dict.items()}
 
     kv_lora_rank = kv.get(f'{arch}.attention.kv_lora_rank', 0)
     head_dim = kv.get(f'{arch}.attention.key_length_mla', kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads))
@@ -2098,17 +2057,8 @@ class Transformer(GLMSeqDriver):
                       beta_fast=kv.get(f'{arch}.rope.scaling.yarn_beta_fast', 32.0),
                       beta_slow=kv.get(f'{arch}.rope.scaling.yarn_beta_slow', 1.0)) if kv.get(f'{arch}.rope.scaling.type') == 'yarn' else None
 
-    # Permute RoPE weights from interleaved to half-split layout.
-    for name in state_dict:
-      if arch in ('kimi-linear', 'glm5-next', 'glm-dsa'): continue  # (glm-dsa: rope on interleaved pairs, the quantized weights as they are)
-      if ('attn_q.weight' in name or 'attn_q_b.weight' in name) and (arch == 'llama' or kv_lora_rank):
-        state_dict[name] = permute_rope(state_dict[name], n_heads, rope_dim)
-      elif arch == 'llama' and 'attn_k.weight' in name:
-        state_dict[name] = permute_rope(state_dict[name], n_kv_heads, state_dict[name].shape[0]//n_kv_heads)
-      elif kv_lora_rank and 'attn_kv_a_mqa.weight' in name:
-        state_dict[name] = permute_rope(state_dict[name], 1, state_dict[name].shape[0]-kv_lora_rank)
     # (SPEC_DRAFTS_BY_SIZE=1:2,4:3,...: a step of m sequences drafts that many, the sizes not listed SPEC_DRAFTS)
-    spec = getenv("SPEC_DRAFTS", 3 if arch == "glm-dsa" else 2)
+    spec = getenv("SPEC_DRAFTS", 3)
     by_size = glm_seq_base.spec_by_size(spec, glm_seq_base.Transformer.SEQ_SIZES)
     config = TransformerConfig(
       num_blocks=num_blocks, dim=kv[f'{arch}.embedding_length'],
@@ -2121,9 +2071,8 @@ class Transformer(GLMSeqDriver):
       max_context=max_context,
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
-      norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe', 'kimi-linear')),
-      expert_gating_func=ExpertGating(kv.get(f'{arch}.expert_gating_func',
-        ExpertGating.SOFTMAX_WEIGHT if arch == 'gpt-oss' else ExpertGating.SOFTMAX)),
+      norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', False),
+      expert_gating_func=ExpertGating(kv.get(f'{arch}.expert_gating_func', ExpertGating.SOFTMAX)),
       kv_lora_rank=kv_lora_rank, q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
       leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
       shared_expert_dim=sizes.get(f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_shexp.weight", kv.get(
@@ -2132,16 +2081,15 @@ class Transformer(GLMSeqDriver):
       shared_expert_gate=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_inp_shexp.weight" in state_dict,
       dense_hidden_dim=sizes.get('blk.0.ffn_gate.weight', kv.get(f'{arch}.feed_forward_length', 0))
         if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
-      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe'), ssm=ssm,
-      ssm_layers=ssm_layers,
+      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0),
       qkv_bias='blk.0.attn_q.bias' in state_dict,
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict, expert_slices=expert_slices,
       expert_proj_bias='blk.0.ffn_gate_exps.bias' in state_dict, attn_output_bias='blk.0.attn_output.bias' in state_dict,
-      swiglu_alpha=1.702 if arch == 'gpt-oss' else 1.0, swiglu_limit=7.0 if arch == 'gpt-oss' else kv.get(f'{arch}.swiglu_clamp_exp', [None])[0],
-      swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
+      swiglu_limit=kv.get(f'{arch}.swiglu_clamp_exp', [None])[0],
+      attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
-      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), indexer=indexer, mtp=mtp,
-      spec_drafts=max([spec, *(d for _, d in by_size)]) if mtp else 0, spec_by_size=by_size if mtp else (), rope_interleave=arch == 'glm-dsa',
+      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 0), indexer=indexer, mtp=mtp,
+      spec_drafts=max([spec, *(d for _, d in by_size)]) if mtp else 0, spec_by_size=by_size if mtp else (), rope_interleave=True,
       indexer_shared=indexer_shared,
       expert_units=expert_units,
       cache_rows=round_up(getenv("SEQ_ROWS", 0), REGION_ALIGN) if (1) else 0)
