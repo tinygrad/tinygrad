@@ -9,7 +9,7 @@ from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.uop.ops import Ops, UPat, UOp
 from tinygrad.helpers import DEV, GlobalCounters, Context, temp
 from tinygrad.engine.realize import run_linear
-from test.helpers import check_schedule, assert_kernel_count, linear_with_vars
+from test.helpers import check_schedule, assert_kernel_count
 
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
@@ -353,7 +353,7 @@ class TestCopyFolding(unittest.TestCase):
   def test_copy_to_same_device_sched(self):
     a = Tensor.ones(4).contiguous().realize().uop.buf_uop
     t = Tensor(a.copy_to_device(a.device))
-    linear, var_vals = linear_with_vars(t)
+    linear, var_vals = t.linear_with_vars()
     assert len([call for call in linear.src if call.src[0].op is Ops.STORE]) == 0
     run_linear(linear, var_vals)
     assert t.uop.is_realized, f"didn't realize Tensor {t}"
@@ -442,7 +442,7 @@ class TestFusionOp(unittest.TestCase):
   def test_expand_fuse(self):
     bt = Tensor(np.ones((10, 1)), dtype=dtypes.float32)
     out = (bt*2).expand(10,10).sum(1)
-    run_linear(*linear_with_vars(out))
+    run_linear(*out.linear_with_vars())
     outd = out.tolist()
     assert all(x == 20.0 for x in outd)
 

@@ -2,7 +2,6 @@
 """Integration test: round-trip RDNA3 assembly through LLVM toolchain."""
 import unittest
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
-from test.helpers import schedule_linear
 from test.amd.helpers import llvm_assemble, llvm_disasm
 
 def waitcnt(vmcnt: int = 0x3f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
@@ -85,7 +84,7 @@ class TestTinygradIntegration(unittest.TestCase):
     from tinygrad.uop.ops import Ops
 
     result = op_fn(Tensor)
-    linear = schedule_linear(result)
+    linear = result.schedule_linear()
     sink_items = [call for call in linear.src if call.src[0].op == Ops.SINK]
     assert len(sink_items) > 0, "No SINK in schedule"
     renderer = AMDLLVMRenderer(Target("AMD", arch='gfx1100'))

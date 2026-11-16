@@ -2,7 +2,6 @@ import unittest, pickle, types
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import ContextVar, Context
 from tinygrad.uop.ops import PatternMatcher, UPat, UOp, deconstruct_function
-from test.helpers import schedule_linear
 
 class TestPickle(unittest.TestCase):
   def test_pickle_code_object(self):
@@ -40,7 +39,7 @@ class TestPickle(unittest.TestCase):
   def test_pickle_schedule(self):
     a = Tensor([1,2])
     out = a + 2
-    sched = schedule_linear(out)
+    sched = out.schedule_linear()
     pk = pickle.dumps(sched)
     sched_pk = pickle.loads(pk)
     self.assertEqual(sched_pk.src[-1].src[0], sched.src[-1].src[0])

@@ -2,10 +2,9 @@ import unittest
 from tinygrad import Tensor, Variable, Context
 from tinygrad.helpers import cpu_events
 from tinygrad.schedule import schedule_cache
-from test.helpers import linear_with_vars, schedule_linear
 
 def schedule_one():
-  schedule_linear(Tensor([1]))
+  Tensor([1]).schedule_linear()
 
 class TestScheduleCache(unittest.TestCase):
   def test_bound_variable_var_vals(self):
@@ -13,7 +12,7 @@ class TestScheduleCache(unittest.TestCase):
     x = Tensor.ones(10).contiguous().realize()
 
     t = x + Tensor(v.bind(42))
-    _, var_vals = linear_with_vars(t)
+    _, var_vals = t.linear_with_vars()
     self.assertEqual(var_vals, {'pos': 42})
 
   def test_view_offset_not_in_cache_key(self):

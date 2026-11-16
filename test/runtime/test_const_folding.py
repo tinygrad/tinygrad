@@ -2,12 +2,12 @@ import unittest, math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import Ops
 import numpy as np
-from test.helpers import not_support_multi_device, schedule_linear
+from test.helpers import not_support_multi_device
 from test.null.test_const_folding import _check_ast_count
 
 class TestMovedConstFolding(unittest.TestCase):
   def test_copy_padded_const(self):
-    schedule = schedule_linear(Tensor.ones(4, buffer=False).pad(((1, 1),)).to("CPU:1"))
+    schedule = Tensor.ones(4, buffer=False).pad(((1, 1),)).to("CPU:1").schedule_linear()
     assert not any(si.src[0].op is Ops.STORE for si in schedule.src), "const copy should be folded"
     np.testing.assert_equal(Tensor.ones(4, buffer=False).pad(((1, 1),)).to("CPU:1").numpy(), [0, 1, 1, 1, 1, 0])
 

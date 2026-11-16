@@ -4,7 +4,6 @@ import unittest, io, sys, re
 from dataclasses import dataclass
 from tinygrad import Device
 from tinygrad.renderer.amd import detect_format
-from test.helpers import schedule_linear
 from test.amd.helpers import llvm_assemble, llvm_disasm, get_target, get_mattr
 from test.amd.disasm import disasm
 
@@ -63,7 +62,7 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
   from tinygrad.runtime.support.elf import elf_loader
 
   out = op_fn(Tensor)
-  linear = lower_and_compile(schedule_linear(out))
+  linear = lower_and_compile(out.schedule_linear())
   kernels = []
   buf_pool: dict[int, int] = {}  # buffer id -> size
   buf_data: dict[int, bytes] = {}  # buffer id -> initial data from bulk STORE

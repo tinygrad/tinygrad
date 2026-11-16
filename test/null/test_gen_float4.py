@@ -4,7 +4,7 @@ from tinygrad.uop.ops import UOp, Ops, AxisType
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 
-from test.helpers import replace_opts, linear_with_vars, schedule_linear
+from test.helpers import replace_opts
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
@@ -18,7 +18,7 @@ class TestFloat4(unittest.TestCase):
     b = Tensor.empty(2, 8).realize()
     c = a + b
 
-    s = schedule_linear(c).src[0]
+    s = c.schedule_linear().src[0]
     realized_ast = s.src[0]
     opts_to_apply = [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]
     program = to_program(replace_opts(realized_ast, opts_to_apply), renderer=Device[Device.DEFAULT].renderer)
@@ -30,7 +30,7 @@ class TestFloat4(unittest.TestCase):
     b = Tensor.empty(2, 8).realize()
     c = a + b
 
-    s = schedule_linear(c).src[0]
+    s = c.schedule_linear().src[0]
     uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST)),
                                                     Opt(op=OptOps.SPLIT, axis=0, arg=(2, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
@@ -41,7 +41,7 @@ class TestFloat4(unittest.TestCase):
     b = Tensor.empty(9).realize().shrink(((1, 9),))
     c = a + b
 
-    s = schedule_linear(c).src[0]
+    s = c.schedule_linear().src[0]
     realized_ast = s.src[0]
     opts_to_apply = [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]
     program = to_program(replace_opts(realized_ast, opts_to_apply), renderer=Device[Device.DEFAULT].renderer)
@@ -53,7 +53,7 @@ class TestFloat4(unittest.TestCase):
     b = Tensor.empty(2, 9).realize().shrink(((0, 2), (1, 9),))
     c = a + b
 
-    s = schedule_linear(c).src[0]
+    s = c.schedule_linear().src[0]
     uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=1, arg=(4, AxisType.UPCAST)),
                                                     Opt(op=OptOps.SPLIT, axis=1, arg=(2, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
@@ -67,7 +67,7 @@ class TestFloat4(unittest.TestCase):
     # only the first and last conv dot products are aligned in a, and b is never aligned, so no
     # float4 should be emitted (the reduce axis of size 4 is the float4 axis here)
 
-    s = schedule_linear(c).src[0]
+    s = c.schedule_linear().src[0]
     uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=1, arg=(4, AxisType.UPCAST))]),
                             renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
@@ -82,7 +82,7 @@ class TestFloat4(unittest.TestCase):
     # don't.
     # UPDATE: now we do this fusion
 
-    s = schedule_linear(c).src[0]
+    s = c.schedule_linear().src[0]
     uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST)),
                                                     Opt(op=OptOps.SPLIT, axis=1, arg=(0, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
@@ -97,7 +97,7 @@ class TestFloat4(unittest.TestCase):
     # we will upcast the top axis of sz 4. they should not be coalesced into float4,
     # since the top axis is not contiguous.
 
-    s = schedule_linear(c).src[0]
+    s = c.schedule_linear().src[0]
     uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]),
                             renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
@@ -110,7 +110,7 @@ class TestFloat4(unittest.TestCase):
 
     # should float4 b but not a
 
-    s = schedule_linear(c).src[0]
+    s = c.schedule_linear().src[0]
     uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]),
                             renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
@@ -124,7 +124,7 @@ class TestFloat4(unittest.TestCase):
 
     # should float4 both
 
-    s = linear_with_vars(c)[0].src[0]
+    s = c.linear_with_vars()[0].src[0]
     uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]),
                             renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
@@ -138,7 +138,7 @@ class TestFloat4(unittest.TestCase):
 
     # should float4 a but not b
 
-    s = linear_with_vars(c)[0].src[0]
+    s = c.linear_with_vars()[0].src[0]
     uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]),
                             renderer=Device[Device.DEFAULT].renderer).src[1].src)
 

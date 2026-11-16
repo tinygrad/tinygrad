@@ -12,7 +12,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.x86 import ISARenderer
-from test.helpers import replace_opts, check_schedule, linear_with_vars, schedule_linear
+from test.helpers import replace_opts, check_schedule
 from test.runtime.test_softmax_fusion import single_kernel_softmax
 MOCKGPU = DEV.interface.startswith("MOCK")
 
@@ -26,7 +26,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(4).realize(), Tensor.randn(4).realize()
     np_a, np_b = a.numpy(), b.numpy()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
-    linear = schedule_linear(c)
+    linear = c.schedule_linear()
     run_linear(linear)
     rawbufs = [s.buffer for s in linear.src[-1].src[1:] if not s.is_bound_var]
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.uop.base.realized, b.uop.base.realized}
@@ -289,7 +289,7 @@ class TestLinearizer(unittest.TestCase):
 
 def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   if isinstance(r, Tensor): r = [r]
-  linear, var_vals = linear_with_vars(*r)
+  linear, var_vals = Tensor.linear_with_vars(*r)
   run_linear(UOp(Ops.LINEAR, src=linear.src[:-1]), var_vals)  # run all kernels except the last one
   last_call = linear.src[-1]
   ast = last_call.src[0]

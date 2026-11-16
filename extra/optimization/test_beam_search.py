@@ -8,7 +8,6 @@ from tinygrad.uop.ops import AxisType
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.codegen.opt.search import get_kernel_actions
-from tinygrad.schedule import create_linear
 
 def rand(*shape):
   return Tensor(np.random.rand(*shape).astype(np.float32))
@@ -85,7 +84,7 @@ class TestBeamSearch(unittest.TestCase):
     tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
     size = max(tc.dims[0], tc.dims[1]) * 8
     a, b = Tensor.rand(size, size, dtype=tc.dtype_in), Tensor.rand(size, size, dtype=tc.dtype_in)
-    ast = create_linear(Tensor.export(a.matmul(b, dtype=tc.dtype_out))[0]).src[-1].src[0]
+    ast = a.matmul(b, dtype=tc.dtype_out).schedule_linear().src[-1].src[0]
     s = Scheduler(ast, Device[Device.DEFAULT].renderer)
     s.apply_opt(Opt(OptOps.TC, 0, (-1, 0, 1)))
     up = prod([x for x, t in zip(s.full_shape, s.axis_types) if t is AxisType.UPCAST])
@@ -95,7 +94,7 @@ class TestBeamSearch(unittest.TestCase):
     assert len(upcasted) > 0, f"expected upcast/unroll actions after TC with max_up={up}, but got none"
 
   def test_reduce_upcast_actions(self):
-    ast = create_linear(Tensor.export(Tensor.empty(32, 32).sum(1))[0]).src[-1].src[0]
+    ast = Tensor.empty(32, 32).sum(1).schedule_linear().src[-1].src[0]
     s = Scheduler(ast, Device[Device.DEFAULT].renderer)
     output_axis, reduce_axis = s.axes_of(reduce=False)[0], s.axes_of(reduce=True)[0]
     actions = get_kernel_actions(s, include_0=False, max_up=32)
@@ -107,7 +106,7 @@ class TestBeamSearch(unittest.TestCase):
     self.assertNotIn((output_axis, 0), up_opts)  # full output upcast of 32 exceeds its limit
 
   def test_reduce_upcast_budget(self):
-    ast = create_linear(Tensor.export(Tensor.empty(32, 32).sum(1))[0]).src[-1].src[0]
+    ast = Tensor.empty(32, 32).sum(1).schedule_linear().src[-1].src[0]
     s = Scheduler(ast, Device[Device.DEFAULT].renderer)
     s.apply_opt(Opt(OptOps.SPLIT, s.axes_of(reduce=False)[0], (2, AxisType.UPCAST)))
     reduce_axis = s.axes_of(reduce=True)[0]
@@ -119,7 +118,7 @@ class TestBeamSearch(unittest.TestCase):
 
   def test_max_up(self):
     a = Tensor.rand(16, 16)
-    ast = create_linear(Tensor.export(a)[0]).src[-1].src[0]
+    ast = a.schedule_linear().src[-1].src[0]
     s = Scheduler(ast, Device[Device.DEFAULT].renderer)
     for max_up in (2, 4):
       actions = get_kernel_actions(s, include_0=False, max_up=max_up)

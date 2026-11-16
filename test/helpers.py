@@ -5,8 +5,7 @@ import numpy as np
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.device import Buffer
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.tensor import _to_np_dtype, map_back
-from tinygrad.schedule import create_linear
+from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen import to_program
 from tinygrad.dtype import DType, truncate, AddrSpace
 from tinygrad.nn.state import get_parameters
@@ -41,15 +40,6 @@ def derandomize_model(model):
     p.replace(Tensor.empty(p.shape, device=p.device, dtype=p.dtype))
     p.realize()
 
-def linear_with_vars(*tensors:Tensor) -> tuple[UOp, dict[str, int]]:
-  fn, externs = Tensor.export(*tensors)
-  return map_back(create_linear(fn), externs)
-
-def schedule_linear(*tensors:Tensor) -> UOp:
-  linear, var_vals = linear_with_vars(*tensors)
-  assert len(var_vals) == 0
-  return linear
-
 class KernelCountException(Exception):
   def __init__(self, expected:int, got:int):
     self.expected, self.got = expected, got
@@ -58,11 +48,11 @@ class KernelCountException(Exception):
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
   if to_prerealize:
     with Context(DEBUG=0, TRACK_MATCH_STATS=0): Tensor.realize(*to_prerealize)
-  if isinstance(t, Tensor): linear, var_vals = linear_with_vars(t)
-  elif isinstance(t, list) and isinstance(t[0], Tensor): linear, var_vals = linear_with_vars(*t)
+  if isinstance(t, Tensor): linear, var_vals = t.linear_with_vars()
+  elif isinstance(t, list) and isinstance(t[0], Tensor): linear, var_vals = Tensor.linear_with_vars(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
-    linear, var_vals = linear_with_vars(Tensor(t))
+    linear, var_vals = Tensor(t).linear_with_vars()
   # test compiling the linear
   compile_linear(linear)
   kernel_cnt = sum((len(call.device) if isinstance(call.device, tuple) else 1)

@@ -1,7 +1,7 @@
 import unittest, contextlib, functools
 from tinygrad import Device, Tensor, Context, TinyJit, dtypes
 from tinygrad.dtype import AddrSpace
-from test.helpers import is_hcq2_device, schedule_linear
+from test.helpers import is_hcq2_device
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.device import Compiled, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
@@ -104,7 +104,7 @@ class TestSQTTProfiler(unittest.TestCase):
   def test_simple(self):
     t = Tensor.empty(1) + 1
     with save_sqtt() as data:
-      linear = schedule_linear(t)
+      linear = t.schedule_linear()
       run_linear(linear)
     fn_name = to_program(linear.src[0].src[0], renderer=Device[Device.DEFAULT].renderer).src[0].arg.function_name
     sqtt = map_sqtt(data)
@@ -160,7 +160,7 @@ class TestSQTTProfiler(unittest.TestCase):
   def test_multiple_runs(self):
     t = Tensor.empty(1) + 1
     with save_sqtt() as data:
-      linear = schedule_linear(t)
+      linear = t.schedule_linear()
       for _ in range(N:=3): run_linear(linear)
     fn_name = to_program(linear.src[0].src[0], renderer=Device[Device.DEFAULT].renderer).src[0].arg.function_name
     sqtt = map_sqtt(data)
@@ -170,7 +170,7 @@ class TestSQTTProfiler(unittest.TestCase):
 
   def test_multiple_kernels(self):
     t = ((Tensor.empty(1) + 1).contiguous() + 2)
-    linear = schedule_linear(t)
+    linear = t.schedule_linear()
     with save_sqtt() as data:
       run_linear(linear)
     sqtt = map_sqtt(data)
@@ -181,7 +181,7 @@ class TestSQTTProfiler(unittest.TestCase):
 
   def test_multiple_kernels_lower(self):
     t = ((Tensor.empty(1) + 1).contiguous() + 2)
-    linear = schedule_linear(t)
+    linear = t.schedule_linear()
     with save_sqtt() as data:
       run_linear(linear)
     sqtt = map_sqtt(data)

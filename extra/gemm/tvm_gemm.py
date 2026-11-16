@@ -30,14 +30,13 @@ except ImportError:
 
 import os
 from tinygrad.tensor import Tensor
-from tinygrad.schedule import create_linear
 
 # define the compute
 A = Tensor.rand(M, K, device="CPU")
 B = Tensor.rand(K, N, device="CPU")
 C = (A.reshape(M, 1, K) * B.permute(1,0).reshape(1, N, K)).sum(axis=2)
 
-linear = create_linear(Tensor.export(C)[0])
+linear = C.schedule_linear()
 from tinygrad.codegen.opt.kernel import Kernel
 from tinygrad.device import CompilerOptions
 lin = Kernel(linear.src[-1].src[0], CompilerOptions(has_local=False, supports_float4=False))

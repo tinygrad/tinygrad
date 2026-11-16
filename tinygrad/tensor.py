@@ -272,6 +272,17 @@ class Tensor(RandMixin):
     fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, name="export")
     return fn, tuple(ctx.externs)
 
+  def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
+    """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
+    fn, externs = self.export(*lst)
+    return map_back(create_linear(fn), externs)
+
+  def schedule_linear(self, *lst:Tensor) -> UOp:
+    """Creates the schedule needed to realize these Tensor(s)."""
+    linear, var_vals = self.linear_with_vars(*lst)
+    assert len(var_vals) == 0
+    return linear
+
   @staticmethod
   def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
     """Runs an exported function compiled to a LINEAR, its EXTERNs are the externs from `Tensor.export`."""

@@ -7,7 +7,7 @@ from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.renderer import Target
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.codegen import to_program
-from test.helpers import assert_kernel_count, schedule_linear
+from test.helpers import assert_kernel_count
 
 def custom_elementwise_add_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
   C,A,B = C.flatten(), A.flatten(), B.flatten()
@@ -33,14 +33,14 @@ class TestCustomKernel(unittest.TestCase):
   def test_gemm_group_refused(self):
     # k is a serial LOOP: custom_gemm has no Ops.REDUCE
     a, b, c = Tensor.empty(16, 16), Tensor.empty(16, 16), Tensor.empty(16, 16)
-    ast = schedule_linear(Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]).src[-1].src[0]
+    ast = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0].schedule_linear().src[-1].src[0]
     with self.assertRaises(KernelOptError):
       Scheduler(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).apply_opt(Opt(OptOps.SPLIT, 2, (4, AxisType.LOCAL)))
 
   def test_gemm_unroll_refused(self):
     # k is a serial LOOP, so the expander has nothing to contract the stores back with
     a, b, c = Tensor.empty(16, 16), Tensor.empty(16, 16), Tensor.empty(16, 16)
-    ast = schedule_linear(Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]).src[-1].src[0]
+    ast = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0].schedule_linear().src[-1].src[0]
     with self.assertRaises(KernelOptError):
       Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(Opt(OptOps.SPLIT, 2, (4, AxisType.UPCAST)))
 
@@ -49,7 +49,7 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.UPCAST)
       return C[i, j].store(A[i, j] + (j%2).cast(A.dtype)).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
-    ast = schedule_linear(Tensor.custom_kernel(Tensor.empty(4, 8), Tensor.empty(4, 8), fxn=kernel)[0]).src[-1].src[0]
+    ast = Tensor.custom_kernel(Tensor.empty(4, 8), Tensor.empty(4, 8), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.RANGE]), 0)
 
@@ -63,7 +63,7 @@ class TestCustomKernel(unittest.TestCase):
       return ACC[j].store(ACC.after(t)[j] + mm).end(t).end(j).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.TC, 0, (i, 0, 1)),)))
     N, M, K = tc.dims
     a, b, acc = Tensor.empty(M, K, dtype=dtypes.half), Tensor.empty(K, N, dtype=dtypes.half), Tensor.empty(N, dtype=dtypes.float)
-    ast = schedule_linear(Tensor.custom_kernel(acc, a, b, fxn=kernel)[0]).src[-1].src[0]
+    ast = Tensor.custom_kernel(acc, a, b, fxn=kernel)[0].schedule_linear().src[-1].src[0]
     with self.assertRaises(KernelOptError): to_program(ast, ren)
 
   def test_index_wmma_after_range(self):
@@ -75,7 +75,7 @@ class TestCustomKernel(unittest.TestCase):
       a, b = (UOp.const((1,)*2**len(f[1]), tc.dtype_in) for f in (tc.frag_a, tc.frag_b))
       c = UOp.const((0,)*2**len(tc.frag_c[1]), tc.dtype_out)
       return B[lane].store(UOp.wmma(a, b, c, tc.dims, tc.threads).after(lane).index(0)).end(lane).sink(arg=KernelInfo(opts_to_apply=()))
-    ast = schedule_linear(Tensor.custom_kernel(Tensor.empty(tc.threads, dtype=tc.dtype_out), fxn=kernel)[0]).src[-1].src[0]
+    ast = Tensor.custom_kernel(Tensor.empty(tc.threads, dtype=tc.dtype_out), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     self.assertEqual(len([u for u in to_program(ast, ren).src[1].src if u.op is Ops.WMMA]), 1)
 
   def test_split_loop_local_barrier(self):
@@ -85,7 +85,7 @@ class TestCustomKernel(unittest.TestCase):
       tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
       v = tmp.after(tmp[l].store(A[t%2, l]))[(l+1)%4]
       return C[l].store(C.after(t)[l] + v).end(t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
-    ast = schedule_linear(Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(2, 4), fxn=kernel)[0]).src[-1].src[0]
+    ast = Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(2, 4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)
 
@@ -96,7 +96,7 @@ class TestCustomKernel(unittest.TestCase):
       tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
       v = tmp.after(tmp[l].store(A[t, l]))[k].reduce(k, arg=Ops.ADD)
       return C[l].store(C.after(t)[l] + v).end(t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
-    ast = schedule_linear(Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(8, 4), fxn=kernel)[0]).src[-1].src[0]
+    ast = Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(8, 4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     prg = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100")))
     self.assertEqual(prg.ranges, {})
     self.assertEqual(len([u for u in prg.src[1].src if u.op is Ops.BARRIER]), 2)
@@ -108,7 +108,7 @@ class TestCustomKernel(unittest.TestCase):
       tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
       tmp = tmp.after(k)[k].set(A[k], end=k)
       return C[0].store(tmp[0]).sink(arg=KernelInfo(opts_to_apply=()))
-    ast = schedule_linear(Tensor.custom_kernel(Tensor.empty(1), Tensor.empty(4), fxn=kernel)[0]).src[-1].src[0]
+    ast = Tensor.custom_kernel(Tensor.empty(1), Tensor.empty(4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     prg = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100")))
     self.assertEqual(prg.ranges, {})
     self.assertEqual(len([u for u in prg.src[1].src if u.op is Ops.BARRIER]), 1)
@@ -152,7 +152,7 @@ class TestCustomKernel(unittest.TestCase):
     C, D, _, _ = Tensor.custom_kernel(C, D, A2, B2, fxn=custom_elementwise_addmul_kernel)  # depends on A2 AND B2
     E = (A2 * 3).contiguous()                      # kernel 2: depends only on A2
     result = (C + D + E).sum()                     # kernel 3: custom_addmul, then kernel 4: sum
-    schedule = schedule_linear(result).src
+    schedule = result.schedule_linear().src
 
     # Find the custom_addmul kernel position
     custom_idx = next((i for i, item in enumerate(schedule)
@@ -169,7 +169,7 @@ class TestCustomKernel(unittest.TestCase):
     Tensor.realize(a, b)
     out = Tensor.invalids(*a.shape, dtype=a.dtype)
     out, *_ = Tensor.custom_kernel(out, a, b, fxn=custom_elementwise_add_kernel)
-    compiled = compile_linear(schedule_linear(out))
+    compiled = compile_linear(out.schedule_linear())
     for call in compiled.src:
       prg = call.src[0]
       if prg.op is not Ops.PROGRAM: continue

@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, Device, dtypes, GlobalCounters
 from tinygrad.helpers import DEV
 from tinygrad.engine.realize import compile_linear, estimate_uop
-from test.helpers import KernelCountException, schedule_linear
+from test.helpers import KernelCountException
 
 class TestIndexing(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "AMD" or (Device.DEFAULT == "NULL" and DEV.arch.startswith("gfx")), "tests AMD bf16 cast overhead")
@@ -20,7 +20,7 @@ class TestIndexing(unittest.TestCase):
     xq = xq.reshape(bs, seqlen, n_heads, head_dim)
     xq_rope, _ = apply_rotary_emb(xq, xq, freqs_cis)
     xq_rope.sum().backward()
-    linear = compile_linear(schedule_linear(wq.grad))
+    linear = compile_linear(wq.grad.schedule_linear())
     if len(linear.src) != 1: raise KernelCountException(1, len(linear.src))
     bwd_ops = estimate_uop(linear.src[0]).ops
     expected_ops = bs*seqlen*dim*dim*ops_scale

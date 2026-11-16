@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops
-from test.helpers import KernelCountException, linear_with_vars
+from test.helpers import KernelCountException
 
 class TestRingAllReduce(unittest.TestCase):
   def test_schedule_ring(self):
@@ -10,7 +10,7 @@ class TestRingAllReduce(unittest.TestCase):
       N = 4
       ds = tuple(f"NULL:{i}" for i in range(N))
       t = Tensor.empty(N, N*100).shard(ds, axis=0).realize()
-      linear = linear_with_vars(t.sum(0))[0]
+      linear = t.sum(0).linear_with_vars()[0]
       copies = [si for si in linear.src if si.src[0].op is Ops.STORE]
       pairs = [(c.src[1].buffer.device, c.src[2].buffer.device) for c in copies]
       # N*(N-1) scatter reduce, and N*(N-1) allgather
@@ -23,7 +23,7 @@ class TestRingAllReduce(unittest.TestCase):
     N = 4
     ds = tuple(f"NULL:{i}" for i in range(N))
     t = Tensor.empty(N, 4096).shard(ds, axis=0).realize()
-    linear = linear_with_vars(t.sum(0))[0]
+    linear = t.sum(0).linear_with_vars()[0]
 
     copies = [si for si in linear.src if si.src[0].op is Ops.STORE]
     sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
@@ -38,7 +38,7 @@ class TestAllreduceCast(unittest.TestCase):
     ds = tuple(f"NULL:{i}" for i in range(2))
     with Context(ALLREDUCE_CAST=allreduce_cast, RING=0, SCACHE=0):
       t = Tensor.empty(4, 4, dtype=dtype).shard(ds, axis=0)
-      linear = linear_with_vars(t.sum(0))[0]
+      linear = t.sum(0).linear_with_vars()[0]
       return {si.src[1].dtype for si in linear.src if si.src[0].op is Ops.STORE}
 
   def test_allreduce_cast_bf16(self):

@@ -7,7 +7,6 @@ from tinygrad.helpers import getenv, Context
 from tinygrad.nn.optim import SGD
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import run_linear
-from test.helpers import linear_with_vars
 
 from extra.models import resnet
 from examples.mlperf.initializers import Conv2dHeNormal, Linear
@@ -72,8 +71,8 @@ class BenchmarkResnetTrain(unittest.TestCase):
 
       y = x.sequential(layer).contiguous().contiguous_backward()
       y.sum().backward()
-      if getenv("ASSIGN", 1): linear, var_vals = linear_with_vars(y, x.grad, *optim.schedule_step())
-      else: linear, var_vals = linear_with_vars(y, x.grad, *[t.grad for t in optim.params])
+      if getenv("ASSIGN", 1): linear, var_vals = Tensor.linear_with_vars(y, x.grad, *optim.schedule_step())
+      else: linear, var_vals = Tensor.linear_with_vars(y, x.grad, *[t.grad for t in optim.params])
 
       for _ in range(JITCNT):
         run_linear(linear, var_vals)

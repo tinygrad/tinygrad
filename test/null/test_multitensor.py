@@ -4,7 +4,7 @@ from tinygrad.uop.ops import Ops
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
 from tinygrad.nn.state import get_parameters, get_state_dict
-from test.helpers import not_support_multi_device, needs_second_gpu, schedule_linear
+from test.helpers import not_support_multi_device, needs_second_gpu
 
 d1 = f"{Device.DEFAULT}:1"
 d2 = f"{Device.DEFAULT}:2"
@@ -277,7 +277,7 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices_4).realize()
 
     out = bn(t)
-    scheds = [call for call in schedule_linear(out).src if call.src[0].op is not Ops.STORE and set(call.device) <= set(devices_4)]
+    scheds = [call for call in out.schedule_linear().src if call.src[0].op is not Ops.STORE and set(call.device) <= set(devices_4)]
     self.assertEqual(set(scheds[0].device), set(devices_4), "should have ast on each shard device")
     self.assertEqual(len(set(s.src[0] for s in scheds)), 1)
 
@@ -352,9 +352,9 @@ class TestBatchNorm(unittest.TestCase):
           p.to_(devices)
 
       synced_out = synced_bn(x)
-      synced_si = list(schedule_linear(synced_out).src)
+      synced_si = list(synced_out.schedule_linear().src)
       unsynced_out = unsynced_bn(x)
-      unsynced_si = list(schedule_linear(unsynced_out).src)
+      unsynced_si = list(unsynced_out.schedule_linear().src)
 
     # TODO: test synced / unsynced batchnorm cross device kernel and copies
     assert synced_si
@@ -368,7 +368,7 @@ class TestBackendMultiTensor(unittest.TestCase):
   def test_shard_invalids_contiguous(self):
     # every store is Invalid, so none of them should become a (empty) kernel
     t = Tensor.invalids(8).shard(devices_2, axis=0).contiguous()
-    self.assertEqual(len([c for c in schedule_linear(t).src if c.src[0].op is Ops.SINK]), 1)
+    self.assertEqual(len([c for c in t.schedule_linear().src if c.src[0].op is Ops.SINK]), 1)
 
 if __name__ == '__main__':
   unittest.main()

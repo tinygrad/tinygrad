@@ -2,7 +2,6 @@ import unittest, ctypes, struct, os, random, numpy as np, time
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import mv_address, DEBUG, DEV
 from test.helpers import slow, replace_opts
-from tinygrad.schedule import create_linear
 from tinygrad.device import Buffer, BufferSpec
 from extra.hcq1.hcq import HCQCompiled, HCQBuffer
 from tinygrad.runtime.autogen import libc
@@ -22,7 +21,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0 = Device[Device.DEFAULT]
     TestHCQ.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
     TestHCQ.b = self.a + 1
-    si = create_linear(Tensor.export(self.b)[0]).src[-1]
+    si = self.b.schedule_linear().src[-1]
 
     TestHCQ.prg = to_program(si.src[0], TestHCQ.d0.renderer)
     TestHCQ.runtime = get_runtime(TestHCQ.d0.device, TestHCQ.prg)
@@ -167,7 +166,7 @@ class TestHCQ(unittest.TestCase):
 
     a = Tensor.randint((3, 3, 3), dtype=dtypes.int, device=Device.DEFAULT).realize()
     b = a + 1
-    si = create_linear(Tensor.export(b)[0]).src[-1]
+    si = b.schedule_linear().src[-1]
 
     prg = to_program(replace_opts(si.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(3, AxisType.LOCAL)) for _ in range(3)]), TestHCQ.d0.renderer)
     runtime = get_runtime(Device.DEFAULT, prg)
@@ -480,7 +479,7 @@ class TestHCQ(unittest.TestCase):
   def test_memory_barrier(self):
     a = Tensor([0, 1], device=Device.DEFAULT, dtype=dtypes.int8).realize()
     b = a + 1
-    prg = to_program(create_linear(Tensor.export(b)[0]).src[-1].src[0], TestHCQ.d0.renderer)
+    prg = to_program(b.schedule_linear().src[-1].src[0], TestHCQ.d0.renderer)
     runtime = get_runtime(TestHCQ.d0.device, prg)
 
     buf1 = Buffer(Device.DEFAULT, 2, options=BufferSpec(nolru=True)).ensure_allocated()

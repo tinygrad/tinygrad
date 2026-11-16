@@ -4,7 +4,7 @@ import torch
 from functools import partial
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit, Variable
 from tinygrad.helpers import getenv, DEV, Context, OSX
-from test.helpers import not_support_multi_device, needs_second_gpu, schedule_linear
+from test.helpers import not_support_multi_device, needs_second_gpu
 from hypothesis import given, settings, strategies as strat
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -169,8 +169,8 @@ class TestRandomness(unittest.TestCase):
 
     Tensor.rand(1).realize()
 
-    s = schedule_linear(Tensor.rand(20)).src
-    s2 = schedule_linear(Tensor.rand(20)).src
+    s = Tensor.rand(20).schedule_linear().src
+    s2 = Tensor.rand(20).schedule_linear().src
 
     assert len(s) == len(s2), f"{len(s)} != {len(s2)}"
     for x,y in zip(s, s2):
@@ -179,8 +179,8 @@ class TestRandomness(unittest.TestCase):
 
     Tensor.rand(1, device=f"{Device.DEFAULT}:1").realize()
 
-    s3 = schedule_linear(Tensor.rand(20, device=f"{Device.DEFAULT}:1")).src
-    s4 = schedule_linear(Tensor.rand(20, device=f"{Device.DEFAULT}:1")).src
+    s3 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule_linear().src
+    s4 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule_linear().src
 
     assert len(s3) == len(s4), f"{len(s3)} != {len(s4)}"
     assert len(s2) == len(s4), f"{len(s)} != {len(s3)}"

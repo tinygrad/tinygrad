@@ -8,7 +8,7 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.codegen import to_program, full_rewrite_to_sink
 from tinygrad.schedule import pm_copy_from_store
-from test.helpers import check_schedule, KernelCountException, jit_cache_count, measure_mem, linear_with_vars, schedule_linear
+from test.helpers import check_schedule, KernelCountException, jit_cache_count, measure_mem
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -26,7 +26,7 @@ class TestBufferUOp(unittest.TestCase):
     # the device Buffer remains unallocated until it's we run the schedule
     self.assertFalse(buf.uop.buffer.is_allocated())
     add = buf+1
-    linear, var_vals = linear_with_vars(add)
+    linear, var_vals = add.linear_with_vars()
     self.assertFalse(buf.uop.buffer.is_allocated())
     run_linear(linear, var_vals)
     self.assertTrue(buf.uop.buffer.is_allocated())
@@ -82,7 +82,7 @@ class TestBufferUOp(unittest.TestCase):
     # unused variable should not appear in var_vals even when there's other work
     a = Tensor(UOp.variable("unused", 0, 10).bind(1))
     b = Tensor.empty(3) + 1
-    _, var_vals = linear_with_vars(a, b)
+    _, var_vals = Tensor.linear_with_vars(a, b)
     self.assertEqual(var_vals, {})
     self.assertIsNone(a.uop.base.realized)
 
@@ -604,7 +604,7 @@ class TestSchedule(unittest.TestCase):
   def test_schedule_mem_used_with_inputs(self):
     with measure_mem() as used:
       x = Tensor.ones(256).contiguous().realize()
-      schedule_linear(x+Tensor.ones(256).contiguous())
+      (x+Tensor.ones(256).contiguous()).schedule_linear()
     self.assertEqual(used(), 1024)
 
   def test_image_dot_f16_fusion(self):
@@ -612,7 +612,7 @@ class TestSchedule(unittest.TestCase):
       def cnt():
         x, y, z = Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float')
         a = (x @ y).relu()
-        linear = compile_linear(schedule_linear((a @ z).relu() + a))
+        linear = compile_linear(((a @ z).relu() + a).schedule_linear())
         return jit_cache_count(linear)
 
       with Context(IMAGE=1):
@@ -628,7 +628,7 @@ class TestSchedule(unittest.TestCase):
         rb = (((((inp @ b1) + c1).relu() @ b2) + c2).relu() + inp).relu()
         b16, c16 = Tensor.empty((512, 16), dtype='float'), Tensor.empty((16,), dtype='float')
         b32, c32 = Tensor.empty((512, 32), dtype='float'), Tensor.empty((32,), dtype='float')
-        linear = compile_linear(schedule_linear((rb @ b16 + c16).relu(), (rb @ b32 + c32).relu()))
+        linear = compile_linear(Tensor.schedule_linear((rb @ b16 + c16).relu(), (rb @ b32 + c32).relu()))
         return jit_cache_count(linear)
 
       with Context(IMAGE=1):
@@ -832,7 +832,7 @@ class TestSchedule(unittest.TestCase):
     kc = Tensor.custom_kernel(out, src_after, fxn=named_copy("kc"))[0]
     out_after = Tensor(kc.uop.src[0].after(*kc.uop.src[1:], kd.uop))
 
-    linear = schedule_linear(out_after)
+    linear = out_after.schedule_linear()
     names = [call.src[0].arg.name for call in linear.src]
     self.assertEqual(set(names), {"ka", "kb", "kc", "kd"})
     self.assertEqual(names[-1], "kc")
@@ -1408,7 +1408,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(c, 2)
 
   def _alu_from_tensor(self, t:Tensor):
-    s = [s for s in schedule_linear(t).src if s.src[0].op is Ops.SINK]
+    s = [s for s in t.schedule_linear().src if s.src[0].op is Ops.SINK]
     self.assertEqual(len(s), 1)
     return [u.op for u in s[0].src[0].toposort() if u.op in GroupOp.ALU]
 
@@ -1709,7 +1709,7 @@ class TestSchedule(unittest.TestCase):
   def test_schedule_mem_used(self):
     with measure_mem() as used:
       Tensor.ones(256).contiguous().realize()
-      schedule_linear(Tensor.ones(5, 5).contiguous())
+      Tensor.ones(5, 5).contiguous().schedule_linear()
     self.assertEqual(used(), 0)
 
   def test_const_schedule(self):
@@ -1920,20 +1920,20 @@ class TestFusionOp(unittest.TestCase):
   def test_recursive_add(self):
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
-    linear = schedule_linear(a)
+    linear = a.schedule_linear()
     prg = to_program(linear.src[-1].src[0], renderer=Device[Device.DEFAULT].renderer)
     assert len(prg.src[2].arg.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
-    linear1 = schedule_linear(a)
+    linear1 = a.schedule_linear()
     b = Tensor([1,2,3,4])
     for _ in range(24): b = b + b
-    linear2 = schedule_linear(b)
+    linear2 = b.schedule_linear()
     c = Tensor([1,2,3,4])
     for _ in range(23): c = c + c
-    linear3 = schedule_linear(c)
+    linear3 = c.schedule_linear()
     self.assertEqual(linear1.src[-1].src[0], linear2.src[-1].src[0])
     with self.assertRaises(AssertionError): self.assertEqual(linear1.src[-1].src[0], linear3.src[-1].src[0])
 
@@ -2081,7 +2081,7 @@ class TestCopyFolding(unittest.TestCase):
     b = Tensor.empty(4, device="NULL:1")
     add = a+b
     assert all_same([x.device for x in add.uop.src]), f"ALU has different devices! {[x.device for x in add.src]}"
-    schedule_linear(add)
+    add.schedule_linear()
 
   def test_clone(self):
     a = Tensor.empty(4)

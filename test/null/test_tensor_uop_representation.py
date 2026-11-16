@@ -1,7 +1,6 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.uop.ops import UPat, Ops, UOp
-from test.helpers import schedule_linear
 
 # NOTE: unlike before base for a realized tensor is always a BUFFER
 realized_pattern = UPat(Ops.BUFFER)
@@ -17,7 +16,7 @@ class TestTensorMutates(unittest.TestCase):
     pa = a.uop
     pb = b.uop
     pr = ret.uop
-    schedule_linear(ret)
+    ret.schedule_linear()
     self.assertIsNot(pa, a.uop)
     self.assertIsNot(pb, b.uop)
     self.assertIsNot(pr, ret.uop)

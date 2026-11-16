@@ -9,7 +9,6 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.engine.realize import compile_linear, get_call_arg_uops, lower_and_compile, run_linear
 import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQInfo
-from test.helpers import linear_with_vars, schedule_linear
 
 def lower_hcq(*body:UOp) -> UOp: # body through lower_call, as a linear
   return UOp(Ops.LINEAR, src=(unwrap(hcq2.lower_call(UOp.sink(*body, arg=KernelInfo("test", optimized=True)).call(hcq=HCQInfo(("CPU",))))),))
@@ -31,7 +30,7 @@ def compiled_chain(n:int, jit=False, device="NULL") -> tuple[Tensor, UOp, list[U
     f(x)
     return f(x), f.captured._linear, [x.uop.base]
   out = chain(x, n)
-  return out, compile_linear(schedule_linear(out), input_uops=inputs, cache=True), inputs
+  return out, compile_linear(out.schedule_linear(), input_uops=inputs, cache=True), inputs
 
 # NULL never runs a batch, so the scheduler is tested on the commands it hands each queue, run by a small executor with symbolic
 # signals and timelines. the fence and the ffi are tested by running them on CPU, see test/runtime/test_hcq2.py.
@@ -42,7 +41,7 @@ def scheduled(*ts:Tensor, **kwargs) -> list[UOp]:
     lin = orig(l, profile)
     batches.extend(c for c in lin.src if c.op is Ops.CALL and c.arg.hcq is not None)
     return lin
-  with patch.object(hcq2, "sched_batches", track): compile_linear(linear_with_vars(ts[0], *ts[1:])[0], **kwargs)
+  with patch.object(hcq2, "sched_batches", track): compile_linear(ts[0].linear_with_vars(*ts[1:])[0], **kwargs)
   return batches
 
 def submits(batch:UOp) -> list[UOp]: # the submit calls of a batch sink in order

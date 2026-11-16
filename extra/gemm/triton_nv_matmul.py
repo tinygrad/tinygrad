@@ -8,7 +8,6 @@ from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, ProgramInfo
 from tinygrad.helpers import getenv
-from tinygrad.schedule import create_linear
 np.set_printoptions(suppress=True)
 
 @triton.jit
@@ -77,11 +76,10 @@ if __name__ == "__main__":
   A, B = Tensor.normal(M, K, std=1e-1, dtype=dtypes.float16).realize(), Tensor.normal(K, N, std=1e-1, dtype=dtypes.float16).realize()
   C = A.matmul(B)
   from tinygrad.uop.ops import Ops
-  fn, externs = Tensor.export(C)
-  linear = create_linear(fn)
+  linear, var_vals = C.linear_with_vars()
   last_call = linear.src[-1]
   ast = last_call.src[0]
-  bufs = [externs[s.arg.slot].buffer for s in last_call.src[1:]]
+  bufs = [s.buffer for s in last_call.src[1:] if not s.is_bound_var]
 
   src = compiled.asm["ptx"]
   # specify the shared memory here so we don't need to do it dynamically
@@ -108,9 +106,10 @@ if __name__ == "__main__":
 
   # check correctness
   if getenv("VERIFY"):
+    from tinygrad.engine.realize import run_linear
     triton_buf = np.frombuffer(si.bufs[0].as_memoryview(), np.float16).reshape(M,N)
     print(triton_buf)
-    Tensor.run(linear, externs)
+    run_linear(linear, var_vals)
     tinygrad_buf = np.frombuffer(si.bufs[0].as_memoryview(), np.float16).reshape(M,N)
     print(tinygrad_buf)
     np.testing.assert_allclose(triton_buf, tinygrad_buf)

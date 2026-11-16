@@ -4,7 +4,6 @@ import unittest
 import numpy as np
 from tinygrad.engine.realize import run_linear
 from tinygrad.tensor import Tensor
-from test.helpers import linear_with_vars, schedule_linear
 
 def _allocations_of_type(t):
   ret = 0
@@ -61,7 +60,7 @@ class TestGC(unittest.TestCase):
   def test_schedule_gc(self):
     x = Tensor.ones(256).contiguous().realize()
     y = Tensor.ones(5, 5).contiguous()
-    schedule_linear(y)
+    y.schedule_linear()
     with assert_freed(x.uop.buffer, y.uop.buffer):
       del x, y
 
@@ -70,7 +69,7 @@ class TestGC(unittest.TestCase):
     with assert_freed(x.uop.buffer):
       y = x+Tensor.ones(256).contiguous()
       del x
-      run_linear(*linear_with_vars(y))
+      run_linear(*y.linear_with_vars())
     with assert_freed(y.uop.buffer):
       del y
 

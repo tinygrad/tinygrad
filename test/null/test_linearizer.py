@@ -9,7 +9,7 @@ from tinygrad.renderer.x86 import ISARenderer
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.helpers import Target
-from test.helpers import replace_opts, linear_with_vars, schedule_linear
+from test.helpers import replace_opts
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "isa backends don't preserve the op spec when lowering")
 class TestLinearizer(unittest.TestCase):
@@ -20,7 +20,7 @@ class TestLinearizer(unittest.TestCase):
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
 
-    uops = tuple(to_program(replace_opts(schedule_linear(r).src[-1].src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))]),
+    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
     num_loads = len([uop for uop in uops if uop.op is Ops.LOAD])
     assert num_loads <= 4, "more load uops than needed"
@@ -33,7 +33,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = a.expand([2]) + b.expand([2])
 
-    uops = tuple(to_program(replace_opts(schedule_linear(r).src[-1].src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))]),
+    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops <= 1, "more alu uops than needed"
@@ -43,7 +43,7 @@ class TestLinearizer(unittest.TestCase):
     x, w = Tensor.randn((1,1,3)).realize(), Tensor.randn((1,1,2)).realize()
     r = Tensor.conv2d(x,w,padding=1).relu()
 
-    uops = tuple(to_program(replace_opts(schedule_linear(r).src[-1].src[0],
+    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0],
       [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST)),
        Opt(op=OptOps.SPLIT, axis=1, arg=(0, AxisType.UPCAST))]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     accs = [u for u in uops if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG]
@@ -54,7 +54,7 @@ class TestLinearizer(unittest.TestCase):
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack(a, b)
-    uops = tuple(to_program(replace_opts(schedule_linear(r).src[-1].src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))]),
+    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops == 0, "more alu uops than needed"
@@ -62,14 +62,14 @@ class TestLinearizer(unittest.TestCase):
   def test_stack_select_folds_into_index(self):
     x = Tensor.empty(7, 4).realize()
     r = Tensor.stack(x.const_like(0), x, x.const_like(0)).reshape(21, 4).shrink(((4, 19), None)).contiguous()
-    uops = tuple(to_program(replace_opts(schedule_linear(r).src[-1].src[0], []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
+    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     self.assertEqual([u.op for u in uops if u.op in {Ops.DIV, Ops.MOD, Ops.TRUNCDIV, Ops.TRUNCMOD}], [])
 
   def test_const_table_even_index(self):
     # idx*2 is even, so the gather never selects the odd entry 5 and the store folds to 0
     idx = UOp.variable("idx", 0, 3).bind(0)
     out = Tensor.const((0, 0, 0, 5, 0, 0, 0, 0), dtypes.int)[idx*2].to("NULL", force=True)
-    uops = to_program(linear_with_vars(out)[0].src[-1].src[0], Device["NULL"].renderer).src[1].src
+    uops = to_program(out.linear_with_vars()[0].src[-1].src[0], Device["NULL"].renderer).src[1].src
     self.assertNotIn(Ops.WHERE, [u.op for u in uops])
     self.assertEqual(next(u for u in uops if u.op is Ops.STORE).src[1].vmax, 0)
 
@@ -78,14 +78,14 @@ class TestLinearizer(unittest.TestCase):
       (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
       if tensor_dtype in (dts:=Device[Device.DEFAULT].renderer.supported_dtypes()) and acc_dtype in dts:
         a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
-        realized_ast = schedule_linear(a).src[-1].src[0]
+        realized_ast = a.schedule_linear().src[-1].src[0]
         program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
         local = [uop for uop in tuple(program.src[1].src) if uop.op is Ops.BUFFER and uop.addrspace in (AddrSpace.LOCAL, AddrSpace.REG)]
         assert local[0].dtype == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
-      realized_ast = schedule_linear(c).src[-1].src[0]
+      realized_ast = c.schedule_linear().src[-1].src[0]
       program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
       local = [uop for uop in tuple(program.src[1].src) if uop.op is Ops.BUFFER and uop.addrspace in (AddrSpace.LOCAL, AddrSpace.REG)]
       self.assertEqual(local[0].dtype, expected_dtype)
@@ -109,7 +109,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
-    sched = [si for si in schedule_linear(t).src if si.src[0].op is Ops.SINK]
+    sched = [si for si in t.schedule_linear().src if si.src[0].op is Ops.SINK]
     # sum_collapse is a full collapse now
     assert len(sched) == 1
     assert not any(u.op is Ops.REDUCE and u.arg[1] > 0 for u in sched[0].src[0].toposort()), "found reduce in sum collapse"
@@ -119,7 +119,7 @@ class TestLinearizerRenderers(unittest.TestCase):
   @unittest.expectedFailure
   def test_upcast_with_locals_cpu(self):
     out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
-    prg = to_program(replace_opts(schedule_linear(out).src[-1].src[0], [Opt(OptOps.SPLIT, axis=0, arg=(4, AxisType.LOCAL))]),
+    prg = to_program(replace_opts(out.schedule_linear().src[-1].src[0], [Opt(OptOps.SPLIT, axis=0, arg=(4, AxisType.LOCAL))]),
                       renderer=ClangRenderer(Target("CPU", arch="x86_64,x86-64")))
     self.assertEqual(len(prg.src[2].arg.split("for")), 5)
 
@@ -128,7 +128,7 @@ class TestLinearizerRenderers(unittest.TestCase):
     r = (x@y).relu()
     opts_to_apply = [Opt(op=OptOps.SPLIT, axis=1, arg=(8, AxisType.LOCAL)), Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.LOCAL)),
                      Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]
-    program = to_program(replace_opts(schedule_linear(r).src[-1].src[0], opts_to_apply),
+    program = to_program(replace_opts(r.schedule_linear().src[-1].src[0], opts_to_apply),
                          renderer=AMDLLVMRenderer(Target("AMD", arch="gfx1100")))
 
     stores = [u for u in tuple(program.src[1].src) if u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG]

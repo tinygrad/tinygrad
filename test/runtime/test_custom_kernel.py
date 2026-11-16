@@ -11,7 +11,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer import TinyELF
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
-from test.helpers import assert_kernel_count, linear_with_vars
+from test.helpers import assert_kernel_count
 from test.null.test_custom_kernel import custom_elementwise_add_kernel, custom_elementwise_addmul_kernel, custom_gemm
 
 # **** kernels ****
@@ -44,7 +44,7 @@ def custom_add_var_kernel(*srcs:UOp, n_slot:int) -> UOp:
   return C[i].store(out).end(i).sink(arg=KernelInfo(name=f"add_var_{n_slot}_{len(Bs)}"))
 
 def run_kernel_args(out:Tensor, name:str) -> list[str|None]:
-  linear, var_vals = linear_with_vars(out)
+  linear, var_vals = out.linear_with_vars()
   sink = [u for u in linear.toposort(enter_calls=True) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) and u.arg.name == name][0]
   sig = TinyELF.from_program(to_program(sink, Device[Device.DEFAULT].renderer)).signature
   run_linear(linear, var_vals)
@@ -636,7 +636,7 @@ class TestCustomKernelArgs(unittest.TestCase):
     srcs = (Tensor.empty(4, dtype=dtypes.int), Tensor.empty(4, dtype=dtypes.int), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(),
             Tensor(Variable("n", 0, 100, dtypes.int).bind(5)))
     out = Tensor.custom_kernel(*srcs, fxn=custom_ignore_first_var_kernel)[0]
-    linear, var_vals = linear_with_vars(out)
+    linear, var_vals = out.linear_with_vars()
     run_linear(linear, {**var_vals, "k": 10})
     self.assertEqual(out.tolist(), [16, 17, 18, 19])
 

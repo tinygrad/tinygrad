@@ -885,7 +885,6 @@ from tinygrad.renderer.amd.dsl import s
 from tinygrad.runtime.autogen.amd.rdna3.ins import (s_add_u32, s_branch, s_cbranch_execz, s_cbranch_scc0, s_cbranch_scc1, s_cmp_eq_i32,
                                                     s_cmp_eq_u64, s_code_end, s_endpgm, s_getpc_b64, s_mov_b32, s_nop)
 from extra.gemm.amd_asm_matmul import Kernel
-from test.helpers import schedule_linear
 
 @needs_tracked_pm
 class TestCfg(unittest.TestCase):
@@ -899,7 +898,7 @@ class TestCfg(unittest.TestCase):
     with save_viz() as viz:
       with Context(DEV=f"NULL::{target}"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
-        _ = do_to_program(schedule_linear(out).src[-1].src[0], Device[out.device].renderer)
+        _ = do_to_program(out.schedule_linear().src[-1].src[0], Device[out.device].renderer)
     codegen_rewrites = next(s for s in viz.list_items() if s["name"] == name)
     disasm = next(s for s in codegen_rewrites["steps"] if s["name"] == "View Disassembly")
     return get_render(viz.data, disasm["query"])

@@ -4,7 +4,6 @@ from tinygrad.uop import Ops
 from tinygrad.uop.ops import ParamArg, AddrSpace
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.function import function
-from test.helpers import linear_with_vars
 def buf(n=8) -> Tensor: return Tensor.empty(n, device="NULL").realize()
 
 class TestExport(unittest.TestCase):
@@ -43,7 +42,7 @@ class TestExport(unittest.TestCase):
     fn, _ = Tensor.export((a+b).contiguous()*v.bind(2))
     self.assertIs(fn, Tensor.export((c+d).contiguous()*v.bind(3))[0])
     # mapped back to this storage and these values
-    linear, var_vals = linear_with_vars((c+d).contiguous()*v.bind(3))
+    linear, var_vals = ((c+d).contiguous()*v.bind(3)).linear_with_vars()
     self.assertEqual(var_vals, {"v": 3})
     self.assertTrue({c.uop.buf_uop, d.uop.buf_uop} <= set(linear.toposort()))
 

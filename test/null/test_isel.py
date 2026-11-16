@@ -5,7 +5,6 @@ from tinygrad.codegen import to_program, pack_args
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp, dtypes, graph_rewrite, ProgramInfo
 from tinygrad.renderer.x86 import X86Renderer, X86Ops, IselContext
-from test.helpers import schedule_linear
 
 # INDEX on a register value with a constant index extracts a single element (the old GEP)
 def lane(y:UOp, i:int) -> UOp: return y.index(UOp.cconst(i, dtypes.int))
@@ -54,7 +53,7 @@ class TestIselX86(unittest.TestCase):
 
   @Context(SPEC=2, NOOPT=1)
   def test_register_store_is_effect(self):
-    to_program(schedule_linear(Tensor.empty(16, 16).sum(1)).src[-1].src[0], X86Renderer(Target(device="CPU", arch="x86_64")))
+    to_program(Tensor.empty(16, 16).sum(1).schedule_linear().src[-1].src[0], X86Renderer(Target(device="CPU", arch="x86_64")))
 
 if __name__ == "__main__":
   unittest.main()
