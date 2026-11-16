@@ -3000,7 +3000,7 @@ class Transformer(GLMSeqDriver):
 
   BPF_G = (8)  # prefills in a step of them: prompts at most
   # (BPF_PS: the rows of a prompt of a step, a jit each (a step's prompts padded to the smallest that fits them), BPF_P the most)
-  BPF_PS = tuple(sorted({int(x) for x in str((getenv("BPF_P", 168))).split(",") if x}))
+  BPF_PS = (168,)
   BPF_P = max(BPF_PS)
   BPF_ROWS = (BPF_G * min(BPF_PS))  # (a step's rows at most: its memory)
   def forward_batch_prefill(self, *vs:UOp, P:int|None=None) -> Tensor:
