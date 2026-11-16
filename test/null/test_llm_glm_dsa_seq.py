@@ -743,4 +743,35 @@ class TestGLMDSASequence(unittest.TestCase):
     self.assertNotIn(K._moe_bundled_persist_kernel, fxns)
     self.assertEqual((bexp.shape, brow.shape, bcnt.shape), ((16*8//2 + E,), ((16*8//2 + E)*2,), (1,)))
 
+  def test_kv4_fast_same_bits(self):
+    # (SEQ_KV4_FAST: a 4-bit value as (1024 + q - 1032) * m in half, the same bits as the int path for every nibble and multiplier)
+    from tinygrad.helpers import getenv
+    from tinygrad.uop.ops import AxisType, KernelInfo
+    from tinygrad.llm.kernels import amd_glm_dsa as K
+    words = [0x76543210, 0xFEDCBA98]
+    def run(fast:str) -> np.ndarray:
+      with patch.dict(os.environ, {"SEQ_KV4_FAST": fast}):
+        getenv.cache_clear()
+        def kern(out:UOp, w:UOp, m:UOp) -> UOp:
+          i = UOp.range(2*63*8, 0, AxisType.LOOP)
+          return out[i].store(K._q4_half(w[i // 504].load(), i % 8, m[(i // 8) % 63].load())).end(i).sink(arg=KernelInfo(name="q4h"))
+        out = Tensor.empty(2*63*8, dtype=dtypes.half, device="CPU")
+        ret = Tensor.custom_kernel(out, Tensor(np.array(words, dtype=np.uint32), device="CPU"),
+                                   Tensor(np.arange(1, 64, dtype=np.int32), device="CPU"), fxn=kern)[0].numpy()
+      getenv.cache_clear()
+      return ret
+    ref = np.array([((w >> (4*n)) & 15) - 8 for w in words for m in range(1, 64) for n in range(8)]) * \
+          np.array([m for w in words for m in range(1, 64) for n in range(8)])
+    for fast in ("0", "1"): np.testing.assert_array_equal(run(fast).view(np.uint16), ref.astype(np.float16).view(np.uint16))
+    # (the K fragments' two-at-a-time form: _q4_quad, nibbles 4*half .. 4*half+3, half a lane value)
+    def kern4(out:UOp, w:UOp, m:UOp) -> UOp:
+      i = UOp.range(2*63*2, 0, AxisType.LOOP)
+      hs = K._q4_quad(w[i // 126].load(), i % 2, m[(i // 2) % 63].load().cast(dtypes.half))
+      return UOp.group(*(out[i*4 + j].store(h) for j, h in enumerate(hs))).end(i).sink(arg=KernelInfo(name="q4q"))
+    out = Tensor.empty(2*63*8, dtype=dtypes.half, device="CPU")
+    got = Tensor.custom_kernel(out, Tensor(np.array(words, dtype=np.uint32), device="CPU"),
+                               Tensor(np.arange(1, 64, dtype=np.int32), device="CPU"), fxn=kern4)[0].numpy()
+    ref4 = np.array([(((w >> (4*(4*h + j))) & 15) - 8) * m for w in words for m in range(1, 64) for h in range(2) for j in range(4)])
+    np.testing.assert_array_equal(got.view(np.uint16), ref4.astype(np.float16).view(np.uint16))
+
 if __name__ == '__main__': unittest.main()

@@ -4301,12 +4301,35 @@ def _q4_mult(k:UOp, row:UOp, g:UOp|int) -> UOp:
 def _q4_half(w:UOp, nib:UOp|int, m:UOp) -> UOp:
   """nibble nib of a word of 4-bit values as the half (q - 8) * m (exact)"""
   sh = UOp.const(4 * nib, dtypes.uint32) if isinstance(nib, int) else (4 * nib).cast(dtypes.uint32)
+  # (SEQ_KV4_FAST (default off, the same bits): the nibble as the half 1024 + q (its bits or'ed into 0x6400's mantissa), then (h - 1032) * m in
+  # half: two half ops, both exact (|q - 8| <= 8, m <= 63), not an int multiply (quarter rate) and two conversions)
+  if getenv("SEQ_KV4_FAST", 0):
+    h = (((w >> sh) & 15) | 0x6400).cast(dtypes.uint16).bitcast(dtypes.half)
+    return (h - 1032.0) * m.cast(dtypes.half)
   return ((((w >> sh) & 15).cast(dtypes.int32) - 8) * m).cast(dtypes.half)
 
 def _q4_frag(k:UOp, row:UOp, w0:UOp|int, m:UOp, half:UOp) -> UOp:
   """16 dims of a 4-bit row (words w0, w0+1) in the order of RDNA4's WMMA fragment, as halves (q - 8) * m"""
   lo, hi = _word(k, row, w0), _word(k, row, w0 + 1)
+  if getenv("SEQ_KV4_FAST", 0):
+    return UOp.stack(*(h for w in (lo, hi) for h in _q4_quad(w, half, m.cast(dtypes.half))))
   return UOp.stack(*(_q4_half(w, half * 4 + i, m) for w in (lo, hi) for i in range(4)))
+
+def _q4_pair(n2:UOp, mh:UOp) -> list[UOp]:
+  """two 4-bit values of one multiplier as the halves (q - 8) * m, two at a time (SEQ_KV4_FAST, the bits of _q4_half): n2 holds 0x6400 | q
+  in both halves (the half 1024 + q), mh the half m; (n - 1032) * m as one packed subtraction and one packed product, both exact"""
+  h2 = "_Float16 __attribute__((ext_vector_type(2)))"
+  fmt = f"__builtin_bit_cast(unsigned int, (__builtin_bit_cast({h2}, {{0}}) - ({h2}){{{{1032.0f16, 1032.0f16}}}}) * " \
+        f"({h2}){{{{{{1}}, {{1}}}}}})"
+  v = _cfn(True, (n2, mh), (fmt, dtypes.uint32))
+  return [(v >> s).cast(dtypes.uint16).bitcast(dtypes.half) for s in (0, 16)]
+
+def _q4_quad(w:UOp, half:UOp|int, mh:UOp) -> list[UOp]:
+  """nibbles 4*half .. 4*half+3 of a word of 4-bit values as halves (q - 8) * m (see _q4_pair; x | x << 12 puts nibble 1 at bit 16 and
+  nibble 3 at bit 24)"""
+  x = (w >> (16 * half if isinstance(half, int) else (16 * half).cast(dtypes.uint32))) & 0xffff
+  z = x | (x << 12)
+  return [h for p in (z, z >> 8) for h in _q4_pair((p & 0x000f000f) | 0x64006400, mh)]
 
 def reduced_rows(k:Tensor, W:int) -> Tensor:
   """the rows k in the reduced-bit format of W words a row (fp8 or 4-bit, see fp8_rows / q4_rows)"""
@@ -4439,8 +4462,12 @@ def _mla_sparse_body(out:UOp, ml:UOp|None, q:UOp, cache:UOp, index:UOp, grouped:
   o_new = []
   for dt in range(KT):
     # (keys past the count are zero: p is 0 there, but 0*nan)
-    if q4: vfrag = UOp.stack(*(vok.where(_q4_half(_word(cache, vk, wave*16 + dt*2 + col//8), col % 8, _q4_mult(cache, vk, wave*4 + dt//2)),
-                                         UOp.const(0, dtypes.half)) for vk, vok in vkeys))
+    # (SEQ_KV4_FAST: 4-bit values are always finite (|q - 8| * m <= 504, the row a real one: key_at clamps), p times the scale is 0 past the
+    # count: no select)
+    if q4 and getenv("SEQ_KV4_FAST", 0):
+      vfrag = UOp.stack(*(_q4_half(_word(cache, vk, wave*16 + dt*2 + col//8), col % 8, _q4_mult(cache, vk, wave*4 + dt//2)) for vk, _ in vkeys))
+    elif q4: vfrag = UOp.stack(*(vok.where(_q4_half(_word(cache, vk, wave*16 + dt*2 + col//8), col % 8, _q4_mult(cache, vk, wave*4 + dt//2)),
+                                           UOp.const(0, dtypes.half)) for vk, vok in vkeys))
     elif fp8: vfrag = UOp.stack(*(vok.where(_fp8_byte_half(_word(cache, vk, wave*32 + dt*4 + col//4), col % 4),
                                           UOp.const(0, dtypes.half)) for vk, vok in vkeys))
     else: vfrag = UOp.stack(*(vok.where(cache[vk, dbase + dt*16 + col].load(), UOp.const(0, dtypes.half)) for vk, vok in vkeys))

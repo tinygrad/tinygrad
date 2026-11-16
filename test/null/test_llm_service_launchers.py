@@ -65,12 +65,12 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     self.assertNotIn("PREFILL_MB1_ROWS=", cmd)
     profile = self.command("glm_14xr9700.sh", {"GLM_KV": "q4", "MAX_CONTEXT": "1048576", "SEQ_ROWS": "1048576",
                                                "SEQ_SLOTS": "16", "SEQ_MAX_ACTIVE": "16", "P2P_GLM5_OFF": "1",
-                                               "FREQS_HOST": "1", "AMD_SCRATCH_MAX": "64", "SEQ_COPY_SCRATCH": "1",
+                                               "FREQS_HOST": "1", "AMD_SCRATCH_MAX": "64", "SEQ_COPY_SCRATCH": "1", "SEQ_KV4_FAST": "1",
                                                "LOAD_DEFER": "1", "AM_PERF_LEVEL": "high", "AM_CLOCKS": "GFXCLK=2000",
                                                "CLOCK_FAST": "GFXCLK=2000", "CLOCK_MANY": "GFXCLK=2000",
                                                "CLOCK_PREFILL": "GFXCLK=2000"})
     for required in ("GLM_KV=q4", "--max_context 1048576", "SEQ_ROWS=1048576", "SEQ_SLOTS=16", "SEQ_MAX_ACTIVE=16",
-                       "P2P_GLM5_OFF=1", "FREQS_HOST=1", "AMD_SCRATCH_MAX=64", "SEQ_COPY_SCRATCH=1", "LOAD_DEFER=1",
+                       "P2P_GLM5_OFF=1", "FREQS_HOST=1", "AMD_SCRATCH_MAX=64", "SEQ_COPY_SCRATCH=1", "SEQ_KV4_FAST=1", "LOAD_DEFER=1",
                        "AM_PERF_LEVEL=high", "AM_CLOCKS=GFXCLK=2000", "CLOCK_FAST=GFXCLK=2000",
                        "CLOCK_MANY=GFXCLK=2000", "CLOCK_PREFILL=GFXCLK=2000"):
       self.assertIn(required, profile)
