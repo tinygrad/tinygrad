@@ -5,6 +5,7 @@ from typing import Callable, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.glm_dsa_gguf import ggml_data_to_tensor
 from tinygrad.llm.kernels.amd_glm import _nucleus_round_kernel, _local_argmax_kernel, _argmax_parts
+_argmax_parts = functools.cache(_argmax_parts.__wrapped__)  # keep DSA's own realized-device-tensor cache
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import prod, getenv, round_up
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
