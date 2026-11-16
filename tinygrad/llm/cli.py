@@ -239,6 +239,9 @@ STOP_DEADLINE_S = 60  # (a clean GLM Flash exit took 18 s on g3; the launchers w
 def _on_sigterm(*_):
   import faulthandler
   faulthandler.dump_traceback_later(STOP_DEADLINE_S, exit=True)
+  # (the compile workers got the same signal: a pool left to its exit finalizer waits for a dead worker's lock)
+  from tinygrad.engine.worker import kill_worker_pool
+  kill_worker_pool()
   sys.exit(0)
 
 def main():

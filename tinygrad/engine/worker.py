@@ -52,3 +52,13 @@ def terminate_worker_pool():
   global worker_pool
   if worker_pool is not None: worker_pool.terminate()
   worker_pool = None
+
+def kill_worker_pool():
+  """at a stop (SIGTERM to the process group: the workers die with it): the workers are killed, and the pool's exit finalizer is skipped. It
+  would wait forever for the queue lock an idle worker held when it died (Pool._help_stuff_finish), and the process would never end"""
+  global worker_pool
+  if worker_pool is None: return
+  for p in worker_pool._pool: p.kill()  # type: ignore[attr-defined]
+  for p in worker_pool._pool: p.join(1)  # type: ignore[attr-defined]
+  worker_pool._terminate.cancel()  # type: ignore[attr-defined]
+  worker_pool = None

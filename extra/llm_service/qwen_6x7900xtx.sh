@@ -76,7 +76,7 @@ elif [[ $ACTION == stop ]]; then
   sudo -n kill -TERM -- "-$pid"
   for _ in {1..90}; do
     if ! sudo -n kill -0 "$pid" 2>/dev/null; then rm "$PIDFILE"; echo 'Qwen stopped'; exit 0; fi
-    read -r -t 1 _ || true
+    sleep 1  # (not read -t: with stdin at its end (ssh, nohup) it returns at once and the 90 s were ~1 s)
   done
   echo "Qwen pid=$pid did not exit in 90 s; inspect before taking further action" >&2; exit 1
 elif [[ $ACTION == status ]]; then
