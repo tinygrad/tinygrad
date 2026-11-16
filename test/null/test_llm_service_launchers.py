@@ -150,7 +150,7 @@ class TestLLMServiceLaunchers(unittest.TestCase):
       "FLAG_AR_POOLN", "LOAD_APART", "MICRO_BATCHES", "QSA_IDX_SPLIT", "QSA_KV_BITS", "QSA_KV_ROT",
       "QSA_KV_SPLIT", "RING_MAXW_DEC", "RING_SEL", "VISION_KERNELS", "FLAG_AR_MAXN", "IQ2S_K256",
       "MLA_SEQ_SHARD", "RING_MAXW", "RING_RS_LIKE_COPIES", "SEQ_WARMUP_ONLY", "WARMUP_PARALLEL",
-      "GLM_ATTN_GRP", "GLM_SEQ",
+      "GLM_ATTN_GRP", "GLM_SEQ", "HOST_MIN", "SLOT_CKPT", "SLOT_HOST", "SEQ_CKPT_HOST",
     )
     files = [SCRIPTS / name for name in ("qwen_6x7900xtx.sh", "glm_flash_6x7900xtx.sh", "glm_14xr9700.sh")]
     files += [ROOT / "test/null" / f"production_{name}_warmup.sh" for name in ("c2", "c5", "c9")]
