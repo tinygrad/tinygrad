@@ -16,8 +16,7 @@ from tinygrad.llm.kernels.amd_glm_dsa import Linear, amd_custom_kernels_supporte
   nucleus, seq_store, mla_sparse_seq, seq_views, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, FP8_ROW, FP8_ROPE_ROW, \
   IDX_FP8_ROW, pool_index_shard, Q4_ROW, Q4_ROPE_ROW, reduced_rows
 from tinygrad.llm.kernels.amd_glm_dsa import p2p_check, host_allgather, Q8_0, lists_pad, GEMM_ROWS
-from tinygrad.llm.kernels.amd_glm_dsa import sp_reduce_scatter, all_to_all, mla_sparse_tokens, tbo_ag_parts, tbo_a2a_pre, \
-  tbo_a2a_parts, tbo_a2a_post, tbo_rs_pre, tbo_rs_parts, tbo_rs_post, tbo_q8_pre, tbo_q8_post
+from tinygrad.llm.kernels.amd_glm_dsa import sp_reduce_scatter, all_to_all, mla_sparse_tokens
 from tinygrad.llm.glm_dsa_gguf import gguf_parse, gguf_shard, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm import glm5next as glm_seq_base
 from tinygrad.uop.ops import resolve, Ops
@@ -816,11 +815,8 @@ class FFNBlock:
     """the row projections of a sequence parallel attention made on the rows' devices (MLATransformerBlock), None if it hasn't them"""
     return None
 
-  def sp_block(self, xs:Tensor, start_pos:int|UOp, T:int|UOp, queue:str|None=None) -> Tensor:
-    """
-    sequence parallel (prefill, no hyper-connections): xs (1, R, D) the residual stream split on its rows over the devices, T of them real.
-    queue: the compute queue of its kernels (a micro batch's)
-    """
+  def sp_block(self, xs:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
+    """sequence parallel (prefill, no hyper-connections): xs (1, R, D) the residual stream split on its rows over the devices, T of them real"""
     self._init_state(xs)
     mask_in = _idx_mask[0] if self.config.indexer_shared and getattr(self, "indexer", None) is None else None
     @function(precompile=True, allow_implicit=True)
@@ -831,7 +827,6 @@ class FFNBlock:
       return (out, m.contiguous()) if (m:=_idx_mask[1]) is not None else out
     ret = _run(xs, start_pos, T, mask_in)
     outs = ret if isinstance(ret, tuple) else (ret,)
-    if queue is not None: outs = _on_queue(outs, queue)
     if len(outs) > 1: _idx_mask[0] = outs[1]
     return outs[0]
 
@@ -1224,138 +1219,6 @@ class MLATransformerBlock(FFNBlock):
             not self.seq_sharded and cfg.q_lora_rank > 0 and self.cache_k.dtype == dtypes.half and
             (cfg.real_heads or cfg.n_heads) % 16 == 0 and self.cache_k.shape[2] % 64 == 0 and amd_custom_kernels_supported(devs)): return False
     return self.indexer is None or (full and self.indexer.sparse)
-
-  # ** two batch overlap (GLM_TBO): a block of a micro batch in phases, a function call each, the copies of the exchanges between them. the
-  # calls of the batches in turn on one queue: the copies of one batch run with the kernels of the other (see Transformer._tbo_blocks)
-  def tbo_a(self, dep:Tensor|None, xs:Tensor, rs:tuple, start_pos:UOp, T:UOp) -> tuple[Tensor, ...]:
-    """the residual (after the sums of the last ffn), the row projections: (xs, qa q8 rows, latent (and indexer keys) rows[, iq, weights])"""
-    cfg, ind = self.config, self.indexer
-    @function(precompile=True, allow_implicit=True)
-    def _a(xs:Tensor, start_pos:UOp, T:UOp, *rs:Tensor) -> tuple[Tensor, ...]:
-      q8_quantize_cache_clear()  # (quantizations of another call's graph aren't this one's)
-      if dep is not None: rs = rs[:-1]
-      # (the residual returned only if it's new: an input returned as it is isn't a buffer the call writes)
-      if rs: xs = (xs + tbo_rs_post(rs[0], list(rs[1:]))).contiguous()
-      hn = self.attn_norm(xs)
-      (B, R, _), lora, rope = hn.shape, cfg.kv_lora_rank, cfg.rope_dim
-      freqs_own = shard_rows(self.freqs_cis[start_pos:start_pos+T].pad_to((R, *self.freqs_cis.shape[1:])).contiguous(), 0)
-      qa = self.attn_q_a_norm(self.attn_q_a(hn))
-      kv_a = self.attn_kv_a_mqa(hn)
-      c_kv = self.attn_kv_a_norm(kv_a[..., :lora])
-      k_rope = apply_rope(kv_a[..., lora:].reshape(B, R, 1, rope).transpose(1, 2), freqs_own, cfg.rope_interleave)
-      rows = [c_kv.reshape(R, lora).cat(k_rope.reshape(R, rope).cast(c_kv.dtype), dim=-1).half()]
-      extra:list[Tensor] = []
-      if ind is not None:
-        idx, ir = ind.idx, ind.idx.rope_dim
-        ik = ind.k_norm(ind.attn_k(hn).float())[0]
-        ik = apply_rope(ik[:, :ir].reshape(1, 1, R, ir), freqs_own, idx.rope_interleave).reshape(R, ir).cat(ik[:, ir:], dim=-1)
-        rows.append(ik.half())
-        # (the indexer's queries in the next call, of the device's rows of the gathered latent: returned from here they made a cycle)
-        extra = [(ind.proj(hn).float() * (idx.n_heads * idx.head_dim)**-0.5)[0].contiguous()]
-      return (*((xs,) if rs else ()), tbo_q8_pre(qa.contiguous()), Tensor.cat(*rows, dim=-1).contiguous(), *extra)
-    out = _a(xs, start_pos, T, *rs, *(() if dep is None else (dep,)))
-    return out if rs else (xs, *out)
-
-  def tbo_b(self, dep:Tensor|None, qa_parts:list[Tensor], row_parts:list[Tensor], extra:tuple, picks:Tensor|None, start_pos:UOp,
-            T:UOp) -> tuple[Tensor, ...]:
-    """the caches of the chunk's rows, the lists of the device's rows, the queries of its heads (all rows): (the queries for all_to_all, lists)"""
-    cfg, ind, n = self.config, self.indexer, len(qa_parts)
-    @function(precompile=True, allow_implicit=True)
-    def _b(start_pos:UOp, T:UOp, *args:Tensor) -> tuple[Tensor, ...]:
-      q8_quantize_cache_clear()  # (quantizations of another call's graph aren't this one's)
-      qp, rp, rest = args[:n], args[n:2*n], args[2*n:len(args) - (dep is not None)]
-      R, lora, rope = int(rp[0].shape[0]) * n, cfg.kv_lora_rank, cfg.rope_dim
-      qa_all = tbo_q8_post(list(qp), R, cfg.q_lora_rank)
-      whole = Tensor.cat(*rp, dim=0)
-      cache = Tensor(self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.store(
-        whole[:T, :lora+rope].reshape(1, 1, T, lora+rope).cast(self.cache_k.dtype).uop)))
-      if ind is not None:
-        S, (w,), idx, ir = start_pos + T, rest, ind.idx, ind.idx.rope_dim
-        freqs_own = shard_rows(self.freqs_cis[start_pos:start_pos+T].pad_to((R, *self.freqs_cis.shape[1:])).contiguous(), 0)
-        iq = ind.attn_q_b(shard_rows(qa_all, 1)).float().reshape(R, idx.n_heads, idx.head_dim).transpose(0, 1).unsqueeze(0)
-        iq = apply_rope(iq[..., :ir], freqs_own, idx.rope_interleave).cat(iq[..., ir:], dim=-1)[0].transpose(0, 1)
-        pk = Tensor(ind.cache_dk.uop.after(ind.cache_dk[start_pos:S].uop.store(whole[:T, lora+rope:].uop)))
-        lists = pool_index_rows(indexer_scores(iq, pk, w, S, 1), start_pos, S, ind.idx.top_k, 1)
-      else: lists = rest[0]
-      freqs = self.freqs_cis[start_pos:start_pos+T].pad_to((R, *self.freqs_cis.shape[1:]))
-      q = self.attn_q_b(qa_all).reshape(1, R, -1, cfg.head_dim).transpose(1, 2)
-      nope = cfg.head_dim - rope
-      q_nope, q_rope = q[..., :nope], apply_rope(q[..., nope:], freqs, cfg.rope_interleave)
-      k_b = self.attn_k_b["weight"].transpose(-1, -2)
-      q_nope = q_nope.half().contiguous().matmul(k_b, dtype=dtypes.float) if k_b.dtype == dtypes.half else q_nope @ k_b
-      q = q_nope.cat(q_rope.cast(q_nope.dtype), dim=-1).half()
-      # (a value of the cache after its writes: they're in this call, the attention of the next call reads them. a shared layer's lists are
-      # its input's: not returned, an input returned as it is isn't a buffer the call writes)
-      ret = (tbo_a2a_pre(q, 2), cache[0, 0, 0:1, 0:1].contiguous())
-      return ret + ((lists.contiguous(),) if ind is not None else ())
-    out = _b(start_pos, T, *qa_parts, *row_parts, *(extra if ind is not None else (unwrap(picks),)), *(() if dep is None else (dep,)))
-    # (q, lists, a value after the caches' writes)
-    return (out[0], out[2] if ind is not None else unwrap(picks), out[1])
-
-  def tbo_c(self, dep:Tensor|None, q_parts:list[Tensor], picks:Tensor, start_pos:UOp, T:UOp) -> Tensor:
-    """the attention of the device's rows with every head: the outputs for all_to_all (back to the devices of the heads)"""
-    cfg = self.config
-    @function(precompile=True, allow_implicit=True)
-    def _c(picks:Tensor, start_pos:UOp, T:UOp, *qp:Tensor) -> Tensor:
-      q8_quantize_cache_clear()  # (quantizations of another call's graph aren't this one's)
-      q = tbo_a2a_post(list(qp[:len(q_parts)]), 1)
-      attn = mla_sparse_tokens(q, self.cache_k.reshape(1, 1, *self.cache_k.shape[2:]), picks, 1.0/cfg.head_dim**0.5, start_pos+T,
-                               cfg.kv_lora_rank, cfg.real_heads or cfg.n_heads)
-      return tbo_a2a_pre(attn.half(), 1)
-    return _c(picks, start_pos, T, *q_parts, *(() if dep is None else (dep,)))
-
-  def tbo_d(self, dep:Tensor|None, o_parts:list[Tensor]) -> tuple[Tensor, Tensor]:
-    """the output projection's partial sums of the device's heads: (float, q8) for the reduce scatter"""
-    @function(precompile=True, allow_implicit=True)
-    def _d(*op:Tensor) -> tuple[Tensor, Tensor]:
-      q8_quantize_cache_clear()  # (quantizations of another call's graph aren't this one's)
-      attn = tbo_a2a_post(list(op[:len(o_parts)]), 2)
-      v_b = self.attn_v_b["weight"].transpose(-1, -2)
-      attn = attn.contiguous().matmul(v_b, dtype=dtypes.float).contiguous() if v_b.dtype == dtypes.half else attn.float() @ v_b
-      B, _, R, _ = attn.shape
-      return tbo_rs_pre(self.attn_output.partial(attn.transpose(1, 2).reshape(B, R, -1)))
-    return _d(*o_parts, *(() if dep is None else (dep,)))
-
-  def tbo_e(self, dep:Tensor|None, xs:Tensor, rs:tuple) -> tuple[Tensor, ...]:
-    """the residual after the attention, the ffn's input (q8 rows) and its routing of the device's rows: (h, q8 rows[, selections])"""
-    cfg = self.config
-    @function(precompile=True, allow_implicit=True)
-    def _e(xs:Tensor, *rs:Tensor) -> tuple[Tensor, ...]:
-      q8_quantize_cache_clear()  # (quantizations of another call's graph aren't this one's)
-      if dep is not None: rs = rs[:-1]
-      h = (xs + tbo_rs_post(rs[0], list(rs[1:]))).contiguous()
-      hn = self.ffn_norm(h)
-      ret:tuple[Tensor, ...] = (h, tbo_q8_pre(hn.contiguous()))
-      if hasattr(self, 'ffn_gate_exps'):
-        bias = self.exp_probs_b["bias"]
-        logits = hn.half().contiguous().matmul(self.ffn_gate_inp.weight.T, dtype=dtypes.float).contiguous() \
-          if self.ffn_gate_inp.weight.dtype == dtypes.half else self.ffn_gate_inp(hn)
-        sel, probs = moe_router(logits, bias, cfg.num_experts_per_tok, cfg.routed_scaling_factor)
-        R = hn.shape[1]
-        ret += (sel.reshape(R, -1).bitcast(dtypes.uint32).cat(probs.reshape(R, -1).float().bitcast(dtypes.uint32), dim=-1).contiguous(),)
-      return ret
-    return _e(xs, *rs, *(() if dep is None else (dep,)))
-
-  def tbo_f(self, dep:Tensor|None, x_parts:list[Tensor], sel_parts:list[Tensor], T:UOp) -> tuple[Tensor, Tensor]:
-    """the ffn of all rows (the device's experts, its part of the shared ones): the partial sums (float, q8) for the reduce scatter"""
-    cfg, n = self.config, len(x_parts)
-    assert not sel_parts or len(sel_parts) == n
-    @function(precompile=True, allow_implicit=True)
-    def _f(T:UOp, *args:Tensor) -> tuple[Tensor, Tensor]:
-      q8_quantize_cache_clear()  # (quantizations of another call's graph aren't this one's)
-      xp, sp = args[:n], args[n:n+len(sel_parts)]
-      R = int(xp[0].shape[0]) * n
-      x = tbo_q8_post(list(xp), R, cfg.dim)
-      if sp:
-        sw = Tensor.cat(*sp, dim=0)
-        k = cfg.num_experts_per_tok
-        _sp_route[0] = (sw[:, :k].bitcast(dtypes.int32).reshape(1, R, k), sw[:, k:].bitcast(dtypes.float32).reshape(1, R, k))
-      _partial_out[0], _partial_half[0], _ffn_rows[0] = True, False, T
-      try: out = self._feed_forward(x)
-      finally: _partial_out[0], _partial_half[0], _ffn_rows[0], _sp_route[0] = False, True, None, None
-      assert out.ndim == x.ndim + 1, "the ffn's partial sums"
-      return tbo_rs_pre(out)
-    return _f(T, *x_parts, *sel_parts, *(() if dep is None else (dep,)))
 
   def _dec_proj(self, x:Tensor) -> tuple[Tensor, ...]|None:
     """
@@ -1778,108 +1641,41 @@ class Transformer(GLMSeqDriver):
     return self.config.hc is None and isinstance(devs, tuple) and not isinstance(T:=tokens.shape[1], int) and \
       int(T.vmax) % (16*len(devs)) == 0 and amd_custom_kernels_supported(devs) and bool((1)) and \
       len(self._part_ranges()) > 1
-  def _micro_batches(self, key:int) -> int:
-    # (GLM_MB_MIN: micro batches of chunks of that many rows at least: a small chunk's batches hung (448: 16 rows a device a batch))
-    mb, n = (1), len(cast(tuple, self.token_embd.weight.device))
-    return mb if mb > 1 and key % (16*n*mb) == 0 and key >= (2688) else 1
   def _has_picks(self, b:int) -> bool: return any(getattr(blk, "indexer", None) is not None for blk in self.blk[:b])
   def _sp_part(self, k:int, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> tuple:
     # (the parts pass the rows and the lists in buffers of their own, two of each: a part reads one and writes the other)
     self._effects = []
     ranges, T, key = self._part_ranges(), tokens.shape[1], int(cast(UOp, tokens.shape[1]).vmax)
-    (a, b), bufs, mb = ranges[k], self._sp_bufs[key], len(self._sp_bufs[key][0])
+    (a, b), bufs = ranges[k], self._sp_bufs[key]
     emb = self._embed(tokens)
-    # micro batches (GLM_MB): the rows of mb parts of the chunk's positions, a batch's blocks on a compute queue of its own (the copies of one
-    # run with the kernels of the other). a batch starts at the end of the tokens before it, its block runs after the one of the batch before
-    # it (it reads the caches that one writes)
-    n = key // mb
-    ts = [cast(UOp, T) if mb == 1 else (cast(UOp, T) - i*n).maximum(0).minimum(n) for i in range(mb)]
-    starts = [start_pos if i == 0 else start_pos + cast(UOp, T).minimum(i*n) for i in range(mb)]
-    if k == 0:
-      pad = emb.pad_to(emb.max_shape).contiguous()
-      xs, picks = [shard_rows(pad[:, i*n:(i+1)*n].contiguous(), 1) for i in range(mb)], cast(list[Tensor|None], [None]*mb)
-    else: xs, picks = [x for x, _ in bufs[k % 2]], [p if self._has_picks(a) else None for _, p in bufs[k % 2]]
-    if mb > 1 and (1) and all(isinstance(blk, MLATransformerBlock) and blk.tok_attn_ok(xs[0], starts[0]) for blk in self.blk[a:b]):
-      xs, picks = self._tbo_blocks(self.blk[a:b], xs, picks, starts, ts)
-    else: self._mb_blocks(self.blk[a:b], xs, picks, starts, ts)
+    if k == 0: x, pick = shard_rows(emb.pad_to(emb.max_shape).contiguous(), 1), None
+    else: x, pick = bufs[k % 2][0], bufs[k % 2][1] if self._has_picks(a) else None
+    for block in self.blk[a:b]:
+      _idx_mask[0] = pick
+      x = block.sp_block(x, start_pos, T)
+      pick = _idx_mask[0]
     if k < len(ranges) - 1:
       self._effects = None
       q8_quantize_cache_clear()
       nxt = bufs[(k + 1) % 2]
-      return tuple(t for i in range(mb) for t in (nxt[i][0].assign(xs[i]),
-                   *((nxt[i][1].assign(unwrap(picks[i]).cast(dtypes.int32)),) if self._has_picks(b) else ())))
-    x = Tensor.cat(*[all_gather(xi, 1) for xi in xs], dim=1) if mb > 1 else all_gather(xs[0], 1)
+      return (nxt[0].assign(x), *((nxt[1].assign(unwrap(pick).cast(dtypes.int32)),) if self._has_picks(b) else ()))
+    x = all_gather(x, 1)
     if self.config.spec_drafts:
       _idx_mask[0] = None
       self._mtp_prefill(emb, x, cast(UOp, start_pos), cast(UOp, T))
     out = self._tail(x[:, :T], tokens, start_pos, temperature)
     effects, self._effects = self._effects, None
     return (out, *effects)
-  def _tbo_blocks(self, blocks:list, xs:list[Tensor], picks:list, starts:list, ts:list) -> tuple[list[Tensor], list]:
-    """
-    two batch overlap: the blocks of the micro batches in phases (MLATransformerBlock.tbo_*), a call each, the batches' calls in turn (every
-    call after the one before it: their order on the compute queue), the copies of a batch's exchange between its calls. the copies of one
-    batch run while the kernels of the other one's call run
-    """
-    # (every call has the order input: a function's schedule is cached by its body, the calls of it must have the same arguments before the
-    # implicit ones (the weights))
-    # (the order input: a token tensor after the call before, the same shape and dtype every call)
-    if not hasattr(self, "_tbo_token"): self._tbo_token = Tensor.zeros(1, device=xs[0].device).contiguous().realize()
-    mb, last = len(xs), cast(list[Tensor|None], [self._tbo_token])
-    def called(out):
-      o = out[0] if isinstance(out, tuple) else out
-      if o.uop.op is Ops.AFTER and o.uop.src[1].op is Ops.CALL: last[0] = Tensor(self._tbo_token.uop.after(*o.uop.src[1:]))
-      return out
-    rs:list[tuple] = [() for _ in range(mb)]
-    for blk in blocks:
-      A = [called(blk.tbo_a(last[0], xs[i], rs[i], starts[i], ts[i])) for i in range(mb)]
-      ag = [(tbo_ag_parts(a[1]), tbo_ag_parts(a[2])) for a in A]
-      B = []
-      for i in range(mb):
-        qp, rp = ag[i]
-        B.append(called(blk.tbo_b(last[0], qp, rp, A[i][3:], picks[i], starts[i], ts[i])))
-        picks[i] = B[i][1]
-      qparts = [tbo_a2a_parts(bo[0], 1, 2) for bo in B]
-      C = [called(blk.tbo_c(last[0], qparts[i], picks[i], starts[i], ts[i])) for i in range(mb)]
-      oparts = [tbo_a2a_parts(c, 2, 1) for c in C]
-      D = [called(blk.tbo_d(last[0], oparts[i])) for i in range(mb)]
-      rsa = [tbo_rs_parts(*d) for d in D]
-      E = [called(blk.tbo_e(last[0], A[i][0], (rsa[i][0], *rsa[i][1]))) for i in range(mb)]
-      fin = [(tbo_ag_parts(e[1]), tbo_ag_parts(e[2]) if len(e) > 2 else []) for e in E]
-      F = [called(blk.tbo_f(last[0], fin[i][0], fin[i][1], ts[i])) for i in range(mb)]
-      for i in range(mb):
-        own, recv = tbo_rs_parts(*F[i])
-        rs[i], xs[i] = (own, *recv), E[i][0]
-    # (the last block's sums)
-    return [(xs[i] + tbo_rs_post(rs[i][0], list(rs[i][1:]))).contiguous() if rs[i] else xs[i] for i in range(mb)], picks
-
-  def _mb_blocks(self, blocks:list, xs:list[Tensor], picks:list, starts:list, ts:list):
-    """the blocks of the micro batches (sp_block, a call a block), a batch's on its queue, a block after the one of the batch before"""
-    mb = len(xs)
-    for block in blocks:
-      prev:Tensor|None = None
-      for i in range(mb):
-        _idx_mask[0] = picks[i]
-        xi = xs[i] if prev is None else Tensor(xs[i].uop.after(*prev.uop.src[1:]))
-        q = f"COMPUTE:{i}" if (1) and (i or (1)) and mb > 1 else None
-        xs[i] = prev = block.sp_block(xi, starts[i], ts[i], q)
-        picks[i] = _idx_mask[0]
-
   def _part_jits(self, key:int) -> list:
     if (jits:=self.jits.get(("parts", key))) is None:
       self._init_states()
-      if not hasattr(self, "_sp_bufs"): self._sp_bufs:dict[int, list[list[tuple[Tensor, Tensor]]]] = {}
+      if not hasattr(self, "_sp_bufs"): self._sp_bufs:dict[int, list[tuple[Tensor, Tensor]]] = {}
       devs = cast(tuple[str, ...], self.token_embd.weight.device)
-      top, mb = unwrap(self.config.indexer).top_k + 2, self._micro_batches(key)
-      # (the compute queues of the micro batches made here: a capture runs in a process that allocates nothing on the devices)
-      for i in range(1, mb if not (1) else 1):
-        for d in devs:
-          if hasattr(dev:=Device[d], "compute_queue_n"): dev.compute_queue_n(i)
+      top = unwrap(self.config.indexer).top_k + 2
       # (the lists: the device's rows' (token parallel attention), else every row's on every device (a sequence sharded cache))
       pax = 0 if (1) and not seq_sharded(devs) else None
-      self._sp_bufs[key] = [[(Tensor.empty(1, key//mb, self.config.dim, dtype=dtypes.float32, device=devs, axis=1).contiguous().realize(),
-                              Tensor.empty(key//mb, top, dtype=dtypes.int32, device=devs, axis=pax).contiguous().realize()) for _ in range(mb)]
-                            for _ in range(2)]
+      self._sp_bufs[key] = [(Tensor.empty(1, key, self.config.dim, dtype=dtypes.float32, device=devs, axis=1).contiguous().realize(),
+                             Tensor.empty(key, top, dtype=dtypes.int32, device=devs, axis=pax).contiguous().realize()) for _ in range(2)]
       jits = self.jits[("parts", key)] = [TinyJit(functools.partial(self._sp_part, k), capture_first=True,
                                                   scratch=self._scratch if (1) else None)
                                            for k in range(len(self._part_ranges()))]
