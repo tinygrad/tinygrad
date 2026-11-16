@@ -4,20 +4,21 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.x86 import ISARenderer, Register, rdef, regs, with_regs, LinearContext
 from typing import Any
 
+# ops that participate in register allocation
 REGALLOC_OPS = {Ops.INS, Ops.BUFFER, Ops.RANGE, Ops.END}
 
 class LinearScanRegallocContext:
   # returns the uop that defines the virtual register
   def vdef(self, v:Register) -> UOp: return self.uops[self.live_range[v][0]]
   def __init__(self, ctx:LinearContext, uops:list[UOp], ren:ISARenderer):
-    uops = self.uops = [u for u in uops if u.op in REGALLOC_OPS]
+    self.uops = uops = [u for u in uops if u.op in REGALLOC_OPS]
     self.ren = ren
     self.idx = itertools.count()
 
     # compute live ranges
     self.live_range: dict[Register, list[int]] = {}
     lr = self.live_range
-    loops: dict[int, int] = {} # the interval of each loop, from its RANGE to the last analyzed uop that reads that RANGE
+    loops: dict[int, int] = {} # the interval of each loop, from its RANGE to the last uop that reads that RANGE
     for idx,u in reversed(list(enumerate(uops))):
       defs = regs(u)
       for v in defs + tuple(rdef(s) for s in dedup(u.src)):
