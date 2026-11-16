@@ -193,10 +193,9 @@ pm_copy_from_store = PatternMatcher([
 class ExportCtx:
   replacements: list[UOp] = field(default_factory=list)
   allocs: dict[UOp, UOp] = field(default_factory=dict)
-  views: set[UOp] = field(default_factory=set)
 
-def contiguous_mops_to_view(ctx:ExportCtx|None, c:UOp, src:UOp):
-  """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
+def contiguous_mops_to_view(ctx:dict[UOp, int]|None, c:UOp, src:UOp):
+  """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range. with a ctx, the view is a PARAM and ctx maps it to its slot"""
   if not all_int(c.shape): return None
   buf = src.base
   while buf.op is Ops.BITCAST: buf = buf.src[0].base
@@ -205,10 +204,10 @@ def contiguous_mops_to_view(ctx:ExportCtx|None, c:UOp, src:UOp):
     if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
     if (view := contiguous_mops_to_view(ctx, unshard.src[0], unshard.src[0])) is None: return None
     view = view.unshard(unshard.arg, unshard.src[1:])
-  elif buf.op is Ops.BUFFER and (cv := src.contiguous_view()) is not None and cv[0].op is Ops.BUFFER:
+  elif buf.op in {Ops.BUFFER, Ops.EXTERN} and (cv := src.contiguous_view()) is not None and cv[0].op in {Ops.BUFFER, Ops.EXTERN}:
     buf, offset = cv
     view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
-    if ctx is not None: ctx.views.add(view)
+    if ctx is not None: view = view.param_like(ctx.setdefault(view, len(ctx)))
     view = view.reshape(c.shape)
   else: return None
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
@@ -248,19 +247,11 @@ def to_extern(ctx:ExportCtx, x:UOp) -> UOp|None:
   ctx.replacements.append(x)
   return x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=len(ctx.replacements)-1, buffer=None, name=None, val=None))
 
-# a contiguous view of storage (made by contiguous_mops_to_view) is storage
-def view_to_extern(ctx:ExportCtx, x:UOp) -> UOp|None:
-  if x not in ctx.views: return None
-  ctx.replacements.append(x)
-  return UOp.alloc((x.max_numel(),), x.dtype, len(ctx.replacements)-1, device=x.device).replace(op=Ops.EXTERN)
-
-pm_export = PatternMatcher([(UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern),
-                            (UPat((Ops.SHRINK, Ops.BITCAST), name="x"), view_to_extern)])+pm_canonicalize_alloc
+pm_export = PatternMatcher([(UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern)])+pm_canonicalize_alloc
 
 def export(big_sink:UOp) -> tuple[UOp, tuple[UOp, ...]]:
   stores = UOp.sink(*(u for u in big_sink.toposort() if is_store_after(u)))
-  stores = graph_rewrite(stores, pm_contiguous_views, ctx=(ctx:=ExportCtx()), name="contiguous views")
-  fn = graph_rewrite(stores, pm_export, ctx=ctx, bottom_up=True, name="export")
+  fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, name="export")
   return fn, tuple(ctx.replacements)
 
 def bind_alloc(b:UOp) -> UOp:
@@ -276,8 +267,11 @@ pm_map_back = PatternMatcher([
 
 def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   fn, externs = export(big_sink)
-  # the exported function has no runtime state: it's scheduled as is, and its EXTERNs are mapped back to the storage and bound Variables at the end
-  linear_call = graph_rewrite(fn.call(precompile=True), pm_schedule, name="schedule to linear", enter_calls=True)
+  # a contiguous view of storage is a different buffer: it's an input of the scheduled function, the call arg is the view
+  views: dict[UOp, int] = {}
+  fn = graph_rewrite(fn, pm_contiguous_views, ctx=views, name="views to params")
+  # the exported function has no runtime state: it's scheduled, and its EXTERNs are mapped back to the storage and bound Variables at the end
+  linear_call = graph_rewrite(fn.call(*views, precompile=True), pm_schedule, name="schedule to linear", enter_calls=True)
 
   # this recursively resolves the linear_call, storage stays unbound until map back
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
