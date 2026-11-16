@@ -4,6 +4,7 @@ from dataclasses import replace
 from typing import Callable, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.glm_dsa_gguf import ggml_data_to_tensor
+from tinygrad.llm.kernels.amd_glm import _nucleus_round_kernel
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import prod, getenv, round_up
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
@@ -2784,24 +2785,6 @@ def sharded_argmax(x:Tensor, n:int) -> Tensor|None:
   # the lowest index of the max
   return vals.eq(vals.max(0, keepdim=True)).where(idxs, n).min(0).reshape(B, 1)
 
-@functools.cache
-def _nucleus_round_kernel(out:UOp, z:UOp, e:UOp, t:UOp) -> UOp:
-  # out (1, B, G): the sums of e over the values of z at or above each of the G thresholds of its row (a device's part of the vocab): a
-  # workgroup a row, a thread every 256th value (all the thresholds), the threads' sums added in LDS in thread order
-  B, _, C, c = cast(tuple[int, int, int, int], z.shape)
-  G = int(t.shape[-1])
-  row, tid = UOp.range(B, 0, AxisType.GLOBAL), UOp.range(256, 1, AxisType.LOCAL)
-  ts = [t[row, g].load() for g in range(G)]
-  acc = UOp.alloc((G,), dtypes.float32, addrspace=AddrSpace.REG)
-  acc = acc.after(UOp.group(*[acc[g].store(UOp.const(0.0, dtypes.float32)) for g in range(G)]))
-  i = UOp.range(C * c // 256, 2, AxisType.LOOP)
-  pos = i * 256 + tid
-  zv, ev = z[row, 0, pos // c, pos % c].load(), e[row, 0, pos // c, pos % c].load()
-  upd = UOp.group(*[acc[g].store(acc.after(i)[g].load() + (zv >= ts[g]).where(ev, 0.0)) for g in range(G)]).end(i)
-  lds = UOp.alloc((256, G), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  lds = lds.after(UOp.group(*[lds[tid, g].store(acc.after(upd)[g].load()) for g in range(G)]).barrier())
-  total = functools.reduce(lambda a, b: a + b, [lds[k, tid.minimum(G-1)].load() for k in range(256)])
-  return out[0, row, tid.valid(tid < G)].store(total).end(row, tid).sink(arg=KernelInfo(name="nucleus_round", opts_to_apply=()))
 
 def nucleus(z:Tensor, n:int, top_p:Tensor, rounds:int|None=None, G:int|None=None) -> Tensor:
   """
