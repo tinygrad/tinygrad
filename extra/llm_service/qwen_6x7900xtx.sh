@@ -67,15 +67,15 @@ elif [[ $ACTION == start ]]; then
   if [[ ${AM_FIRST_START:-0} == 1 ]]; then SERVER_ENV+=(AM_VM_RESET=1); fi
   [[ ! -e $PIDFILE ]] || { echo "PID file already exists: $PIDFILE (check status first)" >&2; exit 2; }
   echo "start $(git rev-parse HEAD 2>/dev/null || cat DEPLOYED_COMMIT 2>/dev/null) model=$MODEL power=${AM_POWER_LIMIT}W" >> "$LOGFILE"
-  setsid env "${SERVER_ENV[@]}" "${COMMAND[@]}" >> "$LOGFILE" 2>&1 & child=$!
+  setsid sudo -n env "${SERVER_ENV[@]}" "${COMMAND[@]}" >> "$LOGFILE" 2>&1 & child=$!
   echo "$child" > "$PIDFILE"
   echo "Qwen started pid=$child log=$LOGFILE"
 elif [[ $ACTION == stop ]]; then
   [[ -r $PIDFILE ]] || { echo 'Qwen is not running (no PID file)' >&2; exit 1; }
   pid=$(cat "$PIDFILE")
-  kill -TERM -- "-$pid"
+  sudo -n kill -TERM -- "-$pid"
   for _ in {1..90}; do
-    if ! kill -0 "$pid" 2>/dev/null; then rm "$PIDFILE"; echo 'Qwen stopped'; exit 0; fi
+    if ! sudo -n kill -0 "$pid" 2>/dev/null; then rm "$PIDFILE"; echo 'Qwen stopped'; exit 0; fi
     read -r -t 1 _ || true
   done
   echo "Qwen pid=$pid did not exit in 90 s; inspect before taking further action" >&2; exit 1

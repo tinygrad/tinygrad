@@ -80,6 +80,17 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     self.assertIn("PENDING", failed.stderr)
     self.assertIn("210 W is not safe", failed.stderr)
 
+  def test_every_launcher_starts_the_server_as_root(self):
+    # the cards are opened through /sys/bus/pci/.../resource0 (root 0600 on the VMs): a start as the login user fails before the GPU
+    for script in ("qwen_6x7900xtx.sh", "glm_flash_6x7900xtx.sh", "glm_14xr9700.sh"):
+      starts = [l for l in (SCRIPTS / script).read_text().splitlines() if l.lstrip().startswith("setsid ")]
+      self.assertEqual(len(starts), 1, script)
+      self.assertTrue(starts[0].lstrip().startswith('setsid sudo -n env "${SERVER_ENV[@]}" "${COMMAND[@]}"'), script)
+      # and stop signals and checks that root process through sudo too (as the login user kill -0 fails with EPERM: 'stopped' while it runs)
+      kills = [l.strip() for l in (SCRIPTS / script).read_text().splitlines() if re.search(r"\bkill\b", l)]
+      self.assertEqual(kills[0], 'sudo -n kill -TERM -- "-$pid"', script)
+      self.assertTrue(kills[1].startswith('if ! sudo -n kill -0 "$pid" 2>/dev/null;'), script)
+
   def test_qwen_power_guard(self):
     proc = subprocess.run(
       [SCRIPTS / "qwen_6x7900xtx.sh", "start"], env={**os.environ, "AM_POWER_LIMIT": "251"}, cwd=ROOT, text=True, capture_output=True
