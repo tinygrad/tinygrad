@@ -35,7 +35,7 @@ COMMAND=(python3 -m tinygrad.llm --model "$MODEL" --shard 14 --max_context "${MA
 
 check_weights() {
   command -v sha256sum >/dev/null
-  (cd "$GLM_WEIGHTS" && sha256sum -c "$ROOT/extra/llm_service/glm53-iq4xs.sha256")
+  (cd "$(dirname -- "$MODEL")" && sha256sum -c "$ROOT/extra/llm_service/glm53-iq4xs.sha256")
 }
 if [[ $ACTION == --print-command ]]; then
   printf '%q ' "${SERVER_ENV[@]}" "${COMMAND[@]}"; printf '\n'
