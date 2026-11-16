@@ -164,6 +164,10 @@ class TestLLMTokenizer(unittest.TestCase):
     self.assertEqual(tok.encode("  你好hello"), ["  ", "你好", "hello"])
     self.assertEqual(tok.encode("a\u200b"), ["a", "\u200b"])
 
+  def test_olmo_split(self):
+    split = SimpleTokenizer({}, {}, "olmo")._split_to_word.findall
+    self.assertEqual(split("in 12345,\n\nI'LL"), ["in", " 12345", ",", "\n", "\n", "I", "'", "LL"])
+
   def test_stream_decoder(self):
     """stream_decoder buffers incomplete UTF-8: token 25677 has 3/4 of emoji, token 138 completes it."""
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]
