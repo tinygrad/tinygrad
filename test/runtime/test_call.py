@@ -9,9 +9,8 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
-from tinygrad.tensor import export
 
-def sched_key(t:Tensor): return export(UOp.sink(t.uop))[0].key
+def sched_key(t:Tensor): return t.export()[0].key
 
 class TestCall(unittest.TestCase):
   def test_call_plus(self):
@@ -279,12 +278,11 @@ class TestCallSchedule(unittest.TestCase):
   def test_precompile_scoped_bind_arg(self):
     @function(precompile=True)
     def f(x:Tensor, scale:UOp) -> Tensor: return x * scale
+    sa, sb = UOp.variable("scale_a", 1, 100).bind(2), UOp.variable("scale_b", 1, 100).bind(3)
+    self.assertEqual(sched_key(f(Tensor.ones(3), sa)), sched_key(f(Tensor.ones(3), sb)))
     a = Tensor.ones(3)
-    x = f(a, UOp.variable("scale_a", 1, 100).bind(2))
-    y = f(a, UOp.variable("scale_b", 1, 100).bind(3))
-    self.assertEqual(sched_key(x), sched_key(y))
-    np.testing.assert_equal(x.numpy(), [2, 2, 2])
-    np.testing.assert_equal(y.numpy(), [3, 3, 3])
+    np.testing.assert_equal(f(a, sa).numpy(), [2, 2, 2])
+    np.testing.assert_equal(f(a, sb).numpy(), [3, 3, 3])
 
   def test_precompile_nested_scope_collision(self):
     # a precompiled function body gets its own positional p{slot} params; they must not be renumbered when the call is
@@ -316,7 +314,7 @@ class TestCallSchedule(unittest.TestCase):
           out = outer(x)
           for call in (u for u in out.uop.toposort(enter_calls=True) if u.op is Ops.CALL):
             self.assertFalse(any(b.op is Ops.BUFFER for b in call.body.toposort(enter_calls=True)))
-          self.assertEqual(sched_key(out), sched_key(outer(x)))
+          self.assertEqual(sched_key(outer(x)), sched_key(outer(x)))
           out.sum().backward()
           np.testing.assert_equal(out.numpy(), [6., 9., 12., 15.])
           np.testing.assert_equal(x.grad.numpy(), [3., 3., 3., 3.])
