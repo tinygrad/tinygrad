@@ -270,6 +270,11 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(resp.choices[0].finish_reason, "length")
     self.assertEqual(resp.usage.completion_tokens, 2)
 
+  def test_context_full_is_length(self):
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301]))
+    resp = self.client.chat.completions.create(model="test", messages=[{"role": "user", "content": "Hello"}])
+    self.assertEqual(resp.choices[0].finish_reason, "length")
+
   def test_models_endpoint(self):
     import requests as req
     resp = req.get(f"http://127.0.0.1:{self.port}/v1/models")
@@ -370,7 +375,7 @@ class TestLLMToolCalls(unittest.TestCase):
     cls.mock_tok._special_tokens = {}
     cls.mock_tok.preset = "qwen2"
     cls.mock_tok.bos_id, cls.mock_tok.eos_id, cls.mock_tok.eot_id = None, 999, None
-    cls.mock_tok.is_end = Mock(return_value=False)
+    cls.mock_tok.is_end = Mock(side_effect=lambda tid: tid == 999)
 
     cls.mock_model = Mock()
     cls.mock_model.max_context = 4
@@ -398,7 +403,7 @@ class TestLLMToolCalls(unittest.TestCase):
   def set_output(self, text:str):
     pieces = dict(enumerate(text, 1))
     self.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: pieces[tid] if tid is not None else "")
-    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter(pieces))
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([*pieces, 999]))
 
   @staticmethod
   def tools():
