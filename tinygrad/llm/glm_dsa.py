@@ -2264,7 +2264,8 @@ class Transformer(GLMSeqDriver):
   def _sample(self, h:Tensor, temperature:Tensor|None, device:str|tuple[str, ...]|None, noise:tuple[Tensor, Tensor]|None=None) -> Tensor:
     """
     the token (B, 1) after every normed hidden state h (B, D), sampled (greedy without a temperature). on device unless the output is split.
-    temperature: (rows, 1) the temperature of every row (or one), or (rows, 2) and its top_p (only the tokens of the top_p nucleus are sampled).
+    temperature: (rows, 1) the temperature of every row (or one), or (rows, 2) and its top_p (only the tokens of the top_p nucleus are sampled),
+    or (rows, 3) and a top_k (ignored: SAMPLE_TOP_K off).
     noise: (seed, keys (B,)): the uniform noise of a row a hash of the seed, its key and the token (see _hash_uniform), not drawn
     """
     logits = self.output(h)
@@ -2280,7 +2281,11 @@ class Transformer(GLMSeqDriver):
       u = _hash_uniform(noise[0], noise[1], logits) if noise is not None else Tensor.rand_like(logits)
       # (-log(u) at least 1-u (it is): the device's log of a u a few ulps below 1 is 0, its noise an infinity)
       logits = z - hot.where(u.maximum(1e-12).log().neg().maximum(1 - u).log(), 0)
-      if tp.shape[1] == 2: logits = (nucleus(z, self.config.vocab_size, tp[:, 1:]) | hot.logical_not()).where(logits, -math.inf)
+      # (the rows: (temperature,), (temperature, top_p), or the seq steps' (temperature, top_p, top_k) (glm5next TEMP_W). a test of exactly two
+      # columns dropped the top_p of every seq step from a6dd1485d on: tokens from the whole vocabulary at temperature 1, see
+      # results/incidents/ts5-stray-tokens)
+      assert tp.shape[1] < 3 or not glm_seq_base.SAMPLE_TOP_K, "SAMPLE_TOP_K: a row's top_k is not in this model's sampler"
+      if tp.shape[1] >= 2: logits = (nucleus(z, self.config.vocab_size, tp[:, 1:2]) | hot.logical_not()).where(logits, -math.inf)
     # a split output: every device takes the max of its part
     if (tok:=sharded_argmax(logits, self.config.vocab_size)) is not None: return tok
     return _argmax_rows(logits.to(device)[:, :self.config.vocab_size])
