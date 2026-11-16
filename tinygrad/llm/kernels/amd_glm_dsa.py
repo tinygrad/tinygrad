@@ -3340,7 +3340,7 @@ _bundle_cache:dict[tuple, tuple[Tensor, Tensor, Tensor]] = {}
 # batched decoding of at least MOE_BUNDLE_MIN tokens: the rows of an expert in bundles of MOE_BUNDLE that share its weight loads
 MOE_BUNDLE, MOE_BUNDLE_MIN = (4), (40)
 # fewer rows (batched decoding of 2-9 users): bundles of MOE_EXACT_M in float from MOE_EXACT_MIN rows (0: off), the per-row kernel's values
-MOE_EXACT_M, MOE_EXACT_MIN = (2), getenv("MOE_EXACT_MIN", 8)
+MOE_EXACT_M, MOE_EXACT_MIN = (2), 8
 # the bundled MoE kernels with MOE_PERSIST workgroups an output block looping over the bundles there are (0: a grid of every possible bundle;
 # 1 runs a device's few bundles one after another: slower in the step; 4-8: G=8 -6.8 ms)
 MOE_PERSIST = (8)
