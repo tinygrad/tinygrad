@@ -4,7 +4,7 @@ from tinygrad.helpers import partition
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
-               bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None, eom_id:int|None=None, chat_template:str|None=None):
+               bos_id:int|None=None, add_bos:bool=True, eos_id:int=0, eot_id:int|None=None, eom_id:int|None=None, chat_template:str|None=None):
     marks = preset in ("qwen35", "qwen35moe")
     preset = {"qwen35":"qwen2","qwen35moe":"qwen2","minimax-m2":"gpt-4o","deepseek-v3":"joyai-llm"}.get(preset, preset)
     if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4","gpt-4o","joyai-llm","bailingmoe2"):
@@ -46,7 +46,7 @@ class SimpleTokenizer:
     self._special_tokens = special_tokens
     self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
     self.preset, self.chat_template = preset, chat_template
-    self.bos_id, self.eos_id, self.eot_id, self.eom_id = bos_id, eos_id, eot_id, eom_id
+    self.bos_id, self.add_bos, self.eos_id, self.eot_id, self.eom_id = bos_id, add_bos, eos_id, eot_id, eom_id
 
   @staticmethod
   def from_gguf_kv(kv:dict):
@@ -55,7 +55,7 @@ class SimpleTokenizer:
     normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] not in (2, 3, 4)) # UNKNOWN|CONTROL|USER_DEFINED
     special_tokens_dict = dict(special_tokens)
     return SimpleTokenizer(dict(normal_tokens), special_tokens_dict, kv["tokenizer.ggml.pre"],
-      bos_id=kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None,
+      bos_id=kv.get('tokenizer.ggml.bos_token_id'), add_bos=kv.get('tokenizer.ggml.add_bos_token', True),
       eos_id=kv.get('tokenizer.ggml.eos_token_id', 0), eot_id=kv.get('tokenizer.ggml.eot_token_id', special_tokens_dict.get('<|im_end|>')),
       eom_id=kv.get('tokenizer.ggml.eom_token_id'), chat_template=kv.get('tokenizer.chat_template'))
 
