@@ -5,7 +5,7 @@ from typing import Any, Callable, Iterator, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.jit import capture_parallel, warmup_wanted, _TinyJit
 from tinygrad.engine import jit as jit_mod
-from tinygrad.engine.realize import run_linear, compile_linear, link_linear, warm_worker_pool
+from tinygrad.engine.realize import warm_worker_pool
 from tinygrad.llm.kernels.amd_glm_dsa import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, hc_pre, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
@@ -2309,9 +2309,6 @@ class Transformer(GLMSeqDriver):
     # one writing them later would overwrite the reset with the last step's
     self._spec_host_out, self._spec_out = _host_ints(devs[0] if isinstance(devs, tuple) else cast(str, devs), 2*k+1)
 
-  def _spec_row0_copy(self, row:UOp, keep:UOp):
-    """row 0 of _spec_h: the hidden state of row `row` (keep 1), or zero (keep 0)"""
-    self._spec_h[0:1].assign(self._spec_h.shrink(((row, row+1), None)).contiguous() * Tensor(keep).cast(dtypes.float)).realize()
   def _spec_row0(self, row:int):
     """the hidden state of the position before a prompt (row 0 of _spec_h): the one of row `row` (the last accepted token), 0: none (zero)"""
     if not hasattr(self, "_spec_row0_jit"):
@@ -2492,28 +2489,12 @@ class Transformer(GLMSeqDriver):
     """the slots for sequence states and warmed decode steps"""
     if not (self.has_recurrent_block and self.config.kv_lora_rank > 0) or self.config.cache_rows: return 0
     return min((80 if self.max_context <= 65536 else 32), max(self.BATCH_SIZES))
-  def decode_slots(self) -> int:
-    return self.batch_slots()
-  def batch_ctx(self) -> int:
-    ctx = min((2048), self.max_context)
-    # (aliased: whole blocks of the split sequence, the slots' regions are the model's cache's positions)
-    if self._aliased(): ctx = ctx // (q:=SEQ_BLK*len(to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)))) * q
-    return ctx
   def _aliased(self) -> bool:
     """
     (SLOT_ALIAS, a sequence sharded cache) the slots' caches and the model's are one buffer: the model's first batch_ctx positions, then the
     slots' (the model's past them too: a long sequence alone overwrites the slots, see main_overlaps)
     """
     return seq_sharded(self.token_embd.weight.device) and bool(self.batch_slots()) and bool((1))
-  def main_overlaps(self, length:int) -> list[int]:
-    """the slots the model's cache of `length` positions overwrites (aliased: slot i's are the model's past (SLOT_SPAN+i)*batch_ctx)"""
-    if not self._aliased(): return []
-    return list(range(min(self.batch_slots(), max(0, -(-length // self.batch_ctx()) - SLOT_SPAN))))
-  def _slot_writes(self):
-    """(aliased) the slots written: the model's conversation past its own positions (and its checkpoint) is gone, see main_own"""
-    if not self._aliased(): return
-    if len(getattr(self, "_cached_tokens", [])) > (S:=self.main_own()): self._cached_tokens = []
-    if len(getattr(self, "_ckpt_tokens", [])) > S: self._ckpt_tokens = []
   def batch_sizes(self) -> tuple[int, ...]:
     """
     the rows of the steps of batched decoding (a jit each): the sizes below the slots and the slots (BATCH_SLOTS of another size). none with
@@ -2645,18 +2626,6 @@ class Transformer(GLMSeqDriver):
                                        for f in (self._slot_copy, self._slot_load_copy, self._slot_move_copy)) for n in range(2, self.max_span()+1)}
       for n, js in self._slot_span_jits.items():
         for name, j in zip(("slot/store", "copy/load", "slot/move"), js): setattr(j, "warmup_name", f"{name}_span{n}")
-  def main_own(self) -> int:
-    """(aliased) the positions of the model's cache that aren't a slot's (SLOT_SPAN slots' worth)"""
-    return SLOT_SPAN*self.batch_ctx()
-  def max_span(self) -> int:
-    """(WIDE, aliased slots) the slots a sequence of batched decoding spans at most: its positions past its slot's are the next ones'"""
-    return SLOT_SPAN if self._aliased() else 1
-  def slot_span(self, length:int) -> int:
-    """the slots a sequence of `length` positions spans"""
-    return max(1, -(-length // self.batch_ctx())) if self._aliased() else 1
-  def _slot_move_vars(self, src:int, dst:int) -> tuple[UOp, ...]:
-    v = functools.partial(UOp.variable, min_val=0, max_val=self.batch_slots()-1)
-    return v("slot_src").bind(src), v("slot_dst").bind(dst)
   def _slot_store_vars(self, i:int, length:int, hrow:int) -> tuple[UOp, ...]:
     S, SC = slot_states(self.config.spec_drafts)
     rp = UOp.variable("slot_rp", 0, self.config.rewind).bind(length % (self.config.rewind + 1))
@@ -2716,18 +2685,6 @@ class Transformer(GLMSeqDriver):
     self._slot_writes()
     (self._slot_jit if span == 1 else self._slot_span_jits[span][0])(*self._slot_store_vars(i, length, hrow))
 
-  def slot_load(self, i:int, length:int, hrow:int=0):
-    """
-    the states of slot i (a sequence of `length` tokens, stored by slot_store or decoded batched there) back into the model's: it continues alone
-    from them (the cache of a conversation kept in a slot). hrow: the slot's row of the last token's hidden state. the caller sets _cached_tokens
-    """
-    self._init_slots()
-    self._slot_jits()
-    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()
-    span = self.slot_span(length)
-    (self._slot_load_jit if span == 1 else self._slot_span_jits[span][1])(*self._slot_store_vars(i, length, hrow))
-    self._ckpt_tokens, self._spec_row = [], 0
-
   # ** a conversation's states in host memory (HOST_STASH in the server: the ones longer than a slot): its bytes copied, no kernel
   HOST_BUCKET = (16384)  # the positions host_save copies: a conversation's rounded up to a multiple (the same copies)
   def _host_parts(self, length:int, ckpt:bool=True) -> list[tuple[Buffer, int, int]]:
@@ -2760,18 +2717,6 @@ class Transformer(GLMSeqDriver):
       for t in getattr(self, "_ckpt", []): add(t)
     return parts
 
-  @staticmethod
-  def _state_parts(t:Tensor, axis:int=0, n:int|None=None) -> list[tuple[Buffer, int, int]]:
-    """the first n rows of a state's axis (all of it): a prefix of every device's buffer, past the axes of one before it"""
-    bufs = [u.buffer for u in t.uop.toposort() if u.op is Ops.BUFFER]
-    assert len(bufs) == 1, f"a state of {len(bufs)} buffers"
-    per = bufs[0].bufs if isinstance(bufs[0], MultiBuffer) else [bufs[0]]
-    shape = list(t.shape)
-    if isinstance(t.device, tuple) and (sa:=t.uop.axis) is not None: shape[sa] //= len(t.device)
-    assert prod(shape[:axis]) == 1 and per[0].nbytes == prod(shape) * t.dtype.itemsize, f"{t.shape} isn't rows of a buffer on axis {axis}"
-    row = int(prod(shape[axis+1:])) * t.dtype.itemsize
-    return [(b, 0, (int(shape[axis]) if n is None else n)*row) for b in per]
-
   def _host_rows(self, length:int|None=None, save:bool=True) -> list[Tensor]:
     """
     the staging rows of the slotted recurrent states (the row of a position p is p%S): host_save copies the row of a conversation's end into
@@ -2786,98 +2731,8 @@ class Transformer(GLMSeqDriver):
       for sv, j in self._hrow_jits.items(): setattr(j, "warmup_name", f"stash/host_{'save' if sv else 'load'}")
     if length is not None: self._hrow_jits[save](slot)
     return self._hrows
-  def _hrow_copy(self, save:bool, slot:UOp):
-    views = self._ckpt_views([x for x in self._recurrent_states() if x[1]], slot)
-    Tensor.realize(*[dst.assign(src) for dst, src in (zip(self._hrows, views) if save else zip(views, self._hrows))])
 
   HOST_CHUNK = (1 << 30)  # the bytes of a buffer of host memory (host_alloc): a conversation takes as many as it needs
-  def _host_layout(self, parts:list[tuple[Buffer, int, int]]) -> list[tuple[int, int]]:
-    """every part's (chunk, offset): one after the other, the next chunk when it doesn't fit (aligned to 256 bytes)"""
-    out, chunk, off = [], 0, 0
-    for _, _, n in parts:
-      assert n <= self.HOST_CHUNK, f"a part of {n} bytes, chunks of {self.HOST_CHUNK}"
-      if off + n > self.HOST_CHUNK: chunk, off = chunk + 1, 0
-      out.append((chunk, off))
-      off = round_up(off + n, 256)
-    return out
-  def host_chunks(self, length:int, ckpt:bool=True) -> int:
-    """the chunks of host memory (host_alloc) host_save needs for a conversation of `length` tokens"""
-    return self._host_layout(self._host_parts(length, ckpt))[-1][0] + 1
-  def host_ckpt(self, tokens:list[int]) -> int:
-    """the tokens of the model's checkpoint (the prompt of its last reply) if it is one of the conversation `tokens` (host_save keeps it)"""
-    ck = self._ckpt_tokens if hasattr(self, "_ckpt") else []
-    return len(ck) if 0 < len(ck) < len(tokens) and tokens[:len(ck)] == ck else 0
-  def host_alloc(self, nbytes:int|None=None) -> Buffer:
-    """a chunk of host memory for host_save (CPU memory: the devices copy to it, mapped on them here once: used again, not made again)"""
-    buf = Buffer("CPU", nbytes or self.HOST_CHUNK, options=BufferSpec(nolru=True)).allocate()
-    for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): buf.get_buf(d)
-    return buf
-
-  def _host_copy(self, save:bool, chunks:list[Buffer], length:int, ckpt:bool=True):
-    if save: self._host_rows(length, True)  # (the row of its end to the staging rows, before the copies)
-    # (the bucket of its positions, its checkpoint or not)
-    self._host_run((save, len(chunks), self._host_len(length), ckpt), save, chunks, lambda: self._host_parts(length, ckpt))
-    if not save: self._host_rows(length, False)  # (the staging rows to the row of its end)
-
-  def _host_run(self, key:tuple, save:bool, chunks:list[Buffer], parts_of:Callable[[], list[tuple[Buffer, int, int]]],
-                layout_of:Callable[[list[tuple[Buffer, int, int]]], list[tuple[int, int]]]|None=None):
-    # the copies between the model's states (parts_of) and chunks (of host memory: inputs of the program, the same program for every chunks
-    # of these sizes): a program made once (building and compiling ~2000 copies takes ~0.5 s), the devices copy at once (CPU memory is the
-    # devices' to copy to, none staged)
-    if not hasattr(self, "_host_programs"): self._host_programs:dict[tuple, UOp] = {}
-    key = (*key, tuple(c.nbytes for c in chunks))
-    if (prg:=self._host_programs.pop(key, None)) is None:
-      parts = parts_of()
-      layout = (layout_of or self._host_layout)(parts)
-      assert len(chunks) > layout[-1][0], f"{len(chunks)} chunks for {layout[-1][0]+1}"
-      ins = [UOp.param(i, dtypes.uint8, c.nbytes, c.device) for i, c in enumerate(chunks)]
-      pairs = [(ins[c][off:off+n], UOp.from_buffer(b.view(n, o).ensure_allocated(), dtypes.uint8)) for (b, o, n), (c, off) in zip(parts, layout)]
-      calls = [h.store_call(b) if save else b.store_call(h) for h, b in pairs]
-      prg = link_linear(compile_linear(UOp(Ops.LINEAR, src=tuple(calls))))
-      while len(self._host_programs) >= (512): self._host_programs.pop(next(iter(self._host_programs)))
-    self._host_programs[key] = prg  # (the most recently used last)
-    devs = to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device))
-    for d in devs: Device[d].synchronize()  # (run ahead steps of the model)
-    run_linear(prg, input_uops=[UOp.from_buffer(c, dtypes.uint8) for c in chunks], jit=True, update_stats=False)
-    for d in devs + ("CPU",): Device[d].synchronize()
-
-  # ** a request's checkpoint while it's decoded in a slot (the model's own is the next prompt's by then): copied to host memory after its
-  # prefill, back into the model's before its conversation's host_save. a client that doesn't send the model's reasoning back has the
-  # conversation of its next turn differ right after this prompt: it goes on from there, not from the start
-  def _ckpt_parts(self) -> list[tuple[Buffer, int, int]]: return [p for t in getattr(self, "_ckpt", []) for p in self._state_parts(t)]
-  @staticmethod
-  def _one_layout(parts:list[tuple[Buffer, int, int]]) -> list[tuple[int, int]]:
-    """every part's (0, offset): one after the other in one buffer (aligned to 256 bytes), whatever its size"""
-    offs = list(itertools.accumulate((round_up(n, 256) for _, _, n in parts), initial=0))
-    return [(0, o) for o in offs[:-1]]
-  def ckpt_alloc(self) -> Buffer|None:
-    """host memory for a copy of the model's checkpoint (ckpt_copy): its size, in one buffer (not chunks). None without one"""
-    if not (parts:=self._ckpt_parts()): return None
-    return self.host_alloc(self._one_layout(parts)[-1][1] + parts[-1][2])
-  def ckpt_copy(self, save:bool, buf:Buffer):
-    """the model's checkpoint into buf (save), or back from it (the caller sets _ckpt_tokens)"""
-    self._host_run(("ckpt", save), save, [buf], self._ckpt_parts, self._one_layout)
-
-  def _host_len(self, length:int) -> int:
-    """the positions of a conversation host_save copies: rounded up to HOST_BUCKET, (aliased) not past the model's own if it fits (the slots')"""
-    n = min(round_up(max(length, 1), self.HOST_BUCKET), self.max_context)
-    return min(n, self.main_own()) if self._aliased() and length <= self.main_own() else n
-
-  def host_save(self, length:int, chunks:list[Buffer], ckpt:bool=True):
-    """
-    the states of the model's conversation of `length` tokens copied to host memory: chunks (host_alloc'd, as many as host_chunks: the same
-    ones every time its copies are the same program). its checkpoint's too (ckpt), its hidden states of speculative decoding (every row, see
-    host_load)
-    """
-    self._host_copy(True, chunks, length, ckpt)
-
-  def host_load(self, chunks:list[Buffer], length:int, hrow:int, ckpt:bool=True):
-    """
-    the states of a conversation of `length` tokens saved by host_save back into the model's (it continues from them, or from its checkpoint:
-    ckpt, saved with it). hrow: the row of _spec_h of its last token's hidden state when saved (_spec_row). sets no _cached_tokens, _ckpt_tokens
-    """
-    self._host_copy(False, chunks, length, ckpt)
-    self._ckpt_tokens, self._spec_row = [], hrow
 
   def forward_batch(self, *positions:UOp) -> Tensor:
     """a step of batched decoding: row i the sequence of slot i at positions[i], its token in _batch_in, its temperature in _batch_temp"""
@@ -2900,8 +2755,6 @@ class Transformer(GLMSeqDriver):
       self._batch_jits[m] = TinyJit(self.forward_batch, capture_first=True, scratch=self._scratch)
       self._batch_jits[m].warmup_name = f"step/{m}"
     return self._batch_jits[m]
-  def _batch_positions(self, positions:list[int]) -> list[UOp]:
-    return [UOp.variable(f"batch_pos{i}", 0, SLOT_SPAN*self.batch_ctx()-1).bind(pos) for i, pos in enumerate(positions)]
 
   def batch_step(self, rows:list[tuple[int, int, float|tuple[float, float]]]) -> list[int]:
     """
@@ -2989,10 +2842,6 @@ class Transformer(GLMSeqDriver):
     if G: Tensor.realize(ret, *pf.effects)
     return ret
 
-  def _ints(self, xs:tuple[UOp, ...]) -> Tensor:
-    """variables as an int32 tensor of the devices (a stack of variables has no device: onto zeros of the devices)"""
-    devs = self.token_embd.weight.device
-    return (Tensor.zeros(len(xs), dtype=dtypes.int32, device=devs) + Tensor.stack(*[Tensor(x) for x in xs]).cast(dtypes.int32)).contiguous()
   def _prompt_ends(self, hn:Tensor, emb:Tensor, pf:BatchPrefill, temps:Tensor) -> Tensor:
     """
     prompts prefilled into slots (pf's, _batch_rows theirs): the MTP layer on their rows (its caches, a token's input the hidden state hn of the
@@ -3047,25 +2896,12 @@ class Transformer(GLMSeqDriver):
     return self.BPF_G if self.batch_sizes() and self.BPF_P and self.sequence_parallel(self.BPF_G * self.BPF_P) and \
       (not seq_sharded(self.token_embd.weight.device) or (0)) and \
       self.max_context <= (65536) else 0
-  def bpf_sizes(self, P:int|None=None) -> tuple[int, ...]:
-    """
-    the prompts of a batch_prefill step of prompts of P rows (a jit each), using BPF_G when it fits BPF_ROWS (or one prompt otherwise)
-    """
-    P = P or min(self.BPF_PS)
-    return (self.BPF_G,) if self.BPF_G * P <= self.BPF_ROWS and self.sequence_parallel(self.BPF_G * P) else (1,)
-  def bpf_class(self, n:int) -> int|None:
-    """the rows of the batch_prefill steps of prompts of n tokens at most (the smallest of BPF_PS), None: more than BPF_P"""
-    return next((p for p in self.BPF_PS if p >= n), None)
   def _bpf_jit(self, G:int|None=None, P:int|None=None):
     if not hasattr(self, "_bpf_jits"): self._bpf_jits:dict[tuple[int, int], Any] = {}
     if (key:=(G or self.BPF_G, P or self.BPF_P)) not in self._bpf_jits:
       self._bpf_jits[key] = TinyJit(functools.partial(self.forward_batch_prefill, P=key[1]), capture_first=True, scratch=self._scratch)
       self._bpf_jits[key].warmup_name = f"step/bpf{key[1]}_{key[0]}"
     return self._bpf_jits[key]
-  def _bpf_vars(self, counts:list[int], slots:list[int], starts:list[int]|None=None) -> list[UOp]:
-    return [UOp.variable(f"bpf_count{g}", 1, self.BPF_P).bind(c) for g, c in enumerate(counts)] + \
-           [UOp.variable(f"bpf_slot{g}", 0, self.batch_slots()-1).bind(s) for g, s in enumerate(slots)] + \
-           [UOp.variable(f"bpf_start{g}", 0, SLOT_SPAN*self.batch_ctx()-1).bind(st) for g, st in enumerate(starts or [0]*len(counts))]
   def batch_prefill(self, prompts:list[tuple[list[int], int, float|tuple[float, float]]], starts:list[int]|None=None, P:int|None=None) -> list[int]:
     """
     prefills of prompts (tokens, slot, temperature) (at most BPF_G of BPF_P tokens) into their slots in one step: the token after every one.
@@ -3098,10 +2934,6 @@ class Transformer(GLMSeqDriver):
       self._bspec_jits[m] = TinyJit(self.forward_batch_spec, capture_first=True, scratch=self._scratch)
       self._bspec_jits[m].warmup_name = f"step/{m}"
     return self._bspec_jits[m]
-  def _bspec_vars(self, seqs:list[tuple[int, int, int]]) -> list[UOp]:
-    k, ctx = self.config.spec_drafts, SLOT_SPAN*self.batch_ctx()
-    return [v for g, (mp, j, par) in enumerate(seqs) for v in (UOp.variable(f"bspec_mtp{g}", 0, ctx-1).bind(mp),
-            UOp.variable(f"bspec_j{g}", 0, k).bind(j), UOp.variable(f"bspec_par{g}", 0, 1).bind(par))]
 
   def batch_spec_step(self, seqs:list[tuple[list[int], int, int, int, float|tuple[float, float]]]) -> list[tuple[list[int], list[int]]]:
     """
@@ -3688,11 +3520,6 @@ class Transformer(GLMSeqDriver):
     return self.config.hc is None and isinstance(devs, tuple) and not isinstance(x.shape[1], int) and \
       int(x.max_shape[1]) % (16*len(devs)) == 0 and amd_custom_kernels_supported(devs) and bool((1))
 
-  def sequence_parallel(self, rows:int) -> bool:
-    """the hyper-connection streams of a prefill chunk of `rows` are split over the devices: tiles of 16 rows on every device"""
-    devs = self.token_embd.weight.device
-    return isinstance(devs, tuple) and self.config.hc is not None and rows % (16*len(devs)) == 0 and bool((1))
-
   def prefill_chunks(self, chunk_size:int|None=None) -> tuple[int, ...]:
     """the prefill chunk sizes, ascending: the custom kernels compute chunks padded to a static size, a piece of a prompt runs the smallest
     one it fits (its own jit), large chunks are efficient. sequence parallel: whole tiles of rows on every device"""
@@ -3898,25 +3725,12 @@ class Transformer(GLMSeqDriver):
     self._ckpt_jits[save](slot)
     if save: self._ckpt_tokens = tokens[:]
 
-  @staticmethod
-  def _ckpt_views(states:list[tuple[Tensor, bool]], slot:UOp) -> list[Tensor]:
-    return [s.shrink(((slot, slot+1),) + (None,)*(s.ndim-1)) if slotted else s for s, slotted in states]
-  def _ckpt_copy(self, save:bool, slot:UOp):
-    views = self._ckpt_views(self._recurrent_states(), slot)
-    pairs = zip(self._ckpt, views) if save else zip(views, self._ckpt)
-    Tensor.realize(*[dst.assign(src) for dst, src in pairs])
-
   def _reuse(self, tokens:list[int]) -> tuple[int, bool]:
     # recurrent state can't be partially reused after divergence: the cached prefix if the tokens extend it, else the checkpoint's (restored)
     cached, ckpt = self._cached_tokens, getattr(self, "_ckpt_tokens", [])
     if cached and len(cached) < len(tokens) and tokens[:len(cached)] == cached: return len(cached), False
     if ckpt and len(ckpt) < len(tokens) and tokens[:len(ckpt)] == ckpt: return len(ckpt), True
     return 0, False
-
-  def get_start_pos(self, tokens:list[int]) -> int:
-    if self.has_recurrent_block: return self._reuse(tokens)[0]
-    prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
-    return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
   def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0, top_p:float=1.0):
     self._finish_load()
