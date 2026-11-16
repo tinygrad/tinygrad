@@ -314,7 +314,7 @@ class TestCustomKernel(unittest.TestCase):
   def test_explicit_stage_padded_slice(self):
     def kernel(out):
       r = UOp.range(2, 0, AxisType.LOOP)
-      return out.store(r.expand(2).pad((1, 1)).bufferize(r, arg=BufferizeOpts(out.device, removable=False))).sink()
+      return out.store(r.expand(2).pad((1, 1)).bufferize(r, arg=BufferizeOpts(Device.DEFAULT, removable=False))).sink()
     self.assertEqual(Tensor.empty(2, 4, dtype=dtypes.int).custom_kernel(fxn=kernel)[0].tolist(), [[0, 0, 0, 0], [0, 1, 1, 0]])
 
   def _test_explicit_stage_free_range(self, space:AddrSpace):
@@ -341,7 +341,7 @@ class TestCustomKernel(unittest.TestCase):
     for direct, want in ((True, [2]), (False, [30])):
       def kernel(out, direct=direct):
         r = UOp.range(4, 0, AxisType.LOOP, dtype=dtypes.int32)
-        v = r.bufferize(r, arg=BufferizeOpts(out.device, removable=False)).index(2).load()
+        v = r.bufferize(r, arg=BufferizeOpts(Device.DEFAULT, removable=False)).index(2).load()
         values = UOp.stack(*[UOp.const(x, dtypes.int32) for x in (10, 20, 30, 40)])
         return out.index(0).store(v if direct else values.index(v)).sink()
       with self.subTest(direct=direct):

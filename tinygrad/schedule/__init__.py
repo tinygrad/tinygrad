@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, replace
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import GroupOp, UOp, Ops, UOpMetaClass, graph_rewrite, MapCtx, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, SCACHE, BASEDIR, partition, dedup, all_int, VIZ
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, SCACHE, BASEDIR, partition, dedup, all_int
 from tinygrad.helpers import diskcache_get, diskcache_put, colored
 
 # **** schedule linearizer
@@ -78,7 +78,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       if rk.op is not Ops.AFTER:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
+        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:])
         linearized.append(k.replace(src=(k.body, *buf_uops)))
       for x in children.get(rk, []):
         in_degree[x] -= 1
@@ -92,26 +92,18 @@ from tinygrad.schedule.prepare import prepare_rangeify
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
-from tinygrad.uop.ops import PatternMatcher, UPat
-
-def create_new_buffer(ctx:tuple[UOp, ...], b:UOp):
-  device = b.device if b.device is not None else next(a.device for a in ctx if a.device is not None)
-  return UOp.new_buffer(device, b.max_numel(), b.dtype)
-
-pm_post_sched_cache = PatternMatcher([
-  # Resolve positional arguments outside kernel bodies; free Variables have slot -1.
-  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[x.arg.slot] if x.arg.slot >= 0 else None),
-  # bind ALLOCs to fresh BUFFERs for this invocation
-  (UPat(Ops.ALLOC, name="b"), create_new_buffer),
-])
+from tinygrad.uop.ops import PatternMatcher, UPat, pm_resolve_params
 
 def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
-  linear = graph_rewrite(linear_call.body, pm_post_sched_cache, ctx=linear_call.src[1:], walk=True, name="params to buffers")
+  # a scheduled function is shared by all its calls, so the storage it allocates gets a fresh identity in each call
+  linear = linear_call.body
+  linear = linear.substitute({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in linear.toposort() if b.op is Ops.ALLOC}, walk=True)
+  # the positional params outside the kernel bodies are the call args, free Variables have slot -1
+  linear = graph_rewrite(linear, pm_resolve_params, ctx=linear_call.src[1:], walk=True, name="params to args")
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
-           **{i:x.unbound() if x.is_variable else x for i,x in enumerate(linear_call.src[1:])
-              if x.op in {Ops.PARAM, Ops.EXTERN} and x.addrspace is AddrSpace.ALU}}
+           **{i:x for i,x in enumerate(linear_call.src[1:]) if x.op in {Ops.PARAM, Ops.EXTERN} and x.addrspace is AddrSpace.ALU}}
   def apply_binds(si:UOp) -> UOp:
     if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
     if si.op is Ops.CALL and si.body.op is Ops.PROGRAM: return si  # compiled parameters already have ABI slots
@@ -195,15 +187,15 @@ pm_copy_from_store = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
 ])
 
-# **** callify: transform a tensor graph into a CALL UOp such that all state is properly scoped
+# **** export: a tensor graph as a function with no runtime state
 
 @dataclass
-class CallifyCtx:
+class ExportCtx:
   replacements: list[UOp] = field(default_factory=list)
   allocs: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
 
-def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
+def contiguous_mops_to_view(ctx:ExportCtx|None, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
   if not all_int(c.shape): return None
   buf = src.base
@@ -213,7 +205,7 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
     if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
     if (view := contiguous_mops_to_view(ctx, unshard.src[0], unshard.src[0])) is None: return None
     view = view.unshard(unshard.arg, unshard.src[1:])
-  elif buf.op in {Ops.BUFFER, Ops.EXTERN} and (cv := src.contiguous_view()) is not None and cv[0].op in {Ops.BUFFER, Ops.EXTERN}:
+  elif buf.op is Ops.BUFFER and (cv := src.contiguous_view()) is not None and cv[0].op is Ops.BUFFER:
     buf, offset = cv
     view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
     if ctx is not None: ctx.views.add(view)
@@ -225,7 +217,7 @@ def is_store_after(u:UOp) -> bool:
   return u.op is Ops.AFTER and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE)
 
 # NOTE: scheduling rewrites belong in prepare; only storage/interface normalization belongs here.
-pm_callify_ctx_collect = PatternMatcher([
+pm_contiguous_views = PatternMatcher([
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.STAGE), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), allow_any_len=True, name="c"), contiguous_mops_to_view),
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
@@ -233,12 +225,12 @@ pm_callify_ctx_collect = PatternMatcher([
 
 # ALLOCs get canonical scope-local id slots here so structurally identical calls hash identically for the
 # schedule cache (fresh slots are all positive from the global counter; negative slots are already canonical)
-def canonicalize_alloc(ctx:CallifyCtx, b:UOp):
+def canonicalize_alloc(ctx:ExportCtx, b:UOp):
   if b.arg.slot >= 0 and b not in ctx.allocs: ctx.allocs[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.allocs)))
   return ctx.allocs.get(b)
 
 def canonicalize_call_body(c:UOp):
-  return c.replace(src=(graph_rewrite(c.body, pm_canonicalize_alloc, init_ctx=CallifyCtx, bottom_up=True),)+c.src[1:])
+  return c.replace(src=(graph_rewrite(c.body, pm_canonicalize_alloc, init_ctx=ExportCtx, bottom_up=True),)+c.src[1:])
 
 pm_canonicalize_alloc = PatternMatcher([
   # NOTE: lambda for late binding, canonicalize_call_body references pm_canonicalize_alloc
@@ -249,74 +241,60 @@ pm_canonicalize_alloc = PatternMatcher([
 # realized storage and bound Variables are runtime state, export turns them into EXTERNs
 def has_runtime_state(x:UOp) -> bool: return x.is_bound_var or (x.op is Ops.BUFFER and x.addrspace is AddrSpace.GLOBAL)
 
-def assert_exported(x:UOp) -> None:
-  assert not has_runtime_state(x), f"transform_to_call takes an exported function, call export first. runtime state in {x.op}"
-
-def replace_input_buffer(ctx:CallifyCtx, b:UOp):
-  ctx.replacements.append(b)
-  return b.param_like(len(ctx.replacements)-1)
-
-pm_replace_buf = PatternMatcher([
-  # replace EXTERNs (storage and bound Variables) with PARAMs for cache key normalization
-  (UPat(Ops.EXTERN, name="b"), replace_input_buffer),
-  # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
-  (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
-  # the body of the call must have no runtime state
-  (UPat((Ops.BUFFER, Ops.PARAM), name="x"), assert_exported),
-])
-
 # **** export: the stores of a tensor graph as a function with no runtime state. storage becomes EXTERN(slot), bound Variables lose
 # their value and ALLOCs get canonical slots. ctx.replacements is what's mapped back
-def to_extern(ctx:CallifyCtx, x:UOp) -> UOp|None:
+def to_extern(ctx:ExportCtx, x:UOp) -> UOp|None:
   if not has_runtime_state(x): return None
   ctx.replacements.append(x)
   return x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=len(ctx.replacements)-1, buffer=None, name=None, val=None))
 
-pm_export = PatternMatcher([(UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern)])+pm_canonicalize_alloc
+# a contiguous view of storage (made by contiguous_mops_to_view) is storage
+def view_to_extern(ctx:ExportCtx, x:UOp) -> UOp|None:
+  if x not in ctx.views: return None
+  ctx.replacements.append(x)
+  return UOp.alloc((x.max_numel(),), x.dtype, len(ctx.replacements)-1, device=x.device).replace(op=Ops.EXTERN)
+
+pm_export = PatternMatcher([(UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern),
+                            (UPat((Ops.SHRINK, Ops.BITCAST), name="x"), view_to_extern)])+pm_canonicalize_alloc
 
 def export(big_sink:UOp) -> tuple[UOp, tuple[UOp, ...]]:
   stores = UOp.sink(*(u for u in big_sink.toposort() if is_store_after(u)))
-  fn = graph_rewrite(stores, pm_export, ctx=(ctx:=CallifyCtx()), bottom_up=True, name="export")
+  stores = graph_rewrite(stores, pm_contiguous_views, ctx=(ctx:=ExportCtx()), name="contiguous views")
+  fn = graph_rewrite(stores, pm_export, ctx=ctx, bottom_up=True, name="export")
   return fn, tuple(ctx.replacements)
 
+def bind_alloc(b:UOp) -> UOp:
+  if b.device is None: raise RuntimeError("global storage needs a device, give the ALLOC one")
+  return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
+
 # EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
-pm_map_back = PatternMatcher([(UPat(Ops.EXTERN, name="e"), lambda ctx,e: x.unbound() if (x:=ctx[e.arg.slot]).is_variable else x)])
-
-def transform_to_call(big_sink:UOp) -> UOp:
-  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Graph")
-  if SPEC: type_verify(big_sink, spec_tensor)
-
-  # The tensor replacement map is collected before these rewrites change node identities.
-  fn = graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
-  ret = graph_rewrite(fn, pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs")
-  ret = ret.call(*ctx.replacements, precompile=True)
-  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
-  return ret
+pm_map_back = PatternMatcher([
+  (UPat(Ops.EXTERN, name="e"), lambda ctx,e: x.unbound() if (x:=ctx[e.arg.slot]).is_variable else x),
+  # global ALLOCs are bound to fresh BUFFERs for this invocation
+  (UPat(Ops.ALLOC, name="b"), lambda b: bind_alloc(b) if b.addrspace is AddrSpace.GLOBAL else None),
+])
 
 def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   fn, externs = export(big_sink)
-  # the call and the linear it lowers to have no runtime state, the EXTERNs are mapped back to the storage and the bound Variables at the end
-  linear_call = graph_rewrite(transform_to_call(fn), pm_schedule, name="schedule to linear", enter_calls=True)
+  # the exported function has no runtime state: it's scheduled as is, and its EXTERNs are mapped back to the storage and bound Variables at the end
+  linear_call = graph_rewrite(fn.call(precompile=True), pm_schedule, name="schedule to linear", enter_calls=True)
 
-  # this recursively resolves the linear_call and allocates buffers
+  # this recursively resolves the linear_call, storage stays unbound until map back
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
   # create copies
   linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
 
-  # map back: the EXTERNs become the storage and the bound Variables of this invocation
-  linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, enter_calls=True, name="map back externs")
+  # map back: the EXTERNs become the storage and the bound Variables of this invocation, ALLOCs get fresh storage
+  linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, enter_calls=True, name="map back")
 
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
   # get var_vals from the bound Variables
   var_vals: dict[str, int] = {}
   for b in externs:
-    if b.is_bound_var:
-      nm, val = b.expr, b.arg.val
-      if nm not in used_vars: continue
-      if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
-      var_vals[nm] = val
+    if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
+      raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
 
   # jit captures this schedule, no need to execute.
   if len(capturing) and CAPTURING:

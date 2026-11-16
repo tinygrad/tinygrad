@@ -1205,8 +1205,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret.view_as(shape)
   def param_like(self, slot:int, name:str|None=None):
     # Scalar arguments bind by slot; names and values stay at the call site, not in schedule cache keys.
-    if self.op in {Ops.PARAM, Ops.EXTERN} and self.addrspace is AddrSpace.ALU:
-      return self.replace(op=Ops.PARAM, arg=replace(self.arg, slot=slot, name=name, val=None))
+    if self.op is Ops.PARAM and self.addrspace is AddrSpace.ALU:
+      return self.replace(arg=replace(self.arg, slot=slot, name=name, val=None))
     # multi-device values become a per-shard sized param wrapped in UNSHARD: the sharding lives in the graph, not the arg
     if self.axis is not None and isinstance(self.device, tuple):
       return UOp.param(slot, self.dtype, prod(to_max_shape(self.shard_shape)), self.device, name=name).view_as(self.shard_shape, self.axis)
@@ -1256,12 +1256,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     it = iter(srcs)
     for i in range(len(param_map)):
       if i not in pos: param_map[i] = next(it)
+    # nothing has a device, so the call can't run on its own: it's inlined where its values are used
+    if default_dev is None: precompile = precompile_backward = False
     def mint(o:UOp, p:int) -> tuple[UOp, UOp]:
       # Declare output storage in the callee's shape, then bind its shape in the caller's scope.
       dev = o.device if o.device is not None else default_dev
       axis = o.axis if isinstance(o.device, tuple) else None
       buf = UOp.alloc(o.shard_shape, o.dtype, device=dev, axis=axis)
-      shp = tuple(graph_rewrite(s, _pm_resolve_params, param_map, walk=True) if isinstance(s, UOp) else s for s in o.shard_shape)
+      shp = tuple(graph_rewrite(s, pm_resolve_params, param_map, walk=True) if isinstance(s, UOp) else s for s in o.shard_shape)
       return UOp.alloc(shp, o.dtype, slot=buf.buf_uop.arg.slot, device=dev, axis=axis), buf.param_like(p)
     outputs = tuple(mint(o, p) for o, p in zip(values, pos))
     rets = tuple(r for r, _ in outputs)
@@ -1881,13 +1883,13 @@ def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
-_pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot] if p.arg.slot >= 0 else None)])
+pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot] if p.arg.slot >= 0 else None)])
 
 def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
-  """Extract a call output's matching store, preserving writes to the enclosing scope's output PARAMs."""
+  """Extract a call output's matching store, preserving writes to the enclosing scope's storage (PARAMs and EXTERNs)."""
   stores = [st for st in t.src if st.op is Ops.STORE and st.src[0].unsharded_base is r.unsharded_base]
   if len(stores) != 1: return None
-  return r.after(stores[0]) if r.unsharded_base.op is Ops.PARAM else stores[0].src[1]
+  return r.after(stores[0]) if r.unsharded_base.op in {Ops.PARAM, Ops.EXTERN} else stores[0].src[1]
 
 # a store's storage keeps the views and drops AFTERs (they only sequence stores)
 pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])])

@@ -173,8 +173,10 @@ def copy_to_anon_store(x:UOp, copy:UOp):
 
 def stage_to_anon_store(x:UOp, stg:UOp):
   if stg.arg is not None and stg.arg.addrspace is not AddrSpace.GLOBAL: return None
+  if (device:=stg.arg.device if stg.arg is not None and stg.arg.device is not None else x.device) is None:
+    raise RuntimeError("global storage needs a device, stage a value with a device or give the STAGE one")
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp.alloc(stg.max_shape, stg.dtype, device=x.device)
+  buf = UOp.alloc(stg.max_shape, stg.dtype, device=device)
   view = buf.shrink_to(stg.shape)
   dst = view.index(*stg.src[1:]) if len(stg.src) > 1 else view
   return view.after(dst.store(x).end(*stg.src[1:]))

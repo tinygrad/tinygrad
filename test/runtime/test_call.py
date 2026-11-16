@@ -9,9 +9,9 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
-from tinygrad.schedule import transform_to_call, export
+from tinygrad.schedule import export
 
-def sched_key(t:Tensor): return transform_to_call(export(UOp.sink(t.uop))[0]).body.key
+def sched_key(t:Tensor): return export(UOp.sink(t.uop))[0].key
 
 class TestCall(unittest.TestCase):
   def test_call_plus(self):
@@ -127,6 +127,22 @@ class TestCallSchedule(unittest.TestCase):
     ref = np.zeros((4, 8), dtype=np.float32)
     ref[1:3, 2:6] = np.arange(8).reshape(2, 4) + 1
     np.testing.assert_equal(big.numpy(), ref)
+
+  def test_deviceless_body_storage_is_banned(self):
+    # global storage needs a device, a device agnostic body can't stage or allocate without one
+    x = Tensor([1., 2., 3., 4.]).realize()
+    p, tmp = UOp.param(0, dtypes.float, (4,)), UOp.alloc((4,), dtypes.float)
+    with self.assertRaisesRegex(RuntimeError, "global storage needs a device"):
+      Tensor(((p + 1).bufferize() * 2).call_with_output(x.uop, precompile=True)).realize()
+    with self.assertRaisesRegex(RuntimeError, "global storage needs a device"):
+      Tensor((tmp.after(tmp.store(p + 1)) * 2).call_with_output(x.uop)).realize()
+
+  def test_deviceless_call_keeps_grad_fxn(self):
+    # a call without a device is inlined where it's used, it still has its custom gradient
+    x = Tensor(3., dtype=dtypes.float)
+    y = Tensor.call(x, fxn=UOp.param(0, dtypes.float, ()) * 2, grad_fxn=lambda g, c: (g * 3,))
+    self.assertEqual(y.gradient(x)[0].item(), 3.0)
+    self.assertEqual(y.item(), 6.0)
 
   def test_precompile_full_buffer_assign(self):
     @function(precompile=True)
