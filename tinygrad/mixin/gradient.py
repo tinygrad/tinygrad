@@ -103,12 +103,17 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.BITCAST), lambda: (None,)),
 ])
 
+# an int or bool value has no gradient
+def _no_gradient(u:UOp) -> bool: return dtypes.is_int(u.dtype) or dtypes.is_bool(u.dtype)
+
 def _deepwalk(root:UOp, targets:set[UOp]) -> tuple[list[UOp], dict[UOp, bool]]:
-  # compute the target path (top down)
+  # compute the target path (top down), it stops at DETACH and at a value with no gradient
   in_target_path: dict[UOp, bool] = {}
-  root.topovisit(lambda u: any(in_target_path[x] or x in targets for x in u.src), in_target_path)
-  # don't flow through DETACH or anything not in target path
-  return [node for node in in_target_path if node.op is not Ops.DETACH and in_target_path[node]], in_target_path
+  def on_path(u:UOp) -> bool:
+    if u.op is Ops.DETACH or _no_gradient(u): return False
+    return any(in_target_path[x] or x in targets for x in u.src)
+  root.topovisit(on_path, in_target_path)
+  return [node for node in in_target_path if in_target_path[node]], in_target_path
 
 def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
   walk, in_target_path = _deepwalk(root, targets)
@@ -124,8 +129,7 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
     if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}\n\nin {str(t0)[0:1000]}...")
     assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
     for k,v in zip(t0.src, lgrads):
-      # an int or bool value has no gradient
-      if v is None or dtypes.is_int(k.dtype) or dtypes.is_bool(k.dtype): continue
+      if v is None or _no_gradient(k): continue
       # a shaped edge's gradient is summed to its source's shape
       if k._shape is not None and v._shape is not None and k._shape != v._shape:
         v = v.cast(sum_acc_dtype(v.dtype))._rop(Ops.ADD, broadcast_axes(k.shape, v.shape)).reshape(k.shape).cast(v.dtype)
