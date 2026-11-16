@@ -43,11 +43,14 @@ class TestStop(unittest.TestCase):
       import tinygrad.llm.cli as cli
       from tinygrad.engine.worker import get_worker_pool
       cli.STOP_DEADLINE_S = 5
-      signal.signal(signal.SIGTERM, cli._on_sigterm)
       pool = get_worker_pool()
       assert pool is not None and pool.map(abs, [-1, -2, -3, -4]) == [1, 2, 3, 4]
+      import atexit, multiprocessing
+      atexit.register(lambda: print(f"WORKERS LEFT {len(multiprocessing.active_children())}", flush=True))
       time.sleep(0.5)
       print("READY", flush=True)
+      # (the server's thread is busy when the signal comes: its handler runs late, after the pool replaced its dead workers)
+      signal.signal(signal.SIGTERM, lambda *a: (time.sleep(3), cli._on_sigterm(*a)))
       os.killpg(0, signal.SIGTERM)
       time.sleep(60)
     """)
@@ -57,7 +60,8 @@ class TestStop(unittest.TestCase):
     dt = time.perf_counter() - st
     self.assertIn("READY", p.stdout)
     self.assertEqual(p.returncode, 0, p.stderr[-2000:])
-    self.assertLess(dt, 20)
+    self.assertIn("WORKERS LEFT 0", p.stdout)  # (none replaced behind the kill)
+    self.assertLess(dt, 8)
 
 class TestAMIdleClocksStop(unittest.TestCase):
   def setUp(self):

@@ -1,4 +1,4 @@
-import multiprocessing, multiprocessing.util, atexit, signal, sys, os, threading, contextlib, subprocess, importlib
+import multiprocessing, multiprocessing.util, multiprocessing.pool, atexit, signal, sys, os, threading, contextlib, subprocess, importlib
 from multiprocessing.context import SpawnContext, SpawnProcess
 from tinygrad.helpers import Context, getenv, PARALLEL, BEAM
 
@@ -58,7 +58,11 @@ def kill_worker_pool():
   would wait forever for the queue lock an idle worker held when it died (Pool._help_stuff_finish), and the process would never end"""
   global worker_pool
   if worker_pool is None: return
-  for p in worker_pool._pool: p.kill()  # type: ignore[attr-defined]
-  for p in worker_pool._pool: p.join(1)  # type: ignore[attr-defined]
+  # (first its handler stops replacing dead workers: else every killed worker comes back, a fresh spawn the join below waits for)
+  worker_pool._worker_handler._state = multiprocessing.pool.TERMINATE  # type: ignore[attr-defined]
+  worker_pool._change_notifier.put(None)  # type: ignore[attr-defined]
+  worker_pool._worker_handler.join(5)  # type: ignore[attr-defined]
+  for p in (ps:=list(worker_pool._pool)): p.kill()  # type: ignore[attr-defined]
+  for p in ps: p.join(1)
   worker_pool._terminate.cancel()  # type: ignore[attr-defined]
   worker_pool = None
