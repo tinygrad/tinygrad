@@ -96,6 +96,10 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["y"]
     self.helper_test_single_op("Gather", inputs, attributes, outputs)
 
+  def test_conv_transpose_auto_pad_valid(self):
+    inputs = {"x": np.random.randn(1, 1, 3, 3).astype(np.float32), "w": np.random.randn(1, 1, 3, 3).astype(np.float32)}
+    self.helper_test_single_op("ConvTranspose", inputs, {"auto_pad": "VALID", "strides": [2, 2]}, ["y"])
+
   def test_gather_jit_different_indices(self):
     # Gather should not assume indices is const when it can change at runtime
     from tinygrad import TinyJit

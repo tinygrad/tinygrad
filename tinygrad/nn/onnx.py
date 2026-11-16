@@ -670,7 +670,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       output_shape = output_shape or [int(X.shape[i+2]) * strides_[i] for i in range(len(strides_))]
       pads = [int(strides_[i]*(input_shape_[i]-1)+output_padding_[i]+((kernel_shape_[i]-1)*dilations_[i]+1)-output_shape[i])
               for i in range(len(input_shape_))]
-      pads = _auto_pad(pads, auto_pad) if auto_pad != "NOTSET" else [0] * len(input_shape_) * 2
+      pads = _auto_pad(pads, auto_pad) if auto_pad not in ("NOTSET", "VALID") else [0] * len(input_shape_) * 2
     pads = _onnx_pads_to_tiny_pads(pads)
     return X.conv_transpose2d(W, B, group, strides_, dilations_, pads, output_padding_)
 
