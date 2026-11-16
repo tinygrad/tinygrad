@@ -94,15 +94,9 @@ from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat
 
-def create_new_buffer(ctx:tuple[UOp, ...], b:UOp):
-  device = b.device if b.device is not None else next(a.device for a in ctx if a.device is not None)
-  return UOp.new_buffer(device, b.max_numel(), b.dtype)
-
 pm_post_sched_cache = PatternMatcher([
   # Resolve positional arguments outside kernel bodies; free Variables have slot -1.
   (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[x.arg.slot] if x.arg.slot >= 0 else None),
-  # bind ALLOCs to fresh BUFFERs for this invocation
-  (UPat(Ops.ALLOC, name="b"), create_new_buffer),
 ])
 
 def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
@@ -281,6 +275,8 @@ def export(big_sink:UOp) -> tuple[UOp, tuple[UOp, ...]]:
 
 # EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
 pm_map_back = PatternMatcher([(UPat(Ops.EXTERN, name="e"), lambda ctx,e: x.unbound() if (x:=ctx[e.arg.slot]).is_variable else x)])
+# ALLOCs are bound to fresh BUFFERs for this invocation, outside the kernel bodies
+pm_bind_allocs = PatternMatcher([(UPat(Ops.ALLOC, name="b"), lambda b: UOp.new_buffer(b.device, b.max_numel(), b.dtype))])
 
 def transform_to_call(big_sink:UOp) -> UOp:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Graph")
@@ -298,7 +294,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   # the call and the linear it lowers to have no runtime state, the EXTERNs are mapped back to the storage and the bound Variables at the end
   linear_call = graph_rewrite(transform_to_call(fn), pm_schedule, name="schedule to linear", enter_calls=True)
 
-  # this recursively resolves the linear_call and allocates buffers
+  # this recursively resolves the linear_call, storage stays unbound until map back
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
   # create copies
@@ -306,6 +302,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
 
   # map back: the EXTERNs become the storage and the bound Variables of this invocation
   linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, enter_calls=True, name="map back externs")
+  linear = graph_rewrite(linear, pm_bind_allocs, walk=True, name="bind allocs")
 
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])

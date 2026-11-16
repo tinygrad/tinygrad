@@ -149,7 +149,11 @@ def resolve_function(c:UOp) -> UOp|None:
     if p.dtype != a.dtype: raise TypeError(f"arg {p.arg.slot} dtype mismatch: expected {p.dtype}, got {a.dtype}")
   # Inlining removes the call scope, so its local allocations need fresh identities.
   dict_map.update({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in nodes if b.op is Ops.ALLOC})
-  return c.body.substitute(dict_map, walk=True)
+  # a body is device agnostic, it runs on the device of its call: storage it stages without a device is on that device
+  return graph_rewrite(c.body.substitute(dict_map, walk=True), pm_stage_on_call_device, ctx=c.device, name="stage on call device")
+
+pm_stage_on_call_device = PatternMatcher([(UPat(Ops.STAGE, name="s"), lambda ctx,s: s.replace(arg=replace(s.arg, device=ctx))
+  if s.arg is not None and s.arg.addrspace is AddrSpace.GLOBAL and s.arg.device is None else None)])
 
 # shape-changing bitcast
 def expand_bitcast(bc:UOp) -> UOp|None:
@@ -174,7 +178,7 @@ def copy_to_anon_store(x:UOp, copy:UOp):
 def stage_to_anon_store(x:UOp, stg:UOp):
   if stg.arg is not None and stg.arg.addrspace is not AddrSpace.GLOBAL: return None
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp.alloc(stg.max_shape, stg.dtype, device=x.device)
+  buf = UOp.alloc(stg.max_shape, stg.dtype, device=stg.arg.device if stg.arg is not None and stg.arg.device is not None else x.device)
   view = buf.shrink_to(stg.shape)
   dst = view.index(*stg.src[1:]) if len(stg.src) > 1 else view
   return view.after(dst.store(x).end(*stg.src[1:]))

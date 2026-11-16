@@ -1256,6 +1256,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     it = iter(srcs)
     for i in range(len(param_map)):
       if i not in pos: param_map[i] = next(it)
+    # nothing has a device, so there is nothing to run a call on: the call is folded, its values are computed where they're used
+    if default_dev is None: return tuple(graph_rewrite(v, _pm_resolve_params, param_map, walk=True) for v in values)
     def mint(o:UOp, p:int) -> tuple[UOp, UOp]:
       # Declare output storage in the callee's shape, then bind its shape in the caller's scope.
       dev = o.device if o.device is not None else default_dev
