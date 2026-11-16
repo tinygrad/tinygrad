@@ -2875,7 +2875,7 @@ def partial_sum(x:Tensor) -> Tensor:
   # (a few rows (decoding): three halves a word, many: packed)
   rows = prod(x.shape[1:-1])
   # (exact: packed from 2 rows (the drafts of speculative decoding): fewer words, a 4 row allreduce 24 us, not 35)
-  pk = _ar_pack() if isinstance(rows, int) and rows >= (2 if getenv("P2P_AR_EXACT", 1) else 5) else None
+  pk = _ar_pack() if isinstance(rows, int) and rows >= 2 else None
   n = prod(x.shape[1:])
   # (packed: P2P_AR_PACK's values a word, else 4x12 (a count of values of the rows that 6 doesn't divide: the drafts' 56), else three halves)
   if pk is not None and isinstance(n, int) and n % pk[0] and n % 4 == 0 and pk != (4, 12): pk = (4, 12)
@@ -3340,7 +3340,7 @@ _bundle_cache:dict[tuple, tuple[Tensor, Tensor, Tensor]] = {}
 # batched decoding of at least MOE_BUNDLE_MIN tokens: the rows of an expert in bundles of MOE_BUNDLE that share its weight loads
 MOE_BUNDLE, MOE_BUNDLE_MIN = (4), (40)
 # fewer rows (batched decoding of 2-9 users): bundles of MOE_EXACT_M in float from MOE_EXACT_MIN rows (0: off), the per-row kernel's values
-MOE_EXACT_M, MOE_EXACT_MIN = (2), getenv("MOE_EXACT_MIN", 8)
+MOE_EXACT_M, MOE_EXACT_MIN = (2), 8
 # the bundled MoE kernels with MOE_PERSIST workgroups an output block looping over the bundles there are (0: a grid of every possible bundle;
 # 1 runs a device's few bundles one after another: slower in the step; 4-8: G=8 -6.8 ms)
 MOE_PERSIST = (8)

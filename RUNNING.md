@@ -90,7 +90,7 @@ setsid env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED=1 HOME="$HOME
   DEV=AMD AM_MEC_PIPES=2 AM_IDLE_MS=1000 AM_POWER_LIMIT=250 \
   SPEC_DRAFTS=2 QSA_KV_BITS4_LAYERS=39,43,47,48 \
   SEQ_ROWS=4310016 SEQ_SLOTS=64 SEQ_SIZES=1,8,16,24,30 SEQ_MAX_ACTIVE=30 SEQ_STASH_GB=46 \
-  SEQ_CKPT_HOST=1 SEQ_CKPT2=1 SEQ_BASE_ALIGN=24 \
+  SEQ_CKPT2=1 SEQ_BASE_ALIGN=24 \
   PREFILL_CHUNK=2304 PREFILL_SIZES=1152 PREFILL_PARTS=2 PREFILL_MB1_ROWS=1200 PREFILL_PK_CTX=131072 \
   PARALLEL=40 TOP_K=20 \
   CLOCK_FAST=2000 CLOCK_MANY=1900 CLOCK_PREFILL=2000 \
@@ -276,15 +276,15 @@ Two draft tokens a step (three measured slower for Pokemon).
 time beside short ones (a second one waits); its first token at ~1M context takes ~12 minutes (705.9 s at 180 W on the FINAL-2 line; 739 s at 170 W and 885 s at 120 W on older lines). Its power setting is
 180 W a card (the board's choice), not the cards' maximum; the bars against tinyamd1 are in the company repo `results/w-pf53/ts5-acceptance.md`.
 
-## API and production environment contract (76 names)
+## API and production environment contract (72 names)
 
 API sampling: a request without a temperature uses the model's GGUF `general.sampling.temp` and `top_p` (Qwen 3.8 Flash: 1.0 / 0.95); absent sampling metadata keeps the previous greedy behavior, explicit request values are unchanged, and startup logs report the defaults.
 
-Count: **33 launch options, 31 operator knobs and 12 short diagnostics (76 total)**. Kernel/model/scheduler decisions already folded into the implementation are not exposed as launch assignments; the launchers and NULL harnesses no longer pass those obsolete names.
+Count: **30 launch options, 30 operator knobs and 12 short diagnostics (72 total)**. Kernel/model/scheduler decisions already folded into the implementation are not exposed as launch assignments; the launchers and NULL harnesses no longer pass those obsolete names.
 
 Any setting not listed here is not supported: its production value is compiled into the tree. Values below are launch defaults/current validated profiles, not permission to run arbitrary combinations. Capacity, sharding and cache-format changes require their own real-memory and text gates. Empty means disabled/unset.
 
-### Shared C2/C5/C9 hardware/model launcher contract (22)
+### Shared C2/C5/C9 hardware/model launcher contract (21)
 
 | Name | C2 | C5 | C9 | Operator changes |
 |---|---|---|---|---|
@@ -297,7 +297,6 @@ Any setting not listed here is not supported: its production value is compiled i
 | `QSA_KV_BITS4_LAYERS` | 39,43,47,48 (example) | n/a | n/a | Attention layers stored in four-bit rows. |
 | `QWEN_MTP` | auto-discovered | n/a | n/a | Optional separate speculative-head GGUF path. |
 | `SEQ_BASE_ALIGN` | 24 | n/a | n/a | Packed-cache region base alignment. |
-| `SEQ_CKPT_HOST` | 1 | model default | model profile | Host storage of recurrent checkpoints. |
 | `SEQ_GATHER_UNION` | default | default | 65536 | Position enabling sparse union gathers. |
 | `SEQ_MAX_ACTIVE` | 30 | 18 | 32 | Concurrent admission cap. |
 | `SEQ_ROWS` | 4310016 (example) | 3916800 | 268800 | Reserved cache rows for this capacity profile. |
@@ -311,12 +310,10 @@ Any setting not listed here is not supported: its production value is compiled i
 | `AM_VM_RESET` | controlled first start only | controlled first start only | controlled first start only | Permission to reset AM hardware once; ordinary starts forbid it. |
 | `VISION_MMPROJ` | required, verified nonempty file | required, verified nonempty file | unsupported and forced empty | Picture-projection GGUF on C2/C5; intentionally not present on C9. |
 
-### Additional C5/D34 hardware/model contracts (11)
+### Additional C5/D34 hardware/model contracts (9)
 
 | Name | D34 value | Operator changes |
 |---|---|---|
-| `SLOT_HOST` | 1 | Host placement policy for sequence slots. |
-| `SLOT_CKPT` | 1 | Checkpoint placement policy for sequence slots. |
 | `BATCH_SLOTS` | 8 | Scheduler batch-slot capacity on this RDNA3 profile. |
 | `LOAD_DEFER` | 1 | Deferred weight-load schedule used by these GLM profiles. |
 | `AMD_SCRATCH_MIN` | 576 | Minimum AM scratch reservation on this profile. |
@@ -327,14 +324,13 @@ Any setting not listed here is not supported: its production value is compiled i
 | `PREFILL_SLICE` | 1536 | Rows allowed in one scheduled prefill slice. |
 | `SEQ_STARVE_ALT` | 1 | Alternative anti-starvation scheduling policy. |
 
-### Operator knobs documented for operations (31)
+### Operator knobs documented for operations (30)
 
 | Name | Default/profile | Purpose |
 |---|---|---|
 | `API_KEY` | empty (open loopback) | Comma-separated Bearer keys; prefer file for real secrets. |
 | `API_KEY_FILE` | unset | File containing one Bearer key per line. |
 | `ENC_CACHE` | 256 | Maximum cached chat-template encodings. |
-| `HOST_MIN` | 4096 | Minimum rows retained for host-cache policy. |
 | `HOST_STASH` | 0 | Host-backed stash policy/capacity for GLM. |
 | `KEEPALIVE` | 15 s | SSE keepalive interval. |
 | `MODEL_ALIASES` | C9 `zai-org/GLM-5.3` | Additional `/v1/models` ids; empty disables. |

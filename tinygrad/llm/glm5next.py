@@ -1006,7 +1006,7 @@ class FFNBlock:
     shexp:Tensor|None = None
     shexp_gate:Tensor|None = None
     if grouped and hasattr(self, 'ffn_gate_shexp') and self.ffn_gate_exps.expert_parallel and \
-       isinstance(x.shape[1], int) and self.ffn_down_shexp.shard_axis == 1 and (not hasattr(self, 'ffn_gate_inp_shexp') or getenv("SHEXP_FUSED", 1)):
+       isinstance(x.shape[1], int) and self.ffn_down_shexp.shard_axis == 1:
       # the shared expert's partial sums are added by the kernel summing the experts' rows of every token (its gate: a scale of a row)
       shexp_act = gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit).contiguous()
       shexp = self.ffn_down_shexp.partial(shexp_act)
@@ -1838,10 +1838,10 @@ class Indexer:
     # a few (the drafts of speculative decoding): the same, a row a query
     if Tq <= 8 and idx.n_heads % 16 == 0 and (1):
       return indexer_decode_index_rows(iq, pk, weights, start_pos, pools, k, idx.kpool, pbase=pb, width=self.max_pools)
-    # (IDX_SPLIT, default on: a prefill chunk's queries split on their rows over the devices (every device had all of them: the same lists six
+    # (index sharding: a prefill chunk's queries split on their rows over the devices (every device had all of them: the same lists six
     # times), each device the scores and the lists of its rows, the lists gathered. the same lists: exact)
     n = len(x.device) if isinstance(x.device, tuple) else 1
-    if n > 1 and getenv("IDX_SPLIT", 1) and not self.shard and Tq % (16*n) == 0 and Tq // n <= (1056) and \
+    if n > 1 and not self.shard and Tq % (16*n) == 0 and Tq // n <= (1056) and \
        idx.n_heads % 16 == 0 and amd_custom_kernels_supported(x.device):
       iq_s = shard_rows(iq.contiguous(), 0)  # (the q projection of every row as before, then split: the same queries)
       w_s = shard_rows(weights.contiguous(), 0)
@@ -3140,7 +3140,7 @@ class Transformer:
   def batch_sizes(self) -> tuple[int, ...]:
     """
     the rows of the steps of batched decoding (a jit each): the sizes below the slots and the slots (BATCH_SLOTS of another size). none with
-    BATCH_DECODE=0 (no batched decoding, the slots only keep conversations: its steps aren't captured)
+    There are no batches without decode slots.
     """
     return tuple(sorted({s for s in self.BATCH_SIZES if s < n} | {n})) if (n:=self.decode_slots()) else ()
 
@@ -3297,21 +3297,13 @@ class Transformer:
   def prefix_to_slot(self, tokens:list[int], slot:int) -> int:
     """
     the states of the longest prefix of tokens the model has (its conversation, or its checkpoint restored) into slot: the position the rest
-    starts at (a batch_prefill continues it there, or slot_first when tokens is exactly its checkpoint).
+    starts at when a batch prefills the remainder there.
     """
     start, restore = self._reuse(tokens) if self.has_recurrent_block else (self.get_start_pos(tokens), False)
     if restore: self._checkpoint(tokens, save=False)
     self.slot_store(slot, start)
     self._slot_hist_set(slot, tokens[:start])
     return start
-
-  def slot_first(self, slot:int, temp:float|tuple[float, ...]) -> int:
-    """the token after the prompt whose checkpoint is in slot: sampled from its hidden state, without another recurrent prefill"""
-    self._init_slots()
-    pair = _temp_pair(temp)
-    temperature = None if pair[0] == 0 else Tensor([pair], device=self.token_embd.weight.device)
-    hrow = self.pool_spec_h.shrink(((slot*2*(self.config.spec_drafts+1), slot*2*(self.config.spec_drafts+1)+1), None))
-    return int(self._sample(hrow, temperature, self.token_embd.weight.device).item())
 
   def _ckpt_from_slot_copy(self, slot:UOp, wp:UOp, wpc:UOp):
     """the states of a slot at a position (its recurrent ones in wp, its conv ones in wpc) as the model's checkpoint (_ckpt, in its order)"""
@@ -3668,7 +3660,7 @@ class Transformer:
 
   BPF_G = (8)  # prefills in a step of them: prompts at most
   # (BPF_PS: the rows of a prompt of a step, a jit each (a step's prompts padded to the smallest that fits them), BPF_P the most)
-  BPF_PS = tuple(sorted({int(x) for x in str((getenv("BPF_P", 168))).split(",") if x}))
+  BPF_PS = (168,)
   BPF_P = max(BPF_PS)
   BPF_ROWS = (BPF_G * min(BPF_PS))  # (a step's rows at most: its memory)
   def forward_batch_prefill(self, *vs:UOp, P:int|None=None) -> Tensor:
@@ -3845,8 +3837,8 @@ class Transformer:
     self.seq_spec_h = _zeros(n*2*(k+1), self._spec_dim, device=devs)
     # every slot's checkpoint: its states of a position (the end of its last prompt), the hidden state of the last token
     self.seq_ckpt_h = _zeros(n, self._spec_dim, device=devs)
-    # (SEQ_CKPT_HOST: the checkpoints' recurrent states in host memory: a copy a turn, the device memory more slots')
-    self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]), host=bool(getenv("SEQ_CKPT_HOST", 1)))[0]] +
+    # (the checkpoints' recurrent states in host memory: a copy a turn, the device memory more slots')
+    self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]), host=True)[0]] +
                             [_slot_pool(n, p, (1, *p.shape[1:]))[0] for p in b.pool_conv] for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
     # (GLM: the checkpoints' indexer rings (the last tokens of the prompt, its last pool's), see _seq_ckpt_copy)
     self.seq_ckpt_rings = [(b.indexer, _slot_pool(n, b.indexer.ring)[0]) for b in self.blk + [self.mtp]

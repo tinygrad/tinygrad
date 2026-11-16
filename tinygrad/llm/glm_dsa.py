@@ -3000,7 +3000,7 @@ class Transformer(GLMSeqDriver):
 
   BPF_G = (8)  # prefills in a step of them: prompts at most
   # (BPF_PS: the rows of a prompt of a step, a jit each (a step's prompts padded to the smallest that fits them), BPF_P the most)
-  BPF_PS = tuple(sorted({int(x) for x in str((getenv("BPF_P", 168))).split(",") if x}))
+  BPF_PS = (168,)
   BPF_P = max(BPF_PS)
   BPF_ROWS = (BPF_G * min(BPF_PS))  # (a step's rows at most: its memory)
   def forward_batch_prefill(self, *vs:UOp, P:int|None=None) -> Tensor:
@@ -3697,7 +3697,7 @@ class Transformer(GLMSeqDriver):
     chunk_size = chunk_size or min(getenv("PREFILL_CHUNK", default if fast else 32), self.max_context)
     if self.has_recurrent_block and not fast: chunk_size = 1
     sizes = [chunk_size] + [min(chunk_size, n) for n in (((192), (512),
-                                                          (chunk_size if glm and getenv("GLM_SP", 1) else 2048),
+                                                          (chunk_size if glm else 2048),
                                                           4096) if fast else ())]
     # (PREFILL_SIZES: more sizes, less padding of a prompt's last piece (the turns of agents: a few hundred tokens), a jit each)
     if fast and (more:=getenv("PREFILL_SIZES", "")): sizes += [min(chunk_size, int(n)) for n in str(more).split(",")]
