@@ -580,7 +580,7 @@ class Handler(VizHandler):
     pictures = None
     # (SUPERSEDE: the same prompt again from the same session (X-Session-ID) while its request runs is a client's retry of it (a client that
     # timed out behind a proxy that doesn't close our connection): the older one stops, it isn't decoded for nobody)
-    key = (sid, len(ids), hash(tuple(ids))) if isinstance(sid, str) and sid and getenv("SUPERSEDE", 1) else None
+    key = (sid, len(ids), hash(tuple(ids))) if isinstance(sid, str) and sid else None
     if key is not None:
       with self.server.keys_lock:
         if (old:=self.server.inflight_keys.get(key)) is not None and not old.done:
@@ -1029,7 +1029,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   def serve_forever(self, poll_interval:float=0.5):
     # (the model's thread polls the devices holding the GIL: the request threads (many streams) take it in turns of SWITCH_INTERVAL, the
     # default 5 ms delays its steps)
-    sys.setswitchinterval(getenv("SWITCH_INTERVAL", 0.0005))
+    sys.setswitchinterval(0.0005)
     # the model runs here, not on a thread of its own: BEAM's _try_compile installs a SIGALRM handler, which raises ValueError off the main thread
     threading.Thread(target=super().serve_forever, args=(poll_interval,), daemon=True, name="HTTPServer").start()
     # sequences sharing the caches (qwen4exp), else requests in batch slots (glm5next), else one at a time
@@ -1191,14 +1191,14 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   main_moved = False
   ckpt_pool: list|None = None  # (host memory for requests' checkpoints, see ckpt_keep)
   ckpt_later: list|None = None  # (the requests done, their checkpoints' host memory freed next)
-  STASH_MIN = getenv("STASH_MIN", 512)  # the tokens a conversation has at least to be kept, a request continues one by at least to load it
+  STASH_MIN = 512  # the tokens a conversation has at least to be kept, a request continues one by at least to load it
   def stash_main(self, busy:set[int]):
     """
     the model's conversation into a free slot (an empty one, else the oldest kept) past the busy ones: a batched step writes the free slots
     before its last one (rows of nothing), a request takes the first free one
     """
     model, tokens = self.model, list(getattr(self.model, "_cached_tokens", []))
-    if not self.keeps() or not getenv("STASH", 1) or len(tokens) < self.STASH_MIN or any(t == tokens for t, _ in self.stash.values()) or \
+    if not self.keeps() or len(tokens) < self.STASH_MIN or any(t == tokens for t, _ in self.stash.values()) or \
        any(e.tokens == tokens for e in self.host) or (self.main_moved and self.slot_host()): return
     if not self.slots or len(tokens) >= model.batch_ctx(): return self.host_save(tokens)
     busy = busy | set(self.partner) | set(self.partner.values())
@@ -1217,7 +1217,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     (SLOT_HOST, with slots and HOST_STASH) a request decoded in a slot has its whole conversation saved to host memory when done: with more
     agents than slots the slot is taken before its next turn, the prompt alone kept would have the turn prefill the reply again
     """
-    return bool(self.slots) and getenv("HOST_STASH", 0.0) > 0 and bool(getenv("SLOT_HOST", 1))
+    return bool(self.slots) and getenv("HOST_STASH", 0.0) > 0
   def keeps(self) -> bool:
     """conversations are kept past the model's (in slots, or in host memory: HOST_STASH, or the sequences sharing its caches)"""
     return bool(self.slots) or getenv("HOST_STASH", 0.0) > 0 or hasattr(self, "engine")
@@ -1226,9 +1226,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     model = self.model
     if (most:=int(getenv("HOST_STASH", 0.0) * 1e9) // model.HOST_CHUNK) <= 0: return
     # (a short one is prefilled again about as fast as it's saved and loaded, ~0.5 s)
-    if len(tokens) < getenv("HOST_MIN", 4096): return
+    if len(tokens) < 4096: return
     st = time.perf_counter()
-    ckpt = model.host_ckpt(tokens) if getenv("HOST_CKPT", 1) else 0
+    ckpt = model.host_ckpt(tokens)
     k = model.host_chunks(len(tokens), bool(ckpt))
     # (an older turn of it out first: its chunks are this one's, in their order (its copies the same program). then free ones, new ones up to
     # the GB, the least recently used one's. one this continues from its checkpoint is an older turn too: its client sent the reply back
@@ -1251,7 +1251,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           f"{len(self.host_free)} free")
   def host_prepare(self):
     """(HOST_STASH) idle: a chunk of host memory made ahead (its memory and its mappings on the devices, ~0.7 s a GB: not a request's wait)"""
-    if (gb:=getenv("HOST_STASH", 0.0)) > 0 and getenv("HOST_PREPARE", 1) and self.host_made < int(gb * 1e9) // self.model.HOST_CHUNK:
+    if (gb:=getenv("HOST_STASH", 0.0)) > 0 and self.host_made < int(gb * 1e9) // self.model.HOST_CHUNK:
       self.host_free.append(self.model.host_alloc())
       self.host_made += 1
   @staticmethod
@@ -1389,7 +1389,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     before a prefill of ids (into slot target): the kept conversation it continues the most into the model (if more than the model's own), the
     model's kept. (the target's own is loaded before the prefill writes the slot)
     """
-    if not self.keeps() or not getenv("STASH", 1): return
+    if not self.keeps(): return
     model, have = self.model, self.model.get_start_pos(ids)
     best = max(((len(t), i) for i, (t, _) in self.stash.items() if (i not in busy or i == target) and len(t) < len(ids) and starts(ids, t)),
                default=(0, -1))
@@ -1418,10 +1418,9 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
                                                   len(t) < len(ids) and starts(ids, t)] +
                [self.host_hit(e, ids) for e in self.host])
   # requests waiting this long are taken in turn, before the others the cache has more of
-  STARVE = getenv("STARVE", 120.0)
-  STARVE_LONG = getenv("STARVE_LONG", 30.0)  # (a request that doesn't fit a slot: the batch drains for it after this long)
-  PAUSE_LONG = getenv("PAUSE_LONG", 1)  # (aliased slots: the batch waits for it instead, after PAUSE_WAIT, see pause_long)
-  PAUSE_WAIT = getenv("PAUSE_WAIT", 0.0)
+  STARVE = 120.0
+  STARVE_LONG = 30.0  # (a request that doesn't fit a slot: the batch drains for it after this long)
+  PAUSE_WAIT = 0.0
   def next_alone(self, pending:list[Request]) -> int:
     """
     the next request alone: the one whose conversation the model or a slot has the most of (agents taking turns: one's next request often comes
@@ -1430,13 +1429,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     if len(pending) == 1 or not self.keeps() or time.perf_counter() - pending[0].st > self.STARVE: return 0
     return max(range(len(pending)), key=lambda i: (self.stash_hit(pending[i].ids + pending[i].generated, set()), -i))
 
-  LONG_FIRST = getenv("LONG_FIRST", 1)
   def admit_order(self, reqs:list[Request]) -> list[Request]:
     """
     (LONG_FIRST) the requests waiting for a slot, the longest conversation first (agents' longest tasks: their turns one after the other are the
     end of a run of many, a turn's wait for a slot is on that path every turn), the ones that waited past STARVE before them in turn
     """
-    if not self.LONG_FIRST or len(reqs) < 2: return reqs
+    if len(reqs) < 2: return reqs
     now = time.perf_counter()
     return sorted(reqs, key=lambda r: (now - r.st <= self.STARVE, -(len(r.ids) + len(r.generated)) if now - r.st <= self.STARVE else r.st))
 
@@ -1480,11 +1478,11 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     finally: self.partner.pop(i, None)
   def _slot_done(self, i:int, req:Request, active:dict):
     k = self.spec
-    if not k or not getenv("STASH", 1) or req.error is not None: return
+    if not k or req.error is not None: return
     start = req.mtp - 1
     n = min(len(req.ids) + len(req.generated), req.pos)
     hrow = (1 - req.par) * (k + 1) + n - start - 1
-    if self.slot_host() and n >= max(getenv("HOST_MIN", 4096), start + 1):
+    if self.slot_host() and n >= max(4096, start + 1):
       # (its states are the slot's until the next step: into the model's (the model's conversation kept first if it isn't), from it to host)
       st = time.perf_counter()
       if not self.main_moved: self.stash_main(set(active) | {i})
@@ -1537,7 +1535,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     it's prefilled from the start every turn
     """
     model = self.model
-    if not self.slot_host() or not getenv("SLOT_CKPT", 1) or req.ckpt_buf is not None or len(req.ids) < getenv("HOST_MIN", 4096): return
+    if not self.slot_host() or req.ckpt_buf is not None or len(req.ids) < 4096: return
     if not callable(getattr(model, "ckpt_copy", None)) or getattr(model, "_ckpt_tokens", None) != req.ids: return
     pool = self.ckpt_pool = self.ckpt_pool or []
     if not pool and (buf:=model.ckpt_alloc()) is not None: pool.append(buf)
@@ -1562,7 +1560,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     new = n - self.stash_hit(req.ids + req.generated, busy)
     # (VISION: a prompt with pictures prefilled before its steps: a mixed step's prompt rows have no picture rows)
     return self.batchable(req) and not self.wide(req) and not req.no_mix and not req.pics and 0 < new <= self.MIX_MAX
-  MIX_MAX = getenv("MIX_MAX", 4096)
+  MIX_MAX = 4096
   def mix_take(self, mixes:list[Request], active:dict, pending:list[Request], land:int):
     """
     (MIX) the prompts of the next mixed steps (as many as free landing slots, free slots): each one's conversation from the model's or a kept
@@ -1599,7 +1597,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         left.append((req, landing, start, pos))
         continue
       # (its prompt's checkpoint from its slot, as ckpt_keep's: the model's own is another prompt's)
-      if self.slot_host() and getenv("SLOT_CKPT", 1) and not req.generated and n >= getenv("HOST_MIN", 4096) and \
+      if self.slot_host() and not req.generated and n >= 4096 and \
          callable(getattr(model, "ckpt_from_slot", None)):
         model.ckpt_from_slot(landing, n)
         model._ckpt_tokens = list(req.ids)
@@ -1667,7 +1665,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       pending.remove(req)
       req.cache_start, req.pos = starts[g], lens[g]
       # (its prompt's checkpoint from its slot, as ckpt_keep's: the model's own is another prompt's)
-      if self.slot_host() and getenv("SLOT_CKPT", 1) and not req.generated and lens[g] >= getenv("HOST_MIN", 4096) and \
+      if self.slot_host() and not req.generated and lens[g] >= 4096 and \
          callable(getattr(model, "ckpt_from_slot", None)):
         model.ckpt_from_slot(slot, lens[g])
         model._ckpt_tokens = list(req.ids)
@@ -1782,7 +1780,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
   # CLOCK_HOLD s apart at most)
   # (CLOCK_FAST, CLOCK_MANY, CLOCK_PREFILL: a mode's caps from the env (e.g. "GFXCLK=1900"; "" none), a box's thermals without a code change)
   CLOCKS = {"fast": getenv("CLOCK_FAST", ""), "many": getenv("CLOCK_MANY", "GFXCLK=2000"), "prefill": getenv("CLOCK_PREFILL", "GFXCLK=2300")}
-  FAST_USERS, CLOCK_HOLD = getenv("CLOCK_FAST_USERS", 4), 0.5
+  FAST_USERS, CLOCK_HOLD = 4, 0.5
   def process_session_ends(self):
     """Execute end requests only on the model's scheduler thread; a current HTTP response is never cancelled."""
     if not hasattr(self, "end_requests"): self.end_requests = queue.Queue()
@@ -2039,12 +2037,12 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         # (a request that doesn't fit a slot waiting past STARVE_LONG: the slots take no more requests (the batch drains, see preempt), then it
         # goes on alone. else it waits for no request to be decoded: while agents take turns that's never)
         # (PAUSE_LONG: the batch waits for it, see pause_long)
-        if active and self.PAUSE_LONG and callable(getattr(model, "main_overlaps", None)) and \
+        if active and callable(getattr(model, "main_overlaps", None)) and \
            (long_req:=next((r for r in pending if not self.batchable(r) and time.perf_counter() - r.st > self.PAUSE_WAIT), None)) is not None:
           self.pause_long(long_req, active, pending)
           continue
         drain = any(not self.batchable(r) and time.perf_counter() - r.st > self.STARVE_LONG for r in pending)
-        if drain and active and getenv("PREEMPT_LONG", 1): self.preempt(active, pending)
+        if drain and active: self.preempt(active, pending)
         if not active and pending:
           # one request (or one that doesn't fit a slot): alone
           if len(pending) == 1 or not self.batchable(pending[0]) or drain:
