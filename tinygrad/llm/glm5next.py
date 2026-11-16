@@ -1838,10 +1838,10 @@ class Indexer:
     # a few (the drafts of speculative decoding): the same, a row a query
     if Tq <= 8 and idx.n_heads % 16 == 0 and (1):
       return indexer_decode_index_rows(iq, pk, weights, start_pos, pools, k, idx.kpool, pbase=pb, width=self.max_pools)
-    # (IDX_SPLIT, default on: a prefill chunk's queries split on their rows over the devices (every device had all of them: the same lists six
+    # (index sharding: a prefill chunk's queries split on their rows over the devices (every device had all of them: the same lists six
     # times), each device the scores and the lists of its rows, the lists gathered. the same lists: exact)
     n = len(x.device) if isinstance(x.device, tuple) else 1
-    if n > 1 and getenv("IDX_SPLIT", 1) and not self.shard and Tq % (16*n) == 0 and Tq // n <= (1056) and \
+    if n > 1 and not self.shard and Tq % (16*n) == 0 and Tq // n <= (1056) and \
        idx.n_heads % 16 == 0 and amd_custom_kernels_supported(x.device):
       iq_s = shard_rows(iq.contiguous(), 0)  # (the q projection of every row as before, then split: the same queries)
       w_s = shard_rows(weights.contiguous(), 0)
@@ -3668,7 +3668,7 @@ class Transformer:
 
   BPF_G = (8)  # prefills in a step of them: prompts at most
   # (BPF_PS: the rows of a prompt of a step, a jit each (a step's prompts padded to the smallest that fits them), BPF_P the most)
-  BPF_PS = tuple(sorted({int(x) for x in str((getenv("BPF_P", 168))).split(",") if x}))
+  BPF_PS = (168,)
   BPF_P = max(BPF_PS)
   BPF_ROWS = (BPF_G * min(BPF_PS))  # (a step's rows at most: its memory)
   def forward_batch_prefill(self, *vs:UOp, P:int|None=None) -> Tensor:
@@ -3845,7 +3845,7 @@ class Transformer:
     self.seq_spec_h = _zeros(n*2*(k+1), self._spec_dim, device=devs)
     # every slot's checkpoint: its states of a position (the end of its last prompt), the hidden state of the last token
     self.seq_ckpt_h = _zeros(n, self._spec_dim, device=devs)
-    # (SEQ_CKPT_HOST: the checkpoints' recurrent states in host memory: a copy a turn, the device memory more slots')
+    # (the checkpoints' recurrent states in host memory: a copy a turn, the device memory more slots')
     self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]), host=True)[0]] +
                             [_slot_pool(n, p, (1, *p.shape[1:]))[0] for p in b.pool_conv] for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
     # (GLM: the checkpoints' indexer rings (the last tokens of the prompt, its last pool's), see _seq_ckpt_copy)
