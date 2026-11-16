@@ -228,6 +228,10 @@ VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf VISION_SLICE_MS=200 VISION_MAX
   VISION_URL_CACHE_MB=512 VISION_BUCKETS=320,576 SERVE_RENDER_CACHE=1 AM_POWER_LIMIT=250 bash extra/llm_service/glm_flash_6x7900xtx.sh start
 ```
 
+A game that resends every screenshot of the window in each request needs a body cap above the 32 MB default once its screenshots are
+larger than 240x216: 842 PNG screenshots at 360x324 (~38.9 KB each) are ~32.7 MB, a 413. For those add `VISION_MAX_BODY_MB=64` to the
+line (both launchers pass it; the Qwen Pokemon line on g4 runs with 64 since Nov 16 02:4x).
+
 **Qwen clients that drop old reasoning** in general (`chat_template_kwargs: {preserve_thinking: false}`): the same `SEQ_CKPT_TAIL=1`.
 A client that sends nothing gets `preserve_thinking=true` and reuses its cache without it. Default off.
 
@@ -371,7 +375,7 @@ Any setting not listed here is not supported: its production value is compiled i
 | `VISION_URL_CACHE_MB` | dedicated picture profile 512 | Maximum host RAM for decoded pictures keyed by data-URL hash: up to this many MB avoids repeated decoding but remains resident beside the row cache and engine state. Reduce it for a shared service after measuring its working set. |
 | `VISION_DECODERS` | 2 | Concurrent picture decode workers. |
 | `VISION_DECODE_WAIT` | 30 s | Picture decode deadline. |
-| `VISION_MAX_BODY_MB` | 32 | HTTP request body cap. |
+| `VISION_MAX_BODY_MB` | 32 | HTTP request body cap (413 above it); 64 for full-resend games with 360x324 screenshots. |
 | `VISION_MAX_BYTES` | 20000000 | Encoded bytes allowed for one picture. |
 | `VISION_MAX_IMAGES` | C2 1024; C5 benchmark/engine default; explicit G3 opt-in 2048; many-customer default 8, typical explicit limit 8–32 | Maximum pictures per request. Each can consume up to the byte/pixel/token caps plus decode, tower and queue work; the dedicated 1024 limit admits far more concurrent work and cache pressure. |
 | `VISION_MAX_PIXELS` | 40000000 | Decoded pixel cap per picture. |
