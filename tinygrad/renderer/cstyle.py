@@ -2,8 +2,7 @@ from typing import Literal, Callable
 import math
 from collections import defaultdict, Counter
 from tinygrad.renderer import tc
-from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
-from tinygrad.uop.weak import commit_weak_consts
+from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters, promo_dtype
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_storage_scalar
 from tinygrad.renderer import Renderer
@@ -87,12 +86,9 @@ pm_narrow_uint = PatternMatcher([(UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.NEG, Ops.
 
 def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
   patterns = PatternMatcher([
-    # a weak CONST states no width and cannot be restated: commit it at the emulated dtype a sibling src states
-    (UPat(GroupOp.ALU, name="x"), lambda x, dts=dts: commit_weak_consts(x, next((s.dtype for s in x.src if s.dtype in dts), None))),
-    (UPat(GroupOp.ALU-{Ops.WHERE}, dtype=dts, name="x"),
-     lambda x: UOp(x.op, src=tuple(vv.cast(dtypes.float) for vv in x.src), arg=x.arg).cast(x.dtype)),
-    (UPat(GroupOp.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dts), UPat.var("y", dtype=dts))),
-     lambda alu,x,y: UOp(alu.op, src=(x.cast(dtypes.float), y.cast(dtypes.float)), arg=alu.arg))])
+    # an emulated op computes in float on its operands at their meet, a weak CONST commits there first
+    (UPat(GroupOp.ALU-{Ops.WHERE}, name="x"), lambda x, dts=dts:
+     x.replace(src=tuple(s.ccast(dt).cast(dtypes.float) for s in x.src)).cast(x.dtype) if (dt:=promo_dtype(x.src)) in dts else None)])
   if casting:
     # add float intermediate casting
     patterns += PatternMatcher([
