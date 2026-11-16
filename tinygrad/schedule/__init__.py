@@ -111,7 +111,7 @@ def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
            **{i:x.unbound() if x.is_variable else x for i,x in enumerate(linear_call.src[1:])
-              if x.op is Ops.PARAM and x.addrspace is AddrSpace.ALU}}
+              if x.op in {Ops.PARAM, Ops.EXTERN} and x.addrspace is AddrSpace.ALU}}
   def apply_binds(si:UOp) -> UOp:
     if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
     if si.op is Ops.CALL and si.body.op is Ops.PROGRAM: return si  # compiled parameters already have ABI slots
@@ -279,7 +279,8 @@ def export(big_sink:UOp) -> tuple[UOp, tuple[UOp, ...]]:
   fn = graph_rewrite(stores, pm_export, ctx=(ctx:=CallifyCtx()), bottom_up=True, name="export")
   return fn, tuple(ctx.replacements)
 
-pm_map_back = PatternMatcher([(UPat(Ops.EXTERN, name="e"), lambda ctx,e: ctx[e.arg.slot])])
+# EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
+pm_map_back = PatternMatcher([(UPat(Ops.EXTERN, name="e"), lambda ctx,e: x.unbound() if (x:=ctx[e.arg.slot]).is_variable else x)])
 
 def transform_to_call(big_sink:UOp) -> UOp:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Graph")
@@ -294,11 +295,8 @@ def transform_to_call(big_sink:UOp) -> UOp:
 
 def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   fn, externs = export(big_sink)
-  # the call has no runtime state, its args are mapped back to the storage and the bound Variables
-  big_sink = transform_to_call(fn)
-  big_sink = big_sink.replace(src=(big_sink.body, *graph_rewrite(UOp.sink(*big_sink.src[1:]), pm_map_back, ctx=externs, walk=True).src))
-  # big_sink srcs are all the Tensors
-  linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
+  # the call and the linear it lowers to have no runtime state, the EXTERNs are mapped back to the storage and the bound Variables at the end
+  linear_call = graph_rewrite(transform_to_call(fn), pm_schedule, name="schedule to linear", enter_calls=True)
 
   # this recursively resolves the linear_call and allocates buffers
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
@@ -306,11 +304,14 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   # create copies
   linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
 
+  # map back: the EXTERNs become the storage and the bound Variables of this invocation
+  linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, enter_calls=True, name="map back externs")
+
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
-  # get var_vals from the bound Variables in the call args
+  # get var_vals from the bound Variables
   var_vals: dict[str, int] = {}
-  for b in big_sink.src[1:]:
+  for b in externs:
     if b.is_bound_var:
       nm, val = b.expr, b.arg.val
       if nm not in used_vars: continue
@@ -319,8 +320,8 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
 
   # jit captures this schedule, no need to execute.
   if len(capturing) and CAPTURING:
-    capturing[0].add_linear(linear)
+    capturing[0].add_linear(linear, var_vals)
     return UOp(Ops.LINEAR, src=()), var_vals
 
-  held_bufs = {b for b in linear_call.src[1:] if b.op is Ops.BUFFER}
+  held_bufs = {b for b in externs if b.op is Ops.BUFFER}
   return memory_plan_rewrite(linear, held_bufs), var_vals
