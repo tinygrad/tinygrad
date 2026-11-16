@@ -628,6 +628,9 @@ class TestContiguousViewOffset(unittest.TestCase):
   def test_expand_const_is_none(self): self._check(UOp.const(5.0).reshape((1,)).expand((4,)), None)
   def test_shrink_invalid(self): self._check(UOp.empty(4).pad((2,2))[0], None)
   def test_strided(self): self._check(UOp.empty(4)[::2], None)
+  # a window whose rows are not whole: no one range (the reshape/shrink fast path once read a shrink's sizes as ends)
+  def test_window_is_none(self): self._check(UOp.empty(6,6)[2:5, 2:5], None)
+  def test_window_one_row(self): self._check(UOp.empty(6,6)[2:3, 1:4], 13)
 
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, PythonRenderer)) and
                      dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires buffer bitcast and 64-bit ints")

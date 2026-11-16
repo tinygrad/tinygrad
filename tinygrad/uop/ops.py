@@ -1014,9 +1014,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.RESHAPE: return inner if all_int(self.shape) else None
     marg = self.marg
     if not all(isinstance(x, int) for se in marg for x in se): return None
-    # contiguous: the dims before the last cut one keep one element
-    cut = [i for i, ((st, en), n) in enumerate(zip(marg, shape)) if (st, en) != (0, n)]
-    if cut and any(en - st != 1 for st, en in marg[:cut[-1]]): return None
+    # contiguous: the dims before the last cut one keep one element (a shrink's marg is (offset, size) a dim)
+    cut = [i for i, ((st, sz), n) in enumerate(zip(marg, shape)) if (st, sz) != (0, n)]
+    if cut and any(sz != 1 for _, sz in marg[:cut[-1]]): return None
     return inner[0], inner[1] + sum(st * sd for (st, _), sd in zip(marg, strides_for_shape(shape)))
 
   def contiguous_view_offset(self) -> int|None: return None if (view := self.contiguous_view()) is None else view[1]
