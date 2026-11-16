@@ -81,6 +81,21 @@ For any service place the relevant lines in a manifest beside the files and run 
 
 ## Start, readiness and stop
 
+**Every start ends with the customer smoke, through the public port, before the server is called serving** (exit code 0 =
+`SMOKE PASSED`; ~1 h on a loaded box, mostly part c):
+
+```bash
+python3 extra/llm_service/smoke.py http://<public host:port> --slots <SEQ_SLOTS> --rows-4k <rows>
+```
+
+`--rows-4k` = the rows of a 3840x2160 picture on that line (picture-limit table below): Qwen at 1,024 rows 1,008, Qwen at 8,192 8,160,
+GLM Flash at 8,000 7,973; without it the count is printed, not checked. GLM Flash: add `--ret-max-tokens 1024` (room for its thinking).
+
+It checks (a) 20 default-sampling chats (no stray-script characters, reasoning in `reasoning_content`; read the five it prints),
+(b) top_p honoured and top_k / unknown fields accepted, (c) max(80, 1.25 x slots) conversations each return to their own secret, text and
+one picture each, (d) 10 pictures in one request and a 3840x2160 picture's rows. Add `--no-pictures` on C9 (text-only). It cannot check
+that the start used the launcher line printed here: the operator states that.
+
 ### Qwen C2, on its six-card serving VM
 
 Work from the immutable tinygrad checkout. This is the full environment from the running V3.1 server (with `AM_VM_RESET=1` only on its first controlled start) and complete engine invocation:
