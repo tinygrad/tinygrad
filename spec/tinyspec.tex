@@ -458,8 +458,7 @@ The result is a reusable graph fragment: the body's storage is represented by \o
 \toprule
 \textbf{Stage} & \textbf{Semantics} \\
 \midrule
-\textbf{Export} & Replace the runtime state of the Tensor graph with \op{Extern}s: bound storage loses its buffer, bound Variables lose their value. The result is a function that can be cached and serialized. \\
-\textbf{Callify} & Transform the exported function into a \op{Call} with positional \op{Param}s. \\
+\textbf{Export} & Replace the runtime state of the Tensor graph with \op{Extern}s: bound storage (and contiguous views of it) loses its buffer, bound Variables lose their value. The result is a function that can be cached and serialized. \\
 \textbf{Rangeify} & Determine the kernel split of the function. Break everything down to shape () \\
 \textbf{Optimize} & Insert local buffers. Swap and split ranges, and determine which axes are parallel and which are serial. \\
 \textbf{Expand} & Expand the parallel ranges into shape. \\

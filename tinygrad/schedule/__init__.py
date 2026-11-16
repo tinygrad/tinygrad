@@ -206,7 +206,7 @@ def contiguous_mops_to_view(ctx:ExportCtx|None, c:UOp, src:UOp):
     if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
     if (view := contiguous_mops_to_view(ctx, unshard.src[0], unshard.src[0])) is None: return None
     view = view.unshard(unshard.arg, unshard.src[1:])
-  elif buf.op in {Ops.BUFFER, Ops.EXTERN} and (cv := src.contiguous_view()) is not None and cv[0].op in {Ops.BUFFER, Ops.EXTERN}:
+  elif buf.op is Ops.BUFFER and (cv := src.contiguous_view()) is not None and cv[0].op is Ops.BUFFER:
     buf, offset = cv
     view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
     if ctx is not None: ctx.views.add(view)
