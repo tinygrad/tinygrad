@@ -189,30 +189,31 @@ VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf VISION_SLICE_MS=200 VISION_MAX
 **Qwen clients that drop old reasoning** in general (`chat_template_kwargs: {preserve_thinking: false}`): the same `SEQ_CKPT_TAIL=1`.
 A client that sends nothing gets `preserve_thinking=true` and reuses its cache without it. Default off.
 
-**The game harness** (teeny, `~/fun/pi_plays_pokemon` at `b1e297d`): prompt "Beat the game." plus the six sentences of arm R2
-(`.pi/RULES_R2.md`, below); no history rewrite (every screenshot and message stays); the run ends at the window's compaction point.
+**The game harness** (teeny, `~/fun/pi_plays_pokemon` at `104cacd`): prompt "Beat the game." plus the seven sentences of arm R3
+(`.pi/RULES_R3.md`, below: R2's six + the board's seventh, Nov 15); no history rewrite (every screenshot and message stays); the run ends at the window's compaction point.
 
 ```bash
 cd ~/fun/pi_plays_pokemon
 # Qwen
-EMU_TEXT_SETTLE=1 PI_ACT_SEQ=1 PI_IMAGE_SIZE=240x216 PI_PRESERVE_THINKING=0 PI_RULES=R2 \
-PI_QWEN_BASE_URL=http://127.0.0.1:<qwen tunnel>/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_FRESH=1 PI_IMAGE_SCALE=2 PI_IMAGE_REFS=0 \
+EMU_TEXT_SETTLE=1 PI_ACT_SEQ=1 PI_IMAGE_SIZE=240x216 PI_PRESERVE_THINKING=0 PI_RULES=R3 \
+PI_QWEN_BASE_URL=http://127.0.0.1:<qwen tunnel>/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_FRESH=1 PI_IMAGE_SCALE=2 PI_IMAGE_REFS=1 \
 PI_TEMPERATURE=1.0 EMU_PORT=8900 EMU_URL=http://127.0.0.1:8900 \
 .venv/bin/python campaign.py --full-context --block-minutes 900 --run qwen38-flash-full-NNN --change "<label>"
 # GLM Flash
-PI_IMAGE_SIZE=240x216 PI_RULES=R2 \
+PI_IMAGE_SIZE=240x216 PI_RULES=R3 \
 PI_GLM_BASE_URL=http://127.0.0.1:<glm tunnel>/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_FRESH=1 PI_IMAGE_SCALE=2 PI_IMAGE_REFS=1 \
 PI_TEMPERATURE=1.0 PI_TOP_P=0.95 EMU_PORT=8901 EMU_URL=http://127.0.0.1:8901 \
 .venv/bin/python campaign.py --full-context --block-minutes 900 --provider local-glm-flash --model "GLM 5.3 Flash" --run glm53-flash-full-NNN --change "<label>"
 ```
 
-The six R2 sentences:
+The seven R3 sentences (picture references on for both models: `PI_IMAGE_REFS=1`, the server keeps pictures by hash):
 - In a new town, enter every building that has a door before you leave the town.
 - When a person asks you to do something, or gives you something to take to someone, do that next, before you explore further.
 - If a person blocks your way and talking to them does not open it, something elsewhere must be done first: go back and finish what you have not finished.
 - When you are given something to take to someone, go back the way you came to where you met that person, and talk to them.
 - If the screen keeps coming back to the same few views, what you are doing does not work: try a wall, an edge or a direction you have not tried yet.
 - Read to the end everything a person says: it often says where to go next.
+- To leave a room, walk onto its stairs, door or mat and keep pressing the same direction until the screen changes.
 
 ## What each configuration cannot do
 
