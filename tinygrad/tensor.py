@@ -19,14 +19,15 @@ from tinygrad.device import Buffer
 
 @dataclass
 class ExportCtx:
-  externs: list[UOp] = field(default_factory=list)
+  # each piece of runtime state is one EXTERN everywhere it's used, the slot is its position in externs
+  externs: dict[UOp, UOp] = field(default_factory=dict)
   allocs: dict[UOp, UOp] = field(default_factory=dict)
 
 def to_extern(ctx:ExportCtx, x:UOp) -> UOp|None:
   # realized storage and bound Variables are runtime state
   if not (x.is_bound_var or (x.op is Ops.BUFFER and x.addrspace is AddrSpace.GLOBAL)): return None
-  ctx.externs.append(x)
-  return x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=len(ctx.externs)-1, buffer=None, name=None, val=None))
+  if x not in ctx.externs: ctx.externs[x] = x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=len(ctx.externs), buffer=None, name=None, val=None))
+  return ctx.externs[x]
 
 # ALLOCs get canonical scope-local id slots so structurally identical calls hash identically for the schedule cache
 # (fresh slots are all positive from the global counter; negative slots are already canonical)
@@ -37,7 +38,7 @@ def canonicalize_alloc(ctx:ExportCtx, b:UOp) -> UOp|None:
 pm_export: PatternMatcher = PatternMatcher([
   (UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern),
   (UPat(Ops.ALLOC, name="b"), canonicalize_alloc),
-  # a call body is its own scope for ALLOC slots, it shares the EXTERNs
+  # a call body is its own scope for ALLOC slots, the EXTERNs are shared
   (UPat(Ops.CALL, name="c"), lambda ctx,c:
    c.replace(src=(graph_rewrite(c.body, pm_export, ctx=ExportCtx(ctx.externs), bottom_up=True, name="export call body"),)+c.src[1:])),
 ])
