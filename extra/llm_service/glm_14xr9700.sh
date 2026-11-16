@@ -15,7 +15,6 @@ MODEL=$GLM_WEIGHTS/GLM-5.3-UD-IQ4_XS/GLM-5.3-UD-IQ4_XS-00001-of-00009.gguf
 SERVER_ENV=(
   HOME="$HOME" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED=1
   DEV=PCI+AMD VFIO=1 AM_POWER_LIMIT="$GLM53_POWER_LIMIT"
-  HOST_STASH=0
   SPEC_DRAFTS=2 SPEC_DRAFTS_BY_SIZE=1:2,2:2,4:3,8:3,16:3
   SEQ_GATHER_UNION=65536 P2P_AR_TIMEOUT_MS=20000
   SEQ_ROWS="${SEQ_ROWS:-268800}" SEQ_SLOTS="${SEQ_SLOTS:-32}" SEQ_SIZES="${SEQ_SIZES:-1,4,8,16}" SEQ_MAX_ACTIVE="${SEQ_MAX_ACTIVE:-32}"
@@ -34,6 +33,11 @@ for _name in API_KEY API_KEY_FILE KEEPALIVE ENC_CACHE GLM_KV FREQS_HOST P2P_GLM5
 done
 COMMAND=(python3 -m tinygrad.llm --model "$MODEL" --shard 14 --max_context "${MAX_CONTEXT:-262144}" --serve "${PORT:-8000}")
 
+check_python() {
+  # (the server's Python prerequisites, before any GPU is opened: a missing one fails the model load after the cards were set up)
+  python3 -c 'import numpy, jinja2' 2>/dev/null || {
+    echo "missing Python prerequisites (numpy, jinja2): sudo apt-get install python3-numpy python3-jinja2 (an iris VM: tools/vm/setup.sh <vm>)" >&2; return 2; }
+}
 check_weights() {
   command -v sha256sum >/dev/null
   (cd "$(dirname -- "$MODEL")" && sha256sum -c "$ROOT/extra/llm_service/glm53-iq4xs.sha256")
@@ -42,26 +46,28 @@ if [[ $ACTION == --print-command ]]; then
   printf '%q ' "${SERVER_ENV[@]}" "${COMMAND[@]}"; printf '\n'
 elif [[ $ACTION == start ]]; then
   [[ $GLM53_POWER_LIMIT =~ ^[0-9]+$ ]] && ((GLM53_POWER_LIMIT > 0)) || { echo 'PENDING: set GLM53_POWER_LIMIT from completed ts5 power verification; 210 W is not safe' >&2; exit 2; }
+  check_python
   check_weights
   mkdir -p "$STATE_DIR"
   cd "$ROOT"
   if [[ ${AM_FIRST_START:-0} == 1 ]]; then SERVER_ENV+=(AM_VM_RESET=1); fi
   [[ ! -e $PIDFILE ]] || { echo "PID file already exists: $PIDFILE (check status first)" >&2; exit 2; }
-  echo "start $(git rev-parse HEAD) model=$MODEL power=${GLM53_POWER_LIMIT}W" >> "$LOGFILE"
+  echo "start $(git rev-parse HEAD 2>/dev/null || cat DEPLOYED_COMMIT 2>/dev/null) model=$MODEL power=${GLM53_POWER_LIMIT}W" >> "$LOGFILE"
   setsid sudo -n env "${SERVER_ENV[@]}" "${COMMAND[@]}" >> "$LOGFILE" 2>&1 & child=$!
   echo "$child" > "$PIDFILE"
 elif [[ $ACTION == stop ]]; then
   [[ -r $PIDFILE ]] || { echo 'GLM is not running (no PID file)' >&2; exit 1; }
   pid=$(cat "$PIDFILE")
-  kill -TERM -- "-$pid"
+  sudo -n kill -TERM -- "-$pid"
   for _ in {1..90}; do
-    if ! kill -0 "$pid" 2>/dev/null; then rm "$PIDFILE"; echo 'GLM stopped'; exit 0; fi
+    if ! sudo -n kill -0 "$pid" 2>/dev/null; then rm "$PIDFILE"; echo 'GLM stopped'; exit 0; fi
     read -r -t 1 _ || true
   done
   echo "GLM pid=$pid did not exit in 90 s; inspect before taking further action" >&2; exit 1
 elif [[ $ACTION == status ]]; then
   curl -fsS "http://127.0.0.1:${PORT:-8000}/status"
 elif [[ $ACTION == check-weights ]]; then
+  check_python
   check_weights
 else
   cat >&2 <<'USAGE'

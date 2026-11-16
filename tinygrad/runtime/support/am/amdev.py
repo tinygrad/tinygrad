@@ -279,11 +279,12 @@ class AMDev:
       self._boot_lock.enter_context(self.card_lock.hold())
       if not self.is_vf and self.psp.is_sos_alive() and self.smu.is_smu_alive(): # skip in vf mode, these are pf funcs.
         # (in a VM a mode1 reset can take the VM with it (see CardLock): a card left initialised by a process that didn't finalize is
-        # reset only with AM_VM_RESET=1; else recreate the VM, its cards come clean)
+        # reset only with AM_VM_RESET=1. a recreated VM is clean only if its host reset the cards: after a killed qemu the next VM on that host
+        # got them as they were left (g2, Nov 16))
         if in_vm() and not getenv("AM_VM_RESET", 0) and not reset_mode:
           self._boot_lock.close()
           raise RuntimeError(f"am {self.devfmt}: the card needs a mode1 reset (left initialised by a process that did not finalize). In a VM "
-                             "that can kill the VM: recreate the VM (its cards come clean), or AM_VM_RESET=1 to reset anyway")
+                             "that can kill the VM: AM_VM_RESET=1 to reset anyway (a VM recreated on the same host can get its cards as they were)")
         self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
         if self.is_hive():
           self._boot_lock.close()

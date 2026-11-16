@@ -22,7 +22,7 @@ SERVER_ENV=(
   HOME="$HOME" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED=1
   DEV=AMD AM_POWER_LIMIT="$AM_POWER_LIMIT"
 
-  HOST_STASH=0 BATCH_SLOTS=8
+  BATCH_SLOTS=8
   SEQ_IDX_SHARD=1 SEQ_KV4=1
   PREFILL_PARTS=4 LOAD_DEFER=1 WARMUP_JITS=all
   SEQ_ROWS="${SEQ_ROWS:-3916800}" SEQ_SLOTS="${SEQ_SLOTS:-18}" SEQ_MAX_ACTIVE="${SEQ_MAX_ACTIVE:-18}"
@@ -48,6 +48,13 @@ fi
 COMMAND=(python3 -m tinygrad.llm --model "$MODEL" --shard 6 --max_context 524288 --serve "${PORT:-8000}")
 SERVER_ENV+=(VISION_MMPROJ="$MMPROJ" VISION_BUCKETS="${VISION_BUCKETS:-320,576}")
 
+check_python() {
+  # (the server's Python prerequisites, before any GPU is opened: a missing one fails the model load after the cards were set up)
+  python3 -c 'import numpy, jinja2, PIL' 2>/dev/null || {
+    echo "missing Python prerequisites (numpy, jinja2, pillow >= 10.0.1): sudo apt-get install python3-numpy python3-jinja2 python3-pil (an iris VM: tools/vm/setup.sh <vm>)" >&2; return 2; }
+  python3 -c 'import sys, PIL; sys.exit(tuple(int(x) for x in PIL.__version__.split(".")[:2]) < (10, 0))' || {
+    echo "the vision tower needs pillow >= 10.0.1: sudo python3 -m pip install --break-system-packages 'pillow>=10.0.1'" >&2; return 2; }
+}
 check_weights() {
   [[ -s $MMPROJ ]] || { echo "VISION_MMPROJ is mandatory: no readable nonempty projector at $MMPROJ" >&2; return 2; }
   command -v sha256sum >/dev/null
@@ -59,27 +66,29 @@ if [[ $ACTION == --print-command ]]; then
 elif [[ $ACTION == start ]]; then
   [[ $AM_POWER_LIMIT =~ ^[0-9]+$ ]] && ((AM_POWER_LIMIT > 0)) || { echo 'AM_POWER_LIMIT must be a positive integer' >&2; exit 2; }
   ((AM_POWER_LIMIT <= 250)) || { echo 'Use a measured thermal limit of at most 250 W; D34 ran at 225 W' >&2; exit 2; }
+  check_python
   check_weights
   mkdir -p "$STATE_DIR"
   cd "$ROOT"
   if [[ ${AM_FIRST_START:-0} == 1 ]]; then SERVER_ENV+=(AM_VM_RESET=1); fi
   [[ ! -e $PIDFILE ]] || { echo "PID file already exists: $PIDFILE (check status first)" >&2; exit 2; }
-  echo "start $(git rev-parse HEAD) model=$MODEL power=${AM_POWER_LIMIT}W" >> "$LOGFILE"
+  echo "start $(git rev-parse HEAD 2>/dev/null || cat DEPLOYED_COMMIT 2>/dev/null) model=$MODEL power=${AM_POWER_LIMIT}W" >> "$LOGFILE"
   setsid sudo -n env "${SERVER_ENV[@]}" "${COMMAND[@]}" >> "$LOGFILE" 2>&1 & child=$!
   echo "$child" > "$PIDFILE"
   echo "GLM Flash started pid=$child log=$LOGFILE"
 elif [[ $ACTION == stop ]]; then
   [[ -r $PIDFILE ]] || { echo 'GLM Flash is not running (no PID file)' >&2; exit 1; }
   pid=$(cat "$PIDFILE")
-  kill -TERM -- "-$pid"
+  sudo -n kill -TERM -- "-$pid"
   for _ in {1..90}; do
-    if ! kill -0 "$pid" 2>/dev/null; then rm "$PIDFILE"; echo 'GLM Flash stopped'; exit 0; fi
+    if ! sudo -n kill -0 "$pid" 2>/dev/null; then rm "$PIDFILE"; echo 'GLM Flash stopped'; exit 0; fi
     read -r -t 1 _ || true
   done
   echo "GLM Flash pid=$pid did not exit in 90 s; inspect before taking further action" >&2; exit 1
 elif [[ $ACTION == status ]]; then
   curl -fsS "http://127.0.0.1:${PORT:-8000}/status"
 elif [[ $ACTION == check-weights ]]; then
+  check_python
   check_weights
 else
   cat >&2 <<'USAGE'
