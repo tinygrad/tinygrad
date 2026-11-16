@@ -88,21 +88,16 @@ def create_schedule(sched_sink:UOp) -> UOp:
 
 from tinygrad.schedule.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing, pm_flatten_linear
-from tinygrad.schedule.prepare import prepare_rangeify
+from tinygrad.schedule.prepare import prepare_rangeify, body_on_call_device
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat, pm_resolve_params
 
 def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
-  # a scheduled function is shared by all its calls, so the storage it allocates gets a fresh identity in each call.
-  # a device agnostic body runs on the device of its call, so storage it allocates without a device is on that device
-  device = next((a.device for a in linear_call.src[1:] if a.device is not None), None)
-  def fresh(b:UOp) -> UOp:
-    if b.device is not None: return b.replace(arg=replace(b.arg, slot=next(UOp.unique_num)))
-    return UOp.alloc((b.max_numel(),), b.dtype, next(UOp.unique_num), b.addrspace, device)
+  # a scheduled function is shared by all its calls, so the storage it allocates gets a fresh identity in each call
   linear = linear_call.body
-  linear = linear.substitute({b:fresh(b) for b in linear.toposort() if b.op is Ops.ALLOC}, walk=True)
+  linear = linear.substitute({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in linear.toposort() if b.op is Ops.ALLOC}, walk=True)
   # the positional params outside the kernel bodies are the call args, free Variables have slot -1
   linear = graph_rewrite(linear, pm_resolve_params, ctx=linear_call.src[1:], walk=True, name="params to args")
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
@@ -124,8 +119,8 @@ pm_resolve_linear_call = PatternMatcher([
 schedule_cache: dict[bytes, UOp] = {}
 # ctx is just for DEBUG on inner
 def lower_sink_to_linear(call:UOp) -> UOp|None:
-  function = call.body
-  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
+  if call.body.op is not Ops.SINK or isinstance(call.body.arg, KernelInfo) or not call.arg.precompile: return None
+  function = body_on_call_device(call, call.body)
   st = time.perf_counter()
   cache_key = function.key
   # SCACHE >= 2 also persists the cache to disk

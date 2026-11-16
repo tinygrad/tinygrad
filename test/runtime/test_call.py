@@ -135,6 +135,19 @@ class TestCallSchedule(unittest.TestCase):
     out = Tensor(((p + 1).bufferize() * 2).call_with_output(x.uop, precompile=True))
     self.assertEqual(out.tolist(), [4., 6., 8., 10.])
 
+  def test_inline_deviceless_body_alloc(self):
+    # the alloc has no device, so it is on the device of the call when the call is inlined
+    x = Tensor([1., 2., 3., 4.]).realize()
+    p, tmp = UOp.param(0, dtypes.float, (4,)), UOp.alloc((4,), dtypes.float)
+    self.assertEqual(Tensor((tmp.after(tmp.store(p + 1)) * 2).call_with_output(x.uop)).tolist(), [4., 6., 8., 10.])
+
+  def test_deviceless_call_keeps_grad_fxn(self):
+    # a call without a device is inlined where it's used, it still has its custom gradient
+    x = Tensor(3., dtype=dtypes.float)
+    y = Tensor.call(x, fxn=UOp.param(0, dtypes.float, ()) * 2, grad_fxn=lambda g, c: (g * 3,))
+    self.assertEqual(y.gradient(x)[0].item(), 3.0)
+    self.assertEqual(y.item(), 6.0)
+
   def test_precompile_full_buffer_assign(self):
     @function(precompile=True)
     def f(x:Tensor) -> Tensor: return x * 2 + 1

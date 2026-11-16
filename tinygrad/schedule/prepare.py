@@ -5,7 +5,7 @@ from tinygrad.uop.ops import graph_rewrite, MapCtx, rewrite_group, identity_elem
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort, dedup
-from tinygrad.schedule.indexing import apply_movement_op
+from tinygrad.schedule.indexing import apply_movement_op, BufferizeOpts
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
@@ -149,11 +149,20 @@ def resolve_function(c:UOp) -> UOp|None:
     if p.dtype != a.dtype: raise TypeError(f"arg {p.arg.slot} dtype mismatch: expected {p.dtype}, got {a.dtype}")
   # Inlining removes the call scope, so its local allocations need fresh identities.
   dict_map.update({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in nodes if b.op is Ops.ALLOC})
-  # a body is device agnostic, it runs on the device of its call: storage it stages without a device is on that device
-  return graph_rewrite(c.body.substitute(dict_map, walk=True), pm_stage_on_call_device, ctx=c.device, name="stage on call device")
+  return body_on_call_device(c, c.body.substitute(dict_map, walk=True))
 
-pm_stage_on_call_device = PatternMatcher([(UPat(Ops.STAGE, name="s"), lambda ctx,s: s.replace(arg=replace(s.arg, device=ctx))
-  if s.arg is not None and s.arg.addrspace is AddrSpace.GLOBAL and s.arg.device is None else None)])
+# a body is device agnostic, it runs on the device of its call: global storage it allocates or stages without a device is on that device
+def stage_on_call_device(ctx:str|tuple[str, ...], s:UOp) -> UOp|None:
+  if s.arg is None: return s.replace(arg=BufferizeOpts(ctx)) if s.device is None else None
+  return s.replace(arg=replace(s.arg, device=ctx)) if s.arg.addrspace is AddrSpace.GLOBAL and s.arg.device is None else None
+pm_storage_on_call_device = PatternMatcher([
+  (UPat(Ops.STAGE, name="s"), stage_on_call_device),
+  (UPat(Ops.ALLOC, name="b"), lambda ctx,b: UOp.alloc((b.max_numel(),), b.dtype, b.arg.slot, device=ctx)
+   if b.addrspace is AddrSpace.GLOBAL and b.device is None else None),
+])
+def body_on_call_device(c:UOp, body:UOp) -> UOp:
+  if (device:=next((a.device for a in c.src[1:] if a.device is not None), None)) is None: return body
+  return graph_rewrite(body, pm_storage_on_call_device, ctx=device, name="storage on call device")
 
 # shape-changing bitcast
 def expand_bitcast(bc:UOp) -> UOp|None:
