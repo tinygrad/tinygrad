@@ -2,7 +2,6 @@ import itertools
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.x86 import ISARenderer, Register, rdef, regs, with_regs, LinearContext
-from typing import Any
 
 # ops that participate in register allocation
 REGALLOC_OPS = {Ops.INS, Ops.BUFFER, Ops.RANGE, Ops.END}
@@ -28,7 +27,7 @@ class LinearScanRegallocContext:
       if u.op is Ops.RANGE: loops[idx] = max(j for j,x in enumerate(uops) if u in x.src)
 
     # allocate registers
-    self.spills: dict[Register, Any] = {} # mapping from virtual to arbitrary spill slot
+    self.spills: dict[Register, int] = {} # mapping from virtual to stack offset
     self.reals: dict[int, dict[Register, Register]] = {} # mapping from virtual to real at each program point
     self.insert_before: dict[int, list[tuple[Register, Register]]] = {} # fills to be inserted at each program point
     live: dict[Register, Register] = {} # mapping from virtual to real that's currently assigned to it
