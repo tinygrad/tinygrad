@@ -327,9 +327,6 @@ def _q8_key(x:Tensor, tokens:int, in_features:int, sumsq:bool, split:bool) -> tu
 
 _q8_cache:dict[tuple, tuple[Tensor, ...]] = {}
 
-def q8_quantize_known(x:Tensor, tokens:int, in_features:int, sumsq:bool, outs:tuple[Tensor, ...]):
-  """the quantization of x is outs (the kernel that made x made it too)"""
-  _q8_cache[_q8_key(x, tokens, in_features, sumsq, False)] = outs
 
 def q8_quantize_cache_clear():
   # (the caches of a forward's graph: kept, they'd keep its buffers from the memory planner of the jits captured after)
@@ -2119,9 +2116,6 @@ class RingMailbox:
 RING_W, RING_CMAX = 8, 4096  # waves a workgroup (a wave a chunk), the most (chunk, round) flags of a slot
 # (the workgroups of a kernel: few, a kernel spinning with many waves on a device can keep the ones another device waits for from starting.
 # a wave's chunk in rounds of a few values a lane (no spills), a flag a round)
-# (the collectives of decoding steps on lanes of their own (from DEC_LANE): their exchanges are small, more workgroups (RING_G_DEC) move them in
-# fewer rounds. a lane's mailboxes always have the same workgroups: their epoch counters move together)
-DEC_LANE = 16
 # (the slots of a mailbox a chunk's own: its flags (a round each) and words at the same place whatever the kernel's workgroups (a decoding lane's
 
 def ring_mailbox(devs:tuple[str, ...]) -> RingMailbox|None:
@@ -2835,57 +2829,6 @@ def _moe_bundled_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, bexp:UOp,
   return UOp.group(*stores).end(ob).end(bundle, output_block, lane, wave).sink(arg=KernelInfo(
     name=f"moe_bundled_{QUANT_NAMES[ggml_type]}_wmma", opts_to_apply=(), estimates=est))
 
-@functools.cache
-def _moe_bundle_kernel(bexp:UOp, brow:UOp, sel:UOp, first:UOp, experts:int, M:int) -> UOp:
-  """
-  the selections (sel: the expert of every (token, slot) row, first the device's first) in bundles of at most M rows of an expert: bexp the
-  expert of every bundle, brow the M rows of every bundle (both filled with -1 before). a workgroup, a thread the experts tid+256*m: it counts
-  their rows, the bundles before them (a sum over the counts in LDS), then puts their rows in their bundles in order. the loops take U
-  selections (or experts) at a time: their LDS loads in flight together
-  """
-  N, THREADS, U = cast(int, sel.shape[0]), 256, 8
-  NP, per = round_up(N, U), (experts + THREADS - 1) // THREADS
-  tid = UOp.range(THREADS, 0, AxisType.LOCAL)
-  es = [tid + THREADS*m for m in range(per)]
-  def ireg(dep:UOp|None=None) -> UOp:
-    r = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
-    return r.after((r if dep is None else r.after(dep))[0].store(UOp.const(0, dtypes.int32)))
-  def isum(xs:list[UOp]) -> UOp: return functools.reduce(lambda a, b: a + b, xs)
-  # the local experts of the selections in LDS (the loops read them there), -1 past them
-  staged = UOp.alloc((NP,), dtypes.int32, addrspace=AddrSpace.LOCAL)
-  idx = [tid + THREADS*q for q in range((NP + THREADS - 1) // THREADS)]
-  staged = staged.after(UOp.group(*(staged[i.valid(i < NP)].store((i < N).where(sel[i.minimum(N-1)].load() - first[0].load(),
-                                                                             UOp.const(-1, dtypes.int32))) for i in idx)).barrier())
-  # the rows of every expert of the thread
-  counts = []
-  for e in es:
-    c, i = ireg(), UOp.range(NP // U, next(UOp.unique_num), AxisType.LOOP)
-    hits = isum([staged[i*U + u].load().eq(e).cast(dtypes.int32) for u in range(U)])
-    c = c.after(c[0].store(c.after(i)[0].load() + hits).end(i))
-    counts.append(c[0].load())
-  nb = [(c + (M-1)) // M for c in counts]
-  lds = UOp.alloc((per*THREADS,), dtypes.int32, addrspace=AddrSpace.LOCAL).after(staged)
-  lds = lds.after(UOp.group(*(lds[e].store(n) for e, n in zip(es, nb))).barrier())
-  stores = []
-  for e, n in zip(es, nb):
-    # the bundles before the expert's
-    a, j = ireg(), UOp.range((per*THREADS) // U, next(UOp.unique_num), AxisType.LOOP)
-    a = a.after(a[0].store(a.after(j)[0].load() + isum([(j*U + u < e).where(lds[j*U + u].load(), UOp.const(0, dtypes.int32))
-                                                         for u in range(U)])).end(j))
-    start = a[0].load().cast(dtypes.weakint)
-    ok = e < experts
-    # its rows, in order
-    r, i = ireg(start), UOp.range(NP // U, next(UOp.unique_num), AxisType.LOOP)
-    cur, hit_list = r.after(i)[0].load(), [staged[i*U + u].load().eq(e) & ok for u in range(U)]
-    puts, at = [], cur
-    for u, h in enumerate(hit_list):
-      puts.append(brow[(start*M + at.cast(dtypes.weakint)).valid(h)].store((i*U + u).cast(dtypes.int32)))
-      at = at + h.cast(dtypes.int32)
-    stores.append(r.after(*puts)[0].store(at).end(i))
-    # its bundles' expert
-    b = UOp.range((N + M - 1) // M, next(UOp.unique_num), AxisType.LOOP)
-    stores.append(bexp[(start + b).valid(ok & (b < n.cast(dtypes.weakint)))].store(e.cast(dtypes.int32)).end(b))
-  return UOp.group(*stores).end(tid).sink(arg=KernelInfo(name="moe_bundle", opts_to_apply=()))
 
 @functools.cache
 def _moe_bundle_atomic_kernel(bexp:UOp, brow:UOp, bcnt:UOp, sel:UOp, first:UOp, experts:int, M:int) -> UOp:
@@ -3244,151 +3187,7 @@ def _add_rows_q8_kernel(y:UOp, acc:UOp, *add:UOp, add_rows:tuple[int, ...]=()) -
     stores.append(y[token, group, (sub*0+8).valid(sub.eq(0))].store(d.bitcast(dtypes.uint32)))
   return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="moe_combine_add", opts_to_apply=()))
 
-# ******** manifold-constrained hyper-connections: the mixing coefficients ********
-
 def _swizzle_xor(val:UOp, mask:int) -> UOp: return _lane_xor(val, mask)
-
-@functools.cache
-def _hc_coeffs_kernel(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, count:int, iters:int, eps:float, norm_eps:float, features:int) -> UOp:
-  # one wave per token. the mix is a linear layer of the streams before their rms norm: scale it by the rms from the sums of squares.
-  # lanes [0, count*count) hold comb[lane//count][lane%count], the sums over a row/column are lane swizzles. the next 2*count lanes pre and post
-  assert count == 4, "the swizzles assume 4 streams"
-  token, lane = UOp.range(out.shape[0], 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
-  groups = sq.shape[1]
-  total = sum((sq[token, (lane + 32*i).valid(lane + 32*i < groups)].load() for i in range((groups+31)//32)), UOp.const(0, dtypes.float))
-  rms = (warp_reduce(total, full_wave=True) * (1/features) + norm_eps).rsqrt()
-  is_comb = lane < count*count
-  idx = is_comb.where(lane + 2*count, (lane - count*count).minimum(2*count-1).maximum(0))
-  which = is_comb.where(2, (lane < count*count + count).where(0, 1))
-  s = which.eq(0).where(scale[0].load().float(), which.eq(1).where(scale[1].load().float(), scale[2].load().float()))
-  v = mix[token, idx].load() * rms * s + base[idx].load().float()
-  # pre, post
-  sig = (1 + (v * -LOG2E).exp2()).reciprocal()
-  prepost = which.eq(0).where(sig + eps, sig * 2)
-  # comb: softmax over the row, then sinkhorn: normalize the columns then the rows, alternating
-  def rowsum(x:UOp, op=lambda a,b: a+b) -> UOp: return op(y:=op(x, _swizzle_xor(x, 1)), _swizzle_xor(y, 2))
-  def colsum(x:UOp) -> UOp: return (y:=x + _swizzle_xor(x, 4)) + _swizzle_xor(y, 8)
-  e = ((v - rowsum(v, UOp.maximum)) * LOG2E).exp2()
-  c = e * rowsum(e).reciprocal() + eps
-  for it in range(2 * iters - 1): c = c * ((colsum(c) if it % 2 == 0 else rowsum(c)) + eps).reciprocal()
-  valid = lane < count*count + 2*count
-  out_idx = is_comb.where(lane + 2*count, lane - count*count)
-  return out[token, out_idx.valid(valid)].store(is_comb.where(c, prepost)).end(token, lane).sink(
-    arg=KernelInfo(name="hc_coeffs", opts_to_apply=()))
-
-def hc_coeffs(mix:Tensor, sq:Tensor, base:Tensor, scale:Tensor, count:int, iters:int, eps:float, norm_eps:float,
-              features:int, split:bool=False) -> tuple[Tensor, Tensor, Tensor]:
-  """
-  pre (..., count), post (..., count) and comb (..., count, count) of mHC from the (..., (2+count)*count) mix of the streams before their rms norm,
-  and the sums of squares of the streams in (rows, groups)
-  """
-  rows = prod(mix.shape[:-1])
-  out = Tensor.empty(rows, mix.shape[-1], dtype=dtypes.float32, device=mix.device, axis=0 if split else None)
-  fxn = functools.partial(_hc_coeffs_kernel, count=count, iters=iters, eps=eps, norm_eps=norm_eps, features=features)
-  # the weights in their dtype: no kernels to convert them every call
-  out = Tensor.custom_kernel(out, mix.float().reshape(rows, -1).contiguous(), sq, base.contiguous(), scale.contiguous(), fxn=fxn)[0]
-  out = out.reshape(*mix.shape[:-1], -1)
-  return out[..., :count], out[..., count:2*count], out[..., 2*count:].reshape(*mix.shape[:-1], count, count)
-
-@functools.cache
-def _hc_pre_kernel(coef:UOp, hn:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, xs:UOp, norm_w:UOp, count:int, iters:int, eps:float, norm_eps:float,
-                   h_eps:float, features:int) -> UOp:
-  # a workgroup per token: wave 0 the coefficients (as hc_coeffs, pre through LDS), then every thread the mix of the streams of its columns,
-  # their rms (LDS) and the normed mix (the sublayer's input)
-  assert count == 4, "the swizzles assume 4 streams"
-  T, D = cast(tuple[int, int], hn.shape)
-  W = 8
-  token, wave, lane = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
-  groups = sq.shape[1]
-  total = sum((sq[token, (lane + 32*i).valid(lane + 32*i < groups)].load() for i in range((groups+31)//32)), UOp.const(0, dtypes.float))
-  rms = (warp_reduce(total, full_wave=True) * (1/features) + norm_eps).rsqrt()
-  is_comb = lane < count*count
-  idx = is_comb.where(lane + 2*count, (lane - count*count).minimum(2*count-1).maximum(0))
-  which = is_comb.where(2, (lane < count*count + count).where(0, 1))
-  s = which.eq(0).where(scale[0].load().float(), which.eq(1).where(scale[1].load().float(), scale[2].load().float()))
-  v = mix[token, idx].load() * rms * s + base[idx].load().float()
-  sig = (1 + (v * -LOG2E).exp2()).reciprocal()
-  prepost = which.eq(0).where(sig + eps, sig * 2)
-  def rowsum(x:UOp, op=lambda a,b: a+b) -> UOp: return op(y:=op(x, _swizzle_xor(x, 1)), _swizzle_xor(y, 2))
-  def colsum(x:UOp) -> UOp: return (y:=x + _swizzle_xor(x, 4)) + _swizzle_xor(y, 8)
-  e = ((v - rowsum(v, UOp.maximum)) * LOG2E).exp2()
-  c = e * rowsum(e).reciprocal() + eps
-  for it in range(2 * iters - 1): c = c * ((colsum(c) if it % 2 == 0 else rowsum(c)) + eps).reciprocal()
-  valid = lane < count*count + 2*count
-  out_idx = is_comb.where(lane + 2*count, lane - count*count)
-  value = is_comb.where(c, prepost)
-  st_coef = coef[token, out_idx.valid(valid & wave.eq(0))].store(value)
-  lds_pre = UOp.alloc((count,), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  is_pre = wave.eq(0) & (lane >= count*count) & (lane < count*count + count)
-  lds_pre = lds_pre.after(lds_pre[(lane - count*count).valid(is_pre)].store(value).barrier())
-  pre = [lds_pre[i].load() for i in range(count)]
-  # the mix of the streams: every thread its D/(W*32) columns
-  per = D // (W * 32)
-  t = wave * 32 + lane
-  cols = [t * per + i for i in range(per)]
-  h = [functools.reduce(lambda a, b: a + b, [pre[st] * xs[token, st, d].load().float() for st in range(count)]) for d in cols]
-  part = functools.reduce(lambda a, b: a + b, [x * x for x in h])
-  lds_s = UOp.alloc((W,), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  lds_s = lds_s.after(lds_s[wave.valid(lane.eq(0))].store(warp_reduce(part, full_wave=True)).barrier())
-  ss = warp_reduce(lds_s[lane % W].load() * (lane < W).cast(dtypes.float32), full_wave=True)
-  inv = (ss * (1 / D) + h_eps).rsqrt()
-  st_h = [hn[token, d].store(x * inv * norm_w[d].load().float()) for x, d in zip(h, cols)]
-  return UOp.group(st_coef, *st_h).end(token, wave, lane).sink(arg=KernelInfo(name="hc_pre", opts_to_apply=()))
-
-def hc_pre(mix:Tensor, sq:Tensor, base:Tensor, scale:Tensor, xs:Tensor, norm_w:Tensor, count:int, iters:int, eps:float, norm_eps:float,
-           h_eps:float, features:int, split:bool=False, raw:bool=False) -> tuple[Tensor, ...]:
-  """
-  hc_coeffs, then the mix of the (rows, count, D) streams weighed by pre and its rms norm (weight norm_w, eps h_eps): pre, post, comb and the
-  normed mix (rows, D), the sublayer's input
-  """
-  rows, D = prod(mix.shape[:-1]), int(xs.shape[-1])
-  axis = 0 if split else None
-  coef = Tensor.empty(rows, mix.shape[-1], dtype=dtypes.float32, device=mix.device, axis=axis)
-  hn = Tensor.empty(rows, D, dtype=dtypes.float32, device=mix.device, axis=axis)
-  fxn = functools.partial(_hc_pre_kernel, count=count, iters=iters, eps=eps, norm_eps=norm_eps, h_eps=h_eps, features=features)
-  coef, hn = Tensor.custom_kernel(coef, hn, mix.float().reshape(rows, -1).contiguous(), sq, base.contiguous(), scale.contiguous(),
-                                  xs.reshape(rows, count, D).contiguous(), norm_w.contiguous(), fxn=fxn)[:2]
-  coef = coef.reshape(*mix.shape[:-1], -1)
-  # raw: the coefficients as they are (pre, post, comb) and the normed mix
-  if raw: return coef, hn.reshape(*mix.shape[:-1], D)
-  return coef[..., :count], coef[..., count:2*count], coef[..., 2*count:].reshape(*mix.shape[:-1], count, count), hn.reshape(*mix.shape[:-1], D)
-
-@functools.cache
-def _hc_post_quant_kernel(xs_new:UOp, q:UOp, scale:UOp, xsum:UOp, sq:UOp, out:UOp, coef:UOp, xs:UOp, count:int) -> UOp:
-  # the streams after a sublayer, xs_new = out*post + comb^T @ xs (the sum in the order of the generic kernel), and their quantization as
-  # _q8_quantize_wide's (a lane 8 neighboring values of a stream, the same code)
-  T, D = cast(tuple[int, int], out.shape)
-  G = D // 32
-  token, st, g8, lane = (UOp.range(T, 0, AxisType.GLOBAL), UOp.range(count, 1, AxisType.GLOBAL), UOp.range(G // 8, 2, AxisType.GLOBAL),
-                         UOp.range(32, -1, AxisType.WARP))
-  chunk, sub = g8*8 + lane//4, lane % 4
-  ds = [chunk*32 + sub*8 + i for i in range(8)]
-  values = []
-  for d in ds:
-    v = out[token, d].load() * coef[token, count + st].load()
-    for j in range(count): v = v + coef[token, 2*count + j*count + st].load() * xs[token, j, d].load()
-    values.append(v)
-  stores = [xs_new[token, st, d].store(v) for d, v in zip(ds, values)]
-  stores += _q8_wide_stores(values, q, scale, xsum, sq, token, st * G + chunk, sub)
-  return UOp.group(*stores).end(token, st, g8, lane).sink(arg=KernelInfo(name="hc_post_quant", opts_to_apply=()))
-
-def hc_post_quant(out:Tensor, coef:Tensor, xs:Tensor, count:int) -> Tensor:
-  """
-  a few tokens (B=1): the streams (B, T, count, D) after a sublayer's output out (B, T, D) (post and comb of coef), their quantization (with
-  the sums of squares) is q8_quantize's of them (the next hyper connection's)
-  """
-  B, T, D = out.shape
-  rows, G = int(B*T), count*int(D)//32
-  xs_new = Tensor.empty(rows, count, D, dtype=dtypes.float32, device=out.device)
-  q = Tensor.empty(rows, G, 8, dtype=dtypes.uint32, device=out.device)
-  scale, sq = (Tensor.empty(rows, G, dtype=dtypes.float32, device=out.device) for _ in range(2))
-  xsum = Tensor.empty(rows, G, 2, dtype=dtypes.float32, device=out.device)
-  # (the inputs as they are: a custom kernel's inputs are materialized only if they aren't buffers or elementwise ops of them)
-  outs = Tensor.custom_kernel(xs_new, q, scale, xsum, sq, out.reshape(rows, D), coef.reshape(rows, -1), xs.reshape(rows, count, D),
-                              fxn=functools.partial(_hc_post_quant_kernel, count=count))
-  ret = outs[0].reshape(B, T, count, D)
-  q8_quantize_known(ret.flatten(2), rows, count*int(D), True, (outs[1], outs[2], outs[3], outs[4]))
-  return ret
 
 @functools.cache
 def _mla_bmm_kernel(out:UOp, x:UOp, w:UOp) -> UOp:

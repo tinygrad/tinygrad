@@ -7,12 +7,11 @@ from tinygrad.engine.jit import capture_parallel, warmup_wanted, _TinyJit
 from tinygrad.engine import jit as jit_mod
 from tinygrad.engine.realize import warm_worker_pool
 from tinygrad.llm.kernels.amd_glm_dsa import Linear, amd_custom_kernels_supported, find_packed, moe_linear, \
-  hc_coeffs, hc_pre, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
+  q8_linear, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, moe_router, \
   indexer_scores, _wmma_rdna4, pool_keys, pool_index_rows, indexer_decode_index, amd_flash_attention_mla_sparse as flash_attention_mla_sparse, \
-  moe_combine, token_sharded, shard_rows, reduce_scatter, \
-  all_gather, all_gather_q8, sharded_argmax, skinny_matmul, moe_combine_scatter, tables_ready, moe_router_local, hc_post_quant, \
-  indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, q8_quantize_known, mla_bmm, bmm_wmma, weighted_sum, rows_gather, \
+  moe_combine, token_sharded, shard_rows, all_gather, all_gather_q8, sharded_argmax, skinny_matmul, moe_combine_scatter, tables_ready, \
+  moe_router_local, indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, grouped_rows, mla_bmm, bmm_wmma, weighted_sum, rows_gather, \
   nucleus, seq_store, mla_sparse_seq, seq_views, seq_rows, SEQ_BLK, seq_gather, seq_store_grouped, FP8_ROW, FP8_ROPE_ROW, \
   IDX_FP8_ROW, pool_index_shard, Q4_ROW, Q4_ROPE_ROW, reduced_rows
 from tinygrad.llm.kernels.amd_glm_dsa import p2p_check, host_allgather, Q8_0, lists_pad, GEMM_ROWS
@@ -141,7 +140,6 @@ def expert_slice_table(units:list[int], experts:int, slices:int) -> list[list[in
   w = max(len(t) for t in table)
   return [t + [-1]*(w-len(t)) for t in table]
 
-_block_q8:list[tuple[UOp, tuple[Tensor, ...]]|None] = [None]  # a decoding block's output and its quantization (the next block's input's)
 # DSA: the mask of the indexer of the last full layer (the input of the shared layers after it), and the one a block's indexer made
 _idx_mask:list[Tensor|None] = [None, None]
 INLINE_ACT = (1)  # a decoding activation computed in the kernel that quantizes it (not a kernel of its own)
@@ -216,12 +214,6 @@ class SSMConfig:
   gate_lower_bound: float|None = None  # kda: bounded decay gate
 
 @dataclass(frozen=True)
-class HCConfig:  # manifold-constrained hyper-connections: count residual streams, mixed by a doubly stochastic matrix
-  count: int
-  sinkhorn_iters: int
-  eps: float
-
-@dataclass(frozen=True)
 class IndexerConfig:  # select top_k tokens by scoring individual keys or pools of kpool keys
   n_heads: int
   head_dim: int
@@ -273,7 +265,7 @@ class TransformerConfig:
   swiglu_up_bias: float = 0.0
   sliding_window: int = 0
   sliding_window_pattern: int = 0
-  hc: HCConfig|None = None
+  hc: None = None  # (no hyper-connections; glm5next's shared methods read it)
   indexer: IndexerConfig|None = None
   indexer_shared: tuple[bool, ...] = ()
   mtp: bool = False  # the next token prediction layer (MTPBlock)
@@ -301,8 +293,6 @@ def _seq_alone() -> bool: return glm_seq_base._seq_alone()
 # A whole SEQ_BLK block on every device of the 14-GPU target, and a multiple of every supported indexer pool size.
 REGION_ALIGN = 3584
 
-# set while a block's rows are split over the devices (sequence parallel prefill): the sublayers return their partial sums (a leading device
-# axis), the hyper-connection sums each device's rows of them (reduce_scatter) instead of all of them on every device
 def _f8_pack(x:Tensor) -> Tensor:
   """x's rows (last axis) as e4m3 bytes of a scale a row (its absolute max over 448) and the scale's 4 bytes after them: (..., D+4) uint8"""
   sc = x.float().abs().max(-1, keepdim=True).maximum(1e-20) / 448
@@ -508,77 +498,6 @@ def seq_sharded(device:str|tuple[str, ...]|None) -> bool:
   """MLA_SEQ_SHARD: the MLA latent caches split on their positions over the devices (memory for a context 1/devices of a copy on every one)"""
   return isinstance(device, tuple) and len(device) > 1 and amd_custom_kernels_supported(device) and bool((1))
 
-class HyperConnection:
-  def __init__(self, config:TransformerConfig):
-    self.count, self.eps, self.iters, self.norm_eps = (hc:=unwrap(config.hc)).count, hc.eps, hc.sinkhorn_iters, config.norm_eps
-    self.fn = Linear(self.count * config.dim, (2 + self.count) * self.count, bias=False)
-    self.base, self.scale = {"weight": Tensor.zeros((2 + self.count) * self.count)}, {"weight": Tensor.zeros(3)}
-
-  def pre_split(self, xs:Tensor, norm:nn.RMSNorm) -> tuple[Tensor, Tensor, Tensor]:
-    """the streams' rows split over the devices (static rows): the coefficients post, comb and the normed sublayer input of every device's rows"""
-    flat = xs.flatten(2)
-    n, features = int(math.prod(flat.shape[:-1])), int(flat.shape[-1])
-    *xq, sq = q8_quantize(flat, n, features, sumsq=True, split=True)
-    mix = q8_linear(self.fn, flat, xq=tuple(xq), split=True)
-    _, post, comb, hn = hc_pre(mix, sq, self.base["weight"], self.scale["weight"], xs, unwrap(norm.weight), self.count, self.iters, self.eps,
-                               self.norm_eps, norm.eps, features, True)
-    return hn, post, comb
-
-  def post_split(self, out:Tensor, post:Tensor, comb:Tensor, xs:Tensor) -> Tensor:
-    """the sublayer output (every device's rows) added to the streams mixed by comb"""
-    return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs)
-
-  def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], Tensor], norm:Callable[[Tensor], Tensor]|None=None, rows:bool=False) -> Tensor:
-    """
-    mHC: the sublayer sees the norm of a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed
-    by comb. rows: the streams have static padded rows, so do the sublayer's input and output.
-    rows split over the devices (sequence parallel): every device computes the coefficients and mixes of its rows, the sublayer sees all
-    of them (all_gather) and returns its partial sums, every device sums its rows of them (reduce_scatter)
-    """
-    base, scale = self.base["weight"], self.scale["weight"]
-    if norm is None: norm = _identity
-    if amd_custom_kernels_supported(xs.device) and self.fn.ggml_type in QUANT_SIZES:
-      # a symbolic token count runs the streams padded to the max size: static shapes, the sublayer sees the real tokens
-      T = xs.shape[1]
-      if not isinstance(xs.numel(), int): xs = xs.pad_to(xs.max_shape).contiguous()
-      # fn(rmsnorm(x)) is fn(x) scaled by the rms: the quantization of x has its sums of squares, one kernel for the coefficients and sinkhorn
-      flat = xs.flatten(2)
-      n, features = int(math.prod(flat.shape[:-1])), int(flat.shape[-1])
-      split = token_sharded(xs)  # sequence parallel: the rows of the streams are split over the devices
-      *xq, sq = q8_quantize(flat, n, features, sumsq=True, split=split)
-      mix = q8_linear(self.fn, flat, xq=tuple(xq), split=split)
-      # a few tokens: the streams after the sublayer and their quantization (the next one's) in a kernel
-      if isinstance(norm, nn.RMSNorm) and norm.weight is not None and not split and not rows and xs.shape[0] == 1 and (1):
-        coef, hn = hc_pre(mix, sq, base, scale, xs, norm.weight, self.count, self.iters, self.eps, self.norm_eps, norm.eps, features, raw=True)
-        return hc_post_quant(sublayer(hn[:, :T]), coef, xs, self.count)
-      if isinstance(norm, nn.RMSNorm) and norm.weight is not None and (1):
-        # one kernel for the coefficients, the mix of the streams and its norm
-        pre, post, comb, hn = hc_pre(mix, sq, base, scale, xs, norm.weight, self.count, self.iters, self.eps, self.norm_eps, norm.eps, features,
-                                     split)
-      else:
-        pre, post, comb = hc_coeffs(mix, sq, base, scale, self.count, self.iters, self.eps, self.norm_eps, features, split)
-        hn = norm((xs * pre.unsqueeze(-1)).sum(2))
-      if split:
-        _partial_out[0], _sp_rows[0] = True, hn
-        try: part = sublayer(all_gather(hn, 1, dtypes.half).float())
-        finally: _partial_out[0], _sp_rows[0] = False, None
-        out = reduce_scatter(part, 1) if part.ndim == hn.ndim + 1 else shard_rows(part, 1)
-      else: out = sublayer(hn if rows else hn[:, :T])
-      if out.shape[1] is not xs.shape[1]: out = out.pad_to((out.shape[0], xs.shape[1], out.shape[2]))
-      ret = out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs)
-      # (a few tokens: materialized, the next sublayer's kernels read it, one buffer for them)
-      return ret if rows else ret[:, :T].contiguous()
-    else:
-      flat = xs.flatten(2)
-      mix = self.fn(flat.rmsnorm(eps=self.norm_eps))
-      pre  = (mix[..., :self.count] * scale[0] + base[:self.count]).sigmoid() + self.eps
-      post = (mix[..., self.count:2*self.count] * scale[1] + base[self.count:2*self.count]).sigmoid() * 2
-      comb = (mix[..., 2*self.count:] * scale[2] + base[2*self.count:]).reshape(*mix.shape[:-1], self.count, self.count).softmax(-1) + self.eps
-      # sinkhorn: normalize the columns then the rows, alternating, to make comb doubly stochastic
-      for i in range(2 * self.iters - 1): comb = comb / (comb.sum(-1 if i % 2 else -2, keepdim=True) + self.eps)
-    out = sublayer(norm((xs * pre.unsqueeze(-1)).sum(2)))
-    return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs)
-
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
     self.config = config
@@ -586,7 +505,6 @@ class FFNBlock:
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(config.dim, config.norm_eps)
     self.ffn_norm    = nn.RMSNorm(config.dim, config.norm_eps)
-    if config.hc is not None: self.hc_attn, self.hc_ffn = HyperConnection(config), HyperConnection(config)
 
     # --- feed-forward (MoE or dense) -------------------------------------
     if config.num_experts > 0:
@@ -757,41 +675,19 @@ class FFNBlock:
   def _attention(self, x:Tensor, start_pos:int|UOp, T:int|UOp|None=None) -> Tensor: raise NotImplementedError
 
   def __call__(self, x: Tensor, start_pos: int|UOp, T:int|UOp|None=None):
-    # T (hyper-connections): x has static padded rows of which the first T are the tokens, the output too
     self._init_state(x)
     # we pass in the weights implicitly so we unpack the GGUF on the fly
-    # (decoding: the output's quantization made by its last kernel is returned too, the next block's input's: BLOCK_Q8_OUT)
-    q8_out = T is None and self.config.hc is not None and bool((1))
-    # (the block before's output's quantization, if x is that output: its function's arguments, the quantization of x in it)
-    xq = _block_q8[0][1] if q8_out and _block_q8[0] is not None and _block_q8[0][0] is x.uop else ()
     # (DSA: the indexer's mask of the last full layer, the shared layers' after it)
-    mask_in = _idx_mask[0] if self.config.indexer_shared and self.config.hc is None and getattr(self, "indexer", None) is None else None
+    mask_in = _idx_mask[0] if self.config.indexer_shared and getattr(self, "indexer", None) is None else None
     @function(precompile=True, allow_implicit=True)
-    def _run(x:Tensor, start_pos:int|UOp, T:int|UOp|None, mask_in:Tensor|None, *xq:Tensor):
+    def _run(x:Tensor, start_pos:int|UOp, T:int|UOp|None, mask_in:Tensor|None):
       _idx_mask[0], _idx_mask[1] = mask_in, None
-      if xq:
-        fx = x.flatten(2)
-        q8_quantize_known(fx, int(prod(fx.shape[:-1])), int(fx.shape[-1]), True, tuple(xq))
-      if self.config.hc is not None:
-        xs = self.hc_attn(x, lambda h: self._attention(h, start_pos, *(() if T is None else (T,))), self.attn_norm, rows=T is not None)
-        _ffn_rows[0] = T
-        try:
-          out = self.hc_ffn(xs, self._feed_forward, self.ffn_norm, rows=T is not None)
-          if not q8_out: return out.contiguous()
-          flat = out.flatten(2)
-          return (out.contiguous(), *q8_quantize(flat, int(prod(flat.shape[:-1])), int(flat.shape[-1]), sumsq=True))
-        finally: _ffn_rows[0] = None
       h =     x + self._attention(self.attn_norm(x), start_pos, *(() if T is None else (T,)))
       out = (h + self._feed_forward(self.ffn_norm(h))).contiguous()
       return (out, m.contiguous()) if (m:=_idx_mask[1]) is not None else out
-    ret = _run(x, start_pos, T, mask_in, *xq)
-    if not q8_out:
-      if isinstance(ret, tuple):
-        ret, _idx_mask[0] = ret
-      return ret
-    out, *q = ret
-    _block_q8[0] = (out.uop, tuple(q))
-    return out
+    ret = _run(x, start_pos, T, mask_in)
+    if isinstance(ret, tuple): ret, _idx_mask[0] = ret
+    return ret
 
   def _sp_sub(self, sub:str, hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
     """sequence parallel sublayer: hn (1, R, D) split on its rows, gathered as q8 groups, the sublayer's partial sums reduce scattered to the rows"""
@@ -829,69 +725,6 @@ class FFNBlock:
     outs = ret if isinstance(ret, tuple) else (ret,)
     if len(outs) > 1: _idx_mask[0] = outs[1]
     return outs[0]
-
-  # the phases of a sublayer on a micro batch (see micro_batch_blocks): functions, scheduled once
-  def _phase_pre(self, hc:HyperConnection, norm:nn.RMSNorm, xs:Tensor) -> tuple[Tensor, Tensor, Tensor]:
-    @function(precompile=True, allow_implicit=True)
-    def _pre(xs:Tensor) -> tuple[Tensor, Tensor, Tensor]:
-      hn, post, comb = hc.pre_split(xs, norm)
-      return hn.contiguous(), post.contiguous(), comb.contiguous()
-    return _pre(xs)
-  def _phase_sub(self, sub:str, hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
-    @function(precompile=True, allow_implicit=True)
-    def _sub(hn:Tensor, start_pos:int|UOp, T:int|UOp) -> Tensor:
-      # (AG_Q8: sent as int8 groups of 32, as the quantized layers would make them)
-      x = all_gather_q8(hn, 1) if (1) and hn.shape[-1] % 256 == 0 else all_gather(hn, 1, dtypes.half)
-      _partial_out[0], _sp_rows[0] = True, hn
-      # (in half: the layers' kernels read it so, a cast to float and back is two copies)
-      xin = x if (1) else x.float()
-      if sub != "attn": _ffn_rows[0] = T
-      try: out = self._attention(xin, start_pos, T) if sub == "attn" else self._feed_forward(xin)
-      finally: _partial_out[0], _sp_rows[0], _ffn_rows[0] = False, None, None
-      # partial sums, or the whole output
-      # (summed and split already: moe_combine_scatter)
-      done = out.ndim == hn.ndim and token_sharded(out)
-      return (out if done else reduce_scatter(out, 1) if out.ndim == hn.ndim + 1 else shard_rows(out, 1)).contiguous()
-    return _sub(hn, start_pos, T)
-  def _phase_post(self, hc:HyperConnection, out:Tensor, post:Tensor, comb:Tensor, xs:Tensor) -> Tensor:
-    @function(precompile=True, allow_implicit=True)
-    def _post(out:Tensor, post:Tensor, comb:Tensor, xs:Tensor) -> Tensor:
-      # (HC_STREAMS_HALF: the streams kept in half, their kernels read half the bytes)
-      ret = hc.post_split(out, post, comb, xs)
-      return (ret.cast(dtypes.half) if (1) else ret).contiguous()
-    return _post(out, post, comb, xs)
-
-def _on_queue(ts:tuple[Tensor, ...], queue:str) -> tuple[Tensor, ...]:
-  """the outputs of a function call, its kernels on the compute queue `queue` (its copies on the copy queue of that index)"""
-  def call_of(u:UOp) -> UOp: return u.src[1] if u.op is Ops.AFTER and u.src[1].op is Ops.CALL else call_of(u.src[0])
-  call = call_of(ts[0].uop)
-  def requeue(u:UOp) -> UOp:
-    if u.op is Ops.AFTER and u.src[1] is call: return u.replace(src=(u.src[0], call.replace(arg=replace(call.arg, queue=queue)), *u.src[2:]))
-    return u.replace(src=(requeue(u.src[0]), *u.src[1:]))
-  return tuple(Tensor(requeue(t.uop)) for t in ts)
-
-def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list) -> list[Tensor]:
-  """
-  the blocks on micro batches of rows (sequence parallel streams, a batch starts at the end of the tokens before it). a sublayer is three
-  phases: the coefficients and its normed input (then gathered), its compute (its partial sums then scattered), its output added to the streams.
-  a sublayer of a batch runs after the one of the batch before it: it reads the state and the cache it writes (implicit, not graph inputs)
-  """
-  def after(x:Tensor, dep:Tensor|None) -> Tensor: return x if dep is None else Tensor(x.uop.after(*dep.uop.src[1:]))
-  def queued(i:int, *outs:Tensor) -> tuple[Tensor, ...]: return _on_queue(outs, f"COMPUTE:{i}") if i and (1) else outs
-  subs = [(block, hc, norm, sub) for block in blocks for hc, norm, sub in ((block.hc_attn, block.attn_norm, "attn"),
-                                                                           (block.hc_ffn, block.ffn_norm, "ffn"))]
-  for block in blocks: block._init_state(xs[0])
-  done:list[Tensor] = []
-  for i in range(len(xs)):
-    for k, (block, hc, norm, sub) in enumerate(subs):
-      if k == 0: hn, post, comb = queued(i, *block._phase_pre(hc, norm, xs[i]))
-      # (the batch before it ran this sublayer: its output's call, sublayer k of every batch is kept in done)
-      out = queued(i, block._phase_sub(sub, after(hn, done[k] if i else None), starts[i], ts[i]))[0]
-      if i == 0: done.append(out)
-      else: done[k] = out
-      xs[i] = queued(i, block._phase_post(hc, out, post, comb, xs[i]))[0]
-      if k + 1 < len(subs): hn, post, comb = queued(i, *subs[k+1][0]._phase_pre(subs[k+1][1], subs[k+1][2], xs[i]))
-  return xs
 
 class Indexer:
   shard = 0  # (SEQ_IDX_SHARD: the devices the pooled keys are split over)
@@ -1522,7 +1355,7 @@ class MTPBlock(MLATransformerBlock):
   next token, a transformer block (without hyper-connections) predicts the token after it (with the output head)
   """
   def __init__(self, config:TransformerConfig):
-    super().__init__(replace(config, hc=None))
+    super().__init__(config)
     self.eh_proj = Linear(2 * config.dim, config.dim, bias=False)
     self.enorm, self.hnorm = nn.RMSNorm(config.dim, config.norm_eps), nn.RMSNorm(config.dim, config.norm_eps)
     self.shared_head_norm = nn.RMSNorm(config.dim, config.norm_eps)
@@ -1576,32 +1409,7 @@ class Transformer(GLMSeqDriver):
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     _idx_mask[0] = None
     x = emb = self._embed(tokens)  # (B, T, D)
-    if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
-    # a symbolic chunk with hyper-connections runs every block on static padded rows (their real count is T), sliced at the end
-    if hc is not None and not isinstance(T:=x.shape[1], int) and amd_custom_kernels_supported(x.device) and \
-       all(isinstance(b, MLATransformerBlock) for b in self.blk):
-      x = x.pad_to(x.max_shape).contiguous()
-      R = int(x.shape[1])
-      # sequence parallel: every device keeps the streams of its rows, the blocks gather and scatter the sublayers' inputs and outputs
-      # micro batches (on queues of their own, AM_MEC_PIPES: the copies of one run with the kernels of the other)
-      mb = (1)
-      if (sp:=self.sequence_parallel(R)) and (mb > 1 or (1)) and self.sequence_parallel(R // mb) and R % mb == 0:
-        # the blocks in phases (micro_batch_blocks), on micro batches of rows if MICRO_BATCHES > 1 (the copies of one overlap the kernels of
-        # the next). a batch starts at the end of the tokens before it (all padding if there are none): its states follow theirs
-        n, xs, ts, starts = R // mb, [], [], []
-        for i in range(mb):
-          xs.append(shard_rows(x[:, i*n:(i+1)*n].contiguous(), 1))
-          ts.append((T - i*n).maximum(0).minimum(n))
-          starts.append(start_pos + (T.minimum(i*n) if i else 0))
-        xs = micro_batch_blocks(self.blk, xs, starts, ts)
-        x = Tensor.cat(*[all_gather(xi.mean(2), 1) for xi in xs], dim=1)
-      else:
-        if sp: x = shard_rows(x, 1)
-        for block in self.blk: x = block(x, start_pos, T)
-        x = all_gather(x.mean(2), 1) if sp else x.mean(2)
-      if self.config.spec_drafts: x = self._mtp_prefill(emb, x, cast(UOp, start_pos), T, sp=bool(sp))
-      x = x[:, :T]
-    elif self.glm_sp(x):
+    if self.glm_sp(x):
       # (sequence parallel prefill: every device the residual of its rows, the sublayers' inputs gathered, their outputs reduce scattered)
       T, _idx_mask[0] = x.shape[1], None
       rs = shard_rows(x.pad_to(x.max_shape).contiguous(), 1)
@@ -1617,7 +1425,6 @@ class Transformer(GLMSeqDriver):
         # (a prompt chunk: the MTP layer's caches of it, on the model's output padded to the chunk's rows (static), T of them real)
         _idx_mask[0] = None
         self._mtp_prefill(emb, x.pad_to(x.max_shape).contiguous(), cast(UOp, start_pos), T)
-    if hc is not None and x.ndim == 4: x = x.mean(2)
     return self._tail(x, tokens, start_pos, temperature)
 
   def _tail(self, x:Tensor, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
@@ -1638,7 +1445,7 @@ class Transformer(GLMSeqDriver):
     return [(b[i], b[i+1]) for i in range(P)]
   def _sp_tokens(self, tokens:Tensor) -> bool:
     devs = self.token_embd.weight.device
-    return self.config.hc is None and isinstance(devs, tuple) and not isinstance(T:=tokens.shape[1], int) and \
+    return isinstance(devs, tuple) and not isinstance(T:=tokens.shape[1], int) and \
       int(T.vmax) % (16*len(devs)) == 0 and amd_custom_kernels_supported(devs) and bool((1)) and \
       len(self._part_ranges()) > 1
   def _has_picks(self, b:int) -> bool: return any(getattr(blk, "indexer", None) is not None for blk in self.blk[:b])
@@ -1734,7 +1541,7 @@ class Transformer(GLMSeqDriver):
     k = self.config.spec_drafts
     self._spec_row0_jit(UOp.variable("spec_row", 0, 2*k+1).bind(row), UOp.variable("spec_keep", 0, 1).bind(int(row != 0)))
 
-  def _mtp_prefill(self, emb:Tensor, x:Tensor, start_pos:UOp, T:UOp, sp:bool=False) -> Tensor:
+  def _mtp_prefill(self, emb:Tensor, x:Tensor, start_pos:UOp, T:UOp) -> Tensor:
     """
     the MTP layer on a prompt chunk (for its caches): emb (1, T, D) the embeddings of its tokens, x (1, rows, D) the model's (padded) output.
     the hidden state of the position before the chunk is row 0 of _spec_h, the one of its last token is written there. returns x
@@ -1743,12 +1550,7 @@ class Transformer(GLMSeqDriver):
     emb, carry = emb.pad_to((1, x.shape[1], emb.shape[-1])), self._spec_h[0:1].unsqueeze(0).contiguous()
     # the MTP layer reads the carry before it's written (the schedule orders an assign after the reads). realized with the call's output
     inp = self.mtp.enorm(emb).cat(self.mtp.hnorm(carry.cat(hn[:, :-1], dim=1)), dim=-1)
-    if sp and (1):
-      # sequence parallel (as the blocks): every device its rows (the projection of the input too), the sublayers on all of them
-      mtp, h = self.mtp, q8_linear(self.mtp.eh_proj, shard_rows(inp.contiguous(), 1), split=True)
-      h = h + mtp._phase_sub("attn", mtp.attn_norm(h), start_pos, T)
-      m = h + mtp._phase_sub("ffn", mtp.ffn_norm(h), start_pos, T)
-    else: m = self.mtp(self.mtp.eh_proj(inp), start_pos, T)
+    m = self.mtp(self.mtp.eh_proj(inp), start_pos, T)
     # (a column of every row: a row split over the devices isn't sliced)
     effects = [m[:, :, :1].contiguous(), self._spec_h[0:1].assign(hn[0].shrink(((T-1, T), None)))]
     if self._effects is None: Tensor.realize(*effects)
@@ -1772,10 +1574,8 @@ class Transformer(GLMSeqDriver):
       if i < k-1: m = self.mtp.predict(self.token_embd(drafts[-1].to(devs)).float(), m, chain[i])
     # verify: the model on the token at start_pos and the drafts, the hidden states of all of them are kept
     x = self.token_embd(y.shrink((None, (j, j+1))).cat(*drafts, dim=1).contiguous()).float()
-    if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     _idx_mask[0] = None
     for block in self.blk: x = block(x, start_pos)
-    if hc is not None: x = x.mean(2)
     tok = self._sample(self._spec_h.shrink(((par*(k+1), (par+1)*(k+1)), None)).assign(self.output_norm(x)[0].float()), temperature, y.device)
     q8_quantize_cache_clear()  # don't keep the graph alive
     out = tok.reshape(1, k+1).cat(*drafts, dim=1).cast(dtypes.int32)
@@ -2259,9 +2059,7 @@ class Transformer(GLMSeqDriver):
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
 
-    hc = HCConfig(kv[f'{arch}.hyper_connection.count'], kv[f'{arch}.hyper_connection.sinkhorn_iterations'],
-                  kv[f'{arch}.hyper_connection.epsilon']) if f'{arch}.hyper_connection.count' in kv else None
-    if hc is not None: state_dict = {k.replace('.hc_attn_', '.hc_attn.').replace('.hc_ffn_', '.hc_ffn.'):v for k,v in state_dict.items()}
+    assert f'{arch}.hyper_connection.count' not in kv, "hyper-connections: not supported (GLM-5.3 has none)"
 
     indexer = IndexerConfig(kv[f'{arch}.attention.indexer.head_count'], kv[f'{arch}.attention.indexer.key_length'],
                             kv[f'{arch}.attention.indexer.top_k'], kv[f'{arch}.attention.indexer.kpool'],
@@ -2342,7 +2140,7 @@ class Transformer(GLMSeqDriver):
       swiglu_alpha=1.702 if arch == 'gpt-oss' else 1.0, swiglu_limit=7.0 if arch == 'gpt-oss' else kv.get(f'{arch}.swiglu_clamp_exp', [None])[0],
       swiglu_up_bias=1.0 if arch == 'gpt-oss' else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
-      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer, mtp=mtp,
+      sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), indexer=indexer, mtp=mtp,
       spec_drafts=max([spec, *(d for _, d in by_size)]) if mtp else 0, spec_by_size=by_size if mtp else (), rope_interleave=arch == 'glm-dsa',
       indexer_shared=indexer_shared,
       expert_units=expert_units,
@@ -2445,7 +2243,7 @@ class Transformer(GLMSeqDriver):
   def glm_sp(self, x:Tensor) -> bool:
     """sequence parallel prefill of a model without hyper-connections (GLM_SP): a chunk of a symbolic size, whole tiles of 16 rows a device"""
     devs = x.device
-    return self.config.hc is None and isinstance(devs, tuple) and not isinstance(x.shape[1], int) and \
+    return isinstance(devs, tuple) and not isinstance(x.shape[1], int) and \
       int(x.max_shape[1]) % (16*len(devs)) == 0 and amd_custom_kernels_supported(devs) and bool((1))
 
   def prefill_chunks(self, chunk_size:int|None=None) -> tuple[int, ...]:
@@ -2463,8 +2261,7 @@ class Transformer(GLMSeqDriver):
                                                           4096) if fast else ())]
     # (PREFILL_SIZES: more sizes, less padding of a prompt's last piece (the turns of agents: a few hundred tokens), a jit each)
     if fast and (more:=getenv("PREFILL_SIZES", "")): sizes += [min(chunk_size, int(n)) for n in str(more).split(",")]
-    if fast and (devs:=self.token_embd.weight.device) and isinstance(devs, tuple) and (self.config.hc is not None and (1) or
-                                                                                     self.config.hc is None and (1)):
+    if fast and (devs:=self.token_embd.weight.device) and isinstance(devs, tuple):
       # whole tiles of 16 rows on every device, the kernels of the whole chunk on tiles of 64
       tile = math.lcm(16*len(devs), 64)
       def tiled(n:int) -> int: return min(max(tile, round(n / tile) * tile), self.max_context // tile * tile or tile)
