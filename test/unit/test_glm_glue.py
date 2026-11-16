@@ -28,6 +28,7 @@ class TestMlaQCat(unittest.TestCase):
   def test_one_device(self): self._check(None)
   def test_sharded_heads(self): self._check(tuple(f"{Device.DEFAULT}:{i}" for i in range(2)))
 
+@unittest.skipIf(Device.DEFAULT == "NULL", "compares computed bits: NULL computes no values (run with DEV=CPU)")
 class TestHalfRowsG(unittest.TestCase):
   # (HALF_ROWS_G: the row max in G parts, then of the parts: the same scales and halves as one reduce, rows past HALF_ROWS_MAX included)
   def test_same_bits(self):
