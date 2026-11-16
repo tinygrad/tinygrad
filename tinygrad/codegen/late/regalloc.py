@@ -4,28 +4,28 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.x86 import ISARenderer, Register, rdef, regs, with_regs, LinearContext
 from typing import Any
 
-PSEUDO_OPS = {Ops.CONST, Ops.CAST, Ops.BITCAST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.STACK}
+# ops that participate in register allocation
+REGALLOC_OPS = {Ops.INS, Ops.BUFFER, Ops.RANGE, Ops.END}
 
 class LinearScanRegallocContext:
   # returns the uop that defines the virtual register
   def vdef(self, v:Register) -> UOp: return self.uops[self.live_range[v][0]]
   def __init__(self, ctx:LinearContext, uops:list[UOp], ren:ISARenderer):
-    self.uops = uops
+    self.uops = uops = [u for u in uops if u.op in REGALLOC_OPS]
     self.ren = ren
     self.idx = itertools.count()
 
     # compute live ranges
     self.live_range: dict[Register, list[int]] = {}
     lr = self.live_range
-    loops: dict[int, int] = {} # the interval of each loop, from its RANGE to the last non pseudo uop that reads that RANGE
+    loops: dict[int, int] = {} # the interval of each loop, from its RANGE to the last uop that reads that RANGE
     for idx,u in reversed(list(enumerate(uops))):
-      if u.op in PSEUDO_OPS: continue
       defs = regs(u)
       for v in defs + tuple(rdef(s) for s in dedup(u.src)):
         if isinstance(v, Register): lr.setdefault(v, []).insert(0, idx)
       for v in defs:
         if (n:=max((e for s,e in loops.items() if s <= lr[v][-1] < e), default=None)): lr[v].append(n)
-      if u.op is Ops.RANGE: loops[idx] = max(j for j,x in enumerate(uops) if u in x.src and x.op not in PSEUDO_OPS)
+      if u.op is Ops.RANGE: loops[idx] = max(j for j,x in enumerate(uops) if u in x.src)
 
     # allocate registers
     self.spills: dict[Register, Any] = {} # mapping from virtual to arbitrary spill slot
@@ -51,7 +51,6 @@ class LinearScanRegallocContext:
       return r
 
     for i,u in enumerate(uops):
-      if u.op in PSEUDO_OPS: continue
       # allocate uses
       for s in u.src:
         if not isinstance(v:=rdef(s), Register): continue
@@ -97,7 +96,6 @@ class LinearScanRegallocContext:
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i = next(ctx.idx)
-  if x.op in PSEUDO_OPS: return None
   nsrc = []
   def retag(x:UOp, r:Register) -> UOp:
     return x.replace(src=(retag(x.src[0],r),*x.src[1:])) if x.op in {Ops.AFTER, Ops.BITCAST} else with_regs(x, (r,))
@@ -119,5 +117,5 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.BUFFER, Ops.RANGE, Ops.END} | PSEUDO_OPS, name="x"), regalloc_rewrite),
+  (UPat(REGALLOC_OPS, name="x"), regalloc_rewrite),
 ])
