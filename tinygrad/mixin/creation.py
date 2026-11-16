@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Callable, Self
 from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, dtypes, to_dtype
-from tinygrad.helpers import argfix
+from tinygrad.helpers import argfix, canonicalize_device
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.movement import MovementMixin
 
@@ -33,7 +33,6 @@ class CreationMixin(DTypeMixin, MovementMixin):
     ```
     """
     from tinygrad.uop.ops import UOp
-    from tinygrad.device import canonicalize_device
     dt = to_dtype(dtype) if dtype is not None else dtypes.default_float
     if dt in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dt}")
     new_shape = argfix(*shape)

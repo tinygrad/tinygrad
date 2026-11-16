@@ -4,7 +4,8 @@ from tinygrad.runtime.autogen import opencl as cl, libc
 from tinygrad.runtime.support import c
 from tinygrad.helpers import to_char_p_p, from_mv, cpu_profile, OSX, DEBUG, suppress_finalizing, unwrap, round_up, is_image_shape
 from tinygrad.renderer.cstyle import OpenCLRenderer
-from tinygrad.device import BufferStorage, BufferSpec, HostAllocator, Compiled, Compiler, CompileError, MMIOInterface
+from tinygrad.device import BufferStorage, BufferSpec, HostAllocator, Compiled, MMIOInterface
+from tinygrad.renderer import Compiler, CompileError, TinyELF
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_kernel_args
@@ -54,7 +55,7 @@ class CLQueue(HWQueue):
   def exec(self, call:UOp, prg:UOp):
     args, images = get_call_kernel_args(call, prg, self.devs), []
     kernel = (p:=make_program(prg, 8, self.devs[0])).after(p.store(prg)).bitcast(dtypes.u64).index(0).load()
-    for i, (_, _, dt, shape) in enumerate(prg.to_elf().signature):
+    for i, (_, _, dt, shape) in enumerate(TinyELF.from_program(prg).signature):
       if is_image_shape(shape): # [format][desc][errcode]
         desc = (cl.CL_MEM_OBJECT_IMAGE2D, shape[1], shape[0], 0, 0, round_up(shape[1], 256 if OSX else 1) * 4 * dt.itemsize, 0, 0, args[i])
         end = self.q64(cl.CL_RGBA | {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize] << 32, *desc, 0)

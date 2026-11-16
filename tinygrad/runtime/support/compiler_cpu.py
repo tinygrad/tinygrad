@@ -1,5 +1,5 @@
 import subprocess, tempfile, pathlib
-from tinygrad.device import Compiler, CompileError
+from tinygrad.renderer import Compiler, CompileError
 from tinygrad.helpers import getenv, capstone_flatdump, cpu_objdump
 
 class ClangCompiler(Compiler):

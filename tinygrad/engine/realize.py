@@ -8,7 +8,7 @@ from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, U
 from tinygrad.uop.ops import pm_flatten_linear
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS
 from tinygrad.dtype import AddrSpace
-from tinygrad.renderer import Estimates, Renderer
+from tinygrad.renderer import Estimates, Renderer, TinyELF
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
@@ -108,7 +108,7 @@ def get_runtime(device:str, ast:UOp, cache=True):
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
     links = {call.body.src[0].arg.function_name:get_runtime(device, call.body, cache)
              for call in ast.src[1].src if call.op is Ops.CALL and call.body.op is Ops.PROGRAM}
-    runtime = Device[device].runtime(ast.to_elf(), links=links)
+    runtime = Device[device].runtime(TinyELF.from_program(ast), links=links)
     if cache: runtime_cache[key] = runtime
   return runtime
 

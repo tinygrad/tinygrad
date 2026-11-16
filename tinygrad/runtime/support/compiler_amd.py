@@ -8,7 +8,7 @@ try:
     import tinygrad.runtime.autogen.comgr_3 as comgr # type: ignore[no-redef]
     assert comgr.AMD_COMGR_LANGUAGE_HIP == 3
 except AttributeError: pass  # ignore if ROCm isn't installed
-from tinygrad.device import Compiler, CompileError
+from tinygrad.renderer import Compiler, CompileError
 from tinygrad.runtime.support import c
 
 def check(status):

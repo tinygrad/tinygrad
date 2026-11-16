@@ -1,5 +1,6 @@
 import functools, struct
-from tinygrad.device import BufferStorage, Compiled, Allocator, BufferSpec, Program, TinyELF
+from tinygrad.device import BufferStorage, Compiled, Allocator, BufferSpec, Program
+from tinygrad.renderer import TinyELF
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up, suppress_finalizing, getenv, to_mv

@@ -144,6 +144,15 @@ class TestCallSchedule(unittest.TestCase):
     self.assertEqual(y.gradient(x)[0].item(), 3.0)
     self.assertEqual(y.item(), 6.0)
 
+  def test_shared_buffer_across_call_bodies(self):
+    # the buffer read by one call and written by another is one EXTERN, so the read runs before the write
+    shared, x = Tensor([2.]).realize(), Tensor([10.]).realize()
+    p = UOp.param(0, dtypes.float, (1,), device=x.device)
+    read = Tensor((p * shared.uop).call_with_output(((x + 1).contiguous() + 1).uop))
+    write = Tensor(shared.uop.after(shared.uop.store(5)).call_with_output())
+    Tensor.realize(read, write)
+    self.assertEqual(read.tolist(), [24.])
+
   def test_bound_var_in_body_not_rebound_by_slot(self):
     # b is exported from the body as an EXTERN, its slot isn't a call position: it must not be rebound to the arg at slot 1 (a)
     x = Tensor([10.]).realize()

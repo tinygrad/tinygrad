@@ -1,5 +1,5 @@
 import ctypes
-from tinygrad.device import Compiler, CompileError
+from tinygrad.renderer import Compiler, CompileError
 from tinygrad.helpers import getenv, cpu_objdump, amdgpu_disassemble, unwrap, DEBUG
 from tinygrad.runtime.autogen import llvm
 

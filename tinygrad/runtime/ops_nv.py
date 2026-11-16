@@ -8,7 +8,8 @@ from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
 from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices, PCIIfaceBase, MAP_FIXED
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_arg_uops, get_call_kernel_args, lower_and_compile, run_linear
-from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device, TinyELF
+from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device
+from tinygrad.renderer import TinyELF
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, PROFILE, ContextVar, VIZ, ProfileEvent, unwrap
 from tinygrad.renderer.ptx import PTXRenderer
@@ -309,7 +310,7 @@ class NVProgramData:
       start_off += (sz if typ == 0x4 else 0) + 4
 
 def nv_build_program(dev:NVDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[NVProgramData, UOp]:
-  data = NVProgramData(dev, prg.to_elf())
+  data = NVProgramData(dev, TinyELF.from_program(prg))
   buf = make_program(prg, len(data.image), devs[0])
   rows = [(off, ((buf.getaddr(devs) + sym) >> sh).ccast(dt)) for off, sym, dt, sh in data.relocs]
   return data, patch(buf, rows, data.image)

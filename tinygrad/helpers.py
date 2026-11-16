@@ -50,6 +50,15 @@ def ansilen(s:str): return len(ansistrip(s))
 def ansipad(s:str, w:int): return s+' '*max(w-ansilen(s), 0)
 def make_tuple(x:int|Sequence[int], cnt:int) -> tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else tuple(x)
 def to_tuple(x:T|tuple[T, ...]) -> tuple[T, ...]: return x if isinstance(x, tuple) else (x,)
+def is_disk_device(device:str|tuple[str, ...]) -> bool: return any(d.split(":", 1)[0].upper() in ("DISK", "NVME") for d in to_tuple(device))
+@functools.cache
+def canonicalize_device_name(device:str) -> str: return re.sub(r":0$", "", (d:=device.split(":", 1)[0].upper()) + device[len(d):])
+def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
+  if device is None:
+    from tinygrad.device import Device  # the default device is selected by opening the devices
+    device = Device.DEFAULT
+  if not isinstance(device, (tuple, list)): return canonicalize_device_name(device)
+  return canonical[0] if len(canonical:=tuple(canonicalize_device_name(d) for d in device)) == 1 else canonical
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fully_flatten(l):
   if not (hasattr(l, "__len__") and hasattr(l, "__getitem__")) or isinstance(l, str): return [l]

@@ -6,27 +6,26 @@ from typing import Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod
-from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING
+from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
 from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.mixin.rand import RandMixin
 # NOTE: engine.realize imports codegen, which has to be imported before schedule (they import each other)
 from tinygrad.engine.realize import run_linear, capturing
 from tinygrad.schedule import create_linear, contiguous_mops_to_view
-from tinygrad.device import Buffer, canonicalize_device, is_disk_device
+from tinygrad.device import Buffer
 
 # **** export: the stores of a tensor graph as a function with no runtime state. storage becomes EXTERN(slot), bound Variables lose
 # their value and ALLOCs get canonical slots. ctx.externs is what's mapped back
 
 @dataclass
 class ExportCtx:
-  externs: list[UOp] = field(default_factory=list)
+  externs: dict[UOp, UOp] = field(default_factory=dict)
   allocs: dict[UOp, UOp] = field(default_factory=dict)
 
 def to_extern(ctx:ExportCtx, x:UOp) -> UOp|None:
   # realized storage and bound Variables are runtime state
   if not (x.is_bound_var or (x.op is Ops.BUFFER and x.addrspace is AddrSpace.GLOBAL)): return None
-  ctx.externs.append(x)
-  return x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=len(ctx.externs)-1, buffer=None, name=None, val=None))
+  return ctx.externs.setdefault(x, x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=len(ctx.externs), buffer=None, name=None, val=None)))
 
 # ALLOCs get canonical scope-local id slots so structurally identical calls hash identically for the schedule cache
 # (fresh slots are all positive from the global counter; negative slots are already canonical)
@@ -37,7 +36,7 @@ def canonicalize_alloc(ctx:ExportCtx, b:UOp) -> UOp|None:
 pm_export: PatternMatcher = PatternMatcher([
   (UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern),
   (UPat(Ops.ALLOC, name="b"), canonicalize_alloc),
-  # a call body is its own scope for ALLOC slots, it shares the EXTERNs
+  # a call body is its own scope for ALLOC slots, the EXTERNs are shared
   (UPat(Ops.CALL, name="c"), lambda ctx,c:
    c.replace(src=(graph_rewrite(c.body, pm_export, ctx=ExportCtx(ctx.externs), bottom_up=True, name="export call body"),)+c.src[1:])),
 ])
