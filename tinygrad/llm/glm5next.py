@@ -16,10 +16,10 @@ from tinygrad.llm.kernels.amd_glm import Linear, gated_delta_prefill, flash_atte
   hc_post_quant, \
   indexer_decode_index_rows, Q8_ROWS_I8, MOE_TILE, I8_WMMA_QUANTS, grouped_rows, q8_quantize_known, SLOT_SPAN, ple_gather, \
   ghc_pre, ghc_post, ghc_prefill_norm, ghc_prefill_mix, moe_softmax_router, Q8_0, IQ3_S, \
-  mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, qsa_prefill_mask, FLAG_LANE, DEC_LANE, IDX_LANE, \
-  flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, f32t_gemm, few_out_rows, index_scores, \
-  host_allreduce, p2p_allreduce, _argmax_parts, _device_index, f16t_gemm, \
-  nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, seq_gather, seq_views, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, q4_rows, Q4_ROW, \
+  mla_bmm, bmm_wmma, weighted_sum, ghc_decode_mix, FLAG_LANE, DEC_LANE, IDX_LANE, \
+  flag_allreduce, ring_mailbox, ring_queue_of, RING_QUEUE_ON, mb_queue, f32t_gemm, few_out_rows, \
+  host_allreduce, p2p_allreduce, _argmax_parts, _device_index, nucleus, seq_store, mla_sparse_seq, seq_rows, SEQ_BLK, \
+  seq_gather, seq_views, seq_store_grouped, fp8_rows, FP8_ROW, IDX_FP8_ROW, q4_rows, Q4_ROW, \
   pool_index_shard, top_k_mask
 from tinygrad.llm.gguf import gguf_parse, ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm.gguf_load import gguf_shard_units, _disk_bytes, _disk_location
@@ -238,7 +238,6 @@ class IndexerConfig:  # select top_k tokens by scoring individual keys or pools 
   rope_dim: int = 0
   rope_interleave: bool = True
   msa: bool = False
-  qsa: bool = False
 
 @dataclass(frozen=True)
 class TransformerConfig:
@@ -255,7 +254,7 @@ class TransformerConfig:
   v_head_dim: int
   yarn: YaRNConfig|None = None
   max_context: int = 0
-  # (the qwen sparse attention's caches: rows of the regions of the sequences sharing them (see Transformer.regions), at least max_context)
+  # rows of the regions of sequences sharing caches (see Transformer.regions), at least max_context
   cache_rows: int = 0
   qk_norm: int = 0
   num_experts: int = 0
@@ -288,7 +287,6 @@ class TransformerConfig:
   indexer_shared: tuple[bool, ...] = ()
   mtp: bool = False  # the next token prediction layer (MTPBlock)
   ple: PLEConfig|None = None
-  qsa: bool = False  # qwen4exp sparse attention (rejected here; use qwen4exp.py)
   expert_pad: int = 0  # the experts padded to this many (never selected) so their slices spread evenly over the devices (expert_slicing)
   spec_drafts: int = 0  # speculative decoding: the tokens the MTP layer drafts for every step of the model
   @property
@@ -1307,12 +1305,10 @@ class TransformerBlock(FFNBlock):
                                             device=x.device, yarn=self.config.yarn)
     if self.indexer: self.indexer._init_state(x)
 
-# set while a qwen sparse-attention context is traced (its jit attends all keys covered by the indexer's top_k)
-_qsa_dense:list[bool] = [False]
 # VISION (GLM 5.3 Flash's pictures, see Transformer._vis_embed): set while the vision variant of a prefill chunk (a chunk with a picture's rows)
 # is traced
 _vis_on:list[bool] = [False]
-# the first row of the sequence's region of the qwen sparse attention's caches (shared by sequences, see Transformer.regions) while its call is
+# the first row of a sequence's region in the shared attention caches (see Transformer.regions) while its call is
 # traced: a bound variable (or 0), a multiple of REGION_ALIGN
 _seq_base:list[UOp|int] = [0]
 # (a multiple of SEQ_BLK*6 (a block on every device of the MLA cache split on positions, see seq_store) and of the pools)
@@ -1360,131 +1356,6 @@ def _pool_select(scores:Tensor, q_pos:Tensor, k_pos:Tensor, idx:IndexerConfig) -
   picked = topk_mask(masked, idx.top_k // idx.kpool).repeat_interleave(idx.kpool, dim=-1)[..., :k_pos.shape[-1]]
   return ((picked | (k_pos >= (q_pos + 1) // idx.kpool * idx.kpool)) & (k_pos <= q_pos)).where(0.0, -math.inf)
 
-class QSAIndexer:
-  """
-  qwen sparse attention's indexer: the keys of a pool of kpool tokens are averaged, normed and roped at the pool's first position, a query's (its
-  heads normed and roped) score of a pool is the sum of its heads' rectified dots. its cache holds every token's key (the pools are made of them)
-  """
-  pool_k:Tensor  # batched decoding: every slot's keys and their pooled keys
-  pool_pk:Tensor
-  def __init__(self, config:TransformerConfig):
-    self.idx, self.max_context, self.cache_rows = (idx:=unwrap(config.indexer)), config.max_context, config.cache_rows
-    self.q_proj, self.k_proj = Linear(config.dim, idx.n_heads * idx.head_dim, bias=False), Linear(config.dim, idx.head_dim, bias=False)
-    self.q_norm, self.k_norm = nn.RMSNorm(idx.head_dim, idx.norm_eps), nn.RMSNorm(idx.head_dim, idx.norm_eps)
-
-  def _init_state(self, x:Tensor):
-    if hasattr(self, "cache_k"): return
-    # every token's key, and the pooled keys (a call pools the pools of its tokens: the ones before them are cached). the rows of every sequence's
-    # region (see Transformer.regions), REGION_ALIGN more than a context: the region of the padding sequences of a step
-    rows = max(self.max_context, self.cache_rows) + REGION_ALIGN
-    self.cache_k = _zeros(rows, self.idx.head_dim, dtype=dtypes.half, device=x.device)
-    self.cache_pk = _zeros(rows // self.idx.kpool, self.idx.head_dim, dtype=dtypes.half, device=x.device)
-
-  def _pooled(self, keys:Tensor, cos:Tensor, sin:Tensor) -> Tensor:
-    """keys (..., pools, kpool, D): the pooled keys (..., pools, D), roped with cos and sin (pools, rope/2) of the pools' first positions"""
-    idx = self.idx
-    k = self.k_norm(keys.float().mean(-2))
-    return _rope(k[..., :idx.rope_dim], cos, sin).cat(k[..., idx.rope_dim:], dim=-1)
-
-  def _queries(self, x:Tensor, cos:Tensor, sin:Tensor) -> Tensor:
-    """x (R, dim): the (R, H, D) queries, roped with cos and sin (R, 1, rope/2)"""
-    idx = self.idx
-    q = self.q_norm(self._proj(self.q_proj, x).reshape(x.shape[0], idx.n_heads, idx.head_dim).float())
-    return _rope(q[..., :idx.rope_dim], cos, sin).cat(q[..., idx.rope_dim:], dim=-1)
-
-  @staticmethod
-  def _proj(lin:Linear, x:Tensor) -> Tensor:
-    """the projections (float weights) of many rows on the tensor cores: half copies of the input and the weight, a float accumulator"""
-    if lin.ggml_type is not None or not isinstance(x.shape[0], int) or x.shape[0] < 32 or x.ndim != 2: return lin(x)
-    # (its weight stored transposed (_derive_weights): the gemm of the rows (a hundred or more of batched decoding), the generic matmul slower)
-    if (wt:=getattr(lin, "weight_t", None)) is not None and (r:=f16t_gemm(x, wt)) is not None: return r
-    return x.half().contiguous().matmul(lin.weight.half().T, dtype=dtypes.float).contiguous()
-
-  def scores(self, x:Tensor, start_pos:int|UOp, T:int|UOp, freqs:Tensor) -> tuple[Tensor, int|UOp]:
-    """
-    x (1, Tq, dim) has the T tokens at start_pos (its rows past them padding): their keys and pools cached, the scores (Tq, pools) of every
-    query on the pools up to the last token's, and that count of pools
-    """
-    idx, Tq = self.idx, x.shape[1]
-    S = start_pos + T
-    pk, pools = self.update(x, start_pos, T, freqs)
-    qf = freqs.shrink(((start_pos, S), None)).pad_to((Tq, freqs.shape[-1])).reshape(Tq, 1, -1)
-    q = self._queries(x[0], *qf.chunk(2, dim=-1))
-    if isinstance(Tq, int) and Tq >= 32:
-      # many queries: the heads' scores of all the pools (a static count: the pools past the last token's aren't seen) on the tensor cores
-      sc = q.reshape(Tq * idx.n_heads, idx.head_dim).half().contiguous().matmul(self._static(pk).T, dtype=dtypes.float).contiguous()
-      return sc.reshape(Tq, idx.n_heads, -1).relu().sum(1).shrink((None, (0, pools))) * idx.head_dim**-0.5, pools
-    sc = (q.transpose(0, 1) @ pk.float().T).relu().sum(0) * idx.head_dim**-0.5  # (Tq, pools)
-    return sc.contiguous(), pools
-
-  def _static(self, pk:Tensor) -> Tensor:
-    """the pooled keys of a sequence (pools, D) as a static (max_context//kpool, D) copy (zeros past them)"""
-    return pk.pad_to((self.max_context // self.idx.kpool, self.idx.head_dim)).contiguous()
-
-  def update(self, x:Tensor, start_pos:int|UOp, T:int|UOp, freqs:Tensor) -> tuple[Tensor, int|UOp]:
-    """
-    the keys of the T tokens of x at start_pos and their pools cached (the sequence's region, from _seq_base): the pooled keys (pools, D) of the
-    sequence (after) and that count of pools up to the last token's
-    """
-    idx, kp, b = self.idx, self.idx.kpool, _seq_base[0]
-    S, pb = start_pos + T, b // kp
-    keys = self._proj(self.k_proj, x[0])[:T].half()
-    cache = Tensor(self.cache_k.uop.after(self.cache_k.shrink(((b+start_pos, b+S), None)).uop.store(keys.uop)))
-    # the pools of the tokens (the first one's tokens before them are cached), from the cached keys
-    first, new = start_pos // kp, (start_pos % kp + T + kp - 1) // kp
-    pf = freqs.reshape(-1, kp, freqs.shape[-1])[:, 0].shrink(((first, first + new), None))
-    pk_new = self._pooled(cache.reshape(-1, kp, idx.head_dim).shrink(((pb + first, pb + first + new), None, None)), *pf.chunk(2, dim=-1))
-    pk = Tensor(self.cache_pk.uop.after(self.cache_pk.shrink(((pb + first, pb + first + new), None)).uop.store(pk_new.half().uop)))
-    _state_written(cache, pk)
-    pools = (S + kp - 1) // kp
-    return pk.shrink(((pb, pb + pools), None)), pools
-
-  def mask(self, x:Tensor, start_pos:int|UOp, T:int|UOp, freqs:Tensor) -> Tensor:
-    """the mask (1, 1, Tq, S) of the keys every query sees"""
-    Tq, N, S = x.shape[1], self.max_context, start_pos + T
-    scores, _ = self.scores(x, start_pos, T, freqs)
-    q_pos, k_pos = (Tensor(start_pos) + Tensor.arange(Tq)).reshape(Tq, 1), Tensor.arange(N)[:S].reshape(1, -1)
-    return _pool_select(scores, q_pos, k_pos, self.idx).reshape(1, 1, Tq, -1).cast(x.dtype)
-
-  def prefill_mask(self, x:Tensor, start_pos:UOp, T:int|UOp, freqs:Tensor) -> Tensor:
-    """One uint32 per pool and 32 queries; score disjoint query rows on the devices, then gather the compact masks."""
-    idx, Tq = self.idx, cast(int, x.shape[1])
-    pk, pools = self.update(x, start_pos, T, freqs)
-    qf = freqs.shrink(((start_pos, start_pos+T), None)).pad_to((Tq, freqs.shape[-1])).reshape(Tq, 1, -1)
-    xx = x[0]
-    if isinstance(x.device, tuple) and Tq % (32*len(x.device)) == 0: xx, qf = shard_rows(xx, 0), shard_rows(qf, 0)
-    q = self._queries(xx, *qf.chunk(2, dim=-1))
-    sc = q.reshape(Tq*idx.n_heads, idx.head_dim).half().contiguous().matmul(self._static(pk).T, dtype=dtypes.float).contiguous()
-    scores = (sc.reshape(Tq, idx.n_heads, -1).relu().sum(1) * idx.head_dim**-0.5).contiguous()
-    return qsa_prefill_mask(scores, start_pos, pools, idx.top_k//idx.kpool, idx.kpool)
-
-  def prefill_picks(self, x:Tensor, start_pos:UOp, T:int|UOp, freqs:Tensor) -> Tensor:
-    """
-    the lists (Tq, top+kpool+1) of the keys every query of a prefill chunk sees (as picks): the scores and the lists of disjoint rows on the
-    devices, then gathered
-    """
-    idx, Tq = self.idx, cast(int, x.shape[1])
-    pk, pools = self.update(x, start_pos, T, freqs)
-    qf = freqs.shrink(((start_pos, start_pos+T), None)).pad_to((Tq, freqs.shape[-1])).reshape(Tq, 1, -1)
-    xx, split = x[0], isinstance(x.device, tuple) and Tq % (32*len(x.device)) == 0
-    if split: xx, qf = shard_rows(xx, 0), shard_rows(qf, 0)
-    q = self._queries(xx, *qf.chunk(2, dim=-1))
-    # (the scores of the pools so far only, the heads' relu summed in the kernel: index_scores)
-    if (scores:=index_scores(q.reshape(Tq, idx.n_heads, idx.head_dim), self._static(pk), pools, idx.head_dim**-0.5)) is None:
-      sc = q.reshape(Tq*idx.n_heads, idx.head_dim).half().contiguous().matmul(self._static(pk).T, dtype=dtypes.float).contiguous()
-      scores = (sc.reshape(Tq, idx.n_heads, -1).relu().sum(1) * idx.head_dim**-0.5).contiguous()
-    # (compact (the pools, not their keys): a quarter of the bytes gathered)
-    lists = pool_index_rows(scores, start_pos, pools, idx.top_k // idx.kpool, idx.kpool, compact=bool((1)))
-    out = all_gather(lists, 0) if split else lists
-    # (QSA_DUMP: debugging, the lists of a chunk kept in a buffer of the layer (the last chunk's))
-    return out
-
-  def picks(self, x:Tensor, start_pos:UOp, T:int|UOp, freqs:Tensor) -> Tensor:
-    """the lists (Tq, top+kpool+1) of the keys every query sees (its top pools, its tail, the count last): one kernel picks them"""
-    scores, pools = self.scores(x, start_pos, T, freqs)
-    scores = scores.pad_to((scores.shape[0], self.max_context // self.idx.kpool)).contiguous()
-    return pool_index_rows(scores, start_pos, pools, self.idx.top_k // self.idx.kpool, self.idx.kpool)
-
 
 class Indexer:
   _regions:tuple[int, int, int]|None = None  # (SLOT_ALIAS: the slots, their positions, the regions of the cache, see _region_views)
@@ -1504,10 +1375,10 @@ class Indexer:
     self.cache_rows = config.cache_rows  # (GLM_SEQ: the regions of the sequences sharing the caches, see Transformer.seq_rows)
     self.attn_q_b = Linear(config.q_lora_rank or config.dim, idx.n_heads * idx.head_dim, bias=False)
     self.attn_k = Linear(config.dim, idx.head_dim, bias=False)
-    self.k_norm = (nn.RMSNorm if idx.msa or idx.qsa else nn.LayerNorm)(idx.head_dim, eps=idx.norm_eps)
-    if idx.msa or idx.qsa: self.q_norm = nn.RMSNorm(idx.head_dim, eps=idx.norm_eps)
+    self.k_norm = (nn.RMSNorm if idx.msa else nn.LayerNorm)(idx.head_dim, eps=idx.norm_eps)
+    if idx.msa: self.q_norm = nn.RMSNorm(idx.head_dim, eps=idx.norm_eps)
     else: self.proj = Linear(config.dim, idx.n_heads, bias=False)
-    if idx.kpool > 1 and not (idx.msa or idx.qsa):
+    if idx.kpool > 1 and not idx.msa:
       self.compressor_gate, self.compressor_ape = Linear(config.dim, idx.head_dim, bias=False), {"weight": Tensor.zeros(idx.kpool, idx.head_dim)}
 
   @property
@@ -1603,11 +1474,11 @@ class Indexer:
 
   def _dense(self, x:Tensor, q:Tensor, start_pos:int|UOp, freqs:Tensor|None=None) -> Tensor:
     (B, T, _), idx, S = x.shape, self.idx, start_pos + x.shape[1]
-    k, iq = self.attn_k(x) if idx.qsa else self.k_norm(self.attn_k(x)), self.attn_q_b(q).reshape(B, T, idx.n_heads, idx.head_dim)
-    if idx.msa or idx.qsa: iq = self.q_norm(iq)
+    k, iq = self.k_norm(self.attn_k(x)), self.attn_q_b(q).reshape(B, T, idx.n_heads, idx.head_dim)
+    if idx.msa: iq = self.q_norm(iq)
     if idx.rope_dim:
       rot = unwrap(freqs)[start_pos:start_pos+T]
-      if not idx.qsa: k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), rot, idx.rope_interleave).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
+      k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), rot, idx.rope_interleave).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
       iq = apply_rope(iq[..., :idx.rope_dim].transpose(1, 2), rot, idx.rope_interleave).transpose(1, 2).cat(iq[..., idx.rope_dim:], dim=-1)
     if hasattr(self, "compressor_gate"):
       # cache an indexer key and a pooling gate per token, a pool's key is the gate softmax weighted sum of its keys
@@ -1616,13 +1487,9 @@ class Indexer:
       k = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2)  # (B, S, D)
     else:
       k = Tensor(self.cache_kg.uop.after(self.cache_kg[:, start_pos:S].uop.store(k.half().uop))).float()  # (B, S, D)
-    if idx.qsa:
-      k, rot = self.k_norm(k.reshape(B, -1, idx.kpool, idx.head_dim).mean(2)), unwrap(freqs)[:self.max_context:idx.kpool]
-      k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), rot, idx.rope_interleave).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
     scores = iq @ k.transpose(-1, -2).unsqueeze(1)
-    if idx.msa:   scores = scores.reshape(B, T, idx.n_heads, scores.shape[-1] // idx.kpool, idx.kpool).max(-1).transpose(1, 2)
-    elif idx.qsa: scores = (scores.relu() * idx.head_dim**-0.5).sum(2).unsqueeze(1)
-    else:         scores = (scores.relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2).unsqueeze(1)
+    if idx.msa: scores = scores.reshape(B, T, idx.n_heads, scores.shape[-1] // idx.kpool, idx.kpool).max(-1).transpose(1, 2)
+    else:       scores = (scores.relu() * (self.proj(x) * (idx.n_heads * idx.head_dim)**-0.5).unsqueeze(-1)).sum(2).unsqueeze(1)
     # the query sees the top_k/kpool best complete pools and the tokens of its own pool while incomplete (the tail)
     q_pos, k_pos = (Tensor(start_pos) + Tensor.arange(T)).reshape(T, 1), Tensor.arange(S)
     scores = ((Tensor.arange(scores.shape[-1]) + 1) * idx.kpool <= q_pos + 1).where(scores, -math.inf)
@@ -2285,7 +2152,6 @@ class Transformer:
   image_pad_id:int = -1
   vision_mrope = False  # (a picture's rows at plain positions: the text model has no rope, no M-RoPE delta (engine's _delta))
   def __init__(self, config:TransformerConfig):
-    assert not config.qsa, "qwen4exp: use tinygrad.llm.qwen4exp"
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
     self.config = config
@@ -2677,7 +2543,7 @@ class Transformer:
   def _spec_call(self, mtp_pos:int, j:int, par:int, temperature:Tensor|None):
     """a step of speculative decoding (forward_spec, its jit)"""
     k, pos = self.config.spec_drafts, mtp_pos + j
-    # (the step's positions mtp_pos..pos+k covered by the top_k of the qwen sparse attention: its jit of all the keys, see _qsa_dense)
+    # select the ordinary/dense-indexer JIT variant for this context
     dense = self._dense_ctx(pos, k + 1)
     name = ("_spec_jit_dense" if dense else "_spec_jit") + ("_greedy" if temperature is None else "")
     if not hasattr(self, name): setattr(self, name, TinyJit(self.forward_spec, capture_first=getattr(self, "_states_ready", False),
@@ -2689,9 +2555,7 @@ class Transformer:
       self._spec_vars = (pos_var("mtp_pos"), UOp.variable("spec_j", 0, k), pos_var("start_pos"), UOp.variable("spec_par", 0, 1),
                          tuple(pos_var(f"spec_pos{i}") for i in range(k-1)))
     v_mtp, v_j, v_pos, v_par, v_chain = self._spec_vars
-    _qsa_dense[0] = dense
-    try: jit(v_mtp.bind(mtp_pos), v_j.bind(j), v_pos.bind(pos), v_par.bind(par), temperature, *(v.bind(pos+1+i) for i,v in enumerate(v_chain)))
-    finally: _qsa_dense[0] = False
+    jit(v_mtp.bind(mtp_pos), v_j.bind(j), v_pos.bind(pos), v_par.bind(par), temperature, *(v.bind(pos+1+i) for i,v in enumerate(v_chain)))
 
   def _wait_host(self, get:Callable[[], Any], what:str) -> Any:
     """the value a step writes to host memory (polled: -1 until then). a step that doesn't come (the devices' errors): an error, not a hang"""
@@ -3393,7 +3257,7 @@ class Transformer:
     out = list(self._bspec_host_out[:n*(2*k+1)])
     return [(out[g*(2*k+1):g*(2*k+1)+k+1], out[g*(2*k+1)+k+1:(g+1)*(2*k+1)]) for g in range(n)]
 
-  # ******** sequences sharing the caches (qwen4exp): every one its region of the attention caches' rows (the token buffer's too) and a slot of
+  # ******** sequences sharing caches: each has a region of attention-cache rows (and the token buffer) plus a slot for
   # the recurrent states. a sequence is prefilled by the model's calls on its region (its states loaded from its slot before, stored after),
   # a step of speculative decoding takes every sequence decoding at once (forward_seqs). the regions are the caller's (see SeqEngine) ********
 
@@ -3917,7 +3781,6 @@ class Transformer:
     the token after the sequence of slot `slot` (its region from base) of pos tokens, from its states there (its hidden state of the last token
     its row 0: a prompt's checkpoint restored, see SeqEngine.prefill): a prompt that is all in the caches has no token to prefill
     """
-    assert not self.config.qsa, "qwen4exp: see qwen4exp.py"
     self._seq_init()
     if not hasattr(self, "_seq_first_jit"): self._seq_first_jit = TinyJit(self._seq_first, capture_first=True)
     for d in to_tuple(cast(str|tuple[str, ...], self.token_embd.weight.device)): Device[d].synchronize()  # (a step may read the token buffer)
@@ -4161,7 +4024,7 @@ class Transformer:
     # a view of the token buffer is already realized: no schedule for the jit input
     if (buf:=getattr(self, "_token_buf", None)) is None or tokens.uop.base is not buf.uop.base: tokens = tokens.contiguous()
     key = int(T.vmax) if isinstance(T:=tokens.shape[1], UOp) else T
-    # (a context the qwen sparse attention's top_k covers: the jits of all the keys, see _qsa_dense)
+    # select the ordinary/dense-indexer JIT variant for this context
     dense = self._dense_ctx(start_pos, T)
     # (a sequence's region from a variable base: jits of their own, see seq_prefill)
     # (VISION: the vision variant of a chunk, see _vis_embed)
@@ -4171,14 +4034,11 @@ class Transformer:
       # the states and caches are set up before: a jit captures on its first call
       self._init_states()
       jit = jits[key] = self._new_jit(key)
-    _qsa_dense[0] = dense
-    try:
-      if not isinstance(jit, list): return jit(tokens, start_pos, temperature, base)[0]
-      # (a prefill in parts: one of them (part, see seq_warmup), else all in order)
-      for p, j in enumerate(jit):
-        if part is None or p == part: out = j(tokens, start_pos, temperature, base)[0]
-      return out
-    finally: _qsa_dense[0] = False
+    if not isinstance(jit, list): return jit(tokens, start_pos, temperature, base)[0]
+    # (a prefill in parts: one of them (part, see seq_warmup), else all in order)
+    for p, j in enumerate(jit):
+      if part is None or p == part: out = j(tokens, start_pos, temperature, base)[0]
+    return out
 
   def _new_jit(self, rows:int) -> Any:
     """the jit of a call of rows (a list of the parts' jits: PREFILL_PARTS)"""
@@ -4208,6 +4068,7 @@ class Transformer:
     # (not the n-gram table: read to host memory by its loader, see _ple_dev_init)
     if defer_load: _read_ahead(entries, skip=("per_layer_token_embd.weight",))
     arch = kv['general.architecture']
+    assert arch != 'qwen4exp', "qwen4exp: use tinygrad.llm.qwen4exp"
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
     assert shard >= 1, f"shard must be at least 1, got {shard}"
     # the next token prediction (MTP) layers: the first is loaded with MTP=1 (model.mtp), the others aren't used
@@ -4234,10 +4095,9 @@ class Transformer:
       head_rules = {**{w: 0 for w in ('attn_q.weight', 'attn_k.weight', 'attn_v.weight', 'attn_q_b.weight', 'attn_k_b.weight', 'attn_v_b.weight')},
                     'attn_output.weight': 1}
       # the kda layers split by heads too (the gated deltanet of qwen3.5 is copied to every device)
-      if arch in ('kimi-linear', 'glm5-next', 'qwen4exp'): head_rules.update({w: 0 for w in ('ssm_conv1d_q.weight', 'ssm_conv1d_k.weight',
+      if arch in ('kimi-linear', 'glm5-next'): head_rules.update({w: 0 for w in ('ssm_conv1d_q.weight', 'ssm_conv1d_k.weight',
         'ssm_conv1d_v.weight', 'ssm_dt.bias', 'ssm_a', 'ssm_beta.weight', 'ssm_f_b.weight', 'ssm_g_b.weight', 'ssm_alpha.weight',
         'attn_gate.weight')})
-      if arch == 'qwen4exp': head_rules['ssm_out.weight'] = 1
       padded_heads = n_heads
       if pad_heads:
         # a device's heads of a weight split on its inputs (attn_output) are whole quant blocks: a Q6_K kda output (heads of 128 columns, blocks
@@ -4252,10 +4112,6 @@ class Transformer:
       # experts are split by their hidden dim, or by experts when it doesn't split (expert parallel)
       exp_hidden, exp_count = kv.get(f'{arch}.expert_feed_forward_length', 0), kv.get(f'{arch}.expert_count', 0)
       down_block = max([_GGML_QUANT.get(t, (1,))[0] for k,(_,_,t) in entries.items() if k.endswith('ffn_down_exps.weight')], default=1)
-      # Five 128-wide slices per Qwen expert reduce routing and down-projection intermediates.
-      if arch == 'qwen4exp' and shard in (4, 6):
-        down_block = math.lcm(down_block, 128)
-        assert exp_hidden % down_block == 0
       exp_names = ('ffn_gate_exps.weight', 'ffn_up_exps.weight', 'ffn_down_exps.weight')
       if exp_hidden % shard == 0 and (exp_hidden // shard) % down_block == 0:
         ffn_rules.update({'ffn_gate_exps.weight': 1, 'ffn_up_exps.weight': 1, 'ffn_down_exps.weight': 2})
@@ -4330,10 +4186,6 @@ class Transformer:
     indexer = IndexerConfig(kv[f'{arch}.attention.indexer.head_count'], kv[f'{arch}.attention.indexer.key_length'],
                             kv[f'{arch}.attention.indexer.top_k'], kpool,
                             kv.get(f'{arch}.attention.layer_norm_epsilon') or kv[f'{arch}.attention.layer_norm_rms_epsilon']) if kpool else None
-    if arch == 'qwen4exp':  # QSA: the indexer pools compress_ratio keys
-      indexer = IndexerConfig(kv[f'{arch}.attention.indexer.head_count'], kv[f'{arch}.attention.indexer.key_length'],
-                              kv[f'{arch}.attention.indexer.top_k'], max(kv[f'{arch}.attention.compress_ratios']),
-                              kv[f'{arch}.attention.layer_norm_rms_epsilon'], kv[f'{arch}.rope.dimension_count'], False)
     ple = PLEConfig(kv[f'{arch}.ple.layers'][0], ple_entry[1][1], tuple(kv[f'{arch}.ple.layer_multipliers']),
                     tuple(kv[f'{arch}.ple.head_vocab_sizes']), tuple(kv[f'{arch}.ple.head_offsets']), kv[f'{arch}.ple.eos_token_id'],
                     kv[f'{arch}.ple.conv_kernel'], ple_entry[2]) if ple_entry is not None else None
@@ -4351,12 +4203,6 @@ class Transformer:
     if arch in ('qwen35', 'qwen35moe'):
       ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')}, silu_gate=True)
       ssm_layers = tuple((i+1) % kv[f'{arch}.full_attention_interval'] != 0 for i in range(num_blocks))
-    elif arch == 'qwen4exp':
-      hv = kv[f'{arch}.ssm.time_step_rank']
-      ssm = SSMConfig(kv[f'{arch}.ssm.conv_kernel'], kv[f'{arch}.ssm.state_size'], hv, hv, kv[f'{arch}.ssm.inner_size'], kda=True, head_decay=True)
-      ssm_layers = tuple((i+1) % kv[f'{arch}.full_attention_interval'] != 0 for i in range(num_blocks))
-      for i, is_ssm in enumerate(ssm_layers):
-        if is_ssm: state_dict[f"blk.{i}.ssm_a"] = state_dict[f"blk.{i}.ssm_a"].reshape(hv, 1)
     elif arch in ('kimi-linear', 'glm5-next'):
       ssm_layers = tuple(x == 0 for x in n_kv_heads)[:num_blocks]
       n_kv_heads = max(n_kv_heads)
@@ -4400,7 +4246,7 @@ class Transformer:
       max_context=max_context,
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
-      norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe', 'kimi-linear', 'qwen4exp')),
+      norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe', 'kimi-linear')),
       expert_gating_func=ExpertGating(kv.get(f'{arch}.expert_gating_func',
         ExpertGating.SOFTMAX_WEIGHT if arch == 'gpt-oss' else ExpertGating.SOFTMAX)),
       kv_lora_rank=kv_lora_rank, q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
@@ -4411,7 +4257,7 @@ class Transformer:
       shared_expert_gate=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_inp_shexp.weight" in state_dict,
       dense_hidden_dim=sizes.get('blk.0.ffn_gate.weight', kv.get(f'{arch}.feed_forward_length', 0))
         if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
-      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe', 'qwen4exp'),
+      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe'),
       ssm=ssm,
       ssm_layers=ssm_layers,
       qkv_bias='blk.0.attn_q.bias' in state_dict,
@@ -4421,11 +4267,11 @@ class Transformer:
       swiglu_up_bias=1.0 if swiglu_oai else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 2 if arch == 'gpt-oss' else 0), hc=hc, indexer=indexer, mtp=mtp,
-      spec_drafts=getenv("SPEC_DRAFTS", 4 if arch == "qwen4exp" else 2) if mtp else 0, ple=ple, qsa=arch == 'qwen4exp', expert_pad=expert_pad,
+      spec_drafts=getenv("SPEC_DRAFTS", 2) if mtp else 0, ple=ple, expert_pad=expert_pad,
       # (SEQ_ROWS: the rows of the caches of the sequences sharing them, past a context: more conversations kept)
       # (GLM-5.3-Flash on several devices: GLM_SEQ on by default (the server's SeqEngine: conversations keep their caches, a host stash), its
       # rows two contexts (262144: 524288 rows, with 16 slots and SEQ_STASH_GB=4 in a 6x24 GB C5's memory; C6/C7 have more))
-      cache_rows=round_up(getenv("SEQ_ROWS", 2*max_context if glm_seq else 0), REGION_ALIGN) if arch == 'qwen4exp' or glm_seq else 0)
+      cache_rows=round_up(getenv("SEQ_ROWS", 2*max_context if glm_seq else 0), REGION_ALIGN) if glm_seq else 0)
     with Linear.empty_init(): model = Transformer(config)  # (the weights are loaded)
     _lap("model made")
     # (the file's KV heads: repeated so every device holds one, device d holds head d*n//devices)
@@ -4615,7 +4461,7 @@ class Transformer:
       self._spec_init()
       if not hasattr(self, "_spec_jit_greedy"): self._spec_jit_greedy = TinyJit(self.forward_spec, capture_first=True, scratch=self._scratch)
       setattr(self._spec_jit_greedy, "warmup_name", "spec")
-      # (and the one of a context the qwen sparse attention's top_k covers, see _qsa_dense)
+      # include the dense-indexer speculative JIT when this context needs it
       if self._dense_ctx(0, 1):
         self._spec_jit_dense_greedy = TinyJit(self.forward_spec, capture_first=True, scratch=self._scratch)
         setattr(self._spec_jit_dense_greedy, "warmup_name", "spec_dense")
