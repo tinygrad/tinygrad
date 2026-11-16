@@ -1,5 +1,6 @@
 import unittest, base64, functools, re, unicodedata, json, pathlib, tempfile
-from tinygrad.llm.cli import SimpleTokenizer, FallbackTemplate
+from tinygrad.llm.cli import FallbackTemplate
+from tinygrad.llm.tokenizer import SimpleTokenizer
 from tinygrad.helpers import fetch
 
 class TestLLMTokenizer(unittest.TestCase):
