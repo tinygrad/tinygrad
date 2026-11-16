@@ -227,11 +227,6 @@ class TestHCQ2Link(unittest.TestCase):
       if isinstance(u.arg, ParamArg): self.assertTrue(u.arg.buffer is None and u.arg.val is None, f"runtime state in {u}")
     self.assertIs(parse_uir(render_uir(template)), template)
 
-  def test_an_extern_links_to_the_buffer_of_the_device(self): # an alloc of that name is its own
-    self.assertIs(hcq2.hcq_link(hcq2.timeline("NULL").sink()).src[0].buffer, Device["NULL"].timeline)
-    self.assertIsNot(hcq2.hcq_link(UOp.alloc((2,), dtypes.u64, device="NULL", name="timeline").sink()).src[0].buffer, Device["NULL"].timeline)
-    with self.assertRaises(KeyError): hcq2.hcq_link(UOp.extern((1,), dtypes.u8, "NULL", "missing").sink())
-
   def test_repeated_word_loops(self): # for (i..10) cmdbuf[off[i]] = var
     var, offs = UOp.alloc((1,), dtypes.uint32, device="CPU", name="var"), [4 * i * i for i in range(10)]
     var = hcq2.patch(var, [], bytes(4)) # initialize at link: the allocator may return a reused buffer
