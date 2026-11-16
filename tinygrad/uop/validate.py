@@ -3,6 +3,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, python_alu
 from tinygrad.dtype import dtypes, Invalid
 from tinygrad.helpers import cpu_profile
 import z3
+from typing import cast
 
 # older versions of z3 dont have some operators like & overloaded
 if z3.get_version() < (4, 12, 4, 0):
@@ -52,7 +53,9 @@ def create_bounded(name:str, vmin:int|z3.ArithRef, vmax:int|z3.ArithRef, solver:
   return s
 def create_var(x:UOp, ctx:tuple[z3.Solver, dict[UOp, z3.ExprRef]]) -> z3.ExprRef:
   name = x.arg.name if x.op is Ops.PARAM else f"{x.op.name.lower()}{len(ctx[1])}"
-  return z3.Bool(name, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else create_bounded(name, x.vmin, x.vmax, ctx[0])
+  vmin, vmax = cast(tuple[int|float|UOp, int|float|UOp],(x.vmin,x.vmax))
+  z3_vmin, z3_vmax = (ctx[1][v] if isinstance(v, UOp) else v for v in (vmin, vmax))
+  return z3.Bool(name, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else create_bounded(name, z3_vmin, z3_vmax, ctx[0])
 # a cast only converts between bool and int, z3_wrap models the width
 def z3_cast(c:UOp, x:z3.ExprRef) -> z3.ExprRef:
   if (c.src[0].dtype == dtypes.bool) == (c.dtype == dtypes.bool): return x

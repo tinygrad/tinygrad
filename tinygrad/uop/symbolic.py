@@ -244,7 +244,7 @@ def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
   if any(u.op_in_backward_slice_with_self(Ops.INDEX) for u in (cond, t, f)): return None
   return cond.where(t.substitute({cond: cond.const_like(True)}), f.substitute({cond: cond.const_like(False)}))
 
-symbolic = symbolic_simple+commutative+PatternMatcher([
+symbolic = symbolic_simple+commutative+div_and_mod_symbolic+PatternMatcher([
   # ** boolean algebra **
   # (!x|y)&x -> y&x
   ((UPat.var("x", dtype=dtypes.bool).logical_not() | UPat.var("y")) & UPat.var("x"), lambda x,y: y & x),
@@ -339,7 +339,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # after/end with 1 src is just src[0]
   (UPat((Ops.AFTER, Ops.END), src=(UPat.var("s"),)), lambda s: s),
   # the rules above key on bare CONSTs, so a redundantly committed const has to be uncast in the same fixpoint
-])+div_and_mod_symbolic+pm_uncast_const
+])+pm_uncast_const
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
 

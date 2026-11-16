@@ -690,7 +690,6 @@ class TestSymbolic(unittest.TestCase):
     lidx3 = Variable("lidx3", 0, 1)
     self.helper_test_variable((gidx0+lidx2+lidx3)*4, 0, 80, "(((gidx0*4)+(lidx2*4))+(lidx3*4))")
 
-  @unittest.expectedFailure
   def test_variable_divmod(self):
     start_pos = Variable("start_pos", 0, 127)
     v = start_pos + 1

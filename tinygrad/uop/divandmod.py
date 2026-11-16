@@ -10,7 +10,8 @@ def fold_divmod_general(d: UOp) -> UOp|None:
 
   if y.vmin==y.vmax==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.DIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
   # x//y is constant
-  if d.op is Ops.MOD and (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y
+  if d.op is Ops.MOD and all(isinstance(b, int) for b in (*x._min_max, *y._min_max)):
+    if (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y
 
   # split uops for the rest of the processing
   x_peeled, const = x.pop_const()
@@ -85,11 +86,22 @@ def fold_divmod_general(d: UOp) -> UOp|None:
       quo.append(u.divides(c)*(c//y.val) if d.op is Ops.DIV else u.const_like(0))
     else: rem.append(u)
 
-  if not quo: return None
   new_x = sum(rem)+x.const_like(0)
+
+  # Prove 0 <= rem < den, so rem // den == 0 & rem % den == rem
+  if len(rem)==1 and provably_zero_quotient(rem[0], y):
+    return rem[0] if d.op is Ops.MOD else sum(quo, x.const_like(0))
+  if not quo: return None
   if new_x.vmin<0: return None
   return new_x%y if d.op is Ops.MOD else new_x//y+sum(quo)
 
+def provably_zero_quotient(num:UOp, den:UOp) -> bool:
+  if num.op is not Ops.PARAM: return False
+  lower, upper = num.arg.vmin_vmax
+  if not isinstance(lower, int) or lower<0: return False
+  if not isinstance(upper, (int, UOp)): return False
+  diff = (den-upper).simplify()
+  return diff.op is Ops.CONST and isinstance(diff.val, int) and diff.val>0
 div_and_mod_symbolic = PatternMatcher([
   # ** 1. Fast Inline Rules **
   # (x//c+a)//d -> (x+a*c)//(c*d) for c>0, d>0
