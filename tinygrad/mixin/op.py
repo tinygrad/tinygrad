@@ -1830,7 +1830,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     weight = Y.const_like(1) if weight is None else weight.gather(0, Y.flatten()).reshape(Y.shape)
     masked_weight = weight if ignore_index is None else weight * Y.ne(ignore_index)
-    nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
+    classes_dim = 0 if self.ndim == 1 else 1
+    nll = -self.gather(classes_dim, Y.unsqueeze(classes_dim)).squeeze(classes_dim) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
   # ***** matrix ops *****

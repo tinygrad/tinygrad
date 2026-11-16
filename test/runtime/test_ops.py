@@ -3252,6 +3252,10 @@ class TestOps(TensorTestCase):
                    lambda x: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.tensor(target)),
                    lambda x: x.log_softmax(axis=1).nll_loss(Tensor(target)))
 
+  def test_nll_loss_unbatched(self):
+    helper_test_op([(2,)], lambda x: torch.nn.functional.nll_loss(x, torch.tensor(1)),
+                          lambda x: x.nll_loss(Tensor(1)))
+
   def test_nll_loss_reductions(self):
     target = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
     for kwargs in ({}, {"reduction": "sum"}, {"reduction": "none"}):
