@@ -215,7 +215,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, buffer=False)
     acc_dtype = least_upper_dtype(dt, dtypes.float32) if dtypes.is_float(dt) else dt
-    return (cls.full((output_len,), step, dtype=acc_dtype, buffer=False)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
+    from tinygrad.uop.ops import to_max_shape
+    return (cls.full(to_max_shape((output_len,)), step, dtype=acc_dtype, buffer=False)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)[:output_len]
 
   @classmethod
   def linspace(cls, start:int|float, stop:int|float, steps:int, dtype:DTypeLike|None=None) -> Self:

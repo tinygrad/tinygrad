@@ -31,7 +31,7 @@ class TestAttention(unittest.TestCase):
       rope_noprune(Tensor.randn(1, 2, 4, 8, dtype=dtypes.float32), v_pos.bind(1))
       rope_prune(Tensor.randn(1, 2, 4, 8, dtype=dtypes.float32), v_pos.bind(1))
     assert_jit_cache_len(rope_prune, 1)
-    assert_jit_cache_len(rope_noprune, 3)
+    assert_jit_cache_len(rope_noprune, 2)
 
 class TestLinear(unittest.TestCase):
   def test_recovers_packed_ggml_weight(self):
