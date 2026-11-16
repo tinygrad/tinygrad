@@ -207,12 +207,11 @@ class Tensor(RandMixin):
     """
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
-  @rewrite_group(lambda *tensors,ret: f"Schedule {len(tensors)} -> {len(ret[0].src)}")
-  def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
+  @rewrite_group(lambda *tensors,ret,**_: f"Schedule {len(tensors)} -> {len(ret[0].src)}")
+  def linear_with_vars(self, *lst:Tensor, plan:bool=True) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
     fn, externs = export(self._bufferize(*lst))
-    capture = bool(capturing) and bool(CAPTURING)
-    linear = create_linear(fn, plan=not capture)
+    linear = create_linear(fn, plan=plan)
 
     # map back: the EXTERNs become the storage and the bound Variables of this invocation, ALLOCs get fresh storage
     linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, enter_calls=True, name="map back")
@@ -222,11 +221,6 @@ class Tensor(RandMixin):
     for b in externs:
       if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
         raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
-
-    # jit captures this linear, no need to execute
-    if capture:
-      capturing[0].add_linear(linear, var_vals)
-      return UOp(Ops.LINEAR, src=()), var_vals
     return linear, var_vals
 
   def _bufferize(self, *lst:Tensor) -> UOp:
@@ -286,8 +280,11 @@ class Tensor(RandMixin):
     """Triggers the computation needed to create these Tensor(s)."""
     to_realize = [x for x in (self,)+lst if x.uop.base.needs_storage()]
     if len(to_realize):
-      linear, var_vals = Tensor.linear_with_vars(*to_realize)
-      run_linear(linear, var_vals, update_stats=do_update_stats)
+      # a capturing jit runs its captured linears later, and plans their memory together
+      capture = bool(capturing) and bool(CAPTURING)
+      linear, var_vals = Tensor.linear_with_vars(*to_realize, plan=not capture)
+      if capture: capturing[0].add_linear(linear, var_vals)
+      else: run_linear(linear, var_vals, update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:
