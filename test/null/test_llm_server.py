@@ -1,7 +1,7 @@
 import unittest, threading, time, json, socket
 from unittest.mock import Mock, patch
 from tinygrad.llm.model import Transformer, TransformerConfig
-from tinygrad.llm.serve import Request, StreamRouter, disconnected, parse_tool_call
+from tinygrad.llm.serve import Request, StreamRouter, disconnected, parse_tool_call, DSML
 
 TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
                            norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, rope_dim=32, v_head_dim=32, max_context=32)
@@ -34,6 +34,12 @@ class TestParseToolCall(unittest.TestCase):
     for call in ("not a call", "read<arg_key>path</arg_key>", "read<arg_key>path</arg_key><arg_value>unfinished",
                  "read<arg_key>path</arg_key><arg_value>a</arg_value>trailing junk"):
       self.assertIsNone(parse_tool_call(call))
+
+  def test_invalid_dsml_call(self):
+    # a parameter cut off by the end of generation must not turn into a call without it
+    param = f'<{DSML}parameter name="path" string="true">a</{DSML}parameter>'
+    for args in (f'<{DSML}parameter name="path" string="true">REA', f'{param}\n<{DSML}parameter name="n" str', f'{param}trailing junk'):
+      self.assertIsNone(parse_tool_call(f'name="read">\n{args}'))
 
 class TestDisconnected(unittest.TestCase):
   def setUp(self):
@@ -483,6 +489,21 @@ class TestLLMToolCalls(unittest.TestCase):
     calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
     self.assertEqual([(tc.function.name, json.loads(tc.function.arguments)) for tc in calls], [('read', {'x"y':'\n</tool_call>\n', 'n':3})])
     self.assertEqual(chunks[-1].choices[0].finish_reason, 'tool_calls')
+
+  def test_dsml_tool_call(self):
+    # V3.2 calls the block function_calls, V4.1 calls it calls and puts a space after each DSML token
+    for block, dsml in (("function_calls", DSML), ("tool_calls", DSML), ("calls", DSML + " ")):
+      with self.subTest(block=block):
+        self.set_output(('a\n\n<|DSML|tool_calls>\n<|DSML|invoke name="read">\n<|DSML|parameter name="path" string="true">3</|DSML|parameter>\n'
+          '<|DSML|parameter name="n" string="false">3</|DSML|parameter>\n</|DSML|invoke>\n'
+          '<|DSML|invoke name="ping">\n</|DSML|invoke>\n</|DSML|tool_calls>').replace('tool_calls', block).replace('|DSML|', dsml))
+        with patch.object(self.mock_tok, "_special_tokens", {DSML: 0}):
+          chunks = list(self.client.chat.completions.create(model="tool-model", messages=[{"role":"user", "content":"hi"}], tools=self.tools(),
+                                                           stream=True))
+        self.assertEqual(''.join(c.choices[0].delta.content or '' for c in chunks if c.choices), 'a')
+        calls = [tc for c in chunks if c.choices for tc in c.choices[0].delta.tool_calls or []]
+        self.assertEqual([(tc.function.name, json.loads(tc.function.arguments)) for tc in calls], [('read', {'path':'3', 'n':3}), ('ping', {})])
+        self.assertEqual(chunks[-1].choices[0].finish_reason, 'tool_calls')
 
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):
