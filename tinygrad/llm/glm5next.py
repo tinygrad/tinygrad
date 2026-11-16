@@ -1006,7 +1006,7 @@ class FFNBlock:
     shexp:Tensor|None = None
     shexp_gate:Tensor|None = None
     if grouped and hasattr(self, 'ffn_gate_shexp') and self.ffn_gate_exps.expert_parallel and \
-       isinstance(x.shape[1], int) and self.ffn_down_shexp.shard_axis == 1 and (not hasattr(self, 'ffn_gate_inp_shexp') or getenv("SHEXP_FUSED", 1)):
+       isinstance(x.shape[1], int) and self.ffn_down_shexp.shard_axis == 1:
       # the shared expert's partial sums are added by the kernel summing the experts' rows of every token (its gate: a scale of a row)
       shexp_act = gated_activation(self.ffn_gate_shexp(x), self.ffn_up_shexp(x), limit=self.config.swiglu_limit).contiguous()
       shexp = self.ffn_down_shexp.partial(shexp_act)
@@ -3846,7 +3846,7 @@ class Transformer:
     # every slot's checkpoint: its states of a position (the end of its last prompt), the hidden state of the last token
     self.seq_ckpt_h = _zeros(n, self._spec_dim, device=devs)
     # (SEQ_CKPT_HOST: the checkpoints' recurrent states in host memory: a copy a turn, the device memory more slots')
-    self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]), host=bool(getenv("SEQ_CKPT_HOST", 1)))[0]] +
+    self.seq_ckpt_states = [[_slot_pool(n, b.pool_rec, (1, *b.pool_rec.shape[1:]), host=True)[0]] +
                             [_slot_pool(n, p, (1, *p.shape[1:]))[0] for p in b.pool_conv] for b in self.blk if isinstance(b, GatedDeltaNetBlock)]
     # (GLM: the checkpoints' indexer rings (the last tokens of the prompt, its last pool's), see _seq_ckpt_copy)
     self.seq_ckpt_rings = [(b.indexer, _slot_pool(n, b.indexer.ring)[0]) for b in self.blk + [self.mtp]
