@@ -4,7 +4,7 @@ from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp, ParamArg, AddrSpace
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.function import function
-from tinygrad.schedule import export
+from tinygrad.tensor import export
 
 def exported(*tensors:Tensor) -> tuple[UOp, tuple[UOp, ...]]: return export(Tensor._bufferize(*tensors))
 

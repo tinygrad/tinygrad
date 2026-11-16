@@ -9,7 +9,7 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
-from tinygrad.schedule import export
+from tinygrad.tensor import export
 
 def sched_key(t:Tensor): return export(UOp.sink(t.uop))[0].key
 

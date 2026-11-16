@@ -1,16 +1,61 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
+from dataclasses import dataclass, field, replace
 from typing import Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
-from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
+from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod
-from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ
-from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
+from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING
+from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.mixin.rand import RandMixin
-from tinygrad.schedule import create_linear_with_vars, contiguous_mops_to_view, is_store_after
+# NOTE: engine.realize imports codegen, which has to be imported before schedule (they import each other)
+from tinygrad.engine.realize import run_linear, capturing
+from tinygrad.schedule import create_linear, contiguous_mops_to_view
 from tinygrad.device import Buffer, canonicalize_device, is_disk_device
-from tinygrad.engine.realize import run_linear
+
+# **** export: the stores of a tensor graph as a function with no runtime state. storage becomes EXTERN(slot), bound Variables lose
+# their value and ALLOCs get canonical slots. ctx.externs is what's mapped back
+
+@dataclass
+class ExportCtx:
+  externs: list[UOp] = field(default_factory=list)
+  allocs: dict[UOp, UOp] = field(default_factory=dict)
+
+def to_extern(ctx:ExportCtx, x:UOp) -> UOp|None:
+  # realized storage and bound Variables are runtime state
+  if not (x.is_bound_var or (x.op is Ops.BUFFER and x.addrspace is AddrSpace.GLOBAL)): return None
+  ctx.externs.append(x)
+  return x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=len(ctx.externs)-1, buffer=None, name=None, val=None))
+
+# ALLOCs get canonical scope-local id slots so structurally identical calls hash identically for the schedule cache
+# (fresh slots are all positive from the global counter; negative slots are already canonical)
+def canonicalize_alloc(ctx:ExportCtx, b:UOp) -> UOp|None:
+  if b.arg.slot >= 0 and b not in ctx.allocs: ctx.allocs[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.allocs)))
+  return ctx.allocs.get(b)
+
+pm_export: PatternMatcher = PatternMatcher([
+  (UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern),
+  (UPat(Ops.ALLOC, name="b"), canonicalize_alloc),
+  # a call body is its own scope for ALLOC slots, it shares the EXTERNs
+  (UPat(Ops.CALL, name="c"), lambda ctx,c:
+   c.replace(src=(graph_rewrite(c.body, pm_export, ctx=ExportCtx(ctx.externs), bottom_up=True, name="export call body"),)+c.src[1:])),
+])
+
+def export(stores:UOp) -> tuple[UOp, tuple[UOp, ...]]:
+  fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, name="export")
+  return fn, tuple(ctx.externs)
+
+def bind_alloc(b:UOp) -> UOp:
+  if b.device is None: raise RuntimeError("global storage needs a device, give the ALLOC one")
+  return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
+
+# EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
+pm_map_back = PatternMatcher([
+  (UPat(Ops.EXTERN, name="e"), lambda ctx,e: x.unbound() if (x:=ctx[e.arg.slot]).is_variable else x),
+  # global ALLOCs are bound to fresh BUFFERs for this invocation
+  (UPat(Ops.ALLOC, name="b"), lambda b: bind_alloc(b) if b.addrspace is AddrSpace.GLOBAL else None),
+])
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -165,7 +210,24 @@ class Tensor(RandMixin):
   @rewrite_group(lambda *tensors,ret: f"Schedule {len(tensors)} -> {len(ret[0].src)}")
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
-    return create_linear_with_vars(self._bufferize(*lst))
+    fn, externs = export(self._bufferize(*lst))
+    capture = bool(capturing) and bool(CAPTURING)
+    linear = create_linear(fn, plan=not capture)
+
+    # map back: the EXTERNs become the storage and the bound Variables of this invocation, ALLOCs get fresh storage
+    linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, enter_calls=True, name="map back")
+    # the values of the bound Variables the linear uses
+    used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
+    var_vals: dict[str, int] = {}
+    for b in externs:
+      if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
+        raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
+
+    # jit captures this linear, no need to execute
+    if capture:
+      capturing[0].add_linear(linear, var_vals)
+      return UOp(Ops.LINEAR, src=()), var_vals
+    return linear, var_vals
 
   def _bufferize(self, *lst:Tensor) -> UOp:
     """Gives these Tensor(s) storage. Returns the graph of the stores into it, the Tensors now reference the storage."""
@@ -203,12 +265,15 @@ class Tensor(RandMixin):
     sink = tensor_map.get(sink, sink)
     # Realized outputs become the storage their AFTER sequenced a store into. Compose with tensor_map before updating
     # Tensors so map values reference final storage.
-    storage = graph_rewrite(stores:=UOp.sink(*(u for u in sink.toposort() if is_store_after(u))), pm_drop_after, bottom_up=True, name="drop after")
+    # the stores are the AFTERs into storage: an AFTER on a BUFFER (an assign) or a STORE into an ALLOC. an ALLOC after a CALL is a call output
+    stores = UOp.sink(*(u for u in sink.toposort()
+                        if u.op is Ops.AFTER and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE)))
+    storage = graph_rewrite(stores, pm_drop_after, bottom_up=True, name="drop after")
     becomes_map = {u:s.shrink_to(u.shape) for u,s in zip(stores.src, storage.src)}
     assert not any(x in becomes_map for x in becomes_map.values())
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
-    return sink
+    return stores
 
   def schedule_linear(self, *lst:Tensor) -> UOp:
     """Creates the schedule needed to realize these Tensor(s)."""
