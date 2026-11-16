@@ -344,6 +344,16 @@ class TestGLMDSASequence(unittest.TestCase):
             (Tensor([seed], dtype=dtypes.uint32, device="CPU"), Tensor(np.arange(16, dtype=np.int32), device="CPU"))).numpy().reshape(-1)]
     self.assertGreater(sum(t != 42 for t in toks), 0)
 
+  def test_hash_uniform_below_one(self):
+    # (a u of 1.0: -log(u) 0, its Gumbel noise an infinity: that token sampled whatever its probability, at any temperature and top_p 1. with
+    # 24 bits (k+0.5)/2**24 rounds to 1.0 at k = 2**24-1: 2 of these 24.8M columns)
+    V = 154880
+    for s in range(40):
+      u = glm_dsa._hash_uniform(Tensor([s], dtype=dtypes.uint32, device="CPU"), Tensor(np.arange(4, dtype=np.int32), device="CPU"),
+                                Tensor.zeros(4, V, device="CPU")).numpy()
+      self.assertLess(u.max(), 1.0, s)
+      self.assertGreater(u.min(), 0.0, s)
+
   def test_seq_prefill_runout_retried(self):
     # (P2P_RETRY: the engine's prefill after a p2p run-out runs the prompt again (same args); slices (upto) and a third run-out raise)
     from tinygrad.llm.kernels.amd_glm_dsa import P2PRunOut
