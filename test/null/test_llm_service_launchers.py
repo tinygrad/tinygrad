@@ -90,25 +90,25 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     cmd = self.command("glm_flash_6x7900xtx.sh")
     for required in (
       "DEV=AMD", "AM_POWER_LIMIT=225", "BATCH_SLOTS=8", "SEQ_KV4=1", "SEQ_ROWS=3916800",
-      "SEQ_SIZES=1\\,2\\,4\\,8\\,12\\,13\\,18", "SEQ_STASH_GB=0", "SEQ_IDX_SHARD=1",
+      "SEQ_SIZES=1\\,2\\,4\\,8\\,12\\,13\\,18", "SEQ_STASH_GB=12", "SEQ_STASH_ENTRIES=64", "SEQ_IDX_SHARD=1",
       "PREFILL_CHUNK=768", "PREFILL_SIZES=192\\,768", "PREFILL_MB1_ROWS=1200", "PREFILL_SLICE=1536",
       "SEQ_STARVE_ALT=1", "--shard 6", "--max_context 524288",
+      # (the one GLM production line: the qualified stash and the picture limits a Pokemon window needs; a 9th picture is never refused)
+      "VISION_MAX_IMAGES=2048", "VISION_CACHE_MB=2048", "VISION_URL_CACHE_MB=512", "VISION_SLICE_MS=200", "SERVE_RENDER_CACHE=1",
+      "VISION_BUCKETS=320\\,576",
     ):
       self.assertIn(required, cmd)
     self.assertIn("GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf", cmd)
     self.assertNotIn("SPEC_DRAFTS=", cmd)  # D34 inherits GLM's default of two drafts.
     self.assertNotIn("AM_VM_RESET=1", cmd)
     self.assertIn("VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf", cmd)
-    self.assertIn("VISION_BUCKETS=576", cmd)
-    for optional in ("VISION_SLICE_MS", "VISION_MAX_TOKENS", "VISION_MAX_IMAGES", "VISION_CACHE_MB",
-                     "VISION_URL_CACHE_MB", "SERVE_RENDER_CACHE"):
-      self.assertNotIn(optional + "=", cmd)  # The benchmark default, not the Pokemon G3 opt-in.
+    self.assertNotIn("VISION_MAX_TOKENS=", cmd)  # (the picture cap stays the benchmark's 1,024 unless given)
     picture = self.command("glm_flash_6x7900xtx.sh", {"VISION_SLICE_MS": "200", "VISION_MAX_TOKENS": "1024",
                                                        "VISION_MAX_IMAGES": "2048", "VISION_CACHE_MB": "2048",
                                                        "VISION_URL_CACHE_MB": "512", "SERVE_RENDER_CACHE": "1"})
     for required in ("VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf", "VISION_SLICE_MS=200",
                      "VISION_MAX_TOKENS=1024", "VISION_MAX_IMAGES=2048", "VISION_CACHE_MB=2048",
-                     "VISION_URL_CACHE_MB=512", "VISION_BUCKETS=576", "SERVE_RENDER_CACHE=1"):
+                     "VISION_URL_CACHE_MB=512", "VISION_BUCKETS=320\\,576", "SERVE_RENDER_CACHE=1"):
       self.assertIn(required, picture)
     failed = subprocess.run(
       [SCRIPTS / "glm_flash_6x7900xtx.sh", "start"], env={**os.environ, "AM_POWER_LIMIT": "251"},
@@ -122,7 +122,8 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     self.assertIn("SEQ_STASH_GB=12", cmd)
     self.assertIn("SEQ_STASH_ENTRIES=64", cmd)
     # 128 entries of ~57.9 MB a card fill 6 GB: such a stash would silently hold no chunk
-    with self.assertRaises(subprocess.CalledProcessError) as e: self.command("glm_flash_6x7900xtx.sh", {"SEQ_STASH_GB": "6"})
+    with self.assertRaises(subprocess.CalledProcessError) as e:
+      self.command("glm_flash_6x7900xtx.sh", {"SEQ_STASH_GB": "6", "SEQ_STASH_ENTRIES": "128"})
     self.assertEqual(e.exception.returncode, 2)
     self.assertIn("holds no chunk", e.exception.output)
 
@@ -137,16 +138,12 @@ class TestLLMServiceLaunchers(unittest.TestCase):
       self.assertIn("needs SEQ_ROWS", e.exception.output)
       self.assertNotIn("VISION_MAX_TOKENS=", self.command(script))  # (the default stays the benchmark's 1,024)
 
-  def test_c5_null_harness_keeps_benchmark_defaults(self):
+  def test_c5_null_harness_matches_the_production_line(self):
     body = (ROOT / "test/null/production_c5_warmup.sh").read_text()
-    self.assertIn("export VISION_MMPROJ VISION_BUCKETS=576", body)
-    for optional in ("VISION_SLICE_MS", "VISION_MAX_TOKENS", "VISION_MAX_IMAGES", "VISION_CACHE_MB",
-                     "VISION_URL_CACHE_MB", "SERVE_RENDER_CACHE"):
-      self.assertNotIn(optional + "=", body)
-    self.assertIn('export "$_extra"', body)
-    for name in ("VISION_SLICE_MS", "VISION_MAX_TOKENS", "VISION_MAX_IMAGES", "VISION_CACHE_MB",
-                 "VISION_URL_CACHE_MB", "SERVE_RENDER_CACHE"):
-      self.assertIn(name, body)
+    self.assertIn("export VISION_MMPROJ VISION_BUCKETS=320,576", body)
+    for name, value in (("VISION_SLICE_MS", "200"), ("VISION_MAX_IMAGES", "2048"), ("VISION_CACHE_MB", "2048"),
+                        ("VISION_URL_CACHE_MB", "512"), ("SERVE_RENDER_CACHE", "1")):
+      self.assertIn(f"{name}=${{{name}:-{value}}}", body)
 
   def test_launch_files_do_not_set_folded_controls(self):
     obsolete = (
