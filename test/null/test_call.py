@@ -5,9 +5,9 @@ from tinygrad.codegen import to_program
 from tinygrad.helpers import Target
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.uop.ops import KernelInfo, Ops
-from tinygrad.schedule import transform_to_call, resolve_linear_call
+from tinygrad.schedule import transform_to_call, resolve_linear_call, export
 
-def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop)).body.key
+def sched_key(t:Tensor): return transform_to_call(export(UOp.sink(t.uop))[0]).body.key
 
 class TestCall(unittest.TestCase):
   def test_call_scalar_param_shape_mismatch(self):

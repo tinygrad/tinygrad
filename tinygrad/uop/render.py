@@ -37,6 +37,7 @@ def render_index(srcs) -> str: return ''.join(f"[{strip_parens(src)}]" for src i
 
 renderer = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), lambda x: x.arg.name if x.arg.name is not None else f"p{x.arg.slot}"),
+  (UPat(Ops.EXTERN, name="x"), lambda x: x.expr),
   (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x:
    x.arg.name if x.arg.name is not None else f"{'a' if x.op is Ops.ALLOC else 'b'}{x.arg.slot}"),
   (UPat(Ops.AFTER, name="x"), lambda ctx,x: ctx[x.src[0]]),
