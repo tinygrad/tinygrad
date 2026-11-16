@@ -19,7 +19,7 @@ ap.add_argument("--slots", type=int, default=64)
 ap.add_argument("--rows-4k", type=int, default=0)
 ap.add_argument("--no-pictures", action="store_true")
 ap.add_argument("--draws", type=int, default=300)
-ap.add_argument("--max-tokens", type=int, default=4000, help="max_tokens of the part a chats")
+ap.add_argument("--max-tokens", type=int, default=8000, help="max_tokens of the part a chats (a thinking model's reply must fit)")
 ap.add_argument("--ret-max-tokens", type=int, default=48, help="max_tokens of a part c reply (thinking off)")
 ap.add_argument("--draw-prompt", default="Name one fruit. Reply with the fruit's name only, no other words.",
                 help="part b's prompt: its first generated token must have a spread (a tail) at temperature 1")
@@ -51,8 +51,16 @@ if "a" in args.only:
             "what inflation is", "how a compiler works", "the rules of chess", "how bees make honey", "what a black hole is", "how to tie a bowline",
             "the history of the printing press", "how solar panels work", "what recursion is", "how tides work", "how a refrigerator works",
             "what DNS is", "how to brew coffee", "why leaves change colour"]
-  def chat(t): return post({"messages": [{"role": "user", "content": f"Explain {t} in about 200 words, in English."}], "max_tokens": args.max_tokens})
+  def chat(t, mt=args.max_tokens):
+    return post({"messages": [{"role": "user", "content": f"Explain {t} in about 200 words, in English."}], "max_tokens": mt})
   with ThreadPoolExecutor(8) as ex: res = list(ex.map(chat, topics))
+  # (an empty reply that ran out of tokens (finish_reason length: the thinking took them all) is asked again once at twice the limit, and said)
+  cut = [i for i, (c, r) in enumerate(res)
+         if c == 200 and r.get("choices") and not content(r).strip() and r["choices"][0].get("finish_reason") == "length"]
+  if cut:
+    with ThreadPoolExecutor(8) as ex: again = list(ex.map(lambda i: chat(topics[i], 2 * args.max_tokens), cut))
+    for i, cr in zip(cut, again): res[i] = cr
+    say(f"A: {len(cut)} empty replies cut by max_tokens {args.max_tokens} (thinking took them all) asked again at {2 * args.max_tokens}")
   ok = [r for c, r in res if c == 200 and r.get("choices")]
   stray = sum(len(STRAY.findall(content(r))) for r in ok)
   think = sum("<think>" in content(r) or "</think>" in content(r) for r in ok)
