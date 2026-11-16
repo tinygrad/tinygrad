@@ -294,11 +294,8 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   # get var_vals from the bound Variables
   var_vals: dict[str, int] = {}
   for b in externs:
-    if b.is_bound_var:
-      nm, val = b.expr, b.arg.val
-      if nm not in used_vars: continue
-      if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
-      var_vals[nm] = val
+    if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
+      raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
 
   # jit captures this schedule, no need to execute.
   if len(capturing) and CAPTURING:
