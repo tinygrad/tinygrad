@@ -5,7 +5,7 @@ Supported baseline: `redqwenflash` at `f3f31afb6c5268640d1602f371b406321c3732a9`
 | Service | Model | Hardware | Context | Devices |
 |---|---|---|---:|---|
 | Qwen C2 | Qwen3.8 Flash Next UD-IQ4_XS **V3.1** + separate MTP + picture tower | 6x AMD 7900 XTX (RDNA3) | 262144 | `DEV=AMD`, 6 shards |
-| GLM Flash C5 | GLM-5.3 Flash UD-IQ3_XXS, D34 quality configuration + mandatory picture tower | 6x AMD 7900 XTX (RDNA3) | 18 x 262144; 524288 server cap | `DEV=AMD`, 6 shards |
+| GLM Flash C5 | GLM-5.3 Flash UD-IQ3_XXS, D34 quality configuration + mandatory picture tower | 6x AMD 7900 XTX (RDNA3) | 18 seats, up to 262144 tokens each from a 3,916,800-token shared pool (14 full-length at once); 524288 server cap | `DEV=AMD`, 6 shards |
 | GLM C9 | GLM-5.3 UD-IQ4_XS; **text-only, no vision tower** | 14x AMD R9700 (RDNA4), ts5 | 262144 / 1048576 (1M profile: a 1,020,639-token request served with sane text at 170 W; 6-h soak at 180 W on 78b57b743 = results/w-pf53/ts5-acceptance.md) | `DEV=PCI+AMD`, `VFIO=1`, 14 shards |
 
 **Vision is mandatory on Qwen C2 and GLM Flash C5, whose models support it.** Their launchers verify the picture file and its hash before start; the CLI also checks the loaded model architecture and rejects a missing/empty working image path. **C9 has no compatible vision tower and is explicitly text-only per the 12:00 decision.** Its launcher always clears `VISION_MMPROJ`; this is intentional, not an unset production option. On C2/C5, no-projector launches remain strictly limited to the offline test configurations, never a deployed service.
@@ -106,7 +106,7 @@ Use 225 W on a hot host. Omit `AM_VM_RESET` for every ordinary start; on the fir
 
 ### GLM Flash C5, on its six-card serving VM
 
-D34 serves 18 concurrent users with 262144 context each (a 524288 server cap), Q4 KV, 18 warmed slots/active requests, 3,916,800 pooled rows and zero stash. The canonical complete environment is printed by the launcher without touching a GPU:
+D34 serves 18 concurrent users, each up to 262144 tokens (a 524288 server cap), Q4 KV, 18 warmed slots/active requests, 3,916,800 pooled rows and zero stash. The pool is shared: it holds 14 full 262,144-token conversations at once (3,916,800 / 262,144 = 14.9; 18 full ones need 4,718,592), so 18 seats fit only while the conversations average under 217,600 tokens; past that the least recent is evicted (and re-prefilled when it returns) or, with the stash profile below, parked in host RAM. The canonical complete environment is printed by the launcher without touching a GPU:
 
 ```bash
 bash extra/llm_service/glm_flash_6x7900xtx.sh --print-command
@@ -134,7 +134,7 @@ silently hold no chunk). Conversations under `SEQ_STASH_CTX` (32,768 tokens) are
 parked by 21 others resumed with the same 64-token greedy continuation as a never-parked twin and 0 tokens re-prefilled; 36
 conversations on 18 seats for 33.7 min: 690 requests, 0 errors, 0 lost, every return from cache or stash. Its cost is the wait at
 the seat: a cold first prompt of 34-90K tokens queues behind returning turns (all 36 first replies took 32 min). The proxy carries
-it as one backend of 18 running / 36 resident / 36 live with a client timeout of at least 1,800 s.
+it as one backend of 18 running / 36 resident / 36 live with a client timeout of at least 3,600 s: in that run the cold first replies took 109-1,933 s (median 570 s) and 2 of 36 took longer than 1,800 s (1,875 s and 1,933 s, cold prompts of 116K and 80K tokens waiting behind returning turns); 3,600 s is that maximum with a margin of about 2x, because the wait grows with the number of returning conversations ahead of a cold one.
 
 **Picture size (both six-card models).** By default a picture is downscaled to at most 1,024 tower rows (`VISION_MAX_TOKENS`, about
 0.8 MP for GLM's 28-pixel rows, 1 MP for Qwen's 32-pixel rows); the publishers allow 8,000 (GLM, `max_image_tokens`) and 16,384 (Qwen).
@@ -269,7 +269,7 @@ not tiled. No video, no audio.
 **Qwen C2:** 30 conversations a box at 262,144 tokens each. DeepSWE v1.1 58.05% (published 58.7%) and SWE-bench Pro: the table below.
 One request decodes at roughly 40 tokens a second on a full box (30 users), more on an idle one; not the 60 the board asked for.
 
-**GLM Flash C5:** 18 conversations a box (262,144 tokens each; the server's cap 524,288 is for scheduling, not one longer conversation).
+**GLM Flash C5:** 18 conversations a box, each up to 262,144 tokens from the shared 3,916,800-token pool (14 at full length at once; the server's cap 524,288 is for scheduling, not one longer conversation).
 Two draft tokens a step (three measured slower for Pokemon).
 
 **GLM C9 (ts5):** text only: GLM-5.3 has no vision tower; a picture is refused. The 1M-token profile serves ONE 1M conversation at a
