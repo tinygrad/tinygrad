@@ -170,6 +170,18 @@ class TestLLMServiceLaunchers(unittest.TestCase):
         self.assertIn(path, runbook)
         self.assertEqual(runbook.count(digest), 1, path)
 
+  def test_glm53_weights_checked_where_the_model_is(self):
+    # (the shards are in GLM_WEIGHTS/GLM-5.3-UD-IQ4_XS: the manifest's names are read there, so a wrong shard fails its hash, not 'no such file')
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+      (shards:=pathlib.Path(d) / "GLM-5.3-UD-IQ4_XS").mkdir()
+      for line in (SCRIPTS / "glm53-iq4xs.sha256").read_text().splitlines(): (shards / line.split()[1]).write_bytes(b"")
+      env = {"PATH": os.environ["PATH"], "HOME": d, "GLM53_POWER_LIMIT": "180", "GLM_WEIGHTS": d, "STATE_DIR": f"{d}/state"}
+      r = subprocess.run(["bash", str(SCRIPTS / "glm_14xr9700.sh"), "start"], env=env, capture_output=True, text=True, timeout=60)
+    self.assertNotEqual(r.returncode, 0)
+    self.assertNotIn("No such file", r.stdout + r.stderr)
+    self.assertIn("did NOT match", r.stdout + r.stderr)
+
   def test_runbook_and_null_warmups_are_self_contained(self):
     runbook = (ROOT / "RUNNING.md").read_text()
     self.assertNotIn("operations `results/", runbook)
