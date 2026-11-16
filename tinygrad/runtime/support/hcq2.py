@@ -201,11 +201,9 @@ def stage_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
     return UOp(Ops.LINEAR, src=(stage.store_call(src), dst.store_call(stage)))
 
   if Device[device].has_copy_queue: return None
-  # a kernel runs on the device of its first buffer, so the buffer on the enqueuing device goes first
-  bufs = (src, dst) if Device.canonicalize(devs[1]) == device and Device.canonicalize(devs[0]) != device else (dst, src)
-  params = {b: UOp.param(i, dtypes.u8, b.nbytes(), device=device) for i, b in enumerate(bufs)}
-  ast = params[dst].index(r:=UOp.range(src.nbytes(), 0)).store(params[src].index(r).load()).end(r).sink(arg=KernelInfo())
-  return lower_and_compile(call.replace(src=(ast, *bufs, *call.src[3:])))
+  out, inp = (UOp.param(i, dtypes.u8, b.nbytes(), device=device) for i, b in enumerate((dst, src)))
+  ast = out.index(r:=UOp.range(src.nbytes(), 0)).store(inp.index(r).load()).end(r).sink(arg=KernelInfo())
+  return lower_and_compile(call.replace(src=(ast, *call.src[1:])))
 
 pm_insert_copy_staging = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.STORE), UPat(name="dst"), UPat(name="src")), name="call", allow_any_len=True), split_rdma),
