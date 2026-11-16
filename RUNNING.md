@@ -165,11 +165,12 @@ SPEC_DRAFTS=3 PREFILL_SIZES=192,384,1152 VISION_MAX_IMAGES=2048 VISION_CACHE_MB=
   bash extra/llm_service/qwen_6x7900xtx.sh start
 ```
 
-**GLM Flash server** (the C5 launcher with the picture limits raised and the render cache on; `VISION_BUCKETS=576` is already C5's):
+**GLM Flash server** (the C5 launcher with the picture limits raised and the render cache on; `VISION_BUCKETS=320,576` adds a
+320-patch bucket for the game's 240x216 screenshot (72 rows = 288 patches; C5's own 576 alone pads it to 576); the GLM R2 games ran this line):
 
 ```bash
 VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf VISION_SLICE_MS=200 VISION_MAX_TOKENS=1024 VISION_MAX_IMAGES=2048 VISION_CACHE_MB=2048 \
-  VISION_URL_CACHE_MB=512 SERVE_RENDER_CACHE=1 AM_POWER_LIMIT=250 bash extra/llm_service/glm_flash_6x7900xtx.sh start
+  VISION_URL_CACHE_MB=512 VISION_BUCKETS=320,576 SERVE_RENDER_CACHE=1 AM_POWER_LIMIT=250 bash extra/llm_service/glm_flash_6x7900xtx.sh start
 ```
 
 **Qwen clients that drop old reasoning** in general (`chat_template_kwargs: {preserve_thinking: false}`): the same `SEQ_CKPT_TAIL=1`.
