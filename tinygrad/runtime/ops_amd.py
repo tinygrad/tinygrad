@@ -825,7 +825,7 @@ class AMIdleClocks:
   pinned high draws ~180 W (its smu sees it busy: auto doesn't lower it either), pinned low as with no process. 0: never lowered
   """
   devs:list[tuple[AMDev, Any]] = []
-  low, last, started = False, 0.0, False
+  low, last, started, stopped = False, 0.0, False, False
   caps:str|None = None  # (the clocks' caps of a working level now, see set_caps. None: AM_CLOCKS)
   lock = threading.Lock()
   @classmethod
@@ -837,9 +837,20 @@ class AMIdleClocks:
       from tinygrad import device as device_mod
       device_mod.launch_hooks.append(cls.wake)
       threading.Thread(target=cls._loop, args=(idle / 1000,), daemon=True, name="am_idle_clocks").start()
+      # (registered after device.py's finalize: runs before it)
+      atexit.register(cls.stop)
       cls.started = True
   @classmethod
+  def stop(cls):
+    """
+    (at exit, before the devices' finalize) the thread ends and no clocks are set from now on: its smu messages and a device's fini don't run
+    at once. waits for the message in flight (its own timeout: 10 s)
+    """
+    cls.stopped = True
+    if cls.lock.acquire(timeout=12): cls.lock.release()
+  @classmethod
   def wake(cls):
+    if cls.stopped: return
     with cls.lock:
       cls.last = time.perf_counter()
       # (the timelines the idle thread reads made here, before a launch: not in the thread)
@@ -889,11 +900,11 @@ class AMIdleClocks:
         except Exception as e: print(f"am {adev.devfmt}: setting the clocks failed: {type(e).__name__}: {e}", flush=True)
   @classmethod
   def _loop(cls, idle:float):
-    while True:
+    while not cls.stopped:
       time.sleep(min(idle, 0.25))
       if cls.low or time.perf_counter() - cls.last < idle: continue
       with cls.lock:
-        if cls.low or time.perf_counter() - cls.last < idle: continue
+        if cls.stopped or cls.low or time.perf_counter() - cls.last < idle: continue
         # (their work done: the value of the last submitted batch signaled. a timeline not made yet: nothing submitted, see wake)
         if any((t:=dev.__dict__.get("timeline")) is not None and (tl:=t.host.view(fmt='Q'))[0] < tl[1] for _, dev in cls.devs): continue
         # (low before they're lowered: a device lowered is raised again before the next launch, if another one failed too)

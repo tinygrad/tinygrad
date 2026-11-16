@@ -235,6 +235,12 @@ def _production_vision_projector_missing(architecture:str) -> bool:
     return not path.is_file() or path.stat().st_size == 0
   except OSError: return True
 
+STOP_DEADLINE_S = 60  # (a clean GLM Flash exit took 18 s on g3; the launchers wait 90 s for a stop)
+def _on_sigterm(*_):
+  import faulthandler
+  faulthandler.dump_traceback_later(STOP_DEADLINE_S, exit=True)
+  sys.exit(0)
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--model", "-m", default=list(models.keys())[0],
@@ -254,8 +260,9 @@ def main():
   if getenv("DEBUG_LOAD"):
     import os
     print(f"load: main at epoch {time.time():.2f} (the process made at epoch {os.stat('/proc/self').st_ctime:.2f})", flush=True)
-  # (SIGTERM exits as an interrupt does: the devices are finalized (am: their queues stopped, the clocks at their lowest), not left pinned high)
-  signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+  # (SIGTERM exits as an interrupt does: the devices are finalized (am: their queues stopped, the clocks at their lowest), not left pinned high.
+  # a stop ends the server: if the exit itself hangs, every thread's stack goes to the log and the process ends STOP_DEADLINE_S after the signal)
+  signal.signal(signal.SIGTERM, _on_sigterm)
   if args.benchmark: args.max_context = max(args.max_context, round_up(sum(args.benchmark)+1, 1024))
 
   # load the model
