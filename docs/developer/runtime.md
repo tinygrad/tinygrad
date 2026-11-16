@@ -41,6 +41,6 @@ The `Program` class is created for each loaded program. It is responsible for ex
 
 The `Compiler` class compiles the output from the `Renderer` and produces it in a device-specific format.
 
-::: tinygrad.device.Compiler
+::: tinygrad.renderer.Compiler
     options:
         members: true
