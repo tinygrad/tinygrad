@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
 if TYPE_CHECKING:
-  from tinygrad.llm.cli import SimpleTokenizer
+  from tinygrad.llm.tokenizer import SimpleTokenizer
   from tinygrad.llm.model import Transformer
 
 def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
