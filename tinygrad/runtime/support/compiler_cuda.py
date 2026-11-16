@@ -2,7 +2,7 @@ import hashlib, tempfile, ctypes, re, pathlib
 from tinygrad.helpers import to_char_p_p, colored, getenv, system, OSX
 from tinygrad.runtime.support.c import init_c_var
 from tinygrad.runtime.autogen import nvrtc, nvjitlink as jitlink
-from tinygrad.device import Compiler, CompileError
+from tinygrad.renderer import Compiler, CompileError
 
 CUDA_PATH = getenv("CUDA_PATH", "")
 root = pathlib.Path(__file__).parents[3]

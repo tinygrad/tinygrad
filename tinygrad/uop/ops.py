@@ -6,12 +6,12 @@ from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace, strong_dtype
 from tinygrad.dtype import PyConst, InvalidType, bitcast
-from tinygrad.device import Buffer, BufferSpec, MultiBuffer, canonicalize_device, is_disk_device, TinyELF
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, flatten
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
 from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST, get_shape, fully_flatten, to_tuple
-from tinygrad.helpers import colored, ansilen, printable, Target, is_image_shape, strides_for_shape
+from tinygrad.helpers import colored, ansilen, printable, Target, is_image_shape, strides_for_shape, is_disk_device, canonicalize_device
 if TYPE_CHECKING:
+  from tinygrad.device import Buffer, BufferSpec, MultiBuffer
   from tinygrad.renderer import Estimates
   from tinygrad.runtime.support.hcq2 import HCQInfo
   from tinygrad.renderer.x86 import Register
@@ -819,6 +819,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert dtype.itemsize > 0, f"not a storage dtype: {dtype}"
     assert isinstance(size, int), f"new_buffer size must be a concrete int, got {size}"
     slot = next(UOp.unique_num) if num is None else num
+    from tinygrad.device import Buffer, MultiBuffer
     buf = MultiBuffer(device, size * dtype.itemsize) if isinstance(device, tuple) else Buffer(device, size * dtype.itemsize)
     return UOp._buffer(size, dtype, slot, device=device, buffer=buf)
   @staticmethod
@@ -938,6 +939,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @property
   def buffer(self) -> Buffer|MultiBuffer:
+    from tinygrad.device import MultiBuffer
     # a bare STAGE (same-device materialization) keeps the source's buffer
     if self.op is Ops.STAGE and self.arg is None: return self.src[0].buffer
     if self.op in {Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER, Ops.BITCAST}: return self.src[0].buffer
@@ -956,7 +958,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return ret.bufs[self.arg]
     if self.op is Ops.MSTACK:
       ret = MultiBuffer.__new__(MultiBuffer)
-      ret.bufs = [cast(Buffer, x.buffer) for x in self.src]
+      ret.bufs = [cast("Buffer", x.buffer) for x in self.src]
       assert all_same([x.nbytes for x in ret.bufs]) and all_same([x.dtype for x in self.src]), "multibuffers mismatch buffers"
       return ret
     assert self.op is Ops.BUFFER and self.arg.buffer is not None, f"must be a realized BUFFER {self}"
@@ -1289,10 +1291,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     params = [u for u in self.src[1].src if u in self.arg.params]
     params += [p for p in self.arg.params if p.arg.slot not in {u.arg.slot for u in params}]
     return tuple(sorted(params, key=lambda p: p.arg.slot))
-
-  def to_elf(self) -> TinyELF:
-    sig = tuple((p.arg.name, p.arg.addrspace, p.dtype, p._shape) for p in self.kernel_params)
-    return TinyELF(self.src[3].arg, self.src[0].arg.function_name, self.arg.target, sig, self.key)
 
   @property
   def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL else self.src

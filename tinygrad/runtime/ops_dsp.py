@@ -1,6 +1,7 @@
 from __future__ import annotations
 import ctypes, os, mmap, tempfile, pathlib, array, threading, contextlib, subprocess, struct
-from tinygrad.device import BufferStorage, MMIOInterface, BufferSpec, Compiled, Allocator, Compiler, Program, TinyELF
+from tinygrad.device import BufferStorage, MMIOInterface, BufferSpec, Compiled, Allocator, Program
+from tinygrad.renderer import Compiler, TinyELF
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing, Target, unwrap

@@ -3,7 +3,8 @@ import socket, struct, sys, signal, ctypes, time, json
 from tinygrad.runtime.support.system import PCIDevice, RemoteCmd, System, REMOTE_REQ, REMOTE_RESP
 from tinygrad.runtime.support.am.amdev import AMMemoryManager
 from tinygrad.runtime.support.system import FileIOInterface
-from tinygrad.device import Device, TinyELF
+from tinygrad.device import Device
+from tinygrad.renderer import TinyELF
 from tinygrad.helpers import DEBUG, Target, to_mv
 
 def resp(resp0=0, resp1=0, status=0): return struct.pack(REMOTE_RESP, status, resp0, resp1)

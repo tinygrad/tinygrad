@@ -2,15 +2,15 @@ from __future__ import annotations
 from dataclasses import dataclass, replace, field
 from collections import defaultdict
 from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
-import importlib, inspect, functools, itertools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap, time, statistics
-from tinygrad.helpers import mv_address, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
-from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
-from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, perf_counter_us, HCQ_RUNTIME_DEV, to_tuple
-from tinygrad.dtype import dtypes, DType, AddrSpace
+import importlib, inspect, functools, itertools, pathlib, os, contextlib, atexit, pickle, decimal, mmap, time, statistics
+from tinygrad.helpers import mv_address, LRU, getenv, DEBUG, GlobalCounters, PROFILE, temp, colored
+from tinygrad.helpers import Context, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
+from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, unwrap, round_up, is_numpy_ndarray
+from tinygrad.helpers import cpu_profile, perf_counter_us, HCQ_RUNTIME_DEV, is_disk_device, canonicalize_device_name
+from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import MMIOInterface
 if TYPE_CHECKING:
-  from tinygrad.renderer import Renderer
+  from tinygrad.renderer import Renderer, Compiler, TinyELF
   from tinygrad.uop.ops import PatternMatcher
 
 # **************** Device ****************
@@ -24,10 +24,8 @@ class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
     self._opened_devices:set[str] = set()
-  @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def _canonicalize(self, device:str) -> str: return re.sub(r":0$", "", (d:=device.split(":", 1)[0].upper()) + device[len(d):])
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
-  def canonicalize(self, device:str|None) -> str: return self._canonicalize(device if device is not None else Device.DEFAULT)
+  def canonicalize(self, device:str|None) -> str: return canonicalize_device_name(device if device is not None else Device.DEFAULT)
   def __getitem__(self, ix:str) -> Compiled:
     ix = self.canonicalize(ix)
     assert ALLOW_DEVICE_USAGE or ix.split(":")[0] in ["DISK", "NPY", "PYTHON"], f"usage of device {ix} disallowed"
@@ -63,13 +61,6 @@ class _Device:
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device: _Device = _Device()
 atexit.register(lambda: [Device[dn].finalize() for dn in tuple(Device._opened_devices)])
-
-def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
-  if not isinstance(device, (tuple, list)): return Device.canonicalize(device)
-  return canonical[0] if len(canonical:=tuple(Device.canonicalize(d) for d in device)) == 1 else canonical
-
-def is_disk_device(device:str|tuple[str, ...]) -> bool:
-  return any(d.split(":", 1)[0].upper() in ("DISK", "NVME") for d in to_tuple(device))
 
 # **************** Profile ****************
 
@@ -324,43 +315,6 @@ class HostAllocator(Allocator):
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
 
 # **************** for Compiled Devices ****************
-
-class CompileError(Exception): pass
-
-class Compiler:
-  def __init__(self, cachekey:str|None=None): self.cachekey = cachekey if CCACHE else None
-  def compile(self, src:str) -> bytes: return src.encode()   # NOTE: empty compiler is the default
-  def compile_cached(self, src:str) -> bytes:
-    if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
-      assert not getenv("ASSERT_COMPILE"), f"tried to compile with ASSERT_COMPILE set\n{src}"
-      lib = self.compile(src)
-      if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
-    return lib
-  def disassemble(self, lib:bytes): pass
-  def server(self, cmd:str, arch:str, *args) -> subprocess.Popen:
-    argv = f"{cmd} {pathlib.Path(__file__).parent}/runtime/support/compileserver.py {type(self).__module__}:{type(self).__name__} {arch}"
-    return subprocess.Popen(argv.split() + [str(a) for a in args], stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
-  def compile_server(self, src:str, proc:subprocess.Popen) -> bytes:
-    unwrap(proc.stdin).write(struct.pack("I", len(src.encode())) + src.encode())
-    if (lib:=unwrap(proc.stdout).read(struct.unpack("I", unwrap(proc.stdout).read(4))[0])): return lib
-    raise CompileError("Compilation Error")
-
-
-@dataclass
-class TinyELF:
-  lib: bytes
-  name: str
-  target: Target
-  # tuple of (name, addrspace, dtype, shape), one per arg in the kernel's order. an ALU arg is a value, the rest are buffers
-  signature: tuple[tuple[str|None, AddrSpace, DType, tuple], ...]
-  profile_key: bytes|None = None
-
-  @staticmethod
-  def iter_sig(signature:tuple[tuple[str|None, AddrSpace, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
-    for _,a,dt,_ in signature:
-      if a is not AddrSpace.ALU: dt = dtypes.uint64 # a buffer is passed by its address
-      yield (offset:=round_up(offset, dt.itemsize)), dt
-      offset += dt.itemsize
 
 class Program(Generic[DeviceType]):
   def __init__(self, dev:DeviceType, obj:TinyELF, links:dict[str,Program[DeviceType]]): pass

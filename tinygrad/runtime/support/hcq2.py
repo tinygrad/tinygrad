@@ -4,7 +4,8 @@ import itertools, ctypes, struct, time
 from dataclasses import replace, dataclass, field
 from collections import defaultdict, Counter
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, flatten, DEBUG, VIZ, ALL2ALL, PROFILE
-from tinygrad.device import Device, Buffer, BufferSpec, Compiled, TinyELF, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
+from tinygrad.device import Device, Buffer, BufferSpec, Compiled, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
+from tinygrad.renderer import TinyELF
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
 from tinygrad.uop.ops import pm_renumber_slots, CountCtx, sint_to_uop, pm_flatten_linear
 from tinygrad.dtype import dtypes, AddrSpace, truncate

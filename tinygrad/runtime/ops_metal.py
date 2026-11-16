@@ -2,7 +2,8 @@ from __future__ import annotations
 import subprocess, pathlib, struct, ctypes, tempfile, functools, platform, weakref, threading, array, sys
 from tinygrad.helpers import to_mv, round_up, cache_dir, unwrap, prod, dedup, to_tuple
 import tinygrad.runtime.support.objc as objc
-from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, Compiler, CompileError, MMIOInterface
+from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface
+from tinygrad.renderer import Compiler, CompileError, TinyELF
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
@@ -132,7 +133,7 @@ class MetalQueue(HWQueue):
     self.rows, self.cmds, self.sizes, self.stamps, self.nbytes = list[tuple[int, UOp]](), list[UOp](), list[tuple[int, int]](), list[UOp](), 0
 
   def exec(self, call:UOp, prg:UOp):
-    args, obj = get_call_kernel_args(call, prg, self.devs), prg.to_elf()
+    args, obj = get_call_kernel_args(call, prg, self.devs), TinyELF.from_program(prg)
     self.rows += (rows:=layout_args(args, off:=round_up(self.nbytes, 256)))
     self.nbytes = max([o + w.dtype.itemsize for o, w in rows], default=off + 8)
 

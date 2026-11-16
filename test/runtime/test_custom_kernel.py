@@ -8,6 +8,7 @@ from tinygrad.schedule.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer import TinyELF
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
 from test.helpers import assert_kernel_count
@@ -45,7 +46,7 @@ def custom_add_var_kernel(*srcs:UOp, n_slot:int) -> UOp:
 def run_kernel_args(out:Tensor, name:str) -> list[str|None]:
   linear, var_vals = out.linear_with_vars()
   sink = [u for u in linear.toposort(enter_calls=True) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) and u.arg.name == name][0]
-  sig = to_program(sink, Device[Device.DEFAULT].renderer).to_elf().signature
+  sig = TinyELF.from_program(to_program(sink, Device[Device.DEFAULT].renderer)).signature
   run_linear(linear, var_vals)
   return [nm for nm, *_ in sig]
 

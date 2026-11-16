@@ -6,13 +6,13 @@ from typing import Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod
-from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING
+from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
 from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.mixin.rand import RandMixin
 # NOTE: engine.realize imports codegen, which has to be imported before schedule (they import each other)
 from tinygrad.engine.realize import run_linear, capturing
 from tinygrad.schedule import create_linear, contiguous_mops_to_view
-from tinygrad.device import Buffer, canonicalize_device, is_disk_device
+from tinygrad.device import Buffer
 
 # **** export: the stores of a tensor graph as a function with no runtime state. storage becomes EXTERN(slot), bound Variables lose
 # their value and ALLOCs get canonical slots. ctx.externs is what's mapped back

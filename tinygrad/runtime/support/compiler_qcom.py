@@ -1,5 +1,5 @@
 import ctypes, struct, platform, pathlib, shutil
-from tinygrad.device import Compiler
+from tinygrad.renderer import Compiler
 from tinygrad.helpers import DEBUG, system, fetch
 from tinygrad.runtime.support.compiler_mesa import disas_adreno
 # see https://github.com/sirhcm/tinydreno
