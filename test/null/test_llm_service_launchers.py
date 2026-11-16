@@ -52,6 +52,7 @@ class TestLLMServiceLaunchers(unittest.TestCase):
       "SPEC_DRAFTS_BY_SIZE=1:2\\,2:2\\,4:3\\,8:3\\,16:3",
       "SEQ_GATHER_UNION=65536",
       "SEQ_STASH_GB=0",
+      "SEQ_STICKY=30",
       "PREFILL_CHUNK=4032",
       "PREFILL_SIZES=1344\\,2688",
       "MODEL_ALIASES=zai-org/GLM-5.3",
