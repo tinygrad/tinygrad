@@ -6,7 +6,7 @@ from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
 from tinygrad.engine.realize import warm_worker_pool
 from tinygrad.engine.jit import capture_parallel, warmup_select, warmup_wanted, _TinyJit, run_as_they_come
 from tinygrad.engine.realize import run_linear, compile_linear, link_linear
-from tinygrad.llm.kernels.amd_glm import rows_shifted, rows_pick, pool_expand
+from tinygrad.llm.kernels.amd_glm import pool_expand
 from tinygrad.llm.kernels.amd_glm import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported, find_packed, moe_linear, \
   hc_coeffs, hc_pre, q8_quantize, q8_linear, QUANT_SIZES, q8_quantize_cache_clear, amd_flash_attention_decode as flash_attention_decode, moe_route, \
   moe_grouped_linear, amd_flash_attention_mla_prefill as flash_attention_mla_prefill, partial_sum, fuse_gate_up, kda_decode, moe_router, \
@@ -2542,9 +2542,7 @@ class Transformer:
         if self.gated:
           # (the streams of all the rows: the MTP layer's input, their last mix the output's)
           if self.config.spec_drafts and (1):
-            # (the MTP layer's input of every device's rows from its own (a row the streams of the one before: the devices' last rows
-            # gathered), the last row's streams picked: not every row's streams gathered)
-            x = self._mtp_prefill_rows(emb, xs, cast(UOp, start_pos), T, n)
+            raise AssertionError("gated speculative prefill: use tinygrad.llm.qwen4exp")
 
         else: x = Tensor.cat(*[_on_lane(i, all_gather, xi.mean(2), 1) for i, xi in enumerate(xs)], dim=1)
       else:
@@ -2553,7 +2551,7 @@ class Transformer:
         if sp: x = shard_rows(x, 1)
         for block in self.blk: x = block(x, start_pos, T, ple_emb=ple)
         if self.gated:
-          if self.config.spec_drafts: x = self._mtp_prefill(emb, x, cast(UOp, start_pos), T)
+          if self.config.spec_drafts: raise AssertionError("gated speculative prefill: use tinygrad.llm.qwen4exp")
         else: x = all_gather(x.mean(2), 1) if sp else self._hc_out(x)
       if self.config.spec_drafts and not self.gated: x = self._mtp_prefill(emb, x, cast(UOp, start_pos), T, sp=bool(sp))
       if x.shape[1] != 1: x = x[:, :T]
@@ -2629,50 +2627,12 @@ class Transformer:
     k = self.config.spec_drafts
     self._spec_row0_jit(UOp.variable("spec_row", 0, 2*k+1).bind(row), UOp.variable("spec_keep", 0, 1).bind(int(row != 0)))
 
-  def _mtp_prefill_rows(self, emb:Tensor, xs:list[Tensor], start_pos:UOp, T:UOp, n:int) -> Tensor:
-    """_mtp_prefill (gated) of the micro batches' streams xs (1, n, count, dim) split on the rows. returns (1, T, count, dim) whose last row is
-    the last row's streams (the others zeros: only the last one is read)"""
-    qm, hc, mb = cast(Any, self.mtp), unwrap(self.config.hc), len(xs)
-    W = hc.count * self.config.dim
-    flat = [x.reshape(n, W) for x in xs]
-    prev = rows_shifted(flat, self._spec_h[0])
-    embp = emb.pad_to((1, n*mb, emb.shape[-1]))
-    mixed = []
-    for i in range(mb):
-      e_l = shard_rows(embp[:, i*n:(i+1)*n].contiguous(), 1)
-      xs_l = qm._project_input_split(e_l, prev[i].reshape(1, n, W))
-      qm._init_state(xs_l)
-      mixed.append(_on_lane(i, all_gather, cast(GatedResidual, qm.hc_attn).pre_split(xs_l)[0], 1, dtypes.half))
-    m = qm._cache_input(Tensor.cat(*mixed, dim=1).float(), start_pos, T)
-    last = rows_pick(flat, T - 1, T, SEL_LANE)
-    effects = [m[:, :, :1, :1].contiguous(), self._spec_h[0:1].assign(last)]
-    if self._effects is None: Tensor.realize(*effects)
-    else: self._effects += effects
-    return last.reshape(1, 1, hc.count, self.config.dim)
-
   def _mtp_prefill(self, emb:Tensor, x:Tensor, start_pos:UOp, T:UOp, sp:bool=False) -> Tensor:
     """
     the MTP layer on a prompt chunk (for its caches): emb (1, T, D) the embeddings of its tokens, x (1, rows, D) the model's (padded) output.
     the hidden state of the position before the chunk is row 0 of _spec_h, the one of its last token is written there. returns x
     """
-    if self.gated:
-      # (the streams of every position: the MTP layer's input of the next one, the ones before the chunk's first in _spec_h's row 0)
-      hs = x.flatten(2).float()
-      emb, carry = emb.pad_to((1, x.shape[1], emb.shape[-1])), self._spec_h[0:1].unsqueeze(0).contiguous()
-      qm, R = cast(Any, self.mtp), int(x.shape[1])
-      if (1) and self.sequence_parallel(R) and amd_custom_kernels_supported(x.device):
-        # (the MTP layer's input projection and mix of every device's rows only (of the gathered streams: its part kept), its mixed input
-        # gathered for the caches: not the projections of every row on every device)
-        e_l, h_l = shard_rows(emb.contiguous(), 1), shard_rows(carry.cat(hs[:, :-1], dim=1).contiguous(), 1)
-        xs_l = qm._project_input_split(e_l, h_l)
-        qm._init_state(xs_l)
-        mixed = cast(GatedResidual, qm.hc_attn).pre_split(xs_l)[0]
-        m = qm._cache_input(all_gather(mixed, 1, dtypes.half).float(), start_pos, T)
-      else: m = qm.prefill_cache(emb, carry.cat(hs[:, :-1], dim=1), start_pos, T)
-      effects = [m[:, :, :1, :1].contiguous(), self._spec_h[0:1].assign(hs[0].shrink(((T-1, T), None)))]
-      if self._effects is None: Tensor.realize(*effects)
-      else: self._effects += effects
-      return x
+    assert not self.gated, "gated speculative prefill: use tinygrad.llm.qwen4exp"
     hn = self.output_norm(x).float()
     emb, carry = emb.pad_to((1, x.shape[1], emb.shape[-1])), self._spec_h[0:1].unsqueeze(0).contiguous()
     # the MTP layer reads the carry before it's written (the schedule orders an assign after the reads). realized with the call's output
