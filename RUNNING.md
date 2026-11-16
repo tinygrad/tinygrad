@@ -316,6 +316,11 @@ too on every decoding step (whole-vocabulary sampling: stray foreign tokens; com
 ## API and production environment contract (72 names)
 
 API sampling: a request without a temperature uses the model's GGUF `general.sampling.temp` and `top_p` (Qwen 3.8 Flash: 1.0 / 0.95); absent sampling metadata keeps the previous greedy behavior, explicit request values are unchanged, and startup logs report the defaults.
+**Penalties are accepted and IGNORED** (every model, every line): a request's `presence_penalty`, `frequency_penalty` and
+`repetition_penalty` (any value) get HTTP 200, no error and no log line, and the reply is sampled with temperature / top_p / top_k
+only. Qwen's publisher recommends presence_penalty 0 (thinking) / 1.5 (non-thinking) against endless repetition: a client that
+relies on it gets none here (Pokemon, Nov 16: 0.2% of Qwen replies looped one sentence to the 32,768-token cap). `smoke.py` part b
+sends all three and prints this.
 
 Count: **30 launch options, 30 operator knobs and 12 short diagnostics (72 total)**. Kernel/model/scheduler decisions already folded into the implementation are not exposed as launch assignments; the launchers and NULL harnesses no longer pass those obsolete names.
 

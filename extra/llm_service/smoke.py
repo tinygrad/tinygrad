@@ -4,7 +4,8 @@
 #  a  20 chats with NO sampling parameters: status 200, stray-script characters in content = 0, no <think> in content, reasoning in
 #     reasoning_content on every reply (--no-reasoning for a model that does not think), five printed for the eye
 #  b  sampling honoured: one-token draws at T 1 / top_p 1 and T 1 / top_p 0.95: the top_p 0.95 arm draws (almost) nothing from the
-#     top_p 1 arm's last 5% tail (fails if that tail is empty); a request with top_k and an unknown field is answered (200)
+#     top_p 1 arm's last 5% tail (fails if that tail is empty); a request with top_k and an unknown field is answered (200), and one
+#     with presence / frequency / repetition penalties (200; this server ignores them: printed, RUNNING.md)
 #  c  returning turns under pressure: N = max(80, 1.25 x slots) conversations, a secret each, then every one returns and must answer its
 #     OWN secret (100%); text, then one picture each
 #  d  10 pictures in one request accepted; a 3840x2160 picture's prompt tokens (checked against --rows-4k if given)
@@ -80,11 +81,14 @@ if "b" in args.only:
     tail.add(tok)
   out, allow = sum(k for tok, k in arms["P95"].items() if tok in tail), max(2, int(0.01 * args.draws))
   code, _r = post({"messages": msgs, "max_tokens": 4, "top_k": 20, "temperature": 0.7, "frobnicate": True})
+  pcode, _r = post({"messages": msgs, "max_tokens": 4, "presence_penalty": 1.5, "frequency_penalty": 0.5, "repetition_penalty": 1.1})
   say(f"B sampler: {args.draws} draws an arm; P1 distinct {len(p1)}, its 5% tail {len(tail)} tokens ({acc} draws); P95 draws in that tail: {out} "
       f"(allow {allow}); top P1 {p1.most_common(4)} P95 {arms['P95'].most_common(4)}; top_k + unknown field: HTTP {code}")
+  say(f"B penalties: presence_penalty / frequency_penalty / repetition_penalty: HTTP {pcode}, accepted and IGNORED by this server "
+      "(the reply is sampled with temperature / top_p / top_k only: RUNNING.md)")
   # (no tail = no power: the arm cannot show a top_p that is ignored; pick a --draw-prompt with a spread instead of passing)
   if not tail: say("B has NO POWER: the P1 arm has no 5% tail (its first token is too certain): use a --draw-prompt with a spread")
-  if out > allow or code != 200 or not tail or min(sum(a.values()) for a in arms.values()) < args.draws * 0.9: fails.append("b")
+  if out > allow or code != 200 or pcode != 200 or not tail or min(sum(a.values()) for a in arms.values()) < args.draws * 0.9: fails.append("b")
 
 if "c" in args.only:
   n = max(80, int(1.25 * args.slots + 0.999))
