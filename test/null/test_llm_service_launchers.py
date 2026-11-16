@@ -117,6 +117,15 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     self.assertEqual(failed.returncode, 2)
     self.assertIn("225", failed.stderr)
 
+  def test_glm_flash_stash_profile(self):
+    cmd = self.command("glm_flash_6x7900xtx.sh", {"SEQ_STASH_GB": "12", "SEQ_STASH_ENTRIES": "64"})
+    self.assertIn("SEQ_STASH_GB=12", cmd)
+    self.assertIn("SEQ_STASH_ENTRIES=64", cmd)
+    # 128 entries of ~57.9 MB a card fill 6 GB: such a stash would silently hold no chunk
+    with self.assertRaises(subprocess.CalledProcessError) as e: self.command("glm_flash_6x7900xtx.sh", {"SEQ_STASH_GB": "6"})
+    self.assertEqual(e.exception.returncode, 2)
+    self.assertIn("holds no chunk", e.exception.output)
+
   def test_c5_null_harness_keeps_benchmark_defaults(self):
     body = (ROOT / "test/null/production_c5_warmup.sh").read_text()
     self.assertIn("export VISION_MMPROJ VISION_BUCKETS=576", body)

@@ -123,6 +123,19 @@ The mandatory C5 baseline sets **`VISION_MMPROJ` and `VISION_BUCKETS=576` only**
 
 With `SESSION_END_TOKEN` unset (the default), explicit backend session-end calls return the expected **403 `backend_session_end_disabled`**, not generation failures. An integrated proxy releases its own session bookkeeping, while backend conversations remain in bounded 18-slot residency until reuse, NONDROP eviction or restart; `ended_dropped=0` only counts processed explicit ends and is **not** proof of backend memory release. Actual coordinated cleanup requires a matching out-of-band token on proxy and backends plus active/completed/duplicate-end tests (including resident/stash drops, `already_ended` and later admissions); never expose the secret in `--print-command`, and enabling the endpoint alone does not move model-seat release before verifier execution.
 
+**C5 stash profile (36 conversations on 18 seats).** `SEQ_STASH_GB=12 SEQ_STASH_ENTRIES=64 extra/llm_service/glm_flash_6x7900xtx.sh start`
+adds a host-RAM stash: a conversation pushed out of the 18 device slots parks its states and cache in host memory and comes back without
+a re-prefill. Sizes (NULL C5, `results/w-gpf/stash/stashsize-null-c5-gb12e64.txt`): a card holds 57.9 MB an entry and 1.97 MB a
+3,072-token chunk; 12 GB / 64 entries = 4,205 chunks a card = 12,917,760 tokens beside the 3,916,800 pooled rows (64 parked
+conversations of ~200K, 49 at a full 262K). The stash is allocated at warm-up: x6 cards = ~72 GB of host RAM (guest MemAvailable
+94.5 -> ~23 GB on a 109 GB VM; leave it at least 8 GB). The launcher refuses a `SEQ_STASH_GB` too small for its entries (it would
+silently hold no chunk). Conversations under `SEQ_STASH_CTX` (32,768 tokens) are not parked; they re-prefill. Proof (g1, tree
+03896ef29, `results/w-gpf/stash/`): greedy 4K / 64K / 262K equal to the reference; a 100K, a 262K and a 40K-with-pictures conversation
+parked by 21 others resumed with the same 64-token greedy continuation as a never-parked twin and 0 tokens re-prefilled; 36
+conversations on 18 seats for 33.7 min: 690 requests, 0 errors, 0 lost, every return from cache or stash. Its cost is the wait at
+the seat: a cold first prompt of 34-90K tokens queues behind returning turns (all 36 first replies took 32 min). The proxy carries
+it as one backend of 18 running / 36 resident / 36 live with a client timeout of at least 1,800 s.
+
 ### GLM C9, on ts5 — text-only; no vision tower
 
 **GLM-5.3 is text-only under the 12:00 product decision.** It has no compatible vision encoder or projector. C9's launcher forces `VISION_MMPROJ` empty, including when the parent shell supplied another value; the generic CLI requires a projector only for the supported Qwen and GLM Flash vision models. Do not substitute GLM Flash's incompatible tower or claim that a file gives C9 vision.
@@ -249,8 +262,8 @@ Any setting not listed here is not supported: its production value is compiled i
 | `SEQ_ROWS` | 4310016 (example) | 3916800 | 268800 | Reserved cache rows for this capacity profile. |
 | `SEQ_SIZES` | 1,8,16,24,30 | 1,2,4,8,12,13,18 | 1,4,8,16 | Warmed decode batch sizes. |
 | `SEQ_SLOTS` | 64 | 18 | 32 | Warmed resident conversation slots. |
-| `SEQ_STASH_ENTRIES` | derived from stash profile; unset in the running env | 128 | 128 | Host-stash entry cap. |
-| `SEQ_STASH_GB` | 46 | 0 | 0 | Host-stash bytes per device. |
+| `SEQ_STASH_ENTRIES` | derived from stash profile; unset in the running env | 128 (stash profile: 64) | 128 | Host-stash entry cap; with `SEQ_STASH_GB` > 0 each entry takes ~57.9 MB a card before any chunk. |
+| `SEQ_STASH_GB` | 46 | 0 (stash profile: 12) | 0 | Host-stash bytes per device. |
 | `SPEC_DRAFTS` | 2 | unset (model default 2) | 2 | Speculative tokens except per-size override. |
 | `SPEC_DRAFTS_BY_SIZE` | empty | empty | 1:2,2:2,4:3,8:3,16:3 | Draft count by active batch size. |
 | `VFIO` | auto/unset | auto/unset | 1 | Device pass-through mode. |

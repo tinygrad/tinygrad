@@ -19,7 +19,7 @@ SERVER_ENV=(
   SEQ_IDX_SHARD=1 SEQ_KV4=1
   PREFILL_PARTS=4 LOAD_DEFER=1 WARMUP_JITS=all
   SEQ_ROWS="${SEQ_ROWS:-3916800}" SEQ_SLOTS="${SEQ_SLOTS:-18}" SEQ_MAX_ACTIVE="${SEQ_MAX_ACTIVE:-18}"
-  SEQ_SIZES="${SEQ_SIZES:-1,2,4,8,12,13,18}" SEQ_STASH_GB="${SEQ_STASH_GB:-0}" SEQ_STASH_ENTRIES=128
+  SEQ_SIZES="${SEQ_SIZES:-1,2,4,8,12,13,18}" SEQ_STASH_GB="${SEQ_STASH_GB:-0}" SEQ_STASH_ENTRIES="${SEQ_STASH_ENTRIES:-128}"
   AMD_SCRATCH_MIN=576 AMD_SCRATCH_MAX=64 SEQ_COPY_SCRATCH=1
   PREFILL_CHUNK="${PREFILL_CHUNK:-768}" PREFILL_SIZES="${PREFILL_SIZES:-192,768}" PREFILL_MB1_ROWS=1200
   PREFILL_SLICE=1536 SEQ_STARVE_ALT=1
@@ -31,6 +31,11 @@ for _name in API_KEY API_KEY_FILE MODEL_ALIASES MODEL_OWNED_BY KEEPALIVE ENC_CAC
   MEM_TRACE DEBUG_LOAD AMD_SCRATCH_LOG KPROF KPROF_TOP LIN_NAMES TELEMETRY_LOG SERVE_TRACE DISABLE_AMD_KERNELS; do
   if [[ -n ${!_name+x} ]]; then SERVER_ENV+=("$_name=${!_name}"); fi
 done
+# a parked conversation's states take ~57.9 MB a card before any 3,072-token chunk (results/w-gpf/stash/stash_sizes.py):
+# a stash too small for its entries silently holds 0 chunks, so refuse it (the qualified stash profile is 12 GB / 64 entries)
+if ! awk -v gb="${SEQ_STASH_GB:-0}" -v n="${SEQ_STASH_ENTRIES:-128}" 'BEGIN{exit !(gb == 0 || gb * 1000 >= n * 57.9 + 100)}'; then
+  echo "SEQ_STASH_GB=${SEQ_STASH_GB} holds no chunk beside SEQ_STASH_ENTRIES=${SEQ_STASH_ENTRIES:-128} entries of 57.9 MB a card" >&2; exit 2
+fi
 COMMAND=(python3 -m tinygrad.llm --model "$MODEL" --shard 6 --max_context 524288 --serve "${PORT:-8000}")
 SERVER_ENV+=(VISION_MMPROJ="$MMPROJ" VISION_BUCKETS="${VISION_BUCKETS:-576}")
 
