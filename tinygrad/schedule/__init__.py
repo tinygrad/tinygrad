@@ -195,7 +195,7 @@ class ExportCtx:
   allocs: dict[UOp, UOp] = field(default_factory=dict)
 
 def contiguous_mops_to_view(ctx:dict[UOp, int]|None, c:UOp, src:UOp):
-  """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range. with a ctx, the view is a PARAM and ctx maps it to its slot"""
+  """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range. a ctx collects the views, mapped to their slot"""
   if not all_int(c.shape): return None
   buf = src.base
   while buf.op is Ops.BITCAST: buf = buf.src[0].base
@@ -207,7 +207,7 @@ def contiguous_mops_to_view(ctx:dict[UOp, int]|None, c:UOp, src:UOp):
   elif buf.op in {Ops.BUFFER, Ops.EXTERN} and (cv := src.contiguous_view()) is not None and cv[0].op in {Ops.BUFFER, Ops.EXTERN}:
     buf, offset = cv
     view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
-    if ctx is not None: view = view.param_like(ctx.setdefault(view, len(ctx)))
+    if ctx is not None: ctx.setdefault(view, len(ctx))
     view = view.reshape(c.shape)
   else: return None
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
@@ -269,7 +269,8 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   fn, externs = export(big_sink)
   # a contiguous view of storage is a different buffer: it's an input of the scheduled function, the call arg is the view
   views: dict[UOp, int] = {}
-  fn = graph_rewrite(fn, pm_contiguous_views, ctx=views, name="views to params")
+  fn = graph_rewrite(fn, pm_contiguous_views, ctx=views, name="contiguous views")
+  fn = fn.substitute({v:v.param_like(i) for v,i in views.items()}, walk=True, name="views to params")
   # the exported function has no runtime state: it's scheduled, and its EXTERNs are mapped back to the storage and bound Variables at the end
   linear_call = graph_rewrite(fn.call(*views, precompile=True), pm_schedule, name="schedule to linear", enter_calls=True)
 
