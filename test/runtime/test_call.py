@@ -128,18 +128,14 @@ class TestCallSchedule(unittest.TestCase):
     ref[1:3, 2:6] = np.arange(8).reshape(2, 4) + 1
     np.testing.assert_equal(big.numpy(), ref)
 
-  def test_precompile_deviceless_body_alloc(self):
-    # the param has no device, so the storage the body allocates is on the device of the call
-    x = Tensor([1., 2., 3., 4.]).realize()
-    p = UOp.param(0, dtypes.float, (4,))
-    out = Tensor(((p + 1).bufferize() * 2).call_with_output(x.uop, precompile=True))
-    self.assertEqual(out.tolist(), [4., 6., 8., 10.])
-
-  def test_inline_deviceless_body_alloc(self):
-    # the alloc has no device, so it is on the device of the call when the call is inlined
+  def test_deviceless_body_storage_is_banned(self):
+    # global storage needs a device, a device agnostic body can't stage or allocate without one
     x = Tensor([1., 2., 3., 4.]).realize()
     p, tmp = UOp.param(0, dtypes.float, (4,)), UOp.alloc((4,), dtypes.float)
-    self.assertEqual(Tensor((tmp.after(tmp.store(p + 1)) * 2).call_with_output(x.uop)).tolist(), [4., 6., 8., 10.])
+    with self.assertRaisesRegex(RuntimeError, "global storage needs a device"):
+      Tensor(((p + 1).bufferize() * 2).call_with_output(x.uop, precompile=True)).realize()
+    with self.assertRaisesRegex(RuntimeError, "global storage needs a device"):
+      Tensor((tmp.after(tmp.store(p + 1)) * 2).call_with_output(x.uop)).realize()
 
   def test_deviceless_call_keeps_grad_fxn(self):
     # a call without a device is inlined where it's used, it still has its custom gradient

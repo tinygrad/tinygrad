@@ -88,7 +88,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
 
 from tinygrad.schedule.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing, pm_flatten_linear
-from tinygrad.schedule.prepare import prepare_rangeify, body_on_call_device
+from tinygrad.schedule.prepare import prepare_rangeify
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
@@ -119,8 +119,8 @@ pm_resolve_linear_call = PatternMatcher([
 schedule_cache: dict[bytes, UOp] = {}
 # ctx is just for DEBUG on inner
 def lower_sink_to_linear(call:UOp) -> UOp|None:
-  if call.body.op is not Ops.SINK or isinstance(call.body.arg, KernelInfo) or not call.arg.precompile: return None
-  function = body_on_call_device(call, call.body)
+  function = call.body
+  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
   st = time.perf_counter()
   cache_key = function.key
   # SCACHE >= 2 also persists the cache to disk
@@ -263,11 +263,15 @@ def export(big_sink:UOp) -> tuple[UOp, tuple[UOp, ...]]:
   fn = graph_rewrite(stores, pm_export, ctx=ctx, bottom_up=True, name="export")
   return fn, tuple(ctx.replacements)
 
+def bind_alloc(b:UOp) -> UOp:
+  if b.device is None: raise RuntimeError("global storage needs a device, give the ALLOC one")
+  return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
+
 # EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
 pm_map_back = PatternMatcher([
   (UPat(Ops.EXTERN, name="e"), lambda ctx,e: x.unbound() if (x:=ctx[e.arg.slot]).is_variable else x),
   # global ALLOCs are bound to fresh BUFFERs for this invocation
-  (UPat(Ops.ALLOC, name="b"), lambda b: UOp.new_buffer(b.device, b.max_numel(), b.dtype) if b.addrspace is AddrSpace.GLOBAL else None),
+  (UPat(Ops.ALLOC, name="b"), lambda b: bind_alloc(b) if b.addrspace is AddrSpace.GLOBAL else None),
 ])
 
 def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:

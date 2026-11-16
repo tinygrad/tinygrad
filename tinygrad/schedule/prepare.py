@@ -5,7 +5,7 @@ from tinygrad.uop.ops import graph_rewrite, MapCtx, rewrite_group, identity_elem
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort, dedup
-from tinygrad.schedule.indexing import apply_movement_op, BufferizeOpts
+from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
@@ -149,20 +149,7 @@ def resolve_function(c:UOp) -> UOp|None:
     if p.dtype != a.dtype: raise TypeError(f"arg {p.arg.slot} dtype mismatch: expected {p.dtype}, got {a.dtype}")
   # Inlining removes the call scope, so its local allocations need fresh identities.
   dict_map.update({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in nodes if b.op is Ops.ALLOC})
-  return body_on_call_device(c, c.body.substitute(dict_map, walk=True))
-
-# a body is device agnostic, it runs on the device of its call: global storage it allocates or stages without a device is on that device
-def stage_on_call_device(ctx:str|tuple[str, ...], s:UOp) -> UOp|None:
-  if s.arg is None: return s.replace(arg=BufferizeOpts(ctx)) if s.device is None else None
-  return s.replace(arg=replace(s.arg, device=ctx)) if s.arg.addrspace is AddrSpace.GLOBAL and s.arg.device is None else None
-pm_storage_on_call_device = PatternMatcher([
-  (UPat(Ops.STAGE, name="s"), stage_on_call_device),
-  (UPat(Ops.ALLOC, name="b"), lambda ctx,b: UOp.alloc((b.max_numel(),), b.dtype, b.arg.slot, device=ctx)
-   if b.addrspace is AddrSpace.GLOBAL and b.device is None else None),
-])
-def body_on_call_device(c:UOp, body:UOp) -> UOp:
-  if (device:=next((a.device for a in c.src[1:] if a.device is not None), None)) is None: return body
-  return graph_rewrite(body, pm_storage_on_call_device, ctx=device, name="storage on call device")
+  return c.body.substitute(dict_map, walk=True)
 
 # shape-changing bitcast
 def expand_bitcast(bc:UOp) -> UOp|None:
@@ -186,8 +173,10 @@ def copy_to_anon_store(x:UOp, copy:UOp):
 
 def stage_to_anon_store(x:UOp, stg:UOp):
   if stg.arg is not None and stg.arg.addrspace is not AddrSpace.GLOBAL: return None
+  if (device:=stg.arg.device if stg.arg is not None and stg.arg.device is not None else x.device) is None:
+    raise RuntimeError("global storage needs a device, stage a value with a device or give the STAGE one")
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp.alloc(stg.max_shape, stg.dtype, device=stg.arg.device if stg.arg is not None and stg.arg.device is not None else x.device)
+  buf = UOp.alloc(stg.max_shape, stg.dtype, device=device)
   view = buf.shrink_to(stg.shape)
   dst = view.index(*stg.src[1:]) if len(stg.src) > 1 else view
   return view.after(dst.store(x).end(*stg.src[1:]))
