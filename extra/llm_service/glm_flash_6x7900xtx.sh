@@ -48,6 +48,13 @@ fi
 COMMAND=(python3 -m tinygrad.llm --model "$MODEL" --shard 6 --max_context 524288 --serve "${PORT:-8000}")
 SERVER_ENV+=(VISION_MMPROJ="$MMPROJ" VISION_BUCKETS="${VISION_BUCKETS:-320,576}")
 
+check_python() {
+  # (the server's Python prerequisites, before any GPU is opened: a missing one fails the model load after the cards were set up)
+  python3 -c 'import numpy, jinja2, PIL' 2>/dev/null || {
+    echo "missing Python prerequisites (numpy, jinja2, pillow >= 10.0.1): sudo apt-get install python3-numpy python3-jinja2 python3-pil (an iris VM: tools/vm/setup.sh <vm>)" >&2; return 2; }
+  python3 -c 'import sys, PIL; sys.exit(tuple(int(x) for x in PIL.__version__.split(".")[:2]) < (10, 0))' || {
+    echo "the vision tower needs pillow >= 10.0.1: sudo python3 -m pip install --break-system-packages 'pillow>=10.0.1'" >&2; return 2; }
+}
 check_weights() {
   [[ -s $MMPROJ ]] || { echo "VISION_MMPROJ is mandatory: no readable nonempty projector at $MMPROJ" >&2; return 2; }
   command -v sha256sum >/dev/null
@@ -59,6 +66,7 @@ if [[ $ACTION == --print-command ]]; then
 elif [[ $ACTION == start ]]; then
   [[ $AM_POWER_LIMIT =~ ^[0-9]+$ ]] && ((AM_POWER_LIMIT > 0)) || { echo 'AM_POWER_LIMIT must be a positive integer' >&2; exit 2; }
   ((AM_POWER_LIMIT <= 250)) || { echo 'Use a measured thermal limit of at most 250 W; D34 ran at 225 W' >&2; exit 2; }
+  check_python
   check_weights
   mkdir -p "$STATE_DIR"
   cd "$ROOT"
@@ -80,6 +88,7 @@ elif [[ $ACTION == stop ]]; then
 elif [[ $ACTION == status ]]; then
   curl -fsS "http://127.0.0.1:${PORT:-8000}/status"
 elif [[ $ACTION == check-weights ]]; then
+  check_python
   check_weights
 else
   cat >&2 <<'USAGE'
