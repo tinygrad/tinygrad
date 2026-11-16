@@ -96,6 +96,16 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["y"]
     self.helper_test_single_op("Gather", inputs, attributes, outputs)
 
+  def test_gather_2d_const_indices(self):
+    x_input = onnx.helper.make_tensor_value_info("x", onnx.TensorProto.FLOAT, (3,))
+    y_output = onnx.helper.make_tensor_value_info("y", onnx.TensorProto.FLOAT, (2, 2))
+    idx_init = onnx.numpy_helper.from_array(np.array([[0, 2], [1, -1]], dtype=np.int64), name="idx")
+    node = onnx.helper.make_node("Gather", ["x", "idx"], ["y"], axis=0)
+    graph = onnx.helper.make_graph([node], "test_gather_2d", [x_input], [y_output], [idx_init])
+    with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp:
+      onnx.save(onnx.helper.make_model(graph, opset_imports=[onnx.helper.make_opsetid("", 13)]), tmp.name)
+      self.assertEqual(OnnxRunner(tmp.name)({"x": Tensor([10., 20., 30.])})["y"].tolist(), [[10., 30.], [20., 30.]])
+
   def test_gather_jit_different_indices(self):
     # Gather should not assume indices is const when it can change at runtime
     from tinygrad import TinyJit

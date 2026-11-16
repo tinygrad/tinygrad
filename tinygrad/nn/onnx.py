@@ -1057,6 +1057,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def Gather(x:Tensor, indices:Tensor|list[int]|int, axis:int=0):
     axis = x._resolve_dim(axis)
     # fast path for constant indices (passed as python list/int from to_python_const)
+    if isinstance(indices, list) and any(isinstance(i, list) for i in indices): indices = Tensor(indices, device=x.device)
     if not isinstance(indices, Tensor):
       indices_list = [indices] if isinstance(indices, int) else list(indices)
       indices_shape = () if isinstance(indices, int) else (len(indices_list),)
