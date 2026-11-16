@@ -1144,7 +1144,7 @@ class FFNBlock:
       # Route each device's own rows; gather the small selections/probabilities rather than repeat the router projection everywhere.
       _partial_out[0], _sp_rows[0] = True, hn
       # (in half: the layers' kernels read it so, a cast to float and back is two copies)
-      xin = x if (1) else x.float()
+      xin = x
       if sub != "attn": _ffn_rows[0] = T
 
       try: out = self._attention(xin, start_pos, T) if sub == "attn" else self._feed_forward(xin)
@@ -1168,7 +1168,7 @@ class FFNBlock:
     def _post(out:Tensor, post:Tensor, comb:Tensor, xs:Tensor) -> Tensor:
       # (HC_STREAMS_HALF: the streams kept in half, their kernels read half the bytes)
       ret = hc.post_split(out, post, comb, xs)
-      return (ret.cast(dtypes.half) if (1) else ret).contiguous()
+      return ret.cast(dtypes.half).contiguous()
     return _post(out, post, comb, xs)
 
 def _fn_out(t:Tensor) -> Tensor:
@@ -1206,10 +1206,9 @@ def micro_batch_blocks(blocks:list, xs:list[Tensor], starts:list, ts:list, ple:T
     return _on_queue(outs, f"COMPUTE:{q}") if (q:=mb_queue(i)) and (1) else outs
   def after(i:int, x:Tensor, dep:Tensor|None, rows:bool=True) -> Tensor:
     if dep is None: return x
-    if (1):
-      z = (dep[..., :1] if rows else dep.flatten()[:1]).cast(x.dtype) * 0
-      while rows and z.ndim < x.ndim: z = z.unsqueeze(-1)
-      return x + (z != z).where(0, z)
+    z = (dep[..., :1] if rows else dep.flatten()[:1]).cast(x.dtype) * 0
+    while rows and z.ndim < x.ndim: z = z.unsqueeze(-1)
+    return x + (z != z).where(0, z)
   subs = [(block, hc, norm, sub) for block in blocks for hc, norm, sub in ((block.hc_attn, block.attn_norm, "attn"),
                                                                            (block.hc_ffn, block.ffn_norm, "ffn"))]
   for block in blocks: block._init_state(xs[0])
@@ -1670,10 +1669,9 @@ class QSABlock(TransformerBlock):
     # every row its own list of the keys of its region: [q|0] on the latent [k|v] rows (the second half of the output is the attention's)
     qr = q.permute(2, 1, 0, 3)  # (rows, H, 1, hd)
     latent = Tensor(cache.uop.after(pk.uop)).unsqueeze(2)
-    if (1):
-      # (a lane a key: its scores of the heads without reductions over the lanes, the value half only of the rows read for the output)
-      attn = qsa_decode_attention(qr[:, :, 0], latent, picks, sb.row_bases, hd**-0.5, parts=(8), waves=(4))
-      return self._out_gated(attn.permute(2, 1, 0, 3), gate)
+    # (a lane a key: its scores of the heads without reductions over the lanes, the value half only of the rows read for the output)
+    attn = qsa_decode_attention(qr[:, :, 0], latent, picks, sb.row_bases, hd**-0.5, parts=(8), waves=(4))
+    return self._out_gated(attn.permute(2, 1, 0, 3), gate)
 
   def _attention_batch(self, x:Tensor, groups:list[tuple[UOp, int]]) -> Tensor:
     """batched decoding: a row a sequence at its position, its caches in its slot (slot g the group g's), one kernel for all of them"""
@@ -2827,7 +2825,7 @@ class Transformer:
     carry = self.__dict__.setdefault("_pf_carry", {})
     if rows not in carry:
       hc, mb, devs = unwrap(self.config.hc), (1), cast(tuple[str, ...], self.token_embd.weight.device)
-      dt = dtypes.half if (1) else dtypes.float32
+      dt = dtypes.half
       carry[rows] = [Tensor.zeros(1, rows // mb, hc.count, self.config.dim, dtype=dt).shard(devs, axis=1).contiguous().realize() for _ in range(mb)]
     return carry[rows]
 
@@ -4786,7 +4784,7 @@ class Transformer:
     if host_embd is not None: state_dict['token_embd.weight'] = host_embd
 
     # all state items should be float16, not float32
-    state_dict = {k:v.cast('float16') if (1) else v for k,v in state_dict.items()}
+    state_dict = {k:v.cast('float16') for k,v in state_dict.items()}
 
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
@@ -5017,8 +5015,7 @@ class Transformer:
       # (PREFILL_CHUNK_UP, default on: the biggest chunk whole tiles up, not the nearest (6 devices: 4096 -> 4224, not 4032): a 4k
       # prompt (4096 tokens and its template) one chunk, not 4032 and a padded 192. other chunk ends: other greedy tokens (4k, 262k);
       # Quality bar passed (8,064-position NLL inside the chunk-noise floor, KL within the noise pair's))
-      up = [min(-(-chunk_size // tile) * tile, self.max_context // tile * tile or tile)] \
-        if (1) else []
+      up = [min(-(-chunk_size // tile) * tile, self.max_context // tile * tile or tile)]
       sizes = [tiled(n) for n in sizes] + up
     return tuple(sorted(set(sizes)))
 
@@ -5028,7 +5025,7 @@ class Transformer:
     if self.config.cache_rows and self.seqs_supported(): return self.seq_warmup()
     sizes = self.prefill_chunks()
     # (a sequence sharded cache (a long context): one after the other, the weights read before the caches are made (their memory is the device's))
-    if (1): self._capture_parallel(sizes)
+    self._capture_parallel(sizes)
     self._finish_load()
     # the big chunk first: its scratch memory is the most, the other jits share it. a prompt one past a size runs the next one (1: the smallest)
     for n in sorted({1, *(s + 1 for s in sizes[:-1])}, reverse=True):
