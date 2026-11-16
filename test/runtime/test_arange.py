@@ -3,12 +3,12 @@ import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import Context, getenv
 from tinygrad.engine.realize import run_linear, estimate_uop, compile_linear
-from test.helpers import needs_second_gpu, check_schedule, assert_kernel_count, KernelCountException
+from test.helpers import needs_second_gpu, check_schedule, assert_kernel_count, KernelCountException, schedule_linear
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, tensor, desired):
     GlobalCounters.reset()
-    linear = compile_linear(tensor.schedule_linear())
+    linear = compile_linear(schedule_linear(tensor))
     if len(linear.src) != 1: raise KernelCountException(1, len(linear.src))
     run_linear(linear)
     np.testing.assert_equal(tensor.numpy(), desired)

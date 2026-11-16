@@ -5,7 +5,7 @@ from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.helpers import getenv
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
-from tinygrad.engine.realize import run_linear
+from tinygrad.schedule import create_linear
 
 N = 4096
 run_count = 5
@@ -43,8 +43,9 @@ if __name__ == "__main__":
   with Context(DEBUG=2):
     for _ in range(run_count): tc = (a@b).realize()
 
-  linear = Tensor.custom_kernel(a, b, c, fxn=make_matmul_kernel(name, src, local_size))[2].schedule_linear()
+  fn, externs = Tensor.export(Tensor.custom_kernel(a, b, c, fxn=make_matmul_kernel(name, src, local_size))[2])
+  linear = create_linear(fn)
   GlobalCounters.reset()
   with Context(DEBUG=2):
-    for _ in range(run_count): run_linear(linear)
+    for _ in range(run_count): Tensor.run(linear, externs)
   print(f"custom  {(c-tc).square().mean().item()}")

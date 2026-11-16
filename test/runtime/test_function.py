@@ -5,7 +5,7 @@ from tinygrad import Tensor, TinyJit, GlobalCounters, Device
 from tinygrad.dtype import AddrSpace, Invalid, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.codegen import to_program
-from test.helpers import assert_kernel_count, KernelCountException
+from test.helpers import assert_kernel_count, KernelCountException, linear_with_vars
 
 class TestFunction(unittest.TestCase):
   def test_simple(self):
@@ -584,7 +584,7 @@ class TestFunctionTuple(unittest.TestCase):
       return c
 
     def count_kernels(t:Tensor):
-      linear, _ = t.linear_with_vars()
+      linear, _ = linear_with_vars(t)
       return sum((len(call.device) if isinstance(call.device, tuple) else 1)
                  for call in linear.src if call.src[0].op is Ops.SINK)
 

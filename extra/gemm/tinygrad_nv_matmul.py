@@ -2,7 +2,7 @@ from tinygrad import Tensor, dtypes, Context
 from tinygrad.helpers import getenv
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.uop.ops import AxisType
-from tinygrad.engine.realize import run_linear
+from tinygrad.schedule import create_linear
 from dataclasses import replace
 
 N = 4096
@@ -26,10 +26,11 @@ if __name__ == "__main__":
       Opt(op=OptOps.SPLIT, axis=1, arg=(2, AxisType.LOCAL)),
       Opt(op=OptOps.SPLIT, axis=0, arg=(2, AxisType.LOCAL)),
     ]
-  linear = C.schedule_linear()
+  fn, externs = Tensor.export(C)
+  linear = create_linear(fn)
   call = linear.src[-1]
   new_ast = call.src[0].replace(arg=replace(call.src[0].arg, opts_to_apply=tuple(opts)))
   new_call = call.replace(src=(new_ast, *call.src[1:]))
   linear = linear.replace(src=tuple(new_call if c is call else c for c in linear.src))
   with Context(DEBUG=2):
-    for i in range(5): run_linear(linear)
+    for i in range(5): Tensor.run(linear, externs)

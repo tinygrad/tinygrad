@@ -4,13 +4,13 @@ from tinygrad.codegen import do_to_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.uop.ops import AxisType
 from test.external.process_replay.process_replay import replay_to_program
-from test.helpers import replace_opts
+from test.helpers import replace_opts, schedule_linear
 
 N = 16
 class TestProcessReplay(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls.ast = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule_linear().src[-1].src[0]
+    cls.ast = schedule_linear(Tensor.empty(N, N) @ Tensor.empty(N, N)).src[-1].src[0]
     cls.renderer = Device[Device.DEFAULT].renderer
 
   def test_replay_no_opts(self):
@@ -36,7 +36,7 @@ class TestProcessReplay(unittest.TestCase):
 
   def test_beam(self):
     with Context(BEAM=1):
-      ast = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule_linear().src[-1].src[0]
+      ast = schedule_linear(Tensor.empty(N, N) @ Tensor.empty(N, N)).src[-1].src[0]
     p = do_to_program(ast, self.renderer)
     good, compare, _ = replay_to_program(p, ast, self.renderer)
     self.assertEqual(good, compare)

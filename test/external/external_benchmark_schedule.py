@@ -5,6 +5,7 @@ from tinygrad.uop.ops import Ops
 from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.codegen.late.linearizer import linearize
 from tinygrad.uop.spec import type_verify, spec_program
+from test.helpers import schedule_linear
 
 if __name__ == "__main__":
   mdl = ResNet50()
@@ -23,7 +24,7 @@ if __name__ == "__main__":
     if not FORWARD_ONLY:
       with Timing("***** model schedule in  "):
         with Profiling(PROFILE >= 3):
-          linear = out.schedule_linear()
+          linear = schedule_linear(out)
 
       if not SCHEDULE_ONLY:
         asts = list({call.src[0].key:call.src[0] for call in linear.src if call.src[0].op is Ops.SINK}.values())

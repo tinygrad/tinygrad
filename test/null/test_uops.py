@@ -18,7 +18,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.uop.weak import pm_lower_weak
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, pm_remove_invalid
-from test.helpers import eval_uop, to_uops_list
+from test.helpers import eval_uop, to_uops_list, linear_with_vars, schedule_linear
 
 class TestDTypeFromUOp(unittest.TestCase):
   def test_broadcastable_promotion(self):
@@ -516,7 +516,7 @@ class TestUOpMethod(unittest.TestCase):
     a = UOp.variable("a", 1, 10)
     uop_var = Tensor(a.bind(1))
     st_var = Tensor.empty((2, 10))[:, :a.bind(1)]
-    _, var_vals = (uop_var+st_var).linear_with_vars()
+    _, var_vals = linear_with_vars(uop_var+st_var)
     self.assertEqual(len(var_vals), 1)
     self.assertEqual(list(var_vals)[0], a.expr)
 
@@ -679,7 +679,7 @@ class TestAssembly(unittest.TestCase):
     a = Tensor.empty(1024)
     b = Tensor.empty(1024)
     c = (a*b).sum()
-    ast = c.schedule_linear().src[-1].src[0]
+    ast = schedule_linear(c).src[-1].src[0]
     opts_to_apply = [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))]
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
     program = to_program(ast, self.renderer)

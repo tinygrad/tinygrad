@@ -10,7 +10,7 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.device import Device
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.x86 import X86Renderer
-from test.helpers import replace_opts
+from test.helpers import replace_opts, schedule_linear
 
 def flops_mem(uops, ignore_indexing=False):
   est = Estimates.from_uops(uops, ignore_indexing)
@@ -19,7 +19,7 @@ def flops_mem(uops, ignore_indexing=False):
 # **************** new FlopCounter ****************
 
 def get_stats(x:Tensor):
-  est = estimate_uop(compile_linear(x.schedule_linear()).src[-1])
+  est = estimate_uop(compile_linear(schedule_linear(x)).src[-1])
   return est.ops, est.mem
 
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu does extra load/store for packed types")
@@ -188,9 +188,9 @@ N = 64
 class TestStatsOptimized(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls.ast_gemm = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule_linear().src[-1].src[0]
-    cls.ast_gemm_half = (Tensor.empty(N, N, dtype=dtypes.half) @ Tensor.empty(N, N, dtype=dtypes.half)).schedule_linear().src[-1].src[0]
-    cls.ast_reduce = (Tensor.empty(N*N).sum()).schedule_linear().src[-1].src[0]
+    cls.ast_gemm = schedule_linear(Tensor.empty(N, N) @ Tensor.empty(N, N)).src[-1].src[0]
+    cls.ast_gemm_half = schedule_linear(Tensor.empty(N, N, dtype=dtypes.half) @ Tensor.empty(N, N, dtype=dtypes.half)).src[-1].src[0]
+    cls.ast_reduce = schedule_linear(Tensor.empty(N*N).sum()).src[-1].src[0]
 
   def check_gemm(self, p:UOp, extra_flops=0, half=False):
     est = p.src[0].arg.estimates

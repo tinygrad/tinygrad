@@ -10,6 +10,7 @@ from tinygrad.tensor import ExportCtx, pm_export
 from tinygrad.codegen import full_rewrite_to_sink, to_program
 from tinygrad.helpers import Context, ansistrip
 from tinygrad.renderer import Estimates
+from test.helpers import linear_with_vars
 
 def _strip_buffers(root:UOp) -> UOp:
   return graph_rewrite(root, pm_export, ctx=ExportCtx(), bottom_up=True, enter_calls=True, name="strip buffers for wire format test")
@@ -27,7 +28,7 @@ class TestSSARender(unittest.TestCase):
     assert_roundtrip(self, root)
 
   def _kernel(self, t:Tensor) -> UOp:
-    lin, _ = Tensor.linear_with_vars(t)
+    lin, _ = linear_with_vars(t)
     return [c for c in lin.src if any(u.op is Ops.REDUCE for u in c.src[0].toposort())][0].src[0]
 
   def test_conv_kernel_graph(self):

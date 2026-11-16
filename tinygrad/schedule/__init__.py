@@ -2,7 +2,7 @@ import time, inspect
 from collections import deque
 from dataclasses import replace
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import GroupOp, UOp, Ops, UOpMetaClass, graph_rewrite, MapCtx, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import GroupOp, UOp, Ops, UOpMetaClass, graph_rewrite, MapCtx, gate_kernel_sink, KernelInfo, rewrite_group
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, SCACHE, BASEDIR, partition, dedup, all_int
 from tinygrad.helpers import diskcache_get, diskcache_put, colored
@@ -211,6 +211,7 @@ pm_contiguous_views = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
 ])
 
+@rewrite_group(lambda fn,ret,**_: f"Schedule {len(fn.src)} -> {len(ret.src)}")
 def create_linear(fn:UOp, plan:bool=True) -> UOp:
   """an exported function (no runtime state) to the LINEAR of calls that runs it, on its EXTERNs, view args and ALLOCs"""
   # a contiguous view of storage is a different buffer: it's an input of the scheduled function, the call arg is the view

@@ -5,6 +5,7 @@ from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, Pr
 from tinygrad.engine.realize import run_linear
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen import to_program
+from test.helpers import schedule_linear
 
 def _dev_base(d):
   p = d.split(":")
@@ -52,7 +53,7 @@ class TestProfiler(unittest.TestCase):
 
     TestProfiler.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
     TestProfiler.b = self.a + 1
-    si = self.b.schedule_linear().src[-1]
+    si = schedule_linear(self.b).src[-1]
 
     TestProfiler.prg = to_program(si.src[0], TestProfiler.d0.renderer)
     run_linear(UOp(Ops.LINEAR, src=(TestProfiler.prg.call(TestProfiler.b.uop, TestProfiler.a.uop),)))

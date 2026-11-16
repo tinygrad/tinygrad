@@ -3,11 +3,11 @@ from tinygrad import Tensor, Device, Context, dtypes
 from tinygrad.dtype import DTYPES_DICT, DType, ConstType
 from tinygrad.uop.ops import Ops, UOp, GroupOp
 from tinygrad.codegen.decomp.op import threefry2x32
-from test.helpers import full_rewrite
+from test.helpers import full_rewrite, schedule_linear
 
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
-  schedule = t.schedule_linear()
+  schedule = schedule_linear(t)
   asts = [s for s in schedule.src if s.src[0].op is Ops.SINK]
   len(asts)
   # NOT SUPPORTED ANYMORE

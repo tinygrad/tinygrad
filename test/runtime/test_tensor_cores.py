@@ -7,7 +7,7 @@ from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo
 from tinygrad.dtype import DType
 from tinygrad.device import Buffer
 from tinygrad.helpers import Context, TC_SELECT, TC_OPT
-from test.helpers import slow, replace_opts, buffer_uops
+from test.helpers import slow, replace_opts, buffer_uops, schedule_linear
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
@@ -34,7 +34,7 @@ def _skip_unsupported_tc_dtypes(dtype_in:DType, dtype_out:DType):
     raise unittest.SkipTest(f"tensor core requires unsupported renderer dtype: {', '.join(unsupported)}")
 
 def tc_reduce_axis(r:Tensor) -> int:
-  sche = Scheduler(r.schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
+  sche = Scheduler(schedule_linear(r).src[-1].src[0], Device[Device.DEFAULT].renderer)
   sche.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, 1)))
   return sche.axes_of(AxisType.WEAK, reduce=True)[0]
 
@@ -43,7 +43,7 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
   _skip_unsupported_tc_dtypes(dtype_in, dtype_out)
   a, b = _tc_rand(M, K, dtype=dtype_in), _tc_rand(K, N, dtype=dtype_in)
   r = a.matmul(b, dtype=dtype_out)
-  sched = r.schedule_linear()
+  sched = schedule_linear(r)
   realized_ast = sched.src[-1].src[0]
   opts_to_apply = [Opt(OptOps.TC, axis, (tc_select, tc_opt, 1))]
 
@@ -122,7 +122,7 @@ class TestTensorCores(unittest.TestCase):
         with Context(ALLOW_TF32=1, TC_SELECT=i, TC_OPT=2):
           a = _tc_rand(tc.dims[1]*8, tc.dims[2]*8, dtype=tc.dtype_in)
           b = _tc_rand(tc.dims[2]*8, tc.dims[0]*8, dtype=tc.dtype_in)
-          ast = a.matmul(b, dtype=tc.dtype_out).schedule_linear().src[-1].src[0]
+          ast = schedule_linear(a.matmul(b, dtype=tc.dtype_out)).src[-1].src[0]
           wmmas = [u for u in to_program(ast, Device[Device.DEFAULT].renderer).src[1].src if u.op is Ops.WMMA]
         self.assertGreater(len(wmmas), 0)
         for u in wmmas: self.assertTrue(any(x.op is Ops.LOAD for x in u.src[2].toposort()), f"accumulator is {u.src[2]}")
@@ -152,8 +152,8 @@ class TestTensorCores(unittest.TestCase):
   def test_tensor_cores_padto_warp(self):
     # the WARP is the hardware simdgroup width, it can't be padded
     tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
-    sche = Scheduler(Tensor.empty(64, 64, dtype=tc.dtype_in).matmul(Tensor.empty(64, 64, dtype=tc.dtype_in), dtype=tc.dtype_out)
-                     .schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
+    sche = Scheduler(schedule_linear(Tensor.empty(64, 64, dtype=tc.dtype_in).matmul(Tensor.empty(64, 64, dtype=tc.dtype_in), dtype=tc.dtype_out))
+                     .src[-1].src[0], Device[Device.DEFAULT].renderer)
     sche.apply_opt(Opt(OptOps.TC, 0, (-1, 0, 1)))
     with self.assertRaises(KernelOptError): sche.apply_opt(Opt(OptOps.PADTO, sche.axis_types.index(AxisType.WARP), 7))
 
@@ -163,8 +163,8 @@ class TestTensorCores(unittest.TestCase):
     tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in not in dtypes.fp8s)
     N, M, K = tc.dims
     K *= 4  # leave four tensor core tiles along K so both group sizes divide the remaining reduction
-    sche = Scheduler(Tensor.empty(M, K, dtype=tc.dtype_in).matmul(Tensor.empty(K, N, dtype=tc.dtype_in), dtype=tc.dtype_out)
-                      .schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
+    sche = Scheduler(schedule_linear(Tensor.empty(M, K, dtype=tc.dtype_in).matmul(Tensor.empty(K, N, dtype=tc.dtype_in), dtype=tc.dtype_out))
+                      .src[-1].src[0], Device[Device.DEFAULT].renderer)
     sche.apply_opt(Opt(OptOps.TC, 0, (-1, 0, 1)))
     axis = sche.axes_of(AxisType.WEAK, reduce=True)[0]
     x, y = Tensor.rand(M, K, dtype=tc.dtype_in), Tensor.rand(K, N, dtype=tc.dtype_in)
@@ -175,8 +175,8 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_failed_padto(self):
     N, M, K = (tc:=Device[Device.DEFAULT].renderer.tensor_cores[0]).dims
-    sche = Scheduler(Tensor.empty(M//4, K, dtype=tc.dtype_in).matmul(Tensor.empty(K, N+N//2, dtype=tc.dtype_in), dtype=tc.dtype_out)
-                     .schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
+    sche = Scheduler(schedule_linear(Tensor.empty(M//4, K, dtype=tc.dtype_in).matmul(Tensor.empty(K, N+N//2, dtype=tc.dtype_in),
+                                     dtype=tc.dtype_out)).src[-1].src[0], Device[Device.DEFAULT].renderer)
     # N pads, then M is too small to pad. the failed attempt leaves the ast untouched
     ast = sche.ast
     with self.assertRaises(KernelOptError): sche.apply_opt(Opt(OptOps.TC, 0, (-1, 2, 1)))
@@ -186,7 +186,7 @@ class TestTensorCores(unittest.TestCase):
   def test_tensor_cores_nested_reduce(self):
     tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
     a, b = Tensor.empty(tc.dims[1]*2, tc.dims[2], dtype=tc.dtype_in), Tensor.empty(tc.dims[2], tc.dims[0], dtype=tc.dtype_in)
-    ast = replace_opts(a.matmul(b, dtype=tc.dtype_out).sum(0).schedule_linear().src[-1].src[0], [Opt(OptOps.TC, 0, (-1, 0, 1))])
+    ast = replace_opts(schedule_linear(a.matmul(b, dtype=tc.dtype_out).sum(0)).src[-1].src[0], [Opt(OptOps.TC, 0, (-1, 0, 1))])
     with self.assertRaises(KernelOptError): to_program(ast, Device[Device.DEFAULT].renderer)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
@@ -197,7 +197,7 @@ class TestTensorCores(unittest.TestCase):
       out = (A[i, r]*B[r, j]).cast(tc.dtype_out).reduce(i, r, arg=Ops.ADD)
       return C[j].store(out).end(j).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.TC, 0, (-1, 0, 1)),)))
     a, b, c = Tensor.empty(m*2, k*2, dtype=tc.dtype_in), Tensor.empty(k*2, n*2, dtype=tc.dtype_in), Tensor.empty(n*2, dtype=tc.dtype_out)
-    ast = Tensor.custom_kernel(c, a, b, fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    ast = schedule_linear(Tensor.custom_kernel(c, a, b, fxn=kernel)[0]).src[-1].src[0]
     with self.assertRaises(KernelOptError): to_program(ast, Device[Device.DEFAULT].renderer)
 
   @Context(ALLOW_TF32=1)
@@ -208,7 +208,7 @@ class TestTensorCores(unittest.TestCase):
       n, m, k = tc.dims
       a, b = _tc_rand(m, k, dtype=tc.dtype_in), _tc_rand(k, n, dtype=tc.dtype_in)
       r = a.matmul(b, dtype=tc.dtype_out)
-      prg = to_program(replace_opts(r.schedule_linear().src[-1].src[0],
+      prg = to_program(replace_opts(schedule_linear(r).src[-1].src[0],
                         [Opt(op=OptOps.TC, axis=0, arg=(-1, 2, 1))]), Device[Device.DEFAULT].renderer)
       if isinstance(Device[Device.DEFAULT].renderer, AMDLLVMRenderer):
         # RDNA emits wmma intrinsics, CDNA emits mfma intrinsics
@@ -258,7 +258,7 @@ class TestTensorCores(unittest.TestCase):
     Tensor.manual_seed(3)
     a = Tensor.rand(tc.dims[1]*2+1, tc.dims[2]*3-1, dtype=tc.dtype_in).realize()
     b = Tensor.rand(tc.dims[2]*3-1, tc.dims[0]*2+1, dtype=tc.dtype_in).realize()
-    sche = Scheduler(a.matmul(b, dtype=tc.dtype_out).schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
+    sche = Scheduler(schedule_linear(a.matmul(b, dtype=tc.dtype_out)).src[-1].src[0], Device[Device.DEFAULT].renderer)
     sche.apply_opt(tc_opt:=Opt(OptOps.TC, 0, (-1, 2, 1)))
     axis = sche.axes_of(AxisType.WEAK, reduce=True)[0]
     helper_linearizer_opt(a.matmul(b, dtype=tc.dtype_out), [[tc_opt, Opt(OptOps.PADTO, axis, 4), Opt(OptOps.SPLIT, axis, (2, AxisType.UPCAST)),

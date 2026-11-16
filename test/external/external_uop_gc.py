@@ -4,6 +4,7 @@ from tinygrad.schedule import schedule_cache
 from tinygrad.codegen import to_program, to_program_cache
 from tinygrad.schedule.indexing import apply_movement_op, _apply_reshape
 from tinygrad.uop.divandmod import fold_divmod_general
+from test.helpers import schedule_linear
 from test.test_tiny import TestTiny
 
 def uops_allocated(): return sum([isinstance(x, UOp) for x in gc.get_objects()])
@@ -14,12 +15,12 @@ def print_uops():
 def start(): pass
 def single_tensor(): Tensor([2])
 def two_plus_two(): Tensor([2])+Tensor([2])
-def two_plus_two_schedule(): (Tensor([2])+Tensor([2])).schedule_linear()
+def two_plus_two_schedule(): schedule_linear(Tensor([2])+Tensor([2]))
 def two_plus_two_kernel():
-  linear = (Tensor([2])+Tensor([2])).schedule_linear()
+  linear = schedule_linear(Tensor([2])+Tensor([2]))
   to_program(linear.src[-1].src[0], Device.default.renderer)
 def two_plus_two_linearize():
-  linear = (Tensor([2])+Tensor([2])).schedule_linear()
+  linear = schedule_linear(Tensor([2])+Tensor([2]))
   to_program(linear.src[-1].src[0], Device.default.renderer)
 def two_plus_two_realize(): (Tensor([2])+Tensor([2])).realize()
 def two_plus_two_item(): (Tensor([2])+Tensor([2])).item()
@@ -36,7 +37,7 @@ def kernel_matmul():
   x = Tensor.eye(3)
   y = Tensor([[2.0,0,-2.0]])
   z = y.matmul(x)
-  linear = z.schedule_linear()
+  linear = schedule_linear(z)
   to_program(linear.src[-1].src[0], Device.default.renderer)
 def realized_matmul():
   x = Tensor.eye(3)

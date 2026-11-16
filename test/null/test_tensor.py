@@ -9,6 +9,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.codegen.late.linearizer import linearize
+from test.helpers import linear_with_vars, schedule_linear
 
 x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
@@ -53,7 +54,7 @@ class TestIdxUpcast(unittest.TestCase):
     for src in ast.src:
       if (ret:=self._find_op(src, op)) is not None: return ret
   def _schedule_render(self, a: Tensor):
-    linear, _ = a.linear_with_vars()
+    linear, _ = linear_with_vars(a)
     for si in linear.src:
       ast = si.src[0]
       if ast.op is Ops.SINK:
@@ -146,9 +147,9 @@ class TestRand(unittest.TestCase):
   def test_rand_large_tensor(self):
     # large tensor rand (num > uint32.max) should not crash in frontend
     Tensor.manual_seed(0)
-    Tensor.rand(2**17, 2**17).schedule_linear()
-    Tensor.rand(2**17, 2**17).schedule_linear()
-    Tensor.rand(2**17, 2**17).schedule_linear()
+    schedule_linear(Tensor.rand(2**17, 2**17))
+    schedule_linear(Tensor.rand(2**17, 2**17))
+    schedule_linear(Tensor.rand(2**17, 2**17))
 
 class TestTensorConstLike(unittest.TestCase):
   def test_const_like_shape(self):

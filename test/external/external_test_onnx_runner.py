@@ -3,12 +3,13 @@ import numpy as np
 from tinygrad import Tensor
 from tinygrad.uop.ops import Ops
 from tinygrad.nn.onnx import OnnxRunner, OnnxDataType
+from test.helpers import schedule_linear
 from hypothesis import given, strategies as st
 
 # copied from test_const_folding.py
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
-  linear = t.schedule_linear()
+  linear = schedule_linear(t)
   asts = [call for call in linear.src if call.src[0].op is Ops.SINK]
   assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
 

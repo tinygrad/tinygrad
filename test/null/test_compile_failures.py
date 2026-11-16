@@ -4,10 +4,11 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import OSX
 from tinygrad.engine.realize import compile_linear
 from tinygrad.codegen import to_program
+from test.helpers import schedule_linear
 
 class TestCompileFailures(unittest.TestCase):
   def compile(self, out:Tensor):
-    compile_linear(out.schedule_linear())
+    compile_linear(schedule_linear(out))
 
   def test_interpolate_atari(self):
     self.compile(Tensor.empty(210, 160, dtype='uint8').interpolate((64, 64)))
@@ -19,7 +20,7 @@ class TestDisassembly(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "CPU" and OSX, "m series cpus support fp16 arithmetic")
   def test_float16_alu(self):
     c = Tensor([1], dtype=dtypes.float16) + Tensor([1], dtype=dtypes.float16)
-    s = c.schedule_linear().src[-1]
+    s = schedule_linear(c).src[-1]
     p = to_program(s.src[0], Device[Device.DEFAULT].renderer)
     lib = Device[Device.DEFAULT].compiler.compile(p.src[2].arg)
     out = io.StringIO()

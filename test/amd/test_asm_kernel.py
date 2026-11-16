@@ -19,6 +19,7 @@ from extra.gemm.amd_asm_matmul import Kernel
 
 # small pattern matcher converting CALL to INS
 from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, rewrite_group
+from test.helpers import schedule_linear
 
 @dataclass(frozen=True)
 class InstInfo:
@@ -214,7 +215,7 @@ class TestAsmKernel(unittest.TestCase):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     a = Tensor.full((16, 16), 1.).contiguous().realize()
     a = Tensor.custom_kernel(a, fxn=custom_add_one)[0]
-    linear = lower_and_compile(a.schedule_linear())
+    linear = lower_and_compile(schedule_linear(a))
     est = estimate_uop(linear.src[-1])
     self.assertEqual(est.ops, a.numel())
     self.assertEqual(est.mem, a.nbytes()*2)
@@ -226,7 +227,7 @@ class TestAsmKernel(unittest.TestCase):
     b = Tensor.full((16, 16), 1, dtype=dtypes.uint32).contiguous().realize()
     a = Tensor.zeros_like(b).contiguous().realize()
     a = Tensor.custom_kernel(a, b, fxn=custom_add_var)[0]
-    linear = a.schedule_linear()
+    linear = schedule_linear(a)
     for i in range(4):
       run_linear(linear, var_vals={"var":i})
       self.assertTrue((a.numpy() == 1+i).all())

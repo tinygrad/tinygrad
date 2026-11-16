@@ -4,6 +4,7 @@ from tinygrad.helpers import to_mv, DEV
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
+from test.helpers import schedule_linear
 
 def _time_queue(q, d):
   st = time.perf_counter()
@@ -21,7 +22,7 @@ class TestHCQ(unittest.TestCase):
     #TestHCQ.d1: AMDDevice = Device["AMD:1"]
     TestHCQ.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
     TestHCQ.b = self.a + 1
-    linear = self.b.schedule_linear()
+    linear = schedule_linear(self.b)
     TestHCQ.prg = to_program(linear.src[-1].src[0], TestHCQ.d0.renderer)
     TestHCQ.runtime = get_runtime(TestHCQ.d0.device, TestHCQ.prg)
     TestHCQ.b.uop.buffer.allocate()

@@ -8,7 +8,7 @@ from tinygrad.helpers import getenv, DEV
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from tinygrad.renderer.amd.dsl import Reg, Inst, s, v
-from tinygrad.engine.realize import run_linear
+from tinygrad.schedule import create_linear
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
@@ -40,12 +40,13 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
   dummy = Tensor.zeros(1).contiguous().realize()
   out = Tensor.custom_kernel(dummy, fxn=fxn)[0]
-  linear = out.schedule_linear()
+  fn, externs = Tensor.export(out)
+  linear = create_linear(fn)
   ets = []
   with Context(DEBUG=2):
     for _ in range(2):
       start = GlobalCounters.time_sum_s
-      run_linear(linear)
+      Tensor.run(linear, externs)
       ets.append(GlobalCounters.time_sum_s - start)
   elapsed = min(ets)
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP

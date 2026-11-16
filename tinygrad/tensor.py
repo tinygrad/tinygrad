@@ -14,8 +14,7 @@ from tinygrad.engine.realize import run_linear, capturing
 from tinygrad.schedule import create_linear, contiguous_mops_to_view
 from tinygrad.device import Buffer
 
-# **** export: the stores of a tensor graph as a function with no runtime state. storage becomes EXTERN(slot), bound Variables lose
-# their value and ALLOCs get canonical slots. ctx.externs is what's mapped back
+# **** export: storage becomes EXTERN(slot), bound Variables lose their value and ALLOCs get canonical slots. ctx.externs is what's mapped back
 
 @dataclass
 class ExportCtx:
@@ -41,10 +40,6 @@ pm_export: PatternMatcher = PatternMatcher([
    c.replace(src=(graph_rewrite(c.body, pm_export, ctx=ExportCtx(ctx.externs), bottom_up=True, name="export call body"),)+c.src[1:])),
 ])
 
-def export(stores:UOp) -> tuple[UOp, tuple[UOp, ...]]:
-  fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, name="export")
-  return fn, tuple(ctx.externs)
-
 def bind_alloc(b:UOp) -> UOp:
   if b.device is None: raise RuntimeError("global storage needs a device, give the ALLOC one")
   return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
@@ -55,6 +50,17 @@ pm_map_back = PatternMatcher([
   # global ALLOCs are bound to fresh BUFFERs for this invocation
   (UPat(Ops.ALLOC, name="b"), lambda b: bind_alloc(b) if b.addrspace is AddrSpace.GLOBAL else None),
 ])
+
+def map_back(linear:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, dict[str, int]]:
+  # the EXTERNs become the storage and the bound Variables of this invocation, ALLOCs get fresh storage
+  linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, enter_calls=True, name="map back")
+  # the values of the bound Variables the linear uses
+  used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
+  var_vals: dict[str, int] = {}
+  for b in externs:
+    if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
+      raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
+  return linear, var_vals
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -206,24 +212,13 @@ class Tensor(RandMixin):
     """
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
-  @rewrite_group(lambda *tensors,ret,**_: f"Schedule {len(tensors)} -> {len(ret[0].src)}")
-  def linear_with_vars(self, *lst:Tensor, plan:bool=True) -> tuple[UOp, dict[str, int]]:
-    """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
-    fn, externs = export(self._bufferize(*lst))
-    linear = create_linear(fn, plan=plan)
-
-    # map back: the EXTERNs become the storage and the bound Variables of this invocation, ALLOCs get fresh storage
-    linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, enter_calls=True, name="map back")
-    # the values of the bound Variables the linear uses
-    used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
-    var_vals: dict[str, int] = {}
-    for b in externs:
-      if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
-        raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
-    return linear, var_vals
-
-  def _bufferize(self, *lst:Tensor) -> UOp:
-    """Gives these Tensor(s) storage. Returns the graph of the stores into it, the Tensors now reference the storage."""
+  @rewrite_group(lambda *tensors,ret,**_: f"Export {len(tensors)} -> {len(ret[1])} externs")
+  def export(self, *lst:Tensor) -> tuple[UOp, tuple[UOp, ...]]:
+    """
+    Gives these Tensor(s) storage and exports the stores into it as a function with no runtime state.
+    Returns the function and, for each EXTERN slot, its storage or bound Variable.
+    The Tensors now reference the storage, it holds their values once the compiled function is passed to `Tensor.run`.
+    """
     sink = UOp.sink(*[t.uop for t in (self,)+lst])
     if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Tensor Graph")
     # weakness ends where storage begins
@@ -266,24 +261,25 @@ class Tensor(RandMixin):
     assert not any(x in becomes_map for x in becomes_map.values())
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
-    return stores
+    fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, name="export")
+    return fn, tuple(ctx.externs)
 
-  def schedule_linear(self, *lst:Tensor) -> UOp:
-    """Creates the schedule needed to realize these Tensor(s)."""
-    linear, var_vals = self.linear_with_vars(*lst)
-    assert len(var_vals) == 0
-    return linear
+  @staticmethod
+  def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
+    """Runs an exported function compiled to a LINEAR, its EXTERNs are the externs from `Tensor.export`."""
+    linear, var_vals = map_back(linear, externs)
+    # a capturing jit runs its captured linears later
+    if capturing and CAPTURING: capturing[0].add_linear(linear, var_vals)
+    else: run_linear(linear, var_vals, update_stats=do_update_stats)
 
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
     to_realize = [x for x in (self,)+lst if x.uop.base.needs_storage()]
     if len(to_realize):
-      # a capturing jit runs its captured linears later, and plans their memory together
-      capture = bool(capturing) and bool(CAPTURING)
-      linear, var_vals = Tensor.linear_with_vars(*to_realize, plan=not capture)
-      if capture: capturing[0].add_linear(linear, var_vals)
-      else: run_linear(linear, var_vals, update_stats=do_update_stats)
+      fn, externs = Tensor.export(*to_realize)
+      # a capturing jit plans the memory of its captured linears together
+      Tensor.run(create_linear(fn, plan=not (capturing and CAPTURING)), externs, do_update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:

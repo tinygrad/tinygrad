@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, dtype_from_uop, graph_rewrite
 from tinygrad.uop.weak import pm_commit_weak
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.uop.spec import spec_shared, type_verify
-from test.helpers import full_rewrite
+from test.helpers import full_rewrite, schedule_linear
 
 class TestWeakPromotion(unittest.TestCase):
   def test_rand_requires_concrete(self):
@@ -176,7 +176,7 @@ class TestWeakStorageBoundary(unittest.TestCase):
 class TestNoRedundantWide(unittest.TestCase):
   def wide_alu(self, t:Tensor) -> int:
     return sum(sum(1 for u in full_rewrite(call.src[0]).toposort() if u.op in GroupOp.ALU and u.dtype in {dtypes.long, dtypes.ulong})
-               for call in t.schedule_linear().src if call.src[0].op is Ops.SINK)
+               for call in schedule_linear(t).src if call.src[0].op is Ops.SINK)
 
   def test_unbounded_long_stays_long(self):
     self.assertGreater(self.wide_alu(Tensor.empty(16, dtype=dtypes.long)*3 + 1), 0)

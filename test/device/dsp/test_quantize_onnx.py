@@ -6,7 +6,7 @@ from tinygrad.uop.ops import Ops, AxisType
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
-from test.helpers import replace_opts
+from test.helpers import replace_opts, schedule_linear
 
 N = 512
 
@@ -38,7 +38,7 @@ def create_gemm_model(model_path:str, batch_size=N, in_size=N, out_size=N, bias=
   return model_path
 
 def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
-  linear = out.schedule_linear()
+  linear = schedule_linear(out)
   call = linear.src[-1]
   prg = to_program(replace_opts(call.src[0], opts), renderer=Device[Device.DEFAULT].renderer)
   if replace_src is not None:

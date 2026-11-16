@@ -3,10 +3,11 @@ from tinygrad import Tensor
 from tinygrad.device import Buffer
 from tinygrad.dtype import Invalid, dtypes
 from tinygrad.engine.realize import run_linear
+from test.helpers import linear_with_vars
 
 class TestInvalidTensor(unittest.TestCase):
   def _invalid_test_helper(self, out, expected):
-    linear, var_vals = out.linear_with_vars()
+    linear, var_vals = linear_with_vars(out)
     buf = out.uop.buffer
     buf.allocate()
     buf.copy_from(Buffer("PYTHON", buf.nbytes, initial_value=b'\x42' * buf.nbytes))

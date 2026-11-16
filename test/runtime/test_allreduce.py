@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, UOp, dtypes
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops
-from test.helpers import KernelCountException
+from test.helpers import KernelCountException, linear_with_vars
 from tinygrad.engine.realize import run_linear
 
 class TestRingAllReduce(unittest.TestCase):
@@ -21,7 +21,7 @@ class TestRingAllReduce(unittest.TestCase):
       x = Tensor.arange(N*M, dtype=dtypes.float).reshape(N, M)
       t = (x*x).clone().shard(ds, axis=0).realize()
       out = t.sum(0).mul(2.).contiguous()
-      linear, var_vals = out.linear_with_vars()
+      linear, var_vals = linear_with_vars(out)
       copies = [si for si in linear.src if si.src[0].op is Ops.STORE]
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
       # N*(N-1) copies for input and output

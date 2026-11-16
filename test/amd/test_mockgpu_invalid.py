@@ -9,8 +9,9 @@ class TestMockGPUInvalidInstruction(unittest.TestCase):
 import os, sys
 from tinygrad import Tensor
 from tinygrad.engine.realize import lower_and_compile, run_linear
+from test.helpers import schedule_linear
 
-linear = lower_and_compile((Tensor.empty(1) + 1).schedule_linear())
+linear = lower_and_compile(schedule_linear(Tensor.empty(1) + 1))
 binary = linear.src[-1].src[0].src[3]
 lib = binary.arg.replace(bytes.fromhex("0000b0bf"), bytes.fromhex("00fe017e"), 1)
 try:

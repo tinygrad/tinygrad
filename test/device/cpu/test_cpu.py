@@ -6,11 +6,12 @@ from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.renderer.x86 import X86Renderer
 from tinygrad.renderer.cstyle import TCCRenderer
 from tinygrad.codegen import to_program
+from test.helpers import schedule_linear
 
 @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
 class TestCPU(unittest.TestCase):
   def test_arch_feats(self):
-    ast = (Tensor.empty(16) + Tensor.empty(16)).schedule_linear().src[-1].src[0]
+    ast = schedule_linear(Tensor.empty(16) + Tensor.empty(16)).src[-1].src[0]
     for ren in Device[Device.DEFAULT].renderers:
       for arch, expect_vmov in [("x86_64,x86-64,avx", True), ("x86_64,x86-64,-avx", False)]:
         with self.subTest(arch=arch):

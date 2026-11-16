@@ -4,6 +4,7 @@ from tinygrad import Tensor, Context, Device, dtypes
 from tinygrad.uop.ops import Ops
 from tinygrad.dtype import AddrSpace
 from tinygrad.codegen import to_program
+from test.helpers import schedule_linear
 from test.device.dsp.test_quantize_onnx import get_quantized_model
 
 @unittest.skip("this is broken")
@@ -19,7 +20,7 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
     run_onnx = OnnxRunner(out_file)
     inp = Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32))
     with Context(QUANTIZE=1):
-      linear = run_onnx({"input":inp})["output"].schedule_linear()
+      linear = schedule_linear(run_onnx({"input":inp})["output"])
       prg = to_program(linear.src[-2].src[0], renderer=Device[Device.DEFAULT].renderer)
       daccs = [u for u in tuple(prg.src[1].src) if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG]
       assert all(u.dtype is dtypes.int for u in daccs)

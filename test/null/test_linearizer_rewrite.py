@@ -4,7 +4,7 @@ from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.late.linearizer import do_split_ends
 from tinygrad.uop.ops import KernelInfo, AxisType, UOp, Ops
-from test.helpers import to_uops_list
+from test.helpers import to_uops_list, schedule_linear
 
 class TestLinearizerRewrite(unittest.TestCase):
   def test_range_order(self):
@@ -25,7 +25,7 @@ class TestLinearizerRewrite(unittest.TestCase):
     t = Tensor.ones((64,64), device="NULL").contiguous().realize()
     out = (t*2).sum(axis=1)
     with Context(SPLIT_REDUCEOP=0):
-      si = out.schedule_linear().src[-1]
+      si = schedule_linear(out).src[-1]
       opts_to_apply = []
       opts_to_apply.append(Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)))
       opts_to_apply.append(Opt(OptOps.SPLIT, 2, (4, AxisType.UPCAST)))
@@ -40,7 +40,7 @@ class TestLinearizerRewrite(unittest.TestCase):
   def test_arange(self):
     out = Tensor.arange(32).clone("NULL")
     with Context(SPLIT_REDUCEOP=0):
-      si = out.schedule_linear().src[-1]
+      si = schedule_linear(out).src[-1]
       opts_to_apply = []
       opts_to_apply.append(Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)))
       ast = si.src[0].replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
@@ -49,7 +49,7 @@ class TestLinearizerRewrite(unittest.TestCase):
 
   def test_kernel_info(self):
     out = Tensor.arange(4).clone("NULL")
-    si = out.schedule_linear().src[-1]
+    si = schedule_linear(out).src[-1]
 
     ast = si.src[0].replace(arg=KernelInfo(opts_to_apply=()))
     prg = to_program(ast, Device.default.renderer)

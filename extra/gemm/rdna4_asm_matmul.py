@@ -4,7 +4,8 @@ from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.helpers import getenv, colored
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.engine.realize import Estimates, run_linear
+from tinygrad.engine.realize import Estimates
+from tinygrad.schedule import create_linear
 from tinygrad.renderer.amd.dsl import s, v, VCC_LO, NULL, src, ttmp
 from tinygrad.runtime.autogen.amd.rdna4.ins import *
 
@@ -226,13 +227,14 @@ def test_matmul():
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
 
   c = Tensor.custom_kernel(a, b, c, fxn=asm_kernel)[2]
-  linear = c.schedule_linear()
+  fn, externs = Tensor.export(c)
+  linear = create_linear(fn)
 
   ets = []
   with Context(DEBUG=2):
     for _ in range(getenv("CNT", 5)):
       start = GlobalCounters.time_sum_s
-      run_linear(linear)
+      Tensor.run(linear, externs)
       ets.append(GlobalCounters.time_sum_s - start)
   print(f"REAL TFLOPS {N*N*N*2 / min(ets) * 1e-12:.2f}")
 
