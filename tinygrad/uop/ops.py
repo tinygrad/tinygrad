@@ -1257,13 +1257,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     for i in range(len(param_map)):
       if i not in pos: param_map[i] = next(it)
     # nothing has a device, so there is nothing to run a call on: the call is folded, its values are computed where they're used
-    if default_dev is None: return tuple(graph_rewrite(v, _pm_resolve_params, param_map, walk=True) for v in values)
+    if default_dev is None: return tuple(graph_rewrite(v, pm_resolve_params, param_map, walk=True) for v in values)
     def mint(o:UOp, p:int) -> tuple[UOp, UOp]:
       # Declare output storage in the callee's shape, then bind its shape in the caller's scope.
       dev = o.device if o.device is not None else default_dev
       axis = o.axis if isinstance(o.device, tuple) else None
       buf = UOp.alloc(o.shard_shape, o.dtype, device=dev, axis=axis)
-      shp = tuple(graph_rewrite(s, _pm_resolve_params, param_map, walk=True) if isinstance(s, UOp) else s for s in o.shard_shape)
+      shp = tuple(graph_rewrite(s, pm_resolve_params, param_map, walk=True) if isinstance(s, UOp) else s for s in o.shard_shape)
       return UOp.alloc(shp, o.dtype, slot=buf.buf_uop.arg.slot, device=dev, axis=axis), buf.param_like(p)
     outputs = tuple(mint(o, p) for o, p in zip(values, pos))
     rets = tuple(r for r, _ in outputs)
@@ -1883,7 +1883,7 @@ def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
-_pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot] if p.arg.slot >= 0 else None)])
+pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot] if p.arg.slot >= 0 else None)])
 
 def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
   """Extract a call output's matching store, preserving writes to the enclosing scope's output PARAMs."""

@@ -92,15 +92,11 @@ from tinygrad.schedule.prepare import prepare_rangeify
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
-from tinygrad.uop.ops import PatternMatcher, UPat
-
-pm_post_sched_cache = PatternMatcher([
-  # Resolve positional arguments outside kernel bodies; free Variables have slot -1.
-  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[x.arg.slot] if x.arg.slot >= 0 else None),
-])
+from tinygrad.uop.ops import PatternMatcher, UPat, pm_resolve_params
 
 def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
-  linear = graph_rewrite(linear_call.body, pm_post_sched_cache, ctx=linear_call.src[1:], walk=True, name="params to buffers")
+  # the positional params outside the kernel bodies are the call args, free Variables have slot -1
+  linear = graph_rewrite(linear_call.body, pm_resolve_params, ctx=linear_call.src[1:], walk=True, name="params to args")
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
