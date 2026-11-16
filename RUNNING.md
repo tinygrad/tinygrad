@@ -373,7 +373,6 @@ Any setting not listed here is not supported: its production value is compiled i
 | `API_KEY` | empty (open loopback) | Comma-separated Bearer keys; prefer file for real secrets. |
 | `API_KEY_FILE` | unset | File containing one Bearer key per line. |
 | `ENC_CACHE` | 256 | Maximum cached chat-template encodings. |
-| `HOST_STASH` | 0 | Host-backed stash policy/capacity for GLM. |
 | `KEEPALIVE` | 15 s | SSE keepalive interval. |
 | `MODEL_ALIASES` | C9 `zai-org/GLM-5.3` | Additional `/v1/models` ids; empty disables. |
 | `MODEL_OWNED_BY` | tinygrad | Owner metadata in `/v1/models`. |
