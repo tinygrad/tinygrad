@@ -939,7 +939,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @property
   def buffer(self) -> Buffer|MultiBuffer:
-    from tinygrad.device import MultiBuffer
+    from tinygrad.device import Buffer, MultiBuffer
     # a bare STAGE (same-device materialization) keeps the source's buffer
     if self.op is Ops.STAGE and self.arg is None: return self.src[0].buffer
     if self.op in {Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER, Ops.BITCAST}: return self.src[0].buffer
@@ -958,7 +958,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return ret.bufs[self.arg]
     if self.op is Ops.MSTACK:
       ret = MultiBuffer.__new__(MultiBuffer)
-      ret.bufs = [cast("Buffer", x.buffer) for x in self.src]
+      ret.bufs = [cast(Buffer, x.buffer) for x in self.src]
       assert all_same([x.nbytes for x in ret.bufs]) and all_same([x.dtype for x in self.src]), "multibuffers mismatch buffers"
       return ret
     assert self.op is Ops.BUFFER and self.arg.buffer is not None, f"must be a realized BUFFER {self}"
