@@ -232,7 +232,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if steps < 0: raise ValueError("number of steps must be non-negative")
     if (dtype := to_dtype(dtype or dtypes.default_float)) == dtypes.bool: raise ValueError("linspace with bool dtype is not supported")
     if steps == 1: return cls.full((1,), start, dtype=dtype, buffer=False)
-    return (start + cls.arange(steps, dtype=dtypes.default_float) * ((stop - start) / (steps - 1))).cast(dtype)
+    idx, step = cls.arange(steps, dtype=dtypes.default_float), (stop - start) / (steps - 1)
+    return (idx < steps // 2).where(start + idx * step, stop - (steps - 1 - idx) * step).cast(dtype)
 
   @classmethod
   def eye(cls, n:int, m:int|None=None, dtype:DTypeLike|None=None) -> Self:
