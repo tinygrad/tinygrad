@@ -213,7 +213,7 @@ class TestViz(unittest.TestCase):
       a = UOp(Ops.PYLITERAL, src=tuple(src), arg=arg)
       exec_rewrite(a, [PatternMatcher([])])
     a2 = next(viz.get_details(0, 0))["graph"][id(a)]
-    self.assertEqual(ansistrip(a2["label"]), "PYLITERAL\nx\nyzww\nw")
+    assert ansistrip(a2["label"]).startswith("PYLITERAL\nx\nyzww\nw")
 
   def test_inf_loop(self):
     a = UOp.const(3)
@@ -255,17 +255,20 @@ class TestViz(unittest.TestCase):
       z = UOp.const(0)
       y = UOp.const(math.pi)
       alu = a*z
-      ret = exec_rewrite(sink:=UOp.sink(alu, y), [sym])
+      cc = UOp.cconst(1, dtypes.int)
+      alu2 = cc + a
+      ret = exec_rewrite(sink:=UOp.sink(alu, alu2, y), [sym])
     lst = viz.list_items()
     self.assertEqual(len(lst), 1)
     graphs = [x["graph"] for x in viz.get_details(0, 0)]
     # const is always in the graph, client side hides exclude=True nodes by default
-    self.assertEqual(list(graphs[0]), [id(a.src[0]), id(a), id(z), id(alu), id(y), id(sink)])
+    self.assertEqual(list(graphs[0]), [id(a.src[0]), id(a), id(z), id(alu), id(cc.src[0]), id(cc), id(alu2), id(y), id(sink)])
     self.assertTrue(graphs[0][id(z)]["exclude"])
     self.assertTrue(graphs[0][id(y)]["exclude"])
     self.assertFalse(graphs[0][id(alu)]["exclude"])
     self.assertEqual(graphs[0][id(y)]["label"].split("\n")[:2], ["CONST", "3.14159"])
-    self.assertEqual(list(graphs[1]), [id(u) for u in ret.toposort()])  # rewrite graph keys follow the rewritten sink's toposort
+    self.assertEqual(graphs[0][id(alu2)]["label"].split("\n")[2:], ["CONST0 1 dtypes.i32", "PARAM1 a Ops.STACK", "()"])
+    self.assertEqual(list(graphs[2]), [id(u) for u in ret.toposort()])  # rewrite graph keys follow the rewritten sink's toposort
 
   def test_const_reshape_expand_folded(self):
     # CONST->EXPAND should be folded into the ALU node, not shown as separate EXPAND nodes

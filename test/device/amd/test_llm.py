@@ -79,8 +79,9 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
 
   def test_mixed_quant_linear_wmma_tiles(self):
     with patch("tinygrad.llm.kernels.amd_gguf.q8_quantize", side_effect=AssertionError("expected WMMA")):
-      for typ in HALFWORD_QUANTS:
-        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=768, out_features=64, token_counts=(16, 32, 64), bias=True)
+      # the token tile (64/32/16) doesn't depend on the quant type, so each type runs one tile and each tile runs on three types
+      for i, typ in enumerate(HALFWORD_QUANTS):
+        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=768, out_features=64, token_counts=((64, 32, 16)[i % 3],), bias=True)
 
   def test_wmma_dequantization_basis(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")

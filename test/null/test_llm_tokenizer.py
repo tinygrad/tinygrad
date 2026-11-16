@@ -1,5 +1,6 @@
 import unittest, base64, functools, re, unicodedata, json, pathlib, tempfile
-from tinygrad.llm.cli import SimpleTokenizer, FallbackTemplate
+from tinygrad.llm.cli import FallbackTemplate
+from tinygrad.llm.tokenizer import SimpleTokenizer
 from tinygrad.helpers import fetch
 
 class TestLLMTokenizer(unittest.TestCase):
@@ -97,6 +98,15 @@ class TestLLMTokenizer(unittest.TestCase):
     self.assertTrue(tok.is_end(0))  # eom ends generation
     self.assertFalse(tok.is_end(2))
 
+  def test_gguf_bos_without_add_bos(self):
+    # add_bos_token=False only stops the fallback template from adding BOS, chat templates still get it as bos_token
+    kv = { "tokenizer.ggml.tokens": ["<s>", "</s>", "hi"], "tokenizer.ggml.token_type": [3, 3, 1], "tokenizer.ggml.pre": "llama3",
+           "tokenizer.ggml.bos_token_id": 0, "tokenizer.ggml.eos_token_id": 1 }
+    for add_bos in (True, False):
+      tok = SimpleTokenizer.from_gguf_kv(kv | {"tokenizer.ggml.add_bos_token": add_bos})
+      self.assertEqual(tok.bos_id, 0)
+      self.assertEqual(FallbackTemplate(tok).render([{"role":"user", "content":"hi"}]).startswith("<s>"), add_bos)
+
   def test_hf_tokens(self):
     with tempfile.TemporaryDirectory() as folder:
       path = pathlib.Path(folder)
@@ -155,6 +165,11 @@ class TestLLMTokenizer(unittest.TestCase):
       self.assertEqual(split["kimi-k2"](s), go, f"kimi-k2 {s!r}")
     self.assertEqual(split["kimi-k2"]("a.\n/b"), ["a", ".\n", "/b"])
 
+  def test_qwen35_split_marks(self):
+    split = SimpleTokenizer({}, {}, "qwen35")._split_to_word.findall
+    self.assertEqual(split("नमस्ते दुनिया"), ["नमस्ते", " दुनिया"])
+    self.assertEqual(split("!!\u0301"), ["!!", "\u0301"])
+
   def test_joyai_llm_split(self):
     tok = SimpleTokenizer({}, {}, "joyai-llm")
     tok._encode_word = lambda word: [word.decode()]
@@ -163,6 +178,10 @@ class TestLLMTokenizer(unittest.TestCase):
     self.assertEqual(tok.encode("it's I'M don'T"), ["it", "'s", " I", "'M", " don", "'T"])
     self.assertEqual(tok.encode("  你好hello"), ["  ", "你好", "hello"])
     self.assertEqual(tok.encode("a\u200b"), ["a", "\u200b"])
+
+  def test_olmo_split(self):
+    split = SimpleTokenizer({}, {}, "olmo")._split_to_word.findall
+    self.assertEqual(split("in 12345,\n\nI'LL"), ["in", " 12345", ",", "\n", "\n", "I", "'", "LL"])
 
   def test_stream_decoder(self):
     """stream_decoder buffers incomplete UTF-8: token 25677 has 3/4 of emoji, token 138 completes it."""

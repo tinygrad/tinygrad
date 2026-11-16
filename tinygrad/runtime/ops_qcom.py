@@ -1,7 +1,8 @@
 from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, contextlib
 from typing import Any
-from tinygrad.device import Compiled, BufferStorage, BufferSpec, Buffer, Device, Allocator, TinyELF
+from tinygrad.device import Compiled, BufferStorage, BufferSpec, Buffer, Device, Allocator
+from tinygrad.renderer import TinyELF
 from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, ccall, cstruct, patch, unwrap_view, layout_args, pack_args, make_program
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.system import FileIOInterface, System
@@ -26,7 +27,7 @@ def dcache_flush():
   sink = UOp.sink(buf.after(flush.end(i)).after(UOp.custom_function('__asm__ volatile("dsb sy" ::: "memory");', fmt=True).call()),
                   arg=KernelInfo(name="dcache_flush", opts_to_apply=()))
   prg = to_program(sink, Device["CPU"].renderer)
-  return Device["CPU"].runtime(prg.to_elf())
+  return Device["CPU"].runtime(TinyELF.from_program(prg))
 
 #Parse C-style defines: <regname>_<field_x>__SHIFT and <regname>_<field_y>__MASK from the adreno module into the following format:
 # qreg.<regname>(<field_x>=..., <field_y>=..., ..., <field_n>=...)
@@ -64,7 +65,7 @@ class QCOMComputeQueue(HWQueue):
   def _cache_flush(self, write_back=True, invalidate=False, sync=True, memsync=False):
     # TODO: 7xx support.
     if write_back: # dirty cache write-back, into the device's dummy buffer
-      dummy = UOp.alloc((0x1000,), dtypes.uint8, 0, device=self.devs[0], name="dummy")
+      dummy = UOp.extern((0x1000,), dtypes.uint8, self.devs[0], "dummy")
       self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_FLUSH_TS, dummy.getaddr(self.devs), 0)
     if invalidate: self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
     if memsync: self.cmd(mesa.CP_WAIT_MEM_WRITES)
@@ -125,7 +126,7 @@ class QCOMComputeQueue(HWQueue):
     global_size_mp = [cast_int(g*l) for g,l in zip(global_size, local_size)]
 
     args_addr, lib_addr = self.kernargs(call, prg, data).getaddr(self.devs), lib.getaddr(self.devs)
-    stack_addr = UOp.alloc((data.hw_stack_offset * 4,), dtypes.uint8, 0, device=self.devs[0], name="stack").getaddr(self.devs)
+    stack_addr = UOp.extern((data.hw_stack_offset * 4,), dtypes.uint8, self.devs[0], "stack").getaddr(self.devs)
 
     self.cmd(mesa.CP_SET_MARKER, qreg.a6xx_cp_set_marker_0(mode=mesa.RM6_COMPUTE))
     self.reg(mesa.REG_A6XX_SP_UPDATE_CNTL, qreg.a6xx_sp_update_cntl(cs_state=True, cs_uav=True))
@@ -169,7 +170,7 @@ class QCOMComputeQueue(HWQueue):
                                                                state_block=mesa.SB6_CS_TEX, num_unit=data.samp_cnt), args_addr + data.samp_off)
       self.reg(mesa.REG_A6XX_SP_CS_SAMPLER_BASE, args_addr + data.samp_off)
       self.reg(mesa.REG_A6XX_TPL1_CS_BORDER_COLOR_BASE,
-               UOp.alloc((0x1000,), dtypes.uint8, 0, device=self.devs[0], name="border_color").getaddr(self.devs))
+               UOp.extern((0x1000,), dtypes.uint8, self.devs[0], "border_color").getaddr(self.devs))
 
     if data.tex_cnt > 0:
       self.cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST_CONSTANTS, state_src=mesa.SS6_INDIRECT,
@@ -281,7 +282,7 @@ class QCOMProgramData:
     self.fregs, self.hregs = _read_lib(lib, reg_desc_off + 0x14), _read_lib(lib, reg_desc_off + 0x18)
 
 def qcom_build_program(dev:QCOMDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[QCOMProgramData, UOp]:
-  image = bytes((data:=QCOMProgramData(dev, prg.to_elf())).image).ljust(round_up(len(data.image), 4), b"\x00")
+  image = bytes((data:=QCOMProgramData(dev, TinyELF.from_program(prg))).image).ljust(round_up(len(data.image), 4), b"\x00")
   return data, patch(make_program(prg, len(image), devs[0]), [], image)
 
 class QCOMAllocator(Allocator['QCOMDevice']):

@@ -8,7 +8,8 @@ from tinygrad.runtime.support.system import FileIOInterface
 from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
 from tinygrad.runtime.support.system import filter_visible_devices
 from tinygrad.uop.ops import sint
-from tinygrad.device import BufferStorage, Compiled, BufferSpec, TinyELF
+from tinygrad.device import BufferStorage, Compiled, BufferSpec
+from tinygrad.renderer import TinyELF
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, TracingKey
 from tinygrad.helpers import ceildiv, unwrap, pluralize
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer

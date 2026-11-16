@@ -132,20 +132,21 @@ def q8_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor, 
   q, scale, xsum = Tensor.custom_kernel(q, scale, xsum, x, fxn=functools.partial(_q8_quantize_kernel, tokens=tokens, in_features=in_features))[:3]
   return q, scale, xsum
 
-def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str) -> UOp:
+def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str, token_tile:int=1) -> UOp:
   chunks = out.shape[2]
   # One wave per output/chunk; group neighboring rows to amortize workgroup scheduling.
   rows = math.gcd(out_features, 4)
-  row = UOp.range(out.shape[0]*out_features//rows, 0, AxisType.GLOBAL)
+  row = UOp.range(out.shape[0]//token_tile*out_features//rows, 0, AxisType.GLOBAL)
   wave = UOp.range(rows, 3, AxisType.LOCAL)
   token_output = row*rows+wave
   chunk, lane = UOp.range(chunks, 1, AxisType.GLOBAL), UOp.range(32, 2, AxisType.LOCAL)
-  token, output = token_output // out_features, token_output % out_features
+  token, output = token_output // out_features * token_tile, token_output % out_features
   group = lane+chunk*32
-  value = (group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32))
-  total = warp_reduce(value, full_wave=True)
-  return out[token, output, chunk.valid(lane.eq(0))].store(total.cast(out.dtype)).end(row, wave, chunk, lane).sink(
-    arg=KernelInfo(name=name, opts_to_apply=()))
+  def total(token:UOp) -> UOp:
+    value = (group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32))
+    return warp_reduce(value, full_wave=True)
+  stores = [out[token+t, output, chunk.valid(lane.eq(0))].store(total(token+t).cast(out.dtype)) for t in range(token_tile)]
+  return UOp.group(*stores).end(row, wave, chunk, lane).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
 def _iq_grid(device:str|tuple[str, ...]|None, ggml_type:int) -> Tensor:
   from tinygrad.runtime.autogen import ggml_common as ggml
@@ -206,10 +207,11 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
 @functools.cache
 def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp, out_features:int, in_features:int, ggml_type:int,
                          cdna:bool=False) -> UOp:
-  return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, cdna)
+  token_tile = tokens if (tokens:=cast(int, out.shape[0])) <= 8 else 1
+  return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, cdna, token_tile=token_tile)
 
 def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp, ...], out_features:int, in_features:int, ggml_type:int,
-                       cdna:bool, gate:Callable|None=None, xtoken:Callable|None=None, name:str="linear_") -> UOp:
+                       cdna:bool, gate:Callable|None=None, xtoken:Callable|None=None, name:str="linear_", token_tile:int=1) -> UOp:
   # gate(token, base) -> base: moves the weight rows, xtoken(token) -> the activation row of an output row
   def group_dot(token:UOp, output:UOp, group:UOp) -> UOp:
     block, subgroup = group//8, group%8
@@ -255,7 +257,7 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
       if ggml_type == IQ3_S: total *= (1+2*((byte(106+subgroup//2) >> ((subgroup%2)*4)) & 15)).float()
       if ggml_type == IQ3_XXS: total *= ((word(66+subgroup*4) >> 28).float()+0.5)*0.5
     return total * xd[token, group]
-  return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type])
+  return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type], token_tile)
 
 @functools.cache
 def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *grids:UOp,

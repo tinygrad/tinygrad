@@ -13,9 +13,9 @@ class CLCache:
   def __init__(self, allowed=None, strict=False, preclear=True, var_vals=None):
     self.allowed, self.strict, self.preclear, self.var_vals = allowed, strict, preclear, var_vals if var_vals is not None else {}
     self.count = 0
-  def add_linear(self, linear):
+  def add_linear(self, linear, var_vals):
     self.count += len(linear.src)
-    run_linear(linear, {})
+    run_linear(linear, var_vals)
   def __enter__(self):
     if self.preclear:
       gc.collect()

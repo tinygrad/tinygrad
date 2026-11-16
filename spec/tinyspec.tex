@@ -52,6 +52,8 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
   Unbound storage of $n$ elements. \\
 \op{Param} & ($n$) & \texttt{ParamArg} &
   Caller-provided storage. \\
+\op{Extern} & ($n$) & \texttt{ParamArg} &
+  Storage or a bound Variable from outside an exported function. \\
 \op{Const} & () & value &
   A scalar constant with shape $(\ )$. \\
 \op{Binary} & () & data & Raw binary data, has dtype uint8 and shape len($data$)  \\
@@ -59,7 +61,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \end{tabular}
 
 \smallskip
-\texttt{ParamArg} contains slot, dtype, value bounds, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for \op{Alloc}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}. The flat size $n$ is stated as a concrete weakint \op{Const} in src (an empty \op{Stack} for a scalar), followed by a \texttt{DEVICE} \op{Range} for multi-device storage.
+\texttt{ParamArg} contains slot, dtype, value bounds, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for \op{Alloc}s and \op{Extern}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}. The flat size $n$ is stated as a concrete weakint \op{Const} in src (an empty \op{Stack} for a scalar), followed by a \texttt{DEVICE} \op{Range} for multi-device storage.
 
 %% ============================================================
 \subsection*{{\color{callblue}Call Ops} \normalfont\small--- function abstraction, like the lambda calculus}
@@ -265,7 +267,7 @@ Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspa
 \textbf{Op} & \textbf{dtype} & \textbf{shape} & \textbf{device} & \textbf{min\_max} \\
 \midrule
 \op{Buffer}, \op{Alloc} & from arg & $(n)$ from src, or $()$ & from arg & dtype range \\
-\op{Param} & from arg & $(n)$ from src, or $()$ & from arg & from src or dtype range \\
+\op{Param}, \op{Extern} & from arg & $(n)$ from src, or $()$ & from arg & from src or dtype range \\
 \op{Const} & from arg & $()$ & \textsc{null} & $[v, v]$ \\[3pt]
 Movement ops & $\mathrm{src}[0].\mathrm{dtype}$ & (see op) & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Unshard} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0]$, each $a_k \times n_k$ & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
@@ -456,7 +458,7 @@ The result is a reusable graph fragment: the body's storage is represented by \o
 \toprule
 \textbf{Stage} & \textbf{Semantics} \\
 \midrule
-\textbf{Callify} & Transform the Tensor graph into a single stateless function. \\
+\textbf{Export} & Replace the runtime state of the Tensor graph with \op{Extern}s: bound storage (and contiguous views of it) loses its buffer, bound Variables lose their value. The result is a function that can be cached and serialized. \\
 \textbf{Rangeify} & Determine the kernel split of the function. Break everything down to shape () \\
 \textbf{Optimize} & Insert local buffers. Swap and split ranges, and determine which axes are parallel and which are serial. \\
 \textbf{Expand} & Expand the parallel ranges into shape. \\

@@ -2,7 +2,8 @@ from __future__ import annotations
 import platform, ctypes, struct, json
 from typing import Any
 from tinygrad.helpers import OSX, unwrap, data64_le, cpu_profile
-from tinygrad.device import Compiled, TinyELF, Program, HostAllocator, BufferSpec
+from tinygrad.device import Compiled, Program, HostAllocator, BufferSpec
+from tinygrad.renderer import TinyELF
 from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer, TCCRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer

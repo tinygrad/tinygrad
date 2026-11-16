@@ -10,7 +10,7 @@ from tinygrad.codegen import to_program
 from tinygrad.dtype import DType, truncate, AddrSpace
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import T, Target, DEV, DEBUG, Context, GlobalCounters
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, TinyELF
 from tinygrad.codegen import full_rewrite_to_sink, linearize_cleanups
 from tinygrad.codegen.late.linearizer import linearize
 from tinygrad.engine.realize import compile_linear
@@ -150,7 +150,7 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None, vals:tuple
     allocator._copyin(buf.buf, memoryview(struct.pack(str(len(data)) + (buf_dt.fmt or ""), *data)))
   g = UOp.param(0, uop.dtype, 1)
   prg = to_program(UOp.store(g.index(UOp.const(0)), uop).sink(arg=KernelInfo()), PythonRenderer(Target("PYTHON")))
-  prog = dev.runtime(prg.to_elf())
+  prog = dev.runtime(TinyELF.from_program(prg))
   out_buf = Buffer("PYTHON", uop.dtype.itemsize, preallocate=True)
   prog(out_buf._buf, *[b.buf for b in bufs], *vals)
   return out_buf.as_memoryview().cast(uop.dtype.fmt or "").tolist()[0]

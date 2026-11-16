@@ -2,12 +2,13 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import decimal
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, unwrap
+from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
+from tinygrad.uop.ops import pm_flatten_linear
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS
 from tinygrad.dtype import AddrSpace
-from tinygrad.renderer import Estimates, Renderer
+from tinygrad.renderer import Estimates, Renderer, TinyELF
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
@@ -16,7 +17,7 @@ from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call.src[1:] if not s.is_variable)
 def get_call_kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...]) -> list[UOp]:
   # one per kernel param in order: a buffer is its address, a value bound in the call is a CONST, any other value is its slotless var read
-  # from var_vals at every run (the jit unbinds its input variables)
+  # from var_vals at every run
   bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
   return [bound.get(p.expr, p.replace(arg=replace(p.arg, slot=-1))).ccast(p.dtype) if p.addrspace is AddrSpace.ALU else
           call.src[1+p.arg.slot].getaddr(devs) for p in prg.kernel_params]
@@ -107,7 +108,7 @@ def get_runtime(device:str, ast:UOp, cache=True):
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
     links = {call.body.src[0].arg.function_name:get_runtime(device, call.body, cache)
              for call in ast.src[1].src if call.op is Ops.CALL and call.body.op is Ops.PROGRAM}
-    runtime = Device[device].runtime(ast.to_elf(), links=links)
+    runtime = Device[device].runtime(TinyELF.from_program(ast), links=links)
     if cache: runtime_cache[key] = runtime
   return runtime
 
@@ -198,12 +199,6 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     st, en = (slots[device].host.view(fmt='Q')[x] for x in prof)
     return float(en-st) / cast(Any, Device[device]).timestamp_divider / 1e6
   return ets + [_prof_tm(d, prof) if ctx.wait else None for d, _, _, prof, *_ in info.kernels if prof]
-
-# flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
-pm_flatten_linear = PatternMatcher([
-  (UPat(Ops.LINEAR, custom_early_reject={Ops.LINEAR}, name="lin"),
-   lambda lin: lin.replace(src=tuple(flatten(c.src if c.op is Ops.LINEAR else (c,) for c in lin.src)))),
-])
 
 def _validate(call:UOp, sink:UOp) -> UOp:
   shadows = tuple(p if p.is_bound_var else

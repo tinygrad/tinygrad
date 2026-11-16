@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Device
-from tinygrad.device import CompileError
+from tinygrad.renderer import CompileError
 if Device.DEFAULT == "AMD":
   # NOTE: if you don't gate this, LVP fails on Mac
   from tinygrad.runtime.support.compiler_llvm import AMDLLVMCompiler

@@ -53,10 +53,15 @@ def create_bounded(name:str, vmin:int|z3.ArithRef, vmax:int|z3.ArithRef, solver:
 def create_var(x:UOp, ctx:tuple[z3.Solver, dict[UOp, z3.ExprRef]]) -> z3.ExprRef:
   name = x.arg.name if x.op is Ops.PARAM else f"{x.op.name.lower()}{len(ctx[1])}"
   return z3.Bool(name, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else create_bounded(name, x.vmin, x.vmax, ctx[0])
-# z3 does not model widths: a cast only converts between bool and int
+# a cast only converts between bool and int, z3_wrap models the width
 def z3_cast(c:UOp, x:z3.ExprRef) -> z3.ExprRef:
   if (c.src[0].dtype == dtypes.bool) == (c.dtype == dtypes.bool): return x
   return x != 0 if c.dtype == dtypes.bool else z3.If(x, 1, 0)
+# z3 ints are unbounded, but a cast, a bitcast and unsigned arithmetic wrap: wrap where vmin/vmax can't show the value fits its dtype
+def z3_wrap(u:UOp, x:z3.ExprRef) -> z3.ExprRef:
+  if u.dtype not in dtypes.ints or u.op not in {Ops.CAST, Ops.BITCAST} and not (u.op in GroupOp.ALU and dtypes.is_unsigned(u.dtype)): return x
+  if (u.vmin, u.vmax) != (u.dtype.min, u.dtype.max): return x
+  return (x-u.dtype.min) % 2**(8*u.dtype.itemsize) + u.dtype.min
 
 z3_renderer = PatternMatcher([
   # the valid condition is a constraint
@@ -69,13 +74,10 @@ z3_renderer = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), lambda x,ctx: ctx[1][x.src[0]] if x.src[0] in ctx[1] else create_var(x, ctx)),
   (UPat((Ops.PARAM, Ops.LOAD, Ops.INDEX), name="x"), create_var),
   (UPat((Ops.CAST, Ops.BITCAST)+tuple(GroupOp.Comparison), src=UPat(dtype=dtypes.floats), name="x"), create_var),
-  # a bitcast between ints wraps into the target range, z3 ints are unbounded
-  (UPat(Ops.BITCAST, dtypes.ints, src=(UPat.var("x", dtypes.ints),), name="c"),
-   lambda c,x,ctx: (ctx[1][x]-c.dtype.min) % 2**(8*c.dtype.itemsize) + c.dtype.min),
   # constants
   (UPat(Ops.CONST, arg=Invalid), lambda ctx: z3.Int("Invalid", ctx=ctx[0].ctx)),
   (UPat(Ops.CONST, name="x"), lambda x,ctx: z3.BoolVal(x.val, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else z3.IntVal(x.val, ctx=ctx[0].ctx)),
-  (UPat(Ops.CAST, src=(UPat.var("x"),), name="c"), lambda c,x,ctx: z3_cast(c, ctx[1][x])),
+  (UPat((Ops.CAST, Ops.BITCAST), src=(UPat.var("x"),), name="c"), lambda c,x,ctx: z3_cast(c, ctx[1][x])),
   (UPat(tuple(z3_alu), name="x"), lambda x,ctx: z3_alu[x.op](x, *(ctx[1][s] for s in x.src))),
   (UPat(GroupOp.ALU, name="x"), lambda x,ctx: python_alu[x.op](*(ctx[1][s] for s in x.src))),
 ])
@@ -87,7 +89,7 @@ def uops_to_z3(solver:z3.Solver, *uops: UOp) -> list[z3.ExprRef]:
   z3map: dict[UOp, z3.ExprRef] = {}
   for u in lst:
     if (z3_rewritten:=z3_renderer.rewrite(u, ctx=(solver, z3map))) is None: raise NotImplementedError(f"{u.op} is not supported by z3")
-    z3map[u] = z3_rewritten
+    z3map[u] = z3_wrap(u, z3_rewritten)
   assert all(u in z3map for u in uops), "UOp failed to rewrite to z3!"
   return [z3map[u] for u in uops]
 

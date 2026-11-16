@@ -68,7 +68,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     if x.op is Ops.STORE:
       # don't look inside stores, this doesn't count toward buffer accesses
       return False
-    if x.op is Ops.PARAM:
+    if x.op in {Ops.PARAM, Ops.EXTERN}:
       accessed_buffers.append(x)
     if x.op is Ops.REDUCE: reduces.append(x)
     return True
@@ -83,7 +83,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   buffer_in_reduce = False
   def buf_gate(x:UOp):
     nonlocal buffer_in_reduce
-    if x.op in {Ops.PARAM, Ops.STAGE, Ops.AFTER}: buffer_in_reduce = True
+    if x.op in {Ops.PARAM, Ops.EXTERN, Ops.STAGE, Ops.AFTER}: buffer_in_reduce = True
     return not buffer_in_reduce
   UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
   del buf_gate
@@ -118,9 +118,6 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   # indexing an after with all fully invalid stores is invalid
   (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True, name="idx"),
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
-  # a deviceless MSTACK src is the same value on every device, so indexing the stack is just indexing that value
-  (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda s,idx: idx.replace(src=(s,)+idx.src[1:]) if s.device is None else None),
 ])
 
 pm_remove_bufferize = PatternMatcher([
@@ -128,8 +125,6 @@ pm_remove_bufferize = PatternMatcher([
   (UPat.var("src").f(Ops.STAGE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
   # STORE to self is NOOP
   (UPat.var("x").store(UPat.var("x")), lambda x: UOp(Ops.NOOP)),
-  # END on NOOP is NOOP
-  (UPat(Ops.END, src=(UPat(Ops.NOOP, name="x"),), allow_any_len=True), lambda x: x),
 ])
 
 def strip_zero_offset_shrink(x:UOp) -> UOp:
@@ -179,7 +174,7 @@ def _limit_bufs(ctx:LimitBufsContext, root:UOp):
   if not (MAX_BUFS:=MAX_KERNEL_BUFFERS.value or DEVICE_MAX_BUFS.get(device, 0)): return None
 
   def visitor(u:UOp) -> frozenset[UOp]:
-    if u.op in {Ops.STAGE, Ops.AFTER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK}: return frozenset((u,))
+    if u.op in {Ops.STAGE, Ops.AFTER, Ops.PARAM, Ops.EXTERN, Ops.MSELECT, Ops.MSTACK}: return frozenset((u,))
     if len(u.src) == 1: return ctx.buf_cache[u.src[0]]
     return frozenset().union(*[ctx.buf_cache[s] for s in u.src])
   bufs = root.topovisit(visitor, ctx.buf_cache)
@@ -256,9 +251,6 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
    lambda m: m.replace(src=tuple([x.src[0].base for x in m.src])).reshape(m.shape)),
 
-  # remove any RESHAPEs on KERNEL
-  (UPat(Ops.CALL, name="k"), lambda k: k.replace(src=tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src))),
-
   # remove invalid writes
   (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONST, arg=Invalid))), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.AFTER, name="x"), remove_noop_afters),
@@ -298,11 +290,11 @@ to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), check_buf_states),
   (UPat((Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT), name="buf"), add_buf),
   # Only storage parameters get kernel-local slots; scalar parameters retain their enclosing call's slots.
-  (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
+  (UPat((Ops.PARAM, Ops.EXTERN), name="buf"), lambda ctx, buf:
    None if buf.addrspace is AddrSpace.ALU else add_buf(ctx, buf)),
 
   # ALU params are scalar symbolic values, not buffers.
-  (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
+  (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.EXTERN), name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
 
   (UPat(Ops.AFTER, name="after"), handle_after),
 

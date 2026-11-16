@@ -5,9 +5,9 @@ from tinygrad.codegen import to_program
 from tinygrad.helpers import Target
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.uop.ops import KernelInfo, Ops
-from tinygrad.schedule import transform_to_call, resolve_linear_call
+from tinygrad.schedule import resolve_linear_call
 
-def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop)).body.key
+def sched_key(t:Tensor): return t.export()[0].key
 
 class TestCall(unittest.TestCase):
   def test_call_scalar_param_shape_mismatch(self):
@@ -76,10 +76,10 @@ class TestCallSchedule(unittest.TestCase):
     a, b = f(x[:left]), f(x[:right])
     self.assertEqual(a.shape, (left,))
     self.assertEqual(b.shape, (right,))
-    self.assertEqual(sched_key(a), sched_key(b))
     for v in a.uop.src[1].body.variables():
       self.assertIsNone(v.arg.name)
       self.assertGreaterEqual(v.arg.slot, 0)
+    self.assertEqual(sched_key(a), sched_key(b))
 
 class TestArgOrder(unittest.TestCase):
   def _dev(self, x): return x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]

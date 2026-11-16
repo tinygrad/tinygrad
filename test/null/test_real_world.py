@@ -41,10 +41,12 @@ def helper_test(nm, gen, model, max_memory_allowed, max_kernels_allowed, all_jit
     if all_jitted:
       assert kernels_used > 0 and kernels_used == GlobalCounters.kernel_count or (kernels_used <= GlobalCounters.kernel_count and getattr(Device[Device.DEFAULT], "graph", None)), f"only {kernels_used} out of {GlobalCounters.kernel_count} were jitted"  # noqa: E501
 
-supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
+supported_dtypes = Device["NULL"].renderer.supported_dtypes()
 
 class TestRealWorld(unittest.TestCase):
   def setUp(self):
+    # kernel counts and memory are checked on NULL, a real device adds its runtime buffers (queues, programs, command buffers) to the memory used
+    self.enterContext(Context(DEV="NULL"))
     gc.collect()
     global global_mem_used
     global_mem_used = GlobalCounters.mem_used
@@ -72,9 +74,7 @@ class TestRealWorld(unittest.TestCase):
       for l in model: t = l(t, t2)
       return t.realize()
 
-    # TODO: support _offset on CL to get mem down to 0.0002
-    exp_mem = 0.00037 if Device.DEFAULT == "CL" else 0.0002
-    helper_test("test_unet_resblock", lambda: (Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24)), test, exp_mem, 37)
+    helper_test("test_unet_resblock", lambda: (Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24)), test, 0.0002, 37)
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need dtypes.float16")
   def test_llama(self):

@@ -2,7 +2,8 @@
 import unittest, os, subprocess
 from unittest.mock import patch
 from tinygrad import Tensor, dtypes
-from tinygrad.device import Device, Compiler, enumerate_devices_str
+from tinygrad.device import Device, enumerate_devices_str
+from tinygrad.renderer import Compiler
 from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, OSX, DEV, CACHELEVEL
 from tinygrad.runtime.support.c import DLL
 

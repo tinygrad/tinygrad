@@ -123,6 +123,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     # always exclude CONST
     if u.op is Ops.CONST and u is not x: excluded.add(u)
     if u.op is Ops.STACK and len(u.src) == 0: excluded.add(u)
+    if u.op is Ops.CAST and u.src[0] in excluded: excluded.add(u)
     # exclude RESHAPE/EXPAND that only serve to broadcast a CONST
     if u.op in {Ops.RESHAPE, Ops.EXPAND} and len(u.src) >= 1 and u.src[0] in excluded and u is not x: excluded.add(u)
     if u.op in {*GroupOp.Movement, Ops.PARAM}: excluded.update(s for s in u.src if s.op is Ops.STACK and all(x.op is Ops.CONST for x in s.src))
@@ -143,9 +144,9 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       if x in excluded:
         # walk through excluded movement ops to find the underlying CONST
         cx = x
-        while cx.op in GroupOp.Movement and len(cx.src) >= 1 and cx.src[0] in excluded: cx = cx.src[0]
-        arg = f"{cx.val:g}" if cx.op is Ops.CONST and dtypes.is_float(cx.dtype) else cx.render() if cx.op is Ops.STACK \
-            else cx.arg.name if isinstance(cx.arg, ParamArg) else f"{cx.arg}"
+        while cx.op in {*GroupOp.Movement, Ops.CAST} and len(cx.src) >= 1 and cx.src[0] in excluded: cx = cx.src[0]
+        arg = (f"{cx.val:g}" if cx.op is Ops.CONST and dtypes.is_float(cx.dtype) else cx.render() if cx.op is Ops.STACK \
+            else str(cx.arg.name) if isinstance(cx.arg, ParamArg) else f"{cx.arg}")+(f" {x.dtype}" if x.op is Ops.CAST else "")
         label.append(f"{cx.op.name}{idx} {arg}" + (f" {cx.src[0].op}" if len(cx.src) else ""))
     with soft_err(lambda _: label.append("<ISSUE GETTING LABEL>")):
       if len(rngs:=u.ranges):

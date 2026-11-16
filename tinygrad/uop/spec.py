@@ -3,7 +3,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, 
 from tinygrad.uop.uir import render_uir
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, weak_dtype
 from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape
-from tinygrad.device import is_disk_device
+from tinygrad.helpers import is_disk_device
 
 # ***** uop helpers *****
 
@@ -147,6 +147,10 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.BUFFER, src=(p_size,), allow_any_len=True, name="buf"), lambda buf:
    isinstance(buf.dtype, DType) and is_device(buf.arg.device) and buf.arg.buffer is not None
    and valid_device_range(buf.arg.device, buf.src[1:]) if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
+  # EXTERN is storage without a runtime buffer or a bound Variable without a value, from outside a function
+  (UPat(Ops.EXTERN, src=(p_size,), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.arg.buffer is None and x.arg.val is None
+   and (is_device(x.arg.device) if x.addrspace is AddrSpace.GLOBAL else x.addrspace is AddrSpace.ALU and x.arg.device is None)
+   and valid_device_range(x.arg.device, x.src[1:])),
   (UPat(Ops.ALLOC, src=(p_size,), allow_any_len=True, name="buf"), lambda buf: isinstance(buf.arg, ParamArg)
    and buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)
    and buf.arg.buffer is None
@@ -255,11 +259,12 @@ spec_kernel_graph = PatternMatcher([
   # const + stack to make vconsts and shape args. a 0-size/bound reduce keeps its const casted
   (UPat(Ops.CONST, src=()), lambda: True),
   (UPat(Ops.CAST, src=(UPat(Ops.CONST, src=()),)), lambda: True),
-  (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM) for x in s.src) or None),
+  (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM, Ops.EXTERN) for x in s.src) or None),
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
-  # PARAM is caller-provided storage (or a Variable in the ALU addrspace), ALLOC is call-local storage
+  # PARAM is caller-provided storage (or a Variable in the ALU addrspace), EXTERN is storage from outside, ALLOC is call-local storage
   (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  (UPat(Ops.EXTERN, src=(p_size,), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, src=(p_size,), allow_any_len=True, name="x"), lambda x:
    isinstance(x.arg, ParamArg) and valid_device_range(x.arg.device, x.src[1:]) and
    (x.arg.buffer is not None if x.addrspace is AddrSpace.GLOBAL else x.addrspace in (AddrSpace.LOCAL, AddrSpace.REG))),

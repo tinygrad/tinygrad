@@ -9,9 +9,8 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
-from tinygrad.schedule import transform_to_call
 
-def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop)).body.key
+def sched_key(t:Tensor): return t.export()[0].key
 
 class TestCall(unittest.TestCase):
   def test_call_plus(self):
@@ -127,6 +126,38 @@ class TestCallSchedule(unittest.TestCase):
     ref = np.zeros((4, 8), dtype=np.float32)
     ref[1:3, 2:6] = np.arange(8).reshape(2, 4) + 1
     np.testing.assert_equal(big.numpy(), ref)
+
+  def test_deviceless_body_storage_is_banned(self):
+    # global storage needs a device, a device agnostic body can't stage or allocate without one
+    x = Tensor([1., 2., 3., 4.]).realize()
+    p, tmp = UOp.param(0, dtypes.float, (4,)), UOp.alloc((4,), dtypes.float)
+    with self.assertRaisesRegex(RuntimeError, "global storage needs a device"):
+      Tensor(((p + 1).bufferize() * 2).call_with_output(x.uop, precompile=True)).realize()
+    with self.assertRaisesRegex(RuntimeError, "global storage needs a device"):
+      Tensor((tmp.after(tmp.store(p + 1)) * 2).call_with_output(x.uop)).realize()
+
+  def test_deviceless_call_keeps_grad_fxn(self):
+    # a call without a device is inlined where it's used, it still has its custom gradient
+    x = Tensor(3., dtype=dtypes.float)
+    y = Tensor.call(x, fxn=UOp.param(0, dtypes.float, ()) * 2, grad_fxn=lambda g, c: (g * 3,))
+    self.assertEqual(y.gradient(x)[0].item(), 3.0)
+    self.assertEqual(y.item(), 6.0)
+
+  def test_shared_buffer_across_call_bodies(self):
+    # the buffer read by one call and written by another is one EXTERN, so the read runs before the write
+    shared, x = Tensor([2.]).realize(), Tensor([10.]).realize()
+    p = UOp.param(0, dtypes.float, (1,), device=x.device)
+    read = Tensor((p * shared.uop).call_with_output(((x + 1).contiguous() + 1).uop))
+    write = Tensor(shared.uop.after(shared.uop.store(5)).call_with_output())
+    Tensor.realize(read, write)
+    self.assertEqual(read.tolist(), [24.])
+
+  def test_bound_var_in_body_not_rebound_by_slot(self):
+    # b is exported from the body as an EXTERN, its slot isn't a call position: it must not be rebound to the arg at slot 1 (a)
+    x = Tensor([10.]).realize()
+    a, b = UOp.variable("a", 1, 10).bind(2), UOp.variable("b", 1, 10).bind(3)
+    p = UOp.param(0, dtypes.float, (1,), device=x.device)
+    self.assertEqual(Tensor((p * a.param_like(1) + b).call_with_output(x.uop, a, b, precompile=True)).tolist(), [23.])
 
   def test_precompile_full_buffer_assign(self):
     @function(precompile=True)
@@ -247,12 +278,11 @@ class TestCallSchedule(unittest.TestCase):
   def test_precompile_scoped_bind_arg(self):
     @function(precompile=True)
     def f(x:Tensor, scale:UOp) -> Tensor: return x * scale
+    sa, sb = UOp.variable("scale_a", 1, 100).bind(2), UOp.variable("scale_b", 1, 100).bind(3)
+    self.assertEqual(sched_key(f(Tensor.ones(3), sa)), sched_key(f(Tensor.ones(3), sb)))
     a = Tensor.ones(3)
-    x = f(a, UOp.variable("scale_a", 1, 100).bind(2))
-    y = f(a, UOp.variable("scale_b", 1, 100).bind(3))
-    self.assertEqual(sched_key(x), sched_key(y))
-    np.testing.assert_equal(x.numpy(), [2, 2, 2])
-    np.testing.assert_equal(y.numpy(), [3, 3, 3])
+    np.testing.assert_equal(f(a, sa).numpy(), [2, 2, 2])
+    np.testing.assert_equal(f(a, sb).numpy(), [3, 3, 3])
 
   def test_precompile_nested_scope_collision(self):
     # a precompiled function body gets its own positional p{slot} params; they must not be renumbered when the call is
@@ -284,7 +314,7 @@ class TestCallSchedule(unittest.TestCase):
           out = outer(x)
           for call in (u for u in out.uop.toposort(enter_calls=True) if u.op is Ops.CALL):
             self.assertFalse(any(b.op is Ops.BUFFER for b in call.body.toposort(enter_calls=True)))
-          self.assertEqual(sched_key(out), sched_key(outer(x)))
+          self.assertEqual(sched_key(outer(x)), sched_key(outer(x)))
           out.sum().backward()
           np.testing.assert_equal(out.numpy(), [6., 9., 12., 15.])
           np.testing.assert_equal(x.grad.numpy(), [3., 3., 3., 3.])

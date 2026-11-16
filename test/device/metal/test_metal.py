@@ -1,6 +1,7 @@
 import gc, unittest
 from unittest.mock import patch
-from tinygrad.device import CompileError, Device, Buffer, BufferSpec
+from tinygrad.device import Device, Buffer, BufferSpec
+from tinygrad.renderer import CompileError
 from tinygrad.helpers import Context
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalAllocator, MetalCompiler

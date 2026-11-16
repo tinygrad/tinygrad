@@ -220,6 +220,7 @@ class TestOps(TensorTestCase):
     helper_test_op([], lambda: torch.arange(5.5, 175.5, 2.5), lambda: Tensor.arange(5.5, 175.5, 2.5), forward_only=True)
     helper_test_op([], lambda: torch.arange(-30.2, -0.3, 0.75), lambda: Tensor.arange(-30.2, -0.3, 0.75), forward_only=True)
     helper_test_op([], lambda: torch.arange(-50.3, -380.2, -2.25), lambda: Tensor.arange(-50.3, -380.2, -2.25), forward_only=True)
+    helper_test_op([], lambda: torch.arange(0, 3, 0.6), lambda: Tensor.arange(0, 3, 0.6), forward_only=True)
     # boundary values that fit exactly in int8 (min=-128, max=127)
     helper_test_op([], lambda: torch.arange(128, dtype=torch.int8), lambda: Tensor.arange(128, dtype=dtypes.int8), forward_only=True)
     helper_test_op([], lambda: torch.arange(-128, 128, dtype=torch.int8), lambda: Tensor.arange(-128, 128, dtype=dtypes.int8), forward_only=True)
@@ -3235,8 +3236,9 @@ class TestOps(TensorTestCase):
   def test_sparse_categorical_crossentropy_ignore_index(self):
     classes = [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
     for i in (-1, 0, 3):
-      helper_test_op([(12,10)], lambda x: torch.nn.CrossEntropyLoss(ignore_index=i)(x, torch.tensor(classes)),
-                                lambda x: x.sparse_categorical_crossentropy(Tensor(classes), ignore_index=i))
+      for labels in (classes, [i, 1], [i]):
+        helper_test_op([(len(labels),10)], lambda x: torch.nn.CrossEntropyLoss(ignore_index=i)(x, torch.tensor(labels)),
+                                          lambda x: x.sparse_categorical_crossentropy(Tensor(labels), ignore_index=i))
 
   def test_sparse_categorical_crossentropy_label_smoothing(self):
     for s in (0.3, 0.9):
@@ -3249,6 +3251,10 @@ class TestOps(TensorTestCase):
     helper_test_op([(32,10,3,3,3)],
                    lambda x: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.tensor(target)),
                    lambda x: x.log_softmax(axis=1).nll_loss(Tensor(target)))
+
+  def test_nll_loss_unbatched(self):
+    helper_test_op([(2,)], lambda x: torch.nn.functional.nll_loss(x, torch.tensor(1)),
+                          lambda x: x.nll_loss(Tensor(1)))
 
   def test_nll_loss_reductions(self):
     target = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
