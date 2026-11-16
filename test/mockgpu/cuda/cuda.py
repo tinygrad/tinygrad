@@ -49,6 +49,7 @@ def cuInit(flags): return cuda.CUDA_SUCCESS
 def cuDeviceGetCount(count): return out(count, 1, ctypes.c_int32)
 def cuDeviceGet(device, ordinal): return out(device, ordinal, ctypes.c_int32)
 def cuDeviceComputeCapability(major, minor, dev): return out(major, 3, ctypes.c_int32) or out(minor, 5, ctypes.c_int32)
+def cuDeviceGetAttribute(pi, attrib, dev): return out(pi, 1, ctypes.c_int32)
 def cuCtxCreate_v2(pctx, flags, dev): return out(pctx, dev + 1)
 def cuCtxSetCurrent(ctx): return cuda.CUDA_SUCCESS
 def cuCtxSynchronize(): return cuda.CUDA_SUCCESS
@@ -76,6 +77,8 @@ def cuLaunchHostFunc(stream, fn, data): return enqueue(stream, lambda: fn(data) 
 def cuMemcpyAsync(dst, src, size, stream): return enqueue(stream, lambda: ctypes.memmove(dst, src, size) or True)
 def cuStreamWriteValue64_v2(stream, address, value, flags): return enqueue(stream, lambda: out(address, value) == 0)
 def cuStreamWaitValue64_v2(stream, address, value, flags): return enqueue(stream, lambda: ctypes.c_uint64.from_address(address).value >= value)
+def cuStreamWriteValue32_v2(stream, address, value, flags): return enqueue(stream, lambda: out(address, value, ctypes.c_uint32) == 0)
+def cuStreamWaitValue32_v2(stream, address, value, flags): return enqueue(stream, lambda: ctypes.c_uint32.from_address(address).value >= value)
 
 for name, fn in list(globals().items()):
   if name.startswith("cu") and callable(fn): setattr(cuda.dll, name, ctypes.CFUNCTYPE(getattr(cuda, name).restype, *getattr(cuda, name).argtypes)(fn))

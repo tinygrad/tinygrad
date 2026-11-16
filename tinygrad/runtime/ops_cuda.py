@@ -36,9 +36,11 @@ pm_cuda = PatternMatcher([ # None is the stream
   (UPat(Ops.CALL, src=(UPat.custom_function("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
    lambda ctx, dst, src, n: (cuda.cuMemcpyAsync, dst.getaddr(ctx.device), src.getaddr(ctx.device), n.val, None)),
   (UPat(Ops.CALL, src=(UPat.custom_function("wait"), UPat(name="sig"), UPat(name="val"))),
-   lambda ctx, sig, val: (cuda.cuStreamWaitValue64_v2, None, sig.getaddr(ctx.device), val, cuda.CU_STREAM_WAIT_VALUE_GEQ)),
+   lambda ctx, sig, val: (cuda.cuStreamWaitValue64_v2, None, sig.getaddr(ctx.device), val, cuda.CU_STREAM_WAIT_VALUE_GEQ) if ctx.memops64 else
+     (cuda.cuStreamWaitValue32_v2, None, sig.getaddr(ctx.device), val.cast(dtypes.uint32), cuda.CU_STREAM_WAIT_VALUE_GEQ)),
   (UPat(Ops.CALL, src=(UPat.custom_function("store"), UPat(name="sig"), UPat(name="val"))),
-   lambda ctx, sig, val: (cuda.cuStreamWriteValue64_v2, None, sig.getaddr(ctx.device), val, cuda.CU_STREAM_WRITE_VALUE_DEFAULT)),
+   lambda ctx, sig, val: (cuda.cuStreamWriteValue64_v2, None, sig.getaddr(ctx.device), val, cuda.CU_STREAM_WRITE_VALUE_DEFAULT) if ctx.memops64 else
+     (cuda.cuStreamWriteValue32_v2, None, sig.getaddr(ctx.device), val.cast(dtypes.uint32), cuda.CU_STREAM_WRITE_VALUE_DEFAULT)),
   (UPat(Ops.CALL, src=(UPat.custom_function("timestamp"), UPat(name="sig"))), # [sig][stamp]
    lambda ctx, sig: (cuda.cuLaunchHostFunc, None, UOp.alloc((1,), dtypes.uint64, 0, device=ctx.device, name="stamp").getaddr(ctx.host),
                      sig[1:2].getaddr(ctx.device))),
@@ -89,6 +91,7 @@ class CUDAAllocator(Allocator['CUDADevice']):
 class CUDADevice(Compiled):
   api:Any = cuda
   launch_end = 0 # CU_LAUNCH_PARAM_END
+  memops64 = True
   renderers = [CUDARenderer, PTXRenderer, NVCCRenderer]
 
   def __init__(self, device:str=""):
@@ -109,6 +112,8 @@ class CUDADevice(Compiled):
 
   def get_arch(self, device_id:int) -> str:
     check(cuda.cuDeviceComputeCapability(ctypes.byref(major:=ctypes.c_int()), ctypes.byref(minor:=ctypes.c_int()), device_id))
+    check(cuda.cuDeviceGetAttribute(ctypes.byref(ops:=ctypes.c_int()), cuda.CU_DEVICE_ATTRIBUTE_CAN_USE_64_BIT_STREAM_MEM_OPS, device_id))
+    self.memops64 = bool(ops.value)
     return f"sm_{major.value}{minor.value}"
 
   @functools.cache
