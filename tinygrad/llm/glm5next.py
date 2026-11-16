@@ -331,8 +331,7 @@ def _skinny(lin:Linear, x:Tensor) -> Tensor|None:
 
 def _decode_rows() -> int: return MOE_BATCH_ROWS if _batch_rows[0] is not None else MOE_DECODE_ROWS
 
-# batched decoding (Transformer.forward_batch): the rows are groups of a sequence each, group g (its rows the tokens at positions pos.. of the
-# sequence) in the state slot g: (pos, rows) of every group
+# batched/sequence decoding: rows grouped by sequence, with per-slot state. See forward_spec and forward_seqs_glm.
 _batch_rows:list[list[tuple[UOp, int]]|None] = [None]
 
 def _batch_attention(x:Tensor, groups:list[tuple[UOp, int]], fn:Callable[[Tensor, list[tuple[UOp, int]]], Tensor]) -> Tensor:
@@ -358,7 +357,7 @@ def slot_states(k:int) -> tuple[int, int]:
 
 def _group_positions(groups:list[tuple[UOp, int]], device:str|tuple[str, ...]|None) -> Tensor:
   """the start positions of the groups of batched decoding (their variables) as an int32 tensor on device"""
-  # (all at 0, the prefills of batch_prefill: zeros. a stack of constants as a custom kernel's input fails the kernel graph's spec)
+  # (all at 0: sequence/prompt positions. a stack of constants as a custom kernel's input fails the kernel graph's spec)
   if all(p.op is Ops.CONST and p.arg == 0 for p, _ in groups): return Tensor.zeros(len(groups), dtype=dtypes.int32, device=device).contiguous()
   return Tensor.stack(*[Tensor(p) for p, _ in groups]).cast(dtypes.int32).contiguous().to(device).contiguous()
 
@@ -1322,7 +1321,7 @@ class Indexer:
   def pk_slot(self) -> int:
     """the rows of a slot's pooled keys (of a device if split)"""
     return int(self.slot_pk[0].shape[0]) // (self.shard or 1)
-  pool_pk:Tensor  # batched decoding: the caches of every slot, and of all of them (MLATransformerBlock._init_slots)
+  pool_pk:Tensor  # sequence-slot pooled-key caches
   pool_ring:Tensor
   slot_pk:list[Tensor]
   slot_ring:list[Tensor]
@@ -1491,7 +1490,7 @@ class Indexer:
 
 class MLATransformerBlock(FFNBlock):
   _regions:tuple[int, int, int]|None = None  # sequence regions for shared caches (see SeqEngine)
-  pool_k:Tensor  # (batched decoding: the slots' caches, see _init_slots)
+  pool_k:Tensor  # (sequence-slot caches, see _init_seq_slots)
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
     qk_nope_head_dim = config.head_dim - config.rope_dim
@@ -1699,8 +1698,7 @@ class MLATransformerBlock(FFNBlock):
         # (SEQ_KV4 (default off, a numerics change): 4-bit rows, see q4_rows: 288 bytes instead of 528)
         row, dt = ((Q4_ROW if getenv("SEQ_KV4", 0) else FP8_ROW,), dtypes.uint32) if getenv("SEQ_FP8", 1) and D == 512 else ((D,), dtypes.half)
         if (reg:=self._regions) is not None:
-          # (SLOT_ALIAS: the slots of batched decoding in the same buffer, regions of S positions: the model's first (SLOT_SPAN of them), slot
-          # i's the SLOT_SPAN+i-th. the model's cache past them is the slots': a long sequence alone overwrites them, see Transformer.main_overlaps)
+          # (SLOT_ALIAS: one buffer of S-position regions shared by the model's sequence cache and slot pools)
           n, S, R = reg
           stride, W = seq_rows(S, len(devs)), SLOT_SPAN
           views = _region_views(devs, 0, row, dt, R*stride, [(0, seq_rows(self.config.max_context, len(devs))), (W*stride, n*stride)] +
@@ -1844,7 +1842,7 @@ class GatedDeltaNetBlock(FFNBlock):
       # (a row of a head: its k, decay, v and beta)
       self.pool_rp = _slot_pool(n, self.recurrent_state, (replay_q(self.config.spec_drafts), *self.recurrent_state.shape[1:3], 2*K + V + 1),
                                 dtypes.float32)[0]
-    # (in one buffer of every device: slot_store writes what a step reads)
+    # (in one buffer of every device: sequence steps write and read the slots)
     # (in float as the model's: a step reads and writes it, in half its rounding adds up over a long reply. in half for many slots
     # (SLOT_STATE_HALF, default past 8): their memory, a long context's model and 32 slots of it don't fit)
     if half is None: half = n > 8
@@ -3056,7 +3054,7 @@ class Transformer:
 
   def _forward_seqs_glm(self, vs:tuple[UOp, ...]) -> Tensor:
     """
-    forward_seqs of GLM (MLA with the indexer, KDA blocks, the MTP layer; no hyper-connections' streams, no n-gram rows): as forward_batch_spec,
+    forward_seqs of GLM (MLA with the indexer, KDA blocks and MTP; no hyper-connection streams or n-gram rows): the old speculative form,
     a sequence's caches its region (its base), its states its slot's. the hidden states kept are the normed ones (as forward_spec's)
     """
     k, G, devs = self.config.spec_drafts if self._step_k is None else self._step_k, len(vs) // 6, self.token_embd.weight.device
@@ -3650,14 +3648,6 @@ class Transformer:
     loads, load_jits = {id(j) for j in self._pending_load if isinstance(j, _TinyJit)}, [j for j in self._pending_load if isinstance(j, _TinyJit)]
     def taken(jit:_TinyJit):
       loads.discard(id(jit))
-      if loads: return
-      self._finish_load()
-      # (run once: their graphs and the buffers they read are freed)
-      for j in load_jits: j.reset()
-      load_jits.clear()
-      gc.collect()
-      for j, _ in calls:
-        if j.captured is None and getattr(j, "link_later", False): j.link_later = False
     # (WARMUP_JITS: the jits of the names wanted (see warmup), the others captured on their first call; the loads' always)
     calls = [(j, c) for j, c in calls if j in load_jits or warmup_wanted(getattr(j, "warmup_name", ""))]
     capture_parallel(calls, meanwhile, taken)
