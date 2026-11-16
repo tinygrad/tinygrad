@@ -5,7 +5,8 @@ from typing import Any, Callable, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.llm.kernels.amd_glm import _nucleus_round_kernel, _local_argmax_kernel, _argmax_parts, _moe_softmax_router_kernel, \
-  _moe_softmax_router_bitonic_kernel, _moe_bundle_atomic_kernel, _route_place_kernel, _ghc_post_kernel
+  _moe_softmax_router_bitonic_kernel, _moe_bundle_atomic_kernel, _route_place_kernel, _ghc_post_kernel, _ghc_pre_kernel, \
+  _gated_delta_prefill_kernel
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import prod, getenv, round_up, unwrap, dedup
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
@@ -3925,32 +3926,6 @@ def _slot_gather_kernel(dst:UOp, pool:UOp, slots:UOp, starts:UOp, S:int) -> UOp:
 def _sigmoid(x:UOp) -> UOp: return ((-x * LOG2E).exp2() + 1).reciprocal()
 
 @functools.cache
-def _ghc_pre_kernel(xn:UOp, q:UOp, scale:UOp, xsum:UOp, part:UOp, xs:UOp, w:UOp, winj:UOp, *, count:int, D:int, eps:float) -> UOp:
-  # a workgroup a (token, stream) of xs (T, count*D): its rms norm (times w) in xn, quantized in groups of 32 (q, scale, xsum: q8_quantize's),
-  # and its inject partials part[token, stream, j] = winj[j, stream's] . xn of the stream
-  NJ, W = cast(int, winj.shape[0]), 8
-  wg, wave = UOp.range(cast(int, xs.shape[0])*count, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL)
-  lane = UOp.range(WARP_SIZE, -1, AxisType.WARP)
-  tok, st, t = wg // count, wg % count, wave * WARP_SIZE + lane
-  vals = [xs[tok, st*D + it*W*WARP_SIZE + t].load().float() for it in range(D // (W*WARP_SIZE))]
-  def block_sum(lds:UOp, j:int, v:UOp) -> tuple[UOp, UOp]:
-    return lds, lds[j, wave.valid(lane.eq(0))].store(warp_reduce(v, full_wave=True))
-  red = UOp.alloc((1 + NJ, W), dtypes.float, addrspace=AddrSpace.LOCAL)
-  red = red.after(red[0, wave.valid(lane.eq(0))].store(warp_reduce(functools.reduce(lambda a,b: a+b, [v*v for v in vals]), full_wave=True)).barrier())
-  rinv = (functools.reduce(lambda a,b: a+b, [red[0, i].load() for i in range(W)]) * (1/D) + eps).sqrt().reciprocal()
-  xns = [v * rinv * w[st*D + it*W*WARP_SIZE + t].load().float() for it, v in enumerate(vals)]
-  stores:list[UOp] = []
-  for it, x in enumerate(xns):
-    stores.append(xn[tok, st*D + it*W*WARP_SIZE + t].store(x.cast(xn.dtype)))
-    stores += _q8_narrow_stores(x, q, scale, xsum, None, tok, st*(D//32) + it*W + wave, lane)
-  ps = [red[1+j, wave.valid(lane.eq(0))].store(warp_reduce(functools.reduce(lambda a,b: a+b, [
-          winj[j, st*D + it*W*WARP_SIZE + t].load().float() * x for it, x in enumerate(xns)]), full_wave=True)) for j in range(NJ)]
-  red2 = red.after(UOp.group(*ps).barrier())
-  stores += [part[tok, st, (UOp.const(j, dtypes.weakint)).valid(t.eq(0))].store(
-               functools.reduce(lambda a,b: a+b, [red2[1+j, i].load() for i in range(W)])) for j in range(NJ)]
-  return UOp.group(*stores).end(wg, wave, lane).sink(arg=KernelInfo(name="ghc_pre", opts_to_apply=()))
-
-@functools.cache
 def _ghc_prefill_norm_kernel(xn:UOp, xhalf:UOp, part:UOp, xs:UOp, w:UOp, winj:UOp, *, count:int, D:int, eps:float, rows:int=0) -> UOp:
   # Keep each normalized stream in registers for all inject dot products. Also write the half GEMM input, avoiding a separate cast.
   # rows: the rows (of a device) past them aren't read nor their xn and xhalf stored (padding: their inject partials are zeros)
@@ -4293,47 +4268,6 @@ def _gated_delta_prefill_lds_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alp
 # key its own) and u_t the update of token t (its delta): u = P (v - W), W_t = S0 (exp2(G_t) k_t), the outputs o = Q + R (v - W) with
 # Q_t = S0 (exp2(G_t) q_t), the state after it S0 exp2(G_C) + sum_t u_t (k_t exp2(G_C - G_t)). P = (I + diag(beta) A)^-1 diag(beta) and R = B P
 # of A_tj = sum_c k_t k_j exp2(G_t - G_j) (j < t), B_tj = sum_c q_t k_j exp2(G_t - G_j) (j < t, B_tt = q_t k_t): every exponent at most 0
-
-
-@functools.cache
-def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None,
-                                end_pos:UOp|None=None) -> UOp:
-  # end_pos: the state is (S, B, H, V, K), the state at a position p is p%S: read at start_pos, written at end_pos
-  batch, heads, tokens, value_dim, row_tile = *core.shape, 4
-  key_dim, alpha_dim = q.shape[-1], alpha.shape[-1] if len(alpha.shape) == 4 else 1
-  assert all(isinstance(x, int) for x in (batch, heads, tokens, value_dim, key_dim)) and key_dim % 32 == 0 and value_dim % row_tile == 0
-  batch, heads, tokens, value_dim, key_dim = cast(tuple[int, int, int, int, int], (batch, heads, tokens, value_dim, key_dim))
-  core, v = (x.reshape(batch*heads, tokens, value_dim) for x in (core, v))
-  q, k = (x.reshape(batch*heads, tokens, key_dim) for x in (q, k))
-  beta, kq = (x.reshape(batch*heads, tokens) for x in (beta, kq))
-  alpha = alpha.reshape(batch*heads, tokens, alpha_dim)
-  # the rows of the state read and written: offsets in the (2*B*H, V, K) state with parities
-  S = cast(int, state.shape[0]) if end_pos is not None else 1
-  read_off, write_off = (0, 0) if end_pos is None else ((cast(UOp, start_pos) % S) * (batch*heads), (end_pos % S) * (batch*heads))
-  state = state.reshape(-1, value_dim, key_dim)
-  bh_row, lane = UOp.range(batch*heads*value_dim//row_tile, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
-  bh, row_base = bh_row // (value_dim//row_tile), (bh_row % (value_dim//row_tile))*row_tile
-  rows, cols = tuple(row_base+i for i in range(row_tile)), tuple(lane + i*32 for i in range(key_dim//32))
-  current = UOp.alloc((row_tile*key_dim//32,), dtypes.float32, addrspace=AddrSpace.REG)
-  initial = None if start_pos is None else start_pos.eq(0)
-  current = current.after(current.store(UOp.stack(*(state[read_off+bh, row, col].float() if initial is None else
-    initial.where(0, state[read_off+bh, row, col].float()) for row in rows for col in cols))))
-  token = UOp.range(tokens, 2, AxisType.LOOP)
-  keys = tuple(k[bh, token, col].load() for col in cols)
-  queries = tuple(q[bh, token, col].load() for col in cols)
-  updates, stores = [], []
-  for row_idx,row in enumerate(rows):
-    previous = tuple(current.after(token)[row_idx*key_dim//32+i].load() for i in range(key_dim//32))
-    decayed, bv = tuple(x * alpha[bh, token, col if alpha_dim > 1 else 0].load() for x,col in zip(previous, cols)), beta[bh, token].load()
-    state_k = warp_reduce(sum((x*y for x,y in zip(decayed, keys)), UOp.const(0, dtypes.float32)), full_wave=True)
-    state_q = warp_reduce(sum((x*y for x,y in zip(decayed, queries)), UOp.const(0, dtypes.float32)), full_wave=True)
-    delta = (v[bh, token, row].load() - state_k) * bv
-    updates += [x + delta*y for x,y in zip(decayed, keys)]
-    stores.append(core[bh, token, row.valid(lane.eq(0))].store(state_q + delta*kq[bh, token]))
-  step = UOp.group(*stores, current.store(UOp.stack(*updates))).end(token)
-  state_stores = (state[write_off+bh, row, col].store(current.after(step)[row_idx*key_dim//32+i].load().cast(state.dtype))
-                  for row_idx,row in enumerate(rows) for i,col in enumerate(cols))
-  return UOp.group(*state_stores).end(lane, bh_row).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
 
 
 DECODE_THREADS = 1024
