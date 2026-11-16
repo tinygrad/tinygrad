@@ -4,7 +4,7 @@ from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp, ParamArg, AddrSpace
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.function import function
-from tinygrad.schedule import export, transform_to_call
+from tinygrad.schedule import export
 
 def exported(*tensors:Tensor) -> tuple[UOp, tuple[UOp, ...]]: return export(Tensor._bufferize(*tensors))
 
@@ -39,9 +39,6 @@ class TestExport(unittest.TestCase):
     self.assertEqual((e*2+1).sym_infer({e.expr: 3}), 7)
     self.assertEqual(fn.variables(), [e])
     with self.assertRaises(AssertionError): e.bind(3)
-
-  def test_transform_to_call_needs_export(self):
-    with self.assertRaises(AssertionError): transform_to_call(UOp.sink((buf()+1).contiguous().uop))
 
   def test_same_function(self):
     v = Variable("v", 1, 4)

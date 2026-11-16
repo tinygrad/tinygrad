@@ -9,9 +9,9 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
-from tinygrad.schedule import transform_to_call, export
+from tinygrad.schedule import export
 
-def sched_key(t:Tensor): return transform_to_call(export(UOp.sink(t.uop))[0]).body.key
+def sched_key(t:Tensor): return export(UOp.sink(t.uop))[0].key
 
 class TestCall(unittest.TestCase):
   def test_call_plus(self):

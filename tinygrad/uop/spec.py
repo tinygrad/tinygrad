@@ -259,11 +259,12 @@ spec_kernel_graph = PatternMatcher([
   # const + stack to make vconsts and shape args. a 0-size/bound reduce keeps its const casted
   (UPat(Ops.CONST, src=()), lambda: True),
   (UPat(Ops.CAST, src=(UPat(Ops.CONST, src=()),)), lambda: True),
-  (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM) for x in s.src) or None),
+  (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM, Ops.EXTERN) for x in s.src) or None),
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
-  # PARAM is caller-provided storage (or a Variable in the ALU addrspace), ALLOC is call-local storage
+  # PARAM is caller-provided storage (or a Variable in the ALU addrspace), EXTERN is storage from outside, ALLOC is call-local storage
   (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  (UPat(Ops.EXTERN, src=(p_size,), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, src=(p_size,), allow_any_len=True, name="x"), lambda x:
    isinstance(x.arg, ParamArg) and valid_device_range(x.arg.device, x.src[1:]) and
    (x.arg.buffer is not None if x.addrspace is AddrSpace.GLOBAL else x.addrspace in (AddrSpace.LOCAL, AddrSpace.REG))),

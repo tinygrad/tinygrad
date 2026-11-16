@@ -1886,10 +1886,10 @@ _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get
 pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot] if p.arg.slot >= 0 else None)])
 
 def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
-  """Extract a call output's matching store, preserving writes to the enclosing scope's output PARAMs."""
+  """Extract a call output's matching store, preserving writes to the enclosing scope's storage (PARAMs and EXTERNs)."""
   stores = [st for st in t.src if st.op is Ops.STORE and st.src[0].unsharded_base is r.unsharded_base]
   if len(stores) != 1: return None
-  return r.after(stores[0]) if r.unsharded_base.op is Ops.PARAM else stores[0].src[1]
+  return r.after(stores[0]) if r.unsharded_base.op in {Ops.PARAM, Ops.EXTERN} else stores[0].src[1]
 
 # a store's storage keeps the views and drops AFTERs (they only sequence stores)
 pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])])
