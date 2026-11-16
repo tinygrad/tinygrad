@@ -518,7 +518,9 @@ def _hash_uniform(seed:Tensor, keys:Tensor, like:Tensor) -> Tensor:
   # (murmur3's finalizer: every bit of the sum mixed into every bit)
   for sh, mul in ((16, 0x85EBCA6B), (13, 0xC2B2AE35)): h = (h ^ (h >> sh)) * mul
   h = h ^ (h >> 16)
-  return ((h >> 8).cast(dtypes.float32) + 0.5) * (1.0 / (1 << 24))
+  # (23 bits, as glm5next's: (k+0.5)/2**24 rounds to 1.0 in float32 at the top (one token in 2**24, ~1% of the steps over the vocabulary): its
+  # noise an infinity, a token of the whole vocabulary sampled whatever its probability (ts5's stray tokens at top_p 1, Nov 16))
+  return ((h >> 9).cast(dtypes.float32) + 0.5) * (1.0 / (1 << 23))
 
 def _argmax_rows(x:Tensor, cols:int=256) -> Tensor:
   """
