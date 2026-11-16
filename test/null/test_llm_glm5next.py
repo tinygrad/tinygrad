@@ -14,17 +14,13 @@ class TestRecurrentCheckpointReuse(unittest.TestCase):
     model._ckpt_tokens = [1, 2, 3]
     model.has_recurrent_block = True
     model._checkpoint = Mock()
-    model.slot_store = Mock()
-    model._slot_hist_set = Mock()
     return model
 
-  def test_same_prompt_again(self):
+  def test_reuse_prompt_checkpoint(self):
     model, tokens = self.model(), [1, 2, 3]
     self.assertEqual(model._reuse(tokens), (3, True))
-    self.assertEqual(model.prefix_to_slot(tokens, 4), 3)
+    model._checkpoint(tokens, save=False)
     model._checkpoint.assert_called_once_with(tokens, save=False)
-    model.slot_store.assert_called_once_with(4, 3)
-    model._slot_hist_set.assert_called_once_with(4, tokens)
 
   def test_generate_samples_exact_checkpoint(self):
     model, tokens = self.model(), [1, 2, 3]

@@ -51,12 +51,11 @@ class TestTopK(unittest.TestCase):
     self.assertEqual(Request([1], "", None, 0.6, 0.95, top_k=20).sampling, (0.6, 0.95, 20.0))
 
   def test_rows(self):
-    # the seq steps' rows: temperature, top_p, top_k (0: none); the batch steps' pairs drop a top_k
+    # the seq steps' rows: temperature, top_p, top_k (0: none)
     for mod in (glm5next, qwen4exp):
       self.assertEqual(list(mod._temp_row(0.0)), [0.0, 1.0, 0.0])
       self.assertEqual(list(mod._temp_row((0.6, 0.95))), [0.6000000238418579, 0.949999988079071, 0.0])
       self.assertEqual(list(mod._temp_row((1.0, 1.0, 20.0))), [1.0, 1.0, 20.0])
-    self.assertEqual(list(glm5next._temp_pair((1.0, 0.5, 20.0))), [1.0, 0.5])
 
 if __name__ == "__main__":
   unittest.main()
