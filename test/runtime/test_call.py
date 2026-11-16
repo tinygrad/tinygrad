@@ -144,6 +144,13 @@ class TestCallSchedule(unittest.TestCase):
     self.assertEqual(y.gradient(x)[0].item(), 3.0)
     self.assertEqual(y.item(), 6.0)
 
+  def test_bound_var_in_body_not_rebound_by_slot(self):
+    # b is exported from the body as an EXTERN, its slot isn't a call position: it must not be rebound to the arg at slot 1 (a)
+    x = Tensor([10.]).realize()
+    a, b = UOp.variable("a", 1, 10).bind(2), UOp.variable("b", 1, 10).bind(3)
+    p = UOp.param(0, dtypes.float, (1,), device=x.device)
+    self.assertEqual(Tensor((p * a.param_like(1) + b).call_with_output(x.uop, a, b, precompile=True)).tolist(), [23.])
+
   def test_precompile_full_buffer_assign(self):
     @function(precompile=True)
     def f(x:Tensor) -> Tensor: return x * 2 + 1
