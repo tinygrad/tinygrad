@@ -128,6 +128,13 @@ class TestCallSchedule(unittest.TestCase):
     ref[1:3, 2:6] = np.arange(8).reshape(2, 4) + 1
     np.testing.assert_equal(big.numpy(), ref)
 
+  def test_precompile_deviceless_body_alloc(self):
+    # the param has no device, so the storage the body allocates is on the device of the call
+    x = Tensor([1., 2., 3., 4.]).realize()
+    p = UOp.param(0, dtypes.float, (4,))
+    out = Tensor(((p + 1).bufferize() * 2).call_with_output(x.uop, precompile=True))
+    self.assertEqual(out.tolist(), [4., 6., 8., 10.])
+
   def test_precompile_full_buffer_assign(self):
     @function(precompile=True)
     def f(x:Tensor) -> Tensor: return x * 2 + 1

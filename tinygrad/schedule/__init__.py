@@ -78,7 +78,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       if rk.op is not Ops.AFTER:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
+        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:])
         linearized.append(k.replace(src=(k.body, *buf_uops)))
       for x in children.get(rk, []):
         in_degree[x] -= 1
@@ -95,16 +95,20 @@ from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat, pm_resolve_params
 
 def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
-  # a scheduled function is shared by all its calls, so the storage it allocates gets a fresh identity in each call
+  # a scheduled function is shared by all its calls, so the storage it allocates gets a fresh identity in each call.
+  # a device agnostic body runs on the device of its call, so storage it allocates without a device is on that device
+  device = next((a.device for a in linear_call.src[1:] if a.device is not None), None)
+  def fresh(b:UOp) -> UOp:
+    if b.device is not None: return b.replace(arg=replace(b.arg, slot=next(UOp.unique_num)))
+    return UOp.alloc((b.max_numel(),), b.dtype, next(UOp.unique_num), b.addrspace, device)
   linear = linear_call.body
-  linear = linear.substitute({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in linear.toposort() if b.op is Ops.ALLOC}, walk=True)
+  linear = linear.substitute({b:fresh(b) for b in linear.toposort() if b.op is Ops.ALLOC}, walk=True)
   # the positional params outside the kernel bodies are the call args, free Variables have slot -1
   linear = graph_rewrite(linear, pm_resolve_params, ctx=linear_call.src[1:], walk=True, name="params to args")
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
-           **{i:x.unbound() if x.is_variable else x for i,x in enumerate(linear_call.src[1:])
-              if x.op in {Ops.PARAM, Ops.EXTERN} and x.addrspace is AddrSpace.ALU}}
+           **{i:x for i,x in enumerate(linear_call.src[1:]) if x.op in {Ops.PARAM, Ops.EXTERN} and x.addrspace is AddrSpace.ALU}}
   def apply_binds(si:UOp) -> UOp:
     if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
     if si.op is Ops.CALL and si.body.op is Ops.PROGRAM: return si  # compiled parameters already have ABI slots

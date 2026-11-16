@@ -16,7 +16,7 @@ from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call.src[1:] if not s.is_variable)
 def get_call_kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...]) -> list[UOp]:
   # one per kernel param in order: a buffer is its address, a value bound in the call is a CONST, any other value is its slotless var read
-  # from var_vals at every run (the jit unbinds its input variables)
+  # from var_vals at every run
   bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
   return [bound.get(p.expr, p.replace(arg=replace(p.arg, slot=-1))).ccast(p.dtype) if p.addrspace is AddrSpace.ALU else
           call.src[1+p.arg.slot].getaddr(devs) for p in prg.kernel_params]
