@@ -6,7 +6,7 @@ Supported baseline: `redqwenflash` at `f3f31afb6c5268640d1602f371b406321c3732a9`
 |---|---|---|---:|---|
 | Qwen C2 | Qwen3.8 Flash Next UD-IQ4_XS **V3.1** + separate MTP + picture tower | 6x AMD 7900 XTX (RDNA3) | 262144 | `DEV=AMD`, 6 shards |
 | GLM Flash C5 | GLM-5.3 Flash UD-IQ3_XXS, D34 quality configuration + mandatory picture tower | 6x AMD 7900 XTX (RDNA3) | 18 x 262144; 524288 server cap | `DEV=AMD`, 6 shards |
-| GLM C9 | GLM-5.3 UD-IQ4_XS; **text-only, no vision tower** | 14x AMD R9700 (RDNA4), ts5 | 262144 / 1048576 candidate pending compute validation | `DEV=PCI+AMD`, `VFIO=1`, 14 shards |
+| GLM C9 | GLM-5.3 UD-IQ4_XS; **text-only, no vision tower** | 14x AMD R9700 (RDNA4), ts5 | 262144 / 1048576 (1M profile: a 1,020,639-token request served with sane text at 170 W; 6-h soak at 180 W on 78b57b743 = results/w-pf53/ts5-acceptance.md) | `DEV=PCI+AMD`, `VFIO=1`, 14 shards |
 
 **Vision is mandatory on Qwen C2 and GLM Flash C5, whose models support it.** Their launchers verify the picture file and its hash before start; the CLI also checks the loaded model architecture and rejects a missing/empty working image path. **C9 has no compatible vision tower and is explicitly text-only per the 12:00 decision.** Its launcher always clears `VISION_MMPROJ`; this is intentional, not an unset production option. On C2/C5, no-projector launches remain strictly limited to the offline test configurations, never a deployed service.
 
@@ -147,7 +147,7 @@ GLM53_POWER_LIMIT=180 AM_PERF_LEVEL=high CLOCK_PREFILL=GFXCLK=2300 \
   bash extra/llm_service/glm_14xr9700.sh start
 ```
 
-`GLM53_POWER_LIMIT=180` = the ts5 power setting the board committed to (Nov 15, ~17:05 PST: "commit to 180W and make it as fast as we can there"), the top rung of w-pf53's uniform ladder uladder-1 (all five rungs 140-180 W passed by events: no traceback / 5xx / p2p run-out / link drop). At 180 W the speed equals 170 W (results/w-pf53/tune180.md: cards average ~133 W, power is not the limit; what the 1M profile pays is its q4 cache); the 8-card supply shows half-second peaks above its 1,700 W rating in every arm (2-4 samples a run). The 6-h soak at 180 W (soak-4, 1M profile) is its proof (results/w-pf53/ts5-acceptance.md). The clock knobs are part of that power setting (decode uncapped, prefill capped at 2300 MHz, perf level high); the launcher forwards them but sets none, so they belong on the start line. At 1M the launcher's default `PREFILL_CHUNK=4032` does not fit on card 0 (warm-up OOM): 2688. `SEQ_COPY_SCRATCH=1` keeps ~0.2-0.5 GB a card of the move jits' own arenas free (the 1M start runs with ~0.48 GB a card free with it). Measured at 1M: one 1,020,637-token request, first token 885 s, decode 47 tok/s. One 1M conversation at a time beside short ones; a second 1M request waits. `AM_FIRST_START=1` only on the first start after a reboot.
+`GLM53_POWER_LIMIT=180` = the ts5 power setting the board committed to (Nov 15, ~17:05 PST: "commit to 180W and make it as fast as we can there"), the top rung of w-pf53's uniform ladder uladder-1 (all five rungs 140-180 W passed by events: no traceback / 5xx / p2p run-out / link drop). At 180 W the speed equals 170 W (results/w-pf53/tune180.md: cards average ~133 W, power is not the limit; what the 1M profile pays is its q4 cache); the 8-card supply shows half-second peaks above its 1,700 W rating (2-4 samples a 12-min run; in the 6-h soak 22 of 12,162 samples in its first 1 h 44 min, highest 2,361 W; its 10-s means stay under 1,450 W). The 6-h soak at 180 W (soak-4, 1M profile) is its proof (results/w-pf53/ts5-acceptance.md). The clock knobs are part of that power setting (decode uncapped, prefill capped at 2300 MHz, perf level high); the launcher forwards them but sets none, so they belong on the start line. At 1M the launcher's default `PREFILL_CHUNK=4032` does not fit on card 0 (warm-up OOM): 2688. `SEQ_COPY_SCRATCH=1` keeps ~0.2-0.5 GB a card of the move jits' own arenas free (the 1M start runs with ~0.48 GB a card free with it). Measured at 1M: one 1,020,637-token request, first token 885 s, decode 47 tok/s. One 1M conversation at a time beside short ones; a second 1M request waits. `AM_FIRST_START=1` only on the first start after a reboot.
 
 The launcher expands q4 to `SEQ_FP8=1`, `SEQ_FP8_IDX=0`, `SEQ_KV4=1`; `GLM_KV=fp8` is a separate mode. Real 14-card start, capacity and correctness checks remain required for both configurations.
 
@@ -219,7 +219,7 @@ One request decodes at roughly 40 tokens a second on a full box (30 users), more
 Two draft tokens a step (three measured slower for Pokemon).
 
 **GLM C9 (ts5):** text only: GLM-5.3 has no vision tower; a picture is refused. The 1M-token profile serves ONE 1M conversation at a
-time beside short ones (a second one waits); its first token at ~1M context takes ~15 minutes (885 s measured). Its power setting is
+time beside short ones (a second one waits); its first token at ~1M context takes ~12-15 minutes (739 s at 170 W; 885 s at the old 120 W setting). Its power setting is
 180 W a card (the board's choice), not the cards' maximum; the bars against tinyamd1 are in the company repo `results/w-pf53/ts5-acceptance.md`.
 
 ## API and production environment contract (76 names)
