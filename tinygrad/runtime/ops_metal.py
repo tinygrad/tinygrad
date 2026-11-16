@@ -88,7 +88,7 @@ MSGSEND, SELNAME = [metal.dll.bind(ctypes.c_void_p)(f) for f in (metal.dll.objc_
 
 # the slot of a handle of the device
 def mtl_handle(d, name:str) -> UOp:
-  return UOp.alloc((len(HANDLES),), dtypes.uint64, 0, device=to_tuple(d)[0], name="handles")[(i:=HANDLES.index(name)):i+1]
+  return UOp.extern((len(HANDLES),), dtypes.uint64, to_tuple(d)[0], "handles")[(i:=HANDLES.index(name)):i+1]
 
 @uopfunc
 def mtl_send(obj:UOp, sel:UOp, a:UOp, b:UOp, c:UOp, out:UOp|None=None) -> UOp: # objc_msgSend by the selector's name, the result to out

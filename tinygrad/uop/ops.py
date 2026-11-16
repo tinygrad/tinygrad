@@ -1172,6 +1172,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
               arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype),
                            addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
+  @staticmethod
+  def extern(shape:tuple[int, ...], dtype:DType, device, name:str): return UOp.alloc(shape, dtype, 0, device=device, name=name).replace(op=Ops.EXTERN)
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
   @staticmethod

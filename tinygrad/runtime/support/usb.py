@@ -208,14 +208,14 @@ class USBMMIOInterface(MMIOInterface):
 HALF, CHUNK, SLOT, STREAM = 0x40000, 0x40000 - 512, 0x4000, 1 << 20 # sram half, payload, slot, stream
 HOST_SIZE = 64 + 2 * HALF + STREAM # link, staging, zeros
 
-def usb_host(dev:str) -> UOp: return UOp.alloc((HOST_SIZE,), dtypes.uint8, 0, device=HCQ_RUNTIME_DEV.device, name=to_name(dev, "usb_host"))
+def usb_host(dev:str) -> UOp: return UOp.extern((HOST_SIZE,), dtypes.uint8, HCQ_RUNTIME_DEV.device, to_name(dev, "usb_host"))
 def usb_link(dev:str) -> UOp: return usb_host(dev)[:48].bitcast(dtypes.uint64) # handle, context, prev chunks, two transfers, error state
 def usb_stage(dev:str) -> UOp: return usb_host(dev)[64:64 + 2 * HALF]
 def usb_zeros(dev:str) -> UOp: return usb_host(dev)[64 + 2 * HALF:]
 
-def usb_go(dev:str) -> UOp: return UOp.alloc((1,), dtypes.uint32, 0, device=dev, name="usb_go") # chunk + 1: read armed
+def usb_go(dev:str) -> UOp: return UOp.extern((1,), dtypes.uint32, dev, "usb_go") # chunk + 1: read armed
 
-def usb_asm24(dev:str) -> UOp: return UOp.alloc((0x85000,), dtypes.uint8, 0, device=dev, name="usb_asm24") # sys, cq, sram
+def usb_asm24(dev:str) -> UOp: return UOp.extern((0x85000,), dtypes.uint8, dev, "usb_asm24") # sys, cq, sram
 def usb_fence(dev:str) -> UOp: return usb_asm24(dev)[0x800:0x804].bitcast(dtypes.uint32) # gpu chunks done
 def usb_cq(dev:str) -> UOp: return usb_asm24(dev)[0x100c:0x1010].bitcast(dtypes.uint32) # completion queue
 def usb_sram(dev:str) -> UOp: return usb_asm24(dev)[0x5000:0x5000 + 2 * HALF]
