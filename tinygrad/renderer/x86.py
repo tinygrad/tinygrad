@@ -1,7 +1,6 @@
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
 import struct, functools, itertools
-from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
@@ -562,9 +561,9 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
               vvvv_uop:UOp|None=None, imm_uop:UOp|None=None) -> bytes:
     nonlocal reg, opc
     # get the encoding values of the different fields
-    reg = cast(int, cast(Register, rdef(reg_uop)).index if reg_uop is not None else reg)
-    rm = cast(Register, rdef(rm_uop)).index
-    idx = cast(Register, rdef(idx_uop)).index if idx_uop is not None and rdef(idx_uop) is not None else 4
+    reg = unwrap(rdef(reg_uop)).index if reg_uop is not None else unwrap(reg)
+    rm = unwrap(rdef(rm_uop)).index
+    idx = unwrap(rdef(idx_uop)).index if idx_uop is not None and rdef(idx_uop) is not None else 4
     # for a memory operand the rm size is the element size carried by the address, otherwise it's the size of the value in the register
     rm_sz = scale_uop.src[0].val if scale_uop is not None else rm_uop.dtype.itemsize
     reg_sz = reg_uop.dtype.itemsize if reg_uop is not None else 0
