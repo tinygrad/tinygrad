@@ -502,9 +502,9 @@ def _host_ints(devs:str|tuple[str, ...], n:int) -> tuple[memoryview, Tensor]:
   mv, t = _host_buffer(devs, 4*n, dtypes.int32)
   return mv.cast('i'), t[None]
 
-def _temp_pair(t:float|tuple[float, float]) -> array.array:
+def _temp_pair(t:float|tuple[float, ...]) -> array.array:
   """a row's temperature and top_p (a temperature alone: top_p 1) for a step's host buffer"""
-  return array.array('f', t if isinstance(t, tuple) else (t, 1.0))
+  return array.array('f', t[:2] if isinstance(t, tuple) else (t, 1.0))  # (a top_k: the batch steps have none)
 
 def _hash_uniform(seed:Tensor, keys:Tensor, like:Tensor) -> Tensor:
   """
@@ -2048,6 +2048,8 @@ class MTPBlock(MLATransformerBlock):
 # The runtime driver is shared; its model-specific block/kernel types deliberately are not (mypy sees the boundary as Any).
 GLMSeqDriver: Any = glm_seq_base.Transformer
 class Transformer(GLMSeqDriver):
+  # (no top_k in this sampler (_sample): a server with SAMPLE_TOP_K / TOP_K ignores a request's, said once, see serve.LLMServer)
+  SAMPLE_TOP_K = False
   def __init__(self, config:TransformerConfig):
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
@@ -2265,7 +2267,7 @@ class Transformer(GLMSeqDriver):
     """
     the token (B, 1) after every normed hidden state h (B, D), sampled (greedy without a temperature). on device unless the output is split.
     temperature: (rows, 1) the temperature of every row (or one), or (rows, 2) and its top_p (only the tokens of the top_p nucleus are sampled),
-    or (rows, 3) and a top_k (ignored: SAMPLE_TOP_K off).
+    or (rows, 3) and a top_k (ignored: no top_k in this sampler, see SAMPLE_TOP_K).
     noise: (seed, keys (B,)): the uniform noise of a row a hash of the seed, its key and the token (see _hash_uniform), not drawn
     """
     logits = self.output(h)
@@ -2284,7 +2286,6 @@ class Transformer(GLMSeqDriver):
       # (the rows: (temperature,), (temperature, top_p), or the seq steps' (temperature, top_p, top_k) (glm5next TEMP_W). a test of exactly two
       # columns dropped the top_p of every seq step from a6dd1485d on: tokens from the whole vocabulary at temperature 1, see
       # results/incidents/ts5-stray-tokens)
-      assert tp.shape[1] < 3 or not glm_seq_base.SAMPLE_TOP_K, "SAMPLE_TOP_K: a row's top_k is not in this model's sampler"
       if tp.shape[1] >= 2: logits = (nucleus(z, self.config.vocab_size, tp[:, 1:2]) | hot.logical_not()).where(logits, -math.inf)
     # a split output: every device takes the max of its part
     if (tok:=sharded_argmax(logits, self.config.vocab_size)) is not None: return tok
@@ -3114,7 +3115,7 @@ class Transformer(GLMSeqDriver):
     seqs = seqs + [([0]*(k+1), 0, 0, 1, 0.0)] * (m - n)
     # (the step's tokens and temperatures written at once, the host's time is the devices' idle time between steps)
     self._bspec_host_in[:m*(k+1)] = array.array('i', [t for y, _, _, _, _ in seqs for t in y])
-    self._batch_host_temp[:2*m] = array.array('f', [v for *_, temp in seqs for v in (temp if isinstance(temp, tuple) else (temp, 1.0))])
+    self._batch_host_temp[:2*m] = array.array('f', [v for *_, temp in seqs for v in _temp_pair(temp)])
     self._bspec_host_out[:m*(2*k+1)] = array.array('i', [-1] * (m*(2*k+1)))
     jit = self._bspec_jit(m)
     if (cap:=getattr(jit, "captured", None)) is not None and (1):
