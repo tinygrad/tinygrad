@@ -73,9 +73,9 @@ elif [[ $ACTION == start ]]; then
 elif [[ $ACTION == stop ]]; then
   [[ -r $PIDFILE ]] || { echo 'Qwen is not running (no PID file)' >&2; exit 1; }
   pid=$(cat "$PIDFILE")
-  kill -TERM -- "-$pid"
+  sudo -n kill -TERM -- "-$pid"
   for _ in {1..90}; do
-    if ! kill -0 "$pid" 2>/dev/null; then rm "$PIDFILE"; echo 'Qwen stopped'; exit 0; fi
+    if ! sudo -n kill -0 "$pid" 2>/dev/null; then rm "$PIDFILE"; echo 'Qwen stopped'; exit 0; fi
     read -r -t 1 _ || true
   done
   echo "Qwen pid=$pid did not exit in 90 s; inspect before taking further action" >&2; exit 1
