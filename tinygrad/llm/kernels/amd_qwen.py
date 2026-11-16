@@ -4,6 +4,7 @@ from dataclasses import replace
 from typing import Any, Callable, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.gguf import ggml_data_to_tensor
+from tinygrad.llm.kernels.amd_glm import _nucleus_round_kernel, _local_argmax_kernel, _argmax_parts
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import prod, getenv, round_up, unwrap, dedup
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
@@ -2686,41 +2687,6 @@ def host_allgather(x:Tensor) -> Tensor|None:
   """
   return flag_all_gather(x, 0) if isinstance(x.device, tuple) else None
 
-@functools.cache
-def _local_argmax_kernel(out:UOp, x:UOp, count:UOp) -> UOp:
-  # a workgroup per row: the max of the first count values of the row (the device's real ones) and its first index, as (value, index bits)
-  B, V = cast(tuple[int, int], x.shape)
-  T = 256
-  row, t = UOp.range(B, 0, AxisType.GLOBAL), UOp.range(T, 1, AxisType.LOCAL)
-  n = count[0].load()
-  best, idx = UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG), UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
-  best = best.after(best[0].store(UOp.const(-math.inf, dtypes.float32)))
-  idx = idx.after(idx[0].store(UOp.const(0, dtypes.int32)))
-  i = UOp.range((V + T - 1) // T, 2, AxisType.LOOP)
-  col = i * T + t
-  v = (col < n).where(x[row, col.minimum(V-1)].load().float(), UOp.const(-math.inf, dtypes.float32))
-  cb, ci = best.after(i)[0].load(), idx.after(i)[0].load()
-  better = v > cb
-  upd = UOp.group(best[0].store(better.where(v, cb)), idx[0].store(better.where(col.cast(dtypes.int32), ci))).end(i)
-  vb, vi = best.after(upd)[0].load(), idx.after(upd)[0].load()
-  # the workgroup's max: the best of every thread in LDS, then a thread picks the first max (the lowest index of the max)
-  lds = UOp.alloc((T, 2), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  lds = lds.after(UOp.group(lds[t, 0].store(vb), lds[t, 1].store(vi.bitcast(dtypes.float32))).barrier())
-  win_v, win_i = lds[0, 0].load(), lds[0, 1].load().bitcast(dtypes.int32)
-  for j in range(1, T):
-    v2, i2 = lds[j, 0].load(), lds[j, 1].load().bitcast(dtypes.int32)
-    take = (v2 > win_v) | (v2.eq(win_v) & (i2 < win_i))
-    win_v, win_i = take.where(v2, win_v), take.where(i2, win_i)
-  return UOp.group(out[row, UOp.const(0, dtypes.weakint).valid(t.eq(0))].store(win_v),
-                   out[row, UOp.const(1, dtypes.weakint).valid(t.eq(0))].store(win_i.bitcast(dtypes.float32))).end(row, t) \
-    .sink(arg=KernelInfo(name="local_argmax", opts_to_apply=()))
-
-@functools.cache
-def _argmax_parts(devs:tuple[str, ...], local:int, n:int) -> tuple[Tensor, Tensor]:
-  # the count of the first n columns on every device (split), the index of its first column (on every device)
-  N = len(devs)
-  return (Tensor([max(0, min(local, n - i*local)) for i in range(N)], dtype=dtypes.int32).shard(devs, 0).realize(),
-          Tensor([[i*local] for i in range(N)], dtype=dtypes.int32).to(devs).realize())
 
 @functools.cache
 def _argmax_chunks_kernel(out:UOp, x:UOp, count:UOp) -> UOp:
@@ -2785,24 +2751,6 @@ def sharded_argmax(x:Tensor, n:int) -> Tensor|None:
   # the lowest index of the max
   return vals.eq(vals.max(0, keepdim=True)).where(idxs, n).min(0).reshape(B, 1)
 
-@functools.cache
-def _nucleus_round_kernel(out:UOp, z:UOp, e:UOp, t:UOp) -> UOp:
-  # out (1, B, G): the sums of e over the values of z at or above each of the G thresholds of its row (a device's part of the vocab): a
-  # workgroup a row, a thread every 256th value (all the thresholds), the threads' sums added in LDS in thread order
-  B, _, C, c = cast(tuple[int, int, int, int], z.shape)
-  G = int(t.shape[-1])
-  row, tid = UOp.range(B, 0, AxisType.GLOBAL), UOp.range(256, 1, AxisType.LOCAL)
-  ts = [t[row, g].load() for g in range(G)]
-  acc = UOp.alloc((G,), dtypes.float32, addrspace=AddrSpace.REG)
-  acc = acc.after(UOp.group(*[acc[g].store(UOp.const(0.0, dtypes.float32)) for g in range(G)]))
-  i = UOp.range(C * c // 256, 2, AxisType.LOOP)
-  pos = i * 256 + tid
-  zv, ev = z[row, 0, pos // c, pos % c].load(), e[row, 0, pos // c, pos % c].load()
-  upd = UOp.group(*[acc[g].store(acc.after(i)[g].load() + (zv >= ts[g]).where(ev, 0.0)) for g in range(G)]).end(i)
-  lds = UOp.alloc((256, G), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  lds = lds.after(UOp.group(*[lds[tid, g].store(acc.after(upd)[g].load()) for g in range(G)]).barrier())
-  total = functools.reduce(lambda a, b: a + b, [lds[k, tid.minimum(G-1)].load() for k in range(256)])
-  return out[0, row, tid.valid(tid < G)].store(total).end(row, tid).sink(arg=KernelInfo(name="nucleus_round", opts_to_apply=()))
 
 def nucleus(z:Tensor, n:int, top_p:Tensor, rounds:int|None=None, G:int|None=None) -> Tensor:
   """
