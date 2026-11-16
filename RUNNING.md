@@ -106,7 +106,7 @@ Use 225 W on a hot host. Omit `AM_VM_RESET` for every ordinary start; on the fir
 
 ### GLM Flash C5, on its six-card serving VM
 
-D34 serves 18 concurrent users, each up to 262144 tokens (a 524288 server cap), Q4 KV, 18 warmed slots/active requests, 3,916,800 pooled rows and zero stash. The pool is shared: it holds 14 full 262,144-token conversations at once (3,916,800 / 262,144 = 14.9; 18 full ones need 4,718,592), so 18 seats fit only while the conversations average under 217,600 tokens; past that the least recent is evicted (and re-prefilled when it returns) or, with the stash profile below, parked in host RAM. The canonical complete environment is printed by the launcher without touching a GPU:
+D34 serves 18 concurrent users, each up to 262144 tokens (a 524288 server cap), Q4 KV, 18 warmed slots/active requests, 3,916,800 pooled rows and zero stash. THE LAUNCHER'S DEFAULT IS NOW THE ONE GLM PRODUCTION LINE (Nov 15, 22:3x): D34 plus the qualified host stash (`SEQ_STASH_GB=12 SEQ_STASH_ENTRIES=64`) plus the picture limits a Pokemon window needs (`VISION_MAX_IMAGES=2048 VISION_CACHE_MB=2048 VISION_URL_CACHE_MB=512 VISION_SLICE_MS=200 SERVE_RENDER_CACHE=1 VISION_BUCKETS=320,576`): a box started by the launcher never refuses a 9th picture (the engine's own default, 8, is for bare `python3 -m tinygrad.llm` runs). `SEQ_STASH_GB=0` gives back the benchmark's D34 exactly. The pool is shared: it holds 14 full 262,144-token conversations at once (3,916,800 / 262,144 = 14.9; 18 full ones need 4,718,592), so 18 seats fit only while the conversations average under 217,600 tokens; past that the least recent is evicted (and re-prefilled when it returns) or, with the stash profile below, parked in host RAM. The canonical complete environment is printed by the launcher without touching a GPU:
 
 ```bash
 bash extra/llm_service/glm_flash_6x7900xtx.sh --print-command
@@ -205,7 +205,7 @@ SPEC_DRAFTS=3 PREFILL_SIZES=192,384,1152 VISION_MAX_IMAGES=2048 VISION_CACHE_MB=
   bash extra/llm_service/qwen_6x7900xtx.sh start
 ```
 
-**GLM Flash server** (the C5 launcher with the picture limits raised and the render cache on; `VISION_BUCKETS=320,576` adds a
+**GLM Flash server** (the C5 launcher: since Nov 15 22:3x its default line carries all of the values below; the line is kept as the record of the R2 games; `VISION_BUCKETS=320,576` adds a
 320-patch bucket for the game's 240x216 screenshot (72 rows = 288 patches; C5's own 576 alone pads it to 576); the GLM R2 games ran this line):
 
 ```bash
