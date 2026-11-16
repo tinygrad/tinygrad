@@ -2875,7 +2875,7 @@ def partial_sum(x:Tensor) -> Tensor:
   # (a few rows (decoding): three halves a word, many: packed)
   rows = prod(x.shape[1:-1])
   # (exact: packed from 2 rows (the drafts of speculative decoding): fewer words, a 4 row allreduce 24 us, not 35)
-  pk = _ar_pack() if isinstance(rows, int) and rows >= (2 if getenv("P2P_AR_EXACT", 1) else 5) else None
+  pk = _ar_pack() if isinstance(rows, int) and rows >= 2 else None
   n = prod(x.shape[1:])
   # (packed: P2P_AR_PACK's values a word, else 4x12 (a count of values of the rows that 6 doesn't divide: the drafts' 56), else three halves)
   if pk is not None and isinstance(n, int) and n % pk[0] and n % 4 == 0 and pk != (4, 12): pk = (4, 12)
