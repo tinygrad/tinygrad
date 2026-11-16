@@ -95,8 +95,11 @@ from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat, pm_resolve_params
 
 def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
+  # a scheduled function is shared by all its calls, so the storage it allocates gets a fresh identity in each call
+  linear = linear_call.body
+  linear = linear.substitute({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in linear.toposort() if b.op is Ops.ALLOC}, walk=True)
   # the positional params outside the kernel bodies are the call args, free Variables have slot -1
-  linear = graph_rewrite(linear_call.body, pm_resolve_params, ctx=linear_call.src[1:], walk=True, name="params to args")
+  linear = graph_rewrite(linear, pm_resolve_params, ctx=linear_call.src[1:], walk=True, name="params to args")
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
