@@ -88,7 +88,7 @@ For any service place the relevant lines in a manifest beside the files and run 
 python3 extra/llm_service/smoke.py http://<public host:port> --slots <SEQ_SLOTS> --rows-4k <rows>
 ```
 
-`--rows-4k` = the rows of a 3840x2160 picture on that line (picture-limit table below): Qwen at 1,024 rows 1,008, Qwen at 8,192 8,160,
+`--rows-4k` = the rows of a 3840x2160 picture on that line (picture-limit table below): Qwen and GLM Flash at 1,024 rows 1,008, Qwen at 8,192 8,160,
 GLM Flash at 8,000 7,973; without it the count is printed, not checked. GLM Flash: add `--ret-max-tokens 1024` (room for its thinking).
 
 It checks (a) 20 default-sampling chats (no stray-script characters, reasoning in `reasoning_content`; read the five it prints),
