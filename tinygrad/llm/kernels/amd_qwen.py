@@ -4,7 +4,8 @@ from dataclasses import replace
 from typing import Any, Callable, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.gguf import ggml_data_to_tensor
-from tinygrad.llm.kernels.amd_glm import _nucleus_round_kernel, _local_argmax_kernel, _argmax_parts
+from tinygrad.llm.kernels.amd_glm import _nucleus_round_kernel, _local_argmax_kernel, _argmax_parts, _moe_softmax_router_kernel, \
+  _moe_softmax_router_bitonic_kernel, _moe_bundle_atomic_kernel
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import prod, getenv, round_up, unwrap, dedup
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
@@ -2965,83 +2966,6 @@ def skinny_parts(x:Tensor, wt:Tensor) -> Tensor|None:
   return Tensor.custom_kernel(out, x.float().reshape(R, K).contiguous(), wt, fxn=fxn)[0]
 
 
-@functools.cache
-def _moe_softmax_router_kernel(sel:UOp, probs:UOp, logits:UOp, *table:UOp, k:int, scale:float) -> UOp:
-  # One wave per token. Select in O(E*k), rather than ranking every expert against all E others.
-  n = cast(int, logits.shape[-1])
-  tokens, width = cast(int, logits.numel()) // n, cast(int, table[0].shape[-1]) if table else 1
-  assert n % 32 == 0 and 0 < k <= n and k*width <= 32
-  logits, sel, probs = logits.reshape(tokens, n), sel.reshape(tokens, k*width), probs.reshape(tokens, k*width)
-  token, lane = UOp.range(tokens, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
-  es = [(lane + 32*m).cast(dtypes.int32) for m in range(n // 32)]
-  scores = [logits[token, e].load().float() for e in es]
-  taken = [UOp.const(False, dtypes.bool)] * len(es)
-  def better(a:UOp, i:UOp, b:UOp, j:UOp) -> UOp: return (a > b) | (a.eq(b) & (i < j))
-  won = []
-  for _ in range(k):
-    best, index = UOp.const(-math.inf, dtypes.float32), UOp.const(1 << 30, dtypes.int32)
-    for e, sc, used in zip(es, scores, taken):
-      value, idx = used.where(-math.inf, sc), used.where(1 << 30, e)
-      choose = better(value, idx, best, index)
-      best, index = choose.where(value, best), choose.where(idx, index)
-    for off in (16, 8, 4, 2, 1):
-      other, oi = _lane_xor(best, off), _lane_xor(index.bitcast(dtypes.float32), off).bitcast(dtypes.int32)
-      choose = better(other, oi, best, index)
-      best, index = choose.where(other, best), choose.where(oi, index)
-    won.append((index, best))
-    taken = [used | e.eq(index) for e, used in zip(es, taken)]
-  # pairwise_topk returns the selected experts in ascending score order, with lower expert IDs last on ties.
-  slots, slot = won[::-1], lane // width
-  expert, score = slots[0]
-  for i, (e, sc) in enumerate(slots[1:], 1): expert, score = slot.eq(i).where(e, expert), slot.eq(i).where(sc, score)
-  p = ((score - won[0][1]) * LOG2E).exp2()
-  total = warp_reduce(((lane < k*width) & (lane % width).eq(0)).where(p, 0), full_wave=True)
-  selected = table[0].reshape(-1, width)[expert.cast(dtypes.weakint).maximum(0).minimum(n-1), lane % width].load() if table else expert
-  at = lane.valid(lane < k*width)
-  return UOp.group(sel[token, at].store(selected), probs[token, at].store(p / total * scale)).end(token, lane).sink(
-    arg=KernelInfo(name="moe_softmax_router", opts_to_apply=()))
-
-@functools.cache
-def _moe_softmax_router_bitonic_kernel(sel:UOp, probs:UOp, logits:UOp, *table:UOp, k:int, scale:float) -> UOp:
-  # Small decode batches need more than one wave per token. Sort (score, -expert) keys with wave shuffles and double-buffered LDS.
-  n, width = int(logits.shape[-1]), int(table[0].shape[-1]) if table else 1
-  assert n >= 32 and n & (n-1) == 0 and 0 < k <= 32
-  tokens = int(logits.numel()) // n
-  logits, sel, probs = logits.reshape(tokens, n), sel.reshape(tokens, k*width), probs.reshape(tokens, k*width)
-  token, wave, lane = UOp.range(tokens, 0, AxisType.GLOBAL), UOp.range(n//32, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
-  idx = wave*32 + lane
-  sc = logits[token, idx].load().float()
-  bits = sc.eq(0).where(0, sc.bitcast(dtypes.uint32))  # signed zeros compare equal
-  ordered = (bits & 0x80000000).ne(0).where(bits ^ 0xffffffff, bits ^ 0x80000000)
-  key = (ordered.cast(dtypes.uint64) << 32) | (n-1-idx).cast(dtypes.uint64)
-  lds, parity = UOp.alloc((2, n), dtypes.uint64, addrspace=AddrSpace.LOCAL), 0
-  for level in range(1, n.bit_length()):
-    for j in reversed(range(level)):
-      stride = 1 << j
-      if stride < 32:
-        lo = _lane_xor(key.cast(dtypes.uint32).bitcast(dtypes.float32), stride).bitcast(dtypes.uint32)
-        hi = _lane_xor((key >> 32).cast(dtypes.uint32).bitcast(dtypes.float32), stride).bitcast(dtypes.uint32)
-        other = lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << 32)
-      else:
-        lds = lds.after(lds[parity, idx].store(key).barrier())
-        other = lds[parity, idx ^ stride].load()
-        parity ^= 1
-      maximum = (idx & (1 << level)).ne(0) ^ (idx & stride).ne(0)
-      key = maximum.eq(key < other).where(other, key)
-  ordered = (key >> 32).cast(dtypes.uint32)
-  sc = (ordered & 0x80000000).ne(0).where(ordered ^ 0x80000000, ordered ^ 0xffffffff).bitcast(dtypes.float32)
-  valid = idx >= n-k  # all selected experts are in the last wave, in pairwise_topk's order
-  best = warp_reduce(valid.where(sc, -math.inf), maximum=True, full_wave=True)
-  p = ((sc-best)*LOG2E).exp2()
-  total = warp_reduce(valid.where(p, 0), full_wave=True)
-  expert = (n-1-key.cast(dtypes.uint32)).cast(dtypes.int32)
-  stores:list[UOp] = []
-  for w in range(width):
-    selected = table[0].reshape(-1, width)[expert.cast(dtypes.weakint), w].load() if table else expert
-    at = ((idx-(n-k))*width+w).valid(valid)
-    stores.extend((sel[token, at].store(selected), probs[token, at].store(p/total*scale)))
-  return UOp.group(*stores).end(token, wave, lane).sink(arg=KernelInfo(name="moe_softmax_router_bitonic", opts_to_apply=()))
-
 def moe_softmax_router(logits:Tensor, k:int, scale:float, table:Tensor|None=None) -> tuple[Tensor, Tensor]:
   shape = (*logits.shape[:-1], k)
   axis = logits.uop.axis if token_sharded(logits) else None
@@ -3078,51 +3002,6 @@ def _moe_bundled_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, bexp:UOp, brow
   return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, gate, xtoken, "moe_bundled_", active=active,
                             bundle=(int(bexp.shape[0]), M, store_row))
 
-
-@functools.cache
-def _moe_bundle_atomic_kernel(bexp:UOp, brow:UOp, sel:UOp, first:UOp, experts:int, M:int) -> UOp:
-  """
-  the bundles with a thread a selection: its rank in its expert by an atomic add of the expert's count (the order of the rows of an expert
-  is the order the adds came in: a row's output doesn't depend on its bundle), the bundles before every expert by a scan of the threads' counts
-  (a thread the experts tid*per..), then every selection to its place
-  """
-  N, THREADS = cast(int, sel.shape[0]), 256
-  per = (experts + THREADS - 1) // THREADS
-  # (the lanes of a wave: hardware lanes, the scans permute across them)
-  wave, lane = UOp.range(THREADS // WARP_SIZE, 0, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
-  tid = wave * WARP_SIZE + lane
-  zero = UOp.const(0, dtypes.int32)
-  cnt = UOp.alloc((per*THREADS,), dtypes.int32, addrspace=AddrSpace.LOCAL)
-  cnt = cnt.after(UOp.group(*(cnt[tid*per + m].store(zero) for m in range(per))).barrier())
-  # the ranks (in LDS)
-  Q = (N + THREADS - 1) // THREADS
-  rank = UOp.alloc((Q*THREADS,), dtypes.int32, addrspace=AddrSpace.LOCAL)
-  def expert(i:UOp) -> tuple[UOp, UOp]:
-    e = (sel[i.minimum(N-1)].load() - first[0].load()).cast(dtypes.weakint)
-    return e.maximum(0).minimum(experts-1), (i < N) & (e >= 0) & (e < experts)
-  adds = []
-  for q in range(Q):
-    e, ok = expert(i:=tid + THREADS*q)
-    r = _sys("__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP)", dtypes.int32, cnt[e], ok.cast(dtypes.int32))
-    adds.append(rank[i].store(r))
-  rank, cnt = rank.after(UOp.group(*adds).barrier()), cnt.after(UOp.group(*adds).barrier())
-  # the bundles of the thread's experts, their exclusive scan over the threads (the waves', then the waves' totals)
-  nbs = [(cnt[tid*per + m].load() + (M-1)) // M for m in range(per)]
-  local = [functools.reduce(lambda a, b: a + b, nbs[:m], zero) for m in range(per)]
-  total = functools.reduce(lambda a, b: a + b, nbs, zero)
-  incl = _wave_scan(total, lane)
-  wt = UOp.alloc((THREADS // WARP_SIZE,), dtypes.int32, addrspace=AddrSpace.LOCAL)
-  wt = wt.after(wt[wave.valid(lane.eq(WARP_SIZE-1))].store(incl).barrier())
-  woff = functools.reduce(lambda a, b: a + b, [(w < wave).where(wt[w].load(), zero) for w in range(THREADS // WARP_SIZE)], zero)
-  start = UOp.alloc((per*THREADS,), dtypes.int32, addrspace=AddrSpace.LOCAL)
-  start = start.after(UOp.group(*(start[tid*per + m].store(woff + incl - total + local[m]) for m in range(per))).barrier())
-  # every selection to its place, the first of a bundle its expert
-  stores = []
-  for q in range(Q):
-    e, ok = expert(i:=tid + THREADS*q)
-    rk, st = rank[i].load().cast(dtypes.weakint), start[e].load().cast(dtypes.weakint)
-    stores += [brow[(st*M + rk).valid(ok)].store(i.cast(dtypes.int32)), bexp[(st + rk // M).valid(ok & (rk % M).eq(0))].store(e.cast(dtypes.int32))]
-  return UOp.group(*stores).end(wave, lane).sink(arg=KernelInfo(name="moe_bundle", opts_to_apply=()))
 
 @functools.cache
 def _moe_bundled_wmma_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, bexp:UOp, brow:UOp, *grids:UOp, out_features:int, in_features:int,
