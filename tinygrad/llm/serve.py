@@ -1187,7 +1187,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
 
   # ** the conversations kept in slots (STASH): the model's states hold one conversation, a request of another one overwrites them. the one
   # there is stored in a free slot first, a request that continues a stored one takes its states back (an agent's turn isn't prefilled again)
-  # (SLOT_HOST: the model's conversation is a prompt decoded in a slot: its whole conversation is saved when done, see slot_done)
+  # (host-backed slot persistence: the model's conversation is a prompt decoded in a slot: its whole conversation is saved when done, see slot_done)
   main_moved = False
   ckpt_pool: list|None = None  # (host memory for requests' checkpoints, see ckpt_keep)
   ckpt_later: list|None = None  # (the requests done, their checkpoints' host memory freed next)
@@ -1214,7 +1214,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.stash[victims[0]] = (tokens, 0)  # (the newest last: the oldest is the next victim)
   def slot_host(self) -> bool:
     """
-    (SLOT_HOST, with slots and HOST_STASH) a request decoded in a slot has its whole conversation saved to host memory when done: with more
+    (host-backed slots, with slots and HOST_STASH) a request decoded in a slot has its whole conversation saved to host memory when done: with more
     agents than slots the slot is taken before its next turn, the prompt alone kept would have the turn prefill the reply again
     """
     return bool(self.slots) and getenv("HOST_STASH", 0.0) > 0
@@ -1529,7 +1529,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
         _close(g)
   def ckpt_keep(self, req:Request):
     """
-    (SLOT_HOST) req goes on in a slot after its prompt: the model's checkpoint (the states at its prompt's end) copied to host memory, its
+    (host-backed slots) request goes on in a slot after its prompt: the model's checkpoint (the states at its prompt's end) copied to host memory, its
     conversation's host_save has it (the model's own checkpoint is another prompt's by then). a client that doesn't send the model's reasoning
     back (its next turn: the reply without it, a tool's result) has the conversation differ right after the prompt: without the checkpoint
     it's prefilled from the start every turn
@@ -2186,7 +2186,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           model.slot_move(hi, lo)
           active[lo] = active.pop(hi)
         # the last one batched (not speculative), nothing waiting: it goes on alone (prefilled again), speculative decoding is faster
-        if not k and len(active) == 1 and not pending and self.waiting.empty() and getenv("BATCH_LAST_ALONE", 1):
+        if not k and len(active) == 1 and not pending and self.waiting.empty():
           pending.append(active.pop(next(iter(active))))
       except Exception as e:
         traceback.print_exc()
