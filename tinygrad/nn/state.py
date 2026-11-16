@@ -241,9 +241,9 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     def __setstate__(self, state): self.tensor = state[0]
 
   deserialized_objects: dict[str, Any] = {}
-  intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16,
-               "IntStorage": dtypes.int32, "BoolStorage": dtypes.bool,
-               "LongStorage": dtypes.int64, "_rebuild_tensor": _rebuild_tensor, "_rebuild_tensor_v2": _rebuild_tensor_v2,
+  intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "DoubleStorage": dtypes.float64, "BFloat16Storage": dtypes.bfloat16,
+               "ByteStorage": dtypes.uint8, "CharStorage": dtypes.int8, "ShortStorage": dtypes.int16, "IntStorage": dtypes.int32,
+               "BoolStorage": dtypes.bool, "LongStorage": dtypes.int64, "_rebuild_tensor": _rebuild_tensor, "_rebuild_tensor_v2": _rebuild_tensor_v2,
                "FloatTensor": None, "Parameter": Parameter}
   whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed
   class Dummy: pass

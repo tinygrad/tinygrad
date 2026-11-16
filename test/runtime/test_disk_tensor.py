@@ -40,6 +40,12 @@ class TestTorchLoad(TempDirTestCase):
     torch.save({"empty": t.to(torch.bfloat16)[:, 1:1]}, self.tmp("strided_bf16.pt"))
     self.assertEqual(torch_load(self.tmp("strided_bf16.pt"))["empty"].shape, (3, 0))
 
+  def test_load_dtypes(self):
+    import torch
+    for dt in [torch.float64, torch.uint8, torch.int8, torch.int16]:
+      torch.save({"x": (x := torch.tensor([-1, 0, 1]).to(dt))}, self.tmp("dtype.pt"))
+      self.assertEqual(torch_load(self.tmp("dtype.pt"))["x"].tolist(), x.tolist())
+
   # pytorch pkl format
   def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
   # pytorch zip format
