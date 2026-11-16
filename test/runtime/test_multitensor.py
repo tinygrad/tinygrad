@@ -401,6 +401,13 @@ class TestMultiTensor(unittest.TestCase):
     s = Tensor([1.0, 2, 3, 4]).shard((f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"), axis=0)
     np.testing.assert_equal((s + Tensor(UOp.const(1.0).cast(dtypes.float))).numpy(), [2, 3, 4, 5])
     np.testing.assert_equal((s + Tensor(UOp.const(1.0).cast(dtypes.float)).reshape((1,)).expand((4,))).numpy(), [2, 3, 4, 5])
+  def test_copy_deviceless_value(self):
+    # a*0 simplifies to a deviceless value
+    a = Tensor([1, 2, 3, 4, 5, 6, 7, 8]).realize()
+    self.assertEqual((a*0).to(devices_2).tolist(), [0]*8)
+    self.assertEqual((a*0+1).shard(devices_2, axis=0).sum().item(), 8)
+    # copied on to one device, it is computed there
+    check_schedule((a*0).to(devices_2).to(d2), 1, filter_sink=False)
 
   def test_add_rank_expand_shard(self):
     # a sharded src keeps its own rank under implicit broadcast, its shard axis right-aligns into the output
