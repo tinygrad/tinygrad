@@ -275,6 +275,9 @@ Two draft tokens a step (three measured slower for Pokemon).
 **GLM C9 (ts5):** text only: GLM-5.3 has no vision tower; a picture is refused. The 1M-token profile serves ONE 1M conversation at a
 time beside short ones (a second one waits); its first token at ~1M context takes ~12 minutes (705.9 s at 180 W on the FINAL-2 line; 739 s at 170 W and 885 s at 120 W on older lines). Its power setting is
 180 W a card (the board's choice), not the cards' maximum; the bars against tinyamd1 are in the company repo `results/w-pf53/ts5-acceptance.md`.
+Sampling: temperature and top_p (default the GGUF's: temperature 1.0, top_p 0.95); **no top_k**: a request's `top_k` (and a server
+`TOP_K`) is ignored, one log line `top_k ... ignored` (glm_dsa's sampler has none). Before p3/w-pf53-sampfix (Nov 16) top_p was ignored
+too on every decoding step (whole-vocabulary sampling: stray foreign tokens; company repo results/incidents/ts5-stray-tokens/).
 
 ## API and production environment contract (72 names)
 

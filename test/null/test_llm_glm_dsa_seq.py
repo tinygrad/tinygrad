@@ -324,6 +324,26 @@ class TestGLMDSASequence(unittest.TestCase):
       tok = model._sample(Tensor(lg, device="CPU"), temps, "CPU", noise).numpy().reshape(-1)
     self.assertEqual(list(tok[:12]), [7]*8 + [42]*4)
 
+  def test_sample_top_p_of_seq_rows(self):
+    # (the seq steps' rows are (temperature, top_p, top_k) (glm5next TEMP_W): their top_p's nucleus applies. a test of exactly two columns
+    # dropped it: at temperature 1 a token outside the nucleus 1 time in 16 here (ts5's stray tokens, Nov 16))
+    model = Transformer.__new__(Transformer)
+    model.config = SimpleNamespace(vocab_size=512)
+    model.output = lambda h: h
+    lg = np.zeros((16, 512), dtype=np.float32)
+    lg[:, 42] = 9.0  # (p 0.94: the nucleus of top_p 0.5 is token 42 alone)
+    for cols in ([1.0, 0.5], [1.0, 0.5, 0.0]):
+      temps = Tensor([cols]*16, device="CPU")
+      for seed in range(8):
+        noise = (Tensor([seed], dtype=dtypes.uint32, device="CPU"), Tensor(np.arange(16, dtype=np.int32), device="CPU"))
+        tok = model._sample(Tensor(lg, device="CPU"), temps, "CPU", noise).numpy().reshape(-1)
+        self.assertEqual(list(tok), [42]*16, (cols, seed))
+    # (top_p 1: every token, the others ~6% of the rows)
+    temps = Tensor([[1.0, 1.0, 0.0]]*16, device="CPU")
+    toks = [t for seed in range(8) for t in model._sample(Tensor(lg, device="CPU"), temps, "CPU",
+            (Tensor([seed], dtype=dtypes.uint32, device="CPU"), Tensor(np.arange(16, dtype=np.int32), device="CPU"))).numpy().reshape(-1)]
+    self.assertGreater(sum(t != 42 for t in toks), 0)
+
   def test_seq_prefill_runout_retried(self):
     # (P2P_RETRY: the engine's prefill after a p2p run-out runs the prompt again (same args); slices (upto) and a third run-out raise)
     from tinygrad.llm.kernels.amd_glm_dsa import P2PRunOut

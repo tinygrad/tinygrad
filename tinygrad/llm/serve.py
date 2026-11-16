@@ -571,7 +571,7 @@ class Handler(VizHandler):
     sid = clean(self.headers.get("X-Session-ID", ""), 4096)
     bench = clean(self.headers.get("X-Bench-Tag", ""), 96)
     if top_k and not self.server.sample_top_k:
-      if not self.server._top_k_said: stderr_log(f"top_k {top_k} ignored: the server runs without SAMPLE_TOP_K\n")
+      if not self.server._top_k_said: stderr_log(f"top_k {top_k} ignored: the server runs without SAMPLE_TOP_K (or its model has no top_k)\n")
       self.server._top_k_said, top_k = True, 0
     req = Request(ids, log, max_tokens, temperature, self.server.top_p if top_p is None else top_p, session_id=sid, bench_tag=bench,
                   top_k=self.server.top_k if top_k is None else top_k)
@@ -989,6 +989,10 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
     self.top_k = max(getenv("TOP_K", 0), 0)  # a request's without one (TOP_K: the config's, e.g. Qwen's 20; 0: none)
     # (the models' graphs take a top_k with SAMPLE_TOP_K (on with TOP_K): without it a request's top_k is ignored, said once)
     self.sample_top_k, self._top_k_said = bool(getenv("SAMPLE_TOP_K", int(self.top_k > 0))), False
+    # (a model without a top_k in its sampler (glm_dsa): every top_k ignored, said once)
+    if self.sample_top_k and not getattr(model, "SAMPLE_TOP_K", True): self.sample_top_k = False
+    if self.top_k and not self.sample_top_k: stderr_log(f"TOP_K {self.top_k} ignored: this model's sampler has no top_k\n")
+    if not self.sample_top_k: self.top_k = 0
     self.waiting: queue.Queue[Request] = queue.Queue()
     self.inflight = 0  # the requests taken by the model (decoded, or waiting for it): the status line's
     self.telemetry = Telemetry(getenv("TELEMETRY_LOG", ""))
