@@ -147,6 +147,22 @@ log-likelihood; Qwen at 8,192: greedy 4K / 64K equal to the production boots, 4K
 4 GB more a card (~2.2M rows): not run. Fewer resident rows serve the same seats through the host stash (parks and restores), at a
 throughput cost that was not measured; the benchmark numbers in this file were measured at 1,024.
 
+**Which box gets which limit, and what a customer is told.** A picture over the limit is DOWNSCALED, aspect kept, never refused
+(refused, with a 400 that says why, only when the file decodes to more than 40 MP, `VISION_MAX_PIXELS`; a large JPEG is first decoded at 1/2-1/8 scale); the response's `usage.prompt_tokens` counts the rows the
+model saw. Whoever offers a box to customers publishes its line of this table with it:
+
+| Box role | Start line | Limit | A 3840x2160 (4K) picture is seen at | 1920x1080 | 4032x3024 (12 MP phone photo) |
+|---|---|---|---|---|---|
+| Coding (DeepSWE, SWE-bench Pro proxies), GLM Flash | C5 benchmark line | 1,024 rows | 1176x661 (shrunk) | 1176x661 (shrunk) | 1008x756 (shrunk) |
+| Coding, Qwen | C2 benchmark line | 1,024 rows | 1344x768 (shrunk) | 1344x768 (shrunk) | 1152x864 (shrunk) |
+| Pictures (vision work, photo customers), GLM Flash | C5 + `VISION_MAX_TOKENS=8000` | 8,000 rows (publisher's) | 3332x1874 (shrunk, as the publisher's own processor) | full size | 2874x2156 (shrunk) |
+| Pictures, Qwen | C2 + `VISION_MAX_TOKENS=8192` | 8,192 rows | full size (3840x2176 canvas) | full size | 3328x2496 (shrunk) |
+| Pokemon (320x288 screenshots), both | the Pokemon lines below | 1,024 rows | (not its load) | | |
+
+(Sizes from `qwen_vision.tower_size`: GLM rows are 28 x 28 pixels, Qwen's 32 x 32. Qwen's publisher allows 16,384 rows = 4032x3024
+at full size; not run here, see above.) So: a coding box shrinks every picture larger than about one megapixel and says so only
+through this table and `usage.prompt_tokens`; send photos to a picture box. The server does not report a resize in the response.
+
 ### GLM C9, on ts5 — text-only; no vision tower
 
 **GLM-5.3 is text-only under the 12:00 product decision.** It has no compatible vision encoder or projector. C9's launcher forces `VISION_MMPROJ` empty, including when the parent shell supplied another value; the generic CLI requires a projector only for the supported Qwen and GLM Flash vision models. Do not substitute GLM Flash's incompatible tower or claim that a file gives C9 vision.
