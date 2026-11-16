@@ -1369,10 +1369,30 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
       if j >= n: exact = max(exact, n)
       info.append((t, n, i, j))
     # (n - (j - i): its length as text, the rows of its pictures in the shared part one pad each)
-    own = [(t, n, i) for t, n, i, j in info if n > exact and i >= min(2048, (n - (j - i)) // 2, len(ids) // 2)]
-    for t, n, i in sorted(own, key=lambda x: x[2], reverse=True)[:2]:
+    own = [(t, n, i, j) for t, n, i, j in info if n > exact and i >= min(2048, (n - (j - i)) // 2, len(ids) // 2)]
+    for t, n, i, j in sorted(own, key=lambda x: x[2], reverse=True)[:2]:
+      if (ret:=self._reuse_rest(rendered, ids, i, collapse_pictures(t[j:n], pad))) is False: continue
+      if ret is not None: return ret
       if rendered.startswith(text:=self.tok.decode(c:=collapse_pictures(t[:n], pad))): return c + self.tok.encode(rendered[len(text):])
     return ids
+
+  def _reuse_rest(self, rendered:str, ids:list[int], i:int, rest:list[int]) -> list[int]|typing.Literal[False]|None:
+    """
+    _reuse_pictures' check of a kept list without decoding its shared part (a Pokemon step at 230K: two decodes, ~30-80 ms of the prep, and
+    with the Qwen line's preserve_thinking=False never a match): ids[:i] are its first tokens as the text has them (common_prefix_pictures),
+    ids the text's tokens (their bytes its bytes: the encoder splits every character into words, every word into byte tokens), so only rest
+    (its tokens after them, collapsed) is compared, as bytes, where ids[i:] begin: its tokens (the full check's), False (the full check's no:
+    a text without a replacement character continues a decoded text only if it continues its bytes), None (the full check decides)
+    """
+    if (tb:=getattr(self.tok, "_tok2bytes", None)) is None: return None
+    try: rb = rendered.encode()
+    except UnicodeEncodeError: return None
+    at = len(rb) - len(tail:=b"".join(tb[x] for x in ids[i:]))
+    if at < 0 or not rb.endswith(tail) or b"\xef\xbf\xbd" in rb: return None
+    end = at + len(b:=b"".join(tb[x] for x in rest))
+    # (the kept rest follows the shared part and ends on a character's start)
+    if rb[at:end] != b or (end < len(rb) and rb[end] & 0xC0 == 0x80): return False
+    return ids[:i] + rest + self.tok.encode(rb[end:].decode())
 
   def miss_log(self, ids:list[int], start:int):
     """a request prefilled from 2000 tokens less than it shares with a kept conversation at least: where they differ"""

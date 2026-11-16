@@ -148,6 +148,18 @@ class TestGuards(unittest.TestCase):
     s.kept = lambda: [(kept, len(kept)), (kept, len(p1)), (ghost, len(ghost))]
     self.assertEqual(expand_pictures(s.reuse_tokens(rendered, enc(rendered)), [pic], PAD)[0][:len(p1)], p1)
     self.assertNotIn(len(ghost), calls, "the longer kept conversation is not decoded")
+    # (a tokenizer with its tokens' bytes: a kept list's rest is compared as bytes where the text's own tokens differ (_reuse_rest), its shared
+    # part not decoded: the same tokens as the full check, whether the text continues it or not (another reply, a longer conversation))
+    reply = p1 + enc("\n</think>\n\nHELLO")
+    for k in (reply, p1 + [2003, 2002], reply + enc("<|im_end|>\n<|im_start|>user\nAnd?<|im_end|>\n<|im_start|>assistant\n<think>\nmore")):
+      s.kept = lambda: [(k, len(k)), (k, len(p1))]
+      s.tok = types.SimpleNamespace(encode=enc, decode=dec)
+      full_check = s.reuse_tokens(rendered, enc(rendered))
+      calls.clear()
+      tb = {x: dec([x]).encode() for x in set(k) | set(enc(rendered)) if x >= 0}
+      s.tok = types.SimpleNamespace(encode=enc, decode=lambda t: calls.append(len(t)) or dec(t), _tok2bytes=tb)
+      self.assertEqual(s.reuse_tokens(rendered, enc(rendered)), full_check)
+      self.assertEqual(calls, [], "no kept list decoded")
     s.tok = types.SimpleNamespace(encode=enc, decode=dec)
     # (without vision: the old path, a list with pictures not reused)
     s.vision = None
