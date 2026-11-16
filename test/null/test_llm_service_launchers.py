@@ -177,11 +177,28 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     with tempfile.TemporaryDirectory() as d:
       (shards:=pathlib.Path(d) / "GLM-5.3-UD-IQ4_XS").mkdir()
       for line in (SCRIPTS / "glm53-iq4xs.sha256").read_text().splitlines(): (shards / line.split()[1]).write_bytes(b"")
-      env = {"PATH": os.environ["PATH"], "HOME": d, "GLM53_POWER_LIMIT": "180", "GLM_WEIGHTS": d, "STATE_DIR": f"{d}/state"}
+      import site  # (HOME moved: this Python's user site kept, the launcher checks its imports first)
+      env = {"PATH": os.environ["PATH"], "HOME": d, "GLM53_POWER_LIMIT": "180", "GLM_WEIGHTS": d, "STATE_DIR": f"{d}/state",
+             "PYTHONUSERBASE": site.getuserbase()}
       r = subprocess.run(["bash", str(SCRIPTS / "glm_14xr9700.sh"), "start"], env=env, capture_output=True, text=True, timeout=60)
     self.assertNotEqual(r.returncode, 0)
     self.assertNotIn("No such file", r.stdout + r.stderr)
     self.assertIn("did NOT match", r.stdout + r.stderr)
+
+  def test_python_prerequisites_before_any_gpu(self):
+    # (a fresh VM without numpy failed the model load after the cards were set up: the launchers check the imports before the weights and the GPUs)
+    import tempfile
+    for script, power in (("qwen_6x7900xtx.sh", "AM_POWER_LIMIT"), ("glm_flash_6x7900xtx.sh", "AM_POWER_LIMIT"),
+                          ("glm_14xr9700.sh", "GLM53_POWER_LIMIT")):
+      with tempfile.TemporaryDirectory() as d:
+        (fake:=pathlib.Path(d) / "python3").write_text("#!/bin/sh\nexit 1\n")
+        fake.chmod(0o755)
+        env = {"PATH": f"{d}:{os.environ['PATH']}", "HOME": d, power: "180", "STATE_DIR": f"{d}/state", "VISION_MMPROJ": f"{d}/none.gguf"}
+        r = subprocess.run(["bash", str(SCRIPTS / script), "start"], env=env, cwd=ROOT, capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 2, script)
+        self.assertIn("missing Python prerequisites", r.stderr, script)
+        self.assertNotIn("VISION_MMPROJ is mandatory", r.stderr, script)
+        self.assertFalse((pathlib.Path(d) / "state").exists(), script)
 
   def test_runbook_and_null_warmups_are_self_contained(self):
     runbook = (ROOT / "RUNNING.md").read_text()

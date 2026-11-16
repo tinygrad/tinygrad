@@ -14,7 +14,7 @@ Only a machine's owner starts/stops service and only one GPU workload may use a 
 
 ## Preconditions
 
-1. Use the supported Python installed by the operations image, an immutable checkout, and `python3 -m pip install pillow>=10.0.1` for picture requests. Keep weights read-only and verify every hash below before a start.
+1. Python prerequisites, on every box before its first start: Python 3 with **numpy** (the model loader), **jinja2** (the chat template) and, on the vision lines C2 / C5, **pillow >= 10.0.1** (Ubuntu 24.04: `sudo apt-get install python3-numpy python3-jinja2 python3-pil`; an iris 6x7900 XTX VM: the company's `tools/vm/setup.sh <vm>` once after its creation). The three launchers check these imports, then the weights' hashes, before any GPU is opened (`<launcher> check-weights` runs both checks alone): a missing module found after the cards were set up costs a mode1 reset in a VM. Use an immutable checkout; keep weights read-only.
 2. Record a writable tinygrad cache (`XDG_CACHE_HOME`), persistent state/log directory, and ownership of the box. Never expose `SESSION_END_TOKEN` or API keys in argv, commits or logs. The HTTP service is loopback HTTP; TLS and external access belong to the front proxy.
 3. Check all expected cards and free device/host memory. R9700 limit: **180 W a card on ts5 (GLM 5.3, 14 cards: the board's setting Nov 15, below); the former launcher default 210 W is NOT safe. `GLM53_POWER_LIMIT` is required (the launcher has no numeric default).** Qwen ran at **250 W/card** and GLM Flash D34 at **225 W/card**; use **225 W for Qwen on a hot host**, keep every hotspot **under 100 C**, and log it. A dropped/hung card is an incident, not a reset loop.
 
