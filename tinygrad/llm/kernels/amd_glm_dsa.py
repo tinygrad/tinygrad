@@ -7,14 +7,12 @@ from tinygrad.llm.glm_dsa_gguf import ggml_data_to_tensor
 from tinygrad.llm.kernels.amd_glm import _nucleus_round_kernel
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import prod, getenv, round_up
-from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
+from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.renderer import Estimates
 
 BLOCK_M, BLOCK_N, WARP_SIZE = 32, 32, 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
-WAVES_M, WAVES_N, LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 2, 2, 16
-WMMA_ACC, THREADS_PER_BLOCK = WMMA_M // LANES_PER_WAVE_M, WARP_SIZE * WAVES_M * WAVES_N
 LDS_PAD, WMMA_ARG, LOG2E = 4, ((WMMA_N, WMMA_M, WMMA_K), 32), math.log2(math.e)
 GGML_BLOCK_SIZE, Q8_GROUP_SIZE = 256, 32
 Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K = 8, 10, 11, 12, 13, 14
@@ -2074,7 +2072,6 @@ def all_to_all(x:Tensor, src:int, dst:int) -> Tensor:
 # ******** ring collectives (redqwenflash): a kernel a device, every device writes into the inbox of the next one (its memory mapped), a flag
 # with the epoch and a checksum a chunk; the chunks of a wave in rounds. one kernel instead of the copies of every step
 
-_LOAD_SYS32 = "__hip_atomic_load({0}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM)"
 FLAG_LANE = [0]
 
 def _init_buffers(pairs:list[tuple[typing.Any, bytes]]):
@@ -2085,20 +2082,9 @@ def _init_buffers(pairs:list[tuple[typing.Any, bytes]]):
     if (host:=b.get_storage().host) is not None: host[:] = memoryview(v).cast('B')
     else: b.copy_from(Buffer("PYTHON", b.nbytes, initial_value=v))
 
-def _q8_pack_values(values:list[UOp], recip:bool=False) -> tuple[list[UOp], UOp]:
-  # (recip: times the scale's reciprocal, not divided by it: a value at a half can round the other way)
-  mx = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
-  for off in (1, 2): mx = mx.maximum(_lane_xor(mx, off))
-  d = _cfn(False, src=(mx,), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
-  rd = _cfn(False, src=(d,), arg=("(1.0f/{0})", dtypes.float)) if recip else None
-  quants = [(_cfn(False, src=(v, rd), arg=("__builtin_nearbyintf({0}*{1})", dtypes.float)) if rd is not None else
-             _cfn(False, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float))).clip(-127, 127).cast(dtypes.int8) for v in values]
-  words = [functools.reduce(lambda a, b: a | b, [quants[w*4+i].cast(dtypes.uint8).cast(dtypes.uint32) << (8*i) for i in range(4)]) for w in range(2)]
-  return words, d
 
 # (more waves: no progress at all). a device is at most one exchange ahead of the next one: two parities of the inbox
 
-SEL_LANE_BASE = 8  # (the lanes from it are the micro batches' second ones (model.SEL_LANE): the same queue)
 RING_MAXW = 1 << 20  # words a part (a slot of the inbox: 4 MB, a prefill's part of 4608 rows of q8 is 2.2 MB)
 
 class RingMailbox:
@@ -2136,23 +2122,7 @@ RING_W, RING_CMAX = 8, 4096  # waves a workgroup (a wave a chunk), the most (chu
 # (the collectives of decoding steps on lanes of their own (from DEC_LANE): their exchanges are small, more workgroups (RING_G_DEC) move them in
 # fewer rounds. a lane's mailboxes always have the same workgroups: their epoch counters move together)
 DEC_LANE = 16
-def ring_g(units:int=0) -> int:
-  # (the decoding steps' lanes: RING_G_DEC, more for a unit a wave (units: a reduce scatter's), two a wave are ~2.5x the time (78 sequences))
-  if FLAG_LANE[0] < DEC_LANE: return (8)
-  return max(G:=32, min(-(-units // RING_W), 2*G))
 # (the slots of a mailbox a chunk's own: its flags (a round each) and words at the same place whatever the kernel's workgroups (a decoding lane's
-# exchanges have 32 to 64 of them: their chunks' epochs move apart, a slot shared by two chunks can be overwritten by a device a kernel ahead
-# before the next one read it: a hang). the most chunks of a lane: 8 workgroups (prefill), 64 (decoding))
-def _ring_chunks(G:int) -> int: return (G if G <= 8 else 64) * RING_W
-def _ring_fits(G:int, R:int, span:int) -> bool:
-  """the rounds and words of a chunk fit in its slots"""
-  return R <= RING_CMAX // _ring_chunks(G) and span <= RING_MAXW // _ring_chunks(G)
-def _ring_rounds(units:int, per_round:int, G:int) -> tuple[int, int, int]:
-  """(workgroups, rounds, units of a wave a round) of units over the waves of G workgroups (per_round: the most a wave a round)"""
-  per_wave = -(-units // (G * RING_W))
-  R = -(-per_wave // per_round)
-  assert R * G * RING_W <= RING_CMAX, f"ring: {units} units in {R} rounds of {G*RING_W} waves"
-  return G, R, -(-per_wave // R)
 
 def ring_mailbox(devs:tuple[str, ...]) -> RingMailbox|None:
   return _ring_mailbox(tuple(Device.canonicalize(d) for d in devs), FLAG_LANE[0])
@@ -2161,221 +2131,6 @@ def _ring_mailbox(devs:tuple[str, ...], lane:int=0) -> RingMailbox|None:
   if len(devs) < 3 or not amd_custom_kernels_supported(devs): return None
   return RingMailbox(devs, RING_CMAX)
 
-RING_DEADLINE:list[UOp|None] = [None]
-def _ring_spin(after:UOp, loads:Callable[[UOp], list[UOp]], stale:Callable[[list[UOp]], UOp], dtype:DType) -> tuple[list[UOp], UOp]:
-  # loads (of the loop) again until stale of them (the same in every lane) is false, a sleep between. (the values, still stale (RING_DEBUG))
-  loop = UOp.range(UOp(Ops.NOOP).after(after), next(UOp.unique_num), dtype=dtypes.void)
-  ld = loads(loop)
-  reg = UOp.alloc((len(ld),), dtype, addrspace=AddrSpace.REG)
-  loaded = reg.after(loop).store(UOp.stack(*ld)) if len(ld) > 1 else reg.after(loop)[0].store(ld[0])
-  got = [reg.after(loaded)[i].load() for i in range(len(ld))]
-  st = stale(got)
-  if (dl:=RING_DEADLINE[0]) is not None: st = st & (_sys("__builtin_readsteadycounter()", dtypes.uint64, st) < dl)
-  s = _sys(f"({{0}} ? (__builtin_amdgcn_s_sleep({(16)}), true) : false)", dtypes.bool, st)
-  reg = reg.after(_cfn(False, src=(s,), arg=("", dtypes.void)).backedge(loop, s))
-  vals = [reg[i].load() for i in range(len(ld))]
-  return vals, stale(vals)
-
-def _wave_sum(c:UOp) -> UOp:
-  for off in (16, 8, 4, 2, 1): c = c + _lane_xor(c.bitcast(dtypes.float32), off).bitcast(dtypes.uint32)
-  return c
-
-_LOAD_SYS64 = "__hip_atomic_load({0}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM)"
-
-def _ring_common(counter:UOp, N:int, dbg:UOp, G:int, tag:int=0, R:int=1, span:int=0):
-  # (span: the words of a chunk in the kernel's layout, from ch*span)
-  W, C, CH = RING_W, G*RING_W, _ring_chunks(G)
-  assert G <= 8 or 32 <= G <= 64, f"ring: {G} workgroups"
-  assert _ring_fits(G, R, span), f"ring: {R} rounds, {span} words a chunk of {CH}"
-  cid = [UOp.const(0, dtypes.weakint)]  # (the round, set by the kernel)
-  wg, warp, lane = UOp.range(G, 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
-  ch = wg*W + warp
-  # (the chunks' epochs: a chunk's moves with the kernels that have it, the same ones on every device)
-  epoch, me = (counter[ch].load() + 1).cast(dtypes.uint32), counter[RING_CMAX].load().cast(dtypes.weakint)
-  RING_DEADLINE[0] = None
-  dbgs:list[UOp] = []
-  par = (epoch & 1).cast(dtypes.weakint)
-  def fslot(s:UOp|int) -> UOp: return (par*N + s)*RING_CMAX + ch*(RING_CMAX // CH) + cid[0]
-  def islot(s:UOp|int, e:UOp, valid:UOp) -> UOp: return ((par*N + s)*RING_MAXW + ch*(RING_MAXW // CH) + (e - ch*span)).valid(valid)
-  def recv(after:UOp, flags:UOp, inbox:UOp, s:UOp|int, at:list[tuple[UOp, UOp]], mult:list[UOp], step:int=0) -> list[UOp]:
-    # this device's inbox: the flag of slot s for the epoch, then the words at (index, valid) until their checksum is the flag's (the words
-    # not valid are 0, as the sender's)
-    (fl,), late = _ring_spin(after, lambda loop: [_sys(_LOAD_SYS64, dtypes.uint64, flags.after(loop)[fslot(s)])],
-                             lambda g: (g[0] >> 32).cast(dtypes.uint32).ne(epoch), dtypes.uint64)
-    # (a gated custom load reads the slot's start: masked)
-    vals, bad = _ring_spin(fl, lambda loop: [v.where(_sys(_LOAD_SYS32, dtypes.uint32, inbox.after(loop)[islot(s, e, v)]), 0) for e, v in at],
-                           lambda g: csum(g, mult).ne(fl.cast(dtypes.uint32)), dtypes.uint32)
-    if RING_DEADLINE[0] is not None:
-      # (the first wave that gave up: its epoch, chunk, flag's epoch | slot<<24 | late<<30 | bad<<31)
-      k, u32 = step % 16, dtypes.uint32
-      su = UOp.const(s, u32) if isinstance(s, int) else s.cast(u32)
-      row = (epoch, UOp.const(tag, u32) + ch.cast(u32), (fl >> 32).cast(u32),
-             su | (late.cast(u32) << 30) | (bad.cast(u32) << 31) | (me.cast(u32) << 24))
-      dbgs.extend([dbg[UOp.const(4*k + i, dtypes.weakint).valid((late | bad) & lane.eq(0))].store(v) for i, v in enumerate(row)])
-    return vals
-  def csum(words:list[UOp], mult:list[UOp]) -> UOp: return _wave_sum(functools.reduce(lambda a, b: a + b, [w*m for w, m in zip(words, mult)]))
-  def send(after:list[UOp], inbox_next:UOp, flags_next:UOp, s:UOp|int, at:list[tuple[UOp, UOp]], words:list[UOp], mult:list[UOp]) -> UOp:
-    sent = [inbox_next.after(*after)[islot(s, e, v)].store(w) for (e, v), w in zip(at, words)]
-    # (the fence: the flag after the words' writes are done. the checksum doesn't need it, a flag seen early is a reread)
-    fenced = _sys('__builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");', dtypes.void, *sent)
-    word = (epoch.cast(dtypes.uint64) << 32) | csum([v.where(w, 0) for (_, v), w in zip(at, words)], mult).cast(dtypes.uint64)
-    return flags_next.after(fenced)[fslot(s).valid(lane.eq(0))].store(word)
-  def finish(last:UOp) -> UOp: return counter.after(last)[ch.valid(lane.eq(0))].store(epoch)
-  def at_round(r:UOp) -> None: cid[0] = r
-  def end_round(x:UOp, r:UOp) -> UOp:  # (the round's debug stores in it)
-    ret = UOp.group(x, *dbgs).end(r)
-    dbgs.clear()
-    return ret
-  return C, wg, warp, lane, ch, me, recv, send, finish, at_round, end_round
-
-@functools.cache
-def _ring_ag_kernel(out:UOp, x:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flags:UOp, flags_next:UOp, dbg:UOp, *, N:int, n:int, G:int=8) -> UOp:
-  # out (N*n words): part s from the device at s, x (n words) this device's. a wave's words in R rounds of EP a lane
-  G, R, EP = _ring_rounds(-(-n // 32), 32, G)  # (rows of 32 words: a word a lane)
-  C, wg, warp, lane, ch, me, recv, send, finish, at_round, end_round = _ring_common(counter, N, dbg, G, n << 10, R, R*EP*32)
-  mult = [(2*(i*32 + lane) + 1).cast(dtypes.uint32) for i in range(EP)]
-  def step(k:UOp|int, dep:list[UOp], rid:int, first:bool, last:bool) -> UOp:
-    s = (me - k + N) % N
-    # (the rounds a loop: a round after the one before, the step after the rounds of the one before)
-    r = UOp.range(R, rid, AxisType.LOOP)
-    at_round(r)
-    at = [(e, e < n) for e in [((ch*R + r)*EP + i)*32 + lane for i in range(EP)]]
-    vals = [x.after(*dep, r)[0, e.valid(v)].load() for e, v in at] if first else \
-      recv(UOp.group(*dep, r), flags, inbox, s, at, mult, k if isinstance(k, int) else 1)
-    st = [out.after(*dep)[(s*n + e).valid(v)].store(w) for (e, v), w in zip(at, vals)]
-    return end_round(UOp.group(*st, send(dep, inbox_next, flags_next, s, at, vals, mult)) if not last else UOp.group(*st), r)
-  # (the steps between the first and the last a loop, see _ring_rs_q8_kernel)
-  prev = step(0, [], 10, True, False)
-  if N > 3:
-    kk = UOp.range(N-2, 11, AxisType.LOOP)
-    prev = step(kk + 1, [prev, kk], 12, False, False).end(kk)
-  else:
-    for k in range(1, N-1): prev = step(k, [prev], 10 + k, False, False)
-  prev = step(N-1, [prev], 10 + N, False, True)
-  return UOp.group(prev, finish(prev)).end(wg, warp, lane).sink(arg=KernelInfo(name=f"ring_allgather_{n*4}", opts_to_apply=()))
-
-@functools.cache
-def _ring_rs_q8_kernel(out:UOp, p:UOp, counter:UOp, inbox:UOp, inbox_next:UOp, flags:UOp, flags_next:UOp, dbg:UOp, *, N:int, size:int,
-                       G:int=8) -> UOp:
-  # p (size) this device's partials, out (size/N) the sum of part me (float). in step k a device adds its partials of part me-k-1 to what
-  # came (the sum of the devices before it), sends it on as int8 groups of 32 with their scale (q8_pack), the last its own. a wave's groups in
-  # R rounds of EP (8 groups a wave, four lanes a group: eight values a lane)
-  blk = size // N
-  BG = blk // 32
-  out = out.reshape(-1)
-  G, R, EP = _ring_rounds(-(-BG // 8), 4, G)
-  C, wg, warp, lane, ch, me, recv, send, finish, at_round, end_round = _ring_common(counter, N, dbg, G, (1 << 31) | (size >> 8 << 10), R,
-                                                                                    R*EP*72)
-  sub = lane % 4
-  def step(k:UOp|int, dep:list[UOp], rid:int, last:bool, first:bool) -> UOp:
-    # step k: the partials of part me-k-1 plus what came (k > 0), sent on (or stored: the last step)
-    b = (me - k - 1 + N) % N
-    r = UOp.range(R, rid, AxisType.LOOP)
-    at_round(r)
-    dep = dep + [r]
-    groups = [((ch*R + r)*EP + i)*8 + lane//4 for i in range(EP)]
-    # the wave's 8 groups on the wire: the words of the lanes (two a lane, lane after lane: a store a line), then the 8 scales (uncached
-    # stores of a peer's memory are its writes: lanes' words apart are a write each)
-    base = [((ch*R + r)*EP + i)*72 for i in range(EP)]
-    at = [(b0 + w*32 + lane, g < BG) for b0, g in zip(base, groups) for w in range(2)] + \
-         [(b0 + 64 + lane//4, (g < BG) & sub.eq(0)) for b0, g in zip(base, groups)]
-    mult = [(2*(j*32 + lane) + 1).cast(dtypes.uint32) for j in range(len(at))]
-    # (the partials loaded after the round before: not all of them at the start, in registers)
-    acc = [[p.after(*dep).reshape(-1)[(b*blk + g*32 + sub*8 + j).valid(g < BG)].load().float() for j in range(8)] for g in groups]
-    if not first:
-      # (the partials' loads before the wait for what came: their latency in it)
-      got = recv(UOp.group(*dep, *[a for g in acc for a in g]), flags, inbox, k-1, at, mult,
-                 k if isinstance(k, int) else 1)
-      for i in range(EP):
-        # (the scale from the group's first lane: every lane loads its word, the others' are masked)
-        sc = got[2*EP + i].bitcast(dtypes.float32)
-        d = _lane_xor(_lane_xor(sc, 1), 2) + _lane_xor(sc, 1) + _lane_xor(sc, 2) + sc
-        ws = got[2*i:2*i+2]
-        acc[i] = [a + (ws[j//4] >> (8*(j%4))).cast(dtypes.uint8).bitcast(dtypes.int8).float()*d for j, a in enumerate(acc[i])]
-    if not last:
-      packed = [_q8_pack_values(a, recip=True) for a in acc]
-      words = [ws[w] for ws, _ in packed for w in range(2)] + [d.bitcast(dtypes.uint32) for _, d in packed]
-      return end_round(send(dep, inbox_next, flags_next, k, at, words, mult), r)
-    outs = [out.after(*dep)[(g*32 + sub*8 + j).valid(g < BG)].store(a[j]) for g, a in zip(groups, acc) for j in range(8)]
-    return end_round(UOp.group(*outs), r)
-  # (the steps between the first and the last a loop: unrolled, every step's graph has all the ones before it (their order), the codegen's
-  # simplifications of them ~quadratic: ~25 s a kernel)
-  prev = step(0, [], 10, False, True)
-  if N > 3:
-    kk = UOp.range(N-2, 11, AxisType.LOOP)
-    prev = step(kk + 1, [prev, kk], 12, False, False).end(kk)
-  else:
-    for k in range(1, N-1): prev = step(k, [prev], 10 + k, False, False)
-  prev = step(N-1, [prev], 10 + N, True, False)
-  assert prev is not None
-  return UOp.group(prev, finish(prev)).end(wg, warp, lane).sink(arg=KernelInfo(name=f"ring_reduce_scatter_q8_{size}", opts_to_apply=()))
-
-# the micro batches' calls on compute queues of their own (1.., the first's 0), their collectives on two more (2, 3): set if the devices have
-# them (AM_MEC_PIPES=2 at least on am), else all on queue 0 (the copies of one micro batch don't run with the kernels of the other)
-EXTRA_QUEUES = [False]
-def ring_queue() -> int:
-  """
-  the compute queue of the ring collectives (0: the calls' own), a queue of their own for the micro batches on queues of theirs (a kernel that
-  spins on its peers holds its queue and its waves: two at once on a device (one a batch) can wait on each other through the devices' queues.
-  on one queue they run one at a time, in the same order on every device)
-  """
-  return 2 if EXTRA_QUEUES[0] else 0
-def mb_queue(i:int) -> int:
-  """the compute queue of micro batch i"""
-  return i if EXTRA_QUEUES[0] else 0
-RING_QUEUE_ON = [False]  # (the collectives on queues of their own only in the micro batches' prefill: a step's on its queue)
-def ring_queue_of(lane:int, any_time:bool=False) -> int:
-  """the queue of a lane's collectives (the ring's queue + the lane), 0: the calls' own"""
-  if not (any_time or RING_QUEUE_ON[0]): return 0
-  return ring_queue() + (lane if ring_queue() else 0)
-
-def _comm_queued(outs:list[Tensor]) -> list[Tensor]:
-  """the outputs of a collective's kernel that spins on its peers, its call on the comm queue of the lane (a micro batch's own: lane i on
-  RING_QUEUE+i, its exchanges in its order. the compute queues never spin: a queue waiting for one can't make a cycle through the devices)"""
-  if not (q:=ring_queue_of(FLAG_LANE[0] % SEL_LANE_BASE)): return outs
-  def call_of(u:UOp) -> UOp: return u.src[1] if u.op is Ops.AFTER and u.src[1].op is Ops.CALL else call_of(u.src[0])
-  call = call_of(outs[0].uop)
-  new = call.replace(arg=replace(call.arg, queue=f"COMPUTE:{q}"))
-  # (the call in the outputs' chains of views and afters: not a walk of the graph before it)
-  def requeue(u:UOp) -> UOp:
-    if u.op is Ops.AFTER and u.src[1] is call: return u.replace(src=(u.src[0], new, *u.src[2:]))
-    return u.replace(src=(requeue(u.src[0]), *u.src[1:]))
-  return [Tensor(requeue(o.uop)) for o in outs]
-def _ring_queued(t:Tensor) -> Tensor: return _comm_queued([t])[0]
-
-def ring_all_gather_words(x:Tensor) -> Tensor|None:
-  """x (N, n) 32 bit words split on the devices: (N*n,) on every device, around the ring. None: not supported"""
-  devs = x.device
-  if not isinstance(devs, tuple) or x.uop.axis != 0 or x.ndim != 2 or x.dtype.itemsize != 4 or not isinstance(n:=x.shape[1], int): return None
-  if n > RING_MAXW: return None
-  G, R, EP = _ring_rounds(-(-n // 32), 32, ring_g())
-  if not _ring_fits(G, R, R*EP*32) or (mb:=ring_mailbox(devs)) is None: return None
-  out = Tensor.empty(len(devs)*n, dtype=dtypes.uint32, device=devs)
-  return _ring_queued(Tensor.custom_kernel(out, x.bitcast(dtypes.uint32).contiguous(), mb.counter, mb.inbox, mb.inbox_next, mb.flags,
-                                          mb.flags_next, mb.dbg, fxn=functools.partial(_ring_ag_kernel, N=len(devs), n=n, G=ring_g()))[0])
-
-def ring_reduce_scatter_q8(p:Tensor, size:int, shape:tuple[int, ...]|None=None, axis:int=0) -> Tensor|None:
-  """
-  p (N, size) partials split on the devices: the sum of part i (size/N, float) on device i, around the ring in int8 groups. shape: the output's
-  (split on axis), made so (a view of the flat one isn't a buffer: a copy of it)
-  """
-  devs = p.device
-  if not isinstance(devs, tuple) or size % (len(devs)*256): return None
-  units = -(-(size//len(devs)//32) // 8)
-  G, R, EP = _ring_rounds(units, 4, ring_g(units))
-  if G*RING_W*R*EP*72 > RING_MAXW or not _ring_fits(G, R, R*EP*72) or (mb:=ring_mailbox(devs)) is None: return None
-  out = Tensor.empty(*(shape or (size,)), dtype=dtypes.float32, device=devs, axis=axis if shape else 0)
-  return _ring_queued(Tensor.custom_kernel(out, p.reshape(len(devs), size).contiguous(), mb.counter, mb.inbox, mb.inbox_next, mb.flags,
-                                          mb.flags_next, mb.dbg, fxn=functools.partial(_ring_rs_q8_kernel, N=len(devs), size=size, G=G))[0])
-
-
-def ring_all_gather(x:Tensor, axis:int) -> Tensor|None:
-  """all_gather of x split on axis (its leading axes of size 1 before it) around the ring: 32 bit words (half pairs)"""
-  N = len(cast(tuple, x.device))
-  if any(s != 1 for s in x.shape[:axis]) or (x.numel() * x.dtype.itemsize) % (4*N): return None
-  words = x.contiguous().bitcast(dtypes.uint32) if x.dtype.itemsize == 4 else x.contiguous().reshape(-1, 2).bitcast(dtypes.uint32)
-  if (g:=ring_all_gather_words(words.reshape(N, -1))) is None: return None
-  return g.bitcast(x.dtype).reshape(x.shape)
 
 # ******** collectives in halves (two batch overlap): the kernels before the copies in one function call, the copies issued between calls,
 # the kernels after them in the next call (its inputs: every device's pieces as tensors of all the devices)
@@ -4163,45 +3918,6 @@ def grouped_rows(buf:Tensor, rows:Tensor, positions:Tensor, stride:int, slots:Te
   return Tensor.custom_kernel(buf, rows.contiguous(), positions, *([slots] if slots is not None else []),
                               fxn=functools.partial(_grouped_rows_kernel, stride=stride))[0]
 
-@functools.cache
-def _slot_scatter_kernel(dst:UOp, src:UOp, slots:UOp, counts:UOp, *starts:UOp, S:int, shift:int) -> UOp:
-  # row slots[g]*S + (starts[g]+counts[g])%S of dst (n*S, rows, F) <- rows shift*counts[g].. (rows of them) of src[g] (G, R, F), cast to
-  # dst's dtype (no starts: 0)
-  G, _, F = cast(tuple[int, int, int], src.shape)
-  rows = cast(int, dst.shape[1])
-  L = math.gcd(F, 256)
-  g, r, blk, lane = (UOp.range(G, 0, AxisType.GLOBAL), UOp.range(rows, 1, AxisType.GLOBAL), UOp.range(F // L, 2, AxisType.GLOBAL),
-                     UOp.range(L, 3, AxisType.LOCAL))
-  f, cnt = blk * L + lane, counts[g].load().cast(dtypes.weakint)
-  value = src[g, shift * cnt + r, f].load().cast(dst.dtype)
-  pos = cnt + starts[0][g].load().cast(dtypes.weakint) if starts else cnt
-  store = dst[slots[g].load().cast(dtypes.weakint) * S + pos % S, r, f].store(value)
-  return store.end(g, r, blk, lane).sink(arg=KernelInfo(name="slot_scatter", opts_to_apply=()))
-
-def slot_scatter(pool:Tensor, src:Tensor, slots:Tensor, counts:Tensor, S:int, shift:int=0, starts:Tensor|None=None) -> Tensor:
-  """
-  the states of G sequences into their slots: pool (n*S, rows, F) row slots[g]*S + (starts[g]+counts[g])%S (a slot's S rows, the one of
-  position starts[g]+counts[g], no starts: 0) is rows shift*counts[g].. (rows of them) of src[g] (G, R, F). returns pool after
-  """
-  return Tensor.custom_kernel(pool, src, slots, counts, *([starts] if starts is not None else []),
-                              fxn=functools.partial(_slot_scatter_kernel, S=S, shift=shift))[0]
-
-@functools.cache
-def _slot_gather_kernel(dst:UOp, pool:UOp, slots:UOp, starts:UOp, S:int) -> UOp:
-  # dst[g] (G, rows, F) <- row slots[g]*S + starts[g]%S of pool (n*S, rows, F), cast to dst's dtype
-  G, rows, F = cast(tuple[int, int, int], dst.shape)
-  L = math.gcd(F, 256)
-  g, r, blk, lane = (UOp.range(G, 0, AxisType.GLOBAL), UOp.range(rows, 1, AxisType.GLOBAL), UOp.range(F // L, 2, AxisType.GLOBAL),
-                     UOp.range(L, 3, AxisType.LOCAL))
-  f = blk * L + lane
-  row = slots[g].load().cast(dtypes.weakint) * S + starts[g].load().cast(dtypes.weakint) % S
-  return dst[g, r, f].store(pool[row, r, f].load().cast(dst.dtype)).end(g, r, blk, lane).sink(arg=KernelInfo(name="slot_gather", opts_to_apply=()))
-
-def slot_gather(pool:Tensor, slots:Tensor, starts:Tensor, S:int, dtype:DType) -> Tensor:
-  """the states of G sequences at their positions from their slots: (G, rows, F) of rows slots[g]*S + starts[g]%S of pool (n*S, rows, F)"""
-  out = Tensor.empty(int(slots.shape[0]), *pool.shape[1:], dtype=dtype, device=pool.device,
-                     axis=None if pool.uop.axis is None else pool.uop.axis)
-  return Tensor.custom_kernel(out, pool, slots, starts, fxn=functools.partial(_slot_gather_kernel, S=S))[0]
 
 def _slot_of(slots:tuple[UOp, ...], g:UOp) -> UOp:
   """the slot of sequence g of a grouped kernel: g, or slots[g]"""
@@ -4691,25 +4407,6 @@ def mla_sparse_tokens(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_l
                              fxn=functools.partial(_mla_sparse_lds_kernel, scale=scale, valid_len=_unbind(valid_len), vdims=vdims, rep=G))[0]
   return out.reshape(R, heads, vdims).permute(1, 0, 2).reshape(1, heads, R, vdims).pad((None, (0, Hp - heads), None, None))
 
-def mla_sparse_seq_tokens(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_len:UOp, vdims:int) -> Tensor:
-  """
-  amd_flash_attention_mla_sparse of the (1, H, T, D) queries split on their heads, a device's rows with every head (SEQ_ATTN_TOK): the
-  queries sent to the devices of their rows (in half, as the kernel reads them), a workgroup 16 heads of a token (all of them real, not a device's
-  few padded to 16: the keys of a token read by H/16 workgroups instead of one on every device), the outputs' first vdims dims sent back in half
-  (as the value projection reads them). the same kernel on the same rows: the same values. (1, H, T, vdims) split on its heads, half
-  """
-  devs = cast(tuple[str, ...], q.device)
-  _, H, T, D = q.shape
-  G = (H + 15) // 16
-  qt = all_to_all(q.half(), 1, 2)[0].permute(1, 0, 2)  # (T, H, D) split on its rows
-  rows = qt.pad((None, (0, G*16 - H), None)).reshape(T*G*16, D).contiguous()
-  vl = _unbind(valid_len)
-  idx = Tensor(shard_rows(index, 0).uop.after(valid_len))
-  out = Tensor.empty(T*G*16, D, dtype=dtypes.float32, device=devs, axis=0)
-  out = Tensor.custom_kernel(out, rows, cache.reshape(-1, int(cache.shape[-1])), idx,
-                             fxn=functools.partial(_mla_sparse_wmma_kernel, scale=scale, valid_len=vl, hg=G))[0]
-  o = out.reshape(T, G*16, D)[:, :H, :vdims].half().permute(1, 0, 2).reshape(1, H, T, vdims)
-  return all_to_all(o, 2, 1)
 
 def amd_flash_attention_mla_sparse(q:Tensor, cache:Tensor, index:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None,
                                    vdims:int|None=None) -> Tensor:
@@ -5046,24 +4743,6 @@ def seq_gather(cache:Tensor, k:Tensor, start_pos:UOp, T:int|UOp, N:int, base:int
   # (fp8: the rows as they are, the attention reads them so. a bitcast would be a copy of all of it)
   return out if fp8 and raw or half else out.bitcast(dtypes.half)
 
-@functools.cache
-def _fmul_rn(a:UOp, b:UOp) -> UOp:
-  """a*b rounded on its own (v_mul_f32): never contracted into an add (an fma), never re-associated with the product it's in (the renderer
-  writes o*(a*b) as o*a*b, (o*a)*b in C)"""
-  return _sys('__extension__({{ float _p; __asm__ volatile("v_mul_f32 %0, %1, %2" : "=v"(_p) : "v"({0}), "v"({1})); _p; }})', dtypes.float32, a, b)
-def _fma(a:UOp, b:UOp, c:UOp) -> UOp: return _sys("__builtin_fmaf({0}, {1}, {2})", dtypes.float32, a, b, c)
-def _dot_chain(xs:list[UOp], ys:list[UOp]) -> UOp:
-  """sum of x*y in order as clang compiles a C sum of products (contracted, read off the gfx1201 code): the first product rounded, every
-  next one fused into the sum (fma(x, y, sum)). explicit: the same on the scalar unit (uniform values: s_mul/s_add, not contracted)"""
-  return functools.reduce(lambda acc, xy: _fma(xy[0], xy[1], acc), list(zip(xs, ys))[1:], _fmul_rn(xs[0], ys[0]))
-def _wg_index(n:int, T:int=256) -> tuple[UOp, tuple[UOp, UOp]]:
-  """
-  an index over n (a multiple of T) in workgroups of T threads, thread t of workgroup w at t*(n/T) + w: the threads of a workgroup far apart
-  (other rows), so a row's values are a thread's own (vector registers and units, as the kernels it replaces had them), not uniform (the
-  scalar unit's float ops: not contracted, its own exp)
-  """
-  wg, t = UOp.range(n // T, 0, AxisType.GLOBAL), UOp.range(T, 1, AxisType.LOCAL)
-  return t*(n // T) + wg, (wg, t)
 
 def mla_sparse_seq(q:Tensor, cache:Tensor, picks:Tensor, scale:float, valid_len:int|UOp|None, grouped:tuple|None=None,
                    dims:int|None=None, base:int|UOp=0) -> Tensor:
@@ -5176,239 +4855,9 @@ def amd_flash_attention_mla_prefill(q:Tensor, cache:Tensor, q_start:int|UOp, val
                                    partials=partials, block_n=block_n, q_start=q_start)
   return out.reshape(B, H, T, D)
 
-def _wmma_fragment(fragment:UOp, lane:UOp, rdna4:bool) -> UOp:
-  return fragment.reshape(2, 2, 4)[:, lane//16, :].reshape(8) if rdna4 else fragment
-
-@functools.cache
-def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:int|UOp|None=None, rdna4:bool=False) -> UOp:
-  valid_kv_len, q_start = _unbind(valid_kv_len), _unbind(q_start) if q_start is not None else None
-  BH, M, D = q.shape
-  _, B, H_KV, physical_n, cache_dim = cache.shape
-  k, v = cache[0].reshape(B*H_KV, physical_n, cache_dim), cache[1].reshape(B*H_KV, physical_n, cache_dim)
-  assert k.shape == v.shape and BH % k.shape[0] == 0 and k.shape[2] == D
-  gqa_group = BH // k.shape[0]
-  if isinstance(M, int): assert M % BLOCK_M == 0
-  assert isinstance(D, int) and D % WMMA_K == 0 and D % LANES_PER_WAVE_N == 0
-  TM, TN, TD, SCALE = BLOCK_M//(WAVES_M*LANES_PER_WAVE_M), BLOCK_N//LANES_PER_WAVE_N, D//(WAVES_N*LANES_PER_WAVE_N), 1/math.sqrt(D)
-  # query row 0 sits at sequence position q_base (the queries may be padded beyond valid_kv_len - q_base rows)
-  q_base = valid_kv_len - M if q_start is None else q_start
-  block_bh, block_m = UOp.range(BH, 0, AxisType.GLOBAL), UOp.range(M // BLOCK_M, 1, AxisType.GLOBAL)
-  kv_head = block_bh // gqa_group
-  q, o = (x.reshape(BH, M//BLOCK_M, BLOCK_M, D)[block_bh, block_m] for x in (q, o))
-  k, v = k[kv_head], v[kv_head]
-  wave_m, wave_n, lane = UOp.range(WAVES_M, 2, AxisType.LOCAL), UOp.range(WAVES_N, 3, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
-  tid, lane_m, lane_n = (wave_m * WAVES_N + wave_n) * WARP_SIZE + lane, lane // LANES_PER_WAVE_N, lane % LANES_PER_WAVE_N
-  Q_ELEMS_PER_THREAD, KV_ELEMS_PER_THREAD = BLOCK_M * D // THREADS_PER_BLOCK, BLOCK_N * D // THREADS_PER_BLOCK
-  QP_lds = UOp.alloc((BLOCK_M, D + LDS_PAD), dtypes.half, addrspace=AddrSpace.LOCAL)
-  KV_lds = UOp.alloc((BLOCK_N, D + LDS_PAD), dtypes.half, addrspace=AddrSpace.LOCAL)[:, :D]
-  acc, m_i, l_i = _reg((TM, TD), 0), _reg((TM,), -math.inf), _reg((TM,), 0)
-  n_tile = UOp.range(((q_base + (block_m + 1) * BLOCK_M).minimum(valid_kv_len) + BLOCK_N - 1) // BLOCK_N, 100, AxisType.LOOP)
-  Q_lds = QP_lds[:, :D]
-  Q_store = Q_lds.after(n_tile).reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid].store(q.reshape(THREADS_PER_BLOCK, Q_ELEMS_PER_THREAD)[tid])
-  load_k = UOp.range(KV_ELEMS_PER_THREAD, 90)
-  kval = k.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_k]
-  K_store = KV_lds.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_k].store(kval).end(load_k)
-  Q_lds, KV_lds_k = Q_lds.after(Q_store, K_store), KV_lds.after(Q_store, K_store)
-  S_reg = _reg((TM, TN), 0, n_tile)
-  k_qk, tm1, tn1 = UOp.range(D//WMMA_K, 101, AxisType.LOOP), UOp.range(TM//WMMA_ACC, 200), UOp.range(TN, 201)
-  S_frag = S_reg.reshape(TM // WMMA_ACC, WMMA_ACC, TN).permute(0, 2, 1)[tm1, tn1]
-  q_frag = Q_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, D // WMMA_K, WMMA_K)[wave_m, tm1, lane_n, k_qk]
-  k_frag = KV_lds_k.reshape(TN, WMMA_N, D // WMMA_K, WMMA_K)[tn1, lane_n, k_qk]
-  # All waves must finish reading Q/K before their shared memory is reused for P/V.
-  q_frag, k_frag = (_wmma_fragment(f, lane, rdna4) for f in (q_frag, k_frag))
-  qk_done = S_frag.store(UOp.wmma(q_frag, k_frag, S_frag.after(k_qk), *WMMA_ARG)).end(tm1, tn1).end(k_qk).barrier()
-  S_reg = S_reg.after(qk_done, S_reg.store(S_reg * SCALE))
-  rm, rn = UOp.range(TM, 250), UOp.range(TN, 251)
-  q_idx = q_base + block_m * BLOCK_M + wave_m * WMMA_M + (lane_m*TM + rm if rdna4 else rm*LANES_PER_WAVE_M + lane_m)
-  k_idx = n_tile * BLOCK_N + rn * LANES_PER_WAVE_N + lane_n
-  causal = (k_idx <= q_idx) & (k_idx < valid_kv_len)
-  S_reg = S_reg.after(S_reg[rm, rn].store(causal.where(S_reg[rm, rn], S_reg[rm, rn].const_like(-math.inf))).end(rm, rn))
-  m_ij, rm2 = _reg((TM,), -math.inf, n_tile), UOp.range(TN, 261, AxisType.LOOP)
-  m_ij = m_ij.after(m_ij.store(m_ij.after(rm2).maximum(S_reg[:, rm2])).end(rm2))
-  ri_w = UOp.range(TM, 270)
-  m_ij = m_ij.after(m_ij[ri_w].store(warp_reduce(m_ij[ri_w], maximum=True)).end(ri_w))
-  tile_max = m_ij.reshape(TM, 1).expand(TM, TN).maximum(-1e30)
-  S_reg = S_reg.after(S_reg.store(((S_reg - tile_max) * LOG2E).exp2()))
-  p_local, ri_ws = _reg((TM,), 0, n_tile), UOp.range(TM, 295)
-  p_sum = p_local.after(p_local[ri_ws].store(sum((warp_reduce(S_reg[ri_ws, rn]) for rn in range(TN)), S_reg.const_like(0))).end(ri_ws))
-  P_lds = QP_lds.flatten()[:WAVES_N * BLOCK_M * BLOCK_N].reshape(WAVES_N, BLOCK_M, BLOCK_N)
-  # gfx11 distributes even/odd rows between half-waves; gfx12 distributes the low/high eight rows.
-  row_shape = (LANES_PER_WAVE_M, TM) if rdna4 else (TM, LANES_PER_WAVE_M)
-  row_lane, row_elem = (2, 3) if rdna4 else (3, 2)
-  P_write = P_lds.reshape(WAVES_N, WAVES_M, *row_shape, TN, LANES_PER_WAVE_N).permute(1, 0, row_lane, 5, row_elem, 4) \
-    .reshape(THREADS_PER_BLOCK, TM, TN)
-  P_store = P_write[tid].store(S_reg.cast(dtypes.half))
-  beta_i, ri4, rj4 = UOp.alloc((TM,), dtypes.float, addrspace=AddrSpace.REG), UOp.range(TM, 330), UOp.range(TD, 331)
-  m_new = m_i[ri4].maximum(m_ij[ri4])
-  alpha_val, beta_val = ((m_i[ri4] - m_new) * LOG2E).exp2(), ((m_ij[ri4] - m_new) * LOG2E).exp2()
-  correction = UOp.group(acc[ri4, rj4].store(alpha_val * acc[ri4, rj4]).end(rj4),
-                         l_i[ri4].store(alpha_val * l_i[ri4] + beta_val * p_sum[ri4]),
-                         m_i[ri4].store(m_new), beta_i[ri4].store(beta_val)).end(ri4)
-  acc, l_i, m_i, beta_i = acc.after(correction), l_i.after(correction), m_i.after(correction), beta_i.after(correction)
-  V_lds = UOp.alloc((D, BLOCK_N + LDS_PAD), dtypes.half, addrspace=AddrSpace.LOCAL)[:, :BLOCK_N]
-  V_copy, load_v = V_lds.after(qk_done).permute(1, 0), UOp.range(KV_ELEMS_PER_THREAD, 390)
-  v_pos = n_tile*BLOCK_N + (tid*KV_ELEMS_PER_THREAD + load_v)//D
-  vval = (v_pos < valid_kv_len).where(v.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_v], 0)
-  V_store = V_copy.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_v].store(vval).end(load_v)
-  P_lds, V_lds = P_lds.after(P_store, V_store), V_lds.after(P_store, V_store)
-  pv_acc = _reg((TM, TD), 0, n_tile)
-  k_pv, tm2, tn2 = UOp.range(BLOCK_N//WMMA_K, 400, AxisType.LOOP), UOp.range(TM//WMMA_ACC, 401), UOp.range(TD, 402)
-  pv_frag = pv_acc.reshape(TM // WMMA_ACC, WMMA_ACC, TD).permute(0, 2, 1)[tm2, tn2]
-  p_frag = P_lds[wave_n].reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_N // WMMA_K, WMMA_K)[wave_m, tm2, lane_n, k_pv]
-  v_frag = V_lds.reshape(WAVES_N, TD, WMMA_N, BLOCK_N // WMMA_K, WMMA_K)[wave_n, tn2, lane_n, k_pv]
-  p_frag, v_frag = (_wmma_fragment(f, lane, rdna4) for f in (p_frag, v_frag))
-  pv_done = pv_frag.store(UOp.wmma(p_frag, v_frag, pv_frag.after(k_pv), *WMMA_ARG)).end(tm2, tn2).end(k_pv)
-  pv_acc = pv_acc.after(pv_done)
-  ri5, rj5 = UOp.range(TM, 410), UOp.range(TD, 411)
-  n_tile_end = acc[ri5, rj5].store(acc[ri5, rj5] + beta_i[ri5] * pv_acc[ri5, rj5]).end(ri5, rj5).end(n_tile)
-  acc, l_i, m_i = acc.after(n_tile_end), l_i.after(n_tile_end), m_i.after(n_tile_end)
-  acc = acc.after(acc.store(acc * (1 / l_i).reshape(TM, 1).expand(TM, TD)))
-  o = o.reshape(WAVES_M, *row_shape, WAVES_N, TD, LANES_PER_WAVE_N) \
-    .permute(0, 3, row_lane-1, 5, row_elem-1, 4).reshape(THREADS_PER_BLOCK, TM, TD)
-  return o[tid].store(acc).end(wave_m, wave_n, lane).end(block_m, block_bh).sink(arg=KernelInfo(opts_to_apply=()))
-
-def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
-  # cached flash attention on the half KV cache (already written through assigned_kv); valid_end stays bound at the graph level
-  T_real, q_start = q.shape[2], None
-  D, N, group = q.shape[3], assigned_kv.shape[3], q.shape[1] // assigned_kv.shape[2]
-  decode = resolve(T_real == 1, False)
-  # Non-power-of-two decode dimensions can lose tail-store masks. Q/P, K, and V use separate LDS allocations.
-  supported = D % 32 == 0 and (D & (D-1) == 0 and N % 64 == 0 and group*((D+LDS_PAD)*2+8) <= 65536 if decode else
-    D >= 64 and 2*(2*BLOCK_M*(D+LDS_PAD) + D*(BLOCK_N+LDS_PAD)) <= 65536 and N % BLOCK_N == 0 and q.max_shape[2] % BLOCK_M == 0)
-  if not supported:
-    k, v = (assigned_kv[i, :, :, :valid_end].float() for i in range(2))
-    mask = None if decode else Tensor.full((T_real, valid_end), -math.inf, dtype=dtypes.float32, device=q.device).triu(valid_end-T_real+1)
-    return q.float().scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)
-  if decode: return amd_flash_attention_decode(q.half(), assigned_kv, valid_end, cast(int, N))
-  if isinstance(T_real, UOp):
-    # symbolic chunk: pad the queries to the static tile; garbage rows are sliced off
-    T_pad = q.max_shape[2]
-    assert T_pad % BLOCK_M == 0, "chunk_size must be a multiple of 32"
-    q, q_start = q.pad_to((*q.shape[:2], T_pad, q.shape[3])), valid_end - T_real
-  B, H, T, D = q.shape
-  out = Tensor.empty(B, H, T, D, dtype="float32", device=q.device, axis=q.uop.axis).reshape(B*H, T, D)
-  fxn = functools.partial(_amd_flash_attention, valid_kv_len=valid_end, q_start=q_start, rdna4=_wmma_rdna4(q.device))
-  if isinstance(valid_end, UOp): assigned_kv = Tensor(assigned_kv.uop.after(valid_end))
-  out = Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), assigned_kv, fxn=fxn)[0].reshape(B, H, T, D)
-  return out if q_start is None else out[:, :, :T_real]
 
 # ******** gated delta net: fused recurrent scan ********
 
-@functools.cache
-def _gated_delta_prefill_lds_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None,
-                                    end_pos:UOp|None=None, TC:int=16, W:int=8) -> UOp:
-  # _gated_delta_prefill_kernel with W waves a workgroup (W*4 value rows of a head): the operands of TC tokens are staged in LDS once for the
-  # waves (every wave of a head read them all from L2), the waves step through them. the same arithmetic
-  # a value row over L lanes (key_dim/L keys a lane, its dots summed over them), row_tile rows a lane
-  L = (16)
-  batch, heads, tokens, value_dim, row_tile = *core.shape, (4 if L == 32 else 2)
-  key_dim, alpha_dim = q.shape[-1], alpha.shape[-1] if len(alpha.shape) == 4 else 1
-  batch, heads, tokens, value_dim, key_dim = cast(tuple[int, int, int, int, int], (batch, heads, tokens, value_dim, key_dim))
-  core, v = (x.reshape(batch*heads, tokens, value_dim) for x in (core, v))
-  q, k = (x.reshape(batch*heads, tokens, key_dim) for x in (q, k))
-  beta, kq = (x.reshape(batch*heads, tokens) for x in (beta, kq))
-  alpha = alpha.reshape(batch*heads, tokens, alpha_dim)
-  S = cast(int, state.shape[0]) if end_pos is not None else 1
-  read_off, write_off = (0, 0) if end_pos is None else ((cast(UOp, start_pos) % S) * (batch*heads), (end_pos % S) * (batch*heads))
-  state = state.reshape(-1, value_dim, key_dim)
-  RW = W * (32 // L) * row_tile  # the rows of a workgroup
-  bh_blk = UOp.range(batch*heads*value_dim//RW, 0, AxisType.GLOBAL)
-  wave, lane = UOp.range(W, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
-  bh, blk_row = bh_blk // (value_dim//RW), (bh_blk % (value_dim//RW))*RW
-  tid = wave*32 + lane
-  kl, rsub, per = lane % L, lane // L, key_dim // L
-  wrow = (wave * (32 // L) + rsub) * row_tile  # the first row of the lane in the workgroup's
-  rows = tuple(blk_row + wrow + i for i in range(row_tile))
-  cols = tuple(kl + i*L for i in range(per))
-  def tree(xs:list[UOp]) -> UOp:
-    while len(xs) > 1: xs = [xs[i] + xs[i+1] if i+1 < len(xs) else xs[i] for i in range(0, len(xs), 2)]
-    return xs[0]
-  def lane_sum(x:UOp) -> UOp:
-    for off in (16, 8, 4, 2, 1):
-      if off < L: x = x + _lane_xor(x, off)
-    return x
-  current = UOp.alloc((row_tile*per,), dtypes.float32, addrspace=AddrSpace.REG)
-  initial = None if start_pos is None else start_pos.eq(0)
-  current = current.after(current.store(UOp.stack(*(state[read_off+bh, row, col].float() if initial is None else
-    initial.where(0, state[read_off+bh, row, col].float()) for row in rows for col in cols))))
-  chunk = UOp.range(tokens // TC, 2, AxisType.LOOP)
-  lds_k, lds_q = (UOp.alloc((TC, key_dim), dtypes.float32, addrspace=AddrSpace.LOCAL) for _ in range(2))
-  lds_a = UOp.alloc((TC, alpha_dim), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  lds_v = UOp.alloc((TC, RW), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  lds_s = UOp.alloc((TC, 2), dtypes.float32, addrspace=AddrSpace.LOCAL)  # beta, kq
-  threads, st = W*32, []
-  for src, lds, width in ((k, lds_k, key_dim), (q, lds_q, key_dim), (alpha, lds_a, alpha_dim)):
-    for e0 in range(0, TC*width, threads):
-      e = tid + e0
-      st.append(lds[(e//width).valid(e < TC*width), e % width].store(src[bh, chunk*TC + (e//width).minimum(TC-1), e % width].load()))
-  for e0 in range(0, TC*RW, threads):
-    e = tid + e0
-    st.append(lds_v[(e//RW).valid(e < TC*RW), e % RW].store(v[bh, chunk*TC + (e//RW).minimum(TC-1), blk_row + e % RW].load()))
-  st += [lds_s[tid.valid(tid < TC), 0].store(beta[bh, chunk*TC + tid.minimum(TC-1)].load()),
-         lds_s[tid.valid(tid < TC), 1].store(kq[bh, chunk*TC + tid.minimum(TC-1)].load())]
-  staged = UOp.group(*st).barrier()
-  lds_k, lds_q, lds_a, lds_v, lds_s = (x.after(staged) for x in (lds_k, lds_q, lds_a, lds_v, lds_s))
-  t = UOp.range(TC, 3, AxisType.LOOP)
-  token = chunk*TC + t
-  keys = tuple(lds_k[t, col].load() for col in cols)
-  queries = tuple(lds_q[t, col].load() for col in cols)
-  updates, stores = [], []
-  for row_idx,row in enumerate(rows):
-    previous = tuple(current.after(t)[row_idx*per+i].load() for i in range(per))
-    decayed, bv = tuple(x * lds_a[t, col if alpha_dim > 1 else 0].load() for x,col in zip(previous, cols)), lds_s[t, 0].load()
-    if L == 32:
-      state_k = warp_reduce(sum((x*y for x,y in zip(decayed, keys)), UOp.const(0, dtypes.float32)), full_wave=True)
-      state_q = warp_reduce(sum((x*y for x,y in zip(decayed, queries)), UOp.const(0, dtypes.float32)), full_wave=True)
-    else:
-      state_k = lane_sum(tree([x*y for x,y in zip(decayed, keys)]))
-      state_q = lane_sum(tree([x*y for x,y in zip(decayed, queries)]))
-    delta = (lds_v[t, wrow + row_idx].load() - state_k) * bv
-    updates += [x + delta*y for x,y in zip(decayed, keys)]
-    stores.append(core[bh, token, row.valid(kl.eq(0))].store(state_q + delta*lds_s[t, 1].load()))
-  step = UOp.group(*stores, current.store(UOp.stack(*updates))).end(t).barrier().end(chunk)
-  state_stores = (state[write_off+bh, row, col].store(current.after(step)[row_idx*per+i].load().cast(state.dtype))
-                  for row_idx,row in enumerate(rows) for i,col in enumerate(cols))
-  return UOp.group(*state_stores).end(lane, wave, bh_blk).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
-
-@functools.cache
-def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None,
-                                end_pos:UOp|None=None) -> UOp:
-  # end_pos: the state is (S, B, H, V, K), the state at a position p is p%S: read at start_pos, written at end_pos
-  batch, heads, tokens, value_dim, row_tile = *core.shape, 4
-  key_dim, alpha_dim = q.shape[-1], alpha.shape[-1] if len(alpha.shape) == 4 else 1
-  assert all(isinstance(x, int) for x in (batch, heads, tokens, value_dim, key_dim)) and key_dim % 32 == 0 and value_dim % row_tile == 0
-  batch, heads, tokens, value_dim, key_dim = cast(tuple[int, int, int, int, int], (batch, heads, tokens, value_dim, key_dim))
-  core, v = (x.reshape(batch*heads, tokens, value_dim) for x in (core, v))
-  q, k = (x.reshape(batch*heads, tokens, key_dim) for x in (q, k))
-  beta, kq = (x.reshape(batch*heads, tokens) for x in (beta, kq))
-  alpha = alpha.reshape(batch*heads, tokens, alpha_dim)
-  # the rows of the state read and written: offsets in the (2*B*H, V, K) state with parities
-  S = cast(int, state.shape[0]) if end_pos is not None else 1
-  read_off, write_off = (0, 0) if end_pos is None else ((cast(UOp, start_pos) % S) * (batch*heads), (end_pos % S) * (batch*heads))
-  state = state.reshape(-1, value_dim, key_dim)
-  bh_row, lane = UOp.range(batch*heads*value_dim//row_tile, 0), UOp.range(32, 1, axis_type=AxisType.LOCAL)
-  bh, row_base = bh_row // (value_dim//row_tile), (bh_row % (value_dim//row_tile))*row_tile
-  rows, cols = tuple(row_base+i for i in range(row_tile)), tuple(lane + i*32 for i in range(key_dim//32))
-  current = UOp.alloc((row_tile*key_dim//32,), dtypes.float32, addrspace=AddrSpace.REG)
-  initial = None if start_pos is None else start_pos.eq(0)
-  current = current.after(current.store(UOp.stack(*(state[read_off+bh, row, col].float() if initial is None else
-    initial.where(0, state[read_off+bh, row, col].float()) for row in rows for col in cols))))
-  token = UOp.range(tokens, 2, AxisType.LOOP)
-  keys = tuple(k[bh, token, col].load() for col in cols)
-  queries = tuple(q[bh, token, col].load() for col in cols)
-  updates, stores = [], []
-  for row_idx,row in enumerate(rows):
-    previous = tuple(current.after(token)[row_idx*key_dim//32+i].load() for i in range(key_dim//32))
-    decayed, bv = tuple(x * alpha[bh, token, col if alpha_dim > 1 else 0].load() for x,col in zip(previous, cols)), beta[bh, token].load()
-    state_k = warp_reduce(sum((x*y for x,y in zip(decayed, keys)), UOp.const(0, dtypes.float32)), full_wave=True)
-    state_q = warp_reduce(sum((x*y for x,y in zip(decayed, queries)), UOp.const(0, dtypes.float32)), full_wave=True)
-    delta = (v[bh, token, row].load() - state_k) * bv
-    updates += [x + delta*y for x,y in zip(decayed, keys)]
-    stores.append(core[bh, token, row.valid(lane.eq(0))].store(state_q + delta*kq[bh, token]))
-  step = UOp.group(*stores, current.store(UOp.stack(*updates))).end(token)
-  state_stores = (state[write_off+bh, row, col].store(current.after(step)[row_idx*key_dim//32+i].load().cast(state.dtype))
-                  for row_idx,row in enumerate(rows) for i,col in enumerate(cols))
-  return UOp.group(*state_stores).end(lane, bh_row).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
 
 @functools.cache
 def _indexer_scores_kernel(out:UOp, q:UOp, k:UOp, w:UOp, *dev:UOp, pools:UOp, NP:int=4, shard:int=0, kpool:int=0,
@@ -5979,9 +5428,6 @@ def _pool_merge_split(cand:Tensor, out:Tensor, devs:tuple[str, ...], rows:int, c
   lists = all_gather(Tensor(UOp.mstack(*[merged(i) for i in range(n)]).unshard(0)), 0)
   return Tensor.custom_kernel(out, lists, fxn=functools.partial(_rows_into_kernel, row0=row0, rows=rows))[0]
 
-def _reg_u32() -> UOp:
-  ret = UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG)
-  return ret.after(ret.store(ret.const_like(0)))
 
 def pool_index_rows(scores:Tensor, q_start:UOp, pools:int|UOp, top:int, kpool:int, row0:int=0, out:Tensor|None=None) -> Tensor:
   """
@@ -6063,232 +5509,9 @@ def rows_gather(table:Tensor, idx:Tensor, dtype:DType|None=None) -> Tensor:
   out = Tensor.empty(int(idx.shape[0]), int(table.shape[1]), dtype=dtype or table.dtype, device=table.device)
   return Tensor.custom_kernel(out, table, idx, fxn=_rows_gather_kernel)[0]
 
-KDA_WAVES = 8
 
-@functools.cache
-def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp, pv:UOp, wq:UOp, wk:UOp, wv:UOp, gate:UOp, alpha:UOp, beta:UOp,
-                       dt:UOp, a:UOp, norm:UOp, start_pos:UOp, lb:float|None, eps:float, R:int=0, row0:int=0, G:int=1,
-                       positions:UOp|None=None, S:int=0, SC:int=0) -> UOp:
-  # row0: the tokens are rows row0.. of the inputs (a row of batched decoding: the inputs of all of them, not a copy of its own)
-  # G: groups (batched decoding: a sequence each, its tokens the rows g*T.., its states the S of g*S.. in the states, its start position the
-  # g-th of positions)
-  # R: the rows of a head split over R workgroups (each makes the convolutions, norms and decays of the head), z the outputs before their norm
-  # (float, kda_out normalizes them): more workgroups, fewer rows in a row
-  # a few tokens (T) of a kda layer, a workgroup per head: the short convolutions of q, k and v (shifting their states), the l2 norms of q and
-  # k, the decay and the delta rule update of the head's state token by token, the rms norm of the outputs and their sigmoid gates.
-  # the states (S, ...) at a position p are p%S: read at start_pos, the ones after every token written (the others keep the states before)
-  # (S: the states of a group, the state buffer can hold more groups than the call's)
-  # (SC: the conv states' S, default S. a recurrent state of S == T: a thread reads its rows of the one of start_pos before it writes them, the
-  # conv states (read by every workgroup of a head, written by the first) need SC > T)
-  S, T, N = S or cast(int, state.shape[0]), cast(int, z.shape[-2]) // G, cast(int, pq.shape[-2])
-  SC = SC or S
-  heads, V, K = cast(tuple[int, int, int], state.shape[-3:])
-  # more tokens: more waves, a wave runs fewer rows through the tokens
-  W, conv = KDA_WAVES * (1 if T == 1 else (2)), cast(int, wq.shape[-1])
-  if R: W = (8)
-  assert K == V and W*32 >= K and V % W == 0 and conv == 4, "a thread per channel of q, k and v"
-  assert T <= S and T < SC, "the states of the T tokens and the one before"
-  state, z = state.reshape(-1, V, K), z.reshape(G*T, heads*V)
-  cq, ck, cv = (x.reshape(-1, heads*K) for x in (cq, ck, cv))
-  pq, pk, pv, gate, alpha = (x.reshape(N, heads*K) for x in (pq, pk, pv, gate, alpha))
-  beta = beta.reshape(N, heads)
-  ghr, wave, lane = UOp.range(G*heads*max(R, 1), 0, AxisType.GLOBAL), UOp.range(W, 1, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
-  grp, hr = (ghr // (heads*max(R, 1)), ghr % (heads*max(R, 1))) if G > 1 else (UOp.const(0, dtypes.weakint), ghr)
-  if positions is not None: start_pos = positions[grp].load().cast(dtypes.weakint)
-  rp, wps = start_pos % S, [(start_pos + t + 1) % S for t in range(T)]
-  rpc, wpcs, cbase = start_pos % SC, [(start_pos + t + 1) % SC for t in range(T)], grp*SC
-  sbase, prow = grp*S, [grp*T + row0 + t for t in range(T)]  # (the group's states and the rows of its tokens)
-  qrows, krows, vrows, gate_rows, alpha_rows, beta_rows = ([x[r] for r in prow] for x in (pq, pk, pv, gate, alpha, beta))
-  hr = ghr if G == 1 else hr
-  h, chunk = (hr // R, hr % R) if R else (hr, UOp.const(0, dtypes.weakint))
-  tid, initial = wave * WARP_SIZE + lane, start_pos.eq(0)
-  def silu(x:UOp) -> UOp: return x / ((-x * LOG2E).exp2() + 1)
-  def sigmoid(x:UOp) -> UOp: return ((-x * LOG2E).exp2() + 1).reciprocal()
-  # the convolutions of every token: thread tid < K is channel tid of q, k and v. the state of a channel is its last conv-1 inputs
-  lds = UOp.alloc((T, 3, K), dtypes.float, addrspace=AddrSpace.LOCAL)
-  ch, active = h * K + tid % K, tid < K
-  stores = []
-  for i, (cs, p, w) in enumerate(((cq, qrows, wq), (ck, krows, wk), (cv, vrows, wv))):
-    inputs = [initial.where(0, cs[(cbase+rpc)*(conv-1) + j, ch].load().float()) for j in range(conv-1)] + [p[t][ch].load().float() for t in range(T)]
-    weights = [w[ch, j].load().float() for j in range(conv)]
-    for t in range(T):
-      window = inputs[t:t+conv]
-      out = silu(sum((weights[j] * window[j] for j in range(1, conv)), weights[0] * window[0]))
-      stores += [lds[t, i, tid.valid(active)].store(out)] + [cs[(cbase+wpcs[t])*(conv-1) + j, ch.valid(active & chunk.eq(0))].store(
-                   window[j+1].cast(cs.dtype)) for j in range(conv-1)]
-  lds = lds.after(UOp.group(*stores).barrier())
-  # every wave: q and k of the head (key column lane + 32*i), l2 normalized, the decay of every column
-  cols = [lane + 32*i for i in range(K // 32)]
-  def l2(x:list[UOp]) -> list[UOp]:
-    r = (warp_reduce(functools.reduce(lambda s,y: s + y*y, x[1:], x[0]*x[0]), full_wave=True) + 1e-6).sqrt().reciprocal()
-    return [y * r for y in x]
-  def dot(x:list[UOp], y:list[UOp]) -> UOp: return warp_reduce(functools.reduce(lambda s,ab: s + ab[0]*ab[1], zip(x[1:], y[1:]), x[0]*y[0]),
-                                                               full_wave=True)
-  qs = [[y * K**-0.5 for y in l2([lds[t, 0, c].load() for c in cols])] for t in range(T)]
-  ks = [l2([lds[t, 1, c].load() for c in cols]) for t in range(T)]
-  kq = [dot(ks[t], qs[t]) for t in range(T)]
-  b = [sigmoid(beta_rows[t][h].load().float()) for t in range(T)]
-  A = a.reshape(heads)[h].load().float()
-  def decay(t:int, c:UOp) -> UOp:
-    g = alpha_rows[t][h*K + c].load().float() + dt.reshape(heads*K)[h*K + c].load().float()
-    if lb is None: return ((g.maximum(0) + ((-g.abs() * LOG2E).exp2() + 1).log2() * (1/LOG2E)) * A * LOG2E).exp2()
-    return (sigmoid(g * -A) * lb * LOG2E).exp2()
-  decays = [[decay(t, c) for c in cols] for t in range(T)]
-  # the delta rule on the rows of this wave, token by token
-  rows_per_wave = V // (W * max(R, 1))
-  lds_o = UOp.alloc((T, V), dtypes.float, addrspace=AddrSpace.LOCAL)
-  ostores, sstores = [], []
-  for j in range(rows_per_wave):
-    r = (chunk * W + wave) * rows_per_wave + j
-    row = [initial.where(0, state[(sbase+rp)*heads + h, r, c].load().float()) for c in cols]
-    for t in range(T):
-      decayed = [x * d for x, d in zip(row, decays[t])]
-      sk, sq = dot(decayed, ks[t]), dot(decayed, qs[t])
-      delta = (lds[t, 2, r].load() - sk) * b[t]
-      row = [x + delta * kk for x, kk in zip(decayed, ks[t])]
-      sstores += [state[(sbase+wps[t])*heads + h, r, c].store(x.cast(state.dtype)) for c, x in zip(cols, row)]
-      ostores.append((z[grp*T + t, (h*V + r).valid(lane.eq(0))] if R else lds_o[t, r.valid(lane.eq(0))]).store(sq + delta * kq[t]))
-  if R: return UOp.group(*ostores, *sstores).end(ghr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
-  lds_o = lds_o.after(UOp.group(*ostores).barrier())
-  # rms norm of the head's outputs, gated
-  zs = []
-  for t in range(T):
-    o = [lds_o[t, c].load() for c in cols]
-    rinv = (warp_reduce(functools.reduce(lambda s,y: s + y*y, o[1:], o[0]*o[0]), full_wave=True) * (1/V) + eps).sqrt().reciprocal()
-    r = tid % V
-    out = lds_o[t, r].load() * rinv * norm[r].load().float() * sigmoid(gate_rows[t][h*V + r].load().float())
-    zs.append(z[grp*T + t, (h*V + r).valid(tid < V)].store(out.cast(z.dtype)))
-  return UOp.group(*zs, *sstores).end(ghr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
 
-@functools.cache
-def _kda_out_kernel(z:UOp, q:UOp, scale:UOp, xsum:UOp, o:UOp, norm:UOp, gate:UOp, eps:float, heads:int) -> UOp:
-  # the rms norm of a head's outputs (as _kda_decode_kernel: a lane its columns lane+32i) gated, in half, and its quantization as
-  # _q8_quantize_kernel's: a wave a group of 32
-  T, HV = cast(tuple[int, int], z.shape)
-  V = HV // heads
-  G = V // 32
-  tg, lane = UOp.range(T*heads*G, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
-  t, h, g = tg // (heads*G), tg // G % heads, tg % G
-  def sigmoid(x:UOp) -> UOp: return ((-x * LOG2E).exp2() + 1).reciprocal()
-  ov = [o[t, h*V + lane + 32*i].load() for i in range(V // 32)]
-  rinv = (warp_reduce(functools.reduce(lambda s,y: s + y*y, ov[1:], ov[0]*ov[0]), full_wave=True) * (1/V) + eps).sqrt().reciprocal()
-  r = g*32 + lane
-  out = (o[t, h*V + r].load() * rinv * norm[r].load().float() * sigmoid(gate[t, h*V + r].load().float())).cast(z.dtype)
-  stores = [z[t, h*V + r].store(out)] + _q8_narrow_stores(out.float(), q, scale, xsum, None, t, h*G + g, lane)
-  return UOp.group(*stores).end(tg, lane).sink(arg=KernelInfo(name="kda_out", opts_to_apply=()))
 
-def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_weights:list[Tensor], gate:Tensor, alpha:Tensor, beta:Tensor,
-               dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float, row:int|None=None, rows:int=1,
-               positions:Tensor|None=None, groups:int=1, S:int=0, SC:int=0, calls_out:list[UOp]|None=None) -> Tensor:
-  """
-  a few tokens (B=1, T) of a kda layer: returns the gated, normed outputs (1, T, heads*V) in half. the states (S, B, ...) at a position p
-  are p%S: the ones of start_pos are read, the ones after every token written (T < S). calls_out: the kernel appended (a later write of
-  the states waits for it)
-  """
-  _, B, heads, V, K = state.shape
-  # row: `rows` tokens, rows row.. of the inputs (batched decoding: the inputs of every sequence's rows)
-  T = projs[0].shape[1] if row is None else rows
-  assert B == 1, "a sequence"  # (start_pos: a bound variable, or an expression of some)
-  # groups (batched decoding): a sequence each, its states the S of g*S.. of the states (of every slot), its start the g-th of positions
-  G = groups
-  axis = None if state.uop.axis is None else 2
-  # (R: the rows of a head over R workgroups, the outputs normed and quantized by kda_out)
-  R = r if (r:=(4)) and V % (r * (8)) == 0 and V % 32 == 0 else 0
-  z = Tensor.empty(1, G*T, heads*V, dtype=dtypes.float if R else dtypes.half, device=state.device, axis=axis)
-  # the states are written in place
-  inplace = tuple(Tensor(s.uop.after(start_pos.uop)) for s in (state, *conv_states))
-  srcs = (z, *inplace, *projs, *conv_weights, gate, alpha, beta, dt, a, norm) + ((positions,) if positions is not None else ())
-  contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
-  params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  pos_param = params[-1] if positions is not None else None
-  call = _kda_decode_kernel(*(params[:-1] if positions is not None else params), cast(UOp, _unbind(start_pos.uop)), lb, eps, R, row or 0, G,
-                            pos_param, S, SC).call(*contig)
-  out = Tensor(contig[0].after(call))
-  if calls_out is not None: calls_out.append(call)
-  if not R: return out
-  # the norm, the gate and the quantization of the outputs (the output projection's input)
-  n = int(heads*V)  # (heads of every device)
-  local = n // len(cast(tuple, state.device)) if axis is not None else n
-  T = int(G*T)
-  zh = Tensor.empty(1, T, n, dtype=dtypes.half, device=state.device, axis=axis)
-  # (as _q8_quantize's of an input split on its features: every device its groups, a tensor of their shape)
-  q = Tensor.empty(T, local // 32, 8, dtype=dtypes.uint32, device=state.device)
-  scale = Tensor.empty(T, local // 32, dtype=dtypes.float32, device=state.device)
-  xsum = Tensor.empty(T, local // 32, 2, dtype=dtypes.float32, device=state.device)
-  if row is not None: gate = gate.shrink((None, (row, row+T), None))
-  outs = Tensor.custom_kernel(zh.reshape(T, n), q, scale, xsum, out.reshape(T, n), norm.contiguous(), gate.reshape(T, n).contiguous(),
-                              fxn=functools.partial(_kda_out_kernel, eps=eps, heads=local // V))
-  zh = outs[0].reshape(1, T, n)
-  q8_quantize_known(zh, T, local, False, (outs[1], outs[2], outs[3]))
-  return zh
 
-@functools.cache
-def _kda_conv_kernel(q:UOp, k:UOp, v:UOp, kq:UOp, sq:UOp, sk:UOp, sv:UOp, pq:UOp, pk:UOp, pv:UOp, cq:UOp, ck:UOp, cv:UOp, taps:int,
-                     qscale:float) -> UOp:
-  """
-  the short convolutions of q, k and v (their windows: the conv states s (taps-1, H*K) then the projections p (T, H*K), weights (H*K, taps))
-  and their silu, q and k l2 normed (q scaled by qscale): (H, T, K) floats, and kq (H, T) the dot of q and k. a wave per head and token, a
-  lane 4 channels
-  """
-  H, T, K = cast(tuple[int, int, int], q.shape)
-  per = K // WARP_SIZE
-  t, h, lane = UOp.range(T, 0, AxisType.GLOBAL), UOp.range(H, 1, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
-  def conv(st:UOp, pr:UOp, cw:UOp, j:int) -> UOp:
-    c = h * K + lane * per + j
-    def win(r:UOp) -> UOp:  # the window's row r: the state's, then the projection's
-      return (r < taps - 1).where(st[r.valid(r < taps - 1), c].load().float(), pr[(r - (taps - 1)).valid(r >= taps - 1), c].load().float())
-    x = functools.reduce(lambda a, b: a + b, [win(t + i) * cw[c, i].load().float() for i in range(taps)])
-    return x * (1 + (x * -LOG2E).exp2()).reciprocal()
-  qs, ks, vs = ([conv(st, pr, cw, j) for j in range(per)] for st, pr, cw in ((sq, pq, cq), (sk, pk, ck), (sv, pv, cv)))
-  def total(xs:list[UOp]) -> UOp: return warp_reduce(functools.reduce(lambda a, b: a + b, xs), full_wave=True)
-  qn, kn = (total([x * x for x in qs]) + 1e-6).rsqrt() * qscale, (total([x * x for x in ks]) + 1e-6).rsqrt()
-  qs, ks = [x * qn for x in qs], [x * kn for x in ks]
-  dot = total([a * b for a, b in zip(qs, ks)])
-  stores = [o[h, t, lane * per + j].store(xs[j]) for o, xs in ((q, qs), (k, ks), (v, vs)) for j in range(per)]
-  stores.append(kq[h, t.valid(lane.eq(0))].store(dot))
-  return UOp.group(*stores).end(t, h, lane).sink(arg=KernelInfo(name="kda_conv", opts_to_apply=()))
 
-def kda_conv(states:list[Tensor], projs:list[Tensor], weights:list[Tensor], dim:int, qscale:float) -> tuple[Tensor, ...]:
-  """
-  the short convolutions of q, k and v (_kda_conv_kernel): their conv states (1, taps-1, heads*dim), projections (1, T, heads*dim) and weights,
-  the heads split over the devices: q, k, v (1, heads, T, dim), kq (1, heads, T)
-  """
-  T, taps = int(projs[0].shape[1]), int(weights[0].shape[-1])
-  devs = projs[0].device
-  n, axis = (len(devs), 0) if isinstance(devs, tuple) else (1, None)
-  heads = int(projs[0].uop.shard_shape[-1] if axis is not None else projs[0].shape[-1]) // dim
-  outs = [Tensor.empty(heads * n, T, dim, dtype=dtypes.float32, device=devs, axis=axis) for _ in range(3)]
-  kq = Tensor.empty(heads * n, T, dtype=dtypes.float32, device=devs, axis=axis)
-  res = Tensor.custom_kernel(*outs, kq, *[x.reshape(x.shape[1], x.shape[2]).contiguous() for x in states + projs],
-                             *[c.contiguous() for c in weights], fxn=functools.partial(_kda_conv_kernel, taps=taps, qscale=qscale))
-  return tuple(x.unsqueeze(0) for x in res[:4])
 
-def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor, start_pos:Tensor|None=None,
-                        end_pos:UOp|None=None, kq:Tensor|None=None) -> Tensor:
-  """
-  the scan of the (B, H, T, ...) tokens updating the recurrent state in place. end_pos: the state is (2, B, H, V, K), the state at position p
-  is p%2: the scan reads the state of start_pos and writes the one of end_pos (the other one keeps the state before)
-  """
-  batch, heads, tokens, key_dim = q.shape
-  value_dim = v.shape[-1]
-  assert q.shape == k.shape and v.shape[:3] == beta.shape == (batch, heads, tokens)
-  assert state.shape[1 if end_pos is not None else 0:] == (batch, heads, value_dim, key_dim)
-  assert alpha.shape[:3] == (batch, heads, tokens) and (len(alpha.shape) == 3 or alpha.shape[-1] in (1, key_dim))
-  assert key_dim % 32 == 0 and value_dim % 4 == 0
-  assert q.dtype == k.dtype == dtypes.float32, "recurrent Q/K must be float32"
-  assert state.uop.contiguous_view_offset() is not None, "recurrent state must be contiguous"
-  if start_pos is not None:
-    # start_pos: a bound variable or an expression of them
-    state = Tensor(state.uop.after(start_pos.uop, *([end_pos] if isinstance(end_pos, UOp) else [])))
-  core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous() if kq is None else kq
-  srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
-  contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
-  params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  end = None if end_pos is None else end_pos.unbind_all()[0] if isinstance(end_pos, UOp) else UOp.const(end_pos, dtypes.weakint)
-  sp = None if start_pos is None else start_pos.uop.unbind_all()[0]
-  # many tokens: the waves of a head share the operands of 16 of them through LDS
-  W = (4)
-  if W and tokens % 16 == 0 and value_dim % (32*W) == 0 and key_dim % 32 == 0:
-    call = _gated_delta_prefill_lds_kernel(*params, sp, end, W=W).call(*contig)
-  else: call = _gated_delta_prefill_kernel(*params, sp, end).call(*contig)
-  return Tensor(contig[0].after(call))
