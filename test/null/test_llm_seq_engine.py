@@ -249,6 +249,70 @@ class TestSeqRegions(unittest.TestCase):
         for t in eng.seqs: self.assertEqual(model.cache[t.base:t.base+t.n], t.tokens[:t.n])
     self.assertGreater(len([c for c in model.calls if c[0] == "move"]), 0)
 
+class ChunkModel(CacheModel):
+  """a CacheModel whose moves and stash copies are of whole SEQ_MOVE chunks from a region's base, as Transformer.seq_move / seq_stash (qwen4exp:
+  static chunk sizes), and whose stash is host rows: a copy that overruns its region writes over the neighbours' rows"""
+  SEQ_MOVE = 512
+  def __init__(self, align:int):
+    super().__init__()
+    self.SEQ_BASE_ALIGN, self.stash_chunks, self.stash_entries, self.host = align, 128, 64, {}
+  def seq_slots(self) -> int: return 16
+  def seq_move(self, src, dst, n):
+    m = -(-n // self.SEQ_MOVE) * self.SEQ_MOVE
+    self.cache[dst:dst+m] = self.cache[src:src+m]
+    self.calls.append(("move", src, dst, n))
+  def seq_stash(self, save, slot, pos, segments, entry, n, hrow=0, ckpt_par=None):
+    C = self.SEQ_MOVE
+    for i, c, k in segments:
+      for j in range(k):
+        if save: self.host[c+j] = self.cache[pos+(i+j)*C:pos+(i+j+1)*C]
+        else: self.cache[pos+(i+j)*C:pos+(i+j+1)*C] = self.host[c+j]
+    super().seq_stash(save, slot, pos, segments, entry, n, hrow, ckpt_par)
+
+class TestSeqChunkCopies(unittest.TestCase):
+  def test_restore_keeps_the_neighbours_rows(self):
+    # (Nov 16, g2 / g4: a returning turn continued on ANOTHER conversation's rows) bases packed tighter than the chunks (SEQ_BASE_ALIGN 24 with
+    # SEQ_MOVE 3,072): many short conversations, more than the slots, then each one's next turn: the rows before every prefill are its own
+    import random
+    rng = random.Random(0)
+    for align in (24, 512):
+      model = ChunkModel(align)
+      eng = SeqEngine(model)
+      pre = [rng.randrange(1000) for _ in range(300)]
+      convs = [pre + [100000 + i] + [rng.randrange(1000) for _ in range(40)] for i in range(40)]
+      with patch.object(SeqEngine, "STICKY", 0.0), patch.object(SeqEngine, "PROTECT", 0.0):
+        for turn in range(2):
+          for i, ids in enumerate(convs):
+            s, start, restore = eng.take(ids, room=64, force=True)
+            self.assertEqual(model.cache[s.base:s.base+start], ids[:start], f"align {align} turn {turn} conversation {i}: another one's rows")
+            eng.prefill(s, ids, start, restore, (0.0, 1.0))
+            eng.stop(s, len(s.tokens))
+            convs[i] = ids + [7, 50 + turn]
+            for t in eng.seqs: self.assertEqual(model.cache[t.base:t.base+t.n], t.tokens[:t.n], f"align {align}: a resident one's rows overwritten")
+      self.assertGreater(len([c for c in model.calls if c[0] == "stash" and not c[1]]), 0)  # (restores happened)
+
+  def test_moves_keep_the_neighbours_rows(self):
+    # (the same with moves only, no stash: an idle region shrunk at its stop (ROOM past its tokens) moved by a whole-chunk copy wrote over the
+    # first rows of the region after its new place) growing conversations, new ones, regions moved and compacted: every resident one's rows
+    import random
+    for align in (24, 3072):
+      rng, model = random.Random(19), ChunkModel(align)
+      # (chunks longer than the room an idle region keeps (ROOM 2,048), as qwen4exp's 3,072: a moved idle region's last chunk passes its cap)
+      model.SEQ_MOVE, model.stash_chunks, model.stash_entries = 3072, 0, 0
+      eng, convs = SeqEngine(model), []
+      with patch.object(SeqEngine, "STICKY", 0.0):
+        for it in range(400):
+          if convs and rng.random() < 0.7: ids = convs.pop(rng.randrange(len(convs))) + [rng.randrange(1000) for _ in range(rng.randrange(1, 900))]
+          else: ids = [it * 100000 + i for i in range(rng.randrange(100, 3000))]
+          if len(ids) > 12000 or (got:=eng.take(ids, rng.choice([0, 64, 3000]))) is None: continue
+          s, start, restore = got
+          self.assertEqual(model.cache[s.base:s.base+start], ids[:start], f"align {align}: another one's rows")
+          eng.prefill(s, ids, start, restore, (0.0, 1.0))
+          eng.stop(s, len(s.tokens))
+          convs.append(ids)
+          for t in eng.seqs: self.assertEqual(model.cache[t.base:t.base+t.n], t.tokens[:t.n], f"align {align}: a resident one's rows overwritten")
+      self.assertGreater(len([c for c in model.calls if c[0] == "move"]), 0)
+
 class TestSeqMaxLen(unittest.TestCase):
   def test_no_room_past_context(self):
     # the caches' rows can be more than the model's context: a sequence's positions aren't (its reply ends at the context)

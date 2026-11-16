@@ -1,5 +1,5 @@
 from __future__ import annotations
-import time
+import math, time
 from dataclasses import dataclass, field
 from typing import cast
 from tinygrad.helpers import round_up, getenv
@@ -291,8 +291,10 @@ class SeqEngine:
     s.base, s.cap = self._packed(a, b), need
 
   def _need(self, length:int) -> int:
-    # (a step writes 2*(k+1) positions past the last token at most, a pool past that)
-    return round_up(length + 2*(self.k + 1) + 8, self.align)
+    # (a step writes 2*(k+1) positions past the last token at most, a pool past that. whole move / stash chunks (SEQ_MOVE rows): a move into
+    # a region and a stash restore write whole chunks from its base, so a region holds them even where bases are packed tighter (SEQ_BASE_ALIGN
+    # 24 with chunks of 3,072: a short conversation's restore wrote over its neighbours' rows, Nov 16)
+    return round_up(length + 2*(self.k + 1) + 8, math.lcm(self.align, getattr(self.model, "SEQ_MOVE", 1)))
   def _time(self, name:str, st:float): self.times[name] = self.times.get(name, 0.0) + time.perf_counter() - st
   def _move(self, s:Seq, base:int):
     st = time.perf_counter()
