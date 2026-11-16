@@ -21,10 +21,12 @@ class ExportCtx:
   externs: dict[UOp, UOp] = field(default_factory=dict)
   allocs: dict[UOp, UOp] = field(default_factory=dict)
 
+def as_extern(x:UOp, slot:int) -> UOp: return x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=slot, buffer=None, name=None, val=None))
+
 def to_extern(ctx:ExportCtx, x:UOp) -> UOp|None:
   # realized storage and bound Variables are runtime state
   if not (x.is_bound_var or (x.op is Ops.BUFFER and x.addrspace is AddrSpace.GLOBAL)): return None
-  return ctx.externs.setdefault(x, x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=len(ctx.externs), buffer=None, name=None, val=None)))
+  return ctx.externs.setdefault(x, as_extern(x, len(ctx.externs)))
 
 # ALLOCs get canonical scope-local id slots so structurally identical calls hash identically for the schedule cache
 # (fresh slots are all positive from the global counter; negative slots are already canonical)
@@ -45,8 +47,14 @@ def bind_alloc(b:UOp) -> UOp:
   return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
 
 # EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
+def map_back_extern(ctx:tuple[UOp, ...], e:UOp) -> UOp:
+  if e.arg.slot >= len(ctx) or as_extern(x:=ctx[e.arg.slot], e.arg.slot) is not e:
+    got = f"{x.dtype} {x.shape} on {x.device}" if e.arg.slot < len(ctx) else "nothing"
+    raise RuntimeError(f"extern {e.arg.slot} must match its EXTERN, {e.dtype} {e.shape} on {e.device}, got {got}")
+  return x.unbound() if x.is_variable else x
+
 pm_map_back = PatternMatcher([
-  (UPat(Ops.EXTERN, name="e"), lambda ctx,e: x.unbound() if (x:=ctx[e.arg.slot]).is_variable else x),
+  (UPat(Ops.EXTERN, name="e"), map_back_extern),
   # global ALLOCs are bound to fresh BUFFERs for this invocation
   (UPat(Ops.ALLOC, name="b"), lambda b: bind_alloc(b) if b.addrspace is AddrSpace.GLOBAL else None),
 ])

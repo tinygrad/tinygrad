@@ -14,5 +14,13 @@ class TestExportRun(unittest.TestCase):
     Tensor.run(linear, externs)
     self.assertEqual(out.shrink(((0, 3),)).tolist(), [33., 123., 273.])
 
+  def test_run_checks_externs(self):
+    a, b = Tensor([1., 2.]).realize(), Tensor([1., 2., 3.]).realize()
+    fn, externs = Tensor.export((a + 1).contiguous())
+    _, other = Tensor.export((b + 1).contiguous())
+    linear = create_linear(fn)
+    with self.assertRaisesRegex(RuntimeError, "must match its EXTERN"): Tensor.run(linear, other)
+    with self.assertRaisesRegex(RuntimeError, "got nothing"): Tensor.run(linear, externs[:1])
+
 if __name__ == "__main__":
   unittest.main()
