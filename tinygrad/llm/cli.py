@@ -341,14 +341,11 @@ def main():
       profile_marker(f"decode @ {i-1}" if i else "prefill")
       if i == keep+1 and n_tg > 2*keep: print("...")
       GlobalCounters.reset()
-      if (log:=getenv("BENCHMARK_LOG", "")): from extra.bench_log import WallTimeEvent, BenchEvent
       with Timing(on_exit=lambda x: f", {(max(n_pp, 1) if i == 0 else 1)*1e9/x:8.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
                   f" {GlobalCounters.global_mem//1000000}/{GlobalCounters.mem_used//1000000} MB  --  "+\
                   tok.decode(toks[n_pp if i <= keep or n_tg <= 2*keep else max(n_pp, 1)+n_tg-keep+1:]).replace("\n", "\\n"),
                   prefix=f"prefill {max(n_pp, 1):5d}: " if i == 0 else f"decode {i-1:6d}: ", enabled=i <= keep or i > n_tg-keep):
-        if log:
-          with WallTimeEvent(BenchEvent.STEP): next(gen)
-        else: next(gen)
+        next(gen)
     exit(0)
 
   # interactive chat
