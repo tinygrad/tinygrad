@@ -121,7 +121,7 @@ class TestLLMServiceLaunchers(unittest.TestCase):
   def test_glm_flash_d34_environment_and_power_guard(self):
     cmd = self.command("glm_flash_6x7900xtx.sh")
     for required in (
-      "DEV=AMD", "AM_POWER_LIMIT=225", "BATCH_SLOTS=8", "SEQ_KV4=1", "SEQ_ROWS=3916800",
+      "DEV=AMD", "AM_POWER_LIMIT=225", "SEQ_KV4=1", "SEQ_ROWS=3916800",
       "SEQ_SIZES=1\\,2\\,4\\,8\\,12\\,13\\,18", "SEQ_STASH_GB=12", "SEQ_STASH_ENTRIES=64", "SEQ_IDX_SHARD=1",
       "PREFILL_CHUNK=768", "PREFILL_SIZES=192\\,768", "PREFILL_SLICE=1536",
       "SEQ_STARVE_ALT=1", "--shard 6", "--max_context 524288",
@@ -183,6 +183,7 @@ class TestLLMServiceLaunchers(unittest.TestCase):
       "QSA_KV_SPLIT", "RING_MAXW_DEC", "RING_SEL", "VISION_KERNELS", "FLAG_AR_MAXN", "IQ2S_K256",
       "MLA_SEQ_SHARD", "RING_MAXW", "RING_RS_LIKE_COPIES", "SEQ_WARMUP_ONLY", "WARMUP_PARALLEL",
       "GLM_ATTN_GRP", "GLM_SEQ", "HOST_MIN", "SLOT_CKPT", "SLOT_HOST", "SEQ_CKPT_HOST",
+      "BATCH_SLOTS", "PARALLEL", "KPROF", "KPROF_TOP",
     )
     files = [SCRIPTS / name for name in ("qwen_6x7900xtx.sh", "glm_flash_6x7900xtx.sh", "glm_14xr9700.sh")]
     files += [ROOT / "test/null" / f"production_{name}_warmup.sh" for name in ("c2", "c5", "c9")]
