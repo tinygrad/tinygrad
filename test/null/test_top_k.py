@@ -54,8 +54,8 @@ class TestTopK(unittest.TestCase):
     p /= p.sum()
     want = np.zeros(V, bool)
     want[np.argsort(-p)[:int((np.cumsum(np.sort(p)[::-1]) < 0.95).sum()) + 1]] = True
-    # (Qwen's copy; GLM Flash's and GLM 5.3's copies are measured on their servers first (CTO 17:1x): not changed without a fault shown)
-    for mod in (amd_qwen,):
+    # (amd_glm_dsa's copy (GLM 5.3) is not reached through a top_k mask: that engine samples without top_k)
+    for mod in (amd_qwen, amd_glm):
       with mock.patch.object(mod, "host_allgather", lambda x: x.to("CPU").to(devs)):
         # (G 512: the generic sums; the production G 16 sums run in an AMD kernel, after the same mass)
         nuc = mod.nucleus(Tensor(zk, device="CPU").shard(devs, axis=1), V, Tensor([[0.95]], device="CPU").to(devs), G=512).to("CPU").numpy()
