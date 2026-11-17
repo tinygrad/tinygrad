@@ -134,6 +134,9 @@ if "b" in args.only:
   # that keeps the top token only is right there, and the head has nothing to compare)
   top = plain.most_common(1)[0][1] / n0 if n0 else 0.0
   peaked = not power and n0 > 0 and top - 3 * math.sqrt(top * (1 - top) / n0) >= 0.95
+  # (NEAR: a one-token head whose share is not below 0.95 by 3 SE either (ts5's 'The' 0.959 of 2,400): the true nucleus of 0.95 may be that
+  # token alone, so the head has nothing to compare either way: the cut test decides; a share below 0.95 by 3 SE stays NO POWER)
+  near = not power and not peaked and len(head) == 1 and top + 3 * math.sqrt(top * (1 - top) / n0) >= 0.95
   verdict = []
   for name in ("P95", "default"):
     arm = arms[name]
@@ -158,8 +161,10 @@ if "b" in args.only:
       "(the reply is sampled with temperature / top_p / top_k only: RUNNING.md)")
   if peaked: say(f"B head PEAKED (top token {top:.3f} of plain, over 0.95 by 3 SE: the nucleus is that token alone): "
                  "no chi-square, the cut test decides")
+  elif near: say(f"B head ONE TOKEN NEAR 0.95 (top token {top:.3f} of plain, within 3 SE of 0.95: the nucleus may be that token alone): "
+                 "no chi-square, the cut test decides")
   elif not power: say("B has NO POWER: the plain arm's head is one token or too few draws: use a --draw-prompt with a spread")
-  if ((not power and not peaked) or (power and any(p < 0.001 for _, _, _, p, _ in verdict)) or pcut >= 0.001 or code != 200 or pcode != 200
+  if ((not (power or peaked or near)) or (power and any(p < 0.001 for _, _, _, p, _ in verdict)) or pcut >= 0.001 or code != 200 or pcode != 200
       or min(sum(a.values()) for a in arms.values()) < args.draws * 0.9): fails.append("b")
 
 if "c" in args.only:
