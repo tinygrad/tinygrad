@@ -473,7 +473,7 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
 
 def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp|None:
   if getattr(type(ctx), "asm") is Renderer.asm: return None
-  src = "\n".join(str(u.arg[0]) for u in lin.src)
+  src = lin.render_uir()
   if DEBUG >= 4: print(src)
   binary = ctx.asm(prg, lin)
   return prg.replace(src=prg.src[:2]+(UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
@@ -490,7 +490,7 @@ def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
 
 pm_to_program = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"),), name="prg"), do_linearize),
-  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR, src=UPat(Ops.INS), name="lin")), name="prg"), do_assemble),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR, src=UPat(Ops.ASM).call(allow_any_len=True), name="lin")), name="prg"), do_assemble),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR), UPat(Ops.SOURCE, name="source")), name="prg"), do_compile),
 ])

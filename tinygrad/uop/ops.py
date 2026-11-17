@@ -15,6 +15,7 @@ if TYPE_CHECKING:
   from tinygrad.renderer import Estimates
   from tinygrad.runtime.support.hcq2 import HCQInfo
   from tinygrad.renderer.x86 import Register
+  from tinygrad.renderer.amd.dsl import Reg
 
 class AxisType(Enum):
   def __repr__(self): return str(self)
@@ -42,7 +43,7 @@ class ParamArg:
   # the memory the linker gives an ALLOC
   spec: BufferSpec|None = None
   # optional register constraints on this allocation, for assembly backends
-  reg: Register|None = None
+  reg: Register|Reg|None = None
   def __repr__(self):
     fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
               ("volatile", False), ("image", None), ("bind_on_realize", False), ("val", None), ("spec", None), ("reg", None))
@@ -123,7 +124,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
          Ops.BACKEDGE | Ops.BARRIER | Ops.IF | Ops.ENDIF | Ops.NOOP | \
-         Ops.REWRITE_ERROR | Ops.PYLITERAL:
+         Ops.REWRITE_ERROR | Ops.PYLITERAL | Ops.ASM:
       # always void
       return dtypes.void
     case Ops.CALL:
@@ -333,7 +334,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.BACKEDGE | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.ASM:
         return None
 
       # INS shape is always scalar, vector width is in the instruction encoding
@@ -597,6 +598,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   @staticmethod
   def ins(op, src:tuple[UOp, ...], dtype:DType) -> UOp: return UOp(Ops.INS, src, (op, dtype))
+  @staticmethod
+  def asm(op) -> UOp: return UOp(Ops.ASM, arg=op)
   def contract(self, *rngs:UOp):
     assert all(x.axis_type == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
@@ -1166,10 +1169,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
-            spec:BufferSpec|None=None, bind_on_realize:bool=False, name:str|None=None):
+            spec:BufferSpec|None=None, bind_on_realize:bool=False, name:str|None=None, reg:Register|Reg|None=None):
     ret = UOp(Ops.ALLOC, src=(shape_to_shape_arg((prod(to_max_shape(shape)),)),)+UOp.device_range_src(device),
               arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype),
-                           addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
+                           addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name, reg=reg))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
   @staticmethod
   def extern(shape:tuple[int, ...], dtype:DType, device, name:str): return UOp.alloc(shape, dtype, 0, device=device, name=name).replace(op=Ops.EXTERN)
@@ -1197,14 +1200,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # TODO: this should replace placeholder
   @staticmethod
   def param(slot:int, dtype:DType, shape:tuple[sint, ...]|sint|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None,
-            name=None, addrspace=AddrSpace.GLOBAL, volatile:bool=False):
+            name=None, addrspace=AddrSpace.GLOBAL, volatile:bool=False, reg:Register|Reg|None=None):
     """create a PARAM: a single sint or 1-d shape gives a flat param of that size, a None shape gives a scalar param.
     src[0] stores the concrete max size (never symbolic): a multi-dim shape is a RESHAPE on top of the flat param,
     a symbolic shape is a max-size param shrunk to the real shape"""
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create param for weak dtype {dtype}")
     shape = (shape,) if isinstance(shape, (int, UOp)) else shape or ()
     ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((prod(to_max_shape(shape)),) if shape else ()),),
-              arg=ParamArg(slot, dtype, vmin_vmax, name, addrspace, device, volatile))
+              arg=ParamArg(slot, dtype, vmin_vmax, name, addrspace, device, volatile, reg=reg))
     return ret.view_as(shape)
   def param_like(self, slot:int, name:str|None=None):
     # Scalar arguments bind by slot; names and values stay at the call site, not in schedule cache keys.
@@ -1357,7 +1360,7 @@ class ProgramInfo:
                        tuple(sorted(dedup(ins))), target)
 
 # the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), bulk stores, and function references
-OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION}
+OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION, Ops.ASM}
 
 # the arg of CUSTOM_FUNCTION: an external function symbol and the dtype of the value it returns
 @dataclass(frozen=True)
