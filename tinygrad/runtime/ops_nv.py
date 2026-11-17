@@ -8,7 +8,8 @@ from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
 from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices, PCIIfaceBase, MAP_FIXED
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_arg_uops, get_call_kernel_args, lower_and_compile, run_linear
-from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device, TinyELF
+from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device
+from tinygrad.renderer import TinyELF
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, PROFILE, ContextVar, VIZ, ProfileEvent, unwrap
 from tinygrad.renderer.ptx import PTXRenderer
@@ -123,7 +124,7 @@ class NVQueue(HWQueue):
     fifo, dev = self.dev.fifos[self.queue], self.devs[0]
     bufs = (("ring", dtypes.uint64, fifo.entries, dev), ("gpput", dtypes.uint32, 1, dev), ("doorbell", dtypes.uint32, 1, dev),
             ("put_value", dtypes.uint64, 1, self.dev.host))
-    ring, gpput, doorbell, put = [UOp.alloc((sz,), dt, device=d, name=to_name(self.dev.device, nm, self.queue)) for nm, dt, sz, d in bufs]
+    ring, gpput, doorbell, put = [UOp.extern((sz,), dt, d, to_name(self.dev.device, nm, self.queue)) for nm, dt, sz, d in bufs]
     return nv_submit(cmdbuf, ring, gpput, doorbell, put, fifo.token)
 
 class NVComputeQueue(NVQueue):
@@ -309,7 +310,7 @@ class NVProgramData:
       start_off += (sz if typ == 0x4 else 0) + 4
 
 def nv_build_program(dev:NVDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[NVProgramData, UOp]:
-  data = NVProgramData(dev, prg.to_elf())
+  data = NVProgramData(dev, TinyELF.from_program(prg))
   buf = make_program(prg, len(data.image), devs[0])
   rows = [(off, ((buf.getaddr(devs) + sym) >> sh).ccast(dt)) for off, sym, dt, sh in data.relocs]
   return data, patch(buf, rows, data.image)
@@ -562,6 +563,7 @@ Compiled.pm_encode += PatternMatcher([
 ])
 
 class NVDevice(Compiled):
+  renderers = [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer]
   ifaces = [NVKIface, PCIIface, MOCKIface]
   sleep_timeout_ms = 200
 
@@ -605,7 +607,7 @@ class NVDevice(Compiled):
     # Set windows addresses to not collide with other allocated buffers.
     self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
-    super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], None, arch=self.arch)
+    super().__init__(device, NVAllocator(self), None, arch=self.arch)
 
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 

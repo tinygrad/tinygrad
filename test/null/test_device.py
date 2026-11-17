@@ -2,7 +2,8 @@
 import unittest, os, subprocess
 from unittest.mock import patch
 from tinygrad import Tensor, dtypes
-from tinygrad.device import Device, Compiler, enumerate_devices_str
+from tinygrad.device import Device, enumerate_devices_str, select_renderer
+from tinygrad.renderer import Compiler
 from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, OSX, DEV, CACHELEVEL
 from tinygrad.runtime.support.c import DLL
 
@@ -125,7 +126,8 @@ class TestDevice(unittest.TestCase):
     except Exception as e: self.skipTest(f"skipping: LLVM not available: {e}")
 
     dev = Device["CPU"]
-    dev.cached_renderer.clear()
+    select_renderer.cache_clear()
+    self.addCleanup(select_renderer.cache_clear)
     with patch("tinygrad.renderer.cstyle.ClangRenderer.__init__", side_effect=RuntimeError("broken")):
       self.assertIsInstance(dev.renderer.compiler, CPULLVMCompiler)
 
@@ -170,6 +172,16 @@ class TestDevVar(unittest.TestCase):
       self.assertEqual(DEV.target("QCOM"), Target("QCOM", "IR3"))
       self.assertEqual(DEV.target("AMD"), Target("AMD", "LLVM"))
       self.assertEqual(DEV.target("CPU"), Target("CPU"))
+
+  def test_select_renderer(self):
+    # a renderer is built from a Target alone, its device isn't opened
+    with Context(ALLOW_DEVICE_USAGE=0):
+      ren = select_renderer(Target("NULL", "WGSL"))
+      self.assertEqual(type(ren).__name__, "WGSLRenderer")
+      self.assertIs(select_renderer(Target("NULL", "WGSL")), ren)
+      self.assertEqual(type(select_renderer(Target("PYTHON"))).__name__, "PythonRenderer")
+      with self.assertRaisesRegex(RuntimeError, "has no renderer"): select_renderer(Target("PYTHON", "LLVM"))
+      with self.assertRaisesRegex(RuntimeError, "DISK has no renderers"): select_renderer(Target("DISK"))
 
   def test_dev_arch_override(self):
     with Context(DEV="NULL::gfx1100"):

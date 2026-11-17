@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, UPat, graph_rewrite, KernelInfo, ProgramInfo
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.device import Device
-from tinygrad.schedule import ExportCtx, pm_export
+from tinygrad.tensor import ExportCtx, pm_export
 from tinygrad.codegen import full_rewrite_to_sink, to_program
 from tinygrad.helpers import Context, ansistrip
 from tinygrad.renderer import Estimates
@@ -111,7 +111,7 @@ class TestSSARender(unittest.TestCase):
     # rdna3 and rdna4 instructions have the same names, a python object is evaluated in its own module
     from tinygrad.runtime.autogen.amd.rdna3 import ins as rdna3
     from tinygrad.runtime.autogen.amd.rdna4 import ins as rdna4
-    for ins in (rdna3, rdna4): assert_roundtrip(self, UOp(Ops.INS, arg=(ins.v_mov_b32_e32(ins.v[1], 1.0), dtypes.void)))
+    for ins in (rdna3, rdna4): assert_roundtrip(self, UOp.asm(ins.v_mov_b32_e32(ins.v[1], 1.0)).call())
 
 class TestParseUIR(unittest.TestCase):
   def test_format(self):

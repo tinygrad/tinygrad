@@ -894,7 +894,7 @@ class TestCfg(unittest.TestCase):
       lidx = UOp.special(1, "lidx0")
       gidx = UOp.special(1, "gidx0")
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
     with save_viz() as viz:
       with Context(DEV=f"NULL::{target}"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
@@ -1271,7 +1271,7 @@ class TestCLI(unittest.TestCase):
 
   @needs_tracked_pm
   def test_nested_calls_schedule_ls(self):
-    from tinygrad.schedule import schedule_cache
+    from tinygrad.codegen import schedule_cache
     @function(precompile=True)
     def inner(x:Tensor): return (x+x).contiguous()
     @function(precompile=True)

@@ -2,7 +2,8 @@ from __future__ import annotations
 import platform, ctypes, struct, json
 from typing import Any
 from tinygrad.helpers import OSX, unwrap, data64_le, cpu_profile
-from tinygrad.device import Compiled, TinyELF, Program, HostAllocator, BufferSpec
+from tinygrad.device import Compiled, Program, HostAllocator, BufferSpec
+from tinygrad.renderer import TinyELF
 from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer, TCCRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
@@ -57,6 +58,7 @@ class CPUProgram(Program['CPUDevice']):
     return float(unwrap(prof.en) - prof.st) * 1e-6 if wait else None
 
 class CPUDevice(Compiled):
+  renderers = [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer, TCCRenderer]
   @property
   def has_copy_queue(self) -> bool: return False
 
@@ -64,7 +66,7 @@ class CPUDevice(Compiled):
     self.remote = None
     if len(parts:=device.split(':')) == 3:
       self.remote = RemotePCIDevice("CPU", f"remote:{device[4:]}:0", RemotePCIDevice.connect(parts[1], int(parts[2])))
-    super().__init__(device, HostAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer, TCCRenderer], CPUProgram,
+    super().__init__(device, HostAllocator(self), CPUProgram,
       arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
     if self.remote is not None: self.peer_group = self.remote.peer_group
 

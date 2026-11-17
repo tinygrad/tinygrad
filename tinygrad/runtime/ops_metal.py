@@ -2,7 +2,8 @@ from __future__ import annotations
 import subprocess, pathlib, struct, ctypes, tempfile, functools, platform, weakref, threading, array, sys
 from tinygrad.helpers import to_mv, round_up, cache_dir, unwrap, prod, dedup, to_tuple
 import tinygrad.runtime.support.objc as objc
-from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, Compiler, CompileError, MMIOInterface
+from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface
+from tinygrad.renderer import Compiler, CompileError, TinyELF
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
@@ -87,7 +88,7 @@ MSGSEND, SELNAME = [metal.dll.bind(ctypes.c_void_p)(f) for f in (metal.dll.objc_
 
 # the slot of a handle of the device
 def mtl_handle(d, name:str) -> UOp:
-  return UOp.alloc((len(HANDLES),), dtypes.uint64, 0, device=to_tuple(d)[0], name="handles")[(i:=HANDLES.index(name)):i+1]
+  return UOp.extern((len(HANDLES),), dtypes.uint64, to_tuple(d)[0], "handles")[(i:=HANDLES.index(name)):i+1]
 
 @uopfunc
 def mtl_send(obj:UOp, sel:UOp, a:UOp, b:UOp, c:UOp, out:UOp|None=None) -> UOp: # objc_msgSend by the selector's name, the result to out
@@ -132,7 +133,7 @@ class MetalQueue(HWQueue):
     self.rows, self.cmds, self.sizes, self.stamps, self.nbytes = list[tuple[int, UOp]](), list[UOp](), list[tuple[int, int]](), list[UOp](), 0
 
   def exec(self, call:UOp, prg:UOp):
-    args, obj = get_call_kernel_args(call, prg, self.devs), prg.to_elf()
+    args, obj = get_call_kernel_args(call, prg, self.devs), TinyELF.from_program(prg)
     self.rows += (rows:=layout_args(args, off:=round_up(self.nbytes, 256)))
     self.nbytes = max([o + w.dtype.itemsize for o, w in rows], default=off + 8)
 
@@ -196,6 +197,7 @@ def poll_event(p:UOp, t:UOp) -> UOp|None:
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.PARAM, name="p").f(Ops.AFTER, allow_any_len=True, name="t").index(UPat.const(0)).load(), poll_event)])
 
 class MetalDevice(Compiled):
+  renderers = [MetalRenderer]
   has_copy_queue = False
 
   def __init__(self, device:str=""):
@@ -216,7 +218,7 @@ class MetalDevice(Compiled):
 
     # https://developer.apple.com/documentation/metal/mtlgpufamily
     def check_family(f): return next(filter(self.sysdevice.supportsFamily, reversed([v for v, nm in metal.enum_MTLGPUFamily.items() if f in nm])), 0)
-    super().__init__(device, MetalAllocator(self), [MetalRenderer], None,
+    super().__init__(device, MetalAllocator(self), None,
                      arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
     Compiled.link_bufs |= {to_name(self.device, "handles"): lambda b: self.handles}
     Compiled.pm_link += PatternMatcher([

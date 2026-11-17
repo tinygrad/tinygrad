@@ -28,7 +28,7 @@ from tinygrad.helpers import colored, ansistrip, Target
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
                Ops.RANGE: "#c8a0e0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
                Ops.INDEX: "#CEF9B7", Ops.STACK: "#D8F9E4",
-               Ops.WMMA: "#efefc0", Ops.UNSHARD: "#f6ccff", Ops.INS: "#eec4ff",
+               Ops.WMMA: "#efefc0", Ops.UNSHARD: "#f6ccff", Ops.INS: "#eec4ff", Ops.ASM: "#908bce",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
                Ops.BUFFER: "#B0BDFF", Ops.EXTERN: "#7FA8D8", Ops.GETADDR: "#9DB1F0", Ops.COPY: "#ff90c0", Ops.CUSTOM_FUNCTION: "#bf71b6",
                Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
@@ -46,7 +46,7 @@ _skip_fields = {"buffer", "grad_fxn"}   # runtime objects
 
 @functools.cache
 def _struct_args() -> dict[Ops, type]:
-  from tinygrad.schedule.indexing import BufferizeOpts  # schedule imports codegen, which imports this
+  from tinygrad.codegen.indexing import BufferizeOpts  # codegen imports this
   return {Ops.PARAM: ParamArg, Ops.REFPARAM: ParamArg, Ops.BUFFER: ParamArg, Ops.ALLOC: ParamArg, Ops.EXTERN: ParamArg, Ops.SINK: KernelInfo,
           Ops.CALL: CallInfo, Ops.CUSTOM_FUNCTION: CustomFunction, Ops.STAGE: BufferizeOpts, Ops.PROGRAM: ProgramInfo}
 

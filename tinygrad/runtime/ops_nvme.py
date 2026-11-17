@@ -108,7 +108,7 @@ class NVMEDevice(Compiled):
   def __init__(self, device:str):
     self.iface = self._select_iface(device)
     self.nvme = cast(NVMEDev, self.iface.dev_impl)
-    super().__init__(device, NVMEAllocator(self), [], None)
+    super().__init__(device, NVMEAllocator(self), None)
   def synchronize(self, timeout:int|None=None): pass
 
 # *****************
@@ -126,7 +126,7 @@ def nvme_queue(drive:str, gpu:str, queue:str) -> NVMEQueue:
 def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[tuple]]: # builds the commands for all reads from one drive on one gpu queue
   drive, gpu, qn = to_tuple(get_call_arg_uops(calls[0])[1].device)[0], queue.device, queue.arg.name
   dev, q = cast(NVMEDevice, Device[drive]).nvme, nvme_queue(drive, gpu, qn)
-  def mem(name:str, size:int, dtype=dtypes.uint8) -> UOp: return UOp.alloc((size,), dtype, 0, device=drive, name=to_name(gpu, qn, name))
+  def mem(name:str, size:int, dtype=dtypes.uint8) -> UOp: return UOp.extern((size,), dtype, drive, to_name(gpu, qn, name))
   sq, cq, regs = mem("sq", 0x1000).getaddr(gpu), mem("cq", 0x1000).getaddr(gpu), mem("regs", dev.regs.nbytes).getaddr(gpu)
 
   # where this submit starts in the queue, bumped once for all its commands

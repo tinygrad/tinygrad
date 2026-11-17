@@ -1,7 +1,6 @@
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
 import struct, functools, itertools
-from typing import Any, cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
@@ -36,21 +35,20 @@ def rdef(u:UOp):
   return r[0] if (r:=regs(u)) else None
 
 class LinearContext:
-  def __init__(self, ren:'ISARenderer'):
-    self.ren, self.stack_size = ren, 0
+  def __init__(self, ren:'ISARenderer'): self.ren, self.stack_size = ren, 0
   def insert_linearized(self, uops:list[UOp]) -> list[UOp]: return uops
-  def assign_spill_slot(self, r:Register, u:UOp) -> Any: raise NotImplementedError("arch specific")
+  def assign_spill_slot(self, r:Register, u:UOp) -> int: raise NotImplementedError("arch specific")
 
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
   isel_matcher: PatternMatcher
   pre_regalloc_matcher: PatternMatcher
   post_regalloc_matcher: PatternMatcher
-  linear_ctx_type: type = LinearContext
+  linear_ctx_type: type[LinearContext] = LinearContext
 
   def is_two_address(self, x:UOp) -> bool: return False
-  def spill(self, spill_slot:Any, x:UOp) -> UOp: raise NotImplementedError("arch specific")
-  def fill(self, spill_slot:Any, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
+  def spill(self, spill_slot:int, x:UOp) -> UOp: raise NotImplementedError("arch specific")
+  def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
 
 # ***** X86 Ops *****
@@ -501,10 +499,36 @@ isel_matcher = PatternMatcher([
 ])
 
 # ***** pre register allocation *****
+class X86LinearContext(LinearContext):
+  def __init__(self, ren:'X86Renderer'):
+    super().__init__(ren)
+    self.lock: UOp|None = None
+
+  # stack alloc/dealloc and callee saved handling
+  def insert_linearized(self, uops:list[UOp]) -> list[UOp]:
+    before, after, used = [], [], {r.name for u in uops if isinstance((r:=rdef(u)), Register)}
+    for r in CALLEE_SAVED:
+      if r.name in used:
+        a = reg(dtypes.uint64, r)
+        slot = self.assign_spill_slot(r,a)
+        before.append(self.ren.spill(slot,a))
+        after.append(self.ren.fill(slot,a,r))
+
+    if self.stack_size > 0:
+      before.insert(0, with_regs(UOp.ins(X86Ops.SUBi, (stack_pointer(),imm(dtypes.int32, self.stack_size)), dtypes.uint64), (RSP,)))
+      after.append(with_regs(UOp.ins(X86Ops.ADDi, (stack_pointer(),imm(dtypes.int32, self.stack_size)), dtypes.uint64), (RSP,)))
+    return before + uops[:-1] + after + [uops[-1]]
+
+  def assign_spill_slot(self, r:Register, u:UOp) -> int:
+    sz = 16 if r.cons[0] in XMM else 8
+    offset = self.stack_size + (sz - self.stack_size % sz) %sz
+    self.stack_size = offset + sz
+    return offset
+
 # the flags belong to the last instruction that wrote them. x86 has no good way to store/restore them (then regalloc would
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
-def flag_rematerialize(ctx:'X86LinearContext', x:UOp):
+def flag_rematerialize(ctx:X86LinearContext, x:UOp):
   if x.op in (Ops.RANGE, Ops.END) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
   elif x.arg[0] in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
     ctx.lock = flag_def
@@ -512,7 +536,7 @@ def flag_rematerialize(ctx:'X86LinearContext', x:UOp):
   return None
 
 # the element size of loads and stores is already captured by fold_address before stack buffers become 64-bit pointers
-def alloc_buffer(ctx:'X86LinearContext', x:UOp):
+def alloc_buffer(ctx:X86LinearContext, x:UOp):
   dst = Register(f"s{ctx.stack_size}", 0, WGPR)
   nx = with_regs(UOp.ins(X86Ops.LEA, fold_address(stack_pointer().index(UOp.cconst(ctx.stack_size, dtypes.uint32))), dtypes.uint64), (dst,))
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
@@ -562,9 +586,9 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
               vvvv_uop:UOp|None=None, imm_uop:UOp|None=None) -> bytes:
     nonlocal reg, opc
     # get the encoding values of the different fields
-    reg = cast(int, cast(Register, rdef(reg_uop)).index if reg_uop is not None else reg)
-    rm = cast(Register, rdef(rm_uop)).index
-    idx = cast(Register, rdef(idx_uop)).index if idx_uop is not None and rdef(idx_uop) is not None else 4
+    reg = unwrap(rdef(reg_uop)).index if reg_uop is not None else unwrap(reg)
+    rm = unwrap(rdef(rm_uop)).index
+    idx = unwrap(rdef(idx_uop)).index if idx_uop is not None and rdef(idx_uop) is not None else 4
     # for a memory operand the rm size is the element size carried by the address, otherwise it's the size of the value in the register
     rm_sz = scale_uop.src[0].val if scale_uop is not None else rm_uop.dtype.itemsize
     reg_sz = reg_uop.dtype.itemsize if reg_uop is not None else 0
@@ -715,32 +739,6 @@ encodings = {
   X86Ops.JMP: lambda x: bytes([0xE9]) + int(0).to_bytes(4),
   X86Ops.RET: lambda x: bytes([0xC3]),
 }
-
-class X86LinearContext(LinearContext):
-  def __init__(self, ren:'X86Renderer'):
-    super().__init__(ren)
-    self.lock: UOp|None = None
-
-  # stack alloc/dealloc and callee saved handling
-  def insert_linearized(self, uops:list[UOp]) -> list[UOp]:
-    before, after, used = [], [], {r.name for u in uops if isinstance((r:=rdef(u)), Register)}
-    for r in CALLEE_SAVED:
-      if r.name in used:
-        a = reg(dtypes.uint64, r)
-        slot = self.assign_spill_slot(r,a)
-        before.append(self.ren.spill(slot,a))
-        after.append(self.ren.fill(slot,a,r))
-
-    if self.stack_size > 0:
-      before.insert(0, with_regs(UOp.ins(X86Ops.SUBi, (stack_pointer(),imm(dtypes.int32, self.stack_size)), dtypes.uint64), (RSP,)))
-      after.append(with_regs(UOp.ins(X86Ops.ADDi, (stack_pointer(),imm(dtypes.int32, self.stack_size)), dtypes.uint64), (RSP,)))
-    return before + uops[:-1] + after + [uops[-1]]
-
-  def assign_spill_slot(self, r:Register, u:UOp) -> int:
-    sz = 16 if r.cons[0] in XMM else 8
-    offset = self.stack_size + (sz - self.stack_size % sz) %sz
-    self.stack_size = offset + sz
-    return offset
 
 class X86Renderer(ISARenderer):
   device = "CPU"

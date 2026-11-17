@@ -4,10 +4,11 @@ from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.schedule.rangeify import BufferizeOpts
+from tinygrad.codegen.rangeify import BufferizeOpts
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer import TinyELF
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
 from test.helpers import assert_kernel_count
@@ -45,7 +46,7 @@ def custom_add_var_kernel(*srcs:UOp, n_slot:int) -> UOp:
 def run_kernel_args(out:Tensor, name:str) -> list[str|None]:
   linear, var_vals = out.linear_with_vars()
   sink = [u for u in linear.toposort(enter_calls=True) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) and u.arg.name == name][0]
-  sig = to_program(sink, Device[Device.DEFAULT].renderer).to_elf().signature
+  sig = TinyELF.from_program(to_program(sink, Device[Device.DEFAULT].renderer)).signature
   run_linear(linear, var_vals)
   return [nm for nm, *_ in sig]
 
@@ -720,7 +721,7 @@ class TestCustomKernelSharded(unittest.TestCase):
     with self.assertRaises(RuntimeError): Tensor.custom_kernel(out, Tensor([7.]).realize(), fxn=kernel)[0].realize()
 
 class TestUnshardIndex(unittest.TestCase):
-  """Regression tests for INDEX on UNSHARD (fragment) resolution in schedule/multi.py.
+  """Regression tests for INDEX on UNSHARD (fragment) resolution in codegen/multi.py.
 
   A fragment is a per-thread REG buffer wrapped in UNSHARD over LOCAL thread ranges.
   index_multi must resolve an INDEX on the UNSHARD view into an INDEX on the per-thread
@@ -794,7 +795,7 @@ def _run_fragment_kernel(testcase, kernel, out_shape, inputs=()):
     raise
 
 class TestUnshardAlu(unittest.TestCase):
-  """Tests for ALU on (fragment) UNSHARD values in schedule/multi.py's alu_multi.
+  """Tests for ALU on (fragment) UNSHARD values in codegen/multi.py's alu_multi.
 
   An ALU with UNSHARD srcs lowers to per-shard ops when every src is one of:
     same sharding:  peel the UNSHARD, keep the layout
@@ -826,7 +827,7 @@ class TestUnshardAlu(unittest.TestCase):
     np.testing.assert_allclose(out, a.numpy(), atol=1e-4)
 
 class TestUnshardStore(unittest.TestCase):
-  """Tests for STORE of a sharded value into an unsharded dest (store_value_multi in schedule/multi.py).
+  """Tests for STORE of a sharded value into an unsharded dest (store_value_multi in codegen/multi.py).
 
   Every shard stores its value into its own contiguous sub-view of the dest, one SHRINK per sharded axis.
   """

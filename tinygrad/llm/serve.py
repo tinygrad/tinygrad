@@ -7,6 +7,8 @@ if TYPE_CHECKING:
   from tinygrad.llm.tokenizer import SimpleTokenizer
   from tinygrad.llm.model import Transformer
 
+DSML = "\uff5cDSML\uff5c"  # the DeepSeek tool call tags, between fullwidth bars
+
 def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
   s = s.strip()
   # Kimi-K3 format: tool="name" index="1"<|sep|><|open|>argument key="key" type="string"<|sep|>value<|close|>argument<|sep|>...
@@ -15,6 +17,12 @@ def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
     if re.sub(pattern, '', m[2], flags=re.DOTALL).strip(): return None
     def unescape(v:str) -> str: return v.replace('&quot;', '"').replace('&amp;', '&')
     try: return unescape(m[1]), {unescape(a[1]): a[3] if a[2] == "string" else json.loads(a[3]) for a in re.finditer(pattern, m[2], re.DOTALL)}
+    except json.JSONDecodeError: return None
+  # DeepSeek DSML format: name="name">\n<{DSML}parameter name="key" string="true|false">value</{DSML}parameter>..., V4.1 puts a space after DSML
+  if (m := re.fullmatch(r'name="([^"]+)">(.*)', s, re.DOTALL)):
+    pattern = rf'<{DSML} ?parameter name="([^"]+)" string="(true|false)">(.*?)</{DSML} ?parameter>'
+    if re.sub(pattern, '', m[2], flags=re.DOTALL).strip(): return None
+    try: return m[1], {a[1]: a[3] if a[2] == "true" else json.loads(a[3]) for a in re.finditer(pattern, m[2], re.DOTALL)}
     except json.JSONDecodeError: return None
   if s.startswith("{"):  # hermes JSON format: {"name": ..., "arguments": {...}}
     try:
@@ -55,13 +63,15 @@ def disconnected(conn:socket.socket) -> bool:
 
 class StreamRouter:
   # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse
-  # (start think, end think, end content, tool call)
-  FORMATS = (("<think>", "</think>", "<tool_call>", r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)"),
+  # (start think, end think, end content, tool call, special token that selects the format)
+  FORMATS = (("<think>", "</think>", "<tool_call>", r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", "<tool_call>"),
              ("<|open|>think<|sep|>", "<|close|>think<|sep|><|open|>response<|sep|>", "<|close|>response<|sep|>",
-              r"<\|open\|>call \s*(.*?)\s*(?:<\|close\|>call<\|sep\|>|$)"))
+              r"<\|open\|>call \s*(.*?)\s*(?:<\|close\|>call<\|sep\|>|$)", "<|close|>"),
+             # the calls block is function_calls (V3.2), tool_calls (V4) or " calls" (V4.1)
+             ("<think>", "</think>", f"\n\n<{DSML}", rf"<{DSML} ?invoke (.*?)\s*(?:</{DSML} ?invoke>|$)", DSML))
   def __init__(self, special_tokens:dict[str, int], reasoning:bool=False):
-    self.think, self.end_think, self.end_content, self.call = next((f for f in self.FORMATS if any(f[2].startswith(t) for t in special_tokens)),
-                                                                   self.FORMATS[0])
+    self.think, self.end_think, self.end_content, self.call = next((f for f in self.FORMATS if f[-1] in special_tokens),
+                                                                   self.FORMATS[0])[:-1]
     self.buf = ""
     self.mode = "reasoning" if reasoning else "undecided"  # output inside a think block is sent as reasoning_content
   def split(self, tag:str, final:bool) -> tuple[str, bool]:

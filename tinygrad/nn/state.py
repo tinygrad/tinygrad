@@ -231,7 +231,6 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     ret = storage_source[storage[2]][byte_start:byte_end].bitcast(storage[1])
 
     if prod(size) and tuple(st for s,st in zip(size, stride) if s != 1) != strides_for_shape(tuple(s for s in size if s != 1)):
-      assert storage[1] != dtypes.bfloat16, "can't index BF16"
       ret = ret.to(None)
       for s,st in zip(size, stride): ret = ret.unfold(-1, ret.shape[-1]-(s-1)*st, max(st, 1))
 
