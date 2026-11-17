@@ -182,14 +182,14 @@ extra_matcher = PatternMatcher([
 # ***** X86 pre instruction selection *****
 def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp: return UOp.placeholder((count,), elem_dt, slot, AddrSpace.LOCAL)
 
-def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
+def gated_load(ctx:itertools.count, addr:UOp, alt:UOp, gate:UOp, x:UOp):
   local = scratch_buffer(addr.src[0].dtype, x.max_numel(), next(ctx))
   local_idx = local.index(UOp.cconst(0, dtypes.int32))
   # the AFTER orders the load after the scratch store
   sel = gate.where(addr, local_idx)
   return sel.after((local_idx if x.max_numel() == 1 else local).store(alt)).load()
 
-def gated_store(ctx, addr:UOp, gate:UOp, val:UOp):
+def gated_store(ctx:itertools.count, addr:UOp, gate:UOp, val:UOp):
   local = scratch_buffer(addr.src[0].dtype, val.max_numel(), next(ctx))
   sel = gate.where(addr, local.index(UOp.cconst(0, dtypes.int32)))
   return sel.store(val)
