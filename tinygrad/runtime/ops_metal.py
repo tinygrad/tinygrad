@@ -10,7 +10,7 @@ from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
 from tinygrad.runtime.support.hcq2 import HWQueue, ccall, patch, layout_args, to_name
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
-from tinygrad.engine.realize import get_call_kernel_args
+from tinygrad.engine.realize import get_call_kernel_args, get_call_info
 
 # 13 is requestType that metal uses to compile source code into MTLB, there aren't any docs or symbols.
 REQUEST_TYPE_COMPILE = 13
@@ -138,7 +138,7 @@ class MetalQueue(HWQueue):
     self.nbytes = max([o + w.dtype.itemsize for o, w in rows], default=off + 8)
 
     # symbolic sizes, set on the command at run time
-    dims = (*prg.arg.global_size, *prg.arg.local_size)
+    dims = (*(info:=get_call_info(call, prg)).global_size, *info.local_size)
     if any(isinstance(d, UOp) for d in dims):
       self.sizes.append((len(self.cmds), at:=round_up(self.nbytes, 8)))
       self.rows += layout_args([UOp.const(d, dtypes.uint64) for d in dims], at)

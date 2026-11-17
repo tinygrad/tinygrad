@@ -8,7 +8,7 @@ from tinygrad.device import BufferStorage, BufferSpec, HostAllocator, Compiled, 
 from tinygrad.renderer import Compiler, CompileError, TinyELF
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
-from tinygrad.engine.realize import get_call_kernel_args
+from tinygrad.engine.realize import get_call_kernel_args, get_call_info
 from tinygrad.runtime.support.hcq2 import HWQueue, ccall, encode_cmdbuf, make_program
 
 CC_CB = c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], c.POINTER[None], cl.size_t, c.POINTER[None]]]
@@ -63,7 +63,8 @@ class CLQueue(HWQueue):
         images.append((end - 8) // 8)
       else: end = self.q64(args[i])
       self.call(cl.clSetKernelArg, kernel, i, args[i].dtype.itemsize, (end - 8,))
-    end = self.q64(*[g * l for g, l in zip(prg.arg.global_size, prg.arg.local_size)], *prg.arg.local_size) # [global][local]
+    info = get_call_info(call, prg)
+    end = self.q64(*[g * l for g, l in zip(info.global_size, info.local_size)], *info.local_size) # [global][local]
     self.call(cl.clEnqueueNDRangeKernel, self.dev.handles[1], kernel, 3, 0, (end - 48,), (end - 24,), 0, 0, 0)
     self.cmds += [(cl.clReleaseMemObject, w) for w in images]
 

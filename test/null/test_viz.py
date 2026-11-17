@@ -1170,8 +1170,9 @@ class TestCLI(unittest.TestCase):
     with save_viz() as viz:
       @TinyJit
       def f(a, b): return (a@a.T), (b@b.T)
+      # a kernel doesn't depend on its Variable's name, so b has a different shape to get a different kernel
       a = Tensor.empty(64, 64, device="NULL")
-      b = Tensor.empty(64, 64, device="NULL")
+      b = Tensor.empty(64, 32, device="NULL")
       for i_val, j_val in test_n:
         i = Variable("i", 1, 64).bind(i_val)
         j = Variable("j", 1, 64).bind(j_val)

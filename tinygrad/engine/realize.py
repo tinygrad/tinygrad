@@ -15,12 +15,18 @@ from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 # **************** Helpers ****************
 
 def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call.src[1:] if not s.is_variable)
+def get_call_scalars(call:UOp, prg:UOp) -> dict[UOp, UOp]:
+  # a program's positional scalar params are the call's args, in the param's dtype
+  return {p:call.src[1+p.arg.slot].ccast(p.dtype) for p in prg.arg.params if p.addrspace is AddrSpace.ALU and p.arg.name is None}
+def get_call_info(call:UOp, prg:UOp) -> ProgramInfo:
+  def sub(xs:tuple, scalars:dict[UOp, UOp]) -> tuple: return tuple(x.substitute(scalars) if isinstance(x, UOp) else x for x in xs)
+  return replace(prg.arg, global_size=sub(prg.arg.global_size, s:=get_call_scalars(call, prg)), local_size=sub(prg.arg.local_size, s))
 def get_call_kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...]) -> list[UOp]:
   # one per kernel param in order: a buffer is its address, a value bound in the call is a CONST, any other value is its slotless var read
-  # from var_vals at every run
+  # from var_vals at every run. a positional scalar is the call's arg
   bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
-  return [bound.get(p.expr, p.replace(arg=replace(p.arg, slot=-1))).ccast(p.dtype) if p.addrspace is AddrSpace.ALU else
-          call.src[1+p.arg.slot].getaddr(devs) for p in prg.kernel_params]
+  return [(bound.get(a.expr, a) if (a:=call.src[1+p.arg.slot] if p.arg.name is None else p.replace(arg=replace(p.arg, slot=-1))).is_variable
+           else a).ccast(p.dtype) if p.addrspace is AddrSpace.ALU else call.src[1+p.arg.slot].getaddr(devs) for p in prg.kernel_params]
 
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.body
@@ -53,7 +59,9 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
 def estimate_uop(call:UOp) -> Estimates:
   call = call.without_after
   if call.arg.hcq is not None: return call.arg.hcq.estimates
-  if (ast:=call.body).op is Ops.PROGRAM: return ast.src[0].arg.estimates or Estimates()
+  if (ast:=call.body).op is Ops.PROGRAM:
+    est, scalars = ast.src[0].arg.estimates or Estimates(), get_call_scalars(call, ast)
+    return Estimates(*(x.substitute(scalars) if isinstance(x, UOp) else x for x in (est.ops, est.lds, est.mem)))
   if ast.op is Ops.STORE or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "encdec"):
     return Estimates(lds=(nbytes:=prod(call.src[1].shape) * call.src[1].dtype.itemsize), mem=nbytes)
   return Estimates()
@@ -77,9 +85,11 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
     et = ets[i] if i < len(ets) else None
     bufs = lanes[i][0] if i < len(lanes) else [cast(Buffer, ctx.input_uops[s].buffer) for s in (stats[3] if stats else ())]
     display_name = get_call_name(kcall, bufs, ctx.var_vals) if stats is None else stats[0]
+    estimates = estimate_uop(kcall) if stats is None else stats[1]
+    op_est, mem_est, lds_est = (sym_infer(x, ctx.var_vals) for x in (estimates.ops, estimates.mem, estimates.lds))
     if PROFILE: # backdate the event to the start of the call, the viz matches a device range with the exec event before it
       outputs, inputs = get_call_outs_ins(kcall) if stats is None else stats[4]
-      cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": ctx.var_vals,
+      cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"estimates": (op_est, mem_est, lds_est),
         "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}, ts=st))
     if DEBUG < (3 if stats is None and call.arg.hcq is not None else 2) or not ctx.update_stats: continue
     if et is None and not (call.arg.hcq is not None and call.arg.hcq.skip_wait):
@@ -87,8 +97,6 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
       et, st = float(perf_counter_us() - st)*1e-6, perf_counter_us()
       GlobalCounters.time_sum_s += et
 
-    estimates = estimate_uop(kcall) if stats is None else stats[1]
-    op_est, mem_est, lds_est = (sym_infer(x, ctx.var_vals) for x in (estimates.ops, estimates.mem, estimates.lds))
     key = kcall.body.key if stats is None else stats[2]
     header_color = 'magenta' if ctx.jit else ('green' if key not in first_run_cache else None)
     ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
@@ -159,8 +167,9 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
     var_vals = {**ctx.var_vals, **device_vars, **{s.expr: s.arg.val for s in call.src[1:] if s.is_bound_var}}
     prg_bufs = {i:b.ensure_allocated() for i,b in zip(ast.arg.globals, bufs)}
     rt = get_runtime(device, ast, cache=ctx.cache)
-    global_sz, local_sz = ast.arg.launch_dims(var_vals)
-    try: args = [(var_vals[p.expr] if p.is_variable else _resolve(call.src[1+p.arg.slot], ctx.input_uops).val) if p.addrspace is AddrSpace.ALU else
+    global_sz, local_sz = get_call_info(call, ast).launch_dims(var_vals)
+    try: args = [(var_vals[a.expr] if (a:=p if p.arg.name else call.src[1+p.arg.slot]).is_variable else _resolve(a, ctx.input_uops).val)
+                 if p.addrspace is AddrSpace.ALU else
                  prg_bufs[p.arg.slot].get_buf(device) for p in ast.kernel_params]
     except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
     ets.append(rt(*args, global_size=global_sz, local_size=local_sz, wait=ctx.wait, timeout=ctx.timeout))
@@ -201,9 +210,9 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return ets + [_prof_tm(d, prof) if ctx.wait else None for d, _, _, prof, *_ in info.kernels if prof]
 
 def _validate(call:UOp, sink:UOp) -> UOp:
-  shadows = tuple(p if p.is_bound_var else
+  shadows = tuple(p if p.addrspace is AddrSpace.ALU else
                   UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in call.src[1:])
-  copies = tuple(s.store_call(p) for s, p in zip(shadows, call.src[1:]) if not p.is_bound_var)
+  copies = tuple(s.store_call(p) for s, p in zip(shadows, call.src[1:]) if p.addrspace is not AddrSpace.ALU)
   return UOp(Ops.LINEAR, src=copies + (call, UOp.custom_function("validate", sink).call(*shadows, *call.src[1:])))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 

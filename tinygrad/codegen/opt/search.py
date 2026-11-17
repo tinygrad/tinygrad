@@ -6,7 +6,7 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.engine.realize import time_call
+from tinygrad.engine.realize import time_call, get_call_info, estimate_uop
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -36,7 +36,7 @@ def _time_program(prg:UOp, var_vals:dict[str, int], buf_uops:list[UOp], early_st
   timeout = int(early_stop * 1e3) if dev_timeout and early_stop is not None and early_stop < math.inf else None
   factor = 1
   if allow_test_size and max_global_size is not None:
-    global_size, factor = get_test_global_size(prg.arg.global_size, max_global_size, var_vals)
+    global_size, factor = get_test_global_size(get_call_info(prg.call(*buf_uops), prg).global_size, max_global_size, var_vals)
     prg = prg.replace(arg=replace(prg.arg, global_size=tuple(global_size)))
   call = prg.call(*buf_uops)
   tms, timer = [], time_call(call, var_vals, timeout=timeout, clear_l2=clear_l2)
@@ -125,7 +125,10 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:i
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
     params = {p.arg.slot:p.dtype for p in s.ast.toposort() if p.op is Ops.PARAM and p.addrspace is not AddrSpace.ALU}
-    buf_uops = [UOp.from_buffer(b, params[i]) for i, b in enumerate(rawbufs)]
+    # the call args: the buffers, then each positional scalar gets the middle of its range
+    scalars = sorted({p for p in s.ast.toposort() if p.op is Ops.PARAM and p.addrspace is AddrSpace.ALU and p.arg.name is None},
+                     key=lambda p: p.arg.slot)
+    buf_uops = [UOp.from_buffer(b, params[i]) for i, b in enumerate(rawbufs)] + [UOp.const(int(p.vmax+p.vmin)//2, p.dtype) for p in scalars]
     exiting, st = False, time.perf_counter()
     dev = Device[s.ren.target.device]
     while not exiting:
@@ -137,8 +140,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:i
         prg, compile_et = proc
         if (lib:=prg.src[3].arg) in seen_libs: continue
         # filter out kernels that use 1000x more compute than the smallest
-        estimates = prg.src[0].arg.estimates
-        least_compute_ops = min(this_compute_ops:=sym_infer(estimates.ops if estimates is not None else 0, var_vals), least_compute_ops)
+        least_compute_ops = min(this_compute_ops:=sym_infer(estimate_uop(prg.call(*buf_uops)).ops, var_vals), least_compute_ops)
         if least_compute_ops*1000 < this_compute_ops:
           if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too much compute. {this_compute_ops} when least is {least_compute_ops}")
           continue

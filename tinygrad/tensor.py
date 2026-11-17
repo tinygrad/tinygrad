@@ -60,9 +60,9 @@ pm_map_back = PatternMatcher([
 
 def map_back(linear:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, dict[str, int]]:
   # the EXTERNs become the storage and the bound Variables of this invocation, ALLOCs get fresh storage
-  linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, enter_calls=True, name="map back")
-  # the values of the bound Variables the linear uses
-  used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
+  linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, name="map back")
+  # the values of the bound Variables the linear uses: the call args, and the named Variables in the call bodies
+  used_vars = {v.expr for si in linear.src for v in UOp.sink(*si.src).variables() if v.arg.name is not None}
   var_vals: dict[str, int] = {}
   for b in externs:
     if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
