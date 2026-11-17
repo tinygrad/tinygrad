@@ -496,11 +496,6 @@ def _host_like(specs:list[tuple[Tensor, int, int]]) -> list[Tensor]:
     ret.append(Tensor(u.unshard(t.uop.axis) if isinstance(t.device, tuple) and t.uop.axis is not None else u))
   return ret
 
-@functools.cache
-def _freqs(dim:int, end:int, theta:float, device:str|tuple[str, ...]|None, yarn:YaRNConfig|None) -> Tensor:
-  """the rope table (one for every block of the same)"""
-  return precompute_freqs_cis(dim, end, theta, device=device, yarn=yarn).realize()
-
 _t_import = time.perf_counter()
 def _lap(what:str):
   """DEBUG_LOAD=1: a line when loading gets past `what` (seconds since the import, the epoch: the launcher's start is known in epoch)"""
@@ -1294,23 +1289,6 @@ _seq_batch:list[SeqBatch|None] = [None]
 def _seq_alone() -> bool:
   """a step of one sequence sharing the caches (GLM_SEQ): the kernels of the model's own step (forward_spec), its greedy tokens the same"""
   return (sb:=_seq_batch[0]) is not None and sb.G == 1 and bool((1))
-
-def _rope(x:Tensor, cos:Tensor, sin:Tensor) -> Tensor:
-  """half-split rope of x (..., d) with cos and sin (..., d/2) broadcast to it"""
-  x1, x2 = x.chunk(2, dim=-1)
-  return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
-
-def _pool_select(scores:Tensor, q_pos:Tensor, k_pos:Tensor, idx:IndexerConfig) -> Tensor:
-  """
-  scores (R, pools) of R queries at q_pos (R, 1) on the keys at k_pos (1, S): the mask (R, S) of the keys a query sees, the top_k/kpool best
-  complete pools and the tokens of its own pool (the tail), causal
-  """
-  pools = scores.shape[-1]
-  ar = Tensor.arange(pools.vmax)[:pools] if isinstance(pools, UOp) else Tensor.arange(pools)
-  masked = ((ar + 1) * idx.kpool <= q_pos + 1).where(scores, -math.inf)
-  picked = topk_mask(masked, idx.top_k // idx.kpool).repeat_interleave(idx.kpool, dim=-1)[..., :k_pos.shape[-1]]
-  return ((picked | (k_pos >= (q_pos + 1) // idx.kpool * idx.kpool)) & (k_pos <= q_pos)).where(0.0, -math.inf)
-
 
 class Indexer:
   _regions:tuple[int, int, int]|None = None  # (SLOT_ALIAS: the slots, their positions, the regions of the cache, see _region_views)
