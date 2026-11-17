@@ -623,7 +623,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *, dtype=dtypes.weakint):
     return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),), arg=(axis_type, axis_id))
   @staticmethod
-  def loop(axis_id:int): return UOp(Ops.RANGE, src=(UOp(Ops.NOOP),), arg=(AxisType.WEAK, axis_id))
+  def loop(axis_id:int): return UOp.range(UOp(Ops.NOOP), axis_id, dtype=dtypes.void)
   @staticmethod
   def special(end:sint, name:str): return UOp(Ops.SPECIAL, src=(sint_to_uop(end),), arg=name)
   @staticmethod

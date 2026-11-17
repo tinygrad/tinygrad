@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, UOp, Device, GlobalCounters
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.uop.ops import KernelInfo, AxisType
+from tinygrad.uop.ops import KernelInfo
 from test.helpers import assert_kernel_count
 from test.runtime.test_custom_kernel import custom_add_one_kernel
 
@@ -14,7 +14,7 @@ class TestGatedIndexMovement(unittest.TestCase):
   def test_gated_store_2d(self):
     # the valid on one index of the 2d C gates the whole store, only j == 0 writes C[i, 0]
     def kernel(C:UOp) -> UOp:
-      i, j = UOp.range(4, 0), UOp.range(4, 1, AxisType.LOOP)
+      i, j = UOp.range(4, 0), UOp.range(4, 1)
       return C[i.valid(j.eq(0)), 0].store((j+1).cast(C.dtype)).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4, 4), fxn=kernel)[0][:, 0].tolist(), [1.]*4)
 
@@ -22,7 +22,7 @@ class TestGatedIndexMovement(unittest.TestCase):
   def test_gated_local_store_2d(self):
     # the valid on one index of the 2d LOCAL tmp gates the whole store, only j == 0 writes tmp[i, 0]
     def kernel(C:UOp) -> UOp:
-      i, j = UOp.range(4, 0), UOp.range(4, 1, AxisType.LOOP)
+      i, j = UOp.range(4, 0), UOp.range(4, 1)
       tmp = UOp.placeholder((4, 4), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
       st = tmp[i.valid(j.eq(0)), 0].store((j+1).cast(dtypes.float)).end(j)
       return C[i].store(tmp.after(st)[i, 0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
@@ -30,7 +30,7 @@ class TestGatedIndexMovement(unittest.TestCase):
 
   def test_gated_store_partial_reshape(self):
     def kernel(C:UOp) -> UOp:
-      i, j = UOp.range(2, 0), UOp.range(3, 1, AxisType.LOOP)
+      i, j = UOp.range(2, 0), UOp.range(3, 1)
       dst = C.reshape(2, 2, 4).index(i.valid(j.eq(0)), 0)
       return dst.store((j+10).cast(C.dtype).reshape(1).expand(4)).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.zeros(4, 4).contiguous(), fxn=kernel)[0].tolist(), [[10.]*4, [0.]*4]*2)

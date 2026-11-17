@@ -11,7 +11,7 @@ class TestEffectRetention(unittest.TestCase):
     for value in (UOp.const(2), UOp.const((1, 2, 3, 4)).reshape((2, 2))):
       with self.subTest(shape=value.shape):
         def kernel(C:UOp) -> UOp:
-          i = UOp.range(3, 0, AxisType.LOOP)
+          i = UOp.range(3, 0)
           cell = C.after(i)[0]
           v = value.after(cell.store(cell + 1))
           return C.after(v.reduce(i, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
@@ -26,7 +26,7 @@ class TestEffectRetention(unittest.TestCase):
       self.assertEqual(out.tolist(), [7, 9])
 
   def test_store_before_empty_loop(self):
-    r = UOp.range(0, 0, AxisType.LOOP)
+    r = UOp.range(0, 0)
     self.assertEqual(Tensor.ones(1).contiguous().custom_kernel(Tensor.empty(1),
       fxn=lambda p,q: q.after(p[0].store(8.), r)[0].store(64.).end(r).sink(arg=KernelInfo(opts_to_apply=())))[0].tolist(), [8.])
 
@@ -39,7 +39,7 @@ class TestEffectRetention(unittest.TestCase):
 
   @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT != "WEBGPU", "CUSTOM renders C")
   def test_group_keeps_custom(self):
-    r = UOp.range(4, 0, AxisType.LOOP)
+    r = UOp.range(4, 0)
     def kernel(C:UOp, D:UOp) -> UOp:
       inc = UOp.custom_function("{0}[0] += 1;", fmt=True).call(C.index(r))
       return UOp.group(inc, D[r].store(1)).end(r).sink(arg=KernelInfo(opts_to_apply=()))
@@ -144,7 +144,7 @@ class TestEffectRetention(unittest.TestCase):
 class TestEffectOrder(unittest.TestCase):
   def test_snapshot_before_overwrite(self):
     def kernel(A:UOp) -> UOp:
-      old, r = A[0].load(), UOp.range(2, 0, AxisType.LOOP)
+      old, r = A[0].load(), UOp.range(2, 0)
       return A.after(A.after(old, r)[0].store(9).end(r))[1].store(old).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor([5, 0], dtype=dtypes.int).contiguous().realize().custom_kernel(fxn=kernel)[0].tolist(), [9, 5])
 
@@ -167,7 +167,7 @@ class TestEffectOrder(unittest.TestCase):
   def test_range_merge_keeps_reduce_order(self):
     # the reduce body stores, so it loops a, k, b in order, and the digits of S are the A[a*2+b] it visits
     def kernel(O:UOp, S:UOp, A:UOp) -> UOp:
-      a, k, b = [UOp.range(2, n, AxisType.LOOP) for n in range(3)]
+      a, k, b = [UOp.range(2, n) for n in range(3)]
       v = A[a*2+b].after((cell:=S.after(a, k, b)[0]).store(cell*10+A[a*2+b]))
       return O[0].store(v.reduce(a, k, b, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
     o, s = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor.zeros(1, dtype=dtypes.int).contiguous(),
@@ -178,7 +178,7 @@ class TestEffectOrder(unittest.TestCase):
   def test_range_merge_keeps_loop_order(self):
     # loops nest by axis id whatever order END lists them, so x is outer and the digits of S are A[0], A[2], A[1], A[3]
     def kernel(S:UOp, A:UOp) -> UOp:
-      x, y = UOp.range(2, 0, AxisType.LOOP), UOp.range(2, 1, AxisType.LOOP)
+      x, y = UOp.range(2, 0), UOp.range(2, 1)
       return (cell:=S.after(x, y)[0]).store(cell*10+A[y*2+x]).end(y, x).sink(arg=KernelInfo(opts_to_apply=()))
     s = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor([1, 2, 3, 4], dtype=dtypes.int), fxn=kernel)[0]
     self.assertEqual(s.item(), 1324)
@@ -207,7 +207,7 @@ class TestEffectOrder(unittest.TestCase):
 class TestEffectFrequency(unittest.TestCase):
   def test_range_merge_keeps_after_domain(self):
     # C is read once per i or once per o, so it counts to 4, and merging o and i must not make that 16
-    o, i = UOp.range(4, 0, AxisType.LOOP), UOp.range(4, 1, AxisType.LOOP)
+    o, i = UOp.range(4, 0), UOp.range(4, 1)
     stores = {"after_i": lambda C,A: (c:=C.after(i)[0]).store(c+1),
               "after_o": lambda C,A: UOp.group((c:=C.after(o)[0]).store(c+1), A.after(o, i)[0].store(1)),
               "load_after_o": lambda C,A: C.after(o, i)[0].store(C.after(o)[0].load()+1)}
@@ -218,7 +218,7 @@ class TestEffectFrequency(unittest.TestCase):
 
   def test_range_merge_keeps_index_domain(self):
     # C[c] is indexed by o alone, so each cell counts to 2 while the B store merges o and i
-    o, i = UOp.range(4, 0, AxisType.LOOP), UOp.range(4, 1, AxisType.LOOP)
+    o, i = UOp.range(4, 0), UOp.range(4, 1)
     for name, c in {"div": o//2, "cmp": (o<2).cast(dtypes.int)}.items():
       with self.subTest(name):
         def kernel(C:UOp, B:UOp, c=c) -> UOp:
@@ -228,13 +228,13 @@ class TestEffectFrequency(unittest.TestCase):
   def test_range_merge_then_shrink(self):
     # r0<2 shrinks the merged range of 8 to 4, which is the same UOp as r0, so it isn't shrunk again to 2
     def kernel(C:UOp) -> UOp:
-      r0, r1 = UOp.range(4, 0, AxisType.LOOP), UOp.range(2, 1, AxisType.LOOP)
+      r0, r1 = UOp.range(4, 0), UOp.range(2, 1)
       return (cell:=C[(r0*2+r1).valid(r0<2)]).store(cell+1).end(r0, r1).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.zeros(8, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [1, 1, 1, 1, 0, 0, 0, 0])
 
   def test_shrink_range_keeps_ungated_index(self):
     # q is ungated in C[q], so q keeps its 4 iterations after r shrinks to its gate r<2
-    q, r = UOp.range(4, 0, AxisType.LOOP), UOp.range(4, 1, AxisType.LOOP)
+    q, r = UOp.range(4, 0), UOp.range(4, 1)
     def kernel(C:UOp, D:UOp) -> UOp:
       return UOp.group(C[q].store(1), D[(q*4+r).valid((q<2)&(r<2))].store(1)).end(q, r).sink(arg=KernelInfo(opts_to_apply=()))
     c, d = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous(), Tensor.zeros(16, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
@@ -244,7 +244,7 @@ class TestEffectFrequency(unittest.TestCase):
 
   def test_shrink_range_keeps_ungated_store(self):
     # C[0] stores r every iteration, so r keeps its 4 iterations though D gates it to r<2
-    r = UOp.range(4, 0, AxisType.LOOP)
+    r = UOp.range(4, 0)
     def kernel(C:UOp, D:UOp) -> UOp:
       return UOp.group(C[0].store(r.cast(dtypes.int)), D[r.valid(r<2)].store(1)).end(r).sink(arg=KernelInfo(opts_to_apply=()))
     c, d = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor.zeros(4, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
@@ -253,7 +253,7 @@ class TestEffectFrequency(unittest.TestCase):
 
   def test_shrink_range_keeps_store_gated_otherwise(self):
     # C[0] is gated by r>=2, not r<c, so r keeps its 4 iterations though D gates it to r<2
-    r = UOp.range(4, 0, AxisType.LOOP)
+    r = UOp.range(4, 0)
     def kernel(C:UOp, D:UOp) -> UOp:
       return UOp.group(C[UOp.const(0).valid(r>=2)].store(r.cast(dtypes.int)), D[r.valid(r<2)].store(1)).end(r).sink(arg=KernelInfo(opts_to_apply=()))
     c, d = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor.zeros(4, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
@@ -263,7 +263,7 @@ class TestEffectFrequency(unittest.TestCase):
   def test_shrink_range_keeps_symbolic_end(self):
     # D gates r to r<4, but r only runs to n=2
     def kernel(D:UOp, N:UOp) -> UOp:
-      r = UOp.range(N, 0, AxisType.LOOP)
+      r = UOp.range(N, 0)
       return D[r.valid(r<4)].store(1).end(r).sink(arg=KernelInfo(opts_to_apply=()))
     d = Tensor.custom_kernel(Tensor.zeros(8, dtype=dtypes.int).contiguous(), Tensor(Variable("n", 1, 8, dtypes.int).bind(2)), fxn=kernel)[0]
     self.assertEqual(d.tolist(), [1, 1, 0, 0, 0, 0, 0, 0])
@@ -271,7 +271,7 @@ class TestEffectFrequency(unittest.TestCase):
   @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT != "WEBGPU", "CUSTOM renders C")
   def test_shrink_range_keeps_custom(self):
     # the CUSTOM sets C[0] to r every iteration, so r keeps its 4 iterations though the D store gates it to r<2
-    r = UOp.range(4, 0, AxisType.LOOP)
+    r = UOp.range(4, 0)
     def kernel(C:UOp, D:UOp) -> UOp:
       val = UOp.custom_function("({0}[0] = {1})", shape=C[0].shape, dtype=dtypes.int, fmt=True).call(C[0], r.cast(dtypes.int))
       return D[r.valid(r<2)].store(val).end(r).sink(arg=KernelInfo(opts_to_apply=()))
@@ -282,7 +282,7 @@ class TestEffectFrequency(unittest.TestCase):
   @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT != "WEBGPU", "CUSTOM renders C")
   def test_reduce_collapse_keeps_custom(self):
     # the CUSTOM increments C[r] every iteration, though the sum only picks r==2
-    r = UOp.range(4, 0, AxisType.LOOP)
+    r = UOp.range(4, 0)
     def kernel(C:UOp, O:UOp) -> UOp:
       inc = UOp.custom_function("({0}[0] += 1)", shape=C.index(r).shape, dtype=dtypes.int, fmt=True).call(C.index(r))
       return O[0].store(UOp.const(2, dtypes.int).eq(r.cast(dtypes.int)).where(inc, 0).reduce(r, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
@@ -292,7 +292,7 @@ class TestEffectFrequency(unittest.TestCase):
 
   def test_padto_gates_store(self):
     # C[0] is 3 after the 3 iterations of r, and padding r to 4 adds a no-op iteration
-    r, l = UOp.range(3, 0, AxisType.LOOP), UOp.loop(1)
+    r, l = UOp.range(3, 0), UOp.loop(1)
     def loop_until(C:UOp) -> UOp:  # a padded iteration exits the loop: its gated reg never reaches 3 again
       reg = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG).after(r)[0].set(0)
       nxt = reg.after(l)[0]+1
@@ -306,7 +306,7 @@ class TestEffectFrequency(unittest.TestCase):
 
   def test_padto_refuses_ungatable(self):
     # a CUSTOM and a STORE to a whole buffer can't be no-ops, so padding r is refused
-    r = UOp.range(3, 0, AxisType.LOOP)
+    r = UOp.range(3, 0)
     effects = {"custom": lambda C: UOp.custom_function("{0}[0] += {1}+1;", fmt=True).call(C.index(0), r.cast(dtypes.int)).end(r),
                "whole_store": lambda C: C.store((r.cast(dtypes.int)+1).reshape((1,))).end(r)}
     for name, effect in effects.items():

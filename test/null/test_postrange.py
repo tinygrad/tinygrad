@@ -24,7 +24,7 @@ class TestReductionAxes(unittest.TestCase):
     self.assertEqual(k.upcastable_dims(), [0])
     self.assertEqual(k.upcastable_dims(reduce=True), [1])
     self.assertEqual(k.upcastable_dims(reduce=None), [0, 1])
-    k.convert_loop_to_global()
+    k.convert_weak_to_global()
     self.assertEqual(k.axis_types, [AxisType.GLOBAL, AxisType.WEAK])
     self.assertEqual(k.reduce_ranges, {r})
 

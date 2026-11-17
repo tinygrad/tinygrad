@@ -50,7 +50,7 @@ class _MXCSRContext:
     if lib is None or not hasattr(self, '_saved'): return
     lib.set_fpcr(self._saved)
 
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, uopfunc, AxisType, rewrite_group, graph_rewrite, PatternMatcher, UPat
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, uopfunc, rewrite_group, graph_rewrite, PatternMatcher, UPat
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import run_linear
@@ -308,7 +308,7 @@ class _Ctx:
     """Create a lane range UOp with unique axis ID."""
     if n is None: n = self.wave_size
     self._axis_id += 1
-    return UOp.range(n, self._axis_id, AxisType.LOOP, dtype=dtypes.int)
+    return UOp.range(n, self._axis_id, dtype=dtypes.int)
 
   def unroll_lanes(self, get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
     """Combine lane bits into a mask using RANGE+REDUCE (32-bit for RDNA, 64-bit for CDNA)."""
@@ -1718,14 +1718,14 @@ F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000
 
 @uopfunc
 def emu_consts(sgpr:UOp, wave_size:int):
-  ci = UOp.range(81, 2, AxisType.LOOP, dtype=dtypes.int)
+  ci = UOp.range(81, 2, dtype=dtypes.int)
   init_ints = sgpr.index(ci+128).store((ci<65).where(ci, 64-ci).cast(dtypes.uint32)).end(ci)
   init_floats = UOp.group(*[sgpr.index(i).store(_c(v)) for i,v in F32_INLINE.items()])
   return UOp.sink(init_ints, init_floats, *([sgpr.index(124).store(_c(0))] if wave_size == 32 else []))
 
 @uopfunc
 def emu_loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
-  w = UOp.range(waves, 0, AxisType.LOOP, dtype=dtypes.int)
+  w = UOp.range(waves, 0, dtype=dtypes.int)
   return active[0].store(routes[w].load().eq(header).cast(dtypes.uint32).reduce(w, arg=Ops.MAX).ne(0)).sink()
 
 def lower_body(sink:UOp, name:str) -> UOp:
@@ -1889,8 +1889,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   # init ranges
   wave_size, total_threads = _wave_size(arch), lx*ly*lz
   n_waves = (total_threads+wave_size-1)//wave_size
-  wg = UOp.range(gx*gy*gz, 0, AxisType.LOOP, dtype=dtypes.uint64)
-  wave = UOp.range(n_waves, 1, AxisType.LOOP, dtype=dtypes.int)
+  wg = UOp.range(gx*gy*gz, 0, dtype=dtypes.uint64)
+  wave = UOp.range(n_waves, 1, dtype=dtypes.int)
   # alloc register and LDS buffers
   sgpr = UOp.alloc((n_waves*SGPR_COUNT,), dtypes.uint32, 0, AddrSpace.REG)
   vgpr = UOp.alloc((n_waves*256*wave_size,), dtypes.uint32, 1, AddrSpace.REG)
@@ -1927,7 +1927,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   runtime_sgprs += [(EXEC_LO.offset, ((_c(1, dtypes.uint64)<<n_lanes.minimum(32).cast(dtypes.uint64))-1).cast(dtypes.uint32))]
   if wave_size == 64:
     runtime_sgprs.append((EXEC_LO.offset+1, ((_c(1, dtypes.uint64)<<(n_lanes-32).maximum(0).cast(dtypes.uint64))-1).cast(dtypes.uint32)))
-  lane = UOp.range(wave_size, 5, AxisType.LOOP, dtype=dtypes.int)
+  lane = UOp.range(wave_size, 5, dtype=dtypes.int)
   tid = wave*wave_size+lane
   init_vgpr = wave_vgpr.index(lane.valid(tid<total_threads)).store((((tid//(lx*ly))<<20)|(((tid//lx)%ly)<<10)|(tid%lx)).cast(dtypes.uint32)).end(lane)
   init = UOp.group(init_vgpr, *(wave_sgpr.after(consts).index(i).store(_c(v)) for i,v in dict(runtime_sgprs).items()))
@@ -1957,9 +1957,9 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     params = [UOp.param(i, a.dtype, a.shape, addrspace=AddrSpace.ALU if i >= len(bufs) or bufs[i].addrspace is AddrSpace.ALU
                         else AddrSpace.GLOBAL, name=bufs[i].arg.name if i < len(bufs) else None) for i,a in enumerate(args)]
     # lower the wave loop with the block, so repeated blocks share its indexing and route check too.
-    w = UOp.range(n_waves, 0, AxisType.LOOP, dtype=dtypes.int)
+    w = UOp.range(n_waves, 0, dtype=dtypes.int)
     gates = () if block_pc in unconditional else (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
-                                                            1, AxisType.LOOP, dtype=dtypes.int),)
+                                                            1, dtype=dtypes.int),)
     call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).shrink(((w*s, (w+1)*s),))
                  if (s:=buffers[b][1]) else p.after(*gates, w) for b,p in zip(bufs, params)]
     block = UOp.group(body.call(*call_args, name="emu_block"), *gates, w).end(*gates).end(w).sink()

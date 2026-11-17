@@ -538,7 +538,7 @@ class TestCallInKernel(unittest.TestCase):
     @uopfunc
     def update(S:UOp, A:UOp) -> UOp: return S[0].store(S[0]*10+A[0]).sink()
     def kernel(O:UOp, S:UOp, A:UOp) -> UOp:
-      a, k, b = [UOp.range(2, n, AxisType.LOOP) for n in range(3)]
+      a, k, b = [UOp.range(2, n) for n in range(3)]
       return O[0].store(A[a*2+b].after(update(S.after(k), A[a*2+b])).reduce(a, k, b, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
     o, s = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor.zeros(1, dtype=dtypes.int).contiguous(),
                                 Tensor([1, 2, 3, 4], dtype=dtypes.int), fxn=kernel)[:2]
@@ -615,11 +615,11 @@ class TestCallInKernel(unittest.TestCase):
   def test_call_body_range_is_not_ours(self):
     @uopfunc
     def mul(out:UOp, A:UOp):
-      k = UOp.range(4, 0, AxisType.LOOP)
+      k = UOp.range(4, 0)
       return out[k].store(A[k]*3).end(k).sink()
 
     def kernel(C:UOp, A:UOp):
-      m, i, call = UOp.range(3, 1, AxisType.LOOP), UOp.range(4, 0, AxisType.LOOP), mul(C, A)
+      m, i, call = UOp.range(3, 1), UOp.range(4, 0), mul(C, A)
       self.assertIn(i, call.body.toposort())
       end_m = C.after(call)[m].store(A[m]).end(m)
       return C.after(end_m)[i].store(A[i]+1).end(i).sink(arg=KernelInfo(name="call_body_range", opts_to_apply=()))
@@ -650,7 +650,7 @@ class TestCallInKernel(unittest.TestCase):
   def test_uopfunc(self):
     @uopfunc
     def axpy(out:UOp, x:UOp, a:int) -> UOp: # a is a trace-time constant: two bodies, two C functions
-      i = UOp.range(x.shape[0], 0, AxisType.LOOP)
+      i = UOp.range(x.shape[0], 0)
       return out[i].store(out[i] + x[i] * a).end(i).sink()
 
     @uopfunc
@@ -658,7 +658,7 @@ class TestCallInKernel(unittest.TestCase):
 
     def kernel(C:UOp, A:UOp) -> UOp:
       C = C.after(triple(C.after(axpy(C, A, 2)), A))
-      i = UOp.range(A.shape[0], 1, AxisType.LOOP) # a loop after the calls
+      i = UOp.range(A.shape[0], 1) # a loop after the calls
       return C[i].store(C[i] + 1).end(i).sink(arg=KernelInfo(name="uopfunc", opts_to_apply=()))
 
     a = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
@@ -683,12 +683,12 @@ class TestCallInKernel(unittest.TestCase):
   def test_call_to_copy(self):
     @uopfunc
     def copy(out:UOp, A:UOp):
-      i = UOp.range(out.shape[0], 0, AxisType.LOOP)
+      i = UOp.range(out.shape[0], 0)
       return out[i].store(A[i]).end(i).sink()
 
     def forward(out1:UOp, out2:UOp, A:UOp):
       call = copy(out1, A)
-      i = UOp.range(out2.shape[0], 0, AxisType.LOOP)
+      i = UOp.range(out2.shape[0], 0)
       inline = out2[i].store(A[i]).end(i).sink()
       return UOp.group(call, inline).sink(arg=KernelInfo(name="forward", opts_to_apply=()))
 
