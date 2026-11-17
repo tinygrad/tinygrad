@@ -111,6 +111,11 @@ class TestLLMServiceLaunchers(unittest.TestCase):
         self.assertIn("stale PID file", r.stdout, script)
         self.assertFalse(pidfile.exists(), script)
 
+  def test_qwen_passes_seq_fork(self):
+    # SEQ_FORK (default off) reaches the server only through the launcher's list of passed names: absent unless set
+    self.assertNotIn("SEQ_FORK", self.command("qwen_6x7900xtx.sh"))
+    self.assertIn("SEQ_FORK=1", self.command("qwen_6x7900xtx.sh", {"SEQ_FORK": "1"}))
+
   def test_qwen_power_guard(self):
     proc = subprocess.run(
       [SCRIPTS / "qwen_6x7900xtx.sh", "start"], env={**os.environ, "AM_POWER_LIMIT": "251"}, cwd=ROOT, text=True, capture_output=True
