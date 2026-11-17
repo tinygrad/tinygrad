@@ -176,19 +176,9 @@ def assert_all_same_devices(ast:UOp):
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
   _same_devices.add(ast)
 
-def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
+def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, n:UOp, r:UOp|None=None):
   if dst.device == src.device and not dst.on_disk(): return None
-  # a copy into the start of a larger destination (a contiguous view of it at offset 0) writes that range
-  if dst.device != src.device and dst.max_shape[0] != (n:=1 if r is None else int(r.vmax) + 1):
-    return copy_kernel_to_view_store(call, dst, src, r if r is not None else UOp.const(0), UOp.const(0), n)
   return call.replace(src=(dst.store(src),) + call.src[1:])
-
-def copy_kernel_to_view_store(call:UOp, dst:UOp, src:UOp, r:UOp, off:UOp, n:int|None=None):
-  # dst[off+i] = src[i] across devices: a STORE to the view of the destination (a copy writes a range)
-  if dst.device == src.device or not isinstance(off.arg, int) or off.arg < 0: return None
-  n, args = int(r.vmax) + 1 if n is None else n, list(call.src[1:])
-  args[dst.arg.slot] = args[dst.arg.slot].shrink(((off.arg, off.arg + n),))
-  return call.replace(src=(UOp.param(dst.arg.slot, dst.dtype, n, dst.device).store(src),) + tuple(args))
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # NOTE: this is a codegen for SDMA devices
@@ -200,18 +190,15 @@ def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # the simplified body is kept only if it is a copy, any other kernel goes to codegen unchanged
   return pm_copy_kernel.rewrite(call.replace(src=(sink,) + call.src[1:]))
 
+def copy_pat(n:UPat, i:UPat) -> UPat:
+  # dst[i] = src[i] for two n-element buffers
+  return UPat(Ops.PARAM, src=(n,), name="dst").index(i).store(UPat(Ops.PARAM, src=(n,), name="src").index(i))
+
+# a bulk STORE copies whole buffers, so lower only kernels that copy every i in range(n). a size 1 copy has its range folded to 0
 pm_copy_kernel = PatternMatcher([
-  # lower copy kernels to bulk STOREs
-  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_store),
-  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_store),
-  # a copy into a range of the destination: a STORE to that view
-  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r") + UPat.cvar("off"))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_view_store),
+  (UPat(Ops.CALL, src=(copy_pat(UPat.cvar("n", arg=1), UPat.cvar(arg=0)).sink(),), name="call", allow_any_len=True), copy_kernel_to_store),
+  (UPat(Ops.CALL, src=(copy_pat(UPat.var("n"), UPat(Ops.RANGE, src=(UPat.var("n"),), name="r")).end(UPat(Ops.RANGE, name="r")).sink(),),
+        name="call", allow_any_len=True), copy_kernel_to_store),
 ])
 
 pm_copy_from_store = PatternMatcher([
