@@ -568,16 +568,18 @@ class TestCustomKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.arange(N).clone("CPU"), fxn=kernel)[0]
     self.assertEqual(out.tolist(), [3, 2, 1, 0])
 
-  def test_alloc(self):
+  def test_alloc(self, N=1):
     def kernel(out:UOp, inp:UOp):
-      i = UOp.range(4, 0, AxisType.LOOP)
-      alloc = UOp.alloc((4,), dtypes.int, -1, addrspace=AddrSpace.REG)
-      buf = UOp._buffer(4, dtypes.int, -1, addrspace=AddrSpace.REG)
+      i = UOp.range(N, 0, AxisType.LOOP)
+      alloc = UOp.alloc((N,), dtypes.int, -1, addrspace=AddrSpace.REG)
+      buf = UOp._buffer(N, dtypes.int, -1, addrspace=AddrSpace.REG)
       alloc = alloc[i].set(inp[i])
-      buf = buf.after(alloc)[i].set(inp[i+4])
+      buf = buf.after(alloc)[i].set(inp[i+N])
       return out[i].store(alloc.after(buf)[i] + buf[i]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
-    out = Tensor.custom_kernel(Tensor.empty(4, dtype=dtypes.int), Tensor.arange(8).clone().realize(), fxn=kernel)[0]
-    self.assertEqual(out.tolist(), [4, 6, 8, 10])
+    out = Tensor.custom_kernel(Tensor.empty(N, dtype=dtypes.int), Tensor.arange(2*N).clone().realize(), fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [2*i+N for i in range(N)])
+
+  def test_alloc_vec(self): self.test_alloc(4)
 
   def test_store_value_broadcasts_to_target(self):
     def stored(shape:tuple[int, ...]) -> list:

@@ -202,9 +202,9 @@ def flag_gate(m:UOp) -> UOp|None:
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
-  # vector BUFFERs get modeled in STACK space
-  (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x: x.replace(arg=replace(x.arg, addrspace=AddrSpace.LOCAL))
-    if x.addrspace is AddrSpace.REG and x.max_numel() > 1 else None),
+  # vector BUFFERs get modeled in scratch space
+  (UPat((Ops.BUFFER, Ops.ALLOC), name="x"),
+   lambda x: scratch_buffer(x.dtype, n, x.arg.slot) if x.addrspace is AddrSpace.REG and (n:=x.max_numel()) > 1 else None),
   # widening a uint32 is free, the 32bit write that produced it already zeroed the upper half
   (UPat(dtype=dtypes.uint32).cast(dtypes.int64s, name="x"), lambda x: x.replace(op=Ops.BITCAST)),
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
