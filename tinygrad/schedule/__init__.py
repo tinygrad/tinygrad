@@ -62,11 +62,14 @@ def create_schedule(sched_sink:UOp) -> UOp:
     # WAR deps: a kernel reading buffer state S must run before another write that supersedes S. an AFTER only
     # supersedes its immediate prior state; join members already present in that prior state are ordering deps, not writes
     for u, k, s in reads:
+      sibling_writes = len(writes.get(s, [])) > 1
       for a, write_kernels in writes.get(s, []):
         if a is u: continue
         for t in write_kernels:
-          # (a write the reader depends on already ran before it: no edge back to it, see redflash's in place state updates)
-          if t is not k and t not in k.backward_slice:
+          # (a write the reader depends on already ran before it: no edge back to it, ONLY between sibling AFTERs of one state (redflash's
+          #  in place state updates). a single write of S that the reader of S depends on is a real WAR conflict: the edge makes the cycle
+          #  error below, as master, instead of a read of the new value)
+          if t is not k and not (sibling_writes and t in k.backward_slice):
             children.setdefault(k, []).append(t)
             in_degree[t] += 1
 

@@ -1,6 +1,6 @@
 # New C9 production-shaped start line on NULL: model load and full sequence warm-up, never real GPU execution.
 # mypy: ignore-errors
-import os, runpy, sys
+import os, runpy, socket, sys
 from tinygrad import Device, Tensor
 
 _realize = Tensor.realize
@@ -104,6 +104,13 @@ def done(self, *args, **kwargs):
 
 
 serve.LLMServer.serve_forever = done
+def _free_port() -> int:
+  # (a fixed port collided with another agent's warm-up binding it at the same moment: Errno 98, Nov 16 16:3x)
+  with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    return s.getsockname()[1]
+
+
 sys.argv = ["tinygrad.llm", "--model", os.environ["MODEL"], "--shard", "14",
-            "--max_context", os.environ.get("MAX_CONTEXT", "262144"), "--serve", "18998"]
+            "--max_context", os.environ.get("MAX_CONTEXT", "262144"), "--serve", str(_free_port())]
 runpy.run_module("tinygrad.llm", run_name="__main__")

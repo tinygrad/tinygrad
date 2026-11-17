@@ -211,6 +211,13 @@ GLM53_POWER_LIMIT=180 AM_PERF_LEVEL=high CLOCK_PREFILL=GFXCLK=2300 \
 
 The launcher expands q4 to `SEQ_FP8=1`, `SEQ_FP8_IDX=0`, `SEQ_KV4=1`; `GLM_KV=fp8` is a separate mode. Real 14-card start, capacity and correctness checks remain required for both configurations.
 
+### When a start is refused: restart in place
+A start that stops with `the card needs a mode1 reset (left initialised by a process that did not finalize)` is restarted ON THE SAME VM
+with a reset-enabled start (`AM_VM_RESET=1`). Do not delete or recreate the VM for it: a freed six-GPU host is taken by CI within a
+minute (Nov 16, 15:57: g3 lost that way). A model switch on one VM boot always meets it: the Qwen launcher sets `AM_MEC_PIPES=2`, the GLM
+Flash launcher leaves 1, so the other model's clean stop leaves a boot version the new start does not accept; a start of the same
+launcher after its own clean stop needs no reset.
+
 ## Pokemon (one game through a whole 262,144-token window, screenshots in every turn)
 
 A game is a workflow on the normal C2 / C5 servers with a few settings changed; vision stays mandatory. One fresh six-card 7900 XTX VM,
@@ -222,11 +229,14 @@ without it every turn re-reads the whole conversation from token 0):
 
 ```bash
 SPEC_DRAFTS=3 PREFILL_SIZES=192,384,1152 VISION_MAX_IMAGES=2048 VISION_CACHE_MB=2048 SERVE_RENDER_CACHE=1 SEQ_CKPT_TAIL=1 \
-  VISION_MAX_BODY_MB=64 VISION_URL_CACHE_MB=4608 SEQ_STASH_GB=41 bash extra/llm_service/qwen_6x7900xtx.sh start
+  VISION_MAX_BODY_MB=64 VISION_URL_CACHE_MB=4608 SEQ_STASH_GB=41 AGING=100 SEQ_STARVE=60 bash extra/llm_service/qwen_6x7900xtx.sh start
 ```
 
 (The last three since Nov 16 02:4x, g4: the game resends every screenshot each turn, ~33.6 MB at ~840 turns, over the 32 MB default;
 the URL cache keeps every decoded screenshot of 12 games, paid from the host stash, 46 -> 41 GB.)
+(`AGING=100 SEQ_STARVE=60` since Nov 16 ~16:00: with the default order (fewest new tokens first, no aging) a turn of 250-400 new tokens
+waited behind every ~200-token turn of the other games: on g4 (~30 games) 262 such turns waited 242 s on average, p90 600 s = the
+default SEQ_STARVE; a waiting turn now gains 100 tokens a second, and none waits more than 60 s before it goes first. Scheduling only.)
 
 **GLM Flash server** (the C5 launcher: since Nov 15 22:3x its default line carries all of the values below; the line is kept as the record of the R2 games; `VISION_BUCKETS=320,576` adds a
 320-patch bucket for the game's 240x216 screenshot (72 rows = 288 patches; C5's own 576 alone pads it to 576); the GLM R2 games ran this line):
