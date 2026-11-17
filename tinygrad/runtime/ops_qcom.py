@@ -301,6 +301,7 @@ Compiled.pm_encode += PatternMatcher([
 ])
 
 class QCOMDevice(Compiled):
+  renderers = [QCOMCLRenderer, IR3Renderer]
   timestamp_divider = 19.2
 
   @property
@@ -329,7 +330,7 @@ class QCOMDevice(Compiled):
     if PROFILE and self.gpu_id[:2] < (7, 3):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
-    super().__init__(device, QCOMAllocator(self), [QCOMCLRenderer, IR3Renderer], None,
+    super().__init__(device, QCOMAllocator(self), None,
                      arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id)
 
     self.var_vals = {"kgsl_fd": self.fd.fd, "kgsl_ctx": self.ctx}

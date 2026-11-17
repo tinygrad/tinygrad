@@ -563,6 +563,7 @@ Compiled.pm_encode += PatternMatcher([
 ])
 
 class NVDevice(Compiled):
+  renderers = [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer]
   ifaces = [NVKIface, PCIIface, MOCKIface]
   sleep_timeout_ms = 200
 
@@ -606,7 +607,7 @@ class NVDevice(Compiled):
     # Set windows addresses to not collide with other allocated buffers.
     self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
-    super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], None, arch=self.arch)
+    super().__init__(device, NVAllocator(self), None, arch=self.arch)
 
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 

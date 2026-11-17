@@ -197,6 +197,7 @@ def poll_event(p:UOp, t:UOp) -> UOp|None:
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.PARAM, name="p").f(Ops.AFTER, allow_any_len=True, name="t").index(UPat.const(0)).load(), poll_event)])
 
 class MetalDevice(Compiled):
+  renderers = [MetalRenderer]
   has_copy_queue = False
 
   def __init__(self, device:str=""):
@@ -217,7 +218,7 @@ class MetalDevice(Compiled):
 
     # https://developer.apple.com/documentation/metal/mtlgpufamily
     def check_family(f): return next(filter(self.sysdevice.supportsFamily, reversed([v for v, nm in metal.enum_MTLGPUFamily.items() if f in nm])), 0)
-    super().__init__(device, MetalAllocator(self), [MetalRenderer], None,
+    super().__init__(device, MetalAllocator(self), None,
                      arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
     Compiled.link_bufs |= {to_name(self.device, "handles"): lambda b: self.handles}
     Compiled.pm_link += PatternMatcher([

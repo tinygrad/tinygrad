@@ -813,6 +813,7 @@ class USBIface(PCIIface):
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
 class AMDDevice(Compiled):
+  renderers = [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer]
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
   sleep_timeout_ms = 200
   max_scratch_psize = 0
@@ -857,7 +858,7 @@ class AMDDevice(Compiled):
     self.sdma_queues:dict = {}
 
     allocator = USBAllocator(self) if self.is_usb else AMDAllocator(self)
-    super().__init__(device, allocator, [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, arch=self.arch)
+    super().__init__(device, allocator, None, arch=self.arch)
 
     # Scratch setup
     self.max_private_segment_size = 0

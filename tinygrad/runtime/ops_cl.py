@@ -95,6 +95,7 @@ class CLAllocator(HostAllocator):
   def _copyout(self, dest:memoryview, src:int): self._copy(cl.clEnqueueReadBuffer, f"{self.dev.device} -> TINY", src, from_mv(dest), dest.nbytes)
 
 class CLDevice(Compiled):
+  renderers = [OpenCLRenderer]
   device_ids = None                 # this is global and only initted once
   timestamp_divider = 3000 / 125 if OSX else 1000.0
 
@@ -117,7 +118,7 @@ class CLDevice(Compiled):
     if "cl_khr_image2d_from_buffer" in exts:
       check(cl.clGetDeviceInfo(self.cl_dev, cl.CL_DEVICE_IMAGE_PITCH_ALIGNMENT, 4, ctypes.byref(ipa := ctypes.c_uint32()), None))
       arch += f",IMAGE_PITCH_ALIGNMENT={ipa.value}"
-    super().__init__(device, CLAllocator(self), [OpenCLRenderer], None, arch=arch)
+    super().__init__(device, CLAllocator(self), None, arch=arch)
     Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, name="p").store(UPat(Ops.PROGRAM, name="prg")), lambda p, prg, d=self:
       p.store(UOp(Ops.BINARY, arg=d.function(prg.src[3].arg, prg.src[0].arg.function_name))) if p.device == d.device else None)])
 
