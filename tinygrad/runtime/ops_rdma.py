@@ -60,7 +60,7 @@ class RDMADevice(Compiled):
 
   def __init__(self, device:str):
     self.iface = self._select_iface(device)
-    super().__init__(device, BNXTAllocator(self), [], None)
+    super().__init__(device, BNXTAllocator(self), None)
 
 # *****************
 # UOps implementation

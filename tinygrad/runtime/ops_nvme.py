@@ -108,7 +108,7 @@ class NVMEDevice(Compiled):
   def __init__(self, device:str):
     self.iface = self._select_iface(device)
     self.nvme = cast(NVMEDev, self.iface.dev_impl)
-    super().__init__(device, NVMEAllocator(self), [], None)
+    super().__init__(device, NVMEAllocator(self), None)
   def synchronize(self, timeout:int|None=None): pass
 
 # *****************

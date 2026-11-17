@@ -17,7 +17,7 @@ class DiskDevice(Compiled):
     self.size: int|None = None
     self.fd: int|None = None
     self.refcount, self.info = 0, Buffer(HCQ_RUNTIME_DEV.device, 16, options=BufferSpec(nolru=True)) # info: [fd, mmap address] for batch reads
-    super().__init__(device, DiskAllocator(self), [], None)
+    super().__init__(device, DiskAllocator(self), None)
   def _might_open(self, size:int):
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
     if self.size is not None and hasattr(self, "mem"):

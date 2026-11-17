@@ -97,7 +97,7 @@ class CUDADevice(Compiled):
     self.cu_device = init_c_var(api.CUdevice, lambda x: check(api.cuDeviceGet(ctypes.byref(x), device_id)))
     self.context = init_c_var(api.CUcontext, lambda x: check(api.cuCtxCreate_v2(ctypes.byref(x), 0, self.cu_device)))
     self.streams = [init_c_var(api.CUstream, lambda x: check(api.cuStreamCreate(ctypes.byref(x), cuda.CU_STREAM_NON_BLOCKING))) for _ in range(2)]
-    super().__init__(device, CUDAAllocator(self), self.renderers, None, arch=self.get_arch(device_id))
+    super().__init__(device, CUDAAllocator(self), None, arch=self.get_arch(device_id))
 
     # [ctx, compute stream, copy stream], and the host function that writes a timestamp
     handles = Buffer(HCQ_RUNTIME_DEV.device, 24, initial_value=b"".join(map(bytes, (self.context, *self.streams))))

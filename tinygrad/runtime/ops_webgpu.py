@@ -165,6 +165,7 @@ class WebGpuAllocator(Allocator['WebGpuDevice']):
   def _free(self, storage:BufferStorage, options:BufferSpec): self.dev.free(storage.buf)
 
 class WebGpuDevice(Compiled):
+  renderers = [WGSLRenderer]
   def __init__(self, device:str):
     # Requesting an adapter
     adapter_res = InstanceRequestAdapter(instance, webgpu.WGPURequestAdapterOptions(
@@ -188,7 +189,7 @@ class WebGpuDevice(Compiled):
 
     webgpu.wgpuAdapterRelease(adapter_res)
 
-    super().__init__(device, WebGpuAllocator(self), [WGSLRenderer], WebGPUProgram,
+    super().__init__(device, WebGpuAllocator(self), WebGPUProgram,
                      arch="shader-f16" * (webgpu.WGPUFeatureName_ShaderF16 in self.features))
 
   def synchronize(self, timeout:int|None=None): QueueOnSubmittedWorkDone(self.queue)

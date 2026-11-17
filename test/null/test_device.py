@@ -2,7 +2,7 @@
 import unittest, os, subprocess
 from unittest.mock import patch
 from tinygrad import Tensor, dtypes
-from tinygrad.device import Device, enumerate_devices_str
+from tinygrad.device import Device, enumerate_devices_str, select_renderer
 from tinygrad.renderer import Compiler
 from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, OSX, DEV, CACHELEVEL
 from tinygrad.runtime.support.c import DLL
@@ -171,6 +171,15 @@ class TestDevVar(unittest.TestCase):
       self.assertEqual(DEV.target("QCOM"), Target("QCOM", "IR3"))
       self.assertEqual(DEV.target("AMD"), Target("AMD", "LLVM"))
       self.assertEqual(DEV.target("CPU"), Target("CPU"))
+
+  def test_select_renderer(self):
+    # a renderer is built from a Target alone, its device isn't opened
+    with Context(ALLOW_DEVICE_USAGE=0):
+      ren = select_renderer(Target("NV", "PTX", "sm_80"))
+      self.assertEqual((type(ren).__name__, ren.target.arch), ("PTXRenderer", "sm_80"))
+      self.assertIs(select_renderer(Target("NV", "PTX", "sm_80")), ren)
+      self.assertEqual(type(select_renderer(Target("PYTHON"))).__name__, "PythonRenderer")
+      with self.assertRaisesRegex(RuntimeError, "has no renderer"): select_renderer(Target("PYTHON", "LLVM"))
 
   def test_dev_arch_override(self):
     with Context(DEV="NULL::gfx1100"):

@@ -62,6 +62,8 @@ Compiled.pm_encode += PatternMatcher([
 ])
 
 class NullDevice(Compiled):
+  renderers = dedup([NullRenderer] + [r for m in [cstyle, nir, ptx, llvmir, wgsl] for r in m.__dict__.values()
+                                      if inspect.isclass(r) and issubclass(r, Renderer)])
   host = property(lambda self: self.device)
   timeline = functools.cached_property(lambda self: self.host_buffer(16))
   error_state = functools.cached_property(lambda self: self.host_buffer(8))
@@ -69,9 +71,7 @@ class NullDevice(Compiled):
   def __init__(self, device:str):
     assert (emu:=getenv("EMULATE", "")) == "", \
       "EMULATE is deprecated, use DEV=NULL:HIP:"+{"AMD":"gfx1100", "AMD_RDNA4":"gfx1201", "AMD_CDNA4":"gfx950"}.get(emu, "<arch>")
-    renderers = [NullRenderer] + [r for m in [cstyle, nir, ptx, llvmir, wgsl] for r in m.__dict__.values()
-                                  if inspect.isclass(r) and issubclass(r, Renderer)]
-    super().__init__(device, NullAllocator(self), dedup(renderers), NullProgram)
+    super().__init__(device, NullAllocator(self), NullProgram)
 
   # its memory is fake: every placeholder on it gets host memory
   def host_buffer(self, n:int) -> Buffer: return Buffer(self.device, n, opaque=memoryview(bytearray(n)), options=BufferSpec(external_ptr=1))
