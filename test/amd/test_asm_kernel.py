@@ -1,7 +1,5 @@
 import unittest
 import functools
-from dataclasses import dataclass
-from typing import Callable
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
@@ -12,69 +10,37 @@ from tinygrad.helpers import getenv, Context
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
-from tinygrad.renderer.amd.dsl import s, v, NULL, Reg, Inst
+from tinygrad.renderer.amd.dsl import s, v, NULL
 from test.amd.helpers import TARGET_TO_ARCH
 from test.mockgpu.amd.emu import RELIFT
 from extra.gemm.amd_asm_matmul import Kernel
-
-# small pattern matcher converting CALL to INS
-from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, rewrite_group
-
-@dataclass(frozen=True)
-class InstInfo:
-  op: Callable[..., Inst]
-  def __repr__(self):
-    op = self.op
-    if isinstance(op, functools.partial):
-      args = [op.args[0].name.lower(), *map(repr, op.args[1:]), *(f"{k}={v!r}" for k, v in op.keywords.items())]
-      return f"InstInfo({', '.join(args)})"
-    return f"InstInfo({op.__name__})"
-  def __reduce__(self):
-    from test.amd.test_asm_kernel import InstInfo
-    return (InstInfo, (self.op,))
-
-def assemble_inst(call:UOp) -> UOp|None:
-  if not isinstance(call.arg, InstInfo): return None
-  src = [u.without_after for u in call.src[1:] if u.dtype != dtypes.void]
-  regs = [(u.src[0].without_after, len(u.src)) if u.op is Ops.STACK else (u, 1) for u in src]
-  args = [Reg(u.arg.slot + (256 if u.arg.name == "v" else 0), size) for u, size in regs]
-  return UOp(Ops.INS, src=call.src[1:], arg=(call.arg.op(*args), dtypes.void))
-
-assemble_sink_pm = PatternMatcher([(UPat(Ops.CALL, name="call"), assemble_inst),])
-
-@rewrite_group("call_to_ins")
-def call_to_ins(sink:UOp) -> UOp:
-  ins = graph_rewrite(sink, assemble_sink_pm, name="convert CALL to INS")
-  lin = UOp(Ops.LINEAR, src=tuple(u for u in ins.toposort() if u.op is Ops.INS))
-  return UOp(Ops.PROGRAM, src=(sink.replace(src=tuple(u for u in sink.src if u.op not in {Ops.CALL, Ops.AFTER})), lin))
 
 def custom_add_one(A:UOp) -> UOp:
   A = A.flatten()
   assert dtypes.is_float(A.dtype), f"buffer dtype must be float32, got {A.dtype}"
   threads = UOp.special(A.numel(), "lidx0")
-  # SGPRs have shape (1,)
-  dest = tuple(UOp.param(i, dtypes.int32, (1,), addrspace=AddrSpace.REG, name="s") for i in range(2))
-  # use STACK for SGPR pairs, s[0:1] has shape (2, 1)
-  kernarg = UOp.stack(*dest)
-  # NOTE: this call body doesn't implement the instruction, this exists in the emulator
-  kernarg_load = UOp(Ops.CALL, src=(UOp.sink(), UOp.stack(*dest), kernarg), arg=InstInfo(functools.partial(s_load_b64, soffset=NULL)))
-  kernarg_wait = UOp(Ops.CALL, src=(UOp.sink(), kernarg_load), arg=InstInfo(functools.partial(s_waitcnt_lgkmcnt, sdst=NULL, simm16=0)))
-  saddr_after = UOp.stack(*(d.after(kernarg_wait) for d in dest))
+  # s[0:1] and v[0] are passed from the caller
+  kernarg = UOp.stack(*(UOp.param(i, dtypes.uint32, (1,), addrspace=AddrSpace.REG, reg=s[i]) for i in range(2)))
+  lane = UOp.param(2, dtypes.u32, (32,), addrspace=AddrSpace.REG, reg=v[0])
+  # SGPRs have shape (1,), use STACK for SGPR pairs, s[2:3] has shape (2, 1)
+  saddr = UOp.stack(*(UOp.alloc((1,), dtypes.u32, i, AddrSpace.REG, reg=s[i+2]) for i in range(2)))
   # VPGRs have shape (32,)
-  offset_val = UOp.param(0, dtypes.int32, (32,), addrspace=AddrSpace.REG, name="v")
-  offset_call = UOp(Ops.CALL, src=(UOp.sink(), offset_val, offset_val), arg=InstInfo(functools.partial(v_lshlrev_b32_e32, src0=2)))
-  offset_after = offset_val.after(offset_call)
-  val = UOp.param(1, dtypes.float32, (32,), addrspace=AddrSpace.REG, name="v")
-  load_call = UOp(Ops.CALL, src=(UOp.sink(), val, offset_after, offset_val, saddr_after), arg=InstInfo(global_load_b32))
-  wait_call = UOp(Ops.CALL, src=(UOp.sink(), load_call), arg=InstInfo(functools.partial(s_waitcnt_vmcnt, sdst=NULL, simm16=0)))
-  c1_dest = UOp.param(2, dtypes.float32, (32,), addrspace=AddrSpace.REG, name="v")
-  mov_call = UOp(Ops.CALL, src=(UOp.sink(), c1_dest), arg=InstInfo(functools.partial(v_mov_b32_e32, src0=1.0)))
-  add_dest = val
-  add_after = add_dest.after(UOp(Ops.CALL, src=(UOp.sink(), add_dest, val.after(wait_call), c1_dest.after(mov_call)), arg=InstInfo(v_add_f32_e32)))
-  store_to_global = UOp(Ops.CALL, src=(UOp.sink(), offset_val, offset_after, add_after, saddr_after), arg=InstInfo(global_store_b32))
-  end_call = UOp(Ops.CALL, src=(UOp.sink(), store_to_global), arg=InstInfo(s_endpgm))
-  sink = UOp.sink(A.base, threads, end_call, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
-  return call_to_ins(sink)
+  offset = UOp.alloc((32,), dtypes.u32, 2, AddrSpace.REG, reg=v[1])
+  value = UOp.alloc((32,), dtypes.u32, 3, AddrSpace.REG, reg=v[2])
+  one = UOp.alloc((32,), dtypes.u32, 4, AddrSpace.REG, reg=v[3])
+  result = UOp.alloc((32,), dtypes.u32, 5, AddrSpace.REG, reg=v[4])
+  saddr = saddr.after(UOp.asm(s_load_b64(s[2:3], s[0:1], soffset=NULL)).call(saddr, kernarg))
+  saddr = saddr.after(UOp.asm(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0)).call(saddr))
+  offset = offset.after(UOp.asm(v_lshlrev_b32_e32(v[1], 2, v[0])).call(offset, lane))
+  value = value.after(UOp.asm(global_load_b32(v[2], v[1], saddr=s[2:3])).call(value, offset, saddr, A))
+  value = value.after(UOp.asm(s_waitcnt_vmcnt(sdst=NULL, simm16=0)).call(value))
+  one = one.after(UOp.asm(v_mov_b32_e32(v[3], 1.0)).call(one))
+  result = result.after(UOp.asm(v_add_f32_e32(v[4], v[2], v[3])).call(result, value, one))
+  store = A.after(UOp.asm(global_store_b32(addr=v[1], data=v[4], saddr=s[2:3])).call(A, offset, result, saddr))
+  end = UOp.asm(s_endpgm()).call(store)
+  sink = UOp.sink(A.base, threads, end, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
+  linear = UOp(Ops.LINEAR, src=tuple(u for u in sink.toposort() if u.op is Ops.CALL))
+  return UOp(Ops.PROGRAM, src=(sink.replace(src=sink.src[:2]), linear))
 
 def custom_add_var(A:UOp, B:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
@@ -93,7 +59,7 @@ def custom_add_var(A:UOp, B:UOp) -> UOp:
     s_endpgm(),
   ]
   sink = UOp.sink(A.base, B.base, var, threads, arg=KernelInfo(f"custom_add_var_{A.numel()}"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
 
 def custom_wave_sync(A:UOp, arch:str) -> UOp:
   # 4 waves across 1024 WG — enough to saturate a SIMD with many concurrent WGs
@@ -107,7 +73,7 @@ def custom_wave_sync(A:UOp, arch:str) -> UOp:
     insts += [s_nop(0)]*4
   insts.append(s_endpgm())
   sink = UOp.sink(A.base, threads, wg, arg=KernelInfo("custom_wave_sync"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
 
 def custom_lds_sync(A:UOp, arch:str) -> UOp:
   A = A.flatten()
@@ -141,7 +107,7 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
     isa.s_endpgm(),
   ]
   sink = UOp.sink(A.base, lds, threads, wg, arg=KernelInfo("custom_lds_sync"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
 
 def custom_handwritten(A:UOp) -> UOp:
   A = A.flatten()
@@ -187,7 +153,7 @@ def custom_handwritten(A:UOp) -> UOp:
   k.emit(r4.s_endpgm())
   insts = k.finalize()
   sink = UOp.sink(A.base, threads, wg, lds, arg=KernelInfo("custom_handwritten"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
 
 def custom_data_deps(A:UOp) -> UOp:
   A = A.flatten()
@@ -203,7 +169,7 @@ def custom_data_deps(A:UOp) -> UOp:
   k.emit(s_endpgm())
   insts = k.finalize()
   sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_data_deps"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestAsmKernel(unittest.TestCase):
@@ -275,7 +241,7 @@ class TestAsmKernel(unittest.TestCase):
       k.emit(s_endpgm())
       insts = k.finalize()
       sink = UOp.sink(out.base, arg=KernelInfo("cfg_kernel"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
     out = Tensor.empty(3).custom_kernel(fxn=cfg_kernel)[0]
     self.assertListEqual(out.tolist(), [2.0, 1.0, 3.0])
 
@@ -296,7 +262,7 @@ class TestAsmKernel(unittest.TestCase):
       k.emit(s_endpgm())
       insts = k.finalize()
       sink = UOp.sink(out.base, arg=KernelInfo("cfg_loop_kernel"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
     out = Tensor.empty(1, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel)[0]
     self.assertListEqual(out.tolist(), [4])
 
@@ -309,7 +275,7 @@ class TestAsmKernel(unittest.TestCase):
         global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), s_endpgm(),
       ]
       sink = UOp.sink(out.base, UOp.special(1, "lidx0"), arg=KernelInfo("unaligned_global_store"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.asm(x).call() for x in insts))))
     out = Tensor.full((8,), 0xA5, dtype=dtypes.uint8).contiguous().realize()
     out = out.custom_kernel(fxn=store_kernel)[0]
     self.assertListEqual(out.tolist(), [0xA5, 0xA5, 0x78, 0x56, 0x34, 0x12, 0xA5, 0xA5])
@@ -321,7 +287,7 @@ class TestAsmKernel(unittest.TestCase):
       insts = [s_load_b64(s[0:1], s[0:1], soffset=NULL), s_waitcnt_lgkmcnt(sdst=NULL, simm16=0), v_mov_b32_e32(v[0], 0),
                v_mov_b32_e32(v[1], 7), *[s_nop(0)]*55, global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), s_endpgm()]
       sink = UOp.sink(out.base, UOp.special(1, "lidx0"), arg=KernelInfo("store_at_text_end"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.asm(x).call() for x in insts))))
     out = Tensor.zeros(1, dtype=dtypes.int32).contiguous().realize().custom_kernel(fxn=store_kernel)[0]
     self.assertListEqual(out.tolist(), [7])
 
@@ -339,7 +305,7 @@ class TestAsmKernel(unittest.TestCase):
         s_endpgm(),
       ]
       sink = UOp.sink(out.base, UOp.special(threads, "lidx0"), arg=KernelInfo(f"wave_sgprs_{threads}"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.asm(x).call() for x in insts))))
     for t in [31, 55, 64]:
       out = Tensor(np.full(t, 0xFFFFFFFF, dtype=np.uint32)).realize().custom_kernel(fxn=functools.partial(readlane_kernel, threads=t))[0]
       self.assertListEqual(out.tolist(), [i//32*32 for i in range(t)])
@@ -366,7 +332,7 @@ class TestAsmKernel(unittest.TestCase):
         global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), s_endpgm(),
       ]
       sink = UOp.sink(out.base, arg=KernelInfo("k"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.asm(x).call() for x in insts))))
     out = Tensor.empty(1, dtype=dtypes.uint32).custom_kernel(fxn=k)[0]
     with Context(RELIFT=max(RELIFT.value, 1)):
       out.realize()
