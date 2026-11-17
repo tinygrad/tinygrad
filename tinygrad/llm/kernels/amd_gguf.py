@@ -24,8 +24,8 @@ def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
   packed_sizes = {typ: decoded.numel() * type_size // 256 for typ,type_size in QUANT_SIZES.items()
                   if in_features % GGML_BLOCK_SIZE == 0 or typ in SMALL_BLOCK_QUANTS}
   graph = decoded.uop.toposort()
-  raw = next((u for u in graph if u.op in (Ops.SHRINK, Ops.BUFFER, Ops.UNSHARD) and u.dtype == dtypes.uint8 and
-              prod(u.shape) in packed_sizes.values()), None)
+  ops = (Ops.UNSHARD,) if decoded.uop.axis is not None else (Ops.SHRINK, Ops.BUFFER)
+  raw = next((u for u in graph if u.op in ops and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes.values()), None)
   if raw is None: return None
   # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
   # This rejects subsequent arithmetic and permutations, including RoPE's concatenated query weights.
