@@ -3,14 +3,15 @@
 # usage: python3 extra/llm_service/smoke.py <url> [--slots 64] [--rows-4k N] [--no-pictures] [--no-reasoning] [--only abcd]
 #  a  20 chats with NO sampling parameters: status 200, stray-script characters in content = 0, no <think> in content, reasoning in
 #     reasoning_content on every reply (--no-reasoning for a model that does not think), five printed for the eye
-#  b  sampling honoured: one-token draws at T 1 / top_p 1 and T 1 / top_p 0.95: the top_p 0.95 arm draws (almost) nothing from the
-#     top_p 1 arm's last 5% tail (fails if that tail is empty); a request with top_k and an unknown field is answered (200), and one
-#     with presence / frequency / repetition penalties (200; this server ignores them: printed, RUNNING.md)
+#  b  sampling against the server's own distribution: one-token draws at T 1 / top_p 1 / top_k 0 (plain), T 1 / top_p 0.95 and T 1 alone
+#     (the model's defaults): on plain's head (its top 92%) the other two arms' relative frequencies equal plain's (chi-square, fails at
+#     p < 0.001 or without power); a request with top_k and an unknown field is answered (200), and one with presence / frequency /
+#     repetition penalties (200; this server ignores them: printed, RUNNING.md)
 #  c  returning turns under pressure: N = max(80, 1.25 x slots) conversations, a secret each, then every one returns and must answer its
 #     OWN secret (100%); text, then one picture each
 #  d  10 pictures in one request accepted; a 3840x2160 picture's prompt tokens (checked against --rows-4k if given)
 # It cannot check (e), that the start was made by the launcher exactly as RUNNING.md prints it: say that in the 'serves' line yourself.
-import sys, json, re, time, random, base64, io, argparse, collections, urllib.request, urllib.error
+import sys, json, re, time, math, random, base64, io, argparse, collections, urllib.request, urllib.error
 from concurrent.futures import ThreadPoolExecutor
 
 ap = argparse.ArgumentParser()
@@ -18,7 +19,8 @@ ap.add_argument("url")
 ap.add_argument("--slots", type=int, default=64)
 ap.add_argument("--rows-4k", type=int, default=0)
 ap.add_argument("--no-pictures", action="store_true")
-ap.add_argument("--draws", type=int, default=300)
+ap.add_argument("--draws", type=int, default=600)
+ap.add_argument("--head", type=float, default=0.92, help="part b: plain's head = its top tokens while the mass before them is under this")
 ap.add_argument("--max-tokens", type=int, default=8000, help="max_tokens of the part a chats (a thinking model's reply must fit)")
 ap.add_argument("--ret-max-tokens", type=int, default=48, help="max_tokens of a part c reply (thinking off)")
 ap.add_argument("--draw-prompt", default="Name one fruit. Reply with the fruit's name only, no other words.",
@@ -71,47 +73,66 @@ if "a" in args.only:
   for t, r in list(zip(topics, [r for _, r in res]))[:5]: say(f"  EYE [{t}]: {content(r)[:300]!r}")
   if len(ok) != len(topics) or stray or think or empty or (not args.no_reasoning and reasoning != len(ok)): fails.append("a")
 
+def chi2_sf(x:float, k:int) -> float:
+  # P(chi-square with k degrees > x): regularized upper incomplete gamma, series form
+  if x <= 0: return 1.0
+  a, tot, term, n = k / 2, 0.0, 2.0 / k, 0
+  while term > 1e-15 * tot and n < 100000:
+    tot += term
+    n += 1
+    term *= (x / 2) / (a + n)
+  return max(0.0, 1 - tot * math.exp(-x / 2 + a * math.log(x / 2) - math.lgamma(a)))
+
 if "b" in args.only:
+  # SAMPLING against the server's own distribution: the first generated token of --draw-prompt, drawn --draws times in three arms:
+  # plain (temperature 1, top_p 1, top_k 0) = the model's distribution, P95 (temperature 1, top_p 0.95) and default (temperature 1 alone:
+  # the server adds the model's defaults, both GGUFs top_p 0.95, Qwen also top_k 20). A correct nucleus only CUTS the tail and renormalises:
+  # on the plain arm's head H (its tokens in rank order while the mass before them is under --head 0.92: inside a nucleus of 0.95, 2-3 standard errors
+  # at 600 draws, and top_k >= |H|)
+  # the relative frequencies of P95 and default equal plain's: a two-sample chi-square on H's bins, fail at p < 0.001. A nucleus that keeps
+  # the top token alone (Qwen, Nov 16) or that reshapes the head fails; a peaked model does not (the old 'distinct of 40' rule failed GLM
+  # Flash and GLM 5.3 for that). No power (|H| < 2 or under 20 plain draws below the top token in H) fails too: pick a --draw-prompt with a
+  # spread. An IGNORED top_p is not decidable this way (the cut mass can be ~0): the mass outside H is printed for the eye.
   msgs = [{"role": "user", "content": args.draw_prompt}]
   def draw(kw): return post({"messages": msgs, "max_tokens": 1, **NOTHINK, **kw})
   # the first generated token: in content, or in reasoning_content for a model that always thinks (GLM 5.3 Flash ignores enable_thinking)
   def first(r:dict) -> str: return content(r) or ((r.get("choices") or [{}])[0].get("message") or {}).get("reasoning_content") or ""
   arms = {}
-  for name, kw in (("P1", {"temperature": 1.0, "top_p": 1.0}), ("P95", {"temperature": 1.0, "top_p": 0.95})):
+  for name, kw in (("plain", {"temperature": 1.0, "top_p": 1.0, "top_k": 0}), ("P95", {"temperature": 1.0, "top_p": 0.95}),
+                   ("default", {"temperature": 1.0})):
     with ThreadPoolExecutor(8) as ex: rs = list(ex.map(draw, [kw] * args.draws))
     arms[name] = collections.Counter(first(r) for c, r in rs if c == 200 and r.get("choices") and first(r))
-  p1, n1 = arms["P1"], sum(arms["P1"].values())
-  # the P1 arm's tail: its rarest tokens, holding its last 5% of draws (an estimate: a few draws of a borderline token are allowed)
-  tail, acc = set(), 0
-  for tok, k in sorted(p1.items(), key=lambda x: x[1]):
-    if acc + k > 0.05 * n1: break
+  plain, n0 = arms["plain"], sum(arms["plain"].values())
+  head, acc = [], 0
+  for tok, k in plain.most_common():
+    if acc >= args.head * n0: break
+    head.append(tok)
     acc += k
-    tail.add(tok)
-  out, allow = sum(k for tok, k in arms["P95"].items() if tok in tail), max(2, int(0.01 * args.draws))
+  big = [t for t in head if plain[t] >= 10]  # (bins: H's tokens with 10+ plain draws, the rest of H in one bin)
+  power = len(head) >= 2 and acc - (plain[head[0]] if head else 0) >= 20
+  verdict = []
+  for name in ("P95", "default"):
+    arm = arms[name]
+    bins = [(plain[t], arm[t]) for t in big] + [(sum(plain[t] for t in head if t not in big), sum(arm[t] for t in head if t not in big))]
+    bins = [b for b in bins if sum(b) > 0]
+    n1, n2 = sum(b[0] for b in bins), sum(b[1] for b in bins)
+    # (two-sample chi-square: expected count of a bin in a sample = the bin's pooled count x that sample's share of the pooled total)
+    def cell(o:int, q:int, n:int, x:int) -> float: return (x - (o + q) * n / (n1 + n2)) ** 2 / ((o + q) * n / (n1 + n2))
+    chi = sum(cell(o, q, n1, o) + cell(o, q, n2, q) for o, q in bins) if n1 and n2 else 0.0
+    p = chi2_sf(chi, len(bins) - 1) if len(bins) > 1 and n1 and n2 else 0.0
+    verdict.append((name, chi, len(bins) - 1, p, 1 - n2 / max(1, sum(arm.values()))))
   code, _r = post({"messages": msgs, "max_tokens": 4, "top_k": 20, "temperature": 0.7, "frobnicate": True})
   pcode, _r = post({"messages": msgs, "max_tokens": 4, "presence_penalty": 1.5, "frequency_penalty": 0.5, "repetition_penalty": 1.1})
-  say(f"B sampler: {args.draws} draws an arm; P1 distinct {len(p1)}, its 5% tail {len(tail)} tokens ({acc} draws); P95 draws in that tail: {out} "
-      f"(allow {allow}); top P1 {p1.most_common(4)} P95 {arms['P95'].most_common(4)}; top_k + unknown field: HTTP {code}")
-  say(f"B penalties: presence_penalty / frequency_penalty / repetition_penalty: HTTP {pcode}, accepted and IGNORED by this server "
+  say(f"B sampler: {args.draws} draws an arm; plain distinct {len(plain)}, head H {len(head)} tokens = {acc / max(1, n0):.3f} of plain; "
+      f"top plain {plain.most_common(4)} P95 {arms['P95'].most_common(4)} default {arms['default'].most_common(4)}")
+  for name, chi, df, p, out in verdict:
+    say(f"B {name} vs plain on H: chi-square {chi:.2f} on {df} df, p = {p:.4f} (fail under 0.001); "
+        f"mass outside H {out:.3f} (plain {1 - acc / max(1, n0):.3f})")
+  say(f"B top_k + unknown field: HTTP {code}; penalties (presence / frequency / repetition): HTTP {pcode}, accepted and IGNORED by this server "
       "(the reply is sampled with temperature / top_p / top_k only: RUNNING.md)")
-  # (no tail = no power: the arm cannot show a top_p that is ignored; pick a --draw-prompt with a spread instead of passing)
-  if not tail: say("B has NO POWER: the P1 arm has no 5% tail (its first token is too certain): use a --draw-prompt with a spread")
-  if out > allow or code != 200 or pcode != 200 or not tail or min(sum(a.values()) for a in arms.values()) < args.draws * 0.9: fails.append("b")
-
-if "b" in args.only:
-  # DEFAULT SAMPLING keeps its spread: the same short request 40 times with temperature 1 alone (what pi and most clients send: the server adds
-  # the model's defaults, Qwen's GGUF top_p 0.95 + top_k 20) against temperature 1, top_p 1, top_k 0. A nucleus that keeps the top token alone
-  # gives the same words 40 times (Qwen Nov 16: 1 distinct of 40 against 40 of 40); a working one about as many as the plain arm
-  wmsgs = [{"role": "user", "content": "Write five random English words, separated by spaces."}]
-  def words(kw:dict) -> str:
-    c, r = post({"messages": wmsgs, "max_tokens": 16, **NOTHINK, "temperature": 1.0, **kw})
-    m = ((r.get("choices") or [{}])[0].get("message") or {}) if c == 200 else {}
-    return (m.get("content") or "") + "|" + (m.get("reasoning_content") or "")
-  dist = {}
-  for name, kw in (("plain", {"top_p": 1.0, "top_k": 0}), ("default", {})):
-    with ThreadPoolExecutor(8) as ex: dist[name] = len(set(ex.map(words, [kw] * 40)))
-  say(f"B default sampling: distinct replies of 40, temperature 1 alone {dist['default']}, with top_p 1 + top_k 0 {dist['plain']} (fail under half)")
-  if dist["default"] < 0.5 * dist["plain"] or dist["plain"] < 10: fails.append("b-default")
+  if not power: say("B has NO POWER: the plain arm's head is one token or too few draws: use a --draw-prompt with a spread")
+  if (not power or any(p < 0.001 for _, _, _, p, _ in verdict) or code != 200 or pcode != 200
+      or min(sum(a.values()) for a in arms.values()) < args.draws * 0.9): fails.append("b")
 
 if "c" in args.only:
   n = max(80, int(1.25 * args.slots + 0.999))
