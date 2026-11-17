@@ -36,7 +36,7 @@ def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
     return kernels + [(d, call, (name, estimates, key, bufs, io)) for d,name,estimates,_,key,bufs,io in call.arg.hcq.kernels]
   ast = call.body
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "validate": return []
-  return [(d, call, None) for d in to_tuple(call.device)]
+  return [(d, call, None) for d in to_tuple(call.device if ast.op is Ops.STORE else get_call_arg_uops(call)[0].device)]
 
 def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|None=None) -> str:
   def _uop_sz_to_str(uop:UOp) -> str: return size_to_str(sym_infer(prod(uop.shape) * uop.dtype.itemsize, var_vals or {}))
