@@ -581,6 +581,17 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_alloc_vec(self): self.test_alloc(4)
 
+  def test_alloc_gated_store(self):
+    def kernel(out:UOp, inp:UOp):
+      gate = inp[2] < 0
+      raw = UOp._buffer(1, dtypes.int, -1, addrspace=AddrSpace.LOCAL)
+      pre = out.index(UOp.const(0).valid(gate)).store(inp[1])
+      buf = raw[0].set(inp[0].load().after(pre))
+      buf = buf.after(raw.index(UOp.const(0).valid(gate)).store(inp[2]))
+      return out[0].store(buf[0]).sink(arg=KernelInfo(opts_to_apply=()))
+    out = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor.arange(3).clone().realize(), fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [0])
+
   def test_store_value_broadcasts_to_target(self):
     def stored(shape:tuple[int, ...]) -> list:
       def kernel(out:UOp, inp:UOp):
