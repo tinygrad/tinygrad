@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, replace
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate
 from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES
 from tinygrad.uop import GroupOp
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite, shape_to_shape_arg
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite, shape_to_shape_arg, promo_dtype
 from tinygrad.uop.weak import commit_weak_consts
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.decomp.transcendental import exponent_bias, shl, shr
@@ -30,7 +30,7 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
       if x.dtype is dtypes.bool or x.dtype in dtypes.uints: return lo, lo.const_like(0)
       return lo, (x < x.const_like(0)).where(lo.const_like(-1), lo.const_like(0))
     case Ops.CAST if dt in (dtypes.long, dtypes.ulong):
-      return (lo:=uops[0].cast(l2i_dt[dt])), (uops[0] / 2**32).cast(l2i_dt[dt]) - ((uops[0] < 0) & lo.ne(0))
+      return (lo:=uops[0].cast(l2i_dt[dt])), (uops[0] * 2**-32).cast(l2i_dt[dt]) - ((uops[0] < 0) & lo.ne(0))
     case Ops.CAST if dt in dtypes.floats:
       small = (a1.eq(0) & (a0 >= 0)) | (a1.eq(-1) & (a0 < 0))
       cdt = dt if dt == dtypes.float64 else dtypes.float32
@@ -114,10 +114,10 @@ def f2f(v, fr:DType, to:DType, sat=True):
     # denormals are zero, but within half a denormal ulp of the smallest normal rounds up to it
     min_norm = shl(1 + fb - tb, fm)
     underflow = nosign < max(min_norm - shl(1, fm - tm), shl(1, fm))
-    norm = rne(nosign.maximum(min_norm), fm - tm) - shl(fb - tb, tm)
+    norm = rne(nosign.maximum(min_norm), fm - tm) + shl(tb - fb, tm)
     # top is one past the largest finite, inf or the nan of formats without inf
     top = 0x7f if to == dtypes.fp8e4m3 else 0x80 if to in dtypes.fp8_fnuz else shl(shl(1, te) - 1, tm)
-    norm = norm.minimum(top - (sat and to in dtypes.fp8s))
+    norm = norm.minimum(norm.const_like(top - (sat and to in dtypes.fp8s)))
     inf, nan = shl(shl(1, fe) - 1, fm), top | (shl(1, tm) - 1 if to in dtypes.fp8s else shl(1, tm - 1))
     # fnuz has one nan and no -0
     if to in dtypes.fp8_fnuz: return (nosign >= inf).where(top, underflow.where(0, sign | norm)).cast(f2f_dt[to])
@@ -139,6 +139,9 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
   return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.index(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
 def f2f_rewrite(ctx:FloatDecompCtx, x:UOp) -> UOp: return graph_rewrite(x, pm_float_decomp, ctx=ctx, bottom_up=True)
+def f2f_src(ctx:FloatDecompCtx, s:UOp) -> UOp:
+  if s.dtype == ctx.fr: return s.cast(ctx.to)
+  return UOp.const(ctx.fr.const(s.val)) if s.dtype is dtypes.weakfloat else s
 
 pm_long_decomp: PatternMatcher = PatternMatcher([
   # the decomp's own bottom-up rewrite can mint bare consts mid-flight: word splitting commits them at the long sibling's dtype
@@ -181,8 +184,8 @@ pm_float_decomp: PatternMatcher = PatternMatcher([
    f2f(x.bitcast(f2f_dt[ctx.fr]), ctx.fr, ctx.to) if bc.dtype == ctx.fr else None),
   (UPat(Ops.CAST, dtypes.floats, src=(UPat.var("val"),), name="x"), lambda ctx,x,val:
    f2f(f2f(val.cast(ctx.to).bitcast(f2f_dt[ctx.to]), ctx.to, ctx.fr), ctx.fr, ctx.to) if x.dtype == ctx.fr else None),
-  (UPat(GroupOp.ALU|{Ops.STACK, Ops.INDEX}, dtypes.floats, name="x"), lambda ctx,x:
-   x.replace(src=tuple(s.cast(ctx.to) if s.dtype == ctx.fr else s for s in x.src)) if x.dtype == ctx.fr else None),
+  (UPat(GroupOp.ALU|{Ops.STACK, Ops.INDEX}, (*dtypes.floats, dtypes.bool), name="x"), lambda ctx,x:
+   x.replace(src=tuple(f2f_src(ctx, s) for s in x.src)) if x.dtype in (ctx.fr, dtypes.bool) and promo_dtype(x.src) == ctx.fr else None),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat(Ops.BITCAST, dtypes.floats, name="val")), name='st'), lambda ctx,st,idx,val:
    st.replace(src=(idx, val.src[0].bitcast(f2f_dt[ctx.fr]))) if val.dtype == ctx.fr and idx.dtype == f2f_dt[ctx.fr] else None),
   (UPat(Ops.STORE, src=(UPat.var("idx").or_casted(), UPat.var("val", dtypes.floats)), name='st'), lambda ctx,st,idx,val:

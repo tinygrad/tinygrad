@@ -82,7 +82,7 @@ base_rewrite = PatternMatcher([
 
 # C promotes uchar and ushort to int, WGSL holds them in u32 and PTX holds uchar in u16, so the ops that wrap compute in uint and narrow after
 pm_narrow_uint = PatternMatcher([(UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.NEG, Ops.SHL, Ops.MULACC), (dtypes.uint8, dtypes.uint16), name="x"),
-                                  lambda x: x.replace(src=tuple(s.cast(dtypes.uint32) for s in x.src)).cast(x.dtype))])
+                                  lambda x: x.replace(src=tuple(s.ccast(promo_dtype(x.src)).cast(dtypes.uint32) for s in x.src)).cast(x.dtype))])
 
 def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
   patterns = PatternMatcher([

@@ -32,7 +32,7 @@ def cast_weak_srcs(c:UOp, u:UOp) -> UOp|None:
   dt = least_upper_dtype(c.dtype, u.commit_dtype(dtypes.int), *(s.commit_dtype(dtypes.int) for s in u.src if s.dtype in dtypes.weaks))
   return None if (ret:=commit_srcs_at(u, dt)) is None else ret.cast(c.dtype)
 
-# rides every round that can mint a weak const, and must reach fixpoint before pm_lower_weak below defaults one
+# must reach fixpoint before pm_lower_weak below defaults a weak const
 pm_commit_weak = PatternMatcher([
   (UPat(GroupOp.Broadcastable, name="u"), commit_weak_srcs),
   (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.weaks)), allow_any_len=True, name="u"),
