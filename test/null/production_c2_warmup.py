@@ -1,7 +1,7 @@
 # Full C2 start on NULL: model load, picture tower, sequence warm-up and run-again; stop before serving.
 # Open the AMD custom-kernel gate for NULL so production-shaped graphs are traced without executing on a GPU.
 # mypy: ignore-errors
-import os, runpy, sys
+import os, runpy, socket, sys
 from tinygrad import Tensor
 
 _realize = Tensor.realize
@@ -95,5 +95,12 @@ def done(self, *args, **kwargs):
 
 
 serve.LLMServer.serve_forever = done
-sys.argv = ["tinygrad.llm", "--model", os.environ["MODEL"], "--shard", "6", "--max_context", "262144", "--serve", "18999"]
+def _free_port() -> int:
+  # (a fixed port collided with another agent's warm-up binding it at the same moment: Errno 98, Nov 16 16:3x)
+  with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    return s.getsockname()[1]
+
+
+sys.argv = ["tinygrad.llm", "--model", os.environ["MODEL"], "--shard", "6", "--max_context", "262144", "--serve", str(_free_port())]
 runpy.run_module("tinygrad.llm", run_name="__main__")
