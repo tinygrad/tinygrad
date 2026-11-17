@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Variable
 from tinygrad.uop.uir import render_uir, parse_uir
-from tinygrad.schedule import create_linear
+from tinygrad.codegen import create_linear
 
 class TestExportRun(unittest.TestCase):
   def test_export_compile_run(self):

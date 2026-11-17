@@ -42,7 +42,6 @@ packages = [
   'tinygrad.runtime.support.am',
   'tinygrad.runtime.support.rdma',
   'tinygrad.runtime.support.nv',
-  'tinygrad.schedule',
   'tinygrad.uop',
   'tinygrad.viz',
 ]
@@ -125,7 +124,6 @@ do_not_mutate = [
   "tinygrad/nn/*",
   "tinygrad/renderer/*",
   "tinygrad/runtime/*",
-  "tinygrad/schedule/*",
   "tinygrad/uop/*",
   "tinygrad/viz/*",
   "tinygrad/device.py",

@@ -5,7 +5,7 @@ from tinygrad.codegen import to_program
 from tinygrad.helpers import Target
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.uop.ops import KernelInfo, Ops
-from tinygrad.schedule import resolve_linear_call
+from tinygrad.codegen import resolve_linear_call
 
 def sched_key(t:Tensor): return t.export()[0].key
 

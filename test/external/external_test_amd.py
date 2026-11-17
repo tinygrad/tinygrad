@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Device, Tensor
-from tinygrad.schedule import create_schedule
+from tinygrad.codegen import create_schedule
 from tinygrad.runtime.ops_amd import AMDDevice
 
 class TestAMD(unittest.TestCase):

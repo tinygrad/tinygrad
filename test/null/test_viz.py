@@ -1271,7 +1271,7 @@ class TestCLI(unittest.TestCase):
 
   @needs_tracked_pm
   def test_nested_calls_schedule_ls(self):
-    from tinygrad.schedule import schedule_cache
+    from tinygrad.codegen import schedule_cache
     @function(precompile=True)
     def inner(x:Tensor): return (x+x).contiguous()
     @function(precompile=True)

@@ -3,7 +3,7 @@ import numpy as np
 from unittest.mock import patch
 from tinygrad import Tensor, UOp, Device
 from tinygrad.nn.state import get_state_dict
-from tinygrad.schedule import schedule_cache
+from tinygrad.codegen import schedule_cache
 from tinygrad.llm.model import Transformer, TransformerConfig
 
 TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
