@@ -98,6 +98,21 @@ if "b" in args.only:
   if not tail: say("B has NO POWER: the P1 arm has no 5% tail (its first token is too certain): use a --draw-prompt with a spread")
   if out > allow or code != 200 or pcode != 200 or not tail or min(sum(a.values()) for a in arms.values()) < args.draws * 0.9: fails.append("b")
 
+if "b" in args.only:
+  # DEFAULT SAMPLING keeps its spread: the same short request 40 times with temperature 1 alone (what pi and most clients send: the server adds
+  # the model's defaults, Qwen's GGUF top_p 0.95 + top_k 20) against temperature 1, top_p 1, top_k 0. A nucleus that keeps the top token alone
+  # gives the same words 40 times (Qwen Nov 16: 1 distinct of 40 against 40 of 40); a working one about as many as the plain arm
+  wmsgs = [{"role": "user", "content": "Write five random English words, separated by spaces."}]
+  def words(kw:dict) -> str:
+    c, r = post({"messages": wmsgs, "max_tokens": 16, **NOTHINK, "temperature": 1.0, **kw})
+    m = ((r.get("choices") or [{}])[0].get("message") or {}) if c == 200 else {}
+    return (m.get("content") or "") + "|" + (m.get("reasoning_content") or "")
+  dist = {}
+  for name, kw in (("plain", {"top_p": 1.0, "top_k": 0}), ("default", {})):
+    with ThreadPoolExecutor(8) as ex: dist[name] = len(set(ex.map(words, [kw] * 40)))
+  say(f"B default sampling: distinct replies of 40, temperature 1 alone {dist['default']}, with top_p 1 + top_k 0 {dist['plain']} (fail under half)")
+  if dist["default"] < 0.5 * dist["plain"] or dist["plain"] < 10: fails.append("b-default")
+
 if "c" in args.only:
   n = max(80, int(1.25 * args.slots + 0.999))
   rng = random.Random(args.seed or int(time.time()))
