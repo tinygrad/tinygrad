@@ -146,7 +146,7 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   assert K == K2
   m = UOp.range(M, 1, AxisType.WEAK)
   n = UOp.range(N, 2, AxisType.WEAK)
-  k = UOp.range(K, 0, AxisType.LOOP)
+  k = UOp.range(K, 0)
   mul = (A.flatten().index((m*UOp.const(K)+k))*
          B.flatten().index((k*UOp.const(N)+n))).cast(dtypes.float32)
   red = mul.reduce(k, arg=Ops.ADD).cast(C.dtype)
