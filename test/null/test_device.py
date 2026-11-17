@@ -126,7 +126,8 @@ class TestDevice(unittest.TestCase):
     except Exception as e: self.skipTest(f"skipping: LLVM not available: {e}")
 
     dev = Device["CPU"]
-    dev.cached_renderer.clear()
+    select_renderer.cache_clear()
+    self.addCleanup(select_renderer.cache_clear)
     with patch("tinygrad.renderer.cstyle.ClangRenderer.__init__", side_effect=RuntimeError("broken")):
       self.assertIsInstance(dev.renderer.compiler, CPULLVMCompiler)
 
@@ -175,11 +176,12 @@ class TestDevVar(unittest.TestCase):
   def test_select_renderer(self):
     # a renderer is built from a Target alone, its device isn't opened
     with Context(ALLOW_DEVICE_USAGE=0):
-      ren = select_renderer(Target("NV", "PTX", "sm_80"))
-      self.assertEqual((type(ren).__name__, ren.target.arch), ("PTXRenderer", "sm_80"))
-      self.assertIs(select_renderer(Target("NV", "PTX", "sm_80")), ren)
+      ren = select_renderer(Target("NULL", "WGSL"))
+      self.assertEqual(type(ren).__name__, "WGSLRenderer")
+      self.assertIs(select_renderer(Target("NULL", "WGSL")), ren)
       self.assertEqual(type(select_renderer(Target("PYTHON"))).__name__, "PythonRenderer")
       with self.assertRaisesRegex(RuntimeError, "has no renderer"): select_renderer(Target("PYTHON", "LLVM"))
+      with self.assertRaisesRegex(RuntimeError, "DISK has no renderers"): select_renderer(Target("DISK"))
 
   def test_dev_arch_override(self):
     with Context(DEV="NULL::gfx1100"):

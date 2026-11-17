@@ -325,7 +325,7 @@ class Program(Generic[DeviceType]):
 def renderer_name(r:type[Renderer], device:str) -> str: return r.__name__.upper().removesuffix("RENDERER").removeprefix(device) or device
 @functools.cache
 def select_renderer(t:Target) -> Renderer:
-  renderers = Device.get_class(t.device).renderers
+  if not (renderers:=Device.get_class(t.device).renderers): raise RuntimeError(f"{t.device} has no renderers, it can't run kernels")
   assert (rn:=next((renderer_name(r, t.device) for r in renderers if getenv(f"{t.device}_{renderer_name(r, t.device)}")), None)) is None, \
     f"{t.device}_{rn}=1 is deprecated, use DEV={t.device}:{rn} instead"
   candidates = select_by_name(renderers, lambda r: renderer_name(r, t.device), t.renderer, f"{t.device} has no renderer {t.renderer!r}")
