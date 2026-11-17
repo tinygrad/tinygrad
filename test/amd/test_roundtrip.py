@@ -58,7 +58,7 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
   """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
   from tinygrad import Tensor
   from tinygrad.uop.ops import Ops
-  from tinygrad.engine.realize import lower_and_compile, resolve_params, unwrap_multi
+  from tinygrad.engine.realize import lower_and_compile, get_call_arg_uops
   from tinygrad.runtime.support.elf import elf_loader
 
   out = op_fn(Tensor)
@@ -69,41 +69,41 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
 
   for call in linear.src:
     ast = call.src[0]
-    for bufs, _ in unwrap_multi(call, resolve_params(call, ())):
-      if ast.op is Ops.STORE:
-        # Handle bulk STORE: extract source data to initialize destination buffer
-        if len(bufs) >= 2:
-          dst_buf, src_buf = bufs[0], bufs[1]
-          dst_id = id(dst_buf)
-          if dst_id not in buf_pool:
-            buf_pool[dst_id] = dst_buf.nbytes
-          # Get source data if it's from numpy/CPU
-          if hasattr(src_buf, 'base') and src_buf.base is not None and src_buf.base.is_allocated():
-            src_data = bytes(src_buf.base.as_memoryview())
-            buf_data[dst_id] = src_data
-      elif ast.op is Ops.PROGRAM:
-        info = ast.arg
-        if len(ast.src) > 3 and ast.src[3].op is Ops.BINARY:
-          lib = bytes(ast.src[3].arg)
-          _, sections, _ = elf_loader(lib)
-          for sec in sections:
-            if sec.name == '.text':
-              buf_idxs = []
-              buf_sizes = []
-              for b in bufs:
-                buf_id = id(b)
-                if buf_id not in buf_pool:
-                  buf_pool[buf_id] = b.nbytes
-                buf_idxs.append(buf_id)
-                buf_sizes.append(b.nbytes)
-              kernels.append(KernelSnapshot(
-                code=bytes(sec.content),
-                src=ast.src[2].arg,
-                global_size=tuple(info.global_size),
-                local_size=tuple(info.local_size),
-                buf_idxs=buf_idxs,
-                buf_sizes=buf_sizes
-              ))
+    bufs = [b.buffer for b in get_call_arg_uops(call)]
+    if ast.op is Ops.STORE:
+      # Handle bulk STORE: extract source data to initialize destination buffer
+      if len(bufs) >= 2:
+        dst_buf, src_buf = bufs[0], bufs[1]
+        dst_id = id(dst_buf)
+        if dst_id not in buf_pool:
+          buf_pool[dst_id] = dst_buf.nbytes
+        # Get source data if it's from numpy/CPU
+        if hasattr(src_buf, 'base') and src_buf.base is not None and src_buf.base.is_allocated():
+          src_data = bytes(src_buf.base.as_memoryview())
+          buf_data[dst_id] = src_data
+    elif ast.op is Ops.PROGRAM:
+      info = ast.arg
+      if len(ast.src) > 3 and ast.src[3].op is Ops.BINARY:
+        lib = bytes(ast.src[3].arg)
+        _, sections, _ = elf_loader(lib)
+        for sec in sections:
+          if sec.name == '.text':
+            buf_idxs = []
+            buf_sizes = []
+            for b in bufs:
+              buf_id = id(b)
+              if buf_id not in buf_pool:
+                buf_pool[buf_id] = b.nbytes
+              buf_idxs.append(buf_id)
+              buf_sizes.append(b.nbytes)
+            kernels.append(KernelSnapshot(
+              code=bytes(sec.content),
+              src=ast.src[2].arg,
+              global_size=tuple(info.global_size),
+              local_size=tuple(info.local_size),
+              buf_idxs=buf_idxs,
+              buf_sizes=buf_sizes
+            ))
   if not kernels: raise RuntimeError("No kernel found")
   return kernels, buf_pool, buf_data
 
