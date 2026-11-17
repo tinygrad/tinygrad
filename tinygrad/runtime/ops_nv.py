@@ -124,7 +124,7 @@ class NVQueue(HWQueue):
     fifo, dev = self.dev.fifos[self.queue], self.devs[0]
     bufs = (("ring", dtypes.uint64, fifo.entries, dev), ("gpput", dtypes.uint32, 1, dev), ("doorbell", dtypes.uint32, 1, dev),
             ("put_value", dtypes.uint64, 1, self.dev.host))
-    ring, gpput, doorbell, put = [UOp.alloc((sz,), dt, device=d, name=to_name(self.dev.device, nm, self.queue)) for nm, dt, sz, d in bufs]
+    ring, gpput, doorbell, put = [UOp.extern((sz,), dt, d, to_name(self.dev.device, nm, self.queue)) for nm, dt, sz, d in bufs]
     return nv_submit(cmdbuf, ring, gpput, doorbell, put, fifo.token)
 
 class NVComputeQueue(NVQueue):

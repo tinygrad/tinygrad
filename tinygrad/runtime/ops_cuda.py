@@ -40,7 +40,7 @@ pm_cuda = PatternMatcher([ # None is the stream
   (UPat(Ops.CALL, src=(UPat.custom_function("store"), UPat(name="sig"), UPat(name="val"))),
    lambda ctx, sig, val: (cuda.cuStreamWriteValue64_v2, None, sig.getaddr(ctx.device), val, cuda.CU_STREAM_WRITE_VALUE_DEFAULT)),
   (UPat(Ops.CALL, src=(UPat.custom_function("timestamp"), UPat(name="sig"))), # [sig][stamp]
-   lambda ctx, sig: (cuda.cuLaunchHostFunc, None, UOp.alloc((1,), dtypes.uint64, 0, device=ctx.device, name="stamp").getaddr(ctx.host),
+   lambda ctx, sig: (cuda.cuLaunchHostFunc, None, UOp.extern((1,), dtypes.uint64, ctx.device, "stamp").getaddr(ctx.host),
                      sig[1:2].getaddr(ctx.device))),
 ])
 
@@ -51,7 +51,7 @@ def cuda_submit(s:UOp, ccallfn:Callable[[Any, *tuple[UOp, ...]], UOp]=ccall) -> 
   for fn, *args in [x for c in call.body.src if (x:=pm_cuda.rewrite(c, ctx=Device[q.device])) is not None]:
     stream = rt_vars.after(h).index(2 if q.arg.name.startswith("COPY") else 1).load() # the stream after the last call
     h = ccallfn(fn, *[stream if a is None else UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args])
-  return h.sink().call(UOp.alloc((3,), dtypes.uint64, 0, device=q.device, name="handles").after(*deps), name=call.body.arg.name)
+  return h.sink().call(UOp.extern((3,), dtypes.uint64, q.device, "handles").after(*deps), name=call.body.arg.name)
 
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("cuda_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), cuda_submit),

@@ -160,7 +160,7 @@ def select_first_inited(candidates:Sequence[Callable[...,T]], err_msg:str, cache
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
 # for length N coefficients `p`, returns p[0] * x**(N-1) + p[1] * x**(N-2) + ... + p[-2] * x + p[-1]
-def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
+def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p)  # type: ignore
 
 @functools.cache
 def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])

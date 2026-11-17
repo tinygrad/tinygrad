@@ -802,7 +802,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   unique_num = itertools.count(0)
 
   def getaddr(self, device=None) -> UOp:
-    if self.without_after.op not in GroupOp.Defines|{Ops.SHRINK, Ops.BITCAST, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.LINEAR}: return self
+    if self.without_after.op not in GroupOp.Defines|{Ops.SHRINK, Ops.BITCAST, Ops.MSTACK, Ops.MSELECT, Ops.LINEAR}: return self
     return UOp(Ops.GETADDR, src=(self,), arg=device or to_tuple(self.device)[0])
   @staticmethod
   def device_range_src(device:str|tuple[str, ...]|None) -> tuple[UOp, ...]:
@@ -883,7 +883,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.SPECIAL, Ops.RANGE, Ops.CONST}: return AddrSpace.ALU
     if self.op is Ops.BINARY: return AddrSpace.GLOBAL
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
-    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT, Ops.END, Ops.UNSHARD}:
+    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.MSTACK, Ops.MSELECT, Ops.END, Ops.UNSHARD}:
       return self.src[0].addrspace
     if self.op in GroupOp.Movement: return self.src[0].addrspace
     if self.op in {Ops.STACK, Ops.WMMA} or self.op in GroupOp.Elementwise:
@@ -893,7 +893,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return None
   @property
   def buf_uop(self) -> UOp:
-    if self.op in GroupOp.Defines: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, src=tuple(x.buf_uop for x in self.src))
     if self.base.op is Ops.AFTER: return self.base.src[0].buf_uop.base
@@ -1172,6 +1171,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
               arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype),
                            addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
+  @staticmethod
+  def extern(shape:tuple[int, ...], dtype:DType, device, name:str): return UOp.alloc(shape, dtype, 0, device=device, name=name).replace(op=Ops.EXTERN)
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
   @staticmethod

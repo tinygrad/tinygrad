@@ -5,7 +5,8 @@ from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes
 from tinygrad.device import Compiled, ProfileGraphEvent
 from tinygrad.helpers import Context, unwrap, to_tuple
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, ParamArg
+from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.engine.realize import compile_linear, get_call_arg_uops, lower_and_compile, run_linear
 import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQInfo
@@ -219,6 +220,12 @@ class TestHCQ2Link(unittest.TestCase):
   def setUp(self): self.enterContext(Context(DEV="NULL"))
 
   def test_eager_templates_compile_once(self): self.assertIs(compiled_chain(3)[1], compiled_chain(3)[1])
+
+  def test_eager_templates_are_exportable(self):
+    template = compiled_chain(3)[1]
+    for u in template.toposort(enter_calls=True):
+      if isinstance(u.arg, ParamArg): self.assertTrue(u.arg.buffer is None and u.arg.val is None, f"runtime state in {u}")
+    self.assertIs(parse_uir(render_uir(template)), template)
 
   def test_repeated_word_loops(self): # for (i..10) cmdbuf[off[i]] = var
     var, offs = UOp.alloc((1,), dtypes.uint32, device="CPU", name="var"), [4 * i * i for i in range(10)]

@@ -40,6 +40,12 @@ class TestTorchLoad(TempDirTestCase):
     torch.save({"empty": t.to(torch.bfloat16)[:, 1:1]}, self.tmp("strided_bf16.pt"))
     self.assertEqual(torch_load(self.tmp("strided_bf16.pt"))["empty"].shape, (3, 0))
 
+  @unittest.skipUnless(dtypes.bfloat16 in Device[Device.DEFAULT].renderer.supported_dtypes(), f"no bfloat16 on {Device.DEFAULT}")
+  def test_load_strided_bf16(self):
+    import torch
+    torch.save({"col": torch.arange(1., 13.).reshape(3, 4).to(torch.bfloat16)[:, 1]}, self.tmp("strided_bf16.pt"))
+    self.assertEqual(torch_load(self.tmp("strided_bf16.pt"))["col"].float().tolist(), [2., 6., 10.])
+
   # pytorch pkl format
   def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
   # pytorch zip format
