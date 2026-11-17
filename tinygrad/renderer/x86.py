@@ -204,7 +204,7 @@ def flag_gate(m:UOp) -> UOp|None:
 pre_isel_matcher = PatternMatcher([
   # vector BUFFERs get modeled in scratch space
   (UPat((Ops.BUFFER, Ops.ALLOC), name="x"),
-   lambda x: scratch_buffer(x.dtype, n, x.arg.slot) if x.addrspace is AddrSpace.REG and (n:=x.max_numel()) > 1 else None),
+   lambda ctx,x: scratch_buffer(x.dtype, n, next(ctx)) if x.addrspace is AddrSpace.REG and (n:=x.max_numel()) > 1 else None),
   # widening a uint32 is free, the 32bit write that produced it already zeroed the upper half
   (UPat(dtype=dtypes.uint32).cast(dtypes.int64s, name="x"), lambda x: x.replace(op=Ops.BITCAST)),
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
