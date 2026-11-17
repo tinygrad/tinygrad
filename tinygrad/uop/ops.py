@@ -251,7 +251,7 @@ _shape_changing_ops = frozenset(GroupOp.Movement | {Ops.UNSHARD, Ops.REDUCE})
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
 class recursive_property:
   """srcs: the srcs fxn reads the property of, they are computed first (without recursion). any other src it reads computes it on access"""
-  def __init__(self, fxn, srcs:Callable[[UOp], tuple[UOp, ...]]|None=None):
+  def __init__(self, fxn, srcs:Callable|None=None):
     self.fxn, self.srcs = fxn, srcs
     self.nm = fxn.__name__
     self.__doc__ = fxn.__doc__
@@ -273,7 +273,7 @@ class recursive_property:
             stack.pop()
     x.__dict__[nm] = ret = fxn(x)
     return ret
-def recursive_property_srcs(srcs:Callable[[UOp], tuple[UOp, ...]]): return lambda fxn: recursive_property(fxn, srcs)
+def recursive_property_srcs(srcs:Callable): return lambda fxn: recursive_property(fxn, srcs)
 
 
 class _UOpTuple(tuple):
