@@ -756,4 +756,8 @@ def create_linear(fn:UOp, plan:bool=True) -> UOp:
   linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
 
   # plan the storage the function allocates. the jit plans all its captured calls together instead
-  return memory_plan_rewrite(linear) if plan else linear
+  if plan: linear = memory_plan_rewrite(linear)
+
+  # the storage it allocates gets canonical slots, so the linear only depends on fn. map back binds each to fresh storage
+  allocs = [u for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL]
+  return linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
