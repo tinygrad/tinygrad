@@ -5232,7 +5232,7 @@ def _wmma_fragment(fragment:UOp, lane:UOp, rdna4:bool) -> UOp:
 def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *sparse:UOp, valid_kv_len:int|UOp, q_start:int|UOp|None=None, rdna4:bool=False,
                          kpool:int=4, parts:int=1) -> UOp:
   # parts (sparse): a block's tiles split over parts workgroups (few blocks are few workgroups for the GPU), o (parts, BH, M, D) every part's
-  # normalized output and sparse[2] (parts, BH, M, 2) its rows' max and sum (see qsa_sparse_prefill: combined after)
+  # normalized output and sparse[2] (parts, BH, M, 2) its rows' max and sum
   valid_kv_len, q_start = _unbind(valid_kv_len), _unbind(q_start) if q_start is not None else None
   BH, M, D = q.shape
   _, B, H_KV, physical_n, cache_dim = cache.shape
@@ -5950,60 +5950,6 @@ def _pick_stores(key:Callable[[UOp], UOp], npc:UOp, per:int, thr:UOp, t:UOp, wav
 # scores and pools) are exchanged, every device picks the top k of all (the same lists everywhere: the attention's keys of every device)
 
 
-def _qsa_tiles_kernel(out:UOp, mask:UOp, q_start:UOp, valid_end:UOp, kpool:int) -> UOp:
-  rows, P = cast(tuple[int, int], mask.shape)
-  tiles, per = P*kpool//BLOCK_N, (P*kpool//BLOCK_N+DECODE_THREADS-1)//DECODE_THREADS
-  row, wave, lane = UOp.range(rows, 0, AxisType.GLOBAL), UOp.range(32, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
-  t = wave*32+lane
-  # (the rows of a chunk past its tokens (its padding): no tiles, their attention isn't computed)
-  end = (q_start+(row+1)*32).minimum(valid_end) * (q_start+row*32 < valid_end).cast(dtypes.weakint)
-  npc = (end+BLOCK_N*DECODE_THREADS-1)//(BLOCK_N*DECODE_THREADS)
-  def key(c:UOp) -> UOp:
-    tile = c*DECODE_THREADS+t
-    val = functools.reduce(lambda a,b: a|b,
-                           [mask[row, (tile*(BLOCK_N//kpool)+j).minimum(P-1)].load() for j in range(BLOCK_N//kpool)])
-    return ((tile*BLOCK_N < end) & (val != 0)).cast(dtypes.uint32)
-  def write(c:UOp, pos:UOp, picked:UOp) -> UOp:
-    return out[row, pos.valid(picked & (pos < tiles))].store((c*DECODE_THREADS+t).cast(dtypes.int32))
-  stores, count = _pick_stores(key, npc, per, UOp.const(1, dtypes.uint32), t, wave, lane, write)
-  stores.append(out[row, UOp.const(tiles, dtypes.weakint).valid(t.eq(0))].store(count))
-  return UOp.group(*stores).end(row, wave, lane).sink(arg=KernelInfo(name="qsa_tiles", opts_to_apply=()))
-
-
-def qsa_sparse_prefill(q:Tensor, cache:Tensor, mask:Tensor, q_start:UOp, valid_end:int|UOp, kpool:int, base:int|UOp=0, N:int=0) -> Tensor:
-  # Cache is (KV, B, rows, K+V), sharded over KV heads, the sequence's keys the rows from base (N of them at most: its region).
-  # Compact active 32-key tiles before the tensor-core attention loop.
-  B, H, T, D = cast(tuple[int, int, int, int], q.shape)
-  N = N or cast(int, cache.shape[-2])
-  assert B == 1 and T % 32 == N % 32 == 0 and 64 <= D <= 256 and D % 32 == 0 and BLOCK_N % kpool == 0
-  assert D == (cache.shape[-1]*32//9 if cache.dtype == dtypes.uint32 else cache.shape[-1])//2
-  ve = cast(UOp, _unbind(valid_end)) if isinstance(valid_end, UOp) else UOp.const(valid_end, dtypes.weakint)
-  mask = Tensor(mask.uop.after(q_start, *([valid_end] if isinstance(valid_end, UOp) else [])))
-  tiles = Tensor.custom_kernel(Tensor.empty(T//32, N//32+1, dtype=dtypes.int32, device=q.device), mask,
-    fxn=functools.partial(_qsa_tiles_kernel, q_start=cast(UOp, _unbind(q_start)), valid_end=ve, kpool=kpool))[0]
-  # the keys and values apart: the copy of the region's valid keys (the rows past them aren't read: not written, N rows every chunk)
-  kv = cache.transpose(0, 1).shrink((None, None, (base, base + valid_end), None))
-  # (an int8 cache: its values in half)
-  if cache.dtype == dtypes.uint32: kv = kv_q8_unpack(kv)
-  tmp = Tensor.empty(2, *kv.shape[:2], N, D, dtype=kv.dtype, device=cache.device, axis=None if cache.uop.axis is None else 2)
-  store = tmp.shrink((None, None, None, (0, valid_end), None)).uop.store(Tensor.stack(kv[..., :D], kv[..., D:]).uop)
-  kv = Tensor(tmp.uop.after(store))
-  # (a block's tiles split over parts workgroups: the blocks of a small chunk are few workgroups for the GPU, ~8 a compute unit; combined after)
-  local_heads = H // (len(q.device) if isinstance(q.device, tuple) and q.uop.axis is not None else 1)
-  parts = max(1, min(8, 768 // (B * local_heads * (T // BLOCK_M))))
-  fxn = functools.partial(_amd_flash_attention, q_start=q_start, valid_kv_len=valid_end, rdna4=_wmma_rdna4(q.device), kpool=kpool, parts=parts)
-  ax = None if q.uop.axis is None else 1
-  if parts == 1:
-    out = Tensor.empty(B, H, T, D, dtype=dtypes.float32, device=q.device, axis=q.uop.axis).reshape(B*H, T, D)
-    return Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), kv, mask, tiles, fxn=fxn)[0].reshape(B, H, T, D)
-  out = Tensor.empty(parts, B*H, T, D, dtype=dtypes.float32, device=q.device, axis=ax)
-  stats = Tensor.empty(parts, B*H, T, 2, dtype=dtypes.float32, device=q.device, axis=ax)
-  res = Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), kv, mask, tiles, stats, fxn=fxn)
-  m, l = res[5][..., 0], res[5][..., 1]
-  w = (l > 0).where(l * (m - m.max(0)).exp(), 0)
-  return ((res[0] * w.unsqueeze(-1)).sum(0) / w.sum(0).maximum(1e-20).unsqueeze(-1)).reshape(B, H, T, D)
-
-
 def _order_key(bits:UOp) -> UOp:
   """an order preserving uint32 key of a float's bits"""
   return (bits >= 0x80000000).where(bits ^ 0xFFFFFFFF, bits | 0x80000000)
@@ -6274,13 +6220,6 @@ def kv_q8_pack(x:Tensor) -> Tensor:
   b = (q + 128).cast(dtypes.uint32)
   words = b[..., 0] | (b[..., 1] << 8) | (b[..., 2] << 16) | (b[..., 3] << 24)
   return words.cat(sc.reshape(*x.shape[:-1], D//32).bitcast(dtypes.uint32), dim=-1)
-
-def kv_q8_unpack(w:Tensor, dtype:DType=dtypes.half) -> Tensor:
-  """the rows (..., D) of kv_q8_pack's words (..., D//4 + D//32)"""
-  D = int(w.shape[-1]) * 32 // 9
-  b = (w[..., :D//4].unsqueeze(-1) >> Tensor([0, 8, 16, 24], dtype=dtypes.uint32, device=w.device)).bitwise_and(0xFF).cast(dtypes.int32)
-  v = (b - 128).float().reshape(*w.shape[:-1], D//32, 32)
-  return (v * w[..., D//4:].bitcast(dtypes.float).unsqueeze(-1)).reshape(*w.shape[:-1], D).cast(dtype)
 
 
 KDA_WAVES = 8

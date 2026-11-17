@@ -1265,7 +1265,6 @@ def _region_rows(config:TransformerConfig) -> int:
   return round_up(max(config.max_context, config.cache_rows), REGION_ALIGN)
 # a prefill chunk's rows in this many micro batches (sequence parallel: the copies of one run with the kernels of the other)
 MICRO_BATCHES = 1
-PREFILL_MB1_ROWS = getenv("PREFILL_MB1_ROWS", 0)
 PREFILL_PARTS = getenv("PREFILL_PARTS", 1)
 WARM_ASYNC = 1
 LANES_LATE = 1
@@ -2236,7 +2235,6 @@ class Transformer:
       R = int(x.shape[1])
       # sequence parallel: every device keeps the streams of its rows, the blocks gather and scatter the sublayers' inputs and outputs
       # micro batches (on queues of their own, AM_MEC_PIPES: the copies of one run with the kernels of the other)
-      # (PREFILL_MB1_ROWS: a chunk of this many rows or fewer in one batch: a small chunk's collectives are latency, not hidden by compute)
       mb = self._prefill_mb(R)
       if (sp:=self.sequence_parallel(R)) and self.sequence_parallel(R // mb) and R % mb == 0:
         # the blocks in phases (micro_batch_blocks), on micro batches of rows (the copies of one overlap the kernels of the next). a batch

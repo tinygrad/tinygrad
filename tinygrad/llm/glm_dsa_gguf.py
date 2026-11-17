@@ -276,54 +276,10 @@ def _file_mmap(path:str) -> memoryview:
   import mmap
   with open(path, "rb") as f: return memoryview(mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ))
 
-def _disk_bytes(data:Tensor) -> memoryview|None:
-  # the bytes of a parsed tensor in the mmapped file, None if it isn't a view of a gguf file
-  from tinygrad.device import Buffer
-  try: buf = data.uop.buffer
-  except Exception: return None
-  if not isinstance(buf, Buffer) or not buf.device.startswith("DISK:") or buf.device.startswith("DISK:shm:"): return None
-  return _file_mmap(buf.device[5:])[buf.offset:buf.offset+buf.nbytes]
-
-def _strided_copy(dst:memoryview, src:memoryview, offset:int, count:int, size:int, stride:int, dst_stride:int|None=None):
-  # count pieces of `size` bytes of src, from `offset` every `stride` bytes, to dst every dst_stride (default size) bytes: strided copies of words
-  dst_stride = size if dst_stride is None else dst_stride
-  if size == 0 or count == 0: return
-  item = next(i for i in (8, 4, 2, 1) if size % i == 0 and stride % i == 0 and offset % i == 0 and dst_stride % i == 0)
-  # whichever is fewer python steps: a copy per piece, or a strided copy per word
-  if count <= size // item:
-    for c in range(count): dst[c*dst_stride:c*dst_stride+size] = src[offset+c*stride:offset+c*stride+size]
-    return
-  fmt = cast(Any, {8: "Q", 4: "I", 2: "H", 1: "B"}[item])
-  s, d, words, dstep = src.cast(fmt), dst.cast(fmt), size // item, dst_stride // item
-  base, step = offset // item, stride // item
-  for w in range(words): d[w:w+(count-1)*dstep+1:dstep] = s[base+w:base+w+(count-1)*step+1:step]
 
 def _gather_word(*nbytes:int) -> Any:
   return next(dt for dt in (dtypes.uint32, dtypes.uint16, dtypes.uint8) if all(n % dt.itemsize == 0 for n in nbytes))
 
-def _units_gather_kernel(dst:UOp, src:UOp, units:UOp, rows:int, slices:int) -> UOp:
-  # dst (units, rows, L) words: unit i (expert e, slice j) is the column block j of the rows of expert e in src (experts, rows, slices, L)
-  from tinygrad.uop.ops import AxisType, KernelInfo
-  U, L = units.shape[0], dst.shape[0] // (units.shape[0] * rows)
-  i, r, k = UOp.range(U, 0, AxisType.GLOBAL), UOp.range(rows, 1, AxisType.GLOBAL), UOp.range(L, 2, AxisType.LOOP)
-  u = units[i].load().cast(dtypes.weakint)
-  return dst[(i*rows + r)*L + k].store(src[((u // slices * rows + r) * slices + u % slices) * L + k].load()).end(i, r, k).sink(
-    arg=KernelInfo(name="units_gather"))
-
-def _part_gather_kernel(dst:UOp, src:UOp, outer:int, off:int) -> UOp:
-  # dst (outer, P) words: the words off.. of every row of src (outer, R), zero past the row
-  from tinygrad.uop.ops import AxisType, KernelInfo
-  P, R = dst.shape[0] // outer, src.shape[0] // outer
-  r, k = UOp.range(outer, 0, AxisType.GLOBAL), UOp.range(P, 1, AxisType.LOOP)
-  c = off + k
-  return dst[r*P + k].store((c < R).where(src[r*R + c.minimum(R-1)].load(), UOp.const(0, src.dtype))).end(r, k).sink(
-    arg=KernelInfo(name="part_gather"))
-
-def _run_gather(fxn:Callable, *bufs:UOp):
-  # the kernel on the buffers, a call run as is (compiled once: the kernel is the same for buffers of the same sizes, no schedule)
-  from tinygrad.engine.realize import run_linear
-  from tinygrad.uop.ops import Ops
-  run_linear(UOp(Ops.LINEAR, src=(fxn(*[UOp.placeholder_like(b, slot=i) for i,b in enumerate(bufs)]).call(*bufs),)), update_stats=False)
 
 def _load_plan(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...], shard_map:dict[str, int],
                units:dict[str, tuple[int, list[list[int]]]], pads:dict[str, int], fuse:dict[str, str],

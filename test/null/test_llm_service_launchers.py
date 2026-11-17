@@ -63,7 +63,6 @@ class TestLLMServiceLaunchers(unittest.TestCase):
       self.assertIn(required, cmd)
     self.assertIn("PENDING_POWER_VERIFICATION", cmd)
     self.assertIn("GLM-5.3-UD-IQ4_XS-00001-of-00009.gguf", cmd)
-    self.assertNotIn("PREFILL_MB1_ROWS=", cmd)
     profile = self.command("glm_14xr9700.sh", {"GLM_KV": "q4", "MAX_CONTEXT": "1048576", "SEQ_ROWS": "1048576",
                                                "SEQ_SLOTS": "16", "SEQ_MAX_ACTIVE": "16", "P2P_GLM5_OFF": "1",
                                                "FREQS_HOST": "1", "AMD_SCRATCH_MAX": "64", "SEQ_COPY_SCRATCH": "1", "SEQ_KV4_FAST": "1",
@@ -103,7 +102,7 @@ class TestLLMServiceLaunchers(unittest.TestCase):
     for required in (
       "DEV=AMD", "AM_POWER_LIMIT=225", "BATCH_SLOTS=8", "SEQ_KV4=1", "SEQ_ROWS=3916800",
       "SEQ_SIZES=1\\,2\\,4\\,8\\,12\\,13\\,18", "SEQ_STASH_GB=12", "SEQ_STASH_ENTRIES=64", "SEQ_IDX_SHARD=1",
-      "PREFILL_CHUNK=768", "PREFILL_SIZES=192\\,768", "PREFILL_MB1_ROWS=1200", "PREFILL_SLICE=1536",
+      "PREFILL_CHUNK=768", "PREFILL_SIZES=192\\,768", "PREFILL_SLICE=1536",
       "SEQ_STARVE_ALT=1", "--shard 6", "--max_context 524288",
       # (the one GLM production line: the qualified stash and the picture limits a Pokemon window needs; a 9th picture is never refused)
       "VISION_MAX_IMAGES=2048", "VISION_CACHE_MB=2048", "VISION_URL_CACHE_MB=512", "VISION_SLICE_MS=200", "SERVE_RENDER_CACHE=1",
