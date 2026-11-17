@@ -337,7 +337,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if regs(x) and regs(x)[0]._cons: return None
   # a register buffer is a BUFFER, a stack buffer becomes the LEA of its address before regalloc
   if x.op in {Ops.BUFFER, Ops.ALLOC}:
-    return with_regs(x, (ctx.vreg(regs(x)) if regs(x) else regbuf_reg(x),)) if x.addrspace is AddrSpace.REG else None
+    return with_regs(x, (ctx.vreg(x.arg.reg) if x.arg.reg else regbuf_reg(x),)) if x.addrspace is AddrSpace.REG else None
   if regs(x): defs = [ctx.vreg(regs(x))]
   elif x.dtype in dtypes.floats or x.arg[0] in XMM_OPS: defs = [ctx.vreg(XMM)]
   else: defs = [ctx.vreg(WGPR)]
