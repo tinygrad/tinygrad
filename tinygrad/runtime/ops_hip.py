@@ -18,14 +18,14 @@ HIPIFY = dict(CUdevice=hip.hipDevice_t, CUcontext=hip.hipCtx_t, CUstream=hip.hip
   cuMemHostAlloc=lambda p, sz, _: hip.hipHostMalloc(p, sz, hip.hipHostMallocCoherent), cuMemFreeHost=hip.hipHostFree,
   cuMemHostRegister_v2=hip.hipHostRegister, cuMemHostUnregister=hip.hipHostUnregister, cuModuleLoadData=hip.hipModuleLoadData,
   cuModuleGetFunction=hip.hipModuleGetFunction, cuLaunchKernel=hip.hipModuleLaunchKernel, cuMemcpyAsync=hip.hipMemcpyAsync,
-  cuStreamWaitValue64_v2=hip.hipStreamWaitValue64, cuStreamWriteValue64_v2=hip.hipStreamWriteValue64, cuLaunchHostFunc=hip.hipLaunchHostFunc)
+  cuStreamWaitValue32_v2=hip.hipStreamWaitValue32, cuStreamWriteValue32_v2=hip.hipStreamWriteValue32, cuLaunchHostFunc=hip.hipLaunchHostFunc)
 if DEV.target("HIP").interface == "MOCK": import test.mockgpu.hip.hip  # noqa: F401  # pylint: disable=unused-import
 
 def hipify(cufn:Any, *cuargs:UOp):
   if (fn:=HIPIFY.get(cufn.__name__)) is None: return None
   args = list(cuargs)
   if fn is hip.hipMemcpyAsync: args.insert(3, UOp.const(hip.hipMemcpyDefault, dtypes.int))
-  if fn is hip.hipStreamWaitValue64: args.append(UOp.const((1<<64)-1, dtypes.uint64))
+  if fn is hip.hipStreamWaitValue32: args.append(UOp.const((1<<32)-1, dtypes.uint32))
   return ccall(fn, *args)
 
 def hip_submit(s:UOp)->UOp: return cuda_submit(s, hipify)
