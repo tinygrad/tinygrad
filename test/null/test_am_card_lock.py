@@ -1,6 +1,6 @@
 import unittest, subprocess, sys, time, uuid, os
 from unittest.mock import patch, mock_open
-from tinygrad.runtime.support.am.amdev import CardLock, in_vm
+from tinygrad.runtime.support.am.amdev import CardLock, in_vm, needs_reset_reason, AMDev
 
 HOLD = "import sys, time; from tinygrad.runtime.support.am.amdev import CardLock\n" \
        "with CardLock(sys.argv[1]).hold():\n  print('held', flush=True); time.sleep(float(sys.argv[2]))\n"
@@ -39,6 +39,19 @@ class TestInVM(unittest.TestCase):
       in_vm.cache_clear()
       with patch("builtins.open", mock_open(read_data=text)): self.assertEqual(in_vm(), want)
     in_vm.cache_clear()
+
+class TestNeedsResetReason(unittest.TestCase):
+  # g3 Nov 16 15:42: a GLM Flash stop (1 MEC pipe) finalized every card, the Qwen start (AM_MEC_PIPES=2) then refused 'did not finalize'
+  def test_other_pipes_clean(self):
+    one, two = AMDev.Version, AMDev.Version ^ (1 << 16)
+    self.assertIn("AM_MEC_PIPES=1, this start wants 2", needs_reset_reason(0, one, two))
+    self.assertIn("AM_MEC_PIPES=2, this start wants 1", needs_reset_reason(0, two, one))
+  def test_not_finalized(self):
+    one, two = AMDev.Version, AMDev.Version ^ (1 << 16)
+    self.assertIn("did not finalize", needs_reset_reason(1, one, two))  # REG6 set: not a clean fini
+    self.assertIn("did not finalize", needs_reset_reason(0, 0, two))  # never booted by AM (another driver)
+    self.assertIn("did not finalize", needs_reset_reason(0, AMDev.Version ^ 1, AMDev.Version))  # another AM version
+    self.assertIn("did not finalize", needs_reset_reason(0, one, one))
 
 if __name__ == "__main__":
   unittest.main()

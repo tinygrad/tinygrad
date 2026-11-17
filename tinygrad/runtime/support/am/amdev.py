@@ -223,6 +223,14 @@ def in_vm() -> bool:
     with open("/proc/cpuinfo") as f: return " hypervisor" in f.read()
   except OSError: return False
 
+def needs_reset_reason(reg6:int, reg7:int, want:int) -> str:
+  """why a live card needs a full boot (= a mode1 reset first). REG6 is 0 after a clean fini, REG7 the version of the AM boot that set the
+  card up: a version that differs only in its AM_MEC_PIPES bits is a clean card of another launcher (GLM Flash 1 pipe, Qwen 2)"""
+  if reg6 == 0 and reg7 != want and (reg7 ^ want) & ~(0xff << 16) == 0:
+    return (f"finalized by an AM boot with AM_MEC_PIPES={((reg7 >> 16) & 0xff) + 1}, this start wants {((want >> 16) & 0xff) + 1}: the MEC "
+            "firmware is loaded only by a full boot")
+  return "left initialised by a process that did not finalize"
+
 class AMDev:
   Version = 0xA000000E
 
@@ -283,8 +291,9 @@ class AMDev:
         # got them as they were left (g2, Nov 16))
         if in_vm() and not getenv("AM_VM_RESET", 0) and not reset_mode:
           self._boot_lock.close()
-          raise RuntimeError(f"am {self.devfmt}: the card needs a mode1 reset (left initialised by a process that did not finalize). In a VM "
-                             "that can kill the VM: AM_VM_RESET=1 to reset anyway (a VM recreated on the same host can get its cards as they were)")
+          why = needs_reset_reason(self.reg("regSCRATCH_REG6").read(), self.reg("regSCRATCH_REG7").read(), self.boot_version)
+          raise RuntimeError(f"am {self.devfmt}: the card needs a mode1 reset ({why}). In a VM that can kill the VM: a fresh VM, or "
+                             "AM_VM_RESET=1 to reset anyway (a VM recreated on the same host can get its cards as they were)")
         self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
         if self.is_hive():
           self._boot_lock.close()
@@ -378,6 +387,8 @@ class AMDev:
     if not self.is_vf: self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
     if not self.is_vf: self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
+    # (in a VM, where a card left initialised costs the VM: one line a card, so a service log shows its stop finalized every card)
+    if in_vm() or DEBUG >= 2: print(f"am {self.devfmt}: finalized{' (error state: next boot full)' if self.is_err_state else ''}", flush=True)
     if self.vf_access: self.release_vf_access()
 
   def release_vf_access(self):
