@@ -42,9 +42,11 @@ def create_schedule(sched_sink:UOp) -> UOp:
       # the prior state is the first of its source and the same-buffer states its kernels read that is not superseded yet
       prior_states = [_unwrap_src(u.src[0]), *[st for k in kernels for st in read_states[k] if st.storage_base is u.storage_base]]
       prev_state = next((st for st in prior_states if st not in writes), prior_states[0])
-      # (sibling AFTERs of a state are allowed: redflash's in place kda state updates. the writes are the kernels not in the prior state)
+      # (sibling AFTERs of a state are allowed: redflash's in place kda state updates. the writes are the kernels not in the prior state
+      #  and, as master, not already on an earlier state of the same buffer: those are ordering deps, not writes)
       prev_kernels = set(_split_after(prev_state)[0]) if prev_state.op is Ops.AFTER else set()
-      writes.setdefault(prev_state, []).append((u, tuple(k for k in kernels if k not in prev_kernels)))
+      writes.setdefault(prev_state, []).append((u, tuple(k for k in kernels if k not in prev_kernels and
+                                                         all(a.storage_base is not u.storage_base for a in children.get(k, [])))))
       # a buffer state is a node after its prior state, its joins and its kernels, so readers inherit its history
       in_degree.setdefault(u, 0)
       for st in ([prev_state] if prev_state.op is Ops.AFTER else []) + [*after_deps, *kernels]:
