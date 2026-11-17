@@ -557,6 +557,8 @@ class Handler(VizHandler):
     dec = tok.stream_decoder()
     tags, sentinels = markup_tags(sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else {})
     router = StreamRouter(sp if isinstance(sp:=getattr(tok, "_special_tokens", None), dict) else None, reasoning, tags)
+    # (a CONTROL token's text is never a reply's (a GLM reply's <|begin_of_box|>, a role marker): as the publisher's servers skip special tokens)
+    hidden = frozenset(c for c in cs if c not in sentinels) if isinstance(cs:=getattr(tok, "control_ids", None), frozenset) else frozenset()
     # the model runs on the server's thread (LLMServer.serve_forever): the request waits there, its tokens come back here
     # (no top_p: the model's own, general.sampling.top_p)
     def clean(value: str, limit: int) -> str:
@@ -596,7 +598,7 @@ class Handler(VizHandler):
         out.append(next_id)
         if next_id in odd:
           stderr_log(log + colored(f"odd token {next_id} after {len(out)} tokens of the reply\n", "red"))
-        text, matched = stopf.feed(sentinels[next_id] if next_id in sentinels else dec(next_id))
+        text, matched = stopf.feed(sentinels[next_id] if next_id in sentinels else "" if next_id in hidden else dec(next_id))
         routed = list(router.route(text, final=matched is not None))
         if any(f == "reasoning_content" for f, _ in routed) or (not routed and router.mode == "reasoning"): n_reasoning[0] += 1
         for field, delta in routed:

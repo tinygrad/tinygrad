@@ -10,10 +10,14 @@ if TYPE_CHECKING:
 
 # (the conversations' texts and tokens SimpleTokenizer.encode keeps: one an agent of the server's (96 of them: their prompts not encoded again))
 ENC_CACHE = getenv("ENC_CACHE", 256)
+# (in a vocabulary with GLM's <|user|> and <|assistant|>, a role marker a reply generates opens the next turn: it ends the reply (the GGUF's
+# eot / eom are <|user|> / <|observation|>; after a short answer the model sometimes writes <|assistant|> and a second turn after it))
+ROLE_MARKERS = ("<|system|>", "<|user|>", "<|assistant|>", "<|observation|>")
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
-               bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None, eom_id:int|None=None, chat_template:str|None=None):
+               bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None, eom_id:int|None=None, chat_template:str|None=None,
+               control_ids:frozenset[int]=frozenset()):
     # (text, its tokens, (each special token's end, the tokens to it)) (see encode)
     self._enc_cache: list[tuple[str, list[int], list[tuple[int, int]]]] = []
     self._enc_lock = threading.Lock()
@@ -55,6 +59,10 @@ class SimpleTokenizer:
     self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
     self.preset, self.chat_template = preset, chat_template
     self.bos_id, self.eos_id, self.eot_id, self.eom_id = bos_id, eos_id, eot_id, eom_id
+    self._ends = {eos_id, eot_id, eom_id} | \
+      ({special_tokens[t] for t in ROLE_MARKERS if t in special_tokens} if all(t in special_tokens for t in ROLE_MARKERS[1:3]) else set())
+    # (the CONTROL tokens (GGUF token type 3): text no reply shows)
+    self.control_ids = control_ids
 
   @staticmethod
   def from_gguf_kv(kv:dict):
@@ -62,7 +70,8 @@ class SimpleTokenizer:
     vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
     normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] not in (2, 3, 4)) # UNKNOWN|CONTROL|USER_DEFINED
     special_tokens_dict = dict(special_tokens)
-    return SimpleTokenizer(dict(normal_tokens), special_tokens_dict, kv["tokenizer.ggml.pre"],
+    control = frozenset(i for i, t in enumerate(kv["tokenizer.ggml.token_type"]) if t == 3)
+    return SimpleTokenizer(dict(normal_tokens), special_tokens_dict, kv["tokenizer.ggml.pre"], control_ids=control,
       bos_id=kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None,
       eos_id=kv.get('tokenizer.ggml.eos_token_id', 0), eot_id=kv.get('tokenizer.ggml.eot_token_id', special_tokens_dict.get('<|im_end|>')),
       # (a GGUF without an eom: <|endoftext|> ends a reply too, as llama.cpp's end-of-generation set and the models' generation_config
@@ -137,7 +146,7 @@ class SimpleTokenizer:
     dec = codecs.getincrementaldecoder('utf-8')('replace')
     def _decode(tid:int|None=None) -> str: return dec.decode(self._tok2bytes[tid]) if tid is not None else dec.decode(b'', final=True)
     return _decode
-  def is_end(self, token_id:int) -> bool: return token_id in (self.eos_id, self.eot_id, self.eom_id)
+  def is_end(self, token_id:int) -> bool: return token_id in self._ends
 
 models = {
   "llama3.2:1b": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf",
