@@ -87,8 +87,29 @@ class TestLLMServiceLaunchers(unittest.TestCase):
       self.assertTrue(starts[0].lstrip().startswith('setsid sudo -n env "${SERVER_ENV[@]}" "${COMMAND[@]}"'), script)
       # and stop signals and checks that root process through sudo too (as the login user kill -0 fails with EPERM: 'stopped' while it runs)
       kills = [l.strip() for l in (SCRIPTS / script).read_text().splitlines() if re.search(r"\bkill\b", l)]
-      self.assertEqual(kills[0], 'sudo -n kill -TERM -- "-$pid"', script)
-      self.assertTrue(kills[1].startswith('if ! sudo -n kill -0 "$pid" 2>/dev/null;'), script)
+      self.assertTrue(kills[0].startswith('if ! sudo -n kill -0 -- "-$pid" 2>/dev/null;'), script)
+      self.assertEqual(kills[1], 'sudo -n kill -TERM -- "-$pid"', script)
+      self.assertTrue(kills[2].startswith('if ! sudo -n kill -0 "$pid" 2>/dev/null;'), script)
+
+  def test_stop_after_a_dead_start_clears_the_pid_file(self):
+    # a start that died (g3 18:17 Nov 16: a refused card) left its PID file; stop failed on kill of the dead group and kept the file, and
+    # the next start refused ('PID file already exists'). stop now removes a PID file whose process group is gone, and exits 0
+    import tempfile
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    with tempfile.TemporaryDirectory() as d:
+      fakebin = pathlib.Path(d) / "bin"
+      fakebin.mkdir()
+      (fakebin / "sudo").write_text('#!/bin/sh\n[ "$1" = -n ] && shift\nexec "$@"\n')
+      (fakebin / "sudo").chmod(0o755)
+      for script in ("qwen_6x7900xtx.sh", "glm_flash_6x7900xtx.sh", "glm_14xr9700.sh"):
+        pidfile = pathlib.Path(d) / "service.pid"
+        pidfile.write_text(f"{dead.pid}\n")
+        env = {"PATH": f"{fakebin}:{os.environ['PATH']}", "HOME": os.environ["HOME"], "STATE_DIR": d}
+        r = subprocess.run([SCRIPTS / script, "stop"], cwd=ROOT, text=True, env=env, capture_output=True, timeout=30)
+        self.assertEqual(r.returncode, 0, (script, r.stdout, r.stderr))
+        self.assertIn("stale PID file", r.stdout, script)
+        self.assertFalse(pidfile.exists(), script)
 
   def test_qwen_power_guard(self):
     proc = subprocess.run(
