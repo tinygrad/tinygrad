@@ -223,7 +223,7 @@ minute (Nov 16, 15:57: g3 lost that way). A model switch on one VM boot always m
 Flash launcher leaves 1, so the other model's clean stop leaves a boot version the new start does not accept; a start of the same
 launcher after its own clean stop needs no reset.
 
-## Pokemon (one game through a whole 262,144-token window, screenshots in every turn)
+## Pokemon (one game through a whole 262,144-token window, a screenshot every turn: the RAW line)
 
 A game is a workflow on the normal C2 server with a few settings changed; vision stays mandatory. One six-card 7900 XTX VM; a restart
 or a changed setting is a start in place on the same VM ("When a start is refused" above), and every start of a game box passes the Qwen
@@ -231,71 +231,57 @@ box gate ("Gates for every change", R3) before games are sent to it.
 
 What counts (Phase 5): a game counts when, from power-on, inside ONE 262,144-token context with nothing in its history replaced, dropped
 or summarised, the emulator's memory shows the first gym leader's battle has begun (BROCKBATTLE; the badge, BADGE1, is reported too).
-The model gets only the system text ("Beat the game." + generic sentences that name no game, place, item, character or creature), one
-screenshot a step, a button tool and its reply (buttons pressed, how much the picture changed): nothing read from emulator memory ever
-reaches the model. Stop rules: a game not out of the house by step 150, without a starter by 300 or not in the first town by 500 is
-stopped and stays in n as a failure. A game started from another game's saved state is a FORK: an experiment, labelled with its source
-and step, never counted for the goal. Counts are "k of n games started" with the line: the company repo's `results/pokemon/BROCK.md`.
+Milestones count only BEFORE a game's first `report()` call (later ones are a separate "resumed" column). A game started from another
+game's saved state is a FORK: an experiment, labelled with its source and step, never counted for the goal. Counts are "k of n games
+started" with the line: the company repo's `results/pokemon/BROCK.md`. Every count made before Nov 16 21:52 used the old harness (it told
+the model how much the picture changed, held and repeated buttons, waited for text to settle): labelled 'not raw (old harness)', not
+counted.
 
-**Qwen server** (the C2 launcher with the overrides below; the game sends `preserve_thinking=false`, so `SEQ_CKPT_TAIL=1` is required:
-without it every turn re-reads the whole conversation from token 0):
+**What the model gets (the RAW line = upstream `geohot/pi_plays_pokemon` 41d8b08, byte for byte; board, Nov 16 21:52):**
+- the system text: upstream's `.pi/SYSTEM.md`, unchanged, and the first user message `Beat the game.`;
+- one screenshot a turn, 320x288 (`PI_IMAGE_SCALE=2`, integer scale, square pixels; upstream's default is 480x432): the size is a free
+  parameter chosen by test and cost (the company repo's `results/pokemon/VISION-PROBE.md`; 90 picture tokens against 210 at 480x432,
+  ~810 turns in a window against ~530);
+- three tools: `look`; `act(actions)` = up to six buttons (`up down left right a b start select`), one press each, in order (an empty
+  list is a legal turn: no hold time, no repeat count, no wait button); `report(done, note)`;
+- the tool reply is upstream's `step N: <buttons> (k presses)` + the new screenshot. NOTHING the harness observes ever reaches the model:
+  no picture change, position, map, text read from the screen, or emulator memory. The game runs in real time between actions.
+- generic sentences on top of the bare text are ARMS beside the bare line (`PI_APPEND_SYSTEM=<file>`, `arms/*.md` in the harness),
+  never the baseline; each must be true of most games of this kind.
+Emulator memory is read only for scoring (milestones, the per-step saved state that forks start from).
+A test guards it: the request bodies the campaign sends (stub model) equal those of upstream's own `pi -a "Beat the game."` for the same
+emulator states, byte for byte outside ids and timestamps (`tests/golden.sh` in the harness; regress runs it on every harness commit).
+
+**Qwen server** (the C2 launcher with the overrides below; `SEQ_FORK=1` lets a fork copy a resident game's cache instead of a cold
+prefill; `SEQ_CKPT_TAIL=1` is for clients that drop old reasoning (`chat_template_kwargs: {preserve_thinking: false}`: without it every
+turn re-reads the conversation from token 0); the bare raw line sends nothing and keeps all thinking, which reuses the cache without it):
 
 ```bash
 SPEC_DRAFTS=3 PREFILL_SIZES=192,384,1152 VISION_MAX_IMAGES=2048 VISION_CACHE_MB=2048 SERVE_RENDER_CACHE=1 SEQ_CKPT_TAIL=1 \
-  VISION_MAX_BODY_MB=64 VISION_URL_CACHE_MB=4608 SEQ_STASH_GB=41 AGING=100 SEQ_STARVE=60 bash extra/llm_service/qwen_6x7900xtx.sh start
+  VISION_MAX_BODY_MB=64 VISION_URL_CACHE_MB=4608 SEQ_STASH_GB=41 AGING=100 SEQ_STARVE=60 SEQ_FORK=1 \
+  bash extra/llm_service/qwen_6x7900xtx.sh start
 ```
 
-(The last three since Nov 16 02:4x, g4: the game resends every screenshot each turn, ~33.6 MB at ~840 turns, over the 32 MB default;
-the URL cache keeps every decoded screenshot of 12 games, paid from the host stash, 46 -> 41 GB.)
-(`AGING=100 SEQ_STARVE=60` since Nov 16 ~16:00: with the default order (fewest new tokens first, no aging) a turn of 250-400 new tokens
-waited behind every ~200-token turn of the other games: on g4 (~30 games) 262 such turns waited 242 s on average, p90 600 s = the
-default SEQ_STARVE; a waiting turn now gains 100 tokens a second, and none waits more than 60 s before it goes first. Scheduling only.)
+(`VISION_MAX_BODY_MB=64 VISION_URL_CACHE_MB=4608 SEQ_STASH_GB=41`: every screenshot of the window is resent each turn (over the 32 MB
+default body), the URL cache keeps every decoded screenshot of 12 games, paid from the host stash. `AGING=100 SEQ_STARVE=60`: a waiting
+turn gains 100 tokens a second and none waits more than 60 s before it goes first (scheduling only). 12 games a box.)
 
-**GLM Flash server** (HISTORICAL: GLM Pokemon is stopped since Nov 16; the C5 launcher: since Nov 15 22:3x its default line carries all of the values below; the line is kept as the record of the R2 games; `VISION_BUCKETS=320,576` adds a
-320-patch bucket for the game's 240x216 screenshot (72 rows = 288 patches; C5's own 576 alone pads it to 576); the GLM R2 games ran this line):
-
-```bash
-VISION_MMPROJ=/home/runner/glmvis/mmproj-F16.gguf VISION_SLICE_MS=200 VISION_MAX_TOKENS=1024 VISION_MAX_IMAGES=2048 VISION_CACHE_MB=2048 \
-  VISION_URL_CACHE_MB=512 VISION_BUCKETS=320,576 SERVE_RENDER_CACHE=1 AM_POWER_LIMIT=250 bash extra/llm_service/glm_flash_6x7900xtx.sh start
-```
-
-The GLM arm of Nov 16 (g1, 8 games at 480x432 + 8 at 360x324) adds `VISION_MAX_BODY_MB=64 VISION_URL_CACHE_MB=7168 SEQ_STASH_GB=6`:
-a decoded screenshot is 677,376 B at 480x432 and 366,912 B at 360x324, 16 games x 800 = 6.7 GB, paid from the stash (16 games fit the
-18 slots; with many other conversations the smaller stash makes a new one wait behind 180-s sticky ones).
-A game that resends every screenshot of the window in each request needs a body cap above the 32 MB default once its screenshots are
-larger than 240x216: 842 PNG screenshots at 360x324 (~38.9 KB each) are ~32.7 MB, a 413. For those add `VISION_MAX_BODY_MB=64` to the
-line (both launchers pass it; the Qwen Pokemon line on g4 runs with 64 since Nov 16 02:4x).
-
-**Qwen clients that drop old reasoning** in general (`chat_template_kwargs: {preserve_thinking: false}`): the same `SEQ_CKPT_TAIL=1`.
-A client that sends nothing gets `preserve_thinking=true` and reuses its cache without it. Default off.
-
-**The game harness** (teeny, `~/fun/pi_plays_pokemon`): the current line (harness commit, rules arm, sampling) is the one every game
-records and `results/pokemon/BROCK.md` lists: take it from there, not from this file. No history rewrite (every screenshot and message
-stays); the run ends at the window's compaction point. HISTORICAL EXAMPLE below: the R3 arm of Nov 15-16 (`.pi/RULES_R3.md`, harness
-`104cacd`; R3N, Nov 16 20:59, drops its first sentence) and the stopped GLM client.
+**The game harness** (teeny, `~/fun/pi_plays_pokemon`, branch main; upstream as remote branch `up/main`): the current line (harness
+commit, arm, sampling, thinking) is the one every game records and `results/pokemon/BROCK.md` lists: take it from there, not from this
+file. One game a line, from power-on (the company repo's `results/w-pkm/raw/raw.sh <box> <scale> <id> <emu port> [think] [arm]` sets it):
 
 ```bash
 cd ~/fun/pi_plays_pokemon
-# Qwen
-EMU_TEXT_SETTLE=1 PI_ACT_SEQ=1 PI_IMAGE_SIZE=240x216 PI_PRESERVE_THINKING=0 PI_RULES=R3 \
 PI_QWEN_BASE_URL=http://127.0.0.1:<qwen tunnel>/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_FRESH=1 PI_IMAGE_SCALE=2 PI_IMAGE_REFS=1 \
-PI_TEMPERATURE=1.0 EMU_PORT=8900 EMU_URL=http://127.0.0.1:8900 \
-.venv/bin/python campaign.py --full-context --block-minutes 900 --run qwen38-flash-full-NNN --change "<label>"
-# GLM Flash (historical: stopped since Nov 16)
-PI_IMAGE_SIZE=240x216 PI_RULES=R3 \
-PI_GLM_BASE_URL=http://127.0.0.1:<glm tunnel>/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_FRESH=1 PI_IMAGE_SCALE=2 PI_IMAGE_REFS=1 \
-PI_TEMPERATURE=1.0 PI_TOP_P=0.95 EMU_PORT=8901 EMU_URL=http://127.0.0.1:8901 \
-.venv/bin/python campaign.py --full-context --block-minutes 900 --provider local-glm-flash --model "GLM 5.3 Flash" --run glm53-flash-full-NNN --change "<label>"
+PI_TEMPERATURE=1.0 PI_TOP_P=1.0 EMU_PORT=8900 EMU_URL=http://127.0.0.1:8900 \
+.venv/bin/python campaign.py --full-context --block-minutes 900 --run <run id> --change "<label>"
 ```
 
-The seven R3 sentences of the historical example (picture references on for both models: `PI_IMAGE_REFS=1`, the server keeps pictures by hash):
-- In a new town, enter every building that has a door before you leave the town.
-- When a person asks you to do something, or gives you something to take to someone, do that next, before you explore further.
-- If a person blocks your way and talking to them does not open it, something elsewhere must be done first: go back and finish what you have not finished.
-- When you are given something to take to someone, go back the way you came to where you met that person, and talk to them.
-- If the screen keeps coming back to the same few views, what you are doing does not work: try a wall, an edge or a direction you have not tried yet.
-- Read to the end everything a person says: it often says where to go next.
-- To leave a room, walk onto its stairs, door or mat and keep pressing the same direction until the screen changes.
+`PI_IMAGE_REFS=1` sends a screenshot already sent by its hash (bytes a request, not tokens: the server keeps pictures by hash). Arms add
+`PI_APPEND_SYSTEM=$PWD/arms/<arm>.md` (text) or `PI_THINKING=low|off` (thinking level). Forks: `fork.py` from a game's
+`states/step-NNN.state` and its session as sent.
+
+GLM 5.3 Flash Pokemon is stopped (Nov 16); its last line is in this file's history (git log -p RUNNING.md).
 
 ## Benchmarks (source: the company repo's results/phase4/benchmarks.md, copied 21:34 Nov 15)
 
