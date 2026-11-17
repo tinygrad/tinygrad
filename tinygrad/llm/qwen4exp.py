@@ -2723,15 +2723,22 @@ class Transformer:
     """the S of a sequence slot's recurrent states (one with SEQ_REPLAY) and of its conv states"""
     S, SC = slot_states(self.config.spec_drafts)
     return 1, SC
-  def seq_ckpt(self, save:bool, slot:int, pos:int, par:int=0):
-    """the checkpoint of slot `slot`: its states of position pos (and the hidden state of row 0) saved, or restored (SEQ_CKPT2: buffer par)"""
+  def seq_ckpt(self, save:bool, slot:int, pos:int, par:int=0, src:int|None=None):
+    """the checkpoint of slot `slot`: its states of position pos (and the hidden state of row 0) saved, or restored (SEQ_CKPT2: buffer par;
+    src: the checkpoint of that slot restored into this one, see seq_fork)"""
     S, SC = self._seq_S()
     if save: self._seq_materialize(slot, pos)
     else: self._seq_kbase[slot] = pos
     CK = self._seq_ckpt_ck
     self._seq_ckpt_jits[save](UOp.variable("seq_slot", 0, self.seq_slots()).bind(slot), UOp.variable("seq_ps", 0, S-1).bind(pos % S),
                               UOp.variable("seq_pc", 0, SC-1).bind(pos % SC),
-                              UOp.variable("seq_cslot", 0, (self.seq_slots() + 1) * CK - 1).bind(slot * CK + par))
+                              UOp.variable("seq_cslot", 0, (self.seq_slots() + 1) * CK - 1).bind((slot if src is None else src) * CK + par))
+  def seq_fork(self, src_slot:int, src_par:int, src_base:int, slot:int, base:int, pos:int):
+    """SEQ_FORK: the first pos positions of the sequence of src_slot (its region at src_base) and its checkpoint there (buffer src_par) copied
+    to slot (its region at base) as its checkpoint (buffer 0): the jits of the moves and the checkpoints, no other kernel"""
+    self.seq_move(src_base, base, pos)
+    self.seq_ckpt(False, slot, pos, par=src_par, src=src_slot)
+    self.seq_ckpt(True, slot, pos)
 
   def _prefill_jit(self, n:int, lp:int|None=None, vis:bool=False) -> Any:
     """the jit of a prefill chunk of n tokens on a sequence's region (lp: of a context of that many pools a device, see _pk_bucket; vis: its

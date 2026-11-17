@@ -269,6 +269,87 @@ class ChunkModel(CacheModel):
         else: self.cache[pos+(i+j)*C:pos+(i+j+1)*C] = self.host[c+j]
     super().seq_stash(save, slot, pos, segments, entry, n, hrow, ckpt_par)
 
+class ForkModel(CacheModel):
+  """a CacheModel that copies a sequence's rows and checkpoint into another slot (SEQ_FORK, Transformer.seq_fork)"""
+  def seq_fork(self, src_slot, src_par, src_base, slot, base, pos):
+    self.cache[base:base+pos] = self.cache[src_base:src_base+pos]
+    self.calls.append(("fork", src_slot, src_par, src_base, slot, base, pos))
+
+@patch.object(SeqEngine, "FORK", 1)
+@patch.object(SeqEngine, "FORK_MIN", 1000)
+class TestSeqFork(unittest.TestCase):
+  def setUp(self): self.model = ForkModel()
+  def first(self, ids:list[int], session:str="a"):
+    eng = SeqEngine(self.model)
+    s, start, restore = eng.take(ids, session_id=session)
+    eng.prefill(s, ids, start, restore, (0.0, 1.0))
+    self.model.calls.clear()
+    return eng, s
+
+  def test_fork_of_a_decoding_one(self):
+    # the same prompt while the first one decodes: its checkpoint copied into a new slot and region, the token after it from there
+    ids = list(range(100, 5100))
+    eng, s = self.first(ids)
+    self.assertEqual(eng.cached(ids), len(ids))
+    s2, start, restore = eng.take(ids, session_id="b")
+    self.assertIsNot(s2, s)
+    self.assertEqual((start, restore, s2.ckpt, s2.n), (len(ids), True, len(ids), len(ids)))
+    self.assertEqual(self.model.calls, [("fork", s.slot, s.cpar, s.base, s2.slot, s2.base, len(ids))])
+    self.assertEqual(self.model.cache[s2.base:s2.base+len(ids)], ids)
+    self.assertTrue(s.active and s.tokens[:len(ids)] == ids)
+    self.assertEqual(eng.prefill(s2, ids, start, restore, (0.0, 1.0)), 8)
+    self.assertEqual(self.model.calls[1:], [("ckpt", False, s2.slot, len(ids)), ("first", s2.slot, len(ids))])
+    # a prompt that goes on past it: the rest prefilled from the copy
+    ids3 = ids + list(range(9000, 9500))
+    s3, start, restore = eng.take(ids3, session_id="c")
+    self.assertEqual((start, restore), (len(ids), True))
+    self.assertEqual(len({s.slot, s2.slot, s3.slot}), 3)
+
+  def test_no_fork(self):
+    # below FORK_MIN, without SEQ_FORK, or a model without seq_fork: a new sequence from 0
+    ids = list(range(100, 900))
+    eng, s = self.first(ids)
+    self.assertEqual(eng.cached(ids), 0)
+    self.assertEqual(eng.take(ids, session_id="b")[1:], (0, False))
+    ids = list(range(100, 5100))
+    with patch.object(SeqEngine, "FORK", 0):
+      eng, s = self.first(ids)
+      self.assertEqual(eng.take(ids, session_id="b")[1:], (0, False))
+    self.model = CacheModel()
+    eng, s = self.first(ids)
+    self.assertEqual(eng.take(ids, session_id="b")[1:], (0, False))
+    self.assertNotIn("fork", [c[0] for c in self.model.calls])
+
+  def test_held_one_of_another_session(self):
+    # an idle conversation held for its session is copied for another session's prompt, taken by its own
+    ids = list(range(100, 5100))
+    eng, s = self.first(ids, "a")
+    eng.stop(s, len(s.tokens))
+    s2, start, restore = eng.take(ids, session_id="b")
+    self.assertIsNot(s2, s)
+    self.assertEqual((start, restore, s.active, s.n), (len(ids), True, False, len(ids)))
+    eng.stop(s2, 0)
+    self.assertIs(eng.take(ids + [1, 2, 3], session_id="a")[0], s)
+    # not held: taken, not copied
+    eng.stop(s, len(s.tokens))
+    with patch.object(SeqEngine, "STICKY", 0.0): self.assertIs(eng.take(ids, session_id="c")[0], s)
+
+  def test_continuation_goes_further(self):
+    # an idle one the prompt continues past the decoding one's checkpoint: taken, not a copy
+    ids = list(range(100, 5100))
+    eng, s = self.first(ids, "a")
+    eng.stop(s, len(s.tokens))
+    longer = ids + list(range(9000, 9500))
+    s2, _, _ = eng.take(longer, session_id="a")
+    eng.prefill(s2, longer, len(ids), True, (0.0, 1.0))
+    eng.stop(s2, len(s2.tokens))
+    s3, _, _ = eng.take(ids, session_id="b")
+    eng.prefill(s3, ids, len(ids), True, (0.0, 1.0))
+    self.model.calls.clear()
+    got = eng.take(longer + [5], session_id="a")
+    self.assertIs(got[0], s2)
+    self.assertNotIn("fork", [c[0] for c in self.model.calls])
+
 class TestSeqChunkCopies(unittest.TestCase):
   def test_restore_keeps_the_neighbours_rows(self):
     # (Nov 16, g2 / g4: a returning turn continued on ANOTHER conversation's rows) bases packed tighter than the chunks (SEQ_BASE_ALIGN 24 with
@@ -532,6 +613,25 @@ class TestScheduleSeqs(unittest.TestCase):
     self.assertEqual(st["last_10m"]["requests"], 3)
     self.assertGreater(st["last_10m"]["ttft"]["max"], 0)
     self.assertEqual(st["generated_total"], 12)
+
+  @patch("tinygrad.llm.serve.stderr_log")
+  @patch.object(SeqEngine, "FORK", 1)
+  def test_forks_wait_for_one_prefill(self, _):
+    # SEQ_FORK: the same prompt from three sessions at once (forks of one saved game): one prefill (in slices), two copies of its checkpoint
+    # (the first one starving, the others not yet: after its slices they'd go first (STARVE_ALT), they wait for it instead)
+    self.server.STARVE_SEQ, self.server.STARVE_ALT = 0.05, 1
+    self.model.seq_fork = lambda *a: self.model.calls.append(("fork",) + a)
+    self.server.engine.fork = True  # (made when the scheduler started, before the model had seq_fork)
+    def req(i:int) -> Request: return Request(list(range(100, 8100)), "", 4, 0.0, session_id=f"s{i}")
+    self.server.waiting.put(first:=req(0))
+    time.sleep(0.06)
+    reqs = [first, req(1), req(2)]
+    for r in reqs[1:]: self.server.waiting.put(r)
+    self.wait(reqs)
+    froms = [c[2] for c in self.model.calls if c[0] == "prefill"]
+    self.assertEqual((froms.count(0), len([c for c in self.model.calls if c[0] == "fork"])), (1, 2))
+    self.assertEqual(sorted(r.cache_start for r in reqs), [0, 8000, 8000])
+    self.assertTrue(all(len(r.generated) == 4 for r in reqs))
 
   @patch("tinygrad.llm.serve.stderr_log")
   def test_short_suffix_mixed_while_other_decodes(self, _):

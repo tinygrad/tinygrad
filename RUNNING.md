@@ -215,7 +215,7 @@ The launcher expands q4 to `SEQ_FP8=1`, `SEQ_FP8_IDX=0`, `SEQ_KV4=1`; `GLM_KV=fp
 
 ### When a start is refused: restart in place
 A start that stops with `the card needs a mode1 reset (left initialised by a process that did not finalize)` is restarted ON THE SAME VM
-with a reset-enabled start (`AM_VM_RESET=1`). Do not delete or recreate the VM for it: a freed six-GPU host is taken by CI within a
+with a reset-enabled start (`AM_FIRST_START=1`: the launchers pass `AM_VM_RESET=1` only through it; `AM_VM_RESET=1` in the line is not passed on). Do not delete or recreate the VM for it: a freed six-GPU host is taken by CI within a
 minute (Nov 16, 15:57: g3 lost that way). A model switch on one VM boot always meets it: the Qwen launcher sets `AM_MEC_PIPES=2`, the GLM
 Flash launcher leaves 1, so the other model's clean stop leaves a boot version the new start does not accept; a start of the same
 launcher after its own clean stop needs no reset.
@@ -396,6 +396,7 @@ Any setting not listed here is not supported: its production value is compiled i
 | `AGING` | 0 | Per-second urgency used by the waiting-request scheduler; changing it affects convoy avoidance. |
 | `SEQ_STARVE` | 600 seconds | Wait threshold granting starvation priority; use a measured workload-specific override such as 30 only explicitly. |
 | `SEQ_CKPT_TAIL` | 0 (off) | Keep a prior-generation boundary checkpoint when clients discard old reasoning, preventing whole-conversation recompute. |
+| `SEQ_FORK` | 0 (off); Qwen only (the C2 launcher passes it) | Forks of one saved game: a prompt that starts with a decoding (or another session's held) conversation's checkpoint gets a copy of it (0.1-0.3 s) instead of a cold prefill; identical waiting prompts wait for the one being prefilled. g3 4d93746d8, 149,741-token prompt: 12 concurrent forks 26.4 s wall (11 copies), one fork alone 1.1 s and equal to its source's own continuation. Greedy is not batch-invariant: concurrent forks differ from each other in text. |
 | `SERVE_RENDER_CACHE` | 1 in the C5 launcher's default; Qwen C2: off unless set (its Pokemon and picture lines above set 1) | Optional chat-template render cache; memoized renders can change server-side cache behavior, so enable only with output-identical API tests and expected cache controls. |
 | `VISION_BUCKETS` | C5 launcher default 320,576 (older C5 benchmark runs: 576); unset on C2 | Additional picture-token tower buckets for frequent image sizes. Every extra bucket adds warm-up time and graph memory; run every bucket again and leave unset unless measured useful. |
 | `VISION_CACHE_MB` | C2 launcher default 1024; C5 launcher default 2048 (older C5 benchmark runs: engine default) | Maximum host RAM for cached picture rows/profile features: this many MB stays resident when full, in addition to decoded pictures and engine state. Size a shared service from measured RSS, not either dedicated-box profile. |
