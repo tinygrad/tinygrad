@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log, getenv
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
 from tinygrad.llm.telemetry import Telemetry, utc_ms
-from tinygrad.llm.engine import SessionInFlight
+from tinygrad.llm.engine import SessionInFlight, starts as seq_starts
 if typing.TYPE_CHECKING: from tinygrad.llm.engine import SeqEngine, Seq
 if TYPE_CHECKING:
   from tinygrad.llm.cli import SimpleTokenizer
@@ -1392,9 +1392,13 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           # (cold ones: SEQ_COLD_MAX being prefilled at most (a cold prefill of an agent's conversation is seconds: many at once and the warm
           # turns wait behind them, starve, lose theirs and come back cold))
           cold = sum(r.cold for r in filling.values()) >= self.COLD_MAX
+          # (SEQ_FORK: a prompt that starts with the whole prompt of one being prefilled waits for it: a copy of its checkpoint then, not a
+          # second prefill of the same tokens (N forks of one saved game))
+          ends = [(f.fill[0], cut) for f in filling.values() if (cut:=eng._tail_cut(f.fill[0]) or len(f.fill[0])) >= eng.FORK_MIN] if eng.FORK else []
+          def fork_wait(r:Request) -> bool: return any(r.hit < n and seq_starts(prompt(r), f, n, exact=False) for f, n in ends)
           cands += [(not starving(r), (r.st if starving(r) else len(r.ids) + len(r.generated) - r.hit - self.AGING*(now - r.st)), 1, r)
                     for r in pending if (r.tried != eng.version or now - r.tried_at > 1.0) and
-                    not (cold and len(r.ids) + len(r.generated) - r.hit > self.COLD_TOKENS)]
+                    not (cold and len(r.ids) + len(r.generated) - r.hit > self.COLD_TOKENS) and not (ends and fork_wait(r))]
         order = sorted(cands, key=lambda x: x[:3])
         if self.STARVE_ALT and starved_last: order = [x for x in order if x[0]] + [x for x in order if not x[0]]
         starved_last = False

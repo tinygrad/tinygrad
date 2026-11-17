@@ -89,6 +89,10 @@ class SeqEngine:
   # (a conversation used in the last PROTECT s is never lost, even forced: its agent's next turn would come back cold, a re-prefill that makes
   # more turns wait and lose theirs (a box's death spiral). forced, only the held ones idle longer are)
   PROTECT = getenv("SEQ_PROTECT", 60.0)
+  # (SEQ_FORK: a new prompt that starts with the checkpoint of a sequence it may not take (decoding, or idle and held for another session: N
+  # forks of one saved game send the same first prompt) gets a copy: the checkpoint's rows and states copied into a new slot and region, the
+  # rest prefilled from there, as a continuation of the source would be. FORK_MIN tokens at least (a copy, not a short prefill))
+  FORK, FORK_MIN = getenv("SEQ_FORK", 0), 4096
   def __init__(self, model):
     # models may pack region bases more tightly than their move/stash chunks (a mock may use 1 for simple unit-test arithmetic)
     self.model, self.k = model, model.config.spec_drafts
@@ -362,7 +366,7 @@ class SeqEngine:
     conversation (not forced), or every slot active: nothing evicted, it waits
     """
     self.last_take_stash = False
-    ret = self._take_seq(ids, room, force)
+    ret = self._take_seq(ids, room, force, session_id)
     if ret is not None and session_id:
       seq = ret[0]
       seq.sessions.add(session_id)
@@ -372,12 +376,20 @@ class SeqEngine:
       # (the continuations from a conversation's end and from its checkpoint (the reply not sent back as it was): see the status line)
       if ret[1]: self.times["from_ckpt" if ret[2] else "from_end"] = self.times.get("from_ckpt" if ret[2] else "from_end", 0) + 1
     return ret
-  def _take_seq(self, ids:list[int], room:int, force:bool) -> tuple[Seq, int, bool]|None:
+  def _forkable(self, s:Seq, session_id:str) -> bool:
+    """SEQ_FORK: s is a source to copy, not a sequence to take: decoding, or idle and held for another session"""
+    if not self.FORK or not hasattr(self.model, "seq_fork"): return False
+    return s.active or bool(session_id and s.sessions and session_id not in s.sessions and self.held(s.used))
+  def _fork_src(self, ids:list[int], session_id:str) -> tuple[Seq, int]|None:
+    """SEQ_FORK: the source with the longest checkpoint (FORK_MIN at least) the prompt starts with"""
+    srcs = [(s, s.ckpt) for s in self.seqs if self._forkable(s, session_id) and self.FORK_MIN <= s.ckpt <= len(ids)]
+    return max((x for x in srcs if starts(ids, x[0].tokens, x[1])), key=lambda x: x[1], default=None)
+  def _take_seq(self, ids:list[int], room:int, force:bool, session_id:str="") -> tuple[Seq, int, bool]|None:
     # (no slot or rows for it even with every idle one out: none of its prefix compared)
     if sum(t.active for t in self.seqs) >= self.nslots or self._need(len(ids)) > self.rows - sum(t.cap for t in self.seqs if t.active): return None
     best:tuple[Seq, int, bool]|None = None
     for s in self.seqs:
-      if s.active: continue
+      if s.active or self._forkable(s, session_id): continue
       if s.n and s.n < len(ids) and starts(ids, s.tokens, s.n): cand = (s, s.n, False)
       # (its checkpoint: a prompt that continues it, or is it (the same prompt again: the token after it sampled from it, nothing prefilled))
       elif s.ckpt and s.ckpt <= len(ids) and starts(ids, s.tokens, s.ckpt): cand = (s, s.ckpt, True)
@@ -390,10 +402,12 @@ class SeqEngine:
       if len(x.tokens) < len(ids) and starts(ids, x.tokens, len(x.tokens)): return len(x.tokens)
       return x.ckpt if 0 < x.ckpt <= len(ids) and starts(ids, x.tokens, x.ckpt) else 0
     stashed = max(((n, i, x) for i, x in enumerate(self.stashed) if (n:=scont(x))), default=(0, 0, None))[2]
+    # (a fork only if its copy goes further than what it could take)
+    if (fork:=self._fork_src(ids, session_id)) is not None and fork[1] <= max(best[1] if best else 0, scont(stashed) if stashed else 0): fork = None
     # (the rows of its prompt and reply. more than the active ones leave even with every idle one out: its prompt's, the reply's grown later)
     length = min(len(ids) + min(room or self.RESERVE, self.RESERVE), self.max_len)
     if self._need(length) > self.rows - sum(t.cap for t in self.seqs if t.active): length = len(ids)
-    if best is not None and (stashed is None or best[1] >= scont(stashed)):
+    if fork is None and best is not None and (stashed is None or best[1] >= scont(stashed)):
       s, start, restore = best
       s.active = True  # (not evicted for its own room)
       if self.room(s, length, force):
@@ -403,8 +417,12 @@ class SeqEngine:
       s.active = False
       return None
     # (the stashed one out of the stash while its slot and region are made: the evictions don't stash over it)
+    if fork is not None: stashed = None
     start = scont(stashed) if stashed is not None else 0
     if stashed is not None: self.stashed.remove(stashed)
+    # (the source neither evicted nor moved away for the fork's room: its slot, region and checkpoint are copied after)
+    src_active = fork is not None and fork[0].active
+    if fork is not None: fork[0].active = True
     # (a run of free rows and idle ones evicted, nothing moved: else the least recently used ones evicted, the fewest rows moved for a region)
     need, base = self._need(length), None
     win = self._window(need, force) if need <= self.rows else None
@@ -413,11 +431,22 @@ class SeqEngine:
       base = win[0]
     elif need > self.rows or not self._make_room(need, True, None, force):
       if stashed is not None: self.stashed.append(stashed)
+      if fork is not None: fork[0].active = src_active
       return None
     s = Seq(min(set(range(self.nslots)) - {t.slot for t in self.seqs}), 0, 0, active=True)
     if base is None: self._place(s, need)
     else: s.base, s.cap = base, need
     self.seqs.append(s)
+    if fork is not None:
+      (src, c), st = fork, time.perf_counter()
+      src.active = src_active
+      # (its rows of the c positions and its checkpoint's states copied: s holds them as its own checkpoint, restored by the prefill)
+      self.model.seq_fork(src.slot, src.cpar, src.base, s.slot, s.base, c)
+      self._time("fork", st)
+      self.times["forked"] = self.times.get("forked", 0) + 1
+      s.tokens, s.n, s.ckpt = list(src.tokens[:c]), c, c
+      self._event("fork", slot=s.slot, src_slot=src.slot, tokens=c)
+      return s, c, True
     if stashed is None: return s, 0, False
     n, st = len(stashed.tokens), time.perf_counter()
     self.model.seq_stash(False, s.slot, s.base, self._segs(stashed.chunks, 0, len(stashed.chunks)), stashed.entry, n, stashed.hrow)
@@ -443,6 +472,9 @@ class SeqEngine:
     cands:list[tuple[int, Seq|Stashed]] = [(max(cont(s.tokens, s.n, s.ckpt), cont(s.tokens, 0, s.ckpt2) if self.CKPT2 else 0), s)
                                            for s in self.seqs if not s.active] + \
                                           [(cont(x.tokens, len(x.tokens), x.ckpt), x) for x in self.stashed]
+    # (SEQ_FORK: a decoding one's checkpoint it would be a copy of)
+    if self.FORK and hasattr(self.model, "seq_fork"):
+      cands += [(k, s) for s in self.seqs if s.active and self.FORK_MIN <= (k:=cont(s.tokens, 0, s.ckpt))]
     n, best = max(cands, key=lambda c: c[0], default=(0, None))
     if touch and n and best is not None: best.used = time.perf_counter()
     return n
