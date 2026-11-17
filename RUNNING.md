@@ -215,7 +215,7 @@ The launcher expands q4 to `SEQ_FP8=1`, `SEQ_FP8_IDX=0`, `SEQ_KV4=1`; `GLM_KV=fp
 
 ### When a start is refused: restart in place
 A start that stops with `the card needs a mode1 reset (left initialised by a process that did not finalize)` is restarted ON THE SAME VM
-with a reset-enabled start (`AM_VM_RESET=1`). Do not delete or recreate the VM for it: a freed six-GPU host is taken by CI within a
+with a reset-enabled start (`AM_FIRST_START=1`: the launchers pass `AM_VM_RESET=1` only through it; `AM_VM_RESET=1` in the line is not passed on). Do not delete or recreate the VM for it: a freed six-GPU host is taken by CI within a
 minute (Nov 16, 15:57: g3 lost that way). A model switch on one VM boot always meets it: the Qwen launcher sets `AM_MEC_PIPES=2`, the GLM
 Flash launcher leaves 1, so the other model's clean stop leaves a boot version the new start does not accept; a start of the same
 launcher after its own clean stop needs no reset.
