@@ -2,7 +2,7 @@ from typing import cast, Callable
 import struct
 from collections import defaultdict
 from tinygrad.renderer import tc, Renderer, with_storage
-from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, promo_dtype
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.renderer.cstyle import CUDARenderer, pm_narrow_uint
 from tinygrad.helpers import flatten, prod, unwrap, Target
@@ -43,7 +43,7 @@ ptx_matcher = PatternMatcher([
   (UPat.var('x', dtype=dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
   # upcast to float32 all the ops that don't support half
   (UPat(doesnt_support_half, dtype=dtypes.half, name="x"),
-    lambda x: (UOp(x.op, src=tuple(vv.cast(dtypes.float32) for vv in x.src), arg=x.arg).cast(dtypes.half))),
+    lambda x: (UOp(x.op, src=tuple(vv.ccast(promo_dtype(x.src)).cast(dtypes.float32) for vv in x.src), arg=x.arg).cast(dtypes.half))),
   # a bool is a predicate register in PTX but a byte in memory, so a bool buffer is accessed through a uint8 view of it
   (UPat(Ops.LOAD, dtypes.bool, src=(UPat(name="idx"),), name="x", allow_any_len=True),
    lambda x,idx: x.replace(src=(with_storage(idx, dtypes.uint8),) + ((x.src[1].cast(dtypes.uint8),) if len(x.src) >= 2 else ())
@@ -144,7 +144,7 @@ class PTXRenderer(Renderer):
     self.compiler = (PTXCompiler if target.interface.startswith("MOCK") or target.device == "CUDA" else NVPTXCompiler)(target.arch)
     self.tensor_cores = [x for x in tc.get_cuda(target.arch) if x.dtype_in in (dtypes.half, dtypes.float)]
     if int(target.arch[3:]) < 80: self.extra_matcher += PatternMatcher([(UPat((Ops.MAX, Ops.EXP2), dtype=dtypes.half, name="x"),
-      lambda x: UOp(x.op, src=tuple(vv.cast(dtypes.float32) for vv in x.src), arg=x.arg).cast(dtypes.half))])
+      lambda x: UOp(x.op, src=tuple(vv.ccast(promo_dtype(x.src)).cast(dtypes.float32) for vv in x.src), arg=x.arg).cast(dtypes.half))])
 
   # language options
   kernel_prefix = """.version VERSION

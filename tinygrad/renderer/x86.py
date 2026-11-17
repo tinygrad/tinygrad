@@ -146,14 +146,14 @@ extra_matcher = PatternMatcher([
   (UPat.var("y", dtypes.uint64).cast(dtypes.floats, name="x"), lambda y,x:
    (y < 2**63).where(y.cast(dtypes.int64).cast(x.dtype), ((y >> 1) | (y & 1)).cast(dtypes.int64).cast(x.dtype) * 2)),
   # no int8 mul or cmove, cast to int16
-  (UPat.var("a", dtypes.int8s) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
+  (UPat.var("a", dtypes.int8s) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.ccast(a.dtype).cast(dtypes.int16)).cast(a.dtype)),
   (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.int8s), UPat.var("b")),
-   lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype)),
+   lambda m,a,b: m.where(a.cast(dtypes.int16), b.ccast(a.dtype).cast(dtypes.int16)).cast(a.dtype)),
   # float16 alus are done in float32
   (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op,
-   src=tuple(s.cast(dtypes.float) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
+   src=tuple(s.ccast(promo_dtype(x.src)).cast(dtypes.float) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
   (UPat(GroupOp.Comparison, src=[UPat(dtype=dtypes.float16), UPat()], name="x"),
-   lambda x: UOp(x.op, src=tuple(s.cast(dtypes.float32) for s in x.src)).cast(x.dtype)),
+   lambda x: UOp(x.op, src=tuple(s.ccast(promo_dtype(x.src)).cast(dtypes.float32) for s in x.src)).cast(x.dtype)),
   # a float WHERE blends at the width of its value, so it needs a comparison at that width to make the mask
   (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats+(dtypes.weakfloat,)), UPat.var("b")).named("w"),
    lambda m,a,b,w: m.cast(w.dtype).ne(UOp.cconst(0, w.dtype)).where(a, b)

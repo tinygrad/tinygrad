@@ -15,7 +15,7 @@ def packed_field(bidx:UOp, dt:DType) -> tuple[UOp, UOp, int]:
 def packed_store(s:UOp):
   bidx, var, *gate = s.src
   idx, shift_am, mask = packed_field(bidx, var.dtype)
-  new_v, wmask = (var.cast(dtypes.uint32) & mask) << shift_am, ((mask << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
+  new_v, wmask = (var.cast(dtypes.uint32) & mask) << shift_am, (UOp.const(mask, dtypes.uint32) << shift_am) ^ 0xFFFFFFFF
   word = idx.cast(dtypes.uint32)
   buf = word.load(*((UOp.const(0, dtypes.uint32), *gate) if gate else ()))
   return word.store((buf & wmask) | new_v, *gate)

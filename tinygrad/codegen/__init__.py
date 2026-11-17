@@ -355,12 +355,12 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions")
   # Transcendental decompositions can introduce unsupported dtypes, e.g. uint64 in Payne-Hanek reduction.
-  sink = graph_rewrite(sink, pm_dtype_decomps+pm_commit_weak, ctx=DTypeDecompCtx(ren), name="decomp dtypes")
+  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=DTypeDecompCtx(ren), name="decomp dtypes")
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
-  pm_final_rewrite = pm_commit_weak+pm_decomp+extra_matcher+pm_split_ends
+  pm_final_rewrite = pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # commit every const still bare so no renderer reads one
