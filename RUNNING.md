@@ -222,11 +222,19 @@ launcher after its own clean stop needs no reset.
 
 ## Pokemon (one game through a whole 262,144-token window, screenshots in every turn)
 
-A game is a workflow on the normal C2 / C5 servers with a few settings changed; vision stays mandatory. One fresh six-card 7900 XTX VM,
-**one server start per boot**; a changed setting needs a fresh VM. Speed and parcel counts: `results/pokemon/SPEED.md` and `PARCEL.md`
-in the company repo (final rows 21:00 Nov 15).
+A game is a workflow on the normal C2 server with a few settings changed; vision stays mandatory. One six-card 7900 XTX VM; a restart
+or a changed setting is a start in place on the same VM ("When a start is refused" above), and every start of a game box passes the Qwen
+box gate ("Gates for every change", R3) before games are sent to it.
 
-**Qwen server** (the C2 launcher with six overrides; the game sends `preserve_thinking=false`, so `SEQ_CKPT_TAIL=1` is required:
+What counts (Phase 5): a game counts when, from power-on, inside ONE 262,144-token context with nothing in its history replaced, dropped
+or summarised, the emulator's memory shows the first gym leader's battle has begun (BROCKBATTLE; the badge, BADGE1, is reported too).
+The model gets only the system text ("Beat the game." + generic sentences that name no game, place, item, character or creature), one
+screenshot a step, a button tool and its reply (buttons pressed, how much the picture changed): nothing read from emulator memory ever
+reaches the model. Stop rules: a game not out of the house by step 150, without a starter by 300 or not in the first town by 500 is
+stopped and stays in n as a failure. A game started from another game's saved state is a FORK: an experiment, labelled with its source
+and step, never counted for the goal. Counts are "k of n games started" with the line: the company repo's `results/pokemon/BROCK.md`.
+
+**Qwen server** (the C2 launcher with the overrides below; the game sends `preserve_thinking=false`, so `SEQ_CKPT_TAIL=1` is required:
 without it every turn re-reads the whole conversation from token 0):
 
 ```bash
@@ -240,7 +248,7 @@ the URL cache keeps every decoded screenshot of 12 games, paid from the host sta
 waited behind every ~200-token turn of the other games: on g4 (~30 games) 262 such turns waited 242 s on average, p90 600 s = the
 default SEQ_STARVE; a waiting turn now gains 100 tokens a second, and none waits more than 60 s before it goes first. Scheduling only.)
 
-**GLM Flash server** (the C5 launcher: since Nov 15 22:3x its default line carries all of the values below; the line is kept as the record of the R2 games; `VISION_BUCKETS=320,576` adds a
+**GLM Flash server** (HISTORICAL: GLM Pokemon is stopped since Nov 16; the C5 launcher: since Nov 15 22:3x its default line carries all of the values below; the line is kept as the record of the R2 games; `VISION_BUCKETS=320,576` adds a
 320-patch bucket for the game's 240x216 screenshot (72 rows = 288 patches; C5's own 576 alone pads it to 576); the GLM R2 games ran this line):
 
 ```bash
@@ -258,8 +266,10 @@ line (both launchers pass it; the Qwen Pokemon line on g4 runs with 64 since Nov
 **Qwen clients that drop old reasoning** in general (`chat_template_kwargs: {preserve_thinking: false}`): the same `SEQ_CKPT_TAIL=1`.
 A client that sends nothing gets `preserve_thinking=true` and reuses its cache without it. Default off.
 
-**The game harness** (teeny, `~/fun/pi_plays_pokemon` at `104cacd`): prompt "Beat the game." plus the seven sentences of arm R3
-(`.pi/RULES_R3.md`, below: R2's six + the board's seventh, Nov 15); no history rewrite (every screenshot and message stays); the run ends at the window's compaction point.
+**The game harness** (teeny, `~/fun/pi_plays_pokemon`): the current line (harness commit, rules arm, sampling) is the one every game
+records and `results/pokemon/BROCK.md` lists: take it from there, not from this file. No history rewrite (every screenshot and message
+stays); the run ends at the window's compaction point. HISTORICAL EXAMPLE below: the R3 arm of Nov 15-16 (`.pi/RULES_R3.md`, harness
+`104cacd`; R3N, Nov 16 20:59, drops its first sentence) and the stopped GLM client.
 
 ```bash
 cd ~/fun/pi_plays_pokemon
@@ -268,14 +278,14 @@ EMU_TEXT_SETTLE=1 PI_ACT_SEQ=1 PI_IMAGE_SIZE=240x216 PI_PRESERVE_THINKING=0 PI_R
 PI_QWEN_BASE_URL=http://127.0.0.1:<qwen tunnel>/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_FRESH=1 PI_IMAGE_SCALE=2 PI_IMAGE_REFS=1 \
 PI_TEMPERATURE=1.0 EMU_PORT=8900 EMU_URL=http://127.0.0.1:8900 \
 .venv/bin/python campaign.py --full-context --block-minutes 900 --run qwen38-flash-full-NNN --change "<label>"
-# GLM Flash
+# GLM Flash (historical: stopped since Nov 16)
 PI_IMAGE_SIZE=240x216 PI_RULES=R3 \
 PI_GLM_BASE_URL=http://127.0.0.1:<glm tunnel>/v1 ROM_PATH=$PWD/roms/pokemon_red.gb PI_FRESH=1 PI_IMAGE_SCALE=2 PI_IMAGE_REFS=1 \
 PI_TEMPERATURE=1.0 PI_TOP_P=0.95 EMU_PORT=8901 EMU_URL=http://127.0.0.1:8901 \
 .venv/bin/python campaign.py --full-context --block-minutes 900 --provider local-glm-flash --model "GLM 5.3 Flash" --run glm53-flash-full-NNN --change "<label>"
 ```
 
-The seven R3 sentences (picture references on for both models: `PI_IMAGE_REFS=1`, the server keeps pictures by hash):
+The seven R3 sentences of the historical example (picture references on for both models: `PI_IMAGE_REFS=1`, the server keeps pictures by hash):
 - In a new town, enter every building that has a door before you leave the town.
 - When a person asks you to do something, or gives you something to take to someone, do that next, before you explore further.
 - If a person blocks your way and talking to them does not open it, something elsewhere must be done first: go back and finish what you have not finished.
@@ -418,8 +428,26 @@ These are off unless diagnosing or validating. Never enable fault injection in c
 
 ## Gates for every change
 
-1. Run focused tests and `DEV=NULL python3 -m pytest test/null -q -n 16`; touched-file Ruff; `python3 -m mypy tinygrad/llm`; `git diff --check`. When launch env changes also run `DEV=NULL python3 -m pytest test/null/test_llm_service_launchers.py -q`.
-2. Run all three full NULL production startups with `bash test/null/production_c2_warmup.sh`, `bash test/null/production_c5_warmup.sh` and `bash test/null/production_c9_warmup.sh`. C2 covers the Qwen text model, picture tower, cache allocation, JIT capture and run-again; its NULL stash defaults to 2 GB/device (override with `SEQ_STASH_GB`) so the test does not allocate the production 46 GB of real host RAM, with unchanged warm graph shapes. C5 covers the GLM Flash D34 model load and full sequence warm-up. C9 covers the GLM model load and full sequence warm-up. Require `NULLWARM: warm-up DONE`, `C5 NULLWARM: warm-up DONE` and `C9 NULLWARM: warm-up DONE`, respectively. Every production startup still requires its real release gates below; NULL results never prove real VRAM, collectives or outputs.
+The exact commands (one script per gate, with how to read each result) are in the company repo's `results/regress/README.md`.
+1. R1, static and NULL, on teeny before every merge: `python3 -m ruff check .`, `python3 -m mypy`, the full
+   `DEV=NULL python3 -m pytest test/null -q` (0 failed), `git diff --check`; when launch env changes also
+   `test/null/test_llm_service_launchers.py`.
+2. R1, kernel identity: the three production NULL warm-ups (`test/null/production_c2_warmup.sh` Qwen with the picture tower,
+   `test/null/production_c5_warmup.sh` GLM Flash with the RAM store, `test/null/production_c9_warmup.sh` GLM 5.3) of the candidate and of the
+   gated head must compile the same kernels in the same order, or every differing kernel is explained (a default-off flag is gated OFF).
+   `warm-up DONE` alone is not the gate. NEVER start these directly on the controller: they go through its one queue
+   (the company repo's `NULLQ_WHO=<you> tools/nullq.sh c2|c5|c9 '<warm-up command>'`: one C9 at a time, two of C2 / C5; a C9 warm-up peaks at ~70 GB and
+   three at once ran the 188 GB controller out of memory); after the job no warm-up process of yours is left and your /tmp trees are
+   removed. The C2 NULL stash defaults to 2 GB/device (`SEQ_STASH_GB`) with unchanged warm graph shapes. NULL never proves real VRAM,
+   collectives or outputs.
+   R2, ratchet: the merge request states the change in total lines (`sz.py`) and in env flags; neither rises unless the same request
+   names the cut that pays for it or a measured Pokemon speed gain is waived for it.
+   R3, box gates, through the launcher with the line this file prints: Qwen at EVERY Pokemon box start (greedy 4K / 64K / 262K equal to
+   the reference of the same start line, taken on a quiet box, + `extra/llm_service/smoke.py` on the public port); GLM 5.3 Flash once
+   for every merge batch and at least daily while anything merges; GLM 5.3 on ts5 is hands-off: its gate is the C9 kernel identity of
+   R1 plus a daily read-only `smoke.py --no-pictures --only ab` of the live server (no restart, no load).
+   R4, one log: every gate run is a row of the company repo's `results/regress/LOG.md` (time, tree, configuration, gate, result, raw
+   files); a red row stops merges until a later row of that configuration is green or the red is explained.
 3. A model/kernel/scheduler change needs base/candidate **text-only greedy output or CHECK-hash identity** at 4k, 64k and 262k, and several users where scheduling matters. Indexer/candidate paths gate at >=12k. Qwen vision changes additionally need picture NLL/known-answer gates while text stays identical.
 4. Numerics changes require predeclared paired teacher-forced NLL/top-1/KL against llama.cpp on identical GGUF ids and real code/agent windows; GLM also runs its C9 NLL/retrieval/GSM8K suite. Never hide a numerics change inside cleanup.
 5. Final candidate real gates: the Qwen engine owner runs a six-card C2 start, effective-env and memory check, warm/cached/multiuser turns and Qwen text/picture outputs. the GLM Flash owner runs the six-card C5/D34 start, effective-env/memory check, native tool-call and reference checks, 18-concurrent-user turns and a 250K-token prompt; the GLM engine owner runs the 14-card C9 pair, effective-env/memory check, cached/multiuser turns and quality checks. Record commit, machine, command and raw output. NULL never proves real VRAM, collectives or performance; speed claims require a same-box same-hour back-to-back pair.
