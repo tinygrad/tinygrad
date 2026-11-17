@@ -94,9 +94,12 @@ GLM Flash at 8,000 7,973; without it the count is printed, not checked. GLM Flas
 spread there and on Qwen).
 
 It checks (a) 20 default-sampling chats (no stray-script characters, reasoning in `reasoning_content`; read the five it prints),
-(b) the sampler against the server's own distribution (first-token draws at top_p 1 / top_k 0, at top_p 0.95 and with the model's
-defaults: on the plain arm's top 92% the other arms' relative frequencies equal plain's, chi-square, no threshold borrowed from one model) and
-top_k / unknown fields accepted, (c) max(80, 1.25 x slots) conversations each return to their own secret, text and
+(b) the sampler against the server's own distribution (first-token draws of `--draw-prompt`, `--draws` times, at top_p 1 / top_k 0
+= plain, at top_p 0.95 and with the model's defaults): a reshape test (on plain's head, its top 92% with 10+ draws a token, the other
+arms' relative frequencies equal plain's, chi-square, fail at p < 0.001 or without power) and a cut test (plain draws twice as many, in
+halves A and B; P95's draws outside half A's 95% head must be fewer than half B's, one-sided, fail unless p < 0.001: an ignored top_p
+FAILS); when plain's top token holds over 95% by 3 standard errors (PEAKED, e.g. GLM 5.3's thinking) only the cut test decides (a peaked
+model needs more `--draws`, ~1200 for GLM 5.3); no threshold borrowed from one model; top_k / unknown fields accepted, (c) max(80, 1.25 x slots) conversations each return to their own secret, text and
 one picture each, (d) 10 pictures in one request and a 3840x2160 picture's rows. Add `--no-pictures` on C9 (text-only). It cannot check
 that the start used the launcher line printed here: the operator states that.
 
