@@ -5,7 +5,8 @@ from tinygrad.device import Device
 from tinygrad.nn import Linear
 from tinygrad.nn.state import get_state_dict
 from tinygrad import dtypes
-import json
+import json, re, ctypes, subprocess, tempfile, os
+import numpy as np
 
 class MockMultiInputModel:
   def forward(self, x1, x2, x3):
@@ -48,6 +49,27 @@ class TextModelExport(unittest.TestCase):
 
     for i, exported_output in enumerate(prg["outputs"]):
       assert outputs[i].dtype.name == exported_output["dtype"], f"Model and exported output dtype don't match: mdl={outputs[i].dtype.name}, prg={exported_output['dtype']}"  # noqa: E501
+
+@unittest.skipUnless(Device.DEFAULT == "CPU", "clang export target runs on CPU")
+class TextModelExportClang(unittest.TestCase):
+  def _run_clang(self, prg:str, inputs:list[np.ndarray], out_shape:tuple[int, ...]) -> np.ndarray:
+    with tempfile.TemporaryDirectory() as d:
+      src, lib = os.path.join(d, "model.c"), os.path.join(d, "model.so")
+      with open(src, "w") as f: f.write(prg)
+      subprocess.check_call(["clang", "-O2", "-shared", "-fPIC", "-x", "c", src, "-o", lib, "-lm"])
+      ins = [np.ascontiguousarray(x, dtype=np.float32) for x in inputs]
+      out = np.zeros(out_shape, dtype=np.float32)
+      ctypes.CDLL(lib).net(*[x.ctypes.data_as(ctypes.c_void_p) for x in ins], out.ctypes.data_as(ctypes.c_void_p))
+    return out
+
+  def test_same_name_different_kernels(self):
+    class Model:
+      def __call__(self, x): return ((x + 1).contiguous() * 3).contiguous()
+    x = Tensor.zeros(4).contiguous().realize()
+    prg, _, _, _, = export_model(Model(), "clang", x)
+    calls = re.findall(r"(\w+)\(\(unsigned char\*\)", prg.split("void net(")[1])
+    self.assertEqual(len(set(calls)), 2, f"both kernels call the same function: {calls}")
+    np.testing.assert_allclose(self._run_clang(prg, [x.numpy()], (4,)), Model()(x).numpy())
 
 @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Testing WebGPU specific model export behavior")
 class TextModelExportWebGPU(unittest.TestCase):

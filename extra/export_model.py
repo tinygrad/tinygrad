@@ -20,6 +20,7 @@ def iter_kernel_calls(linear:UOp):
 def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], List, Dict[str,Tuple[int,DType,int]], Dict[str,Buffer]]:
   output_name = {id(b): f"output{i}" for i, b in enumerate(output_bufs)}
   functions, bufs, bufs_to_save, statements, n = {}, {}, {}, [], 0
+  src_to_name: Dict[str,str] = {}
 
   def name_of(bu:UOp, is_out:bool) -> str:
     nonlocal n
@@ -38,9 +39,16 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     arg_uops = [b for b in call.src[1:] if not b.is_bound_var]
     prg = to_program(call.src[0], Device[arg_uops[0].device].renderer)
     info = prg.arg
-    functions[prg.src[0].arg.function_name] = prg.src[2].arg
+    src = prg.src[2].arg
+    if (fname:=src_to_name.get(src)) is None:
+      # kernel names aren't unique, key by source and add a unique suffix for repeats
+      fname = base = prg.src[0].arg.function_name
+      k = 0
+      while fname in functions: k, fname = k+1, f"{base}_v{k+1}"
+      src_to_name[src] = fname
+      functions[fname] = src.replace(f" {base}(", f" {fname}(")
     cargs = [p if p.addrspace is AddrSpace.ALU else name_of(call.src[1+p.arg.slot], p.arg.slot == 0) for p in prg.kernel_params]
-    statements.append((prg.src[0].arg.function_name, cargs, info.global_size, info.local_size))
+    statements.append((fname, cargs, info.global_size, info.local_size))
 
   return functions, statements, {name:(size, dtype, key) for name, size, dtype, key in bufs.values()}, bufs_to_save
 
