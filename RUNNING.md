@@ -328,7 +328,7 @@ Sampling: temperature and top_p (default the GGUF's: temperature 1.0, top_p 0.95
 `TOP_K`) is ignored, one log line `top_k ... ignored` (glm_dsa's sampler has none). Before p3/w-pf53-sampfix (Nov 16) top_p was ignored
 too on every decoding step (whole-vocabulary sampling: stray foreign tokens; company repo results/incidents/ts5-stray-tokens/).
 
-## API and production environment contract (72 names)
+## API and production environment contract
 
 API sampling: a request without a temperature uses the model's GGUF `general.sampling.temp` and `top_p` (Qwen 3.8 Flash: 1.0 / 0.95); absent sampling metadata keeps the previous greedy behavior, explicit request values are unchanged, and startup logs report the defaults.
 **Penalties are accepted and IGNORED** (every model, every line): a request's `presence_penalty`, `frequency_penalty` and
@@ -337,11 +337,11 @@ only. Qwen's publisher recommends presence_penalty 0 (thinking) / 1.5 (non-think
 relies on it gets none here (Pokemon, Nov 16: 0.2% of Qwen replies looped one sentence to the 32,768-token cap). `smoke.py` part b
 sends all three and prints this.
 
-Count: **30 launch options, 30 operator knobs and 12 short diagnostics (72 total)**. Kernel/model/scheduler decisions already folded into the implementation are not exposed as launch assignments; the launchers and NULL harnesses no longer pass those obsolete names.
+The names are the ones in the tables and the diagnostics list below (no count is kept here: the mechanical count is the audit's, `tools/tg_audit.py` in the company repo). Kernel/model/scheduler decisions already folded into the implementation are not exposed as launch assignments; the launchers and NULL harnesses no longer pass those obsolete names.
 
 Any setting not listed here is not supported: its production value is compiled into the tree. Values below are launch defaults/current validated profiles, not permission to run arbitrary combinations. Capacity, sharding and cache-format changes require their own real-memory and text gates. Empty means disabled/unset.
 
-### Shared C2/C5/C9 hardware/model launcher contract (21)
+### Shared C2/C5/C9 hardware/model launcher contract
 
 | Name | C2 | C5 | C9 | Operator changes |
 |---|---|---|---|---|
@@ -366,7 +366,7 @@ Any setting not listed here is not supported: its production value is compiled i
 | `AM_VM_RESET` | controlled first start only | controlled first start only | controlled first start only | Permission to reset AM hardware once; ordinary starts forbid it. |
 | `VISION_MMPROJ` | required, verified nonempty file | required, verified nonempty file | unsupported and forced empty | Picture-projection GGUF on C2/C5; intentionally not present on C9. |
 
-### Additional C5/D34 hardware/model contracts (9)
+### Additional C5/D34 hardware/model contracts
 
 | Name | D34 value | Operator changes |
 |---|---|---|
@@ -379,7 +379,7 @@ Any setting not listed here is not supported: its production value is compiled i
 | `PREFILL_SLICE` | 1536 | Rows allowed in one scheduled prefill slice. |
 | `SEQ_STARVE_ALT` | 1 | Alternative anti-starvation scheduling policy. |
 
-### Operator knobs documented for operations (30)
+### Operator knobs documented for operations
 
 | Name | Default/profile | Purpose |
 |---|---|---|
@@ -414,7 +414,7 @@ Any setting not listed here is not supported: its production value is compiled i
 | `VISION_SLICE_MS` | 200 in validated picture services; generic default 300 | Target picture work per scheduler slice. |
 | `WARMUP_JITS` | C5/D34 `all` | Named start-time JIT subset; `all` warms every supported production graph. |
 
-### Short diagnostics list (12)
+### Short diagnostics list
 
 These are off unless diagnosing or validating. `SERVE_RENDER_CHECK=64` checks that many cached chat-template renders byte for byte; compare ordinary and cached modes before enabling `SERVE_RENDER_CACHE`. Keep those validation runs separate from the shared picture service.
 
