@@ -79,6 +79,8 @@ elif [[ $ACTION == start ]]; then
 elif [[ $ACTION == stop ]]; then
   [[ -r $PIDFILE ]] || { echo 'GLM Flash is not running (no PID file)' >&2; exit 1; }
   pid=$(cat "$PIDFILE")
+  # (a start that died (a refused card, an error) leaves its PID file: nothing to stop, and the next start would refuse)
+  if ! sudo -n kill -0 -- "-$pid" 2>/dev/null; then rm "$PIDFILE"; echo "GLM Flash was not running (stale PID file of pid=$pid removed)"; exit 0; fi
   sudo -n kill -TERM -- "-$pid"
   for _ in {1..90}; do
     if ! sudo -n kill -0 "$pid" 2>/dev/null; then rm "$PIDFILE"; echo 'GLM Flash stopped'; exit 0; fi
