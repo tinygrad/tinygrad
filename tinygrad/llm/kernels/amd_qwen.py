@@ -25,8 +25,6 @@ from tinygrad.renderer import Estimates
 
 BLOCK_M, BLOCK_N, WARP_SIZE = 32, 32, 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
-WAVES_M, WAVES_N, LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 2, 2, 16
-WMMA_ACC, THREADS_PER_BLOCK = WMMA_M // LANES_PER_WAVE_M, WARP_SIZE * WAVES_M * WAVES_N
 LDS_PAD, WMMA_ARG, LOG2E = 4, ((WMMA_N, WMMA_M, WMMA_K), 32), math.log2(math.e)
 GGML_BLOCK_SIZE, Q8_GROUP_SIZE = 256, 32
 Q5_0, Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K = 6, 8, 10, 11, 12, 13, 14
@@ -2791,8 +2789,6 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
 
 # ******** moe_route of many tokens: a counting sort in three kernels (the generic one-hot and cumsum kernels: ~0.3 ms a layer) ********
 
-ROUTE_G, ROUTE_T = 64, 256  # workgroups, threads
-
 def _moe_route_sort(sel:Tensor, first:Tensor, experts:int, tile:int) -> tuple[Tensor, Tensor, Tensor]|None:
   """moe_route's entries, tiles and pos of many tokens by the counting sort (None: not those shapes)"""
   if not amd_custom_kernels_supported(sel.device) or experts > 2048: return None
@@ -3496,12 +3492,6 @@ def ghc_decode_mix(lo:Tensor, up_raw:Tensor, xn:Tensor, part:Tensor, count:int) 
 # ** an fp8 latent cache (SEQ_FP8): a row of 512 latent dims is 128 words of e4m3 values and 4 float scales (of 128 dims each, their absolute
 # max over 448), 528 bytes instead of 1024
 
-
-# ******** the MLA latent cache split on its positions over the devices (sequence sharded): a block of SEQ_BLK positions a device in turn ********
-# position p is on device (p // SEQ_BLK) % n, row (p // (SEQ_BLK*n)) * SEQ_BLK + p % SEQ_BLK of its part: the positions of a context of any length
-# are on every device. a device attends all the heads over its keys, the devices' outputs are combined by their max and sum
-
-SEQ_BLK = 64
 
 # (WIDE) the slots a sequence of batched decoding spans at most: its positions past its slot's are the next slots' (not decoded meanwhile)
 
