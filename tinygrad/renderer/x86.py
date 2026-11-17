@@ -44,7 +44,7 @@ class ISARenderer(Renderer):
   isel_matcher: PatternMatcher
   pre_regalloc_matcher: PatternMatcher
   post_regalloc_matcher: PatternMatcher
-  linear_ctx_type: type = LinearContext
+  linear_ctx_type: type[LinearContext] = LinearContext
 
   def is_two_address(self, x:UOp) -> bool: return False
   def spill(self, spill_slot:int, x:UOp) -> UOp: raise NotImplementedError("arch specific")
