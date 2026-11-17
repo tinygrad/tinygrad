@@ -109,7 +109,7 @@ setsid env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. PYTHONUNBUFFERED=1 HOME="$HOME
   SEQ_ROWS=4310016 SEQ_SLOTS=64 SEQ_SIZES=1,8,16,24,30 SEQ_MAX_ACTIVE=30 SEQ_STASH_GB=46 \
   SEQ_CKPT2=1 SEQ_BASE_ALIGN=24 \
   PREFILL_CHUNK=2304 PREFILL_SIZES=1152 PREFILL_PARTS=2 PREFILL_PK_CTX=131072 \
-  PARALLEL=40 TOP_K=20 \
+  TOP_K=20 \
   CLOCK_FAST=2000 CLOCK_MANY=1900 CLOCK_PREFILL=2000 \
   VISION_MMPROJ=/weights/Qwen3.8-Flash-Next-UD-IQ4_XS-V31/mmproj/mmproj-F16.gguf \
   VISION_SLICE_MS=200 VISION_MAX_IMAGES=1024 VISION_CACHE_MB=1024 VISION_URL_CACHE_MB=512 \
@@ -365,7 +365,6 @@ Any setting not listed here is not supported: its production value is compiled i
 
 | Name | D34 value | Operator changes |
 |---|---|---|
-| `BATCH_SLOTS` | 8 | Scheduler batch-slot capacity on this RDNA3 profile. |
 | `LOAD_DEFER` | 1 | Deferred weight-load schedule used by these GLM profiles. |
 | `AMD_SCRATCH_MIN` | 576 | Minimum AM scratch reservation on this profile. |
 | `AMD_SCRATCH_MAX` | 64 | Maximum AM scratch reservation on this profile. |
@@ -413,7 +412,7 @@ Any setting not listed here is not supported: its production value is compiled i
 
 These are off unless diagnosing or validating. `SERVE_RENDER_CHECK=64` checks that many cached chat-template renders byte for byte; compare ordinary and cached modes before enabling `SERVE_RENDER_CACHE`. Keep those validation runs separate from the shared picture service.
 
-These are off unless diagnosing or validating. Never enable fault injection in customer service. `DEBUG_LOAD`, `MEM_TRACE`, `AMD_SCRATCH_LOG`, `KPROF` (with `KPROF_TOP=30`), `LIN_NAMES`, `TELEMETRY_LOG=<jsonl-path>`, `SERVE_TRACE=<trace-path>`, `DISABLE_AMD_KERNELS=1` for generic-kernel reference runs, `RING_RDNA4=1` only on an owned RDNA4 validation job, `P2P_FAKE_RUNOUT=1` only for fault-injection tests.
+These are off unless diagnosing or validating. Never enable fault injection in customer service. `DEBUG_LOAD`, `MEM_TRACE`, `AMD_SCRATCH_LOG`, `LIN_NAMES`, `TELEMETRY_LOG=<jsonl-path>`, `SERVE_TRACE=<trace-path>`, `DISABLE_AMD_KERNELS=1` for generic-kernel reference runs, `RING_RDNA4=1` only on an owned RDNA4 validation job, `P2P_FAKE_RUNOUT=1` only for fault-injection tests.
 
 ## Gates for every change
 
