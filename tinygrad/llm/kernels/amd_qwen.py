@@ -6,13 +6,15 @@ from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.llm.kernels.amd_glm import _nucleus_round_kernel, _local_argmax_kernel, _argmax_parts, _moe_softmax_router_kernel, \
   _moe_softmax_router_bitonic_kernel, _moe_bundle_atomic_kernel, _route_place_kernel, _ghc_post_kernel, _ghc_pre_kernel, \
-  _gated_delta_prefill_kernel, _route_count_kernel, _kda_replay_kernel, \
-  _skinny_kernel, _sum_parts_kernel, _few_out_rows_kernel, _moe_tile, _exclusive_cumsum_kernel, _scatter_rows_kernel, \
-  _route_init_kernel, _weighted_sum_kernel, _kda_out_kernel, _q8_wide_stores, _wmma_layout, _q8k_quantize_kernel, \
-  _q8_sum_kernel, _amd_f16_gemv_kernel, _slot_gather_kernel, _ple_gather_kernel, \
+  _gated_delta_prefill_kernel, _route_count_kernel, _skinny_kernel, _sum_parts_kernel, _few_out_rows_kernel, _moe_tile, \
+  _scatter_rows_kernel, _route_init_kernel, _weighted_sum_kernel, _kda_out_kernel, _q8_wide_stores, _wmma_layout, \
+  _q8_sum_kernel, _amd_f16_gemv_kernel, \
   _prefetched, _wmma_scale, _decode_linear_loop, _q8_narrow_stores, _q8_pack_values, unwrap_storage_views, \
   moe_combine as moe_combine, kda_conv as kda_conv, kv_q8_pack as kv_q8_pack, slot_scatter as slot_scatter, _materialized, \
-  fuse_gate_up as fuse_gate_up
+  fuse_gate_up as fuse_gate_up, q8k_quantize, kda_replay as kda_replay, _act_stores, _view_back, \
+  slot_gather as slot_gather, _q8_unpacked, _load_u32, _iq_even_signs, _wave_scan, _vec_load, \
+  ple_gather as ple_gather, _iq4_scale, exclusive_cumsum, token_sharded as token_sharded, shard_rows as shard_rows, \
+  _reg, _known_decoded, _i8_frag, _sigmoid, _q5_scales, _load_byte, _order_key
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import prod, getenv, round_up, unwrap, dedup
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
@@ -117,10 +119,6 @@ def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
     val = val.maximum(other) if maximum else val + other
   return val
 
-def _reg(shape:tuple[int, ...], value:float, dep:UOp|None=None) -> UOp:
-  ret = UOp.alloc(shape, dtypes.float, addrspace=AddrSpace.REG)
-  return ret.after((ret if dep is None else ret.after(dep)).store(ret.const_like(value)))
-
 # ******** quant linear: q8-activation kernels over packed ggml weights ********
 
 # (the most rows the split-K gemm of tiles of 32 rows takes (batched decoding, the smallest prefill chunk), see q8_linear)
@@ -132,10 +130,6 @@ AG_FUSE = 1
 XUNPACK = 1  # all_gather_q8 push unpacks itself (bit-exact, stress-tested with zero mismatches)
 # TILE16: batched decoding's hyper-connection gemms (a device's few rows: 4-16 of a tile of 32) of its real rows' tiles alone, in tiles of 16
 TILE16 = 1
-
-def _known_decoded(u:UOp) -> tuple[int, UOp]|None:
-  from tinygrad.llm.gguf_load import decoded_weights
-  return decoded_weights.get(unwrap_storage_views(u))
 
 def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
   """(ggml type, packed words) if `decoded` is exactly the dequantization of packed ggml weights, rows of in_features"""
@@ -242,15 +236,6 @@ def _amd_load(ptr:UOp, lanes:int|None=None, stream:bool=False) -> UOp:
   idx = sum((coord*math.prod(buf.shape[i+1:]) for i,coord in enumerate(coords)), UOp.const(0))
   return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes))).load(arg="nontemporal" if stream else None)
 
-def _load_byte(raw:UOp, base:UOp, offset:int|UOp) -> UOp:
-  size = raw.dtype.itemsize
-  return (raw[base + offset//size].cast(dtypes.uint32) >> ((offset%size)*8)) & 255
-def _load_u32(raw:UOp, base:UOp, offset:int|UOp, stream:bool=False) -> UOp:
-  # Halfword-aligned formats cannot load u32 directly.
-  lo, hi = (raw[base+offset//2+i] for i in range(2))
-  if stream: lo, hi = _amd_load(lo), _amd_load(hi)
-  return lo.cast(dtypes.uint32) | (hi.cast(dtypes.uint32) << 16)
-
 def _half(value:UOp) -> UOp: return value.cast(dtypes.uint16).bitcast(dtypes.float16).float()
 
 def _iq4_bytes(packed:UOp, shift:int|UOp) -> UOp:
@@ -259,21 +244,6 @@ def _iq4_bytes(packed:UOp, shift:int|UOp) -> UOp:
   low = _amd_byte_perm(UOp.const(0xf6eaddcf, dtypes.uint32), UOp.const(0xbfad9881, dtypes.uint32), selectors)
   high = _amd_byte_perm(UOp.const(0x71594535, dtypes.uint32), UOp.const(0x26190d01, dtypes.uint32), selectors & 0x07070707)
   return _amd_byte_perm(high, low, 0x03020100 | ((selectors & 0x08080808) >> 1))
-
-def _q5_scales(raw:UOp, base:UOp, subgroup:UOp) -> tuple[UOp, UOp, UOp, UOp]:
-  # scales/mins (6-bit each) live in block bytes 4-15: three words total, same for the whole super-block's lanes
-  w1, w2, w3 = _amd_load(raw[base+1]), _amd_load(raw[base+2]), _amd_load(raw[base+3])
-  sb = (subgroup & 3) * 8  # byte within word
-  byte1, byte2, byte3 = (w1 >> sb) & 255, (w2 >> sb) & 255, (w3 >> sb) & 255
-  scale = (subgroup < 4).where(byte1 & 63, (byte3 & 15) | ((byte1 >> 6) << 4))
-  minimum = (subgroup < 4).where(byte2 & 63, (byte3 >> 4) | ((byte2 >> 6) << 4))
-  d, dmin = (raw[base] & 0xffff).cast(dtypes.uint16), (raw[base] >> 16).cast(dtypes.uint16)
-  return _half(d), _half(dmin), scale.float(), minimum.float()
-
-def _iq4_scale(raw:UOp, base:UOp, subgroup:UOp) -> UOp:
-  header, low = raw[base].load(), raw[base+1].load()
-  scale = ((low >> (4*subgroup)) & 15) | (((header >> (16+2*subgroup)) & 3) << 4)
-  return _half(header) * (scale.cast(dtypes.int32)-32).float()
 
 _tables:dict[tuple, Tensor] = {}
 def _table(key:tuple, device:str|tuple[str, ...]|None, values:tuple[int, ...], dtype:DType) -> Tensor:
@@ -455,12 +425,6 @@ def tables_ready(device:str|tuple[str, ...]):
   iq4_half_lut(device)
   for t in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S): _iq_grid(device, t)
 
-def _iq_even_signs(signs:UOp) -> UOp:
-  parity = signs ^ (signs >> 4)
-  parity ^= parity >> 2
-  parity ^= parity >> 1
-  return signs | ((parity & 1) << 7)
-
 def _iq_signed_word(word:UOp, signs:UOp) -> UOp:
   # sign bit i to bit 0 of byte i (the shifted copies of the 4 bits don't overlap: no carries), all of the byte's bits for the mask
   ones = ((signs & 15) * 0x00204081) & 0x01010101
@@ -630,12 +594,6 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
   multi = int(out.shape[0]) if gate is None and xtoken is None and 1 < out.shape[0] <= DECODE_MULTI else 1
   return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type], multi=multi)
 
-def _is_buffer(x:Tensor) -> bool:
-  # x is a kernel's output (its views): every load of it in a kernel is a load, not a computation (each element is read by many outputs)
-  u = x.uop
-  while u.op in (Ops.RESHAPE, Ops.SHRINK, Ops.EXPAND, Ops.PERMUTE) or (u.op is Ops.CAST and dtypes.is_float(u.dtype)): u = u.src[0]
-  return u.op in (Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.ALLOC, Ops.STAGE)
-
 
 def _gated(gate:UOp, up:UOp, act:tuple[float, float, float]) -> UOp:
   # gated_activation in a kernel: act is (alpha, limit, up_bias), limit <= 0 for none
@@ -667,13 +625,6 @@ def _wmma_values(accs, update, half, lane, wave, output_waves, rdna4:bool=False)
     return tuple(low.where(own[i], peer[i+4]) if j == 0 else low.where(peer[i], own[i+4]) for i in range(4) for j in range(2))
   tt = len(accs[0])
   return [[values(ot*tt+tile) for tile in range(tt)] for ot in range(len(accs))]
-
-def _act_stores(out, outputs, tokens, vals, act):
-  # the paired output tiles are the gate and up rows of the same 16 columns (interleaved weights): the activation is stored
-  assert len(outputs) == 2, "a gated activation needs the gate and up tiles of a column"
-  col = outputs[0] - (outputs[0] // 32) * 16
-  return [out[token, col].store(_gated(g[i], u[i], act).cast(out.dtype))
-          for tile_tokens, g, u in zip(tokens, vals[0], vals[1]) for i, token in enumerate(tile_tokens)]
 
 def _wmma_stores(out, outputs, tokens, accs, update, half, lane, wave, output_waves, rdna4:bool=False):
   vals = _wmma_values(accs, update, half, lane, wave, output_waves, rdna4)
@@ -787,17 +738,6 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, *group:UOp, ou
     return tuple((_half((pair >> (half*16)) & 0xffff)*scale).cast(dtypes.float16) for pair in pairs)
   return _quant_linear_wmma(out, x, out_features, in_features, QUANT_SIZES[IQ4_XS]//4, layout, dequant, "linear_iq4_xs_f16_wmma",
                             group, expert_words, x_div, act, rdna4)
-
-def _i8_frag(words:tuple[UOp, ...]) -> UOp:
-  # NOTE: a bitcast of the words to int8 vectors loops in devectorize, the compiler packs the bytes back
-  return UOp.stack(*(((w >> (8*i)) & 0xff).cast(dtypes.uint8).bitcast(dtypes.int8) for w in words for i in range(4)))
-
-def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]:
-  """int8 groups of 32 (as q8_quantize) and one scale per 256 inputs"""
-  q = Tensor.empty(tokens, in_features//32, 8, dtype=dtypes.uint32, device=x.device)
-  scale = Tensor.empty(tokens, in_features//256, dtype=dtypes.float32, device=x.device)
-  outs = Tensor.custom_kernel(q, scale, x, fxn=functools.partial(_q8k_quantize_kernel, tokens=tokens, in_features=in_features))
-  return outs[0], outs[1]
 
 # a*b+c of the low 24 bits of a and b (a full rate multiply, the 32 bit one is quarter rate)
 # K256_UNROLL: _grouped_k256_kernel's sub-blocks unrolled (weight loads issued together): 1/8 all8 (the default-off experiment),
@@ -2290,10 +2230,6 @@ def ring_reduce_scatter_q8(p:Tensor, size:int, shape:tuple[int, ...]|None=None, 
 
 # ******** sequence parallel: the rows of a tensor split over the devices ********
 
-def token_sharded(x:Tensor) -> bool:
-  """x is split over devices on an axis before its last: its rows if the caller says so (not a leading device axis of partials)"""
-  return isinstance(x.device, tuple) and (axis:=x.uop.axis) is not None and axis < x.ndim - 1
-
 def _per_device(x:Tensor) -> UOp:
   # the value on every device of a split kernel output (_materialized): its buffer's view of the device, after the kernel
   u = x.uop
@@ -2305,10 +2241,6 @@ def _cast_kernel(out:UOp, x:UOp) -> UOp:
   o, s = out.flatten(), x.flatten()
   i = UOp.range(o.shape[0], 0)
   return o[i].store(s[i].load().cast(o.dtype)).end(i).sink(arg=KernelInfo(name="cast"))
-
-def shard_rows(x:Tensor, axis:int) -> Tensor:
-  """a tensor on every device split on axis: each device keeps its part, nothing is copied"""
-  return Tensor(x.uop._shard(axis, UOp.range(len(cast(tuple, x.device)), 0, AxisType.DEVICE)).unshard(axis))
 
 
 def reduce_scatter(p:Tensor, axis:int) -> Tensor:
@@ -2363,12 +2295,6 @@ def reduce_scatter(p:Tensor, axis:int) -> Tensor:
         got[(t, (j+1) % n)] = mine.copy_to_device(devs[(j+1) % n])
     outs.append([(got[(t, t)] + piece(part(t, t), pc).cast(dtypes.half)).float() for t in range(n)])
   return Tensor(UOp.mstack(*[functools.reduce(lambda a, b: a.cat(b, dim=axis), [o[t] for o in outs]).contiguous() for t in range(n)]).unshard(axis))
-
-def _q8_unpacked(pk:UOp, token:UOp, group:UOp, sub:UOp) -> list[UOp]:
-  # a lane's eight values of a packed group (q8_pack)
-  d = pk[token, group, 8].load().bitcast(dtypes.float32)
-  words = [pk[token, group, sub*2 + w].load() for w in range(2)]
-  return [(words[i//4] >> (8*(i%4))).cast(dtypes.uint8).bitcast(dtypes.int8).float() * d for i in range(8)]
 
 @functools.cache
 def _q8_pack_kernel(out:UOp, x:UOp, *add:UOp, row0:int=0) -> UOp:
@@ -2945,18 +2871,9 @@ def moe_grouped_linear(weight:Tensor, ggml_type:int, experts:int, x:Tensor, entr
   result = Tensor.custom_kernel(out, weight, *srcs, fxn=fxn)[0]
   return result.reshape(devices, rows_out, cols) if devices > 1 else result
 
-def exclusive_cumsum(x:Tensor) -> Tensor:
-  """(n, T, C) int32: the sum of the rows before every row"""
-  out = Tensor.empty(*x.shape, dtype=dtypes.int32, device=x.device, axis=x.uop.axis)
-  return Tensor.custom_kernel(out, x.cast(dtypes.int32).contiguous(), fxn=_exclusive_cumsum_kernel)[0]
-
 # ******** moe_route of many tokens: a counting sort in three kernels (the generic one-hot and cumsum kernels: ~0.3 ms a layer) ********
 
 ROUTE_G, ROUTE_T = 64, 256  # workgroups, threads
-
-def _route_expert(sel:UOp, first:UOp, i:UOp, N:int, experts:int) -> tuple[UOp, UOp]:
-  e = (sel.reshape(-1)[i.minimum(N-1)].load() - first.reshape(-1)[0].load()).cast(dtypes.weakint)
-  return e.maximum(0).minimum(experts-1), (i < N) & (e >= 0) & (e < experts)
 
 def _moe_route_sort(sel:Tensor, first:Tensor, experts:int, tile:int) -> tuple[Tensor, Tensor, Tensor]|None:
   """moe_route's entries, tiles and pos of many tokens by the counting sort (None: not those shapes)"""
@@ -3039,12 +2956,6 @@ def weighted_sum(x:Tensor, p:Tensor) -> Tensor|None:
 
 # ******** tiny dense fp16 gemv ********
 
-def _view_back(t:Tensor) -> Tensor:
-  # Widening half to float is exact; preserve casts that round or change the values.
-  uop = t.uop
-  while uop.op is Ops.CAST and uop.dtype == dtypes.float32 and uop.src[0].dtype in (dtypes.half, dtypes.bfloat16): uop = uop.src[0]
-  return Tensor(uop).reshape(t.shape)
-
 def f16_gemv(layer:Linear, x:Tensor) -> Tensor:
   tokens = prod(x.shape[:-1])
   assert isinstance(tokens, int)
@@ -3059,11 +2970,6 @@ def f16_gemv(layer:Linear, x:Tensor) -> Tensor:
   return Tensor.custom_kernel(*srcs, fxn=fxn)[0].reshape(*x.shape[:-1], layer.out_features)
 
 # ******** flash attention on the KV cache ********
-
-def _vec_load(ptr:UOp, lanes:int) -> tuple[UOp, ...]:
-  if lanes == 1: return (ptr.load().float(),)
-  vec = _amd_load(ptr, lanes)
-  return tuple(vec[i].float() for i in range(lanes))
 
 
 @functools.cache
@@ -3516,8 +3422,6 @@ def pool_window(pool:Tensor, keys:Tensor, slots:Tensor, positions:Tensor, S:int,
 # ******** gated hyper-connections (qwen4exp) of a few rows: the streams' norm, quantization and inject partials in a kernel, the up projection,
 # its sigmoid gates and the mean of the gated streams in another (the down projection between them is the decode linear) ********
 
-def _sigmoid(x:UOp) -> UOp: return ((-x * LOG2E).exp2() + 1).reciprocal()
-
 @functools.cache
 def _ghc_prefill_norm_kernel(xn:UOp, xhalf:UOp, part:UOp, xs:UOp, w:UOp, winj:UOp, *, count:int, D:int, eps:float, rows:int=0) -> UOp:
   # Keep each normalized stream in registers for all inject dot products. Also write the half GEMM input, avoiding a separate cast.
@@ -3669,17 +3573,6 @@ def ghc_decode_mix(lo:Tensor, up_raw:Tensor, xn:Tensor, part:Tensor, count:int) 
                             fxn=functools.partial(_ghc_decode_mix_kernel, count=count, D=D, R=R))[:5]
   if not sharded: q8_quantize_known(ret[0], T, D, False, tuple(ret[2:]))
   return ret[0], ret[1]
-
-def ple_gather(ids:Tensor, heads:list[Tensor], rb:int) -> Tensor:
-  """the packed rows (R, H*rb) uint8 of the rows ids (R, H) int32 of every head's table (heads: (rows*rb,) uint8 each, in host memory)"""
-  out = Tensor.empty(int(ids.shape[0]), len(heads) * rb, dtype=dtypes.uint8, device=ids.device)
-  return Tensor.custom_kernel(out, ids.cast(dtypes.int32).contiguous(), *heads, fxn=functools.partial(_ple_gather_kernel, rb=rb))[0]
-
-def slot_gather(pool:Tensor, slots:Tensor, starts:Tensor, S:int, dtype:DType) -> Tensor:
-  """the states of G sequences at their positions from their slots: (G, rows, F) of rows slots[g]*S + starts[g]%S of pool (n*S, rows, F)"""
-  out = Tensor.empty(int(slots.shape[0]), *pool.shape[1:], dtype=dtype, device=pool.device,
-                     axis=None if pool.uop.axis is None else pool.uop.axis)
-  return Tensor.custom_kernel(out, pool, slots, starts, fxn=functools.partial(_slot_gather_kernel, S=S))[0]
 
 
 # ** an fp8 latent cache (SEQ_FP8): a row of 512 latent dims is 128 words of e4m3 values and 4 float scales (of 128 dims each, their absolute
@@ -3864,11 +3757,6 @@ def _popcount(x:UOp) -> UOp: return _cfn(True, src=(x,), arg=("__builtin_popcoun
 def _bpermute(x:UOp, src_lane:UOp) -> UOp:
   return _cfn(False, src=(x, src_lane), arg=("__builtin_amdgcn_ds_bpermute((int)({1})*4, (int)({0}))", dtypes.int32))
 def _readlane(x:UOp, lane:int) -> UOp: return _cfn(False, src=(x,), arg=(f"__builtin_amdgcn_readlane((int)({{0}}), {lane})", dtypes.int32))
-def _wave_scan(x:UOp, lane:UOp) -> UOp:
-  """the inclusive prefix sums of x (int32) over the lanes of a wave"""
-  for d in (1, 2, 4, 8, 16): x = x + (lane >= d).where(_bpermute(x, (lane - d).maximum(0)), UOp.const(0, dtypes.int32))
-  return x
-
 def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:UOp, lane:UOp) -> UOp:
   """
   the k-th largest of the keys of a workgroup's threads (key(c) a thread's of chunk c of npc, uint32, 1 at least, all of them with no more pools
@@ -4111,11 +3999,6 @@ def seq_index_split(scores:Tensor, positions:Tensor, top:int, kpool:int) -> Tens
   out = Tensor.empty(rows, top + 2, dtype=dtypes.int32, device=devs)
   return Tensor.custom_kernel(out, allc.reshape(n, rows, top, 2).contiguous(), positions,
                               fxn=functools.partial(_pool_merge_kernel, k=top, kpool=kpool))[0]
-
-
-def _order_key(bits:UOp) -> UOp:
-  """an order preserving uint32 key of a float's bits"""
-  return (bits >= 0x80000000).where(bits ^ 0xFFFFFFFF, bits | 0x80000000)
 
 
 @functools.cache
@@ -4562,13 +4445,6 @@ def _kda_decode_kernel(z:UOp, state:UOp, cq:UOp, ck:UOp, cv:UOp, pq:UOp, pk:UOp,
     out = lds_o[t, r].load() * rinv * norm[r].load().float() * sigmoid(gate_rows[t][h*V + r].load().float())
     zs.append(z[grp*T + t, (h*V + r).valid(tid < V)].store(out.cast(z.dtype)))
   return UOp.group(*zs, *sstores, *istores).end(ghr, wave, lane).sink(arg=KernelInfo(name="kda_decode", opts_to_apply=()))
-
-def kda_replay(state:Tensor, rp:Tensor, slot:UOp, base:UOp, n:UOp, T:int, Q:int) -> Tensor:
-  """the state of a slot (replay's, see _kda_replay_kernel) advanced n tokens from its base: the state after the kernel"""
-  # (the variables bound by the state input: its kernel the unbound ones)
-  st = Tensor(state.uop.after(slot, base, n))
-  return Tensor.custom_kernel(st, rp, fxn=functools.partial(_kda_replay_kernel, slot=cast(UOp, _unbind(slot)), base=cast(UOp, _unbind(base)),
-                                                            n=cast(UOp, _unbind(n)), T=T, Q=Q))[0]
 
 def kda_decode(state:Tensor, conv_states:list[Tensor], projs:list[Tensor], conv_weights:list[Tensor], gate:Tensor, alpha:Tensor, beta:Tensor,
                dt:Tensor, a:Tensor, norm:Tensor, start_pos:Tensor, lb:float|None, eps:float, row:int|None=None, rows:int=1,
