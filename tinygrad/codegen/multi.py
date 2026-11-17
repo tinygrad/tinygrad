@@ -1,7 +1,7 @@
 from tinygrad.helpers import all_same, prod, getenv, ALLREDUCE_CAST
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType, graph_rewrite, broadcast_axes, _broadcast_shape, sint_to_uop
 from tinygrad.dtype import dtypes
-from tinygrad.schedule.allreduce import handle_allreduce
+from tinygrad.codegen.allreduce import handle_allreduce
 
 # ***** multi rewrite MSELECT/MSTACK *****
 

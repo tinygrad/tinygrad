@@ -2,7 +2,7 @@ import unittest
 import functools
 from tinygrad import Tensor, Variable, UOp, function
 from tinygrad.uop.ops import KernelInfo
-from tinygrad.schedule import schedule_cache
+from tinygrad.codegen import schedule_cache
 
 def custom_add_kernel(A:UOp, B:UOp, num:int=0) -> UOp:
   return A[0].set(B[0] + num).sink(arg=KernelInfo(f"custom_add_{num}"))

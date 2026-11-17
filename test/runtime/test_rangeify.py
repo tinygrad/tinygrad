@@ -99,7 +99,7 @@ class TestRangeifyPM(unittest.TestCase):
   def setUp(self): self.base = Tensor.empty(10*10).reshape(10, 10).contiguous()
   def assert_same(self, a, b):
     def run_pm_rangeify(t:Tensor):
-      from tinygrad.schedule.rangeify import pm_rangeify, RangeifyContext
+      from tinygrad.codegen.rangeify import pm_rangeify, RangeifyContext
       sink = t.uop.sink()
       pm_realize = PatternMatcher([(UPat(Ops.STAGE, name="x"), lambda x: x.replace(op=Ops.REALIZE))])
       sink = graph_rewrite(sink, pm_realize)

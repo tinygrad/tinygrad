@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo, AxisType
 from tinygrad.dtype import AddrSpace
 from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.codegen import to_program, full_rewrite_to_sink
-from tinygrad.schedule import pm_copy_from_store
+from tinygrad.codegen import pm_copy_from_store
 from test.helpers import check_schedule, KernelCountException, jit_cache_count, measure_mem
 
 def _realize_weights(m):
