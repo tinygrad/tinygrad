@@ -281,7 +281,22 @@ PI_TEMPERATURE=1.0 PI_TOP_P=1.0 EMU_PORT=8900 EMU_URL=http://127.0.0.1:8900 \
 `PI_APPEND_SYSTEM=$PWD/arms/<arm>.md` (text) or `PI_THINKING=low|off` (thinking level). Forks: `fork.py` from a game's
 `states/step-NNN.state` and its session as sent.
 
-GLM 5.3 Flash Pokemon is stopped (Nov 16); its last line is in this file's history (git log -p RUNNING.md).
+**GLM 5.3 Flash server** (the raw-line arm beside Qwen; board, Nov 17: "GLM 5.3 Flash MAY run as a raw-line arm"; box g4 since 07:21 Nov 17,
+tree bdb15fd94, R3 results/rebase/boxgate/g4-glmraw-bdb15fd94/ in the company repo). The C5 launcher with the overrides below:
+
+```bash
+VISION_BUCKETS=1152,1984 VISION_MAX_BODY_MB=64 VISION_URL_CACHE_MB=7168 AGING=100 SEQ_STARVE=60 AM_POWER_LIMIT=250 \
+  bash extra/llm_service/glm_flash_6x7900xtx.sh start
+```
+
+(`VISION_BUCKETS=1152,1984`: the raw line's screenshots, 480x432 = 288 rows = 1,152 patches and 640x576 = 483 rows = 1,932 patches
+(bucket 1,984), each compiled at its own size instead of padded to 2,048. `VISION_MAX_BODY_MB=64 VISION_URL_CACHE_MB=7168`: every
+screenshot of the window resent each turn; the URL cache keeps every decoded screenshot of 16 games (677,376 B at 480x432, 1,136,016 B at
+640x576). `AGING=100 SEQ_STARVE=60` as the Qwen line (scheduling only). The launcher's defaults stay: 18 seats, 3,916,800 pooled rows,
+the RAM store 12 GB / 64 entries, `VISION_MAX_IMAGES=2048`. GLM Flash always thinks; the bare raw client keeps every turn's thinking.
+12-16 games a box. A turn costs ~580 tokens at 480x432 (~450 turns in a window) and ~775 at 640x576 (~335).)
+R3 at every start of this line: greedy 4K / 64K / 262K equal to `g4-glmraw-bdb15fd94/greedy.json`, `smoke.py --slots 18 --rows-4k 1008`,
+and the picture reference compared with `g4-glmraw-bdb15fd94/picref.json` (company repo; the exact `picref.py` command is in `results/regress/README.md`).
 
 ## Benchmarks (source: the company repo's results/phase4/benchmarks.md, copied 21:34 Nov 15)
 
