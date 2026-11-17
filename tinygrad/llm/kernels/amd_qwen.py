@@ -14,7 +14,8 @@ from tinygrad.llm.kernels.amd_glm import _nucleus_round_kernel, _local_argmax_ke
   fuse_gate_up as fuse_gate_up, q8k_quantize, kda_replay as kda_replay, _act_stores, _view_back, \
   slot_gather as slot_gather, _q8_unpacked, _load_u32, _iq_even_signs, _wave_scan, _vec_load, \
   ple_gather as ple_gather, _iq4_scale, exclusive_cumsum, token_sharded as token_sharded, shard_rows as shard_rows, \
-  _reg, _known_decoded, _i8_frag, _sigmoid, _q5_scales, _load_byte, _order_key
+  _reg, _known_decoded, _i8_frag, _sigmoid, _q5_scales, _load_byte, _order_key, _unbind, _cfn, warp_reduce, _amd_dp4a, \
+  _amd_byte_perm, _amd_load, _half, _iq4_bytes, _gated, _h2, _wave_sum, _per_device, _ballot, _popcount, _bpermute, _readlane
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import prod, getenv, round_up, unwrap, dedup
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
@@ -40,8 +41,6 @@ def _small_block(ggml_type:int, group:UOp|int) -> UOp|int:
   return group // (w // 32) * hw
 QUANT_NAMES = {Q8_0: "q8_0", Q2_K: "q2_k", Q3_K: "q3_k", Q4_K: "q4_k", Q5_K: "q5_k", Q6_K: "q6", IQ4_XS: "iq4_xs",
                IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ4_NL: "iq4_nl", IQ3_S: "iq3_s", IQ2_S: "iq2_s", Q2_0: "q2_0", Q5_0: "q5_0"}
-
-def _unbind(v:int|UOp) -> int|UOp: return v.unbind_all()[0] if isinstance(v, UOp) else v
 
 DECODE_MULTI = 32  # up to that many tokens of a decode linear share its weight loads
 
@@ -69,11 +68,6 @@ def _wmma_rdna4(device:str|tuple[str, ...]|None) -> bool:
 I8_WMMA_QUANTS = (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S)
 # formats with a single scale per 32 weights and no offset
 GROUP_SCALE_QUANTS = (Q8_0, IQ4_NL, IQ4_XS, IQ3_S, IQ3_XXS, Q4_K, Q5_K, Q2_0, Q5_0)
-
-def _cfn(inline:bool, src:tuple[UOp, ...], arg:tuple[str, DType]) -> UOp:
-  """a call of inline C (the old CUSTOM (a statement, or a value in a variable) and CUSTOMI (inline=True: an expression)): arg (format, dtype)"""
-  fmt, dt = arg
-  return UOp.custom_function(fmt, shape=src[0].shape if src and dt != dtypes.void else (), dtype=dt, fmt=True).call(*src, inline=inline)
 
 def _lane_xor(val:UOp, mask:int) -> UOp:
   """the float of lane ^ mask (wave32): DPP within rows of 16 lanes, permlanex16 across them (RDNA, a few cycles), else a ds_swizzle"""
@@ -111,13 +105,6 @@ def fwht(x:Tensor, sign:Tensor, transpose:bool=False) -> Tensor:
   xf = x.float().contiguous()
   out = Tensor.empty(*xf.shape, dtype=dtypes.float32, device=x.device, axis=xf.uop.axis if isinstance(x.device, tuple) else None)
   return Tensor.custom_kernel(out, xf, sign.float().contiguous(), fxn=functools.partial(_fwht_kernel, pre=not transpose))[0]
-
-def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
-  for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
-    if val.op is Ops.INDEX and val.addrspace == AddrSpace.REG: val = val.load()
-    other = _lane_xor(val, offset)
-    val = val.maximum(other) if maximum else val + other
-  return val
 
 # ******** quant linear: q8-activation kernels over packed ggml weights ********
 
@@ -212,9 +199,6 @@ class Linear(nn.Linear):
       return out.shrink(tuple((0, s) for s in (*x.shape[:-1], self.out_features)))
     return super().__call__(x)
 
-def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
-  return _cfn(True, src=(a, b, c), arg=("__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)", dtypes.int32))
-
 def _amd_sudot4u(a:UOp, b:UOp, c:UOp) -> UOp:  # c + the dot of a's 4 signed bytes with b's 4 unsigned ones
   return _cfn(True, src=(a, b, c), arg=("__builtin_amdgcn_sudot4(true, {}, false, {}, {}, false)", dtypes.int32))
 
@@ -224,26 +208,6 @@ def _amd_pkrtz(a:UOp, b:UOp) -> UOp:  # two floats to a half2 (its bits)
 def _amd_fdot2_less1152(a:UOp, b:UOp, c:UOp, less:int=1152) -> UOp:  # c + the dot of the half2s a - 1152 (less) and b (in float)
   return _cfn(True, src=(a, b, c), arg=(f"__builtin_amdgcn_fdot2(__builtin_bit_cast({_H2}, {{0}}) - ({_H2})((_Float16){less:.1f}f), "
                                              f"__builtin_bit_cast({_H2}, {{1}}), {{2}}, false)", dtypes.float))
-
-def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
-  return _cfn(True, src=tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), arg=("__builtin_amdgcn_perm({}, {}, {})", dtypes.uint32))
-
-def _amd_load(ptr:UOp, lanes:int|None=None, stream:bool=False) -> UOp:
-  assert ptr.op is Ops.INDEX
-  # nontemporal scalar load: streamed weights must not evict the activations/KV cache from L2
-  if lanes is None: return ptr.load(arg="nontemporal")
-  buf, coords = ptr.src[0], ptr.src[1:]
-  idx = sum((coord*math.prod(buf.shape[i+1:]) for i,coord in enumerate(coords)), UOp.const(0))
-  return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes))).load(arg="nontemporal" if stream else None)
-
-def _half(value:UOp) -> UOp: return value.cast(dtypes.uint16).bitcast(dtypes.float16).float()
-
-def _iq4_bytes(packed:UOp, shift:int|UOp) -> UOp:
-  # the non-linear iq4nl table as a byte lookup: 3 byte_perms beat any arithmetic/select-tree form (~60% decode)
-  selectors = (packed >> shift) & 0x0f0f0f0f
-  low = _amd_byte_perm(UOp.const(0xf6eaddcf, dtypes.uint32), UOp.const(0xbfad9881, dtypes.uint32), selectors)
-  high = _amd_byte_perm(UOp.const(0x71594535, dtypes.uint32), UOp.const(0x26190d01, dtypes.uint32), selectors & 0x07070707)
-  return _amd_byte_perm(high, low, 0x03020100 | ((selectors & 0x08080808) >> 1))
 
 _tables:dict[tuple, Tensor] = {}
 def _table(key:tuple, device:str|tuple[str, ...]|None, values:tuple[int, ...], dtype:DType) -> Tensor:
@@ -594,12 +558,6 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
   multi = int(out.shape[0]) if gate is None and xtoken is None and 1 < out.shape[0] <= DECODE_MULTI else 1
   return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type], multi=multi)
 
-
-def _gated(gate:UOp, up:UOp, act:tuple[float, float, float]) -> UOp:
-  # gated_activation in a kernel: act is (alpha, limit, up_bias), limit <= 0 for none
-  alpha, limit, up_bias = act
-  if limit > 0: gate, up = gate.minimum(limit), up.maximum(-limit).minimum(limit)
-  return gate * (1 + (gate * (-alpha*LOG2E)).exp2()).reciprocal() * (up + up_bias)
 
 def _wmma_values(accs, update, half, lane, wave, output_waves, rdna4:bool=False) -> list[list[tuple[UOp, ...]]]:
   # the accumulators' values of every output tile and token tile, in the order of the tile's tokens
@@ -1672,12 +1630,6 @@ def _flag_ar_common(N:int, n:int, T:int, EP:int, counter:UOp):
   def fslot(s:UOp|int) -> UOp: return par*N + s
   return wg, t, els, epoch, me, spos, vslot, fslot
 
-def _h2(x:UOp, e:UOp, n:int, clip:bool=True) -> UOp:
-  # Reduce partials saturate to fp16; pure allgather preserves the original half bits, including infinities.
-  def h(v:UOp) -> UOp:
-    return (v.float().maximum(-65504.0).minimum(65504.0) if clip else v).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
-  return h(x[0, (2*e).valid(e < n)].load()) | (h(x[0, (2*e+1).valid(e < n)].load()) << 16)
-
 @functools.cache
 def _flag_send_kernel(*args:UOp, N:int, n:int, T:int, EP:int, scatter:int=0, raw:bool=False, packed:bool=False) -> UOp:
   # a device's values into its slot of every peer's inbox (args: the inboxes 1..N-1, x, the counters)
@@ -2029,10 +1981,6 @@ def _ring_spin(after:UOp, loads:Callable[[UOp], list[UOp]], stale:Callable[[list
   vals = [reg[i].load() for i in range(len(ld))]
   return vals, stale(vals)
 
-def _wave_sum(c:UOp) -> UOp:
-  for off in (16, 8, 4, 2, 1): c = c + _lane_xor(c.bitcast(dtypes.float32), off).bitcast(dtypes.uint32)
-  return c
-
 _LOAD_SYS64 = "__hip_atomic_load({0}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM)"
 
 def _ring_common(counter:UOp, N:int, dbg:UOp, G:int, tag:int=0, R:int=1, span:int=0, maxw:int=RING_MAXW):
@@ -2229,12 +2177,6 @@ def ring_reduce_scatter_q8(p:Tensor, size:int, shape:tuple[int, ...]|None=None, 
 
 
 # ******** sequence parallel: the rows of a tensor split over the devices ********
-
-def _per_device(x:Tensor) -> UOp:
-  # the value on every device of a split kernel output (_materialized): its buffer's view of the device, after the kernel
-  u = x.uop
-  assert u.op is Ops.AFTER and u.src[0].op is Ops.UNSHARD, f"not a split kernel output: {u.op}"
-  return u.src[0].src[0].after(*u.src[1:])
 
 @functools.cache
 def _cast_kernel(out:UOp, x:UOp) -> UOp:
@@ -3753,13 +3695,6 @@ def _gated_delta_prefill_lds_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alp
 
 DECODE_THREADS = 1024
 
-# a ballot is across the wave: a CUSTOM (a statement of its own), not inlined where it is used (in the branch of a gated store)
-def _ballot(pred:UOp) -> UOp: return _cfn(False, src=(pred,), arg=("__builtin_amdgcn_ballot_w32({0})", dtypes.uint32))
-def _popcount(x:UOp) -> UOp: return _cfn(True, src=(x,), arg=("__builtin_popcount({})", dtypes.int32))
-# across the wave: CUSTOMs (statements of their own, not inlined in the branch of a gated store)
-def _bpermute(x:UOp, src_lane:UOp) -> UOp:
-  return _cfn(False, src=(x, src_lane), arg=("__builtin_amdgcn_ds_bpermute((int)({1})*4, (int)({0}))", dtypes.int32))
-def _readlane(x:UOp, lane:int) -> UOp: return _cfn(False, src=(x,), arg=(f"__builtin_amdgcn_readlane((int)({{0}}), {lane})", dtypes.int32))
 def _radix_kth(key:Callable[[UOp], UOp], npc:UOp, k:int, pools:UOp, t:UOp, wave:UOp, lane:UOp) -> UOp:
   """
   the k-th largest of the keys of a workgroup's threads (key(c) a thread's of chunk c of npc, uint32, 1 at least, all of them with no more pools
