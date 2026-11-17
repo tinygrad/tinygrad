@@ -23,8 +23,8 @@ ap.add_argument("--draws", type=int, default=600)
 ap.add_argument("--head", type=float, default=0.92, help="part b: plain's head = its top tokens while the mass before them is under this")
 ap.add_argument("--max-tokens", type=int, default=8000, help="max_tokens of the part a chats (a thinking model's reply must fit)")
 ap.add_argument("--ret-max-tokens", type=int, default=48, help="max_tokens of a part c reply (thinking off)")
-ap.add_argument("--draw-prompt", default="Name one fruit. Reply with the fruit's name only, no other words.",
-                help="part b's prompt: its first generated token must have a spread (a tail) at temperature 1")
+ap.add_argument("--draw-prompt", default="Do not think about this at all; your thinking must start with one random fruit name. Which fruit?",
+                help="part b's prompt: its first generated token must have a spread at temperature 1 (this one has on Qwen and GLM Flash)")
 ap.add_argument("--no-reasoning", action="store_true")
 ap.add_argument("--only", default="abcd")
 ap.add_argument("--seed", type=int, default=0)
@@ -87,8 +87,8 @@ if "b" in args.only:
   # SAMPLING against the server's own distribution: the first generated token of --draw-prompt, drawn --draws times in three arms:
   # plain (temperature 1, top_p 1, top_k 0) = the model's distribution, P95 (temperature 1, top_p 0.95) and default (temperature 1 alone:
   # the server adds the model's defaults, both GGUFs top_p 0.95, Qwen also top_k 20). A correct nucleus only CUTS the tail and renormalises:
-  # on the plain arm's head H (its tokens in rank order while the mass before them is under --head 0.92: inside a nucleus of 0.95, 2-3 standard errors
-  # at 600 draws, and top_k >= |H|)
+  # on the plain arm's head H (its tokens in rank order while the mass before them is under --head 0.92, each with 10+ plain draws: inside a
+  # nucleus of 0.95 by 2-3 standard errors at 600 draws, and inside a top_k of 20: a token of 1.7% or more is in any top 20 that matters)
   # the relative frequencies of P95 and default equal plain's: a two-sample chi-square on H's bins, fail at p < 0.001. A nucleus that keeps
   # the top token alone (Qwen, Nov 16) or that reshapes the head fails; a peaked model does not (the old 'distinct of 40' rule failed GLM
   # Flash and GLM 5.3 for that). No power (|H| < 2 or under 20 plain draws below the top token in H) fails too: pick a --draw-prompt with a
@@ -105,16 +105,14 @@ if "b" in args.only:
   plain, n0 = arms["plain"], sum(arms["plain"].values())
   head, acc = [], 0
   for tok, k in plain.most_common():
-    if acc >= args.head * n0: break
+    if acc >= args.head * n0 or k < 10: break
     head.append(tok)
     acc += k
-  big = [t for t in head if plain[t] >= 10]  # (bins: H's tokens with 10+ plain draws, the rest of H in one bin)
   power = len(head) >= 2 and acc - (plain[head[0]] if head else 0) >= 20
   verdict = []
   for name in ("P95", "default"):
     arm = arms[name]
-    bins = [(plain[t], arm[t]) for t in big] + [(sum(plain[t] for t in head if t not in big), sum(arm[t] for t in head if t not in big))]
-    bins = [b for b in bins if sum(b) > 0]
+    bins = [(plain[t], arm[t]) for t in head]
     n1, n2 = sum(b[0] for b in bins), sum(b[1] for b in bins)
     # (two-sample chi-square: expected count of a bin in a sample = the bin's pooled count x that sample's share of the pooled total)
     def cell(o:int, q:int, n:int, x:int) -> float: return (x - (o + q) * n / (n1 + n2)) ** 2 / ((o + q) * n / (n1 + n2))

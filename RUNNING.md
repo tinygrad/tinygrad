@@ -90,8 +90,8 @@ python3 extra/llm_service/smoke.py http://<public host:port> --slots <SEQ_SLOTS>
 
 `--rows-4k` = the rows of a 3840x2160 picture on that line (picture-limit table below): Qwen and GLM Flash at 1,024 rows 1,008, Qwen at 8,192 8,160,
 GLM Flash at 8,000 7,973; without it the count is printed, not checked. GLM Flash always thinks (its template opens `<think>`;
-`enable_thinking` does nothing): add `--ret-max-tokens 1024 --draw-prompt "Do not think about this at all; your thinking must start with one
-random fruit name. Which fruit?"` (part b then samples the reasoning's first token, which has a spread there).
+`enable_thinking` does nothing): add `--ret-max-tokens 1024` (part b then samples the reasoning's first token; its default prompt has a
+spread there and on Qwen).
 
 It checks (a) 20 default-sampling chats (no stray-script characters, reasoning in `reasoning_content`; read the five it prints),
 (b) the sampler against the server's own distribution (first-token draws at top_p 1 / top_k 0, at top_p 0.95 and with the model's
