@@ -621,6 +621,7 @@ class TestScheduleSeqs(unittest.TestCase):
     # (the first one starving, the others not yet: after its slices they'd go first (STARVE_ALT), they wait for it instead)
     self.server.STARVE_SEQ, self.server.STARVE_ALT = 0.05, 1
     self.model.seq_fork = lambda *a: self.model.calls.append(("fork",) + a)
+    self.server.engine.fork = True  # (made when the scheduler started, before the model had seq_fork)
     def req(i:int) -> Request: return Request(list(range(100, 8100)), "", 4, 0.0, session_id=f"s{i}")
     self.server.waiting.put(first:=req(0))
     time.sleep(0.06)

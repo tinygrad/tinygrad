@@ -1394,7 +1394,7 @@ class LLMServer(socketserver.ThreadingMixIn, TCPServerWithReuse):
           cold = sum(r.cold for r in filling.values()) >= self.COLD_MAX
           # (SEQ_FORK: a prompt that starts with the whole prompt of one being prefilled waits for it: a copy of its checkpoint then, not a
           # second prefill of the same tokens (N forks of one saved game))
-          ends = [(f.fill[0], cut) for f in filling.values() if (cut:=eng._tail_cut(f.fill[0]) or len(f.fill[0])) >= eng.FORK_MIN] if eng.FORK else []
+          ends = [(f.fill[0], cut) for f in filling.values() if (cut:=eng._tail_cut(f.fill[0]) or len(f.fill[0])) >= eng.FORK_MIN] if eng.fork else []
           def fork_wait(r:Request) -> bool: return any(r.hit < n and seq_starts(prompt(r), f, n, exact=False) for f, n in ends)
           cands += [(not starving(r), (r.st if starving(r) else len(r.ids) + len(r.generated) - r.hit - self.AGING*(now - r.st)), 1, r)
                     for r in pending if (r.tried != eng.version or now - r.tried_at > 1.0) and

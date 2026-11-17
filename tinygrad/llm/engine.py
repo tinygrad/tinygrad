@@ -112,6 +112,7 @@ class SeqEngine:
     self.telemetry = None  # optional storage_event observer, installed by LLMServer (no scheduling behavior)
     self.last_take_stash = False
     self.end_resident_dropped, self.end_stash_dropped = 0, 0
+    self.fork = bool(self.FORK) and hasattr(model, "seq_fork")  # (SEQ_FORK on a model that copies a checkpoint across slots)
 
   def _event(self, kind:str, **fields) -> None:
     if self.telemetry is not None:
@@ -378,7 +379,7 @@ class SeqEngine:
     return ret
   def _forkable(self, s:Seq, session_id:str) -> bool:
     """SEQ_FORK: s is a source to copy, not a sequence to take: decoding, or idle and held for another session"""
-    if not self.FORK or not hasattr(self.model, "seq_fork"): return False
+    if not self.fork: return False
     return s.active or bool(session_id and s.sessions and session_id not in s.sessions and self.held(s.used))
   def _fork_src(self, ids:list[int], session_id:str) -> tuple[Seq, int]|None:
     """SEQ_FORK: the source with the longest checkpoint (FORK_MIN at least) the prompt starts with"""
@@ -473,7 +474,7 @@ class SeqEngine:
                                            for s in self.seqs if not s.active] + \
                                           [(cont(x.tokens, len(x.tokens), x.ckpt), x) for x in self.stashed]
     # (SEQ_FORK: a decoding one's checkpoint it would be a copy of)
-    if self.FORK and hasattr(self.model, "seq_fork"):
+    if self.fork:
       cands += [(k, s) for s in self.seqs if s.active and self.FORK_MIN <= (k:=cont(s.tokens, 0, s.ckpt))]
     n, best = max(cands, key=lambda c: c[0], default=(0, None))
     if touch and n and best is not None: best.used = time.perf_counter()
