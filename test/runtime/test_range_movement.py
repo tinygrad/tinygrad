@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, UOp, Device, GlobalCounters
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.uop.ops import KernelInfo
+from tinygrad.uop.ops import AxisType, KernelInfo
 from test.helpers import assert_kernel_count
 from test.runtime.test_custom_kernel import custom_add_one_kernel
 
@@ -27,6 +27,18 @@ class TestGatedIndexMovement(unittest.TestCase):
       st = tmp[i.valid(j.eq(0)), 0].store((j+1).cast(dtypes.float)).end(j)
       return C[i].store(tmp.after(st)[i, 0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), fxn=kernel)[0].tolist(), [1.]*4)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local and Device[Device.DEFAULT].renderer.has_shared, "needs workgroup shared memory")
+  def test_scatter_through_reshape_after_barriers(self):
+    def kernel(C:UOp) -> UOp:
+      row, lane = UOp.range(8, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
+      a, b = [UOp.placeholder((8,), dtypes.int32, slot=i, addrspace=AddrSpace.LOCAL) for i in (0, 1)]
+      a = a.after(a[row.valid(lane.eq(31))].store((7-row).cast(dtypes.int32)).barrier())
+      b = b.after(b[row.valid(lane.eq(0))].store(a[row]).barrier())
+      dst = C.reshape(64)[b[row].cast(dtypes.weakint).valid(lane.eq(0))]
+      return dst.store((row+1).cast(C.dtype)).end(row, lane).sink(arg=KernelInfo(opts_to_apply=()))
+    out = Tensor.zeros(1, 64, dtype=dtypes.int32).contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(out, fxn=kernel)[0].tolist(), [list(range(8, 0, -1)) + [0]*56])
 
   def test_gated_store_partial_reshape(self):
     def kernel(C:UOp) -> UOp:

@@ -1,5 +1,5 @@
 # all of symbolic lives here now
-import math
+import itertools, math
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, BottomUpGate, exec_alu, promo_dtype, identity_element
 from tinygrad.dtype import PyConst, ConstFloat, dtypes, can_lossless_cast, Invalid, bitcast, truncate
@@ -353,13 +353,28 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
   if (a:=lt.src[0]).op is Ops.CONST: return lt.src[1], neg, int(a.val) + (0 if neg else 1)
   return a, not neg, int(lt.src[1].vmin) if neg else int(lt.src[1].vmax)-1
 
+def loads_as_variables(uop:UOp, context:UOp) -> dict[UOp, UOp]|None:
+  # Index arithmetic may simplify a loaded value, but not the stores and barriers that precede it.
+  if not uop.op_in_backward_slice_with_self(Ops.AFTER): return {}
+  loads = [u for u in uop.toposort() if u.op in {Ops.LOAD, Ops.INDEX} and (dtypes.is_int(u.dtype) or u.dtype is dtypes.bool)
+           and any(s.op_in_backward_slice_with_self(Ops.AFTER) for s in u.src)]
+  # Variables are interned. Don't alias a user variable in the expression, predicate, or view shape.
+  used = {v.arg.name for v in UOp.sink(uop, context).toposort() if v.op is Ops.PARAM}
+  names = (name for i in itertools.count() if (name:=f"_load{i}") not in used)
+  hidden = {u:UOp.variable(next(names), u.vmin, u.vmax, u.dtype) for u in loads}
+  return None if uop.substitute(hidden).op_in_backward_slice_with_self(Ops.AFTER) else hidden
+
 def _keep_range(ctx:dict[UOp, UOp], r:UOp) -> None:
   if r not in ctx: raise BottomUpGate
 pm_keep_range = PatternMatcher([(UPat(Ops.RANGE, name="r"), _keep_range)])
 
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # return simplified uop (might be the same as input)
+  if (hidden:=loads_as_variables(uop, valid)) is None: return uop
+  if not hidden: return _uop_given_valid(valid, uop, try_simplex)
+  return uop if (ret:=_uop_given_valid(valid, hid:=uop.substitute(hidden), try_simplex)) is hid else ret.substitute({v:k for k,v in hidden.items()})
 
+def _uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:defaultdict[UOp, list[PyConst|None]] = defaultdict(lambda: [None, None])
   for stmt in valid.split_uop(Ops.AND):

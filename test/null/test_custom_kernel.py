@@ -113,6 +113,30 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(prg.ranges, {})
     self.assertEqual(len([u for u in prg.src[1].src if u.op is Ops.BARRIER]), 1)
 
+  def test_store_gated_by_local_through_reshape(self):
+    # a store into a reshaped output at a fixed position, gated by a value loaded from a local after a barrier: the gate stays the store's
+    def kernel(C:UOp) -> UOp:
+      lane = UOp.range(32, 0, AxisType.LOCAL)
+      tmp = UOp.placeholder((32,), dtypes.int32, slot=0, addrspace=AddrSpace.LOCAL)
+      tmp = tmp.after(tmp[lane].store(lane.cast(dtypes.int32)).barrier())
+      return C.reshape(1, 32)[0, UOp.const(1, dtypes.weakint).valid(tmp[31-lane].eq(0))].store(1).end(lane).sink(arg=KernelInfo(opts_to_apply=()))
+    ast = Tensor.custom_kernel(Tensor.empty(32, dtype=dtypes.int32), fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
+    self.assertEqual(len([u for u in uops if u.op is Ops.IF and any(x.op is Ops.LOAD for x in u.src[0].toposort())]), 1)
+
+  def test_store_at_loaded_position_through_reshape(self):
+    # the address is a value loaded after two barriers: moving it through the reshape doesn't copy the stores it is after
+    def kernel(C:UOp) -> UOp:
+      lane, warp = UOp.range(8, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
+      a = UOp.placeholder((8,), dtypes.int32, slot=0, addrspace=AddrSpace.LOCAL)
+      a = a.after(a[lane.valid(warp.eq(31))].store(1).barrier())
+      b = UOp.placeholder((8,), dtypes.int32, slot=1, addrspace=AddrSpace.LOCAL)
+      b = b.after(b[lane].store(a[0]).barrier())
+      return C.reshape(64)[b[0].cast(dtypes.weakint)].store(1).end(lane, warp).sink(arg=KernelInfo(opts_to_apply=()))
+    ast = Tensor.custom_kernel(Tensor.empty(1, 64, dtype=dtypes.int32), fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
+    self.assertEqual(len([u for u in uops if u.op is Ops.STORE]), 3)
+
   def test_gemm_qkv(self):
     B, N, K_DIM, H_KV, REP, D = 2, 7, 6, 2, 2, 6
     H, QKV = H_KV * REP, H_KV * (REP + 2) * D
