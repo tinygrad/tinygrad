@@ -11,7 +11,7 @@ class TestReductionAxes(unittest.TestCase):
 
   def reduction(self, size=64):
     # Reduction role, not numeric id, determines optimizer axis order.
-    i, r = UOp.range(size, 1), UOp.range(size, 0)
+    i, r = UOp.range(size, 1, AxisType.WEAK), UOp.range(size, 0, AxisType.WEAK)
     inp, out = UOp.param(0, dtypes.float, (size, size)), UOp.param(1, dtypes.float, (size,))
     return self.scheduler(out[i].store(inp[i, r].reduce(r, arg=Ops.ADD)).end(i).sink(arg=KernelInfo())), i, r
 
@@ -66,7 +66,7 @@ class TestReductionAxes(unittest.TestCase):
     self.assertEqual(k.group_for_reduces, 1)
 
   def test_nested_reduction_group_refused(self):
-    i, r = UOp.range(8, 0), UOp.range(8, 1)
+    i, r = UOp.range(8, 0, AxisType.WEAK), UOp.range(8, 1, AxisType.WEAK)
     inp, out = UOp.param(0, dtypes.float, (8, 8)), UOp.param(1, dtypes.float, (1,))
     ast = out[0].store(inp[i, r].reduce(r, arg=Ops.ADD).reduce(i, arg=Ops.ADD)).sink(arg=KernelInfo())
     for upcast_outer in (False, True):
@@ -78,7 +78,7 @@ class TestReductionAxes(unittest.TestCase):
 
   def test_execute_upcast_reduction(self):
     def kernel(out, inp):
-      i, r = UOp.range(4, 0), UOp.range(8, 1)
+      i, r = UOp.range(4, 0, AxisType.WEAK), UOp.range(8, 1, AxisType.WEAK)
       return out[i].store(inp[i, r].reduce(r, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=(
         Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)))))
     inp = Tensor([float(i) for i in range(32)], device="PYTHON").reshape(4, 8).contiguous().realize()
