@@ -5,7 +5,7 @@
 #     reasoning_content on every reply (--no-reasoning for a model that does not think), five printed for the eye
 #  b  sampling against the server's own distribution: one-token draws at T 1 / top_p 1 / top_k 0 (plain), T 1 / top_p 0.95 and T 1 alone
 #     (the model's defaults): on plain's head (its top 92%) the other two arms' relative frequencies equal plain's (chi-square, fails at
-#     p < 0.001 or without power, unless the top token holds 92%+); top_p 0.95 CUTS: P95's mass outside the 95% head of one half of plain
+#     p < 0.001 or without power, unless the top token holds 95%+); top_p 0.95 CUTS: P95's mass outside the 95% head of one half of plain
 #     is smaller than the other half's (one-sided, fails unless p < 0.001: an ignored top_p fails); a request with top_k and an unknown
 #     field is answered (200), and one with presence / frequency / repetition penalties (200; this server ignores them: printed, RUNNING.md)
 #  c  returning turns under pressure: N = max(80, 1.25 x slots) conversations, a secret each, then every one returns and must answer its
@@ -93,9 +93,9 @@ if "b" in args.only:
   # the relative frequencies of P95 and default equal plain's: a two-sample chi-square on H's bins, fail at p < 0.001. A nucleus that keeps
   # the top token alone (Qwen, Nov 16) or that reshapes the head fails; a peaked model does not (the old 'distinct of 40' rule failed GLM
   # Flash and GLM 5.3 for that). No power (|H| < 2 or under 20 plain draws below the top token in H) fails too (pick a --draw-prompt with a
-  # spread), except PEAKED: plain's top token alone holds 92%+ (GLM 5.3's thinking starts 'The' ~98% whatever the prompt): a nucleus of 0.95
-  # is then the top token or little more, nothing to compare on the head, and the cut test below decides alone. An IGNORED top_p passes
-  # the chi-square (nothing reshaped): so the plain arm draws twice as many, its halves A and B (by request order),
+  # spread), except PEAKED: plain's top token holds more than 95% (by 3 standard errors; GLM 5.3's thinking starts 'The' ~98% whatever
+  # the prompt): a nucleus of 0.95 is then the top token alone, nothing to compare on the head, and the cut test below decides alone.
+  # An IGNORED top_p passes the chi-square (nothing reshaped): so the plain arm draws twice as many, its halves A and B (by request order),
   # T = A's tokens in rank order while A's mass before them is under 0.95, and P95's draws outside T must be FEWER than B's (one-sided
   # two-proportion test, fails unless p < 0.001). T is chosen on A alone: with top_p ignored B and P95 are draws of one distribution
   # independent of T, so the test is exact whatever T is; with a nucleus, P95 has none of plain's mass past 0.95 (power: the prompt's
@@ -130,7 +130,10 @@ if "b" in args.only:
     head.append(tok)
     acc += k
   power = len(head) >= 2 and acc - (plain[head[0]] if head else 0) >= 20
-  peaked = not power and n0 > 0 and plain.most_common(1)[0][1] >= 0.92 * n0
+  # (PEAKED: the top token's share at least 0.95 by 3 standard errors: the true nucleus of 0.95 is then that token ALONE, so a sampler
+  # that keeps the top token only is right there, and the head has nothing to compare)
+  top = plain.most_common(1)[0][1] / n0 if n0 else 0.0
+  peaked = not power and n0 > 0 and top - 3 * math.sqrt(top * (1 - top) / n0) >= 0.95
   verdict = []
   for name in ("P95", "default"):
     arm = arms[name]
@@ -153,7 +156,8 @@ if "b" in args.only:
         f"mass outside H {out:.3f} (plain {1 - acc / max(1, n0):.3f})")
   say(f"B top_k + unknown field: HTTP {code}; penalties (presence / frequency / repetition): HTTP {pcode}, accepted and IGNORED by this server "
       "(the reply is sampled with temperature / top_p / top_k only: RUNNING.md)")
-  if peaked: say("B head PEAKED (top token 92%+ of plain): no chi-square on the head, the cut test decides")
+  if peaked: say(f"B head PEAKED (top token {top:.3f} of plain, over 0.95 by 3 SE: the nucleus is that token alone): "
+                 "no chi-square, the cut test decides")
   elif not power: say("B has NO POWER: the plain arm's head is one token or too few draws: use a --draw-prompt with a spread")
   if ((not power and not peaked) or (power and any(p < 0.001 for _, _, _, p, _ in verdict)) or pcut >= 0.001 or code != 200 or pcode != 200
       or min(sum(a.values()) for a in arms.values()) < args.draws * 0.9): fails.append("b")
