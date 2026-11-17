@@ -8,7 +8,8 @@ from tinygrad.llm.kernels.amd_glm import _nucleus_round_kernel, _local_argmax_ke
   _moe_softmax_router_bitonic_kernel, _moe_bundle_atomic_kernel, _route_place_kernel, _ghc_post_kernel, _ghc_pre_kernel, \
   _gated_delta_prefill_kernel, _moe_combine_kernel, _route_count_kernel, _kda_replay_kernel, _kda_conv_kernel, \
   _skinny_kernel, _sum_parts_kernel, _few_out_rows_kernel, _moe_tile, _exclusive_cumsum_kernel, _scatter_rows_kernel, \
-  _route_init_kernel, _weighted_sum_kernel, _kda_out_kernel
+  _route_init_kernel, _weighted_sum_kernel, _kda_out_kernel, _q8_wide_stores, _wmma_layout, _q8k_quantize_kernel, \
+  _q8_sum_kernel, _amd_f16_gemv_kernel, _slot_scatter_kernel, _slot_gather_kernel, _ple_gather_kernel
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import prod, getenv, round_up, unwrap, dedup
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
@@ -364,25 +365,6 @@ def _q8_quantize_wide(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, in
   stores = _q8_wide_stores(values, q, scale, xsum, sq[0] if sq else None, token, group, sub)
   return UOp.group(*stores).end(token_g8, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
 
-def _q8_wide_stores(values:list[UOp], q:UOp, scale:UOp, xsum:UOp, sq:UOp|None, token:UOp, group:UOp, sub:UOp) -> list[UOp]:
-  # a lane's 8 neighboring values of a group of 32 (four lanes a group, sub the lane of the four): their words, scale, sums (and squares)
-  mx = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
-  for off in (1, 2): mx = mx.maximum(_lane_xor(mx, off))
-  d = _cfn(False, src=(mx,), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
-  quants = [_cfn(False, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float)).clip(-127, 127).cast(dtypes.int8) for v in values]
-  words = [functools.reduce(lambda a, b: a | b, [quants[w*4+i].cast(dtypes.uint8).cast(dtypes.uint32) << (8*i) for i in range(4)]) for w in range(2)]
-  qs = functools.reduce(lambda a, b: a + b, [qv.float() for qv in quants])
-  qs = qs + _lane_xor(qs, 1)
-  stores:list[UOp] = [q[token, group, sub*2 + w].store(words[w]) for w in range(2)]
-  stores += [scale[token, group.valid(sub.eq(0))].store(d), xsum[token, group, (sub//2).valid((sub%2).eq(0))].store(qs)]
-  if sq is not None:
-    sqs = [v*v for v in values]
-    sqs = [a + _lane_xor(a, 2) for a in sqs]  # 16 apart: the lane two over
-    sqs = [a + _lane_xor(a, 1) for a in sqs]  # 8 apart
-    for k in (4, 2, 1): sqs = [sqs[i] + sqs[i ^ k] for i in range(8)]
-    stores.append(sq[token, group.valid(sub.eq(0))].store(sqs[0]))
-  return stores
-
 def q8_quantize(x:Tensor, tokens:int, in_features:int, sumsq:bool=False, split:bool=False) -> tuple[Tensor, ...]:
   """
   int8 groups of 32 with their scales and sums (and optionally sums of squares). an input shared by several layers is quantized once.
@@ -726,22 +708,6 @@ def _is_buffer(x:Tensor) -> bool:
   return u.op in (Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.ALLOC, Ops.STAGE)
 
 
-def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, group:tuple[UOp, ...]=(), rows:int|None=None, waves:int=2):
-  # grouped experts: the token blocks cover the sorted rows (group[0]), not the output. rows: the rows of out to cover (default all)
-  # output_tiles: at most that many, as many as divide the outputs
-  output_tiles = next(t for t in (output_tiles, 4, 2, 1) if t <= output_tiles and out_features % (16*t) == 0)
-  output_waves = next(w for w in (waves, 8, 4, 2, 1) if w <= waves and out_features % (16*output_tiles*w) == 0)
-  token_block = UOp.range((group[0].shape[0] if group else rows or out.shape[0])//token_tile, 0, AxisType.GLOBAL)
-  output_block = UOp.range(out_features//(16*output_tiles*output_waves), 1, AxisType.GLOBAL)
-  # lane is a hardware WARP range (like the flash kernel): the fragment math stays visible without being
-  # range-split into nested loops, which would scramble the WMMA fragment layout
-  lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(output_waves, 3, axis_type=AxisType.LOCAL)
-  col, half = lane % 16, lane // 16
-  outputs = tuple((output_block*output_waves+wave)*(16*output_tiles) + tile*16 + col for tile in range(output_tiles))
-  inputs = tuple(token_block*token_tile + tile*16 + col for tile in range(token_tile//16))
-  tokens = tuple(tuple(token_block*token_tile + tile*16 + half*8 + i for i in range(8)) for tile in range(token_tile//16))
-  return output_waves, token_block, output_block, lane, wave, half, outputs, inputs, tokens
-
 def _gated(gate:UOp, up:UOp, act:tuple[float, float, float]) -> UOp:
   # gated_activation in a kernel: act is (alpha, limit, up_bias), limit <= 0 for none
   alpha, limit, up_bias = act
@@ -922,21 +888,6 @@ def _wmma_scale(raw:UOp, base:UOp, subgroup:UOp, half:int, ggml_type:int) -> tup
 def _i8_frag(words:tuple[UOp, ...]) -> UOp:
   # NOTE: a bitcast of the words to int8 vectors loops in devectorize, the compiler packs the bytes back
   return UOp.stack(*(((w >> (8*i)) & 0xff).cast(dtypes.uint8).bitcast(dtypes.int8) for w in words for i in range(4)))
-
-@functools.cache
-def _q8k_quantize_kernel(q:UOp, scale:UOp, x:UOp, tokens:int, in_features:int) -> UOp:
-  # int8 groups of 32 with one scale per 256 inputs (q8_K, as the CPU dots of IQ formats): a wave a (token, block), eight inputs a lane
-  blocks = in_features // 256
-  token_block, lane = UOp.range(tokens*blocks, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
-  token, block = token_block // blocks, token_block % blocks
-  values = [x.reshape(tokens, in_features)[token, block*256 + lane*8 + i].load().float() for i in range(8)]
-  local = functools.reduce(lambda a, b: a.maximum(b), [v.abs() for v in values])
-  d = _cfn(False, src=(warp_reduce(local, maximum=True, full_wave=True),), arg=("({0}/127.0f)", dtypes.float)).maximum(1e-8)
-  quants = [_cfn(False, src=(v, d), arg=("__builtin_nearbyintf({0}/{1})", dtypes.float)).clip(-127, 127).cast(dtypes.int8) for v in values]
-  words = [functools.reduce(lambda a, b: a | b, [quants[w*4+i].cast(dtypes.uint8).cast(dtypes.uint32) << (8*i) for i in range(4)]) for w in range(2)]
-  group = block*8 + lane//4
-  stores = [q[token, group, (lane%4)*2 + w].store(words[w]) for w in range(2)] + [scale[token, block.valid(lane.eq(0))].store(d)]
-  return UOp.group(*stores).end(token_block, lane).sink(arg=KernelInfo(name="q8k_quantize", opts_to_apply=()))
 
 def q8k_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor]:
   """int8 groups of 32 (as q8_quantize) and one scale per 256 inputs"""
@@ -2588,19 +2539,6 @@ def _q8_unpack_kernel(out:UOp, *parts:UOp) -> UOp:
   stores = [out[token, group*32 + sub*8 + i].store(vals[i]) for i in range(8)]
   return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q8_unpack", opts_to_apply=()))
 
-@functools.cache
-def _q8_sum_kernel(out:UOp, mine:UOp, *packed:UOp, row0:int=0) -> UOp:
-  # the packed groups (q8_pack) of the others plus mine (from row row0), in float: a lane eight inputs
-  T, D = cast(tuple[int, int], out.shape)
-  G = D // 32
-  tg8, lane = UOp.range(T*(G//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
-  token, group, sub = tg8//(G//8), (tg8 % (G//8))*8 + lane//4, lane % 4
-  acc = [UOp.const(0, dtypes.float)]*8
-  for pk in packed: acc = [a + b for a, b in zip(acc, _q8_unpacked(pk, token, group, sub))]
-  acc = [acc[i] + mine.reshape(-1, D)[row0 + token, group*32 + sub*8 + i].load().float() for i in range(8)]
-  stores = [out[token, group*32 + sub*8 + i].store(acc[i].cast(out.dtype)) for i in range(8)]
-  return UOp.group(*stores).end(tg8, lane).sink(arg=KernelInfo(name="q8_sum", opts_to_apply=()))
-
 def all_gather_q8(x:Tensor, axis:int, real:int=0) -> Tensor:
   """
   all_gather of x (1, T, D) split on its rows (axis 1) in half, sent as int8 groups of 32 with their scale (as q8_quantize: the activations
@@ -3241,25 +3179,6 @@ def weighted_sum(x:Tensor, p:Tensor) -> Tensor|None:
 
 # ******** tiny dense fp16 gemv ********
 
-@functools.cache
-def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *rest:UOp, in_features:int, out_features:int, tokens:int) -> UOp:
-  bias: UOp|None = rest[0] if rest else None
-  # one block per (token, output row), 32 lanes accumulate 4-wide chunks of the row
-  lanes, val_chunk = WARP_SIZE, 4
-  token, out_row = UOp.range(tokens, 0, AxisType.GLOBAL), UOp.range(out_features, 1, AxisType.GLOBAL)
-  lane = UOp.range(lanes, 2, axis_type=AxisType.LOCAL)
-  per = in_features // (lanes * val_chunk)
-  assert per * lanes * val_chunk == in_features
-  w = w.reshape((out_features, per, lanes*val_chunk))
-  x = x.reshape((tokens, per, lanes*val_chunk))
-  acc = UOp.const(0, dtypes.float32)
-  for i in range(per):
-    for j in range(val_chunk):
-      acc = acc + w[out_row, i, lane*val_chunk + j].load().float() * x[token, i, lane*val_chunk + j].load().float()
-  total = warp_reduce(acc, full_wave=True)
-  if bias is not None: total = total + bias[out_row].load().float()
-  return out[token, out_row.valid(lane.eq(0))].store(total).end(token, out_row, lane).sink(arg=KernelInfo(name="linear_f16_gemv", opts_to_apply=()))
-
 def _view_back(t:Tensor) -> Tensor:
   # Widening half to float is exact; preserve casts that round or change the values.
   uop = t.uop
@@ -3702,21 +3621,6 @@ def qsa_decode_attention(q:Tensor, cache:Tensor, index:Tensor, bases:Tensor, sca
   return out, ls
 
 
-@functools.cache
-def _slot_scatter_kernel(dst:UOp, src:UOp, slots:UOp, counts:UOp, *starts:UOp, S:int, shift:int) -> UOp:
-  # row slots[g]*S + (starts[g]+counts[g])%S of dst (n*S, rows, F) <- rows shift*counts[g].. (rows of them) of src[g] (G, R, F), cast to
-  # dst's dtype (no starts: 0)
-  G, _, F = cast(tuple[int, int, int], src.shape)
-  rows = cast(int, dst.shape[1])
-  L = math.gcd(F, 256)
-  g, r, blk, lane = (UOp.range(G, 0, AxisType.GLOBAL), UOp.range(rows, 1, AxisType.GLOBAL), UOp.range(F // L, 2, AxisType.GLOBAL),
-                     UOp.range(L, 3, AxisType.LOCAL))
-  f, cnt = blk * L + lane, counts[g].load().cast(dtypes.weakint)
-  value = src[g, shift * cnt + r, f].load().cast(dst.dtype)
-  pos = cnt + starts[0][g].load().cast(dtypes.weakint) if starts else cnt
-  store = dst[slots[g].load().cast(dtypes.weakint) * S + pos % S, r, f].store(value)
-  return store.end(g, r, blk, lane).sink(arg=KernelInfo(name="slot_scatter", opts_to_apply=()))
-
 def slot_scatter(pool:Tensor, src:Tensor, slots:Tensor, counts:Tensor, S:int, shift:int=0, starts:Tensor|None=None) -> Tensor:
   """
   the states of G sequences into their slots: pool (n*S, rows, F) row slots[g]*S + (starts[g]+counts[g])%S (a slot's S rows, the one of
@@ -3756,17 +3660,6 @@ def pool_window(pool:Tensor, keys:Tensor, slots:Tensor, positions:Tensor, S:int,
   out, pool = Tensor.custom_kernel(out, pool, keys.contiguous(), slots, positions,
                                    fxn=functools.partial(_pool_window_kernel, S=S, NP=NP, kpool=kpool))[:2]
   return out, pool
-
-@functools.cache
-def _slot_gather_kernel(dst:UOp, pool:UOp, slots:UOp, starts:UOp, S:int) -> UOp:
-  # dst[g] (G, rows, F) <- row slots[g]*S + starts[g]%S of pool (n*S, rows, F), cast to dst's dtype
-  G, rows, F = cast(tuple[int, int, int], dst.shape)
-  L = math.gcd(F, 256)
-  g, r, blk, lane = (UOp.range(G, 0, AxisType.GLOBAL), UOp.range(rows, 1, AxisType.GLOBAL), UOp.range(F // L, 2, AxisType.GLOBAL),
-                     UOp.range(L, 3, AxisType.LOCAL))
-  f = blk * L + lane
-  row = slots[g].load().cast(dtypes.weakint) * S + starts[g].load().cast(dtypes.weakint) % S
-  return dst[g, r, f].store(pool[row, r, f].load().cast(dst.dtype)).end(g, r, blk, lane).sink(arg=KernelInfo(name="slot_gather", opts_to_apply=()))
 
 # ******** gated hyper-connections (qwen4exp) of a few rows: the streams' norm, quantization and inject partials in a kernel, the up projection,
 # its sigmoid gates and the mean of the gated streams in another (the down projection between them is the decode linear) ********
@@ -3924,14 +3817,6 @@ def ghc_decode_mix(lo:Tensor, up_raw:Tensor, xn:Tensor, part:Tensor, count:int) 
                             fxn=functools.partial(_ghc_decode_mix_kernel, count=count, D=D, R=R))[:5]
   if not sharded: q8_quantize_known(ret[0], T, D, False, tuple(ret[2:]))
   return ret[0], ret[1]
-
-@functools.cache
-def _ple_gather_kernel(out:UOp, ids:UOp, *heads:UOp, rb:int) -> UOp:
-  # out (R, H*rb) <- row ids[r, j] (rb bytes) of head j's table, for every row r and head j (a lane a byte)
-  R, H = cast(tuple[int, int], ids.shape)
-  r, b = UOp.range(R, 0, AxisType.GLOBAL), UOp.range(rb, 1, AxisType.LOCAL)
-  stores = [out[r, j*rb + b].store(heads[j][ids[r, j].load().cast(dtypes.weakint) * rb + b].load()) for j in range(H)]
-  return UOp.group(*stores).end(r, b).sink(arg=KernelInfo(name="ple_gather", opts_to_apply=()))
 
 def ple_gather(ids:Tensor, heads:list[Tensor], rb:int) -> Tensor:
   """the packed rows (R, H*rb) uint8 of the rows ids (R, H) int32 of every head's table (heads: (rows*rb,) uint8 each, in host memory)"""
