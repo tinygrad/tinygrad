@@ -296,7 +296,7 @@ screenshot of the window resent each turn; the URL cache keeps every decoded scr
 the RAM store 12 GB / 64 entries, `VISION_MAX_IMAGES=2048`. GLM Flash always thinks; the bare raw client keeps every turn's thinking.
 12-16 games a box. A turn costs ~580 tokens at 480x432 (~450 turns in a window) and ~775 at 640x576 (~335).)
 R3 at every start of this line: greedy 4K / 64K / 262K equal to `g4-glmraw-bdb15fd94/greedy.json`, `smoke.py --slots 18 --rows-4k 1008`,
-and the picture reference `python3 results/w-gpf/smoke/picref.py <url> <out.json> --compare g4-glmraw-bdb15fd94/picref.json` (company repo).
+and the picture reference compared with `g4-glmraw-bdb15fd94/picref.json` (company repo; the exact `picref.py` command is in `results/regress/README.md`).
 
 ## Benchmarks (source: the company repo's results/phase4/benchmarks.md, copied 21:34 Nov 15)
 
