@@ -40,6 +40,27 @@ class TestTopK(unittest.TestCase):
     nuc = amd_qwen.nucleus(zk, 64, Tensor([[0.5]], device="CPU")).numpy() & keep.numpy()
     self.assertTrue(4 <= nuc.sum() <= 8 and (nuc[0] <= (z[0] == 2.0)).all())
 
+  def test_nucleus_split_with_a_masked_device(self):
+    # (a top_k mask leaves every token of some devices' parts -inf: their max -inf made the mass NaN and the nucleus empty or the top token
+    # alone: Qwen at the GGUF's top_k 20 + top_p 0.95 sampled greedily, Nov 16) the vocab split over 6 devices as the output projection's
+    from unittest import mock
+    V, N = 1536, 6
+    devs = tuple(f"CPU:{i}" for i in range(N))
+    z = np.random.default_rng(0).normal(0, 3, (1, V)).astype(np.float32)
+    zk = np.full_like(z, -np.inf)
+    top = np.argsort(-z[0, :V // N])[:20]  # (the 20 kept tokens all in device 0's part)
+    zk[0, top] = z[0, top]
+    p = np.exp(zk[0] - zk[0].max())
+    p /= p.sum()
+    want = np.zeros(V, bool)
+    want[np.argsort(-p)[:int((np.cumsum(np.sort(p)[::-1]) < 0.95).sum()) + 1]] = True
+    # (Qwen's copy; GLM Flash's and GLM 5.3's copies are measured on their servers first (CTO 17:1x): not changed without a fault shown)
+    for mod in (amd_qwen,):
+      with mock.patch.object(mod, "host_allgather", lambda x: x.to("CPU").to(devs)):
+        # (G 512: the generic sums; the production G 16 sums run in an AMD kernel, after the same mass)
+        nuc = mod.nucleus(Tensor(zk, device="CPU").shard(devs, axis=1), V, Tensor([[0.95]], device="CPU").to(devs), G=512).to("CPU").numpy()
+      np.testing.assert_array_equal(nuc[0], want, err_msg=mod.__name__)
+
   def test_request_param(self):
     self.assertIsNone(sampling_top_k({}))
     self.assertEqual(sampling_top_k({"top_k": 20}), 20)

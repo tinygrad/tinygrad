@@ -2828,7 +2828,9 @@ def nucleus(z:Tensor, n:int, top_p:Tensor, rounds:int|None=None, G:int|None=None
     assert g is not None, "no host_allgather on these devices"
     return g.reshape(N, *part.shape[:1], *part.shape[2:])
   # the max and the sum of exp past it of every device's part, at once: the max, the sum of all
-  pm = vsum(zc, "max")
+  # (a device whose whole part is -inf (a top_k mask kept none of its tokens) would give exp(-inf - -inf) = NaN, a NaN mass, and a nucleus
+  # of nothing (Qwen with the GGUF's top_k 20 + top_p 0.95 sampled the top token alone, Nov 16): its max is taken as -1e30, no exp past it)
+  pm = vsum(zc, "max").maximum(-1e30)
   g = parts(pm.stack(vsum((zc - pm.reshape(B, N, 1, 1)).exp()), dim=-1))  # (N, B, 2)
   m = g[..., 0].max(0)
   mass = ((g[..., 1] * (g[..., 0] - m).exp()).sum(0) * top_p.reshape(-1)).reshape(B, 1)
