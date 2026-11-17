@@ -7,7 +7,7 @@ from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.llm.kernels.amd_glm import _nucleus_round_kernel, _local_argmax_kernel, _argmax_parts, _moe_softmax_router_kernel, \
   _moe_softmax_router_bitonic_kernel, _moe_bundle_atomic_kernel, _route_place_kernel, _ghc_post_kernel, _ghc_pre_kernel, \
   _gated_delta_prefill_kernel, _route_count_kernel, _skinny_kernel, _sum_parts_kernel, _few_out_rows_kernel, _moe_tile, \
-  _scatter_rows_kernel, _route_init_kernel, _weighted_sum_kernel, _kda_out_kernel, _q8_wide_stores, _wmma_layout, \
+  _scatter_rows_kernel, _route_init_kernel, _weighted_sum_kernel, _kda_out_kernel, _wmma_layout, \
   _q8_sum_kernel, _amd_f16_gemv_kernel, \
   _prefetched, _wmma_scale, _decode_linear_loop, _q8_narrow_stores, _q8_pack_values, unwrap_storage_views, \
   moe_combine as moe_combine, kda_conv as kda_conv, kv_q8_pack as kv_q8_pack, slot_scatter as slot_scatter, _materialized, \
@@ -15,7 +15,8 @@ from tinygrad.llm.kernels.amd_glm import _nucleus_round_kernel, _local_argmax_ke
   slot_gather as slot_gather, _q8_unpacked, _load_u32, _iq_even_signs, _wave_scan, _vec_load, \
   ple_gather as ple_gather, _iq4_scale, exclusive_cumsum, token_sharded as token_sharded, shard_rows as shard_rows, \
   _reg, _known_decoded, _i8_frag, _sigmoid, _q5_scales, _load_byte, _order_key, _unbind, _cfn, warp_reduce, _amd_dp4a, \
-  _amd_byte_perm, _amd_load, _half, _iq4_bytes, _gated, _h2, _wave_sum, _per_device, _ballot, _popcount, _bpermute, _readlane
+  _amd_byte_perm, _amd_load, _half, _iq4_bytes, _gated, _h2, _wave_sum, _per_device, _ballot, _popcount, _bpermute, _readlane, \
+  _q8_quantize_wide, _q8_key, _sys
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import prod, getenv, round_up, unwrap, dedup
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
@@ -266,16 +267,6 @@ def q8_quantize_tiles(x:Tensor, tokens:int, in_features:int, tiles:Tensor) -> tu
                                                                                tile=tile))
   return tuple(outs[:3])
 
-def _q8_quantize_wide(q:UOp, scale:UOp, xsum:UOp, x:UOp, *sq:UOp, tokens:int, in_features:int) -> UOp:
-  # as _q8_quantize_kernel, a wave quantizes 8 groups: a lane eight neighboring inputs (wide loads), four lanes a group. the same values: the
-  # max and the integer sums don't depend on the order, the sums of squares add in the order of the full wave butterfly (16, 8, 4, 2, 1 apart)
-  groups = in_features//Q8_GROUP_SIZE
-  token_g8, lane = UOp.range(tokens*(groups//8), 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
-  token, group, sub = token_g8//(groups//8), (token_g8 % (groups//8))*8 + lane//4, lane % 4
-  values = [x.reshape(tokens, in_features)[token, group*32 + sub*8 + i].load().float() for i in range(8)]
-  stores = _q8_wide_stores(values, q, scale, xsum, sq[0] if sq else None, token, group, sub)
-  return UOp.group(*stores).end(token_g8, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
-
 def q8_quantize(x:Tensor, tokens:int, in_features:int, sumsq:bool=False, split:bool=False) -> tuple[Tensor, ...]:
   """
   int8 groups of 32 with their scales and sums (and optionally sums of squares). an input shared by several layers is quantized once.
@@ -283,14 +274,6 @@ def q8_quantize(x:Tensor, tokens:int, in_features:int, sumsq:bool=False, split:b
   """
   if (ret:=_q8_cache.get(key:=_q8_key(x, tokens, in_features, sumsq, split))) is None: ret = _q8_cache[key] = _q8_quantize(*key)
   return ret
-
-def _q8_key(x:Tensor, tokens:int, in_features:int, sumsq:bool, split:bool) -> tuple:
-  # (keyed by the rows: the views of an input are quantized once)
-  u = x.uop
-  if not split and x.shape[-1] == in_features and prod(x.shape) == tokens*in_features:
-    while u.op is Ops.RESHAPE: u = u.src[0]
-    u = u.reshape((tokens, in_features))
-  return (u, tokens, in_features, sumsq, split)
 
 _q8_cache:dict[tuple, tuple[Tensor, ...]] = {}
 
@@ -1424,9 +1407,6 @@ def q8_linear(layer:Linear, x:Tensor, reduce:bool=True, xq:tuple[Tensor, ...]|No
   result = result.reshape(*x.shape[:-1], out_features)
   return result if layer.bias is None else result + layer.bias
 
-def _sys(fmt:str, dtype:DType, *src:UOp) -> UOp: return _cfn(False, src=src, arg=(fmt, dtype))
-
-
 # ******** allreduce peer to peer: the values in half into the inboxes of the peers, then a flag a peer ********
 
 # every device has an inbox in its memory (uncached, mapped into every other device): two parities of a slot per sender for the values (two
@@ -2177,13 +2157,6 @@ def ring_reduce_scatter_q8(p:Tensor, size:int, shape:tuple[int, ...]|None=None, 
 
 
 # ******** sequence parallel: the rows of a tensor split over the devices ********
-
-@functools.cache
-def _cast_kernel(out:UOp, x:UOp) -> UOp:
-  o, s = out.flatten(), x.flatten()
-  i = UOp.range(o.shape[0], 0)
-  return o[i].store(s[i].load().cast(o.dtype)).end(i).sink(arg=KernelInfo(name="cast"))
-
 
 def reduce_scatter(p:Tensor, axis:int) -> Tensor:
   """
