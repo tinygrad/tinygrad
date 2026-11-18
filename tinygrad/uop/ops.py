@@ -1224,9 +1224,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
-  def native(name:Any, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
+  def native(code:Any, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
     shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
-    return UOp(Ops.NATIVE, src=shape_src+src, arg=NativeInfo(name, dtype, fmt))
+    return UOp(Ops.NATIVE, src=shape_src+src, arg=NativeInfo(code, dtype, fmt))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, hcq:HCQInfo|None=None) -> UOp:
@@ -1365,7 +1365,7 @@ OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.NATIVE}
 @dataclass(frozen=True)
 class NativeInfo:
   # renderer specific
-  name: Any
+  code: Any
   dtype: DType = dtypes.void
   fmt: bool = False
 
@@ -1480,7 +1480,7 @@ class UPat(RandMixin):
   @staticmethod
   def const(b:ConstType, dtype:DType|tuple[DType, ...]|None=None): return UPat(Ops.CONST, dtype=dtype, arg=b)
   @staticmethod
-  def native(fn:str, dtype:DType=dtypes.void, **kwargs): return UPat(Ops.NATIVE, arg=NativeInfo(fn, dtype), **kwargs)
+  def native(code:str, dtype:DType=dtypes.void, **kwargs): return UPat(Ops.NATIVE, arg=NativeInfo(code, dtype), **kwargs)
 
   # lil helper
   def f(self, op, **kwargs): return UPat(op, src=(self,), **kwargs)

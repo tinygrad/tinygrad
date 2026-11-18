@@ -118,16 +118,16 @@ pm_renderer = PatternMatcher([
 
   # AND/OR of inline NATIVE fragments becomes a single NATIVE
   (UPat(Ops.AND, src=UPat(Ops.CALL), name="x"), lambda x:
-   UOp.native("(" + ' and '.join(y.body.arg.name for y in x.src) + ")", fmt=True).call(inline=True)
+   UOp.native("(" + ' and '.join(y.body.arg.code for y in x.src) + ")", fmt=True).call(inline=True)
    if all(y.arg.inline for y in x.src) else None),
   (UPat(Ops.OR, src=UPat(Ops.CALL), name="x"), lambda x:
-   UOp.native("(" + ' or '.join(y.body.arg.name for y in x.src) + ")", fmt=True).call(inline=True)
+   UOp.native("(" + ' or '.join(y.body.arg.code for y in x.src) + ")", fmt=True).call(inline=True)
    if all(y.arg.inline for y in x.src) else None),
 
-  (UPat(Ops.CALL, name="x"), lambda x: UOp.native(x.body.arg.name.format(*[y.body.arg.name for y in x.src[1:]]), fmt=True).call(inline=True)
+  (UPat(Ops.CALL, name="x"), lambda x: UOp.native(x.body.arg.code.format(*[y.body.arg.code for y in x.src[1:]]), fmt=True).call(inline=True)
    if not x.arg.inline and all(y.op is Ops.CALL and y.arg.inline for y in x.src[1:]) else None),
   (UPat(Ops.INDEX, src=(UPat(Ops.CALL, name="x"), UPat(Ops.CONST, name="c"))),
-   lambda x,c: UOp.native(x.body.arg.name + f".src[{c.val}]", fmt=True).call(inline=True) if x.arg.inline else None)
+   lambda x,c: UOp.native(x.body.arg.code + f".src[{c.val}]", fmt=True).call(inline=True) if x.arg.inline else None)
 ], compiled=False)
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
@@ -142,8 +142,8 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
       for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1))
     elif s.op is Ops.STORE:
       assert all(y.op is Ops.CALL and y.arg.inline for y in s.src)
-      store_pieces.append(f"{s.src[0].body.arg.name}={s.src[1].body.arg.name}")
-    elif s.op is Ops.CALL and s.arg.inline: and_pieces.append(s.body.arg.name)
+      store_pieces.append(f"{s.src[0].body.arg.code}={s.src[1].body.arg.code}")
+    elif s.op is Ops.CALL and s.arg.inline: and_pieces.append(s.body.arg.code)
     else: raise UPatCompileError(f"can't compile this {s}")
   # if we have an or, render it
   if len(or_pieces):
