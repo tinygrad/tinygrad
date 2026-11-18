@@ -4,7 +4,7 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.x86 import ISARenderer, Register, rdef, regs, with_regs, reg, LinearContext
 
 # ops that participate in register allocation
-REGALLOC_OPS = {Ops.INS, Ops.BUFFER, Ops.RANGE, Ops.END}
+REGALLOC_OPS = {Ops.CALL, Ops.BUFFER, Ops.RANGE, Ops.END}
 
 class LinearScanRegallocContext:
   # returns the uop that defines the virtual register
@@ -64,7 +64,7 @@ class LinearScanRegallocContext:
             # two address instructions (src is reused by def) can only coalesce reused src.
             # reused src goes first to get priority in case of a tiebreak
             if ren.is_two_address(u) and j == 0:
-              uses = tuple(live.get(rdef(s)) for s in u.src)
+              uses = tuple(live.get(rdef(s)) for s in u.src_without_body)
               cons = ((uses[0],) if uses[0] in cons else ()) + tuple(r for r in cons if r not in uses)
             live[v] = alloc(cons, i+1)
           self.reals.setdefault(i, {})[v] = live[v]
