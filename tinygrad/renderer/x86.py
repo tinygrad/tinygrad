@@ -24,7 +24,7 @@ class IselContext:
 # a native call declares its destination registers as register parameters
 def regs(u:UOp) -> tuple[Register, ...]:
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return (u.arg.reg,) if u.arg.reg is not None else ()
-  return tuple(s.arg.reg for s in u.body.src[-1].src) if u.op is Ops.CALL else ()
+  return tuple(s.arg.reg for s in next(x for x in u.body.src if x.op is Ops.SINK).src) if u.op is Ops.CALL else ()
 def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp:
   assert u.dtype is not dtypes.void, "void cannot have output registers"
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return u.replace(arg=replace(u.arg, reg=r[0]))
