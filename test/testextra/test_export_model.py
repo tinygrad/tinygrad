@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.device import Device
 from tinygrad.nn import Linear
 from tinygrad.nn.state import get_state_dict
-from tinygrad import dtypes
+from tinygrad import dtypes, Variable
 import json
 
 class MockMultiInputModel:
@@ -48,6 +48,15 @@ class TextModelExport(unittest.TestCase):
 
     for i, exported_output in enumerate(prg["outputs"]):
       assert outputs[i].dtype.name == exported_output["dtype"], f"Model and exported output dtype don't match: mdl={outputs[i].dtype.name}, prg={exported_output['dtype']}"  # noqa: E501
+
+  def test_variable_model_export(self):
+    # a Variable the model reads is an input at the kernel's dtype, named after it
+    class Model:
+      def forward(self, x): return x + Tensor(Variable("v", 1, 10).bind(3))
+    x = Tensor.ones(4, dtype=dtypes.int).contiguous().realize()
+    prg = json.loads(export_model(Model(), "", x)[0])
+    self.assertEqual(prg["buffers"]["v"]["dtype"], "i32")
+    self.assertIn("v", prg["statements"][0]["args"])
 
 @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Testing WebGPU specific model export behavior")
 class TextModelExportWebGPU(unittest.TestCase):

@@ -688,17 +688,16 @@ class TestCustomKernelArgs(unittest.TestCase):
     self.assertEqual(d.tolist(), [2, 3]*4)
 
 class TestCustomKernelSharded(unittest.TestCase):
-  def test_device_range_direct_linear(self):
-    # a kernel run directly reads its DEVICE range as the device number, like an exported one
-    devs = ("CPU:1", "CPU:2")
-    out = Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(devs, axis=0).contiguous().realize()
-    p, d = UOp.param(0, dtypes.int, 1, device=devs), UOp.range(2, 0, AxisType.DEVICE)
-    linear = UOp(Ops.LINEAR, src=(p[0].store(d.cast(dtypes.int)).sink(arg=KernelInfo(name="store_dnum")).call(out.uop.buf_uop),))
+  def test_device_number_arg(self):
+    # the kernel's DEVICE range is its device number arg, bound per device and validated on each
+    def kernel(C:UOp) -> UOp: return C[0].store(UOp.range(2, 0, AxisType.DEVICE).cast(dtypes.int)).sink(arg=KernelInfo(name="store_dnum"))
+    out = Tensor.custom_kernel(Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(("CPU:1", "CPU:2"), axis=0).contiguous(), fxn=kernel)[0]
+    linear, _ = out.linear_with_vars()
+    validated = compile_linear(linear, validate=True).toposort()
+    self.assertEqual(len([c for c in validated if c.op is Ops.CALL and c.body.op is Ops.CUSTOM_FUNCTION and c.body.arg.name == "validate"
+                          and c.body.src[-1].arg.name == "store_dnum"]), 2)
     run_linear(linear)
     self.assertEqual(out.tolist(), [0, 1])
-    # it's validated on each device
-    validated = compile_linear(linear, validate=True).toposort()
-    self.assertEqual(len([c for c in validated if c.op is Ops.CALL and c.body.op is Ops.CUSTOM_FUNCTION and c.body.arg.name == "validate"]), 2)
 
   def test_simple_sharded(self):
     devs = ("CPU:0", "CPU:1")

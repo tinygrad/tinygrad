@@ -21,12 +21,15 @@ class TestCall(unittest.TestCase):
     run_linear(UOp(Ops.LINEAR, src=(prg.call(out.uop.buf_uop, UOp.const(42, dtypes.int)),)))
     self.assertEqual(out.item(), 42)
 
-  def test_free_variables(self):
-    # a kernel run directly reads the Variable its call binds, and the one it isn't given from var_vals
-    out = Tensor.empty(1, dtype=dtypes.int).realize()
-    p, a, b = UOp.param(0, dtypes.int, 1), Variable("a", 1, 10, dtypes.int), Variable("b", 1, 10, dtypes.int)
-    run_linear(UOp(Ops.LINEAR, src=(p[0].store(a*10+b).sink(arg=KernelInfo(name="store_ab")).call(out.uop.buf_uop, b.bind(3)),)), var_vals={"a": 2})
-    self.assertEqual(out.item(), 23)
+  def test_scalar_arg_after_call(self):
+    # a scalar arg after a call orders its kernel after that call
+    x, y, z = [Tensor([0], dtype=dtypes.int).realize().uop.buf_uop for _ in range(3)]
+    p, q, r = UOp.param(0, dtypes.int, 1), UOp.param(1, dtypes.int, 1), UOp.param(2, dtypes.int, 1)
+    v = UOp.param(1, dtypes.int, vmin_vmax=(1, 10), name="v", addrspace=AddrSpace.ALU)
+    init = p[0].store(UOp.const(1, dtypes.int)).sink(arg=KernelInfo("init")).call(x)
+    producer = p[0].store(q[0]).sink(arg=KernelInfo("producer")).call(y, x.after(init))
+    consumer = p[0].store(v+r[0]).sink(arg=KernelInfo("consumer")).call(z, Variable("v", 1, 10, dtypes.int).bind(1).after(producer), y)
+    self.assertEqual(Tensor(z.after(consumer)).tolist(), [2])
 
   def test_call_plus(self):
     a = Tensor.randn(10, 10)

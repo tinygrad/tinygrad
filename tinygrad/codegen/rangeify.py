@@ -317,8 +317,9 @@ def split_store(x:UOp) -> UOp|None:
 
   # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
   kernel = ret.sink(arg=KernelInfo()).call(*lctx.map.values())
-  # the scalars it reads, also in the symbolic shapes of its storage, are args after the storage
-  return kernel.lift_args([u for u in kernel.body.toposort() if u.op in {Ops.PARAM, Ops.EXTERN} and u.addrspace is AddrSpace.ALU])
+  # the scalars it reads, also in the symbolic shapes of its storage, and its device number are args after the storage
+  return kernel.lift_args([u for u in kernel.body.toposort() if (u.op in {Ops.PARAM, Ops.EXTERN} and u.addrspace is AddrSpace.ALU) or
+                           (u.op is Ops.RANGE and u.axis_type is AxisType.DEVICE)])
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),

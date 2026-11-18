@@ -7,6 +7,8 @@ from tinygrad.nn.state import get_state_dict
 from tinygrad.helpers import Context, prod
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.codegen import to_program
+from tinygrad.engine.realize import get_call_arg_uops
+from dataclasses import replace
 import json
 from collections import OrderedDict
 
@@ -35,12 +37,13 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     return name
 
   for call in iter_kernel_calls(linear):
-    arg_uops = [b for b in call.src[1:] if not b.is_bound_var]
-    prg = to_program(call.src[0], Device[arg_uops[0].device].renderer)
-    info = prg.arg
+    prg = to_program(call.src[0], Device[get_call_arg_uops(call)[0].device].renderer)
     functions[prg.src[0].arg.function_name] = prg.src[2].arg
-    cargs = [p if p.addrspace is AddrSpace.ALU else name_of(call.src[1+p.arg.slot], p.arg.slot == 0) for p in prg.kernel_params]
-    statements.append((prg.src[0].arg.function_name, cargs, info.global_size, info.local_size))
+    # a scalar param is the Variable its call passes, an input of the model at the param's dtype
+    svars = {p:p.replace(arg=replace(p.arg, slot=-1, name=call.src[1+p.arg.slot].expr)) for p in prg.arg.params if p.addrspace is AddrSpace.ALU}
+    cargs = [svars[p] if p.addrspace is AddrSpace.ALU else name_of(call.src[1+p.arg.slot], p.arg.slot == 0) for p in prg.kernel_params]
+    global_size, local_size = [[x.substitute(svars) if isinstance(x, UOp) else x for x in sz] for sz in (prg.arg.global_size, prg.arg.local_size)]
+    statements.append((prg.src[0].arg.function_name, cargs, global_size, local_size))
 
   return functions, statements, {name:(size, dtype, key) for name, size, dtype, key in bufs.values()}, bufs_to_save
 

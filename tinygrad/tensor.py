@@ -8,6 +8,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtyp
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
 from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
+from tinygrad.uop.ops import KernelInfo, AxisType
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.codegen import create_linear, contiguous_mops_to_view
 from tinygrad.engine.realize import run_linear, capturing
@@ -36,8 +37,10 @@ def canonicalize_alloc(ctx:ExportCtx, b:UOp) -> UOp|None:
 def export_call(ctx:ExportCtx, c:UOp) -> UOp:
   # a call body is its own scope for ALLOC slots, the EXTERNs are shared
   c = c.replace(src=(graph_rewrite(c.body, pm_export, ctx=ExportCtx(ctx.externs), bottom_up=True, name="export call body"),)+c.src[1:])
-  # what it reads from the enclosing scope, the EXTERNs and the free Variables, are its args. nested calls are done
-  return c.lift_args([u for u in c.body.toposort() if u.op is Ops.EXTERN or (u.is_variable and u.arg.slot == -1)])
+  # what it reads from the enclosing scope, the EXTERNs, the free Variables and a kernel's device number, are its args. nested calls are done
+  kernel = isinstance(c.body.arg, KernelInfo)
+  return c.lift_args([u for u in c.body.toposort() if u.op is Ops.EXTERN or (u.is_variable and u.arg.slot == -1) or
+                      (kernel and u.op is Ops.RANGE and u.axis_type is AxisType.DEVICE)])
 
 pm_export: PatternMatcher = PatternMatcher([
   (UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern),

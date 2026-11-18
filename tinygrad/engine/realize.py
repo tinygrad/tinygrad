@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
-from tinygrad.uop.ops import pm_flatten_linear, AxisType
+from tinygrad.uop.ops import pm_flatten_linear
 from tinygrad.device import Device, Buffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer, TinyELF
@@ -193,21 +193,12 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     return float(en-st) / cast(Any, Device[device]).timestamp_divider / 1e6
   return ets + [_prof_tm(d, prof) if ctx.wait else None for d, _, _, prof, *_ in info.kernels if prof]
 
-def lift_kernel_args(call:UOp) -> UOp|None:
-  # a kernel run directly, not exported, may read what it isn't given: its device number, bound per device at launch,
-  # and Variables, read from var_vals. they become its args
-  free = [u for u in call.body.toposort() if (u.op is Ops.RANGE and u.axis_type is AxisType.DEVICE) or (u.is_variable and u.arg.slot == -1)]
-  return call.lift_args(free) if free else None
-pm_kernel_args = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lift_kernel_args)])
-
-def _validate(call:UOp) -> UOp:
-  # the validation compiles the kernel itself, so it gets the kernel with all its args
-  if (lifted:=lift_kernel_args(call)) is not None: call = lifted
+def _validate(call:UOp, sink:UOp) -> UOp:
   shadows = tuple(p if p.addrspace is AddrSpace.ALU else
                   UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in call.src[1:])
   copies = tuple(s.store_call(p) for s, p in zip(shadows, call.src[1:]) if p.addrspace is not AddrSpace.ALU)
-  return UOp(Ops.LINEAR, src=copies + (call, UOp.custom_function("validate", call.body).call(*shadows, *call.src[1:])))
-pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
+  return UOp(Ops.LINEAR, src=copies + (call, UOp.custom_function("validate", sink).call(*shadows, *call.src[1:])))
+pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
 # ctx is beam value
 pm_beam = PatternMatcher([
@@ -229,7 +220,6 @@ def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
   return None
 
 def lower_and_compile(linear:UOp, verbose=True) -> UOp:
-  linear = graph_rewrite(linear, pm_kernel_args, name="kernel args", walk=True)
   # collect the kernels to lower and compile, deduped by their compile cache key
   if not len(ar:={c: a for c in linear.toposort() if c.op is Ops.CALL and (a:=_get_call_to_compile(c)) is not None}): return linear
 

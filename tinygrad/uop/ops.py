@@ -1242,14 +1242,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # (a function pointer) in source, rendered as an indirect call
     return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, inline, hcq))
   def lift_args(self, free:list[UOp]) -> UOp:
-    """the CALL's body reads these from the enclosing scope: each becomes a PARAM at the slot of its value, an arg the call has or a new one
-    after the others. the value of a DEVICE range is the device number, bound per device at launch"""
+    """the CALL's body reads these from the enclosing scope: each becomes a PARAM at a new slot and its value an arg after the others.
+    the value of a DEVICE range is the device number, bound per device at launch"""
     args = [UOp.variable("_device_num", 0, u.vmax, u.dtype) if u.op is Ops.RANGE else u for u in free]
-    slots = {(s.unbound() if s.is_bound_var else s):i for i,s in enumerate(self.src[1:])}
-    new = [a for a in dedup(args) if a not in slots]
-    slots |= {a:len(self.src)-1+i for i,a in enumerate(new)}
-    params = {u:a.replace(op=Ops.PARAM, arg=replace(a.arg, slot=slots[a], name=None, val=None)) for u,a in zip(free, args)}
-    return self.replace(src=(self.body.substitute(params, walk=True), *self.src[1:], *new))
+    params = {u:a.replace(op=Ops.PARAM, arg=replace(a.arg, slot=len(self.src)-1+i, name=None, val=None)) for i,(u,a) in enumerate(zip(free, args))}
+    return self.replace(src=(self.body.substitute(params, walk=True), *self.src[1:], *args))
 
   @staticmethod
   def call_with_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
