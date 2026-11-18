@@ -76,10 +76,10 @@ runs:
         enable-cache: 'false' # see below for manual caching
 
     # **** Caching ****
-    # NOTE: self-hosted CI (ie. collaborator PRs) should never cache anything, instead, either:
+    # NOTE: self-hosted CI (ie. master and collaborator PRs) should never cache anything, instead, either:
     #   * bake into the CI image: https://git.tinygrad.win/tinygrad/images, OR
     #   * handle in CI runner HTTP cache
-    # Because CI for master and non-collaborator PRs are github-hosted, they need caching to workaround the flaky internet.
+    # Because CI for non-collaborator PRs is github-hosted, they need caching to workaround the flaky internet.
     # Additionally, the actions/cache/restore pattern should be used to avoid PRs polluting the limited github cache storage.
 
     - name: Cache Python packages (PR)
@@ -128,7 +128,7 @@ runs:
         uv venv --allow-existing --python ${{ inputs.python-version }} "$VIRTUAL_ENV"
         uv pip install --python "$VIRTUAL_ENV" -e . ${{ inputs.pydeps }}
     - name: Prune uv cache
-      if: github.event_name != 'pull_request'
+      if: github.event_name != 'pull_request' && runner.environment == 'github-hosted'
       shell: bash
       run: uv cache prune --ci
     - name: Configure venv
