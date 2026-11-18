@@ -472,7 +472,8 @@ pm_lift_deps = PatternMatcher([
 
 def _needs_arg(u:UOp, root:bool) -> bool:
   if u.op in (Ops.BUFFER, Ops.ALLOC, Ops.EXTERN): return u.addrspace is AddrSpace.GLOBAL
-  return u.op is Ops.PARAM and u.is_variable != root
+  # every Variable is an arg, the root also takes the inputs
+  return u.op is Ops.PARAM and (u.is_variable or root)
 
 def _param_for(u:UOp, slot:int) -> UOp:
   if u.op is Ops.GETADDR or u.is_variable:

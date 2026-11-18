@@ -240,11 +240,10 @@ class Scheduler:
   @property
   def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.WARP, AxisType.LOCAL, reduce=True))
 
-def args_from_ast(ast:UOp, dname:str) -> tuple[list[Buffer], dict[str, int]]:
-  # the storage params get buffers, the named Variables the middle of their range. positional scalars are call args, see beam_search
-  glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM and x.arg.slot >= 0 and x.addrspace is not AddrSpace.ALU],
-                 key=lambda x: x.arg.slot)
-  return [Buffer(dname, x.max_numel() * x.dtype.itemsize) for x in glbls], {k.expr:int(k.vmax+k.vmin)//2 for k in ast.variables() if k.arg.name}
+def bufs_from_ast(ast:UOp, dname:str) -> dict[int, Buffer]:
+  # a buffer for each storage param, by slot
+  return {x.arg.slot:Buffer(dname, x.max_numel() * x.dtype.itemsize) for x in ast.backward_slice
+          if x.op is Ops.PARAM and x.addrspace is not AddrSpace.ALU}
 
 def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   if ast.arg is not None and ast.arg.optimized: return ast
@@ -254,10 +253,10 @@ def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
     for opt in ki.opts_to_apply: k.apply_opt(opt)
   elif beam >= 1:
     from tinygrad.codegen.opt.search import beam_search
-    rawbufs, var_vals = args_from_ast(ast, ren.target.device)
+    rawbufs = bufs_from_ast(ast, ren.target.device)
     # beam search may open devices
     with Context(ALLOW_DEVICE_USAGE=1):
-      k = beam_search(k, rawbufs, var_vals, beam, bool(getenv("BEAM_ESTIMATE", 1)))
+      k = beam_search(k, rawbufs, beam, bool(getenv("BEAM_ESTIMATE", 1)))
   elif not NOOPT and ki.applied_opts == ():
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet

@@ -762,12 +762,13 @@ def create_linear(fn:UOp, plan:bool=True) -> UOp:
   allocs = [u for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL]
   linear = linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
 
-  # a call's body has no EXTERNs, they are its args, so map back only binds call args
-  return graph_rewrite(linear, pm_extern_args, enter_calls=True, name="externs to call args")
+  # a call's body has no free references, they are its args, so map back only binds call args
+  return graph_rewrite(linear, pm_lift_free, enter_calls=True, name="lift free references to call args")
 
-# each EXTERN in a call's body becomes a PARAM at a new slot and the EXTERN its arg. a nested call moved its EXTERNs to its args already
-def extern_args(call:UOp) -> UOp|None:
-  if not (externs:=[u for u in call.body.toposort() if u.op is Ops.EXTERN]): return None
-  params = {e:e.replace(op=Ops.PARAM, arg=replace(e.arg, slot=len(call.src)-1+i)) for i,e in enumerate(externs)}
-  return call.replace(src=(call.body.substitute(params, walk=True), *call.src[1:], *externs))
-pm_extern_args = PatternMatcher([(UPat(Ops.CALL, name="call"), extern_args)])
+# a free reference in a call's body, an EXTERN or a Variable not bound to an arg, becomes a PARAM at a new slot and is the call's arg.
+# a nested call lifted its free references to its args already
+def lift_free(call:UOp) -> UOp|None:
+  if not (free:=[u for u in call.body.toposort() if u.op is Ops.EXTERN or (u.is_variable and u.arg.slot == -1)]): return None
+  params = {u:u.replace(op=Ops.PARAM, arg=replace(u.arg, slot=len(call.src)-1+i, name=None, val=None)) for i,u in enumerate(free)}
+  return call.replace(src=(call.body.substitute(params, walk=True), *call.src[1:], *free))
+pm_lift_free = PatternMatcher([(UPat(Ops.CALL, name="call"), lift_free)])
