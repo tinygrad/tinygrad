@@ -1,5 +1,5 @@
 from __future__ import annotations
-import dataclasses, os, pathlib, struct
+import dataclasses, os, pathlib, pickle, struct, zlib
 from tinygrad.runtime.autogen import mtfw
 from tinygrad.runtime.support.mt.mtdev import MTDev
 from tinygrad.runtime.support.mt.compute import MTFirmware, SUB_PA, FW_DEVVA, ROOT_BASE
@@ -14,25 +14,83 @@ class MTLaunchResult:
   run_time: int
   output: int
 
+@dataclasses.dataclass
+class MTBundle:
+  writes:list[tuple[int,bytes]]
+  maps:list[tuple[int,int]]
+  offsets:dict[int,int]
+  cursor:int
+  text_offset:int
+
+
+def compress_mt_bundle(state:MTBundle) -> bytes: return zlib.compress(pickle.dumps(state,protocol=5),1)
+def decompress_mt_bundle(data:bytes) -> MTBundle: return pickle.loads(zlib.decompress(data))
+
+
+def read_mt_map(path:pathlib.Path) -> tuple[int,list[tuple[int,bytes]]]:
+  if path.suffix == '.sparse':
+    raw = path.read_bytes()
+    file_size, count = struct.unpack_from('<QQ',raw)
+    chunks, off = [], 16
+    for _ in range(count):
+      page, chunk_size = struct.unpack_from('<II',raw,off)
+      off += 8
+      chunks.append((page,raw[off:off+chunk_size]))
+      off += chunk_size
+    return file_size,chunks
+  data, zero_page = path.read_bytes(), bytes(0x1000)
+  return len(data),[(off,chunk) for off in range(0,len(data),0x1000)
+                    if (chunk:=data[off:off+0x1000]) != zero_page[:len(chunk)]]
+
+
+def parse_mt_bundle(bundle:pathlib.Path) -> MTBundle:
+  writes:list[tuple[int,bytes]] = []
+  maps:list[tuple[int,int]] = []
+  offsets:dict[int,int] = {}
+  cursor, resource_byte = 0, 0
+  common = bundle.parent if bundle.name.endswith('fresh') else pathlib.Path('/tmp/mt-research') if bundle.name.startswith('mt-launch-') else bundle
+  paths:dict[int,pathlib.Path] = {}
+  for root in [common,bundle]:
+    for path in root.glob('real-map-*'):
+      if path.suffix not in ['.bin','.sparse']: continue
+      va = int(path.name[len('real-map-'):].split('.')[0],16)
+      if va not in paths or path.suffix == '.sparse': paths[va] = path
+  for va,path in sorted(paths.items()):
+    size,chunks = read_mt_map(path)
+    offsets[va] = cursor
+    pa = 0x40000000 + cursor
+    chunk_map = dict(chunks)
+    for off in range(0,size,0x1000):
+      if (chunk:=chunk_map.get(off)) is not None:
+        writes.append((cursor+off,chunk))
+        maps.append((va+off,pa+off))
+      else: maps.append((va+off,SUB_PA+0x1000))
+    if va == 0xda00406000:
+      for off,chunk in chunks:
+        if off <= 8 < off+len(chunk): resource_byte = chunk[8-off]
+    cursor += (size + 0xfff) & ~0xfff
+  return MTBundle(writes,maps,offsets,cursor,0x100 if resource_byte >= 21 else 0x80)
+
+
 class MTLaunch(MTFirmware):
+  write_map:dict[int,bytes]
+  packet:bytearray
   _active:MTLaunch|None = None
   _loaded:MTLaunch|None = None
 
-  def __init__(self, dev:MTDev, bundle:str, packet:str):
+  def __init__(self, dev:MTDev, bundle:str, packet:str, state:MTBundle|None=None):
     reuse = MTLaunch._active is not None and MTLaunch._active.dev is dev
     super().__init__(dev, prepare=not reuse)
     if reuse:
       assert MTLaunch._active is not None
       self.mmu = MTLaunch._active.mmu
-    self.bundle, self.packet_path = pathlib.Path(bundle), pathlib.Path(packet)
+    self.bundle, self.packet_path, self.bundle_state = pathlib.Path(bundle), pathlib.Path(packet), state
     self.sv = self.dev.pci_dev.map_bar(2, off=SUB_PA, size=0x2000000, fmt='B')
-    self.sv[:0x20000] = bytes(0x20000)
+    if not reuse: self.sv[:0x20000] = bytes(0x20000)
     self.zero_pa, self.out_pa = SUB_PA + 0x1000, SUB_PA + 0x3000
-    self.zero_page = bytes(0x1000)
     self.mmu_dirty = True
     self.backing_pa = 0x40000000
     self.backing = self.dev.pci_dev.map_bar(2, off=self.backing_pa, size=0x10000000, fmt='B')
-    self.backing_offsets:dict[int,int] = {}
     self._map_bundle()
     self._prepare_packet()
     self.ccb:MTCCB|None = None
@@ -40,44 +98,21 @@ class MTLaunch(MTFirmware):
     self.generation = 1
     MTLaunch._loaded = self
 
-  def _map_file(self, va:int, data:bytes) -> None:
-    if os.environ.get('MT_SPARSE_MAP') and data == bytes(len(data)): return
-    pa = self.backing_pa + self.backing_cursor
-    self.backing_offsets[va] = self.backing_cursor
-    for off in range(0, len(data), 0x1000):
-      chunk = data[off:off+0x1000]
-      if chunk != self.zero_page[:len(chunk)]:
-        self.backing[self.backing_cursor+off:self.backing_cursor+off+len(chunk)] = bytes(len(chunk))
-        self.backing[self.backing_cursor+off:self.backing_cursor+off+len(chunk)] = chunk
-        self.bundle_writes.append((self.backing_cursor+off,chunk))
-        self.bundle_maps.append((va+off,pa+off))
-        self.mmu.map(va + off, pa + off, MT_PTE_READ_WRITE)
-      else:
-        self.bundle_maps.append((va+off,self.zero_pa))
-        self.mmu.map(va + off, self.zero_pa, MT_PTE_READ_WRITE)
-    self.backing_cursor += (len(data) + 0xfff) & ~0xfff
-
   def _map_bundle(self) -> None:
-    if hasattr(self,'bundle_maps'):
-      for off,data in self.bundle_writes: self.backing[off:off+len(data)] = data
-      for va,pa in self.bundle_maps: self.mmu.map(va,pa,MT_PTE_READ_WRITE)
-      return
-    self.bundle_writes:list[tuple[int,bytes]] = []
-    self.bundle_maps:list[tuple[int,int]] = []
-    self.backing_cursor = 0
+    if self.bundle_state is None: self.bundle_state = parse_mt_bundle(self.bundle)
+    state = self.bundle_state
+    if state.cursor > len(self.backing): raise MemoryError("MT launch bundle exceeds backing store")
+    self.backing_offsets, self.backing_cursor, self.text_offset = state.offsets, state.cursor, state.text_offset
+    previous = MTLaunch._loaded
+    previous_writes = previous.write_map if previous is not None and previous.dev is self.dev else {}
+    self.write_map = dict(state.writes)
+    for off,data in state.writes:
+      if previous_writes.get(off) != data: self.backing[off:off+len(data)] = data
     for base in [0xda00400000,0xe000400000]:
       for off in range(0,0x1000000,0x1000):
         if base+off not in self.mmu.pages: self.mmu.map(base+off,self.zero_pa,MT_PTE_READ_WRITE)
-    paths = list(self.bundle.glob('real-map-*.bin'))
-    names = {p.name for p in paths}
-    common = self.bundle.parent if self.bundle.name.endswith('fresh') else self.bundle
-    paths += [p for p in common.glob('real-map-*.bin') if p.name not in names]
-    for path in sorted(paths): self._map_file(int(path.name[len('real-map-'):-4], 16), path.read_bytes())
-    if self.backing_cursor > len(self.backing): raise MemoryError("MT launch bundle exceeds backing store")
-    resource_path = self.bundle / 'real-map-da00406000.bin'
-    if not resource_path.exists(): resource_path = common / 'real-map-da00406000.bin'
-    resource = resource_path.read_bytes()
-    self.text_offset = 0x100 if resource[8] >= 21 else 0x80
+    for va,pa in state.maps:
+      if self.mmu.pages.get(va) != pa: self.mmu.map(va,pa,MT_PTE_READ_WRITE)
     for off in range(0x400000, 0x410000, 0x1000): self.mmu.map(FW_DEVVA + off, 0x20000000 + off, MT_PTE_READ_WRITE)
     for i in range(18): self.mmu.map(0xd9bfff0000 + i * 0x1000, self.zero_pa, MT_PTE_READ_WRITE)
     self.mmu.map(0xe1c2003000, self.out_pa, MT_PTE_READ_WRITE)
@@ -100,9 +135,12 @@ class MTLaunch(MTFirmware):
     struct.pack_into('<Q', packet, 0x08, FW_DEVVA + 0x40b000)
     struct.pack_into('<Q', packet, 0xc0 + 0x88, FW_DEVVA + 0x409000)
     struct.pack_into('<Q', packet, 0xc0 + 0x90, FW_DEVVA + 0x40a000)
+    previous = MTLaunch._loaded
+    for off in range(0,len(packet),0x1000):
+      chunk = bytes(packet[off:off+0x1000])
+      if previous is None or previous.packet[off:off+len(chunk)] != chunk: self.sv[off:off+len(chunk)] = chunk
+      if self.mmu.pages.get(0x8000420000+off) != SUB_PA+off: self.mmu.map(0x8000420000+off,SUB_PA+off,MT_PTE_READ_WRITE)
     self.packet = packet
-    self.sv[:len(packet)] = packet
-    for off in range(0, len(packet), 0x1000): self.mmu.map(0x8000420000 + off, SUB_PA + off, MT_PTE_READ_WRITE)
     self.v[0x405000:0x405010] = struct.pack('<QII', ROOT_BASE, 0xffffffff, 0)
 
   def load_kernel(self, image:MTKernelImage, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1)) -> None:
@@ -146,7 +184,7 @@ class MTLaunch(MTFirmware):
     self.backing[off+0x3c:off+0x40] = block
 
   def start(self, timeout:float=10.0) -> None:
-    if MTLaunch._active is not None and MTLaunch._active.dev is self.dev and not os.environ.get('MT_NO_REUSE'):
+    if MTLaunch._active is not None and MTLaunch._active.dev is self.dev:
       active = MTLaunch._active
       assert active.ccb is not None
       self.v, self.layout, self.ccb = active.v, active.layout, active.ccb
@@ -181,16 +219,7 @@ class MTLaunch(MTFirmware):
       self.upload_mmu()
       self.mmu_dirty = False
     self.ccb.submit(0x8000420000, len(self.packet), ROOT_BASE, generation=self.generation)
-    try: response = self.ccb.wait(float(os.environ.get('MT_TIMEOUT','5')))
-    except TimeoutError:
-      if os.environ.get('MT_TRACE'):
-        open('/tmp/mt-research/reuse-timeout-trace.bin','wb').write(bytes(self.v[self.layout.trace:self.layout.trace+0x17da0]))
-        print('MT TIMEOUT',hex(self.ccb.response_index()),'ITEM',bytes(self.v[self.ccb.item_off:self.ccb.item_off+0x80]).hex(),
-              'TAIL',bytes(self.v[self.ccb.item_off+0x560:self.ccb.item_off+0x5b0]).hex(),
-              'REQ',bytes(self.v[self.ccb.queue_off+0x4000:self.ccb.queue_off+0x4030]).hex(),
-              'RESP',bytes(self.v[self.ccb.queue_off+0x1000:self.ccb.queue_off+0x1060]).hex(),
-              'QCELLS',bytes(self.v[self.ccb.queue_off:self.ccb.queue_off+0x20]).hex(),flush=True)
-      raise
+    response = self.ccb.wait(float(os.environ.get('MT_TIMEOUT','5')))
     if response.value:
       fault = (self._read(0xe150), self._read(0xe158), self._read(0x130, 4), self._read(0x4a0))
       raise RuntimeError(f"MT launch failed: {response}, fault={fault}")

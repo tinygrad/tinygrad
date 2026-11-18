@@ -11,6 +11,7 @@ class MTMMU4:
     self.pd:dict[int,int] = {}
     self.pt:dict[tuple[int,int],int] = {}
     self.pages:dict[int,int] = {}
+    self.dirty_pages:set[int] = set()
 
   def _alloc(self) -> int:
     if self.next + MT_PAGE_SIZE > len(self.root): raise MemoryError("MT MMU root allocation exhausted")
@@ -26,12 +27,15 @@ class MTMMU4:
     if pci not in self.pd:
       self.pd[pci] = self._alloc()
       self.root[pci*4:pci*4+4] = (((self.pd[pci] >> 12) << 4) | 1).to_bytes(4, 'little')
+      self.dirty_pages.add((pci*4) & ~0xfff)
     if (pci, pdi) not in self.pt:
       self.pt[pci,pdi] = self._alloc()
       off = self.pd[pci] - self.root_pa + pdi * 8
       self.root[off:off+8] = (self.pt[pci,pdi] | 1).to_bytes(8, 'little')
+      self.dirty_pages.add(off & ~0xfff)
     off = self.pt[pci,pdi] - self.root_pa + pti * 8
     self.root[off:off+8] = ((pa & 0xfffffffff000) | flags).to_bytes(8, 'little')
+    self.dirty_pages.add(off & ~0xfff)
 
   def map_range(self, va:int, pa:int, size:int, flags:int=MT_PTE_READ_ONLY) -> None:
     if size % MT_PAGE_SIZE: raise ValueError("MT MMU range size must be 4 KiB aligned")

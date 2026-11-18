@@ -33,15 +33,13 @@ class MTFirmware:
     if prepare: self._prepare()
 
   def _prepare(self) -> None:
-    if os.environ.get('MT_TRACE'): print('MT prepare begin', flush=True)
     lay = self.layout
     self.dev.smc._write(0x1400000, struct.pack('<I', 1))
     self.dev.smc._write(0x1400004, struct.pack('<I', 1))
     with open(self.path, 'rb') as f: raw = f.read()
-    if os.environ.get('MT_TRACE'): print('MT firmware read', flush=True)
-    self.v[:0x500000] = bytes(0x500000)
-    if os.environ.get('MT_TRACE'): print('MT firmware zeroed', flush=True)
     self.v[:len(raw)] = raw
+    for start,end in [(FWIF_OFF,lay.trace),(lay.trace,lay.trace+0x1000),(lay.perf,lay.perf+0x1000),
+                      (lay.fault,lay.watchdog+0x1000),(0x400000,0x410000)]: self.v[start:end] = bytes(end-start)
     fw = mtfw.struct_MTFW_FWIF_TAG()
     fw.watchDog = META_BASE + lay.watchdog
     fw.ccbQueueArrayAddr, fw.ccbQueueArrayNum = META_BASE + lay.ccb, 5
@@ -75,21 +73,19 @@ class MTFirmware:
     struct.pack_into('<I', rc, 5, 0x1000000)
     struct.pack_into('<H', rc, 10, self.core_count * 2)
     self.v[lay.regcfg:lay.regcfg+16] = rc
-    if os.environ.get('MT_TRACE'): print('MT FWIF written', flush=True)
     self.mmu.map_range(FW_DEVVA, FW_BASE, INIT_SIZE)
-    if os.environ.get('MT_TRACE'): print('MT page tables built', flush=True)
 
   def _write(self, off:int, value:int, size:int=8) -> None: self.dev.smc._write(MT_SOCIF_OFFSET + off, value.to_bytes(size, 'little'))
   def _read(self, off:int, size:int=8) -> int: return int.from_bytes(self.dev.smc._read(MT_SOCIF_OFFSET + off, size), 'little')
 
   def upload_mmu(self) -> None:
-    rv = self.dev.pci_dev.map_bar(2, off=ROOT_BASE, size=self.mmu.next, fmt='B')
-    rv[:] = self.mmu.root[:self.mmu.next]
+    for off in sorted(self.mmu.dirty_pages):
+      rv = self.dev.pci_dev.map_bar(2, off=ROOT_BASE+off, size=0x1000, fmt='B')
+      rv[:] = self.mmu.root[off:off+0x1000]
+    self.mmu.dirty_pages.clear()
 
   def start(self, timeout:float=10.0) -> None:
-    if os.environ.get('MT_TRACE'): print('MT start upload', flush=True)
     self.upload_mmu()
-    if os.environ.get('MT_TRACE'): print('MT start clocks', flush=True)
     self._write(0xa100, 0, 4)
     self._read(0xa100, 4)
     for value in [0x1249249249249249,0x36db6db6db6db6db,0x7fffffffffffffff]:
@@ -113,8 +109,6 @@ class MTFirmware:
     self._write(0, 0x5545010155151101)
     self._write(0x80, 0x5554151555455555)
     self._write(0x1158, 0xff, 4)
-    if os.environ.get('MT_CLK_DEBUG'):
-      print('MT PRECLK', hex(self._read(0)), hex(self._read(0x80)), hex(self._read(0x1158)), hex(self._read(0x1148)), flush=True)
     clock_deadline = time.monotonic() + min(timeout, 1.0)
     while self._read(0x1148) & 0xff != 0xff and time.monotonic() < clock_deadline: time.sleep(0.001)
     self._write(0, 0xaa8a0202aa2a2202)
@@ -138,7 +132,6 @@ class MTFirmware:
     time.sleep(3e-6)
     self._write(0x93c0, 1, 4)
     self._write(0x70c0, 1, 4)
-    if os.environ.get('MT_TRACE'): print('MT start released', flush=True)
     deadline = time.monotonic() + timeout
     while True:
       started = struct.unpack('<I', self.v[FWIF_OFF+4:FWIF_OFF+8])[0]

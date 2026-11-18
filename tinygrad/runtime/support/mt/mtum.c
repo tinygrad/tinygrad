@@ -76,6 +76,24 @@ static void dump_file(const char *path, const void *data, size_t size) {
   int fd = open(path, O_WRONLY|O_CREAT|O_TRUNC, 0644);
   if (fd >= 0) { if (write(fd, data, size) != (ssize_t)size) fprintf(stderr, "short capture %s\n", path); close(fd); }
 }
+static void dump_sparse_file(const char *path, const unsigned char *data, size_t size) {
+  int fd = open(path, O_WRONLY|O_CREAT|O_TRUNC, 0644);
+  if (fd < 0) return;
+  uint64_t header[2] = {size, 0};
+  if (write(fd, header, sizeof(header)) != sizeof(header)) fprintf(stderr, "short sparse capture %s\n", path);
+  for (size_t off = 0; off < size; off += 4096) {
+    size_t len = size - off < 4096 ? size - off : 4096, nonzero = 0;
+    for (size_t j = 0; j < len; j++) if (data[off+j]) { nonzero = 1; break; }
+    if (nonzero) {
+      uint32_t entry[2] = {(uint32_t)off, (uint32_t)len};
+      if (write(fd, entry, sizeof(entry)) != sizeof(entry) || write(fd, data+off, len) != (ssize_t)len) fprintf(stderr, "short sparse capture %s\n", path);
+      header[1]++;
+    }
+  }
+  lseek(fd, 0, SEEK_SET);
+  if (write(fd, header, sizeof(header)) != sizeof(header)) fprintf(stderr, "short sparse header %s\n", path);
+  close(fd);
+}
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
   static void *(*fn)(void *,size_t,int,int,int,off_t);
   if (!fn) fn=dlsym(RTLD_NEXT,"mmap");
@@ -184,9 +202,11 @@ int ioctl(int fd, unsigned long req, ...) {
         }
       }
       for (int i = 0; i < va_count; i++) if (va_tracks[i].host && va_tracks[i].size <= 0x1000000) {
-        char path[256]; snprintf(path, sizeof(path), "real-map-%lx.bin", va_tracks[i].va);
-        dump_file(capture_path(path), va_tracks[i].host, va_tracks[i].size);
+        char path[256]; snprintf(path, sizeof(path), "real-map-%lx.sparse", va_tracks[i].va);
+        dump_sparse_file(capture_path(path), va_tracks[i].host, va_tracks[i].size);
       }
+      uint32_t done = 1;
+      dump_file(capture_path("real-capture-done"), &done, sizeof(done));
     }
     if (a->type == 3 && a->cmd == 0) *(uint64_t *)((char *)out + 8) = 1;
     if (a->type == 4 && a->cmd == 0) {
