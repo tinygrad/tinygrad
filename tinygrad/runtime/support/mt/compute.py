@@ -25,12 +25,12 @@ class MTFirmwareLayout:
     self.ccb = FWIF_OFF + 0x40ee0
 
 class MTFirmware:
-  def __init__(self, dev:MTDev, path:str|None=None, core_count:int=8):
+  def __init__(self, dev:MTDev, path:str|None=None, core_count:int=8, prepare:bool=True):
     self.dev, self.path, self.core_count = dev, path or os.environ.get('MT_FIRMWARE', DEFAULT_FIRMWARE), core_count
     self.layout = MTFirmwareLayout(core_count)
     self.v = self.dev.pci_dev.map_bar(2, off=FW_BASE, size=INIT_SIZE, fmt='B')
     self.mmu = MTMMU4(ROOT_BASE)
-    self._prepare()
+    if prepare: self._prepare()
 
   def _prepare(self) -> None:
     if os.environ.get('MT_TRACE'): print('MT prepare begin', flush=True)
@@ -83,8 +83,8 @@ class MTFirmware:
   def _read(self, off:int, size:int=8) -> int: return int.from_bytes(self.dev.smc._read(MT_SOCIF_OFFSET + off, size), 'little')
 
   def upload_mmu(self) -> None:
-    rv = self.dev.pci_dev.map_bar(2, off=ROOT_BASE, size=len(self.mmu.root), fmt='B')
-    rv[:] = self.mmu.root
+    rv = self.dev.pci_dev.map_bar(2, off=ROOT_BASE, size=self.mmu.next, fmt='B')
+    rv[:] = self.mmu.root[:self.mmu.next]
 
   def start(self, timeout:float=10.0) -> None:
     if os.environ.get('MT_TRACE'): print('MT start upload', flush=True)

@@ -15,34 +15,59 @@ class MTLaunchResult:
   output: int
 
 class MTLaunch(MTFirmware):
+  _active:MTLaunch|None = None
+  _loaded:MTLaunch|None = None
+
   def __init__(self, dev:MTDev, bundle:str, packet:str):
-    super().__init__(dev)
+    reuse = MTLaunch._active is not None and MTLaunch._active.dev is dev
+    super().__init__(dev, prepare=not reuse)
+    if reuse:
+      assert MTLaunch._active is not None
+      self.mmu = MTLaunch._active.mmu
     self.bundle, self.packet_path = pathlib.Path(bundle), pathlib.Path(packet)
     self.sv = self.dev.pci_dev.map_bar(2, off=SUB_PA, size=0x2000000, fmt='B')
     self.sv[:0x20000] = bytes(0x20000)
     self.zero_pa, self.out_pa = SUB_PA + 0x1000, SUB_PA + 0x3000
+    self.zero_page = bytes(0x1000)
+    self.mmu_dirty = True
     self.backing_pa = 0x40000000
     self.backing = self.dev.pci_dev.map_bar(2, off=self.backing_pa, size=0x10000000, fmt='B')
     self.backing_offsets:dict[int,int] = {}
     self._map_bundle()
     self._prepare_packet()
     self.ccb:MTCCB|None = None
+    self.launch_id = 1
     self.generation = 1
+    MTLaunch._loaded = self
 
   def _map_file(self, va:int, data:bytes) -> None:
+    if os.environ.get('MT_SPARSE_MAP') and data == bytes(len(data)): return
     pa = self.backing_pa + self.backing_cursor
     self.backing_offsets[va] = self.backing_cursor
     for off in range(0, len(data), 0x1000):
       chunk = data[off:off+0x1000]
-      if any(chunk):
+      if chunk != self.zero_page[:len(chunk)]:
         self.backing[self.backing_cursor+off:self.backing_cursor+off+len(chunk)] = bytes(len(chunk))
         self.backing[self.backing_cursor+off:self.backing_cursor+off+len(chunk)] = chunk
+        self.bundle_writes.append((self.backing_cursor+off,chunk))
+        self.bundle_maps.append((va+off,pa+off))
         self.mmu.map(va + off, pa + off, MT_PTE_READ_WRITE)
-      else: self.mmu.map(va + off, self.zero_pa, MT_PTE_READ_WRITE)
+      else:
+        self.bundle_maps.append((va+off,self.zero_pa))
+        self.mmu.map(va + off, self.zero_pa, MT_PTE_READ_WRITE)
     self.backing_cursor += (len(data) + 0xfff) & ~0xfff
 
   def _map_bundle(self) -> None:
+    if hasattr(self,'bundle_maps'):
+      for off,data in self.bundle_writes: self.backing[off:off+len(data)] = data
+      for va,pa in self.bundle_maps: self.mmu.map(va,pa,MT_PTE_READ_WRITE)
+      return
+    self.bundle_writes:list[tuple[int,bytes]] = []
+    self.bundle_maps:list[tuple[int,int]] = []
     self.backing_cursor = 0
+    for base in [0xda00400000,0xe000400000]:
+      for off in range(0,0x1000000,0x1000):
+        if base+off not in self.mmu.pages: self.mmu.map(base+off,self.zero_pa,MT_PTE_READ_WRITE)
     paths = list(self.bundle.glob('real-map-*.bin'))
     names = {p.name for p in paths}
     common = self.bundle.parent if self.bundle.name.endswith('fresh') else self.bundle
@@ -56,10 +81,21 @@ class MTLaunch(MTFirmware):
     for off in range(0x400000, 0x410000, 0x1000): self.mmu.map(FW_DEVVA + off, 0x20000000 + off, MT_PTE_READ_WRITE)
     for i in range(18): self.mmu.map(0xd9bfff0000 + i * 0x1000, self.zero_pa, MT_PTE_READ_WRITE)
     self.mmu.map(0xe1c2003000, self.out_pa, MT_PTE_READ_WRITE)
+    aliases = [(0xc000000000,0x20400000),(0x22000000,0x20400000),(0x90400000,0x20400000),
+               (0xe1c0401000,SUB_PA+0x1000),(0xe1c0402000,SUB_PA+0x8000),(0xe1c2001000,SUB_PA+0x1000),
+               (0xe1c2002000,SUB_PA+0x8000),(0xe000002000,SUB_PA+0x8000),(0x90005000,SUB_PA+0x5000),
+               (0x90008000,SUB_PA+0x8000),(0xdafffff000,SUB_PA+0x11000),
+               (0x81e120000,self.mmu.pages[0x81e1200000]),(0x81e140000,self.mmu.pages[0x81e1400000])]
+    for va,pa in aliases:
+      if va not in self.mmu.pages: self.mmu.map(va,pa,MT_PTE_READ_WRITE)
+    for off in range(0,0x100000,0x1000):
+      if FW_DEVVA+0x200000+off not in self.mmu.pages: self.mmu.map(FW_DEVVA+0x200000+off,SUB_PA+off,MT_PTE_READ_WRITE)
+    for off in range(0,0x1000000,0x1000):
+      if 0xdb00000000+off not in self.mmu.pages: self.mmu.map(0xdb00000000+off,self.zero_pa,MT_PTE_READ_WRITE)
 
   def _prepare_packet(self) -> None:
     packet = bytearray(self.packet_path.read_bytes())
-    struct.pack_into('<Q', packet, 0x38, 0)
+    struct.pack_into('<Q', packet, 0x38, 1)
     struct.pack_into('<I', packet, 0x40, 1)
     struct.pack_into('<Q', packet, 0x08, FW_DEVVA + 0x40b000)
     struct.pack_into('<Q', packet, 0xc0 + 0x88, FW_DEVVA + 0x409000)
@@ -94,9 +130,7 @@ class MTLaunch(MTFirmware):
 
   def map_buffer(self, va:int, pa:int, size:int, flags:int=MT_PTE_READ_WRITE) -> None:
     self.mmu.map_range(va, pa, size, flags)
-    if self.ccb is not None:
-      self.generation += 1
-      self.upload_mmu()
+    self.mmu_dirty = True
 
   def set_args(self, args:tuple[int, ...]) -> None:
     off = self.backing_offsets[0x81e1200000] + 0x38
@@ -112,20 +146,51 @@ class MTLaunch(MTFirmware):
     self.backing[off+0x3c:off+0x40] = block
 
   def start(self, timeout:float=10.0) -> None:
-    super().start(timeout)
+    if MTLaunch._active is not None and MTLaunch._active.dev is self.dev and not os.environ.get('MT_NO_REUSE'):
+      active = MTLaunch._active
+      assert active.ccb is not None
+      self.v, self.layout, self.ccb = active.v, active.layout, active.ccb
+      self.launch_id = active.launch_id + 1
+      active.launch_id = self.launch_id
+      if MTLaunch._loaded is not self:
+        self._map_bundle()
+        self._prepare_packet()
+        MTLaunch._loaded = self
+      struct.pack_into('<Q', self.packet, 0x38, self.launch_id)
+      self.generation = active.generation + 1
+      active.generation = self.generation
+      self.upload_mmu()
+      self.v[0x405000:0x405010] = struct.pack('<QII', ROOT_BASE, 0xffffffff, 0)
+    else:
+      super().start(timeout)
+      MTLaunch._active = self
     self._write(0xe150, 0)
     self._write(0xe158, 0)
     self._write(0x138, 0xffffffff, 4)
     self._write(0xe160, 0)
     self._write(0xe198, 0)
+    self.mmu_dirty = False
     self.sv[0x3000:0x4000] = bytes(0x1000)
-    ci = mtfw.MTFW_CCB_ITEM()
-    self.ccb = MTCCB(self.dev, self.v, self.layout.item + 3 * 4096 * ci.SIZE, self.layout.ccb + 3 * 0x4030)
+    if self.ccb is None:
+      ci = mtfw.MTFW_CCB_ITEM()
+      self.ccb = MTCCB(self.dev, self.v, self.layout.item + 3 * 4096 * ci.SIZE, self.layout.ccb + 3 * 0x4030)
 
   def execute(self) -> MTLaunchResult:
     if self.ccb is None: raise RuntimeError("MT firmware was not started")
+    if self.mmu_dirty:
+      self.upload_mmu()
+      self.mmu_dirty = False
     self.ccb.submit(0x8000420000, len(self.packet), ROOT_BASE, generation=self.generation)
-    response = self.ccb.wait(float(os.environ.get('MT_TIMEOUT','5')))
+    try: response = self.ccb.wait(float(os.environ.get('MT_TIMEOUT','5')))
+    except TimeoutError:
+      if os.environ.get('MT_TRACE'):
+        open('/tmp/mt-research/reuse-timeout-trace.bin','wb').write(bytes(self.v[self.layout.trace:self.layout.trace+0x17da0]))
+        print('MT TIMEOUT',hex(self.ccb.response_index()),'ITEM',bytes(self.v[self.ccb.item_off:self.ccb.item_off+0x80]).hex(),
+              'TAIL',bytes(self.v[self.ccb.item_off+0x560:self.ccb.item_off+0x5b0]).hex(),
+              'REQ',bytes(self.v[self.ccb.queue_off+0x4000:self.ccb.queue_off+0x4030]).hex(),
+              'RESP',bytes(self.v[self.ccb.queue_off+0x1000:self.ccb.queue_off+0x1060]).hex(),
+              'QCELLS',bytes(self.v[self.ccb.queue_off:self.ccb.queue_off+0x20]).hex(),flush=True)
+      raise
     if response.value:
       fault = (self._read(0xe150), self._read(0xe158), self._read(0x130, 4), self._read(0x4a0))
       raise RuntimeError(f"MT launch failed: {response}, fault={fault}")

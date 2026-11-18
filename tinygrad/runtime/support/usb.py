@@ -205,7 +205,7 @@ class USBMMIOInterface(MMIOInterface):
 # *****************
 # 1. placeholders
 
-HALF, CHUNK, SLOT, STREAM = 0x40000, 0x40000 - 512, 0x4000, 1 << 20 # sram half, payload, slot, stream
+HALF, CHUNK, SLOT, STREAM = 0x40000, 0x40000 - 512, 0x4000, 1 << 21 # sram half, payload, slot, stream
 HOST_SIZE = 64 + 2 * HALF + STREAM # link, staging, zeros
 
 def usb_host(dev:str) -> UOp: return UOp.extern((HOST_SIZE,), dtypes.uint8, HCQ_RUNTIME_DEV.device, to_name(dev, "usb_host"))

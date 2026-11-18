@@ -43,7 +43,7 @@ class MTBufferMeta:
 class MTAllocator(Allocator['MTDevice']):
   def __init__(self, dev):
     super().__init__(dev)
-    self.next_va, self.next_pa = 0x8000000000, 0x80000000
+    self.next_va, self.next_pa = 0x8001000000, 0x80000000
     self.dev.views = {}
     self.free_blocks:list[tuple[int,int,int]] = []
 
@@ -56,7 +56,6 @@ class MTAllocator(Allocator['MTDevice']):
       self.next_va += size
       self.next_pa += size
     view = self.dev.mt.pci_dev.map_bar(2, off=pa, size=size, fmt='B')
-    view[:] = bytes(size)
     meta = MTBufferMeta(va, pa, size)
     self.dev.map_buffer(va, pa, size)
     self.dev.views[va] = (view, meta)
@@ -93,7 +92,7 @@ class MTLaunchGenerator:
   def __init__(self, dev:MTDevice):
     self.dev = dev
 
-  def generate(self, obj:TinyELF) -> MTLaunch:
+  def generate(self, obj:TinyELF, global_size:tuple[int,int,int], local_size:tuple[int,int,int]) -> MTLaunch:
     td = tempfile.mkdtemp(prefix='mt-launch-')
     src_path = pathlib.Path(td) / 'kernel.mu'
     args = []
@@ -105,7 +104,7 @@ class MTLaunchGenerator:
     main = (f'#include <musa.h>\n#include <cstdint>\n#include <unistd.h>\nint main() {{\n'
             f'  musaFunction_t fn = nullptr;\n  musaGetFuncBySymbol(&fn, (const void *)&{obj.name});\n'
             f'  {arg_decls}\n  void *args[] = {{{arg_names}}};\n'
-            f'  musaLaunchKernel((const void *)&{obj.name}, dim3(1,1,1), dim3(1,1,1), args, 0, nullptr);\n'
+            f'  musaLaunchKernel((const void *)&{obj.name}, dim3{global_size}, dim3{local_size}, args, 0, nullptr);\n'
             f'  musaDeviceSynchronize();\n  usleep(1000000);\n  _Exit(0);\n}}\n')
     key = hashlib.sha256(obj.lib).hexdigest()
     source = MUSA_SOURCES.get(key) or diskcache_get('mt_sources', key)
@@ -129,28 +128,35 @@ class MTLaunchGenerator:
 
 class MTProgram(Program['MTDevice']):
   def __init__(self, dev:MTDevice, obj:TinyELF, links:dict[str,MTProgram]):
-    self.dev, self.name, self.profile_key = dev, obj.name, obj.profile_key
+    self.dev, self.name, self.profile_key, self.obj = dev, obj.name, obj.profile_key, obj
     self.image = MTKernelImage.from_elf(obj.lib)
-    self.launch = dev.get_launch(obj)
+    self.launch:MTLaunch|None = None
     if os.environ.get('MT_TRACE'): print('MT IMAGE',self.image.metadata.kernel,flush=True)
 
   def __call__(self, *args:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                wait:bool=False, timeout:int|None=None):
+    self.launch = self.dev.get_launch(self.obj, global_size, local_size)
     if os.environ.get('MT_GENERATE','1') == '0' and not os.environ.get('MT_SKIP_LOAD'):
-      assert self.dev.launch is not None
-      self.dev.launch.load_kernel(self.image, global_size, local_size)
+      self.launch.load_kernel(self.image, global_size, local_size)
     if os.environ.get('MT_TRACE'): print('MT START',self.launch.bundle,flush=True)
     self.dev.ensure_started(self.launch)
     if os.environ.get('MT_TRACE'): print('MT STARTED',flush=True)
     self.launch.set_args(tuple(args))
     self.launch.set_grid(global_size, local_size)
+    if os.environ.get('MT_TRACE'):
+      print('MT LAUNCH DIMS',self.name,global_size,local_size,flush=True)
+      print('MT LAUNCH ARGS',tuple(hex(a) for a in args),[hex(self.launch.mmu.pages.get(a & ~0xfff,0)) for a in args],flush=True)
+      arg_off = self.launch.backing_offsets[0x81e1200000]
+      print('MT LAUNCH ARGSTATE',self.launch.backing[arg_off+0x38:arg_off+0x68].hex(),flush=True)
     result = self.launch.execute()
     if os.environ.get('MT_TRACE'):
       const = self.launch.backing_offsets[0x81e1200000]
       dims_off = self.launch.backing_offsets[0x81e1400000]
       print('MT DIMS',global_size,local_size,self.launch.backing[dims_off+0x2c:dims_off+0x40].hex(),flush=True)
+      view, meta = self.dev._view(args[-1])
+      off = args[-1] - meta.va
       print('MT PROGRAM',self.name,tuple(hex(a) for a in args),result,
-            self.launch.backing[const+0x40:const+0x50].hex(),self.dev.views[args[-1]][0][:16].hex(),flush=True)
+            self.launch.backing[const+0x40:const+0x50].hex(),view[off:off+16].hex(),flush=True)
     return result.run_time / 25_000_000 if wait else None
 
 class MTDevice(Compiled):
@@ -162,7 +168,7 @@ class MTDevice(Compiled):
     packet = os.environ.get('MT_LAUNCH_PACKET', '/tmp/mt-research/real-submission-direct.bin')
     self.launch = None if os.environ.get('MT_GENERATE','1') != '0' else MTLaunch(self.mt, bundle, packet)
     self.launches = [] if self.launch is None else [self.launch]
-    self.launch_cache:dict[int,MTLaunch] = {}
+    self.launch_cache:dict[tuple[int,tuple[int,int,int],tuple[int,int,int]],MTLaunch] = {}
     self.generator = MTLaunchGenerator(self)
     self.buffer_maps:list[tuple[int,int,int]] = []
     self.current_launch:MTLaunch|None = None
@@ -173,13 +179,19 @@ class MTDevice(Compiled):
   @property
   def has_copy_queue(self) -> bool: return False
 
-  def get_launch(self, obj:TinyELF) -> MTLaunch:
+  def get_launch(self, obj:TinyELF, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1)) -> MTLaunch:
     if os.environ.get('MT_GENERATE','1') == '0':
       assert self.launch is not None
       return self.launch
-    key = hash(obj.lib)
+    key = (hash(obj.lib), global_size, local_size)
     if key not in self.launch_cache:
-      launch = self.generator.generate(obj)
+      cache_key = f'{hashlib.sha256(obj.lib).hexdigest()}_{global_size}_{local_size}'
+      cached = diskcache_get('mt_launch_v3', cache_key)
+      if cached is not None and pathlib.Path(cached['packet']).exists():
+        launch = MTLaunch(self.mt, cached['bundle'], cached['packet'])
+      else:
+        launch = self.generator.generate(obj, global_size, local_size)
+        diskcache_put('mt_launch_v3', cache_key, {'bundle':str(launch.bundle),'packet':str(launch.packet_path)})
       self.launch_cache[key] = launch
       self.launches.append(launch)
       for va,pa,size in self.buffer_maps: launch.map_buffer(va,pa,size)
