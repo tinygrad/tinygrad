@@ -2,11 +2,9 @@ from dataclasses import dataclass, field
 from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo
-from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import prod, dedup, VIZ, MAX_KERNEL_BUFFERS, SPEC
-from tinygrad.helpers import get_single_element
+from tinygrad.helpers import prod, dedup, VIZ, MAX_KERNEL_BUFFERS, SPEC, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.indexing import run_rangeify, BufferizeOpts, apply_movement_op
 from tinygrad.codegen.prepare import pm_mops

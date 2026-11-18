@@ -1,6 +1,5 @@
 import struct
-from tinygrad.renderer import tc
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import tc, Renderer
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast, fp8_index, amd_fp8s
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str

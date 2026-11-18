@@ -2,12 +2,10 @@ from __future__ import annotations
 import itertools
 from dataclasses import replace
 from typing import cast
-from tinygrad.uop.ops import Ops, GroupOp, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element
-from tinygrad.uop.ops import axis_colors
+from tinygrad.uop.ops import Ops, GroupOp, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element, axis_colors
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, round_up, prod, get_single_element
-from tinygrad.helpers import ALLOW_TF32, count, Context
+from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, round_up, prod, get_single_element, ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -89,7 +87,7 @@ class Scheduler:
     if opt.op is OptOps.TC: rng = UOp(Ops.NOOP)
     else:
       check(type(opt.axis) is int and 0 <= opt.axis < self.shape_len, f"invalid axis on {opt.axis=} {opt.op=} {self.shape_len=}")
-      rng = self.rngs[cast(int, opt.axis)]
+      rng = self.rngs[opt.axis]
 
     ret = None
     if opt.op is OptOps.SPLIT:
@@ -151,7 +149,7 @@ class Scheduler:
       ret = replaced_rng
     elif opt.op is OptOps.SWAP:
       check(type(opt.arg) is int and 0 <= opt.arg < self.shape_len, f"invalid swap axis on {opt.arg=} {self.shape_len=}")
-      altrng:UOp = self.rngs[cast(int, opt.arg)]
+      altrng:UOp = self.rngs[opt.arg]
       check(rng.axis_type == AxisType.GLOBAL and altrng.axis_type == AxisType.GLOBAL, "swap only for globals")
       self.ast = self.ast.substitute({rng:rng.replace(arg=(rng.axis_type, *altrng.axis_id)),
                                       altrng:altrng.replace(arg=(altrng.axis_type, *rng.axis_id))},
