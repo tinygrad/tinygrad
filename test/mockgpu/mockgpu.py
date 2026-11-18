@@ -23,7 +23,7 @@ setattr(libc.dll, "mockgpu_doorbell", mockgpu_doorbell)
 
 mocked = {t.device for t in DEV.value if t.interface.startswith("MOCK")}
 def hook_doorbells(s:UOp) -> UOp|None:
-  hooks = tuple(UOp.custom_function("mockgpu_doorbell").call(b.after(c).getaddr(Device[d].host)) for c in s.toposort() if c.op is Ops.CALL
+  hooks = tuple(UOp.native("mockgpu_doorbell").call(b.after(c).getaddr(Device[d].host)) for c in s.toposort() if c.op is Ops.CALL
                 for b in c.src[1:] if b.op is Ops.EXTERN and "doorbell" in str(b.arg.name) and (d:=to_tuple(b.device)[0]).split(":")[0] in mocked)
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])
@@ -34,7 +34,7 @@ def mockgpu_progress(_:int): # compiled spin loops wait on the gpus, which run o
 setattr(libc.dll, "mockgpu_progress", mockgpu_progress)
 
 def kick_gpus(body:UOp, loop:UOp, cond:UOp) -> UOp|None: # each iteration of a spin loop runs the gpus
-  kick = UOp.custom_function("mockgpu_progress").call(UOp.const(0, dtypes.uint64).after(body))
+  kick = UOp.native("mockgpu_progress").call(UOp.const(0, dtypes.uint64).after(body))
   return None if kick in cond.src else body.backedge(loop, cond.after(kick))
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.BACKEDGE, src=(UPat(name="body"), UPat(name="loop"), UPat(name="cond"))), kick_gpus)])
 
