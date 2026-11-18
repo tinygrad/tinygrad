@@ -28,7 +28,7 @@ def regs(u:UOp) -> tuple[Register, ...]:
 def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp:
   assert u.dtype is not dtypes.void, "void cannot have output registers"
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return u.replace(arg=replace(u.arg, reg=r[0]))
-  return u.replace(arg=u.arg[:2]+r)
+  return UOp.ins(u.arg[0], u.src, u.dtype, *r)
 
 def rdef(u:UOp):
   if u.op in {Ops.AFTER, Ops.BITCAST}: return rdef(u.src[0])
@@ -172,10 +172,9 @@ extra_matcher = PatternMatcher([
   (UPat(Ops.NEG, name="x"), lambda x: x.const_like(-0.0).alu(Ops.SUB, *x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
   (UPat(Ops.TRUNCMOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.TRUNCDIV, y)),
-  # scalar reg gated mops become cmovs
-  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate")),
+  (UPat(Ops.INDEX, name="addr").load(UPat.var("alt"), UPat.var("gate")),
     lambda addr,alt,gate: gate.where(addr.load(), alt) if is_regbuf(addr.src[0]) else None),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate")),
+  (UPat(Ops.INDEX, name="addr").store(UPat.var("val"), UPat.var("gate")),
     lambda addr,val,gate: addr.store(gate.where(val, addr.load())) if is_regbuf(addr.src[0]) else None),
 ])
 
@@ -246,7 +245,7 @@ def args_pointer() -> UOp: return reg(dtypes.uint64, RDI)
 # a register buffer is its own virtual register, named by its identity
 def regbuf_reg(x:UOp) -> Register: return rdef(x) or Register(f"b{x.key.hex()}", 0, XMM if x.dtype in dtypes.floats else WGPR)
 # a value moved into a register constrained to cons
-def pin(ctx:IselContext, x:UOp, cons:Register|tuple[Register, ...]) -> UOp: return with_regs(UOp.ins(X86Ops.MOV, (x,), x.dtype), (ctx.vreg(cons),))
+def pin(ctx:IselContext, x:UOp, cons:Register|tuple[Register, ...]) -> UOp: return UOp.ins(X86Ops.MOV, (x,), x.dtype, ctx.vreg(cons))
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
 def lane(x:UOp, i:int) -> int: return s.src[1].src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
@@ -290,7 +289,7 @@ def idiv(ctx:IselContext, x:UOp) -> UOp:
   dividend = pin(ctx, x.src[0].cast(dividend_dtype), RAX)
   defs = [ctx.vreg(RAX), ctx.vreg(RDX)][:1+(x.dtype not in dtypes.int8s)]
   divisor = pin(ctx, x.src[1], tuple(r for r in WGPR if r not in (RAX, RDX)))
-  idiv = with_regs(UOp.ins(op, (dividend, divisor) + tuple(ext), x.dtype), tuple(defs))
+  idiv = UOp.ins(op, (dividend, divisor) + tuple(ext), x.dtype, *defs)
   # this move "cleanses" the register constraints (rax/rdx) of idiv
   return UOp.ins(X86Ops.MOV, (idiv,), x.dtype)
 
@@ -300,13 +299,11 @@ def shift(ctx:IselContext, x:UOp, op:X86Ops) -> UOp:
   cnt = pin(ctx, x.src[1], RCX)
   return UOp.ins(op, (val, cnt), x.dtype)
 
-# a memory address operand is (base, index, displacement, size)
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.int8.max else dtypes.int8, v)
   def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v.cast(dtypes.uint32) if v.dtype.itemsize < 4 else v
   if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp(Ops.NOOP), _disp(0), imm(dtypes.uint32, x.dtype.itemsize))
   base, idx = x.src[0], x.src[1]
-  # buffers are indexed by element, the stack pointer by byte
   scale = 1 if base in (stack_pointer(), args_pointer()) else base.dtype.itemsize
   sz = imm(dtypes.uint32, base.dtype.itemsize)
   if idx.op is Ops.ADD and (c:=idx.src[1]).op is Ops.CAST and c.src[0].op is Ops.CONST:
@@ -314,7 +311,6 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   if idx.op is Ops.CAST and idx.src[0].op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.src[0].val * scale), sz)
   return (base, _cast(idx), _disp(0), sz)
 
-# the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
 def lea(x:UOp) -> UOp: return UOp.ins(X86Ops.LEA, fold_address(x), dtypes.uint64)
 
 GPR_DEST_OPS = {X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI, X86Ops.VMOVDm, X86Ops.VMOVQm}
@@ -471,9 +467,8 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.int64s).bitcast(dtypes.float64).named("x"), lambda x: UOp.ins(X86Ops.VMOVQ, x.src, x.dtype)),
   (UPat(dtype=dtypes.float32).bitcast(dtypes.int32s).named("x"), lambda x: UOp.ins(X86Ops.VMOVDm, x.src, x.dtype)),
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: UOp.ins(X86Ops.VMOVQm, x.src, x.dtype)),
-  # lower register mops: a store is just a copy, load is an anon copy to preserve ordering
   (UPat.var("a").store(UPat.var("val")), lambda a,val:
-    UOp(Ops.STACK).after(with_regs(UOp.ins(copy_op(val.dtype), (val.after(buf),), buf.dtype), (regbuf_reg(buf.without_after),)))
+    UOp(Ops.STACK).after(UOp.ins(copy_op(val.dtype), (val.after(buf),), buf.dtype, regbuf_reg(buf.without_after)))
     if is_regbuf((buf := a.src[0] if a.op is Ops.INDEX else a)) else None),
   (UPat.var("a").load().named("x"), lambda a,x:
     UOp.ins(copy_op(x.dtype), (buf,), x.dtype) if is_regbuf((buf:=a.src[0] if a.op is Ops.INDEX else a)) else None),
@@ -515,8 +510,8 @@ class X86LinearContext(LinearContext):
         after.append(self.ren.fill(slot,a,r))
 
     if self.stack_size > 0:
-      before.insert(0, with_regs(UOp.ins(X86Ops.SUBi, (stack_pointer(),imm(dtypes.int32, self.stack_size)), dtypes.uint64), (RSP,)))
-      after.append(with_regs(UOp.ins(X86Ops.ADDi, (stack_pointer(),imm(dtypes.int32, self.stack_size)), dtypes.uint64), (RSP,)))
+      before.insert(0, UOp.ins(X86Ops.SUBi, (stack_pointer(), imm(dtypes.int32, self.stack_size)), dtypes.uint64, RSP))
+      after.append(UOp.ins(X86Ops.ADDi, (stack_pointer(), imm(dtypes.int32, self.stack_size)), dtypes.uint64, RSP))
     return before + uops[:-1] + after + [uops[-1]]
 
   def assign_spill_slot(self, r:Register) -> int:
@@ -538,7 +533,7 @@ def flag_rematerialize(ctx:X86LinearContext, x:UOp):
 # the element size of loads and stores is already captured by fold_address before stack buffers become 64-bit pointers
 def alloc_buffer(ctx:X86LinearContext, x:UOp):
   dst = Register(f"s{ctx.stack_size}", 0, WGPR)
-  nx = with_regs(UOp.ins(X86Ops.LEA, fold_address(stack_pointer().index(UOp.cconst(ctx.stack_size, dtypes.uint32))), dtypes.uint64), (dst,))
+  nx = UOp.ins(X86Ops.LEA, fold_address(stack_pointer().index(UOp.cconst(ctx.stack_size, dtypes.uint32))), dtypes.uint64, dst)
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
   return nx, [stack_pointer(), nx]
 
@@ -551,12 +546,12 @@ def label(x:UOp) -> UOp: return UOp.ins(X86Ops.LABEL, (x,), dtypes.void)
 def lower_range(x:UOp) -> tuple[UOp, list[UOp]]:
   if x.dtype is dtypes.void: return x, [x, label(x)]
   bound = x.src[0].without_after
-  idx = with_regs(UOp.ins(X86Ops.MOVi, (imm(x.dtype, 0),), x.dtype), (regbuf_reg(x),))
+  idx = UOp.ins(X86Ops.MOVi, (imm(x.dtype, 0),), x.dtype, regbuf_reg(x))
   cmp = UOp.ins(X86Ops.CMPi if is_imm(bound) else X86Ops.CMP, (idx, bound), dtypes.void)
   return idx.after(x), [idx, x, start:=label(x), cmp, UOp.ins(X86Ops.JGE, (start, cmp), dtypes.void)]
 
 def lower_end(x:UOp, c:UOp) -> tuple[UOp, list[UOp]]:
-  inc = with_regs(UOp.ins(X86Ops.ADDi, (c, imm(c.dtype, 1)), c.dtype), regs(c.src[0]))
+  inc = UOp.ins(X86Ops.ADDi, (c, imm(c.dtype, 1)), c.dtype, *regs(c.src[0]))
   return (end:=x.replace(src=(x.src[0], c.src[1]))), [inc, end]
 
 pre_regalloc_matcher = PatternMatcher([
@@ -756,7 +751,7 @@ class X86Renderer(ISARenderer):
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
   def is_two_address(self, x:UOp) -> bool: return x.op is Ops.INS and x.arg[0] in X86GroupOp.TwoAddress
-  def copy(self, x:UOp, reg:Register) -> UOp: return with_regs(UOp.ins(X86Ops.MOV, (x,), x.dtype), (reg,))
+  def copy(self, x:UOp, reg:Register) -> UOp: return UOp.ins(X86Ops.MOV, (x,), x.dtype, reg)
 
   def spill(self, spill_slot:int, x:UOp) -> UOp:
     op = X86Ops.VMOVUPSm if rdef(x).cons[0] in XMM else X86Ops.MOVm
@@ -765,7 +760,7 @@ class X86Renderer(ISARenderer):
 
   def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp:
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return with_regs(UOp.ins(X86Ops.VMOVUPS if reg.cons[0] in XMM else X86Ops.MOV, fold_address(stack_pointer().index(disp)), x.dtype), (reg,))
+    return UOp.ins(X86Ops.VMOVUPS if reg.cons[0] in XMM else X86Ops.MOV, fold_address(stack_pointer().index(disp)), x.dtype, reg)
 
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg[0]))[-1] in ('i', 'm') else o[7:]).lower():7s}"
