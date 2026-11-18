@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import unittest, os, subprocess, sys
+import unittest, os, subprocess, sys, tempfile
 from unittest.mock import patch
 from tinygrad import Tensor, dtypes
 from tinygrad.device import Device, enumerate_devices_str
@@ -9,15 +9,11 @@ from tinygrad.runtime.support.c import DLL
 
 class TestDevice(unittest.TestCase):
   def test_reset_lock_does_not_hang(self):
-    subprocess.run([sys.executable, "-c", """
-import tempfile
-from types import SimpleNamespace
-from tinygrad.runtime.support.system import System, PCIDevice
-
-with tempfile.NamedTemporaryFile() as lock_file:
-  device = SimpleNamespace(lock_fd=System.flock_acquire(lock_file.name))
-  PCIDevice.reset_lock(device)
-"""], check=True, timeout=10)
+    code = ("import sys; from types import SimpleNamespace; from tinygrad.runtime.support.system import System, PCIDevice; "
+            "device = SimpleNamespace(lock_fd=System.flock_acquire(sys.argv[1])); PCIDevice.reset_lock(device)")
+    with tempfile.NamedTemporaryFile() as lock_file:
+      result = subprocess.run([sys.executable, '-c', code, lock_file.name], capture_output=True, timeout=10)
+    self.assertEqual(result.returncode, 0, result.stderr.decode())
 
   def test_canonicalize(self):
     self.assertEqual(Device.canonicalize(None), Device.DEFAULT)
