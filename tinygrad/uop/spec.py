@@ -1,5 +1,5 @@
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, ParamArg, CallInfo, OPAQUE_CALL_BODIES, \
-  CustomFunction
+  NativeInfo
 from tinygrad.uop.uir import render_uir
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, weak_dtype
 from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape
@@ -104,8 +104,8 @@ spec_shared = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True, name="x"),
    lambda x: (x.src[0].shape == () or x.addrspace is AddrSpace.ALU) and x.src[0].dtype is not dtypes.void),
 
-  # a CUSTOM_FUNCTION names an external function: the arg is a CustomFunction stating the return dtype
-  (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, CustomFunction)),
+  # a NATIVE names native code or an external function: the arg is NativeInfo stating the return dtype
+  (UPat(Ops.NATIVE, name="x", allow_any_len=True), lambda x: isinstance(x.arg, NativeInfo)),
   # CALL: the body is always an opaque body stating the dtype, the arg is a CallInfo
   (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, CallInfo)),
 

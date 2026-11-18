@@ -150,7 +150,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.BARRIER), lambda ctx: "  fence seq_cst"),
 
   # calls
-  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
+  (UPat(Ops.CALL, src=(UPat(Ops.NATIVE, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
    f"  {'' if x.dtype == dtypes.void else ctx[x] + ' = '}call {ldt(x.dtype)} @{f.arg.name}({', '.join(f'{lparam(y)} {ctx[y]}' for y in x.src[1:])})"),
 ])
 
@@ -230,7 +230,7 @@ class CPULLVMRenderer(LLVMRenderer):
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
-             for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
+             for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.NATIVE}
     decls |= {x.body.src[0].arg.function_name: f"declare void @{x.body.src[0].arg.function_name}({', '.join(map(lparam, x.body.arg.params))})"
               for x in uops if x.op is Ops.CALL and x.body.op is Ops.PROGRAM}
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'

@@ -131,8 +131,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
     case Ops.CALL:
       # a call has the dtype of its body, void for opaque bodies
       return src[0].dtype
-    case Ops.CUSTOM_FUNCTION:
-      # an external function states its return dtype in the arg
+    case Ops.NATIVE:
+      # a native function states its return dtype in the arg
       return arg.dtype
     case Ops.INS:
       # arg is (instruction, dtype, *registers), a queue command or an asm line is void
@@ -370,7 +370,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         assert len(self.src[0].as_shape) <= 1
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
-      case Ops.CUSTOM_FUNCTION:
+      case Ops.NATIVE:
         return self.src[0].as_shape if self.dtype != dtypes.void else None
       case Ops.PYLITERAL: return None
       case Ops.STAGE:
@@ -1226,9 +1226,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
-  def custom_function(name:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
+  def native(name:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
     shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
-    return UOp(Ops.CUSTOM_FUNCTION, src=shape_src+src, arg=CustomFunction(name, dtype, fmt))
+    return UOp(Ops.NATIVE, src=shape_src+src, arg=NativeInfo(name, dtype, fmt))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, hcq:HCQInfo|None=None) -> UOp:
@@ -1238,7 +1238,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
     assert all(r.axis_type is AxisType.DEVICE for r in self.ranges), \
       f"ranges {self.ranges} are leaking out of the call in {self.render_uir()}"
-    # an external C call is a CALL on a CUSTOM_FUNCTION body stating the (possibly void) return dtype, the callee
+    # an external C call is a CALL on a NATIVE body stating the (possibly void) return dtype, the callee
     # (a function pointer) in source, rendered as an indirect call
     return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, inline, hcq))
 
@@ -1361,11 +1361,11 @@ class ProgramInfo:
                        tuple(sorted(dedup(ins))), target)
 
 # the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), bulk stores, and function references
-OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION, Ops.ASM}
+OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.NATIVE, Ops.ASM}
 
-# the arg of CUSTOM_FUNCTION: an external function symbol and the dtype of the value it returns
+# the arg of NATIVE: native code or a function symbol, and the dtype of the value it returns
 @dataclass(frozen=True)
-class CustomFunction:
+class NativeInfo:
   name: str
   dtype: DType = dtypes.void
   fmt: bool = False
@@ -1481,7 +1481,7 @@ class UPat(RandMixin):
   @staticmethod
   def const(b:ConstType, dtype:DType|tuple[DType, ...]|None=None): return UPat(Ops.CONST, dtype=dtype, arg=b)
   @staticmethod
-  def custom_function(fn:str, dtype:DType=dtypes.void, **kwargs): return UPat(Ops.CUSTOM_FUNCTION, arg=CustomFunction(fn, dtype), **kwargs)
+  def native(fn:str, dtype:DType=dtypes.void, **kwargs): return UPat(Ops.NATIVE, arg=NativeInfo(fn, dtype), **kwargs)
 
   # lil helper
   def f(self, op, **kwargs): return UPat(op, src=(self,), **kwargs)
