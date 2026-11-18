@@ -277,7 +277,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
 
   # calc deps for each tag
   tracker = DepsTracker(queue_of)
-  accs = [[(s, k in get_call_outs_ins(c)[0]) for k, s in enumerate(c.src[1:]) if not s.is_variable] for c, _, _ in ctx.batch]
+  accs = [[(s, k in get_call_outs_ins(c)[0]) for k, s in enumerate(c.src[1:]) if s.addrspace is not AddrSpace.ALU] for c, _, _ in ctx.batch]
   dep_tags:list[list[int]] = [tracker.access_resources(acc, tag) for tag, acc in enumerate(accs)]
 
   # add barriers when a call deps on another call of its queue

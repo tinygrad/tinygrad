@@ -1,7 +1,10 @@
-import unittest
+import unittest, math
 
 from tinygrad import Tensor, UOp, Device, dtypes
 from tinygrad.engine.realize import compile_linear
+from tinygrad.device import Buffer
+from tinygrad.codegen import to_program
+from tinygrad.codegen.opt.search import _beam_call, _time_program
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, KernelInfo, AxisType
 
@@ -25,6 +28,19 @@ class TestSearch(unittest.TestCase):
     with Context(BEAM=1, IGNORE_BEAM_CACHE=1, CACHELEVEL=0):
       out = Tensor.custom_kernel(Tensor.empty(256), Tensor.empty(256), fxn=fxn)[0].realize()
     self.assertEqual(out.tolist(), [3.0]*256)
+
+  def test_beam_scalar_first(self):
+    # the scalar at slot 0 isn't the launch device, the buffer at slot 1 is
+    v = UOp.variable("v", 1, 10, dtypes.int).bind(3)
+    def fxn(s:UOp, o:UOp) -> UOp:
+      i = UOp.range(4096, 0, AxisType.WEAK)
+      return o[i].store(s).end(i).sink(arg=KernelInfo("scalar_first"))
+    def out(): return Tensor.custom_kernel(Tensor(v), Tensor.empty(4096, dtype=dtypes.int), fxn=fxn)[1]
+    # beam times the candidates with a value for the scalar
+    prg = to_program(out().linear_with_vars()[0].src[0].body, Device[Device.DEFAULT].renderer)
+    bufs = {1:UOp.from_buffer(Buffer(Device.DEFAULT, 4096*4).ensure_allocated(), dtypes.int)}
+    self.assertTrue(all(math.isfinite(t) for t in _time_program(_beam_call(prg, bufs))))
+    with Context(BEAM=1, IGNORE_BEAM_CACHE=1, CACHELEVEL=0): self.assertEqual(out().tolist()[:2], [3, 3])
 
 if __name__ == "__main__":
   unittest.main()

@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, function, Device
+from tinygrad import Tensor, function, Device, Variable
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, uopfunc
 from tinygrad.engine.realize import run_linear, get_runtime
@@ -20,6 +20,24 @@ class TestCall(unittest.TestCase):
     prg = to_program(p.index(UOp.const(0)).store(n).sink(arg=KernelInfo("named_scalar")), Device[Device.DEFAULT].renderer)
     run_linear(UOp(Ops.LINEAR, src=(prg.call(out.uop.buf_uop, UOp.const(42, dtypes.int)),)))
     self.assertEqual(out.item(), 42)
+
+  def test_free_variable_from_var_vals(self):
+    # a kernel run directly reads a Variable it isn't given from var_vals, also when it's compiled before its call
+    p, v = UOp.param(0, dtypes.int, 1), Variable("v", 1, 10, dtypes.int)
+    sink = p[0].store(v).sink(arg=KernelInfo(name="store_v"))
+    for body in (sink, to_program(sink, Device[Device.DEFAULT].renderer)):
+      out = Tensor.empty(1, dtype=dtypes.int).realize()
+      run_linear(UOp(Ops.LINEAR, src=(body.call(out.uop.buf_uop),)), var_vals={"v": 7})
+      self.assertEqual(out.item(), 7)
+
+  def test_free_variable_bound_in_call(self):
+    # the kernel reads the Variable the call binds, the other one from var_vals, also when it's compiled before its call
+    p, a, b = UOp.param(0, dtypes.int, 1), Variable("a", 1, 10, dtypes.int), Variable("b", 1, 10, dtypes.int)
+    sink = p[0].store(a*10+b).sink(arg=KernelInfo(name="store_ab"))
+    for body in (sink, to_program(sink, Device[Device.DEFAULT].renderer)):
+      out = Tensor.empty(1, dtype=dtypes.int).realize()
+      run_linear(UOp(Ops.LINEAR, src=(body.call(out.uop.buf_uop, b.bind(3)),)), var_vals={"a": 2})
+      self.assertEqual(out.item(), 23)
 
   def test_call_plus(self):
     a = Tensor.randn(10, 10)
@@ -514,6 +532,17 @@ class TestCallMultiSharded(unittest.TestCase):
                      or Device.DEFAULT == "AMD" and isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage),
                      "calls in kernel not implemented in this renderer")
 class TestCallInKernel(unittest.TestCase):
+  def test_nested_call_captured_scalar(self):
+    # a call in the kernel captures a bound Variable, it's an arg of the call and then of the kernel
+    v = Variable("v", 1, 4, dtypes.int).bind(3)
+    @uopfunc
+    def add_v(out:UOp, x:UOp) -> UOp:
+      i = UOp.range(x.numel(), 0)
+      return out[i].store(x[i] + v).end(i).sink()
+    x = Tensor([1, 2], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.empty_like(x), x, fxn=lambda out,x: add_v(out, x).sink(arg=KernelInfo(name="add_v_kernel")))[0]
+    self.assertEqual(out.tolist(), [4, 5])
+
   def test_simple(self):
     N = getenv("N", 4)
 

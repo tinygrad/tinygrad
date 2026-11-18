@@ -1,11 +1,11 @@
 import unittest, functools
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, Variable, TinyJit
-from tinygrad.engine.realize import run_linear
+from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.codegen.rangeify import BufferizeOpts
-from tinygrad.uop.ops import KernelInfo, AxisType, Ops, uopfunc
+from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer import TinyELF
@@ -622,17 +622,6 @@ class TestCustomKernelArgs(unittest.TestCase):
     Tensor.custom_kernel(Tensor.empty(2), a, fxn=kernel, grad_fxn=lambda g, k: (None, (Tensor(g)*2).uop))[0].sum().backward()
     self.assertEqual(a.grad.tolist(), [2.0, 2.0])
 
-  def test_nested_call_captured_scalar(self):
-    # a call in the kernel captures a bound Variable, it's an arg of the call and then of the kernel
-    v = Variable("v", 1, 4, dtypes.int).bind(3)
-    @uopfunc
-    def add_v(out:UOp, x:UOp) -> UOp:
-      i = UOp.range(x.numel(), 0)
-      return out[i].store(x[i] + v).end(i).sink()
-    x = Tensor([1, 2], dtype=dtypes.int).realize()
-    out = Tensor.custom_kernel(Tensor.empty_like(x), x, fxn=lambda out,x: add_v(out, x).sink(arg=KernelInfo(name="add_v_kernel")))[0]
-    self.assertEqual(out.tolist(), [4, 5])
-
   def test_scalar_arg_any_position(self):
     for n_slot in range(3):
       with self.subTest(n_slot=n_slot):
@@ -698,6 +687,21 @@ class TestCustomKernelArgs(unittest.TestCase):
     self.assertEqual(d.tolist(), [2, 3]*4)
 
 class TestCustomKernelSharded(unittest.TestCase):
+  def test_device_range_direct_linear(self):
+    # a kernel run directly reads its DEVICE range as the device number, like an exported one
+    devs = ("CPU:1", "CPU:2")
+    out = Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(devs, axis=0).contiguous().realize()
+    p, d = UOp.param(0, dtypes.int, 1, device=devs), UOp.range(2, 0, AxisType.DEVICE)
+    sink = p[0].store(d.cast(dtypes.int)).sink(arg=KernelInfo(name="store_dnum"))
+    # also when it's compiled before its call
+    for body in (to_program(sink, Device["CPU"].renderer), sink):
+      out.assign(Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(devs, axis=0)).realize()
+      run_linear(linear:=UOp(Ops.LINEAR, src=(body.call(out.uop.buf_uop),)))
+      self.assertEqual(out.tolist(), [0, 1])
+    # it's validated on each device
+    validated = compile_linear(linear, validate=True).toposort()
+    self.assertEqual(len([c for c in validated if c.op is Ops.CALL and c.body.op is Ops.CUSTOM_FUNCTION and c.body.arg.name == "validate"]), 2)
+
   def test_simple_sharded(self):
     devs = ("CPU:0", "CPU:1")
 

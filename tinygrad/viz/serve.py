@@ -249,9 +249,9 @@ def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEven
     fmt:dict = {}
     if (ref:=data.ref_map.get(e.profile_key)) is not None and ref < len(data.ctxs):
       name = data.ctxs[ref]["name"]
-      if (ki:=data.ctxs[ref].get("ki")) is not None and ki.estimates is not None and ei is not None and "estimates" in ei.arg:
-        # the exec event has the estimates of this call
-        for est_key,est_val in zip(("FLOPS", "B/s mem", "B/s lds"), ei.arg["estimates"]): fmt[est_key] = int(est_val/(dur*1e-6))
+      if (ki:=data.ctxs[ref].get("ki")) is not None and ki.estimates is not None and ei is not None:
+        # the exec event has the estimates of this call, a profile saved before it had them has no rates
+        for est_key,est_val in zip(("FLOPS", "B/s mem", "B/s lds"), ei.arg.get("estimates", ())): fmt[est_key] = int(est_val/(dur*1e-6))
         key = ei.key
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name

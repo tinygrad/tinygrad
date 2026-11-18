@@ -88,8 +88,14 @@ def group_gpudims(ctx:Renderer, s:UOp):
   # Hardware ids may coincide with logical ids: replace ranges simultaneously, including those in the new masks.
   return s.substitute(masks).substitute(subs, walk=True)
 
+pm_device_to_var = PatternMatcher([
+  # the DEVICE axis is not a program axis, it's bound per device at launch. lower it to the _device_num variable (like SPECIAL for devices)
+  (UPat(Ops.RANGE, name="r"),
+   lambda r: UOp.variable("_device_num", 0, r.vmax, dtype=r.dtype) if r.axis_type is AxisType.DEVICE else None),
+])
+
 # Run once: grouping creates new GLOBAL/LOCAL ranges, which must not be grouped again.
-pm_group_gpudims = PatternMatcher([(UPat(Ops.SINK, name="s"), group_gpudims)])
+pm_group_gpudims = PatternMatcher([(UPat(Ops.SINK, name="s"), group_gpudims)])+pm_device_to_var
 
 pm_range_to_special = PatternMatcher([
   (UPat(Ops.RANGE, name="r"), lambda r: r.replace(op=Ops.SPECIAL, arg=f"{'g' if r.axis_type is AxisType.GLOBAL else 'l'}idx{r.axis_id[-1]}")
