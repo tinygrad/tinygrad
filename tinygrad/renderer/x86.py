@@ -21,7 +21,7 @@ class IselContext:
   def __init__(self): self.reg_n = itertools.count()
   def vreg(self, cons:tuple[Register, ...]|Register): return Register(f"v{next(self.reg_n)}", 0, cons if isinstance(cons, tuple) else (cons,))
 
-# a native call declares its destination registers as register parameters
+# a native call declares its destination registers in src
 def regs(u:UOp) -> tuple[Register, ...]:
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return (u.arg.reg,) if u.arg.reg is not None else ()
   return tuple(s.arg.reg for s in next(x for x in u.body.src if x.op is Ops.SINK).src) if u.op is Ops.CALL else ()
@@ -338,7 +338,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   elif x.dtype in dtypes.floats or x.body.arg.code in XMM_OPS: defs = [ctx.vreg(XMM)]
   else: defs = [ctx.vreg(WGPR)]
   # TODO: add this once the scheduler can track register pressure
-  # if x.body.arg.code in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
+  # if x.arg[0] in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
   return with_regs(x, tuple(defs))
 
 def copy_op(dt:DType) -> X86Ops:
