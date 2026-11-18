@@ -10,7 +10,7 @@ from tinygrad.uop.ops import pm_renumber_slots, CountCtx, sint_to_uop, pm_flatte
 from tinygrad.dtype import dtypes, AddrSpace, truncate
 from tinygrad.renderer import Estimates, TinyELF
 from tinygrad.runtime.support.c import Struct
-from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, lower_and_compile
+from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, lower_and_compile, get_call_info
 
 # **** calls
 
@@ -320,7 +320,9 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   order = dedup(queue_of + list(closers.values()))
   open_cmds = {queue: _start_ins(ctx, *queue) if queue in ctx.calls or not ctx.queues[queue[0]] else [] for queue in order}
 
-  programs = {queue: [cmd for tag in ctx.calls.get(queue, []) for pre, post in [ins_for_call(tag)] for cmd in pre + [ctx.batch[tag][0]] + post]
+  # a queue runs each program with the launch sizes of its call
+  calls = [c.replace(src=(c.body.replace(arg=get_call_info(c, c.body)), *c.src[1:])) if c.body.op is Ops.PROGRAM else c for c, _, _ in ctx.batch]
+  programs = {queue: [cmd for tag in ctx.calls.get(queue, []) for pre, post in [ins_for_call(tag)] for cmd in pre + [calls[tag]] + post]
               for queue in order}
   closings = {queue: [cmd for dev in ctx.queues if closers[dev] == queue for cmd in close_cmds[dev]] for queue in order}
   return {queue: open_cmds[queue] + programs[queue] + closings[queue] for queue in order}
