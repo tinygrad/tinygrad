@@ -40,7 +40,7 @@ class TinyELF:
   @staticmethod
   def from_program(prg:UOp) -> TinyELF:
     sig = tuple((p.arg.name, p.arg.addrspace, p.dtype, p._shape) for p in prg.kernel_params)
-    return TinyELF(prg.src[3].arg, prg.src[0].arg.function_name, prg.arg.target, sig, prg.key)
+    return TinyELF(prg.src[3].arg, prg.src[0].arg.function_name, prg.arg.target, sig, prg.program_key)
 
   @staticmethod
   def iter_sig(signature:tuple[tuple[str|None, AddrSpace, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:

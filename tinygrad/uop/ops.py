@@ -1295,6 +1295,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return [s.after(kernel) for s in srcs]
 
   @functools.cached_property
+  def program_key(self) -> bytes:
+    # a PROGRAM is its kernel and code, the launch sizes in its arg are the ones a call binds
+    return UOp.sink(*self.src).key
+
+  @functools.cached_property
   def kernel_params(self) -> tuple[UOp, ...]:
     # the kernel's params in slot order. the LINEAR keeps two IMAGE params of one slot in order, isel and packing replace PARAMs
     params = [u for u in self.src[1].src if u in self.arg.params]
