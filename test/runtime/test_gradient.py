@@ -1,6 +1,7 @@
 import unittest, math
 import numpy as np
 from tinygrad import Tensor
+from tinygrad.function import function
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, KernelInfo, Ops
 
@@ -30,6 +31,12 @@ class TestTensorGradient(unittest.TestCase):
     for v in (x < 4, x.int(), x.detach()):
       y = Tensor.empty(1).custom_kernel(v.contiguous(), fxn=kernel)[0]
       self.assertListEqual((y + x).sum().gradient(x)[0].tolist(), [1.0])
+
+  def test_non_target_arg_skips_opaque_call(self):
+    def kernel(o:UOp, a:UOp) -> UOp: return o[0].store(a[0]).sink(arg=KernelInfo())
+    f = function(lambda a, b: a + Tensor.empty(1).custom_kernel(b, fxn=kernel)[0])
+    x = Tensor([3.5])
+    self.assertListEqual(f(x, Tensor([2.0])).sum().gradient(x)[0].tolist(), [1.0])
 
   def test_with_custom_gradient(self):
     x = Tensor([1.0, 2.0, 3.0])
