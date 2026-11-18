@@ -550,10 +550,8 @@ def label(x:UOp) -> UOp: return UOp.ins(X86Ops.LABEL, (x,), dtypes.void)
 # after the LABEL and incremented before the END, the body reads it as AFTER(index, RANGE)
 def lower_range(x:UOp) -> tuple[UOp, list[UOp]]:
   if x.dtype is dtypes.void: return x, [x, label(x)]
-  bound = x.src[0]
-  deps:tuple[UOp, ...] = ()
-  while bound.op is Ops.AFTER: bound, deps = bound.src[0], deps + bound.src[1:]
-  idx = with_regs(UOp.ins(X86Ops.MOVi, (imm(x.dtype, 0),) + deps, x.dtype), (regbuf_reg(x),))
+  bound = x.src[0].without_after
+  idx = with_regs(UOp.ins(X86Ops.MOVi, (imm(x.dtype, 0),), x.dtype), (regbuf_reg(x),))
   cmp = UOp.ins(X86Ops.CMPi if is_imm(bound) else X86Ops.CMP, (idx, bound), dtypes.void)
   return idx.after(x), [idx, x, start:=label(x), cmp, UOp.ins(X86Ops.JGE, (start, cmp), dtypes.void)]
 
