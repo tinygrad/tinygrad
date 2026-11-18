@@ -1241,6 +1241,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # an external C call is a CALL on a CUSTOM_FUNCTION body stating the (possibly void) return dtype, the callee
     # (a function pointer) in source, rendered as an indirect call
     return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, inline, hcq))
+  def lift_args(self, free:list[UOp]) -> UOp:
+    """the CALL's body reads these from the enclosing scope: each becomes a PARAM at a new slot and its value an arg after the others.
+    the value of a DEVICE range is the device number, bound per device at launch"""
+    args = [UOp.variable("_device_num", 0, u.vmax, u.dtype) if u.op is Ops.RANGE else u for u in free]
+    params = {u:a.replace(op=Ops.PARAM, arg=replace(a.arg, slot=len(self.src)-1+i, name=None, val=None)) for i,(u,a) in enumerate(zip(free, args))}
+    return self.replace(src=(self.body.substitute(params, walk=True), *self.src[1:], *args))
 
   @staticmethod
   def call_with_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,

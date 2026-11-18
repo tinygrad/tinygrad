@@ -170,9 +170,10 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b:
 
 def unwrap_call(call:UOp) -> UOp|None:
   if (n:=max([len(to_tuple(a.device)) for a in get_call_arg_uops(call)], default=1)) == 1: return None
-  dnum = UOp.variable("_device_num", 0, n - 1, dtypes.i32)
-  return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.body, *[a.src[i] if a.op is Ops.MSTACK else a.mselect(i) if len(to_tuple(a.device)) > 1
-                                                                   else a for a in call.src[1:]], dnum.bind(i))) for i in range(n)))
+  # each device gets its lane of the args, the device number is bound to it
+  return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.body, *[a.bind(i) if a.is_variable and a.arg.name == "_device_num" else a.src[i]
+                                                                   if a.op is Ops.MSTACK else a.mselect(i) if len(to_tuple(a.device)) > 1
+                                                                   else a for a in call.src[1:]])) for i in range(n)))
 pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
 
 def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:

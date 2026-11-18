@@ -619,23 +619,12 @@ def create_schedule(sched_sink:UOp) -> UOp:
   return UOp(Ops.LINEAR, src=tuple(linearized))
 
 
-def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
+def resolve_linear_call(linear_call:UOp):
   # a scheduled function is shared by all its calls, so the storage it allocates gets a fresh identity in each call
   linear = linear_call.body
   linear = linear.substitute({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in linear.toposort() if b.op is Ops.ALLOC}, walk=True)
-  # the positional params outside the kernel bodies are the call args, free Variables have slot -1
-  linear = graph_rewrite(linear, pm_resolve_params, ctx=linear_call.src[1:], walk=True, name="params to args")
-  # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
-  # scalar args (e.g. precompiled allreduce) inherit it
-  binds = {**(outer_binds or {}),
-           **{i:x for i,x in enumerate(linear_call.src[1:]) if x.op in {Ops.PARAM, Ops.EXTERN} and x.addrspace is AddrSpace.ALU}}
-  def apply_binds(si:UOp) -> UOp:
-    if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
-    if si.op is Ops.CALL and si.body.op is Ops.PROGRAM: return si  # compiled parameters already have ABI slots
-    # positional scalar PARAMs are the call args. an EXTERN's slot indexes the externs, it's mapped back later
-    subs = {v:binds[v.arg.slot] for s in si.src for v in s.variables() if v.op is Ops.PARAM and v.arg.name is None and v.arg.slot in binds}
-    return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
-  return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
+  # a call's body only has its own params, so the positional params in the call args are the args of this call
+  return graph_rewrite(linear, pm_resolve_params, ctx=linear_call.src[1:], walk=True, name="params to args")
 
 pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here
@@ -758,15 +747,4 @@ def create_linear(fn:UOp, plan:bool=True) -> UOp:
 
   # the storage it allocates gets canonical slots, so the linear only depends on fn. map back binds each to fresh storage
   allocs = [u for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL]
-  linear = linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
-
-  # a call's body has no free references, they are its args, so map back only binds call args
-  return graph_rewrite(linear, pm_lift_free, enter_calls=True, name="lift free references to call args")
-
-# a free reference in a call's body, an EXTERN or a Variable not bound to an arg, becomes a PARAM at a new slot and is the call's arg.
-# a nested call lifted its free references to its args already
-def lift_free(call:UOp) -> UOp|None:
-  if not (free:=[u for u in call.body.toposort() if u.op is Ops.EXTERN or (u.is_variable and u.arg.slot == -1)]): return None
-  params = {u:u.replace(op=Ops.PARAM, arg=replace(u.arg, slot=len(call.src)-1+i, name=None, val=None)) for i,u in enumerate(free)}
-  return call.replace(src=(call.body.substitute(params, walk=True), *call.src[1:], *free))
-pm_lift_free = PatternMatcher([(UPat(Ops.CALL, name="call"), lift_free)])
+  return linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")

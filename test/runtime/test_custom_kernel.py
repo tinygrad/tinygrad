@@ -5,7 +5,7 @@ from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.codegen.rangeify import BufferizeOpts
-from tinygrad.uop.ops import KernelInfo, AxisType, Ops
+from tinygrad.uop.ops import KernelInfo, AxisType, Ops, uopfunc
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer import TinyELF
@@ -611,6 +611,27 @@ class TestCustomKernelArgs(unittest.TestCase):
     a, b = Tensor([100.0, 200, 300, 400]), Tensor([1.0, 2, 3, 4])
     out = Tensor.custom_kernel(Tensor.empty(4), a, b, fxn=custom_ignore_first_kernel)[0]
     self.assertEqual(out.tolist(), [2, 3, 4, 5])
+
+  def test_captured_scalar_grad(self):
+    # the gradient callback gets the explicit inputs, not the Variable the kernel captures
+    v = Variable("v", 1, 4, dtypes.int).bind(2)
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i = UOp.range(C.numel(), 0)
+      return C[i].store(A[i]*v.cast(A.dtype)).end(i).sink(arg=KernelInfo(name="mul_v"))
+    a = Tensor([1.0, 2.0])
+    Tensor.custom_kernel(Tensor.empty(2), a, fxn=kernel, grad_fxn=lambda g, k: (None, (Tensor(g)*2).uop))[0].sum().backward()
+    self.assertEqual(a.grad.tolist(), [2.0, 2.0])
+
+  def test_nested_call_captured_scalar(self):
+    # a call in the kernel captures a bound Variable, it's an arg of the call and then of the kernel
+    v = Variable("v", 1, 4, dtypes.int).bind(3)
+    @uopfunc
+    def add_v(out:UOp, x:UOp) -> UOp:
+      i = UOp.range(x.numel(), 0)
+      return out[i].store(x[i] + v).end(i).sink()
+    x = Tensor([1, 2], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(Tensor.empty_like(x), x, fxn=lambda out,x: add_v(out, x).sink(arg=KernelInfo(name="add_v_kernel")))[0]
+    self.assertEqual(out.tolist(), [4, 5])
 
   def test_scalar_arg_any_position(self):
     for n_slot in range(3):

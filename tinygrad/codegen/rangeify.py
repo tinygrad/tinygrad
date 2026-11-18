@@ -289,7 +289,7 @@ def check_buf_states(x:UOp):
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), check_buf_states),
   (UPat((Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT), name="buf"), add_buf),
-  # Only storage parameters get kernel-local slots; scalar parameters retain their enclosing call's slots.
+  # storage params get kernel-local slots here, the scalars once it's a call
   (UPat((Ops.PARAM, Ops.EXTERN), name="buf"), lambda ctx, buf:
    None if buf.addrspace is AddrSpace.ALU else add_buf(ctx, buf)),
 
@@ -315,7 +315,10 @@ def split_store(x:UOp) -> UOp|None:
   ret = graph_rewrite(ret, pm_renumber_range, ctx={a:i for i,a in enumerate(lctx.ranges)}, walk=True)
 
   # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
-  return ret.sink(arg=KernelInfo()).call(*lctx.map.values())
+  kernel = ret.sink(arg=KernelInfo()).call(*lctx.map.values())
+  # the scalars it reads, also in the symbolic shapes of its storage, and its device number are args after the storage
+  return kernel.lift_args([u for u in kernel.body.toposort() if (u.op in {Ops.PARAM, Ops.EXTERN} and u.addrspace is AddrSpace.ALU) or
+                           (u.op is Ops.RANGE and u.axis_type is AxisType.DEVICE)])
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
