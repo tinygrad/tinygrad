@@ -1,11 +1,10 @@
 from typing import Literal, Callable
 import math
 from collections import defaultdict, Counter
-from tinygrad.renderer import tc
+from tinygrad.renderer import tc, Renderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters, promo_dtype
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_storage_scalar
-from tinygrad.renderer import Renderer
 
 base_rewrite = PatternMatcher([
   # local/reg buffers

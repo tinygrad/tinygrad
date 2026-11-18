@@ -258,7 +258,7 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, valid_kv_len, m
 def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, live:int|UOp) -> UOp:
   # one wave per (batch, head, 64-dim tile): every lane redundantly weights its chunks; no cross-lane traffic
   live = _unbind(live)
-  B, H, C, D = cast(tuple[int, int, int, int], partial.shape)
+  B, H, C, D = partial.shape
   DT = 64 if D % 64 == 0 else WARP_SIZE  # dims per block
   assert D % DT == 0
   block_bh, block_dt = UOp.range(B*H, 0, AxisType.GLOBAL), UOp.range(D//DT, 1, AxisType.GLOBAL)
@@ -426,7 +426,6 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   batch, heads, tokens, value_dim, row_tile = *core.shape, 4
   key_dim, alpha_dim = q.shape[-1], alpha.shape[-1] if len(alpha.shape) == 4 else 1
   assert all(isinstance(x, int) for x in (batch, heads, tokens, value_dim, key_dim)) and key_dim % 32 == 0 and value_dim % row_tile == 0
-  batch, heads, tokens, value_dim, key_dim = cast(tuple[int, int, int, int, int], (batch, heads, tokens, value_dim, key_dim))
   core, v = (x.reshape(batch*heads, tokens, value_dim) for x in (core, v))
   q, k = (x.reshape(batch*heads, tokens, key_dim) for x in (q, k))
   beta, kq = (x.reshape(batch*heads, tokens) for x in (beta, kq))

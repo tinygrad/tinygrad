@@ -190,7 +190,7 @@ class UOpMetaClass(type):
       if SPEC > 2:
         # SPEC=3 checks the shape
         _ = created._shape
-      with Context(CHECK_OOB=0): fret = cast(bool|None, spec_full.rewrite(created))
+      with Context(CHECK_OOB=0): fret = spec_full.rewrite(created)
       if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {created}")
     return created
 
@@ -857,7 +857,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.MSELECT:
       assert isinstance(self.src[0].device, tuple), f"mselect must be on tuple device, getting {self.src[0].device}"
       return self.src[0].device[self.arg]
-    if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
+    if self.op is Ops.MSTACK: return tuple(x.device for x in self.src)
     if self.op in {Ops.BUFFER, Ops.ALLOC, Ops.EXTERN}: return self.arg.device
     if self.op is Ops.COPY: return self.arg
     if self.op is Ops.ALLREDUCE: return self.arg[1]
@@ -1005,7 +1005,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.unbound(), self.arg.val
   def unbind_all(self) -> tuple[UOp, dict[Variable, int]]:
     bound = {x: x.unbound() for x in self.backward_slice_with_self if x.is_bound_var}
-    return self.substitute(bound, walk=True), {v: cast(int, x.arg.val) for x, v in bound.items()}
+    return self.substitute(bound, walk=True), {v: x.arg.val for x, v in bound.items()}
   def variables(self) -> list[Variable]:
     ret = set()
     for x in self.backward_slice_with_self:
@@ -1150,7 +1150,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     from tinygrad.uop.render import renderer
     pm = renderer if pm is None else pm
     for u in (s:=self.simplify() if simplify else self).toposort():
-      ctx[u] = cast(str, pm.rewrite(u, ctx=ctx))
+      ctx[u] = pm.rewrite(u, ctx=ctx)
     return ctx[s]
 
   def render_uir(self) -> str:
@@ -1344,8 +1344,8 @@ class ProgramInfo:
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
-      if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(int, u.src[0].substitute(
-        {v:v.replace(arg=replace(v.arg, slot=-1)) for v in u.src[0].toposort() if v.op is Ops.PARAM and v.is_variable}).ssimplify())
+      if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = u.src[0].substitute(
+        {v:v.replace(arg=replace(v.arg, slot=-1)) for v in u.src[0].toposort() if v.op is Ops.PARAM and v.is_variable}).ssimplify()
     if not outs and not ins: outs = ins = _globals # if neither is inferred, default to all buffers
     return ProgramInfo(tuple(global_size), tuple(local_size),
                        tuple(sorted(_params, key=lambda p: p.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),

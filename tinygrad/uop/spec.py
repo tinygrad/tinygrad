@@ -2,8 +2,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, 
   NativeInfo
 from tinygrad.uop.uir import render_uir
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, weak_dtype
-from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape
-from tinygrad.helpers import is_disk_device
+from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape, is_disk_device
 
 # ***** uop helpers *****
 
