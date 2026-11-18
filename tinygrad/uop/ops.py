@@ -599,8 +599,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   @staticmethod
   def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:Register) -> UOp:
-    dst = UOp.sink(*(UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r) for i,r in enumerate(regs)))
-    return UOp.native(op, dst, dtype=dtype).call(*src)
+    body = UOp.sink(*(UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r) for i,r in enumerate(regs)))
+    return UOp.native(op, body, dtype=dtype).call(*src)
   def contract(self, *rngs:UOp):
     assert all(x.axis_type == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
