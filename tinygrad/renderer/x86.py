@@ -182,15 +182,15 @@ extra_matcher = PatternMatcher([
 # ***** X86 pre instruction selection *****
 def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp: return UOp.placeholder((count,), elem_dt, slot, AddrSpace.LOCAL)
 
-def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
+def gated_load(ctx:itertools.count, addr:UOp, alt:UOp, gate:UOp, x:UOp):
   local = scratch_buffer(addr.src[0].dtype, x.max_numel(), next(ctx))
   local_idx = local.index(UOp.cconst(0, dtypes.int32))
   # the AFTER orders the load after the scratch store
   sel = gate.where(addr, local_idx)
   return sel.after((local_idx if x.max_numel() == 1 else local).store(alt)).load()
 
-def gated_store(addr:UOp, gate:UOp, val:UOp):
-  local = scratch_buffer(addr.src[0].dtype, val.max_numel(), -1)
+def gated_store(ctx:itertools.count, addr:UOp, gate:UOp, val:UOp):
+  local = scratch_buffer(addr.src[0].dtype, val.max_numel(), next(ctx))
   sel = gate.where(addr, local.index(UOp.cconst(0, dtypes.int32)))
   return sel.store(val)
 
@@ -202,9 +202,9 @@ def flag_gate(m:UOp) -> UOp|None:
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
-  # vector BUFFERs get modeled in STACK space
-  (UPat((Ops.BUFFER, Ops.ALLOC), name="x"), lambda x: x.replace(arg=replace(x.arg, addrspace=AddrSpace.LOCAL))
-    if x.addrspace is AddrSpace.REG and x.max_numel() > 1 else None),
+  # vector BUFFERs get modeled in scratch space
+  (UPat((Ops.BUFFER, Ops.ALLOC), name="x"),
+   lambda ctx,x: scratch_buffer(x.dtype, n, next(ctx)) if x.addrspace is AddrSpace.REG and (n:=x.max_numel()) > 1 else None),
   # widening a uint32 is free, the 32bit write that produced it already zeroed the upper half
   (UPat(dtype=dtypes.uint32).cast(dtypes.int64s, name="x"), lambda x: x.replace(op=Ops.BITCAST)),
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
@@ -337,7 +337,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if regs(x) and regs(x)[0]._cons: return None
   # a register buffer is a BUFFER, a stack buffer becomes the LEA of its address before regalloc
   if x.op in {Ops.BUFFER, Ops.ALLOC}:
-    return with_regs(x, (ctx.vreg(regs(x)) if regs(x) else regbuf_reg(x),)) if x.addrspace is AddrSpace.REG else None
+    return with_regs(x, (ctx.vreg(x.arg.reg) if x.arg.reg else regbuf_reg(x),)) if x.addrspace is AddrSpace.REG else None
   if regs(x): defs = [ctx.vreg(regs(x))]
   elif x.dtype in dtypes.floats or x.arg[0] in XMM_OPS: defs = [ctx.vreg(XMM)]
   else: defs = [ctx.vreg(WGPR)]
