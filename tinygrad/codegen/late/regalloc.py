@@ -103,7 +103,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     if (v:=rdef(ctx.uops[i].src[j])) in ctx.reals.get(i, {}):
       reg = ctx.reals[i][v]
       if v in ctx.spills:
-        fill = ctx.ren.fill(ctx.spills[v], ctx.vdef(v), reg)
+        fill = ctx.ren.fill(ctx.spills[v], s, reg)
         # an AFTER-wrapped value (e.g. a RANGE bound) keeps its ordering deps around the fill
         nsrc.append(s.replace(src=(fill,)+s.src[1:]) if s.op is Ops.AFTER else fill)
       else: nsrc.append(retag(s, reg))
