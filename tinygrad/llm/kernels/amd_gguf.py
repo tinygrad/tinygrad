@@ -51,11 +51,11 @@ def _amd_dp4a(a:UOp, b:UOp, c:UOp, cdna:bool) -> UOp:
   # CDNA has no sudot4 (dot8-insts)
   d = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
   expr = "__builtin_amdgcn_sdot4({1}, {2}, {3}, false)" if cdna else "__builtin_amdgcn_sudot4(true, {1}, true, {2}, {3}, false)"
-  return dest.after(UOp.asm("{0}[0] = " + expr + ";").call(d, a, b, c))[0].load()
+  return d.after(UOp.asm("{0}[0] = " + expr + ";").call(d, a, b, c))[0].load()
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
   d = UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG)
-  return d.after(UOp.asm("{0}[0] = __builtin_amdgcn_perm({1}, {2}, {3});").call(dest, *[x.cast(dtypes.uint32) for x in (a, b, selectors)]))[0].load()
+  return d.after(UOp.asm("{0}[0] = __builtin_amdgcn_perm({1}, {2}, {3});").call(d, *[x.cast(dtypes.uint32) for x in (a, b, selectors)]))[0].load()
 
 def _load_byte(raw:UOp, base:UOp, offset:int|UOp) -> UOp:
   size = raw.dtype.itemsize
