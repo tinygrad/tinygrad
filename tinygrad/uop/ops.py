@@ -1233,7 +1233,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, hcq:HCQInfo|None=None) -> UOp:
     """call a body with the given args: a plain CallInfo CALL. all inputs must be ready (buffers/params), this never
-    creates ALLOCs: use call_with_outputs for calls that produce values"""
+    creates ALLOCs: use call_with_outputs for calls that produce values. a compiled PROGRAM's params are its args by slot, Variables included"""
     assert self.op in OPAQUE_CALL_BODIES, f"cannot call a {self.op} body, use call_with_outputs for value-producing bodies"
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
     assert all(r.axis_type is AxisType.DEVICE for r in self.ranges), \
@@ -1344,7 +1344,7 @@ class ProgramInfo:
   target: Target = Target()
 
   def launch_dims(self, var_vals:dict[str, int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])  # type: ignore[arg-type]
+    global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])
     local_size = tuple([sym_infer(sz, var_vals) for sz in self.local_size])
     return global_size, local_size
 
@@ -1354,15 +1354,15 @@ class ProgramInfo:
     _globals: list[int] = []
     outs: list[int] = []
     ins: list[int] = []
-    global_size: list[int] = [1, 1, 1]
-    local_size: list[int] = [1, 1, 1]
+    global_size: list[sint] = [1, 1, 1]
+    local_size: list[sint] = [1, 1, 1]
     for u in sink.toposort():
       if u.op is Ops.PARAM: _params.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
-      if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
+      if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(sint, u.src[0].ssimplify())
     if not outs and not ins: outs = ins = _globals # if neither is inferred, default to all buffers
     return ProgramInfo(tuple(global_size), tuple(local_size),
                        tuple(sorted(_params, key=lambda p: p.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),

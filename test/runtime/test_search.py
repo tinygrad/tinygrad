@@ -18,27 +18,15 @@ class TestSearch(unittest.TestCase):
     program = next(u for u in compiled.toposort(enter_calls=True) if u.op is Ops.PROGRAM)
     self.assertNotEqual(program.src[0].arg.applied_opts, ())
 
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "needs global dims")
-  def test_beam_unused_input(self):
-    # the kernel ignores its input at slot 1 and its captured Variable is its arg at slot 2, beam's timing call keeps the slots
-    v = UOp.variable("v", 1, 8).bind(3)
-    def fxn(o:UOp, _:UOp) -> UOp:
-      r = UOp.range(256, 0, AxisType.GLOBAL)
-      return o[r].store(v.cast(dtypes.float)).end(r).sink(arg=KernelInfo("ignores_input"))
-    with Context(BEAM=1, IGNORE_BEAM_CACHE=1, CACHELEVEL=0):
-      out = Tensor.custom_kernel(Tensor.empty(256), Tensor.empty(256), fxn=fxn)[0].realize()
-    self.assertEqual(out.tolist(), [3.0]*256)
-
-  def test_beam_scalar_first(self):
-    # the scalar at slot 0 isn't the launch device, the buffer at slot 1 is
+  def test_beam_call_args(self):
+    # beam times each candidate with args at the program's slots: a value for the scalar at slot 0, a placeholder for the unused slot 1
     v = UOp.variable("v", 1, 10, dtypes.int).bind(3)
-    def fxn(s:UOp, o:UOp) -> UOp:
+    def fxn(s:UOp, _:UOp, o:UOp) -> UOp:
       i = UOp.range(4096, 0, AxisType.WEAK)
-      return o[i].store(s).end(i).sink(arg=KernelInfo("scalar_first"))
-    def out(): return Tensor.custom_kernel(Tensor(v), Tensor.empty(4096, dtype=dtypes.int), fxn=fxn)[1]
-    # beam times the candidates with a value for the scalar
+      return o[i].store(s).end(i).sink(arg=KernelInfo("beam_call_args"))
+    def out(): return Tensor.custom_kernel(Tensor(v), Tensor.empty(16), Tensor.empty(4096, dtype=dtypes.int), fxn=fxn)[2]
     prg = to_program(out().linear_with_vars()[0].src[0].body, Device[Device.DEFAULT].renderer)
-    bufs = {1:UOp.from_buffer(Buffer(Device.DEFAULT, 4096*4).ensure_allocated(), dtypes.int)}
+    bufs = {2:UOp.from_buffer(Buffer(Device.DEFAULT, 4096*4).ensure_allocated(), dtypes.int)}
     self.assertTrue(all(math.isfinite(t) for t in _time_program(_beam_call(prg, bufs))))
     with Context(BEAM=1, IGNORE_BEAM_CACHE=1, CACHELEVEL=0): self.assertEqual(out().tolist()[:2], [3, 3])
 

@@ -620,6 +620,7 @@ class TestCustomKernelArgs(unittest.TestCase):
       return C[i].store(A[i]*v.cast(A.dtype)).end(i).sink(arg=KernelInfo(name="mul_v"))
     a = Tensor([1.0, 2.0])
     Tensor.custom_kernel(Tensor.empty(2), a, fxn=kernel, grad_fxn=lambda g, k: (None, (Tensor(g)*2).uop))[0].sum().backward()
+    assert a.grad is not None
     self.assertEqual(a.grad.tolist(), [2.0, 2.0])
 
   def test_scalar_arg_any_position(self):
@@ -692,12 +693,9 @@ class TestCustomKernelSharded(unittest.TestCase):
     devs = ("CPU:1", "CPU:2")
     out = Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(devs, axis=0).contiguous().realize()
     p, d = UOp.param(0, dtypes.int, 1, device=devs), UOp.range(2, 0, AxisType.DEVICE)
-    sink = p[0].store(d.cast(dtypes.int)).sink(arg=KernelInfo(name="store_dnum"))
-    # also when it's compiled before its call
-    for body in (to_program(sink, Device["CPU"].renderer), sink):
-      out.assign(Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(devs, axis=0)).realize()
-      run_linear(linear:=UOp(Ops.LINEAR, src=(body.call(out.uop.buf_uop),)))
-      self.assertEqual(out.tolist(), [0, 1])
+    linear = UOp(Ops.LINEAR, src=(p[0].store(d.cast(dtypes.int)).sink(arg=KernelInfo(name="store_dnum")).call(out.uop.buf_uop),))
+    run_linear(linear)
+    self.assertEqual(out.tolist(), [0, 1])
     # it's validated on each device
     validated = compile_linear(linear, validate=True).toposort()
     self.assertEqual(len([c for c in validated if c.op is Ops.CALL and c.body.op is Ops.CUSTOM_FUNCTION and c.body.arg.name == "validate"]), 2)

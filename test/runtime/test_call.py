@@ -21,23 +21,12 @@ class TestCall(unittest.TestCase):
     run_linear(UOp(Ops.LINEAR, src=(prg.call(out.uop.buf_uop, UOp.const(42, dtypes.int)),)))
     self.assertEqual(out.item(), 42)
 
-  def test_free_variable_from_var_vals(self):
-    # a kernel run directly reads a Variable it isn't given from var_vals, also when it's compiled before its call
-    p, v = UOp.param(0, dtypes.int, 1), Variable("v", 1, 10, dtypes.int)
-    sink = p[0].store(v).sink(arg=KernelInfo(name="store_v"))
-    for body in (sink, to_program(sink, Device[Device.DEFAULT].renderer)):
-      out = Tensor.empty(1, dtype=dtypes.int).realize()
-      run_linear(UOp(Ops.LINEAR, src=(body.call(out.uop.buf_uop),)), var_vals={"v": 7})
-      self.assertEqual(out.item(), 7)
-
-  def test_free_variable_bound_in_call(self):
-    # the kernel reads the Variable the call binds, the other one from var_vals, also when it's compiled before its call
+  def test_free_variables(self):
+    # a kernel run directly reads the Variable its call binds, and the one it isn't given from var_vals
+    out = Tensor.empty(1, dtype=dtypes.int).realize()
     p, a, b = UOp.param(0, dtypes.int, 1), Variable("a", 1, 10, dtypes.int), Variable("b", 1, 10, dtypes.int)
-    sink = p[0].store(a*10+b).sink(arg=KernelInfo(name="store_ab"))
-    for body in (sink, to_program(sink, Device[Device.DEFAULT].renderer)):
-      out = Tensor.empty(1, dtype=dtypes.int).realize()
-      run_linear(UOp(Ops.LINEAR, src=(body.call(out.uop.buf_uop, b.bind(3)),)), var_vals={"a": 2})
-      self.assertEqual(out.item(), 23)
+    run_linear(UOp(Ops.LINEAR, src=(p[0].store(a*10+b).sink(arg=KernelInfo(name="store_ab")).call(out.uop.buf_uop, b.bind(3)),)), var_vals={"a": 2})
+    self.assertEqual(out.item(), 23)
 
   def test_call_plus(self):
     a = Tensor.randn(10, 10)

@@ -196,21 +196,9 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 def lift_kernel_args(call:UOp) -> UOp|None:
   # a kernel run directly, not exported, may read what it isn't given: its device number, bound per device at launch,
   # and Variables, read from var_vals. they become its args
-  if call.body.op is Ops.PROGRAM:
-    # compiled before its call, it numbered them after its params by name. a Variable the call doesn't give at its slot, as a value or itself,
-    # is the Variable of that name the call binds, or read from var_vals
-    if not isinstance(call.body.arg, ProgramInfo): return None
-    given = {s.expr:s for s in call.src[1:] if s.is_variable}
-    def value(p:UOp, a:UOp|None) -> UOp:
-      if a is not None and a.addrspace is AddrSpace.ALU and not (a.is_variable and a.expr != p.expr): return a
-      return given.get(p.expr, p.replace(arg=replace(p.arg, slot=-1)))
-    named = {p.arg.slot:p for p in call.body.arg.params if p.is_variable and p.arg.name}
-    args = [value(named[i], a) if i in named else a for i,a in enumerate(call.src[1:])] + \
-           [value(named[i], None) for i in range(len(call.src)-1, max(named, default=-1)+1)]
-    return None if tuple(args) == call.src[1:] else call.replace(src=(call.body, *args))
   free = [u for u in call.body.toposort() if (u.op is Ops.RANGE and u.axis_type is AxisType.DEVICE) or (u.is_variable and u.arg.slot == -1)]
   return call.lift_args(free) if free else None
-pm_kernel_args = PatternMatcher([(UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM)),), name="call", allow_any_len=True), lift_kernel_args)])
+pm_kernel_args = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lift_kernel_args)])
 
 def _validate(call:UOp) -> UOp:
   # the validation compiles the kernel itself, so it gets the kernel with all its args
