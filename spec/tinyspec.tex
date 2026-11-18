@@ -244,7 +244,6 @@ Ternary & $(P, A, B)$
 \op{If} & (gate,) & --- & Begin conditional execution block. \\
 \op{Endif} & (if,) & --- & End conditional execution block. \\
 \op{Wmma} & (A, B, acc) & config & Warp matrix multiply-accumulate (tensor cores). \\
-\op{Custom} & (args\ldots) & fmt & Inject custom code string into generated source. \\
 \op{AtomicAdd} & (idx, val) & --- & Atomic read-modify-write: \texttt{buf[idx] += val}. \\[4pt]
 \op{Native} & (meta\ldots) & native & Opaque native code or device function (e.g.\ HW decode). Via \op{Call}. \\
 \op{Program} & (linear, source, binary) & --- & Compiled kernel: instructions, source, and machine code. \\
