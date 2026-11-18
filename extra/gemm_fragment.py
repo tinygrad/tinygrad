@@ -82,7 +82,7 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   C_local = C_local.after(C_local.store(0.0))
 
   # for ko in T.Pipelined(T.ceildiv(K, BLOCK_K), num_stages=3):
-  ko = UOp.range(cdiv(K, BLOCK_K), 6, AxisType.LOOP)
+  ko = UOp.range(cdiv(K, BLOCK_K), 6)
 
   # index the outer matrices
   a = a.rearrange("(m bm) (k bk) -> m k bm bk", bm=BLOCK_M, bk=BLOCK_K)[by, ko]
@@ -95,8 +95,8 @@ def matmul_relu_kernel(c:UOp, a:UOp, b:UOp) -> UOp:
   B_shared = B_shared.after(with_threads(B_shared).store(with_threads(b)))
 
   # T.gemm(A_shared, B_shared, C_local), no WMMA
-  kk = UOp.range(BLOCK_K, 11, AxisType.LOOP)
-  ir = UOp.range(TM, 12, AxisType.LOOP)
+  kk = UOp.range(BLOCK_K, 11)
+  ir = UOp.range(TM, 12)
   jj = UOp.range(TN, 13, AxisType.UPCAST)
   acc = C_local.after(kk)[ir, ty, tx, jj] + A_shared[ir*TM + ty, kk].cast(dtypes.float32) * B_shared[kk, tx*TN + jj].cast(dtypes.float32)
   # closing the ko loop here too; codegen adds the barrier so no thread overwrites the tiles while others still read them

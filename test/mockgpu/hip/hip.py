@@ -33,6 +33,6 @@ def hipGetDevicePropertiesR0600(prop, device_id):
 fns = {fn.__name__: getattr(mc, cu) for cu, fn in HIPIFY.items() if fn.__name__.startswith("hip")}
 fns |= dict(hipHostMalloc=mc.cuMemHostAlloc, hipModuleLoadData=hipModuleLoadData, hipGetDevicePropertiesR0600=hipGetDevicePropertiesR0600,
   hipMemcpyAsync=lambda dst, src, size, kind, stream: mc.cuMemcpyAsync(dst, src, size, stream),
-  hipStreamWaitValue64=lambda stream, ptr, value, flags, mask: mc.cuStreamWaitValue64_v2(stream, ptr, value, flags))
+  hipStreamWaitValue32=lambda stream, ptr, value, flags, mask: mc.cuStreamWaitValue32_v2(stream, ptr, value, flags))
 for name, fn in fns.items(): setattr(hip.dll, name, ctypes.CFUNCTYPE(getattr(hip, name).restype, *getattr(hip, name).argtypes)(fn))
 hip.dll._loaded_[hip.dll.nm] = hip.dll

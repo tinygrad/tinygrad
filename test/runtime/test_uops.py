@@ -239,7 +239,7 @@ class TestUOpPrograms(unittest.TestCase):
 
   def test_masked_read_of_constant_table(self):
     out = Tensor.empty(4, dtype=dtypes.int)
-    O, T, i = out.uop.placeholder_like(0), UOp(Ops.BINARY, arg=bytes([3, 4, 5, 6])), UOp.range(4, 0)
+    O, T, i = out.uop.placeholder_like(0), UOp(Ops.BINARY, arg=bytes([3, 4, 5, 6])), UOp.range(4, 0, AxisType.WEAK)
     self._run(O[i].store((T.index(i.valid(i < 2)).load() > 0).cast(dtypes.int)).end(i).sink(arg=KernelInfo()), out)
     self.assertEqual(out.tolist(), [1, 1, 0, 0])
 
@@ -273,7 +273,7 @@ class TestUOpPrograms(unittest.TestCase):
     # Axes: i,j are spatial; k is a reduction axis over the shared dim K
     i = UOp.range(M, axis_id=0)                             # rows of A/C
     j = UOp.range(N, axis_id=1)                             # cols of B/C
-    k = UOp.range(K, axis_id=2, axis_type=AxisType.LOOP)  # reduction over K
+    k = UOp.range(K, axis_id=2)  # reduction over K
 
     # Zero-init: write a scalar 0 to each (i,j).
     C = C[i, j].set(0.0)
@@ -292,7 +292,7 @@ class TestUOpPrograms(unittest.TestCase):
     with Context(DEBUG=0): Tensor.realize(a, b, c, ref)
 
     A, B, C = a.uop.placeholder_like(0), b.uop.placeholder_like(1), c.uop.placeholder_like(2)
-    i, j, k = UOp.range(10, 0), UOp.range(10, 1), UOp.range(10, 2, axis_type=AxisType.LOOP)
+    i, j, k = UOp.range(10, 0), UOp.range(10, 1), UOp.range(10, 2)
 
     C = C[i, j].set(0.0)
     C = C[i, j].set(C.after(k)[i, j] + A[i, k] * B[k, j], end=k)

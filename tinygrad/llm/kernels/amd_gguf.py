@@ -295,7 +295,8 @@ def _wmma_words(lane_group:UOp, kgroups:int) -> tuple[UOp|int, ...]:
 def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, lanes:int):
   if out_features % (16*output_tiles): output_tiles = 1
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
-  token_block, output_block = UOp.range(out.shape[0]//token_tile, 0), UOp.range(out_features//(16*output_tiles*output_waves), 1)
+  token_block = UOp.range(out.shape[0]//token_tile, 0, AxisType.GLOBAL)
+  output_block = UOp.range(out_features//(16*output_tiles*output_waves), 1, AxisType.GLOBAL)
   # lane is a hardware WARP range (like the flash kernel): the fragment math stays visible without being
   # range-split into nested loops, which would scramble the WMMA fragment layout
   lane, wave = UOp.range(lanes, -1, axis_type=AxisType.WARP), UOp.range(output_waves, 3, axis_type=AxisType.LOCAL)
@@ -333,7 +334,7 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
   accs = tuple(tuple(UOp.alloc((len(tokens[0]),), dtypes.float32, addrspace=AddrSpace.REG)
                      for tile in range(token_tile // 16)) for ot in range(output_tiles))
   accs = tuple(tuple(acc.after(acc.store(acc.const_like(0))) for acc in output_accs) for output_accs in accs)
-  group = UOp.range(in_features // Q8_GROUP_SIZE, 4, AxisType.LOOP)
+  group = UOp.range(in_features // Q8_GROUP_SIZE, 4)
   block, subgroup = group // 8, group % 8
   wmma_accs = [list(output_accs) for output_accs in accs]
   ks = tuple(word*4 + b for word in _wmma_words(lane_group, kgroups) for b in range(4))

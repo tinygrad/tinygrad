@@ -25,7 +25,7 @@ class Scheduler:
   def applied_opts(self) -> tuple[Opt, ...]: return self.ast.arg.applied_opts
   @property
   def rngs(self):
-    # Keep serial/vectorized reduction axes last, deriving their role from REDUCE rather than the axis type.
+    # Keep WEAK/UPCAST reduction axes last, deriving their role from REDUCE rather than the axis type.
     # void RANGEs are loops, not opt axes. the DEVICE axis is launched, not an opt axis
     red = self.reduce_ranges
     return sorted([u for u in self.ast.backward_slice if u.op is Ops.RANGE and u.dtype is not dtypes.void and u.vmax > 0
@@ -50,7 +50,7 @@ class Scheduler:
       name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=self.applied_opts, optimized=True))
 
-  def convert_loop_to_global(self) -> None:
+  def convert_weak_to_global(self) -> None:
     if not self.ren.has_local: return
     red = self.reduce_ranges
     rngs = [r for s in self.ast.src if s.op is Ops.END for r in s.src[1:] if r.axis_type is AxisType.WEAK and r not in red]
@@ -249,7 +249,7 @@ def args_from_ast(ast:UOp, dname:str) -> tuple[list[Buffer], dict[str, int]]:
 def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   if ast.arg is not None and ast.arg.optimized: return ast
   k = Scheduler(ast, ren)
-  k.convert_loop_to_global()
+  k.convert_weak_to_global()
   if (ki:=k.ast.arg).opts_to_apply is not None:
     for opt in ki.opts_to_apply: k.apply_opt(opt)
   elif beam >= 1:

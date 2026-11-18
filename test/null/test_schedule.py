@@ -3,7 +3,7 @@ import unittest
 from typing import cast
 from tinygrad import nn, dtypes, Device, Tensor, getenv
 from tinygrad.helpers import Context, all_same
-from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.dtype import AddrSpace
 from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.codegen import to_program, full_rewrite_to_sink
@@ -859,12 +859,12 @@ class TestSchedule(unittest.TestCase):
 
   # a kernel that copies part of a buffer is not a whole-buffer copy, so the cross-device kernel is rejected
   def test_error_on_partial_copy(self):
-    r = UOp.range(4, 0, AxisType.LOOP)
+    r = UOp.range(4, 0)
     with self.assertRaisesRegex(RuntimeError, "same device"):
       self._lower_copy_kernel(lambda p,q: p.index(r).store(q.index(r)).end(r))
 
   def test_error_on_partial_copy_gated(self):
-    r = UOp.range(8, 0, AxisType.LOOP)
+    r = UOp.range(8, 0)
     with self.assertRaisesRegex(RuntimeError, "same device"):
       self._lower_copy_kernel(lambda p,q: p.index(r.valid(r<4)).store(q.index(r)).end(r))
 
