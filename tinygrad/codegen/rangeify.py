@@ -200,7 +200,8 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
   size = prod(x.shape)
   dtype = x.commit_dtype()  # a BUFFER is never weak: store at the committed dtype, the .cast(x.dtype) on the result keeps readers unchanged
-  rngs = sorted(idx.ranges, key=lambda x: x.arg)
+  # the store ends the loops it is in, the DEVICE range is launched per device
+  rngs = sorted([r for r in idx.ranges if r.axis_type is not AxisType.DEVICE], key=lambda x: x.arg)
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
 
   # AFTER: add END to the existing STORE, return buffer with kernel dependency
@@ -214,7 +215,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
       if store_target.src[0].op is Ops.STAGE and store_target.src[0].src[0].op is Ops.INDEX:
         store_target = store_target.src[0].src[0]
       if store.src[1] is store_target: continue  # skip self-assign
-      end_rngs = sorted(dedup(tuple(store_target.ranges) + tuple(rngs)), key=lambda x: x.arg)
+      end_rngs = sorted(dedup([r for r in store_target.ranges if r.axis_type is not AxisType.DEVICE] + rngs), key=lambda x: x.arg)
       ended_stores.append(store_target.store(store.src[1]).end(*end_rngs))
     return buf.after(*ended_stores)
 

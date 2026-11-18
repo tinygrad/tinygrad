@@ -40,7 +40,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     # pass if client closed connection
     except (BrokenPipeError, ConnectionResetError): source.close()
 
-from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
+from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, range_str, range_start, multirange_str
 from tinygrad.uop.ops import KernelInfo, ParamArg, ProgramInfo
 from tinygrad.uop.render import render_index
 from tinygrad.uop.uir import render_uir, uops_colors, _inline, _render_arg
@@ -250,8 +250,8 @@ def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEven
     if (ref:=data.ref_map.get(e.profile_key)) is not None and ref < len(data.ctxs):
       name = data.ctxs[ref]["name"]
       if (ki:=data.ctxs[ref].get("ki")) is not None and ki.estimates is not None and ei is not None:
-        for est_key,est_val in (("FLOPS", ki.estimates.ops), ("B/s mem", ki.estimates.mem), ("B/s lds", ki.estimates.lds)):
-          with soft_err(lambda _: fmt.update({est_key:"ERR"})): fmt[est_key] = int(sym_infer(est_val, ei.arg['var_vals'])/(dur*1e-6))
+        # the exec event has the estimates of this call, a profile saved before it had them has no rates
+        for est_key,est_val in zip(("FLOPS", "B/s mem", "B/s lds"), ei.arg.get("estimates", ())): fmt[est_key] = int(est_val/(dur*1e-6))
         key = ei.key
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name

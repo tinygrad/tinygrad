@@ -52,8 +52,8 @@ def timeline(dev:str) -> UOp: return UOp.extern((2,), dtypes.u64, dev, "timeline
 def timeline_value(dev:str) -> UOp: return timeline(dev).index(1).load()
 
 def make_program(prg:UOp, size:int, device:str) -> UOp:
-  slot = int.from_bytes(prg.key[:8], "little")
-  if PROFILE: Compiled.profile_events.append(ProfileProgramEvent(device, prg.src[0].arg.function_name, prg.src[3].arg, None, slot, prg.key))
+  slot = int.from_bytes((key:=prg.program_key)[:8], "little")
+  if PROFILE: Compiled.profile_events.append(ProfileProgramEvent(device, prg.src[0].arg.function_name, prg.src[3].arg, None, slot, key))
   return UOp.alloc((size,), dtypes.u8, slot, device=device, name="program")
 
 def make_submit(*cmds:UOp, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a submit calls its commands on a queue, after deps
@@ -276,7 +276,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
 
   # calc deps for each tag
   tracker = DepsTracker(queue_of)
-  accs = [[(s, k in get_call_outs_ins(c)[0]) for k, s in enumerate(c.src[1:]) if not s.is_variable] for c, _, _ in ctx.batch]
+  accs = [[(s, k in get_call_outs_ins(c)[0]) for k, s in enumerate(c.src[1:]) if s.addrspace is not AddrSpace.ALU] for c, _, _ in ctx.batch]
   dep_tags:list[list[int]] = [tracker.access_resources(acc, tag) for tag, acc in enumerate(accs)]
 
   # add barriers when a call deps on another call of its queue
@@ -337,7 +337,7 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   names = [get_call_name(c, get_call_arg_uops(c)) for c, _, _ in ctx.batch]
   estimates = [estimate_uop(c) for c, _, _ in ctx.batch]
   stamps = [tuple(2 * s + 1 for s in ctx.stamps(d, tag)) for tag, (_, d, _) in enumerate(ctx.batch)]
-  profile_keys = [c.body.key if c.body.op is Ops.PROGRAM else None for c, _, _ in ctx.batch]
+  profile_keys = [c.body.program_key if c.body.op is Ops.PROGRAM else None for c, _, _ in ctx.batch]
   args = [[unwrap_lane(c.src[1 + g])[:2] for g in getattr(c.body.arg, "globals", range(len(c.src) - 1))] for c, _, _ in ctx.batch]
   bufs = [tuple(b.arg.slot for b, _ in a) if all(b.op in (Ops.PARAM, Ops.EXTERN) and lane is None for b, lane in a) else () for a in args]
   kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch]))

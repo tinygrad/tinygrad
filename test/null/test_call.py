@@ -4,7 +4,8 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.codegen import to_program
 from tinygrad.helpers import Target
 from tinygrad.renderer.cstyle import ClangRenderer
-from tinygrad.uop.ops import KernelInfo, Ops
+from dataclasses import replace
+from tinygrad.uop.ops import KernelInfo, Ops, ProgramInfo
 from tinygrad.codegen import resolve_linear_call
 
 def sched_key(t:Tensor): return t.export()[0].key
@@ -114,6 +115,15 @@ class TestArgOrder(unittest.TestCase):
     p1 = UOp.param(1, x.dtype, x.shape, self._dev(x))
     with self.assertRaises(AssertionError):
       UOp.call_with_outputs((p1.reshape(x.shape) * 2, p1.reshape(x.shape) + 1), x.uop, output_pos=(1, 0))
+
+class TestProgramKey(unittest.TestCase):
+  def test_program_key(self):
+    # a program is its kernel and code: binding its launch sizes keeps it, another entry point in the same binary is another program
+    p, binary = UOp.param(0, dtypes.int, (1,)), UOp(Ops.BINARY, arg=b"two kernels")
+    one, two = [UOp(Ops.PROGRAM, src=(p[0].store(UOp.const(1, dtypes.int)).sink(arg=KernelInfo(n)), UOp(Ops.LINEAR), UOp(Ops.SOURCE, arg=""), binary),
+                    arg=ProgramInfo()) for n in ("one", "two")]
+    self.assertEqual(one.program_key, one.replace(arg=replace(one.arg, global_size=(4, 1, 1))).program_key)
+    self.assertNotEqual(one.program_key, two.program_key)
 
 class TestCallCodegen(unittest.TestCase):
   def test_compiled_scalar_slots_are_not_call_slots(self):

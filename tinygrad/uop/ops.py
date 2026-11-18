@@ -1289,6 +1289,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return [s.after(kernel) for s in srcs]
 
   @functools.cached_property
+  def program_key(self) -> bytes:
+    # a PROGRAM is its kernel and code, the launch sizes in its arg are the ones a call binds
+    return UOp.sink(*self.src).key
+
+  @functools.cached_property
   def kernel_params(self) -> tuple[UOp, ...]:
     # the kernel's params in slot order. the LINEAR keeps two IMAGE params of one slot in order, isel and packing replace PARAMs
     params = [u for u in self.src[1].src if u in self.arg.params]
@@ -1324,8 +1329,8 @@ class KernelInfo:
 
 @dataclass(frozen=True)
 class ProgramInfo:
-  global_size: tuple[int|float, ...] = (1, 1, 1)
-  local_size: tuple[int, ...] = (1, 1, 1)
+  global_size: tuple[sint, ...] = (1, 1, 1)
+  local_size: tuple[sint, ...] = (1, 1, 1)
   params: tuple[UOp, ...] = ()
   globals: tuple[int, ...] = ()
   outs: tuple[int, ...] = ()
@@ -1333,7 +1338,7 @@ class ProgramInfo:
   target: Target = Target()
 
   def launch_dims(self, var_vals:dict[str, int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])  # type: ignore[arg-type]
+    global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])
     local_size = tuple([sym_infer(sz, var_vals) for sz in self.local_size])
     return global_size, local_size
 
@@ -1343,15 +1348,15 @@ class ProgramInfo:
     _globals: list[int] = []
     outs: list[int] = []
     ins: list[int] = []
-    global_size: list[int] = [1, 1, 1]
-    local_size: list[int] = [1, 1, 1]
+    global_size: list[sint] = [1, 1, 1]
+    local_size: list[sint] = [1, 1, 1]
     for u in sink.toposort():
       if u.op is Ops.PARAM: _params.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
-      if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(int, u.src[0].substitute(
+      if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(sint, u.src[0].substitute(
         {v:v.replace(arg=replace(v.arg, slot=-1)) for v in u.src[0].toposort() if v.op is Ops.PARAM and v.is_variable}).ssimplify())
     if not outs and not ins: outs = ins = _globals # if neither is inferred, default to all buffers
     return ProgramInfo(tuple(global_size), tuple(local_size),

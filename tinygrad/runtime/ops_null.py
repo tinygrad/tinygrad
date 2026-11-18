@@ -31,7 +31,7 @@ class NullQueue(HWQueue):
   def exec(self, call:UOp, prg:UOp):
     args = get_call_kernel_args(call, prg, self.devs)
     kernargs = UOp(Ops.LINEAR, src=tuple(pack_args(layout_args(args), 8 * max(len(args), 1))), arg="kernargs")
-    self.cmd(EXEC, kernargs, len(args), self.event(self.devs[0], prg.src[0].arg.function_name, prg.key))
+    self.cmd(EXEC, kernargs, len(args), self.event(self.devs[0], prg.src[0].arg.function_name, prg.program_key))
   def copy(self, dst:UOp, src:UOp, sz:int): self.cmd(COPY, dst, src, self.event(f"{src.device}:SDMA:0", f"{src.device} -> {dst.device}"))
   def wait(self, signal:UOp, value:UOp, eq:bool=False): self.cmd(WAIT, signal, value, int(eq))
   def signal(self, signal:UOp, value:UOp): self.cmd(STORE, signal, value)
