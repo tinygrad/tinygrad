@@ -251,6 +251,11 @@ class TestSchedule(unittest.TestCase):
       out = (x - x.max(keepdim=True)).max()
       check_schedule(out, 3)
 
+  def test_split_reduceop_inverse_reshapes(self):
+    x = Tensor.empty(3, *[2]*18).realize()
+    with Context(SPLIT_REDUCEOP=1):
+      check_schedule(x.reshape(*[2]*18, 3).reshape(3, *[2]*18).sum(), 1)
+
   def test_example_matmul_contig(self):
     x = Tensor.eye(64).clone().realize()
     y = Tensor.eye(64).clone().realize()
