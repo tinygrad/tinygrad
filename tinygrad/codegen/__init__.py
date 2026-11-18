@@ -1,13 +1,15 @@
 from dataclasses import replace, dataclass, field
 from collections import deque
 import itertools, functools, time, inspect
-from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
-from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
+from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC, SCACHE, BASEDIR
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile
+from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
+from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.uir import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
-from tinygrad.renderer import Renderer, Estimates
+from tinygrad.renderer import Renderer, Estimates, TinyELF
 from tinygrad.renderer.x86 import ISARenderer, IselContext
 from tinygrad.dtype import dtypes, AddrSpace
 
@@ -18,27 +20,17 @@ from tinygrad.uop.movement import mop_cleanup
 from tinygrad.codegen.decomp.dtype import DTypeDecompCtx, pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
 from tinygrad.codegen.decomp.transcendental import get_transcendental_patterns
-from tinygrad.codegen.late.coalesce import indexing_simplify
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.codegen.multi import multi_pm
-from tinygrad.codegen.prepare import pm_mops, expand_bitcast, _mop_index
+from tinygrad.codegen.prepare import pm_mops, expand_bitcast, _mop_index, prepare_rangeify
 from tinygrad.codegen.indexing import _stack_select
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
-from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, argsort, partition, to_function_name
-from tinygrad.renderer import TinyELF
-from tinygrad.uop.ops import _broadcast_shape, identity_element
-from tinygrad.codegen.rangeify import BufferizeOpts
-from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink
-from tinygrad.helpers import cpu_profile, SCACHE, BASEDIR, dedup, all_int
-from tinygrad.helpers import diskcache_get, diskcache_put, colored
+from tinygrad.codegen.late.coalesce import indexing_simplify, memory_coalescing, pm_simplify_add_image
+from tinygrad.codegen.rangeify import BufferizeOpts, get_kernel_graph
 from tinygrad.codegen.memory import memory_plan_rewrite
-from tinygrad.codegen.prepare import prepare_rangeify
-from tinygrad.codegen.rangeify import get_kernel_graph
-from tinygrad.uop.ops import pm_resolve_params, pm_flatten_linear
 
 def do_number_param(ctx:tuple[int, dict[str, int]], x:UOp): # after the params, one slot per name
   if x.is_variable and x.arg.slot == -1: return x.replace(arg=replace(x.arg, slot=ctx[0] + ctx[1].setdefault(x.arg.name, len(ctx[1]))))
@@ -687,9 +679,6 @@ def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, n:UOp, r:UOp|None=None):
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # NOTE: this is a codegen for SDMA devices
   if dst.is_virtual or src.is_virtual or (dst.device == src.device and not dst.on_disk()): return None
-  from tinygrad.codegen.simplify import pm_flatten_range, pm_simplify_ranges
-  from tinygrad.codegen.prepare import pm_mops
-  from tinygrad.uop.symbolic import sym
   sink = graph_rewrite(ast, sym+pm_mops+pm_flatten_range+pm_simplify_ranges, init_ctx=MapCtx, name="simplify ranges in copy")
   # the simplified body is kept only if it is a copy, any other kernel goes to codegen unchanged
   return pm_copy_kernel.rewrite(call.replace(src=(sink,) + call.src[1:]))
