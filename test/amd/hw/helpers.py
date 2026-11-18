@@ -108,7 +108,7 @@ def run_rdna4(instructions: list, out_reg: int = 2) -> list[int]:
   if not dev.renderer.target.arch.startswith('gfx12'): raise unittest.SkipTest('requires RDNA4 hardware')
   out_gpu = Buffer(dev.device, WAVE_SIZE * 4).ensure_allocated()
   sink = UOp.sink(UOp.param(0, dtypes.uint32, (WAVE_SIZE,)), UOp.special(WAVE_SIZE, 'lidx0'), arg=KernelInfo('test'))
-  prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.asm(x).call() for x in instructions))))
+  prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in instructions))))
   run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
   hw = list(out_gpu.as_memoryview().cast('I'))
   if emu != hw:
@@ -224,7 +224,7 @@ def run_program_hw(instructions: list, n_lanes: int = 1) -> WaveState:
   lds = UOp.placeholder((65536,), dtypes.uint8, 0, AddrSpace.LOCAL)
   scratch = UOp.alloc((512,), dtypes.uint8, name="scratch", addrspace=AddrSpace.GLOBAL)
   sink = UOp.sink(UOp.param(0, dtypes.uint32, (buf_sz // 4,)), UOp.special(n_lanes, "lidx0"), lds, scratch, arg=KernelInfo("test"))
-  body = UOp(Ops.LINEAR, src=tuple(UOp.asm(x).call() for x in prologue + instructions + epilogue))
+  body = UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in prologue + instructions + epilogue))
   prg = UOp(Ops.PROGRAM, src=(sink, body))
   run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
 
