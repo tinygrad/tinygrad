@@ -644,21 +644,22 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
   # get the encoding structure of the uop
   # when a uop writes to memory it takes the form of a store, dtype is void, no definition
   address:tuple[UOp|None, ...]
+  src = x.src_without_body
   if x.body.arg.code in X86GroupOp.WriteMem:
-    if len(x.src_without_body) > 4: address, rest = x.src_without_body[:4], x.src_without_body[4:]
-    else: address, rest = (x, None, None, None), x.src_without_body
+    if len(src) > 4: address, rest = src[:4], src[4:]
+    else: address, rest = (x, None, None, None), src
     imm_uop = rest[:1] if rest and is_imm(rest[0]) else (None,)
     return _encode(rest[0], *address, *(None, *rest[1:])) if reg is None else _encode(None, *address, *(None, *imm_uop))
 
   if x.body.arg.code in X86GroupOp.Rm1st:
-    if len(x.src_without_body) > 3: address, rest = x.src_without_body[:4], x.src_without_body[4:]
-    else: address, rest = (x.src_without_body[0], None, None, None), x.src_without_body[1:]
+    if len(src) > 3: address, rest = src[:4], src[4:]
+    else: address, rest = (src[0], None, None, None), src[1:]
     imm_uop = rest[:1] if rest and is_imm(rest[0]) else (None,)
     return _encode(x, *address, *(None, *imm_uop)) if reg is None else _encode(None, *address, *(x if sel else None, *imm_uop))
 
   if x.body.arg.code in X86GroupOp.Rm2nd:
-    if len(x.src_without_body) > 4: address, rest = x.src_without_body[1:5], x.src_without_body[:1] + x.src_without_body[5:]
-    else: address, rest = (x.src_without_body[1], None, None, None), x.src_without_body[:1] + x.src_without_body[2:]
+    if len(src) > 4: address, rest = src[1:5], src[:1] + src[5:]
+    else: address, rest = (src[1], None, None, None), src[:1] + src[2:]
     # cmp reg, rm doesn't define a new register
     return _encode(x, *address, *rest) if x.dtype is not dtypes.void else _encode(rest[0], *address)
 
