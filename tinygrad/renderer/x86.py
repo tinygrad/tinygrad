@@ -172,7 +172,6 @@ extra_matcher = PatternMatcher([
   (UPat(Ops.NEG, name="x"), lambda x: x.const_like(-0.0).alu(Ops.SUB, *x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
   (UPat(Ops.TRUNCMOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.TRUNCDIV, y)),
-  # scalar reg gated mops become cmovs
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate")),
     lambda addr,alt,gate: gate.where(addr.load(), alt) if is_regbuf(addr.src[0]) else None),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate")),
@@ -471,7 +470,6 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.int64s).bitcast(dtypes.float64).named("x"), lambda x: UOp.ins(X86Ops.VMOVQ, x.src, x.dtype)),
   (UPat(dtype=dtypes.float32).bitcast(dtypes.int32s).named("x"), lambda x: UOp.ins(X86Ops.VMOVDm, x.src, x.dtype)),
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: UOp.ins(X86Ops.VMOVQm, x.src, x.dtype)),
-  # lower register mops: a store is just a copy, load is an anon copy to preserve ordering
   (UPat.var("a").store(UPat.var("val")), lambda a,val:
     UOp(Ops.STACK).after(UOp.ins(copy_op(val.dtype), (val.after(buf),), buf.dtype, regbuf_reg(buf.without_after)))
     if is_regbuf((buf := a.src[0] if a.op is Ops.INDEX else a)) else None),
