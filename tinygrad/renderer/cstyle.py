@@ -67,8 +67,8 @@ base_rewrite = PatternMatcher([
 
   # call native code or an external function by symbol: the NATIVE body names the callee, the srcs are the args and set the types
   (UPat(Ops.CALL, src=(UPat(Ops.NATIVE, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
-   f.arg.name.format(*[ctx[y] for y in x.src[1:]]) if f.arg.fmt else
-   f"(({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(map(ctx.render_type, x.src[1:]))}))({f.arg.name}))"
+   f.arg.code.format(*[ctx[y] for y in x.src[1:]]) if f.arg.fmt else
+   f"(({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(map(ctx.render_type, x.src[1:]))}))({f.arg.code}))"
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])})" + (";" if x.dtype is dtypes.void else "")),
 
   # call to PROGRAM links BINARY at runtime
@@ -275,7 +275,7 @@ class CStyleLanguage(Renderer):
     bodies = dedup(u.body for u in UOp.sink(*uops).toposort(enter_calls=bool(self.inline_prefix)) if u.op is Ops.CALL
                    and not (u.body.op is Ops.NATIVE and u.body.arg.fmt))
     inlines = {b:self._render(list(b.src)) for b in bodies if b.op is Ops.LINEAR}
-    prefix = [f"extern void {b.arg.name}();" if b.op is Ops.NATIVE else
+    prefix = [f"extern void {b.arg.code}();" if b.op is Ops.NATIVE else
               f"extern void {b.src[0].arg.function_name}({', '.join(self.param_type(p) for p in b.arg.params)});" if b.op is Ops.PROGRAM else
               f"static inline {self.inline_prefix} void {b.arg}({', '.join(f'{self.param_type(p)} {n}' for n,(p,_) in inlines[b][2])}) {{\n" +
               '\n'.join(inlines[b][1]) + "\n}" for b in bodies]
