@@ -44,7 +44,7 @@ class LinearScanRegallocContext:
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
       if v not in self.spills:
-        self.spills[v] = ctx.assign_spill_slot(v, self.vdef(v))
+        self.spills[v] = ctx.assign_spill_slot(v)
       r = alloc(cons if cons is not None else v.cons, i)
       self.insert_before.setdefault(i, []).append((v, r))
       return r
