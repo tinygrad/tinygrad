@@ -1366,6 +1366,7 @@ OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.NATIVE}
 # the arg of NATIVE: native code or a function symbol, and the dtype of the value it returns
 @dataclass(frozen=True)
 class NativeInfo:
+  # renderer specific
   name: Any
   dtype: DType = dtypes.void
   fmt: bool = False
