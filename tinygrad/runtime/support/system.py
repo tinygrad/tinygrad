@@ -248,8 +248,7 @@ class PCIDevice:
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     return System.alloc_sysmem(size, vaddr, contiguous)
 
-  def reset_lock(self, lock=True):
-    if not OSX: fcntl.lockf(self.lock_fd, fcntl.LOCK_EX if lock else fcntl.LOCK_UN)
+  def reset_lock(self, lock=True): return None if OSX else fcntl.lockf(self.lock_fd, fcntl.LOCK_EX if lock else fcntl.LOCK_UN)
   def reset(self):
     if hasattr(self, "vfio_dev"): return vfio.VFIO_DEVICE_RESET(self.vfio_dev)
     os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
