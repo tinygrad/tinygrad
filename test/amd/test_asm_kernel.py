@@ -42,10 +42,11 @@ def custom_add_one(A:UOp) -> UOp:
   linear = UOp(Ops.LINEAR, src=tuple(u for u in sink.toposort() if u.op is Ops.CALL))
   return UOp(Ops.PROGRAM, src=(sink.replace(src=sink.src[:2]), linear))
 
-def custom_add_var(A:UOp, B:UOp, var:UOp) -> UOp:
+def custom_add_var(A:UOp, B:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
   assert A.dtype == dtypes.uint32, f"buffer dtype must be uint32, got {A.dtype}"
   threads = UOp.special(A.numel(), "lidx0")
+  var = UOp.param(2, dtypes.int, vmin_vmax=(0, 10), name="var", addrspace=AddrSpace.ALU)
   insts = [
     s_load_b128(s[4:7], s[0:1]),
     s_load_b32(s[8], s[0:1], offset=0x10), # all threads load the same variable
@@ -190,7 +191,7 @@ class TestAsmKernel(unittest.TestCase):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     b = Tensor.full((16, 16), 1, dtype=dtypes.uint32).contiguous().realize()
     a = Tensor.zeros_like(b).contiguous().realize()
-    a = Tensor.custom_kernel(a, b, Tensor(UOp.variable("var", 0, 10, dtypes.int)), fxn=custom_add_var)[0]
+    a = Tensor.custom_kernel(a, b, fxn=custom_add_var)[0]
     linear = a.schedule_linear()
     for i in range(4):
       run_linear(linear, var_vals={"var":i})
