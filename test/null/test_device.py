@@ -12,8 +12,8 @@ class TestDevice(unittest.TestCase):
     code = ("import sys; from types import SimpleNamespace; from tinygrad.runtime.support.system import System, PCIDevice; "
             "device = SimpleNamespace(lock_fd=System.flock_acquire(sys.argv[1])); PCIDevice.reset_lock(device)")
     with tempfile.NamedTemporaryFile() as lock_file:
-      result = subprocess.run([sys.executable, '-c', code, lock_file.name], capture_output=True, timeout=10)
-    self.assertEqual(result.returncode, 0, result.stderr.decode())
+      result = subprocess.run([sys.executable, '-c', code, lock_file.name], timeout=10)
+    self.assertEqual(result.returncode, 0)
 
   def test_canonicalize(self):
     self.assertEqual(Device.canonicalize(None), Device.DEFAULT)
