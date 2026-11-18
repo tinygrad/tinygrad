@@ -558,6 +558,14 @@ class TestVizIntegration(unittest.TestCase):
       for key, count in (("FLOPS", 7), ("B/s mem", 7*4*2), ("B/s lds", 7*4*2)):
         self.assertEqual(e["fmt"][key], int(count / (e["dur"]*1e-6)))
 
+  def test_estimates_saved_before(self):
+    # a profile saved before the exec events had estimates still renders, without the rates
+    with save_viz() as viz: (Tensor.empty(16, device="NULL") + 1).realize()
+    for e in cpu_events:
+      if isinstance(e, ProfilePointEvent) and e.name == "exec": del e.arg["estimates"]
+    profile = decode_profile(unwrap(get_profile(viz.data, cpu_events)))
+    self.assertTrue(all("FLOPS" not in e["fmt"] for e in profile["layout"]["NULL"]["events"]))
+
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 from tinygrad.viz.cli import decode_profile

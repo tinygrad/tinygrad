@@ -2,7 +2,7 @@ import math, time, traceback, signal
 from dataclasses import replace
 from tinygrad.uop.ops import sym_infer, AxisType, UOp, Ops
 from tinygrad.device import Device, Buffer
-from tinygrad.dtype import AddrSpace
+from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
@@ -124,11 +124,10 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:i
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
-    params = {p.arg.slot:p.dtype for p in s.ast.toposort() if p.op is Ops.PARAM and p.addrspace is not AddrSpace.ALU}
-    # the call args: the buffers, then each positional scalar gets the middle of its range
-    scalars = sorted({p for p in s.ast.toposort() if p.op is Ops.PARAM and p.addrspace is AddrSpace.ALU and p.arg.name is None},
-                     key=lambda p: p.arg.slot)
-    buf_uops = [UOp.from_buffer(b, params[i]) for i, b in enumerate(rawbufs)] + [UOp.const(int(p.vmax+p.vmin)//2, p.dtype) for p in scalars]
+    # the call args at the kernel's slots: the buffers, a scalar gets the middle of its range, an unused slot a placeholder
+    params, bufs = {p.arg.slot:p for p in s.ast.toposort() if p.op is Ops.PARAM and p.arg.slot >= 0}, iter(rawbufs)
+    buf_uops = [UOp.const(0, dtypes.int) if (p:=params.get(i)) is None else UOp.const(int(p.vmax+p.vmin)//2, p.dtype)
+                if p.addrspace is AddrSpace.ALU else UOp.from_buffer(next(bufs), p.dtype) for i in range(max(params, default=-1)+1)]
     exiting, st = False, time.perf_counter()
     dev = Device[s.ren.target.device]
     while not exiting:

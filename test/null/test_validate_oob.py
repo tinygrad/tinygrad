@@ -31,6 +31,13 @@ class TestValidateOOB(unittest.TestCase):
       with self.assertRaises(RuntimeError):
         to_uops_list([buf.index(Variable("i", -5, 10)).load()])  # negative
 
+  def test_unnamed_scalars_are_independent(self):
+    # two unnamed scalar params are different args, an index that's only in bounds when they're equal is out of bounds
+    with Context(CHECK_OOB=1, SPEC=2):
+      buf = UOp.param(0, dtypes.int, 1)
+      a, b = (UOp.param(i, dtypes.int, vmin_vmax=(0, 8), addrspace=AddrSpace.ALU) for i in (1, 2))
+      with self.assertRaises(RuntimeError): to_uops_list([buf.index(a - b).load()])
+
   def test_range_with_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, 16)

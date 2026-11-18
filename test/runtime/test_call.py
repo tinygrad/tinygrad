@@ -13,6 +13,14 @@ from tinygrad.renderer.llvmir import LLVMRenderer
 def sched_key(t:Tensor): return t.export()[0].key
 
 class TestCall(unittest.TestCase):
+  def test_named_scalar_is_its_arg(self):
+    # a named scalar param that isn't a Variable gets the call's arg at its slot
+    out = Tensor.empty(1, dtype=dtypes.int).realize()
+    p, n = UOp.param(0, dtypes.int, (1,)), UOp.param(1, dtypes.int, name="n", addrspace=AddrSpace.ALU)
+    prg = to_program(p.index(UOp.const(0)).store(n).sink(arg=KernelInfo("named_scalar")), Device[Device.DEFAULT].renderer)
+    run_linear(UOp(Ops.LINEAR, src=(prg.call(out.uop.buf_uop, UOp.const(42, dtypes.int)),)))
+    self.assertEqual(out.item(), 42)
+
   def test_call_plus(self):
     a = Tensor.randn(10, 10)
     b = Tensor.randn(10, 10)
