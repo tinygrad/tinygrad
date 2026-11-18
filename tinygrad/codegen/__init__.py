@@ -462,8 +462,6 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if isinstance(ctx, ISARenderer):
     lin_ctx = ctx.linear_ctx_type(ctx)
     lst = line_rewrite(lst, ctx.pre_regalloc_matcher, lin_ctx)
-    # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
-    lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
     regalloc_ctx = LinearScanRegallocContext(lin_ctx, lst, ctx)
     lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
     lst = lin_ctx.insert_linearized(lst)

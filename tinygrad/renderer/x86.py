@@ -37,7 +37,7 @@ def rdef(u:UOp):
 class LinearContext:
   def __init__(self, ren:'ISARenderer'): self.ren, self.stack_size = ren, 0
   def insert_linearized(self, uops:list[UOp]) -> list[UOp]: return uops
-  def assign_spill_slot(self, r:Register, u:UOp) -> int: raise NotImplementedError("arch specific")
+  def assign_spill_slot(self, r:Register) -> int: raise NotImplementedError("arch specific")
 
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
@@ -510,7 +510,7 @@ class X86LinearContext(LinearContext):
     for r in CALLEE_SAVED:
       if r.name in used:
         a = reg(dtypes.uint64, r)
-        slot = self.assign_spill_slot(r,a)
+        slot = self.assign_spill_slot(r)
         before.append(self.ren.spill(slot,a))
         after.append(self.ren.fill(slot,a,r))
 
@@ -519,7 +519,7 @@ class X86LinearContext(LinearContext):
       after.append(with_regs(UOp.ins(X86Ops.ADDi, (stack_pointer(),imm(dtypes.int32, self.stack_size)), dtypes.uint64), (RSP,)))
     return before + uops[:-1] + after + [uops[-1]]
 
-  def assign_spill_slot(self, r:Register, u:UOp) -> int:
+  def assign_spill_slot(self, r:Register) -> int:
     sz = 16 if r.cons[0] in XMM else 8
     offset = self.stack_size + (sz - self.stack_size % sz) %sz
     self.stack_size = offset + sz
