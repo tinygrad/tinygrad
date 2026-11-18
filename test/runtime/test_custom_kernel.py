@@ -579,6 +579,7 @@ class TestCustomKernel(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.empty(N, dtype=dtypes.int), Tensor.arange(2*N).clone().realize(), fxn=kernel)[0]
     self.assertEqual(out.tolist(), [2*i+N for i in range(N)])
 
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does not support dynamic register indexing")
   def test_alloc_vec(self): self.test_alloc(4)
 
   def test_store_value_broadcasts_to_target(self):
