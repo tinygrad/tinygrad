@@ -249,7 +249,6 @@ class PCIDevice:
     return System.alloc_sysmem(size, vaddr, contiguous)
 
   def reset_lock(self, lock=True):
-    # macOS lockf conflicts with the lifetime flock.
     if not OSX: fcntl.lockf(self.lock_fd, fcntl.LOCK_EX if lock else fcntl.LOCK_UN)
   def reset(self):
     if hasattr(self, "vfio_dev"): return vfio.VFIO_DEVICE_RESET(self.vfio_dev)
