@@ -28,7 +28,7 @@ def regs(u:UOp) -> tuple[Register, ...]:
 def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp:
   assert u.dtype is not dtypes.void, "void cannot have output registers"
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return u.replace(arg=replace(u.arg, reg=r[0]))
-  return u.replace(arg=u.arg[:2]+r)
+  return UOp.ins(u.arg[0], u.src, u.dtype, *r)
 
 def rdef(u:UOp):
   if u.op in {Ops.AFTER, Ops.BITCAST}: return rdef(u.src[0])
