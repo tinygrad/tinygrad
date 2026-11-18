@@ -29,15 +29,15 @@ def custom_add_one(A:UOp) -> UOp:
   value = UOp.alloc((32,), dtypes.u32, 3, AddrSpace.REG, reg=v[2])
   one = UOp.alloc((32,), dtypes.u32, 4, AddrSpace.REG, reg=v[3])
   result = UOp.alloc((32,), dtypes.u32, 5, AddrSpace.REG, reg=v[4])
-  saddr = saddr.after(UOp.asm(s_load_b64(s[2:3], s[0:1], soffset=NULL)).call(saddr, kernarg))
-  saddr = saddr.after(UOp.asm(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0)).call(saddr))
-  offset = offset.after(UOp.asm(v_lshlrev_b32_e32(v[1], 2, v[0])).call(offset, lane))
-  value = value.after(UOp.asm(global_load_b32(v[2], v[1], saddr=s[2:3])).call(value, offset, saddr, A))
-  value = value.after(UOp.asm(s_waitcnt_vmcnt(sdst=NULL, simm16=0)).call(value))
-  one = one.after(UOp.asm(v_mov_b32_e32(v[3], 1.0)).call(one))
-  result = result.after(UOp.asm(v_add_f32_e32(v[4], v[2], v[3])).call(result, value, one))
-  store = A.after(UOp.asm(global_store_b32(addr=v[1], data=v[4], saddr=s[2:3])).call(A, offset, result, saddr))
-  end = UOp.asm(s_endpgm()).call(store)
+  saddr = saddr.after(UOp.native(s_load_b64(s[2:3], s[0:1], soffset=NULL)).call(saddr, kernarg))
+  saddr = saddr.after(UOp.native(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0)).call(saddr))
+  offset = offset.after(UOp.native(v_lshlrev_b32_e32(v[1], 2, v[0])).call(offset, lane))
+  value = value.after(UOp.native(global_load_b32(v[2], v[1], saddr=s[2:3])).call(value, offset, saddr, A))
+  value = value.after(UOp.native(s_waitcnt_vmcnt(sdst=NULL, simm16=0)).call(value))
+  one = one.after(UOp.native(v_mov_b32_e32(v[3], 1.0)).call(one))
+  result = result.after(UOp.native(v_add_f32_e32(v[4], v[2], v[3])).call(result, value, one))
+  store = A.after(UOp.native(global_store_b32(addr=v[1], data=v[4], saddr=s[2:3])).call(A, offset, result, saddr))
+  end = UOp.native(s_endpgm()).call(store)
   sink = UOp.sink(A.base, threads, end, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
   linear = UOp(Ops.LINEAR, src=tuple(u for u in sink.toposort() if u.op is Ops.CALL))
   return UOp(Ops.PROGRAM, src=(sink.replace(src=sink.src[:2]), linear))
@@ -58,7 +58,7 @@ def custom_add_var(A:UOp, B:UOp, var:UOp) -> UOp:
     s_endpgm(),
   ]
   sink = UOp.sink(A.base, B.base, var, threads, arg=KernelInfo(f"custom_add_var_{A.numel()}"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.native(x).call() for x in insts]))))
 
 def custom_wave_sync(A:UOp, arch:str) -> UOp:
   # 4 waves across 1024 WG — enough to saturate a SIMD with many concurrent WGs
@@ -72,7 +72,7 @@ def custom_wave_sync(A:UOp, arch:str) -> UOp:
     insts += [s_nop(0)]*4
   insts.append(s_endpgm())
   sink = UOp.sink(A.base, threads, wg, arg=KernelInfo("custom_wave_sync"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.native(x).call() for x in insts]))))
 
 def custom_lds_sync(A:UOp, arch:str) -> UOp:
   A = A.flatten()
@@ -106,7 +106,7 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
     isa.s_endpgm(),
   ]
   sink = UOp.sink(A.base, lds, threads, wg, arg=KernelInfo("custom_lds_sync"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.native(x).call() for x in insts]))))
 
 def custom_handwritten(A:UOp) -> UOp:
   A = A.flatten()
@@ -152,7 +152,7 @@ def custom_handwritten(A:UOp) -> UOp:
   k.emit(r4.s_endpgm())
   insts = k.finalize()
   sink = UOp.sink(A.base, threads, wg, lds, arg=KernelInfo("custom_handwritten"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.native(x).call() for x in insts]))))
 
 def custom_data_deps(A:UOp) -> UOp:
   A = A.flatten()
@@ -168,7 +168,7 @@ def custom_data_deps(A:UOp) -> UOp:
   k.emit(s_endpgm())
   insts = k.finalize()
   sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_data_deps"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.native(x).call() for x in insts]))))
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestAsmKernel(unittest.TestCase):
@@ -240,7 +240,7 @@ class TestAsmKernel(unittest.TestCase):
       k.emit(s_endpgm())
       insts = k.finalize()
       sink = UOp.sink(out.base, arg=KernelInfo("cfg_kernel"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.native(x).call() for x in insts]))))
     out = Tensor.empty(3).custom_kernel(fxn=cfg_kernel)[0]
     self.assertListEqual(out.tolist(), [2.0, 1.0, 3.0])
 
@@ -261,7 +261,7 @@ class TestAsmKernel(unittest.TestCase):
       k.emit(s_endpgm())
       insts = k.finalize()
       sink = UOp.sink(out.base, arg=KernelInfo("cfg_loop_kernel"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.asm(x).call() for x in insts]))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.native(x).call() for x in insts]))))
     out = Tensor.empty(1, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel)[0]
     self.assertListEqual(out.tolist(), [4])
 
@@ -274,7 +274,7 @@ class TestAsmKernel(unittest.TestCase):
         global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), s_endpgm(),
       ]
       sink = UOp.sink(out.base, UOp.special(1, "lidx0"), arg=KernelInfo("unaligned_global_store"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.asm(x).call() for x in insts))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in insts))))
     out = Tensor.full((8,), 0xA5, dtype=dtypes.uint8).contiguous().realize()
     out = out.custom_kernel(fxn=store_kernel)[0]
     self.assertListEqual(out.tolist(), [0xA5, 0xA5, 0x78, 0x56, 0x34, 0x12, 0xA5, 0xA5])
@@ -286,7 +286,7 @@ class TestAsmKernel(unittest.TestCase):
       insts = [s_load_b64(s[0:1], s[0:1], soffset=NULL), s_waitcnt_lgkmcnt(sdst=NULL, simm16=0), v_mov_b32_e32(v[0], 0),
                v_mov_b32_e32(v[1], 7), *[s_nop(0)]*55, global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), s_endpgm()]
       sink = UOp.sink(out.base, UOp.special(1, "lidx0"), arg=KernelInfo("store_at_text_end"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.asm(x).call() for x in insts))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in insts))))
     out = Tensor.zeros(1, dtype=dtypes.int32).contiguous().realize().custom_kernel(fxn=store_kernel)[0]
     self.assertListEqual(out.tolist(), [7])
 
@@ -304,7 +304,7 @@ class TestAsmKernel(unittest.TestCase):
         s_endpgm(),
       ]
       sink = UOp.sink(out.base, UOp.special(threads, "lidx0"), arg=KernelInfo(f"wave_sgprs_{threads}"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.asm(x).call() for x in insts))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in insts))))
     for t in [31, 55, 64]:
       out = Tensor(np.full(t, 0xFFFFFFFF, dtype=np.uint32)).realize().custom_kernel(fxn=functools.partial(readlane_kernel, threads=t))[0]
       self.assertListEqual(out.tolist(), [i//32*32 for i in range(t)])
@@ -331,7 +331,7 @@ class TestAsmKernel(unittest.TestCase):
         global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), s_endpgm(),
       ]
       sink = UOp.sink(out.base, arg=KernelInfo("k"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.asm(x).call() for x in insts))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in insts))))
     out = Tensor.empty(1, dtype=dtypes.uint32).custom_kernel(fxn=k)[0]
     with Context(RELIFT=max(RELIFT.value, 1)):
       out.realize()

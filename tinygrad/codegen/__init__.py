@@ -488,7 +488,7 @@ def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
 
 pm_to_program = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"),), name="prg"), do_linearize),
-  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR, src=UPat(Ops.ASM).call(allow_any_len=True), name="lin")), name="prg"), do_assemble),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR, src=UPat(Ops.NATIVE).call(allow_any_len=True), name="lin")), name="prg"), do_assemble),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR), UPat(Ops.SOURCE, name="source")), name="prg"), do_compile),
 ])

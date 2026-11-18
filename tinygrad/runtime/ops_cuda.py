@@ -33,13 +33,13 @@ pm_cuda = PatternMatcher([ # None is the stream
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), cu_launch_kernel),
   (UPat(Ops.CALL, src=(UPat(Ops.STORE), UPat(name="dst"), UPat(name="src")), allow_any_len=True),
    lambda ctx, dst, src: (cuda.cuMemcpyAsync, dst.getaddr(ctx.device), src.getaddr(ctx.device), src.max_numel() * src.dtype.itemsize, None)),
-  (UPat(Ops.CALL, src=(UPat.custom_function("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
+  (UPat(Ops.CALL, src=(UPat.native("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
    lambda ctx, dst, src, n: (cuda.cuMemcpyAsync, dst.getaddr(ctx.device), src.getaddr(ctx.device), n.val, None)),
-  (UPat(Ops.CALL, src=(UPat.custom_function("wait"), UPat(name="sig"), UPat(name="val"))),
+  (UPat(Ops.CALL, src=(UPat.native("wait"), UPat(name="sig"), UPat(name="val"))),
    lambda ctx, sig, val: (cuda.cuStreamWaitValue32_v2, None, sig.getaddr(ctx.device), val.cast(dtypes.uint32), cuda.CU_STREAM_WAIT_VALUE_GEQ)),
-  (UPat(Ops.CALL, src=(UPat.custom_function("store"), UPat(name="sig"), UPat(name="val"))),
+  (UPat(Ops.CALL, src=(UPat.native("store"), UPat(name="sig"), UPat(name="val"))),
    lambda ctx, sig, val: (cuda.cuStreamWriteValue32_v2, None, sig.getaddr(ctx.device), val.cast(dtypes.uint32), cuda.CU_STREAM_WRITE_VALUE_DEFAULT)),
-  (UPat(Ops.CALL, src=(UPat.custom_function("timestamp"), UPat(name="sig"))), # [sig][stamp]
+  (UPat(Ops.CALL, src=(UPat.native("timestamp"), UPat(name="sig"))), # [sig][stamp]
    lambda ctx, sig: (cuda.cuLaunchHostFunc, None, UOp.extern((1,), dtypes.uint64, ctx.device, "stamp").getaddr(ctx.host),
                      sig[1:2].getaddr(ctx.device))),
 ])

@@ -105,7 +105,7 @@ def nv_submit(cmdbuf:UOp, ring:UOp, gpput:UOp, doorbell:UOp, put:UOp, token:int)
 class NVQueue(HWQueue):
   dev:NVDevice
   q_rewrite = HWQueue.q_rewrite + PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat.custom_function("nv"),), allow_any_len=True, name="u"), lambda ctx, u: ctx.q(*u.src[1:])),
+    (UPat(Ops.CALL, src=(UPat.native("nv"),), allow_any_len=True, name="u"), lambda ctx, u: ctx.q(*u.src[1:])),
   ])
 
   def nvm(self, subc:int, mthd:int|UOp, *vals, typ=2): self.q(*nvm(subc, mthd, *vals, typ=typ))
