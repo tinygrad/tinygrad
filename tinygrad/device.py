@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 # **************** Device ****************
 
-ALL_DEVICES = ["METAL", "AMD", "NV", "QCOM", "CUDA", "HIP", "CL", "CPU", "DSP", "WEBGPU"]
+ALL_DEVICES = ["METAL", "AMD", "NV", "QCOM", "CUDA", "HIP", "CL", "CPU", "DSP", "WEBGPU", "MT"]
 HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "HIP", "NULL", "METAL", "CL"))
 HOST_DEVS = frozenset(("CPU", "PYTHON"))
 UVM_DEVS = frozenset(("QCOM", "METAL", "CL")) # cl uses host memcpys
