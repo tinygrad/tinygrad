@@ -568,8 +568,9 @@ class TestCustomKernel(unittest.TestCase):
   def test_custom_uop(self):
     N = 4
     def kernel(x:UOp) -> UOp:
-      y = UOp.custom_function("__builtin_shufflevector({0}, {0}, 3, 2, 1, 0)", shape=(N,), dtype=x.dtype,
-                              fmt=True).call(UOp.stack([x[i].load() for i in range(N)]))
+      y = UOp.alloc((N,), x.dtype, addrspace=AddrSpace.REG)
+      code = "\n".join(f"{{0}}[{i}] = __builtin_shufflevector({{1}}, {{1}}, 3, 2, 1, 0)[{i}];" for i in range(N))
+      y = y.after(UOp.asm(code).call(y, UOp.stack([x[i].load() for i in range(N)])))
       self.assertEqual(y.shape, (N,))
       return x.store(y).sink(arg=KernelInfo("kernel"))
     out = Tensor.custom_kernel(Tensor.arange(N).clone("CPU"), fxn=kernel)[0]

@@ -49,12 +49,13 @@ def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp, cdna:bool) -> UOp:
   # CDNA has no sudot4 (dot8-insts)
-  return UOp.custom_function("__builtin_amdgcn_sdot4({}, {}, {}, false)" if cdna else "__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)",
-                             shape=a.shape, dtype=dtypes.int32, fmt=True).call(a, b, c, inline=True)
+  d = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
+  expr = "__builtin_amdgcn_sdot4({1}, {2}, {3}, false)" if cdna else "__builtin_amdgcn_sudot4(true, {1}, true, {2}, {3}, false)"
+  return dest.after(UOp.asm("{0}[0] = " + expr + ";").call(d, a, b, c))[0].load()
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
-  return UOp.custom_function("__builtin_amdgcn_perm({}, {}, {})", shape=a.shape, dtype=dtypes.uint32,
-                             fmt=True).call(*[x.cast(dtypes.uint32) for x in (a, b, selectors)], inline=True)
+  d = UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG)
+  return d.after(UOp.asm("{0}[0] = __builtin_amdgcn_perm({1}, {2}, {3});").call(dest, *[x.cast(dtypes.uint32) for x in (a, b, selectors)]))[0].load()
 
 def _load_byte(raw:UOp, base:UOp, offset:int|UOp) -> UOp:
   size = raw.dtype.itemsize
@@ -112,13 +113,15 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, tokens:int, in_featur
   # Quantize each input once, then pack four neighboring lanes into one word.
   # Keep divisions intact: reciprocal multiplication can move half-precision inputs across rounding ties.
   warp_max = warp_reduce(value.abs(), maximum=True, full_wave=True)
-  d = UOp.custom_function("({0}/127.0f)", shape=warp_max.shape, dtype=dtypes.float, fmt=True).call(warp_max).maximum(1e-8)
-  rounded = UOp.custom_function("__builtin_nearbyintf({0}/{1})", shape=value.shape, dtype=dtypes.float, fmt=True).call(value, d)
+  d = UOp.alloc((1,), dtypes.float, addrspace=AddrSpace.REG)
+  d = d.after(UOp.asm("{0}[0] = {1}/127.0f;").call(d, warp_max))[0].load().maximum(1e-8)
+  rounded = UOp.alloc((1,), dtypes.float, addrspace=AddrSpace.REG)
+  rounded = rounded.after(UOp.asm("{0}[0] = __builtin_nearbyintf({1}/{2});").call(rounded, value, d))[0].load()
   quant = rounded.clip(-127, 127).cast(dtypes.int8)
   word = quant.cast(dtypes.uint8).cast(dtypes.uint32) << ((lane%4)*8).cast(dtypes.uint32)
   for offset in (1, 2):
-    word |= UOp.custom_function(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f|offset<<10})", shape=word.shape, dtype=dtypes.uint32,
-                                fmt=True).call(word)
+    dest = UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG)
+    word |= dest.after(UOp.asm(f"{{0}}[0] = __builtin_amdgcn_ds_swizzle({{1}}, {0x1f|offset<<10});").call(dest, word))[0].load()
   stores = (q[token, group, (lane//4).valid((lane%4).eq(0))].store(word),
             scale[token, group.valid(lane.eq(0))].store(d),
             xsum[token, group, (lane//16).valid((lane%16).eq(0))].store(warp_reduce(quant.float())))
