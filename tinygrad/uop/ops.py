@@ -371,7 +371,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
       case Ops.NATIVE:
-        return self.src[-1].as_shape if self.dtype != dtypes.void else None
+        return self.src[0].as_shape if self.dtype != dtypes.void else None
       case Ops.PYLITERAL: return None
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
@@ -599,7 +599,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   @staticmethod
   def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:Register) -> UOp:
-    dst = UOp.sink(*(UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r).store(0) for i,r in enumerate(regs)))
+    dst = UOp.sink(*(UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r) for i,r in enumerate(regs)))
     return UOp.native(op, dst, dtype=dtype).call(*src)
   def contract(self, *rngs:UOp):
     assert all(x.axis_type == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
@@ -1228,7 +1228,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def native(code:Any, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
     shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
-    return UOp(Ops.NATIVE, src=src+shape_src, arg=NativeInfo(code, dtype, fmt))
+    return UOp(Ops.NATIVE, src=shape_src+src, arg=NativeInfo(code, dtype, fmt))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, hcq:HCQInfo|None=None) -> UOp:

@@ -21,10 +21,10 @@ class IselContext:
   def __init__(self): self.reg_n = itertools.count()
   def vreg(self, cons:tuple[Register, ...]|Register): return Register(f"v{next(self.reg_n)}", 0, cons if isinstance(cons, tuple) else (cons,))
 
-# a native call declares its register writes as stores to register parameters
+# a native call declares its destination registers as register parameters
 def regs(u:UOp) -> tuple[Register, ...]:
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return (u.arg.reg,) if u.arg.reg is not None else ()
-  return tuple(s.src[0].arg.reg for s in u.body.src[0].src) if u.op is Ops.CALL else ()
+  return tuple(s.arg.reg for s in u.body.src[-1].src) if u.op is Ops.CALL else ()
 def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp:
   assert u.dtype is not dtypes.void, "void cannot have output registers"
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return u.replace(arg=replace(u.arg, reg=r[0]))
