@@ -125,7 +125,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
          Ops.BACKEDGE | Ops.BARRIER | Ops.IF | Ops.ENDIF | Ops.NOOP | \
-         Ops.REWRITE_ERROR | Ops.PYLITERAL | Ops.ASM:
+         Ops.REWRITE_ERROR | Ops.PYLITERAL:
       # always void
       return dtypes.void
     case Ops.CALL:
@@ -335,7 +335,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.BACKEDGE | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.ASM:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE:
         return None
 
       # INS shape is always scalar, vector width is in the instruction encoding
@@ -600,7 +600,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:Register) -> UOp: return UOp(Ops.INS, src, (op, dtype, *regs))
   @staticmethod
-  def asm(op) -> UOp: return UOp(Ops.ASM, arg=op)
+  def asm(op) -> UOp: return UOp.native(op)
   def contract(self, *rngs:UOp):
     assert all(x.axis_type == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
@@ -1226,7 +1226,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
-  def native(name:str, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
+  def native(name:Any, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
     shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
     return UOp(Ops.NATIVE, src=shape_src+src, arg=NativeInfo(name, dtype, fmt))
 
@@ -1361,12 +1361,12 @@ class ProgramInfo:
                        tuple(sorted(dedup(ins))), target)
 
 # the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), bulk stores, and function references
-OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.NATIVE, Ops.ASM}
+OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.NATIVE}
 
 # the arg of NATIVE: native code or a function symbol, and the dtype of the value it returns
 @dataclass(frozen=True)
 class NativeInfo:
-  name: str
+  name: Any
   dtype: DType = dtypes.void
   fmt: bool = False
 
