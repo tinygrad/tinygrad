@@ -213,9 +213,11 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
 
 @functools.cache
 def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp, out_features:int, in_features:int, ggml_type:int,
-                         cdna:bool=False) -> UOp:
+                         cdna:bool=False, group_rows:int=0) -> UOp:
   token_tile = tokens if (tokens:=cast(int, out.shape[0])) <= 8 else 1
-  return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, cdna, token_tile=token_tile)
+  words = out_features * in_features * QUANT_SIZES[ggml_type] // GGML_BLOCK_SIZE // raw.dtype.itemsize
+  gate = (lambda token, base: base + token // group_rows * words) if group_rows else None
+  return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, cdna, gate, token_tile=token_tile)
 
 def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp, ...], out_features:int, in_features:int, ggml_type:int,
                        cdna:bool, gate:Callable|None=None, xtoken:Callable|None=None, name:str="linear_", token_tile:int=1) -> UOp:
@@ -439,17 +441,19 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
 
 def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   assert layer.ggml_type in QUANT_SIZES
+  groups, shape, rows = layer.groups, x.shape, prod(x.shape[:-2])
+  if groups > 1: x = x.reshape(rows, groups, -1).transpose(0, 1).reshape(groups*rows, -1)
   tokens = int(x.numel()) // layer.in_features
-  out_features, in_features = layer.out_features, int(x.uop.shard_shape[-1])
+  out_features, in_features = layer.out_features // groups, int(x.uop.shard_shape[-1])
   splits = layer.in_features // in_features
   assert (layer.shard_axis == 1) == (splits > 1), f"input features split over {splits} devices, weight split on axis {layer.shard_axis}"
   out_shape:tuple[int, ...] = (splits*tokens, out_features)
   fxn:Callable[..., UOp]
   extra = (_iq_grid(x.device, layer.ggml_type),) if layer.ggml_type in (IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ3_S, IQ2_S) else ()
   # the kernels write the output features of their own device
-  local_out = out_features // len(dev) if isinstance(dev:=layer.weight.device, tuple) and layer.shard_axis == 0 else out_features
+  local_out = out_features // len(dev) if isinstance(dev:=layer.weight.device, tuple) and layer.shard_axis == 0 and groups == 1 else out_features
   cdna = _is_cdna(x.device)
-  if tokens % 16 == 0 and local_out % 16 == 0:
+  if groups == 1 and tokens % 16 == 0 and local_out % 16 == 0:
     if layer.ggml_type == IQ4_XS:
       fxn, extra = _iq4_linear_f16_wmma_kernel, (iq4_half_lut(x.device),)
     else:
@@ -458,14 +462,16 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
     fxn = functools.partial(fxn, kgroups=4 if cdna else 2 if _is_rdna4(x.device) else 1, lanes=64 if cdna else 32)
     srcs = (x.cast(dtypes.float16).contiguous(), *extra)
   else:
-    fxn = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type, cdna=cdna)
-    srcs = (*q8_quantize(x, tokens, in_features), *extra)
+    fxn = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type, cdna=cdna, group_rows=rows if groups > 1 else 0)
+    srcs = (*q8_quantize(x, int(prod(x.uop.shard_shape[:-1])), in_features), *extra)
     out_shape += ((in_features+1023)//1024,)
-  out = Tensor.empty(out_shape, dtype=dtypes.float32, device=x.device, axis=None if layer.shard_axis is None else 1-layer.shard_axis)
+  axis = x.uop.axis if groups > 1 else None if layer.shard_axis is None else 1-layer.shard_axis
+  out = Tensor.empty(out_shape, dtype=dtypes.float32, device=x.device, axis=axis)
   result = Tensor.custom_kernel(out, layer.weight, *srcs, fxn=functools.partial(fxn, out_features=local_out, in_features=in_features))[0]
   if len(result.shape) == 3: result = result.sum(-1)
   # row parallel: every device wrote the partial sum of its input features, the sum over the devices is the allreduce
   if splits > 1: result = result.reshape(splits, tokens, out_features).sum(0)
-  result = result.reshape(*x.shape[:-1], out_features)
+  if groups > 1: result = result.reshape(groups, rows, out_features).transpose(0, 1)
+  result = result.reshape(*shape[:-1], out_features)
   return result if layer.bias is None else result + layer.bias
 

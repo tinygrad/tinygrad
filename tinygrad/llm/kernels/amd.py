@@ -71,9 +71,10 @@ class Linear(nn.Linear):
   shard_axis:int|None = None
   weight_scale_inv:Tensor|None = None
   weight_block_size:tuple[int, int] = (128, 128)
-  def __init__(self, in_features:int, out_features:int, bias=True):
+  def __init__(self, in_features:int, out_features:int, bias=True, groups:int=1):
     super().__init__(in_features, out_features, bias)
-    self.in_features, self.out_features = in_features, out_features
+    # groups > 1: x is (..., groups, in_features), group g multiplies the g-th block of out_features//groups weight rows
+    self.in_features, self.out_features, self.groups = in_features, out_features, groups
   def set_quantized(self, decoded:Tensor):
     from tinygrad.llm.kernels.amd_gguf import find_packed
     if (found:=find_packed(decoded, self.in_features)) is None: return
@@ -84,13 +85,14 @@ class Linear(nn.Linear):
     if self.weight_scale_inv is not None:
       out = fp8_matmul(x, self.weight, self.weight_scale_inv, self.weight_block_size)
       return out + self.bias if self.bias is not None else out
-    supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
+    grouped_ok = self.groups == 1 or (self.weight.uop.axis, x.uop.axis) in ((None, None), (0, x.ndim-2))
+    supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device) and grouped_ok
     if self.ggml_type is None and supported:
       self.set_quantized(self.weight)
       if self.ggml_type is None:
         # tiny dense fp16 matmul (e.g. the ssm beta/alpha head rows): single fp16 gemv kernel instead of a
         # generic matmul schedule, and realize the densely packed weight once if it is still a lazy ggml view
-        if self.weight.dtype in (dtypes.half, dtypes.float, dtypes.bfloat16) and self.out_features <= 2048 \
+        if self.groups == 1 and self.weight.dtype in (dtypes.half, dtypes.float, dtypes.bfloat16) and self.out_features <= 2048 \
           and self.in_features % (WARP_SIZE*4) == 0 and self.weight.uop.axis is None:
           numel, max_shape = x.numel(), x.max_shape
           if isinstance(numel, int) or prod(max_shape) // self.in_features <= 32:
@@ -101,7 +103,8 @@ class Linear(nn.Linear):
       if isinstance(x.numel(), int): return q8_linear(self, x)
       # symbolic token count: pad to the max chunk size so the kernels see static shapes, garbage rows are sliced off
       out = q8_linear(self, x.pad_to(x.max_shape))
-      return out.shrink(tuple((0, s) for s in (*x.shape[:-1], self.out_features)))
+      return out.shrink(tuple((0, s) for s in (*x.shape[:-1], self.out_features // self.groups)))
+    if self.groups > 1: return (x.unsqueeze(-2) @ self.weight.reshape(self.groups, -1, self.in_features).transpose(-1, -2)).squeeze(-2)
     return super().__call__(x)
 
 class ExpertWeights:
