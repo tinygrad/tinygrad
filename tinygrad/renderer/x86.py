@@ -21,14 +21,14 @@ class IselContext:
   def __init__(self): self.reg_n = itertools.count()
   def vreg(self, cons:tuple[Register, ...]|Register): return Register(f"v{next(self.reg_n)}", 0, cons if isinstance(cons, tuple) else (cons,))
 
-# a native call declares its destination registers in src
+# the registers an ins defines exist in the src of NATIVE
 def regs(u:UOp) -> tuple[Register, ...]:
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return (u.arg.reg,) if u.arg.reg is not None else ()
-  return tuple(s.arg.reg for s in next(x for x in u.body.src if x.op is Ops.SINK).src) if u.op is Ops.CALL else ()
+  return tuple(s.arg.reg for s in u.body.toposort() if s.op is Ops.PARAM) if u.op is Ops.CALL else ()
 def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp:
   assert u.dtype is not dtypes.void, "void cannot have output registers"
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return u.replace(arg=replace(u.arg, reg=r[0]))
-  return UOp.ins(u.body.arg.code, u.src[1:], u.dtype, *r)
+  return UOp.ins(u.body.arg.code, u.src_without_body, u.dtype, *r)
 
 def rdef(u:UOp):
   if u.op in {Ops.AFTER, Ops.BITCAST}: return rdef(u.src[0])
@@ -349,14 +349,13 @@ def mov_op(s:UOp) -> UOp:
   return UOp.ins(X86Ops.MOVABS if s.dtype in dtypes.int64s else X86Ops.MOVi, (imm(s.dtype, s.src[0].val),), s.dtype) if is_imm(s) else s
 
 def load_const(x:UOp) -> UOp:
-  op, src = x.body.arg.code, x.src[1:]
-  n = len(src)
+  op, n = x.body.arg.code, len(x.src_without_body)
   # keep the instruction's immediate operand as a constant
   immediate = {n-1} if op in X86GroupOp.Immediate else set()
   # memory addresses are (base, index, displacement, scale), keep displacement and scale constant too
   immediate |= {2,3} if op in X86GroupOp.WriteMem and n>4 else {3,4} if op in X86GroupOp.Rm2nd and n>4 else \
       ({2,3} if op in X86GroupOp.Rm1st and n>3 else set())
-  return x.replace(src=x.src[:1]+tuple(s if i in immediate else mov_op(s) for i,s in enumerate(src)))
+  return x.replace(src=(x.body,)+tuple(s if i in immediate else mov_op(s) for i,s in enumerate(x.src_without_body)))
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
@@ -569,7 +568,7 @@ post_regalloc_matcher = PatternMatcher([
   # an END jumps back to its loop's LABEL and labels the loop's exit
   (UPat(Ops.END, name="x"), lambda x: (x, [UOp.ins(X86Ops.JMP, (x.src[1],), dtypes.void), label(label(x.src[1]))])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
-  (UPat(Ops.CALL, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[:1]+x.src[2:]),
+  (UPat(Ops.CALL, name="x"), lambda ctx,x: (nx:=x.replace(src=(x.body,)+x.src[2:]),
    [ctx.ren.copy(x.src[1], rdef(x)), nx] if rdef(x) != rdef(x.src[1]) else [nx]) if x.body.arg.code in X86GroupOp.TwoAddress else None),
 ])
 
@@ -645,22 +644,21 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
   # get the encoding structure of the uop
   # when a uop writes to memory it takes the form of a store, dtype is void, no definition
   address:tuple[UOp|None, ...]
-  src = x.src[1:]
   if x.body.arg.code in X86GroupOp.WriteMem:
-    if len(src) > 4: address, rest = src[:4], src[4:]
-    else: address, rest = (x, None, None, None), src
+    if len(x.src_without_body) > 4: address, rest = x.src_without_body[:4], x.src_without_body[4:]
+    else: address, rest = (x, None, None, None), x.src_without_body
     imm_uop = rest[:1] if rest and is_imm(rest[0]) else (None,)
     return _encode(rest[0], *address, *(None, *rest[1:])) if reg is None else _encode(None, *address, *(None, *imm_uop))
 
   if x.body.arg.code in X86GroupOp.Rm1st:
-    if len(src) > 3: address, rest = src[:4], src[4:]
-    else: address, rest = (src[0], None, None, None), src[1:]
+    if len(x.src_without_body) > 3: address, rest = x.src_without_body[:4], x.src_without_body[4:]
+    else: address, rest = (x.src_without_body[0], None, None, None), x.src_without_body[1:]
     imm_uop = rest[:1] if rest and is_imm(rest[0]) else (None,)
     return _encode(x, *address, *(None, *imm_uop)) if reg is None else _encode(None, *address, *(x if sel else None, *imm_uop))
 
   if x.body.arg.code in X86GroupOp.Rm2nd:
-    if len(src) > 4: address, rest = src[1:5], src[:1] + src[5:]
-    else: address, rest = (src[1], None, None, None), src[:1] + src[2:]
+    if len(x.src_without_body) > 4: address, rest = x.src_without_body[1:5], x.src_without_body[:1] + x.src_without_body[5:]
+    else: address, rest = (x.src_without_body[1], None, None, None), x.src_without_body[:1] + x.src_without_body[2:]
     # cmp reg, rm doesn't define a new register
     return _encode(x, *address, *rest) if x.dtype is not dtypes.void else _encode(rest[0], *address)
 
@@ -767,13 +765,13 @@ class X86Renderer(ISARenderer):
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.body.arg.code))[-1] in ('i', 'm') else o[7:]).lower():7s}"
     def _format_operands(x:UOp) -> str:
-      src = x.src[1:]
       def _format(src:tuple[UOp, ...]) -> list[str]:
         return [str(s.src[0].val) if is_imm(s) else reg_strs[o].get(s.dtype.itemsize, o) if \
                 (o:=str(rdef(s))) in reg_strs else o for s in src if is_imm(s) or rdef(s) is not None]
       def _mem_adress(base:UOp, idx:UOp, disp:UOp, scale:UOp) -> list[str]:
         return [f"[{rdef(base)}" + (f" + {rdef(idx)}*{scale.src[0].val}" if rdef(idx) else "") + (f" + {d}" if (d:=disp.src[0].val) else "") + "]"]
 
+      src = x.src_without_body
       if len(src) > 4 and x.body.arg.code in X86GroupOp.WriteMem: ret = _mem_adress(*src[:4]) + _format(src[4:])
       elif len(src) > 3 and x.body.arg.code in X86GroupOp.Rm1st: ret = _format((x,)) + _mem_adress(*src[:4]) + _format(src[4:])
       elif len(src) > 4 and x.body.arg.code in X86GroupOp.Rm2nd: ret = _format((x, src[0])) + _mem_adress(*src[1:5]) + _format(src[5:])
@@ -799,7 +797,7 @@ class X86Renderer(ISARenderer):
         targets[u.src[1]] = len(binary)
         continue
       if u.body.arg.code not in encodings or (l:=encodings[u.body.arg.code](u)) is None:
-        raise RuntimeError(f"failed to encode {u.body.arg.code} with {u.dtype} srcs {[x.dtype for x in u.src]}")
+        raise RuntimeError(f"failed to encode {u.body.arg.code} with {u.dtype} srcs {[x.dtype for x in u.src_without_body]}")
       binary.extend(l)
       if u.body.arg.code in X86GroupOp.Jump: jumps[u] = len(binary)
     # fixup jump targets now that encoding size is known
