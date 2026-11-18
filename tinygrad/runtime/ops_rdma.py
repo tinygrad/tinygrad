@@ -60,7 +60,7 @@ class RDMADevice(Compiled):
 
   def __init__(self, device:str):
     self.iface = self._select_iface(device)
-    super().__init__(device, BNXTAllocator(self), [], None)
+    super().__init__(device, BNXTAllocator(self), None)
 
 # *****************
 # UOps implementation
@@ -78,7 +78,7 @@ def rdma_qp(pair:tuple[str, str]) -> dict[str, BNXTQP]:
   return qps
 
 def rdma_mem(nic:str, pair:tuple[str, str], name:str, size:int, dtype:DType=dtypes.uint8) -> UOp:
-  return UOp.alloc((size,), dtype, 0, device=nic, name=to_name(*pair, name))
+  return UOp.extern((size,), dtype, nic, to_name(*pair, name))
 def rdma_ring(nic:str, pair:tuple[str, str], is_recv:bool) -> UOp:
   return rdma_mem(nic, pair, "rq" if is_recv else "sq", RING_ENTRIES * (WQE_SIZE if is_recv else WQE_SIZE + 8))
 def rdma_cq(nic:str, pair:tuple[str, str], is_recv:bool) -> UOp: return rdma_mem(nic, pair, "rcq" if is_recv else "scq", CQ_ENTRIES * 32)

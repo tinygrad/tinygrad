@@ -46,5 +46,16 @@ class TestExport(unittest.TestCase):
     self.assertEqual(var_vals, {"v": 3})
     self.assertTrue({c.uop.buf_uop, d.uop.buf_uop} <= set(linear.toposort()))
 
+  def test_create_linear_deterministic(self):
+    # the linear only depends on the export, the storage it allocates gets canonical slots
+    from tinygrad.codegen import create_linear, schedule_cache
+    fn, _ = Tensor.export((((buf()+1).contiguous()*2).to("NULL:1")+3).contiguous())
+    linear = create_linear(fn)
+    self.assertTrue(any(u.op is Ops.ALLOC for u in linear.toposort()))
+    Tensor.empty(4, device="NULL").realize()  # other work takes slots from the global counter
+    self.assertIs(create_linear(fn), linear)
+    schedule_cache.clear()
+    self.assertIs(create_linear(fn), linear)
+
 if __name__ == "__main__":
   unittest.main()

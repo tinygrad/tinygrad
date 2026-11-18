@@ -419,7 +419,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_external_call_preserves_ranges(self):
     r = UOp.range(4, 0, dtype=dtypes.int)
-    fn = UOp.custom_function("external", dtype=dtypes.int)
+    fn = UOp.native("external", dtype=dtypes.int)
     call = fn.call(UOp.const(0, dtypes.uint64), r + 1)
     self.assertEqual(set(call.ranges), {r})
 
@@ -463,7 +463,7 @@ class TestReduceCollapse(unittest.TestCase):
 
 class TestMovementOps(unittest.TestCase):
   def test_pm_mops_partial_reshape_index_removes_reshape(self):
-    from tinygrad.schedule.prepare import pm_mops
+    from tinygrad.codegen.prepare import pm_mops
     src = UOp.param(0, dtypes.float, shape=(32, 4))
     r0, r1 = UOp.range(4, 0), UOp.range(8, 1)
     result = graph_rewrite(src.reshape((4, 8, 4)).index(r0, r1), pm_mops, name="test")
@@ -474,7 +474,7 @@ class TestMovementOps(unittest.TestCase):
     self.assertEqual([u for u in result.toposort() if u.op is Ops.RESHAPE], [src])
 
   def test_pm_mops_partial_reshape_index_suffix_mismatch_does_nothing(self):
-    from tinygrad.schedule.prepare import pm_mops
+    from tinygrad.codegen.prepare import pm_mops
     src = UOp.param(0, dtypes.float, shape=(2, 6))
     result = graph_rewrite(src.reshape((2, 3, 2)).index(UOp.range(2, 0)), pm_mops, name="test")
     self.assertEqual(result.op, Ops.INDEX)
@@ -488,7 +488,7 @@ class TestConstBufferize(unittest.TestCase):
     The pattern at rangeify.py uses allow_any_len=True because
     CONST doesn't depend on ranges (constant is same value everywhere).
     """
-    from tinygrad.schedule.rangeify import pm_const_buffer_folding, BufferizeOpts
+    from tinygrad.codegen.rangeify import pm_const_buffer_folding, BufferizeOpts
     c = UOp.const(42.0)
     r1 = UOp.range(3, 0)
     bufferize_with_range = c.bufferize(r1, arg=BufferizeOpts(device=None))
@@ -502,7 +502,7 @@ class TestConstBufferize(unittest.TestCase):
 
   def test_const_bufferize_with_multiple_ranges(self):
     """Test CONST.BUFFERIZE with multiple ranges is also folded."""
-    from tinygrad.schedule.rangeify import pm_const_buffer_folding, BufferizeOpts
+    from tinygrad.codegen.rangeify import pm_const_buffer_folding, BufferizeOpts
     c = UOp.const(3.14)
     r1 = UOp.range(3, 0)
     r2 = UOp.range(4, 1)

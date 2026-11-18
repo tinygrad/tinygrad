@@ -105,13 +105,13 @@ class TestSSARender(unittest.TestCase):
   def test_nan_pattern(self):
     # the pattern compiler puts a UPat's float arg in a PYLITERAL, any nan is the same one
     from tinygrad.uop.upat import _get_clause
-    assert_roundtrip(self, _get_clause(UPat(Ops.CONST, arg=-math.nan), UOp.custom_function("x", fmt=True).call(inline=True)))
+    assert_roundtrip(self, _get_clause(UPat(Ops.CONST, arg=-math.nan), UOp.native("x", fmt=True).call(inline=True)))
 
   def test_amd_instructions(self):
     # rdna3 and rdna4 instructions have the same names, a python object is evaluated in its own module
     from tinygrad.runtime.autogen.amd.rdna3 import ins as rdna3
     from tinygrad.runtime.autogen.amd.rdna4 import ins as rdna4
-    for ins in (rdna3, rdna4): assert_roundtrip(self, UOp(Ops.INS, arg=(ins.v_mov_b32_e32(ins.v[1], 1.0), dtypes.void)))
+    for ins in (rdna3, rdna4): assert_roundtrip(self, UOp.native(ins.v_mov_b32_e32(ins.v[1], 1.0)).call())
 
 class TestParseUIR(unittest.TestCase):
   def test_format(self):

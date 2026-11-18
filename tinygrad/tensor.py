@@ -9,9 +9,8 @@ from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_num
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
 from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.mixin.rand import RandMixin
-# NOTE: engine.realize imports codegen, which has to be imported before schedule (they import each other)
+from tinygrad.codegen import create_linear, contiguous_mops_to_view
 from tinygrad.engine.realize import run_linear, capturing
-from tinygrad.schedule import create_linear, contiguous_mops_to_view
 from tinygrad.device import Buffer
 
 # **** export: storage becomes EXTERN(slot), bound Variables lose their value and ALLOCs get canonical slots. ctx.externs is what's mapped back
@@ -609,7 +608,7 @@ class Tensor(RandMixin):
     ref_frames = [x.contiguous() for x in ref_frames or []]
     assert frame_pos.is_bound_var, "frame_pos must be a bound Variable"
     srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
-    fn = UOp.custom_function("encdec", frame_pos.unbound(), *[UOp.const(s) for s in shape])
+    fn = UOp.native("encdec", frame_pos.unbound(), *[UOp.const(s) for s in shape])
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
 P = ParamSpec("P")

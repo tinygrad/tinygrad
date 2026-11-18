@@ -46,7 +46,7 @@ def _run_wave64_hw(instructions: list, out_reg: int = 1) -> list[int]:
   lds = UOp.placeholder((65536,), dtypes.uint8, 0, AddrSpace.LOCAL)
   sink = UOp.sink(UOp.param(0, dtypes.uint32, (WAVE64,)), UOp.special(WAVE64, "lidx0"),
                   lds.end(UOp.range(WAVE64, 0, AxisType.WARP)), arg=KernelInfo("test"))
-  body = UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in _wave64_code(instructions, out_reg)))
+  body = UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in _wave64_code(instructions, out_reg)))
   prg = UOp(Ops.PROGRAM, src=(sink, body))
   run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
   out = out_gpu.as_memoryview()

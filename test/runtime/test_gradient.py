@@ -23,6 +23,14 @@ class TestTensorGradient(unittest.TestCase):
     z = (x + (2*x).int().float() + (2*x).bool().float() + (3*x).half().float()).sum()
     self.assertListEqual(z.gradient(x)[0].tolist(), [4.0, 4.0, 4.0])
 
+  def test_stopped_path_skips_opaque_call(self):
+    # a comparison, int cast or DETACH ends the path
+    def kernel(o:UOp, a:UOp) -> UOp: return o[0].store(a[0].cast(o.dtype)).sink(arg=KernelInfo())
+    x = Tensor([3.5])
+    for v in (x < 4, x.int(), x.detach()):
+      y = Tensor.empty(1).custom_kernel(v.contiguous(), fxn=kernel)[0]
+      self.assertListEqual((y + x).sum().gradient(x)[0].tolist(), [1.0])
+
   def test_with_custom_gradient(self):
     x = Tensor([1.0, 2.0, 3.0])
     z = (x * x).sum()

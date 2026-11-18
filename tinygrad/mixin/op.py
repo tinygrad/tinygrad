@@ -215,7 +215,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, buffer=False)
     acc_dtype = least_upper_dtype(dt, dtypes.float32) if dtypes.is_float(dt) else dt
-    return (cls.full((output_len,), step, dtype=acc_dtype, buffer=False)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
+    from tinygrad.uop.ops import to_max_shape
+    return (cls.full(to_max_shape((output_len,)), step, dtype=acc_dtype, buffer=False)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)[:output_len]
 
   @classmethod
   def linspace(cls, start:int|float, stop:int|float, steps:int, dtype:DTypeLike|None=None) -> Self:
@@ -1778,8 +1779,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     log_probs = self.log_softmax()
     loss_mask = Y.ne(ignore_index)
     y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1)
-    smoothing = label_smoothing * log_probs.mean(-1)
-    unreduced = loss_mask.where((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing, 0)
+    loss = (log_probs * y).sum(-1)
+    if label_smoothing > 0: loss = (1 - label_smoothing) * loss + label_smoothing * log_probs.mean(-1)
+    unreduced = loss_mask.where(loss, 0)
     return -unreduced.sum() / loss_mask.sum() if reduction == "mean" else -unreduced._do_reduction(reduction)
 
   def cross_entropy(self, Y:Self, reduction:ReductionStr="mean", label_smoothing:float=0.0) -> Self:
@@ -1806,7 +1808,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if self.shape != Y.shape:
       if self.max(classes_dim).shape != Y.shape: raise RuntimeError(f"shape mismatch: {self.shape=}, {Y.shape=}")
       Y = Y.unsqueeze(classes_dim)._one_hot_along_dim(num_classes=self.shape[classes_dim], dim=classes_dim)
-    Y = (1 - label_smoothing)*Y + label_smoothing / int(Y.shape[classes_dim])
+    if label_smoothing > 0: Y = (1 - label_smoothing)*Y + label_smoothing / int(Y.shape[classes_dim])
     return -self.log_softmax(classes_dim).mul(Y).sum(classes_dim)._do_reduction(reduction)
 
   def nll_loss(self, Y:Self, weight:Self|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean") -> Self:

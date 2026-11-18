@@ -4,17 +4,7 @@ del os.environ["LD_PRELOAD"]
 import ctypes, ctypes.util
 from extra.dsp.run import install_hook, ioctl, libc, get_struct, qcom_dsp, format_struct, to_mv, hexdump
 
-@ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long)
-def _mmap(addr, length, prot, flags, fd, offset):
-  mmap_type = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long)
-  orig_mmap = mmap_type(ctypes.addressof(orig_mmap_mv))
-  ret = orig_mmap(addr, length, prot, flags, fd, offset)
-  # ll = os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else ""
-  print(f"mmap {addr=}, {length=}, {prot=}, {flags=}, {fd=}, {offset=} {ret=}")
-  return ret
-
 #install_hook(libc.ioctl, ioctl)
-#orig_mmap_mv = install_hook(libc.mmap, _mmap)
 print("import done")
 import mmap
 

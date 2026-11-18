@@ -5,7 +5,7 @@ from tinygrad.codegen import to_program
 from tinygrad.helpers import Target
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.uop.ops import KernelInfo, Ops
-from tinygrad.schedule import resolve_linear_call
+from tinygrad.codegen import resolve_linear_call
 
 def sched_key(t:Tensor): return t.export()[0].key
 
@@ -130,7 +130,7 @@ class TestCallCodegen(unittest.TestCase):
 
   def test_call_stack_pointer(self):
     slot = UOp.placeholder((1,), dtypes.uint32, addrspace=AddrSpace.REG)
-    call = UOp.custom_function("callback").call(slot[0])
+    call = UOp.native("callback").call(slot[0])
     prg = to_program(call.sink(arg=KernelInfo("call_stack")), ClangRenderer(Target("CPU", arch="x86_64,x86-64")))
     self.assertIn("(unsigned int*)((buf", prg.src[2].arg)
 

@@ -6,11 +6,12 @@ import importlib, inspect, functools, itertools, pathlib, os, contextlib, atexit
 from tinygrad.helpers import mv_address, LRU, getenv, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, perf_counter_us, HCQ_RUNTIME_DEV, is_disk_device, canonicalize_device_name
+from tinygrad.helpers import cpu_profile, perf_counter_us, HCQ_RUNTIME_DEV, is_disk_device, canonicalize_device_name, Target
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import MMIOInterface
+from tinygrad.renderer import Renderer
 if TYPE_CHECKING:
-  from tinygrad.renderer import Renderer, Compiler, TinyELF
+  from tinygrad.renderer import Compiler, TinyELF
   from tinygrad.uop.ops import PatternMatcher
 
 # **************** Device ****************
@@ -320,8 +321,19 @@ class Program(Generic[DeviceType]):
   def __init__(self, dev:DeviceType, obj:TinyELF, links:dict[str,Program[DeviceType]]): pass
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False) -> float|None: pass
 
+# a renderer is built from a fully specified Target alone, the device isn't opened
+def renderer_name(r:type[Renderer], device:str) -> str: return r.__name__.upper().removesuffix("RENDERER").removeprefix(device) or device
+@functools.cache
+def select_renderer(t:Target) -> Renderer:
+  if not (renderers:=Device.get_class(t.device).renderers): raise RuntimeError(f"{t.device} has no renderers, it can't run kernels")
+  assert (rn:=next((renderer_name(r, t.device) for r in renderers if getenv(f"{t.device}_{renderer_name(r, t.device)}")), None)) is None, \
+    f"{t.device}_{rn}=1 is deprecated, use DEV={t.device}:{rn} instead"
+  candidates = select_by_name(renderers, lambda r: renderer_name(r, t.device), t.renderer, f"{t.device} has no renderer {t.renderer!r}")
+  return select_first_inited(candidates, f"No renderer for {t.device} is available", None, t)
+
 class Compiled:
   ifaces:list[Callable] = []
+  renderers:list[type[Renderer]] = []
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
   timestamp_divider: float = 1000.0
@@ -336,13 +348,10 @@ class Compiled:
   pm_link:PatternMatcher
   link_bufs:dict[str, Buffer|Callable[..., Buffer]] = {}
 
-  def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, arch=None):
-    from tinygrad.renderer import Renderer
-
-    self.device, self.allocator, self.runtime_t, self.renderers = device, allocator, runtime, renderers or [Renderer]
+  def __init__(self, device:str, allocator:Allocator, runtime:type[Program[Self]]|None, arch=None):
+    self.device, self.allocator, self.runtime_t = device, allocator, runtime
     self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
     self.peer_group = getattr(getattr(self, 'iface', None), 'peer_group', device.split(":")[0])
-    self.cached_renderer:dict[Any, Renderer] = {}
 
     # profiling
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
@@ -408,15 +417,9 @@ class Compiled:
 
   # helpers
 
-  def _renderer_name(self, r:type[Renderer]) -> str:
-    return r.__name__.upper().removesuffix("RENDERER").removeprefix(devname:=self.device.split(':')[0].upper()) or devname
-
   def _select_renderer(self, cv=DEV) -> Renderer:
-    assert (rn:=next((self._renderer_name(r) for r in self.renderers if getenv(f"{self.device}_{self._renderer_name(r)}")), None)) is None, \
-      f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} instead"
-    t = cv.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {}))
-    return select_first_inited(select_by_name(self.renderers, self._renderer_name, t.renderer, f"{self.device} has no renderer {t.renderer!r}"),
-                               f"No renderer for {self.device} is available", self.cached_renderer, t)
+    # the opened device fills in its arch
+    return select_renderer(cv.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {})))
 
   def _select_iface(self, device:str):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
@@ -477,12 +480,13 @@ def enumerate_devices_str() -> Generator[str, None, None]:
           iface_results.append(f"{colored('+', 'green')} {name}: {pluralize('device', count)} {default_text}")
         except Exception as e: iface_results.append(f"{colored('-', 'red')} {iface.__name__[:-5]}: {e}")
       for r in d.renderers:
+        name = renderer_name(r, device.split(':')[0])
         try:
-          with Context(CACHELEVEL=0, DEV=f"{device}:{d._renderer_name(r)}"): test = (Tensor([1,2,3], device=device) * 2).tolist()
+          with Context(CACHELEVEL=0, DEV=f"{device}:{name}"): test = (Tensor([1,2,3], device=device) * 2).tolist()
           if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
-          default_text = '(default)' if type(d.renderer) is r else f'(DEV={device}:{d._renderer_name(r)} to make default)'
-          ren_results.append(f"{colored('+', 'green')} {d._renderer_name(r)} {default_text}")
-        except Exception as e: ren_results.append(f"{colored('-', 'red')} {d._renderer_name(r)}: {e}")
+          default_text = '(default)' if type(d.renderer) is r else f'(DEV={device}:{name} to make default)'
+          ren_results.append(f"{colored('+', 'green')} {name} {default_text}")
+        except Exception as e: ren_results.append(f"{colored('-', 'red')} {name}: {e}")
       result = (colored('PASS', 'green') + ("\n"+" "*12+"interfaces:\n" if iface_results else "") + '\n'.join([" "*13+x for x in iface_results]) +
                 (("\n"+" "*12+"renderers:\n") + '\n'.join([" "*13+x for x in ren_results]) if len(ren_results) > 1 else ""))
     except Exception as e: result = f"{colored('FAIL', 'red')} {e}"

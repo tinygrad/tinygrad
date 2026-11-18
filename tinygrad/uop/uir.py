@@ -20,7 +20,7 @@ from typing import Any, Callable
 from tinygrad import dtype
 from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid
 from tinygrad.uop import Ops, GroupOp, ops
-from tinygrad.uop.ops import UOp, KernelInfo, CallInfo, CustomFunction, ProgramInfo, ParamArg, AxisType
+from tinygrad.uop.ops import UOp, KernelInfo, CallInfo, NativeInfo, ProgramInfo, ParamArg, AxisType
 from tinygrad.helpers import colored, ansistrip, Target
 
 # ***** render *****
@@ -28,9 +28,9 @@ from tinygrad.helpers import colored, ansistrip, Target
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
                Ops.RANGE: "#c8a0e0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
                Ops.INDEX: "#CEF9B7", Ops.STACK: "#D8F9E4",
-               Ops.WMMA: "#efefc0", Ops.UNSHARD: "#f6ccff", Ops.INS: "#eec4ff",
+               Ops.WMMA: "#efefc0", Ops.UNSHARD: "#f6ccff",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
-               Ops.BUFFER: "#B0BDFF", Ops.EXTERN: "#7FA8D8", Ops.GETADDR: "#9DB1F0", Ops.COPY: "#ff90c0", Ops.CUSTOM_FUNCTION: "#bf71b6",
+               Ops.BUFFER: "#B0BDFF", Ops.EXTERN: "#7FA8D8", Ops.GETADDR: "#9DB1F0", Ops.COPY: "#ff90c0", Ops.NATIVE: "#bf71b6",
                Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
                Ops.LINEAR: "#7DF4FF", Ops.ALLOC: "#C07788", Ops.PROGRAM: "#a0a0a0",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0",
@@ -46,9 +46,9 @@ _skip_fields = {"buffer", "grad_fxn"}   # runtime objects
 
 @functools.cache
 def _struct_args() -> dict[Ops, type]:
-  from tinygrad.schedule.indexing import BufferizeOpts  # schedule imports codegen, which imports this
+  from tinygrad.codegen.indexing import BufferizeOpts  # codegen imports this
   return {Ops.PARAM: ParamArg, Ops.REFPARAM: ParamArg, Ops.BUFFER: ParamArg, Ops.ALLOC: ParamArg, Ops.EXTERN: ParamArg, Ops.SINK: KernelInfo,
-          Ops.CALL: CallInfo, Ops.CUSTOM_FUNCTION: CustomFunction, Ops.STAGE: BufferizeOpts, Ops.PROGRAM: ProgramInfo}
+          Ops.CALL: CallInfo, Ops.NATIVE: NativeInfo, Ops.STAGE: BufferizeOpts, Ops.PROGRAM: ProgramInfo}
 
 def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
 
@@ -83,9 +83,9 @@ def _render_arg(x:UOp, ref:Callable[[UOp], str|None]=lambda _: None) -> str:
   """the args, written after the srcs"""
   if (a:=x.arg) is None: return ""
   if x.op is Ops.CONST: return _const_str(x)
-  if x.op is Ops.RANGE:   # like UOp.range the axis defaults to WEAK. flatten_range merges slots: slot=[1 2]
+  if x.op is Ops.RANGE:   # like UOp.range the axis defaults to LOOP. flatten_range merges slots: slot=[1 2]
     slot = a[1] if len(a) == 2 else a[1:]
-    return f"slot={_val(slot, False, ref)}" + ("" if a[0] is AxisType.WEAK else f" axis={a[0].name}")
+    return f"slot={_val(slot, False, ref)}" + ("" if a[0] is AxisType.LOOP else f" axis={a[0].name}")
   if x.op is Ops.REDUCE: return f"op={a[0].name.lower()}" + (f" pop={a[1]}" if a[1] else "")
   if x.op is Ops.ALLREDUCE: return f"op={a[0].name.lower()} device={_val(a[1], False, ref)}"
   if type(a) is _struct_args().get(x.op):
@@ -148,7 +148,7 @@ def _build(name:str, srcs:tuple[UOp, ...], kv:dict[str, Any]) -> UOp:
   if set(kv) == {"arg"}: arg = kv["arg"]
   elif op is Ops.RANGE:
     slot = kv["slot"]
-    arg = (kv.get("axis", AxisType.WEAK), *(slot if isinstance(slot, tuple) else (slot,)))
+    arg = (kv.get("axis", AxisType.LOOP), *(slot if isinstance(slot, tuple) else (slot,)))
   elif op is Ops.REDUCE: arg = (kv["op"], kv.get("pop", 0))
   elif op is Ops.ALLREDUCE: arg = (kv["op"], kv["device"])
   elif struct is not None and (kv or op is Ops.CALL): arg = struct(**kv)   # a CALL always has a CallInfo

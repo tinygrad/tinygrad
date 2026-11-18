@@ -894,7 +894,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def _window(size, output_datatype, periodic, a):
     size = int(_resolve_const(size))
     N, n = (size if periodic else size - 1), Tensor.arange(size)
-    w = a[0] - a[1] * (n * (2 * math.pi / N)).cos() + a[2] * (n * (4 * math.pi / N)).cos()
+    w = a[0] - a[1] * (n * (2 * math.pi / N)).cos()
+    if a[2]: w = w + a[2] * (n * (4 * math.pi / N)).cos()
     return w.cast(OnnxDataType(output_datatype).to_dtype())
   def HannWindow(size, output_datatype:int=1, periodic:int=1): return _window(size, output_datatype, periodic, (0.5, 0.5, 0))
   def HammingWindow(size, output_datatype:int=1, periodic:int=1): return _window(size, output_datatype, periodic, (25/46, 21/46, 0))

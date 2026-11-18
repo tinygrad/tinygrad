@@ -23,8 +23,8 @@ def dcache_flush():
   from tinygrad.codegen import to_program
   buf, n = UOp.param(0, dtypes.uint8, 1), UOp.param(1, dtypes.int, shape=(), name="n", addrspace=AddrSpace.ALU)
   i = UOp.range(n, 0, dtype=dtypes.int)
-  flush = UOp.custom_function('__asm__ volatile("dc cvac, %0" :: "r"({0}) : "memory");', fmt=True).call(buf.index(i * 64))
-  sink = UOp.sink(buf.after(flush.end(i)).after(UOp.custom_function('__asm__ volatile("dsb sy" ::: "memory");', fmt=True).call()),
+  flush = UOp.native('__asm__ volatile("dc cvac, %0" :: "r"({0}) : "memory");', fmt=True).call(buf.index(i * 64))
+  sink = UOp.sink(buf.after(flush.end(i)).after(UOp.native('__asm__ volatile("dsb sy" ::: "memory");', fmt=True).call()),
                   arg=KernelInfo(name="dcache_flush", opts_to_apply=()))
   prg = to_program(sink, Device["CPU"].renderer)
   return Device["CPU"].runtime(TinyELF.from_program(prg))
@@ -65,7 +65,7 @@ class QCOMComputeQueue(HWQueue):
   def _cache_flush(self, write_back=True, invalidate=False, sync=True, memsync=False):
     # TODO: 7xx support.
     if write_back: # dirty cache write-back, into the device's dummy buffer
-      dummy = UOp.alloc((0x1000,), dtypes.uint8, 0, device=self.devs[0], name="dummy")
+      dummy = UOp.extern((0x1000,), dtypes.uint8, self.devs[0], "dummy")
       self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_FLUSH_TS, dummy.getaddr(self.devs), 0)
     if invalidate: self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
     if memsync: self.cmd(mesa.CP_WAIT_MEM_WRITES)
@@ -126,7 +126,7 @@ class QCOMComputeQueue(HWQueue):
     global_size_mp = [cast_int(g*l) for g,l in zip(global_size, local_size)]
 
     args_addr, lib_addr = self.kernargs(call, prg, data).getaddr(self.devs), lib.getaddr(self.devs)
-    stack_addr = UOp.alloc((data.hw_stack_offset * 4,), dtypes.uint8, 0, device=self.devs[0], name="stack").getaddr(self.devs)
+    stack_addr = UOp.extern((data.hw_stack_offset * 4,), dtypes.uint8, self.devs[0], "stack").getaddr(self.devs)
 
     self.cmd(mesa.CP_SET_MARKER, qreg.a6xx_cp_set_marker_0(mode=mesa.RM6_COMPUTE))
     self.reg(mesa.REG_A6XX_SP_UPDATE_CNTL, qreg.a6xx_sp_update_cntl(cs_state=True, cs_uav=True))
@@ -170,7 +170,7 @@ class QCOMComputeQueue(HWQueue):
                                                                state_block=mesa.SB6_CS_TEX, num_unit=data.samp_cnt), args_addr + data.samp_off)
       self.reg(mesa.REG_A6XX_SP_CS_SAMPLER_BASE, args_addr + data.samp_off)
       self.reg(mesa.REG_A6XX_TPL1_CS_BORDER_COLOR_BASE,
-               UOp.alloc((0x1000,), dtypes.uint8, 0, device=self.devs[0], name="border_color").getaddr(self.devs))
+               UOp.extern((0x1000,), dtypes.uint8, self.devs[0], "border_color").getaddr(self.devs))
 
     if data.tex_cnt > 0:
       self.cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST_CONSTANTS, state_src=mesa.SS6_INDIRECT,
@@ -301,6 +301,7 @@ Compiled.pm_encode += PatternMatcher([
 ])
 
 class QCOMDevice(Compiled):
+  renderers = [QCOMCLRenderer, IR3Renderer]
   timestamp_divider = 19.2
 
   @property
@@ -329,7 +330,7 @@ class QCOMDevice(Compiled):
     if PROFILE and self.gpu_id[:2] < (7, 3):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
-    super().__init__(device, QCOMAllocator(self), [QCOMCLRenderer, IR3Renderer], None,
+    super().__init__(device, QCOMAllocator(self), None,
                      arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id)
 
     self.var_vals = {"kgsl_fd": self.fd.fd, "kgsl_ctx": self.ctx}

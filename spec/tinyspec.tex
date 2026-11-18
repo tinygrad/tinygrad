@@ -238,15 +238,13 @@ Ternary & $(P, A, B)$
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
 \op{Barrier} & (deps\ldots) & --- & Synchronize threads within a workgroup. \\
-\op{Ins} & \ldots & \ldots & A single machine instruction (e.g.\ AMD ISA). \\
 \op{GetAddr} & (buf,) & dev & Lower buf to its address on device dev. \\
 \op{Special} & (bound,) & name & GPU thread/workgroup index (e.g.\ \texttt{gidx0}, \texttt{lidx1}). \\
 \op{If} & (gate,) & --- & Begin conditional execution block. \\
 \op{Endif} & (if,) & --- & End conditional execution block. \\
 \op{Wmma} & (A, B, acc) & config & Warp matrix multiply-accumulate (tensor cores). \\
-\op{Custom} & (args\ldots) & fmt & Inject custom code string into generated source. \\
 \op{AtomicAdd} & (idx, val) & --- & Atomic read-modify-write: \texttt{buf[idx] += val}. \\[4pt]
-\op{CustomFunction} & (meta\ldots) & name & Opaque device function (e.g.\ HW decode). Via \op{Call}. \\
+\op{Native} & (meta\ldots) & native & Opaque native code or device function (e.g.\ HW decode). Via \op{Call}. \\
 \op{Program} & (linear, source, binary) & --- & Compiled kernel: instructions, source, and machine code. \\
 \op{Source} & () & str & Human-readable rendered source code. \\
 \op{Binary} & () & bytes & Compiled machine code. \\
@@ -314,8 +312,8 @@ Each kernel's iteration space is a set of \op{Range} axes. Every range has an \t
 {\color{axblue}\texttt{GLOBAL}} & \texttt{g} & --- & --- & GPU global workgroup dimension. \\
 {\color{axcyan}\texttt{LOCAL}} & \texttt{l} & g, L & inner/outer & Workgroup local dimension (shared memory). \\
 {\color{axbrcyan}\texttt{WARP}} & \texttt{w} & \multicolumn{2}{l}{(created by \op{TC})} & Warp-level lanes for tensor cores. \\
-{\color{axwhite}\texttt{WEAK}} & \texttt{L} & --- & --- & Optimizable range (default). \\
-{\color{axwhite}\texttt{LOOP}} & \texttt{L} & --- & --- & Pinned sequential loop. \\
+{\color{axwhite}\texttt{WEAK}} & \texttt{L} & --- & --- & Optimizable range. \\
+{\color{axwhite}\texttt{LOOP}} & \texttt{L} & --- & --- & Pinned sequential loop (default). \\
 {\color{axyellow}\texttt{UPCAST}} & \texttt{u} & g, l, L & inner/outer & Vectorization, including reduction unrolling. \\
 \bottomrule
 \end{tabular}

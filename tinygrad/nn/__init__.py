@@ -327,9 +327,9 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     embed_size = grad_weight.shape[-1]
     BLOCK_J = min(256, embed_size)
     n_j_blocks = (embed_size + BLOCK_J - 1) // BLOCK_J
-    i = UOp.range(grad_emb_flat.shape[0], 0)         # batch_size * sequence_length -> GLOBAL
+    i = UOp.range(grad_emb_flat.shape[0], 0, AxisType.WEAK)  # batch_size * sequence_length -> GLOBAL
     j_inner = UOp.range(BLOCK_J, 2, AxisType.WEAK if device in ("CPU", "NULL") else AxisType.LOCAL)  # BLOCK_J threads per workgroup
-    j_outer = UOp.range(n_j_blocks, 1)
+    j_outer = UOp.range(n_j_blocks, 1, AxisType.WEAK)
     j = j_outer * BLOCK_J + j_inner
     # mask padded embed
     j_ok = j < embed_size
@@ -350,7 +350,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"
     elif device == "AMD": atomic_arg = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
     else: raise NotImplementedError(f"no atomics for device {device}")
-    atomic = UOp.custom_function(atomic_arg, fmt=True).call(grad_weight.index(local_token_id, j_idx), grad_val)
+    atomic = UOp.native(atomic_arg, fmt=True).call(grad_weight.index(local_token_id, j_idx), grad_val)
     return grad_weight.flatten().after(atomic.end(i, j_outer, j_inner)).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
 
   grad_weight_uop = grad_weight_uop.custom_kernel(grad_emb, idx, fxn=_embedding_bwd_kernel)[0]

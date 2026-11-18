@@ -33,14 +33,14 @@ pm_cuda = PatternMatcher([ # None is the stream
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), cu_launch_kernel),
   (UPat(Ops.CALL, src=(UPat(Ops.STORE), UPat(name="dst"), UPat(name="src")), allow_any_len=True),
    lambda ctx, dst, src: (cuda.cuMemcpyAsync, dst.getaddr(ctx.device), src.getaddr(ctx.device), src.max_numel() * src.dtype.itemsize, None)),
-  (UPat(Ops.CALL, src=(UPat.custom_function("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
+  (UPat(Ops.CALL, src=(UPat.native("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
    lambda ctx, dst, src, n: (cuda.cuMemcpyAsync, dst.getaddr(ctx.device), src.getaddr(ctx.device), n.val, None)),
-  (UPat(Ops.CALL, src=(UPat.custom_function("wait"), UPat(name="sig"), UPat(name="val"))),
-   lambda ctx, sig, val: (cuda.cuStreamWaitValue64_v2, None, sig.getaddr(ctx.device), val, cuda.CU_STREAM_WAIT_VALUE_GEQ)),
-  (UPat(Ops.CALL, src=(UPat.custom_function("store"), UPat(name="sig"), UPat(name="val"))),
-   lambda ctx, sig, val: (cuda.cuStreamWriteValue64_v2, None, sig.getaddr(ctx.device), val, cuda.CU_STREAM_WRITE_VALUE_DEFAULT)),
-  (UPat(Ops.CALL, src=(UPat.custom_function("timestamp"), UPat(name="sig"))), # [sig][stamp]
-   lambda ctx, sig: (cuda.cuLaunchHostFunc, None, UOp.alloc((1,), dtypes.uint64, 0, device=ctx.device, name="stamp").getaddr(ctx.host),
+  (UPat(Ops.CALL, src=(UPat.native("wait"), UPat(name="sig"), UPat(name="val"))),
+   lambda ctx, sig, val: (cuda.cuStreamWaitValue32_v2, None, sig.getaddr(ctx.device), val.cast(dtypes.uint32), cuda.CU_STREAM_WAIT_VALUE_GEQ)),
+  (UPat(Ops.CALL, src=(UPat.native("store"), UPat(name="sig"), UPat(name="val"))),
+   lambda ctx, sig, val: (cuda.cuStreamWriteValue32_v2, None, sig.getaddr(ctx.device), val.cast(dtypes.uint32), cuda.CU_STREAM_WRITE_VALUE_DEFAULT)),
+  (UPat(Ops.CALL, src=(UPat.native("timestamp"), UPat(name="sig"))), # [sig][stamp]
+   lambda ctx, sig: (cuda.cuLaunchHostFunc, None, UOp.extern((1,), dtypes.uint64, ctx.device, "stamp").getaddr(ctx.host),
                      sig[1:2].getaddr(ctx.device))),
 ])
 
@@ -51,7 +51,7 @@ def cuda_submit(s:UOp, ccallfn:Callable[[Any, *tuple[UOp, ...]], UOp]=ccall) -> 
   for fn, *args in [x for c in call.body.src if (x:=pm_cuda.rewrite(c, ctx=Device[q.device])) is not None]:
     stream = rt_vars.after(h).index(2 if q.arg.name.startswith("COPY") else 1).load() # the stream after the last call
     h = ccallfn(fn, *[stream if a is None else UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args])
-  return h.sink().call(UOp.alloc((3,), dtypes.uint64, 0, device=q.device, name="handles").after(*deps), name=call.body.arg.name)
+  return h.sink().call(UOp.extern((3,), dtypes.uint64, q.device, "handles").after(*deps), name=call.body.arg.name)
 
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("cuda_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), cuda_submit),
@@ -97,7 +97,7 @@ class CUDADevice(Compiled):
     self.cu_device = init_c_var(api.CUdevice, lambda x: check(api.cuDeviceGet(ctypes.byref(x), device_id)))
     self.context = init_c_var(api.CUcontext, lambda x: check(api.cuCtxCreate_v2(ctypes.byref(x), 0, self.cu_device)))
     self.streams = [init_c_var(api.CUstream, lambda x: check(api.cuStreamCreate(ctypes.byref(x), cuda.CU_STREAM_NON_BLOCKING))) for _ in range(2)]
-    super().__init__(device, CUDAAllocator(self), self.renderers, None, arch=self.get_arch(device_id))
+    super().__init__(device, CUDAAllocator(self), None, arch=self.get_arch(device_id))
 
     # [ctx, compute stream, copy stream], and the host function that writes a timestamp
     handles = Buffer(HCQ_RUNTIME_DEV.device, 24, initial_value=b"".join(map(bytes, (self.context, *self.streams))))

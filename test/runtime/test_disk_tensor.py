@@ -40,6 +40,12 @@ class TestTorchLoad(TempDirTestCase):
     torch.save({"empty": t.to(torch.bfloat16)[:, 1:1]}, self.tmp("strided_bf16.pt"))
     self.assertEqual(torch_load(self.tmp("strided_bf16.pt"))["empty"].shape, (3, 0))
 
+  @unittest.skipUnless(dtypes.bfloat16 in Device[Device.DEFAULT].renderer.supported_dtypes(), f"no bfloat16 on {Device.DEFAULT}")
+  def test_load_strided_bf16(self):
+    import torch
+    torch.save({"col": torch.arange(1., 13.).reshape(3, 4).to(torch.bfloat16)[:, 1]}, self.tmp("strided_bf16.pt"))
+    self.assertEqual(torch_load(self.tmp("strided_bf16.pt"))["col"].float().tolist(), [2., 6., 10.])
+
   # pytorch pkl format
   def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
   # pytorch zip format
@@ -95,7 +101,7 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.float32, 3.1415927)
     _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
     # doesn't suport normal cast
-    with self.assertRaises(NotImplementedError):
+    with self.assertRaisesRegex(RuntimeError, "DISK has no renderers"):
       Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16).to(None).realize()
 
     # Those two should be moved to test_dtype.py:test_shape_change_bitcast after bitcast works on non-disk

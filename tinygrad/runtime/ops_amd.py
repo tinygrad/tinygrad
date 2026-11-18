@@ -48,7 +48,7 @@ class ProfilePMCEvent(ProfileEvent): device:str; kern:int; sched:list[PMCSample]
 def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, named {device}_{name}_{queue}. put is the host's copy of the write pointer
   shapes = [("ring", (q.ring.nbytes // 4,), dtypes.uint32, hq.devs[0])] + [(n, (1,), dtypes.uint64, hq.devs[0]) for n in ("write_ptr", "doorbell")]
   shapes += [("put_value", (1,), dtypes.uint64, hq.dev.host)]
-  return [UOp.alloc(s, dt, 0, device=d, name=to_name(hq.dev.device, n, hq.queue)) for n, s, dt, d in shapes]
+  return [UOp.extern(s, dt, d, to_name(hq.dev.device, n, hq.queue)) for n, s, dt, d in shapes]
 
 @uopfunc
 def amd_push(cmdbuf:UOp, words:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, unit:int=4, doorbell_lag:int=0) -> UOp:
@@ -169,7 +169,7 @@ class AMDComputeQueue(HWQueue):
   ### profiling: a kernel's slot holds its counters and trace until a synchronize reads them back
 
   def prof_buf(self, name:str, dtype:DType) -> UOp:
-    return UOp.alloc((getattr(self.dev, name).nbytes // dtype.itemsize,), dtype, 0, device=self.devs[0], name=name)
+    return UOp.extern((getattr(self.dev, name).nbytes // dtype.itemsize,), dtype, self.devs[0], name)
 
   def prof_start(self, info:ProgramInfo, lib:UOp) -> UOp:
     log = self.prof_buf("prof_log", dtypes.uint64)
@@ -376,7 +376,7 @@ class AMDComputeQueue(HWQueue):
 
     prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
     args_addr = self.kernargs(call, prg, data)
-    scratch_addr = UOp.alloc((data.private_segment_size,), dtypes.uint8, 0, device=self.devs[0], name="scratch").getaddr(self.devs)
+    scratch_addr = UOp.extern((data.private_segment_size,), dtypes.uint8, self.devs[0], "scratch").getaddr(self.devs)
 
     user_regs:list = []
     if data.enable_private_segment_sgpr: user_regs = [scratch_addr | (1 << 63), 0xffffffff, 0x20c14000]
@@ -813,6 +813,7 @@ class USBIface(PCIIface):
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
 class AMDDevice(Compiled):
+  renderers = [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer]
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
   sleep_timeout_ms = 200
   max_scratch_psize = 0
@@ -857,7 +858,7 @@ class AMDDevice(Compiled):
     self.sdma_queues:dict = {}
 
     allocator = USBAllocator(self) if self.is_usb else AMDAllocator(self)
-    super().__init__(device, allocator, [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, arch=self.arch)
+    super().__init__(device, allocator, None, arch=self.arch)
 
     # Scratch setup
     self.max_private_segment_size = 0

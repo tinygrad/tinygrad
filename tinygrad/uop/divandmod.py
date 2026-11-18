@@ -40,9 +40,10 @@ def fold_divmod_general(d: UOp) -> UOp|None:
     terms, factors = zip(*decomp)
 
     # fold_divmod_congruence: fold if a is congruent to an expression whose range is between 0 and c
-    # try both signs of the remainder for a lone term (covers a binary numerator that crosses one period)
-    # or on an exact f%c == c//2 tie; otherwise pick the smaller to keep the product over terms small
-    rem_choices = [(r, r-c) if (r:=f%c)*2 == c or len(terms)==1 else (min(r, r-c, key=abs),) for f in factors]
+    # each term takes the remainder r or r-c with the smaller abs, keeping the range narrow
+    # both are tried for a lone term, and for the only varying term with r == c/2 (two such terms span c and never fold)
+    ties = [i for i,(f,v) in enumerate(zip(factors,terms)) if (f%c)*2 == c and v.vmin != v.vmax]
+    rem_choices = [(r, r-c) if len(terms)==1 or ties==[i] else (min(r, r-c, key=abs),) for i,r in enumerate(f%c for f in factors)]
     for rems in itertools.product(*rem_choices):
       if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c:
         if d.op is Ops.MOD: return rem - rem.vmin//c*c

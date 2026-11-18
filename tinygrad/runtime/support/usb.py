@@ -208,14 +208,14 @@ class USBMMIOInterface(MMIOInterface):
 HALF, CHUNK, SLOT, STREAM = 0x40000, 0x40000 - 512, 0x4000, 1 << 20 # sram half, payload, slot, stream
 HOST_SIZE = 64 + 2 * HALF + STREAM # link, staging, zeros
 
-def usb_host(dev:str) -> UOp: return UOp.alloc((HOST_SIZE,), dtypes.uint8, 0, device=HCQ_RUNTIME_DEV.device, name=to_name(dev, "usb_host"))
+def usb_host(dev:str) -> UOp: return UOp.extern((HOST_SIZE,), dtypes.uint8, HCQ_RUNTIME_DEV.device, to_name(dev, "usb_host"))
 def usb_link(dev:str) -> UOp: return usb_host(dev)[:48].bitcast(dtypes.uint64) # handle, context, prev chunks, two transfers, error state
 def usb_stage(dev:str) -> UOp: return usb_host(dev)[64:64 + 2 * HALF]
 def usb_zeros(dev:str) -> UOp: return usb_host(dev)[64 + 2 * HALF:]
 
-def usb_go(dev:str) -> UOp: return UOp.alloc((1,), dtypes.uint32, 0, device=dev, name="usb_go") # chunk + 1: read armed
+def usb_go(dev:str) -> UOp: return UOp.extern((1,), dtypes.uint32, dev, "usb_go") # chunk + 1: read armed
 
-def usb_asm24(dev:str) -> UOp: return UOp.alloc((0x85000,), dtypes.uint8, 0, device=dev, name="usb_asm24") # sys, cq, sram
+def usb_asm24(dev:str) -> UOp: return UOp.extern((0x85000,), dtypes.uint8, dev, "usb_asm24") # sys, cq, sram
 def usb_fence(dev:str) -> UOp: return usb_asm24(dev)[0x800:0x804].bitcast(dtypes.uint32) # gpu chunks done
 def usb_cq(dev:str) -> UOp: return usb_asm24(dev)[0x100c:0x1010].bitcast(dtypes.uint32) # completion queue
 def usb_sram(dev:str) -> UOp: return usb_asm24(dev)[0x5000:0x5000 + 2 * HALF]
@@ -401,13 +401,13 @@ def usb_copy_rewriter(s:UOp) -> UOp|None:
 
   # host side, after the submit
   link = usb_link(dev).after(s)
-  done = UOp.custom_function("usb_begin").call(link, usb_fence(dev), link.index(2).load())
+  done = UOp.native("usb_begin").call(link, usb_fence(dev), link.index(2).load())
   for cin, run, table, k in runs:
-    if run: done = UOp.custom_function("usb_drain").call(link.after(done), usb_fence(dev), UOp.const(run + 1, dtypes.uint64)) # a run uses both halves
+    if run: done = UOp.native("usb_drain").call(link.after(done), usb_fence(dev), UOp.const(run + 1, dtypes.uint64)) # a run uses both halves
     live = UOp.range(link.after(done).index(5).load().eq(0).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int) # no trips once failed
     loop, at = UOp.range(UOp(Ops.NOOP).after(link, live), next(UOp.unique_num), dtype=dtypes.void), usb_stack(dtypes.int, 0)
     i, word = at.after(loop).index(0).load(), usb_fence(dev) if cin else usb_go(dev)
-    sent = UOp.custom_function("usb_send" if cin else "usb_recv").call(link.after(loop), table, i, UOp.const(run, dtypes.int), word)
+    sent = UOp.native("usb_send" if cin else "usb_recv").call(link.after(loop), table, i, UOp.const(run, dtypes.int), word)
     done = at.after(sent).index(0).store(i + 1).backedge(loop, (i + 1 < k) & link.after(sent).index(5).load().eq(0)).end(live)
   return link.after(done).index(2).store(UOp.const(n, dtypes.uint64))
 
@@ -415,19 +415,19 @@ Compiled.pm_encode = PatternMatcher([(UPat.sink().call(UPat(Ops.PARAM)).after(al
   usb_copy_rewriter)]) + Compiled.pm_encode # the copies of a submit go through the sram window
 Compiled.pm_lower += PatternMatcher([
   # the gpu's memory is reached over usb
-  (UPat.custom_function("memcpy", dtypes.uint64).call(UPat.var("dst"), UPat.var("src"), UPat.var("n")), usb_memcpy),
-  (UPat.custom_function("memset", dtypes.uint64).call(UPat.var("dst"), UPat.const(0).or_casted(), UPat.var("n")),
+  (UPat.native("memcpy", dtypes.uint64).call(UPat.var("dst"), UPat.var("src"), UPat.var("n")), usb_memcpy),
+  (UPat.native("memset", dtypes.uint64).call(UPat.var("dst"), UPat.const(0).or_casted(), UPat.var("n")),
    lambda dst, n: usb_memcpy(dst, usb_zeros(dst.src[0].device).index(0), n, fill=True)),
   (UPat.var("b").index(UPat.var("idx")).store(UPat.var("v")), lambda b, idx, v: usb_store(b, idx, v) if is_remote(b) else None),
   (UPat.var("b").index(UPat.var("idx")).load(name="ld"), lambda b, idx, ld: usb_load(b, idx, ld) if is_remote(b) else None),
   # the usb host calls get their bodies
-  (UPat(Ops.CALL, src=(UPat.custom_function("usb_begin"), UPat.var("link"), UPat.var("fence"), UPat.var("prev"))),
+  (UPat(Ops.CALL, src=(UPat.native("usb_begin"), UPat.var("link"), UPat.var("fence"), UPat.var("prev"))),
    lambda link, fence, prev: usb_begin(link, fence.getaddr("CPU"), prev)),
-  (UPat(Ops.CALL, src=(UPat.custom_function("usb_drain"), UPat.var("link"), UPat.var("fence"), UPat.var("need"))),
+  (UPat(Ops.CALL, src=(UPat.native("usb_drain"), UPat.var("link"), UPat.var("fence"), UPat.var("need"))),
    lambda link, fence, need: usb_drain(link, fence.getaddr("CPU"), need)),
-  (UPat(Ops.CALL, src=(UPat.custom_function("usb_send"), UPat.var("link"), UPat.var("table"), UPat.var("i"), UPat.var("run"), UPat.var("fence"))),
+  (UPat(Ops.CALL, src=(UPat.native("usb_send"), UPat.var("link"), UPat.var("table"), UPat.var("i"), UPat.var("run"), UPat.var("fence"))),
    lambda link, table, i, run, fence: usb_send(link, table, i, run, fence.getaddr("CPU"), usb_stage(fence.device))),
-  (UPat(Ops.CALL, src=(UPat.custom_function("usb_recv"), UPat.var("link"), UPat.var("table"), UPat.var("i"), UPat.var("run"), UPat.var("go"))),
+  (UPat(Ops.CALL, src=(UPat.native("usb_recv"), UPat.var("link"), UPat.var("table"), UPat.var("i"), UPat.var("run"), UPat.var("go"))),
    lambda link, table, i, run, go: usb_recv(link, table, i, run, go.getaddr("CPU"), usb_stage(go.device))),
 ])
 

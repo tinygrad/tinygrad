@@ -43,7 +43,7 @@ def _run_hw(instructions: list, out_reg: int = 2, lanes: int = 1) -> list[int]:
   out_gpu = Buffer(dev.device, lanes * 4, preallocate=True)
   lds = UOp.placeholder((65536,), dtypes.uint8, 0, AddrSpace.LOCAL)
   sink = UOp.sink(UOp.param(0, dtypes.uint32, (lanes,)), UOp.special(lanes, "lidx0"), lds, arg=KernelInfo("test"))
-  body = UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in _code(instructions, out_reg)))
+  body = UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in _code(instructions, out_reg)))
   prg = UOp(Ops.PROGRAM, src=(sink, body))
   run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
   out = out_gpu.as_memoryview()
