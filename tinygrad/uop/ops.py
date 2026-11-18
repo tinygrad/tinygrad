@@ -598,7 +598,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def without_after(self) -> UOp: return self.src[0].without_after if self.op is Ops.AFTER else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   @staticmethod
-  def ins(op, src:tuple[UOp, ...], dtype:DType, *muts:Register) -> UOp: return UOp(Ops.INS, src, (op, dtype, *muts))
+  def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:Register) -> UOp: return UOp(Ops.INS, src, (op, dtype, *regs))
   @staticmethod
   def asm(op) -> UOp: return UOp(Ops.ASM, arg=op)
   def contract(self, *rngs:UOp):
