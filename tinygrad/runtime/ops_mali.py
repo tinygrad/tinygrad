@@ -8,7 +8,7 @@ from tinygrad.runtime.support import c
 from tinygrad.renderer import TinyELF
 from tinygrad.renderer.nir import MALIRenderer
 from tinygrad.runtime.autogen import panfrost as pf, mesa, panthor as pt, libc
-from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, ccall, layout_args, pack_args, encode_cmdbuf, make_program, patch
+from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, ccall, layout_args, encode_cmdbuf, make_program, patch
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_kernel_args
 
@@ -140,88 +140,9 @@ def mali_run(buf:UOp, cmds:tuple, ctx:UOp) -> UOp:
       buf = buf.after(ret)
   return buf.sink()
 
-class MALIQueue(HWQueue):
-  dev:MALIDevice
-  def __init__(self, submit:UOp):
-    super().__init__(submit)
-    self.cmds:list[tuple] = []
-    self.ctx = UOp.const(ctypes.addressof(self.dev.ctx.contents), dtypes.u64)
-
-  def call(self, fn, *args): self.cmds.append((fn, args))
-  def copy(self, dst:UOp, src:UOp, n:int):
-    dst_mali, src_mali = to_tuple(dst.device)[0] == self.devs[0], to_tuple(src.device)[0] == self.devs[0]
-    if dst_mali and src_mali:
-      self.call(pf.panfrost_buffer_copy, dst.getaddr(self.devs), src.getaddr(self.devs), UOp.const(n, dtypes.u32))
-    elif dst_mali:
-      self.call(pf.panfrost_buffer_write, dst.getaddr(self.devs), src.getaddr(), UOp.const(n, dtypes.u32))
-    elif src_mali:
-      self.call(pf.panfrost_buffer_read, src.getaddr(self.devs), dst.getaddr(), UOp.const(n, dtypes.u32))
-
-  def wait(self, dst:UOp, val:UOp|int, eq=False):
-    self.call(pf.panfrost_compute_wait, dst.getaddr(HCQ_RUNTIME_DEV.device), UOp.const(val, dtypes.u64) if isinstance(val, int) else val)
-  def memory_barrier(self): pass
-  def exec_barrier(self): pass
-  def signal(self, dst:UOp, val:UOp|int):
-    self.call(pf.panfrost_compute_signal, dst.getaddr(HCQ_RUNTIME_DEV.device), UOp.const(val, dtypes.u64) if isinstance(val, int) else val)
-  def timestamp(self, dst:UOp): self.call(pf.panfrost_compute_timestamp, dst.getaddr(HCQ_RUNTIME_DEV.device))
-
-  def exec(self, call:UOp, prg:UOp):
-    obj = TinyELF.from_program(prg)
-    data = self.dev.program(obj)
-    args = get_call_kernel_args(call, prg, self.devs)
-    total_args = data.arg_size + 4 * len(data.vendor_fau)
-    rows = layout_args(args) + [(data.arg_size + 4 * i, UOp.const(v, dtypes.u32)) for i, v in enumerate(data.vendor_fau)]
-    arg_off = self.q(*pack_args(rows, total_args)) - total_args
-    cb = pf.struct_pipe_constant_buffer(buffer_size=total_args)
-    cb_off = self.q(UOp(Ops.BINARY, arg=bytes(cb))) - ctypes.sizeof(cb)
-    grid = pf.struct_pipe_grid_info(work_dim=3)
-    grid_off = self.q(UOp(Ops.BINARY, arg=bytes(grid))) - ctypes.sizeof(grid)
-    self.patches += [(grid_off + off, w) for off, w in layout_args([UOp.const(x, dtypes.u32) for x in prg.arg.local_size], 8)]
-    self.patches += [(grid_off + off, w) for off, w in layout_args([UOp.const(x, dtypes.u32) for x in prg.arg.global_size], 32)]
-
-    self.call(pf.panfrost_compute_bind, UOp.const(check(data.kernel), dtypes.u64))
-    self.call(pf.panfrost_compute_set_constants, (cb_off,), (arg_off,))
-
-    sampler_offsets:list[int] = []
-    image_addresses:list[UOp] = []
-    image_blob = bytearray()
-    handles_off = self.q(UOp(Ops.BINARY, arg=bytes(8 * data.num_samplers))) - 8 * data.num_samplers if data.num_samplers else 0
-    for i, (width, height, itemsize, _) in enumerate(data.image_info):
-      if not itemsize: continue
-      resource = call.src[1 + data.buffer_slots[i]].getaddr(self.devs)
-      fmt = pf.PIPE_FORMAT_R16G16B16A16_FLOAT if itemsize == 2 else pf.PIPE_FORMAT_R32G32B32A32_FLOAT
-      tex2d = pf.struct_pipe_tex2d_from_buf(offset=0, row_stride=width, width=width, height=height)
-      if len(sampler_offsets) < data.num_samplers:
-        tmpl = pf.struct_pipe_sampler_view(format=fmt, target=pf.PIPE_TEXTURE_2D, is_tex2d_from_buf=True,
-          swizzle_r=0, swizzle_g=1, swizzle_b=2, swizzle_a=3, texture=None, context=self.dev.ctx, u=tex2d)
-        tmpl_off = self.q(UOp(Ops.BINARY, arg=bytes(tmpl))) - ctypes.sizeof(tmpl)
-        handle_off = handles_off + 8 * len(sampler_offsets)
-        self.call(pf.panfrost_compute_create_sampler_view, resource, (tmpl_off,), (handle_off,))
-        sampler_offsets.append(handle_off)
-      else:
-        view = pf.struct_pipe_image_view(resource=None, format=fmt,
-          access=pf.PIPE_IMAGE_ACCESS_READ_WRITE | pf.PIPE_IMAGE_ACCESS_TEX2D_FROM_BUFFER,
-          shader_access=pf.PIPE_IMAGE_ACCESS_READ_WRITE, u=tex2d)
-        image_addresses.append(resource)
-        image_blob += bytes(view)
-
-    if sampler_offsets:
-      self.call(pf.panfrost_compute_set_samplers, UOp.const(self.dev.sampler_state, dtypes.u64), (handles_off,),
-        UOp.const(len(sampler_offsets), dtypes.u32))
-    if image_blob:
-      assert len(image_addresses) <= 4
-      image_off = self.q(UOp(Ops.BINARY, arg=bytes(image_blob))) - len(image_blob)
-      self.call(pf.panfrost_compute_set_images, UOp.const(len(image_addresses), dtypes.u32), (image_off,),
-        *[*image_addresses, *([UOp.const(0, dtypes.u64)] * (4 - len(image_addresses)))])
-
-    self.call(pf.panfrost_compute_launch, (grid_off,))
-    for handle_off in sampler_offsets: self.call(pf.panfrost_compute_release_sampler_view, handle_off)
-
-  def encode(self) -> UOp: return mali_run(encode_cmdbuf(self, self.lin), tuple(self.cmds), self.ctx)
-
 def mali_buffer(address, size): return struct.pack('<IIQIIII', 9 | (1 << 4), size, address, 0, 0, 0, 0)
 
-# Experimental direct Valhall CSF queue, enabled only with MALI_RAW=1. The default remains the validated Gallium HCQ2 path.
+# Direct Valhall CSF command queue.
 class MALIRawQueue(HWQueue):
   dev:MALIDevice
   def __init__(self, submit:UOp):
@@ -244,9 +165,9 @@ class MALIRawQueue(HWQueue):
   def timestamp(self, dst:UOp): self.cmds.append((pf.panfrost_compute_timestamp, (dst.getaddr(HCQ_RUNTIME_DEV.device),)))
   def copy(self, dst:UOp, src:UOp, n:int):
     dst_mali, src_mali = to_tuple(dst.device)[0] == self.devs[0], to_tuple(src.device)[0] == self.devs[0]
-    if dst_mali and src_mali: self.cmds.append((pf.panfrost_buffer_copy, (dst.getaddr(self.devs), src.getaddr(self.devs), n)))
-    elif dst_mali: self.cmds.append((pf.panfrost_buffer_write, (dst.getaddr(self.devs), src.getaddr(), n)))
-    elif src_mali: self.cmds.append((pf.panfrost_buffer_read, (src.getaddr(self.devs), dst.getaddr(), n)))
+    if dst_mali and src_mali: self.cmds.append((pf.panfrost_buffer_copy, (dst.getaddr(self.devs), src.getaddr(self.devs), UOp.const(n, dtypes.u32))))
+    elif dst_mali: self.cmds.append((pf.panfrost_buffer_write, (dst.getaddr(self.devs), src.getaddr(), UOp.const(n, dtypes.u32))))
+    elif src_mali: self.cmds.append((pf.panfrost_buffer_read, (src.getaddr(self.devs), dst.getaddr(), UOp.const(n, dtypes.u32))))
 
   def write(self, address:UOp, value:UOp, size:int):
     self.cmds.append((pt.panthor_write, (address, value, UOp.const(size, dtypes.u32))))
@@ -281,20 +202,18 @@ class MALIRawQueue(HWQueue):
       (textures if len(textures) < data.num_samplers else images).append((out, resource))
       self.dev.allocator.free(dummy, 16, BufferSpec())
     resources = alloc(128, 'resources')
-    resource_rows = [(0, ubodesc.getaddr(self.devs)), (4, UOp.const(1 << 24, dtypes.u32)), (8, UOp.const(32, dtypes.u64)),
-                     (48, sampler_desc.getaddr(self.devs)), (52, UOp.const(1 << 24, dtypes.u32)), (56, UOp.const(32, dtypes.u64))]
+    resource_rows = [(0, ubodesc.getaddr(self.devs) | (1 << 56)), (8, UOp.const(32, dtypes.u64)),
+                     (48, sampler_desc.getaddr(self.devs) | (1 << 56)), (56, UOp.const(32, dtypes.u64))]
     if textures:
       texture_desc = alloc(32 * len(textures), 'texture')
       texture_desc = patch(texture_desc, [], b''.join(map(bytes, textures)))
       for i, (_, resource) in enumerate(textures): self.write(texture_desc.getaddr(self.devs) + 16 + 32 * i, resource, 8)
-      resource_rows += [(64, texture_desc.getaddr(self.devs)), (68, UOp.const(1 << 24, dtypes.u32)),
-                        (72, UOp.const(32 * len(textures), dtypes.u64))]
+      resource_rows += [(64, texture_desc.getaddr(self.devs) | (1 << 56)), (72, UOp.const(32 * len(textures), dtypes.u64))]
     if images:
       image_desc = alloc(32 * len(images), 'image')
       image_desc = patch(image_desc, [], b''.join(map(bytes, images)))
       for i, (_, resource) in enumerate(images): self.write(image_desc.getaddr(self.devs) + 16 + 32 * i, resource, 8)
-      resource_rows += [(80, image_desc.getaddr(self.devs)), (84, UOp.const(1 << 24, dtypes.u32)),
-                        (88, UOp.const(32 * len(images), dtypes.u64))]
+      resource_rows += [(80, image_desc.getaddr(self.devs) | (1 << 56)), (88, UOp.const(32 * len(images), dtypes.u64))]
     resources = patch(resources, resource_rows, bytes(128))
     word_args = {}
     for off, word in rows:
@@ -330,6 +249,7 @@ class MALIRawQueue(HWQueue):
     self.move48(24, tsd.getaddr(self.devs))
     self.move32(32, 0)
     wg = (local_size[0] - 1) | ((local_size[1] - 1) << 10) | ((local_size[2] - 1) << 20)
+    if data.info.allow_merging_workgroups: wg |= 1 << 31
     self.move32(33, wg)
     for reg in (34, 35, 36): self.move32(reg, 0)
     for i, value in enumerate(global_size): self.move32(37 + i, value)
@@ -359,17 +279,15 @@ class MALIRawQueue(HWQueue):
 
   def encode(self) -> UOp:
     for u in self.lin.src: self.q_rewrite.rewrite(u, ctx=self)
-    if not self.blob: self.q(UOp.const(0, dtypes.u64))
-    return self.submit(encode_cmdbuf(self))
+    empty = not self.blob
+    if empty: self.q(UOp.const(0, dtypes.u64))
+    cmdbuf = encode_cmdbuf(self)
+    if empty: return mali_run(cmdbuf, tuple(self.cmds), self.ctx) # host-only queues need no panthor submission
+    return self.submit(cmdbuf)
 
-def mali_encode(s:UOp) -> UOp: return MALIRawQueue(s).encode() if os.getenv('MALI_RAW') else MALIQueue(s).encode()
+def mali_encode(s:UOp) -> UOp: return MALIRawQueue(s).encode()
 Compiled.pm_encode += PatternMatcher([(UPat.sink(arg=KernelInfo("mali_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"),
   mali_encode), (UPat.sink(arg=KernelInfo("mali_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), mali_encode)])
-
-# Legacy host-call queue retained for reference while the raw CSF path is validated.
-Compiled.pm_encode += PatternMatcher([(UPat.sink(arg=KernelInfo("mali_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"),
-  lambda s: MALIQueue(s).encode()), (UPat.sink(arg=KernelInfo("mali_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"),
-  lambda s: MALIQueue(s).encode())])
 
 class MALIDevice(Compiled):
   renderers = [MALIRenderer]
@@ -420,6 +338,7 @@ class MALIDevice(Compiled):
     if libc.dll.ioctl(self.fd, pt.DRM_IOCTL_SYNCOBJ_CREATE, ctypes.byref(sync)) != 0:
       raise RuntimeError(f'MALI syncobj creation failed: {ctypes.get_errno()}')
     self.sync_handle = sync.handle
+    pt.panthor_set_sync_handle(self.ctx, self.sync_handle)
     super().__init__(device, MALIAllocator(self), None, arch="g610")
     self.var_vals = {'panthor_fd': self.fd, 'panthor_group': self.group_handle, 'panthor_sync': self.sync_handle}
 
@@ -452,13 +371,12 @@ class MALIDevice(Compiled):
 
   def _wait_signal(self, sig, value:int, timeout:int|None=None):
     self.flush()
-    if os.getenv('MALI_RAW'):
-      point = pt.panthor_context_point(self.ctx)
-      handles, points = ctypes.c_uint32(self.sync_handle), ctypes.c_uint64(point)
-      wait = pt.struct_drm_syncobj_timeline_wait(handles=ctypes.addressof(handles), points=ctypes.addressof(points),
-        timeout_nsec=time.monotonic_ns() + 1000000000, count_handles=1)
-      ret = libc.dll.ioctl(self.fd, pt.DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, ctypes.byref(wait))
-      if ret != 0: raise RuntimeError('MALI timeline wait failed')
+    point = pt.panthor_context_point(self.ctx)
+    handles, points = ctypes.c_uint32(self.sync_handle), ctypes.c_uint64(point)
+    wait = pt.struct_drm_syncobj_timeline_wait(handles=ctypes.addressof(handles), points=ctypes.addressof(points),
+      timeout_nsec=time.monotonic_ns() + 1000000000, count_handles=1)
+    ret = libc.dll.ioctl(self.fd, pt.DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, ctypes.byref(wait))
+    if ret != 0: raise RuntimeError('MALI timeline wait failed')
     super()._wait_signal(sig, value, timeout)
 
   def finalize(self):
