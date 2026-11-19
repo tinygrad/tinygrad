@@ -125,10 +125,11 @@ def gen(name, files, dll="", args=[], prolog=[], rules=[], epilog=[], recsym=Fal
       case clang.CXType_Typedef if nm(t) == nm(canon:=clang.clang_getCanonicalType(t)): return tname(canon)
       case clang.CXType_Typedef:
         defined, cnm = nm(canon:=clang.clang_getCanonicalType(t)) in types, tname(canon, typedef=nm(t))
-        types[nm(t)] = cnm if nm(t).startswith("__") else nm(t).replace('::', '_'), True
+        tnm = nm(t).removeprefix("const ")
+        types[tnm] = cnm if tnm.startswith("__") else tnm.replace('::', '_'), True
         # RECORDs need to handle typedefs specially to allow for self-reference
-        if canon.kind != clang.CXType_Record or defined: lines.append(f"{nm(t).replace('::', '_')}: TypeAlias = {cnm}")
-        return types[nm(t)][0]
+        if canon.kind != clang.CXType_Record or defined: lines.append(f"{tnm.replace('::', '_')}: TypeAlias = {cnm}")
+        return types[tnm][0]
       case clang.CXType_Record:
         # TODO: packed unions
         # libclang does not use CXType_Elaborated for function parameters with type qualifiers (eg. void (*)(const struct foo))
@@ -142,8 +143,8 @@ def gen(name, files, dll="", args=[], prolog=[], rules=[], epilog=[], recsym=Fal
           types[_nm] = (tnm:=real_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0, (ln:=len(lines))
           lines.append(f"class {tnm}(c.Struct): pass")
           if typedef:
-            lines.append(f"{typedef.replace('::', '_')}: TypeAlias = {tnm}")
-            types[typedef] = typedef.replace('::', '_'), True
+            lines.append(f"{typedef.removeprefix('const ').replace('::', '_')}: TypeAlias = {tnm}")
+            types[typedef.removeprefix('const ')] = typedef.removeprefix('const ').replace('::', '_'), True
         ff = [(normalize(f), clang.clang_getCanonicalType(ty:=clang.clang_getCursorType(f)), tname(ty, f"{tnm}_{nm(f)}"), offset) +
               ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8) * clang.clang_Cursor_isBitField(f))
               for f,offset in all_fields(t)]
