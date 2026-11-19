@@ -1898,11 +1898,13 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       else: permute = permute[0].reshape(1).cat(((permute[1:num] - 2) % (num - 1)) + 1)
       return U, V, permute
     # classical Jacobi converges in ~4 sweeps; one full sweep is (num-1) rounds for even num
-    for _ in range(4 * num): U, V, permute = one_round_jacobi(U, V, permute)
+    for _ in range(4 * num if num > 1 else 0): U, V, permute = one_round_jacobi(U, V, permute)
     #extract singular values and sort. construct U from Q
     S, indices = U.square().sum(-2).sqrt().sort(dim=-1, descending=True)
     new_indices = indices.unsqueeze(-2).expand(b_shape + (num, num))
     U = U.gather(-1, new_indices) / S.ne(0).where(S, 1).unsqueeze(-2)
+    # A zero 1x1 block still needs a unit singular vector.
+    if num == 1: U = U.ne(0).where(U, 1)
     V = V.gather(-1, new_indices)
     # place U into the top-left num×num block of a q_num×q_num identity matrix
     pad_arg = (None,) * len(b_shape) + ((0, q_num - num), (0, q_num - num))
