@@ -107,9 +107,10 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
 
   # collect
-  memory: defaultdict[tuple[Ops, UOp, UOp|None, UOp, object, int|tuple[int, int]], dict[int, list[UOp]]] = defaultdict(dict)
+  memory: defaultdict[tuple[Ops, UOp, UOp|None, UOp|None, object, int|tuple[int, int]], dict[int, list[UOp]]] = defaultdict(dict)
   # depth[u] is the lexicographically largest (GLOBAL stores, LOCAL stores) count on any chain u waits on, u included
   depth: dict[UOp, tuple[int, int]] = {}
+  gated: list[tuple[UOp, tuple[Ops, UOp, UOp|None, UOp|None, object, int|tuple[int, int]], int]] = []
   for u in sink.toposort():
     depth[u] = waits = max([depth[s] for s in u.src_without_body], default=(0, 0))
     if u.op is Ops.STORE: depth[u] = (waits[0]+(u.src[0].addrspace is AddrSpace.GLOBAL), waits[1]+(u.src[0].addrspace is AddrSpace.LOCAL))
@@ -117,7 +118,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalescing does not support gated loads/stores"
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
-      if buf.addrspace == AddrSpace.REG: continue
+      if buf.addrspace == AddrSpace.REG and not ctx.vector_alu: continue
       if buf.buf_uop.op is Ops.PARAM and buf.buf_uop.arg.volatile: continue # volatile accesses never merge
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
       if idx.is_invalid: continue
@@ -128,11 +129,42 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       else: root_src, arg = idx, 0
       # loads/stores only coalesce with others carrying the same arg (e.g. the nontemporal flag)
       # and the same depth (GLOBAL count only for GLOBAL accesses), so no merge closes a dependency cycle
-      memory[(u.op, buf, root_src, valid, u.arg, waits[0] if buf.addrspace is AddrSpace.GLOBAL else waits)].setdefault(arg, []).append(u)
+      key: tuple[Ops, UOp, UOp|None, UOp|None, object, int|tuple[int, int]] = \
+        (u.op, buf, root_src, valid, u.arg, waits[0] if buf.addrspace is AddrSpace.GLOBAL else waits)
+      # with overread, a load merges with loads of other valids: it loads ungated and the valid selects after
+      if u.op is Ops.LOAD and ctx.overread and buf.addrspace is AddrSpace.GLOBAL:
+        if valid is UOp.const(True): key = key[:3]+(None,)+key[4:]
+        else:
+          gated.append((u, key, arg))
+          continue
+      memory[key].setdefault(arg, []).append(u)
+
+  def bounded(x:UOp, valid:UOp) -> UOp:
+    # x with the ranges the valid bounds replaced by variables of those bounds
+    lo_hi: dict[UOp, list[int]] = {}
+    for stmt in valid.split_uop(Ops.AND):
+      if (res:=parse_valid(stmt)) is None or (X:=res[0]).op is not Ops.RANGE: continue
+      b = lo_hi.setdefault(X, [int(X.vmin), int(X.vmax)])
+      if res[1]: b[1] = min(b[1], int(res[2]))
+      else: b[0] = max(b[0], int(res[2]))
+    return x.substitute({r:UOp.variable(f"bound{i}", lo, hi, r.dtype) for i,(r,(lo,hi)) in enumerate(lo_hi.items()) if lo <= hi})
+  def readable(buf:UOp, idx:UOp) -> bool:
+    return idx.vmin*buf.dtype.itemsize >= -ctx.overread and (idx.vmax+1)*buf.dtype.itemsize <= buf.max_numel()*buf.dtype.itemsize+ctx.overread
+  for u,gkey,arg in gated:
+    gbuf, gvalid = gkey[1], u.src[0].src[1].get_valid()
+    # the index of a gated load was simplified given its valid, it's at a const offset from an ungated root that simplifies the same
+    for mkey in list(memory):
+      if (mkey[0],mkey[1],mkey[3],mkey[4],mkey[5]) != (gkey[0],gbuf,None,gkey[4],gkey[5]) or (mroot:=mkey[2]) is None: continue
+      if (off:=(u.src[0].src[1].get_idx() - uop_given_valid(gvalid, mroot)).simplify()).op is Ops.CONST and readable(gbuf, mroot+off.arg):
+        memory[mkey].setdefault(off.arg, []).append(u)
+        break
+    else:
+      if (groot:=gkey[2]) is not None and readable(gbuf, groot+arg): gkey = gkey[:3]+(None,)+gkey[4:]
+      memory[gkey].setdefault(arg, []).append(u)
 
   # build replacements
   replacements = {}
-  for (op,buf,_,_,ld_arg,_),offsets in memory.items():
+  for (op,buf,root,kvalid,ld_arg,_),offsets in memory.items():
     # allowed lengths (copied in)
     lengths = []
     must_divide = True
@@ -143,14 +175,45 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       # TODO: a better way to get this than ctx
       lengths = [8,4,2] if buf.dtype == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
     lengths.append(1)  # worst case, it's not folded
+    # with overread, an ungated load reads whole vectors of the longest length, a lane picks from its load
+    # (loads gated by one valid load the same way, gated)
+    if op is Ops.LOAD and root is not None and (kvalid is None or (ctx.overread and buf.addrspace is AddrSpace.GLOBAL)):
+      def load_window(start:int, lanes:list[int]) -> bool:
+        if (length:=min((l for l in lengths if l > lanes[-1] - start), default=0)) == 0 or len(lanes) * 4 < length: return False
+        # at least a whole vector register (the DSP's 128 bytes), if it's in the buffer
+        if ctx.target.device == "DSP" and (whole:=min(lengths[0], 128 // buf.dtype.itemsize)) > length and \
+           (root + start).vmin >= 0 and (root + start + whole - 1).vmax < buf.max_numel(): length = whole
+        rs = root if kvalid is None else bounded(root, kvalid)
+        if not (readable(buf, rs + start) and readable(buf, rs + start + length - 1)): return False
+        ld = UOp(Ops.SHRINK, src=(buf, (root + start) if kvalid is None else (root + start).valid(kvalid), UOp.const(length))).load(arg=ld_arg)
+        for x in lanes:
+          for oo in offsets[x]:
+            lane = ld.index(x - start)
+            replacements[oo] = lane if kvalid is not None else oo.src[0].src[1].get_valid().where(lane, UOp.const(0, oo.dtype))
+        return True
+      # a long contiguous run loads alone (its lanes are in one or two loads), short runs group in windows
+      rest = []
+      for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0]):
+        run = [x for _,x in group]
+        while len(run) >= 32:
+          if not load_window(run[0], chunk:=run[:lengths[0]]): break
+          run = run[len(chunk):]
+        rest += run
+      while rest:
+        win = [x for x in rest if x < rest[0] + lengths[0]]
+        rest = rest[len(win):] if len(win) > 1 and load_window(win[0], win) else rest[1:]
+      continue
     # do the grouping
     for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0]):
-      full_grp = [offsets[x] for _,x in group]
+      args = [x for _,x in group]
+      full_grp = [offsets[x] for x in args]
       while len(full_grp):
-        # the group starts at its first access's index, valid included
-        offset = full_grp[0][0].src[0].src[1]
-        length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.get_idx().divides(l) is not None)][0]
-        grp, full_grp = full_grp[:length], full_grp[length:]
+        # the group starts at its first access's index, valid included. a group of ungated loads starts at the root
+        offset = full_grp[0][0].src[0].src[1] if kvalid is not None else full_grp[0][0].src[0].src[1].get_idx() if root is None else root + args[0]
+        # the DSP's vectors are any length up to 128 (rendered padded to a power of two, a store in pieces)
+        length = min(len(full_grp), 128) if ctx.target.device == "DSP" else \
+          [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.get_idx().divides(l) is not None)][0]
+        grp, full_grp, args = full_grp[:length], full_grp[length:], args[length:]
         assert op is not Ops.STORE or all(len(g) == 1 for g in grp), "attempting multiple stores"
         if length == 1: continue
         idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(length)))
@@ -161,7 +224,8 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
         else:
           ld = idx.load(arg=ld_arg)
           for i,g in enumerate(grp):
-            for oo in g: replacements[oo] = ld.index(i)
+            for oo in g:
+              replacements[oo] = ld.index(i) if kvalid is not None else oo.src[0].src[1].get_valid().where(ld.index(i), UOp.const(0, oo.dtype))
 
   # apply
   return sink.substitute(replacements, name="memory coalescing")

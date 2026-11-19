@@ -1,11 +1,86 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, TC_MIN_GLOBALS, USE_TC, IMAGE
-from tinygrad.uop.ops import Ops, UOp, resolve, AxisType
+from tinygrad.uop.ops import Ops, UOp, resolve, AxisType, GroupOp
 from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
+from tinygrad.dtype import dtypes
+
+def output_strides(k:Scheduler) -> dict[UOp, int]:
+  # the strides of the ranges in the index of the (first) store
+  if not (stores:=[x for x in k.ast.backward_slice if x.op is Ops.STORE and x.src[0].op is Ops.INDEX]): return {}
+  idx, strides = stores[0].src[0].src[1].get_idx(), {}
+  for r in k.rngs:
+    d = (idx.substitute({r:r.const_like(1)}) - idx.substitute({r:r.const_like(0)})).simplify()
+    if d.vmin == d.vmax: strides[r] = int(d.vmin)
+  return strides
+
+def loop_order(k:Scheduler) -> Scheduler:
+  # the outer loop of two is the one whose inner loop rereads less: each iteration of the outer loop rereads the buffers it doesn't index
+  if len(outer:=[r for r in k.rngs if r.axis_type is AxisType.WEAK and r not in k.reduce_ranges]) < 2: return k
+  a, b = outer[:2]
+  bufs = {x.src[0]:x for x in k.ast.backward_slice if x.op is Ops.INDEX and x.src[0].op is Ops.PARAM}
+  def rereads(r:UOp, n:int) -> int: return sum(p.max_numel()*p.dtype.itemsize for p,ix in bufs.items() if r not in ix.ranges) * n
+  if rereads(a, int(a.vmax+1)) > rereads(b, int(b.vmax+1)):
+    try: k.apply_opt(Opt(OptOps.SWAP, k.rngs.index(a), k.rngs.index(b)))
+    except KernelOptError: pass
+  return k
+
+def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
+  """ For wide SIMD without locals: a tensor core if one fits (padding to it), else a vector of the contiguous output each loop iteration """
+  if USE_TC > 0 and (r:=k.reduceop) is not None and r.arg[0] is Ops.ADD and \
+     (mul:=r.src[0] if r.src[0].op is not Ops.CAST else r.src[0].src[0]).op is Ops.MUL:
+    # the tensor core's M (its vector lanes) is the output's contiguous range: the choices of _apply_tc_opt, A is in0 or in1
+    in0, in1 = mul.src
+    in0_r = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg, reverse=True)
+    in1_r = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg, reverse=True)
+    red = sorted(r.src[1:], key=lambda x: x.arg, reverse=True)
+    ms = [m for _,m,_ in itertools.product(in1_r, in0_r, red)] + [m for _,m,_ in itertools.product(in0_r, in1_r, red)]
+    strides = output_strides(k)
+    for axis in sorted(range(len(ms)), key=lambda i: strides.get(ms[i]) != 1):
+      # of the tensor cores that fit, the one with the least padding
+      cands = []
+      for sel in (range(len(k.ren.tensor_cores)) if TC_SELECT.value == -1 else [TC_SELECT.value]):
+        tk = k.copy()
+        try: tk.apply_opt(Opt(OptOps.TC, axis, (sel, 2, USE_TC.value)))
+        except KernelOptError: continue
+        cands.append(tk)
+      if cands: return loop_order(min(cands, key=lambda t: prod(t.full_shape)))
+  k = k.copy()
+  # math that isn't in vectors only gets a few lanes for ILP. weakint is index math
+  alu_dtypes = {dtypes.int32 if u.dtype is dtypes.weakint else u.dtype for u in k.ast.backward_slice if u.op in GroupOp.ALU-GroupOp.Comparison}
+  if not alu_dtypes <= set(k.ren.vector_dtypes): lanes = 4
+  # upcast the output axes that are contiguous with the ones already upcasted, innermost first
+  n = 1
+  if (stores:=[x for x in k.ast.backward_slice if x.op is Ops.STORE and x.src[0].op is Ops.INDEX]):
+    idx, strides = stores[0].src[0].src[1].get_idx(), {}
+    for r in [k.rngs[a] for a in k.upcastable_dims()]:
+      d = (idx.substitute({r:r.const_like(1)}) - idx.substitute({r:r.const_like(0)})).simplify()
+      if d.vmin == d.vmax and d.vmin > 0: strides[r] = int(d.vmin)
+    # n lanes so far, covering the memory up to extent
+    n, extent, plan = 1, 1, []
+    for r in sorted(strides, key=lambda r: strides[r]):
+      if strides[r] != extent or (sz:=int(r.vmax+1)) == 1: break
+      amt = max(x for x in range(1, min(sz, lanes//n)+1) if sz % x == 0)
+      if amt > 1: plan.append((r, amt))
+      n, extent = n*amt, extent*sz
+      if amt != sz: break
+    # the outer axes upcast first: the last upcast is the innermost lane, the lanes are in memory order
+    for r,amt in plan[::-1]: k.apply_opt(Opt(OptOps.SPLIT, k.rngs.index(r), (0 if amt == int(r.vmax+1) else amt, AxisType.UPCAST)))
+  # unroll small reduces
+  for axis in k.upcastable_dims(reduce=True)[::-1]:
+    if k.full_shape[axis] <= (4 if n < 32 else 3): k.apply_opt(Opt(OptOps.SPLIT, axis, (0, AxisType.UPCAST)))
+  # a vector's reduce of bytes (or their products) unrolls by 4: wide vector ISAs have dot products of 4 bytes
+  def is_bytes(u:UOp) -> bool: return u.op is Ops.CAST and u.src[0].dtype in (dtypes.uint8, dtypes.int8)
+  if n >= 32 and (r:=k.reduceop) is not None and (is_bytes(b:=r.src[0]) or (b.op is Ops.MUL and all(is_bytes(s) for s in b.src))):
+    for axis in k.upcastable_dims(reduce=True)[::-1]:
+      if k.full_shape[axis] % 4 == 0 and k.full_shape[axis] > 4:
+        k.apply_opt(Opt(OptOps.SPLIT, axis, (4, AxisType.UPCAST)))
+        break
+  return k
 
 def hand_coded_optimizations(k:Scheduler) -> Scheduler:
+  if k.ren.vector_alu: return vector_optimizations(k)
   # first try the tensor cores
   """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
   Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).

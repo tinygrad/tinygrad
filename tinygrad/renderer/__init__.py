@@ -109,6 +109,11 @@ class Renderer:
   inline_prefix: str|None = None
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
+  # the devectorized lanes are rebuilt into vector ALU ops, the heuristic upcasts kernels with only vector_dtypes ALU ops to a vector
+  vector_alu: bool = False
+  vector_dtypes: tuple[DType, ...] = ()
+  # bytes that can be read before and after every global buffer. lanes with different valids merge into one vector load if it fits
+  overread: int = 0
   has_local: bool = True
   has_shared: bool = True
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
@@ -118,6 +123,8 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
   extra_matcher: PatternMatcher|None = None
+  # applied to the final program, before control flow
+  late_matcher: PatternMatcher|None = None
   packed_args: bool = False
   code_for_op: dict[Ops, Callable] = {}
 

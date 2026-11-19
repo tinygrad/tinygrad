@@ -4,11 +4,16 @@ from dataclasses import replace
 from typing import cast
 from tinygrad.uop.ops import Ops, GroupOp, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element, axis_colors
 from tinygrad.device import Buffer
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, round_up, prod, get_single_element, ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
+from tinygrad.renderer.tc import TensorCore
+
+def tc_input(x:UOp, tc:TensorCore) -> UOp:
+  # an int tensor core takes its inputs before they are widened to the accumulator
+  return x.src[0] if x.op is Ops.CAST and dtypes.is_int(x.dtype) and x.dtype == tc.dtype_out and x.src[0].dtype == tc.dtype_in else x
 
 split_targets = {AxisType.UPCAST: (AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK),
                  AxisType.LOCAL: (AxisType.GLOBAL, AxisType.WEAK)}
@@ -134,8 +139,15 @@ class Scheduler:
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
       def gate(b:UOp) -> UOp: return b.replace(src=(b.src[0], b.src[1].get_idx().valid(valid&b.src[1].get_valid())))
+      # a load of a padded output range (its padded outputs aren't stored) that a renderer can read past the buffer to doesn't need a gate
+      stored = {u.src[0] for u in self.ast.backward_slice if u.op is Ops.STORE}
+      def ungated(b:UOp) -> bool:
+        if not self.ren.overread or rng in self.reduce_ranges or b in stored or b.src[0].addrspace is not AddrSpace.GLOBAL or \
+           b.src[0].max_numel() < new_sz: return False
+        idx, sz = b.src[1].get_idx().substitute({rng:replaced_rng}), b.src[0].dtype.itemsize
+        return idx.vmin*sz >= -self.ren.overread and (idx.vmax+1)*sz <= b.src[0].max_numel()*sz+self.ren.overread
       for b in self.bufs:
-        if rng in b.src[1].ranges: replaces[b] = gate(b)
+        if rng in b.src[1].ranges and not ungated(b): replaces[b] = gate(b)
       # the padded iterations are no-ops: their INDEXes, indexed STOREs and BACKEDGEs are gated and their REDUCEs add the identity
       for u in self.ast.backward_slice:
         if u.op in GroupOp.Effect|{Ops.BACKEDGE} and rng in u.ranges:
@@ -150,7 +162,8 @@ class Scheduler:
     elif opt.op is OptOps.SWAP:
       check(type(opt.arg) is int and 0 <= opt.arg < self.shape_len, f"invalid swap axis on {opt.arg=} {self.shape_len=}")
       altrng:UOp = self.rngs[opt.arg]
-      check(rng.axis_type == AxisType.GLOBAL and altrng.axis_type == AxisType.GLOBAL, "swap only for globals")
+      check(rng.axis_type == altrng.axis_type and rng.axis_type in (AxisType.GLOBAL, AxisType.WEAK, AxisType.LOOP) and
+            rng not in self.reduce_ranges and altrng not in self.reduce_ranges, "swap only for globals or loops")
       self.ast = self.ast.substitute({rng:rng.replace(arg=(rng.axis_type, *altrng.axis_id)),
                                       altrng:altrng.replace(arg=(altrng.axis_type, *rng.axis_id))},
                                       name=f"swap {rng.axis_id} {altrng.axis_id}", walk=True)
@@ -169,7 +182,7 @@ class Scheduler:
       in0, in1 = mul.src
       for tc in self.ren.tensor_cores if tc_select == -1 else [self.ren.tensor_cores[tc_select]]:
         if self.ren.target.device in ("CUDA", "NV") and tc.dtype_in == dtypes.float and not ALLOW_TF32: continue
-        if tc.dtype_in == in0.dtype and tc.dtype_in == in1.dtype and tc.dtype_out == reduceop.dtype:
+        if tc.dtype_in == tc_input(in0, tc).dtype and tc.dtype_in == tc_input(in1, tc).dtype and tc.dtype_out == reduceop.dtype:
           # tensor cores have three ranges. X, Y, and REDUCE
           in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg, reverse=True)
           in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg, reverse=True)
@@ -181,9 +194,11 @@ class Scheduler:
 
           # pick ranges
           # NOTE: in1 and in0 are switched because tc.dims is (N, M, K)
-          axis_choices = list(itertools.product(in1_ranges, in0_ranges, red_ranges))
+          # after the choices of in0 as A are the choices of in1 as A
+          axis_choices = [(False, c) for c in itertools.product(in1_ranges, in0_ranges, red_ranges)] + \
+                         [(True, c) for c in itertools.product(in0_ranges, in1_ranges, red_ranges)]
           if not (axis < len(axis_choices)): continue
-          axes = list(axis_choices[axis])
+          swap, axes = axis_choices[axis][0], list(axis_choices[axis][1])
           check(not any(r in self.reduce_ranges for r in axes[:2]), "tensor core N and M can't be contracted")
 
           # do optimizations and save the ranges
@@ -206,7 +221,8 @@ class Scheduler:
             reduceop = get_single_element([x for x in self.reduceops if axes[2] in x.src[1:]])
             gate, mul = (r0.src[0], r0.src[1]) if (r0:=reduceop.src[0]).op is Ops.WHERE else (None, r0)
             if mul.op is Ops.CAST: mul = mul.src[0]
-            ins = mul.src if gate is None else tuple(gate.where(x, UOp.const(0, x.dtype)) for x in mul.src)
+            ins = tuple(tc_input(x, tc) for x in (mul.src[::-1] if swap else mul.src))
+            if gate is not None: ins = tuple(gate.where(x, UOp.const(0, x.dtype)) for x in ins)
             srcs = [x.substitute({ne[a]: ne[b] for a,b in rl.items()}, walk=True) for x,rl in zip(ins, tc.relabel())]
 
             # get upcast axes for the tensor cores

@@ -29,6 +29,7 @@ from tinygrad.codegen.indexing import _stack_select
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import indexing_simplify, memory_coalescing, pm_simplify_add_image
+from tinygrad.codegen.late.vectorize import pm_vectorize
 from tinygrad.codegen.rangeify import BufferizeOpts, get_kernel_graph
 from tinygrad.codegen.memory import memory_plan_rewrite
 
@@ -203,6 +204,9 @@ def lower_reduce(ctx:itertools.count, r:UOp):
   return acc.after(acc_out).load()
 
 pm_reduce_local = pm_wmma_add+PatternMatcher([
+  # a reduce over only ranges accumulates in the layout of its input, the reshape/permute moves after the loop
+  (UPat(Ops.REDUCE, src=(UPat((Ops.RESHAPE, Ops.PERMUTE), name="m"),), allow_any_len=True, name="r"),
+   lambda r,m: m.replace(src=(r.replace(src=(m.src[0],)+r.src[1:]),)+m.src[1:]) if r.arg[1] == 0 and len(r.src) > 1 else None),
   # fix group for reduce
   (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
   # remove reduces
@@ -317,7 +321,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
 
   # devectorize
-  sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, name="devectorize2")
+  # with overread the valids simplify after coalescing: lanes with different valids merge if their indexes are alike
+  sink = graph_rewrite(sink, symbolic_simple+devectorizer2+(indexing_simplify if not ren.overread else PatternMatcher([])), name="devectorize2")
 
   # some coalescing misses without this
   sink = graph_rewrite(sink, sym, name="early symbolic")
@@ -366,6 +371,14 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # commit every const still bare so no renderer reads one
   sink = graph_rewrite(sink, pm_cast_const, name="cast consts", walk=True)
+
+  # rebuild vector ALU ops from the lanes
+  if ren.vector_alu: sink = graph_rewrite(sink, pm_vectorize, name="vectorize")
+
+  # renderer specific rewrites of the final program, the consts they make are committed
+  if ren.late_matcher is not None:
+    sink = graph_rewrite(sink, ren.late_matcher, ctx=ren, name="late renderer rewrite")
+    sink = graph_rewrite(sink, pm_cast_const, name="cast late consts", walk=True)
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
   sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
