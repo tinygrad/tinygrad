@@ -160,6 +160,14 @@ class TestEdgeCases(unittest.TestCase):
     out = Tensor.arange(0, 2, 0.3).numpy()
     np.testing.assert_allclose(out, torch_out, atol=1e-7)
 
+  @unittest.skipIf(dtypes.double in Device[Device.DEFAULT].renderer.supported_dtypes(), "only fails where the device can't do double")
+  @unittest.expectedFailure
+  def test_float64_numpy_on_device_without_double(self):
+    # np.arange(4.) is float64. on a device without double (METAL, WEBGPU, CL without fp64) every kernel on it fails to compile, even .float()
+    # the renderer says double is unsupported but it's never emulated. should be emulated, or at least castable to a supported dtype
+    arr = np.arange(4.)
+    np.testing.assert_allclose(Tensor(arr).float().numpy(), torch.tensor(arr).float().numpy())
+
   @unittest.skip("this is flaky")
   @unittest.expectedFailure
   def test_topk_ties_indices(self):
