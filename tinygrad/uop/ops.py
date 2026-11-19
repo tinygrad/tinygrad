@@ -133,8 +133,10 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       return src[0].dtype
     case Ops.NATIVE:
       # a native function states its return dtype in the arg
-      assert bool(src) ^ bool(arg.dtype)
-      return src[0].dtype if src else arg.dtype
+      if src:
+        assert arg.dtype is None
+        return src[0].dtype
+      return arg.dtype
     case Ops.INDEX:
       # an image access is always float, no matter the storage dtype
       # TODO: should there be a CAST so src[0].dtype just work?
@@ -363,8 +365,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
       case Ops.NATIVE:
-        assert bool(self.src) ^ bool(self.arg.shape), f"{self} {bool(self.src)} {bool(self.arg.shape)}"
-        return self.src[0]._shape if self.src else self.arg.shape
+        if self.src:
+          assert self.arg.shape is None
+          return self.src[0].shape
+        return self.arg.shape
       case Ops.PYLITERAL: return None
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
@@ -1223,7 +1227,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if src:
       if shape is not None: assert src[0].shape == shape, f"{src[0].shape} must match {shape}"
       if dtype is not None: assert src[0].dtype == dtype, f"{src[0].dtype} must match {dtype}"
-    return UOp(Ops.NATIVE, src=src, arg=NativeInfo(code, fmt) if src else NativeInfo(code, dtype, shape, fmt))
+    if dtype is not dtypes.void:
+      shape = () # terrible special case
+    return UOp(Ops.NATIVE, src=src, arg=NativeInfo(code, fmt=fmt) if src else NativeInfo(code, dtype, shape, fmt))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, hcq:HCQInfo|None=None) -> UOp:
