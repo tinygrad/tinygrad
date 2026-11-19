@@ -174,7 +174,7 @@ def mulhi(x:UOp, a:UOp, c:UOp, s:UOp) -> UOp|None:
   parts = [f"mulhi_w({shuffle('{0}', '{0}', [i+j if i+j < n else -1 for j in range(32)])}, {cv})" for i in range(0, n, 32)]
   if len(parts) & (len(parts)-1): parts += [parts[-1]] * (vpad(len(parts)) - len(parts))
   ret = concat(parts, 32)
-  return UOp.custom_function(ret if vpad(n) == 32*len(parts) else shuffle(ret, ret, range(n)), shape=x.shape, dtype=x.dtype, fmt=True).call(a.src[0])
+  return UOp.native(ret if vpad(n) == 32*len(parts) else shuffle(ret, ret, range(n)), shape=x.shape, dtype=x.dtype, fmt=True).call(a.src[0])
 
 def vrmpy_sum(x:UOp) -> UOp|None:
   # a sum of products of bytes is vrmpy: the sum of 4 products per lane, a vector of bytes times 4 scalar bytes
@@ -199,14 +199,14 @@ def vrmpy_sum(x:UOp) -> UOp|None:
     # a product of two vectors of bytes: both interleaved, vrmpy of the vectors (a missing product is the first with weights 0)
     o, zero = int(acc is not None), "((hvx_ub)(0))"
     args = [f"{{{o+i}}}" if i < len(vg) else zero for i in range(4)] + [f"{{{o+len(vg)+i}}}" if i < len(vg) else zero for i in range(4)]
-    fn = UOp.custom_function("vrmpy4v(" + ("{0}" if acc is not None else "((hvx_w128)(0))") + "".join(", "+a for a in args) + ")",
+    fn = UOp.native("vrmpy4v(" + ("{0}" if acc is not None else "((hvx_w128)(0))") + "".join(", "+a for a in args) + ")",
                              shape=x.shape, dtype=x.dtype, fmt=True)
     acc = fn.call(*([acc] if acc is not None else []), *[a for a,_ in vg], *[b for _,b in vg])
   for g in groups:
     g = g + [(g[0][0], UOp.const(0, dtypes.uint8))] * (4 - len(g))
     w = functools.reduce(UOp.__or__, [b.cast(dtypes.uint32) << (8*i) if i else b.cast(dtypes.uint32) for i,(_,b) in enumerate(g)])
     o = int(acc is not None)
-    fn = UOp.custom_function("vrmpy4(" + ("{0}" if o else "((hvx_w128)(0))") + "".join(f", {{{i+o}}}" for i in range(5)) + ")",
+    fn = UOp.native("vrmpy4(" + ("{0}" if o else "((hvx_w128)(0))") + "".join(f", {{{i+o}}}" for i in range(5)) + ")",
                              shape=x.shape, dtype=x.dtype, fmt=True)
     acc = fn.call(*([acc] if acc is not None else []), *[a for a,_ in g], w)
   return acc
@@ -311,7 +311,7 @@ def l2fetch_rt(ivs:list[tuple[int, int]]) -> tuple[int, int, int]|None:
 
 def add_prefetch(sink:UOp) -> UOp|None:
   if not getenv("PREFETCH", 1): return None
-  if any(u.op is Ops.CALL and u.body.op is Ops.CUSTOM_FUNCTION and "l2fetch" in u.body.arg.name for u in sink.toposort()): return None
+  if any(u.op is Ops.CALL and u.body.op is Ops.NATIVE and "l2fetch" in str(u.body.arg.code) for u in sink.toposort()): return None
   # the loop tree: the parent of a range is the innermost range of its END
   ends = {u.src[1]:u for u in sink.toposort() if u.op is Ops.END and u.src[1].op is Ops.RANGE}
   def depth(r:UOp) -> int: return len(ends[r].ranges) if r in ends else -1
@@ -368,7 +368,7 @@ def add_prefetch(sink:UOp) -> UOp|None:
     # Rtt is (stride << 32) | (width << 16) | height
     # (the first iteration of the outermost loop is a core's first, see render_range)
     first = "1" if reuse is None else f"{{1}} == (core*{int(reuse.vmax)+1})/{NCORES}" if reuse is chain[0] else "{1} == 0"
-    pf = UOp.custom_function(f"if ({first}) __builtin_HEXAGON_Y5_l2fetch({{0}}, {(rt[0] << 32) | (rt[1] << 16) | rt[2]}ull);", fmt=True) \
+    pf = UOp.native(f"if ({first}) __builtin_HEXAGON_Y5_l2fetch({{0}}, {(rt[0] << 32) | (rt[1] << 16) | rt[2]}ull);", fmt=True) \
       .call(buf.index(start), *([reuse] if reuse is not None else []))
     if i+1 < len(chain): subs[chain[i+1]] = (r:=subs.get(chain[i+1], chain[i+1])).replace(src=(r.src[0].after(pf),))
     else: subs.update({a:a.replace(src=(a.src[0].after(pf),)+a.src[1:]) for a,_ in accs})
@@ -390,7 +390,7 @@ def minmax(w:UOp) -> UOp|None:
   if not is_vec(a): a, b = b, a
   if not is_vec(a) or (is_vec(b) and b.shape != a.shape): return None
   # (a scalar is broadcast by the vector arithmetic)
-  return UOp.custom_function(f"{fn}({{0}}, {{1}})" if is_vec(b) else f"{fn}({{0}}, ({{0}})*0+({{1}}))", shape=w.shape, dtype=w.dtype,
+  return UOp.native(f"{fn}({{0}}, {{1}})" if is_vec(b) else f"{fn}({{0}}, ({{0}})*0+({{1}}))", shape=w.shape, dtype=w.dtype,
                              fmt=True).call(a, b)
 
 dsp_late = PatternMatcher([
