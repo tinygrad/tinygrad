@@ -486,8 +486,8 @@ def lookup(x:UOp) -> UOp|None:
     if u.op is Ops.CAST: return byte_lane(u.src[0], c)
     if u.op is Ops.ADD and isinstance(k:=const_val(u.src[1]), int): return byte_lane(u.src[0], c+k)
     return None if (l:=lane_of(u)) is None or l[0].dtype.itemsize != 1 else (*l, c)
-  lanes = [byte_lane(i) if 0 <= (i:=s.src[0].src[1]).vmin and i.vmax < 256 else None for s in x.src]
-  if any(l is None for l in lanes) or not all_same([(v, c) for v,_,c in lanes]) or [i for _,i,_ in lanes] != list(range(128)): return None
+  lanes = [l for s in x.src if 0 <= (i:=s.src[0].src[1]).vmin and i.vmax < 256 and (l:=byte_lane(i)) is not None]
+  if len(lanes) != 128 or not all_same([(v, c) for v,_,c in lanes]) or [i for _,i,_ in lanes] != list(range(128)): return None
   v, _, c = lanes[0]
   return UOp.native(f"lut256((hvx_ub)({{0}}) + (hvx_ub)({c & 0xff}), {{1}})", shape=x.shape, dtype=x.dtype, fmt=True).call(v, t)
 

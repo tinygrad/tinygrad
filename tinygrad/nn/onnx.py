@@ -289,14 +289,15 @@ def _to_python_const(t:Tensor) -> list[ConstType]|ConstType|bytes:
 
 # ***** QDQ fusion *****
 QDQ_PASSTHROUGH = {"Reshape", "Flatten", "Squeeze", "Unsqueeze", "Transpose"}
-# elementwise functions of one input
+# elementwise functions of one input, and of one input and scalars
 QDQ_LOOKUP = {"Gelu", "Sigmoid", "Tanh", "HardSigmoid", "HardSwish", "Elu", "Selu", "Celu", "LeakyRelu", "Softplus", "Softsign", "Mish", "Erf",
               "Exp", "Log", "Sqrt", "Reciprocal", "Neg", "Abs", "Relu"}
-def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[str, ...],
+QDQ_ELEMENTWISE = QDQ_LOOKUP | {"DequantizeLinear", "Cast", "Add", "Sub", "Mul", "Div"}
+def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[str, ...], input_dtypes:dict[str, DType],
              select_op:Callable[[OnnxNode], Callable]) -> tuple[OnnxNode, ...]:
   """
   Like onnxruntime, rewrite the float ops of a QDQ model (DequantizeLinear -> op -> QuantizeLinear) into QLinear ops that compute in integers.
-  An elementwise function of one 8-bit input is a lookup table of its 256 values. The quantization params must be initializers.
+  An elementwise function of one 8-bit tensor is a lookup table of its 256 values. The quantization params must be initializers.
   """
   producer = {o:n for n in nodes for o in n.outputs}
   consumers: dict[str, list[OnnxNode]] = {}
@@ -314,6 +315,17 @@ def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[st
     # the QuantizeLinear that's the only consumer of name
     if name in outputs or len(cs:=consumers.get(name, [])) != 1 or (n:=cs[0]).op != "QuantizeLinear" or len(n.inputs) != 3: return None
     return n if per_tensor(*n.inputs[1:]) else None
+  def elementwise(n:OnnxNode) -> tuple[str, DType, list[OnnxNode], list[OnnxNode]]|None:
+    # n is elementwise ops (their other inputs scalar initializers) and movement ops of an 8-bit tensor: (it, its dtype, the ops, the movement ops)
+    ops, moves, name = list[OnnxNode](), list[OnnxNode](), n.outputs[0]
+    while (p:=producer.get(name)) is not None and (p is n or (name not in outputs and len(consumers.get(name, [])) == 1)) and \
+          (p.op in QDQ_PASSTHROUGH or (p.op in QDQ_ELEMENTWISE and all((t:=init(i)) is not None and t.numel() == 1 for i in p.inputs[1:]))):
+      (moves if p.op in QDQ_PASSTHROUGH else ops).insert(0, p)
+      name = p.inputs[0]
+    # (a DequantizeLinear's input is 8-bit if its zero point is, and only something other than a DequantizeLinear needs a table)
+    if not ops or all(o.op == "DequantizeLinear" for o in ops): return None
+    xdt = cast(Tensor, init(ops[0].inputs[2])).dtype if ops[0].op == "DequantizeLinear" and len(ops[0].inputs) > 2 else input_dtypes.get(name)
+    return (name, xdt, ops, moves) if xdt in (dtypes.uint8, dtypes.int8) else None
   def bias(name:str, scale:Tensor) -> tuple[str, ...]|None:
     # an int32 bias with scale x_scale*w_scale and zero point 0
     if name == "": return ()
@@ -326,14 +338,17 @@ def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[st
 
   fused, skip = [], set()
   for n in nodes:
-    new, y = None, q(n.outputs[0]) if len(n.outputs) == 1 else None
-    if n.op in QDQ_LOOKUP and len(n.inputs) == 1 and (x:=dq(n.inputs[0])) and (xdt:=cast(Tensor, init(x[2])).dtype) in (dtypes.uint8, dtypes.int8):
-      # the table is the float ops on each of the values (and the QuantizeLinear after them)
+    new: OnnxNode|list[OnnxNode]|None = None
+    y = q(n.outputs[0]) if len(n.outputs) == 1 else None
+    if (y is not None or n.op in QDQ_LOOKUP) and (src:=elementwise(n)) is not None:
+      # the table is the ops on each of the values (and the QuantizeLinear after them), the movement ops move its lookups
+      src_name, xdt, ops, moves = src
       t = Tensor.arange(xdt.min, xdt.max+1).cast(xdt)
-      for op,inps in ((producer[n.inputs[0]], x[1:]), (n, ()), *([(y, y.inputs[1:])] if y is not None else [])):
-        t = select_op(op)(t, *[init(i) for i in inps], **op.opts)
-      values[tname:=f"{(y or n).outputs[0]}_table"] = t.realize()
-      new = OnnxNode("QLinearLookup", n.opset_id, (x[0], tname), (y or n).outputs, {})
+      for op in ops + ([y] if y is not None else []): t = select_op(op)(t, *[init(i) for i in op.inputs[1:]], **op.opts)
+      values[tname:=f"{(y or n).outputs[0]}_table"] = t.flatten().realize()
+      names = [f"{(y or n).outputs[0]}_lookup{i}" for i in range(len(moves))] + [(y or n).outputs[0]]
+      new = [OnnxNode("QLinearLookup", n.opset_id, (src_name, tname), (names[0],), {})] + \
+            [dataclasses.replace(m, inputs=(a, *m.inputs[1:]), outputs=(b,)) for m,a,b in zip(moves, names, names[1:])]
     elif y is None: pass
     elif n.op == "Conv" and (x:=dq(n.inputs[0])) and (w:=dq(n.inputs[1], axis=0)) and init(w[0]) is not None and \
       (b:=bias(n.inputs[2] if len(n.inputs) > 2 else "", cast(Tensor, init(x[1])) * cast(Tensor, init(w[1])))) is not None:
@@ -367,7 +382,7 @@ def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[st
       # moving data around doesn't change the quantized values
       new = OnnxNode(n.op, n.opset_id, (x[0], *n.inputs[1:]), y.outputs, n.opts)
     if new is not None and y is not None: skip.add(id(y))
-    if id(n) not in skip: fused.append(new or n)
+    if id(n) not in skip: fused.extend(new if isinstance(new, list) else [new or n])
   return tuple(fused)
 
 # ***** runner ******
@@ -392,7 +407,7 @@ class OnnxRunner:
     self.graph_outputs = tuple(o["name"] for o in graph["output"])
     self.onnx_ops = onnx_ops
     self.graph_nodes = fuse_qdq(tuple(n["parsed_node"] for n in graph["node"]), self.graph_values, self.graph_outputs,
-                                lambda n: self._select_op(n.op, n.opset_id))
+                                {k:v.dtype for k,v in self.graph_inputs.items()}, lambda n: self._select_op(n.op, n.opset_id))
     # track names from initializers and Constant nodes for fast path optimizations
     self.const_names: set[str] = set(self.graph_values.keys()) | {o for n in self.graph_nodes if n.op == "Constant" for o in n.outputs}
 
