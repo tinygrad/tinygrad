@@ -222,3 +222,41 @@ class TestQuantizeOnnx(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
+
+@unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")
+class TestQuantizeOnnxModels(unittest.TestCase):
+  # models quantized like onnxruntime does match it on the DSP, with the DSP's ops in their kernels
+  def setUp(self):
+    try:
+      import onnx, onnxruntime # noqa: F401 # pylint: disable=unused-import
+    except ImportError: raise unittest.SkipTest()
+
+  def _test(self, fn:str, inp:np.ndarray, code:tuple[str, ...]):
+    import onnxruntime as ort
+    from tinygrad.nn.onnx import OnnxRunner
+    from tinygrad.uop.ops import Ops
+    ref = ort.InferenceSession(fn).run(None, {"input": inp})[0]
+    runner = OnnxRunner(fn)
+    linear = runner({"input": Tensor(inp)})["output"].schedule_linear()
+    src = "\n".join(u.arg for c in linear.src if c.src[0].op is Ops.SINK
+                    for u in to_program(c.src[0], Device["DSP"].renderer).src if u.op is Ops.SOURCE)
+    for c in code: self.assertIn(c, src)
+    np.testing.assert_allclose(runner({"input": Tensor(inp)})["output"].numpy(), ref, atol=np.diff(np.unique(ref)).min()*1.01, rtol=0)
+
+  def test_conv_per_channel_int8(self):
+    from onnx import helper, TensorProto
+    from test.device.cpu.test_quantize_onnx import quantize_graph, conv_nodes
+    nodes, inits = conv_nodes(16, 32)
+    fn = quantize_graph(nodes + [helper.make_node("Relu", ["conv"], ["output"])], [helper.make_tensor_value_info("input", TensorProto.FLOAT,
+                        [1, 16, 16, 128])], inits, lambda: np.random.uniform(-1, 1, (1, 16, 16, 128)).astype(np.float32), True, "QInt8")
+    # a tensor core of unsigned by signed bytes, the requantize multiplies per channel
+    self._test(fn, np.random.uniform(-1, 1, (1, 16, 16, 128)).astype(np.float32), ("vrmpybus", "mulhi_w("))
+
+  def test_lookup_gelu(self):
+    from onnx import helper, TensorProto
+    from test.device.cpu.test_quantize_onnx import quantize_graph, conv_nodes
+    nodes, inits = conv_nodes(8, 8)
+    nodes2, inits2 = conv_nodes(8, 8, "act", "output")
+    fn = quantize_graph(nodes + [helper.make_node("Gelu", ["conv"], ["act"])] + nodes2, [helper.make_tensor_value_info("input", TensorProto.FLOAT,
+                        [1, 8, 16, 16])], inits + inits2, lambda: np.random.uniform(-1, 1, (1, 8, 16, 16)).astype(np.float32), opset=20)
+    self._test(fn, np.random.uniform(-1, 1, (1, 8, 16, 16)).astype(np.float32), ("lut256(",))
