@@ -123,7 +123,7 @@ class X86GroupOp:
                 X86Ops.OR, X86Ops.ORi}
 
   # X86Ops that jump, their first src is what the LABEL they jump to marks
-  Jump = {X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JAE, X86Ops.JMP}
+  Jump = {X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JMP}
 
   # X86Ops whose first src is the rm field. a TwoAddress op drops its first src post regalloc, so its Rm2nd src ends up first
   Rm1st = {X86Ops.MOV, X86Ops.VMOVSS, X86Ops.VMOVSD, X86Ops.VMOVUPS, X86Ops.MOVZX, X86Ops.MOVSX, X86Ops.MOVSXD, X86Ops.VMOVD, X86Ops.VMOVQ,
@@ -364,10 +364,9 @@ def load_const(x:UOp) -> UOp:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
-  # lower the backedge condition to flags, retaining its loop scope until after linearization
-  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="y")), name="x"), lambda x,y:
-   x.replace(src=x.src[:2]+(cmp(y),), arg={Ops.CMPEQ: X86Ops.JE, Ops.CMPNE: X86Ops.JNE,
-    Ops.CMPLT: X86Ops.JB if y.src[0].dtype in dtypes.uints else X86Ops.JL}[y.op])),
+  # BACKEDGE becomes a conditional jump to its RANGE, it uses flags
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="y")), name="x"), lambda x,y: UOp.ins({Ops.CMPEQ: X86Ops.JE,
+   Ops.CMPNE: X86Ops.JNE, Ops.CMPLT: X86Ops.JB if y.src[0].dtype in dtypes.uints else X86Ops.JL}[y.op], (x.src[1], x.src[0], cmp(y)), x.dtype)),
   # **** Op -> X86Op ****
   # function abi constraints
   (UPat(Ops.PARAM), args_pointer),
@@ -530,7 +529,7 @@ class X86LinearContext(LinearContext):
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
 def flag_rematerialize(ctx:X86LinearContext, x:UOp):
-  if x.op in (Ops.IF, Ops.BACKEDGE, Ops.ENDIF, Ops.RANGE, Ops.END) or x.body.arg.code in X86GroupOp.WriteFlags: ctx.lock = x
+  if x.op in (Ops.IF, Ops.ENDIF, Ops.BACKEDGE, Ops.RANGE, Ops.END) or x.body.arg.code in X86GroupOp.WriteFlags: ctx.lock = x
   elif x.body.arg.code in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
     ctx.lock = flag_def
     return (x, [flag_def, x])
