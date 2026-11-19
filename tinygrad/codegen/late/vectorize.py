@@ -11,7 +11,7 @@ def lane_of(u:UOp) -> tuple[UOp, int]|None:
   while i.op is Ops.CAST: i = i.src[0]
   return (u.src[0], i.arg) if i.op is Ops.CONST else None
 
-def vectorize_stack(x:UOp) -> UOp|None:
+def vectorize_stack(ctx, x:UOp) -> UOp|None:
   if len(x.src) < 2 or any(s.shape != () for s in x.src) or all_same(x.src): return None
   # a stack of all the lanes of x in order is x
   if all((l:=lane_of(s)) is not None and l == (x.src[0].src[0], i) for i,s in enumerate(x.src)) and x.src[0].src[0].shape == (len(x.src),):
@@ -32,9 +32,9 @@ def vectorize_stack(x:UOp) -> UOp|None:
     sd = casts[0].src[0].dtype
     if all(s in casts or (isinstance(v:=const_val(s), int) and sd.min <= v <= sd.max) for s in x.src):
       return UOp.stack(*[s if s in casts else UOp.const(const_val(s), sd).cast(x.dtype) for s in x.src])
-  # a stack of the same op is the op on stacks
+  # a stack of the same op is the op on stacks, in the renderer's vector dtypes
   s0 = x.src[0]
-  if s0.op not in GroupOp.ALU|{Ops.CAST, Ops.BITCAST}: return None
+  if s0.op not in GroupOp.ALU|{Ops.CAST, Ops.BITCAST} or any(u.dtype not in ctx.vector_dtypes for u in (s0, *s0.src)): return None
   if not all(s.op is s0.op and s.dtype == s0.dtype and s.arg == s0.arg for s in x.src): return None
   cols = list(zip(*[s.src for s in x.src]))
   if not all(all_same([s.dtype for s in col]) for col in cols): return None

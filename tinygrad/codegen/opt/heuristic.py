@@ -51,8 +51,9 @@ def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
           if c[0] < best[0] * 3 // 4: best = c
         return loop_order(best[1])
   k = k.copy()
-  # math that isn't in vectors only gets a few lanes for ILP. weakint is index math
-  alu_dtypes = {dtypes.int32 if u.dtype is dtypes.weakint else u.dtype for u in k.ast.backward_slice if u.op in GroupOp.ALU-GroupOp.Comparison}
+  # math that isn't in vectors is scalar, it gets a few lanes for ILP. weakint is index math, a compare is in its operands' dtype
+  alu_dtypes = {dtypes.int32 if (dt:=u.src[0].dtype if u.op in GroupOp.Comparison else u.dtype) is dtypes.weakint else dt
+                for u in k.ast.backward_slice if u.op in GroupOp.ALU|{Ops.REDUCE}}
   if not alu_dtypes <= set(k.ren.vector_dtypes): lanes = 4
   # the biggest input is read in vectors: if it's contiguous in a long reduce but not in the output, the reduce is the vector (its lanes accumulate)
   loads = sorted([x for x in k.ast.backward_slice if x.op is Ops.INDEX and x.src[0].op is Ops.PARAM and x not in [s.src[0] for s in stores]],

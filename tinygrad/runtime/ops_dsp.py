@@ -37,16 +37,52 @@ def render_vec_alu(ctx:DSPRenderer, x:UOp) -> str|None:
   srcs = [splat(ctx, s, x.max_numel()) for s in x.src]
   # the condition of a vector select is a mask of the result size
   if x.op is Ops.WHERE:
+    # (a select of a vector register of bytes is vmux: clang miscompiles some)
+    if x.dtype.itemsize == 1 and vpad(x.max_numel()) == 128:
+      return f"(({ctx.render_type(x)})V6(vmux)(V6(vandvrt)((HVX_Vector)({srcs[0]}), 0x01010101), (HVX_Vector)({srcs[1]}), (HVX_Vector)({srcs[2]})))"
     return f"(-__builtin_convertvector({srcs[0]}, {ctx._render_dtype(mask_dtype[x.dtype.itemsize], x.max_numel())})?{srcs[1]}:{srcs[2]})"
   ret = ctx.code_for_op[x.op](*srcs, x.dtype)
-  # vector compares are masks of the operand size
-  return f"__builtin_convertvector({ret}, {ctx.render_type(x)})" if x.op in GroupOp.Comparison else ret
+  # vector compares are masks of the operand size (-1 is true), a vector of bools is bytes of 0 or 1
+  return to_bool(ctx, ret, x.max_numel()) if x.op in GroupOp.Comparison else ret
+
+# clang's vectors of bools are bits (and crash its HVX backend): a vector of bools renders as bytes of 0 or 1
+def to_bool(ctx:DSPRenderer, mask:str, n:int) -> str: return f"(-__builtin_convertvector({mask}, {ctx._render_dtype(dtypes.uint8, n)}))"
 
 # a vector of n lanes renders as the next power of two lanes, the lanes past n are undefined
 def vpad(n:int) -> int: return 1 << (n-1).bit_length() if n > 1 else n
-def shuffle(a:str, b:str, idxs, src_width:int|None=None) -> str:
+def shuffle(a:str, b:str, idxs, src_width:int|None=None, isz:int|None=None, b_splat:bool=False) -> str:
   idxs = list(idxs)
   idxs += [-1]*(vpad(len(idxs))-len(idxs))
+  # clang miscompiles some shuffles that take a lane again after others (a broadcast in blocks is fine): they're permutations blended with
+  # vmux (or for less than a vector register, the lanes go through memory it can't fold)
+  # (the lanes of a broadcast b are all the same)
+  runs = [i for j,i in enumerate(idxs) if i >= 0 and (j == 0 or idxs[j-1] != i) and not (b_splat and (i >= len(idxs) or a == b))]
+  if len(runs) != len(set(runs)):
+    # (more than a vector register is a shuffle for each register of it, concatenated)
+    if isz is not None and len(idxs)*isz > 128 and (len(idxs)*isz) % 128 == 0:
+      w = 128 // isz
+      return concat([shuffle(a, b, idxs[c:c+w], isz=isz, b_splat=b_splat) for c in range(0, len(idxs), w)], w)
+    if isz is None or len(idxs)*isz != 128:
+      return (f"({{ __auto_type _a = ({a}); __auto_type _b = {'_a' if b == a else f'({b})'}; enum {{ _n = sizeof(_a)/sizeof(_a[0]) }}; "
+              f"typedef __typeof__(_a[0]) _e; typedef _e _v __attribute__((ext_vector_type({len(idxs)}))); _e volatile _t[2*_n]; "
+              f"for (int _i = 0; _i < _n; _i++) {{ _t[_i] = _a[_i]; _t[_n+_i] = _b[_i]; }} "
+              f"(_v){{{','.join(f'_t[{max(i, 0)}]' for i in idxs)}}}; }})")
+    # the k-th pass takes the k-th time each lane is taken
+    passes: list[list[int]] = []
+    seen: dict[int, int] = {}
+    for j,i in enumerate(idxs):
+      if i < 0: continue
+      seen[i] = k = seen.get(i, -1) + 1
+      while len(passes) <= k: passes.append([-1]*len(idxs))
+      passes[k][j] = i
+    def perm(p:list[int]) -> str:
+      rest = iter(i for i in range(len(idxs)) if i not in set(p))
+      return f"__builtin_shufflevector({a}, {b}, {','.join(str(i if i >= 0 else next(rest)) for i in p)})"
+    ret = f"({{ __auto_type _s = {perm(passes[0])};"
+    for p in passes[1:]:
+      mask = "((hvx_ub){" + ",".join("1" if i >= 0 else "0" for i in p for _ in range(isz)) + "})"
+      ret += f" _s = (__typeof__(_s))V6(vmux)(V6(vandvrt)((HVX_Vector){mask}, 0x01010101), (HVX_Vector)({perm(p)}), (HVX_Vector)_s);"
+    return ret + " _s; })"
   # a shuffle of a vector to the same width with undefined lanes is a permutation of it: clang scalarizes it unless it's a permutation
   if src_width == len(idxs) and -1 in idxs and len(used:=[i for i in idxs if i >= 0]) == len(set(used)) and all(i < src_width for i in used):
     rest = iter(i for i in range(src_width) if i not in set(used))
@@ -58,7 +94,8 @@ def concat(parts:list[str], m:int) -> str:
 
 def can_load_wide(u:UOp) -> bool:
   # (a whole vector register from where it loads is in the buffer or the bytes past it that can be read. what fits a scalar register doesn't)
-  return u.op is Ops.LOAD and len(u.src) == 1 and (b:=u.src[0]).op is Ops.SHRINK and b.src[0].addrspace is AddrSpace.GLOBAL and \
+  return u.op is Ops.LOAD and u.dtype in DSPRenderer.vector_dtypes and len(u.src) == 1 and (b:=u.src[0]).op is Ops.SHRINK and \
+    b.src[0].addrspace is AddrSpace.GLOBAL and \
     8 < b.max_numel()*u.dtype.itemsize < 128 and b.src[1].get_valid() is UOp.const(True) and \
     b.src[1].vmax*u.dtype.itemsize + 128 <= b.src[0].max_numel()*u.dtype.itemsize + DSP_OVERREAD
 # the lanes of the rendered vector u
@@ -81,8 +118,10 @@ def stack_lanes(ctx:DSPRenderer, srcs:tuple[UOp, ...]) -> str:
       for r in runs:
         # the run's lanes are lanes off+j of a:b
         off = r[0][1]-r[0][0]
-        rot = f"V6(valignb)({b}, {a}, {off})" if 0 <= off <= 127 and r[-1][1] < 256 else \
-              f"V6(valignb)({a}, {a}, {off % 128})" if r[-1][1] < 128 else f"V6(valignb)({b}, {b}, {(off-128) % 128})"
+        # (clang crashes on a rotation by 0)
+        def rotate(hi:str, lo:str, o:int) -> str: return lo if o == 0 else f"V6(valignb)({hi}, {lo}, {o})"
+        rot = rotate(b, a, off) if 0 <= off <= 127 and r[-1][1] < 256 else \
+              rotate(a, a, off % 128) if r[-1][1] < 128 else rotate(b, b, (off-128) % 128)
         if not ret: ret = rot
         else:
           mask = "((hvx_ub){" + ",".join("1" if r[0][0] <= j <= r[-1][0] else "0" for j in range(128)) + "})"
@@ -95,34 +134,41 @@ def stack_lanes(ctx:DSPRenderer, srcs:tuple[UOp, ...]) -> str:
        not (len(vecs) == 2 and all_same([b-a for a,b in zip(cat, cat[1:])])):
       ret = ""
       for v in vecs:
-        pv = f"(HVX_Vector)({shuffle(ctx[v], ctx[v], [i if u is v else -1 for u,i in map(unwrap, lanes)], 128)})"
+        pv = f"(HVX_Vector)({shuffle(ctx[v], ctx[v], [i if u is v else -1 for u,i in map(unwrap, lanes)], 128, 1)})"
         mask = "((hvx_ub){" + ",".join("1" if j < n and unwrap(lanes[j])[0] is v else "0" for j in range(128)) + "})"
         ret = pv if not ret else f"V6(vmux)(V6(vandvrt)((HVX_Vector){mask}, 0x01010101), {pv}, {ret})"
       return f"(({ctx._render_dtype(dtypes.uint8, 128)})({ret}))"
     if len(vecs) <= 2 and all(v.dtype == vecs[0].dtype and rwidth(ctx, v) == rwidth(ctx, vecs[0]) for v in vecs):
       return shuffle(ctx[vecs[0]], ctx[vecs[-1]], [vecs.index(v)*rwidth(ctx, v) + i for v,i in map(unwrap, lanes)],
-                     rwidth(ctx, vecs[0]) if len(vecs) == 1 else None)
+                     rwidth(ctx, vecs[0]) if len(vecs) == 1 else None, isz)
+  # less than a vector register of scalars is a vector of them (clang crashes on the shuffles of small vectors from them, and on a vector of
+  # compares: bools go through memory)
+  if all(l is None for l in lanes) and vpad(n)*isz < 128:
+    if srcs[0].dtype == dtypes.bool:
+      return f"({{ unsigned char volatile _t[{vpad(n)}] = {{{', '.join(ctx[s] for s in srcs)}}}; " + \
+             f"({ctx._render_dtype(dtypes.uint8, n)}){{{', '.join(f'_t[{i}]' for i in range(vpad(n)))}}}; }})"
+    return f"(({ctx._render_dtype(srcs[0].dtype, n)}){{{', '.join(ctx[s] for s in srcs)}}})"
   # more than a vector is concatenated vectors, clang crashes on some shuffles of them
   if n*isz > 128 and n % (c:=128//isz) == 0:
     return concat([stack_lanes(ctx, srcs[i:i+c]) for i in range(0, n, c)], c)
   # else the lanes of each vector and scalar are shuffled in one at a time, at the width of the widest (at least the HVX vector width,
   # clang crashes on shuffles of smaller vectors). a vector literal can crash clang
   # (bools are shuffled as bytes, clang scalarizes shuffles of bool vectors)
-  w, is_bool = vpad(max([n, 128 // isz] + [rwidth(ctx, unwrap(l)[0]) for l in lanes if l is not None])), srcs[0].dtype == dtypes.bool
+  w = vpad(max([n, 128 // isz] + [rwidth(ctx, unwrap(l)[0]) for l in lanes if l is not None]))
   parts_: dict[UOp, list[tuple[int, int]]] = {}
   for j,(s,l) in enumerate(zip(srcs, lanes)): parts_.setdefault(l[0] if l is not None else s, []).append((j, l[1] if l is not None else 0))
   def widen(p:UOp) -> str:
-    if not is_vec(p): return f"(({ctx._render_dtype(dtypes.uint8, w)})({ctx[p]}))" if is_bool else splat(ctx, p, w)
-    v = f"__builtin_convertvector({ctx[p]}, {ctx._render_dtype(dtypes.uint8, rwidth(ctx, p))})" if is_bool else ctx[p]
+    if not is_vec(p): return splat(ctx, p, w)
+    v = ctx[p]
     return v if (m:=rwidth(ctx, p)) == w else shuffle(v, v, list(range(m)) + [-1]*(w-m))
   acc, done = "", set()
   for p,pl in sorted(parts_.items(), key=lambda kv: not is_vec(kv[0])):
     src = dict(pl)
-    if not acc: acc = shuffle(widen(p), widen(p), [src.get(j, -1) for j in range(w)])
-    else: acc = shuffle(acc, widen(p), [j if j in done else w+src[j] if j in src else -1 for j in range(w)])
+    if not acc: acc = shuffle(widen(p), widen(p), [src.get(j, -1) for j in range(w)], isz=isz, b_splat=not is_vec(p))
+    else: acc = shuffle(acc, widen(p), [j if j in done else w+src[j] if j in src else -1 for j in range(w)], isz=isz, b_splat=not is_vec(p))
     done |= set(src)
   if w != n: acc = shuffle(acc, acc, range(n))
-  return f"__builtin_convertvector(({acc}) != 0, {ctx._render_dtype(dtypes.bool, n)})" if is_bool else acc
+  return acc
 
 def render_vec_stack(ctx:DSPRenderer, x:UOp) -> str|None:
   if len(x.src) < 2 or any(s.shape != () for s in x.src): return None
@@ -257,18 +303,20 @@ def render_wide_load(ctx:DSPRenderer, x:UOp, bidx:UOp) -> str|None:
 
 def render_store_pieces(ctx:DSPRenderer, bidx:UOp, var:UOp) -> str|None:
   if bidx.op is not Ops.SHRINK or (n:=bidx.max_numel()) < 2: return None
+  return _store_pieces(ctx, ctx[bidx], ctx[var], var.dtype, n, bidx)
+
+def _store_pieces(ctx:DSPRenderer, ptr:str, var:str, dtype:DType, n:int, bidx:UOp) -> str|None:
   # a store of up to a vector register that isn't a whole aligned one is masked stores of the vector register
-  if 32 < (nb:=n*var.dtype.itemsize) <= 128 and (nb < 128 or known_factor(bidx.src[1]) % n) and bidx.src[0].addrspace is AddrSpace.GLOBAL:
-    v = f"((HVX_Vector)({ctx[var]}))" if vpad(n)*var.dtype.itemsize == 128 else \
-      f"((HVX_Vector)({shuffle(ctx[var], ctx[var], list(range(n)) + [-1]*(128//var.dtype.itemsize-n))}))"
-    return f"store_n((unsigned char*)({ctx[bidx]}), {v}, {nb});"
+  if 32 < (nb:=n*dtype.itemsize) <= 128 and (nb < 128 or known_factor(bidx.src[1]) % n) and bidx.src[0].addrspace is AddrSpace.GLOBAL:
+    v = f"((HVX_Vector)({var if vpad(n)*dtype.itemsize == 128 else shuffle(var, var, list(range(n)) + [-1]*(128//dtype.itemsize-n))}))"
+    return f"store_n((unsigned char*)({ptr}), {v}, {nb});"
   # a vector store that isn't a power of two lanes (rendered padded) stores pieces that are
   if vpad(n) == n: return None
   pieces, o = [], 0
   while o < n:
     l = 1 << ((n-o).bit_length()-1)
-    val = f"{ctx[var]}[{o}]" if l == 1 else shuffle(ctx[var], ctx[var], range(o, o+l))
-    pieces.append(f"*(({ctx._render_dtype(var.dtype, l) + ('_u' if l > 1 else '')}*)({ctx[bidx]}+{o})) = {val};")
+    val = f"({var})[{o}]" if l == 1 else shuffle(var, var, range(o, o+l))
+    pieces.append(f"*(({ctx._render_dtype(dtype, l) + ('_u' if l > 1 else '')}*)({ptr}+{o})) = {val};")
     o += l
   return " ".join(pieces)
 
@@ -277,6 +325,7 @@ dsp_vec_rewrite = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), render_range),
   (UPat(Ops.STORE, src=(UPat.var("bidx"), UPat.var("var"))), render_store_pieces),
   (UPat(Ops.LOAD, src=(UPat.var("bidx"),), name="x"), render_wide_load),
+  (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda ctx,x: to_bool(ctx, f"(({ctx[x.src[0]]}) != 0)", x.max_numel()) if is_vec(x) else None),
   (UPat(Ops.CAST, name="x"),
    lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})" if is_vec(x) or is_vec(x.src[0]) else None),
   (UPat(GroupOp.ALU, name="x"), render_vec_alu),
@@ -345,9 +394,10 @@ def add_prefetch(sink:UOp) -> UOp|None:
   for (buf, base), accs in groups.items():
     # a small buffer stays in L2 (and its prefetch would stop a bigger one in flight)
     if not base.ranges or buf.max_numel()*buf.dtype.itemsize <= PREFETCH_SMALL: continue
-    # the loops around the loads, outermost first
+    # the loops around the loads, outermost first (all the loops of the index)
     chain = [max(base.ranges, key=depth)]
     while (p:=parent[chain[0]]) is not None: chain.insert(0, p)
+    if not all(r in chain for r in base.ranges): continue
     consts, width, best = dedup([c for _,c in accs]), max(a.max_numel() for a,_ in accs) * buf.dtype.itemsize, None
     # inside a loop it doesn't index (but the outermost, the cores split it), what it reads is read again from L2 if it fits: it's only
     # prefetched in that loop's first iteration
@@ -479,7 +529,7 @@ class DSPRenderer(ClangRenderer):
     return f"{self._render_dtype(x.dtype)} {self[x]}[{vpad(x.max_numel()) + 128 // x.dtype.itemsize}] __attribute__((aligned(128)));"
 
   def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.ALU, mutable=True, override_ptr=False, shape=None):
-    return super()._render_dtype(dtype, vpad(sz), addrspace, mutable, override_ptr, shape)
+    return super()._render_dtype(dtypes.uint8 if dtype == dtypes.bool and sz > 1 else dtype, vpad(sz), addrspace, mutable, override_ptr, shape)
 
   def render_wmmas(self, uops) -> list[str]:
     wmmas = [render_vrmpy(name, dims, *[self._render_dtype(dt, sz) for dt,sz in zip((din, din, dout), szs)])
@@ -498,8 +548,9 @@ class DSPRenderer(ClangRenderer):
   def _vector_typedefs(self, uops) -> list[str]:
     # every dtype at every vector width: the vector ops splat scalars and select with masks
     counts = dedup([cnt for _,cnt in uops_to_dtypes(uops) if cnt > 1] + [32, 64, 128])
-    dts = dedup([u.dtype for u in uops if u.dtype in self.type_map and u.dtype is not dtypes.void] +
-                [dtypes.bool, *mask_dtype.values()])
+    # (bytes are always there: bools are bytes, shuffles of bytes blend)
+    dts = dedup([u.dtype for u in uops if u.dtype in self.type_map and u.dtype not in (dtypes.void, dtypes.bool)] +
+                [dtypes.uint8, *mask_dtype.values()])
     # and the HVX vector width of every dtype (shuffles of smaller vectors widen to it)
     # and all the smaller powers of two (the pieces of stores)
     pow2 = [1 << i for i in range(1, max(counts).bit_length()+1)]
@@ -659,7 +710,8 @@ class DSPCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as f:
-      def cc(flags:str): system(f"{getenv('CC','clang')} {self.args} {flags} -Wall -Werror -fno-stack-protector -x c -fPIC " +
+      # (the lanes of a padded vector may load values that aren't used)
+      def cc(flags:str): system(f"{getenv('CC','clang')} {self.args} {flags} -Wall -Werror -Wno-unused-variable -fno-stack-protector -x c -fPIC " +
                                 f"-ffreestanding -nostdlib - -o {f.name}", input=src.encode())
       # a kernel with a big stack frame (vector spills) can't run on the calling thread, it's compiled to run on threads only
       if self.mock: cc("")

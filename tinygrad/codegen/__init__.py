@@ -379,8 +379,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # commit every const still bare so no renderer reads one
   sink = graph_rewrite(sink, pm_cast_const, name="cast consts", walk=True)
 
-  # rebuild vector ALU ops from the lanes
-  if ren.vector_alu: sink = graph_rewrite(sink, pm_vectorize, name="vectorize")
+  # rebuild vector ALU ops from the lanes, if all the kernel's math is in the vector dtypes
+  if ren.vector_alu and all(u.dtype in ren.vector_dtypes for u in sink.toposort() if u.op in GroupOp.ALU and u.dtype is not dtypes.weakint) and \
+     all(u.src[0].dtype in ren.vector_dtypes for u in sink.toposort() if u.op in GroupOp.Comparison and u.src[0].dtype is not dtypes.weakint):
+    sink = graph_rewrite(sink, pm_vectorize, ctx=ren, name="vectorize")
 
   # renderer specific rewrites of the final program, the consts they make are committed
   if ren.late_matcher is not None:

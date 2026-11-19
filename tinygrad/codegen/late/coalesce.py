@@ -168,8 +168,9 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     # allowed lengths (copied in)
     lengths = []
     must_divide = True
-    if ctx.target.device == "DSP":
-      lengths = [128,64,32,16,8,4]
+    if ctx.target.device == "DSP" and buf.dtype in ctx.vector_dtypes:
+      # (a memory access is up to a vector register, 128 bytes)
+      lengths = [l for l in (128,64,32,16,8,4) if l*buf.dtype.itemsize <= 128 or buf.addrspace is not AddrSpace.GLOBAL]
       must_divide = False
     elif buf.dtype in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and ctx.supports_float4:
       # TODO: a better way to get this than ctx
@@ -181,10 +182,13 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       def load_window(start:int, lanes:list[int]) -> bool:
         if (length:=min((l for l in lengths if l > lanes[-1] - start), default=0)) == 0 or len(lanes) * 4 < length: return False
         # at least a whole vector register (the DSP's 128 bytes), if it's in the buffer. (what fits in a scalar register loads in one)
-        if ctx.target.device == "DSP" and length*buf.dtype.itemsize > 8 and (whole:=min(lengths[0], 128 // buf.dtype.itemsize)) > length and \
+        if ctx.target.device == "DSP" and buf.dtype in ctx.vector_dtypes and length*buf.dtype.itemsize > 8 and \
+           (whole:=min(lengths[0], 128 // buf.dtype.itemsize)) > length and \
            (root + start).vmin >= 0 and (root + start + whole - 1).vmax < buf.max_numel(): length = whole
         rs = root if kvalid is None else bounded(root, kvalid)
+        # it reads in the buffer or the bytes that can be read past it, and the shrink can be in its shape
         if not (readable(buf, rs + start) and readable(buf, rs + start + length - 1)): return False
+        if (root + start).vmax < 0 or (root + start).vmin + length > buf.max_numel(): return False
         ld = UOp(Ops.SHRINK, src=(buf, (root + start) if kvalid is None else (root + start).valid(kvalid), UOp.const(length))).load(arg=ld_arg)
         for x in lanes:
           for oo in offsets[x]:
@@ -215,7 +219,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
         # the group starts at its first access's index, valid included. a group of ungated loads starts at the root
         offset = full_grp[0][0].src[0].src[1] if kvalid is not None else full_grp[0][0].src[0].src[1].get_idx() if root is None else root + args[0]
         # the DSP's vectors are any length up to 128 (rendered padded to a power of two, a store in pieces)
-        length = min(len(full_grp), 128) if ctx.target.device == "DSP" else \
+        length = min(len(full_grp), lengths[0]) if ctx.target.device == "DSP" and buf.dtype in ctx.vector_dtypes else \
           [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.get_idx().divides(l) is not None)][0]
         grp, full_grp, args = full_grp[:length], full_grp[length:], args[length:]
         assert op is not Ops.STORE or all(len(g) == 1 for g in grp), "attempting multiple stores"
