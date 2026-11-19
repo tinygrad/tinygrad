@@ -175,9 +175,9 @@ def vector_access(ren, x:UOp) -> UOp|None:
     gates: list[UOp|None] = [None]*len(wins)
     if valid is not None and not all(readable(s, l) for s,l in wins):
       if ren.overread < ren.vector_bytes: return None
-      vl, lcache = valid.reshape((n,)) if valid.shape != () else valid, {}
+      vl = valid.reshape((n,)) if valid.shape != () else valid
       for w,(s,l) in enumerate(wins):
-        if not readable(s, l): gates[w] = functools.reduce(operator.or_, dedup(lane_expr(vl, k, lcache).simplify() for k,o in enumerate(offs)
+        if not readable(s, l): gates[w] = functools.reduce(operator.or_, dedup(lane_expr(vl, k, {}).simplify() for k,o in enumerate(offs)
                                                                                if o is not None and s <= o < s + l))
     # (a window of a lane is a scalar load)
     loads = [(UOp(Ops.SHRINK, src=(buf, at, UOp.const(l))) if l > 1 else buf.index(at)).load(arg=x.arg)
