@@ -112,6 +112,8 @@ class Renderer:
   # the devectorized lanes are rebuilt into vector ALU ops, the heuristic upcasts kernels with only vector_dtypes ALU ops to a vector
   vector_alu: bool = False
   vector_dtypes: tuple[DType, ...] = ()
+  # the bytes of a vector register: a vector access of memory is up to one
+  vector_bytes: int = 0
   # bytes that can be read before and after every global buffer. lanes with different valids merge into one vector load if it fits
   overread: int = 0
   has_local: bool = True

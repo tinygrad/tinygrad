@@ -29,7 +29,7 @@ from tinygrad.codegen.indexing import _stack_select
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import indexing_simplify, memory_coalescing, pm_simplify_add_image
-from tinygrad.codegen.late.vectorize import pm_vectorize
+from tinygrad.codegen.late.vectorize import pm_vector_lower, pm_vector_flatten, vectorized, vector_math
 from tinygrad.codegen.rangeify import BufferizeOpts, get_kernel_graph
 from tinygrad.codegen.memory import memory_plan_rewrite
 
@@ -327,15 +327,20 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
 
-  # devectorize
-  # with overread the valids simplify after coalescing: lanes with different valids merge if their indexes are alike
-  sink = graph_rewrite(sink, symbolic_simple+devectorizer2+(indexing_simplify if not ren.overread else PatternMatcher([])), name="devectorize2")
+  # a renderer with vector ALU ops keeps the vectors, else (or if they can't all be kept) they're split into lanes
+  if (vector:=ren.vector_alu and vector_math(sink, ren.vector_dtypes) and
+      vectorized(vsink:=graph_rewrite(graph_rewrite(sink, symbolic_simple+pm_vector_lower, ctx=ren, name="vectorize"), pm_vector_flatten,
+                                      name="flatten vectors"))): sink = vsink
+  else:
+    # devectorize
+    # with overread the valids simplify after coalescing: lanes with different valids merge if their indexes are alike
+    sink = graph_rewrite(sink, symbolic_simple+devectorizer2+(indexing_simplify if not ren.overread else PatternMatcher([])), name="devectorize2")
 
-  # some coalescing misses without this
-  sink = graph_rewrite(sink, sym, name="early symbolic")
+    # some coalescing misses without this
+    sink = graph_rewrite(sink, sym, name="early symbolic")
 
-  # do memory coalescing (late)
-  sink = memory_coalescing(sink, ren)
+    # do memory coalescing (late)
+    sink = memory_coalescing(sink, ren)
   # an image is read_only or write_only, so a PARAM that is both loaded and stored stays a buffer
   loaded, stored = [{u.src[0].buf_uop for u in sink.toposort() if u.op is op} for op in (Ops.LOAD, Ops.STORE)]
   sink = graph_rewrite(sink, pm_simplify_add_image, name="add images", ctx=({}, ren, loaded & stored), bottom_up=True)
@@ -376,13 +381,11 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   pm_final_rewrite = pm_commit_weak+pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
+  # (the broadcasts the lowering made are stacks)
+  if vector: sink = graph_rewrite(sink, pm_vector_flatten, name="flatten vectors")
+
   # commit every const still bare so no renderer reads one
   sink = graph_rewrite(sink, pm_cast_const, name="cast consts", walk=True)
-
-  # rebuild vector ALU ops from the lanes, if all the kernel's math is in the vector dtypes
-  if ren.vector_alu and all(u.dtype in ren.vector_dtypes for u in sink.toposort() if u.op in GroupOp.ALU and u.dtype is not dtypes.weakint) and \
-     all(u.src[0].dtype in ren.vector_dtypes for u in sink.toposort() if u.op in GroupOp.Comparison and u.src[0].dtype is not dtypes.weakint):
-    sink = graph_rewrite(sink, pm_vectorize, ctx=ren, name="vectorize")
 
   # renderer specific rewrites of the final program, the consts they make are committed
   if ren.late_matcher is not None:
@@ -419,9 +422,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 pm_linearize_cleanups = PatternMatcher([
   # if statements are not allowed in the graph
   (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
-  # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
+  # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF (a gate of each lane of a vector is the renderer's)
   (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
-   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))])),
+   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))])
+   if gate._shape == () else None),
   # ALLOC becomes a distinct BUFFER before rendering
   (UPat(Ops.ALLOC, name="x"), lambda ctx,x: ((buf:=x.replace(op=Ops.BUFFER, arg=replace(x.arg, slot=next(ctx)))), [buf])),
 ])
