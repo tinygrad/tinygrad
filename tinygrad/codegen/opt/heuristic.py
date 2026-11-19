@@ -38,14 +38,18 @@ def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
     red = sorted(r.src[1:], key=lambda x: x.arg, reverse=True)
     ms = [m for _,m,_ in itertools.product(in1_r, in0_r, red)] + [m for _,m,_ in itertools.product(in0_r, in1_r, red)]
     for axis in sorted(range(len(ms)), key=lambda i: out_strides.get(ms[i]) != 1):
-      # of the tensor cores that fit, the one with the least padding
+      # of the tensor cores that fit (the first preferred), a later one if it does a lot less work: the padded multiply adds
       cands = []
       for sel in (range(len(k.ren.tensor_cores)) if TC_SELECT.value == -1 else [TC_SELECT.value]):
         tk = k.copy()
         try: tk.apply_opt(Opt(OptOps.TC, axis, (sel, 2, USE_TC.value)))
         except KernelOptError: continue
-        cands.append(tk)
-      if cands: return loop_order(min(cands, key=lambda t: prod(t.full_shape)))
+        cands.append((prod(tk.full_shape) * k.ren.tensor_cores[sel].dims[2], tk))
+      if cands:
+        best = cands[0]
+        for c in cands[1:]:
+          if c[0] < best[0] * 3 // 4: best = c
+        return loop_order(best[1])
   k = k.copy()
   # math that isn't in vectors only gets a few lanes for ILP. weakint is index math
   alu_dtypes = {dtypes.int32 if u.dtype is dtypes.weakint else u.dtype for u in k.ast.backward_slice if u.op in GroupOp.ALU-GroupOp.Comparison}
