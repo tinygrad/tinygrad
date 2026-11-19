@@ -209,9 +209,18 @@ __attribute__((unused)) static inline __attribute__((always_inline)) void store_
   HVX_Vector m = n >= 128 ? V6(lvsplatw)(0x01010101) : V6(vandqrt)(V6(pred_scalar2)(n), 0x01010101);
   V6(vS32b_qpred_ai)(V6(vandvrt)(V6(vlalignb)(m, z, off), 0x01010101), a, V6(vlalignb)(v, z, off));
   if (off + n > 128) V6(vS32b_qpred_ai)(V6(vandvrt)(V6(vlalignb)(z, m, off), 0x01010101), a+1, V6(vlalignb)(z, v, off)); }
+// t[x] for each byte x, t is 256 bytes: vlut32 looks up 32 entries a time, entry 32s+j of a table vector is at byte 2j+64(s&1)+(s>>1)
+// (the halves of each 128 entries interleaved)
+__attribute__((unused)) static inline __attribute__((always_inline)) hvx_ub lut256(hvx_ub x, const unsigned char *t) {
+  typedef unsigned char hvx_ub_u __attribute__((aligned(1),ext_vector_type(128)));
+  hvx_ub a = *(const hvx_ub_u*)t, b = *(const hvx_ub_u*)(t+128);
+  HVX_Vector ta = (HVX_Vector)__builtin_shufflevector(a, a, LUT_PERM), tb = (HVX_Vector)__builtin_shufflevector(b, b, LUT_PERM);
+  HVX_Vector r = V6(vlutvvb)((HVX_Vector)x, ta, 0);
+  for (int i = 1; i < 8; i++) r = V6(vlutvvb_oracc)(r, (HVX_Vector)x, i < 4 ? ta : tb, i);
+  return (hvx_ub)r; }
 __attribute__((unused)) static inline __attribute__((always_inline)) hvx_w mulhi_w(hvx_w a, hvx_w c) {
   HVX_VectorPair p = V6(vmpyewuh_64)((HVX_Vector)a, (HVX_Vector)c); p = V6(vmpyowh_64_acc)(p, (HVX_Vector)a, (HVX_Vector)c);
-  return (hvx_w)V6(hi)(p); }"""
+  return (hvx_w)V6(hi)(p); }""".replace("LUT_PERM", ",".join(str(p//2 + 64*(p%2)) for p in range(128)))
 
 def const_val(u:UOp):
   while u.op is Ops.CAST: u = u.src[0]
@@ -469,7 +478,21 @@ def minmax(w:UOp) -> UOp|None:
   return UOp.native(f"{fn}({{0}}, {{1}})" if is_vec(b) else f"{fn}({{0}}, ({{0}})*0+({{1}}))", shape=w.shape, dtype=w.dtype,
                              fmt=True).call(a, b)
 
+def lookup(x:UOp) -> UOp|None:
+  # 128 bytes loaded from a table of 256 at the bytes of a vector (plus a const) are lut256
+  if len(x.src) != 128 or x.dtype.itemsize != 1 or any(s.op is not Ops.LOAD or s.src[0].op is not Ops.INDEX for s in x.src): return None
+  if (t:=x.src[0].src[0].src[0]).op is not Ops.PARAM or t.max_numel() > 256 or any(s.src[0].src[0] is not t for s in x.src): return None
+  def byte_lane(u:UOp, c:int=0) -> tuple[UOp, int, int]|None:
+    if u.op is Ops.CAST: return byte_lane(u.src[0], c)
+    if u.op is Ops.ADD and isinstance(k:=const_val(u.src[1]), int): return byte_lane(u.src[0], c+k)
+    return None if (l:=lane_of(u)) is None or l[0].dtype.itemsize != 1 else (*l, c)
+  lanes = [byte_lane(i) if 0 <= (i:=s.src[0].src[1]).vmin and i.vmax < 256 else None for s in x.src]
+  if any(l is None for l in lanes) or not all_same([(v, c) for v,_,c in lanes]) or [i for _,i,_ in lanes] != list(range(128)): return None
+  v, _, c = lanes[0]
+  return UOp.native(f"lut256((hvx_ub)({{0}}) + (hvx_ub)({c & 0xff}), {{1}})", shape=x.shape, dtype=x.dtype, fmt=True).call(v, t)
+
 dsp_late = PatternMatcher([
+  (UPat(Ops.STACK, name="x"), lookup),
   (UPat(Ops.SINK, name="sink"), add_prefetch),
   (UPat(Ops.WHERE, name="w"), minmax),
   (UPat(Ops.ADD, name="x"), vrmpy_sum),
