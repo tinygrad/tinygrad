@@ -294,4 +294,4 @@ def vectorized(sink:UOp) -> bool:
 def vector_math(sink:UOp, vector_dtypes) -> bool:
   # all the math is in the vector dtypes (index math is weakint, a compare is in its operands' dtype)
   return all((u.src[0].dtype if u.op in GroupOp.Comparison else u.dtype) in vector_dtypes for u in sink.toposort()
-             if u.op in GroupOp.ALU and (u.src[0].dtype if u.op in GroupOp.Comparison else u.dtype) is not dtypes.weakint)
+             if u.op in GroupOp.ALU|{Ops.REDUCE} and (u.src[0].dtype if u.op in GroupOp.Comparison else u.dtype) is not dtypes.weakint)

@@ -1,9 +1,10 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, TC_MIN_GLOBALS, USE_TC, IMAGE
-from tinygrad.uop.ops import Ops, UOp, resolve, AxisType, GroupOp
+from tinygrad.uop.ops import Ops, UOp, resolve, AxisType
 from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
+from tinygrad.codegen.late.vectorize import vector_math
 from tinygrad.dtype import dtypes
 
 def index_strides(k:Scheduler, idx:UOp) -> dict[UOp, int]:
@@ -92,13 +93,8 @@ def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
         break
   return k
 
-def vector_math(k:Scheduler) -> bool:
-  # all the kernel's math is in the renderer's vector dtypes. weakint is index math, a compare is in its operands' dtype
-  return {dtypes.int32 if (dt:=u.src[0].dtype if u.op in GroupOp.Comparison else u.dtype) is dtypes.weakint else dt
-          for u in k.ast.backward_slice if u.op in GroupOp.ALU|{Ops.REDUCE}} <= set(k.ren.vector_dtypes)
-
 def hand_coded_optimizations(k:Scheduler) -> Scheduler:
-  if k.ren.vector_alu and vector_math(k): return vector_optimizations(k)
+  if k.ren.vector_alu and vector_math(k.ast, k.ren.vector_dtypes): return vector_optimizations(k)
   # first try the tensor cores
   """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
   Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
