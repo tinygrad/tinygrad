@@ -65,6 +65,13 @@ def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
   for r in sorted([r for r in out_strides if r in [k.rngs[a] for a in k.upcastable_dims()] and out_strides[r] > 0], key=lambda r: out_strides[r]):
     if out_strides[r] != extent or (sz:=int(r.vmax+1)) == 1: break
     amt = max(x for x in range(1, min(sz, lanes//n)+1) if sz % x == 0)
+    # an innermost axis without a good vector width is padded to one (the least padding of a few)
+    if n == 1 and amt < lanes//4 < sz:
+      axis, w = k.rngs.index(r), min((lanes, lanes//2, lanes//4), key=lambda w: (-(-sz//w)*w, -w))
+      try:
+        k.apply_opt(Opt(OptOps.PADTO, axis, w))
+        r, amt = next(x for x in k.rngs if x.arg == r.arg), w
+      except KernelOptError: pass
     if amt > 1: plan.append((r, amt))
     n, extent = n*amt, extent*sz
     if amt != sz: break
