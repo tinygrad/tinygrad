@@ -1259,8 +1259,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     acc = x.conv2d(w, groups=group, stride=strides, dilation=dilations)
     # sum(x*w) - wz*sum(x) - xz*sum(w-wz)
     if any(wz):
-      xsum = x.sum(1, keepdim=True) if group == 1 and w.shape[2:] == (1,)*(w.ndim-2) and strides in (1, (1,)*(w.ndim-2)) else \
-        x.conv2d(Tensor.ones(group, *w.shape[1:], dtype=dtypes.int32), groups=group, stride=strides, dilation=dilations)
+      # the sums of the windows of x in each group
+      ks, n, c = w.shape[2:], int(x.shape[0]), int(x.shape[1])
+      xs = x._pool(ks, strides, dilations)
+      xsum = xs.reshape(n, group, c//group, *xs.shape[2:]).sum((2, *range(-len(ks), 0)))
       acc = acc - xsum.repeat_interleave(int(w.shape[0])//group, 1) * _per_channel(wz, acc.ndim, dtypes.int32)
     # with _bias_folded, fuse_qdq folded the last term into the bias
     if xz and not _bias_folded: acc = acc - xz * (w - wz_).sum(tuple(range(1, w.ndim))).reshape(1, -1, *[1]*(w.ndim-2))
