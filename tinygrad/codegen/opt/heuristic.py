@@ -156,18 +156,21 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # **** local groups ****
 
   if k.ren.has_local:
-    if k.ren.target.device == "QCOM":
+    if k.ren.target.device in ("QCOM", "MALI"):
       # for openpilot: use 32..128 threads per workgroup, at most 8 on the innermost axis
       # apply innermost global axes first so the leading hardware local dims hold the trailing global axes, like gidx
       workgroup = 1
+      workgroup_limit = getenv('MALI_WG', 64) if k.ren.target.device == 'MALI' else 128
       opts: list[tuple[int, int]] = []
       for axis in [a for a in k.axes_of(AxisType.GLOBAL, AxisType.WEAK, reduce=False) if k.rngs[a].src[0].op is Ops.CONST][-3:][::-1]:
-        if (sz:=max(x for x in range(1, min(int(k.full_shape[axis]), 128 // workgroup if opts else 8) + 1) if int(k.full_shape[axis]) % x == 0)) > 1:
+        limit = workgroup_limit // workgroup if opts else 8
+        if (sz:=max(x for x in range(1, min(int(k.full_shape[axis]), limit) + 1) if int(k.full_shape[axis]) % x == 0)) > 1:
           opts.append((axis, sz))
           workgroup *= sz
       if opts and workgroup < 32:  # fill at least one wave: grow the innermost local as much as possible
         axis, sz = opts[0]
-        opts[0] = axis, max(x for x in range(1, min(int(k.full_shape[axis]), 128 * sz // workgroup) + 1) if int(k.full_shape[axis]) % x == 0)
+        limit = workgroup_limit * sz // workgroup
+        opts[0] = axis, max(x for x in range(1, min(int(k.full_shape[axis]), limit) + 1) if int(k.full_shape[axis]) % x == 0)
       for axis, sz in opts: k.apply_opt(Opt(OptOps.SPLIT, axis, (sz, AxisType.LOCAL)))
     else:
       # prioritize making expand axes local
