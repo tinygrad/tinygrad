@@ -281,7 +281,7 @@ required_input_python_consts: dict[str, tuple[int, ...]] = {
   **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")},
   # quantization params
   "QLinearConv": (1,2,4,5,6,7), "QLinearMatMul": (1,2,4,5,6,7), "QLinearAdd": (1,2,4,5,6,7), "QLinearGlobalAveragePool": (1,2,3,4),
-  "QGemm": (1,2,4,5,7,8),
+  "QGemm": (1,2,4,5,7,8), "QLinearReduceMean": (1,2,3,4,5),
 }
 
 def _to_python_const(t:Tensor) -> list[ConstType]|ConstType|bytes:
@@ -327,7 +327,14 @@ def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[st
   fused, skip = [], set()
   for n in nodes:
     new, y = None, q(n.outputs[0]) if len(n.outputs) == 1 else None
-    if y is None: pass
+    if n.op in QDQ_LOOKUP and len(n.inputs) == 1 and (x:=dq(n.inputs[0])) and (xdt:=cast(Tensor, init(x[2])).dtype) in (dtypes.uint8, dtypes.int8):
+      # the table is the float ops on each of the values (and the QuantizeLinear after them)
+      t = Tensor.arange(xdt.min, xdt.max+1).cast(xdt)
+      for op,inps in ((producer[n.inputs[0]], x[1:]), (n, ()), *([(y, y.inputs[1:])] if y is not None else [])):
+        t = select_op(op)(t, *[init(i) for i in inps], **op.opts)
+      values[tname:=f"{(y or n).outputs[0]}_table"] = t.realize()
+      new = OnnxNode("QLinearLookup", n.opset_id, (x[0], tname), (y or n).outputs, {})
+    elif y is None: pass
     elif n.op == "Conv" and (x:=dq(n.inputs[0])) and (w:=dq(n.inputs[1], axis=0)) and init(w[0]) is not None and \
       (b:=bias(n.inputs[2] if len(n.inputs) > 2 else "", cast(Tensor, init(x[1])) * cast(Tensor, init(w[1])))) is not None:
       new = OnnxNode("QLinearConv", n.opset_id, (*x, *w, *y.inputs[1:], *b), y.outputs, n.opts)
@@ -352,18 +359,14 @@ def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[st
       new = OnnxNode("QLinearMatMul", n.opset_id, (*a, *w, *y.inputs[1:]), y.outputs, {})
     elif n.op == "Add" and (a:=dq(n.inputs[0])) and (b:=dq(n.inputs[1])):
       new = OnnxNode("QLinearAdd", n.opset_id, (*a, *b, *y.inputs[1:]), y.outputs, {})
+    elif n.op == "ReduceMean" and (x:=dq(n.inputs[0])) and all(i == "" or init(i) is not None for i in n.inputs[1:]):
+      new = OnnxNode("QLinearReduceMean", n.opset_id, (*x, *y.inputs[1:], *n.inputs[1:]), y.outputs, n.opts)
     elif n.op == "GlobalAveragePool" and (x:=dq(n.inputs[0])):
       new = OnnxNode("QLinearGlobalAveragePool", n.opset_id, (*x, *y.inputs[1:]), y.outputs, {"channels_last": 0})
-    elif n.op in QDQ_LOOKUP and len(n.inputs) == 1 and (x:=dq(n.inputs[0])) and (xdt:=cast(Tensor, init(x[2])).dtype) in (dtypes.uint8, dtypes.int8):
-      # the table is the float ops on each of the values
-      t = Tensor.arange(xdt.min, xdt.max+1).cast(xdt)
-      for op,inps in ((producer[n.inputs[0]], x[1:]), (n, ()), (y, y.inputs[1:])): t = select_op(op)(t, *[init(i) for i in inps], **op.opts)
-      values[tname:=f"{y.outputs[0]}_table"] = t.realize()
-      new = OnnxNode("QLinearLookup", n.opset_id, (x[0], tname), y.outputs, {})
     elif n.op in QDQ_PASSTHROUGH and (x:=dq(n.inputs[0])) and same(x[1], y.inputs[1]) and same(x[2], y.inputs[2]):
       # moving data around doesn't change the quantized values
       new = OnnxNode(n.op, n.opset_id, (x[0], *n.inputs[1:]), y.outputs, n.opts)
-    if new is not None: skip.add(id(y))
+    if new is not None and y is not None: skip.add(id(y))
     if id(n) not in skip: fused.append(new or n)
   return tuple(fused)
 
@@ -1333,6 +1336,14 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     acc = X.int().sum(axis=tuple(range(2, X.ndim)), keepdim=True) - n * _qconst(x_zero_point)[0]
     ret = _requantize(acc, [_qconst(x_scale)[0] / (_qconst(y_scale)[0] * n)], _qconst(y_zero_point), _qdtype(y_zero_point))
     return ret.permute(0, *range(2, ret.ndim), 1) if channels_last else ret  # NCHW -> NHWC
+
+  def QLinearReduceMean(X:Tensor, x_scale:QParam, x_zero_point:QParam, y_scale:QParam, y_zero_point:QParam, axes:Sequence[int]|None=None,
+                        keepdims:int=1, noop_with_empty_axes:int=0):
+    # sum(x-xz) * x_scale / (y_scale * n)
+    if (ax:=_axes(axes, noop_with_empty_axes)) is None: ax = list(range(X.ndim))
+    n = prod(X.shape[a] for a in ax)
+    acc = X.int().sum(tuple(ax), keepdim=bool(keepdims)) - n * _qconst(x_zero_point)[0]
+    return _requantize(acc, [_qconst(x_scale)[0] / (_qconst(y_scale)[0] * n)], _qconst(y_zero_point), _qdtype(y_zero_point))
 
   def ConvInteger(x: Tensor, w: Tensor, x_zero_point:Tensor = Tensor(0), w_zero_point:Tensor = Tensor(0), **opts) -> Tensor:
     return _op_integer(Conv, [x,w], [x_zero_point,w_zero_point], **opts)
