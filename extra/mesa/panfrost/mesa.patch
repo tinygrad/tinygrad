@@ -95,62 +95,28 @@ index 12249f4..68a7cf0 100644
    include_directories : [inc_gallium, inc_include, inc_src],
    dependencies : [idep_nir, idep_mesautil],
    build_by_default : false,
-diff --git a/src/gallium/drivers/panfrost/pan_cmdstream.c b/src/gallium/drivers/panfrost/pan_cmdstream.c
-index 5f354f0..1e14ad3 100644
---- a/src/gallium/drivers/panfrost/pan_cmdstream.c
-+++ b/src/gallium/drivers/panfrost/pan_cmdstream.c
-@@ -3553,14 +3553,8 @@ panfrost_launch_grid(struct pipe_context *pipe,
- {
-    struct panfrost_context *ctx = pan_context(pipe);
+diff --git a/src/gallium/drivers/panfrost/meson.build b/src/gallium/drivers/panfrost/meson.build
+index dd8ff95..005e815 100644
+--- a/src/gallium/drivers/panfrost/meson.build
++++ b/src/gallium/drivers/panfrost/meson.build
+@@ -62,7 +62,6 @@ foreach ver : panfrost_versions
+     'panfrost-v' + ver, files_panfrost_vx,
+     include_directories : panfrost_includes,
+     c_args : ['-DPAN_ARCH=' + ver],
+-    gnu_symbol_visibility : 'hidden',
+     dependencies : [idep_pan_packers, idep_nir, dep_libdrm, idep_mesautil, idep_libpan_per_arch[ver]],
+ )
+ endforeach
+@@ -79,7 +78,6 @@ libpanfrost = static_library(
+   ],
+   include_directories : panfrost_includes,
+   c_args : [c_msvc_compat_args, compile_args_panfrost],
+-  gnu_symbol_visibility : 'hidden',
+   link_with: [libpanfrost_versions],
+ )
  
--   /* XXX - shouldn't be necessary with working memory barriers. Affected
--    * test: KHR-GLES31.core.compute_shader.pipeline-post-xfb */
--   panfrost_flush_all_batches(ctx, "Launch grid pre-barrier");
--
-    struct panfrost_batch *batch = panfrost_get_batch_for_fbo(ctx);
-    panfrost_launch_grid_on_batch(pipe, batch, info);
--
--   panfrost_flush_all_batches(ctx, "Launch grid post-barrier");
- }
- 
- #define AFBC_BLOCK_ALIGN 16
-diff --git a/src/gallium/drivers/panfrost/pan_context.c b/src/gallium/drivers/panfrost/pan_context.c
-index 813bb15..909d003 100644
---- a/src/gallium/drivers/panfrost/pan_context.c
-+++ b/src/gallium/drivers/panfrost/pan_context.c
-@@ -945,9 +945,7 @@ panfrost_set_global_binding(struct pipe_context *pctx, unsigned first,
- static void
- panfrost_memory_barrier(struct pipe_context *pctx, unsigned flags)
- {
--   /* TODO: Be smart and only flush the minimum needed, maybe emitting a
--    * cache flush job if that would help */
--   panfrost_flush_all_batches(pan_context(pctx), "Memory barrier");
-+   /* tinyMali orders compute work with CSF waits instead of host-side flushes. */
- }
- 
- static void
-diff --git a/src/gallium/drivers/panfrost/pan_csf.c b/src/gallium/drivers/panfrost/pan_csf.c
-index 53a1838..b314ea4 100644
---- a/src/gallium/drivers/panfrost/pan_csf.c
-+++ b/src/gallium/drivers/panfrost/pan_csf.c
-@@ -1002,6 +1002,15 @@ GENX(csf_launch_grid)(struct panfrost_batch *batch,
-       cs_run_compute(b, task_increment, task_axis,
-                      cs_shader_res_sel(0, 0, 0, 0));
-    }
-+
-+   /* tinyMali batches compute launches without host-side group flushes. */
-+   cs_wait_slot(b, 2);
-+   struct cs_index flush_id = cs_reg32(b, 74);
-+   cs_move32_to(b, flush_id, 0);
-+   cs_flush_caches(b, MALI_CS_FLUSH_MODE_CLEAN, MALI_CS_FLUSH_MODE_CLEAN,
-+                   MALI_CS_OTHER_FLUSH_MODE_INVALIDATE, flush_id,
-+                   cs_defer(0, 0));
-+   cs_wait_slot(b, 0);
- }
- 
- void
 diff --git a/src/gallium/drivers/panfrost/pan_jm.c b/src/gallium/drivers/panfrost/pan_jm.c
-index af01674..1016ada 100644
+index af01674..a2629c1 100644
 --- a/src/gallium/drivers/panfrost/pan_jm.c
 +++ b/src/gallium/drivers/panfrost/pan_jm.c
 @@ -375,7 +375,7 @@ GENX(jm_launch_grid)(struct panfrost_batch *batch,
@@ -158,63 +124,46 @@ index af01674..1016ada 100644
  
     unsigned indirect_dep = 0;
 -#if PAN_GPU_SUPPORTS_DISPATCH_INDIRECT
-+#if 0 /* tinyMali only uses direct grid launches */
++#if 0 /* tinygrad: indirect dispatch helpers are not built; only direct grids are used */
     if (info->indirect) {
        uint64_t indirect_buffer_addr =
           pan_resource(info->indirect)->plane.base + info->indirect_offset;
-diff --git a/src/gallium/drivers/panfrost/pan_job.c b/src/gallium/drivers/panfrost/pan_job.c
-index 94faaba..df817fa 100644
---- a/src/gallium/drivers/panfrost/pan_job.c
-+++ b/src/gallium/drivers/panfrost/pan_job.c
-@@ -439,9 +439,10 @@ panfrost_batch_get_scratchpad(struct panfrost_batch *batch,
-    unsigned size = pan_get_total_stack_size(size_per_thread, thread_tls_alloc,
-                                             core_id_range);
- 
--   if (batch->scratchpad) {
--      assert(panfrost_bo_size(batch->scratchpad) >= size);
--   } else {
-+   if (batch->scratchpad && panfrost_bo_size(batch->scratchpad) < size) {
-+      batch->scratchpad = NULL; /* the batch BO array retains the old allocation */
-+   }
-+   if (!batch->scratchpad) {
-       batch->scratchpad =
-          panfrost_batch_create_bo(batch, size, PAN_BO_INVISIBLE,
-                                   PIPE_SHADER_VERTEX, "Thread local storage");
-@@ -457,9 +458,10 @@ struct panfrost_bo *
- panfrost_batch_get_shared_memory(struct panfrost_batch *batch, unsigned size,
-                                  unsigned workgroup_count)
- {
--   if (batch->shared_memory) {
--      assert(panfrost_bo_size(batch->shared_memory) >= size);
--   } else {
-+   if (batch->shared_memory && panfrost_bo_size(batch->shared_memory) < size) {
-+      batch->shared_memory = NULL; /* the batch BO array retains the old allocation */
-+   }
-+   if (!batch->shared_memory) {
-       batch->shared_memory = panfrost_batch_create_bo(
-          batch, size, PAN_BO_INVISIBLE, PIPE_SHADER_VERTEX,
-          "Workgroup shared memory");
+diff --git a/src/gallium/winsys/panfrost/drm/meson.build b/src/gallium/winsys/panfrost/drm/meson.build
+index 1e98cef..b6b0005 100644
+--- a/src/gallium/winsys/panfrost/drm/meson.build
++++ b/src/gallium/winsys/panfrost/drm/meson.build
+@@ -8,6 +8,5 @@ libpanfrostwinsys = static_library(
+     inc_src, inc_include,
+     inc_gallium, inc_gallium_aux, inc_gallium_drivers,
+   ],
+-  gnu_symbol_visibility : 'hidden',
+   dependencies: [dep_libdrm, idep_mesautil],
+ )
 diff --git a/src/meson.build b/src/meson.build
-index 70bf495..e029384 100644
+index 70bf495..ef8798a 100644
 --- a/src/meson.build
 +++ b/src/meson.build
 @@ -176,3 +176,4 @@ if with_glx != 'disabled' and not with_glvnd
  endif
  
  subdir('tool')
-+subdir('tinymali')
++subdir('tinymesa')
 diff --git a/src/panfrost/compiler/bi_validate.c b/src/panfrost/compiler/bi_validate.c
-index 99c61a0..e132a80 100644
+index 99c61a0..8515c34 100644
 --- a/src/panfrost/compiler/bi_validate.c
 +++ b/src/panfrost/compiler/bi_validate.c
-@@ -110,6 +110,7 @@ bi_validate_preload(bi_context *ctx)
- static bool
- bi_validate_width(bi_context *ctx)
- {
-+   return true; /* tinyMali: 64-bit WLS/TLS pointers are valid in u32 address arithmetic */
-    bool succ = true;
-    uint8_t *width = calloc(ctx->ssa_alloc, sizeof(uint8_t));
+@@ -129,7 +129,10 @@ bi_validate_width(bi_context *ctx)
+          unsigned v = I->src[s].value;
+          unsigned n = bi_count_read_registers(I, s);
  
+-         if (width[v] != n) {
++         if (width[v] != n &&
++             !(I->op == BI_OPCODE_IADD_U32 && s == 1 && n == 1 && width[v] == 2 &&
++               I->src[0].type == BI_INDEX_FAU &&
++               (I->src[0].value == BIR_FAU_WLS_PTR || I->src[0].value == BIR_FAU_TLS_PTR))) {
+             succ = false;
+             fprintf(stderr, "source %u, expected width %u, got width %u\n", s,
+                     n, width[v]);
 diff --git a/src/panfrost/compiler/bifrost_compile.c b/src/panfrost/compiler/bifrost_compile.c
 index 2c5497d..3f3a39c 100644
 --- a/src/panfrost/compiler/bifrost_compile.c

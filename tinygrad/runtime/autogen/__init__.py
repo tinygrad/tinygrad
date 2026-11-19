@@ -166,6 +166,22 @@ def __getattr__(nm):
   dll=f"'tinymesa_cpu' if DEV.renderer == 'LVP' else 'tinymesa', {tinymesa_path}, emsg='pip install tinymesa==25.2.7.2'",
   prolog=["from tinygrad.helpers import DEV", "import gzip, base64, sysconfig, os"],
   epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
+    case "panfrost":
+      return load("panfrost", [
+        "{}/src/gallium/winsys/panfrost/drm/panfrost_drm_public.h", "{}/src/panfrost/lib/pan_shader.h",
+        "{}/src/gallium/include/pipe/p_context.h", "{}/src/gallium/include/pipe/p_screen.h",
+        "{}/src/gallium/include/pipe/p_state.h", "{}/src/gallium/include/pipe/p_defines.h",
+        "{}/src/util/xmlconfig.h", "{}/src/util/driconf.h", "{}/src/util/u_inlines.h", "{}/src/util/u_sampler.h",
+        "{}/src/util/blob.h", "{}/src/util/os_time.h"],
+        args=lambda:["-DHAVE_ENDIAN_H", "-DHAVE_STRUCT_TIMESPEC", "-DHAVE_PTHREAD", "-I{}/src", "-I{}/include",
+                     "-I{}/src/compiler", "-I{}/src/compiler/nir", "-I{}/src/gallium/include", "-I{}/src/gallium/auxiliary",
+                     "-I{}/src/panfrost", "-I{}/src/util", "-I{}/gen", f"-I{system('llvm-config --includedir')}"],
+        preprocess=lambda path: subprocess.run("\n".join(["mkdir -p gen/util/format", "python3 src/compiler/builtin_types_h.py gen/builtin_types.h",
+          "python3 src/util/format/u_format_table.py src/util/format/u_format.yaml --enums > gen/util/format/u_format_gen.h",
+          "python3 src/compiler/nir/nir_opcodes_h.py > gen/nir_opcodes.h", "python3 src/compiler/nir/nir_builder_opcodes_h.py > gen/nir_builder_opcodes.h",
+          "python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen"]), cwd=path, shell=True, check=True),
+        srcs="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.7/mesa-25.2.7.tar.gz",
+        dll=f"'tinymesa', {tinymesa_path}, emsg='pip install tinymesa==25.2.7.2'", prolog=["import os, sysconfig"], macros=False)
     case "libclang":
       return load("libclang",
                   lambda: [f"{system('llvm-config-20 --includedir')}/clang-c/{s}.h" for s in ["Index", "CXString", "CXSourceLocation", "CXFile"]],
