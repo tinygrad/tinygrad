@@ -1,16 +1,21 @@
 from __future__ import annotations
 import ctypes, functools, os, mmap, tempfile, pathlib, array, threading, contextlib, subprocess, struct, math, itertools, hashlib, operator
-from tinygrad.device import BufferStorage, MMIOInterface, BufferSpec, Compiled, Allocator, Program
+import types, time, traceback
+from typing import cast
+from tinygrad.device import BufferStorage, MMIOInterface, BufferSpec, Compiled, Allocator, HCQ_RUNTIME_DEV
 from tinygrad.renderer import Compiler, TinyELF
 from tinygrad.dtype import dtypes, AddrSpace, DType
-from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType
-from tinygrad.helpers import getenv, round_up, round_down, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing, Target, unwrap, dedup
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType, KernelInfo, uopfunc
+from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing, Target, unwrap, dedup
 from tinygrad.helpers import all_same, prod
-from tinygrad.renderer.cstyle import ClangRenderer, base_rewrite, wmma_args, uops_to_dtypes, _wmma_name
+from tinygrad.renderer.cstyle import ClangRenderer, base_rewrite, uops_to_dtypes, _wmma_name
 from tinygrad.renderer import tc
 from tinygrad.runtime.support.memory import TLSFAllocator
 from tinygrad.codegen.late.vectorize import lane_of
 from tinygrad.runtime.autogen import libc, qcom_dsp
+from tinygrad.runtime.support.c import DLL
+from tinygrad.runtime.support.hcq2 import HWQueue, ccall, cstruct, patch, unwrap_view, layout_args, pack_args, make_program
+from tinygrad.engine.realize import get_call_kernel_args
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
 # ***** vector rendering *****
@@ -89,6 +94,8 @@ def shuffle(a:str, b:str, idxs, src_width:int|None=None, isz:int|None=None, b_sp
     idxs = [i if i >= 0 else next(rest) for i in idxs]
   return f"__builtin_shufflevector({a}, {b}, {','.join(map(str, idxs))})"
 def concat(parts:list[str], m:int) -> str:
+  # (the lanes past the parts are undefined)
+  parts = parts + [parts[-1]] * (vpad(len(parts)) - len(parts))
   while len(parts) > 1: parts, m = [shuffle(a, b, list(range(m)) + [vpad(m)+i for i in range(m)]) for a,b in zip(parts[::2], parts[1::2])], 2*m
   return parts[0]
 
@@ -216,7 +223,6 @@ def mulhi(x:UOp, a:UOp, c:UOp, s:UOp) -> UOp|None:
   if not isinstance(cv:=const_val(c), int) or not -2**31 <= cv < 2**31: return None
   n = x.max_numel()
   parts = [f"mulhi_w({shuffle('{0}', '{0}', [i+j if i+j < n else -1 for j in range(32)])}, {cv})" for i in range(0, n, 32)]
-  if len(parts) & (len(parts)-1): parts += [parts[-1]] * (vpad(len(parts)) - len(parts))
   ret = concat(parts, 32)
   return UOp.native(ret if vpad(n) == 32*len(parts) else shuffle(ret, ret, range(n)), shape=x.shape, dtype=x.dtype, fmt=True).call(a.src[0])
 
@@ -256,8 +262,9 @@ def vrmpy_sum(x:UOp) -> UOp|None:
   return acc
 
 # vrmpy tensor core: A is 4 rows of 128 bytes, interleaved to 4 vectors of [32][4] bytes. B is 4 bytes per column, C a row of 128 int per column
-def render_vrmpy(name:str, dims:tuple[int, int, int], a:str, b:str, c:str) -> str:
+def render_vrmpy(name:str, dims:tuple[int, int, int], a:str, b:str, c:str, signed_b:bool) -> str:
   # A is K rows of M bytes, each vrmpy is 32 lanes (m) of 4 bytes (k): the rows are interleaved into vectors, M/32 for each 4 rows
+  # (vrmpyub multiplies by unsigned bytes of B, vrmpybus by signed ones)
   n, m, k = dims
   if m == 128: inter = """HVX_VectorPair s01 = V6(vshuffvdd)(r[1], r[0], -1), s23 = V6(vshuffvdd)(r[3], r[2], -1);
   HVX_VectorPair q0 = V6(vshuffvdd)(V6(lo)(s23), V6(lo)(s01), -2), q1 = V6(vshuffvdd)(V6(hi)(s23), V6(hi)(s01), -2);
@@ -273,21 +280,23 @@ def render_vrmpy(name:str, dims:tuple[int, int, int], a:str, b:str, c:str) -> st
   __builtin_memcpy(r, &a, sizeof(r)); __builtin_memcpy(acc, &c, sizeof(acc));
   {inter}
   for (int n = 0; n < {n}; n++) for (int g = 0; g < {kg}; g++) for (int j = 0; j < {mv}; j++)
-    acc[n*{mv}+j] = V6(vrmpyub_acc)(acc[n*{mv}+j], v[g*{mv}+j], w[n*{kg}+g]);
+    acc[n*{mv}+j] = V6({'vrmpybus_acc' if signed_b else 'vrmpyub_acc'})(acc[n*{mv}+j], v[g*{mv}+j], w[n*{kg}+g]);
   __builtin_memcpy(&c, acc, sizeof(acc)); return c;
 }}
 static inline __attribute__((always_inline, unused)) {c} __{name}({a} a, {b} b, {c} c) {{
   unsigned int w[{n*kg}]; __builtin_memcpy(w, &b, sizeof(w)); return __{name}_w(a, w, c); }}"""
 
-def render_wmma(ctx:DSPRenderer, x:UOp) -> str|None:
+# (B's dtype can be different from A's)
+def wmma_name(x:UOp) -> str: return _wmma_name(x) + (f"_{x.src[1].dtype.name}" if x.src[1].dtype != x.arg[1] else "")
+def render_wmma(ctx:DSPRenderer, x:UOp) -> str:
   # a B that's whole scalar loads in order is their words
-  if (b:=x.src[1]).op is not Ops.STACK or any(lane_of(s) is None for s in b.src): return None
-  vecs = dedup([unwrap(lane_of(s))[0] for s in b.src])
-  if [unwrap(lane_of(s)) for s in b.src] != [(v, i) for v in vecs for i in range(v.max_numel())] or \
-     any(v.op is not Ops.LOAD or v.max_numel()*v.dtype.itemsize not in (4, 8) or v in ctx.wide_loads for v in vecs): return None
+  vecs = dedup([unwrap(lane_of(s))[0] for s in b.src]) if (b:=x.src[1]).op is Ops.STACK and all(lane_of(s) is not None for s in b.src) else []
+  if not vecs or [unwrap(lane_of(s)) for s in b.src] != [(v, i) for v in vecs for i in range(v.max_numel())] or \
+     any(v.op is not Ops.LOAD or v.max_numel()*v.dtype.itemsize not in (4, 8) or v in ctx.wide_loads for v in vecs):
+    return f"__{wmma_name(x)}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]})"
   words = [f"(unsigned int)(__builtin_bit_cast(unsigned long long, {ctx[v]}) >> {32*h})" if v.max_numel()*v.dtype.itemsize == 8 else
            f"__builtin_bit_cast(unsigned int, {ctx[v]})" for v in vecs for h in range(v.max_numel()*v.dtype.itemsize//4)]
-  return f"__{_wmma_name(x)}_w({ctx[x.src[0]]}, (const unsigned int[]){{{', '.join(words)}}}, {ctx[x.src[2]]})"
+  return f"__{wmma_name(x)}_w({ctx[x.src[0]]}, (const unsigned int[]){{{', '.join(words)}}}, {ctx[x.src[2]]})"
 
 def render_range(ctx:DSPRenderer, x:UOp) -> str|None:
   # each core runs a contiguous chunk of the parallel loop
@@ -531,9 +540,9 @@ class DSPRenderer(ClangRenderer):
     return super()._render_dtype(dtypes.uint8 if dtype == dtypes.bool and sz > 1 else dtype, vpad(sz), addrspace, mutable, override_ptr, shape)
 
   def render_wmmas(self, uops) -> list[str]:
-    wmmas = [render_vrmpy(name, dims, *[self._render_dtype(dt, sz) for dt,sz in zip((din, din, dout), szs)])
-             for name,dims,din,dout,szs in wmma_args(uops)]
-    return wmmas
+    def dt(s:UOp) -> str: return self._render_dtype(s.dtype, int(s.shape[-1]))
+    return [render_vrmpy(wmma_name(u), u.arg[0], dt(u.src[0]), dt(u.src[1]), dt(u.src[2]), u.src[1].dtype == dtypes.int8)
+            for u in {wmma_name(u):u for u in uops if u.op is Ops.WMMA}.values()]
 
   def render_type(self, u:UOp):
     return self._render_dtype(u.dtype, 128 // u.dtype.itemsize) if u in self.wide_loads else super().render_type(u)
@@ -560,36 +569,28 @@ class DSPRenderer(ClangRenderer):
     return super().render_vector_prefix(dt, count) + f"\ntypedef {self.render_dtype(dt)} {self._render_dtype(dt, count)}_u " + \
       f"__attribute__((aligned(1),ext_vector_type({count})));"
 
-  def _render_defines(self, uops) -> list[str]:
-    return ['''/* DSP boilerplate */ struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency;
-      _Bool set_dcvs_params; short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3];};''','int HAP_power_set(void*, void*);',
-      'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
-      'unsigned long long HAP_perf_get_time_us(void);', HVX_PRELUDE] + self._vector_typedefs(uops) + self.render_wmmas(uops)
+  def _render_defines(self, uops) -> list[str]: return [HVX_PRELUDE] + self._vector_typedefs(uops) + self.render_wmmas(uops)
 
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]]) -> str:
+    # the DSP runs kernel_run from a batch of commands (see DSP_UTIL_SRC) with the args laid out by TinyELF.iter_sig and the pool of workers
     def ty(b:UOp) -> str: return self._render_dtype(b.dtype) if b.addrspace == AddrSpace.ALU else "void*"
-    gbufs = [i for i,(_,(b,_)) in enumerate(bufs) if b.addrspace == AddrSpace.GLOBAL]
+    offs = [o for o,_ in TinyELF.iter_sig(tuple((None, b.addrspace, b.dtype, ()) for _,(b,_) in bufs))]
     msrc = ['typedef struct { ' + ' '.join(f'{ty(b)} a{i};' for i,(_,(b,_)) in enumerate(bufs)) + ' int core; } kargs_t;',
-            # the workers of the pool (see DSP_UTIL_SRC) run cores of the kernel
+            # the workers of the pool run cores of the kernel
             'typedef struct { void (*run)(void *pool, void (*fn)(void*), void *args, int argsize, int ncaller); } pool_t;',
             '__attribute__((unused)) static void kcore(void *p) { kargs_t *a = p; ' +
             f'{function_name}({", ".join([f"a->a{i}" for i in range(len(bufs))] + ["a->core"])}); }}',
-            'int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
-            'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};',
-            'HAP_power_set((void*)handle, (void*)&req);', 'if ((sc>>24) != 2) return 0;',
-            f'kargs_t args[{NCORES}]; pool_t *pool = (pool_t*)*(unsigned int*)((char*)pra[0].buf.pv+{len(bufs)*8}); (void)pool;']
-    # the buffers are mapped on the DSP for their lifetime (see DSPAllocator), the args are their DSP addresses
-    msrc += [f'args[0].a{i} = ({ty(b)})*({"unsigned int" if i in gbufs else ty(b)}*)((char*)pra[0].buf.pv+{i*8});' for i,(_,(b,_)) in enumerate(bufs)]
+            'void kernel_run(const unsigned char *a, pool_t *pool) {', f'kargs_t args[{NCORES}]; (void)pool;']
+    # (a buffer is its address)
+    msrc += [f'args[0].a{i} = ' + (f'*(const {ty(b)}*)(a+{o});' if b.addrspace == AddrSpace.ALU else f'(void*)*(const unsigned int*)(a+{o});')
+             for i,((_,(b,_)),o) in enumerate(zip(bufs, offs))]
     msrc += [f"for (int i = 1; i < {NCORES}; i++) {{ args[i] = args[0]; args[i].core = i; }} args[0].core = 0;"]
-    msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
     # the cores from ncaller on run on the workers, the ones before on the calling thread
     def run(ncaller:int) -> list[str]:
       return [f'{function_name}({", ".join([f"args[0].a{i}" for i in range(len(bufs))] + [str(c)])});' for c in range(ncaller)] if ncaller == NCORES \
         else [f"pool->run(pool, kcore, args, sizeof(kargs_t), {ncaller});"]
     # the calling thread's stack takes small frames of vectors only: a big frame runs on the workers (see DSPCompiler)
-    msrc += ["#ifdef DSP_BIG_FRAME"] + run(0) + ["#else"] + run(NCORES if self.inline else 1) + ["#endif"]
-    msrc += [             "*(unsigned long long *)(pra[1].buf.pv) = HAP_perf_get_time_us() - start;"]
-    msrc += ["return 0; }"]
+    msrc += ["#ifdef DSP_BIG_FRAME"] + run(0) + ["#else"] + run(NCORES if self.inline else 1) + ["#endif", "}"]
     return '\n'.join(msrc)
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s+(dtypes.bfloat16,)}
@@ -605,28 +606,55 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
   for i, mv in enumerate(ins + outs): pra[i].buf.pv, pra[i].buf.len = ctypes.c_void_p(mv_address(mv) if mv.nbytes > 0 else 0), mv.nbytes
   return pra, fds, attrs, (ins, outs)
 
-class DSPProgram(Program['DSPDevice']):
-  def __init__(self, dev:DSPDevice, obj:TinyELF, links=None): self.dev, self.lib, self.signature = dev, obj.lib, obj.signature
+# ***** the queue: a batch of commands the DSP runs in one call (see DSP_UTIL_SRC) *****
 
-  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
-    bufs = [b for b,(_,a,_,_) in zip(args, self.signature) if a is not AddrSpace.ALU]
-    if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
+# a command is 3 u64s: op, a, b
+DSP_EXEC, DSP_WAIT, DSP_WAIT_EQ, DSP_STORE, DSP_TIMESTAMP = range(5)
 
-    pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray(len(args)*8+8))], outs=[timer:=memoryview(bytearray(8)).cast('Q')])
-    for i,(b,(_,a,dt,_)) in enumerate(zip(args, self.signature)):
-      struct.pack_into(unwrap(dt.fmt) if a is AddrSpace.ALU else 'I', var_vals_mv, i*8, b if a is AddrSpace.ALU else b.dsp_addr)
-    # (and the pool the kernel runs its cores on)
-    struct.pack_into('I', var_vals_mv, len(args)*8, self.dev.pool)
-    self.dev.exec_lib(self.lib, rpc_sc(method=2, ins=1, outs=1, fds=0), pra, fds, attrs)
-    return timer[0] / 1e6
+@uopfunc
+def dsp_submit(req:UOp, ret:UOp, fd:UOp) -> UOp:
+  idir, base, nr, struct_t = qcom_dsp.FASTRPC_IOCTL_INVOKE.args
+  ioctl_cmd = (idir << 30) | (ctypes.sizeof(struct_t) << 16) | (base << 8) | nr
+  return ret.index(0).store(ccall(libc.dll.ioctl, fd, UOp.const(ioctl_cmd, dtypes.uint32), req.index(0))).sink()
 
-class DSPBuffer:
-  def __init__(self, va_addr:int, size:int, share_info, offset:int=0, dsp_addr:int=0, arena:DSPArena|None=None):
-    self.va_addr, self.size, self.share_info, self.offset, self.dsp_addr, self.arena = va_addr, size, share_info, offset, dsp_addr, arena
+@uopfunc
+def mockdsp_ring(cmds:UOp, addr:UOp, n:UOp) -> UOp: return ccall(MockDSP.lib.mockdsp_submit, addr, n).sink()
+
+class DSPQueue(HWQueue):
+  def cmd(self, op:int, a:UOp|int=0, b:UOp|int=0):
+    self.q(*[x.cast(dtypes.uint64) if isinstance(x, UOp) else UOp.const(x, dtypes.uint64) for x in (op, a, b)])
+  def exec(self, call:UOp, prg:UOp):
+    args = get_call_kernel_args(call, prg, self.devs)
+    kernargs = UOp(Ops.LINEAR, src=tuple(pack_args(rows:=layout_args(args), round_up(max([o + w.dtype.itemsize for o, w in rows], default=8), 8))),
+                   arg="kernargs")
+    fn = (p:=make_program(prg, 8, self.devs[0])).after(p.store(prg)).bitcast(dtypes.uint64).index(0).load()
+    self.cmd(DSP_EXEC, fn, kernargs.getaddr(self.devs))
+  def wait(self, signal:UOp, value:UOp, eq:bool=False): self.cmd(DSP_WAIT_EQ if eq else DSP_WAIT, signal.getaddr(self.devs), value)
+  def signal(self, signal:UOp, value:UOp): self.cmd(DSP_STORE, signal.getaddr(self.devs), value)
+  # (a timestamp slot is [signal][timestamp])
+  def timestamp(self, signal:UOp): self.cmd(DSP_TIMESTAMP, signal.getaddr(self.devs) + UOp.const(8, dtypes.uint64))
+  def submit(self, cmdbuf:UOp) -> UOp:
+    ib, off = unwrap_view(cmdbuf)
+    addr, n = ib.getaddr(self.devs) + off, cmdbuf.max_numel()
+    if cast(DSPDevice, self.dev).mock is not None: return mockdsp_ring(cmdbuf, addr, UOp.const(n, dtypes.uint64))
+    # the util lib's RUN, its args are copied to the DSP
+    args = patch(UOp.alloc((12,), dtypes.uint8, device=HCQ_RUNTIME_DEV.device, name="dsp_run"),
+                 layout_args([DSP_UTIL_RUN, addr.cast(dtypes.uint32), n]), bytes(12))
+    pra = cstruct(qcom_dsp.struct_remote_buf, pv=args.getaddr(HCQ_RUNTIME_DEV.device), len=12)
+    req = cstruct(qcom_dsp.struct_fastrpc_ioctl_invoke, handle=UOp.variable("dsp_util", 0, 2**32-1, dtypes.uint32),
+                  sc=rpc_sc(method=2, ins=1), pra=pra.getaddr(HCQ_RUNTIME_DEV.device))
+    return dsp_submit(req.after(cmdbuf), UOp.alloc((1,), dtypes.int32, device=HCQ_RUNTIME_DEV.device, name="dsp_submit_ret"),
+                      UOp.variable("dsp_fd", 0, 2**31-1, dtypes.int32))
+
+Compiled.pm_encode += PatternMatcher([
+  (UPat.sink(arg=KernelInfo("dsp_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: DSPQueue(s).encode()),
+])
+
+# ***** memory *****
 
 class DSPArena:
-  # the DSP maps few buffers (~250, the libs count too): the buffers are parts of big ones, each mapped on the DSP once
-  # they're uncached on the host (it only copies in and out of them), its caches don't need syncs
+  # the DSP maps few buffers (~250): the buffers are parts of big ones, each mapped on the DSP once
+  # they're uncached on the host, the DSP writes back and drops its caches when it starts and finishes a batch
   def __init__(self, dev:DSPDevice, size:int):
     self.dev, self.size = dev, size
     self.handle = qcom_dsp.ION_IOC_ALLOC(dev.ion_fd, len=size, align=0x1000, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=0).handle
@@ -636,6 +664,7 @@ class DSPArena:
 
 DSP_ARENA = 32 << 20
 class DSPAllocator(Allocator['DSPDevice']):
+  # a buffer is its address on the DSP, the host accesses it through its own mapping
   def __init__(self, dev:DSPDevice):
     super().__init__(dev)
     self.arenas: list[DSPArena] = []
@@ -643,14 +672,14 @@ class DSPAllocator(Allocator['DSPDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     # the kernels read up to DSP_OVERREAD bytes before and after a buffer (vector loads with invalid lanes, clang widening small vector loads)
     asize = round_up(size + 2*DSP_OVERREAD, 128)
-    # a buffer only the host accesses (like the timeline) is host memory, and the buffers before the DSP's session starts (its shell)
-    if getenv("MOCKDSP") or options.host or not hasattr(self.dev, "rpc_fd"):
-      share_info = None if getenv("MOCKDSP") or options.host else \
+    # the mock's buffers are host memory, and the buffers before the DSP's session starts (its shell) are ION buffers of their own
+    if (mock:=self.dev.mock is not None) or not hasattr(self.dev, "rpc_fd"):
+      share_info = None if mock else \
         qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=round_up(asize, 0x1000), align=0x1000,
                                heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED).handle)
       va = libc.mmap(0, round_up(asize, 0x1000), mmap.PROT_READ|mmap.PROT_WRITE,
                      mmap.MAP_SHARED|(mmap.MAP_ANONYMOUS if share_info is None else 0), share_info.fd if share_info is not None else -1, 0)
-      return BufferStorage(opaque:=DSPBuffer(va+DSP_OVERREAD, size, share_info, offset=DSP_OVERREAD), share_info, MMIOInterface(opaque.va_addr, size))
+      return BufferStorage(va+DSP_OVERREAD, (None, va, share_info), MMIOInterface(va+DSP_OVERREAD, size))
     for arena in self.arenas:
       with contextlib.suppress(MemoryError):
         off = arena.parts.alloc(asize, 128)
@@ -658,28 +687,22 @@ class DSPAllocator(Allocator['DSPDevice']):
     else:
       self.arenas.append(arena:=DSPArena(self.dev, max(DSP_ARENA, round_up(asize, 0x1000))))
       off = arena.parts.alloc(asize, 128)
-    # (the host accesses it through copyin and copyout only, they sync the DSP's caches)
-    return BufferStorage(DSPBuffer(arena.va+off+DSP_OVERREAD, size, None, off+DSP_OVERREAD, arena.dsp_addr+off+DSP_OVERREAD, arena))
+    return BufferStorage(arena.dsp_addr+off+DSP_OVERREAD, (arena, off, None), MMIOInterface(arena.va+off+DSP_OVERREAD, size))
 
   @suppress_finalizing
   def _free(self, storage:BufferStorage, options:BufferSpec):
-    if (arena:=storage.buf.arena) is not None: return arena.parts.free(storage.buf.offset-DSP_OVERREAD)
-    libc.munmap(storage.buf.va_addr-DSP_OVERREAD, round_up(storage.buf.size + 2*DSP_OVERREAD, 0x1000))
-    if storage.buf.share_info is not None:
-      os.close(storage.buf.share_info.fd)
-      qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=storage.buf.share_info.handle)
+    arena, va, share_info = storage.meta
+    if arena is not None: return arena.parts.free(va)
+    libc.munmap(va, round_up(unwrap(storage.host).nbytes + 2*DSP_OVERREAD, 0x1000))
+    if share_info is not None:
+      os.close(share_info.fd)
+      qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=share_info.handle)
 
-  # the DSP's caches aren't coherent with the host: before the host touches a buffer the DSP writes back and drops its lines of it
-  def _sync(self, buf:DSPBuffer, size:int):
-    if buf.dsp_addr: self.dev.dsp_util(DSP_UTIL_FLUSH_INVALIDATE, start:=round_down(buf.dsp_addr, 64), round_up(buf.dsp_addr+size, 64)-start)
-  def _copyin(self, dest:DSPBuffer, src:memoryview):
-    self._sync(dest, src.nbytes)
-    ctypes.memmove(dest.va_addr, mv_address(src), src.nbytes)
-  def _copyout(self, dest:memoryview, src:DSPBuffer):
-    self._sync(src, dest.nbytes)
-    ctypes.memmove(mv_address(dest), src.va_addr, dest.nbytes)
-  def _offset(self, buf, size:int, offset:int):
-    return DSPBuffer(buf.va_addr+offset, size, buf.share_info, buf.offset+offset, buf.dsp_addr+offset if buf.dsp_addr else 0, buf.arena)
+  def _copyin(self, dest:int, src:memoryview): raise RuntimeError("the host copies through the buffer's host mapping")
+  def _copyout(self, dest:memoryview, src:int): raise RuntimeError("the host copies through the buffer's host mapping")
+  def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
+
+# ***** compiler *****
 
 # the biggest stack frame the calling (fastrpc) thread runs: a bigger one of vectors crashes it
 DSP_CALLER_FRAME = 4096
@@ -726,7 +749,6 @@ class DSPCompiler(Compiler):
 
 class MockDSPRenderer(DSPRenderer):
   def __init__(self, target:Target): self.target, self.compiler = target, DSPCompiler(mock=True)
-  def _render_defines(self, uops) -> list[str]: return [HVX_PRELUDE] + self._vector_typedefs(uops) + self.render_wmmas(uops)
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]]) -> str:
     # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
     # control register 21 is HEX_REG_QEMU_INSN_CNT, 0x6a15c000 loads it
@@ -751,15 +773,17 @@ class MockDSPRenderer(DSPRenderer):
     msrc.append('exit(0); }')
     return '\n'.join(msrc)
 
-# the libs open at once: the DSP maps ~250 things (a lib is one)
-DSP_OPEN_LIBS = 128
-# a lib that maps buffers on the DSP and writes back and drops the DSP's cache lines of them
-# and that runs the pool of workers (threads with their own stacks) the kernels run their cores on
-DSP_UTIL_MAP, DSP_UTIL_FLUSH_INVALIDATE, DSP_UTIL_POOL = 0, 1, 2
+# a lib that maps buffers on the DSP, makes the pool of workers (threads with their own stacks) the kernels run their cores on, loads the
+# kernels and runs batches of commands
+DSP_UTIL_MAP, DSP_UTIL_POOL, DSP_UTIL_LOAD, DSP_UTIL_RUN = range(4)
 DSP_UTIL_SRC = DSP_THREADS_PRELUDE + f"""
 typedef union {{ struct {{ void *pv; unsigned int len; }} buf; struct {{ int fd; unsigned int offset; }} dma; }} remote_arg;
 void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);
+struct dcvs_v2_req {{ int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency; _Bool set_dcvs_params; short _pad2;
+  char target_corner; char min_corner; char max_corner; int _pad3[3]; }};
+int HAP_power_set(void*, void*); unsigned long long HAP_perf_get_qtimer_count(void);
 int qurt_mem_cache_clean(unsigned int addr, unsigned int size, int opcode, int type);
+void *dlopen(const char *name, int flags); void *dlsym(void *handle, const char *name);
 typedef union {{ unsigned long long raw; struct {{ unsigned int signals, waiting, queue, attribute; }} X; }} qurt_signal_t;
 void qurt_signal_init(qurt_signal_t *signal); void qurt_signal_set(qurt_signal_t *signal, unsigned int mask);
 unsigned int qurt_signal_wait(qurt_signal_t *signal, unsigned int mask, unsigned int attribute);
@@ -794,38 +818,85 @@ static pool_t *make_pool(void) {{
   }}
   return the_pool = pool;
 }}
+typedef struct {{ unsigned long long op, a, b; }} cmd_t;
+static int run_cmds(const cmd_t *c, unsigned int n) {{
+  // the host writes the commands and the kernel args, and reads what the commands and the kernels write: the DSP writes back and drops its
+  // caches before and after
+  qurt_mem_cache_clean(0, 0, 4 /* QURT_MEM_CACHE_FLUSH_INVALIDATE_ALL */, 1 /* QURT_MEM_DCACHE */);
+  int ret = 0;
+  for (const cmd_t *e = c + n / sizeof(cmd_t); c < e && !ret; c++) {{
+    unsigned long long *p = (unsigned long long*)(unsigned int)c->a;
+    if (c->op == {DSP_EXEC}) ((void (*)(const void*, pool_t*))(unsigned int)c->a)((const void*)(unsigned int)c->b, the_pool);
+    // (the commands run in order: a wait that isn't met now never is)
+    else if (c->op == {DSP_WAIT}) ret = *p < c->b;
+    else if (c->op == {DSP_WAIT_EQ}) ret = *p != c->b;
+    else if (c->op == {DSP_STORE}) *p = c->b;
+    else if (c->op == {DSP_TIMESTAMP}) *p = HAP_perf_get_qtimer_count();
+  }}
+  qurt_mem_cache_clean(0, 0, 4 /* QURT_MEM_CACHE_FLUSH_INVALIDATE_ALL */, 1 /* QURT_MEM_DCACHE */);
+  return ret;
+}}
 int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {{
   if ((sc>>24) != 2) return 0;
   unsigned int *in = pra[0].buf.pv, op = in[0], addr = in[1], size = in[2];
-  if (op == 0) *(unsigned int*)pra[1].buf.pv = (unsigned int)HAP_mmap(0, size, 3, 0, pra[2].dma.fd, 0);
-  if (op == 1) qurt_mem_cache_clean(addr, size, 2 /* QURT_MEM_CACHE_FLUSH_INVALIDATE */, 1 /* QURT_MEM_DCACHE */);
-  if (op == 2) *(unsigned int*)pra[1].buf.pv = (unsigned int)make_pool();
+  if (op == {DSP_UTIL_MAP}) *(unsigned int*)pra[1].buf.pv = (unsigned int)HAP_mmap(0, size, 3, 0, pra[2].dma.fd, 0);
+  if (op == {DSP_UTIL_POOL}) {{
+    struct dcvs_v2_req req = {{.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */}};
+    HAP_power_set((void*)handle, (void*)&req);
+    *(unsigned int*)pra[1].buf.pv = (unsigned int)make_pool();
+  }}
+  // a kernel's lib (named after the words, see RPCListener) and its kernel_run
+  if (op == {DSP_UTIL_LOAD}) {{
+    void *lib = dlopen((const char*)(in + 3), 2 /* RTLD_NOW */);
+    *(unsigned int*)pra[1].buf.pv = lib ? (unsigned int)dlsym(lib, "kernel_run") : 0;
+  }}
+  if (op == {DSP_UTIL_RUN}) return run_cmds((const cmd_t*)addr, size);
   return 0;
 }}"""
+
 class DSPDevice(Compiled):
   renderers = [MockDSPRenderer] if getenv("MOCKDSP") else [DSPRenderer]
+  timestamp_divider = 19.2
+
+  @property
+  def has_copy_queue(self) -> bool: return False
+
   def __init__(self, device:str=""):
-    if getenv("MOCKDSP"): super().__init__(device, DSPAllocator(self), MockDSPProgram)
-    else:
+    super().__init__(device, DSPAllocator(self), None)
+    self.mock = MockDSP(self) if getenv("MOCKDSP") else None
+    if self.mock is None:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
-      super().__init__(device, DSPAllocator(self), DSPProgram)
       fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
-      self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True)).buf
-      ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
+      self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
+      ctypes.memmove(unwrap(self.shell_buf.host).addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
 
       self.init_dsp()
       RPCListener(self).start()
-      self.util_lib = DSPCompiler().compile_cached(DSP_UTIL_SRC)
-      self.pool = self.dsp_util(DSP_UTIL_POOL)
+      self.util_handle = self.open_lib(DSPCompiler().compile_cached(DSP_UTIL_SRC))
+      self.dsp_util(DSP_UTIL_POOL)
+      self.var_vals = {"dsp_fd": self.rpc_fd, "dsp_util": self.util_handle}
+    # a program is its kernel_run on the DSP (in the mock, the index of the program)
+    Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, name="p").store(UPat(Ops.PROGRAM, name="prg")), lambda p, prg, d=self:
+      p.store(UOp(Ops.BINARY, arg=struct.pack("<Q", d.function(prg)))) if p.device == d.device else None)])
 
-  def dsp_util(self, op:int, addr:int=0, size:int=0, fd:int|None=None) -> int:
-    pra, fds, attrs, _ = rpc_prep_args(ins=[memoryview(array.array('I', [op, addr, size]))], outs=[out:=memoryview(bytearray(4)).cast('I')],
-                                       in_fds=[fd] if fd is not None else [])
-    self.exec_lib(self.util_lib, rpc_sc(method=2, ins=1, outs=1, fds=len(fds)-2), pra, fds, attrs)
+  @functools.cache
+  def function(self, prg:UOp) -> int:
+    obj = TinyELF.from_program(prg)
+    if self.mock is not None: return self.mock.load(obj)
+    self.binded_lib, self.binded_lib_off = obj.lib, 0
+    if not (fn:=self.dsp_util(DSP_UTIL_LOAD, name=f"tinylib{hashlib.sha256(obj.lib).hexdigest()[:16]}")):
+      raise RuntimeError(f"DSP can't load {obj.name}")
+    return fn
+
+  def dsp_util(self, op:int, addr:int=0, size:int=0, fd:int|None=None, name:str="") -> int:
+    pra, fds, attrs, _ = rpc_prep_args(ins=[memoryview(bytearray(array.array("I", [op, addr, size]).tobytes() + name.encode() + b"\0"))],
+                                       outs=[out:=memoryview(bytearray(4)).cast('I')], in_fds=[fd] if fd is not None else [])
+    qcom_dsp.FASTRPC_IOCTL_INVOKE_ATTRS(self.rpc_fd, fds=fds, attrs=attrs,
+      inv=qcom_dsp.struct_fastrpc_ioctl_invoke(handle=self.util_handle, sc=rpc_sc(method=2, ins=1, outs=1, fds=len(fds)-2), pra=pra))
     if op == DSP_UTIL_MAP and out[0] in (0, 0xffffffff): raise MemoryError(f"DSP can't map a buffer of {size} bytes")
     return out[0]
 
-  def open_lib(self, lib):
+  def open_lib(self, lib:bytes) -> int:
     self.binded_lib, self.binded_lib_off = lib, 0
     # (a name of its own: the DSP's dlopen of an open name returns the open lib)
     fp = f"file:///tinylib{hashlib.sha256(lib).hexdigest()[:16]}?entry&_modver=1.0&_dom=cdsp\0"
@@ -835,37 +906,12 @@ class DSPDevice(Compiled):
     if o1.cast('i')[1] < 0: raise RuntimeError(f"Cannot open lib: {o2.tobytes().decode()}")
     return o1.cast('I')[0]
 
-  def close_lib(self, handle):
-    pra, _, _, _ = rpc_prep_args(ins=[memoryview(array.array('I', [handle, 0xff]))], outs=[memoryview(bytearray(0x8)), memoryview(bytearray(0xff))])
-    qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=rpc_sc(method=1, ins=1, outs=2), pra=pra)
-
-  def exec_lib(self, lib, sc, args, fds, attrs):
-    # a lib stays open: opening and closing one for every call leaks on the DSP, it dies after ~1500 calls
-    def _exec_lib():
-      if (handle:=self.lib_handles.get(lib)) is None:
-        # (up to DSP_OPEN_LIBS of them, the oldest kernel is closed. the util lib stays, its workers run its code)
-        if len(self.lib_handles) >= DSP_OPEN_LIBS:
-          self.close_lib(self.lib_handles.pop(next(l for l in self.lib_handles if l is not getattr(self, "util_lib", None))))
-        handle = self.lib_handles[lib] = self.open_lib(lib)
-      qcom_dsp.FASTRPC_IOCTL_INVOKE_ATTRS(self.rpc_fd, fds=fds, attrs=attrs, inv=qcom_dsp.struct_fastrpc_ioctl_invoke(handle=handle, sc=sc, pra=args))
-    try: _exec_lib()
-    except (OSError, PermissionError):
-      # DSP might ask for a connection reset or just fail with operation not permitted, try to reset connection.
-      self.init_dsp()
-      try: _exec_lib()
-      except (OSError, PermissionError) as e: raise RuntimeError(e)
-
   def init_dsp(self):
-    self.lib_handles: dict[bytes, int] = {}
-    if hasattr(self, 'rpc_fd'):
-      with contextlib.suppress(OSError):
-        qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=4, sc=rpc_sc(method=2, ins=0, outs=0)) # pylint: disable=access-member-before-definition
-      os.close(self.rpc_fd) # pylint: disable=access-member-before-definition
-
     self.rpc_fd: int = os.open('/dev/adsprpc-smd', os.O_RDONLY | os.O_NONBLOCK)
     qcom_dsp.FASTRPC_IOCTL_GETINFO(self.rpc_fd, 3)
     qcom_dsp.FASTRPC_IOCTL_CONTROL(self.rpc_fd, req=0x3)
-    qcom_dsp.FASTRPC_IOCTL_INIT(self.rpc_fd, flags=0x1, file=self.shell_buf.va_addr, filelen=self.shell_buf.size, filefd=self.shell_buf.share_info.fd)
+    qcom_dsp.FASTRPC_IOCTL_INIT(self.rpc_fd, flags=0x1, file=(shell:=unwrap(self.shell_buf.host)).addr, filelen=shell.nbytes,
+                                filefd=self.shell_buf.meta[2].fd)
     qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=3, sc=rpc_sc(method=3, ins=0, outs=0))
 
 class RPCListener(threading.Thread):
@@ -944,20 +990,48 @@ static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd,
 return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}
 static int munmap(void *addr, unsigned int length) {{ return syscall((long)addr, length, 0, 0, 0, 0, 215); }}'''
 
-class MockDSPProgram(Program[DSPDevice]):
-  def __init__(self, dev:DSPDevice, obj:TinyELF, links=None): self.lib, self.signature = obj.lib, obj.signature
-  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
+class MockDSPProgram:
+  def __init__(self, lib:bytes, signature): self.lib, self.signature = lib, signature
+  def __call__(self, kernargs:int):
+    # the args are laid out by TinyELF.iter_sig, a buffer is its address
+    sig = list(zip(self.signature, TinyELF.iter_sig(self.signature)))
+    vals = [struct.unpack_from(unwrap(dt.fmt), to_mv(kernargs + o, dt.itemsize))[0] for _,(o,dt) in sig]
+    bufs = [(v, prod(shape)*dt.itemsize) for v,((_,a,dt,shape),_) in zip(vals, sig) if a is not AddrSpace.ALU]
     with tempfile.NamedTemporaryFile(suffix=".out") as dsp_lib:
       dsp_lib.write(self.lib)
       dsp_lib.flush()
       os.chmod(dsp_lib.name, 0o0777)
       proc = subprocess.run(["qemu-hexagon-static", *(['-strace'] if DEBUG >= 5 else []), dsp_lib.name],
-        input=b''.join(struct.pack(unwrap(dt.fmt), x) if a is AddrSpace.ALU else bytes(to_mv(x.va_addr, x.size))
-                       for x,(_,a,dt,_) in zip(args, self.signature)),
-        stdout=subprocess.PIPE, check=True)
+        input=b''.join(struct.pack(unwrap(dt.fmt), v) if a is AddrSpace.ALU else bytes(to_mv(v, prod(shape)*dt.itemsize))
+                       for v,((_,a,dt,shape),_) in zip(vals, sig)), stdout=subprocess.PIPE, check=True)
     offset = 4
-    for x in (x for x,(_,a,_,_) in zip(args, self.signature) if a is not AddrSpace.ALU):
-      to_mv(x.va_addr, x.size)[:] = proc.stdout[offset:offset+x.size]
-      offset += x.size
+    for addr, size in bufs:
+      to_mv(addr, size)[:] = proc.stdout[offset:offset+size]
+      offset += size
     assert offset == len(proc.stdout)
-    return struct.unpack("I", proc.stdout[0:4])[0] / 1e9  # pretend it's 1 Ghz, but this is an inscount, not a time
+
+class MockDSP:
+  # the mock's batches run in python (the host program calls mockdsp_submit, see DSPQueue), each kernel in qemu
+  lib = types.SimpleNamespace()
+  def __init__(self, dev:DSPDevice):
+    self.dev, self.programs = dev, list[MockDSPProgram]()
+    MockDSP.lib.mockdsp_submit = ctypes.CFUNCTYPE(None, ctypes.c_uint64, ctypes.c_uint64)(self.submit)
+    MockDSP.lib.mockdsp_submit.__name__ = "mockdsp_submit"
+    DLL._loaded_["mockdsp"] = cast(ctypes.CDLL, MockDSP.lib)
+
+  def load(self, obj:TinyELF) -> int:
+    self.programs.append(MockDSPProgram(obj.lib, obj.signature))
+    return len(self.programs) - 1
+
+  def submit(self, addr:int, n:int):
+    # (an exception can't leave the callback, the device's error state reports it)
+    try:
+      for op, a, b in itertools.batched(to_mv(addr, n).cast('Q'), 3):
+        if op == DSP_EXEC: self.programs[a](b)
+        elif op in (DSP_WAIT, DSP_WAIT_EQ) and not (to_mv(a, 8).cast('Q')[0] >= b if op == DSP_WAIT else to_mv(a, 8).cast('Q')[0] == b):
+          raise RuntimeError(f"a wait for {b} isn't met")
+        elif op == DSP_STORE: to_mv(a, 8).cast('Q')[0] = b
+        elif op == DSP_TIMESTAMP: to_mv(a, 8).cast('Q')[0] = int(time.perf_counter_ns() * self.dev.timestamp_divider / 1000)
+    except Exception:
+      traceback.print_exc()
+      self.dev.error_state.host.view(fmt='q')[0] = 1

@@ -13,7 +13,7 @@ from tinygrad.renderer.tc import TensorCore
 
 def tc_input(x:UOp, tc:TensorCore) -> UOp:
   # an int tensor core takes its inputs before they are widened to the accumulator
-  return x.src[0] if x.op is Ops.CAST and dtypes.is_int(x.dtype) and x.dtype == tc.dtype_out and x.src[0].dtype == tc.dtype_in else x
+  return x.src[0] if x.op is Ops.CAST and dtypes.is_int(x.dtype) and x.dtype == tc.dtype_out and x.src[0].dtype in tc.dtypes_in else x
 
 split_targets = {AxisType.UPCAST: (AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK),
                  AxisType.LOCAL: (AxisType.GLOBAL, AxisType.WEAK)}
@@ -183,7 +183,8 @@ class Scheduler:
       in0, in1 = mul.src
       for tc in self.ren.tensor_cores if tc_select == -1 else [self.ren.tensor_cores[tc_select]]:
         if self.ren.target.device in ("CUDA", "NV") and tc.dtype_in == dtypes.float and not ALLOW_TF32: continue
-        if tc.dtype_in == tc_input(in0, tc).dtype and tc.dtype_in == tc_input(in1, tc).dtype and tc.dtype_out == reduceop.dtype:
+        # A and B are in0 and in1 in some order (see the swap below)
+        if (dts:=(tc_input(in0, tc).dtype, tc_input(in1, tc).dtype)) in (tc.dtypes_in, tc.dtypes_in[::-1]) and tc.dtype_out == reduceop.dtype:
           # tensor cores have three ranges. X, Y, and REDUCE
           in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg, reverse=True)
           in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg, reverse=True)
@@ -200,6 +201,7 @@ class Scheduler:
                          [(True, c) for c in itertools.product(in0_ranges, in1_ranges, red_ranges)]
           if not (axis < len(axis_choices)): continue
           swap, axes = axis_choices[axis][0], list(axis_choices[axis][1])
+          if (dts[::-1] if swap else dts) != tc.dtypes_in: continue
           check(not any(r in self.reduce_ranges for r in axes[:2]), "tensor core N and M can't be contracted")
 
           # do optimizations and save the ranges

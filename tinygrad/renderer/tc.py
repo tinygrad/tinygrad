@@ -12,6 +12,9 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   frag_a: tuple[tuple[str, ...], tuple[str, ...]]
   frag_b: tuple[tuple[str, ...], tuple[str, ...]]
   frag_c: tuple[tuple[str, ...], tuple[str, ...]]
+  dtype_b: DType|None = None # dtype for B if it's not dtype_in
+  @property
+  def dtypes_in(self) -> tuple[DType, DType]: return (self.dtype_in, self.dtype_b or self.dtype_in)
   def axis_coords(self) -> list[str]:
     # tile bit of each tc axis in creation order, n then m then the k unrolls. split j of a dim is bit j
     used = self.frag_a[0] + self.frag_a[1] + self.frag_c[0] + self.frag_c[1]
@@ -150,10 +153,9 @@ metal = [TensorCore(dtype_in=di, dtype_out=do, frag_a=(("k1", "m0", "m1", "k2", 
 
 # ***** Qualcomm Hexagon HVX *****
 
-# vrmpy: each int32 lane accumulates the dot product of 4 adjacent bytes with 4 bytes of a scalar register
+# vrmpy: each int32 lane accumulates the dot product of 4 adjacent unsigned bytes with 4 bytes of a scalar register (unsigned or signed)
 # (4,128,4): A is 4 rows of 128 lanes (interleaved into vrmpy order by the WMMA), B is 4 bytes per column, C is a row of 128 lanes per column
 # (8,64,8): for a narrow M, A is 8 rows of 64 lanes and B 8 bytes for each of 8 columns
-hexagon = [TensorCore(dtype_in=dtypes.uint8, dtype_out=dtypes.int32, frag_a=((), tuple(f"m{i}" for i in range(7))+("k0", "k1")),
-  frag_b=((), ("k0", "k1", "n0", "n1")), frag_c=((), tuple(f"m{i}" for i in range(7))+("n0", "n1"))),
-  TensorCore(dtype_in=dtypes.uint8, dtype_out=dtypes.int32, frag_a=((), tuple(f"m{i}" for i in range(6))+("k0", "k1", "k2")),
-  frag_b=((), ("k0", "k1", "k2", "n0", "n1", "n2")), frag_c=((), tuple(f"m{i}" for i in range(6))+("n0", "n1", "n2")))]
+hexagon = [TensorCore(dtype_in=dtypes.uint8, dtype_b=db, dtype_out=dtypes.int32, frag_a=((), tuple(f"m{i}" for i in range(m))+k), frag_b=((), k+n),
+                      frag_c=((), tuple(f"m{i}" for i in range(m))+n))
+           for m,k,n in [(7, ("k0", "k1"), ("n0", "n1")), (6, ("k0", "k1", "k2"), ("n0", "n1", "n2"))] for db in (dtypes.uint8, dtypes.int8)]
