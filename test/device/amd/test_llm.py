@@ -218,7 +218,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     packed = rng.integers(0, 256, (G*OUT*IN//32, 34), dtype=np.uint8)
     packed[:, :2] = np.array([0.001], np.float16).view(np.uint8)
     decoded = ggml_data_to_tensor(Tensor(packed.flatten()).contiguous().realize(), G*OUT*IN, 8).reshape(G*OUT, IN)
-    w, x = decoded.numpy().reshape(G, OUT, IN), rng.standard_normal((1, 1, G, IN)).astype(np.float32)
+    w, x = decoded.numpy().reshape(G, OUT, IN), rng.standard_normal((1, 2, G, IN)).astype(np.float32)
     linear = Linear(IN, G*OUT, bias=False, groups=G)
     linear.weight = decoded
     got = linear(Tensor(x)).numpy()
