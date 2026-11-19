@@ -133,7 +133,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       return src[0].dtype
     case Ops.NATIVE:
       # a native function states its return dtype in the arg
-      return arg.dtype
+      assert bool(src) ^ bool(arg.dtype)
+      return src[0].dtype if src else arg.dtype
     case Ops.INDEX:
       # an image access is always float, no matter the storage dtype
       # TODO: should there be a CAST so src[0].dtype just work?
@@ -362,7 +363,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
       case Ops.NATIVE:
-        return self.src[0].as_shape
+        assert bool(self.src) ^ bool(self.arg.shape), f"{self} {bool(self.src)} {bool(self.arg.shape)}"
+        return self.src[0]._shape if self.src else self.arg.shape
       case Ops.PYLITERAL: return None
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
@@ -590,8 +592,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   @staticmethod
   def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:Register) -> UOp:
-    params = UOp.sink(*(UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r) for i,r in enumerate(regs)))
-    return UOp.native(op, params, dtype=dtype).call(*src)
+    params = [UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r) for i,r in enumerate(regs)]
+    return UOp.native(op, *params, dtype=dtype).call(*src)
   def contract(self, *rngs:UOp):
     assert all(x.axis_type == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
@@ -1217,9 +1219,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
-  def native(code:Any, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
-    shape_src = (shape_to_shape_arg(shape),)
-    return UOp(Ops.NATIVE, src=shape_src+src, arg=NativeInfo(code, dtype, fmt))
+  def native(code:Any, *src:UOp, shape:tuple[sint, ...]|None=None, dtype:DType|None=None, fmt:bool=False) -> UOp:
+    if src:
+      if shape is not None: assert src[0].shape == shape, f"{src[0].shape} must match {shape}"
+      if dtype is not None: assert src[0].dtype == dtype, f"{src[0].dtype} must match {dtype}"
+    return UOp(Ops.NATIVE, src=src, arg=NativeInfo(code, fmt) if src else NativeInfo(code, dtype, shape, fmt))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, hcq:HCQInfo|None=None) -> UOp:
@@ -1359,7 +1363,8 @@ OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.NATIVE}
 class NativeInfo:
   # renderer specific
   code: Any
-  dtype: DType = dtypes.void
+  dtype: DType|None = None
+  shape: tuple[int, ...]|None = None
   fmt: bool = False
 
 @dataclass(frozen=True)
