@@ -24,7 +24,7 @@ def lane_map(u:UOp) -> list[int|None]:
   if u.op is Ops.EXPAND: dims = [(0, 0, None)]*(len(u.shape)-len(in_shape)) + [(0 if s == 1 else x, 0, None) for x,s in zip(st, in_shape)]
   elif u.op is Ops.PERMUTE: dims = [(st[p], 0, None) for p in u.marg]
   elif u.op is Ops.SHRINK: dims = [(x, b, None) for x,(b,_) in zip(st, u.marg)]
-  else: dims = [(x, -b, n) for x,(b,_),n in zip(st, u.marg, in_shape)] # PAD
+  else: dims = [(x, -b, int(n)) for x,(b,_),n in zip(st, u.marg, in_shape)] # PAD
   ret: list[int|None] = [0]
   for (x, off, n), sz in zip(dims, u.shape):
     ret = [None if r is None or (n is not None and not 0 <= j+off < n) else r + (j+off)*x for r in ret for j in range(int(sz))]
