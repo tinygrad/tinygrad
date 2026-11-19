@@ -1,4 +1,4 @@
-import multiprocessing, multiprocessing.util, atexit, signal, sys, os, threading, contextlib, subprocess
+import multiprocessing, multiprocessing.util, atexit, signal, sys, os, threading, contextlib, subprocess, importlib
 from multiprocessing.context import SpawnContext, SpawnProcess
 from tinygrad.helpers import Context, getenv, PARALLEL
 
@@ -9,22 +9,18 @@ def _init_worker():
   Context(ALLOW_DEVICE_USAGE=0, VIZ=0, TRACK_MATCH_STATS=0).__enter__()
   signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-# spawn normally reimports the user's __main__ before _init_worker. This replays top-level code and can recursively create pools. There is no public
-# multiprocessing switch to skip that import, so hide the two attributes used to locate __main__ while each worker (including replacements) starts.
-_spawn_lock, _missing = threading.Lock(), object()
+# spawn reimports the user's __main__ before _init_worker, replaying top-level code and potentially creating pools recursively.
+# A spec named "__main__" makes multiprocessing.spawn skip that import.
+_spawn_lock = threading.Lock()
 @contextlib.contextmanager
 def _without_main():
-  main = sys.modules.get("__main__")
-  if main is None:
-    yield
-    return
+  main = sys.modules["__main__"]
   with _spawn_lock:
-    saved = {name:getattr(main, name, _missing) for name in ("__file__", "__spec__")}
+    saved = main.__spec__
     try:
-      for name in saved: setattr(main, name, None)
+      main.__spec__ = importlib.machinery.ModuleSpec("__main__", None)
       yield
-    finally:
-      for name,value in saved.items(): delattr(main, name) if value is _missing else setattr(main, name, value)
+    finally: main.__spec__ = saved
 
 # spawn execs with the live environ, other threads changing os.environ (pytest) can break it: https://github.com/python/cpython/issues/157613
 def _spawnv_passfds(path, args, passfds):

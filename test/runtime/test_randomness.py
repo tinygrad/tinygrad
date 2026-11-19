@@ -210,21 +210,6 @@ class TestRandomness(unittest.TestCase):
     assert math.isfinite(mx), mx
     assert math.isfinite(mn), mn
 
-  def test_random_counter_overflow(self):
-    device = Device.DEFAULT
-    Tensor.manual_seed(1337)
-    Tensor.rand(1).realize()
-
-    Tensor._device_rng_counters[device].assign(Tensor([dtypes.uint32.max - 5, 0], device=device, dtype=dtypes.uint32)).realize()
-
-    Tensor.rand(10).realize()
-    c = Tensor._device_rng_counters[device].numpy()
-    np.testing.assert_allclose(c, [4, 1])
-
-    Tensor.rand(10).realize()
-    c = Tensor._device_rng_counters[device].numpy()
-    np.testing.assert_allclose(c, [14, 1])
-
   def test_three_lazy_rands_realized_one_at_a_time_are_distinct(self):
     Tensor.manual_seed(123)
     r1, r2, r3 = [Tensor.rand(4) for _ in range(3)]

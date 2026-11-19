@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, pathlib, signal, struct, json, os, itertools, heapq
+import argparse, pathlib, signal, struct, json, os, itertools, heapq, re
 os.environ["VIZ"] = "0"
 if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
@@ -66,6 +66,8 @@ def get(data:dict, key:str):
   match = difflib.get_close_matches(key, [ansistrip(k) for k in data], n=1, cutoff=0.6)
   raise RuntimeError(f'item "{key}" not found in list'+(f", did you mean {match[0]!r}?" if match else ''))
 
+def matches(name:str, query:str) -> bool: return bool(query) and re.search(query, name, re.IGNORECASE) is not None
+
 def fmt_top(k:dict) -> str:
   return f"{fmt_colored(k['name'])}{' ' * max(0, 38-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"+\
       (" "*4+fmt_data(k['fmt']) if k['fmt'] else "")
@@ -78,7 +80,8 @@ def fmt_all(k:dict) -> str:
 
 @Context(ALLOW_DEVICE_USAGE=0)
 def main(args) -> None:
-  viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
+  if len(args.paths) == 1: args.paths.append(None)
+  viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.paths[1], default=RewriteTrace([], [], {}))))
 
   def emit(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
@@ -94,8 +97,8 @@ def main(args) -> None:
           for line in m["diff"]: print(emit(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
     if data.get("src") is not None: print(emit(data["src"]))
 
-  profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
-  if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
+  profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.paths[0], default=[]))
+  if profile_bytes is None: raise RuntimeError(f"empty profile in {args.paths[0]}")
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["_data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
@@ -198,21 +201,23 @@ def main(args) -> None:
             elif not file.startswith("<") and not fxn.startswith("<"): fmt["loc"] = line
         yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3, "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"],
                "ext":"\n".join(ext)}
-    fmt_row = fmt_top if args.t else fmt_all
+    fmt_row, query = fmt_top if args.t else fmt_all, "".join(args.query) if args.query else None
     seen_refs:set[int] = set()
     def render_event(k:dict, ls=args.list) -> None:
-      if len(args.src) > 1 and ansistrip(k["name"]) not in args.src: return None
-      print(emit(k, to_str=fmt_row))
+      if len(args.src) > 1 and ansistrip(k["name"]) not in args.src and query is None: return None
+      if (debug_steps:=query is None or matches(ansistrip(k["name"]), query)): print(emit(k, to_str=fmt_row))
       if k["ref"] is not None and k["ref"] not in seen_refs:
         seen_refs.add(k["ref"])
         for i,s in enumerate(viz_data.ctxs[k["ref"]]["steps"]):
-          if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
-          if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
-          if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 6 or (DEBUG >= 5 and s["name"] == "View Kernel Graph") or (s["name"] in args.src):
-            print_step(s, reconstruct_matches=s["name"] in args.src)
-          if DEBUG >= 7: print_step(s, reconstruct_matches=True)
-      elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
+          if debug_steps:
+            if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
+            if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
+            if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
+            if DEBUG >= 6 or (DEBUG >= 5 and s["name"] == "View Kernel Graph") or (s["name"] in args.src):
+              print_step(s, reconstruct_matches=s["name"] in args.src)
+            if DEBUG >= 7: print_step(s, reconstruct_matches=True)
+          elif query is not None and matches(s["name"], query): print_step(s, reconstruct_matches=DEBUG >= 7)
+      elif debug_steps and (DEBUG >= 3 and k.get("ext")): print(emit(k["ext"]))
     for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)
 
 def get_arg_parser() -> argparse.ArgumentParser:
@@ -221,10 +226,9 @@ def get_arg_parser() -> argparse.ArgumentParser:
   parser.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
   parser.add_argument("--interval", nargs="+", metavar=("START", "END"), help="Optional start and end marker")
   parser.add_argument("-t", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
-  parser.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
-                      default=temp("profile.pkl", append_user=True))
-  parser.add_argument("--rewrites-path", type=str, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
-                      default=temp("rewrites.pkl", append_user=True))
+  parser.add_argument("-q", "--query", nargs="+", default=[], metavar="REGEX", help="Search query")
+  parser.add_argument("--paths", nargs="+", metavar=("PROFILE", "REWRITES"), help="Paths to profile and optional rewrites (default: latest files)",
+                      default=[temp("profile.pkl", append_user=True), temp("rewrites.pkl", append_user=True)])
   parser.add_argument("--json", action="store_true", help="Emit profiler output as JSON")
   return parser
 

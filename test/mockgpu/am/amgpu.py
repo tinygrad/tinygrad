@@ -1,12 +1,19 @@
 # mypy: ignore-errors
 from __future__ import annotations
-import ctypes, struct, functools, os, mmap
+import ctypes, struct, functools, os, mmap, tempfile
 from tinygrad.runtime.autogen.am import am, smu_14_0_2
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.amd import AMDReg, import_asic_regs
 from test.mockgpu.amd.amdgpu import AMDGPU
 
 VRAM_SIZE = 512 << 20
+
+def memfd(name:str) -> int:
+  if hasattr(os, "memfd_create"): return os.memfd_create(name)
+  # macos has no memfd_create, use an unlinked temp file
+  fd, path = tempfile.mkstemp(prefix=name)
+  os.unlink(path)
+  return fd
 
 IP_VERSIONS = {
   am.GC_HWIP: (12, 0, 0), am.SDMA0_HWIP: (7, 0, 0), am.MMHUB_HWIP: (4, 1, 0), am.NBIO_HWIP: (6, 3, 1),
@@ -263,11 +270,11 @@ class MockMMIOInterface:
 class MockAMGPU(AMDGPU):
   def __init__(self, gpuid:int=0):
     super().__init__(gpuid)
-    self.vram_fd = libc.memfd_create(b"vram", libc.MFD_CLOEXEC)
+    self.vram_fd = memfd("vram")
     os.ftruncate(self.vram_fd, VRAM_SIZE)
     self.vram_addr = libc.mmap(0, VRAM_SIZE, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, self.vram_fd, 0)
     self.vram = (ctypes.c_ubyte * VRAM_SIZE).from_address(self.vram_addr)
-    self.doorbell_fd = libc.memfd_create(b"doorbell", libc.MFD_CLOEXEC)
+    self.doorbell_fd = memfd("doorbell")
     os.ftruncate(self.doorbell_fd, 0x2000)
     self.arch = "rdna4"
     self._sysmem_map:dict[int,int] = {}

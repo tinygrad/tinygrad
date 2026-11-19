@@ -52,6 +52,8 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
   Unbound storage of $n$ elements. \\
 \op{Param} & ($n$) & \texttt{ParamArg} &
   Caller-provided storage. \\
+\op{Extern} & ($n$) & \texttt{ParamArg} &
+  Storage or a bound Variable from outside an exported function. \\
 \op{Const} & () & value &
   A scalar constant with shape $(\ )$. \\
 \op{Binary} & () & data & Raw binary data, has dtype uint8 and shape len($data$)  \\
@@ -59,7 +61,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \end{tabular}
 
 \smallskip
-\texttt{ParamArg} contains slot, dtype, value bounds, alignment, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for \op{Alloc}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}. The flat size $n$ is stated as a concrete weakint \op{Const} in src (an empty \op{Stack} for a scalar), followed by a \texttt{DEVICE} \op{Range} for multi-device storage.
+\texttt{ParamArg} contains slot, dtype, value bounds, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for \op{Alloc}s and \op{Extern}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}. The flat size $n$ is stated as a concrete weakint \op{Const} in src (an empty \op{Stack} for a scalar), followed by a \texttt{DEVICE} \op{Range} for multi-device storage.
 
 %% ============================================================
 \subsection*{{\color{callblue}Call Ops} \normalfont\small--- function abstraction, like the lambda calculus}
@@ -158,22 +160,24 @@ Assign is \op{Store} followed by \op{After}: write the value, then return the bu
 \textbf{Arity} & \textbf{src} & \textbf{Op} & \textbf{Semantics} \\
 \midrule
 Unary & $(T,)$
-  & \op{Recip}
+  & \op{Cast}
+  & Convert to target dtype (specified in arg). \\
+& & \op{Recip}
   & $1/x$ \\
 & & \op{Trunc}
   & $\mathrm{trunc}(x)$: round toward zero. \\
-& & \op{Cast}
-  & Convert to target dtype (specified in arg). \\
   \\[4pt]
 Binary & $(A, B)$
   & \op{Add}, \op{Mul}, \op{Max}
   & $a+b$, $a \cdot b$, $\max(a,b)$ \\
-& & \op{Floordiv}, \op{Floormod}
+& & \op{Div}, \op{Mod}
   & $\lfloor a/b \rfloor$, $a-b\lfloor a/b \rfloor$ \\
-& & \op{CmpLt}, \op{CmpNe}
-  & $[a < b]$, $[a \ne b]$ \\
-& & \op{Xor}, \op{Or}, \op{And}, \op{Shr}, \op{Shl}
-  & $a \oplus b$, $a \mid b$, $a \mathbin{\&} b$, $a \gg b$, $a \ll b$ \\[4pt]
+& & \op{CmpLt}, \op{CmpEq}
+  & $[a < b]$, $[a = b]$ \\
+& & \op{Xor}, \op{Or}, \op{And}
+  & $a \oplus b$, $a \mid b$, $a \mathbin{\&} b$ \\
+& & \op{Shl}, \op{Shr}
+  & $a \ll b$, $a \gg b$ \\[4pt]
 Ternary & $(P, A, B)$
   & \op{Where}
   & $A[\mathbf{i}]$ if $P[\mathbf{i}] \ne 0$, else $B[\mathbf{i}]$ \\
@@ -182,6 +186,10 @@ Ternary & $(P, A, B)$
 \end{tabular}
 
 \medskip
+\op{CmpEq} is primitive elementwise equality, returning bool (as do \op{CmpLt} and \op{CmpNe}). For floating-point inputs, equality is false if either operand is NaN, and $+0 = -0$. \op{CmpNe} is its logical complement, including for NaNs.
+
+\medskip
+\noindent\begin{minipage}{\linewidth}
 \textbf{Decomposed elementwise ops} --- defined in terms of the primitives above.
 
 \smallskip
@@ -191,14 +199,14 @@ Ternary & $(P, A, B)$
 \midrule
 \op{Neg} & \op{Mul}($A$, $-1$) & $-x$ \\
 \op{Sub} & \op{Add}($A$, \op{Neg}($B$)) & $a - b$ \\
-\op{Div} & \op{Mul}($A$, \op{Recip}($B$)) & $a / b$ \\
-\op{Cdiv} & $q+c$ & Integer division toward zero. \\
-\op{Cmod} & $r-bc$ & Remainder with dividend's sign (or zero). \\
+\op{Fdiv} & \op{Mul}($A$, \op{Recip}($B$)) & Floating-point division $a / b$. \\
+\op{Truncdiv} & $\operatorname{sgn}(a)\operatorname{sgn}(b)\lfloor |a|/|b| \rfloor$ & Integer division toward zero. \\
+\op{Truncmod} & $a - b \cdot \op{Truncdiv}(a,b)$ & Remainder with dividend's sign (or zero). \\
 \op{CmpGt} & \op{CmpLt}($B$, $A$) & $[a > b]$ \\
-\op{CmpGe} & \op{CmpNe}(\op{CmpLt}($A$, $B$),\, $1$) & $[a \ge b]$ \\
-\op{CmpLe} & \op{CmpNe}(\op{CmpLt}($B$, $A$),\, $1$) & $[a \le b]$ \\
-\op{CmpEq} & \op{CmpNe}(\op{CmpNe}($A$, $B$),\, $1$) & $[a = b]$ \\
-\op{Not} & \op{CmpNe}($A$, $1$) & $\lnot a$ \\[4pt]
+\op{CmpGe} & \op{CmpEq}(\op{CmpLt}($A$, $B$),\, $0$) & $[a \ge b]$ \\
+\op{CmpLe} & \op{CmpEq}(\op{CmpLt}($B$, $A$),\, $0$) & $[a \le b]$ \\
+\op{CmpNe} & \op{CmpEq}(\op{CmpEq}($A$, $B$),\, $0$) & $[a \ne b]$ \\
+\op{Not} & \op{CmpEq}($A$, $0$) & $\lnot a$ \\[4pt]
 \op{Exp2} & polynomial approx + \op{Mul}, \op{Add} & $2^x$ \\
 \op{Log2} & exponent extract + polynomial approx & $\log_2 x$ \\
 \op{Sin} & argument reduction + polynomial approx & $\sin x$ \\
@@ -208,6 +216,7 @@ Ternary & $(P, A, B)$
 \op{Threefry} & 5 rounds of add-rotate-xor (ARX) & Threefry 2x32 PRNG \\
 \bottomrule
 \end{tabular}
+\end{minipage}
 
 %% ============================================================
 \subsection*{{\color{markerorange}Marker Ops} \normalfont\small--- identity on data}
@@ -229,15 +238,13 @@ Ternary & $(P, A, B)$
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
 \op{Barrier} & (deps\ldots) & --- & Synchronize threads within a workgroup. \\
-\op{Ins} & \ldots & \ldots & A single machine instruction (e.g.\ AMD ISA). \\
 \op{GetAddr} & (buf,) & dev & Lower buf to its address on device dev. \\
 \op{Special} & (bound,) & name & GPU thread/workgroup index (e.g.\ \texttt{gidx0}, \texttt{lidx1}). \\
 \op{If} & (gate,) & --- & Begin conditional execution block. \\
 \op{Endif} & (if,) & --- & End conditional execution block. \\
 \op{Wmma} & (A, B, acc) & config & Warp matrix multiply-accumulate (tensor cores). \\
-\op{Custom} & (args\ldots) & fmt & Inject custom code string into generated source. \\
 \op{AtomicAdd} & (idx, val) & --- & Atomic read-modify-write: \texttt{buf[idx] += val}. \\[4pt]
-\op{CustomFunction} & (meta\ldots) & name & Opaque device function (e.g.\ HW decode). Via \op{Call}. \\
+\op{Native} & (meta\ldots) & native & Opaque native code or device function (e.g.\ HW decode). Via \op{Call}. \\
 \op{Program} & (linear, source, binary) & --- & Compiled kernel: instructions, source, and machine code. \\
 \op{Source} & () & str & Human-readable rendered source code. \\
 \op{Binary} & () & bytes & Compiled machine code. \\
@@ -258,7 +265,7 @@ Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspa
 \textbf{Op} & \textbf{dtype} & \textbf{shape} & \textbf{device} & \textbf{min\_max} \\
 \midrule
 \op{Buffer}, \op{Alloc} & from arg & $(n)$ from src, or $()$ & from arg & dtype range \\
-\op{Param} & from arg & $(n)$ from src, or $()$ & from arg & from src or dtype range \\
+\op{Param}, \op{Extern} & from arg & $(n)$ from src, or $()$ & from arg & from src or dtype range \\
 \op{Const} & from arg & $()$ & \textsc{null} & $[v, v]$ \\[3pt]
 Movement ops & $\mathrm{src}[0].\mathrm{dtype}$ & (see op) & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Unshard} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0]$, each $a_k \times n_k$ & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
@@ -271,7 +278,7 @@ ALU unary & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0].\mathrm{shape}$ 
 \op{Mul} & $\mathrm{src}[0].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & $[\min,\max]$ of products \\
 \op{Max} & $\mathrm{src}[0].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & $[\max(a,b),\, \max(A,B)]$ \\
 Other binary & $\mathrm{src}[0].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\
-\op{CmpLt}, \op{CmpNe} & bool & broadcast & $\mathrm{src}[0].\mathrm{device}$ & from intervals \\
+\shortstack[l]{\op{CmpLt}, \op{CmpEq},\\\op{CmpNe}} & bool & broadcast & $\mathrm{src}[0].\mathrm{device}$ & from intervals \\
 \op{Where} & $\mathrm{src}[1].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & $[\min(b,c),\, \max(B,C)]$ \\[3pt]
 \op{Call} & void & --- & first non-null src device & --- \\
 \op{Range} & index & $()$ & \textsc{null} & $[0,\, n{-}1]$ \\
@@ -305,8 +312,8 @@ Each kernel's iteration space is a set of \op{Range} axes. Every range has an \t
 {\color{axblue}\texttt{GLOBAL}} & \texttt{g} & --- & --- & GPU global workgroup dimension. \\
 {\color{axcyan}\texttt{LOCAL}} & \texttt{l} & g, L & inner/outer & Workgroup local dimension (shared memory). \\
 {\color{axbrcyan}\texttt{WARP}} & \texttt{w} & \multicolumn{2}{l}{(created by \op{TC})} & Warp-level lanes for tensor cores. \\
-{\color{axwhite}\texttt{WEAK}} & \texttt{L} & --- & --- & Optimizable range (default). \\
-{\color{axwhite}\texttt{LOOP}} & \texttt{L} & --- & --- & Pinned sequential loop. \\
+{\color{axwhite}\texttt{WEAK}} & \texttt{L} & --- & --- & Optimizable range. \\
+{\color{axwhite}\texttt{LOOP}} & \texttt{L} & --- & --- & Pinned sequential loop (default). \\
 {\color{axyellow}\texttt{UPCAST}} & \texttt{u} & g, l, L & inner/outer & Vectorization, including reduction unrolling. \\
 \bottomrule
 \end{tabular}
@@ -449,7 +456,7 @@ The result is a reusable graph fragment: the body's storage is represented by \o
 \toprule
 \textbf{Stage} & \textbf{Semantics} \\
 \midrule
-\textbf{Callify} & Transform the Tensor graph into a single stateless function. \\
+\textbf{Export} & Replace the runtime state of the Tensor graph with \op{Extern}s: bound storage (and contiguous views of it) loses its buffer, bound Variables lose their value. The result is a function that can be cached and serialized. \\
 \textbf{Rangeify} & Determine the kernel split of the function. Break everything down to shape () \\
 \textbf{Optimize} & Insert local buffers. Swap and split ranges, and determine which axes are parallel and which are serial. \\
 \textbf{Expand} & Expand the parallel ranges into shape. \\

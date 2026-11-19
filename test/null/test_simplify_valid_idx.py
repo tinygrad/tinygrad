@@ -2,6 +2,7 @@ import unittest, itertools
 from dataclasses import replace
 
 from tinygrad.codegen.late.coalesce import indexing_simplify, pm_simplify_add_image
+from tinygrad import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.uop.weak import pm_commit_weak
@@ -10,13 +11,16 @@ from tinygrad.helpers import Context
 from test.helpers import full_rewrite
 from test.null.test_uop_symbolic import check_uop_against_string
 
-# symbolic-only idx + valid simplification (no late lowering of FLOORDIV/FLOORMOD)
+# symbolic-only idx + valid simplification (no late lowering of DIV/MOD)
 def simplify_valid_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load, name="simplify_valid_idx")
 # image-aware idx + valid simplification: adds the codegen-layer matcher that drops provably in-bounds gates
 def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+indexing_simplify, name="simplify_image_idx")
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp.param(0, dtypes.float, 1024).index(idx.valid(valid)).load()
+
+def get_gated_store_uop(valid:UOp, idx:UOp):
+  return UOp.param(0, dtypes.float, 1024).index(idx.valid(valid)).store(1.0)
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
   return UOp.param(0, dtypes.float, image_shape).index(idx[1].valid(valid), idx[0].valid(valid)).load()
@@ -40,7 +44,7 @@ class TestValidIdxSimplification(unittest.TestCase):
     load = get_gated_load_uop(gate, idx)
     self.check(load,
       "0",
-      "(((lidx0+(gidx0*4))<19)!=True)")
+      "((lidx0+(gidx0*4))<19).eq(False)")
 
   def test_simplify_within_valid1(self):
     ridx0 = Range(0, 4)
@@ -198,7 +202,7 @@ class TestValidIdxSimplification(unittest.TestCase):
     load = get_gated_load_uop(valid, idx)
     self.check(load,
       "1",
-      "((((r0+r1)<1)!=True)&(((r2+r3)<1)!=True))")
+      "(((r0+r1)<1).eq(False)&((r2+r3)<1).eq(False))")
 
   def test_valid_with_non_const_rhs(self):
     ridx0 = Range(0, 1024)
@@ -239,11 +243,11 @@ class TestImageSimplification(unittest.TestCase):
     # should match any one of the AND clause and drop the matched statement from valid
     valid = (gidx0<1).ne(True) & (gidx1<1).ne(True)
     load = get_load_image_uop(shape, valid, (gidx0+1, gidx1-1))
-    self.check(load, "((gidx0<1)!=True)", "(gidx0+1)", "(gidx1+-1)")
+    self.check(load, "(gidx0<1).eq(False)", "(gidx0+1)", "(gidx1+-1)")
 
     valid = (gidx0<1).ne(True) & (gidx1<1).ne(True)
     load = get_load_image_uop(shape, valid, (gidx0, gidx1-1))
-    self.check(load, "((gidx0<1)!=True)", "gidx0", "(gidx1+-1)")
+    self.check(load, "(gidx0<1).eq(False)", "gidx0", "(gidx1+-1)")
 
   def test_idx_lt_bound(self):
     # (idx1 < image_bound) ? (..., idx1) : 0 can drop the valid
@@ -478,7 +482,7 @@ class TestImageSimplification(unittest.TestCase):
       self.check(load, None, "(gidx0+lidx0*1024+r0*1024+lidx1*128+-3168)", "0")
     except AssertionError:
       # TODO: fold valid
-      self.check(load, "(((lidx1<1)!=True)&((lidx0+r0)<19))",
+      self.check(load, "((lidx1<1).eq(False)&((lidx0+r0)<19))",
                        "(gidx0+lidx1*128+(lidx0*1024+r0*1024)+-3168)", "0")
 
   def test_simplify10(self):
@@ -497,7 +501,7 @@ class TestImageSimplification(unittest.TestCase):
       self.check(load, None, "(lidx2+gidx0*4+lidx0*1024+r0*1024+lidx1*256+-3264)", "0")
     except AssertionError:
       # TODO: fold valid
-      self.check(load, "(((lidx1<1)!=True)&((lidx0+r0)<11))",
+      self.check(load, "((lidx1<1).eq(False)&((lidx0+r0)<11))",
                        "(lidx2+gidx0*4+lidx1*256+(lidx0*1024+r0*1024)+-3264)", "0")
 
   def test_drop_non_monotonic_window(self):
@@ -519,6 +523,10 @@ class TestImageSimplification(unittest.TestCase):
                               (Special("gidx0", 10), idx_y))
     off = graph_rewrite(load.sink(), pm_commit_weak+indexing_simplify).src[0].src[0]
     self.assertEqual(off.src[1].get_valid(), UOp.const(True))
+
+  def test_int64_index_into_image_with_emulated_long(self):
+    with Context(DEV="NULL:OPENCL:,IMAGE_PITCH_ALIGNMENT=64", IMAGE=1, EMULATED_DTYPES="long"):
+      Tensor.empty(96, 128)[Tensor([3, 1, 5], dtype=dtypes.int64)].realize()
 
 class TestImageStore(unittest.TestCase):
   def test_half_store_converts_lane_by_lane(self):
@@ -559,52 +567,58 @@ class TestRangeShrink(unittest.TestCase):
 
   def assert_range_end(self, ranges:list[UOp], end:int):
     self.assertEqual(len(ranges), 1)
-    with Context(NOOPT=1, SPEC=0): expected = full_rewrite(UOp.const(end, dtypes.int).sink()).src[0]
-    self.assertIs(ranges[0].src[0], expected)
+    self.assertEqual(ranges[0].src[0].without_after.ssimplify(), end)
 
   def test_range_shrink_single_guard(self):
     # range 0..203 guarded by r < 4 everywhere -> shrink to 0..3
     r = Range(0, 204)
-    load = get_gated_load_uop(r < UOp.const(4), r)
-    ranges = self.get_ranges(load.sink())
+    store = get_gated_store_uop(r < UOp.const(4), r)
+    ranges = self.get_ranges(store.sink())
     self.assert_range_end(ranges, 4)
 
   def test_range_shrink_picks_max_guard(self):
-    # two loads guard the same range with r < 4 and r < 8 -> shrink to max(4, 8) = 8
+    # two stores guard the same range with r < 4 and r < 8 -> shrink to max(4, 8) = 8
     r = Range(0, 204)
-    load1 = get_gated_load_uop(r < UOp.const(4), r)
-    load2 = get_gated_load_uop(r < UOp.const(8), r)
-    ranges = self.get_ranges(UOp.sink(load1, load2))
+    store1 = get_gated_store_uop(r < UOp.const(4), r)
+    store2 = UOp.param(1, dtypes.float, 1024).index(r.valid(r < UOp.const(8))).store(1.0)
+    ranges = self.get_ranges(UOp.sink(store1, store2))
     self.assert_range_end(ranges, 8)
 
   def test_range_no_shrink_guard_ge_max(self):
     # guard r < 300 with range max 204 -> no shrink (guard doesn't constrain)
     r = Range(0, 204)
-    load = get_gated_load_uop(r < UOp.const(300), r)
-    ranges = self.get_ranges(load.sink())
+    store = get_gated_store_uop(r < UOp.const(300), r)
+    ranges = self.get_ranges(store.sink())
     self.assert_range_end(ranges, 204)
 
   def test_range_no_shrink_when_unguarded_elsewhere(self):
-    # one load guards r < 4, but another load uses r without a gate -> no shrink
+    # one store guards r < 4, but another store uses r without a gate -> no shrink
     r = Range(0, 204)
-    load1 = get_gated_load_uop(r < UOp.const(4), r)
-    load2 = UOp.param(1, dtypes.float, 204).index(r).load()
-    ranges = self.get_ranges(UOp.sink(load1, load2))
+    store1 = get_gated_store_uop(r < UOp.const(4), r)
+    store2 = UOp.param(1, dtypes.float, 204).index(r).store(1.0)
+    ranges = self.get_ranges(UOp.sink(store1, store2))
     self.assert_range_end(ranges, 204)
 
-  def test_range_no_shrink_when_used_in_reduce(self):
-    # range used in both a gated load AND directly in the reduce expression -> no shrink
+  def test_range_shrink_ignores_ungated_read(self):
+    # the store guards r < 4 and its value reads r without a gate -> shrink to 0..3
     r = Range(0, 204)
-    gated_load = get_gated_load_uop(r < UOp.const(4), r)
-    red = (r.cast(dtypes.float) + gated_load).reduce(r, arg=Ops.ADD)
-    ranges = self.get_ranges(red.sink())
+    store = UOp.param(0, dtypes.float, 1024).index(r.valid(r < UOp.const(4))).store(UOp.param(1, dtypes.float, 204).index(r).load())
+    ranges = self.get_ranges(store.sink())
+    self.assert_range_end(ranges, 4)
+
+  def test_range_no_shrink_when_used_in_reduce(self):
+    # a gated store inside the reduce guards r < 4, but the reduce sums every iteration -> no shrink
+    r = Range(0, 204)
+    gated_store = get_gated_store_uop(r < UOp.const(4), r)
+    red = r.cast(dtypes.float).after(gated_store).reduce(r, arg=Ops.ADD)
+    ranges = self.get_ranges(UOp.param(1, dtypes.float, 1)[0].store(red).sink())
     self.assert_range_end(ranges, 204)
 
   def test_range_shrink_to_single_iteration(self):
     # guard r < 1 shrinks range to 1 -> single iteration, range eliminated entirely
     r = Range(0, 204)
-    load = get_gated_load_uop(r < UOp.const(1), r)
-    ranges = self.get_ranges(load.sink())
+    store = get_gated_store_uop(r < UOp.const(1), r)
+    ranges = self.get_ranges(store.sink())
     self.assertEqual(len(ranges), 0)
 
   def test_range_shrink_store_where_invalid(self):

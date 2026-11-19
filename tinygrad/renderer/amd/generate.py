@@ -148,7 +148,7 @@ def parse_xml(filename: str):
       for fmt, _, otype in op_info.values():
         if fmt and fmt not in fmts: fmts[fmt] = 0
         if otype: op_types_set.add(otype)
-      if op_info: types[(name, base_enum)] = op_info
+      if op_info or (enc.find("Operands") is not None and not enc.findall("Operands/Operand")): types[(name, base_enum)] = op_info
   # Find opcodes that only exist in a specific variant encoding (no base format version)
   suffix_only_ops: dict[str, dict[str, set[int]]] = {}  # {suffix: {base_fmt: {opcodes}}}
   for base_fmt, opcodes in opcode_encs.items():
@@ -240,8 +240,9 @@ def extract_pcode(pages: list[list[tuple[float, float, str, str]]], name_to_op: 
       for j in range(1, len(sorted_lines)):
         prev_page, prev_y, _ = sorted_lines[j-1]
         curr_page, curr_y, _ = sorted_lines[j]
-        if depth == 0 and curr_page == prev_page and prev_y - curr_y > 30: break
-        if depth == 0 and curr_page != prev_page and prev_y > 60 and curr_y < 730: break
+        if depth == 0 and ((curr_page == prev_page and prev_y - curr_y > 30) or (curr_page != prev_page and prev_y > 60 and curr_y < 730)):
+          if any(' = ' in t for *_, t in filtered) or not any(' = ' in t for *_, t in sorted_lines[j:]): break
+          filtered = []
         filtered.append(sorted_lines[j])
         code = sorted_lines[j][2].split("//")[0]
         depth += code.count("{") - code.count("}")
@@ -462,6 +463,7 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
   with open(path, "w") as f: f.write("\n".join(lines))
 
 def write_operands(types: dict, enums: dict, arch: str, path: pathlib.Path) -> None:
+  types = {k: v for k, v in types.items() if v}
   valid = {(name, fmt) for fmt, ops in enums.items() for name in ops.values()}
   # only import enums that are actually used as keys in OPERANDS
   used_bases = {eb for (nm, eb) in types if (nm, eb) in valid}
@@ -536,6 +538,9 @@ if __name__ == "__main__":
     pages = extract_pdf_text(cfg["pdf"])
     name_to_op = {name: op for ops in arch_data[arch]["enums"].values() for op, name in ops.items()}
     pcode = extract_pcode(pages, name_to_op)
+    for fmt, ops in arch_data[arch]["enums"].items():
+      for op, name in ops.items():
+        if arch_data[arch]["types"].get((name, fmt)) == {}: pcode.setdefault((name, op), '')
     base = autogen_base / arch
     write_pcode(pcode, arch_data[arch]["enums"], arch, base / "str_pcode.py")
     print(f"  {arch}: {len(pcode)} pcode entries")

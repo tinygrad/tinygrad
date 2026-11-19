@@ -1,5 +1,5 @@
 import unittest
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, Device
 from tinygrad.helpers import Context
 
 class TestBuffer(unittest.TestCase):
@@ -38,7 +38,7 @@ class TestBuffer(unittest.TestCase):
   def test_cache_owned_storage_only(self):
     for opaque in (None, memoryview(bytearray(8))):
       with self.subTest(imported=opaque is not None), Context(LRU=1):
-        b = Buffer("PYTHON", 8, opaque=opaque)
+        b = Buffer("PYTHON", 8, opaque=opaque, allocator=type(Device["PYTHON"].allocator)(Device["PYTHON"]))
         buf = b._buf
         b.deallocate()
         self.assertEqual(b._buf is buf, opaque is None)

@@ -7,10 +7,9 @@ import pickle, base64, itertools, time, sys, ctypes
 from dataclasses import replace
 from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import all_same, getenv, Target, IMAGE, is_image_shape, to_mv, mv_address
-from tinygrad.device import HostAllocator, Compiled, Compiler, Program, TinyELF
-from tinygrad.renderer import tc
+from tinygrad.device import HostAllocator, Compiled, Program
+from tinygrad.renderer import tc, Renderer, Compiler, TinyELF
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
-from tinygrad.renderer import Renderer
 from tinygrad.runtime.support.elf import link_sym
 from tinygrad.runtime.support.c import DLL
 
@@ -46,12 +45,10 @@ def wmma(tensor_cores:list[tc.TensorCore], arg, inp, warp_size:int):
   return out
 
 class PythonProgram(Program['PythonDevice']):
-  def __init__(self, dev:'PythonDevice', obj:TinyELF, uops:list[UOp]|None=None):
-    self.uops: list[UOp] = uops or pickle.loads(obj.lib)
-    self.fxns = {u: PythonProgram(dev, obj, list(u.body.src)) for u in self.uops if u.op is Ops.CALL and u.body.op is Ops.LINEAR}
-    self.tensor_cores = PythonRenderer(obj.target).tensor_cores
+  def __init__(self, dev:'PythonDevice', obj:TinyELF, links:dict[str,'PythonProgram']):
+    self.uops: list[UOp] = pickle.loads(obj.lib)
+    self.tensor_cores, self.links = PythonRenderer(obj.target).tensor_cores, links
     self.uop_to_index: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
-    self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op in {Ops.END, Ops.BACKEDGE}}
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
@@ -63,24 +60,24 @@ class PythonProgram(Program['PythonDevice']):
       i = 0
       while i < len(self.uops):
         u = self.uops[i]
-        src_values = [values[v] for v in u.src_without_body if v.dtype is not dtypes.void]
+        src_values = [values.get(v, None) for v in u.src_without_body if v.dtype is not dtypes.void]
         src_dtypes = [v.dtype for v in u.src_without_body if v.dtype is not dtypes.void]
         if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
+        if u.op is Ops.ENDIF:
+          exec_masks.pop()
+          i += 1
+          continue
+        if not any(exec_masks[-1]): # NOTE: thread divergence isnt handled
+          i += 1
+          continue
         if u.op is Ops.BACKEDGE:
           i = self.uop_to_index[u.src[1]] if values[u.src[2]][0] else i+1
-          continue
-        if u.op is Ops.END:
-          i = self.uop_to_index[u.src[1]]
           continue
         if u.op is Ops.IF:
           exec_masks.append([x and y for x,y in zip(exec_masks[-1], src_values[0])])
           i += 1
           continue
-        if u.op is Ops.ENDIF:
-          exec_masks.pop()
-          i += 1
-          continue
-        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.CUSTOM_FUNCTION) or (u.op is Ops.RANGE and u.dtype == dtypes.void) or u in env \
+        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.NATIVE) or (u.op is Ops.RANGE and u.dtype == dtypes.void) or u in env \
           or (u.op is Ops.AFTER and u.dtype is dtypes.void):
           # in the python emulator, the warp is always in sync
           i += 1
@@ -123,15 +120,6 @@ class PythonProgram(Program['PythonDevice']):
             scale = v.dtype.itemsize // v.src[0].dtype.itemsize if (v:=u.src[0].without_after).op is Ops.BITCAST else 1
             for m,o in zip(src_values[0], src_values[1]): ret.append((m[0], m[1]+o*scale) if isinstance(m, tuple) else (m, o*scale))
           values[u] = ret
-        elif u.op is Ops.RANGE:
-          if u not in values: values[u] = [0] * warp_size
-          else:
-            for j in range(len(values[u])):
-              values[u][j] += 1
-          if values[u][0] == src_values[0][0]:
-            del values[u]
-            i = self.loop_ends[u] + 1
-            continue
         elif u.op is Ops.STACK: values[u] = src_values
         elif u.op is Ops.BITCAST: values[u] = [bitcast(x, src_dtypes[0], u.dtype) for x in src_values[0]]
         elif u.op is Ops.CAST:
@@ -143,10 +131,11 @@ class PythonProgram(Program['PythonDevice']):
                                for k in range(len(src_values))], j, u.dtype) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
-        elif u in self.fxns: values[u] = [self.fxns[u](env={p: values[u.src[p.arg.slot+1]] for p in u.body.src if p.op is Ops.PARAM})]
+        elif u.op is Ops.CALL and u.body.op is Ops.PROGRAM:
+          values[u] = [self.links[u.body.src[0].arg.function_name](env={p: values[u.src[p.arg.slot+1]] for p in u.body.arg.params})]
         elif u.op is Ops.CALL: # a C function by symbol, linked against the loaded libraries
           restype = None if u.dtype is dtypes.void else getattr(ctypes, f"c_{'u' if u.dtype in dtypes.uints else ''}int{u.dtype.bitsize}")
-          cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.src[0].arg.name, list(DLL._loaded_.values())))
+          cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.body.arg.code, list(DLL._loaded_.values())))
           values[u] = []
           for args,gate in zip(zip(*src_values), exec_masks[-1]):
             call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]
@@ -186,5 +175,6 @@ class PythonRenderer(Renderer):
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d != dtypes.half or sys.version_info >= (3, 12)}
 
 class PythonDevice(Compiled):
+  renderers = [PythonRenderer]
   def __init__(self, device:str):
-    super().__init__(device, HostAllocator(self), [PythonRenderer], PythonProgram)
+    super().__init__(device, HostAllocator(self), PythonProgram)

@@ -5,10 +5,7 @@ AM driver is a userspace driver targeting AMD's RDNA3/RDNA4. You only need tinyg
 ## How to run?
 Make sure that amdgpu module is unloaded and just run tinygrad with `DEV=AMD`!
 
-Optional requirements:
-
-* System without IOMMU for P2P / SDMA support
-* vfio-pci module for IRQ handling
+If the IOMMU translates (not `iommu=pt`), tinygrad drives the GPU through vfio-pci (`sudo modprobe vfio-pci disable_idle_d3=1`).
 
 ## Environment Variables
 

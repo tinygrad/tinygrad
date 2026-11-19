@@ -14,11 +14,8 @@ U = TypeVar("U")
 def prod(x:Iterable[T]) -> T|int: return functools.reduce(operator.mul, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
-OSX, WIN = sys.platform == "darwin", sys.platform == "win32"
+OSX = sys.platform == "darwin"
 BASEDIR = pathlib.Path(__file__).parent
-
-# fix colors on Windows, https://stackoverflow.com/questions/12492810/python-how-can-i-make-the-ansi-escape-codes-to-work-also-in-windows
-if WIN: os.system("")
 
 def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
 def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
@@ -53,6 +50,15 @@ def ansilen(s:str): return len(ansistrip(s))
 def ansipad(s:str, w:int): return s+' '*max(w-ansilen(s), 0)
 def make_tuple(x:int|Sequence[int], cnt:int) -> tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else tuple(x)
 def to_tuple(x:T|tuple[T, ...]) -> tuple[T, ...]: return x if isinstance(x, tuple) else (x,)
+def is_disk_device(device:str|tuple[str, ...]) -> bool: return any(d.split(":", 1)[0].upper() in ("DISK", "NVME") for d in to_tuple(device))
+@functools.cache
+def canonicalize_device_name(device:str) -> str: return re.sub(r":0$", "", (d:=device.split(":", 1)[0].upper()) + device[len(d):])
+def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
+  if device is None:
+    from tinygrad.device import Device  # the default device is selected by opening the devices
+    device = Device.DEFAULT
+  if not isinstance(device, (tuple, list)): return canonicalize_device_name(device)
+  return canonical[0] if len(canonical:=tuple(canonicalize_device_name(d) for d in device)) == 1 else canonical
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fully_flatten(l):
   if not (hasattr(l, "__len__") and hasattr(l, "__getitem__")) or isinstance(l, str): return [l]
@@ -69,7 +75,7 @@ def strip_parens(fst:str) -> str: return fst[1:-1] if fst[:1]=='(' and fst[-1:]=
 def ceildiv(num, amt):
   # use (num + amt - 1) // amt when num is a UOp and non-negative to avoid C/Python division mismatch
   if hasattr(num, 'vmin') and num.vmin >= 0 and (amt > 0 if isinstance(amt, int) else amt.vmin > 0): return (num + amt - 1) // amt
-  return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
+  return math.ceil(num / amt) if any(isinstance(x, float) for x in (num, amt)) else -(num//-amt)
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
 def round_down(num:int, amt:int) -> int: return -round_up(-num, amt)
 def next_power2(x): return 1 if x == 0 else 1 << (x - 1).bit_length()
@@ -154,7 +160,7 @@ def select_first_inited(candidates:Sequence[Callable[...,T]], err_msg:str, cache
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
 # for length N coefficients `p`, returns p[0] * x**(N-1) + p[1] * x**(N-2) + ... + p[-2] * x + p[-1]
-def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
+def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p)  # type: ignore
 
 @functools.cache
 def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
@@ -167,6 +173,8 @@ def getenv(key:str, default:Any=0): return type(default)(os.getenv(key, default)
 
 def temp(x:str, append_user:bool=False) -> str:
   return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{getpass.getuser()}" if append_user else x)).as_posix()
+
+def _has_lib(nm:str): return os.getenv(f"{nm.upper()}_PATH") or any(os.path.isfile(f"/usr/{d}/lib{nm}.so") for d in ("lib", "lib64", "local/lib"))
 
 def stderr_log(msg:str): print(msg, end='', file=sys.stderr, flush=True)
 
@@ -240,7 +248,7 @@ class _DEV(ContextVar):
 DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
 JIT = ContextVar("JIT", 1)
-WINO, CAPTURING, TRACEMETA, NO_COLOR = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1), ContextVar("NO_COLOR", 0)
+WINO, CAPTURING, NO_COLOR = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("NO_COLOR", 0)
 TRAINING = ContextVar("TRAINING", 0)
 USE_TC, TC_SELECT, TC_OPT, TC_MIN_GLOBALS = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("TC_MIN_GLOBALS", 0)
 TRANSCENDENTAL = ContextVar("TRANSCENDENTAL", 1)
@@ -249,7 +257,7 @@ RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0),
 ALLREDUCE_NODE_NDEVS = ContextVar("ALLREDUCE_NODE_NDEVS", 0) # gpus per node, the nodes cabled gpu k to gpu k
 CACHELEVEL, IGNORE_BEAM_CACHE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0)
 VALIDATE_WITH_CPU = ContextVar("VALIDATE_WITH_CPU", 0)
-HCQ_RUNTIME_DEV = _DEV("HCQ_RUNTIME_DEV", "CPU:LLVM")
+HCQ_RUNTIME_DEV = _DEV("HCQ_RUNTIME_DEV", "CPU:TCC" if sys.platform == "linux" and _has_lib("tcc") else "CPU:LLVM")
 # TODO: this is broken for some indexing
 DISABLE_FAST_IDIV = ContextVar("DISABLE_FAST_IDIV", 1)
 FUSE_OPTIM = ContextVar("FUSE_OPTIM", 0)
@@ -280,7 +288,6 @@ PROFILE = ContextVar("PROFILE", abs(VIZ.value))
 SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed
 CHECK_OOB = ContextVar("CHECK_OOB", 0)
-DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
 # set to 1, this uses tuplize in the linearizer sort order
 TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
 # set to 0 to disable the compiler cache
@@ -293,13 +300,6 @@ SCACHE = ContextVar("SCACHE", 1)
 USE_ATOMICS = ContextVar("USE_ATOMICS", 0)
 # don't allow broadcast
 DISALLOW_BROADCAST = ContextVar("DISALLOW_BROADCAST", 0)
-
-@dataclass(frozen=True)
-class Metadata:
-  name: str
-  backward: bool = False
-  def __hash__(self): return hash(self.name)
-  def __str__(self): return self.name + (" bw" if self.backward else "")
 
 # **************** global state Counters ****************
 
@@ -405,7 +405,7 @@ if getenv("DEBUG_GC"):
 cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 
-VERSION = 24
+VERSION = 25
 _db_connection = threading.local()
 def db_connection():
   if (conn:=getattr(_db_connection, "conn", None)) is None:
@@ -434,17 +434,14 @@ def diskcache_get(table:str, key:dict|str|int) -> Any:
   if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
   return None
 
-_db_tables: set[str] = set()
 def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
   if CACHELEVEL < 1: return val
   if isinstance(key, (str,int)): key = {"key": key}
   conn = db_connection()
   cur = conn.cursor()
-  if table not in _db_tables:
-    TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
-    ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
-    cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
-    _db_tables.add(table)
+  TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
+  ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
+  cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
   cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key))}, ?)",
               tuple(key.values()) + (val if prepickled else pickle.dumps(val),))
   conn.commit()
@@ -579,7 +576,6 @@ def to_mv(ptr:int, sz:int) -> memoryview: return memoryview((ctypes.c_uint8 * sz
 def mv_address(mv): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
 def to_char_p_p(options: list[bytes], to_type=ctypes.c_char):
   return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
-def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
 
 # *** tqdm
 

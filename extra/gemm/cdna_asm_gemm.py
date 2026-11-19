@@ -59,7 +59,7 @@ def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp,
                   arg=KernelInfo(f"mxfp4_gemm_{M}_{N}_{K}_{tile_m}x{tile_n}",
                                  estimates=Estimates(ops=2*M*N*K, mem=(M*half_k+N*half_k)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
   insts = build_kernel(M, N, K, tile_m, tile_n)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in insts))))
 
 def _mxfp4_gemm_quantized(a_q:Tensor, b_q:Tensor, scale_a:Tensor, scale_b:Tensor) -> Tensor:
   M, half_k = a_q.shape
@@ -144,9 +144,9 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   K2, N = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2
-  m = UOp.range(M, 1)
-  n = UOp.range(N, 2)
-  k = UOp.range(K, 0, AxisType.LOOP)
+  m = UOp.range(M, 1, AxisType.WEAK)
+  n = UOp.range(N, 2, AxisType.WEAK)
+  k = UOp.range(K, 0)
   mul = (A.flatten().index((m*UOp.const(K)+k))*
          B.flatten().index((k*UOp.const(N)+n))).cast(dtypes.float32)
   red = mul.reduce(k, arg=Ops.ADD).cast(C.dtype)

@@ -44,9 +44,9 @@ class TestPcodePDF(unittest.TestCase):
       "if SCC then\nD0.i32 = 32'I(signext(SIMM16.i16))\nendif")
 
   def test_swizzle_spans_blocks_and_pages(self):
-    for arch in ('rdna3', 'rdna4'):
+    for arch, opcode in (('rdna3', 53), ('rdna4', 53), ('cdna', 61)):
       with self.subTest(arch=arch):
-        code = self.pcode[arch][('DS_SWIZZLE_B32', 53)]
+        code = self.pcode[arch][('DS_SWIZZLE_B32', opcode)]
         self.assertIn('} elsif (offset >= 0xc000) {', code)
         self.assertIn('thread_out[i+3]', code)
         self.assertIn('xor_mask = offset[14:10];', code)

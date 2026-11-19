@@ -291,6 +291,7 @@ class NVDriver(VirtDriver):
         self.track_address(st.params.pMemory, st.params.pMemory + st.params.limit + 1,
                            lambda mv,off: None, lambda mv, off: self._gpu_mmio_write(mv, off, None))
     return 0
+  def progress(self): self._gpu_mmio_write(None, 0, None)
   def _gpu_mmio_write(self, mv, off, gpu):
     if self._executing: return  # prevent re-entrancy
     self._executing = True

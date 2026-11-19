@@ -24,7 +24,7 @@ def custom_elementwise_addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp) -> UOp:
 
 def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   assert A.shape[1] == B.shape[0]
-  i, j, k = UOp.range(C.shape[0], 0), UOp.range(C.shape[1], 1), UOp.range(A.shape[1], 2, axis_type=AxisType.LOOP)
+  i, j, k = UOp.range(C.shape[0], 0), UOp.range(C.shape[1], 1), UOp.range(A.shape[1], 2)
   C = C[i, j].set(0.0)
   prog = C[i, j].store(C.after(k)[i, j] + A[i, k] * B[k, j]).end(k).end(i, j)
   return prog.sink(arg=KernelInfo(name=f"custom_gemm_{C.shape[0]}_{C.shape[1]}_{A.shape[1]}", opts_to_apply=()))
@@ -47,7 +47,7 @@ class TestCustomKernel(unittest.TestCase):
   def test_upcast_split_range(self):
     # j%2 splits j into two UPCAST ranges, the expander expands both, so no loop is left
     def kernel(C:UOp, A:UOp) -> UOp:
-      i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.UPCAST)
+      i, j = UOp.range(4, 0, AxisType.WEAK), UOp.range(8, 1, AxisType.UPCAST)
       return C[i, j].store(A[i, j] + (j%2).cast(A.dtype)).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
     ast = Tensor.custom_kernel(Tensor.empty(4, 8), Tensor.empty(4, 8), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
@@ -58,7 +58,7 @@ class TestCustomKernel(unittest.TestCase):
     ren = AMDLLVMRenderer(Target("AMD", arch="gfx1100"))
     i, tc = next((i, tc) for i, tc in enumerate(ren.tensor_cores) if tc.dtype_in is dtypes.half and tc.dtype_out is dtypes.float)
     def kernel(ACC:UOp, A:UOp, B:UOp) -> UOp:
-      t, j, k = UOp.range(A.shape[0], 0, AxisType.LOOP), UOp.range(B.shape[1], 1), UOp.range(A.shape[1], 2)
+      t, j, k = UOp.range(A.shape[0], 0), UOp.range(B.shape[1], 1, AxisType.WEAK), UOp.range(A.shape[1], 2, AxisType.WEAK)
       mm = (A[t, k] * B[k, j]).cast(dtypes.float).reduce(k, arg=Ops.ADD)
       return ACC[j].store(ACC.after(t)[j] + mm).end(t).end(j).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.TC, 0, (i, 0, 1)),)))
     N, M, K = tc.dims
@@ -66,10 +66,22 @@ class TestCustomKernel(unittest.TestCase):
     ast = Tensor.custom_kernel(acc, a, b, fxn=kernel)[0].schedule_linear().src[-1].src[0]
     with self.assertRaises(KernelOptError): to_program(ast, ren)
 
+  def test_index_wmma_after_range(self):
+    # a WMMA is a shaped value that stays shaped, its index lowers with the AFTER outside
+    ren = AMDLLVMRenderer(Target("AMD", arch="gfx1100"))
+    tc = ren.tensor_cores[0]
+    def kernel(B:UOp) -> UOp:
+      lane = UOp.range(tc.threads, 0, AxisType.LOCAL)
+      a, b = (UOp.const((1,)*2**len(f[1]), tc.dtype_in) for f in (tc.frag_a, tc.frag_b))
+      c = UOp.const((0,)*2**len(tc.frag_c[1]), tc.dtype_out)
+      return B[lane].store(UOp.wmma(a, b, c, tc.dims, tc.threads).after(lane).index(0)).end(lane).sink(arg=KernelInfo(opts_to_apply=()))
+    ast = Tensor.custom_kernel(Tensor.empty(tc.threads, dtype=tc.dtype_out), fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    self.assertEqual(len([u for u in to_program(ast, ren).src[1].src if u.op is Ops.WMMA]), 1)
+
   def test_split_loop_local_barrier(self):
     # t%2 splits the t loop. tmp is stored and loaded in the loop, so the end of the loop still needs a barrier
     def kernel(C:UOp, A:UOp) -> UOp:
-      l, t = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1, AxisType.LOOP)
+      l, t = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1)
       tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
       v = tmp.after(tmp[l].store(A[t%2, l]))[(l+1)%4]
       return C[l].store(C.after(t)[l] + v).end(t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
@@ -80,7 +92,7 @@ class TestCustomKernel(unittest.TestCase):
   def test_loop_local_barrier_inner_loop_load(self):
     # tmp is loaded inside the k loop. the end of the t loop still needs a barrier, and it leaves no range open
     def kernel(C:UOp, A:UOp) -> UOp:
-      l, t, k = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1, AxisType.LOOP), UOp.range(4, 2)
+      l, t, k = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1), UOp.range(4, 2)
       tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
       v = tmp.after(tmp[l].store(A[t, l]))[k].reduce(k, arg=Ops.ADD)
       return C[l].store(C.after(t)[l] + v).end(t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
@@ -92,14 +104,15 @@ class TestCustomKernel(unittest.TestCase):
   def test_local_barrier_after_ended_loop(self):
     # tmp is read after the k loop that stored it. the barrier before the read leaves no range open
     def kernel(C:UOp, A:UOp) -> UOp:
-      k = UOp.range(4, 0, AxisType.LOOP)
+      k = UOp.range(4, 0)
       tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
       tmp = tmp.after(k)[k].set(A[k], end=k)
       return C[0].store(tmp[0]).sink(arg=KernelInfo(opts_to_apply=()))
     ast = Tensor.custom_kernel(Tensor.empty(1), Tensor.empty(4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     prg = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100")))
-    self.assertEqual(prg.ranges, {})
-    self.assertEqual(len([u for u in prg.src[1].src if u.op is Ops.BARRIER]), 1)
+    barriers = [u for u in prg.src[1].src if u.op is Ops.BARRIER]
+    self.assertEqual(len(barriers), 1)
+    self.assertEqual(barriers[0].ranges, {})
 
   def test_gemm_qkv(self):
     B, N, K_DIM, H_KV, REP, D = 2, 7, 6, 2, 2, 6

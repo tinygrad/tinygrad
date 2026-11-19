@@ -17,7 +17,7 @@ The `UOp` graph specifies the compute in terms of low level tinygrad ops. Not al
 
 ## Scheduling
 
-The [scheduler](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/schedule/__init__.py) converts the graph of UOps into a `LINEAR` UOp whose `src` is a list of `CALL` UOps. One `CALL` is one kernel on the GPU, and the scheduler is responsible for breaking the large compute graph into subgraphs that can fit in a kernel. The `CALL`'s `src[0]` (a `SINK` ast) specifies what compute to run, and the remaining `src` are the buffers to run it on.
+The [scheduler](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/codegen/__init__.py) converts the graph of UOps into a `LINEAR` UOp whose `src` is a list of `CALL` UOps. One `CALL` is one kernel on the GPU, and the scheduler is responsible for breaking the large compute graph into subgraphs that can fit in a kernel. The `CALL`'s `src[0]` (a `SINK` ast) specifies what compute to run, and the remaining `src` are the buffers to run it on.
 
 ## Lowering
 

@@ -3,7 +3,6 @@ import unittest
 from tinygrad import Tensor, Device, Variable, dtypes
 from tinygrad.helpers import fetch, round_up
 from tinygrad.engine.realize import compile_linear
-from tinygrad.runtime.support.hcq2 import HCQInfo
 from tinygrad.uop.ops import Ops
 from extra.hevc.hevc import parse_hevc_file_headers, nv_gpu
 from extra.hevc.decode import hevc_decode
@@ -100,8 +99,8 @@ class TestHevc(unittest.TestCase):
 
     compiled = compile_linear(decoded.linear_with_vars()[0])
     self.assertTrue(all(call.without_after.body.op is Ops.PROGRAM for call in compiled.src))
-    self.assertEqual(sum("enc/dec" in k[1] for c in compiled.src if isinstance(c.without_after.arg.aux, HCQInfo)
-                         for k in c.without_after.arg.aux.kernels), 1)
+    self.assertEqual(sum("enc/dec" in k[1] for c in compiled.src if c.without_after.arg.hcq is not None
+                         for k in c.without_after.arg.hcq.kernels), 1)
     self.assertIn("ENCDEC:0", Device["NV"].fifos)
 
 if __name__ == "__main__":

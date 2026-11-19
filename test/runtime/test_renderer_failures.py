@@ -55,5 +55,12 @@ class TestCStyleFailures(unittest.TestCase):
     ret = _setup_and_test_alu(Ops.MAX, 1, UOp.const(dtypes.int.min+1).cast(dtypes.int))
     self.assertEqual(ret[0], 1)
 
+  def test_neg_is_parenthesized(self):
+    # "--x" is a decrement and "x--x" does not parse
+    for f, expected in [(lambda x: x.alu(Ops.NEG).alu(Ops.NEG), 5), (lambda x: x.alu(Ops.SUB, x.alu(Ops.NEG)), 10)]:
+      a, b = UOp.param(0, dtypes.int, 1), UOp.param(1, dtypes.int, 1)
+      sink = UOp(Ops.SINK, src=(UOp.store(a.index(UOp.const(0)), f(b.index(UOp.const(0)).load())),), arg=KernelInfo())
+      self.assertEqual(_test_uop_result([Tensor([5], dtype=dtypes.int)], sink)[0][0], expected)
+
 if __name__ == '__main__':
   unittest.main()

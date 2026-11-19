@@ -1,5 +1,6 @@
 import functools, struct
-from tinygrad.device import BufferStorage, Compiled, Allocator, BufferSpec, Program, TinyELF
+from tinygrad.device import BufferStorage, Compiled, Allocator, BufferSpec, Program
+from tinygrad.renderer import TinyELF
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up, suppress_finalizing, getenv, to_mv
@@ -51,7 +52,7 @@ AdapterRequestDevice = synchronous(webgpu.enum_WGPURequestDeviceStatus, True)(we
 QueueOnSubmittedWorkDone = synchronous(webgpu.enum_WGPUQueueWorkDoneStatus)(webgpu.wgpuQueueOnSubmittedWorkDone2)
 
 class WebGPUProgram(Program['WebGpuDevice']):
-  def __init__(self, dev:'WebGpuDevice', obj:TinyELF):
+  def __init__(self, dev:'WebGpuDevice', obj:TinyELF, links=None):
     self.dev, self.name, self.signature = dev, to_wgpu_str(obj.name), obj.signature
 
     # Creating shader module
@@ -164,6 +165,7 @@ class WebGpuAllocator(Allocator['WebGpuDevice']):
   def _free(self, storage:BufferStorage, options:BufferSpec): self.dev.free(storage.buf)
 
 class WebGpuDevice(Compiled):
+  renderers = [WGSLRenderer]
   def __init__(self, device:str):
     # Requesting an adapter
     adapter_res = InstanceRequestAdapter(instance, webgpu.WGPURequestAdapterOptions(
@@ -187,7 +189,7 @@ class WebGpuDevice(Compiled):
 
     webgpu.wgpuAdapterRelease(adapter_res)
 
-    super().__init__(device, WebGpuAllocator(self), [WGSLRenderer], WebGPUProgram,
+    super().__init__(device, WebGpuAllocator(self), WebGPUProgram,
                      arch="shader-f16" * (webgpu.WGPUFeatureName_ShaderF16 in self.features))
 
   def synchronize(self, timeout:int|None=None): QueueOnSubmittedWorkDone(self.queue)

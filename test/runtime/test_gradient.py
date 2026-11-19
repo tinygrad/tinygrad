@@ -1,6 +1,7 @@
 import unittest, math
 import numpy as np
 from tinygrad import Tensor
+from tinygrad.function import function
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, KernelInfo, Ops
 
@@ -17,6 +18,25 @@ class TestTensorGradient(unittest.TestCase):
     x = Tensor([1.0, 2.0, 3.0])
     w = Tensor.randn((3,))
     self.assertListEqual(x.sum().gradient(w)[0].tolist(), [0.0, 0.0, 0.0])
+
+  def test_cast_gradient(self):
+    x = Tensor([-1.3, 0.4, 2.6])
+    z = (x + (2*x).int().float() + (2*x).bool().float() + (3*x).half().float()).sum()
+    self.assertListEqual(z.gradient(x)[0].tolist(), [4.0, 4.0, 4.0])
+
+  def test_stopped_path_skips_opaque_call(self):
+    # a comparison, int cast or DETACH ends the path
+    def kernel(o:UOp, a:UOp) -> UOp: return o[0].store(a[0].cast(o.dtype)).sink(arg=KernelInfo())
+    x = Tensor([3.5])
+    for v in (x < 4, x.int(), x.detach()):
+      y = Tensor.empty(1).custom_kernel(v.contiguous(), fxn=kernel)[0]
+      self.assertListEqual((y + x).sum().gradient(x)[0].tolist(), [1.0])
+
+  def test_non_target_arg_skips_opaque_call(self):
+    def kernel(o:UOp, a:UOp) -> UOp: return o[0].store(a[0]).sink(arg=KernelInfo())
+    f = function(lambda a, b: a + Tensor.empty(1).custom_kernel(b, fxn=kernel)[0])
+    x = Tensor([3.5])
+    self.assertListEqual(f(x, Tensor([2.0])).sum().gradient(x)[0].tolist(), [1.0])
 
   def test_with_custom_gradient(self):
     x = Tensor([1.0, 2.0, 3.0])
@@ -118,7 +138,7 @@ class TestTensorGradient(unittest.TestCase):
     self.assertAlmostEqual(dp.item(), 7*math.cos(0.5), places=5)
 
   def test_max_backward_many_ties(self):
-    t = Tensor.ones(70000, dtype=dtypes.half).contiguous()
+    t = Tensor.ones(70000, dtype=dtypes.bfloat16).contiguous()
     np.testing.assert_allclose(t.max().gradient(t)[0].sum().numpy(), 1.0, atol=1e-3)
 
 class TestMultiOutputGradient(unittest.TestCase):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import time, mmap, sys, shutil, os, glob, subprocess, argparse, collections
+import time, mmap, sys, shutil, os, glob, subprocess, argparse, collections, fcntl
 from tinygrad.helpers import DEBUG, NO_COLOR, colored, ansilen
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.am import am
@@ -91,6 +91,7 @@ class SMICtx:
     self.devs = []
     self.opened_pcidevs = []
     self.opened_pci_resources = {}
+    self.lock_fds = {}
     self.prev_lines_cnt = 0
     self.prev_terminal_width = 0
     self.prev_terminal_height = 0
@@ -142,6 +143,11 @@ class SMICtx:
     for d in [f[8:-5] for f in glob.glob(pattern)]:
       if d.startswith("usb"): continue
       if self.dev_filter is not None and d != self.dev_filter: continue
+      if d not in self.lock_fds: self.lock_fds[d] = os.open(f"/tmp/am_{d}.lock", os.O_RDONLY)
+      try: fcntl.lockf(self.lock_fds[d], fcntl.LOCK_SH | fcntl.LOCK_NB)
+      except OSError: # the driver is resetting the gpu, no mmio until it is done
+        self.devs, self.opened_pcidevs = [x for x in self.devs if x.pcibus != d], [x for x in self.opened_pcidevs if x != d]
+        continue
       if d not in self.opened_pcidevs:
         self._open_am_device(d)
 
@@ -417,6 +423,7 @@ if __name__ == "__main__":
     while True:
       smi_ctx.rescan_devs()
       smi_ctx.draw(args.list)
+      for fd in smi_ctx.lock_fds.values(): fcntl.lockf(fd, fcntl.LOCK_UN)
       if args.list: break
       time.sleep(1)
   except KeyboardInterrupt:

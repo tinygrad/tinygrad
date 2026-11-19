@@ -3,21 +3,18 @@ from typing import Any
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import prod, getenv, dedup, TUPLE_ORDER
+from tinygrad.helpers import getenv, dedup, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
   lst = list(sink.toposort())
   out_degree:defaultdict[UOp, int] = defaultdict(int)
-  priorities:dict[UOp, tuple[int, int, int, Any]] = {}
+  priorities:dict[UOp, tuple[int, int, Any]] = {}
 
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
     for s in u.src_without_body: out_degree[s] += 1
-
-    # we place UOps with higher run_counts later
-    run_count = prod([int(r.vmax)+1 for r in u.ranges])
 
     # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
     extra = None
@@ -27,10 +24,10 @@ def linearize(sink:UOp) -> list[UOp]:
       case Ops.BUFFER | Ops.ALLOC: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18
       case Ops.LOAD: priority = -1    # place loads early
       case Ops.STORE: priority = 1    # place stores late
-      case Ops.RANGE: priority = 5    # placing RANGE is good
-      case Ops.END | Ops.BACKEDGE: priority = -5     # placing loop exits is bad
+      case Ops.RANGE | Ops.IF: priority = 5    # placing control-flow openers late is good
+      case Ops.END | Ops.BACKEDGE | Ops.ENDIF: priority = -5     # placing control-flow exits early is good
       case _: priority = 0            # everything else has priority 0
-    priorities[u] = (run_count, len(u.ranges), priority, extra)
+    priorities[u] = (len(u.ranges), priority, extra)
 
   # number the uops in "ideal" order
   nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if TUPLE_ORDER else ())))}
@@ -64,9 +61,9 @@ class CFGContext:
       deps[u] = {}
       for s in u.src_without_body: deps[u] |= deps[s]
 
-      if u.op in (Ops.END, Ops.BACKEDGE, Ops.SINK):
+      if u.op in (Ops.END, Ops.ENDIF, Ops.BACKEDGE, Ops.SINK):
         nesting |= {x:u for x in deps[u] if x.op in (Ops.END, Ops.BACKEDGE) and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
-      if u.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE): deps[u][u] = None
+      if u.op in (Ops.IF, Ops.RANGE, Ops.END, Ops.BACKEDGE, Ops.ENDIF): deps[u][u] = None
 
     self.edges: dict[UOp, UOp] = {}
     siblings: dict[UOp, list[UOp]] = {}

@@ -8,9 +8,9 @@ from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.viz.serve import load_amd_counters, VizData
-from tinygrad.renderer.amd.sqtt import decode, print_packets
+from tinygrad.renderer.amd.sqtt import decode, print_packets, map_insts, IMMEDIATE_MASK
 from tinygrad.renderer.amd.dsl import s, v
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, DEV
 
 @contextlib.contextmanager
 def save_sqtt():
@@ -92,7 +92,7 @@ def custom_asm_rdna(A:UOp):
 def custom_asm(A, insts, num_threads, lds_size=0) -> UOp:
   lds = UOp.placeholder((lds_size,), dtypes.uint8, addrspace=AddrSpace.LOCAL) if lds_size else None
   return UOp(Ops.PROGRAM, src=(UOp.sink(A, lds, UOp.special(num_threads, "lidx0"), arg=KernelInfo("asm")), \
-      UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS,arg=(x,dtypes.void)) for x in insts]))))
+      UOp(Ops.LINEAR, src=tuple([UOp.native(x).call() for x in insts]))))
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "only runs on AMD")
 class TestSQTTProfiler(unittest.TestCase):
@@ -144,6 +144,18 @@ class TestSQTTProfiler(unittest.TestCase):
     with Context(SQTT_LIMIT_SE=1), save_sqtt():
       Tensor.empty(1).custom_kernel(fxn=functools.partial(setprio_kernel, priority=3))[0].realize()
       Tensor.empty(1).custom_kernel(fxn=functools.partial(setprio_kernel, priority=0))[0].realize()
+
+  def test_immediate_mask(self):
+    if not self.arch.startswith("gfx11") or DEV.interface.startswith("MOCK"): self.skipTest("needs RDNA3 hardware")
+    from tinygrad.runtime.autogen.amd.rdna3 import ins as isa
+    # the two waves on SIMD 0 leave the barrier together and retire the s_nop in one IMMEDIATE_MASK packet
+    insts = [isa.s_barrier(), isa.s_delay_alu(1), isa.s_nop(0), isa.s_endpgm()]
+    with save_sqtt() as data:
+      Tensor.empty(1).custom_kernel(fxn=lambda A: custom_asm(A, insts, 32*4))[0].realize()
+    prgs = {e.tag:e for e in data if isinstance(e, ProfileProgramEvent)}
+    masked = [info.inst for e in data if isinstance(e, ProfileSQTTEvent) and e.itrace
+              for p, info in map_insts(e.blob, prgs[e.kern].lib, self.arch) if isinstance(p, IMMEDIATE_MASK)]
+    self.assertEqual(masked, [isa.s_nop(0), isa.s_nop(0)])
 
   def test_multiple_runs(self):
     t = Tensor.empty(1) + 1

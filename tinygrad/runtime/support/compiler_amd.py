@@ -1,5 +1,5 @@
 import ctypes, hashlib, tempfile, subprocess, pathlib
-from tinygrad.helpers import amdgpu_disassemble, getenv
+from tinygrad.helpers import amdgpu_disassemble, getenv, to_char_p_p
 from tinygrad.runtime.autogen import comgr
 try:
   comgr.amd_comgr_get_version(ctypes.byref(major:=ctypes.c_uint64()), ctypes.byref(minor:=ctypes.c_uint64()))
@@ -8,9 +8,8 @@ try:
     import tinygrad.runtime.autogen.comgr_3 as comgr # type: ignore[no-redef]
     assert comgr.AMD_COMGR_LANGUAGE_HIP == 3
 except AttributeError: pass  # ignore if ROCm isn't installed
-from tinygrad.device import Compiler, CompileError
+from tinygrad.renderer import Compiler, CompileError
 from tinygrad.runtime.support import c
-from tinygrad.helpers import to_char_p_p
 
 def check(status):
   if status != 0:

@@ -101,5 +101,12 @@ class TestUSBMMIOInterface(unittest.TestCase):
     self.assertEqual(list(raw), values)
     self.assertEqual(list(usb3.mem[4:8]), values)
 
+  def test_pcimem_view(self):
+    usb3 = MockUSB(bytearray(self.size))
+    mmio_pci = USBMMIOInterface(usb3, 0, self.size, fmt='B', pcimem=True)
+    mmio_pci[8:16] = [1, 2, 3, 4, 5, 6, 7, 8]
+    qword_view = mmio_pci.view(fmt='Q')[:]
+    self.assertEqual(qword_view[1], int.from_bytes(mmio_pci[8:16], 'little'))
+
 if __name__ == "__main__":
   unittest.main()

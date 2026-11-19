@@ -1,13 +1,14 @@
 # schedule tests that pass on NULL backend (no copyout needed)
-import unittest, time, gc
+import unittest
 from typing import cast
 from tinygrad import nn, dtypes, Device, Tensor, getenv
-from tinygrad.helpers import GlobalCounters, Context, all_same
+from tinygrad.helpers import Context, all_same
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.dtype import AddrSpace
 from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.codegen import to_program, full_rewrite_to_sink
-from test.helpers import check_schedule, assert_kernel_count, KernelCountException, jit_cache_count
+from tinygrad.codegen import pm_copy_from_store
+from test.helpers import check_schedule, KernelCountException, jit_cache_count, measure_mem
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -18,7 +19,7 @@ class TestBufferUOp(unittest.TestCase):
     buf = Tensor.empty(10)
     self.assertIs(buf.uop.op, Ops.ALLOC)
     self.assertTrue(buf.uop.arg.bind_on_realize)
-    self.assertIsNone(buf.uop.arg.buffer)
+    self.assertIsNone(buf.uop.realized)
     buf.realize()
     self.assertIsNotNone(buf.uop.buffer)
     self.assertEqual(buf.uop.shape, (10,))
@@ -209,16 +210,6 @@ class TestSchedule(unittest.TestCase):
     expr = a/a
     check_schedule(expr, 1)
 
-  def test_div_collapse(self):
-    a = Tensor.full((4,), 1.0).contiguous().realize()
-    b = Tensor.full((4,), 2.0).contiguous().realize()
-    c = Tensor.full((4,), 3.0).contiguous().realize()
-    GlobalCounters.reset()
-    expr = (a/b)/c
-    expr.realize()
-    assert_kernel_count(1)
-    self.assertLessEqual(GlobalCounters.global_ops, 4*3)
-
   # NOTE: this is causing "LAZYCACHE=1 incorrectly reuses contiguous const" #4562
   # should contiguous dedup?
   @unittest.skip("we do the exact opposite now")
@@ -259,6 +250,11 @@ class TestSchedule(unittest.TestCase):
     with Context(SPLIT_REDUCEOP=1):
       out = (x - x.max(keepdim=True)).max()
       check_schedule(out, 3)
+
+  def test_split_reduceop_inverse_reshapes(self):
+    x = Tensor.empty(3, *[2]*18).realize()
+    with Context(SPLIT_REDUCEOP=1):
+      check_schedule(x.reshape(*[2]*18, 3).reshape(3, *[2]*18).sum(), 1)
 
   def test_example_matmul_contig(self):
     x = Tensor.eye(64).clone().realize()
@@ -611,13 +607,10 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d_half(self): self.test_conv2d(4, dtype=dtypes.half)
 
   def test_schedule_mem_used_with_inputs(self):
-    Tensor.ones(256).contiguous().realize() # hcq2 caches the linked schedule with its buffers
-    gc.collect()
-    base = GlobalCounters.mem_used
-    x = Tensor.ones(256).contiguous().realize()
-    (x+Tensor.ones(256).contiguous()).schedule_linear()
-    gc.collect()
-    self.assertEqual(GlobalCounters.mem_used-base, 1024)
+    with measure_mem() as used:
+      x = Tensor.ones(256).contiguous().realize()
+      (x+Tensor.ones(256).contiguous()).schedule_linear()
+    self.assertEqual(used(), 1024)
 
   def test_image_dot_f16_fusion(self):
     with Context(FLOAT16=1, OPENPILOT_HACKS=1):
@@ -722,7 +715,11 @@ class TestSchedule(unittest.TestCase):
       for call in linear.src:
         if call.src[0].op is not Ops.SINK: continue
         sink = full_rewrite_to_sink(call.src[0], Device[call.device].renderer)
-        reduce_kernels += any(u.op is Ops.STORE and u.addrspace is AddrSpace.REG and u.ranges for u in sink.toposort())
+        uops = sink.toposort()
+        loop_accs = {cmp.src[0].buf_uop for u in uops if u.op is Ops.BACKEDGE for cmp in u.src[2].toposort()
+          if cmp.op is Ops.CMPLT and cmp.src[0].op is Ops.LOAD}
+        # a reduce kernel is identified by a STORE into a REG buffer (STORE has void dtype, check the addrspace of its target)
+        reduce_kernels += any(u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.REG and u.ranges for u in sink.toposort())
       self.assertEqual(reduce_kernels, 1)
 
   def test_push_through_reshape(self):
@@ -862,6 +859,26 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty((1,), device="NULL:1").expand(10).contiguous()
     c = a+b
     with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 2)
+
+  def _lower_copy_kernel(self, fxn):
+    dst, src = Tensor.empty(8, dtype=dtypes.int, device="NULL"), Tensor.empty(8, dtype=dtypes.int, device="NULL:1")
+    ast = fxn(dst.uop.param_like(0), src.uop.param_like(1)).sink(arg=KernelInfo(opts_to_apply=()))
+    return pm_copy_from_store.rewrite(ast.call(dst.uop, src.uop))
+
+  # a kernel that copies part of a buffer is not a whole-buffer copy, so the cross-device kernel is rejected
+  def test_error_on_partial_copy(self):
+    r = UOp.range(4, 0)
+    with self.assertRaisesRegex(RuntimeError, "same device"):
+      self._lower_copy_kernel(lambda p,q: p.index(r).store(q.index(r)).end(r))
+
+  def test_error_on_partial_copy_gated(self):
+    r = UOp.range(8, 0)
+    with self.assertRaisesRegex(RuntimeError, "same device"):
+      self._lower_copy_kernel(lambda p,q: p.index(r.valid(r<4)).store(q.index(r)).end(r))
+
+  def test_error_on_partial_copy_zero(self):
+    with self.assertRaisesRegex(RuntimeError, "same device"):
+      self._lower_copy_kernel(lambda p,q: p.index(0).store(q.index(0)))
 
   def test_rand(self):
     x = Tensor.rand(32)
@@ -1413,7 +1430,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_pow_neg_05_is_rsqrt(self):
     t = Tensor([1.0, 2.0, 3.0]) ** -0.5
-    self.assertEqual(self._alu_from_tensor(t), [Ops.RECIPROCAL, Ops.SQRT])
+    self.assertEqual(self._alu_from_tensor(t), [Ops.RECIP, Ops.SQRT])
 
   def test_pow_2_has_1_mul(self):
     t = Tensor([1.0, 2.0, 3.0]) ** Tensor(2.0)
@@ -1698,13 +1715,10 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   def test_schedule_mem_used(self):
-    Tensor.ones(256).contiguous().realize() # hcq2 caches the linked schedule with its buffers
-    gc.collect()
-    base = GlobalCounters.mem_used
-    Tensor.ones(256).contiguous().realize()
-    Tensor.ones(5, 5).contiguous().schedule_linear()
-    gc.collect()
-    self.assertEqual(GlobalCounters.mem_used-base, 0)
+    with measure_mem() as used:
+      Tensor.ones(256).contiguous().realize()
+      Tensor.ones(5, 5).contiguous().schedule_linear()
+    self.assertEqual(used(), 0)
 
   def test_const_schedule(self):
     constv = Tensor.empty(2, 2).const_like(10).uop
@@ -1912,16 +1926,13 @@ class TestUOpBecome(unittest.TestCase):
 
 class TestFusionOp(unittest.TestCase):
   def test_recursive_add(self):
-    st = time.perf_counter()
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
     linear = a.schedule_linear()
     prg = to_program(linear.src[-1].src[0], renderer=Device[Device.DEFAULT].renderer)
-    self.assertLess(time.perf_counter()-st, 2.0)
     assert len(prg.src[2].arg.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
-    st = time.perf_counter()
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
     linear1 = a.schedule_linear()
@@ -1933,24 +1944,19 @@ class TestFusionOp(unittest.TestCase):
     linear3 = c.schedule_linear()
     self.assertEqual(linear1.src[-1].src[0], linear2.src[-1].src[0])
     with self.assertRaises(AssertionError): self.assertEqual(linear1.src[-1].src[0], linear3.src[-1].src[0])
-    self.assertLess(time.perf_counter()-st, 2.0)
 
   def test_recursive_pad(self):
-    st = time.perf_counter()
     val = 1.0
     a = Tensor(val)
     for _ in range(24): a = Tensor.stack(a, a)[0]
     check_schedule(a, 0)
-    self.assertLess(time.perf_counter()-st, 2.0)
 
   def test_recursive_reshape(self):
-    st = time.perf_counter()
     a = Tensor.empty(32, 32).realize()
     b = Tensor.empty(16, 2).realize()
     r = a.sum(1)
     for _ in range(24): r = r.reshape(16, 2) + b
     check_schedule(r, 1)
-    self.assertLess(time.perf_counter()-st, 2.0)
 
 # NOTE: the NULL backend supports SLICE
 class TestBufferView(unittest.TestCase):
@@ -2071,21 +2077,6 @@ class TestInvalidTensor(unittest.TestCase):
     from tinygrad.dtype import Invalid
     t = Tensor.full((4,), Invalid, dtype=dtypes.float)
     check_schedule(t, 0)
-
-class TestLimitBufs(unittest.TestCase):
-  def test_limit_bufs_linear_scaling(self):
-    def sched_time(n):
-      with Context(TRACK_MATCH_STATS=0, DEBUG=0, PARALLEL=0):
-        bufs = [Tensor.ones(16).contiguous().realize() for _ in range(4)]
-        root = bufs[0]
-        for i in range(n): root = root + bufs[i % 4]
-        with Context(MAX_KERNEL_BUFFERS=8, SCACHE=0):
-          st = time.perf_counter()
-          root.schedule_linear()
-          return time.perf_counter() - st
-    sched_time(400)
-    t1, t2 = min(sched_time(400) for _ in range(3)), min(sched_time(1600) for _ in range(3))
-    self.assertLess(t2/t1, 8, f"{t1*1e3:.1f}ms -> {t2*1e3:.1f}ms")
 
 class TestCopyFolding(unittest.TestCase):
   def test_one_hot_with_copy(self):

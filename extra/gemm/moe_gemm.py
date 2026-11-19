@@ -101,11 +101,12 @@ def custom_grouped_mx_gemm_bw(gradient:UOp, kernel:UOp, w_stored:bool=False) -> 
 
 def grouped_mx_gemm_backward(g:Tensor, aq:Tensor, ae8:Tensor, bq:Tensor, be8:Tensor, expert_off:Tensor, *,
                              w_stored:bool=False, quantized_gradient:tuple[Tensor, Tensor]|None=None) -> tuple[Tensor, Tensor]:
+  from extra.gptoss_kernels.transpose_requantize import transpose_requantize_mxfp8
   E, N = bq.shape[:2]
   g = g.reshape(aq.shape[0], N).cast(dtypes.bfloat16)
   x_phys = (aq.cast(dtypes.bfloat16) * _mx_block_scale(ae8).cast(dtypes.bfloat16))
-  w_phys = (bq.cast(dtypes.bfloat16) * _mx_block_scale_3d(be8).cast(dtypes.bfloat16))
-  grad_x = grouped_mx_gemm(g if quantized_gradient is None else quantized_gradient, w_phys.transpose(1, 2), expert_off)
+  w_transposed = transpose_requantize_mxfp8(bq, be8)
+  grad_x = grouped_mx_gemm(g if quantized_gradient is None else quantized_gradient, w_transposed, expert_off)
   grad_w = grouped_mx_wgrad(g, x_phys, expert_off, E)
   grad_xq = grad_x * _mx_block_scale(ae8).cast(dtypes.bfloat16)
   grad_wq = grad_w.contiguous() if w_stored else (grad_w * _mx_block_scale_3d(be8).cast(dtypes.bfloat16)).contiguous()
@@ -113,14 +114,14 @@ def grouped_mx_gemm_backward(g:Tensor, aq:Tensor, ae8:Tensor, bq:Tensor, be8:Ten
 
 _grouped_bw_stored = functools.partial(custom_grouped_mx_gemm_bw, w_stored=True)
 
-def grouped_mx_gemm(x:Tensor|tuple[Tensor, Tensor], w:Tensor|tuple[Tensor, Tensor], expert_off:Tensor) -> Tensor:
+def grouped_mx_gemm(x:Tensor|tuple[Tensor, Tensor], w:Tensor|tuple[Tensor, Tensor]|tuple[Tensor, Tensor, Tensor], expert_off:Tensor) -> Tensor:
   if isinstance(x, tuple):
     x_q, x_e8 = x
     x_si, x = mx_pack(x_e8), x_q
   else:
     x_q, x_e8, x_si = quantize_mxfp8(x)
   if (pre_quantized := isinstance(w, tuple)):
-    w_q, w_e8 = w
+    w_q, w_e8 = w[:2]
     E, N, K2 = w_q.shape
   else:
     E, N, K2 = w.shape
@@ -130,7 +131,7 @@ def grouped_mx_gemm(x:Tensor|tuple[Tensor, Tensor], w:Tensor|tuple[Tensor, Tenso
   assert M % 256 == 0 and N % 256 == 0 and K % 128 == 0, f"grouped mxfp8 needs M%256,N%256,K%128, got {M,K,N}"
   dname = (x.device[0] if isinstance(x.device, tuple) else x.device).split(":")[0]
   if not pre_quantized: w_q, w_e8, _ = quantize_mxfp8(w)
-  w_si = mx_pack_3d(w_e8)
+  w_si = w[2] if pre_quantized and len(w) == 3 else mx_pack_3d(w_e8)
   xe_in, out_shape = x_e8.reshape(M, K // 32), (M, N)
   if isinstance(x.device, tuple) and (row_axis := x.uop.axis) is not None:
     ndev = len(x.device)

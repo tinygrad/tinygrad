@@ -16,15 +16,15 @@ class Ops(FastEnum):
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
 
-  # BUFFER references bound storage; ALLOC declares unbound global storage
-  BUFFER = auto(); ALLOC = auto()
+  # BUFFER references bound storage; ALLOC declares unbound global storage; EXTERN is storage from outside an exported function
+  BUFFER = auto(); ALLOC = auto(); EXTERN = auto()
 
   # ** 2 -- non op uops **
 
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
   # CALL is a kernel invocation; value-producing calls write to ALLOC arguments
-  PARAM = auto(); CALL = auto()
+  PARAM = auto(); REFPARAM = auto(); CALL = auto()
 
   # renderer
   # LINEAR is a list of UOps, SOURCE has a str arg that's human readable, BINARY has bytes arg that's compiled
@@ -54,14 +54,14 @@ class Ops(FastEnum):
 
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto()
-  SQRT = auto(); RECIPROCAL = auto(); NEG = auto(); TRUNC = auto()
+  SQRT = auto(); RECIP = auto(); NEG = auto(); TRUNC = auto()
 
   # BinaryOps
-  ADD = auto(); MUL = auto(); SHL = auto(); SHR = auto(); CDIV = auto(); MAX = auto(); CMOD = auto()
+  ADD = auto(); MUL = auto(); SHL = auto(); SHR = auto(); TRUNCDIV = auto(); MAX = auto(); TRUNCMOD = auto()
   CMPLT = auto(); CMPNE = auto(); CMPEQ = auto()
   XOR = auto(); OR = auto(); AND = auto()
   THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto()
-  FLOORDIV = auto(); FLOORMOD = auto()
+  DIV = auto(); MOD = auto()
 
   # TernaryOps
   WHERE = auto(); MULACC = auto()
@@ -75,19 +75,13 @@ class Ops(FastEnum):
   # const.
   CONST = auto()
 
-  # CUSTOM/CUSTOMI are used to output strings into codegen. the I makes the string inline
-  CUSTOM = auto(); CUSTOMI = auto()
-
-  # INS is a machine instruction
-  INS = auto()
-
   # ** 6 -- ops that don't exist in programs **
 
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
   # buffer ops
-  STAGE = auto(); COPY = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
+  STAGE = auto(); COPY = auto(); MSELECT = auto(); MSTACK = auto(); NATIVE = auto()
 
   # the core 5 movement ops! these only exist in the tensor graph
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto()
@@ -97,30 +91,40 @@ class Ops(FastEnum):
   REDUCE = auto(); ALLREDUCE = auto()
 
   # ** 7 -- pattern compiler IR (used in upat.py) **
-  # PYLITERAL carries a Python literal as an arg for CUSTOM predicates
+  # PYLITERAL carries a Python literal as an arg for custom predicates
   PYLITERAL = auto()
 
 class GroupOp:
-  Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}
-  Binary = {Ops.ADD, Ops.MUL, Ops.CDIV, Ops.MAX, Ops.CMOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ,
-            Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW, Ops.FLOORDIV, Ops.FLOORMOD}
+  Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG, Ops.TRUNC}
+  Binary = {Ops.ADD, Ops.MUL, Ops.TRUNCDIV, Ops.MAX, Ops.TRUNCMOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ,
+            Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW, Ops.DIV, Ops.MOD}
   Ternary = {Ops.WHERE, Ops.MULACC}
   ALU = set.union(Unary, Binary, Ternary)
   Broadcastable = set.union(Binary, Ternary)
 
   # TODO: is BITCAST always Elementwise if it's shape changing?
   Elementwise = set.union(ALU, {Ops.CAST, Ops.BITCAST})
+  UnaryElementwise = Unary | {Ops.CAST}
 
-  Defines = {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}
+  Defines = {Ops.PARAM, Ops.REFPARAM, Ops.BUFFER, Ops.ALLOC, Ops.EXTERN, Ops.BINARY}
 
   Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM, Ops.GETADDR}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK}
+  # ops with a shape from the shape of src[0] and the arg
+  ShapeChanging = Movement | {Ops.UNSHARD, Ops.REDUCE}
+
+  # ops with the dtype of their first src, and ops with the promoted dtype of their srcs. the other ops are in dtype_from_uop
+  PassthroughDType = {Ops.LOAD, Ops.UNSHARD, Ops.REDUCE, Ops.AFTER, Ops.RANGE, Ops.CONTIGUOUS_BACKWARD, Ops.COPY, Ops.STAGE, Ops.DETACH,
+                      Ops.MSTACK, Ops.MSELECT, Ops.ALLREDUCE, Ops.SPECIAL, Ops.END, Ops.NEG, Ops.TRUNC} | Movement
+
+  # ops that may have a side effect each time they run
+  Effect = {Ops.STORE, Ops.CALL, Ops.BARRIER}
 
   # BinaryOps that can be flipped
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.CMPEQ, Ops.XOR, Ops.AND, Ops.OR}
 
   # BinaryOps where f(f(a,b),c) = f(a,f(b,c))
-  Associative = {Ops.ADD, Ops.MUL, Ops.AND, Ops.OR, Ops.MAX}
+  Associative = {Ops.ADD, Ops.MUL, Ops.AND, Ops.OR, Ops.MAX, Ops.XOR}
 
   # BinaryOps that satisfy f(x,x)=x see https://en.wikipedia.org/wiki/Idempotence
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}
@@ -130,5 +134,6 @@ class GroupOp:
 
   # These can change the dtype to bool
   Comparison = {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}
+  PromoteDType = Broadcastable - Comparison - {Ops.WHERE, Ops.THREEFRY, Ops.FDIV, Ops.SHL, Ops.SHR}
 
   All = set(Ops)

@@ -2,10 +2,13 @@ from __future__ import annotations
 import ctypes, time, array, struct, itertools, dataclasses
 from typing import cast, Any
 from tinygrad.runtime.autogen import nv, nv_570 as nv_gpu, pci
-from tinygrad.helpers import lo32, hi32, DEBUG, round_up, round_down, fetch_fw, wait_cond, ceildiv
+from tinygrad.helpers import lo32, hi32, DEBUG, round_up, round_down, fetch, getenv, wait_cond, ceildiv
 from tinygrad.runtime.support.system import System
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.elf import elf_loader
+
+fw_src = "https://github.com/tinygrad/open-gpu-kernel-modules/releases/download/firmware-570.190"
+def fetch_nv_fw(arch:str, name:str, sha256:str) -> bytes: return fetch(f"{fw_src}/{arch}-{name}", subdir="fw", sha256=sha256).read_bytes()
 
 @dataclasses.dataclass(frozen=True)
 class GRBufDesc: size:int; virt:bool; phys:bool; local:bool=False # noqa: E702
@@ -171,7 +174,7 @@ class NV_FLCN(NV_IP):
   def prep_booter(self):
     sha = {"ga102":"4497e3eff7e95c774b8a569d17b27c08c9650158d10b229d2be81cdcad9a085b",
            "ad102":"8b293e19b637c5e22c87a2428d1c71bb13e0904e8a88ac6b3c6c1f2679c6e37a"}[self.nvdev.fw_name]
-    h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{self.nvdev.fw_name}/gsp", "booter_load-570.144.bin", sha))
+    h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_nv_fw(self.nvdev.fw_name, "booter_load-570.190.bin", sha))
     lh = nv.struct_nvfw_hs_load_header_v2.from_buffer_copy(b, (hs:=nv.struct_nvfw_hs_header_v2.from_buffer_copy(b, h.header_offset)).header_offset)
     app = nv.struct_nvfw_hs_load_header_v2_app.from_buffer_copy(b, hs.header_offset + ctypes.sizeof(nv.struct_nvfw_hs_load_header_v2))
 
@@ -183,8 +186,9 @@ class NV_FLCN(NV_IP):
     _, self.booter_image_paddr, _ = self.nvdev._alloc_boot_mem(len(patched_image), data=patched_image, sysmem=False)
     self.booter_data_off, self.booter_data_sz, self.booter_code_off, self.booter_code_sz = lh.os_data_offset, lh.os_data_size, app.offset, app.size
 
-  def init_hw(self):
+  def init_hw(self) -> bool:
     self.falcon, self.sec2 = 0x00110000, 0x00840000
+    speed_override = getenv("NV_OVERRIDE", 1) and self.nvdev.pci_dev.read_config(pci.PCI_DEVICE_ID, 2) in {0x2203,0x2204,0x2206,0x220a,0x2216,0x2684}
 
     self.reset(self.falcon)
     self.execute_hs(self.falcon, self.frts_image_paddr, code_off=0x0, data_off=self.desc_v3.IMEMLoadSize,
@@ -192,6 +196,20 @@ class NV_FLCN(NV_IP):
       dmemPa=self.desc_v3.DMEMPhysBase, dmemVa=0x0, dmemSz=self.desc_v3.DMEMLoadSize,
       pkc_off=self.desc_v3.PKCDataOffset, engid=self.desc_v3.EngineIdMask, ucodeid=self.desc_v3.UcodeId)
     assert self.nvdev.NV_PFB_PRI_MMU_WPR2_ADDR_HI.read() != 0, "WPR2 is not initialized"
+
+    if needs_mid_reset:=(speed_override and self.nvdev.rreg(0x823804) != 0xffffffff):
+      # unlock FEAT registers
+      code = ([0xffffffff, 0x19c, 0xd44, 0x19c, 0x19c, 0x19c, 0x823804, 0x19c, 0x1fce, 0x19c, 0x19c, 0x0, 0x19c, 0x1101, 0x84c8, 0x8e18, 0x19c,
+               0x84c8, 0x0, 0x19c, 0x1fce, 0x19c, 0x19c, 0xffbc, 0x19c, 0x5789, 0x19c, 0x19c, 0x19c, 0xd44, 0x19c, 0x19c, 0x19c, 0x3, 0x19c, 0x1fce,
+               0x19c, 0x19c, 0x19c, 0x19c, 0xd52, 0x81ee, 0x19c, 0x19c, 0x19c, 0x19c] if self.nvdev.chip_name.startswith("GA1") else
+              [0xfffff0ff, 0x19c, 0x21b2, 0x19c, 0x19c, 0x19c, 0x1fa7cc, 0x19c, 0x33fc, 0x19c, 0x19c, 0xffffffff, 0x19c, 0x256f, 0x7a02, 0x9a0148,
+               0x19c, 0x33fc, 0x19c, 0x19c, 0xffffffff, 0x19c, 0x256f, 0x7a02, 0x1fa7c4, 0x19c, 0x33fc, 0x19c, 0x19c, 0xffffffff, 0x19c, 0x256f,
+               0x7a02, 0x823804, 0x19c, 0x33fc, 0x19c, 0x19c, 0x67b00001, 0x19c, 0x256f, 0x7a02, 0x19c, 0x19c, 0x31b5, 0x771e])
+      desc = bytes(array.array('I', [7 if i == 0x1100 else 0x19c for i in range(0, 0xf948, 4)] + code))
+      _, _, desc_addrs = self.nvdev._alloc_boot_mem(len(desc), data=desc, contiguous=True)
+      meta = nv.GspFwWprMeta.from_buffer_copy(bytes(self.nvdev.gsp.wpr_meta[:ctypes.sizeof(nv.GspFwWprMeta)]))
+      meta.sysmemAddrOfSignature, meta.sizeOfSignature = desc_addrs[0], len(desc)
+      self.nvdev.gsp.wpr_meta[:ctypes.sizeof(meta)] = bytes(meta)
 
     self.reset(self.falcon, riscv=True)
 
@@ -203,11 +221,19 @@ class NV_FLCN(NV_IP):
     self.reset(self.sec2)
     mbx = self.execute_hs(self.sec2, self.booter_image_paddr, code_off=self.booter_code_off, data_off=self.booter_data_off,
       imemPa=0x0, imemVa=self.booter_code_off, imemSz=self.booter_code_sz, dmemPa=0x0, dmemVa=0x0, dmemSz=self.booter_data_sz,
-      pkc_off=0x10, engid=1, ucodeid=3, mailbox=self.nvdev.gsp.wpr_meta_sysmem)
-    assert mbx[0] == 0x0, f"Booter failed to execute, mailbox is {mbx[0]:08x}, {mbx[1]:08x}"
+      pkc_off=0x10, engid=1, ucodeid=3, mailbox=self.nvdev.gsp.wpr_meta_sysmem,
+      wait_for=(lambda: self.nvdev.rreg(0x823804) == 0xffffffff) if needs_mid_reset and self.nvdev.chip_name.startswith("GA1") else None)
+    assert needs_mid_reset or mbx[0] == 0x0, f"Booter failed to execute, mailbox is {mbx[0]:08x}, {mbx[1]:08x}"
+    if needs_mid_reset: return True
+
+    if speed_override:
+      for off, val in (regs:={0x82381c:0x88888888, 0x823820:0x8}).items(): self.nvdev.wreg(off, val)
+      assert all(self.nvdev.rreg(off) == v for off, v in regs.items()) and \
+        (self.nvdev.chip_name.startswith("GA1") or not self.nvdev.rreg(0x823818) & 0x07ffffff), "FEAT not latched"
 
     self.nvdev.NV_PFALCON_FALCON_OS.with_base(self.falcon).write(0x0)
     assert self.nvdev.NV_PRISCV_RISCV_CPUCTL.with_base(self.falcon).read_bitfields()['active_stat'] == 1, "GSP Core is not active"
+    return False
 
   def execute_dma(self, base:int, cmd:int, dest:int, mem_off:int, src:int, size:int):
     wait_cond(lambda: self.nvdev.NV_PFALCON_FALCON_DMATRFCMD.with_base(base).read_bitfields()['full'], value=0, msg="DMA does not progress")
@@ -233,7 +259,8 @@ class NV_FLCN(NV_IP):
 
   def wait_cpu_halted(self, base): wait_cond(lambda: self.nvdev.NV_PFALCON_FALCON_CPUCTL.with_base(base).read_bitfields()['halted'], msg="not halted")
 
-  def execute_hs(self, base, img_paddr, code_off, data_off, imemPa, imemVa, imemSz, dmemPa, dmemVa, dmemSz, pkc_off, engid, ucodeid, mailbox=None):
+  def execute_hs(self, base, img_paddr, code_off, data_off, imemPa, imemVa, imemSz, dmemPa, dmemVa, dmemSz, pkc_off, engid, ucodeid,
+                 mailbox=None, wait_for=None):
     self.disable_ctx_req(base)
 
     # target=0 is FB (not in published headers)
@@ -259,7 +286,8 @@ class NV_FLCN(NV_IP):
       self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).write(hi32(mailbox))
 
     self.start_cpu(base)
-    self.wait_cpu_halted(base)
+    if wait_for is None: self.wait_cpu_halted(base)
+    else: wait_cond(wait_for, msg="Firmware did not complete")
 
     if mailbox is not None:
       return self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(base).read(), self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).read()
@@ -300,8 +328,8 @@ class NV_FLCN_COT(NV_IP):
     self.init_fmc_image()
 
   def init_fmc_image(self):
-    _, sections, _ = elf_loader(fetch_fw(f"nvidia/{self.nvdev.fw_name}/gsp", "fmc-570.144.bin",
-                                         "cb59a35c1d4bd1274d7267fd10243c29f843ff41c851b9cbd59f5af2ddd7fece"))
+    _, sections, _ = elf_loader(fetch_nv_fw(self.nvdev.fw_name, "fmc-570.190.bin",
+                                            "e0950cdd16fe7045adbce11543f5b6d13146fca89e78158a9ab07d28dcbe576a"))
     def _section(s): return next((sh.content for sh in sections if sh.name == s))
     self.fmc_booter_image, self.fmc_booter_hash = _section("image"), memoryview(_section("hash")).cast('I')
     self.fmc_booter_sig, self.fmc_booter_pkey = memoryview(_section("signature")).cast('I'), memoryview(_section("publickey") + b"\x00" * 3).cast('I')
@@ -399,7 +427,7 @@ class NV_GSP(NV_IP):
     libos_args_view[:sum(ctypes.sizeof(s) for s in libos_structs)] = b''.join(bytes(s) for s in libos_structs)
 
   def init_gsp_image(self):
-    _, sections, _ = elf_loader(fetch_fw("nvidia/ga102/gsp", "gsp-570.144.bin", "a8c3ebeed280323aedb51c061f321e73379cce7a9ae643a33dd03915df027f7f"))
+    _, sections, _ = elf_loader(fetch_nv_fw("ga102", "gsp-570.190.bin", "eb92d12eef04eafac12e31f50ebef097aa236cb389ac651496f8f12e38d1aadd"))
     self.gsp_image = next((sh.content for sh in sections if sh.name == ".fwimage"))
     signature = next((sh.content for sh in sections if sh.name == (f".fwsignature_{self.nvdev.chip_name[:4].lower()}x")))
 
@@ -425,8 +453,8 @@ class NV_GSP(NV_IP):
   def init_boot_binary_image(self):
     sha = {"ga102":"82428f532240727e95bb3083fbaaba9b2cc7b937314323f2d546ce7245f27fad",
            "ad102":"65ab2e6b6e0fca95365c4deac79a34582abcfeb15b6ae234138f22e7183118a8",
-           "gb202":"d40b48e431d1707dc77af3605db358ed7a32ebfc2830eb74de2eddb4d3025071"}[self.nvdev.fw_name]
-    h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{self.nvdev.fw_name}/gsp", "bootloader-570.144.bin", sha))
+           "gb202":"e5e505fb453bcd618a4966464aa601e97a1ced2b1d450cab5bcb69e4043dc7f2"}[self.nvdev.fw_name]
+    h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_nv_fw(self.nvdev.fw_name, "bootloader-570.190.bin", sha))
     self.booter_image, self.booter_desc = b[h.data_offset:h.data_offset+h.data_size], nv.RM_RISCV_UCODE_DESC.from_buffer_copy(b, h.header_offset)
     _, _, booter_addrs = self.nvdev._alloc_boot_mem(len(self.booter_image), data=self.booter_image)
     self.booter_bar1 = booter_addrs[0]
@@ -442,7 +470,7 @@ class NV_GSP(NV_IP):
       'bootloaderManifestOffset': self.booter_desc.manifestOffset, 'revision':nv.GSP_FW_WPR_META_REVISION, 'magic':nv.GSP_FW_WPR_META_MAGIC}
 
     if self.nvdev.fmc_boot:
-      m = nv.GspFwWprMeta(**common, vgaWorkspaceSize=0x20000, pmuReservedSize=0x1820000, nonWprHeapSize=0x220000, gspFwHeapSize=0x8700000,
+      m = nv.GspFwWprMeta(**common, vgaWorkspaceSize=0x20000, pmuReservedSize=0x1820000, nonWprHeapSize=0x230000, gspFwHeapSize=0x8700000,
         frtsSize=0x100000)
     else:
       m = nv.GspFwWprMeta(**common, vgaWorkspaceSize=(vga_sz:=0x100000), vgaWorkspaceOffset=(vga_off:=self.nvdev.vram_size-vga_sz),

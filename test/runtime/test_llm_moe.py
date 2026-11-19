@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from dataclasses import replace
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
 from tinygrad.llm.model import ExpertGating, TransformerBlock, TransformerConfig
 
 def _moe_config(dim=8, hidden=16, n_heads=2, num_experts=4, num_experts_per_tok=2):
@@ -122,6 +122,25 @@ class TestMoEFeedForward(unittest.TestCase):
         if norm_topk_prob: weights /= weights.sum()
         expected = (weights * (sel + 1)).sum() / (1 + np.exp(-1))
         np.testing.assert_allclose(out, expected, rtol=1e-3)
+
+  def test_moe_feed_forward_expert_groups(self):
+    # groups tie on top-2 sum, only the first group (zero gate) is kept
+    block = TransformerBlock(replace(_moe_config(), expert_gating_func=ExpertGating.SOFTMAX_WEIGHT, expert_bias=True,
+                                     expert_group_count=2, expert_group_used=1))
+    block.ffn_gate_inp.weight = Tensor([[0.625, 0.375, 0.75, 0.25]] * 8).T / 8
+    block.ffn_gate_exps.weight = Tensor([0.0, 0.0, 1.0, 1.0]).reshape(4, 1, 1).expand(4, 16, 8)
+    block.ffn_up_exps.weight, block.ffn_down_exps.weight = Tensor.ones(4, 16, 8), Tensor.ones(4, 8, 16)
+    np.testing.assert_equal(block._feed_forward(Tensor.ones(1, 1, 8)).numpy(), 0)
+
+  def test_moe_feed_forward_expert_hash(self):
+    # hash routed: the experts come from tid2eid by token, the router (tied scores) is ignored, only experts 2 and 3 have a nonzero gate
+    block = TransformerBlock(replace(_moe_config(), expert_hash=True))
+    block.ffn_gate_inp.weight = Tensor.zeros(4, 8)
+    block.ffn_gate_tid2eid["weight"] = Tensor([[0, 0]] * 5 + [[3, 2], [0, 0], [0, 0]], dtype=dtypes.int32)
+    block.ffn_gate_exps.weight = Tensor([0.0, 0.0, 1.0, 1.0]).reshape(4, 1, 1).expand(4, 16, 8)
+    block.ffn_up_exps.weight, block.ffn_down_exps.weight = Tensor.ones(4, 16, 8), Tensor.ones(4, 8, 16)
+    out = block._feed_forward(Tensor.ones(1, 2, 8), Tensor([[5, 7]])).numpy()
+    np.testing.assert_allclose(out[0, :, 0], [8 / (1 + np.exp(-8)) * 8 * 16 / 2, 0], rtol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()

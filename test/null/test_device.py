@@ -2,8 +2,9 @@
 import unittest, os, subprocess
 from unittest.mock import patch
 from tinygrad import Tensor, dtypes
-from tinygrad.device import Device, Compiler, enumerate_devices_str
-from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, WIN, OSX, DEV
+from tinygrad.device import Device, enumerate_devices_str, select_renderer
+from tinygrad.renderer import Compiler
+from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, OSX, DEV, CACHELEVEL
 from tinygrad.runtime.support.c import DLL
 
 class TestDevice(unittest.TestCase):
@@ -71,7 +72,6 @@ class TestDevice(unittest.TestCase):
     result = subprocess.run(['python3', '-c', 'import runpy, tinygrad; runpy.run_module("tinygrad.device")'], capture_output=True)
     self.assertEqual(result.returncode, 0, result.stderr.decode())
 
-  @unittest.skipIf(WIN, "skipping windows test") # TODO: subprocess causes memory violation?
   def test_env_overwrite_default_compiler(self):
     if Device.DEFAULT == "CPU":
       from tinygrad.runtime.support.compiler_cpu import ClangCompiler
@@ -103,7 +103,6 @@ class TestDevice(unittest.TestCase):
                         shell=True, check=True, env={**os.environ, "DEV": "AMD:HIP"})
     else: self.skipTest("only run on CPU/AMD")
 
-  @unittest.skipIf(WIN, "skipping windows test")
   def test_env_online(self):
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
@@ -127,7 +126,8 @@ class TestDevice(unittest.TestCase):
     except Exception as e: self.skipTest(f"skipping: LLVM not available: {e}")
 
     dev = Device["CPU"]
-    dev.cached_renderer.clear()
+    select_renderer.cache_clear()
+    self.addCleanup(select_renderer.cache_clear)
     with patch("tinygrad.renderer.cstyle.ClangRenderer.__init__", side_effect=RuntimeError("broken")):
       self.assertIsInstance(dev.renderer.compiler, CPULLVMCompiler)
 
@@ -142,6 +142,12 @@ class TestDevice(unittest.TestCase):
     with Context(DEV="PYTHON"): self.assertEqual(Tensor.empty(1).device, "PYTHON")
     with Context(DEV="NULL"): self.assertEqual(Tensor.empty(1).device, "NULL")
     self.assertEqual(Tensor.empty(1).device, orig_dev)
+
+  def test_const_doesnt_need_default_device(self):
+    # finding the default device can open every device, a const (like the 1 in x+1) has no device and doesn't need it
+    with patch.object(type(Device), "DEFAULT", property(lambda _: self.fail("looked up the default device"))):
+      Tensor(1.0)
+      Tensor.empty(3, device="NULL") + 1
 
 class TestDevVar(unittest.TestCase):
   def test_parse(self):
@@ -167,6 +173,16 @@ class TestDevVar(unittest.TestCase):
       self.assertEqual(DEV.target("AMD"), Target("AMD", "LLVM"))
       self.assertEqual(DEV.target("CPU"), Target("CPU"))
 
+  def test_select_renderer(self):
+    # a renderer is built from a Target alone, its device isn't opened
+    with Context(ALLOW_DEVICE_USAGE=0):
+      ren = select_renderer(Target("NULL", "WGSL"))
+      self.assertEqual(type(ren).__name__, "WGSLRenderer")
+      self.assertIs(select_renderer(Target("NULL", "WGSL")), ren)
+      self.assertEqual(type(select_renderer(Target("PYTHON"))).__name__, "PythonRenderer")
+      with self.assertRaisesRegex(RuntimeError, "has no renderer"): select_renderer(Target("PYTHON", "LLVM"))
+      with self.assertRaisesRegex(RuntimeError, "DISK has no renderers"): select_renderer(Target("DISK"))
+
   def test_dev_arch_override(self):
     with Context(DEV="NULL::gfx1100"):
       self.assertEqual(Device["NULL"].renderer.target.arch, "gfx1100")
@@ -176,6 +192,7 @@ class MockCompiler(Compiler):
   def compile(self, src) -> bytes: return src.encode()
 
 class TestCompiler(unittest.TestCase):
+  @unittest.skipIf(CACHELEVEL < 1, "disk cache is off")
   def test_compile_cached(self):
     diskcache_put("key", "123", None) # clear cache
     getenv.cache_clear()

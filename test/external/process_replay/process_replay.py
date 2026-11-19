@@ -10,6 +10,7 @@ if not int(os.getenv("ASSERT_PROCESS_REPLAY", "1")): ASSERT_DIFF = 0
 
 try:
   from tinygrad.renderer import Renderer
+  from tinygrad.renderer.x86 import X86Renderer
   from tinygrad.codegen import to_program
   from tinygrad.uop.ops import UOp, Ops
   from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
@@ -38,6 +39,7 @@ SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE"
 # uncomment this to disable by default
 #SKIP_PROCESS_REPLAY = not ASSERT_DIFF and not ((k:="[p]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", ""))
 if REF == "master": SKIP_PROCESS_REPLAY = True
+if REF == "update_benchmark": SKIP_PROCESS_REPLAY = "[pr]" not in os.getenv("COMMIT_MESSAGE", "").lower()
 class ProcessReplayWarning(Warning): pass
 
 # *** replay the function and convert return values to string
@@ -52,8 +54,15 @@ def replay_to_program(p:UOp, ast:UOp, renderer:Renderer) -> tuple[str, str, tupl
   device = renderer.target.device
   def to_str(ret:UOp) -> str:
     src = next(x.arg for x in ret.src if x.op is Ops.SOURCE)
+    if isinstance(renderer, X86Renderer):
+      import capstone
+      return "\n".join(f"{i.mnemonic} {i.op_str}" for i in capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64).disasm(bytes.fromhex(src), 0))
     # PYTHON renderer pickles UOps, first unpickle and decode here
-    if device.startswith("PYTHON"): return "\n".join([str(x) for x in pickle.loads(base64.b64decode(src))])
+    # a nested PROGRAM prints its LINEAR, its SOURCE/BINARY are pickles of that LINEAR whose bytes depend on object identity
+    if device.startswith("PYTHON"):
+      uops = pickle.loads(base64.b64decode(src))
+      pickles = {u:u.replace(arg=None) for u in UOp.sink(*uops).toposort(enter_calls=True) if u.op in (Ops.SOURCE, Ops.BINARY)}
+      return "\n".join([str(x.substitute(pickles, enter_calls=True)) for x in uops])
     return src
   # properly color the name arg
   ast_repr = codecs.decode(str(input_ast), "unicode_escape")
@@ -64,12 +73,12 @@ replayers["do_to_program"] = replay_to_program
 
 # *** run replayers on captured rows and print diffs
 
-def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
+def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]], table_name=TABLE_NAME) -> None:
   if ASSERT_DIFF: warnings.filterwarnings("error", category=ProcessReplayWarning)
   if early_stop.is_set(): return None
   conn = db_connection()
   cur = conn.cursor()
-  cur.execute(f"SELECT val FROM '{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
+  cur.execute(f"SELECT val FROM '{table_name}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
   changed = 0
   for row in cur.fetchall():
     if changed > MAX_DIFF_PCT:
@@ -100,28 +109,32 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
 
 # *** generic runner to map rows of a table to a function in parallel
 
-def _pmap(fxns:dict[str, Callable]) -> None:
+def _pmap(fxns:dict[str, Callable], table_name:str=TABLE_NAME) -> None:
   conn = db_connection()
   cur = conn.cursor()
-  try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
+  try: row_count = cur.execute(f"select count(*) from '{table_name}'").fetchone()[0]
   except sqlite3.OperationalError:
-    raise RuntimeError(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
+    raise RuntimeError(f"{table_name} isn't accessible in master, did DB_VERSION change?")
   finally:
     cur.close()
 
   with ProcessPoolExecutor(multiprocessing.cpu_count(), mp_context=multiprocessing.get_context("spawn")) as pool:
     with tqdm(total=row_count) as bar:
-      for _ in pool.map(functools.partial(diff, fxns=fxns), range(0, row_count, s:=min(PAGE_SIZE, row_count))): bar.update(min(s, row_count-bar.n))
+      for _ in pool.map(functools.partial(diff, fxns=fxns, table_name=table_name), range(0, row_count, s:=min(PAGE_SIZE, row_count))):
+        bar.update(min(s, row_count-bar.n))
 
 # *** main loop
 
-if __name__ == "__main__":
+def main(fxns:dict[str, Callable], table_name:str=TABLE_NAME) -> None:
   if SKIP_PROCESS_REPLAY:
     logging.info("skipping process replay.")
     exit(0)
 
   logging.info(f"running process replay with {ASSERT_DIFF=}")
-  try: _pmap(replayers)
+  try: _pmap(fxns, table_name)
   except Exception as e:
     logging.info(f"process replay err: {e}")
     exit(int(ASSERT_DIFF))
+
+if __name__ == "__main__":
+  main(replayers)

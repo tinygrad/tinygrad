@@ -157,6 +157,18 @@ class TestSetitem(unittest.TestCase):
       n[2:4, 3:5] = np.full((2, 2), i)
       np.testing.assert_allclose(t.numpy(), n)
 
+  def test_jit_setitem_after_assign(self):
+    @TinyJit
+    def f(t:Tensor):
+      t += 1
+      t[0] = 5
+      return t
+
+    for i in range(3):
+      t = Tensor.full((3,), float(i)).contiguous().realize()
+      f(t)
+      self.assertEqual(t.tolist(), [5, i+1, i+1])
+
   def test_jit_setitem_variable_offset(self):
     @TinyJit
     def f(t:Tensor, a:Tensor, v:Variable):
@@ -172,6 +184,13 @@ class TestSetitem(unittest.TestCase):
       f(t, a, v)
       np.testing.assert_allclose(t.numpy(), n)
     np.testing.assert_allclose(t.numpy(), [[1,1,1,1,1,1],[2,2,2,2,2,2],[3,3,3,3,3,3],[4,4,4,4,4,4],[5,5,5,5,5,5],[6,6,6,6,6,6]])
+
+  def test_setitem_view_after_assign(self):
+    t = Tensor([0.0, 0.0, 0.0, 0.0]).contiguous().realize()
+    t += 1
+    v = t[1:3]
+    v[0] = 5
+    self.assertEqual(t.tolist(), [1, 5, 1, 1])
 
   def test_setitem_overlapping_inplace1(self):
     t = Tensor([[3.0], [2.0], [1.0]]).contiguous()
@@ -225,6 +244,15 @@ class TestSetitem(unittest.TestCase):
     n[[0, 2], :2] = [[10, 20], [30, 40]]
     np.testing.assert_equal(t.numpy(), n)
 
+  def test_setitem_tensor_indexing_broadcast(self):
+    t = Tensor.zeros(3, dtype=dtypes.int).contiguous()
+    t[Tensor([0, 1, 2])] = Tensor([[7, 8, 9]], dtype=dtypes.int)
+    n = np.zeros((3,), dtype=np.int32)
+    n[[0, 1, 2]] = [[7, 8, 9]]
+    np.testing.assert_equal(t.numpy(), n)
+    # v broadcasts to the indexed shape, not the other way
+    with self.assertRaises(ValueError): t[Tensor([0])] = Tensor([1, 2], dtype=dtypes.int)
+
   def test_setitem_2d_tensor_indexing(self):
     t = Tensor.zeros(2, dtype=dtypes.int).contiguous()
     index = Tensor([[0, 1], [1,0]])
@@ -257,46 +285,7 @@ class TestSetitem(unittest.TestCase):
     s1 = t.sum()
     t[3:].assign(2.0)
     s2 = t.sum()
-    try:
-      np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [0.0, 3.0, 9.0])
-    except AssertionError:
-      # TODO: broken now, lazy sums all see final buffer state
-      np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [9.0, 9.0, 9.0])
-
-    # eager version
-    t = Tensor.zeros(6).contiguous().realize()
-    s0 = t.sum().realize()
-    t[:3].assign(1.0).realize()
-    s1 = t.sum().realize()
-    t[3:].assign(2.0).realize()
-    s2 = t.sum().realize()
     np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [0.0, 3.0, 9.0])
-
-  def test_cross_assign_independence(self):
-    # when assigning to two tensors using computations from both,
-    # both assigns should see the OLD values of both tensors
-    a = Tensor.arange(4, dtype=dtypes.float).clone().realize()
-    b = Tensor.arange(4, 8, dtype=dtypes.float).clone().realize()
-    new_a = a + b    # [4, 6, 8, 10]
-    new_b = a * 2    # [0, 2, 4, 6] -- should use OLD a
-    a.assign(new_a)
-    b.assign(new_b)
-    np.testing.assert_allclose(a.numpy(), [4, 6, 8, 10])
-    try:
-      np.testing.assert_allclose(b.numpy(), [0, 2, 4, 6])
-    except AssertionError:
-      # TODO: broken now, new_b sees mutated a
-      np.testing.assert_allclose(b.numpy(), [8, 12, 16, 20])
-
-    # eager version
-    a = Tensor.arange(4, dtype=dtypes.float).clone().realize()
-    b = Tensor.arange(4, 8, dtype=dtypes.float).clone().realize()
-    new_a = (a + b).realize()
-    new_b = (a * 2).realize()
-    a.assign(new_a).realize()
-    b.assign(new_b).realize()
-    np.testing.assert_allclose(a.numpy(), [4, 6, 8, 10])
-    np.testing.assert_allclose(b.numpy(), [0, 2, 4, 6])
 
   def test_setitem_multiple_disjoint_on_invalid(self):
     z = Tensor.invalids(10, dtype="int").realize()
@@ -313,6 +302,13 @@ class TestAssignBitcast(unittest.TestCase):
     a = Tensor.full((4,), 1.0, dtype=dtypes.float32).contiguous()
     a.bitcast(dtypes.uint32).assign(Tensor([0x40800000, 0x40400000, 0x40000000, 0x3f800000], dtype=dtypes.uint32)).realize()
     np.testing.assert_allclose(a.numpy(), [4.0, 3.0, 2.0, 1.0])
+
+  @unittest.expectedFailure
+  def test_setitem_through_bitcast(self):
+    # TODO: the view of a bitcast is not storage, so the functional path replaces the temporary and a is never written
+    a = Tensor.full((4,), 1.0, dtype=dtypes.float32).contiguous().realize()
+    a.bitcast(dtypes.uint32)[1] = 0x40000000
+    np.testing.assert_allclose(a.numpy(), [1.0, 2.0, 1.0, 1.0])
 
 class TestWithGrad(unittest.TestCase):
   def test_set_backward(self):

@@ -1,16 +1,73 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
-from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
+from dataclasses import dataclass, field, replace
+from typing import Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
-from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
-from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray, prod
-from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ
-from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, PatternMatcher, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
+from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
+from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod
+from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
+from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.mixin.rand import RandMixin
-from tinygrad.schedule import create_linear_with_vars, contiguous_mops_to_view, is_store_after
-from tinygrad.device import Buffer, canonicalize_device, is_disk_device
-from tinygrad.engine.realize import run_linear
+from tinygrad.codegen import create_linear, contiguous_mops_to_view
+from tinygrad.engine.realize import run_linear, capturing
+from tinygrad.device import Buffer
+
+# **** export: storage becomes EXTERN(slot), bound Variables lose their value and ALLOCs get canonical slots. ctx.externs is what's mapped back
+
+@dataclass
+class ExportCtx:
+  externs: dict[UOp, UOp] = field(default_factory=dict)
+  allocs: dict[UOp, UOp] = field(default_factory=dict)
+
+def as_extern(x:UOp, slot:int) -> UOp: return x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=slot, buffer=None, name=None, val=None))
+
+def to_extern(ctx:ExportCtx, x:UOp) -> UOp|None:
+  # realized storage and bound Variables are runtime state
+  if not (x.is_bound_var or (x.op is Ops.BUFFER and x.addrspace is AddrSpace.GLOBAL)): return None
+  return ctx.externs.setdefault(x, as_extern(x, len(ctx.externs)))
+
+# ALLOCs get canonical scope-local id slots so structurally identical calls hash identically for the schedule cache
+# (fresh slots are all positive from the global counter; negative slots are already canonical)
+def canonicalize_alloc(ctx:ExportCtx, b:UOp) -> UOp|None:
+  if b.arg.slot >= 0 and b not in ctx.allocs: ctx.allocs[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.allocs)))
+  return ctx.allocs.get(b)
+
+pm_export: PatternMatcher = PatternMatcher([
+  (UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern),
+  (UPat(Ops.ALLOC, name="b"), canonicalize_alloc),
+  # a call body is its own scope for ALLOC slots, the EXTERNs are shared
+  (UPat(Ops.CALL, name="c"), lambda ctx,c:
+   c.replace(src=(graph_rewrite(c.body, pm_export, ctx=ExportCtx(ctx.externs), bottom_up=True, name="export call body"),)+c.src[1:])),
+])
+
+def bind_alloc(b:UOp) -> UOp:
+  if b.device is None: raise RuntimeError("global storage needs a device, give the ALLOC one")
+  return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
+
+# EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
+def map_back_extern(ctx:tuple[UOp, ...], e:UOp) -> UOp:
+  if e.arg.slot >= len(ctx) or as_extern(x:=ctx[e.arg.slot], e.arg.slot) is not e:
+    got = f"{x.dtype} {x.shape} on {x.device}" if e.arg.slot < len(ctx) else "nothing"
+    raise RuntimeError(f"extern {e.arg.slot} must match its EXTERN, {e.dtype} {e.shape} on {e.device}, got {got}")
+  return x.unbound() if x.is_variable else x
+
+pm_map_back = PatternMatcher([
+  (UPat(Ops.EXTERN, name="e"), map_back_extern),
+  # global ALLOCs are bound to fresh BUFFERs for this invocation
+  (UPat(Ops.ALLOC, name="b"), lambda b: bind_alloc(b) if b.addrspace is AddrSpace.GLOBAL else None),
+])
+
+def map_back(linear:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, dict[str, int]]:
+  # the EXTERNs become the storage and the bound Variables of this invocation, ALLOCs get fresh storage
+  linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, enter_calls=True, name="map back")
+  # the values of the bound Variables the linear uses
+  used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
+  var_vals: dict[str, int] = {}
+  for b in externs:
+    if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
+      raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
+  return linear, var_vals
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -35,6 +92,7 @@ def _tensor_holds(u:UOp) -> bool: return any((t:=tref()) is not None and t.uop i
 # **** Tensor helper functions ****
 
 def _fromnp(x: 'numpy.ndarray') -> UOp:
+  x = x.astype(x.dtype.newbyteorder("="), copy=False)
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
   # fake realize
   ret.buffer.allocate(x)
@@ -59,8 +117,7 @@ class Tensor(RandMixin):
       if isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
       elif isinstance(data, UOp): device = data.device
     _dtype:DType|None = to_dtype(dtype) if dtype is not None else None
-    _device:str|tuple[str, ...] = canonicalize_device(device)
-    del device, dtype
+    del dtype
 
     # tensors can have gradients if you have called .backward
     self.grad:Tensor|None = None
@@ -89,8 +146,8 @@ class Tensor(RandMixin):
     # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
-    # data might be on a different device
-    self.uop:UOp = data if data.device is None or data.device == _device else data.copy_to_device(_device)
+    # data might be on a different device. NOTE: a const has no device, it doesn't need to look up the default device
+    self.uop:UOp = data if data.device is None or data.device == (_device:=canonicalize_device(device)) else data.copy_to_device(_device)
     # cast on the target device, the source may not hold the dtype (numpy has no fp8/bfloat16) or be able to compute it (DISK)
     if _dtype is not None: self.uop = self.uop.cast(_dtype)
 
@@ -102,8 +159,7 @@ class Tensor(RandMixin):
 
   def _apply_uop(self, fxn:Callable[..., UOp], *x:Tensor, **kwargs) -> Tensor:
     srcs = (self,)+x
-    new_uop: UOp = fxn(*[t.uop for t in srcs], **kwargs)
-    if TRACEMETA >= 1 and (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = (metadata,)
+    if (new_uop:=fxn(*[t.uop for t in srcs], **kwargs)) is self.uop: return self
     # directly create the Tensor
     ret = Tensor.__new__(Tensor)
     ret.uop, ret.grad, ret.is_param = new_uop, None, True
@@ -163,9 +219,13 @@ class Tensor(RandMixin):
     """
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
-  @rewrite_group(lambda *tensors,ret: f"Schedule {len(tensors)} -> {len(ret[0].src)}")
-  def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
-    """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
+  @rewrite_group(lambda *tensors,ret,**_: f"Export {len(tensors)} -> {len(ret[1])} externs")
+  def export(self, *lst:Tensor) -> tuple[UOp, tuple[UOp, ...]]:
+    """
+    Gives these Tensor(s) storage and exports the stores into it as a function with no runtime state.
+    Returns the function and, for each EXTERN slot, its storage or bound Variable.
+    The Tensors now reference the storage, it holds their values once the compiled function is passed to `Tensor.run`.
+    """
     sink = UOp.sink(*[t.uop for t in (self,)+lst])
     if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Tensor Graph")
     # weakness ends where storage begins
@@ -200,13 +260,21 @@ class Tensor(RandMixin):
     sink = tensor_map.get(sink, sink)
     # Realized outputs become the storage their AFTER sequenced a store into. Compose with tensor_map before updating
     # Tensors so map values reference final storage.
-    storage = graph_rewrite(stores:=UOp.sink(*(u for u in sink.toposort() if is_store_after(u))), pm_drop_after, bottom_up=True, name="drop after")
+    # the stores are the AFTERs into storage: an AFTER on a BUFFER (an assign) or a STORE into an ALLOC. an ALLOC after a CALL is a call output
+    stores = UOp.sink(*(u for u in sink.toposort()
+                        if u.op is Ops.AFTER and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE)))
+    storage = graph_rewrite(stores, pm_drop_after, bottom_up=True, name="drop after")
     becomes_map = {u:s.shrink_to(u.shape) for u,s in zip(stores.src, storage.src)}
     assert not any(x in becomes_map for x in becomes_map.values())
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
+    fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, name="export")
+    return fn, tuple(ctx.externs)
 
-    return create_linear_with_vars(sink)
+  def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
+    """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
+    fn, externs = self.export(*lst)
+    return map_back(create_linear(fn), externs)
 
   def schedule_linear(self, *lst:Tensor) -> UOp:
     """Creates the schedule needed to realize these Tensor(s)."""
@@ -214,13 +282,22 @@ class Tensor(RandMixin):
     assert len(var_vals) == 0
     return linear
 
+  @staticmethod
+  def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
+    """Runs an exported function compiled to a LINEAR, its EXTERNs are the externs from `Tensor.export`."""
+    linear, var_vals = map_back(linear, externs)
+    # a capturing jit runs its captured linears later
+    if capturing and CAPTURING: capturing[0].add_linear(linear, var_vals)
+    else: run_linear(linear, var_vals, update_stats=do_update_stats)
+
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
     to_realize = [x for x in (self,)+lst if x.uop.base.needs_storage()]
     if len(to_realize):
-      linear, var_vals = Tensor.linear_with_vars(*to_realize)
-      run_linear(linear, var_vals, update_stats=do_update_stats)
+      fn, externs = Tensor.export(*to_realize)
+      # a capturing jit plans the memory of its captured linears together
+      Tensor.run(create_linear(fn, plan=not (capturing and CAPTURING)), externs, do_update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:
@@ -272,7 +349,6 @@ class Tensor(RandMixin):
     return self
 
   def _buffer(self) -> Buffer:
-    from tinygrad.engine.realize import capturing
     if capturing and not getenv("UNSAFE_ALLOW_JIT_BUFFER"):
       from tinygrad.engine.jit import JitError
       raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
@@ -299,29 +375,6 @@ class Tensor(RandMixin):
     assert fmt is not None, f"no fmt dtype for {self.dtype}"
     assert fmt != "e" or sys.version_info >= (3, 12)
     return buf.as_memoryview().cast(fmt, self.shape)  # type: ignore[arg-type,return-value]
-
-  # NOTE: list[Any] because return type is recursive (list[list[...]] for higher dimensions)
-  def tolist(self) -> PyConst|list[Any]:
-    """
-    Returns the value of this tensor as a nested list.
-    Returns single value for const tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3, 4])
-    print(t.tolist())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor(5)
-    print(t.tolist())
-    ```
-    """
-    # TODO: remove half once minimum python supports it
-    if self.dtype in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s): return self.cast(dtypes.float32).tolist()
-    if 0 in self.shape:
-      assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-      def _tolist(shape:tuple[int, ...]): return [_tolist(shape[1:]) for _ in range(shape[0])]
-      return _tolist(self.shape)
-    return self.data().tolist()
 
   def numpy(self) -> 'numpy.ndarray':
     """
@@ -461,14 +514,10 @@ class Tensor(RandMixin):
     if device not in Tensor._device_seeds:
       seed = [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed]
       Tensor._device_seeds[device] = Tensor(seed, device=device, dtype=dtypes.uint32)
-      Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32)
+      Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint64)
     counter = Tensor._device_rng_counters[device]
-    new_low = counter[0:1] + (num & 0xffffffff)
-    new_high = counter[1:2] + (num >> 32) + (new_low < counter[0])
-    counter.assign(new_low.cat(new_high))
-    low = counter[0:1] - (num & 0xffffffff)
-    high = counter[1:2] - (num >> 32) - (counter[0] < (num & 0xffffffff))
-    return Tensor._device_seeds[device], low.cat(high)
+    counter.assign(counter + num)
+    return Tensor._device_seeds[device], (counter - num).bitcast(dtypes.uint32)
 
   # ***** toposort and backward pass *****
 
@@ -514,8 +563,8 @@ class Tensor(RandMixin):
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
     is_disk = self.uop.on_disk()
     advanced = any(isinstance(i, (Tensor, list, tuple)) for i in idx)
-    realized = is_disk or self.uop.base.op in {Ops.BUFFER, Ops.ALLOC} or self.uop._base_buffer_is_realized()
-    if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
+    realized = is_disk or self.uop.base.op in {Ops.BUFFER, Ops.ALLOC} or self.uop.base.without_after.is_realized
+    if not realized and (self.is_floating_point() or not advanced):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.replace(self._getitem(indices, v))
     elif advanced: # advanced setitem
@@ -558,32 +607,20 @@ class Tensor(RandMixin):
     ref_frames = [x.contiguous() for x in ref_frames or []]
     assert frame_pos.is_bound_var, "frame_pos must be a bound Variable"
     srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
-    fn = UOp.custom_function("encdec", frame_pos.unbound(), *[UOp.const(s) for s in shape])
+    fn = UOp.native("encdec", frame_pos.unbound(), *[UOp.const(s) for s in shape])
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
 P = ParamSpec("P")
 T = TypeVar("T")
 
-# this tracks the tensor.py METADATA, contextvars.ContextVar was switched to this due to thread safety issues
-class _ContextVar(Generic[T]):
-  def __init__(self, default:T): self.state:T = default
-  def get(self) -> T: return self.state
-  def set(self, x:T) -> T:
-    ret, self.state = self.state, x
-    return ret
-_METADATA: _ContextVar[Metadata|None] = _ContextVar(default=None)
-
-def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
+def _profile_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
+  @functools.wraps(fn)
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-    if TRACEMETA < 1 or _METADATA.get() is not None: return fn(*args, **kwargs)
-    token = _METADATA.set(Metadata(name=fn.__name__))
+    if not PROFILE: return fn(*args, **kwargs)
     with cpu_profile(TracingKey(fn.__name__), "USER"):
-      ret = fn(*args, **kwargs)
-    _METADATA.set(token)
-    return ret
+      return fn(*args, **kwargs)
   return _wrapper
 
-if TRACEMETA >= 1:
-  for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
-    if name in ["__class__", "__del__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
-    setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
+for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
+  if name in ["__class__", "__del__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
+  setattr(Tensor, name, _profile_wrapper(fn))

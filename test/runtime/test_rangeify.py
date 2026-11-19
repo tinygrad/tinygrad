@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, dtypes, Variable
 from tinygrad.helpers import Context, GlobalCounters, getenv, DEBUG
-from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp
+from tinygrad.uop.ops import UOp
 
 class TestDoubleMatmul(unittest.TestCase):
   def test_double_matmul(self):
@@ -32,6 +32,20 @@ class TestRangeifyEdgeCase(unittest.TestCase):
     v = Variable("v", 0, 10).bind(3)
     t = Tensor(UOp.stack(v, v+1).cast(dtypes.int)) + Tensor.arange(2)
     self.assertListEqual(t.tolist(), [3, 5])
+
+  def test_value_index_variable(self):
+    v = Variable("v", 0, 2).bind(1)
+    self.assertEqual(Tensor(UOp.stack(*[UOp.const(x, dtypes.int) for x in (42, 43, 44)]).index(v)).item(), 43)
+    self.assertEqual(Tensor((Tensor([1, 2, 3]).realize().uop + 1).index(v)).item(), 3)
+    self.assertEqual(Tensor(Tensor([1, 2, 3]).realize().uop.index(v)).item(), 2)
+    self.assertEqual(Tensor(Tensor([1, 2, 3]).realize().uop.index(Tensor([2]).realize()[0].uop % 3)).item(), 3)
+    self.assertEqual([Tensor((Tensor([1, 2, 3]).realize().uop + 1).pad(((1, 1),)).index(Variable("p", 0, 4).bind(i))).item() for i in range(5)],
+                     [0, 2, 3, 4, 0])
+    stack = UOp.stack(UOp.const(42, dtypes.int)).pad(((1, 1),))
+    self.assertEqual([Tensor(stack.index(Variable("q", 0, 2).bind(i))).item() for i in range(3)], [0, 42, 0])
+    self.assertEqual(Tensor(Tensor([[1, 2, 3]]).realize().expand(4, 3).uop.index(Variable("r", 0, 3).bind(2))).tolist(), [1, 2, 3])
+    self.assertEqual(Tensor((Tensor([[1, 2, 3], [4, 5, 6]]).realize().uop + 1).index(Variable("w", 0, 1).bind(1))).tolist(), [5, 6, 7])
+    self.assertEqual(Tensor(Tensor([7]).realize().expand(3).uop.index(Tensor([2, 0]).realize().uop)).tolist(), [7, 7])
 
   def test_variable_data_and_shape(self):
     # the same Variable has a data edge through CAST and a structural edge through SHRINK
@@ -79,57 +93,6 @@ def fa():
   return q.scaled_dot_product_attention(k, v)
 
 # contiguous + reduce can support ranges?
-
-@unittest.skip("pm_rangeify no longer exists. test this in a different way")
-class TestRangeifyPM(unittest.TestCase):
-  def setUp(self): self.base = Tensor.empty(10*10).reshape(10, 10).contiguous()
-  def assert_same(self, a, b):
-    def run_pm_rangeify(t:Tensor):
-      from tinygrad.schedule.rangeify import pm_rangeify, RangeifyContext
-      sink = t.uop.sink()
-      pm_realize = PatternMatcher([(UPat(Ops.STAGE, name="x"), lambda x: x.replace(op=Ops.REALIZE))])
-      sink = graph_rewrite(sink, pm_realize)
-      return graph_rewrite(sink, pm_rangeify, ctx=RangeifyContext())
-    self.assertIs(run_pm_rangeify(a.contiguous()), run_pm_rangeify(b.contiguous()))
-
-  def test_nothing_match(self):
-    a = self.base.pad(((0,0),(0,1)))
-    b = self.base.pad(((0,0),(0,1)))
-    self.assert_same(a, b)
-
-  def test_reshape_match(self):
-    a = self.base
-    b = self.base.reshape(100).reshape(10, 10)
-    self.assert_same(a, b)
-
-  def test_permute_reshape_match(self):
-    a = self.base
-    b = self.base.permute(1,0).reshape(100).reshape(10, 10).permute(1,0)
-    self.assert_same(a, b)
-
-  def test_padded_permute_match(self):
-    a = self.base.pad(((0,0),(0,1)))
-    b = self.base.permute(1,0).pad(((0,1),(0,0))).permute(1,0)
-    self.assert_same(a, b)
-
-  @unittest.expectedFailure
-  def test_padded_reshape_match(self):
-    a = self.base.pad(((0,0),(0,1)))
-    b = self.base.reshape(100).reshape(10, 10).pad(((0,0),(0,1)))
-    self.assert_same(a, b)
-
-  @unittest.expectedFailure
-  def test_padded_permute_reshape_match(self):
-    a = self.base.pad(((0,0),(0,1)))
-    b = self.base.permute(1,0).reshape(100).reshape(10, 10).pad(((0,1),(0,0))).permute(1,0)
-    self.assert_same(a, b)
-
-  # why is this failing?
-  @unittest.expectedFailure
-  def test_cross_pad_match(self):
-    a = self.base.pad(((0,0),(0,1))).pad(((0,1),(0,0)))
-    b = self.base.pad(((0,1),(0,0))).pad(((0,0),(0,1)))
-    self.assert_same(a, b)
 
 if __name__ == '__main__':
   unittest.main()

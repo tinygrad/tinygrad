@@ -5,6 +5,9 @@ from tinygrad.nn import Conv2d, Linear, Embedding
 from tinygrad.nn.state import load_state_dict
 
 class TestNN(unittest.TestCase):
+  def test_conv2d_same_padding_tuple_stride(self):
+    Conv2d(1, 1, 3, stride=(1, 1), padding='same')
+
   def test_conv2d_same_padding_invalid_stride(self):
     self.assertRaises(ValueError, Conv2d, in_channels=16, out_channels=32, kernel_size=2, stride=2, padding='same')
 

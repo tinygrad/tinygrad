@@ -1,10 +1,10 @@
 from __future__ import annotations
 import functools, itertools, math, string
-from typing import TYPE_CHECKING, Callable, Self, Sequence, Literal, get_args
+from typing import TYPE_CHECKING, Any, Callable, Self, Sequence, Literal, get_args
 from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
-from tinygrad.uop import Ops
+from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
 from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype, commit_int
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, fully_flatten, get_shape, make_tuple, merge_dicts, prod
@@ -29,7 +29,30 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     assert self.numel() == 1, "must have one element for item"
-    return self.data()[(0,) * len(self.shape)]
+    return self.reshape(()).tolist()  # type: ignore[return-value]
+
+  # NOTE: list[Any] because return type is recursive (list[list[...]] for higher dimensions)
+  def tolist(self) -> PyConst|list[Any]:
+    """
+    Returns the value of this tensor as a nested list.
+    Returns single value for const tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4])
+    print(t.tolist())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor(5)
+    print(t.tolist())
+    ```
+    """
+    # TODO: remove half once minimum python supports it
+    if self.dtype in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s): return self.cast(dtypes.float32).tolist()
+    if 0 in self.shape:
+      assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
+      def _tolist(shape:tuple[int, ...]): return [_tolist(shape[1:]) for _ in range(shape[0])]
+      return _tolist(self.shape)
+    return self.data().tolist()
 
   def __getitem__(self, indices) -> Self:
     """
@@ -140,7 +163,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
       if v is None: return x  # advanced getitem
       # advanced setitem: resolve tensor dims in collapsed space, then fall through to basic setitem path
-      vb = v._broadcast_to(_broadcast_shape(x.shape, v.shape))
+      vb = v._broadcast_to(x.shape)
       for dim in sum_axis: vb = vb.unsqueeze(dim)  # add back reduced dims from sum
       start = dims[0] if not permuted else 0
       vb = x_pre._masked_merge(vb, mask, tuple(range(start, start + len(big_shape))))
@@ -192,7 +215,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, buffer=False)
     acc_dtype = least_upper_dtype(dt, dtypes.float32) if dtypes.is_float(dt) else dt
-    return (cls.full((output_len,), step, dtype=acc_dtype, buffer=False)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
+    from tinygrad.uop.ops import to_max_shape
+    return (cls.full(to_max_shape((output_len,)), step, dtype=acc_dtype, buffer=False)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)[:output_len]
 
   @classmethod
   def linspace(cls, start:int|float, stop:int|float, steps:int, dtype:DTypeLike|None=None) -> Self:
@@ -750,7 +774,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return padded[0].usum(*padded[1:])
 
   def _cumalu(self, axis:int, op:Ops) -> Self:
-    assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
+    assert self.shape[axis] != 0 and op in GroupOp.Reduce
     pads = (None,)*(self.ndim-1) + ((self.shape[axis]-1, 0),)
     pooled = self.transpose(axis,-1)._pad_constant(pads, identity_element(op, self.commit_dtype()))._pool((self.shape[axis],))
     return getattr(pooled, {Ops.ADD: "sum", Ops.MAX: "max", Ops.MUL: "prod"}[op])(-1).transpose(axis, -1)
@@ -1069,8 +1093,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (num//den, (num+den-1)//den, (num % den).cast(dtypes.float32)/den)]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
       else:
-        scale, arr = in_sz / size[i], type(self).arange(size[i], dtype=dtypes.float32)
-        index = (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
+        scale, arr = in_sz / size[i], type(self).arange(1, size[i]+1, dtype=dtypes.float32) - (0.5 if mode=="nearest-exact" else 1)
+        index = (scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
         x = x.gather(i, index)
     return x.cast(self.dtype)
 
@@ -1753,10 +1777,11 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if Y.device is not None and self.device is not None and Y.device != self.device:
       raise RuntimeError(f"expected Y and self on the same device, {Y.device=}, {self.device=}")
     log_probs = self.log_softmax()
-    loss_mask = Y.ne(ignore_index) if ignore_index != -1 else Y.const_like(True, dtypes.bool)
-    y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)
-    smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
-    unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
+    loss_mask = Y.ne(ignore_index)
+    y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1)
+    loss = (log_probs * y).sum(-1)
+    if label_smoothing > 0: loss = (1 - label_smoothing) * loss + label_smoothing * log_probs.mean(-1)
+    unreduced = loss_mask.where(loss, 0)
     return -unreduced.sum() / loss_mask.sum() if reduction == "mean" else -unreduced._do_reduction(reduction)
 
   def cross_entropy(self, Y:Self, reduction:ReductionStr="mean", label_smoothing:float=0.0) -> Self:
@@ -1783,7 +1808,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if self.shape != Y.shape:
       if self.max(classes_dim).shape != Y.shape: raise RuntimeError(f"shape mismatch: {self.shape=}, {Y.shape=}")
       Y = Y.unsqueeze(classes_dim)._one_hot_along_dim(num_classes=self.shape[classes_dim], dim=classes_dim)
-    Y = (1 - label_smoothing)*Y + label_smoothing / int(Y.shape[classes_dim])
+    if label_smoothing > 0: Y = (1 - label_smoothing)*Y + label_smoothing / int(Y.shape[classes_dim])
     return -self.log_softmax(classes_dim).mul(Y).sum(classes_dim)._do_reduction(reduction)
 
   def nll_loss(self, Y:Self, weight:Self|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean") -> Self:
@@ -1807,7 +1832,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     weight = Y.const_like(1) if weight is None else weight.gather(0, Y.flatten()).reshape(Y.shape)
     masked_weight = weight if ignore_index is None else weight * Y.ne(ignore_index)
-    nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
+    classes_dim = 0 if self.ndim == 1 else 1
+    nll = -self.gather(classes_dim, Y.unsqueeze(classes_dim)).squeeze(classes_dim) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
   # ***** matrix ops *****

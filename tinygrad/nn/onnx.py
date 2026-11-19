@@ -353,8 +353,8 @@ class OnnxRunner:
     """Convert tensor to python const with name-based caching for JIT stability."""
     t = self.graph_values[name]
     if idx not in required_input_python_consts.get(op, ()) or not isinstance(t, Tensor): return t
+    if name in self.graph_inputs: return _to_python_const(t)
     # cache by name - safe because JIT requires fixed input shapes, so computed values (Shape ops) are deterministic
-    # true graph inputs that are python consts are rare; if they change across runs, cached value will be wrong
     if (cached := self._python_const_cache.get(name)) is None: cached = self._python_const_cache[name] = _to_python_const(t)
     return cached
 
@@ -882,7 +882,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     import numpy as np
     if not training_mode: return data, data.const_like(True, dtypes.bool)
     if seed is not None:
-      rand = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)), dtype=data.dtype, device=data.device)
+      rand = Tensor(np.random.RandomState(seed).random(data.shape), dtype=data.dtype, device=data.device)
     else:
       rand = data.rand_like()
     mask = rand >= ratio
@@ -894,7 +894,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def _window(size, output_datatype, periodic, a):
     size = int(_resolve_const(size))
     N, n = (size if periodic else size - 1), Tensor.arange(size)
-    w = a[0] - a[1] * (n * (2 * math.pi / N)).cos() + a[2] * (n * (4 * math.pi / N)).cos()
+    w = a[0] - a[1] * (n * (2 * math.pi / N)).cos()
+    if a[2]: w = w + a[2] * (n * (4 * math.pi / N)).cos()
     return w.cast(OnnxDataType(output_datatype).to_dtype())
   def HannWindow(size, output_datatype:int=1, periodic:int=1): return _window(size, output_datatype, periodic, (0.5, 0.5, 0))
   def HammingWindow(size, output_datatype:int=1, periodic:int=1): return _window(size, output_datatype, periodic, (25/46, 21/46, 0))
@@ -1023,7 +1024,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       assert num_heads is not None, "num_heads must be provided for 3D input"
       X = X.unflatten(-1, (num_heads, int(X.shape[-1]) // num_heads))
 
-    head_size = cast(int, X.shape[-1])
+    head_size = X.shape[-1]
     rot_dim = rotary_embedding_dim or head_size
     x_rotate, x_pass = X[..., :rot_dim], X[..., rot_dim:]
 
@@ -1077,7 +1078,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     ret = x[(b_idx,) + tuple(i.squeeze(-1) for i in indices.split(1, -1))]
     return ret.reshape(*x_shape[:batch_dims], *i_shape[batch_dims:-1], *ret.shape[indices.ndim-1:])
   def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Literal["none", "add", "mul", "max", "min"]='none'):
-    assert updates.shape == indices.shape[:-1] + x.shape[cast(int, indices.shape[-1]):]
+    assert updates.shape == indices.shape[:-1] + x.shape[indices.shape[-1]:]
     for index, u in zip(indices.split(1, 0), updates.split(1, 0)):
       i = tuple(idx.squeeze(-1) for idx in index.squeeze(0).split(1, -1))
       u = u.squeeze(0)

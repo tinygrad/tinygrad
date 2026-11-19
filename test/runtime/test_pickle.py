@@ -119,6 +119,14 @@ class TestPickle(unittest.TestCase):
     self.assertListEqual(t1.tolist(), [9,9,9,9])
     self.assertListEqual(t2.tolist(), [1,2,3,4])
 
+  def test_pickle_preserves_aliases(self):
+    t = Tensor([1,2,3,4], dtype=dtypes.int32).realize()
+    a, b = pickle.loads(pickle.dumps((t, t.bitcast(dtypes.uint32))))
+    self.assertListEqual(b.tolist(), [1,2,3,4])
+    a.assign(Tensor([5,6,7,8], dtype=dtypes.int32)).realize()
+    self.assertListEqual(b.tolist(), [5,6,7,8])
+    self.assertListEqual(t.tolist(), [1,2,3,4])
+
   def test_pickle_view_is_self_contained(self):
     # a pickled graph carries its own buffer: data from earlier loads of related graphs must not leak into it
     t = Tensor([1,2,3,4]).realize()

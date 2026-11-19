@@ -74,8 +74,8 @@ def cuLaunchKernel(f, gx, gy, gz, lx, ly, lz, smem, stream, params, extra):
   return enqueue(stream, lambda: run_kernel(handle(f), args, size, gx, gy, gz, lx, ly, lz, smem))
 def cuLaunchHostFunc(stream, fn, data): return enqueue(stream, lambda: fn(data) or True)
 def cuMemcpyAsync(dst, src, size, stream): return enqueue(stream, lambda: ctypes.memmove(dst, src, size) or True)
-def cuStreamWriteValue64_v2(stream, address, value, flags): return enqueue(stream, lambda: out(address, value) == 0)
-def cuStreamWaitValue64_v2(stream, address, value, flags): return enqueue(stream, lambda: ctypes.c_uint64.from_address(address).value >= value)
+def cuStreamWriteValue32_v2(stream, address, value, flags): return enqueue(stream, lambda: out(address, value, ctypes.c_uint32) == 0)
+def cuStreamWaitValue32_v2(stream, address, value, flags): return enqueue(stream, lambda: ctypes.c_uint32.from_address(address).value >= value)
 
 for name, fn in list(globals().items()):
   if name.startswith("cu") and callable(fn): setattr(cuda.dll, name, ctypes.CFUNCTYPE(getattr(cuda, name).restype, *getattr(cuda, name).argtypes)(fn))

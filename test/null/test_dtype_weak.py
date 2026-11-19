@@ -40,7 +40,7 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertIs(denom.dtype, dtypes.weakfloat)  # the setup: the denominator expression itself is weak
     x, y = Tensor([2048.0], dtype=dtypes.float32)._broadcasted(denom)
     self.assertIs(y.dtype, dtypes.float32)
-    recips = [u for u in (x / y)._uop.toposort() if u.op is Ops.RECIPROCAL]
+    recips = [u for u in (x / y)._uop.toposort() if u.op is Ops.RECIP]
     self.assertEqual([(u.dtype, u.src[0].dtype) for u in recips], [(dtypes.float32, dtypes.float32)])
     with Context(DEFAULT_FLOAT=dtypes.float16):
       committed = graph_rewrite((UOp.const(1).cast(dtypes.int32) + UOp.const(1.0)).cast(dtypes.float32), pm_commit_weak)

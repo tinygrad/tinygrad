@@ -1,11 +1,53 @@
 from __future__ import annotations
-from typing import Callable, cast
+from typing import Callable, Generator, cast
+import subprocess, pathlib, struct
 from dataclasses import dataclass, replace
-from tinygrad.helpers import prod, Target, EMULATED_DTYPES
+from tinygrad.helpers import prod, Target, EMULATED_DTYPES, CCACHE, getenv, diskcache_get, diskcache_put, unwrap, round_up
 from tinygrad.uop.ops import Ops, UOp, sint, ssimplify, smin, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.renderer.tc import TensorCore
-from tinygrad.device import Compiler
+
+class CompileError(Exception): pass
+
+class Compiler:
+  def __init__(self, cachekey:str|None=None): self.cachekey = cachekey if CCACHE else None
+  def compile(self, src:str) -> bytes: return src.encode()   # NOTE: empty compiler is the default
+  def compile_cached(self, src:str) -> bytes:
+    if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
+      assert not getenv("ASSERT_COMPILE"), f"tried to compile with ASSERT_COMPILE set\n{src}"
+      lib = self.compile(src)
+      if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
+    return lib
+  def disassemble(self, lib:bytes): pass
+  def server(self, cmd:str, arch:str, *args) -> subprocess.Popen:
+    argv = f"{cmd} {pathlib.Path(__file__).parent.parent}/runtime/support/compileserver.py {type(self).__module__}:{type(self).__name__} {arch}"
+    return subprocess.Popen(argv.split() + [str(a) for a in args], stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
+  def compile_server(self, src:str, proc:subprocess.Popen) -> bytes:
+    unwrap(proc.stdin).write(struct.pack("I", len(src.encode())) + src.encode())
+    if (lib:=unwrap(proc.stdout).read(struct.unpack("I", unwrap(proc.stdout).read(4))[0])): return lib
+    raise CompileError("Compilation Error")
+
+
+@dataclass
+class TinyELF:
+  lib: bytes
+  name: str
+  target: Target
+  # tuple of (name, addrspace, dtype, shape), one per arg in the kernel's order. an ALU arg is a value, the rest are buffers
+  signature: tuple[tuple[str|None, AddrSpace, DType, tuple], ...]
+  profile_key: bytes|None = None
+
+  @staticmethod
+  def from_program(prg:UOp) -> TinyELF:
+    sig = tuple((p.arg.name, p.arg.addrspace, p.dtype, p._shape) for p in prg.kernel_params)
+    return TinyELF(prg.src[3].arg, prg.src[0].arg.function_name, prg.arg.target, sig, prg.key)
+
+  @staticmethod
+  def iter_sig(signature:tuple[tuple[str|None, AddrSpace, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
+    for _,a,dt,_ in signature:
+      if a is not AddrSpace.ALU: dt = dtypes.uint64 # a buffer is passed by its address
+      yield (offset:=round_up(offset, dt.itemsize)), dt
+      offset += dt.itemsize
 
 # an access takes its dtype from the buffer it indexes, so accessing at another dtype restates the storage on the buffer that owns it
 def with_storage(x:UOp, dt:DType) -> UOp:
@@ -37,7 +79,7 @@ class Estimates:
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
-        while len(buf.src) and buf.op not in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: buf = buf.src[0]
+        while len(buf.src) and buf.op not in GroupOp.Defines: buf = buf.src[0]
         if buf.op is Ops.PARAM:
           # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
           accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mults
@@ -45,7 +87,8 @@ class Estimates:
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
         if u.dtype is not dtypes.void:  # unbounded loop, unknown trip count
-          mults *= cast(sint, u.src[0].ssimplify())
+          bound = u.src[0].without_after.simplify()
+          mults *= bound.vmax if bound.ranges else bound.ssimplify()
           # SPECIAL are already counted in mults
           mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op in {Ops.END, Ops.BACKEDGE}: mults = mult_stack.pop(-1)
@@ -63,6 +106,7 @@ class Estimates:
 class Renderer:
   target: Target
   suffix: str = ""
+  inline_prefix: str|None = None
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
   has_local: bool = True
@@ -74,6 +118,7 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
   extra_matcher: PatternMatcher|None = None
+  packed_args: bool = False
   code_for_op: dict[Ops, Callable] = {}
 
   compiler: Compiler = Compiler()

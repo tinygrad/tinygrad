@@ -1,5 +1,5 @@
 import base64, ctypes, pathlib, tempfile, hashlib
-from tinygrad.device import Compiler
+from tinygrad.renderer import Compiler
 from tinygrad.helpers import cpu_objdump, system, data64
 from tinygrad.runtime.autogen import mesa, llvm, libc
 from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler, expect, cerr

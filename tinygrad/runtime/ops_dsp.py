@@ -1,7 +1,7 @@
 from __future__ import annotations
-import ctypes, os, mmap, tempfile, pathlib, array, threading, contextlib, sys, subprocess, struct
-assert sys.platform != 'win32'
-from tinygrad.device import BufferStorage, MMIOInterface, BufferSpec, Compiled, Allocator, Compiler, Program, TinyELF
+import ctypes, os, mmap, tempfile, pathlib, array, threading, contextlib, subprocess, struct
+from tinygrad.device import BufferStorage, MMIOInterface, BufferSpec, Compiled, Allocator, Program
+from tinygrad.renderer import Compiler, TinyELF
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing, Target, unwrap
@@ -12,6 +12,7 @@ if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-i
 class DSPRenderer(ClangRenderer):
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_typedef = "__attribute__((noinline)) void"
+  packed_args = False
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
 
@@ -57,7 +58,7 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
   return pra, fds, attrs, (ins, outs)
 
 class DSPProgram(Program['DSPDevice']):
-  def __init__(self, dev:DSPDevice, obj:TinyELF): self.dev, self.lib, self.signature = dev, obj.lib, obj.signature
+  def __init__(self, dev:DSPDevice, obj:TinyELF, links=None): self.dev, self.lib, self.signature = dev, obj.lib, obj.signature
 
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     bufs = [b for b,(_,a,_,_) in zip(args, self.signature) if a is not AddrSpace.ALU]
@@ -126,12 +127,36 @@ class DSPCompiler(Compiler):
   def disassemble(self, lib:bytes): return cpu_objdump(lib, "llvm-objdump")
 
 
+class MockDSPRenderer(DSPRenderer):
+  def __init__(self, target:Target): self.target, self.compiler = target, DSPCompiler(mock=True)
+  def _render_defines(self, uops) -> list[str]: return ClangRenderer._render_defines(self, uops)
+  def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]]) -> str:
+    # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
+    # control register 21 is HEX_REG_QEMU_INSN_CNT, 0x6a15c000 loads it
+    msrc = [mockdsp_boilerplate, 'void _start(void) {']
+    for i,b in enumerate(bufs):
+      if b[1][0].addrspace == AddrSpace.GLOBAL:
+        sz = b[1][0].max_numel()*b[1][0].dtype.itemsize
+        # for loop for big reads
+        msrc.append(f"void *buf{i} = mmap2(0, {sz}, 3, 0x21, -1, 0); for(int rd = 0; rd < {sz}; rd += read(0, buf{i}+rd, {sz}-rd));")
+      else:
+        msrc.append(f"{self._render_dtype(b[1][0].dtype)} val{i}; read(0, &val{i}, {b[1][0].dtype.itemsize});")
+    msrc.append("unsigned int st = inscount();")
+    params = [(f'(void*)buf{i}' if b[1][0].addrspace == AddrSpace.GLOBAL else f'val{i}') for i,b in enumerate(bufs)]
+    msrc.append(f"{function_name}({', '.join(params)});")
+    msrc.append("unsigned int et = inscount() - st; write(1, &et, sizeof(et));")
+    for i,b in enumerate(bufs):
+      if b[1][0].addrspace == AddrSpace.GLOBAL: msrc.append(f"write(1, buf{i}, {b[1][0].max_numel()*b[1][0].dtype.itemsize});")
+    msrc.append('exit(0); }')
+    return '\n'.join(msrc)
+
 class DSPDevice(Compiled):
+  renderers = [MockDSPRenderer] if getenv("MOCKDSP") else [DSPRenderer]
   def __init__(self, device:str=""):
-    if getenv("MOCKDSP"): super().__init__(device, DSPAllocator(self), [MockDSPRenderer], MockDSPProgram)
+    if getenv("MOCKDSP"): super().__init__(device, DSPAllocator(self), MockDSPProgram)
     else:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
-      super().__init__(device, DSPAllocator(self), [DSPRenderer], DSPProgram)
+      super().__init__(device, DSPAllocator(self), DSPProgram)
       fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
       self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True)).buf
       ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
@@ -251,31 +276,8 @@ static unsigned int inscount(void) {{ unsigned int ret; __asm__ volatile(".word 
 static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd, unsigned long offset) {{
 return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}'''
 
-class MockDSPRenderer(DSPRenderer):
-  def __init__(self, target:Target): self.target, self.compiler = target, DSPCompiler(mock=True)
-  def _render_defines(self, uops) -> list[str]: return ClangRenderer._render_defines(self, uops)
-  def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]]) -> str:
-    # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
-    # control register 21 is HEX_REG_QEMU_INSN_CNT, 0x6a15c000 loads it
-    msrc = [mockdsp_boilerplate, 'void _start(void) {']
-    for i,b in enumerate(bufs):
-      if b[1][0].addrspace == AddrSpace.GLOBAL:
-        sz = b[1][0].max_numel()*b[1][0].dtype.itemsize
-        # for loop for big reads
-        msrc.append(f"void *buf{i} = mmap2(0, {sz}, 3, 0x21, -1, 0); for(int rd = 0; rd < {sz}; rd += read(0, buf{i}+rd, {sz}-rd));")
-      else:
-        msrc.append(f"{self._render_dtype(b[1][0].dtype)} val{i}; read(0, &val{i}, {b[1][0].dtype.itemsize});")
-    msrc.append("unsigned int st = inscount();")
-    params = [(f'(void*)buf{i}' if b[1][0].addrspace == AddrSpace.GLOBAL else f'val{i}') for i,b in enumerate(bufs)]
-    msrc.append(f"{function_name}({', '.join(params)});")
-    msrc.append("unsigned int et = inscount() - st; write(1, &et, sizeof(et));")
-    for i,b in enumerate(bufs):
-      if b[1][0].addrspace == AddrSpace.GLOBAL: msrc.append(f"write(1, buf{i}, {b[1][0].max_numel()*b[1][0].dtype.itemsize});")
-    msrc.append('exit(0); }')
-    return '\n'.join(msrc)
-
 class MockDSPProgram(Program[DSPDevice]):
-  def __init__(self, dev:DSPDevice, obj:TinyELF): self.lib, self.signature = obj.lib, obj.signature
+  def __init__(self, dev:DSPDevice, obj:TinyELF, links=None): self.lib, self.signature = obj.lib, obj.signature
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     with tempfile.NamedTemporaryFile(suffix=".out") as dsp_lib:
       dsp_lib.write(self.lib)
