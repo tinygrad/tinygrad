@@ -51,10 +51,6 @@ def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
           if c[0] < best[0] * 3 // 4: best = c
         return loop_order(best[1])
   k = k.copy()
-  # math that isn't in vectors is scalar, it gets a few lanes for ILP. weakint is index math, a compare is in its operands' dtype
-  alu_dtypes = {dtypes.int32 if (dt:=u.src[0].dtype if u.op in GroupOp.Comparison else u.dtype) is dtypes.weakint else dt
-                for u in k.ast.backward_slice if u.op in GroupOp.ALU|{Ops.REDUCE}}
-  if not alu_dtypes <= set(k.ren.vector_dtypes): lanes = 4
   # the biggest input is read in vectors: if it's contiguous in a long reduce but not in the output, the reduce is the vector (its lanes accumulate)
   loads = sorted([x for x in k.ast.backward_slice if x.op is Ops.INDEX and x.src[0].op is Ops.PARAM and x not in [s.src[0] for s in stores]],
                  key=lambda x: x.src[0].max_numel()*x.src[0].dtype.itemsize)
@@ -86,8 +82,13 @@ def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
         break
   return k
 
+def vector_math(k:Scheduler) -> bool:
+  # all the kernel's math is in the renderer's vector dtypes. weakint is index math, a compare is in its operands' dtype
+  return {dtypes.int32 if (dt:=u.src[0].dtype if u.op in GroupOp.Comparison else u.dtype) is dtypes.weakint else dt
+          for u in k.ast.backward_slice if u.op in GroupOp.ALU|{Ops.REDUCE}} <= set(k.ren.vector_dtypes)
+
 def hand_coded_optimizations(k:Scheduler) -> Scheduler:
-  if k.ren.vector_alu: return vector_optimizations(k)
+  if k.ren.vector_alu and vector_math(k): return vector_optimizations(k)
   # first try the tensor cores
   """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
   Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).

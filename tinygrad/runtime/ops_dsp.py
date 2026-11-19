@@ -141,13 +141,11 @@ def stack_lanes(ctx:DSPRenderer, srcs:tuple[UOp, ...]) -> str:
     if len(vecs) <= 2 and all(v.dtype == vecs[0].dtype and rwidth(ctx, v) == rwidth(ctx, vecs[0]) for v in vecs):
       return shuffle(ctx[vecs[0]], ctx[vecs[-1]], [vecs.index(v)*rwidth(ctx, v) + i for v,i in map(unwrap, lanes)],
                      rwidth(ctx, vecs[0]) if len(vecs) == 1 else None, isz)
-  # less than a vector register of scalars is a vector of them (clang crashes on the shuffles of small vectors from them, and on a vector of
-  # compares: bools go through memory)
+  # less than a vector register of scalars is a vector of them through memory (clang crashes on the shuffles of small vectors from them, and
+  # on a vector of them that it makes vector math of)
   if all(l is None for l in lanes) and vpad(n)*isz < 128:
-    if srcs[0].dtype == dtypes.bool:
-      return f"({{ unsigned char volatile _t[{vpad(n)}] = {{{', '.join(ctx[s] for s in srcs)}}}; " + \
-             f"({ctx._render_dtype(dtypes.uint8, n)}){{{', '.join(f'_t[{i}]' for i in range(vpad(n)))}}}; }})"
-    return f"(({ctx._render_dtype(srcs[0].dtype, n)}){{{', '.join(ctx[s] for s in srcs)}}})"
+    return f"({{ {ctx.render_dtype(srcs[0].dtype) if srcs[0].dtype != dtypes.bool else 'unsigned char'} volatile _t[{vpad(n)}] = " + \
+           f"{{{', '.join(ctx[s] for s in srcs)}}}; ({ctx._render_dtype(srcs[0].dtype, n)}){{{', '.join(f'_t[{i}]' for i in range(vpad(n)))}}}; }})"
   # more than a vector is concatenated vectors, clang crashes on some shuffles of them
   if n*isz > 128 and n % (c:=128//isz) == 0:
     return concat([stack_lanes(ctx, srcs[i:i+c]) for i in range(0, n, c)], c)
