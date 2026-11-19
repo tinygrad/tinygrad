@@ -71,11 +71,9 @@ class Estimates:
     mem: dict[tuple[UOp, Ops], sint] = {}
     mults: sint = 1
     mult_stack: list[sint] = []
-    excluded: set[UOp] = set()
-    if ignore_indexing:
-      for u in uops:
-        if u.op in {Ops.INDEX, Ops.SHRINK}:
-          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
+    # ALUs used for indexing don't count as flops. the toposort stops at END/BACKEDGE so loop bodies still count
+    idxs = [s for u in uops if u.op in {Ops.INDEX, Ops.SHRINK} for s in u.src[1:]] if ignore_indexing else []
+    excluded = UOp.sink(*idxs).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u

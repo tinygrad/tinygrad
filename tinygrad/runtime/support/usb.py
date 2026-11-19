@@ -261,7 +261,7 @@ def usb_patch(link:UOp, addr:UOp, val:UOp, slot:UOp) -> UOp: # poke only on chan
 # 3. lower
 
 def is_host(b:UOp) -> bool: return not all_devices_in(b.device, HCQ_DEVS - {"CPU"})
-def is_usb(dev) -> bool: return getattr(Device[to_tuple(dev)[0]], "is_usb", False)
+def is_usb(dev) -> bool: return to_name(d:=to_tuple(dev)[0], "usb_host") in Compiled.link_bufs or getattr(Device[d], "is_usb", False)
 def is_remote(b:UOp) -> bool: return (p:=unwrap_view(b)[0]).op in (Ops.PARAM, Ops.ALLOC, Ops.EXTERN) and p.device is not None and is_usb(p.device)
 def usb_addr(b:UOp, idx:UOp, dt:DType) -> UOp: return b.getaddr("CPU") + (idx * dt.itemsize).cast(dtypes.uint64) # byte address of b[idx]
 def usb_deps(b:UOp) -> tuple[UOp, ...]: # deps through views
