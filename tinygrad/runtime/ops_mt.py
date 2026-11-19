@@ -195,6 +195,7 @@ class MTComputeQueue(HWQueue):
       ops.append(op)
       link = link.after(op)
     root_addr = self.dev.mt.pci_dev.bar_info(2)[0]+0x30000000
+    poll_in_hcq = not self.cacheable or len(self.submissions) > 1
     for i,(launch,deps,packet,write_map,generation,mmu_pages,grid_deps) in enumerate(self.submissions):
       ccb = launch.ccb
       assert ccb is not None
@@ -247,10 +248,10 @@ class MTComputeQueue(HWQueue):
       write(launch.v.addr+ccb.queue_off+idx*8,struct.pack('<Q',0x90000000+ccb.item_off))
       add(usb_poke(link,launch.v.addr+ccb.queue_off+0x4000,next_wr))
       add(usb_poke(link,self.dev.mt.mmio.addr+0xc00b00,UOp.const(3,dtypes.u32)))
-      if not self.cacheable:
+      if poll_in_hcq:
         add(mt_poll(link,launch.v.addr+ccb.queue_off+0x1004+idx*0x30,token))
         add(usb_poke(link,launch.v.addr+ccb.queue_off+0x4028,next_wr))
-      self.dev.poll_in_hcq = not self.cacheable
+      self.dev.poll_in_hcq = poll_in_hcq
       add(link.index(2).store(next_wr.cast(dtypes.u64)))
       add(link.index(3).store(seq+1))
       self.dev.uploaded_write_map = write_map

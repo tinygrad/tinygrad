@@ -278,15 +278,6 @@ def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequenc
   if len(linear.src) == 0: return
   def is_mt_kernel(c:UOp):
     return c.op is Ops.CALL and c.body.op in (Ops.PROGRAM,Ops.SINK) and any(d.split(':')[0] == 'MT' for d in to_tuple(get_call_arg_uops(c)[0].device))
-  if not jit and sum(is_mt_kernel(c) for c in linear.src) > 1:
-    chunk:list[UOp] = []
-    for call in linear.src:
-      chunk.append(call)
-      if is_mt_kernel(call):
-        run_linear(UOp(Ops.LINEAR,src=tuple(chunk)),var_vals,input_uops,update_stats,jit,wait)
-        chunk = []
-    if chunk: run_linear(UOp(Ops.LINEAR,src=tuple(chunk)),var_vals,input_uops,update_stats,jit,wait)
-    return
   inputs = list(input_uops)
   if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, cache=True), input_uops=inputs)
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)

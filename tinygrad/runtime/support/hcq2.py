@@ -364,11 +364,13 @@ def sched_batches(l:UOp, profile:bool, cacheable:bool=False) -> UOp:
     return f"COPY:{copy_of.get((c.src[1].device, c.src[2].device), 0)}"
 
   devs = [get_enqueue_devs(c) for c in l.src]
+  if devs.count(('MT',)) > 1: cacheable = False  # sequential MT submissions must drain before the next host program
   srcs:list[UOp] = []
   for hcq, grp in itertools.groupby(zip(l.src, devs), key=lambda e: bool(e[1])):
     run = list(grp)
     peer_groups = dedup([Device[d[0]].peer_group for _, d in run if d])
     batches = [[(c, d[0], queue_for(c)) for c, d in run if Device[d[0]].peer_group == pg] for pg in peer_groups]
+    batches = [single for batch in batches for single in ([[(c,d,q)] for c,d,q in batch] if batch and batch[0][1] == 'MT' else [batch])]
     if hcq: srcs += [_finalize_batch(BatchCtx(batch, profile), batch is not batches[-1], cacheable) for batch in batches]
     else: srcs += [c for c, _ in run]
   return l.replace(src=tuple(srcs))
