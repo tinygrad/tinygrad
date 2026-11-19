@@ -289,10 +289,14 @@ def _to_python_const(t:Tensor) -> list[ConstType]|ConstType|bytes:
 
 # ***** QDQ fusion *****
 QDQ_PASSTHROUGH = {"Reshape", "Flatten", "Squeeze", "Unsqueeze", "Transpose"}
-def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[str, ...]) -> tuple[OnnxNode, ...]:
+# elementwise functions of one input
+QDQ_LOOKUP = {"Gelu", "Sigmoid", "Tanh", "HardSigmoid", "HardSwish", "Elu", "Selu", "Celu", "LeakyRelu", "Softplus", "Softsign", "Mish", "Erf",
+              "Exp", "Log", "Sqrt", "Reciprocal", "Neg", "Abs", "Relu"}
+def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[str, ...],
+             select_op:Callable[[OnnxNode], Callable]) -> tuple[OnnxNode, ...]:
   """
   Like onnxruntime, rewrite the float ops of a QDQ model (DequantizeLinear -> op -> QuantizeLinear) into QLinear ops that compute in integers.
-  The quantization params must be initializers.
+  An elementwise function of one 8-bit input is a lookup table of its 256 values. The quantization params must be initializers.
   """
   producer = {o:n for n in nodes for o in n.outputs}
   consumers: dict[str, list[OnnxNode]] = {}
@@ -350,6 +354,12 @@ def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[st
       new = OnnxNode("QLinearAdd", n.opset_id, (*a, *b, *y.inputs[1:]), y.outputs, {})
     elif n.op == "GlobalAveragePool" and (x:=dq(n.inputs[0])):
       new = OnnxNode("QLinearGlobalAveragePool", n.opset_id, (*x, *y.inputs[1:]), y.outputs, {"channels_last": 0})
+    elif n.op in QDQ_LOOKUP and len(n.inputs) == 1 and (x:=dq(n.inputs[0])) and (xdt:=cast(Tensor, init(x[2])).dtype) in (dtypes.uint8, dtypes.int8):
+      # the table is the float ops on each of the values
+      t = Tensor.arange(xdt.min, xdt.max+1).cast(xdt)
+      for op,inps in ((producer[n.inputs[0]], x[1:]), (n, ()), (y, y.inputs[1:])): t = select_op(op)(t, *[init(i) for i in inps], **op.opts)
+      values[tname:=f"{y.outputs[0]}_table"] = t.realize()
+      new = OnnxNode("QLinearLookup", n.opset_id, (x[0], tname), y.outputs, {})
     elif n.op in QDQ_PASSTHROUGH and (x:=dq(n.inputs[0])) and same(x[1], y.inputs[1]) and same(x[2], y.inputs[2]):
       # moving data around doesn't change the quantized values
       new = OnnxNode(n.op, n.opset_id, (x[0], *n.inputs[1:]), y.outputs, n.opts)
@@ -377,12 +387,13 @@ class OnnxRunner:
     self.graph_values = {"": None, **{i["name"]: i["parsed_tensor"] for i in graph["initializer"]}}
     self.graph_inputs = {i["name"]: i["parsed_type"] for i in graph["input"] if i["name"] not in self.graph_values}
     self.graph_outputs = tuple(o["name"] for o in graph["output"])
-    self.graph_nodes = fuse_qdq(tuple(n["parsed_node"] for n in graph["node"]), self.graph_values, self.graph_outputs)
+    self.onnx_ops = onnx_ops
+    self.graph_nodes = fuse_qdq(tuple(n["parsed_node"] for n in graph["node"]), self.graph_values, self.graph_outputs,
+                                lambda n: self._select_op(n.op, n.opset_id))
     # track names from initializers and Constant nodes for fast path optimizations
     self.const_names: set[str] = set(self.graph_values.keys()) | {o for n in self.graph_nodes if n.op == "Constant" for o in n.outputs}
 
     self.variable_dims: dict[str, int] = {}
-    self.onnx_ops = onnx_ops
     self._python_const_cache: dict[str, list[ConstType]|ConstType|bytes] = {}  # cache by name for JIT stability
 
   @classmethod
@@ -1307,6 +1318,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     acc = (a.int() - _qconst(a_zero_point)[0]) * round(ma * 2**frac) + (b.int() - _qconst(b_zero_point)[0]) * round(mb * 2**frac)
     out = ((acc + (1 << (frac-1)) - 1 + ((acc >> frac) & 1)) >> frac) + _qconst(c_zero_point)[0]
     return _clamp_cast(out, _qdtype(c_zero_point)).contiguous()
+
+  def QLinearLookup(x:Tensor, table:Tensor) -> Tensor:
+    # the 8-bit x indexes the table of the function's outputs (see fuse_qdq)
+    return table[x.int() - int(x.dtype.min)].contiguous()
 
   def QLinearMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
     return _qlinearop_quantized(Tensor.mul, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], c_scale, c_zero_point)
