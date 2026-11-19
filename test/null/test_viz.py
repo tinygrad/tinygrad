@@ -411,7 +411,7 @@ class TestVizIntegration(unittest.TestCase):
     lst = viz.list_items()
     kern_idx = next(i for i,s in enumerate(lst) if s["name"] == name)
     isel_idx = next(i for i,s in enumerate(lst[kern_idx]["steps"]) if s["name"] == "instruction selection")
-    graph = next(viz.get_details(i, isel_idx+1))["graph"]
+    graph = next(viz.get_details(kern_idx, isel_idx+1))["graph"]
     for u in graph.values():
       if u["label"].startswith("CALL\n"): assert "NATIVE X86Ops" in u["label"]
 
