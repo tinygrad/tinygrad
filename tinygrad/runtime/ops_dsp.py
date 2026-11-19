@@ -6,7 +6,7 @@ from tinygrad.dtype import dtypes, AddrSpace, DType
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.helpers import getenv, round_up, round_down, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing, Target, unwrap, dedup
 from tinygrad.helpers import all_same, prod
-from tinygrad.renderer.cstyle import ClangRenderer, base_rewrite, wmma_args, uops_to_dtypes
+from tinygrad.renderer.cstyle import ClangRenderer, base_rewrite, wmma_args, uops_to_dtypes, _wmma_name
 from tinygrad.renderer import tc
 from tinygrad.runtime.support.memory import TLSFAllocator
 from tinygrad.codegen.late.vectorize import lane_of
@@ -57,9 +57,9 @@ def concat(parts:list[str], m:int) -> str:
   return parts[0]
 
 def can_load_wide(u:UOp) -> bool:
-  # (a whole vector register from where it loads is in the buffer or the bytes past it that can be read)
+  # (a whole vector register from where it loads is in the buffer or the bytes past it that can be read. what fits a scalar register doesn't)
   return u.op is Ops.LOAD and len(u.src) == 1 and (b:=u.src[0]).op is Ops.SHRINK and b.src[0].addrspace is AddrSpace.GLOBAL and \
-    1 < b.max_numel() and b.max_numel()*u.dtype.itemsize < 128 and b.src[1].get_valid() is UOp.const(True) and \
+    8 < b.max_numel()*u.dtype.itemsize < 128 and b.src[1].get_valid() is UOp.const(True) and \
     b.src[1].vmax*u.dtype.itemsize + 128 <= b.src[0].max_numel()*u.dtype.itemsize + DSP_OVERREAD
 # the lanes of the rendered vector u
 def rwidth(ctx:DSPRenderer, u:UOp) -> int: return 128 // u.dtype.itemsize if u in ctx.wide_loads else vpad(u.max_numel())
@@ -222,15 +222,28 @@ def render_vrmpy(name:str, dims:tuple[int, int, int], a:str, b:str, c:str) -> st
   HVX_VectorPair s1 = V6(vshuffvdd)(r[3], r[2], -1), q1 = V6(vshuffvdd)(V6(hi)(s1), V6(lo)(s1), -1);
   HVX_Vector v[4] = {V6(lo)(q0), V6(hi)(q0), V6(lo)(q1), V6(hi)(q1)};"""
   # acc[n][j] for the M/32 vectors j, w[n][g] for the K/4 groups g of 4 rows
+  # (B is words: the call passes the words of the scalar loads B is, see render_wmma)
   mv, kg = m//32, k//4
-  return f"""static inline __attribute__((always_inline)) {c} __{name}({a} a, {b} b, {c} c) {{
-  HVX_Vector r[4], acc[{n*mv}]; int w[{n*kg}];
-  __builtin_memcpy(r, &a, sizeof(r)); __builtin_memcpy(acc, &c, sizeof(acc)); __builtin_memcpy(w, &b, sizeof(w));
+  return f"""static inline __attribute__((always_inline)) {c} __{name}_w({a} a, const unsigned int *w, {c} c) {{
+  HVX_Vector r[4], acc[{n*mv}];
+  __builtin_memcpy(r, &a, sizeof(r)); __builtin_memcpy(acc, &c, sizeof(acc));
   {inter}
   for (int n = 0; n < {n}; n++) for (int g = 0; g < {kg}; g++) for (int j = 0; j < {mv}; j++)
     acc[n*{mv}+j] = V6(vrmpyub_acc)(acc[n*{mv}+j], v[g*{mv}+j], w[n*{kg}+g]);
   __builtin_memcpy(&c, acc, sizeof(acc)); return c;
-}}"""
+}}
+static inline __attribute__((always_inline, unused)) {c} __{name}({a} a, {b} b, {c} c) {{
+  unsigned int w[{n*kg}]; __builtin_memcpy(w, &b, sizeof(w)); return __{name}_w(a, w, c); }}"""
+
+def render_wmma(ctx:DSPRenderer, x:UOp) -> str|None:
+  # a B that's whole scalar loads in order is their words
+  if (b:=x.src[1]).op is not Ops.STACK or any(lane_of(s) is None for s in b.src): return None
+  vecs = dedup([unwrap(lane_of(s))[0] for s in b.src])
+  if [unwrap(lane_of(s)) for s in b.src] != [(v, i) for v in vecs for i in range(v.max_numel())] or \
+     any(v.op is not Ops.LOAD or v.max_numel()*v.dtype.itemsize not in (4, 8) or v in ctx.wide_loads for v in vecs): return None
+  words = [f"(unsigned int)(__builtin_bit_cast(unsigned long long, {ctx[v]}) >> {32*h})" if v.max_numel()*v.dtype.itemsize == 8 else
+           f"__builtin_bit_cast(unsigned int, {ctx[v]})" for v in vecs for h in range(v.max_numel()*v.dtype.itemsize//4)]
+  return f"__{_wmma_name(x)}_w({ctx[x.src[0]]}, (const unsigned int[]){{{', '.join(words)}}}, {ctx[x.src[2]]})"
 
 def render_range(ctx:DSPRenderer, x:UOp) -> str|None:
   # each core runs a contiguous chunk of the parallel loop
@@ -260,6 +273,7 @@ def render_store_pieces(ctx:DSPRenderer, bidx:UOp, var:UOp) -> str|None:
   return " ".join(pieces)
 
 dsp_vec_rewrite = PatternMatcher([
+  (UPat(Ops.WMMA, name="x"), render_wmma),
   (UPat(Ops.RANGE, name="x"), render_range),
   (UPat(Ops.STORE, src=(UPat.var("bidx"), UPat.var("var"))), render_store_pieces),
   (UPat(Ops.LOAD, src=(UPat.var("bidx"),), name="x"), render_wide_load),

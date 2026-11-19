@@ -180,8 +180,8 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     if op is Ops.LOAD and root is not None and (kvalid is None or (ctx.overread and buf.addrspace is AddrSpace.GLOBAL)):
       def load_window(start:int, lanes:list[int]) -> bool:
         if (length:=min((l for l in lengths if l > lanes[-1] - start), default=0)) == 0 or len(lanes) * 4 < length: return False
-        # at least a whole vector register (the DSP's 128 bytes), if it's in the buffer
-        if ctx.target.device == "DSP" and (whole:=min(lengths[0], 128 // buf.dtype.itemsize)) > length and \
+        # at least a whole vector register (the DSP's 128 bytes), if it's in the buffer. (what fits in a scalar register loads in one)
+        if ctx.target.device == "DSP" and length*buf.dtype.itemsize > 8 and (whole:=min(lengths[0], 128 // buf.dtype.itemsize)) > length and \
            (root + start).vmin >= 0 and (root + start + whole - 1).vmax < buf.max_numel(): length = whole
         rs = root if kvalid is None else bounded(root, kvalid)
         if not (readable(buf, rs + start) and readable(buf, rs + start + length - 1)): return False
