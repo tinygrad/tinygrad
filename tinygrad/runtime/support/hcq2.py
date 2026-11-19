@@ -371,7 +371,7 @@ def sched_batches(l:UOp, profile:bool, cacheable:bool=False) -> UOp:
     peer_groups = dedup([Device[d[0]].peer_group for _, d in run if d])
     batches = [[(c, d[0], queue_for(c)) for c, d in run if Device[d[0]].peer_group == pg] for pg in peer_groups]
     batches = [single for batch in batches for single in ([[(c,d,q)] for c,d,q in batch] if batch and batch[0][1] == 'MT' else [batch])]
-    if hcq: srcs += [_finalize_batch(BatchCtx(batch, profile), batch is not batches[-1], cacheable) for batch in batches]
+    if hcq: srcs += [_finalize_batch(BatchCtx(batch, profile), batch is not batches[-1] and batch[0][1] != 'MT', cacheable) for batch in batches]
     else: srcs += [c for c, _ in run]
   return l.replace(src=tuple(srcs))
 

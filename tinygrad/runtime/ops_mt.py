@@ -126,6 +126,8 @@ class MTComputeQueue(HWQueue):
     self.cacheable = (info:=getattr(submit.arg,'hcq',None)) is not None and info.cacheable
     self.submissions:list[tuple[MTLaunch,UOp,bytes,dict[int,bytes],int,dict[int,bytes]|None,UOp|None]] = []
     self.signals:list[tuple[UOp,UOp]] = []
+    self.timestamp_slots:list[list[UOp|None]] = []
+    self.timestamp_open = False
 
   def encode(self) -> UOp:
     for u in self.lin.src:
@@ -145,7 +147,12 @@ class MTComputeQueue(HWQueue):
   def exec_barrier(self): pass
   def wait(self, signal:UOp, value:UOp): pass  # synchronous submissions make cross-queue waits implicit
   def signal(self, signal:UOp, value:UOp): self.signals.append((signal,value))
-  def timestamp(self, signal:UOp): self.signals.append((signal,UOp.const(0,dtypes.u64)))
+  def timestamp(self, signal:UOp):
+    if self.timestamp_open:
+      self.timestamp_slots[-1][1] = signal
+    else:
+      self.timestamp_slots.append([signal,None])
+    self.timestamp_open = not self.timestamp_open
 
   def snapshot_mmu(self, launch:MTLaunch) -> dict[int,bytes]:
     pages:dict[int,bytes] = {}
@@ -195,7 +202,7 @@ class MTComputeQueue(HWQueue):
       ops.append(op)
       link = link.after(op)
     root_addr = self.dev.mt.pci_dev.bar_info(2)[0]+0x30000000
-    poll_in_hcq = not self.cacheable or len(self.submissions) > 1
+    poll_in_hcq = not self.cacheable or len(self.submissions) > 1 or bool(self.timestamp_slots)
     for i,(launch,deps,packet,write_map,generation,mmu_pages,grid_deps) in enumerate(self.submissions):
       ccb = launch.ccb
       assert ccb is not None
@@ -251,6 +258,18 @@ class MTComputeQueue(HWQueue):
       if poll_in_hcq:
         add(mt_poll(link,launch.v.addr+ccb.queue_off+0x1004+idx*0x30,token))
         add(usb_poke(link,launch.v.addr+ccb.queue_off+0x4028,next_wr))
+      if i < len(self.timestamp_slots):
+        start_signal,end_signal = self.timestamp_slots[i]
+        def read_timing(addr:int, dtype):
+          slot = usb_stack(dtype)
+          header = usb_ctrl(link,0x40,0xF0,0x20|0x0F00,2,usb_stack(dtypes.uint64,addr,dtype.itemsize//4).index(0),12,5000)
+          read = usb_bulk(link.after(header),0x81,slot.index(0),dtype.itemsize)
+          add(read)
+          return slot.after(read).index(0).load()
+        timestamp = read_timing(launch.v.addr+0x40a000,dtypes.u64)
+        run_time = read_timing(launch.v.addr+0x409008,dtypes.u32).cast(dtypes.u64)
+        if start_signal is not None: add(start_signal.index(1).store(timestamp))
+        if end_signal is not None: add(end_signal.index(1).store(timestamp+run_time))
       self.dev.poll_in_hcq = poll_in_hcq
       add(link.index(2).store(next_wr.cast(dtypes.u64)))
       add(link.index(3).store(seq+1))
