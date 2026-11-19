@@ -137,7 +137,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if u.op is not Ops.SOURCE: argst = word_wrap(argst.replace(':', ''))
     if isinstance(u.arg, ProgramInfo):
       argst = word_wrap(repr(u.arg).replace(f"params={u.arg.params!r}", "params=(\n" + '\n'.join(render_uir(p) for p in u.arg.params) + "\n)"))
-    label = [f"{str(u.op).split('.')[1]}{(chr(10)+argst) if argst else ''}"]
+    label, ref = [f"{u.op.name}{(chr(10)+argst) if argst else ''}"], None
     with soft_err(lambda _: label.append("<ISSUE GETTING DTYPE>")):
       if u.dtype != dtypes.void: label.append(str(u.dtype))
     for idx,x in enumerate(u.src[:1] if u.op in {Ops.STAGE, Ops.INDEX} else (u.src if u.op is not Ops.END else [])):
@@ -154,7 +154,9 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       if u._shape is not None:
         label.append(shape_to_str(u.shape))
       if u.op is Ops.CALL:
-        label += [u.body.key.hex()[:8], str(u.body.op)]
+        ref = data.ref_map.get(canonicalize_ast(u.body))
+        name = fmt_colored(data.ctxs[ref]["name"]) if ref is not None else u.body.arg.code if u.body.op is Ops.NATIVE else ""
+        label += [u.body.key.hex()[:8], f"{u.body.op.name} {name}"]
       if u.op in {Ops.INDEX, Ops.STAGE}:
         if len(u.src) > 1:
           label.append(render_index(s.render() for s in u.src[1:]) if sum(len(s.toposort()) for s in u.src[1:]) < 50 else "INDEX TOO LARGE")
@@ -164,8 +166,6 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       if u.op in {Ops.END, Ops.REDUCE, Ops.BACKEDGE} and len(trngs:=list(u.ended_ranges if u.op is Ops.BACKEDGE else
                                                                  UOp.sink(*u.src[range_start[u.op]:]).ranges)):
         label.append(' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs]))
-    ref = data.ref_map.get(canonicalize_ast(u.body)) if u.op is Ops.CALL else None
-    if ref is not None: label.append(f"codegen@{fmt_colored(data.ctxs[ref]['name'])}")
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
     color = uops_colors.get(u.op, "#ffffff")
