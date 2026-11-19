@@ -10531,3 +10531,6 @@ A6XX_UBO_1_BASE_HI__SHIFT = 0
 A6XX_UBO_1_SIZE__MASK = 0xfffe0000
 A6XX_UBO_1_SIZE__SHIFT = 17
 lvp_nir_options = gzip.decompress(base64.b64decode("H4sIAAAAAAAAA2NgZGRkYGAAkYxgCsQFsxigwgwQBoxmhCqFq2WEKwIrAEGIkQxoAEMALwCqVsCiGUwLMHA0QPn29nBJkswHANb8YpH4AAAA"))
+
+@dll.bind(c.POINTER[struct_nir_shader_compiler_options], ctypes.c_uint)
+def pan_shader_get_compiler_options(arch:int) -> c.POINTER[struct_nir_shader_compiler_options]: ...
