@@ -627,8 +627,8 @@ class DSPQueue(HWQueue):
     args = get_call_kernel_args(call, prg, self.devs)
     kernargs = UOp(Ops.LINEAR, src=tuple(pack_args(rows:=layout_args(args), round_up(max([o + w.dtype.itemsize for o, w in rows], default=8), 8))),
                    arg="kernargs")
-    fn = (p:=make_program(prg, 8, self.devs[0])).after(p.store(prg)).bitcast(dtypes.uint64).index(0).load()
-    self.cmd(DSP_EXEC, fn, kernargs.getaddr(self.devs))
+    # (the address of the program: the DSP reads its kernel_run there, see DSPDevice.function)
+    self.cmd(DSP_EXEC, (p:=make_program(prg, 8, self.devs[0])).after(p.store(prg)).getaddr(self.devs), kernargs.getaddr(self.devs))
   def wait(self, signal:UOp, value:UOp, eq:bool=False): self.cmd(DSP_WAIT_EQ if eq else DSP_WAIT, signal.getaddr(self.devs), value)
   def signal(self, signal:UOp, value:UOp): self.cmd(DSP_STORE, signal.getaddr(self.devs), value)
   # (a timestamp slot is [signal][timestamp])
@@ -826,7 +826,7 @@ static int run_cmds(const cmd_t *c, unsigned int n) {{
   int ret = 0;
   for (const cmd_t *e = c + n / sizeof(cmd_t); c < e && !ret; c++) {{
     unsigned long long *p = (unsigned long long*)(unsigned int)c->a;
-    if (c->op == {DSP_EXEC}) ((void (*)(const void*, pool_t*))(unsigned int)c->a)((const void*)(unsigned int)c->b, the_pool);
+    if (c->op == {DSP_EXEC}) (*(void (**)(const void*, pool_t*))p)((const void*)(unsigned int)c->b, the_pool);
     // (the commands run in order: a wait that isn't met now never is)
     else if (c->op == {DSP_WAIT}) ret = *p < c->b;
     else if (c->op == {DSP_WAIT_EQ}) ret = *p != c->b;
@@ -1027,7 +1027,7 @@ class MockDSP:
     # (an exception can't leave the callback, the device's error state reports it)
     try:
       for op, a, b in itertools.batched(to_mv(addr, n).cast('Q'), 3):
-        if op == DSP_EXEC: self.programs[a](b)
+        if op == DSP_EXEC: self.programs[to_mv(a, 8).cast('Q')[0]](b)
         elif op in (DSP_WAIT, DSP_WAIT_EQ) and not (to_mv(a, 8).cast('Q')[0] >= b if op == DSP_WAIT else to_mv(a, 8).cast('Q')[0] == b):
           raise RuntimeError(f"a wait for {b} isn't met")
         elif op == DSP_STORE: to_mv(a, 8).cast('Q')[0] = b
