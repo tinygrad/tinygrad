@@ -271,9 +271,10 @@ dsp_vec_rewrite = PatternMatcher([
 
 # ***** L2 prefetch *****
 # there's no hardware prefetch into L2 and only one l2fetch in flight per thread. a load prefetches what it reads in the next iteration of the
-# innermost loop it reads at least PREFETCH_MIN bytes in, as a box of rows. the prefetch goes right before the loop inside that one
-PREFETCH_MIN, PREFETCH_SMALL, PREFETCH_CUR = getenv('PREFETCH_MIN', 2048), getenv('PREFETCH_SMALL', 16384), getenv('PREFETCH_CUR', 32768)
-PREFETCH_REUSE = getenv('PREFETCH_REUSE', 262144)
+# innermost loop it reads at least PREFETCH_MIN bytes in, as a box of rows. the prefetch goes right before the loop inside that one.
+# a buffer of at most PREFETCH_SMALL bytes isn't prefetched, a prefetch of at least PREFETCH_CUR bytes is of the iteration itself
+# what's read again in a loop (up to PREFETCH_REUSE bytes) is in L2 after its first iteration
+PREFETCH_MIN, PREFETCH_SMALL, PREFETCH_CUR, PREFETCH_REUSE = 2048, 16384, 32768, 256 << 10
 
 def footprint(idx:UOp, inner:list[UOp], consts:list[int], itemsize:int, width:int) -> list[tuple[int, int]]|None:
   # the byte intervals idx+c reads for all c in consts and all values of the inner ranges, relative to idx+min(consts) with them at 0
@@ -310,7 +311,6 @@ def l2fetch_rt(ivs:list[tuple[int, int]]) -> tuple[int, int, int]|None:
   return (stride, min(0xffff, ivs[0][1]-ivs[0][0]), min(0xffff, len(ivs)))
 
 def add_prefetch(sink:UOp) -> UOp|None:
-  if not getenv("PREFETCH", 1): return None
   if any(u.op is Ops.CALL and u.body.op is Ops.NATIVE and "l2fetch" in str(u.body.arg.code) for u in sink.toposort()): return None
   # the loop tree: the parent of a range is the innermost range of its END
   ends = {u.src[1]:u for u in sink.toposort() if u.op is Ops.END and u.src[1].op is Ops.RANGE}
@@ -400,10 +400,9 @@ dsp_late = PatternMatcher([
   (UPat(Ops.CAST, name="x", src=(UPat(Ops.SHR, src=(UPat(Ops.MUL, src=[UPat(Ops.CAST, name="a"), UPat(name="c")]), UPat(name="s"))),)), mulhi),
 ])
 
-# the DSP has 2 HVX contexts in 128 byte mode
-# DSP_THREADS=0 runs the kernel on the fastrpc thread, a crash there is an error instead of a hang
-DSP_THREADS, DSP_STACK, DSP_OVERREAD = getenv("DSP_THREADS", 2), getenv("DSP_STACK", 64*1024), 512
-NCORES = max(DSP_THREADS, 1)
+# the DSP has 2 HVX contexts in 128 byte mode: a kernel runs on 2 cores, each a thread with a stack of DSP_STACK bytes
+# the buffers can be read DSP_OVERREAD bytes before and after
+NCORES, DSP_STACK, DSP_OVERREAD = 2, 64 << 10, 512
 DSP_THREADS_PRELUDE = """typedef unsigned long qurt_thread_t;
 typedef struct { char name[16]; unsigned char tcb_partition; unsigned char affinity; unsigned short priority; unsigned char asid;
   unsigned char bus_priority; unsigned short timetest_id; unsigned int stack_size; void *stack_addr; char padding[96]; } qurt_thread_attr_t;
@@ -411,6 +410,7 @@ int qurt_thread_create(qurt_thread_t *thread_id, qurt_thread_attr_t *attr, void 
 int qurt_thread_join(qurt_thread_t tid, int *status); void qurt_thread_exit(int status);
 void* malloc(unsigned int); void free(void*);"""
 
+DSP_INLINE_BYTES = 32 << 10
 class DSPRenderer(ClangRenderer):
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_typedef = "__attribute__((noinline)) void"
@@ -443,9 +443,9 @@ class DSPRenderer(ClangRenderer):
       if u.op is Ops.END: depth -= 1
     stores = [u for u in uops if u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.GLOBAL]
     self.parallel = top[0] if len(top) == 1 and stores and all(top[0] in st.ranges for st in stores) else None
-    # a kernel with little memory or no parallel loop runs its cores one after the other on the calling thread: a thread costs ~15us
+    # a kernel with little memory or no parallel loop runs its cores one after the other on the calling thread
     self.inline = self.parallel is None or sum(u.max_numel()*u.dtype.itemsize for u in uops if u.op is Ops.PARAM and
-                                               u.addrspace is AddrSpace.GLOBAL) < getenv("DSP_INLINE_BYTES", 32768)
+                                               u.addrspace is AddrSpace.GLOBAL) < DSP_INLINE_BYTES
     # a small load whose lanes are only used one at a time loads the whole vector register
     users: dict[UOp, list[UOp]] = {}
     for u in uops:
@@ -500,7 +500,6 @@ class DSPRenderer(ClangRenderer):
     return ['''/* DSP boilerplate */ struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency;
       _Bool set_dcvs_params; short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3];};''','int HAP_power_set(void*, void*);',
       'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
-      'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
       'unsigned long long HAP_perf_get_time_us(void);', HVX_PRELUDE] + self._vector_typedefs(uops) + self.render_wmmas(uops)
 
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]]) -> str:
@@ -524,7 +523,7 @@ class DSPRenderer(ClangRenderer):
       return [f'{function_name}({", ".join([f"args[0].a{i}" for i in range(len(bufs))] + [str(c)])});' for c in range(ncaller)] if ncaller == NCORES \
         else [f"pool->run(pool, kcore, args, sizeof(kargs_t), {ncaller});"]
     # the calling thread's stack takes small frames of vectors only: a big frame runs on the workers (see DSPCompiler)
-    msrc += ["#ifdef DSP_BIG_FRAME"] + run(0) + ["#else"] + run(NCORES if self.inline or DSP_THREADS == 0 else 1) + ["#endif"]
+    msrc += ["#ifdef DSP_BIG_FRAME"] + run(0) + ["#else"] + run(NCORES if self.inline else 1) + ["#endif"]
     msrc += [             "*(unsigned long long *)(pra[1].buf.pv) = HAP_perf_get_time_us() - start;"]
     msrc += ["return 0; }"]
     return '\n'.join(msrc)
@@ -571,7 +570,7 @@ class DSPArena:
     self.va = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, self.share_info.fd, 0)
     self.dsp_addr, self.parts = dev.dsp_util(DSP_UTIL_MAP, size=size, fd=self.share_info.fd), TLSFAllocator(size)
 
-DSP_ARENA = getenv("DSP_ARENA", 32 << 20)
+DSP_ARENA = 32 << 20
 class DSPAllocator(Allocator['DSPDevice']):
   def __init__(self, dev:DSPDevice):
     super().__init__(dev)
@@ -619,10 +618,10 @@ class DSPAllocator(Allocator['DSPDevice']):
     return DSPBuffer(buf.va_addr+offset, size, buf.share_info, buf.offset+offset, buf.dsp_addr+offset if buf.dsp_addr else 0, buf.arena)
 
 # the biggest stack frame the calling (fastrpc) thread runs: a bigger one of vectors crashes it
-DSP_CALLER_FRAME = getenv("DSP_CALLER_FRAME", 4096)
+DSP_CALLER_FRAME = 4096
 class DSPCompiler(Compiler):
   def __init__(self, mock:bool=False):
-    self.mock, compiler_args = mock, f"--target=hexagon -mcpu=hexagonv65 -fuse-ld=lld -nostdlib -mhvx=v65 -mhvx-length=128b -O{getenv('DSP_OPT', 2)}"
+    self.mock, compiler_args = mock, "--target=hexagon -mcpu=hexagonv65 -fuse-ld=lld -nostdlib -mhvx=v65 -mhvx-length=128b -O2"
     if mock: self.args = f"-static {compiler_args}"
     else:
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
@@ -672,9 +671,8 @@ class MockDSPRenderer(DSPRenderer):
         sz = b[1][0].max_numel()*b[1][0].dtype.itemsize
         # unmapped guard pages (qemu's are 64KB) around the buffer catch out of bounds accesses. for loop for big reads
         rsz = round_up(sz+2*DSP_OVERREAD, 0x10000)
-        start = round_down(rsz-sz-DSP_OVERREAD, 128) if getenv('MOCKDSP_GUARD_END') else DSP_OVERREAD
         msrc.append(f"char *g{i} = (char*)mmap2(0, {rsz+0x20000}, 3, 0x22, -1, 0)+0x10000; munmap(g{i}-0x10000, 0x10000); "
-                    f"munmap(g{i}+{rsz}, 0x10000); char *buf{i} = g{i}+{start}; "
+                    f"munmap(g{i}+{rsz}, 0x10000); char *buf{i} = g{i}+{DSP_OVERREAD}; "
                     f"for(int rd = 0; rd < {sz}; rd += read(0, buf{i}+rd, {sz}-rd));")
       else:
         msrc.append(f"{self._render_dtype(b[1][0].dtype)} val{i}; read(0, &val{i}, {b[1][0].dtype.itemsize});")
@@ -688,13 +686,14 @@ class MockDSPRenderer(DSPRenderer):
     msrc.append('exit(0); }')
     return '\n'.join(msrc)
 
-DSP_OPEN_LIBS = getenv("DSP_OPEN_LIBS", 512)
-# a lib that maps buffers on the DSP, unmaps them and writes back and drops the DSP's cache lines of them
+# the libs open at once: the DSP maps ~250 things (a lib is one)
+DSP_OPEN_LIBS = 128
+# a lib that maps buffers on the DSP and writes back and drops the DSP's cache lines of them
 # and that runs the pool of workers (threads with their own stacks) the kernels run their cores on
-DSP_UTIL_MAP, DSP_UTIL_UNMAP, DSP_UTIL_FLUSH_INVALIDATE, DSP_UTIL_POOL = 0, 1, 2, 3
+DSP_UTIL_MAP, DSP_UTIL_FLUSH_INVALIDATE, DSP_UTIL_POOL = 0, 1, 2
 DSP_UTIL_SRC = DSP_THREADS_PRELUDE + f"""
 typedef union {{ struct {{ void *pv; unsigned int len; }} buf; struct {{ int fd; unsigned int offset; }} dma; }} remote_arg;
-void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset); int HAP_munmap(void *addr, int len);
+void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);
 int qurt_mem_cache_clean(unsigned int addr, unsigned int size, int opcode, int type);
 typedef union {{ unsigned long long raw; struct {{ unsigned int signals, waiting, queue, attribute; }} X; }} qurt_signal_t;
 void qurt_signal_init(qurt_signal_t *signal); void qurt_signal_set(qurt_signal_t *signal, unsigned int mask);
@@ -734,9 +733,8 @@ int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {{
   if ((sc>>24) != 2) return 0;
   unsigned int *in = pra[0].buf.pv, op = in[0], addr = in[1], size = in[2];
   if (op == 0) *(unsigned int*)pra[1].buf.pv = (unsigned int)HAP_mmap(0, size, 3, 0, pra[2].dma.fd, 0);
-  if (op == 1) HAP_munmap((void*)addr, size);
-  if (op == 2) qurt_mem_cache_clean(addr, size, 2 /* QURT_MEM_CACHE_FLUSH_INVALIDATE */, 1 /* QURT_MEM_DCACHE */);
-  if (op == 3) *(unsigned int*)pra[1].buf.pv = (unsigned int)make_pool();
+  if (op == 1) qurt_mem_cache_clean(addr, size, 2 /* QURT_MEM_CACHE_FLUSH_INVALIDATE */, 1 /* QURT_MEM_DCACHE */);
+  if (op == 2) *(unsigned int*)pra[1].buf.pv = (unsigned int)make_pool();
   return 0;
 }}"""
 class DSPDevice(Compiled):
@@ -780,8 +778,9 @@ class DSPDevice(Compiled):
     # a lib stays open: opening and closing one for every call leaks on the DSP, it dies after ~1500 calls
     def _exec_lib():
       if (handle:=self.lib_handles.get(lib)) is None:
-        # (up to DSP_OPEN_LIBS of them, the oldest is closed)
-        if len(self.lib_handles) >= DSP_OPEN_LIBS: self.close_lib(self.lib_handles.pop(next(iter(self.lib_handles))))
+        # (up to DSP_OPEN_LIBS of them, the oldest kernel is closed. the util lib stays, its workers run its code)
+        if len(self.lib_handles) >= DSP_OPEN_LIBS:
+          self.close_lib(self.lib_handles.pop(next(l for l in self.lib_handles if l is not getattr(self, "util_lib", None))))
         handle = self.lib_handles[lib] = self.open_lib(lib)
       qcom_dsp.FASTRPC_IOCTL_INVOKE_ATTRS(self.rpc_fd, fds=fds, attrs=attrs, inv=qcom_dsp.struct_fastrpc_ioctl_invoke(handle=handle, sc=sc, pra=args))
     try: _exec_lib()

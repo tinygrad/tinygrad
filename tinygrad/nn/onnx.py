@@ -7,7 +7,7 @@ from tinygrad.mixin.op import ReductionStr
 from tinygrad.helpers import getenv, all_same, prod, flatten, make_tuple, argsort, get_single_element, polyN, Context
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate, least_upper_dtype, DTYPES_DICT
 from tinygrad.device import Device
-from tinygrad.uop.ops import sint, _broadcast_shape, resolve
+from tinygrad.uop.ops import sint, _broadcast_shape
 
 # quantization params are python consts: a scalar, a per channel list or the bytes of a uint8 tensor
 QParam = ConstType|Sequence[ConstType]|bytes
@@ -289,7 +289,6 @@ def _to_python_const(t:Tensor) -> list[ConstType]|ConstType|bytes:
 
 # ***** QDQ fusion *****
 QDQ_PASSTHROUGH = {"Reshape", "Flatten", "Squeeze", "Unsqueeze", "Transpose"}
-_weight_layouts: dict[tuple, Tensor] = {}
 def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[str, ...]) -> tuple[OnnxNode, ...]:
   """
   Like onnxruntime, rewrite the float ops of a QDQ model (DequantizeLinear -> op -> QuantizeLinear) into QLinear ops that compute in integers.
@@ -344,10 +343,6 @@ def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[st
         folded = (wt - (bz.reshape(-1, 1) if opts.get("transB", 0) else bz)).sum(1 if opts.get("transB", 0) else 0) * -az
         values[bname:=f"{n.outputs[0]}_folded_bias"] = (folded + cast(Tensor, init(b[0])) if b else folded).realize()
         b, opts = (bname,), {**opts, "_bias_folded": 1}
-      if opts.get("transB", 0):
-        # the weights are stored transposed: the outputs are contiguous in them, a vector of outputs loads a vector of weights
-        values[wname:=f"{w[0]}_transposed"] = cast(Tensor, init(w[0])).T.contiguous().realize()
-        w, opts = (wname, *w[1:]), {**opts, "transB": 0}
       new = OnnxNode("QGemm", n.opset_id, (*a, *w, *(b or ("",)), *y.inputs[1:]), y.outputs, opts)
     elif n.op == "MatMul" and (a:=dq(n.inputs[0])) and (w:=dq(n.inputs[1], axis=1)):
       new = OnnxNode("QLinearMatMul", n.opset_id, (*a, *w, *y.inputs[1:]), y.outputs, {})
@@ -359,10 +354,6 @@ def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[st
       # moving data around doesn't change the quantized values
       new = OnnxNode(n.op, n.opset_id, (x[0], *n.inputs[1:]), y.outputs, n.opts)
     if new is not None: skip.add(id(y))
-    # a QuantizeLinear left (of a float input) has its params as python consts too
-    if new is None and n.op == "QuantizeLinear" and len(n.inputs) == 3 and per_tensor(*n.inputs[1:]):
-      new = OnnxNode(n.op, n.opset_id, n.inputs, n.outputs, {**n.opts, "_scale": float(cast(Tensor, init(n.inputs[1])).item()),
-                                                               "_zero_point": int(cast(Tensor, init(n.inputs[2])).item())})
     if id(n) not in skip: fused.append(new or n)
   return tuple(fused)
 
@@ -554,7 +545,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       sh = _per_channel(shift, acc.ndim, dtypes.int64)
       out = (x + _per_channel([(1 << (v-1)) - 1 for v in shift], acc.ndim, dtypes.int64) + (x.rshift(sh) & 1)).rshift(sh).cast(dtypes.int32)
     # the quantized output is realized: the next op reads it many times (a conv), recomputing the requantize there would be slow
-    return _realize_act(_clamp_cast(out + _per_channel(zero_point, acc.ndim, dtypes.int32), dtype))
+    return _clamp_cast(out + _per_channel(zero_point, acc.ndim, dtypes.int32), dtype).contiguous()
 
   def _qlinearop_float(op, inputs:list[Tensor], zero_points:list[Tensor], scales:list[Tensor], out_scale:Tensor, out_zero_point:Tensor, **opts):
     # op execution is done in float32
@@ -1235,15 +1226,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
   # ***** Quantization Ops *****
-  def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1,
-                     _scale:float|None=None, _zero_point:int=0):
+  def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
     if isinstance(y_zero_point, Tensor): out_dtype = y_zero_point.dtype
     elif output_dtype != 0: out_dtype = OnnxDataType(output_dtype).to_dtype()
     else: out_dtype = dtypes.uint8
-    # a device with vector ALUs without floats quantizes in integers
-    if out_dtype == dtypes.uchar and x.dtype == dtypes.float32 and _scale is not None and isinstance(x.device, str) and \
-       (ren:=Device[x.device].renderer).vector_alu and dtypes.float32 not in ren.vector_dtypes:
-      return _quantize_int(x, _scale, _zero_point)
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
     if out_dtype == dtypes.uchar:
       # this appears to work in practice, at least for uchar out_dtype. it folds with the quantize stuff
@@ -1251,20 +1237,6 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     else:
       ret = _clamp_cast(((x / y_scale).round() + y_zero_point), out_dtype)
     return ret.contiguous()
-
-  def _quantize_int(x:Tensor, scale:float, zero_point:int) -> Tensor:
-    # x/scale + zero_point rounded half up to uint8 in integer math on the float's bits, for vector units without floats
-    # |x| is m * 2**(e-150) with a 24 bit mantissa m: p = m/scale/2**k (30 bits), x/scale in 21 bit fixed point is p shifted by 129-k-e
-    k = max(0, math.ceil(math.log2(2**25 / scale)) - 30)
-    bits = x.bitcast(dtypes.int32)
-    e, m = (bits >> 23) & 0xff, (bits & 0x7fffff) | 0x800000
-    p = ((m << 7).cast(dtypes.int64) * round(2**(25-k) / scale)).rshift(32).cast(dtypes.int32)
-    # (it saturates at 256, past that a left shift may overflow)
-    t, sat = 129 - k - e, 1 << 29
-    left = (-t).maximum(0).minimum(30)
-    v = (t >= 0).where((t < 31).where(p >> t.maximum(0).minimum(30), 0), ((p >> (30 - left)) != 0).where(sat, p << left))
-    v = (bits < 0).where(-v.minimum(sat), v.minimum(sat))
-    return _clamp_cast((v + (zero_point << 21) + (1 << 20)) >> 21, dtypes.uint8).contiguous()
 
   def DynamicQuantizeLinear(x: Tensor):
     # only support uint8
@@ -1281,50 +1253,18 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def _qconv(x:Tensor, xz:int, w:Tensor, wz:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:tuple[int, ...]|int=1, group:int=1,
              kernel_shape:tuple[int, ...]|None=None, pads:tuple[int, ...]|int=0, strides:tuple[int, ...]|int=1, _bias_folded:int=0) -> Tensor:
     # sum((x-xz)*(w-wz)) in int32. x is padded with its zero point so the zero point terms are the same for every output
-    # the padded input is realized: the conv reads it without any bounds checks
-    # a conv with few inputs per output is a matmul of its realized windows of inputs. channels of zero points (and weights of the weight zero
-    # point) are added to make the inputs a multiple of 4, then the matmul's weights are in 4x4 blocks like a 1x1 conv's
-    im2col = group == 1 and w.shape[2:] != (1, 1) and prod(w.shape[1:]) <= 32 and dilations in (1, (1, 1))
-    ci = next(c for c in range(int(w.shape[1]), int(w.shape[1])+4) if c*prod(w.shape[2:]) % 4 == 0) if im2col else int(w.shape[1])
-    if any(p := _resolve_pool_pads(x, pads, kernel_shape or w.shape[2:], dilations, strides, auto_pad)) or ci != w.shape[1]:
-      # in the layout of the conv's output
-      out_shape = (*x.shape[:2], *[s//st for s,st in zip(x.shape[2:], make_tuple(strides, 2))])
-      x = _realize_act(x.pad(p, value=xz).pad(((0,0), (0,ci-int(w.shape[1])), (0,0), (0,0)), value=xz), _channels_last(out_shape))
-    if im2col:
-      if ci != w.shape[1]:
-        w = w.pad(((0,0), (0,ci-int(w.shape[1])), (0,0), (0,0)), value=wz[0]) if len(wz) == 1 else \
-          w.cat(Tensor(wz, dtype=w.dtype).reshape(-1, 1, 1, 1).expand(int(w.shape[0]), ci-int(w.shape[1]), *w.shape[2:]), dim=1)
-      co, k, (n, _, ho, wo) = int(w.shape[0]), prod(w.shape[1:]), (x._pool(w.shape[2:], strides).shape)[:4]
-      cols = x._pool(w.shape[2:], strides).permute(0, 1, 4, 5, 2, 3).reshape(n, k, ho*wo).contiguous().int()
-      acc = _conv_weights(w.reshape(co, k, 1, 1), False).reshape(co, k).int() @ cols
-      if any(wz): acc = acc - cols.sum(1, keepdim=True) * _per_channel(wz, 3, dtypes.int32)
-      if xz and not _bias_folded: acc = acc - xz * (w.int() - _per_channel(wz, w.ndim, dtypes.int32, axis=0)).sum((1, 2, 3)).reshape(1, -1, 1)
-      return acc.reshape(n, co, ho, wo)
-    x = x.int()
-    w, wz_ = w.int(), _per_channel(wz, w.ndim, dtypes.int32, axis=0)
-    # with one input channel per group (depthwise) the zero point terms cost as much as the conv, subtract them first
-    if w.shape[1] == 1:
-      # sum(x*w) - wz*sum(x) - xz*sum(w-wz): the reduces multiply bytes, like the vrmpy instruction of the DSP
-      acc = x.conv2d(w, groups=group, stride=strides, dilation=dilations)
-      if any(wz): acc = acc - x.conv2d(Tensor.ones(*w.shape, dtype=dtypes.uint8).int(), groups=group, stride=strides, dilation=dilations) * \
-        _per_channel(wz, acc.ndim, dtypes.int32)
-      return acc - xz * (w - wz_).sum(tuple(range(1, w.ndim))).reshape(1, -1, *[1]*(w.ndim-2)) if xz else acc
+    # the padded input is realized: the conv reads it without bounds checks
+    if any(p := _resolve_pool_pads(x, pads, kernel_shape or w.shape[2:], dilations, strides, auto_pad)): x = x.pad(p, value=xz).contiguous()
+    x, w, wz_ = x.int(), w.int(), _per_channel(wz, w.ndim, dtypes.int32, axis=0)
     acc = x.conv2d(w, groups=group, stride=strides, dilation=dilations)
     # sum(x*w) - wz*sum(x) - xz*sum(w-wz)
     if any(wz):
-      xsum = x.sum(1, keepdim=True) if group == 1 and w.shape[2:] == (1, 1) and strides in (1, (1, 1)) else \
+      xsum = x.sum(1, keepdim=True) if group == 1 and w.shape[2:] == (1,)*(w.ndim-2) and strides in (1, (1,)*(w.ndim-2)) else \
         x.conv2d(Tensor.ones(group, *w.shape[1:], dtype=dtypes.int32), groups=group, stride=strides, dilation=dilations)
       acc = acc - xsum.repeat_interleave(int(w.shape[0])//group, 1) * _per_channel(wz, acc.ndim, dtypes.int32)
     # with _bias_folded, fuse_qdq folded the last term into the bias
     if xz and not _bias_folded: acc = acc - xz * (w - wz_).sum(tuple(range(1, w.ndim))).reshape(1, -1, *[1]*(w.ndim-2))
     return acc
-
-  def _channels_last(shape:tuple[sint, ...]) -> bool:
-    return len(shape) == 4 and bool(getenv("NHWC")) and resolve(prod(shape[2:]) <= getenv("NHWC_MAX", 256))
-  def _realize_act(x:Tensor, channels_last:bool|None=None) -> Tensor:
-    # a small 2D activation is stored channels last (NHWC)
-    return x.permute(0, 2, 3, 1).contiguous().permute(0, 3, 1, 2) if (_channels_last(x.shape) if channels_last is None else channels_last) \
-      else x.contiguous()
 
   def _qmatmul(a:Tensor, az:int, b:Tensor, bz:list[int], bias_folded:int=0) -> Tensor:
     # sum((a-az)*(b-bz)) in int32: sum(a*b) - bz*sum(a) - az*sum(b-bz). b's zero point is per tensor or per column
@@ -1334,21 +1274,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if az and not bias_folded: acc = acc - az * (b - bz_).sum(-2, keepdim=True)
     return acc
 
-  def _conv_weights(w:Tensor, channels_last:bool, blk:int=4) -> Tensor:
-    # a 1x1 conv's weights are stored in the layout of its matmul's other operand, made once:
-    # with the activations channels last (the outputs are the vector) the outputs are contiguous, else in blkxblk blocks of outputs and inputs
-    if w.shape[2:] != (1, 1) or w.shape[0] % blk or w.shape[1] % blk: return w
-    if (key:=(w.uop.key, channels_last, blk)) not in _weight_layouts:
-      co, ci = w.shape[:2]
-      if channels_last: _weight_layouts[key] = w.reshape(co, ci).T.contiguous().realize().T.reshape(w.shape)
-      else: _weight_layouts[key] = w.reshape(co//blk, blk, ci//blk, blk).permute(0, 2, 1, 3).contiguous().realize().permute(0, 2, 1, 3) \
-        .reshape(w.shape)
-    return _weight_layouts[key]
-
   def QLinearConv(x:Tensor, x_scale:QParam, x_zero_point:QParam, w:Tensor, w_scale:QParam, w_zero_point:QParam,
                   y_scale:QParam, y_zero_point:QParam, B:Tensor|None=None, **opts):
-    # (a small output is the narrow tensor core's M, it takes 8x8 blocks)
-    w = _conv_weights(w, _channels_last(x.shape), 8 if prod(x.shape[2:]) <= getenv("NARROW_TC", 64) and w.shape[2:] == (1, 1) else 4)
     acc = _qconv(x, _qconst(x_zero_point)[0], w, _qconst(w_zero_point), **opts)
     if B is not None: acc = acc + B.reshape(1, -1, *[1]*(acc.ndim-2))
     return _requantize(acc, [_qconst(x_scale)[0]*s/_qconst(y_scale)[0] for s in _qconst(w_scale)], _qconst(y_zero_point), _qdtype(y_zero_point))
@@ -1364,23 +1291,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def QGemm(A:Tensor, a_scale:QParam, a_zero_point:QParam, B:Tensor, b_scale:QParam, b_zero_point:QParam,
             C:Tensor|None=None, y_scale:QParam|None=None, y_zero_point:QParam|None=None, alpha:float=1.0, transA:int=0, transB:int=0,
             _bias_folded:int=0):
-    A, B = A.transpose() if transA else A, B.transpose() if transB else B
-    if A.ndim == 2 and getenv("GEMM_CONV", 1):
-      # a matmul of the weights (in 4x4 blocks, like a 1x1 conv's) and the activations, the outputs are the matmul's M
-      # the weights are stored in blocks of 128 outputs (the tensor core's A, a vector of the outputs), the outputs padded to them
-      co, ci = int(B.shape[1]), int(B.shape[0])
-      if (key:=(B.uop.key, "gemv")) not in _weight_layouts:
-        _weight_layouts[key] = B.T.pad(((0, -co % 128), (0, 0))).reshape(-1, 128, ci).permute(0, 2, 1).contiguous().realize() \
-          .permute(0, 2, 1).reshape(-1, ci).T
-      wb = _weight_layouts[key]
-      az, wz = _qconst(a_zero_point)[0], _per_channel(_qconst(b_zero_point), 2, dtypes.int32, axis=1)
-      # (the batch is padded to a multiple of 4, the tensor core's N, stored in its blocks of 4 batches by 4 inputs)
-      a4 = A.pad(((0, (-A.shape[0]) % 4), (0, 0))).reshape(-1, 4, ci//4, 4).permute(0, 2, 1, 3).contiguous().permute(0, 2, 1, 3).reshape(-1, ci)
-      acc = (a4.int() @ wb.int()).contiguous()[:A.shape[0], :co]
-      wb = B
-      if any(_qconst(b_zero_point)): acc = acc - A.int().sum(-1, keepdim=True) * wz
-      if az and not _bias_folded: acc = acc - az * (wb.int() - wz).sum(0, keepdim=True)
-    else: acc = _qmatmul(A, _qconst(a_zero_point)[0], B, _qconst(b_zero_point), _bias_folded)
+    acc = _qmatmul(A.transpose() if transA else A, _qconst(a_zero_point)[0], B.transpose() if transB else B, _qconst(b_zero_point), _bias_folded)
     if C is not None: acc = acc + C
     scale = [alpha*_qconst(a_scale)[0]*s for s in _qconst(b_scale)]
     if y_scale is None: return acc.float() * _per_channel(scale, 2, dtypes.float32)
@@ -1393,7 +1304,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     frac = min(24, int(math.log2(2**31 / (256 * (ma + mb)))))
     acc = (a.int() - _qconst(a_zero_point)[0]) * round(ma * 2**frac) + (b.int() - _qconst(b_zero_point)[0]) * round(mb * 2**frac)
     out = ((acc + (1 << (frac-1)) - 1 + ((acc >> frac) & 1)) >> frac) + _qconst(c_zero_point)[0]
-    return _realize_act(_clamp_cast(out, _qdtype(c_zero_point)))
+    return _clamp_cast(out, _qdtype(c_zero_point)).contiguous()
 
   def QLinearMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
     return _qlinearop_quantized(Tensor.mul, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], c_scale, c_zero_point)
