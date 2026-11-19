@@ -37,19 +37,22 @@ def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
     in1_r = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg, reverse=True)
     red = sorted(r.src[1:], key=lambda x: x.arg, reverse=True)
     ms = [m for _,m,_ in itertools.product(in1_r, in0_r, red)] + [m for _,m,_ in itertools.product(in0_r, in1_r, red)]
-    for axis in sorted(range(len(ms)), key=lambda i: out_strides.get(ms[i]) != 1):
-      # of the tensor cores that fit (the first preferred), a later one if it does a lot less work: the padded multiply adds
-      cands = []
+    # of the choices with M contiguous in the output (else the first that fits), for each tensor core the one with the least work (the padded
+    # multiply adds). the first tensor core is preferred, a later one if it does a lot less work
+    best: dict[int, tuple[int, Scheduler]] = {}
+    for axis in (contiguous:=[i for i in range(len(ms)) if out_strides.get(ms[i]) == 1]) or range(len(ms)):
       for sel in (range(len(k.ren.tensor_cores)) if TC_SELECT.value == -1 else [TC_SELECT.value]):
         tk = k.copy()
         try: tk.apply_opt(Opt(OptOps.TC, axis, (sel, 2, USE_TC.value)))
         except KernelOptError: continue
-        cands.append((prod(tk.full_shape) * k.ren.tensor_cores[sel].dims[2], tk))
-      if cands:
-        best = cands[0]
-        for c in cands[1:]:
-          if c[0] < best[0] * 3 // 4: best = c
-        return loop_order(best[1])
+        work = prod(tk.full_shape) * k.ren.tensor_cores[sel].dims[2]
+        if sel not in best or work < best[sel][0]: best[sel] = (work, tk)
+      if best and not contiguous: break
+    if best:
+      choice = best[min(best)]
+      for sel in sorted(best)[1:]:
+        if best[sel][0] < choice[0] * 3 // 4: choice = best[sel]
+      return loop_order(choice[1])
   k = k.copy()
   # the biggest input is read in vectors: if it's contiguous in a long reduce but not in the output, the reduce is the vector (its lanes accumulate)
   loads = sorted([x for x in k.ast.backward_slice if x.op is Ops.INDEX and x.src[0].op is Ops.PARAM and x not in [s.src[0] for s in stores]],
