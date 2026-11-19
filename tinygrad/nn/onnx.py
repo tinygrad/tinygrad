@@ -303,7 +303,11 @@ def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[st
   consumers: dict[str, list[OnnxNode]] = {}
   for n in nodes:
     for i in n.inputs: consumers.setdefault(i, []).append(n)
-  def init(name:str) -> Tensor|None: return t if isinstance(t:=values.get(name), Tensor) else None
+  # (the params and the tables and biases made of them are computed on the CPU, the ones made go to the default device)
+  def init(name:str) -> Tensor|None: return t.to("CPU") if isinstance(t:=values.get(name), Tensor) else None
+  def put(name:str, t:Tensor) -> str:
+    values[name] = t.to(Device.DEFAULT).realize()
+    return name
   def per_tensor(*names:str) -> bool: return all((t:=init(nm)) is not None and t.numel() == 1 for nm in names)
   def same(a:str, b:str) -> bool: return a == b or ((ta:=init(a)) is not None and (tb:=init(b)) is not None and ta.tolist() == tb.tolist())
   def dq(name:str, axis:int|None=None) -> tuple[str, ...]|None:
@@ -333,8 +337,7 @@ def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[st
       not cast(Tensor, init(b[2])).abs().max().item() and (cast(Tensor, init(b[1])) - scale).abs().max().item() <= 1e-6 * scale.abs().max().item():
       return (b[0],)
     if (t:=init(name)) is None or not dtypes.is_float(t.dtype): return None
-    values[qname:=f"{name}_quantized_int32"] = (t / scale).round().cast(dtypes.int32).realize()
-    return (qname,)
+    return (put(f"{name}_quantized_int32", (t / scale).round().cast(dtypes.int32)),)
 
   fused, skip = [], set()
   for n in nodes:
@@ -345,7 +348,7 @@ def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[st
       src_name, xdt, ops, moves = src
       t = Tensor.arange(xdt.min, xdt.max+1).cast(xdt)
       for op in ops + ([y] if y is not None else []): t = select_op(op)(t, *[init(i) for i in op.inputs[1:]], **op.opts)
-      values[tname:=f"{(y or n).outputs[0]}_table"] = t.flatten().realize()
+      tname = put(f"{(y or n).outputs[0]}_table", t.flatten())
       names = [f"{(y or n).outputs[0]}_lookup{i}" for i in range(len(moves))] + [(y or n).outputs[0]]
       new = [OnnxNode("QLinearLookup", n.opset_id, (src_name, tname), (names[0],), {})] + \
             [dataclasses.replace(m, inputs=(a, *m.inputs[1:]), outputs=(b,)) for m,a,b in zip(moves, names, names[1:])]
@@ -357,7 +360,7 @@ def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[st
       if (wt:=cast(Tensor, init(w[0]))).shape[1] > 1 and (xz:=int(cast(Tensor, init(x[2])).item())):
         wz = cast(Tensor, init(w[2])).int().reshape(-1, *[1]*(wt.ndim-1))
         folded = (wt.int() - wz).sum(tuple(range(1, wt.ndim))) * -xz
-        values[bname:=f"{n.outputs[0]}_folded_bias"] = (folded + cast(Tensor, init(b[0])) if b else folded).realize()
+        bname = put(f"{n.outputs[0]}_folded_bias", folded + cast(Tensor, init(b[0])) if b else folded)
         new = OnnxNode("QLinearConv", n.opset_id, (*x, *w, *y.inputs[1:], bname), y.outputs, {**n.opts, "_bias_folded": 1})
     elif n.op == "Gemm" and n.opts.get("beta", 1.0) == 1.0 and not n.opts.get("transA", 0) and (a:=dq(n.inputs[0])) and \
       (w:=dq(n.inputs[1], axis=0 if n.opts.get("transB", 0) else 1)) and init(w[0]) is not None and \
@@ -367,7 +370,7 @@ def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[st
         # the a zero point term is a constant, it's folded into the bias
         wt, bz = cast(Tensor, init(w[0])).int(), cast(Tensor, init(w[2])).int()
         folded = (wt - (bz.reshape(-1, 1) if opts.get("transB", 0) else bz)).sum(1 if opts.get("transB", 0) else 0) * -az
-        values[bname:=f"{n.outputs[0]}_folded_bias"] = (folded + cast(Tensor, init(b[0])) if b else folded).realize()
+        bname = put(f"{n.outputs[0]}_folded_bias", folded + cast(Tensor, init(b[0])) if b else folded)
         b, opts = (bname,), {**opts, "_bias_folded": 1}
       new = OnnxNode("QGemm", n.opset_id, (*a, *w, *(b or ("",)), *y.inputs[1:]), y.outputs, opts)
     elif n.op == "MatMul" and (a:=dq(n.inputs[0])) and (w:=dq(n.inputs[1], axis=1)):

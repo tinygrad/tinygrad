@@ -1,7 +1,7 @@
 # for renderers with vector ALU ops (Renderer.vector_alu) the expander's shaped values are lowered as vectors, not split into lanes: a value of
 # shape S is a vector of prod(S) lanes in row major order. an access of memory at a shaped index that's a scalar plus a const for each lane is
 # vector accesses of the windows of the buffer its lanes are in, a movement op of a value is a gather of its lanes
-import itertools, functools, operator
+import functools, operator
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, exec_alu
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.helpers import prod, all_same, strides_for_shape, unwrap, dedup
@@ -17,16 +17,17 @@ def lane_of(u:UOp) -> tuple[UOp, int]|None:
 @functools.cache
 def lane_map(u:UOp) -> list[int|None]:
   # the lane of u.src[0] each lane of the movement op u is (None in a pad)
-  in_shape, strides = u.src[0].shape, strides_for_shape(u.src[0].shape)
+  in_shape, st = u.src[0].shape, strides_for_shape(u.src[0].shape)
   if u.op is Ops.RESHAPE: return list(range(prod(u.shape)))
-  ret: list[int|None] = []
-  for idx in itertools.product(*[range(int(s)) for s in u.shape]):
-    # (an expand adds leading dims)
-    if u.op is Ops.EXPAND: src = list(idx[len(idx)-len(in_shape):])
-    elif u.op is Ops.PERMUTE: src = [idx[u.marg.index(d)] for d in range(len(in_shape))]
-    elif u.op is Ops.SHRINK: src = [i+b for i,(b,_) in zip(idx, u.marg)]
-    else: src = [i-b for i,(b,_) in zip(idx, u.marg)] # PAD
-    ret.append(sum(i*s for i,s in zip(src, strides)) if all(0 <= i < s for i,s in zip(src, in_shape)) else None)
+  # each dim of u is a dim of the src with a stride, its index offset by a const (and in a pad it's in the src if it's in its size)
+  dims: list[tuple[int, int, int|None]]
+  if u.op is Ops.EXPAND: dims = [(0, 0, None)]*(len(u.shape)-len(in_shape)) + [(0 if s == 1 else x, 0, None) for x,s in zip(st, in_shape)]
+  elif u.op is Ops.PERMUTE: dims = [(st[p], 0, None) for p in u.marg]
+  elif u.op is Ops.SHRINK: dims = [(x, b, None) for x,(b,_) in zip(st, u.marg)]
+  else: dims = [(x, -b, n) for x,(b,_),n in zip(st, u.marg, in_shape)] # PAD
+  ret: list[int|None] = [0]
+  for (x, off, n), sz in zip(dims, u.shape):
+    ret = [None if r is None or (n is not None and not 0 <= j+off < n) else r + (j+off)*x for r in ret for j in range(int(sz))]
   return ret
 
 def lanes(u:UOp, env:dict[UOp, int], cache:dict[UOp, tuple]) -> tuple|None:
@@ -221,6 +222,9 @@ def vector_movement(x:UOp) -> UOp|None:
     return a.replace(src=tuple(s if s.shape == () else x.replace(src=(s,)+x.src[1:]) for s in a.src))
   if x.op is Ops.RESHAPE: return None
   if x.src[0].op is Ops.CONST and (v:=lanes(x, {}, {})) is not None: return UOp.stack(*[UOp.const(c, x.dtype) for c in v]).reshape(x.shape)
+  # (a gather of a gather picks from its srcs)
+  if (stk:=x.src[0].src[0] if x.src[0].op is Ops.RESHAPE else x.src[0]).op is Ops.STACK and all(s.shape == () for s in stk.src):
+    return UOp.stack(*[stk.src[i or 0] for i in lane_map(x)]).reshape(x.shape)
   src = x.src[0].reshape((prod(x.src[0].shape),))
   return gather([(src, i if i is not None else 0) for i in lane_map(x)], x.shape)
 

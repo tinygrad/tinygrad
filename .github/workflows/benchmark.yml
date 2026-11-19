@@ -462,8 +462,7 @@ jobs:
         ln -s /data/imagenet extra/datasets/imagenet
         ln -s /data/testsig-*.so .
         PYTHONPATH=. DEV=CPU QUANT=1 CNT=0 python3 examples/test_onnx_imagenet.py https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx /tmp/model.quant.onnx
-        # benchmark on DSP with NOOPT=1, the devectorizer has issues
-        PYTHONPATH=. DEV=DSP NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
+        PYTHONPATH=. DEV=DSP CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
