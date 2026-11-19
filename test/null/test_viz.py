@@ -401,6 +401,20 @@ class TestVizIntegration(unittest.TestCase):
     with Context(BEAM=2):
       self.test_link_sched_codegen()
 
+  @Context(DEV="NULL:X86:x86_64")
+  def test_insts_label(self):
+    name = "insts_label"
+    def custom_insts(A): return A[0].set(A[0]+1).sink(arg=KernelInfo(name))
+    x = Tensor.custom_kernel(Tensor.empty(1), fxn=custom_insts)[0]
+    with save_viz() as viz:
+      x.realize()
+    lst = viz.list_items()
+    kern_idx = next(i for i,s in enumerate(lst) if s["name"] == name)
+    isel_idx = next(i for i,s in enumerate(lst[kern_idx]["steps"]) if s["name"] == "instruction selection")
+    graph = next(viz.get_details(i, isel_idx+1))["graph"]
+    for u in graph.values():
+      if u["label"].startswith("CALL\n"): assert "NATIVE X86Ops" in u["label"]
+
   # tracing also works without a rewrite_group context
   # all graph_rewrites get put into the default group
   def test_default_tracing(self):
