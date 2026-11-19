@@ -647,9 +647,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def overflows(self, dtype:DType) -> bool: return self.vmin < dtype.min or dtype.max < self.vmax
 
   def split_uop(self:UOp, sep:Ops) -> Iterator[UOp]:
-    if self.op is sep:
-      for s in self.src: yield from s.split_uop(sep)
-    else: yield self
+    stack = [self]
+    while stack:
+      if (u:=stack.pop()).op is sep: stack.extend(reversed(u.src))
+      else: yield u
 
   # *** multi-device helpers ***
 
