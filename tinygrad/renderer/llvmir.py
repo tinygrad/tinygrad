@@ -228,8 +228,8 @@ class CPULLVMRenderer(LLVMRenderer):
   string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str:
-    decls = {x.src[0].arg.code: f"declare {ldt(x.dtype)} @{x.src[0].arg.code}({', '.join(map(lparam, x.src[1:]))})"
-             for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.NATIVE}
+    decls = {x.body.arg.code: f"declare {ldt(x.dtype)} @{x.body.arg.code}({', '.join(map(lparam, x.src[1:]))})"
+             for x in uops if x.op is Ops.CALL and x.body.op is Ops.NATIVE}
     decls |= {x.body.src[0].arg.function_name: f"declare void @{x.body.src[0].arg.function_name}({', '.join(map(lparam, x.body.arg.params))})"
               for x in uops if x.op is Ops.CALL and x.body.op is Ops.PROGRAM}
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'

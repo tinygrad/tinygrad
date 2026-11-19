@@ -154,7 +154,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       if u._shape is not None:
         label.append(shape_to_str(u.shape))
       if u.op is Ops.CALL:
-        label += [u.src[0].key.hex()[:8], str(u.src[0].op)]
+        label += [u.body.key.hex()[:8], str(u.body.op)]
       if u.op in {Ops.INDEX, Ops.STAGE}:
         if len(u.src) > 1:
           label.append(render_index(s.render() for s in u.src[1:]) if sum(len(s.toposort()) for s in u.src[1:]) < 50 else "INDEX TOO LARGE")
