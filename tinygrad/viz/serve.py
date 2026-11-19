@@ -155,8 +155,8 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
         label.append(shape_to_str(u.shape))
       if u.op is Ops.CALL:
         ref = data.ref_map.get(canonicalize_ast(u.body))
-        code = f"codegen@{fmt_colored(data.ctxs[ref]['name'])}" if ref is not None else u.body.arg.code if u.body.op is Ops.NATIVE else ""
-        label += [u.body.key.hex()[:8], f"{u.body.op.name} {code}"]
+        name = fmt_colored(data.ctxs[ref]["name"]) if ref is not None else u.body.arg.code if u.body.op is Ops.NATIVE else ""
+        label += [u.body.key.hex()[:8], f"{u.body.op.name} {name}"]
       if u.op in {Ops.INDEX, Ops.STAGE}:
         if len(u.src) > 1:
           label.append(render_index(s.render() for s in u.src[1:]) if sum(len(s.toposort()) for s in u.src[1:]) < 50 else "INDEX TOO LARGE")
