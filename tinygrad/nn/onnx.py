@@ -546,11 +546,12 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     # round(acc * scale) + zero_point in fixed point, scale and zero_point are per tensor or per channel (axis 1)
     mult, shift = [list(z) for z in zip(*[_fixed_point(m) for m in scale])]
     assert all(0 < s < 63 for s in shift), f"requantize scale out of range: {scale}"
-    x = acc.cast(dtypes.int64) * _per_channel(mult, acc.ndim, dtypes.int64)
-    if all_same(shift) and shift[0] > 32:
+    x = acc.cast(dtypes.int64) * (m.cast(dtypes.int64) if isinstance(m:=_per_channel(mult, acc.ndim, dtypes.int32), Tensor) else m)
+    if all(s > 32 for s in shift):
       # take the high half of the product first, that's a single mulhi instruction on most targets
       # the high half is rounded down, so a tie in it is above the tie in x: round half up
-      out = (x.rshift(32).cast(dtypes.int32) + (1 << (shift[0] - 33))).rshift(shift[0] - 32)
+      hi, hs = x.rshift(32).cast(dtypes.int32), [s - 32 for s in shift]
+      out = (hi + _per_channel([1 << (s - 1) for s in hs], acc.ndim, dtypes.int32)) >> _per_channel(hs, acc.ndim, dtypes.int32)
     else:
       # round half to even
       sh = _per_channel(shift, acc.ndim, dtypes.int64)

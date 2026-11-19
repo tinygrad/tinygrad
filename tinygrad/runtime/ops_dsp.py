@@ -209,8 +209,8 @@ __attribute__((unused)) static inline __attribute__((always_inline)) void store_
   HVX_Vector m = n >= 128 ? V6(lvsplatw)(0x01010101) : V6(vandqrt)(V6(pred_scalar2)(n), 0x01010101);
   V6(vS32b_qpred_ai)(V6(vandvrt)(V6(vlalignb)(m, z, off), 0x01010101), a, V6(vlalignb)(v, z, off));
   if (off + n > 128) V6(vS32b_qpred_ai)(V6(vandvrt)(V6(vlalignb)(z, m, off), 0x01010101), a+1, V6(vlalignb)(z, v, off)); }
-__attribute__((unused)) static inline __attribute__((always_inline)) hvx_w mulhi_w(hvx_w a, int c) {
-  HVX_VectorPair p = V6(vmpyewuh_64)((HVX_Vector)a, V6(lvsplatw)(c)); p = V6(vmpyowh_64_acc)(p, (HVX_Vector)a, V6(lvsplatw)(c));
+__attribute__((unused)) static inline __attribute__((always_inline)) hvx_w mulhi_w(hvx_w a, hvx_w c) {
+  HVX_VectorPair p = V6(vmpyewuh_64)((HVX_Vector)a, (HVX_Vector)c); p = V6(vmpyowh_64_acc)(p, (HVX_Vector)a, (HVX_Vector)c);
   return (hvx_w)V6(hi)(p); }"""
 
 def const_val(u:UOp):
@@ -218,13 +218,18 @@ def const_val(u:UOp):
   return u.arg if u.op is Ops.CONST else None
 
 def mulhi(x:UOp, a:UOp, c:UOp, s:UOp) -> UOp|None:
-  # (int)(((long long)a * c) >> 32) on a vector of int is mulhi_w 32 lanes at a time
+  # (int)(((long long)a * c) >> 32) on a vector of int is mulhi_w 32 lanes at a time, c is an int: a const, a scalar or a vector like a
   if not is_vec(x) or x.dtype != dtypes.int32 or a.src[0].dtype != dtypes.int32 or const_val(s) != 32: return None
-  if not isinstance(cv:=const_val(c), int) or not -2**31 <= cv < 2**31: return None
   n = x.max_numel()
-  parts = [f"mulhi_w({shuffle('{0}', '{0}', [i+j if i+j < n else -1 for j in range(32)])}, {cv})" for i in range(0, n, 32)]
+  def lanes(v:str, i:int) -> str: return shuffle(v, v, [i+j if i+j < n else -1 for j in range(32)])
+  if isinstance(cv:=const_val(c), int):
+    if not -2**31 <= cv < 2**31: return None
+  elif not (c.op is Ops.CAST and c.src[0].dtype == dtypes.int32 and (not is_vec(c.src[0]) or c.src[0].shape == a.src[0].shape)): return None
+  def cpart(i:int) -> str: return f"((hvx_w)({cv}))" if isinstance(cv, int) else lanes("{1}", i) if is_vec(c.src[0]) else "((hvx_w)({1}))"
+  parts = [f"mulhi_w({lanes('{0}', i)}, {cpart(i)})" for i in range(0, n, 32)]
   ret = concat(parts, 32)
-  return UOp.native(ret if vpad(n) == 32*len(parts) else shuffle(ret, ret, range(n)), shape=x.shape, dtype=x.dtype, fmt=True).call(a.src[0])
+  return UOp.native(ret if vpad(n) == 32*len(parts) else shuffle(ret, ret, range(n)), shape=x.shape, dtype=x.dtype, fmt=True) \
+    .call(a.src[0], *([] if isinstance(cv, int) else [c.src[0]]))
 
 def vrmpy_sum(x:UOp) -> UOp|None:
   # a sum of products of bytes is vrmpy: the sum of 4 products per lane, a vector of bytes times 4 scalar bytes
@@ -709,7 +714,8 @@ DSP_CALLER_FRAME = 4096
 class DSPCompiler(Compiler):
   def __init__(self, mock:bool=False):
     self.mock, compiler_args = mock, "--target=hexagon -mcpu=hexagonv65 -fuse-ld=lld -nostdlib -mhvx=v65 -mhvx-length=128b -O2"
-    if mock: self.args = f"-static {compiler_args}"
+    # (qemu asserts translating some packets with a .cur load, the mock's code isn't packetized)
+    if mock: self.args = f"-static {compiler_args} -mllvm -disable-packetizer"
     else:
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
       # the sections are in three segments (read only, code, data), each a page aligned map on the DSP: it takes few maps
@@ -991,7 +997,7 @@ return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}
 static int munmap(void *addr, unsigned int length) {{ return syscall((long)addr, length, 0, 0, 0, 0, 215); }}'''
 
 class MockDSPProgram:
-  def __init__(self, lib:bytes, signature): self.lib, self.signature = lib, signature
+  def __init__(self, obj:TinyELF): self.name, self.lib, self.signature = obj.name, obj.lib, obj.signature
   def __call__(self, kernargs:int):
     # the args are laid out by TinyELF.iter_sig, a buffer is its address
     sig = list(zip(self.signature, TinyELF.iter_sig(self.signature)))
@@ -1003,7 +1009,8 @@ class MockDSPProgram:
       os.chmod(dsp_lib.name, 0o0777)
       proc = subprocess.run(["qemu-hexagon-static", *(['-strace'] if DEBUG >= 5 else []), dsp_lib.name],
         input=b''.join(struct.pack(unwrap(dt.fmt), v) if a is AddrSpace.ALU else bytes(to_mv(v, prod(shape)*dt.itemsize))
-                       for v,((_,a,dt,shape),_) in zip(vals, sig)), stdout=subprocess.PIPE, check=True)
+                       for v,((_,a,dt,shape),_) in zip(vals, sig)), stdout=subprocess.PIPE)
+    if proc.returncode: raise RuntimeError(f"{self.name} failed in qemu with {proc.returncode}")
     offset = 4
     for addr, size in bufs:
       to_mv(addr, size)[:] = proc.stdout[offset:offset+size]
@@ -1020,7 +1027,7 @@ class MockDSP:
     DLL._loaded_["mockdsp"] = cast(ctypes.CDLL, MockDSP.lib)
 
   def load(self, obj:TinyELF) -> int:
-    self.programs.append(MockDSPProgram(obj.lib, obj.signature))
+    self.programs.append(MockDSPProgram(obj))
     return len(self.programs) - 1
 
   def submit(self, addr:int, n:int):
