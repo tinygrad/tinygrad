@@ -484,7 +484,7 @@ class DSPRenderer(ClangRenderer):
   def _vector_typedefs(self, uops) -> list[str]:
     # every dtype at every vector width: the vector ops splat scalars and select with masks
     counts = dedup([cnt for _,cnt in uops_to_dtypes(uops) if cnt > 1] + [32, 64, 128])
-    dts = dedup([u.dtype for u in uops if u.dtype in self.type_map and u.dtype is not dtypes.void and u.addrspace in (AddrSpace.ALU, None)] +
+    dts = dedup([u.dtype for u in uops if u.dtype in self.type_map and u.dtype is not dtypes.void] +
                 [dtypes.bool, *mask_dtype.values()])
     # and the HVX vector width of every dtype (shuffles of smaller vectors widen to it)
     # and all the smaller powers of two (the pieces of stores)

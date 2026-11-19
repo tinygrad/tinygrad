@@ -203,6 +203,12 @@ def lower_reduce(ctx:itertools.count, r:UOp):
   acc_out = acc_initted.store(acc_initted.alu(op, ret)).end(*r.src[1:])
   return acc.after(acc_out).load()
 
+# with vector ALU ops, a reduce of the lanes of a vector in a loop to a scalar accumulates the vector, its lanes are reduced after the loop
+pm_vector_accumulate = PatternMatcher([
+  (UPat(Ops.REDUCE, name="r"), lambda r: r.replace(src=(r.replace(arg=(r.arg[0], 0)),), arg=r.arg)
+   if r.arg[1] > 0 and len(r.src) > 1 and r.shape == () and r.arg[0] is Ops.ADD and dtypes.is_int(r.dtype) else None),
+])
+
 pm_reduce_local = pm_wmma_add+PatternMatcher([
   # a reduce over only ranges accumulates in the layout of its input, the reshape/permute moves after the loop
   (UPat(Ops.REDUCE, src=(UPat((Ops.RESHAPE, Ops.PERMUTE), name="m"),), allow_any_len=True, name="r"),
@@ -308,6 +314,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   slots = itertools.count(max([u.arg.slot+1 for u in sink.toposort() if u.op is Ops.ALLOC], default=0))
 
   # remove reduce
+  if ren.vector_alu: sink = graph_rewrite(sink, pm_vector_accumulate, name="vector accumulators")
   sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=slots, name="remove reduces")
 
   # add locals

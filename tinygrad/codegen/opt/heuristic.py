@@ -6,14 +6,13 @@ from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.dtype import dtypes
 
-def output_strides(k:Scheduler) -> dict[UOp, int]:
-  # the strides of the ranges in the index of the (first) store
-  if not (stores:=[x for x in k.ast.backward_slice if x.op is Ops.STORE and x.src[0].op is Ops.INDEX]): return {}
-  idx, strides = stores[0].src[0].src[1].get_idx(), {}
+def index_strides(k:Scheduler, idx:UOp) -> dict[UOp, int]:
+  # the constant strides of the ranges in idx
+  ret = {}
   for r in k.rngs:
     d = (idx.substitute({r:r.const_like(1)}) - idx.substitute({r:r.const_like(0)})).simplify()
-    if d.vmin == d.vmax: strides[r] = int(d.vmin)
-  return strides
+    if d.vmin == d.vmax: ret[r] = int(d.vmin)
+  return ret
 
 def loop_order(k:Scheduler) -> Scheduler:
   # the outer loop of two is the one whose inner loop rereads less: each iteration of the outer loop rereads the buffers it doesn't index
@@ -27,7 +26,9 @@ def loop_order(k:Scheduler) -> Scheduler:
   return k
 
 def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
-  """ For wide SIMD without locals: a tensor core if one fits (padding to it), else a vector of the contiguous output each loop iteration """
+  """ For wide SIMD without locals: a tensor core if one fits (padding to it), else a vector of the contiguous output or of the reduce """
+  stores = [x for x in k.ast.backward_slice if x.op is Ops.STORE and x.src[0].op is Ops.INDEX]
+  out_strides = index_strides(k, stores[0].src[0].src[1].get_idx()) if stores else {}
   if USE_TC > 0 and (r:=k.reduceop) is not None and r.arg[0] is Ops.ADD and \
      (mul:=r.src[0] if r.src[0].op is not Ops.CAST else r.src[0].src[0]).op is Ops.MUL:
     # the tensor core's M (its vector lanes) is the output's contiguous range: the choices of _apply_tc_opt, A is in0 or in1
@@ -36,8 +37,7 @@ def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
     in1_r = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg, reverse=True)
     red = sorted(r.src[1:], key=lambda x: x.arg, reverse=True)
     ms = [m for _,m,_ in itertools.product(in1_r, in0_r, red)] + [m for _,m,_ in itertools.product(in0_r, in1_r, red)]
-    strides = output_strides(k)
-    for axis in sorted(range(len(ms)), key=lambda i: strides.get(ms[i]) != 1):
+    for axis in sorted(range(len(ms)), key=lambda i: out_strides.get(ms[i]) != 1):
       # of the tensor cores that fit, the one with the least padding
       cands = []
       for sel in (range(len(k.ren.tensor_cores)) if TC_SELECT.value == -1 else [TC_SELECT.value]):
@@ -50,23 +50,25 @@ def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
   # math that isn't in vectors only gets a few lanes for ILP. weakint is index math
   alu_dtypes = {dtypes.int32 if u.dtype is dtypes.weakint else u.dtype for u in k.ast.backward_slice if u.op in GroupOp.ALU-GroupOp.Comparison}
   if not alu_dtypes <= set(k.ren.vector_dtypes): lanes = 4
+  # the biggest input is read in vectors: if it's contiguous in a long reduce but not in the output, the reduce is the vector (its lanes accumulate)
+  loads = sorted([x for x in k.ast.backward_slice if x.op is Ops.INDEX and x.src[0].op is Ops.PARAM and x not in [s.src[0] for s in stores]],
+                 key=lambda x: x.src[0].max_numel()*x.src[0].dtype.itemsize)
+  if loads and (lstrides:=index_strides(k, loads[-1].src[1].get_idx())) and not any(lstrides.get(r) == 1 for r,s in out_strides.items() if s == 1):
+    for axis in k.upcastable_dims(reduce=True)[::-1]:
+      if lstrides.get(k.rngs[axis]) == 1 and (amt:=max(x for x in range(1, min(k.full_shape[axis], lanes)+1) if k.full_shape[axis] % x == 0)) >= 32:
+        k.apply_opt(Opt(OptOps.SPLIT, axis, (0 if amt == k.full_shape[axis] else amt, AxisType.UPCAST)))
+        return k
   # upcast the output axes that are contiguous with the ones already upcasted, innermost first
-  n = 1
-  if (stores:=[x for x in k.ast.backward_slice if x.op is Ops.STORE and x.src[0].op is Ops.INDEX]):
-    idx, strides = stores[0].src[0].src[1].get_idx(), {}
-    for r in [k.rngs[a] for a in k.upcastable_dims()]:
-      d = (idx.substitute({r:r.const_like(1)}) - idx.substitute({r:r.const_like(0)})).simplify()
-      if d.vmin == d.vmax and d.vmin > 0: strides[r] = int(d.vmin)
-    # n lanes so far, covering the memory up to extent
-    n, extent, plan = 1, 1, []
-    for r in sorted(strides, key=lambda r: strides[r]):
-      if strides[r] != extent or (sz:=int(r.vmax+1)) == 1: break
-      amt = max(x for x in range(1, min(sz, lanes//n)+1) if sz % x == 0)
-      if amt > 1: plan.append((r, amt))
-      n, extent = n*amt, extent*sz
-      if amt != sz: break
-    # the outer axes upcast first: the last upcast is the innermost lane, the lanes are in memory order
-    for r,amt in plan[::-1]: k.apply_opt(Opt(OptOps.SPLIT, k.rngs.index(r), (0 if amt == int(r.vmax+1) else amt, AxisType.UPCAST)))
+  # n lanes so far, covering the memory up to extent
+  n, extent, plan = 1, 1, []
+  for r in sorted([r for r in out_strides if r in [k.rngs[a] for a in k.upcastable_dims()] and out_strides[r] > 0], key=lambda r: out_strides[r]):
+    if out_strides[r] != extent or (sz:=int(r.vmax+1)) == 1: break
+    amt = max(x for x in range(1, min(sz, lanes//n)+1) if sz % x == 0)
+    if amt > 1: plan.append((r, amt))
+    n, extent = n*amt, extent*sz
+    if amt != sz: break
+  # the outer axes upcast first: the last upcast is the innermost lane, the lanes are in memory order
+  for r,amt in plan[::-1]: k.apply_opt(Opt(OptOps.SPLIT, k.rngs.index(r), (0 if amt == int(r.vmax+1) else amt, AxisType.UPCAST)))
   # unroll small reduces
   for axis in k.upcastable_dims(reduce=True)[::-1]:
     if k.full_shape[axis] <= (4 if n < 32 else 3): k.apply_opt(Opt(OptOps.SPLIT, axis, (0, AxisType.UPCAST)))

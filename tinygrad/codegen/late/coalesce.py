@@ -200,8 +200,12 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
           run = run[len(chunk):]
         rest += run
       while rest:
-        win = [x for x in rest if x < rest[0] + lengths[0]]
-        rest = rest[len(win):] if len(win) > 1 and load_window(win[0], win) else rest[1:]
+        # the biggest window from the first lane that loads, else it's alone
+        for l in lengths[:-1]:
+          if len(win:=[x for x in rest if x < rest[0] + l]) > 1 and load_window(win[0], win):
+            rest = rest[len(win):]
+            break
+        else: rest = rest[1:]
       continue
     # do the grouping
     for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0]):
