@@ -128,12 +128,9 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
          Ops.REWRITE_ERROR | Ops.PYLITERAL:
       # always void
       return dtypes.void
-    case Ops.CALL:
+    case Ops.CALL | Ops.NATIVE:
       # a call has the dtype of its body, void for opaque bodies
       return src[0].dtype
-    case Ops.NATIVE:
-      # a native function states its return dtype in the arg
-      return arg.dtype
     case Ops.INDEX:
       # an image access is always float, no matter the storage dtype
       # TODO: should there be a CAST so src[0].dtype just work?
@@ -361,8 +358,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         assert len(self.src[0].as_shape) <= 1
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
-      case Ops.NATIVE:
-        return self.src[0].as_shape if self.dtype != dtypes.void else None
       case Ops.PYLITERAL: return None
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
@@ -375,7 +370,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
       # passthrough ops
       case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
-           Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END | Ops.CALL:
+           Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END | Ops.CALL | Ops.NATIVE:
         return self.src[0]._shape
 
       case Ops.BITCAST:
@@ -590,8 +585,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   @staticmethod
   def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:Register) -> UOp:
-    params = UOp.sink(*(UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r) for i,r in enumerate(regs)))
-    return UOp.native(op, params, dtype=dtype).call(*src)
+    params = [UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r) for i,r in enumerate(regs)]
+    return UOp.native(op, *params, dtype=dtype).call(*src)
   def contract(self, *rngs:UOp):
     assert all(x.axis_type == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
@@ -1218,8 +1213,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def native(code:Any, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
-    shape_src = (shape_to_shape_arg(shape),) if dtype != dtypes.void else ()
-    return UOp(Ops.NATIVE, src=shape_src+src, arg=NativeInfo(code, dtype, fmt))
+    return UOp(Ops.NATIVE, src=src or (UOp.param(-1, dtype, shape),), arg=NativeInfo(code, fmt=fmt))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, hcq:HCQInfo|None=None) -> UOp:
@@ -1354,12 +1348,11 @@ class ProgramInfo:
 # the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), bulk stores, and function references
 OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.NATIVE}
 
-# the arg of NATIVE: native code or a function symbol, and the dtype of the value it returns
+# the arg of NATIVE: native code or a function symbol
 @dataclass(frozen=True)
 class NativeInfo:
   # renderer specific
   code: Any
-  dtype: DType = dtypes.void
   fmt: bool = False
 
 @dataclass(frozen=True)
@@ -1473,7 +1466,7 @@ class UPat(RandMixin):
   @staticmethod
   def const(b:ConstType, dtype:DType|tuple[DType, ...]|None=None): return UPat(Ops.CONST, dtype=dtype, arg=b)
   @staticmethod
-  def native(code:str, dtype:DType=dtypes.void, **kwargs): return UPat(Ops.NATIVE, arg=NativeInfo(code, dtype), **kwargs)
+  def native(code:str, **kwargs): return UPat(Ops.NATIVE, arg=NativeInfo(code), **kwargs)
 
   # lil helper
   def f(self, op, **kwargs): return UPat(op, src=(self,), **kwargs)
