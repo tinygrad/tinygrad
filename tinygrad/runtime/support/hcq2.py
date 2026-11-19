@@ -51,9 +51,11 @@ def unwrap_lane(v:UOp) -> tuple[UOp, int|None, int]: # look through views and a 
 def timeline(dev:str) -> UOp: return UOp.extern((2,), dtypes.u64, dev, "timeline")
 def timeline_value(dev:str) -> UOp: return timeline(dev).index(1).load()
 
-def make_program(prg:UOp, size:int, device:str) -> UOp:
+def make_program(prg:UOp, size:int, device:str, tag:str="", call_key:bytes=b"") -> UOp:
   slot = int.from_bytes(prg.key[:8], "little")
   if PROFILE: Compiled.profile_events.append(ProfileProgramEvent(device, prg.src[0].arg.function_name, prg.src[3].arg, None, slot, prg.key))
+  if tag: slot ^= int.from_bytes(tag.encode().ljust(8, b'\0')[:8], "little")
+  slot ^= int.from_bytes(call_key[:8], "little")
   return UOp.alloc((size,), dtypes.u8, slot, device=device, name="program")
 
 def make_submit(*cmds:UOp, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a submit calls its commands on a queue, after deps
@@ -328,7 +330,8 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   queues = _build_queues(ctx)
 
   # wait for the previous (this) schedule run
-  fence = make_fence(ctx.slots, num_queues:={dev: len(qs) for dev, qs in ctx.queues.items()})
+  num_queues = {dev: len(qs) for dev, qs in ctx.queues.items()}
+  fence = UOp(Ops.NOOP) if any(dev.startswith('MALI') for dev in ctx.queues) else make_fence(ctx.slots, num_queues=num_queues)
   submits:list[UOp] = []
   for (dev, queue), cmds in queues.items(): submits.append(make_submit(*cmds, dev=dev, queue=queue, deps=(fence, *submits[-1:])))
   sink = UOp.sink(submits[-1], *announce(ctx.slots, num_queues, submits[-1]), arg=KernelInfo("hcq_submit", estimates=Estimates(), optimized=True))

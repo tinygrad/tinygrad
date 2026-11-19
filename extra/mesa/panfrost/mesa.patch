@@ -116,10 +116,18 @@ index dd8ff95..005e815 100644
  )
 
 diff --git a/src/gallium/drivers/panfrost/pan_cmdstream.c b/src/gallium/drivers/panfrost/pan_cmdstream.c
-index 5f354f0..e6cb8af 100644
+index 5f354f0..c84b68d 100644
 --- a/src/gallium/drivers/panfrost/pan_cmdstream.c
 +++ b/src/gallium/drivers/panfrost/pan_cmdstream.c
-@@ -1605,7 +1605,6 @@ panfrost_emit_const_buf(struct panfrost_batch *batch,
+@@ -53,6 +53,7 @@
+ #include "pan_format.h"
+ #include "pan_jm.h"
+ #include "pan_job.h"
++#include "pan_public.h"
+ #include "pan_pool.h"
+ #include "pan_precomp.h"
+ #include "pan_resource.h"
+@@ -1605,7 +1606,6 @@ panfrost_emit_const_buf(struct panfrost_batch *batch,
        /* TODO: Is there any benefit to combining ranges */
        memcpy(push_cpu + i, (uint8_t *)mapped_ubo + src.offset, 4);
     }
@@ -127,11 +135,50 @@ index 5f354f0..e6cb8af 100644
     return ubos.gpu;
  }
 
+@@ -4474,3 +4474,27 @@ GENX(panfrost_cmdstream_screen_init)(struct panfrost_screen *screen)
+
+    dev->precomp_cache = GENX(panfrost_precomp_cache_init)(screen);
+ }
++
++
++#if PAN_ARCH == 10
++void
++panfrost_make_texture_desc(struct pipe_context *ctx,
++                           const struct pipe_sampler_view *tmpl,
++                           struct mali_texture_packed *out)
++{
++   struct panfrost_sampler_view view = {
++      .base = *tmpl,
++      .pool = &pan_context(ctx)->descs,
++   };
++   panfrost_update_sampler_view(&view, ctx);
++   *out = view.bifrost_descriptor;
++}
++
++void
++panfrost_sampler_desc(void *state, struct mali_sampler_packed *out)
++{
++   struct panfrost_sampler_state *so = state;
++   *out = so->hw;
++}
++
++#endif
 diff --git a/src/gallium/drivers/panfrost/pan_context.h b/src/gallium/drivers/panfrost/pan_context.h
-index 29e8956..48c740d 100644
+index 29e8956..c71b257 100644
 --- a/src/gallium/drivers/panfrost/pan_context.h
 +++ b/src/gallium/drivers/panfrost/pan_context.h
-@@ -449,6 +449,14 @@ struct panfrost_shader_binary {
+@@ -139,6 +139,10 @@ struct panfrost_context {
+    /* Sync obj used to keep track of in-flight jobs. */
+    uint32_t syncobj;
+
++   /* Timeline point used by the raw panthor compute queue. */
++   uint64_t raw_syncpoint;
++   uint32_t raw_sync_handle;
++
+    /* Set of 32 batches. When the set is full, the LRU entry (the batch
+     * with the smallest seqnum) is flushed to free a slot.
+     */
+@@ -449,6 +453,14 @@ struct panfrost_shader_binary {
     struct util_dynarray binary;
  };
 
@@ -147,18 +194,21 @@ index 29e8956..48c740d 100644
  panfrost_disk_cache_store(struct disk_cache *cache,
                            const struct panfrost_uncompiled_shader *uncompiled,
 diff --git a/src/gallium/drivers/panfrost/pan_helpers.c b/src/gallium/drivers/panfrost/pan_helpers.c
-index 6139216..4d9d29c 100644
+index 6139216..dca98f8 100644
 --- a/src/gallium/drivers/panfrost/pan_helpers.c
 +++ b/src/gallium/drivers/panfrost/pan_helpers.c
-@@ -23,6 +23,7 @@
+@@ -22,7 +22,10 @@
+  */
 
  #include "util/u_vbuf.h"
++#include <sys/ioctl.h>
++#include <drm/panthor_drm.h>
  #include "pan_context.h"
 +#include "pan_public.h"
 
  void
  panfrost_analyze_sysvals(struct panfrost_compiled_shader *ss)
-@@ -262,3 +263,177 @@ panfrost_track_image_access(struct panfrost_batch *batch,
+@@ -262,3 +265,291 @@ panfrost_track_image_access(struct panfrost_batch *batch,
        panfrost_batch_read_rsrc(batch, rsrc, stage);
     }
  }
@@ -258,18 +308,28 @@ index 6139216..4d9d29c 100644
 +   memcpy(ptr, data, size);
 +   ctx->buffer_unmap(ctx, transfer);
 +   return ctx;
++
 +}
 +
 +struct pipe_context *
 +panfrost_buffer_read(struct pipe_context *ctx, uint64_t address,
 +                     void *data, unsigned size)
 +{
++   if (size == 0) return ctx;
 +   struct pipe_resource *resource = panfrost_resource_lookup(ctx->screen, address);
-+   struct pipe_fence_handle *fence = NULL;
-+   ctx->flush(ctx, &fence, 0);
-+   if (fence) {
-+      ctx->screen->fence_finish(ctx->screen, NULL, fence, OS_TIMEOUT_INFINITE);
-+      ctx->screen->fence_reference(ctx->screen, &fence, NULL);
++   if (!resource) return ctx;
++   struct panfrost_context *pctx = pan_context(ctx);
++   if (pctx->raw_sync_handle && pctx->raw_syncpoint) {
++      uint32_t handle = pctx->raw_sync_handle;
++      uint64_t point = pctx->raw_syncpoint;
++      struct timespec ts;
++      clock_gettime(CLOCK_MONOTONIC, &ts);
++      struct drm_syncobj_timeline_wait wait = {
++         .handles = (uintptr_t)&handle, .points = (uintptr_t)&point,
++         .timeout_nsec = ts.tv_sec * 1000000000ULL + ts.tv_nsec + 1000000000ULL,
++         .count_handles = 1,
++      };
++      ioctl(panfrost_device_fd(pan_device(ctx->screen)), DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
 +   }
 +   struct pipe_box box = {.width = size, .height = 1, .depth = 1};
 +   box.x = address - pan_resource(resource)->plane.base;
@@ -278,6 +338,7 @@ index 6139216..4d9d29c 100644
 +   memcpy(data, ptr, size);
 +   ctx->buffer_unmap(ctx, transfer);
 +   return ctx;
++
 +}
 +
 +struct pipe_context *
@@ -336,6 +397,109 @@ index 6139216..4d9d29c 100644
 +   *address = ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 +   return ctx;
 +}
++
++
++uint64_t
++panfrost_compute_shader_desc(void *cso)
++{
++   struct panfrost_uncompiled_shader *so = cso;
++   struct panfrost_compiled_shader *v = util_dynarray_begin(&so->variants);
++   return v->state.gpu;
++}
++
++void
++panfrost_compute_shader_info(void *cso, struct pan_shader_info *info)
++{
++   struct panfrost_uncompiled_shader *so = cso;
++   struct panfrost_compiled_shader *v = util_dynarray_begin(&so->variants);
++   *info = v->info;
++}
++
++void
++panfrost_compute_tls_info(struct pipe_context *ctx, void *cso, const struct pipe_grid_info *grid, uint32_t *out)
++{
++   struct panfrost_uncompiled_shader *so = cso;
++   struct panfrost_compiled_shader *ss = util_dynarray_begin(&so->variants);
++   struct panfrost_device *dev = pan_device(ctx->screen);
++   struct pan_compute_dim local_size = {grid->block[0], grid->block[1], grid->block[2]};
++   struct pan_compute_dim dim = {grid->grid[0], grid->grid[1], grid->grid[2]};
++   unsigned wls_size = ss->info.wls_size + grid->variable_shared_mem;
++   unsigned instances = pan_calc_wls_instances(&local_size, &dev->kmod.props, &dim);
++   out[0] = ss->info.tls_size;
++   out[1] = wls_size;
++   out[2] = instances;
++   out[3] = wls_size ? pan_calc_total_wls_size(wls_size, instances, dev->core_id_range) : 0;
++   out[4] = ss->info.tls_size ? pan_get_total_stack_size(ss->info.tls_size, dev->thread_tls_alloc, dev->core_id_range) : 0;
++}
++
++
++uint32_t
++panfrost_context_group_handle(struct pipe_context *ctx)
++{
++   return pan_context(ctx)->csf.group_handle;
++}
++
++uint64_t
++panthor_context_point(struct pipe_context *ctx)
++{
++   return pan_context(ctx)->raw_syncpoint;
++}
++struct pipe_context *
++panthor_write(struct pipe_context *ctx, uint64_t address, uint64_t value, uint32_t size)
++{
++   struct pipe_resource *pr = panfrost_resource_lookup(ctx->screen, address);
++   if (!pr) {
++      return ctx;
++   }
++   struct panfrost_resource *r = pan_resource(pr);
++   void *ptr = (uint8_t *)r->bo->ptr.cpu + address - r->plane.base;
++   if (size == 4) *(uint32_t *)ptr = value;
++   else if (size == 8) *(uint64_t *)ptr = value;
++   else assert(!"invalid raw write size");
++   return ctx;
++}
++
++
++struct pipe_context *
++panthor_group_submit(struct pipe_context *ctx, int fd, uint32_t group, uint64_t stream_addr,
++                     uint32_t stream_size, uint32_t sync_handle)
++{
++   pan_context(ctx)->raw_sync_handle = sync_handle;
++   struct pipe_fence_handle *raw_fence = NULL;
++   ctx->flush(ctx, &raw_fence, 0);
++   if (raw_fence) {
++      ctx->screen->fence_finish(ctx->screen, NULL, raw_fence, OS_TIMEOUT_INFINITE);
++      ctx->screen->fence_reference(ctx->screen, &raw_fence, NULL);
++   }
++   uint64_t point = ++pan_context(ctx)->raw_syncpoint;
++   if (stream_size == 0)
++      stream_addr = 0;
++   struct drm_panthor_sync_op sync = {
++      .flags = DRM_PANTHOR_SYNC_OP_SIGNAL |
++               DRM_PANTHOR_SYNC_OP_HANDLE_TYPE_TIMELINE_SYNCOBJ,
++      .handle = sync_handle,
++      .timeline_value = point,
++   };
++   struct drm_panthor_queue_submit qsubmit = {
++      .queue_index = 0,
++      .stream_addr = stream_addr,
++      .stream_size = stream_size,
++      .latest_flush = 0,
++      .syncs = DRM_PANTHOR_OBJ_ARRAY(1, &sync),
++   };
++   struct drm_panthor_group_submit gsubmit = {
++      .group_handle = group,
++      .queue_submits = DRM_PANTHOR_OBJ_ARRAY(1, &qsubmit),
++   };
++   int ret = ioctl(fd, DRM_IOCTL_PANTHOR_GROUP_SUBMIT, &gsubmit);
++   return ctx;
++}
++
++unsigned
++panfrost_max_threads(struct pipe_screen *screen, unsigned work_reg_count)
++{
++   return pan_compute_max_thread_count(&pan_device(screen)->kmod.props, work_reg_count);
++}
 diff --git a/src/gallium/drivers/panfrost/pan_jm.c b/src/gallium/drivers/panfrost/pan_jm.c
 index af01674..1016ada 100644
 --- a/src/gallium/drivers/panfrost/pan_jm.c
@@ -350,7 +514,7 @@ index af01674..1016ada 100644
        uint64_t indirect_buffer_addr =
           pan_resource(info->indirect)->plane.base + info->indirect_offset;
 diff --git a/src/gallium/drivers/panfrost/pan_public.h b/src/gallium/drivers/panfrost/pan_public.h
-index 587fc3f..6bc9857 100644
+index 587fc3f..2cd638e 100644
 --- a/src/gallium/drivers/panfrost/pan_public.h
 +++ b/src/gallium/drivers/panfrost/pan_public.h
 @@ -28,10 +28,30 @@
@@ -384,7 +548,7 @@ index 587fc3f..6bc9857 100644
  struct pipe_screen *
  panfrost_create_screen(int fd, const struct pipe_screen_config *config,
                         struct renderonly *ro);
-@@ -41,3 +61,15 @@ panfrost_create_screen(int fd, const struct pipe_screen_config *config,
+@@ -41,3 +61,36 @@ panfrost_create_screen(int fd, const struct pipe_screen_config *config,
  #endif
 
  #endif
@@ -400,8 +564,29 @@ index 587fc3f..6bc9857 100644
 +struct pipe_context *panfrost_compute_signal(struct pipe_context *ctx, uint64_t *address, uint64_t value);
 +
 +struct pipe_context *panfrost_compute_timestamp(struct pipe_context *ctx, uint64_t *address);
++
++uint64_t panfrost_compute_shader_desc(void *cso);
++void panfrost_compute_shader_info(void *cso, struct pan_shader_info *info);
++void panfrost_compute_tls_info(struct pipe_context *ctx, void *cso, const struct pipe_grid_info *grid, uint32_t *out);
++
++uint32_t panfrost_context_group_handle(struct pipe_context *ctx);
++uint64_t panthor_context_point(struct pipe_context *ctx);
++struct pipe_context *panthor_write(struct pipe_context *ctx, uint64_t address, uint64_t value, uint32_t size);
++
++struct pipe_context *panthor_group_submit(struct pipe_context *ctx, int fd, uint32_t group, uint64_t stream_addr, uint32_t stream_size, uint32_t sync_handle);
++
++
++
++
++unsigned panfrost_max_threads(struct pipe_screen *screen, unsigned work_reg_count);
++
++
++struct mali_texture_packed;
++struct mali_sampler_packed;
++void panfrost_make_texture_desc(struct pipe_context *ctx, const struct pipe_sampler_view *tmpl, struct mali_texture_packed *out);
++void panfrost_sampler_desc(void *state, struct mali_sampler_packed *out);
 diff --git a/src/gallium/drivers/panfrost/pan_resource.c b/src/gallium/drivers/panfrost/pan_resource.c
-index 549380f..9a10807 100644
+index 549380f..675df88 100644
 --- a/src/gallium/drivers/panfrost/pan_resource.c
 +++ b/src/gallium/drivers/panfrost/pan_resource.c
 @@ -54,6 +54,7 @@
@@ -455,7 +640,7 @@ index 549380f..9a10807 100644
     u_transfer_helper_destroy(pscreen->transfer_helper);
  }
 
-@@ -2560,3 +2576,19 @@ panfrost_resource_context_init(struct pipe_context *pctx)
+@@ -2560,3 +2576,24 @@ panfrost_resource_context_init(struct pipe_context *pctx)
     pctx->clear_render_target = panfrost_clear_render_target;
     pctx->clear_depth_stencil = panfrost_clear_depth_stencil;
  }
@@ -471,6 +656,11 @@ index 549380f..9a10807 100644
 +         ret = &r->base;
 +         break;
 +      }
++   }
++   if (!ret) {
++      fprintf(stderr, "LOOKUP MISS %llx\n", (unsigned long long)address);
++      for (struct panfrost_resource *r = pan_screen(screen)->resources; r; r = r->next_resource)
++         fprintf(stderr, "  resource %p base %llx width %u\n", (void *)r, (unsigned long long)r->plane.base, r->base.width0);
 +   }
 +   simple_mtx_unlock(&pan_screen(screen)->resources_mutex);
 +   return ret;

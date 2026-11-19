@@ -1,6 +1,9 @@
 panfrost_symbols = [
   'panfrost_drm_screen_create',
   'panfrost_resource_address',
+  'panfrost_compute_shader_desc',
+  'panfrost_compute_shader_info',
+  'panfrost_device_vm_id',
   'panfrost_compute_bind',
   'panfrost_compute_set_constants',
   'panfrost_compute_launch',
