@@ -11,7 +11,7 @@ from tinygrad.engine.realize import get_call_arg_uops, get_call_kernel_args, low
 from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device
 from tinygrad.renderer import TinyELF
 from tinygrad.dtype import dtypes, DType, AddrSpace
-from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, PROFILE, ContextVar, VIZ, ProfileEvent, unwrap, all_int
+from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, PROFILE, ContextVar, VIZ, ProfileEvent, unwrap
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.runtime import autogen
@@ -205,8 +205,7 @@ class NVEncDecQueue(NVQueue):
     assert all(unwrap_view(b)[1] % 0x100 == 0 for b in get_call_arg_uops(call)), "all buffers must be 0x100 aligned"
     # decoder offsets are in 256-byte units
     bufout, bufin, desc, *hist = [(b.getaddr(self.devs) >> 8).cast(dtypes.uint32) for b in get_call_arg_uops(call)]
-    assert all_int(ast.shape), f"invalid shape {ast.shape}"
-    h, w, frame_pos = 2 * ast.shape[0] // 3, ast.shape[1], ast.src[1].replace(op=Ops.PARAM).cast(dtypes.int32)
+    h, w, frame_pos = 2 * ast.src[1].val // 3, ast.src[2].val, ast.src[0].replace(op=Ops.PARAM).cast(dtypes.int32)
     self.dev._ensure_has_vid_hw(w, h)
     coloc, filt, stat = [(UOp.from_buffer(b, dtypes.uint8).getaddr(self.devs) >> 8).cast(dtypes.uint32)
                          for b in (self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.vid_stat_buf)]
