@@ -319,3 +319,14 @@ class IR3Renderer(NIRRenderer):
     self.b.shader.contents.info.num_images = texs() + imgs()
 
   def supported_dtypes(self): return {d for d in NIRRenderer.supported_dtypes(self) if d != dtypes.double}
+
+class MALIRenderer(IR3Renderer):
+  has_local, has_shared = True, True
+  global_max, local_max = (65535, 65535, 65535), (256, 256, 256)
+  shared_max = 32768
+
+  def postrender(self, uops:list[UOp]):
+    super().postrender(uops)
+    self.b.shader.contents.info.num_ubos = 1
+    self.b.shader.contents.info.first_ubo_is_default_ubo = True
+    self.b.shader.contents.info.num_textures = len(self.texs)

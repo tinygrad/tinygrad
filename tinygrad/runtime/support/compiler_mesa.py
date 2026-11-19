@@ -93,6 +93,15 @@ def disas_adreno(lib:bytes, gpu_id=630):
     tf.seek(0)
     print(tf.read())
 
+class MALICompiler(Compiler):
+  def __init__(self, arch):
+    assert arch in ("g610", "10"), f"unsupported Mali architecture {arch}"
+    self.nir_options = bytes(mesa.pan_shader_get_compiler_options(10).contents)
+    super().__init__(f"compile_mali_{arch}")
+
+  # The native tm_compile entry point consumes this serialized NIR directly.
+  def compile(self, src) -> bytes: return src.encode()
+
 class IR3Compiler(Compiler):
   def __init__(self, arch):
     assert arch.split(',')[0] == "a630", "only a630 supported, for now"

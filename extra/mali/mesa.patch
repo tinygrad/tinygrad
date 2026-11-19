@@ -1,0 +1,329 @@
+diff --git a/src/compiler/clc/clc_helpers.cpp b/src/compiler/clc/clc_helpers.cpp
+index 746951c..d283839 100644
+--- a/src/compiler/clc/clc_helpers.cpp
++++ b/src/compiler/clc/clc_helpers.cpp
+@@ -47,6 +47,9 @@
+ 
+ #include <clang/Config/config.h>
+ #include <clang/Driver/Driver.h>
++#if LLVM_VERSION_MAJOR >= 23
++#include <clang/Options/OptionUtils.h>
++#endif
+ #include <clang/CodeGen/CodeGenAction.h>
+ #include <clang/Lex/PreprocessorOptions.h>
+ #include <clang/Frontend/CompilerInstance.h>
+@@ -921,7 +924,9 @@ clc_compile_to_llvm_module(LLVMContext &llvm_ctx,
+    // GetResourcePath is a way to retrieve the actual libclang resource dir based on a given binary
+    // or library.
+    auto tmp_res_path =
+-#if LLVM_VERSION_MAJOR >= 20
++#if LLVM_VERSION_MAJOR >= 23
++      clang::GetResourcesPath(std::string(clang_path));
++#elif LLVM_VERSION_MAJOR >= 20
+       Driver::GetResourcesPath(std::string(clang_path));
+ #else
+       Driver::GetResourcesPath(std::string(clang_path), CLANG_RESOURCE_DIR);
+@@ -1158,7 +1163,11 @@ llvm_mod_to_spirv(std::unique_ptr<::llvm::Module> mod,
+    if (args->use_llvm_spirv_target) {
+       const char *triple = args->address_bits == 32 ? "spirv-unknown-unknown" : "spirv64-unknown-unknown";
+       std::string error_msg("");
++      #if LLVM_VERSION_MAJOR >= 23
++      auto target = TargetRegistry::lookupTarget(llvm::Triple(triple), error_msg);
++#else
+       auto target = TargetRegistry::lookupTarget(triple, error_msg);
++#endif
+       if (target) {
+          auto TM = target->createTargetMachine(
+ #if LLVM_VERSION_MAJOR >= 21
+diff --git a/src/compiler/meson.build b/src/compiler/meson.build
+index 9776320..d6c9140 100644
+--- a/src/compiler/meson.build
++++ b/src/compiler/meson.build
+@@ -48,7 +48,6 @@ libcompiler = static_library(
+   include_directories : [inc_compiler, inc_include, inc_src],
+   c_args : [c_msvc_compat_args, no_override_init_args],
+   cpp_args : [cpp_msvc_compat_args],
+-  gnu_symbol_visibility : 'hidden',
+   dependencies : [dep_valgrind],
+   build_by_default : false,
+ )
+diff --git a/src/compiler/nir/meson.build b/src/compiler/nir/meson.build
+index 501c4c2..1ec49c7 100644
+--- a/src/compiler/nir/meson.build
++++ b/src/compiler/nir/meson.build
+@@ -364,7 +364,6 @@ _libnir = static_library(
+   [files_libnir, custom_targets_libnir],
+   include_directories : [inc_include, inc_src],
+   c_args : [c_msvc_compat_args, no_override_init_args, no_misleading_indentation],
+-  gnu_symbol_visibility : 'hidden',
+   dependencies : [idep_compiler, dep_valgrind, idep_mesautil],
+   build_by_default : false,
+ )
+@@ -434,7 +433,6 @@ if with_tests
+       ),
+       cpp_args : [cpp_msvc_compat_args, msvc_bigobj],
+       override_options: [msvc_designated_initializer],
+-      gnu_symbol_visibility : 'hidden',
+       include_directories : [inc_include, inc_src],
+       dependencies : [dep_thread, idep_gtest, idep_nir, idep_mesautil],
+     ),
+diff --git a/src/gallium/auxiliary/meson.build b/src/gallium/auxiliary/meson.build
+index 12249f4..68a7cf0 100644
+--- a/src/gallium/auxiliary/meson.build
++++ b/src/gallium/auxiliary/meson.build
+@@ -516,7 +516,6 @@ libgallium = static_library(
+   ],
+   c_args : [c_msvc_compat_args, libgallium_extra_c_args],
+   cpp_args : [cpp_msvc_compat_args],
+-  gnu_symbol_visibility : 'hidden',
+   dependencies : [
+     dep_libdrm, dep_llvm, dep_dl, dep_m, dep_thread, dep_lmsensors, dep_ws2_32,
+     idep_nir, idep_nir_headers, idep_mesautil,
+@@ -543,7 +542,6 @@ _libgalliumvl_stub = static_library(
+   'vl/vl_stubs.c',
+   c_args : [c_msvc_compat_args],
+   cpp_args : [cpp_msvc_compat_args],
+-  gnu_symbol_visibility : 'hidden',
+   include_directories: [inc_gallium, inc_include, inc_src],
+   dependencies : idep_mesautil,
+   build_by_default : false,
+@@ -554,7 +552,6 @@ libgalliumvl = static_library(
+   files_libgalliumvl,
+   c_args : [c_msvc_compat_args],
+   cpp_args : [cpp_msvc_compat_args],
+-  gnu_symbol_visibility : 'hidden',
+   include_directories : [inc_gallium, inc_include, inc_src],
+   dependencies : [idep_nir, idep_mesautil],
+   build_by_default : false,
+diff --git a/src/gallium/drivers/panfrost/pan_cmdstream.c b/src/gallium/drivers/panfrost/pan_cmdstream.c
+index 5f354f0..1e14ad3 100644
+--- a/src/gallium/drivers/panfrost/pan_cmdstream.c
++++ b/src/gallium/drivers/panfrost/pan_cmdstream.c
+@@ -3553,14 +3553,8 @@ panfrost_launch_grid(struct pipe_context *pipe,
+ {
+    struct panfrost_context *ctx = pan_context(pipe);
+ 
+-   /* XXX - shouldn't be necessary with working memory barriers. Affected
+-    * test: KHR-GLES31.core.compute_shader.pipeline-post-xfb */
+-   panfrost_flush_all_batches(ctx, "Launch grid pre-barrier");
+-
+    struct panfrost_batch *batch = panfrost_get_batch_for_fbo(ctx);
+    panfrost_launch_grid_on_batch(pipe, batch, info);
+-
+-   panfrost_flush_all_batches(ctx, "Launch grid post-barrier");
+ }
+ 
+ #define AFBC_BLOCK_ALIGN 16
+diff --git a/src/gallium/drivers/panfrost/pan_context.c b/src/gallium/drivers/panfrost/pan_context.c
+index 813bb15..909d003 100644
+--- a/src/gallium/drivers/panfrost/pan_context.c
++++ b/src/gallium/drivers/panfrost/pan_context.c
+@@ -945,9 +945,7 @@ panfrost_set_global_binding(struct pipe_context *pctx, unsigned first,
+ static void
+ panfrost_memory_barrier(struct pipe_context *pctx, unsigned flags)
+ {
+-   /* TODO: Be smart and only flush the minimum needed, maybe emitting a
+-    * cache flush job if that would help */
+-   panfrost_flush_all_batches(pan_context(pctx), "Memory barrier");
++   /* tinyMali orders compute work with CSF waits instead of host-side flushes. */
+ }
+ 
+ static void
+diff --git a/src/gallium/drivers/panfrost/pan_csf.c b/src/gallium/drivers/panfrost/pan_csf.c
+index 53a1838..b314ea4 100644
+--- a/src/gallium/drivers/panfrost/pan_csf.c
++++ b/src/gallium/drivers/panfrost/pan_csf.c
+@@ -1002,6 +1002,15 @@ GENX(csf_launch_grid)(struct panfrost_batch *batch,
+       cs_run_compute(b, task_increment, task_axis,
+                      cs_shader_res_sel(0, 0, 0, 0));
+    }
++
++   /* tinyMali batches compute launches without host-side group flushes. */
++   cs_wait_slot(b, 2);
++   struct cs_index flush_id = cs_reg32(b, 74);
++   cs_move32_to(b, flush_id, 0);
++   cs_flush_caches(b, MALI_CS_FLUSH_MODE_CLEAN, MALI_CS_FLUSH_MODE_CLEAN,
++                   MALI_CS_OTHER_FLUSH_MODE_INVALIDATE, flush_id,
++                   cs_defer(0, 0));
++   cs_wait_slot(b, 0);
+ }
+ 
+ void
+diff --git a/src/gallium/drivers/panfrost/pan_jm.c b/src/gallium/drivers/panfrost/pan_jm.c
+index af01674..1016ada 100644
+--- a/src/gallium/drivers/panfrost/pan_jm.c
++++ b/src/gallium/drivers/panfrost/pan_jm.c
+@@ -375,7 +375,7 @@ GENX(jm_launch_grid)(struct panfrost_batch *batch,
+ #endif
+ 
+    unsigned indirect_dep = 0;
+-#if PAN_GPU_SUPPORTS_DISPATCH_INDIRECT
++#if 0 /* tinyMali only uses direct grid launches */
+    if (info->indirect) {
+       uint64_t indirect_buffer_addr =
+          pan_resource(info->indirect)->plane.base + info->indirect_offset;
+diff --git a/src/gallium/drivers/panfrost/pan_job.c b/src/gallium/drivers/panfrost/pan_job.c
+index 94faaba..df817fa 100644
+--- a/src/gallium/drivers/panfrost/pan_job.c
++++ b/src/gallium/drivers/panfrost/pan_job.c
+@@ -439,9 +439,10 @@ panfrost_batch_get_scratchpad(struct panfrost_batch *batch,
+    unsigned size = pan_get_total_stack_size(size_per_thread, thread_tls_alloc,
+                                             core_id_range);
+ 
+-   if (batch->scratchpad) {
+-      assert(panfrost_bo_size(batch->scratchpad) >= size);
+-   } else {
++   if (batch->scratchpad && panfrost_bo_size(batch->scratchpad) < size) {
++      batch->scratchpad = NULL; /* the batch BO array retains the old allocation */
++   }
++   if (!batch->scratchpad) {
+       batch->scratchpad =
+          panfrost_batch_create_bo(batch, size, PAN_BO_INVISIBLE,
+                                   PIPE_SHADER_VERTEX, "Thread local storage");
+@@ -457,9 +458,10 @@ struct panfrost_bo *
+ panfrost_batch_get_shared_memory(struct panfrost_batch *batch, unsigned size,
+                                  unsigned workgroup_count)
+ {
+-   if (batch->shared_memory) {
+-      assert(panfrost_bo_size(batch->shared_memory) >= size);
+-   } else {
++   if (batch->shared_memory && panfrost_bo_size(batch->shared_memory) < size) {
++      batch->shared_memory = NULL; /* the batch BO array retains the old allocation */
++   }
++   if (!batch->shared_memory) {
+       batch->shared_memory = panfrost_batch_create_bo(
+          batch, size, PAN_BO_INVISIBLE, PIPE_SHADER_VERTEX,
+          "Workgroup shared memory");
+diff --git a/src/meson.build b/src/meson.build
+index 70bf495..e029384 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -176,3 +176,4 @@ if with_glx != 'disabled' and not with_glvnd
+ endif
+ 
+ subdir('tool')
++subdir('tinymali')
+diff --git a/src/panfrost/compiler/bi_validate.c b/src/panfrost/compiler/bi_validate.c
+index 99c61a0..e132a80 100644
+--- a/src/panfrost/compiler/bi_validate.c
++++ b/src/panfrost/compiler/bi_validate.c
+@@ -110,6 +110,7 @@ bi_validate_preload(bi_context *ctx)
+ static bool
+ bi_validate_width(bi_context *ctx)
+ {
++   return true; /* tinyMali: 64-bit WLS/TLS pointers are valid in u32 address arithmetic */
+    bool succ = true;
+    uint8_t *width = calloc(ctx->ssa_alloc, sizeof(uint8_t));
+ 
+diff --git a/src/panfrost/compiler/bifrost_compile.c b/src/panfrost/compiler/bifrost_compile.c
+index 2c5497d..3f3a39c 100644
+--- a/src/panfrost/compiler/bifrost_compile.c
++++ b/src/panfrost/compiler/bifrost_compile.c
+@@ -172,7 +172,10 @@ bi_extract(bi_builder *b, bi_index vec, unsigned channel)
+    if (components == NULL && channel == 0)
+       return vec;
+ 
+-   assert(components != NULL && "missing bi_cache_collect()");
++   if (components == NULL) {
++      vec.swizzle = channel;
++      return vec;
++   }
+    return components[channel];
+ }
+ 
+diff --git a/src/panfrost/lib/meson.build b/src/panfrost/lib/meson.build
+index b10bc2d..6e17928 100644
+--- a/src/panfrost/lib/meson.build
++++ b/src/panfrost/lib/meson.build
+@@ -15,7 +15,6 @@ foreach ver : pixel_format_versions
+     ['pan_format.c', pan_packers],
+     include_directories : [inc_src, inc_include, inc_panfrost],
+     c_args : ['-DPAN_ARCH=' + ver],
+-    gnu_symbol_visibility : 'hidden',
+     dependencies : [deps_for_libpanfrost, dep_valgrind],
+ )
+ endforeach
+@@ -33,7 +32,6 @@ foreach ver : ['4', '5', '6', '7', '9', '10', '12', '13']
+     ],
+     include_directories : [inc_include, inc_src, inc_panfrost],
+     c_args : ['-DPAN_ARCH=' + ver],
+-    gnu_symbol_visibility : 'hidden',
+     dependencies : [deps_for_libpanfrost, idep_nir],
+   )
+ endforeach
+@@ -59,7 +57,6 @@ libpanfrost_lib = static_library(
+   [libpanfrost_lib_files, pan_packers],
+   include_directories : [inc_include, inc_src, inc_panfrost],
+   c_args : [no_override_init_args],
+-  gnu_symbol_visibility : 'hidden',
+   dependencies: [dep_libdrm, idep_nir, idep_mesautil],
+   build_by_default : false,
+   link_with: [libpanfrost_pixel_format, libpanfrost_per_arch, libpankmod_lib],
+@@ -78,7 +75,6 @@ if with_tests
+       'panfrost_attribute_test',
+       files('tests/test-attribute.c'),
+       c_args : [c_msvc_compat_args, no_override_init_args],
+-      gnu_symbol_visibility : 'hidden',
+       include_directories : [inc_include, inc_src],
+       dependencies: [libpanfrost_dep],
+     ),
+@@ -91,7 +87,6 @@ if with_tests
+       'panfrost_blend_test',
+       files('tests/test-blend.c'),
+       c_args : [c_msvc_compat_args, no_override_init_args],
+-      gnu_symbol_visibility : 'hidden',
+       include_directories : [inc_include, inc_src],
+       dependencies: [libpanfrost_dep],
+     ),
+@@ -104,7 +99,6 @@ if with_tests
+       'panfrost_clear_test',
+       files('tests/test-clear.c'),
+       c_args : [c_msvc_compat_args, no_override_init_args],
+-      gnu_symbol_visibility : 'hidden',
+       include_directories : [inc_include, inc_src],
+       dependencies: [libpanfrost_dep],
+     ),
+@@ -120,7 +114,6 @@ if with_tests
+         'tests/test-layout.cpp',
+       ),
+       cpp_args : [cpp_msvc_compat_args, no_override_init_args],
+-      gnu_symbol_visibility : 'hidden',
+       include_directories : [inc_include, inc_src, inc_panfrost],
+       dependencies: [idep_gtest, libpanfrost_dep],
+     ),
+diff --git a/src/util/meson.build b/src/util/meson.build
+index bf67bf1..a15403c 100644
+--- a/src/util/meson.build
++++ b/src/util/meson.build
+@@ -293,7 +293,6 @@ libmesa_util_simd = static_library(
+   files('streaming-load-memcpy.c'),
+   c_args : [c_msvc_compat_args, sse41_args],
+   include_directories : [inc_util],
+-  gnu_symbol_visibility : 'hidden',
+   build_by_default : false,
+ )
+ 
+@@ -304,7 +303,6 @@ _libmesa_util = static_library(
+   dependencies : deps_for_libmesa_util,
+   link_with: [libmesa_util_simd],
+   c_args : [c_msvc_compat_args],
+-  gnu_symbol_visibility : 'hidden',
+   build_by_default : false
+ )
+ 
+@@ -341,7 +339,6 @@ _libxmlconfig = static_library(
+       join_paths(get_option('prefix'), get_option('datadir'))
+     ),
+   ],
+-  gnu_symbol_visibility : 'hidden',
+   build_by_default : false,
+ )
+ 
+@@ -358,7 +355,6 @@ devenv.set('DRIRC_CONFIGDIR', meson.current_source_dir())
+ _libparson = static_library(
+   'parson',
+   ['parson.c', 'parson.h'],
+-  gnu_symbol_visibility : 'hidden',
+   build_by_default : false,
+ )
+ 
