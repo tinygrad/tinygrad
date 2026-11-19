@@ -588,8 +588,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   @staticmethod
   def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:Register) -> UOp:
-    params = [UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r) for i,r in enumerate(regs)]
-    return UOp.native(op, *params, dtype=dtype).call(*src)
+    params = UOp.sink(*(UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r) for i,r in enumerate(regs)))
+    return UOp.native(op, params, dtype=dtype).call(*src)
   def contract(self, *rngs:UOp):
     assert all(x.axis_type == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
@@ -1216,9 +1216,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def native(code:Any, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
-    if src: assert src[0].shape == shape and src[0].dtype == dtype, f"shape and dtype must match {src[0].shape} {shape} {src[0].dtype} {dtype}"
-    else: src = (shape_to_shape_arg(shape),)
-    return UOp(Ops.NATIVE, src=src, arg=NativeInfo(code, dtype, fmt))
+    shape_src = (shape_to_shape_arg(shape),)
+    return UOp(Ops.NATIVE, src=shape_src+src, arg=NativeInfo(code, dtype, fmt))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, hcq:HCQInfo|None=None) -> UOp:
