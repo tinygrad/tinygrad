@@ -193,8 +193,20 @@ index 29e8956..c71b257 100644
  void
  panfrost_disk_cache_store(struct disk_cache *cache,
                            const struct panfrost_uncompiled_shader *uncompiled,
+diff --git a/src/gallium/drivers/panfrost/pan_csf.c b/src/gallium/drivers/panfrost/pan_csf.c
+index 53a1838..5fb8729 100644
+--- a/src/gallium/drivers/panfrost/pan_csf.c
++++ b/src/gallium/drivers/panfrost/pan_csf.c
+@@ -30,6 +30,7 @@
+ #include "gen_macros.h"
+ #include "pan_cmdstream.h"
+ #include "pan_context.h"
++#include "pan_public.h"
+ #include "pan_csf.h"
+ #include "pan_fb_preload.h"
+ #include "pan_job.h"
 diff --git a/src/gallium/drivers/panfrost/pan_helpers.c b/src/gallium/drivers/panfrost/pan_helpers.c
-index 6139216..dca98f8 100644
+index 6139216..0e99261 100644
 --- a/src/gallium/drivers/panfrost/pan_helpers.c
 +++ b/src/gallium/drivers/panfrost/pan_helpers.c
 @@ -22,7 +22,10 @@
@@ -208,7 +220,7 @@ index 6139216..dca98f8 100644
 
  void
  panfrost_analyze_sysvals(struct panfrost_compiled_shader *ss)
-@@ -262,3 +265,291 @@ panfrost_track_image_access(struct panfrost_batch *batch,
+@@ -262,3 +265,317 @@ panfrost_track_image_access(struct panfrost_batch *batch,
        panfrost_batch_read_rsrc(batch, rsrc, stage);
     }
  }
@@ -331,6 +343,12 @@ index 6139216..dca98f8 100644
 +      };
 +      ioctl(panfrost_device_fd(pan_device(ctx->screen)), DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
 +   }
++   struct pipe_fence_handle *fence = NULL;
++   ctx->flush(ctx, &fence, 0);
++   if (fence) {
++      ctx->screen->fence_finish(ctx->screen, NULL, fence, OS_TIMEOUT_INFINITE);
++      ctx->screen->fence_reference(ctx->screen, &fence, NULL);
++   }
 +   struct pipe_box box = {.width = size, .height = 1, .depth = 1};
 +   box.x = address - pan_resource(resource)->plane.base;
 +   struct pipe_transfer *transfer;
@@ -444,10 +462,29 @@ index 6139216..dca98f8 100644
 +{
 +   return pan_context(ctx)->raw_syncpoint;
 +}
++
++void
++panthor_set_sync_handle(struct pipe_context *ctx, uint32_t handle)
++{
++   pan_context(ctx)->raw_sync_handle = handle;
++}
++static struct pipe_resource *raw_last;
++static uint64_t raw_last_base, raw_last_size;
++
 +struct pipe_context *
 +panthor_write(struct pipe_context *ctx, uint64_t address, uint64_t value, uint32_t size)
 +{
-+   struct pipe_resource *pr = panfrost_resource_lookup(ctx->screen, address);
++   struct pipe_resource *pr;
++   if (raw_last && address >= raw_last_base && address < raw_last_base + raw_last_size) {
++      pr = raw_last;
++   } else {
++      pr = panfrost_resource_lookup(ctx->screen, address);
++      if (pr) {
++         raw_last = pr;
++         raw_last_base = pan_resource(pr)->plane.base;
++         raw_last_size = pr->width0;
++      }
++   }
 +   if (!pr) {
 +      return ctx;
 +   }
@@ -492,6 +529,7 @@ index 6139216..dca98f8 100644
 +      .queue_submits = DRM_PANTHOR_OBJ_ARRAY(1, &qsubmit),
 +   };
 +   int ret = ioctl(fd, DRM_IOCTL_PANTHOR_GROUP_SUBMIT, &gsubmit);
++   raw_last = NULL;
 +   return ctx;
 +}
 +
@@ -514,7 +552,7 @@ index af01674..1016ada 100644
        uint64_t indirect_buffer_addr =
           pan_resource(info->indirect)->plane.base + info->indirect_offset;
 diff --git a/src/gallium/drivers/panfrost/pan_public.h b/src/gallium/drivers/panfrost/pan_public.h
-index 587fc3f..2cd638e 100644
+index 587fc3f..673e02d 100644
 --- a/src/gallium/drivers/panfrost/pan_public.h
 +++ b/src/gallium/drivers/panfrost/pan_public.h
 @@ -28,10 +28,30 @@
@@ -548,7 +586,7 @@ index 587fc3f..2cd638e 100644
  struct pipe_screen *
  panfrost_create_screen(int fd, const struct pipe_screen_config *config,
                         struct renderonly *ro);
-@@ -41,3 +61,36 @@ panfrost_create_screen(int fd, const struct pipe_screen_config *config,
+@@ -41,3 +61,37 @@ panfrost_create_screen(int fd, const struct pipe_screen_config *config,
  #endif
 
  #endif
@@ -571,6 +609,7 @@ index 587fc3f..2cd638e 100644
 +
 +uint32_t panfrost_context_group_handle(struct pipe_context *ctx);
 +uint64_t panthor_context_point(struct pipe_context *ctx);
++void panthor_set_sync_handle(struct pipe_context *ctx, uint32_t handle);
 +struct pipe_context *panthor_write(struct pipe_context *ctx, uint64_t address, uint64_t value, uint32_t size);
 +
 +struct pipe_context *panthor_group_submit(struct pipe_context *ctx, int fd, uint32_t group, uint64_t stream_addr, uint32_t stream_size, uint32_t sync_handle);
