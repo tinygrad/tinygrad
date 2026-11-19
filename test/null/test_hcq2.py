@@ -51,7 +51,7 @@ def submits(batch:UOp) -> list[UOp]: # the submit calls of a batch sink in order
   return calls
 def queues(batch:UOp) -> dict[tuple[str, str], list[UOp]]:
   return {(q.device, q.arg.name): list(c.body.src) for c in submits(batch.body) for q in [c.src[1]]}
-def ins_name(c:UOp) -> str|None: return c.body.arg.name if c.op is Ops.CALL and c.body.op is Ops.CUSTOM_FUNCTION else None
+def ins_name(c:UOp) -> str|None: return c.body.arg.code if c.op is Ops.CALL and c.body.op is Ops.NATIVE else None
 def calls(batch:UOp) -> list[UOp]: return [c for cmds in queues(batch).values() for c in cmds if c.op is Ops.CALL and ins_name(c) is None]
 def devices_of(call:UOp) -> set[str]: return {to_tuple(a.device)[0] for a in get_call_arg_uops(call)}
 

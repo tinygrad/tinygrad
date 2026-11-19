@@ -152,7 +152,7 @@ class TestRecurse(unittest.TestCase):
 
   def test_self_referential_call_argument(self):
     a = UOp.variable('a', 0, 10, dtype=dtypes.float).bufferize()
-    pm = PatternMatcher([(UPat(Ops.STAGE, name="x"), lambda x: UOp.custom_function("f", x.param_like(0)).call(x))])
+    pm = PatternMatcher([(UPat(Ops.STAGE, name="x"), lambda x: UOp.native("f", x.param_like(0)).call(x))])
     with self.assertRaisesRegex(RuntimeError, "unresolved rewrite dependencies") as cm:
       graph_rewrite(a.sink(), pm, bottom_up=True)
     self.assertIn("STAGE@", str(cm.exception))
@@ -178,7 +178,7 @@ class TestRecurse(unittest.TestCase):
 class TestCallRewrite(unittest.TestCase):
   def test_wrap_node_in_call(self):
     a = UOp.variable('a', 0, 10, dtype=dtypes.float).bufferize()
-    call = UOp.custom_function("f", a).call()
+    call = UOp.native("f", a).call()
     for walk in (False, True):
       for bottom_up in (False, True):
         with self.subTest(walk=walk, bottom_up=bottom_up):
@@ -186,17 +186,17 @@ class TestCallRewrite(unittest.TestCase):
 
   def test_body_shared_with_argument(self):
     a, b = UOp.const(3), UOp.const(4)
-    call = UOp.custom_function("f", a).call(a)
+    call = UOp.native("f", a).call(a)
     for walk in (False, True):
       for bottom_up in (False, True):
         for enter_calls in (False, True):
           with self.subTest(walk=walk, bottom_up=bottom_up, enter_calls=enter_calls):
             ret = graph_rewrite(call, _substitute, {a:b}, walk=walk, bottom_up=bottom_up, enter_calls=enter_calls)
-            self.assertIs(ret, UOp.custom_function("f", b if enter_calls else a).call(b))
+            self.assertIs(ret, UOp.native("f", b if enter_calls else a).call(b))
 
   def test_body_shared_with_sibling(self):
     a, b = UOp.const(3), UOp.const(4)
-    call = UOp.custom_function("f", a).call()
+    call = UOp.native("f", a).call()
     for walk in (False, True):
       for bottom_up in (False, True):
         for call_first in (False, True):

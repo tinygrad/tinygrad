@@ -37,11 +37,11 @@ class TestEffectRetention(unittest.TestCase):
                                  fxn=lambda a: f(a, a.after(a[0].store(7))).sink(arg=KernelInfo(opts_to_apply=())))[0]
       self.assertEqual(out.tolist(), [7, 0, 0])
 
-  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT != "WEBGPU", "CUSTOM renders C")
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT != "WEBGPU", "NATIVE renders C")
   def test_group_keeps_custom(self):
     r = UOp.range(4, 0)
     def kernel(C:UOp, D:UOp) -> UOp:
-      inc = UOp.custom_function("{0}[0] += 1;", fmt=True).call(C.index(r))
+      inc = UOp.native("{0}[0] += 1;", fmt=True).call(C.index(r))
       return UOp.group(inc, D[r].store(1)).end(r).sink(arg=KernelInfo(opts_to_apply=()))
     c, d = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous(), Tensor.zeros(4, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
     Tensor.realize(c, d)
@@ -268,23 +268,23 @@ class TestEffectFrequency(unittest.TestCase):
     d = Tensor.custom_kernel(Tensor.zeros(8, dtype=dtypes.int).contiguous(), Tensor(Variable("n", 1, 8, dtypes.int).bind(2)), fxn=kernel)[0]
     self.assertEqual(d.tolist(), [1, 1, 0, 0, 0, 0, 0, 0])
 
-  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT != "WEBGPU", "CUSTOM renders C")
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT != "WEBGPU", "NATIVE renders C")
   def test_shrink_range_keeps_custom(self):
-    # the CUSTOM sets C[0] to r every iteration, so r keeps its 4 iterations though the D store gates it to r<2
+    # the NATIVE sets C[0] to r every iteration, so r keeps its 4 iterations though the D store gates it to r<2
     r = UOp.range(4, 0)
     def kernel(C:UOp, D:UOp) -> UOp:
-      val = UOp.custom_function("({0}[0] = {1})", shape=C[0].shape, dtype=dtypes.int, fmt=True).call(C[0], r.cast(dtypes.int))
+      val = UOp.native("({0}[0] = {1})", shape=C[0].shape, dtype=dtypes.int, fmt=True).call(C[0], r.cast(dtypes.int))
       return D[r.valid(r<2)].store(val).end(r).sink(arg=KernelInfo(opts_to_apply=()))
     c, d = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor.zeros(4, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
     Tensor.realize(c, d)
     self.assertEqual((c.tolist(), d.tolist()), ([3], [0, 1, 0, 0]))
 
-  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT != "WEBGPU", "CUSTOM renders C")
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and Device.DEFAULT != "WEBGPU", "NATIVE renders C")
   def test_reduce_collapse_keeps_custom(self):
-    # the CUSTOM increments C[r] every iteration, though the sum only picks r==2
+    # the NATIVE increments C[r] every iteration, though the sum only picks r==2
     r = UOp.range(4, 0)
     def kernel(C:UOp, O:UOp) -> UOp:
-      inc = UOp.custom_function("({0}[0] += 1)", shape=C.index(r).shape, dtype=dtypes.int, fmt=True).call(C.index(r))
+      inc = UOp.native("({0}[0] += 1)", shape=C.index(r).shape, dtype=dtypes.int, fmt=True).call(C.index(r))
       return O[0].store(UOp.const(2, dtypes.int).eq(r.cast(dtypes.int)).where(inc, 0).reduce(r, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
     c, o = Tensor.custom_kernel(Tensor.zeros(4, dtype=dtypes.int).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)[:2]
     Tensor.realize(c, o)
@@ -305,9 +305,9 @@ class TestEffectFrequency(unittest.TestCase):
         self.assertEqual(Tensor.zeros(1, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [3])
 
   def test_padto_refuses_ungatable(self):
-    # a CUSTOM and a STORE to a whole buffer can't be no-ops, so padding r is refused
+    # a NATIVE and a STORE to a whole buffer can't be no-ops, so padding r is refused
     r = UOp.range(3, 0)
-    effects = {"custom": lambda C: UOp.custom_function("{0}[0] += {1}+1;", fmt=True).call(C.index(0), r.cast(dtypes.int)).end(r),
+    effects = {"custom": lambda C: UOp.native("{0}[0] += {1}+1;", fmt=True).call(C.index(0), r.cast(dtypes.int)).end(r),
                "whole_store": lambda C: C.store((r.cast(dtypes.int)+1).reshape((1,))).end(r)}
     for name, effect in effects.items():
       with self.subTest(name):

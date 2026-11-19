@@ -1,4 +1,3 @@
-from typing import cast
 import math, dataclasses
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, broadcast_axes
 from tinygrad.helpers import argsort
@@ -17,22 +16,26 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
     zero_count = is_zero.cast(sum_acc_dtype(is_zero.dtype))._rop(Ops.ADD, axes)
     return (ctx * is_zero.where(zero_count.eq(1).where(safe_x._rop(Ops.MUL, axes), 0), ret/safe_x),)
 
-def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
+def call_gradient(grads:dict[UOp, UOp], k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   fxn, args = k.body, k.src[1:]
+  # an output is its arg after the call, duplicate args share their first slot
+  out_grads = {args.index(a):grads[out] for a in args if (out:=a.after(k)) in grads}
+  if not out_grads: return (None,) * len(k.src)
   outputs = {st.src[0].unsharded_base.arg.slot:st for st in fxn.src
              if st.op is Ops.STORE and st.src[0].unsharded_base.op is Ops.PARAM} if fxn.op is Ops.SINK and fxn.arg is None else {}
   if k.arg.grad_fxn is not None:
     real = [g.clone(device=args[i].device) if g.device is None else g
-            for i,g in enumerate(ctx.src) if g.op is not Ops.NOOP]
+            for i,g in out_grads.items()]
     git = iter(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
     return (None,) + tuple(None if i in outputs else next(git) for i in range(len(args)))
   assert outputs, f"expected a CALL with output STOREs or a grad_fxn, got {fxn.op}"
-  params = {p.arg.slot:p for p in fxn.toposort() if p.op is Ops.PARAM and p.arg.slot >= 0}
-  grad_args = tuple(ctx.src[i] for i in outputs)
+  params = {p.arg.slot:p for p in fxn.toposort() if p.op is Ops.PARAM and p.arg.slot in needed}
+  grad_slots = [i for i in outputs if i in out_grads]
+  grad_args = tuple(out_grads[i] for i in grad_slots)
   root_grad = UOp.sink(*[g if g.device is None else g.param_like(len(args)+i) for i,g in enumerate(grad_args)])
-  grads = compute_gradient(UOp.sink(*[st.src[1] for st in outputs.values()]), root_grad, set(params.values()))
-  grad_bodies = {i:grads[p].view_as(args[i].shard_shape, args[i].axis)
-                 for i in needed - outputs.keys() if (p:=params.get(i)) is not None and p in grads}
+  body_grads = compute_gradient(UOp.sink(*[outputs[i].src[1] for i in grad_slots]), root_grad, set(params.values()))
+  grad_bodies = {i:body_grads[p].view_as(args[i].shard_shape, args[i].axis)
+                 for i in needed - outputs.keys() if (p:=params.get(i)) is not None and p in body_grads}
   bwd_body = UOp.sink(*grad_bodies.values())
   # Reuse the output PARAMs for saved forward values instead of recomputing them.
   if k.arg.precompile:
@@ -89,8 +92,8 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),) + (None,) * (len(ret.src)-1)),
   (UPat(Ops.UNSHARD, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   (UPat(Ops.SINK), lambda ctx: ctx.src),
-  (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
-    (ctx, UOp.sink(*([ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1)])))),
+  # call_gradient reads gradients from the output AFTERs
+  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.CALL))), lambda ctx: (ctx, None)),
   # ordering-only AFTER: store target is a different buffer, gradient flows straight through to dest
   (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="t"), UPat())))),
    lambda ctx, dest, t: (ctx, None) if t.buf_uop is not dest.buf_uop else None),
@@ -119,13 +122,13 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
   walk, in_target_path = _deepwalk(root, targets)
   grads: dict[UOp, UOp] = {root: root_grad}
   for t0 in reversed(walk):
-    if t0 not in grads or grads[t0].op is Ops.NOOP: continue
     # CALL: pass needed param set so backward only computes required gradients
     if t0.op is Ops.CALL:
       needed = {i for i, arg in enumerate(t0.src[1:]) if arg in targets or in_target_path.get(arg, False)}
-      lgrads:tuple[UOp|None, ...]|None = call_gradient(grads[t0], t0, needed)
+      lgrads:tuple[UOp|None, ...]|None = call_gradient(grads, t0, needed)
+    elif t0 not in grads: continue
     else:
-      lgrads = cast(tuple[UOp|None, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
+      lgrads = pm_gradient.rewrite(t0, ctx=grads[t0])
     if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}\n\nin {str(t0)[0:1000]}...")
     assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
     for k,v in zip(t0.src, lgrads):
@@ -133,10 +136,5 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
       # a shaped edge's gradient is summed to its source's shape
       if k._shape is not None and v._shape is not None and k._shape != v._shape:
         v = v.cast(sum_acc_dtype(v.dtype))._rop(Ops.ADD, broadcast_axes(k.shape, v.shape)).reshape(k.shape).cast(v.dtype)
-      if k in grads and grads[k].op is not Ops.NOOP:
-        if v.op is Ops.SINK and grads[k].op is Ops.SINK:
-          grads[k] = UOp.sink(*[p + n if (p.op is not Ops.NOOP and n.op is not Ops.NOOP) else
-                                 n if p.op is Ops.NOOP else p for p, n in zip(grads[k].src, v.src)])
-        else: grads[k] = grads[k] + v
-      else: grads[k] = v
+      grads[k] = grads[k] + v if k in grads else v
   return grads

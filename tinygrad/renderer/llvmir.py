@@ -1,6 +1,5 @@
 import struct
-from tinygrad.renderer import tc
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import tc, Renderer
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast, fp8_index, amd_fp8s
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
@@ -150,8 +149,8 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.BARRIER), lambda ctx: "  fence seq_cst"),
 
   # calls
-  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
-   f"  {'' if x.dtype == dtypes.void else ctx[x] + ' = '}call {ldt(x.dtype)} @{f.arg.name}({', '.join(f'{lparam(y)} {ctx[y]}' for y in x.src[1:])})"),
+  (UPat(Ops.CALL, src=(UPat(Ops.NATIVE, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
+   f"  {'' if x.dtype == dtypes.void else ctx[x] + ' = '}call {ldt(x.dtype)} @{f.arg.code}({', '.join(f'{lparam(y)} {ctx[y]}' for y in x.src[1:])})"),
 ])
 
 pm_widen_uidx = PatternMatcher([
@@ -229,8 +228,8 @@ class CPULLVMRenderer(LLVMRenderer):
   string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str:
-    decls = {x.src[0].arg.name: f"declare {ldt(x.dtype)} @{x.src[0].arg.name}({', '.join(map(lparam, x.src[1:]))})"
-             for x in uops if x.op is Ops.CALL and x.src[0].op is Ops.CUSTOM_FUNCTION}
+    decls = {x.body.arg.code: f"declare {ldt(x.dtype)} @{x.body.arg.code}({', '.join(map(lparam, x.src[1:]))})"
+             for x in uops if x.op is Ops.CALL and x.body.op is Ops.NATIVE}
     decls |= {x.body.src[0].arg.function_name: f"declare void @{x.body.src[0].arg.function_name}({', '.join(map(lparam, x.body.arg.params))})"
               for x in uops if x.op is Ops.CALL and x.body.op is Ops.PROGRAM}
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'

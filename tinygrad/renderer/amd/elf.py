@@ -13,7 +13,7 @@ from tinygrad.runtime.autogen.amd.cdna.ins import s_nop as s_nop_cdna
 
 _arch_map = {"gfx9": "cdna", "gfx10": "rdna3", "gfx11": "rdna3", "gfx12": "rdna4"}
 def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
-  insts = [u.body.arg for u in lin.src]
+  insts = [u.body.arg.code for u in lin.src]
 
   # ** scan for max vgpr/sgpr/accvgpr
   max_vgpr, max_sgpr, max_accvgpr = 0, 0, 0
