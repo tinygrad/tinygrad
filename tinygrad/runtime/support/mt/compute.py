@@ -7,7 +7,8 @@ from tinygrad.runtime.support.mt.mmu import MTMMU4
 FW_BASE, ROOT_BASE, INIT_SIZE, FW_DEVVA = 0x20000000, 0x30000000, 0x2000000, 0xe1c0000000
 FWIF_OFF, META_BASE = 0xc0000, 0x90000000
 SUB_PA, SUB_VA = FW_BASE + INIT_SIZE, FW_DEVVA + INIT_SIZE
-DEFAULT_FIRMWARE = str(pathlib.Path(__file__).with_name('mtfw-gen1.bin'))
+FIRMWARE_PATHS = ('/lib/firmware/mthreads/mtfw-gen1.bin', '/opt/musa/lib/firmware/mthreads/mtfw-gen1.bin')
+DEFAULT_FIRMWARE = next((path for path in FIRMWARE_PATHS if pathlib.Path(path).is_file()), FIRMWARE_PATHS[0])
 
 class MTFirmwareLayout:
   def __init__(self, core_count:int=8):
@@ -27,6 +28,9 @@ class MTFirmwareLayout:
 class MTFirmware:
   def __init__(self, dev:MTDev, path:str|None=None, core_count:int=8, prepare:bool=True, mmu:MTMMU4|None=None, v=None):
     self.dev, self.path, self.core_count = dev, path or os.environ.get('MT_FIRMWARE', DEFAULT_FIRMWARE), core_count
+    if prepare and not pathlib.Path(self.path).is_file():
+      raise FileNotFoundError(f'MT firmware not found at {self.path}. Install mtfw-gen1.bin or set MT_FIRMWARE; '
+                              'see tinygrad/runtime/support/mt/README.md')
     self.layout = MTFirmwareLayout(core_count)
     self.v = self.dev.pci_dev.map_bar(2, off=FW_BASE, size=INIT_SIZE, fmt='B') if v is None else v
     self.mmu = MTMMU4(ROOT_BASE) if mmu is None else mmu

@@ -21,7 +21,7 @@ from tinygrad.runtime.support.mt.elf import MTKernelImage
 
 class MUSACompiler(Compiler):
   def __init__(self):
-    super().__init__('mt')
+    super().__init__('mt_O3')
     self.mt = MTCompiler()
   def compile(self, src:str) -> bytes:
     return self.mt.compile_raw(src)
@@ -294,6 +294,10 @@ Compiled.pm_encode += PatternMatcher([
 class MTDevice(Compiled):
   renderers = [MUSARenderer]
   timestamp_divider = 25
+  serialize_hcq = True
+  skip_nested_lift = True
+  direct_hcq = True
+  enqueue_copies = False
   def __init__(self, device:str=''):
     dev_id = int(device.split(':')[1]) if ':' in device else 0
     self.mt = MTDev.open_usb(dev_id)
@@ -379,6 +383,17 @@ class MTDevice(Compiled):
       self.current_launch.v[ccb.queue_off+0x4028:ccb.queue_off+0x402c] = struct.pack('<I',(i+1)&0xff)
     self.response_checked = seq
 
+  def hcq_runtime_key(self, input_uops:list[UOp]): return tuple((u.arg.buffer,u.arg.buffer._buf) for u in input_uops)
+  def lower_hcq_call(self, call:UOp) -> UOp: return mt_lower_call(call)
+
+  def post_run(self) -> None: self.synchronize()
+
+  def post_link(self, input_uops:list[UOp]) -> None:
+    for launch in self.launches:
+      if launch.mmu_dirty:
+        launch.upload_mmu()
+        launch.mmu_dirty = False
+
   def activate_cached(self, profile_key:bytes|None) -> None:
     if profile_key is not None and (cached:=self.cached_launches.get(profile_key)) is not None:
       launch,obj,global_size,local_size = cached
@@ -417,6 +432,7 @@ class MTDevice(Compiled):
       # Spill VA uses a per-core power-of-two stride (minimum 32 MiB), with Core Number set to the physical core count.
       spill_arena = max(0x2000000,1 << (spill_bytes<<20).bit_length())*8 if spill_bytes else 0
       needed = max(round_up(spill_bytes*threads,0x1000),spill_arena)
+      if needed > 0x40000000: raise MemoryError(f'MT spill allocation {needed:#x} exceeds the validated 1 GiB limit')
       spill_size,spill = self.spill_buffers.get(0,(0,None))
       if spill_size < needed:
         spill = self.allocator.alloc(needed,BufferSpec())

@@ -41,6 +41,10 @@ VIZ                 | [1]        | 0=disabled, 1=[viz enabled](https://github.co
 ALLOW_TF32          | [1]        | enable TensorFloat-32 tensor cores on Ampere or newer GPUs.
 WEBGPU_BACKEND      | [WGPUBackendType_Metal, ...]          | Force select a backend for WebGPU (Metal, DirectX, OpenGL, Vulkan...)
 CUDA_PATH           | str        | Use `CUDA_PATH/include` for CUDA headers for CUDA and NV backends. If not set, TinyGrad will use `/usr/local/cuda/include`, `/usr/include` and `/opt/cuda/include`.
+MUSA_PATH           | str        | MUSA Toolkit location used for MT device compilation, default `/opt/musa`.
+MT_FIRMWARE         | str        | Path to `mtfw-gen1.bin`; otherwise standard firmware paths are searched (see `tinygrad/runtime/support/mt/README.md`).
+MT_TIMEOUT          | int        | MT submission and synchronization timeout in seconds, default `5`.
+MT_BOOT_TIMEOUT     | int        | MT firmware startup timeout in seconds, default `10`.
 
 ### DEV variable
 

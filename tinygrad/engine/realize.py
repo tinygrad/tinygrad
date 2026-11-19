@@ -188,7 +188,7 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
   if PROFILE:
     for d in {d for d, _, _, prof, *_ in info.kernels if prof and (slots[d], prof[0]) in Device[d].prof_ents}: Device[d].synchronize()
-  if info.kernels and info.kernels[0][0].split(':')[0] == 'MT': cast(Any,Device['MT']).activate_cached(info.kernels[0][3])
+  if info.kernels: Device[info.device[0]].activate_cached(info.kernels[0][3])
   ets = exec_kernel(ctx, call, ast, devices=(Device[info.device[0]].host,))
   if not (ctx.wait or PROFILE): return ets
 
@@ -276,13 +276,12 @@ def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp: return hcq_l
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   assert linear.op is Ops.LINEAR, f"run_linear calls on {linear.op}"
   if len(linear.src) == 0: return
-  def is_mt_kernel(c:UOp):
-    return c.op is Ops.CALL and c.body.op in (Ops.PROGRAM,Ops.SINK) and any(d.split(':')[0] == 'MT' for d in to_tuple(get_call_arg_uops(c)[0].device))
   inputs = list(input_uops)
   if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, cache=True), input_uops=inputs)
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: track_stats(ctx, call.without_after, perf_counter_us(), pm_exec.rewrite(call.without_after, ctx))
-  if any(is_mt_kernel(c) for c in linear.src): Device['MT'].synchronize()
+  for d in {d for c in linear.src if c.op is Ops.CALL and c.body.op in (Ops.PROGRAM,Ops.SINK) and get_call_arg_uops(c)
+            for d in to_tuple(get_call_arg_uops(c)[0].device)}: Device[d].post_run()
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)

@@ -27,7 +27,7 @@ class MTCompiler:
       src, obj = pathlib.Path(td) / 'kernel.mu', pathlib.Path(td) / 'kernel.o'
       src.write_text(source)
       include = pathlib.Path(__file__).parent/'include'
-      self._run([str(self.bin/'mcc'), f'--musa-path={self.musa_path}', '--offload-arch=mp_21', f'-I{include}',
+      self._run([str(self.bin/'mcc'), '-O3', f'--musa-path={self.musa_path}', '--offload-arch=mp_21', f'-I{include}',
                  '-c', str(src), '-o', str(obj)], td)
       return self.extract_raw(obj,td)
 

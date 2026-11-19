@@ -13,6 +13,7 @@ class MTMMU4:
     self.pages:dict[int,int] = {}
     self.page_flags:dict[int,int] = {}
     self.dirty_pages:set[int] = set()
+    self.mapped_ranges:set[tuple[int,int,int,int]] = set()
 
   def _alloc(self) -> int:
     if self.next + MT_PAGE_SIZE > len(self.root): raise MemoryError("MT MMU root allocation exhausted")
@@ -24,6 +25,8 @@ class MTMMU4:
     if va % MT_PAGE_SIZE or pa % MT_PAGE_SIZE: raise ValueError("MT MMU mappings must be 4 KiB aligned")
     if flags & 1 != 1: raise ValueError("MT MMU mapping must be present")
     if self.pages.get(va) == pa and self.page_flags.get(va) == flags: return
+    if va in self.pages:
+      self.mapped_ranges = {r for r in self.mapped_ranges if not (r[0] <= va < r[0]+r[2])}
     self.pages[va],self.page_flags[va] = pa,flags
     pci, pdi, pti = (va >> 30) & 0x3ff, (va >> 21) & 0x1ff, (va >> 12) & 0x1ff
     if pci not in self.pd:
@@ -41,4 +44,7 @@ class MTMMU4:
 
   def map_range(self, va:int, pa:int, size:int, flags:int=MT_PTE_READ_ONLY) -> None:
     if size % MT_PAGE_SIZE: raise ValueError("MT MMU range size must be 4 KiB aligned")
+    key = (va,pa,size,flags)
+    if key in self.mapped_ranges: return
     for off in range(0, size, MT_PAGE_SIZE): self.map(va + off, pa + off, flags)
+    self.mapped_ranges.add(key)

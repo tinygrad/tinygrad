@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, Variable
 
 @unittest.skipUnless(Device.DEFAULT == 'MT', 'MT cache regressions require MT hardware')
 class TestMTHCQCache(unittest.TestCase):
@@ -19,6 +19,28 @@ class TestMTHCQCache(unittest.TestCase):
     b = Tensor([5.,6,7])
     self.assertEqual((b+2).tolist(), [7.,8.,9.])
     self.assertEqual((a+1).tolist(), [2.,3.,4.])
+
+  def test_output_replacement(self):
+    a, b = Tensor([1.,2,3]), Tensor([4.,5,6])
+    first = (a+b).tolist()
+    second = (a+b).tolist()
+    self.assertEqual(first, [5.,7.,9.])
+    self.assertEqual(second, [5.,7.,9.])
+    self.assertEqual((a+b).tolist(), [5.,7.,9.])
+
+  def test_a_b_a_switches(self):
+    a, b = Tensor([1.,2,3]), Tensor([4.,5,6])
+    self.assertEqual((a+b).tolist(), [5.,7.,9.])
+    self.assertEqual((a-b).tolist(), [-3.,-3.,-3.])
+    self.assertEqual((a+b).tolist(), [5.,7.,9.])
+    self.assertEqual((a-b).tolist(), [-3.,-3.,-3.])
+    self.assertEqual((a+b).tolist(), [5.,7.,9.])
+
+  def test_symbolic_reduce_revisits(self):
+    i = Variable('i', 1, 10)
+    ones = Tensor.ones(10).contiguous()
+    for s in [2,5,2,8,5]:
+      self.assertEqual(ones[:i.bind(s)].sum().item(), s)
 
   def test_gemm_then_gemv(self):
     a, b = Tensor.ones(64,64).contiguous(), Tensor.eye(64).clone()

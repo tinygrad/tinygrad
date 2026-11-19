@@ -1,7 +1,7 @@
 import ctypes, struct, time, functools, itertools
 from typing import cast
 from tinygrad.runtime.autogen import libusb, libc
-from tinygrad.helpers import DEBUG, DEV, HCQ_RUNTIME_DEV, to_mv, round_up, ceildiv, flatten, to_tuple
+from tinygrad.helpers import DEBUG, DEV, HCQ_RUNTIME_DEV, to_mv, mv_address, round_up, ceildiv, flatten, to_tuple
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, uopfunc
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device
@@ -71,11 +71,16 @@ class USB3:
     assert checked(libusb.libusb_control_transfer)(self.handle, 0xC0, request, value, index, self._ctrl_buf, length, timeout) == length
     return self._ctrl_mv[:length]
 
-  def bulk_write(self, payload:bytes, timeout:int=1000):
-    if len(payload) > len(self._bulk_mv): self._bulk_buf, self._bulk_mv = alloc_cbuffer(len(payload))
-    self._bulk_mv[:len(payload)] = payload
+  def bulk_write(self, payload:bytes|bytearray|memoryview, timeout:int=1000):
+    view = payload if isinstance(payload, memoryview) else memoryview(payload)
+    try:
+      buf = (ctypes.c_ubyte * len(view)).from_address(mv_address(view))
+    except (TypeError, ValueError):
+      if len(view) > len(self._bulk_mv): self._bulk_buf, self._bulk_mv = alloc_cbuffer(len(view))
+      self._bulk_mv[:len(view)] = view
+      buf = self._bulk_buf
     checked(libusb.libusb_bulk_transfer, "bulk OUT 0x02 failed") \
-      (self.handle, 0x02, self._bulk_buf, len(payload), self._transferred, timeout)
+      (self.handle, 0x02, buf, len(view), self._transferred, timeout)
     assert self._transferred.value == len(payload), f"bulk OUT short write: {self._transferred.value}/{len(payload)} bytes"
 
   def bulk_read(self, length:int, timeout:int=1000) -> memoryview:
@@ -141,7 +146,7 @@ class CustomASM24Controller:
     address = (bus << 24) | (dev << 19) | (fn << 16) | (byte_addr & 0xfff)
     return self.pcie_request(fmt_type, address, value, size)
 
-  def pcie_mem_write(self, address:int, data:bytes):
+  def pcie_mem_write(self, address:int, data:bytes|bytearray|memoryview):
     """Streaming PCIe memory write via 0xF0 mode 1 + bulk OUT. Data is little-endian dwords on the wire."""
     if not data: return
     assert len(data) % 4 == 0, f"pcie_mem_write requires 4-byte aligned size, got {len(data)}"
@@ -153,8 +158,15 @@ class CustomASM24Controller:
   def pcie_mem_read(self, address:int, nbytes:int) -> memoryview:
     """Streaming PCIe memory read via 0xF0 mode 2 + bulk IN. Returns little-endian bytes."""
     assert nbytes % 4 == 0, f"pcie_mem_read requires 4-byte aligned size, got {nbytes}"
-    self._f0_out(0x20, 0x0F, address, nbytes // 4, mode=2)
-    return self.usb.bulk_read(nbytes, timeout=30000)
+    if nbytes <= 4 * STREAM:
+      self._f0_out(0x20, 0x0F, address, nbytes // 4, mode=2)
+      return self.usb.bulk_read(nbytes, timeout=30000)
+    result = bytearray(nbytes)
+    for off in range(0,nbytes,4 * STREAM):
+      size = min(4 * STREAM,nbytes-off)
+      self._f0_out(0x20,0x0F,address+off,size//4,mode=2)
+      result[off:off+size] = self.usb.bulk_read(size,timeout=30000)
+    return memoryview(result)
 
   def read(self, base_addr:int, length:int) -> bytes:
     """Read from chip XDATA via vendor control IN (bRequest=0xE4). wValue=addr, wLength=size."""
@@ -193,7 +205,7 @@ class USBMMIOInterface(MMIOInterface):
 
   def __setitem__(self, index, data):
     off, _ = self._off_from_index(index)
-    data = struct.pack(self.fmt, data) if isinstance(data, int) else bytes(data)
+    data = struct.pack(self.fmt, data) if isinstance(data, int) else data if isinstance(data, (bytes, bytearray, memoryview)) else bytes(data)
     if not self.pcimem: self.usb.scsi_write(data) if self.addr == 0xf000 else self.usb.write(self.addr + off, data)
     else:
       # writes are whole dwords
