@@ -24,7 +24,7 @@ class IselContext:
 # the registers an ins defines exist in the src of NATIVE
 def regs(u:UOp) -> tuple[Register, ...]:
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return (u.arg.reg,) if u.arg.reg is not None else ()
-  return tuple(s.arg.reg for s in u.body.toposort() if s.op is Ops.PARAM) if u.op is Ops.CALL else ()
+  return tuple(s.arg.reg for s in u.body.toposort() if s.op is Ops.PARAM and s.arg.reg is not None) if u.op is Ops.CALL else ()
 def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp:
   assert u.dtype is not dtypes.void, "void cannot have output registers"
   if u.op in {Ops.BUFFER, Ops.ALLOC}: return u.replace(arg=replace(u.arg, reg=r[0]))
