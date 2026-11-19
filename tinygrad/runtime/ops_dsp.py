@@ -165,7 +165,8 @@ def stack_lanes(ctx:DSPRenderer, srcs:tuple[UOp, ...]) -> str:
   def widen(p:UOp) -> str:
     if not is_vec(p): return splat(ctx, p, w)
     v = ctx[p]
-    return v if (m:=rwidth(ctx, p)) == w else shuffle(v, v, list(range(m)) + [-1]*(w-m))
+    # (a shuffle to another width is a type of its own for older clangs)
+    return v if (m:=rwidth(ctx, p)) == w else f"(({ctx._render_dtype(p.dtype, w)})({shuffle(v, v, list(range(m)) + [-1]*(w-m))}))"
   acc, done = "", set()
   for p,pl in sorted(parts_.items(), key=lambda kv: not is_vec(kv[0])):
     src = dict(pl)
@@ -593,9 +594,10 @@ class DSPRenderer(ClangRenderer):
     return dedup([self.render_vector_prefix(dt, cnt) for dt in dts for cnt in dedup(counts + pow2 + [128 // dt.itemsize]) if cnt > 1])
 
   def render_vector_prefix(self, dt, count:int) -> str:
-    count = vpad(count)
-    return super().render_vector_prefix(dt, count) + f"\ntypedef {self.render_dtype(dt)} {self._render_dtype(dt, count)}_u " + \
-      f"__attribute__((aligned(1),ext_vector_type({count})));"
+    # (a vector is aligned to its size, a power of two: the type is the same as a shuffle's for older clangs)
+    vec, count = self._render_dtype(dt, count := vpad(count)), vpad(count)
+    return f"typedef {self.render_dtype(dt)} {vec} __attribute__((ext_vector_type({count})));\n" + \
+           f"typedef {self.render_dtype(dt)} {vec}_u __attribute__((aligned(1),ext_vector_type({count})));"
 
   def _render_defines(self, uops) -> list[str]: return [HVX_PRELUDE] + self._vector_typedefs(uops) + self.render_wmmas(uops)
 
@@ -737,8 +739,8 @@ DSP_CALLER_FRAME = 4096
 class DSPCompiler(Compiler):
   def __init__(self, mock:bool=False):
     self.mock, compiler_args = mock, "--target=hexagon -mcpu=hexagonv65 -fuse-ld=lld -nostdlib -mhvx=v65 -mhvx-length=128b -O2"
-    # (qemu asserts translating some packets with a .cur load, the mock's code isn't packetized)
-    if mock: self.args = f"-static {compiler_args} -mllvm -disable-packetizer"
+    # (qemu asserts translating some packets with a .cur load, the mock's code isn't scheduled to make them)
+    if mock: self.args = f"-static {compiler_args} -mllvm -enable-cur-sched=false"
     else:
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
       # the sections are in three segments (read only, code, data), each a page aligned map on the DSP: it takes few maps
