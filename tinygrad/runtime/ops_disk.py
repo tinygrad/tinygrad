@@ -115,8 +115,8 @@ def disk_read(file:UOp, srcs:UOp, counts:UOp, rings:UOp, sqes:UOp) -> UOp: # src
 
 def is_disk_read(c:UOp) -> bool:
   dev, src = [to_tuple(b.device)[0] for b in c.src[1:3]] if c.op is Ops.CALL and c.body.op is Ops.STORE else ("", "")
-  return src.startswith("DISK:") and not src.startswith("DISK:shm:") and Device[dev].has_copy_queue and not dev.startswith("NULL") and bool(uring()) \
-    and not getattr(Device[dev], "is_usb", False)
+  return src.startswith("DISK:") and not src.startswith("DISK:shm:") and Device[dev].has_copy_queue and \
+    not dev.startswith(("NULL", "MALI")) and bool(uring()) and not getattr(Device[dev], "is_usb", False)
 
 def disk_copy_rewriter(s:UOp) -> UOp|None:
   lin = s.without_after.body

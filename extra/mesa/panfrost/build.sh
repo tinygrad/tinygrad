@@ -7,6 +7,10 @@ PANFROST_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ ! -d "$MESA_DIR/.git" ]; then
   git clone --depth 1 --branch mesa-25.2.7 https://gitlab.freedesktop.org/mesa/mesa.git "$MESA_DIR"
 fi
+if [ ! -d "$MESA_DIR/../vulkan-headers/include" ]; then
+  git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git "$MESA_DIR/../vulkan-headers"
+fi
+export CPATH="$MESA_DIR/../vulkan-headers/include${CPATH:+:$CPATH}"
 
 git -C "$MESA_DIR" apply --check "$PANFROST_DIR/mesa.patch" 2>/dev/null && \
   git -C "$MESA_DIR" apply "$PANFROST_DIR/mesa.patch" || true
