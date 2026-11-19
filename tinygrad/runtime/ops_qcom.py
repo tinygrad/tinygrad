@@ -19,7 +19,6 @@ BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
 
 @functools.cache
 def dcache_flush():
-  from tinygrad.uop.ops import KernelInfo
   from tinygrad.codegen import to_program
   buf, n = UOp.param(0, dtypes.uint8, 1), UOp.param(1, dtypes.int, shape=(), name="n", addrspace=AddrSpace.ALU)
   i = UOp.range(n, 0, dtype=dtypes.int)

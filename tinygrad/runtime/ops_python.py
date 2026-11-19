@@ -145,7 +145,7 @@ class PythonProgram(Program['PythonDevice']):
           values[u] = [self.links[u.body.src[0].arg.function_name](env={p: values[u.src[p.arg.slot+1]] for p in u.body.arg.params})]
         elif u.op is Ops.CALL: # a C function by symbol, linked against the loaded libraries
           restype = None if u.dtype is dtypes.void else getattr(ctypes, f"c_{'u' if u.dtype in dtypes.uints else ''}int{u.dtype.bitsize}")
-          cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.src[0].arg.code, list(DLL._loaded_.values())))
+          cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))(link_sym(u.body.arg.code, list(DLL._loaded_.values())))
           values[u] = []
           for args,gate in zip(zip(*src_values), exec_masks[-1]):
             call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]

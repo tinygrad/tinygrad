@@ -2,8 +2,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, 
   NativeInfo
 from tinygrad.uop.uir import render_uir
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, weak_dtype
-from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape
-from tinygrad.helpers import is_disk_device
+from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape, is_disk_device
 
 # ***** uop helpers *****
 
@@ -104,8 +103,8 @@ spec_shared = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True, name="x"),
    lambda x: (x.src[0].shape == () or x.addrspace is AddrSpace.ALU) and x.src[0].dtype is not dtypes.void),
 
-  # a NATIVE names native code or an external function: the arg is NativeInfo stating the return dtype
-  (UPat(Ops.NATIVE, name="x", allow_any_len=True), lambda x: isinstance(x.arg, NativeInfo)),
+  # a NATIVE names native code or an external function: the arg is NativeInfo, src[0] states its dtype and shape
+  (UPat(Ops.NATIVE, name="x", allow_any_len=True), lambda x: isinstance(x.arg, NativeInfo) and len(x.src) >= 1),
   # CALL: the body is always an opaque body stating the dtype, the arg is a CallInfo
   (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, CallInfo)),
 

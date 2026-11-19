@@ -349,7 +349,6 @@ class Tensor(RandMixin):
     return self
 
   def _buffer(self) -> Buffer:
-    from tinygrad.engine.realize import capturing
     if capturing and not getenv("UNSAFE_ALLOW_JIT_BUFFER"):
       from tinygrad.engine.jit import JitError
       raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
