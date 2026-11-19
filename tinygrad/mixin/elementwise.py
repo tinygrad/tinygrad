@@ -422,8 +422,9 @@ class ElementwiseMixin(CreationMixin):
     Calculates (self.exp()+other.exp()).log(), elementwise.
     """
     a, b = self._broadcasted(other)
-    m = (mx:=a.maximum(b)).isfinite().where(mx, 0)
-    return ((a-m).exp() + (b-m).exp()).log() + m
+    t = (a.minimum(b) - (mx:=a.maximum(b))).exp()
+    # max + log(1+t), plus the part of t that rounding 1+t loses
+    return mx.isfinite().where(mx + (u:=t+1).log() + (t - (u - 1)), mx)
 
   def where(self, x: 'Self | ConstType | sint', y: 'Self | ConstType | sint') -> Self:
     """

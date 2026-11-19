@@ -1079,6 +1079,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(45,65)], lambda t: torch.nn.functional.softplus(t, beta=1/3), lambda t: Tensor.softplus(t, beta=1/3), grad_atol=1e-6)
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6, low=300, high=400)
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6, low=-400, high=-300)
+    helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, atol=0, grad_atol=0, low=-60, high=-10)
     helper_test_op([()], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
     helper_test_op(None, torch.nn.functional.softplus, Tensor.softplus, vals=[[-math.inf, math.inf, 0.0]], forward_only=True)
 
