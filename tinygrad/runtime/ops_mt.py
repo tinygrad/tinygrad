@@ -60,9 +60,9 @@ class MUSACompiler(Compiler):
       args = ['out' if '*' in p else 'scalar' for p in params]
       cached = generate_mt_launch(src,match.group(1),args,(1,1,1),(1,1,1))
       lib = cached['lib']
-      key = hashlib.sha256(lib).hexdigest()
       cached['state'] = compress_mt_bundle(cached['state'])
-      diskcache_put('mt_launch_v3', f'{key}_{(1,1,1)}_{(1,1,1)}', cached)
+      key = hashlib.sha256(lib).hexdigest()
+      diskcache_put('mt_launch_v3',f'{key}_{(1,1,1)}_{(1,1,1)}',cached)
     key = hashlib.sha256(lib).hexdigest()
     MUSA_SOURCES[key] = src
     diskcache_put('mt_sources', key, src)
@@ -196,22 +196,23 @@ class MTDevice(Compiled):
       return self.launch
     key = (hash(obj.lib), global_size, local_size)
     if key not in self.launch_cache:
-      cache_key = f'{hashlib.sha256(obj.lib).hexdigest()}_{global_size}_{local_size}'
+      lib_key = hashlib.sha256(obj.lib).hexdigest()
+      cache_key = f'{lib_key}_{global_size}_{local_size}'
       cached = diskcache_get('mt_launch_v3', cache_key)
       if cached is None and (global_size,local_size) != ((1,1,1),(1,1,1)):
-        cached = diskcache_get('mt_launch_v3', f'{hashlib.sha256(obj.lib).hexdigest()}_{(1,1,1)}_{(1,1,1)}')
+        cached = diskcache_get('mt_launch_v3', f'{lib_key}_{(1,1,1)}_{(1,1,1)}')
       if cached is not None and pathlib.Path(cached['packet']).exists():
         state = cached.get('state')
         if isinstance(state,bytes): state = decompress_mt_bundle(state)
         launch = MTLaunch(self.mt, cached['bundle'], cached['packet'], state)
       else:
         launch = self.generator.generate(obj, global_size, local_size)
-      assert launch.bundle_state is not None
-      diskcache_put('mt_launch_v3', cache_key,
-                    {'bundle':str(launch.bundle),'packet':str(launch.packet_path),'state':compress_mt_bundle(launch.bundle_state)})
       self.launch_cache[key] = launch
       self.launches.append(launch)
       for va,pa,size in self.buffer_maps: launch.map_buffer(va,pa,size)
+      assert launch.bundle_state is not None
+      diskcache_put('mt_launch_v3', cache_key,
+                    {'bundle':str(launch.bundle),'packet':str(launch.packet_path),'state':compress_mt_bundle(launch.bundle_state)})
     return self.launch_cache[key]
 
   def map_buffer(self, va:int, pa:int, size:int):

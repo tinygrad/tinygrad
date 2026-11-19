@@ -96,6 +96,7 @@ class MTLaunch(MTFirmware):
     self.ccb:MTCCB|None = None
     self.launch_id = 1
     self.generation = 1
+    self.loaded_text_size = 0x7000
     MTLaunch._loaded = self
 
   def _map_bundle(self) -> None:
@@ -106,6 +107,8 @@ class MTLaunch(MTFirmware):
     previous = MTLaunch._loaded
     previous_writes = previous.write_map if previous is not None and previous.dev is self.dev else {}
     self.write_map = dict(state.writes)
+    text_page = self.write_map.get(state.offsets[0xe000000000],b'')
+    self.text_offset = next((off for off in range(0x80,0x200,0x10) if any(text_page[off:off+0x10])),self.text_offset)
     for off,data in state.writes:
       if previous_writes.get(off) != data: self.backing[off:off+len(data)] = data
     for base in [0xda00400000,0xe000400000]:
@@ -143,28 +146,40 @@ class MTLaunch(MTFirmware):
     self.packet = packet
     self.v[0x405000:0x405010] = struct.pack('<QII', ROOT_BASE, 0xffffffff, 0)
 
+  def _write_backing(self, off:int, data:bytes|bytearray) -> None:
+    for pos in range(off,off+len(data),0x1000):
+      page_off = pos & ~0xfff
+      start = max(off,page_off)
+      end = min(off+len(data),page_off+0x1000)
+      page = bytearray(self.write_map.get(page_off,bytes(0x1000)))
+      page[start-page_off:end-page_off] = data[start-off:end-off]
+      self.backing[start:end] = data[start-off:end-off]
+      self.write_map[page_off] = bytes(page)
+
   def load_kernel(self, image:MTKernelImage, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1)) -> None:
     text_off = self.backing_offsets[0xe000000000] + self.text_offset
-    self.backing[text_off:text_off+0x80] = image.text.ljust(0x80, b'\0')
+    text_size = max(self.loaded_text_size,len(image.text))
+    self._write_backing(text_off,image.text.ljust(text_size,b'\0'))
+    self.loaded_text_size = len(image.text)
     if os.environ.get('MT_LOAD_TEXT_ONLY'): return
     const_off = self.backing_offsets[0x81e1200000]
     args = image.metadata.kernel['.args']
     user_args = [a for a in args if a['.argBase']['.name'] not in ['Global Spill Base','Core Number']
                  and not a['.argBase']['.name'].startswith('threadIdx')]
     clear_start = 0x48 if len(user_args) <= 1 else 0x50
+    clear_end = max([0x80]+[imm.offset*4+4 for imm in image.metadata.immediates])
     if not os.environ.get('MT_LOAD_NO_IMMS'):
-      self.backing[const_off+clear_start:const_off+0x80] = bytes(0x80-clear_start)
+      self._write_backing(const_off+clear_start,bytes(clear_end-clear_start))
       for imm in image.metadata.immediates:
         if imm.offset >= 18 and imm.value not in [0x8000,0x20000]:
-          self.backing[const_off+imm.offset*4:const_off+imm.offset*4+4] = struct.pack('<I', imm.value)
+          self._write_backing(const_off+imm.offset*4,struct.pack('<I',imm.value))
     if os.environ.get('MT_LOAD_NO_RESOURCES'): return
     resource_off = self.backing_offsets[0xda00406000]
-    shared = bytearray(self.backing[resource_off+8:resource_off+12])
+    shared = bytearray(self.write_map.get(resource_off,bytes(0x1000))[8:12])
     shared[0] = image.metadata.kernel['.shared_reg_count']
-    self.backing[resource_off+8:resource_off+12] = shared
-    temp = bytearray(self.backing[resource_off+0x1c:resource_off+0x20])
-    temp[0] = 8 if image.metadata.kernel['.shared_reg_count'] % 2 == 0 else 0
-    self.backing[resource_off+0x1c:resource_off+0x20] = temp
+    self._write_backing(resource_off+8,shared)
+    temp = (image.metadata.kernel['.temp_reg_count'] * 4 + 7) & ~7
+    self._write_backing(resource_off+0x24,struct.pack('<I',temp))
 
   def map_buffer(self, va:int, pa:int, size:int, flags:int=MT_PTE_READ_WRITE) -> None:
     self.mmu.map_range(va, pa, size, flags)
@@ -172,16 +187,16 @@ class MTLaunch(MTFirmware):
 
   def set_args(self, args:tuple[int, ...]) -> None:
     off = self.backing_offsets[0x81e1200000] + 0x38
-    for i, arg in enumerate(args): self.backing[off+i*8:off+i*8+8] = struct.pack('<Q', arg)
+    for i, arg in enumerate(args): self._write_backing(off+i*8,struct.pack('<Q',arg))
 
   def set_grid(self, global_size:tuple[int,int,int], local_size:tuple[int,int,int]) -> None:
     off = self.backing_offsets[0x81e1400000]
-    for i, field in enumerate([0x2c,0x30,0x34]): self.backing[off+field:off+field+4] = struct.pack('<I', global_size[i] - 1)
-    block = bytearray(self.backing[off+0x3c:off+0x40])
+    for i, field in enumerate([0x2c,0x30,0x34]): self._write_backing(off+field,struct.pack('<I',global_size[i]-1))
+    block = bytearray(self.write_map.get(off,bytes(0x1000))[0x3c:0x40])
     block[0] = local_size[2] - 1
     block[1] = (local_size[1] - 1) << 2
     block[2:4] = struct.pack('<H', (local_size[0] - 1) << 4)
-    self.backing[off+0x3c:off+0x40] = block
+    self._write_backing(off+0x3c,block)
 
   def start(self, timeout:float=10.0) -> None:
     if MTLaunch._active is not None and MTLaunch._active.dev is self.dev:
@@ -193,6 +208,7 @@ class MTLaunch(MTFirmware):
       if MTLaunch._loaded is not self:
         self._map_bundle()
         self._prepare_packet()
+        self.loaded_text_size = 0x7000
         MTLaunch._loaded = self
       struct.pack_into('<Q', self.packet, 0x38, self.launch_id)
       self.generation = active.generation + 1
