@@ -333,8 +333,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
                                       name="flatten vectors"))): sink = vsink
   else:
     # devectorize
-    # with overread the valids simplify after coalescing: lanes with different valids merge if their indexes are alike
-    sink = graph_rewrite(sink, symbolic_simple+devectorizer2+(indexing_simplify if not ren.overread else PatternMatcher([])), name="devectorize2")
+    sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, name="devectorize2")
 
     # some coalescing misses without this
     sink = graph_rewrite(sink, sym, name="early symbolic")

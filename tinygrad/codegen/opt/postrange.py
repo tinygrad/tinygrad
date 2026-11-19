@@ -4,7 +4,7 @@ from dataclasses import replace
 from typing import cast
 from tinygrad.uop.ops import Ops, GroupOp, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element, axis_colors
 from tinygrad.device import Buffer
-from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, round_up, prod, get_single_element, ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
@@ -140,15 +140,8 @@ class Scheduler:
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
       def gate(b:UOp) -> UOp: return b.replace(src=(b.src[0], b.src[1].get_idx().valid(valid&b.src[1].get_valid())))
-      # a load of a padded output range (its padded outputs aren't stored) that a renderer can read past the buffer to doesn't need a gate
-      stored = {u.src[0] for u in self.ast.backward_slice if u.op is Ops.STORE}
-      def ungated(b:UOp) -> bool:
-        if not self.ren.overread or rng in self.reduce_ranges or b in stored or b.src[0].addrspace is not AddrSpace.GLOBAL or \
-           b.src[0].max_numel() < new_sz: return False
-        idx, sz = b.src[1].get_idx().substitute({rng:replaced_rng}), b.src[0].dtype.itemsize
-        return idx.vmin*sz >= -self.ren.overread and (idx.vmax+1)*sz <= b.src[0].max_numel()*sz+self.ren.overread
       for b in self.bufs:
-        if rng in b.src[1].ranges and not ungated(b): replaces[b] = gate(b)
+        if rng in b.src[1].ranges: replaces[b] = gate(b)
       # the padded iterations are no-ops: their INDEXes, indexed STOREs and BACKEDGEs are gated and their REDUCEs add the identity
       for u in self.ast.backward_slice:
         if u.op in GroupOp.Effect|{Ops.BACKEDGE} and rng in u.ranges:

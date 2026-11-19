@@ -4,7 +4,7 @@
 import itertools, functools, operator
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, exec_alu
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
-from tinygrad.helpers import prod, all_same, strides_for_shape, unwrap
+from tinygrad.helpers import prod, all_same, strides_for_shape, unwrap, dedup
 
 def lane_of(u:UOp) -> tuple[UOp, int]|None:
   # u is lane i of the vector value x (not memory) if it's x.index(i)
@@ -170,10 +170,18 @@ def vector_access(ren, x:UOp) -> UOp|None:
   # (a window can be in the buffer's shape)
   if not all((base + s).vmax >= 0 and (base + s).vmin + l <= buf.max_numel() for s,l in wins): return None
   if x.op is Ops.LOAD:
-    # with a valid the windows load ungated (the bytes past the buffer can be read) and the valid selects
-    if valid is not None and not all(readable(s, l) for s,l in wins): return None
+    # with a valid the windows load ungated (the bytes past the buffer can be read) and the valid selects. a window that can be read only if
+    # one of its lanes is valid (a valid lane is in the buffer, the rest of the window is in the bytes past it) is gated by that
+    gates: list[UOp|None] = [None]*len(wins)
+    if valid is not None and not all(readable(s, l) for s,l in wins):
+      if ren.overread < ren.vector_bytes: return None
+      vflat, cache = valid.reshape((n,)) if valid.shape != () else valid, {}
+      for w,(s,l) in enumerate(wins):
+        if not readable(s, l): gates[w] = functools.reduce(operator.or_, dedup(lane_expr(vflat, k, cache).simplify() for k,o in enumerate(offs)
+                                                                               if o is not None and s <= o < s + l))
     # (a window of a lane is a scalar load)
-    loads = [UOp(Ops.SHRINK, src=(buf, base + s, UOp.const(l))).load(arg=x.arg) if l > 1 else buf.index(base + s).load(arg=x.arg) for s,l in wins]
+    loads = [(UOp(Ops.SHRINK, src=(buf, at, UOp.const(l))) if l > 1 else buf.index(at)).load(arg=x.arg)
+             for (s,l),g in zip(wins, gates) for at in [base + s if g is None else (base + s).valid(g)]]
     # (an invalid lane is 0)
     srcs = [(zero, None) if o is None else next((ld, o - s if l > 1 else None) for ld,(s,l) in zip(loads, wins) if s <= o < s + l)
             for o in offs]
