@@ -1,6 +1,15 @@
 # Python Panfrost backend
 
-`DEV=MALI` uses tinygrad's Python allocator/program classes and `panfrost.py` bindings to call Mesa's existing NIR and Gallium APIs over `/dev/dri/renderD128` (panthor). There is no custom C backend, OpenCL, Rusticl, or `mali_kbase`.
+`DEV=MALI` uses tinygrad's HCQ2 queue and `panfrost.py` bindings to call Mesa's existing NIR and Gallium APIs over `/dev/dri/renderD128` (panthor). Kernel arguments and launches are patched into one command stream. There is no custom C backend, OpenCL, Rusticl, or `mali_kbase`.
+
+Arm's compiler can optionally be used for supported non-shared-memory kernels (the rest still use Mesa):
+
+```sh
+export CMPBE_PATH="$HOME/mali-userspace/usr/lib/aarch64-linux-gnu/libmali.so.1.9.0"
+export MALI_VENDOR=1
+```
+
+`MALI_VENDOR=1` is optional and affects compilation only; execution always uses panthor.
 
 ## Build
 

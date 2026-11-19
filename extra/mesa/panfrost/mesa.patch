@@ -3,7 +3,7 @@ index 746951c..d283839 100644
 --- a/src/compiler/clc/clc_helpers.cpp
 +++ b/src/compiler/clc/clc_helpers.cpp
 @@ -47,6 +47,9 @@
- 
+
  #include <clang/Config/config.h>
  #include <clang/Driver/Driver.h>
 +#if LLVM_VERSION_MAJOR >= 23
@@ -114,20 +114,542 @@ index dd8ff95..005e815 100644
 -  gnu_symbol_visibility : 'hidden',
    link_with: [libpanfrost_versions],
  )
- 
+
+diff --git a/src/gallium/drivers/panfrost/pan_cmdstream.c b/src/gallium/drivers/panfrost/pan_cmdstream.c
+index 5f354f0..e6cb8af 100644
+--- a/src/gallium/drivers/panfrost/pan_cmdstream.c
++++ b/src/gallium/drivers/panfrost/pan_cmdstream.c
+@@ -1605,7 +1605,6 @@ panfrost_emit_const_buf(struct panfrost_batch *batch,
+       /* TODO: Is there any benefit to combining ranges */
+       memcpy(push_cpu + i, (uint8_t *)mapped_ubo + src.offset, 4);
+    }
+-
+    return ubos.gpu;
+ }
+
+diff --git a/src/gallium/drivers/panfrost/pan_context.h b/src/gallium/drivers/panfrost/pan_context.h
+index 29e8956..48c740d 100644
+--- a/src/gallium/drivers/panfrost/pan_context.h
++++ b/src/gallium/drivers/panfrost/pan_context.h
+@@ -449,6 +449,14 @@ struct panfrost_shader_binary {
+    struct util_dynarray binary;
+ };
+
++/* Externally compiled compute shader for the native Gallium compute path. */
++struct panfrost_native_shader {
++   struct pan_shader_info info;
++   struct panfrost_sysvals sysvals;
++   const void *binary;
++   size_t binary_size;
++};
++
+ void
+ panfrost_disk_cache_store(struct disk_cache *cache,
+                           const struct panfrost_uncompiled_shader *uncompiled,
+diff --git a/src/gallium/drivers/panfrost/pan_helpers.c b/src/gallium/drivers/panfrost/pan_helpers.c
+index 6139216..4d9d29c 100644
+--- a/src/gallium/drivers/panfrost/pan_helpers.c
++++ b/src/gallium/drivers/panfrost/pan_helpers.c
+@@ -23,6 +23,7 @@
+
+ #include "util/u_vbuf.h"
+ #include "pan_context.h"
++#include "pan_public.h"
+
+ void
+ panfrost_analyze_sysvals(struct panfrost_compiled_shader *ss)
+@@ -262,3 +263,177 @@ panfrost_track_image_access(struct panfrost_batch *batch,
+       panfrost_batch_read_rsrc(batch, rsrc, stage);
+    }
+ }
++
++
++/* Small public Gallium entry points used by the tinymesa HCQ runtime. */
++uint64_t
++panfrost_resource_address(struct pipe_resource *resource)
++{
++   return pan_resource(resource)->plane.base;
++}
++
++struct pipe_context *
++panfrost_compute_bind(struct pipe_context *ctx, void *state)
++{
++   ctx->bind_compute_state(ctx, state);
++   return ctx;
++}
++
++struct pipe_context *
++panfrost_compute_set_constants(struct pipe_context *ctx,
++                               const struct pipe_constant_buffer *cb,
++                               void *args)
++{
++   ((struct pipe_constant_buffer *)cb)->user_buffer = args;
++   ctx->set_constant_buffer(ctx, PIPE_SHADER_COMPUTE, 0, false, cb);
++   return ctx;
++}
++
++struct pipe_context *
++panfrost_compute_launch(struct pipe_context *ctx,
++                        const struct pipe_grid_info *grid)
++{
++   ctx->launch_grid(ctx, grid);
++   return ctx;
++}
++
++void *
++panfrost_compute_create_sampler_view(struct pipe_context *ctx,
++                                     uint64_t address,
++                                     const struct pipe_sampler_view *tmpl)
++{
++   struct pipe_resource *resource = panfrost_resource_lookup(ctx->screen, address);
++   return ctx->create_sampler_view(ctx, resource, tmpl);
++}
++
++struct pipe_context *
++panfrost_compute_set_samplers(struct pipe_context *ctx, void *sampler,
++                              struct pipe_sampler_view **views, unsigned count)
++{
++   ctx->bind_sampler_states(ctx, PIPE_SHADER_COMPUTE, 0, 1, &sampler);
++   ctx->set_sampler_views(ctx, PIPE_SHADER_COMPUTE, 0, count, 0, views);
++   return ctx;
++}
++
++struct pipe_context *
++panfrost_compute_release_sampler_view(struct pipe_context *ctx,
++                                      struct pipe_sampler_view *view)
++{
++   ctx->sampler_view_release(ctx, view);
++   return ctx;
++}
++
++struct pipe_context *
++panfrost_compute_set_images(struct pipe_context *ctx, unsigned count,
++                            const struct pipe_image_view *views,
++                            uint64_t address0, uint64_t address1,
++                            uint64_t address2, uint64_t address3)
++{
++   uint64_t addresses[] = {address0, address1, address2, address3};
++   struct pipe_image_view resolved[4];
++   assert(count <= 4);
++   memcpy(resolved, views, count * sizeof(*views));
++   for (unsigned i = 0; i < count; i++)
++      resolved[i].resource = panfrost_resource_lookup(ctx->screen, addresses[i]);
++   ctx->set_shader_images(ctx, PIPE_SHADER_COMPUTE, 0, count, 0, resolved);
++   return ctx;
++}
++
++struct pipe_context *
++panfrost_compute_flush(struct pipe_context *ctx)
++{
++   ctx->flush(ctx, NULL, 0);
++   return ctx;
++}
++
++
++struct pipe_context *
++panfrost_buffer_write(struct pipe_context *ctx, uint64_t address,
++                      const void *data, unsigned size)
++{
++   struct pipe_resource *resource = panfrost_resource_lookup(ctx->screen, address);
++   struct pipe_box box = {.width = size, .height = 1, .depth = 1};
++   box.x = address - pan_resource(resource)->plane.base;
++   struct pipe_transfer *transfer;
++   void *ptr = ctx->buffer_map(ctx, resource, 0, PIPE_MAP_WRITE, &box, &transfer);
++   memcpy(ptr, data, size);
++   ctx->buffer_unmap(ctx, transfer);
++   return ctx;
++}
++
++struct pipe_context *
++panfrost_buffer_read(struct pipe_context *ctx, uint64_t address,
++                     void *data, unsigned size)
++{
++   struct pipe_resource *resource = panfrost_resource_lookup(ctx->screen, address);
++   struct pipe_fence_handle *fence = NULL;
++   ctx->flush(ctx, &fence, 0);
++   if (fence) {
++      ctx->screen->fence_finish(ctx->screen, NULL, fence, OS_TIMEOUT_INFINITE);
++      ctx->screen->fence_reference(ctx->screen, &fence, NULL);
++   }
++   struct pipe_box box = {.width = size, .height = 1, .depth = 1};
++   box.x = address - pan_resource(resource)->plane.base;
++   struct pipe_transfer *transfer;
++   void *ptr = ctx->buffer_map(ctx, resource, 0, PIPE_MAP_READ, &box, &transfer);
++   memcpy(data, ptr, size);
++   ctx->buffer_unmap(ctx, transfer);
++   return ctx;
++}
++
++struct pipe_context *
++panfrost_buffer_copy(struct pipe_context *ctx, uint64_t dst_address,
++                     uint64_t src_address, unsigned size)
++{
++   struct pipe_resource *dst = panfrost_resource_lookup(ctx->screen, dst_address);
++   struct pipe_resource *src = panfrost_resource_lookup(ctx->screen, src_address);
++   if (!dst && !src) {
++      memcpy((void *)dst_address, (void *)src_address, size);
++      return ctx;
++   }
++   if (!src) {
++         return panfrost_buffer_write(ctx, dst_address, (const void *)src_address, size);
++   }
++   if (!dst) {
++      return panfrost_buffer_read(ctx, src_address, (void *)dst_address, size);
++   }
++   struct pipe_box box = {.x = src_address - pan_resource(src)->plane.base,
++                          .width = size, .height = 1, .depth = 1};
++   ctx->resource_copy_region(ctx, dst, 0, dst_address - pan_resource(dst)->plane.base,
++                             0, 0, src, 0, &box);
++   return ctx;
++}
++
++
++struct pipe_context *
++panfrost_compute_wait(struct pipe_context *ctx, volatile uint64_t *address,
++                      uint64_t value)
++{
++   while (*address < value)
++      ;
++   return ctx;
++}
++
++struct pipe_context *
++panfrost_compute_signal(struct pipe_context *ctx, uint64_t *address,
++                        uint64_t value)
++{
++   *address = value;
++   return ctx;
++}
++
++
++struct pipe_context *
++panfrost_compute_timestamp(struct pipe_context *ctx, uint64_t *address)
++{
++   struct pipe_fence_handle *fence = NULL;
++   ctx->flush(ctx, &fence, 0);
++   if (fence) {
++      ctx->screen->fence_finish(ctx->screen, NULL, fence, OS_TIMEOUT_INFINITE);
++      ctx->screen->fence_reference(ctx->screen, &fence, NULL);
++   }
++   struct timespec ts;
++   clock_gettime(CLOCK_MONOTONIC, &ts);
++   *address = ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
++   return ctx;
++}
 diff --git a/src/gallium/drivers/panfrost/pan_jm.c b/src/gallium/drivers/panfrost/pan_jm.c
-index af01674..a2629c1 100644
+index af01674..1016ada 100644
 --- a/src/gallium/drivers/panfrost/pan_jm.c
 +++ b/src/gallium/drivers/panfrost/pan_jm.c
 @@ -375,7 +375,7 @@ GENX(jm_launch_grid)(struct panfrost_batch *batch,
  #endif
- 
+
     unsigned indirect_dep = 0;
 -#if PAN_GPU_SUPPORTS_DISPATCH_INDIRECT
-+#if 0 /* tinygrad: indirect dispatch helpers are not built; only direct grids are used */
++#if 0 /* tinyMali only uses direct grid launches */
     if (info->indirect) {
        uint64_t indirect_buffer_addr =
           pan_resource(info->indirect)->plane.base + info->indirect_offset;
+diff --git a/src/gallium/drivers/panfrost/pan_public.h b/src/gallium/drivers/panfrost/pan_public.h
+index 587fc3f..6bc9857 100644
+--- a/src/gallium/drivers/panfrost/pan_public.h
++++ b/src/gallium/drivers/panfrost/pan_public.h
+@@ -28,10 +28,30 @@
+ extern "C" {
+ #endif
+
++#include <stdint.h>
++
+ struct pipe_screen;
+ struct pipe_screen_config;
++struct pipe_context;
++struct pipe_resource;
++struct pipe_constant_buffer;
++struct pipe_grid_info;
++struct pipe_sampler_view;
++struct pipe_image_view;
+ struct renderonly;
+
++uint64_t panfrost_resource_address(struct pipe_resource *resource);
++struct pipe_context *panfrost_compute_bind(struct pipe_context *ctx, void *state);
++struct pipe_context *panfrost_compute_set_constants(struct pipe_context *ctx, const struct pipe_constant_buffer *cb, void *args);
++struct pipe_context *panfrost_compute_launch(struct pipe_context *ctx, const struct pipe_grid_info *grid);
++void *panfrost_compute_create_sampler_view(struct pipe_context *ctx, uint64_t address,
++                                           const struct pipe_sampler_view *tmpl);
++struct pipe_context *panfrost_compute_set_samplers(struct pipe_context *ctx, void *sampler,
++                                   struct pipe_sampler_view **views, unsigned count);
++struct pipe_context *panfrost_compute_release_sampler_view(struct pipe_context *ctx, struct pipe_sampler_view *view);
++struct pipe_context *panfrost_compute_set_images(struct pipe_context *ctx, unsigned count, const struct pipe_image_view *views, uint64_t address0, uint64_t address1, uint64_t address2, uint64_t address3);
++struct pipe_context *panfrost_compute_flush(struct pipe_context *ctx);
++
+ struct pipe_screen *
+ panfrost_create_screen(int fd, const struct pipe_screen_config *config,
+                        struct renderonly *ro);
+@@ -41,3 +61,15 @@ panfrost_create_screen(int fd, const struct pipe_screen_config *config,
+ #endif
+
+ #endif
++
++struct pipe_context *panfrost_buffer_write(struct pipe_context *ctx, uint64_t address, const void *data, unsigned size);
++struct pipe_context *panfrost_buffer_read(struct pipe_context *ctx, uint64_t address, void *data, unsigned size);
++struct pipe_context *panfrost_buffer_copy(struct pipe_context *ctx, uint64_t dst_address,
++                                          uint64_t src_address, unsigned size);
++
++struct pipe_resource *panfrost_resource_lookup(struct pipe_screen *screen, uint64_t address);
++
++struct pipe_context *panfrost_compute_wait(struct pipe_context *ctx, volatile uint64_t *address, uint64_t value);
++struct pipe_context *panfrost_compute_signal(struct pipe_context *ctx, uint64_t *address, uint64_t value);
++
++struct pipe_context *panfrost_compute_timestamp(struct pipe_context *ctx, uint64_t *address);
+diff --git a/src/gallium/drivers/panfrost/pan_resource.c b/src/gallium/drivers/panfrost/pan_resource.c
+index 549380f..9a10807 100644
+--- a/src/gallium/drivers/panfrost/pan_resource.c
++++ b/src/gallium/drivers/panfrost/pan_resource.c
+@@ -54,6 +54,7 @@
+ #include "pan_bo.h"
+ #include "pan_context.h"
+ #include "pan_resource.h"
++#include "pan_public.h"
+ #include "pan_screen.h"
+ #include "pan_tiling.h"
+ #include "pan_util.h"
+@@ -244,6 +245,15 @@ panfrost_resource_destroy(struct pipe_screen *screen, struct pipe_resource *pt)
+    struct panfrost_device *dev = pan_device(screen);
+    struct panfrost_resource *rsrc = (struct panfrost_resource *)pt;
+
++   simple_mtx_lock(&pan_screen(screen)->resources_mutex);
++   for (struct panfrost_resource **cur = &pan_screen(screen)->resources; *cur; cur = &(*cur)->next_resource) {
++      if (*cur == rsrc) {
++         *cur = rsrc->next_resource;
++         break;
++      }
++   }
++   simple_mtx_unlock(&pan_screen(screen)->resources_mutex);
++
+    if (rsrc->scanout)
+       renderonly_scanout_destroy(rsrc->scanout, dev->ro);
+
+@@ -1165,6 +1175,10 @@ panfrost_resource_create_with_modifier(struct pipe_screen *screen,
+    if (template->bind & PIPE_BIND_INDEX_BUFFER)
+       so->index_cache = CALLOC_STRUCT(pan_minmax_cache);
+
++   simple_mtx_lock(&pan_screen(screen)->resources_mutex);
++   so->next_resource = pan_screen(screen)->resources;
++   pan_screen(screen)->resources = so;
++   simple_mtx_unlock(&pan_screen(screen)->resources_mutex);
+    return (struct pipe_resource *)so;
+ }
+
+@@ -2522,6 +2536,7 @@ static const struct u_transfer_vtbl transfer_vtbl = {
+ void
+ panfrost_resource_screen_init(struct pipe_screen *pscreen)
+ {
++   simple_mtx_init(&pan_screen(pscreen)->resources_mutex, mtx_plain);
+    pscreen->can_create_resource = panfrost_can_create_resource;
+    pscreen->resource_create_with_modifiers =
+       panfrost_resource_create_with_modifiers;
+@@ -2538,6 +2553,7 @@ panfrost_resource_screen_init(struct pipe_screen *pscreen)
+ void
+ panfrost_resource_screen_destroy(struct pipe_screen *pscreen)
+ {
++   simple_mtx_destroy(&pan_screen(pscreen)->resources_mutex);
+    u_transfer_helper_destroy(pscreen->transfer_helper);
+ }
+
+@@ -2560,3 +2576,19 @@ panfrost_resource_context_init(struct pipe_context *pctx)
+    pctx->clear_render_target = panfrost_clear_render_target;
+    pctx->clear_depth_stencil = panfrost_clear_depth_stencil;
+ }
++
++
++struct pipe_resource *
++panfrost_resource_lookup(struct pipe_screen *screen, uint64_t address)
++{
++   simple_mtx_lock(&pan_screen(screen)->resources_mutex);
++   struct pipe_resource *ret = NULL;
++   for (struct panfrost_resource *r = pan_screen(screen)->resources; r; r = r->next_resource) {
++      if (address >= r->plane.base && address < r->plane.base + r->base.width0) {
++         ret = &r->base;
++         break;
++      }
++   }
++   simple_mtx_unlock(&pan_screen(screen)->resources_mutex);
++   return ret;
++}
+diff --git a/src/gallium/drivers/panfrost/pan_resource.h b/src/gallium/drivers/panfrost/pan_resource.h
+index 1521ca2..b84a327 100644
+--- a/src/gallium/drivers/panfrost/pan_resource.h
++++ b/src/gallium/drivers/panfrost/pan_resource.h
+@@ -64,6 +64,7 @@ struct pan_afbcp {
+
+ struct panfrost_resource {
+    struct pipe_resource base;
++   struct panfrost_resource *next_resource;
+    struct {
+       struct pipe_scissor_state extent;
+       struct {
+diff --git a/src/gallium/drivers/panfrost/pan_screen.h b/src/gallium/drivers/panfrost/pan_screen.h
+index e1c17c6..3d369b1 100644
+--- a/src/gallium/drivers/panfrost/pan_screen.h
++++ b/src/gallium/drivers/panfrost/pan_screen.h
+@@ -148,6 +148,9 @@ struct panfrost_screen {
+       unsigned initial_chunks;
+       unsigned max_chunks;
+    } csf_tiler_heap;
++
++   struct panfrost_resource *resources;
++   simple_mtx_t resources_mutex;
+ };
+
+ static inline struct panfrost_screen *
+diff --git a/src/gallium/drivers/panfrost/pan_shader.c b/src/gallium/drivers/panfrost/pan_shader.c
+index 543199e..30cf32e 100644
+--- a/src/gallium/drivers/panfrost/pan_shader.c
++++ b/src/gallium/drivers/panfrost/pan_shader.c
+@@ -51,16 +51,18 @@ panfrost_alloc_shader(const nir_shader *nir)
+
+    so->nir = nir;
+
+-   /* Serialize the NIR to a binary blob that we can hash for the disk
+-    * cache. Drop unnecessary information (like variable names) so the
+-    * serialized NIR is smaller, and also to let us detect more isomorphic
+-    * shaders when hashing, increasing cache hits.
+-    */
+-   struct blob blob;
+-   blob_init(&blob);
+-   nir_serialize(&blob, nir, true);
+-   _mesa_sha1_compute(blob.data, blob.size, so->nir_sha1);
+-   blob_finish(&blob);
++   if (nir) {
++      /* Serialize the NIR to a binary blob that we can hash for the disk
++       * cache. Drop unnecessary information (like variable names) so the
++       * serialized NIR is smaller, and also to let us detect more isomorphic
++       * shaders when hashing, increasing cache hits.
++       */
++      struct blob blob;
++      blob_init(&blob);
++      nir_serialize(&blob, nir, true);
++      _mesa_sha1_compute(blob.data, blob.size, so->nir_sha1);
++      blob_finish(&blob);
++   }
+
+    return so;
+ }
+@@ -588,6 +590,27 @@ panfrost_create_compute_state(struct pipe_context *pctx,
+                               const struct pipe_compute_state *cso)
+ {
+    struct panfrost_context *ctx = pan_context(pctx);
++
++   if (cso->ir_type == 2) {
++      const struct panfrost_native_shader *native = cso->prog;
++      struct panfrost_screen *screen = pan_screen(pctx->screen);
++      struct panfrost_uncompiled_shader *so = panfrost_alloc_shader(NULL);
++      struct panfrost_compiled_shader *v = panfrost_alloc_variant(so);
++      memset(v, 0, sizeof *v);
++
++      v->info = native->info;
++      v->sysvals = native->sysvals;
++      if (native->binary_size) {
++         v->bin = panfrost_pool_take_ref(
++            &ctx->shaders,
++            pan_pool_upload_aligned(&ctx->shaders.base, native->binary,
++                                    native->binary_size, 128));
++      }
++      screen->vtbl.prepare_shader(v, &ctx->descs, true);
++      panfrost_analyze_sysvals(v);
++      return so;
++   }
++
+    struct panfrost_uncompiled_shader *so = panfrost_alloc_shader(cso->prog);
+    struct panfrost_compiled_shader *v = panfrost_alloc_variant(so);
+    memset(v, 0, sizeof *v);
+diff --git a/src/gallium/drivers/zink/nir_to_spirv/nir_to_spirv.c b/src/gallium/drivers/zink/nir_to_spirv/nir_to_spirv.c
+index 064bce8..97742c1 100644
+--- a/src/gallium/drivers/zink/nir_to_spirv/nir_to_spirv.c
++++ b/src/gallium/drivers/zink/nir_to_spirv/nir_to_spirv.c
+@@ -3436,6 +3436,59 @@ emit_elect(struct ntv_context *ctx, nir_intrinsic_instr *intr)
+    store_def(ctx, intr->def.index, result, nir_type_bool);
+ }
+
++static void
++emit_load_ubo(struct ntv_context *ctx, nir_intrinsic_instr *intr)
++{
++   assert(nir_src_is_const(intr->src[0]) && nir_src_as_uint(intr->src[0]) == 0);
++
++   unsigned bit_size = intr->def.bit_size;
++   unsigned idx = bit_size >> 4;
++   SpvId scalar_type = get_uvec_type(ctx, bit_size, 1);
++   if (!ctx->ubos[0][idx]) {
++      SpvId array_type = spirv_builder_type_runtime_array(&ctx->builder, scalar_type);
++      SpvId struct_type = spirv_builder_type_struct(&ctx->builder, &array_type, 1);
++      spirv_builder_emit_decoration(&ctx->builder, struct_type, SpvDecorationBlock);
++      spirv_builder_emit_member_offset(&ctx->builder, struct_type, 0, 0);
++      SpvId pointer_type = spirv_builder_type_pointer(&ctx->builder,
++                                                       SpvStorageClassUniform,
++                                                       struct_type);
++      SpvId var_id = spirv_builder_emit_var(&ctx->builder, pointer_type,
++                                            SpvStorageClassUniform);
++      spirv_builder_emit_descriptor_set(&ctx->builder, var_id, 0);
++      spirv_builder_emit_binding(&ctx->builder, var_id, 0);
++      ctx->ubos[0][idx] = var_id;
++   }
++
++   nir_alu_type atype;
++   SpvId offset = get_src(ctx, &intr->src[1], &atype);
++   SpvId uint_type = get_uvec_type(ctx, 32, 1);
++   if (atype != nir_type_uint)
++      offset = emit_bitcast(ctx, uint_type, offset);
++   SpvId element = emit_binop(ctx, SpvOpUDiv, uint_type, offset,
++                              emit_uint_const(ctx, 32, bit_size / 8));
++   SpvId zero = emit_uint_const(ctx, 32, 0);
++   SpvId pointer_type = spirv_builder_type_pointer(&ctx->builder,
++                                                    SpvStorageClassUniform,
++                                                    scalar_type);
++   SpvId constituents[NIR_MAX_VEC_COMPONENTS];
++   for (unsigned i = 0; i < intr->def.num_components; ++i) {
++      SpvId indices[2] = { zero, element };
++      SpvId ptr = spirv_builder_emit_access_chain(&ctx->builder, pointer_type,
++                                                  ctx->ubos[0][idx], indices,
++                                                  ARRAY_SIZE(indices));
++      constituents[i] = spirv_builder_emit_load(&ctx->builder, scalar_type, ptr);
++      if (i + 1 < intr->def.num_components)
++         element = emit_binop(ctx, SpvOpIAdd, uint_type, element,
++                              emit_uint_const(ctx, 32, 1));
++   }
++   SpvId result = intr->def.num_components == 1 ? constituents[0] :
++      spirv_builder_emit_composite_construct(&ctx->builder,
++                                             get_def_uvec_type(ctx, &intr->def),
++                                             constituents,
++                                             intr->def.num_components);
++   store_def(ctx, intr->def.index, result, nir_type_uint);
++}
++
+ static void
+ emit_intrinsic(struct ntv_context *ctx, nir_intrinsic_instr *intr)
+ {
+@@ -3472,6 +3525,10 @@ emit_intrinsic(struct ntv_context *ctx, nir_intrinsic_instr *intr)
+       emit_load_push_const(ctx, intr);
+       break;
+
++   case nir_intrinsic_load_ubo:
++      emit_load_ubo(ctx, intr);
++      break;
++
+    case nir_intrinsic_load_global:
+    case nir_intrinsic_load_global_constant:
+       emit_load_global(ctx, intr);
+@@ -4611,7 +4668,11 @@ get_spacing(enum gl_tess_spacing spacing)
+ struct spirv_shader *
+ nir_to_spirv(struct nir_shader *s, const struct zink_shader_info *sinfo, const struct zink_screen *screen)
+ {
+-   const uint32_t spirv_version = screen->spirv_version;
++   const uint32_t spirv_version = screen ? screen->spirv_version : SPIRV_VERSION(1, 0);
++   if (!sinfo) {
++      static const struct zink_shader_info default_sinfo = {0};
++      sinfo = &default_sinfo;
++   }
+    struct spirv_shader *ret = NULL;
+
+    struct ntv_context ctx = {0};
 diff --git a/src/gallium/winsys/panfrost/drm/meson.build b/src/gallium/winsys/panfrost/drm/meson.build
 index 1e98cef..b6b0005 100644
 --- a/src/gallium/winsys/panfrost/drm/meson.build
@@ -145,7 +667,7 @@ index 70bf495..ef8798a 100644
 +++ b/src/meson.build
 @@ -176,3 +176,4 @@ if with_glx != 'disabled' and not with_glvnd
  endif
- 
+
  subdir('tool')
 +subdir('tinymesa')
 diff --git a/src/panfrost/compiler/bi_validate.c b/src/panfrost/compiler/bi_validate.c
@@ -155,7 +677,7 @@ index 99c61a0..8515c34 100644
 @@ -129,7 +129,10 @@ bi_validate_width(bi_context *ctx)
           unsigned v = I->src[s].value;
           unsigned n = bi_count_read_registers(I, s);
- 
+
 -         if (width[v] != n) {
 +         if (width[v] != n &&
 +             !(I->op == BI_OPCODE_IADD_U32 && s == 1 && n == 1 && width[v] == 2 &&
@@ -171,7 +693,7 @@ index 2c5497d..3f3a39c 100644
 @@ -172,7 +172,10 @@ bi_extract(bi_builder *b, bi_index vec, unsigned channel)
     if (components == NULL && channel == 0)
        return vec;
- 
+
 -   assert(components != NULL && "missing bi_cache_collect()");
 +   if (components == NULL) {
 +      vec.swizzle = channel;
@@ -179,7 +701,31 @@ index 2c5497d..3f3a39c 100644
 +   }
     return components[channel];
  }
- 
+
+diff --git a/src/panfrost/compiler/meson.build b/src/panfrost/compiler/meson.build
+index 3769f06..0da4e37 100644
+--- a/src/panfrost/compiler/meson.build
++++ b/src/panfrost/compiler/meson.build
+@@ -134,7 +134,6 @@ libpanfrost_bifrost_disasm = static_library(
+   dependencies: [idep_nir],
+   link_with: [libpanfrost_util],
+   c_args : [no_override_init_args],
+-  gnu_symbol_visibility : 'hidden',
+   build_by_default : false,
+ )
+
+diff --git a/src/panfrost/compiler/valhall/meson.build b/src/panfrost/compiler/valhall/meson.build
+index 3bddb28..fef264d 100644
+--- a/src/panfrost/compiler/valhall/meson.build
++++ b/src/panfrost/compiler/valhall/meson.build
+@@ -39,7 +39,6 @@ libpanfrost_valhall_disasm = static_library(
+   valhall_disasm_c,
+   include_directories : [inc_include, inc_src],
+   c_args : [no_override_init_args],
+-  gnu_symbol_visibility : 'hidden',
+   build_by_default : false,
+ )
+
 diff --git a/src/panfrost/lib/meson.build b/src/panfrost/lib/meson.build
 index b10bc2d..6e17928 100644
 --- a/src/panfrost/lib/meson.build
@@ -251,7 +797,7 @@ index bf67bf1..a15403c 100644
 -  gnu_symbol_visibility : 'hidden',
    build_by_default : false,
  )
- 
+
 @@ -304,7 +303,6 @@ _libmesa_util = static_library(
    dependencies : deps_for_libmesa_util,
    link_with: [libmesa_util_simd],
@@ -259,7 +805,7 @@ index bf67bf1..a15403c 100644
 -  gnu_symbol_visibility : 'hidden',
    build_by_default : false
  )
- 
+
 @@ -341,7 +339,6 @@ _libxmlconfig = static_library(
        join_paths(get_option('prefix'), get_option('datadir'))
      ),
@@ -267,7 +813,7 @@ index bf67bf1..a15403c 100644
 -  gnu_symbol_visibility : 'hidden',
    build_by_default : false,
  )
- 
+
 @@ -358,7 +355,6 @@ devenv.set('DRIRC_CONFIGDIR', meson.current_source_dir())
  _libparson = static_library(
    'parson',
@@ -275,4 +821,4 @@ index bf67bf1..a15403c 100644
 -  gnu_symbol_visibility : 'hidden',
    build_by_default : false,
  )
- 
+

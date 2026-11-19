@@ -182,6 +182,8 @@ def __getattr__(nm):
           "python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen"]), cwd=path, shell=True, check=True),
         srcs="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.7/mesa-25.2.7.tar.gz",
         dll=f"'tinymesa', {tinymesa_path}, emsg='pip install tinymesa==25.2.7.2'", prolog=["import os, sysconfig"], macros=False)
+    case "cmpbe":
+      return load("cmpbe", [], dll="'mali'")
     case "libclang":
       return load("libclang",
                   lambda: [f"{system('llvm-config-20 --includedir')}/clang-c/{s}.h" for s in ["Index", "CXString", "CXSourceLocation", "CXFile"]],

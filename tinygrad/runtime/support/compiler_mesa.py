@@ -1,6 +1,6 @@
-import base64, ctypes, pathlib, tempfile, hashlib
-from tinygrad.renderer import Compiler
-from tinygrad.helpers import cpu_objdump, system, data64
+import base64, ctypes, pathlib, tempfile, hashlib, struct
+from tinygrad.renderer import Compiler, CompileError
+from tinygrad.helpers import cpu_objdump, system, data64, getenv
 from tinygrad.runtime.autogen import mesa, llvm, libc
 from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler, expect, cerr
 
@@ -93,14 +93,66 @@ def disas_adreno(lib:bytes, gpu_id=630):
     tf.seek(0)
     print(tf.read())
 
+def compile_mali_vendor(src, nir_options):
+  from tinygrad.runtime.autogen import panfrost as pf, cmpbe
+
+  nir = deserialize(src, nir_options)
+  info = nir.contents.info
+  if info.shared_size:
+    mesa.ralloc_free(nir)
+    return src.encode()  # Arm's WLS/reconvergence is incorrect for tinygrad reductions.
+  metadata = struct.pack('<4sIIII', b'MLV1', info.shared_size, info.num_textures, info.num_images,
+                         info.uses_control_barrier or info.uses_memory_barrier)
+  mesa.nir_convert_from_ssa(nir, True, False)
+  spv = pf.nir_to_spirv(nir, None, None)
+  if not spv: raise CompileError("NIR to SPIR-V conversion failed")
+  spirv = ctypes.string_at(spv.contents.words, spv.contents.num_words * 4)
+  pf.spirv_shader_delete(spv)
+  mesa.ralloc_free(nir)
+
+  libc = ctypes.CDLL('libc.so.6')
+  libc.malloc.argtypes, libc.malloc.restype = [ctypes.c_size_t], ctypes.c_void_p
+  libc.free.argtypes, libc.free.restype = [ctypes.c_void_p], None
+  alloc = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_size_t)(libc.malloc)
+  free = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(libc.free)
+  ctx = (ctypes.c_ubyte * 256)()
+  cmpbe.put_ptr(ctx, 120, ctypes.cast(alloc, ctypes.c_void_p).value)
+  cmpbe.put_ptr(ctx, 128, ctypes.cast(free, ctypes.c_void_p).value)
+  ctx[216] = 1  # SPIR-V, no OpenCL or kernel driver context
+  options = (ctypes.c_ubyte * 80)()
+  cmpbe.cmpbe_v2_init_options(options, 0)
+  cmpbe.cmpbe_v2_set_option_value(options, 12, 1)
+  cmpbe.cmpbe_v2_set_option_value(options, 16, 1)
+  entry = ctypes.c_char_p(b'main')
+  shader = (ctypes.c_ubyte * 40)()
+  cmpbe.put_ptr(shader, 0, ctypes.cast(entry, ctypes.c_void_p).value)
+  cmpbe.put_ptr(shader, 24, ctypes.addressof(options))
+  source = ctypes.create_string_buffer(spirv)
+  result = ctypes.c_void_p()
+  rc = cmpbe.cmpbe_v2_compile_single_shader(ctx, source, len(spirv), shader, 6, 7, 0, None, None, ctypes.byref(result))
+  if rc != 0:
+    log = ctypes.c_void_p.from_address(result.value + 8).value if result.value else None
+    msg = ctypes.string_at(log).decode(errors='replace') if log else f'cmpbe_v2 error {rc}'
+    if result.value: cmpbe.cmpbe_v2_free_compilation_result(result)
+    raise CompileError(msg)
+  assert result.value
+  mbs_ptr = ctypes.c_uint64.from_address(result.value + 16).value
+  mbs_size = ctypes.c_uint64.from_address(result.value + 24).value
+  if not result.value or not mbs_ptr or not mbs_size:
+    cmpbe.cmpbe_v2_free_compilation_result(result)
+    raise CompileError('vendor compiler returned no MBS2')
+  mbs2 = ctypes.string_at(mbs_ptr, mbs_size)
+  cmpbe.cmpbe_v2_free_compilation_result(result)
+  return base64.b64encode(metadata + mbs2)
+
 class MALICompiler(Compiler):
   def __init__(self, arch):
     assert arch in ("g610", "10"), f"unsupported Mali architecture {arch}"
     self.nir_options = bytes(mesa.pan_shader_get_compiler_options(10).contents)
-    super().__init__(f"compile_mali_{arch}")
+    super().__init__(f"compile_mali_{'vendor_' if getenv('MALI_VENDOR') else ''}{arch}")
 
-  # The native tm_compile entry point consumes this serialized NIR directly.
-  def compile(self, src) -> bytes: return src.encode()
+  # The runtime consumes serialized NIR or vendor MBS2, depending on MALI_VENDOR.
+  def compile(self, src) -> bytes: return compile_mali_vendor(src, self.nir_options) if getenv('MALI_VENDOR') else src.encode()
 
 class IR3Compiler(Compiler):
   def __init__(self, arch):

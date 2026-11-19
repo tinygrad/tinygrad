@@ -103,6 +103,31 @@ class struct_pipe_compute_state(c.Struct): SIZE = 24
 struct_pipe_compute_state.register_fields([('ir_type', ctypes.c_uint32, 0), ('prog', ctypes.c_void_p, 8),
                                            ('static_shared_mem', ctypes.c_uint32, 16)])
 
+@record
+class struct_pan_ubo_word(c.Struct): SIZE = 4
+struct_pan_ubo_word.register_fields([('ubo', ctypes.c_uint16, 0), ('offset', ctypes.c_uint16, 2)])
+@record
+class struct_pan_shader_info(c.Struct): SIZE = 1496
+struct_pan_shader_info.register_fields([
+  ('stage', ctypes.c_uint32, 0), ('work_reg_count', ctypes.c_uint32, 4), ('tls_size', ctypes.c_uint32, 8),
+  ('wls_size', ctypes.c_uint32, 12), ('preload', ctypes.c_uint64, 128), ('allow_merging_workgroups', ctypes.c_ubyte, 136),
+  ('contains_barrier', ctypes.c_ubyte, 168), ('writes_global', ctypes.c_ubyte, 170),
+  ('sampler_count', ctypes.c_uint32, 188), ('texture_count', ctypes.c_uint32, 192), ('ubo_count', ctypes.c_uint32, 196),
+  ('attributes_read_count', ctypes.c_uint32, 200), ('attribute_count', ctypes.c_uint32, 204),
+  ('attributes_read', ctypes.c_uint32, 208), ('push_count', ctypes.c_uint32, 820),
+  ('push_words', c.Array[struct_pan_ubo_word, Literal[128]], 824), ('ubo_mask', ctypes.c_uint32, 1336)])
+@record
+class struct_panfrost_sysvals(c.Struct): SIZE = 132
+struct_panfrost_sysvals.register_fields([('sysvals', c.Array[ctypes.c_uint32, Literal[32]], 0), ('sysval_count', ctypes.c_uint32, 128)])
+@record
+class struct_panfrost_native_shader(c.Struct): SIZE = 1656
+struct_panfrost_native_shader.register_fields([('info', struct_pan_shader_info, 0), ('sysvals', struct_panfrost_sysvals, 1496),
+  ('binary', ctypes.c_void_p, 1632), ('binary_size', ctypes.c_uint64, 1640)])
+@record
+class struct_spirv_shader(c.Struct): SIZE = 24
+struct_spirv_shader.register_fields([('words', ctypes.c_void_p, 0), ('num_words', ctypes.c_uint64, 8),
+                                     ('tcs_vertices_out_word', ctypes.c_uint32, 16)])
+
 struct_pipe_screen.register_fields([
   ('destroy', c.CFUNCTYPE[None, [c.POINTER[struct_pipe_screen]]], 1400),
   ('context_create', c.CFUNCTYPE[c.POINTER[struct_pipe_context], [c.POINTER[struct_pipe_screen], ctypes.c_void_p, ctypes.c_uint32]], 1472),
@@ -134,6 +159,43 @@ struct_pipe_context.register_fields([
 def panfrost_drm_screen_create(drmFD:int, config:c.POINTER[struct_pipe_screen_config]) -> c.POINTER[struct_pipe_screen]: ...
 @dll.bind(c.POINTER[struct_nir_shader_compiler_options], ctypes.c_uint32)
 def pan_shader_get_compiler_options(arch:int) -> c.POINTER[struct_nir_shader_compiler_options]: ...
+@dll.bind(ctypes.c_uint64, c.POINTER[struct_pipe_resource])
+def panfrost_resource_address(resource:c.POINTER[struct_pipe_resource]) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context], ctypes.c_void_p)
+def panfrost_compute_bind(ctx:c.POINTER[struct_pipe_context], state:ctypes.c_void_p) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context], c.POINTER[struct_pipe_constant_buffer], ctypes.c_void_p)
+def panfrost_compute_set_constants(ctx:c.POINTER[struct_pipe_context], cb:c.POINTER[struct_pipe_constant_buffer], args:ctypes.c_void_p) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context], c.POINTER[struct_pipe_grid_info])
+def panfrost_compute_launch(ctx:c.POINTER[struct_pipe_context], grid:c.POINTER[struct_pipe_grid_info]) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context], ctypes.c_uint64, c.POINTER[struct_pipe_sampler_view])
+def panfrost_compute_create_sampler_view(ctx:c.POINTER[struct_pipe_context], address:int,
+  tmpl:c.POINTER[struct_pipe_sampler_view]) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context], ctypes.c_void_p, c.POINTER[c.POINTER[struct_pipe_sampler_view]], ctypes.c_uint32)
+def panfrost_compute_set_samplers(ctx:c.POINTER[struct_pipe_context], sampler:ctypes.c_void_p,
+  views:c.POINTER[c.POINTER[struct_pipe_sampler_view]], count:int) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context], c.POINTER[struct_pipe_sampler_view])
+def panfrost_compute_release_sampler_view(ctx:c.POINTER[struct_pipe_context], view:c.POINTER[struct_pipe_sampler_view]) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context], ctypes.c_uint32, c.POINTER[struct_pipe_image_view], ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64)
+def panfrost_compute_set_images(ctx:c.POINTER[struct_pipe_context], count:int, views:c.POINTER[struct_pipe_image_view],
+  address0:int, address1:int, address2:int, address3:int) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context])
+def panfrost_compute_flush(ctx:c.POINTER[struct_pipe_context]) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context], ctypes.c_uint64, ctypes.c_void_p, ctypes.c_uint32)
+def panfrost_buffer_write(ctx:c.POINTER[struct_pipe_context], address:int, data:ctypes.c_void_p, size:int) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context], ctypes.c_uint64, ctypes.c_void_p, ctypes.c_uint32)
+def panfrost_buffer_read(ctx:c.POINTER[struct_pipe_context], address:int, data:ctypes.c_void_p, size:int) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context], ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint32)
+def panfrost_buffer_copy(ctx:c.POINTER[struct_pipe_context], dst_address:int, src_address:int, size:int) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context], c.POINTER[ctypes.c_uint64], ctypes.c_uint64)
+def panfrost_compute_wait(ctx:c.POINTER[struct_pipe_context], address:c.POINTER[ctypes.c_uint64], value:int) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context], c.POINTER[ctypes.c_uint64], ctypes.c_uint64)
+def panfrost_compute_signal(ctx:c.POINTER[struct_pipe_context], address:c.POINTER[ctypes.c_uint64], value:int) -> int: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_pipe_context], c.POINTER[ctypes.c_uint64])
+def panfrost_compute_timestamp(ctx:c.POINTER[struct_pipe_context], address:c.POINTER[ctypes.c_uint64]) -> int: ...
+@dll.bind(c.POINTER[struct_spirv_shader], ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+def nir_to_spirv(shader:ctypes.c_void_p, info:ctypes.c_void_p, screen:ctypes.c_void_p) -> c.POINTER[struct_spirv_shader]: ...
+@dll.bind(None, c.POINTER[struct_spirv_shader])
+def spirv_shader_delete(shader:c.POINTER[struct_spirv_shader]) -> None: ...
 @dll.bind(None, c.POINTER[struct_driOptionCache], c.POINTER[struct_driOptionDescription], ctypes.c_uint32)
 def driParseOptionInfo(info:c.POINTER[struct_driOptionCache], configOptions:c.POINTER[struct_driOptionDescription], numOptions:int) -> None: ...
 @dll.bind(None, c.POINTER[struct_driOptionCache])
@@ -156,6 +218,7 @@ PIPE_BIND_LINEAR = 1 << 21
 PIPE_MAP_READ = 1
 PIPE_MAP_WRITE = 2
 PIPE_SHADER_IR_NIR = 1
+PIPE_SHADER_IR_NATIVE = 2
 PIPE_SHADER_COMPUTE = 5
 PIPE_IMAGE_ACCESS_READ_WRITE = 3
 PIPE_IMAGE_ACCESS_TEX2D_FROM_BUFFER = 1 << 4
