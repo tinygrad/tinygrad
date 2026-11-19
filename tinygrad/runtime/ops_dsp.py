@@ -428,25 +428,6 @@ def add_prefetch(sink:UOp) -> UOp|None:
     else: subs.update({a:a.replace(src=(a.src[0].after(pf),)+a.src[1:]) for a,_ in accs})
   return sink.substitute(subs, name="prefetch") if subs else None
 
-def minmax(w:UOp) -> UOp|None:
-  # a vector select of x or a bound by a compare of them is a min or max (a clamp)
-  if not is_vec(w) or not dtypes.is_int(w.dtype): return None
-  c, a, b = w.src
-  # (through the nots of the select's polarity)
-  while c.op in (Ops.CMPNE, Ops.CMPEQ) and isinstance(cv:=const_val(c.src[1]), bool):
-    c, a, b = (c.src[0], a, b) if (c.op is Ops.CMPEQ) == cv else (c.src[0], b, a)
-  if c.op is not Ops.CMPLT: return None
-  def same(x:UOp, y:UOp) -> bool: return x is y or (const_val(x) is not None and const_val(x) == const_val(y))
-  # where(x<y, x, y) is min, where(x<y, y, x) is max
-  if same(c.src[0], a) and same(c.src[1], b): fn = "__builtin_elementwise_min"
-  elif same(c.src[0], b) and same(c.src[1], a): fn = "__builtin_elementwise_max"
-  else: return None
-  if not is_vec(a): a, b = b, a
-  if not is_vec(a) or (is_vec(b) and b.shape != a.shape): return None
-  # (a scalar is broadcast by the vector arithmetic)
-  return UOp.native(f"{fn}({{0}}, {{1}})" if is_vec(b) else f"{fn}({{0}}, ({{0}})*0+({{1}}))", shape=w.shape, dtype=w.dtype,
-                             fmt=True).call(a, b)
-
 def lookup(x:UOp) -> UOp|None:
   # 128 bytes loaded from a table of 256 at the bytes of a vector (plus a const) are lut256
   if len(x.src) != 128 or x.dtype.itemsize != 1 or any(s.op is not Ops.LOAD or s.src[0].op is not Ops.INDEX for s in x.src): return None
@@ -463,7 +444,6 @@ def lookup(x:UOp) -> UOp|None:
 dsp_late = PatternMatcher([
   (UPat(Ops.STACK, name="x"), lookup),
   (UPat(Ops.SINK, name="sink"), add_prefetch),
-  (UPat(Ops.WHERE, name="w"), minmax),
   (UPat(Ops.ADD, name="x"), vrmpy_sum),
   (UPat(Ops.CAST, name="x", src=(UPat(Ops.SHR, src=(UPat(Ops.MUL, src=[UPat(Ops.CAST, name="a"), UPat(name="c")]), UPat(name="s"))),)), mulhi),
 ])
@@ -478,7 +458,6 @@ int qurt_thread_create(qurt_thread_t *thread_id, qurt_thread_attr_t *attr, void 
 int qurt_thread_join(qurt_thread_t tid, int *status); void qurt_thread_exit(int status);
 void* malloc(unsigned int); void free(void*);"""
 
-DSP_INLINE_BYTES = 32 << 10
 class DSPRenderer(ClangRenderer):
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_typedef = "__attribute__((noinline)) void"
@@ -497,7 +476,6 @@ class DSPRenderer(ClangRenderer):
   # every kernel runs on all the cores, the outermost loop is split between them
   extra_args = ["int core"]
   parallel: UOp|None = None
-  inline: bool = False
 
   def __init__(self, target:Target): self.target, self.compiler = target, DSPCompiler()
 
@@ -512,11 +490,8 @@ class DSPRenderer(ClangRenderer):
     stores = [u for u in uops if u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.GLOBAL]
     self.parallel = top[0] if len(top) == 1 and top[0].arg[0] in (AxisType.GLOBAL, AxisType.WEAK) and stores and \
       all(top[0] in st.ranges for st in stores) else None
-    # a kernel with little memory or no parallel loop runs its cores one after the other on the calling thread
-    self.inline = self.parallel is None or sum(u.max_numel()*u.dtype.itemsize for u in uops if u.op is Ops.PARAM and
-                                               u.addrspace is AddrSpace.GLOBAL) < DSP_INLINE_BYTES
     try: return super().render(uops)
-    finally: self.parallel, self.inline = None, False
+    finally: self.parallel = None
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     # without a parallel loop the first core does all the work
@@ -567,20 +542,16 @@ class DSPRenderer(ClangRenderer):
     offs = [o for o,_ in TinyELF.iter_sig(tuple((None, b.addrspace, b.dtype, ()) for _,(b,_) in bufs))]
     msrc = ['typedef struct { ' + ' '.join(f'{ty(b)} a{i};' for i,(_,(b,_)) in enumerate(bufs)) + ' int core; } kargs_t;',
             # the workers of the pool run cores of the kernel
-            'typedef struct { void (*run)(void *pool, void (*fn)(void*), void *args, int argsize, int ncaller); } pool_t;',
+            'typedef struct { void (*run)(void *pool, void (*fn)(void*), void *args, int argsize); } pool_t;',
             '__attribute__((unused)) static void kcore(void *p) { kargs_t *a = p; ' +
             f'{function_name}({", ".join([f"a->a{i}" for i in range(len(bufs))] + ["a->core"])}); }}',
-            'void kernel_run(const unsigned char *a, pool_t *pool) {', f'kargs_t args[{NCORES}]; (void)pool;']
+            'void kernel_run(const unsigned char *a, pool_t *pool) {', f'kargs_t args[{NCORES}];']
     # (a buffer is its address)
     msrc += [f'args[0].a{i} = ' + (f'*(const {ty(b)}*)(a+{o});' if b.addrspace == AddrSpace.ALU else f'(void*)*(const unsigned int*)(a+{o});')
              for i,((_,(b,_)),o) in enumerate(zip(bufs, offs))]
     msrc += [f"for (int i = 1; i < {NCORES}; i++) {{ args[i] = args[0]; args[i].core = i; }} args[0].core = 0;"]
-    # the cores from ncaller on run on the workers, the ones before on the calling thread
-    def run(ncaller:int) -> list[str]:
-      return [f'{function_name}({", ".join([f"args[0].a{i}" for i in range(len(bufs))] + [str(c)])});' for c in range(ncaller)] if ncaller == NCORES \
-        else [f"pool->run(pool, kcore, args, sizeof(kargs_t), {ncaller});"]
-    # the calling thread's stack takes small frames of vectors only: a big frame runs on the workers (see DSPCompiler)
-    msrc += ["#ifdef DSP_BIG_FRAME"] + run(0) + ["#else"] + run(NCORES if self.inline else 1) + ["#endif", "}"]
+    # the cores run on the workers (the calling thread's stack is small)
+    msrc += ["pool->run(pool, kcore, args, sizeof(kargs_t));", "}"]
     return '\n'.join(msrc)
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s+(dtypes.bfloat16,)}
@@ -695,8 +666,6 @@ class DSPAllocator(Allocator['DSPDevice']):
 
 # ***** compiler *****
 
-# the biggest stack frame the calling (fastrpc) thread runs: a bigger one of vectors crashes it
-DSP_CALLER_FRAME = 4096
 class DSPCompiler(Compiler):
   def __init__(self, mock:bool=False):
     self.mock, compiler_args = mock, "--target=hexagon -mcpu=hexagonv65 -fuse-ld=lld -nostdlib -mhvx=v65 -mhvx-length=128b -O2"
@@ -715,7 +684,7 @@ class DSPCompiler(Compiler):
       self.args = f"-shared {compiler_args} -Wl,-z,norelro -T{self.link_ld.name}"
 
     # the cache depends on how it's compiled and linked
-    key = hashlib.sha256((compiler_args + link_script + str(DSP_CALLER_FRAME)).encode()).hexdigest()[:16] if not mock else ""
+    key = hashlib.sha256((compiler_args + link_script).encode()).hexdigest()[:16] if not mock else ""
     super().__init__(None if mock else f"compile_dsp_{key}")
 
   def __del__(self):
@@ -725,15 +694,8 @@ class DSPCompiler(Compiler):
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as f:
       # (the lanes of a padded vector may load values that aren't used)
-      def cc(flags:str): system(f"{getenv('CC','clang')} {self.args} {flags} -Wall -Werror -Wno-unused-variable -fno-stack-protector -x c -fPIC " +
-                                f"-ffreestanding -nostdlib - -o {f.name}", input=src.encode())
-      # a kernel with a big stack frame (vector spills) can't run on the calling thread, it's compiled to run on threads only
-      if self.mock: cc("")
-      else:
-        try: cc(f"-Wframe-larger-than={DSP_CALLER_FRAME}")
-        except RuntimeError as e:
-          if "stack frame size" not in str(e): raise
-          cc("-DDSP_BIG_FRAME")
+      system(f"{getenv('CC','clang')} {self.args} -Wall -Werror -Wno-unused-variable -fno-stack-protector -x c -fPIC -ffreestanding -nostdlib - " +
+             f"-o {f.name}", input=src.encode())
       return pathlib.Path(f.name).read_bytes()
 
   def disassemble(self, lib:bytes): return cpu_objdump(lib, "llvm-objdump")
@@ -780,7 +742,7 @@ typedef union {{ unsigned long long raw; struct {{ unsigned int signals, waiting
 void qurt_signal_init(qurt_signal_t *signal); void qurt_signal_set(qurt_signal_t *signal, unsigned int mask);
 unsigned int qurt_signal_wait(qurt_signal_t *signal, unsigned int mask, unsigned int attribute);
 void qurt_signal_clear(qurt_signal_t *signal, unsigned int mask);
-typedef struct pool {{ void (*run)(struct pool *pool, void (*fn)(void*), void *args, int argsize, int ncaller);
+typedef struct pool {{ void (*run)(struct pool *pool, void (*fn)(void*), void *args, int argsize);
   qurt_signal_t go[{NCORES}], done; void (*fn)(void*); char *args; int argsize; }} pool_t;
 typedef struct {{ pool_t *pool; int core; }} worker_t;
 static void worker(void *p) {{
@@ -791,12 +753,10 @@ static void worker(void *p) {{
     qurt_signal_set(&pool->done, 1 << w->core);
   }}
 }}
-static void run(pool_t *pool, void (*fn)(void*), void *args, int argsize, int ncaller) {{
+static void run(pool_t *pool, void (*fn)(void*), void *args, int argsize) {{
   pool->fn = fn; pool->args = args; pool->argsize = argsize;
-  for (int i = ncaller; i < {NCORES}; i++) qurt_signal_set(&pool->go[i], 1);
-  for (int i = 0; i < ncaller; i++) fn((char*)args + i * argsize);
-  unsigned int mask = ((1 << {NCORES}) - 1) & ~((1 << ncaller) - 1);
-  if (mask) {{ qurt_signal_wait(&pool->done, mask, 1 /* QURT_SIGNAL_ATTR_WAIT_ALL */); qurt_signal_clear(&pool->done, mask); }}
+  for (int i = 0; i < {NCORES}; i++) qurt_signal_set(&pool->go[i], 1);
+  qurt_signal_wait(&pool->done, (1 << {NCORES}) - 1, 1 /* QURT_SIGNAL_ATTR_WAIT_ALL */); qurt_signal_clear(&pool->done, (1 << {NCORES}) - 1);
 }}
 static pool_t *the_pool;
 static pool_t *make_pool(void) {{
