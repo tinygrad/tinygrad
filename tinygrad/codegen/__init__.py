@@ -538,7 +538,10 @@ def to_program_key(ast:UOp, renderer:Renderer) -> tuple:
 
 to_program_cache: dict[tuple, UOp] = {}
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
-  if (prg:=to_program_cache.get(key:=to_program_key(ast, renderer))) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
+  key = to_program_key(ast, renderer)
+  if (prg:=to_program_cache.get(key)) is None:
+    prg = do_to_program(ast, renderer)
+    to_program_cache[key] = prg
   return prg
 
 # **** schedule linearizer

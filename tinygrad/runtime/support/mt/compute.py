@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, struct, time
+import os, pathlib, struct, time
 from tinygrad.runtime.autogen import mtfw
 from tinygrad.runtime.support.mt.mtdev import MTDev, MT_SOCIF_OFFSET
 from tinygrad.runtime.support.mt.mmu import MTMMU4
@@ -7,7 +7,7 @@ from tinygrad.runtime.support.mt.mmu import MTMMU4
 FW_BASE, ROOT_BASE, INIT_SIZE, FW_DEVVA = 0x20000000, 0x30000000, 0x2000000, 0xe1c0000000
 FWIF_OFF, META_BASE = 0xc0000, 0x90000000
 SUB_PA, SUB_VA = FW_BASE + INIT_SIZE, FW_DEVVA + INIT_SIZE
-DEFAULT_FIRMWARE = '/tmp/mt-research/musa-driver-3.3.0/lib/firmware/mthreads/mtfw-gen1.bin'
+DEFAULT_FIRMWARE = str(pathlib.Path(__file__).with_name('mtfw-gen1.bin'))
 
 class MTFirmwareLayout:
   def __init__(self, core_count:int=8):
@@ -25,11 +25,11 @@ class MTFirmwareLayout:
     self.ccb = FWIF_OFF + 0x40ee0
 
 class MTFirmware:
-  def __init__(self, dev:MTDev, path:str|None=None, core_count:int=8, prepare:bool=True):
+  def __init__(self, dev:MTDev, path:str|None=None, core_count:int=8, prepare:bool=True, mmu:MTMMU4|None=None, v=None):
     self.dev, self.path, self.core_count = dev, path or os.environ.get('MT_FIRMWARE', DEFAULT_FIRMWARE), core_count
     self.layout = MTFirmwareLayout(core_count)
-    self.v = self.dev.pci_dev.map_bar(2, off=FW_BASE, size=INIT_SIZE, fmt='B')
-    self.mmu = MTMMU4(ROOT_BASE)
+    self.v = self.dev.pci_dev.map_bar(2, off=FW_BASE, size=INIT_SIZE, fmt='B') if v is None else v
+    self.mmu = MTMMU4(ROOT_BASE) if mmu is None else mmu
     if prepare: self._prepare()
 
   def _prepare(self) -> None:
@@ -79,9 +79,13 @@ class MTFirmware:
   def _read(self, off:int, size:int=8) -> int: return int.from_bytes(self.dev.smc._read(MT_SOCIF_OFFSET + off, size), 'little')
 
   def upload_mmu(self) -> None:
+    if not self.mmu.dirty_pages: return
+    if not hasattr(self,'root_view'): self.root_view = self.dev.pci_dev.map_bar(2,off=ROOT_BASE,size=len(self.mmu.root),fmt='B')
+    chunks:list[tuple[int,int]] = []
     for off in sorted(self.mmu.dirty_pages):
-      rv = self.dev.pci_dev.map_bar(2, off=ROOT_BASE+off, size=0x1000, fmt='B')
-      rv[:] = self.mmu.root[off:off+0x1000]
+      if chunks and off == chunks[-1][1]: chunks[-1] = (chunks[-1][0],off+0x1000)
+      else: chunks.append((off,off+0x1000))
+    for start,end in chunks: self.root_view[start:end] = self.mmu.root[start:end]
     self.mmu.dirty_pages.clear()
 
   def start(self, timeout:float=10.0) -> None:

@@ -24,6 +24,7 @@ class HCQInfo:
   slots:tuple[tuple[str, int], ...] = () # per device, the position of its batch slots in the args
 
   skip_wait:bool = False # TODO: remove. an rdma copy between nodes is two batches, so waiting on the first alone deadlocks
+  cacheable:bool = False
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -33,6 +34,7 @@ def get_enqueue_devs(call:UOp) -> tuple[str, ...]:
   runs_on = call.device if call.body.op is Ops.STORE and all_devices_in(call.device, HCQ_DEVS - UVM_DEVS) else get_call_arg_uops(call)[0].device
   devs = tuple(Device.canonicalize(d) for d in to_tuple(runs_on))
   if not all_devices_in(devs, HCQ_DEVS) or (call.body.op is Ops.STORE and all_devices_in(devs, UVM_DEVS)): return ()
+  if call.body.op is Ops.STORE and any(d.split(':')[0] == 'MT' for d in devs): return ()
   return devs
 
 def unwrap_view(v:UOp) -> tuple[UOp, int]: # look through views to (base, byte offset)
@@ -324,7 +326,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
   closings = {queue: [cmd for dev in ctx.queues if closers[dev] == queue for cmd in close_cmds[dev]] for queue in order}
   return {queue: open_cmds[queue] + programs[queue] + closings[queue] for queue in order}
 
-def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
+def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False, cacheable:bool=False) -> UOp:
   queues = _build_queues(ctx)
 
   # wait for the previous (this) schedule run
@@ -342,12 +344,14 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   bufs = [tuple(b.arg.slot for b, _ in a) if all(b.op in (Ops.PARAM, Ops.EXTERN) and lane is None for b, lane in a) else () for a in args]
   kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch]))
   slots = ctx.slots if ctx.profile else {} # profiling reads them
-  info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, slots=tuple((d, i) for i, d in enumerate(slots)),
+  info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, cacheable=cacheable, kernels=kerns, slots=tuple((d, i) for i, d in enumerate(slots)),
                  estimates=Estimates(*[sum(x*n for x, n in Counter(t).items()) for t in zip(*[vars(e).values() for e in estimates])]).simplify())
   return sink.call(*slots.values(), hcq=info)
 
 @rewrite_group(new_ctx=False)
-def sched_batches(l:UOp, profile:bool) -> UOp:
+def sched_batches(l:UOp, profile:bool, cacheable:bool=False) -> UOp:
+  if len(l.src) == 1 and (c:=l.src[0]).op is Ops.CALL and c.body.op is Ops.PROGRAM and get_enqueue_devs(c) == ('MT',):
+    return l.replace(src=(_finalize_batch(BatchCtx([(c,'MT','COMPUTE:0')],profile),cacheable=cacheable),))
   copies = [c for c in l.src if c.op is Ops.CALL and c.body.op is Ops.STORE]
   ring = sorted({Device.canonicalize(d) for c in copies for b in get_call_arg_uops(c) for d in to_tuple(b.device) if all_devices_in(d, HCQ_DEVS)})
   # TODO: handle max queue amt better
@@ -365,7 +369,7 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
     run = list(grp)
     peer_groups = dedup([Device[d[0]].peer_group for _, d in run if d])
     batches = [[(c, d[0], queue_for(c)) for c, d in run if Device[d[0]].peer_group == pg] for pg in peer_groups]
-    if hcq: srcs += [_finalize_batch(BatchCtx(batch, profile), batch is not batches[-1]) for batch in batches]
+    if hcq: srcs += [_finalize_batch(BatchCtx(batch, profile), batch is not batches[-1], cacheable) for batch in batches]
     else: srcs += [c for c, _ in run]
   return l.replace(src=tuple(srcs))
 
@@ -506,12 +510,16 @@ def lower_call(call:UOp) -> UOp|None:
   # encode bodies
   body = graph_rewrite(call.body, Compiled.pm_encode, ctx=(lt_patches:=list[UOp]()), bpm=pm_hoist_links, name="encode")
   body = graph_rewrite(body, Compiled.pm_lower, ctx=lt_patches, bpm=pm_hoist_links, enter_calls=True, name="lower")
-  body = graph_rewrite(body, pm_lift, walk=True, enter_calls=True, name="lift")
+  if not any(d.split(':')[0] == 'MT' for d in call.arg.hcq.device): body = graph_rewrite(body, pm_lift, walk=True, enter_calls=True, name="lift")
 
   if VIZ: graph_rewrite(UOp.sink(*dedup(lt_patches)), PatternMatcher([]), name="View Link-Time Patches")
 
   # batch args, link patches wait after the call
   return lift(call.replace(src=(body, *call.src[1:])), root=True).after(*dedup(lt_patches))
+def lower_encoded_call(call:UOp) -> UOp:
+  body = graph_rewrite(call.body, PatternMatcher([]), ctx=(lt_patches:=list[UOp]()), bpm=pm_hoist_links, name="hoist links")
+  return lift(call.replace(src=(body, *call.src[1:])), root=True).after(*dedup(lt_patches))
+
 pm_lower_call = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])
 
 # **** link: allocs to buffers, addresses to consts
@@ -569,20 +577,33 @@ pm_resolve_link = PatternMatcher([
 
 # **** compile and link
 
-hcq_compile_cache:dict[tuple[UOp, bool, bool], UOp] = {} # eager templates: a buffer-free linear (uops are hash-consed) to its compiled form
+hcq_compile_cache:dict[tuple[UOp, bool, bool, tuple[tuple[Buffer,int], ...]|None], UOp] = {}
 
 @rewrite_group(lambda linear,input_uops,profile,cache=False,ret=None: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=False) -> UOp:
   if any(getattr(c.without_after.arg, "hcq", None) is not None for c in linear.src): return linear # compiled already
-
   if cache and input_uops is not None:
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
-    linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffers")
-  linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
-  if cache and input_uops is not None and (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
-  lin = graph_rewrite(sched_batches(linear, profile), pm_lower_call, walk=True, name="lower call")
+    replacements = {}
+    for u in linear.toposort():
+      if u.op is Ops.BUFFER: replacements[u] = replace_buffer((input_uops,slots),u)
+    linear = linear.substitute(replacements,walk=True)
+  mt_hcq = input_uops is not None and any(u.arg.buffer.device.split(':')[0] == 'MT' for u in input_uops)
+  if not mt_hcq or any(c.op is Ops.CALL and c.body.op is Ops.STORE for c in linear.toposort()):
+    linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
+  runtime_key = tuple((u.arg.buffer,u.arg.buffer._buf) for u in input_uops) if mt_hcq and input_uops is not None else None
+  key = (linear,profile,ALL2ALL >= 1,runtime_key)
+  cached = hcq_compile_cache.get(key) if cache and input_uops is not None else None
+  if cached is not None: return cached
+  if mt_hcq:
+    from tinygrad.runtime.ops_mt import mt_lower_call
+    scheduled = sched_batches(linear, profile, cache)
+    lin = scheduled.replace(src=tuple(mt_lower_call(c) if c.op is Ops.CALL and c.arg.hcq is not None else c for c in scheduled.src))
+  else: lin = graph_rewrite(sched_batches(linear, profile, cache), pm_lower_call, walk=True, name="lower call")
   with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin, verbose=DEBUG>=3)
-  if cache and input_uops is not None and final_linear is not linear: hcq_compile_cache[key] = final_linear
+  if cache and input_uops is not None and final_linear is not linear and (not mt_hcq or cast(Any,Device['MT']).hcq_cacheable(final_linear)):
+    hcq_compile_cache[key] = final_linear
+
   return final_linear
 
 @rewrite_group(lambda _,input_uops=None,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
@@ -591,4 +612,9 @@ def hcq_link(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
   ctx = LinkCtx(input_uops or [])
   linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_link, ctx=ctx, walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
+  for name in {u.arg.buffer.device for u in input_uops or [] if u.arg.buffer.device.split(':')[0] == 'MT'}:
+    for launch in cast(Any,Device[name]).launches:
+      if launch.mmu_dirty:
+        launch.upload_mmu()
+        launch.mmu_dirty = False
   return linked

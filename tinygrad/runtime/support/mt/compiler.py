@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, pathlib, subprocess, tempfile
 from tinygrad.runtime.support.mt.elf import MTKernelImage
 
-DEFAULT_MUSA_PATH = '/tmp/mt-research/toolkit/musa_toolkits_4.3.0'
+DEFAULT_MUSA_PATH = '/opt/musa'
 
 class MTCompiler:
   def __init__(self, musa_path:str|None=None):

@@ -6,11 +6,12 @@ MT_PTE_READ_WRITE = 0x3c0000000000000d
 
 class MTMMU4:
   """Rogue MMU v4 page tables used by the MTT S80 (BVNC 35.4.1632.23)."""
-  def __init__(self, root_pa:int, size:int=0x400000):
+  def __init__(self, root_pa:int, size:int=0x1000000):
     self.root_pa, self.root, self.next = root_pa, bytearray(size), 0x1000
     self.pd:dict[int,int] = {}
     self.pt:dict[tuple[int,int],int] = {}
     self.pages:dict[int,int] = {}
+    self.page_flags:dict[int,int] = {}
     self.dirty_pages:set[int] = set()
 
   def _alloc(self) -> int:
@@ -22,7 +23,8 @@ class MTMMU4:
   def map(self, va:int, pa:int, flags:int=MT_PTE_READ_ONLY) -> None:
     if va % MT_PAGE_SIZE or pa % MT_PAGE_SIZE: raise ValueError("MT MMU mappings must be 4 KiB aligned")
     if flags & 1 != 1: raise ValueError("MT MMU mapping must be present")
-    self.pages[va] = pa
+    if self.pages.get(va) == pa and self.page_flags.get(va) == flags: return
+    self.pages[va],self.page_flags[va] = pa,flags
     pci, pdi, pti = (va >> 30) & 0x3ff, (va >> 21) & 0x1ff, (va >> 12) & 0x1ff
     if pci not in self.pd:
       self.pd[pci] = self._alloc()

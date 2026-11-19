@@ -1,50 +1,22 @@
 from __future__ import annotations
-import dataclasses, os, pathlib, re, subprocess, tempfile, hashlib
-from typing import Any
-from tinygrad.device import Compiled, Program, Allocator, BufferStorage, BufferSpec, Buffer
+import ctypes, dataclasses, os, struct, hashlib, time
+from typing import Any, cast
+from tinygrad.device import Compiled, Allocator, BufferStorage, BufferSpec, Buffer
 from tinygrad.renderer import Compiler, TinyELF
 from tinygrad.renderer.cstyle import CUDARenderer, CStyleLanguage
-from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.helpers import round_up, diskcache_get, diskcache_put
+from tinygrad.dtype import dtypes
+from tinygrad.helpers import round_up
+from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, KernelInfo
+from tinygrad.runtime.support.hcq2 import HWQueue, patch, get_time_ms, to_name, ccall
+from tinygrad.runtime.support.usb import USB3, usb_link, usb_stream, usb_ctrl, usb_bulk, usb_stack, usb_fail, usb_poke, HOST_SIZE
+from tinygrad.engine.realize import get_call_kernel_args
+from tinygrad.runtime.autogen import mtfw, libc
 from tinygrad.runtime.support.mt.mtdev import MTDev
-from tinygrad.runtime.support.mt.launch import MTLaunch, parse_mt_bundle, compress_mt_bundle, decompress_mt_bundle
+from tinygrad.runtime.support.memory import MMIOInterface
+from tinygrad.runtime.support.mt.launch import MTLaunch
+from tinygrad.runtime.support.mt.generated import MTGeneratedLaunch
 from tinygrad.runtime.support.mt.compiler import MTCompiler
 from tinygrad.runtime.support.mt.elf import MTKernelImage
-
-MUSA_SOURCES:dict[str,str] = {}
-
-
-def generate_mt_launch(source:str, name:str, args:list[str], global_size:tuple[int,int,int],
-                       local_size:tuple[int,int,int]) -> dict[str,Any]:
-  td = tempfile.mkdtemp(prefix='mt-launch-')
-  src_path = pathlib.Path(td) / 'kernel.mu'
-  arg_decls = 'void *out = reinterpret_cast<void *>(uintptr_t(0xe1c2003000ULL)); uint64_t scalar = 1;'
-  arg_names = ','.join('&out' if x == 'out' else '&scalar' for x in args)
-  main = (f'#include <musa.h>\n#include <cstdint>\n#include <cstdio>\n#include <cstdlib>\n#include <unistd.h>\nint main() {{\n'
-          f'  musaFunction_t fn = nullptr;\n  musaGetFuncBySymbol(&fn, (const void *)&{name});\n'
-          f'  {arg_decls}\n  void *args[] = {{{arg_names}}};\n'
-          f'  musaLaunchKernel((const void *)&{name}, dim3{global_size}, dim3{local_size}, args, 0, nullptr);\n'
-          f'  musaDeviceSynchronize();\n'
-          f'  char done[512];\n  snprintf(done, sizeof(done), "%s/real-capture-done", getenv("MT_CAPTURE_DIR"));\n'
-          f'  while (access(done, F_OK) != 0) usleep(1000);\n  _Exit(0);\n}}\n')
-  src_path.write_text(source + '\n' + main)
-  musa = os.environ.get('MUSA_PATH', '/tmp/mt-research/toolkit/musa_toolkits_4.3.0')
-  driver = '/tmp/mt-research/musa-driver-3.3.0/usr/lib/x86_64-linux-gnu'
-  host = str(pathlib.Path(td) / 'host')
-  include = pathlib.Path(__file__).parent/'support/mt/include'
-  cmd = [str(pathlib.Path(musa)/'bin/mcc'), f'--musa-path={musa}', '--offload-arch=mp_21', f'-I{include}', str(src_path), '-o', host,
-         f'-L{musa}/lib', f'-L{driver}', '-lmusart', '-lmusa', '-lstdc++']
-  result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-  if result.returncode: raise RuntimeError(f'MUSA launch host build failed:\n{result.stdout}{result.stderr}')
-  env = os.environ.copy()
-  env.update({'MT_CAPTURE_DIR':td, 'MT_MPX':'0xff', 'MT_UMD':'1', 'LD_PRELOAD':mtum_library(),
-              'LD_LIBRARY_PATH':f'{musa}/lib:{driver}'})
-  result = subprocess.run([host], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
-  if 'JOB SUBMIT' not in result.stderr: raise RuntimeError(f'MUSA launch generation failed:\n{result.stdout}{result.stderr}')
-  state, lib = parse_mt_bundle(pathlib.Path(td)), MTCompiler(musa).extract_raw(pathlib.Path(host),td)
-  for path in pathlib.Path(td).iterdir():
-    if path.name != 'real-submission.bin': path.unlink()
-  return {'bundle':td,'packet':str(pathlib.Path(td)/'real-submission.bin'),'state':state,'lib':lib}
 
 
 class MUSACompiler(Compiler):
@@ -52,21 +24,7 @@ class MUSACompiler(Compiler):
     super().__init__('mt')
     self.mt = MTCompiler()
   def compile(self, src:str) -> bytes:
-    if os.environ.get('MT_GENERATE','1') == '0': lib = self.mt.compile_raw(src)
-    else:
-      match = re.search(r'extern "C" __global__ void\s+(\w+)\s*\(([^)]*)\)',src)
-      if match is None: raise RuntimeError('MUSA kernel signature is missing')
-      params = [p for p in match.group(2).split(',') if p.strip()]
-      args = ['out' if '*' in p else 'scalar' for p in params]
-      cached = generate_mt_launch(src,match.group(1),args,(1,1,1),(1,1,1))
-      lib = cached['lib']
-      cached['state'] = compress_mt_bundle(cached['state'])
-      key = hashlib.sha256(lib).hexdigest()
-      diskcache_put('mt_launch_v3',f'{key}_{(1,1,1)}_{(1,1,1)}',cached)
-    key = hashlib.sha256(lib).hexdigest()
-    MUSA_SOURCES[key] = src
-    diskcache_put('mt_sources', key, src)
-    return lib
+    return self.mt.compile_raw(src)
 
 class MUSARenderer(CUDARenderer):
   kernel_typedef = 'extern "C" __global__ void'
@@ -88,10 +46,19 @@ class MTAllocator(Allocator['MTDevice']):
     super().__init__(dev)
     self.next_va, self.next_pa = 0x8001000000, 0x80000000
     self.dev.views = {}
+    self.host_buffers:dict[int,Any] = {}
     self.free_blocks:list[tuple[int,int,int]] = []
 
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     size = round_up(size, 0x1000)
+    if options.host:
+      host = (ctypes.c_ubyte * size)()
+      va = ctypes.addressof(host)
+      view = MMIOInterface(va,size,fmt='B')
+      meta = MTBufferMeta(va,0,size)
+      self.host_buffers[va] = host
+      self.dev.views[va] = (view,meta)
+      return BufferStorage(va,meta,view)
     if self.free_blocks and self.free_blocks[-1][2] == size:
       va, pa, size = self.free_blocks.pop()
     else:
@@ -108,7 +75,10 @@ class MTAllocator(Allocator['MTDevice']):
     self.dev.synchronize()
     meta = storage.meta
     self.dev.views.pop(meta.va, None)
-    self.free_blocks.append((meta.va, meta.pa, meta.size))
+    self.dev.buffer_maps.pop(meta.va, None)
+    if meta.va in self.host_buffers:
+      self.host_buffers.pop(meta.va)
+    else: self.free_blocks.append((meta.va, meta.pa, meta.size))
 
   def _copyin(self, dest:int, src:memoryview):
     view, meta = self.dev._view(dest)
@@ -127,97 +97,282 @@ class MTAllocator(Allocator['MTDevice']):
     data = view[start:end]
     dest[:] = data[off-start:off-start+dest.nbytes]
 
-  def _map(self, buf:Buffer) -> BufferStorage: raise NotImplementedError('MT external mappings are not implemented')
+  def _map(self, buf:Buffer) -> BufferStorage:
+    if buf.device == self.dev.device: return buf.get_storage()
+    storage = self._alloc(buf.nbytes,buf.options)
+    self._copyin(storage.buf,buf.as_memoryview(allow_zero_copy=True))
+    return storage
+
+  def _unmap(self, storage:BufferStorage): self._free(storage,BufferSpec())
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
 
-def mtum_library() -> str:
-  path = os.environ.get('MT_UMD', str(pathlib.Path.home()/'.cache/tinygrad/libmtum.so'))
-  source = pathlib.Path(__file__).parent/'support/mt/mtum.c'
-  if not pathlib.Path(path).exists() or pathlib.Path(path).stat().st_mtime < source.stat().st_mtime:
-    pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
-    tmp = f'{path}.{os.getpid()}'
-    result = subprocess.run(['cc','-shared','-fPIC','-O2','-o',tmp,str(source),'-ldl'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if result.returncode: raise RuntimeError(f'libmtum build failed:\n{result.stdout}{result.stderr}')
-    os.replace(tmp,path)
-  return path
+def mt_poll(link:UOp, addr:UOp, target:UOp) -> UOp:
+  loop = UOp.range(UOp(Ops.NOOP).after(link,start:=get_time_ms(link)),next(UOp.unique_num),dtype=dtypes.void)
+  slot = usb_stack(dtypes.u64)
+  header = usb_ctrl(link.after(loop),0x40,0xF0,0x20|0x0F00,2,usb_stack(dtypes.uint64,addr,2).index(0),12,5000)
+  read = usb_bulk(link.after(header),0x81,slot.index(0),8)
+  response = slot.after(read,ccall(libc.usleep,100).sink()).index(0).load()
+  done = (response >> 32).cast(dtypes.u64)
+  poll = done.backedge(loop,(done < target) & (get_time_ms(done) - start < int(float(os.environ.get('MT_TIMEOUT','5'))*1000))).sink()
+  status = response & 0xffffffff
+  bad = ((done.after(poll) != target).cast(dtypes.u64) << 63) | (((status&0xffffffff) != 0).cast(dtypes.u64)*target << 32) | (status & 0xffffffff)
+  return usb_fail(link.after(poll),bad)
 
-class MTLaunchGenerator:
-  def __init__(self, dev:MTDevice):
-    self.dev = dev
 
-  def generate(self, obj:TinyELF, global_size:tuple[int,int,int], local_size:tuple[int,int,int]) -> MTLaunch:
-    args = ['out' if addrspace != AddrSpace.ALU else 'scalar' for _,addrspace,_,_ in obj.signature]
-    key = hashlib.sha256(obj.lib).hexdigest()
-    source = MUSA_SOURCES.get(key) or diskcache_get('mt_sources', key)
-    if source is None: raise RuntimeError('MUSA source is missing from the launch-generation cache')
-    cached = generate_mt_launch(source,obj.name,args,global_size,local_size)
-    return MTLaunch(self.dev.mt,cached['bundle'],cached['packet'],cached['state'])
+class MTComputeQueue(HWQueue):
+  dev:MTDevice
+  def __init__(self, submit):
+    super().__init__(submit)
+    self.cacheable = (info:=getattr(submit.arg,'hcq',None)) is not None and info.cacheable
+    self.submissions:list[tuple[MTLaunch,UOp,bytes,dict[int,bytes],int,dict[int,bytes]|None,UOp|None]] = []
+    self.signals:list[tuple[UOp,UOp]] = []
 
-class MTProgram(Program['MTDevice']):
-  def __init__(self, dev:MTDevice, obj:TinyELF, links:dict[str,MTProgram]):
-    self.dev, self.name, self.profile_key, self.obj = dev, obj.name, obj.profile_key, obj
-    self.image = MTKernelImage.from_elf(obj.lib)
-    self.launch:MTLaunch|None = None
+  def encode(self) -> UOp:
+    for u in self.lin.src:
+      if u.op is Ops.END: raise NotImplementedError('MT queue loops are not supported')
+      if u.op is not Ops.CALL: continue
+      body = u.src[0]
+      if body.op is Ops.PROGRAM: self.exec(u,body)
+      elif body.op is Ops.CUSTOM_FUNCTION:
+        if body.arg.name == 'store': self.signal(u.src[1],u.src[2])
+        elif body.arg.name == 'timestamp': self.timestamp(u.src[1])
+        elif body.arg.name not in ('memory_barrier','exec_barrier','wait','wait_eq'):
+          raise NotImplementedError(f'MT queue operation {body.arg.name}')
+      elif body.op is not Ops.STORE: raise NotImplementedError(f'MT queue operation {body.op}')
+    return self.submit(UOp.sink())
 
-  def __call__(self, *args:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
-               wait:bool=False, timeout:int|None=None):
-    self.launch = self.dev.get_launch(self.obj, global_size, local_size)
-    if os.environ.get('MT_GENERATE','1') == '0' and not os.environ.get('MT_SKIP_LOAD'):
-      self.launch.load_kernel(self.image, global_size, local_size)
-    self.dev.ensure_started(self.launch)
-    self.launch.set_args(tuple(args))
-    self.launch.set_grid(global_size, local_size)
-    result = self.launch.execute()
-    return result.run_time / 25_000_000 if wait else None
+  def memory_barrier(self): pass  # every MT submission is drained before the next
+  def exec_barrier(self): pass
+  def wait(self, signal:UOp, value:UOp): pass  # synchronous submissions make cross-queue waits implicit
+  def signal(self, signal:UOp, value:UOp): self.signals.append((signal,value))
+  def timestamp(self, signal:UOp): self.signals.append((signal,UOp.const(0,dtypes.u64)))
+
+  def snapshot_mmu(self, launch:MTLaunch) -> dict[int,bytes]:
+    pages:dict[int,bytes] = {}
+    for va in launch.mmu.pages:
+      if 0x8001000000 <= va < cast(MTAllocator,self.dev.allocator).next_va: continue
+      pci,pdi,pti = (va>>30)&0x3ff,(va>>21)&0x1ff,(va>>12)&0x1ff
+      if (pci,pdi) in launch.mmu.pt:
+        offs = {(pci*4)&~0xfff,(launch.mmu.pd[pci]-launch.mmu.root_pa+pdi*8)&~0xfff,
+                (launch.mmu.pt[pci,pdi]-launch.mmu.root_pa+pti*8)&~0xfff}
+        for off in offs: pages[off] = bytes(launch.mmu.root[off:off+0x1000])
+    return pages
+
+  def exec(self, call:UOp, prg:UOp):
+    if self.submissions and self.submissions[-1][5] is None:
+      prev = self.submissions[-1]
+      self.submissions[-1] = (*prev[:5],self.snapshot_mmu(prev[0]),prev[6])
+    obj = TinyELF.from_program(prg)
+    global_size = cast(tuple[int,int,int],tuple(x if isinstance(x,int) else 1 for x in prg.arg.global_size))
+    local_size = cast(tuple[int,int,int],tuple(x if isinstance(x,int) else 1 for x in prg.arg.local_size))
+    launch = self.dev.get_launch(obj,global_size,local_size)
+    self.dev.activate_launch(launch,obj,global_size,local_size)
+    if obj.profile_key is not None: self.dev.cached_launches[obj.profile_key] = (launch,obj,global_size,local_size)
+    grid_deps = None
+    if any(not isinstance(x,int) for x in (*prg.arg.global_size,*prg.arg.local_size)):
+      grid_rows = [(off,(prg.arg.global_size[i]-1).cast(dtypes.u32)) for i,off in enumerate([0x2c,0x30,0x34])
+                   if not isinstance(prg.arg.global_size[i],int)]
+      local_rows = [(0x3c,prg.arg.local_size[2]-1,dtypes.u8),(0x3d,(prg.arg.local_size[1]-1)<<2,dtypes.u8),
+                    (0x3e,(prg.arg.local_size[0]-1)<<4,dtypes.u16)]
+      grid_rows += [(off,val.cast(dt)) for off,val,dt in local_rows if not isinstance(val,int)]
+      grid_off = launch.backing_offsets[0x81e1400000]
+      grid = UOp.alloc((0x1000,),dtypes.u8,device='CPU')
+      grid_deps = patch(grid,grid_rows,launch.write_map.get(grid_off,bytes(0x1000)))
+    const_off = launch.backing_offsets[0x81e1200000]
+    args = UOp.alloc((0x1000,),dtypes.u8,device='CPU')
+    rows = [(0x38+i*8,arg.cast(dtypes.u64)) for i,arg in enumerate(get_call_kernel_args(call,prg,self.devs))]
+    state = (bytes(launch.packet),dict(launch.write_map),launch.generation,None)
+    self.submissions.append((launch,patch(args,rows,launch.write_map.get(const_off,bytes(0x1000))),*state,grid_deps))
+
+  def submit(self, cmdbuf:UOp) -> UOp:
+    if len(self.submissions) > 1 and self.submissions[-1][5] is None:
+      prev = self.submissions[-1]
+      self.submissions[-1] = (*prev[:5],self.snapshot_mmu(prev[0]),prev[6])
+    ops: list[Any] = []
+    link = usb_link(self.dev.device)
+    def add(op):
+      nonlocal link
+      ops.append(op)
+      link = link.after(op)
+    root_addr = self.dev.mt.pci_dev.bar_info(2)[0]+0x30000000
+    for i,(launch,deps,packet,write_map,generation,mmu_pages,grid_deps) in enumerate(self.submissions):
+      ccb = launch.ccb
+      assert ccb is not None
+      def write(addr:int|UOp, blob:bytes, rows=()):
+        data = UOp.alloc((len(blob),),dtypes.u8,device='CPU')
+        addr = addr if isinstance(addr,UOp) else UOp.const(addr,dtypes.u64)
+        data = patch(data,list(rows),blob)
+        if len(blob) > 0x200000: op = usb_stream(link,addr,data,UOp.const(len(blob),dtypes.int),True)
+        else:
+          header = usb_ctrl(link,0x40,0xF0,0x60|0x0F00,1,usb_stack(dtypes.uint64,addr,len(blob)//4).index(0),12,5000)
+          op = usb_bulk(link.after(header),0x02,data.index(0),len(blob))
+        add(op)
+      previous = self.submissions[i-1][3] if i else self.dev.uploaded_write_map
+      changed = sorted((off,data) for off,data in write_map.items() if off != launch.backing_offsets[0x81e1200000] and
+                       (previous.get(off) != data))
+      chunks:list[tuple[int,bytearray]] = []
+      for off,data in changed:
+        if chunks and off == chunks[-1][0]+len(chunks[-1][1]): chunks[-1][1].extend(data)
+        else: chunks.append((off,bytearray(data)))
+      for off,chunk in chunks: write(launch.backing.addr+off,bytes(chunk))
+      if len(self.submissions) > 1:
+        if i == 0: write(launch.sv.addr,packet)
+        else:
+          previous_packet = self.submissions[i-1][2]
+          for off in range(0,len(packet),0x1000):
+            packet_chunk = packet[off:off+0x1000]
+            if previous_packet[off:off+len(packet_chunk)] != packet_chunk: write(launch.sv.addr+off,packet_chunk)
+        previous_mmu = self.submissions[i-1][5] if i else self.submissions[-1][5]
+        assert mmu_pages is not None and previous_mmu is not None
+        for off,data in mmu_pages.items():
+          if previous_mmu.get(off) != data: write(root_addr+off,data)
+      idx = link.index(2).load()
+      seq = link.index(3).load()
+      token = (0x103+seq).cast(dtypes.u64)
+      ci = mtfw.MTFW_CCB_ITEM()
+      ci.submissionCmd,ci.ccbItemToken,ci.hostPrivateData,ci.processId = 104,0,0x4d544e4f50,0
+      sp = ci.ccbItemPara.submissionPara
+      sp.pageTableRootAddr,sp.pageTableGeneration = 0x30000000,generation
+      sp.submissionQueueId,sp.submissionAddr,sp.submissionSize,sp.qSempOutofOrder = 0,0x8000420000,len(packet),1
+      item_size = ci.SIZE
+      item = UOp.alloc((ci.SIZE,),dtypes.u8,device='CPU')
+      item = patch(item,[(16,token)],bytes(ci))
+      add(usb_stream(link.after(deps),UOp.const(launch.v.addr+ccb.item_off,dtypes.u64),item,UOp.const(item_size,dtypes.int),True))
+      args_off = launch.backing_offsets[0x81e1200000]
+      add(usb_stream(link,UOp.const(launch.backing.addr+args_off,dtypes.u64),deps,UOp.const(0x1000,dtypes.int),True))
+      if grid_deps is not None:
+        grid_off = launch.backing_offsets[0x81e1400000]
+        add(usb_stream(link,UOp.const(launch.backing.addr+grid_off,dtypes.u64),grid_deps,UOp.const(0x1000,dtypes.int),True))
+      next_wr = ((idx + 1) & 0xff).cast(dtypes.u32)
+      write(launch.v.addr+ccb.queue_off+idx*8,struct.pack('<Q',0x90000000+ccb.item_off))
+      add(usb_poke(link,launch.v.addr+ccb.queue_off+0x4000,next_wr))
+      add(usb_poke(link,self.dev.mt.mmio.addr+0xc00b00,UOp.const(3,dtypes.u32)))
+      if not self.cacheable:
+        add(mt_poll(link,launch.v.addr+ccb.queue_off+0x1004+idx*0x30,token))
+        add(usb_poke(link,launch.v.addr+ccb.queue_off+0x4028,next_wr))
+      self.dev.poll_in_hcq = not self.cacheable
+      add(link.index(2).store(next_wr.cast(dtypes.u64)))
+      add(link.index(3).store(seq+1))
+      self.dev.uploaded_write_map = write_map
+    for signal,value in self.signals: add(signal.index(0).store(value))  # type: ignore[assignment]
+    return UOp.sink(UOp.barrier(*self.deps,*ops))
+
+
+def mt_lower_call(call:UOp) -> UOp:
+  from tinygrad.runtime.support.hcq2 import lower_encoded_call
+  for u in call.body.toposort():
+    if (u.op is Ops.AFTER and u.src[0].op is Ops.CALL and u.src[0].src[0].op is Ops.SINK and
+        u.src[0].src[1].op is Ops.PARAM and u.src[0].src[1].arg.name == 'COMPUTE:0'):
+      queue = MTComputeQueue(u.replace(arg=call.arg)).encode().replace(arg=call.body.arg)
+      return lower_encoded_call(call.replace(src=(queue,*call.src[1:])))
+  raise RuntimeError('No MT compute submission found')
+
+Compiled.pm_encode += PatternMatcher([
+  (UPat.sink(arg=KernelInfo("mt_compute_submit")).call(UPat()).after(allow_any_len=True,name="s"),lambda s:MTComputeQueue(s).encode()),
+])
 
 class MTDevice(Compiled):
   renderers = [MUSARenderer]
+  timestamp_divider = 25
   def __init__(self, device:str=''):
     dev_id = int(device.split(':')[1]) if ':' in device else 0
     self.mt = MTDev.open_usb(dev_id)
-    bundle = os.environ.get('MT_LAUNCH_BUNDLE', '/tmp/mt-research/argfresh')
-    packet = os.environ.get('MT_LAUNCH_PACKET', '/tmp/mt-research/real-submission-direct.bin')
-    self.launch = None if os.environ.get('MT_GENERATE','1') != '0' else MTLaunch(self.mt, bundle, packet)
-    self.launches = [] if self.launch is None else [self.launch]
+    self.launches:list[MTLaunch] = []
+    self.launch_order:list[MTLaunch] = []
     self.launch_cache:dict[tuple[int,tuple[int,int,int],tuple[int,int,int]],MTLaunch] = {}
-    self.generator = MTLaunchGenerator(self)
-    self.buffer_maps:list[tuple[int,int,int]] = []
+    self.buffer_maps:dict[int,tuple[int,int]] = {}
+    self.spill_buffers:dict[int,tuple[int,Any]] = {}
     self.current_launch:MTLaunch|None = None
+    self.poll_in_hcq = True
+    self.cached_launches:dict[bytes,tuple[MTLaunch,TinyELF,tuple[int,int,int],tuple[int,int,int]]] = {}
+    self.uploaded_write_map:dict[int,bytes] = {}
     self.started = False
+    self.response_checked = 0
     self.views:dict[int,tuple[Any,MTBufferMeta]] = {}
-    super().__init__(device, MTAllocator(self), MTProgram, arch='mp_21')
+    super().__init__(device, MTAllocator(self), None, arch='mp_21')
+    usb_dev = getattr(self.mt.pci_dev,'usb')
+    words = [ctypes.addressof(x.contents) for x in (usb_dev.usb.handle,USB3.ctx())] + [0,0,0]
+    host = Buffer('CPU',HOST_SIZE,options=BufferSpec(nolru=True),initial_value=struct.pack('5Q',*words).ljust(HOST_SIZE,b'\0'))
+    Compiled.link_bufs[to_name(self.device,'usb_host')] = host
 
   @property
   def has_copy_queue(self) -> bool: return False
 
   def get_launch(self, obj:TinyELF, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1)) -> MTLaunch:
-    if os.environ.get('MT_GENERATE','1') == '0':
-      assert self.launch is not None
-      return self.launch
     key = (hash(obj.lib), global_size, local_size)
     if key not in self.launch_cache:
-      lib_key = hashlib.sha256(obj.lib).hexdigest()
-      cache_key = f'{lib_key}_{global_size}_{local_size}'
-      cached = diskcache_get('mt_launch_v3', cache_key)
-      if cached is None and (global_size,local_size) != ((1,1,1),(1,1,1)):
-        cached = diskcache_get('mt_launch_v3', f'{lib_key}_{(1,1,1)}_{(1,1,1)}')
-      if cached is not None and pathlib.Path(cached['packet']).exists():
-        state = cached.get('state')
-        if isinstance(state,bytes): state = decompress_mt_bundle(state)
-        launch = MTLaunch(self.mt, cached['bundle'], cached['packet'], state)
-      else:
-        launch = self.generator.generate(obj, global_size, local_size)
+      launch = MTGeneratedLaunch(self.mt)
+      launch.kernel_lib = ''
       self.launch_cache[key] = launch
       self.launches.append(launch)
-      for va,pa,size in self.buffer_maps: launch.map_buffer(va,pa,size)
-      assert launch.bundle_state is not None
-      diskcache_put('mt_launch_v3', cache_key,
-                    {'bundle':str(launch.bundle),'packet':str(launch.packet_path),'state':compress_mt_bundle(launch.bundle_state)})
+      self.launch_order.append(launch)
+      if len(self.launch_order) > 512:
+        old = self.launch_order.pop(0)
+        self.launches.remove(old)
+        for launch_key,cached_launch in list(self.launch_cache.items()):
+          if cached_launch is old: del self.launch_cache[launch_key]
+      for va,(pa,size) in self.buffer_maps.items(): launch.map_buffer(va,pa,size)
     return self.launch_cache[key]
 
+  def fw_extern(self, launch:MTLaunch, kind:str, off:int, size:int, dtype) -> UOp:
+    name = f'mt_{kind}_{id(launch):x}' if kind == 'args' else f'mt_{kind}'
+    if name not in Compiled.link_bufs:
+      if kind == 'doorbell': storage = BufferStorage(0,host=self.mt.smc.mmio.view(0xc00b00,4,fmt='I'))
+      elif kind == 'args': storage = BufferStorage(0x81e1200000,host=launch.backing.view(off,size,fmt='B'))
+      else: storage = BufferStorage(0xe1c0000000+off,host=launch.v.view(off,size,fmt='Q' if kind == 'timestamp' else 'B'))
+      Compiled.link_bufs[name] = Buffer(self.device,size,opaque=storage)
+    return UOp.extern((size//dtype.itemsize,),dtype,self.device,name)
+
   def map_buffer(self, va:int, pa:int, size:int):
-    self.buffer_maps.append((va,pa,size))
-    for launch in self.launches: launch.map_buffer(va,pa,size)
+    self.buffer_maps[va] = (pa,size)
+    if self.current_launch is not None: self.current_launch.map_buffer(va,pa,size)
+    if self.started and self.current_launch is not None: self.current_launch.upload_mmu()
+
+  def _fault(self) -> tuple[int, ...]:
+    if self.current_launch is None: return ()
+    launch = self.current_launch
+    return (launch._read(0xe150),launch._read(0xe158),launch._read(0x130,4),launch._read(0x4a0))
+
+  def synchronize(self, timeout:int|None=None):
+    super().synchronize(timeout)
+    host_buf = Compiled.link_bufs[to_name(self.device,'usb_host')]
+    assert isinstance(host_buf,Buffer)
+    host = host_buf.host.view(fmt='q')
+    if host[5]: raise RuntimeError(f'MT USB error: {host[5]}, fault={self._fault()}')
+    if getattr(self,'poll_in_hcq',True):
+      self.response_checked = host[3]  # every in-graph poll already validated the response value and token
+      return
+    seq = host[3]
+    if self.current_launch is None: return
+    ccb = self.current_launch.ccb
+    assert ccb is not None
+    for i in range(self.response_checked,seq):
+      off = ccb.queue_off+0x1004+(i&0xff)*0x30
+      deadline = time.monotonic() + (timeout if timeout is not None else float(os.environ.get('MT_TIMEOUT','5')))
+      while True:
+        response = struct.unpack('<Q',self.current_launch.v[off:off+8])[0]
+        value, token = response & 0xffffffff, response >> 32
+        if value: raise RuntimeError(f'MT submission {i} failed: value={value}, token={token:#x}, fault={self._fault()}')
+        if token == 0x103+i: break
+        if time.monotonic() >= deadline: raise TimeoutError(f'MT submission {i} response timed out: value={value}, token={token:#x}')
+        time.sleep(0.0001)
+      self.current_launch.v[ccb.queue_off+0x4028:ccb.queue_off+0x402c] = struct.pack('<I',(i+1)&0xff)
+    self.response_checked = seq
+
+  def activate_cached(self, profile_key:bytes|None) -> None:
+    if profile_key is not None and (cached:=self.cached_launches.get(profile_key)) is not None:
+      launch,obj,global_size,local_size = cached
+      if getattr(launch,'cache_activations',0) and (self.current_launch is not launch or MTLaunch._loaded is not launch):
+        self.activate_launch(launch,obj,global_size,local_size)
+        for off,data in launch.write_map.items(): launch.backing[off:off+len(data)] = data
+        launch.sv[:0x1000] = launch.packet[:0x1000]
+      launch.cache_activations = getattr(launch,'cache_activations',0) + 1
+
+  def hcq_cacheable(self, linear:UOp) -> bool:
+    for call in linear.toposort():
+      if call.op is Ops.CALL and call.src[0].op is Ops.PROGRAM and call.src[0].arg.target.arch == 'mp_21':
+        if MTKernelImage.from_elf(TinyELF.from_program(call.src[0]).lib).metadata.kernel['.has_barrier']: return False
+    return True
 
   def ensure_started(self, launch:MTLaunch):
     if self.current_launch is not launch:
@@ -225,7 +380,36 @@ class MTDevice(Compiled):
       self.current_launch = launch
       self.started = True
 
+  def activate_launch(self, launch:MTLaunch, obj:TinyELF, global_size:tuple[int,int,int], local_size:tuple[int,int,int]) -> None:
+    key = hashlib.sha256(obj.lib).hexdigest()
+    unchanged = MTLaunch._loaded is launch and launch.kernel_lib == key
+    self.ensure_started(launch)
+    image = MTKernelImage.from_elf(obj.lib)
+    if not unchanged:
+      if isinstance(launch,MTGeneratedLaunch): launch.set_generated(image)
+      elif launch.kernel_lib != key: launch.load_kernel(image)
+      launch.kernel_lib = key
+      if isinstance(launch,MTGeneratedLaunch): launch.generate_static_pds()
+      launch.generate_pds(image)
+    spill_bytes = max(image.metadata.kernel['.private_memory_size'],image.metadata.kernel['.local_mem_used_in_cluster'])
+    if spill_bytes:
+      threads = global_size[0]*global_size[1]*global_size[2]*local_size[0]*local_size[1]*local_size[2]
+      # Spill VA uses a per-core power-of-two stride (minimum 32 MiB), with Core Number set to the physical core count.
+      spill_arena = max(0x2000000,1 << (spill_bytes<<20).bit_length())*8 if spill_bytes else 0
+      needed = max(round_up(spill_bytes*threads,0x1000),spill_arena)
+      spill_size,spill = self.spill_buffers.get(0,(0,None))
+      if spill_size < needed:
+        spill = self.allocator.alloc(needed,BufferSpec())
+        self.spill_buffers[0] = (needed,spill)
+      launch.set_spill(spill.buf)
+      launch._write_backing(launch.backing_offsets[0x81e1200000]+8,struct.pack('<I',8))
+    if launch.mmu_dirty:
+      launch.upload_mmu()
+      launch.mmu_dirty = False
+    launch.set_grid(global_size,local_size)
+
   def _view(self, va:int):
+    if va in self.views: return self.views[va]
     for base, (view, meta) in self.views.items():
       if base <= va < base + meta.size: return view, meta
     raise RuntimeError(f'Unknown MT buffer address {va:#x}')

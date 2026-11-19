@@ -28,6 +28,20 @@ class TestMTMMU4(unittest.TestCase):
       off = m.pt[pci,pdi] - m.root_pa + i * 8
       self.assertEqual(int.from_bytes(m.root[off:off+8], 'little'), 0x40000000 + i * 0x1000 | MT_PTE_READ_ONLY)
 
+  def test_idempotent_mapping(self):
+    m = MTMMU4(0x30000000)
+    va, pa = 0xe1c0000000, 0x20000000
+    m.map(va, pa, MT_PTE_READ_WRITE)
+    dirty = m.dirty_pages.copy()
+    m.map(va, pa, MT_PTE_READ_WRITE)
+    self.assertEqual(m.dirty_pages, dirty)
+    m.map(va, pa, MT_PTE_READ_ONLY)
+    self.assertEqual(m.dirty_pages, dirty)
+    self.assertEqual(m.page_flags[va], MT_PTE_READ_ONLY)
+    pci, pdi, pti = (va>>30)&0x3ff, (va>>21)&0x1ff, (va>>12)&0x1ff
+    off = m.pt[pci,pdi] - m.root_pa + pti * 8
+    self.assertEqual(int.from_bytes(m.root[off:off+8], 'little'), pa | MT_PTE_READ_ONLY)
+
   def test_invalid_and_exhaustion(self):
     m = MTMMU4(0x30000000, size=0x3000)
     with self.assertRaises(ValueError): m.map(1, 0)
