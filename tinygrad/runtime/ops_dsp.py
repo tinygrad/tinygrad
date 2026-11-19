@@ -3,7 +3,7 @@ import ctypes, functools, os, mmap, tempfile, pathlib, array, threading, context
 from tinygrad.device import BufferStorage, MMIOInterface, BufferSpec, Compiled, Allocator, Program
 from tinygrad.renderer import Compiler, TinyELF
 from tinygrad.dtype import dtypes, AddrSpace, DType
-from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType
 from tinygrad.helpers import getenv, round_up, round_down, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing, Target, unwrap, dedup
 from tinygrad.helpers import all_same, prod
 from tinygrad.renderer.cstyle import ClangRenderer, base_rewrite, wmma_args, uops_to_dtypes, _wmma_name
@@ -496,7 +496,7 @@ class DSPRenderer(ClangRenderer):
   def __init__(self, target:Target): self.target, self.compiler = target, DSPCompiler()
 
   def render(self, uops:list[UOp]) -> str:
-    # the loop that's split between the cores: the only outermost loop, if all the global stores are in it
+    # the loop that's split between the cores: the only outermost loop, if its iterations may run in parallel and all the global stores are in it
     depth, top = 0, []
     for u in uops:
       if u.op is Ops.RANGE:
@@ -504,7 +504,8 @@ class DSPRenderer(ClangRenderer):
         depth += 1
       if u.op is Ops.END: depth -= 1
     stores = [u for u in uops if u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.GLOBAL]
-    self.parallel = top[0] if len(top) == 1 and stores and all(top[0] in st.ranges for st in stores) else None
+    self.parallel = top[0] if len(top) == 1 and top[0].arg[0] in (AxisType.GLOBAL, AxisType.WEAK) and stores and \
+      all(top[0] in st.ranges for st in stores) else None
     # a kernel with little memory or no parallel loop runs its cores one after the other on the calling thread
     self.inline = self.parallel is None or sum(u.max_numel()*u.dtype.itemsize for u in uops if u.op is Ops.PARAM and
                                                u.addrspace is AddrSpace.GLOBAL) < DSP_INLINE_BYTES
