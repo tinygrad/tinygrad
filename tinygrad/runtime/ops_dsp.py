@@ -721,9 +721,10 @@ class DSPAllocator(Allocator['DSPDevice']):
 
   @suppress_finalizing
   def _free(self, storage:BufferStorage, options:BufferSpec):
-    arena, va, share_info = storage.meta
-    if arena is not None: return arena.parts.free(va)
-    libc.munmap(va, round_up(unwrap(storage.host).nbytes + 2*DSP_OVERREAD, 0x1000))
+    # (the meta is the arena and the part's offset in it, or the mapping and its ION buffer)
+    arena, at, share_info = storage.meta
+    if arena is not None: return arena.parts.free(at)
+    libc.munmap(at, round_up(unwrap(storage.host).nbytes + 2*DSP_OVERREAD, 0x1000))
     if share_info is not None:
       os.close(share_info.fd)
       qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=share_info.handle)
