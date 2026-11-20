@@ -611,23 +611,12 @@ def create_schedule(sched_sink:UOp) -> UOp:
   return UOp(Ops.LINEAR, src=tuple(linearized))
 
 
-def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
+def resolve_linear_call(linear_call:UOp):
   # a scheduled function is shared by all its calls, so the storage it allocates gets a fresh identity in each call
   linear = linear_call.body
   linear = linear.substitute({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in linear.toposort() if b.op is Ops.ALLOC}, walk=True)
   # the positional params outside the kernel bodies are the call args, free Variables have slot -1
-  linear = graph_rewrite(linear, pm_resolve_params, ctx=linear_call.src[1:], walk=True, name="params to args")
-  # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
-  # scalar args (e.g. precompiled allreduce) inherit it
-  binds = {**(outer_binds or {}),
-           **{i:x for i,x in enumerate(linear_call.src[1:]) if x.op in {Ops.PARAM, Ops.EXTERN} and x.addrspace is AddrSpace.ALU}}
-  def apply_binds(si:UOp) -> UOp:
-    if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
-    if si.op is Ops.CALL and si.body.op is Ops.PROGRAM: return si  # compiled parameters already have ABI slots
-    # positional scalar PARAMs are the call args. an EXTERN's slot indexes the externs, it's mapped back later
-    subs = {v:binds[v.arg.slot] for s in si.src for v in s.variables() if v.op is Ops.PARAM and v.arg.name is None and v.arg.slot in binds}
-    return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
-  return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
+  return graph_rewrite(linear, pm_resolve_params, ctx=linear_call.src[1:], walk=True, name="params to args")
 
 pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here

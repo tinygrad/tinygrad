@@ -3,7 +3,6 @@ import itertools
 from dataclasses import replace
 from typing import cast
 from tinygrad.uop.ops import Ops, GroupOp, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element, axis_colors
-from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, round_up, prod, get_single_element, ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
@@ -238,10 +237,6 @@ class Scheduler:
   @property
   def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.WARP, AxisType.LOCAL, reduce=True))
 
-def args_from_ast(ast:UOp, dname:str) -> tuple[list[Buffer], dict[str, int]]:
-  glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM and x.arg.slot >= 0], key=lambda x: x.arg.slot)
-  return [Buffer(dname, x.max_numel() * x.dtype.itemsize) for x in glbls], {k.expr:int(k.vmax+k.vmin)//2 for k in ast.variables()}
-
 def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   if ast.arg is not None and ast.arg.optimized: return ast
   k = Scheduler(ast, ren)
@@ -250,10 +245,9 @@ def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
     for opt in ki.opts_to_apply: k.apply_opt(opt)
   elif beam >= 1:
     from tinygrad.codegen.opt.search import beam_search
-    rawbufs, var_vals = args_from_ast(ast, ren.target.device)
     # beam search may open devices
     with Context(ALLOW_DEVICE_USAGE=1):
-      k = beam_search(k, rawbufs, var_vals, beam, bool(getenv("BEAM_ESTIMATE", 1)))
+      k = beam_search(k, beam, bool(getenv("BEAM_ESTIMATE", 1)))
   elif not NOOPT and ki.applied_opts == ():
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet

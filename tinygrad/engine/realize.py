@@ -16,10 +16,7 @@ from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
 def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call.src[1:] if not s.is_variable)
 def get_call_kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...]) -> list[UOp]:
-  # one per kernel param in order: a buffer is its address, a value bound in the call is a CONST, any other value is its slotless var read
-  # from var_vals at every run
-  bound = {s.expr: UOp.const(s.arg.val) for s in call.src[1:] if s.is_bound_var}
-  return [bound.get(p.expr, p.replace(arg=replace(p.arg, slot=-1))).ccast(p.dtype) if p.addrspace is AddrSpace.ALU else
+  return [call.scalar_arg(p).ccast(p.dtype) if p.addrspace is AddrSpace.ALU else
           call.src[1+p.arg.slot].getaddr(devs) for p in prg.kernel_params]
 
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
@@ -53,7 +50,7 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
 def estimate_uop(call:UOp) -> Estimates:
   call = call.without_after
   if call.arg.hcq is not None: return call.arg.hcq.estimates
-  if (ast:=call.body).op is Ops.PROGRAM: return ast.src[0].arg.estimates or Estimates()
+  if (ast:=call.body).op is Ops.PROGRAM and (est:=ast.src[0].arg.estimates): return Estimates(*map(call.bind_symbols, (est.ops, est.lds, est.mem)))
   if ast.op is Ops.STORE or (ast.op is Ops.NATIVE and ast.arg.code == "encdec"):
     return Estimates(lds=(nbytes:=prod(call.src[1].shape) * call.src[1].dtype.itemsize), mem=nbytes)
   return Estimates()
@@ -144,12 +141,12 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, device:str|None=None) -> lis
   if device is None:
     device = to_tuple(get_call_arg_uops(call)[0].device)[0]
     if device.split(":")[0] in HOST_DEVS: Device[device].synchronize(ctx.timeout)
-  var_vals = {**ctx.var_vals, **{s.expr: s.arg.val for s in call.src[1:] if s.is_bound_var}}
   prg_bufs = {i:_buffer(call.src[1+i], ctx.input_uops).ensure_allocated() for i in ast.arg.globals}
   rt = get_runtime(device, ast, cache=ctx.cache)
-  global_sz, local_sz = ast.arg.launch_dims(var_vals)
-  try: args = [(var_vals[p.expr] if p.is_variable else _resolve(call.src[1+p.arg.slot], ctx.input_uops).val) if p.addrspace is AddrSpace.ALU else
-               prg_bufs[p.arg.slot].get_buf(device) for p in ast.kernel_params]
+  def scalar(a:UOp): return ctx.var_vals[a.expr] if a.is_variable else _resolve(a, ctx.input_uops).val
+  try:
+    args = [scalar(call.scalar_arg(p)) if p.addrspace is AddrSpace.ALU else prg_bufs[p.arg.slot].get_buf(device) for p in ast.kernel_params]
+    global_sz, local_sz = (tuple(sym_infer(x, ctx.var_vals) for x in dims) for dims in ast.arg.launch_dims(call))
   except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
   return [rt(*args, global_size=global_sz, local_size=local_sz, wait=ctx.wait, timeout=ctx.timeout)]
 
@@ -188,9 +185,9 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return ets + [_prof_tm(d, prof) if ctx.wait else None for d, _, _, prof, *_ in info.kernels if prof]
 
 def _validate(call:UOp, sink:UOp) -> UOp:
-  shadows = tuple(p if p.is_bound_var else
+  shadows = tuple(p if p.is_variable else
                   UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in call.src[1:])
-  copies = tuple(s.store_call(p) for s, p in zip(shadows, call.src[1:]) if not p.is_bound_var)
+  copies = tuple(s.store_call(p) for s, p in zip(shadows, call.src[1:]) if not p.is_variable)
   return UOp(Ops.LINEAR, src=copies + (call, UOp.native("validate", sink).call(*shadows, *call.src[1:])))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 

@@ -160,7 +160,7 @@ class NVComputeQueue(NVQueue):
 
   def exec(self, call:UOp, prg:UOp):
     data, lib = nv_build_program(self.dev, prg, self.devs)
-    global_size, local_size = prg.arg.global_size, prg.arg.local_size
+    global_size, local_size = prg.arg.launch_dims(call)
     if prod(local_size) > 1024 or data.max_threads < prod(local_size):
       raise RuntimeError(f"Too many resources requested for launch, {prod(local_size)=}, {data.max_threads=}")
     if any(g > mx for g,mx in zip(global_size, [2147483647, 65535, 65535]) if isinstance(g, int)) or \

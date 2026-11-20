@@ -986,7 +986,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def expr(self) -> str:
     assert self.op in {Ops.PARAM, Ops.BUFFER, Ops.EXTERN}
     # EXTERNs have no name, they are identified by their unique slot
-    return f"e{self.arg.slot}" if self.op is Ops.EXTERN else unwrap(self.arg.name)
+    return f"e{self.arg.slot}" if self.op is Ops.EXTERN else (self.arg.name or f"p{self.arg.slot}")
   def bind(self, val:int|UOp):
     # EXTERNs have no runtime state, their values are bound at the call site
     assert self.op is Ops.PARAM and self.is_variable and not self.is_bound_var, f"op is {self.op}, need an unbound Variable"
@@ -1200,8 +1200,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret.view_as(shape)
   def param_like(self, slot:int, name:str|None=None):
     # Scalar arguments bind by slot; names and values stay at the call site, not in schedule cache keys.
-    if self.op is Ops.PARAM and self.addrspace is AddrSpace.ALU:
-      return self.replace(arg=replace(self.arg, slot=slot, name=name, val=None))
+    if self.op in {Ops.PARAM, Ops.EXTERN} and self.addrspace is AddrSpace.ALU:
+      return self.replace(op=Ops.PARAM, arg=replace(self.arg, slot=slot, name=name, val=None))
     # multi-device values become a per-shard sized param wrapped in UNSHARD: the sharding lives in the graph, not the arg
     if self.axis is not None and isinstance(self.device, tuple):
       return UOp.param(slot, self.dtype, prod(to_max_shape(self.shard_shape)), self.device, name=name).view_as(self.shard_shape, self.axis)
@@ -1284,6 +1284,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     params += [p for p in self.arg.params if p.arg.slot not in {u.arg.slot for u in params}]
     return tuple(sorted(params, key=lambda p: p.arg.slot))
 
+  def scalar_arg(self, p:UOp) -> UOp:
+    # Positional parameters read the call slot. Free Variables (including _device_num) are supplied by name.
+    if p.arg.name is None or not p.is_variable: a = self.src[1+p.arg.slot]
+    else: a = next((s for s in self.src[1:] if s.is_bound_var and s.arg.name == p.arg.name), p.replace(arg=replace(p.arg, slot=-1)))
+    return UOp.const(a.arg.val, p.dtype) if a.is_bound_var else a
+
+  def bind_symbols(self, x):
+    return x.substitute({p:self.scalar_arg(p).ccast(p.dtype) for p in x.variables()}, walk=True).ssimplify() if isinstance(x, UOp) else x
+
   @property
   def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL else self.src
 
@@ -1313,18 +1322,15 @@ class KernelInfo:
 
 @dataclass(frozen=True)
 class ProgramInfo:
-  global_size: tuple[int|float, ...] = (1, 1, 1)
-  local_size: tuple[int, ...] = (1, 1, 1)
+  global_size: tuple[sint|float, ...] = (1, 1, 1)
+  local_size: tuple[sint, ...] = (1, 1, 1)
   params: tuple[UOp, ...] = ()
   globals: tuple[int, ...] = ()
   outs: tuple[int, ...] = ()
   ins: tuple[int, ...] = ()
   target: Target = Target()
 
-  def launch_dims(self, var_vals:dict[str, int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])  # type: ignore[arg-type]
-    local_size = tuple([sym_infer(sz, var_vals) for sz in self.local_size])
-    return global_size, local_size
+  def launch_dims(self, call:UOp): return tuple(map(call.bind_symbols, self.global_size)), tuple(map(call.bind_symbols, self.local_size))
 
   @staticmethod
   def from_sink(sink:UOp, target:Target=Target()) -> ProgramInfo:
@@ -1332,16 +1338,15 @@ class ProgramInfo:
     _globals: list[int] = []
     outs: list[int] = []
     ins: list[int] = []
-    global_size: list[int] = [1, 1, 1]
-    local_size: list[int] = [1, 1, 1]
+    global_size: list[sint] = [1, 1, 1]
+    local_size: list[sint] = [1, 1, 1]
     for u in sink.toposort():
       if u.op is Ops.PARAM: _params.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
-      if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = u.src[0].substitute(
-        {v:v.replace(arg=replace(v.arg, slot=-1)) for v in u.src[0].toposort() if v.op is Ops.PARAM and v.is_variable}).ssimplify()
+      if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(sint, u.src[0].ssimplify())
     if not outs and not ins: outs = ins = _globals # if neither is inferred, default to all buffers
     return ProgramInfo(tuple(global_size), tuple(local_size),
                        tuple(sorted(_params, key=lambda p: p.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),

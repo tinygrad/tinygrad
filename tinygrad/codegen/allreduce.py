@@ -71,4 +71,8 @@ def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|Non
   to = red.param_like(0)
   src = buf.param_like(1)
   red = src.allreduce(*red.arg)
-  return output.after(to.after(to.store(handle_allreduce(src, red))).sink().call(output.base, buf.contiguous(), name="allreduce", precompile=True))
+  # Symbolic dimensions in the views belong to the caller. Pass them after the two storage arguments.
+  body = to.after(to.store(handle_allreduce(src, red))).sink()
+  dims = [v for v in body.variables() if v.arg.slot >= 0]
+  body = body.substitute({v:v.param_like(i+2) for i,v in enumerate(dims)}, walk=True)
+  return output.after(body.call(output.base, buf.contiguous(), *dims, name="allreduce", precompile=True))

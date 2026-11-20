@@ -267,6 +267,7 @@ def add_buf(ctx:LocalAddBufferContext, buf:UOp):
   raise BottomUpGate
 
 def debuf(slot:int, buf:UOp):
+  if buf.addrspace is AddrSpace.ALU: return buf.param_like(slot)
   param = UOp.param(slot, buf.dtype, buf.max_numel(), addrspace=buf.addrspace, device=buf.device)
   return param.reshape(buf.max_shape).view_as(buf.shape)
 
@@ -286,10 +287,9 @@ def check_buf_states(x:UOp):
 
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), check_buf_states),
-  (UPat((Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT), name="buf"), add_buf),
-  # Only storage parameters get kernel-local slots; scalar parameters retain their enclosing call's slots.
-  (UPat((Ops.PARAM, Ops.EXTERN), name="buf"), lambda ctx, buf:
-   None if buf.addrspace is AddrSpace.ALU else add_buf(ctx, buf)),
+  (UPat((Ops.BUFFER, Ops.ALLOC, Ops.EXTERN, Ops.MSTACK, Ops.MSELECT), name="buf"), add_buf),
+  # Pass positional scalars as arguments too, except for free Variables (slot -1).
+  (UPat(Ops.PARAM, name="buf"), lambda ctx, buf: add_buf(ctx, buf) if buf.addrspace is not AddrSpace.ALU or buf.arg.slot >= 0 else None),
 
   # ALU params are scalar symbolic values, not buffers.
   (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.EXTERN), name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
@@ -309,11 +309,13 @@ def split_store(x:UOp) -> UOp|None:
   # local kernel rewrite
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+pm_flatten_range, ctx=lctx, name="kernel split", bottom_up=True)
-  ret = ret.substitute({b:debuf(i, b) for i,b in enumerate(lctx.map)}, walk=True)
+  # Keep buffer slots contiguous; scalar arguments follow storage in the launch ABI.
+  args = sorted(lctx.map, key=lambda b: b.addrspace is AddrSpace.ALU)
+  ret = ret.substitute({b:debuf(i, b) for i,b in enumerate(args)}, walk=True)
   ret = graph_rewrite(ret, pm_renumber_range, ctx={a:i for i,a in enumerate(lctx.ranges)}, walk=True)
 
   # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
-  return ret.sink(arg=KernelInfo()).call(*lctx.map.values())
+  return ret.sink(arg=KernelInfo()).call(*(lctx.map[b] for b in args))
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),

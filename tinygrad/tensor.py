@@ -46,11 +46,14 @@ def bind_alloc(b:UOp) -> UOp:
   return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
 
 # EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
-def map_back_extern(ctx:tuple[UOp, ...], e:UOp) -> UOp:
-  if e.arg.slot >= len(ctx) or as_extern(x:=ctx[e.arg.slot], e.arg.slot) is not e:
-    got = f"{x.dtype} {x.shape} on {x.device}" if e.arg.slot < len(ctx) else "nothing"
+def map_back_extern(ctx:tuple[tuple[UOp, ...], dict[str, int]], e:UOp) -> UOp:
+  externs, var_vals = ctx
+  if e.arg.slot >= len(externs) or as_extern(x:=externs[e.arg.slot], e.arg.slot) is not e:
+    got = f"{x.dtype} {x.shape} on {x.device}" if e.arg.slot < len(externs) else "nothing"
     raise RuntimeError(f"extern {e.arg.slot} must match its EXTERN, {e.dtype} {e.shape} on {e.device}, got {got}")
-  return x.unbound() if x.is_variable else x
+  if not x.is_bound_var: return x
+  if var_vals.setdefault(x.expr, x.arg.val) != x.arg.val: raise RuntimeError(f"bind mismatch on {x.expr}, {var_vals[x.expr]} != {x.arg.val}")
+  return x.unbound()
 
 pm_map_back = PatternMatcher([
   (UPat(Ops.EXTERN, name="e"), map_back_extern),
@@ -60,14 +63,8 @@ pm_map_back = PatternMatcher([
 
 def map_back(linear:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, dict[str, int]]:
   # the EXTERNs become the storage and the bound Variables of this invocation, ALLOCs get fresh storage
-  linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, enter_calls=True, name="map back")
-  # the values of the bound Variables the linear uses
-  used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
   var_vals: dict[str, int] = {}
-  for b in externs:
-    if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
-      raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
-  return linear, var_vals
+  return graph_rewrite(linear, pm_map_back, ctx=(externs, var_vals), walk=True, enter_calls=True, name="map back"), var_vals
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
