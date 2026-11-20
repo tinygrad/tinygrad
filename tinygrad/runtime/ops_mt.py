@@ -179,8 +179,10 @@ class MTDev:
 # **** mmu ****
 
 MT_PAGE_SIZE = mtmmu.ROGUE_MMUCTRL_PC_DATA_PD_BASE_ALIGNSIZE
-MT_PTE_READ_ONLY = 0x3c00000000000001
-MT_PTE_READ_WRITE = 0x3c0000000000000d
+MT_GEN1_PTE_GUARD = 0x3c00000000000000
+MT_PTE_READ_ONLY = mtmmu.ROGUE_MMUCTRL_PT_DATA_VALID_EN|MT_GEN1_PTE_GUARD
+MT_PTE_READ_WRITE = MT_PTE_READ_ONLY|mtmmu.ROGUE_MMUCTRL_PT_DATA_CC_EN|mtmmu.ROGUE_MMUCTRL_PT_DATA_SLC_BYPASS_CTRL_EN
+MT_PTE_PA_MASK = 0xfffffffff000
 
 class MTMMU4:
   """Rogue MMU v4 page tables used by the MTT S80 (BVNC 35.4.1632.23)."""
@@ -219,7 +221,7 @@ class MTMMU4:
       self.root[off:off+8] = (self.pt[pci,pdi] | 1).to_bytes(8, 'little')
       self.dirty_pages.add(off & ~0xfff)
     off = self.pt[pci,pdi] - self.root_pa + pti * 8
-    self.root[off:off+8] = ((pa & 0xfffffffff000) | flags).to_bytes(8, 'little')
+    self.root[off:off+8] = ((pa & MT_PTE_PA_MASK) | flags).to_bytes(8, 'little')
     self.dirty_pages.add(off & ~0xfff)
 
   def map_range(self, va:int, pa:int, size:int, flags:int=MT_PTE_READ_ONLY) -> None:
@@ -230,6 +232,16 @@ class MTMMU4:
     self.mapped_ranges.add(key)
 
 # **** elf ****
+
+class MP:
+  FIXINT_MAX, FIXNEG_MIN = 0x7f,0xe0
+  FIXMAP_BASE,FIXARR_BASE,FIXSTR_BASE = 0x80,0x90,0xa0
+  NIL,FALSE,TRUE = 0xc0,0xc2,0xc3
+  BIN8,BIN16,BIN32 = 0xc4,0xc5,0xc6
+  STR8,STR16,STR32 = 0xd9,0xda,0xdb
+  UINT8,UINT16,UINT32,UINT64 = 0xcc,0xcd,0xce,0xcf
+  INT8,INT16,INT32,INT64 = 0xd0,0xd1,0xd2,0xd3
+  ARR16,ARR32,MAP16,MAP32 = 0xdc,0xdd,0xde,0xdf
 
 class _MessagePack:
   def __init__(self, data:bytes): self.data, self.off = data, 0
@@ -242,31 +254,19 @@ class _MessagePack:
   def sint(self, n:int) -> int: return int.from_bytes(self.take(n), 'big', signed=True)
   def unpack(self):
     tag = self.uint(1)
-    if tag <= 0x7f: return tag
-    if tag >= 0xe0: return tag - 0x100
-    if 0x80 <= tag <= 0x8f: return {self.unpack():self.unpack() for _ in range(tag & 0xf)}
-    if 0x90 <= tag <= 0x9f: return [self.unpack() for _ in range(tag & 0xf)]
-    if 0xa0 <= tag <= 0xbf: return self.take(tag & 0x1f).decode()
-    if tag == 0xc0: return None
-    if tag in (0xc2,0xc3): return tag == 0xc3
-    if tag == 0xc4: return self.take(self.uint(1))
-    if tag == 0xc5: return self.take(self.uint(2))
-    if tag == 0xc6: return self.take(self.uint(4))
-    if tag == 0xd9: return self.take(self.uint(1)).decode()
-    if tag == 0xda: return self.take(self.uint(2)).decode()
-    if tag == 0xdb: return self.take(self.uint(4)).decode()
-    if tag == 0xcc: return self.uint(1)
-    if tag == 0xcd: return self.uint(2)
-    if tag == 0xce: return self.uint(4)
-    if tag == 0xcf: return self.uint(8)
-    if tag == 0xd0: return self.sint(1)
-    if tag == 0xd1: return self.sint(2)
-    if tag == 0xd2: return self.sint(4)
-    if tag == 0xd3: return self.sint(8)
-    if tag == 0xdc: return [self.unpack() for _ in range(self.uint(2))]
-    if tag == 0xdd: return [self.unpack() for _ in range(self.uint(4))]
-    if tag == 0xde: return {self.unpack():self.unpack() for _ in range(self.uint(2))}
-    if tag == 0xdf: return {self.unpack():self.unpack() for _ in range(self.uint(4))}
+    if tag <= MP.FIXINT_MAX: return tag
+    if tag >= MP.FIXNEG_MIN: return tag - 0x100
+    if MP.FIXMAP_BASE <= tag < MP.FIXARR_BASE: return {self.unpack():self.unpack() for _ in range(tag & 0xf)}
+    if MP.FIXARR_BASE <= tag < MP.FIXSTR_BASE: return [self.unpack() for _ in range(tag & 0xf)]
+    if MP.FIXSTR_BASE <= tag < MP.NIL: return self.take(tag & 0x1f).decode()
+    if tag == MP.NIL: return None
+    if tag in (MP.FALSE,MP.TRUE): return tag == MP.TRUE
+    if tag in (MP.BIN8,MP.BIN16,MP.BIN32): return self.take(self.uint(1 << (tag-MP.BIN8)))
+    if tag in (MP.STR8,MP.STR16,MP.STR32): return self.take(self.uint(1 << (tag-MP.STR8))).decode()
+    if tag in (MP.UINT8,MP.UINT16,MP.UINT32,MP.UINT64): return self.uint(1 << (tag-MP.UINT8))
+    if tag in (MP.INT8,MP.INT16,MP.INT32,MP.INT64): return self.sint(1 << (tag-MP.INT8))
+    if tag in (MP.ARR16,MP.ARR32): return [self.unpack() for _ in range(self.uint(1 << (tag-MP.ARR16+1)))]
+    if tag in (MP.MAP16,MP.MAP32): return {self.unpack():self.unpack() for _ in range(self.uint(1 << (tag-MP.MAP16+1)))}
     raise ValueError(f"Unsupported MTGPU MessagePack tag {tag:#x}")
 
 @dataclasses.dataclass(frozen=True)
@@ -451,6 +451,14 @@ RESUME_VA = mtheap.MTGPU_VGPU_HEAP_PDS_BASE
 PDS_MAIN_VA = 0xda00400000
 TASK_VA = 0x100804000
 CDM_EXECUTION_ADDRESS = 0x81e0e00000
+MT_ARGS_USER_OFFSET,MT_ARGS_CORE_COUNT_OFFSET = 0x38,8
+MT_GRID_GLOBAL_OFFSETS,MT_GRID_LOCAL_OFFSET = (0x2c,0x30,0x34),0x3c
+MT_PDS_DATA_OFFSET = 0x78
+MT_TIMESTAMP_OFFSET,MT_RUNTIME_OFFSET,MT_TIMESTAMP_BUFFER_OFFSET = 0x40a000,0x409008,0x40b000
+MT_CCB_DOORBELL_OFFSET = 0xc00b00
+MT_USB_REQ_TYPE,MT_USB_REQUEST,MT_USB_ADDR_MODE = 0x40,0xF0,0x0F00
+MT_USB_MODE_WRITE,MT_USB_MODE_READ,MT_USB_EP_OUT,MT_USB_EP_IN,MT_USB_TIMEOUT_MS = 0x60,0x20,0x02,0x81,5000
+MT_PDS_PREFIX_CONTROL = 0x400d030001000078
 
 MT_TIMESTAMP_ADDR = 0x8000438200
 MT_FW_CSW_BUFFER = 0x6800000000
@@ -514,22 +522,27 @@ def build_submission(launch_id:int=1, execution_address:int=CDM_EXECUTION_ADDRES
 FW_BASE, ROOT_BASE, INIT_SIZE, FW_DEVVA = 0x20000000, 0x30000000, 0x2000000, mtheap.MTGPU_VGPU_HEAP_FW_BASE
 FWIF_OFF, META_BASE = 0xc0000, 0x90000000
 SUB_PA, SUB_VA = FW_BASE + INIT_SIZE, FW_DEVVA + INIT_SIZE
+MT_FW_BASE_ADJUST,MT_FW_VGPU_SHARED_OFFSET = 0xfffed2e0,0x97730
+MT_FW_CFG_OFFSET,MT_FW_PERF_OFFSET = 0x26e10,0x70a50
+MT_FW_DUMP_SIZE,MT_FW_REGCFG_SIZE,MT_FW_REGBUF_SIZE,MT_FW_GPU_UTIL_SIZE = 0x88218,0xee240,0x30,0x4c0
+MT_META_SCRATCH_OFF,MT_META_SCRATCH_SIZE = 0x400000,0x10000
+MT_BOOT_CFG_OFFSET = 0x405000
 FIRMWARE_PATHS = ('/lib/firmware/mthreads/mtfw-gen1.bin', '/opt/musa/lib/firmware/mthreads/mtfw-gen1.bin')
 DEFAULT_FIRMWARE = next((path for path in FIRMWARE_PATHS if pathlib.Path(path).is_file()), FIRMWARE_PATHS[0])
 
 class MTFirmwareLayout:
   def __init__(self, core_count:int=8):
     self.reg_dump_buffer_size = (core_count * 40 + 24 + 8) * 64
-    self.vgpu_shared = (0xfffed2e0 + 0x97730 + core_count * 40) & 0xffffffff
-    self.trace = (0xfffed2e0 + 0x26e10 + 0x40ee0 + FWIF_OFF) & 0xffffffff
-    self.perf = FWIF_OFF + ((0xfffed2e0 + 0x26e10 + 0x70a50) & 0xffffffff)
-    self.fault = self.perf + 0xe6018
-    self.dump = self.fault + 0x88218
-    self.regcfg = self.fault + 0xee240
-    self.regbuf = self.regcfg + 0x30
+    self.vgpu_shared = (MT_FW_BASE_ADJUST + MT_FW_VGPU_SHARED_OFFSET + core_count * 40) & 0xffffffff
+    self.trace = (MT_FW_BASE_ADJUST + MT_FW_CFG_OFFSET + mtfw.struct_MTFW_FWIF_TAG.SIZE + FWIF_OFF) & 0xffffffff
+    self.perf = FWIF_OFF + ((MT_FW_BASE_ADJUST + MT_FW_CFG_OFFSET + MT_FW_PERF_OFFSET) & 0xffffffff)
+    self.fault = self.perf + mtfw.MTFW_FWIF_PERF_EVENT_BUF_CTL.SIZE
+    self.dump = self.fault + MT_FW_DUMP_SIZE
+    self.regcfg = self.fault + MT_FW_REGCFG_SIZE
+    self.regbuf = self.regcfg + MT_FW_REGBUF_SIZE
     self.item = self.regbuf + self.reg_dump_buffer_size
     self.gpu = self.item + self.vgpu_shared
-    self.watchdog = self.gpu + 0x4c0
+    self.watchdog = self.gpu + MT_FW_GPU_UTIL_SIZE
     self.ccb = FWIF_OFF + mtfw.struct_MTFW_FWIF_TAG.SIZE
 
 def build_firmware(lay:MTFirmwareLayout) -> bytes:
@@ -589,7 +602,8 @@ class MTFirmware:
     with open(self.path, 'rb') as f: raw = f.read()
     self.v[:len(raw)] = raw
     for start,end in [(FWIF_OFF,lay.trace),(lay.trace,lay.trace+0x1000),(lay.perf,lay.perf+0x1000),
-                      (lay.fault,lay.watchdog+0x1000),(0x400000,0x410000)]: self.v[start:end] = bytes(end-start)
+                      (lay.fault,lay.watchdog+0x1000),(MT_META_SCRATCH_OFF,MT_META_SCRATCH_OFF+MT_META_SCRATCH_SIZE)]:
+      self.v[start:end] = bytes(end-start)
     fw = build_firmware(lay)
     self.v[FWIF_OFF:FWIF_OFF+len(fw)] = fw
     self.v[lay.trace:lay.trace+128] = struct.pack('<32I', *([0xffffffff] * 32))
@@ -753,9 +767,9 @@ class MTLaunch(MTFirmware):
     packet = bytearray(build_submission())
     struct.pack_into('<Q', packet, 0x38, 1)
     struct.pack_into('<I', packet, 0x40, 1)
-    struct.pack_into('<Q', packet, 0x08, FW_DEVVA + 0x40b000)
-    struct.pack_into('<Q', packet, 0xc0 + 0x88, FW_DEVVA + 0x409000)
-    struct.pack_into('<Q', packet, 0xc0 + 0x90, FW_DEVVA + 0x40a000)
+    struct.pack_into('<Q', packet, 0x08, FW_DEVVA + MT_TIMESTAMP_BUFFER_OFFSET)
+    struct.pack_into('<Q', packet, 0xc0 + 0x88, FW_DEVVA + MT_RUNTIME_OFFSET - 8)
+    struct.pack_into('<Q', packet, 0xc0 + 0x90, FW_DEVVA + MT_TIMESTAMP_OFFSET)
     previous = MTLaunch._loaded
     for off in range(0,len(packet),0x1000):
       chunk = bytes(packet[off:off+0x1000])
@@ -765,7 +779,7 @@ class MTLaunch(MTFirmware):
       if not unchanged: self.sv[off:off+len(chunk)] = chunk
       if self.mmu.pages.get(SUBMISSION_VA+off) != SUB_PA+off: self.mmu.map(SUBMISSION_VA+off,SUB_PA+off,MT_PTE_READ_WRITE)
     self.packet = packet
-    if previous is None: self.v[0x405000:0x405010] = struct.pack('<QII', ROOT_BASE, 0xffffffff, 0)
+    if previous is None: self.v[MT_BOOT_CFG_OFFSET:MT_BOOT_CFG_OFFSET+16] = struct.pack('<QII', ROOT_BASE, 0xffffffff, 0)
 
   def _write_backing(self, off:int, data:bytes|bytearray) -> None:
     for pos in range(off,off+len(data),0x1000):
@@ -807,12 +821,12 @@ class MTLaunch(MTFirmware):
     k = image.metadata.kernel
     temp_bytes = (k['.temp_reg_count']*4+7)&~7
     shared_blocks = (k['.shared_reg_count']+15)&~15
-    prefix_words = (self.pds_execution_address,8,0,temp_bytes,shared_blocks,0x100000000,0,0x400d030001000078)
+    prefix_words = (self.pds_execution_address,8,0,temp_bytes,shared_blocks,0x100000000,0,MT_PDS_PREFIX_CONTROL)
     prefix = tuple(struct.unpack('<16I',struct.pack('<8Q',*prefix_words)))
     program = compute_pds(self.pds_execution_address,(local[0],local[1],local[2]),(workgroup[0],workgroup[1],workgroup[2]),barrier,
                           coefficient_update=False,prefix=prefix)
     self._write_backing(self.pds_code_off+7,program.code)
-    for off in self.pds_data_offsets: self._write_backing(off+0x78,program.data)
+    for off in self.pds_data_offsets: self._write_backing(off+MT_PDS_DATA_OFFSET,program.data)
 
   def map_buffer(self, va:int, pa:int, size:int, flags:int=MT_PTE_READ_WRITE) -> None:
     self.mmu.map_range(va, pa, size, flags)
@@ -823,12 +837,12 @@ class MTLaunch(MTFirmware):
 
   def set_grid(self, global_size:tuple[int,int,int], local_size:tuple[int,int,int]) -> None:
     off = self.backing_offsets[GRID_VA]
-    for i, field in enumerate([0x2c,0x30,0x34]): self._write_backing(off+field,struct.pack('<I',cdm_workgroup(global_size[i]-1)))
-    block = bytearray(self.write_map.get(off,bytes(0x1000))[0x3c:0x40])
+    for i, field in enumerate(MT_GRID_GLOBAL_OFFSETS): self._write_backing(off+field,struct.pack('<I',cdm_workgroup(global_size[i]-1)))
+    block = bytearray(self.write_map.get(off,bytes(MT_PAGE_SIZE))[MT_GRID_LOCAL_OFFSET:MT_GRID_LOCAL_OFFSET+4])
     block[0] = local_size[2] - 1
     block[1] = (local_size[1] - 1) << 2
     block[2:4] = struct.pack('<H', (local_size[0] - 1) << 4)
-    self._write_backing(off+0x3c,block)
+    self._write_backing(off+MT_GRID_LOCAL_OFFSET,block)
     k = self.generated_image.metadata.kernel
     has_block = any(a['.kind'] in (5,6,7) for a in k['.args'])
     local_mem = k['.shared_memory_size']
@@ -913,6 +927,11 @@ MT_GEN1_KERNEL6_BASE = 0x2000000
 MT_GEN1_KERNEL7 = 0x406010
 MT_GEN1_KERNEL8 = 0x101085
 MT_GEN1_PDS_RESUME_OFFSET = 0x3580
+MT_GEN1_RESOURCE_REGISTER_BASE = 0x90000000
+MT_GEN1_RESOURCE_CONTROLS_BARRIER = (0x30000347,0xb0002003,0x80000043)
+MT_GEN1_RESOURCE_CONTROLS_WORKGROUP = (0xb0000347,0x80000043)
+MT_GEN1_RESOURCE_CONTROLS_IDS = (0x80000043,)
+MT_GEN1_RESOURCE_CONTROLS_SIMPLE = (0x80,)
 
 # Undocumented generation-1 fields after the public submission/kick/context structs.
 MT_GEN1_TASK_QWORDS = {
@@ -1047,17 +1066,17 @@ class MTGeneratedLaunch(MTLaunch):
     self.resource_text_field = 0x28 if has_barrier else 0x20 if has_ids else 0x18
     self.resource_temp_flags = 1 if has_barrier else 0
     self._write_backing(resource_off,struct.pack('<Q',ARGS_VA))
-    self._write_backing(resource_off+8,struct.pack('<I',0x90000000|k['.shared_reg_count']))
-    self._write_backing(self.backing_offsets[ARGS_VA]+8,struct.pack('<I',0xff))
+    self._write_backing(resource_off+8,struct.pack('<I',MT_GEN1_RESOURCE_REGISTER_BASE|k['.shared_reg_count']))
+    self._write_backing(self.backing_offsets[ARGS_VA]+MT_ARGS_CORE_COUNT_OFFSET,struct.pack('<I',0xff))
     controls:tuple[int,...]
     if has_barrier:
-      controls = (0x30000347,0xb0002003,0x80000043)
+      controls = MT_GEN1_RESOURCE_CONTROLS_BARRIER
     elif any(a['.kind'] in (5,6,7) for a in k['.args']):
-      controls = (0xb0000347,0x80000043)
+      controls = MT_GEN1_RESOURCE_CONTROLS_WORKGROUP
     elif has_ids:
-      controls = (0x80000043,)
+      controls = MT_GEN1_RESOURCE_CONTROLS_IDS
     else:
-      controls = (0x80,)
+      controls = MT_GEN1_RESOURCE_CONTROLS_SIMPLE
     for i,value in enumerate(controls): self._write_backing(resource_off+0x18+i*4,struct.pack('<I',value))
     self._write_backing(resource_off+self.resource_text_field,struct.pack('<I',self.text_offset))
     temp = ((k['.temp_reg_count']*4+7)&~7) | self.resource_temp_flags
@@ -1198,8 +1217,9 @@ class MTAllocator(Allocator['MTDevice']):
 def mt_poll(link:UOp, addr:UOp, target:UOp) -> UOp:
   loop = UOp.range(UOp(Ops.NOOP).after(link,start:=get_time_ms(link)),next(UOp.unique_num),dtype=dtypes.void)
   slot = usb_stack(dtypes.u64)
-  header = usb_ctrl(link.after(loop),0x40,0xF0,0x20|0x0F00,2,usb_stack(dtypes.uint64,addr,2).index(0),12,5000)
-  read = usb_bulk(link.after(header),0x81,slot.index(0),8)
+  header = usb_ctrl(link.after(loop),MT_USB_REQ_TYPE,MT_USB_REQUEST,MT_USB_ADDR_MODE|MT_USB_MODE_READ,2,
+                    usb_stack(dtypes.uint64,addr,2).index(0),12,MT_USB_TIMEOUT_MS)
+  read = usb_bulk(link.after(header),MT_USB_EP_IN,slot.index(0),8)
   response = slot.after(read,ccall(libc.usleep,100).sink()).index(0).load()
   done = (response >> 32).cast(dtypes.u64)
   poll = done.backedge(loop,(done < target) & (get_time_ms(done) - start < int(float(os.environ.get('MT_TIMEOUT','5'))*1000))).sink()
@@ -1276,17 +1296,17 @@ class MTComputeQueue(HWQueue):
     if obj.profile_key is not None: self.dev.cached_launches[obj.profile_key] = (launch,obj,global_size,local_size)
     grid_deps = None
     if any(not isinstance(x,int) for x in (*prg.arg.global_size,*prg.arg.local_size)):
-      grid_rows = [(off,(prg.arg.global_size[i]-1).cast(dtypes.u32)) for i,off in enumerate([0x2c,0x30,0x34])
+      grid_rows = [(off,(prg.arg.global_size[i]-1).cast(dtypes.u32)) for i,off in enumerate(MT_GRID_GLOBAL_OFFSETS)
                    if not isinstance(prg.arg.global_size[i],int)]
-      local_rows = [(0x3c,prg.arg.local_size[2]-1,dtypes.u8),(0x3d,(prg.arg.local_size[1]-1)<<2,dtypes.u8),
-                    (0x3e,(prg.arg.local_size[0]-1)<<4,dtypes.u16)]
+      local_rows = [(MT_GRID_LOCAL_OFFSET,prg.arg.local_size[2]-1,dtypes.u8),(MT_GRID_LOCAL_OFFSET+1,(prg.arg.local_size[1]-1)<<2,dtypes.u8),
+                    (MT_GRID_LOCAL_OFFSET+2,(prg.arg.local_size[0]-1)<<4,dtypes.u16)]
       grid_rows += [(off,val.cast(dt)) for off,val,dt in local_rows if not isinstance(val,int)]
       grid_off = launch.backing_offsets[GRID_VA]
       grid = UOp.alloc((0x1000,),dtypes.u8,device='CPU')
       grid_deps = patch(grid,grid_rows,launch.write_map.get(grid_off,bytes(0x1000)))
     const_off = launch.backing_offsets[ARGS_VA]
     args = UOp.alloc((0x1000,),dtypes.u8,device='CPU')
-    rows = [(0x38+i*8,arg.cast(dtypes.u64)) for i,arg in enumerate(get_call_kernel_args(call,prg,self.devs))]
+    rows = [(MT_ARGS_USER_OFFSET+i*8,arg.cast(dtypes.u64)) for i,arg in enumerate(get_call_kernel_args(call,prg,self.devs))]
     self.submissions.append(MTSubmission(launch=launch,args=patch(args,rows,launch.write_map.get(const_off,bytes(0x1000))),
                                          packet=bytes(launch.packet),write_map=dict(launch.write_map),generation=launch.generation,
                                          mmu_pages=None,grid_deps=grid_deps))
@@ -1313,8 +1333,9 @@ class MTComputeQueue(HWQueue):
         data = patch(data,list(rows),blob)
         if len(blob) > 0x200000: op = usb_stream(link,addr,data,UOp.const(len(blob),dtypes.int),True)
         else:
-          header = usb_ctrl(link,0x40,0xF0,0x60|0x0F00,1,usb_stack(dtypes.uint64,addr,len(blob)//4).index(0),12,5000)
-          op = usb_bulk(link.after(header),0x02,data.index(0),len(blob))
+          header = usb_ctrl(link,MT_USB_REQ_TYPE,MT_USB_REQUEST,MT_USB_ADDR_MODE|MT_USB_MODE_WRITE,1,
+                            usb_stack(dtypes.uint64,addr,len(blob)//4).index(0),12,MT_USB_TIMEOUT_MS)
+          op = usb_bulk(link.after(header),MT_USB_EP_OUT,data.index(0),len(blob))
         add(op)
       previous = self.submissions[i-1].write_map if i else self.dev.uploaded_write_map
       changed = sorted((off,data) for off,data in write_map.items() if off != launch.backing_offsets[ARGS_VA] and
@@ -1350,7 +1371,7 @@ class MTComputeQueue(HWQueue):
       next_wr = ((idx + 1) & 0xff).cast(dtypes.u32)
       write(launch.v.addr+ccb.queue_off+idx*8,struct.pack('<Q',META_BASE+ccb.item_off))
       add(usb_poke(link,launch.v.addr+ccb.queue_off+mt_off(mtfw.MTFW_CCB_QUEUE,'reqCcbCtrl'),next_wr))
-      add(usb_poke(link,self.dev.mt.mmio.addr+0xc00b00,UOp.const(mtfw.MTFW_CCB_TYPE_CDM,dtypes.u32)))
+      add(usb_poke(link,self.dev.mt.mmio.addr+MT_CCB_DOORBELL_OFFSET,UOp.const(mtfw.MTFW_CCB_TYPE_CDM,dtypes.u32)))
       response_off = mt_off(mtfw.MTFW_CCB_QUEUE,'respCcbQ') + mt_off(mtfw.MTFW_CCB_RESP,'respValue') + idx*mtfw.MTFW_CCB_RESP.SIZE
       add(mt_poll(link,launch.v.addr+ccb.queue_off+response_off,token))
       add(usb_poke(link,launch.v.addr+ccb.queue_off+mt_off(mtfw.MTFW_CCB_QUEUE,'respCcbCtrl')+mt_off(mtfw.MTFW_RING_CTRL,'rdIdx'),next_wr))
@@ -1420,8 +1441,8 @@ class MTDevice(Compiled):
 
   def synchronize(self, timeout:int|None=None):
     if self.prof_ents and self.current_launch is not None:
-      timestamp = struct.unpack('<Q',self.current_launch.v[0x40a000:0x40a008])[0]
-      run_time = struct.unpack('<I',self.current_launch.v[0x409008:0x40900c])[0]
+      timestamp = struct.unpack('<Q',self.current_launch.v[MT_TIMESTAMP_OFFSET:MT_TIMESTAMP_OFFSET+8])[0]
+      run_time = struct.unpack('<I',self.current_launch.v[MT_RUNTIME_OFFSET:MT_RUNTIME_OFFSET+4])[0]
       for (buf,_), ent in self.prof_ents.items():
         sigs = buf.host.view(fmt='Q')
         sigs[ent.st_id], sigs[ent.en_id] = timestamp, timestamp + run_time
@@ -1473,7 +1494,7 @@ class MTDevice(Compiled):
       spill = self.spill_buffer[1]
       launch.map_buffer(spill.buf,spill.meta.pa,needed)
       launch.set_spill(spill.buf)
-      launch._write_backing(launch.backing_offsets[ARGS_VA]+8,struct.pack('<I',cores))
+      launch._write_backing(launch.backing_offsets[ARGS_VA]+MT_ARGS_CORE_COUNT_OFFSET,struct.pack('<I',cores))
     if launch.mmu_dirty:
       launch.upload_mmu()
       launch.mmu_dirty = False
