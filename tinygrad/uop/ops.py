@@ -1127,18 +1127,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _sym_fxn(self):
     from tinygrad.uop.render import _render_with_splits, renderer_infer
     sself = self.simplify()
-    varnames = tuple(dedup(x.expr for x in sself.toposort() if x.op in {Ops.PARAM, Ops.EXTERN} and x.arg.addrspace == AddrSpace.ALU))
-    # TODO: sanitize varnames, or don't use naked eval while staying fast
     ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
     lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
     ns: dict[str, Any] = {"max": max, "truncdiv": cdiv, "truncmod": cmod, "div": floordiv, "mod": floormod, "bitcast": bitcast,
                           "dtypes": dtypes, "exec_alu": exec_alu, "Ops": Ops}
-    exec(f"def _f({','.join(varnames)}):\n"+'\n'.join(lines), ns)  # pylint: disable=exec-used
-    return ns["_f"], varnames
+    exec("def _f(values):\n"+'\n'.join(lines), ns)  # pylint: disable=exec-used
+    return ns["_f"]
 
-  def sym_infer(self, var_vals:dict[str, int]):
-    fxn, varnames = self._sym_fxn
-    return fxn(**{k:v for k,v in var_vals.items() if k in varnames})
+  def sym_infer(self, var_vals:dict[str, int]): return self._sym_fxn(var_vals)
 
   def render(self, simplify=True, pm:PatternMatcher|None=None) -> str:
     ctx: dict[UOp, str] = {}
@@ -1183,6 +1179,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       (self.op is Ops.CONST or (self.op in GroupOp.ALU|{Ops.CAST} and all(s.is_scalar_arg for s in self.src))))
   def placeholder_like(self, slot:int):
     if self.is_scalar_arg:
+      if bad:=next((u.op for u in self.toposort() if u.op in GroupOp.ALU and u.op not in python_alu), None):
+        raise ValueError(f"{bad} is not supported in a by-value kernel argument")
       # A predicate uses an integer kernel argument (OpenCL has no bool kernel ABI).
       dtype = dtypes.int32 if self.dtype is dtypes.bool else self.dtype
       arg = ParamArg(slot, dtype, (self.vmin, self.vmax), self.arg.name if self.is_variable else None, AddrSpace.ALU)

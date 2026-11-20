@@ -204,7 +204,11 @@ class Tensor(RandMixin):
 
     This API is alpha and may change.
     """
-    return [Tensor(u) for u in UOp.custom_kernel(*(UOp.const(t) if isinstance(t, int) else t._uop for t in (self,)+lst), fxn=fxn, grad_fxn=grad_fxn)]
+    def arg(t:Tensor|sint) -> UOp:
+      if not isinstance(t, Tensor): return UOp.const(t) if isinstance(t, int) else t
+      if t.device is not None or t.uop.is_variable: return t.uop  # Tensor(Variable) is the original scalar API
+      return t.uop.clone(next((x.device for x in (self,)+lst if isinstance(x, Tensor) and x.device is not None), None))
+    return [Tensor(u) for u in UOp.custom_kernel(*map(arg, (self,)+lst), fxn=fxn, grad_fxn=grad_fxn)]
 
   @rewrite_group(lambda *tensors,ret,**_: f"Export {len(tensors)} -> {len(ret[1])} externs")
   def export(self, *lst:Tensor) -> tuple[UOp, tuple[UOp, ...]]:
@@ -280,7 +284,7 @@ class Tensor(RandMixin):
   @staticmethod
   def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
     """Execute a LINEAR from `Tensor.compile` without rerunning the tinygrad scheduler or compiler.
-    Replacement buffers must preserve aliasing: slots exported as disjoint must not overlap."""
+    NV batches must run in the process that compiled them. Slots exported as disjoint must not be rebound to overlapping storage."""
     if capturing and CAPTURING: raise RuntimeError("cannot capture an already compiled Tensor.run")
     exec_linear(link_linear(linear, externs), ExecContext(update_stats=do_update_stats))
 

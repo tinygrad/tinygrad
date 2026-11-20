@@ -669,12 +669,18 @@ class TestCustomKernelArgs(unittest.TestCase):
     B, n = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Variable("n", 0, 100, dtypes.int)
     for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [1+k, 2+k, 3+k, 4+k])
 
+  def test_scalar_tensor_is_buffer(self):
+    def kernel(out, a, b, c): return out[0].store(a[0]+b[0]+c).sink(arg=KernelInfo(name="scalar_buffers"))
+    self.assertEqual(Tensor.empty(1, dtype=dtypes.int).custom_kernel(Tensor(5, dtype=dtypes.int), Tensor(3)+Tensor(4), 2, fxn=kernel)[0].item(), 14)
+
   def test_scalar_expression_arg(self):
     def kernel(out, v, small): return out[0].store(v+small.cast(out.dtype)).sink(arg=KernelInfo(name="store_scalar"))
     def build(n, m):
       x, y = n.cast(dtypes.uint8), m.cast(dtypes.uint8)
       return Tensor.empty(1, dtype=dtypes.int).custom_kernel(x.cast(dtypes.int)+(x*y).cast(dtypes.int), x<10, fxn=kernel)[0]
-    n, m = Variable("n", 0, 1000, dtypes.int), Variable("m", 1, 4, dtypes.int)
+    n, m = Variable("Ops", 0, 1000, dtypes.int), Variable("exec_alu", 1, 4, dtypes.int)
+    with self.assertRaisesRegex(ValueError, "THREEFRY.*by-value"):
+      build(n.bind(1).cast(dtypes.uint64).threefry(m.bind(1).cast(dtypes.uint64)), m.bind(1))
     program, jit = Tensor.compile(build(n.bind(1), m.bind(1)).export()[0]), TinyJit(lambda n,m: build(n,m).realize())
     for v,k in ((1, 1), (258, 3), (255, 2), (516, 4)):
       out = build(nv:=n.bind(v), mv:=m.bind(k))

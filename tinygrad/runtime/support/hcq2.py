@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Any, Sequence, Callable
-import itertools, ctypes, struct, time
+import itertools, ctypes, os, struct, time
 from dataclasses import replace, dataclass, field
 from collections import defaultdict, Counter
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, flatten, DEBUG, VIZ, ALL2ALL, PROFILE
@@ -14,6 +14,8 @@ from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_o
 
 # **** calls
 
+_process_nonce = os.urandom(16).hex()  # PID alone can be reused; nonce alone is inherited across fork.
+
 @dataclass(frozen=True)
 class HCQInfo:
   device:tuple[str, ...]
@@ -24,6 +26,9 @@ class HCQInfo:
   slots:tuple[tuple[str, int], ...] = () # per device, the position of its batch slots in the args
 
   skip_wait:bool = False # TODO: remove. an rdma copy between nodes is two batches, so waiting on the first alone deadlocks
+  owner:tuple[int, str]|None = None
+
+  def link_owner(self): return (os.getpid(), _process_nonce) if any(d.split(":")[0] == "NV" for d in self.device) else None
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -499,7 +504,9 @@ Compiled.pm_encode = PatternMatcher([])
 Compiled.pm_lower = PatternMatcher([])
 
 def lower_call(call:UOp) -> UOp|None:
-  if call.arg.hcq is None: return None
+  if (info:=call.arg.hcq) is None: return None
+  # NV encodes a process-local FIFO token. Only its compiler process can submit this batch.
+  if (owner:=info.link_owner()) is not None: call = call.replace(arg=replace(call.arg, hcq=replace(info, owner=owner)))
 
   # encode bodies
   body = graph_rewrite(call.body, Compiled.pm_encode, ctx=(lt_patches:=list[UOp]()), bpm=pm_hoist_links, name="encode")
@@ -588,6 +595,7 @@ def hcq_link(linear:UOp, input_uops:Sequence[UOp]=()) -> UOp:
   # A deserialized batch may be the first use of its device in this process. Open it before applying its link rules.
   for call in linear.src:
     if (hcq:=getattr(call.without_after.arg, "hcq", None)) is not None:
+      if hcq.owner != hcq.link_owner(): raise RuntimeError("NV batches must be compiled and run in the same process")
       for device in hcq.device: Device[device]
   linked = graph_rewrite(linear, Compiled.pm_link, walk=True, name="link programs") if Compiled.pm_link.patterns else linear
   ctx = LinkCtx(input_uops)

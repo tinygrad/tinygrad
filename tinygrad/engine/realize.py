@@ -49,8 +49,8 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
 
 def estimate_uop(call:UOp) -> Estimates:
   call = call.without_after
-  ast = call.body
-  if (est:=call.arg.hcq.estimates if call.arg.hcq is not None else ast.src[0].arg.estimates if ast.op is Ops.PROGRAM else None):
+  if call.arg.hcq is not None: return call.arg.hcq.estimates
+  if (ast:=call.body).op is Ops.PROGRAM and (est:=ast.src[0].arg.estimates):
     return Estimates(*map(call.bind_symbols, (est.ops, est.lds, est.mem)))
   if ast.op is Ops.STORE or (ast.op is Ops.NATIVE and ast.arg.code == "encdec"):
     return Estimates(lds=(nbytes:=prod(call.src[1].shape) * call.src[1].dtype.itemsize), mem=nbytes)
@@ -58,12 +58,18 @@ def estimate_uop(call:UOp) -> Estimates:
 
 first_run_cache:set[bytes] = set()
 def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|None]):
+  def infer(x):
+    if not isinstance(x, UOp): return x
+    vals = ctx.var_vals
+    if call.arg.hcq is not None:
+      vals = vals | {p.expr:sym_infer(call.scalar_arg(p), vals) for p in x.variables() if p.op is Ops.PARAM and p.arg.slot >= 0}
+    return x.sym_infer(vals)
   if ctx.update_stats:
     is_hcq = call.arg.hcq is not None
     estimates, n = estimate_uop(call), 1 if is_hcq else len(get_call_kernels(call))
     GlobalCounters.kernel_count += len(call.arg.hcq.kernels) if is_hcq else n
-    GlobalCounters.global_ops += n*sym_infer(estimates.ops, ctx.var_vals)
-    GlobalCounters.global_mem += n*sym_infer(estimates.mem, ctx.var_vals)
+    GlobalCounters.global_ops += n*infer(estimates.ops)
+    GlobalCounters.global_mem += n*infer(estimates.mem)
     GlobalCounters.time_sum_s += sum(et for et in ets if et is not None)
   if DEBUG < 2 and not PROFILE: return
 
@@ -74,7 +80,7 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
     et = ets[i] if i < len(ets) else None
     bufs = [_buffer(b, ctx.input_uops) for b in (args if stats is None else [kcall.src[1+s] for s in stats[3]])]
     display_name, estimates, key = (get_call_name(kcall, bufs, ctx.var_vals), estimate_uop(kcall), kcall.body.key) if stats is None else stats[:3]
-    op_est, mem_est, lds_est = (sym_infer(kcall.bind_symbols(x) if stats else x, ctx.var_vals) for x in (estimates.ops, estimates.mem, estimates.lds))
+    op_est, mem_est, lds_est = map(infer, (estimates.ops, estimates.mem, estimates.lds))
     if PROFILE: # backdate the event to the start of the call, the viz matches a device range with the exec event before it
       outputs, inputs = get_call_outs_ins(kcall) if stats is None else stats[4]
       cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"program": key, "estimates": (op_est, mem_est, lds_est),
