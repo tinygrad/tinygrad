@@ -472,5 +472,5 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   if splits > 1: result = result.reshape(splits, tokens, out_features).sum(0)
   if groups > 1: result = result.reshape(groups, rows, out_features).transpose(0, 1)
   result = result.reshape(*shape[:-1], out_features)
-  return result if layer.bias is None else result + layer.bias
+  return result if layer.bias is None else result + (layer.bias.reshape(groups, out_features) if groups > 1 else layer.bias)
 

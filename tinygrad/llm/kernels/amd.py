@@ -104,7 +104,9 @@ class Linear(nn.Linear):
       # symbolic token count: pad to the max chunk size so the kernels see static shapes, garbage rows are sliced off
       out = q8_linear(self, x.pad_to(x.max_shape))
       return out.shrink(tuple((0, s) for s in (*x.shape[:-1], self.out_features // self.groups)))
-    if self.groups > 1: return (x.unsqueeze(-2) @ self.weight.reshape(self.groups, -1, self.in_features).transpose(-1, -2)).squeeze(-2)
+    if self.groups > 1:
+      out = (x.unsqueeze(-2) @ self.weight.reshape(self.groups, -1, self.in_features).transpose(-1, -2)).squeeze(-2)
+      return out if self.bias is None else out + self.bias.reshape(self.groups, -1)
     return super().__call__(x)
 
 class ExpertWeights:
