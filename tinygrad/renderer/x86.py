@@ -15,7 +15,7 @@ class Register:
   _cons: tuple["Register", ...] = field(default_factory=tuple)
   @property
   def cons(self): return self._cons or (self,)
-  def __repr__(self): return self.name
+  def __str__(self): return self.name
 
 class IselContext:
   def __init__(self): self.reg_n = itertools.count()
