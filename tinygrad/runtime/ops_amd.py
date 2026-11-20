@@ -77,12 +77,12 @@ def amd_sdma_submit(cmdbuf:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp) -> UO
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
 def dispatch_packet(data:AMDProgramData, dims:tuple, kernel_object:UOp=UOp.const(0, dtypes.uint64),
-                    kernarg_address:UOp=UOp.const(0, dtypes.uint64)) -> list: # as words: the grid may be symbolic
+                    kernarg_address:UOp=UOp.const(0, dtypes.uint64)) -> list[UOp]: # as words: the grid may be symbolic
   global_size, local_size = dims
   pkt = bytes(hsa.hsa_kernel_dispatch_packet_t(header=AQL_HDR | (hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_HEADER_TYPE),
     setup=3 << hsa.HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS, private_segment_size=data.private_segment_size,
     group_segment_size=data.group_segment_size, **{f"workgroup_size_{d}": l for d, l in zip("xyz", local_size)}))
-  grid = [(g * l).cast(dtypes.uint32) if isinstance(g, UOp) else g * l for g, l in zip(global_size, local_size)]
+  grid = [UOp.const(g*l, dtypes.uint32) for g,l in zip(global_size, local_size)]
   return [UOp(Ops.BINARY, arg=pkt[:12]), *grid, UOp(Ops.BINARY, arg=pkt[24:32]), kernel_object, kernarg_address, UOp(Ops.BINARY, arg=pkt[48:])]
 
 class AMDComputeQueue(HWQueue):
@@ -454,8 +454,7 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     self.private_segment_size = max(self.private_segment_size, data.private_segment_size)
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.close_run(len(self.blob))
-    pkt = dispatch_packet(data, prg.arg.launch_dims(call), lib.getaddr(self.devs) + data.desc_offset, self.kernargs(call, prg, data))
-    self.pkts += [UOp.const(w, dtypes.uint32) if isinstance(w, int) else w for w in pkt]
+    self.pkts += dispatch_packet(data, prg.arg.launch_dims(call), lib.getaddr(self.devs) + data.desc_offset, self.kernargs(call, prg, data))
     self.run_start = len(self.blob)
     if self.dev.prof_enabled: self.prof_stop(slot)
 

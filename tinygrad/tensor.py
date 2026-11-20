@@ -46,7 +46,9 @@ pm_export: PatternMatcher = PatternMatcher([
   (UPat(Ops.CALL, name="c"), export_call),
 ])
 
-def bind_alloc(b:UOp) -> UOp: return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
+def bind_alloc(b:UOp) -> UOp:
+  if b.device is None: raise RuntimeError("global storage needs a device, give the ALLOC one")
+  return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
 
 # EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
 def map_back_extern(ctx:tuple[UOp, ...], e:UOp) -> UOp:

@@ -153,6 +153,8 @@ class TestCallSchedule(unittest.TestCase):
       Tensor(((p + 1).bufferize() * 2).call_with_output(x.uop, precompile=True)).realize()
     with self.assertRaisesRegex(RuntimeError, "global storage needs a device"):
       Tensor((tmp.after(tmp.store(p + 1)) * 2).call_with_output(x.uop)).realize()
+    with self.assertRaisesRegex(RuntimeError, "global storage needs a device"):
+      Tensor.run(UOp(Ops.LINEAR, src=(tmp.store_call(x.uop.buf_uop),)), ())
 
   def test_deviceless_call_keeps_grad_fxn(self):
     # a call without a device is inlined where it's used, it still has its custom gradient
