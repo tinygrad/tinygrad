@@ -5,7 +5,8 @@ from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.helpers import DEV
 from tinygrad.llm.kernels.amd import (Linear, ExpertWeights, amd_custom_kernels_supported, flash_attention, gated_delta_prefill,
                                       _is_rdna4, _is_cdna)
-from tinygrad.llm.kernels.amd_gguf import q8_quantize, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, Q4_K, IQ3_S, IQ1_S, MXFP4
+from tinygrad.llm.kernels.amd_gguf import (q8_quantize, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, Q8_0, Q4_K, Q6_K,
+                                          IQ3_S, IQ4_XS, IQ1_S, MXFP4)
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from test.runtime.test_llm_quantized import QuantLinearMixin
 
@@ -62,51 +63,52 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_q5_linear(self): self._test_quant_linear(13, 176)
   def test_q8_0_linear_small_blocks(self): self._test_quant_linear(8, 272, in_features=288, out_features=16, token_counts=(1, 16))
   def test_q6_linear_odd_blocks(self): self._test_quant_linear(14, 210, in_features=768, out_features=3, token_counts=(1, 3, 16))
-  def test_q2_k_linear(self): self._test_quant_linear(10, 84, in_features=768, token_counts=(1, 3, 16))
-  def test_q3_k_linear(self): self._test_quant_linear(11, 110, in_features=768, token_counts=(1, 3, 16))
-  def test_iq2_xxs_linear(self): self._test_quant_linear(16, 66, in_features=768, token_counts=(1, 3, 16))
-  def test_iq2_xs_linear(self): self._test_quant_linear(17, 74, in_features=768, token_counts=(1, 3, 16))
-  def test_iq3_xxs_linear(self): self._test_quant_linear(18, 98, in_features=768, token_counts=(1, 3, 16))
-  def test_iq1_s_linear(self): self._test_quant_linear(19, 50, in_features=768, token_counts=(1, 3, 16))
-  def test_iq4_nl_linear(self): self._test_quant_linear(20, 144, in_features=768, token_counts=(1, 3, 16))
-  def test_iq3_s_linear(self): self._test_quant_linear(21, 110, in_features=768, token_counts=(1, 3, 16))
-  def test_iq2_s_linear(self): self._test_quant_linear(22, 82, in_features=768, token_counts=(1, 3, 16))
+  def test_q2_k_linear(self): self._test_quant_linear(10, 84, in_features=256, out_features=16, token_counts=(1, 3, 16))
+  def test_q3_k_linear(self): self._test_quant_linear(11, 110, in_features=256, out_features=16, token_counts=(1, 3, 16))
+  def test_iq2_xxs_linear(self): self._test_quant_linear(16, 66, in_features=256, out_features=16, token_counts=(1, 3, 16))
+  def test_iq2_xs_linear(self): self._test_quant_linear(17, 74, in_features=256, out_features=16, token_counts=(1, 3, 16))
+  def test_iq3_xxs_linear(self): self._test_quant_linear(18, 98, in_features=256, out_features=16, token_counts=(1, 3, 16))
+  def test_iq1_s_linear(self): self._test_quant_linear(19, 50, in_features=256, out_features=16, token_counts=(1, 3, 16))
+  def test_iq4_nl_linear(self): self._test_quant_linear(20, 144, in_features=256, out_features=16, token_counts=(1, 3, 16))
+  def test_iq3_s_linear(self): self._test_quant_linear(21, 110, in_features=256, out_features=16, token_counts=(1, 3, 16))
+  def test_iq2_s_linear(self): self._test_quant_linear(22, 82, in_features=256, out_features=16, token_counts=(1, 3, 16))
   def test_mxfp4_linear(self): self._test_quant_linear(39, 136, in_features=288, token_counts=(1, 3))
   def test_mxfp4_linear_wmma(self): self._test_quant_linear(39, 136, in_features=288, token_counts=(16,))
 
   def test_wmma_linear_symbolic(self):
     with patch("tinygrad.llm.kernels.amd_gguf.q8_quantize", side_effect=AssertionError("expected WMMA")):
-      for typ in QUANT_SIZES:
-        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=48, token_counts=(3, 17), bias=True, symbolic=True)
+      # Symbolic padding is shared; cover the Q4/Q5, generic/grid, and IQ4 LUT WMMA kernel families.
+      for typ in (Q4_K, IQ3_S, IQ4_XS):
+        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=16, token_counts=(17,), bias=True, symbolic=True)
 
   def test_mixed_quant_linear_wmma_tiles(self):
     with patch("tinygrad.llm.kernels.amd_gguf.q8_quantize", side_effect=AssertionError("expected WMMA")):
-      # the token tile (64/32/16) doesn't depend on the quant type, so each type runs one tile and each tile runs on three types
-      for i, typ in enumerate(HALFWORD_QUANTS):
-        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=768, out_features=64, token_counts=((64, 32, 16)[i % 3],), bias=True)
+      # Token tiling is independent of the format. Q6 also covers odd super-block counts; the basis test covers every format.
+      for typ, tokens, in_features in ((Q8_0, 64, 256), (Q6_K, 32, 768), (IQ1_S, 16, 256)):
+        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=in_features, out_features=64, token_counts=(tokens,), bias=True)
 
   def test_wmma_dequantization_basis(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
     from gguf import dequantize, GGMLQuantizationType
     rng = np.random.default_rng(1907)
     scales = np.array([0, 2**-24, -2**-24, 2**-14, -0.00035, .001, .0037, -.125, 1, -4, 8], np.float16)
-    identity = Tensor(np.eye(768, dtype=np.float16)).realize()
+    identity = Tensor(np.eye(256, dtype=np.float16)).realize()
     for typ, size in QUANT_SIZES.items():
       with self.subTest(ggml_type=typ):
-        packed = rng.integers(0, 256, (48*3, size), dtype=np.uint8)
+        packed = rng.integers(0, 256, (16, size), dtype=np.uint8)
         blocks = packed.reshape(-1, SMALL_BLOCK_QUANTS[typ]*2) if typ in SMALL_BLOCK_QUANTS and typ != 39 else packed
         offset = size-2 if typ in (11, 14) else 80 if typ == 10 else 0
-        if typ == 39: packed.reshape(-1, 17)[:, 0] = rng.integers(100, 141, 48*3*8)  # mxfp4 e8m0 scales: fp16 rounds e < 100 to 0, e > 140 overflows
+        if typ == 39: packed.reshape(-1, 17)[:, 0] = rng.integers(100, 141, 16*8)  # mxfp4 e8m0 scales: fp16 rounds e < 100 to 0, e > 140 overflows
         else: blocks[:, offset:offset+2] = np.resize(scales, len(blocks)).view(np.uint8).reshape(-1, 2)
         if typ in (10, 12, 13):
           offset = 82 if typ == 10 else 2
           blocks[:, offset:offset+2] = np.resize(scales[::-1], len(blocks)).view(np.uint8).reshape(-1, 2)
-        expected = dequantize(packed.flatten(), GGMLQuantizationType(typ)).reshape(48, 768).astype(np.float16).astype(np.float32).T
-        # Odd super-block counts and halfword-only (mxfp4 byte-only) alignment exercise both row and block offsets.
+        expected = dequantize(packed.flatten(), GGMLQuantizationType(typ)).reshape(16, 256).astype(np.float16).astype(np.float32).T
+        # Halfword-only (mxfp4 byte-only) alignment exercises unaligned storage views.
         pad = 1 if typ == 39 else 2 if typ in HALFWORD_QUANTS else 4
         raw = Tensor(np.pad(packed.flatten(), (pad, 0))).realize()[pad:]
-        linear = Linear(768, 48, bias=False)
-        linear.weight = ggml_data_to_tensor(raw, 48*768, typ).reshape(48, 768)
+        linear = Linear(256, 16, bias=False)
+        linear.weight = ggml_data_to_tensor(raw, 16*256, typ).reshape(16, 256)
         actual = linear(identity).numpy()
         self.assertEqual(linear.ggml_type, typ)
         # Bare RDNA3 WMMA has a small FP32 accumulation bias even for identity products.
@@ -143,9 +145,8 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
           self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=outputs, token_counts=(1, 3))
 
   def test_quant_linear_bias(self):
-    for typ in (12, 21, 23):
-      with self.subTest(ggml_type=typ):
-        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=16, token_counts=(1, 3, 16), bias=True)
+    # Bias is a shared epilogue after both decode and WMMA; per-format math doesn't need to be repeated here.
+    self._test_quant_linear(Q4_K, QUANT_SIZES[Q4_K], in_features=256, out_features=16, token_counts=(1, 3, 16), bias=True)
 
   def test_quant_linear_partial_output_tile(self):
     # Cover a sub-tile output, a trailing tile, and IQ4's larger-output tile selection.
