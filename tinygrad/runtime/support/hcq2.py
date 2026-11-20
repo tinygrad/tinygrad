@@ -591,6 +591,10 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=
 
 @rewrite_group(lambda _,input_uops=None,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
+  # A deserialized batch may be the first use of its device in this process. Open it before applying its link rules.
+  for call in linear.src:
+    if (hcq:=getattr(call.without_after.arg, "hcq", None)) is not None:
+      for device in hcq.device: Device[device]
   linked = graph_rewrite(linear, Compiled.pm_link, walk=True, name="link programs") if Compiled.pm_link.patterns else linear
   ctx = LinkCtx(input_uops or [])
   linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_link, ctx=ctx, walk=True, name="link")
