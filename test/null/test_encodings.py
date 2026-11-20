@@ -122,9 +122,9 @@ class TestEncodingsX86(unittest.TestCase):
   # test two address instruction with fused load works
   def test_two_address_load(self):
     address = (reg(dtypes.uint64, RDI), reg(dtypes.uint64, RSI), imm(dtypes.int8, 10), imm(dtypes.uint8, 4))
-    cmove = UOp.ins(X86Ops.CMOVE, address, dtypes.int32, RAX)
-    # cmove eax, dword ptr [rdi + rsi*4 + 0xa]
-    self.assertEqual(bytes.fromhex(self.encode(cmove)), bytes.fromhex("0F 44 44 B7 0A"))
+    cmove = UOp.ins(X86Ops.CMOVNE, address, dtypes.int32, RAX)
+    # cmovne eax, dword ptr [rdi + rsi*4 + 0xa]
+    self.assertEqual(bytes.fromhex(self.encode(cmove)), bytes.fromhex("0F 45 44 B7 0A"))
 
   # test instruction where displacement and imm have the same value
   def test_disp_imm_same_value(self):
@@ -140,9 +140,9 @@ class TestEncodingsX86(unittest.TestCase):
 
   # cmoves have the cmp as the last src even though it is not explicitly used, the cmp doesn't define a reg and is ignored in the encoding
   def test_cmove_ignore_cmp(self):
-    cmove = UOp.ins(X86Ops.CMOVE, (reg(dtypes.int32, RAX), UOp.ins(X86Ops.CMP, (), dtypes.void)), dtypes.int32, RDX)
-    # cmove edx, eax
-    self.assertEqual(bytes.fromhex(self.encode(cmove)), bytes.fromhex("0F 44 D0"))
+    cmove = UOp.ins(X86Ops.CMOVNE, (reg(dtypes.int32, RAX), UOp.ins(X86Ops.CMP, (), dtypes.void)), dtypes.int32, RDX)
+    # cmovne edx, eax
+    self.assertEqual(bytes.fromhex(self.encode(cmove)), bytes.fromhex("0F 45 D0"))
 
 if __name__ == "__main__":
   unittest.main()

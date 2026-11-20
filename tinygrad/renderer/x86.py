@@ -73,10 +73,10 @@ class X86Ops(FastEnum):
   VCMPSS = auto(); VCMPSD = auto()
   SETNE = auto(); SETE = auto(); SETL = auto(); SETB = auto()
   # where
-  CMOVNE = auto(); CMOVE = auto(); CMOVL = auto(); CMOVB = auto()
+  CMOVNE = auto()
   VBLENDVPS = auto(); VBLENDVPD = auto()
   # jumps
-  JNE = auto(); JE = auto(); JL = auto(); JB = auto(); JGE = auto(); JMP = auto()
+  JNE = auto(); JGE = auto(); JMP = auto()
   # vectorize / gep
   VINSERTPS = auto(); VPSRLDQ = auto()
   VPEXTRW = auto(); VPEXTRD = auto()
@@ -97,13 +97,13 @@ class X86GroupOp:
   # X86Ops whose first src is also the destination
   TwoAddress = {X86Ops.ADD, X86Ops.ADDi, X86Ops.AND, X86Ops.ANDi, X86Ops.XOR, X86Ops.XORi, X86Ops.OR, X86Ops.ORi, X86Ops.IMUL,
                 X86Ops.SUB, X86Ops.SUBi, X86Ops.SHL, X86Ops.SHLi, X86Ops.SHR, X86Ops.SHRi, X86Ops.SAR, X86Ops.SARi,
-                X86Ops.IDIV, X86Ops.DIV, X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB}
+                X86Ops.IDIV, X86Ops.DIV, X86Ops.CMOVNE}
 
   # X86Ops whose second src is the rm field, so that src is what can be a memory operand
   Rm2nd = {X86Ops.ADD, X86Ops.SUB, X86Ops.AND, X86Ops.OR, X86Ops.XOR, X86Ops.IMUL, X86Ops.CMP,
            X86Ops.VADDSS, X86Ops.VADDSD, X86Ops.VSUBSS, X86Ops.VSUBSD, X86Ops.VMULSS, X86Ops.VMULSD, X86Ops.VDIVSS, X86Ops.VDIVSD,
            X86Ops.VBLENDVPS, X86Ops.VBLENDVPD, X86Ops.VCMPSS, X86Ops.VCMPSD, X86Ops.VROUNDSS, X86Ops.VROUNDSD, X86Ops.VSQRTSS, X86Ops.VSQRTSD,
-           X86Ops.VINSERTPS, X86Ops.VPINSRW, X86Ops.VPINSRD, X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB,
+           X86Ops.VINSERTPS, X86Ops.VPINSRW, X86Ops.VPINSRD, X86Ops.CMOVNE,
            X86Ops.VCVTSI2SS, X86Ops.VCVTSI2SD, X86Ops.VCVTSS2SD, X86Ops.VCVTSD2SS, X86Ops.IDIV, X86Ops.DIV}
 
   # X86Ops that can write to memory
@@ -113,16 +113,10 @@ class X86GroupOp:
               X86Ops.VCVTPS2PH, X86Ops.VPEXTRW, X86Ops.VPEXTRD}
 
   # X86Ops that read flags
-  ReadFlags = {X86Ops.CMOVB, X86Ops.CMOVL, X86Ops.CMOVE, X86Ops.CMOVNE, X86Ops.SETB, X86Ops.SETL, X86Ops.SETE, X86Ops.SETNE, X86Ops.JB, X86Ops.JL,
-               X86Ops.JE, X86Ops.JNE, X86Ops.JGE}
-
-  # X86Ops that write flags or can modify flags to undefined values
-  WriteFlags = {X86Ops.CMP, X86Ops.CMPi, X86Ops.ADD, X86Ops.ADDi, X86Ops.SUB, X86Ops.SUBi, X86Ops.IMUL, X86Ops.IMULi, X86Ops.IDIV, X86Ops.DIV,
-                X86Ops.SHL, X86Ops.SHLi, X86Ops.SHR, X86Ops.SHRi, X86Ops.SAR, X86Ops.SARi, X86Ops.AND, X86Ops.ANDi, X86Ops.XOR, X86Ops.XORi,
-                X86Ops.OR, X86Ops.ORi}
+  ReadFlags = {X86Ops.CMOVNE, X86Ops.SETB, X86Ops.SETL, X86Ops.SETE, X86Ops.SETNE, X86Ops.JNE, X86Ops.JGE}
 
   # X86Ops that jump, their first src is what the LABEL they jump to marks
-  Jump = {X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JMP}
+  Jump = {X86Ops.JNE, X86Ops.JGE, X86Ops.JMP}
 
   # X86Ops whose first src is the rm field. a TwoAddress op drops its first src post regalloc, so its Rm2nd src ends up first
   Rm1st = {X86Ops.MOV, X86Ops.VMOVSS, X86Ops.VMOVSD, X86Ops.VMOVUPS, X86Ops.MOVZX, X86Ops.MOVSX, X86Ops.MOVSXD, X86Ops.VMOVD, X86Ops.VMOVQ,
@@ -192,12 +186,6 @@ def gated_store(ctx:itertools.count, addr:UOp, gate:UOp, val:UOp):
   sel = gate.where(addr, local.index(UOp.cconst(0, dtypes.int32)))
   return sel.store(val)
 
-# a gate the flags can be picked with, or the bool compared to zero that replaces one they can't: only an integer
-# comparison sets the flags, see cmp. NOTE: the 0 is int so the bool zero-extends and compares as int (a byte compare renders
-# different kernels)
-def flag_gate(m:UOp) -> UOp|None:
-  return None if m.op in GroupOp.Comparison and m.src[0].dtype not in dtypes.floats else m.cast(dtypes.int).alu(Ops.CMPNE, UOp.cconst(0, dtypes.int))
-
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
   # vector BUFFERs get modeled in scratch space
@@ -210,9 +198,6 @@ pre_isel_matcher = PatternMatcher([
   # gated load/store become a conditional move on the address, the load/store are unconditional
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate")), gated_store),
-  # a conditional backedge picks with the flags, and so does the cmove, which is legalized in isel
-  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
-   lambda m,x: x.replace(src=x.src[:2]+(g,)) if (g:=flag_gate(m)) is not None else None),
 ])
 
 # ***** X86 registers *****
@@ -256,10 +241,13 @@ def to_imm(c:UOp) -> UOp|None:
 def cmp(x:UOp) -> UOp:
   if x.src[0].dtype in dtypes.floats: raise RuntimeError(f"no flag compare for {x.src[0].dtype}, a float gate must be a mask")
   return UOp.ins(X86Ops.CMP, x.src, dtypes.void) if (i:=to_imm(x.src[1])) is None else UOp.ins(X86Ops.CMPi, (x.src[0], i), dtypes.void)
+
 # comparisons that produce masks, the mask has the width of the operands
 def mask(x:UOp) -> UOp:
   dt, v = x.src[0].dtype, imm(dtypes.uint8, {Ops.CMPLT: 1, Ops.CMPNE: 4, Ops.CMPEQ: 0}[x.op])
   return UOp.ins(X86Ops.VCMPSS if dt is dtypes.float32 else X86Ops.VCMPSD, x.src + (v,), dt)
+
+def test_gate(m:UOp) -> UOp: return UOp.ins(X86Ops.CMPi, (m.cast(dtypes.int), imm(dtypes.int32, 0)), dtypes.void)
 
 # vinsertps xmm2, xmm0, xmm1, imm
 # inserts any 32 bit element in xmm1 into any position in xmm0 according to immm, result is written to xmm2
@@ -332,8 +320,6 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if regs(x): defs = [ctx.vreg(regs(x))]
   elif x.dtype in dtypes.floats or x.body.arg.code in XMM_OPS: defs = [ctx.vreg(XMM)]
   else: defs = [ctx.vreg(WGPR)]
-  # TODO: add this once the scheduler can track register pressure
-  # if x.arg[0] in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
   return with_regs(x, tuple(defs))
 
 def copy_op(dt:DType) -> X86Ops:
@@ -354,9 +340,8 @@ def load_const(x:UOp) -> UOp:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
-  # BACKEDGE becomes a conditional jump to its RANGE, it uses flags
-  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="y")), name="x"), lambda x,y: UOp.ins({Ops.CMPEQ: X86Ops.JE,
-   Ops.CMPNE: X86Ops.JNE, Ops.CMPLT: X86Ops.JB if y.src[0].dtype in dtypes.uints else X86Ops.JL}[y.op], (x.src[1], x.src[0], cmp(y)), x.dtype)),
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
+   lambda x,m: UOp.ins(X86Ops.JNE, (x.src[1], x.src[0], test_gate(m)), x.dtype)),
   # **** Op -> X86Op ****
   # function abi constraints
   (UPat(Ops.PARAM), args_pointer),
@@ -375,16 +360,9 @@ isel_matcher = PatternMatcher([
   # in this case we have a mask producing comparison whose user expects a bool, so we convert to bool
   (UPat(GroupOp.Comparison, src=(UPat.var("y", (dtypes.float32, dtypes.float64)), UPat()), name="x"), lambda y,x:
    (mask(x).bitcast(dt:=to_int(y.dtype)) & UOp.cconst(1, dt)).bitcast(dtypes.bool)),
-  # conditional moves that use flags
-  # TODO: remove this once we allow all flag producing ops in cmove
-  # the blends took every float gate a mask can serve, so a gate that is still not an integer comparison becomes one here
-  (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")), lambda m,a,b: g.where(a, b) if (g:=flag_gate(m)) is not None else None),
-  (UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.sints), UPat()), name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b:
-   UOp.ins(X86Ops.CMOVL, (b, a, cmp(m)), a.dtype)),
-  (UPat(Ops.CMPLT, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp.ins(X86Ops.CMOVB, (b, a, cmp(m)), a.dtype)),
-  (UPat(Ops.CMPEQ, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp.ins(X86Ops.CMOVE, (b, a, cmp(m)), a.dtype)),
-  (UPat(Ops.CMPNE, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp.ins(X86Ops.CMOVNE, (b, a, cmp(m)), a.dtype)),
-  # comparisons whose user doesn't use the flag, move flag result to register
+  # conditional moves use materialized boolean values
+  (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp.ins(X86Ops.CMOVNE, (b, a, test_gate(m)), a.dtype)),
+  # comparisons materialize their result in a register
   (UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.uints), UPat()), name="x"), lambda x: UOp.ins(X86Ops.SETB, (cmp(x),), x.dtype)),
   (UPat(Ops.CMPLT, name="x"), lambda x: UOp.ins(X86Ops.SETL, (cmp(x),), x.dtype)),
   (UPat(Ops.CMPEQ, name="x"), lambda x: UOp.ins(X86Ops.SETE, (cmp(x),), x.dtype)),
@@ -490,10 +468,6 @@ isel_matcher = PatternMatcher([
 
 # ***** pre register allocation *****
 class X86LinearContext(LinearContext):
-  def __init__(self, ren:'X86Renderer'):
-    super().__init__(ren)
-    self.lock: UOp|None = None
-
   # stack alloc/dealloc and callee saved handling
   def insert_linearized(self, uops:list[UOp]) -> list[UOp]:
     before, after, used = [], [], {r.name for u in uops if isinstance((r:=rdef(u)), Register)}
@@ -514,16 +488,6 @@ class X86LinearContext(LinearContext):
     offset = self.stack_size + (sz - self.stack_size % sz) %sz
     self.stack_size = offset + sz
     return offset
-
-# the flags belong to the last instruction that wrote them. x86 has no good way to store/restore them (then regalloc would
-# handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
-# optional, there is no fallback load from stack
-def flag_rematerialize(ctx:X86LinearContext, x:UOp):
-  if x.op in (Ops.RANGE, Ops.END) or x.body.arg.code in X86GroupOp.WriteFlags: ctx.lock = x
-  elif x.body.arg.code in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
-    ctx.lock = flag_def
-    return (x, [flag_def, x])
-  return None
 
 # the element size of loads and stores is already captured by fold_address before stack buffers become 64-bit pointers
 def alloc_buffer(ctx:X86LinearContext, x:UOp):
@@ -551,7 +515,8 @@ def lower_end(x:UOp, c:UOp) -> tuple[UOp, list[UOp]]:
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
-  (UPat((Ops.CALL, Ops.RANGE, Ops.END), name="x"), flag_rematerialize),
+  (UPat(Ops.CALL, name="x"), lambda x: (x, []) if x.body.arg.code in {X86Ops.CMP, X86Ops.CMPi} else
+   (x, [x.src[-1], x]) if x.body.arg.code in X86GroupOp.ReadFlags else None),
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, src=(UPat(), UPat(Ops.AFTER, name="c")), name="x"), lower_end),
 ])
@@ -710,8 +675,7 @@ encodings = {
   X86Ops.VDIVSS: lambda x: encode(x, 0x5E, pp=2, sel=1), X86Ops.VDIVSD: lambda x: encode(x, 0x5E, pp=3, sel=1),
   X86Ops.VCMPSS: lambda x: encode(x, 0xC2, pp=2, sel=1), X86Ops.VCMPSD: lambda x: encode(x, 0xC2, pp=3, sel=1),
   # ternary
-  X86Ops.CMOVB: lambda x: encode(x, 0x0F42), X86Ops.CMOVL: lambda x: encode(x, 0x0F4C),
-  X86Ops.CMOVE: lambda x: encode(x, 0x0F44), X86Ops.CMOVNE: lambda x: encode(x, 0x0F45),
+  X86Ops.CMOVNE: lambda x: encode(x, 0x0F45),
   X86Ops.VBLENDVPS: lambda x: encode(x, 0x4A, pp=1, sel=3), X86Ops.VBLENDVPD: lambda x: encode(x, 0x4B, pp=1, sel=3),
   # shuffles
   X86Ops.VPSRLDQ: lambda x: encode(x, 0x73, reg=3, pp=1, sel=1),
@@ -720,10 +684,7 @@ encodings = {
   # extract
   X86Ops.VPEXTRW: lambda x: encode(x, 0x15, pp=1, sel=3), X86Ops.VPEXTRD: lambda x: encode(x, 0x16, pp=1, sel=3),
   # jumps are encoded with a placeholder which gets patched later once the real offset is known
-  X86Ops.JE: lambda x: bytes([0x0F, 0x84]) + int(0).to_bytes(4),
   X86Ops.JNE: lambda x: bytes([0x0F, 0x85]) + int(0).to_bytes(4),
-  X86Ops.JL: lambda x: bytes([0x0F, 0x8C]) + int(0).to_bytes(4),
-  X86Ops.JB: lambda x: bytes([0x0F, 0x82]) + int(0).to_bytes(4),
   X86Ops.JGE: lambda x: bytes([0x0F, 0x8D]) + int(0).to_bytes(4),
   X86Ops.JMP: lambda x: bytes([0xE9]) + int(0).to_bytes(4),
   X86Ops.RET: lambda x: bytes([0xC3]),
