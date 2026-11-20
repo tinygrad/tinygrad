@@ -51,7 +51,7 @@ def create_bounded(name:str, vmin:int|z3.ArithRef, vmax:int|z3.ArithRef, solver:
   solver.add((vmin <= (s:=z3.Int(name, ctx=solver.ctx)))&(s <= vmax))
   return s
 def create_var(x:UOp, ctx:tuple[z3.Solver, dict[UOp, z3.ExprRef]]) -> z3.ExprRef:
-  name = x.arg.name if x.op is Ops.PARAM else f"{x.op.name.lower()}{len(ctx[1])}"
+  name = x.expr if x.op is Ops.PARAM else f"{x.op.name.lower()}{len(ctx[1])}"
   return z3.Bool(name, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else create_bounded(name, x.vmin, x.vmax, ctx[0])
 # a cast only converts between bool and int, z3_wrap models the width
 def z3_cast(c:UOp, x:z3.ExprRef) -> z3.ExprRef:

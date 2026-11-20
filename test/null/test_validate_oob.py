@@ -31,6 +31,12 @@ class TestValidateOOB(unittest.TestCase):
       with self.assertRaises(RuntimeError):
         to_uops_list([buf.index(Variable("i", -5, 10)).load()])  # negative
 
+  def test_unnamed_param_slots_are_independent(self):
+    buf = UOp.param(0, dtypes.int, 1)
+    a, b = (UOp.param(slot, dtypes.int, vmin_vmax=(0, 8), addrspace=AddrSpace.ALU) for slot in (1, 2))
+    with Context(CHECK_OOB=1, SPEC=2), self.assertRaises(RuntimeError):
+      to_uops_list([buf.index(a - b).load()])
+
   def test_range_with_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, 16)
