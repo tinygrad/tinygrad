@@ -1,6 +1,6 @@
 import unittest, functools
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, Variable, TinyJit
-from tinygrad.engine.realize import run_linear
+from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes
@@ -612,6 +612,17 @@ class TestCustomKernelArgs(unittest.TestCase):
     out = Tensor.custom_kernel(Tensor.empty(4), a, b, fxn=custom_ignore_first_kernel)[0]
     self.assertEqual(out.tolist(), [2, 3, 4, 5])
 
+  def test_captured_scalar_grad(self):
+    # the gradient callback gets the explicit inputs, not the Variable the kernel captures
+    v = Variable("v", 1, 4, dtypes.int).bind(2)
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i = UOp.range(C.numel(), 0)
+      return C[i].store(A[i]*v.cast(A.dtype)).end(i).sink(arg=KernelInfo(name="mul_v"))
+    a = Tensor([1.0, 2.0])
+    Tensor.custom_kernel(Tensor.empty(2), a, fxn=kernel, grad_fxn=lambda g, k: (None, (Tensor(g)*2).uop))[0].sum().backward()
+    assert a.grad is not None
+    self.assertEqual(a.grad.tolist(), [2.0, 2.0])
+
   def test_scalar_arg_any_position(self):
     for n_slot in range(3):
       with self.subTest(n_slot=n_slot):
@@ -677,6 +688,17 @@ class TestCustomKernelArgs(unittest.TestCase):
     self.assertEqual(d.tolist(), [2, 3]*4)
 
 class TestCustomKernelSharded(unittest.TestCase):
+  def test_device_number_arg(self):
+    # the kernel's DEVICE range is its device number arg, bound per device and validated on each
+    def kernel(C:UOp) -> UOp: return C[0].store(UOp.range(2, 0, AxisType.DEVICE).cast(dtypes.int)).sink(arg=KernelInfo(name="store_dnum"))
+    out = Tensor.custom_kernel(Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(("CPU:1", "CPU:2"), axis=0).contiguous(), fxn=kernel)[0]
+    linear, _ = out.linear_with_vars()
+    validated = compile_linear(linear, validate=True).toposort()
+    self.assertEqual(len([c for c in validated if c.op is Ops.CALL and c.body.op is Ops.NATIVE and c.body.arg.code == "validate"
+                          and c.body.src[-1].arg.name == "store_dnum"]), 2)
+    run_linear(linear)
+    self.assertEqual(out.tolist(), [0, 1])
+
   def test_simple_sharded(self):
     devs = ("CPU:0", "CPU:1")
 

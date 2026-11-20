@@ -1192,17 +1192,13 @@ class TestCLI(unittest.TestCase):
         Tensor.realize(*f(a[:i], b[:j]))
     with write_files(viz) as files:
       out = run_cli(*files, "-s", "NULL")
-      aggregate = run_cli(*files, "-s", "NULL", "-t")
-    self.assertEqual(len(out), 3*2)
-    # Operation count increases with N; FLOPS is a rate and also depends on the measured duration.
-    gflops = [row["fmt"]["FLOPS"] for row in out]
-    flops = [rate * row["dur_ms"] * 1e-3 for rate, row in zip(gflops, out)]
-    self.assertGreater(flops[4], flops[2])
-    self.assertGreater(flops[5], flops[3])
-    # aggregate flops
-    self.assertEqual(len(aggregate), 2)
-    agg_gflops = [row["fmt"]["FLOPS"] for row in aggregate]
-    assert all(min(gflops) < v < max(gflops) for v in agg_gflops), f"{agg_gflops}"
+      summary, = run_cli(*files, "-s", "NULL", "-t")
+    # Six calls share one kernel. Each contributes its own operation count to the aggregate rate.
+    ops = [row["fmt"]["FLOPS"] * row["dur_ms"] * 1e-3 for row in out]
+    for got, expected in zip(ops, [2*n*n*64 for pair in test_n for n in pair], strict=True):
+      self.assertAlmostEqual(got, expected, delta=expected*1e-3)
+    self.assertEqual(summary["count"], len(ops))
+    self.assertAlmostEqual(summary["fmt"]["FLOPS"], sum(ops)/(summary["dur_ms"] * 1e-3), delta=1)
 
   def test_dedup(self):
     with save_viz() as viz:
