@@ -209,8 +209,11 @@ GPR = tuple(UOp.placeholder((1,), dtypes.uint64, i, AddrSpace.REG, name=n) for i
             enumerate(("rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", *(f"r{i}" for i in range(8, 16)))))
 RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI = GPR[:8]
 XMM = tuple(UOp.placeholder((1,), dtypes.uint64, i, AddrSpace.REG, name=f"xmm{i}") for i in range(16))
-physical_regs = {(r.arg.name, r.arg.slot):r for r in GPR+XMM}
-def physical_reg(u:UOp) -> UOp|None: return physical_regs.get((u.arg.name, u.arg.slot))
+physical_regs = frozenset(GPR+XMM)
+def physical_reg(u:UOp) -> UOp|None:
+  # NOTE: this is not the architectural dtype, it's the widest dtype we use
+  r = UOp.placeholder((1,), dtypes.uint64, u.arg.slot, AddrSpace.REG, name=u.arg.name)
+  return r if r in physical_regs else None
 # gprs you can write to
 WGPR = tuple(r for r in GPR if r is not RSP)
 
