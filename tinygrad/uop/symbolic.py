@@ -50,17 +50,17 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
   #   q == b//div     -> b*mul              (full recombine)
   #   q == (b//div)%d -> (b%(div*d))*mul    (partial recombine into a wider mod, needs d>0)
   terms = list(x.split_uop(Ops.ADD))
-  for i,u in enumerate(terms):
-    mod, mul = u.pop_const(Ops.MUL)
+  scaled = [t.pop_const(Ops.MUL) for t in terms]
+  for i,(mod,mul) in enumerate(scaled):
     if mod.op is not Ops.MOD or mod.src[1].op is not Ops.CONST: continue
     base, div = mod.src[0], mod.src[1].val
-    for j,v in enumerate(terms):
-      q, scale = v.pop_const(Ops.MUL)
+    for j,(q,scale) in enumerate(scaled):
       if i == j or scale != div*mul: continue
-      rest = [t for k,t in enumerate(terms) if k not in (i,j)]
-      if (b:=_quotient_base(q, base, div)) is not None: return (b*mul).usum(*rest)
-      if q.op is Ops.MOD and q.src[1].op is Ops.CONST and (d:=q.src[1].val) > 0 and (b:=_quotient_base(q.src[0], base, div)) is not None:
-        return ((b % (div*d))*mul).usum(*rest)
+      if (b:=_quotient_base(q, base, div)) is None:
+        if q.op is not Ops.MOD or q.src[1].op is not Ops.CONST or (d:=q.src[1].val) <= 0: continue
+        if (b:=_quotient_base(q.src[0], base, div)) is None: continue
+        b = b % (div*d)
+      return (b*mul).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
   return None
 
 # Invalid poisons the value: ops move inside the gate so the Invalid reaches the LOAD/STORE and folds there.
