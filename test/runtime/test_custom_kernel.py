@@ -1,6 +1,6 @@
 import unittest, functools
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, Variable, TinyJit
-from tinygrad.engine.realize import run_linear, compile_linear
+from tinygrad.engine.realize import run_linear, compile_linear, link_linear
 from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes
@@ -691,13 +691,28 @@ class TestCustomKernelSharded(unittest.TestCase):
   def test_device_number_arg(self):
     # the kernel's DEVICE range is its device number arg, bound per device and validated on each
     def kernel(C:UOp) -> UOp: return C[0].store(UOp.range(2, 0, AxisType.DEVICE).cast(dtypes.int)).sink(arg=KernelInfo(name="store_dnum"))
-    out = Tensor.custom_kernel(Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(("CPU:1", "CPU:2"), axis=0).contiguous(), fxn=kernel)[0]
+    x = Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(("CPU:1", "CPU:2"), axis=0).contiguous().realize()
+    out = Tensor.custom_kernel(x, fxn=kernel)[0]
     linear, _ = out.linear_with_vars()
-    validated = compile_linear(linear, validate=True).toposort()
-    self.assertEqual(len([c for c in validated if c.op is Ops.CALL and c.body.op is Ops.NATIVE and c.body.arg.code == "validate"
-                          and c.body.src[-1].arg.name == "store_dnum"]), 2)
-    run_linear(linear)
+    validated = compile_linear(linear, validate=True)
+    self.assertEqual(sum(c.without_after.body.op is Ops.NATIVE and c.without_after.body.arg.code == "validate" for c in validated.src), 2)
+    # the reference and readback storage are slots for the linker, not buffers made by the compiler
+    self.assertFalse(any(u.op is Ops.BUFFER for u in validated.toposort(enter_calls=True)
+                         if u.device == "CPU" or (isinstance(u.device, tuple) and "CPU" in u.device)))
+    run_linear(link_linear(validated), jit=True, wait=True)
     self.assertEqual(out.tolist(), [0, 1])
+
+  def test_validate_catches_mismatch(self):
+    def kernel(C:UOp, v:int) -> UOp: return C[0].store(UOp.const(v, dtypes.int)).sink(arg=KernelInfo(name=f"store_{v}"))
+    out = Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous().realize(), fxn=functools.partial(kernel, v=1))[0]
+    linear, _ = out.linear_with_vars()
+    validated = compile_linear(linear, validate=True)
+    # swap the CPU reference for one that computes something else, the validation fails when the batch runs
+    calls = [c.without_after for c in validated.src]
+    ref = next(c for c in calls if c.body.op is Ops.PROGRAM and c.body.src[0].arg.name == "store_1" and c.src[1].device == "CPU")
+    wrong = to_program(kernel(UOp.placeholder((1,), dtypes.int, 0), 2), Device["CPU"].renderer)
+    validated = validated.substitute({ref: ref.replace(src=(wrong, *ref.src[1:]))})
+    with self.assertRaises(AssertionError): run_linear(link_linear(validated), jit=True, wait=True)
 
   def test_simple_sharded(self):
     devs = ("CPU:0", "CPU:1")

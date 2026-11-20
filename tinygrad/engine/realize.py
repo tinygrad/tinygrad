@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import decimal
+import decimal, itertools
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, Context, to_tuple, tqdm, unwrap
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
@@ -148,19 +148,11 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, device:str|None=None) -> lis
   except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
   return [rt(*args, global_size=global_sz, local_size=local_sz, wait=ctx.wait, timeout=ctx.timeout)]
 
-def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
+def exec_validate(ctx:ExecContext, call:UOp) -> list[float|None]:
   import numpy as np
   from tinygrad.dtype import _to_np_dtype
-  Device["CPU"].synchronize(ctx.timeout)
-  exec_kernel(ctx, call, prg:=to_program(ast.src[0], Device["CPU"].renderer)) # the shadows sit at the call's slots, so it runs like any call
-  pos = [k for k, s in enumerate(call.src[1:]) if s.addrspace is not AddrSpace.ALU]
-  args = [_buffer(b, ctx.input_uops) for b in get_call_arg_uops(call)]
-  bufs, dev_bufs = dict(zip(pos, args[:len(args)//2])), dict(zip(pos, args[len(args)//2:]))
-  for i in prg.arg.outs:
-    dt = _to_np_dtype(call.src[1+i].dtype)
-    assert dt is not None, f"no np dtype for {call.src[1+i].dtype}"
-    np.testing.assert_allclose(np.frombuffer(dev_bufs[i].ensure_allocated().as_memoryview(), dt),
-                               np.frombuffer(bufs[i].as_memoryview(), dt), rtol=1e-3, atol=1e-3)
+  def array(b:UOp): return np.frombuffer(_buffer(b, ctx.input_uops).as_memoryview(), unwrap(_to_np_dtype(b.dtype)))
+  np.testing.assert_allclose(array(call.src[1]), array(call.src[2]), rtol=1e-3, atol=1e-3)
   return []
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
@@ -182,11 +174,17 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     return float(en-st) / Device[device].timestamp_divider / 1e6
   return ets + [_prof_tm(d, prof) if ctx.wait else None for d, _, _, prof, *_ in info.kernels if prof]
 
-def _validate(call:UOp, sink:UOp) -> UOp:
-  shadows = tuple(p if p.addrspace is AddrSpace.ALU else
-                  UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in call.src[1:])
-  copies = tuple(s.store_call(p) for s, p in zip(shadows, call.src[1:]) if p.addrspace is not AddrSpace.ALU)
-  return UOp(Ops.LINEAR, src=copies + (call, UOp.native("validate", sink).call(*shadows, *call.src[1:])))
+def _validate(ctx:Iterator[int], call:UOp, sink:UOp) -> UOp:
+  def shadow(p:UOp): return UOp.alloc((p.max_numel(),), p.dtype, next(ctx), device=("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU")
+  args = call.src[1:]
+  shadows = [p if p.addrspace is AddrSpace.ALU else shadow(p) for p in args]
+  copies = [s.store_call(p) for s,p in zip(shadows, args) if p.addrspace is not AddrSpace.ALU]
+  ref = to_program(sink, Device["CPU"].renderer)
+  calls = [*copies, call, ref.call(*shadows)]
+  for i in ref.arg.outs:
+    actual = shadow(args[i])
+    calls.extend((actual.store_call(args[i]), UOp.native("validate").call(actual, shadows[i])))
+  return UOp(Ops.LINEAR, src=tuple(calls))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
 # ctx is beam value
@@ -242,11 +240,14 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.STORE, name="ast"),), name="call", allow_any_len=True), exec_copy),
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True),
    lambda ctx, call, ast: exec_hcq(ctx, call, ast) if call.arg.hcq is not None else exec_kernel(ctx, call, ast)),
-  (UPat(Ops.CALL, src=(UPat.native("validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
+  (UPat(Ops.CALL, src=(UPat.native("validate"),), name="call", allow_any_len=True), exec_validate),
 ])
 
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None, cache=False) -> UOp:
-  if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
+  if validate:
+    # Give the reference and readback buffers distinct, reproducible slots below the schedule's scratch slots.
+    first = min((u.arg.slot for u in linear.toposort() if u.op is Ops.ALLOC), default=0)-1
+    linear = graph_rewrite(linear, pm_validate, ctx=itertools.count(first, -1), name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = lower_and_compile(linear)
   linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
