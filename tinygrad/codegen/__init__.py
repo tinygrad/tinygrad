@@ -232,6 +232,8 @@ def add_local_buffer(ctx, x:UOp):
 
 pm_add_local_buffers = PatternMatcher([
   (UPat(Ops.STAGE, name="x"), add_local_buffer),
+  # buffer and alloc are treated the same way, cannocalize to one op
+  (UPat(Ops.ALLOC, name="x"), lambda ctx,x: x.replace(op=Ops.BUFFER, arg=replace(x.arg, slot=next(ctx)))),
 ])+pm_mops
 
 # float ALUs need a float operand
@@ -301,7 +303,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # expand
   sink = graph_rewrite(sink, expander, ctx=build_range_map(sink), name="expander")
 
-  slots = itertools.count(max([u.arg.slot+1 for u in sink.toposort() if u.op is Ops.ALLOC], default=0))
+  slots = itertools.count(max([u.arg.slot+1 for u in sink.toposort() if u.op in {Ops.ALLOC, Ops.BUFFER}], default=0))
 
   # remove reduce
   sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=slots, name="remove reduces")
@@ -400,8 +402,6 @@ pm_linearize_cleanups = PatternMatcher([
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
   (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
    lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))])),
-  # ALLOC becomes a distinct BUFFER before rendering
-  (UPat(Ops.ALLOC, name="x"), lambda ctx,x: ((buf:=x.replace(op=Ops.BUFFER, arg=replace(x.arg, slot=next(ctx)))), [buf])),
 ])
 
 # requires lst be toposorted. like graph rewrite, but for lines
@@ -416,8 +416,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
   return newlst
 
 def linearize_cleanups(lst:list[UOp]) -> list[UOp]:
-  slots = itertools.count(max([u.arg.slot+1 for u in lst if u.op is Ops.BUFFER], default=0))
-  return line_rewrite(lst, pm_linearize_cleanups, ctx=slots)
+  return line_rewrite(lst, pm_linearize_cleanups)
 
 @dataclass
 class LowerCallsCtx:
@@ -458,7 +457,6 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
     lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
     lst = lin_ctx.insert_linearized(lst)
     lst = line_rewrite(lst, ctx.post_regalloc_matcher, lin_ctx)
-    if DEBUG >= 4: print(ctx.asm_str(lst, sink.arg.function_name))
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
 def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp|None:

@@ -531,7 +531,9 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp:
   return UOp.from_buffer(r, b.dtype, HCQ_RUNTIME_DEV.device)
 
 def resolve_extern(ctx:LinkCtx, b:UOp) -> UOp:
-  if b.arg.name is None: return ctx.inputs[b.arg.slot]
+  if b.arg.name is None:
+    a = ctx.inputs[b.arg.slot]
+    return UOp.const(a.arg.val, b.dtype) if a.is_bound_var else a
   owned = Compiled.link_bufs[b.arg.name if b.arg.name in Compiled.link_bufs else to_name(b.device, b.arg.name)]
   return UOp.from_buffer(owned if isinstance(owned, Buffer) else owned(b), b.dtype, HCQ_RUNTIME_DEV.device)
 
