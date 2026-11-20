@@ -508,7 +508,8 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     if renderer.packed_args and full_sink.arg.kernel: full_sink = pack_args(full_sink, prog_info.params)
     # instruction selection
     if isinstance(renderer, ISARenderer):
-      full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
+      slots = itertools.count(min([0]+[u.arg.slot for u in full_sink.toposort() if u.op is Ops.BUFFER])-1, -1)
+      full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=slots, name="pre instruction selection", bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(), name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
