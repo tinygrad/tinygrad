@@ -147,7 +147,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, device:str|None=None) -> lis
   var_vals = {**ctx.var_vals, **{s.expr: s.arg.val for s in call.src[1:] if s.is_bound_var}}
   prg_bufs = {i:_buffer(call.src[1+i], ctx.input_uops).ensure_allocated() for i in ast.arg.globals}
   rt = get_runtime(device, ast, cache=ctx.cache)
-  global_sz, local_sz = (tuple(sym_infer(x, ctx.var_vals) for x in dims) for dims in ast.arg.launch_dims(call))
+  global_sz, local_sz = (tuple(sym_infer(x, var_vals) for x in dims) for dims in ast.arg.launch_dims(call))
   try: args = [(var_vals[p.expr] if p.is_variable else _resolve(call.src[1+p.arg.slot], ctx.input_uops).val) if p.addrspace is AddrSpace.ALU else
                prg_bufs[p.arg.slot].get_buf(device) for p in ast.kernel_params]
   except KeyError as e: raise RuntimeError(f"unbound Variable {e}") from None
