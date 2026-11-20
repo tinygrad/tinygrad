@@ -1217,7 +1217,7 @@ MT_SPILL_MIN_STRIDE = INIT_SIZE
 
 class MUSACompiler(Compiler):
   def __init__(self):
-    super().__init__('mt_O3_nocc_bfloat16')
+    super().__init__('mt_O3_nocc_bfloat16_v2')
     self.mt = MTCompiler()
   def compile(self, src:str) -> bytes: return self.mt.compile_raw(src)
 
@@ -1229,6 +1229,7 @@ class MUSARenderer(CUDARenderer):
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     return super().render_kernel(function_name, kernel, bufs, uops, ['#include <musa.h>'] + (prefix or []))
   def render_cast(self, u, val):
+    if u.src[0].dtype == dtypes.bfloat16 and u.dtype != dtypes.bfloat16: return f'({self.render_type(u)})((float)({val}))'
     return f'__float2bfloat16({val})' if u.dtype == dtypes.bfloat16 else super().render_cast(u,val)
   def supported_dtypes(self): return set(dtypes.all) - {dtypes.double,*dtypes.fp8s}
 
