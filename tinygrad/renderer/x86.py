@@ -23,11 +23,11 @@ class IselContext:
 
 # the registers an ins defines exist in the src of NATIVE
 def regs(u:UOp) -> tuple[Register, ...]:
-  if u.op in {Ops.BUFFER, Ops.ALLOC}: return (u.arg.reg,) if u.arg.reg is not None else ()
+  if u.op is Ops.BUFFER: return (u.arg.reg,) if u.arg.reg is not None else ()
   return tuple(s.arg.reg for s in u.body.toposort() if s.op is Ops.PARAM and s.arg.reg is not None) if u.op is Ops.CALL else ()
 def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp:
   assert u.dtype is not dtypes.void, "void cannot have output registers"
-  if u.op in {Ops.BUFFER, Ops.ALLOC}: return u.replace(arg=replace(u.arg, reg=get_single_element(r)))
+  if u.op is Ops.BUFFER: return u.replace(arg=replace(u.arg, reg=get_single_element(r)))
   return UOp.ins(u.body.arg.code, u.src_without_body, u.dtype, *r)
 
 def rdef(u:UOp):
@@ -201,7 +201,7 @@ def flag_gate(m:UOp) -> UOp|None:
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
   # vector BUFFERs get modeled in scratch space
-  (UPat((Ops.BUFFER, Ops.ALLOC), name="x"),
+  (UPat(Ops.BUFFER, name="x"),
    lambda ctx,x: scratch_buffer(x.dtype, n, next(ctx)) if x.addrspace is AddrSpace.REG and (n:=x.max_numel()) > 1 else None),
   # widening a uint32 is free, the 32bit write that produced it already zeroed the upper half
   (UPat(dtype=dtypes.uint32).cast(dtypes.int64s, name="x"), lambda x: x.replace(op=Ops.BITCAST)),
@@ -312,7 +312,7 @@ GPR_DEST_OPS = {X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VCVTTSS2SI, X86Ops.VCVTTS
 XMM_OPS = {op for op in X86Ops if op.name.startswith('V')} - GPR_DEST_OPS
 
 def _is_vec_xmm(y: UOp) -> bool:
-  return (y.op is Ops.CALL and y.body.arg.code in XMM_OPS) or (y.op not in (Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.REFPARAM, Ops.AFTER, Ops.CALL) \
+  return (y.op is Ops.CALL and y.body.arg.code in XMM_OPS) or (y.op not in (Ops.BUFFER, Ops.PARAM, Ops.REFPARAM, Ops.AFTER, Ops.CALL) \
       and y.max_numel() > 1)
 
 def _xmm_sz(x: UOp) -> X86Ops:
@@ -327,7 +327,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # already allocated vregs
   if regs(x) and regs(x)[0]._cons: return None
   # a register buffer is a BUFFER, a stack buffer becomes the LEA of its address before regalloc
-  if x.op in {Ops.BUFFER, Ops.ALLOC}:
+  if x.op is Ops.BUFFER:
     return with_regs(x, (ctx.vreg(x.arg.reg) if x.arg.reg else regbuf_reg(x),)) if x.addrspace is AddrSpace.REG else None
   if regs(x): defs = [ctx.vreg(regs(x))]
   elif x.dtype in dtypes.floats or x.body.arg.code in XMM_OPS: defs = [ctx.vreg(XMM)]
@@ -485,7 +485,7 @@ isel_matcher = PatternMatcher([
   # move const to registers for instructions that don't support immediate operands
   (UPat(Ops.CALL, name="x"), load_const),
   # allocate virtual registers
-  (UPat((Ops.CALL, Ops.BUFFER, Ops.ALLOC), name="x"), alloc_vregs),
+  (UPat((Ops.CALL, Ops.BUFFER), name="x"), alloc_vregs),
 ])
 
 # ***** pre register allocation *****
