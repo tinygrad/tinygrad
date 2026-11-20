@@ -1303,6 +1303,11 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(n.cast(dtypes.uint8).cast(dtypes.int), {n.expr: 300}) == 44
     x, y = Variable("x", 0, 255, dtypes.uint8), Variable("y", 0, 255, dtypes.uint8)
     assert sym_infer((x*y).cast(dtypes.int), {x.expr: 16, y.expr: 16}) == 0
+  def test_sym_infer_typed_where(self):
+    x = Variable("x", 0, 100, dtypes.int32)
+    assert sym_infer(x.valid(x<10), {"x": 3}) == 3  # don't evaluate Invalid
+    expr = (x<10).where(Variable("byte", 0, 255, dtypes.uint8), 258)
+    assert sym_infer(expr, {"x": 50}) == 2  # narrow the selected value without reading byte
   def test_sym_infer_var_names_dont_shadow(self):
     # a Variable's name can't shadow the helpers the inferred function uses
     m, b = Variable("max", -10, 10), Variable("b", -10, 10)

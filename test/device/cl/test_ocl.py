@@ -1,6 +1,7 @@
 import multiprocessing, unittest
 from concurrent.futures import ProcessPoolExecutor
-from tinygrad import Device, Tensor, dtypes
+from unittest.mock import patch
+from tinygrad import Device, Tensor, dtypes, Context
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 from tinygrad.runtime.ops_cl import CLDevice, CLAllocator, CLCompiler
@@ -36,6 +37,16 @@ class TestCLError(unittest.TestCase):
     roles = ["out" if u is out.uop.base.buf_uop else "a" for u in inputs]
     with ProcessPoolExecutor(1, mp_context=multiprocessing.get_context("spawn")) as runner:
       self.assertEqual(runner.submit(run_compiled, render_uir(compiled), roles).result(), [2, 3, 4, 5])
+
+  def test_compile_once_per_source(self):
+    # a kernel queued many times compiles once, even without the disk cache
+    calls, real_compile = [], CLCompiler.compile
+    def counted(self, src:str) -> bytes: return (calls.append(src), real_compile(self, src))[1]
+    with Context(CCACHE=0), patch.object(CLCompiler, "compile", counted):
+      x = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+      for _ in range(4): x = (x * 3).contiguous()
+      self.assertEqual(x.tolist(), [81, 162, 243, 324])
+    self.assertEqual(len(calls), len(set(calls)))
 
   def test_unaligned_copy(self):
     data = list(range(65))

@@ -64,6 +64,7 @@ renderer = PatternMatcher([
 
 renderer_infer = PatternMatcher([
   (UPat((Ops.PARAM, Ops.EXTERN), name="x"), lambda x: f"values[{x.expr!r}]"),
+  (UPat(Ops.WHERE, dtypes.ints, name="x"), lambda ctx,x: f"{x.dtype!r}.const({ctx[x.src[1]]} if {ctx[x.src[0]]} else {ctx[x.src[2]]})"),
   (UPat(GroupOp.ALU, dtypes.ints, name="x"), lambda ctx,x: f"exec_alu({x.op!r}, {x.dtype!r}, ({','.join(ctx[s] for s in x.src)},))"),
   (UPat((Ops.MOD, Ops.DIV), name="x"), lambda ctx,x: f"{x.op.name.lower()}({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"{x.dtype!r}.const({ctx[x.src[0]]})"),

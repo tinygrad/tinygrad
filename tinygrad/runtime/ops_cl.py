@@ -54,7 +54,7 @@ class CLQueue(HWQueue):
 
   def exec(self, call:UOp, prg:UOp):
     args, images = get_call_kernel_args(call, prg, self.devs), []
-    lib = CLCompiler(self.dev).compile_cached(prg.src[3].arg.decode())
+    lib = self.dev.compile(prg.src[3].arg)
     p = make_program(prg, 8, self.devs[0])
     kernel = p.after(p.store(prg.replace(src=(*prg.src[:3], UOp(Ops.BINARY, arg=lib))))).bitcast(dtypes.u64).index(0).load()
     for i, (_, _, dt, shape) in enumerate(TinyELF.from_program(prg).signature):
@@ -126,6 +126,9 @@ class CLDevice(Compiled):
     Compiled.link_bufs[to_name(self.device, "handles")] = Buffer(self.host, 16, initial_value=bytes(self.context)+bytes(self.queue))
     Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, name="p").store(UPat(Ops.PROGRAM, name="prg")), lambda p, prg, d=self:
       p.store(UOp(Ops.BINARY, arg=d.function(prg.src[3].arg, prg.src[0].arg.function_name))) if p.device == d.device else None)])
+
+  @functools.cache
+  def compile(self, src:bytes) -> bytes: return CLCompiler(self).compile_cached(src.decode())
 
   @functools.cache
   def function(self, lib:bytes, name:str) -> bytes:

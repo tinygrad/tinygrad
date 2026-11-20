@@ -712,7 +712,7 @@ class TestCustomKernelSharded(unittest.TestCase):
     ref = next(c for c in calls if c.body.op is Ops.PROGRAM and c.body.src[0].arg.name == "store_1" and c.src[1].device == "CPU")
     wrong = to_program(kernel(UOp.placeholder((1,), dtypes.int, 0), 2), Device["CPU"].renderer)
     validated = validated.substitute({ref: ref.replace(src=(wrong, *ref.src[1:]))})
-    with self.assertRaises(AssertionError): run_linear(link_linear(validated), jit=True, wait=True)
+    with self.assertRaisesRegex(AssertionError, "Not equal to tolerance"): run_linear(link_linear(validated), jit=True, wait=True)
 
   def test_simple_sharded(self):
     devs = ("CPU:0", "CPU:1")

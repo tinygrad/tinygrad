@@ -151,7 +151,9 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, device:str|None=None) -> lis
 def exec_validate(ctx:ExecContext, call:UOp) -> list[float|None]:
   import numpy as np
   from tinygrad.dtype import _to_np_dtype
-  def array(b:UOp): return np.frombuffer(_buffer(b, ctx.input_uops).as_memoryview(), unwrap(_to_np_dtype(b.dtype)))
+  def array(b:UOp):
+    if (dt:=_to_np_dtype(b.dtype)) is None: raise RuntimeError(f"VALIDATE_WITH_CPU can't compare {b.dtype}, it has no numpy dtype")
+    return np.frombuffer(_buffer(b, ctx.input_uops).as_memoryview(), dt)
   np.testing.assert_allclose(array(call.src[1]), array(call.src[2]), rtol=1e-3, atol=1e-3)
   return []
 
