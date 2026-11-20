@@ -72,10 +72,11 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
   for i, (device, kcall, stats) in enumerate(kernels):
     et = ets[i] if i < len(ets) else None
     bufs = [_buffer(b, ctx.input_uops) for b in args] if stats is None else [cast(Buffer, ctx.input_uops[s].buffer) for s in stats[3]]
-    display_name = get_call_name(kcall, bufs, ctx.var_vals) if stats is None else stats[0]
+    display_name, estimates, key = (get_call_name(kcall, bufs, ctx.var_vals), estimate_uop(kcall), kcall.body.key) if stats is None else stats[:3]
+    op_est, mem_est, lds_est = (sym_infer(x, ctx.var_vals) for x in (estimates.ops, estimates.mem, estimates.lds))
     if PROFILE: # backdate the event to the start of the call, the viz matches a device range with the exec event before it
       outputs, inputs = get_call_outs_ins(kcall) if stats is None else stats[4]
-      cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": ctx.var_vals,
+      cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"program": key, "estimates": (op_est, mem_est, lds_est),
         "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}, ts=st))
     if DEBUG < (3 if stats is None and call.arg.hcq is not None else 2) or not ctx.update_stats: continue
     if et is None and not (call.arg.hcq is not None and call.arg.hcq.skip_wait):
@@ -83,9 +84,6 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
       et, st = float(perf_counter_us() - st)*1e-6, perf_counter_us()
       GlobalCounters.time_sum_s += et
 
-    estimates = estimate_uop(kcall) if stats is None else stats[1]
-    op_est, mem_est, lds_est = (sym_infer(x, ctx.var_vals) for x in (estimates.ops, estimates.mem, estimates.lds))
-    key = kcall.body.key if stats is None else stats[2]
     header_color = 'magenta' if ctx.jit else ('green' if key not in first_run_cache else None)
     ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
     flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
