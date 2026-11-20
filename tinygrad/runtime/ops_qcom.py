@@ -1,15 +1,15 @@
 from __future__ import annotations
-import os, ctypes, functools, mmap, struct, array, math, contextlib
+import os, ctypes, functools, mmap, struct, array, math, select, contextlib, time
 from typing import Any
 from tinygrad.device import Compiled, BufferStorage, BufferSpec, Buffer, Device, Allocator
 from tinygrad.renderer import TinyELF
 from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, ccall, cstruct, patch, unwrap_view, layout_args, pack_args, make_program
-from tinygrad.runtime.support.memory import MMIOInterface
+from tinygrad.runtime.support.memory import MMIOInterface, TLSFAllocator
 from tinygrad.runtime.support.system import FileIOInterface, System
-from tinygrad.runtime.autogen import kgsl, mesa, libc
+from tinygrad.runtime.autogen import kgsl, msm_drm, mesa, libc
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import IR3Renderer
-from tinygrad.helpers import getenv, mv_address, round_up, ceildiv, prod, is_image_shape, next_power2, flatten, to_name, PROFILE, IMAGE
+from tinygrad.helpers import getenv, mv_address, round_up, unwrap, ceildiv, prod, is_image_shape, next_power2, flatten, to_name, PROFILE, IMAGE
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_kernel_args
@@ -50,8 +50,8 @@ def pkt4_hdr(reg: int, cnt: int): return mesa.CP_TYPE4_PKT | cnt & 0x7F | parity
 def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
 
 @uopfunc
-def qcom_submit(req:UOp, ret:UOp, fd:UOp) -> UOp: # the kernel driver takes the command buffer
-  idir, base, nr, struct_t = kgsl.IOCTL_KGSL_GPU_COMMAND.args
+def qcom_submit(req:UOp, ret:UOp, fd:UOp, ioctl:functools.partial) -> UOp: # the kernel driver takes the command buffer
+  idir, base, nr, struct_t = ioctl.args
   ioctl_cmd = (idir << 30) | (ctypes.sizeof(struct_t) << 16) | (base << 8) | nr
   return ret.index(0).store(ccall(libc.dll.ioctl, fd, UOp.const(ioctl_cmd, dtypes.uint32), req.index(0))).sink()
 
@@ -195,11 +195,9 @@ class QCOMComputeQueue(HWQueue):
 
   def submit(self, cmdbuf:UOp) -> UOp:
     ib, ib_off = unwrap_view(cmdbuf)
-    fd, ctxid = [UOp.variable(n, 0, 2**31 - 1, dtypes.int32) for n in ("kgsl_fd", "kgsl_ctx")]
-    obj = cstruct(kgsl.struct_kgsl_command_object, gpuaddr=ib.getaddr(self.devs) + ib_off, size=cmdbuf.max_numel(), flags=kgsl.KGSL_CMDLIST_IB)
-    req = cstruct(kgsl.struct_kgsl_gpu_command, cmdlist=obj.getaddr(HCQ_RUNTIME_DEV.device), cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object),
-                  numcmds=1, context_id=ctxid)
-    return qcom_submit(req.after(cmdbuf), UOp.alloc((1,), dtypes.int32, device=self.devs[0], name="submit_ret"), fd)
+    fd, ctx = [UOp.variable(to_name(self.devs[0], n), 0, 2**31 - 1, dtypes.int32) for n in ("fd", "ctx")]
+    req = self.dev.iface.submit_req(ib.getaddr(self.devs) + ib_off, cmdbuf.max_numel(), ctx)
+    return qcom_submit(req.after(cmdbuf), UOp.alloc((1,), dtypes.int32, device=self.devs[0], name="submit_ret"), fd, self.dev.iface.submit_ioctl)
 
 class QCOMProgramData:
   def __init__(self, dev:QCOMDevice, obj:TinyELF):
@@ -286,33 +284,24 @@ def qcom_build_program(dev:QCOMDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[Q
 
 class QCOMAllocator(Allocator['QCOMDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
-    return self.dev._gpu_map(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
+    return self.dev.iface.map(options.external_ptr, size) if options.external_ptr else self.dev.iface.alloc(size)
 
   def _free(self, storage:BufferStorage, options:BufferSpec):
     self.dev.synchronize()
-    self.dev._gpu_free(storage)
+    self.dev.iface.free(storage)
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
 
 def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, f"{nm}_MASK")
 
-Compiled.pm_encode += PatternMatcher([
-  (UPat.sink(arg=KernelInfo("qcom_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: QCOMComputeQueue(s).encode()),
-])
+class KGSLIface:
+  count, submit_ioctl = 1, kgsl.IOCTL_KGSL_GPU_COMMAND
 
-class QCOMDevice(Compiled):
-  renderers = [QCOMCLRenderer, IR3Renderer]
-  timestamp_divider = 19.2
-
-  @property
-  def has_copy_queue(self) -> bool: return False
-
-  def __init__(self, device:str=""):
+  def __init__(self, dev:QCOMDevice, device_id:int):
     self.fd = FileIOInterface('/dev/kgsl-3d0', os.O_RDWR)
 
     flags = kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC \
       | flag("KGSL_CONTEXT_PRIORITY", getenv("QCOM_PRIORITY", 8)) | flag("KGSL_CONTEXT_PREEMPT_STYLE", kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN)
     self.ctx = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=flags).drawctxt_id
-    self._stack:Buffer|None = None # private-memory stack
 
     # Set max power
     struct.pack_into('IIQQ', pwr:=memoryview(bytearray(0x18)), 0, 1, self.ctx, mv_address(_:=memoryview(array.array('I', [1]))), 4)
@@ -321,26 +310,9 @@ class QCOMDevice(Compiled):
     # Load info about qcom device
     info = kgsl.struct_kgsl_devinfo()
     kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
-    self.gpu_id = (info.chip_id >> 24, (info.chip_id >> 16) & 0xFF, (info.chip_id >> 8) & 0xFF)
+    self.chip_id = info.chip_id
 
-    # a7xx start with 730x or 'Cxxx', a8xx starts 'Exxx'
-    if self.gpu_id[:2] >= (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={info.chip_id:#x}")
-
-    if PROFILE and self.gpu_id[:2] < (7, 3):
-      System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
-
-    super().__init__(device, QCOMAllocator(self), None,
-                     arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id)
-
-    self.var_vals = {"kgsl_fd": self.fd.fd, "kgsl_ctx": self.ctx}
-
-    # the cache flush target, and zeros: the samplers clamp to a black border
-    dummy = Buffer(self.device, 0x1000, options=BufferSpec(nolru=True), preallocate=True, allocator=self.allocator)
-    border_color = Buffer(self.device, 0x1000, options=BufferSpec(nolru=True), initial_value=bytes(0x1000), allocator=self.allocator)
-    stack = {to_name(self.device, "stack"): lambda b: self._ensure_stack_size(b.max_numel())}
-    Compiled.link_bufs |= stack | {to_name(self.device, "dummy"): dummy, to_name(self.device, "border_color"): border_color}
-
-  def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> BufferStorage:
+  def alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> BufferStorage:
     flags |= flag("KGSL_MEMALIGN", alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP
     if uncached: flags |= flag("KGSL_CACHEMODE", kgsl.KGSL_CACHEMODE_UNCACHED)
 
@@ -350,7 +322,7 @@ class QCOMDevice(Compiled):
     if fill_zeroes: ctypes.memset(va_addr, 0, size)
     return BufferStorage(va_addr, (alloc, True), MMIOInterface(va_addr, size, fmt='B'))
 
-  def _gpu_map(self, ptr:int, size:int) -> BufferStorage:
+  def map(self, ptr:int, size:int) -> BufferStorage:
     ptr_aligned, size_aligned = (ptr & ~0xfff), round_up(size + (ptr & 0xfff), 0x1000)
     dcache_flush()(ptr_line_aligned:=ptr & ~63, ceildiv(ptr + size - ptr_line_aligned, 64))
     try:
@@ -360,18 +332,103 @@ class QCOMDevice(Compiled):
       if e.errno == 14: return BufferStorage(ptr, (None, False), MMIOInterface(ptr, size, fmt='B'))
       raise RuntimeError("Failed to map external pointer to GPU memory") from e
 
-  def _gpu_free(self, storage:BufferStorage):
+  def free(self, storage:BufferStorage):
     if storage.meta[0] is None: return # external (gpu) ptr
     if not storage.meta[1]: kgsl.IOCTL_KGSL_SHAREDMEM_FREE(self.fd, gpuaddr=storage.meta[0].gpuaddr) # external (cpu) ptr
     else:
       kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=storage.meta[0].id)
       FileIOInterface.munmap(storage.buf, storage.meta[0].mmapsize)
 
+  def submit_req(self, ib:UOp, size:int, ctx:UOp) -> UOp:
+    obj = cstruct(kgsl.struct_kgsl_command_object, gpuaddr=ib, size=size, flags=kgsl.KGSL_CMDLIST_IB)
+    return cstruct(kgsl.struct_kgsl_gpu_command, cmdlist=obj.getaddr(HCQ_RUNTIME_DEV.device), cmdsize=obj.nbytes(), numcmds=1, context_id=ctx)
+
+  def sleep(self, tm:int): # wait for the last queued command
+    ts = kgsl.IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID(self.fd, context_id=self.ctx, type=kgsl.KGSL_TIMESTAMP_QUEUED).timestamp
+    with contextlib.suppress(OSError, RuntimeError):
+      kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.fd, context_id=self.ctx, timestamp=ts, timeout=tm)
+
+class MSMIface:
+  count, submit_ioctl = 1, msm_drm.DRM_IOCTL_MSM_GEM_SUBMIT
+
+  def __init__(self, dev:QCOMDevice, device_id:int):
+    self.dev, self.fd = dev, FileIOInterface('/dev/dri/renderD128', os.O_RDWR)
+    drv = ctypes.create_string_buffer(8)
+    msm_drm.DRM_IOCTL_VERSION(self.fd, name_len=len(drv), name=drv) # the render node can belong to any drm driver
+    if drv.value != b"msm": raise RuntimeError(f"renderD128 is {drv.value.decode()}, not msm")
+
+    # vm_bind: the gpu addresses are ours, a submit runs a cmdbuf by its address with no bo list. enabled before anything creates the vm
+    msm_drm.DRM_IOCTL_MSM_SET_PARAM(self.fd, pipe=msm_drm.MSM_PIPE_3D0, param=msm_drm.MSM_PARAM_EN_VM_BIND, value=1)
+    self.chip_id = self._param(msm_drm.MSM_PARAM_CHIP_ID) & 0xffffffff # the upper bits can carry the speedbin
+    self.va_allocator = TLSFAllocator(self._param(msm_drm.MSM_PARAM_VA_SIZE), base=self._param(msm_drm.MSM_PARAM_VA_START))
+    self.ctx, self.bind_queue = [msm_drm.DRM_IOCTL_MSM_SUBMITQUEUE_NEW(self.fd, flags=f).id for f in (0, msm_drm.MSM_SUBMITQUEUE_VM_BIND)]
+
+  def _param(self, param:int) -> int: return msm_drm.DRM_IOCTL_MSM_GET_PARAM(self.fd, pipe=msm_drm.MSM_PIPE_3D0, param=param).value
+
+  def alloc(self, size:int) -> BufferStorage:
+    gem = msm_drm.DRM_IOCTL_MSM_GEM_NEW(self.fd, size=round_up(size, 0x1000), flags=msm_drm.MSM_BO_WC | msm_drm.MSM_BO_NO_SHARE)
+    va_addr = self.va_allocator.alloc(gem.size)
+    bind_op = msm_drm.struct_drm_msm_vm_bind_op(op=msm_drm.MSM_VM_BIND_OP_MAP, handle=gem.handle, iova=va_addr, range=gem.size)
+    bind = msm_drm.DRM_IOCTL_MSM_VM_BIND(self.fd, flags=msm_drm.MSM_VM_BIND_FENCE_FD_OUT, nr_ops=1, queue_id=self.bind_queue, op=bind_op)
+    select.select([bind.fence_fd], [], []) # binds are async and submits don't wait for them
+    os.close(bind.fence_fd)
+
+    mmap_off = msm_drm.DRM_IOCTL_MSM_GEM_INFO(self.fd, handle=gem.handle, info=msm_drm.MSM_INFO_GET_OFFSET).value
+    cpu_addr = self.fd.mmap(0, gem.size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, mmap_off)
+    return BufferStorage(va_addr, gem, MMIOInterface(cpu_addr, size, fmt='B'))
+
+  def free(self, storage:BufferStorage):
+    unmap_op = msm_drm.struct_drm_msm_vm_bind_op(op=msm_drm.MSM_VM_BIND_OP_UNMAP, iova=storage.buf, range=storage.meta.size)
+    msm_drm.DRM_IOCTL_MSM_VM_BIND(self.fd, nr_ops=1, queue_id=self.bind_queue, op=unmap_op) # binds run in order: a map of this va waits for it
+    self.va_allocator.free(storage.buf)
+    FileIOInterface.munmap(unwrap(storage.host).addr, storage.meta.size)
+    msm_drm.DRM_IOCTL_GEM_CLOSE(self.fd, handle=storage.meta.handle)
+
+  def submit_req(self, ib:UOp, size:int, ctx:UOp) -> UOp:
+    cmd = cstruct(msm_drm.struct_drm_msm_gem_submit_cmd, type=msm_drm.MSM_SUBMIT_CMD_BUF, size=size, iova=ib)
+    return cstruct(msm_drm.struct_drm_msm_gem_submit, flags=msm_drm.MSM_PIPE_3D0, nr_cmds=1, cmds=cmd.getaddr(HCQ_RUNTIME_DEV.device), queueid=ctx)
+
+  def sleep(self, tm:int): # the timeout is absolute monotonic time
+    fence = self.dev.timeline.host.view(fmt='Q')[1] # the queue numbers its submits from 1, so does the timeline: a batch is one submit
+    deadline = msm_drm.struct_drm_msm_timespec(*divmod(time.monotonic_ns() + tm * 1000000, 1000000000))
+    with contextlib.suppress(OSError, RuntimeError): msm_drm.DRM_IOCTL_MSM_WAIT_FENCE(self.fd, fence=fence, timeout=deadline, queueid=self.ctx)
+
+Compiled.pm_encode += PatternMatcher([
+  (UPat.sink(arg=KernelInfo("qcom_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: QCOMComputeQueue(s).encode()),
+])
+
+class QCOMDevice(Compiled):
+  renderers = [QCOMCLRenderer, IR3Renderer]
+  ifaces = [KGSLIface, MSMIface]
+  timestamp_divider = 19.2
+
+  @property
+  def has_copy_queue(self) -> bool: return False
+
+  def __init__(self, device:str=""):
+    self.iface = self._select_iface(device)
+    self.gpu_id = ((chip_id:=self.iface.chip_id) >> 24, (chip_id >> 16) & 0xFF, (chip_id >> 8) & 0xFF)
+    self._stack:Buffer|None = None # private-memory stack
+
+    # a7xx start with 730x or 'Cxxx', a8xx starts 'Exxx'
+    if self.gpu_id[:2] >= (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={chip_id:#x}")
+
+    if PROFILE and isinstance(self.iface, KGSLIface):
+      System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
+
+    super().__init__(device, QCOMAllocator(self), None,
+                     arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id)
+
+    self.var_vals = {to_name(self.device, "fd"): self.iface.fd.fd, to_name(self.device, "ctx"): self.iface.ctx}
+
+    # the cache flush target, and zeros: the samplers clamp to a black border
+    dummy = Buffer(self.device, 0x1000, options=BufferSpec(nolru=True), preallocate=True, allocator=self.allocator)
+    border_color = Buffer(self.device, 0x1000, options=BufferSpec(nolru=True), initial_value=bytes(0x1000), allocator=self.allocator)
+    stack = {to_name(self.device, "stack"): lambda b: self._ensure_stack_size(b.max_numel())}
+    Compiled.link_bufs |= stack | {to_name(self.device, "dummy"): dummy, to_name(self.device, "border_color"): border_color}
+
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
-    if sig[0] < value:
-      ts = kgsl.IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID(self.fd, context_id=self.ctx, type=kgsl.KGSL_TIMESTAMP_QUEUED).timestamp
-      with contextlib.suppress(OSError, RuntimeError):
-        kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.fd, context_id=self.ctx, timestamp=ts, timeout=int(timeout or self.wait_timeout_ms))
+    if sig[0] < value: self.iface.sleep(int(timeout or self.wait_timeout_ms))
     super()._wait_signal(sig, value, timeout)
 
   def _ensure_stack_size(self, sz:int) -> Buffer: # one stack for the device, grown to the deepest program's private memory
@@ -382,4 +439,5 @@ class QCOMDevice(Compiled):
 
   def _at_profile_finalize(self):
     super()._at_profile_finalize()
-    with contextlib.suppress(RuntimeError): System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", "10", "Failed to reenable suspend mode")
+    if isinstance(self.iface, KGSLIface):
+      with contextlib.suppress(RuntimeError): System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", "10", "Failed to reenable suspend mode")
