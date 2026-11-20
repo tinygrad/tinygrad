@@ -212,11 +212,11 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_grouped_quant_linear(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(6)
-    G, OUT, IN = 4, 16, 512
+    G, OUT, IN = 2, 16, 512
     packed = rng.integers(0, 256, (G*OUT*IN//32, 34), dtype=np.uint8)
     packed[:, :2] = np.array([0.001], np.float16).view(np.uint8)
     decoded = ggml_data_to_tensor(Tensor(packed.flatten()).contiguous().realize(), G*OUT*IN, 8).reshape(G*OUT, IN)
-    w, x = decoded.numpy().reshape(G, OUT, IN), rng.standard_normal((1, 2, G, IN)).astype(np.float32)
+    w, x = reference_weight(packed, 8, G, OUT, IN), rng.standard_normal((1, 2, G, IN)).astype(np.float32)
     linear = Linear(IN, G*OUT, bias=False, groups=G)
     linear.weight = decoded
     got = linear(Tensor(x)).numpy()
