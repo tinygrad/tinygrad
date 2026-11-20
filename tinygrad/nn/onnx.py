@@ -302,6 +302,11 @@ class OnnxRunner:
     self.graph_inputs = {i["name"]: i["parsed_type"] for i in graph["input"] if i["name"] not in self.graph_values}
     self.graph_outputs = tuple(o["name"] for o in graph["output"])
     self.graph_nodes = tuple(n["parsed_node"] for n in graph["node"])
+    # a scale or zero point of one element is a const: quantized math folds it
+    for n in self.graph_nodes:
+      if n.op in {"QuantizeLinear", "DequantizeLinear"}:
+        for name in n.inputs[1:3]:
+          if isinstance(t:=self.graph_values.get(name), Tensor) and t.numel() == 1: self.graph_values[name] = Tensor(t.item(), dtype=t.dtype)
     # track names from initializers and Constant nodes for fast path optimizations
     self.const_names: set[str] = set(self.graph_values.keys()) | {o for n in self.graph_nodes if n.op == "Constant" for o in n.outputs}
 

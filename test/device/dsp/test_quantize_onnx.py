@@ -117,7 +117,8 @@ class TestQuantizeOnnx(unittest.TestCase):
     };
     __attribute__((noinline)) void fxn(unsigned char* restrict __attribute__((align_value(128))) data0,
                                        unsigned char* restrict __attribute__((align_value(128))) data1,
-                                       signed char* restrict __attribute__((align_value(128))) data2) {
+                                       signed char* restrict __attribute__((align_value(128))) data2, int core) {
+      if (core != 0) return;
       for (int ridx0 = 0; ridx0 < 512; ridx0++) {
         int alu0 = (ridx0<<9);
         for (int ridx1 = 0; ridx1 < 4; ridx1++) {

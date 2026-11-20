@@ -99,8 +99,8 @@ class Scheduler:
       if amt == 0: amt = int(rng.vmax+1)
       is_reduce = rng in self.reduce_ranges
       if new_type is AxisType.UPCAST:
-        if is_reduce: check(amt <= 32, "don't unroll more than 32")
-        else: check(self.ren.target.device == "DSP" or amt <= 16, "don't upcast more than 16")
+        if is_reduce: check(amt <= max(32, self.ren.vector_lanes), "don't unroll more than 32 (or a vector)")
+        else: check(self.ren.vector_lanes > 0 or amt <= 16, "don't upcast more than 16")
       # prevents METAL compiler hangs
       if self.reduceop is not None and ((new_type is AxisType.LOCAL and is_reduce) or self.group_for_reduces):
         upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, reduce=False)+self.axes_of(AxisType.WARP, AxisType.LOCAL)])

@@ -438,6 +438,21 @@ jobs:
 
 # ****** Feature Tests ******
 
+  testdevectorize:
+    name: Linux (devectorize)
+    runs-on: *linux
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: devectorize-minimal
+        deps: testing_unit
+    - name: Test DEV=CPU DEVECTORIZE=0
+      run: DEV=CPU DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/runtime/test_ops.py
+
   testdsp:
     name: Linux (DSP)
     runs-on: *linux

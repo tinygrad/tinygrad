@@ -1,29 +1,66 @@
 from __future__ import annotations
-import ctypes, os, mmap, tempfile, pathlib, array, threading, contextlib, subprocess, struct
+import ctypes, os, mmap, tempfile, pathlib, array, threading, contextlib, subprocess, struct, itertools
 from tinygrad.device import BufferStorage, MMIOInterface, BufferSpec, Compiled, Allocator, Program
 from tinygrad.renderer import Compiler, TinyELF
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat
 from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing, Target, unwrap
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
+# a buffer stays mapped until another (allocation, by its id) is passed: a jit passes the same ones. a thread runs on a stack of STACK bytes
+DSP_RUNTIME = """typedef struct { int uid, len; void *p; } map_t;
+static inline void *map(map_t *m, int uid, int len, int fd) {
+  if (m->uid != uid) { if (m->p) HAP_munmap(m->p, m->len); *m = (map_t){uid, len, HAP_mmap(0, len, 3, 0, fd, 0)}; }
+  return m->p;
+}
+typedef unsigned long qurt_thread_t;
+typedef struct { char name[16]; unsigned char tcb_partition, affinity; unsigned short priority; unsigned char asid, bus_priority;
+  unsigned short timetest_id; unsigned int stack_size; void *stack_addr; char padding[96]; } qurt_thread_attr_t;
+int qurt_thread_create(qurt_thread_t*, qurt_thread_attr_t*, void (*)(void*), void*); int qurt_thread_join(qurt_thread_t, int*);
+void qurt_thread_exit(int); void *malloc(unsigned int); void free(void*);
+#define STACK 0x10000
+static inline qurt_thread_t start_thread(void (*f)(void*), void *arg, void *stack) {
+  qurt_thread_attr_t attr = {.priority=100, .stack_size=STACK, .stack_addr=stack}; qurt_thread_t th;
+  qurt_thread_create(&th, &attr, f, arg);
+  return th;
+}"""
+
 class DSPRenderer(ClangRenderer):
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_typedef = "__attribute__((noinline)) void"
   packed_args = False
+  # (HVX v65 has no float)
+  vector_lanes, vector_floats = 128, False
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
 
+  # a kernel runs on the 2 HVX contexts: its outermost loop is split between 2 threads (cores) if it has all the global stores, else core 0 runs it
+  extra_args = ["int core"]
+  string_rewrite = PatternMatcher([(UPat(Ops.RANGE, name="x"), lambda ctx,x: f"for (int {ctx[x]} = (core*{ctx[x.src[0]]})/2; {ctx[x]} < "
+                                    f"((core+1)*{ctx[x.src[0]]})/2; {ctx[x]}++) {{" if x is ctx.parallel else None)]) + ClangRenderer.string_rewrite
+
   def __init__(self, target:Target): self.target, self.compiler = target, DSPCompiler()
+
+  def render(self, uops:list[UOp]) -> str:
+    depth, top = 0, list[UOp]()
+    for u in uops:
+      if u.op is Ops.RANGE: top, depth = top + [u] * (depth == 0), depth + 1
+      if u.op is Ops.END: depth -= 1
+    stores = [u for u in uops if u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.GLOBAL]
+    self.parallel = top[0] if stores and len(top) == 1 and all(top[0] in st.ranges for st in stores) else None
+    return super().render(uops)
+
+  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
+    return super().render_kernel(function_name, ([] if self.parallel is not None else ["  if (core != 0) return;"]) + kernel, bufs, uops, prefix)
 
   def _render_defines(self, uops) -> list[str]:
     return ['''/* DSP boilerplate */ struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency;
       _Bool set_dcvs_params; short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3];};''','int HAP_power_set(void*, void*);',
       'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
       'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
-      'unsigned long long HAP_perf_get_time_us(void);'] + super()._render_defines(uops)
+      'unsigned long long HAP_perf_get_time_us(void);', DSP_RUNTIME] + super()._render_defines(uops)
 
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]]) -> str:
     msrc = ['int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
@@ -35,12 +72,17 @@ class DSPRenderer(ClangRenderer):
              for i,b in enumerate(bufs)]
     gbufs = [i for i,b in enumerate(bufs) if b[1][0].addrspace == AddrSpace.GLOBAL]
     msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{j}];' for j,i in enumerate(gbufs)]
-    msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{j+3}].dma.fd,0)+off{i};' for j,i in enumerate(gbufs)]
+    msrc += [f'static map_t maps[{len(gbufs)}];'] + [f'void *buf_{i} = map(&maps[{j}], ((int*)pra[0].buf.pv)[{2*i+1}], sz_or_val_{i}, '
+                                                    f'pra[{j+3}].dma.fd) + off{i};' for j,i in enumerate(gbufs)]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
     fbufs = [(f'buf_{i}' if b[1][0].addrspace == AddrSpace.GLOBAL else f'sz_or_val_{i}') for i,b in enumerate(bufs)]
-    msrc += [f"{function_name}({', '.join(fbufs)});"]
+    # core 1 runs on a thread while the caller runs core 0
+    args = [f"{self._render_dtype(b[1][0].dtype) if b[1][0].addrspace == AddrSpace.ALU else 'void*'} a{i};" for i,b in enumerate(bufs)]
+    msrc = ['typedef struct { ' + ' '.join(args) + ' } kargs_t;', f"static void core1(void *p) {{ kargs_t *a = p; "
+            f"{function_name}({', '.join([f'a->a{i}' for i in range(len(bufs))] + ['1'])}); qurt_thread_exit(0); }}"] + msrc
+    msrc += [f"kargs_t args = {{{', '.join(fbufs)}}}; void *stack = malloc(STACK); qurt_thread_t th = start_thread(core1, &args, stack);",
+             f"{function_name}({', '.join(fbufs+['0'])}); int status; qurt_thread_join(th, &status); free(stack);"]
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
-    msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if b[1][0].addrspace == AddrSpace.GLOBAL]
     msrc += ["return 0; }"]
     return '\n'.join(msrc)
 
@@ -67,22 +109,24 @@ class DSPProgram(Program['DSPDevice']):
     pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray(len(args)*8)), off_mv:=memoryview(bytearray(len(bufs)*4))],
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     for i,(b,(_,a,dt,_)) in enumerate(zip(args, self.signature)):
-      struct.pack_into(unwrap(dt.fmt) if a is AddrSpace.ALU else 'i', var_vals_mv, i*8, b if a is AddrSpace.ALU else b.size)
+      struct.pack_into(unwrap(dt.fmt) if a is AddrSpace.ALU else 'ii', var_vals_mv, i*8, *((b,) if a is AddrSpace.ALU else (b.alloc[1], b.alloc[0])))
     off_mv.cast('I')[:] = array.array('I', tuple(b.offset for b in bufs))
     self.dev.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
     return timer[0] / 1e6
 
 class DSPBuffer:
-  def __init__(self, va_addr:int, size:int, share_info, offset:int=0):
-    self.va_addr, self.size, self.share_info, self.offset = va_addr, size, share_info, offset
+  # (alloc is the id and the size of its allocation)
+  def __init__(self, va_addr:int, size:int, share_info, offset:int=0, alloc:tuple[int, int]=(0, 0)):
+    self.va_addr, self.size, self.share_info, self.offset, self.alloc = va_addr, size, share_info, offset, alloc
 
 class DSPAllocator(Allocator['DSPDevice']):
+  uids = itertools.count(1)
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     if getenv("MOCKDSP"): fd, share_info, flags = -1, None, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS
     else:
       b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
       fd, flags = (share_info:=qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)).fd, mmap.MAP_SHARED
-    opaque = DSPBuffer(libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, flags, fd, 0), size, share_info, offset=0)
+    opaque = DSPBuffer(libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, flags, fd, 0), size, share_info, offset=0, alloc=(next(self.uids), size))
     return BufferStorage(opaque, opaque.share_info, MMIOInterface(opaque.va_addr, size))
 
   @suppress_finalizing
@@ -95,11 +139,11 @@ class DSPAllocator(Allocator['DSPDevice']):
   def _as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
   def _copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, mv_address(src), src.nbytes)
   def _copyout(self, dest:memoryview, src:DSPBuffer): ctypes.memmove(mv_address(dest), src.va_addr, dest.nbytes)
-  def _offset(self, buf, size:int, offset:int): return DSPBuffer(buf.va_addr+offset, size, buf.share_info, buf.offset+offset)
+  def _offset(self, buf, size:int, offset:int): return DSPBuffer(buf.va_addr+offset, size, buf.share_info, buf.offset+offset, buf.alloc)
 
 class DSPCompiler(Compiler):
   def __init__(self, mock:bool=False):
-    self.mock, compiler_args = mock, "--target=hexagon -mcpu=hexagonv65 -fuse-ld=lld -nostdlib -mhvx=v65 -mhvx-length=128b"
+    self.mock, compiler_args = mock, "--target=hexagon -mcpu=hexagonv65 -fuse-ld=lld -nostdlib -mhvx=v65 -mhvx-length=128b -Wl,-z,norelro"
     if mock: self.args = f"-static {compiler_args}"
     else:
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
@@ -143,7 +187,7 @@ class MockDSPRenderer(DSPRenderer):
         msrc.append(f"{self._render_dtype(b[1][0].dtype)} val{i}; read(0, &val{i}, {b[1][0].dtype.itemsize});")
     msrc.append("unsigned int st = inscount();")
     params = [(f'(void*)buf{i}' if b[1][0].addrspace == AddrSpace.GLOBAL else f'val{i}') for i,b in enumerate(bufs)]
-    msrc.append(f"{function_name}({', '.join(params)});")
+    msrc.append(f"{function_name}({', '.join(params+['0'])}); {function_name}({', '.join(params+['1'])});")
     msrc.append("unsigned int et = inscount() - st; write(1, &et, sizeof(et));")
     for i,b in enumerate(bufs):
       if b[1][0].addrspace == AddrSpace.GLOBAL: msrc.append(f"write(1, buf{i}, {b[1][0].max_numel()*b[1][0].dtype.itemsize});")
@@ -166,22 +210,19 @@ class DSPDevice(Compiled):
 
   def open_lib(self, lib):
     self.binded_lib, self.binded_lib_off = lib, 0
-    fp = "file:///tinylib?entry&_modver=1.0&_dom=cdsp\0"
+    # (each lib is opened by its own name: the DSP keeps one lib of a name)
+    fp = f"file:///tinylib{len(self.handles)}?entry&_modver=1.0&_dom=cdsp\0"
     pra, _, _, _ = rpc_prep_args(ins=[memoryview(array.array('I', [len(fp), 0xff])), memoryview(bytearray(fp.encode()))],
                                  outs=[o1:=memoryview(bytearray(0x8)), o2:=memoryview(bytearray(0xff))])
     qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=rpc_sc(method=0, ins=2, outs=2), pra=pra)
     if o1.cast('i')[1] < 0: raise RuntimeError(f"Cannot open lib: {o2.tobytes().decode()}")
     return o1.cast('I')[0]
 
-  def close_lib(self, handle):
-    pra, _, _, _ = rpc_prep_args(ins=[memoryview(array.array('I', [handle, 0xff]))], outs=[memoryview(bytearray(0x8)), memoryview(bytearray(0xff))])
-    qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=rpc_sc(method=1, ins=1, outs=2), pra=pra)
-
   def exec_lib(self, lib, sc, args, fds, attrs):
+    # a lib stays open (until the connection resets)
     def _exec_lib():
-      handle = self.open_lib(lib)
+      if (handle:=self.handles.get(lib)) is None: handle = self.handles[lib] = self.open_lib(lib)
       qcom_dsp.FASTRPC_IOCTL_INVOKE_ATTRS(self.rpc_fd, fds=fds, attrs=attrs, inv=qcom_dsp.struct_fastrpc_ioctl_invoke(handle=handle, sc=sc, pra=args))
-      self.close_lib(handle)
     try: _exec_lib()
     except (OSError, PermissionError):
       # DSP might ask for a connection reset or just fail with operation not permitted, try to reset connection.
@@ -190,6 +231,7 @@ class DSPDevice(Compiled):
       except (OSError, PermissionError) as e: raise RuntimeError(e)
 
   def init_dsp(self):
+    self.handles: dict[bytes, int] = {}
     if hasattr(self, 'rpc_fd'):
       with contextlib.suppress(OSError):
         qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=4, sc=rpc_sc(method=2, ins=0, outs=0)) # pylint: disable=access-member-before-definition
@@ -238,7 +280,7 @@ class RPCListener(threading.Thread):
       status = 0 # reset status, will set if error
       if sc == 0x20200: pass # greating
       elif sc == 0x13050100: # open
-        try: out_args[0].cast('I')[0] = TINYFD if (name:=in_args[3].tobytes()[:-1].decode()) == "tinylib" else os.open(name, os.O_RDONLY)
+        try: out_args[0].cast('I')[0] = TINYFD if (name:=in_args[3].tobytes()[:-1].decode()).startswith("tinylib") else os.open(name, os.O_RDONLY)
         except OSError: status = 1
       elif sc == 0x3010000:
         if (fd:=in_args[0].cast('I')[0]) != TINYFD: os.close(fd)
