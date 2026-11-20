@@ -13,7 +13,9 @@ from tinygrad.runtime.support.system import PCIDevice, USBPCIDevice, System, fil
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.engine.realize import get_call_kernel_args
-from tinygrad.runtime.autogen import libc
+from tinygrad.runtime.autogen import mtfw, libc
+
+def mt_off(typ, name:str) -> int: return next(f[2] for f in typ._real_fields_ if f[0] == name)
 
 # **** mtdev ****
 
@@ -395,19 +397,15 @@ CDM_EXECUTION_ADDRESS = 0x81e0e00000
 
 def build_submission(launch_id:int=1, execution_address:int=CDM_EXECUTION_ADDRESS) -> bytes:
   """Build one compute submission with its CDM kick and error region."""
-  head = bytearray(0x58)
-  struct.pack_into('<II',head,36,0xffffffff,0x58)
-  struct.pack_into('<I',head,44,2)
-  struct.pack_into('<Q',head,56,launch_id)
+  head = mtfw.MTFW_SUBMISSION_HEAD()
+  head.timestampAddr, head.fwCswBufer = 0x8000438200, 0x6800000000
+  head.retryCount, head.subRegionDescStartOffset, head.subRegionDescNums = 0xffffffff, mtfw.MTFW_SUBMISSION_HEAD.SIZE, 2
+  head.cbId = launch_id
 
-  cdm = bytearray(24)
-  struct.pack_into('<I',cdm,0,2)  # MTFW_SUB_REGION_CDM
-  struct.pack_into('<I',cdm,8,0xa0)
-  struct.pack_into('<I',cdm,16,0x198)
-  error = bytearray(24)
-  struct.pack_into('<I',error,0,10)  # MTFW_SUB_REGION_ERROR_BUFFER
-  struct.pack_into('<Q',error,8,execution_address)
-  struct.pack_into('<I',error,16,8)
+  cdm = mtfw.MTFW_SUBMISSION_REGION_DESC()
+  cdm.regionType, cdm.regionStart.offset, cdm.regionSize = mtfw.MTFW_SUB_REGION_CDM, 0xa0, 0x198
+  error = mtfw.MTFW_SUBMISSION_REGION_DESC()
+  error.regionType, error.regionStart.gpuAddr, error.regionSize = mtfw.MTFW_SUB_REGION_ERROR_BUFFER, execution_address, 8
 
   kick = bytearray(0x1a8)
   struct.pack_into('<QQ',kick,0x18,0x1800000000,0x2000000001)
@@ -429,7 +427,7 @@ def build_submission(launch_id:int=1, execution_address:int=CDM_EXECUTION_ADDRES
   struct.pack_into('<Q',kick,0x198,0x207820c000)
   struct.pack_into('<I',kick,0x1a0,0x200)
 
-  raw = head
+  raw = bytearray(bytes(head))
   struct.pack_into('<Q',raw,0x8,0)
   struct.pack_into('<Q',raw,0x10,0x8000438200)
   struct.pack_into('<Q',raw,0x18,0x6800000000)
@@ -462,16 +460,23 @@ class MTFirmwareLayout:
     self.ccb = FWIF_OFF + 0x40ee0
 
 def build_firmware(lay:MTFirmwareLayout) -> bytes:
-  fw = bytearray(0x40ee0)
-  for off,fmt,value in [(16,'<Q',META_BASE+lay.watchdog),(24,'<Q',META_BASE+lay.ccb),(64,'<I',5),(159336,'<Q',META_BASE+lay.trace),
-                        (159352,'<Q',META_BASE+lay.perf),(159368,'<I',1),(159376,'<Q',META_BASE+lay.fault),(159384,'<Q',META_BASE+lay.gpu),
-                        (159440,'<I',25),(159444,'<I',1600000000)]: struct.pack_into(fmt,fw,off,value)
-  cfg = 159456
-  for off,count,base in [(8,2,0),(24,4,0x200),(56,6,0x600),(104,8,0xc00),(168,10,0x1400),(248,12,0x1e00),(344,14,0x2a00),(456,16,0x3800)]:
-    for i in range(count): struct.pack_into('<Q',fw,cfg+off+i*8,0xd9bfff0000|base+i*0x100)
-  for off,value in [(584,0xe0ffe00000),(592,0xda00000000),(600,0xe000000000),(608,0xec00000000),
-                    (616,0xec40000000),(624,0xb000000000),(632,0xeb00000000)]: struct.pack_into('<Q',fw,cfg+off,value)
-  struct.pack_into('<I',fw,cfg+640,0xfff80000)
+  fw = mtfw.struct_MTFW_FWIF_TAG()
+  fw.watchDog = META_BASE + lay.watchdog
+  fw.ccbQueueArrayAddr, fw.ccbQueueArrayNum = META_BASE + lay.ccb, mtfw.MTFW_CCB_TYPE_MAX_NUM
+  fw.traceBufAddr = META_BASE + lay.trace
+  fw.metaPerfEventBufCtrlArray, fw.metaPerfEventBufCtrlNum = META_BASE + lay.perf, 1
+  fw.faultDumpBuffer, fw.gpuUtilBufAddr = META_BASE + lay.fault, META_BASE + lay.gpu
+  fw.socTimerFreq, fw.gpuFrequence = 25, 1600000000
+  cfg = fw.fwCfgs.cfg
+  for name,count,base in [('flStateAddrsSCG',2,0),('flStateAddrsMCG2',4,0x200),('flStateAddrsMCG3',6,0x600),
+                          ('flStateAddrsMCG4',8,0xc00),('flStateAddrsMCG5',10,0x1400),('flStateAddrsMCG6',12,0x1e00),
+                          ('flStateAddrsMCG7',14,0x2a00),('flStateAddrsMCG8',16,0x3800)]:
+    for i in range(count): getattr(cfg, name)[i] = 0xd9bfff0000 | base + i * 0x100
+  cfg.yuvCoefficientAddr = 0xe0ffe00000
+  cfg.pdsHeapBaseAddr, cfg.uscHeapBaseAddr = 0xda00000000, 0xe000000000
+  cfg.fbcdcHeapBaseAddr, cfg.fbcdcLargeHeapBaseAddr = 0xec00000000, 0xec40000000
+  cfg.texStateHeapBaseAddr, cfg.componentCtrlHeapBaseAddr = 0xb000000000, 0xeb00000000
+  cfg.dmKillShaderOffset = 0xfff80000
   return bytes(fw)
 
 class MTFirmware:
@@ -583,16 +588,15 @@ class MTFirmware:
 
 MT_TOKEN_BASE = 0x103
 MT_HOST_PRIVATE = 0x4d544e4f50
-MT_CCB_ITEM_SIZE = 0x5b0
+MT_CCB_ITEM_SIZE = mtfw.MTFW_CCB_ITEM.SIZE
 
 def build_ccb_item(generation:int, submission_size:int) -> bytes:
-  item = bytearray(MT_CCB_ITEM_SIZE)
-  struct.pack_into('<I',item,8,104)
-  struct.pack_into('<Q',item,24,MT_HOST_PRIVATE)
-  struct.pack_into('<QQ',item,56,ROOT_BASE,generation)
-  struct.pack_into('<Q',item,1376,SUBMISSION_VA)
-  struct.pack_into('<I',item,1384,submission_size)
-  return bytes(item)
+  ci = mtfw.MTFW_CCB_ITEM()
+  ci.submissionCmd, ci.hostPrivateData = mtfw.MTFW_SUBMISSION_CMD_GPU_CDM, MT_HOST_PRIVATE
+  sp = ci.ccbItemPara.submissionPara
+  sp.pageTableRootAddr, sp.pageTableGeneration = ROOT_BASE, generation
+  sp.submissionAddr, sp.submissionSize = SUBMISSION_VA, submission_size
+  return bytes(ci)
 
 @dataclasses.dataclass
 class MTCCB:
@@ -773,7 +777,8 @@ class MTLaunch(MTFirmware):
       self._write(0x138, 0xffffffff, 4)
       self._write(0xe160, 0)
       self._write(0xe198, 0)
-      self.ccb = MTCCB(self.layout.item + 3 * 4096 * MT_CCB_ITEM_SIZE, self.layout.ccb + 3 * 0x4030)
+      self.ccb = MTCCB(self.layout.item + mtfw.MTFW_CCB_TYPE_CDM * 4096 * MT_CCB_ITEM_SIZE,
+                       self.layout.ccb + mtfw.MTFW_CCB_TYPE_CDM * mtfw.MTFW_CCB_QUEUE.SIZE)
 
 # **** generated ****
 
@@ -1067,7 +1072,8 @@ def mt_poll(link:UOp, addr:UOp, target:UOp) -> UOp:
   done = (response >> 32).cast(dtypes.u64)
   poll = done.backedge(loop,(done < target) & (get_time_ms(done) - start < int(float(os.environ.get('MT_TIMEOUT','5'))*1000))).sink()
   status = response & 0xffffffff
-  bad = ((done.after(poll) != target).cast(dtypes.u64) << 63) | (((status&0xffffffff) != 0).cast(dtypes.u64)*target << 32) | (status & 0xffffffff)
+  bad = ((done.after(poll) != target).cast(dtypes.u64) << 63) | \
+    (((status&0xffffffff) != mtfw.MTFW_CCB_RESP_DONE).cast(dtypes.u64)*target << 32) | (status & 0xffffffff)
   return usb_fail(link.after(poll),bad)
 
 
@@ -1200,7 +1206,7 @@ class MTComputeQueue(HWQueue):
       token = (MT_TOKEN_BASE+seq).cast(dtypes.u64)
       item_size = MT_CCB_ITEM_SIZE
       item = UOp.alloc((item_size,),dtypes.u8,device='CPU')
-      item = patch(item,[(16,token)],build_ccb_item(generation,len(packet)))
+      item = patch(item,[(mt_off(mtfw.MTFW_CCB_ITEM,'ccbItemToken'),token)],build_ccb_item(generation,len(packet)))
       add(usb_stream(link.after(deps),UOp.const(launch.v.addr+ccb.item_off,dtypes.u64),item,UOp.const(item_size,dtypes.int),True))
       args_off = launch.backing_offsets[ARGS_VA]
       add(usb_stream(link,UOp.const(launch.backing.addr+args_off,dtypes.u64),deps,UOp.const(0x1000,dtypes.int),True))
@@ -1209,10 +1215,11 @@ class MTComputeQueue(HWQueue):
         add(usb_stream(link,UOp.const(launch.backing.addr+grid_off,dtypes.u64),grid_deps,UOp.const(0x1000,dtypes.int),True))
       next_wr = ((idx + 1) & 0xff).cast(dtypes.u32)
       write(launch.v.addr+ccb.queue_off+idx*8,struct.pack('<Q',META_BASE+ccb.item_off))
-      add(usb_poke(link,launch.v.addr+ccb.queue_off+0x4000,next_wr))
-      add(usb_poke(link,self.dev.mt.mmio.addr+0xc00b00,UOp.const(3,dtypes.u32)))
-      add(mt_poll(link,launch.v.addr+ccb.queue_off+0x1004+idx*0x30,token))
-      add(usb_poke(link,launch.v.addr+ccb.queue_off+0x4028,next_wr))
+      add(usb_poke(link,launch.v.addr+ccb.queue_off+mt_off(mtfw.MTFW_CCB_QUEUE,'reqCcbCtrl'),next_wr))
+      add(usb_poke(link,self.dev.mt.mmio.addr+0xc00b00,UOp.const(mtfw.MTFW_CCB_TYPE_CDM,dtypes.u32)))
+      response_off = mt_off(mtfw.MTFW_CCB_QUEUE,'respCcbQ') + mt_off(mtfw.MTFW_CCB_RESP,'respValue') + idx*mtfw.MTFW_CCB_RESP.SIZE
+      add(mt_poll(link,launch.v.addr+ccb.queue_off+response_off,token))
+      add(usb_poke(link,launch.v.addr+ccb.queue_off+mt_off(mtfw.MTFW_CCB_QUEUE,'respCcbCtrl')+mt_off(mtfw.MTFW_RING_CTRL,'rdIdx'),next_wr))
       add(link.index(2).store(next_wr.cast(dtypes.u64)))
       add(link.index(3).store(seq+1))
       self.dev.uploaded_write_map = write_map
