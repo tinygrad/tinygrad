@@ -49,7 +49,6 @@ class ISARenderer(Renderer):
   def is_two_address(self, x:UOp) -> bool: return False
   def spill(self, spill_slot:int, x:UOp) -> UOp: raise NotImplementedError("arch specific")
   def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
-  def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
 
 # ***** X86 Ops *****
 
@@ -231,10 +230,6 @@ XMM = tuple(Register(f"xmm{i}", i) for i in range(16))
 WGPR = tuple(r for r in GPR if r != RSP)
 
 CALLEE_SAVED = (RBX, RBP, GPR[12], GPR[13], GPR[14], GPR[15])
-
-reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, "rdx": {4:"edx", 2:"dx", 1:"dl"}, "rbx": {4:"ebx", 2:"bx", 1:"bl"},
-        "rsp": {4:"esp", 2:"sp", 1:"spl"}, "rbp": {4:"ebp", 2:"bp", 1:"bpl"}, "rsi": {4:"esi", 2:"si", 1:"sil"}, "rdi": {4:"edi", 2:"di", 1:"dil"},
-        **{f"r{i}": {4:f"r{i}d", 2:f"r{i}w", 1:f"r{i}b"} for i in range(8, 16)}}
 
 # a register defined outside the instruction stream: the stack pointer, the args pointer, a callee saved register
 def reg(dt:DType, r:Register) -> UOp: return UOp.placeholder((), dt, slot=-1, addrspace=AddrSpace.REG, reg=r)
@@ -762,31 +757,6 @@ class X86Renderer(ISARenderer):
   def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp:
     disp = UOp.cconst(spill_slot, dtypes.int32)
     return UOp.ins(X86Ops.VMOVUPS if reg in XMM else X86Ops.MOV, fold_address(stack_pointer().index(disp)), x.dtype, reg)
-
-  def asm_str(self, uops:list[UOp], function_name:str) -> str:
-    def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.body.arg.code))[-1] in ('i', 'm') else o[7:]).lower():7s}"
-    def _format_operands(x:UOp) -> str:
-      def _format(src:tuple[UOp, ...]) -> list[str]:
-        return [str(s.src[0].val) if is_imm(s) else reg_strs[o].get(s.dtype.itemsize, o) if \
-                (o:=str(rdef(s))) in reg_strs else o for s in src if is_imm(s) or rdef(s) is not None]
-      def _mem_adress(base:UOp, idx:UOp, disp:UOp, scale:UOp) -> list[str]:
-        return [f"[{rdef(base)}" + (f" + {rdef(idx)}*{scale.src[0].val}" if rdef(idx) else "") + (f" + {d}" if (d:=disp.src[0].val) else "") + "]"]
-
-      src = x.src_without_body
-      if len(src) > 4 and x.body.arg.code in X86GroupOp.WriteMem: ret = _mem_adress(*src[:4]) + _format(src[4:])
-      elif len(src) > 3 and x.body.arg.code in X86GroupOp.Rm1st: ret = _format((x,)) + _mem_adress(*src[:4]) + _format(src[4:])
-      elif len(src) > 4 and x.body.arg.code in X86GroupOp.Rm2nd: ret = _format((x, src[0])) + _mem_adress(*src[1:5]) + _format(src[5:])
-      else: ret = _format((x,) + src)
-      return ", ".join(ret)
-
-    asm = [f".{function_name}:"]
-    for u in uops:
-      if u.op is not Ops.CALL: continue
-      if u.body.arg.code is X86Ops.LABEL: asm.append(f".L{uops.index(u)}:")
-      elif u.body.arg.code is X86Ops.RET: asm.append(_format_op(u))
-      elif u.body.arg.code in X86GroupOp.Jump: asm.append(_format_op(u) + f" .L{uops.index(label(u.src[1]))}")
-      else: asm.append(_format_op(u) + " " + _format_operands(u))
-    return "\n".join(asm)
 
   def render(self, uops:list[UOp]) -> str:
     targets: dict[UOp, int] = {}
