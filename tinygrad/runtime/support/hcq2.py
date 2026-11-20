@@ -456,7 +456,7 @@ def encode_cmdbuf(hq:HWQueue, lin:UOp|None=None, name:str="cmdbuf", device:str|t
 # **** lower: cmdbufs become a host program
 
 def hoist_links(ctx:list[UOp], a:UOp) -> UOp|None:
-  links, rest = partition(a.src[1:], lambda s: s.op is Ops.STORE and _is_link_patch(s))
+  links, rest = partition(a.src[1:], lambda s: (s.op is Ops.STORE and _is_link_patch(s)) or (s.op is Ops.EXTERN and s.arg.name is not None))
   if not links: return None
   ctx.extend(links)
   return a.src[0].after(*rest)
