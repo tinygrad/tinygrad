@@ -3,7 +3,7 @@ import struct
 from tinygrad.runtime.support.mt.launch import MTLaunch
 from tinygrad.runtime.support.mt.elf import MTKernelImage
 from tinygrad.runtime.support.mt.mmu import MT_PTE_READ_WRITE
-from tinygrad.runtime.support.mt.submission import CDM_EXECUTION_ADDRESS
+from tinygrad.runtime.support.mt.submission import CDM_EXECUTION_ADDRESS, ARGS_VA, GRID_VA, RESOURCE_VA, TEXT_VA, RESUME_VA, PDS_MAIN_VA, TASK_VA
 
 # Device-VA to backing-PA layout used by the generated compute context. This is
 # an allocation map, not captured launch state.
@@ -15,11 +15,11 @@ GENERATED_OFFSETS = {
   0x81e0802000:0x8e00000,0x81e0812000:0x8e10000,0x81e0814000:0x8e12000,0x81e0815000:0x8e13000,
   0x81e081e000:0x8e1c000,0x81e0820000:0x8e1e000,0x81e0830000:0x8e1f000,0x81e0840000:0x8e2f000,
   0x81e0849000:0x8e38000,0x81e0861000:0x8e50000,0x81e08c9000:0x8eb8000,0x81e08d2000:0x8ec1000,
-  0x81e0a00000:0x8ed9000,0x81e0e00000:0x92d9000,0x81e1200000:0x96d9000,0x81e1400000:0x98d9000,
-  0xda00000000:0x9ad9000,
-  **{0xda00400000+i*0x1000:0x9ed9000+i*0x1000 for i in range(7)},
-  0xe000000000:0xa0df000,0xe000400000:0xa4df000,0xe000402000:0xa4e1000,0xe000408000:0xa4e7000,
-  0xf000000000:0xa4ed000,0xf000400000:0xa8ed000,0x100804000:0xb0ed000,0x100805000:0xb0ee000,
+  0x81e0a00000:0x8ed9000,CDM_EXECUTION_ADDRESS:0x92d9000,ARGS_VA:0x96d9000,GRID_VA:0x98d9000,
+  RESUME_VA:0x9ad9000,
+  **{PDS_MAIN_VA+i*0x1000:0x9ed9000+i*0x1000 for i in range(7)},
+  TEXT_VA:0xa0df000,0xe000400000:0xa4df000,0xe000402000:0xa4e1000,0xe000408000:0xa4e7000,
+  0xf000000000:0xa4ed000,0xf000400000:0xa8ed000,TASK_VA:0xb0ed000,0x100805000:0xb0ee000,
   **{0x100820000+i*0x1000:0xb0ef000+i*0x1000 for i in range(9)},
 }
 
@@ -39,7 +39,7 @@ class MTGeneratedLaunch(MTLaunch):
               0xd0:0x14,0x184:1,0x1a8:2,0x210:0x2c,0x228:0x200,0x500:4}
     for field,value in qwords.items(): struct.pack_into('<Q',page,field,value)
     for field,value in dwords.items(): struct.pack_into('<I',page,field,value)
-    self._write_backing(self.backing_offsets[0x100804000],page)
+    self._write_backing(self.backing_offsets[TASK_VA],page)
 
   def generate_static_pds(self) -> None:
     # Firmware resume and main PDS programs. These instruction words are fixed
@@ -81,22 +81,22 @@ class MTGeneratedLaunch(MTLaunch):
     elif has_local: words(0x3580,0xdcb40002,0xd2800000,0xf0001301,0xfc000012)
     else: words(0x3580,0xdcb40002,0xd2800000,0xfc00000a)
     words(0x3600,0xf4001005)
-    self._write_backing(self.backing_offsets[0xda00000000],resume)
+    self._write_backing(self.backing_offsets[RESUME_VA],resume)
     main = bytearray(0x1000)
     for off,word in {0x00:0xf4001000,0x10:0xf4000002,0x20:0xf0001000,0x24:0xf4000012}.items():
       struct.pack_into('<I',main,off,word)
-    self._write_backing(self.backing_offsets[0xda00400000],main)
+    self._write_backing(self.backing_offsets[PDS_MAIN_VA],main)
 
   def _map_generated(self) -> None:
     self.backing_offsets = GENERATED_OFFSETS.copy()
     self.write_map = {}
-    for va in (0xda00406000,0x81e1200000,0x81e1400000,0x81e0e00000):
+    for va in (RESOURCE_VA,ARGS_VA,GRID_VA,CDM_EXECUTION_ADDRESS):
       self._write_backing(self.backing_offsets[va],bytes(0x1000))
-    self.text_va = 0xe000000000
+    self.text_va = TEXT_VA
     self.text_offset = 0x2000
     self.pds_execution_address = CDM_EXECUTION_ADDRESS
-    self.pds_code_off = self.backing_offsets[0xda00400000]
-    self.pds_data_offsets = [self.backing_offsets[0x100804000]]
+    self.pds_code_off = self.backing_offsets[PDS_MAIN_VA]
+    self.pds_data_offsets = [self.backing_offsets[TASK_VA]]
     self.generate_task_page()
     items = list(GENERATED_OFFSETS.items())
     for i,(va,off) in enumerate(items):
@@ -129,7 +129,7 @@ class MTGeneratedLaunch(MTLaunch):
     k = image.metadata.kernel
     has_ids = any(a['.kind'] in (1,2,3,5,6,7) for a in k['.args'])
     has_barrier = k['.has_barrier']
-    resource_off = self.backing_offsets[0xda00406000]
+    resource_off = self.backing_offsets[RESOURCE_VA]
     spill_bytes = max(k['.private_memory_size'],k['.local_mem_used_in_cluster'])
     # Spill text uses a 32 KiB region when possible and a 192 KiB region for larger images.
     self.text_offset = (0x8000 if len(image.text) <= 0x8000 else 0x30000) if spill_bytes else \
@@ -137,9 +137,9 @@ class MTGeneratedLaunch(MTLaunch):
     self.resource_temp_offset = 0x2c if has_barrier else 0x24 if has_ids else 0x1c
     self.resource_text_field = 0x28 if has_barrier else 0x20 if has_ids else 0x18
     self.resource_temp_flags = 1 if has_barrier else 0
-    self._write_backing(resource_off,struct.pack('<Q',0x81e1200000))
+    self._write_backing(resource_off,struct.pack('<Q',ARGS_VA))
     self._write_backing(resource_off+8,struct.pack('<I',0x90000000|k['.shared_reg_count']))
-    self._write_backing(self.backing_offsets[0x81e1200000]+8,struct.pack('<I',0xff))
+    self._write_backing(self.backing_offsets[ARGS_VA]+8,struct.pack('<I',0xff))
     controls:tuple[int,...]
     if has_barrier:
       controls = (0x30000347,0xb0002003,0x80000043)

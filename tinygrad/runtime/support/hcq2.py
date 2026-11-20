@@ -513,16 +513,12 @@ def lower_call(call:UOp) -> UOp|None:
   # encode bodies
   body = graph_rewrite(call.body, Compiled.pm_encode, ctx=(lt_patches:=list[UOp]()), bpm=pm_hoist_links, name="encode")
   body = graph_rewrite(body, Compiled.pm_lower, ctx=lt_patches, bpm=pm_hoist_links, enter_calls=True, name="lower")
-  if not any(Device[d].skip_nested_lift for d in call.arg.hcq.device): body = graph_rewrite(body, pm_lift, walk=True, enter_calls=True, name="lift")
+  body = graph_rewrite(body, pm_lift, walk=True, enter_calls=True, name="lift")
 
   if VIZ: graph_rewrite(UOp.sink(*dedup(lt_patches)), PatternMatcher([]), name="View Link-Time Patches")
 
   # batch args, link patches wait after the call
   return lift(call.replace(src=(body, *call.src[1:])), root=True).after(*dedup(lt_patches))
-def lower_encoded_call(call:UOp) -> UOp:
-  body = graph_rewrite(call.body, PatternMatcher([]), ctx=(lt_patches:=list[UOp]()), bpm=pm_hoist_links, name="hoist links")
-  return lift(call.replace(src=(body, *call.src[1:])), root=True).after(*dedup(lt_patches))
-
 pm_lower_call = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])
 
 # **** link: allocs to buffers, addresses to consts
@@ -591,17 +587,14 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=
     for u in linear.toposort():
       if u.op is Ops.BUFFER: replacements[u] = replace_buffer((input_uops,slots),u)
     linear = linear.substitute(replacements,walk=True)
-  direct_dev = next((Device[u.arg.buffer.device] for u in input_uops or [] if Device[u.arg.buffer.device].direct_hcq), None)
-  if direct_dev is None or any(c.op is Ops.CALL and c.body.op is Ops.STORE for c in linear.toposort()):
+  key_dev = next((Device[u.arg.buffer.device] for u in input_uops or [] if Device[u.arg.buffer.device].custom_hcq_runtime_key), None)
+  if key_dev is None or any(c.op is Ops.CALL and c.body.op is Ops.STORE for c in linear.toposort()):
     linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
-  runtime_key = direct_dev.hcq_runtime_key(input_uops or []) if direct_dev is not None else None
+  runtime_key = key_dev.hcq_runtime_key(input_uops or []) if key_dev is not None else None
   key = (linear,profile,ALL2ALL >= 1,runtime_key)
   cached = hcq_compile_cache.get(key) if cache and input_uops is not None else None
   if cached is not None: return cached
-  if direct_dev is not None:
-    scheduled = sched_batches(linear, profile, cache)
-    lin = scheduled.replace(src=tuple(direct_dev.lower_hcq_call(c) if c.op is Ops.CALL and c.arg.hcq is not None else c for c in scheduled.src))
-  else: lin = graph_rewrite(sched_batches(linear, profile, cache), pm_lower_call, walk=True, name="lower call")
+  lin = graph_rewrite(sched_batches(linear, profile, cache), pm_lower_call, walk=True, name="lower call")
   with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin, verbose=DEBUG>=3)
   if cache and input_uops is not None and final_linear is not linear and \
       all(Device[u.arg.buffer.device].hcq_cacheable(final_linear) for u in input_uops):

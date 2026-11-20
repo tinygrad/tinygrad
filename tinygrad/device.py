@@ -357,8 +357,8 @@ class Compiled:
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
 
   serialize_hcq = False
-  skip_nested_lift = False
-  direct_hcq = False
+  # Set when the HCQ cache needs device-specific buffer identity in its key.
+  custom_hcq_runtime_key = False
   enqueue_copies = True
 
   @property
@@ -369,7 +369,6 @@ class Compiled:
   def activate_cached(self, profile_key:bytes|None): pass
   def hcq_cacheable(self, linear:Any) -> bool: return True
   def hcq_runtime_key(self, input_uops:list[Any]): return None
-  def lower_hcq_call(self, call:Any): raise NotImplementedError
 
   @property
   def host(self) -> str: return f"CPU:{self.peer_group[7:]}" if self.peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.device

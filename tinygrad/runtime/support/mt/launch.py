@@ -8,7 +8,7 @@ from tinygrad.runtime.support.mt.ccb import MTCCB
 from tinygrad.runtime.support.mt.mmu import MT_PTE_READ_WRITE
 from tinygrad.runtime.support.mt.elf import MTKernelImage
 from tinygrad.runtime.support.mt.pds import compute_pds, PDS_UNUSED
-from tinygrad.runtime.support.mt.submission import build_submission, SUBMISSION_VA
+from tinygrad.runtime.support.mt.submission import build_submission, SUBMISSION_VA, ARGS_VA, GRID_VA
 
 BACKING_PA, BACKING_SIZE = 0x40000000,0x10000000
 
@@ -106,7 +106,7 @@ class MTLaunch(MTFirmware):
         self.mmu_dirty = True
         self.generation += 1
     self._write_backing(text_off,image.text)
-    const_off = self.backing_offsets[0x81e1200000]
+    const_off = self.backing_offsets[ARGS_VA]
     args = image.metadata.kernel['.args']
     user_args = [a for a in args if a['.argBase']['.name'] not in ['Global Spill Base','Core Number']
                  and not a['.argBase']['.name'].startswith('threadIdx')]
@@ -139,10 +139,10 @@ class MTLaunch(MTFirmware):
     self.mmu_dirty = True
 
   def set_spill(self, va:int) -> None:
-    self._write_backing(self.backing_offsets[0x81e1200000],struct.pack('<Q',va))
+    self._write_backing(self.backing_offsets[ARGS_VA],struct.pack('<Q',va))
 
   def set_grid(self, global_size:tuple[int,int,int], local_size:tuple[int,int,int]) -> None:
-    off = self.backing_offsets[0x81e1400000]
+    off = self.backing_offsets[GRID_VA]
     for i, field in enumerate([0x2c,0x30,0x34]): self._write_backing(off+field,struct.pack('<I',global_size[i]-1))
     block = bytearray(self.write_map.get(off,bytes(0x1000))[0x3c:0x40])
     block[0] = local_size[2] - 1

@@ -3,6 +3,13 @@ import struct
 from tinygrad.runtime.autogen import mtfw
 
 SUBMISSION_VA = 0x8000420000
+ARGS_VA = 0x81e1200000
+GRID_VA = 0x81e1400000
+RESOURCE_VA = 0xda00406000
+TEXT_VA = 0xe000000000
+RESUME_VA = 0xda00000000
+PDS_MAIN_VA = 0xda00400000
+TASK_VA = 0x100804000
 CDM_EXECUTION_ADDRESS = 0x81e0e00000
 
 def build_submission(launch_id:int=1, execution_address:int=CDM_EXECUTION_ADDRESS) -> bytes:

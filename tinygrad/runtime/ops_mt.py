@@ -14,7 +14,7 @@ from tinygrad.runtime.autogen import mtfw, libc
 from tinygrad.runtime.support.mt.mtdev import MTDev
 from tinygrad.runtime.support.mt.compute import ROOT_BASE, META_BASE
 from tinygrad.runtime.support.mt.ccb import MT_TOKEN_BASE, MT_HOST_PRIVATE
-from tinygrad.runtime.support.mt.submission import SUBMISSION_VA
+from tinygrad.runtime.support.mt.submission import SUBMISSION_VA, ARGS_VA, GRID_VA
 from tinygrad.runtime.support.system import USBPCIDevice
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.mt.launch import MTLaunch
@@ -126,12 +126,28 @@ def mt_poll(link:UOp, addr:UOp, target:UOp) -> UOp:
   return usb_fail(link.after(poll),bad)
 
 
+@dataclasses.dataclass
+class MTSubmission:
+  """One encoded launch and the state needed to publish it.
+
+  args is the runtime-patched argument page. write_map contains sparse generated
+  backing pages. mmu_pages is captured before shared launch state is replaced.
+  grid_deps is an optional symbolic grid/local-size patch.
+  """
+  launch: MTGeneratedLaunch
+  args: UOp
+  packet: bytes
+  write_map: dict[int,bytes]
+  generation: int
+  mmu_pages: dict[int,bytes]|None
+  grid_deps: UOp|None
+
 class MTComputeQueue(HWQueue):
   dev:MTDevice
   def __init__(self, submit):
     super().__init__(submit)
     self.cacheable = (info:=getattr(submit.arg,'hcq',None)) is not None and info.cacheable
-    self.submissions:list[tuple[MTGeneratedLaunch,UOp,bytes,dict[int,bytes],int,dict[int,bytes]|None,UOp|None]] = []
+    self.submissions:list[MTSubmission] = []
     self.signals:list[tuple[UOp,UOp]] = []
     self.timestamp_slots:list[list[UOp|None]] = []
     self.timestamp_open = False
@@ -173,9 +189,8 @@ class MTComputeQueue(HWQueue):
     return pages
 
   def exec(self, call:UOp, prg:UOp):
-    if self.submissions and self.submissions[-1][5] is None:
-      prev = self.submissions[-1]
-      self.submissions[-1] = (*prev[:5],self.snapshot_mmu(prev[0]),prev[6])
+    if self.submissions and self.submissions[-1].mmu_pages is None:
+      self.submissions[-1].mmu_pages = self.snapshot_mmu(self.submissions[-1].launch)
     obj = TinyELF.from_program(prg)
     global_size = cast(tuple[int,int,int],tuple(x if isinstance(x,int) else 1 for x in prg.arg.global_size))
     local_size = cast(tuple[int,int,int],tuple(x if isinstance(x,int) else 1 for x in prg.arg.local_size))
@@ -189,19 +204,19 @@ class MTComputeQueue(HWQueue):
       local_rows = [(0x3c,prg.arg.local_size[2]-1,dtypes.u8),(0x3d,(prg.arg.local_size[1]-1)<<2,dtypes.u8),
                     (0x3e,(prg.arg.local_size[0]-1)<<4,dtypes.u16)]
       grid_rows += [(off,val.cast(dt)) for off,val,dt in local_rows if not isinstance(val,int)]
-      grid_off = launch.backing_offsets[0x81e1400000]
+      grid_off = launch.backing_offsets[GRID_VA]
       grid = UOp.alloc((0x1000,),dtypes.u8,device='CPU')
       grid_deps = patch(grid,grid_rows,launch.write_map.get(grid_off,bytes(0x1000)))
-    const_off = launch.backing_offsets[0x81e1200000]
+    const_off = launch.backing_offsets[ARGS_VA]
     args = UOp.alloc((0x1000,),dtypes.u8,device='CPU')
     rows = [(0x38+i*8,arg.cast(dtypes.u64)) for i,arg in enumerate(get_call_kernel_args(call,prg,self.devs))]
-    state = (bytes(launch.packet),dict(launch.write_map),launch.generation,None)
-    self.submissions.append((launch,patch(args,rows,launch.write_map.get(const_off,bytes(0x1000))),*state,grid_deps))
+    self.submissions.append(MTSubmission(launch=launch,args=patch(args,rows,launch.write_map.get(const_off,bytes(0x1000))),
+                                         packet=bytes(launch.packet),write_map=dict(launch.write_map),generation=launch.generation,
+                                         mmu_pages=None,grid_deps=grid_deps))
 
   def submit(self, cmdbuf:UOp) -> UOp:
-    if len(self.submissions) > 1 and self.submissions[-1][5] is None:
-      prev = self.submissions[-1]
-      self.submissions[-1] = (*prev[:5],self.snapshot_mmu(prev[0]),prev[6])
+    if len(self.submissions) > 1 and self.submissions[-1].mmu_pages is None:
+      self.submissions[-1].mmu_pages = self.snapshot_mmu(self.submissions[-1].launch)
     ops: list[Any] = []
     link = usb_link(self.dev.device)
     def add(op):
@@ -210,7 +225,10 @@ class MTComputeQueue(HWQueue):
       link = link.after(op)
     root_addr = self.dev.mt.pci_dev.bar_info(2)[0]+ROOT_BASE
     poll_in_hcq = not self.cacheable or len(self.submissions) > 1 or bool(self.timestamp_slots)
-    for i,(launch,deps,packet,write_map,generation,mmu_pages,grid_deps) in enumerate(self.submissions):
+    for i,submission in enumerate(self.submissions):
+      launch,deps,packet,write_map,generation,mmu_pages,grid_deps = (submission.launch,submission.args,submission.packet,
+                                                                      submission.write_map,submission.generation,submission.mmu_pages,
+                                                                      submission.grid_deps)
       ccb = launch.ccb
       assert ccb is not None
       def write(addr:int|UOp, blob:bytes, rows=()):
@@ -222,8 +240,8 @@ class MTComputeQueue(HWQueue):
           header = usb_ctrl(link,0x40,0xF0,0x60|0x0F00,1,usb_stack(dtypes.uint64,addr,len(blob)//4).index(0),12,5000)
           op = usb_bulk(link.after(header),0x02,data.index(0),len(blob))
         add(op)
-      previous = self.submissions[i-1][3] if i else self.dev.uploaded_write_map
-      changed = sorted((off,data) for off,data in write_map.items() if off != launch.backing_offsets[0x81e1200000] and
+      previous = self.submissions[i-1].write_map if i else self.dev.uploaded_write_map
+      changed = sorted((off,data) for off,data in write_map.items() if off != launch.backing_offsets[ARGS_VA] and
                        (previous.get(off) != data))
       chunks:list[tuple[int,bytearray]] = []
       for off,data in changed:
@@ -233,11 +251,11 @@ class MTComputeQueue(HWQueue):
       if len(self.submissions) > 1:
         if i == 0: write(launch.sv.addr,packet)
         else:
-          previous_packet = self.submissions[i-1][2]
+          previous_packet = self.submissions[i-1].packet
           for off in range(0,len(packet),0x1000):
             packet_chunk = packet[off:off+0x1000]
             if previous_packet[off:off+len(packet_chunk)] != packet_chunk: write(launch.sv.addr+off,packet_chunk)
-        previous_mmu = self.submissions[i-1][5] if i else self.submissions[-1][5]
+        previous_mmu = self.submissions[i-1].mmu_pages if i else self.submissions[-1].mmu_pages
         assert mmu_pages is not None and previous_mmu is not None
         for off,data in mmu_pages.items():
           if previous_mmu.get(off) != data: write(root_addr+off,data)
@@ -253,10 +271,10 @@ class MTComputeQueue(HWQueue):
       item = UOp.alloc((ci.SIZE,),dtypes.u8,device='CPU')
       item = patch(item,[(16,token)],bytes(ci))
       add(usb_stream(link.after(deps),UOp.const(launch.v.addr+ccb.item_off,dtypes.u64),item,UOp.const(item_size,dtypes.int),True))
-      args_off = launch.backing_offsets[0x81e1200000]
+      args_off = launch.backing_offsets[ARGS_VA]
       add(usb_stream(link,UOp.const(launch.backing.addr+args_off,dtypes.u64),deps,UOp.const(0x1000,dtypes.int),True))
       if grid_deps is not None:
-        grid_off = launch.backing_offsets[0x81e1400000]
+        grid_off = launch.backing_offsets[GRID_VA]
         add(usb_stream(link,UOp.const(launch.backing.addr+grid_off,dtypes.u64),grid_deps,UOp.const(0x1000,dtypes.int),True))
       next_wr = ((idx + 1) & 0xff).cast(dtypes.u32)
       write(launch.v.addr+ccb.queue_off+idx*8,struct.pack('<Q',META_BASE+ccb.item_off))
@@ -285,15 +303,6 @@ class MTComputeQueue(HWQueue):
     return UOp.sink(UOp.barrier(*self.deps,*ops))
 
 
-def mt_lower_call(call:UOp) -> UOp:
-  from tinygrad.runtime.support.hcq2 import lower_encoded_call
-  for u in call.body.toposort():
-    if (u.op is Ops.AFTER and u.src[0].op is Ops.CALL and u.src[0].src[0].op is Ops.SINK and
-        u.src[0].src[1].op is Ops.PARAM and u.src[0].src[1].arg.name == 'COMPUTE:0'):
-      queue = MTComputeQueue(u.replace(arg=call.arg)).encode().replace(arg=call.body.arg)
-      return lower_encoded_call(call.replace(src=(queue,*call.src[1:])))
-  raise RuntimeError('No MT compute submission found')
-
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("mt_compute_submit")).call(UPat()).after(allow_any_len=True,name="s"),lambda s:MTComputeQueue(s).encode()),
 ])
@@ -302,8 +311,7 @@ class MTDevice(Compiled):
   renderers = [MUSARenderer]
   timestamp_divider = 25
   serialize_hcq = True
-  skip_nested_lift = True
-  direct_hcq = True
+  custom_hcq_runtime_key = True
   enqueue_copies = False
   def __init__(self, device:str=''):
     dev_id = int(device.split(':')[1]) if ':' in device else 0
@@ -381,7 +389,6 @@ class MTDevice(Compiled):
     self.response_checked = seq
 
   def hcq_runtime_key(self, input_uops:list[UOp]): return tuple((u.arg.buffer,u.arg.buffer._buf) for u in input_uops)
-  def lower_hcq_call(self, call:UOp) -> UOp: return mt_lower_call(call)
 
   def post_run(self) -> None: self.synchronize()
 
@@ -434,13 +441,13 @@ class MTDevice(Compiled):
       spill = self.spill_buffer[1]
       launch.map_buffer(spill.buf,spill.meta.pa,needed)
       launch.set_spill(spill.buf)
-      launch._write_backing(launch.backing_offsets[0x81e1200000]+8,struct.pack('<I',cores))
+      launch._write_backing(launch.backing_offsets[ARGS_VA]+8,struct.pack('<I',cores))
     if launch.mmu_dirty:
       launch.upload_mmu()
       launch.mmu_dirty = False
     launch.set_grid(global_size,local_size)
     if spill_bytes and local_size[0]*local_size[1]*local_size[2] > 1:
-      launch._write_backing(launch.backing_offsets[0x81e1400000]+0x20,struct.pack('<I',MT_SPILL_WORKGROUP_KERNEL8))
+      launch._write_backing(launch.backing_offsets[GRID_VA]+0x20,struct.pack('<I',MT_SPILL_WORKGROUP_KERNEL8))
 
   def _view(self, va:int):
     if va in self.views: return self.views[va]
