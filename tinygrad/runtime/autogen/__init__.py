@@ -71,6 +71,8 @@ def __getattr__(nm):
     case "nvjitlink": load("nvjitlink", [root/"extra/nvJitLink.h"], dll="'nvJitLink'", paths=nv_lib_path, prolog=["import sysconfig"])
     case "kfd": return load("kfd", [root/"extra/hip_gpu_driver/kfd_ioctl.h"])
     case "mtfw": return load("mtfw", [str(root/"extra/mt_gpu_driver/fwif/*.h")])
+    case "mtdev": return load("mtdev", [root/"extra/mt_gpu_driver/mtgpu_defs.h", root/"extra/mt_gpu_driver/mtgpu_segment.h"])
+    case "mtmmu": return load("mtmmu", [root/"extra/mt_gpu_driver/pvr/include/pvr_rogue_mmu_defs.h"])
     case "mtheap": return load("mtheap", [root/"extra/mt_gpu_driver/vgpu_heap.h", root/"extra/mt_gpu_driver/pvr/include/rgx_heap_firmware.h"],
                                args=["-DRGX_FW_HEAP_SHIFT=25"], rules=[(r'IMG_UINT32_C\(([^)]+)\)', r'\1')], prolog=["RGX_FW_HEAP_SHIFT = 25"])
     case "mtcdm": return load("mtcdm", [root/"extra/mt_gpu_driver/csbgen/rogue_cdm.h"], args=[f"-I{root/'extra/mt_gpu_driver'}"])

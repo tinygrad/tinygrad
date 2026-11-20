@@ -13,19 +13,19 @@ from tinygrad.runtime.support.system import PCIDevice, USBPCIDevice, System, fil
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.engine.realize import get_call_kernel_args
-from tinygrad.runtime.autogen import mtfw, mtregs, mtpds, mtcdm, mtheap, libc
+from tinygrad.runtime.autogen import mtfw, mtregs, mtpds, mtcdm, mtheap, mtdev, mtmmu, libc
 
 def mt_off(typ, name:str) -> int: return next(f[2] for f in typ._real_fields_ if f[0] == name)
 
 # **** mtdev ****
 
-MT_VENDOR_ID = 0x1ed5
+MT_VENDOR_ID = mtdev.PCI_VENDOR_ID_MT
 MT_USB_GPU_BUS = 2
 MT_SYS_BAR, MT_DDR_BAR = 0, 2
 MT_SRAM_OFFSET = 0x30000
 MT_DISTRIBUTOR_OFFSET = 0x83000
 MT_SOCIF_OFFSET, MT_CORE_STRIDE, MT_CORE_COUNT = 0xc00000, 0x100000, 8
-MT_CORE_ID = 0x20
+MT_CORE_ID = mtregs.RGX_CR_CORE_ID
 
 MT_IPC_TX_RING, MT_IPC_RX_RING = MT_SRAM_OFFSET, MT_SRAM_OFFSET + 0x218
 MT_IPC_IRQ = 2
@@ -159,7 +159,8 @@ class MTDev:
   @property
   def bvnc(self) -> tuple[int, int, int, int]:
     value = self.core_ids[0]
-    return ((value >> 48) & 0xffff, (value >> 32) & 0xffff, (value >> 16) & 0xffff, value & 0xffff)
+    return ((value >> mtregs.RGX_CR_CORE_ID_BRANCH_ID_SHIFT) & 0xffff, (value >> mtregs.RGX_CR_CORE_ID_VERSION_ID_SHIFT) & 0xffff,
+            (value >> mtregs.RGX_CR_CORE_ID_NUMBER_OF_SCALABLE_UNITS_SHIFT) & 0xffff, value & 0xffff)
 
   def close(self): self.smc.set_pstate(MT_PSTATE_P12)
 
@@ -177,7 +178,7 @@ class MTDev:
 
 # **** mmu ****
 
-MT_PAGE_SIZE = 0x1000
+MT_PAGE_SIZE = mtmmu.ROGUE_MMUCTRL_PC_DATA_PD_BASE_ALIGNSIZE
 MT_PTE_READ_ONLY = 0x3c00000000000001
 MT_PTE_READ_WRITE = 0x3c0000000000000d
 
@@ -205,7 +206,9 @@ class MTMMU4:
     if va in self.pages:
       self.mapped_ranges = {r for r in self.mapped_ranges if not (r[0] <= va < r[0]+r[2])}
     self.pages[va],self.page_flags[va] = pa,flags
-    pci, pdi, pti = (va >> 30) & 0x3ff, (va >> 21) & 0x1ff, (va >> 12) & 0x1ff
+    pci = (va >> mtmmu.ROGUE_MMUCTRL_VADDR_PC_INDEX_SHIFT) & (mtmmu.ROGUE_MMUCTRL_ENTRIES_PC_VALUE-1)
+    pdi = (va >> mtmmu.ROGUE_MMUCTRL_VADDR_PD_INDEX_SHIFT) & (mtmmu.ROGUE_MMUCTRL_ENTRIES_PD_VALUE-1)
+    pti = (va >> mtmmu.ROGUE_MMUCTRL_VADDR_PT_INDEX_SHIFT) & (mtmmu.ROGUE_MMUCTRL_ENTRIES_PT_VALUE-1)
     if pci not in self.pd:
       self.pd[pci] = self._alloc()
       self.root[pci*4:pci*4+4] = (((self.pd[pci] >> 12) << 4) | 1).to_bytes(4, 'little')
@@ -671,7 +674,7 @@ class MTCCB:
 
 # **** launch ****
 
-BACKING_PA, BACKING_SIZE = 0x40000000,0x10000000
+BACKING_PA, BACKING_SIZE = 0x40000000,mtdev.MTGPU_RESERVED_MEM_SIZE
 
 class MTLaunch(MTFirmware):
   write_map:dict[int,bytes]
@@ -1087,7 +1090,7 @@ class MTCompiler:
 
 # KERNEL8 value used by multi-thread spill workgroups.
 MT_SPILL_WORKGROUP_KERNEL8 = 0x108085
-MT_SPILL_MIN_STRIDE = 0x2000000
+MT_SPILL_MIN_STRIDE = INIT_SIZE
 
 class MUSACompiler(Compiler):
   def __init__(self):
@@ -1236,7 +1239,9 @@ class MTComputeQueue(HWQueue):
     pages:dict[int,bytes] = {}
     for va in launch.mmu.pages:
       if 0x8001000000 <= va < cast(MTAllocator,self.dev.allocator).next_va: continue
-      pci,pdi,pti = (va>>30)&0x3ff,(va>>21)&0x1ff,(va>>12)&0x1ff
+      pci = (va >> mtmmu.ROGUE_MMUCTRL_VADDR_PC_INDEX_SHIFT) & (mtmmu.ROGUE_MMUCTRL_ENTRIES_PC_VALUE-1)
+      pdi = (va >> mtmmu.ROGUE_MMUCTRL_VADDR_PD_INDEX_SHIFT) & (mtmmu.ROGUE_MMUCTRL_ENTRIES_PD_VALUE-1)
+      pti = (va >> mtmmu.ROGUE_MMUCTRL_VADDR_PT_INDEX_SHIFT) & (mtmmu.ROGUE_MMUCTRL_ENTRIES_PT_VALUE-1)
       if (pci,pdi) in launch.mmu.pt:
         offs = {(pci*4)&~0xfff,(launch.mmu.pd[pci]-launch.mmu.root_pa+pdi*8)&~0xfff,
                 (launch.mmu.pt[pci,pdi]-launch.mmu.root_pa+pti*8)&~0xfff}
