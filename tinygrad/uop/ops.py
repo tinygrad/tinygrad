@@ -14,7 +14,6 @@ if TYPE_CHECKING:
   from tinygrad.device import Buffer, BufferSpec, MultiBuffer
   from tinygrad.renderer import Estimates
   from tinygrad.runtime.support.hcq2 import HCQInfo
-  from tinygrad.renderer.x86 import Register
   from tinygrad.renderer.amd.dsl import Reg
 
 class AxisType(Enum):
@@ -44,7 +43,7 @@ class ParamArg:
   # the memory the linker gives an ALLOC
   spec: BufferSpec|None = None
   # optional register constraints on this allocation, for assembly backends
-  reg: Register|Reg|None = None
+  reg: Reg|None = None
   def __repr__(self):
     fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
               ("volatile", False), ("image", None), ("bind_on_realize", False), ("val", None), ("spec", None), ("reg", None))
@@ -585,8 +584,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def without_after(self) -> UOp: return self.src[0].without_after if self.op is Ops.AFTER else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   @staticmethod
-  def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:Register|UOp) -> UOp:
-    params = [r if isinstance(r, UOp) else UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r) for i,r in enumerate(regs)]
+  def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:UOp) -> UOp:
+    params = [UOp.param(r.arg.slot, dtype, name=r.arg.name, addrspace=AddrSpace.REG) if r.op is Ops.BUFFER else r for r in regs]
     return UOp.native(op, *params, dtype=dtype).call(*src)
   def contract(self, *rngs:UOp):
     assert all(x.axis_type == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
@@ -802,7 +801,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return (UOp.range(len(device), 0, AxisType.DEVICE),) if isinstance(device, tuple) else ()
   @staticmethod
   def _buffer(size:int, dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, buffer:Buffer|MultiBuffer|None=None,
-              reg:Register|Reg|None=None, name:str|None=None) -> UOp:
+              reg:Reg|None=None, name:str|None=None) -> UOp:
     return UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),)+UOp.device_range_src(device),
                arg=ParamArg(slot, dtype, addrspace=addrspace, device=device, buffer=buffer, reg=reg, name=name))
   @staticmethod
@@ -1168,7 +1167,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
   @staticmethod
-  def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, reg:Register|Reg|None=None, name:str|None=None):
+  def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, reg:Reg|None=None, name:str|None=None):
     dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if slot is None: slot = next(UOp.unique_num)
     if addrspace is AddrSpace.GLOBAL:
@@ -1189,7 +1188,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # TODO: this should replace placeholder
   @staticmethod
   def param(slot:int, dtype:DType, shape:tuple[sint, ...]|sint|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None,
-            name=None, addrspace=AddrSpace.GLOBAL, volatile:bool=False, reg:Register|Reg|None=None):
+            name=None, addrspace=AddrSpace.GLOBAL, volatile:bool=False, reg:Reg|None=None):
     """create a PARAM: a single sint or 1-d shape gives a flat param of that size, a None shape gives a scalar param.
     src[0] stores the concrete max size (never symbolic): a multi-dim shape is a RESHAPE on top of the flat param,
     a symbolic shape is a max-size param shrunk to the real shape"""

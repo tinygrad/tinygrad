@@ -6,50 +6,42 @@ from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import unwrap, Target, get_single_element
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
-@dataclass(frozen=True)
-class Register:
-  name: str
-  index: int
-  def __repr__(self): return self.name
-
-def vreg(slot:int, dtype:DType, choices:tuple[Register, ...], name:str="vreg") -> tuple[UOp, ...]:
-  if len(choices) == 1: return (UOp.param(slot, dtype, name=name, addrspace=AddrSpace.REG, reg=get_single_element(choices)),)
-  dst = UOp.param(slot, dtype, name=name, addrspace=AddrSpace.REG)
-  return dst, UOp(Ops.STACK, src=tuple(UOp.param(0, dtype, addrspace=AddrSpace.REG, reg=r) for r in choices))
+def vreg(slot:int, dtype:DType, choices:tuple[UOp, ...], name:str="vreg") -> tuple[UOp, ...]:
+  return UOp.param(slot, dtype, name=name, addrspace=AddrSpace.REG), UOp(Ops.STACK, src=choices)
 
 class IselContext:
   def __init__(self): self.reg_n = itertools.count()
-  def vreg(self, dtype:DType, choices:tuple[Register, ...]): return vreg(next(self.reg_n), dtype, choices)
+  def vreg(self, dtype:DType, choices:tuple[UOp, ...]): return vreg(next(self.reg_n), dtype, choices)
 
 # the registers an ins defines exist in the src of NATIVE
 def regs(u:UOp) -> tuple[UOp, ...]:
   if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG: return regbuf_reg(u)
   return u.body.src if u.op is Ops.CALL else ()
 
-def register_choices(u:UOp) -> dict[UOp, tuple[Register, ...]]:
+def register_choices(u:UOp) -> dict[UOp, tuple[UOp, ...]]:
   operands = regs(u)
-  return {p:(p.arg.reg,) if p.arg.reg is not None else tuple(r.arg.reg for r in operands[i+1].src)
-          for i,p in enumerate(operands) if p.op is Ops.PARAM and p.addrspace is AddrSpace.REG}
+  return {p:(r,) if (r:=physical_reg(p)) is not None else operands[i+1].src
+          for i,p in enumerate(operands) if p.op in (Ops.PARAM, Ops.BUFFER) and p.addrspace is AddrSpace.REG}
 
 def vdef(u:UOp) -> UOp|None:
   if u.op in {Ops.AFTER, Ops.BITCAST}: return vdef(u.src[0])
   operands = regs(u)
   return operands[0] if operands and operands[0].addrspace is AddrSpace.REG else None
 
-def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp:
+def with_regs(u:UOp, r:tuple[UOp, ...]) -> UOp:
   assert u.dtype is not dtypes.void, "void cannot have output registers"
-  if u.op is Ops.BUFFER: return u.replace(arg=replace(u.arg, reg=get_single_element(r)))
+  if u.op is Ops.BUFFER: return reg(u.dtype, get_single_element(r))
   return UOp.ins(u.body.arg.code, u.src_without_body, u.dtype, *r)
 
 def rdef(u:UOp):
-  return p.arg.reg if (p:=vdef(u)) is not None else None
+  return physical_reg(p) if (p:=vdef(u)) is not None else None
 
 class LinearContext:
   def __init__(self, ren:'ISARenderer'): self.ren, self.stack_size = ren, 0
   def insert_linearized(self, uops:list[UOp]) -> list[UOp]: return uops
-  def assign_spill_slot(self, r:Register) -> int: raise NotImplementedError("arch specific")
+  def assign_spill_slot(self, r:UOp) -> int: raise NotImplementedError("arch specific")
 
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
@@ -60,7 +52,7 @@ class ISARenderer(Renderer):
 
   def is_two_address(self, x:UOp) -> bool: return False
   def spill(self, spill_slot:int, x:UOp) -> UOp: raise NotImplementedError("arch specific")
-  def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
+  def fill(self, spill_slot:int, x:UOp, reg:UOp) -> UOp: raise NotImplementedError("arch specific")
 
 # ***** X86 Ops *****
 
@@ -213,33 +205,30 @@ pre_isel_matcher = PatternMatcher([
 ])
 
 # ***** X86 registers *****
-RAX = Register("rax", 0)
-RCX = Register("rcx", 1)
-RDX = Register("rdx", 2)
-RBX = Register("rbx", 3)
-RSP = Register("rsp", 4)
-RBP = Register("rbp", 5)
-RSI = Register("rsi", 6)
-RDI = Register("rdi", 7)
-GPR = (RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI) + tuple(Register(f"r{i}", i) for i in range(8, 16))
-XMM = tuple(Register(f"xmm{i}", i) for i in range(16))
+GPR = tuple(UOp.placeholder((1,), dtypes.uint64, i, AddrSpace.REG, name=n) for i,n in
+            enumerate(("rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", *(f"r{i}" for i in range(8, 16)))))
+RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI = GPR[:8]
+XMM = tuple(UOp.placeholder((1,), dtypes.uint64, i, AddrSpace.REG, name=f"xmm{i}") for i in range(16))
+physical_regs = {(r.arg.name, r.arg.slot):r for r in GPR+XMM}
+def physical_reg(u:UOp) -> UOp|None: return physical_regs.get((u.arg.name, u.arg.slot))
 # gprs you can write to
-WGPR = tuple(r for r in GPR if r != RSP)
+WGPR = tuple(r for r in GPR if r is not RSP)
 
 CALLEE_SAVED = (RBX, RBP, GPR[12], GPR[13], GPR[14], GPR[15])
 
 # a register defined outside the instruction stream: the stack pointer, the args pointer, a callee saved register
-def reg(dt:DType, r:Register) -> UOp: return UOp.placeholder((), dt, slot=-1, addrspace=AddrSpace.REG, reg=r)
+def reg(dt:DType, r:UOp) -> UOp: return r.replace(arg=replace(r.arg, dtype=dt))
 def stack_pointer() -> UOp: return reg(dtypes.uint64, RSP)
 def args_pointer() -> UOp: return reg(dtypes.uint64, RDI)
 
 # ***** X86 instruction selection *****
 # a register buffer is its own virtual register, identified by its buffer slot
 def regbuf_reg(x:UOp) -> tuple[UOp, ...]:
-  return vreg(x.arg.slot, x.dtype, (x.arg.reg,) if x.arg.reg is not None else XMM if x.dtype in dtypes.floats else WGPR, name="buffer")
+  if physical_reg(x) is not None: return (x,)
+  return vreg(x.arg.slot, x.dtype, XMM if x.dtype in dtypes.floats else WGPR, name="buffer")
 
 # a value moved into a register constrained to cons
-def pin(ctx:IselContext, x:UOp, cons:tuple[Register, ...]) -> UOp: return UOp.ins(X86Ops.MOV, (x,), x.dtype, *ctx.vreg(x.dtype, cons))
+def pin(ctx:IselContext, x:UOp, cons:tuple[UOp, ...]) -> UOp: return UOp.ins(X86Ops.MOV, (x,), x.dtype, *ctx.vreg(x.dtype, cons))
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
 def lane(x:UOp, i:int) -> int: return s.src[1].src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
@@ -328,7 +317,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if x.dtype is dtypes.void: return None
   if (dst:=vdef(x)) is not None:
     # already allocated vregs
-    if dst.arg.name is not None: return None
+    if physical_reg(dst) is None: return None
     defs = tuple(p for choices in register_choices(x).values() for p in ctx.vreg(x.dtype, choices))
   else: defs = ctx.vreg(x.dtype, XMM if x.dtype in dtypes.floats or x.body.arg.code in XMM_OPS else WGPR)
   return UOp.ins(x.body.arg.code, x.src_without_body, x.dtype, *defs)
@@ -481,9 +470,9 @@ isel_matcher = PatternMatcher([
 class X86LinearContext(LinearContext):
   # stack alloc/dealloc and callee saved handling
   def insert_linearized(self, uops:list[UOp]) -> list[UOp]:
-    before, after, used = [], [], {r.name for u in uops if isinstance((r:=rdef(u)), Register)}
+    before, after, used = [], [], {rdef(u) for u in uops}
     for r in CALLEE_SAVED:
-      if r.name in used:
+      if r in used:
         a = reg(dtypes.uint64, r)
         slot = self.assign_spill_slot(r)
         before.append(self.ren.spill(slot,a))
@@ -494,7 +483,7 @@ class X86LinearContext(LinearContext):
       after.append(UOp.ins(X86Ops.ADDi, (stack_pointer(), imm(dtypes.int32, self.stack_size)), dtypes.uint64, RSP))
     return before + uops[:-1] + after + [uops[-1]]
 
-  def assign_spill_slot(self, r:Register) -> int:
+  def assign_spill_slot(self, r:UOp) -> int:
     sz = 16 if r in XMM else 8
     offset = self.stack_size + (sz - self.stack_size % sz) %sz
     self.stack_size = offset + sz
@@ -540,7 +529,7 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.END, name="x"), lambda x: (x, [UOp.ins(X86Ops.JMP, (x.src[1],), dtypes.void), label(label(x.src[1]))])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.CALL, name="x"), lambda ctx,x: (nx:=x.replace(src=(x.body,)+x.src[2:]),
-   [ctx.ren.copy(x.src[1], rdef(x)), nx] if rdef(x) != rdef(x.src[1]) else [nx]) if x.body.arg.code in X86GroupOp.TwoAddress else None),
+   [ctx.ren.copy(x.src[1], rdef(x)), nx] if rdef(x) is not rdef(x.src[1]) else [nx]) if x.body.arg.code in X86GroupOp.TwoAddress else None),
 ])
 
 # ***** X86 instruction encoding *****
@@ -550,9 +539,9 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
               vvvv_uop:UOp|None=None, imm_uop:UOp|None=None) -> bytes:
     nonlocal reg, opc
     # get the encoding values of the different fields
-    reg = unwrap(rdef(reg_uop)).index if reg_uop is not None else unwrap(reg)
-    rm = unwrap(rdef(rm_uop)).index
-    idx = unwrap(rdef(idx_uop)).index if idx_uop is not None and rdef(idx_uop) is not None else 4
+    reg = unwrap(rdef(reg_uop)).arg.slot if reg_uop is not None else unwrap(reg)
+    rm = unwrap(rdef(rm_uop)).arg.slot
+    idx = unwrap(rdef(idx_uop)).arg.slot if idx_uop is not None and rdef(idx_uop) is not None else 4
     # for a memory operand the rm size is the element size carried by the address, otherwise it's the size of the value in the register
     rm_sz = scale_uop.src[0].val if scale_uop is not None else rm_uop.dtype.itemsize
     reg_sz = reg_uop.dtype.itemsize if reg_uop is not None else 0
@@ -564,7 +553,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     # r extends reg field, x extends index field, b extends rm or base field
     r, _x, b = reg >> 3, idx >> 3, rm >> 3
     if sel: # VEX bytes
-      vvvv = (vd.index if isinstance(vd := rdef(vvvv_uop), Register) else reg) if vvvv_uop is not None else 0
+      vvvv = (vd.arg.slot if (vd:=rdef(vvvv_uop)) is not None else reg) if vvvv_uop is not None else 0
       if sel == 1 and _x == b == we == 0: inst += bytes([0xC5, (~r & 0b1) << 7 | (~vvvv & 0b1111) << 3 | pp])
       else: inst += bytes([0xC4, (~r & 0b1) << 7 | (~_x & 0b1) << 6 | (~b & 0b1) << 5 | sel, we << 7 | (~vvvv & 0b1111) << 3 | pp])
     else: # optional PREFIX and REX bytes
@@ -609,7 +598,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     # IMM byte
     if imm_uop is not None:
       if is_imm(imm_uop): inst += struct.pack(unwrap(imm_uop.dtype.fmt), imm_uop.src[0].val)
-      elif isinstance(rdef(imm_uop), Register): inst += bytes([(rdef(imm_uop).index & 0b1111) << 4 | 0b0000])
+      elif (r:=rdef(imm_uop)) is not None: inst += bytes([(r.arg.slot & 0b1111) << 4 | 0b0000])
     return inst
 
   # get the encoding structure of the uop
@@ -643,7 +632,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
 encodings = {
   # moves
   X86Ops.MOVABS: lambda x:
-   bytes([0b0100 << 4 | 0b1 << 3 | 0b00 << 2 | rdef(x).index >> 3, 0xB8 + (rdef(x).index & 0b111)]) + struct.pack(x.dtype.fmt, x.src[1].src[0].val),
+   bytes([0x48 | (slot:=rdef(x).arg.slot) >> 3, 0xB8 + (slot & 7)]) + struct.pack(x.dtype.fmt, x.src[1].src[0].val),
   X86Ops.MOV: lambda x: encode(x, 0x8B), X86Ops.MOVi: lambda x: encode(x, 0xC7, reg=0),
   X86Ops.MOVm: lambda x: encode(x, 0x89), X86Ops.LEA: lambda x: encode(x, 0x8D),
   X86Ops.VMOVSS: lambda x: encode(x, 0x10, pp=2, sel=1), X86Ops.VMOVSSm: lambda x: encode(x, 0x11, pp=2, sel=1),
@@ -719,14 +708,14 @@ class X86Renderer(ISARenderer):
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
   def is_two_address(self, x:UOp) -> bool: return x.op is Ops.CALL and x.body.arg.code in X86GroupOp.TwoAddress
-  def copy(self, x:UOp, reg:Register) -> UOp: return UOp.ins(X86Ops.MOV, (x,), x.dtype, reg)
+  def copy(self, x:UOp, reg:UOp) -> UOp: return UOp.ins(X86Ops.MOV, (x,), x.dtype, reg)
 
   def spill(self, spill_slot:int, x:UOp) -> UOp:
     op = X86Ops.VMOVUPSm if rdef(x) in XMM else X86Ops.MOVm
     disp = UOp.cconst(spill_slot, dtypes.int32)
     return UOp.ins(op, fold_address(stack_pointer().index(disp)) + (x,), dtypes.void)
 
-  def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp:
+  def fill(self, spill_slot:int, x:UOp, reg:UOp) -> UOp:
     disp = UOp.cconst(spill_slot, dtypes.int32)
     return UOp.ins(X86Ops.VMOVUPS if reg in XMM else X86Ops.MOV, fold_address(stack_pointer().index(disp)), x.dtype, reg)
 

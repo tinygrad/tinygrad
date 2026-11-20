@@ -1,7 +1,7 @@
 import itertools
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.renderer.x86 import ISARenderer, Register, vdef, register_choices, with_regs, reg, LinearContext
+from tinygrad.renderer.x86 import ISARenderer, vdef, register_choices, with_regs, reg, LinearContext
 
 # ops that participate in register allocation
 REGALLOC_OPS = {Ops.CALL, Ops.BUFFER, Ops.RANGE, Ops.END}
@@ -30,12 +30,12 @@ class LinearScanRegallocContext:
 
     # allocate registers
     self.spills: dict[UOp, int] = {} # mapping from virtual to stack offset
-    self.reals: dict[int, dict[UOp, Register]] = {} # mapping from virtual to real at each program point
-    self.insert_before: dict[int, list[tuple[UOp, Register]]] = {} # fills to be inserted at each program point
-    live: dict[UOp, Register] = {} # mapping from virtual to real that's currently assigned to it
-    live_ins: list[dict[UOp, Register]] = [] # mapping from virtual to real at loop entry
+    self.reals: dict[int, dict[UOp, UOp]] = {} # mapping from virtual to real at each program point
+    self.insert_before: dict[int, list[tuple[UOp, UOp]]] = {} # fills to be inserted at each program point
+    live: dict[UOp, UOp] = {} # mapping from virtual to real that's currently assigned to it
+    live_ins: list[dict[UOp, UOp]] = [] # mapping from virtual to real at loop entry
 
-    def alloc(cons:tuple[Register, ...], i:int) -> Register:
+    def alloc(cons:tuple[UOp, ...], i:int) -> UOp:
       live_inv = {v:k for k,v in live.items()}
       # allocate the best register. Registers not in live or not used again are free and have priority,
       # otherwise pick the one with the furthest next use. Regs that appear first in cons have priority in case of a tie
@@ -44,7 +44,7 @@ class LinearScanRegallocContext:
       return live.pop(vreg) if vreg is not None else reg
 
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
-    def fill(v:UOp, i:int, cons:tuple[Register, ...]|None=None) -> Register:
+    def fill(v:UOp, i:int, cons:tuple[UOp, ...]|None=None) -> UOp:
       r = alloc(cons if cons is not None else choices[v], i)
       if v not in self.spills: self.spills[v] = ctx.assign_spill_slot(r)
       self.insert_before.setdefault(i, []).append((v, r))
@@ -75,7 +75,7 @@ class LinearScanRegallocContext:
         # we move to registers vars used in the loop sorted by next use, vars not used in the loop will not be reloaded in the epilogue
         used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < loops[i] for l in lr[v])]
         sorted_uses = sorted(used_in_loop, key=lambda k: (next(l-i for l in lr[k] if l >= i), lr[k][0], k.key))
-        live_in: dict[UOp, Register] = {}
+        live_in: dict[UOp, UOp] = {}
         for v in sorted_uses:
           # if all the possible registers are already in live_in there's no space for this var
           if set(choices[v]).issubset(live_in.values()): continue
@@ -89,7 +89,7 @@ class LinearScanRegallocContext:
         # TODO: don't reload if first use in loop is a load
         live_in = live_ins.pop()
         for v,r in live_in.items():
-          if v not in live or live[v] != r: live[v] = fill(v, i, (r,))
+          if live.get(v) is not r: live[v] = fill(v, i, (r,))
         # a spilled var that only got a register inside the loop must be forced to reload from spill slot
         for v in list(live.keys()):
           if v in self.spills and v not in live_in: live.pop(v)
