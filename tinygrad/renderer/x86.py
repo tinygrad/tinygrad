@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import unwrap, Target
+from tinygrad.helpers import unwrap, Target, get_single_element
 from dataclasses import dataclass, field, replace
 
 @dataclass(frozen=True)
@@ -27,7 +27,7 @@ def regs(u:UOp) -> tuple[Register, ...]:
   return tuple(s.arg.reg for s in u.body.toposort() if s.op is Ops.PARAM and s.arg.reg is not None) if u.op is Ops.CALL else ()
 def with_regs(u:UOp, r:tuple[Register, ...]) -> UOp:
   assert u.dtype is not dtypes.void, "void cannot have output registers"
-  if u.op in {Ops.BUFFER, Ops.ALLOC}: return u.replace(arg=replace(u.arg, reg=r[0]))
+  if u.op in {Ops.BUFFER, Ops.ALLOC}: return u.replace(arg=replace(u.arg, reg=get_single_element(r)))
   return UOp.ins(u.body.arg.code, u.src_without_body, u.dtype, *r)
 
 def rdef(u:UOp):
