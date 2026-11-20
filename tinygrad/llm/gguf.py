@@ -263,11 +263,16 @@ class GGUFPackedTable:
   def read(self, start:int|UOp, n:int, device:str|tuple[str, ...]|None) -> Tensor:
     return ggml_data_to_tensor(self.rows[start:start+n].to(device).flatten(), n*int(self.rows.shape[1])*self.width, self.typ)
 
+def gguf_can_split(shape:tuple[int, ...], typ:int, axis:int, n:int) -> bool:
+  """whether `shape` splits evenly on `axis` over `n` devices, a split of the last axis has to keep whole quant blocks"""
+  return shape[axis] % n == 0 and not (axis == len(shape)-1 and shape[axis]//n % _GGML_QUANT.get(typ, (1,))[0])
+
 def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:tuple[str, ...],
-               shard_map:dict[str, int]|None=None, repeats:dict[str, int]|None=None) -> dict[str, Tensor]:
+               shard_map:dict[str, int]|None=None, repeats:dict[str, int]|None=None, pads:dict[str, int]|None=None) -> dict[str, Tensor]:
   """
   Loads the parsed `entries` on `devices`: a tensor in `shard_map` is sharded on the given axis, the others are copied to every device.
   A tensor in `repeats` is first cut into `len(devices)//repeats` row blocks that are each repeated `repeats` times.
+  A tensor in `pads` is zero padded with that many rows to split on axis 0, every device reads only its rows from the file.
   """
   n, packed, shard_map = len(devices), {}, shard_map or {}
   for name, r in (repeats or {}).items():
@@ -276,9 +281,15 @@ def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:t
     entries[name] = (data.to("CPU").reshape(n//r, -1).repeat_interleave(r, 0).flatten(), (shape[0]*r, *shape[1:]), typ)
   for name, (data, shape, typ) in entries.items():
     if (axis:=shard_map.get(name)) is None: packed[name] = data.shard(devices)
+    elif p:=(pads or {}).get(name, 0):
+      if axis != 0 or shape[0] + p != round_up(shape[0], n): raise ValueError(f"{name}: can't pad {shape} by {p} rows over {n} devices")
+      part, size = data.numel() // shape[0] * (shape[0]+p) // n, data.numel()
+      shards = [data[min(i*part, size):min((i+1)*part, size)].to(Device.canonicalize(d)) for i,d in enumerate(devices)]
+      shards = [x.pad(((0, part-x.numel()),)).clone().reshape(1, part) for x in shards]
+      packed[name] = Tensor(UOp.mstack(*[x.uop for x in shards]).unshard(0))
+      entries[name] = (data, (shape[0]+p, *shape[1:]), typ)
     else:
-      if shape[axis] % n or (axis == len(shape)-1 and shape[axis]//n % _GGML_QUANT.get(typ, (1,))[0]):
-        raise ValueError(f"{name}: can't split {shape} on axis {axis} over {n} devices")
+      if not gguf_can_split(shape, typ, axis, n): raise ValueError(f"{name}: can't split {shape} on axis {axis} over {n} devices")
       parts = (data.to("CPU") if prod(shape[:axis]) > 1 else data).reshape(*shape[:axis], n, -1)
       packed[name] = parts.permute(axis, *range(axis), axis+1).shard(devices, 0)
   # TODO: shard copies the full tensor to every device
