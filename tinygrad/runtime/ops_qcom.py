@@ -100,7 +100,7 @@ class QCOMComputeQueue(HWQueue):
     ubos = [a for a,(_,_,_,shape) in kargs if not is_image_shape(shape)]
     if data.NIR:
       args += layout_args(ubos, data.buf_off)
-      if data.wgsz != 0xfc: args += layout_args(list(prg.arg.local_size), data.wgsz * 4)
+      if data.wgsz != 0xfc: args += layout_args(list(prg.arg.launch_dims(call)[1]), data.wgsz * 4)
     else: args += list(zip(data.buf_offs, ubos))
 
     def _tex(b, ibo=False):
@@ -116,7 +116,7 @@ class QCOMComputeQueue(HWQueue):
 
   def exec(self, call:UOp, prg:UOp):
     data, lib = qcom_build_program(self.dev, prg, self.devs)
-    global_size, local_size = prg.arg.global_size, prg.arg.local_size
+    global_size, local_size = prg.arg.launch_dims(call)
     if data.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
     if any(g*l>mx for g,l,mx in zip(global_size, local_size, [65536, 65536, 65536])) and any(l>mx for l,mx in zip(local_size, [1024, 1024, 1024])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")

@@ -63,7 +63,8 @@ class CLQueue(HWQueue):
         images.append((end - 8) // 8)
       else: end = self.q64(args[i])
       self.call(cl.clSetKernelArg, kernel, i, args[i].dtype.itemsize, (end - 8,))
-    end = self.q64(*[g * l for g, l in zip(prg.arg.global_size, prg.arg.local_size)], *prg.arg.local_size) # [global][local]
+    global_size, local_size = prg.arg.launch_dims(call)
+    end = self.q64(*[g * l for g, l in zip(global_size, local_size)], *local_size) # [global][local]
     self.call(cl.clEnqueueNDRangeKernel, self.dev.handles[1], kernel, 3, 0, (end - 48,), (end - 24,), 0, 0, 0)
     self.cmds += [(cl.clReleaseMemObject, w) for w in images]
 

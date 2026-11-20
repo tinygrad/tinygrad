@@ -138,7 +138,7 @@ class MetalQueue(HWQueue):
     self.nbytes = max([o + w.dtype.itemsize for o, w in rows], default=off + 8)
 
     # symbolic sizes, set on the command at run time
-    dims = (*prg.arg.global_size, *prg.arg.local_size)
+    dims = sum(prg.arg.launch_dims(call), ())
     if any(isinstance(d, UOp) for d in dims):
       self.sizes.append((len(self.cmds), at:=round_up(self.nbytes, 8)))
       self.rows += layout_args([UOp.const(d, dtypes.uint64) for d in dims], at)

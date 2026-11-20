@@ -4,12 +4,18 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.codegen import to_program
 from tinygrad.helpers import Target
 from tinygrad.renderer.cstyle import ClangRenderer
-from tinygrad.uop.ops import KernelInfo, Ops
+from tinygrad.uop.ops import KernelInfo, Ops, ProgramInfo
 from tinygrad.codegen import resolve_linear_call
 
 def sched_key(t:Tensor): return t.export()[0].key
 
 class TestCall(unittest.TestCase):
+  def test_launch_dims_bind_only_call_variables(self):
+    n, m = UOp.variable("n", 1, 8), UOp.variable("m", 1, 8)
+    prg = UOp(Ops.PROGRAM, (UOp.sink(arg=KernelInfo()),), ProgramInfo(global_size=(n + m, 1, 1), local_size=(n, 1, 1)))
+    for value in (2, 5):
+      self.assertEqual(prg.arg.launch_dims(prg.call(n.bind(value))), (((m + value).simplify(), 1, 1), (value, 1, 1)))
+
   def test_call_scalar_param_shape_mismatch(self):
     scalar_fxn = UOp.param(0, dtypes.float, ()) * 2
     with self.assertRaisesRegex(TypeError, "shape mismatch: expected scalar"):
