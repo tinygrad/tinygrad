@@ -3,6 +3,7 @@ from tinygrad.dtype import DType, dtypes, AddrSpace
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.jit import TinyJit
+from tinygrad.engine.realize import get_call_arg_uops
 from tinygrad.nn.state import get_state_dict
 from tinygrad.helpers import Context, prod
 from tinygrad.uop.ops import Ops, UOp
@@ -35,12 +36,14 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     return name
 
   for call in iter_kernel_calls(linear):
-    arg_uops = [b for b in call.src[1:] if not b.is_bound_var]
-    prg = to_program(call.src[0], Device[arg_uops[0].device].renderer)
-    info = prg.arg
+    prg = to_program(call.body, Device[get_call_arg_uops(call)[0].device].renderer)
     functions[prg.src[0].arg.function_name] = prg.src[2].arg
-    cargs = [p if p.addrspace is AddrSpace.ALU else name_of(call.src[1+p.arg.slot], p.arg.slot == 0) for p in prg.kernel_params]
-    statements.append((prg.src[0].arg.function_name, cargs, info.global_size, info.local_size))
+    # The model input name belongs to the caller, its ABI dtype to the compiled PARAM.
+    scalars = {p:UOp.variable(v.expr, v.vmin, v.vmax, p.dtype) if (v:=call.scalar_arg(p)).is_variable else v.ccast(p.dtype)
+               for p in prg.arg.params if p.addrspace is AddrSpace.ALU}
+    cargs = [scalars[p] if p.addrspace is AddrSpace.ALU else name_of(call.src[1+p.arg.slot], p.arg.slot == 0) for p in prg.kernel_params]
+    dims = [[x.substitute(scalars, walk=True).ssimplify() if isinstance(x, UOp) else x for x in sz] for sz in (prg.arg.global_size, prg.arg.local_size)]
+    statements.append((prg.src[0].arg.function_name, cargs, *dims))
 
   return functions, statements, {name:(size, dtype, key) for name, size, dtype, key in bufs.values()}, bufs_to_save
 
@@ -132,7 +135,7 @@ def export_model_webgpu(functions, statements, bufs, weight_names, input_names, 
   layouts = f"const layouts=[{create_bind_group_layouts}]"
   kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, pipelines[{i}], layouts[{i}], infinityBuf, [{', '.join(args)}], [{', '.join(str(x) for x in global_size)}]);" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
 
-  buf_type = lambda x: "createUniformBuf" if x in set(uop.arg[0] for uop in symbolic_vars) else "createEmptyBuf"
+  buf_type = lambda x: "createUniformBuf" if x in symbolic_vars.values() else "createEmptyBuf"
   map_to_external_weight = lambda _key: f"state_dict['{weight_names[_key]}']" if stream_weights else f"getTensorBuffer(safetensor, metadata['{weight_names[_key]}'])"
   _bufs =  '\n    '.join([f"const {name} = " + (f"{buf_type(_key)}(device, {size});" if _key not in weight_names else f"createWeightBuf(device, {size}, {map_to_external_weight(_key)})") + ";"  for name,(size,dtype,_key) in bufs.items()])
   gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:{input_name}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,input_name in enumerate(input_names)])
@@ -253,24 +256,26 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
 
   # handle symbolic variables; TODO: refactor to fix some of this stuff upstream in tinygrad
   symbolic_vars = OrderedDict()
-  for i, (_, args, global_size, _) in enumerate(statements):
+  for _, args, global_size, _ in statements:
     for j, var in enumerate(args):
       if getattr(var, "op", None) is Ops.PARAM and var.addrspace is AddrSpace.ALU and var.arg.name is not None:
         if var not in symbolic_vars:
           symbolic_vars[var] = var.expr
           bufs[symbolic_vars[var]] = (var.dtype.itemsize, var.dtype, symbolic_vars[var])
-        statements[i][1][j] = symbolic_vars[var]
+        args[j] = symbolic_vars[var]
+      elif isinstance(var, UOp) and var.op is Ops.CONST: args[j] = str(var.val)
 
     if global_size:
       for j, dim in enumerate(global_size):
-        if getattr(dim, "op", None) is Ops.ADD and len(dim.src) == 2 and \
+        if isinstance(dim, UOp) and dim.is_variable: global_size[j] = f"_{dim.expr}[0]"
+        elif getattr(dim, "op", None) is Ops.ADD and len(dim.src) == 2 and \
            any(s.op is Ops.PARAM and s.addrspace is AddrSpace.ALU for s in dim.src) and any(s.op is Ops.CONST for s in dim.src):
           name, val = dim.src if dim.src[1].op is Ops.CONST else reversed(dim.src)
           global_size[j] = f"_{name.expr}[0] + {val.val}"
 
   prg = ""
   if target == "clang":
-    prg = export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names)
+    prg = export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names, symbolic_vars=symbolic_vars)
   elif target == "wasm":
     return export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names, weight_names, model_name, symbolic_vars, wasm=True)
   elif target == "webgpu":

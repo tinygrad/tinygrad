@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.device import Device
 from tinygrad.nn import Linear
 from tinygrad.nn.state import get_state_dict
-from tinygrad import dtypes
+from tinygrad import dtypes, Variable
 import json
 
 class MockMultiInputModel:
@@ -32,6 +32,13 @@ class TextModelExport(unittest.TestCase):
 
     for i, exported_input in enumerate(prg["inputs"]):
       assert inputs[i].dtype.name == exported_input["dtype"], f"Model and exported input dtype don't match: mdl={inputs[i].dtype.name}, prg={exported_input['dtype']}"  # noqa: E501
+
+  def test_symbolic_scalar_argument(self):
+    v = Variable("v", 1, 10).bind(3)
+    def model(x): return x + Tensor(v)
+    prg = json.loads(export_model(model, "", Tensor.ones(4, dtype=dtypes.int).contiguous().realize())[0])
+    self.assertEqual(prg["buffers"]["v"]["dtype"], "i32")
+    self.assertIn("v", prg["statements"][0]["args"])
 
   def test_multi_output_model_export(self):
     model = MockMultiOutputModel()
