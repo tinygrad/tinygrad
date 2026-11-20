@@ -47,11 +47,13 @@ z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = {Ops.TRUNCMOD: lambda _,a,b: a-z3
   Ops.WHERE: lambda _,c,a,b: z3.If(c,a,b), Ops.MAX: lambda _,a,b: z3.If(a<b, b, a),
   Ops.AND: z3_and, Ops.OR: z3_or, Ops.XOR: z3_xor, Ops.SHL: z3_shift, Ops.SHR: z3_shift}
 
-def create_bounded(name:str, vmin:int|z3.ArithRef, vmax:int|z3.ArithRef, solver:z3.Solver) -> z3.ArithRef:
+def create_bounded(name:str|int, vmin:int|z3.ArithRef, vmax:int|z3.ArithRef, solver:z3.Solver) -> z3.ArithRef:
   solver.add((vmin <= (s:=z3.Int(name, ctx=solver.ctx)))&(s <= vmax))
   return s
 def create_var(x:UOp, ctx:tuple[z3.Solver, dict[UOp, z3.ExprRef]]) -> z3.ExprRef:
-  name = x.arg.name if x.op is Ops.PARAM else f"{x.op.name.lower()}{len(ctx[1])}"
+  # Z3 integer symbols identify positional slots without colliding with free Variable names.
+  if x.op is Ops.PARAM: name = x.arg.slot if x.arg.slot >= 0 else x.arg.name
+  else: name = f"{x.op.name.lower()}{len(ctx[1])}"
   return z3.Bool(name, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else create_bounded(name, x.vmin, x.vmax, ctx[0])
 # a cast only converts between bool and int, z3_wrap models the width
 def z3_cast(c:UOp, x:z3.ExprRef) -> z3.ExprRef:
