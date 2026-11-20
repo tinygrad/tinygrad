@@ -29,9 +29,11 @@ class TestIselX86(unittest.TestCase):
     d = a.alu(Ops.CMPNE, b).where(a, b)
     f = c + d
     n = self.isel_rewrite(f)
-    self.assertTrue(n.src[1].body.arg.code is X86Ops.CMOVL and n.src[2].body.arg.code is X86Ops.CMOVNE)
-    # both comparisons become the same instruction
-    self.assertTrue(n.src[1].src[3] == n.src[2].src[3] and n.src[1].src[3].body.arg.code is X86Ops.CMP)
+    ops = [u.body.arg.code for u in n.toposort() if u.op is Ops.CALL]
+    self.assertEqual(ops.count(X86Ops.CMOVNE), 2)
+    self.assertEqual(ops.count(X86Ops.SETL), 1)
+    self.assertEqual(ops.count(X86Ops.SETNE), 1)
+    self.assertEqual(ops.count(X86Ops.CMP), 1)
 
   def test_vinsertps(self):
     a = UOp.variable("a", 0, 0, dtypes.float32)
