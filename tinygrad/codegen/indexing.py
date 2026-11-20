@@ -145,12 +145,8 @@ pm_fix_deviceless = PatternMatcher([
 
 @functools.cache
 def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:UOp) -> UOp:
-  acc:sint = 1
-  axes_in:list[UOp] = []
-  for s,src in list(zip(out_shape, urngs.src))[::-1]:
-    axes_in.append(acc*src)
-    acc *= s
-  combined_axes = UOp.const(0).usum(axes_in)
+  combined_axes = UOp.const(0)
+  for s,src in zip(out_shape, urngs.src): combined_axes = combined_axes*s + src
   axes_out:list[UOp] = []
   for s in in_shape[::-1]:
     axes_out.append(combined_axes % s)
