@@ -563,6 +563,16 @@ class TestAssign(unittest.TestCase):
     cache[v_pos:v_pos+1, :].assign(Tensor.ones(1, 4))
     self.assertEqual(cache.sum().item(), 4.0)
 
+  def test_assign_add_to_symbolic_slice(self):
+    # A write through a symbolically indexed view must update the original buffer.
+    i, pos, n = Variable("i", 0, 2).bind(1), Variable("pos", 0, 4).bind(0), Variable("n", 1, 4).bind(4)
+    x = Tensor.zeros(3, 8, 3).contiguous().realize()
+    view = x[i, pos:pos+n]
+    view.assign(view + Tensor.ones(4, 3)[:n]).realize()
+    expected = np.zeros((3, 8, 3))
+    expected[1, :4] = 1
+    np.testing.assert_array_equal(x.numpy(), expected)
+
   def test_chained_assign_slice_then_read(self):
     """Three caches with chained assign-then-read: each block writes to its cache and reads back,
     feeding the result to the next block's assign. Without proper dependency tracking, block N's read

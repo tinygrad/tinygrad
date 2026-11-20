@@ -66,8 +66,8 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     if x.op is Ops.STORE:
       # don't look inside stores, this doesn't count toward buffer accesses
       return False
-    if x.op in {Ops.PARAM, Ops.EXTERN}:
-      accessed_buffers.append(x)
+    # Symbolic indices are scalar inputs, not buffer accesses.
+    if x.op in {Ops.PARAM, Ops.EXTERN} and x.arg.addrspace == AddrSpace.GLOBAL: accessed_buffers.append(x)
     if x.op is Ops.REDUCE: reduces.append(x)
     return True
   src.toposort(gate=red_gate)
