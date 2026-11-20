@@ -432,44 +432,59 @@ PDS_MAIN_VA = 0xda00400000
 TASK_VA = 0x100804000
 CDM_EXECUTION_ADDRESS = 0x81e0e00000
 
+MT_TIMESTAMP_ADDR = 0x8000438200
+MT_FW_CSW_BUFFER = 0x6800000000
+MT_CDM_REGION_OFFSET, MT_CDM_REGION_SIZE = 0xa0, 0x198
+MT_SUBMISSION_SIZE = 0x19250
+# Undocumented generation-1 context bytes following MTFW_KICK_HEAD. The documented kick head is constructed from its struct.
+MT_GEN1_KICK_TAIL = bytes.fromhex(
+  '0000000000000000000000000000000000000000000000000000000000000000'
+  '00000000000000000000000000000000000000000000000000000000ff000000'
+  '000000000000000000000000000000000000000000000000f001000010000000'
+  '0200000000000000000000000000000000000000000000000000000000000000'
+  '0000000000000000000000000000000000000000000000000000000000000000'
+  '00000000000000000000000000000000000084e0810000000003420080000000'
+  '80034200800000002c00000000000000008342008000000000c0207820000000'
+  '0002000000000000')
+def build_compute_ctx() -> bytes:
+  ctx = mtfw.MTFW_COMPUTE_CTX_REGS()
+  ctx.cdmContextPds0,ctx.cdmContextPds1 = 0xe140000040010081,0x3606c1400002
+  ctx.cdmTerminatePds0,ctx.cdmTerminatePds1 = 0x3601,0
+  ctx.cdmResumePds0,ctx.cdmResumePds1 = 0x2000000,0x80000000
+  return bytes(ctx)
+
+def build_kick_head():
+  head = mtfw.MTFW_KICK_HEAD()
+  head.kickSemaphore.dependentValue[0] = 0x1800000000
+  head.kickSemaphore.dependentValue[2] = 0x2000000000
+  head.kickSemaphore.dependentValue[3] = 1
+  head.kickSemaphore.dependentValue[5] = 0x30d4000000178
+  head.kickSemaphore.dependentValue[6] = 0x14
+  return head
+
+def build_region_descs(execution_address:int):
+  cdm = mtfw.MTFW_SUBMISSION_REGION_DESC()
+  cdm.regionType, cdm.regionStart.offset, cdm.regionSize = mtfw.MTFW_SUB_REGION_CDM, MT_CDM_REGION_OFFSET, MT_CDM_REGION_SIZE
+  error = mtfw.MTFW_SUBMISSION_REGION_DESC()
+  error.regionType, error.regionStart.gpuAddr, error.regionSize = mtfw.MTFW_SUB_REGION_ERROR_BUFFER, execution_address, 8
+  return cdm,error
+
 def build_submission(launch_id:int=1, execution_address:int=CDM_EXECUTION_ADDRESS) -> bytes:
   """Build one compute submission with its CDM kick and error region."""
   head = mtfw.MTFW_SUBMISSION_HEAD()
-  head.timestampAddr, head.fwCswBufer = 0x8000438200, 0x6800000000
+  head.timestampAddr, head.fwCswBufer = MT_TIMESTAMP_ADDR, MT_FW_CSW_BUFFER
   head.retryCount, head.subRegionDescStartOffset, head.subRegionDescNums = 0xffffffff, mtfw.MTFW_SUBMISSION_HEAD.SIZE, 2
   head.cbId = launch_id
 
-  cdm = mtfw.MTFW_SUBMISSION_REGION_DESC()
-  cdm.regionType, cdm.regionStart.offset, cdm.regionSize = mtfw.MTFW_SUB_REGION_CDM, 0xa0, 0x198
-  error = mtfw.MTFW_SUBMISSION_REGION_DESC()
-  error.regionType, error.regionStart.gpuAddr, error.regionSize = mtfw.MTFW_SUB_REGION_ERROR_BUFFER, execution_address, 8
-
-  kick = bytearray(0x1a8)
-  struct.pack_into('<QQ',kick,0x18,0x1800000000,0x2000000001)
-  struct.pack_into('<Q',kick,0x20,0)
-  struct.pack_into('<Q',kick,0x28,0x2000000000)
-  struct.pack_into('<I',kick,0x30,1)
-  struct.pack_into('<I',kick,0x38,0)
-  struct.pack_into('<Q',kick,0x40,0x30d4000000178)
-  struct.pack_into('<I',kick,0x48,0x14)
-  struct.pack_into('<Q',kick,0xf8,0xff00000000)
-  struct.pack_into('<Q',kick,0x118,0x10000001f0)
-  struct.pack_into('<I',kick,0x120,2)
-  struct.pack_into('<I',kick,0x128,0)
-  struct.pack_into('<Q',kick,0x170,0x81e0840000)
-  struct.pack_into('<Q',kick,0x178,0x8000420300)
-  struct.pack_into('<Q',kick,0x180,0x8000420380)
-  struct.pack_into('<I',kick,0x188,0x2c)
-  struct.pack_into('<Q',kick,0x190,0x8000428300)
-  struct.pack_into('<Q',kick,0x198,0x207820c000)
-  struct.pack_into('<I',kick,0x1a0,0x200)
+  cdm,error = build_region_descs(execution_address)
+  kick = bytes(build_kick_head()) + MT_GEN1_KICK_TAIL
 
   raw = bytearray(bytes(head))
   struct.pack_into('<Q',raw,0x8,0)
-  struct.pack_into('<Q',raw,0x10,0x8000438200)
-  struct.pack_into('<Q',raw,0x18,0x6800000000)
-  packet = bytearray((bytes(raw)+bytes(cdm)+bytes(error)+kick+bytes(8)).ljust(0x19250,b'\0'))
-  struct.pack_into('<QQQQQQ',packet,0x300,0xe140000040010081,0x3606c1400002,0x3601,0,0x2000000,0x80000000)
+  struct.pack_into('<Q',raw,0x10,MT_TIMESTAMP_ADDR)
+  struct.pack_into('<Q',raw,0x18,MT_FW_CSW_BUFFER)
+  packet = bytearray((bytes(raw)+bytes(cdm)+bytes(error)+kick+bytes(8)).ljust(MT_SUBMISSION_SIZE,b'\0'))
+  packet[0x300:0x300+mtfw.MTFW_COMPUTE_CTX_REGS.SIZE] = build_compute_ctx()
   for off in range(0x380,0x1000,0x80): struct.pack_into('<Q',packet,off,0xb0)
   return bytes(packet)
 
@@ -494,7 +509,7 @@ class MTFirmwareLayout:
     self.item = self.regbuf + self.reg_dump_buffer_size
     self.gpu = self.item + self.vgpu_shared
     self.watchdog = self.gpu + 0x4c0
-    self.ccb = FWIF_OFF + 0x40ee0
+    self.ccb = FWIF_OFF + mtfw.struct_MTFW_FWIF_TAG.SIZE
 
 def build_firmware(lay:MTFirmwareLayout) -> bytes:
   fw = mtfw.struct_MTFW_FWIF_TAG()
@@ -556,18 +571,20 @@ class MTFirmware:
     fw = build_firmware(lay)
     self.v[FWIF_OFF:FWIF_OFF+len(fw)] = fw
     self.v[lay.trace:lay.trace+128] = struct.pack('<32I', *([0xffffffff] * 32))
-    self.v[lay.trace+0x17d20:lay.trace+0x17d20+128] = struct.pack('<32I', *([1] * 32))
-    self.v[lay.fault+0x8208:lay.fault+0x8210] = struct.pack('<Q', META_BASE + lay.dump)
-    self.v[lay.fault+0x8210:lay.fault+0x8214] = struct.pack('<I', 1)
+    self.v[lay.trace+mtfw.MTFW_FWIF_TRACEBUF.SIZE:lay.trace+mtfw.MTFW_FWIF_TRACEBUF.SIZE+128] = struct.pack('<32I', *([1] * 32))
+    cfg_array_off = lay.fault + mt_off(mtfw.MTFW_FWIF_FAULT_INFO_CTRL,'regDumpCfgArray')
+    cfg_num_off = lay.fault + mt_off(mtfw.MTFW_FWIF_FAULT_INFO_CTRL,'regDumpCfgNums')
+    self.v[cfg_array_off:cfg_array_off+8] = struct.pack('<Q', META_BASE + lay.dump)
+    self.v[cfg_num_off:cfg_num_off+4] = struct.pack('<I', 1)
     for i in range(64):
-      self.v[lay.fault+i*0x208+0x1f0:lay.fault+i*0x208+0x1f8] = struct.pack('<Q', META_BASE+lay.regbuf+i*(lay.reg_dump_buffer_size>>6))
-      self.v[lay.fault+i*0x208+0x1f8:lay.fault+i*0x208+0x1fc] = struct.pack('<I', lay.reg_dump_buffer_size>>9)
-    self.v[lay.dump+8:lay.dump+12] = struct.pack('<I', 1)
-    rc = bytearray(16)
-    struct.pack_into('<I', rc, 0, 0x208e150)
-    struct.pack_into('<I', rc, 5, 0x1000000)
-    struct.pack_into('<H', rc, 10, self.core_count * 2)
-    self.v[lay.regcfg:lay.regcfg+16] = rc
+      addr_off = lay.fault + i*mtfw.MTFW_FWIF_FAULT_INFO.SIZE + mt_off(mtfw.MTFW_FWIF_FAULT_INFO,'regDumpBuffAddr')
+      num_off = lay.fault + i*mtfw.MTFW_FWIF_FAULT_INFO.SIZE + mt_off(mtfw.MTFW_FWIF_FAULT_INFO,'regDumpBuffNum')
+      self.v[addr_off:addr_off+8] = struct.pack('<Q', META_BASE+lay.regbuf+i*(lay.reg_dump_buffer_size>>6))
+      self.v[num_off:num_off+4] = struct.pack('<I', lay.reg_dump_buffer_size>>9)
+    self.v[lay.dump+mt_off(mtfw.MTFW_FWIF_DUMP_CFG,'regDumpCfgNum'):lay.dump+mt_off(mtfw.MTFW_FWIF_DUMP_CFG,'regDumpCfgNum')+4] = struct.pack('<I', 1)
+    rc = mtfw.MTFW_FWIF_REG_DUMP_CFG()
+    rc.regOffset,rc.regStride,rc.regIdxNum,rc.indirectNum,rc.dumpBufNums = mtregs.RGX_CR_MMU_FAULT_STATUS1,8,2,1,self.core_count*2
+    self.v[lay.regcfg:lay.regcfg+rc.SIZE] = bytes(rc)
     self.mmu.map_range(FW_DEVVA, FW_BASE, INIT_SIZE)
 
   def _write(self, off:int, value:int, size:int=8) -> None: self.dev.smc._write(MT_SOCIF_OFFSET + off, value.to_bytes(size, 'little'))
@@ -783,7 +800,7 @@ class MTLaunch(MTFirmware):
 
   def set_grid(self, global_size:tuple[int,int,int], local_size:tuple[int,int,int]) -> None:
     off = self.backing_offsets[GRID_VA]
-    for i, field in enumerate([0x2c,0x30,0x34]): self._write_backing(off+field,struct.pack('<I',global_size[i]-1))
+    for i, field in enumerate([0x2c,0x30,0x34]): self._write_backing(off+field,struct.pack('<I',cdm_workgroup(global_size[i]-1)))
     block = bytearray(self.write_map.get(off,bytes(0x1000))[0x3c:0x40])
     block[0] = local_size[2] - 1
     block[1] = (local_size[1] - 1) << 2
@@ -794,9 +811,10 @@ class MTLaunch(MTFirmware):
     local_mem = k['.shared_memory_size']
     blocks = max(1,(local_mem+63)//64)
     register_blocks = k['.shared_reg_count']//16+1
-    for field,value in [(0x00,mtcdm.ROGUE_CDMCTRL_USC_TARGET_ANY<<1),(0x04,0x406000|mtcdm.ROGUE_CDMCTRL_SD_TYPE_USC),
-                        (0x08,0x3500),(0x18,0x2000000|register_blocks),
-                        (0x20,0x101085),(0x24,0x406010),(0x28,0x3580),(0x38,(0x1000 if has_block else 0)+blocks),
+    for field,value in [(0x00,cdm_kernel0(mtcdm.ROGUE_CDMCTRL_USC_TARGET_ANY)),
+                        (0x04,cdm_kernel1(MT_GEN1_KERNEL1_DATA_ADDR,mtcdm.ROGUE_CDMCTRL_SD_TYPE_NONE,usc_common_shared=True)),
+                        (0x08,cdm_kernel2(MT_GEN1_KERNEL2_CODE_ADDR)),(0x18,MT_GEN1_KERNEL6_BASE|register_blocks),
+                        (0x20,MT_GEN1_KERNEL8),(0x24,MT_GEN1_KERNEL7),(0x28,MT_GEN1_PDS_RESUME_OFFSET),(0x38,(0x1000 if has_block else 0)+blocks),
                         (0x40,0x80000000)]: self._write_backing(off+field,struct.pack('<I',value))
 
   def start(self, timeout:float=10.0) -> None:
@@ -830,40 +848,65 @@ class MTLaunch(MTFirmware):
 
 # **** generated ****
 
-# Device-VA to backing-PA layout used by the generated compute context. This is
-# an allocation map, not captured launch state.
-GENERATED_OFFSETS = {
-  0x100000000:0x0,0x100400000:0x200000,0x100800000:0x400000,0x100a00000:0x600000,0x101a00000:0x1600000,
-  **{0x102a00000+i*0x100000:0x2600000+i*0x100000 for i in range(33)},
-  **{0x105a00000+i*0x100000:0x5600000+i*0x100000 for i in range(32)},
-  0x8000000000:0x8600000,0x8000400000:0x8a00000,
-  0x81e0802000:0x8e00000,0x81e0812000:0x8e10000,0x81e0814000:0x8e12000,0x81e0815000:0x8e13000,
-  0x81e081e000:0x8e1c000,0x81e0820000:0x8e1e000,0x81e0830000:0x8e1f000,0x81e0840000:0x8e2f000,
-  0x81e0849000:0x8e38000,0x81e0861000:0x8e50000,0x81e08c9000:0x8eb8000,0x81e08d2000:0x8ec1000,
-  0x81e0a00000:0x8ed9000,CDM_EXECUTION_ADDRESS:0x92d9000,ARGS_VA:0x96d9000,GRID_VA:0x98d9000,
-  RESUME_VA:0x9ad9000,
-  **{PDS_MAIN_VA+i*0x1000:0x9ed9000+i*0x1000 for i in range(7)},
-  TEXT_VA:0xa0df000,0xe000400000:0xa4df000,0xe000402000:0xa4e1000,0xe000408000:0xa4e7000,
-  0xf000000000:0xa4ed000,0xf000400000:0xa8ed000,TASK_VA:0xb0ed000,0x100805000:0xb0ee000,
-  **{0x100820000+i*0x1000:0xb0ef000+i*0x1000 for i in range(9)},
+# Fixed generation-1 device VA regions, in backing-store allocation order. The backing offsets are computed, not duplicated.
+MT_GEN1_REGIONS = [
+  (0x100000000,0x200000),(0x100400000,0x200000),(0x100800000,0x200000),(0x100a00000,0x1000000),(0x101a00000,0x1000000),
+  *[(0x102a00000+i*0x100000,0x100000) for i in range(32)],(0x104a00000,0x1000000),
+  *[(0x105a00000+i*0x100000,0x100000) for i in range(31)],(0x107900000,0x1100000),
+  (0x8000000000,0x400000),(0x8000400000,0x400000),
+  (0x81e0802000,0x10000),(0x81e0812000,0x2000),(0x81e0814000,0x1000),(0x81e0815000,0x9000),
+  (0x81e081e000,0x2000),(0x81e0820000,0x1000),(0x81e0830000,0x10000),(0x81e0840000,0x9000),
+  (0x81e0849000,0x18000),(0x81e0861000,0x68000),(0x81e08c9000,0x9000),(0x81e08d2000,0x18000),
+  (0x81e0a00000,0x400000),(CDM_EXECUTION_ADDRESS,0x400000),(ARGS_VA,0x200000),(GRID_VA,0x200000),(RESUME_VA,0x400000),
+  *[(PDS_MAIN_VA+i*MT_PAGE_SIZE,MT_PAGE_SIZE) for i in range(6)],(RESOURCE_VA,0x200000),
+  (TEXT_VA,0x400000),(0xe000400000,0x2000),(0xe000402000,0x6000),(0xe000408000,0x6000),
+  (0xf000000000,0x400000),(0xf000400000,0x800000),(TASK_VA,MT_PAGE_SIZE),(0x100805000,MT_PAGE_SIZE),
+  *[(0x100820000+i*MT_PAGE_SIZE,MT_PAGE_SIZE) for i in range(9)],
+]
+GENERATED_OFFSETS = {}
+_backing_off = 0
+for _va,_size in MT_GEN1_REGIONS:
+  GENERATED_OFFSETS[_va] = _backing_off
+  _backing_off += _size
+
+def cdm_kernel0(usc_target:int) -> int: return usc_target << 1
+def cdm_kernel1(data_addr:int, sd_type:int, usc_common_shared:bool=False) -> int: return data_addr | (sd_type<<2) | int(usc_common_shared)<<1
+def cdm_kernel2(code_addr:int, one_wg_per_task:bool=False) -> int: return code_addr | int(one_wg_per_task)
+def cdm_workgroup(size:int) -> int: return size
+
+# Generation-1 launch control values that differ from Mesa's stock CDM stream.
+MT_GEN1_KERNEL1_DATA_ADDR = 0x406000
+MT_GEN1_KERNEL2_CODE_ADDR = 0x3500
+MT_GEN1_KERNEL6_BASE = 0x2000000
+MT_GEN1_KERNEL7 = 0x406010
+MT_GEN1_KERNEL8 = 0x101085
+MT_GEN1_PDS_RESUME_OFFSET = 0x3580
+
+# Undocumented generation-1 fields after the public submission/kick/context structs.
+MT_GEN1_TASK_QWORDS = {
+  0x1a0:0x10000001f0,0x1f8:0x81e0812000,0x200:0x8000404300,0x208:0x8000404380,0x218:0x8000404400,
+  0x220:0x2078200800,0x380:0xb0,
 }
+MT_GEN1_TASK_DWORDS = {0x184:1,0x1a8:2,0x210:0x2c,0x228:0x200,0x500:4}
 
 class MTGeneratedLaunch(MTLaunch):
   _text_span = 0
 
   def generate_task_page(self) -> None:
-    # Generation-1 CDM task/context layout. Kernel-specific resources and PDS
-    # programs are overlaid from ELF metadata by set_generated()/generate_pds().
-    page = bytearray(0x1000)
-    qwords = {0x10:0x8000404500,0x18:0x6800000000,0x78:0x81e0e00000,0x80:8,
-              0x90:0,0x98:0,0xa0:0x1800000000,0xa8:0,0xb0:0x2000000000,0xb8:1,0xc0:0,0xc8:0x30d4000000178,
-              0x1a0:0x10000001f0,0x1f8:0x81e0812000,0x200:0x8000404300,0x208:0x8000404380,0x218:0x8000404400,
-              0x220:0x2078200800,0x300:0xe140000040010081,0x308:0x3606c1400002,0x310:0x3601,
-              0x320:0x2000000,0x328:0x80000000,0x380:0xb0}
-    dwords = {0x24:0xffffffff,0x28:0x58,0x2c:2,0x38:1,0x40:1,0x58:2,0x60:0xa0,0x68:0x198,0x70:0xa,
-              0xd0:0x14,0x184:1,0x1a8:2,0x210:0x2c,0x228:0x200,0x500:4}
-    for field,value in qwords.items(): struct.pack_into('<Q',page,field,value)
-    for field,value in dwords.items(): struct.pack_into('<I',page,field,value)
+    page = bytearray(MT_PAGE_SIZE)
+    head = mtfw.MTFW_SUBMISSION_HEAD()
+    head.fwCswBufer,head.submissionCmd = 0x8000404500,mtfw.MTFW_SUBMISSION_CMD_GPU_CDM
+    head.retryCount,head.subRegionDescStartOffset,head.subRegionDescNums = 0xffffffff,mtfw.MTFW_SUBMISSION_HEAD.SIZE,2
+    head.cbId,head.processId = 1,1
+    page[:head.SIZE] = bytes(head)
+    cdm,error = build_region_descs(CDM_EXECUTION_ADDRESS)
+    page[0x58:0x58+cdm.SIZE] = bytes(cdm)
+    page[0x70:0x70+error.SIZE] = bytes(error)
+    page[0x88:0x88+mtfw.MTFW_KICK_HEAD.SIZE] = bytes(build_kick_head())
+    for field,value in MT_GEN1_TASK_QWORDS.items(): struct.pack_into('<Q',page,field,value)
+    for field,value in MT_GEN1_TASK_DWORDS.items(): struct.pack_into('<I',page,field,value)
+    ctx = build_compute_ctx()
+    page[0x300:0x300+len(ctx)] = ctx
     self._write_backing(self.backing_offsets[TASK_VA],page)
 
   def generate_static_pds(self) -> None:
@@ -932,13 +975,18 @@ class MTGeneratedLaunch(MTLaunch):
       if self.mmu.pages.get(va) != pa: self.mmu.map_range(va,pa,size,MT_PTE_READ_WRITE)
     for va in (0x2078200000,0x207820c000):
       if va not in self.mmu.pages: self.mmu.map(va,self.zero_pa,MT_PTE_READ_WRITE)
-    error_off = self.backing_offsets[0x81e0e00000]
-    self._write_backing(error_off+0x1f0,struct.pack('<Q',0x81e0e00218))
-    self._write_backing(error_off+0x1f8,struct.pack('<I',1))
-    self._write_backing(error_off+0x200,struct.pack('<Q',0x81e0e00288))
-    self._write_backing(error_off+0x208,struct.pack('<I',0x11d))
-    self._write_backing(error_off+0x218,struct.pack('<Q',0x81e0e00228))
-    self._write_backing(error_off+0x220,struct.pack('<I',6))
+    error_off = self.backing_offsets[CDM_EXECUTION_ADDRESS]
+    error = mtfw.MTFW_FWIF_ERROR_INFO()
+    error.regDumpCfgArray,error.regDumpCfgNums = CDM_EXECUTION_ADDRESS+mtfw.MTFW_FWIF_ERROR_INFO.SIZE,1
+    error.regDumpBuffAddr,error.regDumpBuffNum = CDM_EXECUTION_ADDRESS+0x288,0x11d
+    self._write_backing(error_off+mt_off(mtfw.MTFW_FWIF_ERROR_INFO,'regDumpCfgArray'),struct.pack('<Q',error.regDumpCfgArray))
+    self._write_backing(error_off+mt_off(mtfw.MTFW_FWIF_ERROR_INFO,'regDumpCfgNums'),struct.pack('<I',error.regDumpCfgNums))
+    self._write_backing(error_off+mt_off(mtfw.MTFW_FWIF_ERROR_INFO,'regDumpBuffAddr'),struct.pack('<Q',error.regDumpBuffAddr))
+    self._write_backing(error_off+mt_off(mtfw.MTFW_FWIF_ERROR_INFO,'regDumpBuffNum'),struct.pack('<I',error.regDumpBuffNum))
+    next_error = CDM_EXECUTION_ADDRESS+mtfw.MTFW_FWIF_ERROR_INFO.SIZE+0x10
+    next_off = error_off+mtfw.MTFW_FWIF_ERROR_INFO.SIZE
+    self._write_backing(next_off+mt_off(mtfw.MTFW_FWIF_DUMP_CFG,'regDumpCfgArray'),struct.pack('<Q',next_error))
+    self._write_backing(next_off+mt_off(mtfw.MTFW_FWIF_DUMP_CFG,'regDumpCfgNum'),struct.pack('<I',6))
     self._write_backing(error_off+0x228,struct.pack('<Q',0x208e150))
     self._write_backing(error_off+0x230,struct.pack('<I',0x20001))
     self._write_backing(error_off+0x238,struct.pack('<Q',0x8000020004084178))
