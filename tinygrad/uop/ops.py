@@ -1321,10 +1321,7 @@ class ProgramInfo:
   ins: tuple[int, ...] = ()
   target: Target = Target()
 
-  def launch_dims(self, var_vals:dict[str, int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])  # type: ignore[arg-type]
-    local_size = tuple([sym_infer(sz, var_vals) for sz in self.local_size])
-    return global_size, local_size
+  def launch_dims(self, call:UOp): return self.global_size, self.local_size
 
   @staticmethod
   def from_sink(sink:UOp, target:Target=Target()) -> ProgramInfo:

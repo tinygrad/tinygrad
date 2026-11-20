@@ -27,7 +27,8 @@ def cu_launch_kernel(ctx:CUDADevice, call:UOp, prg:UOp) -> tuple:
   addr = buf.getaddr(HCQ_RUNTIME_DEV.device) # [extra: buffer pointer, &args, buffer size, &size, end][size][args]
   hdr = layout_args([UOp.const(v, dtypes.uint64) if isinstance(v, int) else v for v in (1, addr+48, 2, addr+40, ctx.launch_end, buf.max_numel()-48)])
   func = (p:=make_program(prg, 8, ctx.device)).after(p.store(prg)).bitcast(dtypes.u64).index(0).load()
-  return (cuda.cuLaunchKernel, func, *prg.arg.global_size, *prg.arg.local_size, 0, None, 0, patch(buf, hdr + rows).index(0))
+  global_size, local_size = prg.arg.launch_dims(call)
+  return (cuda.cuLaunchKernel, func, *global_size, *local_size, 0, None, 0, patch(buf, hdr + rows).index(0))
 
 pm_cuda = PatternMatcher([ # None is the stream
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), cu_launch_kernel),
