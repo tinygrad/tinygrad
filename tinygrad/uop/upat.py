@@ -47,7 +47,6 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
         first = st.src[1].substitute({it: base.index(0)})
         pred.append(UOp.native("{0} is {1}", fmt=True).call(st.src[1], first))
         and_clause.append(UOp(Ops.STORE, src=(st.src[0], first)))
-      if len(stores): and_clause.append(UOp.native("len({0}.src) != 0", fmt=True).call(base))
       # (a generator: the elements after the first are checked against it only if it matched)
       and_clause.append(UOp.native("all({0} for {1} in {2}.src)", fmt=True).call(UOp(Ops.AND, src=tuple(pred)), it, base))
     # multi match (fork)

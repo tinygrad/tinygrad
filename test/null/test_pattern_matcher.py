@@ -186,6 +186,22 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(UOp.stack(UOp.const(False, dtypes.bool), a < 5)), None)
     self.assertEqual(matcher.rewrite(UOp.stack(a < 5, a < 6)), a)
 
+  def test_empty_repeated_capture(self):
+    empty, leaf = UOp.sink(), UOp.const(1)
+    for compiled in (False, True):
+      with self.subTest(compiled=compiled):
+        # An empty repeat cannot supply a capture, even if the callback has a default for it.
+        direct = PatternMatcher([(UPat(Ops.SINK, src=UPat.var("x")), lambda x=True: x)], compiled=compiled)
+        self.assertIsNone(direct.rewrite(empty))
+        self.assertIs(direct.rewrite(leaf.sink()), leaf)
+        nested = PatternMatcher([(UPat(Ops.SINK, src=UPat(src=UPat.var("x"))), lambda x=True: x)], compiled=compiled)
+        self.assertIsNone(nested.rewrite(empty))
+        self.assertIsNone(nested.rewrite(empty.sink()))
+        self.assertIs(nested.rewrite(leaf.sink().sink()), leaf)
+        # A name on the parent is not a capture inside the repeat.
+        unnamed = PatternMatcher([(UPat(Ops.SINK, src=UPat(), name="s"), lambda s: True)], compiled=compiled)
+        self.assertTrue(unnamed.rewrite(empty))
+
   def test_allow_len(self):
     matcher = PatternMatcher([(UPat(Ops.MULACC, name="x", src=(UPat(Ops.CONST),), allow_any_len=True), lambda x: x.sink())])
     c1 = UOp.const(1.0)
