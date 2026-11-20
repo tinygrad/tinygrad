@@ -817,6 +817,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert opaque.nbytes % dtype.itemsize == 0, f"{opaque.nbytes} bytes is not divisible by {dtype.itemsize} for {dtype}"
     # Both storage identity and interpretation are part of the UOp key.
     return UOp._buffer(opaque.nbytes // dtype.itemsize, dtype, -id(opaque), device=device or opaque.device, buffer=opaque)
+  def as_extern(self, slot:int) -> UOp: return self.replace(op=Ops.EXTERN, arg=replace(self.arg, slot=slot, buffer=None, name=None, val=None))
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
