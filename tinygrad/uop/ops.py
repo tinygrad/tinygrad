@@ -585,8 +585,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def without_after(self) -> UOp: return self.src[0].without_after if self.op is Ops.AFTER else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   @staticmethod
-  def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:Register) -> UOp:
-    params = [UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r) for i,r in enumerate(regs)]
+  def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:Register|UOp) -> UOp:
+    params = [r if isinstance(r, UOp) else UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r) for i,r in enumerate(regs)]
     return UOp.native(op, *params, dtype=dtype).call(*src)
   def contract(self, *rngs:UOp):
     assert all(x.axis_type == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
