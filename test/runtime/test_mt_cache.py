@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Tensor, Device, Variable
+from tinygrad.helpers import Context
 
 @unittest.skipUnless(Device.DEFAULT == 'MT', 'MT cache regressions require MT hardware')
 class TestMTHCQCache(unittest.TestCase):
@@ -41,6 +42,12 @@ class TestMTHCQCache(unittest.TestCase):
     ones = Tensor.ones(10).contiguous()
     for s in [2,5,2,8,5]:
       self.assertEqual(ones[:i.bind(s)].sum().item(), s)
+
+  def test_profiled_revisit(self):
+    with Context(DEBUG=2):
+      a, b = Tensor([1.,2,3]), Tensor([4.,5,6])
+      self.assertEqual((a+b).tolist(), [5.,7.,9.])
+      self.assertEqual((a+b).tolist(), [5.,7.,9.])
 
   def test_gemm_then_gemv(self):
     a, b = Tensor.ones(64,64).contiguous(), Tensor.eye(64).clone()

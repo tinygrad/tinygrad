@@ -311,7 +311,7 @@ def mt_lower_call(call:UOp) -> UOp:
         u.src[0].src[1].op is Ops.PARAM and u.src[0].src[1].arg.name == 'COMPUTE:0'):
       mt_queue = MTComputeQueue(u.replace(arg=call.arg))
       queue = mt_queue.encode().replace(arg=call.body.arg)
-      outer_args = tuple(s.expr for s in call.src[1:])
+      outer_args = tuple(s.expr if s.op in (Ops.PARAM,Ops.BUFFER,Ops.EXTERN) else s.key for s in call.src[1:])
       if mt_queue.template_hit and (cached:=getattr(mt_queue.template_launch,'lowered_template',None)) is not None and \
          cached[0] == mt_queue.template_key and cached[1] == outer_args: return cached[2]
       ret = lower_encoded_call(call.replace(src=(queue,*call.src[1:])))
