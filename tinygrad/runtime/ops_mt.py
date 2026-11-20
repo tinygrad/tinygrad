@@ -13,7 +13,7 @@ from tinygrad.runtime.support.system import PCIDevice, USBPCIDevice, System, fil
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.engine.realize import get_call_kernel_args
-from tinygrad.runtime.autogen import mtfw, mtregs, libc
+from tinygrad.runtime.autogen import mtfw, mtregs, mtpds, libc
 
 def mt_off(typ, name:str) -> int: return next(f[2] for f in typ._real_fields_ if f[0] == name)
 
@@ -327,11 +327,48 @@ class MTPDSProgram:
   def from_words(cls, code:list[int], data:list[int]) -> MTPDSProgram:
     return cls(struct.pack(f'<{len(code)}I',*code),struct.pack(f'<{len(data)}I',*data))
 
-def _bra(addr:int) -> int: return 0xc0000000 | (2<<24) | (1<<23) | (8<<19) | addr
-def _halt() -> int: return 0xd0000000 | (6<<23)
-def _doutu(src0:int=0) -> int: return 0xf0000000 | (1<<26) | (src0<<8) | 2
-def _doutw(src1:int, src0:int, end:bool=False) -> int:
-  return 0xf0000000 | (int(end)<<26) | (src1<<16) | (src0<<8) | 1
+def _bra(addr:int) -> int:
+  return mtpds.PVR_ROGUE_PDSINST_BRA_OPCODE_DEFAULT | (2<<mtpds.PVR_ROGUE_PDSINST_BRA_SRCC_SHIFT) | \
+    mtpds.PVR_ROGUE_PDSINST_BRA_NEG_ENABLE | (8<<mtpds.PVR_ROGUE_PDSINST_BRA_SETC_SHIFT) | addr
+
+def _dout(dst:int, src0:int=0, src1:int=0, cc:int=0, end:int=0) -> int:
+  return mtpds.PVR_ROGUE_PDSINST_DOUT_OPCODE_DEFAULT | (cc<<mtpds.PVR_ROGUE_PDSINST_DOUT_CC_SHIFT) | \
+    (end<<mtpds.PVR_ROGUE_PDSINST_DOUT_END_SHIFT) | (src1<<mtpds.PVR_ROGUE_PDSINST_DOUT_SRC1_SHIFT) | \
+    (src0<<mtpds.PVR_ROGUE_PDSINST_DOUT_SRC0_SHIFT) | dst
+
+def _doutu(src0:int=0, cc:int=0, end:int=1, flags:int=0) -> int:
+  return _dout(mtpds.PVR_ROGUE_PDSINST_DOUT_DST_DOUTU,src0,cc=cc,end=end) | flags
+
+def _doutw(src1:int, src0:int, end:bool=False) -> int: return _dout(mtpds.PVR_ROGUE_PDSINST_DOUT_DST_DOUTW,src0,src1,end=end)
+def _doutd(src0:int, cc:int=0, end:int=0) -> int: return _dout(mtpds.PVR_ROGUE_PDSINST_DOUT_DST_DOUTD,src0,cc=cc,end=end)
+def _doutc(src0:int) -> int: return _dout(5,src0,end=1)  # DOUTC, conditional in the Mesa headers
+
+def _sp(op:int, cc:int=0, payload:int=0) -> int:
+  return (mtpds.PVR_ROGUE_PDSINST_OPCODEC_SP<<28) | (op<<23) | (cc<<27) | payload
+
+def _release() -> int: return _sp(mtpds.PVR_ROGUE_PDSINST_OPCODESP_RELEASE)
+def _halt() -> int: return _sp(mtpds.PVR_ROGUE_PDSINST_OPCODESP_HALT)
+def _ld(src0:int=0, flags:int=0) -> int: return _sp(mtpds.PVR_ROGUE_PDSINST_OPCODESP_LD,payload=src0|flags)
+def _st(src0:int=0) -> int: return _sp(mtpds.PVR_ROGUE_PDSINST_OPCODESP_ST,payload=src0)
+def _wdf(payload:int) -> int: return _sp(mtpds.PVR_ROGUE_PDSINST_OPCODESP_WDF,payload=payload)
+def _vendor_sp9(cc:int, payload:int) -> int: return _sp(9,cc,payload)  # generation-1 resume ABI; not defined by Mesa
+
+def _sftlp64(cc:int, lop:int, im:int, src0:int, src1:int, src2:int, dst:int) -> int:
+  return mtpds.PVR_ROGUE_PDSINST_SFTLP64_OPCODE_DEFAULT | (cc<<mtpds.PVR_ROGUE_PDSINST_SFTLP64_CC_SHIFT) | \
+    (lop<<mtpds.PVR_ROGUE_PDSINST_SFTLP64_LOP_SHIFT) | (im<<mtpds.PVR_ROGUE_PDSINST_SFTLP64_IM_SHIFT) | \
+    (src0<<mtpds.PVR_ROGUE_PDSINST_SFTLP64_SRC0_SHIFT) | (src1<<mtpds.PVR_ROGUE_PDSINST_SFTLP64_SRC1_SHIFT) | \
+    (src2<<mtpds.PVR_ROGUE_PDSINST_SFTLP64_SRC2_SHIFT) | (dst<<mtpds.PVR_ROGUE_PDSINST_SFTLP64_DST_SHIFT)
+
+def _cmp(cc:int, cop:int, setcp:int, im:int, src0:int, src1:int) -> int:
+  return mtpds.PVR_ROGUE_PDSINST_CMP_OPCODE_DEFAULT | (cc<<mtpds.PVR_ROGUE_PDSINST_CMP_CC_SHIFT) | \
+    (cop<<mtpds.PVR_ROGUE_PDSINST_CMP_COP_SHIFT) | (setcp<<mtpds.PVR_ROGUE_PDSINST_CMP_SETCP_SHIFT) | \
+    (im<<mtpds.PVR_ROGUE_PDSINST_CMP_IM_SHIFT) | (src0<<mtpds.PVR_ROGUE_PDSINST_CMP_SRC0_SHIFT) | (src1<<mtpds.PVR_ROGUE_PDSINST_CMP_SRC1_SHIFT)
+
+def _ddmad(cc:int, end:int, src0:int, src1:int, src2:int, src3:int) -> int:
+  return mtpds.PVR_ROGUE_PDSINST_DDMAD_OPCODE_DEFAULT | (cc<<mtpds.PVR_ROGUE_PDSINST_DDMAD_CC_SHIFT) | \
+    (end<<mtpds.PVR_ROGUE_PDSINST_DDMAD_END_SHIFT) | (src0<<mtpds.PVR_ROGUE_PDSINST_DDMAD_SRC0_SHIFT) | \
+    (src1<<mtpds.PVR_ROGUE_PDSINST_DDMAD_SRC1_SHIFT) | (src2<<mtpds.PVR_ROGUE_PDSINST_DDMAD_SRC2_SHIFT) | \
+    (src3<<mtpds.PVR_ROGUE_PDSINST_DDMAD_SRC3_SHIFT)
 
 def _control(dest:int, part:str, store:str, last:bool) -> int:
   masks = {'lower32':0,'upper32':1,'lower64':2}
@@ -829,48 +866,50 @@ class MTGeneratedLaunch(MTLaunch):
     self._write_backing(self.backing_offsets[TASK_VA],page)
 
   def generate_static_pds(self) -> None:
-    # Firmware resume and main PDS programs. These instruction words are fixed
-    # by the generation-1 PDS ABI, not per-kernel captured launch data.
+    # Firmware resume and main PDS programs. The flags/payloads not defined by Mesa are generation-1 resume ABI bits.
     resume = bytearray(0x4000)
     def words(off:int, *values:int) -> None: struct.pack_into(f'<{len(values)}I',resume,off,*values)
-    words(0x20,0xf4000002)
-    words(0x30,0xd2800000)
-    words(0x40,0xf0001001,0xf4000012)
-    words(0x50,0xf0001001,0xf4000012)
-    def doutw(off:int) -> None: words(off,0xf0002000,0xf400180a)
-    def doutd(off:int) -> None: words(off,0xdcb40003,0xf0001301,0xd2800000,0xf0001b01,0xfc000012)
+    words(0x20,_doutu())
+    words(0x30,_release())
+    words(0x40,_doutw(0,0x10),_doutu(flags=0x10))
+    words(0x50,_doutw(0,0x10),_doutu(flags=0x10))
+    def doutw(off:int) -> None: words(off,_doutd(0x20),_doutu(src0=0x18,flags=0x8))
+    def doutd(off:int) -> None:
+      words(off,_vendor_sp9(1,0x340003),_doutw(0,0x13),_release(),_doutw(0,0x1b),_doutu(cc=1,flags=0x10))
     for base in range(0x80,0x1800,0x100):
       doutw(base)
       doutd(base+0x80)
-    words(0x1880,0xdcb40002,0xd2800000,0xf0001001,0xf4000012)
-    words(0x1900,0xf0001001,0xf4000012)
-    words(0x1980,0xf4001005,0xd2800000)
+    words(0x1880,_vendor_sp9(1,0x340002),_release(),_doutw(0,0x10),_doutu(flags=0x10))
+    words(0x1900,_doutw(0,0x10),_doutu(flags=0x10))
+    words(0x1980,_doutc(0x10),_release())
     for off,address,size in [(0x1a00,0x81e08a1180,0x1000000600),(0x1a20,0x81e08a1180,0x2000000800),
                              (0x1a40,0x81e08a5180,0x1000000600),(0x1a60,0x81e08a5180,0x2000000800)]:
       struct.pack_into('<QI4xQ',resume,off,address,0x80000043,size)
     struct.pack_into('<QII',resume,0x1a80,0x81e08a9180,0,0x21000000)
-    words(0x1aa0,0xd1340002,0xd1300040,0xa766ff8d,0xb1acc005,0xe0650107,0xd0080067,0xd0200002,0xd0800000,0xd2800000)
+    words(0x1aa0,_wdf(0x340002),_wdf(0x300040),_sftlp64(0,7,0,0x19,0x17,0xfc,0xd),_cmp(0,0,1,1,0xb,0x3001),
+          _ddmad(0,0,0x19,8,4,7),_st(0x67),_ld(2,flags=0x200000),_st(),_release())
     struct.pack_into('<QII',resume,0x1b00,0x81e08a9180,0,0x30400000)
-    words(0x1b10,0xd1340002,0xd1300040,0xa766ff8d,0xb1acc005,0xe0650107,0xd0000067,0xd0800000,0xd2800000)
-    words(0x1b80,0xdcb40002,0xd2800000,0xf0001001,0xf4000012)
-    words(0x1c00,0xf0001001,0xf4000012)
-    words(0x1c80,0xf4001005,0xd2800000)
+    words(0x1b10,_wdf(0x340002),_wdf(0x300040),_sftlp64(0,7,0,0x19,0x17,0xfc,0xd),_cmp(0,0,1,1,0xb,0x3001),
+          _ddmad(0,0,0x19,8,4,7),_ld(0x67),_st(),_release())
+    words(0x1b80,_vendor_sp9(1,0x340002),_release(),_doutw(0,0x10),_doutu(flags=0x10))
+    words(0x1c00,_doutw(0,0x10),_doutu(flags=0x10))
+    words(0x1c80,_doutc(0x10),_release())
     for base in range(0x1d00,0x3500,0x100):
       doutw(base)
       doutd(base+0x80)
-    words(0x3500,0xf4001000)
+    words(0x3500,_doutd(0x10,end=1))
     args = self.generated_image.metadata.kernel['.args']
     has_block = any(a['.kind'] in (5,6,7) for a in args)
     has_local = any(a['.kind'] in (1,2,3) for a in args)
     if self.generated_image.metadata.kernel['.has_barrier']:
-      words(0x3580,0xdcb40004,0xf0001301,0xf0001801,0xd2800000,0xf0002301,0xfc00001a)
+      words(0x3580,_vendor_sp9(1,0x340004),_doutw(0,0x13),_doutw(0,0x18),_release(),_doutw(0,0x23),_doutu(cc=1,flags=0x18))
     elif has_block: doutd(0x3580)
-    elif has_local: words(0x3580,0xdcb40002,0xd2800000,0xf0001301,0xfc000012)
-    else: words(0x3580,0xdcb40002,0xd2800000,0xfc00000a)
-    words(0x3600,0xf4001005)
+    elif has_local: words(0x3580,_vendor_sp9(1,0x340002),_release(),_doutw(0,0x13),_doutu(cc=1,flags=0x10))
+    else: words(0x3580,_vendor_sp9(1,0x340002),_release(),_doutu(cc=1,flags=0x8))
+    words(0x3600,_doutc(0x10))
     self._write_backing(self.backing_offsets[RESUME_VA],resume)
     main = bytearray(0x1000)
-    for off,word in {0x00:0xf4001000,0x10:0xf4000002,0x20:0xf0001000,0x24:0xf4000012}.items():
+    for off,word in {0x00:_doutd(0x10,end=1),0x10:_doutu(),0x20:_doutd(0x10),0x24:_doutu(flags=0x10)}.items():
       struct.pack_into('<I',main,off,word)
     self._write_backing(self.backing_offsets[PDS_MAIN_VA],main)
 
