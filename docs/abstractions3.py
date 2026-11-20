@@ -31,19 +31,10 @@ with Context(TRAINING=1):
   optim.schedule_step()   # this will step the optimizer without running realize
 
 # *****
-# 3. Export and compile the graph.
-
-# The weight Tensors have been assigned to, but not yet realized. Everything is still lazy at this point
-# l1.uop and l2.uop define a computation graph
-
-# export gives the Tensors storage and returns the graph of stores into it as a function with no runtime state,
-# its EXTERNs are the storage (and bound Variables) listed in externs
+# 3. Export the pending weight updates. Compile the graph without the storage it will write into.
 fn, externs = Tensor.export(l1, l2)
-
-# the compiler only needs fn, not the weights or their addresses
 linear = Tensor.compile(fn)
-
-print(f"The schedule contains {len(linear.src)} items.")
+print(f"The compiled program contains {len(linear.src)} calls.")
 for call in linear.src: print(str(call)[:80])
 
 # *****

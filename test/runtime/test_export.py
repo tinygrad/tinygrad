@@ -13,7 +13,7 @@ class TestExportRun(unittest.TestCase):
   def test_export_compile_run(self):
     def export(xs, name, n):
       x, v = Tensor(xs).realize(), Variable(name, 1, 4).bind(n)
-      out = ((x + 1).contiguous()[:v] * v).sum()
+      out = ((x + Variable("delta", 1, 4).bind(1)).contiguous()[:v] * v).sum()
       return out, *out.export()
 
     a, fn, first = export([1, 2, 3, 4], "rows", 2)
@@ -29,15 +29,9 @@ class TestExportRun(unittest.TestCase):
       Tensor.run(linear, second)
       Tensor.run(linear, first)
     self.assertEqual((a.item(), b.item()), (2*(2+3), 3*(11+21+31)))
-
-  def test_link_scalar_extern(self):
-    scale = Variable("scale", 1, 4)
-    out = Tensor([1, 2, 3]).realize() * scale.bind(2)
-    fn, externs = out.export()
-    compiled = Tensor.compile(fn)
-    for n in (2, 3):
-      Tensor.run(compiled, tuple(scale.bind(n) if x.is_bound_var else x for x in externs))
-      self.assertEqual(out.tolist(), [n, 2*n, 3*n])
+    # Even two scalars with the same runtime name bind independently by slot.
+    Tensor.run(linear, tuple(Variable("n", 1, 4).bind(3 if x.expr == "rows" else 1) if x.is_bound_var else x for x in first))
+    self.assertEqual(a.item(), 3*(2+3+4))
 
   def test_run_checks_externs(self):
     a, b = Tensor([1., 2.]).realize(), Tensor([1., 2., 3.]).realize()

@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
 from dataclasses import dataclass, field, replace
-from typing import Callable, Iterable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
+from typing import Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod
@@ -46,29 +46,15 @@ pm_export: PatternMatcher = PatternMatcher([
   (UPat(Ops.CALL, name="c"), export_call),
 ])
 
-# EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
-def map_back_extern(ctx:tuple[UOp, ...], e:UOp) -> UOp:
-  return x.unbound() if (x:=e.extern_arg(ctx)).is_bound_var else x
-
-pm_map_back = PatternMatcher([
-  (UPat(Ops.EXTERN, name="e"), map_back_extern),
-  # global ALLOCs are bound to fresh BUFFERs for this invocation
-  (UPat(Ops.ALLOC, name="b"), lambda b: UOp.new_buffer(b.device, b.max_numel(), b.dtype) if b.addrspace is AddrSpace.GLOBAL else None),
-])
-
 def map_back(linear:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, dict[str, int]]:
-  # the EXTERNs become the storage and the bound Variables of this invocation, ALLOCs get fresh storage
-  linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, name="map back")
-  # the values of the bound Variables the linear uses, they are call args
-  used_vars = {v.expr for si in linear.src for v in UOp.sink(*si.src[1:]).variables()}
-  return linear, binding_values(b for b in externs if b.is_bound_var and b.expr in used_vars)
-
-def binding_values(externs:Iterable[UOp]) -> dict[str, int]:
-  var_vals:dict[str, int] = {}
-  for b in externs:
-    if b.is_bound_var and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
-      raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
-  return var_vals
+  # Legacy schedules and JIT capture use named variables and concrete scratch buffers.
+  subs = {u:UOp.new_buffer(u.device, u.max_numel(), u.dtype) for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL}
+  vals:dict[str, int] = {}
+  for u in linear.toposort():
+    if u.op is Ops.EXTERN:
+      subs[u] = x.unbound() if (x:=externs[u.arg.slot]).is_bound_var else x
+      if x.is_bound_var: vals[x.expr] = x.arg.val
+  return linear.substitute(subs, walk=True), vals
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -270,6 +256,9 @@ class Tensor(RandMixin):
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
     fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, name="export")
+    values:dict[str, int] = {}
+    for v in ctx.externs:
+      if v.is_bound_var and values.setdefault(v.expr, v.arg.val) != v.arg.val: raise RuntimeError(f"bind mismatch on {v.expr}")
     return fn, tuple(ctx.externs)
 
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
@@ -292,8 +281,7 @@ class Tensor(RandMixin):
   def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
     """Link a LINEAR from `Tensor.compile` to this invocation's externs and execute it."""
     if capturing and CAPTURING: raise RuntimeError("cannot capture an already compiled Tensor.run")
-    ctx = ExecContext(binding_values(externs), externs, update_stats=do_update_stats)
-    exec_linear(link_linear(linear, list(externs)), ctx)
+    exec_linear(link_linear(linear, externs), ExecContext(update_stats=do_update_stats))
 
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:

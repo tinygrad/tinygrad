@@ -49,25 +49,21 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
 
 def estimate_uop(call:UOp) -> Estimates:
   call = call.without_after
-  if call.arg.hcq is not None: return call.arg.hcq.estimates
-  if (ast:=call.body).op is Ops.PROGRAM and (est:=ast.src[0].arg.estimates): return Estimates(*map(call.bind_symbols, (est.ops, est.lds, est.mem)))
+  ast = call.body
+  if (est:=call.arg.hcq.estimates if call.arg.hcq is not None else ast.src[0].arg.estimates if ast.op is Ops.PROGRAM else None):
+    return Estimates(*map(call.bind_symbols, (est.ops, est.lds, est.mem)))
   if ast.op is Ops.STORE or (ast.op is Ops.NATIVE and ast.arg.code == "encdec"):
     return Estimates(lds=(nbytes:=prod(call.src[1].shape) * call.src[1].dtype.itemsize), mem=nbytes)
   return Estimates()
 
 first_run_cache:set[bytes] = set()
 def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|None]):
-  def infer(x):
-    # HCQ batch estimates are metadata on the compiled CALL: bind their scalar EXTERNs just like the kernel args.
-    if isinstance(x, UOp) and call.arg.hcq is not None:
-      x = x.substitute({v:UOp.const(ctx.input_uops[v.arg.slot].arg.val, v.dtype) for v in x.variables() if v.op is Ops.EXTERN})
-    return sym_infer(x, ctx.var_vals)
   if ctx.update_stats:
     is_hcq = call.arg.hcq is not None
     estimates, n = estimate_uop(call), 1 if is_hcq else len(get_call_kernels(call))
     GlobalCounters.kernel_count += len(call.arg.hcq.kernels) if is_hcq else n
-    GlobalCounters.global_ops += n*infer(estimates.ops)
-    GlobalCounters.global_mem += n*infer(estimates.mem)
+    GlobalCounters.global_ops += n*sym_infer(estimates.ops, ctx.var_vals)
+    GlobalCounters.global_mem += n*sym_infer(estimates.mem, ctx.var_vals)
     GlobalCounters.time_sum_s += sum(et for et in ets if et is not None)
   if DEBUG < 2 and not PROFILE: return
 
@@ -76,9 +72,9 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
   if args and call.body.op is Ops.PROGRAM: args = [call.src[1+g] for g in call.body.arg.globals]
   for i, (device, kcall, stats) in enumerate(kernels):
     et = ets[i] if i < len(ets) else None
-    bufs = [_buffer(b, ctx.input_uops) for b in args] if stats is None else [cast(Buffer, ctx.input_uops[s].buffer) for s in stats[3]]
+    bufs = [_buffer(b, ctx.input_uops) for b in (args if stats is None else [kcall.src[1+s] for s in stats[3]])]
     display_name, estimates, key = (get_call_name(kcall, bufs, ctx.var_vals), estimate_uop(kcall), kcall.body.key) if stats is None else stats[:3]
-    op_est, mem_est, lds_est = map(infer, (estimates.ops, estimates.mem, estimates.lds))
+    op_est, mem_est, lds_est = (sym_infer(kcall.bind_symbols(x) if stats else x, ctx.var_vals) for x in (estimates.ops, estimates.mem, estimates.lds))
     if PROFILE: # backdate the event to the start of the call, the viz matches a device range with the exec event before it
       outputs, inputs = get_call_outs_ins(kcall) if stats is None else stats[4]
       cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"program": key, "estimates": (op_est, mem_est, lds_est),
@@ -156,11 +152,8 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, device:str|None=None) -> lis
 def exec_validate(ctx:ExecContext, call:UOp) -> list[float|None]:
   import numpy as np
   from tinygrad.dtype import _to_np_dtype
-  actual, expected = call.src[1:]
-  dt = _to_np_dtype(expected.dtype)
-  assert dt is not None, f"no np dtype for {expected.dtype}"
-  np.testing.assert_allclose(np.frombuffer(_buffer(actual, ctx.input_uops).as_memoryview(), dt),
-                             np.frombuffer(_buffer(expected, ctx.input_uops).as_memoryview(), dt), rtol=1e-3, atol=1e-3)
+  def array(b:UOp): return np.frombuffer(_buffer(b, ctx.input_uops).as_memoryview(), unwrap(_to_np_dtype(b.dtype)))
+  np.testing.assert_allclose(array(call.src[1]), array(call.src[2]), rtol=1e-3, atol=1e-3)
   return []
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
@@ -188,11 +181,11 @@ def _validate(ctx:Iterator[int], call:UOp, sink:UOp) -> UOp:
   shadows = [p if p.addrspace is AddrSpace.ALU else shadow(p) for p in args]
   copies = [s.store_call(p) for s,p in zip(shadows, args) if p.addrspace is not AddrSpace.ALU]
   ref = to_program(sink, Device["CPU"].renderer)
-  checks:list[UOp] = []
+  calls = [*copies, call, ref.call(*shadows)]
   for i in ref.arg.outs:
     actual = shadow(args[i])
-    checks.extend((actual.store_call(args[i]), UOp.native("validate").call(actual, shadows[i])))
-  return UOp(Ops.LINEAR, src=(*copies, call, ref.call(*shadows), *checks))
+    calls.extend((actual.store_call(args[i]), UOp.native("validate").call(actual, shadows[i])))
+  return UOp(Ops.LINEAR, src=tuple(calls))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
 # ctx is beam value
@@ -242,7 +235,7 @@ def lower_and_compile(linear:UOp, verbose=True) -> UOp:
   return linear.substitute({c: c.replace(src=(to_program_cache[keys[c]], *c.src[1:])) for c in ar},
                            name="precompile kernels")
 
-from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link # noqa: E402 # down here, hcq2 imports realize
+from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link as link_linear # noqa: E402 # down here, hcq2 imports realize
 
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.STORE, name="ast"),), name="call", allow_any_len=True), exec_copy),
@@ -251,24 +244,17 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat.native("validate"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None, cache=False) -> UOp:
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, profile:bool|None=None, cache=False) -> UOp:
   if validate:
     # Give the reference and readback buffers distinct, reproducible slots below the schedule's scratch slots.
     first = min((u.arg.slot for u in linear.toposort() if u.op is Ops.ALLOC), default=0)-1
     linear = graph_rewrite(linear, pm_validate, ctx=itertools.count(first, -1), name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
-  linear = lower_and_compile(linear)
-  linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
-  return linear
-
-def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp: return hcq_link(linear, input_uops=input_uops)
+  return hcq_compile(lower_and_compile(linear), bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
-  assert linear.op is Ops.LINEAR, f"run_linear calls on {linear.op}"
-  if len(linear.src) == 0: return
-  inputs = list(input_uops)
-  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, cache=True), input_uops=inputs)
-  exec_linear(linear, ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait))
+  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU))
+  exec_linear(linear, ExecContext(var_vals or {}, tuple(input_uops), update_stats, jit, wait))
 
 def exec_linear(linear:UOp, ctx:ExecContext):
   assert linear.op is Ops.LINEAR, f"exec_linear calls on {linear.op}"

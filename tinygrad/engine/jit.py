@@ -30,7 +30,7 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   # storage no one outside the jit holds is scratch: it's planned and bound at link
   scratch = {u: UOp.alloc((u.max_numel(),), u.dtype, device=u.device) for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs}
   linear = memory_plan_rewrite(linear.substitute(scratch, walk=True))
-  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), input_uops=input_uops, cache=False)
+  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View compiled linear")
   return linear
 
