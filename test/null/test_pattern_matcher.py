@@ -179,6 +179,13 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c3), c3.sink())
     self.assertEqual(matcher.rewrite(c4), None)
 
+  def test_src_repeat_named_first_mismatch(self):
+    # a named bind in a repeated src binds the first src, a first src that doesn't match is no match
+    matcher = PatternMatcher([(UPat(Ops.STACK, name="x", src=UPat(Ops.CMPLT, src=(UPat.var("y"), UPat()))), lambda x,y: y)])
+    a = UOp.variable("a", 0, 10)
+    self.assertEqual(matcher.rewrite(UOp.stack(UOp.const(False, dtypes.bool), a < 5)), None)
+    self.assertEqual(matcher.rewrite(UOp.stack(a < 5, a < 6)), a)
+
   def test_allow_len(self):
     matcher = PatternMatcher([(UPat(Ops.MULACC, name="x", src=(UPat(Ops.CONST),), allow_any_len=True), lambda x: x.sink())])
     c1 = UOp.const(1.0)
