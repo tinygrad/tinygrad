@@ -13,7 +13,7 @@ from tinygrad.runtime.support.system import PCIDevice, USBPCIDevice, System, fil
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.engine.realize import get_call_kernel_args
-from tinygrad.runtime.autogen import mtfw, libc
+from tinygrad.runtime.autogen import mtfw, mtregs, libc
 
 def mt_off(typ, name:str) -> int: return next(f[2] for f in typ._real_fields_ if f[0] == name)
 
@@ -479,6 +479,24 @@ def build_firmware(lay:MTFirmwareLayout) -> bytes:
   cfg.dmKillShaderOffset = 0xfff80000
   return bytes(fw)
 
+# Values programmed by MUSA 3.3.0's meta_fw_reset_sequence() and RGXStart() for BVNC 35.4.1632.23.
+# These are device-specific reset/clock programs, not constants present in the register headers.
+MT_MERCER_RESET_ASSERT = (0x1249249249249249,0x36db6db6db6db6db,mtregs.RGX_CR_MERCER_SOFT_RESET_MASKFULL)
+MT_MERCER_RESET_DEASSERT = (0x36db6db6db6db6db,0x1249249249249249,0)
+MT_SOFT_RESET_SEQUENCE = (0x386000000800,0x3860000088f2,0x20000080f2,mtregs.RGX_CR_SOFT_RESET_GARTEN_EN)
+MT_CLK_CTRL0_PRE_JONES, MT_CLK_CTRL1_PRE_JONES = 0x5545010155151101, 0x5554151555455555
+MT_CLK_CTRL0_POST_JONES, MT_CLK_CTRL1_POST_JONES = 0xaa8a0202aa2a2202, 0xaaa82a2aaa8aaaaa
+MT_CLK_CTRL0_UPDATE_MASK, MT_CLK_CTRL0_UPDATE_BITS = 0xfcfffffff3fffcff, 0x100000004000100
+MT_CLK_CTRL1_UPDATE_MASK, MT_CLK_CTRL1_UPDATE_BITS = 0xffffffffcf3fffff, 0x10400000
+MT_MMU_PAGE_RANGES = ((mtregs.RGX_CR_MMU_PAGE_SIZE_RANGE_ONE,0),(mtregs.RGX_CR_MMU_PAGE_SIZE_RANGE_TWO,0xfff80800),
+                      (mtregs.RGX_CR_MMU_PAGE_SIZE_RANGE_THREE,0),(mtregs.RGX_CR_MMU_PAGE_SIZE_RANGE_FOUR,0xfff80000))
+MT_ACE_PROT_CTRL = 0
+for _name, _value in mtregs.__dict__.items():
+  if _name.startswith('RGX_CR_ACE_PROT_CTRL_OSID') and _name.endswith('_UNPRIVILEGED_NON_SECURE'): MT_ACE_PROT_CTRL |= _value
+MT_ACE_CTRL = ((0xf << mtregs.RGX_CR_ACE_CTRL_PM_MMU_AXCACHE_SHIFT) | mtregs.RGX_CR_ACE_CTRL_MMU_AWCACHE_WRITE_BACK_WRITE_ALLOCATE |
+               mtregs.RGX_CR_ACE_CTRL_MMU_ARCACHE_WRITE_BACK_READ_ALLOCATE | mtregs.RGX_CR_ACE_CTRL_COH_DOMAIN_OUTER_SHAREABLE)
+MT_FW_STARTED_MAGIC = 0x4d
+
 class MTFirmware:
   def __init__(self, dev:MTDev, path:str|None=None, core_count:int=8, prepare:bool=True, mmu:MTMMU4|None=None, v=None):
     self.dev, self.path, self.core_count = dev, path or os.environ.get('MT_FIRMWARE', DEFAULT_FIRMWARE), core_count
@@ -517,6 +535,9 @@ class MTFirmware:
 
   def _write(self, off:int, value:int, size:int=8) -> None: self.dev.smc._write(MT_SOCIF_OFFSET + off, value.to_bytes(size, 'little'))
   def _read(self, off:int, size:int=8) -> int: return int.from_bytes(self.dev.smc._read(MT_SOCIF_OFFSET + off, size), 'little')
+  def _write_read(self, off:int, value:int, size:int=8) -> None:
+    self._write(off,value,size)
+    self._read(off,size)
 
   def upload_mmu(self) -> None:
     if not self.mmu.dirty_pages: return
@@ -529,59 +550,48 @@ class MTFirmware:
 
   def start(self, timeout:float=10.0) -> None:
     self.upload_mmu()
-    self._write(0xa100, 0, 4)
-    self._read(0xa100, 4)
-    for value in [0x1249249249249249,0x36db6db6db6db6db,0x7fffffffffffffff]:
-      self._write(0x630, value)
-      self._read(0x630)
-    for off in [0x650,0x640]:
-      self._write(off, 0xffffffff, 4)
-      self._read(off, 4)
-    for value in [0x386000000800,0x3860000088f2,0x20000080f2,0x2000000000]:
-      self._write(0x100, value)
-      self._read(0x100)
-    for off in [0x640,0x650]:
-      self._write(off, 0, 4)
-      self._read(off, 4)
-    for value in [0x36db6db6db6db6db,0x1249249249249249,0]:
-      self._write(0x630, value)
-      self._read(0x630)
-    self._read(0x100)
-    self._write(0xbf8, 1, 4)
-    self._write(0xb50, 0)
-    self._write(0, 0x5545010155151101)
-    self._write(0x80, 0x5554151555455555)
-    self._write(0x1158, 0xff, 4)
+    self._write_read(mtregs.RGX_CR_SYS_BUS_SECURE,0,4)
+    for value in MT_MERCER_RESET_ASSERT: self._write_read(mtregs.RGX_CR_MERCER_SOFT_RESET,value)
+    for off in [mtregs.RGX_CR_SWIFT_SOFT_RESET,mtregs.RGX_CR_TEXAS_SOFT_RESET]: self._write_read(off,0xffffffff,4)
+    for value in MT_SOFT_RESET_SEQUENCE: self._write_read(mtregs.RGX_CR_SOFT_RESET,value)
+    for off in [mtregs.RGX_CR_TEXAS_SOFT_RESET,mtregs.RGX_CR_SWIFT_SOFT_RESET]: self._write_read(off,0,4)
+    for value in MT_MERCER_RESET_DEASSERT: self._write_read(mtregs.RGX_CR_MERCER_SOFT_RESET,value)
+    self._read(mtregs.RGX_CR_SOFT_RESET)
+    self._write(mtregs.RGX_CR_META_BOOT,mtregs.RGX_CR_META_BOOT_MODE_EN,4)
+    self._write(mtregs.RGX_CR_MTS_GARTEN_WRAPPER_CONFIG,0)
+    self._write(mtregs.RGX_CR_CLK_CTRL0,MT_CLK_CTRL0_PRE_JONES)
+    self._write(mtregs.RGX_CR_CLK_CTRL1,MT_CLK_CTRL1_PRE_JONES)
+    self._write(mtregs.RGX_CR_JONES_RAM_INIT_KICK,mtregs.RGX_CR_JONES_RAM_INIT_KICK_MASKFULL & 0xff,4)
     clock_deadline = time.monotonic() + min(timeout, 1.0)
-    while self._read(0x1148) & 0xff != 0xff and time.monotonic() < clock_deadline: time.sleep(0.001)
-    self._write(0, 0xaa8a0202aa2a2202)
-    self._write(0x80, 0xaaa82a2aaa8aaaaa)
-    self._write(0x80008, 0xff, 4)
-    self._read(0x80008, 4)
-    self._write(0x7080, 0x1000000000000000 | FW_BASE)
-    self._write(0x7048, 0x3000000000000000 | (FW_BASE + 0x100000))
-    self._write(0xb50, 0)
-    self._write(0xe140, 0, 4)
-    self._read(0xe140, 4)
-    self._write(0xe148, ROOT_BASE >> 12, 4)
-    for off,value in [(0xe350,0),(0xe358,0xfff80800),(0xe360,0),(0xe368,0xfff80000)]: self._write(off, value)
-    self._write(0xe328, 0x0202020202020202)
-    self._write(0xe320, 0x78ff2)
-    self._write(0, (self._read(0) & 0xfcfffffff3fffcff) | 0x100000004000100)
-    self._write(0x80, (self._read(0x80) & 0xffffffffcf3fffff) | 0x10400000)
+    while self._read(mtregs.RGX_CR_JONES_RAM_STATUS) & 0xff != 0xff and time.monotonic() < clock_deadline: time.sleep(0.001)
+    self._write(mtregs.RGX_CR_CLK_CTRL0,MT_CLK_CTRL0_POST_JONES)
+    self._write(mtregs.RGX_CR_CLK_CTRL1,MT_CLK_CTRL1_POST_JONES)
+    self._write_read(mtregs.RGX_CR_HMMU_BYPASS,mtregs.RGX_CR_HMMU_BYPASS_MASKFULL,4)
+    self._write(mtregs.RGX_CR_FWCORE_ADDR_REMAP_CONFIG12,mtregs.RGX_CR_FWCORE_ADDR_REMAP_CONFIG12_FETCH_EN_EN | FW_BASE)
+    self._write(mtregs.RGX_CR_FWCORE_ADDR_REMAP_CONFIG5,mtregs.RGX_CR_FWCORE_ADDR_REMAP_CONFIG5_LOAD_STORE_EN_EN |
+                mtregs.RGX_CR_FWCORE_ADDR_REMAP_CONFIG5_FETCH_EN_EN | (FW_BASE + 0x100000))
+    self._write(mtregs.RGX_CR_MTS_GARTEN_WRAPPER_CONFIG,0)
+    self._write_read(mtregs.RGX_CR_MMU_CBASE_MAPPING_CONTEXT,0,4)
+    self._write(mtregs.RGX_CR_MMU_CBASE_MAPPING,ROOT_BASE >> mtregs.RGX_CR_MMU_CBASE_MAPPING_BASE_ADDR_ALIGNSHIFT,4)
+    for off,value in MT_MMU_PAGE_RANGES: self._write(off,value)
+    self._write(mtregs.RGX_CR_ACE_PROT_CTRL,MT_ACE_PROT_CTRL)
+    self._write(mtregs.RGX_CR_ACE_CTRL,MT_ACE_CTRL)
+    self._write(mtregs.RGX_CR_CLK_CTRL0,(self._read(mtregs.RGX_CR_CLK_CTRL0) & MT_CLK_CTRL0_UPDATE_MASK) | MT_CLK_CTRL0_UPDATE_BITS)
+    self._write(mtregs.RGX_CR_CLK_CTRL1,(self._read(mtregs.RGX_CR_CLK_CTRL1) & MT_CLK_CTRL1_UPDATE_MASK) | MT_CLK_CTRL1_UPDATE_BITS)
     time.sleep(3e-6)
-    self._write(0x100, 0)
-    self._read(0x100)
+    self._write_read(mtregs.RGX_CR_SOFT_RESET,0)
     time.sleep(3e-6)
-    self._write(0x93c0, 1, 4)
-    self._write(0x70c0, 1, 4)
+    self._write(mtregs.RGX_CR_FWCORE_DMI_DMCONTROL,mtregs.RGX_CR_FWCORE_DMI_DMCONTROL_DMACTIVE_EN,4)
+    self._write(mtregs.RGX_CR_FWCORE_BOOT,mtregs.RGX_CR_FWCORE_BOOT_MODE_EN,4)
     deadline = time.monotonic() + timeout
+    started_off, build_off = FWIF_OFF + mt_off(mtfw.struct_MTFW_FWIF_TAG,'fwStarted'), FWIF_OFF + mt_off(mtfw.struct_MTFW_FWIF_TAG,'fwBuildVer')
     while True:
-      started = struct.unpack('<I', self.v[FWIF_OFF+4:FWIF_OFF+8])[0]
-      if started & 0xff == 0x4d:
-        self.started, self.build = started, bytes(self.v[FWIF_OFF+8:FWIF_OFF+16]).rstrip(b'\0')
+      started = struct.unpack('<I', self.v[started_off:started_off+4])[0]
+      if started & 0xff == MT_FW_STARTED_MAGIC:
+        self.started, self.build = started, bytes(self.v[build_off:build_off+mtfw.MTFWIF_FW_BUILD_VERSION_SIZE]).rstrip(b'\0')
         return
-      if time.monotonic() > deadline: raise TimeoutError(f"MT firmware start timed out: {started:#x}, fault={self._read(0xe160):#x}")
+      if time.monotonic() > deadline:
+        raise TimeoutError(f"MT firmware start timed out: {started:#x}, fault={self._read(mtregs.RGX_CR_MMU_FAULT_STATUS_META):#x}")
       time.sleep(0.01)
 
 # **** CCB ****
@@ -772,11 +782,11 @@ class MTLaunch(MTFirmware):
       MTLaunch._active = self
     self.mmu_dirty = False
     if self.ccb is None:
-      self._write(0xe150, 0)
-      self._write(0xe158, 0)
-      self._write(0x138, 0xffffffff, 4)
-      self._write(0xe160, 0)
-      self._write(0xe198, 0)
+      self._write(mtregs.RGX_CR_MMU_FAULT_STATUS1,0)
+      self._write(mtregs.RGX_CR_MMU_FAULT_STATUS2,0)
+      self._write(mtregs.RGX_CR_EVENT_CLEAR,0xffffffff,4)
+      self._write(mtregs.RGX_CR_MMU_FAULT_STATUS_META,0)
+      self._write(mtregs.RGX_CR_MMU_FAULT_STATUS2_META,0)
       self.ccb = MTCCB(self.layout.item + mtfw.MTFW_CCB_TYPE_CDM * 4096 * MT_CCB_ITEM_SIZE,
                        self.layout.ccb + mtfw.MTFW_CCB_TYPE_CDM * mtfw.MTFW_CCB_QUEUE.SIZE)
 
@@ -1281,7 +1291,8 @@ class MTDevice(Compiled):
   def _fault(self) -> tuple[int, ...]:
     if self.current_launch is None: return ()
     launch = self.current_launch
-    return (launch._read(0xe150),launch._read(0xe158),launch._read(0x130,4),launch._read(0x4a0))
+    return (launch._read(mtregs.RGX_CR_MMU_FAULT_STATUS1),launch._read(mtregs.RGX_CR_MMU_FAULT_STATUS2),
+            launch._read(mtregs.RGX_CR_EVENT_STATUS,4),launch._read(mtregs.RGX_CR_CDM_CONTEXT_STORE_STATUS))
 
   def synchronize(self, timeout:int|None=None):
     if self.prof_ents and self.current_launch is not None:

@@ -71,6 +71,9 @@ def __getattr__(nm):
     case "nvjitlink": load("nvjitlink", [root/"extra/nvJitLink.h"], dll="'nvJitLink'", paths=nv_lib_path, prolog=["import sysconfig"])
     case "kfd": return load("kfd", [root/"extra/hip_gpu_driver/kfd_ioctl.h"])
     case "mtfw": return load("mtfw", [str(root/"extra/mt_gpu_driver/fwif/*.h")])
+    case "mtregs": return load("mtregs", [root/"extra/mt_gpu_driver/pvr/hwdefs/km/rgx_cr_defs_km.h"],
+                               args=["-DIMG_EXPLICIT_INCLUDE_HWDEFS", f"-I{root/'extra/mt_gpu_driver/pvr/include'}"],
+                               rules=[(r'IMG_UINT64_C\(([^)]+)\)', r'\1'), (r'UINT64_C\(([^)]+)\)', r'\1')])
     case "nv_570" | "nv_580" | "nv_610" | "nv_615":
       return load(nm, [
         *[root/"extra/nv_gpu_driver"/s for s in ["clc9b0.h", "clc6c0qmd.h","clcec0qmd.h", "nvdec_drv.h"]], "{}/kernel-open/common/inc/nvmisc.h",
