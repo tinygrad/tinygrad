@@ -198,9 +198,10 @@ class USBMMIOInterface(MMIOInterface):
   def __getitem__(self, index):
     off, sz = self._off_from_index(index)
     if self.pcimem:
-      start, end = off & ~3, round_up(off+sz,4)
-      data = self.usb.pcie_mem_read(self.addr + start, end-start)
-      if start != off or end != off+sz: data = data[off-start:off-start+sz]
+      absolute = self.addr + off
+      start, end = absolute & ~3, round_up(absolute+sz,4)
+      data = self.usb.pcie_mem_read(start,end-start)
+      if start != absolute or end != absolute+sz: data = data[absolute-start:absolute-start+sz]
     else: data = self.usb.read(self.addr + off, sz)
     return (data if self.fmt == 'B' else memoryview(data).cast(self.fmt).tolist()) if isinstance(index, slice) else int.from_bytes(data, "little")
 
@@ -209,15 +210,16 @@ class USBMMIOInterface(MMIOInterface):
     data = struct.pack(self.fmt, data) if isinstance(data, int) else data if isinstance(data, (bytes, bytearray, memoryview)) else bytes(data)
     if not self.pcimem: self.usb.scsi_write(data) if self.addr == 0xf000 else self.usb.write(self.addr + off, data)
     else:
-      # writes are whole dwords
-      if len(data) % 4 or off % 4:
-        start, end = off & ~3, round_up(off+len(data),4)
+      # writes are whole dwords, and views may begin at an unaligned device address
+      absolute = self.addr + off
+      if len(data) % 4 or absolute % 4:
+        start, end = absolute & ~3, round_up(absolute+len(data),4)
         aligned = bytearray(end-start)
-        if off != start: aligned[:4] = self.usb.pcie_mem_read(self.addr+start,4)
-        if end != off+len(data) and (off == start or end-start > 4): aligned[-4:] = self.usb.pcie_mem_read(self.addr+end-4,4)
-        aligned[off-start:off-start+len(data)] = data
-        off, data = start, aligned
-      self.usb.pcie_mem_write(self.addr+off, data)
+        if absolute != start: aligned[:4] = self.usb.pcie_mem_read(start,4)
+        if end != absolute+len(data) and (absolute == start or end-start > 4): aligned[-4:] = self.usb.pcie_mem_read(end-4,4)
+        aligned[absolute-start:absolute-start+len(data)] = data
+        absolute, data = start, aligned
+      self.usb.pcie_mem_write(absolute,data)
 
   def view(self, offset:int=0, size:int|None=None, fmt=None):
     return USBMMIOInterface(self.usb, self.addr+offset, self.nbytes-offset if size is None else size, fmt=fmt or self.fmt, pcimem=self.pcimem)

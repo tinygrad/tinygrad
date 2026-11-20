@@ -164,7 +164,7 @@ def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
 
 def not_support_multi_device():
   # CL and CUDA don't support multi device if in CI
-  return (Device.DEFAULT == "CL" and Device[Device.DEFAULT].count() < 2) or (Device.DEFAULT == "CUDA" and DEV.interface.startswith("MOCK"))
+  return (Device.DEFAULT in ("CL","MT") and Device[Device.DEFAULT].count() < 2) or (Device.DEFAULT == "CUDA" and DEV.interface.startswith("MOCK"))
 
 def needs_second_gpu(fn):
   @functools.wraps(fn)

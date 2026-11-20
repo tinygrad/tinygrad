@@ -366,6 +366,9 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
     run = list(grp)
     peer_groups = dedup([Device[d[0]].peer_group for _, d in run if d])
     batches = [[(c, d[0], queue_for(c)) for c, d in run if Device[d[0]].peer_group == pg] for pg in peer_groups]
+    # Bound host-side dependency graphs on backends that cannot lower very large submissions efficiently.
+    batches = [batch[i:i+size] for batch in batches for size in [getattr(Device[batch[0][1]],'hcq_batch_size',len(batch))]
+               for i in range(0,len(batch),size)]
     if hcq: srcs += [_finalize_batch(BatchCtx(batch, profile), batch is not batches[-1]) for batch in batches]
     else: srcs += [c for c, _ in run]
   return l.replace(src=tuple(srcs))

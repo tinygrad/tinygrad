@@ -465,6 +465,7 @@ MT_TIMESTAMP_ADDR = 0x8000438200
 MT_FW_CSW_BUFFER = 0x6800000000
 MT_CDM_REGION_OFFSET, MT_CDM_REGION_SIZE = 0xa0, 0x198
 MT_SUBMISSION_SIZE = 0x19250
+MT_SUBMISSION_ID_OFFSET = mt_off(mtfw.MTFW_SUBMISSION_HEAD,'cbId')
 def mt_words(size:int, qwords:dict[int,int], dwords:dict[int,int]|None=None) -> bytes:
   data = bytearray(size)
   for off,value in qwords.items(): struct.pack_into('<Q',data,off,value)
@@ -717,6 +718,9 @@ class MTFirmwareContext:
   launch_id:int = 1
   generation:int = 1
   started:bool = False
+  task_page:bytes|None = None
+  submission_packet:bytes|None = None
+  static_pds:dict[tuple[bool,bool,bool],tuple[bytes,bytes]] = dataclasses.field(default_factory=dict)
 
 # **** launch ****
 
@@ -737,6 +741,7 @@ class MTLaunch(MTFirmware):
   ctx:MTFirmwareContext
   def __init__(self, dev:MTDev):
     ctx = dev.launch_context
+    new_context = ctx is None
     super().__init__(dev, prepare=ctx is None, mmu=ctx.mmu if ctx is not None else None, v=ctx.v if ctx is not None else None)
     self.sv:MMIOInterface = ctx.sv if ctx is not None else self.dev.pci_dev.map_bar(2,off=SUB_PA,size=INIT_SIZE,fmt='B')
     if ctx is None: self.sv[:0x20000] = bytes(0x20000)
@@ -750,7 +755,7 @@ class MTLaunch(MTFirmware):
       dev.launch_context = ctx
     self.ctx = ctx
     self._map_generated()
-    self._map_common()
+    if new_context: self._map_common()
     self._prepare_packet()
     self.ccb:MTCCB|None = None
     self.launch_id = 1
@@ -780,9 +785,10 @@ class MTLaunch(MTFirmware):
         self.mmu.map(mtheap.MTGPU_VGPU_HEAP_PDS_INDIRECT_STATE_BASE+off,self.zero_pa,MT_PTE_READ_WRITE)
 
   def _prepare_packet(self) -> None:
-    packet = bytearray(build_submission())
-    struct.pack_into('<Q', packet, 0x38, 1)
-    struct.pack_into('<I', packet, 0x40, 1)
+    if self.ctx.submission_packet is None: self.ctx.submission_packet = build_submission()
+    packet = bytearray(self.ctx.submission_packet)
+    struct.pack_into('<Q',packet,MT_SUBMISSION_ID_OFFSET,1)
+    struct.pack_into('<I',packet,mt_off(mtfw.MTFW_SUBMISSION_HEAD,'processId'),1)
     struct.pack_into('<Q', packet, 0x08, FW_DEVVA + MT_TIMESTAMP_BUFFER_OFFSET)
     struct.pack_into('<Q', packet, 0xc0 + 0x88, FW_DEVVA + MT_RUNTIME_OFFSET - 8)
     struct.pack_into('<Q', packet, 0xc0 + 0x90, FW_DEVVA + MT_TIMESTAMP_OFFSET)
@@ -871,7 +877,7 @@ class MTLaunch(MTFirmware):
       self.v, self.layout, self.ccb = ctx.v, ctx.layout, ctx.ccb
       self.launch_id = ctx.launch_id + 1
       ctx.launch_id = self.launch_id
-      struct.pack_into('<Q', self.packet, 0x38, self.launch_id)
+      struct.pack_into('<Q',self.packet,MT_SUBMISSION_ID_OFFSET,self.launch_id)
       self.generation = ctx.generation + 1
       ctx.generation = self.generation
       self.upload_mmu()
@@ -949,7 +955,7 @@ MT_GEN1_TASK_DWORDS = {0x184:1,0x1a8:2,0x210:0x2c,0x228:0x200,0x500:4}
 class MTGeneratedLaunch(MTLaunch):
   text_span = 0  # default only; assignments are per launch
 
-  def generate_task_page(self) -> None:
+  def _build_task_page(self) -> bytes:
     page = bytearray(mt_words(MT_PAGE_SIZE,MT_GEN1_TASK_QWORDS,MT_GEN1_TASK_DWORDS))
     head = mtfw.MTFW_SUBMISSION_HEAD()
     head.fwCswBufer,head.submissionCmd = 0x8000404500,mtfw.MTFW_SUBMISSION_CMD_GPU_CDM
@@ -962,9 +968,13 @@ class MTGeneratedLaunch(MTLaunch):
     page[0x88:0x88+mtfw.MTFW_KICK_HEAD.SIZE] = bytes(build_kick_head())
     ctx = build_compute_ctx()
     page[0x300:0x300+len(ctx)] = ctx
-    self._write_backing(self.backing_offsets[TASK_VA],page)
+    return bytes(page)
 
-  def generate_static_pds(self) -> None:
+  def generate_task_page(self) -> None:
+    if self.ctx.task_page is None: self.ctx.task_page = self._build_task_page()
+    self._write_backing(self.backing_offsets[TASK_VA],self.ctx.task_page)
+
+  def _build_static_pds(self) -> tuple[bytes,bytes]:
     # Firmware resume and main PDS programs. The flags/payloads not defined by Mesa are generation-1 resume ABI bits.
     resume = bytearray(0x4000)
     def words(off:int, *values:int) -> None: struct.pack_into(f'<{len(values)}I',resume,off,*values)
@@ -1006,10 +1016,18 @@ class MTGeneratedLaunch(MTLaunch):
     elif has_local: words(0x3580,_vendor_sp9(1,0x340002),_release(),_doutw(0,0x13),_doutu(cc=1,flags=0x10))
     else: words(0x3580,_vendor_sp9(1,0x340002),_release(),_doutu(cc=1,flags=0x8))
     words(0x3600,_doutc(0x10))
-    self._write_backing(self.backing_offsets[RESUME_VA],resume)
     main = bytearray(0x1000)
     for off,word in {0x00:_doutd(0x10,end=1),0x10:_doutu(),0x20:_doutd(0x10),0x24:_doutu(flags=0x10)}.items():
       struct.pack_into('<I',main,off,word)
+    return bytes(resume),bytes(main)
+
+  def generate_static_pds(self) -> None:
+    k = self.generated_image.metadata.kernel
+    args = k['.args']
+    key = (k['.has_barrier'],any(a['.kind'] in (5,6,7) for a in args),any(a['.kind'] in (1,2,3) for a in args))
+    if key not in self.ctx.static_pds: self.ctx.static_pds[key] = self._build_static_pds()
+    resume,main = self.ctx.static_pds[key]
+    self._write_backing(self.backing_offsets[RESUME_VA],resume)
     self._write_backing(self.backing_offsets[PDS_MAIN_VA],main)
 
   def _map_generated(self) -> None:
@@ -1119,7 +1137,72 @@ class MTCompiler:
       include = pathlib.Path(td)/'include'
       include.mkdir()
       (include/'cuda_fp16.h').write_text('#pragma once\n#include <musa_fp16.h>\n')
-      self._run([str(self.bin/'mcc'), '-O3', f'--musa-path={self.musa_path}', '--offload-arch=mp_21', f'-I{include}',
+      # The S80 reports arch210. MUSA exposes CUDA bfloat16 math only for arch220;
+      # use its scalar constructors and replace math/operators with float-backed arch210 implementations.
+      (include/'cuda_bf16.h').write_text('#pragma once\n'
+        '#if defined(__MUSA_ARCH__) && __MUSA_ARCH__ < 220\n'
+        '#define MT_SAVE_ARCH __MUSA_ARCH__\n#undef __MUSA_ARCH__\n#define __MUSA_ARCH__ 220\n'
+        '#define __musa_float2bfloat16 mt_safe_musa_float2bfloat16\n'
+        '#define __musa_bfloat162float mt_safe_musa_bfloat162float\n'
+        '#define __musa_hadd_bf16 mt_safe_hadd_bf16\n#define __musa_hsub_bf16 mt_safe_hsub_bf16\n'
+        '#define __musa_hmul_bf16 mt_safe_hmul_bf16\n#define __musa_hneg_bf16 mt_safe_hneg_bf16\n'
+        '#define __musa_hlt_bf16 mt_safe_hlt_bf16\n#define __musa_hgt_bf16 mt_safe_hgt_bf16\n'
+        '#define __musa_hle_bf16 mt_safe_hle_bf16\n#define __musa_hge_bf16 mt_safe_hge_bf16\n'
+        '#define __musa_hte_bf16 mt_safe_hte_bf16\n#define __musa_hnte_bf16 mt_safe_hnte_bf16\n'
+        '#define hlog2 mt_native_hlog2\n#define hexp2 mt_native_hexp2\n#define hsin mt_native_hsin\n'
+        '#define hsqrt mt_native_hsqrt\n#define htrunc mt_native_htrunc\n#define hceil mt_native_hceil\n'
+        '#define hfloor mt_native_hfloor\n#define hrcp mt_native_hrcp\n#endif\n'
+        'struct __mt_bfloat16;\n'
+        'static __device__ __inline__ __bf16 mt_safe_musa_float2bfloat16(float);\n'
+        'static __device__ __inline__ float mt_safe_musa_bfloat162float(__bf16);\n'
+        'static __device__ __inline__ __bf16 mt_safe_hadd_bf16(__bf16,__bf16);\n'
+        'static __device__ __inline__ __bf16 mt_safe_hsub_bf16(__bf16,__bf16);\n'
+        'static __device__ __inline__ __bf16 mt_safe_hmul_bf16(__bf16,__bf16);\n'
+        'static __device__ __inline__ __bf16 mt_safe_hneg_bf16(__bf16);\n'
+        'static __device__ __inline__ bool mt_safe_hlt_bf16(__bf16,__bf16);\n'
+        'static __device__ __inline__ bool mt_safe_hgt_bf16(__bf16,__bf16);\n'
+        'static __device__ __inline__ bool mt_safe_hle_bf16(__bf16,__bf16);\n'
+        'static __device__ __inline__ bool mt_safe_hge_bf16(__bf16,__bf16);\n'
+        'static __device__ __inline__ bool mt_safe_hte_bf16(__bf16,__bf16);\n'
+        'static __device__ __inline__ bool mt_safe_hnte_bf16(__bf16,__bf16);\n'
+        '#include <musa_bf16.h>\n'
+        '#if defined(MT_SAVE_ARCH)\n#undef __MUSA_ARCH__\n#define __MUSA_ARCH__ MT_SAVE_ARCH\n#undef MT_SAVE_ARCH\n'
+        '#undef hlog2\n#undef hexp2\n#undef hsin\n#undef hsqrt\n#undef htrunc\n#undef hceil\n#undef hfloor\n#undef hrcp\n#endif\n'
+        '#undef __musa_float2bfloat16\n#undef __musa_bfloat162float\n'
+        '#undef __musa_hadd_bf16\n#undef __musa_hsub_bf16\n#undef __musa_hmul_bf16\n#undef __musa_hneg_bf16\n'
+        '#undef __musa_hlt_bf16\n#undef __musa_hgt_bf16\n#undef __musa_hle_bf16\n#undef __musa_hge_bf16\n'
+        '#undef __musa_hte_bf16\n#undef __musa_hnte_bf16\n'
+        'static __device__ __inline__ __bf16 mt_safe_hadd_bf16(__bf16 a,__bf16 b) {\n'
+        '  __mt_bfloat16_raw ra,rb,r; ra.data=a; rb.data=b; r=__float2bfloat16(__bfloat162float(ra)+__bfloat162float(rb)); return r.data; }\n'
+        'static __device__ __inline__ __bf16 mt_safe_hsub_bf16(__bf16 a,__bf16 b) {\n'
+        '  __mt_bfloat16_raw ra,rb,r; ra.data=a; rb.data=b; r=__float2bfloat16(__bfloat162float(ra)-__bfloat162float(rb)); return r.data; }\n'
+        'static __device__ __inline__ __bf16 mt_safe_hmul_bf16(__bf16 a,__bf16 b) {\n'
+        '  __mt_bfloat16_raw ra,rb,r; ra.data=a; rb.data=b; r=__float2bfloat16(__bfloat162float(ra)*__bfloat162float(rb)); return r.data; }\n'
+        'static __device__ __inline__ __bf16 mt_safe_hneg_bf16(__bf16 a) {\n'
+        '  __mt_bfloat16_raw ra,r; ra.data=a; r=__float2bfloat16(-__bfloat162float(ra)); return r.data; }\n'
+        'static __device__ __inline__ bool mt_safe_hlt_bf16(__bf16 a,__bf16 b) { __mt_bfloat16_raw ra,rb; ra.data=a; rb.data=b; return __bfloat162float(ra)<__bfloat162float(rb); }\n'
+        'static __device__ __inline__ bool mt_safe_hgt_bf16(__bf16 a,__bf16 b) { __mt_bfloat16_raw ra,rb; ra.data=a; rb.data=b; return __bfloat162float(ra)>__bfloat162float(rb); }\n'
+        'static __device__ __inline__ bool mt_safe_hle_bf16(__bf16 a,__bf16 b) { __mt_bfloat16_raw ra,rb; ra.data=a; rb.data=b; return __bfloat162float(ra)<=__bfloat162float(rb); }\n'
+        'static __device__ __inline__ bool mt_safe_hge_bf16(__bf16 a,__bf16 b) { __mt_bfloat16_raw ra,rb; ra.data=a; rb.data=b; return __bfloat162float(ra)>=__bfloat162float(rb); }\n'
+        'static __device__ __inline__ bool mt_safe_hte_bf16(__bf16 a,__bf16 b) { __mt_bfloat16_raw ra,rb; ra.data=a; rb.data=b; return __bfloat162float(ra)==__bfloat162float(rb); }\n'
+        'static __device__ __inline__ bool mt_safe_hnte_bf16(__bf16 a,__bf16 b) { __mt_bfloat16_raw ra,rb; ra.data=a; rb.data=b; return __bfloat162float(ra)!=__bfloat162float(rb); }\n'
+        'static __device__ __inline__ __bf16 mt_safe_musa_float2bfloat16(float a) {\n'
+        '  __mt_bfloat16_raw r; unsigned int sign,rem; r.x = __internal_float2bfloat16(a,sign,rem);\n'
+        '  if ((rem > 0x80000000U) || ((rem == 0x80000000U) && ((r.x & 1U) != 0U))) r.x++; return r.data; }\n'
+        'static __device__ __inline__ float mt_safe_musa_bfloat162float(__bf16 x) {\n'
+        '  __mt_bfloat16_raw r; r.data = x; return __uint_as_float(((unsigned int)r.x) << 16); }\n'
+        'using nv_bfloat16 = __mt_bfloat16;\n'
+        '#if defined(__MUSA_ARCH__) && __MUSA_ARCH__ < 220\n'
+        'static __device__ __inline__ mt_bfloat16 hexp2(mt_bfloat16 x) { return __float2bfloat16(exp2f(__bfloat162float(x))); }\n'
+        'static __device__ __inline__ mt_bfloat16 hlog2(mt_bfloat16 x) { return __float2bfloat16(log2f(__bfloat162float(x))); }\n'
+        'static __device__ __inline__ mt_bfloat16 hsin(mt_bfloat16 x) { return __float2bfloat16(sinf(__bfloat162float(x))); }\n'
+        'static __device__ __inline__ mt_bfloat16 hsqrt(mt_bfloat16 x) { return __float2bfloat16(sqrtf(__bfloat162float(x))); }\n'
+        'static __device__ __inline__ mt_bfloat16 htrunc(mt_bfloat16 x) { return __float2bfloat16(truncf(__bfloat162float(x))); }\n'
+        'static __device__ __inline__ mt_bfloat16 hceil(mt_bfloat16 x) { return __float2bfloat16(ceilf(__bfloat162float(x))); }\n'
+        'static __device__ __inline__ mt_bfloat16 hfloor(mt_bfloat16 x) { return __float2bfloat16(floorf(__bfloat162float(x))); }\n'
+        'static __device__ __inline__ mt_bfloat16 hrcp(mt_bfloat16 x) { return __float2bfloat16(1.0f/__bfloat162float(x)); }\n'
+        '#endif\n')
+      self._run([str(self.bin/'mcc'), '-O3', '-mllvm', '-mtgpu-enable-const-calc=false', f'--musa-path={self.musa_path}', '--offload-arch=mp_21', f'-I{include}',
                  '-c', str(src), '-o', str(obj)], td)
       return self.extract_raw(obj,td)
 
@@ -1134,7 +1217,7 @@ MT_SPILL_MIN_STRIDE = INIT_SIZE
 
 class MUSACompiler(Compiler):
   def __init__(self):
-    super().__init__('mt_O3')
+    super().__init__('mt_O3_nocc_bfloat16')
     self.mt = MTCompiler()
   def compile(self, src:str) -> bytes: return self.mt.compile_raw(src)
 
@@ -1145,7 +1228,9 @@ class MUSARenderer(CUDARenderer):
     self.compiler, self.tensor_cores = MUSACompiler(), []
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     return super().render_kernel(function_name, kernel, bufs, uops, ['#include <musa.h>'] + (prefix or []))
-  def supported_dtypes(self): return set(dtypes.all) - {dtypes.double}
+  def render_cast(self, u, val):
+    return f'__float2bfloat16({val})' if u.dtype == dtypes.bfloat16 else super().render_cast(u,val)
+  def supported_dtypes(self): return set(dtypes.all) - {dtypes.double,*dtypes.fp8s}
 
 @dataclasses.dataclass(frozen=True)
 class MTBufferMeta:
@@ -1227,8 +1312,10 @@ def mt_poll(link:UOp, addr:UOp, target:UOp) -> UOp:
   response = slot.after(read,ccall(libc.usleep,100).sink()).index(0).load()
   done = (response >> 32).cast(dtypes.u64)
   poll = done.backedge(loop,(done < target) & (get_time_ms(done) - start < int(float(os.environ.get('MT_TIMEOUT','5'))*1000))).sink()
-  status = response & 0xffffffff
-  bad = ((done.after(poll) != target).cast(dtypes.u64) << 63) | \
+  response_after = slot.after(poll).index(0).load()
+  done_after = (response_after >> 32).cast(dtypes.u64)
+  status = response_after & 0xffffffff
+  bad = ((done_after != target).cast(dtypes.u64) << 63) | \
     (((status&0xffffffff) != mtfw.MTFW_CCB_RESP_DONE).cast(dtypes.u64)*target << 32) | (status & 0xffffffff)
   return usb_fail(link.after(poll),bad)
 
@@ -1294,7 +1381,7 @@ class MTComputeQueue(HWQueue):
       grid_deps = patch(grid,grid_rows,launch.write_map.get(grid_off,bytes(0x1000)))
     const_off = launch.backing_offsets[ARGS_VA]
     args = UOp.alloc((0x1000,),dtypes.u8,device='CPU')
-    rows = [(MT_ARGS_USER_OFFSET+i*8,arg.cast(dtypes.u64)) for i,arg in enumerate(get_call_kernel_args(call,prg,self.devs))]
+    rows = [(MT_ARGS_USER_OFFSET+off,arg.cast(dt)) for arg,(off,dt) in zip(get_call_kernel_args(call,prg,self.devs),TinyELF.iter_sig(obj.signature))]
     self.submissions.append(MTSubmission(launch=launch,args=patch(args,rows,launch.write_map.get(const_off,bytes(0x1000))),
                                          packet=bytes(launch.packet),write_map=dict(launch.write_map),generation=launch.generation,
                                          grid_deps=grid_deps))
@@ -1302,11 +1389,16 @@ class MTComputeQueue(HWQueue):
   def submit(self, cmdbuf:UOp) -> UOp:
     assert len(self.timestamps) in (0,2*len(self.submissions))
     ops: list[Any] = []
-    link = usb_link(self.dev.device)
+    # Keep the USB register state fixed while each operation depends only on its immediate predecessor.
+    state = usb_link(self.dev.device)
+    link = state
     def add(op):
       nonlocal link
       ops.append(op)
-      link = link.after(op)
+      link = state.after(op)
+    # Only the current ordered queue is consulted: first submission restores all state, later ones upload changes.
+    previous_pages:dict[int,bytes]|None = None
+    previous_packet:bytes|None = None
     for i,submission in enumerate(self.submissions):
       launch,deps,packet,write_map,generation,grid_deps = (submission.launch,submission.args,submission.packet,
                                                            submission.write_map,submission.generation,submission.grid_deps)
@@ -1324,11 +1416,17 @@ class MTComputeQueue(HWQueue):
         add(op)
       chunks:list[tuple[int,bytearray]] = []
       for off,data in sorted(write_map.items()):
-        if off == launch.backing_offsets[ARGS_VA]: continue
+        if off == launch.backing_offsets[ARGS_VA] or (previous_pages is not None and previous_pages.get(off) == data): continue
         if chunks and off == chunks[-1][0]+len(chunks[-1][1]): chunks[-1][1].extend(data)
         else: chunks.append((off,bytearray(data)))
       for off,chunk in chunks: write(launch.backing.addr+off,bytes(chunk))
-      write(launch.sv.addr,packet)
+      previous_pages = write_map
+      if previous_packet is None: write(launch.sv.addr,packet)
+      else:
+        assert packet[:MT_SUBMISSION_ID_OFFSET] == previous_packet[:MT_SUBMISSION_ID_OFFSET] and \
+          packet[MT_SUBMISSION_ID_OFFSET+8:] == previous_packet[MT_SUBMISSION_ID_OFFSET+8:]
+        write(launch.sv.addr+MT_SUBMISSION_ID_OFFSET,packet[MT_SUBMISSION_ID_OFFSET:MT_SUBMISSION_ID_OFFSET+8])
+      previous_packet = packet
       idx = link.index(2).load()
       seq = link.index(3).load()
       token = (MT_TOKEN_BASE+seq).cast(dtypes.u64)
@@ -1378,6 +1476,7 @@ Compiled.pm_encode += PatternMatcher([
 class MTDevice(Compiled):
   renderers = [MUSARenderer]
   timestamp_divider = 25
+  hcq_batch_size = 8
   enqueue_copies = False
   def __init__(self, device:str=''):
     dev_id = int(device.split(':')[1]) if ':' in device else 0
