@@ -179,6 +179,32 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c3), c3.sink())
     self.assertEqual(matcher.rewrite(c4), None)
 
+  def test_src_repeat_named_first_mismatch(self):
+    matcher = PatternMatcher([(UPat(Ops.STACK, src=UPat(Ops.CMPLT, src=(UPat.var("y"), UPat()))), lambda y: y)])
+    a = UOp.variable("a", 0, 10)
+    self.assertIsNone(matcher.rewrite(UOp.stack(UOp.const(False, dtypes.bool), a < 5)))
+    self.assertEqual(matcher.rewrite(UOp.stack(a < 5, a < 6)), a)
+
+  def test_any_wildcard(self):
+    p = UPat.any(UPat.var("x"), UPat()).sink(name="s")
+    for compiled in (False, True):
+      pm = PatternMatcher([(p, lambda s,x=None: s.src[0] if x is None else None)], compiled=compiled)
+      self.assertIs(pm.rewrite(UOp.const(1).sink()), UOp.const(1))
+
+  def test_named_any(self):
+    p = UPat.any(UPat(Ops.CONST, name="inner"), UPat(Ops.CAST)).named("x").sink()
+    a = UOp.const(1)
+    for compiled in (False, True):
+      pm = PatternMatcher([(p, lambda x,inner=None: inner if x.op is Ops.CONST else x)], compiled=compiled)
+      self.assertIs(pm.rewrite(a.sink()), a)
+      self.assertIs(pm.rewrite((b:=a.cast(dtypes.int)).sink()), b)
+      self.assertIsNone(pm.rewrite((a+a).sink()))
+
+  def test_empty_dtype_set(self):
+    for compiled in (False, True):
+      pm = PatternMatcher([(UPat(Ops.SINK, dtype=set()), lambda: True)], compiled=compiled)
+      self.assertIsNone(pm.rewrite(UOp.sink()))
+
   def test_allow_len(self):
     matcher = PatternMatcher([(UPat(Ops.MULACC, name="x", src=(UPat(Ops.CONST),), allow_any_len=True), lambda x: x.sink())])
     c1 = UOp.const(1.0)

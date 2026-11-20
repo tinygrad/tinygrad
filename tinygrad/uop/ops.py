@@ -1435,8 +1435,8 @@ class UPat(RandMixin):
     # repeat if it's a UPat
     elif isinstance(src, UPat): self.src = [itertools.repeat(src)]
 
-    self.strict_length = not (allow_any_len or isinstance(src, UPat) or src is None)
-    self.required_len: int = 0 if isinstance(src, UPat) or src is None else len(src)
+    self.strict_length = not (is_any or allow_any_len or isinstance(src, UPat) or src is None)
+    self.required_len: int = 0 if is_any or isinstance(src, UPat) or src is None else len(src)
     self.location = location or get_location()
 
     if custom_early_reject is not None: self.early_reject = custom_early_reject
@@ -1445,13 +1445,13 @@ class UPat(RandMixin):
       self.early_reject = {pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1}
 
   @property
-  def dtype(self) -> DType: return self.match_dtype[0] if self.match_dtype is not None else dtypes.void
+  def dtype(self) -> DType: return self.match_dtype[0] if self.match_dtype else dtypes.void
 
   def __reduce__(self):
     return UPat, (self.op, self.match_dtype, self._in_src, self.arg, self.name, not self.strict_length, self.custom_early_reject, self.location,
                   self.is_any)
   def named(self, name:str):
-    return UPat(self.op, self.match_dtype, self._in_src, self.arg, name, not self.strict_length, self.custom_early_reject)
+    return UPat(self.op, self.match_dtype, self._in_src, self.arg, name, not self.strict_length, self.custom_early_reject, is_any=self.is_any)
 
   @staticmethod
   def any(*src): return UPat(src=src, is_any=True)
@@ -1506,13 +1506,13 @@ class UPat(RandMixin):
     return UPat(op, dtypes.bool if op in GroupOp.Comparison else asrc[-1].match_dtype, list(asrc) if op in GroupOp.Commutative else asrc)
 
   def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
-    if self.is_any: return flatten([x.match(uop, store.copy()) for x in self.src[0]])
     if (self.op is not None and uop.op not in self.op) or \
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.match_dtype is not None and uop.dtype not in self.match_dtype) or \
        (self.arg is not None and self.arg != uop.arg) or \
        (len(uop.src) < self.required_len) or \
        (self.strict_length and len(uop.src) != self.required_len): return []
+    if self.is_any: return flatten([x.match(uop, store.copy()) for x in self.src[0]])
     if self.src is None: return [store]
     res: list[dict[str, UOp]] = []
     for vp in self.src:
