@@ -346,6 +346,23 @@ def _doutw(src1:int, src0:int, end:bool=False) -> int: return _dout(mtpds.PVR_RO
 def _doutd(src0:int, cc:int=0, end:int=0) -> int: return _dout(mtpds.PVR_ROGUE_PDSINST_DOUT_DST_DOUTD,src0,cc=cc,end=end)
 def _doutc(src0:int) -> int: return _dout(5,src0,end=1)  # DOUTC, conditional in the Mesa headers
 
+MT_GEN1_DMA_DOFFSET,MT_GEN1_DMA_SLCMODE = 2,2
+
+def _doutd_src0(sbase:int, doffset:int=0, slcmode:int=0) -> int:
+  return sbase | (doffset<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTD_SRC0_DOFFSET_SHIFT) | \
+    (slcmode<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTD_SRC0_SLCMODE_SHIFT)
+
+def _doutd_src1(ao:int, bsize:int, last:int=0, wordsize:int=0, dest:int=0, cmode:int=0, repeat:int=0) -> int:
+  return (last<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTD_SRC1_LAST_SHIFT) | \
+    (wordsize<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTD_SRC1_WORDSIZE_SHIFT) | \
+    (dest<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTD_SRC1_DEST_SHIFT) | (cmode<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTD_SRC1_CMODE_SHIFT) | \
+    (ao<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTD_SRC1_AO_SHIFT) | (repeat<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTD_SRC1_REPEAT_SHIFT) | bsize
+
+def _doutu_src0(exe_off:int, temps:int=0, sample_rate:int=0, dual_phase:int=0) -> int:
+  return (dual_phase<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTU_SRC0_DUAL_PHASE_SHIFT) | \
+    (temps<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTU_SRC0_TEMPS_SHIFT) | \
+    (sample_rate<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTU_SRC0_SAMPLE_RATE_SHIFT) | (exe_off<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTU_SRC0_EXE_OFF_SHIFT)
+
 def _sp(op:int, cc:int=0, payload:int=0) -> int:
   return (mtpds.PVR_ROGUE_PDSINST_OPCODEC_SP<<28) | (op<<23) | (cc<<27) | payload
 
@@ -943,11 +960,11 @@ class MTGeneratedLaunch(MTLaunch):
     words(0x1980,_doutc(0x10),_release())
     for off,address,size in [(0x1a00,0x81e08a1180,0x1000000600),(0x1a20,0x81e08a1180,0x2000000800),
                              (0x1a40,0x81e08a5180,0x1000000600),(0x1a60,0x81e08a5180,0x2000000800)]:
-      struct.pack_into('<QI4xQ',resume,off,address,0x80000043,size)
-    struct.pack_into('<QII',resume,0x1a80,0x81e08a9180,0,0x21000000)
+      struct.pack_into('<QI4xQ',resume,off,address,_doutd_src1(0,0x43,last=1,wordsize=2),size)
+    struct.pack_into('<QII',resume,0x1a80,0x81e08a9180,0,_doutu_src0(0x840000))
     words(0x1aa0,_wdf(0x340002),_wdf(0x300040),_sftlp64(0,7,0,0x19,0x17,0xfc,0xd),_cmp(0,0,1,1,0xb,0x3001),
           _ddmad(0,0,0x19,8,4,7),_st(0x67),_ld(2,flags=0x200000),_st(),_release())
-    struct.pack_into('<QII',resume,0x1b00,0x81e08a9180,0,0x30400000)
+    struct.pack_into('<QII',resume,0x1b00,0x81e08a9180,0,_doutu_src0(0xc10000))
     words(0x1b10,_wdf(0x340002),_wdf(0x300040),_sftlp64(0,7,0,0x19,0x17,0xfc,0xd),_cmp(0,0,1,1,0xb,0x3001),
           _ddmad(0,0,0x19,8,4,7),_ld(0x67),_st(),_release())
     words(0x1b80,_vendor_sp9(1,0x340002),_release(),_doutw(0,0x10),_doutu(flags=0x10))
@@ -1005,17 +1022,17 @@ class MTGeneratedLaunch(MTLaunch):
     rc = mtfw.MTFW_FWIF_REG_DUMP_CFG()
     rc.regOffset,rc.regStride,rc.regIdxNum,rc.indirectNum = mtregs.RGX_CR_MMU_FAULT_STATUS1,8,2,1
     self._write_backing(error_off+0x228,bytes(rc)[:8])
-    self._write_backing(error_off+0x230,struct.pack('<I',0x20001))
-    self._write_backing(error_off+0x238,struct.pack('<Q',0x8000020004084178))
-    self._write_backing(error_off+0x240,struct.pack('<I',0x100004))
-    self._write_backing(error_off+0x248,struct.pack('<Q',0x8000020040084800))
-    self._write_backing(error_off+0x250,struct.pack('<I',0x1000004))
-    self._write_backing(error_off+0x258,struct.pack('<Q',0x8000020000000000))
-    self._write_backing(error_off+0x260,struct.pack('<I',4))
-    self._write_backing(error_off+0x268,struct.pack('<Q',0x8000020000000000))
-    self._write_backing(error_off+0x270,struct.pack('<I',4))
-    self._write_backing(error_off+0x278,struct.pack('<Q',0x80000200010841b8))
-    self._write_backing(error_off+0x280,struct.pack('<I',0x40004))
+    self._write_backing(error_off+0x230,struct.pack('<I',_doutd_src1(0x10,1)))
+    self._write_backing(error_off+0x238,struct.pack('<Q',_doutd_src0(0x4084178,MT_GEN1_DMA_DOFFSET,MT_GEN1_DMA_SLCMODE)))
+    self._write_backing(error_off+0x240,struct.pack('<I',_doutd_src1(0x80,4)))
+    self._write_backing(error_off+0x248,struct.pack('<Q',_doutd_src0(0x40084800,MT_GEN1_DMA_DOFFSET,MT_GEN1_DMA_SLCMODE)))
+    self._write_backing(error_off+0x250,struct.pack('<I',_doutd_src1(0x800,4)))
+    self._write_backing(error_off+0x258,struct.pack('<Q',_doutd_src0(0,MT_GEN1_DMA_DOFFSET,MT_GEN1_DMA_SLCMODE)))
+    self._write_backing(error_off+0x260,struct.pack('<I',_doutd_src1(0,4)))
+    self._write_backing(error_off+0x268,struct.pack('<Q',_doutd_src0(0,MT_GEN1_DMA_DOFFSET,MT_GEN1_DMA_SLCMODE)))
+    self._write_backing(error_off+0x270,struct.pack('<I',_doutd_src1(0,4)))
+    self._write_backing(error_off+0x278,struct.pack('<Q',_doutd_src0(0x10841b8,MT_GEN1_DMA_DOFFSET,MT_GEN1_DMA_SLCMODE)))
+    self._write_backing(error_off+0x280,struct.pack('<I',_doutd_src1(0x20,4)))
   def set_generated(self, image:MTKernelImage) -> None:
     self.generated_image = image
     k = image.metadata.kernel
