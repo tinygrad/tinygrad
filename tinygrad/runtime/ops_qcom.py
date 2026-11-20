@@ -353,15 +353,20 @@ class MSMIface:
 
   def __init__(self, dev:QCOMDevice, device_id:int):
     self.dev, self.fd = dev, FileIOInterface('/dev/dri/renderD128', os.O_RDWR)
+    drv = ctypes.create_string_buffer(8)
+    msm_drm.DRM_IOCTL_VERSION(self.fd, name_len=len(drv), name=drv) # the render node can belong to any drm driver
+    if drv.value != b"msm": raise RuntimeError(f"renderD128 is {drv.value.decode()}, not msm")
 
     # vm_bind: the gpu addresses are ours, a submit runs a cmdbuf by its address with no bo list. enabled before anything creates the vm
     msm_drm.DRM_IOCTL_MSM_SET_PARAM(self.fd, pipe=msm_drm.MSM_PIPE_3D0, param=msm_drm.MSM_PARAM_EN_VM_BIND, value=1)
-    self.chip_id = self._param(msm_drm.MSM_PARAM_CHIP_ID)
+    self.chip_id = self._param(msm_drm.MSM_PARAM_CHIP_ID) & 0xffffffff # the upper bits can carry the speedbin
     self.va_allocator = TLSFAllocator(self._param(msm_drm.MSM_PARAM_VA_SIZE), base=self._param(msm_drm.MSM_PARAM_VA_START))
     self.ctx, self.bind_queue = [msm_drm.DRM_IOCTL_MSM_SUBMITQUEUE_NEW(self.fd, flags=f).id for f in (0, msm_drm.MSM_SUBMITQUEUE_VM_BIND)]
 
+  def _param(self, param:int) -> int: return msm_drm.DRM_IOCTL_MSM_GET_PARAM(self.fd, pipe=msm_drm.MSM_PIPE_3D0, param=param).value
+
   def alloc(self, size:int) -> BufferStorage:
-    gem = msm_drm.DRM_IOCTL_MSM_GEM_NEW(self.fd, size=round_up(size, 0x1000), flags=msm_drm.MSM_BO_WC)
+    gem = msm_drm.DRM_IOCTL_MSM_GEM_NEW(self.fd, size=round_up(size, 0x1000), flags=msm_drm.MSM_BO_WC | msm_drm.MSM_BO_NO_SHARE)
     va_addr = self.va_allocator.alloc(gem.size)
     bind_op = msm_drm.struct_drm_msm_vm_bind_op(op=msm_drm.MSM_VM_BIND_OP_MAP, handle=gem.handle, iova=va_addr, range=gem.size)
     bind = msm_drm.DRM_IOCTL_MSM_VM_BIND(self.fd, flags=msm_drm.MSM_VM_BIND_FENCE_FD_OUT, nr_ops=1, queue_id=self.bind_queue, op=bind_op)
@@ -378,8 +383,6 @@ class MSMIface:
     self.va_allocator.free(storage.buf)
     FileIOInterface.munmap(unwrap(storage.host).addr, storage.meta.size)
     msm_drm.DRM_IOCTL_GEM_CLOSE(self.fd, handle=storage.meta.handle)
-
-  def _param(self, param:int) -> int: return msm_drm.DRM_IOCTL_MSM_GET_PARAM(self.fd, pipe=msm_drm.MSM_PIPE_3D0, param=param).value
 
   def submit_req(self, ib:UOp, size:int, ctx:UOp) -> UOp:
     cmd = cstruct(msm_drm.struct_drm_msm_gem_submit_cmd, type=msm_drm.MSM_SUBMIT_CMD_BUF, size=size, iova=ib)
