@@ -130,7 +130,10 @@ class MTGeneratedLaunch(MTLaunch):
     has_ids = any(a['.kind'] in (1,2,3,5,6,7) for a in k['.args'])
     has_barrier = k['.has_barrier']
     resource_off = self.backing_offsets[0xda00406000]
-    self.text_offset = 0x1000 if len(image.text) <= 0x1000 else 0x2000 if len(image.text) <= 0x20000 else 0x30000
+    spill_bytes = max(k['.private_memory_size'],k['.local_mem_used_in_cluster'])
+    # Spill text uses a 32 KiB region when possible and a 192 KiB region for larger images.
+    self.text_offset = (0x8000 if len(image.text) <= 0x8000 else 0x30000) if spill_bytes else \
+      0x1000 if len(image.text) <= 0x1000 else 0x2000 if len(image.text) <= 0x20000 else 0x30000
     self.resource_temp_offset = 0x2c if has_barrier else 0x24 if has_ids else 0x1c
     self.resource_text_field = 0x28 if has_barrier else 0x20 if has_ids else 0x18
     self.resource_temp_flags = 1 if has_barrier else 0

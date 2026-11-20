@@ -45,7 +45,8 @@ Hardware-independent tests are in `test/null/test_mt*.py`. Hardware regressions 
 
 ```bash
 DEV=MT python -m pytest test/test_tiny.py test/runtime/test_mt_cache.py -x -q
+DEV=MT PARALLEL=12 python -m pytest test/runtime/test_ops.py -x -q
 DEV=MT DEBUG=2 python -c 'from tinygrad import Tensor; print((Tensor([1.,2.,3.]) + Tensor([4.,5.,6.])).tolist())'
 ```
 
-The current implementation targets MMU4 and generation-1 firmware only. Launches are serialized to preserve shared launch/MMU state. There is no copy queue, and double-precision kernels are not supported by the MUSA renderer. Kernels requiring spill or local-cluster memory are rejected before submission.
+The current implementation targets MMU4 and generation-1 firmware only. Launches are serialized to preserve shared launch/MMU state. There is no copy queue, and double-precision kernels are not supported by the MUSA renderer. Spill launches use per-core private-memory arenas with text/workgroup layouts derived from the launch ABI; spill allocations above 1 GiB are rejected.

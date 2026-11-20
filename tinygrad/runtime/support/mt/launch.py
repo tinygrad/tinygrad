@@ -33,7 +33,8 @@ class MTLaunch(MTFirmware):
     super().__init__(dev, prepare=not reuse, mmu=active.mmu if active is not None else None, v=active.v if active is not None else None)
     self.sv:Any = active.sv if active is not None else self.dev.pci_dev.map_bar(2, off=SUB_PA, size=INIT_SIZE, fmt='B')
     if not reuse: self.sv[:0x20000] = bytes(0x20000)
-    self.zero_pa = SUB_PA + 0x1000
+    # The firmware reserves a fixed output/status page even when user output VAs differ.
+    self.zero_pa, self.status_pa = SUB_PA + 0x1000, SUB_PA + 0x3000
     self.mmu_dirty = True
     self.backing_pa = BACKING_PA
     self.backing:Any = active.backing if active is not None else self.dev.pci_dev.map_bar(2, off=self.backing_pa, size=BACKING_SIZE, fmt='B')
@@ -55,6 +56,7 @@ class MTLaunch(MTFirmware):
     for off in range(0x400000, 0x410000, 0x1000): self.mmu.map(FW_DEVVA + off, FW_BASE + off, MT_PTE_READ_WRITE)
     if 0x100000000 not in self.mmu.pages: self.mmu.map(0x100000000,SUB_PA+0x6000,MT_PTE_READ_WRITE)
     for i in range(18): self.mmu.map(0xd9bfff0000+i*0x1000,SUB_PA+0x10000+i*0x1000,MT_PTE_READ_WRITE)
+    self.mmu.map(0xe1c2003000,self.status_pa,MT_PTE_READ_WRITE)
     aliases = [(0xc000000000,0x20400000),(0x22000000,0x20400000),(0x90400000,0x20400000),
                (0xe1c0401000,SUB_PA+0x1000),(0xe1c0402000,SUB_PA+0x8000),(0xe1c2001000,SUB_PA+0x1000),
                (0xe1c2002000,SUB_PA+0x8000),(0xe000002000,SUB_PA+0x8000),(0x90005000,SUB_PA+0x5000),
@@ -135,6 +137,9 @@ class MTLaunch(MTFirmware):
   def map_buffer(self, va:int, pa:int, size:int, flags:int=MT_PTE_READ_WRITE) -> None:
     self.mmu.map_range(va, pa, size, flags)
     self.mmu_dirty = True
+
+  def set_spill(self, va:int) -> None:
+    self._write_backing(self.backing_offsets[0x81e1200000],struct.pack('<Q',va))
 
   def set_grid(self, global_size:tuple[int,int,int], local_size:tuple[int,int,int]) -> None:
     off = self.backing_offsets[0x81e1400000]

@@ -23,6 +23,10 @@ from tinygrad.runtime.support.mt.compiler import MTCompiler
 from tinygrad.runtime.support.mt.elf import MTKernelImage
 
 
+# KERNEL8 value used by multi-thread spill workgroups.
+MT_SPILL_WORKGROUP_KERNEL8 = 0x108085
+MT_SPILL_MIN_STRIDE = 0x2000000
+
 class MUSACompiler(Compiler):
   def __init__(self):
     super().__init__('mt_O3')
@@ -307,6 +311,7 @@ class MTDevice(Compiled):
     self.launch_order:list[MTGeneratedLaunch] = []
     self.launch_cache:dict[tuple[bytes,tuple[int,int,int],tuple[int,int,int]],MTGeneratedLaunch] = {}
     self.buffer_maps:dict[int,tuple[int,int]] = {}
+    self.spill_buffer:tuple[int,BufferStorage]|None = None
     self.current_launch:MTGeneratedLaunch|None = None
     self.poll_in_hcq = True
     self.cached_launches:dict[bytes,tuple[MTGeneratedLaunch,TinyELF,tuple[int,int,int],tuple[int,int,int]]] = {}
@@ -409,8 +414,6 @@ class MTDevice(Compiled):
 
   def activate_launch(self, launch:MTGeneratedLaunch, obj:TinyELF, global_size:tuple[int,int,int], local_size:tuple[int,int,int]) -> None:
     image = MTKernelImage.from_elf(obj.lib)
-    if max(image.metadata.kernel['.private_memory_size'],image.metadata.kernel['.local_mem_used_in_cluster']):
-      raise NotImplementedError('MT kernels requiring spill or local-cluster memory are not supported')
     unchanged = MTLaunch._loaded is launch and launch.kernel_lib == obj.lib
     self.ensure_started(launch)
     if not unchanged:
@@ -418,10 +421,26 @@ class MTDevice(Compiled):
       launch.kernel_lib = obj.lib
       launch.generate_static_pds()
       launch.generate_pds(image)
+    if (spill_bytes:=max(image.metadata.kernel['.private_memory_size'],image.metadata.kernel['.local_mem_used_in_cluster'])):
+      cores = launch.core_count
+      threads = global_size[0]*global_size[1]*global_size[2]*local_size[0]*local_size[1]*local_size[2]
+      # Private frames use per-core power-of-two strides (minimum 32 MiB).
+      per_core_threads = (threads+cores-1)//cores
+      spill_stride = max(MT_SPILL_MIN_STRIDE,1 << (spill_bytes*per_core_threads).bit_length())
+      needed = spill_stride*cores
+      if needed > 0x40000000: raise MemoryError(f'MT spill allocation {needed:#x} exceeds the validated 1 GiB limit')
+      if self.spill_buffer is None or self.spill_buffer[0] < needed:
+        self.spill_buffer = (needed,self.allocator.alloc(needed,BufferSpec()))
+      spill = self.spill_buffer[1]
+      launch.map_buffer(spill.buf,spill.meta.pa,needed)
+      launch.set_spill(spill.buf)
+      launch._write_backing(launch.backing_offsets[0x81e1200000]+8,struct.pack('<I',cores))
     if launch.mmu_dirty:
       launch.upload_mmu()
       launch.mmu_dirty = False
     launch.set_grid(global_size,local_size)
+    if spill_bytes and local_size[0]*local_size[1]*local_size[2] > 1:
+      launch._write_backing(launch.backing_offsets[0x81e1400000]+0x20,struct.pack('<I',MT_SPILL_WORKGROUP_KERNEL8))
 
   def _view(self, va:int):
     if va in self.views: return self.views[va]
