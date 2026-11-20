@@ -36,7 +36,7 @@ def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
 def realize_custom_kernel_srcs(ctx:IndexingContext, c:UOp) -> None:
   for s in c.src[1:]:
     while s.op is Ops.RESHAPE: s = s.src[0]
-    if s.op not in ALWAYS_CONTIGUOUS:
+    if s.op not in ALWAYS_CONTIGUOUS and not s.is_scalar_arg:
       ctx.realize_map[s] = None
       ctx.non_removable[s] = None
 

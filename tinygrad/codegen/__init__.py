@@ -538,6 +538,7 @@ def _unwrap_src(s: UOp) -> UOp:
 
 # a buffer state is a define or an AFTER. MSELECT/MSTACK join per-device states
 def _states(s: UOp) -> list[UOp]:
+  if s.is_scalar_arg: return []  # scalar expressions read no storage
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
   if s.op is Ops.CONST: return []  # a constant arg, e.g. the device number of one device, reads no buffer
@@ -601,7 +602,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       if rk.op is not Ops.AFTER:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:])
+        buf_uops = tuple(s if s.is_scalar_arg else _unwrap_src(s).buf_uop for s in k.src[1:])
         linearized.append(k.replace(src=(k.body, *buf_uops)))
       for x in children.get(rk, []):
         in_degree[x] -= 1

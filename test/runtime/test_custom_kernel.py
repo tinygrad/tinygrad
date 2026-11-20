@@ -669,6 +669,12 @@ class TestCustomKernelArgs(unittest.TestCase):
     B, n = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Variable("n", 0, 100, dtypes.int)
     for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [1+k, 2+k, 3+k, 4+k])
 
+  def test_scalar_expression_arg(self):
+    def kernel(out, length): return out[0].store(length.cast(out.dtype)).sink(arg=KernelInfo(name="store_length"))
+    f = TinyJit(lambda pos, count: Tensor.empty(1, dtype=dtypes.int).custom_kernel(pos+count*2, fxn=kernel)[0].realize())
+    pos, count = Variable("pos", 0, 32), Variable("count", 1, 8)
+    for p,c in ((0, 4), (1, 2), (17, 1), (3, 7)): self.assertEqual(f(pos.bind(p), count.bind(c)).item(), p+2*c)
+
   def test_scalar_arg_jit_fixed_bind(self):
     # m is bound inside the jitted function so it's not an input, a replay keeps m=10 while the input n changes
     kernel = functools.partial(custom_add_var_kernel, n_slot=0)

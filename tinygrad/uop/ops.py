@@ -1179,7 +1179,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret = UOp._buffer(prod(shape), dtype, slot, addrspace=addrspace, reg=reg, name=name)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
+  @functools.cached_property
+  def is_scalar_arg(self) -> bool:
+    # A by-value kernel argument reads only constants and scalar parameters, never storage.
+    return self.is_variable or ((dtypes.is_int(self.dtype) or self.dtype == dtypes.bool) and
+      (self.op is Ops.CONST or (self.op in GroupOp.ALU|{Ops.CAST} and all(s.is_scalar_arg for s in self.src))))
   def placeholder_like(self, slot:int):
+    if self.is_scalar_arg:
+      arg = ParamArg(slot, self.dtype, (self.vmin, self.vmax), self.arg.name if self.is_variable else None, AddrSpace.ALU)
+      return UOp(Ops.PARAM, (UOp(Ops.STACK),), arg)
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
     return UOp.placeholder(self.max_shard_shape, self.dtype, slot)
 
@@ -1280,9 +1288,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # one-line convenience for the single-output case: self is the value
   def call_with_output(self, *srcs:UOp, **kwargs) -> UOp: return UOp.call_with_outputs((self,), *srcs, **kwargs)[0]
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
-    placeholders = [s.replace(arg=replace(s.arg, slot=i, val=None)) if s.is_variable else UOp.placeholder_like(s, slot=i)
-                    for i,s in enumerate(srcs)]
-    kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)
+    kernel = fxn(*(s.placeholder_like(i) for i,s in enumerate(srcs))).call(*srcs, grad_fxn=grad_fxn)
     return [s.after(kernel) for s in srcs]
 
   @functools.cached_property

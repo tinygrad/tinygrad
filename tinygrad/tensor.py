@@ -198,13 +198,13 @@ class Tensor(RandMixin):
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
     return Tensor(fxn._uop.call_with_output(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn))
 
-  def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
+  def custom_kernel(self, *lst:Tensor|sint, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
     """
-    Call into a custom kernel written in UOps. Returns the Tensors after the Kernel has been applied.
+    Call a UOp kernel with Tensor buffers and by-value integer expressions. Returns the Tensors after the kernel has been applied.
 
     This API is alpha and may change.
     """
-    return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
+    return [Tensor(u) for u in UOp.custom_kernel(*(UOp.const(t) if isinstance(t, int) else t._uop for t in (self,)+lst), fxn=fxn, grad_fxn=grad_fxn)]
 
   @rewrite_group(lambda *tensors,ret,**_: f"Export {len(tensors)} -> {len(ret[1])} externs")
   def export(self, *lst:Tensor) -> tuple[UOp, tuple[UOp, ...]]:

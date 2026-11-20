@@ -334,7 +334,8 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   def slot(u:UOp) -> int: return args.setdefault(u, len(args))
   kernels = []
   for tag, (c, d, _) in enumerate(ctx.batch):
-    est = estimate_uop(c.replace(src=(c.body, *(a.param_like(slot(a)) if a.op is Ops.EXTERN and a.is_variable else a for a in c.src[1:]))))
+    est_args = (a.placeholder_like(slot(a)) if a.is_scalar_arg and a.op_in_backward_slice_with_self(Ops.EXTERN) else a for a in c.src[1:])
+    est = estimate_uop(c.replace(src=(c.body, *est_args)))
     bufs = tuple(slot(c.src[1+i]) for i in getattr(c.body.arg, "globals", range(len(c.src)-1))) if ctx.profile else ()
     kernels.append((d, get_call_name(c, get_call_arg_uops(c)), est, tuple(2*s+1 for s in ctx.stamps(d, tag)),
                     c.body.key if c.body.op is Ops.PROGRAM else None, bufs, get_call_outs_ins(c)))
