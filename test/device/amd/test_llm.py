@@ -8,7 +8,7 @@ from tinygrad.llm.kernels.amd import (Linear, ExpertWeights, amd_custom_kernels_
 from tinygrad.llm.kernels.amd_gguf import (q8_quantize, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, Q8_0, Q4_K, Q6_K,
                                           IQ3_S, IQ4_XS, IQ1_S, MXFP4)
 from tinygrad.llm.gguf import ggml_data_to_tensor
-from test.runtime.test_llm_quantized import QuantLinearMixin
+from test.runtime.test_llm_quantized import QuantLinearMixin, reference_weight
 
 class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_wmma_architecture_selection(self):
@@ -63,16 +63,20 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_q5_linear(self): self._test_quant_linear(13, 176)
   def test_q8_0_linear_small_blocks(self): self._test_quant_linear(8, 272, in_features=288, out_features=16, token_counts=(1, 16))
   def test_q6_linear_odd_blocks(self): self._test_quant_linear(14, 210, in_features=768, out_features=3, token_counts=(1, 3, 16))
-  def test_q2_k_linear(self): self._test_quant_linear(10, 84, in_features=256, out_features=16, token_counts=(1, 3, 16))
-  def test_q3_k_linear(self): self._test_quant_linear(11, 110, in_features=256, out_features=16, token_counts=(1, 3, 16))
-  def test_iq2_xxs_linear(self): self._test_quant_linear(16, 66, in_features=256, out_features=16, token_counts=(1, 3, 16))
-  def test_iq2_xs_linear(self): self._test_quant_linear(17, 74, in_features=256, out_features=16, token_counts=(1, 3, 16))
-  def test_iq3_xxs_linear(self): self._test_quant_linear(18, 98, in_features=256, out_features=16, token_counts=(1, 3, 16))
-  def test_iq1_s_linear(self): self._test_quant_linear(19, 50, in_features=256, out_features=16, token_counts=(1, 3, 16))
-  def test_iq4_nl_linear(self): self._test_quant_linear(20, 144, in_features=256, out_features=16, token_counts=(1, 3, 16))
-  def test_iq3_s_linear(self): self._test_quant_linear(21, 110, in_features=256, out_features=16, token_counts=(1, 3, 16))
-  def test_iq2_s_linear(self): self._test_quant_linear(22, 82, in_features=256, out_features=16, token_counts=(1, 3, 16))
-  def test_mxfp4_linear(self): self._test_quant_linear(39, 136, in_features=288, token_counts=(1, 3))
+  # Exercise the format-specific dot product with a ragged second split-K chunk, then a dense WMMA product.
+  # The token loop and symbolic padding are shared; exercise those on one grid format rather than every grid.
+  def _test_split_k_and_wmma(self, typ, token_counts=(1, 16)):
+    self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=16, token_counts=token_counts)
+  def test_q2_k_linear(self): self._test_split_k_and_wmma(10)
+  def test_q3_k_linear(self): self._test_split_k_and_wmma(11)
+  def test_iq2_xxs_linear(self): self._test_split_k_and_wmma(16)
+  def test_iq2_xs_linear(self): self._test_split_k_and_wmma(17, (1, 3, 16))
+  def test_iq3_xxs_linear(self): self._test_split_k_and_wmma(18)
+  def test_iq1_s_linear(self): self._test_split_k_and_wmma(19)
+  def test_iq4_nl_linear(self): self._test_split_k_and_wmma(20)
+  def test_iq3_s_linear(self): self._test_split_k_and_wmma(21)
+  def test_iq2_s_linear(self): self._test_split_k_and_wmma(22)
+  def test_mxfp4_linear(self): self._test_quant_linear(39, 136, in_features=1056, token_counts=(1, 3))
   def test_mxfp4_linear_wmma(self): self._test_quant_linear(39, 136, in_features=288, token_counts=(16,))
 
   def test_wmma_linear_symbolic(self):
@@ -89,7 +93,6 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
 
   def test_wmma_dequantization_basis(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
-    from gguf import dequantize, GGMLQuantizationType
     rng = np.random.default_rng(1907)
     scales = np.array([0, 2**-24, -2**-24, 2**-14, -0.00035, .001, .0037, -.125, 1, -4, 8], np.float16)
     identity = Tensor(np.eye(256, dtype=np.float16)).realize()
@@ -103,7 +106,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         if typ in (10, 12, 13):
           offset = 82 if typ == 10 else 2
           blocks[:, offset:offset+2] = np.resize(scales[::-1], len(blocks)).view(np.uint8).reshape(-1, 2)
-        expected = dequantize(packed.flatten(), GGMLQuantizationType(typ)).reshape(16, 256).astype(np.float16).astype(np.float32).T
+        expected = reference_weight(packed, typ, 16, 256).astype(np.float16).astype(np.float32).T
         # Halfword-only (mxfp4 byte-only) alignment exercises unaligned storage views.
         pad = 1 if typ == 39 else 2 if typ in HALFWORD_QUANTS else 4
         raw = Tensor(np.pad(packed.flatten(), (pad, 0))).realize()[pad:]
@@ -117,7 +120,6 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
 
   def test_quant_linear_unaligned_storage_fallback(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
-    from gguf import dequantize, GGMLQuantizationType
     rng = np.random.default_rng(73)
     x = rng.normal(size=(16, 256)).astype(np.float32)
     for typ, offset in ((12, 1), (12, 2), (12, 3), (21, 1), (21, 3)):
@@ -125,24 +127,19 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         packed = rng.integers(0, 256, (16, QUANT_SIZES[typ]), dtype=np.uint8)
         packed[:, :2] = np.array([.001], np.float16).view(np.uint8)
         if typ == 12: packed[:, 2:4] = np.array([.0002], np.float16).view(np.uint8)
-        weight = dequantize(packed.flatten(), GGMLQuantizationType(typ)).reshape(16, 256)
+        weight = reference_weight(packed, typ, 16, 256)
         raw = Tensor(np.pad(packed.flatten(), (offset, 0))).realize()[offset:]
         linear = Linear(256, 16, bias=False)
         linear.weight = ggml_data_to_tensor(raw, 16*256, typ).reshape(16, 256)
         np.testing.assert_allclose(linear(Tensor(x)).numpy(), x @ weight.T, rtol=2e-5, atol=1e-5)
         self.assertIsNone(linear.ggml_type)
 
-  def test_mixed_quant_linear_split_k(self):
-    for typ in (10, 11, 16, 17, 18, 19, 20, 21, 22, 39):
-      with self.subTest(ggml_type=typ):
-        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=3, token_counts=(1,))
-
   def test_quant_linear_decode_row_groups(self):
     # One, two, and four waves per workgroup; ragged split-K and multiple tokens must stay independent.
-    for typ in (12, 13, 14, 23):
-      for outputs in (3, 6, 12):
-        with self.subTest(ggml_type=typ, out_features=outputs):
-          self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=outputs, token_counts=(1, 3))
+    # Row grouping is shared by the formats, so cover each group size without taking the cross product.
+    for typ, outputs in ((12, 3), (13, 6), (14, 12), (23, 3)):
+      with self.subTest(ggml_type=typ, out_features=outputs):
+        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=outputs, token_counts=(1, 3))
 
   def test_quant_linear_bias(self):
     # Bias is a shared epilogue after both decode and WMMA; per-format math doesn't need to be repeated here.
@@ -165,7 +162,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         if typ in (12, 13): packed[:, 2:4] = np.array([0.0002], dtype=np.float16).view(np.uint8)
         raw = Tensor(np.pad(packed.flatten(), (4, 0))).contiguous().realize()[4:]
         decoded = ggml_data_to_tensor(raw, 16*256, typ).reshape(16, 256).half()
-        original = decoded.numpy()
+        original = reference_weight(packed, typ, 16, 256).astype(np.float16)
         x = rng.normal(size=(3, 256)).astype(np.float16)
         for prefix in (None, 0, 4):
           with self.subTest(prefix=prefix):
@@ -238,7 +235,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     if typ == MXFP4: blocks.reshape(-1, 17)[:, 0] = rng.integers(122, 128, blocks.size//17)  # e8m0 scales
     else: blocks[:, :4] = np.array([0.001, 0.0001], np.float16).view(np.uint8)
     decoded = ggml_data_to_tensor(Tensor(blocks.flatten()).contiguous().realize(), E*OUT*IN, typ).reshape(E, OUT, IN)
-    w = decoded.numpy()
+    w = reference_weight(blocks, typ, E, OUT, IN)
     act = rng.standard_normal((1, T, K, IN)).astype(np.float32)
     sel = np.stack([rng.choice(E, K, replace=False) for _ in range(T)])[None].astype(np.int32)
     ew = ExpertWeights(E, IN, OUT)
@@ -301,7 +298,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     for i in range(blocks): packed[i*210+208:i*210+210] = np.array([0.01], dtype=np.float16).view(np.uint8)
     raw = Tensor(np.pad(packed, (4, 0))).contiguous().realize()[4:]
     decoded = ggml_data_to_tensor(raw, 16*in_features, 14).reshape(16, in_features)
-    weight = decoded.numpy()
+    weight = reference_weight(packed, Q6_K, 16, in_features)
     linear = Linear(in_features, 16, bias=False)
     nn.state.load_state_dict(linear, {"weight":decoded}, verbose=False, realize=False)
     x = rng.normal(size=(3, in_features)).astype(np.float32)
