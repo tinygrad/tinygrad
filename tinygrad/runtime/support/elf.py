@@ -41,13 +41,17 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL
       sh.header.sh_addr = len(image) - len(sh.content)
 
   # Relocations
+  sym_cache:dict[str, int] = {}
+  def cached_link_sym(sym:str) -> int:
+    if sym not in sym_cache: sym_cache[sym] = link_sym(sym, link_libs or [], link_syms)
+    return sym_cache[sym]
   relocs = []
   for sh, trgt_sh_name, c_rels in rel + rela:
     if trgt_sh_name == ".eh_frame": continue
     target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
     rels = [(r.r_offset, unwrap(symtab)[getattr(libc, f"{ecls.upper()}_R_SYM")(r.r_info)], getattr(libc, f"{ecls.upper()}_R_TYPE")(r.r_info),
              getattr(r, "r_addend", 0)) for r in c_rels]
-    relocs += [(target_image_off + roff, link_sym(_strtab(strtab, sym.st_name), link_libs or [], link_syms) if sym.st_shndx == 0 else
+    relocs += [(target_image_off + roff, cached_link_sym(_strtab(strtab, sym.st_name)) if sym.st_shndx == 0 else
                 sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
 
   return memoryview(image), sections, relocs

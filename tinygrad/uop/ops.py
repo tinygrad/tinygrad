@@ -1284,7 +1284,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def kernel_params(self) -> tuple[UOp, ...]:
     # the kernel's params in slot order. the LINEAR keeps two IMAGE params of one slot in order, isel and packing replace PARAMs
-    params = [u for u in self.src[1].src if u in self.arg.params]
+    param_set = set(self.arg.params)
+    params = [u for u in self.src[1].src if u in param_set]
     params += [p for p in self.arg.params if p.arg.slot not in {u.arg.slot for u in params}]
     return tuple(sorted(params, key=lambda p: p.arg.slot))
 

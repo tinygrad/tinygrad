@@ -166,6 +166,8 @@ def __getattr__(nm):
   dll=f"'tinymesa_cpu' if DEV.renderer == 'LVP' else 'tinymesa', {tinymesa_path}, emsg='pip install tinymesa==25.2.7.2'",
   prolog=["from tinygrad.helpers import DEV", "import gzip, base64, sysconfig, os"],
   epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
+    case "cmpbe":
+      return load("cmpbe", [], dll="'mali'")
     case "libclang":
       return load("libclang",
                   lambda: [f"{system('llvm-config-20 --includedir')}/clang-c/{s}.h" for s in ["Index", "CXString", "CXSourceLocation", "CXFile"]],

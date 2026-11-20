@@ -51,9 +51,11 @@ def unwrap_lane(v:UOp) -> tuple[UOp, int|None, int]: # look through views and a 
 def timeline(dev:str) -> UOp: return UOp.extern((2,), dtypes.u64, dev, "timeline")
 def timeline_value(dev:str) -> UOp: return timeline(dev).index(1).load()
 
-def make_program(prg:UOp, size:int, device:str) -> UOp:
+def make_program(prg:UOp, size:int, device:str, tag:str="", call_key:bytes=b"") -> UOp:
   slot = int.from_bytes(prg.key[:8], "little")
   if PROFILE: Compiled.profile_events.append(ProfileProgramEvent(device, prg.src[0].arg.function_name, prg.src[3].arg, None, slot, prg.key))
+  if tag: slot ^= int.from_bytes(tag.encode().ljust(8, b'\0')[:8], "little")
+  slot ^= int.from_bytes(call_key[:8], "little")
   return UOp.alloc((size,), dtypes.u8, slot, device=device, name="program")
 
 def make_submit(*cmds:UOp, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a submit calls its commands on a queue, after deps
@@ -484,11 +486,13 @@ def lift(call:UOp, root:bool=False) -> UOp: # callees are lifted already
   body, args = graph_rewrite(call.body, pm_lift_deps + pm_renumber_slots, init_ctx=CountCtx, walk=True, name="lift deps"), list(call.src[1:])
   nodes = body.toposort(gate=lambda u: u.op is not Ops.GETADDR)
   leaves = dedup([u for u in nodes if _needs_arg(u, root)] + [g for u in nodes for g in u.src if g.op is Ops.GETADDR])
-  slots = args + (new:=[u for u in leaves if u not in args])
-  body = body.substitute({u: _param_for(u, slots.index(u)) for u in leaves}, walk=True)
+  arg_set = set(args)
+  slots = args + (new:=[u for u in leaves if u not in arg_set])
+  slot_map = {u:i for i, u in enumerate(slots)}
+  body = body.substitute({u: _param_for(u, slot_map[u]) for u in leaves}, walk=True)
 
   # new args in the caller
-  own = {p: args[p.arg.slot].without_after for u in new for p in u.toposort() if p.op is Ops.PARAM and p.arg.name and not _needs_arg(p, root)}
+  own = {p: args[p.arg.slot].without_after for p in UOp.sink(*new).toposort() if p.op is Ops.PARAM and p.arg.name and not _needs_arg(p, root)}
   return call.replace(src=(body, *args, *UOp.sink(*new).substitute(own, walk=True).src))
 
 pm_lift = PatternMatcher([
