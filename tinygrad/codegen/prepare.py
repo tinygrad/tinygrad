@@ -267,17 +267,18 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 ])
 
 def channels_last(tsink:UOp) -> UOp:
-  # on the DSP a 4D tensor in memory (realized, or a buffer read) has its leading axis innermost (NCHW is NHWC, OIHW is IHWO): the channels a
-  # kernel makes are a contiguous vector in what it reads and writes
+  # on a device whose renderer is channels_last a 4D tensor in memory (realized, or a buffer read) has its leading axis innermost (NCHW is NHWC,
+  # OIHW is IHWO): the channels a kernel makes are a contiguous vector in what it reads and writes
+  from tinygrad.device import Device
   def last(u:UOp) -> UOp:
     x, arg = (u.src[0], u.arg) if u.op is Ops.STAGE else (u, BufferizeOpts(u.device, removable=False))
     perm = [i for i in range(x.ndim) if i != (a:=next(i for i,s in enumerate(x.shape) if s != 1))] + [a]
     return UOp(Ops.STAGE, src=(x.permute(tuple(perm)),), arg=arg).permute(tuple(perm.index(i) for i in range(x.ndim)))
   # (a buffer read, not a store's)
   dsts = {u.src[0] for u in tsink.toposort() if u.op is Ops.STORE}
-  if not (todo:={u for u in tsink.toposort() if u._shape is not None and len(u.shape) == 4 and any(s != 1 for s in u.shape) and
-                 str(u.device).startswith("DSP") and (u.op is Ops.STAGE or (u.op is Ops.RESHAPE and u.src[0].op in {Ops.PARAM, Ops.EXTERN}))} - dsts):
-    return tsink
+  def tensor(u:UOp) -> bool: return u.op is Ops.STAGE or (u.op is Ops.RESHAPE and u.src[0].op in {Ops.PARAM, Ops.EXTERN} and u not in dsts)
+  if not (todo:={u for u in tsink.toposort() if tensor(u) and len(u.shape) == 4 and any(s != 1 for s in u.shape) and isinstance(u.device, str)
+                 and any(r.channels_last for r in Device.get_class(u.device).renderers)}): return tsink
   # (rebuilt from the srcs up: a STAGE in a STAGE's src is changed too)
   new: dict[UOp, UOp] = {}
   for u in tsink.toposort():

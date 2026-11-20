@@ -32,7 +32,7 @@ class DSPRenderer(ClangRenderer):
   kernel_typedef = "__attribute__((noinline)) void"
   packed_args = False
   # (HVX v65 has no float)
-  vector_lanes, vector_floats = 128, False
+  vector_lanes, vector_floats, channels_last = 128, False, True
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
 

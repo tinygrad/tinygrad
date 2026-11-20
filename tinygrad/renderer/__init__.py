@@ -121,6 +121,8 @@ class Renderer:
   # a renderer with vectors: values stay vectors, a kernel upcasts one contiguous axis to this many lanes
   vector_lanes: int = 0
   vector_floats: bool = True
+  # 4D tensors in memory are channels last (NHWC)
+  channels_last: bool = False
 
   compiler: Compiler = Compiler()
 
