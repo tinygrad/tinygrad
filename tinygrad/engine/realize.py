@@ -175,7 +175,6 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
   if PROFILE:
     for d in {d for d, _, _, prof, *_ in info.kernels if prof and (slots[d], prof[0]) in Device[d].prof_ents}: Device[d].synchronize()
-  if info.kernels and Device[info.device[0]].serialize_hcq: Device[info.device[0]].activate_cached(info.kernels[0][3])
   ets = exec_kernel(ctx, call, ast, device=Device[info.device[0]].host)
   if not (ctx.wait or PROFILE): return ets
 

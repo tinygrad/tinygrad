@@ -366,9 +366,7 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
     run = list(grp)
     peer_groups = dedup([Device[d[0]].peer_group for _, d in run if d])
     batches = [[(c, d[0], queue_for(c)) for c, d in run if Device[d[0]].peer_group == pg] for pg in peer_groups]
-    batches = [single for batch in batches for single in ([[(c,d,q)] for c,d,q in batch] if batch and Device[batch[0][1]].serialize_hcq else [batch])]
-    if hcq: srcs += [_finalize_batch(BatchCtx(batch, profile),
-                                      batch is not batches[-1] and not Device[batch[0][1]].serialize_hcq) for batch in batches]
+    if hcq: srcs += [_finalize_batch(BatchCtx(batch, profile), batch is not batches[-1]) for batch in batches]
     else: srcs += [c for c, _ in run]
   return l.replace(src=tuple(srcs))
 
@@ -572,7 +570,7 @@ pm_resolve_link = PatternMatcher([
 
 # **** compile and link
 
-hcq_compile_cache:dict[tuple[UOp, bool, bool, tuple|None], UOp] = {} # eager templates: a buffer-free linear to its compiled form
+hcq_compile_cache:dict[tuple[UOp, bool, bool], UOp] = {} # eager templates: a buffer-free linear to its compiled form
 
 @rewrite_group(lambda linear,input_uops,profile,cache=False,ret=None: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=False) -> UOp:
@@ -582,11 +580,8 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
     replacements = {u:replace_buffer((input_uops,slots),u) for u in linear.toposort() if u.op is Ops.BUFFER}
     linear = linear.substitute(replacements,walk=True)
-  serialized = any(Device[d].serialize_hcq for u in input_uops or [] for d in to_tuple(u.arg.buffer.device))
-  if not serialized or any(c.op is Ops.CALL and c.body.op is Ops.STORE for c in linear.toposort()):
-    linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
-  runtime_key = tuple((u.arg.buffer,u.arg.buffer._buf) for u in input_uops or []) if serialized else None
-  key = (linear,profile,ALL2ALL >= 1,runtime_key)
+  linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
+  key = (linear,profile,ALL2ALL >= 1)
   if cache and input_uops is not None and (cached:=hcq_compile_cache.get(key)) is not None: return cached
   lin = graph_rewrite(sched_batches(linear, profile), pm_lower_call, walk=True, name="lower call")
   with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin, verbose=DEBUG>=3)

@@ -142,6 +142,7 @@ class MTSMC:
 class MTDev:
   def __init__(self, pci_dev:PCIDevice):
     self.pci_dev, self.devfmt = pci_dev, pci_dev.pcibus
+    self.launch_context:MTLaunch|None = None
     self.mmio = pci_dev.map_bar(MT_SYS_BAR, fmt='B')
     self.vram_size = pci_dev.bar_info(MT_DDR_BAR)[1]
     self.smc = MTSMC(self.mmio)
@@ -718,12 +719,9 @@ class MTLaunch(MTFirmware):
   pds_code_off:int
   pds_data_offsets:list[int]
   generated_image:MTKernelImage
-  _active:MTLaunch|None = None
-  _loaded:MTLaunch|None = None
-
   def __init__(self, dev:MTDev):
-    reuse = MTLaunch._active is not None and MTLaunch._active.dev is dev
-    active = MTLaunch._active if reuse else None
+    active = dev.launch_context
+    reuse = active is not None
     super().__init__(dev, prepare=not reuse, mmu=active.mmu if active is not None else None, v=active.v if active is not None else None)
     self.sv:Any = active.sv if active is not None else self.dev.pci_dev.map_bar(2, off=SUB_PA, size=INIT_SIZE, fmt='B')
     if not reuse: self.sv[:0x20000] = bytes(0x20000)
@@ -738,7 +736,6 @@ class MTLaunch(MTFirmware):
     self.ccb:MTCCB|None = None
     self.launch_id = 1
     self.generation = 1
-    MTLaunch._loaded = self
 
   def _map_generated(self) -> None: raise NotImplementedError
 
@@ -770,16 +767,10 @@ class MTLaunch(MTFirmware):
     struct.pack_into('<Q', packet, 0x08, FW_DEVVA + MT_TIMESTAMP_BUFFER_OFFSET)
     struct.pack_into('<Q', packet, 0xc0 + 0x88, FW_DEVVA + MT_RUNTIME_OFFSET - 8)
     struct.pack_into('<Q', packet, 0xc0 + 0x90, FW_DEVVA + MT_TIMESTAMP_OFFSET)
-    previous = MTLaunch._loaded
     for off in range(0,len(packet),0x1000):
-      chunk = bytes(packet[off:off+0x1000])
-      unchanged = previous is not None and previous.packet[off:off+len(chunk)] == chunk
-      if off == 0 and previous is not None:
-        unchanged = previous.packet[:0x38] == packet[:0x38] and previous.packet[0x40:0x1000] == packet[0x40:0x1000]
-      if not unchanged: self.sv[off:off+len(chunk)] = chunk
       if self.mmu.pages.get(SUBMISSION_VA+off) != SUB_PA+off: self.mmu.map(SUBMISSION_VA+off,SUB_PA+off,MT_PTE_READ_WRITE)
     self.packet = packet
-    if previous is None: self.v[MT_BOOT_CFG_OFFSET:MT_BOOT_CFG_OFFSET+16] = struct.pack('<QII', ROOT_BASE, 0xffffffff, 0)
+    self.v[MT_BOOT_CFG_OFFSET:MT_BOOT_CFG_OFFSET+16] = struct.pack('<QII', ROOT_BASE, 0xffffffff, 0)
 
   def _write_backing(self, off:int, data:bytes|bytearray) -> None:
     for pos in range(off,off+len(data),0x1000):
@@ -855,24 +846,19 @@ class MTLaunch(MTFirmware):
                         (0x40,0x80000000)]: self._write_backing(off+field,struct.pack('<I',value))
 
   def start(self, timeout:float=10.0) -> None:
-    if MTLaunch._active is not None and MTLaunch._active.dev is self.dev:
-      active = MTLaunch._active
+    if self.dev.launch_context is not None:
+      active = self.dev.launch_context
       assert active.ccb is not None
       self.v, self.layout, self.ccb = active.v, active.layout, active.ccb
       self.launch_id = active.launch_id + 1
       active.launch_id = self.launch_id
-      if MTLaunch._loaded is not self:
-        self._map_generated()
-        self._map_common()
-        self._prepare_packet()
-        MTLaunch._loaded = self
       struct.pack_into('<Q', self.packet, 0x38, self.launch_id)
       self.generation = active.generation + 1
       active.generation = self.generation
       self.upload_mmu()
     else:
       super().start(timeout)
-      MTLaunch._active = self
+      self.dev.launch_context = self
     self.mmu_dirty = False
     if self.ccb is None:
       self._write(mtregs.RGX_CR_MMU_FAULT_STATUS1,0)
@@ -1234,15 +1220,13 @@ class MTSubmission:
   """One encoded launch and the state needed to publish it.
 
   args is the runtime-patched argument page. write_map contains sparse generated
-  backing pages. mmu_pages is captured before shared launch state is replaced.
-  grid_deps is an optional symbolic grid/local-size patch.
+  backing pages. grid_deps is an optional symbolic grid/local-size patch.
   """
   launch: MTGeneratedLaunch
   args: UOp
   packet: bytes
   write_map: dict[int,bytes]
   generation: int
-  mmu_pages: dict[int,bytes]|None
   grid_deps: UOp|None
 
 class MTComputeQueue(HWQueue):
@@ -1251,6 +1235,7 @@ class MTComputeQueue(HWQueue):
     super().__init__(submit)
     self.submissions:list[MTSubmission] = []
     self.signals:list[tuple[UOp,UOp]] = []
+    self.timestamps:list[UOp] = []
 
   def encode(self) -> UOp:
     for u in self.lin.src:
@@ -1270,30 +1255,14 @@ class MTComputeQueue(HWQueue):
   def exec_barrier(self): pass
   def wait(self, signal:UOp, value:UOp): pass  # synchronous submissions make cross-queue waits implicit
   def signal(self, signal:UOp, value:UOp): self.signals.append((signal,value))
-  def timestamp(self, signal:UOp): pass  # timestamps are read synchronously by MTDevice
-
-  def snapshot_mmu(self, launch:MTLaunch) -> dict[int,bytes]:
-    pages:dict[int,bytes] = {}
-    for va in launch.mmu.pages:
-      if 0x8001000000 <= va < cast(MTAllocator,self.dev.allocator).next_va: continue
-      pci = (va >> mtmmu.ROGUE_MMUCTRL_VADDR_PC_INDEX_SHIFT) & (mtmmu.ROGUE_MMUCTRL_ENTRIES_PC_VALUE-1)
-      pdi = (va >> mtmmu.ROGUE_MMUCTRL_VADDR_PD_INDEX_SHIFT) & (mtmmu.ROGUE_MMUCTRL_ENTRIES_PD_VALUE-1)
-      pti = (va >> mtmmu.ROGUE_MMUCTRL_VADDR_PT_INDEX_SHIFT) & (mtmmu.ROGUE_MMUCTRL_ENTRIES_PT_VALUE-1)
-      if (pci,pdi) in launch.mmu.pt:
-        offs = {(pci*4)&~0xfff,(launch.mmu.pd[pci]-launch.mmu.root_pa+pdi*8)&~0xfff,
-                (launch.mmu.pt[pci,pdi]-launch.mmu.root_pa+pti*8)&~0xfff}
-        for off in offs: pages[off] = bytes(launch.mmu.root[off:off+0x1000])
-    return pages
+  def timestamp(self, signal:UOp): self.timestamps.append(signal)
 
   def exec(self, call:UOp, prg:UOp):
-    if self.submissions and self.submissions[-1].mmu_pages is None:
-      self.submissions[-1].mmu_pages = self.snapshot_mmu(self.submissions[-1].launch)
     obj = TinyELF.from_program(prg)
     global_size = cast(tuple[int,int,int],tuple(x if isinstance(x,int) else 1 for x in prg.arg.global_size))
     local_size = cast(tuple[int,int,int],tuple(x if isinstance(x,int) else 1 for x in prg.arg.local_size))
     launch = self.dev.get_launch(obj,global_size,local_size)
     self.dev.activate_launch(launch,obj,global_size,local_size)
-    if obj.profile_key is not None: self.dev.cached_launches[obj.profile_key] = (launch,obj,global_size,local_size)
     grid_deps = None
     if any(not isinstance(x,int) for x in (*prg.arg.global_size,*prg.arg.local_size)):
       grid_rows = [(off,(prg.arg.global_size[i]-1).cast(dtypes.u32)) for i,off in enumerate(MT_GRID_GLOBAL_OFFSETS)
@@ -1309,22 +1278,19 @@ class MTComputeQueue(HWQueue):
     rows = [(MT_ARGS_USER_OFFSET+i*8,arg.cast(dtypes.u64)) for i,arg in enumerate(get_call_kernel_args(call,prg,self.devs))]
     self.submissions.append(MTSubmission(launch=launch,args=patch(args,rows,launch.write_map.get(const_off,bytes(0x1000))),
                                          packet=bytes(launch.packet),write_map=dict(launch.write_map),generation=launch.generation,
-                                         mmu_pages=None,grid_deps=grid_deps))
+                                         grid_deps=grid_deps))
 
   def submit(self, cmdbuf:UOp) -> UOp:
-    if len(self.submissions) > 1 and self.submissions[-1].mmu_pages is None:
-      self.submissions[-1].mmu_pages = self.snapshot_mmu(self.submissions[-1].launch)
+    assert len(self.timestamps) in (0,2*len(self.submissions))
     ops: list[Any] = []
     link = usb_link(self.dev.device)
     def add(op):
       nonlocal link
       ops.append(op)
       link = link.after(op)
-    root_addr = self.dev.mt.pci_dev.bar_info(2)[0]+ROOT_BASE
     for i,submission in enumerate(self.submissions):
-      launch,deps,packet,write_map,generation,mmu_pages,grid_deps = (submission.launch,submission.args,submission.packet,
-                                                                      submission.write_map,submission.generation,submission.mmu_pages,
-                                                                      submission.grid_deps)
+      launch,deps,packet,write_map,generation,grid_deps = (submission.launch,submission.args,submission.packet,
+                                                           submission.write_map,submission.generation,submission.grid_deps)
       ccb = launch.ccb
       assert ccb is not None
       def write(addr:int|UOp, blob:bytes, rows=()):
@@ -1337,25 +1303,13 @@ class MTComputeQueue(HWQueue):
                             usb_stack(dtypes.uint64,addr,len(blob)//4).index(0),12,MT_USB_TIMEOUT_MS)
           op = usb_bulk(link.after(header),MT_USB_EP_OUT,data.index(0),len(blob))
         add(op)
-      previous = self.submissions[i-1].write_map if i else self.dev.uploaded_write_map
-      changed = sorted((off,data) for off,data in write_map.items() if off != launch.backing_offsets[ARGS_VA] and
-                       (previous.get(off) != data))
       chunks:list[tuple[int,bytearray]] = []
-      for off,data in changed:
+      for off,data in sorted(write_map.items()):
+        if off == launch.backing_offsets[ARGS_VA]: continue
         if chunks and off == chunks[-1][0]+len(chunks[-1][1]): chunks[-1][1].extend(data)
         else: chunks.append((off,bytearray(data)))
       for off,chunk in chunks: write(launch.backing.addr+off,bytes(chunk))
-      if len(self.submissions) > 1:
-        if i == 0: write(launch.sv.addr,packet)
-        else:
-          previous_packet = self.submissions[i-1].packet
-          for off in range(0,len(packet),0x1000):
-            packet_chunk = packet[off:off+0x1000]
-            if previous_packet[off:off+len(packet_chunk)] != packet_chunk: write(launch.sv.addr+off,packet_chunk)
-        previous_mmu = self.submissions[i-1].mmu_pages if i else self.submissions[-1].mmu_pages
-        assert mmu_pages is not None and previous_mmu is not None
-        for off,data in mmu_pages.items():
-          if previous_mmu.get(off) != data: write(root_addr+off,data)
+      write(launch.sv.addr,packet)
       idx = link.index(2).load()
       seq = link.index(3).load()
       token = (MT_TOKEN_BASE+seq).cast(dtypes.u64)
@@ -1377,7 +1331,19 @@ class MTComputeQueue(HWQueue):
       add(usb_poke(link,launch.v.addr+ccb.queue_off+mt_off(mtfw.MTFW_CCB_QUEUE,'respCcbCtrl')+mt_off(mtfw.MTFW_RING_CTRL,'rdIdx'),next_wr))
       add(link.index(2).store(next_wr.cast(dtypes.u64)))
       add(link.index(3).store(seq+1))
-      self.dev.uploaded_write_map = write_map
+      if self.timestamps:
+        # The firmware exposes a start timestamp and a duration. Keep the duration in the end slot until synchronize().
+        start_slot,end_slot = self.timestamps[2*i:2*i+2]
+        stamp = UOp.alloc((1,),dtypes.u64,device='CPU')
+        stamp_read = usb_stream(link,UOp.const(launch.v.addr+MT_TIMESTAMP_OFFSET,dtypes.u64),stamp,UOp.const(8,dtypes.int),False)
+        add(stamp_read)
+        runtime = UOp.alloc((1,),dtypes.u32,device='CPU')
+        runtime_read = usb_stream(link,UOp.const(launch.v.addr+MT_RUNTIME_OFFSET,dtypes.u64),runtime,UOp.const(4,dtypes.int),False)
+        add(runtime_read)
+        start_addr = start_slot.after(stamp_read).getaddr('CPU')+8
+        end_addr = end_slot.after(runtime_read).getaddr('CPU')+8
+        add(ccall(libc.memcpy,start_addr,stamp.after(stamp_read).getaddr('CPU'),8).sink())
+        add(ccall(libc.memcpy,end_addr,runtime.after(runtime_read).getaddr('CPU'),4).sink())
     for signal,value in self.signals: add(signal.index(0).store(value))  # type: ignore[assignment]
     return UOp.sink(UOp.barrier(*self.deps,*ops))
 
@@ -1389,18 +1355,15 @@ Compiled.pm_encode += PatternMatcher([
 class MTDevice(Compiled):
   renderers = [MUSARenderer]
   timestamp_divider = 25
-  serialize_hcq = True
   enqueue_copies = False
   def __init__(self, device:str=''):
     dev_id = int(device.split(':')[1]) if ':' in device else 0
     self.mt = MTDev.open_usb(dev_id)
-    self.launch_order:list[MTGeneratedLaunch] = []
+    self.launch_order:list[tuple[bytes,tuple[int,int,int],tuple[int,int,int]]] = []
     self.launch_cache:dict[tuple[bytes,tuple[int,int,int],tuple[int,int,int]],MTGeneratedLaunch] = {}
     self.buffer_maps:dict[int,tuple[int,int]] = {}
     self.spill_buffer:tuple[int,BufferStorage]|None = None
     self.current_launch:MTGeneratedLaunch|None = None
-    self.cached_launches:dict[bytes,tuple[MTGeneratedLaunch,TinyELF,tuple[int,int,int],tuple[int,int,int]]] = {}
-    self.uploaded_write_map:dict[int,bytes] = {}
     self.started = False
     self.views:dict[int,tuple[Any,MTBufferMeta]] = {}
     super().__init__(device, MTAllocator(self), None, arch='mp_21')
@@ -1413,20 +1376,15 @@ class MTDevice(Compiled):
   def has_copy_queue(self) -> bool: return False
 
   def get_launch(self, obj:TinyELF, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1)) -> MTGeneratedLaunch:
-    key = (obj.lib, global_size, local_size)
-    if key not in self.launch_cache:
+    key = (obj.lib,global_size,local_size)
+    if (launch:=self.launch_cache.get(key)) is None:
       launch = MTGeneratedLaunch(self.mt)
       launch.kernel_lib = b''
       self.launch_cache[key] = launch
-      self.launch_order.append(launch)
-      if len(self.launch_order) > 512:
-        old = self.launch_order.pop(0)
-        for launch_key,cached_launch in list(self.launch_cache.items()):
-          if cached_launch is old: del self.launch_cache[launch_key]
-        for profile_key,cached in list(self.cached_launches.items()):
-          if cached[0] is old: del self.cached_launches[profile_key]
+      self.launch_order.append(key)
+      if len(self.launch_order) > 512: del self.launch_cache[self.launch_order.pop(0)]
       for va,(pa,size) in self.buffer_maps.items(): launch.map_buffer(va,pa,size)
-    return self.launch_cache[key]
+    return launch
 
   def map_buffer(self, va:int, pa:int, size:int):
     self.buffer_maps[va] = (pa,size)
@@ -1440,25 +1398,15 @@ class MTDevice(Compiled):
             launch._read(mtregs.RGX_CR_EVENT_STATUS,4),launch._read(mtregs.RGX_CR_CDM_CONTEXT_STORE_STATUS))
 
   def synchronize(self, timeout:int|None=None):
-    if self.prof_ents and self.current_launch is not None:
-      timestamp = struct.unpack('<Q',self.current_launch.v[MT_TIMESTAMP_OFFSET:MT_TIMESTAMP_OFFSET+8])[0]
-      run_time = struct.unpack('<I',self.current_launch.v[MT_RUNTIME_OFFSET:MT_RUNTIME_OFFSET+4])[0]
-      for (buf,_), ent in self.prof_ents.items():
-        sigs = buf.host.view(fmt='Q')
-        sigs[ent.st_id], sigs[ent.en_id] = timestamp, timestamp + run_time
+    # MTComputeQueue stores start and duration separately; generic profiling expects start and end timestamps.
+    for (buf,_),ent in self.prof_ents.items():
+      sigs = buf.host.view(fmt='Q')
+      sigs[ent.en_id] = sigs[ent.st_id] + (sigs[ent.en_id]&0xffffffff)
     super().synchronize(timeout)
     host_buf = Compiled.link_bufs[to_name(self.device,'usb_host')]
     assert isinstance(host_buf,Buffer)
     host = host_buf.host.view(fmt='q')
     if host[5]: raise RuntimeError(f'MT USB error: {host[5]}, fault={self._fault()}')
-
-  def activate_cached(self, profile_key:bytes|None) -> None:
-    if profile_key is not None and (cached:=self.cached_launches.get(profile_key)) is not None:
-      launch,obj,global_size,local_size = cached
-      if self.current_launch is not launch or MTLaunch._loaded is not launch:
-        self.activate_launch(launch,obj,global_size,local_size)
-        for off,data in launch.write_map.items(): launch.backing[off:off+len(data)] = data
-        launch.sv[:0x1000] = launch.packet[:0x1000]
 
   def hcq_cacheable(self, linear:UOp) -> bool:
     for call in linear.toposort():
@@ -1474,7 +1422,7 @@ class MTDevice(Compiled):
 
   def activate_launch(self, launch:MTGeneratedLaunch, obj:TinyELF, global_size:tuple[int,int,int], local_size:tuple[int,int,int]) -> None:
     image = MTKernelImage.from_elf(obj.lib)
-    unchanged = MTLaunch._loaded is launch and launch.kernel_lib == obj.lib
+    unchanged = launch.kernel_lib == obj.lib
     self.ensure_started(launch)
     if not unchanged:
       launch.set_generated(image)

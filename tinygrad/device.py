@@ -356,7 +356,6 @@ class Compiled:
     # profiling
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
 
-  serialize_hcq = False
   enqueue_copies = True
 
   @property
