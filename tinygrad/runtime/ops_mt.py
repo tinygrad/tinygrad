@@ -142,7 +142,7 @@ class MTSMC:
 class MTDev:
   def __init__(self, pci_dev:PCIDevice):
     self.pci_dev, self.devfmt = pci_dev, pci_dev.pcibus
-    self.launch_context:MTLaunch|None = None
+    self.launch_context:MTFirmwareContext|None = None
     self.mmio = pci_dev.map_bar(MT_SYS_BAR, fmt='B')
     self.vram_size = pci_dev.bar_info(MT_DDR_BAR)[1]
     self.smc = MTSMC(self.mmio)
@@ -465,17 +465,18 @@ MT_TIMESTAMP_ADDR = 0x8000438200
 MT_FW_CSW_BUFFER = 0x6800000000
 MT_CDM_REGION_OFFSET, MT_CDM_REGION_SIZE = 0xa0, 0x198
 MT_SUBMISSION_SIZE = 0x19250
-# Generation-1 context bytes following MTFW_KICK_HEAD, recovered from MUSA's SubmissionKickCreate/CDMStreamWrite path.
-# These trailing context records have no public struct definition; the kick head itself is generated from its public struct.
-MT_GEN1_KICK_TAIL = bytes.fromhex(
-  '0000000000000000000000000000000000000000000000000000000000000000'
-  '00000000000000000000000000000000000000000000000000000000ff000000'
-  '000000000000000000000000000000000000000000000000f001000010000000'
-  '0200000000000000000000000000000000000000000000000000000000000000'
-  '0000000000000000000000000000000000000000000000000000000000000000'
-  '00000000000000000000000000000000000084e0810000000003420080000000'
-  '80034200800000002c00000000000000008342008000000000c0207820000000'
-  '0002000000000000')
+def mt_words(size:int, qwords:dict[int,int], dwords:dict[int,int]|None=None) -> bytes:
+  data = bytearray(size)
+  for off,value in qwords.items(): struct.pack_into('<Q',data,off,value)
+  for off,value in (dwords or {}).items(): struct.pack_into('<I',data,off,value)
+  return bytes(data)
+
+# Generation-1 context records following MTFW_KICK_HEAD, recovered from MUSA's SubmissionKickCreate/CDMStreamWrite path.
+# Only these nonzero fields are defined by the vendor stream; the rest is reserved zero padding.
+MT_GEN1_KICK_TAIL = mt_words(0xe8,{
+  0x38:0xff00000000,0x58:0x10000001f0,0x60:0x2,0xb0:0x81e0840000,0xb8:0x8000420300,
+  0xc0:0x8000420380,0xc8:0x2c,0xd0:0x8000428300,0xd8:0x207820c000,0xe0:0x200,
+})
 def build_compute_ctx() -> bytes:
   ctx = mtfw.MTFW_COMPUTE_CTX_REGS()
   ctx.cdmContextPds0,ctx.cdmContextPds1 = 0xe140000040010081,0x3606c1400002
@@ -704,9 +705,23 @@ class MTCCB:
   item_off:int
   queue_off:int
 
+@dataclasses.dataclass
+class MTFirmwareContext:
+  """Booted firmware state and fixed ABI allocations shared by all launches on one device."""
+  v:MMIOInterface
+  mmu:MTMMU4
+  layout:MTFirmwareLayout
+  sv:MMIOInterface
+  backing:MMIOInterface
+  ccb:MTCCB|None = None
+  launch_id:int = 1
+  generation:int = 1
+  started:bool = False
+
 # **** launch ****
 
 BACKING_PA, BACKING_SIZE = 0x40000000,mtdev.MTGPU_RESERVED_MEM_SIZE
+MT_LAUNCH_CACHE_SIZE = 512
 
 class MTLaunch(MTFirmware):
   write_map:dict[int,bytes]
@@ -719,17 +734,21 @@ class MTLaunch(MTFirmware):
   pds_code_off:int
   pds_data_offsets:list[int]
   generated_image:MTKernelImage
+  ctx:MTFirmwareContext
   def __init__(self, dev:MTDev):
-    active = dev.launch_context
-    reuse = active is not None
-    super().__init__(dev, prepare=not reuse, mmu=active.mmu if active is not None else None, v=active.v if active is not None else None)
-    self.sv:Any = active.sv if active is not None else self.dev.pci_dev.map_bar(2, off=SUB_PA, size=INIT_SIZE, fmt='B')
-    if not reuse: self.sv[:0x20000] = bytes(0x20000)
+    ctx = dev.launch_context
+    super().__init__(dev, prepare=ctx is None, mmu=ctx.mmu if ctx is not None else None, v=ctx.v if ctx is not None else None)
+    self.sv:MMIOInterface = ctx.sv if ctx is not None else self.dev.pci_dev.map_bar(2,off=SUB_PA,size=INIT_SIZE,fmt='B')
+    if ctx is None: self.sv[:0x20000] = bytes(0x20000)
     # The firmware reserves a fixed output/status page even when user output VAs differ.
     self.zero_pa, self.status_pa = SUB_PA + 0x1000, SUB_PA + 0x3000
     self.mmu_dirty = True
     self.backing_pa = BACKING_PA
-    self.backing:Any = active.backing if active is not None else self.dev.pci_dev.map_bar(2, off=self.backing_pa, size=BACKING_SIZE, fmt='B')
+    self.backing:MMIOInterface = ctx.backing if ctx is not None else self.dev.pci_dev.map_bar(2,off=self.backing_pa,size=BACKING_SIZE,fmt='B')
+    if ctx is None:
+      ctx = MTFirmwareContext(self.v,self.mmu,self.layout,self.sv,self.backing)
+      dev.launch_context = ctx
+    self.ctx = ctx
     self._map_generated()
     self._map_common()
     self._prepare_packet()
@@ -846,19 +865,18 @@ class MTLaunch(MTFirmware):
                         (0x40,0x80000000)]: self._write_backing(off+field,struct.pack('<I',value))
 
   def start(self, timeout:float=10.0) -> None:
-    if self.dev.launch_context is not None:
-      active = self.dev.launch_context
-      assert active.ccb is not None
-      self.v, self.layout, self.ccb = active.v, active.layout, active.ccb
-      self.launch_id = active.launch_id + 1
-      active.launch_id = self.launch_id
+    ctx = self.ctx
+    if ctx.started:
+      assert ctx.ccb is not None
+      self.v, self.layout, self.ccb = ctx.v, ctx.layout, ctx.ccb
+      self.launch_id = ctx.launch_id + 1
+      ctx.launch_id = self.launch_id
       struct.pack_into('<Q', self.packet, 0x38, self.launch_id)
-      self.generation = active.generation + 1
-      active.generation = self.generation
+      self.generation = ctx.generation + 1
+      ctx.generation = self.generation
       self.upload_mmu()
     else:
       super().start(timeout)
-      self.dev.launch_context = self
     self.mmu_dirty = False
     if self.ccb is None:
       self._write(mtregs.RGX_CR_MMU_FAULT_STATUS1,0)
@@ -868,6 +886,8 @@ class MTLaunch(MTFirmware):
       self._write(mtregs.RGX_CR_MMU_FAULT_STATUS2_META,0)
       self.ccb = MTCCB(self.layout.item + mtfw.MTFW_CCB_TYPE_CDM * 4096 * MT_CCB_ITEM_SIZE,
                        self.layout.ccb + mtfw.MTFW_CCB_TYPE_CDM * mtfw.MTFW_CCB_QUEUE.SIZE)
+      ctx.ccb = self.ccb
+    ctx.launch_id,ctx.generation,ctx.started = self.launch_id,max(ctx.generation,self.generation),True
 
 # **** generated ****
 
@@ -927,10 +947,10 @@ MT_GEN1_TASK_QWORDS = {
 MT_GEN1_TASK_DWORDS = {0x184:1,0x1a8:2,0x210:0x2c,0x228:0x200,0x500:4}
 
 class MTGeneratedLaunch(MTLaunch):
-  _text_span = 0
+  text_span = 0  # default only; assignments are per launch
 
   def generate_task_page(self) -> None:
-    page = bytearray(MT_PAGE_SIZE)
+    page = bytearray(mt_words(MT_PAGE_SIZE,MT_GEN1_TASK_QWORDS,MT_GEN1_TASK_DWORDS))
     head = mtfw.MTFW_SUBMISSION_HEAD()
     head.fwCswBufer,head.submissionCmd = 0x8000404500,mtfw.MTFW_SUBMISSION_CMD_GPU_CDM
     head.retryCount,head.subRegionDescStartOffset,head.subRegionDescNums = 0xffffffff,mtfw.MTFW_SUBMISSION_HEAD.SIZE,2
@@ -940,8 +960,6 @@ class MTGeneratedLaunch(MTLaunch):
     page[0x58:0x58+cdm.SIZE] = bytes(cdm)
     page[0x70:0x70+error.SIZE] = bytes(error)
     page[0x88:0x88+mtfw.MTFW_KICK_HEAD.SIZE] = bytes(build_kick_head())
-    for field,value in MT_GEN1_TASK_QWORDS.items(): struct.pack_into('<Q',page,field,value)
-    for field,value in MT_GEN1_TASK_DWORDS.items(): struct.pack_into('<I',page,field,value)
     ctx = build_compute_ctx()
     page[0x300:0x300+len(ctx)] = ctx
     self._write_backing(self.backing_offsets[TASK_VA],page)
@@ -1067,9 +1085,9 @@ class MTGeneratedLaunch(MTLaunch):
     self._write_backing(resource_off+self.resource_text_field,struct.pack('<I',self.text_offset))
     temp = ((k['.temp_reg_count']*4+7)&~7) | self.resource_temp_flags
     self._write_backing(resource_off+self.resource_temp_offset,struct.pack('<I',temp))
-    MTGeneratedLaunch._text_span = max(MTGeneratedLaunch._text_span,len(image.text))
+    self.text_span = max(self.text_span,len(image.text))
     text_off = self.backing_offsets[self.text_va]+self.text_offset
-    self._write_backing(text_off,bytes((MTGeneratedLaunch._text_span+0xfff)&~0xfff))
+    self._write_backing(text_off,bytes((self.text_span+0xfff)&~0xfff))
     self.load_kernel(image)
 
 # **** compiler ****
@@ -1219,8 +1237,9 @@ def mt_poll(link:UOp, addr:UOp, target:UOp) -> UOp:
 class MTSubmission:
   """One encoded launch and the state needed to publish it.
 
-  args is the runtime-patched argument page. write_map contains sparse generated
-  backing pages. grid_deps is an optional symbolic grid/local-size patch.
+  Submissions are drained in order, so the fixed backing can be reused safely.
+  Each instance owns its captured generated pages, packet, runtime argument page,
+  and optional symbolic grid/local-size patch until it is published.
   """
   launch: MTGeneratedLaunch
   args: UOp
@@ -1332,7 +1351,6 @@ class MTComputeQueue(HWQueue):
       add(link.index(2).store(next_wr.cast(dtypes.u64)))
       add(link.index(3).store(seq+1))
       if self.timestamps:
-        # The firmware exposes a start timestamp and a duration. Keep the duration in the end slot until synchronize().
         start_slot,end_slot = self.timestamps[2*i:2*i+2]
         stamp = UOp.alloc((1,),dtypes.u64,device='CPU')
         stamp_read = usb_stream(link,UOp.const(launch.v.addr+MT_TIMESTAMP_OFFSET,dtypes.u64),stamp,UOp.const(8,dtypes.int),False)
@@ -1340,10 +1358,15 @@ class MTComputeQueue(HWQueue):
         runtime = UOp.alloc((1,),dtypes.u32,device='CPU')
         runtime_read = usb_stream(link,UOp.const(launch.v.addr+MT_RUNTIME_OFFSET,dtypes.u64),runtime,UOp.const(4,dtypes.int),False)
         add(runtime_read)
+        start = stamp.after(stamp_read).index(0).load()
+        end = start + runtime.after(runtime_read).index(0).load().cast(dtypes.u64)
+        end_buf = UOp.alloc((1,),dtypes.u64,device='CPU')
+        end_write = end_buf.after(runtime_read).index(0).store(end)
+        add(end_write)
         start_addr = start_slot.after(stamp_read).getaddr('CPU')+8
-        end_addr = end_slot.after(runtime_read).getaddr('CPU')+8
+        end_addr = end_slot.after(end_write).getaddr('CPU')+8
         add(ccall(libc.memcpy,start_addr,stamp.after(stamp_read).getaddr('CPU'),8).sink())
-        add(ccall(libc.memcpy,end_addr,runtime.after(runtime_read).getaddr('CPU'),4).sink())
+        add(ccall(libc.memcpy,end_addr,end_buf.after(end_write).getaddr('CPU'),8).sink())
     for signal,value in self.signals: add(signal.index(0).store(value))  # type: ignore[assignment]
     return UOp.sink(UOp.barrier(*self.deps,*ops))
 
@@ -1382,7 +1405,7 @@ class MTDevice(Compiled):
       launch.kernel_lib = b''
       self.launch_cache[key] = launch
       self.launch_order.append(key)
-      if len(self.launch_order) > 512: del self.launch_cache[self.launch_order.pop(0)]
+      if len(self.launch_order) > MT_LAUNCH_CACHE_SIZE: del self.launch_cache[self.launch_order.pop(0)]
       for va,(pa,size) in self.buffer_maps.items(): launch.map_buffer(va,pa,size)
     return launch
 
@@ -1398,10 +1421,6 @@ class MTDevice(Compiled):
             launch._read(mtregs.RGX_CR_EVENT_STATUS,4),launch._read(mtregs.RGX_CR_CDM_CONTEXT_STORE_STATUS))
 
   def synchronize(self, timeout:int|None=None):
-    # MTComputeQueue stores start and duration separately; generic profiling expects start and end timestamps.
-    for (buf,_),ent in self.prof_ents.items():
-      sigs = buf.host.view(fmt='Q')
-      sigs[ent.en_id] = sigs[ent.st_id] + (sigs[ent.en_id]&0xffffffff)
     super().synchronize(timeout)
     host_buf = Compiled.link_bufs[to_name(self.device,'usb_host')]
     assert isinstance(host_buf,Buffer)
@@ -1416,6 +1435,7 @@ class MTDevice(Compiled):
 
   def ensure_started(self, launch:MTGeneratedLaunch):
     if self.current_launch is not launch:
+      if self.current_launch is not None: launch.ctx.generation = max(launch.ctx.generation,self.current_launch.generation)
       launch.start(timeout=float(os.environ.get('MT_BOOT_TIMEOUT','10')))
       self.current_launch = launch
       self.started = True
