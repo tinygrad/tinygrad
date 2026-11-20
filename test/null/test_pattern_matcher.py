@@ -2,6 +2,7 @@ import unittest, itertools
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, GroupOp # noqa: F401
 from tinygrad.uop.ops import PatternMatcher, UPat
+from tinygrad.uop.upat import UPatCompileError
 
 class TestPatternMatcher(unittest.TestCase):
   def test_simple_match(self):
@@ -201,6 +202,38 @@ class TestPatternMatcher(unittest.TestCase):
         # A name on the parent is not a capture inside the repeat.
         unnamed = PatternMatcher([(UPat(Ops.SINK, src=UPat(), name="s"), lambda s: True)], compiled=compiled)
         self.assertTrue(unnamed.rewrite(empty))
+
+  def test_empty_typed_repeat(self):
+    p = UPat(Ops.SINK, src=UPat(Ops.CONST))
+    for compiled in (False, True):
+      for pat, u in ((p, UOp.sink()), (p.sink(), UOp.sink().sink())):
+        self.assertTrue(PatternMatcher([(pat, lambda: True)], compiled=compiled).rewrite(u))
+
+  def test_repeated_alternative_capture_rejected(self):
+    add = UPat(Ops.ADD, src=[UPat.var("x"), UPat(Ops.CONST)])
+    pm = PatternMatcher([(UPat(Ops.SINK, src=add), lambda x: x)], compiled=True)
+    with self.assertRaisesRegex(UPatCompileError, "captures inside repeated alternatives"):
+      pm.rewrite((UOp.const(1) + UOp.const(2)).sink())
+
+  def test_any_wildcard(self):
+    p = UPat.any(UPat.var("x"), UPat()).sink(name="s")
+    for compiled in (False, True):
+      pm = PatternMatcher([(p, lambda s,x=None: s.src[0] if x is None else None)], compiled=compiled)
+      self.assertIs(pm.rewrite(UOp.const(1).sink()), UOp.const(1))
+
+  def test_named_any(self):
+    p = UPat.any(UPat(Ops.CONST, name="inner"), UPat(Ops.CAST)).named("x").sink()
+    a = UOp.const(1)
+    for compiled in (False, True):
+      pm = PatternMatcher([(p, lambda x,inner=None: inner if x.op is Ops.CONST else x)], compiled=compiled)
+      self.assertIs(pm.rewrite(a.sink()), a)
+      self.assertIs(pm.rewrite((b:=a.cast(dtypes.int)).sink()), b)
+      self.assertIsNone(pm.rewrite((a+a).sink()))
+
+  def test_empty_dtype_set(self):
+    for compiled in (False, True):
+      pm = PatternMatcher([(UPat(Ops.SINK, dtype=set()), lambda: True)], compiled=compiled)
+      self.assertIsNone(pm.rewrite(UOp.sink()))
 
   def test_allow_len(self):
     matcher = PatternMatcher([(UPat(Ops.MULACC, name="x", src=(UPat(Ops.CONST),), allow_any_len=True), lambda x: x.sink())])

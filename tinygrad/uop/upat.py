@@ -13,13 +13,10 @@ def flatands(x:UOp) -> list[UOp]: return [x] if x.op is not Ops.AND else [y for 
 #           PYLITERAL (Python literal for NATIVE operands), AND/OR (clause combininers).
 
 def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
-  if self.is_any:
-    assert len(self.src) == 1
-    return UOp(Ops.AND, src=(UOp(Ops.OR, src=tuple(_get_clause(s, base, depth) for s in self.src[0])),))
   # build the and_clause for acceptance
   and_clause:list[UOp] = []
   if self.op is not None:
-    if len(self.op) > 1:
+    if len(self.op) != 1:
       and_clause.append(UOp.native("{0}.op in {1}", fmt=True).call(base, UOp(Ops.PYLITERAL, arg=frozenset(self.op))))
     else: and_clause.append(UOp.native("{0}.op is {1}", fmt=True).call(base, UOp(Ops.PYLITERAL, arg=self.op[0])))
   if self.arg is not None:
@@ -29,11 +26,13 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
     and_clause.append(UOp.native("len({0}.src)"+(" == " if self.strict_length else " >= ")+str(self.required_len), fmt=True).call(base))
   if self.name is not None: and_clause.append(UOp(Ops.STORE, src=(UOp.native(self.name, fmt=True).call(inline=True), base)))
   if self.match_dtype is not None:
-    if len(self.match_dtype) > 1:
+    if len(self.match_dtype) != 1:
       and_clause.append(UOp.native("{0}.dtype in {1}", fmt=True).call(base, UOp(Ops.PYLITERAL, arg=frozenset(self.match_dtype))))
     else:
       and_clause.append(UOp.native("{0}.dtype is {1}", fmt=True).call(base, UOp(Ops.PYLITERAL, arg=self.match_dtype[0])))
-  if self.src is not None:
+  if self.is_any:
+    and_clause.append(UOp(Ops.OR, src=tuple(_get_clause(s, base, depth) for s in self.src[0])))
+  elif self.src is not None:
     # single match
     if len(self.src) == 1 and isinstance(self.src[0], tuple):
       and_clause += [_get_clause(s, base.index(i), depth) for i,s in enumerate(self.src[0])]
@@ -43,6 +42,9 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
       match = _get_clause(next(self.src[0]), it, depth+1)
       # lift named binds out of the repeat: they bind the first src, and every element must be identical to it
       stores, pred = partition(flatands(match), lambda x: x.op is Ops.STORE)
+      # Alternative captures can come from different paths per source. There is no single first-source path to lift.
+      if any(x.op is Ops.OR and x.op_in_backward_slice_with_self(Ops.STORE) for x in pred):
+        raise UPatCompileError(f"can't compile captures inside repeated alternatives at {self.location[0]}:{self.location[1]}")
       for st in stores:
         first = st.src[1].substitute({it: base.index(0)})
         pred.append(UOp.native("{0} is {1}", fmt=True).call(st.src[1], first))
@@ -54,7 +56,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
       fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
       and_clause.append(UOp(Ops.OR, src=tuple(fork_cond)))
     else: raise RuntimeError("broken")
-  return UOp(Ops.AND, src=tuple(and_clause)) if and_clause else UOp.native("True", fmt=True).call(inline=True)
+  return UOp(Ops.AND, src=tuple(and_clause))
 
 # *** pattern matcher ***
 
@@ -118,10 +120,10 @@ pm_renderer = PatternMatcher([
 
   # AND/OR of inline NATIVE fragments becomes a single NATIVE
   (UPat(Ops.AND, src=UPat(Ops.CALL), name="x"), lambda x:
-   UOp.native("(" + ' and '.join(y.body.arg.code for y in x.src) + ")", fmt=True).call(inline=True)
+   UOp.native("(" + (' and '.join(y.body.arg.code for y in x.src) or 'True') + ")", fmt=True).call(inline=True)
    if all(y.arg.inline for y in x.src) else None),
   (UPat(Ops.OR, src=UPat(Ops.CALL), name="x"), lambda x:
-   UOp.native("(" + ' or '.join(y.body.arg.code for y in x.src) + ")", fmt=True).call(inline=True)
+   UOp.native("(" + (' or '.join(y.body.arg.code for y in x.src) or 'False') + ")", fmt=True).call(inline=True)
    if all(y.arg.inline for y in x.src) else None),
 
   (UPat(Ops.CALL, name="x"), lambda x: UOp.native(x.body.arg.code.format(*[y.body.arg.code for y in x.src[1:]]), fmt=True).call(inline=True)
