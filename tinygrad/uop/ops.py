@@ -1436,14 +1436,12 @@ class UPat(RandMixin):
     elif isinstance(src, UPat): self.src = [itertools.repeat(src)]
 
     self.strict_length = not (is_any or allow_any_len or isinstance(src, UPat) or src is None)
-    self._has_capture: bool = name is not None or (src._has_capture if isinstance(src, UPat) else any(s._has_capture for s in src or ()))
-    # A repeat with captures needs a first source to bind them from.
-    self.required_len: int = int(src._has_capture) if isinstance(src, UPat) else (0 if is_any else len(src or ()))
+    self.required_len: int = 0 if is_any or isinstance(src, UPat) or src is None else len(src)
     self.location = location or get_location()
 
     if custom_early_reject is not None: self.early_reject = custom_early_reject
     else:
-      upat_match = [] if not self.required_len else ([src] if isinstance(src, UPat) else self.src[0])
+      upat_match = [src] if isinstance(src, UPat) else ([] if src is None else self.src[0])
       self.early_reject = {pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1}
 
   @property

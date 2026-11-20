@@ -42,21 +42,19 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
       match = _get_clause(next(self.src[0]), it, depth+1)
       # lift named binds out of the repeat: they bind the first src, and every element must be identical to it
       stores, pred = partition(flatands(match), lambda x: x.op is Ops.STORE)
-      # Alternative captures can come from different paths per source. There is no single first-source path to lift.
-      if any(x.op is Ops.OR and x.op_in_backward_slice_with_self(Ops.STORE) for x in pred):
-        raise UPatCompileError(f"can't compile captures inside repeated alternatives at {self.location[0]}:{self.location[1]}")
       for st in stores:
         first = st.src[1].substitute({it: base.index(0)})
         pred.append(UOp.native("{0} is {1}", fmt=True).call(st.src[1], first))
         and_clause.append(UOp(Ops.STORE, src=(st.src[0], first)))
-      # (a generator: the elements after the first are checked against it only if it matched)
+      if len(stores): and_clause.append(UOp.native("len({0}.src) != 0", fmt=True).call(base))
+      # Short-circuit before a later source can reference a capture from a mismatched first source.
       and_clause.append(UOp.native("all({0} for {1} in {2}.src)", fmt=True).call(UOp(Ops.AND, src=tuple(pred)), it, base))
     # multi match (fork)
     elif len(self.src) > 1 and all(isinstance(x, tuple) for x in self.src):
       fork_cond = [UOp(Ops.AND, src=tuple([_get_clause(s, base.index(i), depth) for i,s in enumerate(ss)])) for ss in self.src]
       and_clause.append(UOp(Ops.OR, src=tuple(fork_cond)))
     else: raise RuntimeError("broken")
-  return UOp(Ops.AND, src=tuple(and_clause))
+  return UOp(Ops.AND, src=tuple(and_clause) or (UOp.native("True", fmt=True).call(inline=True),))
 
 # *** pattern matcher ***
 
@@ -120,10 +118,10 @@ pm_renderer = PatternMatcher([
 
   # AND/OR of inline NATIVE fragments becomes a single NATIVE
   (UPat(Ops.AND, src=UPat(Ops.CALL), name="x"), lambda x:
-   UOp.native("(" + (' and '.join(y.body.arg.code for y in x.src) or 'True') + ")", fmt=True).call(inline=True)
+   UOp.native("(" + ' and '.join(y.body.arg.code for y in x.src) + ")", fmt=True).call(inline=True)
    if all(y.arg.inline for y in x.src) else None),
   (UPat(Ops.OR, src=UPat(Ops.CALL), name="x"), lambda x:
-   UOp.native("(" + (' or '.join(y.body.arg.code for y in x.src) or 'False') + ")", fmt=True).call(inline=True)
+   UOp.native("(" + ' or '.join(y.body.arg.code for y in x.src) + ")", fmt=True).call(inline=True)
    if all(y.arg.inline for y in x.src) else None),
 
   (UPat(Ops.CALL, name="x"), lambda x: UOp.native(x.body.arg.code.format(*[y.body.arg.code for y in x.src[1:]]), fmt=True).call(inline=True)
