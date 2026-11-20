@@ -135,6 +135,9 @@ class MTComputeQueue(HWQueue):
     self.signals:list[tuple[UOp,UOp]] = []
     self.timestamp_slots:list[list[UOp|None]] = []
     self.timestamp_open = False
+    self.template_key:Any = None
+    self.template_launch:MTLaunch|None = None
+    self.template_hit = False
 
   def encode(self) -> UOp:
     for u in self.lin.src:
@@ -217,11 +220,13 @@ class MTComputeQueue(HWQueue):
         previous = self.dev.uploaded_write_map
         changed_key = tuple(sorted((off,data) for off,data in write_map.items()
                                    if off != launch.backing_offsets[0x81e1200000] and previous.get(off) != data))
-        template_key = (packet,generation,tuple(sorted(write_map.items())),changed_key,self.deps,tuple(self.signals))
-        if (cached:=getattr(launch,'submission_template',None)) is not None and cached[0] == template_key:
+        template_key = (packet,generation,tuple(sorted(write_map.items())),changed_key,tuple(self.signals))
+        self.template_key,self.template_launch = template_key,launch
+        if (cached:=getattr(launch,'submission_template',None)) is not None and cached[0] == template_key and len(cached[3]) == len(self.deps):
+          self.template_hit = True
           self.dev.poll_in_hcq = False
           self.dev.uploaded_write_map = write_map
-          return cached[2].substitute({cached[1]:deps},walk=True)
+          return cached[2].substitute({cached[1]:deps, **dict(zip(cached[3],self.deps))},walk=True)
     for i,(launch,deps,packet,write_map,generation,mmu_pages,grid_deps) in enumerate(self.submissions):
       ccb = launch.ccb
       assert ccb is not None
@@ -295,7 +300,7 @@ class MTComputeQueue(HWQueue):
       self.dev.uploaded_write_map = write_map
     for signal,value in self.signals: add(signal.index(0).store(value))  # type: ignore[assignment]
     ret = UOp.sink(UOp.barrier(*self.deps,*ops))
-    if template_key is not None: launch.submission_template = (template_key,deps,ret)
+    if template_key is not None: launch.submission_template = (template_key,deps,ret,self.deps)
     return ret
 
 
@@ -304,8 +309,14 @@ def mt_lower_call(call:UOp) -> UOp:
   for u in call.body.toposort():
     if (u.op is Ops.AFTER and u.src[0].op is Ops.CALL and u.src[0].src[0].op is Ops.SINK and
         u.src[0].src[1].op is Ops.PARAM and u.src[0].src[1].arg.name == 'COMPUTE:0'):
-      queue = MTComputeQueue(u.replace(arg=call.arg)).encode().replace(arg=call.body.arg)
-      return lower_encoded_call(call.replace(src=(queue,*call.src[1:])))
+      mt_queue = MTComputeQueue(u.replace(arg=call.arg))
+      queue = mt_queue.encode().replace(arg=call.body.arg)
+      outer_args = tuple(s.expr for s in call.src[1:])
+      if mt_queue.template_hit and (cached:=getattr(mt_queue.template_launch,'lowered_template',None)) is not None and \
+         cached[0] == mt_queue.template_key and cached[1] == outer_args: return cached[2]
+      ret = lower_encoded_call(call.replace(src=(queue,*call.src[1:])))
+      if mt_queue.template_launch is not None: mt_queue.template_launch.lowered_template = (mt_queue.template_key,outer_args,ret)
+      return ret
   raise RuntimeError('No MT compute submission found')
 
 Compiled.pm_encode += PatternMatcher([

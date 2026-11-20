@@ -30,6 +30,7 @@ class MTLaunch(MTFirmware):
   generated_image:MTKernelImage
   cache_activations:int
   submission_template:Any
+  lowered_template:Any
   _active:MTLaunch|None = None
   _loaded:MTLaunch|None = None
 
