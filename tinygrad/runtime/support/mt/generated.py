@@ -99,13 +99,11 @@ class MTGeneratedLaunch(MTLaunch):
 
   def _map_generated(self) -> None:
     self.backing_offsets = GENERATED_OFFSETS.copy()
-    self.backing_cursor = 0xb0f8000
     self.write_map = {}
     for va in (0xda00406000,0x81e1200000,0x81e1400000,0x81e0e00000):
       self._write_backing(self.backing_offsets[va],bytes(0x1000))
     self.text_va = 0xe000000000
     self.text_offset = 0x2000
-    self.free_text_offset = 0x30000
     self.pds_execution_address = 0x81e0e00000
     self.pds_code_off = self.backing_offsets[0xda00400000]
     self.pds_data_offsets = [self.backing_offsets[0x100804000]]
@@ -142,16 +140,10 @@ class MTGeneratedLaunch(MTLaunch):
     has_ids = any(a['.kind'] in (1,2,3,5,6,7) for a in k['.args'])
     has_barrier = k['.has_barrier']
     resource_off = self.backing_offsets[0xda00406000]
-    self.template_text = image.text
-    spill_bytes = max(k['.private_memory_size'],k['.local_mem_used_in_cluster'])
-    self.text_offset = 0x30000 if spill_bytes else 0x1000 if len(image.text) <= 0x1000 else 0x2000 if len(image.text) <= 0x20000 else 0x30000
-    self.template_temp_count = k['.temp_reg_count']
-    self.template_shared_count = k['.shared_reg_count']
+    self.text_offset = 0x1000 if len(image.text) <= 0x1000 else 0x2000 if len(image.text) <= 0x20000 else 0x30000
     self.resource_temp_offset = 0x2c if has_barrier else 0x24 if has_ids else 0x1c
     self.resource_text_field = 0x28 if has_barrier else 0x20 if has_ids else 0x18
-    self.resource_temp_delta = 0
     self.resource_temp_flags = 1 if has_barrier else 0
-    self.free_text_offset = 0x30000
     self._write_backing(resource_off,struct.pack('<Q',0x81e1200000))
     self._write_backing(resource_off+8,struct.pack('<I',0x90000000|k['.shared_reg_count']))
     self._write_backing(self.backing_offsets[0x81e1200000]+8,struct.pack('<I',0xff))

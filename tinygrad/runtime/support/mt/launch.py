@@ -1,26 +1,19 @@
 from __future__ import annotations
-import dataclasses, os, struct
+import struct
 from typing import Any
 from tinygrad.runtime.autogen import mtfw
 from tinygrad.runtime.support.mt.mtdev import MTDev
 from tinygrad.runtime.support.mt.compute import MTFirmware, SUB_PA, FW_DEVVA, ROOT_BASE
-from tinygrad.runtime.support.mt.ccb import MTCCB, MTResponse
+from tinygrad.runtime.support.mt.ccb import MTCCB
 from tinygrad.runtime.support.mt.mmu import MT_PTE_READ_WRITE
 from tinygrad.runtime.support.mt.elf import MTKernelImage
 from tinygrad.runtime.support.mt.pds import compute_pds, PDS_UNUSED
 from tinygrad.runtime.support.mt.submission import build_submission
 
-@dataclasses.dataclass(frozen=True)
-class MTLaunchResult:
-  response: MTResponse
-  timestamp: int
-  run_time: int
-  output: int
-
 class MTLaunch(MTFirmware):
   write_map:dict[int,bytes]
   packet:bytearray
-  kernel_lib:str
+  kernel_lib:bytes
   backing_offsets:dict[int,int]
   text_va:int
   text_offset:int
@@ -29,8 +22,6 @@ class MTLaunch(MTFirmware):
   pds_data_offsets:list[int]
   generated_image:MTKernelImage
   cache_activations:int
-  submission_template:Any
-  lowered_template:Any
   _active:MTLaunch|None = None
   _loaded:MTLaunch|None = None
 
@@ -40,17 +31,17 @@ class MTLaunch(MTFirmware):
     super().__init__(dev, prepare=not reuse, mmu=active.mmu if active is not None else None, v=active.v if active is not None else None)
     self.sv:Any = active.sv if active is not None else self.dev.pci_dev.map_bar(2, off=SUB_PA, size=0x2000000, fmt='B')
     if not reuse: self.sv[:0x20000] = bytes(0x20000)
-    self.zero_pa, self.out_pa = SUB_PA + 0x1000, SUB_PA + 0x3000
+    self.zero_pa = SUB_PA + 0x1000
     self.mmu_dirty = True
     self.backing_pa = 0x40000000
     self.backing:Any = active.backing if active is not None else self.dev.pci_dev.map_bar(2, off=self.backing_pa, size=0x10000000, fmt='B')
     self._map_generated()
     self._map_common()
-    self.packet_data = build_submission()
     self._prepare_packet()
     self.ccb:MTCCB|None = None
     self.launch_id = 1
     self.generation = 1
+    self.cache_activations = 0
     MTLaunch._loaded = self
 
   def _map_generated(self) -> None: raise NotImplementedError
@@ -62,7 +53,6 @@ class MTLaunch(MTFirmware):
     for off in range(0x400000, 0x410000, 0x1000): self.mmu.map(FW_DEVVA + off, 0x20000000 + off, MT_PTE_READ_WRITE)
     if 0x100000000 not in self.mmu.pages: self.mmu.map(0x100000000,SUB_PA+0x6000,MT_PTE_READ_WRITE)
     for i in range(18): self.mmu.map(0xd9bfff0000+i*0x1000,SUB_PA+0x10000+i*0x1000,MT_PTE_READ_WRITE)
-    self.mmu.map(0xe1c2003000, self.out_pa, MT_PTE_READ_WRITE)
     aliases = [(0xc000000000,0x20400000),(0x22000000,0x20400000),(0x90400000,0x20400000),
                (0xe1c0401000,SUB_PA+0x1000),(0xe1c0402000,SUB_PA+0x8000),(0xe1c2001000,SUB_PA+0x1000),
                (0xe1c2002000,SUB_PA+0x8000),(0xe000002000,SUB_PA+0x8000),(0x90005000,SUB_PA+0x5000),
@@ -76,7 +66,7 @@ class MTLaunch(MTFirmware):
       if 0xdb00000000+off not in self.mmu.pages: self.mmu.map(0xdb00000000+off,self.zero_pa,MT_PTE_READ_WRITE)
 
   def _prepare_packet(self) -> None:
-    packet = bytearray(self.packet_data)
+    packet = bytearray(build_submission())
     struct.pack_into('<Q', packet, 0x38, 1)
     struct.pack_into('<I', packet, 0x40, 1)
     struct.pack_into('<Q', packet, 0x08, FW_DEVVA + 0x40b000)
@@ -144,13 +134,6 @@ class MTLaunch(MTFirmware):
     self.mmu.map_range(va, pa, size, flags)
     self.mmu_dirty = True
 
-  def set_spill(self, va:int) -> None:
-    self._write_backing(self.backing_offsets[0x81e1200000],struct.pack('<Q',va))
-
-  def set_args(self, args:tuple[int, ...]) -> None:
-    off = self.backing_offsets[0x81e1200000] + 0x38
-    for i, arg in enumerate(args): self._write_backing(off+i*8,struct.pack('<Q',arg))
-
   def set_grid(self, global_size:tuple[int,int,int], local_size:tuple[int,int,int]) -> None:
     off = self.backing_offsets[0x81e1400000]
     for i, field in enumerate([0x2c,0x30,0x34]): self._write_backing(off+field,struct.pack('<I',global_size[i]-1))
@@ -196,18 +179,3 @@ class MTLaunch(MTFirmware):
       self._write(0xe198, 0)
       ci = mtfw.MTFW_CCB_ITEM()
       self.ccb = MTCCB(self.dev, self.v, self.layout.item + 3 * 4096 * ci.SIZE, self.layout.ccb + 3 * 0x4030)
-
-  def execute(self) -> MTLaunchResult:
-    if self.ccb is None: raise RuntimeError("MT firmware was not started")
-    for off,data in self.write_map.items(): self.backing[off:off+len(data)] = data
-    self.sv[0x3000:0x4000] = bytes(0x1000)
-    if self.mmu_dirty:
-      self.upload_mmu()
-      self.mmu_dirty = False
-    self.ccb.submit(0x8000420000, len(self.packet), ROOT_BASE, generation=self.generation)
-    response = self.ccb.wait(float(os.environ.get('MT_TIMEOUT','5')))
-    if response.value:
-      fault = (self._read(0xe150), self._read(0xe158), self._read(0x130, 4), self._read(0x4a0))
-      raise RuntimeError(f"MT launch failed: {response}, fault={fault}")
-    return MTLaunchResult(response, struct.unpack('<Q', self.v[0x40a000:0x40a008])[0], struct.unpack('<I', self.v[0x409008:0x40900c])[0],
-                          struct.unpack('<I', self.sv[0x3000:0x3004])[0])

@@ -84,31 +84,3 @@ class MTKernelImage:
     note = next(s for s in sections if s.name == '.note')
     metadata = MTLaunchMetadata.from_note(note.content)
     return cls(int(text.header.sh_addr), text.content, dataclasses.replace(metadata, entry=int(text.header.sh_addr)))
-
-  def template_signature(self) -> str:
-    k = self.metadata.kernel
-    fields = ['.shared_reg_count','.attr_reg_count','.shared_memory_size',
-              '.local_mem_used_in_cluster','.private_memory_size','.has_barrier','.has_texture','.global_atomic_count',
-              '.shared_atomic_lock_idx','.barrier_coef','.wave_mode','.coef_reg_count','.slot_reg_count']
-    params = tuple((a['.argBase']['.name'],a['.kind'],a['.argBase']['.type'],a['.argBase']['.size']) for a in k['.args'])
-    return repr((tuple(k.get(f) for f in fields),params))
-
-  def superset_signature(self) -> str:
-    k = self.metadata.kernel
-    fields = ['.attr_reg_count','.shared_memory_size','.has_barrier','.has_texture','.global_atomic_count','.shared_atomic_lock_idx',
-              '.barrier_coef','.wave_mode','.coef_reg_count']
-    return repr(tuple(k.get(f) for f in fields))
-
-  def universal_signature(self) -> str:
-    k = self.metadata.kernel
-    fields = ['.shared_memory_size','.has_barrier','.has_texture','.global_atomic_count','.shared_atomic_lock_idx',
-              '.barrier_coef','.wave_mode','.coef_reg_count']
-    return repr(tuple(k.get(f) for f in fields))
-
-  def launch_signature(self) -> str:
-    k = self.metadata.kernel
-    fields = ['.shared_reg_count','.attr_reg_count','.shared_memory_size',
-              '.local_mem_used_in_cluster','.private_memory_size','.has_barrier','.has_texture','.global_atomic_count',
-              '.shared_atomic_lock_idx','.barrier_coef','.wave_mode','.coef_reg_count','.slot_reg_count']
-    params = tuple((a['.argBase']['.name'],a['.kind'],a['.argBase']['.type'],a['.argBase']['.size']) for a in k['.args'])
-    return repr(((self.entry,len(self.text),k['.temp_reg_count'],tuple(k.get(f) for f in fields)),params))

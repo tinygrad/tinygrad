@@ -12,7 +12,7 @@ The MUSA userspace runtime and `libmtum` are not used or linked. Kernel text, la
 
 ## Compiler and firmware setup
 
-The compiler defaults to `/opt/musa`; set `MUSA_PATH` for a different toolkit location. Device kernels are compiled with `-O3`. MUSA 4.3 high-register spill kernels with live local arrays are recompiled with volatile local arrays to avoid incorrect spill results; ordinary kernels retain the normal optimization path.
+The compiler defaults to `/opt/musa`; set `MUSA_PATH` for a different toolkit location. Device kernels are compiled with `-O3`.
 
 Firmware is deliberately **not included in the tinygrad repository**. It is loaded from the first available location:
 
@@ -48,4 +48,4 @@ DEV=MT python -m pytest test/test_tiny.py test/runtime/test_mt_cache.py -x -q
 DEV=MT DEBUG=2 python -c 'from tinygrad import Tensor; print((Tensor([1.,2.,3.]) + Tensor([4.,5.,6.])).tolist())'
 ```
 
-The current implementation targets MMU4 and generation-1 firmware only. Launches are serialized to preserve shared launch/MMU state. There is no copy queue, and double-precision kernels are not supported by the MUSA renderer. Launches requiring more than 1 GiB of spill storage are rejected before submission.
+The current implementation targets MMU4 and generation-1 firmware only. Launches are serialized to preserve shared launch/MMU state. There is no copy queue, and double-precision kernels are not supported by the MUSA renderer. Kernels requiring spill or local-cluster memory are rejected before submission.
