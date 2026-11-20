@@ -3,6 +3,11 @@ from tinygrad import Tensor
 from tinygrad.dtype import dtypes, Invalid
 
 class TestAfterCounterexamples(unittest.TestCase):
+  def test_after_multi_device_buffer_dep(self):
+    b = Tensor.ones(4, 8, device="CPU").shard(("CPU:0", "CPU:1"), axis=0).contiguous().realize()
+    c = Tensor.ones(4, 8, device="CPU").contiguous().realize()
+    self.assertEqual((Tensor(c.uop.after(b.uop)) + 1).tolist(), [[2.]*8]*4)
+
   def test_ordered_writes_allowed(self):
     x = Tensor([0.]).realize().uop
     a = x.after(x.store(1))
