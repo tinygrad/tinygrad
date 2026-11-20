@@ -2,16 +2,16 @@
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
 from dataclasses import dataclass, field, replace
-from typing import Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
+from typing import Callable, Iterable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod
-from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
+from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, VALIDATE_WITH_CPU, is_disk_device, canonicalize_device
 from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.uop.ops import KernelInfo, AxisType
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.codegen import create_linear, contiguous_mops_to_view
-from tinygrad.engine.realize import run_linear, capturing
+from tinygrad.engine.realize import compile_linear, link_linear, exec_linear, ExecContext, capturing
 from tinygrad.device import Buffer
 
 # **** export: storage becomes EXTERN(slot), bound Variables lose their value and ALLOCs get canonical slots. ctx.externs is what's mapped back
@@ -21,12 +21,10 @@ class ExportCtx:
   externs: dict[UOp, UOp] = field(default_factory=dict)
   allocs: dict[UOp, UOp] = field(default_factory=dict)
 
-def as_extern(x:UOp, slot:int) -> UOp: return x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=slot, buffer=None, name=None, val=None))
-
 def to_extern(ctx:ExportCtx, x:UOp) -> UOp|None:
   # realized storage and bound Variables are runtime state
   if not (x.is_bound_var or (x.op is Ops.BUFFER and x.addrspace is AddrSpace.GLOBAL)): return None
-  return ctx.externs.setdefault(x, as_extern(x, len(ctx.externs)))
+  return ctx.externs.setdefault(x, x.as_extern(len(ctx.externs)))
 
 # ALLOCs get canonical scope-local id slots so structurally identical calls hash identically for the schedule cache
 # (fresh slots are all positive from the global counter; negative slots are already canonical)
@@ -48,21 +46,14 @@ pm_export: PatternMatcher = PatternMatcher([
   (UPat(Ops.CALL, name="c"), export_call),
 ])
 
-def bind_alloc(b:UOp) -> UOp:
-  if b.device is None: raise RuntimeError("global storage needs a device, give the ALLOC one")
-  return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
-
 # EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
 def map_back_extern(ctx:tuple[UOp, ...], e:UOp) -> UOp:
-  if e.arg.slot >= len(ctx) or as_extern(x:=ctx[e.arg.slot], e.arg.slot) is not e:
-    got = f"{x.dtype} {x.shape} on {x.device}" if e.arg.slot < len(ctx) else "nothing"
-    raise RuntimeError(f"extern {e.arg.slot} must match its EXTERN, {e.dtype} {e.shape} on {e.device}, got {got}")
-  return x.unbound() if x.is_variable else x
+  return x.unbound() if (x:=e.extern_arg(ctx)).is_bound_var else x
 
 pm_map_back = PatternMatcher([
   (UPat(Ops.EXTERN, name="e"), map_back_extern),
   # global ALLOCs are bound to fresh BUFFERs for this invocation
-  (UPat(Ops.ALLOC, name="b"), lambda b: bind_alloc(b) if b.addrspace is AddrSpace.GLOBAL else None),
+  (UPat(Ops.ALLOC, name="b"), lambda b: UOp.new_buffer(b.device, b.max_numel(), b.dtype) if b.addrspace is AddrSpace.GLOBAL else None),
 ])
 
 def map_back(linear:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, dict[str, int]]:
@@ -70,11 +61,14 @@ def map_back(linear:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, dict[str, int]]:
   linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, name="map back")
   # the values of the bound Variables the linear uses, they are call args
   used_vars = {v.expr for si in linear.src for v in UOp.sink(*si.src[1:]).variables()}
-  var_vals: dict[str, int] = {}
+  return linear, binding_values(b for b in externs if b.is_bound_var and b.expr in used_vars)
+
+def binding_values(externs:Iterable[UOp]) -> dict[str, int]:
+  var_vals:dict[str, int] = {}
   for b in externs:
-    if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
+    if b.is_bound_var and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
       raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
-  return linear, var_vals
+  return var_vals
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -290,12 +284,16 @@ class Tensor(RandMixin):
     return linear
 
   @staticmethod
+  def compile(fn:UOp) -> UOp:
+    """Schedule and compile a function from `Tensor.export`, without binding its storage or scalar arguments."""
+    return compile_linear(create_linear(fn), validate=VALIDATE_WITH_CPU, cache=True)
+
+  @staticmethod
   def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
-    """Runs an exported function compiled to a LINEAR, its EXTERNs are the externs from `Tensor.export`."""
-    linear, var_vals = map_back(linear, externs)
-    # a capturing jit runs its captured linears later
-    if capturing and CAPTURING: capturing[0].add_linear(linear, var_vals)
-    else: run_linear(linear, var_vals, update_stats=do_update_stats)
+    """Link a LINEAR from `Tensor.compile` to this invocation's externs and execute it."""
+    if capturing and CAPTURING: raise RuntimeError("cannot capture an already compiled Tensor.run")
+    ctx = ExecContext(binding_values(externs), externs, update_stats=do_update_stats)
+    exec_linear(link_linear(linear, list(externs)), ctx)
 
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
@@ -303,8 +301,9 @@ class Tensor(RandMixin):
     to_realize = [x for x in (self,)+lst if x.uop.base.needs_storage()]
     if len(to_realize):
       fn, externs = Tensor.export(*to_realize)
-      # a capturing jit plans the memory of its captured linears together
-      Tensor.run(create_linear(fn, plan=not (capturing and CAPTURING)), externs, do_update_stats=do_update_stats)
+      # A capturing jit plans and compiles all its schedules together.
+      if capturing and CAPTURING: capturing[0].add_linear(*map_back(create_linear(fn, plan=False), externs))
+      else: Tensor.run(Tensor.compile(fn), externs, do_update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:

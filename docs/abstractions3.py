@@ -31,7 +31,7 @@ with Context(TRAINING=1):
   optim.schedule_step()   # this will step the optimizer without running realize
 
 # *****
-# 3. Export and compile to a schedule (linear uop).
+# 3. Export and compile the graph.
 
 # The weight Tensors have been assigned to, but not yet realized. Everything is still lazy at this point
 # l1.uop and l2.uop define a computation graph
@@ -40,15 +40,14 @@ with Context(TRAINING=1):
 # its EXTERNs are the storage (and bound Variables) listed in externs
 fn, externs = Tensor.export(l1, l2)
 
-# the compiler turns the function into a linear of calls, it's pure: it only sees fn
-from tinygrad.codegen import create_linear
-linear = create_linear(fn)
+# the compiler only needs fn, not the weights or their addresses
+linear = Tensor.compile(fn)
 
 print(f"The schedule contains {len(linear.src)} items.")
 for call in linear.src: print(str(call)[:80])
 
 # *****
-# 4. Run the schedule (linear uop) on the storage.
+# 4. Link the compiled calls to the storage and run them.
 
 Tensor.run(linear, externs)
 

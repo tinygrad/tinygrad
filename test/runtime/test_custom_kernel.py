@@ -1,6 +1,6 @@
 import unittest, functools
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, Variable, TinyJit
-from tinygrad.engine.realize import run_linear, compile_linear
+from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes
@@ -691,12 +691,12 @@ class TestCustomKernelSharded(unittest.TestCase):
   def test_device_number_arg(self):
     # the kernel's DEVICE range is its device number arg, bound per device and validated on each
     def kernel(C:UOp) -> UOp: return C[0].store(UOp.range(2, 0, AxisType.DEVICE).cast(dtypes.int)).sink(arg=KernelInfo(name="store_dnum"))
-    out = Tensor.custom_kernel(Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(("CPU:1", "CPU:2"), axis=0).contiguous(), fxn=kernel)[0]
-    linear, _ = out.linear_with_vars()
-    validated = compile_linear(linear, validate=True).toposort()
-    self.assertEqual(len([c for c in validated if c.op is Ops.CALL and c.body.op is Ops.NATIVE and c.body.arg.code == "validate"
-                          and c.body.src[-1].arg.name == "store_dnum"]), 2)
-    run_linear(linear)
+    x = Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(("CPU:1", "CPU:2"), axis=0).contiguous().realize()
+    out = Tensor.custom_kernel(x, fxn=kernel)[0]
+    fn, externs = out.export()
+    with Context(VALIDATE_WITH_CPU=1): linear = Tensor.compile(fn)
+    self.assertEqual(sum(c.body.op is Ops.NATIVE and c.body.arg.code == "validate" for c in linear.src), 2)
+    Tensor.run(linear, externs)
     self.assertEqual(out.tolist(), [0, 1])
 
   def test_simple_sharded(self):

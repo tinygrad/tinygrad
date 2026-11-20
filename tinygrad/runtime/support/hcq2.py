@@ -165,7 +165,7 @@ def cstruct(struct_t:type[Struct], **fields:UOp|int) -> UOp:
 def replace_buffer(ctx:tuple[list[UOp], dict[UOp, int]], b:UOp) -> UOp:
   bufs, slots = ctx
   if slots.setdefault(b, len(bufs)) == len(bufs): bufs.append(b)
-  return b.replace(op=Ops.EXTERN, arg=replace(b.arg, slot=slots[b], buffer=None))
+  return b.as_extern(slots[b])
 pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b: replace_buffer(ctx, b))])
 
 def unwrap_call(call:UOp) -> UOp|None:
@@ -472,9 +472,9 @@ pm_lift_deps = PatternMatcher([
 ])
 
 def _needs_arg(u:UOp, root:bool) -> bool:
+  if u.is_variable: return True
   if u.op in (Ops.BUFFER, Ops.ALLOC, Ops.EXTERN): return u.addrspace is AddrSpace.GLOBAL
-  # every Variable is an arg, the root also takes the inputs
-  return u.op is Ops.PARAM and (u.is_variable or root)
+  return root and u.op is Ops.PARAM
 
 def _param_for(u:UOp, slot:int) -> UOp:
   if u.op is Ops.GETADDR or u.is_variable:
@@ -532,7 +532,7 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp:
 
 def resolve_extern(ctx:LinkCtx, b:UOp) -> UOp:
   if b.arg.name is None:
-    a = ctx.inputs[b.arg.slot]
+    a = b.extern_arg(ctx.inputs)
     return UOp.const(a.arg.val, b.dtype) if a.is_bound_var else a
   owned = Compiled.link_bufs[b.arg.name if b.arg.name in Compiled.link_bufs else to_name(b.device, b.arg.name)]
   return UOp.from_buffer(owned if isinstance(owned, Buffer) else owned(b), b.dtype, HCQ_RUNTIME_DEV.device)
@@ -582,15 +582,20 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=
   if cache and input_uops is not None:
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
     linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffers")
+  elif cache: cache = not any(u.op is Ops.BUFFER for u in linear.toposort())  # only cache templates without live storage
   linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
-  if cache and input_uops is not None and (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
+  if cache and (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
   lin = graph_rewrite(sched_batches(linear, profile), pm_lower_call, walk=True, name="lower call")
   with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin, verbose=DEBUG>=3)
-  if cache and input_uops is not None and final_linear is not linear: hcq_compile_cache[key] = final_linear
+  if cache and final_linear is not linear: hcq_compile_cache[key] = final_linear
   return final_linear
 
 @rewrite_group(lambda _,input_uops=None,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
+  # A deserialized batch may be the first use of its device in this process. Open it before applying its link rules.
+  for call in linear.src:
+    if (hcq:=getattr(call.without_after.arg, "hcq", None)) is not None:
+      for device in hcq.device: Device[device]
   linked = graph_rewrite(linear, Compiled.pm_link, walk=True, name="link programs") if Compiled.pm_link.patterns else linear
   ctx = LinkCtx(input_uops or [])
   linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_link, ctx=ctx, walk=True, name="link")
