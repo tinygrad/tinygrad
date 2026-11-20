@@ -13,7 +13,7 @@ from tinygrad.runtime.support.system import PCIDevice, USBPCIDevice, System, fil
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.engine.realize import get_call_kernel_args
-from tinygrad.runtime.autogen import mtfw, mtregs, mtpds, mtcdm, libc
+from tinygrad.runtime.autogen import mtfw, mtregs, mtpds, mtcdm, mtheap, libc
 
 def mt_off(typ, name:str) -> int: return next(f[2] for f in typ._real_fields_ if f[0] == name)
 
@@ -426,8 +426,8 @@ SUBMISSION_VA = 0x8000420000
 ARGS_VA = 0x81e1200000
 GRID_VA = 0x81e1400000
 RESOURCE_VA = 0xda00406000
-TEXT_VA = 0xe000000000
-RESUME_VA = 0xda00000000
+TEXT_VA = mtheap.MTGPU_VGPU_HEAP_USC_BASE
+RESUME_VA = mtheap.MTGPU_VGPU_HEAP_PDS_BASE
 PDS_MAIN_VA = 0xda00400000
 TASK_VA = 0x100804000
 CDM_EXECUTION_ADDRESS = 0x81e0e00000
@@ -436,7 +436,8 @@ MT_TIMESTAMP_ADDR = 0x8000438200
 MT_FW_CSW_BUFFER = 0x6800000000
 MT_CDM_REGION_OFFSET, MT_CDM_REGION_SIZE = 0xa0, 0x198
 MT_SUBMISSION_SIZE = 0x19250
-# Undocumented generation-1 context bytes following MTFW_KICK_HEAD. The documented kick head is constructed from its struct.
+# Generation-1 context bytes following MTFW_KICK_HEAD, recovered from MUSA's SubmissionKickCreate/CDMStreamWrite path.
+# These trailing context records have no public struct definition; the kick head itself is generated from its public struct.
 MT_GEN1_KICK_TAIL = bytes.fromhex(
   '0000000000000000000000000000000000000000000000000000000000000000'
   '00000000000000000000000000000000000000000000000000000000ff000000'
@@ -490,7 +491,7 @@ def build_submission(launch_id:int=1, execution_address:int=CDM_EXECUTION_ADDRES
 
 # **** compute ****
 
-FW_BASE, ROOT_BASE, INIT_SIZE, FW_DEVVA = 0x20000000, 0x30000000, 0x2000000, 0xe1c0000000
+FW_BASE, ROOT_BASE, INIT_SIZE, FW_DEVVA = 0x20000000, 0x30000000, 0x2000000, mtheap.MTGPU_VGPU_HEAP_FW_BASE
 FWIF_OFF, META_BASE = 0xc0000, 0x90000000
 SUB_PA, SUB_VA = FW_BASE + INIT_SIZE, FW_DEVVA + INIT_SIZE
 FIRMWARE_PATHS = ('/lib/firmware/mthreads/mtfw-gen1.bin', '/opt/musa/lib/firmware/mthreads/mtfw-gen1.bin')
@@ -525,9 +526,10 @@ def build_firmware(lay:MTFirmwareLayout) -> bytes:
                           ('flStateAddrsMCG7',14,0x2a00),('flStateAddrsMCG8',16,0x3800)]:
     for i in range(count): getattr(cfg, name)[i] = 0xd9bfff0000 | base + i * 0x100
   cfg.yuvCoefficientAddr = 0xe0ffe00000
-  cfg.pdsHeapBaseAddr, cfg.uscHeapBaseAddr = 0xda00000000, 0xe000000000
-  cfg.fbcdcHeapBaseAddr, cfg.fbcdcLargeHeapBaseAddr = 0xec00000000, 0xec40000000
-  cfg.texStateHeapBaseAddr, cfg.componentCtrlHeapBaseAddr = 0xb000000000, 0xeb00000000
+  cfg.pdsHeapBaseAddr, cfg.uscHeapBaseAddr = mtheap.MTGPU_VGPU_HEAP_PDS_BASE,mtheap.MTGPU_VGPU_HEAP_USC_BASE
+  cfg.fbcdcHeapBaseAddr, cfg.fbcdcLargeHeapBaseAddr = mtheap.MTGPU_VGPU_HEAP_FBCDC_BASE,mtheap.MTGPU_VGPU_HEAP_FBCDCLARGE_BASE
+  cfg.texStateHeapBaseAddr = mtheap.MTGPU_VGPU_HEAP_TEXTURESTATE_BASE
+  cfg.componentCtrlHeapBaseAddr = mtheap.MTGPU_VGPU_HEAP_COMPONENTCTRL_BASE
   cfg.dmKillShaderOffset = 0xfff80000
   return bytes(fw)
 
@@ -724,7 +726,8 @@ class MTLaunch(MTFirmware):
     for off in range(0,0x100000,0x1000):
       if FW_DEVVA+0x200000+off not in self.mmu.pages: self.mmu.map(FW_DEVVA+0x200000+off,SUB_PA+off,MT_PTE_READ_WRITE)
     for off in range(0,0x1000000,0x1000):
-      if 0xdb00000000+off not in self.mmu.pages: self.mmu.map(0xdb00000000+off,self.zero_pa,MT_PTE_READ_WRITE)
+      if mtheap.MTGPU_VGPU_HEAP_PDS_INDIRECT_STATE_BASE+off not in self.mmu.pages:
+        self.mmu.map(mtheap.MTGPU_VGPU_HEAP_PDS_INDIRECT_STATE_BASE+off,self.zero_pa,MT_PTE_READ_WRITE)
 
   def _prepare_packet(self) -> None:
     packet = bytearray(build_submission())
@@ -987,7 +990,9 @@ class MTGeneratedLaunch(MTLaunch):
     next_off = error_off+mtfw.MTFW_FWIF_ERROR_INFO.SIZE
     self._write_backing(next_off+mt_off(mtfw.MTFW_FWIF_DUMP_CFG,'regDumpCfgArray'),struct.pack('<Q',next_error))
     self._write_backing(next_off+mt_off(mtfw.MTFW_FWIF_DUMP_CFG,'regDumpCfgNum'),struct.pack('<I',6))
-    self._write_backing(error_off+0x228,struct.pack('<Q',0x208e150))
+    rc = mtfw.MTFW_FWIF_REG_DUMP_CFG()
+    rc.regOffset,rc.regStride,rc.regIdxNum,rc.indirectNum = mtregs.RGX_CR_MMU_FAULT_STATUS1,8,2,1
+    self._write_backing(error_off+0x228,bytes(rc)[:8])
     self._write_backing(error_off+0x230,struct.pack('<I',0x20001))
     self._write_backing(error_off+0x238,struct.pack('<Q',0x8000020004084178))
     self._write_backing(error_off+0x240,struct.pack('<I',0x100004))
