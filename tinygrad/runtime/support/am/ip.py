@@ -246,6 +246,14 @@ class AM_SMU(AM_IP):
       with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]), timeout=20)
       if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]))
 
+  def set_gfxclk_boost(self):
+    if not hasattr(self.smu_mod, "PPTable_t"): return
+    boost = self.read_table(self.smu_mod.PPTable_t, self.smu_mod.TABLE_PPTABLE).SkuTable.DriverReportedClocks.BoostClockAc
+    if boost == 0: return
+    self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, self.smu_mod.PPCLK_GFXCLK << 16 | boost)
+    self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, self.smu_mod.PPCLK_GFXCLK << 16 | boost)
+    if DEBUG >= 2: print(f"am {self.adev.devfmt}: gfxclk pinned at the boost clock, {boost} MHz")
+
   def set_power_limit(self, watts:float):
     ppt_limit = max(int(round(watts)), 1)
     self._send_msg(self.smu_mod.PPSMC_MSG_SetPptLimit, ppt_limit)
