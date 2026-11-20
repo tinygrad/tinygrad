@@ -158,6 +158,7 @@ class CustomASM24Controller:
   def pcie_mem_read(self, address:int, nbytes:int) -> memoryview:
     """Streaming PCIe memory read via 0xF0 mode 2 + bulk IN. Returns little-endian bytes."""
     assert nbytes % 4 == 0, f"pcie_mem_read requires 4-byte aligned size, got {nbytes}"
+    # The ASM24 bridge can fail bulk reads larger than 4 MiB.
     if nbytes <= 4 * STREAM:
       self._f0_out(0x20, 0x0F, address, nbytes // 4, mode=2)
       return self.usb.bulk_read(nbytes, timeout=30000)

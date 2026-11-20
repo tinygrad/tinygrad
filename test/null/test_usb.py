@@ -22,17 +22,22 @@ class TestUSBTransfers(unittest.TestCase):
       usb.bulk_write(b'xy')
       self.assertEqual(calls[-1], (ctypes.addressof(usb._bulk_buf), 2))
 
-  def test_bounded_pcie_reads(self):
-    calls = []
+  def test_pcie_reads_are_bounded_and_ordered(self):
+    requests, reads = [], []
     class FakeUSB:
-      def control_write(self, *args): pass
       def bulk_read(self, size, timeout=1000):
-        calls.append(size)
-        return bytes(size)
+        reads.append(size)
+        return bytes([len(reads)]) * size
     controller = CustomASM24Controller.__new__(CustomASM24Controller)
     controller.usb = FakeUSB()
-    result = controller.pcie_mem_read(0x1000, 4 * STREAM + 4)
-    self.assertEqual(calls, [4 * STREAM, 4])
-    self.assertEqual(len(result), 4 * STREAM + 4)
+    controller._f0_out = lambda fmt, byte_en, address, count, mode: requests.append((fmt,byte_en,address,count,mode))
+
+    result = controller.pcie_mem_read(0x1000,4 * STREAM + 4)
+
+    self.assertEqual(requests,[(0x20,0x0f,0x1000,STREAM,2),(0x20,0x0f,0x1000 + 4 * STREAM,1,2)])
+    self.assertEqual(reads,[4 * STREAM,4])
+    self.assertEqual(len(result),4 * STREAM + 4)
+    self.assertEqual(result[:4],b'\x01' * 4)
+    self.assertEqual(result[-4:],b'\x02' * 4)
 
 if __name__ == '__main__': unittest.main()
