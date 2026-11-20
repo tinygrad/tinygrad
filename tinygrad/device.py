@@ -357,13 +357,10 @@ class Compiled:
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
 
   serialize_hcq = False
-  cache_hcq = True
   enqueue_copies = True
 
   @property
   def has_copy_queue(self) -> bool: return True
-
-  def post_link(self, input_uops:list[Any]): pass
 
   @property
   def host(self) -> str: return f"CPU:{self.peer_group[7:]}" if self.peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.device

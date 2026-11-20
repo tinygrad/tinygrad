@@ -212,7 +212,9 @@ class USBMMIOInterface(MMIOInterface):
       # writes are whole dwords
       if len(data) % 4 or off % 4:
         start, end = off & ~3, round_up(off+len(data),4)
-        aligned = bytearray(self.usb.pcie_mem_read(self.addr+start,end-start))
+        aligned = bytearray(end-start)
+        if off != start: aligned[:4] = self.usb.pcie_mem_read(self.addr+start,4)
+        if end != off+len(data) and (off == start or end-start > 4): aligned[-4:] = self.usb.pcie_mem_read(self.addr+end-4,4)
         aligned[off-start:off-start+len(data)] = data
         off, data = start, aligned
       self.usb.pcie_mem_write(self.addr+off, data)

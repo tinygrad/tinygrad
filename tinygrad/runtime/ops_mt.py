@@ -13,7 +13,7 @@ from tinygrad.runtime.support.system import PCIDevice, USBPCIDevice, System, fil
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.engine.realize import get_call_kernel_args
-from tinygrad.runtime.autogen import mtfw, libc
+from tinygrad.runtime.autogen import libc
 
 # **** mtdev ****
 
@@ -395,24 +395,19 @@ CDM_EXECUTION_ADDRESS = 0x81e0e00000
 
 def build_submission(launch_id:int=1, execution_address:int=CDM_EXECUTION_ADDRESS) -> bytes:
   """Build one compute submission with its CDM kick and error region."""
-  head = mtfw.MTFW_SUBMISSION_HEAD()
-  head.timestampAddr = 0x8000438200
-  head.fwCswBufer = 0x6800000000
-  head.retryCount = 0xffffffff
-  head.subRegionDescStartOffset = 0x58
-  head.subRegionDescNums = 2
-  head.frameId = 0
-  head.cbId = launch_id
-  head.processId = 0
+  head = bytearray(0x58)
+  struct.pack_into('<II',head,36,0xffffffff,0x58)
+  struct.pack_into('<I',head,44,2)
+  struct.pack_into('<Q',head,56,launch_id)
 
-  cdm = mtfw.MTFW_SUBMISSION_REGION_DESC()
-  cdm.regionType = 2  # MTFW_SUB_REGION_CDM
-  cdm.regionStart.offset = 0xa0
-  cdm.regionSize = 0x198
-  error = mtfw.MTFW_SUBMISSION_REGION_DESC()
-  error.regionType = 10  # MTFW_SUB_REGION_ERROR_BUFFER
-  error.regionStart.gpuAddr = execution_address
-  error.regionSize = 8
+  cdm = bytearray(24)
+  struct.pack_into('<I',cdm,0,2)  # MTFW_SUB_REGION_CDM
+  struct.pack_into('<I',cdm,8,0xa0)
+  struct.pack_into('<I',cdm,16,0x198)
+  error = bytearray(24)
+  struct.pack_into('<I',error,0,10)  # MTFW_SUB_REGION_ERROR_BUFFER
+  struct.pack_into('<Q',error,8,execution_address)
+  struct.pack_into('<I',error,16,8)
 
   kick = bytearray(0x1a8)
   struct.pack_into('<QQ',kick,0x18,0x1800000000,0x2000000001)
@@ -434,7 +429,7 @@ def build_submission(launch_id:int=1, execution_address:int=CDM_EXECUTION_ADDRES
   struct.pack_into('<Q',kick,0x198,0x207820c000)
   struct.pack_into('<I',kick,0x1a0,0x200)
 
-  raw = bytearray(bytes(head).ljust(0x58,b'\0'))
+  raw = head
   struct.pack_into('<Q',raw,0x8,0)
   struct.pack_into('<Q',raw,0x10,0x8000438200)
   struct.pack_into('<Q',raw,0x18,0x6800000000)
@@ -466,12 +461,24 @@ class MTFirmwareLayout:
     self.watchdog = self.gpu + 0x4c0
     self.ccb = FWIF_OFF + 0x40ee0
 
+def build_firmware(lay:MTFirmwareLayout) -> bytes:
+  fw = bytearray(0x40ee0)
+  for off,fmt,value in [(16,'<Q',META_BASE+lay.watchdog),(24,'<Q',META_BASE+lay.ccb),(64,'<I',5),(159336,'<Q',META_BASE+lay.trace),
+                        (159352,'<Q',META_BASE+lay.perf),(159368,'<I',1),(159376,'<Q',META_BASE+lay.fault),(159384,'<Q',META_BASE+lay.gpu),
+                        (159440,'<I',25),(159444,'<I',1600000000)]: struct.pack_into(fmt,fw,off,value)
+  cfg = 159456
+  for off,count,base in [(8,2,0),(24,4,0x200),(56,6,0x600),(104,8,0xc00),(168,10,0x1400),(248,12,0x1e00),(344,14,0x2a00),(456,16,0x3800)]:
+    for i in range(count): struct.pack_into('<Q',fw,cfg+off+i*8,0xd9bfff0000|base+i*0x100)
+  for off,value in [(584,0xe0ffe00000),(592,0xda00000000),(600,0xe000000000),(608,0xec00000000),
+                    (616,0xec40000000),(624,0xb000000000),(632,0xeb00000000)]: struct.pack_into('<Q',fw,cfg+off,value)
+  struct.pack_into('<I',fw,cfg+640,0xfff80000)
+  return bytes(fw)
+
 class MTFirmware:
   def __init__(self, dev:MTDev, path:str|None=None, core_count:int=8, prepare:bool=True, mmu:MTMMU4|None=None, v=None):
     self.dev, self.path, self.core_count = dev, path or os.environ.get('MT_FIRMWARE', DEFAULT_FIRMWARE), core_count
     if prepare and not pathlib.Path(self.path).is_file():
-      raise FileNotFoundError(f'MT firmware not found at {self.path}. Install mtfw-gen1.bin or set MT_FIRMWARE; '
-                              'set MT_FIRMWARE to its location')
+      raise FileNotFoundError(f'MT firmware not found at {self.path}; set MT_FIRMWARE to mtfw-gen1.bin')
     self.layout = MTFirmwareLayout(core_count)
     self.v = self.dev.pci_dev.map_bar(2, off=FW_BASE, size=INIT_SIZE, fmt='B') if v is None else v
     self.mmu = MTMMU4(ROOT_BASE) if mmu is None else mmu
@@ -486,26 +493,8 @@ class MTFirmware:
     self.v[:len(raw)] = raw
     for start,end in [(FWIF_OFF,lay.trace),(lay.trace,lay.trace+0x1000),(lay.perf,lay.perf+0x1000),
                       (lay.fault,lay.watchdog+0x1000),(0x400000,0x410000)]: self.v[start:end] = bytes(end-start)
-    fw = mtfw.struct_MTFW_FWIF_TAG()
-    fw.watchDog = META_BASE + lay.watchdog
-    fw.ccbQueueArrayAddr, fw.ccbQueueArrayNum = META_BASE + lay.ccb, 5
-    fw.traceBufAddr = META_BASE + lay.trace
-    fw.metaPerfEventBufCtrlArray, fw.metaPerfEventBufCtrlNum = META_BASE + lay.perf, 1
-    fw.faultDumpBuffer, fw.gpuUtilBufAddr = META_BASE + lay.fault, META_BASE + lay.gpu
-    fw.socTimerFreq, fw.gpuFrequence = 25, 1600000000
-    fw.multicoreClusterMask = 0
-    cfg = fw.fwCfgs.cfg
-    cfg.version, cfg.flags.value = 0, 0
-    for name,count,base in [('flStateAddrsSCG',2,0),('flStateAddrsMCG2',4,0x200),('flStateAddrsMCG3',6,0x600),
-                            ('flStateAddrsMCG4',8,0xc00),('flStateAddrsMCG5',10,0x1400),('flStateAddrsMCG6',12,0x1e00),
-                            ('flStateAddrsMCG7',14,0x2a00),('flStateAddrsMCG8',16,0x3800)]:
-      for i in range(count): getattr(cfg, name)[i] = 0xd9bfff0000 | base + i * 0x100
-    cfg.yuvCoefficientAddr = 0xe0ffe00000
-    cfg.pdsHeapBaseAddr, cfg.uscHeapBaseAddr = 0xda00000000, 0xe000000000
-    cfg.fbcdcHeapBaseAddr, cfg.fbcdcLargeHeapBaseAddr = 0xec00000000, 0xec40000000
-    cfg.texStateHeapBaseAddr, cfg.componentCtrlHeapBaseAddr = 0xb000000000, 0xeb00000000
-    cfg.dmKillShaderOffset = 0xfff80000
-    self.v[FWIF_OFF:FWIF_OFF+fw.SIZE] = bytes(fw)
+    fw = build_firmware(lay)
+    self.v[FWIF_OFF:FWIF_OFF+len(fw)] = fw
     self.v[lay.trace:lay.trace+128] = struct.pack('<32I', *([0xffffffff] * 32))
     self.v[lay.trace+0x17d20:lay.trace+0x17d20+128] = struct.pack('<32I', *([1] * 32))
     self.v[lay.fault+0x8208:lay.fault+0x8210] = struct.pack('<Q', META_BASE + lay.dump)
@@ -594,6 +583,16 @@ class MTFirmware:
 
 MT_TOKEN_BASE = 0x103
 MT_HOST_PRIVATE = 0x4d544e4f50
+MT_CCB_ITEM_SIZE = 0x5b0
+
+def build_ccb_item(generation:int, submission_size:int) -> bytes:
+  item = bytearray(MT_CCB_ITEM_SIZE)
+  struct.pack_into('<I',item,8,104)
+  struct.pack_into('<Q',item,24,MT_HOST_PRIVATE)
+  struct.pack_into('<QQ',item,56,ROOT_BASE,generation)
+  struct.pack_into('<Q',item,1376,SUBMISSION_VA)
+  struct.pack_into('<I',item,1384,submission_size)
+  return bytes(item)
 
 @dataclasses.dataclass
 class MTCCB:
@@ -774,8 +773,7 @@ class MTLaunch(MTFirmware):
       self._write(0x138, 0xffffffff, 4)
       self._write(0xe160, 0)
       self._write(0xe198, 0)
-      ci = mtfw.MTFW_CCB_ITEM()
-      self.ccb = MTCCB(self.layout.item + 3 * 4096 * ci.SIZE, self.layout.ccb + 3 * 0x4030)
+      self.ccb = MTCCB(self.layout.item + 3 * 4096 * MT_CCB_ITEM_SIZE, self.layout.ccb + 3 * 0x4030)
 
 # **** generated ****
 
@@ -1206,14 +1204,9 @@ class MTComputeQueue(HWQueue):
       idx = link.index(2).load()
       seq = link.index(3).load()
       token = (MT_TOKEN_BASE+seq).cast(dtypes.u64)
-      ci = mtfw.MTFW_CCB_ITEM()
-      ci.submissionCmd,ci.ccbItemToken,ci.hostPrivateData,ci.processId = 104,0,MT_HOST_PRIVATE,0
-      sp = ci.ccbItemPara.submissionPara
-      sp.pageTableRootAddr,sp.pageTableGeneration = ROOT_BASE,generation
-      sp.submissionQueueId,sp.submissionAddr,sp.submissionSize,sp.qSempOutofOrder = 0,SUBMISSION_VA,len(packet),1
-      item_size = ci.SIZE
-      item = UOp.alloc((ci.SIZE,),dtypes.u8,device='CPU')
-      item = patch(item,[(16,token)],bytes(ci))
+      item_size = MT_CCB_ITEM_SIZE
+      item = UOp.alloc((item_size,),dtypes.u8,device='CPU')
+      item = patch(item,[(16,token)],build_ccb_item(generation,len(packet)))
       add(usb_stream(link.after(deps),UOp.const(launch.v.addr+ccb.item_off,dtypes.u64),item,UOp.const(item_size,dtypes.int),True))
       args_off = launch.backing_offsets[ARGS_VA]
       add(usb_stream(link,UOp.const(launch.backing.addr+args_off,dtypes.u64),deps,UOp.const(0x1000,dtypes.int),True))
@@ -1253,7 +1246,6 @@ class MTDevice(Compiled):
   renderers = [MUSARenderer]
   timestamp_divider = 25
   serialize_hcq = True
-  cache_hcq = False
   enqueue_copies = False
   def __init__(self, device:str=''):
     dev_id = int(device.split(':')[1]) if ':' in device else 0
@@ -1305,12 +1297,6 @@ class MTDevice(Compiled):
     assert isinstance(host_buf,Buffer)
     host = host_buf.host.view(fmt='q')
     if host[5]: raise RuntimeError(f'MT USB error: {host[5]}, fault={self._fault()}')
-
-  def post_link(self, input_uops:list[UOp]) -> None:
-    for launch in self.launch_order:
-      if launch.mmu_dirty:
-        launch.upload_mmu()
-        launch.mmu_dirty = False
 
   def ensure_started(self, launch:MTGeneratedLaunch):
     if self.current_launch is not launch:
