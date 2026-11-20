@@ -81,7 +81,8 @@ class TestLrScheduler(unittest.TestCase):
     opts['total_steps'] = epochs
     self._test_lr_scheduler(OneCycleLR, torch.optim.lr_scheduler.OneCycleLR, epochs, opts, atol, rtol)
 
-  def test_multisteplr(self): self._test_multisteplr(10, {'milestones': [1, 2, 7]}, 1e-6, 1e-6)
+  # repeated milestones apply a decay for each occurrence
+  def test_multisteplr(self): self._test_multisteplr(10, {'milestones': [1, 1, 2, 7]}, 1e-6, 1e-6)
   def test_multisteplr_gamma(self): self._test_multisteplr(10, {'milestones': [1, 2, 7], 'gamma': 0.1337}, 1e-6, 1e-6)
 
   def test_reducelronplateau(self): self._test_reducelronplateau(100, {}, 1e-6, 1e-6)
