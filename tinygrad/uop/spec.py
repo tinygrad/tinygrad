@@ -213,7 +213,7 @@ spec_program = PatternMatcher([
   (UPat(GroupOp.Movement), lambda: False),
 
   # REG/LOCAL buffer
-  (UPat((Ops.BUFFER, Ops.ALLOC), src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
+  (UPat(Ops.BUFFER, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
