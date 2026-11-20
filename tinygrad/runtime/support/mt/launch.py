@@ -29,6 +29,7 @@ class MTLaunch(MTFirmware):
   pds_data_offsets:list[int]
   generated_image:MTKernelImage
   cache_activations:int
+  submission_template:Any
   _active:MTLaunch|None = None
   _loaded:MTLaunch|None = None
 

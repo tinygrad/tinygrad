@@ -210,6 +210,18 @@ class MTComputeQueue(HWQueue):
       link = link.after(op)
     root_addr = self.dev.mt.pci_dev.bar_info(2)[0]+0x30000000
     poll_in_hcq = not self.cacheable or len(self.submissions) > 1 or bool(self.timestamp_slots)
+    template_key = None
+    if not poll_in_hcq and len(self.submissions) == 1:
+      launch,deps,packet,write_map,generation,_,grid_deps = self.submissions[0]
+      if grid_deps is None:
+        previous = self.dev.uploaded_write_map
+        changed_key = tuple(sorted((off,data) for off,data in write_map.items()
+                                   if off != launch.backing_offsets[0x81e1200000] and previous.get(off) != data))
+        template_key = (packet,generation,tuple(sorted(write_map.items())),changed_key,self.deps,tuple(self.signals))
+        if (cached:=getattr(launch,'submission_template',None)) is not None and cached[0] == template_key:
+          self.dev.poll_in_hcq = False
+          self.dev.uploaded_write_map = write_map
+          return cached[2].substitute({cached[1]:deps},walk=True)
     for i,(launch,deps,packet,write_map,generation,mmu_pages,grid_deps) in enumerate(self.submissions):
       ccb = launch.ccb
       assert ccb is not None
@@ -282,7 +294,9 @@ class MTComputeQueue(HWQueue):
       add(link.index(3).store(seq+1))
       self.dev.uploaded_write_map = write_map
     for signal,value in self.signals: add(signal.index(0).store(value))  # type: ignore[assignment]
-    return UOp.sink(UOp.barrier(*self.deps,*ops))
+    ret = UOp.sink(UOp.barrier(*self.deps,*ops))
+    if template_key is not None: launch.submission_template = (template_key,deps,ret)
+    return ret
 
 
 def mt_lower_call(call:UOp) -> UOp:
