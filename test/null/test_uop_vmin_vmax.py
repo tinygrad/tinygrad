@@ -183,6 +183,11 @@ class TestVminVmaxProperties(unittest.TestCase):
     # a possibly-negative operand is not bounded
     self.assertEqual((UOp.variable('x', -1, 10) ^ 16)._min_max, (dtypes.weakint.min, dtypes.weakint.max))
 
+  def test_vmin_vmax_or_grid_index(self):
+    lo, hi = UOp.variable('lo', 0, 255, dtypes.uint32), UOp.variable('hi', 0, 7, dtypes.uint32)
+    self.assertEqual((lo | (hi << 8))._min_max, (0, 2047))
+    self.assertEqual((UOp.variable('x', -1, 255) | 256)._min_max, (dtypes.weakint.min, dtypes.weakint.max))
+
   def test_vmin_vmax_cast(self):
     x = UOp.variable('x', -10, 10, dtypes.int)
     x_float = x.cast(dtypes.float)

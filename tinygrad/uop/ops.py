@@ -1086,7 +1086,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         if s1_vmax < 0: return (s1_vmin+1, 0)
       if self.op is Ops.XOR and s1_vmin == s1_vmax == -1 and isinstance(s0_vmin, int) and isinstance(s0_vmax, int):
         return wrapped(self.dtype, ~int(s0_vmax), ~int(s0_vmin))
-      if self.op is Ops.XOR and dtypes.is_int(self.dtype) and s0_vmin >= 0 and s1_vmin >= 0:
+      if self.op in (Ops.OR, Ops.XOR) and dtypes.is_int(self.dtype) and s0_vmin >= 0 and s1_vmin >= 0:
         return 0, (1 << int(max(s0_vmax, s1_vmax)).bit_length()) - 1
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
       # bounds never prove a float compare true since nan compares false
