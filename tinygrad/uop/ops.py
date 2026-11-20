@@ -242,7 +242,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.GETADDR: return cast("Buffer", self.src[0].buffer).get_buf(to_tuple(self.arg)[0])
     # a casted const CAST(dt, CONST(v)) is one const: .val reads the value through the CAST
     assert self.op is Ops.CAST and self.src[0].op is Ops.CONST, f"val is only for consts, got {self.op}"
-    return self.src[0].val
+    return self.dtype.const(self.src[0].val)
   @property
   def is_invalid(self) -> bool: return self.op is Ops.CONST and self.val is Invalid
   @recursive_property
@@ -1126,17 +1126,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _sym_fxn(self):
     from tinygrad.uop.render import _render_with_splits, renderer_infer
     sself = self.simplify()
-    varnames = tuple(dedup(x.expr for x in sself.toposort() if x.op in {Ops.PARAM, Ops.EXTERN} and x.arg.addrspace == AddrSpace.ALU))
-    # TODO: sanitize varnames, or don't use naked eval while staying fast
     ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
     lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
-    ns: dict[str, Any] = {"max": max, "truncdiv": cdiv, "truncmod": cmod, "div": floordiv, "mod": floormod, "bitcast": bitcast, "dtypes": dtypes}
-    exec(f"def _f({','.join(varnames)}):\n"+'\n'.join(lines), ns)  # pylint: disable=exec-used
-    return ns["_f"], varnames
+    ns: dict[str, Any] = {"max": max, "truncdiv": cdiv, "truncmod": cmod, "div": floordiv, "mod": floormod, "bitcast": bitcast,
+                          "dtypes": dtypes, "exec_alu": exec_alu, "Ops": Ops}
+    exec("def _f(values):\n"+'\n'.join(lines), ns)  # pylint: disable=exec-used
+    return ns["_f"]
 
-  def sym_infer(self, var_vals:dict[str, int]):
-    fxn, varnames = self._sym_fxn
-    return fxn(**{k:v for k,v in var_vals.items() if k in varnames})
+  def sym_infer(self, var_vals:dict[str, int]): return self._sym_fxn(var_vals)
 
   def render(self, simplify=True, pm:PatternMatcher|None=None) -> str:
     ctx: dict[UOp, str] = {}

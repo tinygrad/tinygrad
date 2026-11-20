@@ -552,8 +552,8 @@ def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
   return _write_host(buf, [(o.val * w.dtype.itemsize, struct.pack(w.dtype.fmt, truncate[w.dtype](w.val))) for o, w in zip(offs.src, ws.src)])
 
 pm_resolve_link = PatternMatcher([
-  # collapse committed const conversions
-  (UPat(Ops.CAST, src=(UPat(Ops.CAST, src=(UPat.cvar(),), name="inner"),), name="c"), lambda c, inner: inner.src[0].cast(c.dtype)),
+  # collapse committed const conversions, the inner cast truncates
+  (UPat.cvar().cast(name="x").cast(name="c"), lambda c,x: UOp.const(x.val, c.dtype)),
   # an alloc and an extern become buffers
   (UPat(Ops.ALLOC, name="b"), bufferize_buf),
   (UPat(Ops.EXTERN, name="b"), resolve_extern),

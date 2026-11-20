@@ -1297,6 +1297,20 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(c.bitcast(dtypes.int), {c.expr: 0xFFFFFFFF}) == -1
 
     assert sym_infer(UOp.const(1.5).cast(dtypes.float).bitcast(dtypes.uint), {}) == 1069547520
+  def test_sym_infer_typed_ints_wrap(self):
+    # sized ints wrap like they do on the device
+    n = Variable("n", 0, 1000, dtypes.int)
+    assert sym_infer(n.cast(dtypes.uint8).cast(dtypes.int), {n.expr: 300}) == 44
+    x, y = Variable("x", 0, 255, dtypes.uint8), Variable("y", 0, 255, dtypes.uint8)
+    assert sym_infer((x*y).cast(dtypes.int), {x.expr: 16, y.expr: 16}) == 0
+  def test_sym_infer_var_names_dont_shadow(self):
+    # a Variable's name can't shadow the helpers the inferred function uses
+    m, b = Variable("max", -10, 10), Variable("b", -10, 10)
+    assert sym_infer(m.maximum(b)+1, {"max": 3, "b": 5}) == 6
+    e = Variable("exec_alu", 0, 1000, dtypes.int)
+    assert sym_infer(e.cast(dtypes.uint8).cast(dtypes.int), {"exec_alu": 300}) == 44
+  def test_sym_infer_unbound(self):
+    with self.assertRaises(KeyError): sym_infer(Variable("a", 0, 10)+1, {})
   def test_sym_infer_deeply_nested(self):
     # build an expression that exceeds Python's nested parentheses limit for eval
     # max(x, negative_const) can't be simplified when x can be negative, so nesting compounds
