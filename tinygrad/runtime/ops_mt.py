@@ -13,7 +13,7 @@ from tinygrad.runtime.support.system import PCIDevice, USBPCIDevice, System, fil
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.engine.realize import get_call_kernel_args
-from tinygrad.runtime.autogen import mtfw, mtregs, mtpds, libc
+from tinygrad.runtime.autogen import mtfw, mtregs, mtpds, mtcdm, libc
 
 def mt_off(typ, name:str) -> int: return next(f[2] for f in typ._real_fields_ if f[0] == name)
 
@@ -794,7 +794,8 @@ class MTLaunch(MTFirmware):
     local_mem = k['.shared_memory_size']
     blocks = max(1,(local_mem+63)//64)
     register_blocks = k['.shared_reg_count']//16+1
-    for field,value in [(0x00,2),(0x04,0x406002),(0x08,0x3500),(0x18,0x2000000|register_blocks),
+    for field,value in [(0x00,mtcdm.ROGUE_CDMCTRL_USC_TARGET_ANY<<1),(0x04,0x406000|mtcdm.ROGUE_CDMCTRL_SD_TYPE_USC),
+                        (0x08,0x3500),(0x18,0x2000000|register_blocks),
                         (0x20,0x101085),(0x24,0x406010),(0x28,0x3580),(0x38,(0x1000 if has_block else 0)+blocks),
                         (0x40,0x80000000)]: self._write_backing(off+field,struct.pack('<I',value))
 
