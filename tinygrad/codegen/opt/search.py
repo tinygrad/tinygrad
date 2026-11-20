@@ -2,7 +2,7 @@ import math, time, traceback, signal
 from dataclasses import replace
 from tinygrad.uop.ops import sym_infer, AxisType, UOp, Ops
 from tinygrad.device import Device
-from tinygrad.dtype import AddrSpace
+from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str, IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.engine.realize import time_call
@@ -122,10 +122,10 @@ def beam_search(s:Scheduler, amt:int, allow_test_size=True):
   try:
     var_vals = {p.expr:int(p.vmax+p.vmin)//2 for p in s.ast.variables()}
     params = {p.arg.slot:p for p in s.ast.toposort() if p.op is Ops.PARAM and p.arg.slot >= 0}
-    args = [UOp.variable("_unused", 0, 0)] * (max(params, default=-1)+1)
+    # a scalar gets the middle of its range, an unused slot a placeholder
+    args = [UOp.const(0, dtypes.int)] * (max(params, default=-1)+1)
     for i,p in params.items():
-      if p.addrspace is AddrSpace.ALU: args[i] = p.bind(var_vals[p.expr]) if p.is_variable else UOp.const(var_vals[p.expr], p.dtype)
-      else: args[i] = UOp.new_buffer(s.ren.target.device, p.max_numel(), p.dtype)
+      args[i] = UOp.const(var_vals[p.expr], p.dtype) if p.addrspace is AddrSpace.ALU else UOp.new_buffer(s.ren.target.device, p.max_numel(), p.dtype)
     exiting, st = False, time.perf_counter()
     dev = Device[s.ren.target.device]
     while not exiting:

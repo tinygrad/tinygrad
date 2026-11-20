@@ -1,6 +1,7 @@
 import functools, itertools
 from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, ALLREDUCE_NODE_NDEVS, getenv
-from tinygrad.uop.ops import UOp
+from tinygrad.uop.ops import UOp, Ops
+from tinygrad.dtype import AddrSpace
 
 # *** allreduce implementation ***
 def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
@@ -71,8 +72,6 @@ def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|Non
   to = red.param_like(0)
   src = buf.param_like(1)
   red = src.allreduce(*red.arg)
-  # Symbolic dimensions in the views belong to the caller. Pass them after the two storage arguments.
-  body = to.after(to.store(handle_allreduce(src, red))).sink()
-  dims = [v for v in body.variables() if v.arg.slot >= 0]
-  body = body.substitute({v:v.param_like(i+2) for i,v in enumerate(dims)}, walk=True)
-  return output.after(body.call(output.base, buf.contiguous(), *dims, name="allreduce", precompile=True))
+  call = to.after(to.store(handle_allreduce(src, red))).sink().call(output.base, buf.contiguous(), name="allreduce", precompile=True)
+  # symbolic dims in the views are the caller's scalars, they are args after the storage
+  return output.after(call.lift_args([u for u in call.body.toposort() if u.op in {Ops.PARAM, Ops.EXTERN} and u.addrspace is AddrSpace.ALU]))

@@ -1228,6 +1228,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # an external C call is a CALL on a NATIVE body stating the (possibly void) return dtype, the callee
     # (a function pointer) in source, rendered as an indirect call
     return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, inline, hcq))
+  def lift_args(self, free:list[UOp]) -> UOp:
+    """the CALL's body reads these from the enclosing scope: each becomes a PARAM at a new slot and its value an arg after the others.
+    the value of a DEVICE range is the device number, bound per device at launch"""
+    free = dedup(free)
+    args = [UOp.variable("_device_num", 0, u.vmax, u.dtype) if u.op is Ops.RANGE else u for u in free]
+    params = {u:a.param_like(len(self.src)-1+i) for i,(u,a) in enumerate(zip(free, args))}
+    return self.replace(src=(self.body.substitute(params, walk=True), *self.src[1:], *args))
 
   @staticmethod
   def call_with_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
@@ -1285,13 +1292,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return tuple(sorted(params, key=lambda p: p.arg.slot))
 
   def scalar_arg(self, p:UOp) -> UOp:
-    # Positional parameters read the call slot. Free Variables (including _device_num) are supplied by name.
-    if p.arg.name is None or not p.is_variable: a = self.src[1+p.arg.slot]
-    else: a = next((s for s in self.src[1:] if s.is_bound_var and s.arg.name == p.arg.name), p.replace(arg=replace(p.arg, slot=-1)))
-    return UOp.const(a.arg.val, p.dtype) if a.is_bound_var else a
+    # a scalar param is the call's arg at its slot, a bound Variable passes its value
+    if p.arg.slot+1 >= len(self.src): raise RuntimeError(f"scalar param {p.expr} at slot {p.arg.slot} has no arg, the call passes {len(self.src)-1}")
+    return UOp.const(a.arg.val, p.dtype) if (a:=self.src[1+p.arg.slot]).is_bound_var else a
 
   def bind_symbols(self, x):
-    return x.substitute({p:self.scalar_arg(p).ccast(p.dtype) for p in x.variables()}, walk=True).ssimplify() if isinstance(x, UOp) else x
+    # the scalar params in x (launch sizes, estimates) become this call's args
+    if not isinstance(x, UOp): return x
+    return x.substitute({p:self.scalar_arg(p).ccast(p.dtype) for p in x.variables() if p.op is Ops.PARAM and p.arg.slot >= 0}, walk=True).ssimplify()
 
   @property
   def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL else self.src

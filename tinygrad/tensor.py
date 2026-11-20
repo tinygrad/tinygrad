@@ -8,6 +8,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtyp
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
 from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
+from tinygrad.uop.ops import KernelInfo, AxisType
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.codegen import create_linear, contiguous_mops_to_view
 from tinygrad.engine.realize import run_linear, capturing
@@ -33,12 +34,18 @@ def canonicalize_alloc(ctx:ExportCtx, b:UOp) -> UOp|None:
   if b.arg.slot >= 0 and b not in ctx.allocs: ctx.allocs[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.allocs)))
   return ctx.allocs.get(b)
 
+def export_call(ctx:ExportCtx, c:UOp) -> UOp:
+  # a call body is its own scope for ALLOC slots, the EXTERNs are shared
+  c = c.replace(src=(graph_rewrite(c.body, pm_export, ctx=ExportCtx(ctx.externs), bottom_up=True, name="export call body"),)+c.src[1:])
+  # what it reads from the enclosing scope, the EXTERNs, the free Variables and a kernel's device number, are its args. nested calls are done
+  kernel = isinstance(c.body.arg, KernelInfo)
+  return c.lift_args([u for u in c.body.toposort() if u.op is Ops.EXTERN or (u.is_variable and u.arg.slot == -1) or
+                      (kernel and u.op is Ops.RANGE and u.axis_type is AxisType.DEVICE)])
+
 pm_export: PatternMatcher = PatternMatcher([
   (UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern),
   (UPat(Ops.ALLOC, name="b"), canonicalize_alloc),
-  # a call body is its own scope for ALLOC slots, the EXTERNs are shared
-  (UPat(Ops.CALL, name="c"), lambda ctx,c:
-   c.replace(src=(graph_rewrite(c.body, pm_export, ctx=ExportCtx(ctx.externs), bottom_up=True, name="export call body"),)+c.src[1:])),
+  (UPat(Ops.CALL, name="c"), export_call),
 ])
 
 def bind_alloc(b:UOp) -> UOp:
@@ -60,14 +67,13 @@ pm_map_back = PatternMatcher([
 
 def map_back(linear:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, dict[str, int]]:
   # the EXTERNs become the storage and the bound Variables of this invocation, ALLOCs get fresh storage
-  linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, enter_calls=True, name="map back")
+  linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, name="map back")
+  # the values of the bound Variables the linear uses, they are call args
+  used_vars = {v.expr for si in linear.src for v in UOp.sink(*si.src[1:]).variables()}
   var_vals: dict[str, int] = {}
-  if bound := [b for b in externs if b.is_bound_var]:
-    # Include free Variables read by custom kernels, even if scheduling removed the AFTER that carried their binding.
-    used = {u.arg.name for u in linear.toposort(enter_calls=True) if u.is_variable and u.arg.slot == -1}
-    for b in bound:
-      if b.expr in used and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
-        raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
+  for b in externs:
+    if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
+      raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
   return linear, var_vals
 
 # *** all in scope Tensors are here. this gets relevant UOps ***

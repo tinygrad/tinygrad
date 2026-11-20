@@ -542,6 +542,7 @@ def _unwrap_src(s: UOp) -> UOp:
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
+  if s.op is Ops.CONST: return []  # a constant arg, e.g. the device number of one device, reads no buffer
   assert s.op in GroupOp.Defines|{Ops.AFTER}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
 
