@@ -292,7 +292,7 @@ class IR3Renderer(NIRRenderer):
      lambda ctx,img,idx_y,idx_x,val: nstore_img(ctx.b, ctx.r[img], ctx.r[idx_y], ctx.r[idx_x], ctx.r[val], val.dtype)),
     (UPat(Ops.LOAD, src=(UPat.var('img').index(UPat.var('idx_y'), UPat.var('idx_x')), UPat.var("alt"), UPat.var("gate"))),
      lambda ctx,img,idx_y,idx_x,alt,gate: if_phi(ctx.b, ctx.r[gate], lambda: ctx.nload_img(img, idx_y, idx_x), lambda: ctx.r[alt])),
-    (UPat(Ops.LOAD, src=(UPat.var('img').index(UPat.var('idx_y'), UPat.var('idx_x')),)), nload_img),
+    (UPat(Ops.LOAD, src=(UPat.var('img').index(UPat.var('idx_y'), UPat.var('idx_x')),)), lambda ctx,img,idx_y,idx_x: ctx.nload_img(img,idx_y,idx_x)),
   ]) + NIRRenderer.def_rewrite
 
   _param = LVPRenderer.param
@@ -321,9 +321,14 @@ class IR3Renderer(NIRRenderer):
   def supported_dtypes(self): return {d for d in NIRRenderer.supported_dtypes(self) if d != dtypes.double}
 
 class MALIRenderer(IR3Renderer):
+  code_for_op = {k:v for k,v in NIRRenderer.code_for_op.items() if k != Ops.SIN}
   has_local, has_shared = True, True
   global_max, local_max = (65535, 65535, 65535), (256, 256, 256)
   shared_max = 32768
+
+  def nload_img(ctx,img,idx_y,idx_x):
+    ctx.texs.add(img)
+    return _nload_img(ctx.b, ctx.r[img], ctx.r[idx_y], ctx.r[idx_x], dtypes.float)
 
   def postrender(self, uops:list[UOp]):
     super().postrender(uops)

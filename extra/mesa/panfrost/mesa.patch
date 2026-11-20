@@ -3,7 +3,7 @@ index 746951c..d283839 100644
 --- a/src/compiler/clc/clc_helpers.cpp
 +++ b/src/compiler/clc/clc_helpers.cpp
 @@ -47,6 +47,9 @@
-
+ 
  #include <clang/Config/config.h>
  #include <clang/Driver/Driver.h>
 +#if LLVM_VERSION_MAJOR >= 23
@@ -114,7 +114,7 @@ index dd8ff95..005e815 100644
 -  gnu_symbol_visibility : 'hidden',
    link_with: [libpanfrost_versions],
  )
-
+ 
 diff --git a/src/gallium/drivers/panfrost/pan_cmdstream.c b/src/gallium/drivers/panfrost/pan_cmdstream.c
 index 5f354f0..c84b68d 100644
 --- a/src/gallium/drivers/panfrost/pan_cmdstream.c
@@ -134,9 +134,9 @@ index 5f354f0..c84b68d 100644
 -
     return ubos.gpu;
  }
-
+ 
 @@ -4474,3 +4474,27 @@ GENX(panfrost_cmdstream_screen_init)(struct panfrost_screen *screen)
-
+ 
     dev->precomp_cache = GENX(panfrost_precomp_cache_init)(screen);
  }
 +
@@ -170,7 +170,7 @@ index 29e8956..c71b257 100644
 @@ -139,6 +139,10 @@ struct panfrost_context {
     /* Sync obj used to keep track of in-flight jobs. */
     uint32_t syncobj;
-
+ 
 +   /* Timeline point used by the raw panthor compute queue. */
 +   uint64_t raw_syncpoint;
 +   uint32_t raw_sync_handle;
@@ -181,7 +181,7 @@ index 29e8956..c71b257 100644
 @@ -449,6 +453,14 @@ struct panfrost_shader_binary {
     struct util_dynarray binary;
  };
-
+ 
 +/* Externally compiled compute shader for the native Gallium compute path. */
 +struct panfrost_native_shader {
 +   struct pan_shader_info info;
@@ -206,21 +206,21 @@ index 53a1838..5fb8729 100644
  #include "pan_fb_preload.h"
  #include "pan_job.h"
 diff --git a/src/gallium/drivers/panfrost/pan_helpers.c b/src/gallium/drivers/panfrost/pan_helpers.c
-index 6139216..0e99261 100644
+index 6139216..74b6ad0 100644
 --- a/src/gallium/drivers/panfrost/pan_helpers.c
 +++ b/src/gallium/drivers/panfrost/pan_helpers.c
 @@ -22,7 +22,10 @@
   */
-
+ 
  #include "util/u_vbuf.h"
 +#include <sys/ioctl.h>
 +#include <drm/panthor_drm.h>
  #include "pan_context.h"
 +#include "pan_public.h"
-
+ 
  void
  panfrost_analyze_sysvals(struct panfrost_compiled_shader *ss)
-@@ -262,3 +265,317 @@ panfrost_track_image_access(struct panfrost_batch *batch,
+@@ -262,3 +265,344 @@ panfrost_track_image_access(struct panfrost_batch *batch,
        panfrost_batch_read_rsrc(batch, rsrc, stage);
     }
  }
@@ -538,13 +538,40 @@ index 6139216..0e99261 100644
 +{
 +   return pan_compute_max_thread_count(&pan_device(screen)->kmod.props, work_reg_count);
 +}
++
++
++bool
++panfrost_nir_has_float_compare(struct nir_shader *shader)
++{
++   nir_foreach_function(function, shader) {
++      if (!function->impl) continue;
++      nir_foreach_block(block, function->impl) {
++         nir_foreach_instr(instr, block) {
++            if (instr->type != nir_instr_type_alu) continue;
++            nir_alu_instr *alu = nir_instr_as_alu(instr);
++            switch (alu->op) {
++            case nir_op_flt:
++            case nir_op_fge:
++            case nir_op_feq:
++            case nir_op_fneu:
++            case nir_op_fmax:
++            case nir_op_fmin:
++               return true;
++            default:
++               break;
++            }
++         }
++      }
++   }
++   return false;
++}
 diff --git a/src/gallium/drivers/panfrost/pan_jm.c b/src/gallium/drivers/panfrost/pan_jm.c
 index af01674..1016ada 100644
 --- a/src/gallium/drivers/panfrost/pan_jm.c
 +++ b/src/gallium/drivers/panfrost/pan_jm.c
 @@ -375,7 +375,7 @@ GENX(jm_launch_grid)(struct panfrost_batch *batch,
  #endif
-
+ 
     unsigned indirect_dep = 0;
 -#if PAN_GPU_SUPPORTS_DISPATCH_INDIRECT
 +#if 0 /* tinyMali only uses direct grid launches */
@@ -552,14 +579,15 @@ index af01674..1016ada 100644
        uint64_t indirect_buffer_addr =
           pan_resource(info->indirect)->plane.base + info->indirect_offset;
 diff --git a/src/gallium/drivers/panfrost/pan_public.h b/src/gallium/drivers/panfrost/pan_public.h
-index 587fc3f..673e02d 100644
+index 587fc3f..7d13b14 100644
 --- a/src/gallium/drivers/panfrost/pan_public.h
 +++ b/src/gallium/drivers/panfrost/pan_public.h
-@@ -28,10 +28,30 @@
+@@ -28,10 +28,32 @@
  extern "C" {
  #endif
-
+ 
 +#include <stdint.h>
++#include <stdbool.h>
 +
  struct pipe_screen;
  struct pipe_screen_config;
@@ -569,8 +597,9 @@ index 587fc3f..673e02d 100644
 +struct pipe_grid_info;
 +struct pipe_sampler_view;
 +struct pipe_image_view;
++struct nir_shader;
  struct renderonly;
-
+ 
 +uint64_t panfrost_resource_address(struct pipe_resource *resource);
 +struct pipe_context *panfrost_compute_bind(struct pipe_context *ctx, void *state);
 +struct pipe_context *panfrost_compute_set_constants(struct pipe_context *ctx, const struct pipe_constant_buffer *cb, void *args);
@@ -586,9 +615,9 @@ index 587fc3f..673e02d 100644
  struct pipe_screen *
  panfrost_create_screen(int fd, const struct pipe_screen_config *config,
                         struct renderonly *ro);
-@@ -41,3 +61,37 @@ panfrost_create_screen(int fd, const struct pipe_screen_config *config,
+@@ -41,3 +63,39 @@ panfrost_create_screen(int fd, const struct pipe_screen_config *config,
  #endif
-
+ 
  #endif
 +
 +struct pipe_context *panfrost_buffer_write(struct pipe_context *ctx, uint64_t address, const void *data, unsigned size);
@@ -619,6 +648,8 @@ index 587fc3f..673e02d 100644
 +
 +unsigned panfrost_max_threads(struct pipe_screen *screen, unsigned work_reg_count);
 +
++bool panfrost_nir_has_float_compare(struct nir_shader *shader);
++
 +
 +struct mali_texture_packed;
 +struct mali_sampler_packed;
@@ -639,7 +670,7 @@ index 549380f..675df88 100644
 @@ -244,6 +245,15 @@ panfrost_resource_destroy(struct pipe_screen *screen, struct pipe_resource *pt)
     struct panfrost_device *dev = pan_device(screen);
     struct panfrost_resource *rsrc = (struct panfrost_resource *)pt;
-
+ 
 +   simple_mtx_lock(&pan_screen(screen)->resources_mutex);
 +   for (struct panfrost_resource **cur = &pan_screen(screen)->resources; *cur; cur = &(*cur)->next_resource) {
 +      if (*cur == rsrc) {
@@ -651,18 +682,18 @@ index 549380f..675df88 100644
 +
     if (rsrc->scanout)
        renderonly_scanout_destroy(rsrc->scanout, dev->ro);
-
+ 
 @@ -1165,6 +1175,10 @@ panfrost_resource_create_with_modifier(struct pipe_screen *screen,
     if (template->bind & PIPE_BIND_INDEX_BUFFER)
        so->index_cache = CALLOC_STRUCT(pan_minmax_cache);
-
+ 
 +   simple_mtx_lock(&pan_screen(screen)->resources_mutex);
 +   so->next_resource = pan_screen(screen)->resources;
 +   pan_screen(screen)->resources = so;
 +   simple_mtx_unlock(&pan_screen(screen)->resources_mutex);
     return (struct pipe_resource *)so;
  }
-
+ 
 @@ -2522,6 +2536,7 @@ static const struct u_transfer_vtbl transfer_vtbl = {
  void
  panfrost_resource_screen_init(struct pipe_screen *pscreen)
@@ -678,7 +709,7 @@ index 549380f..675df88 100644
 +   simple_mtx_destroy(&pan_screen(pscreen)->resources_mutex);
     u_transfer_helper_destroy(pscreen->transfer_helper);
  }
-
+ 
 @@ -2560,3 +2576,24 @@ panfrost_resource_context_init(struct pipe_context *pctx)
     pctx->clear_render_target = panfrost_clear_render_target;
     pctx->clear_depth_stencil = panfrost_clear_depth_stencil;
@@ -709,7 +740,7 @@ index 1521ca2..b84a327 100644
 --- a/src/gallium/drivers/panfrost/pan_resource.h
 +++ b/src/gallium/drivers/panfrost/pan_resource.h
 @@ -64,6 +64,7 @@ struct pan_afbcp {
-
+ 
  struct panfrost_resource {
     struct pipe_resource base;
 +   struct panfrost_resource *next_resource;
@@ -728,16 +759,16 @@ index e1c17c6..3d369b1 100644
 +   struct panfrost_resource *resources;
 +   simple_mtx_t resources_mutex;
  };
-
+ 
  static inline struct panfrost_screen *
 diff --git a/src/gallium/drivers/panfrost/pan_shader.c b/src/gallium/drivers/panfrost/pan_shader.c
 index 543199e..30cf32e 100644
 --- a/src/gallium/drivers/panfrost/pan_shader.c
 +++ b/src/gallium/drivers/panfrost/pan_shader.c
 @@ -51,16 +51,18 @@ panfrost_alloc_shader(const nir_shader *nir)
-
+ 
     so->nir = nir;
-
+ 
 -   /* Serialize the NIR to a binary blob that we can hash for the disk
 -    * cache. Drop unnecessary information (like variable names) so the
 -    * serialized NIR is smaller, and also to let us detect more isomorphic
@@ -760,7 +791,7 @@ index 543199e..30cf32e 100644
 +      _mesa_sha1_compute(blob.data, blob.size, so->nir_sha1);
 +      blob_finish(&blob);
 +   }
-
+ 
     return so;
  }
 @@ -588,6 +590,27 @@ panfrost_create_compute_state(struct pipe_context *pctx,
@@ -798,7 +829,7 @@ index 064bce8..97742c1 100644
 @@ -3436,6 +3436,59 @@ emit_elect(struct ntv_context *ctx, nir_intrinsic_instr *intr)
     store_def(ctx, intr->def.index, result, nir_type_bool);
  }
-
+ 
 +static void
 +emit_load_ubo(struct ntv_context *ctx, nir_intrinsic_instr *intr)
 +{
@@ -858,7 +889,7 @@ index 064bce8..97742c1 100644
 @@ -3472,6 +3525,10 @@ emit_intrinsic(struct ntv_context *ctx, nir_intrinsic_instr *intr)
        emit_load_push_const(ctx, intr);
        break;
-
+ 
 +   case nir_intrinsic_load_ubo:
 +      emit_load_ubo(ctx, intr);
 +      break;
@@ -877,7 +908,7 @@ index 064bce8..97742c1 100644
 +      sinfo = &default_sinfo;
 +   }
     struct spirv_shader *ret = NULL;
-
+ 
     struct ntv_context ctx = {0};
 diff --git a/src/gallium/winsys/panfrost/drm/meson.build b/src/gallium/winsys/panfrost/drm/meson.build
 index 1e98cef..b6b0005 100644
@@ -896,7 +927,7 @@ index 70bf495..ef8798a 100644
 +++ b/src/meson.build
 @@ -176,3 +176,4 @@ if with_glx != 'disabled' and not with_glvnd
  endif
-
+ 
  subdir('tool')
 +subdir('tinymesa')
 diff --git a/src/panfrost/compiler/bi_validate.c b/src/panfrost/compiler/bi_validate.c
@@ -906,7 +937,7 @@ index 99c61a0..8515c34 100644
 @@ -129,7 +129,10 @@ bi_validate_width(bi_context *ctx)
           unsigned v = I->src[s].value;
           unsigned n = bi_count_read_registers(I, s);
-
+ 
 -         if (width[v] != n) {
 +         if (width[v] != n &&
 +             !(I->op == BI_OPCODE_IADD_U32 && s == 1 && n == 1 && width[v] == 2 &&
@@ -922,7 +953,7 @@ index 2c5497d..3f3a39c 100644
 @@ -172,7 +172,10 @@ bi_extract(bi_builder *b, bi_index vec, unsigned channel)
     if (components == NULL && channel == 0)
        return vec;
-
+ 
 -   assert(components != NULL && "missing bi_cache_collect()");
 +   if (components == NULL) {
 +      vec.swizzle = channel;
@@ -930,7 +961,7 @@ index 2c5497d..3f3a39c 100644
 +   }
     return components[channel];
  }
-
+ 
 diff --git a/src/panfrost/compiler/meson.build b/src/panfrost/compiler/meson.build
 index 3769f06..0da4e37 100644
 --- a/src/panfrost/compiler/meson.build
@@ -942,7 +973,7 @@ index 3769f06..0da4e37 100644
 -  gnu_symbol_visibility : 'hidden',
    build_by_default : false,
  )
-
+ 
 diff --git a/src/panfrost/compiler/valhall/meson.build b/src/panfrost/compiler/valhall/meson.build
 index 3bddb28..fef264d 100644
 --- a/src/panfrost/compiler/valhall/meson.build
@@ -954,7 +985,7 @@ index 3bddb28..fef264d 100644
 -  gnu_symbol_visibility : 'hidden',
    build_by_default : false,
  )
-
+ 
 diff --git a/src/panfrost/lib/meson.build b/src/panfrost/lib/meson.build
 index b10bc2d..6e17928 100644
 --- a/src/panfrost/lib/meson.build
@@ -1026,7 +1057,7 @@ index bf67bf1..a15403c 100644
 -  gnu_symbol_visibility : 'hidden',
    build_by_default : false,
  )
-
+ 
 @@ -304,7 +303,6 @@ _libmesa_util = static_library(
    dependencies : deps_for_libmesa_util,
    link_with: [libmesa_util_simd],
@@ -1034,7 +1065,7 @@ index bf67bf1..a15403c 100644
 -  gnu_symbol_visibility : 'hidden',
    build_by_default : false
  )
-
+ 
 @@ -341,7 +339,6 @@ _libxmlconfig = static_library(
        join_paths(get_option('prefix'), get_option('datadir'))
      ),
@@ -1042,7 +1073,7 @@ index bf67bf1..a15403c 100644
 -  gnu_symbol_visibility : 'hidden',
    build_by_default : false,
  )
-
+ 
 @@ -358,7 +355,6 @@ devenv.set('DRIRC_CONFIGDIR', meson.current_source_dir())
  _libparson = static_library(
    'parson',
@@ -1050,4 +1081,4 @@ index bf67bf1..a15403c 100644
 -  gnu_symbol_visibility : 'hidden',
    build_by_default : false,
  )
-
+ 

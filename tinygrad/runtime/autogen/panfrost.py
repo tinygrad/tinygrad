@@ -4,7 +4,7 @@ import ctypes, os, sysconfig
 from typing import Literal
 from tinygrad.runtime.support import c
 from tinygrad.runtime.support.c import record
-from tinygrad.runtime.autogen.mesa import struct_nir_shader_compiler_options
+from tinygrad.runtime.autogen.mesa import struct_nir_shader_compiler_options, struct_nir_shader
 
 dll = c.DLL('panfrost', os.getenv('MESA_PATH', 'tinymesa'), os.path.join(sysconfig.get_paths()['platlib'], 'tinymesa'), emsg='pip install tinymesa==25.2.7.2')
 
@@ -171,6 +171,8 @@ def panfrost_compute_tls_info(ctx:c.POINTER[struct_pipe_context], cso:ctypes.c_v
 def panfrost_context_group_handle(ctx:c.POINTER[struct_pipe_context]) -> int: ...
 @dll.bind(ctypes.c_uint32, c.POINTER[struct_pipe_screen], ctypes.c_uint32)
 def panfrost_max_threads(screen:c.POINTER[struct_pipe_screen], work_reg_count:int) -> int: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_nir_shader])
+def panfrost_nir_has_float_compare(shader:c.POINTER[struct_nir_shader]) -> bool: ...
 @dll.bind(None, c.POINTER[struct_pipe_context], c.POINTER[struct_pipe_sampler_view], ctypes.c_void_p)
 def panfrost_make_texture_desc(ctx:c.POINTER[struct_pipe_context], tmpl:c.POINTER[struct_pipe_sampler_view], out:ctypes.c_void_p) -> None: ...
 @dll.bind(None, ctypes.c_void_p, ctypes.c_void_p)

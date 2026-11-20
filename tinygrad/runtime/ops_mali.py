@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any
-import base64, ctypes, os, struct, time
+import base64, ctypes, os, struct, time, itertools
 from tinygrad.device import Compiled, BufferStorage, BufferSpec, HostAllocator, Program, MMIOInterface
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.helpers import suppress_finalizing, is_image_shape, from_mv, to_tuple, next_power2
@@ -142,12 +142,17 @@ def mali_run(buf:UOp, cmds:tuple, ctx:UOp) -> UOp:
 
 def mali_buffer(address, size): return struct.pack('<IIQIIII', 9 | (1 << 4), size, address, 0, 0, 0, 0)
 
+def mali_texture_desc(width:int, height:int, itemsize:int) -> bytes:
+  return struct.pack('<IIIIQII', 0x37c00022 if itemsize == 2 else 0x2fc00022, (width - 1) | ((height - 1) << 16), 0x688, 0, 0, 0, 0)
+
 # Direct Valhall CSF command queue.
+RAW_QUEUE_NONCE = itertools.count()
 class MALIRawQueue(HWQueue):
   dev:MALIDevice
   def __init__(self, submit:UOp):
     super().__init__(submit)
     self.cmds:list[tuple] = []
+    self.nonce = next(RAW_QUEUE_NONCE)
     self.ctx = UOp.const(ctypes.addressof(self.dev.ctx.contents), dtypes.u64)
 
   def move32(self, reg:int, value:Any):
@@ -171,13 +176,17 @@ class MALIRawQueue(HWQueue):
 
   def write(self, address:UOp, value:UOp, size:int):
     self.cmds.append((pt.panthor_write, (address, value, UOp.const(size, dtypes.u32))))
+  def store64(self, address:UOp, value:UOp):
+    self.move48(88, address)
+    self.move48(90, value)
+    self.q(UOp.const((21 << 56) | (3 << 16) | (88 << 40) | (90 << 48), dtypes.u64)) # STORE_MULTIPLE: 64 bits
 
   def exec(self, call:UOp, prg:UOp):
     obj = TinyELF.from_program(prg)
     data = self.dev.program(obj)
     args = get_call_kernel_args(call, prg, self.devs)
     def alloc(size:int, tag:str): return make_program(prg, size, self.devs[0], tag, call.key)
-    total_args = data.arg_size + 4 * len(data.vendor_fau)
+    total_args = max(16, data.arg_size + 4 * len(data.vendor_fau))
     rows = layout_args(args) + [(data.arg_size + 4 * i, UOp.const(v, dtypes.u32)) for i, v in enumerate(data.vendor_fau)]
     argbuf = patch(alloc(total_args, 'kernargs'), [], bytes(total_args))
     for off, word in rows: self.write(argbuf.getaddr(self.devs) + off, word, word.dtype.itemsize)
@@ -189,30 +198,32 @@ class MALIRawQueue(HWQueue):
     sampler_desc = patch(sampler_desc, [], bytes(sampler))
     textures:list[tuple] = []
     images:list[tuple] = []
-    for i, (width, height, itemsize, _) in enumerate(data.image_info):
+    image_params = sorted(enumerate(data.image_info), key=lambda x: (data.buffer_slots[x[0]] not in prg.arg.outs, x[0]))
+    has_images = any(x[1][2] for x in image_params)
+    for i, (width, height, itemsize, _) in image_params:
       if not itemsize: continue
-      dummy = self.dev.allocator.alloc(16, BufferSpec())
-      fmt = pf.PIPE_FORMAT_R16G16B16A16_FLOAT if itemsize == 2 else pf.PIPE_FORMAT_R32G32B32A32_FLOAT
-      tex2d = pf.struct_pipe_tex2d_from_buf(offset=0, row_stride=width, width=width, height=height)
-      tmpl = pf.struct_pipe_sampler_view(format=fmt, target=pf.PIPE_TEXTURE_2D, is_tex2d_from_buf=True,
-        swizzle_r=0, swizzle_g=1, swizzle_b=2, swizzle_a=3, texture=dummy.buf.resource, context=self.dev.ctx, u=tex2d)
-      out = (ctypes.c_ubyte * 32)()
-      pf.panfrost_make_texture_desc(self.dev.ctx, ctypes.byref(tmpl), out)
-      resource = call.src[1 + data.buffer_slots[i]].getaddr(self.devs)
-      (textures if len(textures) < data.num_samplers else images).append((out, resource))
-      self.dev.allocator.free(dummy, 16, BufferSpec())
+      resource = args[data.buffer_slots[i]]
+      payload = alloc(64, f'{self.nonce:x}_{i}')
+      payload = patch(payload, [(0, UOp.const((3 if itemsize == 2 else 4) << 24 | 0x21a, dtypes.u32)),
+        (4, UOp.const(width * height * itemsize * 4, dtypes.u32)), (16, UOp.const(width * itemsize * 4, dtypes.u32)),
+        (24, UOp.const((width - 1) | ((height - 1) << 16), dtypes.u32))], bytes(64))
+      self.store64(payload.getaddr(self.devs) + 8, resource)
+      desc = mali_texture_desc(width, height, itemsize)
+      is_texture = data.buffer_slots[i] not in prg.arg.outs
+      if is_texture: textures.append((desc, payload, resource))
+      images.append((desc, payload, resource))
     resources = alloc(128, 'resources')
     resource_rows = [(0, ubodesc.getaddr(self.devs) | (1 << 56)), (8, UOp.const(32, dtypes.u64)),
                      (48, sampler_desc.getaddr(self.devs) | (1 << 56)), (56, UOp.const(32, dtypes.u64))]
     if textures:
       texture_desc = alloc(32 * len(textures), 'texture')
-      texture_desc = patch(texture_desc, [], b''.join(map(bytes, textures)))
-      for i, (_, resource) in enumerate(textures): self.write(texture_desc.getaddr(self.devs) + 16 + 32 * i, resource, 8)
+      texture_desc = patch(texture_desc, [(16 + 32 * i, payload.getaddr(self.devs)) for i, (_, payload, _) in enumerate(textures)],
+        b''.join(x[0] for x in textures))
       resource_rows += [(64, texture_desc.getaddr(self.devs) | (1 << 56)), (72, UOp.const(32 * len(textures), dtypes.u64))]
     if images:
       image_desc = alloc(32 * len(images), 'image')
-      image_desc = patch(image_desc, [], b''.join(map(bytes, images)))
-      for i, (_, resource) in enumerate(images): self.write(image_desc.getaddr(self.devs) + 16 + 32 * i, resource, 8)
+      image_desc = patch(image_desc, [(16 + 32 * i, payload.getaddr(self.devs)) for i, (_, payload, _) in enumerate(images)],
+        b''.join(x[0] for x in images))
       resource_rows += [(80, image_desc.getaddr(self.devs) | (1 << 56)), (88, UOp.const(32 * len(images), dtypes.u64))]
     resources = patch(resources, resource_rows, bytes(128))
     word_args = {}
@@ -266,6 +277,7 @@ class MALIRawQueue(HWQueue):
         break
       task_threads *= global_size[i]
       axis += 1
+    if has_images: self.q(UOp.const((3 << 56) | (1 << 16), dtypes.u64)) # wait for descriptor stores
     self.q(UOp.const((4 << 56) | increment | (axis << 14), dtypes.u64)) # RUN_COMPUTE
     self.q(UOp.const((3 << 56) | (0xff << 16), dtypes.u64))
     self.move32(74, 0)
@@ -339,7 +351,7 @@ class MALIDevice(Compiled):
       raise RuntimeError(f'MALI syncobj creation failed: {ctypes.get_errno()}')
     self.sync_handle = sync.handle
     pt.panthor_set_sync_handle(self.ctx, self.sync_handle)
-    super().__init__(device, MALIAllocator(self), None, arch="g610")
+    super().__init__(device, MALIAllocator(self), None, arch="g610,IMAGE_PITCH_ALIGNMENT=64")
     self.var_vals = {'panthor_fd': self.fd, 'panthor_group': self.group_handle, 'panthor_sync': self.sync_handle}
 
   def program(self, obj:TinyELF) -> MALIProgram:

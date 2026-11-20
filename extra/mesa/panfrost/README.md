@@ -1,8 +1,8 @@
 # Python Panfrost backend
 
-`DEV=MALI` uses tinygrad's HCQ2 queue and `panfrost.py` bindings to call Mesa's existing NIR and Gallium APIs over `/dev/dri/renderD128` (panthor). Kernel arguments and launches are patched into one command stream. There is no custom C backend, OpenCL, Rusticl, or `mali_kbase`.
+`DEV=MALI` uses tinygrad's HCQ2 queue and `panfrost.py` bindings over `/dev/dri/renderD128` (panthor). The runtime builds direct Valhall CSF command streams in Python, including compute state, descriptors, image surfaces, and runtime pointer updates, then submits them with `DRM_IOCTL_PANTHOR_GROUP_SUBMIT`. Mesa provides compilation and resource helpers, not a Gallium launch queue. There is no custom C backend, OpenCL, Rusticl, or `mali_kbase`.
 
-Arm's compiler can optionally be used for supported non-shared-memory kernels (the rest still use Mesa):
+Arm's compiler can optionally be used for supported non-shared-memory kernels; shared-memory, image-using, and floating-comparison kernels use Mesa. Mali uses explicit FP16/FP32 image shapes from `image_conv2d`; generic automatic image conversion is disabled until storage-image descriptors are supported:
 
 ```sh
 export CMPBE_PATH="$HOME/mali-userspace/usr/lib/aarch64-linux-gnu/libmali.so.1.9.0"

@@ -47,7 +47,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   k = k.copy()
 
   # upcast float4 images, this must be early so we don't accidentally add locals before the upcast
-  if IMAGE:
+  if IMAGE and k.ren.target.device != 'MALI':
     for buf_index,buf in enumerate(k.bufs):
       if image_valid_dims(buf.src[0].dtype, buf.src[0].max_numel(), k.ren.target.arch):
         idx = k.bufs[buf_index].src[1]

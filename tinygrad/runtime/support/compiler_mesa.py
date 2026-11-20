@@ -98,9 +98,9 @@ def compile_mali_vendor(src, nir_options):
 
   nir = deserialize(src, nir_options)
   info = nir.contents.info
-  if info.shared_size:
+  if info.shared_size or info.num_images or info.num_textures or pf.panfrost_nir_has_float_compare(nir):
     mesa.ralloc_free(nir)
-    return src.encode()  # Arm's WLS/reconvergence is incorrect for tinygrad reductions.
+    return src.encode()  # Mesa handles WLS/reconvergence, images, and floating comparisons correctly.
   metadata = struct.pack('<4sIIII', b'MLV1', info.shared_size, info.num_textures, info.num_images,
                          info.uses_control_barrier or info.uses_memory_barrier)
   mesa.nir_convert_from_ssa(nir, True, False)
@@ -147,7 +147,7 @@ def compile_mali_vendor(src, nir_options):
 
 class MALICompiler(Compiler):
   def __init__(self, arch):
-    assert arch in ("g610", "10"), f"unsupported Mali architecture {arch}"
+    assert arch.split(',')[0] in ("g610", "10"), f"unsupported Mali architecture {arch}"
     self.nir_options = bytes(mesa.pan_shader_get_compiler_options(10).contents)
     super().__init__(f"compile_mali_{'vendor_' if getenv('MALI_VENDOR') else ''}{arch}")
 
