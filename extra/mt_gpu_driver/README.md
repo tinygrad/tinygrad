@@ -62,6 +62,10 @@ python3 src/imagination/csbgen/gen_pack_header.py \
 
 The equivalent Meson target is `src/imagination/csbgen/rogue_cdm.h`, generated when the `imagination-experimental` Vulkan driver is enabled. The vendored file is the exact output of that target.
 
+## Arch210 compatibility headers
+
+`cuda_bf16.h` and `cuda_fp16.h` are tinygrad-authored compatibility shims for the MTT S80's arch210 target. They provide float-backed math and conversions where MUSA exposes the corresponding CUDA operations only for arch220 or later. They are not vendor headers and are not used for other architectures.
+
 ## Regenerating Python bindings
 
 From the tinygrad repository root, regenerate every MT binding and require a clean diff:
