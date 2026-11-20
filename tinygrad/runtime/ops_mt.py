@@ -362,7 +362,8 @@ def _doutd_src1(ao:int, bsize:int, last:int=0, wordsize:int=0, dest:int=0, cmode
 def _doutu_src0(exe_off:int, temps:int=0, sample_rate:int=0, dual_phase:int=0) -> int:
   return (dual_phase<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTU_SRC0_DUAL_PHASE_SHIFT) | \
     (temps<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTU_SRC0_TEMPS_SHIFT) | \
-    (sample_rate<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTU_SRC0_SAMPLE_RATE_SHIFT) | (exe_off<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTU_SRC0_EXE_OFF_SHIFT)
+    (sample_rate<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTU_SRC0_SAMPLE_RATE_SHIFT) | \
+    (exe_off<<mtpds.PVR_ROGUE_PDSINST_DOUT_FIELDS_DOUTU_SRC0_EXE_OFF_SHIFT)
 
 def _sp(op:int, cc:int=0, payload:int=0) -> int:
   return (mtpds.PVR_ROGUE_PDSINST_OPCODEC_SP<<28) | (op<<23) | (cc<<27) | payload
@@ -1140,7 +1141,8 @@ class MTCompiler:
       # use its scalar constructors and replace math/operators with float-backed arch210 implementations.
       for name in ('cuda_fp16.h','cuda_bf16.h'):
         (include/name).write_text((pathlib.Path(__file__).parents[2]/'extra/mt_gpu_driver'/name).read_text())
-      self._run([str(self.bin/'mcc'), '-O3', '-mllvm', '-mtgpu-enable-const-calc=false', f'--musa-path={self.musa_path}', '--offload-arch=mp_21', f'-I{include}',
+      self._run([str(self.bin/'mcc'), '-O3', '-mllvm', '-mtgpu-enable-const-calc=false', f'--musa-path={self.musa_path}',
+                 '--offload-arch=mp_21', f'-I{include}',
                  '-c', str(src), '-o', str(obj)], td)
       return self.extract_raw(obj,td)
 
