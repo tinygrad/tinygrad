@@ -497,10 +497,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 pm_linearize_cleanups = PatternMatcher([
   # if statements are not allowed in the graph
   (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
-  # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF (a gate of each lane of a vector is the renderer's)
+  # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
   (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
-   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))])
-   if gate._shape == () else None),
+   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))])),
   # ALLOC becomes a distinct BUFFER before rendering
   (UPat(Ops.ALLOC, name="x"), lambda ctx,x: ((buf:=x.replace(op=Ops.BUFFER, arg=replace(x.arg, slot=next(ctx)))), [buf])),
 ])

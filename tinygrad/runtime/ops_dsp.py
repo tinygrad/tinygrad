@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, functools, os, mmap, tempfile, pathlib, array, threading, contextlib, subprocess, struct, math, itertools, hashlib, operator
+import ctypes, functools, os, mmap, tempfile, pathlib, array, threading, contextlib, subprocess, struct, math, itertools, hashlib
 import types, time, traceback
 from typing import cast, Any
 from tinygrad.device import BufferStorage, MMIOInterface, BufferSpec, Compiled, Allocator, HCQ_RUNTIME_DEV
@@ -113,11 +113,6 @@ def gather(ctx:DSPRenderer, items:list) -> str:
   for o in range(0, vpad(n)*isz, 128):
     src = [(v, i*isz + j % isz) for j in range(o, min(o+128, n*isz)) for v,i in [unwrap(lanes[j // isz])]]
     pairs = dedup([(v, sb // 128) for v,sb in src])
-    # (consecutive bytes of a register, or of two, are it rotated: valignb)
-    pos = [pairs.index((v, sb // 128))*128 + sb % 128 for v,sb in src]
-    if pos and len(pairs) <= 2 and pos == list(range(pos[0], pos[0] + len(pos))):
-      outs.append(reg(*pairs[0]) if pos[0] == 0 else f"V6(valignb)({reg(*pairs[-1])}, {reg(*pairs[0])}, {pos[0]})")
-      continue
     ret = ""
     for k in range(0, len(pairs), 2):
       pr = pairs[k:k+2]
@@ -142,41 +137,19 @@ HVX_PRELUDE = """typedef long HVX_Vector __attribute__((__vector_size__(128))); 
 typedef int hvx_w __attribute__((ext_vector_type(32)));
 typedef unsigned char hvx_ub __attribute__((aligned(128),ext_vector_type(128)));
 typedef int hvx_w128 __attribute__((aligned(512),ext_vector_type(128)));
-__attribute__((unused)) static inline __attribute__((always_inline))
-hvx_w128 vrmpy4(hvx_w128 acc, hvx_ub x0, hvx_ub x1, hvx_ub x2, hvx_ub x3, unsigned w) {
-  HVX_VectorPair s01 = V6(vshuffvdd)((HVX_Vector)x1, (HVX_Vector)x0, -1), s23 = V6(vshuffvdd)((HVX_Vector)x3, (HVX_Vector)x2, -1);
-  HVX_VectorPair q0 = V6(vshuffvdd)(V6(lo)(s23), V6(lo)(s01), -2), q1 = V6(vshuffvdd)(V6(hi)(s23), V6(hi)(s01), -2);
-  HVX_Vector a[4]; __builtin_memcpy(a, &acc, sizeof(a));
-  a[0] = V6(vrmpyub_acc)(a[0], V6(lo)(q0), w); a[1] = V6(vrmpyub_acc)(a[1], V6(hi)(q0), w);
-  a[2] = V6(vrmpyub_acc)(a[2], V6(lo)(q1), w); a[3] = V6(vrmpyub_acc)(a[3], V6(hi)(q1), w);
-  __builtin_memcpy(&acc, a, sizeof(a)); return acc; }
-__attribute__((unused)) static inline __attribute__((always_inline)) void interleave4(HVX_Vector *v, hvx_ub x0, hvx_ub x1, hvx_ub x2, hvx_ub x3) {
-  HVX_VectorPair s01 = V6(vshuffvdd)((HVX_Vector)x1, (HVX_Vector)x0, -1), s23 = V6(vshuffvdd)((HVX_Vector)x3, (HVX_Vector)x2, -1);
-  HVX_VectorPair q0 = V6(vshuffvdd)(V6(lo)(s23), V6(lo)(s01), -2), q1 = V6(vshuffvdd)(V6(hi)(s23), V6(hi)(s01), -2);
-  v[0] = V6(lo)(q0); v[1] = V6(hi)(q0); v[2] = V6(lo)(q1); v[3] = V6(hi)(q1); }
-__attribute__((unused)) static inline __attribute__((always_inline))
-hvx_w128 vrmpy4v(hvx_w128 acc, hvx_ub x0, hvx_ub x1, hvx_ub x2, hvx_ub x3, hvx_ub w0, hvx_ub w1, hvx_ub w2, hvx_ub w3) {
-  HVX_Vector a[4], x[4], w[4]; __builtin_memcpy(a, &acc, sizeof(a));
-  interleave4(x, x0, x1, x2, x3); interleave4(w, w0, w1, w2, w3);
-  for (int i = 0; i < 4; i++) a[i] = V6(vrmpyubv_acc)(a[i], x[i], w[i]);
-  __builtin_memcpy(&acc, a, sizeof(a)); return acc; }
-__attribute__((unused)) static inline __attribute__((always_inline)) void store_m(unsigned char *p, HVX_Vector v, HVX_Vector m, int n) {
-  // the bytes of the first n of v that are set in m to p, any alignment: the parts in the two vector registers of memory with predicates
+__attribute__((unused)) static inline __attribute__((always_inline)) void store_n(unsigned char *p, HVX_Vector v, int n) {
+  // the first n bytes of v to p, any alignment: the parts in the two vector registers of memory with predicates
   unsigned off = (unsigned)p & 127; HVX_Vector *a = (HVX_Vector*)(p - off), z = V6(vd0)();
+  HVX_Vector m = n >= 128 ? V6(lvsplatw)(-1) : V6(vandqrt)(V6(pred_scalar2)(n), -1);
   V6(vS32b_qpred_ai)(V6(vandvrt)(V6(vlalignb)(m, z, off), 0x01010101), a, V6(vlalignb)(v, z, off));
   if (off + n > 128) V6(vS32b_qpred_ai)(V6(vandvrt)(V6(vlalignb)(z, m, off), 0x01010101), a+1, V6(vlalignb)(z, v, off)); }
-__attribute__((unused)) static inline __attribute__((always_inline)) void store_n(unsigned char *p, HVX_Vector v, int n) {
-  store_m(p, v, n >= 128 ? V6(lvsplatw)(-1) : V6(vandqrt)(V6(pred_scalar2)(n), -1), n); }
 // the bytes x of a:b (256 bytes): vlut32 looks up 32 entries a time, entry 32s+j of a table vector is at byte 2j+64(s&1)+(s>>1)
-// (the halves of each 128 entries interleaved). and t[x] for each byte x of a table t of 256 bytes
+// (the halves of each 128 entries interleaved)
 __attribute__((unused)) static inline __attribute__((always_inline)) HVX_Vector vperm(HVX_Vector a, HVX_Vector b, HVX_Vector x) {
   HVX_Vector ta = (HVX_Vector)__builtin_shufflevector((hvx_ub)a, (hvx_ub)a, LUT_PERM);
   HVX_Vector tb = (HVX_Vector)__builtin_shufflevector((hvx_ub)b, (hvx_ub)b, LUT_PERM), r = V6(vlutvvb)(x, ta, 0);
   for (int i = 1; i < 8; i++) r = V6(vlutvvb_oracc)(r, x, i < 4 ? ta : tb, i);
   return r; }
-__attribute__((unused)) static inline __attribute__((always_inline)) hvx_ub lut256(hvx_ub x, const unsigned char *t) {
-  typedef unsigned char hvx_ub_u __attribute__((aligned(1),ext_vector_type(128)));
-  return (hvx_ub)vperm((HVX_Vector)*(const hvx_ub_u*)t, (HVX_Vector)*(const hvx_ub_u*)(t+128), (HVX_Vector)x); }
 __attribute__((unused)) static inline __attribute__((always_inline)) hvx_w mulhi_w(hvx_w a, hvx_w c) {
   HVX_VectorPair p = V6(vmpyewuh_64)((HVX_Vector)a, (HVX_Vector)c); p = V6(vmpyowh_64_acc)(p, (HVX_Vector)a, (HVX_Vector)c);
   return (hvx_w)V6(hi)(p); }""".replace("LUT_PERM", ",".join(str(p//2 + 64*(p%2)) for p in range(128)))
@@ -209,41 +182,6 @@ def mulhi(x:UOp, a:UOp, c:UOp, s:UOp) -> UOp|None:
   ret = concat(parts, 32)
   return UOp.native(ret if vpad(n) == 32*len(parts) else shuffle(ret, ret, range(n)), shape=x.shape, dtype=x.dtype, fmt=True) \
     .call(a.src[0], *([] if isinstance(cv, int) else [c]))
-
-def vrmpy_sum(x:UOp) -> UOp|None:
-  # a sum of products of bytes is vrmpy: the sum of 4 products per lane, a vector of bytes times 4 scalar bytes
-  if not (is_vec(x) and x.dtype == dtypes.int32 and vpad(x.max_numel()) == 128): return None
-  def terms(u:UOp) -> list[UOp]: return terms(u.src[0]) + terms(u.src[1]) if u.op is Ops.ADD and u.shape == x.shape else [u]
-  def u8vec(u:UOp) -> UOp|None: return u.src[0] if u.op is Ops.CAST and u.src[0].dtype == dtypes.uint8 and u.src[0].shape == x.shape else None
-  prods: list[tuple[UOp, UOp]] = []
-  sums: list[UOp] = []
-  rest: list[UOp] = []
-  vprods: list[tuple[UOp, UOp]] = []
-  for t in terms(x):
-    if t.op is Ops.MUL and (p:=next(((v, w) for a,b in (t.src, t.src[::-1])
-                                     if (v:=u8vec(a)) is not None and (w:=narrow(b, dtypes.uint8)) is not None), None)):
-      prods.append(p)
-    elif t.op is Ops.MUL and (v:=u8vec(t.src[0])) is not None and (w:=u8vec(t.src[1])) is not None: vprods.append((v, w))
-    elif (v:=u8vec(t)) is not None: sums.append(v)
-    else: rest.append(t)
-  if len(prods) + len(sums) + len(vprods) < 3: return None
-  groups = [prods[i:i+4] for i in range(0, len(prods), 4)] + [[(v, UOp.const(1, dtypes.uint8)) for v in sums[i:i+4]] for i in range(0, len(sums), 4)]
-  acc = functools.reduce(UOp.__add__, rest) if rest else None
-  for vg in [vprods[i:i+4] for i in range(0, len(vprods), 4)]:
-    # a product of two vectors of bytes: both interleaved, vrmpy of the vectors (a missing product is the first with weights 0)
-    o, zero = int(acc is not None), "((hvx_ub)(0))"
-    args = [f"{{{o+i}}}" if i < len(vg) else zero for i in range(4)] + [f"{{{o+len(vg)+i}}}" if i < len(vg) else zero for i in range(4)]
-    fn = UOp.native("vrmpy4v(" + ("{0}" if acc is not None else "((hvx_w128)(0))") + "".join(", "+a for a in args) + ")",
-                             shape=x.shape, dtype=x.dtype, fmt=True)
-    acc = fn.call(*([acc] if acc is not None else []), *[a for a,_ in vg], *[b for _,b in vg])
-  for g in groups:
-    g = g + [(g[0][0], UOp.const(0, dtypes.uint8))] * (4 - len(g))
-    w = functools.reduce(UOp.__or__, [b.cast(dtypes.uint32) << (8*i) if i else b.cast(dtypes.uint32) for i,(_,b) in enumerate(g)])
-    o = int(acc is not None)
-    fn = UOp.native("vrmpy4(" + ("{0}" if o else "((hvx_w128)(0))") + "".join(f", {{{i+o}}}" for i in range(5)) + ")",
-                             shape=x.shape, dtype=x.dtype, fmt=True)
-    acc = fn.call(*([acc] if acc is not None else []), *[a for a,_ in g], w)
-  return acc
 
 # vrmpy tensor core: A is 4 rows of 128 bytes, interleaved to 4 vectors of [32][4] bytes. B is 4 bytes per column, C a row of 128 int per column
 def render_vrmpy(name:str, dims:tuple[int, int, int], a:str, b:str, c:str, signed_b:bool) -> str:
@@ -288,33 +226,12 @@ def render_range(ctx:DSPRenderer, x:UOp) -> str|None:
   i, n = ctx[x], ctx[x.src[0]]
   return f"for ({ctx.render_dtype(x.dtype)} {i} = (core*{n})/{NCORES}; {i} < ((core+1)*{n})/{NCORES}; {i}++) {{"
 
-def render_masked_store(ctx:DSPRenderer, bidx:UOp, var:UOp, gate:UOp) -> str|None:
-  # a store of a vector with a gate for each lane stores the bytes of the lanes that are set
-  if gate._shape == () or (n:=bidx.max_numel()) * var.dtype.itemsize > 128: return None
-  sz = var.dtype.itemsize
-  def full(x:str) -> str: return f"((HVX_Vector)({x if vpad(n)*sz == 128 else shuffle(x, x, list(range(n)) + [-1]*(128//sz-n))}))"
-  # (the mask is all the bytes of a lane set: -1 in an int of its size)
-  m = f"(-__builtin_convertvector({ctx[gate]}, {ctx._render_dtype({1:dtypes.int8, 2:dtypes.int16, 4:dtypes.int32}[sz], vpad(n))}))"
-  return f"store_m((unsigned char*)({ctx[bidx]}), {full(ctx[var])}, {full(m)}, {n*sz});"
-
-def render_store_pieces(ctx:DSPRenderer, bidx:UOp, var:UOp) -> str|None:
-  if bidx.op is not Ops.SHRINK or (n:=bidx.max_numel()) < 2: return None
-  return _store_pieces(ctx, ctx[bidx], ctx[var], var.dtype, n, bidx)
-
-def _store_pieces(ctx:DSPRenderer, ptr:str, var:str, dtype:DType, n:int, bidx:UOp) -> str|None:
+def render_store(ctx:DSPRenderer, bidx:UOp, var:UOp) -> str|None:
   # a store of up to a vector register that isn't a whole aligned one is masked stores of the vector register
-  if 32 < (nb:=n*dtype.itemsize) <= 128 and (nb < 128 or known_factor(bidx.src[1]) % n) and bidx.src[0].addrspace is AddrSpace.GLOBAL:
-    v = f"((HVX_Vector)({var if vpad(n)*dtype.itemsize == 128 else shuffle(var, var, list(range(n)) + [-1]*(128//dtype.itemsize-n))}))"
-    return f"store_n((unsigned char*)({ptr}), {v}, {nb});"
-  # a vector store that isn't a power of two lanes (rendered padded) stores pieces that are
-  if vpad(n) == n: return None
-  pieces, o = [], 0
-  while o < n:
-    l = 1 << ((n-o).bit_length()-1)
-    val = f"({var})[{o}]" if l == 1 else shuffle(var, var, range(o, o+l))
-    pieces.append(f"*(({ctx._render_dtype(dtype, l) + ('_u' if l > 1 else '')}*)({ptr}+{o})) = {val};")
-    o += l
-  return " ".join(pieces)
+  if bidx.op is not Ops.SHRINK or not 32 < (nb:=(n:=bidx.max_numel())*var.dtype.itemsize) <= 128: return None
+  if nb == 128 and known_factor(bidx.src[1]) % n == 0: return None
+  v = ctx[var] if vpad(n)*var.dtype.itemsize == 128 else shuffle(ctx[var], ctx[var], list(range(n)) + [-1]*(128//var.dtype.itemsize-n))
+  return f"store_n((unsigned char*)({ctx[bidx]}), (HVX_Vector)({v}), {nb});"
 
 dsp_vec_rewrite = PatternMatcher([
   # (a lane of a value of one lane, rendered as a scalar, is it)
@@ -323,8 +240,7 @@ dsp_vec_rewrite = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.CALL), UPat()), name="x"), lambda ctx,x: f"({ctx[l[0]]})[{l[1]}]" if (l:=lane_of(x)) is not None else None),
   (UPat(Ops.WMMA, name="x"), render_wmma),
   (UPat(Ops.RANGE, name="x"), render_range),
-  (UPat(Ops.STORE, src=(UPat.var("bidx"), UPat.var("var"))), render_store_pieces),
-  (UPat(Ops.STORE, src=(UPat.var("bidx"), UPat.var("var"), UPat.var("gate"))), render_masked_store),
+  (UPat(Ops.STORE, src=(UPat.var("bidx"), UPat.var("var"))), render_store),
   (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda ctx,x: to_bool(ctx, f"(({ctx[x.src[0]]}) != 0)", x.max_numel()) if is_vec(x) else None),
   (UPat(Ops.CAST, name="x"),
    lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})" if is_vec(x) or is_vec(x.src[0]) else None),
@@ -333,128 +249,38 @@ dsp_vec_rewrite = PatternMatcher([
 ])
 
 # ***** L2 prefetch *****
-# there's no hardware prefetch into L2 and only one l2fetch in flight per thread. a load prefetches what it reads in the next iteration of the
-# innermost loop it reads at least PREFETCH_MIN bytes in, as a box of rows. the prefetch goes right before the loop inside that one.
-# a buffer of at most PREFETCH_SMALL bytes isn't prefetched, a prefetch of at least PREFETCH_CUR bytes is of the iteration itself
-# what's read again in a loop (up to PREFETCH_REUSE bytes) is in L2 after its first iteration
-PREFETCH_MIN, PREFETCH_SMALL, PREFETCH_CUR, PREFETCH_REUSE = 2048, 16384, 32768, 256 << 10
-
-def footprint(idx:UOp, inner:list[UOp], consts:list[int], itemsize:int, width:int) -> list[tuple[int, int]]|None:
-  # the byte intervals idx+c reads for all c in consts and all values of the inner ranges, relative to idx+min(consts) with them at 0
-  def coef(r:UOp) -> int|None:
-    # the stride of r in the affine idx
-    ret = 0
-    for t in idx.split_uop(Ops.ADD):
-      if r not in t.toposort(): continue
-      if t is r: ret += 1
-      elif t.op is Ops.MUL and t.src[0] is r and isinstance(c:=const_val(t.src[1]), int): ret += c
-      elif t.op is Ops.SHL and t.src[0] is r and isinstance(c:=const_val(t.src[1]), int): ret += 1 << c
-      else: return None
-    return ret
-  strides = []
-  for r in inner:
-    if (s:=coef(r)) is None: return None
-    strides.append((s * itemsize, int(r.vmax)+1))
-  if prod(n for _,n in strides) * len(consts) > 4096: return None
-  offs = sorted({(c-min(consts))*itemsize + sum(s*i for (s,_),i in zip(strides, x))
-                 for c in consts for x in itertools.product(*[range(n) for _,n in strides])})
-  ivs: list[tuple[int, int]] = []
-  for o in offs:
-    if ivs and o <= ivs[-1][1]: ivs[-1] = (ivs[-1][0], max(ivs[-1][1], o+width))
-    else: ivs.append((o, o+width))
-  return ivs
-
-def l2fetch_rt(ivs:list[tuple[int, int]]) -> tuple[int, int, int]|None:
-  # (stride, width, height) of an l2fetch of the intervals, each up to 16 bits. a contiguous interval is lines of 128 bytes
-  if len(ivs) == 1 or all(a[1] == b[0] for a,b in zip(ivs, ivs[1:])): return (128, 128, min(0xffff, (ivs[-1][1]-ivs[0][0]+127)//128))
-  if not all_same([b-a for a,b in ivs]) or not all_same([b[0]-a[0] for a,b in zip(ivs, ivs[1:])]):
-    # irregular intervals that are mostly the hull prefetch the hull
-    return l2fetch_rt([(ivs[0][0], ivs[-1][1])]) if (ivs[-1][1]-ivs[0][0]) <= 2*sum(b-a for a,b in ivs) else None
-  if (stride:=ivs[1][0]-ivs[0][0]) > 0xffff: return None
-  return (stride, min(0xffff, ivs[0][1]-ivs[0][0]), min(0xffff, len(ivs)))
+# there's no hardware prefetch into L2 and one l2fetch is in flight: a loop prefetches the bytes its next iteration reads of its biggest load
+# (what one iteration steps over, from where the next one starts), before the loop inside it
 
 def add_prefetch(sink:UOp) -> UOp|None:
   if any(u.op is Ops.CALL and u.body.op is Ops.NATIVE and "l2fetch" in str(u.body.arg.code) for u in sink.toposort()): return None
-  # the loop tree: the parent of a range is the innermost range of its END
   ends = {u.src[1]:u for u in sink.toposort() if u.op is Ops.END and u.src[1].op is Ops.RANGE}
-  def depth(r:UOp) -> int: return len(ends[r].ranges) if r in ends else -1
-  parent = {r:max(e.ranges, key=depth) if e.ranges else None for r,e in ends.items()}
-  # loads of a buffer that are the same up to a constant prefetch together
-  groups: dict[tuple[UOp, UOp], list[tuple[UOp, int]]] = {}
+  best: dict[UOp, tuple[int, UOp, UOp]] = {}
   for u in sink.toposort():
     if u.op is not Ops.LOAD or (a:=u.src[0]).op not in (Ops.SHRINK, Ops.INDEX) or a.src[0].op is not Ops.PARAM or len(a.src) < 2: continue
-    if (idx:=a.src[1].get_idx()).is_invalid or not all(r in ends for r in idx.ranges): continue
-    # (the terms of the base in a canonical order)
-    terms = [t.src[0] if t.op is Ops.CAST and t.src[0].op is Ops.CONST else t for t in idx.split_uop(Ops.ADD)]
-    if not (rest:=[t for t in terms if t.op is not Ops.CONST]): continue
-    c, base = sum(int(t.arg) for t in terms if t.op is Ops.CONST), functools.reduce(operator.add, sorted(rest, key=lambda t: t.tuplize))
-    groups.setdefault((a.src[0], base), []).append((a, c))
+    if (idx:=a.src[1].get_idx()).is_invalid or not (rngs:=[r for r in idx.ranges if r in ends]): continue
+    # (the index at the loop's iteration t, the other ranges at 0)
+    loop, t = min(rngs, key=lambda r: len(ends[r].ranges)), UOp.variable("prefetch_t", 0, int(rngs[0].vmax), rngs[0].dtype)
+    at = idx.substitute({r:t if r is loop else r.const_like(0) for r in idx.ranges})
+    if not isinstance(step:=const_val((at.substitute({t:t.const_like(1)}) - at.substitute({t:t.const_like(0)})).simplify()), int): continue
+    # (a small buffer stays in L2)
+    if (nb:=step*a.src[0].dtype.itemsize) <= 0 or a.src[0].max_numel()*a.src[0].dtype.itemsize <= 16384: continue
+    if loop not in best or best[loop][0] < nb: best[loop] = (nb, a.src[0], at.substitute({t:(loop < int(loop.vmax)).where(loop+1, loop)}))
   subs: dict[UOp, UOp] = {}
-  plan: dict[UOp, list[tuple]] = {}
-  for (buf, base), accs in groups.items():
-    # a small buffer stays in L2 (and its prefetch would stop a bigger one in flight)
-    if not base.ranges or buf.max_numel()*buf.dtype.itemsize <= PREFETCH_SMALL: continue
-    # the loops around the loads, outermost first (all the loops of the index)
-    chain = [max(base.ranges, key=depth)]
-    while (p:=parent[chain[0]]) is not None: chain.insert(0, p)
-    if not all(r in chain for r in base.ranges): continue
-    consts, width, best = dedup([c for _,c in accs]), max(a.max_numel() for a,_ in accs) * buf.dtype.itemsize, None
-    # inside a loop it doesn't index (but the outermost, the cores split it), what it reads is read again from L2 if it fits: it's only
-    # prefetched in that loop's first iteration
-    reuse = next((r for k,r in enumerate(chain) if (k > 0 or (r.vmax+1) >= 2*NCORES) and r not in base.ranges and (fp:=footprint(base,
-                  [q for q in chain[k+1:] if q in base.ranges], consts, buf.dtype.itemsize, width)) is not None and
-                  sum(b-a for a,b in fp) <= PREFETCH_REUSE), None)
-    for i in reversed(range(len(chain))):
-      if chain[i] not in base.ranges: continue
-      if (ivs:=footprint(base, [r for r in chain[i+1:] if r in base.ranges], consts, buf.dtype.itemsize, width)) is None: break
-      if (rt:=l2fetch_rt(ivs)) is None: break
-      best = (i, rt, sum(b-a for a,b in ivs), chain, accs, base, consts, reuse if reuse is not None and chain.index(reuse) < i else None)
-      if best[2] >= PREFETCH_MIN: break
-    if best is not None: plan.setdefault(buf, []).append(best)
-  # of the prefetches of a buffer, the big ones (or the biggest one)
-  todo = [(buf, pp) for buf,ps in plan.items() for pp in ([q for q in ps if q[2] >= PREFETCH_MIN] or [max(ps, key=lambda q: q[2])])]
-  # an l2fetch stops the one in flight: each loop prefetches only its biggest
-  per_loop: dict[UOp, tuple[UOp, tuple]] = {}
-  for buf,pp in todo:
-    if (at:=pp[3][pp[0]]) not in per_loop or per_loop[at][1][2] < pp[2]: per_loop[at] = (buf, pp)
-  for buf,(i, rt, size, chain, accs, base, consts, reuse) in per_loop.values():
-    loop, inner = chain[i], [r for r in chain[i+1:] if r in base.ranges]
-    # the loop's next iteration, the last one prefetches itself. a big one is prefetched in the iteration itself, it runs ahead of the loads
-    tmp = UOp.variable("prefetch_loop", 0, int(loop.vmax), loop.dtype)
-    nxt = base.substitute({loop:tmp, **{r:r.const_like(0) for r in inner}}).simplify().substitute(
-      {tmp:loop if size >= PREFETCH_CUR else (loop < int(loop.vmax)).where(loop+1, loop)})
-    # an l2fetch outside the mapped memory faults: the start is clamped into the buffer
-    start = nxt + min(consts)
-    extent = -(-((rt[2]-1)*rt[0] + rt[1]) // buf.dtype.itemsize)
-    if extent > buf.max_numel(): continue
-    if start.vmin < 0: start = (start < 0).where(start.const_like(0), start)
-    if start.vmax > (last:=buf.max_numel()-extent): start = (start < last).where(start, start.const_like(last))
-    # Rtt is (stride << 32) | (width << 16) | height
-    # (the first iteration of the outermost loop is a core's first, see render_range)
-    first = "1" if reuse is None else f"{{1}} == (core*{int(reuse.vmax)+1})/{NCORES}" if reuse is chain[0] else "{1} == 0"
-    pf = UOp.native(f"if ({first}) __builtin_HEXAGON_Y5_l2fetch({{0}}, {(rt[0] << 32) | (rt[1] << 16) | rt[2]}ull);", fmt=True) \
-      .call(buf.index(start), *([reuse] if reuse is not None else []))
-    if i+1 < len(chain): subs[chain[i+1]] = (r:=subs.get(chain[i+1], chain[i+1])).replace(src=(r.src[0].after(pf),))
-    else: subs.update({a:a.replace(src=(a.src[0].after(pf),)+a.src[1:]) for a,_ in accs})
+  for loop,(nb, buf, nxt) in best.items():
+    # (the next iteration, the last one prefetches itself) clamped into the buffer: an l2fetch outside the mapped memory faults
+    lines, last = min(0xffff, -(-nb // 128)), max(0, buf.max_numel() - min(nb, 128*0xffff) // buf.dtype.itemsize)
+    nxt = (nxt < 0).where(nxt.const_like(0), (nxt < last).where(nxt, nxt.const_like(last)))
+    pf = UOp.native(f"__builtin_HEXAGON_Y5_l2fetch({{0}}, {(128 << 32) | (128 << 16) | lines}ull);", fmt=True).call(buf.index(nxt))
+    # (before the loop inside it, else before the loads)
+    if (inner:=[r for r,e in ends.items() if loop in e.ranges and len(e.ranges) == len(ends[loop].ranges)+1]):
+      subs.update({r:r.replace(src=(r.src[0].after(pf),)) for r in inner[:1]})
+    else: subs.update({u.src[0]:u.src[0].replace(src=(buf.after(pf),)+u.src[0].src[1:]) for u in sink.toposort()
+                       if u.op is Ops.LOAD and u.src[0].op in (Ops.SHRINK, Ops.INDEX) and u.src[0].src[0] is buf and loop in u.ranges})
   return sink.substitute(subs, name="prefetch") if subs else None
 
-def lookup(x:UOp) -> UOp|None:
-  # 128 bytes loaded from a table of 256 at the bytes of a vector (plus a const) are lut256
-  if len(x.src) != 128 or x.dtype.itemsize != 1 or any(s.op is not Ops.LOAD or s.src[0].op is not Ops.INDEX for s in x.src): return None
-  if (t:=x.src[0].src[0].src[0]).op is not Ops.PARAM or t.max_numel() > 256 or any(s.src[0].src[0] is not t for s in x.src): return None
-  def byte_lane(u:UOp, c:int=0) -> tuple[UOp, int, int]|None:
-    if u.op is Ops.CAST: return byte_lane(u.src[0], c)
-    if u.op is Ops.ADD and isinstance(k:=const_val(u.src[1]), int): return byte_lane(u.src[0], c+k)
-    return None if (l:=lane_of(u)) is None or l[0].dtype.itemsize != 1 else (*l, c)
-  lanes = [l for s in x.src if 0 <= (i:=s.src[0].src[1]).vmin and i.vmax < 256 and (l:=byte_lane(i)) is not None]
-  if len(lanes) != 128 or not all_same([(v, c) for v,_,c in lanes]) or [i for _,i,_ in lanes] != list(range(128)): return None
-  v, _, c = lanes[0]
-  return UOp.native(f"lut256((hvx_ub)({{0}}) + (hvx_ub)({c & 0xff}), {{1}})", shape=x.shape, dtype=x.dtype, fmt=True).call(v, t)
-
 dsp_late = PatternMatcher([
-  (UPat(Ops.STACK, name="x"), lookup),
   (UPat(Ops.SINK, name="sink"), add_prefetch),
-  (UPat(Ops.ADD, name="x"), vrmpy_sum),
   (UPat(Ops.CAST, name="x", src=(UPat(Ops.SHR, src=(UPat(Ops.MUL, src=[UPat(Ops.CAST, name="a"), UPat(name="c")]), UPat(name="s"))),)), mulhi),
 ])
 

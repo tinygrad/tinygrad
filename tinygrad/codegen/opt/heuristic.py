@@ -37,22 +37,15 @@ def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
     in1_r = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg, reverse=True)
     reds = sorted(red.src[1:], key=lambda x: x.arg, reverse=True)
     ms = [m for _,m,_ in itertools.product(in1_r, in0_r, reds)]
-    # of the choices with M contiguous in the output (else the first that fits), for each tensor core the one with the least work (the padded
-    # multiply adds). the first tensor core is preferred, a later one if it does a lot less work
-    best: dict[int, tuple[int, Scheduler]] = {}
-    for axis in (contiguous:=[i for i in range(len(ms)) if out_strides.get(ms[i]) == 1]) or range(len(ms)):
+    # of the choices with M contiguous in the output (else any), the one with the least work (the padded multiply adds)
+    cands: list[tuple[int, int, Scheduler]] = []
+    for axis in [i for i in range(len(ms)) if out_strides.get(ms[i]) == 1] or range(len(ms)):
       for sel in (range(len(k.ren.tensor_cores)) if TC_SELECT.value == -1 else [TC_SELECT.value]):
         tk = k.copy()
         try: tk.apply_opt(Opt(OptOps.TC, axis, (sel, 2, USE_TC.value)))
         except KernelOptError: continue
-        work = prod(tk.full_shape) * k.ren.tensor_cores[sel].dims[2]
-        if sel not in best or work < best[sel][0]: best[sel] = (work, tk)
-      if best and not contiguous: break
-    if best:
-      choice = best[min(best)]
-      for sel in sorted(best)[1:]:
-        if best[sel][0] < choice[0] * 3 // 4: choice = best[sel]
-      return loop_order(choice[1])
+        cands.append((prod(tk.full_shape) * k.ren.tensor_cores[sel].dims[2], sel, tk))
+    if cands: return loop_order(min(cands, key=lambda c: c[:2])[2])
   k = k.copy()
   # the biggest input is read in vectors: if it's contiguous in a long reduce but not in the output, the reduce is the vector (its lanes accumulate)
   loads = sorted([x for x in k.ast.backward_slice if x.op is Ops.INDEX and x.src[0].op is Ops.PARAM and x not in [s.src[0] for s in stores]],
@@ -83,13 +76,6 @@ def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
   # unroll small reduces
   for axis in k.upcastable_dims(reduce=True)[::-1]:
     if k.full_shape[axis] <= (4 if n < 32 else 3): k.apply_opt(Opt(OptOps.SPLIT, axis, (0, AxisType.UPCAST)))
-  # a vector's reduce of bytes (or their products) unrolls by 4: wide vector ISAs have dot products of 4 bytes
-  def is_bytes(u:UOp) -> bool: return u.op is Ops.CAST and u.src[0].dtype in (dtypes.uint8, dtypes.int8)
-  if n >= 32 and (rb:=k.reduceop) is not None and (is_bytes(b:=rb.src[0]) or (b.op is Ops.MUL and all(is_bytes(s) for s in b.src))):
-    for axis in k.upcastable_dims(reduce=True)[::-1]:
-      if k.full_shape[axis] % 4 == 0 and k.full_shape[axis] > 4:
-        k.apply_opt(Opt(OptOps.SPLIT, axis, (4, AxisType.UPCAST)))
-        break
   return k
 
 def vector_math(k:Scheduler) -> bool:
