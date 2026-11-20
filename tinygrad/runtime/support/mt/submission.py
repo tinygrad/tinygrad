@@ -2,6 +2,7 @@ from __future__ import annotations
 import struct
 from tinygrad.runtime.autogen import mtfw
 
+SUBMISSION_VA = 0x8000420000
 CDM_EXECUTION_ADDRESS = 0x81e0e00000
 
 def build_submission(launch_id:int=1, execution_address:int=CDM_EXECUTION_ADDRESS) -> bytes:

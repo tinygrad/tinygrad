@@ -2,6 +2,10 @@ from __future__ import annotations
 import dataclasses, struct, time
 from tinygrad.runtime.autogen import mtfw
 from tinygrad.runtime.support.mt.mtdev import MTDev
+from tinygrad.runtime.support.mt.compute import META_BASE
+
+MT_TOKEN_BASE = 0x103
+MT_HOST_PRIVATE = 0x4d544e4f50
 
 @dataclasses.dataclass(frozen=True)
 class MTResponse:
@@ -20,7 +24,7 @@ class MTResponse:
     return cls(*struct.unpack('<IIQQQIIQ', data))
 
 class MTCCB:
-  def __init__(self, dev:MTDev, mem, item_off:int, queue_off:int, ccb_type:int=3, meta_base:int=0x90000000):
+  def __init__(self, dev:MTDev, mem, item_off:int, queue_off:int, ccb_type:int=3, meta_base:int=META_BASE):
     self.dev, self.mem, self.item_off, self.queue_off = dev, mem, item_off, queue_off
     self.ccb_type, self.meta_base, self.wr_idx = ccb_type, meta_base, 0
     self.response_rd = 0
@@ -39,8 +43,8 @@ class MTCCB:
 
   def submit(self, submission_addr:int, submission_size:int, root_pa:int, generation:int=1, command:int=104,
              token:int|None=None, private:int|None=None, queue_id:int=0) -> None:
-    if token is None: token = 0x103 + self.seq
-    if private is None: private = 0x4d544e4f50
+    if token is None: token = MT_TOKEN_BASE + self.seq
+    if private is None: private = MT_HOST_PRIVATE
     ci = mtfw.MTFW_CCB_ITEM()
     ci.submissionCmd, ci.ccbItemToken, ci.hostPrivateData, ci.processId = command, token, private, 0
     ci.cbId = 0
@@ -53,7 +57,7 @@ class MTCCB:
 
   def flush_mmu(self, root_pa:int, generation:int=1) -> None:
     ci = mtfw.MTFW_CCB_ITEM()
-    ci.submissionCmd, ci.ccbItemToken, ci.hostPrivateData, ci.processId = 13, 0x103, 0x4d544e4f50, 1
+    ci.submissionCmd, ci.ccbItemToken, ci.hostPrivateData, ci.processId = 13, MT_TOKEN_BASE, MT_HOST_PRIVATE, 1
     sp = ci.ccbItemPara.invalidTlbCfg
     sp.pageTableRootAddr, sp.pageTableGeneration = root_pa, generation
     self._publish(ci)

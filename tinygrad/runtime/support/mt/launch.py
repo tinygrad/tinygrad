@@ -3,12 +3,14 @@ import struct
 from typing import Any
 from tinygrad.runtime.autogen import mtfw
 from tinygrad.runtime.support.mt.mtdev import MTDev
-from tinygrad.runtime.support.mt.compute import MTFirmware, SUB_PA, FW_DEVVA, ROOT_BASE
+from tinygrad.runtime.support.mt.compute import MTFirmware, SUB_PA, FW_BASE, FW_DEVVA, ROOT_BASE, INIT_SIZE
 from tinygrad.runtime.support.mt.ccb import MTCCB
 from tinygrad.runtime.support.mt.mmu import MT_PTE_READ_WRITE
 from tinygrad.runtime.support.mt.elf import MTKernelImage
 from tinygrad.runtime.support.mt.pds import compute_pds, PDS_UNUSED
-from tinygrad.runtime.support.mt.submission import build_submission
+from tinygrad.runtime.support.mt.submission import build_submission, SUBMISSION_VA
+
+BACKING_PA, BACKING_SIZE = 0x40000000,0x10000000
 
 class MTLaunch(MTFirmware):
   write_map:dict[int,bytes]
@@ -29,12 +31,12 @@ class MTLaunch(MTFirmware):
     reuse = MTLaunch._active is not None and MTLaunch._active.dev is dev
     active = MTLaunch._active if reuse else None
     super().__init__(dev, prepare=not reuse, mmu=active.mmu if active is not None else None, v=active.v if active is not None else None)
-    self.sv:Any = active.sv if active is not None else self.dev.pci_dev.map_bar(2, off=SUB_PA, size=0x2000000, fmt='B')
+    self.sv:Any = active.sv if active is not None else self.dev.pci_dev.map_bar(2, off=SUB_PA, size=INIT_SIZE, fmt='B')
     if not reuse: self.sv[:0x20000] = bytes(0x20000)
     self.zero_pa = SUB_PA + 0x1000
     self.mmu_dirty = True
-    self.backing_pa = 0x40000000
-    self.backing:Any = active.backing if active is not None else self.dev.pci_dev.map_bar(2, off=self.backing_pa, size=0x10000000, fmt='B')
+    self.backing_pa = BACKING_PA
+    self.backing:Any = active.backing if active is not None else self.dev.pci_dev.map_bar(2, off=self.backing_pa, size=BACKING_SIZE, fmt='B')
     self._map_generated()
     self._map_common()
     self._prepare_packet()
@@ -50,7 +52,7 @@ class MTLaunch(MTFirmware):
     for base in [0xda00400000,0xe000400000]:
       for off in range(0,0x1000000,0x1000):
         if base+off not in self.mmu.pages: self.mmu.map(base+off,self.zero_pa,MT_PTE_READ_WRITE)
-    for off in range(0x400000, 0x410000, 0x1000): self.mmu.map(FW_DEVVA + off, 0x20000000 + off, MT_PTE_READ_WRITE)
+    for off in range(0x400000, 0x410000, 0x1000): self.mmu.map(FW_DEVVA + off, FW_BASE + off, MT_PTE_READ_WRITE)
     if 0x100000000 not in self.mmu.pages: self.mmu.map(0x100000000,SUB_PA+0x6000,MT_PTE_READ_WRITE)
     for i in range(18): self.mmu.map(0xd9bfff0000+i*0x1000,SUB_PA+0x10000+i*0x1000,MT_PTE_READ_WRITE)
     aliases = [(0xc000000000,0x20400000),(0x22000000,0x20400000),(0x90400000,0x20400000),
@@ -79,7 +81,7 @@ class MTLaunch(MTFirmware):
       if off == 0 and previous is not None:
         unchanged = previous.packet[:0x38] == packet[:0x38] and previous.packet[0x40:0x1000] == packet[0x40:0x1000]
       if not unchanged: self.sv[off:off+len(chunk)] = chunk
-      if self.mmu.pages.get(0x8000420000+off) != SUB_PA+off: self.mmu.map(0x8000420000+off,SUB_PA+off,MT_PTE_READ_WRITE)
+      if self.mmu.pages.get(SUBMISSION_VA+off) != SUB_PA+off: self.mmu.map(SUBMISSION_VA+off,SUB_PA+off,MT_PTE_READ_WRITE)
     self.packet = packet
     if previous is None: self.v[0x405000:0x405010] = struct.pack('<QII', ROOT_BASE, 0xffffffff, 0)
 

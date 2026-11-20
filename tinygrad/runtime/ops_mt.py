@@ -12,6 +12,10 @@ from tinygrad.runtime.support.usb import USB3, usb_link, usb_stream, usb_ctrl, u
 from tinygrad.engine.realize import get_call_kernel_args
 from tinygrad.runtime.autogen import mtfw, libc
 from tinygrad.runtime.support.mt.mtdev import MTDev
+from tinygrad.runtime.support.mt.compute import ROOT_BASE, META_BASE
+from tinygrad.runtime.support.mt.ccb import MT_TOKEN_BASE, MT_HOST_PRIVATE
+from tinygrad.runtime.support.mt.submission import SUBMISSION_VA
+from tinygrad.runtime.support.system import USBPCIDevice
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.mt.launch import MTLaunch
 from tinygrad.runtime.support.mt.generated import MTGeneratedLaunch
@@ -200,7 +204,7 @@ class MTComputeQueue(HWQueue):
       nonlocal link
       ops.append(op)
       link = link.after(op)
-    root_addr = self.dev.mt.pci_dev.bar_info(2)[0]+0x30000000
+    root_addr = self.dev.mt.pci_dev.bar_info(2)[0]+ROOT_BASE
     poll_in_hcq = not self.cacheable or len(self.submissions) > 1 or bool(self.timestamp_slots)
     for i,(launch,deps,packet,write_map,generation,mmu_pages,grid_deps) in enumerate(self.submissions):
       ccb = launch.ccb
@@ -235,12 +239,12 @@ class MTComputeQueue(HWQueue):
           if previous_mmu.get(off) != data: write(root_addr+off,data)
       idx = link.index(2).load()
       seq = link.index(3).load()
-      token = (0x103+seq).cast(dtypes.u64)
+      token = (MT_TOKEN_BASE+seq).cast(dtypes.u64)
       ci = mtfw.MTFW_CCB_ITEM()
-      ci.submissionCmd,ci.ccbItemToken,ci.hostPrivateData,ci.processId = 104,0,0x4d544e4f50,0
+      ci.submissionCmd,ci.ccbItemToken,ci.hostPrivateData,ci.processId = 104,0,MT_HOST_PRIVATE,0
       sp = ci.ccbItemPara.submissionPara
-      sp.pageTableRootAddr,sp.pageTableGeneration = 0x30000000,generation
-      sp.submissionQueueId,sp.submissionAddr,sp.submissionSize,sp.qSempOutofOrder = 0,0x8000420000,len(packet),1
+      sp.pageTableRootAddr,sp.pageTableGeneration = ROOT_BASE,generation
+      sp.submissionQueueId,sp.submissionAddr,sp.submissionSize,sp.qSempOutofOrder = 0,SUBMISSION_VA,len(packet),1
       item_size = ci.SIZE
       item = UOp.alloc((ci.SIZE,),dtypes.u8,device='CPU')
       item = patch(item,[(16,token)],bytes(ci))
@@ -251,7 +255,7 @@ class MTComputeQueue(HWQueue):
         grid_off = launch.backing_offsets[0x81e1400000]
         add(usb_stream(link,UOp.const(launch.backing.addr+grid_off,dtypes.u64),grid_deps,UOp.const(0x1000,dtypes.int),True))
       next_wr = ((idx + 1) & 0xff).cast(dtypes.u32)
-      write(launch.v.addr+ccb.queue_off+idx*8,struct.pack('<Q',0x90000000+ccb.item_off))
+      write(launch.v.addr+ccb.queue_off+idx*8,struct.pack('<Q',META_BASE+ccb.item_off))
       add(usb_poke(link,launch.v.addr+ccb.queue_off+0x4000,next_wr))
       add(usb_poke(link,self.dev.mt.mmio.addr+0xc00b00,UOp.const(3,dtypes.u32)))
       if poll_in_hcq:
@@ -311,7 +315,7 @@ class MTDevice(Compiled):
     self.response_checked = 0
     self.views:dict[int,tuple[Any,MTBufferMeta]] = {}
     super().__init__(device, MTAllocator(self), None, arch='mp_21')
-    usb_dev = getattr(self.mt.pci_dev,'usb')
+    usb_dev = cast(USBPCIDevice,self.mt.pci_dev).usb
     words = [ctypes.addressof(x.contents) for x in (usb_dev.usb.handle,USB3.ctx())] + [0,0,0]
     host = Buffer('CPU',HOST_SIZE,options=BufferSpec(nolru=True),initial_value=struct.pack('5Q',*words).ljust(HOST_SIZE,b'\0'))
     Compiled.link_bufs[to_name(self.device,'usb_host')] = host
@@ -365,7 +369,7 @@ class MTDevice(Compiled):
         response = struct.unpack('<Q',self.current_launch.v[off:off+8])[0]
         value, token = response & 0xffffffff, response >> 32
         if value: raise RuntimeError(f'MT submission {i} failed: value={value}, token={token:#x}, fault={self._fault()}')
-        if token == 0x103+i: break
+        if token == MT_TOKEN_BASE+i: break
         if time.monotonic() >= deadline: raise TimeoutError(f'MT submission {i} response timed out: value={value}, token={token:#x}')
         time.sleep(0.0001)
       self.current_launch.v[ccb.queue_off+0x4028:ccb.queue_off+0x402c] = struct.pack('<I',(i+1)&0xff)
@@ -404,11 +408,11 @@ class MTDevice(Compiled):
       self.started = True
 
   def activate_launch(self, launch:MTGeneratedLaunch, obj:TinyELF, global_size:tuple[int,int,int], local_size:tuple[int,int,int]) -> None:
-    unchanged = MTLaunch._loaded is launch and launch.kernel_lib == obj.lib
-    self.ensure_started(launch)
     image = MTKernelImage.from_elf(obj.lib)
     if max(image.metadata.kernel['.private_memory_size'],image.metadata.kernel['.local_mem_used_in_cluster']):
       raise NotImplementedError('MT kernels requiring spill or local-cluster memory are not supported')
+    unchanged = MTLaunch._loaded is launch and launch.kernel_lib == obj.lib
+    self.ensure_started(launch)
     if not unchanged:
       launch.set_generated(image)
       launch.kernel_lib = obj.lib

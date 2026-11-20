@@ -34,6 +34,7 @@ class MTFirmware:
     self.layout = MTFirmwareLayout(core_count)
     self.v = self.dev.pci_dev.map_bar(2, off=FW_BASE, size=INIT_SIZE, fmt='B') if v is None else v
     self.mmu = MTMMU4(ROOT_BASE) if mmu is None else mmu
+    self.root_view = self.dev.pci_dev.map_bar(2,off=ROOT_BASE,size=len(self.mmu.root),fmt='B')
     if prepare: self._prepare()
 
   def _prepare(self) -> None:
@@ -84,7 +85,6 @@ class MTFirmware:
 
   def upload_mmu(self) -> None:
     if not self.mmu.dirty_pages: return
-    if not hasattr(self,'root_view'): self.root_view = self.dev.pci_dev.map_bar(2,off=ROOT_BASE,size=len(self.mmu.root),fmt='B')
     chunks:list[tuple[int,int]] = []
     for off in sorted(self.mmu.dirty_pages):
       if chunks and off == chunks[-1][1]: chunks[-1] = (chunks[-1][0],off+0x1000)

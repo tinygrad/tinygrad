@@ -3,6 +3,7 @@ import struct
 from tinygrad.runtime.support.mt.launch import MTLaunch
 from tinygrad.runtime.support.mt.elf import MTKernelImage
 from tinygrad.runtime.support.mt.mmu import MT_PTE_READ_WRITE
+from tinygrad.runtime.support.mt.submission import CDM_EXECUTION_ADDRESS
 
 # Device-VA to backing-PA layout used by the generated compute context. This is
 # an allocation map, not captured launch state.
@@ -104,7 +105,7 @@ class MTGeneratedLaunch(MTLaunch):
       self._write_backing(self.backing_offsets[va],bytes(0x1000))
     self.text_va = 0xe000000000
     self.text_offset = 0x2000
-    self.pds_execution_address = 0x81e0e00000
+    self.pds_execution_address = CDM_EXECUTION_ADDRESS
     self.pds_code_off = self.backing_offsets[0xda00400000]
     self.pds_data_offsets = [self.backing_offsets[0x100804000]]
     self.generate_task_page()
