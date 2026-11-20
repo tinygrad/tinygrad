@@ -362,6 +362,8 @@ class Compiled:
   @property
   def has_copy_queue(self) -> bool: return True
 
+  def hcq_cacheable(self, linear:Any) -> bool: return True
+
   @property
   def host(self) -> str: return f"CPU:{self.peer_group[7:]}" if self.peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.device
 

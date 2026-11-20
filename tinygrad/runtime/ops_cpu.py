@@ -28,7 +28,8 @@ class CPUProgram(Program['CPUDevice']):
       self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), len(link_ids), payload=obj.lib + link_ids)[0]
     else:
       self.buf = dev.allocator.alloc(len(obj.lib)+0x4000, BufferSpec(nolru=True))
-      sections = elf_loader(obj.lib,link_libs=list(DLL._loaded_.values()),link_syms={n:p.buf.buf for n,p in self.links.items()})[1]
+      sections = elf_loader(obj.lib,link_libs=list(DLL._loaded_.values()),link_syms={n:p.buf.buf for n,p in self.links.items()})[1] \
+        if obj.lib[:4] == libc.ELFMAG.encode() else []
       text_off = next((s.header.sh_addr for s in sections if s.name == '.text'),0)
       loaded = self._load(obj.lib, self.buf.buf)
       unwrap(self.buf.host)[:len(loaded)] = loaded

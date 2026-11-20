@@ -1093,8 +1093,6 @@ class MTComputeQueue(HWQueue):
     super().__init__(submit)
     self.submissions:list[MTSubmission] = []
     self.signals:list[tuple[UOp,UOp]] = []
-    self.timestamp_slots:list[list[UOp|None]] = []
-    self.timestamp_open = False
 
   def encode(self) -> UOp:
     for u in self.lin.src:
@@ -1114,12 +1112,7 @@ class MTComputeQueue(HWQueue):
   def exec_barrier(self): pass
   def wait(self, signal:UOp, value:UOp): pass  # synchronous submissions make cross-queue waits implicit
   def signal(self, signal:UOp, value:UOp): self.signals.append((signal,value))
-  def timestamp(self, signal:UOp):
-    if self.timestamp_open:
-      self.timestamp_slots[-1][1] = signal
-    else:
-      self.timestamp_slots.append([signal,None])
-    self.timestamp_open = not self.timestamp_open
+  def timestamp(self, signal:UOp): pass  # timestamps are read synchronously by MTDevice
 
   def snapshot_mmu(self, launch:MTLaunch) -> dict[int,bytes]:
     pages:dict[int,bytes] = {}
@@ -1140,6 +1133,7 @@ class MTComputeQueue(HWQueue):
     local_size = cast(tuple[int,int,int],tuple(x if isinstance(x,int) else 1 for x in prg.arg.local_size))
     launch = self.dev.get_launch(obj,global_size,local_size)
     self.dev.activate_launch(launch,obj,global_size,local_size)
+    if obj.profile_key is not None: self.dev.cached_launches[obj.profile_key] = (launch,obj,global_size,local_size)
     grid_deps = None
     if any(not isinstance(x,int) for x in (*prg.arg.global_size,*prg.arg.local_size)):
       grid_rows = [(off,(prg.arg.global_size[i]-1).cast(dtypes.u32)) for i,off in enumerate([0x2c,0x30,0x34])
@@ -1219,18 +1213,6 @@ class MTComputeQueue(HWQueue):
       add(usb_poke(link,self.dev.mt.mmio.addr+0xc00b00,UOp.const(3,dtypes.u32)))
       add(mt_poll(link,launch.v.addr+ccb.queue_off+0x1004+idx*0x30,token))
       add(usb_poke(link,launch.v.addr+ccb.queue_off+0x4028,next_wr))
-      if i < len(self.timestamp_slots):
-        start_signal,end_signal = self.timestamp_slots[i]
-        def read_timing(addr:int, dtype):
-          slot = usb_stack(dtype)
-          header = usb_ctrl(link,0x40,0xF0,0x20|0x0F00,2,usb_stack(dtypes.uint64,addr,dtype.itemsize//4).index(0),12,5000)
-          read = usb_bulk(link.after(header),0x81,slot.index(0),dtype.itemsize)
-          add(read)
-          return slot.after(read).index(0).load()
-        timestamp = read_timing(launch.v.addr+0x40a000,dtypes.u64)
-        run_time = read_timing(launch.v.addr+0x409008,dtypes.u32).cast(dtypes.u64)
-        if start_signal is not None: add(start_signal.index(1).store(timestamp))
-        if end_signal is not None: add(end_signal.index(1).store(timestamp+run_time))
       add(link.index(2).store(next_wr.cast(dtypes.u64)))
       add(link.index(3).store(seq+1))
       self.dev.uploaded_write_map = write_map
@@ -1255,6 +1237,7 @@ class MTDevice(Compiled):
     self.buffer_maps:dict[int,tuple[int,int]] = {}
     self.spill_buffer:tuple[int,BufferStorage]|None = None
     self.current_launch:MTGeneratedLaunch|None = None
+    self.cached_launches:dict[bytes,tuple[MTGeneratedLaunch,TinyELF,tuple[int,int,int],tuple[int,int,int]]] = {}
     self.uploaded_write_map:dict[int,bytes] = {}
     self.started = False
     self.views:dict[int,tuple[Any,MTBufferMeta]] = {}
@@ -1278,6 +1261,8 @@ class MTDevice(Compiled):
         old = self.launch_order.pop(0)
         for launch_key,cached_launch in list(self.launch_cache.items()):
           if cached_launch is old: del self.launch_cache[launch_key]
+        for profile_key,cached in list(self.cached_launches.items()):
+          if cached[0] is old: del self.cached_launches[profile_key]
       for va,(pa,size) in self.buffer_maps.items(): launch.map_buffer(va,pa,size)
     return self.launch_cache[key]
 
@@ -1292,11 +1277,31 @@ class MTDevice(Compiled):
     return (launch._read(0xe150),launch._read(0xe158),launch._read(0x130,4),launch._read(0x4a0))
 
   def synchronize(self, timeout:int|None=None):
+    if self.prof_ents and self.current_launch is not None:
+      timestamp = struct.unpack('<Q',self.current_launch.v[0x40a000:0x40a008])[0]
+      run_time = struct.unpack('<I',self.current_launch.v[0x409008:0x40900c])[0]
+      for (buf,_), ent in self.prof_ents.items():
+        sigs = buf.host.view(fmt='Q')
+        sigs[ent.st_id], sigs[ent.en_id] = timestamp, timestamp + run_time
     super().synchronize(timeout)
     host_buf = Compiled.link_bufs[to_name(self.device,'usb_host')]
     assert isinstance(host_buf,Buffer)
     host = host_buf.host.view(fmt='q')
     if host[5]: raise RuntimeError(f'MT USB error: {host[5]}, fault={self._fault()}')
+
+  def activate_cached(self, profile_key:bytes|None) -> None:
+    if profile_key is not None and (cached:=self.cached_launches.get(profile_key)) is not None:
+      launch,obj,global_size,local_size = cached
+      if self.current_launch is not launch or MTLaunch._loaded is not launch:
+        self.activate_launch(launch,obj,global_size,local_size)
+        for off,data in launch.write_map.items(): launch.backing[off:off+len(data)] = data
+        launch.sv[:0x1000] = launch.packet[:0x1000]
+
+  def hcq_cacheable(self, linear:UOp) -> bool:
+    for call in linear.toposort():
+      if call.op is Ops.CALL and call.src[0].op is Ops.PROGRAM and call.src[0].arg.target.arch == 'mp_21':
+        if MTKernelImage.from_elf(TinyELF.from_program(call.src[0]).lib).metadata.kernel['.has_barrier']: return False
+    return True
 
   def ensure_started(self, launch:MTGeneratedLaunch):
     if self.current_launch is not launch:

@@ -572,7 +572,7 @@ pm_resolve_link = PatternMatcher([
 
 # **** compile and link
 
-hcq_compile_cache:dict[tuple[UOp, bool, bool], UOp] = {} # eager templates: a buffer-free linear (uops are hash-consed) to its compiled form
+hcq_compile_cache:dict[tuple[UOp, bool, bool, tuple|None], UOp] = {} # eager templates: a buffer-free linear to its compiled form
 
 @rewrite_group(lambda linear,input_uops,profile,cache=False,ret=None: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=False) -> UOp:
@@ -580,13 +580,18 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=
 
   if cache and input_uops is not None:
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
-    linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffers")
-  linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
-  if cache and input_uops is not None and (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
+    replacements = {u:replace_buffer((input_uops,slots),u) for u in linear.toposort() if u.op is Ops.BUFFER}
+    linear = linear.substitute(replacements,walk=True)
+  serialized = any(Device[d].serialize_hcq for u in input_uops or [] for d in to_tuple(u.arg.buffer.device))
+  if not serialized or any(c.op is Ops.CALL and c.body.op is Ops.STORE for c in linear.toposort()):
+    linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
+  runtime_key = tuple((u.arg.buffer,u.arg.buffer._buf) for u in input_uops or []) if serialized else None
+  key = (linear,profile,ALL2ALL >= 1,runtime_key)
+  if cache and input_uops is not None and (cached:=hcq_compile_cache.get(key)) is not None: return cached
   lin = graph_rewrite(sched_batches(linear, profile), pm_lower_call, walk=True, name="lower call")
   with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin, verbose=DEBUG>=3)
   if cache and input_uops is not None and final_linear is not linear and \
-      all(not Device[d].serialize_hcq for u in input_uops for d in to_tuple(u.arg.buffer.device)): hcq_compile_cache[key] = final_linear
+      all(Device[d].hcq_cacheable(final_linear) for u in input_uops for d in to_tuple(u.arg.buffer.device)): hcq_compile_cache[key] = final_linear
   return final_linear
 
 @rewrite_group(lambda _,input_uops=None,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
