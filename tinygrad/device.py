@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 
 # **************** Device ****************
 
-ALL_DEVICES = ["METAL", "AMD", "NV", "QCOM", "CUDA", "HIP", "CL", "CPU", "DSP", "WEBGPU"]
-HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "HIP", "NULL", "METAL", "CL"))
+ALL_DEVICES = ["METAL", "AMD", "NV", "QCOM", "CUDA", "HIP", "CL", "CPU", "DSP", "WEBGPU", "MT"]
+HCQ_DEVS = frozenset(("AMD", "NV", "QCOM", "CUDA", "HIP", "NULL", "METAL", "CL", "MT"))
 HOST_DEVS = frozenset(("CPU", "PYTHON"))
 UVM_DEVS = frozenset(("QCOM", "METAL", "CL")) # cl uses host memcpys
 
@@ -356,8 +356,14 @@ class Compiled:
     # profiling
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
 
+  serialize_hcq = False
+  cache_hcq = True
+  enqueue_copies = True
+
   @property
   def has_copy_queue(self) -> bool: return True
+
+  def post_link(self, input_uops:list[Any]): pass
 
   @property
   def host(self) -> str: return f"CPU:{self.peer_group[7:]}" if self.peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.device

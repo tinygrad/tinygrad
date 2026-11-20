@@ -9,7 +9,7 @@ from tinygrad.renderer.cstyle import ClangRenderer, TCCRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.renderer.x86 import X86Renderer
-from tinygrad.runtime.support.elf import jit_loader
+from tinygrad.runtime.support.elf import jit_loader, elf_loader
 from tinygrad.runtime.support.system import RemotePCIDevice, RemoteCmd
 from tinygrad.runtime.autogen import libc
 
@@ -27,12 +27,14 @@ class CPUProgram(Program['CPUDevice']):
       link_ids = json.dumps({n:p.fxn for n,p in links.items()}).encode()
       self.fxn:Any = dev.remote.rpc(RemoteCmd.LOAD_PROG, len(obj.lib), len(link_ids), payload=obj.lib + link_ids)[0]
     else:
-      self.buf = dev.allocator.alloc(len(obj.lib), BufferSpec(nolru=True))
+      self.buf = dev.allocator.alloc(len(obj.lib)+0x4000, BufferSpec(nolru=True))
+      sections = elf_loader(obj.lib,link_libs=list(DLL._loaded_.values()),link_syms={n:p.buf.buf for n,p in self.links.items()})[1]
+      text_off = next((s.header.sh_addr for s in sections if s.name == '.text'),0)
       loaded = self._load(obj.lib, self.buf.buf)
       unwrap(self.buf.host)[:len(loaded)] = loaded
 
       # RWX pages are unrepresentable on apple silicon (https://blog.svenpeter.dev/posts/m1_sprr_gxf/), so flip the written pages to R-X
-      libc.mprotect(ctypes.c_void_p(self.buf.buf), len(obj.lib), libc.PROT_READ | libc.PROT_EXEC)
+      libc.mprotect(ctypes.c_void_p(self.buf.buf), len(loaded), libc.PROT_READ | libc.PROT_EXEC)
 
       # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
       # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
@@ -43,7 +45,7 @@ class CPUProgram(Program['CPUDevice']):
         # msync should be a universal POSIX way to do this
         libc.msync(ctypes.c_void_p(self.buf.buf), len(loaded), libc.MS_SYNC | libc.MS_INVALIDATE)
 
-      self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.buf.buf)
+      self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.buf.buf + text_off)
 
   def __call__(self, *args:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                wait:bool=False, timeout:int|None=None) -> float|None:

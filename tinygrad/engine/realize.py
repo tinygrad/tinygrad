@@ -170,7 +170,7 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   info = call.arg.hcq
-  ctx = replace(ctx, wait=ctx.wait and not info.skip_wait,
+  ctx = replace(ctx, wait=ctx.wait and not info.skip_wait, cache=ctx.cache and Device[info.device[0]].cache_hcq,
                 var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in Device[d].var_vals.items()}})
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
   if PROFILE:

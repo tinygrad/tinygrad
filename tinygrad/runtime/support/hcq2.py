@@ -33,6 +33,7 @@ def get_enqueue_devs(call:UOp) -> tuple[str, ...]:
   runs_on = call.device if call.body.op is Ops.STORE and all_devices_in(call.device, HCQ_DEVS - UVM_DEVS) else get_call_arg_uops(call)[0].device
   devs = tuple(Device.canonicalize(d) for d in to_tuple(runs_on))
   if not all_devices_in(devs, HCQ_DEVS) or (call.body.op is Ops.STORE and all_devices_in(devs, UVM_DEVS)): return ()
+  if call.body.op is Ops.STORE and any(not Device[d].enqueue_copies for d in devs): return ()
   return devs
 
 def unwrap_view(v:UOp) -> tuple[UOp, int]: # look through views to (base, byte offset)
@@ -365,7 +366,9 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
     run = list(grp)
     peer_groups = dedup([Device[d[0]].peer_group for _, d in run if d])
     batches = [[(c, d[0], queue_for(c)) for c, d in run if Device[d[0]].peer_group == pg] for pg in peer_groups]
-    if hcq: srcs += [_finalize_batch(BatchCtx(batch, profile), batch is not batches[-1]) for batch in batches]
+    batches = [single for batch in batches for single in ([[(c,d,q)] for c,d,q in batch] if batch and Device[batch[0][1]].serialize_hcq else [batch])]
+    if hcq: srcs += [_finalize_batch(BatchCtx(batch, profile),
+                                      batch is not batches[-1] and not Device[batch[0][1]].serialize_hcq) for batch in batches]
     else: srcs += [c for c, _ in run]
   return l.replace(src=tuple(srcs))
 
@@ -582,7 +585,8 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=
   if cache and input_uops is not None and (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
   lin = graph_rewrite(sched_batches(linear, profile), pm_lower_call, walk=True, name="lower call")
   with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin, verbose=DEBUG>=3)
-  if cache and input_uops is not None and final_linear is not linear: hcq_compile_cache[key] = final_linear
+  if cache and input_uops is not None and final_linear is not linear and \
+      all(Device[d].cache_hcq for u in input_uops for d in to_tuple(u.arg.buffer.device)): hcq_compile_cache[key] = final_linear
   return final_linear
 
 @rewrite_group(lambda _,input_uops=None,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
@@ -591,4 +595,5 @@ def hcq_link(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
   ctx = LinkCtx(input_uops or [])
   linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_link, ctx=ctx, walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
+  for name in {d for u in input_uops or [] for d in to_tuple(u.arg.buffer.device)}: Device[name].post_link(input_uops or [])
   return linked
