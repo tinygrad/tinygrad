@@ -1136,7 +1136,15 @@ class MTCompiler:
       src.write_text(source)
       include = pathlib.Path(td)/'include'
       include.mkdir()
-      (include/'cuda_fp16.h').write_text('#pragma once\n#include <musa_fp16.h>\n')
+      (include/'cuda_fp16.h').write_text('#pragma once\n#include <musa_fp16.h>\n'
+        '#if !defined(__MUSA_ARCH__) || __MUSA_ARCH__ < 220\n'
+        '__device__ __inline__ __half hsin(__half x) { return __float2half(sinf(__half2float(x))); }\n'
+        '__device__ __inline__ __half hlog2(__half x) { return __float2half(log2f(__half2float(x))); }\n'
+        '__device__ __inline__ __half hexp2(__half x) { return __float2half(exp2f(__half2float(x))); }\n'
+        '__device__ __inline__ __half hsqrt(__half x) { return __float2half(sqrtf(__half2float(x))); }\n'
+        '__device__ __inline__ __half htrunc(__half x) { return __float2half(truncf(__half2float(x))); }\n'
+        '__device__ __inline__ __half hrcp(__half x) { return __float2half(1.0f/__half2float(x)); }\n'
+        '#endif\n')
       # The S80 reports arch210. MUSA exposes CUDA bfloat16 math only for arch220;
       # use its scalar constructors and replace math/operators with float-backed arch210 implementations.
       (include/'cuda_bf16.h').write_text('#pragma once\n'
@@ -1217,7 +1225,7 @@ MT_SPILL_MIN_STRIDE = INIT_SIZE
 
 class MUSACompiler(Compiler):
   def __init__(self):
-    super().__init__('mt_O3_nocc_bfloat16_v2')
+    super().__init__('mt_O3_nocc_bfloat16_v7')
     self.mt = MTCompiler()
   def compile(self, src:str) -> bytes: return self.mt.compile_raw(src)
 
