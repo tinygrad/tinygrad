@@ -755,13 +755,13 @@ class X86Renderer(ISARenderer):
   def copy(self, x:UOp, reg:Register) -> UOp: return UOp.ins(X86Ops.MOV, (x,), x.dtype, reg)
 
   def spill(self, spill_slot:int, x:UOp) -> UOp:
-    op = X86Ops.VMOVUPSm if rdef(x).cons[0] in XMM else X86Ops.MOVm
+    op = X86Ops.VMOVUPSm if rdef(x) in XMM else X86Ops.MOVm
     disp = UOp.cconst(spill_slot, dtypes.int32)
     return UOp.ins(op, fold_address(stack_pointer().index(disp)) + (x,), dtypes.void)
 
   def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp:
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp.ins(X86Ops.VMOVUPS if reg.cons[0] in XMM else X86Ops.MOV, fold_address(stack_pointer().index(disp)), x.dtype, reg)
+    return UOp.ins(X86Ops.VMOVUPS if reg in XMM else X86Ops.MOV, fold_address(stack_pointer().index(disp)), x.dtype, reg)
 
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.body.arg.code))[-1] in ('i', 'm') else o[7:]).lower():7s}"
