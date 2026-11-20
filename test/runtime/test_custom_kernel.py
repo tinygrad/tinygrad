@@ -670,10 +670,16 @@ class TestCustomKernelArgs(unittest.TestCase):
     for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [1+k, 2+k, 3+k, 4+k])
 
   def test_scalar_expression_arg(self):
-    def kernel(out, length): return out[0].store(length.cast(out.dtype)).sink(arg=KernelInfo(name="store_length"))
-    f = TinyJit(lambda pos, count: Tensor.empty(1, dtype=dtypes.int).custom_kernel(pos+count*2, fxn=kernel)[0].realize())
-    pos, count = Variable("pos", 0, 32), Variable("count", 1, 8)
-    for p,c in ((0, 4), (1, 2), (17, 1), (3, 7)): self.assertEqual(f(pos.bind(p), count.bind(c)).item(), p+2*c)
+    def kernel(out, v, small): return out[0].store(v+small.cast(out.dtype)).sink(arg=KernelInfo(name="store_scalar"))
+    def build(n, m):
+      x, y = n.cast(dtypes.uint8), m.cast(dtypes.uint8)
+      return Tensor.empty(1, dtype=dtypes.int).custom_kernel(x.cast(dtypes.int)+(x*y).cast(dtypes.int), x<10, fxn=kernel)[0]
+    n, m = Variable("n", 0, 1000, dtypes.int), Variable("m", 1, 4, dtypes.int)
+    program, jit = Tensor.compile(build(n.bind(1), m.bind(1)).export()[0]), TinyJit(lambda n,m: build(n,m).realize())
+    for v,k in ((1, 1), (258, 3), (255, 2), (516, 4)):
+      out = build(nv:=n.bind(v), mv:=m.bind(k))
+      Tensor.run(program, out.export()[1])
+      self.assertEqual((out.item(), build(nv, mv).item(), jit(nv, mv).item()), (v%256 + (v*k)%256 + (v%256 < 10),)*3)
 
   def test_scalar_arg_jit_fixed_bind(self):
     # m is bound inside the jitted function so it's not an input, a replay keeps m=10 while the input n changes

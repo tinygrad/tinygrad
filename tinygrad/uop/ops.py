@@ -246,7 +246,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.GETADDR: return cast("Buffer", self.src[0].buffer).get_buf(to_tuple(self.arg)[0])
     # a casted const CAST(dt, CONST(v)) is one const: .val reads the value through the CAST
     assert self.op is Ops.CAST and self.src[0].op is Ops.CONST, f"val is only for consts, got {self.op}"
-    return self.src[0].val
+    return self.dtype.const(self.src[0].val)
   @property
   def is_invalid(self) -> bool: return self.op is Ops.CONST and self.val is Invalid
   @recursive_property
@@ -1135,7 +1135,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
     lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
-    ns: dict[str, Any] = {"max": max, "truncdiv": cdiv, "truncmod": cmod, "div": floordiv, "mod": floormod, "bitcast": bitcast, "dtypes": dtypes}
+    ns: dict[str, Any] = {"max": max, "truncdiv": cdiv, "truncmod": cmod, "div": floordiv, "mod": floormod, "bitcast": bitcast,
+                          "dtypes": dtypes, "exec_alu": exec_alu, "Ops": Ops}
     exec(f"def _f({','.join(varnames)}):\n"+'\n'.join(lines), ns)  # pylint: disable=exec-used
     return ns["_f"], varnames
 
@@ -1186,8 +1187,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       (self.op is Ops.CONST or (self.op in GroupOp.ALU|{Ops.CAST} and all(s.is_scalar_arg for s in self.src))))
   def placeholder_like(self, slot:int):
     if self.is_scalar_arg:
-      arg = ParamArg(slot, self.dtype, (self.vmin, self.vmax), self.arg.name if self.is_variable else None, AddrSpace.ALU)
-      return UOp(Ops.PARAM, (UOp(Ops.STACK),), arg)
+      # A predicate uses an integer kernel argument (OpenCL has no bool kernel ABI).
+      dtype = dtypes.int32 if self.dtype is dtypes.bool else self.dtype
+      arg = ParamArg(slot, dtype, (self.vmin, self.vmax), self.arg.name if self.is_variable else None, AddrSpace.ALU)
+      return UOp(Ops.PARAM, (UOp(Ops.STACK),), arg).cast(self.dtype)
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
     return UOp.placeholder(self.max_shard_shape, self.dtype, slot)
 

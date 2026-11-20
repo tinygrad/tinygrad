@@ -279,7 +279,8 @@ class Tensor(RandMixin):
 
   @staticmethod
   def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
-    """Link a LINEAR from `Tensor.compile` to this invocation's externs and execute it."""
+    """Execute a LINEAR from `Tensor.compile` without rerunning the tinygrad scheduler or compiler.
+    Replacement buffers must preserve aliasing: slots exported as disjoint must not overlap."""
     if capturing and CAPTURING: raise RuntimeError("cannot capture an already compiled Tensor.run")
     exec_linear(link_linear(linear, externs), ExecContext(update_stats=do_update_stats))
 
