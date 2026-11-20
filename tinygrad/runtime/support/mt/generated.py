@@ -143,7 +143,8 @@ class MTGeneratedLaunch(MTLaunch):
     has_barrier = k['.has_barrier']
     resource_off = self.backing_offsets[0xda00406000]
     self.template_text = image.text
-    self.text_offset = 0x1000 if len(image.text) <= 0x1000 else 0x2000 if len(image.text) <= 0x20000 else 0x30000
+    spill_bytes = max(k['.private_memory_size'],k['.local_mem_used_in_cluster'])
+    self.text_offset = 0x30000 if spill_bytes else 0x1000 if len(image.text) <= 0x1000 else 0x2000 if len(image.text) <= 0x20000 else 0x30000
     self.template_temp_count = k['.temp_reg_count']
     self.template_shared_count = k['.shared_reg_count']
     self.resource_temp_offset = 0x2c if has_barrier else 0x24 if has_ids else 0x1c

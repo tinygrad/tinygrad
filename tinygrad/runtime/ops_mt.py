@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, dataclasses, os, struct, hashlib, time
+import ctypes, dataclasses, os, re, struct, hashlib, time
 from typing import Any, cast
 from tinygrad.device import Compiled, Allocator, BufferStorage, BufferSpec, Buffer
 from tinygrad.renderer import Compiler, TinyELF
@@ -24,10 +24,17 @@ class MUSACompiler(Compiler):
     super().__init__('mt_O3')
     self.mt = MTCompiler()
   def compile(self, src:str) -> bytes:
-    return self.mt.compile_raw(src)
+    lib = self.mt.compile_raw(src)
+    k = MTKernelImage.from_elf(lib).metadata.kernel
+    # MUSA 4.3 miscompiles some high-register spill kernels with live local arrays.
+    if k['.private_memory_size'] and k['.temp_reg_count'] > 128:
+      volatile = re.sub(r'(?m)^(\s*)(float|double|int|uint|bool|half) (buf\d+\[\d+\];)',r'\1volatile \2 \3',src)
+      if volatile != src: return self.mt.compile_raw(volatile)
+    return lib
 
 class MUSARenderer(CUDARenderer):
   kernel_typedef = 'extern "C" __global__ void'
+  max_opt_ranges = 7
   def __init__(self, target):
     CStyleLanguage.__init__(self, target)
     self.compiler, self.tensor_cores = MUSACompiler(), []
@@ -430,13 +437,16 @@ class MTDevice(Compiled):
     if spill_bytes:
       threads = global_size[0]*global_size[1]*global_size[2]*local_size[0]*local_size[1]*local_size[2]
       # Spill VA uses a per-core power-of-two stride (minimum 32 MiB), with Core Number set to the physical core count.
-      spill_arena = max(0x2000000,1 << (spill_bytes<<20).bit_length())*8 if spill_bytes else 0
+      per_core_threads = (threads+7)//8
+      spill_stride = max(0x2000000,1 << (spill_bytes*per_core_threads).bit_length()) if spill_bytes else 0
+      spill_arena = spill_stride*8
       needed = max(round_up(spill_bytes*threads,0x1000),spill_arena)
       if needed > 0x40000000: raise MemoryError(f'MT spill allocation {needed:#x} exceeds the validated 1 GiB limit')
       spill_size,spill = self.spill_buffers.get(0,(0,None))
       if spill_size < needed:
         spill = self.allocator.alloc(needed,BufferSpec())
         self.spill_buffers[0] = (needed,spill)
+      launch.map_buffer(spill.buf,spill.meta.pa,needed)
       launch.set_spill(spill.buf)
       launch._write_backing(launch.backing_offsets[0x81e1200000]+8,struct.pack('<I',8))
     if launch.mmu_dirty:

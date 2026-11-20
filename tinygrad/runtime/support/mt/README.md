@@ -12,7 +12,7 @@ The MUSA userspace runtime and `libmtum` are not used or linked. Kernel text, la
 
 ## Compiler and firmware setup
 
-The compiler defaults to `/opt/musa`; set `MUSA_PATH` for a different toolkit location. Device kernels are compiled with `-O3`.
+The compiler defaults to `/opt/musa`; set `MUSA_PATH` for a different toolkit location. Device kernels are compiled with `-O3`. MUSA 4.3 high-register spill kernels with live local arrays are recompiled with volatile local arrays to avoid incorrect spill results; ordinary kernels retain the normal optimization path.
 
 Firmware is deliberately **not included in the tinygrad repository**. It is loaded from the first available location:
 
