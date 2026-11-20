@@ -11,9 +11,14 @@ from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.tc import TensorCore
 
+def mul_reduce(reduceops:list[UOp]) -> tuple[UOp, UOp]|None:
+  # the (first) sum of products and its product (under a gate or a cast), the tensor core's. a kernel can have other sums (of zero points)
+  def mul(x:UOp) -> UOp: return mul(x.src[1] if x.op is Ops.WHERE else x.src[0]) if x.op in (Ops.WHERE, Ops.CAST) else x
+  return next(((r, m) for r in reduceops if r.arg[0] is Ops.ADD and (m:=mul(r.src[0])).op is Ops.MUL), None)
+
 def tc_input(x:UOp, tc:TensorCore) -> UOp:
   # an int tensor core takes its inputs before they are widened to the accumulator
-  return x.src[0] if x.op is Ops.CAST and dtypes.is_int(x.dtype) and x.dtype == tc.dtype_out and x.src[0].dtype in tc.dtypes_in else x
+  return x.src[0] if x.op is Ops.CAST and dtypes.is_int(x.dtype) and x.dtype == tc.dtype_out and x.src[0].dtype == tc.dtype_in else x
 
 split_targets = {AxisType.UPCAST: (AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK),
                  AxisType.LOCAL: (AxisType.GLOBAL, AxisType.WEAK)}
@@ -169,15 +174,12 @@ class Scheduler:
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> None|list[UOp]:
     if not (reduceops := self.reduceops): raise KernelOptError("no reduce ops for TensorCore")
-    reduceop = reduceops[0]
-    if reduceop.arg[0] is Ops.ADD:
-      mul = reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]
-      if mul.op is not Ops.MUL: return None
+    if (rm:=mul_reduce(reduceops)) is not None:
+      reduceop, mul = rm
       in0, in1 = mul.src
       for tc in self.ren.tensor_cores if tc_select == -1 else [self.ren.tensor_cores[tc_select]]:
         if self.ren.target.device in ("CUDA", "NV") and tc.dtype_in == dtypes.float and not ALLOW_TF32: continue
-        # A and B are in0 and in1 in some order (see the swap below)
-        if (dts:=(tc_input(in0, tc).dtype, tc_input(in1, tc).dtype)) in (tc.dtypes_in, tc.dtypes_in[::-1]) and tc.dtype_out == reduceop.dtype:
+        if tc_input(in0, tc).dtype == tc.dtype_in and tc_input(in1, tc).dtype == tc.dtype_in and tc.dtype_out == reduceop.dtype:
           # tensor cores have three ranges. X, Y, and REDUCE
           in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg, reverse=True)
           in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg, reverse=True)
@@ -189,12 +191,9 @@ class Scheduler:
 
           # pick ranges
           # NOTE: in1 and in0 are switched because tc.dims is (N, M, K)
-          # after the choices of in0 as A are the choices of in1 as A
-          axis_choices = [(False, c) for c in itertools.product(in1_ranges, in0_ranges, red_ranges)] + \
-                         [(True, c) for c in itertools.product(in0_ranges, in1_ranges, red_ranges)]
+          axis_choices = list(itertools.product(in1_ranges, in0_ranges, red_ranges))
           if not (axis < len(axis_choices)): continue
-          swap, axes = axis_choices[axis][0], list(axis_choices[axis][1])
-          if (dts[::-1] if swap else dts) != tc.dtypes_in: continue
+          axes = list(axis_choices[axis])
           check(not any(r in self.reduce_ranges for r in axes[:2]), "tensor core N and M can't be contracted")
 
           # do optimizations and save the ranges
@@ -214,10 +213,9 @@ class Scheduler:
             continue
 
           if use_tensor_cores != 2:
-            reduceop = get_single_element([x for x in self.reduceops if axes[2] in x.src[1:]])
-            gate, mul = (r0.src[0], r0.src[1]) if (r0:=reduceop.src[0]).op is Ops.WHERE else (None, r0)
-            if mul.op is Ops.CAST: mul = mul.src[0]
-            ins = tuple(tc_input(x, tc) for x in (mul.src[::-1] if swap else mul.src))
+            reduceop, mul = get_single_element([rm for x in self.reduceops if axes[2] in x.src[1:] and (rm:=mul_reduce([x])) is not None])
+            gate = reduceop.src[0].src[0] if reduceop.src[0].op is Ops.WHERE else None
+            ins = tuple(tc_input(x, tc) for x in mul.src)
             if gate is not None: ins = tuple(gate.where(x, UOp.const(0, x.dtype)) for x in ins)
             srcs = [x.substitute({ne[a]: ne[b] for a,b in rl.items()}, walk=True) for x,rl in zip(ins, tc.relabel())]
 

@@ -9,9 +9,6 @@ from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate, l
 from tinygrad.device import Device
 from tinygrad.uop.ops import sint, _broadcast_shape
 
-# quantization params are python consts: a scalar, a per channel list or the bytes of a uint8 tensor
-QParam = ConstType|Sequence[ConstType]|bytes
-
 # ***** protobuf definitions ******
 class WireType(enum.IntEnum):
   """
@@ -216,12 +213,13 @@ class OnnxPBParser:
     assert len(present_fields) == 1, f"only 1 data field is allowed from {obj=}"
     data = obj[present_fields[0]]
     if not isinstance(data, Tensor):
-      obj["parsed_tensor"] = Tensor(data, dtype=dtype).reshape(shape)
+      # (an element is a const)
+      obj["parsed_tensor"] = Tensor(data[0] if prod(shape) == 1 else data, dtype=dtype).reshape(shape)
       return obj
     assert isinstance(data, Tensor) and data.dtype == dtypes.uint8, data
     data = data.bitcast(dtype).reshape(shape).to(Device.DEFAULT)
     # const folding
-    if shape == ():
+    if prod(shape) == 1:
       if data.dtype == dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
       data = Tensor(data.item(), dtype=dtype).reshape(shape)
     obj["parsed_tensor"] = data
@@ -278,115 +276,11 @@ required_input_python_consts: dict[str, tuple[int, ...]] = {
   "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
   "HannWindow": (0,), "HammingWindow": (0,), "BlackmanWindow": (0,),
   **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
-  **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")},
-  # quantization params
-  "QLinearConv": (1,2,4,5,6,7), "QLinearMatMul": (1,2,4,5,6,7), "QLinearAdd": (1,2,4,5,6,7), "QLinearGlobalAveragePool": (1,2,3,4),
-  "QGemm": (1,2,4,5,7,8), "QLinearReduceMean": (1,2,3,4,5),
+  **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
 }
 
 def _to_python_const(t:Tensor) -> list[ConstType]|ConstType|bytes:
   return t.data().tobytes() if t.dtype == dtypes.uint8 else t.tolist()
-
-# ***** QDQ fusion *****
-QDQ_PASSTHROUGH = {"Reshape", "Flatten", "Squeeze", "Unsqueeze", "Transpose"}
-# elementwise functions of one input, and of one input and scalars
-QDQ_LOOKUP = {"Gelu", "Sigmoid", "Tanh", "HardSigmoid", "HardSwish", "Elu", "Selu", "Celu", "LeakyRelu", "Softplus", "Softsign", "Mish", "Erf",
-              "Exp", "Log", "Sqrt", "Reciprocal", "Neg", "Abs", "Relu"}
-QDQ_ELEMENTWISE = QDQ_LOOKUP | {"DequantizeLinear", "Cast", "Add", "Sub", "Mul", "Div"}
-def fuse_qdq(nodes:tuple[OnnxNode, ...], values:dict[str, Any], outputs:tuple[str, ...], input_dtypes:dict[str, DType],
-             select_op:Callable[[OnnxNode], Callable]) -> tuple[OnnxNode, ...]:
-  """
-  Like onnxruntime, rewrite the float ops of a QDQ model (DequantizeLinear -> op -> QuantizeLinear) into QLinear ops that compute in integers.
-  An elementwise function of one 8-bit tensor is a lookup table of its 256 values. The quantization params must be initializers.
-  """
-  producer = {o:n for n in nodes for o in n.outputs}
-  consumers: dict[str, list[OnnxNode]] = {}
-  for n in nodes:
-    for i in n.inputs: consumers.setdefault(i, []).append(n)
-  # (the params and the tables and biases made of them are computed on the CPU, the ones made go to the default device)
-  def init(name:str) -> Tensor|None: return t.to("CPU") if isinstance(t:=values.get(name), Tensor) else None
-  def put(name:str, t:Tensor) -> str:
-    values[name] = t.to(Device.DEFAULT).realize()
-    return name
-  def per_tensor(*names:str) -> bool: return all((t:=init(nm)) is not None and t.numel() == 1 for nm in names)
-  def same(a:str, b:str) -> bool: return a == b or ((ta:=init(a)) is not None and (tb:=init(b)) is not None and ta.tolist() == tb.tolist())
-  def dq(name:str, axis:int|None=None) -> tuple[str, ...]|None:
-    # the (quantized, scale, zero_point) inputs of the DequantizeLinear making name. the params are per tensor or per channel on axis
-    if (n:=producer.get(name)) is None or n.op != "DequantizeLinear" or len(n.inputs) != 3 or n.opts.get("block_size", 0): return None
-    if any(init(i) is None for i in n.inputs[1:]): return None
-    return n.inputs if per_tensor(*n.inputs[1:]) or (axis is not None and n.opts.get("axis", 1) == axis) else None
-  def q(name:str) -> OnnxNode|None:
-    # the QuantizeLinear that's the only consumer of name
-    if name in outputs or len(cs:=consumers.get(name, [])) != 1 or (n:=cs[0]).op != "QuantizeLinear" or len(n.inputs) != 3: return None
-    return n if per_tensor(*n.inputs[1:]) else None
-  def elementwise(n:OnnxNode) -> tuple[str, DType, list[OnnxNode], list[OnnxNode]]|None:
-    # n is elementwise ops (their other inputs scalar initializers) and movement ops of an 8-bit tensor: (it, its dtype, the ops, the movement ops)
-    ops, moves, name = list[OnnxNode](), list[OnnxNode](), n.outputs[0]
-    while (p:=producer.get(name)) is not None and (p is n or (name not in outputs and len(consumers.get(name, [])) == 1)) and \
-          (p.op in QDQ_PASSTHROUGH or (p.op in QDQ_ELEMENTWISE and all((t:=init(i)) is not None and t.numel() == 1 for i in p.inputs[1:]))):
-      (moves if p.op in QDQ_PASSTHROUGH else ops).insert(0, p)
-      name = p.inputs[0]
-    # (a DequantizeLinear's input is 8-bit if its zero point is, and only something other than a DequantizeLinear needs a table)
-    if not ops or all(o.op == "DequantizeLinear" for o in ops): return None
-    xdt = cast(Tensor, init(ops[0].inputs[2])).dtype if ops[0].op == "DequantizeLinear" and len(ops[0].inputs) > 2 else input_dtypes.get(name)
-    return (name, xdt, ops, moves) if xdt in (dtypes.uint8, dtypes.int8) else None
-  def bias(name:str, scale:Tensor) -> tuple[str, ...]|None:
-    # an int32 bias with scale x_scale*w_scale and zero point 0
-    if name == "": return ()
-    if (b:=dq(name, axis=0)) is not None and (bq:=init(b[0])) is not None and bq.dtype == dtypes.int32 and \
-      not cast(Tensor, init(b[2])).abs().max().item() and (cast(Tensor, init(b[1])) - scale).abs().max().item() <= 1e-6 * scale.abs().max().item():
-      return (b[0],)
-    if (t:=init(name)) is None or not dtypes.is_float(t.dtype): return None
-    return (put(f"{name}_quantized_int32", (t / scale).round().cast(dtypes.int32)),)
-
-  fused, skip = [], set()
-  for n in nodes:
-    new: OnnxNode|list[OnnxNode]|None = None
-    y = q(n.outputs[0]) if len(n.outputs) == 1 else None
-    if (y is not None or n.op in QDQ_LOOKUP) and (src:=elementwise(n)) is not None:
-      # the table is the ops on each of the values (and the QuantizeLinear after them), the movement ops move its lookups
-      src_name, xdt, ops, moves = src
-      t = Tensor.arange(xdt.min, xdt.max+1).cast(xdt)
-      for op in ops + ([y] if y is not None else []): t = select_op(op)(t, *[init(i) for i in op.inputs[1:]], **op.opts)
-      tname = put(f"{(y or n).outputs[0]}_table", t.flatten())
-      names = [f"{(y or n).outputs[0]}_lookup{i}" for i in range(len(moves))] + [(y or n).outputs[0]]
-      new = [OnnxNode("QLinearLookup", n.opset_id, (src_name, tname), (names[0],), {})] + \
-            [dataclasses.replace(m, inputs=(a, *m.inputs[1:]), outputs=(b,)) for m,a,b in zip(moves, names, names[1:])]
-    elif y is None: pass
-    elif n.op == "Conv" and (x:=dq(n.inputs[0])) and (w:=dq(n.inputs[1], axis=0)) and init(w[0]) is not None and \
-      (b:=bias(n.inputs[2] if len(n.inputs) > 2 else "", cast(Tensor, init(x[1])) * cast(Tensor, init(w[1])))) is not None:
-      new = OnnxNode("QLinearConv", n.opset_id, (*x, *w, *y.inputs[1:], *b), y.outputs, n.opts)
-      # the x zero point term is a constant, it's folded into the bias
-      if (wt:=cast(Tensor, init(w[0]))).shape[1] > 1 and (xz:=int(cast(Tensor, init(x[2])).item())):
-        wz = cast(Tensor, init(w[2])).int().reshape(-1, *[1]*(wt.ndim-1))
-        folded = (wt.int() - wz).sum(tuple(range(1, wt.ndim))) * -xz
-        bname = put(f"{n.outputs[0]}_folded_bias", folded + cast(Tensor, init(b[0])) if b else folded)
-        new = OnnxNode("QLinearConv", n.opset_id, (*x, *w, *y.inputs[1:], bname), y.outputs, {**n.opts, "_bias_folded": 1})
-    elif n.op == "Gemm" and n.opts.get("beta", 1.0) == 1.0 and not n.opts.get("transA", 0) and (a:=dq(n.inputs[0])) and \
-      (w:=dq(n.inputs[1], axis=0 if n.opts.get("transB", 0) else 1)) and init(w[0]) is not None and \
-      (b:=bias(n.inputs[2] if len(n.inputs) > 2 else "", n.opts.get("alpha", 1.0) * cast(Tensor, init(a[1])) * cast(Tensor, init(w[1])))) is not None:
-      opts = {k:v for k,v in n.opts.items() if k != "beta"}
-      if (az:=int(cast(Tensor, init(a[2])).item())):
-        # the a zero point term is a constant, it's folded into the bias
-        wt, bz = cast(Tensor, init(w[0])).int(), cast(Tensor, init(w[2])).int()
-        folded = (wt - (bz.reshape(-1, 1) if opts.get("transB", 0) else bz)).sum(1 if opts.get("transB", 0) else 0) * -az
-        bname = put(f"{n.outputs[0]}_folded_bias", folded + cast(Tensor, init(b[0])) if b else folded)
-        b, opts = (bname,), {**opts, "_bias_folded": 1}
-      new = OnnxNode("QGemm", n.opset_id, (*a, *w, *(b or ("",)), *y.inputs[1:]), y.outputs, opts)
-    elif n.op == "MatMul" and (a:=dq(n.inputs[0])) and (w:=dq(n.inputs[1], axis=1)):
-      new = OnnxNode("QLinearMatMul", n.opset_id, (*a, *w, *y.inputs[1:]), y.outputs, {})
-    elif n.op == "Add" and (a:=dq(n.inputs[0])) and (b:=dq(n.inputs[1])):
-      new = OnnxNode("QLinearAdd", n.opset_id, (*a, *b, *y.inputs[1:]), y.outputs, {})
-    elif n.op == "ReduceMean" and (x:=dq(n.inputs[0])) and all(i == "" or init(i) is not None for i in n.inputs[1:]):
-      new = OnnxNode("QLinearReduceMean", n.opset_id, (*x, *y.inputs[1:], *n.inputs[1:]), y.outputs, n.opts)
-    elif n.op == "GlobalAveragePool" and (x:=dq(n.inputs[0])):
-      new = OnnxNode("QLinearGlobalAveragePool", n.opset_id, (*x, *y.inputs[1:]), y.outputs, {"channels_last": 0})
-    elif n.op in QDQ_PASSTHROUGH and (x:=dq(n.inputs[0])) and same(x[1], y.inputs[1]) and same(x[2], y.inputs[2]):
-      # moving data around doesn't change the quantized values
-      new = OnnxNode(n.op, n.opset_id, (x[0], *n.inputs[1:]), y.outputs, n.opts)
-    if new is not None and y is not None: skip.add(id(y))
-    if id(n) not in skip: fused.extend(new if isinstance(new, list) else [new or n])
-  return tuple(fused)
 
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
@@ -408,13 +302,12 @@ class OnnxRunner:
     self.graph_values = {"": None, **{i["name"]: i["parsed_tensor"] for i in graph["initializer"]}}
     self.graph_inputs = {i["name"]: i["parsed_type"] for i in graph["input"] if i["name"] not in self.graph_values}
     self.graph_outputs = tuple(o["name"] for o in graph["output"])
-    self.onnx_ops = onnx_ops
-    self.graph_nodes = fuse_qdq(tuple(n["parsed_node"] for n in graph["node"]), self.graph_values, self.graph_outputs,
-                                {k:v.dtype for k,v in self.graph_inputs.items()}, lambda n: self._select_op(n.op, n.opset_id))
+    self.graph_nodes = tuple(n["parsed_node"] for n in graph["node"])
     # track names from initializers and Constant nodes for fast path optimizations
     self.const_names: set[str] = set(self.graph_values.keys()) | {o for n in self.graph_nodes if n.op == "Constant" for o in n.outputs}
 
     self.variable_dims: dict[str, int] = {}
+    self.onnx_ops = onnx_ops
     self._python_const_cache: dict[str, list[ConstType]|ConstType|bytes] = {}  # cache by name for JIT stability
 
   @classmethod
@@ -548,37 +441,6 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     assert dtypes.is_int(out.dtype), "quantized op should've done math in int"
     out_quantized = (out * prod(scales) / out_scale).round() + out_zero_point
     return _clamp_cast(out_quantized, out_zero_point.dtype)
-
-  # the QLinear ops below compute in integers like gemmlowp: the raw products accumulate in int32 with the zero point terms factored out of
-  # the reduce, then a fixed point multiply requantizes. their scales and zero points are python consts (see required_input_python_consts)
-  def _qconst(v:QParam|None, default:ConstType=0) -> list:
-    return [default] if v is None else list(v) if isinstance(v, (bytes, list, tuple)) else [v]
-  # a uint8 python const is bytes, an int8 one is a list
-  def _qdtype(zero_point:QParam|None) -> DType: return dtypes.uint8 if isinstance(zero_point, bytes) else dtypes.int8
-  def _per_channel(v:list, ndim:int, dtype:DType, axis:int=1) -> Tensor|int:
-    return int(v[0]) if len(v) == 1 else Tensor(v, dtype=dtype).reshape([len(v) if i == axis else 1 for i in range(ndim)])
-
-  def _fixed_point(m:float) -> tuple[int, int]:
-    # m ~= mult * 2**-shift with mult in [2**30, 2**31)
-    fr, e = math.frexp(m)
-    return (mult, 31-e) if (mult:=round(fr * 2**31)) < 2**31 else (2**30, 30-e)
-
-  def _requantize(acc:Tensor, scale:list[float], zero_point:list[int], dtype:DType) -> Tensor:
-    # round(acc * scale) + zero_point in fixed point, scale and zero_point are per tensor or per channel (axis 1)
-    mult, shift = [list(z) for z in zip(*[_fixed_point(m) for m in scale])]
-    assert all(0 < s < 63 for s in shift), f"requantize scale out of range: {scale}"
-    x = acc.cast(dtypes.int64) * (m.cast(dtypes.int64) if isinstance(m:=_per_channel(mult, acc.ndim, dtypes.int32), Tensor) else m)
-    if all(s > 32 for s in shift):
-      # take the high half of the product first, that's a single mulhi instruction on most targets
-      # the high half is rounded down, so a tie in it is above the tie in x: round half up
-      hi, hs = x.rshift(32).cast(dtypes.int32), [s - 32 for s in shift]
-      out = (hi + _per_channel([1 << (s - 1) for s in hs], acc.ndim, dtypes.int32)) >> _per_channel(hs, acc.ndim, dtypes.int32)
-    else:
-      # round half to even
-      sh = _per_channel(shift, acc.ndim, dtypes.int64)
-      out = (x + _per_channel([(1 << (v-1)) - 1 for v in shift], acc.ndim, dtypes.int64) + (x.rshift(sh) & 1)).rshift(sh).cast(dtypes.int32)
-    # the quantized output is realized: the next op reads it many times (a conv), recomputing the requantize there would be slow
-    return _clamp_cast(out + _per_channel(zero_point, acc.ndim, dtypes.int32), dtype).contiguous()
 
   def _qlinearop_float(op, inputs:list[Tensor], zero_points:list[Tensor], scales:list[Tensor], out_scale:Tensor, out_zero_point:Tensor, **opts):
     # op execution is done in float32
@@ -1283,85 +1145,27 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     x_scale, x_zero_point = _prepare_quantize(x, x_scale, x_zero_point, axis, block_size)
     return ((x.int() - x_zero_point) * x_scale).cast(x_scale.dtype)
 
-  def _qconv(x:Tensor, xz:int, w:Tensor, wz:list[int], auto_pad:AUTO_PAD_OPTIONS="NOTSET", dilations:tuple[int, ...]|int=1, group:int=1,
-             kernel_shape:tuple[int, ...]|None=None, pads:tuple[int, ...]|int=0, strides:tuple[int, ...]|int=1, _bias_folded:int=0) -> Tensor:
-    # sum((x-xz)*(w-wz)) in int32. x is padded with its zero point so the zero point terms are the same for every output
-    # the padded input is realized: the conv reads it without bounds checks
-    if any(p := _resolve_pool_pads(x, pads, kernel_shape or w.shape[2:], dilations, strides, auto_pad)): x = x.pad(p, value=xz).contiguous()
-    x, w, wz_ = x.int(), w.int(), _per_channel(wz, w.ndim, dtypes.int32, axis=0)
-    acc = x.conv2d(w, groups=group, stride=strides, dilation=dilations)
-    # sum(x*w) - wz*sum(x) - xz*sum(w-wz)
-    if any(wz):
-      # the sums of the windows of x in each group
-      ks, n, c = w.shape[2:], int(x.shape[0]), int(x.shape[1])
-      xs = x._pool(ks, strides, dilations)
-      xsum = xs.reshape(n, group, c//group, *xs.shape[2:]).sum((2, *range(-len(ks), 0)))
-      acc = acc - xsum.repeat_interleave(int(w.shape[0])//group, 1) * _per_channel(wz, acc.ndim, dtypes.int32)
-    # with _bias_folded, fuse_qdq folded the last term into the bias
-    if xz and not _bias_folded: acc = acc - xz * (w - wz_).sum(tuple(range(1, w.ndim))).reshape(1, -1, *[1]*(w.ndim-2))
-    return acc
+  def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor, w:Tensor, w_scale:Tensor, w_zero_point:Tensor, y_scale:Tensor,
+                  y_zero_point:Tensor, B:Tensor|None=None, **opts):
+    # align quant params for non-scalars based on https://onnx.ai/onnx/operators/onnx__QLinearConv.html
+    w_zero_point = w_zero_point.reshape(-1, 1, 1, 1)
+    w_scale = w_scale.reshape(1, -1, 1, 1)
+    return _qlinearop_quantized(Conv, [x,w], [x_zero_point,w_zero_point], [x_scale,w_scale], y_scale, y_zero_point, **{"B":B, **opts})
 
-  def _qmatmul(a:Tensor, az:int, b:Tensor, bz:list[int], bias_folded:int=0) -> Tensor:
-    # sum((a-az)*(b-bz)) in int32: sum(a*b) - bz*sum(a) - az*sum(b-bz). b's zero point is per tensor or per column
-    a, b, bz_ = a.int(), b.int(), _per_channel(bz, b.ndim, dtypes.int32, axis=b.ndim-1)
-    acc = a @ b
-    if any(bz): acc = acc - a.sum(-1, keepdim=True) * bz_
-    if az and not bias_folded: acc = acc - az * (b - bz_).sum(-2, keepdim=True)
-    return acc
+  def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, y_scale:Tensor,
+                    y_zero_point:Tensor) -> Tensor:
+    return _qlinearop_quantized(Tensor.matmul, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], y_scale, y_zero_point)
 
-  def QLinearConv(x:Tensor, x_scale:QParam, x_zero_point:QParam, w:Tensor, w_scale:QParam, w_zero_point:QParam,
-                  y_scale:QParam, y_zero_point:QParam, B:Tensor|None=None, **opts):
-    acc = _qconv(x, _qconst(x_zero_point)[0], w, _qconst(w_zero_point), **opts)
-    if B is not None: acc = acc + B.reshape(1, -1, *[1]*(acc.ndim-2))
-    return _requantize(acc, [_qconst(x_scale)[0]*s/_qconst(y_scale)[0] for s in _qconst(w_scale)], _qconst(y_zero_point), _qdtype(y_zero_point))
-
-  def QLinearMatMul(a:Tensor, a_scale:QParam, a_zero_point:QParam, b:Tensor, b_scale:QParam, b_zero_point:QParam,
-                    y_scale:QParam, y_zero_point:QParam) -> Tensor:
-    acc = _qmatmul(a, _qconst(a_zero_point)[0], b, _qconst(b_zero_point))
-    scale = [_qconst(a_scale)[0]*s/_qconst(y_scale)[0] for s in _qconst(b_scale)]
-    if len(scale) > 1: acc = acc.transpose(-1, 1) # per column scales go on axis 1
-    out = _requantize(acc, scale, _qconst(y_zero_point), _qdtype(y_zero_point))
-    return out.transpose(-1, 1) if len(scale) > 1 else out
-
-  def QGemm(A:Tensor, a_scale:QParam, a_zero_point:QParam, B:Tensor, b_scale:QParam, b_zero_point:QParam,
-            C:Tensor|None=None, y_scale:QParam|None=None, y_zero_point:QParam|None=None, alpha:float=1.0, transA:int=0, transB:int=0,
-            _bias_folded:int=0):
-    acc = _qmatmul(A.transpose() if transA else A, _qconst(a_zero_point)[0], B.transpose() if transB else B, _qconst(b_zero_point), _bias_folded)
-    if C is not None: acc = acc + C
-    scale = [alpha*_qconst(a_scale)[0]*s for s in _qconst(b_scale)]
-    if y_scale is None: return acc.float() * _per_channel(scale, 2, dtypes.float32)
-    return _requantize(acc, [s/_qconst(y_scale)[0] for s in scale], _qconst(y_zero_point), _qdtype(y_zero_point))
-
-  def QLinearAdd(a:Tensor, a_scale:QParam, a_zero_point:QParam, b:Tensor, b_scale:QParam, b_zero_point:QParam, c_scale:QParam,
-                 c_zero_point:QParam):
-    # ((a-az)*ma + (b-bz)*mb) with the multipliers in fixed point with as many fraction bits as int32 allows
-    ma, mb = _qconst(a_scale)[0]/_qconst(c_scale)[0], _qconst(b_scale)[0]/_qconst(c_scale)[0]
-    frac = min(24, int(math.log2(2**31 / (256 * (ma + mb)))))
-    acc = (a.int() - _qconst(a_zero_point)[0]) * round(ma * 2**frac) + (b.int() - _qconst(b_zero_point)[0]) * round(mb * 2**frac)
-    out = ((acc + (1 << (frac-1)) - 1 + ((acc >> frac) & 1)) >> frac) + _qconst(c_zero_point)[0]
-    return _clamp_cast(out, _qdtype(c_zero_point)).contiguous()
-
-  def QLinearLookup(x:Tensor, table:Tensor) -> Tensor:
-    # the 8-bit x indexes the table of the function's outputs (see fuse_qdq)
-    return table[x.int() - int(x.dtype.min)].contiguous()
+  def QLinearAdd(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
+    return _qlinearop_float(Tensor.add, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], c_scale, c_zero_point)
 
   def QLinearMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, c_scale:Tensor, c_zero_point:Tensor):
     return _qlinearop_quantized(Tensor.mul, [a,b], [a_zero_point,b_zero_point], [a_scale,b_scale], c_scale, c_zero_point)
 
-  def QLinearGlobalAveragePool(X:Tensor, x_scale:QParam, x_zero_point:QParam, y_scale:QParam, y_zero_point:QParam, channels_last:int):
+  def QLinearGlobalAveragePool(X:Tensor, x_scale:Tensor, x_zero_point:Tensor, y_scale:Tensor, y_zero_point:Tensor, channels_last:int):
     if channels_last: X = X.permute(0, X.ndim-1, *range(1, X.ndim-1))  # NHWC -> NCHW
-    n = prod(X.shape[2:])
-    acc = X.int().sum(axis=tuple(range(2, X.ndim)), keepdim=True) - n * _qconst(x_zero_point)[0]
-    ret = _requantize(acc, [_qconst(x_scale)[0] / (_qconst(y_scale)[0] * n)], _qconst(y_zero_point), _qdtype(y_zero_point))
+    ret = _qlinearop_float(GlobalAveragePool, [X], [x_zero_point], [x_scale], y_scale, y_zero_point)
     return ret.permute(0, *range(2, ret.ndim), 1) if channels_last else ret  # NCHW -> NHWC
-
-  def QLinearReduceMean(X:Tensor, x_scale:QParam, x_zero_point:QParam, y_scale:QParam, y_zero_point:QParam, axes:Sequence[int]|None=None,
-                        keepdims:int=1, noop_with_empty_axes:int=0):
-    # sum(x-xz) * x_scale / (y_scale * n)
-    if (ax:=_axes(axes, noop_with_empty_axes)) is None: ax = list(range(X.ndim))
-    n = prod(X.shape[a] for a in ax)
-    acc = X.int().sum(tuple(ax), keepdim=bool(keepdims)) - n * _qconst(x_zero_point)[0]
-    return _requantize(acc, [_qconst(x_scale)[0] / (_qconst(y_scale)[0] * n)], _qconst(y_zero_point), _qdtype(y_zero_point))
 
   def ConvInteger(x: Tensor, w: Tensor, x_zero_point:Tensor = Tensor(0), w_zero_point:Tensor = Tensor(0), **opts) -> Tensor:
     return _op_integer(Conv, [x,w], [x_zero_point,w_zero_point], **opts)

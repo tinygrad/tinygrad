@@ -1,9 +1,9 @@
 from dataclasses import replace, dataclass, field
 from collections import deque
-import itertools, functools, time, inspect
+import itertools, functools, time, inspect, math, operator
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC, SCACHE, BASEDIR
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile
-from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored
+from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored, prod
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
@@ -29,7 +29,6 @@ from tinygrad.codegen.indexing import _stack_select
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import indexing_simplify, memory_coalescing, pm_simplify_add_image
-from tinygrad.codegen.late.vectorize import pm_vector_lower, pm_vector_flatten, vectorized, vector_math
 from tinygrad.codegen.rangeify import BufferizeOpts, get_kernel_graph
 from tinygrad.codegen.memory import memory_plan_rewrite
 
@@ -121,25 +120,50 @@ def index_lane(x:UOp, idx:tuple[UOp, ...]) -> UOp:
   while ret.op is Ops.INDEX and ret.src[0].op in GroupOp.Movement and (nxt:=_mop_index(ret.src[0], ret)) is not None: ret = nxt
   return ret
 
-def do_devectorize(b:UOp):
+# a flat value (a vector) is its lanes
+def flat(x:UOp) -> bool:
+  return x.op in (Ops.STACK, Ops.WMMA) or (x.op not in GroupOp.Movement|{Ops.INDEX} and x._shape is not None and len(x.shape) == 1)
+
+def do_devectorize(ctx:Renderer, b:UOp):
   if b.shape == (): return None
   # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
   if not all(x.shape == b.shape or x.base.is_invalid for x in b.src): return None
+  # a renderer with vector ALU ops for the dtype does the elementwise op once on the lanes of each src
+  if ctx.vector_alu and b.op in GroupOp.Elementwise and (b.src[0].dtype if b.op in GroupOp.Comparison else b.dtype) in ctx.vector_dtypes:
+    lanes = list(itertools.product(*[[UOp.const(i) for i in range(x)] for x in b.shape]))
+    # (a flat src is its lanes, else its lanes are a stack)
+    srcs = tuple(x if x.base.is_invalid or flat(x) else UOp.stack(*[index_lane(x, i) for i in lanes]) for x in b.src)
+    return None if srcs == b.src else b.replace(src=srcs).reshape(b.shape)
   src = []
   for idx_c in itertools.product(*[[UOp.const(i) for i in range(x)] for x in b.shape]):
     src.append(b.replace(src=tuple(x.base if x.base.is_invalid else index_lane(x, idx_c) for x in b.src)))
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
-  if all(x.op in (Ops.STACK, Ops.WMMA) for x in u.src): return None
+  if all(flat(x) for x in u.src): return None
   assert len(u.shape) == 1
-  src = []
-  for b in u.src:
-    if b.op != Ops.STACK:
-      src.append(UOp.stack(*[b.index(i) for i in range(b.max_numel())]))
-    else:
-      src.append(b)
-  return u.replace(src=tuple(src))
+  return u.replace(src=tuple(b if flat(b) else UOp.stack(*[b.index(i) for i in range(b.max_numel())]) for b in u.src))
+
+def ungate_load(ctx:Renderer, ld:UOp, buf:UOp, idx:UOp, valid:UOp, inv:UOp) -> UOp|None:
+  # a gated load that can read past the buffer (Renderer.overread) loads ungated and selects, so it coalesces with the others
+  sz = buf.dtype.itemsize
+  if not inv.base.is_invalid or idx.vmin*sz < -ctx.overread or (idx.vmax+1)*sz > buf.max_numel()*sz + ctx.overread: return None
+  return valid.where(buf.index(idx).load(*ld.src[1:], arg=ld.arg), ld.const_like(0))
+
+def push_view(x:UOp) -> UOp|None:
+  # a movement op (that doesn't add lanes) or a slice (an index of leading dims) of elementwise math or a load is the math or the load of the
+  # moved srcs: the vectors are only as wide as they are used
+  if (a:=x.src[0]).addrspace is not AddrSpace.ALU or a._shape is None or x.op is Ops.EXPAND or \
+     (x.op is Ops.INDEX and not (len(x.src)-1 < len(a.shape) and all(i.op is Ops.CONST for i in x.src[1:]))): return None
+  if a.op in GroupOp.Elementwise and all(s.shape == a.shape for s in a.src): return a.replace(src=tuple(x.replace(src=(s,)+x.src[1:]) for s in a.src))
+  if a.op is Ops.LOAD and len(a.src) == 1 and (ix:=a.src[0]).op is Ops.INDEX and len(ix.src) == 2 and ix.src[1].shape == a.shape:
+    return ix.src[0].index(x.replace(src=(ix.src[1],)+x.src[1:])).load(arg=a.arg)
+  return None
+
+# a renderer with vector ALU ops loads what can be read past the buffer ungated, and its vectors are as wide as they are used
+pm_vector_prep = pm_mops+PatternMatcher([
+  (UPat.var("buf").index(UPat.var("valid").where(UPat.var("idx"), UPat.var("inv"))).load(name="ld"), ungate_load),
+  (UPat(GroupOp.Movement|{Ops.INDEX}, name="x"), push_view)])
 
 devectorizer2 = pm_mops+PatternMatcher([
   # unpack broadcasting
@@ -202,6 +226,64 @@ def lower_reduce(ctx:itertools.count, r:UOp):
   acc_initted = acc.after(acc_init, *r.src[1:])
   acc_out = acc_initted.store(acc_initted.alu(op, ret)).end(*r.src[1:])
   return acc.after(acc_out).load()
+
+# **** quantized math is in ints: float math of ints scaled by consts (dequantized), cast back to an int (quantized) ****
+
+def scaled(u:UOp) -> tuple[UOp, float]|None:
+  # u as x.float()*c for an int x: (x, c)
+  if u.op is Ops.MUL and u.src[1].op is Ops.CONST and (x:=scaled(u.src[0])) is not None: return (x[0], x[1]*u.src[1].arg)
+  # (a padded one is the padded int)
+  if u.op is Ops.WHERE and u.src[2].op is Ops.CONST and u.src[2].arg == 0 and (x:=scaled(u.src[1])) is not None:
+    return (u.src[0].where(x[0], x[0].const_like(0)), x[1])
+  return (u.src[0].cast(dtypes.int32), 1.0) if u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_int(u.src[0].dtype) else None
+
+def bound(x:UOp) -> int: return max(abs(int(x.vmin)), abs(int(x.vmax)))
+
+def mul_scaled(m:UOp) -> UOp|None:
+  # a product of scaled ints is the scaled product (exact in float if it's < 2**24)
+  if (a:=scaled(m.src[0])) is None or (b:=scaled(m.src[1])) is None or bound(a[0])*bound(b[0]) >= 2**24: return None
+  return (a[0]*b[0]).cast(m.dtype) * (a[1]*b[1])
+
+def reduce_scaled(r:UOp) -> UOp|None:
+  # a sum of a scaled int is the scaled sum, in int32 if it can't overflow
+  if r.arg[0] is not Ops.ADD or (a:=scaled(r.src[0])) is None: return None
+  if bound(a[0])*prod(int(x.vmax+1) for x in r.src[1:]) >= 2**31: return None
+  return r.replace(src=(a[0],)+r.src[1:]).cast(r.dtype) * a[1]
+
+def add_scaled(x:UOp) -> UOp|None:
+  # a sum of ints with the same scale (a bias with the scale of the products) is the scaled sum
+  if (a:=scaled(x.src[0])) is None or (b:=scaled(x.src[1])) is None or abs(a[1]-b[1]) > 1e-6*abs(a[1]): return None
+  return (a[0]+b[0]).cast(x.dtype) * a[1]
+
+def requantize(x:UOp) -> UOp|None:
+  # (sum of scaled ints + k).int() is fixed point: the high word of each int times its multiplier of 31 bits, plus k, shifted down
+  terms, k = [], 0.0
+  for t in x.src[0].split_uop(Ops.ADD):
+    if t.op is Ops.CONST: k += t.arg
+    elif (a:=scaled(t)) is not None and a[1] != 1.0: terms.append(a)
+    else: return None
+  if not terms or (s:=31 - math.frexp(max(abs(c) for _,c in terms))[1]) <= 32: return None
+  hi = functools.reduce(operator.add, [((a.cast(dtypes.int64) * round(c * 2**s)) >> 32).cast(dtypes.int32) for a,c in terms])
+  return ((hi + round(k * 2**(s-32))) >> (s-32)).cast(x.dtype)
+
+def reduce_offsets(r:UOp, a:UOp, b:UOp) -> UOp|None:
+  # a sum of products of ints plus consts (zero points) is the sum of the products and the sums of each times the other's const
+  (a, ca), (b, cb) = [(x.src[0], x.src[1].arg) if x.op is Ops.ADD and x.src[1].op is Ops.CONST else (x, 0) for x in (a, b)]
+  if r.arg[0] is not Ops.ADD or not dtypes.is_int(r.dtype) or (ca == 0 and cb == 0): return None
+  terms = [a*b] + ([a*cb] if cb else []) + ([b*ca] if ca else [])
+  return functools.reduce(operator.add, [r.replace(src=(t,)+r.src[1:]) for t in terms]) + ca*cb*prod(int(x.vmax+1) for x in r.src[1:])
+
+pm_quantized = PatternMatcher([
+  # (a padded int plus a const is the int padded with minus the const, plus it. a cast of a padded small int is outside the where)
+  (UPat.var("v").where(UPat.var("x", dtypes.ints)+UPat.cvar("c"), 0), lambda v,x,c: v.where(x, -c)+c),
+  (UPat.var("v").where(UPat.var("x").cast(dtypes.ints, name="cx"), UPat.cvar("c")),
+   lambda v,x,cx,c: v.where(x, c.cast(x.dtype)).cast(cx.dtype) if dtypes.is_int(x.dtype) and x.dtype.min <= c.arg <= x.dtype.max else None),
+  (UPat(Ops.REDUCE, src=(UPat.var("a")*UPat.var("b"),), allow_any_len=True, name="r"), reduce_offsets),
+  (UPat(Ops.MUL, dtype=dtypes.floats, name="m"), mul_scaled),
+  (UPat(Ops.REDUCE, dtype=dtypes.floats, name="r"), reduce_scaled),
+  (UPat(Ops.ADD, dtype=dtypes.floats, name="x"), add_scaled),
+  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(Ops.ADD, dtype=dtypes.floats),), name="x"), requantize),
+])
 
 # with vector ALU ops, a reduce of the lanes of a vector in a loop to a scalar accumulates the vector, its lanes are reduced after the loop
 pm_vector_accumulate = PatternMatcher([
@@ -286,6 +368,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # preprocess
   sink = graph_rewrite(sink, pm_mops+pm_expand_value_bitcast, name="early movement ops", bottom_up=True)
+  sink = graph_rewrite(sink, sym+pm_quantized, name="quantized math")
 
   # first we optimize
   if optimize:
@@ -327,19 +410,15 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
 
-  # a renderer with vector ALU ops keeps the vectors, else (or if they can't all be kept) they're split into lanes
-  if (vector:=ren.vector_alu and vector_math(sink, ren.vector_dtypes) and
-      vectorized(vsink:=graph_rewrite(graph_rewrite(sink, symbolic_simple+pm_vector_lower, ctx=ren, name="vectorize"), pm_vector_flatten,
-                                      name="flatten vectors"))): sink = vsink
-  else:
-    # devectorize
-    sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, name="devectorize2")
+  # devectorize
+  if ren.vector_alu: sink = graph_rewrite(sink, pm_vector_prep, ctx=ren, name="vector prep")
+  sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, ctx=ren, name="devectorize2")
 
-    # some coalescing misses without this
-    sink = graph_rewrite(sink, sym, name="early symbolic")
+  # some coalescing misses without this
+  sink = graph_rewrite(sink, sym, name="early symbolic")
 
-    # do memory coalescing (late)
-    sink = memory_coalescing(sink, ren)
+  # do memory coalescing (late)
+  sink = memory_coalescing(sink, ren)
   # an image is read_only or write_only, so a PARAM that is both loaded and stored stays a buffer
   loaded, stored = [{u.src[0].buf_uop for u in sink.toposort() if u.op is op} for op in (Ops.LOAD, Ops.STORE)]
   sink = graph_rewrite(sink, pm_simplify_add_image, name="add images", ctx=({}, ren, loaded & stored), bottom_up=True)
@@ -379,9 +458,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
   pm_final_rewrite = pm_commit_weak+pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
-
-  # (the broadcasts the lowering made are stacks)
-  if vector: sink = graph_rewrite(sink, pm_vector_flatten, name="flatten vectors")
 
   # commit every const still bare so no renderer reads one
   sink = graph_rewrite(sink, pm_cast_const, name="cast consts", walk=True)

@@ -5,7 +5,7 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
 from tinygrad.uop.ops import gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, Context, SPEC
+from tinygrad.helpers import argsort, all_same, cpu_profile, Context, SPEC, all_int, strides_for_shape
 
 @dataclass
 class IndexingContext:
@@ -171,6 +171,10 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
       rngs = tuple(r if (sz == sh and off == 0) else (r-off).valid(graph_rewrite((r >= off) & (r < (sh+off)),
         symbolic+pm_simplify_valid, name="pad")) for r,sh,(off,sz) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
+      # (consts reshape in python)
+      if all(r.op is Ops.CONST for r in rngs) and all_int(in_shape) and all_int(arg):
+        flat = sum(int(r.arg)*st for r,st in zip(rngs, strides_for_shape(arg)))
+        return tuple(UOp.const(flat // st % s if s != 1 else 0) for s,st in zip(in_shape, strides_for_shape(in_shape)))
       sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
       sub_array = {r:r.replace(arg=(AxisType.PLACEHOLDER, i)) for i,r in enumerate(sink.ranges)}
       rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src

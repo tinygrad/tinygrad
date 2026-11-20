@@ -74,6 +74,8 @@ def _mop_index(r:UOp, idx:UOp):
     if r.op is not Ops.RESHAPE or src_prefix < 0 or in_shape[src_prefix:] != r.shape[len(idxs):]: return None
     in_shape, arg = in_shape[:src_prefix], r.shape[:len(idxs)]
   new_idxs = apply_movement_op(r.op, in_shape, arg, idxs)
+  # (a lane, consts in every dim, has no gates)
+  if all(i.op is Ops.CONST for i in idxs): return r.src[0].index(*new_idxs, arg=idx.arg) if not partial else None
   kept = {UOp.const(True)} | {c for i in new_idxs for c in _valid(i).split_uop(Ops.AND)}
   dropped = dedup(c for i in idxs for c in _valid(i).split_uop(Ops.AND) if c not in kept)
   if (ret := r.src[0].index(*new_idxs, arg=idx.arg)).shape != idx.shape and partial: return None

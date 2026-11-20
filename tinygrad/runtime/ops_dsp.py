@@ -1,17 +1,16 @@
 from __future__ import annotations
 import ctypes, functools, os, mmap, tempfile, pathlib, array, threading, contextlib, subprocess, struct, math, itertools, hashlib, operator
 import types, time, traceback
-from typing import cast
+from typing import cast, Any
 from tinygrad.device import BufferStorage, MMIOInterface, BufferSpec, Compiled, Allocator, HCQ_RUNTIME_DEV
 from tinygrad.renderer import Compiler, TinyELF
 from tinygrad.dtype import dtypes, AddrSpace, DType
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType, KernelInfo, uopfunc
 from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing, Target, unwrap, dedup
-from tinygrad.helpers import all_same, prod
+from tinygrad.helpers import all_same, prod, strides_for_shape
 from tinygrad.renderer.cstyle import ClangRenderer, base_rewrite, uops_to_dtypes, _wmma_name
 from tinygrad.renderer import tc
 from tinygrad.runtime.support.memory import TLSFAllocator
-from tinygrad.codegen.late.vectorize import lane_of
 from tinygrad.runtime.autogen import libc, qcom_dsp
 from tinygrad.runtime.support.c import DLL
 from tinygrad.runtime.support.hcq2 import HWQueue, ccall, cstruct, patch, unwrap_view, layout_args, pack_args, make_program
@@ -64,10 +63,19 @@ def concat(parts:list[str], m:int) -> str:
   while len(parts) > 1: parts, m = [shuffle(a, b, list(range(m)) + [vpad(m)+i for i in range(m)]) for a,b in zip(parts[::2], parts[1::2])], 2*m
   return parts[0]
 
-def gather(ctx:DSPRenderer, srcs:tuple[UOp, ...]) -> str:
-  # the vector of srcs, each a lane of a vector or a scalar
-  n, dt, lanes = len(srcs), srcs[0].dtype, [lane_of(s) for s in srcs]
-  if all(s is srcs[0] for s in srcs): return splat(ctx, srcs[0], n)
+def lane_of(u:UOp) -> tuple[UOp, int]|None:
+  # u is lane i of the value x (not memory) if it's x indexed at a const in each dim (the lanes are in row major order)
+  if u.op is not Ops.INDEX or (x:=u.src[0]).addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) or x._shape is None or \
+     x.max_numel() == 1 or len(u.src) - 1 != len(x.shape) or not all((i.src[0] if i.op is Ops.CAST else i).op is Ops.CONST for i in u.src[1:]):
+    return None
+  return (x, sum(int((i.src[0] if i.op is Ops.CAST else i).arg)*st for i,st in zip(u.src[1:], strides_for_shape(x.shape))))
+
+def gather(ctx:DSPRenderer, items:list) -> str:
+  # the vector of items, each a lane of a vector (vector, i) or a scalar
+  lanes: list[tuple[UOp, int]|None] = [x if isinstance(x, tuple) else None for x in items]
+  srcs: list[Any] = [x if not isinstance(x, tuple) else None for x in items]
+  n, dt = len(items), (items[0][0] if isinstance(items[0], tuple) else items[0]).dtype
+  if all(s is srcs[0] and s is not None for s in srcs): return splat(ctx, srcs[0], n)
   vecs = dedup([l[0] for l in lanes if l is not None])
   if len(vecs) == 1 and lanes == [(vecs[0], i) for i in range(n)] and vpad(vecs[0].max_numel()) == vpad(n): return ctx[vecs[0]]
   if vecs and len(vecs) & (len(vecs)-1) == 0 and all_same([v.max_numel() for v in vecs]) and vpad(m:=vecs[0].max_numel()) == m and \
@@ -86,13 +94,14 @@ def gather(ctx:DSPRenderer, srcs:tuple[UOp, ...]) -> str:
     def lanes_of(f) -> str: return f"(({vt}){{{', '.join(str(ones) if f(s, l) else '0' for s,l in zip(srcs, lanes))}}})"
     ret = f"(({vt}){{{', '.join(str(int(s.arg)) if l is None and s.op is Ops.CONST else '0' for s,l in zip(srcs, lanes))}}})"
     if vecs:
-      any_lane = next(s for s,l in zip(srcs, lanes) if l is not None)
-      ret += f" | ({gather(ctx, tuple(s if l is not None else any_lane for s,l in zip(srcs, lanes)))} & {lanes_of(lambda s,l: l is not None)})"
+      any_lane = next(l for l in lanes if l is not None)
+      ret += f" | ({gather(ctx, [l or any_lane for l in lanes])} & {lanes_of(lambda s,l: l is not None)})"
     for x in xs: ret += f" | ({splat(ctx, x, n)} & {lanes_of(lambda s,l,x=x: s is x)})"
     return f"({ret})"
   # a vector of scalars goes through memory (clang crashes on some vectors of them)
   if any(l is None for l in lanes):
-    return f"({{ {'unsigned char' if dt == dtypes.bool else ctx.render_dtype(dt)} volatile _t[{vpad(n)}] = {{{', '.join(ctx[s] for s in srcs)}}}; " \
+    vals = [ctx[s] if l is None else f"({ctx[l[0]]})[{l[1]}]" for s,l in zip(srcs, lanes)]
+    return f"({{ {'unsigned char' if dt == dtypes.bool else ctx.render_dtype(dt)} volatile _t[{vpad(n)}] = {{{', '.join(vals)}}}; " \
            f"({ctx._render_dtype(dt, n)}){{{', '.join(f'_t[{i}]' for i in range(vpad(n)))}}}; }})"
   # else each register (128 bytes) of it is bytes of the registers of the vectors, a pair of them at a time: vperm
   isz = dt.itemsize
@@ -123,8 +132,9 @@ def gather(ctx:DSPRenderer, srcs:tuple[UOp, ...]) -> str:
   return shuffle(f"(({ctx._render_dtype(dt, w)})({outs[0]}))", f"(({ctx._render_dtype(dt, w)})({outs[0]}))", range(n))
 
 def render_vec_stack(ctx:DSPRenderer, x:UOp) -> str|None:
-  if len(x.src) < 2 or any(s.shape != () for s in x.src): return None
-  return gather(ctx, x.src)
+  # (a stack of vectors is of their lanes)
+  if len(x.src) < 2 and x.src[0].shape == (): return None
+  return gather(ctx, [l for s in x.src for l in ([lane_of(s) or s] if s.shape == () else [(s, i) for i in range(s.max_numel())])])
 
 # the high word of a 32x32 bit multiply, the requantize. HVX has no 64 bit multiply, vmpye+vmpyo make the 64 bit product
 HVX_PRELUDE = """typedef long HVX_Vector __attribute__((__vector_size__(128))); typedef long HVX_VectorPair __attribute__((__vector_size__(256)));
@@ -307,8 +317,8 @@ def _store_pieces(ctx:DSPRenderer, ptr:str, var:str, dtype:DType, n:int, bidx:UO
   return " ".join(pieces)
 
 dsp_vec_rewrite = PatternMatcher([
-  # (a lane of a scalar, a vector that simplified to a broadcast of one, or of a vector of one lane, rendered as a scalar, is it)
-  (UPat(Ops.INDEX, name="x"), lambda ctx,x: ctx[x.src[0]] if x.src[0].addrspace is AddrSpace.ALU and x.src[0]._shape in ((), (1,)) else None),
+  # (a lane of a value of one lane, rendered as a scalar, is it)
+  (UPat(Ops.INDEX, name="x"), lambda ctx,x: ctx[x.src[0]] if x.src[0].addrspace is AddrSpace.ALU and x.src[0].max_numel() == 1 else None),
   # (a lane of the vector a call makes, a vector op rewritten here, is a lane of it)
   (UPat(Ops.INDEX, src=(UPat(Ops.CALL), UPat()), name="x"), lambda ctx,x: f"({ctx[l[0]]})[{l[1]}]" if (l:=lane_of(x)) is not None else None),
   (UPat(Ops.WMMA, name="x"), render_wmma),

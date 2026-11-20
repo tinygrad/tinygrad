@@ -1,10 +1,9 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, TC_MIN_GLOBALS, USE_TC, IMAGE
-from tinygrad.uop.ops import Ops, UOp, resolve, AxisType
+from tinygrad.uop.ops import Ops, UOp, resolve, AxisType, GroupOp
 from tinygrad.codegen.late.coalesce import image_valid_dims
-from tinygrad.codegen.opt.postrange import Scheduler
-from tinygrad.codegen.late.vectorize import vector_math
+from tinygrad.codegen.opt.postrange import Scheduler, mul_reduce
 from tinygrad.dtype import dtypes
 
 def index_strides(k:Scheduler, idx:UOp) -> dict[UOp, int]:
@@ -30,14 +29,14 @@ def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
   """ For wide SIMD without locals: a tensor core if one fits (padding to it), else a vector of the contiguous output or of the reduce """
   stores = [x for x in k.ast.backward_slice if x.op is Ops.STORE and x.src[0].op is Ops.INDEX]
   out_strides = index_strides(k, stores[0].src[0].src[1].get_idx()) if stores else {}
-  if USE_TC > 0 and (r:=k.reduceop) is not None and r.arg[0] is Ops.ADD and \
-     (mul:=r.src[0] if r.src[0].op is not Ops.CAST else r.src[0].src[0]).op is Ops.MUL:
-    # the tensor core's M (its vector lanes) is the output's contiguous range: the choices of _apply_tc_opt, A is in0 or in1
+  if USE_TC > 0 and (rm:=mul_reduce(k.reduceops)) is not None:
+    red, mul = rm
+    # the tensor core's M (its vector lanes) is the output's contiguous range: the choices of _apply_tc_opt
     in0, in1 = mul.src
     in0_r = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg, reverse=True)
     in1_r = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg, reverse=True)
-    red = sorted(r.src[1:], key=lambda x: x.arg, reverse=True)
-    ms = [m for _,m,_ in itertools.product(in1_r, in0_r, red)] + [m for _,m,_ in itertools.product(in0_r, in1_r, red)]
+    reds = sorted(red.src[1:], key=lambda x: x.arg, reverse=True)
+    ms = [m for _,m,_ in itertools.product(in1_r, in0_r, reds)]
     # of the choices with M contiguous in the output (else the first that fits), for each tensor core the one with the least work (the padded
     # multiply adds). the first tensor core is preferred, a later one if it does a lot less work
     best: dict[int, tuple[int, Scheduler]] = {}
@@ -86,15 +85,20 @@ def vector_optimizations(k:Scheduler, lanes:int=128) -> Scheduler:
     if k.full_shape[axis] <= (4 if n < 32 else 3): k.apply_opt(Opt(OptOps.SPLIT, axis, (0, AxisType.UPCAST)))
   # a vector's reduce of bytes (or their products) unrolls by 4: wide vector ISAs have dot products of 4 bytes
   def is_bytes(u:UOp) -> bool: return u.op is Ops.CAST and u.src[0].dtype in (dtypes.uint8, dtypes.int8)
-  if n >= 32 and (r:=k.reduceop) is not None and (is_bytes(b:=r.src[0]) or (b.op is Ops.MUL and all(is_bytes(s) for s in b.src))):
+  if n >= 32 and (rb:=k.reduceop) is not None and (is_bytes(b:=rb.src[0]) or (b.op is Ops.MUL and all(is_bytes(s) for s in b.src))):
     for axis in k.upcastable_dims(reduce=True)[::-1]:
       if k.full_shape[axis] % 4 == 0 and k.full_shape[axis] > 4:
         k.apply_opt(Opt(OptOps.SPLIT, axis, (4, AxisType.UPCAST)))
         break
   return k
 
+def vector_math(k:Scheduler) -> bool:
+  # all the kernel's math is in the renderer's vector dtypes (weakint is index math, a compare is in its operands' dtype)
+  return all((u.src[0].dtype if u.op in GroupOp.Comparison else u.dtype) in k.ren.vector_dtypes for u in k.ast.backward_slice
+             if u.op in GroupOp.ALU|{Ops.REDUCE} and (u.src[0].dtype if u.op in GroupOp.Comparison else u.dtype) is not dtypes.weakint)
+
 def hand_coded_optimizations(k:Scheduler) -> Scheduler:
-  if k.ren.vector_alu and vector_math(k.ast, k.ren.vector_dtypes): return vector_optimizations(k)
+  if k.ren.vector_alu and vector_math(k): return vector_optimizations(k)
   # first try the tensor cores
   """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
   Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
