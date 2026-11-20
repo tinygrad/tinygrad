@@ -288,8 +288,8 @@ def check_buf_states(x:UOp):
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), check_buf_states),
   (UPat((Ops.BUFFER, Ops.ALLOC, Ops.EXTERN, Ops.MSTACK, Ops.MSELECT), name="buf"), add_buf),
-  # Pass positional scalars as arguments too, except for free Variables (slot -1).
-  (UPat(Ops.PARAM, name="buf"), lambda ctx, buf: add_buf(ctx, buf) if buf.addrspace is not AddrSpace.ALU or buf.arg.slot >= 0 else None),
+  # positional params (storage and scalars) become kernel args, free Variables (slot -1) stay in the kernel
+  (UPat(Ops.PARAM, name="buf"), lambda ctx, buf: add_buf(ctx, buf) if buf.arg.slot >= 0 else None),
 
   # ALU params are scalar symbolic values, not buffers.
   (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.EXTERN), name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),

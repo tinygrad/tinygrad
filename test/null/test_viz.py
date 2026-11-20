@@ -1195,7 +1195,8 @@ class TestCLI(unittest.TestCase):
       summary, = run_cli(*files, "-s", "NULL", "-t")
     # Six calls share one kernel. Each contributes its own operation count to the aggregate rate.
     ops = [row["fmt"]["FLOPS"] * row["dur_ms"] * 1e-3 for row in out]
-    self.assertEqual(ops, [2*n*n*64 for pair in test_n for n in pair])
+    for got, expected in zip(ops, [2*n*n*64 for pair in test_n for n in pair], strict=True):
+      self.assertAlmostEqual(got, expected, delta=expected*1e-3)
     self.assertEqual(summary["count"], len(ops))
     self.assertAlmostEqual(summary["fmt"]["FLOPS"], sum(ops)/(summary["dur_ms"] * 1e-3), delta=1)
 

@@ -242,18 +242,17 @@ def flatten_events(profile:list[ProfileEvent], device_ts_diffs:dict[str, Decimal
 def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
   events:list[bytes] = []
   # A batch can enqueue the same program several times before its first device range starts.
-  pending:dict[bytes|str|None, deque[ProfilePointEvent]] = defaultdict(deque)
+  pending:dict[bytes, deque[ProfilePointEvent]] = defaultdict(deque)
   for st,et,dur,e in dev_events:
-    if isinstance(e, ProfilePointEvent) and e.name == "exec": pending[e.arg.get("program", e.arg["name"])].append(e)
+    if isinstance(e, ProfilePointEvent) and e.name == "exec" and e.arg["program"] is not None: pending[e.arg["program"]].append(e)
     if isinstance(e, ProfilePointEvent) or dur == 0: continue
     name, key = e.name, None
     fmt:dict = {}
     if (ref:=data.ref_map.get(e.profile_key)) is not None and ref < len(data.ctxs):
       name = data.ctxs[ref]["name"]
-      if (ki:=data.ctxs[ref].get("ki")) is not None and (queue:=pending.get(e.profile_key) or pending.get(ki.name)):
-        ei = queue.popleft()
-        key = ei.key
-        fmt = {k:int(v/(dur*1e-6)) for k,v in zip(("FLOPS", "B/s mem", "B/s lds"), ei.arg.get("estimates", ()))}
+      if e.profile_key is not None and (queue:=pending.get(e.profile_key)):
+        key = (ei:=queue.popleft()).key
+        fmt = {k:int(v/(dur*1e-6)) for k,v in zip(("FLOPS", "B/s mem", "B/s lds"), ei.arg["estimates"])}
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=data.ref_map.get(k)) is not None), None)

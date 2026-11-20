@@ -38,10 +38,11 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
   for call in iter_kernel_calls(linear):
     prg = to_program(call.body, Device[get_call_arg_uops(call)[0].device].renderer)
     functions[prg.src[0].arg.function_name] = prg.src[2].arg
-    # The model input name belongs to the caller, its ABI dtype to the compiled PARAM.
-    scalars = {p:UOp.variable(v.expr, v.vmin, v.vmax, p.dtype) if (v:=call.scalar_arg(p)).is_variable else v.ccast(p.dtype)
+    # scalar args are the caller's Variables (named by the caller, typed by the kernel PARAM) or constants
+    scalars = {p:UOp.variable(v.expr, v.vmin, v.vmax, p.dtype) if (v:=call.scalar_arg(p)).is_variable else v
                for p in prg.arg.params if p.addrspace is AddrSpace.ALU}
-    cargs = [scalars[p] if p.addrspace is AddrSpace.ALU else name_of(call.src[1+p.arg.slot], p.arg.slot == 0) for p in prg.kernel_params]
+    cargs = [(s if (s:=scalars[p]).is_variable else str(s.arg)) if p.addrspace is AddrSpace.ALU else
+             name_of(call.src[1+p.arg.slot], p.arg.slot == 0) for p in prg.kernel_params]
     dims = [[x.substitute(scalars, walk=True).ssimplify() if isinstance(x, UOp) else x for x in sz] for sz in (prg.arg.global_size, prg.arg.local_size)]
     statements.append((prg.src[0].arg.function_name, cargs, *dims))
 
@@ -258,20 +259,12 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
   symbolic_vars = OrderedDict()
   for _, args, global_size, _ in statements:
     for j, var in enumerate(args):
-      if getattr(var, "op", None) is Ops.PARAM and var.addrspace is AddrSpace.ALU and var.arg.name is not None:
-        if var not in symbolic_vars:
-          symbolic_vars[var] = var.expr
-          bufs[symbolic_vars[var]] = (var.dtype.itemsize, var.dtype, symbolic_vars[var])
-        args[j] = symbolic_vars[var]
-      elif isinstance(var, UOp) and var.op is Ops.CONST: args[j] = str(var.val)
-
-    if global_size:
-      for j, dim in enumerate(global_size):
-        if isinstance(dim, UOp) and dim.is_variable: global_size[j] = f"_{dim.expr}[0]"
-        elif getattr(dim, "op", None) is Ops.ADD and len(dim.src) == 2 and \
-           any(s.op is Ops.PARAM and s.addrspace is AddrSpace.ALU for s in dim.src) and any(s.op is Ops.CONST for s in dim.src):
-          name, val = dim.src if dim.src[1].op is Ops.CONST else reversed(dim.src)
-          global_size[j] = f"_{name.expr}[0] + {val.val}"
+      if isinstance(var, UOp):
+        symbolic_vars[var] = args[j] = var.expr
+        bufs[var.expr] = (var.dtype.itemsize, var.dtype, var.expr)
+    # symbolic dims read the uniform buffer of each Variable
+    for j, dim in enumerate(global_size):
+      if isinstance(dim, UOp): global_size[j] = dim.substitute({v:UOp.variable(f"_{v.expr}[0]", v.vmin, v.vmax, v.dtype) for v in dim.variables()}).render()
 
   prg = ""
   if target == "clang":
