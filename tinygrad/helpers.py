@@ -130,7 +130,6 @@ def canonicalize_strides(shape:tuple[T, ...], strides:tuple[T, ...]) -> tuple[T,
 
 @functools.cache
 def strides_for_shape(shape:tuple[T, ...]) -> tuple[T, ...]:
-  if not shape: return ()
   strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
   return canonicalize_strides(shape, strides)
 
