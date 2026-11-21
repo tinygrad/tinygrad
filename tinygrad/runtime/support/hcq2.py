@@ -11,6 +11,7 @@ from tinygrad.dtype import dtypes, AddrSpace, truncate
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.c import Struct
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear, lower_and_compile
+from tinygrad.engine.realize import QUEUE_FUNCTIONS
 
 # **** calls
 
@@ -29,7 +30,7 @@ def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for
 
 def get_enqueue_devs(call:UOp) -> tuple[str, ...]:
   if call.op is not Ops.CALL: return () # entries can be AFTER-wrapped calls
-  if call.body.op not in (Ops.PROGRAM, Ops.STORE) and not (call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg.name == "encdec"): return ()
+  if call.body.op not in (Ops.PROGRAM, Ops.STORE) and not (call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg.name in QUEUE_FUNCTIONS): return ()
   runs_on = call.device if call.body.op is Ops.STORE and all_devices_in(call.device, HCQ_DEVS - UVM_DEVS) else get_call_arg_uops(call)[0].device
   devs = tuple(Device.canonicalize(d) for d in to_tuple(runs_on))
   if not all_devices_in(devs, HCQ_DEVS) or (call.body.op is Ops.STORE and all_devices_in(devs, UVM_DEVS)): return ()
@@ -356,7 +357,7 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
 
   def queue_for(c:UOp) -> str:
     if c.body.op is Ops.PROGRAM: return "COMPUTE:0"
-    if c.body.op is Ops.CUSTOM_FUNCTION: return "ENCDEC:0"
+    if c.body.op is Ops.CUSTOM_FUNCTION: return QUEUE_FUNCTIONS[c.body.arg.name]
     return f"COPY:{copy_of.get((c.src[1].device, c.src[2].device), 0)}"
 
   devs = [get_enqueue_devs(c) for c in l.src]
@@ -378,6 +379,9 @@ class HWQueue:
     (UPat(Ops.CALL, src=(UPat(Ops.STORE), UPat(name="dst"), UPat(name="src")), allow_any_len=True),
      lambda ctx, dst, src: ctx.copy(dst, src, src.max_numel() * src.dtype.itemsize)),
     (UPat(Ops.CALL, src=(UPat.custom_function("encdec", name="s"),), name="c", allow_any_len=True), lambda ctx, c, s: ctx.encdec(c, s)),
+    # a graph's wait for the host
+    (UPat(Ops.CALL, src=(UPat.custom_function("host_wait"), UPat(name="dst")), allow_any_len=True),
+     lambda ctx, dst: (ctx.wait(dst, UOp.const(1, dtypes.u32)), ctx.memory_barrier())),
 
     # ins
     (UPat(Ops.CALL, src=(UPat.custom_function("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
