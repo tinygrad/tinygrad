@@ -1,4 +1,4 @@
-import unittest
+import random, unittest
 from types import SimpleNamespace
 from collections import defaultdict
 from unittest.mock import patch
@@ -129,6 +129,18 @@ class TestHCQ2Deps(unittest.TestCase):
     b, tracker = UOp.param(0, dtypes.uint8, 16, device="NULL"), hcq2.DepsTracker("AABAA")
     for tag, view in enumerate([b, b, b, b.shrink(((0, 8),))]): self.assertEqual(tracker.access_resources([(view, False)], tag), [])
     self.assertEqual(tracker.access_resources([(b, True)], 4), [1, 2, 3])
+
+  def test_overlaps_as_a_scan(self):  # random spans of a buffer: the waits a scan of every access kept finds
+    b, rng, ref = UOp.param(0, dtypes.uint8, 64, device="NULL"), random.Random(0), []
+    tracker = hcq2.DepsTracker("AB" * 150)
+    for tag in range(300):
+      start = rng.randrange(64)
+      end, write = rng.randrange(start + 1, 65), rng.random() < 0.3
+      want = sorted({t for lo, hi, w, t in ref if lo < end and start < hi and (write or w)})
+      if write: ref = [(lo, hi, w, t) for a, c, w, t in ref for lo, hi in ((a, min(c, start)), (max(a, end), c)) if lo < hi]
+      else: ref = [r for r in ref if r[:3] != (start, end, False) or "AB"[r[3] % 2] != "AB"[tag % 2]]
+      ref.append((start, end, write, tag))
+      self.assertEqual(tracker.access_resources([(b.shrink(((start, end),)), write)], tag), want)
 
   def test_aliases_do_not_wait_on_themselves(self):
     b = UOp.param(0, dtypes.uint8, 16, device="NULL")

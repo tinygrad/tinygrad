@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Any, Sequence, Callable
-import itertools, ctypes, struct, time
+import bisect, itertools, ctypes, struct, time
 from dataclasses import replace, dataclass, field
 from collections import defaultdict, Counter
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, flatten, DEBUG, VIZ, ALL2ALL, PROFILE
@@ -216,23 +216,30 @@ pm_insert_copy_staging = PatternMatcher([
 class DepsTracker:
   def __init__(self, queue_of:Sequence[Any]):
     self.queue_of = queue_of
-    self.ranges:dict[tuple[UOp, int|None], list[tuple[int, int, bool, int]]] = defaultdict(list) # per (base, lane): (start, end, is_write, tag)
+    # per (base, lane): (start, end, is_write, tag) sorted by start, and its longest span
+    self.ranges:dict[tuple[UOp, int|None], list[tuple[int, int, bool, int]]] = defaultdict(list)
+    self.longest:dict[tuple[UOp, int|None], int] = defaultdict(int)
+
+  def overlapping(self, key:tuple[UOp, int|None], start:int, end:int) -> list[tuple[int, int, bool, int]]:
+    rs = self.ranges[key]
+    return [r for r in rs[bisect.bisect_right(rs, (start - self.longest[key],)):bisect.bisect_left(rs, (end,))] if start < r[1]]
 
   def access_resources(self, accesses:Sequence[tuple[UOp, bool]], tag:int) -> list[int]: # (buffer, is_write) accesses -> earlier tags to wait on
     lanes = [(*unwrap_lane(b), b, is_write) for b, is_write in accesses]
     spans = [((base, lane), off, off + b.max_numel() * b.dtype.itemsize, is_write) for base, lane, off, b, is_write in lanes]
 
     # a write waits for the overlapping reads and writes, a read for the overlapping writes
-    waits = [t for key, start, end, is_write in spans for lo, hi, was_write, t in self.ranges[key]
-             if lo < end and start < hi and (is_write or was_write)]
+    waits = [t for key, start, end, is_write in spans for _, _, was_write, t in self.overlapping(key, start, end) if is_write or was_write]
 
     # a write owns its span: the earlier accesses keep only the parts outside it.
     for key, start, end, is_write in spans:
-      if is_write:
-        self.ranges[key] = [(lo, hi, w, t) for a, b, w, t in self.ranges[key] for lo, hi in ((a, min(b, start)), (max(a, end), b)) if lo < hi]
-      else: self.ranges[key] = [r for r in self.ranges[key] if r[:3] != (start, end, False) or self.queue_of[r[3]] != self.queue_of[tag]]
-      self.ranges[key].append((start, end, is_write, tag))
-    return dedup(waits)
+      if is_write: old = self.overlapping(key, start, end)
+      else: old = [r for r in self.overlapping(key, start, end) if r[:3] == (start, end, False) and self.queue_of[r[3]] == self.queue_of[tag]]
+      kept = [(lo, hi, w, t) for a, b, w, t in old for lo, hi in ((a, min(b, start)), (max(a, end), b)) if lo < hi] if is_write else []
+      for r in old: del self.ranges[key][bisect.bisect_left(self.ranges[key], r)]
+      for r in kept + [(start, end, is_write, tag)]: bisect.insort(self.ranges[key], r)
+      self.longest[key] = max(self.longest[key], end - start)
+    return sorted(set(waits))
 
 @dataclass
 class BatchCtx:
