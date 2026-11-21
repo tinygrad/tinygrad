@@ -437,17 +437,15 @@ def _hc_coeffs(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, iters:int, eps:flo
   rms = (warp_reduce(sq[token, lane].load(), full_wave=True) * (1/features) + norm_eps).rsqrt()
   is_comb, is_pre = lane < C*C, (lane >= C*C) & (lane < C*C + C)
   idx = is_comb.where(lane + 2*C, (lane - C*C).minimum(2*C-1))
-  s = is_comb.where(scale[2].load().float(), is_pre.where(scale[0].load().float(), scale[1].load().float()))
+  s = scale[(idx // C).minimum(2)].load().float()
   v = mix[token, idx].load() * rms * s + base[idx].load().float()
-  sig = (1 + (v * -LOG2E).exp2()).reciprocal()
   def rowsum(x:UOp, op=UOp.__add__) -> UOp: return op(y:=op(x, _lane_xor(x, 1)), _lane_xor(y, 2))
   def colsum(x:UOp) -> UOp: return (y:=x + _lane_xor(x, 4)) + _lane_xor(y, 8)
   e = ((v - rowsum(v, UOp.maximum)) * LOG2E).exp2()
-  c = e * rowsum(e).reciprocal() + eps
-  for it in range(2*iters - 1): c = c * ((colsum(c) if it % 2 == 0 else rowsum(c)) + eps).reciprocal()
-  value = is_comb.where(c, is_pre.where(sig + eps, sig * 2))
-  out_idx = is_comb.where(lane + 2*C, lane - C*C)
-  return out[token, out_idx.valid(lane < C*C + 2*C)].store(value).end(token, lane).sink(arg=KernelInfo(name="hc_coeffs", opts_to_apply=()))
+  sig, comb = v.sigmoid(), e / rowsum(e) + eps
+  for it in range(2*iters - 1): comb = comb / ((colsum(comb) if it % 2 == 0 else rowsum(comb)) + eps)
+  value = is_comb.where(comb, is_pre.where(sig + eps, sig * 2))
+  return out[token, idx.valid(lane < C*C + 2*C)].store(value).end(token, lane).sink(arg=KernelInfo(name="hc_coeffs", opts_to_apply=()))
 
 def hc_coeffs_supported(x:Tensor, count:int) -> bool:
   return amd_custom_kernels_supported(x.device) and count == 4 and x.uop.axis is None and x.shape[-1] % 32 == 0
