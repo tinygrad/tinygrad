@@ -222,6 +222,7 @@ class PCIDevice:
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"): raise RuntimeError(f"Driver is bound to {pcibus}")
+    self.set_completion_timeout()
 
     # remove sibling functions of the gpu, if any
     for fn in range(1, 8):
@@ -255,11 +256,20 @@ class PCIDevice:
   def write_config_flush(self, offset:int, value:int, size:int):
     self.write_config(offset, value, size)
     self.read_config(offset, size)
+  def find_cap(self, cap_id:int) -> int:
+    ptr = self.read_config(pci.PCI_CAPABILITY_LIST, 1) & ~3
+    while ptr and self.read_config(ptr + pci.PCI_CAP_LIST_ID, 1) != cap_id: ptr = self.read_config(ptr + pci.PCI_CAP_LIST_NEXT, 1) & ~3
+    return ptr
+  def set_completion_timeout(self):
+    if (exp:=self.find_cap(pci.PCI_CAP_ID_EXP)) and self.read_config(exp + pci.PCI_EXP_DEVCAP2, 4) & 0x4:
+      self.write_config(exp + pci.PCI_EXP_DEVCTL2, self.read_config(exp + pci.PCI_EXP_DEVCTL2, 2) & ~pci.PCI_EXP_DEVCTL2_COMP_TIMEOUT | 0x9, 2)
 
-  @functools.cache
   def region(self, idx:int=vfio.VFIO_PCI_CONFIG_REGION_INDEX) -> tuple[FileIOInterface, int]: # fd and offset of a bar or the config space
     if hasattr(self, "vfio_dev"): return self.vfio_dev, idx << 40 # VFIO_PCI_OFFSET_SHIFT
-    return FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/{f'resource{idx}' if idx < 6 else 'config'}", os.O_RDWR|os.O_SYNC|os.O_CLOEXEC), 0
+    return self.sysfs_region(idx), 0
+  @functools.cache
+  def sysfs_region(self, idx:int) -> FileIOInterface:
+    return FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/{f'resource{idx}' if idx < 6 else 'config'}", os.O_RDWR|os.O_SYNC|os.O_CLOEXEC)
   @functools.cache
   def bar_info(self, bar_idx:int) -> tuple[int, int]:
     s, e, _ = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()[bar_idx].split()
@@ -284,6 +294,7 @@ class USBPCIDevice(PCIDevice):
     self.usb: CustomASM24Controller = CustomASM24Controller(usb)
     self._bar_info = System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
     self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
+    self.set_completion_timeout()
 
   def dma_view(self, ctrl_addr, size): return USBMMIOInterface(self.usb, ctrl_addr, size, fmt='B', pcimem=False)
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
