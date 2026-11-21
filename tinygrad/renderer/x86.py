@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import unwrap, Target, get_single_element
+from tinygrad.helpers import unwrap, Target
 from dataclasses import replace
 
 def vreg(slot:int, dtype:DType, choices:tuple[UOp, ...], name:str="vreg") -> tuple[UOp, ...]:
@@ -32,11 +32,6 @@ def register_choices(u:UOp) -> dict[UOp, tuple[UOp, ...]]:
   operands = regs(u)
   return {p:(r,) if (r:=physical_reg(p)) is not None else operands[i+1].src
           for i,p in enumerate(operands) if p.op in (Ops.PARAM, Ops.BUFFER) and p.addrspace is AddrSpace.REG}
-
-def with_regs(u:UOp, r:tuple[UOp, ...]) -> UOp:
-  assert u.dtype is not dtypes.void, "void cannot have output registers"
-  if u.op is Ops.BUFFER: return reg(u.dtype, get_single_element(r))
-  return UOp.ins(u.body.arg.code, u.src_without_body, u.dtype, *r)
 
 class LinearContext:
   def __init__(self, ren:'ISARenderer'): self.ren, self.stack_size = ren, 0
