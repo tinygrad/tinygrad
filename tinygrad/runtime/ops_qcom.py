@@ -83,7 +83,8 @@ class QCOMComputeQueue(HWQueue):
 
   def timestamp(self, signal:UOp):
     self.cmd(mesa.CP_WAIT_FOR_IDLE)
-    self.cmd(mesa.CP_REG_TO_MEM, qreg.cp_reg_to_mem_0(reg=mesa.REG_A6XX_CP_ALWAYS_ON_COUNTER, cnt=2, _64b=True), signal.getaddr(self.devs))
+    self.cmd(mesa.CP_REG_TO_MEM, qreg.cp_reg_to_mem_0(reg=mesa.REG_A6XX_CP_ALWAYS_ON_COUNTER, cnt=2, _64b=True),
+             signal.getaddr(self.devs) + UOp.const(8, dtypes.uint64))
 
   def wait(self, signal:UOp, value:UOp):
     self.cmd(mesa.CP_WAIT_REG_MEM, qreg.cp_wait_reg_mem_0(function=mesa.WRITE_GE, poll=mesa.POLL_MEMORY), signal.getaddr(self.devs),
