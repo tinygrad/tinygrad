@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools, math
-from typing import cast
+from typing import Callable, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod, getenv, unwrap
@@ -33,12 +33,13 @@ def _gfx_version(device:str|tuple[str, ...]|None) -> tuple[int, ...]:
 def _is_rdna4(device:str|tuple[str, ...]|None) -> bool: return _gfx_version(device)[0] == 12
 def _is_cdna(device:str|tuple[str, ...]|None) -> bool: return _gfx_version(device)[0] == 9
 
-def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
-  for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
+def warp_reduce(val:UOp, op:Callable[[UOp, UOp], UOp]=UOp.__add__, full_wave:bool=False, masks:tuple[int, ...]|None=None) -> UOp:
+  for mask in masks or ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
     if val.op is Ops.INDEX and val.addrspace == AddrSpace.REG: val = val.load()
-    other = UOp.native(f"__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | offset<<10}))",
-                       shape=val.shape, dtype=dtypes.float, fmt=True).call(val)
-    val = val.maximum(other) if maximum else val + other
+    arg = "__builtin_bit_cast(int, {0})" if val.dtype == dtypes.float else "{0}"
+    swizzle = f"__builtin_amdgcn_ds_swizzle({arg}, {0x1f | mask<<10})"
+    if val.dtype == dtypes.float: swizzle = f"__builtin_bit_cast(float, {swizzle})"
+    val = op(val, UOp.native(swizzle, shape=val.shape, dtype=val.dtype, fmt=True).call(val))
   return val
 
 def _reg(shape:tuple[int, ...], value:float, dep:UOp|None=None) -> UOp:
@@ -357,7 +358,7 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   m_ij, rm2 = _reg((TM,), -math.inf, n_tile), UOp.range(TN, 261)
   m_ij = m_ij.after(m_ij.store(m_ij.after(rm2).maximum(S_reg[:, rm2])).end(rm2))
   ri_w = UOp.range(TM, 270)
-  m_ij = m_ij.after(m_ij[ri_w].store(warp_reduce(m_ij[ri_w], maximum=True)).end(ri_w))
+  m_ij = m_ij.after(m_ij[ri_w].store(warp_reduce(m_ij[ri_w], UOp.maximum)).end(ri_w))
   tile_max = m_ij.reshape(TM, 1).expand(TM, TN).maximum(-1e30)
   S_reg = S_reg.after(S_reg.store(((S_reg - tile_max) * LOG2E).exp2()))
   p_local, ri_ws = _reg((TM,), 0, n_tile), UOp.range(TM, 295)
@@ -426,10 +427,6 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
 
 # ******** mhc ********
 
-def _lane_xor(val:UOp, mask:int) -> UOp:
-  return UOp.native(f"__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | mask<<10}))",
-                    shape=val.shape, dtype=dtypes.float, fmt=True).call(val)
-
 @functools.cache
 def _hc_coeffs(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, iters:int, eps:float, norm_eps:float, features:int) -> UOp:
   C = 4
@@ -439,11 +436,10 @@ def _hc_coeffs(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, iters:int, eps:flo
   idx = is_comb.where(lane + 2*C, (lane - C*C).minimum(2*C-1))
   s = scale[(idx // C).minimum(2)].load().float()
   v = mix[token, idx].load() * rms * s + base[idx].load().float()
-  def rowsum(x:UOp, op=UOp.__add__) -> UOp: return op(y:=op(x, _lane_xor(x, 1)), _lane_xor(y, 2))
-  def colsum(x:UOp) -> UOp: return (y:=x + _lane_xor(x, 4)) + _lane_xor(y, 8)
-  e = ((v - rowsum(v, UOp.maximum)) * LOG2E).exp2()
-  sig, comb = v.sigmoid(), e / rowsum(e) + eps
-  for it in range(2*iters - 1): comb = comb / ((colsum(comb) if it % 2 == 0 else rowsum(comb)) + eps)
+  row, col = (1, 2), (4, 8)  # comb[r][c] is on lane 4*r+c
+  e = ((v - warp_reduce(v, UOp.maximum, masks=row)) * LOG2E).exp2()
+  sig, comb = v.sigmoid(), e / warp_reduce(e, masks=row) + eps
+  for it in range(2*iters - 1): comb = comb / (warp_reduce(comb, masks=col if it % 2 == 0 else row) + eps)
   value = is_comb.where(comb, is_pre.where(sig + eps, sig * 2))
   return out[token, idx.valid(lane < C*C + 2*C)].store(value).end(token, lane).sink(arg=KernelInfo(name="hc_coeffs", opts_to_apply=()))
 
