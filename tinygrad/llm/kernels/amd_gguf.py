@@ -115,13 +115,12 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, tokens:int, in_featur
   value = x.reshape(tokens, groups, 32)[token, group, lane].load().float()
   # Quantize each input once, then pack four neighboring lanes into one word.
   # Keep divisions intact: reciprocal multiplication can move half-precision inputs across rounding ties.
-  warp_max = warp_reduce(value.abs(), maximum=True, full_wave=True)
+  warp_max = warp_reduce(value.abs(), Ops.MAX, full_wave=True)
   d = UOp.native("({0}/127.0f)", shape=warp_max.shape, dtype=dtypes.float, fmt=True).call(warp_max).maximum(1e-8)
   rounded = UOp.native("__builtin_nearbyintf({0}/{1})", shape=value.shape, dtype=dtypes.float, fmt=True).call(value, d)
   quant = rounded.clip(-127, 127).cast(dtypes.int8)
   word = quant.cast(dtypes.uint8).cast(dtypes.uint32) << ((lane%4)*8).cast(dtypes.uint32)
-  for offset in (1, 2):
-    word |= UOp.native(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f|offset<<10})", shape=word.shape, dtype=dtypes.uint32, fmt=True).call(word)
+  word = warp_reduce(word, Ops.OR, masks=(1, 2))
   stores = (q[token, group, (lane//4).valid((lane%4).eq(0))].store(word),
             scale[token, group.valid(lane.eq(0))].store(d),
             xsum[token, group, (lane//16).valid((lane%16).eq(0))].store(warp_reduce(quant.float())))
