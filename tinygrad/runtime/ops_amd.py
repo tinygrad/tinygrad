@@ -774,7 +774,7 @@ class PCIIface(PCIIfaceBase):
 
   def sleep(self, timeout):
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
-      self.pci_dev.irq_fd.read(8 * events_cnt)
+      self.pci_dev.irq_fd.read(8 * events_cnt, binary=True)
     self._collect_interrupts()
     if self.dev_impl.is_err_state: raise RuntimeError("Device is in error state")
 
