@@ -21,15 +21,16 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
     else: onetime.append(si)
   return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
 
-@rewrite_group(lambda linear,held_bufs,input_uops,input_vars,ret=(): f"JIT {pluralize('call', len(linear.src))}")
-def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], input_vars:dict[str, int]) -> UOp:
+@rewrite_group(lambda linear,held_bufs,input_uops,input_vars,arenas=None,ret=(): f"JIT {pluralize('call', len(linear.src))}")
+def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], input_vars:dict[str, int], arenas:dict|None=None) -> UOp:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
 
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.max_numel(), u.device) for i,u in enumerate(input_uops)}, walk=True)
   # unbind input variables, they change every call and are read from var_vals. any other binding was fixed at capture and stays
   linear = linear.substitute({v: v.unbound() for v in linear.toposort() if v.is_bound_var and v.expr in input_vars}, walk=True)
-  linear = memory_plan_rewrite(linear, held_bufs)
+  linear = memory_plan_rewrite(linear, held_bufs, arenas)
+  held_bufs = held_bufs | set((arenas or {}).values())
   scratch = {u: UOp.alloc((u.max_numel(),), u.dtype, device=u.device) for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs}
   linear = linear.substitute(scratch, walk=True)
   linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), input_uops=input_uops, cache=False)
@@ -52,9 +53,10 @@ class CapturedJit(Generic[ReturnType]):
   _linear: UOp
   expected_names: list[int|str]
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
+  fixed_vars: dict[str, int] = field(default_factory=dict)
   _linears: dict[tuple[UOp, ...], tuple[UOp, dict[UOp, UOp]]] = field(default_factory=dict)  # aliased inputs -> (linked linear with copies, staging)
 
-  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info)
+  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info, self.fixed_vars)
 
   @functools.cached_property
   def _jit_bufs(self) -> set[UOp]: return {u for u in self._linear.toposort() if u.op is Ops.BUFFER}
@@ -73,7 +75,7 @@ class CapturedJit(Generic[ReturnType]):
 
     linear, staging = self._linears[aliased]
     if DEBUG >= 1 and len(linear.src) >= 10: print(f"jit execs {len(linear.src)} calls")
-    run_linear(linear, var_vals, input_uops=[staging.get(u, u) for u in input_uops], jit=True)
+    run_linear(linear, {**self.fixed_vars, **var_vals}, input_uops=[staging.get(u, u) for u in input_uops], jit=True)
     for t,u,vals in self._symbolic_ret: t.uop = u.substitute({v:v.bind(var_vals.get(v.expr, i)) for v,i in vals.items()}, walk=True)
     return self.ret
 
@@ -100,18 +102,19 @@ def _prepare_jit_inputs(args, kwargs):
   return input_buf_uops, var_vals, names, expected_input_info
 
 class _TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False):
+  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False, arenas:dict|None=None,
+               capture_first=False):
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
     self.captured: CapturedJit|None = captured
-    self.cnt: int = 2 if self.fxn is None else 0
-    self.prune = prune
+    self.prune, self.arenas, self.first = prune, arenas, int(capture_first)
+    self.cnt: int = 2 if self.fxn is None else self.first
 
-  def add_linear(self, linear:UOp): self._linears.append(linear)
+  def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append((linear, var_vals))
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
-    self.cnt = 0
+    self.cnt = self.first
     self.captured = None
 
   def __reduce__(self):
@@ -133,7 +136,7 @@ class _TinyJit(Generic[ReturnType]):
       # jit capture
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
-      self._linears: list[UOp] = []
+      self._linears: list[tuple[UOp, dict[str, int]]] = []
       capturing.append(self)
       try:
         ret = self.fxn(*args, **kwargs)
@@ -144,13 +147,14 @@ class _TinyJit(Generic[ReturnType]):
       if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buf_uops)} inputs")
 
       # combine all captured linears into one, memory plan, and compile
-      big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
+      big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l,_ in self._linears])))
+      fixed_vars = {k:v for k,v in merge_dicts([vv for _,vv in self._linears]).items() if k not in var_vals}
       del self._linears
 
       if self.prune:
         big_linear, onetime_linear = prune_linear(big_linear, set(input_buf_uops))
         if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
-        run_linear(onetime_linear, var_vals)
+        run_linear(onetime_linear, {**fixed_vars, **var_vals})
         del onetime_linear
 
       # hold all buffers with real storage reachable from live Tensors (e.g. lazy .grad created during capture) and all buffers with
@@ -158,11 +162,11 @@ class _TinyJit(Generic[ReturnType]):
       def _buf_or_none(u:UOp) -> Buffer|MultiBuffer|None: return u.arg.buffer if u.op is Ops.BUFFER else None
       held_bufs = {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if _buf_or_none(u) is not None}
       held_bufs |= {u for u in big_linear.toposort() if (b:=_buf_or_none(u)) is not None and b.is_allocated()}
-      linear = jit_lower(big_linear, held_bufs, input_buf_uops, var_vals)
+      linear = jit_lower(big_linear, held_bufs, input_buf_uops, var_vals, self.arenas)
       # drop the pre-planning graph: it keeps the whole capture-time working set allocated (big_linear) or referenced (held_bufs).
       # the planned linear only uses the arena/held buffers, so the intermediates must be freed before linking and first exec
       del big_linear, held_bufs
-      self.captured = CapturedJit(ret, linear, names, expected_input_info)
+      self.captured = CapturedJit(ret, linear, names, expected_input_info, fixed_vars)
       ret = self.captured(input_buf_uops, var_vals)
     elif self.cnt >= 2:
       # jit exec
@@ -177,7 +181,8 @@ class _TinyJit(Generic[ReturnType]):
 
 # overload signatures support both @TinyJit and @TinyJit(prune=True) syntax
 @overload
-def TinyJit(fxn:Callable[..., ReturnType], *, prune:bool=False) -> _TinyJit[ReturnType]: ...
+def TinyJit(fxn:Callable[..., ReturnType], *, prune:bool=False, arenas:dict|None=None, capture_first:bool=False) -> _TinyJit[ReturnType]: ...
 @overload
-def TinyJit(fxn:None=None, *, prune:bool=False) -> Callable[[Callable[..., ReturnType]], _TinyJit[ReturnType]]: ...
+def TinyJit(fxn:None=None, *, prune:bool=False, arenas:dict|None=None,
+            capture_first:bool=False) -> Callable[[Callable[..., ReturnType]], _TinyJit[ReturnType]]: ...
 def TinyJit(fxn=None, **kwargs): return (lambda f: _TinyJit(f, **kwargs)) if fxn is None else _TinyJit(fxn, **kwargs)
