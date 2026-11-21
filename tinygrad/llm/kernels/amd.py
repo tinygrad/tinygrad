@@ -36,7 +36,7 @@ def _is_cdna(device:str|tuple[str, ...]|None) -> bool: return _gfx_version(devic
 def warp_reduce(val:UOp, op:Ops=Ops.ADD, full_wave:bool=False, masks:tuple[int, ...]|None=None) -> UOp:
   if val.op is Ops.INDEX and val.addrspace == AddrSpace.REG: val = val.load()
   assert val.dtype in (dtypes.float32, dtypes.int32, dtypes.uint32)
-  for mask in masks or ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
+  for mask in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)) if masks is None else masks:
     swizzle = UOp.native(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f | mask<<10})", shape=val.shape, dtype=dtypes.int32, fmt=True)
     val = val.alu(op, swizzle.call(val.bitcast(dtypes.int32)).bitcast(val.dtype))
   return val
