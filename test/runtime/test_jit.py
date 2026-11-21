@@ -136,6 +136,20 @@ class TestJit(unittest.TestCase):
     add.reset()
     _simple_test(add, N=20)
 
+  def test_jit_capture_first(self):
+    add = TinyJit(lambda a, b: (a+b).realize(), capture_first=True)
+    a, b = Tensor.randn(10, 10).realize(), Tensor.randn(10, 10).realize()
+    np.testing.assert_allclose(add(a, b).numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
+    self.assertIsNotNone(add.captured)
+    add.reset()
+    _simple_test(add, N=20)
+
+  def test_jit_bound_variable(self):
+    @TinyJit
+    def f(a): return (a[:UOp.variable("j", 1, 10).bind(3)] + 1).sum().realize()
+    a = Tensor([float(i) for i in range(10)]).realize()
+    for _ in range(4): self.assertEqual(f(a).item(), 6.0)
+
   def test_simple_jit_norealize(self):
     @TinyJit
     def add(a, b): return (a+b)

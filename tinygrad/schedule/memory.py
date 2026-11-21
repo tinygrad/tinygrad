@@ -16,7 +16,7 @@ def _can_plan(b:UOp, held_bufs:set[UOp]) -> bool:
 
 LaneKey = tuple[str, int]
 
-def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
+def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None, arenas:dict|None=None) -> UOp:
   if NO_MEMORY_PLANNER: return linear
   if held_bufs is None: held_bufs = set()
 
@@ -52,10 +52,13 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
   arena_sizes = {key: round_up(peak, block_size) for key, (peak, _) in peaks.items()}
 
   # build replace_map: each buffer becomes a SHRINK/BITCAST into a shared per-device-lane arena
-  arenas = {key: UOp.new_buffer(key[0], sz, dtypes.int8) for key, sz in arena_sizes.items()}
-  replace_map = {buf_uop:arenas[_key(buf_uop)][offset:offset+buf_uop.nbytes()].bitcast(buf_uop.dtype) for buf_uop, offset in offsets.items()}
+  for key, sz in arena_sizes.items():
+    if arenas is not None and (key not in arenas or arenas[key].max_numel() < sz):
+      arenas[key] = UOp.new_buffer(key[0], sz, dtypes.int8)
+  lanes = {key: arenas[key] if arenas is not None else UOp.new_buffer(key[0], sz, dtypes.int8) for key, sz in arena_sizes.items()}
+  replace_map = {buf_uop:lanes[_key(buf_uop)][offset:offset+buf_uop.nbytes()].bitcast(buf_uop.dtype) for buf_uop, offset in offsets.items()}
 
   if DEBUG >= 1 and (omem:=sum(nbytes.values()) / 1e6) != (nmem:=sum(arena_sizes.values()) / 1e6):
-    print(f"memory reduced from {omem:.2f} MB -> {nmem:.2f} MB, {len(first_appearance)} -> {len(arenas)} bufs")
+    print(f"memory reduced from {omem:.2f} MB -> {nmem:.2f} MB, {len(first_appearance)} -> {len(lanes)} bufs")
 
   return linear.substitute(replace_map, name="memory plan", walk=True)

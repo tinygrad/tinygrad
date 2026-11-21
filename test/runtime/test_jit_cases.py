@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import TinyJit, Tensor
+from tinygrad import TinyJit, Tensor, Device
 
 # The JIT functions as a "capturing" JIT.
 # Whatever kernels ran in the JIT the second run through the function will be the kernels that will run from then on.
@@ -73,6 +73,33 @@ class TestJitCases(unittest.TestCase):
       x.assign(Tensor([i])).realize()
       f()
       self.assertEqual(out.item(), i*2)
+
+  def test_arenas_of_jits_never_run_at_once(self):
+    """jits that never run at the same time share their scratch's compute arena: one buffer, and a jit's outputs another jit takes never in it"""
+    def f(x): return ((x + 1).contiguous() * 2).contiguous().sum(0).realize()
+    def g(y): return ((y * 3).contiguous() - 1).contiguous().sum().realize()
+    arenas:dict = {}
+    fs, gs, fu, gu = TinyJit(f, arenas=arenas), TinyJit(g, arenas=arenas), TinyJit(f), TinyJit(g)
+    for i in range(5):
+      x = Tensor([[i, i + 1], [i + 2, i + 3]]).float().realize()
+      shared, unshared = gs(fs(x)), gu(fu(x))
+      self.assertEqual(shared.item(), unshared.item())
+      self.assertEqual(shared.item(), ((2*i + 4) * 2 + (2*i + 6) * 2) * 3 - 2)
+    self.assertEqual(len(arenas), 1)
+
+  def test_arenas_of_jits_never_run_at_once_copies(self):
+    """jits that never run at the same time share their copies' scratch too: one buffer a device"""
+    d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
+    def f(x): return ((x + 1).contiguous().to(d1) * 2).contiguous().to(d0).sum(0).realize()
+    def g(y): return ((y * 3).contiguous().to(d1) - 1).contiguous().to(d0).sum().realize()
+    arenas:dict = {}
+    fs, gs, fu, gu = TinyJit(f, arenas=arenas), TinyJit(g, arenas=arenas), TinyJit(f), TinyJit(g)
+    for i in range(5):
+      x = Tensor([[i, i + 1], [i + 2, i + 3]], device=d0).float().realize()
+      shared, unshared = gs(fs(x)), gu(fu(x))
+      self.assertEqual(shared.item(), unshared.item())
+      self.assertEqual(shared.item(), ((2*i + 4) * 2 + (2*i + 6) * 2) * 3 - 2)
+    self.assertEqual(sorted(lane for _, lane in arenas), [1, 1])
 
 if __name__ == '__main__':
   unittest.main()
