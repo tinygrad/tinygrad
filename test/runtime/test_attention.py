@@ -3,8 +3,8 @@ import numpy as np
 from tinygrad import Tensor, dtypes, nn, UOp, TinyJit
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig, MLATransformerBlock, Indexer, IndexerConfig,
-  HyperConnection, HCConfig, AttentionResidual, GatedResidual, PLELayer, PLEConfig,
-  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk, short_conv,
+  HyperConnection, HCConfig, AttentionResidual, GatedResidual, PLELayer, PLEConfig, Transformer,
+  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk, short_conv, topk_mask,
 )
 from tinygrad.llm.gguf import GGUFPackedTable
 from test.helpers import slow
@@ -136,6 +136,13 @@ class TestAttention(unittest.TestCase):
     expected = np.where([[1, 0, 0, 0], [1, 1, 0, 0], [1, 1, 1, 0], [0, 0, 1, 1]], 0., -np.inf)
     np.testing.assert_array_equal(indexer(x, q, (0,)).numpy(), expected[None, None])
 
+  def test_topk_mask(self):  # x >= its k-th largest (all of it if shorter), ties all in, on a symbolic length too
+    x = np.random.default_rng(0).standard_normal((3, 16)).astype(np.float32)
+    x[1, :6], x[2, 9:] = x[1, 6], -np.inf
+    def want(S:int) -> np.ndarray: return x[:, :S] >= np.sort(x[:, :S])[:, -min(5, S), None]
+    for S in (3, 5, 16): np.testing.assert_array_equal(topk_mask(Tensor(x[:, :S]), 5).numpy(), want(S), err_msg=f"{S=}")
+    np.testing.assert_array_equal(topk_mask(Tensor(x)[:, :UOp.variable("S", 1, 16).bind(9)], 5).pad_to((3, 16)).numpy()[:, :9], want(9))
+
   def test_indexer_no_kpool(self):
     # glm-dsa: every key is scored on its own (no k-pools) and the first rope_dim dims are rotated, interleaved
     idx = IndexerConfig(n_heads=1, head_dim=2, top_k=2, kpool=1, norm_eps=1e-6, rope_dim=2)
@@ -144,14 +151,15 @@ class TestAttention(unittest.TestCase):
     indexer.proj.weight = Tensor.ones(1, 2)
     x, q = Tensor([[[2., 0.], [2., 0.], [0., 2.], [0., 2.]]]), Tensor([[[1., -1.], [1., -1.], [1., -1.], [-1., 1.]]])
     indexer._init_state(x)
-    # reference: interleaved rope on q/k, relu scores, top-2 of the causal positions
+    # reference: interleaved rope on q and the layer normed k, relu scores, top-2 of the causal positions (ties at the second all in)
     pos = np.arange(4)
     cos, sin = np.cos(pos), np.sin(pos)  # rope_dim=2 -> one frequency, theta=10000**0
     def irope(v):
       return np.concatenate([v[:, 0::2]*cos[:, None] - v[:, 1::2]*sin[:, None], v[:, 0::2]*sin[:, None] + v[:, 1::2]*cos[:, None]], axis=-1)
-    scores = np.maximum(irope(q.numpy()[0]) @ irope(x.numpy()[0]).T, 0) / 2**0.5
+    k = (x.numpy()[0] - x.numpy()[0].mean(-1, keepdims=True)) / np.sqrt(x.numpy()[0].var(-1, keepdims=True) + 1e-6)
+    scores = np.maximum(irope(q.numpy()[0]) @ irope(k).T, 0)
     expected = np.full((4, 4), -np.inf)
-    for t in range(4): expected[t, np.argsort(scores[t, :t+1])[-2:]] = 0.0
+    for t in range(4): expected[t, :t+1][scores[t, :t+1] >= np.sort(scores[t, :t+1])[-2:][0]] = 0.0
     np.testing.assert_allclose(indexer(x, q, (0,), precompute_freqs_cis(2, 4, 10000.0)).numpy(), expected[None, None])
 
   def test_indexer_msa(self):
@@ -416,6 +424,94 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
         np.testing.assert_allclose(np.concatenate(outs, axis=1), decode, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
         np.testing.assert_allclose(chunked_conv, decode_conv, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
         np.testing.assert_allclose(chunked_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
+
+  def test_padded_chunk_matches_decode(self):
+    ssm = SSMConfig(conv_kernel=4, state_size=32, group_count=2, time_step_rank=2, inner_size=64, kda=True,
+                    gate_lower_bound=-5.0, full_rank=(True, False))
+    config = self._make_config(dim=64, max_context=16, ssm=ssm)
+    block, rng = GatedDeltaNetBlock(config, ssm), np.random.default_rng(19)
+    for p in nn.state.get_parameters(block): p.replace(Tensor(rng.normal(0, 0.2, p.shape).astype(np.float32)))
+    xs, live = Tensor(rng.normal(0, 0.3, (1, 12, 64)).astype(np.float32)), UOp.variable("live", 1, 8)
+    block._init_state(xs)
+    @TinyJit
+    def padded(x:Tensor, pos:UOp, count:UOp): return block._attention(x, (pos,), live=count).realize()
+    for start, n in ((0, 3), (2, 6), (0, 1), (3, 8)):
+      with self.subTest(start=start, live=n):
+        want = [self._run_attention(block, xs[:, i:i+1], i) for i in range(start + n)]
+        states = [s.numpy() for s in block._states()]
+        after = self._run_attention(block, xs[:, start+n:start+n+1], start+n)
+        for i in range(start): self._run_attention(block, xs[:, i:i+1], i)
+        # _run_attention applies the input norm, which the direct fused attention call needs too
+        got = padded(block.attn_norm(xs[:, start:start+8]).contiguous(), UOp.variable("pos", 0, 7).bind(start), live.bind(n)).numpy()
+        np.testing.assert_allclose(got[:, :n], np.concatenate(want[start:], axis=1), rtol=1e-3, atol=1e-3)
+        for s, w in zip(block._states(), states): np.testing.assert_allclose(s.numpy(), w, rtol=1e-3, atol=1e-3)
+        np.testing.assert_allclose(self._run_attention(block, xs[:, start+n:start+n+1], start+n), after, rtol=1e-3, atol=1e-3)
+
+  def test_short_step_rollback(self):
+    # a verify step of [next, wrong guess] then rollback(1) leaves the states as if only next was stepped
+    for kda in (False, True):
+      ssm = SSMConfig(conv_kernel=3, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=kda, silu_gate=not kda)
+      config = self._make_config(ssm=ssm, max_context=8)
+      model = Transformer(config)
+      for p in nn.state.get_parameters(model.blk[0]):
+        p.replace(self._tensor_linspace(-0.05, 0.05, p.shape) if len(p.shape) > 1 else self._tensor_linspace(0.05, 0.1, p.shape))
+      x, guess = self._tensor_linspace(-0.5, 0.5, (1, 3, config.dim)), self._tensor_linspace(0.9, -0.2, (1, 1, config.dim))
+      expected = [self._run_attention(model.blk[0], x[:, i:i+1], i) for i in range(3)]
+      expected_states = [s.numpy() for s in model.blk[0]._states()]
+      self._run_attention(model.blk[0], x[:, :2], 0)  # (not opted in: a short step keeps nothing)
+      self.assertEqual(model.blk[0].kept, [])
+      with self.assertRaises(AssertionError): model.rollback(1)
+      model.blk[0].keep = 1
+      self._run_attention(model.blk[0], x[:, :1], 0)
+      verify = self._run_attention(model.blk[0], x[:, 1:2].cat(guess, dim=1), 1)
+      with self.assertRaises(AssertionError): model.rollback(0)
+      model.rollback(1)
+      last = self._run_attention(model.blk[0], x[:, 2:3], 2)
+      np.testing.assert_allclose(verify[:, :1], expected[1], rtol=1e-3, atol=1e-3, err_msg=f"{kda=}")
+      np.testing.assert_allclose(last, expected[2], rtol=1e-3, atol=1e-3, err_msg=f"{kda=}")
+      for s, e in zip(model.blk[0]._states(), expected_states): np.testing.assert_allclose(s.numpy(), e, rtol=1e-3, atol=1e-3, err_msg=f"{kda=}")
+
+  def test_rollback_replayed(self):  # rollbacks after verify steps, more than a jit's capture: the states as if only the next tokens were stepped
+    ssm = SSMConfig(conv_kernel=3, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=True)
+    model = Transformer(self._make_config(ssm=ssm, max_context=8))
+    for p in nn.state.get_parameters(model.blk[0]):
+      p.replace(self._tensor_linspace(-0.05, 0.05, p.shape) if len(p.shape) > 1 else self._tensor_linspace(0.05, 0.1, p.shape))
+    x, guess = self._tensor_linspace(-0.5, 0.5, (1, 5, model.config.dim)), self._tensor_linspace(0.9, -0.2, (1, 1, model.config.dim))
+    expected = [self._run_attention(model.blk[0], x[:, i:i+1], i) for i in range(5)]
+    model.blk[0].keep = 1
+    self._run_attention(model.blk[0], x[:, :1], 0)
+    for i in range(1, 4):
+      np.testing.assert_allclose(self._run_attention(model.blk[0], x[:, i:i+1].cat(guess, dim=1), i)[:, :1], expected[i], rtol=1e-3, atol=1e-3)
+      model.rollback(1)
+    np.testing.assert_allclose(self._run_attention(model.blk[0], x[:, 4:5], 4), expected[4], rtol=1e-3, atol=1e-3)
+
+  def test_prompt_states_restored(self):  # a prompt that extends the last one, not what was generated after it: as if fed from 0
+    ssm = SSMConfig(conv_kernel=3, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=True)
+    model, rng = Transformer(self._make_config(num_blocks=2, ssm_layers=(True, False), ssm=ssm, max_context=16)), np.random.default_rng(7)
+    for p in nn.state.get_parameters(model): p.replace(Tensor(rng.standard_normal(p.shape).astype(np.float32)))
+    first, second = [1, 2, 3, 4], [1, 2, 3, 4, 7, 9]
+    def take(gen) -> list[int]: return [t for _, t in zip(range(4), gen)]
+    want = take(model.generate(second[:]))
+    out = take(model.generate(first[:]))  # (from 0: first extends neither the tokens fed nor the last prompt)
+    self.assertNotEqual(out[0], second[len(first)])
+    self.assertEqual(model.get_start_pos(second), len(first))
+    self.assertEqual(take(model.generate(second[:])), want)
+    self.assertEqual(model.get_start_pos([5, 6]), 0)
+
+  def test_prompt_fork_restored(self):  # prompts sharing a prefix X: fed from where one diverged from the tokens fed before it (its states saved)
+    ssm = SSMConfig(conv_kernel=3, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=True)
+    model, rng = Transformer(self._make_config(num_blocks=2, ssm_layers=(True, False), ssm=ssm, max_context=24)), np.random.default_rng(7)
+    for p in nn.state.get_parameters(model): p.replace(Tensor(rng.standard_normal(p.shape).astype(np.float32)))
+    X = [1, 2, 3, 4, 5, 6]
+    def take(prompt:list[int]) -> list[int]: return [t for _, t in zip(range(4), model.generate(prompt, chunk_size=2))]  # (X: whole chunks)
+    want = take(X + [11, 12])
+    take(X + [7, 8])  # (from 0: its states kept after X, where it diverges)
+    self.assertEqual(model.get_start_pos(X + [9, 10]), len(X))
+    take(X + [9, 10])
+    self.assertEqual(model.get_start_pos(X + [11, 12]), len(X))
+    self.assertEqual(take(X + [11, 12]), want)
+    self.assertEqual(model.get_start_pos([5, 6, 7]), 0)  # (a prompt of other tokens from 0: the ones kept dropped)
+    self.assertEqual(model.get_start_pos(X + [1]), 0)
 
   def test_start_zero_resets_realized_state(self):
     config = self._make_config(max_context=3)
