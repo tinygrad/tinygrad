@@ -238,7 +238,7 @@ class HyperConnection:
   def __call__(self, xs:Tensor, sublayer:Callable[[Tensor], tuple[Tensor, Tensor|None]]) -> tuple[Tensor, Tensor|None]:
     """mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb"""
     if hc_coeffs_supported(flat:=xs.flatten(2), self.count):
-      pre, post, comb = hc_coeffs(self.fn, flat, self.base["weight"], self.scale["weight"], self.iters, self.eps, self.norm_eps)
+      pre, post, comb = hc_coeffs(self.fn, flat, self.base["weight"], self.scale["weight"], self.count, self.iters, self.eps, self.norm_eps)
       out, aux = sublayer((xs * pre.unsqueeze(-1)).sum(2))
       return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs), aux
     (mixed, mix), base, scale = self.mix(xs), self.base["weight"], self.scale["weight"]

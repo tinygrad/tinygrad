@@ -427,35 +427,30 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
 # ******** mhc ********
 
 @functools.cache
-def _hc_coeffs(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, iters:int, eps:float, norm_eps:float, features:int) -> UOp:
-  C = 4
+def _hc_coeffs(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, C:int, iters:int, eps:float, norm_eps:float, features:int) -> UOp:
   token, lane = UOp.range(out.shape[0], 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP)
-  rms = (warp_reduce(sq[token, lane].load(), full_wave=True) * (1/features) + norm_eps).rsqrt()
+  rms = (warp_reduce(sq[token, lane].load(), Ops.ADD, full_wave=True) * (1/features) + norm_eps).rsqrt()
   is_comb, is_pre = lane < C*C, (lane >= C*C) & (lane < C*C + C)
   idx = is_comb.where(lane + 2*C, (lane - C*C).minimum(2*C-1))
   s = scale[(idx // C).minimum(2)].load().float()
   v = mix[token, idx].load() * rms * s + base[idx].load().float()
-  row, col = (1, 2), (4, 8)  # comb[r][c] is on lane 4*r+c
+  row, col = tuple(1 << k for k in range(C.bit_length() - 1)), tuple(C << k for k in range(C.bit_length() - 1))  # comb[r][c] is on lane C*r+c
   e = ((v - warp_reduce(v, Ops.MAX, masks=row)) * LOG2E).exp2()
   sig, comb = v.sigmoid(), e / warp_reduce(e, masks=row) + eps
-  for it in range(2*iters - 1): comb = comb / (warp_reduce(comb, masks=col if it % 2 == 0 else row) + eps)
+  for i in range(2*iters - 1): comb = comb / (warp_reduce(comb, masks=row if i % 2 else col) + eps)
   value = is_comb.where(comb, is_pre.where(sig + eps, sig * 2))
   return out[token, idx.valid(lane < C*C + 2*C)].store(value).end(token, lane).sink(arg=KernelInfo(name="hc_coeffs", opts_to_apply=()))
 
 def hc_coeffs_supported(x:Tensor, count:int) -> bool:
-  return amd_custom_kernels_supported(x.device) and count == 4 and x.uop.axis is None and x.shape[-1] % 32 == 0
+  return amd_custom_kernels_supported(x.device) and count == 4 and x.dtype == dtypes.float32 and x.uop.axis is None and x.shape[-1] % 32 == 0
 
-def hc_coeffs(fn:Linear, x:Tensor, base:Tensor, scale:Tensor, iters:int, eps:float, norm_eps:float) -> tuple[Tensor, Tensor, Tensor]:
-  lead, padded = x.shape[:-1], x if isinstance(x.numel(), int) else x.pad_to(x.max_shape)
-  rows, features = prod(padded.shape[:-1]), padded.shape[-1]
-  flat = padded.reshape(rows, features)
-  mix = fn(flat)
-  out = Tensor.empty(rows, mix.shape[-1], dtype=dtypes.float32, device=x.device)
-  out = Tensor.custom_kernel(out, mix.float().contiguous(), flat.float().square().reshape(rows, 32, -1).sum(-1).contiguous(), base.contiguous(),
-                             scale.contiguous(), fxn=functools.partial(_hc_coeffs, iters=iters, eps=eps, norm_eps=norm_eps, features=features))[0]
-  out = out.reshape(*padded.shape[:-1], -1)
-  if padded is not x: out = out.shrink(tuple((0, s) for s in (*lead, out.shape[-1])))
-  return out[..., :4], out[..., 4:8], out[..., 8:].reshape(*lead, 4, 4)
+def hc_coeffs(fn:Linear, x:Tensor, base:Tensor, scale:Tensor, count:int, iters:int, eps:float, norm_eps:float) -> tuple[Tensor, Tensor, Tensor]:
+  mix = fn(flat:=x.pad_to(x.max_shape).reshape(-1, x.shape[-1]))
+  fxn = functools.partial(_hc_coeffs, C=count, iters=iters, eps=eps, norm_eps=norm_eps, features=x.shape[-1])
+  out = Tensor.custom_kernel(Tensor.empty(*mix.shape, dtype=dtypes.float32, device=x.device), mix.float().contiguous(),
+                             flat.float().square().unflatten(-1, (32, -1)).sum(-1).contiguous(), base.contiguous(), scale.contiguous(), fxn=fxn)[0]
+  out = out.reshape(*x.max_shape[:-1], -1).shrink_to(*x.shape[:-1], None)
+  return out[..., :count], out[..., count:2*count], out[..., 2*count:].reshape(*x.shape[:-1], count, count)
 
 # ******** gated delta net: fused recurrent scan ********
 
