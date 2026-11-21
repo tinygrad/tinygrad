@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.llm.model import TransformerConfig, apply_rope, MLATransformerBlock, precompute_freqs_cis
+from tinygrad.llm.model import TransformerConfig, IndexerConfig, apply_rope, MLATransformerBlock, MTPBlock, precompute_freqs_cis
 from tinygrad.llm.hf import e4m3fn_to_fnuz
 from test.runtime.test_llm_quantized import fp8_reference
 
@@ -12,6 +12,30 @@ class TestMLA(unittest.TestCase):
       "norm_eps": 1e-5, "vocab_size": 100, "head_dim": 16, "rope_theta": 10000.0, "rope_dim": 8, "max_context": 32,
       "kv_lora_rank": 16, "v_head_dim": 8,
     } | kwargs)
+
+  def test_rope_table_only_when_used(self): # no positions (mla_nope) and an indexer without rope: no table
+    for nope, indexer_rope, used in ((False, None, True), (True, None, False), (True, 0, False), (True, 4, True)):
+      indexer = None if indexer_rope is None else IndexerConfig(2, 8, 4, rope_dim=indexer_rope)
+      config = self._make_config(mla_nope=nope, q_lora_rank=16, indexer=indexer)
+      (block:=MLATransformerBlock(config))._init_state(Tensor.empty(1, 1, config.dim))
+      self.assertEqual(block.freqs_cis is not None, used)
+
+  def test_mtp_fill_cache(self):
+    idx = IndexerConfig(2, 8, 2, rope_dim=8)
+    for indexer, nope in ((None, True), (idx, False), (IndexerConfig(2, 8, 2, kpool=2), True)):
+      with self.subTest(indexer=indexer, nope=nope):
+        block = MTPBlock(self._make_config(q_lora_rank=16, indexer=indexer, mla_nope=nope))
+        x = Tensor.randn(1, 4, block.config.dim).realize()
+        block._init_state(x)
+        caches = [block.cache_k] + ([block.indexer.cache_kg] if block.indexer else [])
+        for cache in caches: cache.assign(-7).realize()
+        block._attention(x, (3,), block._indexer_mask(x, (3,), None)).realize()
+        expected = [cache.numpy().copy() for cache in caches]
+        for cache in caches: cache.assign(-7).realize()
+        block.fill_cache(x, 3).realize()
+        for cache, want in zip(caches, expected):
+          self.assertTrue((want != -7).any())
+          np.testing.assert_array_equal(cache.numpy(), want)
 
   def test_mla_attention_matches_naive(self):
     for interleave in (False, True):
@@ -87,7 +111,7 @@ class TestMLA(unittest.TestCase):
     block._init_state(x_norm)
     prefill = block._attention(x_norm[:, :3], (0,)).realize()
     decode = block._attention(x_norm[:, 3:], (3,)).realize()
-    np.testing.assert_allclose(prefill.cat(decode, dim=1).numpy(), abs_np, atol=2e-5, rtol=2e-5)
+    np.testing.assert_allclose(prefill.cat(decode, dim=1).numpy(), abs_np, atol=5e-4, rtol=5e-4)  # (the cache in half)
 
   def test_fp8_projections(self):
     formats = [fnuz for fnuz, dt in ((False, dtypes.fp8e4m3), (True, dtypes.fp8e4m3fnuz))
