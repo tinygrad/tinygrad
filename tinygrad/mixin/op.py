@@ -215,7 +215,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, buffer=False)
     acc_dtype = least_upper_dtype(dt, dtypes.float32) if dtypes.is_float(dt) else dt
-    return (cls.full((output_len,), step, dtype=acc_dtype, buffer=False)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
+    # a symbolic length is a slice of the arange of its longest (the cumsum of a symbolic length isn't folded)
+    n = output_len if isinstance(output_len, int) else output_len.vmax
+    return (cls.full((n,), step, dtype=acc_dtype, buffer=False)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype).shrink(((0, output_len),))
 
   @classmethod
   def linspace(cls, start:int|float, stop:int|float, steps:int, dtype:DTypeLike|None=None) -> Self:
