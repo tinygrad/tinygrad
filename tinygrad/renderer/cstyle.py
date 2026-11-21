@@ -472,9 +472,9 @@ class CUDARenderer(CStyleLanguage):
     if any(dt == dtypes.half for dt, _ in used_dtypes): prefix.append("#include <cuda_fp16.h>")
     if any(dt == dtypes.bfloat16 for dt, _ in used_dtypes): prefix.append("#include <cuda_bf16.h>")
     prefix += [self.render_vector_prefix(dt, count) for dt, count in used_dtypes if (count in (4,8) and dt in {dtypes.half, dtypes.bfloat16})
-      or (count in (2,4,8,16) and dt in dtypes.fp8s)]
-    dt_map_in = { dtypes.f32: "tf32", dtypes.f16: "f16", dtypes.bf16: "bf16", dtypes.fp8e4m3: "e4m3", dtypes.fp8e5m2: "e5m2" }
-    dt_map_out = { dtypes.f32: "f32", dtypes.f16: "f16" }
+      or (count in (2,4,8,16) and dt in dtypes.fp8s) or (dt == dtypes.int8 and count in (2,4,8))]
+    dt_map_in = { dtypes.f32: "tf32", dtypes.f16: "f16", dtypes.bf16: "bf16", dtypes.i8: "s8", dtypes.fp8e4m3: "e4m3", dtypes.fp8e5m2: "e5m2" }
+    dt_map_out = { dtypes.f32: "f32", dtypes.f16: "f16", dtypes.i32: "s32" }
     for name, (N, M, K), dtype_in, dtype_out, upcast_sizes in wmma_args(uops):
       wmma_dtypes = [self._render_dtype(dtype, size, AddrSpace.REG) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
       n_operands = [size*dtype.itemsize//4 for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)] # 4 => CUDA reg size in bytes
