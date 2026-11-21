@@ -6,7 +6,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, K
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, dedup, VIZ, MAX_KERNEL_BUFFERS, SPEC
-from tinygrad.helpers import get_single_element
+from tinygrad.helpers import get_single_element, all_same
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, apply_movement_op
 from tinygrad.schedule.prepare import pm_mops
@@ -244,6 +244,10 @@ def remove_noop_afters(x:UOp) -> UOp|None:
   if len(src) != len(x.src): return src[0] if len(src) == 1 else x.replace(src=src)
   return None
 
+def reshape_through_mselect(m:UOp) -> UOp|None:
+  srcs = tuple(x.src[0].base if x.op is Ops.RESHAPE else x for x in m.src)
+  return m.replace(src=srcs).reshape(m.shape) if srcs != m.src and all_same([x.shape for x in srcs]) else None
+
 pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
   (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), bufferize_to_store),
 
@@ -253,8 +257,7 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
    lambda u,buf: u.replace(src=(buf,)+u.src[1:]).cast(u.dtype)),
 
   # move RESHAPEs through MSELECT/MSTACK
-  (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
-   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src])).reshape(m.shape)),
+  (UPat((Ops.MSELECT, Ops.MSTACK), name="m"), reshape_through_mselect),
 
   # remove any RESHAPEs on KERNEL
   (UPat(Ops.CALL, name="k"), lambda k: k.replace(src=tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src))),
