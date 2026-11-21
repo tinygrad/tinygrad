@@ -96,8 +96,8 @@ class BufferSpec:
   external_ptr: int|None = None
 
 class MultiBuffer:
-  def __init__(self, device:tuple[str, ...], nbytes:int):
-    self.bufs = [Buffer(d, nbytes) for d in device]
+  def __init__(self, device:tuple[str, ...], nbytes:int, options:BufferSpec|None=None):
+    self.bufs = [Buffer(d, nbytes, options=options) for d in device]
   @property
   def device(self): return tuple(x.device for x in self.bufs)
   @property

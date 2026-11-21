@@ -21,12 +21,16 @@ def get_call_kernel_args(call:UOp, prg:UOp, devs:tuple[str, ...]) -> list[UOp]:
   return [bound.get(p.expr, p.replace(arg=replace(p.arg, slot=-1))).ccast(p.dtype) if p.addrspace is AddrSpace.ALU else
           call.src[1+p.arg.slot].getaddr(devs) for p in prg.kernel_params]
 
+# functions a device queue runs in the graph and their queue, each writes its first arg after reading the rest. host_wait holds the queue
+# till the host sets the first word of its arg to 1: a graph waits for the host
+QUEUE_FUNCTIONS = {"encdec": "ENCDEC:0", "host_wait": "COMPUTE:0"}
+
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.body
   if call.arg.hcq is not None: return (), ()
   if ast.op is Ops.PROGRAM: return tuple(ast.arg.outs), tuple(ast.arg.ins)
   if ast.op is Ops.STORE: return (0,), (1,)
-  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name in QUEUE_FUNCTIONS: return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
 
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
@@ -45,6 +49,7 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
   if ast.op is Ops.PROGRAM: return ast.src[0].arg.name
   if ast.op is Ops.STORE: return colored(f"copy {_uop_sz_to_str(arg_uops[0]):>10}, {_dev_str(bufs[0]):>7s} <- {_dev_str(bufs[1]):7s}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name == "encdec": return colored(f"enc/dec {_uop_sz_to_str(arg_uops[0])}", "yellow")
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg.name in QUEUE_FUNCTIONS: return colored(ast.arg.name, "yellow")
   raise NotImplementedError("get_call_name is not implemented")
 
 # **************** Stat ****************

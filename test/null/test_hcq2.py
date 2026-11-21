@@ -61,8 +61,8 @@ def word(u:UOp) -> tuple[UOp, int]:
   return hcq2.unwrap_view(u)
 
 T = 5 # the timeline value the last submitted batch of every device signals
-def run(batch:UOp, done:dict[str, int]|None=None, prio:list|None=None) -> tuple[list, dict, dict]:
-  qs, cs, mem = queues(batch), calls(batch), defaultdict(int)
+def run(batch:UOp, done:dict[str, int]|None=None, prio:list|None=None, mem:defaultdict|None=None) -> tuple[list, dict, dict]:
+  qs, cs, mem = queues(batch), calls(batch), defaultdict(int) if mem is None else mem
   for d in batch.arg.hcq.device:
     mem[word(hcq2.timeline(d))] = (done or {}).get(d, T)
     mem[word(hcq2.timeline(d).index(1))] = T
@@ -75,8 +75,8 @@ def run(batch:UOp, done:dict[str, int]|None=None, prio:list|None=None) -> tuple[
     for q in (list(qs) if prio is None else prio):
       if not (cmds:=qs[q]): continue
       c = cmds[0]
-      if (name:=ins_name(c)) is not None and name.startswith("wait"):
-        sig, target = mem[word(c.src[1])], val(c.src[2])
+      if (name:=ins_name(c)) is not None and name.startswith(("wait", "host_wait")):
+        sig, target = mem[word(c.src[1])], 1 if name == "host_wait" else val(c.src[2])
         if sig != target if name == "wait_eq" else sig < target: continue
       elif name == "store":
         mem[w:=word(c.src[1])] = val(c.src[2])
@@ -186,6 +186,21 @@ class TestHCQ2Schedule(unittest.TestCase):
       b = self.batch((self.x.to("NULL:1") + 1).contiguous())
     self.assertTrue(all(c.body.op is Ops.PROGRAM for c in calls(b)))
     self.assertEqual(orders(b), {(0, 1)})
+
+  def test_a_wait_after_a_result(self): # a graph waits for the host after the results that are its args: it holds the queue after their kernels
+    table = Tensor.empty(4, dtype=dtypes.uint32).realize()
+    y = (self.x + 1).contiguous()
+    wait = UOp.custom_function("host_wait").call(table.uop, y.uop)
+    b = unwrap(scheduled((y + Tensor(table.uop.after(wait)).float()).contiguous())[0])
+    (wait,) = [c for c in queues(b)[("NULL", "COMPUTE:0")] if ins_name(c) == "host_wait"]
+    for prio in rotations(b):
+      host = defaultdict(int)
+      self.assertEqual([x for x in run(b, prio=prio, mem=host)[0] if isinstance(x, int)], [0])
+      host[word(wait.src[1])] = 1
+      self.assertEqual([x for x in run(b, prio=prio, mem=host)[0] if isinstance(x, int)], [0, 1])
+    q = SimpleNamespace(log=[], wait=lambda d, v: q.log.append(("wait", d, v)), memory_barrier=lambda: q.log.append(("memory_barrier",)))
+    hcq2.HWQueue.q_rewrite.rewrite(wait, ctx=q)
+    self.assertEqual(q.log, [("wait", wait.src[1], UOp.const(1, dtypes.uint32)), ("memory_barrier",)])
 
   def test_a_host_kernel_splits_the_batch(self):
     self.assertEqual(len(self.scheduled(((self.x + 1).contiguous().to("PYTHON") + 2).contiguous().to("NULL") + 3)), 2)
