@@ -221,7 +221,7 @@ class TestAttention(unittest.TestCase):
 
   def test_ple_rows(self):
     # a bigram and a trigram head, EOS (7) before the start or an EOS
-    ple = PLELayer(self._make_config(hc=HCConfig(2, 0, 0.0), ple=PLEConfig(0, 32, (1, 2, 4), (13, 17), 7, 2)))
+    ple = PLELayer(self._make_config(hc=HCConfig(2, 0, 0.0), ple=PLEConfig((0,), 32, (1, 2, 4), (13, 17), 7, 2)))
     table = np.random.default_rng(0).integers(0, 256, (30, 18), dtype=np.uint8)
     ple.table = GGUFPackedTable((Tensor(table.flatten()).pad((7, 11)).contiguous().realize()[7:-11], (30, 32), 20))
     for start_pos in (0, 2): ple.write_rows([3, 7, 5, 9], start_pos, 2, 2)
