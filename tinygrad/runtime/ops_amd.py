@@ -50,7 +50,8 @@ def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, named 
   shapes += [("put_value", (1,), dtypes.uint64, hq.dev.host)]
   ret = [UOp.alloc(s, dt, 0, device=d, name=to_name(hq.dev.device, n, hq.queue)) for n, s, dt, d in shapes]
   # (am: the hdp flush register, see amd_push)
-  if getattr(hq.dev, "hdp_flush_buf", None) is not None: ret.append(UOp.alloc((1,), dtypes.uint32, 0, device=hq.dev.host, name=to_name(hq.dev.device, "hdp_flush")))
+  if getattr(hq.dev, "hdp_flush_buf", None) is not None:
+    ret.append(UOp.alloc((1,), dtypes.uint32, 0, device=hq.dev.host, name=to_name(hq.dev.device, "hdp_flush")))
   return ret
 
 @uopfunc
