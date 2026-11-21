@@ -80,6 +80,8 @@ class TestBitCast(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
       Tensor.empty((3,), dtype=dtypes.int8).bitcast(dtypes.float16).shape
+    # a 0-d tensor has no last axis to rescale
+    with self.assertRaises(RuntimeError): Tensor.empty((), dtype=dtypes.uint16).bitcast(dtypes.uint32).shape
 
 if __name__ == "__main__":
   unittest.main()

@@ -57,5 +57,12 @@ class TestIselX86(unittest.TestCase):
   def test_register_store_is_effect(self):
     to_program(Tensor.empty(16, 16).sum(1).schedule_linear().src[-1].src[0], X86Renderer(Target(device="CPU", arch="x86_64")))
 
+  def test_register_casts(self):
+    renderer = X86Renderer(Target(device="CPU", arch="x86_64"))
+    for t in (Tensor.empty(16, dtype=dtypes.uint32).cast(dtypes.int64), Tensor.empty(16) < Tensor.empty(16)):
+      sink = to_program(t.schedule_linear().src[-1].src[0], renderer).src[0]
+      for u in sink.toposort():
+        if u.op is Ops.BITCAST: self.assertEqual(u.dtype.itemsize, u.src[0].dtype.itemsize)
+
 if __name__ == "__main__":
   unittest.main()
