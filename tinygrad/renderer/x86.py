@@ -26,7 +26,8 @@ def register_choices(u:UOp) -> dict[UOp, tuple[UOp, ...]]:
           for i,p in enumerate(operands) if p.op in (Ops.PARAM, Ops.BUFFER) and p.addrspace is AddrSpace.REG}
 
 def vdef(u:UOp) -> UOp|None:
-  if u.op in {Ops.AFTER, Ops.BITCAST}: return vdef(u.src[0])
+  # a BITCAST or CAST that survives isel is no instruction, it reads the register of its source
+  if u.op in {Ops.AFTER, Ops.BITCAST, Ops.CAST}: return vdef(u.src[0])
   operands = regs(u)
   return operands[0] if operands and operands[0].addrspace is AddrSpace.REG else None
 
@@ -195,10 +196,6 @@ pre_isel_matcher = PatternMatcher([
   # vector BUFFERs get modeled in scratch space
   (UPat(Ops.BUFFER, name="x"),
    lambda ctx,x: scratch_buffer(x.dtype, n, next(ctx)) if x.addrspace is AddrSpace.REG and (n:=x.max_numel()) > 1 else None),
-  # widening a uint32 is free, the 32bit write that produced it already zeroed the upper half
-  (UPat(dtype=dtypes.uint32).cast(dtypes.int64s, name="x"), lambda x: x.replace(op=Ops.BITCAST)),
-  (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
-   lambda y,x: x.replace(op=Ops.BITCAST) if x.dtype.itemsize == y.dtype.itemsize else None),
   # gated load/store become a conditional move on the address, the load/store are unconditional
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate")), gated_store),
@@ -360,9 +357,9 @@ isel_matcher = PatternMatcher([
    UOp.ins(X86Ops.VBLENDVPS, (b, a, mask(m)), a.dtype)),
   (UPat(GroupOp.Comparison, src=(UPat(dtype=dtypes.float64), UPat()), name="m").where(UPat.var("a", dtypes.float64), UPat.var("b")), lambda m,a,b:
    UOp.ins(X86Ops.VBLENDVPD, (b, a, mask(m)), a.dtype)),
-  # in this case we have a mask producing comparison whose user expects a bool, so we convert to bool
+  # in this case we have a mask producing comparison whose user expects a bool, mask & 1 is 0 or 1 so the cast to bool is its low byte
   (UPat(GroupOp.Comparison, src=(UPat.var("y", (dtypes.float32, dtypes.float64)), UPat()), name="x"), lambda y,x:
-   (mask(x).bitcast(dt:=to_int(y.dtype)) & UOp.cconst(1, dt)).bitcast(dtypes.bool)),
+   (mask(x).bitcast(dt:=to_int(y.dtype)) & UOp.cconst(1, dt)).cast(dtypes.bool)),
   # conditional moves use materialized boolean values
   (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp.ins(X86Ops.CMOVNE, (b, a, test_gate(m)), a.dtype)),
   # comparisons materialize their result in a register
@@ -435,7 +432,9 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.int32).cast(dtypes.int64s, name="x"), lambda x: UOp.ins(X86Ops.MOVSXD, x.src, x.dtype)),
   (UPat(dtype=dtypes.sints).cast(dtypes.ints, name="x"),
    lambda x: UOp.ins(X86Ops.MOVSX, x.src, x.dtype) if x.src[0].dtype.itemsize < x.dtype.itemsize else None),
-  (UPat(dtype=dtypes.ints).cast(dtypes.ints, name="x"), lambda x: UOp.ins(X86Ops.MOV, x.src, x.dtype)),
+  # narrowing is a real move. any 32-bit write zeroes the upper half, so widening a uint32 is free, like a same width cast
+  (UPat(dtype=dtypes.ints).cast(dtypes.ints, name="x"),
+   lambda x: UOp.ins(X86Ops.MOV, x.src, x.dtype) if x.src[0].dtype.itemsize > x.dtype.itemsize else None),
   # bitcasts between scalar floats and ints
   (UPat.var("y", dtypes.float16).bitcast(dtypes.int16s).named("x"), lambda y,x: UOp.ins(X86Ops.VPEXTRW, (y, imm(dtypes.uint8, 0)), x.dtype)),
   (UPat(dtype=dtypes.int16s).bitcast(dtypes.float16).named("x"), lambda x: vpins(x, x.src)),
