@@ -60,9 +60,10 @@ base_rewrite = PatternMatcher([
 
   # alu/gep
   (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{_wmma_name(x)}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
+  # (a chain of the op in its left src has no parens, in its right src only if regrouping it is exact: not for signed ints or floats)
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
-    *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} and (i == 0 or x.dtype not in dtypes.sints)
-       else ctx[v] for i,v in enumerate(x.src)]), x.dtype)),
+    *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} and
+       (i == 0 or x.dtype not in dtypes.sints+dtypes.floats) else ctx[v] for i,v in enumerate(x.src)]), x.dtype)),
 
   # call native code or an external function by symbol: the NATIVE body names the callee, the srcs are the args and set the types
   (UPat(Ops.CALL, src=(UPat(Ops.NATIVE, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
