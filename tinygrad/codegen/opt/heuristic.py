@@ -7,21 +7,21 @@ from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
 
 def vector_optimizations(k:Scheduler) -> Scheduler:
-  # a renderer with vectors upcasts one axis to (at most) vector_lanes lanes: the output's innermost, else a reduce axis (each lane sums a part).
+  # a renderer with vectors upcasts one axis to (at most) vector_lanes lanes: the output's innermost.
   # every buffer reads it contiguously (or not at all), only loads are gated by it
   k, store = k.copy(), next(u.src[0] for u in k.ast.backward_slice if u.op is Ops.STORE)
   def contiguous(r:UOp, b:UOp) -> bool:
     # (r is a term of its own in b's index where it's valid, or isn't in it)
     idx = uop_given_valid(b.src[1].get_valid(), b.src[1].get_idx()).simplify()
     return r not in idx.backward_slice or (r in (terms:=list(idx.split_uop(Ops.ADD))) and not any(r in t.backward_slice for t in terms if t is not r))
-  def ok(r:UOp) -> bool: return (r in store.src[1].get_idx().split_uop(Ops.ADD) or r in k.reduce_ranges) and \
+  def ok(r:UOp) -> bool: return r in store.src[1].get_idx().split_uop(Ops.ADD) and \
     r not in store.src[1].get_valid().backward_slice and all(contiguous(r, b) for b in k.bufs)
-  if (r:=next((k.rngs[a] for a in k.upcastable_dims()+k.upcastable_dims(reduce=True) if ok(k.rngs[a])), None)) is None: return k
+  if (r:=next((k.rngs[a] for a in k.upcastable_dims() if ok(k.rngs[a])), None)) is None: return k
   n, w = r.src[0].arg, 1 << (min(r.src[0].arg, k.ren.vector_lanes).bit_length()-1)
   if n % w == 0: k.apply_opt(Opt(OptOps.SPLIT, k.rngs.index(r), (w, AxisType.UPCAST)))
   # a vector is a power of two lanes: the last of an output axis that isn't a multiple of it ends at the end of the axis, doing some lanes again
   # (not if the kernel reads its output)
-  elif r not in k.reduce_ranges and not any(b.src[0] is store.src[0] for b in k.bufs if b is not store):
+  elif not any(b.src[0] is store.src[0] for b in k.bufs if b is not store):
     k.ast = k.ast.substitute({r:(r.replace(src=(UOp.const(-(-n//w)),))*w).minimum(n-w) + UOp.range(w, next(k.opt_range), AxisType.UPCAST)})
   return k
 
