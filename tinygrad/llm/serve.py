@@ -129,7 +129,8 @@ class Handler(VizHandler):
     tool_calls: list[dict] = []
     for m in re.finditer(router.call, router.buf, re.DOTALL):
       if (parsed := parse_tool_call(m.group(1))) is None:
-        stderr_log(f"{colored('failed to parse tool call', 'red')}: {m.group(1)[:200]}\n")
+        call = m.group(1) if len(m.group(1)) <= 400 else f"{m.group(1)[:200]} ... {m.group(1)[-200:]}"
+        stderr_log(f"{colored('failed to parse tool call', 'red')}: {call}\n")
         yield chunk({"content":m.group(0)})  # don't silently drop output the client can't use
       else:
         name, args = parsed
@@ -149,7 +150,8 @@ class Handler(VizHandler):
     if self.path == "/v1/chat/completions":
       # render and tokenize
       normalize_messages(body["messages"])
-      rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True, preserve_thinking=True)
+      rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True, preserve_thinking=True,
+                                             **({"thinking_effort": e} if (e:=body.get("reasoning_effort")) else {}))
       ids: list[int] = self.server.tok.encode(rendered)
       log_prefix += f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  "
       if len(ids) >= self.server.model.max_context:
