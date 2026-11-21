@@ -823,8 +823,8 @@ class Engine:
   def layers(self, pieces:list[tuple[int, int, dict[str, Tensor]]], pos:int):
     """a read window's blocks, a layer at a time over its pieces. a moe layer's experts a piece's tokens route to read in (the host waits for
     the gpus' counts: the layers before are done with their slots), their slots given to the gpus, kept till the layer's done. when a
-    piece's tokens route to half of a layer's experts or more, every next layer's are read ahead (queued behind the layer's own) while the
-    gpus work"""
+    piece's tokens route to half of a layer's experts or more, every next layer's are read ahead (queued behind the layer's own, a layer
+    read ahead whole the next before its counts) while the gpus work"""
     n, E, K = 1, self.m["n_experts"], self.model.config.num_experts_per_tok
     ahead:dict[int, np.ndarray] = {}
     moe = sum(hasattr(b, "ffn_gate_inp") for b in self.model.blk)
@@ -847,6 +847,8 @@ class Engine:
           args = (Tensor(self.tags[li]), self.parts[1][li])
           if forecast is None: self.graph(route, self.v_wlive.bind(T), b.exp_probs_b["bias"], *args)
           else: self.graph(forecast, self.v_wlive.bind(T), b.exp_probs_b["bias"], self.model.blk[self.m["layers"][li + 1]].exp_probs_b["bias"], *args)
+          if li in ahead and len(ahead[li]) == E and li + 1 < moe and li + 1 not in ahead:
+            if self.read(self.window_codes(li + 1, ahead[li]), self.window_codes(li, ahead[li]), wait=False): ahead[li + 1] = ahead[li]
           counts = self.counted(li, T)
           used = np.flatnonzero(counts)
           codes = self.window_codes(li, np.union1d(used, ahead[li]) if li in ahead else used)
