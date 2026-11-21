@@ -160,6 +160,22 @@ class FallbackTemplate:
       out += self.end_turn()
     return out + self.role("assistant") if add_generation_prompt else out
 
+def chat_template(tok:SimpleTokenizer, fallback:bool=False) -> jinja2.Template|FallbackTemplate:
+  # the model's chat template if jinja2 is available (enables model-specific formatting)
+  if fallback or (ct := tok.chat_template) is None: return FallbackTemplate(tok)
+  try:
+    import jinja2
+    env = jinja2.Environment(extensions=['jinja2.ext.loopcontrols'])  # (for {% break %})
+    env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj, **kwargs)  # jinja2's tojson escapes <>& for HTML safety
+    env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
+    env.globals['strftime_now'] = lambda fmt: time.strftime(fmt)
+    env.globals['bos_token'] = tok.decode([tok.bos_id]) if tok.bos_id is not None else ""
+    env.globals['eos_token'] = tok.decode([tok.eos_id])
+    return env.from_string(ct)
+  except ImportError:
+    print("warning: jinja2 is not installed, the model's chat template is disabled")
+    return FallbackTemplate(tok)
+
 from tinygrad.llm.serve import LLMServer
 
 def main():
@@ -190,19 +206,7 @@ def main():
   # get tokenizer
   tok = SimpleTokenizer.from_hf(path, preset='glm4') if path.is_dir() else SimpleTokenizer.from_gguf_kv(kv)
 
-  # use the model's chat template if jinja2 is available (enables model-specific formatting)
-  template: jinja2.Template|FallbackTemplate = FallbackTemplate(tok)
-  if not args.no_chat_template and (ct := tok.chat_template) is not None:
-    try:
-      import jinja2
-      env = jinja2.Environment(extensions=['jinja2.ext.loopcontrols'])  # (for {% break %})
-      env.filters['tojson'] = lambda obj, **kwargs: json.dumps(obj, **kwargs)  # jinja2's tojson escapes <>& for HTML safety
-      env.globals['raise_exception'] = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
-      env.globals['strftime_now'] = lambda fmt: time.strftime(fmt)
-      env.globals['bos_token'] = tok.decode([tok.bos_id]) if tok.bos_id is not None else ""
-      env.globals['eos_token'] = tok.decode([tok.eos_id])
-      template = env.from_string(ct)
-    except ImportError: print("warning: jinja2 is not installed, the model's chat template is disabled")
+  template = chat_template(tok, fallback=args.no_chat_template)
 
   # warmup the JIT
   if args.warmup or args.serve:
