@@ -114,6 +114,12 @@ class TestUOpsStats(unittest.TestCase):
     prg = to_program(buf.index(i*(i+1)//2+j).store(j).end(j, i).sink(arg=KernelInfo()), X86Renderer(Target("CPU", arch="x86_64")))
     self.assertEqual(prg.src[0].arg.estimates.lds, 3*3*4)
 
+  def test_loaded_loop_estimate(self):
+    buf, count = UOp.param(0, dtypes.int32, 8), UOp.param(1, dtypes.int32, 1)
+    i = UOp.range(count.index(0).load().maximum(0).minimum(8), 0)
+    prg = to_program(buf.index(i).store(i).end(i).sink(arg=KernelInfo()), X86Renderer(Target("CPU", arch="x86_64")))
+    self.assertEqual(prg.src[0].arg.estimates.lds, 4+8*4)
+
   def test_simple_add(self):
     a = Tensor.empty(100,100)
     b = Tensor.empty(100,100)
