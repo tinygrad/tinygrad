@@ -435,6 +435,7 @@ class TestDTypeALU(unittest.TestCase):
         np.testing.assert_equal(result.numpy(), [x >> d for x, d in zip(values, distances)])
 
   def test_shl(self): self._test_shl()
+  def test_shl_bitcast_half(self): self.assertEqual((Tensor([-8.], dtype=dtypes.half).bitcast(dtypes.int16) << 1).int().item(), -28672)
   def test_shr(self): self._test_shr()
   def test_shr_long_of_small_value(self):
     self.assertEqual((Tensor([-1, 5], dtype=dtypes.int8).cast(dtypes.int64) >> 32).tolist(), [-1, 0])
