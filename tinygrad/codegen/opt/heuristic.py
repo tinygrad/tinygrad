@@ -25,15 +25,8 @@ def vector_optimizations(k:Scheduler) -> Scheduler:
     k.ast = k.ast.substitute({r:(r.replace(src=(UOp.const(-(-n//w)),))*w).minimum(n-w) + UOp.range(w, next(k.opt_range), AxisType.UPCAST)})
   return k
 
-def split_cores(k:Scheduler) -> Scheduler:
-  # the renderer's cores (global_max) split the outermost output axis they divide
-  if (c:=(k.ren.global_max or (1,))[0]) > 1 and (r:=next((r for r in k.rngs if r.axis_type is AxisType.WEAK and r not in k.reduce_ranges and
-                                                         isinstance(n:=r.src[0].arg, int) and n % c == 0), None)) is not None:
-    k.ast = k.ast.substitute({r:UOp.range(c, next(k.opt_range), AxisType.GLOBAL)*(n//c) + r.replace(src=(UOp.const(n//c),))})
-  return k
-
 def hand_coded_optimizations(k:Scheduler) -> Scheduler:
-  if k.ren.vector_lanes: return split_cores(vector_optimizations(k))
+  if k.ren.vector_lanes: return vector_optimizations(k)
   # first try the tensor cores
   """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
   Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
