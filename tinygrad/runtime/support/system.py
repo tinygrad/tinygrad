@@ -222,7 +222,10 @@ class PCIDevice:
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"): raise RuntimeError(f"Driver is bound to {pcibus}")
-    self.set_completion_timeout()
+    port = self.pcibus
+    while FileIOInterface.exists(f"/sys/bus/pci/devices/{port}/config"):
+      PCIPort(port).set_completion_timeout()
+      port += "/.."
 
     # remove sibling functions of the gpu, if any
     for fn in range(1, 8):
@@ -284,6 +287,9 @@ class PCIDevice:
     rpath = f"/sys/bus/pci/devices/{self.pcibus}/resource{bar_idx}_resize"
     try: FileIOInterface(rpath, os.O_RDWR).write(str(int(FileIOInterface(rpath, os.O_RDONLY).read(), 16).bit_length() - 1))
     except OSError as e: raise RuntimeError(f"Cannot resize BAR {bar_idx}: {e}. Ensure the resizable BAR option is enabled.") from e
+
+class PCIPort(PCIDevice):
+  def __init__(self, pcibus:str): self.pcibus = pcibus
 
 class USBPCIDevice(PCIDevice):
   def __init__(self, devpref:str, dev, pcibus):
