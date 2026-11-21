@@ -121,6 +121,18 @@ def fold_const_where(gate:UOp, c0:UOp, c1:UOp, w:UOp) -> UOp:
   ret = c0 if gate.val else c1
   return ret.ccast(w.dtype) if ret.op is Ops.CONST and ret.dtype in dtypes.weaks and w.dtype not in dtypes.weaks else ret
 
+def after_deps(x:UOp) -> UOp:
+  # an AFTER waits only on effects and the ops listed here, a REDUCE dep keeps its body ended by its ranges, any other dep is replaced by its srcs
+  deps:dict[UOp, None] = {}
+  seen, stack = set(), list(reversed(x.src[1:]))
+  while stack:
+    if (y:=stack.pop()) in seen: continue
+    seen.add(y)
+    if y.op in GroupOp.Effect|{Ops.RANGE, Ops.END, Ops.BACKEDGE, Ops.LINEAR, Ops.STAGE, Ops.LOAD}: deps[y] = None
+    elif y.op is Ops.REDUCE: deps[UOp(Ops.NOOP).after(y.src[0]).end(*y.src[1:])] = None
+    else: stack.extend(reversed(y.src))
+  return x.replace(src=(x.src[0], *deps))
+
 def lift_value_after(x:UOp) -> UOp|None:
   afters = [s for s in x.src if s.op is Ops.AFTER]
   if x.shape != () or x.src[-1].is_invalid: return None
@@ -339,10 +351,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
     and not (u.op is Ops.SHR and u.src[1].vmax >= 32)
     and not (u.op in (Ops.MOD, Ops.TRUNCMOD) and u.src[0].vmin <= dtypes.int.min and u.src[1].vmin <= -1 <= u.src[1].vmax) else None),
   ((UPat.var("x", dtypes.weakint) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+cast.const_like(c.val)),
-  # an AFTER waits only on effects and the ops listed here, a REDUCE dep keeps its body ended by its ranges, any other dep is replaced by its srcs
-  (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
-    tuple(dedup(flatten([(y,) if y.op in GroupOp.Effect|{Ops.RANGE, Ops.END, Ops.BACKEDGE, Ops.LINEAR, Ops.STAGE, Ops.LOAD}
-                        else (UOp(Ops.NOOP).after(y.src[0]).end(*y.src[1:]),) if y.op is Ops.REDUCE else y.src for y in x.src[1:]]))))),
+  (UPat(Ops.AFTER, name="x"), after_deps),
   # after/end with 1 src is just src[0]
   (UPat((Ops.AFTER, Ops.END), src=(UPat.var("s"),)), lambda s: s),
   # the rules above key on bare CONSTs, so a redundantly committed const has to be uncast in the same fixpoint
