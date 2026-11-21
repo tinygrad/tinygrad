@@ -1,6 +1,5 @@
 import itertools
 from tinygrad.helpers import dedup, get_single_element
-from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.x86 import ISARenderer, vdef, register_choices, reg, LinearContext
 
