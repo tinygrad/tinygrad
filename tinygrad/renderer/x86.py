@@ -20,24 +20,23 @@ def regs(u:UOp) -> tuple[UOp, ...]:
   if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG: return regbuf_reg(u)
   return u.body.src if u.op is Ops.CALL else ()
 
-def register_choices(u:UOp) -> dict[UOp, tuple[UOp, ...]]:
-  operands = regs(u)
-  return {p:(r,) if (r:=physical_reg(p)) is not None else operands[i+1].src
-          for i,p in enumerate(operands) if p.op in (Ops.PARAM, Ops.BUFFER) and p.addrspace is AddrSpace.REG}
-
 def vdef(u:UOp) -> UOp|None:
   # a BITCAST or CAST that survives isel is no instruction, it reads the register of its source
   if u.op in {Ops.AFTER, Ops.BITCAST, Ops.CAST}: return vdef(u.src[0])
   operands = regs(u)
   return operands[0] if operands and operands[0].addrspace is AddrSpace.REG else None
 
+def rdef(u:UOp) -> UOp|None: return physical_reg(p) if (p:=vdef(u)) is not None else None
+
+def register_choices(u:UOp) -> dict[UOp, tuple[UOp, ...]]:
+  operands = regs(u)
+  return {p:(r,) if (r:=physical_reg(p)) is not None else operands[i+1].src
+          for i,p in enumerate(operands) if p.op in (Ops.PARAM, Ops.BUFFER) and p.addrspace is AddrSpace.REG}
+
 def with_regs(u:UOp, r:tuple[UOp, ...]) -> UOp:
   assert u.dtype is not dtypes.void, "void cannot have output registers"
   if u.op is Ops.BUFFER: return reg(u.dtype, get_single_element(r))
   return UOp.ins(u.body.arg.code, u.src_without_body, u.dtype, *r)
-
-def rdef(u:UOp):
-  return physical_reg(p) if (p:=vdef(u)) is not None else None
 
 class LinearContext:
   def __init__(self, ren:'ISARenderer'): self.ren, self.stack_size = ren, 0
