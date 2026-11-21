@@ -132,14 +132,14 @@ def keeps_vector(b:UOp, ctx:Renderer|None) -> bool:
 
 def do_devectorize(b:UOp, ctx:Renderer|None=None):
   if b.shape == (): return None
-  # broadcasting needs to be already unpacked (a scalar is in every lane), Invalid matches any dtype and shape
-  if not all(x.shape in (b.shape, ()) or x.base.is_invalid for x in b.src): return None
+  # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
+  if not all(x.shape == b.shape or x.base.is_invalid for x in b.src): return None
   lanes = list(itertools.product(*[[UOp.const(i) for i in range(x)] for x in b.shape]))
   if keeps_vector(b, ctx):
     # (on the lanes of each src: a flat one is a vector, else a stack of its lanes)
-    srcs = tuple(x if x.base.is_invalid or flat(x) else UOp.stack(*[x if x.shape == () else index_lane(x, i) for i in lanes]) for x in b.src)
+    srcs = tuple(x if x.base.is_invalid or flat(x) else UOp.stack(*[index_lane(x, i) for i in lanes]) for x in b.src)
     return None if srcs == b.src else b.replace(src=srcs).reshape(b.shape)
-  src = [b.replace(src=tuple(x.base if x.base.is_invalid else x if x.shape == () else index_lane(x, idx_c) for x in b.src)) for idx_c in lanes]
+  src = [b.replace(src=tuple(x.base if x.base.is_invalid else index_lane(x, idx_c) for x in b.src)) for idx_c in lanes]
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):

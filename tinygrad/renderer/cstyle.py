@@ -3,7 +3,7 @@ import math
 from collections import defaultdict, Counter
 from tinygrad.renderer import tc, Renderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters, promo_dtype
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, all_same, Target, IMAGE, FLOAT16, is_image_shape
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_storage_scalar
 
 base_rewrite = PatternMatcher([
@@ -285,9 +285,8 @@ clang_rewrite = PatternMatcher([
   # a cast of a vector converts each lane (a C cast of a vector is a bitcast, __builtin_convertvector takes only vectors)
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})"
    if x.max_numel() > 1 and x.addrspace is AddrSpace.ALU else None),
-  # a scalar expanded (or a stack of it) is a splat
+  # a scalar expanded is a splat
   (UPat(Ops.EXPAND, name="x"), lambda ctx,x: f"(({ctx.render_type(x)})({ctx[x.src[0]]}))"),
-  (UPat(Ops.STACK, name="x"), lambda ctx,x: f"(({ctx.render_type(x)})({ctx[x.src[0]]}))" if len(x.src) > 1 and all_same(x.src) else None),
   # a comparison of vectors is a mask (-1 or 0 lanes of the size of the operands): it converts to bools, a select converts them to a mask
   (UPat(GroupOp.Comparison, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx.code_for_op[x.op](*[ctx[s] for s in x.src], x.dtype)}, "
    f"{ctx.render_type(x)})" if x.max_numel() > 1 else None),
