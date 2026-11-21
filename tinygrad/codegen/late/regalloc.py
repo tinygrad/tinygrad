@@ -104,7 +104,6 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   nx = x.replace(src=tuple(nsrc))
   if (defs:=ctx.defs[i]):
     r = tuple(ctx.reals[i][v] for v in defs)
-    assert nx.dtype is not dtypes.void, "void cannot have output registers"
     nx = reg(nx.dtype, get_single_element(r)) if nx.op is Ops.BUFFER else UOp.ins(nx.body.arg.code, nx.src_without_body, nx.dtype, *r)
 
   before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), r) for v,r in ctx.insert_before.get(i, [])]
