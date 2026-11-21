@@ -1,4 +1,4 @@
-import unittest
+import unittest, re
 from tinygrad.device import Device
 from tinygrad.dtype import dtypes
 from tinygrad.codegen import to_program
@@ -32,6 +32,13 @@ class TestCStyleFailures(unittest.TestCase):
   def test_repeat_and(self): self._test_src_strip_paren(Ops.AND)
 
   def test_repeat_sub(self): self._test_src_strip_paren(Ops.SUB, should_strip_paren=False)
+
+  def test_float_chain_in_right_src(self):
+    # a float chain in the right src keeps its parens: regrouping floats isn't exact
+    ret = Tensor.empty(1)
+    for _ in range(5): ret = Tensor.empty(1) * (ret * Tensor.empty(1))
+    linear, _ = check_schedule(ret, 1)
+    self.assertGreaterEqual(len(re.findall(r"\w\*\(", to_program(linear.src[0].src[0], Device[Device.DEFAULT].renderer).src[2].arg)), 5)
 
 class TestWGSLFailures(unittest.TestCase):
   def test_folded_packed_store(self):
