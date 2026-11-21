@@ -2,10 +2,31 @@ import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, TC_MIN_GLOBALS, USE_TC, IMAGE
 from tinygrad.uop.ops import Ops, UOp, resolve, AxisType
+from tinygrad.uop.symbolic import uop_given_valid
 from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
 
+def vector_optimizations(k:Scheduler) -> Scheduler:
+  # a renderer with vectors upcasts one axis to (at most) vector_lanes lanes: the output's innermost.
+  # every buffer reads it contiguously (or not at all), only loads are gated by it
+  k, store = k.copy(), next(u.src[0] for u in k.ast.backward_slice if u.op is Ops.STORE)
+  def contiguous(r:UOp, b:UOp) -> bool:
+    # (r is a term of its own in b's index where it's valid, or isn't in it)
+    idx = uop_given_valid(b.src[1].get_valid(), b.src[1].get_idx()).simplify()
+    return r not in idx.backward_slice or (r in (terms:=list(idx.split_uop(Ops.ADD))) and not any(r in t.backward_slice for t in terms if t is not r))
+  def ok(r:UOp) -> bool: return r in store.src[1].get_idx().split_uop(Ops.ADD) and \
+    r not in store.src[1].get_valid().backward_slice and all(contiguous(r, b) for b in k.bufs)
+  if (r:=next((k.rngs[a] for a in k.upcastable_dims() if ok(k.rngs[a])), None)) is None: return k
+  n, w = r.src[0].arg, 1 << (min(r.src[0].arg, k.ren.vector_lanes).bit_length()-1)
+  if n % w == 0: k.apply_opt(Opt(OptOps.SPLIT, k.rngs.index(r), (w, AxisType.UPCAST)))
+  # a vector is a power of two lanes: the last of an output axis that isn't a multiple of it ends at the end of the axis, doing some lanes again
+  # (not if the kernel reads its output)
+  elif not any(b.src[0] is store.src[0] for b in k.bufs if b is not store):
+    k.ast = k.ast.substitute({r:(r.replace(src=(UOp.const(-(-n//w)),))*w).minimum(n-w) + UOp.range(w, next(k.opt_range), AxisType.UPCAST)})
+  return k
+
 def hand_coded_optimizations(k:Scheduler) -> Scheduler:
+  if k.ren.vector_lanes: return vector_optimizations(k)
   # first try the tensor cores
   """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
   Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
@@ -109,12 +130,11 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   for axis in to_upcast[::-1]: k.apply_opt(Opt(OptOps.SPLIT, axis, (0, AxisType.UPCAST)))
 
   # potentially do more upcasts of non reduce axes based on a heuristic
-  is_dsp = k.ren.target.device == "DSP"
   upcasted_axis: set[int] = set()
   while resolve(prod(k.full_shape[i] for i in k.upcastable_dims()) >= 1024) and (k.upcast_size() < 32):
     xb_choices = []
-    # consider all upcastable axes with 3 or 4 upcast (128 on the DSP)
-    for axis, upcast_amount in itertools.product(k.upcastable_dims(), ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
+    # consider all upcastable axes with 3 or 4 upcast
+    for axis, upcast_amount in itertools.product(k.upcastable_dims(), [3,4]):
       # if we haven't upcasted it, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis in upcasted_axis or k.full_shape[axis]%upcast_amount != 0: continue
       rng = k.rngs[axis]

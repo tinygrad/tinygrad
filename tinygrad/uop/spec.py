@@ -208,7 +208,8 @@ spec_program = PatternMatcher([
   # allow special SHRINK of a buffer or its bitcast
   (UPat(Ops.SHRINK, src=(UPat(GroupOp.Defines|{Ops.AFTER}).or_bitcasted(), UPat(), UPat.cvar().or_casted())), lambda: True),
 
-  # movement ops are not allowed in programs
+  # movement ops are not allowed in programs, but a scalar expanded is a vector
+  (UPat(Ops.EXPAND, src=(UPat(), UPat()), name="x"), lambda x: True if x.src[0].shape == () and x.ndim == 1 else None),
   (UPat(GroupOp.Movement), lambda: False),
 
   # REG/LOCAL buffer

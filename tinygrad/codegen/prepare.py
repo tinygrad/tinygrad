@@ -4,7 +4,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, graph_rewr
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort, dedup
-from tinygrad.codegen.indexing import apply_movement_op
+from tinygrad.codegen.indexing import apply_movement_op, BufferizeOpts
 from tinygrad.codegen.allreduce import create_allreduce_function
 from tinygrad.codegen.multi import multi_pm
 
@@ -266,11 +266,33 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.AFTER, name="s"), lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u) for u in s.src[1:] if u.op is not Ops.NOOP))),
 ])
 
+def channels_last(tsink:UOp) -> UOp:
+  # on a device whose renderer is channels_last a 4D int tensor in memory (realized, or a buffer read) has its leading axis innermost (NCHW is
+  # NHWC, OIHW is IHWO): the channels a kernel makes are a contiguous vector in what it reads and writes. (float tensors keep their layout: the
+  # order of a float sum is the same on every device)
+  from tinygrad.device import Device
+  def last(u:UOp) -> UOp:
+    x, arg = (u.src[0], u.arg) if u.op is Ops.STAGE else (u, BufferizeOpts(u.device, removable=False))
+    perm = [i for i in range(x.ndim) if i != (a:=next(i for i,s in enumerate(x.shape) if s != 1))] + [a]
+    return UOp(Ops.STAGE, src=(x.permute(tuple(perm)),), arg=arg).permute(tuple(perm.index(i) for i in range(x.ndim)))
+  # (a buffer read, not a store's)
+  dsts = {u.src[0] for u in tsink.toposort() if u.op is Ops.STORE}
+  def tensor(u:UOp) -> bool:
+    return dtypes.is_int(u.dtype) and (u.op is Ops.STAGE or (u.op is Ops.RESHAPE and u.src[0].op in {Ops.PARAM, Ops.EXTERN} and u not in dsts))
+  if not (todo:={u for u in tsink.toposort() if tensor(u) and len(u.shape) == 4 and any(s != 1 for s in u.shape) and isinstance(u.device, str)
+                 and any(r.channels_last for r in Device.get_class(u.device).renderers)}): return tsink
+  # (rebuilt from the srcs up: a STAGE in a STAGE's src is changed too)
+  new: dict[UOp, UOp] = {}
+  for u in tsink.toposort():
+    new[u] = v = u.replace(src=tuple(new.get(s, s) for s in u.src))
+    if u in todo: new[u] = last(v)
+  return new[tsink]
+
 @rewrite_group(new_ctx=False)
 def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
   tsink = graph_rewrite(forward_call_outputs(sink), multi_pm, name="multi_pm")
-  tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls+pm_disk_copy, name="inline calls")
+  tsink = channels_last(graph_rewrite(tsink, pm_mops+pm_inline_calls+pm_disk_copy, name="inline calls"))
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, init_ctx=MapCtx, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   return tsink

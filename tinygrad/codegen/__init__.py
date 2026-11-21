@@ -1,7 +1,8 @@
 from dataclasses import replace, dataclass, field
 from collections import deque
 import itertools, functools, time, inspect
-from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC, SCACHE, BASEDIR
+from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
+from tinygrad.helpers import SCACHE, BASEDIR
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile
 from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
@@ -22,7 +23,7 @@ from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifyin
 from tinygrad.codegen.decomp.transcendental import get_transcendental_patterns
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
-from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
+from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented, pm_int_reduce
 from tinygrad.codegen.multi import multi_pm
 from tinygrad.codegen.prepare import pm_mops, expand_bitcast, _mop_index, prepare_rangeify
 from tinygrad.codegen.indexing import _stack_select
@@ -120,13 +121,25 @@ def index_lane(x:UOp, idx:tuple[UOp, ...]) -> UOp:
   while ret.op is Ops.INDEX and ret.src[0].op in GroupOp.Movement and (nxt:=_mop_index(ret.src[0], ret)) is not None: ret = nxt
   return ret
 
-def do_devectorize(b:UOp):
+# a flat value (a vector) is its lanes
+def flat(x:UOp) -> bool: return x.op is Ops.STACK or (x.op not in GroupOp.Movement|{Ops.INDEX} and x._shape is not None and x.ndim == 1)
+
+def keeps_vector(b:UOp, ctx:Renderer|None) -> bool:
+  # with DEVECTORIZE=0 (or a renderer with vectors) an elementwise op of one dim on loaded values (not index math) stays a vector op
+  if DEVECTORIZE and (ctx is None or not ctx.vector_lanes): return False
+  return b.op in GroupOp.Elementwise and b.ndim == 1 and b.max_numel() > 1 and b.dtype is not dtypes.weakint and \
+    b.op_in_backward_slice_with_self(Ops.LOAD) and (ctx is None or ctx.vector_floats or not any(dtypes.is_float(x.dtype) for x in (b,)+b.src))
+
+def do_devectorize(b:UOp, ctx:Renderer|None=None):
   if b.shape == (): return None
-  # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
-  if not all(x.shape == b.shape or x.base.is_invalid for x in b.src): return None
-  src = []
-  for idx_c in itertools.product(*[[UOp.const(i) for i in range(x)] for x in b.shape]):
-    src.append(b.replace(src=tuple(x.base if x.base.is_invalid else index_lane(x, idx_c) for x in b.src)))
+  # broadcasting needs to be already unpacked (a scalar is in every lane), Invalid matches any dtype and shape
+  if not all(x.shape in (b.shape, ()) or x.base.is_invalid for x in b.src): return None
+  lanes = list(itertools.product(*[[UOp.const(i) for i in range(x)] for x in b.shape]))
+  if keeps_vector(b, ctx):
+    # (on the lanes of each src: a flat one is a vector, else a stack of its lanes)
+    srcs = tuple(x if x.base.is_invalid or flat(x) else UOp.stack(*[x if x.shape == () else index_lane(x, i) for i in lanes]) for x in b.src)
+    return None if srcs == b.src else b.replace(src=srcs).reshape(b.shape)
+  src = [b.replace(src=tuple(x.base if x.base.is_invalid else x if x.shape == () else index_lane(x, idx_c) for x in b.src)) for idx_c in lanes]
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
@@ -279,6 +292,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # preprocess
   sink = graph_rewrite(sink, pm_mops+pm_expand_value_bitcast, name="early movement ops", bottom_up=True)
 
+  # quantized math is in ints (before the opts: the same on every renderer)
+  sink = graph_rewrite(sink, sym+pm_int_reduce, name="quantized math")
+
   # first we optimize
   if optimize:
     # collapse loads reduce (indexing by a tensor)
@@ -319,7 +335,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
 
   # devectorize
-  sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, name="devectorize2")
+  sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, ctx=ren, name="devectorize2")
 
   # some coalescing misses without this
   sink = graph_rewrite(sink, sym, name="early symbolic")
@@ -519,7 +535,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   return prg
 
 # config affects generated programs and cache keys; context also carries compile-only behavior to workers
-to_program_config = (NOOPT, EMULATED_DTYPES, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32,
+to_program_config = (NOOPT, DEVECTORIZE, EMULATED_DTYPES, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32,
                      DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS)
 to_program_context = (*to_program_config, SPEC, CHECK_OOB, DEBUG)
 def to_program_key(ast:UOp, renderer:Renderer) -> tuple:

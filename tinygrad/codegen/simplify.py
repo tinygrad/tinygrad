@@ -1,8 +1,8 @@
-import itertools
+import itertools, math
 from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, graph_rewrite, _substitute, range_start, AxisType, identity_element
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import partition, dedup
+from tinygrad.helpers import partition, dedup, prod
 from tinygrad.dtype import dtypes
 
 def flatten_range(r:UOp) -> UOp|None:
@@ -94,6 +94,50 @@ pm_reduce_unparented = PatternMatcher([
   # remove any ranges from a REDUCE that aren't referenced in the reduce source
   (UPat(Ops.REDUCE, name="red"), reduce_unparented),
 ])
+
+def int_factors(u:UOp, rngs:tuple[UOp, ...]) -> tuple[list[UOp], list[UOp]]|None:
+  # a product as (ints in floats, factors without the ranges), where(v, x, 0) gates the ints
+  if u.op is Ops.CAST and dtypes.is_int(u.src[0].dtype) and dtypes.is_float(u.dtype): return [u.src[0].cast(dtypes.int32)], []
+  if not any(r in u.ranges for r in rngs): return [], [u]
+  if u.op is Ops.MUL and (a:=int_factors(u.src[0], rngs)) is not None and (b:=int_factors(u.src[1], rngs)) is not None: return a[0]+b[0], a[1]+b[1]
+  if u.op is Ops.WHERE and u.src[2].op is Ops.CONST and u.src[2].arg == 0 and (f:=int_factors(u.src[1], rngs)) is not None and f[0]:
+    return [u.src[0].where(f[0][0], 0)]+f[0][1:], f[1]
+  return None
+
+def int_reduce(red:UOp) -> UOp|None:
+  # a float sum of products of ints is the float of their sum in int32 (if it fits, exact) times the other factors: integer math is fast
+  if red.arg[0] is not Ops.ADD or not dtypes.is_float(red.dtype) or (f:=int_factors(red.src[0], red.src[1:])) is None or not f[0]: return None
+  ints = UOp.uprod(*f[0])
+  if prod(max(abs(x.vmin), abs(x.vmax)) for x in f[0]) * prod(r.vmax+1 for r in red.src[1:]) >= 2**31: return None
+  return UOp.uprod(ints.reduce(*red.src[1:], arg=red.arg).cast(red.dtype), *f[1])
+
+def bound(x:UOp) -> int:
+  # the largest magnitude of an int (a sum's is its src's times the size of its ranges)
+  if x.op is Ops.REDUCE and x.arg[0] is Ops.ADD: return bound(x.src[0]) * prod(int(r.vmax+1) for r in x.src[1:])
+  if x.op in (Ops.ADD, Ops.MUL): return bound(x.src[0])+bound(x.src[1]) if x.op is Ops.ADD else bound(x.src[0])*bound(x.src[1])
+  return max(abs(int(x.vmin)), abs(int(x.vmax))) if x.op is not Ops.CAST else bound(x.src[0])
+
+def requantize(x:UOp) -> UOp|None:
+  # an int of a float sum of ints times consts plus a const in fixed point: the high word of each int (shifted up to 31 bits) times its multiplier
+  # (31 bits), the const added, shifted down
+  def flat(t:UOp, c:float) -> list[tuple[UOp, float]]:
+    if t.op is Ops.ADD: return flat(t.src[0], c) + flat(t.src[1], c)
+    return flat(t.src[0], c*t.src[1].arg) if t.op is Ops.MUL and t.src[1].op is Ops.CONST else [(t, c)]
+  terms, k = [], 0.0
+  for t,c in flat(x.src[0], 1.0):
+    if t.op is Ops.CONST: k += t.arg * c
+    elif t.op is Ops.CAST and dtypes.is_int(t.src[0].dtype) and t.src[0].dtype.itemsize <= 4:
+      a = t.src[0].cast(dtypes.int32)
+      terms.append((a * 2**p if (p:=30-bound(t.src[0]).bit_length()) >= 0 else a >> -p, c*2**-p))
+    else: return None
+  if not terms or (s:=31 - math.frexp(max(abs(c) for _,c in terms))[1]) <= 32: return None
+  hi = UOp.usum(*[((a.cast(dtypes.int64) * round(c * 2**s)) >> 32).cast(dtypes.int32) for a,c in terms])
+  return ((hi + round(k * 2**(s-32))) >> (s-32)).cast(x.dtype)
+
+pm_int_reduce = PatternMatcher([(UPat(Ops.REDUCE, name="red"), int_reduce),
+  # (clamped at 0 or more: the floor of the shift is the truncation of the cast)
+  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(Ops.ADD, dtype=dtypes.floats),), name="x").maximum(UPat.cvar("c")),
+   lambda x,c: r.maximum(c) if c.arg >= 0 and (r:=requantize(x)) is not None else None)])
 
 pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
   # lift x+y out of reduce on lt

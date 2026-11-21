@@ -117,7 +117,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalescing does not support gated loads/stores"
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
-      if buf.addrspace == AddrSpace.REG: continue
+      if buf.addrspace == AddrSpace.REG and not ctx.vector_lanes: continue
       if buf.buf_uop.op is Ops.PARAM and buf.buf_uop.arg.volatile: continue # volatile accesses never merge
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
       if idx.is_invalid: continue
