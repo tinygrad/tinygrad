@@ -565,6 +565,16 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(out.tolist(), [5])
 
 class TestCustomKernelArgs(unittest.TestCase):
+  def test_elementwise_src_inlined(self):
+    # an input that is elementwise ops (casts, bitcasts, broadcasts, views, pads, stacks) of buffers is computed by the custom kernel's loads
+    a, b = Tensor.randn(4, 8).realize(), Tensor.randn(8).realize()
+    for src in ((a.half() * 2 + b).exp2().float(), (a.T[:4, :] + 1).relu(), a.silu() * b.reshape(1, 8), Tensor.stack(a, a*2, a+1).reshape(12, 8),
+                a[1:3], a.pad(((1, 1), (0, 0))), a.bitcast(dtypes.int32).bitcast(dtypes.float32)[:, 2:6]):
+      GlobalCounters.reset()
+      out = Tensor.custom_kernel(Tensor.empty(*src.shape), src, fxn=custom_add_one_kernel)[0].realize()
+      self.assertEqual(GlobalCounters.kernel_count, 1)
+      np.testing.assert_allclose(out.numpy(), src.numpy() + 1, rtol=1e-5, atol=1e-5)
+
   def test_duplicate_call_arg(self):
     x = Tensor.arange(4).clone().realize()
     x = Tensor.custom_kernel(x, x, fxn=custom_add_one_kernel)[0]
