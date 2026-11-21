@@ -242,7 +242,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.GETADDR: return cast("Buffer", self.src[0].buffer).get_buf(to_tuple(self.arg)[0])
     # a casted const CAST(dt, CONST(v)) is one const: .val reads the value through the CAST
     assert self.op is Ops.CAST and self.src[0].op is Ops.CONST, f"val is only for consts, got {self.op}"
-    return self.src[0].val
+    return self.dtype.const(self.src[0].val)
   @property
   def is_invalid(self) -> bool: return self.op is Ops.CONST and self.val is Invalid
   @recursive_property
@@ -817,6 +817,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert opaque.nbytes % dtype.itemsize == 0, f"{opaque.nbytes} bytes is not divisible by {dtype.itemsize} for {dtype}"
     # Both storage identity and interpretation are part of the UOp key.
     return UOp._buffer(opaque.nbytes // dtype.itemsize, dtype, -id(opaque), device=device or opaque.device, buffer=opaque)
+  def as_extern(self, slot:int) -> UOp: return self.replace(op=Ops.EXTERN, arg=replace(self.arg, slot=slot, buffer=None, name=None, val=None))
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
@@ -1126,17 +1127,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _sym_fxn(self):
     from tinygrad.uop.render import _render_with_splits, renderer_infer
     sself = self.simplify()
-    varnames = tuple(dedup(x.expr for x in sself.toposort() if x.op in {Ops.PARAM, Ops.EXTERN} and x.arg.addrspace == AddrSpace.ALU))
-    # TODO: sanitize varnames, or don't use naked eval while staying fast
     ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
     lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
-    ns: dict[str, Any] = {"max": max, "truncdiv": cdiv, "truncmod": cmod, "div": floordiv, "mod": floormod, "bitcast": bitcast, "dtypes": dtypes}
-    exec(f"def _f({','.join(varnames)}):\n"+'\n'.join(lines), ns)  # pylint: disable=exec-used
-    return ns["_f"], varnames
+    ns: dict[str, Any] = {"max": max, "truncdiv": cdiv, "truncmod": cmod, "div": floordiv, "mod": floormod, "bitcast": bitcast,
+                          "dtypes": dtypes, "exec_alu": exec_alu, "Ops": Ops}
+    exec("def _f(values):\n"+'\n'.join(lines), ns)  # pylint: disable=exec-used
+    return ns["_f"]
 
-  def sym_infer(self, var_vals:dict[str, int]):
-    fxn, varnames = self._sym_fxn
-    return fxn(**{k:v for k,v in var_vals.items() if k in varnames})
+  def sym_infer(self, var_vals:dict[str, int]): return self._sym_fxn(var_vals)
 
   def render(self, simplify=True, pm:PatternMatcher|None=None) -> str:
     ctx: dict[UOp, str] = {}
@@ -1174,7 +1172,19 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret = UOp._buffer(prod(shape), dtype, slot, addrspace=addrspace, name=name)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
+  @functools.cached_property
+  def is_scalar_arg(self) -> bool:
+    # A by-value kernel argument reads only constants and scalar parameters, never storage.
+    return self.is_variable or ((dtypes.is_int(self.dtype) or self.dtype == dtypes.bool) and
+      (self.op is Ops.CONST or (self.op in GroupOp.ALU|{Ops.CAST} and all(s.is_scalar_arg for s in self.src))))
   def placeholder_like(self, slot:int):
+    if self.is_scalar_arg:
+      if bad:=next((u.op for u in self.toposort() if u.op in GroupOp.ALU and u.op not in python_alu), None):
+        raise ValueError(f"{bad} is not supported in a by-value kernel argument")
+      # A predicate uses an integer kernel argument (OpenCL has no bool kernel ABI).
+      dtype = dtypes.int32 if self.dtype is dtypes.bool else self.dtype
+      arg = ParamArg(slot, dtype, (self.vmin, self.vmax), self.arg.name if self.is_variable else None, AddrSpace.ALU)
+      return UOp(Ops.PARAM, (UOp(Ops.STACK),), arg).cast(self.dtype)
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
     return UOp.placeholder(self.max_shard_shape, self.dtype, slot)
 
@@ -1275,9 +1285,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # one-line convenience for the single-output case: self is the value
   def call_with_output(self, *srcs:UOp, **kwargs) -> UOp: return UOp.call_with_outputs((self,), *srcs, **kwargs)[0]
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
-    placeholders = [s.replace(arg=replace(s.arg, slot=i, val=None)) if s.is_variable else UOp.placeholder_like(s, slot=i)
-                    for i,s in enumerate(srcs)]
-    kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)
+    kernel = fxn(*(s.placeholder_like(i) for i,s in enumerate(srcs))).call(*srcs, grad_fxn=grad_fxn)
     return [s.after(kernel) for s in srcs]
 
   @functools.cached_property

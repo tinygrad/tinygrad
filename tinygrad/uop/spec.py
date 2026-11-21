@@ -256,6 +256,7 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.CONST, src=()), lambda: True),
   (UPat(Ops.CAST, src=(UPat(Ops.CONST, src=()),)), lambda: True),
   (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM, Ops.EXTERN) for x in s.src) or None),
+  (UPat(GroupOp.ALU|{Ops.CAST}, name="x"), lambda x: x.is_scalar_arg or None),
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
   # PARAM is caller-provided storage (or a Variable in the ALU addrspace), EXTERN is storage from outside, ALLOC is call-local storage

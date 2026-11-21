@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Any, Sequence, Callable
-import itertools, ctypes, struct, time
+import itertools, ctypes, os, struct, time
 from dataclasses import replace, dataclass, field
 from collections import defaultdict, Counter
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, flatten, DEBUG, VIZ, ALL2ALL, PROFILE
@@ -14,6 +14,8 @@ from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_o
 
 # **** calls
 
+_process_nonce = os.urandom(16).hex()  # PID alone can be reused; nonce alone is inherited across fork.
+
 @dataclass(frozen=True)
 class HCQInfo:
   device:tuple[str, ...]
@@ -24,6 +26,9 @@ class HCQInfo:
   slots:tuple[tuple[str, int], ...] = () # per device, the position of its batch slots in the args
 
   skip_wait:bool = False # TODO: remove. an rdma copy between nodes is two batches, so waiting on the first alone deadlocks
+  owner:tuple[int, str]|None = None
+
+  def link_owner(self): return (os.getpid(), _process_nonce) if any(d.split(":")[0] == "NV" for d in self.device) else None
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -160,13 +165,7 @@ def cstruct(struct_t:type[Struct], **fields:UOp|int) -> UOp:
   buf = UOp.alloc((ctypes.sizeof(struct_t),), dtypes.u8, device=HCQ_RUNTIME_DEV.device, name=struct_t.__name__)
   return patch(buf, rows, bytes(ctypes.sizeof(struct_t)))
 
-# **** prep: externs, unwrap multi, staging copies
-
-def replace_buffer(ctx:tuple[list[UOp], dict[UOp, int]], b:UOp) -> UOp:
-  bufs, slots = ctx
-  if slots.setdefault(b, len(bufs)) == len(bufs): bufs.append(b)
-  return b.replace(op=Ops.EXTERN, arg=replace(b.arg, slot=slots[b], buffer=None))
-pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b: replace_buffer(ctx, b))])
+# **** prep: unwrap multi, staging copies
 
 def unwrap_call(call:UOp) -> UOp|None:
   if (n:=max([len(to_tuple(a.device)) for a in get_call_arg_uops(call)], default=1)) == 1: return None
@@ -334,18 +333,20 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   for (dev, queue), cmds in queues.items(): submits.append(make_submit(*cmds, dev=dev, queue=queue, deps=(fence, *submits[-1:])))
   sink = UOp.sink(submits[-1], *announce(ctx.slots, num_queues, submits[-1]), arg=KernelInfo("hcq_submit", estimates=Estimates(), optimized=True))
 
-  # per call metadata
-  names = [get_call_name(c, get_call_arg_uops(c)) for c, _, _ in ctx.batch]
-  estimates = [estimate_uop(c) for c, _, _ in ctx.batch]
-  stamps = [tuple(2 * s + 1 for s in ctx.stamps(d, tag)) for tag, (_, d, _) in enumerate(ctx.batch)]
-  profile_keys = [c.body.key if c.body.op is Ops.PROGRAM else None for c, _, _ in ctx.batch]
-  args = [[unwrap_lane(c.src[1 + g])[:2] for g in getattr(c.body.arg, "globals", range(len(c.src) - 1))] for c, _, _ in ctx.batch]
-  bufs = [tuple(b.arg.slot for b, _ in a) if all(b.op in (Ops.PARAM, Ops.EXTERN) and lane is None for b, lane in a) else () for a in args]
-  kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch]))
-  slots = ctx.slots if ctx.profile else {} # profiling reads them
-  info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, slots=tuple((d, i) for i, d in enumerate(slots)),
-                 estimates=Estimates(*[sum(x*n for x, n in Counter(t).items()) for t in zip(*[vars(e).values() for e in estimates])]).simplify())
-  return sink.call(*slots.values(), hcq=info)
+  # Profiling buffers and symbolic estimates refer to this submitter's arguments, just like its program.
+  slots = ctx.slots if ctx.profile else {}
+  args = {u:i for i,u in enumerate(slots.values())}
+  def slot(u:UOp) -> int: return args.setdefault(u, len(args))
+  kernels = []
+  for tag, (c, d, _) in enumerate(ctx.batch):
+    est_args = (a.placeholder_like(slot(a)) if a.is_scalar_arg and a.op_in_backward_slice_with_self(Ops.EXTERN) else a for a in c.src[1:])
+    est = estimate_uop(c.replace(src=(c.body, *est_args)))
+    bufs = tuple(slot(c.src[1+i]) for i in getattr(c.body.arg, "globals", range(len(c.src)-1))) if ctx.profile else ()
+    kernels.append((d, get_call_name(c, get_call_arg_uops(c)), est, tuple(2*s+1 for s in ctx.stamps(d, tag)),
+                    c.body.key if c.body.op is Ops.PROGRAM else None, bufs, get_call_outs_ins(c)))
+  info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=tuple(kernels), slots=tuple((d, i) for i, d in enumerate(slots)),
+                 estimates=Estimates(*[sum(x*n for x, n in Counter(t).items()) for t in zip(*[vars(k[2]).values() for k in kernels])]).simplify())
+  return sink.call(*args, hcq=info)
 
 @rewrite_group(new_ctx=False)
 def sched_batches(l:UOp, profile:bool) -> UOp:
@@ -472,9 +473,9 @@ pm_lift_deps = PatternMatcher([
 ])
 
 def _needs_arg(u:UOp, root:bool) -> bool:
+  if u.is_variable: return True
   if u.op in (Ops.BUFFER, Ops.ALLOC, Ops.EXTERN): return u.addrspace is AddrSpace.GLOBAL
-  # every Variable is an arg, the root also takes the inputs
-  return u.op is Ops.PARAM and (u.is_variable or root)
+  return root and u.op is Ops.PARAM
 
 def _param_for(u:UOp, slot:int) -> UOp:
   if u.op is Ops.GETADDR or u.is_variable:
@@ -503,7 +504,9 @@ Compiled.pm_encode = PatternMatcher([])
 Compiled.pm_lower = PatternMatcher([])
 
 def lower_call(call:UOp) -> UOp|None:
-  if call.arg.hcq is None: return None
+  if (info:=call.arg.hcq) is None: return None
+  # NV encodes a process-local FIFO token. Only its compiler process can submit this batch.
+  if (owner:=info.link_owner()) is not None: call = call.replace(arg=replace(call.arg, hcq=replace(info, owner=owner)))
 
   # encode bodies
   body = graph_rewrite(call.body, Compiled.pm_encode, ctx=(lt_patches:=list[UOp]()), bpm=pm_hoist_links, name="encode")
@@ -522,7 +525,7 @@ Compiled.link_bufs |= {"timeline": lambda b: Device[b.device].timeline}
 Compiled.pm_link = PatternMatcher([])
 
 @dataclass
-class LinkCtx: inputs:list[UOp]; refs:list[UOp] = field(default_factory=list) # noqa: E702
+class LinkCtx: inputs:Sequence[UOp]; refs:list[UOp] = field(default_factory=list) # noqa: E702
 
 def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp:
   if b.arg.name is None: return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
@@ -532,7 +535,9 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp:
 
 def resolve_extern(ctx:LinkCtx, b:UOp) -> UOp:
   if b.arg.name is None:
-    a = ctx.inputs[b.arg.slot]
+    if not 0 <= (i:=b.arg.slot) < len(ctx.inputs): raise RuntimeError(f"extern {i} must match its EXTERN, got nothing")
+    a = ctx.inputs[i]
+    if not (a.is_bound_var or a.op is Ops.BUFFER) or a.as_extern(i) is not b: raise RuntimeError(f"extern {i} must match its EXTERN: {b}, got {a}")
     return UOp.const(a.arg.val, b.dtype) if a.is_bound_var else a
   owned = Compiled.link_bufs[b.arg.name if b.arg.name in Compiled.link_bufs else to_name(b.device, b.arg.name)]
   return UOp.from_buffer(owned if isinstance(owned, Buffer) else owned(b), b.dtype, HCQ_RUNTIME_DEV.device)
@@ -552,8 +557,7 @@ def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
   return _write_host(buf, [(o.val * w.dtype.itemsize, struct.pack(w.dtype.fmt, truncate[w.dtype](w.val))) for o, w in zip(offs.src, ws.src)])
 
 pm_resolve_link = PatternMatcher([
-  # collapse committed const conversions
-  (UPat(Ops.CAST, src=(UPat(Ops.CAST, src=(UPat.cvar(),), name="inner"),), name="c"), lambda c, inner: inner.src[0].cast(c.dtype)),
+  (UPat.cvar().cast(name="x").cast(name="c"), lambda c,x: UOp.const(x.val, c.dtype)),
   # an alloc and an extern become buffers
   (UPat(Ops.ALLOC, name="b"), bufferize_buf),
   (UPat(Ops.EXTERN, name="b"), resolve_extern),
@@ -575,24 +579,26 @@ pm_resolve_link = PatternMatcher([
 
 hcq_compile_cache:dict[tuple[UOp, bool, bool], UOp] = {} # eager templates: a buffer-free linear (uops are hash-consed) to its compiled form
 
-@rewrite_group(lambda linear,input_uops,profile,cache=False,ret=None: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
-def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache:bool=False) -> UOp:
+@rewrite_group(lambda linear,profile,cache=False,ret=None: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
+def hcq_compile(linear:UOp, profile:bool, cache:bool=False) -> UOp:
   if any(getattr(c.without_after.arg, "hcq", None) is not None for c in linear.src): return linear # compiled already
 
-  if cache and input_uops is not None:
-    slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
-    linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffers")
   linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
-  if cache and input_uops is not None and (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
+  if cache and (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
   lin = graph_rewrite(sched_batches(linear, profile), pm_lower_call, walk=True, name="lower call")
   with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin, verbose=DEBUG>=3)
-  if cache and input_uops is not None and final_linear is not linear: hcq_compile_cache[key] = final_linear
+  if cache and final_linear is not linear: hcq_compile_cache[key] = final_linear
   return final_linear
 
 @rewrite_group(lambda _,input_uops=None,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
-def hcq_link(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
+def hcq_link(linear:UOp, input_uops:Sequence[UOp]=()) -> UOp:
+  # A deserialized batch may be the first use of its device in this process. Open it before applying its link rules.
+  for call in linear.src:
+    if (hcq:=getattr(call.without_after.arg, "hcq", None)) is not None:
+      if hcq.owner != hcq.link_owner(): raise RuntimeError("NV batches must be compiled and run in the same process")
+      for device in hcq.device: Device[device]
   linked = graph_rewrite(linear, Compiled.pm_link, walk=True, name="link programs") if Compiled.pm_link.patterns else linear
-  ctx = LinkCtx(input_uops or [])
+  ctx = LinkCtx(input_uops)
   linked = graph_rewrite(linked, pm_resolve_link+Compiled.pm_link, ctx=ctx, walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
   return linked

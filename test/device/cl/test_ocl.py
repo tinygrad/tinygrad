@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Device
 from tinygrad.device import Buffer
-from tinygrad.runtime.ops_cl import CLDevice, CLAllocator
+from tinygrad.runtime.ops_cl import CLDevice, CLAllocator, CLCompiler
 
 @unittest.skipUnless(Device.DEFAULT == "CL", "Runs only on OpenCL")
 class TestCLError(unittest.TestCase):
@@ -15,8 +15,8 @@ class TestCLError(unittest.TestCase):
 
   def test_invalid_kernel_name(self):
     device = Device[Device.DEFAULT]
-    with self.assertRaises(RuntimeError) as err:
-      device.function(b"__kernel void test(__global int* a) { a[0] = 1; }", "")
+    lib = CLCompiler(device).compile_cached("__kernel void test(__global int* a) { a[0] = 1; }")
+    with self.assertRaises(RuntimeError) as err: device.function(lib, "")
     assert str(err.exception) == "OpenCL Error -46: CL_INVALID_KERNEL_NAME"
 
   def test_unaligned_copy(self):

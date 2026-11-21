@@ -155,11 +155,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)).eq(UPat.var("x")),
    lambda x: x.const_like(True, dtypes.bool)), # x == x -> True (only ints)
   # ** constant folding **
-  # canonicalize casted CONST
-  (UPat(Ops.CAST, dtypes.all, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val)),
-  # collapse committed const conversions
-  (UPat(Ops.CAST, dtypes.all, name="root", src=(UPat(Ops.CAST, dtypes.all, src=(UPat(Ops.CONST, name="c"),)),)),
-   lambda root,c: root.const_like(c.val)),
+  (UPat.cvar().or_casted("x").cast(dtypes.all, name="c"), lambda c,x: c.const_like(x.val)),
   # one rule per spelling: bare has no width, a pair evaluates at its stated width, mixed commits to the promotion
   # NOTE: THREEFRY(const,const) folds via its decomposition
   (UPat(GroupOp.ALU-{Ops.THREEFRY}, src=bare_const, name="a"), fold_const_alu),

@@ -539,6 +539,7 @@ def _unwrap_src(s: UOp) -> UOp:
 
 # a buffer state is a define or an AFTER. MSELECT/MSTACK join per-device states
 def _states(s: UOp) -> list[UOp]:
+  if s.is_scalar_arg: return []  # scalar expressions read no storage
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
   if s.op is Ops.CONST: return []  # a constant arg, e.g. the device number of one device, reads no buffer
@@ -602,7 +603,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       if rk.op is not Ops.AFTER:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:])
+        buf_uops = tuple(s if s.is_scalar_arg else _unwrap_src(s).buf_uop for s in k.src[1:])
         linearized.append(k.replace(src=(k.body, *buf_uops)))
       for x in children.get(rk, []):
         in_degree[x] -= 1
@@ -736,4 +737,5 @@ def create_linear(fn:UOp, plan:bool=True) -> UOp:
 
   # the storage it allocates gets canonical slots, so the linear only depends on fn. map back binds each to fresh storage
   allocs = [u for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL]
+  if any(b.device is None for b in allocs): raise RuntimeError("global storage needs a device, give the ALLOC one")
   return linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
