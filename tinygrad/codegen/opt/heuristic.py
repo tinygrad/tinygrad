@@ -175,11 +175,12 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     else:
       # prioritize making expand axes local
       local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].get_idx().backward_slice for b in k.bufs), axis) \
-                              for axis in k.axes_of(AxisType.GLOBAL, AxisType.WEAK, reduce=False) if k.rngs[axis].src[0].op is Ops.CONST]
+                              for axis in k.axes_of(AxisType.GLOBAL, AxisType.WEAK, reduce=False)]
       to_local: list[tuple[UOp, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
         local_size = prod(sz for _, sz in to_local)
-        local_sz: int|None = next((x for x in ([32] * (axis == 0) + [16,8,4,3,2]) if k.full_shape[axis] % x == 0 and local_size * x <= 128), None)
+        local_sz: int|None = next((x for x in ([32] * (axis == 0) + [16,8,4,3,2])
+                                   if k.rngs[axis].src[0].divides(x) is not None and local_size * x <= 128), None)
         if local_sz is not None: to_local.append((k.rngs[axis], local_sz))
       for rng, local_sz in sorted(to_local[:3], key=lambda x: k.rngs.index(x[0])):
         k.apply_opt(Opt(OptOps.SPLIT, k.rngs.index(rng), (local_sz, AxisType.LOCAL)))
