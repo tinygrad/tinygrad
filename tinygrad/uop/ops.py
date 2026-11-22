@@ -61,6 +61,11 @@ def identity_element(op:Ops, dt:DType) -> PyConst: return dt.const({Ops.ADD:0, O
 # unsigned arithmetic wraps mod 2^n, so its interval holds only if it fits the dtype
 def wrapped(dt:DType, lo:PyConst, hi:PyConst) -> tuple[PyConst, PyConst]:
   return (lo, hi) if not dtypes.is_unsigned(dt) or 0 <= lo and hi <= dt.max else (dt.min, dt.max)
+# a value read at a float dtype rounds monotonically, and an endpoint that is or becomes nan (no inf in the format) bounds nothing
+def rounded(dt:DType, lo:PyConst, hi:PyConst) -> tuple[PyConst, PyConst]:
+  if not dtypes.is_float(dt): return lo, hi
+  lo, hi = map(truncate.get(dt, float), (lo, hi))
+  return (dt.min, dt.max) if math.isnan(lo) or math.isnan(hi) else (lo, hi)
 
 # With True as the default, this matches the old symbolic behavior
 def resolve(x:UOp|bool, default:bool=True):
@@ -1051,7 +1056,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def _min_max(self) -> tuple[PyConst, PyConst]:
     if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):
-      (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
+      # operands are read at the dtype the op computes at (a comparison: their promotion), a weak const included
+      dt = promo_dtype(self.src) if self.op in GroupOp.Comparison else self.dtype
+      (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = rounded(dt, *self.src[0]._min_max), rounded(dt, *self.src[1]._min_max)
       if self.op is Ops.ADD: return wrapped(self.dtype, s0_vmin+s1_vmin, s0_vmax+s1_vmax)
       if self.op is Ops.SUB: return wrapped(self.dtype, s0_vmin-s1_vmax, s0_vmax-s1_vmin)
       if self.op is Ops.AND and dtypes.is_int(self.dtype) and s1_vmin == s1_vmax and (s0_vmin >= 0 or s1_vmax >= 0):
@@ -1086,16 +1093,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         return 0, (1 << int(max(s0_vmax, s1_vmax)).bit_length()) - 1
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
       # bounds never prove a float compare true since nan compares false
-      if self.op is Ops.CMPLT: return (s0_vmax<s1_vmin and not dtypes.is_float(self.src[0].dtype), s0_vmin<s1_vmax)
+      if self.op is Ops.CMPLT: return (s0_vmax<s1_vmin and not dtypes.is_float(dt), s0_vmin<s1_vmax)
       if self.op is Ops.CMPEQ:
-        return (s0_vmin == s0_vmax == s1_vmin == s1_vmax and not dtypes.is_float(self.src[0].dtype), not ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin)))
+        return (s0_vmin == s0_vmax == s1_vmin == s1_vmax and not dtypes.is_float(dt), not ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin)))
       if self.op is Ops.OR and self.dtype == dtypes.bool: return s0_vmin or s1_vmin, s0_vmax or s1_vmax
       if self.op is Ops.AND and self.dtype == dtypes.bool: return s0_vmin and s1_vmin, s0_vmax and s1_vmax
     if self.op is Ops.WHERE:
       # int (a<b).where(a,b) is min(a,b)
       if dtypes.is_int(self.dtype) and self.src[0].op is Ops.CMPLT and self.src[0].src == self.src[1:]:
         return min(self.src[1].vmin, self.src[2].vmin), min(self.src[1].vmax, self.src[2].vmax)
-      return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
+      return rounded(self.dtype, min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax))
     # NOTE: returned UOp is assumed to be CONST
     if self.op in GroupOp.Defines and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
     if self.op in (Ops.RANGE, Ops.SPECIAL) and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
@@ -1110,10 +1117,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.PAD or (self.op is Ops.INDEX and not all(c.get_valid() is UOp.const(True) for c in self.src[1:])):
       return min(self.src[0].vmin, 0), max(self.src[0].vmax, 0)
     if self.op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.AFTER, Ops.DETACH, Ops.COPY, Ops.CONTIGUOUS_BACKWARD}: return self.src[0]._min_max
-    # a cast rounds monotonically, except an int wraps past an int dtype and an inf a float dtype can't hold becomes nan
-    if self.op is Ops.CAST and dtypes.is_float(self.dtype):
-      smin, smax = (truncate.get(self.dtype, float)(v) for v in self.src[0]._min_max)
-      if not math.isnan(smin) and not math.isnan(smax): return smin, smax
+    if self.op is Ops.CAST and dtypes.is_float(self.dtype): return rounded(self.dtype, *self.src[0]._min_max)
     if self.op is Ops.CAST and dtypes.is_int(self.dtype):
       smin, smax = (math.trunc(v) if math.isfinite(v) else v for v in self.src[0]._min_max)
       if self.dtype.min <= smin and smax <= self.dtype.max: return smin, smax
