@@ -66,6 +66,8 @@ def wrapped(dt:DType, lo:PyConst, hi:PyConst) -> tuple[PyConst, PyConst]:
 def resolve(x:UOp|bool, default:bool=True):
   if isinstance(x, bool): return x
   assert x.dtype == dtypes.bool, "UOp in resolve must be bool"
+  # bounds that already decide it don't need the simplify, which rewrites everything x depends on (e.g. the loop before a RANGE)
+  if x.vmin == x.vmax: return bool(x.vmin)
   # NOTE: generating the text for the exception is expensive, so we do this
   return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
 
