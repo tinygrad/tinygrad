@@ -52,6 +52,7 @@ def load(name, files, **kwargs):
     kwargs['epilog'] = (epi(srcpath) if srcs else epi()) if callable(epi:=kwargs.get('epilog', [])) else epi
     try: f.write_text(kwargs.pop("gen", importlib.import_module("tinygrad.runtime.support.autogen").gen)(name, files, **kwargs))
     except Exception as e: raise RuntimeError(f"error while generating {name}") from e
+    importlib.invalidate_caches()  # the new module may not be in the finder's directory listing yet
     if srcs: td.cleanup()
   return importlib.import_module(f"{path}.{name.replace('/', '.')}")
 
@@ -192,7 +193,9 @@ def __getattr__(nm):
                   preprocess=_extract_deb)
     case "nvme":
       kh = "{}/usr/src/linux-headers-6.18.9+deb14-common/include"
-      return load("nvme", [f"{kh}/linux/nvme.h"], srcs=linux_headers_kern_deb, args=["-D__KERNEL__", f"-I{kh}"], preprocess=_extract_deb)
+      # __print_symbolic is a kernel tracing macro, not a callable in the generated module.
+      return load("nvme", [f"{kh}/linux/nvme.h"], srcs=linux_headers_kern_deb, args=["-D__KERNEL__", f"-I{kh}"], preprocess=_extract_deb,
+                  rules=[(r"(?s)^.*\b__print_symbolic\(.*$", "")])
     case "bnxt":
       kh = "{}/usr/src/linux-headers-6.18.9+deb14-common/include"
       return load("bnxt", [f"{kh}/linux/bnxt/hsi.h", *[f"{{}}/{s.split('/')[-1].split('?')[0]}" for s in bnxt_src]],

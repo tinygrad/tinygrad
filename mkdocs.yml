@@ -122,6 +122,7 @@ plugins:
       python:
         paths: [tinygrad]
         options:
+          extensions: [extra/griffe_extensions.py:SkipAutogen]
           docstring_options:
             ignore_init_summary: true
           docstring_section_style: list
