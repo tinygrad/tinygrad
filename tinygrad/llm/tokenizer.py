@@ -1,4 +1,3 @@
-from __future__ import annotations
 import sys, codecs, itertools, typing, re, string, unicodedata, json, pathlib
 from tinygrad.helpers import partition
 

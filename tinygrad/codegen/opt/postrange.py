@@ -116,9 +116,10 @@ class Scheduler:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
       check(opt.axis is not None and opt.axis >= 0, "tensor core opts must have an axis")
       check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 3, "tensor core opts must have valid arg")
-      check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.ren.tensor_cores), "tensor core opts must have valid tc_select")
-      check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
-      check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
+      tc_select, tc_opt, use_tensor_cores = cast(tuple, opt.arg)
+      check(-1 <= tc_select < len(self.ren.tensor_cores), "tensor core opts must have valid tc_select")
+      check(0 <= tc_opt <= 2, "tensor core opts must have valid tc_opt")
+      check(0 < use_tensor_cores <= 2, "use_tensor_cores value is not valid")
       try: ret = self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt)
       except ValueError as e: raise KernelOptError(str(e))
       check(ret is not None, "no tensor core available")
