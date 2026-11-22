@@ -465,9 +465,11 @@ class Engine:
     moe = [b for b in m.blk if hasattr(b, "ffn_gate_inp")]
     stages = [("attend", self.attend)]
     if self.forecast_jit is not None: stages.append(("forecast", functools.partial(self.attend, forecast=True)))
-    for b, (name, fxn), cap, c0 in itertools.product(m.blk, stages, self.chunk_vars, (0, self.chunk)):
-      if name == "forecast" and (b not in moe or cap != min(self.chunk_vars) or c0): continue
-      jit, args, first, live = self.chunk_graph(name, b, fxn, cap, c0)
+    for b, (name, fxn), cap, c0, ahead in itertools.product(m.blk, stages, self.chunk_vars, range(0, min(3 * self.chunk, self.W), self.chunk),
+                                                            (False, True)):
+      if ahead and (cap != self.chunk or c0 + cap >= self.W) or name == "forecast" and (b not in moe or cap != min(self.chunk_vars) or c0 or ahead):
+        continue
+      jit, args, first, live = self.chunk_graph(name, b, fxn, cap, c0, ahead)
       if first is b: self.graph(jit, self.v_pos.bind(0), live, self.v_c0.bind(0), self.v_n.bind(1), self.v_s.bind(0), *args)
     for b, n, cap in itertools.product(moe, range(-(-self.W // self.chunk), 0, -1), self.chunk_vars):
       jit, args, first, live = self.post_graph(b, (n - 1) * self.chunk + cap)
@@ -488,12 +490,14 @@ class Engine:
 
   def window_shapes(self) -> dict[str, tuple[tuple[int, ...], DType]]:
     """the window's compute state (a piece of W tokens'): the moe's inputs (the routed experts' inputs, each gpu's partials of the shared
-    experts' outputs, the router's logits), its routes, a gpu's rows of the experts' activations and outputs"""
+    experts' outputs, the router's logits), its routes, a gpu's rows of the experts' activations and outputs, a chunk's attention input mixed
+    ahead (two: a chunk's, the next's)"""
     c, W, E, K = self.model.config, self.W, self.m["n_experts"], self.model.config.num_experts_per_tok
     R, f32, i32 = max(map(self.rows, TILES)), dtypes.float32, dtypes.int32
     return {"h": ((W, self.lat), self.tiles_dtype), "shared": ((W, c.dim), self.bank), "logits": ((W, E), f32), "w": ((W, K), f32),
             "pos": ((W * K,), i32), "entries": ((R,), i32), "tiles": ((R // TILES[0],), i32),
             "act": ((R, self.units), dtypes.half), "down": ((R, self.lat), dtypes.half),
+            **{f"mixed{p}": ((1, self.chunk, c.dim), self.bank) for p in range(2)},
             **({"guess_logits": ((min(self.chunk, SHORT_CHUNK), E), f32)} if self.forecast_counts is not None else {})}
 
   def window_state(self, at:int) -> dict[str, Tensor]:  # (lent from the pool's slots from at on)
@@ -515,9 +519,11 @@ class Engine:
     n = self.chunk // len(self.devs)
     return t[:, :, c0 // len(self.devs):c0 // len(self.devs) + n]
 
-  def whole(self, t:Tensor) -> Tensor:  # (t (1, R, ...) split on its rows, on every gpu: each gpu's rows copied to the others once, a buffer)
+  def whole(self, t:Tensor, into:Tensor|None=None) -> Tensor:
+    """t (1, R, ...) split on its rows, on every gpu: each gpu's rows copied to the others once, a buffer (into's, after its deps)"""
     n = t.shape[1] // len(self.devs)
-    return Tensor.cat(*(t[:, i * n:(i + 1) * n] for i in range(len(self.devs))), dim=1).contiguous()
+    rows = Tensor.cat(*(t[:, i * n:(i + 1) * n] for i in range(len(self.devs))), dim=1)
+    return rows.contiguous() if into is None else into.assign(rows)
 
   def in_order(self, t:Tensor, r0:int=0, n:int|None=None) -> Tensor:
     """a piece's (1, gpus, W/gpus, ...) rows r0..r0+n on every gpu in its tokens' order (1, n, ...): their chunks' gathered"""
@@ -555,11 +561,12 @@ class Engine:
     first, jit, args = self.kinds[(name, b)]
     return jit, args, first
 
-  def chunk_graph(self, name:str, b:FFNBlock, fxn:Callable, n:int, c0:int=0) -> tuple[Callable, list[Tensor], FFNBlock, UOp]:
-    """b's graph of a stage for a chunk of n rows at c0: two of each, the chunks' in turn (the host queues a chunk's while the one before runs)"""
-    cap = next(c for c in self.chunk_vars if n <= c)
-    if name in ("attend", "forecast"): name += self.index_roles.get(b, "")
-    return (*self.kind(f"{name}{cap}:{c0 // self.chunk % 2}", b, fxn), self.chunk_vars[cap].bind(n))
+  def chunk_graph(self, name:str, b:FFNBlock, fxn:Callable, n:int, c0:int, ahead:bool) -> tuple[Callable, list[Tensor], FFNBlock, UOp]:
+    """b's graph of an attend for a chunk of n rows at c0: two of each, the chunks' in turn (the host queues a chunk's while the one before
+    runs), its attention input mixed by the chunk before or not, the next chunk's mixed ahead or not"""
+    cap, p = next(c for c in self.chunk_vars if n <= c), c0 // self.chunk % 2
+    fxn = functools.partial(fxn, mixed=p if c0 else None, ahead=1 - p if ahead else None)
+    return (*self.kind(f"{name}{self.index_roles.get(b, '')}{cap}:{p}:{c0 > 0}:{ahead}", b, fxn), self.chunk_vars[cap].bind(n))
 
   def post_graph(self, b:FFNBlock, T:int) -> tuple[Callable, list[Tensor], FFNBlock, UOp]:
     """b's graph of the posts of a piece of T rows: a kind of each count of chunks and its last chunk's cap, the last chunk's live rows"""
@@ -581,13 +588,18 @@ class Engine:
       rows = rows.assign(mask[0].pad_to(rows.shape, value=-1))
     return rows[:h.shape[1]].unsqueeze(0)
 
-  def attend(self, b:FFNBlock, pos:UOp, live:UOp, c0:UOp, n:UOp, s:UOp, *_, forecast:bool=False) -> Tensor:
+  def attend(self, b:FFNBlock, pos:UOp, live:UOp, c0:UOp, n:UOp, s:UOp, *_, forecast:bool=False, mixed:int|None=None,
+             ahead:int|None=None) -> Tensor:
     """a chunk's live rows' attention at c0 of the window (positions pos..) on its n streams, added to stream s, then its feed forward's mix: a
     moe's parts before the routed experts into the window's buffers, a dense block's feed forward added to stream s. the rows symbolic: a
-    kernel's work the live rows'"""
+    kernel's work the live rows'. its attention input mixed already (mixed: the buffer's, by the chunk before) or not, the next chunk's mixed
+    into buffer ahead (its rows' streams the block before's: written last, nothing waits on its copies)"""
     rows = (c0 // len(self.devs), self.chunk // len(self.devs))
     bank = Tensor(self.win["bank"].uop)
-    h = self.whole(self.mix(getattr(b, "attn_res_score", None), bank.flatten(1, 2), b.attn_norm, n, rows).cast(self.bank))[:, :live]
+    def attention_input(rows:tuple[UOp, int]) -> Tensor:
+      return self.mix(getattr(b, "attn_res_score", None), bank.flatten(1, 2), b.attn_norm, n, rows).cast(self.bank)
+    nxt = attention_input((rows[0] + rows[1], rows[1])) if ahead is not None else None
+    h = (self.whole(attention_input(rows)) if mixed is None else Tensor(self.win[f"mixed{mixed}"].uop))[:, :live]
     if isinstance(b, MLATransformerBlock):
       latents = b._latents(h)
       mask = self.window_mask(b, h, pos, c0, latents[0])
@@ -597,7 +609,7 @@ class Engine:
       a = self.partials(lambda: b._attention(h, (pos,), mask, live))
     bank = Tensor(self.win["bank"].uop.after(self.add(s, c0, a).uop))
     x = self.whole(self.mix(getattr(b, "ffn_res_score", None), bank.flatten(1, 2), b.ffn_norm, s + 1, rows).cast(self.bank))[:, :live]
-    if not hasattr(b, "ffn_gate_inp"): return self.add(s, c0, self.partials(lambda: b._feed_forward(x))).realize()
+    if not hasattr(b, "ffn_gate_inp"): return self.ahead(ahead, nxt, [self.add(s, c0, self.partials(lambda: b._feed_forward(x)))])
     logits = (w(x[0]) if isinstance(w:=self.scorer(b), Linear) else x[0] @ w.T).float()
     scores = logits.reshape(live, len(self.devs), 2, -1)
     logits = scores[:, :, 0].reshape(live, -1).contiguous()
@@ -609,7 +621,11 @@ class Engine:
       predicted = allgather_last(scores[:, :, 1].reshape(live, -1).contiguous().half()).float()
       result.append(Tensor(self.win["guess_logits"].uop).assign(predicted.pad_to(self.win["guess_logits"].shape)))
     shexp = self.as_partials(self.partials(lambda: b._shared(x)))[:, 0]
-    return Tensor.realize(*result, shared.assign(shexp.pad_to(shared.shape).cast(shared.dtype)))[0]
+    return self.ahead(ahead, nxt, [*result, shared.assign(shexp.pad_to(shared.shape).cast(shared.dtype))])
+
+  def ahead(self, p:int|None, nxt:Tensor|None, outs:list[Tensor]) -> Tensor:  # (outs and the next chunk's mixed input into buffer p after them)
+    if nxt is not None: outs.append(self.whole(nxt, Tensor(self.win[f"mixed{p}"].uop.after(*(t.uop for t in outs)))))
+    return Tensor.realize(*outs)[0]
 
   @staticmethod
   def new_stream(b:FFNBlock) -> bool: return hasattr(b, "attn_res_score") and b.attn_res_score.new_block
@@ -849,7 +865,7 @@ class Engine:
                     hasattr(b, "ffn_gate_inp") and i < self.m["layers"][moe - 1] else None)
         for c0, nlive in chunks(T):
           name, fxn = ("forecast", functools.partial(self.attend, forecast=True)) if forecast is not None else ("attend", self.attend)
-          jit, args, _, live = self.chunk_graph(name, b, fxn, nlive, c0)
+          jit, args, _, live = self.chunk_graph(name, b, fxn, nlive, c0, c0 + self.chunk < T)
           self.graph(jit, self.v_pos.bind(pos + p0 + c0), live, self.v_c0.bind(c0), self.v_n.bind(n), self.v_s.bind(s), *args)
           self.pump()
         if hasattr(b, "ffn_gate_inp"):
