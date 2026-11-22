@@ -52,6 +52,7 @@ def load(name, files, **kwargs):
     kwargs['epilog'] = (epi(srcpath) if srcs else epi()) if callable(epi:=kwargs.get('epilog', [])) else epi
     try: f.write_text(kwargs.pop("gen", importlib.import_module("tinygrad.runtime.support.autogen").gen)(name, files, **kwargs))
     except Exception as e: raise RuntimeError(f"error while generating {name}") from e
+    importlib.invalidate_caches() # the finder caches directory listings, a file written in the same mtime tick isn't seen otherwise
     if srcs: td.cleanup()
   return importlib.import_module(f"{path}.{name.replace('/', '.')}")
 
