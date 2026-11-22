@@ -254,7 +254,6 @@ jobs:
         deps: testing_unit
         llvm: 'true'
     - name: Test SPEC=2
-      # Without a durations file, least_duration interleaves equally weighted tests rather than taking two contiguous chunks.
       run: DEV=CPU SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/device/cpu --splits 2 --group ${{ matrix.group }} --splitting-algorithm least_duration
 
   fuzzing:
