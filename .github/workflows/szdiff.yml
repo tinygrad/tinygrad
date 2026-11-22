@@ -26,14 +26,15 @@ jobs:
       - name: Check whether branch is up-to-date
         id: brstat
         run: |
-          git remote add tinygrad https://github.com/tinygrad/tinygrad
-          git fetch tinygrad master
+          # the repo the PR targets, on github or gitea
+          git remote add base ${{ github.server_url }}/${{ github.repository }}
+          git fetch base ${{ github.event.pull_request.base.ref }}
           echo "${{ github.event.pull_request.head.sha }}"
-          git rev-list --left-right --count  tinygrad/master...${{ github.event.pull_request.head.sha }} | awk '{print "Behind "$1" - Ahead "$2""}'
-          count=$(git rev-list --left-right --count  tinygrad/master...${{ github.event.pull_request.head.sha }} | awk '{print $1}')
+          git rev-list --left-right --count  base/${{ github.event.pull_request.base.ref }}...${{ github.event.pull_request.head.sha }} | awk '{print "Behind "$1" - Ahead "$2""}'
+          count=$(git rev-list --left-right --count  base/${{ github.event.pull_request.base.ref }}...${{ github.event.pull_request.head.sha }} | awk '{print $1}')
           if [ $count -gt 0 ]
           then
-            echo "Current branch is behind tinygrad master branch!"
+            echo "Current branch is behind the base branch!"
             echo "stat=true" >> "$GITHUB_OUTPUT"
           else
             echo "stat=false" >> "$GITHUB_OUTPUT"
@@ -74,14 +75,26 @@ jobs:
           cp "$BASE/sz.py" .
           python sz.py "$BASE" "$PR" > loc_content.txt
       - name: Comment Code Line Diff
-        continue-on-error: false
-        uses: marocchino/sticky-pull-request-comment@v3
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ignore_empty: true
-          skip_unchanged: true
-          recreate: true
-          path: loc_content.txt
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BODY_FILE: loc_content.txt
+        # the issue comment REST api is the same on github and gitea
+        run: &sticky_comment |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          api, repo, num = os.environ["GITHUB_API_URL"], os.environ["GITHUB_REPOSITORY"], os.environ["PR_NUMBER"]
+          body = open(os.environ["BODY_FILE"]).read() if os.environ.get("BODY_FILE") else os.environ["BODY"]
+          marker = "<!-- line count bot -->"
+          def req(method, url, data=None):
+            r = urllib.request.Request(url, method=method, data=json.dumps(data).encode() if data is not None else None,
+                                       headers={"Authorization": f"token {os.environ['TOKEN']}", "Accept": "application/json", "Content-Type": "application/json"})
+            with urllib.request.urlopen(r) as f: return json.loads(f.read() or b"null")
+          old = [c for c in req("GET", f"{api}/repos/{repo}/issues/{num}/comments?per_page=100") if c["body"].startswith(marker)]
+          if not body.strip() or (old and old[-1]["body"] == f"{marker}\n{body}"): raise SystemExit(0)  # empty or unchanged
+          for c in old: req("DELETE", f"{api}/repos/{repo}/issues/comments/{c['id']}")
+          req("POST", f"{api}/repos/{repo}/issues/{num}/comments", {"body": f"{marker}\n{body}"})
+          PY
 
   rebase:
     name: Core Library Line Difference
@@ -92,11 +105,8 @@ jobs:
     if: needs.checkbranch.outputs.branchstat == 'true'
     steps:
       - name: Comment Rebase
-        continue-on-error: false
-        uses: marocchino/sticky-pull-request-comment@v3
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          skip_unchanged: true
-          recreate: true
-          message: |
-            This branch currently is behind tinygrad/master. The line count difference bot is disabled.
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BODY: This branch currently is behind ${{ github.repository }}/${{ github.event.pull_request.base.ref }}. The line count difference bot is disabled.
+        run: *sticky_comment
