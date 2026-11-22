@@ -5,7 +5,7 @@
 from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, ctypes
 from dataclasses import replace
-from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
+from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, Invalid, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import all_same, getenv, Target, IMAGE, is_image_shape, to_mv, mv_address
 from tinygrad.device import HostAllocator, Compiled, Program
 from tinygrad.renderer import tc, Renderer, Compiler, TinyELF
@@ -154,7 +154,12 @@ class PythonProgram(Program['PythonDevice']):
         elif u.op in GroupOp.ALU:
           assert all_same([len(x) for x in src_values]), f"{[len(x) for x in src_values]} doesn't match on {u.op}"
           assert all_same([u.dtype] + src_dtypes) or u.op in {*GroupOp.Comparison, Ops.WHERE, Ops.SHL, Ops.SHR}, f"dtype mismatch on {u.op}"
-          values[u] = [exec_alu(u.op, u.dtype, p) for p in zip(*src_values)]
+          # exec_alu handles vectors and Invalid, scalar threads skip its per call checks
+          if any(isinstance(x, tuple) or x is Invalid for v in src_values for x in v):
+            values[u] = [exec_alu(u.op, u.dtype, p) for p in zip(*src_values)]
+          else:
+            fxn, trunc = python_alu[u.op], truncate.get(u.dtype)
+            values[u] = [fxn(*p) for p in zip(*src_values)] if trunc is None else [trunc(fxn(*p)) for p in zip(*src_values)]
         assert u in values, u
         i += 1
     return time.perf_counter() - st
