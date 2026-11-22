@@ -1,4 +1,4 @@
-import unittest
+import functools, unittest
 from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
@@ -881,14 +881,16 @@ class TestPartialSum(unittest.TestCase):
       for _ in range(4 * 16): ref = (((q:=p + ref * np.float32(0.25))[0] + q[1]) + q[2]) + q[3]
       for i in range(4): np.testing.assert_array_equal(Tensor(y.uop.mselect(i)).numpy().view(np.uint32), ref.view(np.uint32))
 
-  def test_reduce_scatter(self): # the partials' sum split on its rows over the gpus (around the ring, in half), in a jit over replays
+  def test_reduce_scatter(self): # the partials' sum split on its rows over the gpus (the ring's order, in half), in a jit over replays
     for ndev in (2, 3, 4):
       devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(ndev))
       p = np.random.default_rng(ndev).standard_normal((ndev, 16 * ndev, 64)).astype(np.float32)
       rs = TinyJit(lambda x: reduce_scatter(x * 2).realize())
       for _ in range(3): y = rs(Tensor(p).shard(devs, 0).realize())
       self.assertEqual((y.shape, y.uop.axis), ((16 * ndev, 64), 0))
-      np.testing.assert_allclose(y.numpy(), (p * 2).sum(0), atol=2e-2, rtol=1e-2)
+      q = (p * 2).astype(np.float16 if amd_custom_kernels_supported(devs) else np.float32).reshape(ndev, ndev, 16, 64)
+      ring = [functools.reduce(np.add, [q[(t + k) % ndev, t] for k in (*range(1, ndev), 0)]) for t in range(ndev)]
+      np.testing.assert_array_equal(y.numpy(), np.concatenate(ring).astype(np.float32))
 
 class TestAllgather(unittest.TestCase):
   def test_allgather_last(self): # a last axis shard on every gpu whole (4 RDNA4 gpus: their mailboxes, else a copy in half), over replays

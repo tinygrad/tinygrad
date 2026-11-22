@@ -1083,20 +1083,26 @@ def _per_device(x:Tensor) -> UOp:  # (the buffer of a kernel's output split over
   assert u.op is Ops.AFTER and u.src[0].op is Ops.UNSHARD, f"not a split kernel output: {u.op}"
   return u.src[0].src[0].after(*u.src[1:])
 
-def reduce_scatter(p:Tensor) -> Tensor:
-  """the sum over the devices of their partials p (devices, R, ...) split on axis 0, split on its rows over the devices (R, ...): around the
-  ring, in step k device j adds its part of the rows of device j-k to what it got and sends it on (in half, as partial_sum sums)"""
+
+def scatter(p:Tensor, rows:int|None=None) -> list[Tensor]:
+  """the partials p (devices, R, ...) split on axis 0 in steps, each (R, ...) split on its rows over the devices (in half, as partial_sum sums):
+  in step k device t has device t+k's part of its rows, copied straight to it (step 0: its own). rows: of each part its first rows"""
   devs, S = cast(tuple[str, ...], p.device), p.shape[1:]
   n, size = len(devs), S[0] // len(devs)
-  sent = dtypes.half if p.dtype == dtypes.float32 and amd_custom_kernels_supported(p.device) else p.dtype
-  local = _per_device(Tensor.empty(*p.shape, dtype=sent, device=devs, axis=0).assign(p.cast(sent)))
-  def part(j:int, i:int) -> UOp: return local.mselect(j).reshape(S).shrink(((i * size, (i + 1) * size), *((0, s) for s in S[1:])))
-  got:dict[tuple[int, int], UOp] = {}
-  for k in range(1, n):
-    for j in range(n):
-      t = (j - k) % n
-      got[(t, (j + 1) % n)] = (part(j, t) if k == 1 else (got[(t, j)] + part(j, t)).contiguous()).copy_to_device(devs[(j + 1) % n])
-  return Tensor(UOp.mstack(*[(got[(t, t)] + part(t, t)).contiguous() for t in range(n)]).unshard(0)).cast(p.dtype)
+  rest, kept = tuple((0, s) for s in S[1:]), size if rows is None else rows
+  p = p.cast(dtypes.half if p.dtype == dtypes.float32 and amd_custom_kernels_supported(p.device) else p.dtype)
+  local = _per_device(p if p.uop.op is Ops.UNSHARD else Tensor.empty(*p.shape, dtype=p.dtype, device=devs, axis=0).assign(p))
+  def part(j:int, i:int) -> UOp: return local.mselect(j).reshape(S).shrink(((i * size, i * size + kept), *rest))
+  own = Tensor(local.reshape(S)._shard(0, UOp.range(n, 0, AxisType.DEVICE)).shrink(((0, kept), *rest)).unshard(0))
+  return [own, *(Tensor(UOp.mstack(*[part((t + k) % n, t).copy_to_device(devs[t]) for t in range(n)]).unshard(0)) for k in range(1, n))]
+
+def ring_sum(steps:list[Tensor]) -> Tensor:  # (scatter's steps summed in the ring's order: as they come, the device's own last)
+  return functools.reduce(Tensor.add, [*steps[1:], steps[0]])
+
+def reduce_scatter(p:Tensor) -> Tensor:
+  """the sum over the devices of their partials p (devices, R, ...) split on axis 0, split on its rows over the devices (R, ...): each device's
+  part of the rows of every device copied straight to it, summed in the ring's order (in half, as partial_sum sums)"""
+  return ring_sum(scatter(p)).contiguous().cast(p.dtype)
 
 def all_to_all(x:Tensor) -> Tensor:
   """x (R, ..., F) split on its last axis over the devices, split on its rows instead (R, ..., F): each device's rows of every device's
