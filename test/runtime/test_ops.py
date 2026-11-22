@@ -1007,6 +1007,9 @@ class TestOps(TensorTestCase):
     helper_test_op([(45,65)], torch.log2, Tensor.log2)
     helper_test_op(None, torch.log2, Tensor.log2, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.log2, Tensor.log2)
+  def test_log2_reciprocal(self):
+    # log2(1/x) is not -log2(x) at x=-0.0 and x=-inf
+    helper_test_op(None, lambda x: (1/x).log2(), vals=[[-math.inf, -0.0, 0.0, -2.0, 1.0, 8.0]])
 
   def test_exp(self):
     helper_test_op([(45,65)], torch.exp, Tensor.exp)
