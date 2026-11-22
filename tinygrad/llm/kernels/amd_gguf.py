@@ -645,8 +645,8 @@ def _expert_f16_kernel(out:UOp, raw:UOp, x:UOp, tiles:UOp, *extra:UOp, out_featu
                        offset:int, act:Callable|None, tile:int, gather:bool, skip:bool) -> UOp:
   # a workgroup: a tile's rows (16, 32 or 64) and 256 outputs (act: 128, a wave's gate tile and its up tile), 8 waves of 2 output tiles. a group
   # of 32 inputs at a time the tile's rows go through LDS (two buffers by its parity) and a wave decodes its outputs' weights to halves, the
-  # scales in them (a tile of 16 rows: from LDS a block at a time, its lanes' reads of a row's words in turn, where they fit, its rows read from x
-  # as they are). skip: a tile's 16 rows whose first is padding (live -1) left out
+  # scales in them (a tile of 16 rows: from LDS a block at a time, its lanes' reads of a row's words in turn, where they fit; its rows read from x
+  # as they are, also where the weights decode from tables in LDS). skip: a tile's 16 rows whose first is padding (live -1) left out
   rows_src, tables = extra[:gather + skip], extra[gather + skip:]
   xrow, live = rows_src[0] if gather else None, rows_src[-1] if skip else None
   waves, type_words = 8, QUANT_SIZES[ggml_type]//raw.dtype.itemsize
@@ -680,12 +680,12 @@ def _expert_f16_kernel(out:UOp, raw:UOp, x:UOp, tiles:UOp, *extra:UOp, out_featu
   staged = [lds[(((step % 2)*steps + k)*tile + r//16)*20 + r%16].store(_amd_load(x[xr(token_block*tile + r//16), ((step*steps + k)*16 + r%16)*2], 2)
                                                                      .bitcast(dtypes.uint32))
             for k in range(steps) for r in (tid + i*waves*32 for i in range(tile*16 // (waves*32)))]
-  lds = src if small else lds.after(UOp.group(*staged).barrier())
+  lds = src if (direct:=small or bool(tables)) else lds.after(UOp.group(*staged).barrier())
   def halves(w:UOp) -> list[UOp]: return [(w >> (16*i)).cast(dtypes.uint16).bitcast(dtypes.half) for i in range(2)]
   def pair(v:UOp) -> UOp: return v.cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32) * 0x10001
   # a lane's inputs of a 16 step h: the first 8 (ph 0) or the last 8, its weights' words 2ph and 2ph+1 of the step's 4
   def afrags(buf:UOp, k:int, t:int) -> list[UOp]:
-    if small:
+    if direct:
       r, i0 = xr(token_block*tile + t*16 + col), (step*steps + k)*32
       return [UOp.stack(*(x.after(buf)[r, i0 + h*16 + 8*ph + j] for j in range(8))) for h in range(2)]
     return [UOp.stack(*(v for w in range(4) for v in halves(buf[(((step % 2)*steps + k)*tile + t*16 + col)*20 + h*8 + 4*ph + w].load())))
