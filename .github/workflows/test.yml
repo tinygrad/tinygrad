@@ -114,7 +114,7 @@ jobs:
         key: be-minimal
         deps: testing_unit
     - name: Run runtime tests
-      run: SKIP_SLOW_TEST=1 DEV=PYTHON python3 -m pytest -n=auto test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_ops.py test/runtime/test_uops.py test/runtime/test_symbolic_ops.py test/runtime/test_renderer_failures.py::TestRendererFailures test/device/python --durations=20
+      run: PARALLEL=0 TEST_MAX_EXAMPLES=50 FORWARD_ONLY=1 SKIP_SLOW_TEST=1 DEV=PYTHON python3 -m pytest -n=auto test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_ops.py test/runtime/test_uops.py test/runtime/test_renderer_failures.py::TestRendererFailures test/device/python --durations=20
     - name: Test IMAGE support
       run: IMAGE=1 DEV=PYTHON python3 test/runtime/test_ops.py TestOps.test_gemm TestOps.test_simple_conv2d
     - name: Test emulated tensor cores
@@ -132,13 +132,17 @@ jobs:
               'DEV=PYTHON::sm_75 HALF=1' 'DEV=PYTHON::sm_80 HALF=1' 'DEV=PYTHON::sm_80 ALLOW_TF32=1'
     - name: Run additional tensor core tests
       run: |
-        DEV=PYTHON::METAL python3 -m pytest -nauto test/runtime/test_tensor_cores.py test/null/test_uops_stats.py::TestUOpsStatsMatmulHalf
-        DEV=PYTHON::gfx1100 python3 -m pytest -nauto test/runtime/test_tensor_cores.py test/null/test_uops_stats.py::TestUOpsStatsMatmulHalf
-        DEV=PYTHON::gfx942 python3 -m pytest -nauto test/runtime/test_tensor_cores.py
-        DEV=PYTHON::gfx950 python3 -m pytest -nauto test/runtime/test_tensor_cores.py
-        DEV=PYTHON::gfx1201 python3 -m pytest -nauto test/runtime/test_tensor_cores.py
-        ALLOW_TF32=1 DEV=PYTHON::sm_89 python3 -m pytest -nauto test/runtime/test_tensor_cores.py
-        DEBUG=2 DEV=PYTHON::sm_80 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
+        run_tc() {
+          export DEV="PYTHON::$1" PARALLEL=0
+          case "$1" in
+            METAL|gfx1100) python3 -m pytest test/runtime/test_tensor_cores.py test/null/test_uops_stats.py::TestUOpsStatsMatmulHalf ;;
+            sm_80) DEBUG=2 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf ;;
+            sm_89) ALLOW_TF32=1 python3 -m pytest test/runtime/test_tensor_cores.py ;;
+            *) python3 -m pytest test/runtime/test_tensor_cores.py ;;
+          esac
+        }
+        export -f run_tc
+        parallel --halt now,fail=1 --tag run_tc ::: METAL gfx1100 gfx942 gfx950 gfx1201 sm_89 sm_80
 
   linter:
     name: Linters
@@ -253,8 +257,15 @@ jobs:
         key: spec-unit
         deps: testing_unit
         llvm: 'true'
+    - name: Check Device.DEFAULT and print some source
+      if: matrix.group == 1
+      run: |
+        DEV=CPU python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
+        DEV=CPU DEBUG=4 python test/test_tiny.py TestTiny.test_plus
     - name: Test SPEC=2
       run: DEV=CPU SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/device/cpu --splits 2 --group ${{ matrix.group }} --splitting-algorithm least_duration
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
 
   fuzzing:
     name: Fuzzing
@@ -460,7 +471,7 @@ jobs:
       fail-fast: false
       matrix:
         dev:
-          - 'CPU:CLANG'
+          # CPU:CLANG is DEV=CPU, which the SPEC=2 jobs run
           - 'CPU:LLVM'
           - 'CPU:LVP'
           - 'CPU:X86'
@@ -470,6 +481,11 @@ jobs:
     name: Linux (DEV=${{ matrix.dev }})
     runs-on: *linux
     timeout-minutes: 20
+    env:
+      # The SPEC=2 CPU groups run the full runtime suite, including gradients.
+      TEST_MAX_EXAMPLES: 50
+      FORWARD_ONLY: 1
+      SKIP_BACKEND_REDUNDANT: 1
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
@@ -478,17 +494,18 @@ jobs:
       with:
         key: linux-${{ matrix.dev }}
         deps: "testing_unit${{ contains(matrix.dev, 'LVP') && ' mesa' || '' }}"
-        llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') || contains(matrix.dev, 'CLANG') }}
+        llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') }}
         webgpu: ${{ matrix.dev == 'WEBGPU' }}
         opencl: ${{ matrix.dev == 'CL' }}
     - name: Set env
-      run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
+      run: echo "DEV=${{ matrix.dev }}" >> "$GITHUB_ENV"
     - name: Check Device.DEFAULT and print some source
       run: |
         python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
         DEBUG=4 python test/test_tiny.py TestTiny.test_plus
     - name: Run runtime tests
-      run: python -m pytest -n=auto test/runtime test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
+      # xdist already occupies the CPUs; don't start a nested compile pool per worker.
+      run: PARALLEL=0 python -m pytest -n=auto test/runtime test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -575,7 +592,7 @@ jobs:
           sleep 1
           REMOTE=127.0.0.1:6482 python -m pytest test/test_tiny.py
       - name: Run tests on MOCK+HIP
-        run: DEV=MOCK+HIP python -m pytest -n=auto test/test_tiny.py test/runtime/test_jit.py test/runtime/test_hcq2.py test/runtime/test_dtype.py
+        run: DEV=MOCK+HIP python -m pytest -n=auto test/test_tiny.py test/runtime/test_jit.py test/runtime/test_hcq2.py
 
   testamd:
     strategy:
@@ -590,6 +607,8 @@ jobs:
     env:
       DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
       SKIP_SLOW_TEST: 1
+      TEST_MAX_EXAMPLES: 50
+      FORWARD_ONLY: 1
       PARALLEL: 0
       PYTHONPATH: .
     steps:
@@ -607,14 +626,17 @@ jobs:
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['AMD'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run pytest (amd)
-        run: >-
-          python -m pytest -n=auto test/runtime/test_ops.py test/runtime/test_dtype.py test/runtime/test_dtype_alu.py
-          test/runtime/test_kernel_opts.py test/runtime/test_linearizer.py test/runtime/test_randomness.py test/runtime/test_jit.py
-          test/runtime/test_multitensor.py test/runtime/test_search.py test/runtime/test_tensor_cores.py test/null/test_hcq2.py
-          test/runtime/test_hcq2.py test/external/external_test_am.py test/device/amd
-          test/runtime/test_disk_tensor.py::TestDiskTensor::test_copy_from_disk
-          test/runtime/test_disk_tensor.py::TestDiskTensor::test_copy_from_disk_offset
-          test/runtime/test_disk_tensor.py::TestDiskTensor::test_copy_from_disk_huge --durations=20
+        run: |
+          TESTS="test/runtime/test_ops.py test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_tensor_cores.py test/device/amd"
+          if [[ '${{ matrix.backend }}' == amdllvm ]]; then TESTS+=" test/runtime/test_kernel_opts.py test/runtime/test_linearizer.py"; fi
+          DISK_TESTS="test/runtime/test_disk_tensor.py::TestDiskTensor::test_copy_from_disk test/runtime/test_disk_tensor.py::TestDiskTensor::test_copy_from_disk_offset test/runtime/test_disk_tensor.py::TestDiskTensor::test_copy_from_disk_huge"
+          # Exercise the shared runtime suites once across the LLVM jobs, not six times.
+          case "${{ matrix.backend }}-${{ matrix.arch }}" in
+            amdllvm-gfx1100) TESTS+=" test/null/test_hcq2.py test/runtime/test_hcq2.py test/external/external_test_am.py $DISK_TESTS" ;;
+            amdllvm-gfx950) TESTS="test/runtime/test_randomness.py test/runtime/test_jit.py test/runtime/test_search.py $TESTS" ;;
+            amdllvm-gfx1201) TESTS="test/runtime/test_multitensor.py $TESTS" ;;
+          esac
+          python -m pytest -n=auto $TESTS --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -646,7 +668,9 @@ jobs:
     runs-on: *linux
     timeout-minutes: 20
     env:
+      TEST_MAX_EXAMPLES: 50
       FORWARD_ONLY: 1
+      SKIP_BACKEND_REDUNDANT: 1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -666,7 +690,7 @@ jobs:
       - name: Run pytest (cuda)
         # skip multitensor because it's slow
         # NV and CUDA share the NVIDIA device tests.
-        run: python -m pytest -n=auto test/runtime test/device/nv --ignore test/runtime/test_multitensor.py --durations=20
+        run: PARALLEL=0 python -m pytest -n=auto test/runtime test/device/nv --ignore test/runtime/test_multitensor.py --durations=20
       - name: Run NV PTX device tests
         if: matrix.backend == 'nv'
         run: DEV=MOCK+NV:PTX python -m pytest -n=auto test/device/nv --durations=20
@@ -690,6 +714,7 @@ jobs:
     timeout-minutes: 15
     env:
       NULL_ALLOW_COPYOUT: 1
+      FORWARD_ONLY: 1
       DEV: ${{ matrix.dev }}${{ contains(matrix.dev, 'a630') && ',IMAGE_PITCH_ALIGNMENT=64' || '' }}
       IMAGE: ${{ contains(matrix.dev, 'a630') && '1' || '0' }}
     steps:

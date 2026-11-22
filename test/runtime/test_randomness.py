@@ -7,7 +7,7 @@ from tinygrad.helpers import getenv, DEV, Context, OSX
 from test.helpers import not_support_multi_device, needs_second_gpu
 from hypothesis import given, settings, strategies as strat
 
-settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
+settings.register_profile("my_profile", max_examples=getenv("TEST_MAX_EXAMPLES", 200), deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
 # https://gist.github.com/devries/11405101
