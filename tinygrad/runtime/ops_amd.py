@@ -432,6 +432,7 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     super().__init__(submit)
     self.cmd_addr = UOp.variable("cmdbuf", 0, 2**48, dtypes.uint64) # the packets point into the cmdbuf, its address binds at submit
     self.pkts:list[UOp] = []
+    self.private_segment_size = 0
     self.run_start = 0
 
   def close_run(self, end:int):
@@ -450,7 +451,7 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
 
   def exec(self, call:UOp, prg:UOp):
     data, lib = amd_build_program(self.dev, prg, self.devs)
-    self.dev.scratch_buffer(data.private_segment_size) # the queue descriptor holds the scratch
+    self.private_segment_size = max(self.private_segment_size, data.private_segment_size)
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.close_run(len(self.blob))
     pkt = dispatch_packet(data, prg.arg.launch_dims(call), lib.getaddr(self.devs) + data.desc_offset, self.kernargs(call, prg, data))
@@ -465,6 +466,12 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     self.q(*UOp.sink(*self.pkts).substitute({self.cmd_addr: base.getaddr(self.devs) + off}).src)
     aql = encode_cmdbuf(self, name="aql", device=self.dev.host)
     return amd_push(self.prof_bump(cmdbuf), aql, *_queue_args(self, self.dev.compute_queue), unit=64, doorbell_lag=1)
+
+  def encode_aql(self, deps:list[UOp]):
+    submit = self.encode()
+    # AQL reads scratch through the runner's queue descriptor, not a pointer in the packet.
+    if self.private_segment_size: deps.append(UOp.extern((self.private_segment_size,), dtypes.u8, self.devs[0], "scratch"))
+    return submit
 
 # *****************
 # SDMA
@@ -1019,6 +1026,6 @@ class AMDDevice(Compiled):
 
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("amd_compute_submit")).call(UPat(name="q")).after(allow_any_len=True, name="s"),
-   lambda s, q: (AMDComputeAQLQueue if cast(AMDDevice, Device[q.device]).is_aql else AMDComputeQueue)(s).encode()),
+   lambda ctx, s, q: AMDComputeAQLQueue(s).encode_aql(ctx) if cast(AMDDevice, Device[q.device]).is_aql else AMDComputeQueue(s).encode()),
   (UPat.sink(arg=KernelInfo("amd_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: AMDSDMAQueue(s).encode()),
 ])

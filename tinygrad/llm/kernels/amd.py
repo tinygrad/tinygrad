@@ -13,8 +13,6 @@ WAVES_M, WAVES_N, LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 2, 2, 16
 WMMA_ACC, THREADS_PER_BLOCK = WMMA_M // LANES_PER_WAVE_M, WARP_SIZE * WAVES_M * WAVES_N
 LDS_PAD, WMMA_ARG, LOG2E = 4, ((WMMA_N, WMMA_M, WMMA_K), 32), math.log2(math.e)
 
-def _unbind(v:int|UOp) -> int|UOp: return v.unbind_all()[0] if isinstance(v, UOp) else v
-
 @functools.cache
 def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
   if getenv("DISABLE_AMD_KERNELS"): return False
@@ -183,7 +181,6 @@ def _vec_load(ptr:UOp, lanes:int) -> tuple[UOp, ...]:
 
 @functools.cache
 def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, valid_kv_len, max_kv_len, block_n, waves=4):
-  valid_kv_len = _unbind(valid_kv_len)
   _, B, H_KV, N, D = cast(tuple[int, int, int, int, int], cache_kv.shape)
   _, H, M, _ = cast(tuple[int, int, int, int], q.shape)
   assert M == 1 and H % H_KV == 0 and D % WARP_SIZE == 0 and max_kv_len <= N and max_kv_len % block_n == 0
@@ -262,7 +259,6 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, valid_kv_len, m
 @functools.cache
 def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, live:int|UOp) -> UOp:
   # one wave per (batch, head, 64-dim tile): every lane redundantly weights its chunks; no cross-lane traffic
-  live = _unbind(live)
   B, H, C, D = partial.shape
   DT = 64 if D % 64 == 0 else WARP_SIZE  # dims per block
   assert D % DT == 0
@@ -290,8 +286,6 @@ def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, live:int|UOp) -> UO
     .end(lane, block_dt, block_bh).sink(arg=KernelInfo(name="flash_decode_combine", opts_to_apply=()))
 
 def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, max_kv_len:int) -> Tensor:
-  # Carry length bindings even when the cache was populated independently of this call.
-  if isinstance(valid_kv_len, UOp): cache_kv = Tensor(cache_kv.uop.after(valid_kv_len))
   B, H, D = cache_kv.shape[1], q.shape[1], cache_kv.shape[4]
   chunks, axis = min(48, max_kv_len // 64), q.uop.axis
   partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device, axis=axis)
@@ -299,20 +293,18 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   waves, group = 16, H // cache_kv.shape[2]
   while waves * group * ((D+LDS_PAD)*2 + 8) > 65536: waves //= 2
   assert waves > 0, "attention head group exceeds shared memory capacity"
-  fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=64, waves=waves)
-  partial, stats = Tensor.custom_kernel(partial, stats, q, cache_kv, fxn=fxn)[:2]
+  fxn = functools.partial(_amd_flash_attention_decode_partial, max_kv_len=max_kv_len, block_n=64, waves=waves)
+  partial, stats = Tensor.custom_kernel(partial, stats, q, cache_kv, valid_kv_len, fxn=fxn)[:2]
   live = (valid_kv_len+63)//64
   live = min(live, chunks) if isinstance(live, int) else live.minimum(chunks)
   out = Tensor.empty(B, H, 1, D, dtype="float32", device=q.device, axis=axis)
-  fxn = functools.partial(_amd_flash_decode_combine, live=live)
-  return Tensor.custom_kernel(out, partial, stats, fxn=fxn)[0]
+  return Tensor.custom_kernel(out, partial, stats, live, fxn=_amd_flash_decode_combine)[0]
 
 def _wmma_fragment(fragment:UOp, lane:UOp, rdna4:bool) -> UOp:
   return fragment.reshape(2, 2, 4)[:, lane//16, :].reshape(8) if rdna4 else fragment
 
 @functools.cache
-def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:int|UOp|None=None, rdna4:bool=False) -> UOp:
-  valid_kv_len, q_start = _unbind(valid_kv_len), _unbind(q_start) if q_start is not None else None
+def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:UOp, q_base:UOp, rdna4:bool=False) -> UOp:
   BH, M, D = q.shape
   _, B, H_KV, physical_n, cache_dim = cache.shape
   k, v = cache[0].reshape(B*H_KV, physical_n, cache_dim), cache[1].reshape(B*H_KV, physical_n, cache_dim)
@@ -321,8 +313,6 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   if isinstance(M, int): assert M % BLOCK_M == 0
   assert isinstance(D, int) and D % WMMA_K == 0 and D % LANES_PER_WAVE_N == 0
   TM, TN, TD, SCALE = BLOCK_M//(WAVES_M*LANES_PER_WAVE_M), BLOCK_N//LANES_PER_WAVE_N, D//(WAVES_N*LANES_PER_WAVE_N), 1/math.sqrt(D)
-  # query row 0 sits at sequence position q_base (the queries may be padded beyond valid_kv_len - q_base rows)
-  q_base = valid_kv_len - M if q_start is None else q_start
   block_bh, block_m = UOp.range(BH, 0, AxisType.GLOBAL), UOp.range(M // BLOCK_M, 1, AxisType.GLOBAL)
   kv_head = block_bh // gqa_group
   q, o = (x.reshape(BH, M//BLOCK_M, BLOCK_M, D)[block_bh, block_m] for x in (q, o))
@@ -400,7 +390,7 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
 
 def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
   # cached flash attention on the half KV cache (already written through assigned_kv); valid_end stays bound at the graph level
-  T_real, q_start = q.shape[2], None
+  T_real = q.shape[2]
   D, N, group = q.shape[3], assigned_kv.shape[3], q.shape[1] // assigned_kv.shape[2]
   decode = resolve(T_real == 1, False)
   # Non-power-of-two decode dimensions can lose tail-store masks. Q/P, K, and V use separate LDS allocations.
@@ -416,13 +406,12 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
     # symbolic chunk: pad the queries to the static tile; garbage rows are sliced off
     T_pad = q.max_shape[2]
     assert T_pad % BLOCK_M == 0, "chunk_size must be a multiple of 32"
-    q, q_start = q.pad_to((*q.shape[:2], T_pad, q.shape[3])), valid_end - T_real
+    q = q.pad_to((*q.shape[:2], T_pad, q.shape[3]))
   B, H, T, D = q.shape
   out = Tensor.empty(B, H, T, D, dtype="float32", device=q.device, axis=q.uop.axis).reshape(B*H, T, D)
-  fxn = functools.partial(_amd_flash_attention, valid_kv_len=valid_end, q_start=q_start, rdna4=_is_rdna4(q.device))
-  if isinstance(valid_end, UOp): assigned_kv = Tensor(assigned_kv.uop.after(valid_end))
-  out = Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), assigned_kv, fxn=fxn)[0].reshape(B, H, T, D)
-  return out if q_start is None else out[:, :, :T_real]
+  fxn = functools.partial(_amd_flash_attention, rdna4=_is_rdna4(q.device))
+  out = out.custom_kernel(q.half().reshape(B*H, T, D), assigned_kv, valid_end, valid_end-T_real, fxn=fxn)[0].reshape(B, H, T, D)
+  return out[:, :, :T_real]
 
 # ******** gated delta net: fused recurrent scan ********
 
@@ -467,12 +456,7 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   assert key_dim % 32 == 0 and value_dim % 4 == 0
   assert q.dtype == k.dtype == dtypes.float32, "recurrent Q/K must be float32"
   assert state.uop.contiguous_view_offset() is not None, "recurrent state must be contiguous"
-  if start_pos is not None:
-    assert start_pos.uop.is_bound_var
-    state = Tensor(state.uop.after(start_pos.uop))
   core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
-  params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  call = _gated_delta_prefill_kernel(*params, None if start_pos is None else start_pos.uop.unbound()).call(*contig)
-  return Tensor(contig[0].after(call))
+  return Tensor(UOp.custom_kernel(*contig, *((start_pos.uop,) if start_pos is not None else ()), fxn=_gated_delta_prefill_kernel)[0])

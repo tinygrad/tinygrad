@@ -1,6 +1,6 @@
 import unittest, functools
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, Variable, TinyJit
-from tinygrad.engine.realize import run_linear, compile_linear
+from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes
@@ -669,6 +669,24 @@ class TestCustomKernelArgs(unittest.TestCase):
     B, n = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Variable("n", 0, 100, dtypes.int)
     for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [1+k, 2+k, 3+k, 4+k])
 
+  def test_scalar_tensor_is_buffer(self):
+    def kernel(out, a, b, c): return out[0].store(a[0]+b[0]+c).sink(arg=KernelInfo(name="scalar_buffers"))
+    self.assertEqual(Tensor.empty(1, dtype=dtypes.int).custom_kernel(Tensor(5, dtype=dtypes.int), Tensor(3)+Tensor(4), 2, fxn=kernel)[0].item(), 14)
+
+  def test_scalar_expression_arg(self):
+    def kernel(out, v, small): return out[0].store(v+small.cast(out.dtype)).sink(arg=KernelInfo(name="store_scalar"))
+    def build(n, m):
+      x, y = n.cast(dtypes.uint8), m.cast(dtypes.uint8)
+      return Tensor.empty(1, dtype=dtypes.int).custom_kernel(x.cast(dtypes.int)+(x*y).cast(dtypes.int), x<10, fxn=kernel)[0]
+    n, m = Variable("Ops", 0, 1000, dtypes.int), Variable("exec_alu", 1, 4, dtypes.int)
+    with self.assertRaisesRegex(ValueError, "THREEFRY.*by-value"):
+      build(n.bind(1).cast(dtypes.uint64).threefry(m.bind(1).cast(dtypes.uint64)), m.bind(1))
+    program, jit = Tensor.compile(build(n.bind(1), m.bind(1)).export()[0]), TinyJit(lambda n,m: build(n,m).realize())
+    for v,k in ((1, 1), (258, 3), (255, 2), (516, 4)):
+      out = build(nv:=n.bind(v), mv:=m.bind(k))
+      Tensor.run(program, out.export()[1])
+      self.assertEqual((out.item(), build(nv, mv).item(), jit(nv, mv).item()), (v%256 + (v*k)%256 + (v%256 < 10),)*3)
+
   def test_scalar_arg_jit_fixed_bind(self):
     # m is bound inside the jitted function so it's not an input, a replay keeps m=10 while the input n changes
     kernel = functools.partial(custom_add_var_kernel, n_slot=0)
@@ -691,12 +709,12 @@ class TestCustomKernelSharded(unittest.TestCase):
   def test_device_number_arg(self):
     # the kernel's DEVICE range is its device number arg, bound per device and validated on each
     def kernel(C:UOp) -> UOp: return C[0].store(UOp.range(2, 0, AxisType.DEVICE).cast(dtypes.int)).sink(arg=KernelInfo(name="store_dnum"))
-    out = Tensor.custom_kernel(Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(("CPU:1", "CPU:2"), axis=0).contiguous(), fxn=kernel)[0]
-    linear, _ = out.linear_with_vars()
-    validated = compile_linear(linear, validate=True).toposort()
-    self.assertEqual(len([c for c in validated if c.op is Ops.CALL and c.body.op is Ops.NATIVE and c.body.arg.code == "validate"
-                          and c.body.src[-1].arg.name == "store_dnum"]), 2)
-    run_linear(linear)
+    x = Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(("CPU:1", "CPU:2"), axis=0).contiguous().realize()
+    out = Tensor.custom_kernel(x, fxn=kernel)[0]
+    fn, externs = out.export()
+    with Context(VALIDATE_WITH_CPU=1): linear = Tensor.compile(fn)
+    self.assertEqual(sum(c.body.op is Ops.NATIVE and c.body.arg.code == "validate" for c in linear.src), 2)
+    Tensor.run(linear, externs)
     self.assertEqual(out.tolist(), [0, 1])
 
   def test_simple_sharded(self):
