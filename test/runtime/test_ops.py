@@ -182,6 +182,8 @@ class TestOps(TensorTestCase):
     helper_test_op([(3,3,3)], lambda x: x.unfold(2, 2, 8))
     helper_test_op([(3,3,3)], lambda x: x.unfold(1, 0, 8))
     helper_test_op([(3,3,3,3,3)], lambda x: x.unfold(-1, 2, 2))
+    helper_test_op([(0,)], lambda x: x.unfold(0, 0, 1))
+    helper_test_op([(2,0,3)], lambda x: x.unfold(1, 0, 5))
 
     self.helper_test_exception([(8,)], lambda x: x.unfold(0, 9, 3), expected=RuntimeError)
     self.helper_test_exception([(8,)], lambda x: x.unfold(1, 8, 3), expected=IndexError)
