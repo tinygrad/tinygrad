@@ -463,15 +463,15 @@ class Engine:
     host's flags preset: slot 0), the routes and experts, the rest. their scratch: one arena (SPARE's)"""
     m, self.kinds = self.model, {}
     moe = [b for b in m.blk if hasattr(b, "ffn_gate_inp")]
-    stages = [("attend", self.attend), ("post", self.post)]
+    stages = [("attend", self.attend)]
     if self.forecast_jit is not None: stages.append(("forecast", functools.partial(self.attend, forecast=True)))
     for b, (name, fxn), cap, c0 in itertools.product(m.blk, stages, self.chunk_vars, (0, self.chunk)):
-      if name == "post" and b not in moe or name == "forecast" and (b not in moe or cap != min(self.chunk_vars) or c0): continue
+      if name == "forecast" and (b not in moe or cap != min(self.chunk_vars) or c0): continue
       jit, args, first, live = self.chunk_graph(name, b, fxn, cap, c0)
-      if first is not b: continue
-      vs = (self.v_pos.bind(0), live, self.v_c0.bind(0), self.v_n.bind(1), self.v_s.bind(0)) if name != "post" else \
-        (live, self.v_c0.bind(0), self.v_s.bind(0))
-      self.graph(jit, *vs, *args)
+      if first is b: self.graph(jit, self.v_pos.bind(0), live, self.v_c0.bind(0), self.v_n.bind(1), self.v_s.bind(0), *args)
+    for b, n, cap in itertools.product(moe, range(-(-self.W // self.chunk), 0, -1), self.chunk_vars):
+      jit, args, first, live = self.post_graph(b, (n - 1) * self.chunk + cap)
+      if first is b: self.graph(jit, live, self.v_s.bind(0), *args)
     self.graph(self.start_jit, self.v_p0.bind(0))
     self.graph(self.tap_jit, self.v_s.bind(0), self.v_tap.bind(0))
     if self.fill_jit: self.graph(self.fill_jit, self.v_pos.bind(0), self.v_p0.bind(0), self.v_c0.bind(0))
@@ -484,7 +484,7 @@ class Engine:
                  self.model.blk[target].exp_probs_b["bias"], Tensor(self.tags[li]), self.parts[1][li])
     for route, experts in self.routes.values():
       self.graph(route, self.v_wlive.bind(self.chunk), b.exp_probs_b["bias"], Tensor(self.tags[li]), self.parts[1][li])
-      self.graph(experts[self.layer_copies[li]], self.pool, self.parts[0][li])
+      self.graph(experts[self.layer_copies[li]], self.pool, self.parts[0][li], Tensor(self.tags[li]))
 
   def window_shapes(self) -> dict[str, tuple[tuple[int, ...], DType]]:
     """the window's compute state (a piece of W tokens'): the moe's inputs (the routed experts' inputs, each gpu's partials of the shared
@@ -511,7 +511,7 @@ class Engine:
   def piece(self, at:int) -> dict[str, Tensor]:  # (lent from the pool's slots from at on: (1, gpus, W/gpus, ...) split on the gpus)
     return {k: t if k == "indices" else Tensor(t.uop.unshard(1)) for k, t in self.lend(self.piece_shapes(), at)[0].items()}
 
-  def own(self, t:Tensor, c0:UOp) -> Tensor:  # (the rows of the chunk at c0 of a piece's (1, gpus, W/gpus, ...): each gpu's own)
+  def own(self, t:Tensor, c0:UOp|int) -> Tensor:  # (the rows of the chunk at c0 of a piece's (1, gpus, W/gpus, ...): each gpu's own)
     n = self.chunk // len(self.devs)
     return t[:, :, c0 // len(self.devs):c0 // len(self.devs) + n]
 
@@ -560,6 +560,12 @@ class Engine:
     cap = next(c for c in self.chunk_vars if n <= c)
     if name in ("attend", "forecast"): name += self.index_roles.get(b, "")
     return (*self.kind(f"{name}{cap}:{c0 // self.chunk % 2}", b, fxn), self.chunk_vars[cap].bind(n))
+
+  def post_graph(self, b:FFNBlock, T:int) -> tuple[Callable, list[Tensor], FFNBlock, UOp]:
+    """b's graph of the posts of a piece of T rows: a kind of each count of chunks and its last chunk's cap, the last chunk's live rows"""
+    n = -(-T // self.chunk)
+    cap = next(c for c in self.chunk_vars if T - (n - 1) * self.chunk <= c)
+    return (*self.kind(f"post{n}x{cap}", b, functools.partial(self.posts, n)), self.chunk_vars[cap].bind(T - (n - 1) * self.chunk))
 
   def window_mask(self, b:FFNBlock, h:Tensor, pos:UOp, c0:UOp, q_a:Tensor|None=None) -> Tensor|None:
     def select() -> Tensor|None:
@@ -618,7 +624,7 @@ class Engine:
     try: return f()
     finally: PARTIALS[0] = False
 
-  def add(self, s:UOp, c0:UOp, y:Tensor, more:Tensor|None=None) -> Tensor:
+  def add(self, s:UOp, c0:UOp|int, y:Tensor, more:Tensor|None=None) -> Tensor:
     """y (1, live, dim) (or its partials: split) and more (each gpu its rows) added to stream s of the bank's chunk at c0, its rows past live 0"""
     # (a slice of a symbolic offset, a symbolic length and a symbolic index isn't written: the chunk's whole rows. each gpu its own)
     bank = self.own(Tensor(self.win["bank"].uop), c0)[:, :, :, s]
@@ -663,10 +669,10 @@ class Engine:
     most = Tensor.cat(*(Tensor(c.uop.unshard(0)).reshape(len(self.devs), -1) for c in counted), dim=1).max(1, keepdim=True)
     return Tensor(tag.uop.after(kept.uop)).assign((most <= live).where(1, 2).cast(dtypes.uint32)).realize()
 
-  def window_experts(self, tile:int, types:tuple[tuple[int, int]|None, ...], pool:Tensor, part1:Tensor, *_) -> Tensor:
+  def window_experts(self, tile:int, types:tuple[tuple[int, int]|None, ...], pool:Tensor, part1:Tensor, tag:Tensor, *_) -> Tensor:
     """the window's routed experts once the host gave their slots (part 1: an expert's slot * copies + its copy): each gpu its units of the
     experts in tiles of an expert's rows, a copy's tiles at a time (of its gate/up and down quant types, none: a layer it doesn't hold) (their
-    rows of down)"""
+    rows of down), then the tag 3 (the host pumps the reads till it: a graph's launch waits without)"""
     K, E, C, u = self.model.config.num_experts_per_tok, self.m["n_experts"], len(self.ms), self.units
     entries, h1, h2 = (Tensor(self.win[k].uop) for k in ("entries", "act", "down"))
     tiles = Tensor(self.win["tiles"].uop)[:self.state_rows(tile)[1]]
@@ -678,7 +684,7 @@ class Engine:
       tslot = ((at >= 0) & (at % C == c)).where(at // C, -1)
       h1 = self.tiles(tile, pool, tslot, h, 2 * u, self.lat, ty[0], 0, h1, xrow=xrow, act=self.act, live=xrow)
       h2 = self.tiles(tile, pool, tslot, h1, self.lat, u, ty[1], self.nbytes(ty[0], 2 * u * self.lat), h2, live=xrow)
-    return h2.realize()
+    return Tensor(tag.uop.after(h2.uop)).assign(tag.const_like(3)).realize()
 
   def tiles(self, tile:int, pool:Tensor, tslot:Tensor, x:Tensor, out_f:int, in_f:int, qtype:int, off:int, out:Tensor, xrow:Tensor|None=None,
             act:Callable|None=None, live:Tensor|None=None) -> Tensor:
@@ -698,7 +704,11 @@ class Engine:
     y = (tslot >= 0).reshape(1, NT, 1, 1).where(y, Tensor(out.uop).reshape(y.shape))
     return Tensor(out.uop).assign(y.reshape(out.shape)).reshape(len(self.devs), NT * tile, -1)
 
-  def post(self, b:FFNBlock, live:UOp, c0:UOp, s:UOp, *_) -> Tensor:
+  def posts(self, n:int, b:FFNBlock, live:UOp, s:UOp, *_) -> Tensor:
+    """a piece's n chunks' posts in one graph, each its own chain (the last chunk's live rows, the others' whole)"""
+    return Tensor.realize(*(self.post(b, live if k == n - 1 else self.chunk, k * self.chunk, s) for k in range(n)))[0]
+
+  def post(self, b:FFNBlock, live:UOp|int, c0:int, s:UOp) -> Tensor:
     """a chunk's live rows' routed experts' outputs (their rows of down weighted) and shared experts' outputs summed over the gpus into the
     block's, added to stream s: without a latent, both in one reduce scatter, with one the routed ones reduce scattered to their rows' gpus,
     normed there and gathered for the up projection's columns, sent back to their rows' gpus"""
@@ -707,10 +717,10 @@ class Engine:
     out = (Tensor(self.win["down"].uop).reshape(G, -1, self.lat)[:, pos.maximum(0)].float() * w.unsqueeze(-1)).sum(2)
     out = out * self.model.config.routed_scaling_factor
     shared = Tensor(self.win["shared"].uop).reshape(G, -1, self.model.config.dim)[:, c0:c0 + live].float().unsqueeze(1)
-    if not self.model.config.expert_latent_dim: return self.add(s, c0, out.unsqueeze(1) + shared).realize()
+    if not self.model.config.expert_latent_dim: return self.add(s, c0, out.unsqueeze(1) + shared)
     rows = reduce_scatter(out.pad_to((G, self.chunk, self.lat)))
     up = b.ffn_routed_up(self.whole(b.ffn_routed_norm(rows).half().reshape(1, self.chunk, self.lat)))[0]
-    return self.add(s, c0, shared, all_to_all(up.half()).reshape(1, G, self.chunk // G, -1)).realize()
+    return self.add(s, c0, shared, all_to_all(up.half()).reshape(1, G, self.chunk // G, -1))
 
   def tap(self, s:UOp, j:UOp, *_) -> Tensor:  # (the draft's input: stream s after a block its tap j)
     return Tensor(self.win["taps"].uop)[:, :, :, j].assign(Tensor(self.win["bank"].uop)[:, :, :, s].float()).realize()
@@ -872,11 +882,10 @@ class Engine:
           self.io.t_reads += time.perf_counter() - t0
           table = np.maximum(self.state["slot_of"][self.window_codes(li, np.arange(E))], 0) * len(self.ms)
           for p in self.bufs[li][2][1]: p[1:1 + E] = table.astype(np.int32).view(np.uint32)
-          self.graph(experts[self.layer_copies[li]], self.pool, self.parts[0][li])
-          for c0, nlive in chunks(T):
-            jit, args, _, live = self.chunk_graph("post", b, self.post, nlive, c0)
-            self.graph(jit, live, self.v_c0.bind(c0), self.v_s.bind(s), *args)
-            self.pump()
+          self.graph(experts[self.layer_copies[li]], self.pool, self.parts[0][li], Tensor(self.tags[li]))
+          jit, args, _, live = self.post_graph(b, T)
+          self.graph(jit, live, self.v_s.bind(s), *args)
+          self.ran(li)
         for j, (blk, mixed) in enumerate(self.taps):
           if blk != i: continue
           if mixed: self.graph(self.mix_jit, self.v_s.bind(s), self.v_tap.bind(j), self.mixer(i).weight)
@@ -892,6 +901,12 @@ class Engine:
 
   def pump(self):  # (the reads ahead queued as the drives have room)
     if host_c().pump(ctypes.byref(self.io)): raise RuntimeError("window reads failed")
+
+  def ran(self, li:int):  # (layer li's experts done on the gpus (their tag 3), the reads pumped meanwhile)
+    t0 = time.perf_counter()
+    while not all(t[0] == 3 for t in self.bufs[li][0][1]):
+      if time.perf_counter() - t0 > 60: raise RuntimeError(f"window layer {li}: the gpus' experts didn't finish")
+      self.pump()
 
   def counted(self, li:int, live:int) -> np.ndarray:
     """layer li's expert counts of a window's tokens once the gpus give them, added to its decayed use counts"""
