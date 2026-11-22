@@ -485,7 +485,6 @@ jobs:
       # The SPEC=2 CPU groups run the full runtime suite, including gradients.
       TEST_MAX_EXAMPLES: 50
       FORWARD_ONLY: 1
-      SKIP_BACKEND_REDUNDANT: 1
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
@@ -670,7 +669,6 @@ jobs:
     env:
       TEST_MAX_EXAMPLES: 50
       FORWARD_ONLY: 1
-      SKIP_BACKEND_REDUNDANT: 1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
