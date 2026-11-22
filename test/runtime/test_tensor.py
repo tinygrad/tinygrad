@@ -7,7 +7,7 @@ from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.uop.ops import UOp
 
-settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
+settings.register_profile("my_profile", max_examples=getenv("TEST_MAX_EXAMPLES", 200), deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
 x_init = np.random.randn(1,3).astype(np.float32)

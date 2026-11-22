@@ -16,7 +16,7 @@ from hypothesis import assume, given, strategies as strat, settings
 
 pytestmark = pytest.mark.filterwarnings("ignore")
 
-settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
+settings.register_profile("my_profile", max_examples=getenv("TEST_MAX_EXAMPLES", 200), deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
 dtypes_float = (dtypes.float16, dtypes.float32, dtypes.float64)
