@@ -84,6 +84,9 @@ class Engine:
       if not (0 < short_window < window and 0 < short_chunk < chunk and short_window % short_chunk == short_chunk % len(self.devs) == 0):
         raise ValueError("a short window needs a smaller window and an evenly sharded smaller chunk")
     self.forecast_counts = host_tensor(self.devs, m["n_experts"], dtypes.uint32) if window else None
+    # (a window's experts graph waits on the gpus for the host's part 1 (a graph's host_wait: amd), launched with its post before the counts
+    # when none of the layer's reads are in flight: a wait polls host memory, the drives' reads slower)
+    self.waits = amd_custom_kernels_supported(self.devs)
     self.ms = [m, *copies]
     L, E, K, G, self.lat, self.units = len(blocks), m["n_experts"], model.config.num_experts_per_tok, len(self.devs), m["lat"], m["units"][0]
     assert all(len(set(c["part_bytes"])) == 1 and c["units"] == [self.units] * G and c["lat"] == self.lat for c in self.ms), \
@@ -420,6 +423,7 @@ class Engine:
     self.arenas.clear()
     self.arenas[key] = room
     self.restore()
+    host_c().flags(ctypes.byref(self.io), 1)
     try: self.window_capture()
     except MemoryError as e: raise MemoryError(f"the window's graphs' scratch past the pool's {room.max_numel() / 1e9:.2f} GB for it") from e
     if (need:=self.arenas[key].max_numel()) > room.max_numel():
@@ -456,6 +460,7 @@ class Engine:
     if states: Tensor.realize(*(saved for _, saved in states))
     try:
       for host, _ in tables: host.fill(0)
+      host_c().flags(ctypes.byref(self.io), 1)
       view.window_capture()
     finally:
       if states: Tensor.realize(*(t.assign(saved) for t, saved in states))
@@ -705,6 +710,7 @@ class Engine:
     K, E, C, u = self.model.config.num_experts_per_tok, self.m["n_experts"], len(self.ms), self.units
     entries, h1, h2 = (Tensor(self.win[k].uop) for k in ("entries", "act", "down"))
     tiles = Tensor(self.win["tiles"].uop)[:self.state_rows(tile)[1]]
+    if self.waits: part1 = Tensor(part1.uop.after(wait(part1.uop)))
     slots = Tensor(part1.uop)[1:1 + E].bitcast(dtypes.int32)
     at, xrow = (tiles >= 0).where(slots[tiles.maximum(0)], -1), (entries >= 0).where(entries // K, -1)
     h = Tensor(self.win["h"].uop)
@@ -838,7 +844,8 @@ class Engine:
 
   def window(self, toks:list[int], pos:int, given:list[int]):
     """the tokens at positions pos.. (a read window) through every block, a layer at a time over its pieces of up to W tokens (each its bank):
-    a layer's experts read once a read window. the caches and states as after steps of them, the draft's cache"""
+    a layer's experts read once a read window. the caches and states as after steps of them, the draft's cache. on an error the gpus' waits
+    for the host released (the graphs queued run out)"""
     T, C, W, t0 = len(toks), self.chunk, self.W, time.perf_counter()
     arena = slice(*self.arena)
     self.drop(arena, wait=True)
@@ -863,6 +870,9 @@ class Engine:
         self.win.update(bank)
         for c0 in range(0, n, C): self.graph(self.fill_jit, self.v_pos.bind(pos + p0 + c0), self.v_p0.bind(p0), self.v_c0.bind(c0))
       for d in self.devs: Device[d].synchronize()
+    except BaseException:
+      host_c().flags(ctypes.byref(self.io), 1)
+      raise
     finally:
       self.win.update(banks[0])
       self.lent_from, self.state["mask"][arena] = self.tail, 0
@@ -902,10 +912,12 @@ class Engine:
         if hasattr(b, "ffn_gate_inp"):
           self.layer = li = self.m["layers"].index(i)
           route, experts = self.routes[next(t for t in TILES if T * K <= t * E or t == TILES[-1])]
-          for t in self.bufs[li][0][1]: t[0] = 0  # (the tag: this piece's counts)
+          for t, p in zip(self.bufs[li][0][1], self.bufs[li][2][1]): t[0] = p[0] = 0  # (the tag: this piece's counts, part 1 not given)
           args = (Tensor(self.tags[li]), self.parts[1][li])
           if forecast is None: self.graph(route, self.v_wlive.bind(T), b.exp_probs_b["bias"], *args)
           else: self.graph(forecast, self.v_wlive.bind(T), b.exp_probs_b["bias"], self.model.blk[self.m["layers"][li + 1]].exp_probs_b["bias"], *args)
+          early = self.waits and not self.state["flying"][self.window_codes(li, np.arange(E))].any()
+          if early: self.experts_post(experts, b, li, T, s)
           if li in ahead and len(ahead[li]) == E and li + 1 < moe and li + 1 not in ahead:
             if self.read(self.window_codes(li + 1, ahead[li]), self.window_codes(li, ahead[li]), wait=False): ahead[li + 1] = ahead[li]
           counts = self.counted(li, T)
@@ -928,17 +940,22 @@ class Engine:
           self.read(codes, codes, wait=True)
           self.io.t_reads += time.perf_counter() - t0
           table = np.maximum(self.state["slot_of"][self.window_codes(li, np.arange(E))], 0) * len(self.ms)
-          for p in self.bufs[li][2][1]: p[1:1 + E] = table.astype(np.int32).view(np.uint32)
-          self.graph(experts[(self.layer_copies[li], -(-T // self.chunk) if self.model.config.expert_latent_dim else 0)], self.pool,
-                     self.parts[0][li], Tensor(self.tags[li]))
-          jit, args, _, live = self.post_graph(b, T)
-          self.graph(jit, live, self.v_s.bind(s), *args)
+          for p in self.bufs[li][2][1]:
+            p[1:1 + E] = table.astype(np.int32).view(np.uint32)
+            p[0] = 1
+          if not early: self.experts_post(experts, b, li, T, s)
           self.ran(li)
         for j, (blk, mixed) in enumerate(self.taps):
           if blk != i: continue
           if mixed: self.graph(self.mix_jit, self.v_s.bind(s), self.v_tap.bind(j), self.mixer(i).weight)
           else: self.graph(self.tap_jit, self.v_s.bind(s), self.v_tap.bind(j))
       n = s + 1
+
+  def experts_post(self, experts:dict, b:FFNBlock, li:int, T:int, s:int):  # (moe block b's (layer li's) experts and posts graphs, a piece of T rows)
+    self.graph(experts[(self.layer_copies[li], -(-T // self.chunk) if self.model.config.expert_latent_dim else 0)], self.pool, self.parts[0][li],
+               Tensor(self.tags[li]))
+    jit, args, _, live = self.post_graph(b, T)
+    self.graph(jit, live, self.v_s.bind(s), *args)
 
   def window_codes(self, li:int, experts:np.ndarray) -> np.ndarray:
     """the codes of layer li's experts a window reads: the first copy's"""
