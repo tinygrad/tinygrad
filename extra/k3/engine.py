@@ -18,7 +18,7 @@ from tinygrad.llm.gguf import ggml_data_to_tensor, _GGML_QUANT
 from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, partial_sum, allgather_last, reduce_scatter, all_to_all, PARTIALS, \
   ordered_expert_sum, ordered_expert_sum_supported
 from tinygrad.llm.kernels.amd_gguf import find_packed, copies_linear, expert_tiles, moe_route, moe_counts, q8_0_linear, QUANT_NAMES, \
-  HALFWORD_QUANTS, TILE_QUANTS
+  HALFWORD_QUANTS, TILE_QUANTS, tiles_dtype
 from extra.k3.host import IoT, host_c, wait, reads, free_bytes, host_tensor, VICTIMS
 from extra.k3.draft import Eagle3, DSpark, MTP, load
 from extra.k3 import persist
@@ -95,6 +95,7 @@ class Engine:
     self.copies = [[(qtype[t[0]], qtype[t[2]]) if t else None for t in (c["types"].get(str(b)) if "types" in c else [c["expert_type"]] * 3
                                                                       if b in c["layers"] else None for b in layers)] for c in self.ms]
     self.types, self.layer_copies = self.copies[0], [tuple(c[li] for c in self.copies) for li in range(len(layers))]
+    self.tiles_dtype = tiles_dtype(self.devs, [t for c in self.copies for ty in c if ty is not None for t in ty])
     self.expert_sizes = [[0 if ty is None else round_up(self.nbytes(ty[0], 2 * self.units * self.lat) +
                           self.nbytes(ty[1], self.units * self.lat), 4096) for ty in types] for types in self.copies]
     # (a pool's slot: of an expert's size in 1-4 parts, the one that pads the experts least (the largest of those), an expert its span of them)
@@ -490,7 +491,7 @@ class Engine:
     experts' outputs, the router's logits), its routes, a gpu's rows of the experts' activations and outputs"""
     c, W, E, K = self.model.config, self.W, self.m["n_experts"], self.model.config.num_experts_per_tok
     R, f32, i32 = max(map(self.rows, TILES)), dtypes.float32, dtypes.int32
-    return {"h": ((W, self.lat), dtypes.half), "shared": ((W, c.dim), self.bank), "logits": ((W, E), f32), "w": ((W, K), f32),
+    return {"h": ((W, self.lat), self.tiles_dtype), "shared": ((W, c.dim), self.bank), "logits": ((W, E), f32), "w": ((W, K), f32),
             "pos": ((W * K,), i32), "entries": ((R,), i32), "tiles": ((R // TILES[0],), i32),
             "act": ((R, self.units), dtypes.half), "down": ((R, self.lat), dtypes.half),
             **({"guess_logits": ((min(self.chunk, SHORT_CHUNK), E), f32)} if self.forecast_counts is not None else {})}
@@ -686,7 +687,8 @@ class Engine:
     tensor cores' expert tiles for TILE_QUANTS (live: the rows' padding -1, left out), else decoded"""
     out = out.reshape(-1, out.shape[-1])
     if amd_custom_kernels_supported(x.device) and qtype in TILE_QUANTS:
-      return expert_tiles(self.pools[qtype], tslot, x, out_f, in_f, qtype, self.part, off, xrow=xrow, act=act, out=out, tile=tile, live=live)
+      return expert_tiles(self.pools[qtype], tslot, x, out_f, in_f, qtype, self.part, off, xrow=xrow, act=act, out=out, tile=tile, live=live,
+                          dtype=x.dtype)
     NT, size, isz = tslot.shape[0], self.nbytes(qtype, out_f * in_f), self.word.itemsize
     w = pool.reshape(len(self.devs), -1, self.part // isz)[:, tslot.maximum(0)][..., off // isz:(off + size) // isz]
     w = w.bitcast(dtypes.uint8)
