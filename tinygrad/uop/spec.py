@@ -55,8 +55,7 @@ spec_shared = PatternMatcher([
   (UPat(Ops.CONST, src=(), name="x"), lambda x: x.is_invalid or type(x.val) is type(x.dtype.const(x.val))),
 
   # STACK is everywhere too
-  (UPat(Ops.STACK, dtype=dtypes.void, src=()), lambda: True),
-  (UPat(Ops.STACK, src=(UPat(),), allow_any_len=True, name="s"),
+  (UPat(Ops.STACK, name="s"),
    lambda s: all_same([x.shape for x in s.src]) and all(matches_dtype(x, s.dtype) or x.dtype == weak_dtype(s.dtype) for x in s.src)),
 
   # ALUs: operands match the result dtype, except comparisons/WHERE; renderer-lowered shifts may use a uint32 count

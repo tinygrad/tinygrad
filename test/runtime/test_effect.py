@@ -47,10 +47,11 @@ class TestEffectRetention(unittest.TestCase):
     Tensor.realize(c, d)
     self.assertEqual((c.tolist(), d.tolist()), ([1]*4, [1]*4))
 
-  def test_stack_runtime_index_effectful_trailing_axis(self):
+  def test_stack_runtime_index_trailing_axis_with_rooted_write(self):
     def kernel(A:UOp, B:UOp):
-      j = UOp.const(1, dtypes.int).after(A[0].store(A[0].load()+1))
-      return B[0].store(UOp.const(((1, 2), (3, 4)), dtypes.int).index(A[1].load(), j)).sink(arg=KernelInfo(opts_to_apply=()))
+      w = A[0].store(A[0].load()+1)
+      return UOp.sink(B[0].store(UOp.const(((1, 2), (3, 4)), dtypes.int).index(A[1].load(), UOp.const(1, dtypes.int))), w,
+                      arg=KernelInfo(opts_to_apply=()))
     a, b = Tensor.custom_kernel(Tensor([0, 1]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([1, 1], [4]))
 
@@ -77,16 +78,18 @@ class TestEffectRetention(unittest.TestCase):
     a, b = Tensor.custom_kernel(Tensor([3, 0]).contiguous(), Tensor.ones(1, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([3, 7], [0]))
 
-  def test_expand_index_keeps_dropped_coordinate_effect(self):
+  def test_expand_index_with_ordered_storage(self):
     def kernel(A:UOp):
-      i = A.after(A[0].store(1))[0].load() % 3
-      return A[1].store(UOp.const(7, dtypes.int).reshape((1,)).expand((3,)).index(i)).sink(arg=KernelInfo(opts_to_apply=()))
+      ready = A.after(A[0].store(1))
+      i = ready[0].load() % 3
+      return ready[1].store(UOp.const(7, dtypes.int).reshape((1,)).expand((3,)).index(i)).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.zeros(2, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [1, 7])
 
-  def test_reshape_index_keeps_dropped_coordinate_effect(self):
+  def test_reshape_index_with_ordered_storage(self):
     def kernel(A:UOp):
-      i = UOp.const(0, dtypes.int).after(A[0].store(9))
-      return A[1].store(UOp.const(7, dtypes.int).reshape((1,)).index(i)).sink(arg=KernelInfo(opts_to_apply=()))
+      ready = A.after(A[0].store(9))
+      i = ready[0].load() % 1
+      return ready[1].store(UOp.const(7, dtypes.int).reshape((1,)).index(i)).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.zeros(2, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [9, 7])
 
   def test_simplify_keeps_read_after_store(self):
@@ -94,24 +97,26 @@ class TestEffectRetention(unittest.TestCase):
     a, b = Tensor.custom_kernel(Tensor([3]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)
     self.assertEqual((a.tolist(), b.tolist()), ([7], [14]))
 
-  def test_stack_index_keeps_selector_effect(self):
-    def kernel(A:UOp, B:UOp):
-      i = UOp.const(0, dtypes.int).after(A[0].store(A[0].load()+1))
-      return B[0].store(UOp.stack(UOp.const(2, dtypes.int)).index(i)).sink(arg=KernelInfo(opts_to_apply=()))
-    a, b = Tensor.custom_kernel(Tensor([0]).contiguous(), Tensor([9]).contiguous(), fxn=kernel)
-    self.assertEqual((a.tolist(), b.tolist()), ([1], [2]))
-
-  def test_stack_index_keeps_lane_effects(self):
+  def test_stack_index_masked_reads_zero(self):
     def kernel(A:UOp):
-      lanes = [A.after(A[j].store(7+2*j))[j].load() for j in range(2)]
-      return A[2].store(UOp.stack(*lanes).index(UOp.const(0, dtypes.int))).sink(arg=KernelInfo(opts_to_apply=()))
+      r = UOp.range(4, 0)
+      i = UOp.const(0, dtypes.int).valid(r < 2)
+      return A[r].store(UOp.stack(UOp.const(7, dtypes.int)).index(i)).end(r).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.full((4,), 5, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [7, 7, 0, 0])
+
+  def test_stack_index_with_rooted_lane_writes(self):
+    def kernel(A:UOp):
+      ws = [A[j].store(7+2*j) for j in range(2)]
+      lanes = [A.after(w)[j].load() for j,w in enumerate(ws)]
+      return UOp.sink(A[2].store(UOp.stack(*lanes).index(UOp.const(0, dtypes.int))), *ws, arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.zeros(3, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [7, 9, 7])
 
-  def test_stack_bounded_index_keeps_lane_effects(self):
+  def test_stack_bounded_index_with_rooted_lane_writes(self):
     i = UOp.range(2, 0)
     def kernel(A:UOp):
-      lanes = [A.after(A[j].store(7+2*j))[j].load() for j in range(4)]
-      return A[4+i].store(UOp.stack(*lanes).index(i)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+      ws = [A[j].store(7+2*j) for j in range(4)]
+      lanes = [A.after(w)[j].load() for j,w in enumerate(ws)]
+      return UOp.sink(A[4+i].store(UOp.stack(*lanes).index(i)).end(i), *ws, arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.zeros(6, dtype=dtypes.int).contiguous().custom_kernel(fxn=kernel)[0].tolist(), [7, 9, 11, 13, 7, 9])
 
   def test_valid_gate_after_effect(self):

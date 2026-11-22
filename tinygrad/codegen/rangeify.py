@@ -96,7 +96,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
 def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:]: return None
-  return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
+  return idx.src[0].shrink(tuple((0, s) for s in b2.shape))
 
 def after_all_invalid(after:UOp):
   buf = after.src[0].buf_uop
