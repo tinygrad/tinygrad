@@ -293,7 +293,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # (a<b).where(c, a+(c-b)) -> max(a+(c-b), c), the shift needs a signed int so the unselected arm can't wrap
   ((UPat.var("a") < UPat.cvar("b")).where(UPat.cvar("c"), UPat.var("y")), lambda a,b,c,y: UOp.maximum(y,c) if (y is a and b.val == c.val) or
    (dtypes.is_int(a.dtype) and not dtypes.is_unsigned(a.dtype) and y is a+(c.val-b.val)) else None),
-  (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else None),
+  # max(x, y) is x, read at the dtype of the max, when x is never below y
+  (UPat.maximum(UPat.var("x"), UPat.var("y")).named("m"), lambda m,x,y: x.ccast(m.dtype) if x.vmin >= y.vmax else None),
   # TODO: why does this rule break beautiful_mnist?
   #((UPat.var("x")+UPat.var("z")).maximum(UPat.var("y")+UPat.var("z")), lambda x,y,z: x.maximum(y) + z),
   # (x//c1)//c2 -> x//(c1*c2) for c2>0 when c1*c2 fits
