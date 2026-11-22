@@ -738,21 +738,33 @@ class Engine:
     return Tensor(out.uop).assign(y.reshape(out.shape)).reshape(len(self.devs), NT * tile, -1)
 
   def posts(self, n:int, b:FFNBlock, live:UOp, s:UOp, *_) -> Tensor:
-    """a piece's n chunks' posts in one graph, each its own chain (the last chunk's live rows, the others' whole)"""
-    return Tensor.realize(*(self.post(b, live if k == n - 1 else self.chunk, k * self.chunk, s) for k in range(n)))[0]
+    """a piece's n chunks' posts in one graph, each its own chain (the last chunk's live rows, the others' whole): a latent's chunks' routed
+    experts' outputs gathered one after another, each scattered to their rows' gpus (a chunk's copies under the next one's gather)"""
+    chunks = [(k * self.chunk, live if k == n - 1 else self.chunk) for k in range(n)]
+    if not self.model.config.expert_latent_dim: return Tensor.realize(*(self.post(c0, live, s) for c0, live in chunks))[0]
+    steps:list[list[Tensor]] = []
+    for c0, live in chunks:
+      down = Tensor(self.win["down"].uop.after(*(st[0].uop for st in steps[-1:])))
+      steps.append(scatter(self.routed_out(down, c0, live).pad_to((len(self.devs), self.chunk, self.lat))))
+    return Tensor.realize(*(self.latent_post(b, c0, s, st) for (c0, _), st in zip(chunks, steps)))[0]
 
-  def post(self, b:FFNBlock, live:UOp|int, c0:int, s:UOp) -> Tensor:
-    """a chunk's live rows' routed experts' outputs (their rows of down weighted) and shared experts' outputs summed over the gpus into the
-    block's, added to stream s: without a latent, both in one reduce scatter, with one the routed ones reduce scattered to their rows' gpus,
-    normed there and gathered for the up projection's columns, sent back to their rows' gpus"""
+  def routed_out(self, down:Tensor, c0:int, live:UOp|int) -> Tensor:
+    """a chunk's live rows' routed experts' outputs: their rows of down weighted, each gpu's"""
     G, K = len(self.devs), self.model.config.num_experts_per_tok
     pos, w = Tensor(self.win["pos"].uop).reshape(-1, K)[c0:c0 + live], Tensor(self.win["w"].uop)[c0:c0 + live]
-    out = (Tensor(self.win["down"].uop).reshape(G, -1, self.lat)[:, pos.maximum(0)].float() * w.unsqueeze(-1)).sum(2)
-    out = out * self.model.config.routed_scaling_factor
-    if not self.model.config.expert_latent_dim:
-      shared = self.own(self.shared(), c0).reshape(G, 1, self.chunk, -1)[:, :, :live].float()
-      return self.add(s, c0, self.split(out.unsqueeze(1) + shared))
-    rows = reduce_scatter(out.pad_to((G, self.chunk, self.lat)))
+    out = (down.reshape(G, -1, self.lat)[:, pos.maximum(0)].float() * w.unsqueeze(-1)).sum(2)
+    return out * self.model.config.routed_scaling_factor
+
+  def post(self, c0:int, live:UOp|int, s:UOp) -> Tensor:
+    """a chunk's live rows' routed experts' outputs and shared experts' outputs summed over the gpus in one reduce scatter, added to stream s"""
+    shared = self.own(self.shared(), c0).reshape(len(self.devs), 1, self.chunk, -1)[:, :, :live].float()
+    return self.add(s, c0, self.split(self.routed_out(Tensor(self.win["down"].uop), c0, live).unsqueeze(1) + shared))
+
+  def latent_post(self, b:FFNBlock, c0:int, s:UOp, steps:list[Tensor]) -> Tensor:
+    """a chunk's routed experts' outputs summed on their rows' gpus (their scatter's steps), normed there and gathered for the up projection's
+    columns, sent back to their rows' gpus, added to stream s with the shared experts' outputs (the experts graph's sum)"""
+    G = len(self.devs)
+    rows = ring_sum(steps).contiguous().float()
     up = b.ffn_routed_up(self.whole(b.ffn_routed_norm(rows).half().reshape(1, self.chunk, self.lat)))[0]
     shared = self.own(Tensor(self.win["shared_rows"].uop).reshape(1, G, -1, self.model.config.dim), c0).float()
     return self.add(s, c0, shared, all_to_all(up.half()).reshape(1, G, self.chunk // G, -1))
