@@ -56,6 +56,7 @@ from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program, to_program_config
 from tinygrad.renderer import Renderer
+from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.helpers import Context, DEV, to_mv, ContextVar, VIZ
 from tinygrad.runtime.autogen import hsa
 from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND, get_elf_section
@@ -1989,6 +1990,17 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
 
 dispatch_cache:dict[tuple, UOp] = {}
 
+class EmuRenderer(CPULLVMRenderer):
+  def __init__(self, target):
+    from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
+    super().__init__(target)
+    assert isinstance(self.compiler, CPULLVMCompiler)
+    # Lifted kernels usually run only a few times. Don't spend O2 compile time on the host-side emulator.
+    self.compiler.passes = b'default<O0>'
+    if self.compiler.cachekey is not None: self.compiler.cachekey += '_emu_O0'
+
+emu_renderer = functools.cache(EmuRenderer)
+
 RELIFT = ContextVar("RELIFT", 0) # lift and recompile to assembly N times
 REPLAY_EMU = ContextVar("REPLAY_EMU", 0)
 
@@ -1999,7 +2011,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                CAPTURE_PROCESS_REPLAY=REPLAY_EMU.value, DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1):
     code = bytes(to_mv(lib, lib_sz))
     dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size)
-    renderer = Device['CPU'].renderer
+    renderer = emu_renderer(Device['CPU'].renderer.target)
     if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
       dispatch_cache[key] = to_program(lift(code, arch, renderer, dispatch, f"emu {name}"), renderer)
       relift_lib = code
