@@ -114,7 +114,7 @@ jobs:
         key: be-minimal
         deps: testing_unit
     - name: Run runtime tests
-      run: PARALLEL=0 TEST_MAX_EXAMPLES=50 FORWARD_ONLY=1 SKIP_SLOW_TEST=1 DEV=PYTHON python3 -m pytest -n=auto test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_ops.py test/runtime/test_uops.py test/runtime/test_renderer_failures.py::TestRendererFailures test/device/python --durations=20
+      run: PARALLEL=0 TEST_MAX_EXAMPLES=50 SKIP_SLOW_TEST=1 DEV=PYTHON python3 -m pytest -n=auto test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_ops.py test/runtime/test_uops.py test/runtime/test_renderer_failures.py::TestRendererFailures test/device/python --durations=20
     - name: Test IMAGE support
       run: IMAGE=1 DEV=PYTHON python3 test/runtime/test_ops.py TestOps.test_gemm TestOps.test_simple_conv2d
     - name: Test emulated tensor cores
@@ -482,9 +482,7 @@ jobs:
     runs-on: *linux
     timeout-minutes: 20
     env:
-      # The SPEC=2 CPU groups run the full runtime suite, including gradients.
       TEST_MAX_EXAMPLES: 50
-      FORWARD_ONLY: 1
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
@@ -607,7 +605,6 @@ jobs:
       DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
       SKIP_SLOW_TEST: 1
       TEST_MAX_EXAMPLES: 50
-      FORWARD_ONLY: 1
       PARALLEL: 0
       PYTHONPATH: .
     steps:
@@ -712,7 +709,6 @@ jobs:
     timeout-minutes: 15
     env:
       NULL_ALLOW_COPYOUT: 1
-      FORWARD_ONLY: 1
       DEV: ${{ matrix.dev }}${{ contains(matrix.dev, 'a630') && ',IMAGE_PITCH_ALIGNMENT=64' || '' }}
       IMAGE: ${{ contains(matrix.dev, 'a630') && '1' || '0' }}
     steps:
