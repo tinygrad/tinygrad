@@ -461,7 +461,7 @@ class PLELayer:
     if not hasattr(self, "conv_state"): self.conv_state = Tensor.zeros(x.shape[0], self.hist, self.count*self.dim, device=x.device).clone()
 
   def write_rows(self, tokens:list[int], start_pos:int, n_toks:int, chunk_size:int):
-    # hash the n-grams ending at each token (t0*m0 ^ t1*m1 ^ ..., pad before the start or, with cut_at_pad, a pad)
+    # hash the n-grams ending at each token (t0*m0 ^ t1*m1 ^ ..., pad before the start or a pad)
     ple, n, ids, offsets = self.ple, len(self.ple.multipliers), [], list(itertools.accumulate(self.ple.vocab_sizes, initial=self.ple.offset))
     for p in range(start_pos, start_pos+n_toks):
       ctx = [ple.pad if p < i or ple.cut_at_pad and ple.pad in tokens[p-i:p] else tokens[p-i] for i in range(n)]
