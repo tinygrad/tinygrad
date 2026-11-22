@@ -333,8 +333,8 @@ def asm_gemm(a:Tensor, b:Tensor, w_post_scale:Tensor|None=None, mx:bool=False, m
           _, _, a_col, scale_a_col = quantize_mxfp4(a, shuffle_col=True)
         assert a_col is not None and scale_a_col is not None
       b_q, scale_b, b_col, scale_b_col = quantize_mxfp4(w, shuffle_row=True, shuffle_col=True) if mxfp4_w is None else mxfp4_w
-      out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b, a, w, a_col, scale_a_col, b_col, scale_b_col,
-                                 fxn=custom_mxfp4_gemm, grad_fxn=custom_mxfp4_gemm_bw)[0]
+      out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b, a, w,
+                                 a_col, scale_a_col, b_col, scale_b_col, fxn=custom_mxfp4_gemm, grad_fxn=custom_mxfp4_gemm_bw)[0]
     elif mx:
       # mxfp8 1x32 block scaling
       if mx_scales is not None:
