@@ -58,7 +58,7 @@ jobs:
           # PR code is only line-counted by master's sz.py, never executed
           allow-unsafe-pr-checkout: true
           persist-credentials: false
-        # the base default to tinygrad master and cannot be other fork branch for security purpose
+        # the base is the default branch of the base repo, never fork code, for security purpose
       - name: Checkout code from tinygrad master
         uses: actions/checkout@v6
         with:
@@ -85,19 +85,25 @@ jobs:
           import json, os, urllib.request
           api, repo, num = os.environ["GITHUB_API_URL"], os.environ["GITHUB_REPOSITORY"], os.environ["PR_NUMBER"]
           body = open(os.environ["BODY_FILE"]).read() if os.environ.get("BODY_FILE") else os.environ["BODY"]
-          marker = "<!-- line count bot -->"
+          marker, legacy = "<!-- line count bot -->", "<!-- Sticky Pull Request Comment -->"  # legacy: marocchino/sticky-pull-request-comment
           def req(method, url, data=None):
             r = urllib.request.Request(url, method=method, data=json.dumps(data).encode() if data is not None else None,
                                        headers={"Authorization": f"token {os.environ['TOKEN']}", "Accept": "application/json", "Content-Type": "application/json"})
-            with urllib.request.urlopen(r) as f: return json.loads(f.read() or b"null")
-          old = [c for c in req("GET", f"{api}/repos/{repo}/issues/{num}/comments?per_page=100") if c["body"].startswith(marker)]
+            with urllib.request.urlopen(r) as f: return json.loads(f.read() or b"null"), f.headers.get("Link", "")
+          # follow the Link header: github paginates (max 100), gitea returns all comments
+          old, url = [], f"{api}/repos/{repo}/issues/{num}/comments?per_page=100"
+          while url:
+            cs, link = req("GET", url)
+            old += [c for c in cs if c["body"].startswith(marker) or c["body"].rstrip().endswith(legacy)]
+            url = next((l.split(";")[0].strip(" <>") for l in link.split(",") if 'rel="next"' in l), None)
           if not body.strip() or (old and old[-1]["body"] == f"{marker}\n{body}"): raise SystemExit(0)  # empty or unchanged
           for c in old: req("DELETE", f"{api}/repos/{repo}/issues/comments/{c['id']}")
           req("POST", f"{api}/repos/{repo}/issues/{num}/comments", {"body": f"{marker}\n{body}"})
           PY
 
   rebase:
-    name: Core Library Line Difference
+    # distinct name: gitea keeps one commit status per name, so the skipped twin would hide this one
+    name: Core Library Line Difference (behind base)
     permissions:
       pull-requests: write
     runs-on: ubuntu-24.04
