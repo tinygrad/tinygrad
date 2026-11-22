@@ -1,4 +1,3 @@
-from __future__ import annotations
 from typing import cast, Any, Sequence, Callable
 import itertools, ctypes, struct, time
 from dataclasses import replace, dataclass, field
