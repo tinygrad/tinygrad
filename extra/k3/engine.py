@@ -4,7 +4,7 @@
 # host routes, reads the missing experts from the drives into each gpu's pool of slots and gives the gpus the slots and weights in two parts
 # (host.py's step_io, in c alongside the graph), the gpus wait for each (host_wait) and run their units of the experts over the pool
 # DEV=AMD:HIP PYTHONPATH=. python3 extra/k3/engine.py trunk.gguf "prompt"
-import collections, copy, ctypes, functools, itertools, math, os, signal, sys, time
+import collections, copy, ctypes, functools, gc, itertools, math, os, signal, sys, time
 import numpy as np
 from typing import Callable, Iterator, cast
 from tinygrad import Tensor, TinyJit, UOp, Device, dtypes, nn
@@ -1028,7 +1028,8 @@ class Engine:
 
   def warm(self):
     """every step's graph (and the rollback's, the saves') captured on dry steps (or the start's file's, checked by them): the host's flags
-    preset (its tables still zero: no experts). the graphs to the start's file, unless they're its"""
+    preset (its tables still zero: no experts). the graphs to the start's file, unless they're its. the start's objects then kept out of the
+    collector's passes (a full one would walk every graph)"""
     host_c().flags(ctypes.byref(self.io), 1)
     self.t_stage = time.perf_counter()
     self.dry_steps()
@@ -1041,6 +1042,7 @@ class Engine:
     if self.short_window and self.short_engine is None:
       self.capture_short_window()
       self.stage("short continuation window")
+    gc.freeze()
 
   def dry_steps(self):
     for T, jit in self.jits.items():
