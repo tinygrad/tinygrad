@@ -430,8 +430,8 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
 def _hc_coeffs(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, C:int, iters:int, eps:float, norm_eps:float, features:int) -> UOp:
   token, lane = UOp.range(out.shape[0], 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP)
   rms = (warp_reduce(sq[token, lane].load(), Ops.ADD, full_wave=True) * (1/features) + norm_eps).rsqrt()
-  is_comb, is_pre = lane < C*C, (lane >= C*C) & (lane < C*C + C)
-  idx = is_comb.where(lane + 2*C, (lane - C*C).minimum(2*C-1))
+  is_comb, is_pre, m = lane < C*C, (lane >= C*C) & (lane < C*C + C), lane % (C*C)
+  idx = is_comb.where(m + 2*C, m.minimum(2*C-1))
   s = scale[(idx // C).minimum(2)].load().float()
   v = mix[token, idx].load() * rms * s + base[idx].load().float()
   row, col = tuple(1 << k for k in range(C.bit_length() - 1)), tuple(C << k for k in range(C.bit_length() - 1))  # comb[r][c] is on lane C*r+c

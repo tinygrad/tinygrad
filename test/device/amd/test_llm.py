@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.helpers import DEV
 from tinygrad.llm.kernels.amd import (Linear, ExpertWeights, amd_custom_kernels_supported, flash_attention, gated_delta_prefill,
-                                      _is_rdna4, _is_cdna)
+                                      _is_rdna4, _is_cdna, hc_coeffs_supported)
 from tinygrad.llm.kernels.amd_gguf import (q8_quantize, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, Q8_0, Q4_K, Q6_K,
                                           IQ3_S, IQ4_XS, IQ1_S, MXFP4)
 from tinygrad.llm.gguf import ggml_data_to_tensor
@@ -301,8 +301,9 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
                                rope_theta=1e4, rope_dim=32, v_head_dim=32, max_context=4, hc=HCConfig(count=4, sinkhorn_iters=3, eps=1e-6))
     hc = HyperConnection(config)
     rng = np.random.default_rng(0)
-    hc.fn.weight, hc.base["weight"] = Tensor(rng.normal(0, 0.1, (24, 128)).astype(np.float32)), Tensor(rng.normal(size=24).astype(np.float32))
-    hc.scale["weight"], xs = Tensor(rng.uniform(0.5, 1.5, 3).astype(np.float32)), Tensor(rng.normal(size=(1, 3, 4, 32)).astype(np.float32))
+    hc.fn.weight, hc.base["weight"] = Tensor(rng.normal(0, 0.1, (24, 128)).astype(np.float16)), Tensor(rng.normal(size=24).astype(np.float16))
+    hc.scale["weight"], xs = Tensor(rng.uniform(0.5, 1.5, 3).astype(np.float16)), Tensor(rng.normal(size=(1, 3, 4, 32)).astype(np.float32))
+    self.assertTrue(hc_coeffs_supported(xs.flatten(2), hc.count))
     got = hc(xs, lambda h: (h * 0.5, None))[0].numpy()
     hc.fn.weight, hc.base["weight"], hc.scale["weight"] = (t.to("CPU") for t in (hc.fn.weight, hc.base["weight"], hc.scale["weight"]))
     np.testing.assert_allclose(got, hc(xs.to("CPU"), lambda h: (h * 0.5, None))[0].numpy(), rtol=1e-4, atol=1e-5)
