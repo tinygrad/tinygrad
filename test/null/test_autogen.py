@@ -333,6 +333,19 @@ class TestAutogen(unittest.TestCase):
       exec(generated_code, namespace)
       return namespace
 
+  def test_macros_after_broken_definition(self):
+    ns = self.run_gen("""
+      #define BASE 5
+      #define BROKEN(x) ((x) +
+      #define DOUBLE(x) ((x) * 2)
+      #define RESULT DOUBLE(BASE)
+      #define MISSING UNKNOWN_NAME
+      #define NEXT (RESULT + 1)
+    """)
+    self.assertNotIn('BROKEN', ns)
+    self.assertNotIn('MISSING', ns)
+    self.assertEqual(ns['NEXT'], 11)
+
   def test_packed_structs(self):
     ns = self.run_gen("""
 typedef unsigned NvU32;

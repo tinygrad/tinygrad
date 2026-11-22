@@ -254,7 +254,7 @@ jobs:
         deps: testing_unit
         llvm: 'true'
     - name: Test SPEC=2
-      run: DEV=CPU SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/device/cpu --splits 2 --group ${{ matrix.group }}
+      run: DEV=CPU SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/device/cpu --splits 2 --group ${{ matrix.group }} --splitting-algorithm least_duration
 
   fuzzing:
     name: Fuzzing
@@ -516,7 +516,11 @@ jobs:
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get install -y llvm-21 llvm-21-tools cloc
+          # The assembler and disassembler tests use the LLVM C API in-process.
+          sudo apt-get install -y --no-install-recommends libllvm21
+          llvm_path=$(dpkg-query -L libllvm21 | grep -m1 '/libLLVM\.so\.21')
+          test -f "$llvm_path"
+          echo "LLVM_PATH=$llvm_path" >> "$GITHUB_ENV"
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_rocprof_decoder.py
       - name: Run AMD renderer tests
