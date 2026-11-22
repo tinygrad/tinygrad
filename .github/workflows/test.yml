@@ -257,15 +257,8 @@ jobs:
         key: spec-unit
         deps: testing_unit
         llvm: 'true'
-    - name: Check Device.DEFAULT and print some source
-      if: matrix.group == 1
-      run: |
-        DEV=CPU python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
-        DEV=CPU DEBUG=4 python test/test_tiny.py TestTiny.test_plus
     - name: Test SPEC=2
       run: DEV=CPU SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/runtime test/device/cpu --splits 2 --group ${{ matrix.group }} --splitting-algorithm least_duration
-    - name: Run process replay tests
-      uses: ./.github/actions/process-replay
 
   fuzzing:
     name: Fuzzing
@@ -471,7 +464,7 @@ jobs:
       fail-fast: false
       matrix:
         dev:
-          # CPU:CLANG is DEV=CPU, which the SPEC=2 jobs run
+          - 'CPU:CLANG'
           - 'CPU:LLVM'
           - 'CPU:LVP'
           - 'CPU:X86'
@@ -491,11 +484,11 @@ jobs:
       with:
         key: linux-${{ matrix.dev }}
         deps: "testing_unit${{ contains(matrix.dev, 'LVP') && ' mesa' || '' }}"
-        llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') }}
+        llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') || contains(matrix.dev, 'CLANG') }}
         webgpu: ${{ matrix.dev == 'WEBGPU' }}
         opencl: ${{ matrix.dev == 'CL' }}
     - name: Set env
-      run: echo "DEV=${{ matrix.dev }}" >> "$GITHUB_ENV"
+      run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
     - name: Check Device.DEFAULT and print some source
       run: |
         python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
