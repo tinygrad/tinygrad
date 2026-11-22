@@ -48,7 +48,7 @@ def run_kernel(func:int, args:int, size:int, gx:int, gy:int, gz:int, lx:int, ly:
 def cuInit(flags): return cuda.CUDA_SUCCESS
 def cuDeviceGetCount(count): return out(count, 1, ctypes.c_int32)
 def cuDeviceGet(device, ordinal): return out(device, ordinal, ctypes.c_int32)
-def cuDeviceComputeCapability(major, minor, dev): return out(major, 3, ctypes.c_int32) or out(minor, 5, ctypes.c_int32)
+def cuDeviceComputeCapability(major, minor, dev): return out(major, 5, ctypes.c_int32) or out(minor, 0, ctypes.c_int32)
 def cuCtxCreate_v2(pctx, flags, dev): return out(pctx, dev + 1)
 def cuCtxSetCurrent(ctx): return cuda.CUDA_SUCCESS
 def cuCtxSynchronize(): return cuda.CUDA_SUCCESS
