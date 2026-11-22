@@ -107,9 +107,10 @@ class _System:
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
-    flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > mmap.PAGESIZE else 0) | (MAP_FIXED if vaddr else 0)
+    size = round_up(size, mmap.PAGESIZE)
+    flags = (libc.MAP_HUGETLB if contiguous and size > mmap.PAGESIZE and self.vfio is None else 0) | (MAP_FIXED if vaddr else 0)
     va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
-    return MMIOInterface(va, size), self.system_paddrs(va, round_up(size, mmap.PAGESIZE))
+    return MMIOInterface(va, size), self.system_paddrs(va, size)
 
   def pci_scan_bus(self, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None) -> list[str]:
     all_devs = []

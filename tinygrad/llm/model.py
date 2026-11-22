@@ -645,7 +645,7 @@ class CompressedAttentionBlock(FFNBlock):
     self.attn_q_a, self.attn_q_a_norm = Linear(config.dim, config.q_lora_rank, bias=False), nn.RMSNorm(config.q_lora_rank, config.norm_eps)
     self.attn_q_b = Linear(config.q_lora_rank, config.n_heads * config.head_dim, bias=False)
     self.attn_kv, self.attn_kv_a_norm = Linear(config.dim, config.head_dim, bias=False), nn.RMSNorm(config.head_dim, config.norm_eps)
-    self.attn_output_a = {"weight": Tensor.zeros(config.o_groups * config.o_lora_rank, config.n_heads * config.head_dim // config.o_groups)}
+    self.attn_output_a = Linear(config.n_heads*config.head_dim//config.o_groups, config.o_groups*config.o_lora_rank, False, groups=config.o_groups)
     self.attn_output_b = Linear(config.o_groups * config.o_lora_rank, config.dim, bias=False)
     if ratio: self.attn_compressor = Compressor(config, ratio, config.head_dim)  # CSA (ratio 4) or HCA (ratio 128)
     self.indexer = None
@@ -676,8 +676,7 @@ class CompressedAttentionBlock(FFNBlock):
     mask = mask.expand(B, cfg.n_heads, T, -1).cat(self.attn_sinks["weight"].reshape(1, -1, 1, 1).expand(B, -1, T, 1), dim=-1)
     cos, sin = freqs.chunk(2, dim=-1)
     o = apply_rope(q.scaled_dot_product_attention(k, k, attn_mask=mask, enable_gqa=True), cos.cat(-sin, dim=-1), True, True).transpose(1, 2)
-    o = o.reshape(B, T, cfg.o_groups, 1, -1) @ self.attn_output_a["weight"].reshape(cfg.o_groups, cfg.o_lora_rank, -1).transpose(-1, -2)
-    return self.attn_output_b(o.reshape(B, T, -1))
+    return self.attn_output_b(self.attn_output_a(o.reshape(B, T, cfg.o_groups, -1)).reshape(B, T, -1))
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):

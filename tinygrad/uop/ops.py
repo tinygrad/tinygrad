@@ -14,8 +14,6 @@ if TYPE_CHECKING:
   from tinygrad.device import Buffer, BufferSpec, MultiBuffer
   from tinygrad.renderer import Estimates
   from tinygrad.runtime.support.hcq2 import HCQInfo
-  from tinygrad.renderer.x86 import Register
-  from tinygrad.renderer.amd.dsl import Reg
 
 class AxisType(Enum):
   def __repr__(self): return str(self)
@@ -43,11 +41,9 @@ class ParamArg:
   val: PyConst|None = None
   # the memory the linker gives an ALLOC
   spec: BufferSpec|None = None
-  # optional register constraints on this allocation, for assembly backends
-  reg: Register|Reg|None = None
   def __repr__(self):
     fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
-              ("volatile", False), ("image", None), ("bind_on_realize", False), ("val", None), ("spec", None), ("reg", None))
+              ("volatile", False), ("image", None), ("bind_on_realize", False), ("val", None), ("spec", None))
     args = [repr(self.slot), repr(self.dtype)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     if self.buffer is not None:
       args.append(f"buffer=UOp.new_buffer({self.device!r}, {self.buffer.nbytes // self.dtype.itemsize}, {self.dtype!r}, {self.slot}).buffer")
@@ -60,6 +56,7 @@ axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.LOCAL
 range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.END: 1, Ops.LINEAR: 0}
 
 # https://en.wikipedia.org/wiki/Identity_element
+@functools.cache
 def identity_element(op:Ops, dt:DType) -> PyConst: return dt.const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dt.min}[op])
 # unsigned arithmetic wraps mod 2^n, so its interval holds only if it fits the dtype
 def wrapped(dt:DType, lo:PyConst, hi:PyConst) -> tuple[PyConst, PyConst]:
@@ -376,8 +373,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.BITCAST:
         ps = self.src[0]._shape
         if ps is None: return None
-        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize) and len(ps) > 0:
-          if isinstance(ps[-1], int) and (ps[-1]*input_sz) % output_sz: raise RuntimeError("unsupported size in bitcast")
+        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize):
+          if len(ps) == 0 or (isinstance(ps[-1], int) and (ps[-1]*input_sz) % output_sz): raise RuntimeError("unsupported size in bitcast")
           return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
         return ps
 
@@ -584,8 +581,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def without_after(self) -> UOp: return self.src[0].without_after if self.op is Ops.AFTER else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   @staticmethod
-  def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:Register) -> UOp:
-    params = [UOp.param(i, dtype, addrspace=AddrSpace.REG, reg=r) for i,r in enumerate(regs)]
+  def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:UOp) -> UOp:
+    params = [UOp.param(r.arg.slot, dtype, name=r.arg.name, addrspace=AddrSpace.REG) if r.op is Ops.BUFFER else r for r in regs]
     return UOp.native(op, *params, dtype=dtype).call(*src)
   def contract(self, *rngs:UOp):
     assert all(x.axis_type == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
@@ -647,9 +644,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def overflows(self, dtype:DType) -> bool: return self.vmin < dtype.min or dtype.max < self.vmax
 
   def split_uop(self:UOp, sep:Ops) -> Iterator[UOp]:
-    if self.op is sep:
-      for s in self.src: yield from s.split_uop(sep)
-    else: yield self
+    stack = [self]
+    while stack:
+      if (u:=stack.pop()).op is sep: stack.extend(reversed(u.src))
+      else: yield u
 
   # *** multi-device helpers ***
 
@@ -800,9 +798,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return (UOp.range(len(device), 0, AxisType.DEVICE),) if isinstance(device, tuple) else ()
   @staticmethod
   def _buffer(size:int, dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, buffer:Buffer|MultiBuffer|None=None,
-              reg:Register|None=None) -> UOp:
+              name:str|None=None) -> UOp:
     return UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),)+UOp.device_range_src(device),
-               arg=ParamArg(slot, dtype, addrspace=addrspace, device=device, buffer=buffer, reg=reg))
+               arg=ParamArg(slot, dtype, addrspace=addrspace, device=device, buffer=buffer, name=name))
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
@@ -984,7 +982,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def expr(self) -> str:
     assert self.op in {Ops.PARAM, Ops.BUFFER, Ops.EXTERN}
     # EXTERNs have no name, they are identified by their unique slot
-    return f"e{self.arg.slot}" if self.op is Ops.EXTERN else unwrap(self.arg.name)
+    return f"e{self.arg.slot}" if self.op is Ops.EXTERN else (self.arg.name or f"p{self.arg.slot}")
   def bind(self, val:int|UOp):
     # EXTERNs have no runtime state, their values are bound at the call site
     assert self.op is Ops.PARAM and self.is_variable and not self.is_bound_var, f"op is {self.op}, need an unbound Variable"
@@ -1084,7 +1082,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         if s1_vmax < 0: return (s1_vmin+1, 0)
       if self.op is Ops.XOR and s1_vmin == s1_vmax == -1 and isinstance(s0_vmin, int) and isinstance(s0_vmax, int):
         return wrapped(self.dtype, ~int(s0_vmax), ~int(s0_vmin))
-      if self.op is Ops.XOR and dtypes.is_int(self.dtype) and s0_vmin >= 0 and s1_vmin >= 0:
+      if self.op in (Ops.OR, Ops.XOR) and dtypes.is_int(self.dtype) and s0_vmin >= 0 and s1_vmin >= 0:
         return 0, (1 << int(max(s0_vmax, s1_vmax)).bit_length()) - 1
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
       # bounds never prove a float compare true since nan compares false
@@ -1156,24 +1154,24 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
-            spec:BufferSpec|None=None, bind_on_realize:bool=False, name:str|None=None, reg:Register|Reg|None=None):
+            spec:BufferSpec|None=None, bind_on_realize:bool=False, name:str|None=None):
     ret = UOp(Ops.ALLOC, src=(shape_to_shape_arg((prod(to_max_shape(shape)),)),)+UOp.device_range_src(device),
               arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype),
-                           addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name, reg=reg))
+                           addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
   @staticmethod
   def extern(shape:tuple[int, ...], dtype:DType, device, name:str): return UOp.alloc(shape, dtype, 0, device=device, name=name).replace(op=Ops.EXTERN)
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
   @staticmethod
-  def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, reg:Register|None=None):
+  def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, name:str|None=None):
     dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if slot is None: slot = next(UOp.unique_num)
     if addrspace is AddrSpace.GLOBAL:
-      ret = UOp.param(slot, dtype, prod(shape))
+      ret = UOp.param(slot, dtype, prod(shape), name=name)
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
-      ret = UOp._buffer(prod(shape), dtype, slot, addrspace=addrspace, reg=reg)
+      ret = UOp._buffer(prod(shape), dtype, slot, addrspace=addrspace, name=name)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
   def placeholder_like(self, slot:int):
@@ -1187,19 +1185,19 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # TODO: this should replace placeholder
   @staticmethod
   def param(slot:int, dtype:DType, shape:tuple[sint, ...]|sint|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None,
-            name=None, addrspace=AddrSpace.GLOBAL, volatile:bool=False, reg:Register|Reg|None=None):
+            name=None, addrspace=AddrSpace.GLOBAL, volatile:bool=False):
     """create a PARAM: a single sint or 1-d shape gives a flat param of that size, a None shape gives a scalar param.
     src[0] stores the concrete max size (never symbolic): a multi-dim shape is a RESHAPE on top of the flat param,
     a symbolic shape is a max-size param shrunk to the real shape"""
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create param for weak dtype {dtype}")
     shape = (shape,) if isinstance(shape, (int, UOp)) else shape or ()
     ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((prod(to_max_shape(shape)),) if shape else ()),),
-              arg=ParamArg(slot, dtype, vmin_vmax, name, addrspace, device, volatile, reg=reg))
+              arg=ParamArg(slot, dtype, vmin_vmax, name, addrspace, device, volatile))
     return ret.view_as(shape)
   def param_like(self, slot:int, name:str|None=None):
     # Scalar arguments bind by slot; names and values stay at the call site, not in schedule cache keys.
-    if self.op is Ops.PARAM and self.addrspace is AddrSpace.ALU:
-      return self.replace(arg=replace(self.arg, slot=slot, name=name, val=None))
+    if self.op in {Ops.PARAM, Ops.EXTERN} and self.addrspace is AddrSpace.ALU:
+      return self.replace(op=Ops.PARAM, arg=replace(self.arg, slot=slot, name=name, val=None))
     # multi-device values become a per-shard sized param wrapped in UNSHARD: the sharding lives in the graph, not the arg
     if self.axis is not None and isinstance(self.device, tuple):
       return UOp.param(slot, self.dtype, prod(to_max_shape(self.shard_shape)), self.device, name=name).view_as(self.shard_shape, self.axis)
@@ -1226,6 +1224,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # an external C call is a CALL on a NATIVE body stating the (possibly void) return dtype, the callee
     # (a function pointer) in source, rendered as an indirect call
     return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, inline, hcq))
+  def lift_args(self, free:list[UOp]) -> UOp:
+    """the CALL's body reads these from the enclosing scope: each becomes a PARAM at a new slot and its value an arg after the others.
+    the value of a DEVICE range is the device number, bound per device at launch"""
+    free = dedup(free)
+    args = [UOp.variable("_device_num", 0, u.vmax, u.dtype) if u.op is Ops.RANGE else u for u in free]
+    params = {u:a.param_like(len(self.src)-1+i) for i,(u,a) in enumerate(zip(free, args))}
+    return self.replace(src=(self.body.substitute(params, walk=True), *self.src[1:], *args))
 
   @staticmethod
   def call_with_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
@@ -1282,6 +1287,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     params += [p for p in self.arg.params if p.arg.slot not in {u.arg.slot for u in params}]
     return tuple(sorted(params, key=lambda p: p.arg.slot))
 
+  def scalar_arg(self, p:UOp) -> UOp:
+    # a scalar param is the call's arg at its slot, a bound Variable passes its value
+    if p.arg.slot+1 >= len(self.src): raise RuntimeError(f"scalar param {p.expr} at slot {p.arg.slot} has no arg, the call passes {len(self.src)-1}")
+    return UOp.const(a.arg.val, p.dtype) if (a:=self.src[1+p.arg.slot]).is_bound_var else a
+
+  def bind_symbols(self, x):
+    # the scalar params in x (launch sizes, estimates) become this call's args
+    if not isinstance(x, UOp): return x
+    return x.substitute({p:self.scalar_arg(p).ccast(p.dtype) for p in x.variables() if p.op is Ops.PARAM and p.arg.slot >= 0}, walk=True).ssimplify()
+
   @property
   def src_without_body(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.CALL else self.src
 
@@ -1311,18 +1326,15 @@ class KernelInfo:
 
 @dataclass(frozen=True)
 class ProgramInfo:
-  global_size: tuple[int|float, ...] = (1, 1, 1)
-  local_size: tuple[int, ...] = (1, 1, 1)
+  global_size: tuple[sint|float, ...] = (1, 1, 1)
+  local_size: tuple[sint, ...] = (1, 1, 1)
   params: tuple[UOp, ...] = ()
   globals: tuple[int, ...] = ()
   outs: tuple[int, ...] = ()
   ins: tuple[int, ...] = ()
   target: Target = Target()
 
-  def launch_dims(self, var_vals:dict[str, int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])  # type: ignore[arg-type]
-    local_size = tuple([sym_infer(sz, var_vals) for sz in self.local_size])
-    return global_size, local_size
+  def launch_dims(self, call:UOp): return tuple(map(call.bind_symbols, self.global_size)), tuple(map(call.bind_symbols, self.local_size))
 
   @staticmethod
   def from_sink(sink:UOp, target:Target=Target()) -> ProgramInfo:
@@ -1330,16 +1342,15 @@ class ProgramInfo:
     _globals: list[int] = []
     outs: list[int] = []
     ins: list[int] = []
-    global_size: list[int] = [1, 1, 1]
-    local_size: list[int] = [1, 1, 1]
+    global_size: list[sint] = [1, 1, 1]
+    local_size: list[sint] = [1, 1, 1]
     for u in sink.toposort():
       if u.op is Ops.PARAM: _params.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
-      if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = u.src[0].substitute(
-        {v:v.replace(arg=replace(v.arg, slot=-1)) for v in u.src[0].toposort() if v.op is Ops.PARAM and v.is_variable}).ssimplify()
+      if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(sint, u.src[0].ssimplify())
     if not outs and not ins: outs = ins = _globals # if neither is inferred, default to all buffers
     return ProgramInfo(tuple(global_size), tuple(local_size),
                        tuple(sorted(_params, key=lambda p: p.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),
@@ -1433,8 +1444,8 @@ class UPat(RandMixin):
     # repeat if it's a UPat
     elif isinstance(src, UPat): self.src = [itertools.repeat(src)]
 
-    self.strict_length = not (allow_any_len or isinstance(src, UPat) or src is None)
-    self.required_len: int = 0 if isinstance(src, UPat) or src is None else len(src)
+    self.strict_length = not (is_any or allow_any_len or isinstance(src, UPat) or src is None)
+    self.required_len: int = 0 if is_any or isinstance(src, UPat) or src is None else len(src)
     self.location = location or get_location()
 
     if custom_early_reject is not None: self.early_reject = custom_early_reject
@@ -1443,13 +1454,13 @@ class UPat(RandMixin):
       self.early_reject = {pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1}
 
   @property
-  def dtype(self) -> DType: return self.match_dtype[0] if self.match_dtype is not None else dtypes.void
+  def dtype(self) -> DType: return self.match_dtype[0] if self.match_dtype else dtypes.void
 
   def __reduce__(self):
     return UPat, (self.op, self.match_dtype, self._in_src, self.arg, self.name, not self.strict_length, self.custom_early_reject, self.location,
                   self.is_any)
   def named(self, name:str):
-    return UPat(self.op, self.match_dtype, self._in_src, self.arg, name, not self.strict_length, self.custom_early_reject)
+    return UPat(self.op, self.match_dtype, self._in_src, self.arg, name, not self.strict_length, self.custom_early_reject, is_any=self.is_any)
 
   @staticmethod
   def any(*src): return UPat(src=src, is_any=True)
@@ -1504,13 +1515,13 @@ class UPat(RandMixin):
     return UPat(op, dtypes.bool if op in GroupOp.Comparison else asrc[-1].match_dtype, list(asrc) if op in GroupOp.Commutative else asrc)
 
   def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
-    if self.is_any: return flatten([x.match(uop, store.copy()) for x in self.src[0]])
     if (self.op is not None and uop.op not in self.op) or \
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.match_dtype is not None and uop.dtype not in self.match_dtype) or \
        (self.arg is not None and self.arg != uop.arg) or \
        (len(uop.src) < self.required_len) or \
        (self.strict_length and len(uop.src) != self.required_len): return []
+    if self.is_any: return flatten([x.match(uop, store.copy()) for x in self.src[0]])
     if self.src is None: return [store]
     res: list[dict[str, UOp]] = []
     for vp in self.src:

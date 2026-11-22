@@ -170,9 +170,10 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b:
 
 def unwrap_call(call:UOp) -> UOp|None:
   if (n:=max([len(to_tuple(a.device)) for a in get_call_arg_uops(call)], default=1)) == 1: return None
-  dnum = UOp.variable("_device_num", 0, n - 1, dtypes.i32)
-  return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.body, *[a.src[i] if a.op is Ops.MSTACK else a.mselect(i) if len(to_tuple(a.device)) > 1
-                                                                   else a for a in call.src[1:]], dnum.bind(i))) for i in range(n)))
+  # each device gets its lane of the args, the device number is bound to it
+  return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.body, *[a.bind(i) if a.is_variable and a.arg.name == "_device_num" else a.src[i]
+                                                                   if a.op is Ops.MSTACK else a.mselect(i) if len(to_tuple(a.device)) > 1
+                                                                   else a for a in call.src[1:]])) for i in range(n)))
 pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
 
 def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
@@ -276,7 +277,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[str, str], list[UOp]]:
 
   # calc deps for each tag
   tracker = DepsTracker(queue_of)
-  accs = [[(s, k in get_call_outs_ins(c)[0]) for k, s in enumerate(c.src[1:]) if not s.is_variable] for c, _, _ in ctx.batch]
+  accs = [[(s, k in get_call_outs_ins(c)[0]) for k, s in enumerate(c.src[1:]) if s.addrspace is not AddrSpace.ALU] for c, _, _ in ctx.batch]
   dep_tags:list[list[int]] = [tracker.access_resources(acc, tag) for tag, acc in enumerate(accs)]
 
   # add barriers when a call deps on another call of its queue
@@ -472,7 +473,8 @@ pm_lift_deps = PatternMatcher([
 
 def _needs_arg(u:UOp, root:bool) -> bool:
   if u.op in (Ops.BUFFER, Ops.ALLOC, Ops.EXTERN): return u.addrspace is AddrSpace.GLOBAL
-  return u.op is Ops.PARAM and u.is_variable != root
+  # every Variable is an arg, the root also takes the inputs
+  return u.op is Ops.PARAM and (u.is_variable or root)
 
 def _param_for(u:UOp, slot:int) -> UOp:
   if u.op is Ops.GETADDR or u.is_variable:
@@ -529,7 +531,9 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp:
   return UOp.from_buffer(r, b.dtype, HCQ_RUNTIME_DEV.device)
 
 def resolve_extern(ctx:LinkCtx, b:UOp) -> UOp:
-  if b.arg.name is None: return ctx.inputs[b.arg.slot]
+  if b.arg.name is None:
+    a = ctx.inputs[b.arg.slot]
+    return UOp.const(a.arg.val, b.dtype) if a.is_bound_var else a
   owned = Compiled.link_bufs[b.arg.name if b.arg.name in Compiled.link_bufs else to_name(b.device, b.arg.name)]
   return UOp.from_buffer(owned if isinstance(owned, Buffer) else owned(b), b.dtype, HCQ_RUNTIME_DEV.device)
 

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import cast, Any
+from typing import cast
 import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, itertools, collections, atexit
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, encode_cmdbuf, to_name, patch, unwrap_view, layout_args, pack_args, make_program, ccall
@@ -76,12 +76,13 @@ def amd_sdma_submit(cmdbuf:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp) -> UO
 
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
-def dispatch_packet(data:AMDProgramData, info:ProgramInfo, kernel_object:UOp=UOp.const(0, dtypes.uint64),
+def dispatch_packet(data:AMDProgramData, dims:tuple, kernel_object:UOp=UOp.const(0, dtypes.uint64),
                     kernarg_address:UOp=UOp.const(0, dtypes.uint64)) -> list: # as words: the grid may be symbolic
+  global_size, local_size = dims
   pkt = bytes(hsa.hsa_kernel_dispatch_packet_t(header=AQL_HDR | (hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_HEADER_TYPE),
     setup=3 << hsa.HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS, private_segment_size=data.private_segment_size,
-    group_segment_size=data.group_segment_size, **{f"workgroup_size_{d}": l for d, l in zip("xyz", info.local_size)}))
-  grid = [(g * l).cast(dtypes.uint32) if isinstance(g, UOp) else g * l for g, l in zip(cast(tuple[Any, ...], info.global_size), info.local_size)]
+    group_segment_size=data.group_segment_size, **{f"workgroup_size_{d}": l for d, l in zip("xyz", local_size)}))
+  grid = [(g * l).cast(dtypes.uint32) if isinstance(g, UOp) else g * l for g, l in zip(global_size, local_size)]
   return [UOp(Ops.BINARY, arg=pkt[:12]), *grid, UOp(Ops.BINARY, arg=pkt[24:32]), kernel_object, kernarg_address, UOp(Ops.BINARY, arg=pkt[48:])]
 
 class AMDComputeQueue(HWQueue):
@@ -368,7 +369,8 @@ class AMDComputeQueue(HWQueue):
   def kernargs(self, call:UOp, prg:UOp, data:AMDProgramData) -> UOp:
     if not data.kernargs_segment_size and not data.enable_dispatch_ptr: return UOp.const(0, dtypes.uint64) # no kernargs, nothing to point at
     args = get_call_kernel_args(call, prg, self.devs)
-    words = pack_args(layout_args(args), data.kernargs_segment_size) + (dispatch_packet(data, prg.arg) if data.enable_dispatch_ptr else [])
+    words = pack_args(layout_args(args), data.kernargs_segment_size)
+    if data.enable_dispatch_ptr: words += dispatch_packet(data, prg.arg.launch_dims(call))
     return UOp(Ops.LINEAR, src=tuple(words), arg="kernargs").getaddr(self.devs)
 
   def exec(self, call:UOp, prg:UOp):
@@ -398,8 +400,9 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_RESTART_X, 0, 0, 0)
     self.wreg(self.gc.regCOMPUTE_USER_DATA_0, *user_regs)
     self.wreg(self.gc.regCOMPUTE_RESOURCE_LIMITS, self.gc.regCOMPUTE_RESOURCE_LIMITS.encode(waves_per_sh=getenv("WAVES_PER_SH")))
-    self.wreg(self.gc.regCOMPUTE_START_X, 0, 0, 0, *prg.arg.local_size, 0, 0)
-    self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *prg.arg.global_size, dispatch_init)
+    global_size, local_size = prg.arg.launch_dims(call)
+    self.wreg(self.gc.regCOMPUTE_START_X, 0, 0, 0, *local_size, 0, 0)
+    self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *global_size, dispatch_init)
     if self.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
     if self.dev.prof_enabled: self.prof_stop(slot)
 
@@ -450,8 +453,8 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     self.dev.scratch_buffer(data.private_segment_size) # the queue descriptor holds the scratch
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.close_run(len(self.blob))
-    self.pkts += [UOp.const(w, dtypes.uint32) if isinstance(w, int) else w
-                  for w in dispatch_packet(data, prg.arg, lib.getaddr(self.devs) + data.desc_offset, self.kernargs(call, prg, data))]
+    pkt = dispatch_packet(data, prg.arg.launch_dims(call), lib.getaddr(self.devs) + data.desc_offset, self.kernargs(call, prg, data))
+    self.pkts += [UOp.const(w, dtypes.uint32) if isinstance(w, int) else w for w in pkt]
     self.run_start = len(self.blob)
     if self.dev.prof_enabled: self.prof_stop(slot)
 
