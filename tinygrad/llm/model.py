@@ -143,8 +143,8 @@ class PLEConfig:
   def layer(self, i:int) -> PLEConfig|None:
     if i not in self.layers: return None
     j, n, v = self.layers.index(i), len(self.layers), self.vocab_sizes
-    def part(t:tuple[int, ...]) -> tuple[int, ...]: return t[j*len(t)//n:(j+1)*len(t)//n]
-    return replace(self, multipliers=part(self.multipliers), vocab_sizes=part(v), offset=sum(v[:j*len(v)//n]))
+    mults, heads = len(self.multipliers) // n, len(v) // n
+    return replace(self, multipliers=self.multipliers[j*mults:][:mults], vocab_sizes=v[j*heads:][:heads], offset=sum(v[:j*heads]))
 
 @dataclass(frozen=True)
 class IndexerConfig:  # select top_k tokens by scoring individual keys or pools of kpool keys
@@ -237,7 +237,7 @@ class HyperConnection:
     self.fn = Linear(self.count * config.dim, (n:=self.count * (1 if head else 2 + self.count)), bias=False)
     self.base, self.scale = {"weight": Tensor.zeros(n)}, {"weight": Tensor.zeros(1 if head else 3)}
 
-  def pre(self, xs:Tensor) -> tuple[Tensor, Tensor]:  # the weights of the streams the sublayer sees, and the mix they come from
+  def pre(self, xs:Tensor) -> tuple[Tensor, Tensor]:
     base, scale, mix = self.base["weight"], self.scale["weight"], self.fn(xs.flatten(2).rmsnorm(eps=self.norm_eps))
     return (mix[..., :self.count] * scale[0] + base[:self.count]).sigmoid() + self.eps, mix
 
@@ -453,15 +453,12 @@ class PLELayer:
     self.ple, self.count, self.dim = unwrap(config.ple), unwrap(config.hc).count, config.dim
     self.max_context, self.hist, width = config.max_context, (self.ple.conv_kernel - 1) * len(self.ple.multipliers), self.count * config.dim
     rows = len(self.ple.vocab_sizes) * self.ple.head_dim
-    if self.ple.conv_kernel:
-      self.key, self.value = (Linear(rows, out, bias=False) for out in (width, config.dim))
-      self.norm_key, self.norm_query, self.norm_conv = (GroupedRMSNorm(self.count, self.dim, config.norm_eps) for _ in range(3))
-      self.conv1d = {"weight": Tensor.zeros(width, self.ple.conv_kernel)}
-    else: raise NotImplementedError("per-layer embeddings without a short conv are not supported")
+    self.key, self.value = (Linear(rows, out, bias=False) for out in (width, config.dim))
+    self.norm_key, self.norm_query, self.norm_conv = (GroupedRMSNorm(self.count, self.dim, config.norm_eps) for _ in range(3))
+    self.conv1d = {"weight": Tensor.zeros(width, self.ple.conv_kernel)}
 
   def _init_state(self, x:Tensor):
-    if self.ple.conv_kernel and not hasattr(self, "conv_state"):
-      self.conv_state = Tensor.zeros(x.shape[0], self.hist, self.count*self.dim, device=x.device).clone()
+    if not hasattr(self, "conv_state"): self.conv_state = Tensor.zeros(x.shape[0], self.hist, self.count*self.dim, device=x.device).clone()
 
   def write_rows(self, tokens:list[int], start_pos:int, n_toks:int, chunk_size:int):
     # hash the n-grams ending at each token (t0*m0 ^ t1*m1 ^ ..., pad before the start or, with cut_at_pad, a pad)
@@ -489,7 +486,7 @@ class Indexer:
     self.idx, self.max_context = (idx:=unwrap(config.indexer)), config.max_context
     self.attn_q_b = Linear(config.q_lora_rank or config.dim, idx.n_heads * idx.head_dim, bias=False)
     if compressor is not None: self.compressor = compressor
-    elif not config.compress_ratios:  # a compressed block without a compressor scores the keys of the last one
+    elif not config.compress_ratios:
       self.attn_k = Linear(config.dim, idx.head_dim, bias=False)
       self.k_norm = (nn.RMSNorm if idx.msa or idx.qsa else nn.LayerNorm)(idx.head_dim, eps=idx.norm_eps)
     if idx.msa or idx.qsa: self.q_norm = nn.RMSNorm(idx.head_dim, eps=idx.norm_eps)
@@ -504,23 +501,23 @@ class Indexer:
                                   *((2, self.idx.head_dim) if hasattr(self, "compressor_gate") else (self.idx.head_dim,)),
                                   dtype=dtypes.half, device=x.device)
 
-  def __call__(self, x:Tensor, q:Tensor, start_pos:StartPos, freqs:Tensor|None=None, keys:Tensor|None=None) -> Tensor:
+  def __call__(self, x:Tensor, q:Tensor, start_pos:StartPos, freqs:Tensor|None=None) -> Tensor:
     (B, T, _), idx, S = x.shape, self.idx, ssimplify(smax(start_pos) + x.shape[1])
-    if keys is None and hasattr(self, "compressor"): keys = self.compressor(x, start_pos, unwrap(freqs))  # pooled, roped and cached
-    k = keys.float() if keys is not None else self.attn_k(x) if idx.qsa else self.k_norm(self.attn_k(x))
+    index_k = self.compressor(x, start_pos, unwrap(freqs)) if hasattr(self, "compressor") else None  # pooled, roped and cached
+    k = index_k.float() if index_k is not None else self.attn_k(x) if idx.qsa else self.k_norm(self.attn_k(x))
     iq = self.attn_q_b(q).reshape(B, T, idx.n_heads, idx.head_dim)
     if idx.msa or idx.qsa: iq = self.q_norm(iq)
     if idx.rope_dim:
       rot = Tensor.stack(*(unwrap(freqs)[p:p+T] for p in start_pos))
-      if not (idx.qsa or keys is not None):
+      if not (idx.qsa or index_k is not None):
         k = apply_rope(k[..., :idx.rope_dim].unsqueeze(1), rot, idx.rope_interleave).squeeze(1).cat(k[..., idx.rope_dim:], dim=-1)
-      iq = apply_rope(iq.transpose(1, 2), rot, idx.rope_interleave, keys is not None).transpose(1, 2)
+      iq = apply_rope(iq.transpose(1, 2), rot, idx.rope_interleave, index_k is not None).transpose(1, 2)
     if hasattr(self, "compressor_gate"):
       # cache an indexer key and a pooling gate per token, a pool's key is the gate softmax weighted sum of its keys
       kg = k.stack(self.compressor_gate(x), dim=2)  # (B, T, kpool, 2, D)
       kg = _update_cache(self.cache_kg, kg, start_pos, 1).float().reshape(B, -1, idx.kpool, 2, idx.head_dim)
       k = ((kg[..., 1, :] + self.compressor_ape["weight"]).softmax(2) * kg[..., 0, :]).sum(2)  # (B, S, D)
-    elif keys is None:
+    elif index_k is None:
       k = _update_cache(self.cache_kg, k, start_pos, 1).float()  # (B, S, D)
     if idx.qsa:
       k, rot = self.k_norm(k.reshape(B, -1, idx.kpool, idx.head_dim).mean(2)), unwrap(freqs)[:self.max_context:idx.kpool]
@@ -533,7 +530,7 @@ class Indexer:
     q_pos = Tensor.stack(*(Tensor(p) for p in start_pos)).reshape(-1, 1, 1, 1) + Tensor.arange(T).reshape(1, 1, T, 1)
     k_pos = Tensor.arange(S)
     scores = ((Tensor.arange(scores.shape[-1]) + 1) * idx.kpool <= q_pos + 1).where(scores, -math.inf)
-    if keys is not None: return topk_mask(scores, idx.top_k // idx.kpool) & (scores > -math.inf)
+    if index_k is not None: return topk_mask(scores, idx.top_k // idx.kpool) & (scores > -math.inf)
     if idx.msa: scores = (Tensor.arange(scores.shape[-1]) == q_pos // idx.kpool).where(math.inf, scores)
     # selected incomplete pools add only tail/future tokens, handled by the final tail and causal mask
     picked = topk_mask(scores, idx.top_k // idx.kpool).repeat_interleave(idx.kpool, dim=-1)[..., :S]
@@ -543,7 +540,7 @@ class Compressor:
   def __init__(self, config:TransformerConfig, ratio:int, dim:int):
     self.ratio, self.span, self.dim, self.max_context = ratio, 1 + (ratio == 4), dim, config.max_context
     self.kv, self.norm = Linear(config.dim, dim * self.span, bias=False), nn.RMSNorm(dim, config.norm_eps)
-    if ratio > 1: self.gate = Linear(config.dim, dim * self.span, bias=False)
+    self.gate = Linear(config.dim, dim * self.span, bias=False)
     self.ape = {"weight": Tensor.zeros(ratio, dim * self.span)}
 
   def _init_state(self, x:Tensor):
@@ -553,11 +550,10 @@ class Compressor:
       self.cache_pools = Tensor.zeros(x.shape[0], ceildiv(self.max_context + x.max_shape[1], self.ratio) + 2, self.dim,
                                       dtype=dtypes.half, device=x.device).clone()
 
-  def pool(self, x:Tensor, start_pos:StartPos) -> Tensor:  # (B, n_pools, dim): the pools from the one of start_pos on
+  def pool(self, x:Tensor, start_pos:StartPos) -> Tensor:
     B, d, r, pos = x.shape[0], self.dim, self.ratio, start_pos[0]
-    kv = self.kv(x)  # one key a pool needs no gate
-    kg, store = rolling_window(self.cache_kg, kv.stack(self.gate(x) if r > 1 else kv.zeros_like(), dim=2), Tensor(pos).eq(0))
-    n_pools = ceildiv(x.max_shape[1] + r - 1, r)
+    kv, n_pools = self.kv(x), ceildiv(x.max_shape[1] + r - 1, r)
+    kg, store = rolling_window(self.cache_kg, kv.stack(self.gate(x), dim=2), Tensor(pos).eq(0))
     kg = Tensor(kg.uop.after(store)).pad_to((B, self.cache_kg.shape[1] + n_pools*r, *kg.shape[2:])) # (B, r*span + n_pools*r, 2, d*span)
     groups, ape = kg[:, r-pos%r:r-pos%r+(n_pools+self.span-1)*r].reshape(B, -1, r, 2, kg.shape[-1]), self.ape["weight"]
     if self.span > 1:
@@ -566,8 +562,8 @@ class Compressor:
       groups, ape = prev.cat(groups[:, 1:, ..., d:], dim=2), ape[:, :d].cat(ape[:, d:])
     return self.norm(((groups[..., 1, :] + ape).softmax(2) * groups[..., 0, :]).sum(2))
 
-  def __call__(self, x:Tensor, start_pos:StartPos, freqs:Tensor, pools:Tensor|None=None) -> Tensor:  # the cache of all the roped pools
-    first_pool, pools = start_pos[0] // self.ratio, self.pool(x, start_pos) if pools is None else pools
+  def __call__(self, x:Tensor, start_pos:StartPos, freqs:Tensor) -> Tensor:
+    first_pool, pools = start_pos[0] // self.ratio, self.pool(x, start_pos)
     rot = freqs[::self.ratio][first_pool:first_pool+pools.shape[1]]
     return _update_cache(self.cache_pools, apply_rope(pools.unsqueeze(1), rot, True, True).squeeze(1), (first_pool,), 1)
 
