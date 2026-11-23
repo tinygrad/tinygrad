@@ -169,19 +169,17 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       grid = _ggml_iq_grid(t.device, _ggml.iq1s_grid, (2048, 8))[q].reshape((-1, 8, 2, 2, 8))
       grid = (grid > 127).where(grid - 256, grid)
       return (dl * (grid + delta)).flatten(-4)
-    if ggml_type == 39:
-      e = blocks[:, 0].cast(dtypes.uint32)
-      small_bits = Tensor.const((0x00200000, 0x00400000), dtypes.uint32).to(t.device, force=True)[e.clip(0, 1).cast(dtypes.int32)] # e < 2
-      d = (e < 2).where(small_bits, (e - 1) * 0x00800000).bitcast(dtypes.float32).unsqueeze(-1)
-      codes = q_to_uint8(blocks[:, 1:17], 4)
-      fp4_val = Tensor.const(_ggml.kvalues_mxfp4, dtypes.float32).to(t.device, force=True)[codes]
-      return (fp4_val * d).flatten(-2)[:n]
-    if ggml_type == 40:
-      e = blocks[:, :4].cast(dtypes.uint32).unsqueeze(-1)
-      normal = (((e >> 3 & 0xF) + 119) << 23 | (e & 7) << 20).bitcast(dtypes.float32)
-      d = (e == 0x7F).where(0, (e & 0x78 == 0).where((e & 7).cast(dtypes.float32) * 2**-10, normal))
+    if ggml_type in (39, 40):
+      if ggml_type == 39:
+        e = blocks[:, :1].cast(dtypes.uint32)
+        small_bits = Tensor.const((0x00200000, 0x00400000), dtypes.uint32).to(t.device, force=True)[e.clip(0, 1).cast(dtypes.int32)] # e < 2
+        d, codes = (e < 2).where(small_bits, (e - 1) * 0x00800000).bitcast(dtypes.float32), blocks[:, 1:]
+      else:
+        e = blocks[:, :4].cast(dtypes.uint32).unsqueeze(-1)
+        normal = (((e >> 3 & 0xF) + 119) << 23 | (e & 7) << 20).bitcast(dtypes.float32)
+        d, codes = (e == 0x7F).where(0, (e & 0x78 == 0).where((e & 7).cast(dtypes.float32) * 2**-10, normal)), blocks[:, 4:].reshape(-1, 4, 8)
       fp4_lut = Tensor.const(_ggml.kvalues_mxfp4, dtypes.float32).to(t.device, force=True)
-      return (d * fp4_lut[q_to_uint8(blocks[:, 4:].reshape(-1, 4, 8), 4)]).flatten(-2)
+      return (fp4_lut[q_to_uint8(codes, 4)] * d).flatten(-2)
     if ggml_type == 41:
       d = blocks[:,:2].bitcast(dtypes.float16)
       bits = q_to_uint8(blocks[:,2:], 1).reshape(-1, 8, 16).transpose(-1, -2).flatten(-2).bitcast(dtypes.int8)
