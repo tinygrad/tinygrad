@@ -65,7 +65,7 @@ def fold_divmod_general(d: UOp) -> UOp|None:
           if const % div: b_parts.append(x.const_like(const % div))
           b = UOp.usum(*b_parts) if b_parts else x.const_like(0)
           if 0 <= b.vmin and b.vmax < div:
-            results.append((len((r:=(newxs % x.ufix(c//div))*div + b).backward_slice), r))
+            results.append((len((r:=(newxs % (c//div))*div + b).backward_slice), r))
     if results: return min(results, key=lambda r: r[0])[1]
 
   # ** Variable Denominator / Fallback Rules **
