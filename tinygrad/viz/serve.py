@@ -354,7 +354,7 @@ def load_amd_counters(data:VizData, profile:list) -> None:
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None and e.profile_key is not None:
       durations.setdefault(e.profile_key, []).append(float(e.en-e.st))
     if isinstance(e, ProfileProgramEvent) and e.device.startswith("AMD") and e.tag is not None: prg_events[e.tag] = e
-    if isinstance(e, ProfileDeviceEvent) and e.device.startswith("AMD"): arch = f"gfx{unwrap(e.props)['gfx_target_version']//1000}"
+    if isinstance(e, ProfileDeviceEvent) and e.device.startswith("AMD"): arch = unwrap(e.target).arch
   if len(counter_events) == 0: return None
   data.ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(data.ctxs), 0), (durations, all_counters:={}))]})
   run_number = {n:0 for n,_ in counter_events}
@@ -517,7 +517,7 @@ def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str]
 
 def load_nv_counters(data:VizData, profile:list) -> None:
   steps:list[dict] = []
-  sm_version = {e.device:e.props.get("sm_version", 0x800) for e in profile if isinstance(e, ProfileDeviceEvent) and e.props is not None}
+  sm_version = {e.device:e.target.get("sm_version", 0x800) for e in profile if isinstance(e, ProfileDeviceEvent) and e.target is not None}
   run_number:dict[bytes, int] = {}
   for e in profile:
     if type(e).__name__ == "ProfilePMAEvent":
