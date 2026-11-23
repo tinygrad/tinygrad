@@ -3,7 +3,7 @@ import itertools, ctypes, struct, time
 from dataclasses import replace, dataclass, field
 from collections import defaultdict, Counter
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, flatten, DEBUG, VIZ, ALL2ALL, PROFILE
-from tinygrad.device import Device, Buffer, BufferSpec, Compiled, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
+from tinygrad.device import Device, Buffer, BufferSpec, Compiled, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent, is_iface_usb
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
 from tinygrad.uop.ops import pm_renumber_slots, CountCtx, sint_to_uop, pm_flatten_linear, AxisType
 from tinygrad.dtype import dtypes, AddrSpace, truncate
@@ -25,7 +25,6 @@ class HCQInfo:
   skip_wait:bool = False # TODO: remove. an rdma copy between nodes is two batches, so waiting on the first alone deadlocks
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
-def is_usb(dev:str|tuple[str, ...]) -> bool: return Device.target_for(Device.canonicalize(to_tuple(dev)[0])).interface.endswith("USB")
 
 def get_enqueue_devs(call:UOp) -> tuple[str, ...]:
   if call.op is not Ops.CALL: return () # entries can be AFTER-wrapped calls
@@ -197,7 +196,7 @@ def stage_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   device = enqueued[0]
 
   from tinygrad.runtime.ops_disk import is_disk_read
-  dev, host, usb_memcpys = Device[device], Device[device].host, is_usb(device)
+  dev, host, usb_memcpys = Device[device], Device[device].host, is_iface_usb(device)
   mappable = {"CPU", "PYTHON"} | ({"NPY", "DISK"} if usb_memcpys else {"DISK"} if is_disk_read(call) else set()) # ops_disk stages it in the batch
   if device != host and not all(Device[d].peer_group == dev.peer_group or (d.split(":")[0] in mappable and Device[d].host == host) for d in devs):
     stage = UOp.alloc(src.max_shape, src.dtype, int.from_bytes(call.key[:8], "little"), device=host)
@@ -247,7 +246,7 @@ class BatchCtx:
 
   def __post_init__(self):
     # the other devices whose memory a call touches: a usb gpu can't reach host memory
-    reach = [HCQ_DEVS if is_usb(d) else HCQ_DEVS | HOST_DEVS for _, d, _ in self.batch]
+    reach = [HCQ_DEVS if is_iface_usb(d) else HCQ_DEVS | HOST_DEVS for _, d, _ in self.batch]
     arg_devs = [{Device.canonicalize(x) for b in get_call_arg_uops(c) for x in to_tuple(b.device)} for c, _, _ in self.batch]
     touched = [{x for x in xs if all_devices_in(x, r)} - {d} for xs, r, (_, d, _) in zip(arg_devs, reach, self.batch)]
 

@@ -6,7 +6,7 @@ import importlib, inspect, functools, itertools, pathlib, os, contextlib, atexit
 from tinygrad.helpers import mv_address, LRU, getenv, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, perf_counter_us, HCQ_RUNTIME_DEV, is_disk_device, canonicalize_device_name, Target
+from tinygrad.helpers import cpu_profile, perf_counter_us, HCQ_RUNTIME_DEV, is_disk_device, canonicalize_device_name, Target, to_tuple
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.renderer import Renderer
@@ -68,6 +68,7 @@ class _Device:
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device: _Device = _Device()
 atexit.register(lambda: [Device[dn].finalize() for dn in tuple(Device._opened_devices)])
+def is_iface_usb(dev:str|tuple[str, ...]) -> bool: return Device.target_for(Device.canonicalize(to_tuple(dev)[0])).interface.endswith("USB")
 
 # **************** Profile ****************
 
