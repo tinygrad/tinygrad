@@ -290,6 +290,15 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
 def lea(x:UOp) -> UOp: return UOp.ins(X86Ops.LEA, fold_address(x), dtypes.uint64)
 
 @uopfunc
+def load_native(opcode:str, base:UOp, index:UOp, displacement:UOp, scale:UOp) -> UOp:
+  target = base.index(index + displacement // scale)
+  return UOp.native(X86Ops[opcode], target.load())
+
+@uopfunc
+def add_native(a:UOp, b:UOp) -> UOp:
+  return UOp.native(X86Ops.VADDSS, a + b)
+
+@uopfunc
 def store_native(opcode:str, base:UOp, index:UOp, displacement:UOp, scale:UOp, value:UOp, lane:UOp|None=None) -> UOp:
   target = base.index(index + displacement // scale).expand(value.shape)
   return UOp.native(X86Ops[opcode], target.store(value))
@@ -403,7 +412,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("a", dtypes.ints+(dtypes.bool,)) ^ UPat.var("b"), lambda a,b: UOp.ins(X86Ops.XOR, (a, b), a.dtype)),
   (UPat(Ops.SUB, dtypes.ints, (UPat.var("a"), UPat.var("b"))), lambda a,b: UOp.ins(X86Ops.SUB, (a, b), a.dtype)),
   # float binary
-  ((UPat(dtype=dtypes.float32) + UPat()).named("x"), lambda x: UOp.ins(X86Ops.VADDSS, x.src, x.dtype)),
+  ((UPat(dtype=dtypes.float32) + UPat()).named("x"), lambda x: add_native(*x.src)),
   ((UPat(dtype=dtypes.float64) + UPat()).named("x"), lambda x: UOp.ins(X86Ops.VADDSD, x.src, x.dtype)),
   ((UPat(dtype=dtypes.float32) * UPat()).named("x"), lambda x: UOp.ins(X86Ops.VMULSS, x.src, x.dtype)),
   ((UPat(dtype=dtypes.float64) * UPat()).named("x"), lambda x: UOp.ins(X86Ops.VMULSD, x.src, x.dtype)),
@@ -446,9 +455,11 @@ isel_matcher = PatternMatcher([
   # load, store
   (UPat(Ops.LOAD, dtypes.floats, src=(UPat(name="a"),), name="x"), lambda x,a: None if a.addrspace is AddrSpace.REG else
    UOp.ins(X86Ops.VPINSRW, (UOp(Ops.NOOP),) + fold_address(a) + (UOp.cconst(0, dtypes.u8),), x.dtype) if x.max_numel() * x.dtype.itemsize == 2 else
+   load_native(_xmm_sz(x).name, *fold_address(a)) if a.op is Ops.INDEX and a.src[0].max_numel() == x.max_numel() == 1 else
    UOp.ins(_xmm_sz(x), fold_address(a), x.dtype)),
   (UPat(Ops.LOAD, dtypes.ints+(dtypes.bool,), src=(UPat(name="a"),), name="x"), lambda x,a: None if a.addrspace is AddrSpace.REG else
-   UOp.ins(X86Ops.MOV, fold_address(a), x.dtype) if x.max_numel() == 1 else UOp.ins(_xmm_sz(x), fold_address(a), x.dtype)),
+   load_native(X86Ops.MOV.name, *fold_address(a)) if a.op is Ops.INDEX and a.src[0].max_numel() == x.max_numel() == 1 else
+   UOp.ins(X86Ops.MOV if x.max_numel() == 1 else _xmm_sz(x), fold_address(a), x.dtype)),
   (UPat.var("a").store(UPat.var("b", dtypes.floats)), lambda a,b: None if a.addrspace is AddrSpace.REG else
    store_native("VPEXTRW", *fold_address(a), b, UOp.cconst(0, dtypes.u8)) if b.max_numel() * b.dtype.itemsize == 2 else
    store_native(f"{_xmm_sz(b).name}m", *fold_address(a), b)),
