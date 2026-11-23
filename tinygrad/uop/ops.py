@@ -111,7 +111,7 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
   return ret
 
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
-  src = tuple(x if isinstance(x, UOp) else UOp.const(x) for x in arg)
+  src = tuple(UOp.const(x) for x in arg)
   for x in src:
     if not dtypes.is_int(x.dtype): raise RuntimeError(f"shape must be int, got {x.dtype} in {arg}")
   return src[0] if len(src) == 1 else UOp(Ops.STACK, src=src)
@@ -221,7 +221,6 @@ class _UOpTuple(tuple):
 
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin import Mixin
-from tinygrad.mixin.elementwise import ElementwiseMixin
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
@@ -566,10 +565,6 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   def vconst_like(self, b:ConstLike):
     # for use after movement ops have been removed
     return UOp.const(b, self.dtype).broadcast(self.max_numel())
-  def ufix(self, x):
-    # only a python const becomes a UOp, a Tensor passes through so _broadcasted lifts self into a Tensor
-    if isinstance(x, ElementwiseMixin): return x
-    return UOp.const(x)
   def broadcast(self, count:int):
     if count == 1: return self
     return UOp(Ops.STACK, src=(self,)*count)
@@ -597,8 +592,8 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   def alu(self, op, *src:UOp, **kwargs): return UOp(op, src=(self, *src), **kwargs)
   @staticmethod
   def const(b:ConstLike, dtype:DType|None=None):
+    if isinstance(b, UOp): return b if dtype is None else b.cast(dtype)
     if dtype is None or b is Invalid: dtype = dtypes.from_py(b)
-    if isinstance(b, UOp): return b.cast(dtype)
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
     # .cast folds away at exactly the dtypes a CONST derives (bool/weakint/weakfloat): bare there, the pair everywhere else
