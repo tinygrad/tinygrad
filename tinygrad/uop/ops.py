@@ -1746,6 +1746,7 @@ class RewriteContext:
     self.replace: dict[UOp, UOp] = {}
     self.enter_calls = enter_calls
 
+  # bpm can see a node more than once, so it's cached. pm runs at most once per UOp due to the replace dict check in unified_rewrite
   def cached_bpm_rewrite(self, x:UOp) -> UOp|None:
     if (ret:=self.bpm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
     ret = self.bpm_cache[x] = unwrap(self.bpm).rewrite(x, self.ctx)
