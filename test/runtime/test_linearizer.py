@@ -17,8 +17,8 @@ from test.runtime.test_softmax_fusion import single_kernel_softmax
 MOCKGPU = DEV.interface.startswith("MOCK")
 
 def backedge_accs(uops):
-  return {cmp.src[0].buf_uop for u in uops if u.op is Ops.BACKEDGE for cmp in u.src[2].toposort()
-    if cmp.op is Ops.CMPLT and cmp.src[0].op is Ops.LOAD}
+  return {idx.buf_uop for u in uops if u.op is Ops.BACKEDGE for cmp in u.src[2].toposort()
+    if cmp.op is Ops.CMPLT and cmp.src[0].op is Ops.ADD and (idx:=cmp.src[0].src[0]).op is Ops.LOAD}
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "isa backends don't preserve the op spec when lowering")
 class TestLinearizer(unittest.TestCase):

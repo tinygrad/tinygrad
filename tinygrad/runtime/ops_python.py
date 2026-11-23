@@ -60,7 +60,7 @@ class PythonProgram(Program['PythonDevice']):
       i = 0
       while i < len(self.uops):
         u = self.uops[i]
-        src_values = [values.get(v, None) for v in u.src_without_body if v.dtype is not dtypes.void]
+        src_values: list[Any] = [values.get(v, None) for v in u.src_without_body if v.dtype is not dtypes.void]
         src_dtypes = [v.dtype for v in u.src_without_body if v.dtype is not dtypes.void]
         if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
         if u.op is Ops.ENDIF:

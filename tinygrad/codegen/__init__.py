@@ -2,10 +2,10 @@ from dataclasses import replace, dataclass, field
 from collections import deque
 import itertools, functools, time, inspect
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC, SCACHE, BASEDIR
-from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, cpu_profile
 from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType, ParamArg
-from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
+from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear, ParamArg
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.uir import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
@@ -270,30 +270,29 @@ pm_implicit_barriers = PatternMatcher([
 ])
 
 def remove_range(sink:UOp):
-  uops = list(sink.toposort())
-  loop_ids = itertools.count(max((aid for u in uops if u.op is Ops.RANGE for aid in u.axis_id), default=-1) + 1)
+  uops = sink.toposort()
   acc_slots = itertools.count(max((u.arg.slot+1 for u in uops if isinstance(u.arg, ParamArg)), default=0))
-  enclosing = {u.src[1]:tuple(u.ranges) for u in uops if u.op is Ops.END and u.ranges}
   ends: dict[UOp, list[UOp]] = {}
   for u in uops:
     if u.op is Ops.END: ends.setdefault(u.src[1], []).append(u)
   replacements: dict[UOp, UOp] = {}
-  for u in uops:
-    if u.op is not Ops.RANGE or u.axis_type in (AxisType.GLOBAL, AxisType.LOCAL) or u.dtype is dtypes.void or u not in ends: continue
-    acc = UOp.placeholder((1,), u.commit_dtype(dtypes.int), slot=next(acc_slots), addrspace=AddrSpace.REG)
-    acc = acc.after(acc.after(*enclosing.get(u, ()))[0].store(0))
-    inputs = dedup(s for x in uops if u in x.ranges for s in x.src_without_body if u not in s.ranges and s is not u)
-    gate = UOp(Ops.IF, src=((u.src[0] > 0).after(acc, *inputs), UOp(Ops.NOOP))) if u.src[0].vmin <= 0 else None
-    loop = UOp.loop(next(loop_ids))
-    loop = loop.replace(src=(loop.src[0].after(gate if gate is not None else acc),))
-    replacements[u] = acc.after(*((loop, gate) if gate is not None else (loop,)))[0].load()
-    for e in ends[u]:
-      if len(e.src) != 2 or len(u.src) != 1: continue
-      body = e.src[0]
-      inc = acc.after(acc[0].store(acc.after(body)[0].load() + 1))
-      end = body.backedge(loop, inc[0].load() < u.src[0])
-      replacements[e] = end if gate is None else UOp(Ops.ENDIF, src=(gate, end))
-  return graph_rewrite(sink.substitute(replacements, name="remove range"), pm_cast_const)
+  for rng, exits in ends.items():
+    if rng.axis_type in (AxisType.GLOBAL, AxisType.LOCAL) or rng.dtype is dtypes.void: continue
+    bound, = rng.src
+    acc = UOp.placeholder((1,), rng.commit_dtype(dtypes.int), slot=next(acc_slots), addrspace=AddrSpace.REG)
+    acc = acc.after(*exits[0].ranges)[0].set(0)
+    entry = UOp(Ops.NOOP).after(acc, bound)
+    if bound.vmin <= 0:
+      inputs = dedup(s for x in uops if rng in x.ranges for s in x.src_without_body if rng not in s.ranges)
+      entry = UOp(Ops.IF, src=((bound > 0).after(acc, *inputs), UOp(Ops.NOOP)))
+    loop = rng.replace(src=(entry,))
+    replacements[rng] = acc.after(loop)[0].load()
+    next_idx = replacements[rng] + 1
+    for end in exits:
+      body = end.src[0]
+      edge = body.backedge(loop, (next_idx < bound).after(acc.after(body)[0].store(next_idx)))
+      replacements[end] = UOp(Ops.ENDIF, src=(entry, edge)) if entry.op is Ops.IF else edge
+  return sink.substitute(replacements, extra_pm=pm_cast_const, name="remove range")
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if DEBUG >= 5: print(render_uir(ast))
