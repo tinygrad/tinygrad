@@ -81,6 +81,11 @@ class TestDropoutProbabilityEdgeCases(unittest.TestCase):
       out = Tensor.ones(100).dropout(1.0)
       np.testing.assert_allclose(out.numpy(), np.zeros(100))
 
+  def test_dropout_rate_one_backward(self):
+    x = Tensor.ones(())
+    with Context(TRAINING=1): x.dropout(1.0).backward()
+    self.assertEqual(x.grad.item(), 0)
+
 class TestZeroFolding(unittest.TestCase):
   # we don't need more of these
 
