@@ -48,6 +48,10 @@ pm_export: PatternMatcher = PatternMatcher([
   (UPat(Ops.CALL, name="c"), export_call),
 ])
 
+def bind_alloc(b:UOp) -> UOp:
+  if b.device is None: raise RuntimeError("global storage needs a device, give the ALLOC one")
+  return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
+
 # EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
 def map_back_extern(ctx:tuple[UOp, ...], e:UOp) -> UOp:
   if e.arg.slot >= len(ctx) or as_extern(x:=ctx[e.arg.slot], e.arg.slot) is not e:
@@ -58,7 +62,7 @@ def map_back_extern(ctx:tuple[UOp, ...], e:UOp) -> UOp:
 pm_map_back = PatternMatcher([
   (UPat(Ops.EXTERN, name="e"), map_back_extern),
   # global ALLOCs are bound to fresh BUFFERs for this invocation
-  (UPat(Ops.ALLOC, name="b"), lambda b: UOp.new_buffer(b.device, b.max_numel(), b.dtype) if b.addrspace is AddrSpace.GLOBAL else None),
+  (UPat(Ops.ALLOC, name="b"), lambda b: bind_alloc(b) if b.addrspace is AddrSpace.GLOBAL else None),
 ])
 
 def map_back(linear:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, dict[str, int]]:
@@ -66,7 +70,11 @@ def map_back(linear:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, dict[str, int]]:
   linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, name="map back")
   # the values of the bound Variables the linear uses, they are call args
   used_vars = {v.expr for si in linear.src for v in UOp.sink(*si.src[1:]).variables()}
-  return linear, {b.expr:b.arg.val for b in externs if b.is_bound_var and b.expr in used_vars}
+  var_vals: dict[str, int] = {}
+  for b in externs:
+    if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
+      raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
+  return linear, var_vals
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -268,7 +276,6 @@ class Tensor(RandMixin):
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
     fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, name="export")
-    if len(names:=[x.expr for x in ctx.externs if x.is_bound_var]) != len(set(names)): raise RuntimeError(f"bind mismatch on a Variable in {names}")
     return fn, tuple(ctx.externs)
 
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:

@@ -721,12 +721,13 @@ pm_contiguous_views = PatternMatcher([
 def create_linear(fn:UOp) -> UOp:
   """an exported function (no runtime state) to the LINEAR of calls that runs it, on its EXTERNs, view args and ALLOCs"""
   # the LINEAR only depends on fn, it's cached for as long as the schedule of fn is
-  if SCACHE and (hit:=linear_cache.get((fn, NO_MEMORY_PLANNER.value))) is not None and hit[0] in schedule_cache: return hit[1]
+  key = (fn, NO_MEMORY_PLANNER.value)
+  if SCACHE and (hit:=linear_cache.get(key)) is not None and hit[0] in schedule_cache: return hit[1]
   # a contiguous view of storage is a different buffer: it's an input of the scheduled function, the call arg is the view
   views: dict[UOp, int] = {}
-  sched_fn = graph_rewrite(fn, pm_contiguous_views, ctx=views, name="contiguous views")
-  sched_fn = sched_fn.substitute({v:v.param_like(i) for v,i in views.items()}, walk=True, name="views to params")
-  linear_call = graph_rewrite(sched_fn.call(*views, precompile=True), pm_schedule, name="schedule to linear", enter_calls=True)
+  fn = graph_rewrite(fn, pm_contiguous_views, ctx=views, name="contiguous views")
+  fn = fn.substitute({v:v.param_like(i) for v,i in views.items()}, walk=True, name="views to params")
+  linear_call = graph_rewrite(fn.call(*views, precompile=True), pm_schedule, name="schedule to linear", enter_calls=True)
 
   # this recursively resolves the linear_call, storage stays unbound until map back
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
@@ -739,7 +740,6 @@ def create_linear(fn:UOp) -> UOp:
 
   # the storage it allocates gets canonical slots, so the linear only depends on fn. map back binds each to fresh storage
   allocs = [u for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL]
-  if any(b.device is None for b in allocs): raise RuntimeError("global storage needs a device, give the ALLOC one")
   ret = linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
-  linear_cache[(fn, NO_MEMORY_PLANNER.value)] = (sched_fn.key, ret)
+  linear_cache[key] = (fn.key, ret)
   return ret
