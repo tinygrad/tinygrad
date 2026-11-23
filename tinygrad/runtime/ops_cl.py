@@ -56,7 +56,8 @@ class CLQueue(HWQueue):
     args, images = get_call_kernel_args(call, prg, self.devs), []
     p = make_program(prg, 8, self.devs[0])
     binary = UOp(Ops.BINARY, arg=self.dev.compile(prg.src[3].arg))
-    kernel = p.after(p.store(prg.replace(src=(*prg.src[:3], binary)))).bitcast(dtypes.u64).index(0).load()
+    # HCQ metadata identifies the original PROGRAM by key; carry the device binary alongside it for link.
+    kernel = p.after(p.store(UOp.native("cl_kernel", prg, binary))).bitcast(dtypes.u64).index(0).load()
     for i, (_, _, dt, shape) in enumerate(TinyELF.from_program(prg).signature):
       if is_image_shape(shape): # [format][desc][errcode]
         desc = (cl.CL_MEM_OBJECT_IMAGE2D, shape[1], shape[0], 0, 0, round_up(shape[1], 256 if OSX else 1) * 4 * dt.itemsize, 0, 0, args[i])
@@ -124,8 +125,10 @@ class CLDevice(Compiled):
     handles = UOp.extern((2,), dtypes.uint64, self.device, "handles")
     self.handles = [handles.index(i).load() for i in range(2)]  # context and queue belong to the process linking the batch
     Compiled.link_bufs[to_name(self.device, "handles")] = Buffer(self.host, 16, initial_value=bytes(self.context)+bytes(self.queue))
-    Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, name="p").store(UPat(Ops.PROGRAM, name="prg")), lambda p, prg, d=self:
-      p.store(UOp(Ops.BINARY, arg=d.function(prg.src[3].arg, prg.src[0].arg.function_name))) if p.device == d.device else None)])
+    Compiled.pm_link += PatternMatcher([
+      (UPat(Ops.ALLOC, name="p").store(UPat.native("cl_kernel", src=(UPat.var("prg"), UPat.var("lib")))),
+       lambda p, prg, lib, d=self: p.store(UOp(Ops.BINARY, arg=d.function(lib.arg, prg.src[0].arg.function_name))) if p.device == d.device else None),
+    ])
 
   @functools.cache
   def compile(self, src:bytes) -> bytes: return CLCompiler(self).compile_cached(src.decode())

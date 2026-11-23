@@ -6,6 +6,7 @@ from tinygrad.codegen import create_linear
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 from tinygrad.runtime.ops_cl import CLDevice, CLAllocator, CLCompiler
+from tinygrad.uop import Ops
 from tinygrad.uop.uir import parse_uir
 
 def compile_batch(fn:str) -> str: return compile_linear(create_linear(parse_uir(fn))).render_uir()
@@ -16,8 +17,13 @@ class TestOpenCL(unittest.TestCase):
     out = Tensor([1, 2, 3], device="CL").realize() + 7
     fn, externs = out.export()
     with ProcessPoolExecutor(1, mp_context=multiprocessing.get_context("spawn")) as pool: batch = pool.submit(compile_batch, fn.render_uir()).result()
+    linear = parse_uir(batch)
+    programs = {p.key for p in linear.toposort() if p.op is Ops.PROGRAM}
+    keys = [k[4] for c in linear.src if (hcq:=c.without_after.arg.hcq) is not None for k in hcq.kernels if k[4] is not None]
+    self.assertTrue(keys)
+    self.assertLessEqual(set(keys), programs)
     with patch.object(CLCompiler, "compile_cached", side_effect=AssertionError("link tried to compile OpenCL source")):
-      run_linear(link_linear(parse_uir(batch), list(externs)), jit=True, wait=True)
+      run_linear(link_linear(linear, list(externs)), jit=True, wait=True)
     self.assertEqual(out.tolist(), [8, 9, 10])
 
   @unittest.skip("allocates tons of memory")
