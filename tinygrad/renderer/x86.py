@@ -6,7 +6,6 @@ from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import unwrap, Target
-from dataclasses import replace
 
 def vreg(slot:int, dtype:DType, choices:tuple[UOp, ...], name:str="vreg") -> tuple[UOp, ...]:
   return UOp.param(slot, dtype, name=name, addrspace=AddrSpace.REG), UOp(Ops.STACK, src=choices)
@@ -208,11 +207,6 @@ WGPR = tuple(r for r in GPR if r is not RSP)
 
 CALLEE_SAVED = (RBX, RBP, GPR[12], GPR[13], GPR[14], GPR[15])
 
-# a register defined outside the instruction stream: the stack pointer, the args pointer, a callee saved register
-def reg(dt:DType, r:UOp) -> UOp: return r.replace(arg=replace(r.arg, dtype=dt))
-def stack_pointer() -> UOp: return reg(dtypes.uint64, RSP)
-def args_pointer() -> UOp: return reg(dtypes.uint64, RDI)
-
 # ***** X86 instruction selection *****
 # a register buffer is its own virtual register, identified by its buffer slot
 def regbuf_reg(x:UOp) -> tuple[UOp, ...]:
@@ -281,7 +275,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v.cast(dtypes.uint32) if v.dtype.itemsize < 4 else v
   if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp.cconst(0, dtypes.u64), _disp(0), UOp.cconst(x.dtype.itemsize, dtypes.u32))
   base, idx = x.src[0], x.src[1]
-  scale = 1 if base in (stack_pointer(), args_pointer()) else base.dtype.itemsize
+  scale = 1 if base in (RSP, RDI) else base.dtype.itemsize
   sz = UOp.cconst(base.dtype.itemsize, dtypes.u32)
   if idx.op is Ops.ADD and is_imm(c:=idx.src[1]) and dtypes.i32.min <= (disp:=c.src[0].val * scale) <= dtypes.i32.max:
     return (base, _cast(idx.src[0]), _disp(disp), sz)
@@ -338,7 +332,7 @@ isel_matcher = PatternMatcher([
    lambda x,m: UOp.ins(X86Ops.JNE, (x.src[1], x.src[0], test_gate(m)), x.dtype)),
   # **** Op -> X86Op ****
   # function abi constraints
-  (UPat(Ops.PARAM), args_pointer),
+  (UPat(Ops.PARAM), lambda: RDI),
   (UPat(Ops.REFPARAM, name="x"), lambda x: x.src[1]),
   # conditional moves between addresses, lea both srcs
   (UPat.var("m").where(UPat((Ops.INDEX, Ops.SHRINK), name="a"), UPat((Ops.INDEX, Ops.SHRINK), name="b")), lambda m,a,b:
@@ -469,14 +463,13 @@ class X86LinearContext(LinearContext):
     before, after, used = [], [], {rdef(u) for u in uops}
     for r in CALLEE_SAVED:
       if r in used:
-        a = reg(dtypes.uint64, r)
         slot = self.assign_spill_slot(r)
-        before.append(self.ren.spill(slot,a))
-        after.append(self.ren.fill(slot,a,r))
+        before.append(self.ren.spill(slot,r))
+        after.append(self.ren.fill(slot,r,r))
 
     if self.stack_size > 0:
-      before.insert(0, UOp.ins(X86Ops.SUBi, (stack_pointer(), UOp.cconst(self.stack_size, dtypes.i32)), dtypes.u64, RSP))
-      after.append(UOp.ins(X86Ops.ADDi, (stack_pointer(), UOp.cconst(self.stack_size, dtypes.i32)), dtypes.u64, RSP))
+      before.insert(0, UOp.ins(X86Ops.SUBi, (RSP, UOp.cconst(self.stack_size, dtypes.i32)), dtypes.u64, RSP))
+      after.append(UOp.ins(X86Ops.ADDi, (RSP, UOp.cconst(self.stack_size, dtypes.i32)), dtypes.u64, RSP))
     return before + uops[:-1] + after + [uops[-1]]
 
   def assign_spill_slot(self, r:UOp) -> int:
@@ -488,9 +481,9 @@ class X86LinearContext(LinearContext):
 # the element size of loads and stores is already captured by fold_address before stack buffers become 64-bit pointers
 def alloc_buffer(ctx:X86LinearContext, x:UOp):
   dst = vreg(ctx.stack_size, dtypes.uint64, WGPR, name="stack")
-  nx = UOp.ins(X86Ops.LEA, fold_address(stack_pointer().index(UOp.cconst(ctx.stack_size, dtypes.uint32))), dtypes.uint64, *dst)
+  nx = UOp.ins(X86Ops.LEA, fold_address(RSP.index(UOp.cconst(ctx.stack_size, dtypes.uint32))), dtypes.uint64, *dst)
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
-  return nx, [stack_pointer(), nx]
+  return nx, [RSP, nx]
 
 # TODO: control flow should be overhauled so that this isn't necessary
 # a LABEL marks its src: the start of a loop its RANGE, the exit of a loop the start LABEL. a jump's first src is what its LABEL marks
@@ -708,11 +701,11 @@ class X86Renderer(ISARenderer):
   def spill(self, spill_slot:int, x:UOp) -> UOp:
     op = X86Ops.VMOVUPSm if rdef(x) in XMM else X86Ops.MOVm
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp.ins(op, fold_address(stack_pointer().index(disp)) + (x,), dtypes.void)
+    return UOp.ins(op, fold_address(RSP.index(disp)) + (x,), dtypes.void)
 
   def fill(self, spill_slot:int, x:UOp, reg:UOp) -> UOp:
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp.ins(X86Ops.VMOVUPS if reg in XMM else X86Ops.MOV, fold_address(stack_pointer().index(disp)), x.dtype, reg)
+    return UOp.ins(X86Ops.VMOVUPS if reg in XMM else X86Ops.MOV, fold_address(RSP.index(disp)), x.dtype, reg)
 
   def render(self, uops:list[UOp]) -> str:
     targets: dict[UOp, int] = {}
