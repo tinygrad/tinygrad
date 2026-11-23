@@ -80,5 +80,40 @@ class TestExport(unittest.TestCase):
     schedule_cache.clear()
     self.assertIs(create_linear(fn), linear)
 
+  def test_create_linear_cached(self):
+    # the linear of a function is cached for as long as its schedule is
+    from unittest.mock import patch
+    from tinygrad import Context
+    import tinygrad.codegen as codegen
+    @function(precompile=True)
+    def add_one(x): return (x+1).contiguous()
+    fn, _ = Tensor.export((add_one(buf())*2+3).contiguous())
+    codegen.schedule_cache.clear()
+    with patch("tinygrad.codegen.memory_plan_rewrite", wraps=codegen.memory_plan_rewrite) as plan:
+      linear = Tensor.compile(fn)
+      self.assertIs(Tensor.compile(fn), linear)
+      self.assertEqual(plan.call_count, 1)
+      # the jit defers the memory plan, a planned linear is not what it gets
+      with Context(NO_MEMORY_PLANNER=1): self.assertIsNot(Tensor.compile(fn), linear)
+      with Context(SCACHE=0): self.assertIs(Tensor.compile(fn), linear)
+      self.assertEqual(plan.call_count, 3)
+      codegen.schedule_cache.clear()
+      self.assertIs(Tensor.compile(fn), linear)
+      self.assertEqual(plan.call_count, 4)
+
+  def test_linear_cache_isolation(self):
+    from tinygrad import Context
+    from tinygrad.codegen import schedule_cache
+    fn, _ = Tensor.export(buf(65536).sum())
+    schedule_cache.clear()
+    with Context(SCACHE=1, SPLIT_REDUCEOP=0, NO_MEMORY_PLANNER=0):
+      linear = Tensor.compile(fn)
+      self.assertEqual(len(linear.src), 1)
+      with Context(SCACHE=0, SPLIT_REDUCEOP=1): self.assertEqual(len(Tensor.compile(fn).src), 2)
+      self.assertIs(Tensor.compile(fn), linear)  # disabled cache didn't overwrite the planned entry
+      schedule_cache.clear()
+      with Context(NO_MEMORY_PLANNER=1, SPLIT_REDUCEOP=1): self.assertEqual(len(Tensor.compile(fn).src), 2)
+      self.assertEqual(len(Tensor.compile(fn).src), 2)  # use the rebuilt schedule, not the old planned entry
+
 if __name__ == "__main__":
   unittest.main()
