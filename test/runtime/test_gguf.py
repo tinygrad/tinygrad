@@ -154,6 +154,7 @@ class TestGGUF(unittest.TestCase):
   def test_dequantization_iq4_xs(self): self._test_dequantization(GGMLQuantizationType.IQ4_XS)
   def test_dequantization_iq1_m(self): self._test_dequantization(GGMLQuantizationType.IQ1_M)
   def test_dequantization_mxfp4(self): self._test_dequantization(GGMLQuantizationType.MXFP4)
+  def test_dequantization_nvfp4(self): self._test_dequantization(GGMLQuantizationType(40), block_count=2)
   @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, "Backend must support bfloat16")
   def test_dequantization_bf16(self): self._test_dequantization(GGMLQuantizationType.BF16)
   def test_dequantization_mxfp4_old(self):
@@ -291,9 +292,9 @@ class TestGGUF(unittest.TestCase):
       for loader in (gguf_parse, gguf_load):
         with self.assertRaises(FileNotFoundError): loader(d / "test-00001-of-00002.gguf")
 
-  def _test_dequantization(self, qtype: GGMLQuantizationType):
+  def _test_dequantization(self, qtype: GGMLQuantizationType, block_count:int=ggml_test_block_count):
     block_size, type_size = GGML_QUANT_SIZES[qtype]
-    n_el, n_bytes = ggml_test_block_count * block_size, ggml_test_block_count * type_size
+    n_el, n_bytes = block_count * block_size, block_count * type_size
 
     try:
       q_data = quantize((np.random.random((n_el,)).astype(np.float32) * 100 - 50), qtype)
