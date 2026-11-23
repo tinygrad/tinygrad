@@ -342,9 +342,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
         return self.src[0]._shape if len(self.src) >= 1 else None
 
       case Ops.INDEX:
-        shp:list[sint] = []
-        for s in self.src[1:]: shp.extend(list(s.shape))
-        return tuple(shp) + self.src[0].shape[len(self.src[1:]):]
+        return tuple(d for s in self.src[1:] for d in s.shape) + self.src[0].shape[len(self.src)-1:]
 
       case Ops.STACK:
         if len(self.src) == 0: return ()
@@ -448,14 +446,9 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   def _ranges(self) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
     for s in self.src: ret.update(s.ranges)
+    # an ended RANGE ends itself, anything else ends the ranges it carries (same as not flowing through it, pre pm_add_control_flow)
     for er in self.ended_ranges:
-      if er.op is Ops.RANGE:
-        # if it's a single RANGE, we don't flow through it.
-        ret.pop(er, None)
-      else:
-        # if it's not a RANGE, we include all ranges in srcs.
-        # technically we shouldn't flow through these ranges either, but this is pre pm_add_control_flow so it's the same.
-        for s in er.ranges: ret.pop(s, None)
+      for r in ((er,) if er.op is Ops.RANGE else er.ranges): ret.pop(r, None)
     return ret
 
   @property
@@ -634,10 +627,8 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   def get_valid(self) -> UOp:
     if self.op is Ops.STACK: return UOp.stack(*(x.get_valid() for x in self.src))
     return self.src[0] if self.op is Ops.WHERE and self.src[2].is_invalid else UOp.const(not self.is_invalid)
-  def reduce(self, *src:UOp, **kwargs):
-    arg = kwargs.pop('arg', None)
-    if isinstance(arg, Ops): arg = (arg, 0)
-    return UOp(Ops.REDUCE, src=(self,)+src, arg=arg, **kwargs)
+  def reduce(self, *src:UOp, arg=None, **kwargs):
+    return UOp(Ops.REDUCE, src=(self,)+src, arg=(arg, 0) if isinstance(arg, Ops) else arg, **kwargs)
 
   def bufferize(self, *args, **kwargs): return UOp(Ops.STAGE, src=(self,)+args, **kwargs)
   def allreduce(self, op, device:str|tuple[str, ...]):
@@ -764,9 +755,8 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def marg(self):
     match self.op:
-      case Ops.RESHAPE | Ops.EXPAND: return self.src[1].as_shape
+      case Ops.RESHAPE | Ops.EXPAND | Ops.PERMUTE: return self.src[1].as_shape
       case Ops.PAD | Ops.SHRINK: return tuple(zip(self.src[1].as_shape, self.src[2].as_shape))
-      case Ops.PERMUTE: return self.src[1].as_shape
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
   def _mop(self, op:Ops, arg) -> UOp:
@@ -775,9 +765,8 @@ class UOp(Mixin, metaclass=UOpMetaClass):
       return self
     if op is Ops.PERMUTE and arg == tuple(range(self.ndim)): return self
     match op:
-      case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
+      case Ops.RESHAPE | Ops.EXPAND | Ops.PERMUTE: src_args = [arg]
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
-      case Ops.PERMUTE: src_args = [arg]
       case Ops.STACK:
         srcs = (self,)+tuple(arg)
         dtype = dtype_from_uop(Ops.STACK, srcs, None)
@@ -1250,10 +1239,8 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     assert all(a < b for a, b in zip(pos, pos[1:])), f"output_pos {output_pos} must be strictly ascending"
     assert all(0 <= p < len(srcs)+len(values) for p in pos), f"output_pos {output_pos} must be within the arg list"
     # the inputs take the slots not in pos, in order: symbolic output shapes resolve against the final argument slots
-    param_map: list[UOp|None] = [None] * (len(srcs) + len(values))
     it = iter(srcs)
-    for i in range(len(param_map)):
-      if i not in pos: param_map[i] = next(it)
+    param_map: list[UOp|None] = [None if i in pos else next(it) for i in range(len(srcs) + len(values))]
     # nothing has a device, so the call can't run on its own: it's inlined where its values are used
     if default_dev is None: precompile = precompile_backward = False
     def mint(o:UOp, p:int) -> tuple[UOp, UOp]:
@@ -1266,11 +1253,9 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     outputs = tuple(mint(o, p) for o, p in zip(values, pos))
     rets = tuple(r for r, _ in outputs)
     body = UOp.sink(*[p.store(v) for v, (_, p) in zip(values, outputs)])
-    args: list[UOp|None] = [None] * (len(srcs) + len(values))
-    for p, r in zip(pos, rets): args[p] = r
-    it = iter(x.contiguous() if precompile else x for x in srcs)
-    call = body.call(*[r if r is not None else next(it) for r in args], grad_fxn=grad_fxn, name=name, precompile=precompile,
-                     precompile_backward=precompile_backward)
+    out = iter(rets)
+    args = [next(out) if x is None else x.contiguous() if precompile else x for x in param_map]
+    call = body.call(*args, grad_fxn=grad_fxn, name=name, precompile=precompile, precompile_backward=precompile_backward)
     return tuple(r.after(call) for r in rets)
 
   # one-line convenience for the single-output case: self is the value
@@ -1494,10 +1479,8 @@ class UPat(Mixin):
   def bitcast(self, dtype=None): return UPat(Ops.BITCAST, dtype, (self,))
   def load(self, *src:UPat, **kwargs): return UPat(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, src=(self,)+src, **kwargs)
-  def reduce(self, *src:UPat, **kwargs):
-    arg = kwargs.pop('arg', None)
-    if isinstance(arg, Ops): arg = (arg, 0)
-    return UPat(Ops.REDUCE, self.match_dtype, src=(self,)+src, arg=arg, **kwargs)
+  def reduce(self, *src:UPat, arg=None, **kwargs):
+    return UPat(Ops.REDUCE, self.match_dtype, src=(self,)+src, arg=(arg, 0) if isinstance(arg, Ops) else arg, **kwargs)
   def broadcast(self, **kwargs): return UPat(Ops.STACK, self.match_dtype, src=self, **kwargs)
   def after(self, *src:UPat, **kwargs): return UPat(Ops.AFTER, self.match_dtype, (self,)+src, **kwargs)
   def call(self, *src:UPat, **kwargs): return UPat(Ops.CALL, src=(self,)+src, **kwargs)
@@ -1763,9 +1746,6 @@ class RewriteContext:
     self.replace: dict[UOp, UOp] = {}
     self.enter_calls = enter_calls
 
-  # no cache needed: pm_rewrite is called at most once per UOp due to the replace dict check in unified_rewrite
-  def pm_rewrite(self, x:UOp) -> UOp|None: return unwrap(self.pm).rewrite(x, self.ctx)
-
   def cached_bpm_rewrite(self, x:UOp) -> UOp|None:
     if (ret:=self.bpm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
     ret = self.bpm_cache[x] = unwrap(self.bpm).rewrite(x, self.ctx)
@@ -1793,7 +1773,7 @@ class RewriteContext:
         new_src = n.src[:skip] + tuple(self.replace.get(x, x) for x in n.src[skip:])
         new_n = UOp(n.op, new_src, n.arg) if new_src != n.src else n
         # top-down: try pm on rebuilt node, use result as-is (no re-traversal)
-        if self.pm is not None and (rewritten:=self.pm_rewrite(new_n)) is not None: new_n = rewritten
+        if self.pm is not None and (rewritten:=self.pm.rewrite(new_n, self.ctx)) is not None: new_n = rewritten
         self.replace[n] = new_n
     return self.replace.get(root, root)
 
@@ -1842,7 +1822,7 @@ class RewriteContext:
           # in stage 1, once all srcs are rewritten, rebuild (if changed) or run top-down rewrite
           if (new_src:=tuple(tmp)) == new_n.src:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-            if self.pm is None or (new_src_n:=self.pm_rewrite(new_n)) is None:
+            if self.pm is None or (new_src_n:=self.pm.rewrite(new_n, self.ctx)) is None:
               self.replace[n] = new_n
               if n in waitlist: stack.extend(waitlist.pop(n))
               continue
