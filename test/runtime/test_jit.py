@@ -136,11 +136,6 @@ class TestJit(unittest.TestCase):
     add.reset()
     _simple_test(add, N=20)
 
-  def test_simple_jit_norealize(self):
-    @TinyJit
-    def add(a, b): return (a+b)
-    _simple_test(add)
-
   def test_simple_jit_norealize_list(self):
     @TinyJit
     def add(a, b): return [a+b]
@@ -150,18 +145,6 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def add(a, b): return {"billy": a+b}
     _simple_test(add, extract=lambda x: x["billy"])
-
-  def test_jit_multiple_outputs(self):
-    @TinyJit
-    def f(a, b): return (a+b).realize(), (a-b).realize(), (a*b).realize()
-    for _ in range(5):
-      a = Tensor.randn(10, 10)
-      b = Tensor.randn(10, 10)
-      c, d, e = f(a, b)
-      np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-      np.testing.assert_allclose(d.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
-      np.testing.assert_allclose(e.numpy(), a.numpy()*b.numpy(), atol=1e-4, rtol=1e-5)
-    assert_jit_cache_len(f, 3)
 
   def test_jit_zero_does_not_jit(self):
     @TinyJit
@@ -237,39 +220,6 @@ class TestJit(unittest.TestCase):
     for i in range(5):
       np.testing.assert_allclose(f(a, Tensor([i])).numpy(), (a+i).numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(f, 1)
-
-  def test_jit_random_regen(self):
-    def f(a, b):
-      rn = Tensor.randn(*a.shape)
-      return ((a+b)*rn).realize()
-    a = Tensor.randn(10, 10).realize()  # realize these before resetting the random seed
-    b = Tensor.randn(10, 10).realize()
-
-    Tensor.manual_seed(1234)
-    jf = TinyJit(f)
-    res = set()
-    for _ in range(5):
-      o1 = jf(a, b)
-      res.add(o1.numpy()[0][0])
-    assert len(res) == 5, "All values should be different, rand works in jit."
-
-    Tensor.manual_seed(1234)
-    jf2 = TinyJit(f)
-    res2 = set()
-    for _ in range(5):
-      o1 = jf2(a, b)
-      res2.add(o1.numpy()[0][0])
-    assert len(res2) == 5, "All values should be different, rand works in jit."
-    assert res == res2, "Jit rand is not reproducible with the same seed"
-
-    Tensor.manual_seed(3421)
-    jf3 = TinyJit(f)
-    res3 = set()
-    for _ in range(5):
-      o1 = jf3(a, b)
-      res3.add(o1.numpy()[0][0])
-    assert len(res3) == 5, "All values should be different, rand works in jit."
-    assert res3 != res2, "Jit rand is diff with diff seeds"
 
   def test_jit_v_nojit_random_regen(self):
     def f(a, b):

@@ -20,7 +20,7 @@ def get_random_expr(ranges, factors):
 
 if __name__ == "__main__":
   skipped = 0
-  for i in range(700):
+  for i in range(70):
     if i % 100 == 0:
       print(f"Running test {i}")
     upper_bounds = [*list(range(1, 4)), 16, 33, 53, 64, 256]

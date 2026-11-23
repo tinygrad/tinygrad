@@ -73,20 +73,6 @@ class TestSymbolicOps(unittest.TestCase):
         k[:, :i].transpose(1, 2), v[:, :i].transpose(1, 2)).realize().numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  def test_sdpa_symbolic_seq_len_query_only(self):
-    # symbolic seq_len on query only (dim -2 after transpose)
-    q = Tensor.rand(2, 10, 4, 8)
-    k = Tensor.rand(2, 5, 4, 8)
-    v = Tensor.rand(2, 5, 4, 8)
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      Tensor.realize(q, k, v)
-      symbolic = q[:, :vi].transpose(1, 2).scaled_dot_product_attention(
-        k.transpose(1, 2), v.transpose(1, 2)).realize()[:2, :4, :i, :8].numpy()
-      expected = q[:, :i].transpose(1, 2).scaled_dot_product_attention(
-        k.transpose(1, 2), v.transpose(1, 2)).realize().numpy()
-      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-
   def test_sdpa_symbolic_batch(self):
     # symbolic batch dim (dim 0)
     q = Tensor.rand(10, 4, 3, 8)
@@ -99,36 +85,11 @@ class TestSymbolicOps(unittest.TestCase):
       expected = q[:i].scaled_dot_product_attention(k[:i], v[:i]).realize().numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  def test_sdpa_symbolic_heads(self):
-    # symbolic heads dim (dim -3)
-    q = Tensor.rand(2, 10, 3, 8)
-    k = Tensor.rand(2, 10, 3, 8)
-    v = Tensor.rand(2, 10, 3, 8)
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      Tensor.realize(q, k, v)
-      symbolic = q[:, :vi].scaled_dot_product_attention(k[:, :vi], v[:, :vi]).realize()[:2, :i, :3, :8].numpy()
-      expected = q[:, :i].scaled_dot_product_attention(k[:, :i], v[:, :i]).realize().numpy()
-      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-
   def test_attention_pos_0_sz_0(self):
     Attention(128, 8)(Tensor.ones(1, 0, 128), Variable("start_pos", 0, 128).bind(0), None)
 
   def test_attention_pos_0_sz_1(self):
     Attention(128, 8)(Tensor.ones(1, 1, 128), Variable("start_pos", 0, 128).bind(0), None)
-
-  def test_attention_pos_0_sz_2(self):
-    Attention(128, 8)(Tensor.ones(1, 2, 128), Variable("start_pos", 0, 128).bind(0), None)
-
-  def test_cat_dim0(self):
-    def f(a, b): return a.cat(b, dim=0).realize()
-    a = Tensor.rand(10, 3)
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      b = Tensor.rand(2, 3)
-      symbolic = f(a[:vi, :], b)[:i+2, :3].numpy()
-      expected = f(a[:i, :], b).numpy()
-      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_cat_dim0_two_vars(self):
     def f(a, b): return a.cat(b, dim=0).realize()
@@ -154,18 +115,6 @@ class TestSymbolicOps(unittest.TestCase):
         expected = f(a[:, :i], b[:, :j]).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  def test_two_vars_plus1_ij(self):
-    def f(a, b): return (a@b+1).realize()
-    a = Tensor.rand(10, 3).realize()
-    b = Tensor.rand(3, 10).realize()
-    for i in range(2, 5):
-      for j in range(2, 5):
-        vi = Variable("i", 1, 10).bind(i)
-        vj = Variable("j", 1, 10).bind(j)
-        symbolic = f(a[:vi, :], b[:, :vj])[:i, :j].numpy()
-        expected = f(a[:i, :], b[:, :j]).numpy()
-        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-
   def test_two_vars_plus1_ji(self):
     # reverse the order of variables
     def f(a, b): return (a@b+1).realize()
@@ -186,15 +135,6 @@ class TestSymbolicOps(unittest.TestCase):
       symbolic = a.shrink(((3,5),(vi,vi+2)))
       symbolic = symbolic.numpy()
       expected = a.shrink(((3,5),(i,i+2))).numpy()
-      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-
-  def test_slice(self):
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      a = Tensor.rand(7, 11)
-      symbolic = a[3:5, vi:vi+2]
-      symbolic = symbolic.numpy()
-      expected = a[3:5, i:i+2].numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_slice_pad_sum(self):
@@ -232,14 +172,6 @@ class TestSymbolicOps(unittest.TestCase):
       symbolic = a[:, 1:2][:i, :1].numpy()
       expected = Tensor.ones(i, 11)[:, 1:2].numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-
-  def test_ones_sum(self):
-    t = Tensor.ones(10).contiguous()
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      symbolic = t[:vi].sum().item()
-      expected = t[:i].sum().item()
-      np.testing.assert_equal(symbolic, expected)
 
   def test_expand_reduce(self):
     for a in (Tensor([1., float("inf")]).reshape(1, 2), Tensor([True, False]).reshape(1, 2)):

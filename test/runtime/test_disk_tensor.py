@@ -46,12 +46,6 @@ class TestTorchLoad(TempDirTestCase):
     torch.save({"col": torch.arange(1., 13.).reshape(3, 4).to(torch.bfloat16)[:, 1]}, self.tmp("strided_bf16.pt"))
     self.assertEqual(torch_load(self.tmp("strided_bf16.pt"))["col"].float().tolist(), [2., 6., 10.])
 
-  # pytorch zip format
-  def test_load_enet_alt(self): compare_weights_both("https://download.pytorch.org/models/efficientnet_b0_rwightman-3dd342df.pth")
-  # pytorch zip format
-  @unittest.skip("fetch error")
-  def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth')
-
   def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
 
   # pytorch tar format

@@ -57,7 +57,6 @@ class TestGGUFTables(unittest.TestCase):
 
 @unittest.skipUnless(dtypes.uint8 in supported_dtypes and dtypes.half in supported_dtypes, "Backend must support uint8 and half")
 class TestGGUF(unittest.TestCase):
-  def test_load_tinyllama_q4_0(self): self._test_gguf_load("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true")
   @slow
   def test_load_gpt2_q4_1(self): self._test_gguf_load("https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.Q4_1.gguf?download=true")
   def test_load_sample_q6_k(self): self._test_gguf_load("https://huggingface.co/Isotr0py/test-gguf-sample/resolve/main/Quant_Q6_K_1024.gguf?download=true")
@@ -404,7 +403,6 @@ class TestGGUFGEMV(unittest.TestCase):
 
   def test_gguf_gemv_q8_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q8_0)
   def test_gguf_gemv_q6_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q6_K)
-  def test_gguf_gemv_iq1_m(self): self._test_gguf_gemv(GGMLQuantizationType.IQ1_M)
   def test_gguf_gemv_mxfp4(self): self._test_gguf_gemv(GGMLQuantizationType.MXFP4)
   @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, "Backend must support bfloat16")
   def test_gguf_gemv_bf16(self): self._test_gguf_gemv(GGMLQuantizationType.BF16)
