@@ -2,9 +2,9 @@ from __future__ import annotations
 import ctypes, hashlib, functools
 from tinygrad.runtime.autogen import opencl as cl, libc
 from tinygrad.runtime.support import c
-from tinygrad.helpers import to_char_p_p, from_mv, cpu_profile, OSX, DEBUG, suppress_finalizing, unwrap, round_up, is_image_shape
+from tinygrad.helpers import to_char_p_p, from_mv, cpu_profile, OSX, DEBUG, suppress_finalizing, unwrap, round_up, is_image_shape, to_name
 from tinygrad.renderer.cstyle import OpenCLRenderer
-from tinygrad.device import BufferStorage, BufferSpec, HostAllocator, Compiled, MMIOInterface
+from tinygrad.device import Buffer, BufferStorage, BufferSpec, HostAllocator, Compiled, MMIOInterface
 from tinygrad.renderer import Compiler, CompileError, TinyELF
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
@@ -54,7 +54,9 @@ class CLQueue(HWQueue):
 
   def exec(self, call:UOp, prg:UOp):
     args, images = get_call_kernel_args(call, prg, self.devs), []
-    kernel = (p:=make_program(prg, 8, self.devs[0])).after(p.store(prg)).bitcast(dtypes.u64).index(0).load()
+    p = make_program(prg, 8, self.devs[0])
+    binary = UOp(Ops.BINARY, arg=self.dev.compile(prg.src[3].arg))
+    kernel = p.after(p.store(prg.replace(src=(*prg.src[:3], binary)))).bitcast(dtypes.u64).index(0).load()
     for i, (_, _, dt, shape) in enumerate(TinyELF.from_program(prg).signature):
       if is_image_shape(shape): # [format][desc][errcode]
         desc = (cl.CL_MEM_OBJECT_IMAGE2D, shape[1], shape[0], 0, 0, round_up(shape[1], 256 if OSX else 1) * 4 * dt.itemsize, 0, 0, args[i])
@@ -113,19 +115,23 @@ class CLDevice(Compiled):
     if DEBUG >= 1: print(f"CLDevice: opening {self.device_name} with version {self.driver_version}")
     self.context = checked(cl.clCreateContext, None, 1, self.cl_dev, CC_CB(), None)
     self.queue = checked(cl.clCreateCommandQueue, self.context, self.cl_dev, cl.CL_QUEUE_PROFILING_ENABLE)
-    self.handles = [int.from_bytes(bytes(h), "little") for h in (self.context, self.queue)]
 
     arch = ",".join(exts:=info(cl.clGetDeviceInfo, self.cl_dev, cl.CL_DEVICE_EXTENSIONS).split())
     if "cl_khr_image2d_from_buffer" in exts:
       check(cl.clGetDeviceInfo(self.cl_dev, cl.CL_DEVICE_IMAGE_PITCH_ALIGNMENT, 4, ctypes.byref(ipa := ctypes.c_uint32()), None))
       arch += f",IMAGE_PITCH_ALIGNMENT={ipa.value}"
     super().__init__(device, CLAllocator(self), None, arch=arch)
+    handles = UOp.extern((2,), dtypes.uint64, self.device, "handles")
+    self.handles = [handles.index(i).load() for i in range(2)]  # context and queue belong to the process linking the batch
+    Compiled.link_bufs[to_name(self.device, "handles")] = Buffer(self.host, 16, initial_value=bytes(self.context)+bytes(self.queue))
     Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, name="p").store(UPat(Ops.PROGRAM, name="prg")), lambda p, prg, d=self:
       p.store(UOp(Ops.BINARY, arg=d.function(prg.src[3].arg, prg.src[0].arg.function_name))) if p.device == d.device else None)])
 
   @functools.cache
-  def function(self, src:bytes, name:str) -> bytes:
-    lib = CLCompiler(self).compile_cached(src.decode())
+  def compile(self, src:bytes) -> bytes: return CLCompiler(self).compile_cached(src.decode())
+
+  @functools.cache
+  def function(self, lib:bytes, name:str) -> bytes:
     program = checked(cl.clCreateProgramWithBinary, self.context, 1, self.cl_dev, ctypes.c_size_t(len(lib)), to_char_p_p([lib], ctypes.c_ubyte), None)
     check(cl.clBuildProgram(program, 1, self.cl_dev, None, BP_CB(), None)) # NOTE: OSX requires this
     return bytes(checked(cl.clCreateKernel, program, name.encode()))
