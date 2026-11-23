@@ -624,7 +624,7 @@ class NVDevice(Compiled):
     queues, names = ("COMPUTE:0", "COPY:0", "ENCDEC:0"), ("ring", "gpput", "doorbell", "put_value")
     bufs = ("local_mem", "vid_coloc", "vid_filter", "vid_stat")
     Compiled.link_bufs |= {to_name(self.device, n, q): lambda b, n=n, q=q: getattr(self.fifos[q], n) for q in queues for n in names}
-    Compiled.link_bufs |= {to_name(self.device, n): lambda b, n=n: self._grow(n, b.max_numel()) for n in bufs}
+    Compiled.link_bufs |= {to_name(self.device, n): lambda b, n=n: self._ensure_buf(n, b.max_numel()) for n in bufs}
 
   @functools.cached_property
   def fifos(self) -> dict[str, GPFifo]:
@@ -700,7 +700,7 @@ class NVDevice(Compiled):
     linear = lower_and_compile(UOp(Ops.LINEAR, src=(unwrap(lower_call(call)),)))
     run_linear(hcq_link(linear), jit=True, update_stats=False, wait=True)
 
-  def _grow(self, name:str, sz:int) -> Buffer:
+  def _ensure_buf(self, name:str, sz:int) -> Buffer:
     if name not in self.bufs or self.bufs[name].nbytes < sz:
       init = None if name == "local_mem" else bytes(sz)
       self.bufs[name] = Buffer(self.device, sz, options=BufferSpec(nolru=True), initial_value=init).ensure_allocated()
