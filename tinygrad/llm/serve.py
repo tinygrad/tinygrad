@@ -1,11 +1,9 @@
 from __future__ import annotations
 import functools, json, pathlib, queue, re, socket, socketserver, threading, time, traceback, typing, uuid
-from typing import TYPE_CHECKING
 from tinygrad.helpers import DEBUG, colored, stderr_log
 from tinygrad.viz.serve import TCPServerWithReuse, Handler as VizHandler
-if TYPE_CHECKING:
-  from tinygrad.llm.tokenizer import SimpleTokenizer
-  from tinygrad.llm.model import Transformer
+from tinygrad.llm.tokenizer import SimpleTokenizer
+from tinygrad.llm.model import Transformer
 
 DSML = "\uff5cDSML\uff5c"  # the DeepSeek tool call tags, between fullwidth bars
 
