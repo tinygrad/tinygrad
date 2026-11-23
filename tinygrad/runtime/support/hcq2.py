@@ -57,7 +57,7 @@ def make_program(prg:UOp, size:int, device:str) -> UOp:
   return UOp.alloc((size,), dtypes.u8, slot, device=device, name="program")
 
 def make_submit(*cmds:UOp, dev:str, queue:str, deps:tuple[UOp, ...]) -> UOp: # a submit calls its commands on a queue, after deps
-  kind = to_name(dev.split(":")[0], queue.split(":")[0], "submit") # nv_compute_submit: the backend matches the kind
+  kind = to_name(Device.get_class(dev).__name__[:-6], queue.split(":")[0], "submit") # nv_compute_submit: the backend matches the kind
   q = UOp.param(0, dtypes.u8, 1, dev, name=queue) # the queue instance: its device and name
   return UOp.sink(*cmds, arg=KernelInfo(kind)).call(q).after(*deps)
 
