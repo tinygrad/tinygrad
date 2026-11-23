@@ -621,9 +621,9 @@ class NVDevice(Compiled):
 
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 
-    queues = {"COMPUTE:0": lambda: self.fifos["COMPUTE:0"], "COPY:0": lambda: self.fifos["COPY:0"], "ENCDEC:0": self._vid_fifo}
-    names, bufs = ("ring", "gpput", "doorbell", "put_value"), ("local_mem", "vid_coloc", "vid_filter", "vid_stat")
-    Compiled.link_bufs |= {to_name(self.device, n, q): lambda b, n=n, f=f: getattr(f(), n) for q, f in queues.items() for n in names}
+    queues, names = ("COMPUTE:0", "COPY:0", "ENCDEC:0"), ("ring", "gpput", "doorbell", "put_value")
+    bufs = ("local_mem", "vid_coloc", "vid_filter", "vid_stat")
+    Compiled.link_bufs |= {to_name(self.device, n, q): lambda b, n=n, q=q: getattr(self.fifos[q], n) for q in queues for n in names}
     Compiled.link_bufs |= {to_name(self.device, n): lambda b, n=n: self._grow(n, b.max_numel()) for n in bufs}
 
   @functools.cached_property
@@ -635,11 +635,13 @@ class NVDevice(Compiled):
     copy = self._new_gpu_fifo("COPY:0", self.ctxshare, self.channel_group, offset=0x100000)
     self.iface.rm_control(self.channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
     self.fifos = {"COMPUTE:0": compute, "COPY:0": copy}
+    if self.iface.viddec_class is not None: self.fifos["ENCDEC:0"] = self._new_gpu_fifo("ENCDEC:0", 0, self.nvdevice, offset=0x200000, video=True)
 
     self._submit_cmds("COMPUTE:0", *nvm(1, nv_gpu.NVC6C0_SET_OBJECT, self.iface.compute_class),
                        *nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, *data64(self.local_mem_window)),
                        *nvm(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, *data64(self.shared_mem_window)))
     self._submit_cmds("COPY:0", *nvm(4, nv_gpu.NVC6C0_SET_OBJECT, self.iface.dma_class))
+    if "ENCDEC:0" in self.fifos: self._submit_cmds("ENCDEC:0", *nvm(4, nv_gpu.NVC6C0_SET_OBJECT, self.iface.viddec_class))
 
     if self.pma_enabled: self._prof_init() # the sampler binds to the channel group, so it only comes up once the channels do
     return self.fifos
@@ -697,12 +699,6 @@ class NVDevice(Compiled):
     call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_setup")).call(hcq=HCQInfo((self.device,)))
     linear = lower_and_compile(UOp(Ops.LINEAR, src=(unwrap(lower_call(call)),)))
     run_linear(hcq_link(linear), jit=True, update_stats=False, wait=True)
-
-  def _vid_fifo(self) -> GPFifo:
-    if "ENCDEC:0" not in self.fifos:
-      self.fifos["ENCDEC:0"] = self._new_gpu_fifo("ENCDEC:0", 0, self.nvdevice, offset=0x200000, video=True)
-      self._submit_cmds("ENCDEC:0", *nvm(4, nv_gpu.NVC6C0_SET_OBJECT, unwrap(self.iface.viddec_class)))
-    return self.fifos["ENCDEC:0"]
 
   def _grow(self, name:str, sz:int) -> Buffer:
     if name not in self.bufs or self.bufs[name].nbytes < sz:
