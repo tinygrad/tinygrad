@@ -269,7 +269,6 @@ def float_to_fp8(x: float, dtype: DType) -> int:
 def fp8_to_float(x: int, dtype: DType) -> float:
   assert dtype in dtypes.fp8s, "Only for fp8s"
   if dtype in dtypes.fp8_fnuz and x == 0x80: return math.nan
-  if (x & 0x7F) == 0: return -0.0 if x & 0x80 else 0.0
   bias, sig_bits, *_ = _fp8_cfg[dtype]
   mant_bits, exp_bits = sig_bits - 1, 8 - sig_bits
   exp_max, mant_max = (1 << exp_bits) - 1, (1 << mant_bits) - 1
