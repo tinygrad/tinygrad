@@ -1182,26 +1182,25 @@ def _allgather_kernel(out:UOp, counter:UOp, *src:UOp, n:int, widths:tuple[int, .
 def allgather_last(x:Tensor, *, exact:bool=False) -> Tensor: return allgather_lasts(x, exact=exact)[0]
 
 def allgather_lasts(*xs:Tensor, exact:bool=False) -> list[Tensor]:
-  """xs sharded on their last axes on every device whole, each device's parts side by side: small float ones in a kernel of the gpus'
-  mailboxes, else each shard copied to the other devices once (larger float ones on the gpus in half unless exact)"""
+  """xs sharded on their last axes on every device whole, each device's parts side by side: small float ones of a fixed shape in a kernel of
+  the gpus' mailboxes, else each shard copied to the other devices once (larger float ones on the gpus in half unless exact)"""
   if not xs: return []
   if len(xs) > 1 and not all(x.uop.axis == x.ndim-1 and isinstance(x.device, tuple) and x.device == xs[0].device
                              and x.shape[:-1] == xs[0].shape[:-1] for x in xs):
     return [allgather_last(x, exact=exact) for x in xs]
   if xs[0].uop.axis != xs[0].ndim-1 or not isinstance(xs[0].device, tuple): return list(xs)
-  if not all(isinstance(d, int) for x in xs for d in x.shape):
-    return [g.shrink(tuple((0, d) for d in x.shape)) for g, x in zip(allgather_lasts(*(x.pad_to(x.max_shape) for x in xs), exact=exact), xs)]
   devs = xs[0].device
   widths = tuple(int(x.shape[-1]) // len(devs) for x in xs)
+  def whole(x:Tensor, w:int) -> Tensor:
+    y = x.half() if not exact and x.dtype == dtypes.float32 and amd_custom_kernels_supported(devs) else x
+    return Tensor.cat(*(y[..., i*w:(i+1)*w] for i in range(len(devs))), dim=-1).cast(x.dtype)
+  if not all(isinstance(d, int) for x in xs for d in x.shape):
+    return [whole(x.pad_to(x.max_shape), w).shrink(tuple((0, d) for d in x.shape)) for x, w in zip(xs, widths)]
   n = sum(prod(x.uop.max_shard_shape) for x in xs)
   shape = _mailbox_shape(xs[0], n)
   if shape is None and len(xs) > 1 and amd_custom_kernels_supported(devs) and _is_rdna4(devs):
     shape = next(((n // g, 1) for g in range(1, AR_GROUPS + 1) if n % g == 0 and n // g <= min(256, AR_WORDS)), None)
-  if any(x.dtype != dtypes.float32 for x in xs) or shape is None:
-    def whole(x:Tensor, w:int) -> Tensor:
-      y = x.half() if not exact and x.dtype == dtypes.float32 and amd_custom_kernels_supported(devs) else x
-      return Tensor.cat(*(y[..., i*w:(i+1)*w] for i in range(len(devs))), dim=-1).cast(x.dtype)
-    return [whole(x, w) for x, w in zip(xs, widths)]
+  if any(x.dtype != dtypes.float32 for x in xs) or shape is None: return [whole(x, w) for x, w in zip(xs, widths)]
   fxn = functools.partial(_allgather_kernel, n=n, widths=widths, T=shape[0], EP=shape[1])
   counter, *mbs = _mailboxes(devs)
   out = keyed_empty(("allgather", *(x.uop.key for x in xs)), (*xs[0].shape[:-1], len(devs) * sum(widths)), dtypes.float32, devs)
