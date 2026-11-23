@@ -1,11 +1,11 @@
-import functools, unittest
+import functools, itertools, unittest
 from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.helpers import DEV
 from tinygrad.llm.kernels.amd import (Linear, ExpertWeights, amd_custom_kernels_supported, flash_attention, gated_delta_prefill, reduce_scatter,
                                       _is_rdna4, _is_cdna, topk_indices, partial_sum, allgather_last, indexer_scores, mla_topk_attention, kda_decode,
-                                      _mailbox_shape)
+                                      _mailbox_words)
 from tinygrad.llm.model import MLATransformerBlock, TransformerConfig, IndexerConfig, Transformer, SSMConfig, AttentionResidual
 from tinygrad.llm.kernels.amd_gguf import (q8_quantize, expert_linear, expert_tiles, moe_route, q8_0_linear, head_linear, QUANT_SIZES,
   HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, Q4_K, IQ3_S, IQ3_XXS)
@@ -866,10 +866,12 @@ class TestResidualMix(unittest.TestCase):
 
 
 class TestPartialSum(unittest.TestCase):
-  def test_chained_in_a_jit(self): # every gpu's sums in gpu order, bitwise, over replays: one shot and two shot
+  def test_chained_in_a_jit(self): # every gpu's sums of the partials in half in gpu order, bitwise, over replays: one shot and two shot (the sums
+    # sent in half)
     devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     if not amd_custom_kernels_supported(devs) or not _is_rdna4(devs): self.skipTest("4 RDNA4 gpus required")
-    for n in (2048, 14336):
+    def half(a:np.ndarray) -> np.ndarray: return a.astype(np.float16).astype(np.float32)
+    for n, sent in ((2048, lambda a: a), (14336, half)):
       p = np.random.default_rng(n).standard_normal((4, n)).astype(np.float32)
       parts, ref = Tensor(p).shard(devs, 0).realize(), np.zeros(n, np.float32)
       @TinyJit
@@ -878,7 +880,7 @@ class TestPartialSum(unittest.TestCase):
         return y.realize()
       y = Tensor.zeros(n).contiguous().to(devs).realize()
       for _ in range(4): y = chain(y)
-      for _ in range(4 * 16): ref = (((q:=p + ref * np.float32(0.25))[0] + q[1]) + q[2]) + q[3]
+      for _ in range(4 * 16): ref = sent((((q:=half(p + ref * np.float32(0.25)))[0] + q[1]) + q[2]) + q[3])
       for i in range(4): np.testing.assert_array_equal(Tensor(y.uop.mselect(i)).numpy().view(np.uint32), ref.view(np.uint32))
 
   def test_reduce_scatter(self): # the partials' sum split on its rows over the gpus (the ring's order, in half), in a jit over replays
@@ -893,16 +895,18 @@ class TestPartialSum(unittest.TestCase):
       np.testing.assert_array_equal(y.numpy(), np.concatenate(ring).astype(np.float32))
 
 class TestAllgather(unittest.TestCase):
-  def test_allgather_last(self): # a last axis shard on every gpu whole (4 RDNA4 gpus: their mailboxes, else a copy in half), over replays
-    for ndev in (2, 4):
+  def test_allgather_last(self): # a last axis shard on every gpu whole (4 RDNA4 gpus: their mailboxes, else a copy), in half unless exact, over
+    # replays
+    for ndev, exact in itertools.product((2, 4), (False, True)):
       devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(ndev))
       for shape in ((1, 3584), (2, 7168), (3, 72), (3, 3584)):
         x = Tensor(p:=np.random.default_rng(ndev).standard_normal(shape).astype(np.float32)).shard(devs, 1).realize()
-        gather = TinyJit(lambda x: allgather_last(x * 2).contiguous().realize())
+        gather = TinyJit(lambda x: allgather_last(x * 2, exact=exact).contiguous().realize())
         for _ in range(3): y = gather(x)
         self.assertIsNone(y.uop.axis)
-        # (the mailboxes' bitwise, a copy's in half)
-        want = p * 2 if _mailbox_shape(x, int(np.prod(x.uop.max_shard_shape))) else (p * 2).astype(np.float16).astype(np.float32)
+        # (in full words exact, or where the halves' words have no mailbox shape)
+        full = exact or ((s:=_mailbox_words(x, int(np.prod(x.uop.max_shard_shape)), exact)) is not None and s[2] == 1)
+        want = p * 2 if full else (p * 2).astype(np.float16).astype(np.float32)
         for i in range(ndev): np.testing.assert_array_equal(Tensor(y.uop.mselect(i)).numpy(), want)
       self.assertIs(allgather_last(z:=Tensor.ones(4, 8).shard(devs, 0)), z)  # (not sharded on its last axis: as it is)
 

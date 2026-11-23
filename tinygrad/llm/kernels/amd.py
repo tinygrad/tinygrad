@@ -995,7 +995,7 @@ def mla_topk_attention(q:Tensor, cache:Tensor, idx:Tensor|None, start:int|UOp, v
 
 # every gpu has a mailbox in its memory, mapped into the others: cached, a writer's l2 combines its stores into lines and a system release
 # writes them back (rdna4's system scope loads miss the reader's l2, rdna3's don't see the others' stores). a workgroup has a region of each:
-# two parities of a slot per gpu and of the sums, AR_WORDS words each, a value and its epoch in a word (no torn reads, no flags). the epochs
+# two parities of a slot per gpu and of the sums, AR_WORDS words each, values and their epoch in a word (no torn reads, no flags). the epochs
 # are the workgroups' counters on each gpu, the same on all of them: every gpu runs the same allreduces. no gpu is an epoch ahead of another's
 # reads (it waits for their values)
 AR_GROUPS, AR_WORDS, AR_TIMEOUT_MS, AR_TWO_SHOT = 64, 1024, 1000, 4096
@@ -1014,7 +1014,7 @@ def _mailboxes(devs:tuple[str, ...]) -> tuple[Tensor, ...]:
   return multi(counters, dtypes.int32), *(multi([own[(d + k) % N] for d in range(N)], dtypes.uint64) for k in range(N))
 
 def _mailbox_shape(x:Tensor, n:sint) -> tuple[int, int]|None:
-  """the mailbox kernels' (T, EP) for n floats a gpu: small ones on RDNA4's gpus (system scope atomics over the peers' memory), else None"""
+  """the mailbox kernels' (T, EP) for n words a gpu: small ones on RDNA4's gpus (system scope atomics over the peers' memory), else None"""
   if not (isinstance(x.device, tuple) and isinstance(n, int) and amd_custom_kernels_supported(x.device) and _is_rdna4(x.device)): return None
   return _ar_shape(n)
 
@@ -1026,22 +1026,37 @@ def _ar_shape(n:int) -> tuple[int, int]|None:
 
 def _sys(fmt:str, dtype, *src:UOp) -> UOp: return UOp.custom_function(fmt, dtype=dtype, fmt=True).call(*src)
 
+AR_VALUES = {1: (dtypes.float32, dtypes.uint32), 2: (dtypes.half, dtypes.uint16)}  # (a word's values by their count: their dtype and bits)
+
+def _mailbox_words(x:Tensor, n:int, exact:bool) -> tuple[int, int, int]|None:
+  """the mailbox kernels' (T, EP, values a word) for n floats a gpu: two halves a word unless exact or their words have no shape, else a float32"""
+  return next(((*shape, w) for w in ((1,) if exact else (2, 1)) if n % w == 0 and (shape:=_mailbox_shape(x, n // w))), None)
+
+def _words(epoch:UOp, vals:list[UOp], per_word:int) -> list[UOp]:  # (the epoch and per_word values a word, the first the lowest bits)
+  dt, bits = AR_VALUES[per_word]
+  return [functools.reduce(lambda w, v: (w << 32 // per_word) | v.cast(dt).bitcast(bits).cast(dtypes.uint64), reversed(vals[i:i + per_word]),
+                           epoch.cast(dtypes.uint64)) for i in range(0, len(vals), per_word)]
+
+def _values(epoch:UOp, words:list[UOp], per_word:int) -> list[UOp]:  # (the words' values, NaN without the epoch)
+  dt, bits = AR_VALUES[per_word]
+  return [(w >> 32).cast(dtypes.uint32).eq(epoch).where((w >> 32 // per_word * j).cast(bits).bitcast(dt).float(), math.nan)
+          for w in words for j in range(per_word)]
+
 @functools.cache
-def _allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, n:int, T:int, EP:int) -> UOp:
+def _allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, n:int, T:int, EP:int, per_word:int) -> UOp:
   # one shot: a gpu stores its values into its slot of every other gpu's mailbox and polls its own for theirs. two shot: workgroup g's go to
   # gpu g%N (its owner) only, the owner sums them and stores the sums into the others' mailboxes. a sum adds the gpus' values in gpu order on
-  # every gpu: the same bits on all. a poll gives up at a deadline: the words it didn't get are NaN (and the sums), not a gpu that never ends
-  N, G, two_shot = len(mb), n // (T * EP), n >= AR_TWO_SHOT
+  # every gpu: the same bits on all. a poll gives up at a deadline: the words it didn't get are NaN (and the sums), not a gpu that never ends.
+  # a word carries per_word values: a gpu's own and the published sums rounded as they're sent
+  N, G, two_shot, dt = len(mb), n // (T * EP * per_word), n // per_word >= AR_TWO_SHOT, AR_VALUES[per_word][0]
   wg, t = UOp.range(G, 0, AxisType.GLOBAL), UOp.range(T, 1, AxisType.LOCAL)
   li = [t * EP + i for i in range(EP)]
-  els = [wg * T * EP + l for l in li]
+  els = [(wg * T * EP + l) * per_word + j for l in li for j in range(per_word)]
   epoch, me = (counter[wg].load() + 1).cast(dtypes.uint32), counter[AR_GROUPS].load().cast(dtypes.weakint)
   deadline = _sys("__builtin_readsteadycounter()", dtypes.uint64, epoch) + AR_TIMEOUT_MS * 100000  # (100 MHz)
   par = (epoch & 1).cast(dtypes.weakint)
   def reg(s:int|UOp, l:UOp) -> UOp: return ((wg * 2 + par) * (N + 1) + s) * AR_WORDS + l
-  vals = [x.reshape(-1)[e].load().float() for e in els]
-  def word(v:UOp) -> UOp: return (epoch.cast(dtypes.uint64) << 32) | v.bitcast(dtypes.uint32).cast(dtypes.uint64)
-  def value(w:UOp) -> UOp: return (w >> 32).cast(dtypes.uint32).eq(epoch).where(w.cast(dtypes.uint32).bitcast(dtypes.float32), math.nan)
+  vals = [x.reshape(-1)[e].load().float().cast(dt).float() for e in els]
   def push(stores:list[UOp], after:UOp|None=None) -> UOp:
     # the stores in the l2, the workgroup's, then one wave writes the l2 back to the others
     fenced = _sys('__builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");', dtypes.void, UOp.const(0, dtypes.int).after(*stores))
@@ -1058,19 +1073,22 @@ def _allreduce_kernel(out:UOp, x:UOp, counter:UOp, *mb:UOp, n:int, T:int, EP:int
     words = words.after(kept.backedge(loop, stale & (_sys("__builtin_readsteadycounter()", dtypes.uint64, stale) < deadline)))
     return [words[i].load() for i in range(len(slots))]
   def ordered_sum(parts:list[UOp]) -> UOp: return functools.reduce(lambda a, b: a + b, parts)
+  words = _words(epoch, vals, per_word)
   if not two_shot:
-    sent = push([mb[k][reg(me, l)].store(word(v)) for k in range(1, N) for l, v in zip(li, vals)])
+    sent = push([mb[k][reg(me, l)].store(w) for k in range(1, N) for l, w in zip(li, words)])
     got = poll(sent, [reg(s, l) for s in range(N) for l in li], [me.ne(s) for s in range(N) for _ in li])
-    stores = [out[e].store(ordered_sum([me.eq(s).where(v, value(got[s * EP + i])) for s in range(N)])) for i, (e, v) in enumerate(zip(els, vals))]
+    theirs = [_values(epoch, got[s * EP:(s + 1) * EP], per_word) for s in range(N)]
+    stores = [out[e].store(ordered_sum([me.eq(s).where(v, theirs[s][i]) for s in range(N)])) for i, (e, v) in enumerate(zip(els, vals))]
   else:
     owner = (wg % N).cast(dtypes.weakint)
     k_owner, is_owner = (owner - me + N) % N, owner.eq(me)
-    sent = push([mb[k][reg(me, l).valid(k_owner.eq(k))].store(word(v)) for k in range(1, N) for l, v in zip(li, vals)])
+    sent = push([mb[k][reg(me, l).valid(k_owner.eq(k))].store(w) for k in range(1, N) for l, w in zip(li, words)])
     got = poll(sent, [reg(s, l) for s in range(N) for l in li], [is_owner & me.ne(s) for s in range(N) for _ in li])
-    sums = [ordered_sum([me.eq(s).where(v, value(got[s * EP + i])) for s in range(N)]) for i, v in enumerate(vals)]
-    published = push([mb[k][reg(N, l).valid(is_owner)].store(word(sm)) for k in range(1, N) for l, sm in zip(li, sums)], sent)
+    theirs = [_values(epoch, got[s * EP:(s + 1) * EP], per_word) for s in range(N)]
+    sums = [ordered_sum([me.eq(s).where(v, theirs[s][i]) for s in range(N)]) for i, v in enumerate(vals)]
+    published = push([mb[k][reg(N, l).valid(is_owner)].store(w) for k in range(1, N) for l, w in zip(li, _words(epoch, sums, per_word))], sent)
     got = poll(published, [reg(N, l) for l in li], [is_owner.logical_not() for _ in li])
-    stores = [out[e].store(is_owner.where(sm, value(g))) for e, sm, g in zip(els, sums, got)]
+    stores = [out[e].store(is_owner.where(sm.cast(dt).float(), v)) for e, sm, v in zip(els, sums, _values(epoch, got, per_word))]
   # the next epoch, once every thread of the workgroup read the counter
   done = counter.after(UOp.group(*stores).barrier())[wg.valid(t.eq(0))].store(epoch.cast(dtypes.int32))
   return UOp.group(*stores, done).end(wg, t).sink(arg=KernelInfo(name="allreduce", opts_to_apply=()))
@@ -1116,12 +1134,12 @@ def all_to_all(x:Tensor) -> Tensor:
   return Tensor(UOp.mstack(*[functools.reduce(lambda a, b: a + b, [part(j, i) for j in range(n)]).contiguous() for i in range(n)]).unshard(0))
 
 def partial_sum(x:Tensor) -> Tensor:
-  """the sum over the devices of their partials x (devices, ...) split on axis 0, on every device: small ones in a kernel of the gpus' mailboxes,
-  larger float ones on the gpus in half (their copies half the bytes)"""
+  """the sum over the devices of their partials x (devices, ...) split on axis 0, on every device: small ones in a kernel of the gpus' mailboxes
+  (two halves a word), larger float ones on the gpus in half (their copies half the bytes)"""
   if not all(isinstance(d, int) for d in x.shape): return partial_sum(x.pad_to(x.max_shape)).shrink(tuple((0, d) for d in x.shape[1:]))
-  if x.uop.axis != 0 or not (shape:=_mailbox_shape(x, n:=prod(x.shape[1:]))):
+  if x.uop.axis != 0 or not (shape:=_mailbox_words(x, n:=int(prod(x.shape[1:])), False)):
     return x.half().sum(0).cast(x.dtype) if x.dtype == dtypes.float32 and amd_custom_kernels_supported(x.device) else x.sum(0)
-  fxn = functools.partial(_allreduce_kernel, n=n, T=shape[0], EP=shape[1])
+  fxn = functools.partial(_allreduce_kernel, n=n, T=shape[0], EP=shape[1], per_word=shape[2])
   out = Tensor.empty(n, dtype=dtypes.float32, device=x.device)
   return Tensor.custom_kernel(out, x.float().reshape(x.shape[0], n).contiguous(), *_mailboxes(x.device), fxn=fxn)[0].reshape(x.shape[1:])
 
@@ -1140,14 +1158,14 @@ def _gather_offset(el:UOp, peer:int, peers:int, widths:tuple[int, ...], rows:int
   return functools.reduce(lambda addr,i: (col < offsets[i+1]).where(addresses[i], addr), reversed(range(len(widths)-1)), addresses[-1])
 
 @functools.cache
-def _allgather_kernel(out:UOp, counter:UOp, *src:UOp, n:int, widths:tuple[int, ...], T:int, EP:int) -> UOp:
+def _allgather_kernel(out:UOp, counter:UOp, *src:UOp, n:int, widths:tuple[int, ...], T:int, EP:int, per_word:int) -> UOp:
   # Each GPU broadcasts its compact local slices (rows of widths, side by side) once. Mailbox slots/epochs share the allreduce protocol; no padded
   # zero vectors or sums.
   xs, mb, width, offs = src[:len(widths)], src[len(widths):], sum(widths), list(itertools.accumulate(widths, initial=0))
-  N, G = len(mb), n // (T * EP)
+  N, G, dt = len(mb), n // (T * EP * per_word), AR_VALUES[per_word][0]
   wg, t = UOp.range(G, 0, AxisType.GLOBAL), UOp.range(T, 1, AxisType.LOCAL)
   li = [t*EP+i for i in range(EP)]
-  els = [wg*T*EP+l for l in li]
+  els = [(wg*T*EP+l)*per_word+j for l in li for j in range(per_word)]
   epoch, me = (counter[wg].load()+1).cast(dtypes.uint32), counter[AR_GROUPS].load().cast(dtypes.weakint)
   deadline = _sys("__builtin_readsteadycounter()", dtypes.uint64, epoch) + AR_TIMEOUT_MS*100000
   par = (epoch & 1).cast(dtypes.weakint)
@@ -1157,9 +1175,8 @@ def _allgather_kernel(out:UOp, counter:UOp, *src:UOp, n:int, widths:tuple[int, .
     row, col = e // width, e % width
     vals = [x.reshape(-1)[(row*w + col - o).valid((col >= o) & (col < o + w))].load() for x, w, o in zip(xs, widths, offs)]
     return functools.reduce(lambda acc, i: (col < offs[i + 1]).where(vals[i], acc), reversed(range(len(vals) - 1)), vals[-1])
-  vals = [load(e) for e in els]
-  words = [(epoch.cast(dtypes.uint64)<<32) | v.bitcast(dtypes.uint32).cast(dtypes.uint64) for v in vals]
-  sent = [mb[k][reg(me, l)].store(v) for k in range(1, N) for l, v in zip(li, words)]
+  vals = [load(e).cast(dt).float() for e in els]
+  sent = [mb[k][reg(me, l)].store(w) for k in range(1, N) for l, w in zip(li, _words(epoch, vals, per_word))]
   fenced = _sys('__builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");', dtypes.void, UOp.const(0, dtypes.int).after(*sent))
   once = UOp.range((t < 32).where(1, 0).after(UOp.group(fenced).barrier()), next(UOp.unique_num), AxisType.LOOP)
   pushed = _sys('__builtin_amdgcn_fence(__ATOMIC_RELEASE, "");', dtypes.void, once).end(once).barrier()
@@ -1171,10 +1188,8 @@ def _allgather_kernel(out:UOp, counter:UOp, *src:UOp, n:int, widths:tuple[int, .
   kept = UOp.alloc((N*EP,), dtypes.uint64, addrspace=AddrSpace.REG)
   stores = UOp.group(*[kept[i].store(g) for i,g in enumerate(got)])
   kept = kept.after(stores.backedge(loop, stale & (_sys("__builtin_readsteadycounter()", dtypes.uint64, stale) < deadline)))
-  def value(i:int) -> UOp:
-    word = kept[i].load()
-    return (word>>32).cast(dtypes.uint32).eq(epoch).where(word.cast(dtypes.uint32).bitcast(dtypes.float32), math.nan)
-  outputs = [out.reshape(-1)[_gather_offset(e, s, N, widths, n//width)].store(me.eq(s).where(v, value(s*EP+i)))
+  theirs = [_values(epoch, [kept[s*EP+i].load() for i in range(EP)], per_word) for s in range(N)]
+  outputs = [out.reshape(-1)[_gather_offset(e, s, N, widths, n//width)].store(me.eq(s).where(v, theirs[s][i]))
              for s in range(N) for i,(e,v) in enumerate(zip(els, vals))]
   done = counter.after(UOp.group(*outputs).barrier())[wg.valid(t.eq(0))].store(epoch.cast(dtypes.int32))
   return UOp.group(*outputs, done).end(wg, t).sink(arg=KernelInfo(name="allgather", opts_to_apply=()))
@@ -1183,7 +1198,7 @@ def allgather_last(x:Tensor, *, exact:bool=False) -> Tensor: return allgather_la
 
 def allgather_lasts(*xs:Tensor, exact:bool=False) -> list[Tensor]:
   """xs sharded on their last axes on every device whole, each device's parts side by side: small float ones of a fixed shape in a kernel of
-  the gpus' mailboxes, else each shard copied to the other devices once (larger float ones on the gpus in half unless exact)"""
+  the gpus' mailboxes, else each shard copied to the other devices once (float ones in half unless exact)"""
   if not xs: return []
   if len(xs) > 1 and not all(x.uop.axis == x.ndim-1 and isinstance(x.device, tuple) and x.device == xs[0].device
                              and x.shape[:-1] == xs[0].shape[:-1] for x in xs):
@@ -1197,11 +1212,11 @@ def allgather_lasts(*xs:Tensor, exact:bool=False) -> list[Tensor]:
   if not all(isinstance(d, int) for x in xs for d in x.shape):
     return [whole(x.pad_to(x.max_shape), w).shrink(tuple((0, d) for d in x.shape)) for x, w in zip(xs, widths)]
   n = sum(prod(x.uop.max_shard_shape) for x in xs)
-  shape = _mailbox_shape(xs[0], n)
+  shape = _mailbox_words(xs[0], n, exact)
   if shape is None and len(xs) > 1 and amd_custom_kernels_supported(devs) and _is_rdna4(devs):
-    shape = next(((n // g, 1) for g in range(1, AR_GROUPS + 1) if n % g == 0 and n // g <= min(256, AR_WORDS)), None)
+    shape = next(((n // g, 1, 1) for g in range(1, AR_GROUPS + 1) if n % g == 0 and n // g <= min(256, AR_WORDS)), None)
   if any(x.dtype != dtypes.float32 for x in xs) or shape is None: return [whole(x, w) for x, w in zip(xs, widths)]
-  fxn = functools.partial(_allgather_kernel, n=n, widths=widths, T=shape[0], EP=shape[1])
+  fxn = functools.partial(_allgather_kernel, n=n, widths=widths, T=shape[0], EP=shape[1], per_word=shape[2])
   counter, *mbs = _mailboxes(devs)
   out = keyed_empty(("allgather", *(x.uop.key for x in xs)), (*xs[0].shape[:-1], len(devs) * sum(widths)), dtypes.float32, devs)
   out = Tensor.custom_kernel(out, counter, *(x.contiguous() for x in xs), *mbs, fxn=fxn)[0]
