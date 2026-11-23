@@ -388,19 +388,32 @@ class TestEngine(unittest.TestCase):
 
   def test_proposal(self):  # a scored draft's verify step: the width whose expected tokens (by the scores) a measured second are most, one not
     # measured first; unscored: every guess
-    eng = SimpleNamespace(tokens=8, widths=[2, 4, 8], step_s={2: [0.05], 4: [0.08], 8: []}, chain=None)
+    eng = SimpleNamespace(tokens=8, widths=[2, 4, 8], step_s={2: [0.05], 4: [0.08], 8: []}, chain=None, scored=np.zeros((2, 10)))
+    eng.borne_out = lambda s: Engine.borne_out(eng, s)  # type: ignore[arg-type]
     g, score = list(range(7)), np.full(7, 0.9)
-    self.assertEqual(Engine.proposal(eng, g, score, 0, 0), g)  # type: ignore[arg-type]
+    self.assertEqual(Engine.proposal(eng, g, score, 0, 0)[0], g)  # type: ignore[arg-type]
     eng.step_s[8] = [0.14]  # (1.9 / .05 = 38, 3.44 / .08 = 43, 5.2 / .14 = 37 tokens a second)
-    self.assertEqual(Engine.proposal(eng, g, score, 0, 0), g[:3])  # type: ignore[arg-type]
-    self.assertEqual(Engine.proposal(eng, g, np.full(7, 0.3), 0, 0), g[:1])  # type: ignore[arg-type]
-    self.assertEqual(Engine.proposal(eng, g, None, 0, 0), g)  # type: ignore[arg-type]
+    gs, scores = Engine.proposal(eng, g, score, 0, 0)  # type: ignore[arg-type]
+    self.assertEqual((gs, list(scores)), (g[:3], [0.9] * 3))
+    self.assertEqual(Engine.proposal(eng, g, np.full(7, 0.3), 0, 0)[0], g[:1])  # type: ignore[arg-type]
+    self.assertEqual(Engine.proposal(eng, g, None, 0, 0), (g, None))  # type: ignore[arg-type]
+    eng.scored[:, 9] = 100, 50  # (guesses scored .9 right half the time: a step of 2)
+    self.assertEqual(Engine.proposal(eng, g, score, 0, 0)[0], g[:1])  # type: ignore[arg-type]
+
+  def test_borne_out(self):  # a score toward its tenth's verified guesses' rate (as 16 of them), untouched while the table's empty
+    eng = SimpleNamespace(scored=np.zeros((2, 10)))
+    s = np.array([0.05, 0.55, 0.95, 1.0])
+    np.testing.assert_allclose(Engine.borne_out(eng, s), s)  # type: ignore[arg-type]
+    Engine.tally(eng, np.array([0.55, 0.57, 0.95]), 1)  # type: ignore[arg-type]
+    Engine.tally(eng, np.array([0.55, 0.95]), 2)  # type: ignore[arg-type]
+    np.testing.assert_equal(eng.scored[:, [5, 9]], [[3, 1], [2, 1]])
+    np.testing.assert_allclose(Engine.borne_out(eng, s), [0.05, (2 + 16 * .55) / 19, (1 + 16 * .95) / 17, 1])  # type: ignore[arg-type]
 
   def test_generate_kept(self):  # a verify step's kept guesses are tokens, the step's guesses the next step's proposal
     steps, seen = iter([([5], [6, 7], None), ([6, 9], [8, 3], None), ([8, 3], [1, 2], None)]), []
     model = SimpleNamespace(fork=lambda *a: 0, save=lambda t: None, rollback=lambda n: None)
     eng = SimpleNamespace(get_start_pos=lambda t: 0, model=model, prefill=lambda t, p: p, step=lambda *a: next(steps), tokens=2, max_context=8,
-                          draft=True, proposal=lambda g, *a: seen.append(g) or g[:1], verified=np.zeros(3, int), W=0, chunk=0,
+                          draft=True, proposal=lambda g, *a: (seen.append(g) or g[:1], None), verified=np.zeros(3, int), W=0, chunk=0,
                           counters=lambda: np.zeros(15), jits={1: None, 2: None}, io=SimpleNamespace(tail=1), temperature_np=np.zeros(1))
     eng.steps = lambda *a, **kw: Engine.steps(eng, *a, **kw)  # type: ignore[arg-type]
     self.assertEqual([t for _, t in zip(range(4), Engine.generate(eng, [0]))], [5, 6, 9, 8])  # type: ignore[arg-type]

@@ -183,6 +183,7 @@ class Engine:
     self.dx, self.v_row = Tensor.empty(n, model.config.dim, device=self.devs).realize(), UOp.variable("row", 0, tokens - 1)
     self.chain_jit = TinyJit(self.run_chain, capture_first=True) if draft is not None and draft.width < tokens - 1 else None
     self.times, self.verified = np.zeros(2), np.zeros(3)  # (launching the graphs, after the last layer), (verify steps, guesses, right ones)
+    self.scored = np.zeros((2, 10))  # (a scored draft's verified guesses by the score's tenth: seen, right)
     self.window_s:collections.deque = collections.deque(maxlen=64)  # (measured: a window's tokens, seconds)
     # each gpu's pool in the experts' words (a bitcast of it is a copy), of what's free after the blocks' caches and states and the window's
     # graphs (captured on a pool of a slot), then the slots a window's state is lent (its own while it runs): slots of decode's otherwise
@@ -1200,23 +1201,32 @@ class Engine:
     scores = ret[T + G:].view(np.float32).copy() if self.draft is not None and self.draft.scored else None
     return ret[:T].tolist(), ret[T:T + G].tolist(), scores
 
-  def proposal(self, g:list[int], score:np.ndarray|None, pos:int, row:int) -> list[int]:
+  def proposal(self, g:list[int], score:np.ndarray|None, pos:int, row:int) -> tuple[list[int], np.ndarray|None]:
     """a verify step's guesses after the token at pos: the row's of the step before (guessed at its row), the draft's chain after them. scored:
-    as many as the step of the widths that expects most tokens a second (by the scores, a guess the chain hasn't made yet scored as the last,
-    the steps' seconds a line in the width through every width's measured ones: one not measured first), the chain run a guess further while
-    a wider step's expected"""
+    as many as the step of the widths that expects most tokens a second (by the scores as the steps bore them out, a guess the chain hasn't
+    made yet scored as the last, the steps' seconds a line in the width through every width's measured ones: one not measured first), the
+    chain run a guess further while a wider step's expected. the guesses and their scores"""
     chain, seen = None, [(T, t) for T in self.widths for t in self.step_s[T]]
     line = np.polyfit(*zip(*seen), 1) if len(self.widths) > 1 and all(self.step_s[T] for T in self.widths) else None
     while True:
       n = self.tokens - 1
       if score is not None and len(self.widths) > 1:
-        s = np.concatenate([score, np.full(n, score[-1])])
+        s = self.borne_out(np.concatenate([score, np.full(n, score[-1])]))
         def rate(T:int) -> float:
           return (1 + np.cumprod(s[:T - 1]).sum()) / (np.mean(t) if line is None else np.polyval(line, T)) if (t:=self.step_s[T]) else math.inf
         n = max(self.widths, key=rate) - 1
-      if len(g) >= n: return g[:n]
+      if len(g) >= n: return g[:n], None if score is None else score[:n]
       guess, prob = next(chain:=chain or self.chain(g[-1], pos, row))
       g, score = [*g, guess], None if score is None else np.append(score, prob)
+
+  def borne_out(self, s:np.ndarray) -> np.ndarray:
+    """scores as the steps bore them out: their tenth's verified guesses right, a score itself as 16 of them"""
+    seen, right = self.scored[:, np.minimum((s * 10).astype(int), 9)]
+    return (right + 16 * s) / (seen + 16)
+
+  def tally(self, score:np.ndarray, row:int):
+    """a verify step's verified guesses (the first row right, the next wrong) into the table of their scores' tenth"""
+    for j in range(min(row + 1, len(score))): self.scored[:, min(int(score[j] * 10), 9)] += (1, j < row)
 
   def chain(self, g:int, pos:int, row:int) -> Iterator[tuple[int, float]]:
     """the draft's guesses after g (at pos+1, guessed at the step's row) for a verify step and their probabilities, a chain step's at a time"""
@@ -1337,11 +1347,12 @@ class Engine:
           (t,), _, _ = self.step([t], len(tokens) - 1)
           widths[1] += 1
           continue
-        gs = self.proposal(g, score, len(tokens) - 1, row)
+        gs, scores = self.proposal(g, score, len(tokens) - 1, row)
         toks, g, score = self.step([t, *gs], len(tokens) - 1)
         widths[len(toks)] += 1
         row = next((j for j, g in enumerate(gs) if toks[j] != g), len(gs))
         self.verified += (1, len(gs), row)
+        if scores is not None: self.tally(scores, row)
         if row < len(gs): self.model.rollback(row + 1)  # (before the kept ones are yielded: a request may stop at any)
         for kept in gs[:row]:
           tokens.append(kept)
