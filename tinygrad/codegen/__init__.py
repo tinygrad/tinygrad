@@ -2,7 +2,7 @@ from dataclasses import replace, dataclass, field
 from collections import deque
 import itertools, functools, time, inspect
 from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
-from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile, prod
 from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored
 from tinygrad.helpers import SCACHE, BASEDIR, NO_MEMORY_PLANNER
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
@@ -25,7 +25,7 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented, pm_int_reduce
 from tinygrad.codegen.multi import multi_pm
-from tinygrad.codegen.prepare import pm_mops, expand_bitcast, _mop_index, prepare_rangeify
+from tinygrad.codegen.prepare import pm_mops, expand_bitcast, prepare_rangeify
 from tinygrad.codegen.indexing import _stack_select
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
@@ -48,14 +48,8 @@ def build_range_map(sink:UOp) -> dict[tuple, int]:
   return ctx
 
 def expand_reduce(r:UOp):
-  range_srcs = []
-  new_axes = []
-  for u in r.src[1:]:
-    if u.op == Ops.RANGE:
-      range_srcs.append(u)
-    else:
-      for i,s in enumerate(u.shape):
-        if s > 1: new_axes.append(i)
+  range_srcs, expanded = partition(r.src[1:], lambda u: u.op is Ops.RANGE)
+  new_axes = [i for u in expanded for i,s in enumerate(u.shape) if s > 1]
   if len(new_axes) == 0: return None
   assert r.arg[1] == 0
   # permute so new_axes come to front, then reduce
@@ -91,12 +85,10 @@ def expand_broadcast(x:UOp):
   return x.replace(src=tuple([u.expand(shape) for u in x.src]))
 
 def broadcast_and_devec_wmma(b:UOp):
-  shapes = [u.shape[:-1] for u in b.src]
-  if not any(shapes): return None
-  shape = _broadcast_shape(*shapes)
+  if not (shape:=b.shape[:-1]): return None
   src_expanded = tuple([u.expand(shape+(u.shape[-1],)) for u in b.src])
   src = []
-  for idx in itertools.product(*[range(i) for i in b.shape[:-1]]):
+  for idx in itertools.product(*[range(i) for i in shape]):
     src.append(b.replace(src=tuple([x.index(*idx) for x in src_expanded])))
   return UOp.stack(*src).reshape(b.shape)
 
@@ -115,11 +107,13 @@ pm_expand_broadcast = pm_wmma_add+PatternMatcher([
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
 
-def index_lane(x:UOp, idx:tuple[UOp, ...]) -> UOp:
-  # x.index(*idx) with the index pushed through the movement ops
-  ret = x.index(*idx)
-  while ret.op is Ops.INDEX and ret.src[0].op in GroupOp.Movement and (nxt:=_mop_index(ret.src[0], ret)) is not None: ret = nxt
-  return ret
+def index_lanes(x:UOp) -> list[UOp]:
+  # RESHAPE preserves row-major lane order and EXPAND prepends broadcast axes.
+  if x.max_numel() == 0: return []
+  if x.op is Ops.RESHAPE and all_int(x.src[0].shape): return index_lanes(x.src[0])
+  if x.op is Ops.EXPAND: return index_lanes(x.src[0]) * int(prod(x.marg))
+  if not x.shape: return [x]
+  return [x.index(*idx) for idx in itertools.product(*map(range, x.shape))]
 
 def keeps_vector(b:UOp, ctx:Renderer|None) -> bool:
   if DEVECTORIZE and (ctx is None or not ctx.vector_lanes): return False
@@ -132,9 +126,9 @@ def do_devectorize(b:UOp, ctx:Renderer|None=None):
   if not all(x.shape == b.shape or x.base.is_invalid for x in b.src): return None
   if keeps_vector(b, ctx):
     if all(flat:=[x.base.is_invalid or x.op not in GroupOp.Movement|{Ops.INDEX} for x in b.src]): return None
-    return b.replace(src=tuple(x if f else UOp.stack(*[index_lane(x, (UOp.const(i),)) for i in range(b.shape[0])]) for x,f in zip(b.src, flat)))
-  lanes = list(itertools.product(*[[UOp.const(i) for i in range(x)] for x in b.shape]))
-  src = [b.replace(src=tuple(x.base if x.base.is_invalid else index_lane(x, idx_c) for x in b.src)) for idx_c in lanes]
+    return b.replace(src=tuple(x if f else UOp.stack(*index_lanes(x)) for x,f in zip(b.src, flat)))
+  lanes = [[x.base] * b.max_numel() if x.base.is_invalid else index_lanes(x) for x in b.src]
+  src = [b.replace(src=values) for values in zip(*lanes, strict=True)]
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):

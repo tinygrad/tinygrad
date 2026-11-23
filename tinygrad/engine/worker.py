@@ -38,7 +38,7 @@ class _WorkerContext(SpawnContext): Process = _WorkerProcess
 worker_pool = None
 def get_worker_pool():
   global worker_pool
-  if multiprocessing.current_process().daemon or PARALLEL == 0: return None
+  if multiprocessing.current_process().daemon or PARALLEL < 2: return None
   if worker_pool is None:
     worker_pool = _WorkerContext().Pool(PARALLEL.value, _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
     @atexit.register

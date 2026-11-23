@@ -195,20 +195,14 @@ def run_rangeify(tsink:UOp) -> UOp:
   # explicit rangeify
   ending_ranges: dict[UOp, bool] = {}
   for x in reversed(tsink_toposort):
-    # no ranges on kernels, they are internal
-    if x.op is Ops.CALL: continue
-
-    # AFTER doesn't have range
-    if x.op is Ops.AFTER: continue
-
-    # treat MSTACK/MSELECT like SINK
-    if x.op in {Ops.MSTACK, Ops.MSELECT}: continue
+    # kernels (internal), AFTER and MSTACK/MSELECT (like SINK) have no ranges of their own
+    if x.op in {Ops.CALL, Ops.AFTER, Ops.MSTACK, Ops.MSELECT}: continue
 
     ending_ranges[x] = any(ending_ranges.get(u, False) for u in consumer_map[x])
     # ranges the consumers iterate that this node broadcasts over
     ended = [rctx.range_map[c][0][i] for c in consumer_map[x] if c in rctx.range_map and c.op in GroupOp.Broadcastable
              for i in broadcast_axes(x.shape, c.shape)]
-    broadcast_ending_ranges = bool(UOp.sink(*ended).ranges)
+    broadcast_ending_ranges = any(r.ranges for r in ended)
     # fusion decision: REDUCE before the broadcast
     if x.op is Ops.REDUCE: ending_ranges[x] |= broadcast_ending_ranges
 
@@ -279,7 +273,7 @@ def run_rangeify(tsink:UOp) -> UOp:
     # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
     # NOTE: this doesn't actually always end a range, but this is why convs are realized, so for now we need it
     if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape):
-      ending_ranges[x] |= bool(UOp.sink(*out_rngs[:len(x.marg)]).ranges)
+      ending_ranges[x] |= any(r.ranges for r in out_rngs[:len(x.marg)])
 
     # REDUCE creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE:

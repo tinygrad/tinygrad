@@ -219,12 +219,9 @@ class Target:
       (iface, indices), s = ((iface_split[0], iface_split[1]) if len(iface_split:=split[0].rsplit(":", 1)) == 2 else (split[0], ""), split[1])
     elif len(split) > 2: raise RuntimeError(f"too many '+' in target string: {s!r}")
     else: iface, indices = "", ""
-    match [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]:
-      case [dev, ren, arch, props]: return Target(dev, ren, arch, iface, indices, props)
-      case [dev, ren, arch]: return Target(dev, ren, arch, iface, indices)
-      case [dev, ren]: return Target(dev, ren, interface=iface, indices=indices)
-      case [dev]: return Target(dev, interface=iface, indices=indices)
-      case _: raise RuntimeError(f"too many ':' in target string: {s!r}")
+    if len(parts:=s.split(':')) > 4: raise RuntimeError(f"too many ':' in target string: {s!r}")
+    dev, ren, arch, props = parts + [""]*(4-len(parts))
+    return Target(dev.upper(), ren.upper(), arch, iface, indices, props)
   def __repr__(self):
     fst, snd = ":".join([self.interface, self.indices]).rstrip(":"), ":".join([self.device, self.renderer, self.arch, self.props]).rstrip(":")
     return (fst + "+" if fst else "") + snd
@@ -259,7 +256,7 @@ USE_TC, TC_SELECT, TC_OPT, TC_MIN_GLOBALS = ContextVar("TC", 1), ContextVar("TC_
 TRANSCENDENTAL, DEVECTORIZE = ContextVar("TRANSCENDENTAL", 1), ContextVar("DEVECTORIZE", 1)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("LRU", 1)
 RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0), ContextVar("ALLREDUCE_CAST", 1)
-ALLREDUCE_NODE_NDEVS = ContextVar("ALLREDUCE_NODE_NDEVS", 0) # gpus per node, the nodes cabled gpu k to gpu k
+NODE_NDEVS = ContextVar("NODE_NDEVS", 0) # gpus per node, the nodes cabled gpu k to gpu k
 CACHELEVEL, IGNORE_BEAM_CACHE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0)
 VALIDATE_WITH_CPU = ContextVar("VALIDATE_WITH_CPU", 0)
 HCQ_RUNTIME_DEV = _DEV("HCQ_RUNTIME_DEV", "CPU:TCC" if sys.platform == "linux" and _has_lib("tcc") else "CPU:LLVM")

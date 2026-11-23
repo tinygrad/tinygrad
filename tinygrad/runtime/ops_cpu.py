@@ -59,15 +59,13 @@ class CPUProgram(Program['CPUDevice']):
 
 class CPUDevice(Compiled):
   renderers = [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer, TCCRenderer]
-  @property
-  def has_copy_queue(self) -> bool: return False
 
   def __init__(self, device:str=""):
     self.remote = None
     if len(parts:=device.split(':')) == 3:
       self.remote = RemotePCIDevice("CPU", f"remote:{device[4:]}:0", RemotePCIDevice.connect(parts[1], int(parts[2])))
     super().__init__(device, HostAllocator(self), CPUProgram,
-      arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
+      arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native", props={"copy": 0})
     if self.remote is not None: self.peer_group = self.remote.peer_group
 
   def synchronize(self, timeout:int|None=None):

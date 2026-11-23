@@ -114,7 +114,7 @@ jobs:
         key: be-minimal
         deps: testing_unit
     - name: Run runtime tests
-      run: PARALLEL=0 TEST_MAX_EXAMPLES=50 SKIP_SLOW_TEST=1 DEV=PYTHON python3 -m pytest -n=auto test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_ops.py test/runtime/test_uops.py test/runtime/test_renderer_failures.py::TestRendererFailures test/device/python --durations=20
+      run: TEST_MAX_EXAMPLES=50 SKIP_SLOW_TEST=1 DEV=PYTHON python3 -m pytest -n=auto test/runtime/test_dtype.py test/runtime/test_dtype_alu.py test/runtime/test_ops.py test/runtime/test_uops.py test/runtime/test_renderer_failures.py::TestRendererFailures test/device/python --durations=20
     - name: Test IMAGE support
       run: IMAGE=1 DEV=PYTHON python3 test/runtime/test_ops.py TestOps.test_gemm TestOps.test_simple_conv2d
     - name: Test emulated tensor cores
@@ -497,8 +497,7 @@ jobs:
         python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
         DEBUG=4 python test/test_tiny.py TestTiny.test_plus
     - name: Run runtime tests
-      # xdist already occupies the CPUs; don't start a nested compile pool per worker.
-      run: PARALLEL=0 python -m pytest -n=auto test/runtime test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
+      run: python -m pytest -n=auto test/runtime test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -681,7 +680,7 @@ jobs:
       - name: Run pytest (cuda)
         # skip multitensor because it's slow
         # NV and CUDA share the NVIDIA device tests.
-        run: PARALLEL=0 python -m pytest -n=auto test/runtime test/device/nv --ignore test/runtime/test_multitensor.py --durations=20
+        run: python -m pytest -n=auto test/runtime test/device/nv --ignore test/runtime/test_multitensor.py --durations=20
       - name: Run NV PTX device tests
         if: matrix.backend == 'nv'
         run: DEV=MOCK+NV:PTX python -m pytest -n=auto test/device/nv --durations=20
@@ -725,5 +724,4 @@ jobs:
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
           DEBUG=4 python3 test/runtime/test_ops.py TestOps.test_add
-          # QCOMCL compiles in qemu, too slow for parallel workers
-          ${{ contains(matrix.dev, 'QCOMCL') && 'PARALLEL=0' || '' }} python -m pytest -n=auto test/runtime/test_ops.py --durations=20
+          python -m pytest -n=auto test/runtime/test_ops.py --durations=20
