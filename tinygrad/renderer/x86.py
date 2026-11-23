@@ -203,9 +203,9 @@ def physical_reg(u:UOp) -> UOp|None:
   r = UOp.placeholder((1,), dtypes.uint64, u.arg.slot, AddrSpace.REG, name=u.arg.name)
   return r if r in physical_regs else None
 
-def param(dt:DType, r:UOp) -> UOp:
+def as_param(r:UOp, dtype:DType) -> UOp:
   assert r.op is Ops.BUFFER, f"param called on {r.op}"
-  return UOp.param(r.arg.slot, dt, name=r.arg.name, addrspace=AddrSpace.REG)
+  return UOp.param(r.arg.slot, dtype, name=r.arg.name, addrspace=AddrSpace.REG)
 
 # gprs you can write to
 WGPR = tuple(r for r in GPR if r is not RSP)
@@ -215,7 +215,7 @@ CALLEE_SAVED = (RBX, RBP, GPR[12], GPR[13], GPR[14], GPR[15])
 # ***** X86 instruction selection *****
 # a register buffer is its own virtual register, identified by its buffer slot
 def regbuf_reg(x:UOp) -> tuple[UOp, ...]:
-  if (r:=physical_reg(x)) is not None: return (param(x.dtype, r),)
+  if (r:=physical_reg(x)) is not None: return (as_param(r, x.dtype),)
   return vreg(x.arg.slot, x.dtype, XMM if x.dtype in dtypes.floats else WGPR, name="buffer")
 
 # a value moved into a register constrained to cons
@@ -266,7 +266,7 @@ def idiv(ctx:IselContext, x:UOp) -> UOp:
   dividend = pin(ctx, x.src[0].cast(dividend_dtype), (RAX,))
   defs = (RAX, RDX) if ext else (RAX,)
   divisor = pin(ctx, x.src[1], tuple(r for r in WGPR if r not in (RAX, RDX)))
-  idiv = UOp.native(op, *[param(x.dtype, r) for r in defs]).call(*(dividend, divisor) + tuple(ext))
+  idiv = UOp.native(op, *[as_param(r, x.dtype) for r in defs]).call(*(dividend, divisor) + tuple(ext))
   # this move "cleanses" the register constraints (rax/rdx) of idiv
   return x.native_like(X86Ops.MOV).call(idiv)
 
@@ -474,8 +474,8 @@ class X86LinearContext(LinearContext):
         after.append(self.ren.fill(slot,r,r))
 
     if self.stack_size > 0:
-      before.insert(0, UOp.native(X86Ops.SUBi, param(dtypes.u64, RSP)).call(RSP, UOp.cconst(self.stack_size, dtypes.i32)))
-      after.append(UOp.native(X86Ops.ADDi, param(dtypes.u64, RSP)).call(RSP, UOp.cconst(self.stack_size, dtypes.i32)))
+      before.insert(0, UOp.native(X86Ops.SUBi, as_param(RSP, dtypes.u64)).call(RSP, UOp.cconst(self.stack_size, dtypes.i32)))
+      after.append(UOp.native(X86Ops.ADDi, as_param(RSP, dtypes.u64)).call(RSP, UOp.cconst(self.stack_size, dtypes.i32)))
     return before + uops[:-1] + after + [uops[-1]]
 
   def assign_spill_slot(self, r:UOp) -> int:
@@ -702,7 +702,7 @@ class X86Renderer(ISARenderer):
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
   def is_two_address(self, x:UOp) -> bool: return x.op is Ops.CALL and x.body.arg.code in X86GroupOp.TwoAddress
-  def copy(self, x:UOp, reg:UOp) -> UOp: return UOp.native(X86Ops.MOV, param(x.dtype, reg)).call(x)
+  def copy(self, x:UOp, reg:UOp) -> UOp: return UOp.native(X86Ops.MOV, as_param(reg, x.dtype)).call(x)
 
   def spill(self, spill_slot:int, x:UOp) -> UOp:
     op = X86Ops.VMOVUPSm if rdef(x) in XMM else X86Ops.MOVm
@@ -711,7 +711,7 @@ class X86Renderer(ISARenderer):
 
   def fill(self, spill_slot:int, x:UOp, reg:UOp) -> UOp:
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp.native(X86Ops.VMOVUPS if reg in XMM else X86Ops.MOV, param(x.dtype, reg)).call(*fold_address(RSP.index(disp)))
+    return UOp.native(X86Ops.VMOVUPS if reg in XMM else X86Ops.MOV, as_param(reg, x.dtype)).call(*fold_address(RSP.index(disp)))
 
   def render(self, uops:list[UOp]) -> str:
     targets: dict[UOp, int] = {}

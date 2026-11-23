@@ -1,7 +1,7 @@
 import itertools
 from tinygrad.helpers import dedup, get_single_element
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.renderer.x86 import ISARenderer, vdef, register_choices, LinearContext, param
+from tinygrad.renderer.x86 import ISARenderer, vdef, register_choices, LinearContext, as_param
 
 # ops that participate in register allocation
 REGALLOC_OPS = {Ops.CALL, Ops.BUFFER, Ops.RANGE, Ops.END}
@@ -105,7 +105,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   if (defs:=ctx.defs[i]):
     r = tuple(ctx.reals[i][v] for v in defs)
     nx = get_single_element(r).cast(nx.dtype) if nx.op is Ops.BUFFER else \
-      UOp.native(nx.body.arg.code, *[param(nx.dtype, x) for x in r]).call(*nx.src_without_body)
+      UOp.native(nx.body.arg.code, *[as_param(x, nx.dtype) for x in r]).call(*nx.src_without_body)
 
   before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), r) for v,r in ctx.insert_before.get(i, [])]
   after = [ctx.ren.spill(ctx.spills[v], nx) for v in defs if v in ctx.spills]
