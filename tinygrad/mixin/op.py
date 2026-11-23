@@ -304,7 +304,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
   def _pad_constant(self, pX, value:ConstType) -> Self:
     # shrink first for negative pads, then pad with only non-negative values
-    pX = tuple((0, 0) if p is None else p for p in pX)
     has_neg = not all(resolve(p >= 0) for p in flatten(pX))
     X = self.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, self.shape))) if has_neg else self
     pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX) if has_neg else pX
@@ -775,7 +774,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
   def _cumalu(self, axis:int, op:Ops) -> Self:
     assert self.shape[axis] != 0 and op in GroupOp.Reduce
     pads = (None,)*(self.ndim-1) + ((self.shape[axis]-1, 0),)
-    pooled = self.transpose(axis,-1)._pad_constant(pads, identity_element(op, self.commit_dtype()))._pool((self.shape[axis],))
+    pooled = self.transpose(axis,-1).pad(pads, value=identity_element(op, self.commit_dtype()))._pool((self.shape[axis],))
     return getattr(pooled, {Ops.ADD: "sum", Ops.MAX: "max", Ops.MUL: "prod"}[op])(-1).transpose(axis, -1)
 
   def _split_cumalu(self, axis:int, op:Ops) -> Self:
@@ -786,8 +785,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     SPLIT = 256
     value = identity_element(op, self.commit_dtype())
     if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumalu(axis, op)
-    chunks = self.transpose(axis,-1)._pad_constant((None,)*(self.ndim-1)+((round_up(s,SPLIT)-s,0),), value).unflatten(-1,(-1,SPLIT))._cumalu(-1, op)
-    base = chunks[..., -1]._cumalu(-1, op)._pad_constant((None,)*(chunks.ndim-2) + ((1, -1),), value)
+    chunks = self.transpose(axis,-1).pad((None,)*(self.ndim-1)+((round_up(s,SPLIT)-s,0),), value=value).unflatten(-1,(-1,SPLIT))._cumalu(-1, op)
+    base = chunks[..., -1]._cumalu(-1, op).pad((None,)*(chunks.ndim-2) + ((1, -1),), value=value)
     return chunks.alu(op, base.unsqueeze(-1)).flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
 
   def cumsum(self, axis:int=0) -> Self:
@@ -956,7 +955,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # pad to power of 2
     n_stages = (orig_len-1).bit_length()
     pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
-    x = x._pad_constant(pads, x.dtype.min if descending else x.dtype.max).unflatten(dim, (2,)*n_stages)
+    x = x.pad(pads, value=x.dtype.min if descending else x.dtype.max).unflatten(dim, (2,)*n_stages)
     # https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
     for stage in range(1, n_stages+1):
       if stage != n_stages:
@@ -1344,14 +1343,13 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
     s_ = stride if stride is not None else k_
     def pool(x:Self, padding_:Sequence[int]) -> Self:
-      return x._pad_constant(((0,0),)*(x.ndim-len(k_)) + flat_to_grouped(padding_), 0.0)._pool(k_, s_, dilation)
+      return x.pad(padding_)._pool(k_, s_, dilation)
     reg_pads = resolve_pool_pads(padding, len(k_))
     pads = self._apply_ceil_mode(reg_pads, k_, s_, dilation) if ceil_mode else reg_pads
     if not count_include_pad:
       return pool(self, pads).sum(axis) / pool(self.const_like(1), pads).sum(axis)
     if not ceil_mode: return pool(self, pads).mean(axis)
-    return pool(self, pads).sum(axis) / pool(self._pad_constant(((0,0),)*(self.ndim-len(k_)) + flat_to_grouped(reg_pads), 0.0).const_like(1),
-                                              tuple(cp-rp for cp,rp in zip(pads, reg_pads))).sum(axis)
+    return pool(self, pads).sum(axis) / pool(self.pad(reg_pads).const_like(1), tuple(cp-rp for cp,rp in zip(pads, reg_pads))).sum(axis)
 
   def max_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
                  ceil_mode=False, return_indices=False) -> Self | tuple[Self, Self]:
@@ -1390,12 +1388,12 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     s_ = stride if stride is not None else k_
     pads = resolve_pool_pads(padding, len(k_))
     if ceil_mode: pads = self._apply_ceil_mode(pads, k_, s_, dilation)
-    pooled = self._pad_constant(((0,0),)*(self.ndim-len(k_)) + flat_to_grouped(pads), self.commit_dtype().min)._pool(k_, s_, dilation)
+    pooled = self.pad(pads, value=self.commit_dtype().min)._pool(k_, s_, dilation)
     if not return_indices: return pooled.max(axis)
     spatial_sz = int(prod(spatial_shape := self.shape[-len(k_):]))
     idx = type(self).arange(spatial_sz, 0, -1).reshape(spatial_shape)
     m = pooled.eq(pooled.max(axis, keepdim=True))
-    idx = m * idx._pad_constant(((0,0),)*(idx.ndim-len(k_)) + flat_to_grouped(pads), idx.dtype.min)._pool(k_, s_, dilation)
+    idx = m * idx.pad(pads, value=idx.dtype.min)._pool(k_, s_, dilation)
     return pooled.max(axis), spatial_sz - idx.max(axis)
 
   def max_unpool2d(self, indices:Self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
@@ -1615,8 +1613,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     padding_ = resolve_pool_pads(padding, len(HW))
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape),\
         f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
-    # conv2d is a pooling op (with padding, possibly negative — _pad_constant handles the shrink)
-    x = self._pad_constant(((0,0),)*(self.ndim-len(HW)) + flat_to_grouped(padding_), 0.0)._pool(HW, stride, dilation)
+    # conv2d is a pooling op (with padding, possibly negative — pad handles the shrink)
+    x = self.pad(padding_)._pool(HW, stride, dilation)
     rcout, oyx = cout//groups, x.shape[2:-len(HW)]
     x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW)\
       .permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
