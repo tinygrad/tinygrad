@@ -36,6 +36,29 @@ class TestExport(unittest.TestCase):
     self.assertEqual(fn.variables(), [e])
     with self.assertRaises(AssertionError): e.bind(3)
 
+  def test_symbolic_kernel_arg(self):
+    from tinygrad.codegen import create_linear
+    fn, _ = Tensor.export(buf()[:Variable("i", 1, 8).bind(3)] + 1)
+    e, = fn.variables()
+    call, = create_linear(fn).src
+    p, = call.body.variables()
+    self.assertIs(p.op, Ops.PARAM)
+    self.assertEqual(p.arg.vmin_vmax, e.arg.vmin_vmax)
+    self.assertIs(call.src[1+p.arg.slot], e)
+    self.assertNotIn(e, call.body.toposort())
+
+  def test_symbolic_program_shared_across_bindings(self):
+    from tinygrad.engine.realize import lower_and_compile
+    def compile_slice(name, value):
+      linear, vals = (buf()[:Variable(name, 1, 8).bind(value)] + 1).linear_with_vars()
+      call, = linear.src
+      p, = call.body.variables()
+      self.assertIsNone(p.arg.name)
+      self.assertEqual(call.src[1+p.arg.slot].expr, name)
+      self.assertEqual(vals, {name: value})
+      return lower_and_compile(linear).src[0].body
+    self.assertIs(compile_slice("i", 2), compile_slice("j", 5))
+
   def test_same_function(self):
     v = Variable("v", 1, 4)
     a, b, c, d = buf(), buf(), buf(), buf()

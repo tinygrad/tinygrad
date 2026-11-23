@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, socket, argparse, codecs, io, struct, re, traceback, itertools, socketserver
+from collections import defaultdict, deque
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from dataclasses import dataclass, field
@@ -40,7 +41,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     # pass if client closed connection
     except (BrokenPipeError, ConnectionResetError): source.close()
 
-from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
+from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, range_str, range_start, multirange_str
 from tinygrad.uop.ops import KernelInfo, ParamArg, ProgramInfo
 from tinygrad.uop.render import render_index
 from tinygrad.uop.uir import render_uir, uops_colors, _inline, _render_arg
@@ -240,19 +241,18 @@ def flatten_events(profile:list[ProfileEvent], device_ts_diffs:dict[str, Decimal
 # normalize event timestamps and attach kernel metadata
 def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
   events:list[bytes] = []
-  ei:ProfilePointEvent|None = None
+  # A batch can enqueue the same program several times before its first device range starts.
+  pending:dict[bytes, deque[ProfilePointEvent]] = defaultdict(deque)
   for st,et,dur,e in dev_events:
-    if isinstance(e, ProfilePointEvent) and e.name == "exec": ei = e
-    # only visualize range events with an end timestamp
-    if dur == 0 or isinstance(e, ProfilePointEvent): continue
+    if isinstance(e, ProfilePointEvent) and e.name == "exec" and e.arg["program"] is not None: pending[e.arg["program"]].append(e)
+    if isinstance(e, ProfilePointEvent) or dur == 0: continue
     name, key = e.name, None
     fmt:dict = {}
     if (ref:=data.ref_map.get(e.profile_key)) is not None and ref < len(data.ctxs):
       name = data.ctxs[ref]["name"]
-      if (ki:=data.ctxs[ref].get("ki")) is not None and ki.estimates is not None and ei is not None:
-        for est_key,est_val in (("FLOPS", ki.estimates.ops), ("B/s mem", ki.estimates.mem), ("B/s lds", ki.estimates.lds)):
-          with soft_err(lambda _: fmt.update({est_key:"ERR"})): fmt[est_key] = int(sym_infer(est_val, ei.arg['var_vals'])/(dur*1e-6))
-        key = ei.key
+      if e.profile_key is not None and (queue:=pending.get(e.profile_key)):
+        key = (ei:=queue.popleft()).key
+        fmt = {k:int(v/(dur*1e-6)) for k,v in zip(("FLOPS", "B/s mem", "B/s lds"), ei.arg["estimates"])}
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=data.ref_map.get(k)) is not None), None)

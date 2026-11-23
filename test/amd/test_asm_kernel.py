@@ -20,15 +20,15 @@ def custom_add_one(A:UOp) -> UOp:
   assert dtypes.is_float(A.dtype), f"buffer dtype must be float32, got {A.dtype}"
   threads = UOp.special(A.numel(), "lidx0")
   # s[0:1] and v[0] are passed from the caller
-  kernarg = UOp.stack(*(UOp.param(i, dtypes.uint32, (1,), addrspace=AddrSpace.REG, reg=s[i]) for i in range(2)))
-  lane = UOp.param(2, dtypes.u32, (32,), addrspace=AddrSpace.REG, reg=v[0])
+  kernarg = UOp.stack(*(UOp.param(i, dtypes.uint32, (1,), addrspace=AddrSpace.REG, name=f"s{i}") for i in range(2)))
+  lane = UOp.param(2, dtypes.u32, (32,), addrspace=AddrSpace.REG, name="v0")
   # SGPRs have shape (1,), use STACK for SGPR pairs, s[2:3] has shape (2, 1)
-  saddr = UOp.stack(*(UOp.alloc((1,), dtypes.u32, i, AddrSpace.REG, reg=s[i+2]) for i in range(2)))
+  saddr = UOp.stack(*(UOp.placeholder((1,), dtypes.u32, i, AddrSpace.REG, name=f"s{i+2}") for i in range(2)))
   # VPGRs have shape (32,)
-  offset = UOp.alloc((32,), dtypes.u32, 2, AddrSpace.REG, reg=v[1])
-  value = UOp.alloc((32,), dtypes.u32, 3, AddrSpace.REG, reg=v[2])
-  one = UOp.alloc((32,), dtypes.u32, 4, AddrSpace.REG, reg=v[3])
-  result = UOp.alloc((32,), dtypes.u32, 5, AddrSpace.REG, reg=v[4])
+  offset = UOp.placeholder((32,), dtypes.u32, 2, AddrSpace.REG, name="v1")
+  value = UOp.placeholder((32,), dtypes.u32, 3, AddrSpace.REG, name="v2")
+  one = UOp.placeholder((32,), dtypes.u32, 4, AddrSpace.REG, name="v3")
+  result = UOp.placeholder((32,), dtypes.u32, 5, AddrSpace.REG, name="v4")
   saddr = saddr.after(UOp.native(s_load_b64(s[2:3], s[0:1], soffset=NULL)).call(saddr, kernarg))
   saddr = saddr.after(UOp.native(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0)).call(saddr))
   offset = offset.after(UOp.native(v_lshlrev_b32_e32(v[1], 2, v[0])).call(offset, lane))
@@ -42,11 +42,10 @@ def custom_add_one(A:UOp) -> UOp:
   linear = UOp(Ops.LINEAR, src=tuple(u for u in sink.toposort() if u.op is Ops.CALL))
   return UOp(Ops.PROGRAM, src=(sink.replace(src=sink.src[:2]), linear))
 
-def custom_add_var(A:UOp, B:UOp) -> UOp:
+def custom_add_var(A:UOp, B:UOp, var:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
   assert A.dtype == dtypes.uint32, f"buffer dtype must be uint32, got {A.dtype}"
   threads = UOp.special(A.numel(), "lidx0")
-  var = UOp.param(2, dtypes.int, vmin_vmax=(0, 10), name="var", addrspace=AddrSpace.ALU)
   insts = [
     s_load_b128(s[4:7], s[0:1]),
     s_load_b32(s[8], s[0:1], offset=0x10), # all threads load the same variable
@@ -191,7 +190,7 @@ class TestAsmKernel(unittest.TestCase):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     b = Tensor.full((16, 16), 1, dtype=dtypes.uint32).contiguous().realize()
     a = Tensor.zeros_like(b).contiguous().realize()
-    a = Tensor.custom_kernel(a, b, fxn=custom_add_var)[0]
+    a = Tensor.custom_kernel(a, b, Tensor(UOp.variable("var", 0, 10, dtypes.int)), fxn=custom_add_var)[0]
     linear = a.schedule_linear()
     for i in range(4):
       run_linear(linear, var_vals={"var":i})

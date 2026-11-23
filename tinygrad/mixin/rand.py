@@ -1,4 +1,3 @@
-from __future__ import annotations
 import math
 from typing import Self, cast
 from tinygrad.dtype import DType, DTypeLike, dtypes, least_upper_dtype, to_dtype, bitcast

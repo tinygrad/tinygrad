@@ -44,8 +44,8 @@ wgsl_matcher = PatternMatcher([
    lambda a,b,c: a.cast(dtypes.int).alu(c.op, b.cast(dtypes.int)).cast(dtypes.bool)),
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX),), allow_any_len=True, name="l"), lambda l: packed_load(l) if is_packed(l) else None),
   (UPat(Ops.STORE, name="s"), lambda s: packed_store(s) if is_packed(s) else None),
-  (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
-  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
+  # WGSL shifts take a u32 count and keep the left operand's type.
+  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="s"), lambda s,x,y: s.replace(src=(x, y.cast(dtypes.uint)))),
   # fix nan checks after decomp, which can emit either comparison
   (UPat.var("a", dtypes.floats).alu(Ops.CMPNE, UPat.var("a")), is_nan),
   (UPat.var("a", dtypes.floats).eq(UPat.var("a")), lambda a: is_nan(a).logical_not()),
@@ -80,7 +80,7 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.BITCAST, dtype=dtypes.char, name="x"), lambda ctx,x: f"((i32({ctx[x.src[0]]}&0xFF)<<24)>>24)"),
     (UPat(Ops.BITCAST, dtype=dtypes.ushort, name="x"), lambda ctx,x: f"bitcast<u32>(vec2<f16>({ctx[x.src[0]]},0))" \
      if x.src[0].dtype == dtypes.half else f"bitcast<u32>({ctx[x.src[0]]}&0xFFFF)"),
-    (UPat(Ops.BITCAST, dtype=dtypes.short, name="x"), lambda ctx,x: f"bitcast<i32>(vec2<f16>({ctx[x.src[0]]},0))" \
+    (UPat(Ops.BITCAST, dtype=dtypes.short, name="x"), lambda ctx,x: f"(bitcast<i32>(vec2<f16>(0,{ctx[x.src[0]]}))>>16u)" \
      if x.src[0].dtype == dtypes.half else f"((i32({ctx[x.src[0]]}&0xFFFF)<<16)>>16)"),
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"bitcast<{ctx.type_map[x.dtype]}>({ctx[x.src[0]]})"),
     (UPat.load(UPat.var("b"), UPat.var("v"), UPat.var("gate")),

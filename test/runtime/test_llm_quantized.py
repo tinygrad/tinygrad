@@ -9,6 +9,11 @@ from tinygrad.llm.model import ExpertWeights
 from tinygrad.llm.hf import e4m3fn_to_fnuz
 from test.helpers import not_support_multi_device
 
+def reference_weight(packed:np.ndarray, ggml_type:int, *shape:int) -> np.ndarray:
+  # Decode on the host so checking a custom kernel doesn't also compile and run the generic dequant graph.
+  from gguf import dequantize, GGMLQuantizationType
+  return dequantize(packed.ravel(), GGMLQuantizationType(ggml_type)).reshape(shape)
+
 class QuantLinearMixin:
   def _test_quant_linear(self, ggml_type, block_bytes, in_features=2048, out_features=64, token_counts=(1, 3, 32, 64, 128),
                          bias=False, custom=True, symbolic=False):
@@ -26,7 +31,7 @@ class QuantLinearMixin:
     if ggml_type in (12, 13): packed[:, 2:4] = np.array([0.0002], dtype=np.float16).view(np.uint8)
     raw = Tensor(np.pad(packed.flatten(), (4, 0))).contiguous().realize()[4:]
     decoded = ggml_data_to_tensor(raw, out_features*in_features, ggml_type).reshape(out_features, in_features)
-    weight = decoded.numpy()
+    weight = reference_weight(packed, ggml_type, out_features, in_features)
     linear = Linear(in_features, out_features, bias=False)
     linear.weight = decoded
     bias_value = rng.normal(size=out_features).astype(np.float32) if bias else 0

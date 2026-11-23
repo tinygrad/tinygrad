@@ -25,15 +25,19 @@ jobs:
           persist-credentials: false
       - name: Check whether branch is up-to-date
         id: brstat
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          git remote add tinygrad https://github.com/tinygrad/tinygrad
-          git fetch tinygrad master
-          echo "${{ github.event.pull_request.head.sha }}"
-          git rev-list --left-right --count  tinygrad/master...${{ github.event.pull_request.head.sha }} | awk '{print "Behind "$1" - Ahead "$2""}'
-          count=$(git rev-list --left-right --count  tinygrad/master...${{ github.event.pull_request.head.sha }} | awk '{print $1}')
+          # the repo the PR targets, on github or gitea
+          git remote add base "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          git fetch base "$BASE_REF"
+          echo "$HEAD_SHA"
+          git rev-list --left-right --count "base/$BASE_REF...$HEAD_SHA" | awk '{print "Behind "$1" - Ahead "$2""}'
+          count=$(git rev-list --left-right --count "base/$BASE_REF...$HEAD_SHA" | awk '{print $1}')
           if [ $count -gt 0 ]
           then
-            echo "Current branch is behind tinygrad master branch!"
+            echo "Current branch is behind the base branch!"
             echo "stat=true" >> "$GITHUB_OUTPUT"
           else
             echo "stat=false" >> "$GITHUB_OUTPUT"
@@ -57,7 +61,7 @@ jobs:
           # PR code is only line-counted by master's sz.py, never executed
           allow-unsafe-pr-checkout: true
           persist-credentials: false
-        # the base default to tinygrad master and cannot be other fork branch for security purpose
+        # the base is the default branch of the base repo, never fork code, for security purpose
       - name: Checkout code from tinygrad master
         uses: actions/checkout@v6
         with:
@@ -74,17 +78,38 @@ jobs:
           cp "$BASE/sz.py" .
           python sz.py "$BASE" "$PR" > loc_content.txt
       - name: Comment Code Line Diff
-        continue-on-error: false
-        uses: marocchino/sticky-pull-request-comment@v3
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ignore_empty: true
-          skip_unchanged: true
-          recreate: true
-          path: loc_content.txt
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BODY_FILE: loc_content.txt
+        # the issue comment REST api is the same on github and gitea
+        run: &sticky_comment |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          api, repo, num = os.environ["GITHUB_API_URL"], os.environ["GITHUB_REPOSITORY"], os.environ["PR_NUMBER"]
+          body = open(os.environ["BODY_FILE"]).read() if os.environ.get("BODY_FILE") else os.environ["BODY"]
+          # same format as marocchino/sticky-pull-request-comment, so its existing comments get replaced too
+          marker = "<!-- Sticky Pull Request Comment -->"
+          new = f"{body}\n{marker}"
+          def req(method, url, data=None):
+            r = urllib.request.Request(url, method=method, data=json.dumps(data).encode() if data is not None else None,
+                                       headers={"Authorization": f"token {os.environ['TOKEN']}", "Accept": "application/json", "Content-Type": "application/json"})
+            with urllib.request.urlopen(r) as f: return json.loads(f.read() or b"null"), f.headers.get("Link", "")
+          # follow the Link header: github paginates (max 100), gitea returns all comments
+          old, url = [], f"{api}/repos/{repo}/issues/{num}/comments?per_page=100"
+          while url:
+            cs, link = req("GET", url)
+            # only the actions bot's own comments, like marocchino (which matched the token's viewer)
+            old += [c for c in cs if c["user"]["login"] in ("github-actions[bot]", "gitea-actions") and c["body"].rstrip().endswith(marker)]
+            url = next((l.split(";")[0].strip(" <>") for l in link.split(",") if 'rel="next"' in l), None)
+          if not body.strip() or (old and old[-1]["body"] == new): raise SystemExit(0)  # empty or unchanged
+          for c in old: req("DELETE", f"{api}/repos/{repo}/issues/comments/{c['id']}")
+          req("POST", f"{api}/repos/{repo}/issues/{num}/comments", {"body": new})
+          PY
 
   rebase:
-    name: Core Library Line Difference
+    # distinct name: gitea keeps one commit status per name, so the skipped twin would hide this one
+    name: Core Library Line Difference (behind base)
     permissions:
       pull-requests: write
     runs-on: ubuntu-24.04
@@ -92,11 +117,8 @@ jobs:
     if: needs.checkbranch.outputs.branchstat == 'true'
     steps:
       - name: Comment Rebase
-        continue-on-error: false
-        uses: marocchino/sticky-pull-request-comment@v3
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          skip_unchanged: true
-          recreate: true
-          message: |
-            This branch currently is behind tinygrad/master. The line count difference bot is disabled.
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BODY: This branch currently is behind ${{ github.event.pull_request.base.ref }}. The line count difference bot is disabled.
+        run: *sticky_comment

@@ -1,6 +1,6 @@
 # pylint: disable=possibly-unused-variable
 from typing import Any, Sequence, cast, Literal, NamedTuple, Generator, Callable
-import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
+import dataclasses, functools, io, math, types, warnings, pathlib, os, struct, enum
 from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, is_numpy_ndarray
 from tinygrad.mixin.op import ReductionStr
@@ -219,8 +219,7 @@ class OnnxPBParser:
     data = data.bitcast(dtype).reshape(shape).to(Device.DEFAULT)
     # const folding
     if shape == ():
-      if data.dtype == dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
-      data = Tensor(data.item(), dtype=dtype).reshape(shape)
+      data = Tensor(data.item(), dtype=dtype)
     obj["parsed_tensor"] = data
     return obj
 
@@ -1045,10 +1044,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def NonZero(x:Tensor):
     mask = (x!=0).flatten()
     flat_idx = Tensor.arange(mask.numel(), dtype=dtypes.int64).masked_select(mask)
-    if flat_idx.ndim == 0: flat_idx = flat_idx.reshape(1)
     if x.ndim == 0:
       return Tensor.zeros((0, flat_idx.shape[0]), dtype=dtypes.int64, device=x.device)
-    strides = [prod(int(s) for s in x.shape[i+1:]) if i+1 < x.ndim else 1 for i in range(x.ndim)]
+    strides = [prod(int(s) for s in x.shape[i+1:]) for i in range(x.ndim)]
     coords = [((flat_idx // stride) % int(dim)) for stride, dim in zip(strides, x.shape)]
     return Tensor.stack(*coords, dim=0)
 
