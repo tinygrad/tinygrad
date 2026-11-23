@@ -5,8 +5,6 @@ from tinygrad.uop.ops import UPat, UOp, Ops, PatternMatcher, graph_rewrite, deco
 
 class UPatCompileError(Exception): pass
 
-def flatands(x:UOp) -> list[UOp]: return [x] if x.op is not Ops.AND else [y for s in x.src for y in flatands(s)]
-
 # **** UPat compiled ****
 # This file builds an IR of match predicates and compiles them to Python source.
 # Ops used: NATIVE (format-string predicates and inline fragments), STORE (bind a matched UOp to a name),
@@ -41,7 +39,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
       it = UOp.native(f"ituop{depth}", fmt=True).call(inline=True)
       match = _get_clause(next(self.src[0]), it, depth+1)
       # lift named binds out of the repeat: they bind the first src, and every element must be identical to it
-      stores, pred = partition(flatands(match), lambda x: x.op is Ops.STORE)
+      stores, pred = partition(match.split_uop(Ops.AND), lambda x: x.op is Ops.STORE)
       for st in stores:
         first = st.src[1].substitute({it: base.index(0)})
         pred.append(UOp.native("{0} is {1}", fmt=True).call(st.src[1], first))
@@ -117,11 +115,8 @@ pm_renderer = PatternMatcher([
   (UPat(Ops.PYLITERAL, name="x"), wrap),
 
   # AND/OR of inline NATIVE fragments becomes a single NATIVE
-  (UPat(Ops.AND, src=UPat(Ops.CALL), name="x"), lambda x:
-   UOp.native("(" + ' and '.join(y.body.arg.code for y in x.src) + ")", fmt=True).call(inline=True)
-   if all(y.arg.inline for y in x.src) else None),
-  (UPat(Ops.OR, src=UPat(Ops.CALL), name="x"), lambda x:
-   UOp.native("(" + ' or '.join(y.body.arg.code for y in x.src) + ")", fmt=True).call(inline=True)
+  (UPat((Ops.AND, Ops.OR), src=UPat(Ops.CALL), name="x"), lambda x:
+   UOp.native("(" + f" {x.op.name.lower()} ".join(y.body.arg.code for y in x.src) + ")", fmt=True).call(inline=True)
    if all(y.arg.inline for y in x.src) else None),
 
   (UPat(Ops.CALL, name="x"), lambda x: UOp.native(x.body.arg.code.format(*[y.body.arg.code for y in x.src[1:]]), fmt=True).call(inline=True)

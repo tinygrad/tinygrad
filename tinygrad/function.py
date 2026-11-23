@@ -106,8 +106,6 @@ def function(fxn:None=None, *, precompile:bool=False, precompile_backward:bool=F
              allow_implicit:bool=False, grad_fxn:Callable|None=None) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
 def function(fxn=None, *, precompile:bool=False, precompile_backward:bool=False,
              allow_implicit:bool=False, grad_fxn:Callable|None=None):
-  if fxn is None:
-    return lambda f: _function(f, precompile=precompile, precompile_backward=precompile_backward,
-                               allow_implicit=allow_implicit, grad_fxn=grad_fxn)
-  return _function(fxn, precompile=precompile, precompile_backward=precompile_backward,
-                   allow_implicit=allow_implicit, grad_fxn=grad_fxn)
+  def decorate(f):
+    return _function(f, precompile=precompile, precompile_backward=precompile_backward, allow_implicit=allow_implicit, grad_fxn=grad_fxn)
+  return decorate if fxn is None else decorate(fxn)
