@@ -2,7 +2,8 @@ import os, sys, mmap, io, ctypes, contextlib, pathlib, functools, collections, s
 from dataclasses import replace
 from typing import cast
 from tinygrad.helpers import OSX, mv_address, flatten, to_tuple, unwrap, ceildiv
-from tinygrad.device import BufferStorage, MMIOInterface, Compiled, Allocator, Buffer, BufferSpec, Device, HCQ_RUNTIME_DEV, is_iface_usb
+from tinygrad.device import BufferStorage, MMIOInterface, Compiled, Allocator, Buffer, BufferSpec, Device, HCQ_RUNTIME_DEV
+from tinygrad.device import is_iface_usb, has_copy_queue
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
 from tinygrad.runtime.support.hcq2 import ccall, ins, patch
@@ -114,7 +115,7 @@ def disk_read(file:UOp, srcs:UOp, counts:UOp, rings:UOp, sqes:UOp) -> UOp: # src
 
 def is_disk_read(c:UOp) -> bool:
   dev, src = [to_tuple(b.device)[0] for b in c.src[1:3]] if c.op is Ops.CALL and c.body.op is Ops.STORE else ("", "")
-  return src.startswith("DISK:") and not src.startswith("DISK:shm:") and Device[dev].has_copy_queue and not dev.startswith("NULL") and bool(uring()) \
+  return src.startswith("DISK:") and not src.startswith("DISK:shm:") and has_copy_queue(dev) and not dev.startswith("NULL") and bool(uring()) \
     and not is_iface_usb(dev)
 
 def disk_copy_rewriter(s:UOp) -> UOp|None:

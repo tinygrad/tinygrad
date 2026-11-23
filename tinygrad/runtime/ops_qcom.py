@@ -403,8 +403,7 @@ class QCOMDevice(Compiled):
   ifaces = [KGSLIface, MSMIface]
   timestamp_divider = 19.2
 
-  @property
-  def has_copy_queue(self) -> bool: return False
+  has_copy_queue = False
 
   def __init__(self, device:str=""):
     self.iface = self._select_iface(device)

@@ -542,7 +542,7 @@ def _amd_program_image(dev, lib:bytes) -> tuple[AMDProgramData, bytes]:
 
 class AMDAllocator(Allocator['AMDDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
-    return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_copy_queue)
+    return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.props["copy"])
 
   def _free(self, storage:BufferStorage, options:BufferSpec):
     self.dev.synchronize()
@@ -653,7 +653,7 @@ class KFDIface:
                    xcc_id=0, idx=0):
     if not hasattr(self, 'queue_event_arr'):
       if not hasattr(KFDIface, 'event_page'):
-        KFDIface.event_page = Buffer(self.dev.device, 0x8000, options=BufferSpec(uncached=True), preallocate=True)
+        KFDIface.event_page = Buffer(self.dev.device, 0x8000, options=BufferSpec(uncached=True), preallocate=True, allocator=self.dev.allocator)
         kfd.AMDKFD_IOC_CREATE_EVENT(KFDIface.kfd, event_page_offset=KFDIface.event_page.meta.handle)
 
       KFDIface.event_page.get_buf(self.dev.device)
@@ -861,7 +861,8 @@ class AMDDevice(Compiled):
     allocator = USBAllocator(self) if self.is_usb else AMDAllocator(self)
     super().__init__(device, allocator, None, arch=self.arch, props={"gc": "%d.%d.%d" % self.iface.ip_versions[am.GC_HWIP], "xccs": self.xccs,
                      "se": self.se_cnt, "cu": self.cu_cnt, "cu_per_sa": self.iface.props['cu_per_simd_array'],
-                     "aql": DEV.target("AMD").get("aql", int(self.xccs > 1))})
+                     "aql": DEV.target("AMD").get("aql", int(self.xccs > 1)), "copy": 0})
+    self.props["copy"] = int(self.sdma_queue(0) is not None) # queue setup allocates buffers that check it
 
     # Scratch setup
     self.max_private_segment_size = 0
@@ -928,11 +929,6 @@ class AMDDevice(Compiled):
     return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.props["aql"] else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, RING_SIZE,
       eop_buffer_size=0x1000, ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size,
       debug_memory_size=round_up(self.wave_cnt * 32, 64))
-
-  @functools.cached_property
-  def has_copy_queue(self) -> bool:
-    self.has_copy_queue = False # queue setup can allocate buffers that check this property
-    return self.sdma_queue(0) is not None
 
   def sdma_queue(self, idx:int):
     if getenv("AMD_DISABLE_SDMA"): return None

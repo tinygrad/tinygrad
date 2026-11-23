@@ -67,6 +67,7 @@ class _Device:
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device: _Device = _Device()
 atexit.register(lambda: [Device[dn].finalize() for dn in tuple(Device._opened_devices)])
+def has_copy_queue(dev:str) -> bool: return bool((t:=Device.target_for(dev)).get("copy", int(Device.get_class(t.device).has_copy_queue)))
 def is_iface_usb(dev:str|tuple[str, ...]) -> bool: return Device.target_for(Device.canonicalize(to_tuple(dev)[0])).interface.endswith("USB")
 
 # **************** Profile ****************
@@ -347,6 +348,7 @@ class Compiled:
   sleep_timeout_ms: int|None = None
   can_recover:bool = False
   var_vals: dict[str, int] = {}
+  has_copy_queue: bool = True
 
   # hcq2
   pm_encode:PatternMatcher
@@ -361,9 +363,6 @@ class Compiled:
 
     # profiling
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
-
-  @property
-  def has_copy_queue(self) -> bool: return True
 
   @property
   def host(self) -> str: return f"CPU:{self.peer_group[7:]}" if self.peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.device

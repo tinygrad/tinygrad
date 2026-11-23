@@ -59,8 +59,7 @@ class CPUProgram(Program['CPUDevice']):
 
 class CPUDevice(Compiled):
   renderers = [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer, TCCRenderer]
-  @property
-  def has_copy_queue(self) -> bool: return False
+  has_copy_queue = False
 
   def __init__(self, device:str=""):
     self.remote = None

@@ -183,7 +183,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     self.assertEqual(len([x for x in run(b, done={"NULL": T - 1})[0] if isinstance(x, int)]), 1)
 
   def test_a_device_without_a_copy_queue_copies_with_a_kernel(self):
-    with patch.object(type(Device["NULL"]), "has_copy_queue", property(lambda _: False)):
+    with patch.object(type(Device["NULL"]), "has_copy_queue", False):
       b = self.batch((self.x.to("NULL:1") + 1).contiguous())
     self.assertTrue(all(c.body.op is Ops.PROGRAM for c in calls(b)))
     self.assertEqual(orders(b), {(0, 1)})
