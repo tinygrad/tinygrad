@@ -2,7 +2,7 @@ from __future__ import annotations
 import ctypes, hashlib, functools
 from tinygrad.runtime.autogen import opencl as cl, libc
 from tinygrad.runtime.support import c
-from tinygrad.helpers import to_char_p_p, from_mv, cpu_profile, OSX, DEBUG, suppress_finalizing, unwrap, round_up, is_image_shape
+from tinygrad.helpers import to_char_p_p, from_mv, cpu_profile, OSX, DEBUG, suppress_finalizing, unwrap, round_up, is_image_shape, to_name
 from tinygrad.renderer.cstyle import OpenCLRenderer
 from tinygrad.device import BufferStorage, BufferSpec, HostAllocator, Compiled, MMIOInterface
 from tinygrad.renderer import Compiler, CompileError, TinyELF
@@ -49,6 +49,8 @@ def cl_run(buf:UOp, cmds:tuple) -> UOp: # one in-order queue, every call after t
 class CLQueue(HWQueue):
   dev:CLDevice
   def q64(self, *vals) -> int: return self.q(*[UOp.const(v, dtypes.uint64) if isinstance(v, int) else v.cast(dtypes.uint64) for v in vals])
+  @property
+  def handles(self) -> list[UOp]: return [UOp.variable(to_name(self.devs[0], n), 0, 2**64 - 1, dtypes.uint64) for n in ("context", "queue")]
   def call(self, fn, *args):
     self.cmds.append((fn, *[UOp.const(a, dtypes.uint64) if isinstance(a, int) else self.q64(a) // 8 - 1 if isinstance(a, UOp) else a for a in args]))
 
@@ -59,18 +61,18 @@ class CLQueue(HWQueue):
       if is_image_shape(shape): # [format][desc][errcode]
         desc = (cl.CL_MEM_OBJECT_IMAGE2D, shape[1], shape[0], 0, 0, round_up(shape[1], 256 if OSX else 1) * 4 * dt.itemsize, 0, 0, args[i])
         end = self.q64(cl.CL_RGBA | {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize] << 32, *desc, 0)
-        self.call(cl.clCreateImage, self.dev.handles[0], cl.CL_MEM_READ_WRITE, (end - 88,), (end - 80,), 0, (end - 8,))
+        self.call(cl.clCreateImage, self.handles[0], cl.CL_MEM_READ_WRITE, (end - 88,), (end - 80,), 0, (end - 8,))
         images.append((end - 8) // 8)
       else: end = self.q64(args[i])
       self.call(cl.clSetKernelArg, kernel, i, args[i].dtype.itemsize, (end - 8,))
     global_size, local_size = prg.arg.launch_dims(call)
     end = self.q64(*[g * l for g, l in zip(global_size, local_size)], *local_size) # [global][local]
-    self.call(cl.clEnqueueNDRangeKernel, self.dev.handles[1], kernel, 3, 0, (end - 48,), (end - 24,), 0, 0, 0)
+    self.call(cl.clEnqueueNDRangeKernel, self.handles[1], kernel, 3, 0, (end - 48,), (end - 24,), 0, 0, 0)
     self.cmds += [(cl.clReleaseMemObject, w) for w in images]
 
   def wait(self, sig:UOp, val:UOp, eq=False): pass # the queue is in order
   def signal(self, sig:UOp, val:UOp): self.call(libc.memcpy, sig.getaddr(self.devs), (self.q64(val) - 8,), 8) # synchronize finishes the queue
-  def timestamp(self, sig:UOp): self.call(cl.clEnqueueMarkerWithWaitList, self.dev.handles[1], 0, 0, sig.getaddr(self.devs)) # [event][time]
+  def timestamp(self, sig:UOp): self.call(cl.clEnqueueMarkerWithWaitList, self.handles[1], 0, 0, sig.getaddr(self.devs)) # [event][time]
 
   def encode(self) -> UOp:
     self.cmds:list[tuple] = []
@@ -113,7 +115,7 @@ class CLDevice(Compiled):
     if DEBUG >= 1: print(f"CLDevice: opening {self.device_name} with version {self.driver_version}")
     self.context = checked(cl.clCreateContext, None, 1, self.cl_dev, CC_CB(), None)
     self.queue = checked(cl.clCreateCommandQueue, self.context, self.cl_dev, cl.CL_QUEUE_PROFILING_ENABLE)
-    self.handles = [int.from_bytes(bytes(h), "little") for h in (self.context, self.queue)]
+    self.var_vals = {to_name(device, n): int.from_bytes(bytes(h), "little") for n, h in (("context", self.context), ("queue", self.queue))}
 
     arch = ",".join(exts:=info(cl.clGetDeviceInfo, self.cl_dev, cl.CL_DEVICE_EXTENSIONS).split())
     if "cl_khr_image2d_from_buffer" in exts:
