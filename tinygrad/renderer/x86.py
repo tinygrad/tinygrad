@@ -52,7 +52,6 @@ class ISARenderer(Renderer):
 
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
-  # these aren't real instructions
   LABEL = auto()
   # index
   LEA = auto()
