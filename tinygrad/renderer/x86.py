@@ -229,7 +229,7 @@ def is_imm(x:UOp) -> bool: return x.op is Ops.CAST and x.src[0].op is Ops.CONST 
 def to_imm(c:UOp) -> UOp|None:
   if not (c.op is Ops.CAST and (v:=c.src[0]).op is Ops.CONST): return None
   if c.dtype in dtypes.int64s: return UOp.cconst(v.val, dtypes.i32) if not v.overflows(dtypes.i32) else None
-  if c.dtype in dtypes.ints+(dtypes.bool,): return imm(c.dtype, v.val)
+  if c.dtype in dtypes.ints+(dtypes.bool,): return UOp.cconst(v.val, c.dtype)
   return None
 # the flag path, which only an integer comparison can take: an x86 float compare sets carry, zero and parity together when an
 # operand is NaN, so a NaN reads as "below" and as "equal", and it clears sign and overflow, so nothing reads as "less"
@@ -278,7 +278,7 @@ def shift(ctx:IselContext, x:UOp, op:X86Ops) -> UOp:
   return UOp.ins(op, (val, cnt), x.dtype)
 
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
-  def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.int8.max else dtypes.int8, v)
+  def _disp(v:int) -> UOp: return UOp.cconst(v, dtypes.i32 if abs(v) > dtypes.i8.max else dtypes.i8)
   def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v.cast(dtypes.uint32) if v.dtype.itemsize < 4 else v
   if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp.cconst(0, dtypes.u64), _disp(0), UOp.cconst(x.dtype.itemsize, dtypes.u32))
   base, idx = x.src[0], x.src[1]
@@ -319,7 +319,7 @@ def copy_op(dt:DType) -> X86Ops:
 
 def mov_op(s:UOp) -> UOp:
   if s.op is Ops.AFTER: return s.replace(src=(mov_op(s.src[0]),)+s.src[1:])
-  return UOp.ins(X86Ops.MOVABS if s.dtype in dtypes.int64s else X86Ops.MOVi, (imm(s.dtype, s.src[0].val),), s.dtype) if is_imm(s) else s
+  return UOp.ins(X86Ops.MOVABS if s.dtype in dtypes.int64s else X86Ops.MOVi, (UOp.cconst(s.src[0].val, s.dtype),), s.dtype) if is_imm(s) else s
 
 def load_const(x:UOp) -> UOp:
   op, n = x.body.arg.code, len(x.src_without_body)
