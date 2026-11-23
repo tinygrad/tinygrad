@@ -3,7 +3,7 @@ from collections import deque
 import itertools, functools, time, inspect
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC, SCACHE, BASEDIR
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile
-from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored
+from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored, NO_MEMORY_PLANNER
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
@@ -624,6 +624,7 @@ pm_resolve_linear_call = PatternMatcher([
 ])+pm_flatten_linear
 
 schedule_cache: dict[bytes, UOp] = {}
+linear_cache: dict[tuple[UOp, int], tuple[bytes, UOp]] = {}  # (exported function, NO_MEMORY_PLANNER) -> (its schedule_cache key, LINEAR)
 # ctx is just for DEBUG on inner
 def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = call.body
@@ -719,11 +720,13 @@ pm_contiguous_views = PatternMatcher([
 @rewrite_group(lambda fn,ret,**_: f"Schedule {len(fn.src)} -> {len(ret.src)}")
 def create_linear(fn:UOp) -> UOp:
   """an exported function (no runtime state) to the LINEAR of calls that runs it, on its EXTERNs, view args and ALLOCs"""
+  # the LINEAR only depends on fn, it's cached for as long as the schedule of fn is
+  if SCACHE and (hit:=linear_cache.get((fn, NO_MEMORY_PLANNER.value))) is not None and hit[0] in schedule_cache: return hit[1]
   # a contiguous view of storage is a different buffer: it's an input of the scheduled function, the call arg is the view
   views: dict[UOp, int] = {}
-  fn = graph_rewrite(fn, pm_contiguous_views, ctx=views, name="contiguous views")
-  fn = fn.substitute({v:v.param_like(i) for v,i in views.items()}, walk=True, name="views to params")
-  linear_call = graph_rewrite(fn.call(*views, precompile=True), pm_schedule, name="schedule to linear", enter_calls=True)
+  sched_fn = graph_rewrite(fn, pm_contiguous_views, ctx=views, name="contiguous views")
+  sched_fn = sched_fn.substitute({v:v.param_like(i) for v,i in views.items()}, walk=True, name="views to params")
+  linear_call = graph_rewrite(sched_fn.call(*views, precompile=True), pm_schedule, name="schedule to linear", enter_calls=True)
 
   # this recursively resolves the linear_call, storage stays unbound until map back
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
@@ -736,4 +739,7 @@ def create_linear(fn:UOp) -> UOp:
 
   # the storage it allocates gets canonical slots, so the linear only depends on fn. map back binds each to fresh storage
   allocs = [u for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL]
-  return linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
+  if any(b.device is None for b in allocs): raise RuntimeError("global storage needs a device, give the ALLOC one")
+  ret = linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
+  linear_cache[(fn, NO_MEMORY_PLANNER.value)] = (sched_fn.key, ret)
+  return ret

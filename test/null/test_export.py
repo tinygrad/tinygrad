@@ -80,5 +80,25 @@ class TestExport(unittest.TestCase):
     schedule_cache.clear()
     self.assertIs(create_linear(fn), linear)
 
+  def test_create_linear_cached(self):
+    # the linear of a function is cached for as long as its schedule is
+    from unittest.mock import patch
+    from tinygrad import Context
+    import tinygrad.codegen as codegen
+    fn, _ = Tensor.export(((buf()+1).contiguous()*2+3).contiguous())
+    with patch("tinygrad.codegen.memory_plan_rewrite", wraps=codegen.memory_plan_rewrite) as plan:
+      linear = Tensor.compile(fn)
+      before = plan.call_count
+      self.assertIs(Tensor.compile(fn), linear)
+      self.assertEqual(plan.call_count, before)
+      # the jit defers the memory plan, a planned linear is not what it gets
+      with Context(NO_MEMORY_PLANNER=1): self.assertIsNot(Tensor.compile(fn), linear)
+      with Context(SCACHE=0): self.assertIs(Tensor.compile(fn), linear)
+      self.assertEqual(plan.call_count, before+2)
+      codegen.schedule_cache.clear()
+      self.assertIs(Tensor.compile(fn), linear)
+      self.assertEqual(plan.call_count, before+3)
+      self.assertEqual(len(codegen.schedule_cache), 1)
+
 if __name__ == "__main__":
   unittest.main()
