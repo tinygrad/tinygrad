@@ -253,6 +253,35 @@ class TestGGUF(unittest.TestCase):
           self.assertEqual(loaded_kv, kv)
           for name, value in expected.items(): np.testing.assert_equal(decoded[name].numpy(), value)
 
+  def test_load_weight_scale(self):
+    from gguf import GGUFWriter
+    from tinygrad import nn
+    from tinygrad.llm.model import Transformer, TransformerConfig
+    config = TransformerConfig(num_blocks=1, dim=8, hidden_dim=8, n_heads=4, n_kv_heads=4, norm_eps=1e-5, vocab_size=32, head_dim=2, v_head_dim=2,
+                               rope_theta=10000, rope_dim=2, max_context=16, num_experts=4, num_experts_per_tok=2)
+    rng = np.random.default_rng(0)
+    weights = {k:rng.normal(size=v.shape).astype(np.float32) for k,v in nn.state.get_state_dict(Transformer(config)).items()}
+    scales = {'blk.0.attn_output.scale': np.array([0.25], np.float32), 'blk.0.ffn_down_exps.scale': np.array([1, 2, 3, 4], np.float32)}
+    with tempfile.TemporaryDirectory() as folder:
+      writer = GGUFWriter(path:=pathlib.Path(folder)/'model.gguf', 'deepseek2')
+      for key,value in {'context_length':16, 'embedding_length':8, 'expert_feed_forward_length':8, 'block_count':1, 'expert_count':4,
+                        'expert_used_count':2, 'attention.head_count':4, 'attention.head_count_kv':4, 'attention.key_length':2,
+                        'rope.dimension_count':2}.items():
+        writer.add_uint32('deepseek2.'+key, value)
+      writer.add_float32('deepseek2.rope.freq_base', 10000)
+      writer.add_float32('deepseek2.attention.layer_norm_rms_epsilon', 1e-5)
+      writer.add_array('tokenizer.ggml.tokens', [str(i) for i in range(32)])
+      for name,value in {**weights, **scales}.items(): writer.add_tensor(name, value)
+      writer.write_header_to_file()
+      writer.write_kv_data_to_file()
+      writer.write_tensors_to_file()
+      writer.close()
+      with Context(DEV="CPU"):
+        blk = Transformer.from_gguf(path)[0].blk[0]
+      np.testing.assert_allclose(blk.attn_output.weight.numpy(), weights['blk.0.attn_output.weight'] * 0.25, rtol=1e-3)
+      expected = weights['blk.0.ffn_down_exps.weight'] * np.arange(1, 5).reshape(4, 1, 1)
+      np.testing.assert_allclose(blk.ffn_down_exps.weight.numpy(), expected, rtol=1e-3)
+
   def test_parse_empty(self):
     blob = self._build_gguf([], [("general.name", "empty")])
     for loader in (gguf_parse, gguf_load):
