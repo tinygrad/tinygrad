@@ -108,7 +108,7 @@ def get_runtime(device:str, ast:UOp, cache=True):
 
 # **************** run linear ****************
 
-capturing: list = []  # put classes with an add_linear method in here
+capturing: list = []  # put classes with an add_export method in here
 
 @dataclass
 class ExecContext:
