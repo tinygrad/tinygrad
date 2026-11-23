@@ -1,6 +1,6 @@
 import unittest
 from tinygrad.helpers import Target
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp
 from tinygrad.dtype import dtypes
 from tinygrad.renderer.x86 import X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm, reg
 
