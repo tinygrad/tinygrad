@@ -6,7 +6,7 @@ import importlib, inspect, functools, itertools, pathlib, os, contextlib, atexit
 from tinygrad.helpers import mv_address, LRU, getenv, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, perf_counter_us, HCQ_RUNTIME_DEV, is_disk_device, canonicalize_device_name, Target
+from tinygrad.helpers import cpu_profile, perf_counter_us, HCQ_RUNTIME_DEV, is_disk_device, canonicalize_device_name, Target, to_tuple
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.renderer import Renderer
@@ -44,8 +44,9 @@ class _Device:
   def target_for(self, device:str, cv=DEV) -> Target:
     if not (t:=cv.target(device.split(':')[0])).arch and device not in self._opened_devices: self[device]
     if (d:=self._opened_devices.get(device)) is None: return t
-    return replace(t, arch=t.arch or d.arch or "", props=",".join(f"{k}={v}" for k, v in (d.props | t.opts).items()))
-  def renderer_for(self, device:str, cv=DEV) -> Renderer: return select_renderer(replace(self.target_for(device, cv), props=""))
+    iface = type(d.iface).__name__[:-5] if hasattr(d, "iface") else ""
+    return replace(t, arch=t.arch or d.arch or "", interface=t.interface or iface, props=",".join(f"{k}={v}" for k, v in (d.props | t.opts).items()))
+  def renderer_for(self, device:str, cv=DEV) -> Renderer: return select_renderer(cv.target((t:=self.target_for(device, cv)).device, arch=t.arch))
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
   def get_available_devices(self) -> Iterator[str]:
@@ -66,6 +67,7 @@ class _Device:
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device: _Device = _Device()
 atexit.register(lambda: [Device[dn].finalize() for dn in tuple(Device._opened_devices)])
+def is_iface_usb(dev:str|tuple[str, ...]) -> bool: return Device.target_for(Device.canonicalize(to_tuple(dev)[0])).interface.endswith("USB")
 
 # **************** Profile ****************
 

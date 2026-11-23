@@ -1,7 +1,7 @@
 import os
 
 # TODO: there is a timing bug without this
-os.environ["AMD_AQL"] = "1"
+os.environ.setdefault("DEV", "AMD:::aql=1")
 
 from tinygrad import Tensor, Device, GlobalCounters, Context, dtypes
 from tinygrad.helpers import getenv, DEV
