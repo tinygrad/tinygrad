@@ -247,7 +247,8 @@ class _DEV(ContextVar):
   def target(self, dev:str, **kwargs) -> Target:
     assert (v:=getenv(k:=f"{dev}_CC", "")) == "", \
       f"{k}={v} is deprecated, use DEV='{';'.join([repr(t) for t in self._value if t.device and t.device != dev] + [f'{dev}:{v}'])}' instead"
-    return replace(next((t for t in self._value if not t.device or t.device == dev), Target(device=dev)).replacedefault(**kwargs), device=dev)
+    t = next((t for t in self._value if not t.device or t.device == dev), Target(device=dev))
+    return t if t.device == dev and not kwargs else replace(t.replacedefault(**kwargs), device=dev)
 
 DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)

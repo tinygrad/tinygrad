@@ -1,11 +1,11 @@
 import ctypes, struct, time, functools, itertools
 from typing import cast
 from tinygrad.runtime.autogen import libusb, libc
-from tinygrad.helpers import DEBUG, DEV, HCQ_RUNTIME_DEV, to_mv, round_up, ceildiv, flatten, to_tuple
+from tinygrad.helpers import DEBUG, DEV, HCQ_RUNTIME_DEV, to_mv, round_up, ceildiv, flatten
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, uopfunc
-from tinygrad.device import Buffer, BufferSpec, Compiled, Device
-from tinygrad.runtime.support.hcq2 import HCQ_DEVS, ccall, patch, unwrap_view, all_devices_in, to_name, get_time_ms, ins
+from tinygrad.device import Buffer, BufferSpec, Compiled
+from tinygrad.runtime.support.hcq2 import HCQ_DEVS, ccall, patch, unwrap_view, all_devices_in, to_name, get_time_ms, ins, is_usb
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support import c
 
@@ -261,7 +261,6 @@ def usb_patch(link:UOp, addr:UOp, val:UOp, slot:UOp) -> UOp: # poke only on chan
 # 3. lower
 
 def is_host(b:UOp) -> bool: return not all_devices_in(b.device, HCQ_DEVS - {"CPU"})
-def is_usb(dev) -> bool: return to_name(d:=to_tuple(dev)[0], "usb_host") in Compiled.link_bufs or getattr(Device[d], "is_usb", False)
 def is_remote(b:UOp) -> bool: return (p:=unwrap_view(b)[0]).op in (Ops.PARAM, Ops.ALLOC, Ops.EXTERN) and p.device is not None and is_usb(p.device)
 def usb_addr(b:UOp, idx:UOp, dt:DType) -> UOp: return b.getaddr("CPU") + (idx * dt.itemsize).cast(dtypes.uint64) # byte address of b[idx]
 def usb_deps(b:UOp) -> tuple[UOp, ...]: # deps through views
