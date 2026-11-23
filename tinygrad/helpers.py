@@ -211,6 +211,7 @@ class Target:
   arch: str = ""
   interface: str = ""
   indices: str = ""
+  props: str = ""
 
   @staticmethod
   def parse(s:str) -> Target:
@@ -219,13 +220,17 @@ class Target:
     elif len(split) > 2: raise RuntimeError(f"too many '+' in target string: {s!r}")
     else: iface, indices = "", ""
     match [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]:
+      case [dev, ren, arch, props]: return Target(dev, ren, arch, iface, indices, props)
       case [dev, ren, arch]: return Target(dev, ren, arch, iface, indices)
       case [dev, ren]: return Target(dev, ren, interface=iface, indices=indices)
       case [dev]: return Target(dev, interface=iface, indices=indices)
       case _: raise RuntimeError(f"too many ':' in target string: {s!r}")
   def __repr__(self):
-    fst, snd = re.sub(":*$", "", ":".join([self.interface, self.indices])), re.sub(":*$", "", ":".join([self.device, self.renderer, self.arch]))
+    fst, snd = ":".join([self.interface, self.indices]).rstrip(":"), ":".join([self.device, self.renderer, self.arch, self.props]).rstrip(":")
     return (fst + "+" if fst else "") + snd
+  @property
+  def opts(self) -> dict[str, str]: return dict(x.split("=", 1) for x in self.props.split(",") if x)
+  def get(self, key:str, default:Any="") -> Any: return type(default)(self.opts.get(key, default))
   # replaces if not already set
   def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
 

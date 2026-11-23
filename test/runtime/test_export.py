@@ -34,6 +34,29 @@ class TestExportRun(unittest.TestCase):
       run_linear(link_linear(compiled, inputs), input_uops=inputs, jit=True)
       self.assertEqual(out.tolist(), [n, 2*n, 3*n])
 
+  def test_capture_export(self):
+    # a capturer gets the export, a function with no runtime state and its externs. nothing is compiled or run until it does
+    from tinygrad.engine.realize import capturing
+    from tinygrad.helpers import GlobalCounters
+    from tinygrad.uop.ops import Ops
+    class Capture:
+      def __init__(self): self.exports = []
+      def add_export(self, fn, externs): self.exports.append((fn, externs))
+    a = Tensor([1, 2, 3]).realize()
+    capturing.append(cap:=Capture())
+    try:
+      kernel_count = GlobalCounters.kernel_count
+      out = (a + 1).realize()
+      with Context(CAPTURING=0): ran = (a + 2).realize()
+    finally: capturing.clear()
+    (fn, externs), = cap.exports
+    self.assertFalse(any(u.op is Ops.BUFFER for u in fn.toposort(enter_calls=True)))
+    self.assertEqual(GlobalCounters.kernel_count, kernel_count+1)
+    self.assertFalse(out.uop.base.buffer.is_allocated())
+    self.assertEqual(ran.tolist(), [3, 4, 5])
+    Tensor.run(Tensor.compile(fn), externs)
+    self.assertEqual(out.tolist(), [2, 3, 4])
+
   def test_run_checks_externs(self):
     a, b = Tensor([1., 2.]).realize(), Tensor([1., 2., 3.]).realize()
     fn, externs = Tensor.export((a + 1).contiguous())

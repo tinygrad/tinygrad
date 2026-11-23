@@ -205,7 +205,7 @@ class NVEncDecQueue(NVQueue):
     assert all(unwrap_view(b)[1] % 0x100 == 0 for b in get_call_arg_uops(call)), "all buffers must be 0x100 aligned"
     # decoder offsets are in 256-byte units
     bufout, bufin, desc, *hist = [(b.getaddr(self.devs) >> 8).cast(dtypes.uint32) for b in get_call_arg_uops(call)]
-    h, w, frame_pos = 2 * ast.src[1].val // 3, ast.src[2].val, ast.src[0].replace(op=Ops.PARAM).cast(dtypes.int32)
+    h, w, frame_pos = 2 * ast.src[0].src[1].val // 3, ast.src[0].src[2].val, ast.src[0].src[0].replace(op=Ops.PARAM).cast(dtypes.int32)
     self.dev._ensure_has_vid_hw(w, h)
     coloc, filt, stat = [(UOp.from_buffer(b, dtypes.uint8).getaddr(self.devs) >> 8).cast(dtypes.uint32)
                          for b in (self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.vid_stat_buf)]
@@ -607,7 +607,7 @@ class NVDevice(Compiled):
     # Set windows addresses to not collide with other allocated buffers.
     self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
-    super().__init__(device, NVAllocator(self), None, arch=self.arch)
+    super().__init__(device, NVAllocator(self), None, arch=self.arch, props={"sm_version": self.sm_version})
 
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 
@@ -835,4 +835,3 @@ class NVDevice(Compiled):
       nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS(bytesConsumed=params.bytesAvailable))
     return pma_data
 
-  def device_props(self) -> dict[str, Any]: return {'arch': self.arch, 'sm_version': self.sm_version}

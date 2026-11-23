@@ -108,7 +108,7 @@ def get_runtime(device:str, ast:UOp, cache=True):
 
 # **************** run linear ****************
 
-capturing: list = []  # put classes with an add_linear method in here
+capturing: list = []  # put classes with an add_export method in here
 
 @dataclass
 class ExecContext:
@@ -205,7 +205,7 @@ def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
   # a PROGRAM with a ProgramInfo and a BINARY is already compiled
   if (ast.op is Ops.SINK and isinstance(ast.arg, KernelInfo)) or \
      (ast.op is Ops.PROGRAM and not (isinstance(ast.arg, ProgramInfo) and ast.src[-1].op is Ops.BINARY)):
-    return ast, Device[to_tuple(c.device)[0]]._select_renderer(HCQ_RUNTIME_DEV if c.arg.hcq is not None else DEV)
+    return ast, Device.renderer_for(Device.canonicalize(to_tuple(c.device)[0]), HCQ_RUNTIME_DEV if c.arg.hcq is not None else DEV)
   return None
 
 def lower_and_compile(linear:UOp, verbose=True) -> UOp:

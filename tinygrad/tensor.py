@@ -291,17 +291,15 @@ class Tensor(RandMixin):
 
   @staticmethod
   @Context(ALLOW_DEVICE_USAGE=0)
-  def compile(fn:UOp, *, plan:bool=True) -> UOp:
-    """Schedule a function from `Tensor.export` without binding its externs. Set `plan=False` to defer memory planning across schedules."""
-    return create_linear(fn, plan=plan)
+  def compile(fn:UOp) -> UOp:
+    """Schedule a function from `Tensor.export` without binding its externs."""
+    return create_linear(fn)
 
   @staticmethod
   def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
     """Runs an exported function compiled to a LINEAR, its EXTERNs are the externs from `Tensor.export`."""
     linear, var_vals = map_back(linear, externs)
-    # a capturing jit runs its captured linears later
-    if capturing and CAPTURING: capturing[0].add_linear(linear, var_vals)
-    else: run_linear(linear, var_vals, update_stats=do_update_stats)
+    run_linear(linear, var_vals, update_stats=do_update_stats)
 
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
@@ -309,9 +307,9 @@ class Tensor(RandMixin):
     to_realize = [x for x in (self,)+lst if x.uop.base.needs_storage()]
     if len(to_realize):
       fn, externs = Tensor.export(*to_realize)
-      # a capturing jit plans the memory of its captured linears together
-      linear = Tensor.compile(fn, plan=not (capturing and CAPTURING))
-      Tensor.run(linear, externs, do_update_stats=do_update_stats)
+      # a capturing jit compiles and runs its captured exports later
+      if capturing and CAPTURING: capturing[0].add_export(fn, externs)
+      else: Tensor.run(Tensor.compile(fn), externs, do_update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:
@@ -621,7 +619,7 @@ class Tensor(RandMixin):
     ref_frames = [x.contiguous() for x in ref_frames or []]
     assert frame_pos.is_bound_var, "frame_pos must be a bound Variable"
     srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
-    fn = UOp.native("encdec", frame_pos.unbound(), *[UOp.const(s) for s in shape])
+    fn = UOp.native("encdec", frame_pos.unbound().after(*[UOp.const(s) for s in shape]))
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
 P = ParamSpec("P")

@@ -408,6 +408,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: apps_llm
+          llvm: 'true' # clang 18 crashes in MachineLICM on avx512fp16 hosts (sapphire rapids+)
       - name: Test LLMs
         env:
           MAX_BUFFER_SIZE: 0

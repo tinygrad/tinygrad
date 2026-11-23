@@ -741,7 +741,7 @@ pm_contiguous_views = PatternMatcher([
 ])
 
 @rewrite_group(lambda fn,ret,**_: f"Schedule {len(fn.src)} -> {len(ret.src)}")
-def create_linear(fn:UOp, plan:bool=True) -> UOp:
+def create_linear(fn:UOp) -> UOp:
   """an exported function (no runtime state) to the LINEAR of calls that runs it, on its EXTERNs, view args and ALLOCs"""
   # a contiguous view of storage is a different buffer: it's an input of the scheduled function, the call arg is the view
   views: dict[UOp, int] = {}
@@ -755,8 +755,8 @@ def create_linear(fn:UOp, plan:bool=True) -> UOp:
   # create copies
   linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
 
-  # plan the storage the function allocates. the jit plans all its captured calls together instead
-  if plan: linear = memory_plan_rewrite(linear)
+  # plan the storage the function allocates
+  linear = memory_plan_rewrite(linear)
 
   # the storage it allocates gets canonical slots, so the linear only depends on fn. map back binds each to fresh storage
   allocs = [u for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL]

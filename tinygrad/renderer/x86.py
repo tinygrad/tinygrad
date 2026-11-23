@@ -14,10 +14,12 @@ class IselContext:
   def __init__(self): self.reg_n = itertools.count()
   def vreg(self, dtype:DType, choices:tuple[UOp, ...]): return vreg(next(self.reg_n), dtype, choices)
 
-# the registers an ins defines exist in the src of NATIVE
+# the registers an ins defines exist in the src of NATIVE, with additional definitions in an AFTER
 def regs(u:UOp) -> tuple[UOp, ...]:
   if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG: return regbuf_reg(u)
-  return u.body.src if u.op is Ops.CALL else ()
+  if u.op is not Ops.CALL: return ()
+  src = u.body.src[0]
+  return src.src if src.op is Ops.AFTER else (src,)
 
 def vdef(u:UOp) -> UOp|None:
   # a BITCAST or CAST that survives isel is no instruction, it reads the register of its source
