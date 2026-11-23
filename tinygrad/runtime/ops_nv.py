@@ -631,8 +631,8 @@ class NVDevice(Compiled):
     mem = self.iface.alloc(3<<20, contiguous=True, cpu_access=True, force_devmem=True, map_flags=nv_gpu.NVOS33_FLAGS_CACHING_TYPE_WRITECOMBINED<<23)
     self.gpfifo_buf = Buffer(self.device, 3<<20, opaque=mem)
 
-    compute = self._new_gpu_fifo("COMPUTE:0", self.ctxshare, self.channel_group, offset=0, entries=GPFIFO_ENTRIES, compute=True)
-    copy = self._new_gpu_fifo("COPY:0", self.ctxshare, self.channel_group, offset=0x100000, entries=GPFIFO_ENTRIES)
+    compute = self._new_gpu_fifo("COMPUTE:0", self.ctxshare, self.channel_group, offset=0, compute=True)
+    copy = self._new_gpu_fifo("COPY:0", self.ctxshare, self.channel_group, offset=0x100000)
     self.iface.rm_control(self.channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
     self.fifos = {"COMPUTE:0": compute, "COPY:0": copy}
 
@@ -644,7 +644,7 @@ class NVDevice(Compiled):
     if self.pma_enabled: self._prof_init() # the sampler binds to the channel group, so it only comes up once the channels do
     return self.fifos
 
-  def _new_gpu_fifo(self, name:str, ctxshare, channel_group, offset=0, entries=0x400, compute=False, video=False) -> GPFifo:
+  def _new_gpu_fifo(self, name:str, ctxshare, channel_group, offset=0, entries=GPFIFO_ENTRIES, compute=False, video=False) -> GPFifo:
     notifier = Buffer(self.device, size:=48 << 20, opaque=self.iface.alloc(size, uncached=True))
     params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(gpFifoOffset=self.gpfifo_buf._buf+offset, gpFifoEntries=entries,
       hObjectError=notifier.meta.hMemory, hObjectBuffer=self.virtmem if video else self.gpfifo_buf.meta.hMemory,
@@ -699,10 +699,9 @@ class NVDevice(Compiled):
     run_linear(hcq_link(linear), jit=True, update_stats=False, wait=True)
 
   def _vid_fifo(self) -> GPFifo:
-    if self.iface.viddec_class is None: raise RuntimeError(f"{self.device} Video decoder class not available.")
     if "ENCDEC:0" not in self.fifos:
-      self.fifos["ENCDEC:0"] = self._new_gpu_fifo("ENCDEC:0", 0, self.nvdevice, offset=0x200000, entries=GPFIFO_ENTRIES, video=True)
-      self._submit_cmds("ENCDEC:0", *nvm(4, nv_gpu.NVC6C0_SET_OBJECT, self.iface.viddec_class))
+      self.fifos["ENCDEC:0"] = self._new_gpu_fifo("ENCDEC:0", 0, self.nvdevice, offset=0x200000, video=True)
+      self._submit_cmds("ENCDEC:0", *nvm(4, nv_gpu.NVC6C0_SET_OBJECT, unwrap(self.iface.viddec_class)))
     return self.fifos["ENCDEC:0"]
 
   def _grow(self, name:str, sz:int) -> Buffer:
