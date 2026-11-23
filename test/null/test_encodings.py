@@ -11,19 +11,19 @@ class TestEncodingsX86(unittest.TestCase):
 
   # displacement of 0 isn't emitted
   def test_base_address(self):
-    load = UOp.ins(X86Ops.MOV, (reg(dtypes.uint64, RDI), UOp(Ops.NOOP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), dtypes.int32, RDI)
+    load = UOp.ins(X86Ops.MOV, (reg(dtypes.uint64, RDI), imm(dtypes.u64, 0), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), dtypes.int32, RDI)
     # mov edi, dword ptr [rdi]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 3F"))
 
   # rsp/r12 require a sib byte when used as base memory address
   def test_rsp_base_address(self):
-    load = UOp.ins(X86Ops.MOV, (reg(dtypes.uint64, RSP), UOp(Ops.NOOP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), dtypes.int32, RSP)
+    load = UOp.ins(X86Ops.MOV, (reg(dtypes.uint64, RSP), imm(dtypes.u64, 0), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), dtypes.int32, RSP)
     # mov esp, dword ptr [rsp]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 24 24"))
 
   # rbp/r13 require a displacement when used as base memory address
   def test_rbp_base_address(self):
-    load = UOp.ins(X86Ops.MOV, (reg(dtypes.uint64, RBP), UOp(Ops.NOOP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), dtypes.int32, RBP)
+    load = UOp.ins(X86Ops.MOV, (reg(dtypes.uint64, RBP), imm(dtypes.u64, 0), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), dtypes.int32, RBP)
     # mov ebp, dword ptr [rbp + 0]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 6D 00"))
 
