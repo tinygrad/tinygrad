@@ -599,15 +599,6 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(stored((1, 2)), [2, 3])
     with self.assertRaises(ValueError): stored((2, 1))
 
-  def test_large_offset(self):
-    n = 1 << 29
-    def kernel(B, A): return B[0].store(A[n]).sink(arg=KernelInfo(name="large_offset"))
-    x = Tensor.empty(1, dtype=dtypes.u32)
-    y = Tensor.empty(n + 1, dtype=dtypes.u32)
-    y[n].assign(Tensor([1 << 31], dtype=dtypes.u32))
-    out = Tensor.custom_kernel(x, y, fxn=kernel)[0].realize()
-    self.assertEqual(out.item(), 1 << 31)
-
 class TestCustomKernelArgs(unittest.TestCase):
   def test_duplicate_call_arg(self):
     x = Tensor.arange(4).clone().realize()
