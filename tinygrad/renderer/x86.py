@@ -329,10 +329,8 @@ def load_const(x:UOp) -> UOp:
   return x.replace(src=(x.body,)+tuple(s if i in immediate and is_imm(s) else mov_op(s) for i,s in enumerate(x.src_without_body)))
 
 isel_matcher = PatternMatcher([
-  # **** Op -> Op ****
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
    lambda x,m: UOp.ins(X86Ops.JNE, (x.src[1], x.src[0], test_gate(m)), x.dtype)),
-  # **** Op -> X86Op ****
   # function abi constraints
   (UPat(Ops.PARAM), lambda: RDI),
   (UPat(Ops.REFPARAM, name="x"), lambda x: x.src[1]),
