@@ -473,8 +473,8 @@ class X86LinearContext(LinearContext):
         after.append(self.ren.fill(slot,a,r))
 
     if self.stack_size > 0:
-      before.insert(0, UOp.ins(X86Ops.SUBi, (stack_pointer(), imm(dtypes.int32, self.stack_size)), dtypes.uint64, RSP))
-      after.append(UOp.ins(X86Ops.ADDi, (stack_pointer(), imm(dtypes.int32, self.stack_size)), dtypes.uint64, RSP))
+      before.insert(0, UOp.ins(X86Ops.SUBi, (stack_pointer(), UOp.cconst(self.stack_size, dtypes.i32)), dtypes.u64, RSP))
+      after.append(UOp.ins(X86Ops.ADDi, (stack_pointer(), UOp.cconst(self.stack_size, dtypes.i32)), dtypes.u64, RSP))
     return before + uops[:-1] + after + [uops[-1]]
 
   def assign_spill_slot(self, r:UOp) -> int:
