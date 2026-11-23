@@ -203,7 +203,9 @@ def physical_reg(u:UOp) -> UOp|None:
   r = UOp.placeholder((1,), dtypes.uint64, u.arg.slot, AddrSpace.REG, name=u.arg.name)
   return r if r in physical_regs else None
 
-def param(dt:DType, r:UOp) -> UOp: return UOp.param(r.arg.slot, dt, name=r.arg.name, addrspace=AddrSpace.REG) if r.op is Ops.BUFFER else r
+def param(dt:DType, r:UOp) -> UOp:
+  assert r.op is Ops.BUFFER, f"param called on {r.op}"
+  return UOp.param(r.arg.slot, dt, name=r.arg.name, addrspace=AddrSpace.REG)
 
 # gprs you can write to
 WGPR = tuple(r for r in GPR if r is not RSP)
@@ -213,7 +215,7 @@ CALLEE_SAVED = (RBX, RBP, GPR[12], GPR[13], GPR[14], GPR[15])
 # ***** X86 instruction selection *****
 # a register buffer is its own virtual register, identified by its buffer slot
 def regbuf_reg(x:UOp) -> tuple[UOp, ...]:
-  if physical_reg(x) is not None: return (x,)
+  if (r:=physical_reg(x)) is not None: return (param(x.dtype, r),)
   return vreg(x.arg.slot, x.dtype, XMM if x.dtype in dtypes.floats else WGPR, name="buffer")
 
 # a value moved into a register constrained to cons
@@ -435,7 +437,7 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.float32).bitcast(dtypes.int32s).named("x"), lambda x: x.native_like(X86Ops.VMOVDm).call(*x.src)),
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: x.native_like(X86Ops.VMOVQm).call(*x.src)),
   (UPat.var("a").store(UPat.var("val")), lambda a,val:
-    UOp(Ops.STACK).after(UOp.native(copy_op(val.dtype), *[param(buf.dtype, r) for r in regbuf_reg(buf.without_after)]).call(val.after(buf)))
+    UOp(Ops.STACK).after(UOp.native(copy_op(val.dtype), *regbuf_reg(buf.without_after)).call(val.after(buf)))
     if is_regbuf((buf := a.src[0] if a.op is Ops.INDEX else a)) else None),
   (UPat.var("a").load().named("x"), lambda a,x:
     x.native_like(copy_op(x.dtype)).call(buf) if is_regbuf((buf:=a.src[0] if a.op is Ops.INDEX else a)) else None),
@@ -503,7 +505,7 @@ def lower_range(x:UOp) -> tuple[UOp, list[UOp]]:
   return idx.after(x), [idx, x, start:=label(x), cmp, UOp.native(X86Ops.JGE).call(start, cmp)]
 
 def lower_end(x:UOp, c:UOp) -> tuple[UOp, list[UOp]]:
-  inc = UOp.native(X86Ops.ADDi, *[param(c.dtype, r) for r in regs(c.src[0])]).call(c, UOp.cconst(1, c.dtype))
+  inc = UOp.native(X86Ops.ADDi, *regs(c.src[0])).call(c, UOp.cconst(1, c.dtype))
   return (end:=x.replace(src=(x.src[0], c.src[1]))), [inc, end]
 
 pre_regalloc_matcher = PatternMatcher([
