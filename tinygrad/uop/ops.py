@@ -1527,16 +1527,15 @@ def deconstruct_function(fxn:Callable) -> tuple:
 
 @functools.cache
 def upat_interpret(p:UPat, fxn:Callable) -> Callable:
-  real_fxn = types.FunctionType(*deconstruct_function(fxn))
-  if 'ctx' in inspect.signature(real_fxn).parameters:
+  if 'ctx' in inspect.signature(fxn).parameters:
     def universal_match(uop, ctx):
       for match in p.match(uop, {}):
-        if (ret:=real_fxn(ctx=ctx, **match)) is not None: return ret  # pylint: disable=not-callable
+        if (ret:=fxn(ctx=ctx, **match)) is not None: return ret
       return None
   else:
     def universal_match(uop, _):
       for match in p.match(uop, {}):
-        if (ret:=real_fxn(**match)) is not None: return ret  # pylint: disable=not-callable
+        if (ret:=fxn(**match)) is not None: return ret
       return None
   return universal_match
 
