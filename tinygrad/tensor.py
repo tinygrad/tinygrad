@@ -6,7 +6,7 @@ from typing import Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod, canonicalize_device_name
-from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
+from tinygrad.helpers import Context, cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
 from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.uop.ops import KernelInfo, AxisType
 from tinygrad.mixin.rand import RandMixin
@@ -288,6 +288,12 @@ class Tensor(RandMixin):
     linear, var_vals = self.linear_with_vars(*lst)
     assert len(var_vals) == 0
     return linear
+
+  @staticmethod
+  @Context(ALLOW_DEVICE_USAGE=0)
+  def compile(fn:UOp) -> UOp:
+    """Schedule a function from `Tensor.export` and plan its storage without binding its externs. `Tensor.run` handles device codegen."""
+    return create_linear(fn)
 
   @staticmethod
   def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
