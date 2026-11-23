@@ -1,7 +1,7 @@
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
 import struct, functools, itertools
-from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
+from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
 from tinygrad.renderer import Renderer
@@ -224,7 +224,6 @@ def pin(ctx:IselContext, x:UOp, cons:tuple[UOp, ...]) -> UOp: return UOp.ins(X86
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
 def lane(x:UOp, i:int) -> int: return s.src[1].src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
-def imm(dt:DType, v:int) -> UOp: return UOp.cconst(truncate[dt](v), dt)
 def is_imm(x:UOp) -> bool: return x.op is Ops.CAST and x.src[0].op is Ops.CONST and x.dtype not in dtypes.floats
 def to_imm(c:UOp) -> UOp|None:
   if not (c.op is Ops.CAST and (v:=c.src[0]).op is Ops.CONST): return None
@@ -278,15 +277,18 @@ def shift(ctx:IselContext, x:UOp, op:X86Ops) -> UOp:
   return UOp.ins(op, (val, cnt), x.dtype)
 
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
-  def _disp(v:int) -> UOp: return UOp.cconst(v, dtypes.i32 if abs(v) > dtypes.i8.max else dtypes.i8)
+  def _disp(v:int) -> UOp: return UOp.cconst(v, dtypes.i8 if dtypes.i8.min <= v <= dtypes.i8.max else dtypes.i32)
   def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v.cast(dtypes.uint32) if v.dtype.itemsize < 4 else v
   if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp.cconst(0, dtypes.u64), _disp(0), UOp.cconst(x.dtype.itemsize, dtypes.u32))
   base, idx = x.src[0], x.src[1]
   scale = 1 if base in (stack_pointer(), args_pointer()) else base.dtype.itemsize
   sz = UOp.cconst(base.dtype.itemsize, dtypes.u32)
-  if idx.op is Ops.ADD and is_imm(c:=idx.src[1]):
-    return (base, _cast(idx.src[0]), _disp(c.src[0].val * scale), sz)
-  if is_imm(idx): return (base, UOp.cconst(0, dtypes.u64), _disp(idx.src[0].val * scale), sz)
+  if idx.op is Ops.ADD and is_imm(c:=idx.src[1]) and dtypes.i32.min <= (disp:=c.src[0].val * scale) <= dtypes.i32.max:
+    return (base, _cast(idx.src[0]), _disp(disp), sz)
+  if is_imm(idx):
+    v = idx.src[0].val
+    if dtypes.i32.min <= (disp:=v*scale) <= dtypes.i32.max: return (base, UOp.cconst(0, dtypes.u64), _disp(disp), sz)
+    return (base, mov_op(UOp.cconst(v, dtypes.i64 if v < 0 else dtypes.u64)), _disp(0), sz)
   return (base, _cast(idx), _disp(0), sz)
 
 def lea(x:UOp) -> UOp: return UOp.ins(X86Ops.LEA, fold_address(x), dtypes.uint64)
@@ -376,9 +378,9 @@ isel_matcher = PatternMatcher([
   # int binary
   ((UPat(dtype=dtypes.ints).alu(Ops.TRUNCDIV, UPat())).named("x"), idiv),
   # int binary with immediate
-  (UPat.var("a", dtypes.ints) << UPat.cvar("c").cast(), lambda a,c: UOp.ins(X86Ops.SHLi, (a, imm(dtypes.uint8, c.val)), a.dtype)),
-  (UPat.var("a", dtypes.uints) >> UPat.cvar("c").cast(), lambda a,c: UOp.ins(X86Ops.SHRi, (a, imm(dtypes.uint8, c.val)), a.dtype)),
-  (UPat.var("a", dtypes.sints) >> UPat.cvar("c").cast(), lambda a,c: UOp.ins(X86Ops.SARi, (a, imm(dtypes.uint8, c.val)), a.dtype)),
+  (UPat.var("a", dtypes.ints) << UPat.cvar("c").cast(), lambda a,c: UOp.ins(X86Ops.SHLi, (a, UOp.cconst(c.val & 0xff, dtypes.u8)), a.dtype)),
+  (UPat.var("a", dtypes.uints) >> UPat.cvar("c").cast(), lambda a,c: UOp.ins(X86Ops.SHRi, (a, UOp.cconst(c.val & 0xff, dtypes.u8)), a.dtype)),
+  (UPat.var("a", dtypes.sints) >> UPat.cvar("c").cast(), lambda a,c: UOp.ins(X86Ops.SARi, (a, UOp.cconst(c.val & 0xff, dtypes.u8)), a.dtype)),
   (UPat.var("a", dtypes.ints) + UPat.cvar().cast(name="c"),
    lambda a,c: UOp.ins(X86Ops.ADDi, (a, i), a.dtype) if (i:=to_imm(c)) is not None else None),
   (UPat.var("a", dtypes.ints) * UPat.cvar().cast(name="c"),
