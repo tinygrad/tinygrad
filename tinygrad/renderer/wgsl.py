@@ -1,7 +1,7 @@
 from tinygrad.dtype import DType, dtypes, truncate, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, pm_narrow_uint
-from tinygrad.helpers import strip_parens, ceildiv
+from tinygrad.helpers import ceildiv
 
 # a field of `width` bits sitting in the low bits of val: shift it up to the sign bit, then let the arithmetic shift fill
 def sign_extend(val:UOp, width:int): return (val << (32-width)).bitcast(dtypes.int) >> (32-width)
@@ -91,9 +91,7 @@ class WGSLRenderer(CStyleLanguage):
      f"atomicAnd(&{ctx[b]},{ctx[wmask]});"+(f"\n  atomicAdd(&{ctx[b]},{ctx[nv]});" if nv is not None else "") if is_packed(b) else None),
     (UPat.store(UPat.var("b"), UPat.var("v")), lambda ctx,b,v: f"{ctx[b]} = {ctx[v]};"),
     (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"))),
-     lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
-    (UPat(Ops.RANGE, dtypes.void), lambda: "loop {"),
-    (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat.var("cond"))), lambda ctx,cond: f"  continuing {{ break if !({ctx[cond]}); }}\n}}"),
+     lambda ctx,b,idx: f"{ctx[b]}[{ctx[idx]}]"),
   ]) + base_rewrite
 
   def render_cast(self, u:UOp, val: str) -> str:
