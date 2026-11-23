@@ -1,6 +1,6 @@
 from typing import TypeVar, Generic, Callable, Any, overload
 import functools
-from tinygrad.tensor import Tensor, all_tensors
+from tinygrad.tensor import Tensor, all_tensors, map_back
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.dtype import DType
@@ -106,7 +106,7 @@ class _TinyJit(Generic[ReturnType]):
     self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
 
-  def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append((linear, var_vals))
+  def add_export(self, fn:UOp, externs:tuple[UOp, ...]): self._exports.append((fn, externs))
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
@@ -132,21 +132,24 @@ class _TinyJit(Generic[ReturnType]):
       # jit capture
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
-      self._linears: list[tuple[UOp, dict[str, int]]] = []
+      self._exports: list[tuple[UOp, tuple[UOp, ...]]] = []
       capturing.append(self)
       try:
         ret = self.fxn(*args, **kwargs)
         if len(params:=get_parameters(ret)): Tensor.realize(*params)
       finally: capturing.clear()
-      if not len(self._linears): raise JitError("didn't JIT anything!")
+      if not len(self._exports): raise JitError("didn't JIT anything!")
       _check_no_non_tensor_return(ret)
-      if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buf_uops)} inputs")
+      if DEBUG >= 1: print(f"JIT captured {len(self._exports)} exports with {len(input_buf_uops)} inputs")
 
-      # combine all captured linears into one, memory plan, and compile
-      big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l,_ in self._linears])))
+      # schedule the captured exports on their storage. the prune needs unplanned storage, jit_lower plans the memory of all of them together
+      with Context(NO_MEMORY_PLANNER=1): linears = [map_back(Tensor.compile(fn), externs) for fn,externs in self._exports]
+      del self._exports
+      # combine all the linears into one, memory plan, and compile
+      big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l,_ in linears])))
       # the values of the Variables at capture, inputs are replaced every call
-      capture_var_vals = merge_dicts([vv for _,vv in self._linears])
-      del self._linears
+      capture_var_vals = merge_dicts([vv for _,vv in linears])
+      del linears
 
       if self.prune:
         big_linear, onetime_linear = prune_linear(big_linear, set(input_buf_uops))

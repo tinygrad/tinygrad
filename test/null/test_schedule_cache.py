@@ -22,7 +22,7 @@ class TestScheduleCache(unittest.TestCase):
     for start in (1, 2, 3):
       v = x[start:start+4]
       (v.contiguous() + v).realize()
-      self.assertEqual(len(schedule_cache), 1)
+      self.assertEqual(sum(isinstance(k, bytes) for k in schedule_cache), 1)
 
   def test_disable_schedule_cache(self):
     schedule_cache.clear()
@@ -33,7 +33,7 @@ class TestScheduleCache(unittest.TestCase):
     with Context(SCACHE=1):
       schedule_one()
       schedule_one()
-    self.assertEqual(len(schedule_cache), 1)
+    self.assertEqual(len(schedule_cache), 2)  # one body schedule and one final LINEAR
 
     # test read
     with Context(PROFILE=1):

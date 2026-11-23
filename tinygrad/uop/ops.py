@@ -84,6 +84,7 @@ def srender(x:sint) -> str: return x.render() if isinstance(x, UOp) else str(x)
 def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   max_dim = max(len(s) for s in shapes)
   return tuple((1,)*(max_dim-len(s))+s for s in shapes)
+def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   if all_same(shapes): return shapes[0]
   # per right-aligned dim: sizes of 1 broadcast to the others, which must all agree
@@ -111,7 +112,7 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
   return ret
 
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
-  src = tuple(x if isinstance(x, UOp) else UOp.const(x) for x in arg)
+  src = tuple(UOp.const(x) for x in arg)
   for x in src:
     if not dtypes.is_int(x.dtype): raise RuntimeError(f"shape must be int, got {x.dtype} in {arg}")
   return src[0] if len(src) == 1 else UOp(Ops.STACK, src=src)
@@ -220,12 +221,11 @@ class _UOpTuple(tuple):
   def __ne__(self, other): return self is not other
 
 # we import this late so we can use resolve/smax in mixins
-from tinygrad.mixin.rand import RandMixin
-from tinygrad.mixin.elementwise import ElementwiseMixin
+from tinygrad.mixin import Mixin
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
-class UOp(RandMixin, metaclass=UOpMetaClass):
+class UOp(Mixin, metaclass=UOpMetaClass):
   op:Ops
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
@@ -566,10 +566,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def vconst_like(self, b:ConstLike):
     # for use after movement ops have been removed
     return UOp.const(b, self.dtype).broadcast(self.max_numel())
-  def ufix(self, x):
-    # only a python const becomes a UOp, a Tensor passes through so _broadcasted lifts self into a Tensor
-    if isinstance(x, ElementwiseMixin): return x
-    return UOp.const(x)
   def broadcast(self, count:int):
     if count == 1: return self
     return UOp(Ops.STACK, src=(self,)*count)
@@ -588,7 +584,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def ins(op, src:tuple[UOp, ...], dtype:DType, *regs:UOp) -> UOp:
     params = [UOp.param(r.arg.slot, dtype, name=r.arg.name, addrspace=AddrSpace.REG) if r.op is Ops.BUFFER else r for r in regs]
-    return UOp.native(op, *params, dtype=dtype).call(*src)
+    native_src = params[0].after(*params[1:]) if params else UOp.param(-1, dtype)
+    return UOp.native(op, native_src).call(*src)
   def contract(self, *rngs:UOp):
     assert all(x.axis_type == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
@@ -596,8 +593,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def alu(self, op, *src:UOp, **kwargs): return UOp(op, src=(self, *src), **kwargs)
   @staticmethod
   def const(b:ConstLike, dtype:DType|None=None):
+    if isinstance(b, UOp): return b if dtype is None else b.cast(dtype)
     if dtype is None or b is Invalid: dtype = dtypes.from_py(b)
-    if isinstance(b, UOp): return b.cast(dtype)
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
     # .cast folds away at exactly the dtypes a CONST derives (bool/weakint/weakfloat): bare there, the pair everywhere else
@@ -1214,8 +1211,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
-  def native(code:Any, *src:UOp, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
-    return UOp(Ops.NATIVE, src=src or (UOp.param(-1, dtype, shape),), arg=NativeInfo(code, fmt=fmt))
+  def native(code:Any, src:UOp|None=None, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
+    return UOp(Ops.NATIVE, src=(src if src is not None else UOp.param(-1, dtype, shape),), arg=NativeInfo(code, fmt=fmt))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, hcq:HCQInfo|None=None) -> UOp:
@@ -1425,7 +1422,7 @@ def get_location() -> tuple[str, int]:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 
-class UPat(RandMixin):
+class UPat(Mixin):
   __slots__ = ("op", "match_dtype", "arg", "name", "src", "is_any")
   def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
@@ -1883,7 +1880,6 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
-def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot] if p.arg.slot >= 0 else None)])

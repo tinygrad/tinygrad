@@ -264,13 +264,17 @@ class PCIDevice:
     if hasattr(self, "vfio_dev"): return self.vfio_dev, idx << 40 # VFIO_PCI_OFFSET_SHIFT
     return FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/{f'resource{idx}' if idx < 6 else 'config'}", os.O_RDWR|os.O_SYNC|os.O_CLOEXEC), 0
   @functools.cache
-  def bar_info(self, bar_idx:int) -> tuple[int, int]:
+  def _sysfs_bar(self, bar_idx:int) -> tuple[int, int]:
     s, e, _ = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()[bar_idx].split()
-    addr, sz = int(s, 16), int(e, 16) - int(s, 16) + 1
+    return int(s, 16), int(e, 16) - int(s, 16) + 1
+  def bar_size(self, bar_idx:int) -> int: return self._sysfs_bar(bar_idx)[1]
+  @functools.cache
+  def bar_info(self, bar_idx:int) -> tuple[int, int]: # bus address and size. under vfio, the bar is iommu-mapped here (slow for large bars)
+    addr, sz = self._sysfs_bar(bar_idx)
     if hasattr(self, "vfio_dev"): addr = System.vfio_map(self.map_bar(bar_idx, size=sz).addr, sz, sz)
     return addr, sz
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
-    (fd, base), sz = self.region(bar), size or (self.bar_info(bar)[1] - off)
+    (fd, base), sz = self.region(bar), size or (self.bar_size(bar) - off)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|(MAP_FIXED if addr else 0), base+off), sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
   def resize_bar(self, bar_idx:int):
@@ -296,6 +300,7 @@ class USBPCIDevice(PCIDevice):
   def write_config(self, offset:int, value:int, size:int): self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, value=value, size=size)
 
   def bar_info(self, bar_idx:int) -> tuple[int, int]: return self._bar_info[bar_idx]  # type: ignore[override]
+  def bar_size(self, bar_idx:int) -> int: return self._bar_info[bar_idx][1]
   def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'):
     return USBMMIOInterface(self.usb, self.bar_info(bar)[0] + off, size or self.bar_info(bar)[1], fmt)
   def resize_bar(self, bar_idx:int): pass # already resized
@@ -308,7 +313,7 @@ class PCIIfaceBase:
   def peer_group(self) -> str: return getattr(self.pci_dev, 'peer_group', type(self.pci_dev).__name__)
   @property
   def remote(self) -> RemotePCIDevice|None: return self.pci_dev if isinstance(self.pci_dev, RemotePCIDevice) else None
-  def is_bar_small(self) -> bool: return self.pci_dev.bar_info(self.vram_bar)[1] == (256 << 20)
+  def is_bar_small(self) -> bool: return self.pci_dev.bar_size(self.vram_bar) == (256 << 20)
 
   def __init__(self, dev, dev_id, vendor, devices:tuple[tuple[int, tuple[int, ...]], ...], vram_bar, va_start, va_size,
                dev_impl_t, base_class:int|None=None):
@@ -469,6 +474,7 @@ class RemotePCIDevice(PCIDevice):
     paddr, size, data = self.rpc(RemoteCmd.MAP_BAR, bar=bar, readout_size=8)
     return paddr, size, struct.unpack('<Q', data)[0]
   def bar_info(self, bar_idx:int) -> tuple[int, int]: return self._bar(bar_idx)[:2]  # type: ignore[override]
+  def bar_size(self, bar_idx:int) -> int: return self._bar(bar_idx)[1]
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     _, sz, host_va = self._bar(bar)
     return RemoteMMIOInterface(self, bar, host_va + off, size or (sz - off), fmt, off=off)

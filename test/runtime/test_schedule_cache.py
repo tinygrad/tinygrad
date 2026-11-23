@@ -77,7 +77,7 @@ class TestScheduleCache(unittest.TestCase):
     x = Tensor([1., 1., 1., 1.]).realize()
     schedule_cache.clear()
     out = f(f(f(x))).realize()
-    self.assertEqual(len(schedule_cache), 2)  # one function body and the outer schedule
+    self.assertEqual(len(schedule_cache), 3)  # one function body, the outer schedule, and the final LINEAR
     self.assertEqual(out.tolist(), [29., 29., 29., 29.])
 
   def test_simple_precompile(self):

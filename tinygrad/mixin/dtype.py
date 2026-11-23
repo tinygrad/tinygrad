@@ -7,7 +7,7 @@ if TYPE_CHECKING:
 
 class DTypeMixin:
   @property
-  def dtype(self) -> DType: raise NotImplementedError
+  def dtype(self) -> DType: return self._uop.dtype
   @property
   def _uop(self) -> 'UOp': raise NotImplementedError
   @classmethod

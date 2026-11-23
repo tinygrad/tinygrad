@@ -1,4 +1,4 @@
-import unittest
+import unittest, mmap
 from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableEntry
 from tinygrad.runtime.support.am.ip import AM_GMC
 from tinygrad.runtime.support.memory import MMIOInterface
@@ -22,7 +22,7 @@ class FakeAM:
     self.is_booting, self.smi_dev = True, False
     self.pcidev = FakePCIDev()
     self.vram_size = (512 << 20)
-    self.vram_mv = memoryview(bytearray(self.vram_size))
+    self.vram_mv = memoryview(mmap.mmap(-1, self.vram_size)) # lazily zeroed: only the touched pages count against RSS
     self.vram = MMIOInterface(mv_address(self.vram_mv), self.vram_mv.nbytes)
     self.gmc = FakeGMC(self)
     self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39], va_bits=48,
@@ -64,6 +64,9 @@ class TestAMPageTable(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     cls.d = [FakeAM() for _ in range(2)]
+
+  @classmethod
+  def tearDownClass(cls): del cls.d
 
   def test_page_table_walkers(self):
     mm = self.d[0].mm

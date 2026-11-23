@@ -1,12 +1,11 @@
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
 import struct, functools, itertools
-from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
+from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import unwrap, Target
-from dataclasses import replace
 
 def vreg(slot:int, dtype:DType, choices:tuple[UOp, ...], name:str="vreg") -> tuple[UOp, ...]:
   return UOp.param(slot, dtype, name=name, addrspace=AddrSpace.REG), UOp(Ops.STACK, src=choices)
@@ -15,10 +14,12 @@ class IselContext:
   def __init__(self): self.reg_n = itertools.count()
   def vreg(self, dtype:DType, choices:tuple[UOp, ...]): return vreg(next(self.reg_n), dtype, choices)
 
-# the registers an ins defines exist in the src of NATIVE
+# the registers an ins defines exist in the src of NATIVE, with additional definitions in an AFTER
 def regs(u:UOp) -> tuple[UOp, ...]:
   if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG: return regbuf_reg(u)
-  return u.body.src if u.op is Ops.CALL else ()
+  if u.op is not Ops.CALL: return ()
+  src = u.body.src[0]
+  return src.src if src.op is Ops.AFTER else (src,)
 
 def vdef(u:UOp) -> UOp|None:
   # a BITCAST or CAST that survives isel is no instruction, it reads the register of its source
@@ -208,11 +209,6 @@ WGPR = tuple(r for r in GPR if r is not RSP)
 
 CALLEE_SAVED = (RBX, RBP, GPR[12], GPR[13], GPR[14], GPR[15])
 
-# a register defined outside the instruction stream: the stack pointer, the args pointer, a callee saved register
-def reg(dt:DType, r:UOp) -> UOp: return r.replace(arg=replace(r.arg, dtype=dt))
-def stack_pointer() -> UOp: return reg(dtypes.uint64, RSP)
-def args_pointer() -> UOp: return reg(dtypes.uint64, RDI)
-
 # ***** X86 instruction selection *****
 # a register buffer is its own virtual register, identified by its buffer slot
 def regbuf_reg(x:UOp) -> tuple[UOp, ...]:
@@ -224,12 +220,11 @@ def pin(ctx:IselContext, x:UOp, cons:tuple[UOp, ...]) -> UOp: return UOp.ins(X86
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
 def lane(x:UOp, i:int) -> int: return s.src[1].src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
-def imm(dt:DType, v:int) -> UOp: return UOp.cconst(truncate[dt](v), dt)
 def is_imm(x:UOp) -> bool: return x.op is Ops.CAST and x.src[0].op is Ops.CONST and x.dtype not in dtypes.floats
 def to_imm(c:UOp) -> UOp|None:
   if not (c.op is Ops.CAST and (v:=c.src[0]).op is Ops.CONST): return None
-  if c.dtype in dtypes.int64s: return imm(dtypes.int32, v.val) if not v.overflows(dtypes.int32) else None
-  if c.dtype in dtypes.ints+(dtypes.bool,): return imm(c.dtype, v.val)
+  if c.dtype in dtypes.int64s: return UOp.cconst(v.val, dtypes.i32) if not v.overflows(dtypes.i32) else None
+  if c.dtype in dtypes.ints+(dtypes.bool,): return UOp.cconst(v.val, c.dtype)
   return None
 # the flag path, which only an integer comparison can take: an x86 float compare sets carry, zero and parity together when an
 # operand is NaN, so a NaN reads as "below" and as "equal", and it clears sign and overflow, so nothing reads as "less"
@@ -239,10 +234,10 @@ def cmp(x:UOp) -> UOp:
 
 # comparisons that produce masks, the mask has the width of the operands
 def mask(x:UOp) -> UOp:
-  dt, v = x.src[0].dtype, imm(dtypes.uint8, {Ops.CMPLT: 1, Ops.CMPNE: 4, Ops.CMPEQ: 0}[x.op])
+  dt, v = x.src[0].dtype, UOp.cconst({Ops.CMPLT: 1, Ops.CMPNE: 4, Ops.CMPEQ: 0}[x.op], dtypes.u8)
   return UOp.ins(X86Ops.VCMPSS if dt is dtypes.float32 else X86Ops.VCMPSD, x.src + (v,), dt)
 
-def test_gate(m:UOp) -> UOp: return UOp.ins(X86Ops.CMPi, (m.cast(dtypes.int), imm(dtypes.int32, 0)), dtypes.void)
+def test_gate(m:UOp) -> UOp: return UOp.ins(X86Ops.CMPi, (m.cast(dtypes.int), UOp.cconst(0, dtypes.i32)), dtypes.void)
 
 # vinsertps xmm2, xmm0, xmm1, imm
 # inserts any 32 bit element in xmm1 into any position in xmm0 according to immm, result is written to xmm2
@@ -250,14 +245,14 @@ def test_gate(m:UOp) -> UOp: return UOp.ins(X86Ops.CMPi, (m.cast(dtypes.int), im
 def vinsertps(x:UOp) -> UOp:
   def _insert(ret:UOp, i:int) -> UOp:
     s, v = base(x, i), lane(x, i)
-    return UOp.ins(X86Ops.VINSERTPS, (ret, s, imm(dtypes.uint8, v << 6 | i << 4)), x.dtype)
+    return UOp.ins(X86Ops.VINSERTPS, (ret, s, UOp.cconst(v << 6 | i << 4, dtypes.u8)), x.dtype)
   return functools.reduce(_insert, range(len(x.src)), UOp(Ops.NOOP))
 
 # vpinsrd xmm2, xmm0, eax, imm
 # inserts the element in eax into any position in xmm0, result is written to xmm2 according to imm
 def vpins(x:UOp, srcs:tuple[UOp, ...]) -> UOp:
   op = {2: X86Ops.VPINSRW, 4: X86Ops.VPINSRD}[x.dtype.itemsize]
-  return functools.reduce(lambda ret,i: UOp.ins(op, (ret, srcs[i], imm(dtypes.uint8, i)), x.dtype), range(len(srcs)), UOp(Ops.NOOP))
+  return functools.reduce(lambda ret,i: UOp.ins(op, (ret, srcs[i], UOp.cconst(i, dtypes.u8)), x.dtype), range(len(srcs)), UOp(Ops.NOOP))
 
 def idiv(ctx:IselContext, x:UOp) -> UOp:
   op = X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV
@@ -278,15 +273,18 @@ def shift(ctx:IselContext, x:UOp, op:X86Ops) -> UOp:
   return UOp.ins(op, (val, cnt), x.dtype)
 
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
-  def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.int8.max else dtypes.int8, v)
+  def _disp(v:int) -> UOp: return UOp.cconst(v, dtypes.i8 if dtypes.i8.min <= v <= dtypes.i8.max else dtypes.i32)
   def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v.cast(dtypes.uint32) if v.dtype.itemsize < 4 else v
-  if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp(Ops.NOOP), _disp(0), imm(dtypes.uint32, x.dtype.itemsize))
+  if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp.cconst(0, dtypes.u64), _disp(0), UOp.cconst(x.dtype.itemsize, dtypes.u32))
   base, idx = x.src[0], x.src[1]
-  scale = 1 if base in (stack_pointer(), args_pointer()) else base.dtype.itemsize
-  sz = imm(dtypes.uint32, base.dtype.itemsize)
-  if idx.op is Ops.ADD and is_imm(c:=idx.src[1]):
-    return (base, _cast(idx.src[0]), _disp(c.src[0].val * scale), sz)
-  if is_imm(idx): return (base, UOp(Ops.NOOP), _disp(idx.src[0].val * scale), sz)
+  scale = 1 if base in (RSP, RDI) else base.dtype.itemsize
+  sz = UOp.cconst(base.dtype.itemsize, dtypes.u32)
+  if idx.op is Ops.ADD and is_imm(c:=idx.src[1]) and dtypes.i32.min <= (disp:=c.src[0].val * scale) <= dtypes.i32.max:
+    return (base, _cast(idx.src[0]), _disp(disp), sz)
+  if is_imm(idx):
+    v = idx.src[0].val
+    if dtypes.i32.min <= (disp:=v*scale) <= dtypes.i32.max: return (base, UOp.cconst(0, dtypes.u64), _disp(disp), sz)
+    return (base, mov_op(UOp.cconst(v, dtypes.i64 if v < 0 else dtypes.u64)), _disp(0), sz)
   return (base, _cast(idx), _disp(0), sz)
 
 def lea(x:UOp) -> UOp: return UOp.ins(X86Ops.LEA, fold_address(x), dtypes.uint64)
@@ -319,16 +317,16 @@ def copy_op(dt:DType) -> X86Ops:
 
 def mov_op(s:UOp) -> UOp:
   if s.op is Ops.AFTER: return s.replace(src=(mov_op(s.src[0]),)+s.src[1:])
-  return UOp.ins(X86Ops.MOVABS if s.dtype in dtypes.int64s else X86Ops.MOVi, (imm(s.dtype, s.src[0].val),), s.dtype) if is_imm(s) else s
+  return UOp.ins(X86Ops.MOVABS if s.dtype in dtypes.int64s else X86Ops.MOVi, (UOp.cconst(s.src[0].val, s.dtype),), s.dtype) if is_imm(s) else s
 
 def load_const(x:UOp) -> UOp:
   op, n = x.body.arg.code, len(x.src_without_body)
   # keep the instruction's immediate operand as a constant
   immediate = {n-1} if op in X86GroupOp.Immediate else set()
-  # memory addresses are (base, index, displacement, scale), keep displacement and scale constant too
-  immediate |= {2,3} if op in X86GroupOp.WriteMem and n>4 else {3,4} if op in X86GroupOp.Rm2nd and n>4 else \
-      ({2,3} if op in X86GroupOp.Rm1st and n>3 else set())
-  return x.replace(src=(x.body,)+tuple(s if i in immediate else mov_op(s) for i,s in enumerate(x.src_without_body)))
+  # memory addresses are (base, index, displacement, scale), keep their immediate operands constant
+  immediate |= {1,2,3} if op in X86GroupOp.WriteMem and n>4 else {2,3,4} if op in X86GroupOp.Rm2nd and n>4 else \
+      ({1,2,3} if op in X86GroupOp.Rm1st and n>3 else set())
+  return x.replace(src=(x.body,)+tuple(s if i in immediate and is_imm(s) else mov_op(s) for i,s in enumerate(x.src_without_body)))
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
@@ -336,7 +334,7 @@ isel_matcher = PatternMatcher([
    lambda x,m: UOp.ins(X86Ops.JNE, (x.src[1], x.src[0], test_gate(m)), x.dtype)),
   # **** Op -> X86Op ****
   # function abi constraints
-  (UPat(Ops.PARAM), args_pointer),
+  (UPat(Ops.PARAM), lambda: RDI),
   (UPat(Ops.REFPARAM, name="x"), lambda x: x.src[1]),
   # conditional moves between addresses, lea both srcs
   (UPat.var("m").where(UPat((Ops.INDEX, Ops.SHRINK), name="a"), UPat((Ops.INDEX, Ops.SHRINK), name="b")), lambda m,a,b:
@@ -362,23 +360,23 @@ isel_matcher = PatternMatcher([
   # float unary
   (UPat.var("y", dtypes.float32).sqrt().named("x"), lambda y,x: UOp.ins(X86Ops.VSQRTSS, (y, y), x.dtype)),
   (UPat.var("y", dtypes.float64).sqrt().named("x"), lambda y,x: UOp.ins(X86Ops.VSQRTSD, (y, y), x.dtype)),
-  (UPat.var("y", dtypes.float32).trunc().named("x"), lambda y,x: UOp.ins(X86Ops.VROUNDSS, (y, y, imm(dtypes.uint8, 3)), x.dtype)),
-  (UPat.var("y", dtypes.float64).trunc().named("x"), lambda y,x: UOp.ins(X86Ops.VROUNDSD, (y, y, imm(dtypes.uint8, 3)), x.dtype)),
+  (UPat.var("y", dtypes.float32).trunc().named("x"), lambda y,x: UOp.ins(X86Ops.VROUNDSS, (y, y, UOp.cconst(3, dtypes.u8)), x.dtype)),
+  (UPat.var("y", dtypes.float64).trunc().named("x"), lambda y,x: UOp.ins(X86Ops.VROUNDSD, (y, y, UOp.cconst(3, dtypes.u8)), x.dtype)),
   # for float16 we route the srcs through gprs, this is suboptimal for values in xmms, in that case we want vpunpcklwd
   (UPat(Ops.STACK, dtypes.float16, name="x"), lambda x: vpins(x, tuple(s.bitcast(dtypes.int16) for s in x.src))),
   (UPat(Ops.STACK, dtypes.float32, name="x"), vinsertps),
   (UPat(Ops.STACK, dtypes.int32s, name="x"), lambda x: vpins(x, x.src)),
   # INDEX on a vector register value extracts a single element
   (UPat.var("y", dtypes.int32s).index(UPat.cvar("c").cast(), name="x"),
-   lambda y,c,x: UOp.ins(X86Ops.VPEXTRD, (y, imm(dtypes.uint8, c.val)), x.dtype) if _is_vec_xmm(y) else None),
+   lambda y,c,x: UOp.ins(X86Ops.VPEXTRD, (y, UOp.cconst(c.val, dtypes.u8)), x.dtype) if _is_vec_xmm(y) else None),
   (UPat.var("y", dtypes.floats).index(UPat.cvar("c").cast(), name="x"),
-   lambda y,c,x: UOp.ins(X86Ops.VPSRLDQ, (y, imm(dtypes.uint8, c.val * x.dtype.itemsize)), x.dtype) if _is_vec_xmm(y) else None),
+   lambda y,c,x: UOp.ins(X86Ops.VPSRLDQ, (y, UOp.cconst(c.val * x.dtype.itemsize, dtypes.u8)), x.dtype) if _is_vec_xmm(y) else None),
   # int binary
   ((UPat(dtype=dtypes.ints).alu(Ops.TRUNCDIV, UPat())).named("x"), idiv),
   # int binary with immediate
-  (UPat.var("a", dtypes.ints) << UPat.cvar("c").cast(), lambda a,c: UOp.ins(X86Ops.SHLi, (a, imm(dtypes.uint8, c.val)), a.dtype)),
-  (UPat.var("a", dtypes.uints) >> UPat.cvar("c").cast(), lambda a,c: UOp.ins(X86Ops.SHRi, (a, imm(dtypes.uint8, c.val)), a.dtype)),
-  (UPat.var("a", dtypes.sints) >> UPat.cvar("c").cast(), lambda a,c: UOp.ins(X86Ops.SARi, (a, imm(dtypes.uint8, c.val)), a.dtype)),
+  (UPat.var("a", dtypes.ints) << UPat.cvar("c").cast(), lambda a,c: UOp.ins(X86Ops.SHLi, (a, UOp.cconst(c.val & 0xff, dtypes.u8)), a.dtype)),
+  (UPat.var("a", dtypes.uints) >> UPat.cvar("c").cast(), lambda a,c: UOp.ins(X86Ops.SHRi, (a, UOp.cconst(c.val & 0xff, dtypes.u8)), a.dtype)),
+  (UPat.var("a", dtypes.sints) >> UPat.cvar("c").cast(), lambda a,c: UOp.ins(X86Ops.SARi, (a, UOp.cconst(c.val & 0xff, dtypes.u8)), a.dtype)),
   (UPat.var("a", dtypes.ints) + UPat.cvar().cast(name="c"),
    lambda a,c: UOp.ins(X86Ops.ADDi, (a, i), a.dtype) if (i:=to_imm(c)) is not None else None),
   (UPat.var("a", dtypes.ints) * UPat.cvar().cast(name="c"),
@@ -411,7 +409,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.FDIV, dtypes.float32, name="x"), lambda x: UOp.ins(X86Ops.VDIVSS, x.src, x.dtype)),
   (UPat(Ops.FDIV, dtypes.float64, name="x"), lambda x: UOp.ins(X86Ops.VDIVSD, x.src, x.dtype)),
   # casts
-  (UPat(dtype=dtypes.float32).cast(dtypes.float16, name="x"), lambda x: UOp.ins(X86Ops.VCVTPS2PH, x.src + (imm(dtypes.uint8, 4),), x.dtype)),
+  (UPat(dtype=dtypes.float32).cast(dtypes.float16, name="x"), lambda x: UOp.ins(X86Ops.VCVTPS2PH, x.src + (UOp.cconst(4, dtypes.u8),), x.dtype)),
   (UPat(dtype=dtypes.float16).cast(dtypes.float32, name="x"), lambda x: UOp.ins(X86Ops.VCVTPH2PS, x.src, x.dtype)),
   (UPat(dtype=dtypes.float32).cast(dtypes.int32s+dtypes.int64s, name="x"), lambda x: UOp.ins(X86Ops.VCVTTSS2SI, x.src, x.dtype)),
   (UPat(dtype=dtypes.float64).cast(dtypes.int32s+dtypes.int64s, name="x"), lambda x: UOp.ins(X86Ops.VCVTTSD2SI, x.src, x.dtype)),
@@ -428,7 +426,7 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.ints).cast(dtypes.ints, name="x"),
    lambda x: UOp.ins(X86Ops.MOV, x.src, x.dtype) if x.src[0].dtype.itemsize > x.dtype.itemsize else None),
   # bitcasts between scalar floats and ints
-  (UPat.var("y", dtypes.float16).bitcast(dtypes.int16s).named("x"), lambda y,x: UOp.ins(X86Ops.VPEXTRW, (y, imm(dtypes.uint8, 0)), x.dtype)),
+  (UPat.var("y", dtypes.float16).bitcast(dtypes.int16s).named("x"), lambda y,x: UOp.ins(X86Ops.VPEXTRW, (y, UOp.cconst(0, dtypes.u8)), x.dtype)),
   (UPat(dtype=dtypes.int16s).bitcast(dtypes.float16).named("x"), lambda x: vpins(x, x.src)),
   (UPat(dtype=dtypes.int32s).bitcast(dtypes.float32).named("x"), lambda x: UOp.ins(X86Ops.VMOVD, x.src, x.dtype)),
   (UPat(dtype=dtypes.int64s).bitcast(dtypes.float64).named("x"), lambda x: UOp.ins(X86Ops.VMOVQ, x.src, x.dtype)),
@@ -444,12 +442,12 @@ isel_matcher = PatternMatcher([
   # TODO: fuse stores, very few cases -- store cmp becomes setcc, store gep int becomes vpextr, store bitcast to int becomes vmovd/q
   # load, store
   (UPat(Ops.LOAD, dtypes.floats, src=(UPat(name="a"),), name="x"), lambda x,a: None if a.addrspace is AddrSpace.REG else
-   UOp.ins(X86Ops.VPINSRW, (UOp(Ops.NOOP),) + fold_address(a) + (imm(dtypes.uint8, 0),), x.dtype) if x.max_numel() * x.dtype.itemsize == 2 else
+   UOp.ins(X86Ops.VPINSRW, (UOp(Ops.NOOP),) + fold_address(a) + (UOp.cconst(0, dtypes.u8),), x.dtype) if x.max_numel() * x.dtype.itemsize == 2 else
    UOp.ins(_xmm_sz(x), fold_address(a), x.dtype)),
   (UPat(Ops.LOAD, dtypes.ints+(dtypes.bool,), src=(UPat(name="a"),), name="x"), lambda x,a: None if a.addrspace is AddrSpace.REG else
    UOp.ins(X86Ops.MOV, fold_address(a), x.dtype) if x.max_numel() == 1 else UOp.ins(_xmm_sz(x), fold_address(a), x.dtype)),
   (UPat.var("a").store(UPat.var("b", dtypes.floats), name="x"), lambda a,b,x: None if a.addrspace is AddrSpace.REG else
-   UOp.ins(X86Ops.VPEXTRW, fold_address(a) + (b, imm(dtypes.uint8, 0)), x.dtype) if b.max_numel() * b.dtype.itemsize == 2 else
+   UOp.ins(X86Ops.VPEXTRW, fold_address(a) + (b, UOp.cconst(0, dtypes.u8)), x.dtype) if b.max_numel() * b.dtype.itemsize == 2 else
    UOp.ins(X86Ops[_xmm_sz(b).name+"m"], fold_address(a) + (b,), x.dtype)),
   (UPat.var("a").store(UPat.var("b", dtypes.ints+(dtypes.bool,)), name="x"), lambda a,b,x: None if a.addrspace is AddrSpace.REG else
    UOp.ins(X86Ops[_xmm_sz(b).name+"m"], fold_address(a) + (b,), x.dtype) if b.max_numel() > 1 else
@@ -467,14 +465,13 @@ class X86LinearContext(LinearContext):
     before, after, used = [], [], {rdef(u) for u in uops}
     for r in CALLEE_SAVED:
       if r in used:
-        a = reg(dtypes.uint64, r)
         slot = self.assign_spill_slot(r)
-        before.append(self.ren.spill(slot,a))
-        after.append(self.ren.fill(slot,a,r))
+        before.append(self.ren.spill(slot,r))
+        after.append(self.ren.fill(slot,r,r))
 
     if self.stack_size > 0:
-      before.insert(0, UOp.ins(X86Ops.SUBi, (stack_pointer(), imm(dtypes.int32, self.stack_size)), dtypes.uint64, RSP))
-      after.append(UOp.ins(X86Ops.ADDi, (stack_pointer(), imm(dtypes.int32, self.stack_size)), dtypes.uint64, RSP))
+      before.insert(0, UOp.ins(X86Ops.SUBi, (RSP, UOp.cconst(self.stack_size, dtypes.i32)), dtypes.u64, RSP))
+      after.append(UOp.ins(X86Ops.ADDi, (RSP, UOp.cconst(self.stack_size, dtypes.i32)), dtypes.u64, RSP))
     return before + uops[:-1] + after + [uops[-1]]
 
   def assign_spill_slot(self, r:UOp) -> int:
@@ -486,9 +483,9 @@ class X86LinearContext(LinearContext):
 # the element size of loads and stores is already captured by fold_address before stack buffers become 64-bit pointers
 def alloc_buffer(ctx:X86LinearContext, x:UOp):
   dst = vreg(ctx.stack_size, dtypes.uint64, WGPR, name="stack")
-  nx = UOp.ins(X86Ops.LEA, fold_address(stack_pointer().index(UOp.cconst(ctx.stack_size, dtypes.uint32))), dtypes.uint64, *dst)
+  nx = UOp.ins(X86Ops.LEA, fold_address(RSP.index(UOp.cconst(ctx.stack_size, dtypes.uint32))), dtypes.uint64, *dst)
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
-  return nx, [stack_pointer(), nx]
+  return nx, [RSP, nx]
 
 # TODO: control flow should be overhauled so that this isn't necessary
 # a LABEL marks its src: the start of a loop its RANGE, the exit of a loop the start LABEL. a jump's first src is what its LABEL marks
@@ -499,12 +496,12 @@ def label(x:UOp) -> UOp: return UOp.ins(X86Ops.LABEL, (x,), dtypes.void)
 def lower_range(x:UOp) -> tuple[UOp, list[UOp]]:
   if x.dtype is dtypes.void: return x, [x, label(x)]
   bound = x.src[0].without_after
-  idx = UOp.ins(X86Ops.MOVi, (imm(x.dtype, 0),), x.dtype, *vreg(0, x.dtype, WGPR, name=x.key.hex()))
+  idx = UOp.ins(X86Ops.MOVi, (UOp.cconst(0, x.dtype),), x.dtype, *vreg(0, x.dtype, WGPR, name=x.key.hex()))
   cmp = UOp.ins(X86Ops.CMPi if is_imm(bound) else X86Ops.CMP, (idx, bound), dtypes.void)
   return idx.after(x), [idx, x, start:=label(x), cmp, UOp.ins(X86Ops.JGE, (start, cmp), dtypes.void)]
 
 def lower_end(x:UOp, c:UOp) -> tuple[UOp, list[UOp]]:
-  inc = UOp.ins(X86Ops.ADDi, (c, imm(c.dtype, 1)), c.dtype, *regs(c.src[0]))
+  inc = UOp.ins(X86Ops.ADDi, (c, UOp.cconst(1, c.dtype)), c.dtype, *regs(c.src[0]))
   return (end:=x.replace(src=(x.src[0], c.src[1]))), [inc, end]
 
 pre_regalloc_matcher = PatternMatcher([
@@ -706,11 +703,11 @@ class X86Renderer(ISARenderer):
   def spill(self, spill_slot:int, x:UOp) -> UOp:
     op = X86Ops.VMOVUPSm if rdef(x) in XMM else X86Ops.MOVm
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp.ins(op, fold_address(stack_pointer().index(disp)) + (x,), dtypes.void)
+    return UOp.ins(op, fold_address(RSP.index(disp)) + (x,), dtypes.void)
 
   def fill(self, spill_slot:int, x:UOp, reg:UOp) -> UOp:
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return UOp.ins(X86Ops.VMOVUPS if reg in XMM else X86Ops.MOV, fold_address(stack_pointer().index(disp)), x.dtype, reg)
+    return UOp.ins(X86Ops.VMOVUPS if reg in XMM else X86Ops.MOV, fold_address(RSP.index(disp)), x.dtype, reg)
 
   def render(self, uops:list[UOp]) -> str:
     targets: dict[UOp, int] = {}
