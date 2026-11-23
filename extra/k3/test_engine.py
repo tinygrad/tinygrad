@@ -392,27 +392,28 @@ class TestEngine(unittest.TestCase):
                           copied=np.zeros(2))
     eng.borne_out = lambda s: Engine.borne_out(eng, s)  # type: ignore[arg-type]
     g, score = list(range(7)), np.full(7, 0.9)
-    self.assertEqual(Engine.proposal(eng, g, score, 0, 0, [])[0], g)  # type: ignore[arg-type]
+    self.assertEqual(Engine.proposal(eng, g, score, 0, 0, [], 0.0)[0], g)  # type: ignore[arg-type]
     eng.step_s[8] = [0.14]  # (1.9 / .05 = 38, 3.44 / .08 = 43, 5.2 / .14 = 37 tokens a second)
-    gs, scores = Engine.proposal(eng, g, score, 0, 0, [])  # type: ignore[arg-type]
+    gs, scores = Engine.proposal(eng, g, score, 0, 0, [], 0.0)  # type: ignore[arg-type]
     self.assertEqual((gs, list(scores)), (g[:3], [0.9] * 3))
-    self.assertEqual(Engine.proposal(eng, g, np.full(7, 0.3), 0, 0, [])[0], g[:1])  # type: ignore[arg-type]
-    self.assertEqual(Engine.proposal(eng, g, None, 0, 0, []), (g, None))  # type: ignore[arg-type]
+    self.assertEqual(Engine.proposal(eng, g, np.full(7, 0.3), 0, 0, [], 0.0)[0], g[:1])  # type: ignore[arg-type]
+    self.assertEqual(Engine.proposal(eng, g, score, 0, 0, [], 30.0)[0], g)  # type: ignore[arg-type]  # (at 30 tokens a second: 0.4, 1.04, 1.5 more)
+    self.assertEqual(Engine.proposal(eng, g, None, 0, 0, [], 0.0), (g, None))  # type: ignore[arg-type]
     eng.scored[:, 9] = 100, 50  # (guesses scored .9 right half the time: a step of 2)
-    self.assertEqual(Engine.proposal(eng, g, score, 0, 0, [])[0], g[:1])  # type: ignore[arg-type]
+    self.assertEqual(Engine.proposal(eng, g, score, 0, 0, [], 0.0)[0], g[:1])  # type: ignore[arg-type]
 
   def test_proposal_copy(self):  # the draft's guesses up to the first the context's copy differs at, the copy's from there, scored by its rate
     eng = SimpleNamespace(tokens=8, widths=[2, 4, 8], step_s={2: [0.05], 4: [0.08], 8: [0.14]}, chain=None, scored=np.zeros((2, 10)),
                           copied=np.zeros(2))
     eng.borne_out = lambda s: Engine.borne_out(eng, s)  # type: ignore[arg-type]
     g, copy = list(range(7)), [0, 1, 9, 9, 9, 9, 9]
-    self.assertEqual(Engine.proposal(eng, g, np.full(7, 0.3), 0, 0, copy)[0], g[:1])  # type: ignore[arg-type]
+    self.assertEqual(Engine.proposal(eng, g, np.full(7, 0.3), 0, 0, copy, 0.0)[0], g[:1])  # type: ignore[arg-type]
     eng.copied[:] = 98, 98  # (the copy's guesses right 99 of 100: the widest step)
-    gs, scores = Engine.proposal(eng, g, np.full(7, 0.3), 0, 0, copy)  # type: ignore[arg-type]
+    gs, scores = Engine.proposal(eng, g, np.full(7, 0.3), 0, 0, copy, 0.0)  # type: ignore[arg-type]
     self.assertEqual((gs, list(scores)), ([0, 1, 9, 9, 9, 9, 9], [0.3, 0.3]))
     Engine.tally(eng, scores, len(gs), 4)  # type: ignore[arg-type]
     np.testing.assert_equal((eng.scored[:, 3], eng.copied), ([2, 2], [101, 100]))
-    gs, scores = Engine.proposal(eng, g[:1], np.full(1, 0.3), 0, 0, copy)  # type: ignore[arg-type]
+    gs, scores = Engine.proposal(eng, g[:1], np.full(1, 0.3), 0, 0, copy, 0.0)  # type: ignore[arg-type]
     self.assertEqual((gs, list(scores)), (g[:1], [0.3]))  # (a chain's guesses: no copy)
 
   def test_copies(self):  # the tokens after the latest earlier place of the context's last COPY, none at the context's own end or with fewer after
@@ -440,7 +441,8 @@ class TestEngine(unittest.TestCase):
     model = SimpleNamespace(fork=lambda *a: 0, save=lambda t: None, rollback=lambda n: None)
     eng = SimpleNamespace(get_start_pos=lambda t: 0, model=model, prefill=lambda t, p: p, step=lambda *a: next(steps), tokens=2, max_context=8,
                           draft=True, proposal=lambda g, *a: (seen.append(g) or g[:1], None), verified=np.zeros(3, int), W=0, chunk=0,
-                          counters=lambda: np.zeros(15), jits={1: None, 2: None}, io=SimpleNamespace(tail=1), temperature_np=np.zeros(1))
+                          counters=lambda: np.zeros(15), jits={1: None, 2: None}, io=SimpleNamespace(tail=1), temperature_np=np.zeros(1),
+                          step_s={2: [0.05]})
     eng.steps = lambda *a, **kw: Engine.steps(eng, *a, **kw)  # type: ignore[arg-type]
     self.assertEqual([t for _, t in zip(range(4), Engine.generate(eng, [0]))], [5, 6, 9, 8])  # type: ignore[arg-type]
     self.assertEqual(seen, [[6, 7], [8, 3]])

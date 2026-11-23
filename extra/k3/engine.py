@@ -1215,13 +1215,14 @@ class Engine:
     scores = ret[T + G:].view(np.float32).copy() if self.draft is not None and self.draft.scored else None
     return ret[:T].tolist(), ret[T:T + G].tolist(), scores
 
-  def proposal(self, g:list[int], score:np.ndarray|None, pos:int, row:int, copy:list[int]) -> tuple[list[int], np.ndarray|None]:
+  def proposal(self, g:list[int], score:np.ndarray|None, pos:int, row:int, copy:list[int], pace:float) -> tuple[list[int], np.ndarray|None]:
     """a verify step's guesses after the token at pos: the row's of the step before (guessed at its row), the draft's chain after them. scored:
-    as many as the step of the widths that expects most tokens a second (by the scores as the steps bore them out, a guess the chain hasn't
-    made yet scored as the last, the steps' seconds a line in the width through every width's measured ones: one not measured first), the
-    chain run a guess further while a wider step's expected. a scored draft's block of the whole step and the context's copy: the draft's
-    guesses up to the first one the copy differs at, the copy's from there, scored by the copy's verified guesses' rate (one both guess the
-    higher). the guesses and the draft's scores of its own"""
+    as many as the step of the widths that expects most tokens a second, or once there's a pace (the request's tokens a second so far) most
+    tokens over what its seconds take at the pace (by the scores as the steps bore them out, a guess the chain hasn't made yet scored as the
+    last, the steps' seconds a line in the width through every width's measured ones: one not measured first), the chain run a guess further
+    while a wider step's expected. a scored draft's block of the whole step and the context's copy: the draft's guesses up to the first one
+    the copy differs at, the copy's from there, scored by the copy's verified guesses' rate (one both guess the higher). the guesses and the
+    draft's scores of its own"""
     chain, seen = None, [(T, t) for T in self.widths for t in self.step_s[T]]
     line = np.polyfit(*zip(*seen), 1) if len(self.widths) > 1 and all(self.step_s[T] for T in self.widths) else None
     own, copied = len(g), score is not None and len(copy) == len(g)
@@ -1234,7 +1235,9 @@ class Engine:
         s = self.borne_out(np.concatenate([score, np.full(n, score[-1])]))
         if copied: s[:own], s[own:len(g)] = np.maximum(s[:own], copy_s), copy_s
         def rate(T:int) -> float:
-          return (1 + np.cumprod(s[:T - 1]).sum()) / (np.mean(t) if line is None else np.polyval(line, T)) if (t:=self.step_s[T]) else math.inf
+          if not (t:=self.step_s[T]): return math.inf
+          tokens, seconds = 1 + np.cumprod(s[:T - 1]).sum(), np.mean(t) if line is None else np.polyval(line, T)
+          return tokens - pace * seconds if pace else tokens / seconds
         n = max(self.widths, key=rate) - 1
       if len(g) >= n: return g[:n], None if score is None else score[:min(n, own)]
       guess, prob = next(chain:=chain or self.chain(g[-1], pos, row))
@@ -1361,7 +1364,7 @@ class Engine:
     cap_prior = fork_prefilled > start or prefilled > fork
     (*_, t), g, score = self.steps(tokens, prefilled, len(tokens), cap_prior=cap_prior)
     self.model.save(tokens)
-    row, c0, v0, widths, copies = 0, self.counters(), self.verified.copy(), collections.Counter(), Copies()
+    row, c0, v0, widths, copies, done = 0, self.counters(), self.verified.copy(), collections.Counter(), Copies(), np.zeros(2)
     try:
       while len(tokens) + self.tokens <= self.max_context:  # (a verify step's last token in the context)
         tokens.append(t)
@@ -1371,11 +1374,12 @@ class Engine:
           (t,), _, _ = self.step([t], len(tokens) - 1)
           widths[1] += 1
           continue
-        gs, scores = self.proposal(g, score, len(tokens) - 1, row, copies(tokens, self.tokens - 1))
+        gs, scores = self.proposal(g, score, len(tokens) - 1, row, copies(tokens, self.tokens - 1), done[0] / done[1] if done[1] > 2 else 0.0)
         toks, g, score = self.step([t, *gs], len(tokens) - 1)
         widths[len(toks)] += 1
         row = next((j for j, g in enumerate(gs) if toks[j] != g), len(gs))
         self.verified += (1, len(gs), row)
+        done += (row + 1, self.step_s[len(toks)][-1])
         if scores is not None: self.tally(scores, len(gs), row)
         if row < len(gs): self.model.rollback(row + 1)  # (before the kept ones are yielded: a request may stop at any)
         for kept in gs[:row]:
