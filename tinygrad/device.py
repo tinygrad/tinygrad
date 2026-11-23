@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace, field
 from collections import defaultdict
-from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
+from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self
 import importlib, inspect, functools, itertools, pathlib, os, contextlib, atexit, pickle, decimal, mmap, time, statistics
 from tinygrad.helpers import mv_address, LRU, getenv, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
@@ -9,10 +9,8 @@ from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKe
 from tinygrad.helpers import cpu_profile, perf_counter_us, HCQ_RUNTIME_DEV, is_disk_device, canonicalize_device_name, Target, to_tuple, NODE_NDEVS
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import MMIOInterface
-from tinygrad.renderer import Renderer
-if TYPE_CHECKING:
-  from tinygrad.renderer import Compiler, TinyELF
-  from tinygrad.uop.ops import PatternMatcher
+from tinygrad.renderer import Renderer, Compiler, TinyELF
+from tinygrad.uop.ops import PatternMatcher
 
 # **************** Device ****************
 
