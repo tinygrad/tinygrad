@@ -56,7 +56,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     run_linear(UOp(Ops.LINEAR, src=(copyout, copyin, copyout)), wait=True)
     self.assertEqual(bytes(host.host[:]), bytes(new.host[:]))
 
-  @patch.object(type(Device["NULL"]), "host", "CPU")
+  @patch.object(hcq2, "host_of", lambda _: "CPU")
   def test_staging(self):
     table = [("NULL", "NULL:1"), ("NULL", "CPU"), ("CPU", "NULL"), ("CL", "CPU"), ("CL", "METAL"), ("CL", "CPU", "NULL"),]
     for path in table:
