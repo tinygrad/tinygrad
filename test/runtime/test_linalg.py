@@ -46,6 +46,28 @@ class TestLinAlg(unittest.TestCase):
   def test_svd_nonfull_3_5(self): self._test_svd_nonfull((3,5))
   def test_svd_nonfull_2_2_2_2_3(self): self._test_svd_nonfull((2,2,2,2,3))
 
+  def _test_svd_singleton(self, size):
+    for full_matrices in (True, False):
+      for name, data in (("arange", np.arange(np.prod(size), dtype=np.float32).reshape(size) - 1), ("zeros", np.zeros(size, dtype=np.float32))):
+        with self.subTest(full_matrices=full_matrices, data=name):
+          a = Tensor(data)
+          U,S,V = a.svd(full_matrices=full_matrices)
+          Tensor.realize(U,S,V)
+          expected = np.linalg.svd(data, full_matrices=full_matrices)
+          self.assertEqual((U.shape, S.shape, V.shape), tuple(x.shape for x in expected))
+          np.testing.assert_allclose(S.numpy(), expected[1], atol=1e-5, rtol=1e-5)
+          orthogonality_helper(U.transpose(-2, -1))
+          orthogonality_helper(V)
+          k = min(size[-2:])
+          reconstruction_helper([U[..., :k] * S.unsqueeze(-2), V[..., :k, :]], a)
+
+  def test_svd_singleton_1_1(self): self._test_svd_singleton((1,1))
+  def test_svd_singleton_1_3(self): self._test_svd_singleton((1,3))
+  def test_svd_singleton_3_1(self): self._test_svd_singleton((3,1))
+  def test_svd_singleton_2_1_1(self): self._test_svd_singleton((2,1,1))
+  def test_svd_singleton_2_1_3(self): self._test_svd_singleton((2,1,3))
+  def test_svd_singleton_2_3_1(self): self._test_svd_singleton((2,3,1))
+
   @unittest.skip("very big. recommend wrapping with TinyJit around inner function")
   def test_svd_large(self):
     size = (1024,1024)
