@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Self, Sequence
 from tinygrad.uop import Ops
 from tinygrad.helpers import prod, argfix, argsort, flatten, dedup, make_tuple, ceildiv, round_up, all_int
-from tinygrad.uop.ops import resolve, smax, _align_left, _broadcast_shape, broadcast_axes
+from tinygrad.uop.ops import resolve, smax, _align_left, _broadcast_shape, broadcast_axes, to_max_shape
 from tinygrad.mixin.dtype import DTypeMixin
 
 if TYPE_CHECKING:
@@ -48,7 +48,6 @@ class MovementMixin(DTypeMixin):
   @property
   def max_shape(self) -> tuple[int, ...]:
     """The shape with every symbolic dimension replaced by its maximum."""
-    from tinygrad.uop.ops import to_max_shape  # deferred: ops.py imports the mixins
     return to_max_shape(self.shape)
 
   def max_numel(self) -> int:
