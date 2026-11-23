@@ -198,7 +198,6 @@ Compiled.pm_lower += PatternMatcher([(UPat(Ops.PARAM, name="p").f(Ops.AFTER, all
 
 class MetalDevice(Compiled):
   renderers = [MetalRenderer]
-  has_copy_queue = False
   opened:weakref.WeakSet[MetalDevice] = weakref.WeakSet()
 
   def __init__(self, device:str=""):
@@ -220,7 +219,7 @@ class MetalDevice(Compiled):
     # https://developer.apple.com/documentation/metal/mtlgpufamily
     def check_family(f): return next(filter(self.sysdevice.supportsFamily, reversed([v for v, nm in metal.enum_MTLGPUFamily.items() if f in nm])), 0)
     super().__init__(device, MetalAllocator(self), None,
-                     arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
+                     arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:], props={"copy": 0})
     MetalDevice.opened.add(self)
     Compiled.link_bufs |= {to_name(self.device, "handles"): lambda b: self.handles}
     Compiled.pm_link += PatternMatcher([

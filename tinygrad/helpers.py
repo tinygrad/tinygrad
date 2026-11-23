@@ -256,7 +256,7 @@ USE_TC, TC_SELECT, TC_OPT, TC_MIN_GLOBALS = ContextVar("TC", 1), ContextVar("TC_
 TRANSCENDENTAL = ContextVar("TRANSCENDENTAL", 1)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("LRU", 1)
 RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0), ContextVar("ALLREDUCE_CAST", 1)
-ALLREDUCE_NODE_NDEVS = ContextVar("ALLREDUCE_NODE_NDEVS", 0) # gpus per node, the nodes cabled gpu k to gpu k
+NODE_NDEVS = ContextVar("NODE_NDEVS", 0) # gpus per node, the nodes cabled gpu k to gpu k
 CACHELEVEL, IGNORE_BEAM_CACHE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0)
 VALIDATE_WITH_CPU = ContextVar("VALIDATE_WITH_CPU", 0)
 HCQ_RUNTIME_DEV = _DEV("HCQ_RUNTIME_DEV", "CPU:TCC" if sys.platform == "linux" and _has_lib("tcc") else "CPU:LLVM")

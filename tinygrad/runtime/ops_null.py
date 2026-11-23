@@ -64,7 +64,6 @@ Compiled.pm_encode += PatternMatcher([
 class NullDevice(Compiled):
   renderers = dedup([NullRenderer] + [r for m in [cstyle, nir, ptx, llvmir, wgsl, x86] for r in m.__dict__.values()
                                       if inspect.isclass(r) and issubclass(r, Renderer)])
-  host = property(lambda self: self.device)
   timeline = functools.cached_property(lambda self: self.host_buffer(16))
   error_state = functools.cached_property(lambda self: self.host_buffer(8))
 
