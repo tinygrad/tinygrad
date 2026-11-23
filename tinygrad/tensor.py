@@ -281,7 +281,7 @@ class Tensor(RandMixin):
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
     fn, externs = self.export(*lst)
-    return map_back(create_linear(fn), externs)
+    return map_back(Tensor.compile(fn), externs)
 
   def schedule_linear(self, *lst:Tensor) -> UOp:
     """Creates the schedule needed to realize these Tensor(s)."""
@@ -291,9 +291,9 @@ class Tensor(RandMixin):
 
   @staticmethod
   @Context(ALLOW_DEVICE_USAGE=0)
-  def compile(fn:UOp) -> UOp:
-    """Schedule a function from `Tensor.export` and plan its storage without binding its externs. `Tensor.run` handles device codegen."""
-    return create_linear(fn)
+  def compile(fn:UOp, *, plan:bool=True) -> UOp:
+    """Schedule a function from `Tensor.export` without binding its externs. Set `plan=False` to defer memory planning across schedules."""
+    return create_linear(fn, plan=plan)
 
   @staticmethod
   def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
@@ -310,7 +310,8 @@ class Tensor(RandMixin):
     if len(to_realize):
       fn, externs = Tensor.export(*to_realize)
       # a capturing jit plans the memory of its captured linears together
-      Tensor.run(create_linear(fn, plan=not (capturing and CAPTURING)), externs, do_update_stats=do_update_stats)
+      linear = Tensor.compile(fn, plan=not (capturing and CAPTURING))
+      Tensor.run(linear, externs, do_update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:
