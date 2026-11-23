@@ -73,7 +73,9 @@ def node_of(dev:str) -> str:
   if dev.split(":")[0] not in HCQ_DEVS or not nodes: return "local"
   assert len(nodes) == 1 or NODE_NDEVS, f"REMOTE={getenv('REMOTE', '')} has several nodes, set NODE_NDEVS to the gpus of one"
   return nodes[int(dev.split(":")[1]) // NODE_NDEVS.value if ":" in dev and NODE_NDEVS else 0]
-def host_of(dev:str) -> str: return HCQ_RUNTIME_DEV.device if (node:=node_of(dev)) == "local" else f"CPU:{node}"
+def host_of(dev:str) -> str:
+  if dev.split(":")[0] == "NULL": return dev
+  return HCQ_RUNTIME_DEV.device if (node:=node_of(dev)) == "local" else f"CPU:{node}"
 def peer_group(dev:str) -> str:
   if (node:=node_of(dev:=Device.canonicalize(dev))) != "local": return node
   return dev if (iface:=Device.target_for(dev).interface).endswith("USB") else "PCI" if iface.endswith("PCI") else dev.split(":")[0]
