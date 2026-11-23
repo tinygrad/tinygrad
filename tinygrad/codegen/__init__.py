@@ -407,9 +407,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   num_params = max([x.arg.slot + 1 for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1], default=0)
   sink = graph_rewrite(sink, pm_number_params, ctx=(num_params, {}), name="number variables", walk=True)
 
-  if isinstance(sink.arg, KernelInfo) and sink.arg.estimates is None:
-    sink = sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(tuple(linearize(sink)), ignore_indexing=True)))
-
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC:
     import os
@@ -419,9 +416,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
         print(render_uir(sink))
         raise
     else: type_verify(sink, spec_program)
-
-  # remove ranges after z3 validation. rewrites to BACKEDGE + explicit acc so rendering is simple
-  sink = remove_range(sink)
 
   # return the rewritten sink
   return sink
@@ -458,8 +452,8 @@ def lower_call(ctx:LowerCallsCtx, call:UOp, b:UOp) -> UOp|None:
   ki = KernelInfo(name + (f"_{i}" if (i:=bodies.setdefault(b, len(bodies))) else ""), optimized=True, kernel=False)
   if ctx.renderer.inline_prefix:
     b = graph_rewrite(b, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
-    b = UOp(Ops.LINEAR, src=tuple(linearize_cleanups(list(b.src[1].src) if b.op is Ops.PROGRAM \
-        else linearize(full_rewrite_to_sink(b, ctx.renderer, optimize=False)))), arg=ki.name)
+    lst = list(b.src[1].src) if b.op is Ops.PROGRAM else linearize(remove_range(full_rewrite_to_sink(b, ctx.renderer, optimize=False)))
+    b = UOp(Ops.LINEAR, src=tuple(linearize_cleanups(lst)), arg=ki.name)
   else: b = to_program(b.substitute({b.src[0]:b.src[0].replace(arg=ki)}) if b.op is Ops.PROGRAM else b.replace(arg=ki), ctx.renderer)
   return call.replace(src=(b,)+call.src[1:])
 
@@ -534,6 +528,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
     if full_sink.arg.estimates is None:
       full_sink = full_sink.replace(arg=replace(full_sink.arg, estimates=Estimates.from_uops(tuple(linearize(full_sink)), ignore_indexing=True)))
+    full_sink = remove_range(full_sink)
     if renderer.packed_args and full_sink.arg.kernel: full_sink = pack_args(full_sink, prog_info.params)
     # instruction selection
     if isinstance(renderer, ISARenderer):
