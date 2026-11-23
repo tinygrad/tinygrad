@@ -270,6 +270,11 @@ def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
   tsink = graph_rewrite(forward_call_outputs(sink), multi_pm, name="multi_pm")
   tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls+pm_disk_copy, name="inline calls")
+  from tinygrad.device import Device
+  devs = {u.device.split(":")[0] for u in tsink.toposort() if isinstance(u.device, str)}
+  if pms:=[(d, pm) for d in sorted(devs) if (pm:=getattr(Device.get_class(d), "prepare_matcher", None)) is not None]:
+    written = {u.src[0].buf_uop for u in tsink.toposort() if u.op is Ops.STORE}
+    for d, pm in pms: tsink = graph_rewrite(tsink, pm, ctx=(d, written), walk=True, name=f"device prepare {d}")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, init_ctx=MapCtx, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   return tsink

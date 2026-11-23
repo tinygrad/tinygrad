@@ -1,10 +1,10 @@
 # pylint: disable=possibly-unused-variable
 from typing import Any, Sequence, cast, Literal, NamedTuple, Generator, Callable
-import dataclasses, functools, io, math, types, warnings, pathlib, os, struct, enum
+import array, dataclasses, functools, io, math, types, warnings, pathlib, os, struct, enum
 from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, is_numpy_ndarray
 from tinygrad.mixin.op import ReductionStr
-from tinygrad.helpers import getenv, all_same, prod, flatten, make_tuple, argsort, get_single_element, polyN, Context
+from tinygrad.helpers import getenv, all_same, prod, flatten, make_tuple, argsort, get_single_element, polyN, Context, unwrap
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate, least_upper_dtype, DTYPES_DICT
 from tinygrad.device import Device
 from tinygrad.uop.ops import sint, _broadcast_shape
@@ -301,12 +301,27 @@ class OnnxRunner:
     self.graph_inputs = {i["name"]: i["parsed_type"] for i in graph["input"] if i["name"] not in self.graph_values}
     self.graph_outputs = tuple(o["name"] for o in graph["output"])
     self.graph_nodes = tuple(n["parsed_node"] for n in graph["node"])
+    self._fold_quant_initializers()
     # track names from initializers and Constant nodes for fast path optimizations
     self.const_names: set[str] = set(self.graph_values.keys()) | {o for n in self.graph_nodes if n.op == "Constant" for o in n.outputs}
 
     self.variable_dims: dict[str, int] = {}
     self.onnx_ops = onnx_ops
     self._python_const_cache: dict[str, list[ConstType]|ConstType|bytes] = {}  # cache by name for JIT stability
+
+  def _fold_quant_initializers(self):
+    if not (qnodes:=[n for n in self.graph_nodes if n.op in {"QuantizeLinear", "DequantizeLinear"}]): return
+    for name in {x for n in qnodes for x in n.inputs[1:3]}:
+      if isinstance(t:=self.graph_values.get(name), Tensor) and t.numel() == 1:
+        self.graph_values[name] = Tensor(t.item(), dtype=t.dtype).reshape(t.shape)
+    if any(isinstance(v, OnnxRunner) for n in self.graph_nodes for v in n.opts.values()): return
+    deq = {n.inputs[0] for n in qnodes if n.op == "DequantizeLinear"} - set(self.graph_outputs)
+    deq -= {x for n in self.graph_nodes for i,x in enumerate(n.inputs) if (n.op, i) != ("DequantizeLinear", 0)}
+    for name in deq:
+      if isinstance(t:=self.graph_values.get(name), Tensor) and t.dtype == dtypes.int32 and t.numel() > 0:
+        lo, hi = min(vals:=t.data().cast('B').cast('i')), max(vals)
+        if (dt:=next((d for d in (dtypes.int8, dtypes.int16) if d.min <= lo and hi <= d.max), None)) is not None:
+          self.graph_values[name] = Tensor(bytes(array.array(unwrap(dt.fmt), vals)), dtype=dt).reshape(t.shape).to(t.device)
 
   @classmethod
   def _from_subgraph(cls, graph: dict) -> "OnnxRunner":

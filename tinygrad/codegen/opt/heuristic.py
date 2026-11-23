@@ -1,7 +1,8 @@
-import itertools
+import itertools, contextlib
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, TC_MIN_GLOBALS, USE_TC, IMAGE
 from tinygrad.uop.ops import Ops, UOp, resolve, AxisType
+from tinygrad.uop.symbolic import uop_given_valid
 from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
 
@@ -45,6 +46,19 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # make a copy so it does not mutate the input
   k = k.copy()
+
+  # vector renderer: upcast one contiguous output axis
+  if k.ren.vector_lanes and all(k.ren.supports_vector(b.dtype) for b in k.bufs):
+    if stores:=[u.src[0] for u in k.ast.backward_slice if u.op is Ops.STORE]:
+      buf_terms = [list(uop_given_valid(b.src[1].get_valid(), b.src[1].get_idx()).simplify().split_uop(Ops.ADD)) for b in k.bufs]
+      for a in k.upcastable_dims():
+        r = k.rngs[a]
+        if any(r not in s.src[1].get_idx().split_uop(Ops.ADD) or r in s.src[1].get_valid().backward_slice for s in stores): continue
+        if any(t is not r and r in t.backward_slice for terms in buf_terms for t in terms): continue
+        if (amt:=1 << (min(k.full_shape[a], k.ren.vector_lanes).bit_length()-1)) > 1:
+          with contextlib.suppress(KernelOptError): k.apply_opt(Opt(OptOps.SPLIT, a, (amt, AxisType.UPCAST)))
+          break
+    return k
 
   # upcast float4 images, this must be early so we don't accidentally add locals before the upcast
   if IMAGE:
@@ -109,12 +123,11 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   for axis in to_upcast[::-1]: k.apply_opt(Opt(OptOps.SPLIT, axis, (0, AxisType.UPCAST)))
 
   # potentially do more upcasts of non reduce axes based on a heuristic
-  is_dsp = k.ren.target.device == "DSP"
   upcasted_axis: set[int] = set()
   while resolve(prod(k.full_shape[i] for i in k.upcastable_dims()) >= 1024) and (k.upcast_size() < 32):
     xb_choices = []
-    # consider all upcastable axes with 3 or 4 upcast (128 on the DSP)
-    for axis, upcast_amount in itertools.product(k.upcastable_dims(), ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
+    # consider all upcastable axes with 3 or 4 upcast
+    for axis, upcast_amount in itertools.product(k.upcastable_dims(), [3,4]):
       # if we haven't upcasted it, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis in upcasted_axis or k.full_shape[axis]%upcast_amount != 0: continue
       rng = k.rngs[axis]

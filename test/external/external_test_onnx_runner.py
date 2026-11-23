@@ -1,6 +1,6 @@
 import unittest, onnx, tempfile, pathlib
 import numpy as np
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import Ops
 from tinygrad.nn.onnx import OnnxRunner, OnnxDataType
 from hypothesis import given, strategies as st
@@ -82,6 +82,27 @@ class TestOnnxRunner(unittest.TestCase):
     self._test_const_fold_unary_op(False)
     # TODO: understand this and fix this, bitcast related
     # self._test_const_fold_binary_op(False)
+
+  def test_dequantized_int32_initializer_narrowed(self):
+    def run(vals, extra_use=False, as_output=False):
+      arr = np.array(vals, dtype=np.int32)
+      nodes = [onnx.helper.make_node('DequantizeLinear', ['b', 's'], ['output'])]
+      if extra_use: nodes.append(onnx.helper.make_node('Identity', ['b'], ['b2']))
+      outputs = [onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, arr.shape)]
+      if as_output: outputs.append(onnx.helper.make_tensor_value_info('b', onnx.TensorProto.INT32, arr.shape))
+      runner = build_onnx(nodes=nodes, outputs=outputs,
+                          initializers=[onnx.helper.make_tensor('b', onnx.TensorProto.INT32, arr.shape, arr.flatten().tolist()),
+                                        onnx.helper.make_tensor('s', onnx.TensorProto.FLOAT, (1,), [0.5])])
+      np.testing.assert_equal(runner({})['output'].numpy(), arr.astype(np.float32)*0.5)
+      self.assertEqual(runner.graph_values['s'].shape, (1,))
+      return runner.graph_values['b'].dtype
+    self.assertEqual(run([-100, 7, 100]), dtypes.int8)
+    self.assertEqual(run([-30000, 7, 30000]), dtypes.int16)
+    self.assertEqual(run([-2**31, 7, 2**31-1]), dtypes.int32)
+    self.assertEqual(run([-100, 7, 100], extra_use=True), dtypes.int32)
+    self.assertEqual(run([-100, 7, 100], as_output=True), dtypes.int32)
+    self.assertEqual(run(42), dtypes.int8)
+    self.assertEqual(run([[-10, 20], [30, -40]]), dtypes.int8)
 
   def test_external_data_loading(self):
     weights = np.arange(4, dtype=np.float32)

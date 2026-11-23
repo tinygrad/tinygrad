@@ -4,7 +4,7 @@ from dataclasses import replace
 from typing import cast
 from tinygrad.uop.ops import Ops, GroupOp, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element, axis_colors
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, round_up, prod, get_single_element, ALLOW_TF32, count, Context
+from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, round_up, ceildiv, prod, get_single_element, ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -60,13 +60,15 @@ class Scheduler:
   def colors(self) -> list[str]: return [axis_colors[t] for t in self.axis_types]
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
 
-  def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False, input_new_rng:UOp|None=None):
+  def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False, input_new_rng:UOp|None=None, overlap:bool=False):
     check(rng.axis_type in split_targets[new_type], f"{new_type} is from {split_targets[new_type]}, not {rng.axis_type}")
-    if (old_sz:=rng.src[0].divides(amount)) is None:
+    if overlap: old_sz = UOp.const(ceildiv(rng.src[0].arg, amount), rng.src[0].dtype)
+    elif (old_sz:=rng.src[0].divides(amount)) is None:
       raise KernelOptError(f"{amount} can't divide {rng.src[0]} in {self.colored_shape()}")
     new_rng = UOp.range(amount, next(self.opt_range), new_type, dtype=rng.dtype) if input_new_rng is None else input_new_rng
     replaced_rng = rng.replace(src=(old_sz,))
-    sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
+    if overlap: sub_axis = (replaced_rng * amount).minimum(rng.src[0].arg - amount) + new_rng
+    else: sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
     self.ast = self.ast.substitute({rng:sub_axis}, extra_pm=pm_flatten_range, name=f"shift {rng.axis_id} {amount} {new_type.name.lower()}")
     return replaced_rng, new_rng
 
@@ -100,7 +102,7 @@ class Scheduler:
       is_reduce = rng in self.reduce_ranges
       if new_type is AxisType.UPCAST:
         if is_reduce: check(amt <= 32, "don't unroll more than 32")
-        else: check(self.ren.target.device == "DSP" or amt <= 16, "don't upcast more than 16")
+        else: check(self.ren.vector_lanes > 0 or amt <= 16, "don't upcast more than 16")
       # prevents METAL compiler hangs
       if self.reduceop is not None and ((new_type is AxisType.LOCAL and is_reduce) or self.group_for_reduces):
         upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, reduce=False)+self.axes_of(AxisType.WARP, AxisType.LOCAL)])
@@ -111,7 +113,14 @@ class Scheduler:
         # We currently don't support a group within another reduce, TODO: fix if-contexts
         check(not any(u in self.reduce_ranges and u.axis_type is AxisType.WEAK for u in reduces[0].ranges),
               "cannot have a group inside another reduce")
-      ret = self.shift_to(rng, amt, new_type, top=top)
+      # overlap the last vector when an upcast doesn't divide an output axis
+      if (overlap:=new_type is AxisType.UPCAST and self.ren.vector_lanes > 0 and rng.src[0].divides(amt) is None):
+        check(not is_reduce and not top and rng.src[0].op is Ops.CONST and amt < rng.src[0].arg, "only an output axis bigger than an upcast overlaps")
+        stores = [u for u in self.ast.backward_slice if u.op is Ops.STORE]
+        outs = {s.src[0].buf_uop for s in stores}
+        check(not any(x.op is Ops.INDEX and x.buf_uop in outs for s in stores for v in s.src[1:]+s.src[0].src[1:] for x in v.toposort()),
+              "an overlapped upcast can't read the kernel's output")
+      ret = self.shift_to(rng, amt, new_type, top=top, overlap=overlap)
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
       check(opt.axis is not None and opt.axis >= 0, "tensor core opts must have an axis")

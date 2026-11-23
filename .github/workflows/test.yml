@@ -458,7 +458,9 @@ jobs:
         llvm: "true"
         qemu: "true"
     - name: Run tests
-      run: MOCKDSP=1 DEV=DSP python -m pytest -n=auto test/test_tiny.py test/runtime/test_transcendental.py::TestTranscendentalVectorized test/device/dsp
+      run: |
+        MOCKDSP=1 DEV=DSP python -m pytest -n=auto test/test_tiny.py test/runtime/test_transcendental.py::TestTranscendentalVectorized test/runtime/test_quantized_math.py test/device/dsp
+        DEV=CPU DEVECTORIZE=0 python -m pytest -n=auto test/test_tiny.py test/runtime/test_ops.py test/runtime/test_quantized_math.py
 
   testlinux:
     strategy:

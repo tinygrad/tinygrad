@@ -118,11 +118,14 @@ class Renderer:
   extra_matcher: PatternMatcher|None = None
   packed_args: bool = False
   code_for_op: dict[Ops, Callable] = {}
+  vector_lanes: int = 0
+  vector_floats: bool = True
 
   compiler: Compiler = Compiler()
 
   def __init__(self, target:Target): self.target = target
   def __reduce__(self): return self.__class__, (self.target,)
+  def supports_vector(self, dt:DType) -> bool: return self.vector_floats or not dtypes.is_float(dt)
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
   def asm(self, prg:UOp, lin:UOp) -> bytes: raise NotImplementedError("needs an assembler")
   def supported_dtypes(self) -> set[DType]:
