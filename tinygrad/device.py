@@ -46,7 +46,7 @@ class _Device:
     if (d:=self._opened_devices.get(device)) is None: return t
     iface = type(d.iface).__name__[:-5] if hasattr(d, "iface") else ""
     return replace(t, arch=t.arch or d.arch or "", interface=t.interface or iface, props=",".join(f"{k}={v}" for k, v in (d.props | t.opts).items()))
-  def renderer_for(self, device:str, cv=DEV) -> Renderer: return select_renderer(cv.target(device.split(':')[0], arch=self.target_for(device, cv).arch))
+  def renderer_for(self, device:str, cv=DEV) -> Renderer: return select_renderer(cv.target((t:=self.target_for(device, cv)).device, arch=t.arch))
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
   def get_available_devices(self) -> Iterator[str]:
