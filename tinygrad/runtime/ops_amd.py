@@ -815,6 +815,7 @@ class USBIface(PCIIface):
 
   def sleep(self, timeout): pass
 
+def is_aql(xccs:int) -> bool: return bool(getenv("AMD_AQL", int(xccs > 1)))
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
 class AMDDevice(Compiled):
@@ -855,7 +856,7 @@ class AMDDevice(Compiled):
     pf = '' if self.nbio.version[0] == 2 else '0' if self.nbio.version[:2] != (7, 11) else '1'
     self.hdp_flush = getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ'), getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE')
 
-    self.is_aql = getenv("AMD_AQL", int(self.xccs > 1))
+    self.is_aql = is_aql(self.xccs)
     self.max_copy_size = 0x40000000 if (4, 4, 2) <= (v:=self.iface.ip_versions[am.SDMA0_HWIP]) < (5, 0, 0) or v >= (5, 2, 0) else 0x400000
     self.sdma_queues:dict = {}
 
@@ -1018,6 +1019,6 @@ class AMDDevice(Compiled):
 
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("amd_compute_submit")).call(UPat(name="q")).after(allow_any_len=True, name="s"),
-   lambda s, q: (AMDComputeAQLQueue if cast(AMDDevice, Device[q.device]).is_aql else AMDComputeQueue)(s).encode()),
+   lambda s, q: (AMDComputeAQLQueue if is_aql(Device.target_for(q.device).get("xccs", 1)) else AMDComputeQueue)(s).encode()),
   (UPat.sink(arg=KernelInfo("amd_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: AMDSDMAQueue(s).encode()),
 ])
