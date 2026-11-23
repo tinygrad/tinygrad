@@ -334,7 +334,7 @@ def load_const(x:UOp) -> UOp:
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
   (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
-   lambda x,m: UOp.ins(X86Ops.JNE, (x.src[1], x.src[0], test_gate(m)), x.dtype)),
+   lambda x,m: x.replace(src=(*x.src[:2], test_gate(m)), arg=X86Ops.JNE)),
   # **** Op -> X86Op ****
   # function abi constraints
   (UPat(Ops.PARAM), lambda: RDI),
@@ -495,6 +495,8 @@ def alloc_buffer(ctx:X86LinearContext, x:UOp):
 def label(x:UOp) -> UOp: return UOp.ins(X86Ops.LABEL, (x,), dtypes.void)
 
 pre_regalloc_matcher = PatternMatcher([
+  (UPat(Ops.IF, name="x"), lambda x: (x, [x.src[0].without_after, x])),
+  (UPat(Ops.BACKEDGE, name="x"), lambda x: (x, [x.src[2].without_after, x])),
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
   (UPat(Ops.CALL, name="x"), lambda x: (x, []) if x.body.arg.code in {X86Ops.CMP, X86Ops.CMPi} else
    (x, [x.src[-1], x]) if x.body.arg.code in X86GroupOp.ReadFlags else None),

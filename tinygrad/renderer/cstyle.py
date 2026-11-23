@@ -212,9 +212,7 @@ class CStyleLanguage(Renderer):
     self.r = r
 
     child_count = Counter(v for ru in uops for v in ru.src)
-    # find which PARAMs are stored to with a single toposort
-    writable_params = {u for u in UOp.sink(*[u.src[0] for u in uops if u.op is Ops.STORE]).toposort(lambda u: u.op not in {Ops.END, Ops.BACKEDGE})
-                       if u.op is Ops.PARAM}
+    writable_params = {u.src[0].buf_uop for u in uops if u.op is Ops.STORE}
     bufs: dict[UOp, tuple[str, tuple[UOp, bool]]] = {}
     kernel = []
     depth = 1
