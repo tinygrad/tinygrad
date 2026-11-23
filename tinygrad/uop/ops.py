@@ -811,8 +811,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
-    ret = UOp.empty(self.shard_shape if axis is not None else self.shape, dtype=self.commit_dtype() if dtype is None else dtype, device=device)
-    return ret.unshard(axis) if axis is not None else ret
+    return UOp.empty(self.shape, dtype=self.commit_dtype() if dtype is None else dtype, device=device, axis=axis)
   @staticmethod
   def _frompy(x:list|tuple|bytes, dtype:DType) -> UOp:
     if isinstance(x, bytes): ret, data = UOp.new_buffer("PYTHON", len(x)//dtype.itemsize, dtype), x
