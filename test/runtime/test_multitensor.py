@@ -1,6 +1,6 @@
 import unittest, random
 import numpy as np
-from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable, getenv
+from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable, function, getenv
 from tinygrad.uop.ops import Ops, UOp, AxisType, graph_rewrite
 from tinygrad.helpers import prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
@@ -8,7 +8,7 @@ from tinygrad.engine.realize import run_linear, lower_and_compile, pm_beam
 from test.helpers import not_support_multi_device, needs_second_gpu, slow, check_schedule, assert_kernel_count, KernelCountException
 from hypothesis import given, strategies as strat, settings
 
-settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
+settings.register_profile("my_profile", max_examples=getenv("TEST_MAX_EXAMPLES", 200), deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
 def helper_test_shard_op(shps, fxn, atol=1e-6, rtol=1e-3):
@@ -720,6 +720,13 @@ class TestMultiTensor(unittest.TestCase):
       r = jf()
       np.testing.assert_allclose(r.numpy(), np.ones(256)+np.ones(256), atol=1e-4, rtol=1e-5)
     assert jf.captured is not None
+
+  def test_precompiled_symbolic_allreduce(self):
+    @function(precompile=True)
+    def f(x:Tensor): return x.sum(0)
+    t = Tensor.ones(4, 4).contiguous().shard(devices_2, axis=0).realize()
+    v = Variable("cols", 1, 4).bind(2)
+    self.assertEqual(f(t[:, :v])[:2].tolist(), [4.0, 4.0])
 
   def test_symbolic_broadcast_copy(self):
     rows = Variable("rows", 1, 4).bind(3)

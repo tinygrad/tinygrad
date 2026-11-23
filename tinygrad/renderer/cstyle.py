@@ -1,11 +1,10 @@
 from typing import Literal, Callable
 import math
 from collections import defaultdict, Counter
-from tinygrad.renderer import tc
+from tinygrad.renderer import tc, Renderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters, promo_dtype
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_storage_scalar
-from tinygrad.renderer import Renderer
 
 base_rewrite = PatternMatcher([
   # local/reg buffers
@@ -176,7 +175,7 @@ class CStyleLanguage(Renderer):
       # this is lane access in C
       if not (idx.op is Ops.CAST and idx.src[0].op is Ops.CONST): return f"({self[buf]})[{self[idx]}]"
       return self[buf]+(f"[{idx.src[0].val}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.src[0].val]}")
-    return f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
+    return f"({self[buf]}+{self[idx]})"
 
   def render_buffer(self, x:UOp):
     prefix = f"{self.smem_align}{self.smem_prefix}" if x.addrspace == AddrSpace.LOCAL else ""

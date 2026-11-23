@@ -76,22 +76,13 @@ runs:
         enable-cache: 'false' # see below for manual caching
 
     # **** Caching ****
-    # NOTE: self-hosted CI (ie. collaborator PRs) should never cache anything, instead, either:
+    # NOTE: self-hosted CI (ie. master and collaborator PRs) should never cache anything, instead, either:
     #   * bake into the CI image: https://git.tinygrad.win/tinygrad/images, OR
     #   * handle in CI runner HTTP cache
-    # Because CI for master and non-collaborator PRs are github-hosted, they need caching to workaround the flaky internet.
-    # Additionally, the actions/cache/restore pattern should be used to avoid PRs polluting the limited github cache storage.
+    # Because CI for non-collaborator PRs is github-hosted, they need caching to workaround the flaky internet.
 
-    - name: Cache Python packages (PR)
-      if: github.event_name == 'pull_request' && runner.environment == 'github-hosted'
-      id: restore-venv-pr
-      uses: actions/cache/restore@v5
-      with:
-        path: /tmp/.uv-cache
-        key: uv-${{ runner.os }}-${{ runner.arch }}-python-${{ inputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
     - name: Cache Python packages
-      if: github.event_name != 'pull_request' && runner.environment == 'github-hosted'
-      id: restore-venv
+      if: runner.environment == 'github-hosted'
       uses: actions/cache@v5
       with:
         path: /tmp/.uv-cache
@@ -99,14 +90,8 @@ runs:
 
     # **** Caching downloads ****
 
-    - name: Cache downloads (PR)
-      if: inputs.key != '' && github.event_name == 'pull_request' && runner.environment == 'github-hosted'
-      uses: actions/cache/restore@v5
-      with:
-        path: ${{ runner.os == 'Linux' && '~/.cache/tinygrad/downloads/' || '~/Library/Caches/tinygrad/downloads/' }}
-        key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
     - name: Cache downloads
-      if: inputs.key != '' && github.event_name != 'pull_request' && runner.environment == 'github-hosted'
+      if: inputs.key != '' && runner.environment == 'github-hosted'
       uses: actions/cache@v5
       with:
         path: ${{ runner.os == 'Linux' && '~/.cache/tinygrad/downloads/' || '~/Library/Caches/tinygrad/downloads/' }}
@@ -128,7 +113,7 @@ runs:
         uv venv --allow-existing --python ${{ inputs.python-version }} "$VIRTUAL_ENV"
         uv pip install --python "$VIRTUAL_ENV" -e . ${{ inputs.pydeps }}
     - name: Prune uv cache
-      if: github.event_name != 'pull_request'
+      if: runner.environment == 'github-hosted'
       shell: bash
       run: uv cache prune --ci
     - name: Configure venv
@@ -210,14 +195,8 @@ runs:
         done
         echo "installed=$installed" >> "$GITHUB_OUTPUT"
 
-    - name: Cache apt (PR)
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && github.event_name == 'pull_request' && steps.apt-pkgs.outputs.installed == 'false' && runner.environment == 'github-hosted'
-      uses: actions/cache/restore@v5
-      with:
-        path: /var/cache/apt/archives/
-        key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
     - name: Cache apt
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && github.event_name != 'pull_request' && steps.apt-pkgs.outputs.installed == 'false' && runner.environment == 'github-hosted'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && steps.apt-pkgs.outputs.installed == 'false' && runner.environment == 'github-hosted'
       uses: actions/cache@v5
       with:
         path: /var/cache/apt/archives/
@@ -267,11 +246,11 @@ runs:
       if: inputs.cuda == 'true'
       shell: bash
       run: |
-        sudo mkdir -p /usr/local/cuda-11.5/targets/x86_64-linux
-        curl -fL https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-11.5.119-archive.tar.xz \
-          | sudo tar -xJ -C /usr/local/cuda-11.5/targets/x86_64-linux --strip-components=1
-        sudo ln -sfnT /usr/local/cuda-11.5 /usr/local/cuda
-        echo /usr/local/cuda-11.5/targets/x86_64-linux/lib | sudo tee /etc/ld.so.conf.d/cuda-11.5.conf
+        sudo mkdir -p /usr/local/cuda-12.4/targets/x86_64-linux
+        curl -fL https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-12.4.127-archive.tar.xz \
+          | sudo tar -xJ -C /usr/local/cuda-12.4/targets/x86_64-linux --strip-components=1
+        sudo ln -sfnT /usr/local/cuda-12.4 /usr/local/cuda
+        echo /usr/local/cuda-12.4/targets/x86_64-linux/lib | sudo tee /etc/ld.so.conf.d/cuda-12.4.conf
         sudo ldconfig
 
     # **** gpuocelot ****
@@ -280,7 +259,7 @@ runs:
       shell: bash
       run: |
         sudo mkdir -p /usr/local/lib
-        sudo curl --output-dir /usr/local/lib -fLO https://github.com/tinygrad/gpuocelot/releases/download/v0.1.0/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
+        sudo curl --output-dir /usr/local/lib -fLO https://github.com/tinygrad/gpuocelot/releases/download/v0.2.0/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
 
     # **** WebGPU ****
 
@@ -298,14 +277,8 @@ runs:
       shell: bash
       run: brew install llvm@20
 
-    - name: Cache libtcc (PR)
-      if: runner.os == 'Linux' && github.event_name == 'pull_request' && runner.environment == 'github-hosted'
-      uses: actions/cache/restore@v5
-      with:
-        path: ~/.cache/tinycc
-        key: tcc-${{ runner.arch }}-${{ env.TCC_COMMIT }}
     - name: Cache libtcc
-      if: runner.os == 'Linux' && github.event_name != 'pull_request' && runner.environment == 'github-hosted'
+      if: runner.os == 'Linux' && runner.environment == 'github-hosted'
       uses: actions/cache@v5
       with:
         path: ~/.cache/tinycc

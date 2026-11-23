@@ -71,11 +71,9 @@ class Estimates:
     mem: dict[tuple[UOp, Ops], sint] = {}
     mults: sint = 1
     mult_stack: list[sint] = []
-    excluded: set[UOp] = set()
-    if ignore_indexing:
-      for u in uops:
-        if u.op in {Ops.INDEX, Ops.SHRINK}:
-          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
+    # ALUs used for indexing don't count as flops. the toposort stops at END/BACKEDGE so loop bodies still count
+    idxs = [s for u in uops if u.op in {Ops.INDEX, Ops.SHRINK} for s in u.src[1:]] if ignore_indexing else []
+    excluded = UOp.sink(*idxs).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
@@ -88,7 +86,7 @@ class Estimates:
         mult_stack.append(mults)
         if u.dtype is not dtypes.void:  # unbounded loop, unknown trip count
           bound = u.src[0].without_after.simplify()
-          mults *= cast(sint, bound.vmax if bound.ranges else bound.ssimplify())
+          mults *= bound.vmax if bound.ranges else bound.ssimplify()
           # SPECIAL are already counted in mults
           mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op in {Ops.END, Ops.BACKEDGE}: mults = mult_stack.pop(-1)

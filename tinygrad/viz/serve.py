@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, socket, argparse, codecs, io, struct, re, traceback, itertools, socketserver
+from collections import defaultdict, deque
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from dataclasses import dataclass, field
@@ -40,7 +41,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     # pass if client closed connection
     except (BrokenPipeError, ConnectionResetError): source.close()
 
-from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
+from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, range_str, range_start, multirange_str
 from tinygrad.uop.ops import KernelInfo, ParamArg, ProgramInfo
 from tinygrad.uop.render import render_index
 from tinygrad.uop.uir import render_uir, uops_colors, _inline, _render_arg
@@ -137,7 +138,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if u.op is not Ops.SOURCE: argst = word_wrap(argst.replace(':', ''))
     if isinstance(u.arg, ProgramInfo):
       argst = word_wrap(repr(u.arg).replace(f"params={u.arg.params!r}", "params=(\n" + '\n'.join(render_uir(p) for p in u.arg.params) + "\n)"))
-    label = [f"{str(u.op).split('.')[1]}{(chr(10)+argst) if argst else ''}"]
+    label, ref = [f"{u.op.name}{(chr(10)+argst) if argst else ''}"], None
     with soft_err(lambda _: label.append("<ISSUE GETTING DTYPE>")):
       if u.dtype != dtypes.void: label.append(str(u.dtype))
     for idx,x in enumerate(u.src[:1] if u.op in {Ops.STAGE, Ops.INDEX} else (u.src if u.op is not Ops.END else [])):
@@ -154,7 +155,9 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       if u._shape is not None:
         label.append(shape_to_str(u.shape))
       if u.op is Ops.CALL:
-        label += [u.src[0].key.hex()[:8], str(u.src[0].op)]
+        ref = data.ref_map.get(canonicalize_ast(u.body))
+        name = fmt_colored(data.ctxs[ref]["name"]) if ref is not None else u.body.arg.code if u.body.op is Ops.NATIVE else ""
+        label += [u.body.key.hex()[:8], f"{u.body.op.name} {name}"]
       if u.op in {Ops.INDEX, Ops.STAGE}:
         if len(u.src) > 1:
           label.append(render_index(s.render() for s in u.src[1:]) if sum(len(s.toposort()) for s in u.src[1:]) < 50 else "INDEX TOO LARGE")
@@ -164,8 +167,6 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       if u.op in {Ops.END, Ops.REDUCE, Ops.BACKEDGE} and len(trngs:=list(u.ended_ranges if u.op is Ops.BACKEDGE else
                                                                  UOp.sink(*u.src[range_start[u.op]:]).ranges)):
         label.append(' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs]))
-    ref = data.ref_map.get(canonicalize_ast(u.body)) if u.op is Ops.CALL else None
-    if ref is not None: label.append(f"codegen@{fmt_colored(data.ctxs[ref]['name'])}")
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
     color = uops_colors.get(u.op, "#ffffff")
@@ -240,19 +241,18 @@ def flatten_events(profile:list[ProfileEvent], device_ts_diffs:dict[str, Decimal
 # normalize event timestamps and attach kernel metadata
 def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
   events:list[bytes] = []
-  ei:ProfilePointEvent|None = None
+  # A batch can enqueue the same program several times before its first device range starts.
+  pending:dict[bytes, deque[ProfilePointEvent]] = defaultdict(deque)
   for st,et,dur,e in dev_events:
-    if isinstance(e, ProfilePointEvent) and e.name == "exec": ei = e
-    # only visualize range events with an end timestamp
-    if dur == 0 or isinstance(e, ProfilePointEvent): continue
+    if isinstance(e, ProfilePointEvent) and e.name == "exec" and e.arg["program"] is not None: pending[e.arg["program"]].append(e)
+    if isinstance(e, ProfilePointEvent) or dur == 0: continue
     name, key = e.name, None
     fmt:dict = {}
     if (ref:=data.ref_map.get(e.profile_key)) is not None and ref < len(data.ctxs):
       name = data.ctxs[ref]["name"]
-      if (ki:=data.ctxs[ref].get("ki")) is not None and ki.estimates is not None and ei is not None:
-        for est_key,est_val in (("FLOPS", ki.estimates.ops), ("B/s mem", ki.estimates.mem), ("B/s lds", ki.estimates.lds)):
-          with soft_err(lambda _: fmt.update({est_key:"ERR"})): fmt[est_key] = int(sym_infer(est_val, ei.arg['var_vals'])/(dur*1e-6))
-        key = ei.key
+      if e.profile_key is not None and (queue:=pending.get(e.profile_key)):
+        key = (ei:=queue.popleft()).key
+        fmt = {k:int(v/(dur*1e-6)) for k,v in zip(("FLOPS", "B/s mem", "B/s lds"), ei.arg["estimates"])}
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=data.ref_map.get(k)) is not None), None)
@@ -354,7 +354,7 @@ def load_amd_counters(data:VizData, profile:list) -> None:
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None and e.profile_key is not None:
       durations.setdefault(e.profile_key, []).append(float(e.en-e.st))
     if isinstance(e, ProfileProgramEvent) and e.device.startswith("AMD") and e.tag is not None: prg_events[e.tag] = e
-    if isinstance(e, ProfileDeviceEvent) and e.device.startswith("AMD"): arch = f"gfx{unwrap(e.props)['gfx_target_version']//1000}"
+    if isinstance(e, ProfileDeviceEvent) and e.device.startswith("AMD"): arch = unwrap(e.target).arch
   if len(counter_events) == 0: return None
   data.ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(data.ctxs), 0), (durations, all_counters:={}))]})
   run_number = {n:0 for n,_ in counter_events}
@@ -517,7 +517,7 @@ def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str]
 
 def load_nv_counters(data:VizData, profile:list) -> None:
   steps:list[dict] = []
-  sm_version = {e.device:e.props.get("sm_version", 0x800) for e in profile if isinstance(e, ProfileDeviceEvent) and e.props is not None}
+  sm_version = {e.device:e.target.get("sm_version", 0x800) for e in profile if isinstance(e, ProfileDeviceEvent) and e.target is not None}
   run_number:dict[bytes, int] = {}
   for e in profile:
     if type(e).__name__ == "ProfilePMAEvent":

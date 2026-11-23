@@ -24,7 +24,7 @@ on:
 jobs:
   autogen:
     name: In-tree Autogen
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR')) && 'turin' || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -40,21 +40,22 @@ jobs:
     - name: Regenerate autogen files
       run: |
         find tinygrad/runtime/autogen -type f -name "*.py" -not -path "*/amd/*" -not -name "__init__.py" -not -name "metal.py" -not -name "iokit.py" -not -name "corefoundation.py" -not -name "libclang.py" -delete
-        python3 -c "from tinygrad.runtime.autogen import opencl"
-        python3 -c "from tinygrad.runtime.autogen import cuda, nvrtc, nvjitlink, nv_570, nv_580, nv_610, nv_615, nv"
-        python3 -c "from tinygrad.runtime.autogen import comgr, comgr_3, hsa, hip, amd_gpu, sqtt, rocprof, amdgpu_kd, amdgpu_drm"
-        python3 -c "from tinygrad.runtime.autogen.am import *"
-        python3 -c "from tinygrad.runtime.autogen.nv_regs import *"
-        python3 -c "from tinygrad.runtime.autogen import libc, kfd, io_uring, pci, vfio"
-        python3 -c "from tinygrad.runtime.autogen import llvm"
-        python3 -c "from tinygrad.runtime.autogen import webgpu"
-        python3 -c "from tinygrad.runtime.autogen import kgsl, qcom_dsp"
-        python3 -c "from tinygrad.runtime.autogen import libusb, tcc"
-        python3 -c "from tinygrad.runtime.autogen import mesa"
-        python3 -c "from tinygrad.runtime.autogen import avcodec"
-        python3 -c "from tinygrad.runtime.autogen import llvm_qcom"
-        python3 -c "from tinygrad.runtime.autogen import mlx5, bnxt, nvme"
-        python3 -c "from tinygrad.runtime.autogen import ggml_common"
+        python3 -c "from tinygrad.runtime.autogen import opencl" &
+        python3 -c "from tinygrad.runtime.autogen import cuda, nvrtc, nvjitlink, nv_570, nv_580, nv_610, nv_615, nv" &
+        python3 -c "from tinygrad.runtime.autogen import comgr, comgr_3, hsa, hip, amd_gpu, sqtt, rocprof, amdgpu_kd, amdgpu_drm" &
+        python3 -c "from tinygrad.runtime.autogen.am import *" &
+        python3 -c "from tinygrad.runtime.autogen.nv_regs import *" &
+        python3 -c "from tinygrad.runtime.autogen import libc, kfd, io_uring, pci, vfio" &
+        python3 -c "from tinygrad.runtime.autogen import llvm" &
+        python3 -c "from tinygrad.runtime.autogen import webgpu" &
+        python3 -c "from tinygrad.runtime.autogen import kgsl, msm_drm, qcom_dsp" &
+        python3 -c "from tinygrad.runtime.autogen import libusb, tcc" &
+        python3 -c "from tinygrad.runtime.autogen import mesa" &
+        python3 -c "from tinygrad.runtime.autogen import avcodec" &
+        python3 -c "from tinygrad.runtime.autogen import llvm_qcom" &
+        python3 -c "from tinygrad.runtime.autogen import mlx5, bnxt, nvme" &
+        python3 -c "from tinygrad.runtime.autogen import ggml_common" &
+        wait
         REGEN=1 python3 -c "from tinygrad.runtime.autogen import libclang"
     - name: Check for differences
       run: |

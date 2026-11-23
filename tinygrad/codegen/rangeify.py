@@ -2,11 +2,9 @@ from dataclasses import dataclass, field
 from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo
-from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import prod, dedup, VIZ, MAX_KERNEL_BUFFERS, SPEC
-from tinygrad.helpers import get_single_element
+from tinygrad.helpers import prod, dedup, VIZ, MAX_KERNEL_BUFFERS, SPEC, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.indexing import run_rangeify, BufferizeOpts, apply_movement_op
 from tinygrad.codegen.prepare import pm_mops
@@ -98,7 +96,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
 def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:]: return None
-  return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
+  return idx.src[0].shrink(tuple((0, s) for s in b2.shape))
 
 def after_all_invalid(after:UOp):
   buf = after.src[0].buf_uop
@@ -200,7 +198,8 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
   size = prod(x.shape)
   dtype = x.commit_dtype()  # a BUFFER is never weak: store at the committed dtype, the .cast(x.dtype) on the result keeps readers unchanged
-  rngs = sorted(idx.ranges, key=lambda x: x.arg)
+  # the store ends the loops it is in, the DEVICE range is launched per device
+  rngs = sorted([r for r in idx.ranges if r.axis_type is not AxisType.DEVICE], key=lambda x: x.arg)
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
 
   # AFTER: add END to the existing STORE, return buffer with kernel dependency
@@ -214,7 +213,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
       if store_target.src[0].op is Ops.STAGE and store_target.src[0].src[0].op is Ops.INDEX:
         store_target = store_target.src[0].src[0]
       if store.src[1] is store_target: continue  # skip self-assign
-      end_rngs = sorted(dedup(tuple(store_target.ranges) + tuple(rngs)), key=lambda x: x.arg)
+      end_rngs = sorted(dedup([r for r in store_target.ranges if r.axis_type is not AxisType.DEVICE] + rngs), key=lambda x: x.arg)
       ended_stores.append(store_target.store(store.src[1]).end(*end_rngs))
     return buf.after(*ended_stores)
 
@@ -289,9 +288,8 @@ def check_buf_states(x:UOp):
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), check_buf_states),
   (UPat((Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT), name="buf"), add_buf),
-  # Only storage parameters get kernel-local slots; scalar parameters retain their enclosing call's slots.
-  (UPat((Ops.PARAM, Ops.EXTERN), name="buf"), lambda ctx, buf:
-   None if buf.addrspace is AddrSpace.ALU else add_buf(ctx, buf)),
+  # storage params get kernel-local slots here, the scalars are lifted once it's a call
+  (UPat((Ops.PARAM, Ops.EXTERN), name="buf"), lambda ctx, buf: None if buf.addrspace is AddrSpace.ALU else add_buf(ctx, buf)),
 
   # ALU params are scalar symbolic values, not buffers.
   (UPat(Ops.INDEX, src=(UPat((Ops.PARAM, Ops.EXTERN), name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
@@ -315,7 +313,10 @@ def split_store(x:UOp) -> UOp|None:
   ret = graph_rewrite(ret, pm_renumber_range, ctx={a:i for i,a in enumerate(lctx.ranges)}, walk=True)
 
   # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
-  return ret.sink(arg=KernelInfo()).call(*lctx.map.values())
+  kernel = ret.sink(arg=KernelInfo()).call(*lctx.map.values())
+  # the scalars it reads (also in the symbolic shapes of its storage) and its device number are args after the storage
+  return kernel.lift_args([u for u in kernel.body.toposort() if (u.op in {Ops.PARAM, Ops.EXTERN} and u.addrspace is AddrSpace.ALU) or
+                           (u.op is Ops.RANGE and u.axis_type is AxisType.DEVICE)])
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),

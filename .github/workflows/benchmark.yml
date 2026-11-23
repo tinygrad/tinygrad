@@ -328,6 +328,15 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: python3 test/external/process_replay/reset.py
+    - name: Benchmark tiny plus
+      run: |
+        time BENCHMARK_LOG=tiny_plus python3 - <<'PY'
+        from tinygrad import Tensor
+        from extra.bench_log import BenchEvent, WallTimeEvent
+        with WallTimeEvent(BenchEvent.FULL):
+          out = Tensor([1.,2,3]) + Tensor([4.,5,6])
+          assert out.tolist() == [5.,7.,9.]
+        PY
     - name: Test tiny
       run: |
         DEBUG=2 python -m pytest -rA test/test_tiny.py
@@ -486,7 +495,9 @@ jobs:
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset chestnut
-      run: python3 extra/usbgpu/debug.py -rnw
+      run: |
+        python3 extra/usbgpu/debug.py -rnw
+        udevadm wait --timeout=10 /dev/chestnut
     - name: UsbGPU boot time
       run: GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU tiny tests

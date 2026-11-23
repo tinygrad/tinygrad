@@ -647,5 +647,6 @@ class MovementMixin:
     if step <= 0: raise RuntimeError(f'step must be > 0 but got {step=}')
     if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
     dim = self._resolve_dim(dim)
+    if self.shape[dim] == 0: return self.reshape(*self.shape[:dim], 1, *self.shape[dim+1:], 0)
     perm_to_last = tuple(i for i in range(self.ndim) if i != dim) + (dim,)
     return self.permute(perm_to_last)._pool((size,), step).permute(argsort(perm_to_last) + (self.ndim,))

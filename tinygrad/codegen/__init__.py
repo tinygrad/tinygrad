@@ -3,7 +3,7 @@ from collections import deque
 import itertools, functools, time, inspect
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC, SCACHE, BASEDIR
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile
-from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored
+from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored, NO_MEMORY_PLANNER
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
@@ -149,9 +149,9 @@ devectorizer2 = pm_mops+PatternMatcher([
   (UPat(Ops.WMMA, name="u"), do_stack_wmma),
   # reshape of a single element shaped value to scalar is an index
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
-  # a scalar index into a STACK selects its lanes after the STACK and the index, renderers only extract lanes at const indices
+  # a scalar index into a STACK is a read of the selected lane, a masked index reads 0. renderers only extract lanes at const indices
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.var("i"))),
-   lambda a,i: _stack_select(i, list(a.src)).after(a, i) if i.shape == () and a.ndim == 1 else None),
+   lambda a,i: i.get_valid().where(_stack_select(i.get_idx(), list(a.src)), a.dtype.const(0)) if i.shape == () and a.ndim == 1 else None),
 ])
 
 def fix_group_for_reduce(x:UOp):
@@ -232,6 +232,8 @@ def add_local_buffer(ctx, x:UOp):
 
 pm_add_local_buffers = PatternMatcher([
   (UPat(Ops.STAGE, name="x"), add_local_buffer),
+  # buffer and alloc are treated the same way, cannocalize to one op
+  (UPat(Ops.ALLOC, name="x"), lambda ctx,x: x.replace(op=Ops.BUFFER, arg=replace(x.arg, slot=next(ctx)))),
 ])+pm_mops
 
 # float ALUs need a float operand
@@ -301,7 +303,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # expand
   sink = graph_rewrite(sink, expander, ctx=build_range_map(sink), name="expander")
 
-  slots = itertools.count(max([u.arg.slot+1 for u in sink.toposort() if u.op is Ops.ALLOC], default=0))
+  slots = itertools.count(max([u.arg.slot+1 for u in sink.toposort() if u.op in {Ops.ALLOC, Ops.BUFFER}], default=0))
 
   # remove reduce
   sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=slots, name="remove reduces")
@@ -400,8 +402,6 @@ pm_linearize_cleanups = PatternMatcher([
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
   (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
    lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))])),
-  # ALLOC becomes a distinct BUFFER before rendering
-  (UPat(Ops.ALLOC, name="x"), lambda ctx,x: ((buf:=x.replace(op=Ops.BUFFER, arg=replace(x.arg, slot=next(ctx)))), [buf])),
 ])
 
 # requires lst be toposorted. like graph rewrite, but for lines
@@ -416,8 +416,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
   return newlst
 
 def linearize_cleanups(lst:list[UOp]) -> list[UOp]:
-  slots = itertools.count(max([u.arg.slot+1 for u in lst if u.op is Ops.BUFFER], default=0))
-  return line_rewrite(lst, pm_linearize_cleanups, ctx=slots)
+  return line_rewrite(lst, pm_linearize_cleanups)
 
 @dataclass
 class LowerCallsCtx:
@@ -458,7 +457,6 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
     lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
     lst = lin_ctx.insert_linearized(lst)
     lst = line_rewrite(lst, ctx.post_regalloc_matcher, lin_ctx)
-    if DEBUG >= 4: print(ctx.asm_str(lst, sink.arg.function_name))
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
 def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp|None:
@@ -510,7 +508,8 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     if renderer.packed_args and full_sink.arg.kernel: full_sink = pack_args(full_sink, prog_info.params)
     # instruction selection
     if isinstance(renderer, ISARenderer):
-      full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
+      slots = itertools.count(min([0]+[u.arg.slot for u in full_sink.toposort() if u.op is Ops.BUFFER])-1, -1)
+      full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=slots, name="pre instruction selection", bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(), name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
@@ -542,6 +541,7 @@ def _unwrap_src(s: UOp) -> UOp:
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
+  if s.op is Ops.CONST: return []  # a constant arg, e.g. the device number of one device, reads no buffer
   assert s.op in GroupOp.Defines|{Ops.AFTER}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
 
@@ -611,31 +611,20 @@ def create_schedule(sched_sink:UOp) -> UOp:
   return UOp(Ops.LINEAR, src=tuple(linearized))
 
 
-def resolve_linear_call(linear_call:UOp, outer_binds:dict[int, UOp]|None=None):
+def resolve_linear_call(linear_call:UOp):
   # a scheduled function is shared by all its calls, so the storage it allocates gets a fresh identity in each call
   linear = linear_call.body
   linear = linear.substitute({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in linear.toposort() if b.op is Ops.ALLOC}, walk=True)
   # the positional params outside the kernel bodies are the call args, free Variables have slot -1
-  linear = graph_rewrite(linear, pm_resolve_params, ctx=linear_call.src[1:], walk=True, name="params to args")
-  # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
-  # scalar args (e.g. precompiled allreduce) inherit it
-  binds = {**(outer_binds or {}),
-           **{i:x for i,x in enumerate(linear_call.src[1:]) if x.op in {Ops.PARAM, Ops.EXTERN} and x.addrspace is AddrSpace.ALU}}
-  def apply_binds(si:UOp) -> UOp:
-    if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
-    if si.op is Ops.CALL and si.body.op is Ops.PROGRAM: return si  # compiled parameters already have ABI slots
-    # positional scalar PARAMs are the call args. an EXTERN's slot indexes the externs, it's mapped back later
-    subs = {v:binds[v.arg.slot] for s in si.src for v in s.variables() if v.op is Ops.PARAM and v.arg.name is None and v.arg.slot in binds}
-    return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
-  return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
+  return graph_rewrite(linear, pm_resolve_params, ctx=linear_call.src[1:], walk=True, name="params to args")
 
 pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), resolve_linear_call),
 ])+pm_flatten_linear
 
-schedule_cache: dict[bytes, UOp] = {}
-# ctx is just for DEBUG on inner
+# Body hashes cache schedules; (exported function, NO_MEMORY_PLANNER) keys cache final LINEARs.
+schedule_cache: dict[bytes|tuple[UOp, int], UOp] = {}
 def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = call.body
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
@@ -728,8 +717,10 @@ pm_contiguous_views = PatternMatcher([
 ])
 
 @rewrite_group(lambda fn,ret,**_: f"Schedule {len(fn.src)} -> {len(ret.src)}")
-def create_linear(fn:UOp, plan:bool=True) -> UOp:
+def create_linear(fn:UOp) -> UOp:
   """an exported function (no runtime state) to the LINEAR of calls that runs it, on its EXTERNs, view args and ALLOCs"""
+  key = (fn, NO_MEMORY_PLANNER.value)
+  if SCACHE and (hit:=schedule_cache.get(key)) is not None: return hit
   # a contiguous view of storage is a different buffer: it's an input of the scheduled function, the call arg is the view
   views: dict[UOp, int] = {}
   fn = graph_rewrite(fn, pm_contiguous_views, ctx=views, name="contiguous views")
@@ -742,9 +733,11 @@ def create_linear(fn:UOp, plan:bool=True) -> UOp:
   # create copies
   linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
 
-  # plan the storage the function allocates. the jit plans all its captured calls together instead
-  if plan: linear = memory_plan_rewrite(linear)
+  # plan the storage the function allocates
+  linear = memory_plan_rewrite(linear)
 
   # the storage it allocates gets canonical slots, so the linear only depends on fn. map back binds each to fresh storage
   allocs = [u for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL]
-  return linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
+  ret = linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
+  if SCACHE: schedule_cache[key] = ret
+  return ret

@@ -1,10 +1,9 @@
 import math, time, traceback, signal
 from dataclasses import replace
 from tinygrad.uop.ops import sym_infer, AxisType, UOp, Ops
-from tinygrad.device import Device, Buffer
-from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str
-from tinygrad.helpers import IGNORE_BEAM_CACHE
+from tinygrad.device import Device
+from tinygrad.dtype import AddrSpace, dtypes
+from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str, IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.engine.realize import time_call
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
@@ -31,14 +30,14 @@ def get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, input_size / prod(test_global_size)
 
-def _time_program(prg:UOp, var_vals:dict[str, int], buf_uops:list[UOp], early_stop:float|None=None,
+def _time_program(prg:UOp, var_vals:dict[str, int], args:list[UOp], early_stop:float|None=None,
                   allow_test_size:int=True, max_global_size:int|None=65536, clear_l2=False, cnt=3, name="test", dev_timeout=False) -> list[float]:
   timeout = int(early_stop * 1e3) if dev_timeout and early_stop is not None and early_stop < math.inf else None
   factor = 1
   if allow_test_size and max_global_size is not None:
     global_size, factor = get_test_global_size(prg.arg.global_size, max_global_size, var_vals)
     prg = prg.replace(arg=replace(prg.arg, global_size=tuple(global_size)))
-  call = prg.call(*buf_uops)
+  call = prg.call(*args)
   tms, timer = [], time_call(call, var_vals, timeout=timeout, clear_l2=clear_l2)
   for _ in range(cnt):
     try: tms.append(next(timer) * factor)
@@ -78,8 +77,6 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
       signal.signal(getattr(signal, 'SIGALRM'), old_handler)
   return x[0], ret
 
-def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_allocated() if buf is not None else buf for buf in bufs]
-
 # *** external API ***
 
 # get dictionary of all possible actions
@@ -104,7 +101,7 @@ def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dic
   return acted
 
 BEAM_DEBUG = getenv("BEAM_DEBUG")
-def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:int, allow_test_size=True):
+def beam_search(s:Scheduler, amt:int, allow_test_size=True):
   key = {"ast": s.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": s.ren.target.device, "suffix": s.ren.suffix}
   if not IGNORE_BEAM_CACHE and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
     ret = s.copy()
@@ -123,9 +120,12 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:i
   if DEBUG >= 2: print(f"   0.00s:                from   1 ->   1 actions {s.colored_shape()}")
 
   try:
-    rawbufs = _ensure_buffer_alloc(rawbufs)
-    params = {p.arg.slot:p.dtype for p in s.ast.toposort() if p.op is Ops.PARAM and p.addrspace is not AddrSpace.ALU}
-    buf_uops = [UOp.from_buffer(b, params[i]) for i, b in enumerate(rawbufs)]
+    var_vals = {p.expr:int(p.vmax+p.vmin)//2 for p in s.ast.variables()}
+    params = {p.arg.slot:p for p in s.ast.toposort() if p.op is Ops.PARAM and p.arg.slot >= 0}
+    # a scalar gets the middle of its range, an unused slot a placeholder
+    args = [UOp.const(0, dtypes.int)] * (max(params, default=-1)+1)
+    for i,p in params.items():
+      args[i] = UOp.const(var_vals[p.expr], p.dtype) if p.addrspace is AddrSpace.ALU else UOp.new_buffer(s.ren.target.device, p.max_numel(), p.dtype)
     exiting, st = False, time.perf_counter()
     dev = Device[s.ren.target.device]
     while not exiting:
@@ -143,7 +143,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:i
           if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too much compute. {this_compute_ops} when least is {least_compute_ops}")
           continue
         seen_libs.add(lib)
-        try: tms = _time_program(prg, var_vals, buf_uops, early_stop=beam[0][1]*3 if len(beam) else 1.0,
+        try: tms = _time_program(prg, var_vals, args, early_stop=beam[0][1]*3 if len(beam) else 1.0,
                                  allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'),
                                  dev_timeout=getenv("BEAM_DEV_TIMEOUT", 1))
         except Exception as e:

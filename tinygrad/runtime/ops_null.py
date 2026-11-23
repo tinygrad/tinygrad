@@ -1,6 +1,6 @@
 import inspect, functools, itertools
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Compiled, HostAllocator, MMIOInterface, Program, ProfileGraphEntry, ProfileGraphEvent
-from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
+from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl, x86
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.dtype import dtypes
@@ -62,7 +62,7 @@ Compiled.pm_encode += PatternMatcher([
 ])
 
 class NullDevice(Compiled):
-  renderers = dedup([NullRenderer] + [r for m in [cstyle, nir, ptx, llvmir, wgsl] for r in m.__dict__.values()
+  renderers = dedup([NullRenderer] + [r for m in [cstyle, nir, ptx, llvmir, wgsl, x86] for r in m.__dict__.values()
                                       if inspect.isclass(r) and issubclass(r, Renderer)])
   host = property(lambda self: self.device)
   timeline = functools.cached_property(lambda self: self.host_buffer(16))

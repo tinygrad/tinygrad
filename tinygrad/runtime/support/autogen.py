@@ -1,5 +1,4 @@
 import ctypes, itertools, re, functools, os, keyword
-from tinygrad.helpers import unwrap
 import tinygrad.runtime.autogen.libclang as clang # use REGEN=1 to regenerate libclang bindings
 
 def unwrap_cursor(c: clang.CXCursor) -> clang.CXCursor:
@@ -276,14 +275,15 @@ def gen(name, files, dll="", args=[], prolog=[], rules=[], epilog=[], recsym=Fal
                     *([f"dll = c.DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines]) + '\n'
   extras = [f"{r} # type: ignore" if "lambda" in r else r
             for m in extras if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
-  while True:
+  # run main once, then each extra in order: an extra that fails is skipped, the ones after it see the same globals as if it never existed
+  glbls: dict = {}
+  try: exec(main, glbls)
+  except Exception as e: raise Exception("parsing failed") from e
+  kept = []
+  for x in extras:
     try:
-      exec(main + '\n'.join(extras), {})
-      break
-    except (SyntaxError, NameError, TypeError) as e:
-      extrano = unwrap(e.lineno if isinstance(e, SyntaxError) else unwrap(unwrap(e.__traceback__).tb_next).tb_lineno) - main.count('\n') - 1
-      assert extrano >= 0 and extrano < len(extras), f"error outside extra range: {e}"
-      print(f"skipping {extras[extrano]}: {e}")
-      del extras[extrano]
+      exec(x, glbls)
+      kept.append(x)
+    except (SyntaxError, NameError, TypeError) as e: print(f"skipping {x}: {e}")
     except Exception as e: raise Exception("parsing failed") from e
-  return main + '\n'.join(extras + epilog)
+  return main + '\n'.join(kept + epilog)

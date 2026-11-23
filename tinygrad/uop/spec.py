@@ -2,8 +2,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, 
   NativeInfo
 from tinygrad.uop.uir import render_uir
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, weak_dtype
-from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape
-from tinygrad.helpers import is_disk_device
+from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape, is_disk_device
 
 # ***** uop helpers *****
 
@@ -56,8 +55,7 @@ spec_shared = PatternMatcher([
   (UPat(Ops.CONST, src=(), name="x"), lambda x: x.is_invalid or type(x.val) is type(x.dtype.const(x.val))),
 
   # STACK is everywhere too
-  (UPat(Ops.STACK, dtype=dtypes.void, src=()), lambda: True),
-  (UPat(Ops.STACK, src=(UPat(),), allow_any_len=True, name="s"),
+  (UPat(Ops.STACK, name="s"),
    lambda s: all_same([x.shape for x in s.src]) and all(matches_dtype(x, s.dtype) or x.dtype == weak_dtype(s.dtype) for x in s.src)),
 
   # ALUs: operands match the result dtype, except comparisons/WHERE; renderer-lowered shifts may use a uint32 count
@@ -104,8 +102,8 @@ spec_shared = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True, name="x"),
    lambda x: (x.src[0].shape == () or x.addrspace is AddrSpace.ALU) and x.src[0].dtype is not dtypes.void),
 
-  # a NATIVE names native code or an external function: the arg is NativeInfo stating the return dtype
-  (UPat(Ops.NATIVE, name="x", allow_any_len=True), lambda x: isinstance(x.arg, NativeInfo)),
+  # a NATIVE names native code or an external function: the arg is NativeInfo, its single src states its dtype and shape
+  (UPat(Ops.NATIVE, src=(UPat(),), name="x"), lambda x: isinstance(x.arg, NativeInfo)),
   # CALL: the body is always an opaque body stating the dtype, the arg is a CallInfo
   (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, CallInfo)),
 
@@ -170,7 +168,8 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"),
    lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in GroupOp.Reduce
    and isinstance(x.arg[1], int) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])
-   and not any(y.op is Ops.RANGE and y.axis_type is AxisType.DEVICE for y in x.src[1:])),
+   # a reduce is over loops, not over the device number (a DEVICE range, or its param once it's a kernel arg) or any other param
+   and not any(y.op is Ops.PARAM or (y.op is Ops.RANGE and y.axis_type is AxisType.DEVICE) for y in x.src[1:])),
 
   # COPY carries the DEVICE range as src[1] when the target is multi-device
   (UPat(Ops.COPY, name="copy", src=(UPat(),), allow_any_len=True), lambda copy:
@@ -213,7 +212,7 @@ spec_program = PatternMatcher([
   (UPat(GroupOp.Movement), lambda: False),
 
   # REG/LOCAL buffer
-  (UPat((Ops.BUFFER, Ops.ALLOC), src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
+  (UPat(Ops.BUFFER, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),

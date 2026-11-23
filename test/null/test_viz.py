@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ, BEAM, CAPTURE_PROCESS_REPLAY
+from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ, BEAM, CAPTURE_PROCESS_REPLAY, Target
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
@@ -401,6 +401,20 @@ class TestVizIntegration(unittest.TestCase):
     with Context(BEAM=2):
       self.test_link_sched_codegen()
 
+  @Context(DEV="NULL:X86:x86_64")
+  def test_insts_label(self):
+    name = "insts_label"
+    def custom_insts(A): return A[0].set(A[0]+1).sink(arg=KernelInfo(name))
+    x = Tensor.custom_kernel(Tensor.empty(1), fxn=custom_insts)[0]
+    with save_viz() as viz:
+      x.realize()
+    lst = viz.list_items()
+    kern_idx = next(i for i,s in enumerate(lst) if s["name"] == name)
+    isel_idx = next(i for i,s in enumerate(lst[kern_idx]["steps"]) if s["name"] == "instruction selection")
+    graph = next(viz.get_details(kern_idx, isel_idx+1))["graph"]
+    for u in graph.values():
+      if u["label"].startswith("CALL\n"): assert "NATIVE X86Ops" in u["label"]
+
   # tracing also works without a rewrite_group context
   # all graph_rewrites get put into the default group
   def test_default_tracing(self):
@@ -685,15 +699,15 @@ class TestVizProfiler(unittest.TestCase):
     self.assertListEqual(list(j['layout']), ['NV', 'NV:SDMA:0', 'NV:1'])
 
   def test_multi_sdma_ordering(self):
-    props = {"gfx_target_version": 0}
+    target = Target("AMD")
     D, St, En = decimal.Decimal, decimal.Decimal(1000), decimal.Decimal(1010)
     prof = [# 2 AMD GPUs, 2 SDMA engines each
-            ProfileDeviceEvent(device='AMD', tdiff=D(-1000), props=props),
-            ProfileDeviceEvent(device='AMD:1', tdiff=D(-900), props=props),
-            ProfileDeviceEvent(device='AMD:SDMA:0', tdiff=D(-100), props=props),
-            ProfileDeviceEvent(device='AMD:SDMA:1', tdiff=D(-80), props=props),
-            ProfileDeviceEvent(device='AMD:1:SDMA:0', tdiff=D(-60), props=props),
-            ProfileDeviceEvent(device='AMD:1:SDMA:1', tdiff=D(-40), props=props),
+            ProfileDeviceEvent(device='AMD', tdiff=D(-1000), target=target),
+            ProfileDeviceEvent(device='AMD:1', tdiff=D(-900), target=target),
+            ProfileDeviceEvent(device='AMD:SDMA:0', tdiff=D(-100), target=target),
+            ProfileDeviceEvent(device='AMD:SDMA:1', tdiff=D(-80), target=target),
+            ProfileDeviceEvent(device='AMD:1:SDMA:0', tdiff=D(-60), target=target),
+            ProfileDeviceEvent(device='AMD:1:SDMA:1', tdiff=D(-40), target=target),
             # compute + copy events
             ProfileRangeEvent(device='AMD', name='E_1', st=St, en=En),
             ProfileRangeEvent(device='AMD:1', name='E_2', st=St, en=En),
@@ -1178,17 +1192,13 @@ class TestCLI(unittest.TestCase):
         Tensor.realize(*f(a[:i], b[:j]))
     with write_files(viz) as files:
       out = run_cli(*files, "-s", "NULL")
-      aggregate = run_cli(*files, "-s", "NULL", "-t")
-    self.assertEqual(len(out), 3*2)
-    # Operation count increases with N; FLOPS is a rate and also depends on the measured duration.
-    gflops = [row["fmt"]["FLOPS"] for row in out]
-    flops = [rate * row["dur_ms"] * 1e-3 for rate, row in zip(gflops, out)]
-    self.assertGreater(flops[4], flops[2])
-    self.assertGreater(flops[5], flops[3])
-    # aggregate flops
-    self.assertEqual(len(aggregate), 2)
-    agg_gflops = [row["fmt"]["FLOPS"] for row in aggregate]
-    assert all(min(gflops) < v < max(gflops) for v in agg_gflops), f"{agg_gflops}"
+      summary, = run_cli(*files, "-s", "NULL", "-t")
+    # Six calls share one kernel. Each contributes its own operation count to the aggregate rate.
+    ops = [row["fmt"]["FLOPS"] * row["dur_ms"] * 1e-3 for row in out]
+    for got, expected in zip(ops, [2*n*n*64 for pair in test_n for n in pair], strict=True):
+      self.assertAlmostEqual(got, expected, delta=expected*1e-3)
+    self.assertEqual(summary["count"], len(ops))
+    self.assertAlmostEqual(summary["fmt"]["FLOPS"], sum(ops)/(summary["dur_ms"] * 1e-3), delta=1)
 
   def test_dedup(self):
     with save_viz() as viz:

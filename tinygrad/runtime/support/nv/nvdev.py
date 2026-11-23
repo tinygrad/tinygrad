@@ -1,4 +1,3 @@
-from __future__ import annotations
 import time, functools, tinygrad.runtime.autogen.nv_regs
 from tinygrad.helpers import getenv, DEBUG, getbits, round_up
 from tinygrad.runtime.autogen import pci
@@ -13,7 +12,6 @@ class NVReg:
 
   def __getitem__(self, idx:int): return NVReg(self.nvdev, self.base, self.off(idx), fields=self.fields)
 
-  def add_field(self, name:str, start:int, end:int): self.fields[name] = (start, end)
   def with_base(self, base:int): return NVReg(self.nvdev, base + self.base, self.off, self.fields)
 
   def read(self): return self.nvdev.rreg(self.base + self.off)

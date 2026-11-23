@@ -261,7 +261,7 @@ def usb_patch(link:UOp, addr:UOp, val:UOp, slot:UOp) -> UOp: # poke only on chan
 # 3. lower
 
 def is_host(b:UOp) -> bool: return not all_devices_in(b.device, HCQ_DEVS - {"CPU"})
-def is_usb(dev) -> bool: return getattr(Device[to_tuple(dev)[0]], "is_usb", False)
+def is_usb(dev) -> bool: return to_name(d:=to_tuple(dev)[0], "usb_host") in Compiled.link_bufs or getattr(Device[d], "is_usb", False)
 def is_remote(b:UOp) -> bool: return (p:=unwrap_view(b)[0]).op in (Ops.PARAM, Ops.ALLOC, Ops.EXTERN) and p.device is not None and is_usb(p.device)
 def usb_addr(b:UOp, idx:UOp, dt:DType) -> UOp: return b.getaddr("CPU") + (idx * dt.itemsize).cast(dtypes.uint64) # byte address of b[idx]
 def usb_deps(b:UOp) -> tuple[UOp, ...]: # deps through views
@@ -415,8 +415,8 @@ Compiled.pm_encode = PatternMatcher([(UPat.sink().call(UPat(Ops.PARAM)).after(al
   usb_copy_rewriter)]) + Compiled.pm_encode # the copies of a submit go through the sram window
 Compiled.pm_lower += PatternMatcher([
   # the gpu's memory is reached over usb
-  (UPat.native("memcpy", dtypes.uint64).call(UPat.var("dst"), UPat.var("src"), UPat.var("n")), usb_memcpy),
-  (UPat.native("memset", dtypes.uint64).call(UPat.var("dst"), UPat.const(0).or_casted(), UPat.var("n")),
+  (UPat.native("memcpy").call(UPat.var("dst"), UPat.var("src"), UPat.var("n")), usb_memcpy),
+  (UPat.native("memset").call(UPat.var("dst"), UPat.const(0).or_casted(), UPat.var("n")),
    lambda dst, n: usb_memcpy(dst, usb_zeros(dst.src[0].device).index(0), n, fill=True)),
   (UPat.var("b").index(UPat.var("idx")).store(UPat.var("v")), lambda b, idx, v: usb_store(b, idx, v) if is_remote(b) else None),
   (UPat.var("b").index(UPat.var("idx")).load(name="ld"), lambda b, idx, ld: usb_load(b, idx, ld) if is_remote(b) else None),
