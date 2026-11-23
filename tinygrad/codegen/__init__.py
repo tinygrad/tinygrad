@@ -280,7 +280,7 @@ def remove_range(sink:UOp):
   replacements: dict[UOp, UOp] = {}
   for u in uops:
     if u.op is not Ops.RANGE or u.axis_type in (AxisType.GLOBAL, AxisType.LOCAL) or u.dtype is dtypes.void or u not in ends: continue
-    acc = UOp.alloc((1,), u.commit_dtype(dtypes.int), slot=next(acc_slots), addrspace=AddrSpace.REG)
+    acc = UOp.placeholder((1,), u.commit_dtype(dtypes.int), slot=next(acc_slots), addrspace=AddrSpace.REG)
     acc = acc.after(acc.after(*enclosing.get(u, ()))[0].store(0))
     inputs = dedup(s for x in uops if u in x.ranges for s in x.src_without_body if u not in s.ranges and s is not u)
     gate = UOp(Ops.IF, src=((u.src[0] > 0).after(acc, *inputs), UOp(Ops.NOOP))) if u.src[0].vmin <= 0 else None

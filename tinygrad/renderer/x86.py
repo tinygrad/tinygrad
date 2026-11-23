@@ -74,7 +74,7 @@ class X86Ops(FastEnum):
   CMOVNE = auto()
   VBLENDVPS = auto(); VBLENDVPD = auto()
   # jumps
-  JNE = auto(); JGE = auto(); JMP = auto()
+  JNE = auto(); JGE = auto(); JMP = auto(); JAE = auto()
   # vectorize / gep
   VINSERTPS = auto(); VPSRLDQ = auto()
   VPEXTRW = auto(); VPEXTRD = auto()
@@ -114,7 +114,7 @@ class X86GroupOp:
   ReadFlags = {X86Ops.CMOVNE, X86Ops.SETB, X86Ops.SETL, X86Ops.SETE, X86Ops.SETNE, X86Ops.JNE, X86Ops.JGE}
 
   # X86Ops that jump, their first src is what the LABEL they jump to marks
-  Jump = {X86Ops.JNE, X86Ops.JGE, X86Ops.JMP}
+  Jump = {X86Ops.JNE, X86Ops.JGE, X86Ops.JMP, X86Ops.JAE}
 
   # X86Ops whose first src is the rm field. a TwoAddress op drops its first src post regalloc, so its Rm2nd src ends up first
   Rm1st = {X86Ops.MOV, X86Ops.VMOVSS, X86Ops.VMOVSD, X86Ops.VMOVUPS, X86Ops.MOVZX, X86Ops.MOVSX, X86Ops.MOVSXD, X86Ops.VMOVD, X86Ops.VMOVQ,
