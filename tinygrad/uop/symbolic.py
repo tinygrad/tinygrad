@@ -236,14 +236,11 @@ commutative = PatternMatcher([
   (UPat(GroupOp.Commutative, dtype=dtypes.weakint, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
-def _gate_index(): raise BottomUpGate
-pm_gate_index = PatternMatcher([(UPat(Ops.INDEX), _gate_index)])
 def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
   """in cond.where(t, f), cond is True within t and False within f"""
   # INDEX gates are owned by the valid/store-coalescing machinery, leave them alone
-  if cond.op is Ops.INDEX or any(s.op is Ops.INDEX for x in cond.toposort(gate=lambda x: x.op is not Ops.INDEX) for s in x.src): return None
-  nt = t.substitute({cond: cond.const_like(True)}, extra_pm=pm_gate_index)
-  nf = f.substitute({cond: cond.const_like(False)}, extra_pm=pm_gate_index)
+  if any(u.op_in_backward_slice_with_self(Ops.INDEX) for u in (cond, t, f)): return None
+  nt, nf = t.substitute({cond: cond.const_like(True)}), f.substitute({cond: cond.const_like(False)})
   return None if nt is t and nf is f else cond.where(nt, nf)
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
