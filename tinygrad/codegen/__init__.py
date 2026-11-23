@@ -47,14 +47,8 @@ def build_range_map(sink:UOp) -> dict[tuple, int]:
   return ctx
 
 def expand_reduce(r:UOp):
-  range_srcs = []
-  new_axes = []
-  for u in r.src[1:]:
-    if u.op == Ops.RANGE:
-      range_srcs.append(u)
-    else:
-      for i,s in enumerate(u.shape):
-        if s > 1: new_axes.append(i)
+  range_srcs, expanded = partition(r.src[1:], lambda u: u.op is Ops.RANGE)
+  new_axes = [i for u in expanded for i,s in enumerate(u.shape) if s > 1]
   if len(new_axes) == 0: return None
   assert r.arg[1] == 0
   # permute so new_axes come to front, then reduce
@@ -90,12 +84,10 @@ def expand_broadcast(x:UOp):
   return x.replace(src=tuple([u.expand(shape) for u in x.src]))
 
 def broadcast_and_devec_wmma(b:UOp):
-  shapes = [u.shape[:-1] for u in b.src]
-  if not any(shapes): return None
-  shape = _broadcast_shape(*shapes)
+  if not (shape:=b.shape[:-1]): return None
   src_expanded = tuple([u.expand(shape+(u.shape[-1],)) for u in b.src])
   src = []
-  for idx in itertools.product(*[range(i) for i in b.shape[:-1]]):
+  for idx in itertools.product(*[range(i) for i in shape]):
     src.append(b.replace(src=tuple([x.index(*idx) for x in src_expanded])))
   return UOp.stack(*src).reshape(b.shape)
 
