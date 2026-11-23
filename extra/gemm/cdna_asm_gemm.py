@@ -3,7 +3,7 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
-from tinygrad.helpers import getenv, all_same, DEBUG, ceildiv
+from tinygrad.helpers import getenv, all_same, DEBUG
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
 
@@ -36,29 +36,22 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
 
 # ** MXFP4 GEMM custom kernel
 
-MXFP4_TILES = ((256, 256), (192, 256), (128, 512))
-MXFP4_TILE_MAP = {(6144, 4096, 16384):(192, 256), (16384, 4096, 6144):(128, 512), (16384, 6144, 4096):(128, 512)}
-
-def select_mxfp4_tile(a_q:Tensor, b_q:Tensor) -> tuple[int, int]:
-  a_shape, b_shape = a_q.uop.shard_shape, b_q.uop.shard_shape
-  M, N, K = math.prod(a_shape[:-1]), math.prod(b_shape[:-1]), a_shape[-1]*2
-  if (tile:=MXFP4_TILE_MAP.get((M, N, K))) is not None: return tile
-  return next((tile_m, tile_n) for tile_m, tile_n in MXFP4_TILES if M % tile_m == N % tile_n == 0)
-
 @functools.cache
-def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp, tile_m:int, tile_n:int) -> UOp:
+def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp, num_cu:int=256) -> UOp:
   from extra.gemm.gemm_mxfp4 import build_kernel
   M, half_k = math.prod(A.shape[:-1]), A.shape[-1]
   N, half_k_b = math.prod(B.shape[:-1]), B.shape[-1]
   K = half_k * 2
   assert half_k == half_k_b and math.prod(C.shape[:-1]) == M and C.shape[-1] == N
+  assert M % 256 == N % 256 == K % 256 == 0, f"MXFP4 GEMM requires multiples of 256, got {M=}, {N=}, {K=}"
+  assert max(M, N)*half_k < 2**32 and 256*N*C.dtype.itemsize < 2**31, "MXFP4 GEMM buffer offsets exceed 32 bits"
   threads = UOp.special(256, "lidx0")
-  groups_x, groups_y = UOp.special(ceildiv(N, tile_n), "gidx0"), UOp.special(ceildiv(M, tile_m), "gidx1")
-  lds = UOp.placeholder((163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
-  sink = UOp.sink(C.base, A.base, B.base, scale_a.base, scale_b.base, *(x.base for x in extra), lds, threads, groups_x, groups_y,
-                  arg=KernelInfo(f"mxfp4_gemm_{M}_{N}_{K}_{tile_m}x{tile_n}",
+  groups = UOp.special(min((M//256)*(N//256), num_cu), "gidx0")
+  lds = UOp.placeholder((135168,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  sink = UOp.sink(C.base, A.base, B.base, scale_a.base, scale_b.base, *(x.base for x in extra), lds, threads, groups,
+                  arg=KernelInfo(f"mxfp4_gemm_{M}_{N}_{K}",
                                  estimates=Estimates(ops=2*M*N*K, mem=(M*half_k+N*half_k)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
-  insts = build_kernel(M, N, K, tile_m, tile_n)
+  insts = build_kernel(M, N, K, num_cu)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in insts))))
 
 def _mxfp4_gemm_quantized(a_q:Tensor, b_q:Tensor, scale_a:Tensor, scale_b:Tensor) -> Tensor:
@@ -74,9 +67,7 @@ def _mxfp4_gemm_quantized(a_q:Tensor, b_q:Tensor, scale_a:Tensor, scale_b:Tensor
   elif b_q.uop.axis == 0:
     out = Tensor(Tensor.invalids(1, M, N//len(a_q.device), dtype=dtypes.bfloat16, device=a_q.device).uop.unshard(2), device=a_q.device)
   else: out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a_q.device)
-  tile_m, tile_n = select_mxfp4_tile(a_q, b_q)
-  out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b,
-                             fxn=functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n))[0]
+  out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b, fxn=custom_mxfp4_gemm)[0]
   if reduce_out: out = out.sum(0)
   return out.squeeze(0)
 
@@ -342,10 +333,8 @@ def asm_gemm(a:Tensor, b:Tensor, w_post_scale:Tensor|None=None, mx:bool=False, m
           _, _, a_col, scale_a_col = quantize_mxfp4(a, shuffle_col=True)
         assert a_col is not None and scale_a_col is not None
       b_q, scale_b, b_col, scale_b_col = quantize_mxfp4(w, shuffle_row=True, shuffle_col=True) if mxfp4_w is None else mxfp4_w
-      tile_m, tile_n = select_mxfp4_tile(a_q, b_q)
-      fxn = functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n)
       out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b, a, w,
-                                 a_col, scale_a_col, b_col, scale_b_col, fxn=fxn, grad_fxn=custom_mxfp4_gemm_bw)[0]
+                                 a_col, scale_a_col, b_col, scale_b_col, fxn=custom_mxfp4_gemm, grad_fxn=custom_mxfp4_gemm_bw)[0]
     elif mx:
       # mxfp8 1x32 block scaling
       if mx_scales is not None:

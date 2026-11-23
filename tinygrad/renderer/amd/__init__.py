@@ -1,5 +1,4 @@
 # Instruction format detection and decoding
-from __future__ import annotations
 from tinygrad.renderer.amd.dsl import Inst, FixedBitField, EnumBitField
 
 # SDWA/DPP variant detection: src0 field (bits 0-8) encodes the variant

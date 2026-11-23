@@ -5,8 +5,8 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
-from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod
-from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
+from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod, canonicalize_device_name
+from tinygrad.helpers import Context, cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
 from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.uop.ops import KernelInfo, AxisType
 from tinygrad.mixin.rand import RandMixin
@@ -281,7 +281,7 @@ class Tensor(RandMixin):
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
     fn, externs = self.export(*lst)
-    return map_back(create_linear(fn), externs)
+    return map_back(Tensor.compile(fn), externs)
 
   def schedule_linear(self, *lst:Tensor) -> UOp:
     """Creates the schedule needed to realize these Tensor(s)."""
@@ -290,12 +290,16 @@ class Tensor(RandMixin):
     return linear
 
   @staticmethod
+  @Context(ALLOW_DEVICE_USAGE=0)
+  def compile(fn:UOp) -> UOp:
+    """Schedule a function from `Tensor.export` without binding its externs."""
+    return create_linear(fn)
+
+  @staticmethod
   def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
     """Runs an exported function compiled to a LINEAR, its EXTERNs are the externs from `Tensor.export`."""
     linear, var_vals = map_back(linear, externs)
-    # a capturing jit runs its captured linears later
-    if capturing and CAPTURING: capturing[0].add_linear(linear, var_vals)
-    else: run_linear(linear, var_vals, update_stats=do_update_stats)
+    run_linear(linear, var_vals, update_stats=do_update_stats)
 
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
@@ -303,8 +307,9 @@ class Tensor(RandMixin):
     to_realize = [x for x in (self,)+lst if x.uop.base.needs_storage()]
     if len(to_realize):
       fn, externs = Tensor.export(*to_realize)
-      # a capturing jit plans the memory of its captured linears together
-      Tensor.run(create_linear(fn, plan=not (capturing and CAPTURING)), externs, do_update_stats=do_update_stats)
+      # a capturing jit compiles and runs its captured exports later
+      if capturing and CAPTURING: capturing[0].add_export(fn, externs)
+      else: Tensor.run(Tensor.compile(fn), externs, do_update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:
@@ -446,7 +451,7 @@ class Tensor(RandMixin):
     if self.uop.device is None: return self
     if not isinstance(self.device, str): raise RuntimeError("can't shard a multi-device tensor")
     if len(devices) == 1: return self.to(devices[0])
-    devices = cast(tuple[str, ...], canonicalize_device(devices))
+    devices = tuple(canonicalize_device_name(d) for d in devices)
     # a shard of a load from a creation device (disk/npy/python) wants the copy to persist, so it inserts a clone
     src = self.uop.clone(devices) if self.uop.on_creation_device() else self.uop
     uop = src.shard(devices, None if axis is None else self._resolve_dim(axis))
@@ -614,7 +619,7 @@ class Tensor(RandMixin):
     ref_frames = [x.contiguous() for x in ref_frames or []]
     assert frame_pos.is_bound_var, "frame_pos must be a bound Variable"
     srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
-    fn = UOp.native("encdec", frame_pos.unbound(), *[UOp.const(s) for s in shape])
+    fn = UOp.native("encdec", frame_pos.unbound().after(*[UOp.const(s) for s in shape]))
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
 P = ParamSpec("P")

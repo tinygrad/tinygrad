@@ -1,4 +1,3 @@
-from __future__ import annotations
 from typing import cast, Any, Sequence, Callable
 import itertools, ctypes, struct, time
 from dataclasses import replace, dataclass, field
@@ -178,8 +177,10 @@ pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
 
 def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   devs = [to_tuple(b.device)[0] for b in (dst, src)]
-  if not all(hasattr(Device[d], "iface") for d in devs) or Device[devs[0]].peer_group == Device[devs[1]].peer_group: return None # not 2 nodes
+  if Device[devs[0]].host == Device[devs[1]].host: return None # not 2 nodes
 
+  from tinygrad.runtime.support.system import PCIIfaceBase
+  if not all(isinstance(getattr(Device[d], "iface", None), PCIIfaceBase) for d in devs): return None
   from tinygrad.runtime.ops_rdma import rdma_nic_for
   if None in (nics:=[rdma_nic_for(Device[d], Device[min(devs)]) for d in devs]): return None
 

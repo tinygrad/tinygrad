@@ -1,7 +1,7 @@
 import itertools
 from tinygrad.helpers import dedup, get_single_element
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.renderer.x86 import ISARenderer, vdef, register_choices, reg, LinearContext
+from tinygrad.renderer.x86 import ISARenderer, vdef, register_choices, LinearContext
 
 # ops that participate in register allocation
 REGALLOC_OPS = {Ops.CALL, Ops.BUFFER, Ops.RANGE, Ops.END}
@@ -99,12 +99,12 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   nsrc = []
   for j,s in enumerate(x.src):
     # v here is the virtual defined by the original s as s is the rewritten version
-    if (v:=vdef(ctx.uops[i].src[j])) in ctx.reals.get(i, {}): nsrc.append(reg(s.dtype, ctx.reals[i][v]))
+    if (v:=vdef(ctx.uops[i].src[j])) in ctx.reals.get(i, {}): nsrc.append(ctx.reals[i][v].cast(s.dtype))
     else: nsrc.append(s)
   nx = x.replace(src=tuple(nsrc))
   if (defs:=ctx.defs[i]):
     r = tuple(ctx.reals[i][v] for v in defs)
-    nx = reg(nx.dtype, get_single_element(r)) if nx.op is Ops.BUFFER else UOp.ins(nx.body.arg.code, nx.src_without_body, nx.dtype, *r)
+    nx = get_single_element(r).cast(nx.dtype) if nx.op is Ops.BUFFER else UOp.ins(nx.body.arg.code, nx.src_without_body, nx.dtype, *r)
 
   before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), r) for v,r in ctx.insert_before.get(i, [])]
   after = [ctx.ren.spill(ctx.spills[v], nx) for v in defs if v in ctx.spills]

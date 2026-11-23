@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ, BEAM, CAPTURE_PROCESS_REPLAY
+from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap, VIZ, BEAM, CAPTURE_PROCESS_REPLAY, Target
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
@@ -699,15 +699,15 @@ class TestVizProfiler(unittest.TestCase):
     self.assertListEqual(list(j['layout']), ['NV', 'NV:SDMA:0', 'NV:1'])
 
   def test_multi_sdma_ordering(self):
-    props = {"gfx_target_version": 0}
+    target = Target("AMD")
     D, St, En = decimal.Decimal, decimal.Decimal(1000), decimal.Decimal(1010)
     prof = [# 2 AMD GPUs, 2 SDMA engines each
-            ProfileDeviceEvent(device='AMD', tdiff=D(-1000), props=props),
-            ProfileDeviceEvent(device='AMD:1', tdiff=D(-900), props=props),
-            ProfileDeviceEvent(device='AMD:SDMA:0', tdiff=D(-100), props=props),
-            ProfileDeviceEvent(device='AMD:SDMA:1', tdiff=D(-80), props=props),
-            ProfileDeviceEvent(device='AMD:1:SDMA:0', tdiff=D(-60), props=props),
-            ProfileDeviceEvent(device='AMD:1:SDMA:1', tdiff=D(-40), props=props),
+            ProfileDeviceEvent(device='AMD', tdiff=D(-1000), target=target),
+            ProfileDeviceEvent(device='AMD:1', tdiff=D(-900), target=target),
+            ProfileDeviceEvent(device='AMD:SDMA:0', tdiff=D(-100), target=target),
+            ProfileDeviceEvent(device='AMD:SDMA:1', tdiff=D(-80), target=target),
+            ProfileDeviceEvent(device='AMD:1:SDMA:0', tdiff=D(-60), target=target),
+            ProfileDeviceEvent(device='AMD:1:SDMA:1', tdiff=D(-40), target=target),
             # compute + copy events
             ProfileRangeEvent(device='AMD', name='E_1', st=St, en=En),
             ProfileRangeEvent(device='AMD:1', name='E_2', st=St, en=En),

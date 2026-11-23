@@ -182,6 +182,8 @@ class TestOps(TensorTestCase):
     helper_test_op([(3,3,3)], lambda x: x.unfold(2, 2, 8))
     helper_test_op([(3,3,3)], lambda x: x.unfold(1, 0, 8))
     helper_test_op([(3,3,3,3,3)], lambda x: x.unfold(-1, 2, 2))
+    helper_test_op([(0,)], lambda x: x.unfold(0, 0, 1))
+    helper_test_op([(2,0,3)], lambda x: x.unfold(1, 0, 5))
 
     self.helper_test_exception([(8,)], lambda x: x.unfold(0, 9, 3), expected=RuntimeError)
     self.helper_test_exception([(8,)], lambda x: x.unfold(1, 8, 3), expected=IndexError)
@@ -289,6 +291,10 @@ class TestOps(TensorTestCase):
   def test_where(self):
     helper_test_op([], lambda: torch.where(torch.tensor([True, False]), 1, 3).type(torch.int32),
                    lambda: Tensor([True, False]).where(1, 3).clone(), forward_only=True)
+    helper_test_op([], lambda: torch.where(torch.tensor([True, False]), 3., 0.1).eq(0.1),
+                   lambda: Tensor([True, False]).where(3., 0.1).eq(0.1), forward_only=True)
+    helper_test_op([], lambda: torch.where(torch.tensor([True, False]), torch.tensor(0.).half(), 0.3).float() > 0.30001,
+                   lambda: Tensor([True, False]).where(Tensor(0., dtype=dtypes.half), 0.3).float() > 0.30001, forward_only=True)
     helper_test_op(
       [(100,)],
       lambda x: torch.where(x > 0.5, 4, 2).type(torch.int32),
@@ -473,6 +479,9 @@ class TestOps(TensorTestCase):
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1, 2, 3], 1.2], forward_only=True)
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[True, False, False], 1.2], forward_only=True)
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[True, False, False], 3], forward_only=True)
+
+    helper_test_op([], lambda: torch.where(torch.tensor([True, False]), torch.tensor(-1.).half(), 0.).maximum(torch.tensor(1.0001)).float(),
+                   lambda: Tensor([True, False]).where(Tensor(-1., dtype=dtypes.half), 0.).maximum(1.0001).float(), forward_only=True)
 
   def test_minimum(self):
     helper_test_op([(45,65), (45,65)], torch.minimum, Tensor.minimum)

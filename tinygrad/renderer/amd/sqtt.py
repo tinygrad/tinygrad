@@ -4,7 +4,6 @@ This module provides encoding and decoding of raw SQTT byte streams.
 The format is nibble-based with variable-width packets determined by a state machine.
 Uses BitField infrastructure from dsl.py, similar to GPU instruction encoding.
 """
-from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterator
 from enum import Enum

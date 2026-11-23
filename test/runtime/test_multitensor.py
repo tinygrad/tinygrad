@@ -8,7 +8,7 @@ from tinygrad.engine.realize import run_linear, lower_and_compile, pm_beam
 from test.helpers import not_support_multi_device, needs_second_gpu, slow, check_schedule, assert_kernel_count, KernelCountException
 from hypothesis import given, strategies as strat, settings
 
-settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
+settings.register_profile("my_profile", max_examples=getenv("TEST_MAX_EXAMPLES", 200), deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
 def helper_test_shard_op(shps, fxn, atol=1e-6, rtol=1e-3):
