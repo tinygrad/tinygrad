@@ -2,12 +2,18 @@ import unittest
 from tinygrad.helpers import Target
 from tinygrad.uop.ops import UOp
 from tinygrad.dtype import dtypes
-from tinygrad.renderer.x86 import X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, reg
+from tinygrad.renderer.x86 import X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, reg, fold_address
 
 class TestEncodingsX86(unittest.TestCase):
   # NOTE: x86 supports a single displacement as memory address and index without base memory address
   # these have no use cases so they aren't supported
   def encode(self, u:UOp): return X86Renderer(Target(device="CPU", arch="x86_64")).render([u])
+
+  def test_large_offset(self):
+    base = reg(dtypes.u32, RDI)
+    address = fold_address(base.index(UOp.cconst(1 << 29, dtypes.i32)))
+    index = UOp.ins(X86Ops.MOVABS, (UOp.cconst(1 << 29, dtypes.u64),), dtypes.u64)
+    self.assertEqual(address, (base, index, UOp.cconst(0, dtypes.i8), UOp.cconst(4, dtypes.u32)))
 
   # displacement of 0 isn't emitted
   def test_base_address(self):
