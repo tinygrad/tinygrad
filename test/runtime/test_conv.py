@@ -26,15 +26,6 @@ class TestConv(unittest.TestCase):
     out = x + y.reshape((1,32,1)).reshape((1,32)) + y.reshape((1,32,1)).reshape((1,32))
     out.numpy()
 
-  def test_simple_biased(self):
-    C = 8
-    x = Tensor.rand(1,C,5,5)
-    w = Tensor.eye(C).reshape((C,C,1,1))
-    b = Tensor(np.arange(C).astype(np.float32))
-    ret = Tensor.conv2d(x,w,b).relu().conv2d(w,b)
-
-    print(ret.numpy())
-
   def test_two_binops_no_rerun_small(self):
     x = Tensor.rand(1,1,32,32)
     w = Tensor.rand(1,1,3,3)

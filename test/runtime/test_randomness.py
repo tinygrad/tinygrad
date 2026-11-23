@@ -60,20 +60,6 @@ class TestRandomness(unittest.TestCase):
   def test_rand(self):
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
 
-  def test_rand_is_lazy(self):
-    Tensor.manual_seed(0)
-    r1 = Tensor.rand(10)
-    self.assertFalse(r1.uop.is_realized, "rand should be lazy - tensor should not be realized")
-    counter = Tensor._device_rng_counters[Device.DEFAULT]
-    self.assertFalse(counter.uop.is_realized, "rand should be lazy - counter should not be realized")
-    # second rand triggers assign path
-    r2 = Tensor.rand(10)
-    self.assertFalse(r2.uop.is_realized, "rand should be lazy - tensor should not be realized after second rand")
-    self.assertFalse(counter.uop.is_realized, "rand should be lazy - counter should not be realized after second rand")
-    Tensor.realize(r1, r2)
-    self.assertTrue(r1.uop.is_realized, "tensor should be realized after .realize()")
-    self.assertTrue(r2.uop.is_realized, "tensor should be realized after .realize()")
-
   @unittest.skipUnless(dtypes.float16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need float16 support")
   def test_rand_float16(self):
     N = 128

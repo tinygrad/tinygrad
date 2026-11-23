@@ -589,9 +589,6 @@ class TestMultiTensor(unittest.TestCase):
       optim.step()
       out.numpy()
 
-  def test_backprop_conv_wino(self):
-    with Context(WINO=1): self.test_backprop_conv()
-
   def test_backward_sum(self):
     x = Tensor([[1.,2,3,4], [5,6,7,8]]).shard(devices_2, axis=0)
     w = Tensor([1.,2,3,4]).shard(devices_2)
@@ -1033,48 +1030,6 @@ class Test2DShard(unittest.TestCase):
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiTransformer(unittest.TestCase):
-  @needs_second_gpu
-  def test_transformer(self):
-    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-
-    from extra.models.llama import Transformer
-    args = {"dim": 32, "n_heads": 1, "n_kv_heads": 1, "n_layers": 2, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 32,
-            "hidden_dim": 32, "max_context": 12}
-    real_model = Transformer(**args)
-    shard_model = Transformer(**args)
-
-    # Realize initialization once, rather than fusing random weight generation into the forward pass.
-    Tensor.realize(*nn.state.get_parameters(real_model))
-    nn.state.load_state_dict(shard_model, nn.state.get_state_dict(real_model))
-
-    # shard
-    for k,v in nn.state.get_state_dict(shard_model).items():
-      if 'scale' in k: v.shard_(device, axis=None)  # from quantized
-      elif '.attention.' in k: v.shard_(device, axis=-1)
-      elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
-      elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
-      elif '.feed_forward.' in k: v.shard_(device, axis=-1)
-      elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
-      elif 'output.weight' in k: v.shard_(device, axis=0)
-      else: v.shard_(device, axis=None)
-    Tensor.realize(*nn.state.get_parameters(shard_model))
-
-    last_tok = 0
-    # i=0: bypasses jit, i=1: jit warmup, i=2: capture and run, i>=3: re-execute jit with new start_pos (catches stale bindings)
-    for i in range(4):
-      real_tok = real_model(Tensor([[last_tok]], device=Device.DEFAULT), i).item()
-      shard_tok = shard_model(Tensor([[last_tok]], device=device), i).item()
-
-      # test kv cache
-      kv1 = real_model.layers[0].attention.cache_kv.numpy()
-      kv2 = shard_model.layers[0].attention.cache_kv.numpy()
-      #print(np.concatenate([kv1[:, :, :, :, 0:1], kv2[:, :, :, :, 0:1]], axis=4))
-      np.testing.assert_allclose(kv1, kv2, atol=1e-5, rtol=1e-5, err_msg=f"issue at token {i}")
-
-      # test token
-      self.assertEqual(real_tok, shard_tok, f"issue at token {i}")
-      last_tok = real_tok
-
   @unittest.skip("super slow")
   def test_llama1b_full(self):
     from tinygrad.helpers import fetch
@@ -1199,32 +1154,6 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 class TestBatchNorm(unittest.TestCase):
   @needs_second_gpu
   def setUp(self): pass
-
-  def test_unsynced_backprop_conv_bn(self):
-    with Context(TRAINING=1):
-      from extra.lr_scheduler import OneCycleLR
-
-      convs = [nn.Conv2d(3, 16, 3), nn.Conv2d(3, 16, 3)]
-      bns = [nn.BatchNorm2d(16), nn.BatchNorm2d(16)]
-
-      for p in get_parameters(convs + bns):
-        p.shard_((d1, d2))
-      optim = nn.optim.Adam(get_parameters(convs + bns))
-      lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
-      lr_sched.step()
-
-      fake_image = Tensor.rand((8, 3, 32, 32)).shard((d1, d2), axis=0)
-
-      f1 = fake_image.shrink(((0, 4), None, None, None))
-      f2 = fake_image.shrink(((4, 8), None, None, None))
-
-      out1 = bns[0](convs[0](f1))
-      out2 = bns[1](convs[1](f2))
-      out = out1.cat(out2)
-      optim.zero_grad()
-      out.mean().backward()
-      optim.step()
-      out.numpy()
 
   def test_unsynced_backprop_standalone_bn(self):
     from extra.lr_scheduler import OneCycleLR

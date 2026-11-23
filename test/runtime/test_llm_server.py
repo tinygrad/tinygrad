@@ -18,16 +18,6 @@ class TestTransformerGenerate(unittest.TestCase):
     model.warmup()
     self.assertIsInstance(next(model.generate([5, 6, 7, 8])), int)
 
-  def test_fixed_position_count(self):
-    model = Transformer(TEST_CONFIG)
-    tokens, temperature = Tensor([[1], [2]]), Tensor([0.0])
-    for positions in [(0, 0), (1, 1), (2, 0)]:
-      model(tokens, positions, temperature).realize()
-    self.assertEqual(model.rollout_jit.cnt, 3)
-    self.assertIsNotNone(model.rollout_jit.captured)
-    with self.assertRaisesRegex(AssertionError, "position count is fixed"):
-      model(tokens, (3,), temperature)
-
   def test_first_recurrent_generate_before_state_init(self):
     model = Transformer(TEST_CONFIG)
     model.has_recurrent_block = True

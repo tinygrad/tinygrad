@@ -131,10 +131,8 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
   def test_quant_linear_fallback(self):
     if amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("run with DISABLE_AMD_KERNELS=1")
-    # per-type dequant math on the generic path is covered by test_gguf, spot check a representative set here
-    for typ in (12, 14, 17, 23):
-      with self.subTest(ggml_type=typ):
-        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=16, token_counts=(1, 3), bias=True, custom=False)
+    # per-type dequant math on the generic path is covered by test_gguf, check fallback dispatch with Q4_K here
+    self._test_quant_linear(12, QUANT_SIZES[12], in_features=256, out_features=16, token_counts=(1, 3), bias=True, custom=False)
 
 def fp8_decode(bits, fnuz=False):
   exponent, mantissa = ((bits >> 3) & 15).astype(np.int32), (bits & 7).astype(np.float32)

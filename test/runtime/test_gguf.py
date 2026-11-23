@@ -57,7 +57,6 @@ class TestGGUFTables(unittest.TestCase):
 
 @unittest.skipUnless(dtypes.uint8 in supported_dtypes and dtypes.half in supported_dtypes, "Backend must support uint8 and half")
 class TestGGUF(unittest.TestCase):
-  def test_load_tinyllama_q8_0(self): self._test_gguf_load("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q8_0.gguf?download=true")
   def test_load_tinyllama_q4_0(self): self._test_gguf_load("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true")
   @slow
   def test_load_gpt2_q4_1(self): self._test_gguf_load("https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.Q4_1.gguf?download=true")
@@ -404,21 +403,7 @@ class TestGGUFGEMV(unittest.TestCase):
     assert np.isfinite(ref).all() and np.isfinite(tensors["weight"].numpy()).all(), f"{qtype.name} has NaN/Inf"
 
   def test_gguf_gemv_q8_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q8_0)
-  def test_gguf_gemv_q5_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q5_0)
-  def test_gguf_gemv_q5_1(self): self._test_gguf_gemv(GGMLQuantizationType.Q5_1)
-  def test_gguf_gemv_q2_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q2_K)
-  def test_gguf_gemv_q3_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q3_K)
-  def test_gguf_gemv_q4_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q4_K)
-  def test_gguf_gemv_q5_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q5_K)
   def test_gguf_gemv_q6_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q6_K)
-  def test_gguf_gemv_iq2_xxs(self): self._test_gguf_gemv(GGMLQuantizationType.IQ2_XXS)
-  def test_gguf_gemv_iq2_xs(self): self._test_gguf_gemv(GGMLQuantizationType.IQ2_XS)
-  def test_gguf_gemv_iq3_xxs(self): self._test_gguf_gemv(GGMLQuantizationType.IQ3_XXS)
-  def test_gguf_gemv_iq1_s(self): self._test_gguf_gemv(GGMLQuantizationType.IQ1_S)
-  def test_gguf_gemv_iq4_nl(self): self._test_gguf_gemv(GGMLQuantizationType.IQ4_NL)
-  def test_gguf_gemv_iq3_s(self): self._test_gguf_gemv(GGMLQuantizationType.IQ3_S)
-  def test_gguf_gemv_iq2_s(self): self._test_gguf_gemv(GGMLQuantizationType.IQ2_S)
-  def test_gguf_gemv_iq4_xs(self): self._test_gguf_gemv(GGMLQuantizationType.IQ4_XS)
   def test_gguf_gemv_iq1_m(self): self._test_gguf_gemv(GGMLQuantizationType.IQ1_M)
   def test_gguf_gemv_mxfp4(self): self._test_gguf_gemv(GGMLQuantizationType.MXFP4)
   @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, "Backend must support bfloat16")

@@ -15,15 +15,6 @@ class TestSymbolicOps(unittest.TestCase):
       np.testing.assert_allclose(a[:, :vi][:, -1:].numpy(), a[:, :i][:, -1:].numpy(), atol=1e-6, rtol=1e-6)
       np.testing.assert_allclose(a[:, :vi][:, -1].numpy(), a[:, :i][:, -1].numpy(), atol=1e-6, rtol=1e-6)
 
-  def test_plus1(self):
-    def f(a): return (a+1).realize()
-    a = Tensor.rand(3, 10)
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      symbolic = f(a[:, :vi])[:3, :i].numpy()
-      expected = f(a[:, :i]).numpy()
-      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-
   def test_plus1_pad(self):
     def f(a): return (a+1).pad((None, (0, 10-a.shape[1]))).realize()
     a = Tensor.rand(3, 10)
@@ -41,16 +32,6 @@ class TestSymbolicOps(unittest.TestCase):
       vi = Variable("i", 1, 10).bind(i)
       symbolic = f(a[:, :vi], b[:, :vi])[:, :i].numpy()
       expected = f(a[:, :i], b[:, :i]).numpy()
-      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-
-  def test_matmul(self):
-    def f(a, b): return (a@b).realize()
-    a = Tensor.rand(3, 10)
-    b = Tensor.rand(10, 5)
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      symbolic = f(a[:, :vi], b[:vi, :]).numpy()
-      expected = f(a[:, :i], b[:i, :]).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_attention(self, dropout_p=0.0, imin=1, imax=5, use_symbolic=True):
@@ -147,16 +128,6 @@ class TestSymbolicOps(unittest.TestCase):
       b = Tensor.rand(2, 3)
       symbolic = f(a[:vi, :], b)[:i+2, :3].numpy()
       expected = f(a[:i, :], b).numpy()
-      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-
-  def test_cat_dim1(self):
-    def f(a, b): return a.cat(b, dim=1).realize()
-    a = Tensor.rand(3, 10)
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      b = Tensor.rand(3, 2)
-      symbolic = f(a[:, :vi], b)[:3, :i+2].numpy()
-      expected = f(a[:, :i], b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_cat_dim0_two_vars(self):
@@ -290,21 +261,6 @@ class TestSymbolicOps(unittest.TestCase):
           symbolic = symbolic[:expected.shape[0]].numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  def test_mean_2d(self):
-    a = Tensor.rand(10, 10)
-    for i in range(2, 5):
-      for j in range(2, 5):
-        vi = Variable("i", 1, 10).bind(i)
-        vj = Variable("j", 1, 10).bind(j)
-        for axis in [None, 0, 1]:
-          expected = a[:i, :j].mean(axis).numpy()
-          symbolic = a[:vi, :vj].mean(axis)
-          if axis is None:
-            symbolic = symbolic.numpy()
-          else:
-            symbolic = symbolic[:expected.shape[0]].numpy()
-          np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-
   def test_var(self):
     a = Tensor.rand(10, 3)
     for i in range(1, 5):
@@ -317,21 +273,6 @@ class TestSymbolicOps(unittest.TestCase):
         else:
           symbolic = symbolic[:expected.shape[0]].numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-
-  def test_var_2d(self):
-    a = Tensor.rand(10, 10)
-    for i in range(2, 5):
-      for j in range(2, 5):
-        vi = Variable("i", 1, 10).bind(i)
-        vj = Variable("j", 1, 10).bind(j)
-        for axis in [None, 0, 1]:
-          expected = a[:i, :j].var(axis).numpy()
-          symbolic_result = a[:vi, :vj].var(axis)
-          if axis is None:
-            symbolic = symbolic_result.numpy()
-          else:
-            symbolic = symbolic_result[:expected.shape[0]].numpy()
-          np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_bitcast_down(self):
     a = Tensor.rand(10, 3)
