@@ -4,7 +4,7 @@ import argparse, ctypes, struct, hashlib, pickle, code, typing, functools
 import tinygrad.runtime.autogen.sqtt as sqtt
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
-from tinygrad.helpers import round_up, flatten, all_same, temp
+from tinygrad.helpers import round_up, flatten, all_same, temp, unwrap
 from dataclasses import dataclass
 
 CHUNK_CLASSES = {
@@ -155,7 +155,7 @@ class RGP:
       if device not in device_events: raise RuntimeError(f"Device {device} not found in profile, devices in profile: {', '.join(device_events.keys())} ")
       device_event = device_events[device]
     sqtt_events = [x for x in profile if isinstance(x, ProfileSQTTEvent) and x.device == device_event.device]
-    device_props = device_event.props
+    target = unwrap(device_event.target)
     # merge events per SE
     merged_sqtt_events:dict[int, ProfileSQTTEvent] = {}
     for ev in sqtt_events:
@@ -172,9 +172,8 @@ class RGP:
     sqtt_events = list(merged_sqtt_events.values())
 
     if len(sqtt_events) == 0: raise RuntimeError(f"Device {device_event.device} doesn't contain SQTT data")
-    gfx_ver = device_props['gfx_target_version'] // 10000
-    gfx_iplvl = getattr(sqtt, f"SQTT_GFXIP_LEVEL_GFXIP_{device_props['gfx_target_version']//10000}_{(device_props['gfx_target_version']//100)%100}",
-                        getattr(sqtt, f"SQTT_GFXIP_LEVEL_GFXIP_{device_props['gfx_target_version']//10000}", None))
+    gfx_ver, gfx_minor, _ = map(int, target.get("gc").split("."))
+    gfx_iplvl = getattr(sqtt, f"SQTT_GFXIP_LEVEL_GFXIP_{gfx_ver}_{gfx_minor}", getattr(sqtt, f"SQTT_GFXIP_LEVEL_GFXIP_{gfx_ver}", None))
     sqtt_itrace_enabled = any([event.itrace for event in sqtt_events])
     sqtt_itrace_masked = not all_same([event.itrace for event in sqtt_events])
     sqtt_itrace_se_mask = functools.reduce(lambda a,b: a|b, [int(event.itrace) << event.se for event in sqtt_events], 0) if sqtt_itrace_masked else 0
@@ -210,14 +209,14 @@ class RGP:
         flags=0,
         trace_shader_core_clock=0x93f05080,
         trace_memory_clock=0x4a723a40,
-        device_id={110000: 0x744c, 110003: 0x7480, 120001: 0x7550, 120000: 0x7550}[device_props['gfx_target_version']],
+        device_id={"gfx1100": 0x744c, "gfx1103": 0x7480, "gfx1201": 0x7550, "gfx1200": 0x7550}[target.arch],
         device_revision_id=0xc8,
         vgprs_per_simd=1536,
         sgprs_per_simd=128*16,
-        shader_engines=device_props['array_count'] // device_props['simd_arrays_per_engine'],
-        compute_unit_per_shader_engine=device_props['simd_count'] // device_props['simd_per_cu'] // (device_props['array_count'] // device_props['simd_arrays_per_engine']),
-        simd_per_compute_unit=device_props['simd_per_cu'],
-        wavefronts_per_simd=device_props['max_waves_per_simd'],
+        shader_engines=target.get("se", 0) * target.get("xccs", 1),
+        compute_unit_per_shader_engine=target.get("cu", 0) // target.get("se", 1),
+        simd_per_compute_unit=2,
+        wavefronts_per_simd=16,
         minimum_vgpr_alloc=4,
         vgpr_alloc_granularity=8,
         minimum_sgpr_alloc=128,
@@ -236,7 +235,7 @@ class RGP:
         vram_bus_width=384, # 384-bit
         l2_cache_size=6 * 1024 * 1024, # 6 MB
         l1_cache_size=32 * 1024, # 32 KB per SIMD (?)
-        lds_size=device_props['lds_size_in_kb'] * 1024,
+        lds_size=64 * 1024,
         gpu_name=b'NAVI31',
         alu_per_clock=0,
         texture_per_clock=0,

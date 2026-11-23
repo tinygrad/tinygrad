@@ -173,7 +173,7 @@ if __name__ == "__main__":
     devs = {e.device: e for e in data if type(e).__name__ == "ProfileDeviceEvent"}
     dumps = []
     for i, e in enumerate(e for e in data if type(e).__name__ == "ProfilePMAEvent"):
-      dumps.append((i, e.blob, devs[e.device].props.get('sm_version', 0x800)))
+      dumps.append((i, e.blob, devs[e.device].target.get('sm_version', 0x800)))
 
   for dump_idx, raw, sm_ver in dumps:
     print(f"\n{'='*60}\nDump {dump_idx} ({len(raw)} bytes, {len(raw)//32} packets)\n{'='*60}")

@@ -607,7 +607,7 @@ class NVDevice(Compiled):
     # Set windows addresses to not collide with other allocated buffers.
     self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
-    super().__init__(device, NVAllocator(self), None, arch=self.arch)
+    super().__init__(device, NVAllocator(self), None, arch=self.arch, props={"sm_version": self.sm_version})
 
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 
@@ -835,4 +835,3 @@ class NVDevice(Compiled):
       nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS(bytesConsumed=params.bytesAvailable))
     return pma_data
 
-  def device_props(self) -> dict[str, Any]: return {'arch': self.arch, 'sm_version': self.sm_version}
