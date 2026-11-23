@@ -219,12 +219,9 @@ class Target:
       (iface, indices), s = ((iface_split[0], iface_split[1]) if len(iface_split:=split[0].rsplit(":", 1)) == 2 else (split[0], ""), split[1])
     elif len(split) > 2: raise RuntimeError(f"too many '+' in target string: {s!r}")
     else: iface, indices = "", ""
-    match [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]:
-      case [dev, ren, arch, props]: return Target(dev, ren, arch, iface, indices, props)
-      case [dev, ren, arch]: return Target(dev, ren, arch, iface, indices)
-      case [dev, ren]: return Target(dev, ren, interface=iface, indices=indices)
-      case [dev]: return Target(dev, interface=iface, indices=indices)
-      case _: raise RuntimeError(f"too many ':' in target string: {s!r}")
+    if len(parts:=s.split(':')) > 4: raise RuntimeError(f"too many ':' in target string: {s!r}")
+    dev, ren, arch, props = parts + [""]*(4-len(parts))
+    return Target(dev.upper(), ren.upper(), arch, iface, indices, props)
   def __repr__(self):
     fst, snd = ":".join([self.interface, self.indices]).rstrip(":"), ":".join([self.device, self.renderer, self.arch, self.props]).rstrip(":")
     return (fst + "+" if fst else "") + snd
