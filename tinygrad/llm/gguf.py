@@ -25,7 +25,7 @@ _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtype
 _GGML_QUANT = {2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
                10:(256,84), 11:(256,110), 12:(256,144), 13:(256,176), 14:(256,210),
                16:(256,66), 17:(256,74), 18:(256,98), 19:(256,50), 20:(32,18), 21:(256,110), 22:(256,82), 23:(256,136),
-               29:(256,56), 39:(32,17), 41:(128,18)}
+               29:(256,56), 39:(32,17), 40:(64,36), 41:(128,18)}
 
 def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """
@@ -36,7 +36,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q5_0 (id: 6),
   Q5_1 (id: 7), Q8_0 (id: 8), Q2_K (id: 10), Q3_K (id: 11), Q4_K (id: 12), Q5_K (id: 13),
   Q6_K (id: 14), IQ2_XXS (id: 16), IQ2_XS (id: 17), IQ3_XXS (id: 18), IQ1_S (id: 19),
-  IQ4_NL (id: 20), IQ3_S (id: 21), IQ2_S (id: 22), IQ4_XS (id: 23), IQ1_M (id: 29), MXFP4 (id: 39), Q1_0 (id: 41)
+  IQ4_NL (id: 20), IQ3_S (id: 21), IQ2_S (id: 22), IQ4_XS (id: 23), IQ1_M (id: 29), MXFP4 (id: 39), NVFP4 (id: 40), Q1_0 (id: 41)
   """
   # https://github.com/ggerganov/ggml/blob/323951f1bdcdfbd5b5ff3a9a7c3770e63b1a560e/include/ggml.h#L356
 
@@ -174,10 +174,14 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       small_bits = Tensor.const((0x00200000, 0x00400000), dtypes.uint32).to(t.device, force=True)[e.clip(0, 1).cast(dtypes.int32)] # e < 2
       d = (e < 2).where(small_bits, (e - 1) * 0x00800000).bitcast(dtypes.float32).unsqueeze(-1)
       codes = q_to_uint8(blocks[:, 1:17], 4)
-      fp4_lut = Tensor.const((0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0,
-                             -0.0,-1.0,-2.0,-3.0,-4.0,-6.0,-8.0,-12.0), dtypes.float32).to(t.device, force=True)
-      fp4_val = fp4_lut[codes]
+      fp4_val = Tensor.const(_ggml.kvalues_mxfp4, dtypes.float32).to(t.device, force=True)[codes]
       return (fp4_val * d).flatten(-2)[:n]
+    if ggml_type == 40:
+      e = blocks[:, :4].cast(dtypes.uint32).unsqueeze(-1)
+      normal = (((e >> 3 & 0xF) + 119) << 23 | (e & 7) << 20).bitcast(dtypes.float32)
+      d = (e == 0x7F).where(0, (e & 0x78 == 0).where((e & 7).cast(dtypes.float32) * 2**-10, normal))
+      fp4_lut = Tensor.const(_ggml.kvalues_mxfp4, dtypes.float32).to(t.device, force=True)
+      return (d * fp4_lut[q_to_uint8(blocks[:, 4:].reshape(-1, 4, 8), 4)]).flatten(-2)
     if ggml_type == 41:
       d = blocks[:,:2].bitcast(dtypes.float16)
       bits = q_to_uint8(blocks[:,2:], 1).reshape(-1, 8, 16).transpose(-1, -2).flatten(-2).bitcast(dtypes.int8)
