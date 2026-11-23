@@ -178,7 +178,7 @@ pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
 
 def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   devs = [to_tuple(b.device)[0] for b in (dst, src)]
-  if host_of(peer_group(devs[0])) == host_of(peer_group(devs[1])): return None # not 2 nodes
+  if host_of(devs[0]) == host_of(devs[1]): return None # not 2 nodes
 
   from tinygrad.runtime.support.system import PCIIfaceBase
   if not all(isinstance(getattr(Device[d], "iface", None), PCIIfaceBase) for d in devs): return None
@@ -197,9 +197,9 @@ def stage_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   device = enqueued[0]
 
   from tinygrad.runtime.ops_disk import is_disk_read
-  host, usb_memcpys = host_of(peer:=peer_group(device)), is_iface_usb(device)
+  host, peer, usb_memcpys = host_of(device), peer_group(device), is_iface_usb(device)
   mappable = {"CPU", "PYTHON"} | ({"NPY", "DISK"} if usb_memcpys else {"DISK"} if is_disk_read(call) else set()) # ops_disk stages it in the batch
-  if device != host and not all(peer_group(d) == peer or (d.split(":")[0] in mappable and host_of(peer_group(d)) == host) for d in devs):
+  if device != host and not all(peer_group(d) == peer or (d.split(":")[0] in mappable and host_of(d) == host) for d in devs):
     stage = UOp.alloc(src.max_shape, src.dtype, int.from_bytes(call.key[:8], "little"), device=host)
     return UOp(Ops.LINEAR, src=(stage.store_call(src), dst.store_call(stage)))
 
