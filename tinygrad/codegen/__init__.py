@@ -10,7 +10,7 @@ from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.uir import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates, TinyELF
-from tinygrad.renderer.x86 import ISARenderer, IselContext
+from tinygrad.renderer.x86 import ISARenderer, IselContext, pm_remove_native
 from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
@@ -511,6 +511,11 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
       slots = itertools.count(min([0]+[u.arg.slot for u in full_sink.toposort() if u.op is Ops.BUFFER])-1, -1)
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=slots, name="pre instruction selection", bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(), name="instruction selection", bottom_up=True)
+      if getattr(renderer, "emulate", False):
+        from tinygrad.renderer.cstyle import ClangRenderer
+        full_sink = graph_rewrite(full_sink, pm_remove_native, ctx=itertools.count(-1, -1), name="remove native", bottom_up=True)
+        host_renderer = ClangRenderer(replace(renderer.target, device="CPU", renderer="", interface=""))
+        return to_program(full_sink, host_renderer)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))

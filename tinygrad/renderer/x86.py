@@ -1,6 +1,7 @@
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
 import struct, functools, itertools
+from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype, uopfunc
@@ -291,7 +292,7 @@ def lea(x:UOp) -> UOp: return UOp.ins(X86Ops.LEA, fold_address(x), dtypes.uint64
 
 @uopfunc
 def load_native(opcode:str, base:UOp, index:UOp, displacement:UOp, scale:UOp) -> UOp:
-  target = base.index(index + displacement // scale)
+  target = base.index((index + displacement // scale).cast(dtypes.int64))
   return UOp.native(X86Ops[opcode], target.load())
 
 @uopfunc
@@ -300,8 +301,14 @@ def add_native(a:UOp, b:UOp) -> UOp:
 
 @uopfunc
 def store_native(opcode:str, base:UOp, index:UOp, displacement:UOp, scale:UOp, value:UOp, lane:UOp|None=None) -> UOp:
-  target = base.index(index + displacement // scale).expand(value.shape)
+  target = base.index((index + displacement // scale).cast(dtypes.int64)).expand(value.shape)
   return UOp.native(X86Ops[opcode], target.store(value))
+
+pm_remove_native = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.NATIVE, name="native"),), allow_any_len=True, name="call"),
+   lambda call,native: call.replace(src=(UOp.sink(native.src[0]), *call.src[1:]),
+                                    arg=replace(call.arg, name=native.arg.code.name.lower()))),
+])
 
 GPR_DEST_OPS = {X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI, X86Ops.VMOVDm, X86Ops.VMOVQm}
 XMM_OPS = {op for op in X86Ops if op.name.startswith('V')} - GPR_DEST_OPS
@@ -455,10 +462,10 @@ isel_matcher = PatternMatcher([
   # load, store
   (UPat(Ops.LOAD, dtypes.floats, src=(UPat(name="a"),), name="x"), lambda x,a: None if a.addrspace is AddrSpace.REG else
    UOp.ins(X86Ops.VPINSRW, (UOp(Ops.NOOP),) + fold_address(a) + (UOp.cconst(0, dtypes.u8),), x.dtype) if x.max_numel() * x.dtype.itemsize == 2 else
-   load_native(_xmm_sz(x).name, *fold_address(a)) if a.op is Ops.INDEX and a.src[0].max_numel() == x.max_numel() == 1 else
+   load_native(_xmm_sz(x).name, *fold_address(a)) if a.op in (Ops.INDEX, Ops.SHRINK) and x.max_numel() == 1 else
    UOp.ins(_xmm_sz(x), fold_address(a), x.dtype)),
   (UPat(Ops.LOAD, dtypes.ints+(dtypes.bool,), src=(UPat(name="a"),), name="x"), lambda x,a: None if a.addrspace is AddrSpace.REG else
-   load_native(X86Ops.MOV.name, *fold_address(a)) if a.op is Ops.INDEX and a.src[0].max_numel() == x.max_numel() == 1 else
+   load_native(X86Ops.MOV.name, *fold_address(a)) if a.op in (Ops.INDEX, Ops.SHRINK) and x.max_numel() == 1 else
    UOp.ins(X86Ops.MOV if x.max_numel() == 1 else _xmm_sz(x), fold_address(a), x.dtype)),
   (UPat.var("a").store(UPat.var("b", dtypes.floats)), lambda a,b: None if a.addrspace is AddrSpace.REG else
    store_native("VPEXTRW", *fold_address(a), b, UOp.cconst(0, dtypes.u8)) if b.max_numel() * b.dtype.itemsize == 2 else
@@ -707,8 +714,10 @@ class X86Renderer(ISARenderer):
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPNE)}
   linear_ctx_type = X86LinearContext
   def __init__(self, target:Target):
-    if target.arch.split(",")[0] != "x86_64": raise RuntimeError(f"X86Renderer only supports x86_64, got {target.arch}")
+    self.emulate = target.interface == "MOCK"
+    if not self.emulate and target.arch.split(",")[0] != "x86_64": raise RuntimeError(f"X86Renderer only supports x86_64, got {target.arch}")
     super().__init__(target)
+    if self.emulate: self.isel_matcher = PatternMatcher(isel_matcher.patterns[:-1])
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
   def is_two_address(self, x:UOp) -> bool: return x.op is Ops.CALL and x.body.arg.code in X86GroupOp.TwoAddress

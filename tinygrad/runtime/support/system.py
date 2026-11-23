@@ -479,4 +479,4 @@ class RemotePCIDevice(PCIDevice):
     _, sz, host_va = self._bar(bar)
     return RemoteMMIOInterface(self, bar, host_va + off, size or (sz - off), fmt, off=off)
 
-if DEV.interface.startswith("MOCK"): from test.mockgpu.mockgpu import MockFileIOInterface as FileIOInterface  # noqa: F401 # pylint: disable=unused-import
+if DEV.interface.startswith("MOCK") and DEV.device != "CPU": from test.mockgpu.mockgpu import MockFileIOInterface as FileIOInterface  # noqa: F401,E501 # pylint: disable=unused-import
