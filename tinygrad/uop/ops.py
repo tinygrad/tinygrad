@@ -220,12 +220,12 @@ class _UOpTuple(tuple):
   def __ne__(self, other): return self is not other
 
 # we import this late so we can use resolve/smax in mixins
-from tinygrad.mixin.rand import RandMixin
+from tinygrad.mixin import Mixin
 from tinygrad.mixin.elementwise import ElementwiseMixin
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
-class UOp(RandMixin, metaclass=UOpMetaClass):
+class UOp(Mixin, metaclass=UOpMetaClass):
   op:Ops
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
@@ -1426,7 +1426,7 @@ def get_location() -> tuple[str, int]:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 
-class UPat(RandMixin):
+class UPat(Mixin):
   __slots__ = ("op", "match_dtype", "arg", "name", "src", "is_any")
   def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,

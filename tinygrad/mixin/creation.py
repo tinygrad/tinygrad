@@ -1,13 +1,12 @@
 from typing import TYPE_CHECKING, Callable, Self
 from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, dtypes, to_dtype
 from tinygrad.helpers import argfix, canonicalize_device
-from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.movement import MovementMixin
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import sint, UOp
 
-class CreationMixin(DTypeMixin, MovementMixin):
+class CreationMixin(MovementMixin):
   @staticmethod
   def const(b, dtype=None): raise NotImplementedError
 
