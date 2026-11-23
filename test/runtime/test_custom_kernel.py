@@ -43,6 +43,10 @@ def custom_add_var_kernel(*srcs:UOp, n_slot:int) -> UOp:
   out = functools.reduce(lambda a,b: a+b, [B[i] for B in Bs]) + srcs[n_slot]
   return C[i].store(out).end(i).sink(arg=KernelInfo(name=f"add_var_{n_slot}_{len(Bs)}"))
 
+def custom_add_nm_kernel(n:UOp, C:UOp, B:UOp, m:UOp) -> UOp:
+  i = UOp.range(C.numel(), 0)
+  return C[i].store(B[i] + n + m).end(i).sink(arg=KernelInfo(name="add_nm"))
+
 def run_kernel_args(out:Tensor, name:str) -> list[str|None]:
   linear, var_vals = out.linear_with_vars()
   sink = [u for u in linear.toposort(enter_calls=True) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) and u.arg.name == name][0]
@@ -677,6 +681,13 @@ class TestCustomKernelArgs(unittest.TestCase):
       return Tensor.custom_kernel(Tensor(n), Tensor.empty(4, dtype=dtypes.int), Bm, fxn=kernel)[1].realize()
     jf, B, n = TinyJit(f), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(), Variable("n", 0, 100, dtypes.int)
     for k in range(1, 6): self.assertEqual(jf(B, n.bind(k)).tolist(), [11+k, 12+k, 13+k, 14+k])
+
+  def test_scalar_arg_twice(self):
+    # the same var passed twice is one kernel param, not two params with the same name
+    n, B = Tensor(Variable("n", 0, 100, dtypes.int).bind(3)), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    out = Tensor.custom_kernel(n, Tensor.empty(4, dtype=dtypes.int), B, n, fxn=custom_add_nm_kernel)[1]
+    self.assertEqual(run_kernel_args(out, "add_nm"), ["n", None, None])
+    self.assertEqual(out.tolist(), [7, 8, 9, 10])
 
   def test_variable_arg_is_not_copy(self):
     # a buffer and a Variable aren't a copy kernel, so the ranges merge in codegen after the split, and SPLIT sees one axis of 8
