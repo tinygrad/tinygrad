@@ -6,7 +6,7 @@ import importlib, inspect, functools, itertools, pathlib, os, contextlib, atexit
 from tinygrad.helpers import mv_address, LRU, getenv, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, perf_counter_us, HCQ_RUNTIME_DEV, is_disk_device, canonicalize_device_name, Target
+from tinygrad.helpers import cpu_profile, perf_counter_us, HCQ_RUNTIME_DEV, is_disk_device, canonicalize_device_name, Target, to_tuple
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.renderer import Renderer
@@ -24,7 +24,7 @@ UVM_DEVS = frozenset(("QCOM", "METAL", "CL")) # cl uses host memcpys
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
-    self._opened_devices:set[str] = set()
+    self._opened_devices:dict[str, Compiled] = {}
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
   def canonicalize(self, device:str|None) -> str: return canonicalize_device_name(device if device is not None else Device.DEFAULT)
   def __getitem__(self, ix:str) -> Compiled:
@@ -38,10 +38,15 @@ class _Device:
     return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{base}.runtime.ops_{x}')) if (cname.lower() == x + "device")][0]
   @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
-    ret = self.get_class(ix)(ix)
-    if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
-    self._opened_devices.add(ix)
+    self._opened_devices[ix] = ret = self.get_class(ix)(ix)
+    if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()} as DEV={self.target_for(ix)}")
     return ret
+  def target_for(self, device:str, cv=DEV) -> Target:
+    if not (t:=cv.target(device.split(':')[0])).arch and device not in self._opened_devices: self[device]
+    if (d:=self._opened_devices.get(device)) is None: return t
+    iface = type(d.iface).__name__[:-5] if hasattr(d, "iface") else ""
+    return replace(t, arch=t.arch or d.arch or "", interface=t.interface or iface, props=",".join(f"{k}={v}" for k, v in (d.props | t.opts).items()))
+  def renderer_for(self, device:str, cv=DEV) -> Renderer: return select_renderer(cv.target((t:=self.target_for(device, cv)).device, arch=t.arch))
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
   def get_available_devices(self) -> Iterator[str]:
@@ -62,11 +67,12 @@ class _Device:
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device: _Device = _Device()
 atexit.register(lambda: [Device[dn].finalize() for dn in tuple(Device._opened_devices)])
+def is_iface_usb(dev:str|tuple[str, ...]) -> bool: return Device.target_for(Device.canonicalize(to_tuple(dev)[0])).interface.endswith("USB")
 
 # **************** Profile ****************
 
 @dataclass(frozen=True)
-class ProfileDeviceEvent(ProfileEvent): device:str; tdiff:decimal.Decimal=decimal.Decimal(0); props:dict[str,Any]|None=None # noqa: E702
+class ProfileDeviceEvent(ProfileEvent): device:str; tdiff:decimal.Decimal=decimal.Decimal(0); target:Target|None=None # noqa: E702
 
 @dataclass(frozen=True)
 class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; base:int|None; tag:int|None=None; profile_key:bytes|None=None # noqa: E702
@@ -348,9 +354,9 @@ class Compiled:
   pm_link:PatternMatcher
   link_bufs:dict[str, Buffer|Callable[..., Buffer]] = {}
 
-  def __init__(self, device:str, allocator:Allocator, runtime:type[Program[Self]]|None, arch=None):
+  def __init__(self, device:str, allocator:Allocator, runtime:type[Program[Self]]|None, arch=None, props:dict[str, Any]|None=None):
     self.device, self.allocator, self.runtime_t = device, allocator, runtime
-    self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
+    self.device_id, self.arch, self.props = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch, props or {}
     self.peer_group = getattr(getattr(self, 'iface', None), 'peer_group', device.split(":")[0])
 
     # profiling
@@ -363,7 +369,7 @@ class Compiled:
   def host(self) -> str: return f"CPU:{self.peer_group[7:]}" if self.peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.device
 
   @property
-  def renderer(self) -> Renderer: return self._select_renderer()
+  def renderer(self) -> Renderer: return Device.renderer_for(self.device)
 
   @property
   def compiler(self) -> Compiler: return self.renderer.compiler
@@ -405,8 +411,6 @@ class Compiled:
   def on_sleep(self):
     if (iface:=getattr(self, "iface", None)) is not None and hasattr(iface, "sleep"): iface.sleep(self.sleep_timeout_ms)
 
-  def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
-
   def finalize(self):
     """
     Called at the end of process lifetime to allow the device to finalize.
@@ -416,10 +420,6 @@ class Compiled:
     if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
 
   # helpers
-
-  def _select_renderer(self, cv=DEV) -> Renderer:
-    # the opened device fills in its arch
-    return select_renderer(cv.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {})))
 
   def _select_iface(self, device:str):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
@@ -451,7 +451,7 @@ class Compiled:
       gpu = max(buf.host.view(fmt='Q')[e.en_id] for (buf, _), e in ents)/decimal.Decimal(self.timestamp_divider)
       tdiffs.append((st+perf_counter_us())/2 - gpu)
     del Compiled.profile_events[n:] # cut calibration kernels
-    Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
+    Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), Device.target_for(self.device)))
 
 if PROFILE:
   @atexit.register

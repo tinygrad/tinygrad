@@ -423,6 +423,34 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
   out = Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), assigned_kv, fxn=fxn)[0].reshape(B, H, T, D)
   return out if q_start is None else out[:, :, :T_real]
 
+# ******** mhc ********
+
+@functools.cache
+def _hc_coeffs(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, C:int, iters:int, eps:float, norm_eps:float, features:int) -> UOp:
+  token, lane = UOp.range(out.shape[0], 0, AxisType.GLOBAL), UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP)
+  rms = (warp_reduce(sq[token, lane].load(), Ops.ADD, full_wave=True) * (1/features) + norm_eps).rsqrt()
+  is_comb, is_pre, m = lane < C*C, (lane >= C*C) & (lane < C*C + C), lane % (C*C)
+  idx = is_comb.where(m + 2*C, m.minimum(2*C-1))
+  s = scale[(idx // C).minimum(2)].load().float()
+  v = mix[token, idx].load() * rms * s + base[idx].load().float()
+  row, col = tuple(1 << k for k in range(C.bit_length() - 1)), tuple(C << k for k in range(C.bit_length() - 1))  # comb[r][c] is on lane C*r+c
+  e = ((v - warp_reduce(v, Ops.MAX, masks=row)) * LOG2E).exp2()
+  sig, comb = v.sigmoid(), e / warp_reduce(e, masks=row) + eps
+  for i in range(2*iters - 1): comb = comb / (warp_reduce(comb, masks=row if i % 2 else col) + eps)
+  value = is_comb.where(comb, is_pre.where(sig + eps, sig * 2))
+  return out[token, idx.valid(lane < C*C + 2*C)].store(value).end(token, lane).sink(arg=KernelInfo(name="hc_coeffs", opts_to_apply=()))
+
+def hc_coeffs_supported(x:Tensor, count:int) -> bool:
+  return amd_custom_kernels_supported(x.device) and count == 4 and x.dtype == dtypes.float32 and x.uop.axis is None and x.shape[-1] % 32 == 0
+
+def hc_coeffs(fn:Linear, x:Tensor, base:Tensor, scale:Tensor, count:int, iters:int, eps:float, norm_eps:float) -> tuple[Tensor, Tensor, Tensor]:
+  mix = fn(flat:=x.pad_to(x.max_shape).reshape(-1, x.shape[-1]))
+  fxn = functools.partial(_hc_coeffs, C=count, iters=iters, eps=eps, norm_eps=norm_eps, features=x.shape[-1])
+  out = Tensor.custom_kernel(Tensor.empty(*mix.shape, dtype=dtypes.float32, device=x.device), mix.float().contiguous(),
+                             flat.float().square().unflatten(-1, (32, -1)).sum(-1).contiguous(), base.contiguous(), scale.contiguous(), fxn=fxn)[0]
+  out = out.reshape(*x.max_shape[:-1], -1).shrink_to(*x.shape[:-1], None)
+  return out[..., :count], out[..., count:2*count], out[..., 2*count:].reshape(*x.shape[:-1], count, count)
+
 # ******** gated delta net: fused recurrent scan ********
 
 @functools.cache

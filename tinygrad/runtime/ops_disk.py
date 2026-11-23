@@ -2,7 +2,7 @@ import os, sys, mmap, io, ctypes, contextlib, pathlib, functools, collections, s
 from dataclasses import replace
 from typing import cast
 from tinygrad.helpers import OSX, mv_address, flatten, to_tuple, unwrap, ceildiv
-from tinygrad.device import BufferStorage, MMIOInterface, Compiled, Allocator, Buffer, BufferSpec, Device, HCQ_RUNTIME_DEV
+from tinygrad.device import BufferStorage, MMIOInterface, Compiled, Allocator, Buffer, BufferSpec, Device, HCQ_RUNTIME_DEV, is_iface_usb
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
 from tinygrad.runtime.support.hcq2 import ccall, ins, patch
@@ -20,7 +20,7 @@ class DiskDevice(Compiled):
     super().__init__(device, DiskAllocator(self), None)
   def _might_open(self, size:int):
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
-    if self.size is not None and hasattr(self, "mem"):
+    if self.size is not None:
       self.refcount += 1
       return
     filename = self.device[len("disk:"):]
@@ -43,9 +43,8 @@ class DiskDevice(Compiled):
     self.refcount -= 1
     if self.refcount == 0:
       if self.fd is not None: os.close(self.fd)
-      if hasattr(self, "mem"):
-        try: self.mem.close()
-        except BufferError: pass
+      try: self.mem.close()
+      except BufferError: pass
       self.size = None
 
 class DiskBuffer:
@@ -116,7 +115,7 @@ def disk_read(file:UOp, srcs:UOp, counts:UOp, rings:UOp, sqes:UOp) -> UOp: # src
 def is_disk_read(c:UOp) -> bool:
   dev, src = [to_tuple(b.device)[0] for b in c.src[1:3]] if c.op is Ops.CALL and c.body.op is Ops.STORE else ("", "")
   return src.startswith("DISK:") and not src.startswith("DISK:shm:") and Device[dev].has_copy_queue and not dev.startswith("NULL") and bool(uring()) \
-    and not getattr(Device[dev], "is_usb", False)
+    and not is_iface_usb(dev)
 
 def disk_copy_rewriter(s:UOp) -> UOp|None:
   lin = s.without_after.body

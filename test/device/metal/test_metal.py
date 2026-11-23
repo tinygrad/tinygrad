@@ -1,5 +1,6 @@
 import gc, unittest
 from unittest.mock import patch
+from tinygrad import Tensor
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.renderer import CompileError
 from tinygrad.helpers import Context
@@ -75,6 +76,15 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
         self.assertEqual(len(allocator.cache[(4096, BufferSpec())]), 1)
       finally:
         allocator.free_cache()
+
+  def test_multi_device_profile_synchronize(self):
+    # the autorelease pool is shared by every METAL device, synchronizing one must not free the command buffers the other still profiles
+    with Context(PROFILE=1):
+      for _ in range(3):
+        Tensor.ones(4, device="METAL:0").contiguous().realize()
+        Tensor.ones(4, device="METAL:1").contiguous().realize()
+        Device["METAL:1"].synchronize()
+        Device["METAL:0"].synchronize()
 
   def test_free(self):
     size = 2**16

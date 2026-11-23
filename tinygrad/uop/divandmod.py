@@ -24,13 +24,8 @@ def fold_divmod_general(d: UOp) -> UOp|None:
 
     # remove_nested_mod in sum: (a%4 + b)%2 -> (a+b)%2
     if d.op is Ops.MOD:
-      new_xs, changed = [], False
-      for u in uops_no_const:
-        if u.op is Ops.MOD and u.src[1].divides(c) is not None:
-          u = u.src[0]
-          changed = True
-        new_xs.append(u)
-      if changed: return (UOp.usum(*new_xs) + const) % y
+      new_xs = [u.src[0] if u.op is Ops.MOD and u.src[1].divides(c) is not None else u for u in uops_no_const]
+      if new_xs != uops_no_const: return (UOp.usum(*new_xs) + const) % y
 
     # exact division keeps the structure of x: (q*c+k)//c -> q+k//c
     if d.op is Ops.DIV and (q:=x_peeled.divides(c)) is not None: return q + const//c
@@ -65,7 +60,7 @@ def fold_divmod_general(d: UOp) -> UOp|None:
           if const % div: b_parts.append(x.const_like(const % div))
           b = UOp.usum(*b_parts) if b_parts else x.const_like(0)
           if 0 <= b.vmin and b.vmax < div:
-            results.append((len((r:=(newxs % x.ufix(c//div))*div + b).backward_slice), r))
+            results.append((len((r:=(newxs % (c//div))*div + b).backward_slice), r))
     if results: return min(results, key=lambda r: r[0])[1]
 
   # ** Variable Denominator / Fallback Rules **

@@ -7,12 +7,11 @@ from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape
 # ***** uop helpers *****
 
 def validate_index(uidx:UOp, gate:UOp|None=None):
-  if len(uidx.src) != 2: return True  # skip for non final index. TODO: check more complex index with shape
+  # skip when OOB checking is off, or for a non final index. TODO: check more complex index with shape
+  if not CHECK_OOB or len(uidx.src) != 2: return True
   buf,idx = uidx.src
-  if idx.is_invalid: return True
-  if gate is None: gate = UOp.const(True)
   # TODO: check for overflow
-  if not CHECK_OOB or is_image_shape(buf._shape): return True
+  if idx.is_invalid or is_image_shape(buf._shape): return True
 
   # buffer size
   sz = buf.max_numel()
@@ -22,7 +21,7 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
 
   # if all is good and CHECK_OOB=1, validate with z3
   from tinygrad.uop.validate import validate_index_with_z3
-  return validate_index_with_z3(sz, idx, gate)
+  return validate_index_with_z3(sz, idx, UOp.const(True) if gate is None else gate)
 
 def valid_device_range(device:str|tuple[str, ...]|None, src:tuple[UOp, ...]) -> bool:
   if not isinstance(device, tuple): return len(src) == 0
@@ -102,8 +101,8 @@ spec_shared = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True, name="x"),
    lambda x: (x.src[0].shape == () or x.addrspace is AddrSpace.ALU) and x.src[0].dtype is not dtypes.void),
 
-  # a NATIVE names native code or an external function: the arg is NativeInfo, src[0] states its dtype and shape
-  (UPat(Ops.NATIVE, name="x", allow_any_len=True), lambda x: isinstance(x.arg, NativeInfo) and len(x.src) >= 1),
+  # a NATIVE names native code or an external function: the arg is NativeInfo, its single src states its dtype and shape
+  (UPat(Ops.NATIVE, src=(UPat(),), name="x"), lambda x: isinstance(x.arg, NativeInfo)),
   # CALL: the body is always an opaque body stating the dtype, the arg is a CallInfo
   (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, CallInfo)),
 
@@ -210,9 +209,6 @@ spec_program = PatternMatcher([
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),
-
-  # REG/LOCAL buffer
-  (UPat(Ops.BUFFER, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),

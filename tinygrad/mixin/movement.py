@@ -1,26 +1,26 @@
 # mixins add syntactic sugar to Tensor and UOp
 from __future__ import annotations
+import itertools
 from typing import TYPE_CHECKING, Self, Sequence
 from tinygrad.uop import Ops
 from tinygrad.helpers import prod, argfix, argsort, flatten, dedup, make_tuple, ceildiv, round_up, all_int
-from tinygrad.uop.ops import resolve, smax, _align_left, _broadcast_shape, broadcast_axes
+from tinygrad.uop.ops import resolve, smax, _align_left, _broadcast_shape, broadcast_axes, to_max_shape
+from tinygrad.mixin.dtype import DTypeMixin
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import sint
 
 
-class MovementMixin:
+class MovementMixin(DTypeMixin):
   # required to implement
   def _mop(self, op: Ops, arg) -> Self:
     raise NotImplementedError
 
   @property
-  def shape(self) -> tuple[sint, ...]:
-    raise NotImplementedError
+  def shape(self) -> tuple[sint, ...]: return self._uop.shape
 
   @property
-  def device(self) -> str|tuple[str, ...]|None:
-    raise NotImplementedError
+  def device(self) -> str|tuple[str, ...]|None: return self._uop.device
 
   # great functions you get!
   @property
@@ -49,7 +49,6 @@ class MovementMixin:
   @property
   def max_shape(self) -> tuple[int, ...]:
     """The shape with every symbolic dimension replaced by its maximum."""
-    from tinygrad.uop.ops import to_max_shape  # deferred: ops.py imports the mixins
     return to_max_shape(self.shape)
 
   def max_numel(self) -> int:
@@ -135,15 +134,12 @@ class MovementMixin:
     if not all(s == ns or s == 1 for s, ns in zip(shape, new_shape)):
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
     # EXPAND only adds dims on the left. squeeze 1s that need expanding, EXPAND on left, permute back.
-    n_left = len(new_shape) - len(self.shape)
-    expand_at = tuple(i-n_left for i in broadcast_axes(self.shape, new_shape) if i >= n_left)
-    kept = tuple(i for i in range(len(self.shape)) if i not in expand_at)
-    squeezed = self.reshape(tuple(self.shape[i] for i in kept))
-    expanded = squeezed._mop(Ops.EXPAND, arg=new_shape[:n_left] + tuple(new_shape[n_left+i] for i in expand_at))
-    # expanded shape = [left] + [expand_at dims] + [kept dims], permute to new_shape
-    perm = tuple(range(n_left)) + tuple(
-      n_left + (expand_at.index(i) if i in expand_at else len(expand_at) + kept.index(i)) for i in range(len(self.shape)))
-    return expanded.permute(perm)
+    expand_at = broadcast_axes(self.shape, new_shape)
+    kept = tuple(i for i in range(len(new_shape)) if i not in expand_at)
+    squeezed = self.reshape(tuple(shape[i] for i in kept))
+    expanded = squeezed._mop(Ops.EXPAND, arg=tuple(new_shape[i] for i in expand_at))
+    # expanded shape = [expand_at dims] + [kept dims], permute back to new_shape
+    return expanded.permute(argsort(expand_at + kept))
 
   def expand(self, shape, *args) -> Self:
     """
@@ -410,14 +406,13 @@ class MovementMixin:
 
     for name in sizes: assert name in lhs, f"axis {name} is not used in transform"
     assert sorted(lhs) == sorted(rhs) and len(lhs) == len(set(lhs)), f"name mismatch in {formula}"
-    for name in lhs+rhs: assert name == "..." or (name.isidentifier() and "_" not in (name[0], name[-1])), f"invalid axis name {name}"
+    for name in lhs: assert name == "..." or (name.isidentifier() and "_" not in (name[0], name[-1])), f"invalid axis name {name}"
     assert "..." not in flatten([lhs[s:e] for s, e in unflatten_dims]), f"cannot have collapsed ellipsis (...) in lhs of {formula}"
-    assert lhs.count("...") <= 1, f"too many ellipses in {formula}"
 
     # resolve ellipsis
     if "..." in lhs:
       ell_len = len(self.shape) - len(lhs) + 1 + sum(e - s - 1 for s, e in unflatten_dims)
-      lhs, rhs = map(lambda l: l[:(i := l.index("..."))] + [f"...{j}" for j in range(ell_len)] + l[i + 1:] if "..." in l else l, (lhs, rhs))
+      lhs, rhs = map(lambda l: l[:(i := l.index("..."))] + [f"...{j}" for j in range(ell_len)] + l[i + 1:], (lhs, rhs))
       def newdims(side, s, e): return (s + (ell_len - 1 if "...0" in side[:s] else 0), e + (ell_len - 1 if "...0" in side[:e] else 0))
       unflatten_dims, flatten_dims = [newdims(lhs, s, e) for s, e in unflatten_dims], [newdims(rhs, s, e) for s, e in flatten_dims]
 
@@ -454,7 +449,8 @@ class MovementMixin:
     assert isinstance(dim_sz, int), f"does not support symbolic shape in split dimension {dim}: {self.shape}"
     if isinstance(sizes, int): sizes = [min(sizes, dim_sz-i) for i in range(0, max(1, dim_sz), max(1, sizes))]
     assert sum(sizes) == dim_sz, f"expect sizes to sum exactly to {dim_sz}, but got {sum(sizes)}"
-    return tuple(self.shrink(tuple((sum(sizes[:i]), sum(sizes[:i+1])) if j == dim else None for j in range(self.ndim))) for i in range(len(sizes)))
+    bounds = itertools.pairwise(itertools.accumulate(sizes, initial=0))
+    return tuple(self.shrink(tuple(b if j == dim else None for j in range(self.ndim))) for b in bounds)
 
   def chunk(self, chunks:int, dim:int=0) -> list[Self]:
     """

@@ -211,6 +211,7 @@ class Target:
   arch: str = ""
   interface: str = ""
   indices: str = ""
+  props: str = ""
 
   @staticmethod
   def parse(s:str) -> Target:
@@ -218,14 +219,15 @@ class Target:
       (iface, indices), s = ((iface_split[0], iface_split[1]) if len(iface_split:=split[0].rsplit(":", 1)) == 2 else (split[0], ""), split[1])
     elif len(split) > 2: raise RuntimeError(f"too many '+' in target string: {s!r}")
     else: iface, indices = "", ""
-    match [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]:
-      case [dev, ren, arch]: return Target(dev, ren, arch, iface, indices)
-      case [dev, ren]: return Target(dev, ren, interface=iface, indices=indices)
-      case [dev]: return Target(dev, interface=iface, indices=indices)
-      case _: raise RuntimeError(f"too many ':' in target string: {s!r}")
+    if len(parts:=s.split(':')) > 4: raise RuntimeError(f"too many ':' in target string: {s!r}")
+    dev, ren, arch, props = parts + [""]*(4-len(parts))
+    return Target(dev.upper(), ren.upper(), arch, iface, indices, props)
   def __repr__(self):
-    fst, snd = re.sub(":*$", "", ":".join([self.interface, self.indices])), re.sub(":*$", "", ":".join([self.device, self.renderer, self.arch]))
+    fst, snd = ":".join([self.interface, self.indices]).rstrip(":"), ":".join([self.device, self.renderer, self.arch, self.props]).rstrip(":")
     return (fst + "+" if fst else "") + snd
+  @property
+  def opts(self) -> dict[str, str]: return dict(x.split("=", 1) for x in self.props.split(",") if x)
+  def get(self, key:str, default:Any="") -> Any: return type(default)(self.opts.get(key, default))
   # replaces if not already set
   def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
 
@@ -242,7 +244,8 @@ class _DEV(ContextVar):
   def target(self, dev:str, **kwargs) -> Target:
     assert (v:=getenv(k:=f"{dev}_CC", "")) == "", \
       f"{k}={v} is deprecated, use DEV='{';'.join([repr(t) for t in self._value if t.device and t.device != dev] + [f'{dev}:{v}'])}' instead"
-    return replace(next((t for t in self._value if not t.device or t.device == dev), Target(device=dev)).replacedefault(**kwargs), device=dev)
+    t = next((t for t in self._value if not t.device or t.device == dev), Target(device=dev))
+    return t if t.device == dev and not kwargs else replace(t.replacedefault(**kwargs), device=dev)
 
 DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)

@@ -574,6 +574,18 @@ class TestJitPrune(unittest.TestCase):
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
     assert_jit_cache_len(w2_prune, 1)
 
+  def test_prune_w_reused_scratch(self):
+    # the pruned kernel's output is read on every call: it must not share planned memory with the scratch that outlives its last read
+    weights = Tensor.rand(1024).realize()
+    def f(x) -> Tensor:
+      c = ((x+1).contiguous() + (weights*2).contiguous()).contiguous()
+      for _ in range(4): c = (c*2).contiguous() + 1
+      return c.sum()
+    jf = TinyJit(f, prune=True)
+    for _ in range(5):
+      a = Tensor.rand(1024).realize()
+      np.testing.assert_allclose(jf(a).item(), ((a.numpy()+1+weights.numpy()*2)*16+15).sum(), rtol=1e-4)
+
 class TestJitFree(unittest.TestCase):
   def test_free_intermediates(self):
     ext_tensor = Tensor([1,24,23,45,1])
