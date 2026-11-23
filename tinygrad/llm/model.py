@@ -1174,6 +1174,9 @@ class Transformer:
     state_dict = gguf_shard(entries, devices, {k: v for k, v in ((k, ep_axis if ep and '_exps.' in k else v) for k, v in shard_map.items())
                                                if v is not None}, repeats)
 
+    for k in [k for k in state_dict if k.endswith('.scale')]:
+      state_dict[w] = state_dict[w:=k.removesuffix('scale')+'weight'] * state_dict.pop(k).reshape(-1, *(1,)*(state_dict[w].ndim-1))
+
     # all float state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) and dtypes.is_float(v.dtype) else v for k,v in state_dict.items()}
 
