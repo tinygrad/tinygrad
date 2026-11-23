@@ -7,9 +7,9 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod, canonicalize_device_name
 from tinygrad.helpers import Context, cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
-from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
+from tinygrad.uop.ops import UOp, Ops, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.uop.ops import KernelInfo, AxisType
-from tinygrad.mixin.rand import RandMixin
+from tinygrad.mixin import Mixin
 from tinygrad.codegen import create_linear, contiguous_mops_to_view
 from tinygrad.engine.realize import run_linear, capturing
 from tinygrad.device import Buffer
@@ -105,7 +105,7 @@ def _fromnp(x: 'numpy.ndarray') -> UOp:
   ret.buffer.allocate(x)
   return ret.reshape(x.shape)
 
-class Tensor(RandMixin):
+class Tensor(Mixin):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
@@ -200,15 +200,6 @@ class Tensor(RandMixin):
   def __len__(self):
     if not self.shape: raise TypeError("len() of a 0-d tensor")
     return self.shape[0]
-
-  @property
-  def device(self) -> str|tuple[str, ...]|None: return self.uop.device
-
-  @property
-  def shape(self) -> tuple[sint, ...]: return self.uop.shape
-
-  @property
-  def dtype(self) -> DType: return self.uop.dtype
 
   # ***** data handlers ****
 

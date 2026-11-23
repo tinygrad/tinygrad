@@ -4,23 +4,22 @@ from typing import TYPE_CHECKING, Self, Sequence
 from tinygrad.uop import Ops
 from tinygrad.helpers import prod, argfix, argsort, flatten, dedup, make_tuple, ceildiv, round_up, all_int
 from tinygrad.uop.ops import resolve, smax, _align_left, _broadcast_shape, broadcast_axes
+from tinygrad.mixin.dtype import DTypeMixin
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import sint
 
 
-class MovementMixin:
+class MovementMixin(DTypeMixin):
   # required to implement
   def _mop(self, op: Ops, arg) -> Self:
     raise NotImplementedError
 
   @property
-  def shape(self) -> tuple[sint, ...]:
-    raise NotImplementedError
+  def shape(self) -> tuple[sint, ...]: return self._uop.shape
 
   @property
-  def device(self) -> str|tuple[str, ...]|None:
-    raise NotImplementedError
+  def device(self) -> str|tuple[str, ...]|None: return self._uop.device
 
   # great functions you get!
   @property
