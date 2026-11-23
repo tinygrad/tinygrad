@@ -20,7 +20,7 @@ class DiskDevice(Compiled):
     super().__init__(device, DiskAllocator(self), None)
   def _might_open(self, size:int):
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
-    if self.size is not None and hasattr(self, "mem"):
+    if self.size is not None:
       self.refcount += 1
       return
     filename = self.device[len("disk:"):]
@@ -43,9 +43,8 @@ class DiskDevice(Compiled):
     self.refcount -= 1
     if self.refcount == 0:
       if self.fd is not None: os.close(self.fd)
-      if hasattr(self, "mem"):
-        try: self.mem.close()
-        except BufferError: pass
+      try: self.mem.close()
+      except BufferError: pass
       self.size = None
 
 class DiskBuffer:
