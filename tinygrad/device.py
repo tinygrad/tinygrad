@@ -69,7 +69,6 @@ Device: _Device = _Device()
 atexit.register(lambda: [Device[dn].finalize() for dn in tuple(Device._opened_devices)])
 def host_of(peer_group:str) -> str: return f"CPU:{peer_group[7:]}" if peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.device
 def peer_group(dev:str) -> str: return Device.target_for(d:=Device.canonicalize(dev)).get("peer", d.split(":")[0])
-def has_copy_queue(dev:str) -> bool: return bool((t:=Device.target_for(dev)).get("copy", int(Device.get_class(t.device).has_copy_queue)))
 def is_iface_usb(dev:str|tuple[str, ...]) -> bool: return Device.target_for(Device.canonicalize(to_tuple(dev)[0])).interface.endswith("USB")
 
 # **************** Profile ****************
@@ -350,7 +349,6 @@ class Compiled:
   sleep_timeout_ms: int|None = None
   can_recover:bool = False
   var_vals: dict[str, int] = {}
-  has_copy_queue: bool = True
 
   # hcq2
   pm_encode:PatternMatcher

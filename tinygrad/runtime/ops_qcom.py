@@ -403,8 +403,6 @@ class QCOMDevice(Compiled):
   ifaces = [KGSLIface, MSMIface]
   timestamp_divider = 19.2
 
-  has_copy_queue = False
-
   def __init__(self, device:str=""):
     self.iface = self._select_iface(device)
     self.gpu_id = ((chip_id:=self.iface.chip_id) >> 24, (chip_id >> 16) & 0xFF, (chip_id >> 8) & 0xFF)
@@ -417,7 +415,7 @@ class QCOMDevice(Compiled):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
     super().__init__(device, QCOMAllocator(self), None,
-                     arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id)
+                     arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id, props={"copy": 0})
 
     self.var_vals = {to_name(self.device, "fd"): self.iface.fd.fd, to_name(self.device, "ctx"): self.iface.ctx}
 
