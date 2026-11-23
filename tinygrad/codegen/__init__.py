@@ -623,9 +623,8 @@ pm_resolve_linear_call = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), resolve_linear_call),
 ])+pm_flatten_linear
 
-schedule_cache: dict[bytes, UOp] = {}
-linear_cache: dict[tuple[UOp, int], tuple[bytes, UOp]] = {}  # (exported function, NO_MEMORY_PLANNER) -> (its schedule_cache key, LINEAR)
-# ctx is just for DEBUG on inner
+# Body hashes cache schedules; (exported function, NO_MEMORY_PLANNER) keys cache final LINEARs.
+schedule_cache: dict[bytes|tuple[UOp, int], UOp] = {}
 def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = call.body
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
@@ -720,9 +719,8 @@ pm_contiguous_views = PatternMatcher([
 @rewrite_group(lambda fn,ret,**_: f"Schedule {len(fn.src)} -> {len(ret.src)}")
 def create_linear(fn:UOp) -> UOp:
   """an exported function (no runtime state) to the LINEAR of calls that runs it, on its EXTERNs, view args and ALLOCs"""
-  # the LINEAR only depends on fn, it's cached for as long as the schedule of fn is
   key = (fn, NO_MEMORY_PLANNER.value)
-  if SCACHE and (hit:=linear_cache.get(key)) is not None and hit[0] in schedule_cache: return hit[1]
+  if SCACHE and (hit:=schedule_cache.get(key)) is not None: return hit
   # a contiguous view of storage is a different buffer: it's an input of the scheduled function, the call arg is the view
   views: dict[UOp, int] = {}
   fn = graph_rewrite(fn, pm_contiguous_views, ctx=views, name="contiguous views")
@@ -741,5 +739,5 @@ def create_linear(fn:UOp) -> UOp:
   # the storage it allocates gets canonical slots, so the linear only depends on fn. map back binds each to fresh storage
   allocs = [u for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL]
   ret = linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
-  linear_cache[key] = (fn.key, ret)
+  if SCACHE: schedule_cache[key] = ret
   return ret
