@@ -860,7 +860,6 @@ class AMDDevice(Compiled):
     self.wave_cnt = (self.cu_cnt * self.waves_per_cu) if self.target[0] != 9 else min(self.cu_cnt * 40, self.se_cnt * self.xccs * 512)
 
     gc, nbio = ("%d.%d.%d" % self.iface.ip_versions[ip] for ip in (am.GC_HWIP, am.NBIF_HWIP))
-    self.gc = amd_ip("gc", gc, self.arch)
     self.sdma_queues:dict = {}
 
     allocator = USBAllocator(self) if self.is_usb else AMDAllocator(self)
@@ -969,8 +968,8 @@ class AMDDevice(Compiled):
     self.aql_desc.scratch_wave64_lane_byte_size = self.max_private_segment_size
     self.aql_desc.scratch_resource_descriptor[:] = [lo32(base), int.from_bytes(rsrc1_t(BASE_ADDRESS_HI=hi32(base), SWIZZLE_ENABLE=1), 'little'),
                                                     lo32(self.scratch.nbytes // self.xccs), int.from_bytes(bytes(rsrc3_t(**rsrc)), 'little')]
-    self.aql_desc.compute_tmpring_size = self.gc.regCOMPUTE_TMPRING_SIZE.encode(waves=self.scratch_waves,
-                                                                                wavesize=self.scratch_wavesize(self.max_private_segment_size))
+    self.aql_desc.compute_tmpring_size = gc_for(self.device).regCOMPUTE_TMPRING_SIZE.encode(waves=self.scratch_waves,
+                                                                                            wavesize=self.scratch_wavesize(self.max_private_segment_size))
     self.aql_gart.host.view(fmt='B')[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
 
   def _prof_buffer(self, size:int, dtype, host:bool=True) -> Buffer:
