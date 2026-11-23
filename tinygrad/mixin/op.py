@@ -1803,7 +1803,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
     classes_dim = 0 if self.ndim == 1 else 1
     if self.shape != Y.shape:
-      if self.max(classes_dim).shape != Y.shape: raise RuntimeError(f"shape mismatch: {self.shape=}, {Y.shape=}")
+      if self.shape[:classes_dim] + self.shape[classes_dim+1:] != Y.shape: raise RuntimeError(f"shape mismatch: {self.shape=}, {Y.shape=}")
       Y = Y.unsqueeze(classes_dim)._one_hot_along_dim(num_classes=self.shape[classes_dim], dim=classes_dim)
     if label_smoothing > 0: Y = (1 - label_smoothing)*Y + label_smoothing / int(Y.shape[classes_dim])
     return -self.log_softmax(classes_dim).mul(Y).sum(classes_dim)._do_reduction(reduction)
@@ -1922,8 +1922,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if self.shape[-2] > self.shape[-1]: return self.transpose(-2, -1).newton_schulz(steps, params, eps).transpose(-2, -1)
     G = self / (self.square().sum(axis=(-2, -1), keepdim=True).sqrt() + eps)
     for _ in range(steps):
-      G = functools.reduce(lambda a, b: a + b, (p * functools.reduce(lambda x, y: (y @ y.transpose(-2, -1)) @ x, [G]*i, G)
-                                                 for i,p in enumerate(params)))
+      A, powers = G @ G.transpose(-2, -1), [G]
+      for _ in params[1:]: powers.append(A @ powers[-1])
+      G = functools.reduce(lambda a, b: a + b, (p * x for p, x in zip(params, powers)))
     return G
 
   # ***** hashing ops *****

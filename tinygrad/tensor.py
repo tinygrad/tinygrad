@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
 from dataclasses import dataclass, field, replace
-from typing import Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
+from typing import Callable, cast, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod, canonicalize_device_name
@@ -134,7 +134,7 @@ class Tensor(Mixin):
     # create a UOp from the different types of inputs
     if data is None:
       data = UOp.const(0.0, _dtype)
-    elif isinstance(data, get_args(ConstType)):
+    elif isinstance(data, ConstType):
       data = UOp.const(data, _dtype)
     elif is_numpy_ndarray(data) and data.shape == ():
       data = UOp.const(data.item(), _dtype or _from_np_dtype(data.dtype))
