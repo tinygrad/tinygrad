@@ -134,7 +134,8 @@ class NVComputeQueue(NVQueue):
     super().__init__(submit)
 
     progs = [nv_build_program(self.dev, u.body, self.devs)[0] for u in self.lin.src if u.op is Ops.CALL and u.body.op is Ops.PROGRAM]
-    self.slm = max([p.slm for p in progs], default=0)
+    slm = max([p.slm for p in progs], default=0)
+    self.lmem_per_tpc = round_up(round_up(slm * 32, 0x200) * self.dev.max_warps_per_sm * self.dev.num_sm_per_tpc, 0x8000)
     self.qmd_sz = round_up(QMD(self.dev).sz * 4, 256)
     self.stride = self.qmd_sz + max([p.kernargs_size for p in progs], default=0)
     self.qmd_buf = UOp.alloc((len(progs) * self.stride,), dtypes.uint8, device=self.devs[0], name=to_name("qmd", self.queue))
@@ -181,11 +182,9 @@ class NVComputeQueue(NVQueue):
     qmd.patches |= dict(layout_args([a.ccast(dtypes.uint64) for a in args] if data.mock else args, at)) # mockgpu wants every arg 64 bit
 
     if not self.qmds:
-      d = self.dev
-      bytes_per_tpc = round_up(round_up(self.slm * 32, 0x200) * d.max_warps_per_sm * d.num_sm_per_tpc, 0x8000)
-      lmem = UOp.extern((round_up(bytes_per_tpc * d.num_tpc_per_gpc * d.num_gpcs, 0x20000),), dtypes.uint8, self.devs[0], "local_mem")
+      lmem = UOp.extern((self.lmem_per_tpc * self.dev.num_tpc_per_gpc * self.dev.num_gpcs,), dtypes.uint8, self.devs[0], "local_mem")
       self.nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, *hilo(lmem.getaddr(self.devs)))
-      self.nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, *data64(bytes_per_tpc), 0xff)
+      self.nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, *data64(self.lmem_per_tpc), 0xff)
     if self.prev_qmd is None:
       if self.dev.pma_enabled: self.nvm(1, nv_gpu.NVC6C0_PM_TRIGGER, 0)
       self.nvm(1, nv_gpu.NVC6C0_SEND_PCAS_A, (qmd_addr >> 8).cast(dtypes.uint32))
@@ -217,10 +216,10 @@ class NVEncDecQueue(NVQueue):
     h, w, frame_pos = 2 * ast.src[0].src[1].val // 3, ast.src[0].src[2].val, ast.src[0].src[0].replace(op=Ops.PARAM).cast(dtypes.int32)
     coloc_sz = round_up((round_up(h, 64) * round_up(h, 64)) + (round_up(w, 64) * round_up(h, 64) // 16), 2 << 20)
     intra_top_off = round_up(h, 64) * (608 + 4864 + 152 + 2000)
-    intra_unk_off = (round_up(intra_top_off, 0x10000) + (64 << 10)) if unwrap(self.dev.iface.viddec_class) >= nv_gpu.NVCFB0_VIDEO_DECODER else None
-    filter_sz = round_up(round_up(intra_top_off, 0x10000) + (64 << 10) + ((2 << 20) if intra_unk_off is not None else 0), 2 << 20)
-    coloc, filt, stat = [(UOp.extern((sz,), dtypes.uint8, self.devs[0], n).getaddr(self.devs) >> 8).cast(dtypes.uint32)
-                         for n, sz in (("vid_coloc", coloc_sz), ("vid_filter", filter_sz), ("vid_stat", 0x1000))]
+    intra_unk_off = round_up(intra_top_off, 0x10000) + (64 << 10)
+    intra_unk_size = (2 << 20) if unwrap(self.dev.iface.viddec_class) >= nv_gpu.NVCFB0_VIDEO_DECODER else 0
+    sizes = {"vid_coloc": coloc_sz, "vid_filter": round_up(intra_unk_off + intra_unk_size, 2 << 20), "vid_stat": 0x1000}
+    coloc, filt, stat = [(UOp.extern((sz,), dtypes.uint8, self.devs[0], n).getaddr(self.devs) >> 8).cast(dtypes.uint32) for n, sz in sizes.items()]
 
     self.nvm(4, nv_gpu.NVC9B0_SET_APPLICATION_ID, nv_gpu.NVC9B0_SET_APPLICATION_ID_ID_HEVC)
     self.nvm(4, nv_gpu.NVC9B0_SET_CONTROL_PARAMS, nv_flags("NVC9B0_SET_CONTROL_PARAMS", codec_type="hevc", testrun_env="prod_run", gptimer_on=1,
@@ -233,7 +232,7 @@ class NVEncDecQueue(NVQueue):
     self.nvm(4, nv_gpu.NVC9B0_SET_NVDEC_STATUS_OFFSET, stat)
     self.nvm(4, nv_gpu.NVC9B0_HEVC_SET_TILE_SIZES_OFFSET, desc + 2, filt)
     self.nvm(4, nv_gpu.NVC9B0_SET_INTRA_TOP_BUF_OFFSET, filt + (intra_top_off >> 8))
-    if intra_unk_off is not None: self.nvm(4, 0x4dc, filt + (intra_unk_off >> 8))
+    if intra_unk_size: self.nvm(4, 0x4dc, filt + (intra_unk_off >> 8))
     self.nvm(4, nv_gpu.NVC9B0_EXECUTE, 0)
 
 # *****************
@@ -613,9 +612,8 @@ class NVDevice(Compiled):
     self.arch: str = "sm_120" if self.sm_version==0xa04 else f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
     self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
-    self.shader_local_mem:Buffer|None = None
     self.var_vals:dict[str, int] = {}
-    self.vid_bufs:dict[str, Buffer] = {}
+    self.bufs:dict[str, Buffer] = {}
     # Set windows addresses to not collide with other allocated buffers.
     self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
@@ -624,10 +622,9 @@ class NVDevice(Compiled):
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 
     queues = {"COMPUTE:0": lambda: self.fifos["COMPUTE:0"], "COPY:0": lambda: self.fifos["COPY:0"], "ENCDEC:0": self._vid_fifo}
-    names = ("ring", "gpput", "doorbell", "put_value")
+    names, bufs = ("ring", "gpput", "doorbell", "put_value"), ("local_mem", "vid_coloc", "vid_filter", "vid_stat")
     Compiled.link_bufs |= {to_name(self.device, n, q): lambda b, n=n, f=f: getattr(f(), n) for q, f in queues.items() for n in names}
-    Compiled.link_bufs |= {to_name(self.device, "local_mem"): lambda b: self._local_mem(b.max_numel())}
-    Compiled.link_bufs |= {to_name(self.device, n): lambda b, n=n: self._vid_buf(n, b.max_numel()) for n in ("vid_coloc", "vid_filter", "vid_stat")}
+    Compiled.link_bufs |= {to_name(self.device, n): lambda b, n=n: self._grow(n, b.max_numel()) for n in bufs}
 
   @functools.cached_property
   def fifos(self) -> dict[str, GPFifo]:
@@ -701,11 +698,6 @@ class NVDevice(Compiled):
     linear = lower_and_compile(UOp(Ops.LINEAR, src=(unwrap(lower_call(call)),)))
     run_linear(hcq_link(linear), jit=True, update_stats=False, wait=True)
 
-  def _local_mem(self, sz:int) -> Buffer:
-    if self.shader_local_mem is None or self.shader_local_mem.nbytes < sz:
-      self.shader_local_mem = Buffer(self.device, sz, options=BufferSpec(nolru=True), preallocate=True)
-    return self.shader_local_mem
-
   def _vid_fifo(self) -> GPFifo:
     if self.iface.viddec_class is None: raise RuntimeError(f"{self.device} Video decoder class not available.")
     if "ENCDEC:0" not in self.fifos:
@@ -713,11 +705,11 @@ class NVDevice(Compiled):
       self._submit_cmds("ENCDEC:0", *nvm(4, nv_gpu.NVC6C0_SET_OBJECT, self.iface.viddec_class))
     return self.fifos["ENCDEC:0"]
 
-  def _vid_buf(self, name:str, sz:int) -> Buffer:
-    self._vid_fifo()
-    if name not in self.vid_bufs or self.vid_bufs[name].nbytes < sz:
-      self.vid_bufs[name] = Buffer(self.device, sz, options=BufferSpec(nolru=True), initial_value=bytes(sz))
-    return self.vid_bufs[name]
+  def _grow(self, name:str, sz:int) -> Buffer:
+    if name not in self.bufs or self.bufs[name].nbytes < sz:
+      init = None if name == "local_mem" else bytes(sz)
+      self.bufs[name] = Buffer(self.device, sz, options=BufferSpec(nolru=True), initial_value=init).ensure_allocated()
+    return self.bufs[name]
 
   def collect_prof(self):
     # the pc samples of a whole batch come back as one stream, so they are reported against the first kernel of it
