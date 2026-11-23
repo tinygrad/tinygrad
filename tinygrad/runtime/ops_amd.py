@@ -6,7 +6,7 @@ from tinygrad.runtime.support.hcq2 import HWQueue, encode_cmdbuf, to_name, patch
 from tinygrad.uop.ops import sint, UOp, ProgramInfo, Ops, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled
 from tinygrad.dtype import dtypes, DType
-from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, prod, colored
+from tinygrad.helpers import getenv, round_up, data64_le, PROFILE, ProfileEvent, lo32, hi32, prod, colored
 from tinygrad.helpers import ceildiv, unwrap, pluralize, ContextVar, VIZ, DEV
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
@@ -823,8 +823,6 @@ class AMDDevice(Compiled):
 
   ifaces = [KFDIface, PCIIface, USBIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface), _mock(USBIface)]
 
-  def device_props(self): return self.iface.props
-
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface,))
 
   def __init__(self, device:str=""):
@@ -836,7 +834,6 @@ class AMDDevice(Compiled):
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
     assert (self.target in ((9,4,2),(9,5,0))) or self.target[0] in (11, 12), f"Unsupported arch: {self.arch}, only RDNA3+ and CDNA3+"
-    if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {self.arch}")
 
     self.xccs = self.iface.props.get('num_xcc', 1)
     self.se_cnt = self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine'] // self.xccs
@@ -861,7 +858,8 @@ class AMDDevice(Compiled):
     self.sdma_queues:dict = {}
 
     allocator = USBAllocator(self) if self.is_usb else AMDAllocator(self)
-    super().__init__(device, allocator, None, arch=self.arch)
+    super().__init__(device, allocator, None, arch=self.arch, props={"gc": "%d.%d.%d" % self.iface.ip_versions[am.GC_HWIP], "xccs": self.xccs,
+                     "se": self.se_cnt, "cu": self.cu_cnt, "cu_per_sa": self.iface.props['cu_per_simd_array']})
 
     # Scratch setup
     self.max_private_segment_size = 0
