@@ -35,6 +35,7 @@ SLOTS, SPARE = getenv("SLOTS", 0), getenv("SPARE", 7 << 28)
 READ_BW, WINDOW_TOKEN_S, STEP_S = 195e9, 1.3e-3, 0.05
 SHORT_CHUNK = 256
 SESSION = 4096  # (a kept session's rows a short request that diverges from it early may write)
+COPY = 8  # (the context's copy: the tokens after an earlier place of its last COPY. K3.1's logged steps replayed: 8 and 12 within 0.2%, < 4 worse)
 TILES = (16, 64)  # (a window's tiles of an expert's rows: the first that holds its rows an expert on average)
 
 def _after(t:Tensor, dep:list[Tensor]) -> Tensor: return Tensor(t.uop.after(*(d.uop for d in dep)))
@@ -51,6 +52,19 @@ class _WindowArenas(dict):
     if key == self.pool_key: raise MemoryError("short window needs more than the shared scratch")
     super().__setitem__(key, value)
 
+
+class Copies:
+  """a request's context: where each run of COPY tokens before its last token last ended"""
+  def __init__(self):
+    self.ends:dict[tuple[int, ...], int] = {}
+    self.upto = COPY - 1
+
+  def __call__(self, tokens:list[int], n:int) -> list[int]:
+    """the n tokens after the latest earlier place of the context's last COPY tokens (none if fewer follow)"""
+    for e in range(self.upto, len(tokens) - 1): self.ends[tuple(tokens[e - COPY + 1:e + 1])] = e + 1
+    self.upto = max(self.upto, len(tokens) - 1)
+    at = self.ends.get(tuple(tokens[-COPY:]), len(tokens))
+    return tokens[at:at + n] if at + n <= len(tokens) else []
 
 class Engine:
   bank:DType = dtypes.half  # (a window's residual streams: in half, the attends read half the bytes)
@@ -183,7 +197,7 @@ class Engine:
     self.dx, self.v_row = Tensor.empty(n, model.config.dim, device=self.devs).realize(), UOp.variable("row", 0, tokens - 1)
     self.chain_jit = TinyJit(self.run_chain, capture_first=True) if draft is not None and draft.width < tokens - 1 else None
     self.times, self.verified = np.zeros(2), np.zeros(3)  # (launching the graphs, after the last layer), (verify steps, guesses, right ones)
-    self.scored = np.zeros((2, 10))  # (a scored draft's verified guesses by the score's tenth: seen, right)
+    self.scored, self.copied = np.zeros((2, 10)), np.zeros(2)  # (a scored draft's verified guesses by the score's tenth, the copy's: seen, right)
     self.window_s:collections.deque = collections.deque(maxlen=64)  # (measured: a window's tokens, seconds)
     # each gpu's pool in the experts' words (a bitcast of it is a copy), of what's free after the blocks' caches and states and the window's
     # graphs (captured on a pool of a slot), then the slots a window's state is lent (its own while it runs): slots of decode's otherwise
@@ -1201,32 +1215,42 @@ class Engine:
     scores = ret[T + G:].view(np.float32).copy() if self.draft is not None and self.draft.scored else None
     return ret[:T].tolist(), ret[T:T + G].tolist(), scores
 
-  def proposal(self, g:list[int], score:np.ndarray|None, pos:int, row:int) -> tuple[list[int], np.ndarray|None]:
+  def proposal(self, g:list[int], score:np.ndarray|None, pos:int, row:int, copy:list[int]) -> tuple[list[int], np.ndarray|None]:
     """a verify step's guesses after the token at pos: the row's of the step before (guessed at its row), the draft's chain after them. scored:
     as many as the step of the widths that expects most tokens a second (by the scores as the steps bore them out, a guess the chain hasn't
     made yet scored as the last, the steps' seconds a line in the width through every width's measured ones: one not measured first), the
-    chain run a guess further while a wider step's expected. the guesses and their scores"""
+    chain run a guess further while a wider step's expected. a scored draft's block of the whole step and the context's copy: the draft's
+    guesses up to the first one the copy differs at, the copy's from there, scored by the copy's verified guesses' rate (one both guess the
+    higher). the guesses and the draft's scores of its own"""
     chain, seen = None, [(T, t) for T in self.widths for t in self.step_s[T]]
     line = np.polyfit(*zip(*seen), 1) if len(self.widths) > 1 and all(self.step_s[T] for T in self.widths) else None
+    own, copied = len(g), score is not None and len(copy) == len(g)
+    if copied:
+      own, copy_s = next((j for j, (a, b) in enumerate(zip(g, copy)) if a != b), own), (self.copied[1] + 1) / (self.copied[0] + 2)
+      g = [*g[:own], *copy[own:]]
     while True:
       n = self.tokens - 1
       if score is not None and len(self.widths) > 1:
         s = self.borne_out(np.concatenate([score, np.full(n, score[-1])]))
+        if copied: s[:own], s[own:len(g)] = np.maximum(s[:own], copy_s), copy_s
         def rate(T:int) -> float:
           return (1 + np.cumprod(s[:T - 1]).sum()) / (np.mean(t) if line is None else np.polyval(line, T)) if (t:=self.step_s[T]) else math.inf
         n = max(self.widths, key=rate) - 1
-      if len(g) >= n: return g[:n], None if score is None else score[:n]
+      if len(g) >= n: return g[:n], None if score is None else score[:min(n, own)]
       guess, prob = next(chain:=chain or self.chain(g[-1], pos, row))
-      g, score = [*g, guess], None if score is None else np.append(score, prob)
+      g, score, own = [*g, guess], None if score is None else np.append(score, prob), own + 1
 
   def borne_out(self, s:np.ndarray) -> np.ndarray:
     """scores as the steps bore them out: their tenth's verified guesses right, a score itself as 16 of them"""
     seen, right = self.scored[:, np.minimum((s * 10).astype(int), 9)]
     return (right + 16 * s) / (seen + 16)
 
-  def tally(self, score:np.ndarray, row:int):
-    """a verify step's verified guesses (the first row right, the next wrong) into the table of their scores' tenth"""
-    for j in range(min(row + 1, len(score))): self.scored[:, min(int(score[j] * 10), 9)] += (1, j < row)
+  def tally(self, score:np.ndarray, n:int, row:int):
+    """a verify step's verified guesses of its n (the first row right, the next wrong): the draft's into the table of their scores' tenth, the
+    copy's after them into its count"""
+    for j in range(min(row + 1, n)):
+      if j < len(score): self.scored[:, min(int(score[j] * 10), 9)] += (1, j < row)
+      else: self.copied += (1, j < row)
 
   def chain(self, g:int, pos:int, row:int) -> Iterator[tuple[int, float]]:
     """the draft's guesses after g (at pos+1, guessed at the step's row) for a verify step and their probabilities, a chain step's at a time"""
@@ -1337,7 +1361,7 @@ class Engine:
     cap_prior = fork_prefilled > start or prefilled > fork
     (*_, t), g, score = self.steps(tokens, prefilled, len(tokens), cap_prior=cap_prior)
     self.model.save(tokens)
-    row, c0, v0, widths = 0, self.counters(), self.verified.copy(), collections.Counter()
+    row, c0, v0, widths, copies = 0, self.counters(), self.verified.copy(), collections.Counter(), Copies()
     try:
       while len(tokens) + self.tokens <= self.max_context:  # (a verify step's last token in the context)
         tokens.append(t)
@@ -1347,12 +1371,12 @@ class Engine:
           (t,), _, _ = self.step([t], len(tokens) - 1)
           widths[1] += 1
           continue
-        gs, scores = self.proposal(g, score, len(tokens) - 1, row)
+        gs, scores = self.proposal(g, score, len(tokens) - 1, row, copies(tokens, self.tokens - 1))
         toks, g, score = self.step([t, *gs], len(tokens) - 1)
         widths[len(toks)] += 1
         row = next((j for j, g in enumerate(gs) if toks[j] != g), len(gs))
         self.verified += (1, len(gs), row)
-        if scores is not None: self.tally(scores, row)
+        if scores is not None: self.tally(scores, len(gs), row)
         if row < len(gs): self.model.rollback(row + 1)  # (before the kept ones are yielded: a request may stop at any)
         for kept in gs[:row]:
           tokens.append(kept)

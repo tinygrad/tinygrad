@@ -104,7 +104,7 @@ def bench(eng, specs:str, late:Callable[[], bool], depth:str=""):
       pos, row = n, 0
       while pos + T < len(toks) and not late():
         st = time.perf_counter()
-        gs, _ = eng.proposal(g, score, pos, row)
+        gs, _ = eng.proposal(g, score, pos, row, [])
         _, g, score = eng.step([toks[pos], *gs], pos, toks[pos + 1:pos + 1 + len(gs) + 1])
         t_steps, steps = t_steps + time.perf_counter() - st, steps + 1
         row = next((j for j, x in enumerate(gs) if x != toks[pos + 1 + j]), len(gs))

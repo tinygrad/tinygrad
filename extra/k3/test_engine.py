@@ -15,7 +15,7 @@ from tinygrad.engine.realize import get_call_arg_uops, get_call_outs_ins
 from tinygrad.helpers import round_up
 from tinygrad.llm.kernels.amd import amd_custom_kernels_supported
 from tinygrad.llm.model import Transformer, TransformerConfig, SSMConfig, ExpertGating, MLATransformerBlock, Indexer, IndexerConfig
-from extra.k3.engine import Engine
+from extra.k3.engine import Engine, Copies, COPY
 from extra.k3.host import IoT, host_c
 from extra.k3.draft import Eagle3, DSpark, MTP
 from extra.k3.eval import window_evaluate, window_dump
@@ -388,24 +388,50 @@ class TestEngine(unittest.TestCase):
 
   def test_proposal(self):  # a scored draft's verify step: the width whose expected tokens (by the scores) a measured second are most, one not
     # measured first; unscored: every guess
-    eng = SimpleNamespace(tokens=8, widths=[2, 4, 8], step_s={2: [0.05], 4: [0.08], 8: []}, chain=None, scored=np.zeros((2, 10)))
+    eng = SimpleNamespace(tokens=8, widths=[2, 4, 8], step_s={2: [0.05], 4: [0.08], 8: []}, chain=None, scored=np.zeros((2, 10)),
+                          copied=np.zeros(2))
     eng.borne_out = lambda s: Engine.borne_out(eng, s)  # type: ignore[arg-type]
     g, score = list(range(7)), np.full(7, 0.9)
-    self.assertEqual(Engine.proposal(eng, g, score, 0, 0)[0], g)  # type: ignore[arg-type]
+    self.assertEqual(Engine.proposal(eng, g, score, 0, 0, [])[0], g)  # type: ignore[arg-type]
     eng.step_s[8] = [0.14]  # (1.9 / .05 = 38, 3.44 / .08 = 43, 5.2 / .14 = 37 tokens a second)
-    gs, scores = Engine.proposal(eng, g, score, 0, 0)  # type: ignore[arg-type]
+    gs, scores = Engine.proposal(eng, g, score, 0, 0, [])  # type: ignore[arg-type]
     self.assertEqual((gs, list(scores)), (g[:3], [0.9] * 3))
-    self.assertEqual(Engine.proposal(eng, g, np.full(7, 0.3), 0, 0)[0], g[:1])  # type: ignore[arg-type]
-    self.assertEqual(Engine.proposal(eng, g, None, 0, 0), (g, None))  # type: ignore[arg-type]
+    self.assertEqual(Engine.proposal(eng, g, np.full(7, 0.3), 0, 0, [])[0], g[:1])  # type: ignore[arg-type]
+    self.assertEqual(Engine.proposal(eng, g, None, 0, 0, []), (g, None))  # type: ignore[arg-type]
     eng.scored[:, 9] = 100, 50  # (guesses scored .9 right half the time: a step of 2)
-    self.assertEqual(Engine.proposal(eng, g, score, 0, 0)[0], g[:1])  # type: ignore[arg-type]
+    self.assertEqual(Engine.proposal(eng, g, score, 0, 0, [])[0], g[:1])  # type: ignore[arg-type]
+
+  def test_proposal_copy(self):  # the draft's guesses up to the first the context's copy differs at, the copy's from there, scored by its rate
+    eng = SimpleNamespace(tokens=8, widths=[2, 4, 8], step_s={2: [0.05], 4: [0.08], 8: [0.14]}, chain=None, scored=np.zeros((2, 10)),
+                          copied=np.zeros(2))
+    eng.borne_out = lambda s: Engine.borne_out(eng, s)  # type: ignore[arg-type]
+    g, copy = list(range(7)), [0, 1, 9, 9, 9, 9, 9]
+    self.assertEqual(Engine.proposal(eng, g, np.full(7, 0.3), 0, 0, copy)[0], g[:1])  # type: ignore[arg-type]
+    eng.copied[:] = 98, 98  # (the copy's guesses right 99 of 100: the widest step)
+    gs, scores = Engine.proposal(eng, g, np.full(7, 0.3), 0, 0, copy)  # type: ignore[arg-type]
+    self.assertEqual((gs, list(scores)), ([0, 1, 9, 9, 9, 9, 9], [0.3, 0.3]))
+    Engine.tally(eng, scores, len(gs), 4)  # type: ignore[arg-type]
+    np.testing.assert_equal((eng.scored[:, 3], eng.copied), ([2, 2], [101, 100]))
+    gs, scores = Engine.proposal(eng, g[:1], np.full(1, 0.3), 0, 0, copy)  # type: ignore[arg-type]
+    self.assertEqual((gs, list(scores)), (g[:1], [0.3]))  # (a chain's guesses: no copy)
+
+  def test_copies(self):  # the tokens after the latest earlier place of the context's last COPY, none at the context's own end or with fewer after
+    copies, run = Copies(), list(range(10, 10 + COPY))
+    self.assertEqual(copies(run, 3), [])
+    self.assertEqual(copies([*run, 1, 2, 3, *run], 3), [1, 2, 3])
+    self.assertEqual(copies([*run, 1, 2, 3, *run, 4, 5, 6, *run], 3), [4, 5, 6])
+    self.assertEqual(copies([*run, 1, 2, 3, *run, 4, 5, 6, *run], 4), [4, 5, 6, *run[:1]])
+    self.assertEqual(Copies()([*run, 1, *run], COPY + 1), [1, *run])
+    self.assertEqual(Copies()([*run, 1, *run], COPY + 2), [])
+    self.assertEqual(Copies()([7] * (COPY + 3), 1), [7])
+    self.assertEqual(Copies()([7] * (COPY + 3), 2), [])
 
   def test_borne_out(self):  # a score toward its tenth's verified guesses' rate (as 16 of them), untouched while the table's empty
     eng = SimpleNamespace(scored=np.zeros((2, 10)))
     s = np.array([0.05, 0.55, 0.95, 1.0])
     np.testing.assert_allclose(Engine.borne_out(eng, s), s)  # type: ignore[arg-type]
-    Engine.tally(eng, np.array([0.55, 0.57, 0.95]), 1)  # type: ignore[arg-type]
-    Engine.tally(eng, np.array([0.55, 0.95]), 2)  # type: ignore[arg-type]
+    Engine.tally(eng, np.array([0.55, 0.57, 0.95]), 3, 1)  # type: ignore[arg-type]
+    Engine.tally(eng, np.array([0.55, 0.95]), 2, 2)  # type: ignore[arg-type]
     np.testing.assert_equal(eng.scored[:, [5, 9]], [[3, 1], [2, 1]])
     np.testing.assert_allclose(Engine.borne_out(eng, s), [0.05, (2 + 16 * .55) / 19, (1 + 16 * .95) / 17, 1])  # type: ignore[arg-type]
 
@@ -418,6 +444,19 @@ class TestEngine(unittest.TestCase):
     eng.steps = lambda *a, **kw: Engine.steps(eng, *a, **kw)  # type: ignore[arg-type]
     self.assertEqual([t for _, t in zip(range(4), Engine.generate(eng, [0]))], [5, 6, 9, 8])  # type: ignore[arg-type]
     self.assertEqual(seen, [[6, 7], [8, 3]])
+
+  def test_generate_copy(self):  # a prompt that repeats itself: the context's copy as a verify step's guesses, the yielded tokens the target's
+    def step(toks, pos, given=None): return [t % 5 + 1 for t in toks], [0, 0, 0], np.full(3, 0.1)  # (the target's: 1 2 3 4 5 1 ..)
+    model = SimpleNamespace(fork=lambda *a: 0, save=lambda t: None, rollback=lambda n: None)
+    eng = SimpleNamespace(get_start_pos=lambda t: 0, model=model, prefill=lambda t, p: p, step=step, tokens=4, widths=[2, 4], max_context=64,
+                          step_s={1: [], 2: [0.05], 4: [0.08]}, chain=None, scored=np.zeros((2, 10)), copied=np.zeros(2), draft=True,
+                          verified=np.zeros(3, int), W=0, chunk=0, counters=lambda: np.zeros(15), jits={1: None, 2: None, 4: None},
+                          io=SimpleNamespace(tail=1), temperature_np=np.zeros(1))
+    for f in ("steps", "proposal", "borne_out", "tally"): setattr(eng, f, getattr(Engine, f).__get__(eng))
+    prompt = [1, 2, 3, 4, 5] * 2 + [1, 2, 3]
+    self.assertEqual([t for _, t in zip(range(20), Engine.generate(eng, list(prompt)))], ([4, 5, 1, 2, 3] * 4))  # type: ignore[arg-type]
+    self.assertTrue(eng.copied[0] == eng.copied[1] > 0)
+    self.assertEqual(eng.scored.sum(), 0)
 
   def test_steps_faster(self):  # steps or a window of n tokens: a window the store's experts not cached read (5 s here) and a token's (measured:
     # their median), a step measured (of the most tokens there's a graph of)
@@ -606,6 +645,19 @@ class TestEngine(unittest.TestCase):
     want, tok = [], 3
     for pos in range(10): want.append(tok:=int(self.want(tok, pos).argmax()))
     self.assertEqual([t for _, t in zip(range(10), eng.generate([3]))], want)
+
+  @unittest.skipUnless(amd_custom_kernels_supported(Device.DEFAULT), "the graph's host syncs and the expert kernel: AMD")
+  def test_generate_dspark_copy(self):  # a prompt that repeats itself: the context's copy as guesses, still the target's greedy tokens
+    from extra.k3.test_draft import dspark
+    path, prompt = dspark(tempfile.mkdtemp(), np.random.default_rng(5), window=6), [3, 5, 7, 3, 5, 7, 3]
+    self.eng = eng = self.engine(2 * E, lambda m: DSpark(path, lambda t: m.token_embd(t).float(), m.output, m.token_embd.weight.device,
+                                                         m.max_context, width=3), tokens=4, widths=(2, 4))
+    eng.warm()
+    for pos, tok in enumerate(prompt[:-1]): self.want(tok, pos)
+    want, tok = [], prompt[-1]
+    for pos in range(len(prompt) - 1, 12): want.append(tok:=int(self.want(tok, pos).argmax()))
+    with patch("extra.k3.engine.COPY", 1):  # (the tiny model's context: a copy after a token seen before)
+      self.assertEqual([t for _, t in zip(range(len(want)), eng.generate(list(prompt)))], want)
 
   @unittest.skipUnless(amd_custom_kernels_supported(Device.DEFAULT), "the graph's host syncs and the expert kernel: AMD")
   def test_generate(self):  # the jitted steps with the host's step_io (every expert cached: no reads), captured on dry steps
