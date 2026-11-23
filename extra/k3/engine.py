@@ -1203,13 +1203,16 @@ class Engine:
   def proposal(self, g:list[int], score:np.ndarray|None, pos:int, row:int) -> list[int]:
     """a verify step's guesses after the token at pos: the row's of the step before (guessed at its row), the draft's chain after them. scored:
     as many as the step of the widths that expects most tokens a second (by the scores, a guess the chain hasn't made yet scored as the last,
-    the steps' measured seconds: one not measured first), the chain run a guess further while a wider step's expected"""
-    chain = None
+    the steps' seconds a line in the width through every width's measured ones: one not measured first), the chain run a guess further while
+    a wider step's expected"""
+    chain, seen = None, [(T, t) for T in self.widths for t in self.step_s[T]]
+    line = np.polyfit(*zip(*seen), 1) if len(self.widths) > 1 and all(self.step_s[T] for T in self.widths) else None
     while True:
       n = self.tokens - 1
       if score is not None and len(self.widths) > 1:
         s = np.concatenate([score, np.full(n, score[-1])])
-        def rate(T:int) -> float: return (1 + np.cumprod(s[:T - 1]).sum()) / np.mean(t) if (t:=self.step_s[T]) else math.inf
+        def rate(T:int) -> float:
+          return (1 + np.cumprod(s[:T - 1]).sum()) / (np.mean(t) if line is None else np.polyval(line, T)) if (t:=self.step_s[T]) else math.inf
         n = max(self.widths, key=rate) - 1
       if len(g) >= n: return g[:n]
       guess, prob = next(chain:=chain or self.chain(g[-1], pos, row))
