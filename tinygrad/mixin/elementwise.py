@@ -32,7 +32,8 @@ class ElementwiseMixin(CreationMixin):
 
   def _broadcasted(self, y: 'Self|ConstType|UOp', reverse: bool = False) -> tuple[Self, Self]:
     y = self.ufix(y)
-    x, y = (y.ufix(self), y) if not reverse else (y, y.ufix(self))
+    x = y.ufix(self)
+    if reverse: x, y = y, x
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
     return _promote(x, out_dtype), _promote(y, out_dtype)
 

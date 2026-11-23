@@ -5,7 +5,7 @@ from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
+from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element, to_max_shape
 from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype, commit_int
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, fully_flatten, get_shape, make_tuple, merge_dicts, prod
 from tinygrad.helpers import resolve_pool_pads, round_up, IMAGE, FLOAT16, WINO
@@ -215,7 +215,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, buffer=False)
     acc_dtype = least_upper_dtype(dt, dtypes.float32) if dtypes.is_float(dt) else dt
-    from tinygrad.uop.ops import to_max_shape
     return (cls.full(to_max_shape((output_len,)), step, dtype=acc_dtype, buffer=False)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)[:output_len]
 
   @classmethod

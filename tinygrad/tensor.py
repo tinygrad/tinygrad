@@ -164,9 +164,8 @@ class Tensor(Mixin):
   @suppress_finalizing
   def __del__(self): all_tensors.pop(weakref.ref(self), None)
 
-  def _apply_uop(self, fxn:Callable[..., UOp], *x:Tensor, **kwargs) -> Tensor:
-    srcs = (self,)+x
-    if (new_uop:=fxn(*[t.uop for t in srcs], **kwargs)) is self.uop: return self
+  def _apply_uop(self, new_uop:UOp) -> Tensor:
+    if new_uop is self.uop: return self
     # directly create the Tensor
     ret = Tensor.__new__(Tensor)
     ret.uop, ret.grad, ret.is_param = new_uop, None, True
@@ -175,7 +174,7 @@ class Tensor(Mixin):
     return ret
 
   # alu, _uop, _wrap_uop and const are used by the mixins
-  def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
+  def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(self.uop.alu(op, *(t.uop for t in src)))
   @property
   def _uop(self) -> UOp: return self.uop
   @classmethod
@@ -548,8 +547,8 @@ class Tensor(Mixin):
 
   # ***** movement ops *****
 
-  def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, op=op, arg=arg)
-  def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
+  def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(self.uop._mop(op, arg))
+  def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(self.uop._rop(op, axis))
 
   def __setitem__(self, indices, v:Tensor|PyConst|list|tuple) -> None:
     if self.dtype in dtypes.weaks: raise RuntimeError("cannot setitem into a weak tensor; it has no storage")

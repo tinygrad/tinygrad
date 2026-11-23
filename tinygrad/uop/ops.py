@@ -84,6 +84,7 @@ def srender(x:sint) -> str: return x.render() if isinstance(x, UOp) else str(x)
 def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   max_dim = max(len(s) for s in shapes)
   return tuple((1,)*(max_dim-len(s))+s for s in shapes)
+def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   if all_same(shapes): return shapes[0]
   # per right-aligned dim: sizes of 1 broadcast to the others, which must all agree
@@ -1879,7 +1880,6 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
-def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot] if p.arg.slot >= 0 else None)])
