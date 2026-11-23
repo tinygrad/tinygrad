@@ -513,7 +513,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(), name="instruction selection", bottom_up=True)
       if getattr(renderer, "emulate", False):
         from tinygrad.renderer.cstyle import ClangRenderer
-        full_sink = graph_rewrite(full_sink, pm_remove_native, ctx=itertools.count(-1, -1), name="remove native", bottom_up=True)
+        full_sink = graph_rewrite(full_sink, pm_remove_native, name="remove native", bottom_up=True)
         host_renderer = ClangRenderer(replace(renderer.target, device="CPU", renderer="", interface=""))
         return to_program(full_sink, host_renderer)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)

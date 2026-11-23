@@ -305,9 +305,8 @@ def store_native(opcode:str, base:UOp, index:UOp, displacement:UOp, scale:UOp, v
   return UOp.native(X86Ops[opcode], target.store(value))
 
 pm_remove_native = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.NATIVE, name="native"),), allow_any_len=True, name="call"),
-   lambda call,native: call.replace(src=(UOp.sink(native.src[0]), *call.src[1:]),
-                                    arg=replace(call.arg, name=native.arg.code.name.lower()))),
+  (UPat(Ops.NATIVE, name="native").call(allow_any_len=True, name="call"),
+   lambda native,call: call.replace(src=(UOp.sink(native.src[0]), *call.src_without_body), arg=replace(call.arg, name=native.arg.code.name.lower()))),
 ])
 
 GPR_DEST_OPS = {X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI, X86Ops.VMOVDm, X86Ops.VMOVQm}
@@ -717,6 +716,7 @@ class X86Renderer(ISARenderer):
     self.emulate = target.interface == "MOCK"
     if not self.emulate and target.arch.split(",")[0] != "x86_64": raise RuntimeError(f"X86Renderer only supports x86_64, got {target.arch}")
     super().__init__(target)
+    # TODO: allow_vregs should just be deleted
     if self.emulate: self.isel_matcher = PatternMatcher(isel_matcher.patterns[:-1])
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
