@@ -25,7 +25,7 @@ class HCQInfo:
   skip_wait:bool = False # TODO: remove. an rdma copy between nodes is two batches, so waiting on the first alone deadlocks
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
-def is_usb(dev:Any) -> bool: return Device.target_for(Device.canonicalize(to_tuple(dev)[0])).interface.endswith("USB")
+def is_usb(dev:str|tuple[str, ...]) -> bool: return Device.target_for(Device.canonicalize(to_tuple(dev)[0])).interface.endswith("USB")
 
 def get_enqueue_devs(call:UOp) -> tuple[str, ...]:
   if call.op is not Ops.CALL: return () # entries can be AFTER-wrapped calls
