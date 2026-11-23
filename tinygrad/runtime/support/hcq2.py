@@ -4,7 +4,7 @@ from dataclasses import replace, dataclass, field
 from collections import defaultdict, Counter
 from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, Context, panic, partition, to_name, flatten, DEBUG, VIZ, ALL2ALL, PROFILE
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, HCQ_RUNTIME_DEV, HCQ_DEVS, HOST_DEVS, UVM_DEVS, ProfileProgramEvent
-from tinygrad.device import is_iface_usb, has_copy_queue
+from tinygrad.device import is_iface_usb, has_copy_queue, peer_group, host_of
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu, uopfunc
 from tinygrad.uop.ops import pm_renumber_slots, CountCtx, sint_to_uop, pm_flatten_linear, AxisType
 from tinygrad.dtype import dtypes, AddrSpace, truncate
@@ -178,7 +178,7 @@ pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
 
 def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   devs = [to_tuple(b.device)[0] for b in (dst, src)]
-  if Device[devs[0]].host == Device[devs[1]].host: return None # not 2 nodes
+  if host_of(peer_group(devs[0])) == host_of(peer_group(devs[1])): return None # not 2 nodes
 
   from tinygrad.runtime.support.system import PCIIfaceBase
   if not all(isinstance(getattr(Device[d], "iface", None), PCIIfaceBase) for d in devs): return None
@@ -197,9 +197,9 @@ def stage_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   device = enqueued[0]
 
   from tinygrad.runtime.ops_disk import is_disk_read
-  dev, host, usb_memcpys = Device[device], Device[device].host, is_iface_usb(device)
+  host, usb_memcpys = host_of(peer:=peer_group(device)), is_iface_usb(device)
   mappable = {"CPU", "PYTHON"} | ({"NPY", "DISK"} if usb_memcpys else {"DISK"} if is_disk_read(call) else set()) # ops_disk stages it in the batch
-  if device != host and not all(Device[d].peer_group == dev.peer_group or (d.split(":")[0] in mappable and Device[d].host == host) for d in devs):
+  if device != host and not all(peer_group(d) == peer or (d.split(":")[0] in mappable and host_of(peer_group(d)) == host) for d in devs):
     stage = UOp.alloc(src.max_shape, src.dtype, int.from_bytes(call.key[:8], "little"), device=host)
     return UOp(Ops.LINEAR, src=(stage.store_call(src), dst.store_call(stage)))
 
@@ -247,7 +247,8 @@ class BatchCtx:
 
   def __post_init__(self):
     # the other devices whose memory a call touches: a usb gpu can't reach host memory
-    reach = [HCQ_DEVS if is_iface_usb(d) else HCQ_DEVS | HOST_DEVS for _, d, _ in self.batch]
+    usb = {d: is_iface_usb(d) for d in {d for _, d, _ in self.batch}}
+    reach = [HCQ_DEVS if usb[d] else HCQ_DEVS | HOST_DEVS for _, d, _ in self.batch]
     arg_devs = [{Device.canonicalize(x) for b in get_call_arg_uops(c) for x in to_tuple(b.device)} for c, _, _ in self.batch]
     touched = [{x for x in xs if all_devices_in(x, r)} - {d} for xs, r, (_, d, _) in zip(arg_devs, reach, self.batch)]
 
@@ -366,8 +367,8 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
   srcs:list[UOp] = []
   for hcq, grp in itertools.groupby(zip(l.src, devs), key=lambda e: bool(e[1])):
     run = list(grp)
-    peer_groups = dedup([Device[d[0]].peer_group for _, d in run if d])
-    batches = [[(c, d[0], queue_for(c)) for c, d in run if Device[d[0]].peer_group == pg] for pg in peer_groups]
+    peers = {d: peer_group(d) for d in dedup(d[0] for _, d in run if d)}
+    batches = [[(c, d[0], queue_for(c)) for c, d in run if peers[d[0]] == pg] for pg in dedup(peers.values())]
     if hcq: srcs += [_finalize_batch(BatchCtx(batch, profile), batch is not batches[-1]) for batch in batches]
     else: srcs += [c for c, _ in run]
   return l.replace(src=tuple(srcs))

@@ -44,8 +44,8 @@ class _Device:
   def target_for(self, device:str, cv=DEV) -> Target:
     if not (t:=cv.target(device.split(':')[0])).arch and device not in self._opened_devices: self[device]
     if (d:=self._opened_devices.get(device)) is None: return t
-    iface = type(d.iface).__name__[:-5] if hasattr(d, "iface") else ""
-    return replace(t, arch=t.arch or d.arch or "", interface=t.interface or iface, props=",".join(f"{k}={v}" for k, v in (d.props | t.opts).items()))
+    iface, props = type(d.iface).__name__[:-5] if hasattr(d, "iface") else "", {"peer": d.peer_group} | d.props | t.opts
+    return replace(t, arch=t.arch or d.arch or "", interface=t.interface or iface, props=",".join(f"{k}={v}" for k, v in props.items()))
   def renderer_for(self, device:str, cv=DEV) -> Renderer: return select_renderer(cv.target((t:=self.target_for(device, cv)).device, arch=t.arch))
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
@@ -67,6 +67,8 @@ class _Device:
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device: _Device = _Device()
 atexit.register(lambda: [Device[dn].finalize() for dn in tuple(Device._opened_devices)])
+def host_of(peer_group:str) -> str: return f"CPU:{peer_group[7:]}" if peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.device
+def peer_group(dev:str) -> str: return Device.target_for(d:=Device.canonicalize(dev)).get("peer", d.split(":")[0])
 def has_copy_queue(dev:str) -> bool: return bool((t:=Device.target_for(dev)).get("copy", int(Device.get_class(t.device).has_copy_queue)))
 def is_iface_usb(dev:str|tuple[str, ...]) -> bool: return Device.target_for(Device.canonicalize(to_tuple(dev)[0])).interface.endswith("USB")
 
@@ -365,7 +367,7 @@ class Compiled:
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
 
   @property
-  def host(self) -> str: return f"CPU:{self.peer_group[7:]}" if self.peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.device
+  def host(self) -> str: return host_of(self.peer_group)
 
   @property
   def renderer(self) -> Renderer: return Device.renderer_for(self.device)
