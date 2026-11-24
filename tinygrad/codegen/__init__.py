@@ -2,7 +2,7 @@ from dataclasses import replace, dataclass, field
 from collections import deque
 import itertools, functools, time, inspect
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC, SCACHE, BASEDIR
-from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile, prod
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, cpu_profile, prod
 from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored, NO_MEMORY_PLANNER
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear, ParamArg
@@ -265,26 +265,24 @@ pm_implicit_barriers = PatternMatcher([
 def remove_range(sink:UOp):
   uops = sink.toposort()
   acc_slots = itertools.count(max((u.arg.slot+1 for u in uops if isinstance(u.arg, ParamArg)), default=0))
-  ends: dict[UOp, list[UOp]] = {}
-  for u in uops:
-    if u.op is Ops.END: ends.setdefault(u.src[1], []).append(u)
   replacements: dict[UOp, UOp] = {}
-  for rng, exits in ends.items():
-    if rng.axis_type in (AxisType.GLOBAL, AxisType.LOCAL) or rng.dtype is dtypes.void: continue
+  for end in uops:
+    if end.op is not Ops.END: continue
+    rng = end.src[1]
+    assert rng not in replacements
     bound, = rng.src
     acc = UOp.placeholder((1,), rng.commit_dtype(dtypes.int), slot=next(acc_slots), addrspace=AddrSpace.REG)
-    acc = acc.after(*exits[0].ranges)[0].set(0)
+    acc = acc.after(*end.ranges)[0].set(0)
     entry = UOp(Ops.NOOP).after(acc, bound)
     if bound.vmin <= 0:
-      inputs = dedup(s for x in uops if rng in x.ranges for s in x.src_without_body if rng not in s.ranges)
+      inputs = dedup(s for x in end.src[0].toposort(lambda x: rng in x.ranges) for s in x.src_without_body if rng not in s.ranges)
       entry = UOp(Ops.IF, src=((bound > 0).after(acc, *inputs), UOp(Ops.NOOP)))
     loop = rng.replace(src=(entry,))
     replacements[rng] = acc.after(loop)[0].load()
     next_idx = replacements[rng] + 1
-    for end in exits:
-      body = end.src[0]
-      edge = body.backedge(loop, (next_idx < bound).after(acc.after(body)[0].store(next_idx)))
-      replacements[end] = UOp(Ops.ENDIF, src=(entry, edge)) if entry.op is Ops.IF else edge
+    body = end.src[0]
+    edge = body.backedge(loop, (next_idx < bound).after(acc.after(body)[0].store(next_idx)))
+    replacements[end] = UOp(Ops.ENDIF, src=(entry, edge)) if entry.op is Ops.IF else edge
   return sink.substitute(replacements, extra_pm=pm_cast_const, name="remove range")
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
