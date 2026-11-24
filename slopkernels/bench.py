@@ -153,8 +153,9 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         w4 = ggml_data_to_tensor(tile_u8[:CHECK_ROWS].flatten(), CHECK_ROWS * K, qtype).reshape(CHECK_ROWS, K)
         _assert_close(out[:, :CHECK_ROWS].float().numpy(), (x.float() @ w4.T).numpy(), rtol=4e-2, atol=5e-2)
       if m % 16 == 0 and n % 16 == 0:
+        mt = 8 if target[0] == 12 and m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
         return (lambda: _krun(f"{arch_gemm}_gemm_{kname}_f16", (m, n), dev, w_packed, x.half().contiguous(),
-                              *_iq_lut(qtype, dev, True), tokens=m, out_features=n, in_features=K, raw_len=w_len)), _verify
+                              *_iq_lut(qtype, dev, True), m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=K, raw_len=w_len)), _verify
       ch = ceildiv(K, 1024)
       def _run() -> Tensor:
         out = _krun(f"{arch_gemv}_gemv_{kname}", (m, n, ch), dev, w_packed, *_q8(x, m, K, dev), *_iq_lut(qtype, dev),
@@ -216,7 +217,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       x = _nonuniform((m, K), dtypes.float32, dev, scale=0.5, freq=0.023)
       def _verify(out:Tensor) -> None:
         _assert_close(out[:, :CHECK_ROWS].float().numpy(), (x @ w[:CHECK_ROWS].float().T).numpy(), rtol=3e-3, atol=3e-3)
-      return (lambda: _krun("amd_gemv_f16_f32", (m, n), dev, w, x, tokens=m, out_features=n, in_blks=K // 128)), _verify
+      return (lambda: _krun("amd_gemv_f16_f32", (m, n), dev, w, x, tokens=m, out_features=n, in_blks=K // 128, val_chunk=4)), _verify
     cases.append((f"dense_gemv_f16_{m}x{n}x{K}", n * K * 2 + m * (K + n) * 4, 2 * m * n * K, _mk_dense))
 
   if not cdna:
@@ -228,9 +229,9 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         ref = q[:, :1].float().scaled_dot_product_attention(kv[0, :, :1].float(), kv[1, :, :1].float(), attn_mask=mask, enable_gqa=True).numpy()
         _assert_close(out[:, :1].float().numpy(), ref, rtol=5e-3, atol=5e-3)
       def _run() -> Tensor:
-        return _krun(f"{arch_gemm}_flash_attn_d{ATTN_D}", (ATTN_H, ATTN_M, ATTN_D), dev, q.reshape(ATTN_H, ATTN_M, ATTN_D), kv,
-                     UOp.const(ATTN_N), UOp.const(ATTN_M), BH=ATTN_H, m_blks=ATTN_M // 32, B=1, H_KV=ATTN_HKV, n_blks=ATTN_N // 32,
-                     valid_kv_offset=0, q_start_from_end=1).reshape(1, ATTN_H, ATTN_M, ATTN_D)
+        return _krun(f"{arch_gemm}_flash_attn", (ATTN_H, ATTN_M, ATTN_D), dev, q.reshape(ATTN_H, ATTN_M, ATTN_D), kv,
+                     UOp.const(ATTN_N), UOp.const(ATTN_M), BH=ATTN_H, m_blks=ATTN_M // 32, B=1, H_KV=ATTN_HKV, d_blks=ATTN_D // 64,
+                     n_blks=ATTN_N // 32, valid_kv_offset=0, q_start_from_end=1).reshape(1, ATTN_H, ATTN_M, ATTN_D)
       return _run, _verify
     cases.append((f"flash_attn_prefill_H{ATTN_H}_M{ATTN_M}_N{ATTN_N}_D{ATTN_D}",
                   (ATTN_H * ATTN_M * ATTN_D + 2 * ATTN_HKV * ATTN_N * ATTN_D) * 2 + ATTN_H * ATTN_M * ATTN_D * 4,
@@ -244,9 +245,10 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         ref = q[:, :1].float().scaled_dot_product_attention(kv[0, :, :1].float(), kv[1, :, :1].float(), enable_gqa=True).numpy()
         _assert_close(out[:, :1].float().numpy(), ref, rtol=5e-3, atol=5e-3)
       def _run() -> Tensor:
-        ch = min(48, ceildiv(ctx, 64))
-        kp = unwrap(slopkernels.get(f"amd_flash_decode_partial_g{ATTN_H // ATTN_HKV}_d{ATTN_D}")).specialize(
-          B=1, H_KV=ATTN_HKV, n_blks=ctx // 64, C=ch, valid_kv_offset=0)
+        ch, grp, waves = min(48, ceildiv(ctx, 64)), ATTN_H // ATTN_HKV, 16
+        while waves * grp * ((ATTN_D + 4) * 2 + 8) > 65536: waves //= 2
+        kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
+          B=1, H_KV=ATTN_HKV, G=grp, d_blks=ATTN_D // 64, n_blks=ctx // 64, C=ch, valid_kv_offset=0, waves=waves)
         partial, stats = (UOp.alloc((1, ATTN_H, ch, d), dtypes.float32, device=dev) for d in (ATTN_D, 2))
         cp = kp.call(partial, stats, q.uop, kv.uop, UOp.const(ctx))
         return _krun("amd_flash_decode_combine", (1, ATTN_H, 1, ATTN_D), dev, partial.after(cp), stats.after(cp), UOp.const(ctx),
@@ -272,8 +274,9 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         ref[t] = st @ q0[t]
       _assert_close(out[0, 0].numpy(), ref, rtol=2e-3, atol=2e-4)
       _assert_close(state[0, 0].numpy(), st, rtol=2e-3, atol=2e-4)
-    return (lambda: _krun(f"amd_gated_delta_k{gd_d}_a1", (1, gd_h, gd_t, gd_d), dev, q, k, v, beta, alpha, state,
-                          (q * k).sum(-1).contiguous(), UOp.const(1), batch=1, heads=gd_h, tokens=gd_t, v_tiles=gd_d // 4)), _verify
+    return (lambda: _krun("amd_gated_delta", (1, gd_h, gd_t, gd_d), dev, q, k, v, beta, alpha.reshape(1, gd_h, gd_t, 1), state,
+                          (q * k).sum(-1).contiguous(), UOp.const(1), batch=1, heads=gd_h, tokens=gd_t, v_tiles=gd_d // 4,
+                          k_blks=gd_d // 32, alpha_k=1)), _verify
   cases.append((f"gated_delta_prefill_H{gd_h}_T{gd_t}_D{gd_d}", (4 * gd_h * gd_t * gd_d + 2 * gd_h * gd_d * gd_d) * 4,
                 6 * gd_h * gd_t * gd_d * gd_d, _mk_gd))
 

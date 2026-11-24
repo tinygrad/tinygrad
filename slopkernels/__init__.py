@@ -29,11 +29,11 @@ def _b_q8(dt:str) -> UOp:
   return _gguf._q8_quantize_kernel(_p(0, (tok, g, 8), "u32"), _p(1, (tok, g), "f32"), _p(2, (tok, g, 2), "f32"),
                                    _p(3, (tok, g * 32), dt), tok, g * 32)
 
-def _b_gemv(wdt:str, xdt:str, vc:int) -> UOp:
-  tok, ib, outf = _t("tokens"), _t("in_blks"), _t("out_features")
+def _b_gemv(wdt:str, xdt:str) -> UOp:
+  tok, ib, outf, vc = _t("tokens"), _t("in_blks"), _t("out_features"), _t("val_chunk", 1, 4)
   inf = ib * (32 * vc)
   return _amd._amd_f16_gemv_kernel(_p(0, (tok, outf), "f32"), _p(1, (outf, inf), wdt), _p(2, (tok, inf), xdt),
-                                   in_features=inf, out_features=outf, tokens=tok, val_chunk=vc)
+                                   in_blks=ib, out_features=outf, tokens=tok, val_chunk=vc)
 
 def _b_qgemv(qt:int, cdna:bool) -> UOp:
   tok, inf, outf, rl = _t("tokens"), _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 30)
@@ -52,28 +52,29 @@ def _b_moe(qt:int, cdna:bool) -> UOp:
                                   out_features=outf, in_features=inf, ggml_type=qt, x_share=xs, cdna=cdna, ndev=nd)
 
 def _b_gemm(qt:int, kg:int, ln:int) -> UOp:
-  tok, inf, outf, rl = _t("tokens"), _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 30)
+  mb, mt, inf, outf, rl = _t("m_blks"), _t("m_tiles", 1, 8), _t("in_features", 32), _t("out_features", 16), _t("raw_len", 1, 1 << 30)
+  tok = mb * (mt * 16)
   tbl = (_p(3, (_WMMA_TBL_LENS[qt],), "u32"),) if qt in _WMMA_TBL_LENS else ()
   return _gguf._quant_linear_f16_wmma_kernel(_p(0, (tok, outf), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (tok, inf), "f16"), *tbl,
-                                             out_features=outf, in_features=inf, ggml_type=qt, kgroups=kg, lanes=ln)
+                                             m_blks=mb, m_tiles=mt, out_features=outf, in_features=inf, ggml_type=qt, kgroups=kg, lanes=ln)
 
 def _b_fdc() -> UOp:
   B, H, C, db, voff = _t("B", 1, 64), _t("H", 1, 256), _t("C", 1, 48), _t("d_blks", 1, 8), _t("valid_kv_offset", 0)
   return _amd._amd_flash_decode_combine(_p(0, (B, H, 1, db * 64), "f32"), _p(1, (B, H, C, db * 64), "f32"),
                                         _p(2, (B, H, C, 2), "f32"), valid_kv_len=_v(3, "valid_kv_len") + voff)
 
-def _b_fdp(G:int, D:int) -> UOp:
-  B, H_KV, C, nb, voff, waves = _t("B", 1, 64), _t("H_KV", 1, 256), _t("C", 1, 48), _t("n_blks", 1, 65536), _t("valid_kv_offset", 0), 16
-  while waves * G * ((D + 4) * 2 + 8) > 65536: waves //= 2
+def _b_fdp() -> UOp:
+  B, H_KV, G, db, C, nb = _t("B", 1, 64), _t("H_KV", 1, 256), _t("G", 1, 8), _t("d_blks", 1, 8), _t("C", 1, 48), _t("n_blks", 1, 65536)
+  voff, waves, D = _t("valid_kv_offset", 0), _t("waves", 1, 16), db * 64
   return _amd._amd_flash_attention_decode_partial(_p(0, (B, H_KV * G, C, D), "f32"), _p(1, (B, H_KV * G, C, 2), "f32"),
     _p(2, (B, H_KV * G, 1, D), "f16"), _p(3, (2, B, H_KV, nb * 64, D), "f16"),
-    valid_kv_len=_v(4, "valid_kv_len") + voff, max_kv_len=nb * 64, block_n=64, waves=waves, group=G)
+    valid_kv_len=_v(4, "valid_kv_len") + voff, d_blks=db, group=G, waves=waves)
 
-def _b_fa(D:int, rdna4:bool) -> UOp:
-  B, H_KV, nb, voff = _t("B", 1, 64), _t("H_KV", 1, 256), _t("n_blks", 1, 65536), _t("valid_kv_offset", 0)
-  BH, mb, qfe, vkl, ql = _t("BH", 1, 4096), _t("m_blks", 1, 4096), _t("q_start_from_end", 0, 1), _v(3, "valid_kv_len"), _v(4, "q_len")
+def _b_fa(rdna4:bool) -> UOp:
+  B, H_KV, db, nb, voff = _t("B", 1, 64), _t("H_KV", 1, 256), _t("d_blks", 1, 8), _t("n_blks", 1, 65536), _t("valid_kv_offset", 0)
+  BH, mb, qfe, vkl, ql, D = _t("BH", 1, 4096), _t("m_blks", 1, 4096), _t("q_start_from_end", 0, 1), _v(3, "valid_kv_len"), _v(4, "q_len"), db * 64
   return _amd._amd_flash_attention(_p(0, (BH, mb * 32, D), "f32"), _p(1, (BH, mb * 32, D), "f16"), _p(2, (2, B, H_KV, nb * 32, D), "f16"),
-    valid_kv_len=qfe.eq(1).where(vkl + voff, vkl + voff + ql), q_start=qfe.eq(1).where(vkl + voff - ql, vkl + voff), rdna4=rdna4)
+    valid_kv_len=qfe.eq(1).where(vkl + voff, vkl + voff + ql), q_start=qfe.eq(1).where(vkl + voff - ql, vkl + voff), d_blks=db, rdna4=rdna4)
 
 def _b_hc(bdt:str, sdt:str) -> UOp:
   tok, feats, iters = _t("tokens"), _t("features", 32), _t("iters", 1, 64)
@@ -81,27 +82,29 @@ def _b_hc(bdt:str, sdt:str) -> UOp:
   return _amd._hc_coeffs_kernel(_p(0, (tok, 24), "f32"), _p(1, (tok, 24), "f32"), _p(2, (tok, 32), "f32"),
                                 _p(3, (24,), bdt), _p(4, (3,), sdt), 4, iters, eps, neps, feats)
 
-def _b_gd(K:int, ca:bool) -> UOp:
-  tok, ba, hd, vt = _t("tokens"), _t("batch", 1, 64), _t("heads", 1, 256), _t("v_tiles", 1, 1024)
+def _b_gd() -> UOp:
+  tok, ba, hd, vt, kb, ak = _t("tokens"), _t("batch", 1, 64), _t("heads", 1, 256), _t("v_tiles", 1, 1024), _t("k_blks", 1, 8), _t("alpha_k", 1, 256)
+  K = kb * 32
   return _amd._gated_delta_prefill_kernel(_p(0, (ba, hd, tok, vt * 4), "f32"), _p(1, (ba, hd, tok, K), "f32"),
     _p(2, (ba, hd, tok, K), "f32"), _p(3, (ba, hd, tok, vt * 4), "f32"), _p(4, (ba, hd, tok), "f32"),
-    _p(5, (ba, hd, tok, K) if ca else (ba, hd, tok), "f32"), _p(6, (ba, hd, vt * 4, K), "f32"),
-    _p(7, (ba, hd, tok), "f32"), start_pos=_v(8, "start_pos"))
+    _p(5, (ba, hd, tok, ak), "f32"), _p(6, (ba, hd, vt * 4, K), "f32"),
+    _p(7, (ba, hd, tok), "f32"), k_blks=kb, alpha_k=ak, start_pos=_v(8, "start_pos"))
 
 _BUILDERS: dict[str, Callable[[], UOp]] = {
   **{f"amd_q8_quantize_{dt}": functools.partial(_b_q8, dt) for dt in ("f16", "bf16", "f32")},
-  **{f"amd_gemv_{w}_{x}{s}": functools.partial(_b_gemv, w, x, vc)
-     for w, x in (("f16", "f32"), ("f32", "f16"), ("bf16", "f32"), ("f32", "bf16"), ("f32", "f32")) for vc, s in ((4, ""), (1, "_v1"))},
+  **{f"amd_gemv_{w}_{x}": functools.partial(_b_gemv, w, x)
+     for w, x in (("f16", "f32"), ("f32", "f16"), ("bf16", "f32"), ("f32", "bf16"), ("f32", "f32"))},
   **{f"{a}_gemv_{qn}": functools.partial(_b_qgemv, qt, cdna)
      for qt, qn in _gguf.QUANT_NAMES.items() for a, cdna in (("rdna", False), ("cdna", True))},
   **{f"{a}_moe_{qn}": functools.partial(_b_moe, qt, cdna) for qt, qn in _gguf.QUANT_NAMES.items() for a, cdna in (("rdna", False), ("cdna", True))},
   **{f"{a}_gemm_{qn}_f16": functools.partial(_b_gemm, qt, kg, ln)
      for qt, qn in _gguf.QUANT_NAMES.items() for a, kg, ln in (("rdna4", 2, 32), ("rdna3", 1, 32), ("cdna", 4, 64))},
   "amd_flash_decode_combine": _b_fdc,
-  **{f"amd_flash_decode_partial_g{G}_d{D}": functools.partial(_b_fdp, G, D) for G in (1, 2, 4, 8) for D in (64, 128, 256)},
-  **{f"{a}_flash_attn_d{D}": functools.partial(_b_fa, D, r4) for D in (64, 128, 256, 320) for a, r4 in (("rdna4", True), ("rdna3", False))},
+  "amd_flash_decode_partial": _b_fdp,
+  "rdna4_flash_attn": functools.partial(_b_fa, True),
+  "rdna3_flash_attn": functools.partial(_b_fa, False),
   **{f"amd_hc_coeffs_{b}_{s}": functools.partial(_b_hc, b, s) for b in ("f16", "f32") for s in ("f16", "f32")},
-  **{f"amd_gated_delta_k{K}_{s}": functools.partial(_b_gd, K, ca) for K in (32, 64, 128, 256) for ca, s in ((False, "a1"), (True, "ak"))},
+  "amd_gated_delta": _b_gd,
 }
 
 def _emit(name:str, fn:Callable[[], UOp]) -> tuple[pathlib.Path, str]:
