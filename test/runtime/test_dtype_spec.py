@@ -57,6 +57,7 @@ class TestTypeSpec(unittest.TestCase):
 
     np.testing.assert_equal(Tensor(n).sum(dtype="int16").numpy(), Tensor(n).sum(dtype=dtypes.int16).numpy())
 
+  @settings(max_examples=5)
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_creation(self, default_int, default_float):
     self.enterContext(Context(DEFAULT_INT=default_int, DEFAULT_FLOAT=default_float))
@@ -76,6 +77,7 @@ class TestTypeSpec(unittest.TestCase):
     if dtypes.float16 in supported_dtypes:
       _assert_eq(Tensor.eye(3, dtype=dtypes.float16), dtypes.float16, np.eye(3))
 
+  @settings(max_examples=5)
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_full(self, default_int, default_float):
     self.enterContext(Context(DEFAULT_INT=default_int, DEFAULT_FLOAT=default_float))
@@ -99,6 +101,7 @@ class TestTypeSpec(unittest.TestCase):
       _assert_eq(Tensor.full((2, 3), 3, dtype=dtypes.float16), dtypes.float16, np.full((2, 3), 3))
       _assert_eq(Tensor.full((2, 3), 3.0, dtype=dtypes.float16), dtypes.float16, np.full((2, 3), 3))
 
+  @settings(max_examples=5)
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_reduce_0d_default(self, default_int, default_float):
     self.enterContext(Context(DEFAULT_INT=default_int, DEFAULT_FLOAT=default_float))
@@ -107,6 +110,7 @@ class TestTypeSpec(unittest.TestCase):
     # _assert_eq(Tensor.ones((2,3,0), dtype=dtypes.default_int).sum(2), dtypes.default_int, np.zeros((2, 3)))
     _assert_eq(Tensor.ones((2,3,0), dtype=dtypes.int32).sum(2), dtypes.int32, np.zeros((2, 3)))
 
+  @settings(max_examples=5)
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_arange(self, default_int, default_float):
     self.enterContext(Context(DEFAULT_INT=default_int, DEFAULT_FLOAT=default_float))

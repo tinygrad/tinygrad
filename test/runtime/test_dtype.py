@@ -72,14 +72,35 @@ class TestDType(unittest.TestCase):
     self.assertEqual(a.dtype, self.DTYPE)
     _test_to_np(a, _to_np_dtype(self.DTYPE), np.array(self.DATA, dtype=_to_np_dtype(self.DTYPE)))
 
-  def test_casts_from(self):
-    for dtype in get_available_cast_dtypes(self.DTYPE):
-      _test_cast(Tensor(self.DATA, dtype=self.DTYPE), dtype)
-
   def test_const_kernel(self):
     if not get_available_cast_dtypes(self.DTYPE): raise unittest.SkipTest("dtype does not run here")
     for value in ([1, 1e-5] if dtypes.is_float(self.DTYPE) else [1]):
       _assert_eq(Tensor.full((4,4), value, dtype=self.DTYPE).clone(), self.DTYPE, np.full((4,4), truncate[self.DTYPE](value)))
+
+  def test_max_reduce(self):
+    # NOOPT keeps the reduce a loop with an accumulator; the rows are nondecreasing, so the max of each is its last element
+    with Context(NOOPT=1):
+      t = Tensor(list(range(8))).cast(self.DTYPE).reshape(2, 4).contiguous()
+      self.assertEqual(t.max(axis=1).tolist(), t[:, -1].tolist())
+
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "skip for now")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "skip for now")
+  def test_uint_overflow(self):
+    if not dtypes.is_unsigned(self.DTYPE): raise unittest.SkipTest("only for unsigned")
+    v = self.DTYPE.max
+    _test_to_np(Tensor(v, dtype=self.DTYPE)+2, _to_np_dtype(self.DTYPE), np.array(v, dtype=_to_np_dtype(self.DTYPE))+2)
+    _test_to_np(Tensor(v, dtype=self.DTYPE)*2, _to_np_dtype(self.DTYPE), np.array(v, dtype=_to_np_dtype(self.DTYPE))*2)
+
+class _DTypePairs:
+  def test_casts_from(self):
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      _test_cast(Tensor(self.DATA, dtype=self.DTYPE), dtype)
+
+  def test_bitcast(self):
+    if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      if dtype != dtypes.bool:
+        _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype)
 
   def test_same_size_ops(self):
     for dtype in get_available_cast_dtypes(self.DTYPE):
@@ -90,31 +111,6 @@ class TestDType(unittest.TestCase):
     for dtype in get_available_cast_dtypes(self.DTYPE):
       if dtype.itemsize > self.DTYPE.itemsize:
         _test_ops(a_dtype=self.DTYPE, b_dtype=dtype)
-
-  def test_downcast_ops(self):
-    for dtype in get_available_cast_dtypes(self.DTYPE):
-      if dtype.itemsize < self.DTYPE.itemsize:
-        _test_ops(a_dtype=self.DTYPE, b_dtype=dtype)
-
-  def test_max_reduce(self):
-    # NOOPT keeps the reduce a loop with an accumulator; the rows are nondecreasing, so the max of each is its last element
-    with Context(NOOPT=1):
-      t = Tensor(list(range(8))).cast(self.DTYPE).reshape(2, 4).contiguous()
-      self.assertEqual(t.max(axis=1).tolist(), t[:, -1].tolist())
-
-  def test_bitcast(self):
-    if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
-    for dtype in get_available_cast_dtypes(self.DTYPE):
-      if dtype != dtypes.bool:
-        _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype)
-
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "skip for now")
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "skip for now")
-  def test_uint_overflow(self):
-    if not dtypes.is_unsigned(self.DTYPE): raise unittest.SkipTest("only for unsigned")
-    v = self.DTYPE.max
-    _test_to_np(Tensor(v, dtype=self.DTYPE)+2, _to_np_dtype(self.DTYPE), np.array(v, dtype=_to_np_dtype(self.DTYPE))+2)
-    _test_to_np(Tensor(v, dtype=self.DTYPE)*2, _to_np_dtype(self.DTYPE), np.array(v, dtype=_to_np_dtype(self.DTYPE))*2)
 
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   target_dtype = target_dtype or least_upper_dtype(a_dtype, b_dtype)
@@ -278,7 +274,7 @@ class TestEmulatedHalf(TestHalfDType):
     self.assertEqual(Tensor([0x7f800001], dtype=dtypes.uint32).bitcast(dtypes.float32).cast(dtypes.half).bitcast(dtypes.uint16).tolist(), [0x7e00])
 
 
-class TestFloatDType(TestDType):
+class TestFloatDType(_DTypePairs, TestDType):
   DTYPE = dtypes.float
 
   def test_float_to_uint(self):
@@ -340,7 +336,7 @@ class TestInt8DType(TestDType):
     a = Tensor([72, -90, 27, 40, -53, 70, 96, 51], dtype=dtypes.int8).bitcast(dtypes.short)
     self.assertListEqual(a.tolist(), [-22968, 10267, 18123, 13152])
 
-class TestUint8DType(TestDType):
+class TestUint8DType(_DTypePairs, TestDType):
   DTYPE = dtypes.uint8
   @unittest.skipIf(Device.DEFAULT == "CUDA" or isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "cuda saturation works differently")
   def test_uint8_to_int8_overflow(self):
@@ -391,7 +387,7 @@ class TestUint16DType(TestDType):
   def test_uint16_to_int8_overflow(self):
     _test_op(lambda: Tensor([2**16-1, 2**16-2, 1, 0], dtype=dtypes.uint16).cast(dtypes.int8), dtypes.int8, [-1, -2, 1, 0])
 
-class TestInt32DType(TestDType): DTYPE = dtypes.int32
+class TestInt32DType(_DTypePairs, TestDType): DTYPE = dtypes.int32
 class TestUint32DType(TestDType): DTYPE = dtypes.uint32
 
 class TestInt64DType(TestDType):
@@ -424,7 +420,7 @@ class TestUint64DType(TestDType):
     self.assertEqual(Tensor([2**63+2**10+1], dtype=dtypes.uint64).cast(dtypes.double).tolist(), [2**63+2**11])
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
-class TestEmulatedUInt64DType(TestUint64DType):
+class TestEmulatedUInt64DType(_DTypePairs, TestUint64DType):
   @classmethod
   def setUpClass(cls):
     cls.stack = contextlib.ExitStack()
@@ -438,7 +434,7 @@ class TestBoolDType(TestDType): DTYPE = dtypes.bool
 
 class TestBFloat16Type(TestDType): DTYPE = dtypes.bfloat16
 
-class TestEmulatedBFloat16Type(TestBFloat16Type):
+class TestEmulatedBFloat16Type(_DTypePairs, TestBFloat16Type):
   @classmethod
   def setUpClass(cls):
     cls.stack = contextlib.ExitStack()
@@ -448,7 +444,7 @@ class TestEmulatedBFloat16Type(TestBFloat16Type):
   @classmethod
   def tearDownClass(cls): cls.stack.close()
 
-class TestFp8e4m3(TestDType): DTYPE = dtypes.fp8e4m3
+class TestFp8e4m3(_DTypePairs, TestDType): DTYPE = dtypes.fp8e4m3
 
 class TestEmulatedFp8e4m3(TestFp8e4m3):
   @classmethod

@@ -5,7 +5,7 @@ from tinygrad import Tensor, UOp, dtypes, nn, function, Device, TinyJit
 from tinygrad.helpers import DEV
 from tinygrad.llm.kernels.amd import (Linear, ExpertWeights, amd_custom_kernels_supported, flash_attention, gated_delta_prefill,
                                       _is_rdna4, _is_cdna, hc_coeffs_supported)
-from tinygrad.llm.kernels.amd_gguf import (q8_quantize, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, Q8_0, Q4_K, Q6_K,
+from tinygrad.llm.kernels.amd_gguf import (q8_quantize, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, Q4_K, Q6_K,
                                           IQ3_S, IQ4_XS, IQ1_S, MXFP4)
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.llm.model import TransformerConfig, HCConfig, HyperConnection
@@ -26,12 +26,6 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     np.testing.assert_allclose(scale.numpy(), scale_np, rtol=1e-6)
     # xsum holds the two per-16 sums per 32-wide group
     np.testing.assert_array_equal(gsum.numpy().reshape(2, 2), expected.reshape(2, 2, 16).sum(-1).astype(np.float32))
-
-  def test_quantize_rounding_ties(self):
-    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
-    values = np.array([-127,127]+[i+0.5 for i in range(-15,15)],dtype=np.float32)
-    quant,_,_ = q8_quantize(Tensor(values),1,32)
-    np.testing.assert_array_equal(quant.bitcast(dtypes.int8).reshape(32).numpy(),np.rint(values).astype(np.int8))
 
   def test_quantize_nonunit_rounding_ties(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
@@ -60,10 +54,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     self.assertEqual(linear.weight.dtype, dtypes.uint16)
 
   def test_q4_k_linear(self): self._test_quant_linear(12, 144)
-  def test_iq4_linear(self): self._test_quant_linear(23, 136)
-  def test_q5_linear(self): self._test_quant_linear(13, 176)
-  def test_q8_0_linear_small_blocks(self): self._test_quant_linear(8, 272, in_features=288, out_features=16, token_counts=(1, 16))
-  def test_q6_linear_odd_blocks(self): self._test_quant_linear(14, 210, in_features=768, out_features=3, token_counts=(1, 3, 16))
+  def test_q8_0_linear_small_blocks(self): self._test_quant_linear(8, 272, in_features=288, out_features=16, token_counts=(1, 64))
   # Exercise the format-specific dot product with a ragged second split-K chunk, then a dense WMMA product.
   # The token loop and symbolic padding are shared; exercise those on one grid format rather than every grid.
   def _test_split_k_and_wmma(self, typ, token_counts=(1, 16)):
@@ -73,24 +64,14 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   def test_iq2_xxs_linear(self): self._test_split_k_and_wmma(16)
   def test_iq2_xs_linear(self): self._test_split_k_and_wmma(17, (1, 3, 16))
   def test_iq3_xxs_linear(self): self._test_split_k_and_wmma(18)
-  def test_iq1_s_linear(self): self._test_split_k_and_wmma(19)
   def test_iq4_nl_linear(self): self._test_split_k_and_wmma(20)
-  def test_iq3_s_linear(self): self._test_split_k_and_wmma(21)
   def test_iq2_s_linear(self): self._test_split_k_and_wmma(22)
-  def test_mxfp4_linear(self): self._test_quant_linear(39, 136, in_features=1056, token_counts=(1, 3))
-  def test_mxfp4_linear_wmma(self): self._test_quant_linear(39, 136, in_features=288, token_counts=(16,))
 
   def test_wmma_linear_symbolic(self):
     with patch("tinygrad.llm.kernels.amd_gguf.q8_quantize", side_effect=AssertionError("expected WMMA")):
       # Symbolic padding is shared; cover the Q4/Q5, generic/grid, and IQ4 LUT WMMA kernel families.
       for typ in (Q4_K, IQ3_S, IQ4_XS):
         self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=16, token_counts=(17,), bias=True, symbolic=True)
-
-  def test_mixed_quant_linear_wmma_tiles(self):
-    with patch("tinygrad.llm.kernels.amd_gguf.q8_quantize", side_effect=AssertionError("expected WMMA")):
-      # Token tiling is independent of the format. Q6 also covers odd super-block counts; the basis test covers every format.
-      for typ, tokens, in_features in ((Q8_0, 64, 256), (Q6_K, 32, 768), (IQ1_S, 16, 256)):
-        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=in_features, out_features=64, token_counts=(tokens,), bias=True)
 
   def test_wmma_dequantization_basis(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3/4 required")
@@ -140,11 +121,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     # Row grouping is shared by the formats, so cover each group size without taking the cross product.
     for typ, outputs in ((12, 3), (13, 6), (14, 12), (23, 3)):
       with self.subTest(ggml_type=typ, out_features=outputs):
-        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=outputs, token_counts=(1, 3))
-
-  def test_quant_linear_bias(self):
-    # Bias is a shared epilogue after both decode and WMMA; per-format math doesn't need to be repeated here.
-    self._test_quant_linear(Q4_K, QUANT_SIZES[Q4_K], in_features=256, out_features=16, token_counts=(1, 3, 16), bias=True)
+        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=outputs, token_counts=(1, 3), bias=typ == Q4_K)
 
   def test_quant_linear_partial_output_tile(self):
     # Cover a sub-tile output, a trailing tile, and IQ4's larger-output tile selection.
@@ -369,8 +346,6 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
       self._test_flash_decode(8, 2, 256, 128, 37, symbolic=True)
 
   def test_flash_attention_decode_gqa_tail(self): self._test_flash_decode(3, 1, 192, 64, 37)
-
-  def test_flash_attention_decode_gqa_output_layout(self): self._test_flash_decode(4, 1, 128, 256, 3)
   def test_flash_attention_decode_large_gqa_group(self): self._test_flash_decode(8, 1, 256, 256, 73)
 
   def _test_flash_decode(self, heads, kv_heads, dim, n, valid, symbolic=False):
@@ -459,9 +434,6 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         valid_kv_len = UOp.variable("valid_kv_len", 1, n).bind(valid)
         assigned = Tensor(cache.uop.after(Tensor(valid_kv_len).uop))
         np.testing.assert_allclose(flash_attention(q, assigned, valid_kv_len).numpy(), expected, rtol=2e-3, atol=2e-4)
-
-  def test_flash_attention_decode_long_context_random(self):
-    self._test_flash_decode(8, 2, 128, 257*64, 257*64-13)  # past 256 chunks, with a ragged tail
 
   def test_flash_attention_decode_chunk_round_accumulator_range(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")

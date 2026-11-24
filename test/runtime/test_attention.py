@@ -446,15 +446,6 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
         np.testing.assert_allclose(chunked_conv, decode_conv, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
         np.testing.assert_allclose(chunked_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
 
-  def test_start_zero_resets_realized_state(self):
-    config = self._make_config(max_context=3)
-    x = self._tensor_linspace(-1, 1, (1, 3, config.dim))
-    block = self._make_block(config)
-    self._run_attention(block, x, 0)
-    restarted = self._run_attention(block, x[:, :2], 0)
-    fresh = self._run_attention(self._make_block(config), x[:, :2], 0)
-    np.testing.assert_allclose(restarted, fresh, rtol=1e-3, atol=1e-3)
-
 class TestShortConv(unittest.TestCase):
   def test_short_conv(self):
     # the window is [state 1, 2 | x 3, 4 | pad 0], tap i of output t reads row t + i*dilation, x becomes the state

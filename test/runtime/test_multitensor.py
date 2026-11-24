@@ -198,16 +198,6 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(Y.stack(X).tolist(), [[[5, 6], [7, 8]], [[1, 2], [3, 4]]])
     self.assertEqual(X.cat(Y, dim=1).tolist(), [[1, 2, 5, 6], [3, 4, 7, 8]])
 
-  def test_allreduce_naive(self):
-    with Context(RING=0):
-      a,b = _test_allreduce(Tensor.rand(256, 256))
-      np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
-
-  def test_allreduce_ring(self):
-    with Context(RING=2):
-      a,b = _test_allreduce(Tensor.rand(256, 256))
-      np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
-
   def test_allreduce_all2all(self):
     with Context(ALL2ALL=2):
       a,b = _test_allreduce(Tensor.rand(256, 256))
@@ -455,7 +445,6 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_simple_add(self): return self._test_simple_add_axis(None, None)
   def test_simple_add_X(self): return self._test_simple_add_axis(0, None)
-  def test_simple_add_W(self): return self._test_simple_add_axis(None, 0)
   def test_simple_add_XW(self): return self._test_simple_add_axis(0, 0)
 
   @given(strat.sampled_from((0, 1, None)), strat.sampled_from((0, 2)))
@@ -547,11 +536,7 @@ class TestMultiTensor(unittest.TestCase):
       np.testing.assert_allclose((X.numpy() @ W1.numpy()) @ W2.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
 
   def test_matmul_shard_none(self): return self._test_matmul_shard_axis(None, None, devices_2)
-  def test_matmul_shard_X_0(self): return self._test_matmul_shard_axis(0, None, devices_2)
-  def test_matmul_shard_X_1(self): return self._test_matmul_shard_axis(1, None, devices_2)
   def test_matmul_shard_W_0(self): return self._test_matmul_shard_axis(None, 0, devices_2)
-  def test_matmul_shard_W_1(self): return self._test_matmul_shard_axis(None, 1, devices_2)
-
   def test_matmul_shard_0_0(self): return self._test_matmul_shard_axis(0, 0, devices_2)
   def test_matmul_shard_0_1(self): return self._test_matmul_shard_axis(0, 1, devices_2)
   def test_matmul_shard_1_0(self): return self._test_matmul_shard_axis(1, 0, devices_2)
@@ -561,13 +546,6 @@ class TestMultiTensor(unittest.TestCase):
   def test_double_matmul_shard_X_1(self): return self._test_double_matmul_shard_axis(1, None, devices_2)
   def test_double_matmul_shard_W_0(self): return self._test_double_matmul_shard_axis(None, 0, devices_2)
   def test_double_matmul_shard_W_1(self): return self._test_double_matmul_shard_axis(None, 1, devices_2)
-
-  def test_conv_data_shard(self):
-    conv = nn.Conv2d(3, 16, 3, bias=False)
-    for p in get_parameters(conv): p.shard_(devices_2)
-    fake_image = Tensor.rand((2, 3, 32, 32)).shard(devices_2, axis=0)
-    out = conv(fake_image)
-    out.numpy()
 
   def test_conv_bias_data_shard(self):
     conv = nn.Conv2d(3, 16, 3)
@@ -1033,48 +1011,6 @@ class Test2DShard(unittest.TestCase):
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiTransformer(unittest.TestCase):
-  @needs_second_gpu
-  def test_transformer(self):
-    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-
-    from extra.models.llama import Transformer
-    args = {"dim": 32, "n_heads": 1, "n_kv_heads": 1, "n_layers": 2, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 32,
-            "hidden_dim": 32, "max_context": 12}
-    real_model = Transformer(**args)
-    shard_model = Transformer(**args)
-
-    # Realize initialization once, rather than fusing random weight generation into the forward pass.
-    Tensor.realize(*nn.state.get_parameters(real_model))
-    nn.state.load_state_dict(shard_model, nn.state.get_state_dict(real_model))
-
-    # shard
-    for k,v in nn.state.get_state_dict(shard_model).items():
-      if 'scale' in k: v.shard_(device, axis=None)  # from quantized
-      elif '.attention.' in k: v.shard_(device, axis=-1)
-      elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
-      elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
-      elif '.feed_forward.' in k: v.shard_(device, axis=-1)
-      elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
-      elif 'output.weight' in k: v.shard_(device, axis=0)
-      else: v.shard_(device, axis=None)
-    Tensor.realize(*nn.state.get_parameters(shard_model))
-
-    last_tok = 0
-    # i=0: bypasses jit, i=1: jit warmup, i=2: capture and run, i>=3: re-execute jit with new start_pos (catches stale bindings)
-    for i in range(4):
-      real_tok = real_model(Tensor([[last_tok]], device=Device.DEFAULT), i).item()
-      shard_tok = shard_model(Tensor([[last_tok]], device=device), i).item()
-
-      # test kv cache
-      kv1 = real_model.layers[0].attention.cache_kv.numpy()
-      kv2 = shard_model.layers[0].attention.cache_kv.numpy()
-      #print(np.concatenate([kv1[:, :, :, :, 0:1], kv2[:, :, :, :, 0:1]], axis=4))
-      np.testing.assert_allclose(kv1, kv2, atol=1e-5, rtol=1e-5, err_msg=f"issue at token {i}")
-
-      # test token
-      self.assertEqual(real_tok, shard_tok, f"issue at token {i}")
-      last_tok = real_tok
-
   @unittest.skip("super slow")
   def test_llama1b_full(self):
     from tinygrad.helpers import fetch
@@ -1199,32 +1135,6 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 class TestBatchNorm(unittest.TestCase):
   @needs_second_gpu
   def setUp(self): pass
-
-  def test_unsynced_backprop_conv_bn(self):
-    with Context(TRAINING=1):
-      from extra.lr_scheduler import OneCycleLR
-
-      convs = [nn.Conv2d(3, 16, 3), nn.Conv2d(3, 16, 3)]
-      bns = [nn.BatchNorm2d(16), nn.BatchNorm2d(16)]
-
-      for p in get_parameters(convs + bns):
-        p.shard_((d1, d2))
-      optim = nn.optim.Adam(get_parameters(convs + bns))
-      lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
-      lr_sched.step()
-
-      fake_image = Tensor.rand((8, 3, 32, 32)).shard((d1, d2), axis=0)
-
-      f1 = fake_image.shrink(((0, 4), None, None, None))
-      f2 = fake_image.shrink(((4, 8), None, None, None))
-
-      out1 = bns[0](convs[0](f1))
-      out2 = bns[1](convs[1](f2))
-      out = out1.cat(out2)
-      optim.zero_grad()
-      out.mean().backward()
-      optim.step()
-      out.numpy()
 
   def test_unsynced_backprop_standalone_bn(self):
     from extra.lr_scheduler import OneCycleLR

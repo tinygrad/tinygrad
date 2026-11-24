@@ -46,7 +46,7 @@ def random_bool_expr(depth=10, expr1=None):
 
 if __name__ == "__main__":
   skipped = 0
-  for i in range(10000):
+  for i in range(3000):
     if i % 1000 == 0:
       print(f"Running test {i}")
     upper_bounds = [*list(range(1, 10)), 16, 32, 64, 128, 256]

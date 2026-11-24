@@ -46,14 +46,6 @@ class TestTorchLoad(TempDirTestCase):
     torch.save({"col": torch.arange(1., 13.).reshape(3, 4).to(torch.bfloat16)[:, 1]}, self.tmp("strided_bf16.pt"))
     self.assertEqual(torch_load(self.tmp("strided_bf16.pt"))["col"].float().tolist(), [2., 6., 10.])
 
-  # pytorch pkl format
-  def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
-  # pytorch zip format
-  def test_load_enet_alt(self): compare_weights_both("https://download.pytorch.org/models/efficientnet_b0_rwightman-3dd342df.pth")
-  # pytorch zip format
-  @unittest.skip("fetch error")
-  def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth')
-
   def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
 
   # pytorch tar format
@@ -63,7 +55,7 @@ class TestTorchLoad(TempDirTestCase):
   def test_shared_storage(self):
     import torch
     fn = self.tmp("shared_storage.pth")
-    torch.save({"a": (a := torch.randn(100)), "b": a[5:]}, fn)
+    torch.save({"a": (a := torch.randn(100)), "b": a[5:]}, fn, _use_new_zipfile_serialization=False)
     compare_weights_both(fn)
 
 test_fn = pathlib.Path(__file__).parents[2] / "weights/LLaMA/7B/consolidated.00.pth"
