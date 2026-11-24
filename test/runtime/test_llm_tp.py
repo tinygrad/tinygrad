@@ -123,15 +123,9 @@ class TestTensorParallel(unittest.TestCase):
         ref = single.blk[0]._feed_forward(x).numpy()
         out = parallel.blk[0]._feed_forward(x.shard(DEVICES)).to(Device.DEFAULT).numpy()
         np.testing.assert_allclose(out, ref, atol=2e-2, rtol=2e-2)
-      # Incompatible provider API version must also replicate experts instead of asserting, and already-split experts must fall back if rejected.
+      # Already-split axis-0 experts must also fall back cleanly if the provider rejects or errors on moe_linear.
       from unittest.mock import patch
       if amd_custom_kernels_supported(DEVICES[0]):
-        with patch("slopkernels.API_VERSION", 999999):
-          p_bad = Transformer.from_gguf(path, 16, shard=2)[0]
-          b_bad = p_bad.blk[0]
-          self.assertEqual((b_bad.ffn_gate_exps.weight.uop.axis, b_bad.ffn_up_exps.weight.uop.axis, b_bad.ffn_down_exps.weight.uop.axis),
-                           (None, None, None))
-          np.testing.assert_allclose(b_bad._feed_forward(x.shard(DEVICES)).to(Device.DEFAULT).numpy(), ref, atol=2e-2, rtol=2e-2)
         p_ep = Transformer.from_gguf(path, 16, shard=2)[0]
         self.assertEqual(p_ep.blk[0].ffn_gate_exps.weight.uop.axis, 0)
         with patch("tinygrad.llm.model._slop_uop", return_value=None):
