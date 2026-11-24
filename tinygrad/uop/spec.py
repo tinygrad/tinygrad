@@ -102,7 +102,7 @@ spec_shared = PatternMatcher([
    lambda x: (x.src[0].shape == () or x.addrspace is AddrSpace.ALU) and x.src[0].dtype is not dtypes.void),
 
   # a NATIVE names native code or an external function: the arg is NativeInfo, its single src states its dtype and shape
-  (UPat(Ops.NATIVE, src=(UPat(),), name="x"), lambda x: isinstance(x.arg, NativeInfo)),
+  (UPat(Ops.NATIVE, name="x"), lambda x: isinstance(x.arg, NativeInfo) and len(x.src) <= 1),
   # CALL: the body is always an opaque body stating the dtype, the arg is a CallInfo
   (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, CallInfo)),
 
