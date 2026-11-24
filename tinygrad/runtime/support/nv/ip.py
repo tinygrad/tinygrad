@@ -636,6 +636,11 @@ class NV_GSP(NV_IP):
       PCIRevisionID=pcidev.read_config(pci.PCI_REVISION_ID, 1), maxUserVa=0x7ffffffff000)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_SET_SYSTEM_INFO, bytes(data))
 
+  def rpc_free(self, client:int):
+    params = nv.struct_NVOS00_PARAMETERS_v03_00(hRoot=client, hObjectParent=client, hObjectOld=client)
+    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_FREE, bytes(nv.rpc_free_v(params=params)))
+    self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_FREE)
+
   def rpc_unloading_guest_driver(self):
     data = nv.rpc_unloading_guest_driver_v(bInPMTransition=0, bGc6Entering=0, newLevel=(__GPU_STATE_FLAGS_FAST_UNLOAD:=1 << 6))
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_UNLOADING_GUEST_DRIVER, bytes(data))
