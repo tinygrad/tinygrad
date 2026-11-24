@@ -682,6 +682,10 @@ class TestOps(TensorTestCase):
     helper_test_op(None, lambda x: x**(2.0**52+2), vals=[[0.5, 1., 2.]], forward_only=True)
     # float to power of int
     helper_test_op(None, lambda x: 0.7**x, lambda x: (0.7**x).clone(), vals=[[-2,-1,0,1,2,3]], forward_only=True)
+    # inf and nan exponents
+    helper_test_op(None, lambda x: x**math.inf, vals=[[0.5, 2., 3.]], forward_only=True)
+    helper_test_op(None, lambda x: x**-math.inf, vals=[[0.5, 2., 3.]], forward_only=True)
+    helper_test_op(None, lambda x: x**math.nan, vals=[[0.5, 2., 3.]], forward_only=True)
 
   @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, NIRRenderer), "TODO: broken in LVP")
