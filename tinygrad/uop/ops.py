@@ -85,6 +85,8 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   max_dim = max(len(s) for s in shapes)
   return tuple((1,)*(max_dim-len(s))+s for s in shapes)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
+def _sshape(shape:tuple[sint, ...]) -> tuple[sint, ...]:
+  return tuple(int(x.vmax) if isinstance(x, UOp) and x.variables() else x for x in shape)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   if all_same(shapes): return shapes[0]
   # per right-aligned dim: sizes of 1 broadcast to the others, which must all agree
@@ -390,7 +392,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
       ps = self.src[0]._shape
       match self.op:
         case Ops.RESHAPE:
-          if not all(x >= 0 for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
+          if not all(resolve(x >= 0) for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
           # with symbolic views prod equality can be true at runtime but unprovable, only reject provably unequal products
           if resolve(prod(ps) != prod(self.marg), False): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
           return self.marg
@@ -540,7 +542,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     return UOp.invalid().expand(ret.shape) if self.base.is_invalid else ret
   def __getitem__(self, idx):
     # buffers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
-    if self.addrspace in (None, AddrSpace.ALU) or self.device is not None: return super(UOp, self).__getitem__(idx)
+    if self.addrspace in (None, AddrSpace.ALU, AddrSpace.TEMPLATE) or self.device is not None: return super(UOp, self).__getitem__(idx)
     idx = self._normalize_indices(list(argfix(idx)))
     if len(slice_idx:=[i for i,x in enumerate(idx) if isinstance(x, slice)]):
       # apply SHRINK for slices that aren't the full range
@@ -1001,6 +1003,23 @@ class UOp(Mixin, metaclass=UOpMetaClass):
         ret.add(UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype))
     return sorted(ret, key=lambda v: (v.arg.name or "", v.arg.slot))
 
+  @staticmethod
+  def template(name:str, vmin_vmax:tuple[PyConst, PyConst]|None=None, dtype:DType=dtypes.weakint) -> UOp:
+    return UOp(Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(-1, dtype, vmin_vmax=vmin_vmax, name=name, addrspace=AddrSpace.TEMPLATE))
+  @property
+  def is_template(self) -> bool: return self.op is Ops.PARAM and self.arg.addrspace is AddrSpace.TEMPLATE
+  def specialize(self, **values:PyConst) -> UOp:
+    tmpls = [u for u in self.toposort(enter_calls=True) if u.is_template]
+    assert {u.arg.name for u in tmpls} == set(values), f"template mismatch: {sorted(values)} vs {sorted({u.arg.name for u in tmpls})}"
+    subs: dict[UOp, UOp] = {}
+    for u in tmpls:
+      v = values[u.arg.name]
+      assert not isinstance(v, bool) and (u.arg.vmin_vmax is None or u.arg.vmin_vmax[0] <= v <= u.arg.vmin_vmax[1])
+      subs[u] = UOp.const(v if dtypes.is_int(u.dtype) else float(v), u.dtype)
+    from tinygrad.uop.symbolic import symbolic_simple
+    with Context(TRACK_MATCH_STATS=0, SPEC=min(SPEC.value, 1)):
+      return graph_rewrite(self.substitute(subs, enter_calls=True), symbolic_simple, enter_calls=True, name="specialize") if subs else self
+
   # *** uop symbolic stuff ***
 
   def const_factor(self) -> int:
@@ -1147,7 +1166,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   @staticmethod
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
             spec:BufferSpec|None=None, bind_on_realize:bool=False, name:str|None=None):
-    ret = UOp(Ops.ALLOC, src=(shape_to_shape_arg((prod(to_max_shape(shape)),)),)+UOp.device_range_src(device),
+    ret = UOp(Ops.ALLOC, src=(shape_to_shape_arg((ssimplify(prod(_sshape(shape))),)),)+UOp.device_range_src(device),
               arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype),
                            addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
@@ -1181,11 +1200,11 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   def param(slot:int, dtype:DType, shape:tuple[sint, ...]|sint|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None,
             name=None, addrspace=AddrSpace.GLOBAL, volatile:bool=False):
     """create a PARAM: a single sint or 1-d shape gives a flat param of that size, a None shape gives a scalar param.
-    src[0] stores the concrete max size (never symbolic): a multi-dim shape is a RESHAPE on top of the flat param,
-    a symbolic shape is a max-size param shrunk to the real shape"""
+    src[0] stores the concrete max size for runtime-variable shapes, or the exact symbolic size expression for template shapes:
+    a multi-dim shape is a RESHAPE on top of the flat param, a runtime-variable shape is a max-size param shrunk to the real shape"""
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create param for weak dtype {dtype}")
     shape = (shape,) if isinstance(shape, (int, UOp)) else shape or ()
-    ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((prod(to_max_shape(shape)),) if shape else ()),),
+    ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((ssimplify(prod(_sshape(shape))),) if shape else ()),),
               arg=ParamArg(slot, dtype, vmin_vmax, name, addrspace, device, volatile))
     return ret.view_as(shape)
   def param_like(self, slot:int, name:str|None=None):
@@ -1198,9 +1217,9 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     return UOp.param(slot, self.dtype, self._shape, self.device, name=name)
   def view_as(self:UOp, shape:tuple[sint, ...], axis:int|None=None) -> UOp:
     """view flat storage as the given (possibly symbolic) shape, optionally sharded on axis, the UNSHARD gives back the multiplied shape"""
-    max_shape = to_max_shape(shape)
-    ret = self.reshape(max_shape) if shape else self
-    if tuple(max_shape) != tuple(shape): ret = ret.shrink_to(shape)
+    storage_shape = _sshape(shape := tuple(ssimplify(s) for s in shape))
+    ret = self.reshape(storage_shape) if shape else self
+    if tuple(storage_shape) != tuple(shape): ret = ret.shrink_to(shape)
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod

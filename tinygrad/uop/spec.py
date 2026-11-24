@@ -86,7 +86,7 @@ spec_shared = PatternMatcher([
    lambda x: x.arg is None and x.src[2].shape == () and not x.src[2].base.is_invalid),
 
   # PARAM/BUFFER carry a size CONST or an empty STACK for scalars
-  (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace is not AddrSpace.TEMPLATE),
   (UPat(Ops.REFPARAM, src=(p_size, UPat(dtype=dtypes.uint64)), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
@@ -255,7 +255,7 @@ spec_kernel_graph = PatternMatcher([
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
   # PARAM is caller-provided storage (or a Variable in the ALU addrspace), EXTERN is storage from outside, ALLOC is call-local storage
-  (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace is not AddrSpace.TEMPLATE),
   (UPat(Ops.EXTERN, src=(p_size,), allow_any_len=True, name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, src=(p_size,), allow_any_len=True, name="x"), lambda x:
    isinstance(x.arg, ParamArg) and valid_device_range(x.arg.device, x.src[1:]) and

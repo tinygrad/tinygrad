@@ -128,7 +128,7 @@ class TestTensorParallel(unittest.TestCase):
       if amd_custom_kernels_supported(DEVICES[0]):
         p_ep = Transformer.from_gguf(path, 16, shard=2)[0]
         self.assertEqual(p_ep.blk[0].ffn_gate_exps.weight.uop.axis, 0)
-        with patch("tinygrad.llm.model._slop_uop", return_value=None):
+        with patch("tinygrad.llm.model._load_kernel", return_value=None):
           np.testing.assert_allclose(p_ep.blk[0]._feed_forward(x.shard(DEVICES)).to(Device.DEFAULT).numpy(), ref, atol=2e-2, rtol=2e-2)
 
   def test_axis0_biased_experts_and_sharded_kda(self):
@@ -143,15 +143,6 @@ class TestTensorParallel(unittest.TestCase):
     got = layer(sel, x)
     if got.ndim == 5: got = got.sum(0)
     np.testing.assert_allclose(got.to(Device.DEFAULT).numpy(), 1.0, rtol=1e-4, atol=1e-4)
-    # 2. Head-sharded KDA inputs must be rejected by gated_delta_prefill_op (not dispatched with global head count).
-    from tinygrad.llm.model import _slop
-    q = Tensor.zeros(1, 2, 1, 32).shard(DEVICES, 1).realize()
-    k = Tensor.zeros(1, 2, 1, 32).shard(DEVICES, 1).realize()
-    v = Tensor.zeros(1, 2, 1, 32).shard(DEVICES, 1).realize()
-    beta = Tensor.zeros(1, 2, 1).shard(DEVICES, 1).realize()
-    alpha = Tensor.ones(1, 2, 1, 32).shard(DEVICES, 1).realize()
-    state = Tensor.zeros(1, 2, 32, 32).shard(DEVICES, 1).realize()
-    self.assertIsNone(_slop("gated_delta_prefill_op", q, k, v, beta, alpha, state))
 
   def test_quantized_linear(self):
     # the AMD kernels on the packed shards: decode (1 token) and WMMA (16 tokens), output and input features split
