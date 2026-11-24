@@ -173,7 +173,7 @@ class MovementMixin(DTypeMixin):
       raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
     if c:
       new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
-    if resolve(prod(self.shape) != prod(new_shape), False):
+    if prod(self.shape) != prod(new_shape):
       raise ValueError(f"size mismatch, can't reshape ({self.shape}) -> ({new_shape})")
     return self._mop(Ops.RESHAPE, arg=new_shape)
 

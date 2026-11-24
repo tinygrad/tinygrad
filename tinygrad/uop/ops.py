@@ -86,8 +86,7 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   return tuple((1,)*(max_dim-len(s))+s for s in shapes)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 def _sshape(shape:tuple[sint, ...]) -> tuple[sint, ...]:
-  return tuple(ssimplify(x.substitute({v: UOp.const(v.vmax) for v in x.variables()}))
-               if isinstance(x, UOp) and any(u.is_template for u in x.toposort()) else int(x.vmax) if isinstance(x, UOp) else x for x in shape)
+  return tuple(int(x.vmax) if isinstance(x, UOp) and x.variables() else x for x in shape)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   if all_same(shapes): return shapes[0]
   # per right-aligned dim: sizes of 1 broadcast to the others, which must all agree
@@ -1216,7 +1215,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
       return self.replace(op=Ops.PARAM, arg=replace(self.arg, slot=slot, name=name, val=None))
     # multi-device values become a per-shard sized param wrapped in UNSHARD: the sharding lives in the graph, not the arg
     if self.axis is not None and isinstance(self.device, tuple):
-      return UOp.param(slot, self.dtype, ssimplify(prod(_sshape(self.shard_shape))), self.device, name=name).view_as(self.shard_shape, self.axis)
+      return UOp.param(slot, self.dtype, prod(to_max_shape(self.shard_shape)), self.device, name=name).view_as(self.shard_shape, self.axis)
     return UOp.param(slot, self.dtype, self._shape, self.device, name=name)
   def view_as(self:UOp, shape:tuple[sint, ...], axis:int|None=None) -> UOp:
     """view flat storage as the given (possibly symbolic) shape, optionally sharded on axis, the UNSHARD gives back the multiplied shape"""

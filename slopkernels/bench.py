@@ -113,8 +113,8 @@ def _krun(name:str, shp:tuple[int, ...], dev:str|tuple[str, ...], *args:Tensor|U
   return Tensor(o.after(k.call(o, *(a.uop if isinstance(a, Tensor) else a for a in args))))
 
 def _q8(x:Tensor, tokens:int, in_f:int, dev:str|tuple[str, ...], axis:int|None=None) -> tuple[UOp, UOp, UOp]:
-  k = unwrap(slopkernels.get(f"amd_q8_quantize_{x.dtype.name}")).specialize(tokens=tokens, in_features=in_f)
-  g, f = in_f // 32, dtypes.float32
+  k = unwrap(slopkernels.get(f"amd_q8_quantize_{x.dtype.name}")).specialize(tokens=tokens, in_groups=(g := in_f // 32))
+  f = dtypes.float32
   q, d, s = (UOp.alloc((tokens, g, *e), dt, device=dev, axis=axis) for e, dt in (((8,), dtypes.uint32), ((), f), ((2,), f)))
   c = k.call(q, d, s, x.reshape(tokens, in_f).uop if x.uop.axis is None else x.uop)
   return q.after(c), d.after(c), s.after(c)
@@ -216,7 +216,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       x = _nonuniform((m, K), dtypes.float32, dev, scale=0.5, freq=0.023)
       def _verify(out:Tensor) -> None:
         _assert_close(out[:, :CHECK_ROWS].float().numpy(), (x @ w[:CHECK_ROWS].float().T).numpy(), rtol=3e-3, atol=3e-3)
-      return (lambda: _krun("amd_gemv_f16_f32", (m, n), dev, w, x, tokens=m, out_features=n, in_features=K)), _verify
+      return (lambda: _krun("amd_gemv_f16_f32", (m, n), dev, w, x, tokens=m, out_features=n, in_blks=K // 128)), _verify
     cases.append((f"dense_gemv_f16_{m}x{n}x{K}", n * K * 2 + m * (K + n) * 4, 2 * m * n * K, _mk_dense))
 
   if not cdna:

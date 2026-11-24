@@ -25,12 +25,13 @@ def _v(slot:int, name:str) -> UOp:
 def _t(name:str, lo:int|float=1, hi:int|float=1 << 20, dt:DType=dtypes.weakint) -> UOp: return UOp.template(name, (lo, hi), dtype=dt)
 
 def _b_q8(dt:str) -> UOp:
-  tok, inf = _t("tokens"), _t("in_features", 32)
-  g = inf // 32
-  return _gguf._q8_quantize_kernel(_p(0, (tok, g, 8), "u32"), _p(1, (tok, g), "f32"), _p(2, (tok, g, 2), "f32"), _p(3, (tok, inf), dt), tok, inf)
+  tok, g = _t("tokens"), _t("in_groups")
+  return _gguf._q8_quantize_kernel(_p(0, (tok, g, 8), "u32"), _p(1, (tok, g), "f32"), _p(2, (tok, g, 2), "f32"),
+                                   _p(3, (tok, g * 32), dt), tok, g * 32)
 
 def _b_gemv(wdt:str, xdt:str, vc:int) -> UOp:
-  tok, inf, outf = _t("tokens"), _t("in_features", 32), _t("out_features")
+  tok, ib, outf = _t("tokens"), _t("in_blks"), _t("out_features")
+  inf = ib * (32 * vc)
   return _amd._amd_f16_gemv_kernel(_p(0, (tok, outf), "f32"), _p(1, (outf, inf), wdt), _p(2, (tok, inf), xdt),
                                    in_features=inf, out_features=outf, tokens=tok, val_chunk=vc)
 
@@ -108,7 +109,9 @@ def _emit(name:str, fn:Callable[[], UOp]) -> tuple[pathlib.Path, str]:
   with Context(TRACK_MATCH_STATS=0, SPEC=0):
     u = graph_rewrite(fn(), symbolic_simple, enter_calls=True)
     if allocs := [x for x in u.toposort(enter_calls=True) if x.op is Ops.ALLOC]:
-      u = u.substitute({b: b.replace(arg=replace(b.arg, slot=i)) for i, b in enumerate(allocs)}, enter_calls=True)
+      u = u.substitute({b: b.replace(arg=replace(b.arg, slot=-1 - i)) for i, b in enumerate(allocs)}, enter_calls=True)
+      u = u.substitute({b.replace(arg=replace(b.arg, slot=-1 - i)): b.replace(arg=replace(b.arg, slot=i))
+                        for i, b in enumerate(allocs)}, enter_calls=True)
     uir = render_uir(u, color=False)
   dst = UIR_DIR / f"{name}.uir"
   tmp = dst.with_name(f".{dst.name}.{os.getpid()}.{threading.get_ident()}.tmp")

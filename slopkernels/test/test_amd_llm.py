@@ -42,7 +42,7 @@ def q8_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor, 
   q = Tensor.empty(tokens, g, 8, dtype=dtypes.uint32, device=x.device)
   d = Tensor.empty(tokens, g, dtype=dtypes.float32, device=x.device)
   s = Tensor.empty(tokens, g, 2, dtype=dtypes.float32, device=x.device)
-  kern = unwrap(slopkernels.get(f"amd_q8_quantize_{x.dtype.name}")).specialize(tokens=tokens, in_features=in_features)
+  kern = unwrap(slopkernels.get(f"amd_q8_quantize_{x.dtype.name}")).specialize(tokens=tokens, in_groups=g)
   call = kern.call(q.uop, d.uop, s.uop, x.reshape(tokens, in_features).uop)
   return Tensor(q.uop.after(call)), Tensor(d.uop.after(call)), Tensor(s.uop.after(call))
 

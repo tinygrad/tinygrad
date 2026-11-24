@@ -94,7 +94,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
     # 1. Dense GEMV
     w_d = Tensor(rng.standard_normal((64, 128)).astype(np.float16)).realize()
     x_d = Tensor(rng.standard_normal((2, 128)).astype(np.float32)).realize()
-    got_d = _krun("amd_gemv_f16_f32", (2, 64), dev, w_d, x_d, tokens=2, out_features=64, in_features=128).numpy()
+    got_d = _krun("amd_gemv_f16_f32", (2, 64), dev, w_d, x_d, tokens=2, out_features=64, in_blks=1).numpy()
     np.testing.assert_allclose(got_d, x_d.numpy() @ w_d.numpy().astype(np.float32).T, rtol=2e-3, atol=2e-3)
     # 2. Quantized GEMV (split-K) & WMMA (M=16)
     _, w_u16, w_ref = _make_q8_0(rng, 64, 1280)
