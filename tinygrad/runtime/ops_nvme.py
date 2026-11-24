@@ -126,8 +126,8 @@ def nvme_queue(drive:str, gpu:str, queue:str) -> dict[str, Buffer]:
 
 def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[tuple]]: # builds the commands for all reads from one drive on one gpu queue
   drive, gpu, qn = to_tuple(get_call_arg_uops(calls[0])[1].device)[0], queue.device, queue.arg.name
-  t = Device.target_for(drive)
-  max_xfer, lba_shift, size = t.get("max_xfer", 0), t.get("lba_shift", 0), t.get("size", 0)
+  opts = Device.target_for(drive).opts
+  max_xfer, lba_shift, size = int(opts["max_xfer"]), int(opts["lba_shift"]), int(opts["size"])
   Compiled.link_bufs |= {to_name(drive, gpu, qn, n): lambda b, n=n: nvme_queue(drive, gpu, qn)[n] for n in ("sq", "cq", "seq", "sq_db", "cq_db")}
   def mem(name:str, size:int, dtype=dtypes.uint8) -> UOp: return UOp.extern((size,), dtype, drive, to_name(gpu, qn, name))
   sq, cq, entries = mem("sq", 0x1000).getaddr(gpu), mem("cq", 0x1000).getaddr(gpu), NVMEQueue.entries
