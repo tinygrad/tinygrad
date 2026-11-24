@@ -41,10 +41,9 @@ class _Device:
     return ret
   def target_for(self, device:str, cv=DEV) -> Target:
     if (t:=cv.target(device.split(':')[0])).arch: return t
-    if (device:=self.canonicalize(device)) not in self._opened_devices:
-      try: self[device]
-      except Exception as e: raise RuntimeError(f"no target for {device}: set its arch in DEV, or open it") from e
-    iface = type(d.iface).__name__[:-5] if hasattr(d:=self._opened_devices[device], "iface") else ""
+    try: d = self._opened_devices.get(device:=self.canonicalize(device)) or self[device]
+    except Exception as e: raise RuntimeError(f"no target for {device}: set its arch in DEV, or open it") from e
+    iface = type(d.iface).__name__[:-5] if hasattr(d, "iface") else ""
     return replace(t, arch=d.arch or "", interface=t.interface or iface, props=",".join(f"{k}={v}" for k, v in (d.props | t.opts).items()))
   def renderer_for(self, device:str, cv=DEV) -> Renderer: return select_renderer(cv.target((t:=self.target_for(device, cv)).device, arch=t.arch))
   @property
