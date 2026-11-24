@@ -2,7 +2,7 @@
 import unittest
 from typing import cast
 from tinygrad import nn, dtypes, Device, Tensor, getenv
-from tinygrad.helpers import Context, all_same
+from tinygrad.helpers import Context, all_same, GlobalCounters
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.dtype import AddrSpace
 from tinygrad.engine.realize import run_linear, compile_linear
@@ -349,6 +349,19 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(32, 16).realize()
     out = a-a.mean(axis=0, keepdim=True)
     check_schedule(out, 2)
+
+  def test_broadcast_full_sum_keepdim(self):
+    a = Tensor.empty(8, 8)
+    check_schedule(a - a.sum(keepdim=True), 1)  # like a - a.sum(), keepdim doesn't change fusion
+
+  def test_staged_reduce_drops_expanded_axis(self):
+    x = Tensor.empty(32, 16).realize()
+    def ops(t):
+      GlobalCounters.reset()
+      t.realize()
+      return GlobalCounters.global_ops
+    # a materialized sum keeps only the axes it depends on, so expanding before or after the reduce costs the same
+    self.assertEqual(ops(x.expand(8, 32, 16).sum(-1).softmax(-1)), ops(x.sum(-1).expand(8, 32).softmax(-1)))
 
   def test_scaled_dot_product_attention_multireduce_fusion(self):
     q = Tensor.empty(32,8,16,8).realize()
