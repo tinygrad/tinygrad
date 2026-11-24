@@ -109,24 +109,25 @@ class NVMEDevice(Compiled):
     self.iface = self._select_iface(device)
     self.nvme = cast(NVMEDev, self.iface.dev_impl)
     super().__init__(device, NVMEAllocator(self), None, props={"max_xfer": self.nvme.max_xfer, "lba_shift": self.nvme.lba_shift})
+    Compiled.link_bufs |= {to_name(device, f"gpu{i}", n): lambda b, i=i, n=n: self.gpu_queue(i)[n] for i in range(16)
+                           for n in ("sq", "cq", "seq", "sq_db", "cq_db")}
   def synchronize(self, timeout:int|None=None): pass
+
+  @functools.cache
+  def gpu_queue(self, gpu:int) -> dict[str, Buffer]:
+    q, (seq, seq_addrs), bar0 = self.nvme.new_queue(), self.nvme.pci_dev.alloc_sysmem(0x1000), self.iface.pci_dev.bar_info(0)[0]
+    regs = self.iface.buffer(self.nvme.regs, [bar0 + o for o in range(0, self.nvme.regs.nbytes, 0x1000)], snooped=False)
+    return {"sq": self.iface.buffer(q.sq, [q.sq_addr]), "cq": self.iface.buffer(q.cq, [q.cq_addr]),
+            "seq": self.iface.buffer(seq.view(0, 8), seq_addrs), "sq_db": regs.view(4, q.sq_db), "cq_db": regs.view(4, q.cq_db)}
 
 # *****************
 # UOps implementation
 
-@functools.cache
-def nvme_queue(drive:str, gpu:str, queue:str) -> dict[str, Buffer]:
-  dev = cast(NVMEDevice, Device[drive])
-  q, (seq, seq_addrs), bar0 = dev.nvme.new_queue(), dev.nvme.pci_dev.alloc_sysmem(0x1000), dev.iface.pci_dev.bar_info(0)[0]
-  regs = dev.iface.buffer(dev.nvme.regs, [bar0 + o for o in range(0, dev.nvme.regs.nbytes, 0x1000)], snooped=False)
-  return {"sq": dev.iface.buffer(q.sq, [q.sq_addr]), "cq": dev.iface.buffer(q.cq, [q.cq_addr]), "seq": dev.iface.buffer(seq.view(0, 8), seq_addrs),
-          "sq_db": regs.view(4, q.sq_db), "cq_db": regs.view(4, q.cq_db)}
-
 def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[tuple]]: # builds the commands for all reads from one drive on one gpu queue
-  drive, gpu, qn = to_tuple(get_call_arg_uops(calls[0])[1].device)[0], queue.device, queue.arg.name
+  drive, gpu = to_tuple(get_call_arg_uops(calls[0])[1].device)[0], queue.device
+  slot = f"gpu{gpu.split(':')[1] if ':' in gpu else 0}"
   max_xfer, lba_shift = (t:=Device.target_for(drive)).get("max_xfer", 128 << 10), t.get("lba_shift", 9)
-  Compiled.link_bufs |= {to_name(drive, gpu, qn, n): lambda b, n=n: nvme_queue(drive, gpu, qn)[n] for n in ("sq", "cq", "seq", "sq_db", "cq_db")}
-  def mem(name:str, size:int, dtype=dtypes.uint8) -> UOp: return UOp.extern((size,), dtype, drive, to_name(gpu, qn, name))
+  def mem(name:str, size:int, dtype=dtypes.uint8) -> UOp: return UOp.extern((size,), dtype, drive, to_name(slot, name))
   sq, cq = mem("sq", 0x1000).getaddr(gpu), mem("cq", 0x1000).getaddr(gpu)
   sq_db, cq_db = mem("sq_db", 4).getaddr(gpu), mem("cq_db", 4).getaddr(gpu)
 
