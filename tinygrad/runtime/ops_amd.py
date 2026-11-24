@@ -92,6 +92,9 @@ def pm4_for(dev:str): return importlib.import_module(f"tinygrad.runtime.autogen.
 def sdma_for(dev:str): return import_module('sdma', (4, 0, 0) if gc_for(dev).version[0] == 9 else (6, 0, 0))
 def xccs_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("xccs", dict(gfx942=8, gfx950=8).get(t.arch, 1))
 def lds_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("lds", dict(gfx950=160).get(t.arch, 64))
+def tmpring_for(dev:str, psize:int) -> int: # the scratch of a wave (64 lanes), in units of 256 bytes (1024 on gfx9)
+  return (gc:=gc_for(dev)).regCOMPUTE_TMPRING_SIZE.encode(waves=Device.target_for(dev).get("scratch_waves", 0),
+                                                          wavesize=ceildiv(max(psize, 128) * 64, 256 if gc.version[0] != 9 else 1024))
 
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
@@ -414,7 +417,7 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
-    self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, waves=self.dev.scratch_waves, wavesize=self.dev.scratch_wavesize(data.private_segment_size))
+    self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, tmpring_for(self.devs[0], data.private_segment_size))
     for xcc_id in range(self.xccs): # architected flat scratch: each xcc gets its part
       with self.pred_exec(xcc_mask=1 << xcc_id):
         self.wreg(self.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, (scratch_addr + data.private_segment_size // self.xccs * xcc_id) >> 8)
@@ -471,7 +474,7 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
 
   def exec(self, call:UOp, prg:UOp):
     data, lib = amd_build_program(prg, self.devs)
-    self.dev.scratch_buffer(data.private_segment_size) # the queue descriptor holds the scratch
+    self.deps += (UOp.extern((data.private_segment_size,), dtypes.uint8, self.devs[0], "scratch"),) # the queue descriptor holds the scratch
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.close_run(len(self.blob))
     pkt = dispatch_packet(data, prg.arg.launch_dims(call), lib.getaddr(self.devs) + data.desc_offset, self.kernargs(call, prg, data))
@@ -863,16 +866,16 @@ class AMDDevice(Compiled):
 
     gc, nbio = ("%d.%d.%d" % self.iface.ip_versions[ip] for ip in (am.GC_HWIP, am.NBIF_HWIP))
     self.sdma_queues:dict = {}
+    scratch_waves = (self.iface.props['max_slots_scratch_cu'] * self.cu_cnt // (self.se_cnt if self.target[0] != 9 else 1)) & 0xfff
 
     allocator = USBAllocator(self) if self.is_usb else AMDAllocator(self)
     super().__init__(device, allocator, None, arch=self.arch, props={"gc": gc, "nbio": nbio, "xccs": self.xccs,
-                     "se": self.se_cnt, "cu": self.cu_cnt, "cu_per_sa": self.iface.props['cu_per_simd_array'],
+                     "se": self.se_cnt, "cu": self.cu_cnt, "cu_per_sa": self.iface.props['cu_per_simd_array'], "scratch_waves": scratch_waves,
                      "lds": self.iface.props['lds_size_in_kb'], "aql": DEV.target("AMD").get("aql", int(self.xccs > 1)), "copy": 0})
     self.props["copy"] = int(self.sdma_queue(0) is not None) # queue setup allocates buffers that check it
 
     # Scratch setup
     self.max_private_segment_size = 0
-    self.scratch_waves = (self.iface.props['max_slots_scratch_cu'] * self.cu_cnt // (self.se_cnt if self.target[0] != 9 else 1)) & 0xfff
     # the ring and its pointers of every queue it can make, made on first use
     queues = {"COMPUTE:0": lambda: self.compute_queue} | {f"COPY:{i}": functools.partial(self.sdma_queue, i) for i in range(8)}
     names = ("ring", "write_ptr", "doorbell", "put_value")
@@ -943,9 +946,6 @@ class AMDDevice(Compiled):
       self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, RING_SIZE, idx=idx)
     return self.sdma_queues.get(idx, None)
 
-  def scratch_wavesize(self, private_segment_size:int) -> int: # the scratch of a wave (64 lanes), in units of 256 bytes (1024 on gfx9)
-    return ceildiv(max(private_segment_size, 128) * 64, 256 if self.target[0] != 9 else 1024)
-
   def scratch_buffer(self, private_segment_size):
     AMDDevice.max_scratch_psize = private_segment_size = max(private_segment_size, 128, AMDDevice.max_scratch_psize)
     if self.max_private_segment_size < private_segment_size:
@@ -970,8 +970,7 @@ class AMDDevice(Compiled):
     self.aql_desc.scratch_wave64_lane_byte_size = self.max_private_segment_size
     self.aql_desc.scratch_resource_descriptor[:] = [lo32(base), int.from_bytes(rsrc1_t(BASE_ADDRESS_HI=hi32(base), SWIZZLE_ENABLE=1), 'little'),
                                                     lo32(self.scratch.nbytes // self.xccs), int.from_bytes(bytes(rsrc3_t(**rsrc)), 'little')]
-    self.aql_desc.compute_tmpring_size = gc_for(self.device).regCOMPUTE_TMPRING_SIZE.encode(waves=self.scratch_waves,
-                                                                                            wavesize=self.scratch_wavesize(self.max_private_segment_size))
+    self.aql_desc.compute_tmpring_size = tmpring_for(self.device, self.max_private_segment_size)
     self.aql_gart.host.view(fmt='B')[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
 
   def _prof_buffer(self, size:int, dtype, host:bool=True) -> Buffer:
