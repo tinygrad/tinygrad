@@ -882,7 +882,8 @@ class AMDDevice(Compiled):
     names = ("ring", "write_ptr", "doorbell", "put_value")
     Compiled.link_bufs |= {to_name(self.device, n, q): lambda b, n=n, f=f: getattr(f(), n) for q, f in queues.items() for n in names}
     Compiled.link_bufs |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel())}
-    Compiled.pm_link += PatternMatcher([(UPat(Ops.EXTERN, arg=(w:=scratch_waves_for(self.device)).arg), lambda: w.const_like(self.scratch_waves))])
+    Compiled.pm_link += PatternMatcher([(UPat(Ops.EXTERN, arg=scratch_waves_for(self.device).arg, name="e"), lambda e, d=self:
+      e.const_like(d.scratch_waves))])
     if self.is_usb: setup_usb_rules(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
