@@ -864,6 +864,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).atanh().numpy())
     ```
     """
+    self = self.cast(least_upper_float(self.dtype))
     return ((1 + self)/(1 - self)).log() / 2
 
   def asinh(self) -> Self:
@@ -876,6 +877,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).asinh().numpy())
     ```
     """
+    self = self.cast(least_upper_float(self.dtype))
     return (sg:=(self<0).where(-1.0, 1.0)) * (self*sg + (self.square() + 1).sqrt()).log()
 
   def acosh(self) -> Self:
@@ -888,6 +890,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).acosh().numpy())
     ```
     """
+    self = self.cast(least_upper_float(self.dtype))
     return (self + (self.square() - 1).sqrt()).log()
 
   def round(self) -> Self:
@@ -962,6 +965,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).atan().numpy())
     ```
     """
+    self = self.cast(least_upper_float(self.dtype))
     return (self / (1 + self * self).sqrt()).asin()
 
   def elu(self, alpha=1.0) -> Self:
@@ -1044,6 +1048,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sinh().numpy())
     ```
     """
+    self = self.cast(least_upper_float(self.dtype))
     return (self.exp() - self.neg().exp()) / 2
 
   def cosh(self) -> Self:
@@ -1056,6 +1061,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).cosh().numpy())
     ```
     """
+    self = self.cast(least_upper_float(self.dtype))
     return (self.exp() + self.neg().exp()) / 2
 
   def erf(self) -> Self:
@@ -1068,6 +1074,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-1.5, -1.0, -0.5, 0., 0.5, 1.0, 1.5]).erf().numpy())
     ```
     """
+    self = self.cast(least_upper_float(self.dtype))
     # https://personal.math.ubc.ca/~cbm/aands/page_299.htm 7.1.26
     t = 1.0 / (1.0 + 0.3275911 * ((s:=(self >= 0).where(1.0, -1.0)) * self))
     return s * (1.0 - t * polyN(t, [1.061405429, -1.453152027, 1.421413741, -0.284496736, 0.254829592]) * (-self.square()).exp())

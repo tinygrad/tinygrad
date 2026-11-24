@@ -151,6 +151,21 @@ class TestAutoCastType(unittest.TestCase):
       # float16 can have larger precision errors
       np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-3, atol=1e-3)
 
+  @given(strat.sampled_from([d for d in core_dtypes if dtypes.is_int(d) and d in supported_dtypes]))
+  def test_int_to_float_unary_func_no_int_overflow(self, dtype):
+    # the intermediate math (x*x, -x, 1-x) must not run in the int dtype
+    for func in [
+      lambda t: t.erf(),
+      lambda t: t.sinh(),
+      lambda t: t.cosh(),
+      lambda t: t.atan(),
+      lambda t: t.asinh(),
+      lambda t: t.acosh(),
+      lambda t: t.atanh(),
+    ]:
+      a = [0, 1, 2, 100]
+      np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-3, atol=1e-3)
+
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need float16")
   def test_sum_dtype_arg(self):
     t = Tensor([40000, 40000], dtype=dtypes.float16)
