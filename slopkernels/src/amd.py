@@ -191,18 +191,22 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *extra, valid_k
   for i in range(-(-G*D//(WAVES*WARP_SIZE))):
     flat = tid + i*WAVES*WARP_SIZE
     h, d = flat // D, flat % D
-    M_val = functools.reduce(UOp.maximum, (ml_lds[w, h, 0].load() for w in range(WAVES)))
+    h_safe = h.minimum(G - 1) if G*D % (WAVES*WARP_SIZE) else h
+    M_val = functools.reduce(UOp.maximum, (ml_lds[w, h_safe, 0].load() for w in range(WAVES)))
     # LDS holds normalized values; restore each wave's sum before combining.
-    val = sum((((ml_lds[w, h, 0].load()-M_val)*LOG2E).exp2() * ml_lds[w, h, 1].load() * acc_lds[w, h, d].load().float()
+    val = sum((((ml_lds[w, h_safe, 0].load()-M_val)*LOG2E).exp2() * ml_lds[w, h_safe, 1].load() * acc_lds[w, h_safe, d].load().float()
                for w in range(WAVES)), zerof)
-    oidx = out[bm, kv_head*G + h, block_chunk, d]
-    if G*D % (WAVES*WARP_SIZE): oidx = out[bm, (kv_head*G + h).valid(flat < G*D), block_chunk, d]
+    oidx = out[bm, kv_head*G + h_safe, block_chunk, d]
+    if G*D % (WAVES*WARP_SIZE): oidx = out[bm, (kv_head*G + h_safe).valid(flat < G*D), block_chunk, d]
     final_stores.append(oidx.store(val))
-  hstat = tid
-  M_val = functools.reduce(UOp.maximum, (ml_lds[w, hstat, 0].load() for w in range(WAVES)))
-  L_val = sum((((ml_lds[w, hstat, 0].load()-M_val)*LOG2E).exp2() * ml_lds[w, hstat, 1].load() for w in range(WAVES)), zerof)
-  q_head = (kv_head*G + hstat).valid(hstat < G) if WAVES*WARP_SIZE > G else kv_head*G + hstat
-  final_stores += [stats[bm, q_head, block_chunk, 0].store(M_val), stats[bm, q_head, block_chunk, 1].store(L_val)]
+  for i in range(-(-G//(WAVES*WARP_SIZE))):
+    hstat = tid + i*WAVES*WARP_SIZE
+    needs_mask = (i + 1)*WAVES*WARP_SIZE > G
+    hstat_safe = hstat.minimum(G - 1) if needs_mask else hstat
+    M_val = functools.reduce(UOp.maximum, (ml_lds[w, hstat_safe, 0].load() for w in range(WAVES)))
+    L_val = sum((((ml_lds[w, hstat_safe, 0].load()-M_val)*LOG2E).exp2() * ml_lds[w, hstat_safe, 1].load() for w in range(WAVES)), zerof)
+    q_head = (kv_head*G + hstat_safe).valid(hstat < G) if needs_mask else kv_head*G + hstat_safe
+    final_stores += [stats[bm, q_head, block_chunk, 0].store(M_val), stats[bm, q_head, block_chunk, 1].store(L_val)]
   return UOp.group(*final_stores).end(lane, wave, block_chunk, block_bhkv).sink(arg=KernelInfo(name="flash_decode_partial", opts_to_apply=()))
 
 @functools.cache

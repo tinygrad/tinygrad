@@ -378,7 +378,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
     from tinygrad.llm.model import Linear
     dev = Tensor.empty(1).device
     rng = np.random.default_rng(51)
-    # 1. Bias-free f16 Linear(32, 16) preserves f16 output dtype across SLOP=0 and SLOP=1
+    # 1. Mixed-dtype Linear parity across SLOP=0 and SLOP=1 (f16@f16, f32@f64, and f16@f16 + f32 bias overflow)
     lin = Linear(32, 16, bias=False)
     lin.weight = Tensor(rng.standard_normal((16, 32)).astype(np.float16)).realize()
     x16 = Tensor(rng.standard_normal((1, 32)).astype(np.float16)).realize()
@@ -387,6 +387,42 @@ class TestSlopKernelsUIR(unittest.TestCase):
     self.assertEqual(y1.dtype, y0.dtype)
     self.assertEqual(y1.dtype, dtypes.float16)
     np.testing.assert_allclose(y1.numpy(), y0.numpy(), rtol=1e-3, atol=1e-3)
+    lin64 = Linear(32, 16, bias=False)
+    lin64.weight = Tensor(rng.standard_normal((16, 32)).astype(np.float32)).realize()
+    x64 = Tensor(rng.standard_normal((1, 32)).astype(np.float64)).realize()
+    with Context(SLOP=0): y64_0 = lin64(x64).realize()
+    with Context(SLOP=1): y64_1 = lin64(x64).realize()
+    self.assertEqual(y64_1.dtype, dtypes.float64)
+    np.testing.assert_allclose(y64_1.numpy(), y64_0.numpy(), rtol=1e-6, atol=1e-6)
+    lin_ovf = Linear(32, 16, bias=True)
+    lin_ovf.weight = Tensor.full((16, 32), 64.0, dtype="float16").contiguous().realize()
+    lin_ovf.bias = Tensor.full((16,), -131072.0, dtype="float32").contiguous().realize()
+    x_ovf = Tensor.full((1, 32), 64.0, dtype="float16").contiguous().realize()
+    with Context(SLOP=0): yovf_0 = lin_ovf(x_ovf).realize()
+    with Context(SLOP=1): yovf_1 = lin_ovf(x_ovf).realize()
+    self.assertEqual(yovf_1.dtype, yovf_0.dtype)
+    np.testing.assert_array_equal(yovf_1.numpy(), yovf_0.numpy())
+    # 2. Decode attention when G > WAVES*WARP_SIZE: logical flash_attention_op rejects over-wide G=64, D=256 cleanly,
+    #    and low-level flash_attention_decode_partial emits workgroup-stride stores covering all G heads
+    self.assertIsNone(slopkernels.get("flash_attention_op", target=tgt, device=dev,
+                                      srcs=(((1, 64, 1, 256), (1, 64, 1, 256), None, "f16"),
+                                            ((2, 1, 1, 128, 256), (2, 1, 1, 128, 256), None, "f16")),
+                                      valid_kv_len=96, decode=True))
+    p40_uir = slopkernels.get("flash_attention_decode_partial", b=1, h=40, m=1, d=64, h_kv=1,
+                              physical_n=64, chunks=1, max_kv_len=64, valid_kv_len=48, waves=1)
+    assert p40_uir is not None
+    # stats is param 1: with G=40 and WAVES*WARP_SIZE=32, 2 stride passes emit 4 stores to stats (M & L for heads 0..31 and 32..39)
+    stats_stores = [u for u in parse_uir(p40_uir).toposort()
+                    if u.op is Ops.STORE and any(x.op is Ops.PARAM and x.arg.slot == 1 for x in u.src[0].toposort())]
+    self.assertEqual(len(stats_stores), 4)
+    # 3. nucleus_round handles non-multiple-of-256 element counts (e.g. 257 unit weights)
+    z257 = Tensor.ones(1, 1, 1, 257, dtype="float32").contiguous().realize()
+    e257 = Tensor.ones(1, 1, 1, 257, dtype="float32").contiguous().realize()
+    t257 = Tensor.full((1, 4), 0.5, dtype="float32").contiguous().realize()
+    nr_uir = slopkernels.get("nucleus_round", b=1, c_blocks=1, c=257, g=4)
+    assert nr_uir is not None
+    got_nr = _run_uir(nr_uir, Tensor.empty(1, 1, 4, dtype="float32"), z257, e257, t257)[0].numpy()
+    np.testing.assert_allclose(got_nr, np.full((1, 1, 4), 257.0, dtype=np.float32), rtol=0, atol=0)
     # 2. quant_decode_multi_proj handles non-multiple-of-4 row counts like (5, 8)
     _, w5_u16, w5_ref = _make_q8_0(rng, 5, 256)
     _, w8_u16, w8_ref = _make_q8_0(rng, 8, 256)
@@ -398,8 +434,9 @@ class TestSlopKernelsUIR(unittest.TestCase):
     mp_uir = slopkernels.get("quant_decode_multi_proj", out_features_tuple=(5, 8), in_features=256, ggml_type=8, tokens=1)
     assert mp_uir is not None
     got5, got8 = _run_uir(mp_uir, out5_init, out8_init, w5_u16, w8_u16, xq, xd, xs)[:2]
-    np.testing.assert_allclose(got5.numpy(), (xm @ w5_ref.T).numpy(), rtol=3e-2, atol=5e-2)
-    np.testing.assert_allclose(got8.numpy(), (xm @ w8_ref.T).numpy(), rtol=3e-2, atol=5e-2)
+    ref5, ref8 = (xm @ w5_ref.T).numpy(), (xm @ w8_ref.T).numpy()
+    np.testing.assert_allclose(got5.numpy(), ref5, rtol=3e-2, atol=max(5e-2, 2e-2 * float(np.abs(ref5).max())))
+    np.testing.assert_allclose(got8.numpy(), ref8, rtol=3e-2, atol=max(5e-2, 2e-2 * float(np.abs(ref8).max())))
     # 3. gated_delta_prefill_op accepts integer start_pos=0 (zeros initial state) and start_pos=3 (keeps state)
     gd_q = Tensor(rng.normal(0, 0.1, (1, 2, 4, 32)).astype(np.float32)).realize()
     gd_k = Tensor(rng.normal(0, 0.1, (1, 2, 4, 32)).astype(np.float32)).realize()

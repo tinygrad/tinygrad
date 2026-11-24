@@ -17,7 +17,7 @@ import struct
 from typing import cast
 
 from tinygrad import UOp
-from tinygrad.dtype import AddrSpace, DType, dtypes
+from tinygrad.dtype import AddrSpace, DType, dtypes, least_upper_dtype
 from tinygrad.helpers import prod
 from tinygrad.uop.ops import Ops, ParamArg
 
@@ -102,21 +102,22 @@ def build_dense_linear(*, target:str|tuple[int, ...], device:DeviceSpec="AMD", s
   (w_shape, _, w_axis, w_dtype), (x_shape, _, x_axis, x_dtype) = cast(TensorDesc, srcs[0]), cast(TensorDesc, srcs[1])
   if len(w_shape) != 2 or w_axis is not None or x_axis is not None: return None
   out_features, in_features = w_shape
-  if in_features % 32 != 0 or x_shape[-1] != in_features or w_dtype not in ("f16", "f32", "bf16"): return None
+  if in_features % 32 != 0 or x_shape[-1] != in_features: return None
+  if w_dtype not in ("f16", "f32", "bf16") or x_dtype not in ("f16", "f32", "bf16"): return None
+  # Preserve Linear fallback semantics: both the dot-product dtype and final (post-bias) dtype must be f32.
+  dot_dt = least_upper_dtype(_dt(w_dtype), _dt(x_dtype))
+  if dot_dt != dtypes.float32: return None
   tokens = int(prod(x_shape[:-1]))
   if tokens >= 16: return None
   p_w, p_x = _p(0, (out_features, in_features), w_dtype, device), _p(1, x_shape, x_dtype, device)
   call_srcs = [p_w, p_x.reshape((tokens, in_features))]
   k_ps = [_p(0, (tokens, out_features), "f32"), _p(1, (out_features, in_features), w_dtype), _p(2, (tokens, in_features), x_dtype)]
-  in_dtypes = [w_dtype, x_dtype]
   if len(srcs) == 3:
     b_shape, _, b_axis, bias_dtype = cast(TensorDesc, srcs[2])
-    if b_axis is not None or b_shape != (out_features,): return None
-    in_dtypes.append(bias_dtype)
+    if b_axis is not None or b_shape != (out_features,) or bias_dtype not in ("f16", "f32", "bf16"): return None
+    if least_upper_dtype(dot_dt, _dt(bias_dtype)) != dtypes.float32: return None
     call_srcs.append(_p(2, (out_features,), bias_dtype, device))
     k_ps.append(_p(3, (out_features,), bias_dtype))
-  # Preserve Linear fallback dtype: only dispatch f32 GEMV when float32 promotion would already occur.
-  if "f32" not in in_dtypes: return None
   out = UOp.alloc((tokens, out_features), dtypes.float32, device=device)
   k = _amd._amd_f16_gemv_kernel(*k_ps, in_features=in_features, out_features=out_features, tokens=tokens)
   return out.after(k.call(out, *call_srcs)).reshape((*x_shape[:-1], out_features))
@@ -255,7 +256,7 @@ def build_flash_attention(*, target:str|tuple[int, ...], device:DeviceSpec="AMD"
     if not (D & (D - 1) == 0 and N_phys % 64 == 0 and group * ((D + 4) * 2 + 8) <= 65536): return None
     waves = 16
     while waves * group * ((D + 4) * 2 + 8) > 65536: waves //= 2
-    if waves <= 0: return None
+    if waves <= 0 or group > waves * 32: return None
     chunks = min(48, (N_phys + 63) // 64)
     partial = UOp.alloc((sh_b * sh_m, sh_h, chunks, D), dtypes.float32, device=device, axis=q_axis)
     stats = UOp.alloc((sh_b * sh_m, sh_h, chunks, 2), dtypes.float32, device=device, axis=q_axis)

@@ -239,14 +239,17 @@ def _argmax_final_kernel(out:UOp, parts:UOp) -> UOp:
 
 def _nucleus_round_kernel(out:UOp, z:UOp, e:UOp, t:UOp) -> UOp:
   B, _, C, c = cast(tuple[int, int, int, int], z.shape)
-  G = int(t.shape[-1])
+  G, n = int(t.shape[-1]), C * c
+  assert n > 0 and G > 0
   row, tid = UOp.range(B, 0, AxisType.GLOBAL), UOp.range(256, 1, AxisType.LOCAL)
   ts = [t[row, g].load() for g in range(G)]
   acc = UOp.alloc((G,), dtypes.float32, addrspace=AddrSpace.REG)
   acc = acc.after(UOp.group(*[acc[g].store(UOp.const(0.0, dtypes.float32)) for g in range(G)]))
-  i = UOp.range(C * c // 256, 2, AxisType.LOOP)
+  i = UOp.range((n + 255) // 256, 2, AxisType.LOOP)
   pos = i * 256 + tid
-  zv, ev = z[row, 0, pos // c, pos % c].load(), e[row, 0, pos // c, pos % c].load()
+  pos_safe = pos.minimum(n - 1) if n % 256 else pos
+  zv, ev = z[row, 0, pos_safe // c, pos_safe % c].load(), e[row, 0, pos_safe // c, pos_safe % c].load()
+  if n % 256: ev = (pos < n).where(ev, 0.0)
   upd = UOp.group(*[acc[g].store(acc.after(i)[g].load() + (zv >= ts[g]).where(ev, 0.0)) for g in range(G)]).end(i)
   lds = UOp.alloc((256, G), dtypes.float32, addrspace=AddrSpace.LOCAL)
   lds = lds.after(UOp.group(*[lds[tid, g].store(acc.after(upd)[g].load()) for g in range(G)]).barrier())
