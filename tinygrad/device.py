@@ -41,7 +41,7 @@ class _Device:
     return ret
   def target_for(self, device:str, cv=DEV) -> Target:
     if (t:=cv.target(device.split(':')[0])).arch: return t
-    if device not in self._opened_devices:
+    if (device:=self.canonicalize(device)) not in self._opened_devices:
       try: self[device]
       except Exception as e: raise RuntimeError(f"no target for {device}: set its arch in DEV, or open it") from e
     iface = type(d.iface).__name__[:-5] if hasattr(d:=self._opened_devices[device], "iface") else ""
