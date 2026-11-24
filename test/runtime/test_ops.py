@@ -58,7 +58,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   torch_fbp, tinygrad_fbp = np.nan, np.nan
   if not forward_only and not FORWARD_ONLY and ts and tst:
     st = time.monotonic()
-    torch_grads = torch.autograd.grad(torch_fxn(*ts).sum(), ts)
+    torch_grads = torch.autograd.grad(out.sum(), ts)
     torch_fbp = time.monotonic() - st
 
     st = time.monotonic()

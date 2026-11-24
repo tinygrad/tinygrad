@@ -7,7 +7,7 @@ from tinygrad.helpers import GlobalCounters, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
-from test.helpers import check_schedule, not_support_multi_device, needs_second_gpu, slow
+from test.helpers import check_schedule, needs_devices, slow
 from tinygrad.engine.realize import run_linear
 
 @slow
@@ -453,8 +453,7 @@ class TestNN(unittest.TestCase):
     layer.num_batches_tracked = Tensor.ones(1)
     load_state_dict(layer, state_dict)
 
-  @needs_second_gpu
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(4)
   def test_load_state_dict_sharded_model(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
@@ -475,7 +474,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
-  @unittest.skipIf(not_support_multi_device, "no multi")
+  @needs_devices(4)
   def test_load_state_dict_sharded_dict(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
@@ -492,8 +491,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
-  @needs_second_gpu
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(4)
   def test_load_state_dict_sharded_model_dict_same_axis(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
 
@@ -514,7 +512,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
-  @unittest.skipIf(not_support_multi_device, "no multi")
+  @needs_devices(6)
   def test_load_state_dict_sharded_model_dict_different_axis(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
     devices5 = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3", f"{Device.DEFAULT}:4", f"{Device.DEFAULT}:5")

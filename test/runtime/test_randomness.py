@@ -4,7 +4,7 @@ import torch
 from functools import partial
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit, Variable
 from tinygrad.helpers import getenv, Context, OSX
-from test.helpers import not_support_multi_device, needs_second_gpu
+from test.helpers import needs_devices
 from hypothesis import given, settings, strategies as strat
 
 settings.register_profile("my_profile", max_examples=getenv("TEST_MAX_EXAMPLES", 200), deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -107,8 +107,7 @@ class TestRandomness(unittest.TestCase):
     r = Tensor.rand(10).numpy()
     np.testing.assert_allclose(r, jr, atol=1e-5, rtol=1e-5)
 
-  @needs_second_gpu
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(2)
   def test_threefry_tensors_cnt(self):
     Tensor.manual_seed(1337)
 

@@ -114,7 +114,7 @@ class RandMixin(OpMixin):
     print(Tensor.randn(2, 3).numpy())
     ```
     """
-    return cls.empty(*shape, **kwargs).randn_like(dtype=dtype)  # type: ignore[attr-defined]
+    return cls.empty(*shape, **kwargs).randn_like(dtype=dtype)
 
   @classmethod
   def randint(cls, *shape, low=0, high=10, dtype=dtypes.int32, **kwargs) -> Self:

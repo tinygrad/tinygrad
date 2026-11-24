@@ -151,4 +151,4 @@ class MockFileIOInterface(FileIOInterface):
   @staticmethod
   def eventfd(initval, flags=None): NotImplementedError()
 
-System.lock_memory = lambda addr, size: None # type: ignore[method-assign,has-type] # nothing dmas from host memory, like MAP_LOCKED in anon_mmap
+System.lock_memory = lambda addr, size: None # type: ignore[has-type] # nothing dmas from host memory, like MAP_LOCKED in anon_mmap

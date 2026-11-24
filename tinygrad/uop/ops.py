@@ -449,6 +449,8 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     if self.op is Ops.BARRIER: return tuple(flatten([x.ended_ranges for x in self.src]))
     # UNSHARD ends the DEVICE range: its src is per-device index math, the device axis is carried by the axis metadata
     if self.op is Ops.UNSHARD: return self.src[1:]
+    # MSELECT picks a single lane, so consumers are no longer indexed by the source's device range.
+    if self.op is Ops.MSELECT: return tuple(r for r in self.src[0].ranges if r.axis_type is AxisType.DEVICE)
     return ()
 
   # determine what ranges this is in
