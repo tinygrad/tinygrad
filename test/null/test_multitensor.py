@@ -199,6 +199,11 @@ class TestMultiScalarALU(unittest.TestCase):
     result.realize()
 
 class TestMultiAxis(unittest.TestCase):
+  def test_mselect_ends_device_range(self):
+    buf = UOp.alloc((8,), dtypes.float, device=("NULL", "NULL:1"))
+    self.assertTrue(buf.ranges)
+    self.assertFalse(buf.mselect(1).ranges)
+
   def test_reshape_shard_invalid(self):
     devices = ("NULL:0", "NULL:1")
     t = Tensor.ones(4, 3).shard(devices, axis=0)
