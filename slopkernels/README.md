@@ -88,8 +88,8 @@ DEV="MOCK+AMD" python3 -m pytest slopkernels/test/ -n12
 ## Layout
 
 - `__init__.py` — narrow public API (`list_kernels`, `get`, `compile_all`, `generate_all`) and kernel registry
-- `export_llm.py` — offline templated LLM UIR generator (`slopkernels.generate_all()` -> `tinygrad/llm/kernels/*.uir`)
-- `__main__.py` — offline CLI compiler (`python3 -m slopkernels [out_dir]`)
+- `export_llm.py` — static catalog of templated LLM UIR kernels (`slopkernels.get(name)` / `slopkernels.generate_all()` -> `slopkernels/uir/*.uir`)
+- `__main__.py` — offline CLI (`python3 -m slopkernels` generates all LLM UIRs to `slopkernels/uir/`)
 - `bench.py` — cold-DRAM GPU LLM op benchmark suite (runs in CI on `7900xtx` & `9060xt`)
 - `src/` — pure `UOp` kernel and logical-op builders (`amd.py`, `amd_gguf.py`, `extra.py`, `ops.py`)
 - `test/` — purity/boundary, offline UIR compilation, 2-GPU TP, and AMD numerical tests

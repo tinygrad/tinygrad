@@ -72,32 +72,33 @@ class TestSlopKernelsUIR(unittest.TestCase):
             self.assertNotIn(alias.name, forbidden_names, f"{p.name} must not import {alias.name}")
         elif isinstance(node, ast.Attribute):
           self.assertNotIn(node.attr, forbidden_attrs, f"{p.name} must not call .{node.attr}()")
-    # 2. Verify tinygrad ONLY imports the zero-arg `generate_all` helper from slopkernels in tinygrad/llm/kernels/__init__.py
+    # 2. Verify tinygrad ONLY imports `get` from slopkernels in tinygrad/llm/model.py and calls it with a single kernel name arg (no kwargs)
     import tinygrad
     root = pathlib.Path(tinygrad.__file__).resolve().parent
     self.assertFalse((root / "llm" / "slop.py").exists(), "tinygrad/llm/slop.py should not exist")
-    kernels_init = (root / "llm" / "kernels" / "__init__.py").resolve()
+    model_py = (root / "llm" / "model.py").resolve()
     for p in root.rglob("*.py"):
       txt = p.read_text()
       if "slopkernels" not in txt: continue
-      slop_imports = [n for n in ast.walk(ast.parse(txt))
+      tree = ast.parse(txt)
+      slop_imports = [n for n in ast.walk(tree)
                       if (isinstance(n, ast.ImportFrom) and n.module and n.module.startswith("slopkernels"))
                       or (isinstance(n, ast.Import) and any(a.name.startswith("slopkernels") for a in n.names))]
-      if p.resolve() == kernels_init:
+      if p.resolve() == model_py:
         self.assertEqual(len(slop_imports), 1)
         self.assertIsInstance(imp := slop_imports[0], ast.ImportFrom)
         assert isinstance(imp, ast.ImportFrom)
-        self.assertEqual((imp.module, [a.name for a in imp.names]), ("slopkernels", ["generate_all"]))
+        self.assertEqual((imp.module, [a.name for a in imp.names]), ("slopkernels", ["get"]))
+        for fn in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_load_kernel"):
+          calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "get"]
+          self.assertEqual(len(calls), 1)
+          self.assertEqual((len(calls[0].args), len(calls[0].keywords)), (1, 0))
       else:
         self.assertEqual(slop_imports, [], f"{p} must not import slopkernels")
-    # 3. Verify no .uir files are tracked in git and any materialized .uir files contain zero ANSI color escape codes
+    # 3. Verify no .uir files are tracked in git
     tracked_uir = subprocess.run(["git", "ls-files", "*.uir"], cwd=str(root.parent), capture_output=True, text=True, check=False)
     if tracked_uir.returncode == 0:
-      self.assertEqual(tracked_uir.stdout.strip(), "", f".uir files must be gitignored, found tracked:\n{tracked_uir.stdout}")
-    llm_dir = root / "llm" / "kernels"
-    if llm_dir.is_dir():
-      for uf in llm_dir.glob("*.uir"):
-        self.assertNotIn("\x1b", uf.read_text(encoding="utf-8"), f"ANSI color escape found in {uf}")
+      self.assertEqual(tracked_uir.stdout.strip(), "", f".uir files must not be tracked in git:\n{tracked_uir.stdout}")
 
   def test_compile_all_offline_to_uir(self):
     """Every registered universal slopkernel compiles offline to a .uir file and round-trips to an Ops.SINK with KernelInfo."""
@@ -488,19 +489,28 @@ class TestSlopKernelsUIR(unittest.TestCase):
                                                          attn_mask=mask, enable_gqa=True).numpy()
       np.testing.assert_allclose(got_fa, ref_fa, rtol=5e-3, atol=5e-3)
 
-  def test_llm_kernels_lazy_generate_all(self):
-    """tinygrad.llm.kernels.load() lazily calls slopkernels.generate_all() to generate all 156 color-free .uir files on disk."""
-    from tinygrad.llm import kernels as llm_kernels
-    llm_dir = pathlib.Path(llm_kernels.__file__).resolve().parent
-    sample_uir = llm_dir / "rdna4_gemm_iq4_xs_f16.uir"
-    if sample_uir.is_file(): sample_uir.unlink()
-    llm_kernels.load.cache_clear()
-    u_iq4 = llm_kernels.load("rdna4_gemm_iq4_xs_f16")
-    self.assertIsNotNone(u_iq4)
-    self.assertTrue(sample_uir.is_file(), "load() must materialize missing .uir files on disk")
-    self.assertEqual(len(list(llm_dir.glob("*.uir"))), 156)
-    self.assertNotIn("\x1b", sample_uir.read_text(encoding="utf-8"))
-    self.assertIsNone(llm_kernels.load("nonexistent_llm_kernel"))
+  def test_llm_kernels_generate_all_and_get(self):
+    """slopkernels.get(name) always writes fresh color-free .uir to slopkernels/uir/ and round-trips through disk; generate_all() writes all 156."""
+    from slopkernels import export_llm
+    uir_dir = export_llm.UIR_DIR
+    sample = uir_dir / "rdna4_gemm_iq4_xs_f16.uir"
+    sample.parent.mkdir(parents=True, exist_ok=True)
+    sample.write_text("stale garbage\n", encoding="utf-8")
+    export_llm.get_llm_kernel.cache_clear()
+    u = slopkernels.get("rdna4_gemm_iq4_xs_f16")
+    self.assertIsNotNone(u)
+    self.assertIs(u.op, Ops.SINK)
+    self.assertTrue(u.has_templates)
+    self.assertNotIn("stale garbage", sample.read_text(encoding="utf-8"))
+    self.assertNotIn("\x1b", sample.read_text(encoding="utf-8"))
+    self.assertIsNone(slopkernels.get("nonexistent_llm_kernel"))
+    all_uirs = slopkernels.generate_all()
+    self.assertEqual(len(all_uirs), 156)
+    self.assertEqual(len(list(uir_dir.glob("*.uir"))), 156)
+    for name, uir in all_uirs.items():
+      self.assertNotIn("\x1b", uir)
+      self.assertIn("addrspace=TEMPLATE", uir)
+      self.assertEqual((uir_dir / f"{name}.uir").read_text(encoding="utf-8").rstrip("\n"), uir)
 
 
 if __name__ == "__main__":

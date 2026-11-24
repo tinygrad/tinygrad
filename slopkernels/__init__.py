@@ -489,8 +489,12 @@ def list_kernels() -> tuple[str, ...]:
   """Return sorted names of all registered slopkernels."""
   return tuple(sorted(_REGISTRY))
 
-def get(name:str, /, **spec:Any) -> str|None:
-  """Compile a named slopkernel specification into pure tinygrad UIR text, or None if unsupported."""
+def get(name:str, /, **spec:Any) -> Any:
+  """Look up a static LLM kernel as a disk-round-tripped UOp (`get(name)`), or compile a spec to UIR (`get(name, **spec)`)."""
+  if not spec:
+    from slopkernels.export_llm import get_llm_kernel
+    if (uop := get_llm_kernel(name)) is not None: return uop
+    if name not in _REGISTRY: return None
   if name not in _REGISTRY: raise KeyError(f"unknown slopkernel {name!r}; available: {list_kernels()}")
   return _REGISTRY[name][0](**spec)
 
@@ -517,9 +521,9 @@ def compile_all(out_dir:str|pathlib.Path|None=None, target:str|tuple[int, ...]|N
     if dst is not None: (dst / f"{name}.uir").write_text(uir + "\n")
   return out
 
-def generate_all() -> None:
-  """Generate all templated LLM `.uir` files on disk in `tinygrad/llm/kernels/`."""
+def generate_all() -> dict[str, str]:
+  """Generate all static templated LLM UIR strings (for tests and offline verification)."""
   from slopkernels.export_llm import generate_all as _generate_all
-  _generate_all()
+  return _generate_all()
 
 __all__ = ["compile_all", "generate_all", "get", "list_kernels"]

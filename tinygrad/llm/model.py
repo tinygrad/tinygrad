@@ -6,7 +6,6 @@ from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device,
 from tinygrad.dtype import least_upper_dtype
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, GGUFPackedTable, _GGML_QUANT, find_packed
 from tinygrad.llm.hf import hf_load
-from tinygrad.llm.kernels import load as _load_kernel
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.uop.ops import Ops, resolve, smax, ssimplify
 from tinygrad.helpers import SLOP, unwrap, round_up, ceildiv, get_child, prod
@@ -32,6 +31,13 @@ def _slop_target(device:str|tuple[str, ...]|None) -> tuple[int, ...]|None: retur
 def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool: return _slop_target(device) is not None
 
 def _sh(shp:tuple[int, ...], axis:int|None, div:int) -> tuple[int, ...]: return tuple(s // div if i == axis else s for i, s in enumerate(shp))
+
+@functools.cache
+def _load_kernel(name:str) -> UOp|None:
+  try:
+    from slopkernels import get
+    return get(name)
+  except ImportError: return None
 
 def _spec_kernel(name:str, **kw:int|float) -> UOp|None:
   global _slop_warned
