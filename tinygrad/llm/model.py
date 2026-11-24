@@ -127,7 +127,7 @@ class ExpertWeights:
         self.set_quantized()
         if self.ggml_type is None: self.use_custom_quant = False
       slop: Tensor|None = None
-      if self.ggml_type is not None and self.use_custom_quant:
+      if self.ggml_type is not None and self.use_custom_quant and not (self.weight.uop.axis == 0 and hasattr(self, 'bias')):
         sp, xp = (sel, x) if isinstance(T:=sel.shape[1], int) else (sel.pad_to(sel.max_shape, value=-1), x.pad_to(x.max_shape))
         if (slop := _slop("moe_linear", self.packed, sp.cast(dtypes.int32).flatten(), xp.contiguous(), ggml_type=self.ggml_type,
                           sel_shape=tuple(int(s) for s in sp.shape[-3:]), in_features=self.in_features,
@@ -893,9 +893,10 @@ class GatedDeltaNetBlock(FFNBlock):
 
     # recurrent: scan over the (padded) tokens, updating the recurrent state. collect the per-step outputs
     state_dep = Tensor(self.recurrent_state.uop.after(*conv_state_stores))
-    if (core_slop := _slop("gated_delta_prefill_op", q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(),
-                           state_dep, *([pos] if isinstance(pos, UOp) else []),
-                           start_pos=None if isinstance(pos, UOp) else int(pos))) is not None:
+    if q.uop.axis is None and state_dep.uop.axis is None and \
+        (core_slop := _slop("gated_delta_prefill_op", q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(),
+                            state_dep, *([pos] if isinstance(pos, UOp) else []),
+                            start_pos=None if isinstance(pos, UOp) else int(pos))) is not None:
       core = core_slop.transpose(1, 2)
     else:
       state = initial.where(0, self.recurrent_state.float())
