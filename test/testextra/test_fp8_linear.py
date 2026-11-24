@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.nn import Linear
 from extra.fp8.fp8_linear import FP8Linear, convert_to_float8_training
-from test.helpers import not_support_multi_device, needs_second_gpu
+from test.helpers import needs_devices
 
 BS, T, in_dim, out_dim = 16, 4, 128, 128
 
@@ -62,8 +62,7 @@ class TestFP8Linear(unittest.TestCase):
     y_after = model(x).numpy()
     np.testing.assert_allclose(y_after, y_before, rtol=0.1, atol=0.1)
 
-  @needs_second_gpu
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(2)
   def test_multi_gpu(self):
     GPUS = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
     fp8_layer = FP8Linear(in_dim, out_dim)

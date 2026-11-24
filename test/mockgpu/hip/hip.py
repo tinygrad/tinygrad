@@ -1,6 +1,6 @@
 # the hip api on top of mock cuda, kernels run on the amd emulator
 import ctypes
-from types import SimpleNamespace
+from tinygrad.helpers import Context
 from tinygrad.runtime.autogen import hip, libc
 from tinygrad.runtime.ops_amd import _amd_program_image
 from tinygrad.runtime.ops_hip import HIPIFY
@@ -18,9 +18,8 @@ mc.run_kernel = run_kernel
 
 def hipModuleLoadData(module, image):
   elf = libc.Elf64_Ehdr.from_address(image) # the section headers end the elf
-  gfx1100 = SimpleNamespace(iface=SimpleNamespace(props={"lds_size_in_kb": 64}), target=(11, 0, 0))
   lib = ctypes.string_at(image, elf.e_shoff + elf.e_shnum * elf.e_shentsize)
-  data, img = _amd_program_image(gfx1100, lib)
+  with Context(DEV="AMD::gfx1100"): data, img = _amd_program_image("AMD", lib)
   text = next(sh.header for sh in elf_loader(lib)[1] if sh.name == ".text")
   buf = ctypes.create_string_buffer(img, len(img))
   programs[ctypes.addressof(buf)] = (buf, data, text.sh_addr + text.sh_size)

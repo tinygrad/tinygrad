@@ -79,14 +79,12 @@ class PBBufferedReader(io.BufferedReader):
   def decode_varint(self) -> int:
     """Reference: https://protobuf.dev/programming-guides/encoding/#varints"""
     result = 0
-    shift = 0
-    while True:
+    for shift in range(0, 70, 7):
       data = self.read(1)
       if data == b"": raise EOFError("decode_varint EOF")
       result |= (data[0] & 0x7F) << shift
       if not (data[0] & 0x80): return result
-      shift += 7
-      if shift >= 70: raise ValueError("Varint too long")
+    raise ValueError("Varint too long")
 
   def read_delimited(self, use_tensor=False):
     str_len = self.decode_varint()
@@ -132,10 +130,6 @@ class OnnxPBParser:
     else: self.tensor = inp
     self.reader = PBBufferedReader(self.tensor)
 
-  def parse(self) -> dict:
-    """Parses the ONNX model into a nested dictionary. """
-    return self._parse_ModelProto()
-
   def _parse_message(self, end_pos: int) -> Generator[tuple[int, WireType], None, None]:
     while self.reader.tell() < end_pos:
       tag = self.reader.decode_varint()
@@ -154,8 +148,8 @@ class OnnxPBParser:
       else: obj[f[0]] = f[1]()
     return obj
 
-  def _parse_ModelProto(self) -> dict:
-    """Entry point for parsing the ONNX model."""
+  def parse(self) -> dict:
+    """Parses the ONNX model (a ModelProto) into a nested dictionary."""
     obj = self._parse_fields({"opset_import": []}, {8: ("opset_import", self._parse_OperatorSetIdProto)}, self.reader.len)
     self.opset_imports = {Domain.from_onnx(x.get('domain')):x.get('version', 1) for x in obj["opset_import"]}
     self.reader.seek(0)
@@ -351,7 +345,9 @@ class OnnxRunner:
   def _get_python_const(self, name:str, op:str, idx:int) -> list[ConstType]|ConstType|bytes|Any:
     """Convert tensor to python const with name-based caching for JIT stability."""
     t = self.graph_values[name]
-    if idx not in required_input_python_consts.get(op, ()) or not isinstance(t, Tensor): return t
+    # a Constant/initializer Gather index is a python const too, for the shrink fast path
+    const_inputs = (1,) if op == "Gather" and name in self.const_names else required_input_python_consts.get(op, ())
+    if idx not in const_inputs or not isinstance(t, Tensor): return t
     if name in self.graph_inputs: return _to_python_const(t)
     # cache by name - safe because JIT requires fixed input shapes, so computed values (Shape ops) are deterministic
     if (cached := self._python_const_cache.get(name)) is None: cached = self._python_const_cache[name] = _to_python_const(t)
@@ -370,11 +366,6 @@ class OnnxRunner:
         # provide additional opts
         if node.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
         if node.op in {"Gradient", "If"}: opts['intermediate_tensors'] = self.graph_values
-        # for Gather, convert indices to python const if from Constant/initializer for shrink fast path
-        if node.op == "Gather" and len(node.inputs) > 1 and node.inputs[1] in self.const_names:
-          idx_name, cache = node.inputs[1], self._python_const_cache
-          if (cached := cache.get(idx_name)) is None: cached = cache[idx_name] = _to_python_const(self.graph_values[idx_name])
-          inps[1] = cached
 
         if debug >= 1: print((f"[{self.graph_name}] " if self.graph_name else "") + f"{num}: op '{node.op}' opt {opts}")
         if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
@@ -662,14 +653,12 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
                     output_padding:tuple[int, ...]|int=0, strides:tuple[int, ...]|int=1):
     input_shape_, kernel_shape_ = X.shape[2:], (kernel_shape or W.shape[2:])
     strides_, dilations_, output_padding_ = (make_tuple(x, len(input_shape_)) for x in (strides, dilations, output_padding))
+    if output_shape is None and pads is None:
+      if auto_pad == "NOTSET": pads = [0] * (2 * len(input_shape_))
+      else: output_shape = [int(i)*s for i,s in zip(input_shape_, strides_)]
     if output_shape is not None: # we pad according to output_shape
       pads = _auto_pad([s_*(i-1) + op_ + ((k_-1)*d_+1) - os for s_,i,op_,k_,d_,os in
                         zip(strides_, input_shape_, output_padding_, kernel_shape_, dilations_, output_shape)], auto_pad)
-    if pads is None: # we generate pads
-      output_shape = output_shape or [int(X.shape[i+2]) * strides_[i] for i in range(len(strides_))]
-      pads = [int(strides_[i]*(input_shape_[i]-1)+output_padding_[i]+((kernel_shape_[i]-1)*dilations_[i]+1)-output_shape[i])
-              for i in range(len(input_shape_))]
-      pads = _auto_pad(pads, auto_pad) if auto_pad != "NOTSET" else [0] * len(input_shape_) * 2
     pads = _onnx_pads_to_tiny_pads(pads)
     return X.conv_transpose2d(W, B, group, strides_, dilations_, pads, output_padding_)
 
@@ -1110,12 +1099,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return x.gather(axis, indices)
 
   def Compress(inp:Tensor, condition:list[bool], axis:int|None=None):
-    if axis is None:
-      inp = inp.flatten()
-      axis = 0
-    axis = inp._resolve_dim(axis)
-    con = Tensor([i for i,cond in enumerate(condition) if cond], device=inp.device) # compress in python
-    return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
+    if axis is None: inp, axis = inp.flatten(), 0
+    return Gather(inp, Tensor([i for i,cond in enumerate(condition) if cond], device=inp.device), axis) # compress in python
 
   # ***** Quantization Ops *****
   def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):

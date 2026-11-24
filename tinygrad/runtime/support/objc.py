@@ -69,7 +69,7 @@ else:
     def _addmeth(cls, m, clsmeth=False):
       nm = m[0].strip(':').replace(':', '_')
       if clsmeth: setattr(cls, nm, classmethod(msg(m[0], cls if m[1] == 'instancetype' else m[1],
-                                                   [cls if a == 'instancetype' else a for a in m[2]], *m[3:], clsmeth=True))) # type: ignore[misc]
+                                                   [cls if a == 'instancetype' else a for a in m[2]], *m[3:], clsmeth=True)))
       else: setattr(cls, nm, msg(m[0], cls if m[1] == 'instancetype' else m[1], [cls if a == 'instancetype' else a for a in m[2]], *m[3:]))
 
 class Spec(id_, metaclass=MetaSpec):

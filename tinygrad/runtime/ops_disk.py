@@ -3,6 +3,7 @@ from dataclasses import replace
 from typing import cast
 from tinygrad.helpers import OSX, mv_address, flatten, to_tuple, unwrap, ceildiv
 from tinygrad.device import BufferStorage, MMIOInterface, Compiled, Allocator, Buffer, BufferSpec, Device, HCQ_RUNTIME_DEV
+from tinygrad.device import is_iface_usb
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, uopfunc
 from tinygrad.runtime.support.hcq2 import ccall, ins, patch
@@ -114,8 +115,8 @@ def disk_read(file:UOp, srcs:UOp, counts:UOp, rings:UOp, sqes:UOp) -> UOp: # src
 
 def is_disk_read(c:UOp) -> bool:
   dev, src = [to_tuple(b.device)[0] for b in c.src[1:3]] if c.op is Ops.CALL and c.body.op is Ops.STORE else ("", "")
-  return src.startswith("DISK:") and not src.startswith("DISK:shm:") and Device[dev].has_copy_queue and not dev.startswith("NULL") and bool(uring()) \
-    and not getattr(Device[dev], "is_usb", False)
+  return src.startswith("DISK:") and not src.startswith("DISK:shm:") and not dev.startswith("NULL") and bool(uring()) \
+    and bool(Device.target_for(dev).get("copy", 1)) and not is_iface_usb(dev)
 
 def disk_copy_rewriter(s:UOp) -> UOp|None:
   lin = s.without_after.body
@@ -158,7 +159,7 @@ def shared(fd:int, at:int, n:int) -> Buffer: # n bytes of memory the kernel shar
 @functools.cache
 def uring() -> tuple[int, io_uring.struct_io_uring_params, Buffer, Buffer]|None: # fd, offsets, the rings (heads, tails, cqes), the sqes
   if sys.platform != "linux" or hasattr(sys, "getandroidapilevel"): return None
-  p = io_uring.struct_io_uring_params(flags=io_uring.IORING_SETUP_NO_SQARRAY)  # type: ignore[unreachable]
+  p = io_uring.struct_io_uring_params(flags=io_uring.IORING_SETUP_NO_SQARRAY)
   if (fd:=libc.syscall(io_uring.NR_io_uring_setup, RING_ENTRIES, ctypes.byref(p))) < 0: return None
   return fd, p, shared(fd, io_uring.IORING_OFF_SQ_RING, p.cq_off.cqes + 16 * p.cq_entries), shared(fd, io_uring.IORING_OFF_SQES, 64 * RING_ENTRIES)
 

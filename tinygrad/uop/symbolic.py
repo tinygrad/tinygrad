@@ -238,10 +238,10 @@ commutative = PatternMatcher([
 
 def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
   """in cond.where(t, f), cond is True within t and False within f"""
-  if cond not in t.bool_slice and cond not in f.bool_slice: return None
   # INDEX gates are owned by the valid/store-coalescing machinery, leave them alone
   if any(u.op_in_backward_slice_with_self(Ops.INDEX) for u in (cond, t, f)): return None
-  return cond.where(t.substitute({cond: cond.const_like(True)}), f.substitute({cond: cond.const_like(False)}))
+  nt, nf = t.substitute({cond: cond.const_like(True)}), f.substitute({cond: cond.const_like(False)})
+  return None if nt is t and nf is f else cond.where(nt, nf)
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
@@ -286,7 +286,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var("c").where(UPat.var("t"), 0) + UPat.var("c").where(0, UPat.var("f")), lambda c,t,f: c.where(t, f)),
   # ALU/variable min==max -> CONST
   (UPat({Ops.CMPLT, Ops.CMPEQ, Ops.DIV, Ops.MOD, Ops.PARAM, Ops.EXTERN, Ops.SPECIAL}, name="x"),
-   lambda x: x.const_like(x.vmin) if x.dtype is not dtypes.void and x.vmin == x.vmax else None),
+   lambda x: x.const_like(x.vmin) if x.dtype is not dtypes.void and not x.is_template and x.vmin == x.vmax else None),
   (UPat(Ops.RANGE, src=(UPat.cvar().or_casted(),), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
   ((UPat.cvar("a") < UPat.var("b")).where(UPat.var("b"), UPat.cvar("c")), lambda a,b,c: UOp.maximum(a,b) if a.val == c.val else None),

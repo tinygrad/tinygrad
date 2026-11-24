@@ -13,10 +13,8 @@ class TestTensorVariable(unittest.TestCase):
     vv = Variable("a", 1, 10).bind(2)
     t = Tensor.ones(3, dtype=dtypes.int8)
     self.assertListEqual((t * vv).tolist(), [2, 2, 2])
-    # TODO: fix
-    try:
-      self.assertListEqual((vv * t).tolist(), [2, 2, 2])
-    except RuntimeError: pass
+    self.assertListEqual((vv * t).tolist(), [2, 2, 2])
+    self.assertEqual((vv * t).dtype, dtypes.int8)
 
   @unittest.skipUnless(dtypes.long in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires long support")
   def test_large_range_variable(self):

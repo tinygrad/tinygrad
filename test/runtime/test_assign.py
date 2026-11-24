@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad import Device, dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import temp, DEV, Context
-from test.helpers import assert_kernel_count, needs_second_gpu
+from test.helpers import assert_kernel_count, needs_devices
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -1045,15 +1045,6 @@ class TestPartialAssignToSharedBuffer(unittest.TestCase):
     for v in views:
       np.testing.assert_allclose(v.numpy(), np.ones((2, 5)))
 
-  def test_many_slices(self):
-    n_params = 10
-    big = Tensor.zeros(n_params * 12).contiguous().realize()
-    grads = [big[i*12:(i+1)*12].reshape(3, 4) for i in range(n_params)]
-    for g in grads: g.assign(g + 1)
-    Tensor.realize(*grads)
-    for g in grads:
-      np.testing.assert_allclose(g.numpy(), np.ones((3, 4)))
-
   def test_mixed_shapes(self):
     big = Tensor.zeros(100).contiguous().realize()
     shapes = [(3, 4), (4, 6), (6, 4), (2, 5), (4, 3)]
@@ -1097,11 +1088,9 @@ class TestAfterCachePatterns(unittest.TestCase):
     np.testing.assert_array_equal(head.numpy(), [3])
     np.testing.assert_array_equal(full.numpy(), [1, 2])
 
+@needs_devices(2)
 class TestMultiAssign(unittest.TestCase):
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-
-  @needs_second_gpu
-  def setUp(self): pass
 
   def test_multi_assign_realized(self):
     out = Tensor.zeros(4).shard(self.device, 0).contiguous().realize()

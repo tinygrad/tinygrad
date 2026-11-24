@@ -23,7 +23,6 @@ def cleanup_dead_axes(b:UOp):
   if b.src[0].op is Ops.AFTER: return None
 
   new_rng = []
-  hit = False
   reshape: list[sint] = []
   for s,rng in zip(b.shape, b.src[1:]):
     # skip for symbolic. TODO: fix this
@@ -31,11 +30,10 @@ def cleanup_dead_axes(b:UOp):
     # CONSTs are already dead axes
     if rng.op is Ops.CONST or (rng.op is Ops.RANGE and rng not in b.src[0].ranges):
       reshape.append(1)
-      hit = True
     else:
       reshape.append(s)
       new_rng.append(rng)
-  if hit:
+  if len(new_rng) != len(reshape):
     return b.replace(src=b.src[0:1]+tuple(new_rng)).reshape(tuple(reshape)).expand(b.shape)
 
 def gate_substitute(ctx, b:UOp) -> None:
@@ -129,21 +127,13 @@ def strip_zero_offset_shrink(x:UOp) -> UOp:
   return x.src[0] if x.op is Ops.SHRINK and all(resolve(start == 0, False) for start,_ in x.marg) else x
 
 def no_indexing_calls(u:UOp):
-  new_srcs = []
-  for x in u.src:
-    if x.op is Ops.INDEX:
-      # sometimes if call srcs have children the call will get an INDEX. we remove it here.
-      # TODO: we should add safety checks here for contiguous
-      new_srcs.append(x.src[0])
-    elif x.op is Ops.SHRINK:
-      # SHRINK with offset 0 is fine
-      new_srcs.append(strip_zero_offset_shrink(x))
-    elif x.op is Ops.MSTACK:
-      new_srcs.append(x.replace(src=tuple(strip_zero_offset_shrink(s) for s in x.src)))
-    else:
-      # everything else we pass through
-      new_srcs.append(x)
-  return u.replace(src=tuple(new_srcs))
+  def strip(x:UOp) -> UOp:
+    # sometimes if call srcs have children the call will get an INDEX. we remove it here.
+    # TODO: we should add safety checks here for contiguous
+    if x.op is Ops.INDEX: return x.src[0]
+    # SHRINK with offset 0 is fine, also inside an MSTACK
+    return x.replace(src=tuple(map(strip_zero_offset_shrink, x.src))) if x.op is Ops.MSTACK else strip_zero_offset_shrink(x)
+  return u.replace(src=tuple(map(strip, u.src)))
 
 pm_no_indexing_calls = PatternMatcher([
   (UPat(Ops.CALL, name="u"), no_indexing_calls),

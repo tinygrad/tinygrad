@@ -2,7 +2,6 @@ import unittest, math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import Ops
 import numpy as np
-from test.helpers import not_support_multi_device
 from test.null.test_const_folding import _check_ast_count
 
 class TestMovedConstFolding(unittest.TestCase):
@@ -83,7 +82,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor(4).max())
     np.testing.assert_equal(Tensor(4).max().numpy(), 4)
 
-@unittest.skipIf(not_support_multi_device() or True, "no multi, RANGEIFY doesn't support multi const folding")
+@unittest.skip("RANGEIFY doesn't support multi const folding")
 class TestMultiConstFolding(unittest.TestCase):
   def test_multi_const_folding_literal(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))

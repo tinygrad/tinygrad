@@ -1,8 +1,7 @@
 import unittest
 from tinygrad import Tensor, dtypes, TinyJit, UOp
-from tinygrad.llm.kernels.amd import Linear
 from tinygrad.llm.gguf import ggml_data_to_tensor
-from tinygrad.llm.model import apply_rope as apply_rope_new, precompute_freqs_cis
+from tinygrad.llm.model import Linear, apply_rope as apply_rope_new, precompute_freqs_cis
 from test.helpers import assert_jit_cache_len, check_schedule
 
 def apply_rope(x:Tensor, start_pos:int):
@@ -40,7 +39,8 @@ class TestLinear(unittest.TestCase):
       decoded = ggml_data_to_tensor(packed, 256, ggml_type).reshape(1, 256)
       linear = Linear(256, 1, bias=False)
       linear.set_quantized(decoded)
-      self.assertEqual((linear.ggml_type, linear.weight.nbytes()), (ggml_type, packed_size))
+      assert linear.packed is not None
+      self.assertEqual((linear.ggml_type, linear.packed.nbytes()), (ggml_type, packed_size))
 
 if __name__ == '__main__':
   unittest.main()

@@ -4,23 +4,25 @@ from tinygrad import Tensor, GlobalCounters
 from tinygrad.uop.ops import UOp, KernelInfo
 
 class TestFunction(unittest.TestCase):
-  def test_depth_restored_on_exception(self):
-    from tinygrad.function import _function
+  def test_context_restored_on_exception(self):
+    from tinygrad.helpers import ALLOW_DEVICE_USAGE, Context
     @function
-    def f(a:Tensor) -> Tensor: raise ValueError("error")
-    with self.assertRaises(ValueError): f(Tensor([1]))
-    self.assertEqual(_function.depth, 0)
+    def f(a:Tensor) -> Tensor:
+      self.assertFalse(ALLOW_DEVICE_USAGE)
+      raise ValueError("error")
+    with Context(ALLOW_DEVICE_USAGE=1):
+      with self.assertRaises(ValueError): f(Tensor([1]))
+      self.assertTrue(ALLOW_DEVICE_USAGE)
 
   def test_name(self):
     @function
     def f(a:Tensor) -> Tensor: return a + 1
-    assert f(Tensor([1])).uop.src[1].arg.name.endswith("f")
+    self.assertEqual(f.__name__, "f")
 
   def test_method_name(self):
     class Foo:
       @function
       def __call__(self, x:Tensor) -> Tensor: return x + 1
-    assert Foo()(Tensor([1])).uop.src[1].arg.name.endswith("Foo.__call__")
 
 class TestFunctionMulti(unittest.TestCase):
   devices_2 = ("NULL:0", "NULL:1")

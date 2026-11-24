@@ -27,11 +27,13 @@ class ElementwiseMixin(CreationMixin):
 
   # great functions you get!
   def ufix(self, x: 'Self|ConstType|UOp') -> Self:
-    return x if isinstance(x, type(self)) else self._wrap_uop(self._uop.ufix(x))
+    # a python const or a bare UOp becomes Self, a Tensor (a mixin wrapping a UOp) passes through so it lifts self
+    return x if isinstance(x, ElementwiseMixin) and x._uop is not x else type(self).const(x)  # type: ignore[return-value]
 
   def _broadcasted(self, y: 'Self|ConstType|UOp', reverse: bool = False) -> tuple[Self, Self]:
     y = self.ufix(y)
-    x, y = (y.ufix(self), y) if not reverse else (y, y.ufix(self))
+    x = y.ufix(self)
+    if reverse: x, y = y, x
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
     return _promote(x, out_dtype), _promote(y, out_dtype)
 

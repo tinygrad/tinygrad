@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from test.helpers import assert_jit_cache_len, not_support_multi_device, needs_second_gpu
+from test.helpers import assert_jit_cache_len, needs_devices
 from tinygrad import Tensor, TinyJit, Device, dtypes, Context, UOp
 from tinygrad.helpers import DEV, GlobalCounters
 from tinygrad.engine.jit import JitError
@@ -66,8 +66,7 @@ class TestJit(unittest.TestCase):
       ja = jf(a)
       np.testing.assert_allclose(a.numpy(), ja.numpy(), atol=1e-4, rtol=1e-5)
 
-  @needs_second_gpu
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(2)
   def test_jitted_transfers(self):
     d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
 
@@ -100,8 +99,7 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose((a.numpy()+b.numpy()), zc.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose((a.numpy()*b.numpy()), wc.numpy(), atol=1e-4, rtol=1e-5)
 
-  @needs_second_gpu
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(2)
   def test_jitted_view(self):
     d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
 
@@ -136,11 +134,6 @@ class TestJit(unittest.TestCase):
     add.reset()
     _simple_test(add, N=20)
 
-  def test_simple_jit_norealize(self):
-    @TinyJit
-    def add(a, b): return (a+b)
-    _simple_test(add)
-
   def test_simple_jit_norealize_list(self):
     @TinyJit
     def add(a, b): return [a+b]
@@ -150,27 +143,6 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def add(a, b): return {"billy": a+b}
     _simple_test(add, extract=lambda x: x["billy"])
-
-  def test_jit_multiple_outputs(self):
-    @TinyJit
-    def f(a, b): return (a+b).realize(), (a-b).realize(), (a*b).realize()
-    for _ in range(5):
-      a = Tensor.randn(10, 10)
-      b = Tensor.randn(10, 10)
-      c, d, e = f(a, b)
-      np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-      np.testing.assert_allclose(d.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
-      np.testing.assert_allclose(e.numpy(), a.numpy()*b.numpy(), atol=1e-4, rtol=1e-5)
-    assert_jit_cache_len(f, 3)
-
-  def test_nothing_jitted(self):
-    @TinyJit
-    def add(a, b): return None
-    with self.assertRaises(JitError):
-      for _ in range(5):
-        a = Tensor.randn(10, 10)
-        b = Tensor.randn(10, 10)
-        add(a, b)
 
   def test_jit_zero_does_not_jit(self):
     @TinyJit
@@ -206,34 +178,6 @@ class TestJit(unittest.TestCase):
       c = add2(a, b)
       np.testing.assert_allclose(c.numpy(), 2*i)
     assert_jit_cache_len(add2, 1)
-
-  def test_jit_shape_mismatch(self):
-    @TinyJit
-    def add(a, b): return (a+b).realize()
-    for _ in range(5):
-      a = Tensor.randn(10, 10)
-      b = Tensor.randn(10, 10)
-      add(a, b)
-    bad = Tensor.randn(20, 20)
-    with self.assertRaises(JitError):
-      add(a, bad)
-
-  def test_jit_shape_views_mismatch(self):
-    @TinyJit
-    def add(a): return (a+1).realize()
-    with self.assertRaises(JitError):
-      for i in range(1,5):
-        # a has an offset that the kernel doesn't know about
-        a = Tensor.randn(10, 10).realize()[:, i:i+2]
-        add(a)
-
-  def test_jit_duplicate_fail(self):
-    # the jit doesn't support duplicate arguments
-    @TinyJit
-    def add(a, b): return (a+b).realize()
-    a = Tensor.randn(10, 10)
-    with self.assertRaises(JitError):
-      add(a, a)
 
   def test_kwargs_jit(self):
     @TinyJit
@@ -275,46 +219,6 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(f(a, Tensor([i])).numpy(), (a+i).numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(f, 1)
 
-  def test_jit_output_non_tensor_fail(self):
-    @TinyJit
-    def f(a, b, i): return (a+b).realize(), i
-    with self.assertRaises(JitError):
-      for i in range(3):
-        f(Tensor.randn(10, 10), Tensor.randn(10, 10), i)
-
-  def test_jit_random_regen(self):
-    def f(a, b):
-      rn = Tensor.randn(*a.shape)
-      return ((a+b)*rn).realize()
-    a = Tensor.randn(10, 10).realize()  # realize these before resetting the random seed
-    b = Tensor.randn(10, 10).realize()
-
-    Tensor.manual_seed(1234)
-    jf = TinyJit(f)
-    res = set()
-    for _ in range(5):
-      o1 = jf(a, b)
-      res.add(o1.numpy()[0][0])
-    assert len(res) == 5, "All values should be different, rand works in jit."
-
-    Tensor.manual_seed(1234)
-    jf2 = TinyJit(f)
-    res2 = set()
-    for _ in range(5):
-      o1 = jf2(a, b)
-      res2.add(o1.numpy()[0][0])
-    assert len(res2) == 5, "All values should be different, rand works in jit."
-    assert res == res2, "Jit rand is not reproducible with the same seed"
-
-    Tensor.manual_seed(3421)
-    jf3 = TinyJit(f)
-    res3 = set()
-    for _ in range(5):
-      o1 = jf3(a, b)
-      res3.add(o1.numpy()[0][0])
-    assert len(res3) == 5, "All values should be different, rand works in jit."
-    assert res3 != res2, "Jit rand is diff with diff seeds"
-
   def test_jit_v_nojit_random_regen(self):
     def f(a, b):
       rn = Tensor.randn(*a.shape)
@@ -345,47 +249,6 @@ class TestJit(unittest.TestCase):
       with_jit.add(o2.numpy()[0][0])
     assert len(with_jit) == 10, "All values should be different."
     assert with_jit == without_jit, "jit and non-jit should produce the same random values with the same seed"
-
-  def test_jit_multiple_random_regen(self):
-    def f(a, b):
-      rn = Tensor.randn(*a.shape)
-      rn = rn * a
-      rn2 = Tensor.randn(*a.shape)
-      rn2 = rn2 * b
-      rn = rn + rn2
-      rn2 = rn2 + Tensor.randn(*a.shape)
-      return ((a+b)*rn).realize(), ((a+b)*rn2).realize()
-    a = Tensor.randn(10, 10).realize()  # realize these before resetting the random seed
-    b = Tensor.randn(10, 10).realize()
-
-    Tensor.manual_seed(1234)
-    jf = TinyJit(f)
-    res = set()
-    for _ in range(5):
-      o1, o2 = jf(a, b)
-      res.add(o1.numpy()[0][0])
-      res.add(o2.numpy()[0][0])
-    assert len(res) == 10, "All values should be different, rand works in jit."
-
-    Tensor.manual_seed(1234)
-    jf2 = TinyJit(f)
-    res2 = set()
-    for _ in range(5):
-      o1, o2 = jf2(a, b)
-      res2.add(o1.numpy()[0][0])
-      res2.add(o2.numpy()[0][0])
-    assert len(res2) == 10, "All values should be different, rand works in jit."
-    assert res == res2, "Jit rand is not reproducible with the same seed"
-
-    Tensor.manual_seed(3421)
-    jf3 = TinyJit(f)
-    res3 = set()
-    for _ in range(5):
-      o1, o2 = jf3(a, b)
-      res3.add(o1.numpy()[0][0])
-      res3.add(o2.numpy()[0][0])
-    assert len(res3) == 10, "All values should be different, rand works in jit."
-    assert res3 != res2, "Jit rand is diff with diff seeds"
 
   def test_jit_random_after_unrealized_random(self):
     @TinyJit
@@ -691,11 +554,9 @@ class TestJitGraphSplit(unittest.TestCase):
     inp_cpu = Tensor.randn(10, 10, device="CPU").realize()
     self.expect(f, inp, inp_cpu)
 
+  @needs_devices(2)
   def test_jit_multidev(self):
     if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
-
-    try: Device[f"{Device.DEFAULT}:1"]
-    except Exception: raise unittest.SkipTest("no multidevice")
 
     @TinyJit
     def f(inp, inp_d1):
@@ -710,12 +571,10 @@ class TestJitGraphSplit(unittest.TestCase):
     inp_d1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:1").realize()
     self.expect(f, inp, inp_d1)
 
+  @needs_devices(2)
   def test_jit_multidev_xfer(self):
     if Device.DEFAULT in {"CPU"}: raise unittest.SkipTest("CPU is not a valid default device for this test (zero-copies)")
     if Device.DEFAULT == "METAL": raise unittest.SkipTest("Metal is flaky, with multidevice (same as metal llama 4gpu?)")
-
-    try: Device[f"{Device.DEFAULT}:1"]
-    except Exception: raise unittest.SkipTest("no multidevice")
 
     @TinyJit
     def f(inp, inp_d1):

@@ -1,4 +1,4 @@
-import os, sys, gc, time, struct, functools, unittest, contextlib
+import os, sys, gc, time, struct, unittest, contextlib
 from dataclasses import replace
 from typing import Any, Callable, Iterator
 import numpy as np
@@ -162,15 +162,7 @@ def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
   assert ret[-1].op is Ops.SINK
   return ret
 
-def not_support_multi_device():
-  # CL and CUDA don't support multi device if in CI
-  return (Device.DEFAULT == "CL" and Device[Device.DEFAULT].count() < 2) or (Device.DEFAULT == "CUDA" and DEV.interface.startswith("MOCK"))
-
-def needs_second_gpu(fn):
-  @functools.wraps(fn)
-  def wrapper(self, *args, **kwargs):
-    # check if there's a second GPU, if not, skip multi tests
-    try: Tensor.zeros(10, device=f"{Device.DEFAULT}:1").contiguous().realize()
-    except Exception as e: self.skipTest(f"second device not available: {e}")
-    return fn(self, *args, **kwargs)
-  return wrapper
+def needs_devices(n:int):
+  # Only these backends use the device suffix to index a physical accelerator. CPU, Metal, etc. open logical devices.
+  device = Device.DEFAULT
+  return unittest.skipIf(device in ("AMD", "NV", "CUDA", "HIP", "CL") and Device[device].count() < n, f"needs {n} {device} devices")

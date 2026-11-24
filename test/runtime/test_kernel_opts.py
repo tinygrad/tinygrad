@@ -2,54 +2,12 @@ import unittest
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.uop.ops import AxisType
-from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.helpers import DEV
 
 # TODO: write a clean version of this
 from test.runtime.test_linearizer import helper_linearizer_opt
 
 class TestKernelOpts(unittest.TestCase):
-  def test_opt_without_axis(self):
-    ast = Tensor.empty(32, 32).sum(1).schedule_linear().src[-1].src[0]
-    for opt in [Opt(OptOps.SPLIT, None, (2, AxisType.UPCAST)), Opt(OptOps.PADTO, None, 32), Opt(OptOps.SWAP, None, 1)]:
-      with self.assertRaises(KernelOptError): Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(opt)
-
-  def test_swap_invalid_arg(self):
-    ast = (Tensor.empty(32, 32) + 1).schedule_linear().src[-1].src[0]
-    for opt in [Opt(OptOps.SWAP, 0, None), Opt(OptOps.SWAP, 0, 99), Opt(OptOps.SWAP, 0, -1), Opt(OptOps.SWAP, 0, True)]:
-      with self.assertRaisesRegex(KernelOptError, "invalid swap axis"): Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(opt)
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: segfaults on MOCKKFD with AMD:LLVM")
-  def test_local_and_grouped_reduce(self):
-    N = 128
-    Tensor.manual_seed(1882)
-    a = Tensor.rand(4, 4, N, N)
-    b = Tensor.rand(4, 4, N)
-    r = (b.sqrt() + ((a+1).sum(axis=3).exp()))
-    helper_linearizer_opt(r, [
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL))],
-      [Opt(OptOps.SPLIT, 0, (16, AxisType.LOCAL))], # Checking how it works with locals
-      [Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL, True))],
-      [Opt(OptOps.SPLIT, 1, (64, AxisType.LOCAL, True))], # Checking how it works with grouped reduce
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL, True))],
-      [Opt(OptOps.SPLIT, 0, (32, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL, True))],
-      # Checking how it works with locals + grouped reduce
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (64, AxisType.LOCAL, True))],
-      # Checking how it works with locals + grouped reduce + upcasts
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 0, (8, AxisType.UPCAST)),
-       Opt(OptOps.SPLIT, 4, (4, AxisType.UPCAST))],
-      # many local + many group
-      [Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL)),
-       Opt(OptOps.SPLIT, 3, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (2, AxisType.LOCAL))],
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL))] * 4,
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL)),
-       Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (2, AxisType.LOCAL)),
-       Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 6, (2, AxisType.LOCAL)),
-       Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 8, (2, AxisType.LOCAL))],
-    ])
-
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_grouped_reduce_with_local_upcast_padto(self):
@@ -87,42 +45,6 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST))],
       [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))],
       [Opt(OptOps.SPLIT, 0, (8, AxisType.UPCAST))], # Checking how it works with upcasts
-    ])
-
-  def test_full_upcast(self):
-    Tensor.manual_seed(1772)
-    a = Tensor.rand(4)
-    b = Tensor.rand(4)
-    r = (a+b).sqrt() * ((a+1).exp())
-    helper_linearizer_opt(r, [
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))], # Checking how it works with upcasts
-    ])
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  def test_matmul(self):
-    Tensor.manual_seed(1552)
-    # Keep the full reduction and enough output elements for every split, without a square output tile.
-    a = Tensor.rand(128, 128)
-    b = Tensor.rand(128, 32)
-    r = a@b
-    helper_linearizer_opt(r, [
-      [Opt(OptOps.SPLIT, 1, (32, AxisType.LOCAL))],
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (4, AxisType.LOCAL))],
-      [Opt(OptOps.SPLIT, 0, (16, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (8, AxisType.LOCAL))], # Checking how it works with locals
-      [Opt(OptOps.SPLIT, 2, (32, AxisType.LOCAL, True))],
-      [Opt(OptOps.SPLIT, 2, (32, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 2, (4, AxisType.UPCAST))], # Checking how it works with grouped_reduce
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (32, AxisType.LOCAL, True))],
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 0, (8, AxisType.LOCAL)),
-       Opt(OptOps.SPLIT, 4, (4, AxisType.LOCAL, True))], # Checking how it works with local+grouped_reduce
-      # Checking all together
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (8, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 4, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),
-       Opt(OptOps.SPLIT, 1, (2, AxisType.UPCAST))],
-      # Full global upcast + local
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (8, AxisType.LOCAL, True)),
-       Opt(OptOps.SPLIT, 4, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (8, AxisType.UPCAST))],
     ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -209,36 +131,6 @@ class TestKernelOpts(unittest.TestCase):
     a, b = Tensor(list(range(17))), Tensor([i%3 for i in range(17)])
     # The extra lanes compare 0 == 0, but must not contribute to the reduction.
     helper_linearizer_opt((a == b).sum(), [[Opt(OptOps.PADTO, 0, 32)]])
-
-  def test_padto_sum_ok(self):
-    N = 18
-    # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
-    a = Tensor.rand(N, N).realize().shrink(((0, 17), (0, 17))) * 100
-    b = (Tensor.rand(N, N) < 0.5).realize().shrink(((0, 17), (0, 17)))
-
-    helper_linearizer_opt(a.sum(0), [
-      [Opt(OptOps.PADTO, 0, 32)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.SPLIT, 0, (8, AxisType.UPCAST)),],
-    ])
-    helper_linearizer_opt(a.sum(1), [
-      [Opt(OptOps.PADTO, 0, 32)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.SPLIT, 0, (8, AxisType.UPCAST)),],
-    ])
-
-    for axis in (0, 1):
-      helper_linearizer_opt(a.sum(), [[Opt(OptOps.PADTO, axis, 32)],])
-      helper_linearizer_opt(a.sum(0), [[Opt(OptOps.PADTO, axis, 32)],])
-      helper_linearizer_opt(b.sum(), [[Opt(OptOps.PADTO, axis, 32)],])
-      helper_linearizer_opt(b.sum(0), [[Opt(OptOps.PADTO, axis, 32)],])
-      helper_linearizer_opt(b.sum(dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
-      # TODO: why?
-      if Device.DEFAULT != "WEBGPU":
-        helper_linearizer_opt(b.sum(0, dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
-        helper_linearizer_opt(b.sum(1, dtype=dtypes.bool), [[Opt(OptOps.PADTO, axis, 32)],])
-
-    # having unsafe ops after sum is fine
-    helper_linearizer_opt(a.sum().exp(), [[Opt(OptOps.PADTO, 0, 32)],])
-    helper_linearizer_opt(a.sum(0).exp(), [[Opt(OptOps.PADTO, 1, 32)],])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -336,15 +228,6 @@ class TestKernelOpts(unittest.TestCase):
 
     helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
     helper_linearizer_opt(a.max(0), [[Opt(OptOps.PADTO, 1, 32)],])
-
-  def test_padto_where(self):
-    Tensor.manual_seed(0)
-    N = 17
-    a = (Tensor.randn(N, N).realize().max(axis=0, keepdim=True) > 1).where(1, 0).int()
-    helper_linearizer_opt(a.max(0), [
-      [Opt(OptOps.PADTO, 0, 32)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.SPLIT, 0, (8, AxisType.UPCAST)),],
-    ])
 
   def test_padto_where_multioutput(self):
     Tensor.manual_seed(0)

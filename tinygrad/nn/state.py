@@ -219,9 +219,6 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
   storage_source: dict[str|int, Tensor] = {}
   lens: dict[str|int, int] = {}
 
-  def _rebuild_tensor(storage, storage_offset, size, stride):
-    return _rebuild_tensor_v2(storage, storage_offset, size, stride)
-
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad=None, backward_hooks=None, metadata=None):
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
@@ -232,7 +229,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
 
     if prod(size) and tuple(st for s,st in zip(size, stride) if s != 1) != strides_for_shape(tuple(s for s in size if s != 1)):
       ret = ret.to(None)
-      for s,st in zip(size, stride): ret = ret.unfold(-1, ret.shape[-1]-(s-1)*st, max(st, 1))
+      for s,st in zip(size, stride): ret = ret.unfold(-1, ret.shape[-1]-(s-1)*st, max(st, 1)).expand(*ret.shape[:-1], s, -1)
 
     return ret.reshape(size)
 
@@ -242,7 +239,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
   deserialized_objects: dict[str, Any] = {}
   intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16,
                "IntStorage": dtypes.int32, "BoolStorage": dtypes.bool,
-               "LongStorage": dtypes.int64, "_rebuild_tensor": _rebuild_tensor, "_rebuild_tensor_v2": _rebuild_tensor_v2,
+               "LongStorage": dtypes.int64, "_rebuild_tensor": _rebuild_tensor_v2, "_rebuild_tensor_v2": _rebuild_tensor_v2,
                "FloatTensor": None, "Parameter": Parameter}
   whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed
   class Dummy: pass

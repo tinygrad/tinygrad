@@ -25,7 +25,6 @@ packages = [
   'tinygrad.codegen.late',
   'tinygrad.engine',
   'tinygrad.llm',
-  'tinygrad.llm.kernels',
   'tinygrad.mixin',
   'tinygrad.nn',
   'tinygrad.renderer',
@@ -145,8 +144,12 @@ explicit_package_bases = true
 warn_unreachable = true
 warn_redundant_casts = true
 strict_equality = true
-# NOTE: had to comment this out to make mypy pass on both CI and OSX
-#warn_unused_ignores = true
+platform = "linux"
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = "tinygrad.runtime.autogen.*"
+warn_unused_ignores = false
 
 [[tool.mypy.overrides]]
 module = "extra.*"
