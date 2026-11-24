@@ -1731,7 +1731,7 @@ def emu_loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
 def lower_body(sink:UOp, name:str) -> UOp:
   bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
   body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}, walk=True)
-  return body.call(*bufs, name=name)
+  return body.replace(arg=KernelInfo(name)).call(*bufs)
 
 instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp, UOp|None, dict[UOp, UOp]]]]] = {}
 
@@ -1848,18 +1848,20 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
 
 RENDER = ContextVar("RENDER", 0) # render lifted ast back to assembly
 
-def render_call(call:UOp):
-  if call.arg.name.startswith("emu_"):
+def render_call(call:UOp, sink:UOp):
+  if sink.arg.name.startswith("emu_"):
     return UOp(Ops.LINEAR, src=tuple(y for x in call.body.toposort() if x.op is Ops.LINEAR for y in x.src if y.op in {Ops.BINARY, Ops.STACK}))
-  encoding = bytes.fromhex(call.arg.name.rsplit("_", 1)[1])
+  encoding = bytes.fromhex(sink.arg.name.rsplit("_", 1)[1])
   words = [UOp(Ops.BINARY, arg=encoding[i:i+4]) for i in range(0, len(encoding), 4)]
   for i,x in enumerate(call.src_without_body[:len(words)]):
     words[-1-i] = UOp(Ops.BINARY, arg=int(x.src[0].arg).to_bytes(4, "little"))
   return words[0] if len(words) == 1 else UOp(Ops.STACK, src=tuple(words))
 
 pm_render = PatternMatcher([
-  (UPat(Ops.CALL, name="call"), render_call),
-  (UPat(Ops.SINK, name="root"), lambda root: next((x for x in root.toposort() if x.op is Ops.LINEAR), None)),
+  (UPat(Ops.CALL, src=(UPat.any(UPat(Ops.SINK, name="sink"), UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"),), allow_any_len=True)),),
+        allow_any_len=True, name="call"), render_call),
+  (UPat(Ops.SINK, name="root"), lambda root: next((x for x in root.toposort() if x.op is Ops.LINEAR), None)
+   if isinstance(root.arg, KernelInfo) and root.arg.name.startswith("emu ") else None),
 ])
 
 @rewrite_group(replay="emu_process_replay")
@@ -1962,8 +1964,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
                                                             1, dtype=dtypes.int),)
     call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).shrink(((w*s, (w+1)*s),))
                  if (s:=buffers[b][1]) else p.after(*gates, w) for b,p in zip(bufs, params)]
-    block = UOp.group(body.call(*call_args, name="emu_block"), *gates, w).end(*gates).end(w).sink()
-    return block.call(*args, name="emu_waves")
+    block = UOp.group(body.call(*call_args), *gates, w).end(*gates).end(w).sink(arg=KernelInfo("emu_waves"))
+    return block.call(*args)
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...], end:UOp) -> UOp:
     for pc, body in regions:
       if body:

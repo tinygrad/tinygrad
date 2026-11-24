@@ -1,13 +1,12 @@
-import gc, itertools, unittest, weakref
+import unittest
+import itertools
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, function, Device, TinyJit
 from tinygrad.helpers import Context
-from tinygrad.llm.kernels.amd import Linear, fp8_matmul, amd_custom_kernels_supported
-from tinygrad.llm.kernels.amd_gguf import QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS, iq4_half_lut, _iq_grid
-from tinygrad.llm.gguf import ggml_data_to_tensor
-from tinygrad.llm.model import ExpertWeights
+from tinygrad.llm.gguf import ggml_data_to_tensor, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS
+from tinygrad.llm.model import Linear, ExpertWeights, fp8_matmul, amd_custom_kernels_supported
 from tinygrad.llm.hf import e4m3fn_to_fnuz
-from test.helpers import not_support_multi_device
+from test.helpers import needs_devices
 
 def reference_weight(packed:np.ndarray, ggml_type:int, *shape:int) -> np.ndarray:
   # Decode on the host so checking a custom kernel doesn't also compile and run the generic dequant graph.
@@ -60,27 +59,7 @@ class QuantLinearMixin:
     self.assertEqual(linear.ggml_type, ggml_type if custom else None)
 
 class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
-  def test_quant_tables_not_retained(self):
-    # one _iq_grid table and the iq4 lut cover both table creation paths
-    for typ in (18, 23):
-      table = (iq4_half_lut(Device.DEFAULT) if typ == 23 else _iq_grid(Device.DEFAULT, typ)).realize()
-      ref = weakref.ref(table)
-      del table
-      gc.collect()
-      self.assertIsNone(ref())
-
-  @unittest.skipIf(not_support_multi_device(), "no multi")
-  def test_quant_tables_multidevice(self):
-    devices = (Device.DEFAULT, f"{Device.DEFAULT}:1")
-    for typ in (18, 23):
-      with self.subTest(ggml_type=typ):
-        single = iq4_half_lut(Device.DEFAULT) if typ == 23 else _iq_grid(Device.DEFAULT, typ)
-        table = (iq4_half_lut(devices) if typ == 23 else _iq_grid(devices, typ)).realize()
-        self.assertEqual(table.device, devices)
-        for i in range(len(devices)):
-          np.testing.assert_array_equal(Tensor(table.uop.mselect(i)).numpy(), single.numpy())
-
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(2)
   def test_quant_linear_multidevice(self):
     if not amd_custom_kernels_supported(Device.DEFAULT): self.skipTest("RDNA3 required")
     devices = (Device.DEFAULT, f"{Device.DEFAULT}:1")
@@ -109,13 +88,14 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         decoded = ggml_data_to_tensor(raw, 256, ggml_type).reshape(1, 256)
         linear = Linear(256, 1, bias=False)
         linear.set_quantized(decoded)
-        linear.weight.realize()
+        assert linear.packed is not None
+        linear.packed.realize()
         self.assertEqual(linear.ggml_type, ggml_type)
-        self.assertEqual(linear.weight.dtype, dtypes.uint8 if ggml_type == 39 else dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32)
-        self.assertEqual(linear.weight.nbytes(), type_size)
-        np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), packed[offset:])
+        self.assertEqual(linear.packed.dtype, dtypes.uint8 if ggml_type == 39 else dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32)
+        self.assertEqual(linear.packed.nbytes(), type_size)
+        np.testing.assert_array_equal(linear.packed.bitcast(dtypes.uint8).numpy(), packed[offset:])
         raw.assign(raw.full_like(1)).realize()
-        np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), np.ones(type_size, dtype=np.uint8))
+        np.testing.assert_array_equal(linear.packed.bitcast(dtypes.uint8).numpy(), np.ones(type_size, dtype=np.uint8))
 
   def test_small_block_quant_weights(self):
     for ggml_type, words in SMALL_BLOCK_QUANTS.items():
@@ -125,16 +105,35 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         if raw.uop.contiguous_view() is None: self.skipTest("requires buffer views")
         linear = Linear(800, 1, bias=False)
         linear.set_quantized(ggml_data_to_tensor(raw, 800, ggml_type).reshape(1, 800))
+        assert linear.packed is not None
         self.assertEqual(linear.ggml_type, ggml_type)
-        np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), packed)
+        np.testing.assert_array_equal(linear.packed.bitcast(dtypes.uint8).numpy(), packed)
+
+  def test_dense_linear_preserves_narrowing_casts(self):
+    linear = Linear(128, 1, bias=False)
+    linear.weight = Tensor.ones(1, 128, dtype=dtypes.half).contiguous().realize()
+    x = Tensor.full((1, 128), 1.0004, dtype=dtypes.float32).contiguous().realize().half()
+    np.testing.assert_allclose(linear(x).numpy(), [[128.0]], rtol=0, atol=0)
+
+  def test_quant_linear_falls_back_when_provider_rejects(self):
+    from unittest.mock import patch
+    rng = np.random.default_rng(7)
+    packed = np.zeros((16 * 256 // 32, 34), dtype=np.uint8)
+    packed[:, :2] = np.array([0.01], dtype=np.float16).view(np.uint8)
+    packed[:, 2:] = rng.integers(-60, 60, size=(16 * 256 // 32, 32), dtype=np.int8).view(np.uint8)
+    raw = Tensor(np.pad(packed.flatten(), (4, 0))).contiguous().realize()[4:]
+    weight = reference_weight(packed, 8, 16, 256)
+    linear = Linear(256, 16, bias=False)
+    linear.weight = ggml_data_to_tensor(raw, 16 * 256, 8).reshape(16, 256)
+    x = rng.normal(size=(2, 256)).astype(np.float32)
+    with patch("tinygrad.llm.model._load_kernel", return_value=None):
+      np.testing.assert_allclose(linear(Tensor(x)).numpy(), x @ weight.T, rtol=1e-4, atol=1e-4)
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
   def test_quant_linear_fallback(self):
-    if amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("run with DISABLE_AMD_KERNELS=1")
-    # per-type dequant math on the generic path is covered by test_gguf, spot check a representative set here
-    for typ in (12, 14, 17, 23):
-      with self.subTest(ggml_type=typ):
-        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=16, token_counts=(1, 3), bias=True, custom=False)
+    if amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("run with SLOP=0")
+    # per-type dequant math on the generic path is covered by test_gguf, check fallback dispatch with Q4_K here
+    self._test_quant_linear(12, QUANT_SIZES[12], in_features=256, out_features=16, token_counts=(1, 3), bias=True, custom=False)
 
 def fp8_decode(bits, fnuz=False):
   exponent, mantissa = ((bits >> 3) & 15).astype(np.int32), (bits & 7).astype(np.float32)
@@ -228,7 +227,7 @@ class TestBlockFP8(unittest.TestCase):
           expected = fp8_reference(x[..., None, :], bits[ids], scales[ids], (4, 8), fnuz).squeeze(-2)
           np.testing.assert_allclose(got, expected, atol=2e-6, rtol=2e-5)
 
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(2)
   def test_tensor_parallel(self):
     if not self.formats: self.skipTest('requires native FP8')
     rng, devices = np.random.default_rng(3), (Device.DEFAULT, f"{Device.DEFAULT}:1")

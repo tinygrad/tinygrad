@@ -26,6 +26,20 @@ def assert_freed(*objects):
   gc.collect()
   for ref in refs: assert ref() is None, f"{ref()} was not freed"
 
+@contextlib.contextmanager
+def gc_frees_tensors():
+  # every collection frees one Tensor, as a collected cycle does when it held the last reference
+  held = [Tensor.empty(1) for _ in range(100)]
+  def free_one(phase, info):
+    if held and phase == "start": held.pop()
+  threshold = gc.get_threshold()
+  gc.callbacks.append(free_one)
+  gc.set_threshold(1)
+  try: yield
+  finally:
+    gc.set_threshold(*threshold)
+    gc.callbacks.remove(free_one)
+
 class TestGC(unittest.TestCase):
   def test_gc(self):
     Tensor.manual_seed(0)
@@ -109,6 +123,14 @@ class TestGC(unittest.TestCase):
       del a
       self.assertTrue(real_buf.is_allocated()) # the Buffer object is still held here
       del real_buf
+
+  def test_setitem_while_gc_frees_tensors(self):
+    a = Tensor.zeros(4).contiguous().realize()
+    with gc_frees_tensors(): a[0:1] = 1
+
+  def test_backward_while_gc_frees_tensors(self):
+    a = Tensor.ones(4)
+    with gc_frees_tensors(): (a*a).sum().backward()
 
 if __name__ == '__main__':
   unittest.main()

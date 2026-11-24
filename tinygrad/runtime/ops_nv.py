@@ -8,7 +8,7 @@ from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
 from tinygrad.runtime.support.system import FileIOInterface, filter_visible_devices, PCIIfaceBase, MAP_FIXED
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_arg_uops, get_call_kernel_args, lower_and_compile, run_linear
-from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device
+from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device, host_of
 from tinygrad.renderer import TinyELF
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, PROFILE, ContextVar, VIZ, ProfileEvent, unwrap
@@ -26,6 +26,9 @@ nv_gpu = nv_570 # default to 570
 PMA = ContextVar("PMA", abs(VIZ.value)>=2)
 
 GPFIFO_ENTRIES = 0x10000
+SHARED_MEM_WINDOW, LOCAL_MEM_WINDOW = 0x729400000000, 0x729300000000 # set windows addresses to not collide with other allocated buffers
+
+def sm_version_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("sm_version", dict(sm_89=0x809, sm_100=0xa00, sm_120=0xa04).get(t.arch, 0))
 
 @dataclass(frozen=True)
 class ProfilePMAEvent(ProfileEvent): device:str; kern:str; blob:bytes; exec_tag:int; profile_key:bytes|None=None # noqa: E702
@@ -50,8 +53,8 @@ def nvm(subc:int, mthd:int|UOp, *vals, typ=2) -> list:
 class QMD:
   fields: dict[str, dict[str, tuple[int, int]]] = {}
 
-  def __init__(self, dev:NVDevice, blob:bytearray|None=None):
-    self.ver, self.sz = (5, 0x60) if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else (3, 0x40)
+  def __init__(self, dev:str, blob:bytearray|None=None):
+    self.ver, self.sz = (5, 0x60) if sm_version_for(dev) >= 0xa00 else (3, 0x40)
 
     # Init fields from module
     if (pref:="NVCEC0_QMDV05_00" if self.ver == 5 else "NVC6C0_QMDV03_00") not in QMD.fields:
@@ -105,7 +108,6 @@ def nv_submit(cmdbuf:UOp, ring:UOp, gpput:UOp, doorbell:UOp, put:UOp, token:UOp)
   return doorbell.after(queued).index(0).store(token).sink()
 
 class NVQueue(HWQueue):
-  dev:NVDevice
   q_rewrite = HWQueue.q_rewrite + PatternMatcher([
     (UPat(Ops.CALL, src=(UPat.native("nv"),), allow_any_len=True, name="u"), lambda ctx, u: ctx.q(*u.src[1:])),
   ])
@@ -125,18 +127,19 @@ class NVQueue(HWQueue):
   def submit(self, cmdbuf:UOp) -> UOp:
     dev = self.devs[0]
     bufs = (("ring", dtypes.uint64, GPFIFO_ENTRIES, dev), ("gpput", dtypes.uint32, 1, dev), ("doorbell", dtypes.uint32, 1, dev),
-            ("put_value", dtypes.uint64, 1, self.dev.host))
-    ring, gpput, doorbell, put = [UOp.extern((sz,), dt, d, to_name(self.dev.device, nm, self.queue)) for nm, dt, sz, d in bufs]
-    return nv_submit(cmdbuf, ring, gpput, doorbell, put, UOp.variable(to_name(self.dev.device, "token", self.queue), 0, 2**32 - 1, dtypes.uint32))
+            ("put_value", dtypes.uint64, 1, host_of(dev)))
+    ring, gpput, doorbell, put = [UOp.extern((sz,), dt, d, to_name(dev, nm, self.queue)) for nm, dt, sz, d in bufs]
+    return nv_submit(cmdbuf, ring, gpput, doorbell, put, UOp.variable(to_name(dev, "token", self.queue), 0, 2**32 - 1, dtypes.uint32))
 
 class NVComputeQueue(NVQueue):
   def __init__(self, submit):
     super().__init__(submit)
 
-    progs = [nv_build_program(self.dev, u.body, self.devs)[0] for u in self.lin.src if u.op is Ops.CALL and u.body.op is Ops.PROGRAM]
-    slm = max([p.slm for p in progs], default=0)
-    self.lmem_per_tpc = round_up(round_up(slm * 32, 0x200) * self.dev.max_warps_per_sm * self.dev.num_sm_per_tpc, 0x8000)
-    self.qmd_sz = round_up(QMD(self.dev).sz * 4, 256)
+    progs = [nv_build_program(u.body, self.devs)[0] for u in self.lin.src if u.op is Ops.CALL and u.body.op is Ops.PROGRAM]
+    slm, t = max([p.slm for p in progs], default=0), Device.target_for(self.devs[0])
+    self.lmem_per_tpc = round_up(round_up(slm * 32, 0x200) * t.get("warps_per_sm", 0) * t.get("sm_per_tpc", 0), 0x8000)
+    self.lmem_size = self.lmem_per_tpc * t.get("tpc_per_gpc", 0) * t.get("gpcs", 0)
+    self.qmd_sz = round_up(QMD(self.devs[0]).sz * 4, 256)
     self.stride = self.qmd_sz + max([p.kernargs_size for p in progs], default=0)
     self.qmd_buf = UOp.alloc((len(progs) * self.stride,), dtypes.uint8, device=self.devs[0], name=to_name("qmd", self.queue))
     self.qmds:list[QMD] = []
@@ -163,7 +166,7 @@ class NVComputeQueue(NVQueue):
              nv_flags("NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI", instruction="true", global_data="true", constant="true"))
 
   def exec(self, call:UOp, prg:UOp):
-    data, lib = nv_build_program(self.dev, prg, self.devs)
+    data, lib = nv_build_program(prg, self.devs)
     global_size, local_size = prg.arg.launch_dims(call)
     if prod(local_size) > 1024 or data.max_threads < prod(local_size):
       raise RuntimeError(f"Too many resources requested for launch, {prod(local_size)=}, {data.max_threads=}")
@@ -172,7 +175,7 @@ class NVComputeQueue(NVQueue):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
 
     qmd_addr = self.qmd_buf.getaddr(self.devs) + UOp.const(len(self.qmds) * self.stride, dtypes.uint64)
-    qmd = QMD(self.dev, data.qmd.mv.ljust(self.stride, b"\0")) # the program's template, in a slot of its own
+    qmd = QMD(self.devs[0], data.qmd.mv.ljust(self.stride, b"\0")) # the program's template, in a slot of its own
     qmd.write(**dict(zip(qmd.grid, global_size)), **{f"cta_thread_dimension{j}": l for j, l in enumerate(local_size)})
     qmd.set_program_addr(lib.getaddr(self.devs) + data.prog_off)
     for j, (off, _) in data.constbufs.items():
@@ -182,11 +185,11 @@ class NVComputeQueue(NVQueue):
     qmd.patches |= dict(layout_args([a.ccast(dtypes.uint64) for a in args] if data.mock else args, at)) # mockgpu wants every arg 64 bit
 
     if not self.qmds:
-      lmem = UOp.extern((self.lmem_per_tpc * self.dev.num_tpc_per_gpc * self.dev.num_gpcs,), dtypes.uint8, self.devs[0], "local_mem")
+      lmem = UOp.extern((self.lmem_size,), dtypes.uint8, self.devs[0], "local_mem")
       self.nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, *hilo(lmem.getaddr(self.devs)))
       self.nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, *data64(self.lmem_per_tpc), 0xff)
     if self.prev_qmd is None:
-      if self.dev.pma_enabled: self.nvm(1, nv_gpu.NVC6C0_PM_TRIGGER, 0)
+      if PMA.value > 0 and PROFILE >= 1: self.nvm(1, nv_gpu.NVC6C0_PM_TRIGGER, 0)
       self.nvm(1, nv_gpu.NVC6C0_SEND_PCAS_A, (qmd_addr >> 8).cast(dtypes.uint32))
       self.nvm(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B_PCAS_ACTION_PREFETCH_SCHEDULE)
     else: self.prev_qmd.write(dependent_qmd0_pointer=qmd_addr >> 8, dependent_qmd0_action=1, dependent_qmd0_prefetch=1, dependent_qmd0_enable=1)
@@ -217,7 +220,7 @@ class NVEncDecQueue(NVQueue):
     coloc_sz = round_up((round_up(h, 64) * round_up(h, 64)) + (round_up(w, 64) * round_up(h, 64) // 16), 2 << 20)
     intra_top_off = round_up(h, 64) * (608 + 4864 + 152 + 2000)
     intra_unk_off = round_up(intra_top_off, 0x10000) + (64 << 10)
-    intra_unk_size = (2 << 20) if unwrap(self.dev.iface.viddec_class) >= nv_gpu.NVCFB0_VIDEO_DECODER else 0
+    intra_unk_size = (2 << 20) if sm_version_for(self.devs[0]) >= 0xa00 else 0
     sizes = {"vid_coloc": coloc_sz, "vid_filter": round_up(intra_unk_off + intra_unk_size, 2 << 20), "vid_stat": 0x1000}
     coloc, filt, stat = [(UOp.extern((sz,), dtypes.uint8, self.devs[0], n).getaddr(self.devs) >> 8).cast(dtypes.uint32) for n, sz in sizes.items()]
 
@@ -239,14 +242,14 @@ class NVEncDecQueue(NVQueue):
 # programs
 
 class NVProgramData:
-  def __init__(self, dev:NVDevice, obj:TinyELF):
-    name, signature, mock = obj.name, obj.signature, isinstance(dev.iface, MOCKIface)
+  def __init__(self, dev:str, obj:TinyELF):
+    name, signature, mock, sm = obj.name, obj.signature, Device.target_for(dev).interface == "MOCK", sm_version_for(dev)
     self.constbufs: dict[int, tuple[int, int]] = {0: (0, 0x160)} # dict[constbuf index, tuple[offset in the image, size]]
     self.relocs: list[tuple[int, int, DType, int]] = [] # (byte offset in the image, symbol offset, width, shift) of the program's address
     self.prog_off, self.cbuf_0, sections, relocs = 0, [], list[Any](), list[Any]()
     image:bytes = obj.lib
 
-    if (NAK:=isinstance(dev.renderer, NAKRenderer)):
+    if (NAK:=isinstance(Device.renderer_for(dev), NAKRenderer)):
       image = obj.lib[ctypes.sizeof(info:=mesa.struct_nak_shader_info.from_buffer_copy(obj.lib)):]
       regs, shmem, lcmem = info.num_gprs, round_up(info.cs.smem_size, 128), round_up(info.slm_size, 16)
     elif mock: image = obj.lib.ljust(round_up(len(obj.lib), 4), b'\x00') # for MOCKGPU the lib is PTX code, not an elf
@@ -276,7 +279,7 @@ class NVProgramData:
         else: raise RuntimeError(f"unknown NV reloc {typ}")
 
       # Minimum cbuf_0 size for driver params: Blackwell needs index 223 (224 entries), older GPUs need index 11 (12 entries)
-      min_cbuf0_entries = 224 if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else 12
+      min_cbuf0_entries = 224 if sm >= 0xa00 else 12
       self.cbuf_0 = [0] * max(cbuf0_size // 4, min_cbuf0_entries)
 
     # the arguments follow the driver params in constant buffer 0 in the kernel's order: buffers as 64 bit addresses, vars packed by their width
@@ -290,12 +293,12 @@ class NVProgramData:
 
     self.slm = round_up(lcmem, 32)
 
-    if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A:
-      if not NAK: self.cbuf_0[188:192], self.cbuf_0[223] = [*data64_le(dev.shared_mem_window), *data64_le(dev.local_mem_window)], 0xfffdc0
+    if sm >= 0xa00:
+      if not NAK: self.cbuf_0[188:192], self.cbuf_0[223] = [*data64_le(SHARED_MEM_WINDOW), *data64_le(LOCAL_MEM_WINDOW)], 0xfffdc0
       qmd = {'qmd_major_version':5, 'qmd_type':nv_gpu.NVCEC0_QMDV05_00_QMD_TYPE_GRID_CTA, 'register_count':regs,
         'shared_memory_size_shifted7':shmem>>7, f'shader_local_memory_{"low" if NAK else "high"}_size_shifted4':self.slm>>4}
     else:
-      if not NAK: self.cbuf_0[6:12] = [*data64_le(dev.shared_mem_window), *data64_le(dev.local_mem_window), *data64_le(0xfffdc0)]
+      if not NAK: self.cbuf_0[6:12] = [*data64_le(SHARED_MEM_WINDOW), *data64_le(LOCAL_MEM_WINDOW), *data64_le(0xfffdc0)]
       qmd = {'qmd_major_version':3, 'sm_global_caching_enable':1, 'shared_memory_size':shmem, 'register_count_v':regs,
         f'shader_local_memory_{"low" if NAK else "high"}_size':self.slm}
 
@@ -307,7 +310,7 @@ class NVProgramData:
       invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1, barrier_count=1,
       cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, constant_buffer_invalidate_0=1, min_sm_config_shared_mem_size=smem_cfg,
       target_sm_config_shared_mem_size=smem_cfg, max_sm_config_shared_mem_size=0x1a, program_prefetch_size=min(prog_sz>>8, 0x1ff),
-      sass_version=dev.sass_version)
+      sass_version=((sm & 0xf00) >> 4) | (sm & 0xf))
     for i,(_,sz) in self.constbufs.items(): self.qmd.write(**{f'constant_buffer_size_shifted4_{i}': sz, f'constant_buffer_valid_{i}': 1})
 
     # Registers allocation granularity per warp is 256, warp allocation granularity is 4. Register file size is 65536.
@@ -319,8 +322,8 @@ class NVProgramData:
       yield typ, param, sh.content[start_off+4:start_off+sz+4] if typ == 0x4 else sz
       start_off += (sz if typ == 0x4 else 0) + 4
 
-def nv_build_program(dev:NVDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[NVProgramData, UOp]:
-  data = NVProgramData(dev, TinyELF.from_program(prg))
+def nv_build_program(prg:UOp, devs:tuple[str, ...]) -> tuple[NVProgramData, UOp]:
+  data = NVProgramData(devs[0], TinyELF.from_program(prg))
   buf = make_program(prg, len(data.image), devs[0])
   rows = [(off, ((buf.getaddr(devs) + sym) >> sh).ccast(dt)) for off, sym, dt, sh in data.relocs]
   return data, patch(buf, rows, data.image)
@@ -564,7 +567,7 @@ class PCIIface(PCIIfaceBase):
     for _ in self.dev_impl.gsp.stat_q.read_resp(): pass
     if self.dev_impl.is_err_state: raise RuntimeError("Device fault detected")
 
-class MOCKIface(NVKIface): count = 1
+class MOCKIface(NVKIface): pass
 
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("nv_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: NVComputeQueue(s).encode()),
@@ -610,14 +613,12 @@ class NVDevice(Compiled):
 
     # FIXME: no idea how to convert this for blackwells
     self.arch: str = "sm_120" if self.sm_version==0xa04 else f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
-    self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
     self.var_vals:dict[str, int] = {}
     self.bufs:dict[str, Buffer] = {}
-    # Set windows addresses to not collide with other allocated buffers.
-    self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
-    super().__init__(device, NVAllocator(self), None, arch=self.arch, props={"sm_version": self.sm_version})
+    super().__init__(device, NVAllocator(self), None, arch=self.arch, props={"sm_version": self.sm_version, "gpcs": self.num_gpcs,
+                     "tpc_per_gpc": self.num_tpc_per_gpc, "sm_per_tpc": self.num_sm_per_tpc, "warps_per_sm": self.max_warps_per_sm})
 
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 
@@ -638,8 +639,8 @@ class NVDevice(Compiled):
     if self.iface.viddec_class is not None: self.fifos["ENCDEC:0"] = self._new_gpu_fifo("ENCDEC:0", 0, self.nvdevice, offset=0x200000, video=True)
 
     self._submit_cmds("COMPUTE:0", *nvm(1, nv_gpu.NVC6C0_SET_OBJECT, self.iface.compute_class),
-                       *nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, *data64(self.local_mem_window)),
-                       *nvm(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, *data64(self.shared_mem_window)))
+                       *nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, *data64(LOCAL_MEM_WINDOW)),
+                       *nvm(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, *data64(SHARED_MEM_WINDOW)))
     self._submit_cmds("COPY:0", *nvm(4, nv_gpu.NVC6C0_SET_OBJECT, self.iface.dma_class))
     if "ENCDEC:0" in self.fifos: self._submit_cmds("ENCDEC:0", *nvm(4, nv_gpu.NVC6C0_SET_OBJECT, self.iface.viddec_class))
 

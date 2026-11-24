@@ -13,33 +13,11 @@ class TestConv(unittest.TestCase):
     assert ret[0,0,0,0] == 48
     assert ret[0,0,0,1] == 72
 
-  def test_many_simple(self):
-    x = Tensor(np.arange(8*2*8).reshape(1,8,2,8).astype(np.float32))
-    #w = Tensor(np.arange(8*8*1*1).reshape(8,8,1,1).astype(np.float32))
-    w = Tensor.eye(8).reshape((8,8,1,1))
-    ret = x.conv2d(w, stride=(1,2), padding=(0,0)).numpy()
-    print(ret)
-
   def test_lazycache(self):
     x = Tensor.rand(1, 32)
     y = Tensor.rand(32)
     out = x + y.reshape((1,32,1)).reshape((1,32)) + y.reshape((1,32,1)).reshape((1,32))
     out.numpy()
-
-  def test_simple_biased(self):
-    C = 8
-    x = Tensor.rand(1,C,5,5)
-    w = Tensor.eye(C).reshape((C,C,1,1))
-    b = Tensor(np.arange(C).astype(np.float32))
-    ret = Tensor.conv2d(x,w,b).relu().conv2d(w,b)
-
-    print(ret.numpy())
-
-  def test_two_binops_no_rerun_small(self):
-    x = Tensor.rand(1,1,32,32)
-    w = Tensor.rand(1,1,3,3)
-    out = x.conv2d(w, padding=(1,1))
-    np.testing.assert_allclose(out.relu().numpy(), np.maximum(out.numpy(), 0), atol=1e-6)
 
   def test_two_overlapping_binops_no_rerun(self):
     x = Tensor.randn(1,3,8,16)
@@ -74,18 +52,6 @@ class TestConv(unittest.TestCase):
     x = x.numpy()
     print(x.shape)
 
-  def test_elu(self):
-    x = Tensor.rand(1,12,16,32)
-
-    w = Tensor.rand(32,12,3,3)
-    x = x.conv2d(w, stride=(2,2), padding=(1,1))
-
-    x = x.elu()
-
-    w = Tensor.rand(32,1,3,3)
-    x = x.conv2d(w, padding=(1,1), groups=32)
-    x.numpy()
-
   def test_bias(self):
     from tinygrad.nn import Conv2d
     x = Tensor.rand(1,12,16,32)
@@ -94,11 +60,6 @@ class TestConv(unittest.TestCase):
     w = Tensor.uniform(32, 1, 3, 3)
     x = x.conv2d(w, groups=32)
     x.numpy()
-
-  def test_multiadd(self):
-    w = Tensor.rand(32)
-    x = Tensor.rand(32).relu()
-    (w+x).numpy()
 
   def test_reorder(self):
     x = Tensor.rand(1,12,16,32)

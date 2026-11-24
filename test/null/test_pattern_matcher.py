@@ -3,6 +3,10 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, GroupOp # noqa: F401
 from tinygrad.uop.ops import PatternMatcher, UPat
 
+# the rewrite uses a global defined after its PatternMatcher, like codegen's lower_call -> to_program
+late_pms = [PatternMatcher([(UPat(Ops.CONST, name="x"), lambda x: late_global(x))], compiled=c) for c in (False, True)]
+def late_global(x:UOp) -> UOp: return x.sink()
+
 class TestPatternMatcher(unittest.TestCase):
   def test_simple_match(self):
     matcher = PatternMatcher([(UPat(Ops.CONST, name="x", dtype=dtypes.weakfloat), lambda x: x.sink())])
@@ -204,6 +208,9 @@ class TestPatternMatcher(unittest.TestCase):
     for compiled in (False, True):
       pm = PatternMatcher([(UPat(Ops.SINK, dtype=set()), lambda: True)], compiled=compiled)
       self.assertIsNone(pm.rewrite(UOp.sink()))
+
+  def test_global_defined_after_matcher(self):
+    for pm in late_pms: self.assertEqual(pm.rewrite(UOp.const(1)), UOp.const(1).sink())
 
   def test_allow_len(self):
     matcher = PatternMatcher([(UPat(Ops.MULACC, name="x", src=(UPat(Ops.CONST),), allow_any_len=True), lambda x: x.sink())])

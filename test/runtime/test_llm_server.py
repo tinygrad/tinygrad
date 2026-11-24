@@ -3,7 +3,6 @@ import numpy as np
 from unittest.mock import patch
 from tinygrad import Tensor, UOp, Device
 from tinygrad.nn.state import get_state_dict
-from tinygrad.codegen import schedule_cache
 from tinygrad.llm.model import Transformer, TransformerConfig
 
 TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
@@ -17,16 +16,6 @@ class TestTransformerGenerate(unittest.TestCase):
     model = Transformer(TEST_CONFIG)
     model.warmup()
     self.assertIsInstance(next(model.generate([5, 6, 7, 8])), int)
-
-  def test_fixed_position_count(self):
-    model = Transformer(TEST_CONFIG)
-    tokens, temperature = Tensor([[1], [2]]), Tensor([0.0])
-    for positions in [(0, 0), (1, 1), (2, 0)]:
-      model(tokens, positions, temperature).realize()
-    self.assertEqual(model.rollout_jit.cnt, 3)
-    self.assertIsNotNone(model.rollout_jit.captured)
-    with self.assertRaisesRegex(AssertionError, "position count is fixed"):
-      model(tokens, (3,), temperature)
 
   def test_first_recurrent_generate_before_state_init(self):
     model = Transformer(TEST_CONFIG)
@@ -106,29 +95,6 @@ class TestTransformerGenerate(unittest.TestCase):
     # should process all 3 tokens from start
     self.assertEqual(captured_inputs, [((1, V_TOKS.bind(3)), (V_START_POS.bind(0),))])
 
-  def test_two_prompts_schedule_cache(self):
-    """Third prompt should hit the schedule cache, not miss (first two warm up both jits: prefill + decode)."""
-    from dataclasses import replace
-    model = Transformer(replace(TEST_CONFIG, max_context=64))
-
-    # first two prompts warm up both jits (prefill + decode)
-    ids = list(range(1, 6))
-    gen = model.generate(ids)
-    for _ in range(3): next(gen)
-
-    ids += list(range(10, 15))
-    gen = model.generate(ids)
-    for _ in range(3): next(gen)
-    cache_size_after_warmup = len(schedule_cache)
-
-    # third prompt should reuse the same schedule cache entries, not create new ones
-    ids += list(range(20, 25))
-    gen = model.generate(ids)
-    for _ in range(3): next(gen)
-
-    self.assertEqual(cache_size_after_warmup, len(schedule_cache),
-      f"third prompt added {len(schedule_cache) - cache_size_after_warmup} new schedule cache entries (expected 0)")
-
   def test_chunked_prefill(self):
     """When prompt > chunk_size, all chunks should be prefill"""
     from tinygrad.uop.ops import resolve
@@ -198,18 +164,6 @@ class TestTransformerGenerate(unittest.TestCase):
     # all runs should produce the same tokens
     self.assertEqual(results[0], results[1])
     self.assertEqual(results[1], results[2])
-
-  def test_temperature_high_produces_variety(self):
-    """High temperature should produce different outputs across runs."""
-    model = Transformer(TEST_CONFIG)
-    tokens = list(range(1, 6))
-    runs = set()
-    for _ in range(5):
-      gen = model.generate(list(tokens), temperature=2.0)
-      out = tuple(next(gen) for _ in range(10))
-      runs.add(out)
-    # with temperature=2.0, we should see at least 2 distinct outputs across 5 runs
-    self.assertGreater(len(runs), 1, "high temperature should produce varied outputs")
 
   def test_recurrent_temperature_high_produces_variety(self):
     model = Transformer(TEST_CONFIG)

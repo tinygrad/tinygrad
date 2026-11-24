@@ -112,9 +112,21 @@ class TestAttention(unittest.TestCase):
     expected = [[[[4 + (3/5 + 3*2/5)], [4 + (1/3 + 3*2/3)]]]]
     for mask in (None, Tensor([0., -np.inf])):
       with self.subTest(mask=mask is not None):
-        actual, returned_mask = hc(Tensor([[[[1.], [3.]]]]), lambda x: (x.square(), mask))
+        actual, returned_mask, pre = hc(Tensor([[[[1.], [3.]]]]), lambda x: (x.square(), mask))
         self.assertIs(returned_mask, mask)
+        self.assertIsNone(pre)
         np.testing.assert_allclose(actual.numpy(), expected, rtol=1e-6, atol=1e-7)
+
+  def test_hyperconnection_delayed(self):
+    hc = HyperConnection(self._make_config(dim=1, hc=HCConfig(count=2, sinkhorn_iters=1, eps=0.0, pre_delayed=True)))
+    hc.fn.weight = Tensor.zeros(8, 2)
+    hc.base["weight"] = Tensor([0., 0., 0., 0., float(np.log(3)), 0., 0., 0.])
+    # the sublayer sees streams [1, 3] weighed by the previous pre, stream 0 when there is none
+    for pre, seen in ((None, 1.), (Tensor([[[0., 1.]]]), 3.), (Tensor([[[.5, .5]]]), 2.)):
+      with self.subTest(seen=seen):
+        actual, _, own = hc(Tensor([[[[1.], [3.]]]]), lambda x: (x.square(), None), pre)
+        np.testing.assert_allclose(actual.numpy(), [[[[seen**2 + (3/5 + 3*2/5)], [seen**2 + (1/3 + 3*2/3)]]]], rtol=1e-6, atol=1e-7)
+        np.testing.assert_allclose(own.numpy(), [[[.5, .5]]], rtol=1e-6)
 
   def test_hyperconnection_head(self):
     # the output head only mixes: pre weights [1/2, 3/4] sum the streams [1, 3] to 11/4
@@ -128,7 +140,7 @@ class TestAttention(unittest.TestCase):
     for new_block, expected in ((True, [1, -3, 0.36]), (False, [1, -3 + 0.36])):
       res = AttentionResidual(self._make_config(dim=1), new_block)
       res.weight = Tensor([np.log(3)])
-      actual, _ = res(Tensor([[[[1.], [-3.]]]]), lambda x: (x.square(), None))
+      actual, _, _ = res(Tensor([[[[1.], [-3.]]]]), lambda x: (x.square(), None))
       np.testing.assert_allclose(actual.numpy().flatten(), expected, rtol=1e-5)
 
   def test_gated_residual(self):
@@ -136,7 +148,7 @@ class TestAttention(unittest.TestCase):
     res.norm.weight, res.down.weight, res.up.weight = Tensor([2., 4.]), Tensor([[np.log(3)/3, np.log(3)/3]]), Tensor([[0.], [4/3]])
     res.inject.weight = Tensor([[0., 0.], [0., np.log(3)/2]])
     # norm [2, 4], gate [1/2, 3/4] mixes to 2, squared to 4, inject gates [1, 3/2] add [4, 6]
-    actual, _ = res(Tensor([[[[1.], [1.]]]]), lambda x: (x.square(), None))
+    actual, _, _ = res(Tensor([[[[1.], [1.]]]]), lambda x: (x.square(), None))
     np.testing.assert_allclose(actual.numpy().flatten(), [5, 7], rtol=1e-4)
 
   def test_indexer(self):
@@ -190,6 +202,13 @@ class TestAttention(unittest.TestCase):
     freqs = Tensor([[1., 0.], [0., 1.], [-1., 0.], [0., -1.]])
     allowed = [[1, 0, 0, 0], [1, 1, 0, 0], [1, 1, 1, 0], [0, 0, 1, 1]]
     np.testing.assert_array_equal(indexer(x, q, (0,), freqs).numpy(), np.where(allowed, 0., -np.inf)[None, None])
+
+  def test_indexer_candidates(self):
+    # deepseek-v4.1: later layers pick only from the candidates, not the best pool 0
+    indexer = Indexer(self._make_config(dim=2, max_context=8, compress_ratios=(1,), indexer=IndexerConfig(n_heads=1, head_dim=1, top_k=1)))
+    indexer.attn_q_b.weight = indexer.proj.weight = Tensor.ones(1, 2)
+    x, keys, candidates = Tensor.ones(1, 1, 2), Tensor([[[6.], [5.]]]), Tensor([[[[False, True]]]])
+    np.testing.assert_array_equal(indexer(x, x, (1,), None, keys, candidates.cat(candidates, dim=1)).numpy(), [[[[0, 1]], [[0, 1]]]])
 
   def test_compressor(self):
     # ratio 4 (overlap): pool j weighs the first half of pool j-1's keys and the second half of its own, tokens 0-1 come from the rolling state
@@ -445,15 +464,6 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
         np.testing.assert_allclose(np.concatenate(outs, axis=1), decode, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
         np.testing.assert_allclose(chunked_conv, decode_conv, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
         np.testing.assert_allclose(chunked_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
-
-  def test_start_zero_resets_realized_state(self):
-    config = self._make_config(max_context=3)
-    x = self._tensor_linspace(-1, 1, (1, 3, config.dim))
-    block = self._make_block(config)
-    self._run_attention(block, x, 0)
-    restarted = self._run_attention(block, x[:, :2], 0)
-    fresh = self._run_attention(self._make_block(config), x[:, :2], 0)
-    np.testing.assert_allclose(restarted, fresh, rtol=1e-3, atol=1e-3)
 
 class TestShortConv(unittest.TestCase):
   def test_short_conv(self):

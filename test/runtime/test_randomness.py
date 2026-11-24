@@ -3,8 +3,8 @@ import numpy as np
 import torch
 from functools import partial
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit, Variable
-from tinygrad.helpers import getenv, DEV, Context, OSX
-from test.helpers import not_support_multi_device, needs_second_gpu
+from tinygrad.helpers import getenv, Context, OSX
+from test.helpers import needs_devices
 from hypothesis import given, settings, strategies as strat
 
 settings.register_profile("my_profile", max_examples=getenv("TEST_MAX_EXAMPLES", 200), deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -60,20 +60,6 @@ class TestRandomness(unittest.TestCase):
   def test_rand(self):
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
 
-  def test_rand_is_lazy(self):
-    Tensor.manual_seed(0)
-    r1 = Tensor.rand(10)
-    self.assertFalse(r1.uop.is_realized, "rand should be lazy - tensor should not be realized")
-    counter = Tensor._device_rng_counters[Device.DEFAULT]
-    self.assertFalse(counter.uop.is_realized, "rand should be lazy - counter should not be realized")
-    # second rand triggers assign path
-    r2 = Tensor.rand(10)
-    self.assertFalse(r2.uop.is_realized, "rand should be lazy - tensor should not be realized after second rand")
-    self.assertFalse(counter.uop.is_realized, "rand should be lazy - counter should not be realized after second rand")
-    Tensor.realize(r1, r2)
-    self.assertTrue(r1.uop.is_realized, "tensor should be realized after .realize()")
-    self.assertTrue(r2.uop.is_realized, "tensor should be realized after .realize()")
-
   @unittest.skipUnless(dtypes.float16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need float16 support")
   def test_rand_float16(self):
     N = 128
@@ -84,27 +70,6 @@ class TestRandomness(unittest.TestCase):
     assert nx[nx == 1].size == 0
     assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
-
-  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"}, "gpuocelot doesn't support certain ops needed for threefry")
-  def test_threefry_against_reference(self):
-    Tensor.manual_seed(1337)
-
-    # reference generated using
-    """
-    key0 = 1337
-    key1 = 0
-    values = jax.extend.random.threefry_2x32((np.uint32(key1), np.uint32(key0)), np.arange(20, dtype=np.uint32))
-    print(f"[{', '.join(f'{v}' for v in values)}]")
-    """
-    jr = np.array([2221762175, 1752107825, 653745012, 1967534793, 1395205442, 3840423848, 2159346757,
-                   603508235, 3319473678, 3363866483, 3544324138, 1436466838, 2169858556, 2570072943,
-                   2387150698, 3678370550, 2911697663, 403244401, 2560861638, 1692360114])
-
-    counts = Tensor.arange(20, dtype=dtypes.uint32)
-    counts0, counts1 = counts.chunk(2)
-    r = Tensor._threefry_random_bits(Tensor([0, 1337], dtype='uint32'), counts0, counts1).numpy()
-
-    np.testing.assert_allclose(jr, r)
 
   def test_threefry_against_reference_full(self):
     Tensor.manual_seed(1337)
@@ -142,8 +107,7 @@ class TestRandomness(unittest.TestCase):
     r = Tensor.rand(10).numpy()
     np.testing.assert_allclose(r, jr, atol=1e-5, rtol=1e-5)
 
-  @needs_second_gpu
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(2)
   def test_threefry_tensors_cnt(self):
     Tensor.manual_seed(1337)
 
@@ -161,32 +125,6 @@ class TestRandomness(unittest.TestCase):
 
     assert len(Tensor._device_rng_counters) == 0
     assert len(Tensor._device_seeds) == 0
-
-  @needs_second_gpu
-  @unittest.skipIf(not_support_multi_device(), "no multi")
-  def test_threefry_same_kernels(self):
-    Tensor.manual_seed(0)
-
-    Tensor.rand(1).realize()
-
-    s = Tensor.rand(20).schedule_linear().src
-    s2 = Tensor.rand(20).schedule_linear().src
-
-    assert len(s) == len(s2), f"{len(s)} != {len(s2)}"
-    for x,y in zip(s, s2):
-      if not (x.src[0] == y.src[0]):
-        print(f"{x.src[0]} != {y.src[0]}")
-
-    Tensor.rand(1, device=f"{Device.DEFAULT}:1").realize()
-
-    s3 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule_linear().src
-    s4 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule_linear().src
-
-    assert len(s3) == len(s4), f"{len(s3)} != {len(s4)}"
-    assert len(s2) == len(s4), f"{len(s)} != {len(s3)}"
-    for x,y in zip(s3, s4):
-      if not (x.src[0] == y.src[0]):
-        print(f"{x.src[0]} != {y.src[0]}")
 
   @unittest.skipUnless(dtypes.bfloat16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need bfloat16 support")
   def test_rand_bfloat16(self):

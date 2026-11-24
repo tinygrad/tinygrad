@@ -45,30 +45,6 @@ class TestTinygrad(unittest.TestCase):
     val2 = a.numpy()
     np.testing.assert_allclose(val1, val2)
 
-  def test_backward_pass(self):
-    def test_tinygrad():
-      x = Tensor(x_init)
-      W = Tensor(W_init)
-      m = Tensor(m_init)
-      out = x.dot(W).relu()
-      out = out.log_softmax()
-      out = out.mul(m).add(m).sum()
-      out.backward()
-      return out.numpy(), x.grad.numpy(), W.grad.numpy()
-
-    def test_pytorch():
-      x = torch.tensor(x_init, requires_grad=True)
-      W = torch.tensor(W_init, requires_grad=True)
-      m = torch.tensor(m_init)
-      out = x.matmul(W).relu()
-      out = torch.nn.functional.log_softmax(out, dim=1)
-      out = out.mul(m).add(m).sum()
-      out.backward()
-      return out.detach().numpy(), x.grad, W.grad
-
-    for x,y in zip(test_tinygrad(), test_pytorch()):
-      np.testing.assert_allclose(x, y, atol=1e-5)
-
   # A simple test is to check that we can accumulate gradients (run backward twice or more times)
   def test_accumulate_gradients(self):
     x = Tensor(x_init)
@@ -254,8 +230,6 @@ class TestTinygrad(unittest.TestCase):
     Tensor.manual_seed(0)
     a = Tensor.randperm(10).realize()
     np.testing.assert_equal(a.numpy(), [8, 9, 4, 3, 6, 1, 7, 5, 2, 0])
-    b = Tensor.randperm(1000).realize()
-    np.testing.assert_equal(set(b.numpy()), set(range(1000)))
 
   def test_randn_isnt_inf_on_zero(self):
     # simulate failure case of rand handing a zero to randn

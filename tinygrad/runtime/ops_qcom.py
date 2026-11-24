@@ -56,7 +56,6 @@ def qcom_submit(req:UOp, ret:UOp, fd:UOp, ioctl:functools.partial) -> UOp: # the
   return ret.index(0).store(ccall(libc.dll.ioctl, fd, UOp.const(ioctl_cmd, dtypes.uint32), req.index(0))).sink()
 
 class QCOMComputeQueue(HWQueue):
-  dev:QCOMDevice
   def cmd(self, opcode:int, *vals): self.q(pkt7_hdr(opcode, sum(x.dtype.itemsize // 4 if isinstance(x, UOp) else 1 for x in vals)), *vals)
 
   def reg(self, reg:int, *vals): self.q(pkt4_hdr(reg, sum(x.dtype.itemsize // 4 if isinstance(x, UOp) else 1 for x in vals)), *vals)
@@ -74,12 +73,8 @@ class QCOMComputeQueue(HWQueue):
 
   def signal(self, signal:UOp, value:UOp):
     self.cmd(mesa.CP_WAIT_FOR_IDLE)
-    if self.dev.gpu_id[:2] < (7, 3):
-      self.cmd(mesa.CP_EVENT_WRITE, qreg.cp_event_write_0(event=mesa.CACHE_FLUSH_TS), signal.getaddr(self.devs), value.cast(dtypes.uint32))
-      self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
-    else:
-      # TODO: support devices starting with 8 Gen 1. Also, 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP
-      raise RuntimeError('CP_EVENT_WRITE7 is not supported')
+    self.cmd(mesa.CP_EVENT_WRITE, qreg.cp_event_write_0(event=mesa.CACHE_FLUSH_TS), signal.getaddr(self.devs), value.cast(dtypes.uint32))
+    self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
 
   def timestamp(self, signal:UOp):
     self.cmd(mesa.CP_WAIT_FOR_IDLE)
@@ -116,7 +111,7 @@ class QCOMComputeQueue(HWQueue):
     return UOp(Ops.LINEAR, src=tuple(pack_args(args, data.kernargs_alloc_size)), arg="kernargs")
 
   def exec(self, call:UOp, prg:UOp):
-    data, lib = qcom_build_program(self.dev, prg, self.devs)
+    data, lib = qcom_build_program(prg, self.devs)
     global_size, local_size = prg.arg.launch_dims(call)
     if data.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
     if any(g*l>mx for g,l,mx in zip(global_size, local_size, [65536, 65536, 65536])) and any(l>mx for l,mx in zip(local_size, [1024, 1024, 1024])):
@@ -197,12 +192,13 @@ class QCOMComputeQueue(HWQueue):
   def submit(self, cmdbuf:UOp) -> UOp:
     ib, ib_off = unwrap_view(cmdbuf)
     fd, ctx = [UOp.variable(to_name(self.devs[0], n), 0, 2**31 - 1, dtypes.int32) for n in ("fd", "ctx")]
-    req = self.dev.iface.submit_req(ib.getaddr(self.devs) + ib_off, cmdbuf.max_numel(), ctx)
-    return qcom_submit(req.after(cmdbuf), UOp.alloc((1,), dtypes.int32, device=self.devs[0], name="submit_ret"), fd, self.dev.iface.submit_ioctl)
+    iface = MSMIface if Device.target_for(self.devs[0]).interface == "MSM" else KGSLIface
+    req = iface.submit_req(ib.getaddr(self.devs) + ib_off, cmdbuf.max_numel(), ctx)
+    return qcom_submit(req.after(cmdbuf), UOp.alloc((1,), dtypes.int32, device=self.devs[0], name="submit_ret"), fd, iface.submit_ioctl)
 
 class QCOMProgramData:
-  def __init__(self, dev:QCOMDevice, obj:TinyELF):
-    self.signature, self.name, self.NIR = obj.signature, obj.name, isinstance(dev.renderer, IR3Renderer)
+  def __init__(self, dev:str, obj:TinyELF):
+    self.signature, self.name, self.NIR = obj.signature, obj.name, isinstance(Device.renderer_for(dev), IR3Renderer)
 
     if self.NIR:
       from tinygrad.runtime.support.compiler_mesa import IR3Compiler
@@ -279,8 +275,8 @@ class QCOMProgramData:
     reg_desc_off = _read_lib(lib, 0x34)
     self.fregs, self.hregs = _read_lib(lib, reg_desc_off + 0x14), _read_lib(lib, reg_desc_off + 0x18)
 
-def qcom_build_program(dev:QCOMDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[QCOMProgramData, UOp]:
-  image = bytes((data:=QCOMProgramData(dev, TinyELF.from_program(prg))).image).ljust(round_up(len(data.image), 4), b"\x00")
+def qcom_build_program(prg:UOp, devs:tuple[str, ...]) -> tuple[QCOMProgramData, UOp]:
+  image = bytes((data:=QCOMProgramData(devs[0], TinyELF.from_program(prg))).image).ljust(round_up(len(data.image), 4), b"\x00")
   return data, patch(make_program(prg, len(image), devs[0]), [], image)
 
 class QCOMAllocator(Allocator['QCOMDevice']):
@@ -340,7 +336,8 @@ class KGSLIface:
       kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=storage.meta[0].id)
       FileIOInterface.munmap(storage.buf, storage.meta[0].mmapsize)
 
-  def submit_req(self, ib:UOp, size:int, ctx:UOp) -> UOp:
+  @staticmethod
+  def submit_req(ib:UOp, size:int, ctx:UOp) -> UOp:
     obj = cstruct(kgsl.struct_kgsl_command_object, gpuaddr=ib, size=size, flags=kgsl.KGSL_CMDLIST_IB)
     return cstruct(kgsl.struct_kgsl_gpu_command, cmdlist=obj.getaddr(HCQ_RUNTIME_DEV.device), cmdsize=obj.nbytes(), numcmds=1, context_id=ctx)
 
@@ -385,7 +382,8 @@ class MSMIface:
     FileIOInterface.munmap(unwrap(storage.host).addr, storage.meta.size)
     msm_drm.DRM_IOCTL_GEM_CLOSE(self.fd, handle=storage.meta.handle)
 
-  def submit_req(self, ib:UOp, size:int, ctx:UOp) -> UOp:
+  @staticmethod
+  def submit_req(ib:UOp, size:int, ctx:UOp) -> UOp:
     cmd = cstruct(msm_drm.struct_drm_msm_gem_submit_cmd, type=msm_drm.MSM_SUBMIT_CMD_BUF, size=size, iova=ib)
     return cstruct(msm_drm.struct_drm_msm_gem_submit, flags=msm_drm.MSM_PIPE_3D0, nr_cmds=1, cmds=cmd.getaddr(HCQ_RUNTIME_DEV.device), queueid=ctx)
 
@@ -403,9 +401,6 @@ class QCOMDevice(Compiled):
   ifaces = [KGSLIface, MSMIface]
   timestamp_divider = 19.2
 
-  @property
-  def has_copy_queue(self) -> bool: return False
-
   def __init__(self, device:str=""):
     self.iface = self._select_iface(device)
     self.gpu_id = ((chip_id:=self.iface.chip_id) >> 24, (chip_id >> 16) & 0xFF, (chip_id >> 8) & 0xFF)
@@ -418,7 +413,7 @@ class QCOMDevice(Compiled):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
     super().__init__(device, QCOMAllocator(self), None,
-                     arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id)
+                     arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id, props={"copy": 0})
 
     self.var_vals = {to_name(self.device, "fd"): self.iface.fd.fd, to_name(self.device, "ctx"): self.iface.ctx}
 

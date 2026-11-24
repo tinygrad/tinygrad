@@ -113,6 +113,10 @@ class TestWeakStorageBoundary(unittest.TestCase):
     self.assertEqual(Tensor([10, 20, 30])[[2**32+1]].tolist(), [0])  # a wide list index is out of range, not wrapped
     with Context(DEFAULT_INT=dtypes.int64): self.assertEqual(Tensor(2).clone().dtype, dtypes.int64)
 
+  def test_broadcast_weakint_keeps_width(self):
+    x = Tensor([1, 0]).sum(keepdim=True).bool().where(2**33, 0)
+    self.assertEqual(x.expand(2).tolist(), [2**33]*2)  # a materialized weak int is stored wide enough for its bounds
+
   @unittest.skipUnless(dtypes.int64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "long scalar arguments cannot be emulated")
   def test_bound_variable_commits_by_bounds(self):
     bound = Tensor(UOp.variable("b", 0, 2**40).bind(2**35+3)).clone(Device.DEFAULT)

@@ -535,7 +535,7 @@ class Tensor(Mixin):
     """
     all_uops = self.uop.toposort()
     # backward fills .grad for every in-scope float tensor with a device
-    tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
+    tensors_need_grad: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and \
                                        t.uop in all_uops and t.is_floating_point() and t.device is not None]
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
@@ -559,7 +559,7 @@ class Tensor(Mixin):
     v_uop, v_bw = (v.uop, v.uop.backward_slice) if isinstance(v, Tensor) else (None, {})
     if self.uop.op_in_backward_slice_with_self(Ops.BUFFER, Ops.ALLOC):
       shared = self.uop.base if self.uop.base.is_realized else None
-      if any(self.uop in t.uop.backward_slice_with_self and t.uop.base is not shared for tref in all_tensors
+      if any(self.uop in t.uop.backward_slice_with_self and t.uop.base is not shared for tref in list(all_tensors)
              if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
         raise RuntimeError("can't setitem on a tensor with other uses")
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
@@ -582,18 +582,18 @@ class Tensor(Mixin):
   # ***** op wrappers *****
 
   # unlike Tensors, UOps are immutable, so these don't go in mixin
-  def __iadd__(self, x) -> Tensor: return self.assign(self.add(x)) # type: ignore[misc]
-  def __isub__(self, x) -> Tensor: return self.assign(self.sub(x)) # type: ignore[misc]
-  def __imul__(self, x) -> Tensor: return self.assign(self.mul(x)) # type: ignore[misc]
-  def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x)) # type: ignore[misc]
-  def __ifloordiv__(self, x) -> Tensor: return self.assign(self.__floordiv__(x)) # type: ignore[misc]
-  def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x)) # type: ignore[misc]
-  def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x)) # type: ignore[misc]
-  def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x)) # type: ignore[misc]
-  def __ixor__(self, x) -> Tensor: return self.assign(self.bitwise_xor(x)) # type: ignore[misc]
-  def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x)) # type: ignore[misc]
-  def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x)) # type: ignore[misc]
-  def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x)) # type: ignore[misc]
+  def __iadd__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.add(x))
+  def __isub__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.sub(x))
+  def __imul__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.mul(x))
+  def __itruediv__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.div(x))
+  def __ifloordiv__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.__floordiv__(x))
+  def __ipow__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.pow(x))
+  def __iand__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.bitwise_and(x))
+  def __ior__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.bitwise_or(x))
+  def __ixor__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.bitwise_xor(x))
+  def __ilshift__(self, x:Tensor|int) -> Tensor: return self.assign(self.lshift(x))
+  def __irshift__(self, x:Tensor|int) -> Tensor: return self.assign(self.rshift(x))
+  def __imatmul__(self, x:Tensor) -> Tensor: return self.assign(self.matmul(x))
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
 

@@ -109,6 +109,11 @@ class TestSchedule(unittest.TestCase):
   def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
   def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 1)
 
+  def test_setitem_overlapping_slice_temp_size(self):
+    a = Tensor.empty(128)
+    a[10:14] = a[11:15]
+    self.assertEqual({b.numel() for c in a.schedule_linear().src for b in c.src[1:]}, {4, 128})  # the temporary is slice-sized
+
   def test_setitem_const_fused(self):
     # https://github.com/tinygrad/tinygrad/issues/10690
     a = Tensor.arange(16).clone().realize()
@@ -184,6 +189,15 @@ class TestLimitBufs(unittest.TestCase):
         a, b = Tensor.rand(N).realize(), Tensor.rand(N).realize()
         base = (idx >= i).where(a + b, base)
       assert all(x > 0 for x in base.tolist())
+
+  def test_limit_bufs_cat(self):
+    with Context(MAX_KERNEL_BUFFERS=8):
+      linear, _ = Tensor.cat(*[Tensor.empty(4) for _ in range(32)]).linear_with_vars()
+    self.assertLessEqual(max(len(call.src)-1 for call in linear.src if call.src[0].op is Ops.SINK), 8)
+
+  def test_limit_bufs_sum(self):
+    with Context(MAX_KERNEL_BUFFERS=8):
+      check_schedule(sum(Tensor.empty(4) for _ in range(16)), 3)  # at most seven inputs per kernel: three kernels sum sixteen buffers
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):

@@ -251,14 +251,14 @@ class MockMMIOInterface:
       for addr in block.addrs: self._addr_block.setdefault(addr, block)
 
   def __getitem__(self, index:int|slice) -> int|list[int]:
-    if isinstance(index, slice): return [self[i] for i in range(index.start or 0, index.stop or 0, index.step or 1)]  # type: ignore[misc]
+    if isinstance(index, slice): return [self[i] for i in range(index.start or 0, index.stop or 0, index.step or 1)]
     if index == 0xde3: return VRAM_SIZE >> 20
     if block := self._addr_block.get(index): return block.read(index)
     return self.regs.get(index, 0)
 
   def __setitem__(self, index:int|slice, val:int|list[int]|tuple[int, ...]):
     if isinstance(index, slice):
-      vals = val if isinstance(val, (list, tuple)) else [val] * ((index.stop - index.start) // (index.step or 1))  # type: ignore[operator]
+      vals = val if isinstance(val, (list, tuple)) else [val] * ((index.stop - index.start) // (index.step or 1))
       for i, v in zip(range(index.start or 0, index.stop or 0, index.step or 1), vals): self[i] = v
       return
     assert isinstance(val, int)
