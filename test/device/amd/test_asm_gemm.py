@@ -3,7 +3,7 @@ import functools
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
 from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm, FP8_DTYPE
-from test.helpers import needs_second_gpu
+from test.helpers import needs_devices
 
 # On non CDNA4 it will only validate the Tensor.custom_kernel integration
 # Use DEV=NULL:HIP:gfx950 to also test the assembly
@@ -336,11 +336,11 @@ class TestGemmMXFP8(unittest.TestCase):
   def test_general_n_bw(self):
     for N in (2048, 8192, 14336): run_mx_gemm_bw(8192, N, 4096)
   # MP sharding: col-parallel (w on out axis), row-parallel (x,w on in axis)
-  @needs_second_gpu
+  @needs_devices(2)
   def test_multi_col_parallel(self): run_mx_gemm_multi(512, 512, 512, x_shard=None, w_shard=0, g_shard=1)
-  @needs_second_gpu
+  @needs_devices(2)
   def test_multi_row_parallel(self): run_mx_gemm_multi(512, 512, 512, x_shard=1, w_shard=1, g_shard=None)
-  @needs_second_gpu
+  @needs_devices(2)
   def test_multi_data_parallel(self): run_mx_gemm_multi(512, 512, 512, x_shard=0, w_shard=None, g_shard=0)
 
 def run_atb_gemm(rows, M, N, a_shard=None, b_shard=None, gpus=1, atol=1.0, rtol=3e-2) -> None:
@@ -362,11 +362,11 @@ class TestHkBf16AtbGemm(unittest.TestCase):
   def setUp(self):
     if not is_cdna4(): self.skipTest("hk bf16 atb gemm is cdna4 only")
   def test_single(self): run_atb_gemm(256, 256, 256)
-  @needs_second_gpu
+  @needs_devices(2)
   def test_k_sharded(self): run_atb_gemm(512, 256, 256, a_shard=1, b_shard=1, gpus=2)
-  @needs_second_gpu
+  @needs_devices(2)
   def test_n_sharded(self): run_atb_gemm(256, 256, 512, a_shard=None, b_shard=2, gpus=2)
-  @needs_second_gpu
+  @needs_devices(2)
   def test_m_sharded(self): run_atb_gemm(256, 512, 256, a_shard=2, b_shard=None, gpus=2)
 
 if __name__ == "__main__":

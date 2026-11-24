@@ -4,7 +4,7 @@ import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW, Muon, LAMB
 from tinygrad.helpers import Context
-from test.helpers import needs_second_gpu, slow
+from test.helpers import needs_devices, slow
 
 np.random.seed(1337)
 x_init = np.random.randn(1,4).astype(np.float32)
@@ -172,7 +172,7 @@ class TestOptim(unittest.TestCase):
     self.assertEqual(t.device, Device.DEFAULT)
     self.assertEqual(opt.m[0].device, "CPU")
 
-  @needs_second_gpu
+  @needs_devices(2)
   def test_lamb_cpu_offload_multi(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
     t = Tensor(x_init.copy()).shard(ds, axis=1)

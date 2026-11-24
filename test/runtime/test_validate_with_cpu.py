@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, Context, Variable, Device
-from test.helpers import needs_second_gpu
+from test.helpers import needs_devices
 
 class TestValidateWithCPU(unittest.TestCase):
   def setUp(self):
@@ -31,7 +31,7 @@ class TestValidateWithCPU(unittest.TestCase):
     b = (a * 2).contiguous()
     self.assertListEqual((b - 1).tolist(), [3.0, 5.0, 7.0])
 
-  @needs_second_gpu
+  @needs_devices(2)
   def test_sharded(self):
     t = Tensor([1.,2,3,4]).shard((f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"), axis=0)
     self.assertListEqual((t + 1).tolist(), [2.0, 3.0, 4.0, 5.0])

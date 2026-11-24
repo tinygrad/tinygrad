@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.device import Buffer
 from tinygrad.helpers import Context, DEV
-from test.helpers import needs_second_gpu
+from test.helpers import needs_devices
 
 @unittest.skipIf(Device.DEFAULT in {"WEBGPU", "CL"}, "subbuffer not supported")
 class TestSubBuffer(unittest.TestCase):
@@ -50,7 +50,7 @@ class TestSubBuffer(unittest.TestCase):
     t = Tensor.arange(0, 10, dtype=dtypes.uint8).clone().realize()
     self.assertIs(t.uop.bitcast(dtypes.int8).buffer, t.uop.buffer)
 
-  @needs_second_gpu
+  @needs_devices(2)
   @unittest.skipIf(Device.DEFAULT not in {"CUDA", "NV", "AMD"} or DEV.interface.startswith("MOCK"), "only NV, AMD, CUDA")
   def test_subbuffer_transfer(self):
     t = Tensor.arange(0, 10, dtype=dtypes.uint8).clone().realize()
