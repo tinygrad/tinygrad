@@ -1151,9 +1151,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
                            addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
   @staticmethod
-  def extern(shape:tuple[int, ...], dtype:DType, device, name:str):
-    if not shape: return UOp(Ops.EXTERN, src=(UOp(Ops.STACK),), arg=ParamArg(0, dtype, (dtype.min, dtype.max), name, AddrSpace.ALU))
-    return UOp.alloc(shape, dtype, 0, device=device, name=name).replace(op=Ops.EXTERN)
+  def extern(shape:tuple[int, ...], dtype:DType, device, name:str): return UOp.alloc(shape, dtype, 0, device=device, name=name).replace(op=Ops.EXTERN)
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
   @staticmethod

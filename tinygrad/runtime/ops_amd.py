@@ -92,7 +92,7 @@ def pm4_for(dev:str): return importlib.import_module(f"tinygrad.runtime.autogen.
 def sdma_for(dev:str): return import_module('sdma', (4, 0, 0) if gc_for(dev).version[0] == 9 else (6, 0, 0))
 def xccs_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("xccs", dict(gfx942=8, gfx950=8).get(t.arch, 1))
 def lds_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("lds", dict(gfx950=160).get(t.arch, 64))
-def waves_for(dev:str) -> UOp: return UOp.extern((), dtypes.uint32, None, to_name(dev, "scratch_waves"))
+def waves_for(dev:str) -> UOp: return UOp.extern((1,), dtypes.uint32, dev, "waves")
 def scratch_wavesize(dev:str, psize:int) -> int: # the scratch of a wave (64 lanes), in units of 256 bytes (1024 on gfx9)
   return ceildiv(max(psize, 128) * 64, 256 if gc_for(dev).version[0] != 9 else 1024)
 
