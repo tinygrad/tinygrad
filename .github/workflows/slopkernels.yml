@@ -56,7 +56,9 @@ jobs:
 
   bench:
     name: Benchmarks (${{ matrix.runner }})
+    # Keep GPU benchmarks off GitHub until this workflow has access to its hardware runners.
     if: >-
+      github.server_url != 'https://github.com' &&
       (github.repository == 'tinygrad/tinygrad' || github.repository == 'geohot/tinygrad') &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
        (github.event_name == 'pull_request' &&
