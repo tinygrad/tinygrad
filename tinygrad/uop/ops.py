@@ -1210,7 +1210,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     if shape is not None or dtype is not None:
       assert src is None, f"native either receives src or {dtype=} and {shape=}"
       src = UOp.param(-1, dtype or dtypes.void, shape or ())
-    return UOp(Ops.NATIVE, src=(src,) if src is not None else (), arg=NativeInfo(code, fmt=fmt))
+    return UOp(Ops.NATIVE, src=(src,) if src is not None else (), arg=NativeInfo(code, fmt))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, hcq:HCQInfo|None=None) -> UOp:
