@@ -1,0 +1,88 @@
+name: slopkernels
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: slopkernels-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  mock:
+    name: Mock AMD (${{ matrix.arch }})
+    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR')) && 'turin' || 'ubuntu-24.04' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ['gfx1100', 'gfx1201']
+    timeout-minutes: 3
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    env:
+      DEV: MOCKKFD+AMD::${{ matrix.arch }}
+      PARALLEL: "0"
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Install test dependencies & AMD comgr
+      run: |
+        pip install -q ruff==0.16.4 mypy==2.3.1 pytest pytest-xdist numpy gguf
+        if ! dpkg-query -W -f='${db:Status-Abbrev}' comgr 2>/dev/null | grep -q '^ii'; then
+          sudo mkdir -p /etc/apt/keyrings
+          wget -qO- https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg >/dev/null
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.1 $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/rocm.list >/dev/null
+          sudo apt-get -qq update && sudo apt-get -y --no-install-recommends install comgr
+        fi
+        printf '/opt/rocm/lib\n/opt/rocm/lib64\n' | sudo tee /etc/ld.so.conf.d/rocm.conf >/dev/null
+        sudo ldconfig
+    - name: Lint & typecheck slopkernels
+      run: |
+        python3 -m ruff check slopkernels/
+        python3 -m mypy slopkernels/__init__.py slopkernels/__main__.py slopkernels/bench.py slopkernels/src
+    - name: Compile all slopkernels offline to UIR
+      run: DEV=NULL python3 -m slopkernels /tmp/slopkernels_uir --target ${{ matrix.arch }}
+    - name: Run slopkernels tests
+      run: python3 -m pytest slopkernels/test/ -n=auto -q --durations=10
+
+  bench:
+    name: Benchmarks (${{ matrix.runner }})
+    # Keep GPU benchmarks off GitHub until this workflow has access to its hardware runners.
+    if: >-
+      github.server_url != 'https://github.com' &&
+      (github.repository == 'tinygrad/tinygrad' || github.repository == 'geohot/tinygrad') &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request' &&
+        (github.event.pull_request.head.repo.full_name == github.repository ||
+         github.event.pull_request.author_association == 'OWNER' ||
+         github.event.pull_request.author_association == 'COLLABORATOR' ||
+         github.event.pull_request.author_association == 'MEMBER')))
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ['7900xtx', '9060xt']
+    timeout-minutes: 3
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    env:
+      DEV: AMD
+      PARALLEL: "1"
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup (AMD)
+      run: AM_RESET=1 python3 -c 'from tinygrad import Device; Device[Device.DEFAULT]'
+    - name: Benchmark & verify LLM ops (GGUF GEMV, GGUF GEMM, MoE, Attention)
+      run: python3 -u -m slopkernels.bench --fast --warmup 2 --iters 5
