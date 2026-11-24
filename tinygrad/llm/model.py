@@ -119,8 +119,7 @@ class Linear(nn.Linear):
       arch = "cdna" if target[0] == 9 else "rdna4" if target[0] == 12 else "rdna3"
       out_shape = _shard_shape((splits * tokens, out_f), out_axis, ndev)
       x_f16 = x_in.half().contiguous().reshape(out_shape[0], in_f) if x_axis is None else x_in.half().contiguous()
-      mt = (8 if target[0] == 12 and out_shape[0] % 128 == 0 and out_shape[0] >= 256 else
-            4 if out_shape[0] % 64 == 0 else 2 if out_shape[0] % 32 == 0 else 1)
+      mt = 8 if out_shape[0] % 128 == 0 and out_shape[0] >= 256 else 4 if out_shape[0] % 64 == 0 else 2 if out_shape[0] % 32 == 0 else 1
       out = _run_kernel(f"{arch}_gemm_{qname}_f16", out_shape, dev, self.packed, x_f16, *_iq_lut(self.ggml_type, dev, True),
                         axis=out_axis, m_blks=out_shape[0] // (mt * 16), m_tiles=mt, out_features=local_out, in_features=in_f, raw_len=raw_len)
     else:

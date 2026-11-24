@@ -20,7 +20,6 @@ from tinygrad.dtype import DType
 from tinygrad.engine.realize import ExecContext, compile_linear, link_linear, pm_exec
 from tinygrad.helpers import ceildiv, prod, unwrap
 from tinygrad.llm.gguf import ggml_data_to_tensor
-from tinygrad.uop.ops import Ops
 
 import slopkernels
 
@@ -131,7 +130,7 @@ def _iq_lut(t:int, dev:str|tuple[str, ...], wmma:bool=False) -> tuple[UOp, ...]:
     grid, nw = {16:(g.iq2xxs_grid, 2), 17:(g.iq2xs_grid, 2), 19:(g.iq1s_grid, 2), 22:(g.iq2s_grid, 2),
                 18:(g.iq3xxs_grid, 1), 21:(g.iq3s_grid, 1)}[t]
     words = tuple((v >> (32 * i)) & 0xffffffff for v in grid for i in range(nw))
-  return (UOp(Ops.STACK, tuple(UOp.const(w, dtypes.uint32) for w in words)).cast(dtypes.uint32).copy_to_device(dev),)
+  return (Tensor(np.array(words, dtype=np.uint32), device=dev).realize().uop,)
 
 def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[str, int, int, SetupFn]]:
   target, cdna = _arch_info(dev)
@@ -153,7 +152,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         w4 = ggml_data_to_tensor(tile_u8[:CHECK_ROWS].flatten(), CHECK_ROWS * K, qtype).reshape(CHECK_ROWS, K)
         _assert_close(out[:, :CHECK_ROWS].float().numpy(), (x.float() @ w4.T).numpy(), rtol=4e-2, atol=5e-2)
       if m % 16 == 0 and n % 16 == 0:
-        mt = 8 if target[0] == 12 and m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
+        mt = 8 if m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
         return (lambda: _krun(f"{arch_gemm}_gemm_{kname}_f16", (m, n), dev, w_packed, x.half().contiguous(),
                               *_iq_lut(qtype, dev, True), m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=K, raw_len=w_len)), _verify
       ch = ceildiv(K, 1024)

@@ -235,6 +235,11 @@ def _quant_group_dot(raw:UOp, base:UOp, subgroup:UOp, x_reg:UOp, xd_val:UOp, xs_
     acc_i = _dp4a_loop(8, dep, q5_w, x_reg, cdna)
     d, dmin, scale, minimum = _q5_scales(raw, base, subgroup)
     return (acc_i.float() * (d * scale) - (xs_fn(0) + xs_fn(1)) * (dmin * minimum)) * xd_val
+  if ggml_type == IQ4_XS and raw.dtype == dtypes.uint32:
+    p_reg = UOp.alloc((4,), dtypes.uint32, addrspace=AddrSpace.REG)
+    p_reg = p_reg.after(p_reg.store(_amd_load(raw[base + 2 + subgroup * 4], 4, stream=True)))
+    acc_i = _dp4a_loop(8, dep, lambda i: _nibble_lut(p_reg[i % 4].load(), _sh((i // 4) * 4), IQ4NL_LUT), x_reg, cdna)
+    return (acc_i.float() * _iq4_scale(raw, base, subgroup)) * xd_val
   if ggml_type == NVFP4 and raw.dtype == dtypes.uint32:
     b64, h64 = subgroup // 2, subgroup % 2
     sc_w = raw[base + b64 * 9].load()
