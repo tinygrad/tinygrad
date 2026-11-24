@@ -54,7 +54,6 @@ class ISARenderer(Renderer):
 
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
-  # these aren't real instructions
   LABEL = auto()
   # index
   LEA = auto()
@@ -329,10 +328,7 @@ def load_const(x:UOp) -> UOp:
   return x.replace(src=(x.body,)+tuple(s if i in immediate and is_imm(s) else mov_op(s) for i,s in enumerate(x.src_without_body)))
 
 isel_matcher = PatternMatcher([
-  # **** Op -> Op ****
-  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
-   lambda x,m: UOp.ins(X86Ops.JNE, (x.src[1], x.src[0], test_gate(m)), x.dtype)),
-  # **** Op -> X86Op ****
+  (UPat().backedge(UPat(), UPat.var("m", dtypes.bool), name="x"), lambda x,m: UOp.ins(X86Ops.JNE, (x.src[1], x.src[0], test_gate(m)), x.dtype)),
   # function abi constraints
   (UPat(Ops.PARAM), lambda: RDI),
   (UPat(Ops.REFPARAM, name="x"), lambda x: x.src[1]),
@@ -358,10 +354,10 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.CMPEQ, name="x"), lambda x: UOp.ins(X86Ops.SETE, (cmp(x),), x.dtype)),
   (UPat(Ops.CMPNE, name="x"), lambda x: UOp.ins(X86Ops.SETNE, (cmp(x),), x.dtype)),
   # float unary
-  (UPat.var("y", dtypes.float32).sqrt().named("x"), lambda y,x: UOp.ins(X86Ops.VSQRTSS, (y, y), x.dtype)),
-  (UPat.var("y", dtypes.float64).sqrt().named("x"), lambda y,x: UOp.ins(X86Ops.VSQRTSD, (y, y), x.dtype)),
-  (UPat.var("y", dtypes.float32).trunc().named("x"), lambda y,x: UOp.ins(X86Ops.VROUNDSS, (y, y, UOp.cconst(3, dtypes.u8)), x.dtype)),
-  (UPat.var("y", dtypes.float64).trunc().named("x"), lambda y,x: UOp.ins(X86Ops.VROUNDSD, (y, y, UOp.cconst(3, dtypes.u8)), x.dtype)),
+  (UPat.var("y", dtypes.float32).sqrt(), lambda y: UOp.ins(X86Ops.VSQRTSS, (y, y), y.dtype)),
+  (UPat.var("y", dtypes.float64).sqrt(), lambda y: UOp.ins(X86Ops.VSQRTSD, (y, y), y.dtype)),
+  (UPat.var("y", dtypes.float32).trunc(), lambda y: UOp.ins(X86Ops.VROUNDSS, (y, y, UOp.cconst(3, dtypes.u8)), y.dtype)),
+  (UPat.var("y", dtypes.float64).trunc(), lambda y: UOp.ins(X86Ops.VROUNDSD, (y, y, UOp.cconst(3, dtypes.u8)), y.dtype)),
   # for float16 we route the srcs through gprs, this is suboptimal for values in xmms, in that case we want vpunpcklwd
   (UPat(Ops.STACK, dtypes.float16, name="x"), lambda x: vpins(x, tuple(s.bitcast(dtypes.int16) for s in x.src))),
   (UPat(Ops.STACK, dtypes.float32, name="x"), vinsertps),
