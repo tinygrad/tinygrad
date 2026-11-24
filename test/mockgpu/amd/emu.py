@@ -1849,17 +1849,18 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
 
 RENDER = ContextVar("RENDER", 0) # render lifted ast back to assembly
 
-def render_call(call:UOp):
-  if call.body.op is Ops.PROGRAM or call.body.arg.name.startswith("emu_"):
+def render_call(call:UOp, sink:UOp):
+  if sink.arg.name.startswith("emu_"):
     return UOp(Ops.LINEAR, src=tuple(y for x in call.body.toposort() if x.op is Ops.LINEAR for y in x.src if y.op in {Ops.BINARY, Ops.STACK}))
-  encoding = bytes.fromhex(call.body.arg.name.rsplit("_", 1)[1])
+  encoding = bytes.fromhex(sink.arg.name.rsplit("_", 1)[1])
   words = [UOp(Ops.BINARY, arg=encoding[i:i+4]) for i in range(0, len(encoding), 4)]
   for i,x in enumerate(call.src_without_body[:len(words)]):
     words[-1-i] = UOp(Ops.BINARY, arg=int(x.src[0].arg).to_bytes(4, "little"))
   return words[0] if len(words) == 1 else UOp(Ops.STACK, src=tuple(words))
 
 pm_render = PatternMatcher([
-  (UPat(Ops.CALL, name="call"), render_call),
+  (UPat(Ops.CALL, src=(UPat.any(UPat(Ops.SINK, name="sink"), UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"),), allow_any_len=True)),),
+        allow_any_len=True, name="call"), render_call),
   (UPat(Ops.SINK, name="root"), lambda root: next((x for x in root.toposort() if x.op is Ops.LINEAR), None)
    if isinstance(root.arg, KernelInfo) and root.arg.kernel else None),
 ])
