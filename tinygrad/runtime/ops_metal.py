@@ -99,7 +99,7 @@ def mtl_msg(obj:UOp, sel:str, *args:UOp|int, out:UOp|None=None) -> UOp:
   words = [UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in (*args, 0, 0, 0)][:3] # the extra args are ignored
   return mtl_send(obj.index(0).load(), UOp(Ops.BINARY, arg=sel.encode() + b"\0").index(0), *words, out=out)
 
-def apple9(arch:str) -> bool: return arch.startswith("Apple") and int(arch[5:]) >= 9
+def gpu_tier_for(arch:str) -> int: return int(arch[5:]) if arch.startswith("Apple") else 0
 
 @uopfunc
 def mtl_run(icb:UOp, value:UOp, first:UOp|int, count:int, last:bool, q:MetalQueue, stamp:UOp|None=None) -> UOp:
@@ -111,7 +111,7 @@ def mtl_run(icb:UOp, value:UOp, first:UOp|int, count:int, last:bool, q:MetalQueu
   c = mtl_msg(enc.after(c), "waitForFence:", fence)
 
   # before apple9 the encoder must declare the buffers and use the pipelines
-  if not apple9(Device.target_for(devs[0]).arch):
+  if gpu_tier_for(Device.target_for(devs[0]).arch) < 9:
     c = mtl_msg(enc.after(c), "useResources:count:usage:", *[mtl_handle(devs, h).index(0).load() for h in ("resources", "count")], 3)
     r = UOp.range(len(dedup(c.src[:2] for c in cmds)), next(UOp.unique_num), dtype=dtypes.uint64)
     c = mtl_msg(enc.after(c), "setComputePipelineState:", icb.bitcast(dtypes.uint64).index(hdr // 8 + 1 + len(cmds) + r).load())
@@ -217,10 +217,10 @@ class MetalDevice(Compiled):
                      arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:], props={"copy": 0})
 
     # apple9 keeps the buffers resident in a residency set
-    if apple9(self.arch):
+    if gpu_tier_for(self.arch) >= 9:
       rsd = ctypes.cast(objc.msg("new", clsmeth=True)(metal.MTLResidencySetDescriptor), metal.MTLResidencySetDescriptor)
       self.residency = self.sysdevice.newResidencySetWithDescriptor_error(rsd, None)
-      if self.residency.value is None: raise RuntimeError(f"{self.arch} needs a residency set, it comes with macOS 15")
+      if self.residency.value is None: raise RuntimeError(f"{self.arch} needs a residency set")
       self.queue.addResidencySet(self.residency)
     MetalDevice.opened.add(self)
     Compiled.link_bufs |= {to_name(self.device, "handles"): lambda b: self.handles}
@@ -233,7 +233,7 @@ class MetalDevice(Compiled):
     return Buffer(self.host, len(vals) * 8, initial_value=struct.pack(f"{len(vals)}Q", *vals))
 
   def mark_resident(self, mtl:metal.MTLBuffer, add:bool):
-    if apple9(self.arch):
+    if gpu_tier_for(self.arch) >= 9:
       objc.msg("addAllocation:" if add else "removeAllocation:", None, [objc.id_])(self.residency, mtl)
       return objc.msg("commit", None)(self.residency)
 
