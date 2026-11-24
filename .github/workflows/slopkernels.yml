@@ -48,11 +48,9 @@ jobs:
     - name: Lint & typecheck slopkernels
       run: |
         python3 -m ruff check slopkernels/
-        python3 -m mypy slopkernels/__init__.py slopkernels/__main__.py slopkernels/bench.py slopkernels/export_llm.py slopkernels/src
-    - name: Compile all slopkernels offline to UIR
-      run: |
-        DEV=NULL python3 -m slopkernels /tmp/slopkernels_uir --target ${{ matrix.arch }}
-        DEV=NULL python3 -m slopkernels
+        python3 -m mypy slopkernels/__init__.py slopkernels/__main__.py slopkernels/bench.py slopkernels/src
+    - name: Generate all slopkernels UIRs
+      run: DEV=NULL python3 -m slopkernels
     - name: Run slopkernels tests
       run: python3 -m pytest slopkernels/test/ -n=auto -q --durations=10
 

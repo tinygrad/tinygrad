@@ -630,7 +630,7 @@ class TransformerBlock(FFNBlock):
         cp = kp.call(partial, stats, q_in.uop, kv.uop, vkl_u)
         attn = _kcall("amd_flash_decode_combine", q_shard, q_in.device, partial.after(cp), stats.after(cp), vkl_u, axis=q_axis,
                       B=sh_b, H=sh_h, C=ch, d_blks=D // 64, valid_kv_offset=vkl_off)
-      elif target[0] != 9 and D in (64, 128, 256) and N_phys % 32 == 0 and (q_t := int(q_in.shape[2])) % 32 == 0 and \
+      elif target[0] != 9 and D in (64, 128, 256, 320) and N_phys % 32 == 0 and (q_t := int(q_in.shape[2])) % 32 == 0 and \
           (k_fa := _spec_kernel(f"{'rdna4' if target[0] == 12 else 'rdna3'}_flash_attn_d{D}", BH=sh_b * sh_h, m_blks=q_t // 32, B=sh_b,
             H_KV=sh_hkv, n_blks=N_phys // 32, valid_kv_offset=vkl_off, q_start_from_end=0 if isinstance(T_real, UOp) else 1)) is not None:
         q_h, ql_u = int(q_in.shape[1]), T_real if isinstance(T_real, UOp) else UOp.const(q_t)

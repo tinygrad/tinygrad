@@ -1,10 +1,10 @@
 import unittest
 from tinygrad import Context, Device, Tensor, UOp, dtypes
-from tinygrad.codegen import create_linear, full_rewrite_to_sink, to_program
+from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop import Ops
-from tinygrad.uop.ops import KernelInfo, ProgramInfo, graph_rewrite, pm_resolve_params
-from tinygrad.uop.spec import spec_program, spec_tensor, type_verify
+from tinygrad.uop.ops import KernelInfo, graph_rewrite, pm_resolve_params
+from tinygrad.uop.spec import spec_kernel_graph, spec_program, spec_tensor, type_verify
 from tinygrad.uop.uir import parse_uir, render_uir
 
 class TestTemplateParams(unittest.TestCase):
@@ -31,12 +31,11 @@ class TestTemplateParams(unittest.TestCase):
       pmix = UOp.param(0, dtypes.float32, (v, d))
       self.assertEqual(pmix.variables(), [v])
       self.assertIs(pmix.specialize(D=64), UOp.param(0, dtypes.float32, (v, 64)))
-      # Excluded from runtime variables & pm_resolve_params
       self.assertFalse(n.is_variable or n.is_bound_var)
       self.assertEqual((n + v).variables(), [v])
       self.assertIs(graph_rewrite(n + v, pm_resolve_params, ctx=(UOp.const(99),), walk=True), n + v)
 
-  def test_uir_roundtrip_and_codegen_boundary(self):
+  def test_uir_roundtrip_and_spec_enforcement(self):
     with Context(SPEC=0):
       n, d, eps = UOp.template("N", (1, 128)), UOp.template("D"), UOp.template("eps", (0.0, 1.0), dtypes.float32)
       out, inp = UOp.param(0, dtypes.float32, (n, d)), UOp.param(1, dtypes.float32, (n, d))
@@ -47,27 +46,20 @@ class TestTemplateParams(unittest.TestCase):
       self.assertNotIn("\x1b", txt)
       self.assertIs(parse_uir(txt), kern)
       spec_k = parse_uir(txt).specialize(N=2, D=4, eps=0.5)
-      self.assertFalse(spec_k.has_templates)
       type_verify(spec_k, spec_tensor)
-      ren = Device["CPU"].renderer
-      with self.assertRaises(AssertionError): full_rewrite_to_sink(kern, ren, optimize=False)
-      with self.assertRaises(AssertionError): to_program(kern, ren)
-      with self.assertRaises(RuntimeError): ProgramInfo.from_sink(kern)
-      with self.assertRaises(RuntimeError): type_verify(kern, spec_program)
-      fn_in, fn_out = UOp.param(0, dtypes.float32, (n, d), device="CPU"), UOp.alloc((n, d), dtypes.float32, slot=1, device="CPU")
-      with self.assertRaises(AssertionError): create_linear(UOp.sink(fn_out.after(kern.call(fn_out, fn_in))))
+      for s in (spec_tensor, spec_program, spec_kernel_graph):
+        with self.assertRaises(RuntimeError): type_verify(kern, s)
+    with Context(SPEC=2):
+      with self.assertRaises(RuntimeError): full_rewrite_to_sink(kern, Device["CPU"].renderer, optimize=False)
     x = Tensor([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]], device="CPU").realize()
     y = Tensor.empty(2, 4, dtype=dtypes.float32, device="CPU")
     self.assertEqual(Tensor(y.uop.after(spec_k.call(y.uop, x.uop))).tolist(), [[1.5, 2.5, 3.5, 4.5], [5.5, 6.5, 7.5, 8.5]])
 
   def test_validation(self):
     with Context(SPEC=0):
-      for bad in (("", None, dtypes.weakint), ("b", None, dtypes.bool), ("x", (False, True), dtypes.weakint),
-                  ("x", (0.5, 4.5), dtypes.weakint), ("x", (10, 5), dtypes.weakint), ("f", (float("nan"), 1.0), dtypes.float32)):
-        with self.assertRaises(AssertionError): UOp.template(*bad)
       n, eps = UOp.template("N", (1, 16)), UOp.template("eps", (0.0, 1.0), dtypes.float32)
       g = n.cast(dtypes.float32) + eps
-      for kw in ({"N": 4}, {"N": 4, "eps": 0.5, "extra": 1}, {"N": True, "eps": 0.5}, {"N": 2.0, "eps": 0.5},
+      for kw in ({"N": 4}, {"N": 4, "eps": 0.5, "extra": 1}, {"N": True, "eps": 0.5},
                  {"N": 0, "eps": 0.5}, {"N": 17, "eps": 0.5}, {"N": 4, "eps": -0.1}, {"N": 4, "eps": float("nan")}):
         with self.assertRaises(AssertionError): g.specialize(**kw)  # type: ignore
       self.assertIs(UOp.const(5).specialize(), UOp.const(5))

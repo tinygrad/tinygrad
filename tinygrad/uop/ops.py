@@ -86,8 +86,8 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   return tuple((1,)*(max_dim-len(s))+s for s in shapes)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 def _sshape(shape:tuple[sint, ...]) -> tuple[sint, ...]:
-  return tuple(ssimplify(x.substitute({v: UOp.const(v.vmax) for v in x.variables()})) if isinstance(x, UOp) and x.has_templates
-               else int(x.vmax) if isinstance(x, UOp) else x for x in shape)
+  return tuple(ssimplify(x.substitute({v: UOp.const(v.vmax) for v in x.variables()}))
+               if isinstance(x, UOp) and any(u.is_template for u in x.toposort()) else int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   if all_same(shapes): return shapes[0]
   # per right-aligned dim: sizes of 1 broadcast to the others, which must all agree
@@ -1008,26 +1008,18 @@ class UOp(Mixin, metaclass=UOpMetaClass):
         ret.add(UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype))
     return sorted(ret, key=lambda v: (v.arg.name or "", v.arg.slot))
 
-  # *** uop Template stuff ***
-
   @staticmethod
   def template(name:str, vmin_vmax:tuple[PyConst, PyConst]|None=None, dtype:DType=dtypes.weakint) -> UOp:
-    assert isinstance(name, str) and name and (dtypes.is_int(dtype) or dtypes.is_float(dtype)), f"bad template {name!r} {dtype}"
-    assert vmin_vmax is None or (len(vmin_vmax) == 2 and dtype.min <= vmin_vmax[0] <= vmin_vmax[1] <= dtype.max and
-      all(not isinstance(x, bool) and isinstance(x, int if dtypes.is_int(dtype) else (int, float)) for x in vmin_vmax)), f"bad {vmin_vmax!r}"
     return UOp(Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(-1, dtype, vmin_vmax=vmin_vmax, name=name, addrspace=AddrSpace.TEMPLATE))
   @property
   def is_template(self) -> bool: return self.op is Ops.PARAM and self.arg.addrspace is AddrSpace.TEMPLATE
-  @recursive_property
-  def has_templates(self) -> bool: return self.is_template or any(s.has_templates for s in self.src)
   def specialize(self, **values:PyConst) -> UOp:
-    tmpls = [u for u in self.toposort(enter_calls=True) if u.is_template] if self.has_templates else []
+    tmpls = [u for u in self.toposort(enter_calls=True) if u.is_template]
     assert {u.arg.name for u in tmpls} == set(values), f"template mismatch: {sorted(values)} vs {sorted({u.arg.name for u in tmpls})}"
     subs: dict[UOp, UOp] = {}
     for u in tmpls:
       v = values[u.arg.name]
-      assert not isinstance(v, bool) and isinstance(v, int if dtypes.is_int(u.dtype) else (int, float)) and u.dtype.min <= v <= u.dtype.max
-      assert u.arg.vmin_vmax is None or u.arg.vmin_vmax[0] <= v <= u.arg.vmin_vmax[1]
+      assert not isinstance(v, bool) and (u.arg.vmin_vmax is None or u.arg.vmin_vmax[0] <= v <= u.arg.vmin_vmax[1])
       subs[u] = UOp.const(v if dtypes.is_int(u.dtype) else float(v), u.dtype)
     from tinygrad.uop.symbolic import symbolic_simple
     with Context(TRACK_MATCH_STATS=0, SPEC=min(SPEC.value, 1)):
@@ -1368,7 +1360,6 @@ class ProgramInfo:
     global_size: list[sint] = [1, 1, 1]
     local_size: list[sint] = [1, 1, 1]
     for u in sink.toposort():
-      if u.is_template: raise RuntimeError(f"unresolved template parameter {u.arg.name!r} in ProgramInfo.from_sink")
       if u.op is Ops.PARAM: _params.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):

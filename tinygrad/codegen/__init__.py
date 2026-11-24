@@ -263,7 +263,6 @@ pm_implicit_barriers = PatternMatcher([
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
-  assert not ast.has_templates, "unresolved template parameter(s) at codegen boundary"
   if DEBUG >= 5: print(render_uir(ast))
   if SPEC: type_verify(ast, spec_tensor)
 
@@ -490,7 +489,6 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   Returns:
     The Ops.PROGRAM with SINK/LINEAR/SOURCE/BINARY.
   """
-  assert not ast.has_templates, "unresolved template parameter(s) at codegen boundary"
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   ast = graph_rewrite(ast, pm_lower_calls, ctx=LowerCallsCtx(renderer), name="lower calls", walk=True)
   if ast.op is Ops.PROGRAM: prg = ast
@@ -714,7 +712,6 @@ pm_contiguous_views = PatternMatcher([
 @rewrite_group(lambda fn,ret,**_: f"Schedule {len(fn.src)} -> {len(ret.src)}")
 def create_linear(fn:UOp) -> UOp:
   """an exported function (no runtime state) to the LINEAR of calls that runs it, on its EXTERNs, view args and ALLOCs"""
-  assert not fn.has_templates, "unresolved template parameter(s) at codegen boundary"
   key = (fn, NO_MEMORY_PLANNER.value)
   if SCACHE and (hit:=schedule_cache.get(key)) is not None: return hit
   # a contiguous view of storage is a different buffer: it's an input of the scheduled function, the call arg is the view

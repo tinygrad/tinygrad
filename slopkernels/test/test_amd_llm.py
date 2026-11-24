@@ -4,15 +4,13 @@ from unittest.mock import patch
 
 import numpy as np
 from tinygrad import Context, Device, Tensor, TinyJit, UOp, dtypes, function, nn
-from tinygrad.helpers import DEV
+from tinygrad.helpers import DEV, ceildiv, unwrap
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.llm.model import ExpertWeights, HCConfig, HyperConnection, Linear, TransformerConfig
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.uop.ops import Ops, resolve
-from tinygrad.uop.uir import parse_uir
 
 import slopkernels
-from slopkernels.bench import _desc, _run_op
 from slopkernels.src.amd_gguf import (
   HALFWORD_QUANTS,
   IQ1_S,
@@ -35,12 +33,6 @@ def _slop_target(device:str|tuple[str, ...]|None) -> tuple[int, ...]|None:
     return tuple(int(x) for x in t) if t is not None and isinstance(Device[dev].renderer, HIPRenderer) else None
 
 def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool: return _slop_target(device) is not None
-def _slop(name:str, *srcs:Tensor|UOp, **attrs) -> Tensor|None:
-  if (target:=_slop_target(dev:=srcs[0].device)) is None: return None
-  if (uir:=slopkernels.get(name, target=target, device=dev, srcs=tuple(_desc(s) for s in srcs), **attrs)) is None: return None
-  return _run_op(uir, *srcs)
-
-
 def _is_rdna4(dev:str) -> bool: return (_slop_target(dev) or (0,))[0] == 12
 def _is_cdna(dev:str) -> bool: return (_slop_target(dev) or (0,))[0] == 9
 
@@ -50,10 +42,8 @@ def q8_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor, 
   q = Tensor.empty(tokens, g, 8, dtype=dtypes.uint32, device=x.device)
   d = Tensor.empty(tokens, g, dtype=dtypes.float32, device=x.device)
   s = Tensor.empty(tokens, g, 2, dtype=dtypes.float32, device=x.device)
-  uir = slopkernels.get("q8_quantize", tokens=tokens, in_features=in_features,
-                        in_shape=tuple(int(v) for v in x.uop.max_shard_shape), in_dtype=x.dtype.name)
-  assert uir is not None
-  call = parse_uir(uir).call(q.uop, d.uop, s.uop, x.uop)
+  kern = unwrap(slopkernels.get(f"amd_q8_quantize_{x.dtype.name}")).specialize(tokens=tokens, in_features=in_features)
+  call = kern.call(q.uop, d.uop, s.uop, x.reshape(tokens, in_features).uop)
   return Tensor(q.uop.after(call)), Tensor(d.uop.after(call)), Tensor(s.uop.after(call))
 
 
@@ -68,13 +58,28 @@ def _split_offset(v:int|UOp) -> tuple[int|UOp, int]:
 def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
   T_real = q.shape[2]
   decode = resolve(T_real == 1, False)
-  q_in = q if not isinstance(T_real, UOp) else q.pad_to((*q.shape[:2], q.max_shape[2], q.shape[3]))
-  v_base, v_off = _split_offset(valid_end)
-  sym_srcs = [s for s in (v_base, T_real) if isinstance(s, UOp)]
-  out = _slop("flash_attention_op", q_in.half(), assigned_kv, *sym_srcs,
-              valid_kv_len=None if isinstance(v_base, UOp) else int(v_base), valid_kv_offset=v_off,
-              q_start_from_end=True, decode=decode)
-  if out is not None: return out if not isinstance(T_real, UOp) else out[:, :, :T_real]
+  if (target := _slop_target(q.device)) is not None:
+    q_in = (q if not isinstance(T_real, UOp) else q.pad_to((*q.shape[:2], q.max_shape[2], q.shape[3]))).half()
+    B, H, M, D = (int(d) for d in q_in.shape)
+    _, _, H_KV, N_phys, _ = (int(d) for d in assigned_kv.shape)
+    v_base, v_off = _split_offset(valid_end)
+    vkl_u = v_base if isinstance(v_base, UOp) else UOp.const(int(v_base))
+    if decode and M == 1 and D in (64, 128, 256) and (grp := H // H_KV) in (1, 2, 4, 8) and N_phys % 64 == 0:
+      ch = min(48, ceildiv(N_phys, 64))
+      kp = unwrap(slopkernels.get(f"amd_flash_decode_partial_g{grp}_d{D}")).specialize(
+        B=B, H_KV=H_KV, n_blks=N_phys // 64, C=ch, valid_kv_offset=v_off)
+      partial, stats = (UOp.alloc((B, H, ch, d), dtypes.float32, device=q.device) for d in (D, 2))
+      cp = kp.call(partial, stats, q_in.uop, assigned_kv.uop, vkl_u)
+      kc = unwrap(slopkernels.get("amd_flash_decode_combine")).specialize(B=B, H=H, C=ch, d_blks=D // 64, valid_kv_offset=v_off)
+      out = UOp.alloc((B, H, 1, D), dtypes.float32, device=q.device)
+      return Tensor(out.after(kc.call(out, partial.after(cp), stats.after(cp), vkl_u)))
+    if not decode and target[0] != 9 and D in (64, 128, 256, 320) and N_phys % 32 == 0 and M % 32 == 0:
+      k_fa = unwrap(slopkernels.get(f"{'rdna4' if target[0] == 12 else 'rdna3'}_flash_attn_d{D}")).specialize(
+        BH=B * H, m_blks=M // 32, B=B, H_KV=H_KV, n_blks=N_phys // 32, valid_kv_offset=v_off, q_start_from_end=1)
+      ql_u = T_real if isinstance(T_real, UOp) else UOp.const(M)
+      out = UOp.alloc((B * H, M, D), dtypes.float32, device=q.device)
+      ret = Tensor(out.after(k_fa.call(out, q_in.reshape(B * H, M, D).uop, assigned_kv.uop, vkl_u, ql_u)).reshape((B, H, M, D)))
+      return ret if not isinstance(T_real, UOp) else ret[:, :, :T_real]
   k, v = (assigned_kv[i, :, :, :valid_end].float() for i in range(2))
   mask = None if decode else Tensor.full((T_real, valid_end), -math.inf, dtype=dtypes.float32, device=q.device).triu(valid_end - T_real + 1)
   return q.float().scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)
@@ -83,11 +88,12 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
 def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor, start_pos:Tensor|None=None) -> Tensor:
   assert q.dtype == k.dtype == dtypes.float32, "recurrent Q/K must be float32"
   assert state.uop.contiguous_view_offset() is not None, "recurrent state must be contiguous"
-  srcs: list[Tensor|UOp] = [s if s.uop.op is Ops.AFTER else s.contiguous() for s in (q, k, v, beta, alpha, state)]
-  if start_pos is not None: srcs.append(start_pos.uop)
-  out = _slop("gated_delta_prefill_op", *srcs)
-  assert out is not None
-  return out
+  B, H, T, K, V = int(q.shape[0]), int(q.shape[1]), int(q.shape[2]), int(q.shape[3]), int(v.shape[3])
+  kern = unwrap(slopkernels.get(f"amd_gated_delta_k{K}_{'ak' if alpha.ndim == 4 else 'a1'}")).specialize(batch=B, heads=H, tokens=T, v_tiles=V // 4)
+  out = UOp.alloc((B, H, T, V), dtypes.float32, device=q.device)
+  srcs = [s.uop if s.uop.op is Ops.AFTER else s.contiguous().uop for s in (q, k, v, beta, alpha, state)]
+  sp = start_pos.uop if start_pos is not None else UOp.const(1)
+  return Tensor(out.after(kern.call(out, *srcs, (q * k).sum(-1).contiguous().uop, sp)))
 
 def reference_weight(packed:np.ndarray, ggml_type:int, *shape:int) -> np.ndarray:
   from gguf import GGMLQuantizationType, dequantize
@@ -207,13 +213,13 @@ class TestQ8Quantize(unittest.TestCase):
   def test_mxfp4_linear_wmma(self): self._test_quant_linear(39, 136, in_features=288, token_counts=(16,))
 
   def test_wmma_linear_symbolic(self):
-    with patch("slopkernels.src.ops._q8_quantize_uops", side_effect=AssertionError("expected WMMA")):
+    with patch("tinygrad.llm.model._q8_quantize", side_effect=AssertionError("expected WMMA")):
       # Symbolic padding is shared; cover the Q4/Q5, generic/grid, and IQ4 LUT WMMA kernel families.
       for typ in (Q4_K, IQ3_S, IQ4_XS):
         self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=16, token_counts=(17,), bias=True, symbolic=True)
 
   def test_mixed_quant_linear_wmma_tiles(self):
-    with patch("slopkernels.src.ops._q8_quantize_uops", side_effect=AssertionError("expected WMMA")):
+    with patch("tinygrad.llm.model._q8_quantize", side_effect=AssertionError("expected WMMA")):
       # Token tiling is independent of the format. Q6 also covers odd super-block counts; the basis test covers every format.
       for typ, tokens, in_features in ((Q8_0, 64, 256), (Q6_K, 32, 768), (IQ1_S, 16, 256)):
         self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=in_features, out_features=64, token_counts=(tokens,), bias=True)
@@ -429,10 +435,7 @@ class TestQ8Quantize(unittest.TestCase):
     rng = np.random.default_rng(0)
     hc.fn.weight, hc.base["weight"] = Tensor(rng.normal(0, 0.1, (24, 128)).astype(np.float16)), Tensor(rng.normal(size=24).astype(np.float16))
     hc.scale["weight"], xs = Tensor(rng.uniform(0.5, 1.5, 3).astype(np.float16)), Tensor(rng.normal(size=(1, 3, 4, 32)).astype(np.float32))
-    self.assertIsNotNone(slopkernels.get("hc_coeffs_op", target=_slop_target(xs.device),
-                                         srcs=(((3, 24), (3, 24), None, "f32"), ((3, 128), (3, 128), None, "f32"),
-                                               ((24,), (24,), None, "f16"), ((3,), (3,), None, "f16")),
-                                         count=4, iters=3, eps=1e-6, norm_eps=1e-6))
+    self.assertIsNotNone(slopkernels.get("amd_hc_coeffs_f16_f16"))
     got = hc(xs, lambda h: (h * 0.5, None))[0].numpy()
     hc.fn.weight, hc.base["weight"], hc.scale["weight"] = (t.to("CPU") for t in (hc.fn.weight, hc.base["weight"], hc.scale["weight"]))
     np.testing.assert_allclose(got, hc(xs.to("CPU"), lambda h: (h * 0.5, None))[0].numpy(), rtol=1e-4, atol=1e-5)
