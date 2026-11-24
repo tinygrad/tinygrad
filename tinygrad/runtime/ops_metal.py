@@ -2,7 +2,7 @@ from __future__ import annotations
 import subprocess, pathlib, struct, ctypes, tempfile, functools, platform, weakref, threading, array, sys
 from tinygrad.helpers import to_mv, round_up, cache_dir, unwrap, prod, dedup, to_tuple
 import tinygrad.runtime.support.objc as objc
-from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface
+from tinygrad.device import Device, Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface
 from tinygrad.renderer import Compiler, CompileError, TinyELF
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.cstyle import MetalRenderer
@@ -99,19 +99,20 @@ def mtl_msg(obj:UOp, sel:str, *args:UOp|int, out:UOp|None=None) -> UOp:
   words = [UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in (*args, 0, 0, 0)][:3] # the extra args are ignored
   return mtl_send(obj.index(0).load(), UOp(Ops.BINARY, arg=sel.encode() + b"\0").index(0), *words, out=out)
 
+def gpu_tier_for(arch:str) -> int: return int(arch[5:]) if arch.startswith("Apple") else 0
+
 @uopfunc
 def mtl_run(icb:UOp, value:UOp, first:UOp|int, count:int, last:bool, q:MetalQueue, stamp:UOp|None=None) -> UOp:
-  cmds, hdr, devs, dev = q.cmds, round_up(q.nbytes, 8) + 24, q.devs, q.dev # a command buffer for the commands [first, first + count)
+  cmds, hdr, devs = q.cmds, round_up(q.nbytes, 8) + 24, q.devs # a command buffer for the commands [first, first + count)
   cb, enc = [UOp.alloc((1,), dtypes.uint64, 0, device=devs[0], name=t) for t in ("mtl_cb", "mtl_enc")]
   fence, event = [mtl_handle(devs, h).index(0).load() for h in ("fence", "event")]
   c = mtl_msg(mtl_handle(devs, "queue"), "commandBuffer", out=cb)
   c = mtl_msg(cb.after(c), "computeCommandEncoder", out=enc)
   c = mtl_msg(enc.after(c), "waitForFence:", fence)
-  if dev.residency.value is None: # no residency set: declare the buffers
-    c = mtl_msg(enc.after(c), "useResources:count:usage:", *[mtl_handle(devs, h).index(0).load() for h in ("resources", "count")], 3)
 
-  # before apple9 the encoder must use the pipelines
-  if not dev.arch.startswith("Apple") or int(dev.arch[5:]) < 9:
+  # before apple9 the encoder must declare the buffers and use the pipelines
+  if gpu_tier_for(Device.target_for(devs[0]).arch) < 9:
+    c = mtl_msg(enc.after(c), "useResources:count:usage:", *[mtl_handle(devs, h).index(0).load() for h in ("resources", "count")], 3)
     r = UOp.range(len(dedup(c.src[:2] for c in cmds)), next(UOp.unique_num), dtype=dtypes.uint64)
     c = mtl_msg(enc.after(c), "setComputePipelineState:", icb.bitcast(dtypes.uint64).index(hdr // 8 + 1 + len(cmds) + r).load())
     c = mtl_msg(enc.after(c), "dispatchThreadgroups:threadsPerThreadgroup:", icb.index(hdr - 24), icb.index(hdr - 24)).end(r)
@@ -127,7 +128,6 @@ def mtl_run(icb:UOp, value:UOp, first:UOp|int, count:int, last:bool, q:MetalQueu
   return mtl_msg(cb.after(c), "commit").sink()
 
 class MetalQueue(HWQueue):
-  dev:MetalDevice
   def __init__(self, submit:UOp):
     super().__init__(submit)
     self.rows, self.cmds, self.sizes, self.stamps, self.nbytes = list[tuple[int, UOp]](), list[UOp](), list[tuple[int, int]](), list[UOp](), 0
@@ -207,11 +207,6 @@ class MetalDevice(Compiled):
     self.queue = self.sysdevice.newCommandQueueWithMaxCommandBufferCount(1024)
     if self.queue.value is None: raise RuntimeError("Cannot allocate a new command queue")
 
-    # try to use residency set when supported
-    rsd = ctypes.cast(objc.msg("new", clsmeth=True)(metal.MTLResidencySetDescriptor), metal.MTLResidencySetDescriptor)
-    self.residency = self.sysdevice.newResidencySetWithDescriptor_error(rsd, None)
-    if self.residency.value is not None: self.queue.addResidencySet(self.residency)
-
     self.resources, self.table = list[int](), (ctypes.c_uint64 * 1)()
     self.event, self.fence = self.sysdevice.newSharedEvent(), self.sysdevice.newFence()
     self.icbs = weakref.WeakKeyDictionary[Buffer, tuple]()
@@ -220,6 +215,13 @@ class MetalDevice(Compiled):
     def check_family(f): return next(filter(self.sysdevice.supportsFamily, reversed([v for v, nm in metal.enum_MTLGPUFamily.items() if f in nm])), 0)
     super().__init__(device, MetalAllocator(self), None,
                      arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:], props={"copy": 0})
+
+    # apple9 keeps the buffers resident in a residency set
+    if gpu_tier_for(self.arch) >= 9:
+      rsd = ctypes.cast(objc.msg("new", clsmeth=True)(metal.MTLResidencySetDescriptor), metal.MTLResidencySetDescriptor)
+      self.residency = self.sysdevice.newResidencySetWithDescriptor_error(rsd, None)
+      if self.residency.value is None: raise RuntimeError(f"{self.arch} needs a residency set")
+      self.queue.addResidencySet(self.residency)
     MetalDevice.opened.add(self)
     Compiled.link_bufs |= {to_name(self.device, "handles"): lambda b: self.handles}
     Compiled.pm_link += PatternMatcher([
@@ -231,7 +233,7 @@ class MetalDevice(Compiled):
     return Buffer(self.host, len(vals) * 8, initial_value=struct.pack(f"{len(vals)}Q", *vals))
 
   def mark_resident(self, mtl:metal.MTLBuffer, add:bool):
-    if self.residency.value is not None:
+    if gpu_tier_for(self.arch) >= 9:
       objc.msg("addAllocation:" if add else "removeAllocation:", None, [objc.id_])(self.residency, mtl)
       return objc.msg("commit", None)(self.residency)
 
