@@ -362,7 +362,7 @@ class Compiled:
   pm_encode:PatternMatcher
   pm_lower:PatternMatcher
   pm_link:PatternMatcher
-  link_bufs:dict[str, Buffer|int|Callable[..., Buffer]] = {}
+  link_bufs:dict[str, Buffer|Callable[..., Buffer]] = {}
 
   def __init__(self, device:str, allocator:Allocator, runtime:type[Program[Self]]|None, arch=None, props:dict[str, Any]|None=None):
     self.device, self.allocator, self.runtime_t = device, allocator, runtime

@@ -880,8 +880,9 @@ class AMDDevice(Compiled):
     queues = {"COMPUTE:0": lambda: self.compute_queue} | {f"COPY:{i}": functools.partial(self.sdma_queue, i) for i in range(8)}
     names = ("ring", "write_ptr", "doorbell", "put_value")
     Compiled.link_bufs |= {to_name(self.device, n, q): lambda b, n=n, f=f: getattr(f(), n) for q, f in queues.items() for n in names}
-    Compiled.link_bufs |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel()),
-                           to_name(self.device, "scratch_waves"): self.scratch_waves}
+    Compiled.link_bufs |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel())}
+    Compiled.pm_link += PatternMatcher([(UPat(Ops.EXTERN, name="e"), lambda e, d=self:
+      UOp.const(d.scratch_waves, e.dtype) if e.arg.name == to_name(d.device, "scratch_waves") else None)])
     if self.is_usb: setup_usb_rules(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
