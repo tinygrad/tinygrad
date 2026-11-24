@@ -302,6 +302,8 @@ SCACHE = ContextVar("SCACHE", 1)
 USE_ATOMICS = ContextVar("USE_ATOMICS", 0)
 # don't allow broadcast
 DISALLOW_BROADCAST = ContextVar("DISALLOW_BROADCAST", 0)
+# set to 0 to disable optional slopkernels
+SLOP = ContextVar("SLOP", 1)
 
 # **************** global state Counters ****************
 
