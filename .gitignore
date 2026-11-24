@@ -70,3 +70,6 @@ dagre/
 graphlib/
 uv.lock
 pi_session_window0.jsonl
+tinygrad/llm/kernels/*.uir
+tinygrad/llm/kernels/.lock
+slopkernels/uir/

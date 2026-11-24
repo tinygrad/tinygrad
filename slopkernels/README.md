@@ -96,10 +96,10 @@ DEV="MOCK+AMD" python3 -m pytest slopkernels/test/ -n12
 
 ## Layout
 
-- `__init__.py` — narrow public API (`list_kernels`, `get`, `compile_all`) and kernel registry
+- `__init__.py` — narrow public API (`list_kernels`, `get`, `compile_all`, `generate_all`) and kernel registry
 - `precompiled.py` — lazy manifest loader and manifest-only UIR lookup (`get(..., precompiled=True)`)
 - `trace.py` — offline-only template tracing utilities (never imported by runtime code)
-- `manifest.json` + `uir/` — 47 canonical pregenerated `gfx1201` UIR artifacts with declared byte sizes and SHA-256 hashes
+- `manifest.json` — declared sizes & SHA-256 hashes for the 47 canonical `gfx1201` UIR artifacts (actual `.uir` files are gitignored and generated lazily on disk)
 - `__main__.py` — offline CLI compiler and manifest generator/verifier (`python3 -m slopkernels --manifest MANIFEST`)
 - `bench.py` — cold-DRAM GPU LLM op benchmark suite (runs in CI on `7900xtx` & `9060xt`)
 - `src/` — pure `UOp` kernel and logical-op builders (`amd.py`, `amd_gguf.py`, `extra.py`, `ops.py`)

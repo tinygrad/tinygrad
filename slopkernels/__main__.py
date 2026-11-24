@@ -10,8 +10,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import pathlib
 import sys
+import threading
 from typing import Any
 
 from slopkernels import _REGISTRY, _canonical_spec, compile_all, list_kernels
@@ -54,7 +56,14 @@ def write_manifest(manifest_path:pathlib.Path, out_dir:pathlib.Path|None=None, t
   return manifest
 
 
-def verify_manifest(manifest_path:pathlib.Path, out_dir:pathlib.Path|None=None) -> tuple[int, int]:
+def _atomic_write(dst:pathlib.Path, raw:bytes) -> None:
+  dst.parent.mkdir(parents=True, exist_ok=True)
+  tmp = dst.with_name(f".{dst.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+  tmp.write_bytes(raw)
+  os.replace(tmp, dst)
+
+
+def verify_manifest(manifest_path:pathlib.Path, out_dir:pathlib.Path|None=None, materialize:bool=False) -> tuple[int, int]:
   """Regenerate every artifact in `manifest_path` and verify its declared byte size and SHA-256 hash."""
   manifest_path = manifest_path.resolve()
   data = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -62,7 +71,7 @@ def verify_manifest(manifest_path:pathlib.Path, out_dir:pathlib.Path|None=None) 
     raise ValueError(f"invalid manifest format: {manifest_path}")
   if data.get("kind") == "llm_kernels":
     from slopkernels.export_llm import verify_llm_manifest
-    return verify_llm_manifest(manifest_path)
+    return verify_llm_manifest(manifest_path, materialize=materialize)
   total_bytes = 0
   for entry in data["artifacts"]:
     name = entry["name"]
@@ -83,9 +92,11 @@ def verify_manifest(manifest_path:pathlib.Path, out_dir:pathlib.Path|None=None) 
     if digest != entry["sha256"]:
       raise ValueError(f"{name}: regenerated sha256 {digest} != manifest sha256 {entry['sha256']}")
     if out_dir is not None:
-      dst = out_dir.resolve() / entry["path"]
-      dst.parent.mkdir(parents=True, exist_ok=True)
-      dst.write_bytes(raw)
+      _atomic_write(out_dir.resolve() / entry["path"], raw)
+    elif materialize:
+      on_disk = manifest_path.parent / entry["path"]
+      if not on_disk.is_file() or len(on_disk.read_bytes()) != size or hashlib.sha256(on_disk.read_bytes()).hexdigest() != digest:
+        _atomic_write(on_disk, raw)
     else:
       on_disk = manifest_path.parent / entry["path"]
       if on_disk.is_file():
@@ -101,6 +112,7 @@ if __name__ == "__main__":
   ap.add_argument("out_dir", nargs="?")
   ap.add_argument("--target", default=None, help="AMD target arch (e.g. gfx1100, gfx1201)")
   ap.add_argument("--manifest", default=None, help="Regenerate every artifact in MANIFEST and verify size + SHA-256")
+  ap.add_argument("--materialize", action="store_true", help="With --manifest, write verified .uir files to disk")
   ap.add_argument("--write-manifest", default=None, help="Generate canonical UIR artifacts and write MANIFEST")
   ap.add_argument("--export-llm", default=None, help="Export templated LLM UIR kernels + manifest.json to directory")
   args = ap.parse_args()
@@ -116,11 +128,12 @@ if __name__ == "__main__":
     print(f"wrote {len(m['artifacts'])} artifacts ({total_bytes:,} bytes) -> {args.write_manifest}")
   elif args.manifest:
     try:
-      count, total_bytes = verify_manifest(pathlib.Path(args.manifest), out_dir=out_path)
+      count, total_bytes = verify_manifest(pathlib.Path(args.manifest), out_dir=out_path, materialize=args.materialize)
     except Exception as e:
       print(f"manifest verification failed: {e}", file=sys.stderr)
       sys.exit(1)
-    print(f"verified {count} artifacts ({total_bytes:,} bytes) from {args.manifest}")
+    verb = "materialized" if args.materialize else "verified"
+    print(f"{verb} {count} artifacts ({total_bytes:,} bytes) from {args.manifest}")
   else:
     uirs = compile_all(args.out_dir, target=args.target)
     total_lines = sum(u.count("\n") + 1 for u in uirs.values())

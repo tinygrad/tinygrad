@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
+import threading
 from dataclasses import replace
 from typing import Any
 
@@ -470,7 +472,14 @@ def export_llm_kernels(out_dir:pathlib.Path) -> dict[str, Any]:
   return manifest
 
 
-def verify_llm_manifest(manifest_path:pathlib.Path) -> tuple[int, int]:
+def _atomic_write(dst:pathlib.Path, raw:bytes) -> None:
+  dst.parent.mkdir(parents=True, exist_ok=True)
+  tmp = dst.with_name(f".{dst.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+  tmp.write_bytes(raw)
+  os.replace(tmp, dst)
+
+
+def verify_llm_manifest(manifest_path:pathlib.Path, materialize:bool=False) -> tuple[int, int]:
   """Regenerate every artifact in an `llm_kernels` manifest and verify declared size + SHA-256."""
   manifest_path = manifest_path.resolve()
   data = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -484,9 +493,39 @@ def verify_llm_manifest(manifest_path:pathlib.Path) -> tuple[int, int]:
     if size != entry["size"]: raise ValueError(f"{name}: regenerated size {size} != manifest size {entry['size']}")
     if digest != entry["sha256"]: raise ValueError(f"{name}: regenerated sha256 {digest} != manifest sha256 {entry['sha256']}")
     on_disk = manifest_path.parent / entry["path"]
-    if on_disk.is_file():
+    if materialize:
+      if not on_disk.is_file() or len(on_disk.read_bytes()) != size or hashlib.sha256(on_disk.read_bytes()).hexdigest() != digest:
+        _atomic_write(on_disk, raw)
+    elif on_disk.is_file():
       disk_raw = on_disk.read_bytes()
       if len(disk_raw) != entry["size"] or hashlib.sha256(disk_raw).hexdigest() != entry["sha256"]:
         raise ValueError(f"{name}: on-disk artifact {on_disk} does not match manifest size/sha256")
     total_bytes += size
   return len(data["artifacts"]), total_bytes
+
+
+DEFAULT_LLM_KERNELS_DIR = pathlib.Path(__file__).resolve().parents[1] / "tinygrad" / "llm" / "kernels"
+
+
+def generate_all() -> None:
+  """Generate all templated LLM `.uir` files on disk in `tinygrad/llm/kernels/` (race-safe, verified against manifest.json)."""
+  manifest_path = DEFAULT_LLM_KERNELS_DIR / "manifest.json"
+  if not manifest_path.is_file(): return
+  def _already_valid() -> bool:
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for e in data.get("artifacts", []):
+      p = DEFAULT_LLM_KERNELS_DIR / e["path"]
+      if not p.is_file(): return False
+      raw = p.read_bytes()
+      if len(raw) != e["size"] or hashlib.sha256(raw).hexdigest() != e["sha256"]: return False
+    return True
+  def _run() -> None:
+    if not _already_valid(): verify_llm_manifest(manifest_path, materialize=True)
+  try:
+    import fcntl
+    with open(DEFAULT_LLM_KERNELS_DIR / ".lock", "w") as lf:
+      fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+      try: _run()
+      finally: fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+  except ImportError:
+    _run()

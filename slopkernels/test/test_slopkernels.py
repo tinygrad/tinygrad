@@ -57,9 +57,9 @@ def _amd_target() -> tuple[int, ...]|None:
 
 class TestSlopKernelsUIR(unittest.TestCase):
   def test_narrow_api_and_purity_boundary(self):
-    """slopkernels exposes only {get, list_kernels, compile_all}, uses pure primitive specs only,
-    contains pure UOp builders only (zero Tensor/Buffer/Device/getenv), and tinygrad only imports top-level slopkernels."""
-    self.assertEqual(set(slopkernels.__all__), {"get", "list_kernels", "compile_all"})
+    """slopkernels exposes only {get, list_kernels, compile_all, generate_all}, uses pure primitive specs only,
+    contains pure UOp builders only (zero Tensor/Buffer/Device/getenv), and tinygrad only imports `generate_all` in tinygrad/llm/kernels."""
+    self.assertEqual(set(slopkernels.__all__), {"get", "list_kernels", "compile_all", "generate_all"})
     for name, (_, sample) in slopkernels._REGISTRY.items():
       for k, v in sample.items():
         self.assertTrue(_is_pure_spec(v), f"{name}.{k} must be pure primitive/tuple, got {type(v).__name__}")
@@ -91,19 +91,32 @@ class TestSlopKernelsUIR(unittest.TestCase):
     for p in [pkg_dir / "__init__.py", pkg_dir / "precompiled.py", *(pkg_dir / "src").glob("*.py")]:
       self.assertFalse(_imports_module(p, "slopkernels.trace"), f"runtime file {p.name} must not import slopkernels.trace")
     self.assertFalse(_imports_module(pkg_dir / "precompiled.py", "slopkernels.src"), "precompiled.py must not import builders")
-    # 2. Verify tinygrad has ZERO imports of slopkernels anywhere (uses pregenerated UIRs in tinygrad/llm/kernels/)
+    # 2. Verify tinygrad ONLY imports the zero-arg `generate_all` helper from slopkernels in tinygrad/llm/kernels/__init__.py
     import tinygrad
     root = pathlib.Path(tinygrad.__file__).resolve().parent
     self.assertFalse((root / "llm" / "slop.py").exists(), "tinygrad/llm/slop.py should not exist")
+    kernels_init = (root / "llm" / "kernels" / "__init__.py").resolve()
     for p in root.rglob("*.py"):
       txt = p.read_text()
       if "slopkernels" not in txt: continue
-      self.assertFalse(_imports_module(p, "slopkernels"), f"{p} must not import slopkernels")
-    # 3. Verify no exported .uir file contains ANSI color escape codes
+      if p.resolve() == kernels_init:
+        tree = ast.parse(txt)
+        slop_imports = [n for n in ast.walk(tree) if (isinstance(n, ast.ImportFrom) and n.module and n.module.startswith("slopkernels"))
+                        or (isinstance(n, ast.Import) and any(a.name.startswith("slopkernels") for a in n.names))]
+        self.assertEqual(len(slop_imports), 1)
+        imp = slop_imports[0]
+        self.assertIsInstance(imp, ast.ImportFrom)
+        assert isinstance(imp, ast.ImportFrom)
+        self.assertEqual((imp.module, [a.name for a in imp.names]), ("slopkernels", ["generate_all"]))
+      else:
+        self.assertFalse(_imports_module(p, "slopkernels"), f"{p} must not import slopkernels")
+    # 3. Verify no .uir files are tracked in git and any materialized .uir files contain zero ANSI color escape codes
+    tracked_uir = subprocess.run(["git", "ls-files", "*.uir"], cwd=str(root.parent), capture_output=True, text=True, check=False)
+    if tracked_uir.returncode == 0:
+      self.assertEqual(tracked_uir.stdout.strip(), "", f".uir files must be gitignored, found tracked:\n{tracked_uir.stdout}")
     for uir_dir in (pkg_dir / "uir", root / "llm" / "kernels"):
-      uir_files = list(uir_dir.glob("*.uir"))
-      self.assertGreater(len(uir_files), 0, f"expected .uir files in {uir_dir}")
-      for uf in uir_files:
+      if not uir_dir.is_dir(): continue
+      for uf in uir_dir.glob("*.uir"):
         self.assertNotIn("\x1b", uf.read_text(encoding="utf-8"), f"ANSI color escape found in {uf}")
 
   def test_compile_all_offline_to_uir(self):
@@ -501,15 +514,29 @@ class TestSlopKernelsUIR(unittest.TestCase):
     from slopkernels import precompiled
 
     # 1. Verify lazy loading in a fresh interpreter (importing slopkernels does NOT load manifest.json)
+    #    and verify on-the-fly on-disk generation when .uir files are deleted (both tinygrad/llm/kernels and slopkernels/uir)
     env = {**os.environ, "DEV": "NULL"}
     code = (
       "import slopkernels; from slopkernels import precompiled; "
       "assert not precompiled.is_loaded(), 'manifest loaded eagerly on import'; "
       "u = slopkernels.get('f16_gemv', in_features=128, out_features=64, tokens=1, precompiled=True); "
-      "assert u is not None and precompiled.is_loaded(), 'manifest should load lazily on first precompiled get'"
+      "assert u is not None and '\\x1b' not in u and precompiled.is_loaded(), 'manifest should load lazily on first precompiled get'"
     )
     proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=False)
     self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+
+    # Verify tinygrad.llm.kernels.load() generates all 156 .uir files on disk lazily when missing (and color-free)
+    from tinygrad.llm import kernels as llm_kernels
+    llm_dir = pathlib.Path(llm_kernels.__file__).resolve().parent
+    sample_uir = llm_dir / "rdna4_gemm_iq4_xs_f16.uir"
+    if sample_uir.is_file(): sample_uir.unlink()
+    llm_kernels.load.cache_clear()
+    u_iq4 = llm_kernels.load("rdna4_gemm_iq4_xs_f16")
+    self.assertIsNotNone(u_iq4)
+    self.assertTrue(sample_uir.is_file(), "load() must materialize missing .uir files on disk")
+    self.assertEqual(len(list(llm_dir.glob("*.uir"))), 156)
+    self.assertNotIn("\x1b", sample_uir.read_text(encoding="utf-8"))
+    self.assertIsNone(llm_kernels.load("nonexistent_llm_kernel"))
 
     # 2. Compute expected canonical gfx1201 UIRs, then block EVERY builder in _REGISTRY
     expected = slopkernels.compile_all(target="gfx1201")

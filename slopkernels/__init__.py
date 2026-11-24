@@ -546,4 +546,9 @@ def compile_all(out_dir:str|pathlib.Path|None=None, target:str|tuple[int, ...]|N
     if dst is not None: (dst / f"{name}.uir").write_text(uir + "\n")
   return out
 
-__all__ = ["compile_all", "get", "list_kernels"]
+def generate_all() -> None:
+  """Generate all pregenerated templated LLM `.uir` files on disk in `tinygrad/llm/kernels/`."""
+  from slopkernels.export_llm import generate_all as _generate_all
+  _generate_all()
+
+__all__ = ["compile_all", "generate_all", "get", "list_kernels"]

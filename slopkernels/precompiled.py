@@ -10,7 +10,10 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import os
 import pathlib
+import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Any
 
@@ -123,8 +126,31 @@ def load_manifest(manifest_path:str|pathlib.Path|None=None) -> ManifestIndex|Non
   return idx
 
 
+def _materialize_manifest(manifest_path:pathlib.Path, artifact_path:pathlib.Path) -> None:
+  """Materialize all `.uir` files declared in `manifest_path` onto disk (race-safe across processes)."""
+  repo_root = pathlib.Path(__file__).resolve().parents[1]
+  env = {**os.environ, "DEV": "NULL", "PYTHONPATH": str(repo_root) + (os.pathsep + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else "")}
+  lock_path = artifact_path.parent / ".lock"
+  lock_path.parent.mkdir(parents=True, exist_ok=True)
+  def _run() -> None:
+    proc = subprocess.run([sys.executable, "-m", "slopkernels", "--manifest", str(manifest_path), "--materialize"],
+                          env=env, capture_output=True, text=True, check=False)
+    if proc.returncode != 0: raise RuntimeError(f"failed to materialize {manifest_path}: {proc.stderr or proc.stdout}")
+  try:
+    import fcntl
+    with open(lock_path, "w") as lf:
+      fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+      try:
+        if not artifact_path.is_file(): _run()
+      finally:
+        fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+  except ImportError:
+    if not artifact_path.is_file(): _run()
+
+
 @functools.cache
-def _read_artifact_text(artifact_path:pathlib.Path, expected_size:int, expected_sha256:str) -> str:
+def _read_artifact_text(manifest_path:pathlib.Path, artifact_path:pathlib.Path, expected_size:int, expected_sha256:str) -> str:
+  if not artifact_path.is_file(): _materialize_manifest(manifest_path, artifact_path)
   raw = artifact_path.read_bytes()
   if len(raw) != expected_size:
     raise ValueError(f"precompiled UIR size mismatch for {artifact_path}: got {len(raw)}, expected {expected_size}")
@@ -135,25 +161,26 @@ def _read_artifact_text(artifact_path:pathlib.Path, expected_size:int, expected_
 
 
 @functools.cache
-def _read_template_uop(artifact_path:pathlib.Path, expected_size:int, expected_sha256:str) -> UOp:
-  return parse_uir(_read_artifact_text(artifact_path, expected_size, expected_sha256))
+def _read_template_uop(manifest_path:pathlib.Path, artifact_path:pathlib.Path, expected_size:int, expected_sha256:str) -> UOp:
+  return parse_uir(_read_artifact_text(manifest_path, artifact_path, expected_size, expected_sha256))
 
 
 def lookup(name:str, spec:dict[str, Any], *, manifest_path:str|pathlib.Path|None=None) -> str|None:
   """Look up a precompiled UIR artifact for `(name, spec)` in the manifest. Returns None on a miss."""
-  idx = load_manifest(manifest_path)
+  mpath = pathlib.Path(manifest_path or DEFAULT_MANIFEST).resolve()
+  idx = load_manifest(mpath)
   if idx is None: return None
   norm = _canonical_spec(spec)
   # 1. Exact concrete hit
   if (entry := idx.concrete.get((name, _freeze_spec(norm)))) is not None:
-    return _read_artifact_text(idx.manifest_dir / entry.path, entry.size, entry.sha256)
+    return _read_artifact_text(mpath, idx.manifest_dir / entry.path, entry.size, entry.sha256)
   # 2. Templated artifact hit: match all structural keys, specialize template scalar keys
   for entry in idx.templated.get(name, ()):
     expected_keys = set(entry.spec) | set(entry.templates)
     if set(norm) != expected_keys: continue
     if any(_freeze(norm[k]) != _freeze(entry.spec[k]) for k in entry.spec if k not in entry.templates): continue
     tvals = {k: norm[k] for k in entry.templates}
-    tmpl_uop = _read_template_uop(idx.manifest_dir / entry.path, entry.size, entry.sha256)
+    tmpl_uop = _read_template_uop(mpath, idx.manifest_dir / entry.path, entry.size, entry.sha256)
     try: specialized = tmpl_uop.specialize(**tvals)
     except (ValueError, TypeError): continue
     return render_uir(specialized, color=False)

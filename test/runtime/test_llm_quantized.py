@@ -126,17 +126,17 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     linear = Linear(256, 16, bias=False)
     linear.weight = ggml_data_to_tensor(raw, 16 * 256, 8).reshape(16, 256)
     x = rng.normal(size=(2, 256)).astype(np.float32)
-    with patch("tinygrad.llm.model._llm_kernel_dispatch", return_value=None):
+    with patch("tinygrad.llm.model._load_kernel", return_value=None):
       np.testing.assert_allclose(linear(Tensor(x)).numpy(), x @ weight.T, rtol=1e-4, atol=1e-4)
 
   def test_slop_provider_error_falls_back(self):
     from unittest.mock import patch
-    from tinygrad.llm.model import _slop
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("AMD custom kernels required")
-    w = Tensor.ones(64, 128, dtype=dtypes.float16).contiguous().realize()
+    linear = Linear(128, 64, bias=False)
+    linear.weight = Tensor.ones(64, 128, dtype=dtypes.float16).contiguous().realize()
     x = Tensor.ones(1, 128, dtype=dtypes.float32).contiguous().realize()
-    with patch("tinygrad.llm.model._llm_kernel_dispatch", side_effect=TypeError("bad spec")):
-      self.assertIsNone(_slop("dense_linear", w, x))
+    with patch("tinygrad.llm.model._load_kernel", side_effect=TypeError("bad spec")):
+      np.testing.assert_allclose(linear(x).numpy(), np.full((1, 64), 128.0, dtype=np.float32), rtol=1e-4, atol=1e-4)
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
   def test_quant_linear_fallback(self):

@@ -264,8 +264,7 @@ pm_implicit_barriers = PatternMatcher([
 
 def assert_no_templates(ast:UOp):
   if ast.has_templates:
-    names = ", ".join(sorted(dedup(t.arg.name for t in ast.templates())))
-    raise RuntimeError(f"unresolved template parameter(s) at codegen boundary: {names}")
+    raise RuntimeError(f"unresolved template parameter(s) at codegen boundary: {', '.join(sorted(dedup(t.arg.name for t in ast.templates())))}")
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   assert_no_templates(ast)

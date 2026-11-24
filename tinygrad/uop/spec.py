@@ -151,19 +151,15 @@ spec_tensor = PatternMatcher([
    and (buf.arg.device is None or (buf.addrspace is AddrSpace.GLOBAL and is_device(buf.arg.device)))
    and valid_device_range(buf.arg.device, buf.src[1:])),
 
-  # a Template is a named scalar int/float PARAM with slot=-1, AddrSpace.TEMPLATE, no device, no bound val
-  (UPat(Ops.PARAM, name="buf"), lambda buf:
-   buf.arg.slot == -1 and isinstance(buf.arg.name, str) and len(buf.arg.name) > 0 and buf.arg.device is None and buf.arg.val is None
-   and buf.src == (UOp(Ops.STACK),) and (dtypes.is_int(buf.dtype) or dtypes.is_float(buf.dtype))
-   if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.TEMPLATE else None),
-  # PARAM/ALLOC may carry an exact symbolic template size expression before specialization
-  (UPat(Ops.PARAM, src=(UPat(),), name="x"), lambda x:
-   isinstance(x.arg, ParamArg) and x.src[0]._shape == () and dtypes.is_int(x.src[0].dtype) if x.src[0].has_templates else None),
-  (UPat(Ops.ALLOC, src=(UPat(),), allow_any_len=True, name="buf"), lambda buf:
-   isinstance(buf.arg, ParamArg) and buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)
-   and buf.arg.buffer is None and buf.src[0]._shape == () and dtypes.is_int(buf.src[0].dtype)
-   and (buf.arg.device is None or (buf.addrspace is AddrSpace.GLOBAL and is_device(buf.arg.device)))
-   and valid_device_range(buf.arg.device, buf.src[1:]) if buf.src[0].has_templates else None),
+  # Templates and template-sized PARAM/ALLOC before specialization
+  (UPat(Ops.PARAM, name="b"), lambda b: b.arg.slot == -1 and isinstance(b.arg.name, str) and bool(b.arg.name) and b.arg.device is None
+   and b.arg.val is None and b.src == (UOp(Ops.STACK),) and (dtypes.is_int(b.dtype) or dtypes.is_float(b.dtype))
+   if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.TEMPLATE else None),
+  (UPat((Ops.PARAM, Ops.ALLOC), src=(UPat(),), allow_any_len=True, name="b"), lambda b:
+   isinstance(b.arg, ParamArg) and b.src[0]._shape == () and dtypes.is_int(b.src[0].dtype)
+   and (b.op is Ops.PARAM or (b.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) and b.arg.buffer is None
+   and (b.arg.device is None or (b.addrspace is AddrSpace.GLOBAL and is_device(b.arg.device))) and valid_device_range(b.arg.device, b.src[1:])))
+   if b.src[0].has_templates else None),
 
   # a Variable is a scalar ALU PARAM with a value range and no device
   (UPat(Ops.PARAM, src=(UPat(Ops.STACK, src=()),), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
