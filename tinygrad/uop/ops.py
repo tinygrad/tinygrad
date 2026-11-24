@@ -131,9 +131,11 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
          Ops.REWRITE_ERROR | Ops.PYLITERAL:
       # always void
       return dtypes.void
-    case Ops.CALL | Ops.NATIVE:
+    case Ops.CALL:
       # a call has the dtype of its body, void for opaque bodies
       return src[0].dtype
+    case Ops.NATIVE:
+      return src[0].dtype if src else dtypes.void
     case Ops.INDEX:
       # an image access is always float, no matter the storage dtype
       # TODO: should there be a CAST so src[0].dtype just work?
@@ -370,8 +372,11 @@ class UOp(Mixin, metaclass=UOpMetaClass):
 
       # passthrough ops
       case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
-           Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END | Ops.CALL | Ops.NATIVE:
+           Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END | Ops.CALL:
         return self.src[0]._shape
+
+      case Ops.NATIVE:
+        return self.src[0].shape if self.src else ()
 
       case Ops.BITCAST:
         ps = self.src[0]._shape
