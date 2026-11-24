@@ -865,18 +865,17 @@ class Transformer:
         'ssm_conv1d_v.weight', 'ssm_dt.bias', 'ssm_a', 'ssm_beta.weight', 'ssm_f_b.weight', 'ssm_g.weight', 'ssm_g_b.weight', 'attn_gate.weight')})
       shard_map = {name: rules[k] for name in entries if (k:=re.sub(r"^blk\.\d+\.", "", name)) in rules}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
-    ep = any(shape[-1] % (shard*_GGML_QUANT.get(typ, (1,))[0]) for k,(_,shape,typ) in entries.items() if 'ffn_down_exps.' in k)
+    ep = any(shape[-1] % (shard*_GGML_QUANT.get(typ, (1,))[0]) for k,(_,shape,typ) in entries.items() if k.endswith('ffn_down_exps.weight'))
     state_dict = gguf_shard(entries, devices, {k: 0 if ep and '_exps.' in k else v for k,v in shard_map.items()}, repeats)
 
+    # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
+    if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
     for k in [k for k in state_dict if k.endswith('.scale')]:
       w = k.removesuffix('scale')+'weight'
       state_dict[w] = state_dict[w] * state_dict.pop(k).reshape(-1, *(1,)*(state_dict[w].ndim-1))
 
     # all float state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) and dtypes.is_float(v.dtype) else v for k,v in state_dict.items()}
-
-    # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
-    if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
 
     hc = HCConfig(kv[f'{arch}.hyper_connection.count'], kv.get(f'{arch}.hyper_connection.sinkhorn_iterations', 0),
                   kv.get(f'{arch}.hyper_connection.epsilon', 0.0),
