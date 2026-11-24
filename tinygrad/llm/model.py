@@ -27,7 +27,12 @@ def _slop_target_cached(device:str|tuple[str, ...]|None) -> tuple[int, ...]|None
     return tuple(int(x) for x in t) if t is not None and isinstance(Device[dev].renderer, HIPRenderer) else None
 
 def _slop_target(device:str|tuple[str, ...]|None) -> tuple[int, ...]|None:
-  return _slop_target_cached(device) if SLOP else None
+  if not SLOP or (t:=_slop_target_cached(device)) is None: return None
+  try:
+    from slopkernels import API_VERSION as slop_api_version
+    if slop_api_version != _SLOP_API_VERSION: return None
+  except Exception: return None
+  return t
 
 def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool: return _slop_target(device) is not None
 
@@ -137,7 +142,6 @@ class ExpertWeights:
                           w_axis=self.weight.uop.axis, ndev=int(self.weight.shape[0]) // int(self.weight.uop.shard_shape[0]))) is not None \
             and not isinstance(T, int):
           slop = slop[..., :T, :, :]
-      assert self.weight.uop.axis != 0 or (slop is not None and not hasattr(self, 'bias')), "split experts need the moe kernel"
       ret = slop if slop is not None else (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
     if self.scale is not None: ret = ret * self.scale[sel].unsqueeze(-1)
     return ret if not hasattr(self, 'bias') else ret + self.bias[sel]
