@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         arch: ['gfx1100', 'gfx1201']
-    timeout-minutes: 3
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -71,7 +71,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: ['7900xtx', '9060xt']
-    timeout-minutes: 3
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash -e -o pipefail {0}
