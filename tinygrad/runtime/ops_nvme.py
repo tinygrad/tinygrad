@@ -90,7 +90,9 @@ class NVMEAllocator(Allocator['NVMEDevice']):
   def __init__(self, dev:NVMEDevice):
     super().__init__(dev)
     self.prp_tables:dict[int, Buffer] = {}
-  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage: return BufferStorage(0)
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
+    if size > self.dev.nvme.size: raise RuntimeError(f"{self.dev.device} holds {self.dev.nvme.size} bytes, not {size}")
+    return BufferStorage(0)
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
   def _map(self, buf:Buffer) -> BufferStorage:
     iface = getattr(Device[buf.device], "iface", None)
@@ -109,8 +111,7 @@ class NVMEDevice(Compiled):
   def __init__(self, device:str):
     self.iface = self._select_iface(device)
     self.nvme = cast(NVMEDev, self.iface.dev_impl)
-    super().__init__(device, NVMEAllocator(self), None,
-                     props={"max_xfer": self.nvme.max_xfer, "lba_shift": self.nvme.lba_shift, "size": self.nvme.size})
+    super().__init__(device, NVMEAllocator(self), None, props={"max_xfer": self.nvme.max_xfer, "lba_shift": self.nvme.lba_shift})
   def synchronize(self, timeout:int|None=None): pass
 
 # *****************
@@ -126,8 +127,7 @@ def nvme_queue(drive:str, gpu:str, queue:str) -> dict[str, Buffer]:
 
 def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[tuple]]: # builds the commands for all reads from one drive on one gpu queue
   drive, gpu, qn = to_tuple(get_call_arg_uops(calls[0])[1].device)[0], queue.device, queue.arg.name
-  t = Device.target_for(drive)
-  max_xfer, lba_shift, size = t.get("max_xfer", 128 << 10), t.get("lba_shift", 9), int(t.opts["size"])
+  max_xfer, lba_shift = (t:=Device.target_for(drive)).get("max_xfer", 128 << 10), t.get("lba_shift", 9)
   Compiled.link_bufs |= {to_name(drive, gpu, qn, n): lambda b, n=n: nvme_queue(drive, gpu, qn)[n] for n in ("sq", "cq", "seq", "sq_db", "cq_db")}
   def mem(name:str, size:int, dtype=dtypes.uint8) -> UOp: return UOp.extern((size,), dtype, drive, to_name(gpu, qn, name))
   sq, cq, entries = mem("sq", 0x1000).getaddr(gpu), mem("cq", 0x1000).getaddr(gpu), NVMEQueue.entries
@@ -142,7 +142,7 @@ def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[tuple]]: # builds the c
     n = start + off
     (dst, src), (full, rem) = get_call_arg_uops(call), divmod(get_call_arg_uops(call)[1].nbytes(), max_xfer)
     (dbase, doff), soff = unwrap_view(dst), unwrap_view(src)[1]
-    assert doff % 0x1000 == 0 and (soff | src.nbytes()) % (1 << lba_shift) == 0 and soff + src.nbytes() <= size, \
+    assert doff % 0x1000 == 0 and (soff | src.nbytes()) % (1 << lba_shift) == 0, \
       f"{drive} reads whole blocks of {1 << lba_shift} bytes into page aligned memory, not {src.nbytes()} bytes at {soff} to {doff}"
     prps, lba0 = dbase.getaddr(drive) + doff // 0x1000 * 16, src.getaddr(drive) >> lba_shift
     def done(end:UOp|int) -> list[UOp]: # completes the read's commands before end: waits for the last one's cqe, then rings the cq doorbell
