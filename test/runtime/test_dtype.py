@@ -280,6 +280,9 @@ class TestFloatDType(_DTypePairs, TestDType):
   def test_float_to_uint(self):
     _test_op(lambda: Tensor([-0.9, -0.3, 1.2], dtype=dtypes.float32).cast(dtypes.uint32), dtypes.uint32,
              [0, 0, 1])
+  def test_float_to_uint_upper_half(self):
+    self.assertEqual(Tensor([3e9]).cast(dtypes.uint32).tolist(), [3000000000])
+    self.assertEqual(Tensor([2.**63+2.**40]).cast(dtypes.uint64).tolist(), [2**63+2**40])
 
 @unittest.skipUnless(dtypes.double in supported_dtypes, f"no double on {Device.DEFAULT}")
 class TestDoubleDType(TestDType):
