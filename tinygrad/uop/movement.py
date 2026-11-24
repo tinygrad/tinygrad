@@ -9,7 +9,7 @@ mop_cleanup = PatternMatcher([
   # merge adjacent RESHAPES
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
   # remove noop RESHAPEs
-  (UPat(Ops.RESHAPE, src=(UPat(name="x2"), UPat()), name="x"), lambda x,x2: x2 if x2._shape is not None and x2.shape == x.shape else None),
+  (UPat(Ops.RESHAPE, src=(UPat(name="x2"), UPat()), name="x"), lambda x,x2: x2 if x2.shape == x.shape else None),
   # merge PERMUTEs
   (UPat(Ops.PERMUTE, src=(UPat(Ops.PERMUTE, name="x2"), UPat()), name="x"),
    lambda x,x2: x2.src[0].permute(tuple(x2.marg[i] for i in x.marg))),
