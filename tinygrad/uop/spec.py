@@ -82,7 +82,7 @@ spec_shared = PatternMatcher([
   (UPat(Ops.END, src=(UPat(dtype=dtypes.void),), allow_any_len=True, name="x"),
    lambda x: x.arg is None and all(u.op is Ops.RANGE and dtypes.is_int(u.dtype) for u in x.src[1:])),
   # Execute body (discarding its value), then repeat the unbounded loop while the scalar condition is true.
-  (UPat(Ops.BACKEDGE, dtypes.void, src=(UPat(), UPat(Ops.RANGE, dtypes.void), UPat(dtype=dtypes.bool)), name="x"),
+  (UPat(Ops.BACKEDGE, dtypes.void, src=(UPat(), UPat(Ops.RANGE, dtypes.void), UPat()), name="x"),
    lambda x: x.arg is None and x.src[2].shape == () and not x.src[2].base.is_invalid),
 
   # PARAM/BUFFER carry a size CONST or an empty STACK for scalars
@@ -235,11 +235,6 @@ spec_full = PatternMatcher([
   # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
   (UPat(Ops.END, src=(UPat(dtype=dtypes.void), UPat()), allow_any_len=True, name="x"),
    lambda x: x.arg is None and all(dtypes.is_int(u.dtype) for u in x.src[1:])),
-
-  # ISA branches carry a flag-producing instruction and a backend jump opcode until linearization.
-  (UPat(Ops.IF, src=(UPat(Ops.CALL, dtypes.void).or_after(),), name="x"), lambda x: x.arg is not None),
-  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(Ops.RANGE, dtypes.void), UPat(Ops.CALL, dtypes.void).or_after()), name="x"),
-   lambda x: x.arg is not None),
 
   # allow any AFTER
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
