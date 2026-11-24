@@ -90,9 +90,7 @@ class NVMEAllocator(Allocator['NVMEDevice']):
   def __init__(self, dev:NVMEDevice):
     super().__init__(dev)
     self.prp_tables:dict[int, Buffer] = {}
-  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
-    if size > self.dev.nvme.size: raise RuntimeError(f"{self.dev.device} holds {self.dev.nvme.size} bytes, not {size}")
-    return BufferStorage(0)
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage: return BufferStorage(0)
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
   def _map(self, buf:Buffer) -> BufferStorage:
     iface = getattr(Device[buf.device], "iface", None)
