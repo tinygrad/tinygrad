@@ -6,7 +6,7 @@ from tinygrad.device import Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
-from tinygrad.uop.ops import UOp
+from tinygrad.uop.ops import Ops, UOp
 
 # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
 def _ggml_iq_grid(device: str|tuple[str, ...]|None, grid: tuple[int, ...], grid_shape: tuple[int, int]) -> Tensor:
@@ -290,3 +290,30 @@ def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:t
     local = decoded.reshape(n, *shape[:axis], shape[axis]//n, *shape[axis+1:])
     return local.permute(*range(1, axis+1), 0, *range(axis+1, local.ndim)).reshape(shape)
   return {name: decode(name, shape, typ) for name, (_, shape, typ) in entries.items()}
+
+Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K = 8, 10, 11, 12, 13, 14
+IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS, MXFP4 = 16, 17, 18, 19, 20, 21, 22, 23, 39
+QUANT_SIZES = {t: 256 // b * s for t, (b, s) in _GGML_QUANT.items()
+               if t in (Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS, MXFP4)}
+HALFWORD_QUANTS = (Q8_0, Q6_K, Q2_K, Q3_K, IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S)
+SMALL_BLOCK_QUANTS = {Q8_0: 17, IQ4_NL: 9, MXFP4: 17}
+
+def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
+  """(ggml type, packed words) if `decoded` is the lazy dequantization of packed ggml weights, rows of in_features."""
+  if in_features % 32: return None
+  packed_sizes = {t: decoded.numel() * sz // 256 for t, sz in QUANT_SIZES.items() if in_features % 256 == 0 or t in SMALL_BLOCK_QUANTS}
+  ops = (Ops.UNSHARD,) if decoded.uop.axis is not None else (Ops.SHRINK, Ops.BUFFER)
+  raw = next((u for u in decoded.uop.toposort() if u.op in ops and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes.values()), None)
+  if raw is None: return None
+  def unwrapped(u:UOp) -> UOp:
+    while u.op in (Ops.RESHAPE, Ops.STAGE) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)) or \
+      (u.op is Ops.PERMUTE and (kept:=[a for a in u.marg if u.src[0].shard_shape[a] != 1]) == sorted(kept)): u = u.src[0]
+    return u
+  for ggml_type, size in packed_sizes.items():
+    if size != prod(raw.shape): continue
+    expected = ggml_data_to_tensor(Tensor(raw).flatten(), int(decoded.numel()), ggml_type)
+    if unwrapped(decoded.uop).key == unwrapped(expected.uop).key: break
+  else: return None
+  word_dtype = dtypes.uint8 if ggml_type == MXFP4 else dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32
+  if (off:=raw.contiguous_view_offset()) is None or off % word_dtype.itemsize or raw.buf_uop.dtype != dtypes.uint8: return None
+  return ggml_type, Tensor(raw).flatten().bitcast(word_dtype).contiguous()

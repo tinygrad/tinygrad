@@ -1,17 +1,144 @@
 from __future__ import annotations
-import enum, functools, itertools, json, math, pathlib, re
+import enum, functools, importlib.util, itertools, json, math, pathlib, re
 from dataclasses import dataclass, replace
 from typing import Callable
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device
-from tinygrad.llm.kernels.amd import Linear, ExpertWeights, fp8_matmul, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
-from tinygrad.llm.kernels.amd import hc_coeffs, hc_coeffs_supported
-from tinygrad.llm.gguf import gguf_parse, gguf_shard, GGUFPackedTable, _GGML_QUANT
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device, Context
+from tinygrad.llm.gguf import gguf_parse, gguf_shard, GGUFPackedTable, _GGML_QUANT, find_packed
 from tinygrad.llm.hf import hf_load
-from tinygrad.uop.ops import resolve, smax, ssimplify
-from tinygrad.helpers import unwrap, round_up, ceildiv, get_child
+from tinygrad.renderer.cstyle import HIPRenderer
+from tinygrad.uop.ops import Ops, resolve, smax, ssimplify
+from tinygrad.uop.uir import parse_uir
+from tinygrad.helpers import SLOP, unwrap, round_up, ceildiv, get_child
 
 StartPos = tuple[int|UOp, ...]
 Sublayer = Callable[[Tensor], tuple[Tensor, Tensor|None]]
+
+# ***** optional slopkernels UIR speedups (falls back to pure tinygrad when absent) *****
+
+_slop_warned = False
+
+@functools.cache
+def _slop_target_cached(device:str|tuple[str, ...]|None) -> tuple[int, ...]|None:
+  if importlib.util.find_spec("slopkernels") is None: return None
+  dev = device[0] if isinstance(device, tuple) else device
+  if dev is None or dev.split(":")[0] != "AMD": return None
+  with Context(ALLOW_DEVICE_USAGE=1):
+    t = getattr(Device[dev], "target", None)
+    return tuple(int(x) for x in t) if t is not None and isinstance(Device[dev].renderer, HIPRenderer) else None
+
+def _slop_target(device:str|tuple[str, ...]|None) -> tuple[int, ...]|None:
+  return _slop_target_cached(device) if SLOP else None
+
+def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool: return _slop_target(device) is not None
+
+def _slop_desc(s:Tensor|UOp) -> tuple:
+  # Pure, hashable descriptor for slopkernels.get(..., srcs=...):
+  #   Tensor -> (shape, max_shard_shape, axis, dtype_name), symbolic UOp -> (vmin, vmax)
+  if isinstance(s, Tensor):
+    return (tuple(int(d) for d in s.shape), tuple(int(d) for d in s.uop.max_shard_shape), s.uop.axis, s.dtype.name)
+  return (int((u:=s.unbind_all()[0]).vmin), int(u.vmax))
+
+@functools.cache
+def _slop_uop(name:str, target:tuple[int, ...], device:str|tuple[str, ...], srcs:tuple, **attrs) -> UOp|None:
+  global _slop_warned
+  try:
+    from slopkernels import get as slop_uir
+    return None if (uir:=slop_uir(name, target=target, device=device, srcs=srcs, **attrs)) is None else parse_uir(uir)
+  except Exception as e:
+    if not _slop_warned:
+      _slop_warned = True
+      print(f"warning: slopkernels disabled for {name!r} ({type(e).__name__}: {e}); falling back to pure tinygrad")
+    return None
+
+def _slop(name:str, *srcs:Tensor|UOp, **attrs) -> Tensor|None:
+  if (target:=_slop_target(dev:=srcs[0].device)) is None: return None
+  if (u:=_slop_uop(name, target, dev, tuple(_slop_desc(s) for s in srcs), **attrs)) is None: return None
+  return Tensor(u.call_with_output(*(s.uop if isinstance(s, Tensor) else s for s in srcs)))
+
+# ***** linear & MoE layers (pure tinygrad math + optional slopkernels speedup) *****
+
+def fp8_matmul(x:Tensor, weight:Tensor, scale:Tensor, block_size:tuple[int, int]) -> Tensor:
+  block_n, block_k = block_size
+  n, k = weight.shape[-2:]
+  x_blocks = x.float().pad((0, -k % block_k)).unflatten(-1, (-1, block_k)).rearrange("... t g k -> ... g t k")
+  w_blocks = weight.pad((0, -k % block_k)).unflatten(-1, (-1, block_k)).rearrange("... n g k -> ... g k n")
+  limit = 224.0 if weight.dtype == dtypes.fp8e4m3fnuz else 448.0
+  x_scale = x_blocks.abs().max(-1, keepdim=True).clamp(min_=1e-10) / limit
+  partials = ((x_blocks / x_scale).clamp(-limit, limit).cast(weight.dtype).contiguous().float() @ w_blocks.float()).contiguous()
+  return (partials * x_scale * scale.transpose(-1, -2).repeat_interleave(block_n, -1)[..., None, :n]).sum(-3).cast(x.dtype)
+
+def _unview_float(t:Tensor) -> Tensor:
+  # Widening half/bfloat16 to float32 is exact; preserve casts that round or change values.
+  uop = t.uop
+  while uop.op is Ops.CAST and uop.dtype == dtypes.float32 and uop.src[0].dtype in (dtypes.half, dtypes.bfloat16): uop = uop.src[0]
+  return Tensor(uop).reshape(t.shape)
+
+class Linear(nn.Linear):
+  ggml_type:int|None = None
+  packed:Tensor|None = None
+  use_custom_quant = True
+  shard_axis:int|None = None
+  weight_scale_inv:Tensor|None = None
+  weight_block_size:tuple[int, int] = (128, 128)
+  def __init__(self, in_features:int, out_features:int, bias=True, groups:int=1):
+    super().__init__(in_features, out_features, bias)
+    self.in_features, self.out_features, self.groups = in_features, out_features, groups
+  def set_quantized(self, decoded:Tensor):
+    self.weight = decoded
+    if (found:=find_packed(decoded, self.in_features)) is None: return
+    self.ggml_type, self.packed, self.shard_axis = found[0], found[1], decoded.uop.axis
+  def __call__(self, x:Tensor) -> Tensor:
+    if self.weight_scale_inv is not None:
+      out = fp8_matmul(x, self.weight, self.weight_scale_inv, self.weight_block_size)
+      return out + self.bias if self.bias is not None else out
+    if self.use_custom_quant and _slop_target((self.packed if self.packed is not None else self.weight).device) is not None:
+      if self.ggml_type is None: self.set_quantized(self.weight)
+      if self.ggml_type is not None and self.packed is not None:
+        xp = x if isinstance(x.numel(), int) else x.pad_to(x.max_shape)
+        if (slop := _slop("quant_linear", self.packed, xp, ggml_type=self.ggml_type, in_features=self.in_features,
+                          out_features=self.out_features, groups=self.groups, w_axis=self.shard_axis)) is not None:
+          if not isinstance(x.numel(), int): slop = slop.shrink(tuple((0, s) for s in (*x.shape[:-1], self.out_features // self.groups)))
+          return slop if self.bias is None else slop + (self.bias.reshape(self.groups, -1) if self.groups > 1 else self.bias)
+      elif self.groups == 1 and isinstance(x.numel(), int):
+        w, xi = _unview_float(self.weight).contiguous(), _unview_float(x).contiguous()
+        b = (_unview_float(self.bias).contiguous(),) if self.bias is not None else ()
+        if (slop := _slop("dense_linear", w, xi, *b)) is not None: return slop
+    if self.groups > 1:
+      out = (x.unsqueeze(-2) @ self.weight.reshape(self.groups, -1, self.in_features).transpose(-1, -2)).squeeze(-2)
+      return out if self.bias is None else out + self.bias.reshape(self.groups, -1)
+    return super().__call__(x)
+
+class ExpertWeights:
+  """Like Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
+  ggml_type:int|None = None
+  use_custom_quant = True
+  scale:Tensor|None = None
+  weight_scale_inv:Tensor|None = None
+  weight_block_size:tuple[int, int] = (128, 128)
+  def __init__(self, num_experts:int, in_features:int, out_features:int, bias:bool=False):
+    self.in_features, self.weight = in_features, Tensor.zeros(num_experts, out_features, in_features)
+    if bias: self.bias = Tensor.zeros(num_experts, out_features)
+  def set_quantized(self):
+    if (found:=find_packed(self.weight, self.in_features)) is not None: self.ggml_type, self.packed = found
+  def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
+    if self.weight_scale_inv is not None:
+      ret = fp8_matmul(x.unsqueeze(-2), self.weight[sel], self.weight_scale_inv[sel], self.weight_block_size).squeeze(-2)
+    else:
+      if self.ggml_type is None and self.use_custom_quant and _slop_target(self.weight.device) is not None:
+        self.set_quantized()
+        if self.ggml_type is None: self.use_custom_quant = False
+      slop: Tensor|None = None
+      if self.ggml_type is not None and self.use_custom_quant and not (self.weight.uop.axis == 0 and hasattr(self, 'bias')):
+        sp, xp = (sel, x) if isinstance(T:=sel.shape[1], int) else (sel.pad_to(sel.max_shape, value=-1), x.pad_to(x.max_shape))
+        if (slop := _slop("moe_linear", self.packed, sp.cast(dtypes.int32).flatten(), xp.contiguous(), ggml_type=self.ggml_type,
+                          sel_shape=tuple(int(s) for s in sp.shape[-3:]), in_features=self.in_features,
+                          local_out=int(self.weight.uop.max_shard_shape[1]), global_out=int(self.weight.shape[1]),
+                          w_axis=self.weight.uop.axis, ndev=int(self.weight.shape[0]) // int(self.weight.uop.shard_shape[0]))) is not None \
+            and not isinstance(T, int):
+          slop = slop[..., :T, :, :]
+      ret = slop if slop is not None else (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
+    if self.scale is not None: ret = ret * self.scale[sel].unsqueeze(-1)
+    return ret if not hasattr(self, 'bias') else ret + self.bias[sel]
 
 class ExpertGating(enum.IntEnum):
   SOFTMAX = 1
@@ -264,10 +391,16 @@ class HyperConnection:
   def __call__(self, xs:Tensor, sublayer:Sublayer, pre:Tensor|None=None) -> tuple[Tensor, Tensor|None, Tensor|None]:
     """mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb"""
     if self.pre_delayed and pre is None: pre = Tensor([1.0] + [0.0] * (self.count - 1), device=xs.device)
-    if hc_coeffs_supported(flat:=xs.flatten(2), self.count):
-      own, post, comb = hc_coeffs(self.fn, flat, self.base["weight"], self.scale["weight"], self.count, self.iters, self.eps, self.norm_eps)
-      out, aux = sublayer(weighted_sum(xs, own if pre is None else pre))
-      return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs), aux, None if pre is None else own
+    flat = xs.flatten(2)
+    if _slop_target(xs.device) is not None and xs.dtype == dtypes.float32 and xs.uop.axis is None:
+      mix = self.fn(fp:=flat.pad_to(flat.max_shape).reshape(-1, flat.shape[-1]))
+      if (co := _slop("hc_coeffs_op", mix.float().contiguous(), fp.float().contiguous(), self.base["weight"].contiguous(),
+                      self.scale["weight"].contiguous(), count=self.count, iters=self.iters, eps=self.eps, norm_eps=self.norm_eps)) is not None:
+        co = co.reshape(*flat.max_shape[:-1], -1).shrink_to(*flat.shape[:-1], None)
+        c = self.count
+        own, post, comb = co[..., :c], co[..., c:2*c], co[..., 2*c:].reshape(*flat.shape[:-1], c, c)
+        out, aux = sublayer(weighted_sum(xs, own if pre is None else pre))
+        return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs), aux, None if pre is None else own
     (own, mix), base, scale = self.pre(xs), self.base["weight"], self.scale["weight"]
     post = (mix[..., self.count:2*self.count] * scale[1] + base[self.count:2*self.count]).sigmoid() * 2
     comb = (mix[..., 2*self.count:] * scale[2] + base[2*self.count:]).reshape(*mix.shape[:-1], self.count, self.count).softmax(-1) + self.eps
@@ -435,11 +568,17 @@ class TransformerBlock(FFNBlock):
 
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
     assigned_kv = _update_cache(self.cache_kv.transpose(0, 1), Tensor.stack(k, v).transpose(0, 1), start_pos, 3)
-    # on RDNA3/4, hybrid models use custom flash attention kernels on the KV cache
-    if  idx_mask is None and amd_custom_kernels_supported(x.device) and self.config.ssm is not None and len(start_pos) == 1:
-      attn = flash_attention(q, assigned_kv.transpose(0, 1), start_pos[0]+T)
-      attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
-      return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
+    # optional slopkernels flash attention speedup on the KV cache
+    if idx_mask is None and self.config.ssm is not None and len(start_pos) == 1 and _slop_target(x.device) is not None:
+      kv, T_real, sp = assigned_kv.transpose(0, 1), q.shape[2], start_pos[0]
+      q_in = q if not isinstance(T_real, UOp) else q.pad_to((*q.shape[:2], q.max_shape[2], q.shape[3]))
+      sym_srcs = [s for s in (sp, T_real) if isinstance(s, UOp)]
+      if (attn := _slop("flash_attention_op", q_in.half(), kv, *sym_srcs,
+                        valid_kv_len=None if isinstance(sp, UOp) else int(sp),
+                        valid_kv_offset=T_real if isinstance(T_real, int) else 0,
+                        decode=resolve(T_real == 1, False))) is not None:
+        attn = (attn if not isinstance(T_real, UOp) else attn[:, :, :T_real]).transpose(1, 2).reshape(B, T, -1)
+        return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
     assigned_kv = _cache_prefix(assigned_kv, start_pos, T, 3).transpose(0, 1)
     k, v = assigned_kv[0], assigned_kv[1]
     mask = (idx_mask.repeat_interleave(self.config.n_heads // int(idx_mask.shape[1]), dim=1) if idx_mask is not None else
@@ -802,13 +941,14 @@ class GatedDeltaNetBlock(FFNBlock):
     alpha = log_alpha.transpose(1, 2).exp()  # per-channel decay for kda, per-head otherwise (B, H, T, K|1)
 
     # recurrent: scan over the (padded) tokens, updating the recurrent state. collect the per-step outputs
-    if self.head_k_dim % 32 == 0 and self.head_v_dim % 4 == 0 and amd_custom_kernels_supported(x.device):
-      # one fused kernel for the whole scan; it resets and updates the recurrent state in place (RDNA3/4)
-      state = Tensor(self.recurrent_state.uop.after(*conv_state_stores))  # carry the conv write into this graph
-      core = gated_delta_prefill(q, k, v, beta, alpha, state, Tensor(pos)).transpose(1, 2)
+    state_dep = Tensor(self.recurrent_state.uop.after(*conv_state_stores))
+    if q.uop.axis is None and state_dep.uop.axis is None and \
+        (core_slop := _slop("gated_delta_prefill_op", q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(),
+                            state_dep, *([pos] if isinstance(pos, UOp) else []),
+                            start_pos=None if isinstance(pos, UOp) else int(pos))) is not None:
+      core = core_slop.transpose(1, 2)
     else:
-      q, k, v, beta = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
-      alpha = alpha.unsqueeze(-2)
+      q, k, v, beta, alpha = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1), alpha.unsqueeze(-2)
       state = initial.where(0, self.recurrent_state.float())
       outs = []
       for t in range(T_pad):
@@ -920,7 +1060,9 @@ class Transformer:
       shard_map = {name: rules[k] for name in entries if (k:=re.sub(r"^blk\.\d+\.", "", name)) in rules}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
     ep = any(shape[-1] % (shard*_GGML_QUANT.get(typ, (1,))[0]) for k,(_,shape,typ) in entries.items() if 'ffn_down_exps.' in k)
-    state_dict = gguf_shard(entries, devices, {k: 0 if ep and '_exps.' in k else v for k,v in shard_map.items()}, repeats)
+    ep_axis = 0 if _slop_target(devices) is not None else None
+    state_dict = gguf_shard(entries, devices, {k: v for k, v in ((k, ep_axis if ep and '_exps.' in k else v) for k, v in shard_map.items())
+                                               if v is not None}, repeats)
 
     # all float state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) and dtypes.is_float(v.dtype) else v for k,v in state_dict.items()}
