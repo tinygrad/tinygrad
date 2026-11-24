@@ -145,18 +145,16 @@ def _quant_linear_wmma(out_features:int, in_features:int, ggml_type:int, tokens:
   nwords = raw_len if raw_len is not None else out_features * in_features * _gguf.QUANT_SIZES[ggml_type] // 256 // w_dt.itemsize
   o_shp = out_shape if out_shape is not None else (tokens, out_features)
   ps = [_p(0, o_shp, out_dtype), _p(1, (nwords,), w_dt), _p(2, x_shape or (tokens, in_features), "f16")]
-  vt = _sym(3, valid_tokens, "valid_tokens") if valid_tokens is not None else None
+  if ggml_type == _gguf.IQ4_XS: ps.append(_p(len(ps), (256,), "u32"))
+  elif ggml_type in (_gguf.IQ3_XXS, _gguf.IQ2_S): ps.append(_p(len(ps), (512 if ggml_type == _gguf.IQ3_XXS else 4096,), "u32"))
+  elif ggml_type in (_gguf.IQ2_XXS, _gguf.IQ2_XS, _gguf.IQ1_S, _gguf.IQ3_S): ps.append(_p(len(ps), (_iq_grid_len(ggml_type),), "u32"))
+  vt = _sym(len(ps), valid_tokens, "valid_tokens") if valid_tokens is not None else None
   if ggml_type == _gguf.IQ4_XS:
-    ps.append(_p(3, (256,), "u32"))
     return render_uir(_gguf._iq4_linear_f16_wmma_kernel(*ps, out_features=out_features, in_features=in_features,
                                                         kgroups=kgroups, lanes=lanes, valid_tokens=vt))
   if ggml_type in (_gguf.Q4_K, _gguf.Q5_K):
     return render_uir(_gguf._q5_linear_f16_wmma_kernel(*ps, out_features=out_features, in_features=in_features,
                                                        ggml_type=ggml_type, kgroups=kgroups, lanes=lanes, valid_tokens=vt))
-  if ggml_type in (_gguf.IQ3_XXS, _gguf.IQ2_S):
-    ps.append(_p(3, (512 if ggml_type == _gguf.IQ3_XXS else 4096,), "u32"))
-  elif ggml_type in (_gguf.IQ2_XXS, _gguf.IQ2_XS, _gguf.IQ1_S, _gguf.IQ3_S):
-    ps.append(_p(3, (_iq_grid_len(ggml_type),), "u32"))
   return render_uir(_gguf._quant_linear_f16_wmma_kernel(*ps, out_features=out_features, in_features=in_features,
                                                         ggml_type=ggml_type, kgroups=kgroups, lanes=lanes, valid_tokens=vt))
 
@@ -237,9 +235,17 @@ def _flash_attention(bh:int, m:int, d:int, b:int, h_kv:int, physical_n:int, *, v
     ps.extend([_p(len(ps), (bh, m, L), "f16"), _p(len(ps) + 1, (E, L), "f16")])
   if has_sink: ps.append(_p(len(ps), (bh, m), "f32"))
   if has_gate: ps.append(_p(len(ps), (b, m, h * d), "f16"))
-  vkl = _sym(len(ps), valid_kv_len, "valid_kv_len")
-  qs = _sym(len(ps) + 1, q_start, "q_start") if q_start is not None else None
-  vm = _sym(len(ps) + (2 if qs is not None else 1), valid_m, "valid_m") if valid_m is not None else None
+  slot = len(ps)
+  def next_sym(spec:int|tuple[int, int]|None, name:str) -> int|UOp|None:
+    nonlocal slot
+    if spec is None or isinstance(spec, int): return spec
+    u = _v(slot, spec[0], spec[1], name)
+    slot += 1
+    return u
+  vkl = next_sym(valid_kv_len, "valid_kv_len")
+  assert vkl is not None
+  qs = next_sym(q_start, "q_start")
+  vm = next_sym(valid_m, "valid_m")
   return render_uir(_amd._amd_flash_attention(*ps, valid_kv_len=vkl, q_start=qs, valid_m=vm, rdna4=rdna4, window=window,
                                               has_rel=rel_shape is not None, has_sink=has_sink, has_gate=has_gate, ring=ring))
 

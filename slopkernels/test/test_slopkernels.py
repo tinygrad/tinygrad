@@ -456,6 +456,29 @@ class TestSlopKernelsUIR(unittest.TestCase):
       got_gd = _call_op("gated_delta_prefill_op", tgt, dev, gd_q, gd_k, gd_v, gd_b, gd_a, gd_s, start_pos=sp).numpy()
       np.testing.assert_allclose(got_gd, np.stack(outs_ref, axis=2), rtol=2e-4, atol=2e-6)
       np.testing.assert_allclose(gd_s.numpy(), st_ref, rtol=2e-4, atol=2e-6)
+    # 6. Public kernel builder slot binding: IQ4_XS quant_linear_wmma with symbolic valid_tokens & flash_attention with const valid_kv_len
+    from tinygrad import UOp
+    iq_uir = slopkernels.get("quant_linear_wmma", out_features=64, in_features=256, ggml_type=23, tokens=32, valid_tokens=(1, 32))
+    assert iq_uir is not None
+    iq_params = {u.arg.slot: u.arg.name for u in parse_uir(iq_uir).toposort() if u.op is Ops.PARAM}
+    self.assertEqual(set(iq_params), {0, 1, 2, 3, 4})
+    self.assertEqual(iq_params[4], "valid_tokens")
+    if tgt[0] != 9:
+      fa_uir = slopkernels.get("flash_attention", bh=4, m=32, d=64, b=1, h_kv=2, physical_n=128,
+                               valid_kv_len=64, q_start=(0, 32), rdna4=tgt[0] == 12)
+      assert fa_uir is not None
+      fa_params = {u.arg.slot: u.arg.name for u in parse_uir(fa_uir).toposort() if u.op is Ops.PARAM}
+      self.assertEqual(set(fa_params), {0, 1, 2, 3})
+      self.assertEqual(fa_params[3], "q_start")
+      q_fa = Tensor(rng.normal(0, 0.2, (1, 4, 32, 64)).astype(np.float16)).realize()
+      kv_fa = Tensor(rng.normal(0, 0.2, (2, 1, 2, 128, 64)).astype(np.float16)).realize()
+      out_fa = Tensor.empty(4, 32, 64, dtype="float32")
+      call_fa = parse_uir(fa_uir).call(out_fa.uop, q_fa.reshape(4, 32, 64).uop, kv_fa.uop, UOp.variable("q_start", 0, 32).bind(32))
+      got_fa = Tensor(out_fa.uop.after(call_fa)).reshape(1, 4, 32, 64).numpy()
+      mask = Tensor.full((32, 64), float("-inf"), dtype=dtypes.float32).triu(64 - 32 + 1)
+      ref_fa = q_fa.float().scaled_dot_product_attention(kv_fa[0, :, :, :64].float(), kv_fa[1, :, :, :64].float(),
+                                                         attn_mask=mask, enable_gqa=True).numpy()
+      np.testing.assert_allclose(got_fa, ref_fa, rtol=5e-3, atol=5e-3)
 
 
 if __name__ == "__main__":
