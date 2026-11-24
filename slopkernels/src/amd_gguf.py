@@ -8,7 +8,7 @@ from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import unwrap
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 
-from slopkernels.src.amd import WMMA_ARG, _amd_load, _unbind, warp_reduce
+from slopkernels.src.amd import WMMA_ARG, _amd_load, warp_reduce
 
 GGML_BLOCK_SIZE, Q8_GROUP_SIZE = 256, 32
 Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K = 8, 10, 11, 12, 13, 14
@@ -176,12 +176,11 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
   return _iq_signed_word(grid[index*grid_words+i%grid_words].load(), signs >> (4*(i%2)))
 
 @functools.cache
-def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp, out_features:int|UOp, in_features:int|UOp, ggml_type:int,
-                         cdna:bool=False, group_rows:int|UOp=0) -> UOp:
+def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp, out_features:UOp, in_features:UOp, ggml_type:int,
+                         cdna:bool=False, group_rows:UOp) -> UOp:
   words = out_features * in_features * QUANT_SIZES[ggml_type] // GGML_BLOCK_SIZE // raw.dtype.itemsize
-  gate = ((lambda token, base: base + (group_rows > 0).where(token // group_rows.maximum(1) * words, 0)) if isinstance(group_rows, UOp)
-          else (lambda token, base: base + token // group_rows * words) if group_rows else None)
-  return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, cdna, gate)
+  return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, cdna,
+                            lambda token, base: base + (group_rows > 0).where(token // group_rows.maximum(1) * words, 0))
 
 def _quant_base(output:UOp, group:UOp, in_features:int|UOp, ggml_type:int, itemsize:int) -> UOp:
   if ggml_type == NVFP4: return (output*in_features//64 + (group//8)*4) * (36//itemsize)
@@ -321,13 +320,12 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
 
 @functools.cache
 def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *grids:UOp,
-                       out_features:int|UOp, in_features:int|UOp, ggml_type:int, x_share:int|UOp, cdna:bool=False, ndev:int|UOp=1) -> UOp:
+                       out_features:UOp, in_features:UOp, ggml_type:int, x_share:UOp, cdna:bool=False, ndev:UOp) -> UOp:
   expert_words = out_features * in_features * QUANT_SIZES[ggml_type] // 256 // raw.dtype.itemsize
   local_experts = raw.shape[0]//expert_words
   def expert(row:UOp) -> UOp: return sel[row].cast(dtypes.weakint) - UOp.range(ndev, 4, AxisType.DEVICE)*local_experts
   def gate(row:UOp, base:UOp) -> UOp:
-    base = base + expert(row).maximum(0).minimum(local_experts-1) * expert_words
-    return base.valid((expert(row) >= 0) & (expert(row) < local_experts)) if (isinstance(ndev, UOp) or ndev > 1) else base
+    return (base + expert(row).maximum(0).minimum(local_experts-1) * expert_words).valid((expert(row) >= 0) & (expert(row) < local_experts))
   return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, cdna, gate, lambda row: row // x_share, "moe_")
 
 def _load_afrag_f16(x:UOp, row:UOp, col0:UOp, ks:tuple[int|UOp, ...], kgroups:int) -> UOp:
@@ -353,23 +351,16 @@ def _iq_half_vals_f32(table:UOp, base_idx:UOp, s4:UOp, sc_f:UOp) -> tuple[UOp, U
 def _wmma_words(lane_group:UOp, kgroups:int) -> tuple[UOp|int, ...]:
   return tuple(range(4)) if kgroups == 1 else tuple(lane_group + kgroups*j for j in range(4//kgroups))
 
-def _wmma_layout(out:UOp, out_features:int|UOp, token_tile:int, output_tiles:int, lanes:int, valid_tokens:int|UOp|None=None,
-                 max_waves:int=2):
-  if isinstance(out_features, UOp): output_tiles, output_waves = 1, 1
-  else:
-    if out_features % (16*output_tiles): output_tiles = 1
-    output_waves = 4 if max_waves >= 4 and out_features % (64*output_tiles) == 0 else 2 if out_features % (32*output_tiles) == 0 else 1
-  n_tblocks = out.shape[0] // token_tile if valid_tokens is None else (_unbind(valid_tokens) + token_tile - 1) // token_tile
-  token_block = UOp.range(n_tblocks, 0, AxisType.GLOBAL)
-  output_block = UOp.range(out_features//(16*output_tiles*output_waves), 1, AxisType.GLOBAL)
+def _wmma_layout(out:UOp, out_features:UOp, lanes:int):
+  token_block, output_block = UOp.range(out.shape[0] // 16, 0, AxisType.GLOBAL), UOp.range(out_features // 16, 1, AxisType.GLOBAL)
   # lane is a hardware WARP range (like the flash kernel): the fragment math stays visible without being
   # range-split into nested loops, which would scramble the WMMA fragment layout
-  lane, wave = UOp.range(lanes, -1, axis_type=AxisType.WARP), UOp.range(output_waves, 3, axis_type=AxisType.LOCAL)
+  lane, wave = UOp.range(lanes, -1, axis_type=AxisType.WARP), UOp.range(1, 3, axis_type=AxisType.LOCAL)
   col, lane_group, rows = lane % 16, lane // 16, 256 // lanes
-  outputs = tuple((output_block*output_waves+wave)*(16*output_tiles) + tile*16 + col for tile in range(output_tiles))
-  inputs = tuple(token_block*token_tile + tile*16 + col for tile in range(token_tile//16))
-  tokens = tuple(tuple(token_block*token_tile + tile*16 + lane_group*rows + i for i in range(rows)) for tile in range(token_tile//16))
-  return output_waves, token_block, output_block, lane, wave, lane_group, outputs, inputs, tokens
+  outputs = (output_block * 16 + col,)
+  inputs = (token_block * 16 + col,)
+  tokens = (tuple(token_block * 16 + lane_group * rows + i for i in range(rows)),)
+  return 1, token_block, output_block, lane, wave, lane_group, outputs, inputs, tokens
 
 def _wmma_stores(out, outputs, tokens, accs, update, lane, wave, output_waves, kgroups):
   if kgroups > 1:
@@ -526,10 +517,8 @@ def _make_wmma_dequant(raw:UOp, ggml_type:int, word_indices:tuple[UOp|int, ...],
 
 @functools.cache
 def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
-                                  out_features:int|UOp, in_features:int|UOp, ggml_type:int, kgroups:int, lanes:int,
-                                  valid_tokens:int|UOp|None=None) -> UOp:
-  token_tile = 16 if isinstance(out.shape[0], UOp) else (64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16)
-  layout = _wmma_layout(out, out_features, token_tile, 1 if isinstance(out_features, UOp) else 2, lanes, valid_tokens=valid_tokens)
+                                  out_features:UOp, in_features:UOp, ggml_type:int, kgroups:int, lanes:int) -> UOp:
+  layout = _wmma_layout(out, out_features, lanes)
   output_waves, _, _, lane, wave, lane_group, _, _, _ = layout
   word_indices = _wmma_words(lane_group, kgroups)
   grid = None

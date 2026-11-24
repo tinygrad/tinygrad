@@ -15,7 +15,6 @@ Sublayer = Callable[[Tensor], tuple[Tensor, Tensor|None]]
 
 # ***** optional custom AMD UIR kernel speedups (falls back to pure tinygrad when disabled/unsupported) *****
 
-_kernel_warned = False
 _QUANT_NAMES = {8:"q8_0", 10:"q2_k", 11:"q3_k", 12:"q4_k", 13:"q5_k", 14:"q6", 16:"iq2_xxs", 17:"iq2_xs",
                 18:"iq3_xxs", 19:"iq1_s", 20:"iq4_nl", 21:"iq3_s", 22:"iq2_s", 23:"iq4_xs", 39:"mxfp4", 40:"nvfp4"}
 
@@ -41,13 +40,7 @@ def _load_kernel(name:str) -> UOp|None:
   except ImportError: return None
 
 def _get_kernel(name:str, **params:int|float) -> UOp|None:
-  global _kernel_warned
-  try: return None if (u := _load_kernel(name)) is None else u.specialize(**params)
-  except Exception as e:
-    if not _kernel_warned:
-      _kernel_warned = True
-      print(f"warning: custom kernel disabled for {name!r} ({type(e).__name__}: {e}); falling back to pure tinygrad")
-    return None
+  return None if (u := _load_kernel(name)) is None else u.specialize(**params)
 
 def _run_kernel(name:str, out_shape:tuple[int, ...], device:str|tuple[str, ...]|None,
                 *args:Tensor|UOp, axis:int|None=None, **params:int|float) -> Tensor|None:

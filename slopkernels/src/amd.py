@@ -41,58 +41,21 @@ def _amd_load(ptr:UOp, lanes:int|None=None, stream:bool=False) -> UOp:
 # ******** tiny dense fp16 gemv ********
 
 @functools.cache
-def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *rest:UOp, in_features:int|UOp, out_features:int|UOp, tokens:int|UOp,
-                         val_chunk:int|None=None) -> UOp:
-  bias: UOp|None = rest[0] if rest else None
-  # one wave per output row; tile all tokens in registers so w is loaded once across speculative verify batches
+def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *, in_features:UOp, out_features:UOp, tokens:UOp, val_chunk:int) -> UOp:
   lanes = WARP_SIZE
-  if val_chunk is None: val_chunk = 4 if in_features % (lanes * 4) == 0 else 2 if in_features % (lanes * 2) == 0 else 1
-  rows = 1 if isinstance(out_features, UOp) else math.gcd(out_features, 2 if out_features <= 128 else 4)
-  out_blk = UOp.range(out_features // rows, 0, AxisType.GLOBAL)
-  wave = UOp.range(rows, 3, AxisType.LOCAL)
+  out_row = UOp.range(out_features, 0, AxisType.GLOBAL)
   lane = UOp.range(lanes, 2, axis_type=AxisType.LOCAL)
-  out_row = out_blk * rows + wave
   per = in_features // (lanes * val_chunk)
-  assert isinstance(in_features, UOp) or per * lanes * val_chunk == in_features
-  w = w.reshape((out_features, per, lanes*val_chunk))
-  x = x.reshape((tokens, per, lanes*val_chunk))
+  w, x = w.reshape((out_features, per, lanes * val_chunk)), x.reshape((tokens, per, lanes * val_chunk))
   zero = UOp.const(0, dtypes.float32)
-  if isinstance(tokens, UOp):
-    t = UOp.range(tokens, 5, AxisType.GLOBAL)
-    acc = UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG)
-    acc = acc.after(acc[0].store(zero))
-    i_r = UOp.range(per, 4)
-    wv, xv = _vec_load(w[out_row, i_r, lane*val_chunk], val_chunk), _vec_load(x[t, i_r, lane*val_chunk], val_chunk)
-    upd = acc[0].store(acc.after(i_r)[0].load() + sum((wv[j] * xv[j] for j in range(val_chunk)), zero)).end(i_r)
-    total = warp_reduce(acc.after(upd)[0].load(), full_wave=True) + (bias[out_row].load().float() if bias is not None else zero)
-    return out[t, out_row.valid(lane.eq(0))].store(total.cast(out.dtype)).end(t, out_blk, wave, lane).sink(
-      arg=KernelInfo(name="linear_f16_gemv", opts_to_apply=()))
-  if tokens > 1 and per > 4:
-    accs_reg = tuple(UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG) for _ in range(tokens))
-    accs_reg = tuple(a.after(a[0].store(zero)) for a in accs_reg)
-    i_r = UOp.range(per, 4)
-    wv = _vec_load(w[out_row, i_r, lane*val_chunk], val_chunk)
-    st: list[UOp] = []
-    for t in range(tokens):
-      xv = _vec_load(x[t, i_r, lane*val_chunk], val_chunk)
-      dot = sum((wv[j] * xv[j] for j in range(val_chunk)), zero)
-      st.append(accs_reg[t][0].store(accs_reg[t].after(i_r)[0].load() + dot))
-    upd = UOp.group(*st).end(i_r)
-    accs = [accs_reg[t].after(upd)[0].load() for t in range(tokens)]
-  else:
-    accs = [zero] * tokens
-    for i in range(per):
-      wv = _vec_load(w[out_row, i, lane*val_chunk], val_chunk)
-      for t in range(tokens):
-        xv = _vec_load(x[t, i, lane*val_chunk], val_chunk)
-        for j in range(val_chunk): accs[t] = accs[t] + wv[j] * xv[j]
-  b_val = bias[out_row].load().float() if bias is not None else None
-  stores: list[UOp] = []
-  for t in range(tokens):
-    total = warp_reduce(accs[t], full_wave=True)
-    if b_val is not None: total = total + b_val
-    stores.append(out[t, out_row.valid(lane.eq(0))].store(total.cast(out.dtype)))
-  return UOp.group(*stores).end(out_blk, wave, lane).sink(
+  t = UOp.range(tokens, 5, AxisType.GLOBAL)
+  acc = UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG)
+  acc = acc.after(acc[0].store(zero))
+  i_r = UOp.range(per, 4)
+  wv, xv = _vec_load(w[out_row, i_r, lane * val_chunk], val_chunk), _vec_load(x[t, i_r, lane * val_chunk], val_chunk)
+  upd = acc[0].store(acc.after(i_r)[0].load() + sum((wv[j] * xv[j] for j in range(val_chunk)), zero)).end(i_r)
+  total = warp_reduce(acc.after(upd)[0].load(), full_wave=True)
+  return out[t, out_row.valid(lane.eq(0))].store(total.cast(out.dtype)).end(t, out_row, lane).sink(
     arg=KernelInfo(name="linear_f16_gemv", opts_to_apply=()))
 
 # ******** flash attention on the KV cache ********
@@ -538,13 +501,12 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
 
 # ******** mHC coefficients (fused Sinkhorn) ********
 
-def _hc_coeffs_kernel(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, count:int, iters:int|UOp, eps:float|UOp, norm_eps:float|UOp,
-                      features:int|UOp) -> UOp:
+def _hc_coeffs_kernel(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, count:int, iters:UOp, eps:UOp, norm_eps:UOp, features:UOp) -> UOp:
   assert count == 4, "the swizzles assume 4 streams"
   token, lane = UOp.range(out.shape[0], 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   groups = sq.shape[1]
   total = sum((sq[token, (lane + 32 * i).valid(lane + 32 * i < groups)].load() for i in range((groups + 31) // 32)), UOp.const(0.0, dtypes.float))
-  rms = (warp_reduce(total, full_wave=True) * (1.0 / (features.cast(dtypes.float32) if isinstance(features, UOp) else features)) + norm_eps).rsqrt()
+  rms = (warp_reduce(total, full_wave=True) * (1.0 / features.cast(dtypes.float32)) + norm_eps).rsqrt()
   is_comb = lane < count * count
   idx = is_comb.where(lane + 2 * count, (lane - count * count).minimum(2 * count - 1).maximum(0))
   which = is_comb.where(2, (lane < count * count + count).where(0, 1))
