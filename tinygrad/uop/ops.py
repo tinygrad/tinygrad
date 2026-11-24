@@ -1302,9 +1302,8 @@ def uopfunc(fn:Callable[..., UOp]) -> Callable[..., UOp]: # sugar for body.call(
   def outlined(*args, name:str|None=None, **kwargs) -> UOp:
     bound = inspect.signature(fn).bind(*args, **kwargs).arguments
     ins = {n: a for n, a in bound.items() if isinstance(a, UOp)}
-    f = graph_rewrite(fn(**(bound|{n: param(i, n, a) for i, (n, a) in enumerate(ins.items())})), pm_renumber_slots,
-                      init_ctx=CountCtx, walk=True)
-    assert f.op is Ops.SINK, f"uopfunc must return a SINK, got {f.op}"
+    f = graph_rewrite(fn(**(bound|{n: param(i, n, a) for i, (n, a) in enumerate(ins.items())})), pm_renumber_slots, init_ctx=CountCtx, walk=True)
+    assert f.op is Ops.SINK, f"expected a sink, got {f.op}"
     if f.arg is None: f = f.replace(arg=KernelInfo(name=name or fn.__name__, kernel=False))
     with Context(TRACK_MATCH_STATS=0): return f.call(*ins.values())
   return functools.wraps(fn)(outlined)

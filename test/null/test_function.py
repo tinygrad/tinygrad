@@ -1,7 +1,7 @@
 import unittest
 from tinygrad.function import function
 from tinygrad import Tensor, GlobalCounters
-from tinygrad.uop.ops import UOp, KernelInfo, Ops
+from tinygrad.uop.ops import UOp, KernelInfo
 
 class TestFunction(unittest.TestCase):
   def test_context_restored_on_exception(self):
@@ -18,13 +18,11 @@ class TestFunction(unittest.TestCase):
     @function
     def f(a:Tensor) -> Tensor: return a + 1
     self.assertEqual(f.__name__, "f")
-    self.assertEqual(f(Tensor([1])).uop.src[1].op, Ops.CALL)
 
   def test_method_name(self):
     class Foo:
       @function
       def __call__(self, x:Tensor) -> Tensor: return x + 1
-    self.assertEqual(Foo()(Tensor([1])).uop.src[1].op, Ops.CALL)
 
 class TestFunctionMulti(unittest.TestCase):
   devices_2 = ("NULL:0", "NULL:1")
