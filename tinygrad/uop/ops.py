@@ -121,12 +121,10 @@ def promo_dtype(src:tuple[UOp,...]) -> DType:
   dts = [x.dtype for x in src]
   return dts[0] if all_same(dts) else least_upper_dtype(*dts)
 
-# TODO: call should probably declare its return value elsewhere
 def call_return_value(body:UOp) -> UOp:
   if body.op is Ops.PROGRAM: body = body.src[0]
   if body.op is Ops.LINEAR: body = body.src[-1]
-  if body.op is not Ops.SINK: return body
-  return body.src[0] if body.src[0].dtype not in dtypes.weaks else body
+  return body.src[-1] if body.op is Ops.SINK else body
 
 def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   # here are the dtype production rules, total over all Ops
@@ -139,6 +137,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       # always void
       return dtypes.void
     case Ops.CALL:
+      # a call has the dtype of its body, void for opaque bodies
       return call_return_value(src[0]).dtype
     case Ops.NATIVE:
       return src[0].dtype if src else dtypes.void
