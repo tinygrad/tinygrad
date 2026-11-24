@@ -535,7 +535,7 @@ class Tensor(Mixin):
     """
     all_uops = self.uop.toposort()
     # backward fills .grad for every in-scope float tensor with a device
-    tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
+    tensors_need_grad: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and \
                                        t.uop in all_uops and t.is_floating_point() and t.device is not None]
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
@@ -559,7 +559,7 @@ class Tensor(Mixin):
     v_uop, v_bw = (v.uop, v.uop.backward_slice) if isinstance(v, Tensor) else (None, {})
     if self.uop.op_in_backward_slice_with_self(Ops.BUFFER, Ops.ALLOC):
       shared = self.uop.base if self.uop.base.is_realized else None
-      if any(self.uop in t.uop.backward_slice_with_self and t.uop.base is not shared for tref in all_tensors
+      if any(self.uop in t.uop.backward_slice_with_self and t.uop.base is not shared for tref in list(all_tensors)
              if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
         raise RuntimeError("can't setitem on a tensor with other uses")
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
