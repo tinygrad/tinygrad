@@ -32,7 +32,7 @@ class TestSymbolic(unittest.TestCase):
   def check_equal_z3(self, expr1, expr2):
     solver = z3.Solver()
     expr1, expr2 = uops_to_z3(solver, expr1, expr2)
-    self.assertEqual(solver.check(expr1 != expr2), z3.unsat, "simplified expression not equal to original")
+    self.assertEqual(solver.check(z3.simplify(expr1 != expr2)), z3.unsat, "simplified expression not equal to original")
 
   def helper_test_variable(self, v, n, m, s, test_z3:bool=True):
     v_simplified = graph_rewrite(v, sym, name="simplify symbolic uop")

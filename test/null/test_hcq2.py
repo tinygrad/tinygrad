@@ -188,6 +188,12 @@ class TestHCQ2Schedule(unittest.TestCase):
     self.assertTrue(all(c.body.op is Ops.PROGRAM for c in calls(b)))
     self.assertEqual(orders(b), {(0, 1)})
 
+  def test_copy_kernel_to_host_runs_on_source(self):
+    with patch.dict(Device["NULL"].props, {"copy": 0}):
+      b = self.batch(self.x.to("CPU"))
+    copy, = calls(b)
+    self.assertIn(copy, queues(b)[("NULL", "COMPUTE:0")])
+
   def test_a_host_kernel_splits_the_batch(self):
     self.assertEqual(len(self.scheduled(((self.x + 1).contiguous().to("PYTHON") + 2).contiguous().to("NULL") + 3)), 2)
 
