@@ -336,7 +336,7 @@ def load_const(x:UOp) -> UOp:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
-  (UPat().backedge(UPat(), UPat.var("m", dtypes.bool), name="x"), lambda x,m: UOp.ins(X86Ops.JNE, (x.src[1], x.src[0], test_gate(m)), x.dtype)),
+  (UPat().backedge(UPat(), UPat.var("m", dtypes.bool), name="x"), lambda x,m: x.replace(src=(*x.src[:2], test_gate(m)), arg=X86Ops.JNE)),
   # **** Op -> X86Op ****
   # function abi constraints
   (UPat(Ops.PARAM), lambda: RDI),
@@ -498,6 +498,7 @@ def label(x:UOp) -> UOp: return UOp.ins(X86Ops.LABEL, (x,), dtypes.void)
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.IF, name="x"), lambda x: (x, [x.src[0].without_after, x.ins(x.arg, (x, x.src[0].without_after), dtypes.void)])),
+  (UPat(Ops.BACKEDGE, name="x"), lambda x: (x, [x.src[2].without_after, x])),
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
   (UPat(Ops.CALL, name="x"), lambda x: (x, []) if x.body.arg.code in {X86Ops.CMP, X86Ops.CMPi} else
    (x, [x.src[-1], x]) if x.body.arg.code in X86GroupOp.ReadFlags else None),
@@ -509,6 +510,7 @@ pre_regalloc_matcher = PatternMatcher([
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [UOp.ins(X86Ops.RET, x.src, x.dtype)])),
+  (UPat(Ops.BACKEDGE, name="x"), lambda x: (x, [x.ins(x.arg, (x.src[1], x.src[2].without_after), x.dtype)])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.CALL, name="x"), lambda ctx,x: (nx:=x.replace(src=(x.body,)+x.src[2:]),
    [ctx.ren.copy(x.src[1], rdef(x)), nx] if rdef(x) is not rdef(x.src[1]) else [nx]) if x.body.arg.code in X86GroupOp.TwoAddress else None),
