@@ -6,7 +6,7 @@ Optional universal AMD RDNA3/RDNA4/CDNA kernel library for `tinygrad`, exported 
 
 ## Usage
 
-`slopkernels/` lives alongside `tinygrad/` in the `tinygrad` repository. `tinygrad` automatically discovers `slopkernels` when present and falls back cleanly to pure `tinygrad` when disabled via `SLOP=0`.
+`slopkernels/` lives at the root of the `tinygrad` repository for source checkouts (like `extra/` — not packaged in `pyproject.toml`). `tinygrad` automatically discovers `slopkernels` when present and falls back cleanly to pure `tinygrad` when absent or disabled via `SLOP=0`.
 
 ## Narrow Public API
 
