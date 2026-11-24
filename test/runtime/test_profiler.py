@@ -5,6 +5,7 @@ from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, Pr
 from tinygrad.engine.realize import run_linear
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen import to_program
+from test.helpers import needs_devices
 
 def _dev_base(d):
   p = d.split(":")
@@ -113,9 +114,9 @@ class TestProfiler(unittest.TestCase):
     #for i in range(1, 3):
     #  assert evs[i].st > evs[i-1].en, "timestamp not aranged"
 
+  @needs_devices(2)
   def test_profile_multidev(self):
-    try: d1 = Device[f"{Device.DEFAULT}:1"]
-    except Exception as e: self.skipTest(f"second device not available {e}")
+    d1 = Device[f"{Device.DEFAULT}:1"]
 
     buf1 = Buffer(Device.DEFAULT, 8, options=BufferSpec(nolru=True)).ensure_allocated()
     buf2 = Buffer(f"{Device.DEFAULT}:1", 8, options=BufferSpec(nolru=True)).ensure_allocated()
@@ -129,9 +130,9 @@ class TestProfiler(unittest.TestCase):
       evs = [x for x in profile if _dev_base(x.device) == dev]
       assert len(evs) == (0 if buf1._host_mv() is not None else 1), "one kernel runs are expected"
 
+  @needs_devices(2)
   def test_profile_multidev_transfer(self):
-    try: d1 = Device[f"{Device.DEFAULT}:1"]
-    except Exception as e: self.skipTest(f"second device not available {e}")
+    d1 = Device[f"{Device.DEFAULT}:1"]
     if Device.DEFAULT in {"CUDA", "CL"}: self.skipTest(f"{Device.DEFAULT} has no p2p: a transfer is two staged copies")
 
     buf1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:0").realize()
@@ -143,9 +144,9 @@ class TestProfiler(unittest.TestCase):
     assert len(kernel_runs) == 1, "one kernel run is expected"
 
   @unittest.skipIf(Device.DEFAULT in "METAL", "METAL does not support queue wait interrupts")
+  @needs_devices(2)
   def test_profile_graph(self):
-    try: d1 = Device[f"{Device.DEFAULT}:1"]
-    except Exception as e: self.skipTest(f"second device not available {e}")
+    d1 = Device[f"{Device.DEFAULT}:1"]
     if Device.DEFAULT in {"CUDA", "CL"}: self.skipTest(f"{Device.DEFAULT} has no p2p: a transfer is two staged copies")
 
     def f(a):

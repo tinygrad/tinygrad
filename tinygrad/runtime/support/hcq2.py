@@ -204,9 +204,13 @@ def stage_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
     return UOp(Ops.LINEAR, src=(stage.store_call(src), dst.store_call(stage)))
 
   if Device.target_for(device).get("copy", 1): return None
-  out, inp = (UOp.param(i, dtypes.u8, b.nbytes(), device=device) for i, b in enumerate((dst, src)))
+  # A kernel runs on its first buffer's device. For a push, slot 0 must be the source, not the destination.
+  push = device != devs[0]
+  args = (src, dst) if push else (dst, src)
+  out = UOp.param(1 if push else 0, dtypes.u8, dst.nbytes(), device=device)
+  inp = UOp.param(0 if push else 1, dtypes.u8, src.nbytes(), device=device)
   ast = out.index(r:=UOp.range(src.nbytes(), 0, AxisType.WEAK)).store(inp.index(r).load()).end(r).sink(arg=KernelInfo())
-  return lower_and_compile(call.replace(src=(ast, *call.src[1:])))
+  return lower_and_compile(call.replace(src=(ast, *args)))
 
 pm_insert_copy_staging = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.STORE), UPat(name="dst"), UPat(name="src")), name="call", allow_any_len=True), split_rdma),

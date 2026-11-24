@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad import Device, dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import temp, DEV, Context
-from test.helpers import assert_kernel_count, needs_second_gpu
+from test.helpers import assert_kernel_count, needs_devices
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -1088,11 +1088,9 @@ class TestAfterCachePatterns(unittest.TestCase):
     np.testing.assert_array_equal(head.numpy(), [3])
     np.testing.assert_array_equal(full.numpy(), [1, 2])
 
+@needs_devices(2)
 class TestMultiAssign(unittest.TestCase):
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-
-  @needs_second_gpu
-  def setUp(self): pass
 
   def test_multi_assign_realized(self):
     out = Tensor.zeros(4).shard(self.device, 0).contiguous().realize()

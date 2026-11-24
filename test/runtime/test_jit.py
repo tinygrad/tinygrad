@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from test.helpers import assert_jit_cache_len, not_support_multi_device, needs_second_gpu
+from test.helpers import assert_jit_cache_len, needs_devices
 from tinygrad import Tensor, TinyJit, Device, dtypes, Context, UOp
 from tinygrad.helpers import DEV, GlobalCounters
 from tinygrad.engine.jit import JitError
@@ -66,8 +66,7 @@ class TestJit(unittest.TestCase):
       ja = jf(a)
       np.testing.assert_allclose(a.numpy(), ja.numpy(), atol=1e-4, rtol=1e-5)
 
-  @needs_second_gpu
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(2)
   def test_jitted_transfers(self):
     d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
 
@@ -100,8 +99,7 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose((a.numpy()+b.numpy()), zc.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose((a.numpy()*b.numpy()), wc.numpy(), atol=1e-4, rtol=1e-5)
 
-  @needs_second_gpu
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(2)
   def test_jitted_view(self):
     d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
 
@@ -556,11 +554,9 @@ class TestJitGraphSplit(unittest.TestCase):
     inp_cpu = Tensor.randn(10, 10, device="CPU").realize()
     self.expect(f, inp, inp_cpu)
 
+  @needs_devices(2)
   def test_jit_multidev(self):
     if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
-
-    try: Device[f"{Device.DEFAULT}:1"]
-    except Exception: raise unittest.SkipTest("no multidevice")
 
     @TinyJit
     def f(inp, inp_d1):
@@ -575,12 +571,10 @@ class TestJitGraphSplit(unittest.TestCase):
     inp_d1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:1").realize()
     self.expect(f, inp, inp_d1)
 
+  @needs_devices(2)
   def test_jit_multidev_xfer(self):
     if Device.DEFAULT in {"CPU"}: raise unittest.SkipTest("CPU is not a valid default device for this test (zero-copies)")
     if Device.DEFAULT == "METAL": raise unittest.SkipTest("Metal is flaky, with multidevice (same as metal llama 4gpu?)")
-
-    try: Device[f"{Device.DEFAULT}:1"]
-    except Exception: raise unittest.SkipTest("no multidevice")
 
     @TinyJit
     def f(inp, inp_d1):

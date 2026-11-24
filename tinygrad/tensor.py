@@ -582,18 +582,18 @@ class Tensor(Mixin):
   # ***** op wrappers *****
 
   # unlike Tensors, UOps are immutable, so these don't go in mixin
-  def __iadd__(self, x) -> Tensor: return self.assign(self.add(x)) # type: ignore[misc]
-  def __isub__(self, x) -> Tensor: return self.assign(self.sub(x)) # type: ignore[misc]
-  def __imul__(self, x) -> Tensor: return self.assign(self.mul(x)) # type: ignore[misc]
-  def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x)) # type: ignore[misc]
-  def __ifloordiv__(self, x) -> Tensor: return self.assign(self.__floordiv__(x)) # type: ignore[misc]
-  def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x)) # type: ignore[misc]
-  def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x)) # type: ignore[misc]
-  def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x)) # type: ignore[misc]
-  def __ixor__(self, x) -> Tensor: return self.assign(self.bitwise_xor(x)) # type: ignore[misc]
-  def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x)) # type: ignore[misc]
-  def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x)) # type: ignore[misc]
-  def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x)) # type: ignore[misc]
+  def __iadd__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.add(x))
+  def __isub__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.sub(x))
+  def __imul__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.mul(x))
+  def __itruediv__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.div(x))
+  def __ifloordiv__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.__floordiv__(x))
+  def __ipow__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.pow(x))
+  def __iand__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.bitwise_and(x))
+  def __ior__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.bitwise_or(x))
+  def __ixor__(self, x:Tensor|ConstType) -> Tensor: return self.assign(self.bitwise_xor(x))
+  def __ilshift__(self, x:Tensor|int) -> Tensor: return self.assign(self.lshift(x))
+  def __irshift__(self, x:Tensor|int) -> Tensor: return self.assign(self.rshift(x))
+  def __imatmul__(self, x:Tensor) -> Tensor: return self.assign(self.matmul(x))
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
 

@@ -7,7 +7,7 @@ from tinygrad.llm.kernels.amd_gguf import QUANT_SIZES, HALFWORD_QUANTS, SMALL_BL
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.llm.model import ExpertWeights
 from tinygrad.llm.hf import e4m3fn_to_fnuz
-from test.helpers import not_support_multi_device
+from test.helpers import needs_devices
 
 def reference_weight(packed:np.ndarray, ggml_type:int, *shape:int) -> np.ndarray:
   # Decode on the host so checking a custom kernel doesn't also compile and run the generic dequant graph.
@@ -68,7 +68,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
       gc.collect()
       self.assertIsNone(ref())
 
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(2)
   def test_quant_tables_multidevice(self):
     devices = (Device.DEFAULT, f"{Device.DEFAULT}:1")
     for typ in (18, 23):
@@ -79,7 +79,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         for i in range(len(devices)):
           np.testing.assert_array_equal(Tensor(table.uop.mselect(i)).numpy(), single.numpy())
 
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(2)
   def test_quant_linear_multidevice(self):
     if not amd_custom_kernels_supported(Device.DEFAULT): self.skipTest("RDNA3 required")
     devices = (Device.DEFAULT, f"{Device.DEFAULT}:1")
@@ -225,7 +225,7 @@ class TestBlockFP8(unittest.TestCase):
           expected = fp8_reference(x[..., None, :], bits[ids], scales[ids], (4, 8), fnuz).squeeze(-2)
           np.testing.assert_allclose(got, expected, atol=2e-6, rtol=2e-5)
 
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_devices(2)
   def test_tensor_parallel(self):
     if not self.formats: self.skipTest('requires native FP8')
     rng, devices = np.random.default_rng(3), (Device.DEFAULT, f"{Device.DEFAULT}:1")

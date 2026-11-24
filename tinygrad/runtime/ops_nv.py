@@ -564,7 +564,7 @@ class PCIIface(PCIIfaceBase):
     for _ in self.dev_impl.gsp.stat_q.read_resp(): pass
     if self.dev_impl.is_err_state: raise RuntimeError("Device fault detected")
 
-class MOCKIface(NVKIface): count = 1
+class MOCKIface(NVKIface): pass
 
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("nv_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: NVComputeQueue(s).encode()),

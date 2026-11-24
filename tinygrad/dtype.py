@@ -1,9 +1,10 @@
 from __future__ import annotations
-from typing import Final, ClassVar, Callable, Literal
+from typing import Final, ClassVar, Callable, Literal, TYPE_CHECKING
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, DEFAULT_FLOAT, DEFAULT_INT
 from enum import IntEnum, auto
+if TYPE_CHECKING: import numpy as np, torch
 
 class ConstFloat(float):
   """Float subclass that distinguishes -0.0 from 0.0 and where nan == nan."""
@@ -310,17 +311,17 @@ def _to_np_dtype(dtype:DType) -> type|None:
   import numpy as np
   if dtype in { dtypes.bfloat16, *dtypes.fp8s }: return np.float32
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
-def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
+def _from_np_dtype(npdtype:'np.dtype') -> DType:
   import numpy as np
   return DTYPES_DICT[np.dtype(npdtype).name]
 
 @functools.cache
-def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-defined] # noqa: F821
+def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:
   import numpy as np, torch
   dtype = strong_dtype(dtype)
   if dtype == dtypes.bfloat16: return torch.bfloat16
   if dtype in dtypes.fp8s: return torch.uint8
   return getattr(torch, np.dtype(dtype.fmt).name, None) if dtype.fmt is not None else None
 @functools.cache
-def _from_torch_dtype(torchdtype:'torch.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
+def _from_torch_dtype(torchdtype:'torch.dtype') -> DType:
   return DTYPES_DICT[str(torchdtype).split('.')[-1]]
