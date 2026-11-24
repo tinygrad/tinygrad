@@ -103,6 +103,18 @@ class TestSlopKernelsUIR(unittest.TestCase):
         u = parse_uir(txt)
         self.assertIn(u.op, (Ops.SINK, Ops.AFTER, Ops.RESHAPE, Ops.REDUCE, Ops.PERMUTE))
         if u.op is Ops.SINK: self.assertIsNotNone(u.arg)
+    # Verify compile_all(target=...) actually emits RDNA4 vs RDNA3 low-level WMMA settings
+    uirs_12 = slopkernels.compile_all(target="gfx1201")
+    uirs_11 = slopkernels.compile_all(target="gfx1100")
+    self.assertEqual(uirs_12["f16_wmma"], slopkernels.get("f16_wmma", out_features=64, in_features=128, tokens=16, kgroups=2, lanes=32))
+    self.assertEqual(uirs_11["f16_wmma"], slopkernels.get("f16_wmma", out_features=64, in_features=128, tokens=16, kgroups=1, lanes=32))
+    self.assertNotEqual(uirs_12["f16_wmma"], uirs_11["f16_wmma"])
+    self.assertEqual(uirs_12["quant_linear_wmma"],
+                     slopkernels.get("quant_linear_wmma", out_features=64, in_features=256, ggml_type=8, tokens=16, kgroups=2, lanes=32, rdna4=True))
+    self.assertEqual(uirs_11["quant_linear_wmma"],
+                     slopkernels.get("quant_linear_wmma", out_features=64, in_features=256, ggml_type=8, tokens=16, kgroups=1, lanes=32, rdna4=False))
+    self.assertNotEqual(uirs_12["quant_linear_wmma"], uirs_11["quant_linear_wmma"])
+    self.assertNotEqual(uirs_12["flash_attention"], uirs_11["flash_attention"])
 
   def test_individual_kernel_uirs_execute_exact(self):
     """Execute universal UIR kernels from slopkernels.get(...) on MOCK+AMD and verify numerical exactness."""
@@ -358,6 +370,55 @@ class TestSlopKernelsUIR(unittest.TestCase):
     got_ss = _run_uir(slopkernels.get("moe_sum_slots", b=1, t=1, slots=4, d=256, has_add=True),
                       Tensor.empty(1, 1, 256, dtype="float32"), sl_in, sl_add)[0].numpy()
     np.testing.assert_allclose(got_ss, sl_in.numpy().sum(0)[None, None] + sl_add.numpy(), rtol=1e-5, atol=1e-5)
+
+  def test_review_regressions(self):
+    """Regressions: f16 Linear dtype parity, non-multiple-of-4 multi_proj tail, and int start_pos in gated_delta_prefill."""
+    if (tgt := _amd_target()) is None: self.skipTest("AMD required")
+    from tinygrad import Context
+    from tinygrad.llm.model import Linear
+    dev = Tensor.empty(1).device
+    rng = np.random.default_rng(51)
+    # 1. Bias-free f16 Linear(32, 16) preserves f16 output dtype across SLOP=0 and SLOP=1
+    lin = Linear(32, 16, bias=False)
+    lin.weight = Tensor(rng.standard_normal((16, 32)).astype(np.float16)).realize()
+    x16 = Tensor(rng.standard_normal((1, 32)).astype(np.float16)).realize()
+    with Context(SLOP=0): y0 = lin(x16).realize()
+    with Context(SLOP=1): y1 = lin(x16).realize()
+    self.assertEqual(y1.dtype, y0.dtype)
+    self.assertEqual(y1.dtype, dtypes.float16)
+    np.testing.assert_allclose(y1.numpy(), y0.numpy(), rtol=1e-3, atol=1e-3)
+    # 2. quant_decode_multi_proj handles non-multiple-of-4 row counts like (5, 8)
+    _, w5_u16, w5_ref = _make_q8_0(rng, 5, 256)
+    _, w8_u16, w8_ref = _make_q8_0(rng, 8, 256)
+    xm = Tensor(rng.standard_normal((1, 256)).astype(np.float32)).realize()
+    xq, xd, xs = _run_uir(slopkernels.get("q8_quantize", tokens=1, in_features=256), Tensor.empty(1, 8, 8, dtype="uint32"),
+                          Tensor.empty(1, 8, dtype="float32"), Tensor.empty(1, 8, 2, dtype="float32"), xm)[:3]
+    out5_init = Tensor.full((1, 5), -999.0, dtype="float32").contiguous().realize()
+    out8_init = Tensor.full((1, 8), -999.0, dtype="float32").contiguous().realize()
+    mp_uir = slopkernels.get("quant_decode_multi_proj", out_features_tuple=(5, 8), in_features=256, ggml_type=8, tokens=1)
+    assert mp_uir is not None
+    got5, got8 = _run_uir(mp_uir, out5_init, out8_init, w5_u16, w8_u16, xq, xd, xs)[:2]
+    np.testing.assert_allclose(got5.numpy(), (xm @ w5_ref.T).numpy(), rtol=3e-2, atol=5e-2)
+    np.testing.assert_allclose(got8.numpy(), (xm @ w8_ref.T).numpy(), rtol=3e-2, atol=5e-2)
+    # 3. gated_delta_prefill_op accepts integer start_pos=0 (zeros initial state) and start_pos=3 (keeps state)
+    gd_q = Tensor(rng.normal(0, 0.1, (1, 2, 4, 32)).astype(np.float32)).realize()
+    gd_k = Tensor(rng.normal(0, 0.1, (1, 2, 4, 32)).astype(np.float32)).realize()
+    gd_v = Tensor(rng.standard_normal((1, 2, 4, 8)).astype(np.float32)).realize()
+    gd_b = Tensor(rng.uniform(0, 1, (1, 2, 4)).astype(np.float32)).realize()
+    gd_a = Tensor(rng.uniform(0.8, 1.0, (1, 2, 4)).astype(np.float32)).realize()
+    init_np = rng.normal(0, 0.2, (1, 2, 8, 32)).astype(np.float32)
+    for sp in (0, 3):
+      gd_s = Tensor(init_np.copy()).contiguous().realize()
+      st_ref = np.zeros_like(init_np) if sp == 0 else init_np.copy()
+      outs_ref = []
+      for t in range(4):
+        st_ref *= gd_a.numpy()[:, :, t, None, None]
+        delta = (gd_v.numpy()[:, :, t] - (st_ref * gd_k.numpy()[:, :, t, None]).sum(-1)) * gd_b.numpy()[:, :, t, None]
+        st_ref += delta[..., None] * gd_k.numpy()[:, :, t, None]
+        outs_ref.append((st_ref * gd_q.numpy()[:, :, t, None]).sum(-1))
+      got_gd = _call_op("gated_delta_prefill_op", tgt, dev, gd_q, gd_k, gd_v, gd_b, gd_a, gd_s, start_pos=sp).numpy()
+      np.testing.assert_allclose(got_gd, np.stack(outs_ref, axis=2), rtol=2e-4, atol=2e-6)
+      np.testing.assert_allclose(gd_s.numpy(), st_ref, rtol=2e-4, atol=2e-6)
 
 
 if __name__ == "__main__":

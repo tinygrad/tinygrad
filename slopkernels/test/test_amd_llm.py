@@ -445,8 +445,8 @@ class TestQ8Quantize(unittest.TestCase):
     linear.weight, linear.bias = Tensor(w), Tensor(bias)
     for tokens in (1, 3):
       with self.subTest(tokens=tokens):
-        x = rng.normal(size=(tokens, 128)).astype(np.float16)
-        np.testing.assert_allclose(linear(Tensor(x)).numpy(), x.astype(np.float32) @ w.astype(np.float32).T + bias, rtol=2e-3, atol=2e-3)
+        x = rng.normal(size=(tokens, 128)).astype(np.float32)
+        np.testing.assert_allclose(linear(Tensor(x)).numpy(), x @ w.astype(np.float32).T + bias, rtol=2e-3, atol=2e-3)
 
   def test_q6_linear_multiple_tokens(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")

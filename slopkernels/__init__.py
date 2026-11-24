@@ -281,12 +281,12 @@ def _flash_decode_combine_q8(b:int, h:int, m:int, d:int, chunks:int, *, valid_kv
 @_register("gated_delta_prefill", {"batch": 1, "heads": 4, "tokens": 8, "value_dim": 64, "key_dim": 64, "alpha_shape": (1, 4, 8)})
 def _gated_delta_prefill(batch:int, heads:int, tokens:int, value_dim:int, key_dim:int, *,
                          v_dtype:str="f32", beta_dtype:str="f32", alpha_shape:tuple[int, ...], alpha_dtype:str="f32",
-                         state_dtype:str="f32", kq_dtype:str="f32", start_pos:tuple[int, int]|None=None) -> str:
+                         state_dtype:str="f32", kq_dtype:str="f32", start_pos:int|tuple[int, int]|None=None) -> str:
   ps = [_p(0, (batch, heads, tokens, value_dim), v_dtype), _p(1, (batch, heads, tokens, key_dim), "f32"),
         _p(2, (batch, heads, tokens, key_dim), "f32"), _p(3, (batch, heads, tokens, value_dim), v_dtype),
         _p(4, (batch, heads, tokens), beta_dtype), _p(5, alpha_shape, alpha_dtype),
         _p(6, (batch, heads, value_dim, key_dim), state_dtype), _p(7, (batch, heads, tokens), kq_dtype)]
-  sp = _v(8, start_pos[0], start_pos[1], "start_pos") if start_pos is not None else None
+  sp = _sym(8, start_pos, "start_pos") if start_pos is not None else None
   return render_uir(_amd._gated_delta_prefill_kernel(*ps, start_pos=sp))
 
 # --- Residual, Conv, Norm, Routing, Activation ---
@@ -490,12 +490,12 @@ def compile_all(out_dir:str|pathlib.Path|None=None, target:str|tuple[int, ...]|N
   out: dict[str, str] = {}
   dst = pathlib.Path(out_dir) if out_dir is not None else None
   if dst is not None: dst.mkdir(parents=True, exist_ok=True)
-  ver = _ops.parse_amd_target(target) if target is not None else None
+  arch = _ops.parse_amd_target(target) if target is not None else None
   for name in list_kernels():
     fn, sample = _REGISTRY[name]
     spec = dict(sample)
-    if ver is not None:
-      cdna, rdna4 = ver[0] == 9, ver[0] == 12
+    if arch is not None:
+      rdna4, cdna = arch
       if "target" in spec: spec["target"] = target
       params = inspect.signature(fn).parameters
       if "cdna" in params: spec["cdna"] = cdna

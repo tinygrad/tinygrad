@@ -108,11 +108,15 @@ def build_dense_linear(*, target:str|tuple[int, ...], device:DeviceSpec="AMD", s
   p_w, p_x = _p(0, (out_features, in_features), w_dtype, device), _p(1, x_shape, x_dtype, device)
   call_srcs = [p_w, p_x.reshape((tokens, in_features))]
   k_ps = [_p(0, (tokens, out_features), "f32"), _p(1, (out_features, in_features), w_dtype), _p(2, (tokens, in_features), x_dtype)]
+  in_dtypes = [w_dtype, x_dtype]
   if len(srcs) == 3:
     b_shape, _, b_axis, bias_dtype = cast(TensorDesc, srcs[2])
     if b_axis is not None or b_shape != (out_features,): return None
+    in_dtypes.append(bias_dtype)
     call_srcs.append(_p(2, (out_features,), bias_dtype, device))
     k_ps.append(_p(3, (out_features,), bias_dtype))
+  # Preserve Linear fallback dtype: only dispatch f32 GEMV when float32 promotion would already occur.
+  if "f32" not in in_dtypes: return None
   out = UOp.alloc((tokens, out_features), dtypes.float32, device=device)
   k = _amd._amd_f16_gemv_kernel(*k_ps, in_features=in_features, out_features=out_features, tokens=tokens)
   return out.after(k.call(out, *call_srcs)).reshape((*x_shape[:-1], out_features))

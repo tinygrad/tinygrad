@@ -1132,7 +1132,8 @@ def _quant_decode_multi_proj_kernel(*args:UOp, out_features_tuple:tuple[int, ...
   xq, xd, xs = args[2*m], args[2*m+1], args[2*m+2]
   grid = args[2*m+3] if len(args) > 2*m+3 else None
   rows = 4
-  blks = tuple(o // rows for o in out_features_tuple)
+  assert m > 0 and all(o > 0 for o in out_features_tuple)
+  blks = tuple((o + rows - 1) // rows for o in out_features_tuple)
   offs = tuple(sum(blks[:i]) for i in range(m))
   tot_blks = sum(blks)
   group_count = in_features // Q8_GROUP_SIZE
@@ -1150,13 +1151,15 @@ def _quant_decode_multi_proj_kernel(*args:UOp, out_features_tuple:tuple[int, ...
   for k in range(m):
     cond_k = (out_blk >= offs[k]) & (out_blk < offs[k] + blks[k])
     loc_o = (out_blk - offs[k]).maximum(0).minimum(blks[k] - 1) * rows + wave
-    conds.append(cond_k)
-    local_outs.append(loc_o)
-    s = UOp.range(cond_k.where(UOp.const(steps, dtypes.weakint), UOp.const(0, dtypes.weakint)), 4 + k)
+    active_k = cond_k & (loc_o < out_features_tuple[k])
+    loc_o_safe = loc_o.minimum(out_features_tuple[k] - 1)
+    conds.append(active_k)
+    local_outs.append(loc_o_safe)
+    s = UOp.range(active_k.where(UOp.const(steps, dtypes.weakint), UOp.const(0, dtypes.weakint)), 4 + k)
     group = lane if steps == 1 else (lane + s * 32)
     g_safe = group.minimum(group_count - 1)
     in_range, sub = group < group_count, g_safe % 8
-    base = _quant_base(loc_o, g_safe, in_features, ggml_type, raws[k].dtype.itemsize)
+    base = _quant_base(loc_o_safe, g_safe, in_features, ggml_type, raws[k].dtype.itemsize)
     if tokens == 1:
       xw = _amd_load(xq[0, g_safe, 0], 8)
       def _xs0(h:int, gs:UOp=g_safe) -> UOp: return xs[0, gs, h].load()

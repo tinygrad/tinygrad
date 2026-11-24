@@ -80,7 +80,7 @@ def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *rest:UOp, in_features:int, out_
   for t in range(tokens):
     total = warp_reduce(accs[t], full_wave=True)
     if b_val is not None: total = total + b_val
-    stores.append(out[t, out_row.valid(lane.eq(0))].store(total))
+    stores.append(out[t, out_row.valid(lane.eq(0))].store(total.cast(out.dtype)))
   return UOp.group(*stores).end(out_blk, wave, lane).sink(
     arg=KernelInfo(name="linear_f16_gemv", opts_to_apply=()))
 
@@ -530,7 +530,7 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *extra:UOp, valid_kv_len:int|U
 # ******** gated delta net: fused recurrent scan ********
 
 @functools.cache
-def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None) -> UOp:
+def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:int|UOp|None=None) -> UOp:
   batch, heads, tokens, value_dim, row_tile = *core.shape, 4
   key_dim, alpha_dim = q.shape[-1], alpha.shape[-1] if len(alpha.shape) == 4 else 1
   assert all(isinstance(x, int) for x in (batch, heads, tokens, value_dim, key_dim)) and key_dim % 32 == 0 and value_dim % row_tile == 0
@@ -542,9 +542,14 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   bh, row_base = bh_row // (value_dim//row_tile), (bh_row % (value_dim//row_tile))*row_tile
   rows, cols = tuple(row_base+i for i in range(row_tile)), tuple(lane + i*32 for i in range(key_dim//32))
   current = UOp.alloc((row_tile*key_dim//32,), dtypes.float32, addrspace=AddrSpace.REG)
-  initial = None if start_pos is None else start_pos.eq(0)
-  current = current.after(current.store(UOp.stack(*(state[bh, row, col].float() if initial is None else
-    initial.where(0, state[bh, row, col].float()) for row in rows for col in cols))))
+  if start_pos is None or (isinstance(start_pos, int) and start_pos != 0):
+    init_vals = tuple(state[bh, row, col].float() for row in rows for col in cols)
+  elif isinstance(start_pos, int):
+    init_vals = tuple(UOp.const(0.0, dtypes.float32) for _ in rows for _ in cols)
+  else:
+    initial = start_pos.eq(0)
+    init_vals = tuple(initial.where(0, state[bh, row, col].float()) for row in rows for col in cols)
+  current = current.after(current.store(UOp.stack(*init_vals)))
   token = UOp.range(tokens, 2)
   keys = tuple(k[bh, token, col].load() for col in cols)
   queries = tuple(q[bh, token, col].load() for col in cols)

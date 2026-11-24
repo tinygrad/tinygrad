@@ -56,7 +56,14 @@ jobs:
 
   bench:
     name: Benchmarks (${{ matrix.runner }})
-    if: github.repository != 'tinygrad/tinygrad' || github.event_name == 'push' || github.event.pull_request.author_association == 'COLLABORATOR'
+    if: >-
+      (github.repository == 'tinygrad/tinygrad' || github.repository == 'geohot/tinygrad') &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request' &&
+        (github.event.pull_request.head.repo.full_name == github.repository ||
+         github.event.pull_request.author_association == 'OWNER' ||
+         github.event.pull_request.author_association == 'COLLABORATOR' ||
+         github.event.pull_request.author_association == 'MEMBER')))
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
