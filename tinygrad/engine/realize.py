@@ -257,11 +257,9 @@ def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:li
     linear = lower_and_compile(linear)
     return hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
 
-def ensure_devices(linear:UOp):
-  for d in sorted({d for u in linear.toposort() if u.op is Ops.EXTERN for d in to_tuple(u.device) if d is not None}): Device[d]
-
 def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
-  ensure_devices(linear)
+  # link opens the devices of the externs, opening a device registers its link buffers and rules
+  for d in sorted({d for u in linear.toposort() if u.op is Ops.EXTERN for d in to_tuple(u.device) if d is not None}): Device[d]
   return hcq_link(linear, input_uops=input_uops)
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
