@@ -211,6 +211,7 @@ class Target:
   arch: str = ""
   interface: str = ""
   indices: str = ""
+  props: str = ""
 
   @staticmethod
   def parse(s:str) -> Target:
@@ -218,14 +219,15 @@ class Target:
       (iface, indices), s = ((iface_split[0], iface_split[1]) if len(iface_split:=split[0].rsplit(":", 1)) == 2 else (split[0], ""), split[1])
     elif len(split) > 2: raise RuntimeError(f"too many '+' in target string: {s!r}")
     else: iface, indices = "", ""
-    match [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]:
-      case [dev, ren, arch]: return Target(dev, ren, arch, iface, indices)
-      case [dev, ren]: return Target(dev, ren, interface=iface, indices=indices)
-      case [dev]: return Target(dev, interface=iface, indices=indices)
-      case _: raise RuntimeError(f"too many ':' in target string: {s!r}")
+    if len(parts:=s.split(':')) > 4: raise RuntimeError(f"too many ':' in target string: {s!r}")
+    dev, ren, arch, props = parts + [""]*(4-len(parts))
+    return Target(dev.upper(), ren.upper(), arch, iface, indices, props)
   def __repr__(self):
-    fst, snd = re.sub(":*$", "", ":".join([self.interface, self.indices])), re.sub(":*$", "", ":".join([self.device, self.renderer, self.arch]))
+    fst, snd = ":".join([self.interface, self.indices]).rstrip(":"), ":".join([self.device, self.renderer, self.arch, self.props]).rstrip(":")
     return (fst + "+" if fst else "") + snd
+  @property
+  def opts(self) -> dict[str, str]: return dict(x.split("=", 1) for x in self.props.split(",") if x)
+  def get(self, key:str, default:Any="") -> Any: return type(default)(self.opts.get(key, default))
   # replaces if not already set
   def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
 
@@ -242,7 +244,8 @@ class _DEV(ContextVar):
   def target(self, dev:str, **kwargs) -> Target:
     assert (v:=getenv(k:=f"{dev}_CC", "")) == "", \
       f"{k}={v} is deprecated, use DEV='{';'.join([repr(t) for t in self._value if t.device and t.device != dev] + [f'{dev}:{v}'])}' instead"
-    return replace(next((t for t in self._value if not t.device or t.device == dev), Target(device=dev)).replacedefault(**kwargs), device=dev)
+    t = next((t for t in self._value if not t.device or t.device == dev), Target(device=dev))
+    return t if t.device == dev and not kwargs else replace(t.replacedefault(**kwargs), device=dev)
 
 DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
@@ -253,7 +256,7 @@ USE_TC, TC_SELECT, TC_OPT, TC_MIN_GLOBALS = ContextVar("TC", 1), ContextVar("TC_
 TRANSCENDENTAL = ContextVar("TRANSCENDENTAL", 1)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("LRU", 1)
 RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0), ContextVar("ALLREDUCE_CAST", 1)
-ALLREDUCE_NODE_NDEVS = ContextVar("ALLREDUCE_NODE_NDEVS", 0) # gpus per node, the nodes cabled gpu k to gpu k
+NODE_NDEVS = ContextVar("NODE_NDEVS", 0) # gpus per node, the nodes cabled gpu k to gpu k
 CACHELEVEL, IGNORE_BEAM_CACHE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0)
 VALIDATE_WITH_CPU = ContextVar("VALIDATE_WITH_CPU", 0)
 HCQ_RUNTIME_DEV = _DEV("HCQ_RUNTIME_DEV", "CPU:TCC" if sys.platform == "linux" and _has_lib("tcc") else "CPU:LLVM")

@@ -198,7 +198,7 @@ Compiled.pm_lower += PatternMatcher([(UPat(Ops.PARAM, name="p").f(Ops.AFTER, all
 
 class MetalDevice(Compiled):
   renderers = [MetalRenderer]
-  has_copy_queue = False
+  opened:weakref.WeakSet[MetalDevice] = weakref.WeakSet()
 
   def __init__(self, device:str=""):
     self.sysdevice = metal.MTLCreateSystemDefaultDevice()
@@ -219,7 +219,8 @@ class MetalDevice(Compiled):
     # https://developer.apple.com/documentation/metal/mtlgpufamily
     def check_family(f): return next(filter(self.sysdevice.supportsFamily, reversed([v for v, nm in metal.enum_MTLGPUFamily.items() if f in nm])), 0)
     super().__init__(device, MetalAllocator(self), None,
-                     arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
+                     arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:], props={"copy": 0})
+    MetalDevice.opened.add(self)
     Compiled.link_bufs |= {to_name(self.device, "handles"): lambda b: self.handles}
     Compiled.pm_link += PatternMatcher([
       (UPat(Ops.BUFFER, name="b").store(UPat(Ops.LINEAR, name="cmds")), lambda b, cmds, d=self: d.new_icb(b.buffer, cmds.src))])
@@ -272,12 +273,15 @@ class MetalDevice(Compiled):
     wait = objc.msg("waitUntilSignaledValue:timeoutMS:", ctypes.c_bool, [ctypes.c_uint64, ctypes.c_uint64])
     if not wait(self.event, value, int(self.wait_timeout_ms)): raise RuntimeError(f"{self.device} signal wait timed out")
 
-  def synchronize(self, timeout:int|None=None):
+  def _read_cb_times(self):
     for slots, start in [(buf.host.view(fmt='Q'), start) for buf, start in self.prof_ents]:
       if slots[start] and not slots[start + 2]: # [command buffer, 0]
         (cb:=metal.MTLCommandBuffer(slots[start])).waitUntilCompleted()
         slots[start], slots[start + 2] = int(cb.GPUStartTime() * 1e9), int(cb.GPUEndTime() * 1e9)
 
+  def synchronize(self, timeout:int|None=None):
+    # the autorelease pool is per thread and shared by every METAL device, popping it frees their command buffers. read them all first
+    for d in MetalDevice.opened: d._read_cb_times()
     super().synchronize(timeout)
     if (pool:=getattr(pools, "pool", None)) is not None: objc.lib.objc_autoreleasePoolPop(pool)
     pools.pool = objc.lib.objc_autoreleasePoolPush()

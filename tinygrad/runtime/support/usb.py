@@ -1,10 +1,10 @@
 import ctypes, struct, time, functools, itertools
 from typing import cast
 from tinygrad.runtime.autogen import libusb, libc
-from tinygrad.helpers import DEBUG, DEV, HCQ_RUNTIME_DEV, to_mv, round_up, ceildiv, flatten, to_tuple
+from tinygrad.helpers import DEBUG, DEV, HCQ_RUNTIME_DEV, to_mv, round_up, ceildiv, flatten
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, uopfunc
-from tinygrad.device import Buffer, BufferSpec, Compiled, Device
+from tinygrad.device import Buffer, BufferSpec, Compiled, is_iface_usb
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, ccall, patch, unwrap_view, all_devices_in, to_name, get_time_ms, ins
 from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support import c
@@ -261,8 +261,8 @@ def usb_patch(link:UOp, addr:UOp, val:UOp, slot:UOp) -> UOp: # poke only on chan
 # 3. lower
 
 def is_host(b:UOp) -> bool: return not all_devices_in(b.device, HCQ_DEVS - {"CPU"})
-def is_usb(dev) -> bool: return to_name(d:=to_tuple(dev)[0], "usb_host") in Compiled.link_bufs or getattr(Device[d], "is_usb", False)
-def is_remote(b:UOp) -> bool: return (p:=unwrap_view(b)[0]).op in (Ops.PARAM, Ops.ALLOC, Ops.EXTERN) and p.device is not None and is_usb(p.device)
+def is_remote(b:UOp) -> bool:
+  return (p:=unwrap_view(b)[0]).op in (Ops.PARAM, Ops.ALLOC, Ops.EXTERN) and p.device is not None and is_iface_usb(p.device)
 def usb_addr(b:UOp, idx:UOp, dt:DType) -> UOp: return b.getaddr("CPU") + (idx * dt.itemsize).cast(dtypes.uint64) # byte address of b[idx]
 def usb_deps(b:UOp) -> tuple[UOp, ...]: # deps through views
   return (b.src[1:] if b.op is Ops.AFTER else ()) + (usb_deps(b.src[0]) if b.op in (Ops.BITCAST, Ops.SHRINK, Ops.AFTER) else ())
@@ -386,7 +386,7 @@ def usb_chunks(call:UOp, first:int, run:int) -> list[UOp]: # gpu side. first: ch
 
 def usb_copy_rewriter(s:UOp) -> UOp|None:
   call, lin = s.without_after, s.without_after.body
-  if not is_usb(dev:=call.src[1].device) or not (copies:=[c for c in lin.src if is_staged(c)]): return None
+  if not is_iface_usb(dev:=call.src[1].device) or not (copies:=[c for c in lin.src if is_staged(c)]): return None
 
   # a run: one direction, one table
   runs, nums, n = list[tuple[bool, int, UOp, int]](), list[tuple[int, int]](), 0

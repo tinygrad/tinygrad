@@ -8,7 +8,7 @@ from tinygrad.engine.realize import run_linear
 class TestRingAllReduce(unittest.TestCase):
   def test_hierarchy(self):
     ds = tuple(f"CPU:{i}" for i in range(4))
-    with Context(ALL2ALL=1, ALLREDUCE_NODE_NDEVS=2): # two nodes of 2
+    with Context(ALL2ALL=1, NODE_NDEVS=2): # two nodes of 2
       for size in (1, 17):
         x = (Tensor.arange(4 * size, dtype=dtypes.int32).reshape(4, size) % 13).realize()
         self.assertEqual(x.shard(ds, axis=0).sum(0).tolist(), x.sum(0).tolist())

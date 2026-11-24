@@ -2,14 +2,14 @@
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
 from dataclasses import dataclass, field, replace
-from typing import Callable, cast, get_args, ParamSpec, TypeVar, TYPE_CHECKING
+from typing import Callable, cast, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod, canonicalize_device_name
 from tinygrad.helpers import Context, cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
-from tinygrad.uop.ops import UOp, Ops, sint, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
+from tinygrad.uop.ops import UOp, Ops, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.uop.ops import KernelInfo, AxisType
-from tinygrad.mixin.rand import RandMixin
+from tinygrad.mixin import Mixin
 from tinygrad.codegen import create_linear, contiguous_mops_to_view
 from tinygrad.engine.realize import run_linear, capturing
 from tinygrad.device import Buffer
@@ -105,7 +105,7 @@ def _fromnp(x: 'numpy.ndarray') -> UOp:
   ret.buffer.allocate(x)
   return ret.reshape(x.shape)
 
-class Tensor(RandMixin):
+class Tensor(Mixin):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
@@ -134,7 +134,7 @@ class Tensor(RandMixin):
     # create a UOp from the different types of inputs
     if data is None:
       data = UOp.const(0.0, _dtype)
-    elif isinstance(data, get_args(ConstType)):
+    elif isinstance(data, ConstType):
       data = UOp.const(data, _dtype)
     elif is_numpy_ndarray(data) and data.shape == ():
       data = UOp.const(data.item(), _dtype or _from_np_dtype(data.dtype))
@@ -164,9 +164,8 @@ class Tensor(RandMixin):
   @suppress_finalizing
   def __del__(self): all_tensors.pop(weakref.ref(self), None)
 
-  def _apply_uop(self, fxn:Callable[..., UOp], *x:Tensor, **kwargs) -> Tensor:
-    srcs = (self,)+x
-    if (new_uop:=fxn(*[t.uop for t in srcs], **kwargs)) is self.uop: return self
+  def _apply_uop(self, new_uop:UOp) -> Tensor:
+    if new_uop is self.uop: return self
     # directly create the Tensor
     ret = Tensor.__new__(Tensor)
     ret.uop, ret.grad, ret.is_param = new_uop, None, True
@@ -175,7 +174,7 @@ class Tensor(RandMixin):
     return ret
 
   # alu, _uop, _wrap_uop and const are used by the mixins
-  def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
+  def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(self.uop.alu(op, *(t.uop for t in src)))
   @property
   def _uop(self) -> UOp: return self.uop
   @classmethod
@@ -200,15 +199,6 @@ class Tensor(RandMixin):
   def __len__(self):
     if not self.shape: raise TypeError("len() of a 0-d tensor")
     return self.shape[0]
-
-  @property
-  def device(self) -> str|tuple[str, ...]|None: return self.uop.device
-
-  @property
-  def shape(self) -> tuple[sint, ...]: return self.uop.shape
-
-  @property
-  def dtype(self) -> DType: return self.uop.dtype
 
   # ***** data handlers ****
 
@@ -557,8 +547,8 @@ class Tensor(RandMixin):
 
   # ***** movement ops *****
 
-  def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, op=op, arg=arg)
-  def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
+  def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(self.uop._mop(op, arg))
+  def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(self.uop._rop(op, axis))
 
   def __setitem__(self, indices, v:Tensor|PyConst|list|tuple) -> None:
     if self.dtype in dtypes.weaks: raise RuntimeError("cannot setitem into a weak tensor; it has no storage")

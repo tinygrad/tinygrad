@@ -2,8 +2,8 @@ from dataclasses import replace, dataclass, field
 from collections import deque
 import itertools, functools, time, inspect
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC, SCACHE, BASEDIR
-from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile
-from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile, prod
+from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored, NO_MEMORY_PLANNER
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
@@ -24,7 +24,7 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.codegen.multi import multi_pm
-from tinygrad.codegen.prepare import pm_mops, expand_bitcast, _mop_index, prepare_rangeify
+from tinygrad.codegen.prepare import pm_mops, expand_bitcast, prepare_rangeify
 from tinygrad.codegen.indexing import _stack_select
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
@@ -47,14 +47,8 @@ def build_range_map(sink:UOp) -> dict[tuple, int]:
   return ctx
 
 def expand_reduce(r:UOp):
-  range_srcs = []
-  new_axes = []
-  for u in r.src[1:]:
-    if u.op == Ops.RANGE:
-      range_srcs.append(u)
-    else:
-      for i,s in enumerate(u.shape):
-        if s > 1: new_axes.append(i)
+  range_srcs, expanded = partition(r.src[1:], lambda u: u.op is Ops.RANGE)
+  new_axes = [i for u in expanded for i,s in enumerate(u.shape) if s > 1]
   if len(new_axes) == 0: return None
   assert r.arg[1] == 0
   # permute so new_axes come to front, then reduce
@@ -90,12 +84,10 @@ def expand_broadcast(x:UOp):
   return x.replace(src=tuple([u.expand(shape) for u in x.src]))
 
 def broadcast_and_devec_wmma(b:UOp):
-  shapes = [u.shape[:-1] for u in b.src]
-  if not any(shapes): return None
-  shape = _broadcast_shape(*shapes)
+  if not (shape:=b.shape[:-1]): return None
   src_expanded = tuple([u.expand(shape+(u.shape[-1],)) for u in b.src])
   src = []
-  for idx in itertools.product(*[range(i) for i in b.shape[:-1]]):
+  for idx in itertools.product(*[range(i) for i in shape]):
     src.append(b.replace(src=tuple([x.index(*idx) for x in src_expanded])))
   return UOp.stack(*src).reshape(b.shape)
 
@@ -114,19 +106,20 @@ pm_expand_broadcast = pm_wmma_add+PatternMatcher([
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
 
-def index_lane(x:UOp, idx:tuple[UOp, ...]) -> UOp:
-  # x.index(*idx) with the index pushed through the movement ops
-  ret = x.index(*idx)
-  while ret.op is Ops.INDEX and ret.src[0].op in GroupOp.Movement and (nxt:=_mop_index(ret.src[0], ret)) is not None: ret = nxt
-  return ret
+def index_lanes(x:UOp) -> list[UOp]:
+  # RESHAPE preserves row-major lane order and EXPAND prepends broadcast axes.
+  if x.max_numel() == 0: return []
+  if x.op is Ops.RESHAPE and all_int(x.src[0].shape): return index_lanes(x.src[0])
+  if x.op is Ops.EXPAND: return index_lanes(x.src[0]) * int(prod(x.marg))
+  if not x.shape: return [x]
+  return [x.index(*idx) for idx in itertools.product(*map(range, x.shape))]
 
 def do_devectorize(b:UOp):
   if b.shape == (): return None
   # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
   if not all(x.shape == b.shape or x.base.is_invalid for x in b.src): return None
-  src = []
-  for idx_c in itertools.product(*[[UOp.const(i) for i in range(x)] for x in b.shape]):
-    src.append(b.replace(src=tuple(x.base if x.base.is_invalid else index_lane(x, idx_c) for x in b.src)))
+  lanes = [[x.base] * b.max_numel() if x.base.is_invalid else index_lanes(x) for x in b.src]
+  src = [b.replace(src=values) for values in zip(*lanes, strict=True)]
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
@@ -628,8 +621,8 @@ pm_resolve_linear_call = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), resolve_linear_call),
 ])+pm_flatten_linear
 
-schedule_cache: dict[bytes, UOp] = {}
-# ctx is just for DEBUG on inner
+# Body hashes cache schedules; (exported function, NO_MEMORY_PLANNER) keys cache final LINEARs.
+schedule_cache: dict[bytes|tuple[UOp, int], UOp] = {}
 def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = call.body
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
@@ -724,6 +717,8 @@ pm_contiguous_views = PatternMatcher([
 @rewrite_group(lambda fn,ret,**_: f"Schedule {len(fn.src)} -> {len(ret.src)}")
 def create_linear(fn:UOp) -> UOp:
   """an exported function (no runtime state) to the LINEAR of calls that runs it, on its EXTERNs, view args and ALLOCs"""
+  key = (fn, NO_MEMORY_PLANNER.value)
+  if SCACHE and (hit:=schedule_cache.get(key)) is not None: return hit
   # a contiguous view of storage is a different buffer: it's an input of the scheduled function, the call arg is the view
   views: dict[UOp, int] = {}
   fn = graph_rewrite(fn, pm_contiguous_views, ctx=views, name="contiguous views")
@@ -741,4 +736,6 @@ def create_linear(fn:UOp) -> UOp:
 
   # the storage it allocates gets canonical slots, so the linear only depends on fn. map back binds each to fresh storage
   allocs = [u for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL]
-  return linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
+  ret = linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
+  if SCACHE: schedule_cache[key] = ret
+  return ret

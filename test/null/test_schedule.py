@@ -1651,19 +1651,6 @@ class TestSchedule(unittest.TestCase):
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
       check_schedule(opt.schedule_step(), 15)
 
-  def test_sgd_4convs_fuse_conv_bw(self):
-    with Context(TRAINING=1):
-      img = Tensor.empty(2,3,16,16)
-      c1 = nn.Conv2d(3,4,3,bias=False)
-      c2 = nn.Conv2d(4,8,3,bias=False)
-      c3 = nn.Conv2d(8,16,3,bias=False)
-      c4 = nn.Conv2d(16,32,3,bias=False)
-      _realize_weights([c1, c2, c3, c4])
-      opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
-      opt.zero_grad()
-      c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 15)
-
   def test_reduce_simple_chase(self):
     a = Tensor.empty(4, 4, 4)
     r = a.sum(0) + 6

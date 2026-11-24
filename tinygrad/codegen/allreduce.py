@@ -1,5 +1,5 @@
 import functools, itertools
-from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, ALLREDUCE_NODE_NDEVS, getenv
+from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, NODE_NDEVS, getenv
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import AddrSpace
 
@@ -20,7 +20,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   # contiguous before we copy it
   buf = buf.contiguous()
 
-  if concrete and (hdev:=ALLREDUCE_NODE_NDEVS.value) > 0 and ndev % hdev == 0:
+  if concrete and (hdev:=NODE_NDEVS.value) > 0 and ndev % hdev == 0:
     d, flat, fold = buf.device, buf.reshape((numel,)), functools.partial(functools.reduce, lambda x, y: x.alu(op, y))
     boxes, cs = [range(b, b + hdev) for b in range(0, ndev, hdev)], [(numel * k // hdev, numel * (k + 1) // hdev) for k in range(hdev)]
     owned = {i: fold([flat.mselect(j).shrink((cs[k],)).copy_to_device(d[i]) for j in box]) for box in boxes for k, i in enumerate(box)}

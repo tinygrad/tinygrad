@@ -150,7 +150,7 @@ def main() -> None:
   prg = next((p for p in profile if isinstance(p, ProfileProgramEvent) and p.name == args.kernel), None)
   dev = next((p for p in profile if isinstance(p, ProfileDeviceEvent) and p.device == prg.device), None)
   assert prg is not None and dev is not None, "must have program binary and device props"
-  target = f"gfx{dev.props['gfx_target_version']//1000}"
+  target = unwrap(dev.target).arch
   sqtt = [p for p in profile if isinstance(p, ProfileSQTTEvent) and p.kern == prg.tag]
 
   decoded = amd_decode((text:=get_elf_section(prg.lib, ".text")).content, get_arch(target), text.header.sh_addr)

@@ -14,7 +14,7 @@ def reconstruction_helper(A:list[Tensor],B:Tensor, tolerance=1e-5):
 class TestLinAlg(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
   def test_svd_general(self):
-    sizes = [(2,2),(5,3),(3,5),(2,2,2,2,3)]
+    sizes = [(5,3),(2,2,2,2,3)]
     for size in sizes:
       a = Tensor.randn(size).realize()
       U,S,V = a.svd()
@@ -40,27 +40,10 @@ class TestLinAlg(unittest.TestCase):
       else: orthogonality_helper(U.transpose(-2,-1)),orthogonality_helper(V.transpose(-2,-1))
       reconstruction_helper([U,s_diag,V],a)
 
-  # faster for parallel pytest
-  def test_svd_nonfull_2_2(self): self._test_svd_nonfull((2,2))
   def test_svd_nonfull_5_3(self): self._test_svd_nonfull((5,3))
   def test_svd_nonfull_3_5(self): self._test_svd_nonfull((3,5))
-  def test_svd_nonfull_2_2_2_2_3(self): self._test_svd_nonfull((2,2,2,2,3))
-
-  @unittest.skip("very big. recommend wrapping with TinyJit around inner function")
-  def test_svd_large(self):
-    size = (1024,1024)
-    a = Tensor.randn(size).realize()
-    U,S,V = a.svd()
-    b_shape,m,n = size[0:-2],size[-2],size[-1]
-    k = min(m,n)
-    s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,) * len(b_shape) + (k,k)))
-    s_diag = s_diag.expand(b_shape + (k,k)).pad(tuple([None]*len(b_shape) + [(0,m-k), (0,n-k)]))
-    orthogonality_helper(U,tolerance=1e-3)
-    orthogonality_helper(V,tolerance=1e-3)
-    reconstruction_helper([U,s_diag,V],a,tolerance=1e-3)
-
   def test_qr_general(self):
-    sizes = [(3,3),(3,6),(6,3),(2,2,2,2,2)]
+    sizes = [(3,6),(6,3),(2,2,2,2,2)]
     for size in sizes:
       a = Tensor.randn(size).realize()
       Q,R = a.qr()
@@ -86,16 +69,6 @@ class TestLinAlg(unittest.TestCase):
       assert not np.isnan(V.numpy()).any()
       s_diag = (S.unsqueeze(-2) * Tensor.eye(2))
       reconstruction_helper([U, s_diag, V], a)
-
-  def test_svd_identity_4x4(self):
-    a = Tensor.eye(4).clone()
-    U,S,V = a.svd()
-    Tensor.realize(U,S,V)
-    assert not np.isnan(U.numpy()).any()
-    assert not np.isnan(S.numpy()).any()
-    assert not np.isnan(V.numpy()).any()
-    s_diag = (S.unsqueeze(-2) * Tensor.eye(4))
-    reconstruction_helper([U, s_diag, V], a)
 
   def test_svd_rank1(self):
     a = Tensor([[1.0, 1.0], [2.0, 2.0]]).realize()

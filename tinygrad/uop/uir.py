@@ -54,8 +54,7 @@ def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and a
 
 def _const_str(x:UOp) -> str:
   """CONSTs are weak or bool, so literals are bare. typed values are CASTs of these"""
-  if x.is_invalid: return "invalid"
-  return str(x.val).lower() if isinstance(x.val, bool) else repr(x.val) if isinstance(x.val, int) else repr(float(x.val))
+  return str(x.val).lower()
 
 def _val(v, named:bool, ref:Callable[[UOp], str|None]) -> str:
   """literals and one-word strings are bare, tuples are [a b], a UOp with a line is its %id, any other python object is `module:repr`"""
@@ -206,7 +205,7 @@ def parse_uir(text:str) -> UOp:
     if isinstance(v:=_lit(t), str):
       if bare and re.fullmatch(r"[a-z_0-9]+", t): return expr(names, t, None)   # an assignment's value can be a bare op
       raise ValueError(f"{t!r} is not a %name or a literal" + (f", write ({t} ...)" if t in _ops else ""))
-    return UOp(Ops.CONST, arg=v if isinstance(v, int) else dtypes.weakfloat.const(v))
+    return UOp.const(v)
   def scope(names:dict[str, UOp|None], close:str|None) -> UOp:
     root: UOp|None = None
     while toks and toks[0] != "}":

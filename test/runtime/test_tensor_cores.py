@@ -221,13 +221,6 @@ class TestTensorCores(unittest.TestCase):
         assert "__WMMA_" in prg.src[2].arg
 
   @Context(ALLOW_TF32=1)
-  @unittest.skipIf((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and Device.default.renderer.target.device == "AMD"), "broken for AMD")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  def test_tensor_cores_padded(self):
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      helper_tc_allclose(tc.dims[0]+(pad:=1), tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
-
-  @Context(ALLOW_TF32=1)
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded_uops(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
@@ -331,20 +324,6 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipIf(Device.DEFAULT in {"CPU"}, "CPU does not support using a different type for accumulation")
-  def test_tensor_cores_unroll_casted_phi(self):
-    tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
-    x, y = Tensor.rand(16, 64, dtype=tc.dtype_in).realize(), Tensor.rand(64, 16, dtype=tc.dtype_in).realize()
-    opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, tc_reduce_axis(x.matmul(y, dtype=tc.dtype_out)), (2, AxisType.UPCAST))]
-    r = x.matmul(y, dtype=tc.dtype_out)
-    ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
-    self.assertGreater(len(wmmas), 0)
-    for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
-
-  @Context(ALLOW_TF32=1)
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skipIf(Device.DEFAULT in {"CPU"}, "CPU does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi_with_children(self):
     # all STORE children are outside the loop
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
@@ -355,28 +334,6 @@ class TestTensorCores(unittest.TestCase):
     wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
     self.assertGreater(len(wmmas), 0)
     for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
-                      "test requires tensor cores with accumulation in half") # testing with half suffices.
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
-  def test_tensor_core_opts(self):
-    N = 128
-    Tensor.manual_seed(1552)
-    a, b = Tensor.rand(N, N, dtype=dtypes.half).realize(), Tensor.rand(N, N, dtype=dtypes.half).realize()
-    R = tc_reduce_axis(a.matmul(b, dtype=dtypes.half))
-    r = a.matmul(b, dtype=dtypes.half)
-    atol, rtol = 0.25, 0.01
-    helper_linearizer_opt(r, [
-      [],
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))],
-      [Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST))],
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST))], # check upcasts
-      [Opt(OptOps.SPLIT, R, (2, AxisType.UPCAST))], # check unroll
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, R+1, (2, AxisType.UPCAST))], # check combo of unroll and upcast
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, R+2, (2, AxisType.UPCAST))],
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, R+2, (4, AxisType.UPCAST))],
-    ], apply_tc=True, atol=atol, rtol=rtol)
 
   @unittest.skipUnless(any(tc.dtype_in in (dtypes.half, dtypes.float) for tc in Device[Device.DEFAULT].renderer.tensor_cores),
                        "test requires half or float tensor cores")

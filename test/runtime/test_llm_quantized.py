@@ -24,7 +24,6 @@ class QuantLinearMixin:
     elif ggml_type == 10:
       packed[:, 80:82] = np.array([0.001], dtype=np.float16).view(np.uint8)
       packed[:, 82:84] = np.array([0.0002], dtype=np.float16).view(np.uint8)
-    elif ggml_type == 39: packed.reshape(-1, 17)[:, 0] = rng.integers(122, 128, packed.size//17)  # mxfp4 e8m0 scales
     elif ggml_type in SMALL_BLOCK_QUANTS:
       packed.reshape(-1, SMALL_BLOCK_QUANTS[ggml_type]*2)[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
     else: packed[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
@@ -131,10 +130,8 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
   def test_quant_linear_fallback(self):
     if amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("run with DISABLE_AMD_KERNELS=1")
-    # per-type dequant math on the generic path is covered by test_gguf, spot check a representative set here
-    for typ in (12, 14, 17, 23):
-      with self.subTest(ggml_type=typ):
-        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=16, token_counts=(1, 3), bias=True, custom=False)
+    # per-type dequant math on the generic path is covered by test_gguf, check fallback dispatch with Q4_K here
+    self._test_quant_linear(12, QUANT_SIZES[12], in_features=256, out_features=16, token_counts=(1, 3), bias=True, custom=False)
 
 def fp8_decode(bits, fnuz=False):
   exponent, mantissa = ((bits >> 3) & 15).astype(np.int32), (bits & 7).astype(np.float32)

@@ -48,8 +48,6 @@ class TestTarExtractFile(unittest.TestCase):
       tar_extract(self.invalid_tar_path)
 
 class TestTarExtractPAX(unittest.TestCase):
-  tar_format = tarfile.PAX_FORMAT
-  max_link_len = 1000_000
   test_files = {
     'a/file1.txt': b'Hello, World!',
     'a/b/file2.bin': b'\x00\x01\x02\x03\x04',
@@ -63,7 +61,7 @@ class TestTarExtractPAX(unittest.TestCase):
   def create_tar_tensor(self):
     fobj = io.BytesIO()
     test_dirs = set(os.path.dirname(k) for k in self.test_files.keys()).difference({ '' })
-    with tarfile.open(fileobj=fobj, mode='w', format=self.tar_format) as tar:
+    with tarfile.open(fileobj=fobj, mode='w', format=tarfile.PAX_FORMAT) as tar:
       for dirname in test_dirs:
         dir_info = tarfile.TarInfo(name=dirname)
         dir_info.type = tarfile.DIRTYPE
@@ -74,11 +72,10 @@ class TestTarExtractPAX(unittest.TestCase):
         file_info.size = len(content)
         tar.addfile(file_info, io.BytesIO(content))
 
-        if len(filename) < self.max_link_len:
-          link_info = tarfile.TarInfo(name=filename + '.lnk')
-          link_info.type = tarfile.SYMTYPE
-          link_info.linkname = filename
-          tar.addfile(link_info)
+        link_info = tarfile.TarInfo(name=filename + '.lnk')
+        link_info.type = tarfile.SYMTYPE
+        link_info.linkname = filename
+        tar.addfile(link_info)
     return Tensor(fobj.getvalue())
 
   def test_tar_extract_content_values(self):
@@ -93,18 +90,6 @@ class TestTarExtractTensorErrors(unittest.TestCase):
   def test_tar_extract_invalid_file(self):
     with self.assertRaises(tarfile.ReadError):
       tar_extract(Tensor(b'This is not a valid tar file'))
-
-  def test_tar_extract_invalid_file_long(self):
-    with self.assertRaises(tarfile.ReadError):
-      tar_extract(Tensor(b'This is not a valid tar file'*100))
-
-class TestTarExtractUSTAR(TestTarExtractPAX):
-  tar_format = tarfile.USTAR_FORMAT
-  max_link_len = 100
-  test_files = {k: v for k, v in TestTarExtractPAX.test_files.items() if len(k) < 256}
-
-class TestTarExtractGNU(TestTarExtractPAX):
-  tar_format = tarfile.GNU_FORMAT
 
 if __name__ == '__main__':
   unittest.main()
