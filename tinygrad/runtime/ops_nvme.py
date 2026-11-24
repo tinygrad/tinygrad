@@ -74,7 +74,7 @@ def prp_table(dev:NVMEDev, pages:list[int]) -> tuple[MMIOInterface, list[int]]:
   table[:8 * len(entries)] = struct.pack(f"<{len(entries)}Q", *entries)
   return table, table_addrs
 
-class NVMEIface(PCIIfaceBase):
+class PCIIface(PCIIfaceBase):
   def __init__(self, dev:NVMEDevice, index:int):
     # make sure the drive isn't mounted or used by md/lvm
     pcibus = filter_visible_devices(System.list_devices(*NVME_IDS), "NVME")[index][1]
@@ -103,7 +103,7 @@ class NVMEAllocator(Allocator['NVMEDevice']):
   def _unmap(self, storage:BufferStorage): self.prp_tables.pop(storage.buf).deallocate()
 
 class NVMEDevice(Compiled):
-  ifaces = [NVMEIface]
+  ifaces = [PCIIface]
 
   def __init__(self, device:str):
     self.iface = self._select_iface(device)
