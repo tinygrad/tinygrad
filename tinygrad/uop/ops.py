@@ -1222,7 +1222,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     return UOp(Ops.NATIVE, src=(src,) if src is not None else (), arg=NativeInfo(code, fmt))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
-           name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, hcq:HCQInfo|None=None) -> UOp:
+           precompile:bool=False, precompile_backward:bool=False, inline:bool=False, hcq:HCQInfo|None=None) -> UOp:
     """call a body with the given args: a plain CallInfo CALL. all inputs must be ready (buffers/params), this never
     creates ALLOCs: use call_with_outputs for calls that produce values"""
     assert self.op in OPAQUE_CALL_BODIES, f"cannot call a {self.op} body, use call_with_outputs for value-producing bodies"
@@ -1231,7 +1231,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
       f"ranges {self.ranges} are leaking out of the call in {self.render_uir()}"
     # an external C call is a CALL on a NATIVE body stating the (possibly void) return dtype, the callee
     # (a function pointer) in source, rendered as an indirect call
-    return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, inline, hcq))
+    return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, precompile, precompile_backward, inline, hcq))
   def lift_args(self, free:list[UOp]) -> UOp:
     """the CALL's body reads these from the enclosing scope: each becomes a PARAM at a new slot and its value an arg after the others.
     the value of a DEVICE range is the device number, bound per device at launch"""
@@ -1242,7 +1242,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def call_with_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
-                        name:str|None=None, precompile:bool=False, precompile_backward:bool=False,
+                        precompile:bool=False, precompile_backward:bool=False,
                         output_pos:tuple[int, ...]|None=None) -> tuple[UOp, ...]:
     """call a body producing the given values, returning the outputs. the body stores into output PARAMs, and the
     outputs are ALLOCs passed as extra inputs to the call (you AFTER on them like normal buffers).
@@ -1273,7 +1273,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     body = UOp.sink(*[p.store(v) for v, (_, p) in zip(values, outputs)])
     out = iter(rets)
     args = [next(out) if x is None else x.contiguous() if precompile else x for x in param_map]
-    call = body.call(*args, grad_fxn=grad_fxn, name=name, precompile=precompile, precompile_backward=precompile_backward)
+    call = body.call(*args, grad_fxn=grad_fxn, precompile=precompile, precompile_backward=precompile_backward)
     return tuple(r.after(call) for r in rets)
 
   # one-line convenience for the single-output case: self is the value
@@ -1311,9 +1311,10 @@ def uopfunc(fn:Callable[..., UOp]) -> Callable[..., UOp]: # sugar for body.call(
   def outlined(*args, name:str|None=None, **kwargs) -> UOp:
     bound = inspect.signature(fn).bind(*args, **kwargs).arguments
     ins = {n: a for n, a in bound.items() if isinstance(a, UOp)}
-    f = graph_rewrite(fn(**(bound|{n: param(i, n, a) for i, (n, a) in enumerate(ins.items())})), pm_renumber_slots,
-                      init_ctx=CountCtx, walk=True)
-    with Context(TRACK_MATCH_STATS=0): return f.call(*ins.values(), name=name or fn.__name__)
+    f = graph_rewrite(fn(**(bound|{n: param(i, n, a) for i, (n, a) in enumerate(ins.items())})), pm_renumber_slots, init_ctx=CountCtx, walk=True)
+    assert f.op is Ops.SINK, f"expected a sink, got {f.op}"
+    if f.arg is None: f = f.replace(arg=KernelInfo(name or fn.__name__))
+    with Context(TRACK_MATCH_STATS=0): return f.call(*ins.values())
   return functools.wraps(fn)(outlined)
 
 @dataclass(frozen=True)
@@ -1373,16 +1374,15 @@ class NativeInfo:
 @dataclass(frozen=True)
 class CallInfo:
   grad_fxn: Callable|None = None
-  name: str|None = None
   precompile: bool = False
   precompile_backward: bool = False
   inline: bool = False
   hcq: HCQInfo|None = None
   # grad_fxn can't be pickled
-  def __reduce__(self): return (CallInfo, (None, self.name, self.precompile, self.precompile_backward, self.inline, self.hcq))
+  def __reduce__(self): return (CallInfo, (None, self.precompile, self.precompile_backward, self.inline, self.hcq))
   def __repr__(self):
     gf = id(self.grad_fxn) if self.grad_fxn else None
-    return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward}, {self.inline}, {self.hcq})"
+    return f"CallInfo({gf}, {self.precompile}, {self.precompile_backward}, {self.inline}, {self.hcq})"
 
 # ******** ops in python ********
 

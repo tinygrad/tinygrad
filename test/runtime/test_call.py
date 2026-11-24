@@ -371,7 +371,7 @@ class TestArgOrder(unittest.TestCase):
   def make_intersperse_call(self, x, precompile=False):
     # the output is at position 0, the input (param slot 1) at position 1 in the call's args
     val = UOp.param(1, x.dtype, x.shape, self._dev(x)).reshape(x.shape) * 2
-    return UOp.call_with_outputs((val,), x.uop, name='t', output_pos=(0,), precompile=precompile)
+    return UOp.call_with_outputs((val,), x.uop, output_pos=(0,), precompile=precompile)
 
   def test_intersperse_returned(self):
     x = Tensor.arange(3, dtype=dtypes.int).realize()
@@ -402,7 +402,7 @@ class TestArgOrder(unittest.TestCase):
     x.requires_grad = True
     p1 = UOp.param(1, dtypes.float, x.shape, self._dev(x))
     val = p1.reshape(x.shape) * p1.reshape(x.shape)
-    outs = UOp.call_with_outputs((val,), x.uop, name='t', output_pos=(0,))
+    outs = UOp.call_with_outputs((val,), x.uop, output_pos=(0,))
     y = Tensor(outs[0], device=x.device)
     y.sum().backward()
     np.testing.assert_equal(x.grad.numpy(), [2, 4, 6])
@@ -770,8 +770,8 @@ class TestCallInKernel(unittest.TestCase):
     x = Tensor.custom_kernel(Tensor.arange(5).clone().realize(), fxn=lambda A: kernel(A, extra=True))[0]
     run_linear(lin:=x.schedule_linear())
     prg2 = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer).src[1]
-    self.assertIs(call.body, next(u.body for u in prg2.src if u.op is Ops.CALL and u.arg.name == "plus2"))
-    self.assertIs(first_binary, next(u.body.src[3] for u in prg2.src if u.op is Ops.CALL and u.arg.name == "plus2"))
+    self.assertIs(call.body, next(u.body for u in prg2.src if u.op is Ops.CALL and u.body.src[0].arg.name == "plus2"))
+    self.assertIs(first_binary, next(u.body.src[3] for u in prg2.src if u.op is Ops.CALL and u.body.src[0].arg.name == "plus2"))
     self.assertIs(call_runtime, get_runtime(Device.DEFAULT, call.body))
     self.assertListEqual(x.tolist(), Tensor.arange(5).add(2).tolist())
 

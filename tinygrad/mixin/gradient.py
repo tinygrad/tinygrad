@@ -48,8 +48,7 @@ def call_gradient(grads:dict[UOp, UOp], k:UOp, needed:set[int]) -> tuple[UOp|Non
   bwd_args = [p if p.arg.slot < 0 else args[p.arg.slot] for p in used]
   bwd_body = bwd_body.substitute({p:p.replace(arg=dataclasses.replace(p.arg, slot=i, name=None, val=None))
                                   for i,p in enumerate(used)}, walk=True)
-  bwd_outs = dict(zip(grad_bodies, UOp.call_with_outputs(bwd_body.src, *bwd_args,
-                                                       name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)))
+  bwd_outs = dict(zip(grad_bodies, UOp.call_with_outputs(bwd_body.src, *bwd_args, precompile=k.arg.precompile_backward)))
   return (None,) + tuple(bwd_outs.get(i) for i in range(len(k.src)-1))
 
 def partial_store_gradient(ctx:UOp, dest:UOp, view:UOp):
