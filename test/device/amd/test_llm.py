@@ -346,6 +346,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
       self._test_flash_decode(8, 2, 256, 128, 37, symbolic=True)
 
   def test_flash_attention_decode_gqa_tail(self): self._test_flash_decode(3, 1, 192, 64, 37)
+  def test_flash_attention_decode_large_gqa_group(self): self._test_flash_decode(8, 1, 256, 256, 73)
 
   def _test_flash_decode(self, heads, kv_heads, dim, n, valid, symbolic=False):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")

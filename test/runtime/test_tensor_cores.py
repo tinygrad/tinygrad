@@ -344,5 +344,19 @@ class TestTensorCores(unittest.TestCase):
     with Context(ALLOW_TF32=1):
       helper_linearizer_opt(a.matmul(b, dtype=tc.dtype_out), [[Opt(OptOps.TC, 0, (-1, 2, 2))]], check_default_opt=False, atol=3e-2, rtol=1e-3)
 
+  @unittest.skipUnless(any(tc.dtype_in in (dtypes.half, dtypes.float) for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+                       "test requires half or float tensor cores")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith(("gfx11", "gfx12")),
+                   "TODO: LLVM AMDGPU miscompiles RDNA WMMA with masked operands, passes on PYTHON::gfx1100")
+  def test_tc_padto_full_upcast(self):
+    # a fully upcast pad lane is gated to 0 on the WMMA operand
+    tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in in (dtypes.half, dtypes.float))
+    Tensor.manual_seed(3)
+    a, b = Tensor.rand(17, 23, dtype=tc.dtype_in).realize(), Tensor.rand(23, 29, dtype=tc.dtype_in).realize()
+    with Context(ALLOW_TF32=1):
+      helper_linearizer_opt(a.matmul(b, dtype=tc.dtype_out),
+                            [[Opt(OptOps.TC, 0, (-1, 2, 1)), Opt(OptOps.PADTO, 0, 4), Opt(OptOps.SPLIT, 0, (0, AxisType.UPCAST))]],
+                            check_default_opt=False, atol=3e-2, rtol=1e-3)
+
 if __name__ == '__main__':
   unittest.main()

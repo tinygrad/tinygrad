@@ -1465,6 +1465,7 @@ class TestOps(TensorTestCase):
     helper_test_op(None, lambda x: x.all(), vals=[[True, False]], forward_only=True)
     helper_test_op(None, lambda x: x.all(), vals=[[False, False]], forward_only=True)
     helper_test_op([()], lambda x: x.all(), forward_only=True)
+    helper_test_op(None, lambda: torch.ones(2**15).bool().all(), lambda: Tensor.ones(2**15).bool().all(), vals=[], forward_only=True)
   def test_all_axis(self):
     helper_test_op([(3,4,5,6)], lambda x: x.all(axis=(1,2)), forward_only=True)
   def test_all_zero_axis(self):
@@ -2051,7 +2052,6 @@ class TestOps(TensorTestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w),
       lambda x,w: Tensor.conv2d(x,w), grad_rtol=1e-5)
 
-  # expect reduce nodes == 3
   def test_simple_conv2d_batched(self):
     helper_test_op([(2,4,9,9), (4,4,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w),
@@ -2331,6 +2331,10 @@ class TestOps(TensorTestCase):
           lambda x: Tensor.avg_pool2d(x, kernel_size=(5,5), padding=1), rtol=1e-5)
     self.helper_test_exception([shape], lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(2,2), padding=(1,1,1)),
                                lambda x: Tensor.avg_pool2d(x, kernel_size=(2,2), padding=(1,1,1)), expected=(RuntimeError, ValueError))
+    # regression test for https://github.com/tinygrad/tinygrad/pull/7581
+    helper_test_op([(1,1,8,8)],
+      lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(1,2), padding=(0,1), stride=(5,1)),
+      lambda x: Tensor.avg_pool2d(x, kernel_size=(1,2), padding=(0,1), stride=(5,1)), rtol=1e-5)
 
   @slow_test
   def test_avg_pool2d_padding_not_counted(self):
@@ -2704,7 +2708,8 @@ class TestOps(TensorTestCase):
 
   def test_cross_entropy_class_probabilities(self):
     helper_test_op([(32,), (32,)], lambda x,y: torch.nn.functional.cross_entropy(x, y), lambda x,y: x.cross_entropy(y))
-    helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y), lambda x,y: x.cross_entropy(y))
+    helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, label_smoothing=0.3),
+                                       lambda x,y: x.cross_entropy(y, label_smoothing=0.3))
     helper_test_op([(32,4,4,4), (32,4,4,4)], lambda x,y: torch.nn.functional.cross_entropy(x, y), lambda x,y: x.cross_entropy(y))
 
   def test_cross_entropy_class_indices(self):

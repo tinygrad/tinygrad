@@ -24,7 +24,6 @@ class QuantLinearMixin:
     elif ggml_type == 10:
       packed[:, 80:82] = np.array([0.001], dtype=np.float16).view(np.uint8)
       packed[:, 82:84] = np.array([0.0002], dtype=np.float16).view(np.uint8)
-    elif ggml_type == 39: packed.reshape(-1, 17)[:, 0] = rng.integers(122, 128, packed.size//17)  # mxfp4 e8m0 scales
     elif ggml_type in SMALL_BLOCK_QUANTS:
       packed.reshape(-1, SMALL_BLOCK_QUANTS[ggml_type]*2)[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
     else: packed[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
