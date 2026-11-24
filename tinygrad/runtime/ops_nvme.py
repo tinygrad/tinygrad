@@ -111,8 +111,7 @@ class NVMEDevice(Compiled):
   def __init__(self, device:str):
     self.iface = self._select_iface(device)
     self.nvme = cast(NVMEDev, self.iface.dev_impl)
-    super().__init__(device, NVMEAllocator(self), None, props={"max_xfer": self.nvme.max_xfer, "lba_shift": self.nvme.lba_shift,
-                                                              "size": self.nvme.size, "db_stride": self.nvme.db_stride})
+    super().__init__(device, NVMEAllocator(self), None, props={k: getattr(self.nvme, k) for k in ("max_xfer", "lba_shift", "size", "db_stride")})
   def synchronize(self, timeout:int|None=None): pass
 
 # *****************
@@ -134,9 +133,8 @@ def nvme_qid(drive:str, gpu:str, queue:str) -> int:
 
 def nvme_copies(queue:UOp, calls:list[UOp]) -> list[list[tuple]]: # builds the commands for all reads from one drive on one gpu queue
   drive, gpu, qn = to_tuple(get_call_arg_uops(calls[0])[1].device)[0], queue.device, queue.arg.name
-  t, entries = Device.target_for(drive), NVMEQueue.entries
-  max_xfer, lba_shift, size = t.get("max_xfer", 0), t.get("lba_shift", 0), t.get("size", 0)
-  sq_db, cq_db = doorbells(nvme_qid(drive, gpu, qn), t.get("db_stride", 0))
+  max_xfer, lba_shift, size, db_stride = (Device.target_for(drive).get(k, 0) for k in ("max_xfer", "lba_shift", "size", "db_stride"))
+  (sq_db, cq_db), entries = doorbells(nvme_qid(drive, gpu, qn), db_stride), NVMEQueue.entries
   def mem(name:str, size:int, dtype=dtypes.uint8) -> UOp: return UOp.extern((size,), dtype, drive, to_name(gpu, qn, name))
   sq, cq, regs = mem("sq", 0x1000).getaddr(gpu), mem("cq", 0x1000).getaddr(gpu), mem("regs", cq_db + 4).getaddr(gpu)
 
