@@ -80,7 +80,7 @@ def function(fxn=None, *, precompile:bool=False, precompile_backward:bool=False,
         buf_strs = '\n  '.join(f"{i}: dtype={b.dtype}, size={b.max_numel()}, device={b.device}" for i,b in enumerate(implicit_buffers))
         raise RuntimeError(f"function {name} has {len(implicit_buffers)} implicit buffer(s), but allow_implicit=False\n  {buf_strs}")
 
-    outs = UOp.call_with_outputs(uret.src if isinstance(ret, tuple) else (uret,), *call_uops, grad_fxn=grad_fxn, name=name,
+    outs = UOp.call_with_outputs(uret.src if isinstance(ret, tuple) else (uret,), *call_uops, grad_fxn=grad_fxn,
                                  precompile=precompile, precompile_backward=precompile_backward)
 
     if DEBUG >= 2:

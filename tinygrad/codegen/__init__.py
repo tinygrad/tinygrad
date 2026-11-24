@@ -418,8 +418,10 @@ class LowerCallsCtx:
 
 def lower_call(ctx:LowerCallsCtx, call:UOp, b:UOp) -> UOp|None:
   if b.op is Ops.PROGRAM and b.src[-1].op is Ops.BINARY: return None
-  bodies = ctx.names.setdefault(name:=to_function_name(call.arg.name), {})
-  ki = KernelInfo(name + (f"_{i}" if (i:=bodies.setdefault(b, len(bodies))) else ""), optimized=True, kernel=False)
+  ki = b.src[0].arg if b.op is Ops.PROGRAM else b.arg
+  assert isinstance(ki, KernelInfo) and not ki.kernel, "call in kernel requires KernelInfo(kernel=False) on the body"
+  bodies = ctx.names.setdefault(name:=to_function_name(ki.name), {})
+  ki = replace(ki, name=name + (f"_{i}" if (i:=bodies.setdefault(b, len(bodies))) else ""), optimized=True)
   if ctx.renderer.inline_prefix:
     b = graph_rewrite(b, pm_lower_calls, ctx=ctx, name="lower calls", walk=True)
     b = UOp(Ops.LINEAR, src=tuple(linearize_cleanups(list(b.src[1].src) if b.op is Ops.PROGRAM \

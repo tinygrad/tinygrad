@@ -1731,7 +1731,7 @@ def emu_loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
 def lower_body(sink:UOp, name:str) -> UOp:
   bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
   body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}, walk=True)
-  return body.call(*bufs, name=name)
+  return body.replace(arg=KernelInfo(name=name, kernel=False)).call(*bufs)
 
 instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp, UOp|None, dict[UOp, UOp]]]]] = {}
 
@@ -1772,7 +1772,8 @@ def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
     linear.extend(nodes)
     linear.append(call.replace(src=(call.body, *args)))
     if _Ctx.sgpr in call.src[1:]: seen.clear()
-  return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("emu_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
+  return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("emu_block", optimized=True, kernel=False)),
+                               UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
 def thread_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
   # thread jump-only blocks.
@@ -1849,9 +1850,9 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
 RENDER = ContextVar("RENDER", 0) # render lifted ast back to assembly
 
 def render_call(call:UOp):
-  if call.arg.name.startswith("emu_"):
+  if call.body.op is Ops.PROGRAM or call.body.arg.name.startswith("emu_"):
     return UOp(Ops.LINEAR, src=tuple(y for x in call.body.toposort() if x.op is Ops.LINEAR for y in x.src if y.op in {Ops.BINARY, Ops.STACK}))
-  encoding = bytes.fromhex(call.arg.name.rsplit("_", 1)[1])
+  encoding = bytes.fromhex(call.body.arg.name.rsplit("_", 1)[1])
   words = [UOp(Ops.BINARY, arg=encoding[i:i+4]) for i in range(0, len(encoding), 4)]
   for i,x in enumerate(call.src_without_body[:len(words)]):
     words[-1-i] = UOp(Ops.BINARY, arg=int(x.src[0].arg).to_bytes(4, "little"))
@@ -1859,7 +1860,8 @@ def render_call(call:UOp):
 
 pm_render = PatternMatcher([
   (UPat(Ops.CALL, name="call"), render_call),
-  (UPat(Ops.SINK, name="root"), lambda root: next((x for x in root.toposort() if x.op is Ops.LINEAR), None)),
+  (UPat(Ops.SINK, name="root"), lambda root: next((x for x in root.toposort() if x.op is Ops.LINEAR), None)
+   if isinstance(root.arg, KernelInfo) and root.arg.kernel else None),
 ])
 
 @rewrite_group(replay="emu_process_replay")
@@ -1962,8 +1964,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
                                                             1, dtype=dtypes.int),)
     call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).shrink(((w*s, (w+1)*s),))
                  if (s:=buffers[b][1]) else p.after(*gates, w) for b,p in zip(bufs, params)]
-    block = UOp.group(body.call(*call_args, name="emu_block"), *gates, w).end(*gates).end(w).sink()
-    return block.call(*args, name="emu_waves")
+    block = UOp.group(body.call(*call_args), *gates, w).end(*gates).end(w).sink(arg=KernelInfo("emu_waves", kernel=False))
+    return block.call(*args)
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...], end:UOp) -> UOp:
     for pc, body in regions:
       if body:

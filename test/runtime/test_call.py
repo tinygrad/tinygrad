@@ -759,8 +759,8 @@ class TestCallInKernel(unittest.TestCase):
     x = Tensor.custom_kernel(Tensor.arange(5).clone().realize(), fxn=lambda A: kernel(A, extra=True))[0]
     run_linear(lin:=x.schedule_linear())
     prg2 = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer).src[1]
-    self.assertIs(call.body, next(u.body for u in prg2.src if u.op is Ops.CALL and u.arg.name == "plus2"))
-    self.assertIs(first_binary, next(u.body.src[3] for u in prg2.src if u.op is Ops.CALL and u.arg.name == "plus2"))
+    self.assertIs(call.body, next(u.body for u in prg2.src if u.op is Ops.CALL and u.body.src[0].arg.name == "plus2"))
+    self.assertIs(first_binary, next(u.body.src[3] for u in prg2.src if u.op is Ops.CALL and u.body.src[0].arg.name == "plus2"))
     self.assertIs(call_runtime, get_runtime(Device.DEFAULT, call.body))
     self.assertListEqual(x.tolist(), Tensor.arange(5).add(2).tolist())
 

@@ -4,7 +4,7 @@ from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
-from tinygrad.uop.ops import Ops, UOp, uopfunc
+from tinygrad.uop.ops import Ops, UOp, uopfunc, KernelInfo
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -201,7 +201,8 @@ class TestHostCalls(unittest.TestCase):
 
   def test_sink_calls_function(self): # a bare sink with args calls a function that writes one arg and takes the address of the other
     def sink(o:UOp, b:UOp):
-      return addr_of(UOp.param(0, dtypes.uint64, 1, name="o"), UOp.param(1, dtypes.uint8, 16, name="b")).sink().call(o, b, name="sink")
+      return addr_of(UOp.param(0, dtypes.uint64, 1, name="o"), UOp.param(1, dtypes.uint8, 16, name="b")).sink(
+        arg=KernelInfo("sink", kernel=False)).call(o, b)
     outs, b = [self._buf(1) for _ in range(2)], self._buf(16, dtypes.uint8)
     for out in outs: self.assertEqual(self._run(sink, out, b), [b.buffer.get_buf("CPU")]) # the second run reuses the program
 
@@ -277,7 +278,7 @@ class TestHostCalls(unittest.TestCase):
     def put(out:UOp, v:UOp): return out.index(0).store(v).sink()
     a, b = [cpu_buf(dtype=dtypes.uint64, name=t) for t in ("cb", "enc")]
     lowered = lower_hcq(put(a, UOp.const(1, dtypes.uint64)), put(b, UOp.const(2, dtypes.uint64)))
-    self.assertEqual(len({c.body for c in lowered.toposort(enter_calls=True) if c.op is Ops.CALL and c.arg.name == "put"}), 1)
+    self.assertEqual(len({c.body for c in lowered.toposort(enter_calls=True) if c.op is Ops.CALL and c.body.arg.name == "put"}), 1)
 
   def test_one_function_with_registers(self): # a body numbers its own registers and loops: two traces are one function
     @uopfunc
