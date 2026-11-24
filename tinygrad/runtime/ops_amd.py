@@ -4,7 +4,7 @@ import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, iterto
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, encode_cmdbuf, to_name, patch, unwrap_view, layout_args, pack_args, make_program, ccall
 from tinygrad.uop.ops import sint, UOp, ProgramInfo, Ops, UPat, PatternMatcher, KernelInfo, uopfunc
-from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled
+from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled, host_of
 from tinygrad.dtype import dtypes, DType
 from tinygrad.helpers import getenv, round_up, data64_le, PROFILE, ProfileEvent, lo32, hi32, prod, colored
 from tinygrad.helpers import ceildiv, pluralize, ContextVar, VIZ, DEV
@@ -50,8 +50,8 @@ class ProfilePMCEvent(ProfileEvent): device:str; kern:int; sched:list[PMCSample]
 
 def _queue_args(hq:HWQueue) -> list[UOp]: # the ring and its pointers, named {device}_{name}_{queue}. put is the host's copy of the write pointer
   shapes = [("ring", (RING_SIZE // 4,), dtypes.uint32, hq.devs[0])] + [(n, (1,), dtypes.uint64, hq.devs[0]) for n in ("write_ptr", "doorbell")]
-  shapes += [("put_value", (1,), dtypes.uint64, hq.dev.host)]
-  return [UOp.extern(s, dt, d, to_name(hq.dev.device, n, hq.queue)) for n, s, dt, d in shapes]
+  shapes += [("put_value", (1,), dtypes.uint64, host_of(hq.devs[0]))]
+  return [UOp.extern(s, dt, d, to_name(hq.devs[0], n, hq.queue)) for n, s, dt, d in shapes]
 
 @uopfunc
 def amd_push(cmdbuf:UOp, words:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put:UOp, unit:int=4, doorbell_lag:int=0) -> UOp:
@@ -90,6 +90,8 @@ def hdp_flush_for(dev:str) -> list[AMDReg]:
   return [getattr(nbio:=nbio_for(dev), f'regBIF_BX_PF{int(nbio.version[:2] == (7, 11))}_GPU_HDP_FLUSH_{x}') for x in ("REQ", "DONE")]
 def pm4_for(dev:str): return importlib.import_module(f"tinygrad.runtime.autogen.am.pm4_{'soc15' if gc_for(dev).version[0] == 9 else 'nv'}")
 def sdma_for(dev:str): return import_module('sdma', (4, 0, 0) if gc_for(dev).version[0] == 9 else (6, 0, 0))
+def xccs_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("xccs", dict(gfx942=8, gfx950=8).get(t.arch, 1))
+def lds_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("lds", dict(gfx950=160).get(t.arch, 64))
 
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
@@ -107,7 +109,7 @@ class AMDComputeQueue(HWQueue):
 
   def __init__(self, submit):
     super().__init__(submit)
-    self.pm4, self.gc = pm4_for(self.devs[0]), gc_for(self.devs[0])
+    self.pm4, self.gc, self.xccs = pm4_for(self.devs[0]), gc_for(self.devs[0]), xccs_for(self.devs[0])
     self.soc = import_soc(self.gc.version)
     self.profiled:list[UOp] = []
     if self.dev.pmc_enabled: self.pmc_start()
@@ -125,10 +127,10 @@ class AMDComputeQueue(HWQueue):
 
   @contextlib.contextmanager
   def pred_exec(self, xcc_mask:int): # the count fills in when the block closes
-    if self.dev.xccs > 1: self.pkt3(self.pm4.PACKET3_PRED_EXEC, xcc_mask << 24)
+    if self.xccs > 1: self.pkt3(self.pm4.PACKET3_PRED_EXEC, xcc_mask << 24)
     start = len(self.blob)
     yield
-    if self.dev.xccs > 1:
+    if self.xccs > 1:
       cnt, = struct.unpack("I", self.blob[start-4:start])
       self.blob[start-4:start] = struct.pack("I", cnt | (len(self.blob) - start) // 4)
 
@@ -228,7 +230,7 @@ class AMDComputeQueue(HWQueue):
       # sq block on gfx11+ goes down to wgps
       inst_cnt, se_cnt, sa_cnt, wgp_cnt = {"GRBM": (1, 1, 1, 1), "GL2C": (32, 1, 1, 1), "TCC": (16, 1, 1, 1),
         "SQ": (1, self.dev.se_cnt) + ((1, 1) if gfx9 else (2, self.dev.iface.props['cu_per_simd_array'] // 2))}[block]
-      end_off += (rec_size:=prod((self.dev.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
+      end_off += (rec_size:=prod((self.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
 
       # gfx11+ and later require even-numbered SQ *_SELECT registers
       regsample = f'reg{block}_PERFCOUNTER{(pcid:=next(block2pid[block]))}'
@@ -236,7 +238,7 @@ class AMDComputeQueue(HWQueue):
         raise RuntimeError(f'{block} is out of perfcounter registers: ({regsample} is not found)')
 
       self.wreg(regsel, perf_sel=idx, **({'simd_mask':0xf, 'sqc_bank_mask':0xf, 'sqc_client_mask':0xf} if gfx9 and block == "SQ" else {}))
-      sched.append(PMCSample(name, block, self.dev.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt, end_off-rec_size, rec_size, regsample))
+      sched.append(PMCSample(name, block, self.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt, end_off-rec_size, rec_size, regsample))
     self.dev.pmc_sched = sched
 
     if gfx9: self.wreg(self.gc.regSQ_PERFCOUNTER_MASK, sh0_mask=0xffff, sh1_mask=0xffff)
@@ -277,7 +279,7 @@ class AMDComputeQueue(HWQueue):
     if SQTT_LIMIT_SE:
       # Calculate number of CUs per SE to enable based on blocks count. 4 is maximum simd per CU, but on rdna we can trace only 1.
       cu_per_se = prod([x if isinstance(x, int) else 1 for x in info.global_size]) // ((self.dev.cu_cnt // self.dev.se_cnt) * 4)
-      for xcc in range(self.dev.xccs):
+      for xcc in range(self.xccs):
         with self.pred_exec(xcc_mask=1 << xcc):
           for i in range(8 if self.gc.version[0] != 9 else 4):
             if SQTT_LIMIT_SE > 1: mask = 1 if SQTT_ITRACE_SE_MASK.value & (1 << i) else 0 # only run unmasked shader engines
@@ -393,7 +395,7 @@ class AMDComputeQueue(HWQueue):
     return UOp(Ops.LINEAR, src=tuple(words), arg="kernargs").getaddr(self.devs)
 
   def exec(self, call:UOp, prg:UOp):
-    data, lib = amd_build_program(self.dev, prg, self.devs)
+    data, lib = amd_build_program(prg, self.devs)
 
     prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
     args_addr = self.kernargs(call, prg, data)
@@ -413,9 +415,9 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
     self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, waves=self.dev.scratch_waves, wavesize=self.dev.scratch_wavesize(data.private_segment_size))
-    for xcc_id in range(self.dev.xccs): # architected flat scratch: each xcc gets its part
+    for xcc_id in range(self.xccs): # architected flat scratch: each xcc gets its part
       with self.pred_exec(xcc_mask=1 << xcc_id):
-        self.wreg(self.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, (scratch_addr + data.private_segment_size // self.dev.xccs * xcc_id) >> 8)
+        self.wreg(self.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, (scratch_addr + data.private_segment_size // self.xccs * xcc_id) >> 8)
     self.wreg(self.gc.regCOMPUTE_RESTART_X, 0, 0, 0)
     self.wreg(self.gc.regCOMPUTE_USER_DATA_0, *user_regs)
     self.wreg(self.gc.regCOMPUTE_RESOURCE_LIMITS, self.gc.regCOMPUTE_RESOURCE_LIMITS.encode(waves_per_sh=getenv("WAVES_PER_SH")))
@@ -443,7 +445,7 @@ class AMDComputeQueue(HWQueue):
   def submit(self, cmdbuf:UOp) -> UOp: # the ring gets an indirect buffer packet: 4 dwords, put stays aligned so it never wraps mid packet
     base, off = unwrap_view(cmdbuf)
     blob = struct.pack("IIII", self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), 0, 0, cmdbuf.max_numel() // 4 | self.pm4.INDIRECT_BUFFER_VALID)
-    ib = UOp.alloc((16,), dtypes.uint8, device=self.dev.host, name=to_name("ib", self.queue))
+    ib = UOp.alloc((16,), dtypes.uint8, device=host_of(self.devs[0]), name=to_name("ib", self.queue))
     return amd_push(self.prof_bump(cmdbuf), patch(ib, [(4, base.getaddr(self.devs) + off)], blob), *_queue_args(self))
 
 class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets: a dispatch per kernel, the pm4 between them wrapped as an ib
@@ -468,7 +470,7 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
   def exec_barrier(self): pass
 
   def exec(self, call:UOp, prg:UOp):
-    data, lib = amd_build_program(self.dev, prg, self.devs)
+    data, lib = amd_build_program(prg, self.devs)
     self.dev.scratch_buffer(data.private_segment_size) # the queue descriptor holds the scratch
     if self.dev.prof_enabled: slot = self.prof_start(prg.arg, lib)
     self.close_run(len(self.blob))
@@ -482,7 +484,7 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     base, off = unwrap_view(cmdbuf)
     self.blob, self.patches = bytearray(), [] # q again, for the aql stream
     self.q(*UOp.sink(*self.pkts).substitute({self.cmd_addr: base.getaddr(self.devs) + off}).src)
-    aql = encode_cmdbuf(self, name="aql", device=self.dev.host)
+    aql = encode_cmdbuf(self, name="aql", device=host_of(self.devs[0]))
     return amd_push(self.prof_bump(cmdbuf), aql, *_queue_args(self), unit=64, doorbell_lag=1)
 
 # *****************
@@ -525,7 +527,7 @@ class AMDSDMAQueue(HWQueue):
 
   def submit(self, cmdbuf:UOp) -> UOp: return amd_sdma_submit(cmdbuf, *_queue_args(self))
 
-  def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin, device=self.dev.host))
+  def encode(self) -> UOp: return self.submit(encode_cmdbuf(self, self.lin, device=host_of(self.devs[0])))
 
 @dataclass(frozen=True)
 class AMDProgramData:
@@ -533,11 +535,11 @@ class AMDProgramData:
   private_segment_size:int; group_segment_size:int; kernargs_segment_size:int # noqa: E702
   enable_dispatch_ptr:int; enable_private_segment_sgpr:int # noqa: E702
 
-def amd_build_program(dev, prg:UOp, devs:tuple[str, ...]) -> tuple[AMDProgramData, UOp]:
-  data, image = _amd_program_image(dev, prg.src[3].arg)
+def amd_build_program(prg:UOp, devs:tuple[str, ...]) -> tuple[AMDProgramData, UOp]:
+  data, image = _amd_program_image(devs[0], prg.src[3].arg)
   return data, patch(make_program(prg, len(image), devs[0]), [], image)
 
-def _amd_program_image(dev, lib:bytes) -> tuple[AMDProgramData, bytes]:
+def _amd_program_image(dev:str, lib:bytes) -> tuple[AMDProgramData, bytes]:
   image, sections, relocs = elf_loader(lib)
   rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")
   for off, sym, typ, addent in relocs:
@@ -545,12 +547,12 @@ def _amd_program_image(dev, lib:bytes) -> tuple[AMDProgramData, bytes]:
     image[off:off+8] = struct.pack('<q', sym - off + addent)
   desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(
     bytes(image[rodata:rodata+ctypes.sizeof(amdgpu_kd.llvm_amdhsa_kernel_descriptor_t)]))
-  if (lds:=((desc.group_segment_fixed_size+511)//512)&0x1FF) > (dev.iface.props['lds_size_in_kb']*1024)//512:
+  if (lds:=((desc.group_segment_fixed_size+511)//512)&0x1FF) > lds_for(dev)*1024//512:
     raise RuntimeError("Too many resources requested: group_segment_size")
   edp = desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
 
   data = AMDProgramData(desc_offset=rodata, entry_point_offset=rodata + desc.kernel_code_entry_byte_offset,
-    rsrc1=desc.compute_pgm_rsrc1 | ((1<<20) if dev.target[0]==11 else 0),  # priv=1 on gfx11 for cwsr
+    rsrc1=desc.compute_pgm_rsrc1 | ((1<<20) if gc_for(dev).version[0]==11 else 0),  # priv=1 on gfx11 for cwsr
     rsrc2=desc.compute_pgm_rsrc2 | (lds<<15), rsrc3=desc.compute_pgm_rsrc3, wave32=bool(desc.kernel_code_properties & 0x400),
     private_segment_size=desc.private_segment_fixed_size,
     group_segment_size=desc.group_segment_fixed_size, kernargs_segment_size=desc.kernarg_size, enable_dispatch_ptr=edp,
@@ -865,7 +867,7 @@ class AMDDevice(Compiled):
     allocator = USBAllocator(self) if self.is_usb else AMDAllocator(self)
     super().__init__(device, allocator, None, arch=self.arch, props={"gc": gc, "nbio": nbio, "xccs": self.xccs,
                      "se": self.se_cnt, "cu": self.cu_cnt, "cu_per_sa": self.iface.props['cu_per_simd_array'],
-                     "aql": DEV.target("AMD").get("aql", int(self.xccs > 1)), "copy": 0})
+                     "lds": self.iface.props['lds_size_in_kb'], "aql": DEV.target("AMD").get("aql", int(self.xccs > 1)), "copy": 0})
     self.props["copy"] = int(self.sdma_queue(0) is not None) # queue setup allocates buffers that check it
 
     # Scratch setup
