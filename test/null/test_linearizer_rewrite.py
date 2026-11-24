@@ -66,8 +66,8 @@ class TestLinearizerRewrite(unittest.TestCase):
     uops = to_uops_list([out.after(store).index(outer).store(UOp.const(2, dtypes.int))])
     self.assertEqual([u.op for u in uops if u.op in (Ops.RANGE, Ops.STORE, Ops.END)],
                      [Ops.RANGE, Ops.RANGE, Ops.STORE, Ops.END, Ops.STORE, Ops.END])
-    ranges, ends = [u for u in uops if u.op is Ops.RANGE], [u for u in uops if u.op is Ops.END]
-    self.assertEqual([e.src[1] for e in ends], ranges[::-1])
+    rngs, ends = [u for u in uops if u.op is Ops.RANGE], [u for u in uops if u.op is Ops.END]
+    self.assertEqual([e.src[1] for e in ends], rngs[::-1])
 
 if __name__ == '__main__':
   unittest.main()
