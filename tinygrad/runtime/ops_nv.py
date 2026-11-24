@@ -562,7 +562,7 @@ class PCIIface(PCIIfaceBase):
   def rm_control(self, obj, cmd, params=None, **kwargs): return self.dev_impl.gsp.rpc_rm_control(obj, cmd, params, self.root, **kwargs)
 
   def device_fini(self):
-    self.dev_impl.gsp.rpc_free(self.root) # fast unload keeps the channels: a leftover video channel hangs nvdec for the next driver
+    self.dev_impl.gsp.rpc_free(self.root)
     self.dev_impl.fini()
 
   def sleep(self, timeout):
