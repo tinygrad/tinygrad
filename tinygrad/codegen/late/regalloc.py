@@ -4,7 +4,7 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.x86 import ISARenderer, vdef, register_choices, LinearContext
 
 # ops that participate in register allocation
-REGALLOC_OPS = {Ops.CALL, Ops.BUFFER, Ops.RANGE, Ops.IF, Ops.ENDIF, Ops.BACKEDGE}
+REGALLOC_OPS = {Ops.CALL, Ops.BUFFER, Ops.RANGE, Ops.BACKEDGE}
 
 class LinearScanRegallocContext:
   # returns the uop that defines the virtual register

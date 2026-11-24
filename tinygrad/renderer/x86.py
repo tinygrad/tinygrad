@@ -183,13 +183,15 @@ def gated_store(ctx:itertools.count, addr:UOp, gate:UOp, val:UOp):
   sel = gate.where(addr, local.index(UOp.cconst(0, dtypes.int32)))
   return sel.store(val)
 
+def jmp_code(cond:UOp):
+  return X86Ops.JAE if cond.op is Ops.CMPLT and cond.src[0].dtype in dtypes.uints else \
+    {Ops.CMPLT:X86Ops.JGE, Ops.CMPEQ:X86Ops.JNE, Ops.CMPNE:X86Ops.JE}[cond.op]
+
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
   # IF jumps over its body on the inverse condition, preserving ordering deps around the flag compare
   (UPat(Ops.IF, src=(UPat(GroupOp.Comparison, name="cond").or_after(), UPat()), arg=None, name="x"), lambda x,cond:
-    x.replace(src=(cmp(cond).after(*(x.src[0].src[1:] if x.src[0].op is Ops.AFTER else ())),),
-      arg=(X86Ops.JAE if cond.op is Ops.CMPLT and cond.src[0].dtype in dtypes.uints
-        else {Ops.CMPLT:X86Ops.JGE, Ops.CMPEQ:X86Ops.JNE, Ops.CMPNE:X86Ops.JE}[cond.op]))),
+    x.replace(src=(cmp(cond).after(*(x.src[0].src[1:] if x.src[0].op is Ops.AFTER else ())),), arg=jmp_code(cond.without_after))),
   # vector BUFFERs get modeled in scratch space
   (UPat(Ops.BUFFER, name="x"),
    lambda ctx,x: scratch_buffer(x.dtype, n, next(ctx)) if x.addrspace is AddrSpace.REG and (n:=x.max_numel()) > 1 else None),
@@ -334,8 +336,7 @@ def load_const(x:UOp) -> UOp:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
-  (UPat().backedge(UPat(), UPat.var("m", dtypes.bool), name="x"),
-   lambda x,m: x.replace(src=(*x.src[:2], test_gate(m)), arg=X86Ops.JNE)),
+  (UPat().backedge(UPat(), UPat.var("m", dtypes.bool), name="x"), lambda x,m: UOp.ins(X86Ops.JNE, (x.src[1], x.src[0], test_gate(m)), x.dtype)),
   # **** Op -> X86Op ****
   # function abi constraints
   (UPat(Ops.PARAM), lambda: RDI),
@@ -496,21 +497,18 @@ def alloc_buffer(ctx:X86LinearContext, x:UOp):
 def label(x:UOp) -> UOp: return UOp.ins(X86Ops.LABEL, (x,), dtypes.void)
 
 pre_regalloc_matcher = PatternMatcher([
-  (UPat(Ops.IF, name="x"), lambda x: (x, [x.src[0].without_after, x])),
-  (UPat(Ops.BACKEDGE, name="x"), lambda x: (x, [x.src[2].without_after, x])),
+  (UPat(Ops.IF, name="x"), lambda x: (x, [x.src[0].without_after, x.ins(x.arg, (x, x.src[0].without_after), dtypes.void)])),
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: alloc_buffer(ctx,x) if x.addrspace is not AddrSpace.REG else None),
   (UPat(Ops.CALL, name="x"), lambda x: (x, []) if x.body.arg.code in {X86Ops.CMP, X86Ops.CMPi} else
    (x, [x.src[-1], x]) if x.body.arg.code in X86GroupOp.ReadFlags else None),
   (UPat(Ops.RANGE, dtypes.void, name="x"), lambda x: (x, [x, label(x)])),
+  (UPat(Ops.ENDIF, name="x"), lambda x: (x, [label(x.src[0])])),
 ])
 
 # ***** post register allocation *****
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [UOp.ins(X86Ops.RET, x.src, x.dtype)])),
-  (UPat(Ops.IF, name="x"), lambda x: (x, [x.ins(x.arg, (x, x.src[0].without_after), dtypes.void)])),
-  (UPat(Ops.ENDIF, name="x"), lambda x: (x, [label(x.src[0])])),
-  (UPat(Ops.BACKEDGE, name="x"), lambda x: (x, [x.ins(x.arg, (x.src[1], x.src[2].without_after), x.dtype)])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.CALL, name="x"), lambda ctx,x: (nx:=x.replace(src=(x.body,)+x.src[2:]),
    [ctx.ren.copy(x.src[1], rdef(x)), nx] if rdef(x) is not rdef(x.src[1]) else [nx]) if x.body.arg.code in X86GroupOp.TwoAddress else None),
