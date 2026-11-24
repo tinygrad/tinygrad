@@ -72,6 +72,6 @@ def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|Non
   to = red.param_like(0)
   src = buf.param_like(1)
   red = src.allreduce(*red.arg)
-  call = to.after(to.store(handle_allreduce(src, red))).sink().call(output.base, buf.contiguous(), name="allreduce", precompile=True)
+  call = to.after(to.store(handle_allreduce(src, red))).sink().call(output.base, buf.contiguous(), precompile=True)
   # symbolic dims in the views are the caller's scalars, they are args after the storage
   return output.after(call.lift_args([u for u in call.body.toposort() if u.op in {Ops.PARAM, Ops.EXTERN} and u.addrspace is AddrSpace.ALU]))

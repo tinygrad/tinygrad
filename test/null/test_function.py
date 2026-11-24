@@ -18,13 +18,11 @@ class TestFunction(unittest.TestCase):
     @function
     def f(a:Tensor) -> Tensor: return a + 1
     self.assertEqual(f.__name__, "f")
-    self.assertEqual(f(Tensor([1])).uop.src[1].arg.name, f.__qualname__)
 
   def test_method_name(self):
     class Foo:
       @function
       def __call__(self, x:Tensor) -> Tensor: return x + 1
-    assert Foo()(Tensor([1])).uop.src[1].arg.name.endswith("Foo.__call__")
 
 class TestFunctionMulti(unittest.TestCase):
   devices_2 = ("NULL:0", "NULL:1")

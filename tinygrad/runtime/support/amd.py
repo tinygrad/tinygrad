@@ -1,4 +1,4 @@
-import functools, tinygrad.runtime.autogen.am
+import functools, operator, tinygrad.runtime.autogen.am
 from dataclasses import dataclass
 from tinygrad.helpers import getbits
 
@@ -7,7 +7,7 @@ class AMDReg:
   name:str; offset:int; segment:int; fields:dict[str, tuple[int, int]]; bases:dict[int, tuple[int, ...]] # noqa: E702
   def __post_init__(self): self.addr:dict[int, int] = { inst: bases[self.segment] + self.offset for inst, bases in self.bases.items() }
 
-  def encode(self, **kwargs) -> int: return functools.reduce(int.__or__, (value << self.fields[name][0] for name,value in kwargs.items()), 0)
+  def encode(self, **kwargs) -> int: return functools.reduce(operator.or_, (value << self.fields[name][0] for name,value in kwargs.items()), 0)
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
 
   def fields_mask(self, *names) -> int:
@@ -38,10 +38,10 @@ def import_module(name:str, target:tuple[int, int, int], submod=""):
 
 def import_soc(ip): return getattr(tinygrad.runtime.autogen.am, f"soc_{ip[0]}")
 
-def import_pmc(ip) -> dict[str, tuple[str, int]]:
+def import_pmc(arch:str) -> dict[str, tuple[str, int]]:
   from tinygrad.runtime.autogen.am import pmc
   # NOTE: precise arch for mi300+, generic for others, since rocm headers lack some archs
-  return {k:x for k,v in pmc.counters.items() if (x:=v.get(f"gfx{ip[0]}{ip[1]:x}{ip[2]:x}" if ip[0] == 9 else f"gfx{ip[0]}", None)) is not None}
+  return {k:x for k,v in pmc.counters.items() if (x:=v.get(arch if arch.startswith("gfx9") else arch[:5], None)) is not None}
 
 def import_asic_regs(prefix:str, version:tuple[int, int, int], cls=AMDReg) -> dict[str, AMDReg]:
   return {reg:cls(name=reg, offset=off, segment=seg, fields=fields) for reg,(off,seg,fields) in import_module(prefix, version, submod="regs").items()}

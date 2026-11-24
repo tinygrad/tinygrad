@@ -52,7 +52,7 @@ def cuda_submit(s:UOp, ccallfn:Callable[[Any, *tuple[UOp, ...]], UOp]=ccall) -> 
   for fn, *args in [x for c in call.body.src if (x:=pm_cuda.rewrite(c, ctx=Device[q.device])) is not None]:
     stream = rt_vars.after(h).index(2 if q.arg.name.startswith("COPY") else 1).load() # the stream after the last call
     h = ccallfn(fn, *[stream if a is None else UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args])
-  return h.sink().call(UOp.extern((3,), dtypes.uint64, q.device, "handles").after(*deps), name=call.body.arg.name)
+  return h.sink(arg=KernelInfo(call.body.arg.name)).call(UOp.extern((3,), dtypes.uint64, q.device, "handles").after(*deps))
 
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("cuda_compute_submit")).call(UPat()).after(allow_any_len=True, name="s"), cuda_submit),
