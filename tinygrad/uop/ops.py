@@ -376,7 +376,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
         return self.src[0]._shape
 
       case Ops.NATIVE:
-        return self.src[0].shape if self.src else ()
+        return self.src[0]._shape if self.src else ()
 
       case Ops.BITCAST:
         ps = self.src[0]._shape
