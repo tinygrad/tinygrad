@@ -6,7 +6,7 @@ from tinygrad.helpers import DEV
 from tinygrad.llm.model import Transformer, TransformerConfig, SSMConfig
 from tinygrad.llm.gguf import gguf_load, gguf_parse, gguf_shard, ggml_data_to_tensor
 from tinygrad.llm.kernels.amd import Linear, ExpertWeights, amd_custom_kernels_supported
-from test.helpers import not_support_multi_device
+from test.helpers import needs_devices
 
 DEVICES = (Device.DEFAULT, f"{Device.DEFAULT}:1")
 
@@ -23,8 +23,8 @@ def random_data(shape:tuple[int, ...], typ:Q, seed=0) -> np.ndarray:
   block, size = GGML_QUANT_SIZES[typ]
   return rng.integers(0, 0x3c, (*shape[:-1], shape[-1]//block*size), dtype=np.uint8)
 
-@unittest.skipIf(not_support_multi_device(), "no multi")
 class TestGGUFShard(unittest.TestCase):
+  @needs_devices(2)
   def test_shards(self):
     # name: (shape, type, sharded axis)
     tensors = {'rows': ((8, 1024), Q.Q4_K, 0), 'cols': ((8, 1024), Q.Q6_K, 1), 'experts_rows': ((4, 8, 512), Q.Q4_K, 1),
@@ -40,9 +40,9 @@ class TestGGUFShard(unittest.TestCase):
           self.assertEqual((out[name].device, out[name].uop.axis), (DEVICES, axis))
           np.testing.assert_array_equal(out[name].to(Device.DEFAULT).numpy(), full[name].numpy())
 
+  @needs_devices(4)
   def test_repeat(self):
     # two row blocks (KV heads) over four devices: device i holds block i//2, the blocks must divide the rows and the devices
-    if Device.DEFAULT != "CPU" and Device[Device.DEFAULT].count() < 4: self.skipTest("needs 4 devices")
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(4))
     entry = (Tensor(random_data((8, 512), Q.Q4_K).reshape(-1), device='CPU'), (8, 512), Q.Q4_K)
     full, out = gguf_shard({'w': entry}, (Device.DEFAULT,))['w'].numpy(), gguf_shard({'w': entry}, devices, {'w': 0}, {'w': 2})['w']
@@ -55,6 +55,7 @@ class TestGGUFShard(unittest.TestCase):
     data = Tensor(random_data((8, 768), Q.Q4_K).reshape(-1), device='CPU')
     with self.assertRaises(ValueError): gguf_shard({'w': (data, (8, 768), Q.Q4_K)}, DEVICES, {'w': 1})
 
+  @needs_devices(2)
   def test_quantized_shards(self):
     # the shards are still recognized as packed quantized weights, and keep the direction of their split
     if Tensor.empty(1, device=DEVICES[0]).uop.contiguous_view() is None: self.skipTest("requires buffer views")
@@ -65,7 +66,7 @@ class TestGGUFShard(unittest.TestCase):
         layer.set_quantized(gguf_shard({'w': (data, (8, 1024), typ)}, DEVICES, {} if axis is None else {'w': axis})['w'].half())
         self.assertEqual((layer.ggml_type, layer.shard_axis), (typ, axis))
 
-@unittest.skipIf(not_support_multi_device(), "no multi")
+@needs_devices(2)
 class TestTensorParallel(unittest.TestCase):
   def test_moe(self):
     # Small feature dimensions still exercise both expert shard axes and top-2 routing over four experts.

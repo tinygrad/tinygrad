@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import Context, getenv
 from tinygrad.engine.realize import run_linear, estimate_uop, compile_linear
-from test.helpers import needs_second_gpu, check_schedule, assert_kernel_count, KernelCountException
+from test.helpers import needs_devices, check_schedule, assert_kernel_count, KernelCountException
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, tensor, desired):
@@ -222,7 +222,7 @@ class TestIndexing(unittest.TestCase):
     for i in idx.flatten().numpy(): expected_grad[i] += 2
     np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
-  @needs_second_gpu
+  @needs_devices(2)
   @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD"), "atomics only on AMD/CPU")
   @Context(USE_ATOMICS=1, SPEC=1)
   def test_embedding_backward_vocab_sharded(self):
