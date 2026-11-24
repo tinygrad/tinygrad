@@ -152,8 +152,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     with soft_err(lambda _: label.append("<ISSUE GETTING LABEL>")):
       if len(rngs:=u.ranges):
         label.append(f"({multirange_str(rngs, color=True)})")
-      if u._shape is not None:
-        label.append(shape_to_str(u.shape))
+      label.append(shape_to_str(u.shape))
       if u.op is Ops.CALL:
         ref = data.ref_map.get(canonicalize_ast(u.body))
         name = fmt_colored(data.ctxs[ref]["name"]) if ref is not None else u.body.arg.code if u.body.op is Ops.NATIVE else ""

@@ -133,7 +133,7 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
     for k,v in zip(t0.src, lgrads):
       if v is None or _no_gradient(k): continue
       # a shaped edge's gradient is summed to its source's shape
-      if k._shape is not None and v._shape is not None and k._shape != v._shape:
+      if k._shape != v._shape:
         v = v.cast(sum_acc_dtype(v.dtype))._rop(Ops.ADD, broadcast_axes(k.shape, v.shape)).reshape(k.shape).cast(v.dtype)
       grads[k] = grads[k] + v if k in grads else v
   return grads

@@ -314,7 +314,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   # *** uop shape stuff ***
 
   @recursive_property
-  def _shape(self) -> tuple[sint, ...]|None:
+  def _shape(self) -> tuple[sint, ...]:
     # elementwise ops are the most common, they are first
     if self.op in GroupOp.UnaryElementwise:
       assert len(self.src) == 1, "unary ops must have 1 src"
@@ -323,7 +323,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     # elementwise ops keep the shape the same. all inputs with shape must match
     if self.op in GroupOp.Broadcastable:
       input_shapes = [x._shape for x in self.src]
-      assert len(self.src) > 0 and all(x is not None for x in input_shapes), f"None input shape not supported for {self.op}"
+      assert len(self.src) > 0, f"no input shape not supported for {self.op}"
       if DISALLOW_BROADCAST and not all_same(input_shapes):
         raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes} {[x.op for x in self.src]}")
       # broadcasting lives in _shape property now
@@ -333,7 +333,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.BACKEDGE | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE:
-        return None
+        return ()
 
       # special (terrible) case for RESHAPE on NOOP
       case Ops.RESHAPE:
@@ -341,7 +341,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
 
       # hacks for NOOP
       case Ops.NOOP:
-        return self.src[0]._shape if len(self.src) >= 1 else None
+        return self.src[0]._shape if len(self.src) >= 1 else ()
 
       case Ops.INDEX:
         return tuple(d for s in self.src[1:] for d in s.shape) + self.src[0].shape[len(self.src)-1:]
@@ -360,7 +360,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
         assert len(self.src[0].as_shape) <= 1
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return self.src[0].as_shape
-      case Ops.PYLITERAL: return None
+      case Ops.PYLITERAL: return ()
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
         return tuple([int(r.vmax+1) for r in self.src[1:]])+self.src[0].shape
@@ -380,7 +380,6 @@ class UOp(Mixin, metaclass=UOpMetaClass):
 
       case Ops.BITCAST:
         ps = self.src[0]._shape
-        if ps is None: return None
         if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize):
           if len(ps) == 0 or (isinstance(ps[-1], int) and (ps[-1]*input_sz) % output_sz): raise RuntimeError("unsupported size in bitcast")
           return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
@@ -389,7 +388,6 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     # movement ops change the shape
     if self.op in GroupOp.ShapeChanging:
       ps = self.src[0]._shape
-      if ps is None: raise RuntimeError(f"movement op {self.op} requires shape, {self.src[0].op} doesn't have one")
       match self.op:
         case Ops.RESHAPE:
           if not all(x >= 0 for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
@@ -422,9 +420,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     raise NotImplementedError(f"no shape handling for {self.op} with {self.dtype}")
 
   @property
-  def shape(self) -> tuple[sint, ...]:
-    if (ret:=self._shape) is None: raise RuntimeError(f"shape requested, but {self.op} doesn't have a shape")
-    return ret
+  def shape(self) -> tuple[sint, ...]: return self._shape
 
   @property
   def shard_shape(self) -> tuple[sint, ...]:
