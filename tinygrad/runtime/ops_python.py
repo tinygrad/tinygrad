@@ -67,11 +67,12 @@ class PythonProgram(Program['PythonDevice']):
           exec_masks.pop()
           i += 1
           continue
-        if u.op is Ops.IF:
-          exec_masks.append([x and y for x,y in zip(exec_masks[-1], src_values[0])])
+        if not any(exec_masks[-1]): # NOTE: thread divergence isnt handled
+          if u.op is Ops.IF: exec_masks.append([False] * warp_size)
           i += 1
           continue
-        if not any(exec_masks[-1]): # NOTE: thread divergence isnt handled
+        if u.op is Ops.IF:
+          exec_masks.append([x and y for x,y in zip(exec_masks[-1], src_values[0])])
           i += 1
           continue
         if u.op is Ops.BACKEDGE:
