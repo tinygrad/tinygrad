@@ -5,7 +5,7 @@ The format is nibble-based with variable-width packets determined by a state mac
 Uses BitField infrastructure from dsl.py, similar to GPU instruction encoding.
 """
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Iterator, ClassVar
 from enum import Enum
 from tinygrad.helpers import getenv, colored
 from tinygrad.renderer.amd.dsl import BitField, FixedBitField, Inst, bits
@@ -185,11 +185,13 @@ class PacketType:
   encoding: FixedBitField
   _raw: int
   _time: int
+  _fields: ClassVar[dict[str, BitField]]
+  _size_nibbles: ClassVar[int]
 
   def __init_subclass__(cls, **kwargs):
     super().__init_subclass__(**kwargs)
-    cls._fields = {k: v for k, v in cls.__dict__.items() if isinstance(v, BitField)}  # type: ignore[attr-defined]
-    cls._size_nibbles = ((max((f.hi for f in cls._fields.values()), default=0) + 4) // 4)  # type: ignore[attr-defined]
+    cls._fields = {k: v for k, v in cls.__dict__.items() if isinstance(v, BitField)}
+    cls._size_nibbles = ((max((f.hi for f in cls._fields.values()), default=0) + 4) // 4)
 
   @classmethod
   def from_raw(cls, raw: int, time: int = 0):
@@ -198,7 +200,7 @@ class PacketType:
     return inst
 
   def __repr__(self) -> str:
-    fields_str = ", ".join(f"{k}={getattr(self, k)}" for k in self._fields if not k.startswith('_') and k != 'encoding')  # type: ignore[attr-defined]
+    fields_str = ", ".join(f"{k}={getattr(self, k)}" for k in self._fields if not k.startswith('_') and k != 'encoding')
     return f"{self.__class__.__name__}({fields_str})"
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -578,7 +580,7 @@ def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dic
   for opcode, pkt_cls in packet_types.items():
     delta_field = getattr(pkt_cls, 'delta', delta_base)
     special = _special.get(pkt_cls, 0)
-    decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_field.lo if delta_field else 0, delta_field.mask if delta_field else 0, delta_mul,  # type: ignore[attr-defined]
+    decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_field.lo if delta_field else 0, delta_field.mask if delta_field else 0, delta_mul,
                            special)
   return decode_info, state_table
 
