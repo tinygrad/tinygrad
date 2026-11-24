@@ -1,0 +1,121 @@
+%0 = param [] slot=-1 dtype=i32 vmin_vmax=[1 65536] name=B addrspace=TEMPLATE
+%1 = param [] slot=-1 dtype=i32 vmin_vmax=[1 65536] name=H addrspace=TEMPLATE
+%2 = mul %0 %1
+%3 = param [] slot=-1 dtype=i32 vmin_vmax=[1 64] name=d_blks addrspace=TEMPLATE
+%4 = mul %3 64
+%5 = mul %2 %4
+%6 = param %5 slot=0 dtype=f32
+%7 = stack %0 %1 1 %4
+%8 = reshape %6 %7
+%9 = cast %2 dtype=weakint
+%10 = range %9 slot=0 axis=GLOBAL
+%11 = cast %10 dtype=i32
+%12 = div %11 %1
+%13 = mod %11 %1
+%14 = div %4 64
+%15 = cast %14 dtype=weakint
+%16 = range %15 slot=1 axis=GLOBAL
+%17 = mul %16 64
+%18 = range 32 slot=2 axis=LOCAL
+%19 = mul %18 2
+%20 = add %17 %19
+%21 = index %8 %12 %13 0 %20
+%22 = alloc 2 slot=0 dtype=f32 addrspace=REG
+%23 = cast 0.0 dtype=f32
+%24 = expand %23 2
+%25 = store %22 %24
+%26 = after %22 %25
+%27 = index %26 0
+%28 = param [] slot=3 dtype=weakint vmin_vmax=[0 1073741824] name=valid_kv_len addrspace=ALU
+%29 = cast %28 dtype=i32
+%30 = param [] slot=-1 dtype=i32 vmin_vmax=[0 1073741824] name=valid_kv_offset addrspace=TEMPLATE
+%31 = add %29 %30
+%32 = add %31 63
+%33 = div %32 64
+%34 = xor %33 -1
+%35 = param [] slot=-1 dtype=i32 vmin_vmax=[1 1024] name=C addrspace=TEMPLATE
+%36 = xor %35 -1
+%37 = max %34 %36
+%38 = xor %37 -1
+%39 = cast %38 dtype=weakint
+%40 = range %39 slot=101
+%41 = after %26 %40
+%42 = index %41 0
+%43 = load %42
+%44 = mul %2 %35
+%45 = mul %44 2
+%46 = param %45 slot=2 dtype=f32
+%47 = stack %0 %1 %35 2
+%48 = reshape %46 %47
+%49 = index %48 %12 %13 %40 0
+%50 = load %49
+%51 = alloc 1 slot=1 dtype=f32 addrspace=REG
+%52 = cast -inf dtype=f32
+%53 = expand %52 1
+%54 = store %51 %53
+%55 = after %51 %54
+%56 = range %39 slot=100
+%57 = after %55 %56
+%58 = index %48 %12 %13 %56 0
+%59 = load %58
+%60 = max %57 %59
+%61 = store %55 %60
+%62 = end %61 %56
+%63 = after %55 %62
+%64 = mul %63 -1.0
+%65 = add %50 %64
+%66 = mul %65 1.4426950408889634
+%67 = exp2 %66
+%68 = mul %44 %4
+%69 = param %68 slot=1 dtype=f32
+%70 = stack %0 %1 %35 %4
+%71 = reshape %69 %70
+%72 = index %71 %12 %13 %40 %20
+%73 = load %72
+%74 = mul %67 %73
+%75 = add %43 %74
+%76 = reshape %75 []
+%77 = store %27 %76
+%78 = index %26 1
+%79 = index %41 1
+%80 = load %79
+%81 = add %20 1
+%82 = index %71 %12 %13 %40 %81
+%83 = load %82
+%84 = mul %67 %83
+%85 = add %80 %84
+%86 = reshape %85 []
+%87 = store %78 %86
+%88 = alloc 1 slot=2 dtype=f32 addrspace=REG
+%89 = expand %23 1
+%90 = store %88 %89
+%91 = after %88 %90
+%92 = index %91 0
+%93 = after %91 %40
+%94 = index %93 0
+%95 = load %94
+%96 = index %48 %12 %13 %40 1
+%97 = load %96
+%98 = mul %67 %97
+%99 = add %95 %98
+%100 = reshape %99 []
+%101 = store %92 %100
+%102 = after [] %77 %87 %101
+%103 = end %102 %40
+%104 = after %26 %103
+%105 = index %104 0
+%106 = load %105
+%107 = after %91 %103
+%108 = index %107 0
+%109 = load %108
+%110 = recip %109
+%111 = mul %106 %110
+%112 = store %21 %111
+%113 = index %8 %12 %13 0 %81
+%114 = index %104 1
+%115 = load %114
+%116 = mul %115 %110
+%117 = store %113 %116
+%118 = after [] %112 %117
+%119 = end %118 %18 %16 %10
+%120 = sink %119 name=flash_decode_combine opts_to_apply=[]

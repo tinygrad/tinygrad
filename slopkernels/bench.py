@@ -22,6 +22,7 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -74,7 +75,7 @@ def _desc(s:Tensor|UOp) -> tuple:
 def _run_op(uir:str, *srcs:Tensor|UOp) -> Tensor:
   return Tensor(parse_uir(uir).call_with_output(*(s.uop if isinstance(s, Tensor) else s for s in srcs)))
 
-def _slop_call(name:str, target:tuple[int, ...], dev:str, *srcs:Tensor|UOp, **attrs:object) -> Callable[[], Tensor]:
+def _slop_call(name:str, target:tuple[int, ...], dev:str, *srcs:Tensor|UOp, **attrs:Any) -> Callable[[], Tensor]:
   uir = slopkernels.get(name, target=target, device=dev, srcs=tuple(_desc(s) for s in srcs), **attrs)
   assert uir is not None, f"slopkernels.get({name!r}) returned None"
   return lambda: _run_op(uir, *srcs)

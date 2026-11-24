@@ -1,0 +1,613 @@
+%0 = param [] slot=-1 dtype=i32 vmin_vmax=[16 1048576] name=tokens addrspace=TEMPLATE
+%1 = param [] slot=-1 dtype=i32 vmin_vmax=[16 1048576] name=out_features addrspace=TEMPLATE
+%2 = mul %0 %1
+%3 = param %2 slot=0 dtype=f32
+%4 = stack %0 %1
+%5 = reshape %3 %4
+%6 = add %0 31
+%7 = div %6 32
+%8 = cast %7 dtype=weakint
+%9 = range %8 slot=0 axis=GLOBAL
+%10 = mul %9 32
+%11 = range 64 slot=-1 axis=WARP
+%12 = div %11 16
+%13 = mul %12 4
+%14 = add %10 %13
+%15 = cast %14 dtype=i32
+%16 = cmplt %15 %0
+%17 = add %1 63
+%18 = div %17 64
+%19 = cast %18 dtype=weakint
+%20 = range %19 slot=1 axis=GLOBAL
+%21 = mul %20 2
+%22 = range 2 slot=3 axis=LOCAL
+%23 = add %21 %22
+%24 = mul %23 32
+%25 = mod %11 16
+%26 = add %24 %25
+%27 = cast %26 dtype=i32
+%28 = cmplt %27 %1
+%29 = and %16 %28
+%30 = xor %15 -1
+%31 = add %0 -1
+%32 = xor %31 -1
+%33 = max %30 %32
+%34 = xor %33 -1
+%35 = where %29 %34 invalid
+%36 = xor %27 -1
+%37 = add %1 -1
+%38 = xor %37 -1
+%39 = max %36 %38
+%40 = xor %39 -1
+%41 = index %5 %35 %40
+%42 = alloc 4 slot=0 dtype=f32 addrspace=REG
+%43 = cast 0.0 dtype=f32
+%44 = expand %43 4
+%45 = store %42 %44
+%46 = after %42 %45
+%47 = param [] slot=-1 dtype=i32 vmin_vmax=[32 1048576] name=in_features addrspace=TEMPLATE
+%48 = mul %0 %47
+%49 = param %48 slot=2 dtype=f16
+%50 = stack %0 %47
+%51 = reshape %49 %50
+%52 = add %10 %25
+%53 = cast %52 dtype=i32
+%54 = xor %53 -1
+%55 = max %54 %32
+%56 = xor %55 -1
+%57 = div %47 32
+%58 = cast %57 dtype=weakint
+%59 = range %58 slot=4
+%60 = mul %59 32
+%61 = add %60 16
+%62 = add %61 %13
+%63 = index %51 %56 %62
+%64 = add %13 1
+%65 = add %61 %64
+%66 = index %51 %56 %65
+%67 = add %13 2
+%68 = add %61 %67
+%69 = index %51 %56 %68
+%70 = add %13 3
+%71 = add %61 %70
+%72 = index %51 %56 %71
+%73 = stack %63 %66 %69 %72
+%74 = alloc 512 slot=1 dtype=u32 addrspace=LOCAL
+%75 = mul %22 64
+%76 = add %75 %11
+%77 = index %74 %76
+%78 = param 512 slot=3 dtype=u32
+%79 = index %78 %76
+%80 = store %77 %79
+%81 = add %76 128
+%82 = index %74 %81
+%83 = index %78 %81
+%84 = store %82 %83
+%85 = add %76 256
+%86 = index %74 %85
+%87 = index %78 %85
+%88 = store %86 %87
+%89 = add %76 384
+%90 = index %74 %89
+%91 = index %78 %89
+%92 = store %90 %91
+%93 = after %74 %80 %84 %88 %92
+%94 = param [] slot=-1 dtype=i32 vmin_vmax=[1 1073741824] name=raw_len addrspace=TEMPLATE
+%95 = param %94 slot=1 dtype=u16
+%96 = div %47 256
+%97 = mul %96 55
+%98 = mul %40 %97
+%99 = div %59 8
+%100 = mul %99 55
+%101 = cast %100 dtype=i32
+%102 = add %98 %101
+%103 = mod %59 8
+%104 = mul %103 8
+%105 = add 2 %104
+%106 = add 4 %12
+%107 = add %105 %106
+%108 = div %107 2
+%109 = cast %108 dtype=i32
+%110 = add %102 %109
+%111 = index %95 %110
+%112 = cast %111 dtype=u32
+%113 = mod %107 2
+%114 = mul %113 8
+%115 = cast %114 dtype=u32
+%116 = shr %112 %115
+%117 = and %116 255
+%118 = add 66 %103
+%119 = div %118 2
+%120 = cast %119 dtype=i32
+%121 = add %102 %120
+%122 = index %95 %121
+%123 = cast %122 dtype=u32
+%124 = mod %118 2
+%125 = mul %124 8
+%126 = cast %125 dtype=u32
+%127 = shr %123 %126
+%128 = and %127 255
+%129 = cast %106 dtype=u32
+%130 = shr %128 %129
+%131 = and %130 1
+%132 = shl %131 8
+%133 = or %117 %132
+%134 = mod %106 1
+%135 = cast %134 dtype=u32
+%136 = add %133 %135
+%137 = index %93 %136
+%138 = load %137
+%139 = mul %103 4
+%140 = add 74 %139
+%141 = div %106 2
+%142 = add %140 %141
+%143 = div %142 2
+%144 = cast %143 dtype=i32
+%145 = add %102 %144
+%146 = index %95 %145
+%147 = cast %146 dtype=u32
+%148 = mod %142 2
+%149 = mul %148 8
+%150 = cast %149 dtype=u32
+%151 = shr %147 %150
+%152 = and %151 255
+%153 = mod %106 2
+%154 = mul 4 %153
+%155 = cast %154 dtype=u32
+%156 = shr %152 %155
+%157 = and %156 15
+%158 = mul %157 2113665
+%159 = and %158 16843009
+%160 = mul %159 255
+%161 = xor %138 %160
+%162 = add %161 %159
+%163 = cast %162 dtype=u8
+%164 = bitcast %163 dtype=i8
+%165 = cast %164 dtype=f32
+%166 = index %95 %102
+%167 = bitcast %166 dtype=f16
+%168 = cast %167 dtype=f32
+%169 = div %103 2
+%170 = add 106 %169
+%171 = div %170 2
+%172 = cast %171 dtype=i32
+%173 = add %102 %172
+%174 = index %95 %173
+%175 = cast %174 dtype=u32
+%176 = mod %170 2
+%177 = mul %176 8
+%178 = cast %177 dtype=u32
+%179 = shr %175 %178
+%180 = and %179 255
+%181 = mod %103 2
+%182 = mul %181 4
+%183 = cast %182 dtype=u32
+%184 = shr %180 %183
+%185 = and %184 15
+%186 = mul 2 %185
+%187 = add 1 %186
+%188 = cast %187 dtype=f32
+%189 = mul %168 %188
+%190 = mul %165 %189
+%191 = cast -0.0 dtype=f32
+%192 = add %190 %191
+%193 = cast %192 dtype=f16
+%194 = shr %162 8
+%195 = cast %194 dtype=u8
+%196 = bitcast %195 dtype=i8
+%197 = cast %196 dtype=f32
+%198 = mul %197 %189
+%199 = add %198 %191
+%200 = cast %199 dtype=f16
+%201 = shr %162 16
+%202 = cast %201 dtype=u8
+%203 = bitcast %202 dtype=i8
+%204 = cast %203 dtype=f32
+%205 = mul %204 %189
+%206 = add %205 %191
+%207 = cast %206 dtype=f16
+%208 = shr %162 24
+%209 = cast %208 dtype=u8
+%210 = bitcast %209 dtype=i8
+%211 = cast %210 dtype=f32
+%212 = mul %211 %189
+%213 = add %212 %191
+%214 = cast %213 dtype=f16
+%215 = stack %193 %200 %207 %214
+%216 = add %60 %13
+%217 = index %51 %56 %216
+%218 = add %60 %64
+%219 = index %51 %56 %218
+%220 = add %60 %67
+%221 = index %51 %56 %220
+%222 = add %60 %70
+%223 = index %51 %56 %222
+%224 = stack %217 %219 %221 %223
+%225 = add %105 %12
+%226 = div %225 2
+%227 = cast %226 dtype=i32
+%228 = add %102 %227
+%229 = index %95 %228
+%230 = cast %229 dtype=u32
+%231 = mod %225 2
+%232 = mul %231 8
+%233 = cast %232 dtype=u32
+%234 = shr %230 %233
+%235 = and %234 255
+%236 = cast %12 dtype=u32
+%237 = shr %128 %236
+%238 = and %237 1
+%239 = shl %238 8
+%240 = or %235 %239
+%241 = mod %12 1
+%242 = cast %241 dtype=u32
+%243 = add %240 %242
+%244 = index %93 %243
+%245 = load %244
+%246 = div %12 2
+%247 = add %140 %246
+%248 = div %247 2
+%249 = cast %248 dtype=i32
+%250 = add %102 %249
+%251 = index %95 %250
+%252 = cast %251 dtype=u32
+%253 = mod %247 2
+%254 = mul %253 8
+%255 = cast %254 dtype=u32
+%256 = shr %252 %255
+%257 = and %256 255
+%258 = mod %12 2
+%259 = mul 4 %258
+%260 = cast %259 dtype=u32
+%261 = shr %257 %260
+%262 = and %261 15
+%263 = mul %262 2113665
+%264 = and %263 16843009
+%265 = mul %264 255
+%266 = xor %245 %265
+%267 = add %266 %264
+%268 = cast %267 dtype=u8
+%269 = bitcast %268 dtype=i8
+%270 = cast %269 dtype=f32
+%271 = mul %270 %189
+%272 = add %271 %191
+%273 = cast %272 dtype=f16
+%274 = shr %267 8
+%275 = cast %274 dtype=u8
+%276 = bitcast %275 dtype=i8
+%277 = cast %276 dtype=f32
+%278 = mul %277 %189
+%279 = add %278 %191
+%280 = cast %279 dtype=f16
+%281 = shr %267 16
+%282 = cast %281 dtype=u8
+%283 = bitcast %282 dtype=i8
+%284 = cast %283 dtype=f32
+%285 = mul %284 %189
+%286 = add %285 %191
+%287 = cast %286 dtype=f16
+%288 = shr %267 24
+%289 = cast %288 dtype=u8
+%290 = bitcast %289 dtype=i8
+%291 = cast %290 dtype=f32
+%292 = mul %291 %189
+%293 = add %292 %191
+%294 = cast %293 dtype=f16
+%295 = stack %273 %280 %287 %294
+%296 = after %46 %59
+%297 = wmma %224 %295 %296 arg=[[16 16 16] `dtypes.f16` 64 `None`]
+%298 = wmma %73 %215 %297 arg=[[16 16 16] `dtypes.f16` 64 `None`]
+%299 = store %46 %298
+%300 = alloc 4 slot=2 dtype=f32 addrspace=REG
+%301 = store %300 %44
+%302 = after %300 %301
+%303 = add %10 16
+%304 = add %303 %25
+%305 = cast %304 dtype=i32
+%306 = xor %305 -1
+%307 = max %306 %32
+%308 = xor %307 -1
+%309 = index %51 %308 %62
+%310 = index %51 %308 %65
+%311 = index %51 %308 %68
+%312 = index %51 %308 %71
+%313 = stack %309 %310 %311 %312
+%314 = index %51 %308 %216
+%315 = index %51 %308 %218
+%316 = index %51 %308 %220
+%317 = index %51 %308 %222
+%318 = stack %314 %315 %316 %317
+%319 = after %302 %59
+%320 = wmma %318 %295 %319 arg=[[16 16 16] `dtypes.f16` 64 `None`]
+%321 = wmma %313 %215 %320 arg=[[16 16 16] `dtypes.f16` 64 `None`]
+%322 = store %302 %321
+%323 = alloc 4 slot=3 dtype=f32 addrspace=REG
+%324 = store %323 %44
+%325 = after %323 %324
+%326 = add %24 16
+%327 = add %326 %25
+%328 = cast %327 dtype=i32
+%329 = xor %328 -1
+%330 = max %329 %38
+%331 = xor %330 -1
+%332 = mul %331 %97
+%333 = add %332 %101
+%334 = add %333 %109
+%335 = index %95 %334
+%336 = cast %335 dtype=u32
+%337 = shr %336 %115
+%338 = and %337 255
+%339 = add %333 %120
+%340 = index %95 %339
+%341 = cast %340 dtype=u32
+%342 = shr %341 %126
+%343 = and %342 255
+%344 = shr %343 %129
+%345 = and %344 1
+%346 = shl %345 8
+%347 = or %338 %346
+%348 = add %347 %135
+%349 = index %93 %348
+%350 = load %349
+%351 = add %333 %144
+%352 = index %95 %351
+%353 = cast %352 dtype=u32
+%354 = shr %353 %150
+%355 = and %354 255
+%356 = shr %355 %155
+%357 = and %356 15
+%358 = mul %357 2113665
+%359 = and %358 16843009
+%360 = mul %359 255
+%361 = xor %350 %360
+%362 = add %361 %359
+%363 = cast %362 dtype=u8
+%364 = bitcast %363 dtype=i8
+%365 = cast %364 dtype=f32
+%366 = index %95 %333
+%367 = bitcast %366 dtype=f16
+%368 = cast %367 dtype=f32
+%369 = add %333 %172
+%370 = index %95 %369
+%371 = cast %370 dtype=u32
+%372 = shr %371 %178
+%373 = and %372 255
+%374 = shr %373 %183
+%375 = and %374 15
+%376 = mul 2 %375
+%377 = add 1 %376
+%378 = cast %377 dtype=f32
+%379 = mul %368 %378
+%380 = mul %365 %379
+%381 = add %380 %191
+%382 = cast %381 dtype=f16
+%383 = shr %362 8
+%384 = cast %383 dtype=u8
+%385 = bitcast %384 dtype=i8
+%386 = cast %385 dtype=f32
+%387 = mul %386 %379
+%388 = add %387 %191
+%389 = cast %388 dtype=f16
+%390 = shr %362 16
+%391 = cast %390 dtype=u8
+%392 = bitcast %391 dtype=i8
+%393 = cast %392 dtype=f32
+%394 = mul %393 %379
+%395 = add %394 %191
+%396 = cast %395 dtype=f16
+%397 = shr %362 24
+%398 = cast %397 dtype=u8
+%399 = bitcast %398 dtype=i8
+%400 = cast %399 dtype=f32
+%401 = mul %400 %379
+%402 = add %401 %191
+%403 = cast %402 dtype=f16
+%404 = stack %382 %389 %396 %403
+%405 = add %333 %227
+%406 = index %95 %405
+%407 = cast %406 dtype=u32
+%408 = shr %407 %233
+%409 = and %408 255
+%410 = shr %343 %236
+%411 = and %410 1
+%412 = shl %411 8
+%413 = or %409 %412
+%414 = add %413 %242
+%415 = index %93 %414
+%416 = load %415
+%417 = add %333 %249
+%418 = index %95 %417
+%419 = cast %418 dtype=u32
+%420 = shr %419 %255
+%421 = and %420 255
+%422 = shr %421 %260
+%423 = and %422 15
+%424 = mul %423 2113665
+%425 = and %424 16843009
+%426 = mul %425 255
+%427 = xor %416 %426
+%428 = add %427 %425
+%429 = cast %428 dtype=u8
+%430 = bitcast %429 dtype=i8
+%431 = cast %430 dtype=f32
+%432 = mul %431 %379
+%433 = add %432 %191
+%434 = cast %433 dtype=f16
+%435 = shr %428 8
+%436 = cast %435 dtype=u8
+%437 = bitcast %436 dtype=i8
+%438 = cast %437 dtype=f32
+%439 = mul %438 %379
+%440 = add %439 %191
+%441 = cast %440 dtype=f16
+%442 = shr %428 16
+%443 = cast %442 dtype=u8
+%444 = bitcast %443 dtype=i8
+%445 = cast %444 dtype=f32
+%446 = mul %445 %379
+%447 = add %446 %191
+%448 = cast %447 dtype=f16
+%449 = shr %428 24
+%450 = cast %449 dtype=u8
+%451 = bitcast %450 dtype=i8
+%452 = cast %451 dtype=f32
+%453 = mul %452 %379
+%454 = add %453 %191
+%455 = cast %454 dtype=f16
+%456 = stack %434 %441 %448 %455
+%457 = after %325 %59
+%458 = wmma %224 %456 %457 arg=[[16 16 16] `dtypes.f16` 64 `None`]
+%459 = wmma %73 %404 %458 arg=[[16 16 16] `dtypes.f16` 64 `None`]
+%460 = store %325 %459
+%461 = alloc 4 slot=4 dtype=f32 addrspace=REG
+%462 = store %461 %44
+%463 = after %461 %462
+%464 = after %463 %59
+%465 = wmma %318 %456 %464 arg=[[16 16 16] `dtypes.f16` 64 `None`]
+%466 = wmma %313 %404 %465 arg=[[16 16 16] `dtypes.f16` 64 `None`]
+%467 = store %463 %466
+%468 = after [] %299 %322 %460 %467
+%469 = end %468 %59
+%470 = after %46 %469
+%471 = index %470 0
+%472 = load %471
+%473 = store %41 %472
+%474 = add %10 %64
+%475 = cast %474 dtype=i32
+%476 = cmplt %475 %0
+%477 = and %476 %28
+%478 = xor %475 -1
+%479 = max %478 %32
+%480 = xor %479 -1
+%481 = where %477 %480 invalid
+%482 = index %5 %481 %40
+%483 = index %470 1
+%484 = load %483
+%485 = store %482 %484
+%486 = add %10 %67
+%487 = cast %486 dtype=i32
+%488 = cmplt %487 %0
+%489 = and %488 %28
+%490 = xor %487 -1
+%491 = max %490 %32
+%492 = xor %491 -1
+%493 = where %489 %492 invalid
+%494 = index %5 %493 %40
+%495 = index %470 2
+%496 = load %495
+%497 = store %494 %496
+%498 = add %10 %70
+%499 = cast %498 dtype=i32
+%500 = cmplt %499 %0
+%501 = and %500 %28
+%502 = xor %499 -1
+%503 = max %502 %32
+%504 = xor %503 -1
+%505 = where %501 %504 invalid
+%506 = index %5 %505 %40
+%507 = index %470 3
+%508 = load %507
+%509 = store %506 %508
+%510 = add %303 %13
+%511 = cast %510 dtype=i32
+%512 = cmplt %511 %0
+%513 = and %512 %28
+%514 = xor %511 -1
+%515 = max %514 %32
+%516 = xor %515 -1
+%517 = where %513 %516 invalid
+%518 = index %5 %517 %40
+%519 = after %302 %469
+%520 = index %519 0
+%521 = load %520
+%522 = store %518 %521
+%523 = add %303 %64
+%524 = cast %523 dtype=i32
+%525 = cmplt %524 %0
+%526 = and %525 %28
+%527 = xor %524 -1
+%528 = max %527 %32
+%529 = xor %528 -1
+%530 = where %526 %529 invalid
+%531 = index %5 %530 %40
+%532 = index %519 1
+%533 = load %532
+%534 = store %531 %533
+%535 = add %303 %67
+%536 = cast %535 dtype=i32
+%537 = cmplt %536 %0
+%538 = and %537 %28
+%539 = xor %536 -1
+%540 = max %539 %32
+%541 = xor %540 -1
+%542 = where %538 %541 invalid
+%543 = index %5 %542 %40
+%544 = index %519 2
+%545 = load %544
+%546 = store %543 %545
+%547 = add %303 %70
+%548 = cast %547 dtype=i32
+%549 = cmplt %548 %0
+%550 = and %549 %28
+%551 = xor %548 -1
+%552 = max %551 %32
+%553 = xor %552 -1
+%554 = where %550 %553 invalid
+%555 = index %5 %554 %40
+%556 = index %519 3
+%557 = load %556
+%558 = store %555 %557
+%559 = cmplt %328 %1
+%560 = and %16 %559
+%561 = where %560 %34 invalid
+%562 = index %5 %561 %331
+%563 = after %325 %469
+%564 = index %563 0
+%565 = load %564
+%566 = store %562 %565
+%567 = and %476 %559
+%568 = where %567 %480 invalid
+%569 = index %5 %568 %331
+%570 = index %563 1
+%571 = load %570
+%572 = store %569 %571
+%573 = and %488 %559
+%574 = where %573 %492 invalid
+%575 = index %5 %574 %331
+%576 = index %563 2
+%577 = load %576
+%578 = store %575 %577
+%579 = and %500 %559
+%580 = where %579 %504 invalid
+%581 = index %5 %580 %331
+%582 = index %563 3
+%583 = load %582
+%584 = store %581 %583
+%585 = and %512 %559
+%586 = where %585 %516 invalid
+%587 = index %5 %586 %331
+%588 = after %463 %469
+%589 = index %588 0
+%590 = load %589
+%591 = store %587 %590
+%592 = and %525 %559
+%593 = where %592 %529 invalid
+%594 = index %5 %593 %331
+%595 = index %588 1
+%596 = load %595
+%597 = store %594 %596
+%598 = and %537 %559
+%599 = where %598 %541 invalid
+%600 = index %5 %599 %331
+%601 = index %588 2
+%602 = load %601
+%603 = store %600 %602
+%604 = and %549 %559
+%605 = where %604 %553 invalid
+%606 = index %5 %605 %331
+%607 = index %588 3
+%608 = load %607
+%609 = store %606 %608
+%610 = after [] %473 %485 %497 %509 %522 %534 %546 %558 %566 %572 %578 %584 %591 %597 %603 %609
+%611 = end %610 %9 %20 %11 %22
+%612 = sink %611 name=linear_iq3_s_f16_wmma opts_to_apply=[]

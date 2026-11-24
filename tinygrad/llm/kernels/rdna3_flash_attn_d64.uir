@@ -1,0 +1,585 @@
+%0 = param [] slot=-1 dtype=i32 vmin_vmax=[1 65536] name=BH addrspace=TEMPLATE
+%1 = param [] slot=-1 dtype=i32 vmin_vmax=[1 65536] name=m_blks addrspace=TEMPLATE
+%2 = mul %1 32
+%3 = mul %0 %2
+%4 = mul %3 64
+%5 = param %4 slot=0 dtype=f32
+%6 = div %2 32
+%7 = stack %0 %6 32 64
+%8 = reshape %5 %7
+%9 = cast %0 dtype=weakint
+%10 = range %9 slot=0 axis=GLOBAL
+%11 = add %2 31
+%12 = div %11 32
+%13 = cast %12 dtype=weakint
+%14 = range %13 slot=1 axis=GLOBAL
+%15 = index %8 %10 %14
+%16 = reshape %15 [2 8 2 2 2 16]
+%17 = permute %16 [0 3 2 5 1 4]
+%18 = reshape %17 [128 8 2]
+%19 = range 2 slot=2 axis=LOCAL
+%20 = mul %19 2
+%21 = range 2 slot=3 axis=LOCAL
+%22 = add %20 %21
+%23 = mul %22 32
+%24 = range 32 slot=-1 axis=WARP
+%25 = add %23 %24
+%26 = index %18 %25
+%27 = alloc 16 slot=0 dtype=f32 addrspace=REG
+%28 = reshape %27 [8 2]
+%29 = cast 0.0 dtype=f32
+%30 = expand %29 [8 2]
+%31 = store %28 %30
+%32 = after %28 %31
+%33 = range 8 slot=330
+%34 = range 2 slot=331
+%35 = index %32 %33 %34
+%36 = alloc 8 slot=1 dtype=f32 addrspace=REG
+%37 = alloc 8 slot=2 dtype=f32 addrspace=REG
+%38 = range 8 slot=275
+%39 = index %37 %38
+%40 = alloc 8 slot=3 dtype=f32 addrspace=REG
+%41 = cast -1.0000000150474662e+30 dtype=f32
+%42 = expand %41 8
+%43 = store %40 %42
+%44 = after %40 %43
+%45 = index %44 %38
+%46 = alloc 8 slot=4 dtype=f32 addrspace=REG
+%47 = param [] slot=-1 dtype=i32 vmin_vmax=[0 1] name=q_start_from_end addrspace=TEMPLATE
+%48 = cmpeq %47 0
+%49 = param [] slot=3 dtype=weakint vmin_vmax=[0 1073741824] name=valid_kv_len addrspace=ALU
+%50 = cast %49 dtype=i32
+%51 = param [] slot=-1 dtype=i32 vmin_vmax=[0 1073741824] name=valid_kv_offset addrspace=TEMPLATE
+%52 = add %50 %51
+%53 = param [] slot=4 dtype=weakint vmin_vmax=[1 1048576] name=q_len addrspace=ALU
+%54 = cast %53 dtype=i32
+%55 = mul %54 -1
+%56 = add %52 %55
+%57 = where %48 %52 %56
+%58 = add %14 1
+%59 = mul %58 32
+%60 = cast %59 dtype=i32
+%61 = add %57 %60
+%62 = xor %61 -1
+%63 = add %52 %54
+%64 = where %48 %63 %52
+%65 = xor %64 -1
+%66 = max %62 %65
+%67 = xor %66 -1
+%68 = add %67 31
+%69 = div %68 32
+%70 = cast %69 dtype=weakint
+%71 = range %70 slot=100
+%72 = after %46 %71
+%73 = cast -inf dtype=f32
+%74 = expand %73 8
+%75 = store %72 %74
+%76 = after %46 %75
+%77 = range 2 slot=261
+%78 = after %76 %77
+%79 = alloc 16 slot=5 dtype=f32 addrspace=REG
+%80 = reshape %79 [8 2]
+%81 = after %80 %71
+%82 = store %81 %30
+%83 = after %80 %82
+%84 = reshape %83 [1 8 2]
+%85 = permute %84 [0 2 1]
+%86 = range 1 slot=200
+%87 = range 2 slot=201
+%88 = index %85 %86 %87
+%89 = alloc 2176 slot=6 dtype=f16 addrspace=LOCAL
+%90 = reshape %89 [32 68]
+%91 = shrink %90 [0 0] [32 64]
+%92 = reshape %91 2048
+%93 = mul %25 16
+%94 = index %92 %93
+%95 = param %4 slot=1 dtype=f16
+%96 = reshape %95 %7
+%97 = index %96 %10 %14
+%98 = reshape %97 2048
+%99 = shrink %98 %93 8
+%100 = load %99
+%101 = shrink %100 0 1
+%102 = reshape %101 []
+%103 = store %94 %102
+%104 = add %93 1
+%105 = index %92 %104
+%106 = shrink %100 1 1
+%107 = reshape %106 []
+%108 = store %105 %107
+%109 = add %93 2
+%110 = index %92 %109
+%111 = shrink %100 2 1
+%112 = reshape %111 []
+%113 = store %110 %112
+%114 = add %93 3
+%115 = index %92 %114
+%116 = shrink %100 3 1
+%117 = reshape %116 []
+%118 = store %115 %117
+%119 = add %93 4
+%120 = index %92 %119
+%121 = shrink %100 4 1
+%122 = reshape %121 []
+%123 = store %120 %122
+%124 = add %93 5
+%125 = index %92 %124
+%126 = shrink %100 5 1
+%127 = reshape %126 []
+%128 = store %125 %127
+%129 = add %93 6
+%130 = index %92 %129
+%131 = shrink %100 6 1
+%132 = reshape %131 []
+%133 = store %130 %132
+%134 = add %93 7
+%135 = index %92 %134
+%136 = shrink %100 7 1
+%137 = reshape %136 []
+%138 = store %135 %137
+%139 = add %93 8
+%140 = index %92 %139
+%141 = shrink %98 %139 8
+%142 = load %141
+%143 = shrink %142 0 1
+%144 = reshape %143 []
+%145 = store %140 %144
+%146 = add %93 9
+%147 = index %92 %146
+%148 = shrink %142 1 1
+%149 = reshape %148 []
+%150 = store %147 %149
+%151 = add %93 10
+%152 = index %92 %151
+%153 = shrink %142 2 1
+%154 = reshape %153 []
+%155 = store %152 %154
+%156 = add %93 11
+%157 = index %92 %156
+%158 = shrink %142 3 1
+%159 = reshape %158 []
+%160 = store %157 %159
+%161 = add %93 12
+%162 = index %92 %161
+%163 = shrink %142 4 1
+%164 = reshape %163 []
+%165 = store %162 %164
+%166 = add %93 13
+%167 = index %92 %166
+%168 = shrink %142 5 1
+%169 = reshape %168 []
+%170 = store %167 %169
+%171 = add %93 14
+%172 = index %92 %171
+%173 = shrink %142 6 1
+%174 = reshape %173 []
+%175 = store %172 %174
+%176 = add %93 15
+%177 = index %92 %176
+%178 = shrink %142 7 1
+%179 = reshape %178 []
+%180 = store %177 %179
+%181 = after %91 %103 %108 %113 %118 %123 %128 %133 %138 %145 %150 %155 %160 %165 %170 %175 %180
+%182 = reshape %181 [2 1 16 4 16]
+%183 = mod %24 16
+%184 = range 4 slot=101
+%185 = index %182 %19 %86 %183 %184
+%186 = alloc 2176 slot=7 dtype=f16 addrspace=LOCAL
+%187 = reshape %186 [32 68]
+%188 = shrink %187 [0 0] [32 64]
+%189 = after %188 %71
+%190 = reshape %189 2048
+%191 = index %190 %93
+%192 = param [] slot=-1 dtype=i32 vmin_vmax=[1 65536] name=B addrspace=TEMPLATE
+%193 = mul 2 %192
+%194 = param [] slot=-1 dtype=i32 vmin_vmax=[1 65536] name=H_KV addrspace=TEMPLATE
+%195 = mul %193 %194
+%196 = param [] slot=-1 dtype=i32 vmin_vmax=[1 1048576] name=n_blks addrspace=TEMPLATE
+%197 = mul %196 32
+%198 = mul %195 %197
+%199 = mul %198 64
+%200 = param %199 slot=2 dtype=f16
+%201 = stack 2 %192 %194 %197 64
+%202 = reshape %200 %201
+%203 = index %202 0
+%204 = mul %192 %194
+%205 = stack %204 %197 64
+%206 = reshape %203 %205
+%207 = cast %10 dtype=i32
+%208 = div %0 %204
+%209 = div %207 %208
+%210 = index %206 %209
+%211 = mul %196 2048
+%212 = reshape %210 %211
+%213 = mul %71 2048
+%214 = add %213 %93
+%215 = shrink %212 %214 8
+%216 = load %215
+%217 = shrink %216 0 1
+%218 = reshape %217 []
+%219 = store %191 %218
+%220 = index %190 %104
+%221 = shrink %216 1 1
+%222 = reshape %221 []
+%223 = store %220 %222
+%224 = index %190 %109
+%225 = shrink %216 2 1
+%226 = reshape %225 []
+%227 = store %224 %226
+%228 = index %190 %114
+%229 = shrink %216 3 1
+%230 = reshape %229 []
+%231 = store %228 %230
+%232 = index %190 %119
+%233 = shrink %216 4 1
+%234 = reshape %233 []
+%235 = store %232 %234
+%236 = index %190 %124
+%237 = shrink %216 5 1
+%238 = reshape %237 []
+%239 = store %236 %238
+%240 = index %190 %129
+%241 = shrink %216 6 1
+%242 = reshape %241 []
+%243 = store %240 %242
+%244 = index %190 %134
+%245 = shrink %216 7 1
+%246 = reshape %245 []
+%247 = store %244 %246
+%248 = index %190 %139
+%249 = add %213 %139
+%250 = shrink %212 %249 8
+%251 = load %250
+%252 = shrink %251 0 1
+%253 = reshape %252 []
+%254 = store %248 %253
+%255 = index %190 %146
+%256 = shrink %251 1 1
+%257 = reshape %256 []
+%258 = store %255 %257
+%259 = index %190 %151
+%260 = shrink %251 2 1
+%261 = reshape %260 []
+%262 = store %259 %261
+%263 = index %190 %156
+%264 = shrink %251 3 1
+%265 = reshape %264 []
+%266 = store %263 %265
+%267 = index %190 %161
+%268 = shrink %251 4 1
+%269 = reshape %268 []
+%270 = store %267 %269
+%271 = index %190 %166
+%272 = shrink %251 5 1
+%273 = reshape %272 []
+%274 = store %271 %273
+%275 = index %190 %171
+%276 = shrink %251 6 1
+%277 = reshape %276 []
+%278 = store %275 %277
+%279 = index %190 %176
+%280 = shrink %251 7 1
+%281 = reshape %280 []
+%282 = store %279 %281
+%283 = after %189 %219 %223 %227 %231 %235 %239 %243 %247 %254 %258 %262 %266 %270 %274 %278 %282
+%284 = reshape %283 [2 16 4 16]
+%285 = index %284 %87 %183 %184
+%286 = after %88 %184
+%287 = wmma %185 %285 %286 arg=[[16 16 16] `dtypes.f16` 32 `None`]
+%288 = store %88 %287
+%289 = end %288 %86 %87
+%290 = end %289 %184
+%291 = barrier %290
+%292 = mul %83 0.125
+%293 = store %83 %292
+%294 = after %83 %291 %293
+%295 = range 8 slot=250
+%296 = range 2 slot=251
+%297 = index %294 %295 %296
+%298 = mul %14 32
+%299 = cast %298 dtype=i32
+%300 = add %57 %299
+%301 = mul %19 16
+%302 = mul %295 2
+%303 = div %24 16
+%304 = add %302 %303
+%305 = add %301 %304
+%306 = cast %305 dtype=i32
+%307 = add %300 %306
+%308 = mul %71 32
+%309 = mul %296 16
+%310 = add %309 %183
+%311 = add %308 %310
+%312 = cast %311 dtype=i32
+%313 = cmplt %307 %312
+%314 = cmpeq %313 false
+%315 = cmplt %312 %64
+%316 = and %314 %315
+%317 = where %316 %297 %73
+%318 = store %297 %317
+%319 = end %318 %295 %296
+%320 = after %294 %319
+%321 = permute %320 [1 0]
+%322 = index %321 %77
+%323 = max %78 %322
+%324 = store %76 %323
+%325 = end %324 %77
+%326 = after %76 %325
+%327 = range 8 slot=270
+%328 = index %326 %327
+%329 = load %328
+%330 = param [] slot=-1 dtype=i32
+%331 = native %330 code='__builtin_amdgcn_ds_swizzle({0}, 8223)' fmt=true
+%332 = bitcast %329 dtype=i32
+%333 = call %331 %332
+%334 = bitcast %333 dtype=f32
+%335 = max %329 %334
+%336 = native %330 code='__builtin_amdgcn_ds_swizzle({0}, 4127)' fmt=true
+%337 = bitcast %335 dtype=i32
+%338 = call %336 %337
+%339 = bitcast %338 dtype=f32
+%340 = max %335 %339
+%341 = native %330 code='__builtin_amdgcn_ds_swizzle({0}, 2079)' fmt=true
+%342 = bitcast %340 dtype=i32
+%343 = call %341 %342
+%344 = bitcast %343 dtype=f32
+%345 = max %340 %344
+%346 = native %330 code='__builtin_amdgcn_ds_swizzle({0}, 1055)' fmt=true
+%347 = bitcast %345 dtype=i32
+%348 = call %346 %347
+%349 = bitcast %348 dtype=f32
+%350 = max %345 %349
+%351 = store %328 %350
+%352 = end %351 %327
+%353 = after %326 %352
+%354 = index %353 %38
+%355 = max %45 %354
+%356 = max %355 -1e+30
+%357 = store %39 %356
+%358 = index %36 %38
+%359 = mul %356 -1.0
+%360 = add %45 %359
+%361 = mul %360 1.4426950408889634
+%362 = exp2 %361
+%363 = store %358 %362
+%364 = store %45 %355
+%365 = after [] %357 %363 %364
+%366 = end %365 %38
+%367 = after %36 %366
+%368 = index %367 %33
+%369 = mul %368 %35
+%370 = store %35 %369
+%371 = end %370 %34
+%372 = alloc 8 slot=8 dtype=f32 addrspace=REG
+%373 = expand %29 8
+%374 = store %372 %373
+%375 = after %372 %374
+%376 = index %375 %33
+%377 = mul %368 %376
+%378 = alloc 8 slot=9 dtype=f32 addrspace=REG
+%379 = after %378 %71
+%380 = store %379 %373
+%381 = after %378 %380
+%382 = range 8 slot=295
+%383 = index %381 %382
+%384 = after %37 %366
+%385 = expand %384 2
+%386 = permute %385 [1 0]
+%387 = mul %386 -1.0
+%388 = add %320 %387
+%389 = mul %388 1.4426950408889634
+%390 = exp2 %389
+%391 = store %320 %390
+%392 = after %320 %391
+%393 = index %392 %382 0
+%394 = load %393
+%395 = bitcast %394 dtype=i32
+%396 = call %331 %395
+%397 = bitcast %396 dtype=f32
+%398 = add %394 %397
+%399 = bitcast %398 dtype=i32
+%400 = call %336 %399
+%401 = bitcast %400 dtype=f32
+%402 = add %398 %401
+%403 = bitcast %402 dtype=i32
+%404 = call %341 %403
+%405 = bitcast %404 dtype=f32
+%406 = add %402 %405
+%407 = bitcast %406 dtype=i32
+%408 = call %346 %407
+%409 = bitcast %408 dtype=f32
+%410 = add %406 %409
+%411 = index %392 %382 1
+%412 = load %411
+%413 = bitcast %412 dtype=i32
+%414 = call %331 %413
+%415 = bitcast %414 dtype=f32
+%416 = add %412 %415
+%417 = bitcast %416 dtype=i32
+%418 = call %336 %417
+%419 = bitcast %418 dtype=f32
+%420 = add %416 %419
+%421 = bitcast %420 dtype=i32
+%422 = call %341 %421
+%423 = bitcast %422 dtype=f32
+%424 = add %420 %423
+%425 = bitcast %424 dtype=i32
+%426 = call %346 %425
+%427 = bitcast %426 dtype=f32
+%428 = add %424 %427
+%429 = add %410 %428
+%430 = store %383 %429
+%431 = end %430 %382
+%432 = after %381 %431
+%433 = index %432 %33
+%434 = add %377 %433
+%435 = store %376 %434
+%436 = after [] %371 %435
+%437 = end %436 %33
+%438 = after %32 %437
+%439 = reshape %438 [1 8 2]
+%440 = permute %439 [0 2 1]
+%441 = range 1 slot=401
+%442 = range 2 slot=402
+%443 = index %440 %441 %442
+%444 = after %187 %291
+%445 = reshape %444 2176
+%446 = shrink %445 0 2048
+%447 = reshape %446 [2 32 32]
+%448 = reshape %446 [2 2 8 2 2 16]
+%449 = permute %448 [1 0 3 5 2 4]
+%450 = reshape %449 [128 8 2]
+%451 = index %450 %25
+%452 = cast %392 dtype=f16
+%453 = store %451 %452
+%454 = alloc 2304 slot=10 dtype=f16 addrspace=LOCAL
+%455 = reshape %454 [64 36]
+%456 = shrink %455 [0 0] [64 32]
+%457 = after %456 %291
+%458 = permute %457 [1 0]
+%459 = reshape %458 2048
+%460 = index %459 %93
+%461 = div %93 64
+%462 = add %308 %461
+%463 = cast %462 dtype=i32
+%464 = cmplt %463 %64
+%465 = index %202 1
+%466 = reshape %465 %205
+%467 = index %466 %209
+%468 = reshape %467 %211
+%469 = shrink %468 %214 8
+%470 = load %469
+%471 = shrink %470 0 1
+%472 = reshape %471 []
+%473 = cast 0.0 dtype=f16
+%474 = where %464 %472 %473
+%475 = store %460 %474
+%476 = index %459 %104
+%477 = shrink %470 1 1
+%478 = reshape %477 []
+%479 = where %464 %478 %473
+%480 = store %476 %479
+%481 = index %459 %109
+%482 = shrink %470 2 1
+%483 = reshape %482 []
+%484 = where %464 %483 %473
+%485 = store %481 %484
+%486 = index %459 %114
+%487 = shrink %470 3 1
+%488 = reshape %487 []
+%489 = where %464 %488 %473
+%490 = store %486 %489
+%491 = index %459 %119
+%492 = shrink %470 4 1
+%493 = reshape %492 []
+%494 = where %464 %493 %473
+%495 = store %491 %494
+%496 = index %459 %124
+%497 = shrink %470 5 1
+%498 = reshape %497 []
+%499 = where %464 %498 %473
+%500 = store %496 %499
+%501 = index %459 %129
+%502 = shrink %470 6 1
+%503 = reshape %502 []
+%504 = where %464 %503 %473
+%505 = store %501 %504
+%506 = index %459 %134
+%507 = shrink %470 7 1
+%508 = reshape %507 []
+%509 = where %464 %508 %473
+%510 = store %506 %509
+%511 = index %459 %139
+%512 = div %139 64
+%513 = add %308 %512
+%514 = cast %513 dtype=i32
+%515 = cmplt %514 %64
+%516 = shrink %468 %249 8
+%517 = load %516
+%518 = shrink %517 0 1
+%519 = reshape %518 []
+%520 = where %515 %519 %473
+%521 = store %511 %520
+%522 = index %459 %146
+%523 = shrink %517 1 1
+%524 = reshape %523 []
+%525 = where %515 %524 %473
+%526 = store %522 %525
+%527 = index %459 %151
+%528 = shrink %517 2 1
+%529 = reshape %528 []
+%530 = where %515 %529 %473
+%531 = store %527 %530
+%532 = index %459 %156
+%533 = shrink %517 3 1
+%534 = reshape %533 []
+%535 = where %515 %534 %473
+%536 = store %532 %535
+%537 = index %459 %161
+%538 = shrink %517 4 1
+%539 = reshape %538 []
+%540 = where %515 %539 %473
+%541 = store %537 %540
+%542 = index %459 %166
+%543 = shrink %517 5 1
+%544 = reshape %543 []
+%545 = where %515 %544 %473
+%546 = store %542 %545
+%547 = index %459 %171
+%548 = shrink %517 6 1
+%549 = reshape %548 []
+%550 = where %515 %549 %473
+%551 = store %547 %550
+%552 = index %459 %176
+%553 = shrink %517 7 1
+%554 = reshape %553 []
+%555 = where %515 %554 %473
+%556 = store %552 %555
+%557 = after %447 %453 %475 %480 %485 %490 %495 %500 %505 %510 %521 %526 %531 %536 %541 %546 %551 %556
+%558 = index %557 %21
+%559 = reshape %558 [2 1 16 2 16]
+%560 = range 2 slot=400
+%561 = index %559 %19 %441 %183 %560
+%562 = after %456 %453 %475 %480 %485 %490 %495 %500 %505 %510 %521 %526 %531 %536 %541 %546 %551 %556
+%563 = reshape %562 [2 2 16 2 16]
+%564 = index %563 %21 %442 %183 %560
+%565 = after %443 %560
+%566 = wmma %561 %564 %565 arg=[[16 16 16] `dtypes.f16` 32 `None`]
+%567 = store %443 %566
+%568 = end %567 %441 %442
+%569 = end %568 %560
+%570 = barrier %569
+%571 = end %570 %71
+%572 = after %438 %571
+%573 = after %375 %437
+%574 = after %573 %571
+%575 = recip %574
+%576 = expand %575 2
+%577 = permute %576 [1 0]
+%578 = mul %572 %577
+%579 = store %572 %578
+%580 = after %572 %579
+%581 = store %26 %580
+%582 = end %581 %19 %21 %24
+%583 = end %582 %14 %10
+%584 = sink %583 name=test opts_to_apply=[]

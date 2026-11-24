@@ -1,0 +1,328 @@
+%0 = param [] slot=-1 dtype=i32 vmin_vmax=[1 1048576] name=tokens addrspace=TEMPLATE
+%1 = param [] slot=-1 dtype=i32 vmin_vmax=[1 1048576] name=out_features addrspace=TEMPLATE
+%2 = mul %0 %1
+%3 = param [] slot=-1 dtype=i32 vmin_vmax=[1 1024] name=chunks addrspace=TEMPLATE
+%4 = mul %2 %3
+%5 = param %4 slot=0 dtype=f32
+%6 = stack %0 %1 %3
+%7 = reshape %5 %6
+%8 = add %1 3
+%9 = div %8 4
+%10 = mul %0 %9
+%11 = cast %10 dtype=weakint
+%12 = range %11 slot=0 axis=GLOBAL
+%13 = cast %12 dtype=i32
+%14 = div %13 %9
+%15 = mod %13 %9
+%16 = mul %15 4
+%17 = range 4 slot=3 axis=LOCAL
+%18 = cast %17 dtype=i32
+%19 = add %16 %18
+%20 = cmplt %19 %1
+%21 = range 32 slot=2 axis=LOCAL
+%22 = cmpeq %21 0
+%23 = and %20 %22
+%24 = xor %19 -1
+%25 = add %1 -1
+%26 = xor %25 -1
+%27 = max %24 %26
+%28 = xor %27 -1
+%29 = where %23 %28 invalid
+%30 = cast %3 dtype=weakint
+%31 = range %30 slot=1 axis=GLOBAL
+%32 = index %7 %14 %29 %31
+%33 = alloc 1 slot=0 dtype=f32 addrspace=REG
+%34 = index %33 0
+%35 = cast 0.0 dtype=f32
+%36 = store %34 %35
+%37 = after %33 %36
+%38 = index %37 0
+%39 = param [] slot=-1 dtype=i32 vmin_vmax=[32 1048576] name=in_features addrspace=TEMPLATE
+%40 = div %39 32
+%41 = mul %3 32
+%42 = add %40 %41
+%43 = add %42 -1
+%44 = div %43 %41
+%45 = cast %44 dtype=weakint
+%46 = range %45 slot=4
+%47 = after %37 %46
+%48 = index %47 0
+%49 = load %48
+%50 = cast %21 dtype=i32
+%51 = cast %31 dtype=i32
+%52 = cast %46 dtype=i32
+%53 = mul %52 %3
+%54 = add %51 %53
+%55 = mul %54 32
+%56 = add %50 %55
+%57 = cmplt %56 %40
+%58 = param [] slot=-1 dtype=i32
+%59 = native %58 code='__builtin_amdgcn_sdot4({}, {}, {}, false)' fmt=true
+%60 = param [] slot=-1 dtype=i32 vmin_vmax=[1 1073741824] name=raw_len addrspace=TEMPLATE
+%61 = param %60 slot=1 dtype=u16
+%62 = div %39 256
+%63 = mul %28 %62
+%64 = xor %56 -1
+%65 = add %40 -1
+%66 = xor %65 -1
+%67 = max %64 %66
+%68 = xor %67 -1
+%69 = div %68 8
+%70 = add %63 %69
+%71 = mul %70 42
+%72 = param [] slot=-1 dtype=i32 vmin_vmax=[0 1048576] name=group_rows addrspace=TEMPLATE
+%73 = cmplt 0 %72
+%74 = max %72 1
+%75 = div %14 %74
+%76 = mul %62 42
+%77 = mul %1 %76
+%78 = mul %75 %77
+%79 = where %73 %78 0
+%80 = add %71 %79
+%81 = mod %68 8
+%82 = div %81 4
+%83 = mul %82 32
+%84 = add %83 28
+%85 = div %84 2
+%86 = add %80 %85
+%87 = index %61 %86
+%88 = cast %87 dtype=u32
+%89 = add %86 1
+%90 = index %61 %89
+%91 = cast %90 dtype=u32
+%92 = shl %91 16
+%93 = or %88 %92
+%94 = cast %93 dtype=i64
+%95 = mod %81 4
+%96 = mul %95 2
+%97 = cast %96 dtype=i64
+%98 = shr %94 %97
+%99 = and %98 50529027
+%100 = mul %0 %40
+%101 = mul %100 8
+%102 = param %101 slot=2 dtype=u32
+%103 = mul %40 8
+%104 = mul %14 %103
+%105 = mul %68 8
+%106 = add %104 %105
+%107 = cast 0 dtype=i32
+%108 = add %106 %107
+%109 = shrink %102 %108 8
+%110 = load %109
+%111 = shrink %110 3 1
+%112 = reshape %111 []
+%113 = add %83 24
+%114 = div %113 2
+%115 = add %80 %114
+%116 = index %61 %115
+%117 = cast %116 dtype=u32
+%118 = add %115 1
+%119 = index %61 %118
+%120 = cast %119 dtype=u32
+%121 = shl %120 16
+%122 = or %117 %121
+%123 = cast %122 dtype=i64
+%124 = shr %123 %97
+%125 = and %124 50529027
+%126 = shrink %110 2 1
+%127 = reshape %126 []
+%128 = add %83 20
+%129 = div %128 2
+%130 = add %80 %129
+%131 = index %61 %130
+%132 = cast %131 dtype=u32
+%133 = add %130 1
+%134 = index %61 %133
+%135 = cast %134 dtype=u32
+%136 = shl %135 16
+%137 = or %132 %136
+%138 = cast %137 dtype=i64
+%139 = shr %138 %97
+%140 = and %139 50529027
+%141 = shrink %110 1 1
+%142 = reshape %141 []
+%143 = add 16 %83
+%144 = div %143 2
+%145 = add %80 %144
+%146 = index %61 %145
+%147 = cast %146 dtype=u32
+%148 = add %145 1
+%149 = index %61 %148
+%150 = cast %149 dtype=u32
+%151 = shl %150 16
+%152 = or %147 %151
+%153 = cast %152 dtype=i64
+%154 = shr %153 %97
+%155 = and %154 50529027
+%156 = shrink %110 0 1
+%157 = reshape %156 []
+%158 = call %59 %155 %157 %107 inline=true
+%159 = call %59 %140 %142 %158 inline=true
+%160 = call %59 %125 %127 %159 inline=true
+%161 = call %59 %99 %112 %160 inline=true
+%162 = cast %161 dtype=f32
+%163 = mul %81 2
+%164 = div %163 2
+%165 = add %80 %164
+%166 = index %61 %165
+%167 = cast %166 dtype=u32
+%168 = cast %167 dtype=i64
+%169 = mod %163 2
+%170 = mul %169 8
+%171 = cast %170 dtype=i64
+%172 = shr %168 %171
+%173 = and %172 15
+%174 = cast %173 dtype=f32
+%175 = mul %162 %174
+%176 = add %80 40
+%177 = index %61 %176
+%178 = bitcast %177 dtype=f16
+%179 = cast %178 dtype=f32
+%180 = mul %175 %179
+%181 = mul %100 2
+%182 = param %181 slot=4 dtype=f32
+%183 = stack %0 %40 2
+%184 = reshape %182 %183
+%185 = index %184 %14 %68 0
+%186 = load %185
+%187 = and %172 255
+%188 = shr %187 4
+%189 = cast %188 dtype=f32
+%190 = mul %186 %189
+%191 = add %80 41
+%192 = index %61 %191
+%193 = bitcast %192 dtype=f16
+%194 = cast %193 dtype=f32
+%195 = mul %190 %194
+%196 = mul %195 -1.0
+%197 = add %180 %196
+%198 = add %35 %197
+%199 = add %83 44
+%200 = div %199 2
+%201 = add %80 %200
+%202 = index %61 %201
+%203 = cast %202 dtype=u32
+%204 = add %201 1
+%205 = index %61 %204
+%206 = cast %205 dtype=u32
+%207 = shl %206 16
+%208 = or %203 %207
+%209 = cast %208 dtype=i64
+%210 = shr %209 %97
+%211 = and %210 50529027
+%212 = shrink %110 7 1
+%213 = reshape %212 []
+%214 = add %83 40
+%215 = div %214 2
+%216 = add %80 %215
+%217 = index %61 %216
+%218 = cast %217 dtype=u32
+%219 = add %216 1
+%220 = index %61 %219
+%221 = cast %220 dtype=u32
+%222 = shl %221 16
+%223 = or %218 %222
+%224 = cast %223 dtype=i64
+%225 = shr %224 %97
+%226 = and %225 50529027
+%227 = shrink %110 6 1
+%228 = reshape %227 []
+%229 = add %83 36
+%230 = div %229 2
+%231 = add %80 %230
+%232 = index %61 %231
+%233 = cast %232 dtype=u32
+%234 = add %231 1
+%235 = index %61 %234
+%236 = cast %235 dtype=u32
+%237 = shl %236 16
+%238 = or %233 %237
+%239 = cast %238 dtype=i64
+%240 = shr %239 %97
+%241 = and %240 50529027
+%242 = shrink %110 5 1
+%243 = reshape %242 []
+%244 = add %83 32
+%245 = div %244 2
+%246 = add %80 %245
+%247 = index %61 %246
+%248 = cast %247 dtype=u32
+%249 = add %246 1
+%250 = index %61 %249
+%251 = cast %250 dtype=u32
+%252 = shl %251 16
+%253 = or %248 %252
+%254 = cast %253 dtype=i64
+%255 = shr %254 %97
+%256 = and %255 50529027
+%257 = shrink %110 4 1
+%258 = reshape %257 []
+%259 = call %59 %256 %258 %107 inline=true
+%260 = call %59 %241 %243 %259 inline=true
+%261 = call %59 %226 %228 %260 inline=true
+%262 = call %59 %211 %213 %261 inline=true
+%263 = cast %262 dtype=f32
+%264 = add %163 1
+%265 = div %264 2
+%266 = add %80 %265
+%267 = index %61 %266
+%268 = cast %267 dtype=u32
+%269 = cast %268 dtype=i64
+%270 = mod %264 2
+%271 = mul %270 8
+%272 = cast %271 dtype=i64
+%273 = shr %269 %272
+%274 = and %273 15
+%275 = cast %274 dtype=f32
+%276 = mul %263 %275
+%277 = mul %276 %179
+%278 = index %184 %14 %68 1
+%279 = load %278
+%280 = and %273 255
+%281 = shr %280 4
+%282 = cast %281 dtype=f32
+%283 = mul %279 %282
+%284 = mul %283 %194
+%285 = mul %284 -1.0
+%286 = add %277 %285
+%287 = add %198 %286
+%288 = param %100 slot=3 dtype=f32
+%289 = stack %0 %40
+%290 = reshape %288 %289
+%291 = index %290 %14 %68
+%292 = mul %287 %291
+%293 = where %57 %292 %35
+%294 = add %49 %293
+%295 = store %38 %294
+%296 = end %295 %46
+%297 = after %37 %296
+%298 = index %297 0
+%299 = load %298
+%300 = native %58 code='__builtin_amdgcn_ds_swizzle({0}, 16415)' fmt=true
+%301 = bitcast %299 dtype=i32
+%302 = call %300 %301
+%303 = bitcast %302 dtype=f32
+%304 = add %299 %303
+%305 = native %58 code='__builtin_amdgcn_ds_swizzle({0}, 8223)' fmt=true
+%306 = bitcast %304 dtype=i32
+%307 = call %305 %306
+%308 = bitcast %307 dtype=f32
+%309 = add %304 %308
+%310 = native %58 code='__builtin_amdgcn_ds_swizzle({0}, 4127)' fmt=true
+%311 = bitcast %309 dtype=i32
+%312 = call %310 %311
+%313 = bitcast %312 dtype=f32
+%314 = add %309 %313
+%315 = native %58 code='__builtin_amdgcn_ds_swizzle({0}, 2079)' fmt=true
+%316 = bitcast %314 dtype=i32
+%317 = call %315 %316
+%318 = bitcast %317 dtype=f32
+%319 = add %314 %318
+%320 = native %58 code='__builtin_amdgcn_ds_swizzle({0}, 1055)' fmt=true
+%321 = bitcast %319 dtype=i32
+%322 = call %320 %321
+%323 = bitcast %322 dtype=f32
+%324 = add %319 %323
+%325 = store %32 %324
+%326 = end %325 %12 %17 %31 %21
+%327 = sink %326 name=linear_q2_k opts_to_apply=[]

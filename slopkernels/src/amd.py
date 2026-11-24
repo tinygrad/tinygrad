@@ -93,14 +93,15 @@ def _vec_load(ptr:UOp, lanes:int) -> tuple[UOp, ...]:
 
 @functools.cache
 def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, *extra, valid_kv_len, max_kv_len, block_n, waves=4, window=0,
-                                        has_rel=False, ring=False):
+                                        has_rel=False, ring=False, group:int|None=None):
   valid_kv_len = _unbind(valid_kv_len)
   is_q4 = cache_kv.dtype == dtypes.uint32
   _, B, H_KV, N, _ = cast(tuple[int, int, int, int, int], cache_kv.shape)
   _, H, M, D = cast(tuple[int, int, int, int], q.shape)
-  assert 1 <= M <= 16 and H % H_KV == 0 and D % WARP_SIZE == 0 and (ring or max_kv_len <= N) and N % block_n == 0
+  assert (1 <= M <= 16 and (not isinstance(H, int) or H % H_KV == 0) and D % WARP_SIZE == 0
+          and (ring or not isinstance(N, int) or max_kv_len <= N) and (not isinstance(N, int) or N % block_n == 0))
   if is_q4: assert D == 128 and cache_kv.shape[4] == 17
-  G, CHUNK, DPL, WAVES, PARTIALS = H // H_KV, block_n, D // WARP_SIZE, waves, out.shape[2]
+  G, CHUNK, DPL, WAVES, PARTIALS = (H // H_KV if group is None else group), block_n, D // WARP_SIZE, waves, out.shape[2]
   assert CHUNK % WAVES == 0
   SEC = CHUNK // WAVES  # keys each wave scans independently
   max_span = (valid_kv_len.minimum(window) if isinstance(valid_kv_len, UOp) else min(valid_kv_len, window)) if window else valid_kv_len
@@ -217,8 +218,8 @@ def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, *extra:UOp, valid_k
   BM, H, C, D = partial.shape
   M = cast(int, o.shape[1] if has_gate else o.shape[2])
   B = cast(int, o.shape[0])
-  DT = 64 if D % 64 == 0 else WARP_SIZE  # dims per block
-  assert D % DT == 0
+  DT = 64 if (not isinstance(D, int) or D % 64 == 0) else WARP_SIZE  # dims per block
+  assert not isinstance(D, int) or D % DT == 0
   block_bh, block_dt = UOp.range(BM*H, 0, AxisType.GLOBAL), UOp.range(D//DT, 1, AxisType.GLOBAL)
   lane = UOp.range(WARP_SIZE, 2, axis_type=AxisType.LOCAL)
   bm, h = block_bh // H, block_bh % H
@@ -318,7 +319,7 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *extra:UOp, valid_kv_len:int|U
   _, B, H_KV, physical_n, cache_dim = cast(tuple[int, int, int, int, int], cache.shape)
   H = BH // B
   k, v = cache[0].reshape(B*H_KV, physical_n, cache_dim), cache[1].reshape(B*H_KV, physical_n, cache_dim)
-  assert k.shape == v.shape and BH % k.shape[0] == 0 and (D == 128 and cache_dim == 17 if is_q4 else k.shape[2] == D)
+  assert k.shape == v.shape and (not isinstance(BH, int) or BH % k.shape[0] == 0) and (D == 128 and cache_dim == 17 if is_q4 else k.shape[2] == D)
   gqa_group = BH // k.shape[0]
   if isinstance(M, int): assert M % BLOCK_M == 0
   assert isinstance(D, int) and D % WMMA_K == 0 and D % LANES_PER_WAVE_N == 0

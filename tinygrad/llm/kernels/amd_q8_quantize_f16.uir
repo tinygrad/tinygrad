@@ -1,0 +1,123 @@
+%0 = param [] slot=-1 dtype=i32 vmin_vmax=[1 1048576] name=tokens addrspace=TEMPLATE
+%1 = param [] slot=-1 dtype=i32 vmin_vmax=[32 1048576] name=in_features addrspace=TEMPLATE
+%2 = div %1 32
+%3 = mul %0 %2
+%4 = mul %3 8
+%5 = param %4 slot=0 dtype=u32
+%6 = stack %0 %2 8
+%7 = reshape %5 %6
+%8 = cast %3 dtype=weakint
+%9 = range %8 slot=0 axis=GLOBAL
+%10 = cast %9 dtype=i32
+%11 = div %10 %2
+%12 = mod %10 %2
+%13 = range 32 slot=-1 axis=WARP
+%14 = mod %13 4
+%15 = cmpeq %14 0
+%16 = div %13 4
+%17 = where %15 %16 invalid
+%18 = index %7 %11 %12 %17
+%19 = param [] slot=-1 dtype=f32
+%20 = native %19 code='__builtin_nearbyintf({0}/{1})' fmt=true
+%21 = mul %0 %1
+%22 = param %21 slot=3 dtype=f16
+%23 = stack %0 %2 32
+%24 = reshape %22 %23
+%25 = index %24 %11 %12 %13
+%26 = load %25
+%27 = cast %26 dtype=f32
+%28 = native %19 code='({0}/127.0f)' fmt=true
+%29 = cmpeq %27 0.0
+%30 = cmpeq %29 false
+%31 = cmplt %27 0.0
+%32 = cast -1.0 dtype=f32
+%33 = cast 1.0 dtype=f32
+%34 = where %31 %32 %33
+%35 = cast 0.0 dtype=f32
+%36 = where %30 %34 %35
+%37 = mul %27 %36
+%38 = param [] slot=-1 dtype=i32
+%39 = native %38 code='__builtin_amdgcn_ds_swizzle({0}, 16415)' fmt=true
+%40 = bitcast %37 dtype=i32
+%41 = call %39 %40
+%42 = bitcast %41 dtype=f32
+%43 = max %37 %42
+%44 = native %38 code='__builtin_amdgcn_ds_swizzle({0}, 8223)' fmt=true
+%45 = bitcast %43 dtype=i32
+%46 = call %44 %45
+%47 = bitcast %46 dtype=f32
+%48 = max %43 %47
+%49 = native %38 code='__builtin_amdgcn_ds_swizzle({0}, 4127)' fmt=true
+%50 = bitcast %48 dtype=i32
+%51 = call %49 %50
+%52 = bitcast %51 dtype=f32
+%53 = max %48 %52
+%54 = native %38 code='__builtin_amdgcn_ds_swizzle({0}, 2079)' fmt=true
+%55 = bitcast %53 dtype=i32
+%56 = call %54 %55
+%57 = bitcast %56 dtype=f32
+%58 = max %53 %57
+%59 = native %38 code='__builtin_amdgcn_ds_swizzle({0}, 1055)' fmt=true
+%60 = bitcast %58 dtype=i32
+%61 = call %59 %60
+%62 = bitcast %61 dtype=f32
+%63 = max %58 %62
+%64 = call %28 %63
+%65 = max %64 1e-08
+%66 = call %20 %27 %65
+%67 = cmplt %66 -127.0
+%68 = where %67 -127.0 %66
+%69 = cmplt 127.0 %68
+%70 = where %69 127.0 %68
+%71 = cast %70 dtype=i8
+%72 = cast %71 dtype=u8
+%73 = cast %72 dtype=u32
+%74 = mul %14 8
+%75 = cast %74 dtype=u32
+%76 = shl %73 %75
+%77 = bitcast %76 dtype=i32
+%78 = call %59 %77
+%79 = bitcast %78 dtype=u32
+%80 = or %76 %79
+%81 = bitcast %80 dtype=i32
+%82 = call %54 %81
+%83 = bitcast %82 dtype=u32
+%84 = or %80 %83
+%85 = store %18 %84
+%86 = param %3 slot=1 dtype=f32
+%87 = stack %0 %2
+%88 = reshape %86 %87
+%89 = cmpeq %13 0
+%90 = where %89 %12 invalid
+%91 = index %88 %11 %90
+%92 = store %91 %65
+%93 = mul %3 2
+%94 = param %93 slot=2 dtype=f32
+%95 = stack %0 %2 2
+%96 = reshape %94 %95
+%97 = mod %13 16
+%98 = cmpeq %97 0
+%99 = div %13 16
+%100 = where %98 %99 invalid
+%101 = index %96 %11 %12 %100
+%102 = cast %71 dtype=f32
+%103 = bitcast %102 dtype=i32
+%104 = call %44 %103
+%105 = bitcast %104 dtype=f32
+%106 = add %102 %105
+%107 = bitcast %106 dtype=i32
+%108 = call %49 %107
+%109 = bitcast %108 dtype=f32
+%110 = add %106 %109
+%111 = bitcast %110 dtype=i32
+%112 = call %54 %111
+%113 = bitcast %112 dtype=f32
+%114 = add %110 %113
+%115 = bitcast %114 dtype=i32
+%116 = call %59 %115
+%117 = bitcast %116 dtype=f32
+%118 = add %114 %117
+%119 = store %101 %118
+%120 = after [] %85 %92 %119
+%121 = end %120 %9 %13
+%122 = sink %121 name=q8_quantize opts_to_apply=[]

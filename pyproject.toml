@@ -25,6 +25,7 @@ packages = [
   'tinygrad.codegen.late',
   'tinygrad.engine',
   'tinygrad.llm',
+  'tinygrad.llm.kernels',
   'tinygrad.mixin',
   'tinygrad.nn',
   'tinygrad.renderer',
@@ -48,6 +49,7 @@ packages = [
 [tool.setuptools.package-data]
 tinygrad = ["py.typed"]
 "tinygrad.llm" = ["chat.html"]
+"tinygrad.llm.kernels" = ["*.uir", "manifest.json"]
 "tinygrad.viz" = ["index.html", "assets/**/*", "js/*"]
 
 

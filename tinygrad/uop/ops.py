@@ -85,6 +85,12 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   max_dim = max(len(s) for s in shapes)
   return tuple((1,)*(max_dim-len(s))+s for s in shapes)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
+def _storage_dim(x:sint) -> sint:
+  if not isinstance(x, UOp): return x
+  if not x.has_templates: return int(x.vmax)
+  if not (vs := x.variables()): return ssimplify(x)
+  return ssimplify(x.substitute({v: UOp.const(v.vmax) for v in vs}))
+def _storage_shape(shape:tuple[sint, ...]) -> tuple[sint, ...]: return tuple(_storage_dim(x) for x in shape)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   if all_same(shapes): return shapes[0]
   # per right-aligned dim: sizes of 1 broadcast to the others, which must all agree
@@ -392,7 +398,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
       if ps is None: raise RuntimeError(f"movement op {self.op} requires shape, {self.src[0].op} doesn't have one")
       match self.op:
         case Ops.RESHAPE:
-          if not all(x >= 0 for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
+          if not all(resolve(x >= 0) for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
           # with symbolic views prod equality can be true at runtime but unprovable, only reject provably unequal products
           if resolve(prod(ps) != prod(self.marg), False): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
           return self.marg
@@ -544,7 +550,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     return UOp.invalid().expand(ret.shape) if self.base.is_invalid else ret
   def __getitem__(self, idx):
     # buffers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
-    if self.addrspace in (None, AddrSpace.ALU) or self.device is not None: return super(UOp, self).__getitem__(idx)
+    if self.addrspace in (None, AddrSpace.ALU, AddrSpace.TEMPLATE) or self.device is not None: return super(UOp, self).__getitem__(idx)
     idx = self._normalize_indices(list(argfix(idx)))
     if len(slice_idx:=[i for i,x in enumerate(idx) if isinstance(x, slice)]):
       # apply SHRINK for slices that aren't the full range
@@ -1005,6 +1011,121 @@ class UOp(Mixin, metaclass=UOpMetaClass):
         ret.add(UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype))
     return sorted(ret, key=lambda v: (v.arg.name or "", v.arg.slot))
 
+  # *** uop Template stuff ***
+
+  @staticmethod
+  def template(name:str, vmin_vmax:tuple[PyConst, PyConst]|None=None, dtype:DType=dtypes.int32) -> UOp:
+    """Create a named scalar int/float compile-time template parameter (`Ops.PARAM` with `AddrSpace.TEMPLATE`, `slot=-1`)."""
+    if not isinstance(name, str) or not name: raise ValueError(f"template name must be a non-empty str, got {name!r}")
+    if not isinstance(dtype, DType) or not (dtypes.is_int(dtype) or dtypes.is_float(dtype)):
+      raise TypeError(f"template dtype must be scalar int or float, got {dtype!r}")
+    bounds: tuple[PyConst, PyConst]|None = None
+    if vmin_vmax is not None:
+      if not isinstance(vmin_vmax, tuple) or len(vmin_vmax) != 2:
+        raise ValueError(f"template {name!r} vmin_vmax must be a (vmin, vmax) tuple, got {vmin_vmax!r}")
+      lo, hi = vmin_vmax
+      if isinstance(lo, bool) or isinstance(hi, bool):
+        raise TypeError(f"template {name!r} vmin_vmax cannot be bool, got {vmin_vmax!r}")
+      if dtypes.is_int(dtype):
+        if not isinstance(lo, int) or not isinstance(hi, int):
+          raise TypeError(f"template {name!r} int vmin_vmax must be (int, int), got {vmin_vmax!r}")
+        if lo > hi: raise ValueError(f"template {name!r} vmin {lo} > vmax {hi}")
+        if lo < dtype.min or hi > dtype.max:
+          raise ValueError(f"template {name!r} vmin_vmax {vmin_vmax} out of range for {dtype} [{dtype.min}, {dtype.max}]")
+        bounds = (lo, hi)
+      else:
+        if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
+          raise TypeError(f"template {name!r} float vmin_vmax must be numeric, got {vmin_vmax!r}")
+        flo, fhi = float(lo), float(hi)
+        if math.isnan(flo) or math.isnan(fhi): raise ValueError(f"template {name!r} vmin_vmax cannot contain nan: {vmin_vmax!r}")
+        if flo > fhi: raise ValueError(f"template {name!r} vmin {flo} > vmax {fhi}")
+        if flo < dtype.min or fhi > dtype.max:
+          raise ValueError(f"template {name!r} vmin_vmax {vmin_vmax} out of range for {dtype} [{dtype.min}, {dtype.max}]")
+        bounds = (flo, fhi)
+    return UOp(Ops.PARAM, src=(UOp(Ops.STACK),), arg=ParamArg(-1, dtype, vmin_vmax=bounds, name=name, addrspace=AddrSpace.TEMPLATE))
+
+  @property
+  def is_template(self) -> bool: return self.op is Ops.PARAM and self.arg.addrspace is AddrSpace.TEMPLATE
+  @recursive_property
+  def has_templates(self) -> bool: return self.is_template or any(s.has_templates for s in self.src)
+  def templates(self) -> list[UOp]:
+    if not self.has_templates: return []
+    return sorted((u for u in self.toposort(enter_calls=True) if u.is_template),
+                  key=lambda t: (t.arg.name or "", t.dtype, t.arg.vmin_vmax is None, t.arg.vmin_vmax))
+
+  def specialize(self, **values:PyConst) -> UOp:
+    """Bind all named template parameters in `self` (including inside CALL bodies) and return a template-free UOp graph."""
+    by_name: dict[str, list[UOp]] = {}
+    for t in self.templates():
+      if not isinstance(t.arg.name, str) or not t.arg.name: raise ValueError(f"unnamed template parameter {t}")
+      by_name.setdefault(t.arg.name, []).append(t)
+    if missing := sorted(set(by_name) - set(values)): raise ValueError(f"missing template value(s): {', '.join(missing)}")
+    if unknown := sorted(set(values) - set(by_name)): raise ValueError(f"unknown template parameter(s): {', '.join(unknown)}")
+    if not by_name: return self
+    subs: dict[UOp, UOp] = {}
+    for name, tlist in by_name.items():
+      val = values[name]
+      if isinstance(val, bool): raise TypeError(f"template {name!r} value cannot be bool, got {val!r}")
+      for t in tlist:
+        dt = t.dtype
+        if dtypes.is_int(dt):
+          if not isinstance(val, int): raise TypeError(f"template {name!r} expects int for {dt}, got {type(val).__name__}")
+          if not (dt.min <= val <= dt.max): raise ValueError(f"template {name!r} value {val} out of range for {dt} [{dt.min}, {dt.max}]")
+          if t.arg.vmin_vmax is not None and not (t.arg.vmin_vmax[0] <= val <= t.arg.vmin_vmax[1]):
+            raise ValueError(f"template {name!r} value {val} out of range [{t.arg.vmin_vmax[0]}, {t.arg.vmin_vmax[1]}]")
+          subs[t] = UOp.const(val, dt)
+        elif dtypes.is_float(dt):
+          if not isinstance(val, (int, float)): raise TypeError(f"template {name!r} expects float for {dt}, got {type(val).__name__}")
+          fval = float(val)
+          if t.arg.vmin_vmax is not None and (math.isnan(fval) or not (t.arg.vmin_vmax[0] <= fval <= t.arg.vmin_vmax[1])):
+            raise ValueError(f"template {name!r} value {val} out of range [{t.arg.vmin_vmax[0]}, {t.arg.vmin_vmax[1]}]")
+          if not math.isnan(fval) and not (dt.min <= fval <= dt.max):
+            raise ValueError(f"template {name!r} value {val} out of range for {dt} [{dt.min}, {dt.max}]")
+          subs[t] = UOp.const(fval, dt)
+        else:
+          raise TypeError(f"template {name!r} has unsupported dtype {dt}")
+    with Context(TRACK_MATCH_STATS=0, SPEC=min(SPEC.value, 1)):
+      ret = self.substitute(subs, enter_calls=True)
+      from tinygrad.uop.symbolic import symbolic_simple
+      def _spec_size(u:UOp) -> UOp|None:
+        if u.src[0].op is Ops.STACK and len(u.src[0].src) == 0: return None
+        if u.src[0].op is Ops.CONST and u.src[0].dtype is dtypes.weakint: return None
+        s = u.src[0].ssimplify()
+        if isinstance(s, int):
+          if s < 0: raise ValueError(f"specialized {u.op.name} size must be non-negative, got {s}")
+          return u.replace(src=(UOp.const(s),)+u.src[1:])
+        return None
+      def _spec_mop(u:UOp) -> UOp|None:
+        new_args = tuple(shape_to_shape_arg(tuple(cast(sint, x.ssimplify()) if isinstance(x, UOp) else x for x in sa.as_shape)) for sa in u.src[1:])
+        if new_args == u.src[1:]: return None
+        nu = u.replace(src=(u.src[0],)+new_args)
+        _ = nu._shape
+        if nu.op is Ops.SHRINK and nu.src[0]._shape is not None and nu.marg == tuple((0, s) for s in nu.src[0].shape): return nu.src[0]
+        return nu
+      def _spec_bound(u:UOp) -> UOp|None:
+        if u.src[0].op is Ops.NOOP: return None
+        if u.src[0].op is Ops.CONST and u.src[0].dtype is dtypes.weakint:
+          return UOp.const(0) if u.op is Ops.RANGE and u.axis_type is AxisType.DEVICE and u.src[0].val == 1 else None
+        s = u.src[0].ssimplify()
+        if isinstance(s, int):
+          if s < 0: raise ValueError(f"specialized {u.op.name} bound must be non-negative, got {s}")
+          if u.op is Ops.RANGE and u.axis_type is AxisType.DEVICE and s == 1: return UOp.const(0)
+          return u.replace(src=(UOp.const(s),))
+        return None
+      pm_spec = symbolic_simple + PatternMatcher([
+        (UPat((Ops.PARAM, Ops.ALLOC, Ops.BUFFER, Ops.EXTERN, Ops.REFPARAM), name="u"), _spec_size),
+        (UPat((Ops.RESHAPE, Ops.EXPAND, Ops.PAD, Ops.SHRINK), name="u"), _spec_mop),
+        (UPat((Ops.RANGE, Ops.SPECIAL), name="u"), _spec_bound),
+      ])
+      ret = graph_rewrite(ret, pm_spec, enter_calls=True, name="specialize")
+    for u in ret.toposort(enter_calls=True):
+      if u.op in GroupOp.ShapeChanging: _ = u._shape
+    assert not ret.has_templates, f"specialization left unresolved templates: {[t.arg.name for t in ret.templates()]}"
+    if SPEC > 1:
+      from tinygrad.uop.spec import type_verify, spec_full
+      with Context(CHECK_OOB=0): type_verify(ret, spec_full, enter_calls=True)
+    return ret
+
   # *** uop symbolic stuff ***
 
   def const_factor(self) -> int:
@@ -1151,7 +1272,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   @staticmethod
   def alloc(shape:tuple[sint, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, axis:int|None=None,
             spec:BufferSpec|None=None, bind_on_realize:bool=False, name:str|None=None):
-    ret = UOp(Ops.ALLOC, src=(shape_to_shape_arg((prod(to_max_shape(shape)),)),)+UOp.device_range_src(device),
+    ret = UOp(Ops.ALLOC, src=(shape_to_shape_arg((ssimplify(prod(_storage_shape(shape))),)),)+UOp.device_range_src(device),
               arg=ParamArg(next(UOp.unique_num) if slot is None else slot, strong_dtype(dtype),
                            addrspace=addrspace, device=device, spec=spec, bind_on_realize=bind_on_realize, name=name))
     return ret.reshape(()) if not shape else ret.view_as(shape, axis)
@@ -1183,11 +1304,11 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   def param(slot:int, dtype:DType, shape:tuple[sint, ...]|sint|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None,
             name=None, addrspace=AddrSpace.GLOBAL, volatile:bool=False):
     """create a PARAM: a single sint or 1-d shape gives a flat param of that size, a None shape gives a scalar param.
-    src[0] stores the concrete max size (never symbolic): a multi-dim shape is a RESHAPE on top of the flat param,
-    a symbolic shape is a max-size param shrunk to the real shape"""
+    src[0] stores the concrete max size for runtime-variable shapes, or the exact symbolic size expression for template shapes:
+    a multi-dim shape is a RESHAPE on top of the flat param, a runtime-variable shape is a max-size param shrunk to the real shape"""
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create param for weak dtype {dtype}")
     shape = (shape,) if isinstance(shape, (int, UOp)) else shape or ()
-    ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((prod(to_max_shape(shape)),) if shape else ()),),
+    ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((ssimplify(prod(_storage_shape(shape))),) if shape else ()),),
               arg=ParamArg(slot, dtype, vmin_vmax, name, addrspace, device, volatile))
     return ret.view_as(shape)
   def param_like(self, slot:int, name:str|None=None):
@@ -1196,13 +1317,15 @@ class UOp(Mixin, metaclass=UOpMetaClass):
       return self.replace(op=Ops.PARAM, arg=replace(self.arg, slot=slot, name=name, val=None))
     # multi-device values become a per-shard sized param wrapped in UNSHARD: the sharding lives in the graph, not the arg
     if self.axis is not None and isinstance(self.device, tuple):
-      return UOp.param(slot, self.dtype, prod(to_max_shape(self.shard_shape)), self.device, name=name).view_as(self.shard_shape, self.axis)
+      sz = ssimplify(prod(_storage_shape(self.shard_shape)))
+      return UOp.param(slot, self.dtype, sz, self.device, name=name).view_as(self.shard_shape, self.axis)
     return UOp.param(slot, self.dtype, self._shape, self.device, name=name)
   def view_as(self:UOp, shape:tuple[sint, ...], axis:int|None=None) -> UOp:
     """view flat storage as the given (possibly symbolic) shape, optionally sharded on axis, the UNSHARD gives back the multiplied shape"""
-    max_shape = to_max_shape(shape)
-    ret = self.reshape(max_shape) if shape else self
-    if tuple(max_shape) != tuple(shape): ret = ret.shrink_to(shape)
+    shape = tuple(ssimplify(s) for s in shape)
+    storage_shape = _storage_shape(shape)
+    ret = self.reshape(storage_shape) if shape else self
+    if tuple(storage_shape) != tuple(shape): ret = ret.shrink_to(shape)
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
@@ -1340,6 +1463,7 @@ class ProgramInfo:
     global_size: list[sint] = [1, 1, 1]
     local_size: list[sint] = [1, 1, 1]
     for u in sink.toposort():
+      if u.is_template: raise RuntimeError(f"unresolved template parameter {u.arg.name!r} in ProgramInfo.from_sink")
       if u.op is Ops.PARAM: _params.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):

@@ -1,0 +1,2245 @@
+{
+  "version": 1,
+  "kind": "llm_kernels",
+  "artifacts": [
+    {
+      "name": "amd_flash_decode_combine",
+      "kind": "llm_template",
+      "path": "amd_flash_decode_combine.uir",
+      "templates": [
+        "B",
+        "C",
+        "H",
+        "d_blks",
+        "valid_kv_offset"
+      ],
+      "size": 3038,
+      "sha256": "ac52769682c192097f3500165699c9899f7bdd54a41378647fc5f8b7cb4ee51c"
+    },
+    {
+      "name": "amd_flash_decode_partial_g1_d128",
+      "kind": "llm_template",
+      "path": "amd_flash_decode_partial_g1_d128.uir",
+      "templates": [
+        "B",
+        "C",
+        "H_KV",
+        "n_blks",
+        "valid_kv_offset"
+      ],
+      "size": 21691,
+      "sha256": "16d4a3396880f0e7e8a840b23e7ae706422d182e9dabd3d67ab41b6abc09537a"
+    },
+    {
+      "name": "amd_flash_decode_partial_g1_d256",
+      "kind": "llm_template",
+      "path": "amd_flash_decode_partial_g1_d256.uir",
+      "templates": [
+        "B",
+        "C",
+        "H_KV",
+        "n_blks",
+        "valid_kv_offset"
+      ],
+      "size": 26523,
+      "sha256": "256cbd2416d9eea24ed6fbe69a9c15e4b86254fd2e1f7dbd127694b10956e69b"
+    },
+    {
+      "name": "amd_flash_decode_partial_g1_d64",
+      "kind": "llm_template",
+      "path": "amd_flash_decode_partial_g1_d64.uir",
+      "templates": [
+        "B",
+        "C",
+        "H_KV",
+        "n_blks",
+        "valid_kv_offset"
+      ],
+      "size": 19291,
+      "sha256": "1fc26d4e3bef68d2532204b0e10af6e61e0c7b77c8426e2cb873abee6f595635"
+    },
+    {
+      "name": "amd_flash_decode_partial_g2_d128",
+      "kind": "llm_template",
+      "path": "amd_flash_decode_partial_g2_d128.uir",
+      "templates": [
+        "B",
+        "C",
+        "H_KV",
+        "n_blks",
+        "valid_kv_offset"
+      ],
+      "size": 27557,
+      "sha256": "15c083bf37f7f2e98d524b970d87637d7a975e818356c89c9d4be313b36e96b5"
+    },
+    {
+      "name": "amd_flash_decode_partial_g2_d256",
+      "kind": "llm_template",
+      "path": "amd_flash_decode_partial_g2_d256.uir",
+      "templates": [
+        "B",
+        "C",
+        "H_KV",
+        "n_blks",
+        "valid_kv_offset"
+      ],
+      "size": 34614,
+      "sha256": "65b8a04d64b7ffa709e0fc8f9d2b2d8ac70cbd7dcf8cd4513834ecf84acd23a3"
+    },
+    {
+      "name": "amd_flash_decode_partial_g2_d64",
+      "kind": "llm_template",
+      "path": "amd_flash_decode_partial_g2_d64.uir",
+      "templates": [
+        "B",
+        "C",
+        "H_KV",
+        "n_blks",
+        "valid_kv_offset"
+      ],
+      "size": 23841,
+      "sha256": "921a6aa15e53e2e4cf51f7c06706b78c3321e8cceb4cfc9e3cc02a6a07a140ef"
+    },
+    {
+      "name": "amd_flash_decode_partial_g4_d128",
+      "kind": "llm_template",
+      "path": "amd_flash_decode_partial_g4_d128.uir",
+      "templates": [
+        "B",
+        "C",
+        "H_KV",
+        "n_blks",
+        "valid_kv_offset"
+      ],
+      "size": 39574,
+      "sha256": "8c0e8d57a474118061440890f5e0886421653f2780c4f2e2887763a964a5c3f9"
+    },
+    {
+      "name": "amd_flash_decode_partial_g4_d256",
+      "kind": "llm_template",
+      "path": "amd_flash_decode_partial_g4_d256.uir",
+      "templates": [
+        "B",
+        "C",
+        "H_KV",
+        "n_blks",
+        "valid_kv_offset"
+      ],
+      "size": 56685,
+      "sha256": "9ef2c42341529627bb79a9f9500ff376ca13445e1a7956ad18b6a09f094f089b"
+    },
+    {
+      "name": "amd_flash_decode_partial_g4_d64",
+      "kind": "llm_template",
+      "path": "amd_flash_decode_partial_g4_d64.uir",
+      "templates": [
+        "B",
+        "C",
+        "H_KV",
+        "n_blks",
+        "valid_kv_offset"
+      ],
+      "size": 33690,
+      "sha256": "a7850ad61ca2f700942443cf1a3b4baa31b83afc6c93d1cfc8bababcff064751"
+    },
+    {
+      "name": "amd_flash_decode_partial_g8_d128",
+      "kind": "llm_template",
+      "path": "amd_flash_decode_partial_g8_d128.uir",
+      "templates": [
+        "B",
+        "C",
+        "H_KV",
+        "n_blks",
+        "valid_kv_offset"
+      ],
+      "size": 69500,
+      "sha256": "fc02ef2d0d76db96dff6bf03d61101a4b04c615e2fe369333322b912c5588b14"
+    },
+    {
+      "name": "amd_flash_decode_partial_g8_d256",
+      "kind": "llm_template",
+      "path": "amd_flash_decode_partial_g8_d256.uir",
+      "templates": [
+        "B",
+        "C",
+        "H_KV",
+        "n_blks",
+        "valid_kv_offset"
+      ],
+      "size": 155331,
+      "sha256": "4e88fc9b0443e9bf498ea252d7d7a6de3e05ea85f166fbf010b2c1bda57429aa"
+    },
+    {
+      "name": "amd_flash_decode_partial_g8_d64",
+      "kind": "llm_template",
+      "path": "amd_flash_decode_partial_g8_d64.uir",
+      "templates": [
+        "B",
+        "C",
+        "H_KV",
+        "n_blks",
+        "valid_kv_offset"
+      ],
+      "size": 53210,
+      "sha256": "28019fd17d04012bdb2292fef0b68ca0fb635c036154822650776068874fed1a"
+    },
+    {
+      "name": "amd_gated_delta_k128_a1",
+      "kind": "llm_template",
+      "path": "amd_gated_delta_k128_a1.uir",
+      "templates": [
+        "batch",
+        "heads",
+        "tokens",
+        "v_tiles"
+      ],
+      "size": 12925,
+      "sha256": "394dee658ddc466f0b209b53bd56bfc2ead6560cf3f38a809faf8c9b2c407b3d"
+    },
+    {
+      "name": "amd_gated_delta_k128_ak",
+      "kind": "llm_template",
+      "path": "amd_gated_delta_k128_ak.uir",
+      "templates": [
+        "batch",
+        "heads",
+        "tokens",
+        "v_tiles"
+      ],
+      "size": 13053,
+      "sha256": "9e431c4e18e9b42d0ce8c230753747bf533f24f1d56e635d1ab22ddc9a30c457"
+    },
+    {
+      "name": "amd_gated_delta_k256_a1",
+      "kind": "llm_template",
+      "path": "amd_gated_delta_k256_a1.uir",
+      "templates": [
+        "batch",
+        "heads",
+        "tokens",
+        "v_tiles"
+      ],
+      "size": 18781,
+      "sha256": "b54a8ceb2bf975edbf471463546525240ef6b03ae2e990f6b91ed476db7378ad"
+    },
+    {
+      "name": "amd_gated_delta_k256_ak",
+      "kind": "llm_template",
+      "path": "amd_gated_delta_k256_ak.uir",
+      "templates": [
+        "batch",
+        "heads",
+        "tokens",
+        "v_tiles"
+      ],
+      "size": 19096,
+      "sha256": "2bda26f1b41e9ac3ba0a9be84532b2fd2ae5501b06a65aa129c9be8915867380"
+    },
+    {
+      "name": "amd_gated_delta_k32_a1",
+      "kind": "llm_template",
+      "path": "amd_gated_delta_k32_a1.uir",
+      "templates": [
+        "batch",
+        "heads",
+        "tokens",
+        "v_tiles"
+      ],
+      "size": 8594,
+      "sha256": "7cebff86ce71ba90162983206ac4d6211dd4d6bfda88920e039de1a201b4434b"
+    },
+    {
+      "name": "amd_gated_delta_k32_ak",
+      "kind": "llm_template",
+      "path": "amd_gated_delta_k32_ak.uir",
+      "templates": [
+        "batch",
+        "heads",
+        "tokens",
+        "v_tiles"
+      ],
+      "size": 8573,
+      "sha256": "cbb4a228b0a78c9462c2ccce7043ca7e3ad495ad4c9f0ad0480b579f975bc99f"
+    },
+    {
+      "name": "amd_gated_delta_k64_a1",
+      "kind": "llm_template",
+      "path": "amd_gated_delta_k64_a1.uir",
+      "templates": [
+        "batch",
+        "heads",
+        "tokens",
+        "v_tiles"
+      ],
+      "size": 10028,
+      "sha256": "78d02e99d830601e3968d95f94b7df9ff07eda492b11803c6ea1e73144bab3e9"
+    },
+    {
+      "name": "amd_gated_delta_k64_ak",
+      "kind": "llm_template",
+      "path": "amd_gated_delta_k64_ak.uir",
+      "templates": [
+        "batch",
+        "heads",
+        "tokens",
+        "v_tiles"
+      ],
+      "size": 10061,
+      "sha256": "61346ceabf8827832ed766d9e56229c9adf0850dee68387b63027d734a192c2f"
+    },
+    {
+      "name": "amd_gemv_bf16_f32",
+      "kind": "llm_template",
+      "path": "amd_gemv_bf16_f32.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "tokens"
+      ],
+      "size": 3309,
+      "sha256": "c5e106adfc1c00e93aa56ecafacf3a830fa03f5b8d9c63d087e46e62e4ca31cb"
+    },
+    {
+      "name": "amd_gemv_bf16_f32_v1",
+      "kind": "llm_template",
+      "path": "amd_gemv_bf16_f32_v1.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "tokens"
+      ],
+      "size": 2494,
+      "sha256": "136635005faeade56a280bc4fac7a7f2297af37822103f45b1aee8d823aaef6f"
+    },
+    {
+      "name": "amd_gemv_f16_f32",
+      "kind": "llm_template",
+      "path": "amd_gemv_f16_f32.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "tokens"
+      ],
+      "size": 3308,
+      "sha256": "33fb7245ab4fa927d3c877e554312fcefba009604315d6869db81e37f3f8dec0"
+    },
+    {
+      "name": "amd_gemv_f16_f32_v1",
+      "kind": "llm_template",
+      "path": "amd_gemv_f16_f32_v1.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "tokens"
+      ],
+      "size": 2493,
+      "sha256": "ca2662c897f709523ff064eef0b1f483c8304d12afa8028c4f1719d7b0090379"
+    },
+    {
+      "name": "amd_gemv_f32_bf16",
+      "kind": "llm_template",
+      "path": "amd_gemv_f32_bf16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "tokens"
+      ],
+      "size": 3309,
+      "sha256": "4e388645e6d12485c8f977166aa4854c52348855723f4272ecd3d31d724d8f6b"
+    },
+    {
+      "name": "amd_gemv_f32_bf16_v1",
+      "kind": "llm_template",
+      "path": "amd_gemv_f32_bf16_v1.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "tokens"
+      ],
+      "size": 2494,
+      "sha256": "5b97b3175d665ae8fa8a8d7afe338519198418ca6caf8cca380df34cd0374e70"
+    },
+    {
+      "name": "amd_gemv_f32_f16",
+      "kind": "llm_template",
+      "path": "amd_gemv_f32_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "tokens"
+      ],
+      "size": 3308,
+      "sha256": "937eb0d1ea67da0132eaf4d556c27e79a247fc7a64c5bf856684fce98d9837c0"
+    },
+    {
+      "name": "amd_gemv_f32_f16_v1",
+      "kind": "llm_template",
+      "path": "amd_gemv_f32_f16_v1.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "tokens"
+      ],
+      "size": 2493,
+      "sha256": "e34ade1e3217b73f58f4b57f31a6a1b39762a866e1fcf60de3db47bc1dbd18bb"
+    },
+    {
+      "name": "amd_gemv_f32_f32",
+      "kind": "llm_template",
+      "path": "amd_gemv_f32_f32.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "tokens"
+      ],
+      "size": 3195,
+      "sha256": "8cab13fb384c50a812c15de9821b4fb3c3b37131f7b29398bdb9cff0def9526d"
+    },
+    {
+      "name": "amd_gemv_f32_f32_v1",
+      "kind": "llm_template",
+      "path": "amd_gemv_f32_f32_v1.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "tokens"
+      ],
+      "size": 2468,
+      "sha256": "c1861b86aa20724bfe50e4dc35d1c585f199dd8d119aae506e4c112ed7f42aa8"
+    },
+    {
+      "name": "amd_hc_coeffs_f16_f16",
+      "kind": "llm_template",
+      "path": "amd_hc_coeffs_f16_f16.uir",
+      "templates": [
+        "eps",
+        "features",
+        "iters",
+        "norm_eps",
+        "tokens"
+      ],
+      "size": 4206,
+      "sha256": "d10a68df9721f1dd15f6e2f1d36e8157ec765a03fe2bfd6c0787a102de26e38b"
+    },
+    {
+      "name": "amd_hc_coeffs_f16_f32",
+      "kind": "llm_template",
+      "path": "amd_hc_coeffs_f16_f32.uir",
+      "templates": [
+        "eps",
+        "features",
+        "iters",
+        "norm_eps",
+        "tokens"
+      ],
+      "size": 4123,
+      "sha256": "533cb417ca093d721a1232cc5b62954e1efe8937cdc8a0ee86685c410b941a3c"
+    },
+    {
+      "name": "amd_hc_coeffs_f32_f16",
+      "kind": "llm_template",
+      "path": "amd_hc_coeffs_f32_f16.uir",
+      "templates": [
+        "eps",
+        "features",
+        "iters",
+        "norm_eps",
+        "tokens"
+      ],
+      "size": 4179,
+      "sha256": "f1a5f9672d9ced209588c2017bfe58016b4b254d39c00ad414d19ee660c561fa"
+    },
+    {
+      "name": "amd_hc_coeffs_f32_f32",
+      "kind": "llm_template",
+      "path": "amd_hc_coeffs_f32_f32.uir",
+      "templates": [
+        "eps",
+        "features",
+        "iters",
+        "norm_eps",
+        "tokens"
+      ],
+      "size": 4096,
+      "sha256": "884be671e6c3808ef26324bdef6589960ab68591790c6895ec2b13437a607594"
+    },
+    {
+      "name": "amd_q8_quantize_bf16",
+      "kind": "llm_template",
+      "path": "amd_q8_quantize_bf16.uir",
+      "templates": [
+        "in_features",
+        "tokens"
+      ],
+      "size": 3330,
+      "sha256": "28b357760a6e962d96844d401762a52632218bf629d9c52b2e5928a7626f1690"
+    },
+    {
+      "name": "amd_q8_quantize_f16",
+      "kind": "llm_template",
+      "path": "amd_q8_quantize_f16.uir",
+      "templates": [
+        "in_features",
+        "tokens"
+      ],
+      "size": 3329,
+      "sha256": "dcee71efbd70952b20dda87c401b5288e6b13fae3dcb97688d42dc8bedc297d0"
+    },
+    {
+      "name": "amd_q8_quantize_f32",
+      "kind": "llm_template",
+      "path": "amd_q8_quantize_f32.uir",
+      "templates": [
+        "in_features",
+        "tokens"
+      ],
+      "size": 3302,
+      "sha256": "9f7038caf2653449d50e615503fd82908c632d968099642ca9269c878195c1d9"
+    },
+    {
+      "name": "cdna_gemm_iq1_s_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_iq1_s_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 16222,
+      "sha256": "2b933eb793936f955c6140ad33f6eae44182a11b6f4e01411a0199d944513001"
+    },
+    {
+      "name": "cdna_gemm_iq2_s_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_iq2_s_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 17727,
+      "sha256": "e476d441ef128ffaf3184d35b05606a75793f6d4cbb1434a3a0ab0187840fb7c"
+    },
+    {
+      "name": "cdna_gemm_iq2_xs_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_iq2_xs_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 14172,
+      "sha256": "afefc204980da825560ae4206f9ae911768840258ca9251893ae0b804ed69abf"
+    },
+    {
+      "name": "cdna_gemm_iq2_xxs_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_iq2_xxs_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 13995,
+      "sha256": "c5305c7128b5128de3c2152b0d91b41ab9ab1d9cd35959c39b8696aaef98df6b"
+    },
+    {
+      "name": "cdna_gemm_iq3_s_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_iq3_s_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 14506,
+      "sha256": "fd6e363a52e20825248cd2f0aaf51ba9b009a68a3b0e5e9acb37465da814439a"
+    },
+    {
+      "name": "cdna_gemm_iq3_xxs_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_iq3_xxs_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 14188,
+      "sha256": "e0e49bcc65ad23a437f38eb552f8af6cd71a95fc7ec3a9e4d8b33bcbeaa8d4bd"
+    },
+    {
+      "name": "cdna_gemm_iq4_nl_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_iq4_nl_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 12460,
+      "sha256": "99931b10835cb6be648422375eab43f8c8dd00293a67bc720e38da70c7e78713"
+    },
+    {
+      "name": "cdna_gemm_iq4_xs_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_iq4_xs_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 11961,
+      "sha256": "ff6f5fb557bd3de662728f5e60a32d1cc74638f20f17f25a91c655e3d9020fe1"
+    },
+    {
+      "name": "cdna_gemm_mxfp4_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_mxfp4_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 13545,
+      "sha256": "dce54bed7e5ddc2ab83e8df796a83cd052339b77d05e56fa9fe2e0a1883c074a"
+    },
+    {
+      "name": "cdna_gemm_nvfp4_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_nvfp4_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 13838,
+      "sha256": "d2d101a93a079bf96d552e5b2fc885e464e9c8bd47038f588bdf48e1aa69bbd0"
+    },
+    {
+      "name": "cdna_gemm_q2_k_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_q2_k_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 12728,
+      "sha256": "915e5d61de5022503f2fb5c1b6808623580804a1e9e108278ed2e69f6e11aa44"
+    },
+    {
+      "name": "cdna_gemm_q3_k_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_q3_k_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 15340,
+      "sha256": "719a317c606d18ef9d49f6296d49b6d2af0291e34bc1f7885281a2e19be91e7a"
+    },
+    {
+      "name": "cdna_gemm_q4_k_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_q4_k_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 12149,
+      "sha256": "9d4e2bc4af0467b01cf0a890561e0c4d072dcf30dbec86b838ceb8bbb21dcad8"
+    },
+    {
+      "name": "cdna_gemm_q5_k_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_q5_k_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 12757,
+      "sha256": "fafa7030c0e95889c504487b86f21045d262bdbe54ed3f655e0fb7fc844b11b7"
+    },
+    {
+      "name": "cdna_gemm_q6_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_q6_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 14043,
+      "sha256": "9ca3033c785ec660b61a9a0421a711c647577a0d1f0afca4afab79d2fc7f2711"
+    },
+    {
+      "name": "cdna_gemm_q8_0_f16",
+      "kind": "llm_template",
+      "path": "cdna_gemm_q8_0_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 10489,
+      "sha256": "dcf3aa2ef08446e16d068b14804e47c3146452e686a463442d04644feb9a28e6"
+    },
+    {
+      "name": "cdna_gemv_iq1_s",
+      "kind": "llm_template",
+      "path": "cdna_gemv_iq1_s.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 7242,
+      "sha256": "f95fa05d1f0a43bd57a28a6981615b7fdee7c8e2faec872c822fabd2a9c94c76"
+    },
+    {
+      "name": "cdna_gemv_iq2_s",
+      "kind": "llm_template",
+      "path": "cdna_gemv_iq2_s.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 9752,
+      "sha256": "543b2f165decc6d12385c90206e4d6a148a610d86278226a0b99e209233fc3e9"
+    },
+    {
+      "name": "cdna_gemv_iq2_xs",
+      "kind": "llm_template",
+      "path": "cdna_gemv_iq2_xs.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 7694,
+      "sha256": "a5226d14c47190027df7dd0bfe5778604dc1a2be9a6fec33e61db1bbe7dbc3fe"
+    },
+    {
+      "name": "cdna_gemv_iq2_xxs",
+      "kind": "llm_template",
+      "path": "cdna_gemv_iq2_xxs.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 8180,
+      "sha256": "f81510fa8e10205a95984f8ea3970f2ae3c1c296304221e52a2593929f31518f"
+    },
+    {
+      "name": "cdna_gemv_iq3_s",
+      "kind": "llm_template",
+      "path": "cdna_gemv_iq3_s.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 10260,
+      "sha256": "490ba9c7c1c3ab4837b04b9fbec140f19627f33952f9aa698e5f49224fe99710"
+    },
+    {
+      "name": "cdna_gemv_iq3_xxs",
+      "kind": "llm_template",
+      "path": "cdna_gemv_iq3_xxs.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 7865,
+      "sha256": "b8432679c7f0b12199a0e42ea115c8f23b95b462a6fa7b3ec6013ecd8ddb009a"
+    },
+    {
+      "name": "cdna_gemv_iq4_nl",
+      "kind": "llm_template",
+      "path": "cdna_gemv_iq4_nl.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 6947,
+      "sha256": "50eb4b305d65964c871e252f43ee3801ea8aafaf53bce17583875041a54e10b9"
+    },
+    {
+      "name": "cdna_gemv_iq4_xs",
+      "kind": "llm_template",
+      "path": "cdna_gemv_iq4_xs.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 7518,
+      "sha256": "3aeac6e5f14372a66c50e30d42c6672f7cb1782b50013f83175de1900d4a45d4"
+    },
+    {
+      "name": "cdna_gemv_mxfp4",
+      "kind": "llm_template",
+      "path": "cdna_gemv_mxfp4.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 8381,
+      "sha256": "02af4bf6396197c32d230ddabe4711052b78c670e6c3b9d9ebda52977de0b098"
+    },
+    {
+      "name": "cdna_gemv_nvfp4",
+      "kind": "llm_template",
+      "path": "cdna_gemv_nvfp4.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 7946,
+      "sha256": "8e12b4caaa5b9fafac60bdb81156c3477f6cb958bfd0ed7455d608134b7a689c"
+    },
+    {
+      "name": "cdna_gemv_q2_k",
+      "kind": "llm_template",
+      "path": "cdna_gemv_q2_k.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 8072,
+      "sha256": "5e8821b9762cfaf1c856e947d030e159308f78689b59c74fdf8b4398ee458c82"
+    },
+    {
+      "name": "cdna_gemv_q3_k",
+      "kind": "llm_template",
+      "path": "cdna_gemv_q3_k.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 11199,
+      "sha256": "777ac3c281b5ac568ccf3dbe26a40331b0478cded8bb102a81873073e24b06f3"
+    },
+    {
+      "name": "cdna_gemv_q4_k",
+      "kind": "llm_template",
+      "path": "cdna_gemv_q4_k.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 6638,
+      "sha256": "3fb503a3585d5604ea9c8b88fccccc433de1d0bdfb530af0ee7ee69d8a7e6ab3"
+    },
+    {
+      "name": "cdna_gemv_q5_k",
+      "kind": "llm_template",
+      "path": "cdna_gemv_q5_k.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 7775,
+      "sha256": "a07121a53644216d20a16daef492a741bdb1819f3124260e1d7036ebbca203fc"
+    },
+    {
+      "name": "cdna_gemv_q6",
+      "kind": "llm_template",
+      "path": "cdna_gemv_q6.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 10789,
+      "sha256": "cd2fbe5cc1c627baac15a565f9019a57a74429a7ddb9fb7e963ea7377188b2bc"
+    },
+    {
+      "name": "cdna_gemv_q8_0",
+      "kind": "llm_template",
+      "path": "cdna_gemv_q8_0.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 4961,
+      "sha256": "887f85b87b80baef4e4f70bf25d94446bf2fc413e2e11d2aca673898185aaf2b"
+    },
+    {
+      "name": "cdna_moe_iq1_s",
+      "kind": "llm_template",
+      "path": "cdna_moe_iq1_s.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 7979,
+      "sha256": "1eb26be8fb3b1869c216d34f9979548fd4aeadd23484967310c0dc1f23df548f"
+    },
+    {
+      "name": "cdna_moe_iq2_s",
+      "kind": "llm_template",
+      "path": "cdna_moe_iq2_s.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 10458,
+      "sha256": "076d73b147281fe2ef6fafa86ad52bf5c0a45c2f28ff9f42f85e1801653d87f0"
+    },
+    {
+      "name": "cdna_moe_iq2_xs",
+      "kind": "llm_template",
+      "path": "cdna_moe_iq2_xs.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 8430,
+      "sha256": "7fe2113108584b51341566a010a396564210809988e3b4d5757caeafe36bf09b"
+    },
+    {
+      "name": "cdna_moe_iq2_xxs",
+      "kind": "llm_template",
+      "path": "cdna_moe_iq2_xxs.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 8939,
+      "sha256": "44415ae5cf03c78bda6577220442e005cb10823004e4c00165fa858d781d2a87"
+    },
+    {
+      "name": "cdna_moe_iq3_s",
+      "kind": "llm_template",
+      "path": "cdna_moe_iq3_s.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 11259,
+      "sha256": "0c5205d0bdda5ce0668514266a080e6bb5e29accccdef7634fb51b35f29a2361"
+    },
+    {
+      "name": "cdna_moe_iq3_xxs",
+      "kind": "llm_template",
+      "path": "cdna_moe_iq3_xxs.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 8508,
+      "sha256": "bf8aba5e6e7ca8229d49708700ace1b4c93873215f1028ec5e657b26bcb4be09"
+    },
+    {
+      "name": "cdna_moe_iq4_nl",
+      "kind": "llm_template",
+      "path": "cdna_moe_iq4_nl.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 7576,
+      "sha256": "77cce45f24e3e826f8f5a2efc4da9b751c2490a2ba54501d56dd257edd6f931d"
+    },
+    {
+      "name": "cdna_moe_iq4_xs",
+      "kind": "llm_template",
+      "path": "cdna_moe_iq4_xs.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 8271,
+      "sha256": "f50620b443889a2b01c75688188e24f00259797cf01ce4e80cbb678768d1ce9b"
+    },
+    {
+      "name": "cdna_moe_mxfp4",
+      "kind": "llm_template",
+      "path": "cdna_moe_mxfp4.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 9438,
+      "sha256": "10eb9dd5f857a854c72b1175b518d0ac439486f27cf4164a3e77c4178e8f724c"
+    },
+    {
+      "name": "cdna_moe_nvfp4",
+      "kind": "llm_template",
+      "path": "cdna_moe_nvfp4.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 8564,
+      "sha256": "18b2e6704984a1b7f52bea5c8f1b0ef4414b3cfa19603d3bfd6b6ea43181d8de"
+    },
+    {
+      "name": "cdna_moe_q2_k",
+      "kind": "llm_template",
+      "path": "cdna_moe_q2_k.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 9231,
+      "sha256": "60e48f141b5b1ce029949eff2079192836087018de3fa9ed98299849ee907289"
+    },
+    {
+      "name": "cdna_moe_q3_k",
+      "kind": "llm_template",
+      "path": "cdna_moe_q3_k.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 12868,
+      "sha256": "753e066d2110d49c191194e11791823534ac93c261f0d16636ff5960d0aa8f7a"
+    },
+    {
+      "name": "cdna_moe_q4_k",
+      "kind": "llm_template",
+      "path": "cdna_moe_q4_k.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 7355,
+      "sha256": "b1546f61c5a49597fa76a190160d5906803eda656b1721e5f67643e570f93106"
+    },
+    {
+      "name": "cdna_moe_q5_k",
+      "kind": "llm_template",
+      "path": "cdna_moe_q5_k.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 8527,
+      "sha256": "96b98050ba2cd98a1c0ee8bcc07d884a215c05e9d7a85ef601b096774cca7bcb"
+    },
+    {
+      "name": "cdna_moe_q6",
+      "kind": "llm_template",
+      "path": "cdna_moe_q6.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 12369,
+      "sha256": "28a9cb44c0e42853ef6c22770a4a2ed991b28e0778f3bc611599bc20dcaac5c0"
+    },
+    {
+      "name": "cdna_moe_q8_0",
+      "kind": "llm_template",
+      "path": "cdna_moe_q8_0.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 5607,
+      "sha256": "6b20ef71ea2197bb13725723535b431b2a938d5c6165cd75bc78f2290484d0ed"
+    },
+    {
+      "name": "rdna3_flash_attn_d128",
+      "kind": "llm_template",
+      "path": "rdna3_flash_attn_d128.uir",
+      "templates": [
+        "B",
+        "BH",
+        "H_KV",
+        "m_blks",
+        "n_blks",
+        "q_start_from_end",
+        "valid_kv_offset"
+      ],
+      "size": 21055,
+      "sha256": "0bed28a030278c3c7dc1909e0d6e8eabcf953f9354937f5fef92d892a5749bd9"
+    },
+    {
+      "name": "rdna3_flash_attn_d256",
+      "kind": "llm_template",
+      "path": "rdna3_flash_attn_d256.uir",
+      "templates": [
+        "B",
+        "BH",
+        "H_KV",
+        "m_blks",
+        "n_blks",
+        "q_start_from_end",
+        "valid_kv_offset"
+      ],
+      "size": 33702,
+      "sha256": "c855d5d9256ad6138e9e7cd2563afc6728e713451ed83a1fc14948fe85d3a8e3"
+    },
+    {
+      "name": "rdna3_flash_attn_d64",
+      "kind": "llm_template",
+      "path": "rdna3_flash_attn_d64.uir",
+      "templates": [
+        "B",
+        "BH",
+        "H_KV",
+        "m_blks",
+        "n_blks",
+        "q_start_from_end",
+        "valid_kv_offset"
+      ],
+      "size": 15069,
+      "sha256": "cd65c56d62c5e15831799e7de42351487e224fd4557b029ae6800e4e215f1ac4"
+    },
+    {
+      "name": "rdna3_gemm_iq1_s_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_iq1_s_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 37802,
+      "sha256": "e98af4fb07c4517d5c32f7aad2ec8bf27d1d11a9ccf3befb7382cf523e181e53"
+    },
+    {
+      "name": "rdna3_gemm_iq2_s_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_iq2_s_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 41790,
+      "sha256": "609b935175d74fc80cda420e134d2c411e8e59353199ffcad2b296c15519144e"
+    },
+    {
+      "name": "rdna3_gemm_iq2_xs_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_iq2_xs_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 33580,
+      "sha256": "d7ae4f78d297d6d9e8457516242bfd7f97073b4770b4d5dd3ce25ff5c054fa9d"
+    },
+    {
+      "name": "rdna3_gemm_iq2_xxs_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_iq2_xxs_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 33385,
+      "sha256": "aac955a0b8e6f9c9891660306e626e8d5c9a424fc3cd6cd91ab0edba3e78b8ce"
+    },
+    {
+      "name": "rdna3_gemm_iq3_s_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_iq3_s_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 36031,
+      "sha256": "894562b6bacc24b43fb8a8df102cb8be83722700194d43fddf272f57b754dcc6"
+    },
+    {
+      "name": "rdna3_gemm_iq3_xxs_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_iq3_xxs_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 36500,
+      "sha256": "bf79a1ac4c78de544718ad20485b2ed659c25e3bfad4f15fb85b887394065a47"
+    },
+    {
+      "name": "rdna3_gemm_iq4_nl_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_iq4_nl_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 31164,
+      "sha256": "0d6341a6bb975ef6bfe3cbb568c2cb4d57684cb8613ebe97eee83a36432e2f99"
+    },
+    {
+      "name": "rdna3_gemm_iq4_xs_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_iq4_xs_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 29551,
+      "sha256": "4c53f97fe3da0f1de606fdcff61946482f0b73cf8addd0f132f3147617c90b8e"
+    },
+    {
+      "name": "rdna3_gemm_mxfp4_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_mxfp4_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 33384,
+      "sha256": "941246e53a160dce8ce0d686d1b934fb369dc03e5cf00e6d09344f0c9ff28d0a"
+    },
+    {
+      "name": "rdna3_gemm_nvfp4_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_nvfp4_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 25344,
+      "sha256": "e206551785b43fa5c2f89b8eb37419703005cb3bdd607e2c324acdfda7ed91d9"
+    },
+    {
+      "name": "rdna3_gemm_q2_k_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_q2_k_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 31120,
+      "sha256": "07c2b62538022c50be9119d53f4aad3bb00650d64a40b49deb50159231b28614"
+    },
+    {
+      "name": "rdna3_gemm_q3_k_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_q3_k_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 38415,
+      "sha256": "19c991dd82508d8c65cab6985592f5119eee9ab7e73bde93fd844f043808ce33"
+    },
+    {
+      "name": "rdna3_gemm_q4_k_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_q4_k_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 27536,
+      "sha256": "c5d0e467c3c2355b8b14430a4d3458e0be71b508be62a79bdcaf6616d412ce55"
+    },
+    {
+      "name": "rdna3_gemm_q5_k_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_q5_k_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 29813,
+      "sha256": "592d702f58f6116e72672e4f7ca8b2ba5bc507c96c73469ef91144e611ba2ba5"
+    },
+    {
+      "name": "rdna3_gemm_q6_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_q6_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 37618,
+      "sha256": "96d4dc76f1dadd710910b978d27e35275604cc41912a8bcf0e3ffdaca07ea6ea"
+    },
+    {
+      "name": "rdna3_gemm_q8_0_f16",
+      "kind": "llm_template",
+      "path": "rdna3_gemm_q8_0_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 23364,
+      "sha256": "c6279cdad8079eaf2a956a7656ef150e21855360613eb672f6145c003c72c78e"
+    },
+    {
+      "name": "rdna4_flash_attn_d128",
+      "kind": "llm_template",
+      "path": "rdna4_flash_attn_d128.uir",
+      "templates": [
+        "B",
+        "BH",
+        "H_KV",
+        "m_blks",
+        "n_blks",
+        "q_start_from_end",
+        "valid_kv_offset"
+      ],
+      "size": 21459,
+      "sha256": "35da992bd1ab48e16f02e4d98c962bd222b0013d016b9817d5a1d3fd94b06e76"
+    },
+    {
+      "name": "rdna4_flash_attn_d256",
+      "kind": "llm_template",
+      "path": "rdna4_flash_attn_d256.uir",
+      "templates": [
+        "B",
+        "BH",
+        "H_KV",
+        "m_blks",
+        "n_blks",
+        "q_start_from_end",
+        "valid_kv_offset"
+      ],
+      "size": 34140,
+      "sha256": "b1390edb44f5168d74c92884e576980c123a577c188ecf850a9eea1fc7cb1bce"
+    },
+    {
+      "name": "rdna4_flash_attn_d64",
+      "kind": "llm_template",
+      "path": "rdna4_flash_attn_d64.uir",
+      "templates": [
+        "B",
+        "BH",
+        "H_KV",
+        "m_blks",
+        "n_blks",
+        "q_start_from_end",
+        "valid_kv_offset"
+      ],
+      "size": 15473,
+      "sha256": "41036214eada9d546282c208f4b74c4b4f798d5a2508ce5a189589d35ad9f133"
+    },
+    {
+      "name": "rdna4_gemm_iq1_s_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_iq1_s_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 29904,
+      "sha256": "0f2366adc139906c848835d7a10b62ba3934c244411816c7ab5ba1f940c98c7e"
+    },
+    {
+      "name": "rdna4_gemm_iq2_s_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_iq2_s_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 32669,
+      "sha256": "b5d2f07edbde3271fae9871814e34bc1c689d87a456be76655b9655a570c963b"
+    },
+    {
+      "name": "rdna4_gemm_iq2_xs_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_iq2_xs_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 25172,
+      "sha256": "2eddc33582017dcdc1c92b03cb7317fc2a3a3c33e2947d95d822aef14e52814e"
+    },
+    {
+      "name": "rdna4_gemm_iq2_xxs_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_iq2_xxs_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 25110,
+      "sha256": "dd48319c630e27e87fcf0048322ae3d32907ebc7198f24ce10218081fbfef6e4"
+    },
+    {
+      "name": "rdna4_gemm_iq3_s_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_iq3_s_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 25750,
+      "sha256": "83dca50130a3a68ade123332c26302135ade61d7e79ea00c183f02abb54ed4d4"
+    },
+    {
+      "name": "rdna4_gemm_iq3_xxs_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_iq3_xxs_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 25607,
+      "sha256": "b5346284902d582dd04f2441280961bd83d08d18e2605ed7017510aecc3b0a25"
+    },
+    {
+      "name": "rdna4_gemm_iq4_nl_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_iq4_nl_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 22362,
+      "sha256": "769cb42f216715dc6b3d66dbca8fb0a12eb91f863f340a36e238eb650f8026d8"
+    },
+    {
+      "name": "rdna4_gemm_iq4_xs_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_iq4_xs_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 20735,
+      "sha256": "708723aa26f1042dd706f2a1605c37f444077b55e26cb968636d394a588b3f2e"
+    },
+    {
+      "name": "rdna4_gemm_mxfp4_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_mxfp4_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 24266,
+      "sha256": "4691c2d0ce7bc6c3c0eb3aa5f33d5bdbc22f6319d13719746ef8bf5af15fb97c"
+    },
+    {
+      "name": "rdna4_gemm_nvfp4_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_nvfp4_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 23409,
+      "sha256": "1ffbee39b8b4f549069066f7d8239aec0eb2be46e74eb0287afbaa73847421ea"
+    },
+    {
+      "name": "rdna4_gemm_q2_k_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_q2_k_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 21565,
+      "sha256": "0fddccaed9b017dae1c12e8c04d8f6eaf5748f3b1264bdb934071ccebbe06182"
+    },
+    {
+      "name": "rdna4_gemm_q3_k_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_q3_k_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 25855,
+      "sha256": "5411267b98b8feae75852c654fecf1184366e26202a15636c8f2fdc8f5ac5162"
+    },
+    {
+      "name": "rdna4_gemm_q4_k_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_q4_k_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 20100,
+      "sha256": "e268e3080b9d2f33327e1b596c8fc25275c9d87e1890a9c42ece795d48433cd3"
+    },
+    {
+      "name": "rdna4_gemm_q5_k_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_q5_k_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 21223,
+      "sha256": "5166501e5d6fb6bd1dc0b915203ec4bf0ffb719e83ad62342516a028fff487d9"
+    },
+    {
+      "name": "rdna4_gemm_q6_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_q6_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 24481,
+      "sha256": "799eb9a5740a157af8b42cb2f7d6a94d493684fe16d0e5aa77f7993fb362a1b0"
+    },
+    {
+      "name": "rdna4_gemm_q8_0_f16",
+      "kind": "llm_template",
+      "path": "rdna4_gemm_q8_0_f16.uir",
+      "templates": [
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 18371,
+      "sha256": "f7740b3f8775417cc0a41be5223ebb845b6cfb0a1cabeb5d52ebd72259dc8776"
+    },
+    {
+      "name": "rdna_gemv_iq1_s",
+      "kind": "llm_template",
+      "path": "rdna_gemv_iq1_s.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 7255,
+      "sha256": "81fe718998da346da46230a3ac94aae40c4eca8eb9aad577b268b0859f1dec6f"
+    },
+    {
+      "name": "rdna_gemv_iq2_s",
+      "kind": "llm_template",
+      "path": "rdna_gemv_iq2_s.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 9765,
+      "sha256": "008d4f1e05d1f4c1bceefc0f2b7e8eabeb1233a40dfba98558b885bbf9c64149"
+    },
+    {
+      "name": "rdna_gemv_iq2_xs",
+      "kind": "llm_template",
+      "path": "rdna_gemv_iq2_xs.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 7707,
+      "sha256": "4b45833a1f03d1150f5a7e540ea47cdd3d30ddd148540b338ec5d138913fb041"
+    },
+    {
+      "name": "rdna_gemv_iq2_xxs",
+      "kind": "llm_template",
+      "path": "rdna_gemv_iq2_xxs.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 8193,
+      "sha256": "d2f44c2e08d703df9648beb3d3f1b196dee6099241e955d73cc7e19a58e87a2f"
+    },
+    {
+      "name": "rdna_gemv_iq3_s",
+      "kind": "llm_template",
+      "path": "rdna_gemv_iq3_s.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 10273,
+      "sha256": "f3111ce8b589fcbe0893846878ddbe2aa16a04308eca9952f3d3281059945488"
+    },
+    {
+      "name": "rdna_gemv_iq3_xxs",
+      "kind": "llm_template",
+      "path": "rdna_gemv_iq3_xxs.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 7878,
+      "sha256": "2008331bc60bbaffbf43cbe014c76fe2b5df41bcb2f849a21dfdb9a744cd75c1"
+    },
+    {
+      "name": "rdna_gemv_iq4_nl",
+      "kind": "llm_template",
+      "path": "rdna_gemv_iq4_nl.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 6960,
+      "sha256": "7072f8a6eb87d1ba28ba68e4628779fb222ad0a79fde43530a4c8ee14c2660cd"
+    },
+    {
+      "name": "rdna_gemv_iq4_xs",
+      "kind": "llm_template",
+      "path": "rdna_gemv_iq4_xs.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 7531,
+      "sha256": "94f4714dedf661aa143c53905473cacdcd7191040ab92b4977bccd12ca1bcb09"
+    },
+    {
+      "name": "rdna_gemv_mxfp4",
+      "kind": "llm_template",
+      "path": "rdna_gemv_mxfp4.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 8394,
+      "sha256": "1ae6858eeb9628ea7ab985616431423ee9052df729550120a88eeafc983f27ef"
+    },
+    {
+      "name": "rdna_gemv_nvfp4",
+      "kind": "llm_template",
+      "path": "rdna_gemv_nvfp4.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 7959,
+      "sha256": "29f8b3bffe09620e356102f27c24a415bcc22953795b35ff34a3d6833858dd91"
+    },
+    {
+      "name": "rdna_gemv_q2_k",
+      "kind": "llm_template",
+      "path": "rdna_gemv_q2_k.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 8085,
+      "sha256": "04cceef631dc612f7fa139a58c54d919d300faa134ca61fca99ae23f36dbd799"
+    },
+    {
+      "name": "rdna_gemv_q3_k",
+      "kind": "llm_template",
+      "path": "rdna_gemv_q3_k.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 11212,
+      "sha256": "036ec2a38455a15dbd84c23e9261011922f450c56bd268614974f3bceecc44f7"
+    },
+    {
+      "name": "rdna_gemv_q4_k",
+      "kind": "llm_template",
+      "path": "rdna_gemv_q4_k.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 6651,
+      "sha256": "eddd0abe03a0919fc5d6fd2cac6db7bd5fbdf5f9505dda8c1da4ed8895c2ad1e"
+    },
+    {
+      "name": "rdna_gemv_q5_k",
+      "kind": "llm_template",
+      "path": "rdna_gemv_q5_k.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 7788,
+      "sha256": "c4ca8fae023f907ee80148f1b9537675a83ab8dd700f3a9e06e9c11bb420f4b8"
+    },
+    {
+      "name": "rdna_gemv_q6",
+      "kind": "llm_template",
+      "path": "rdna_gemv_q6.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 10802,
+      "sha256": "b61a8fecbaf8f65a09ace88c67dc81d0cf761b4b1ec857271df73c75660a0ce2"
+    },
+    {
+      "name": "rdna_gemv_q8_0",
+      "kind": "llm_template",
+      "path": "rdna_gemv_q8_0.uir",
+      "templates": [
+        "chunks",
+        "group_rows",
+        "in_features",
+        "out_features",
+        "raw_len",
+        "tokens"
+      ],
+      "size": 4974,
+      "sha256": "cd2f48474cd9c656d12f74212cff216cf2cfe79fe80ab51b8154a01337e98529"
+    },
+    {
+      "name": "rdna_moe_iq1_s",
+      "kind": "llm_template",
+      "path": "rdna_moe_iq1_s.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 7992,
+      "sha256": "b993deba0e0eb40c8b0f7cb0e449e2b5e09b945fb50bdb2d10ffe1ece9fb4a24"
+    },
+    {
+      "name": "rdna_moe_iq2_s",
+      "kind": "llm_template",
+      "path": "rdna_moe_iq2_s.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 10471,
+      "sha256": "8ec67d754a43fd11b9f22fc978d743283ce6a37f01c71d1bb2a4f1c08f81c1c7"
+    },
+    {
+      "name": "rdna_moe_iq2_xs",
+      "kind": "llm_template",
+      "path": "rdna_moe_iq2_xs.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 8443,
+      "sha256": "20bac25d2157b60a2558ad831c30d6d83b9910f986fbc0bc0338de411b049697"
+    },
+    {
+      "name": "rdna_moe_iq2_xxs",
+      "kind": "llm_template",
+      "path": "rdna_moe_iq2_xxs.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 8952,
+      "sha256": "13ed1b662aed53e904c8be67262701747bdb808d5cf147b26b018365ce0764ae"
+    },
+    {
+      "name": "rdna_moe_iq3_s",
+      "kind": "llm_template",
+      "path": "rdna_moe_iq3_s.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 11272,
+      "sha256": "62ad16883cec74c08ce397898cdcb75707e22df9fc5ee8bdb5ea078474087182"
+    },
+    {
+      "name": "rdna_moe_iq3_xxs",
+      "kind": "llm_template",
+      "path": "rdna_moe_iq3_xxs.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 8521,
+      "sha256": "3bad87673522a753c95c7833efb67cacd75db04e23b5b2b870da1f7f1be261be"
+    },
+    {
+      "name": "rdna_moe_iq4_nl",
+      "kind": "llm_template",
+      "path": "rdna_moe_iq4_nl.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 7589,
+      "sha256": "2b52a83a99e550a5e319d408b3b81347adb6359881dd39e62736b5e70efa30f9"
+    },
+    {
+      "name": "rdna_moe_iq4_xs",
+      "kind": "llm_template",
+      "path": "rdna_moe_iq4_xs.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 8284,
+      "sha256": "cdacffe24168d043a85a2150e51de503e9f021aa8d471b5c0c8a790b75d58ba7"
+    },
+    {
+      "name": "rdna_moe_mxfp4",
+      "kind": "llm_template",
+      "path": "rdna_moe_mxfp4.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 9451,
+      "sha256": "6fab112706b53f477d961fc3bb9a4ae8112b290f882f0936df126646222aa13c"
+    },
+    {
+      "name": "rdna_moe_nvfp4",
+      "kind": "llm_template",
+      "path": "rdna_moe_nvfp4.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 8577,
+      "sha256": "767bb30f2dc3b14504c819aa022a521f0bf1f0cc3925d783e8dcdfe6bb53f708"
+    },
+    {
+      "name": "rdna_moe_q2_k",
+      "kind": "llm_template",
+      "path": "rdna_moe_q2_k.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 9244,
+      "sha256": "d227e63efec72fe3e961982ad0533c79acde1da48d46876bbbe2f0b6e7b14352"
+    },
+    {
+      "name": "rdna_moe_q3_k",
+      "kind": "llm_template",
+      "path": "rdna_moe_q3_k.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 12881,
+      "sha256": "61685ac3aff8e1b7a4d750e0b5e350f2d882d814f3d0c3bf49badde744da9a50"
+    },
+    {
+      "name": "rdna_moe_q4_k",
+      "kind": "llm_template",
+      "path": "rdna_moe_q4_k.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 7368,
+      "sha256": "d27f0e79f9cdb74439f3b410501f1f6ca5e362e52662d734fc9cbadcef760910"
+    },
+    {
+      "name": "rdna_moe_q5_k",
+      "kind": "llm_template",
+      "path": "rdna_moe_q5_k.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 8540,
+      "sha256": "dfcc38cced536e70fbc57778c95d2e684b4f4791d2d3c873fde17962181f5331"
+    },
+    {
+      "name": "rdna_moe_q6",
+      "kind": "llm_template",
+      "path": "rdna_moe_q6.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 12382,
+      "sha256": "5c30fcd2b2ce01815c7552ca03e8217b40bd841a279a4fb36561e336a0449737"
+    },
+    {
+      "name": "rdna_moe_q8_0",
+      "kind": "llm_template",
+      "path": "rdna_moe_q8_0.uir",
+      "templates": [
+        "chunks",
+        "in_features",
+        "ndev",
+        "out_features",
+        "raw_len",
+        "rows",
+        "x_rows",
+        "x_share"
+      ],
+      "size": 5620,
+      "sha256": "2a4ac1debcb2a5cdd03628f2ff15c67522b01b1f7897679d1a3cb725d505beb6"
+    }
+  ]
+}

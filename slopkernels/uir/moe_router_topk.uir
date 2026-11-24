@@ -1,0 +1,314 @@
+%0 = param 4 slot=0 dtype=i32
+%1 = reshape %0 [1 4]
+%2 = range 32 slot=-1 axis=WARP
+%3 = cmpeq %2 0
+%4 = range 1 slot=0 axis=GLOBAL
+%5 = where %3 %4 invalid
+%6 = index %1 %5 0
+%7 = alloc 1 slot=0 dtype=f32 addrspace=REG
+%8 = alloc 1 slot=1 dtype=f32 addrspace=REG
+%9 = index %8 0
+%10 = param 32 slot=2 dtype=f32
+%11 = reshape %10 [1 1 32]
+%12 = reshape %11 [1 32]
+%13 = add 0 %2
+%14 = index %12 %4 %13
+%15 = load %14
+%16 = mul %15 -1.4426950408889634
+%17 = exp2 %16
+%18 = add 1.0 %17
+%19 = recip %18
+%20 = mul 1.0 %19
+%21 = store %9 %20
+%22 = index %7 0
+%23 = param 32 slot=3 dtype=f16
+%24 = index %23 %13
+%25 = load %24
+%26 = cast %25 dtype=f32
+%27 = add %20 %26
+%28 = store %22 %27
+%29 = after %7 %21 %28
+%30 = index %29 0
+%31 = load %30
+%32 = param [] slot=-1 dtype=i32
+%33 = native %32 code='__builtin_amdgcn_ds_swizzle({0}, 16415)' fmt=true
+%34 = bitcast %31 dtype=i32
+%35 = call %33 %34
+%36 = bitcast %35 dtype=f32
+%37 = max %31 %36
+%38 = native %32 code='__builtin_amdgcn_ds_swizzle({0}, 8223)' fmt=true
+%39 = bitcast %37 dtype=i32
+%40 = call %38 %39
+%41 = bitcast %40 dtype=f32
+%42 = max %37 %41
+%43 = native %32 code='__builtin_amdgcn_ds_swizzle({0}, 4127)' fmt=true
+%44 = bitcast %42 dtype=i32
+%45 = call %43 %44
+%46 = bitcast %45 dtype=f32
+%47 = max %42 %46
+%48 = native %32 code='__builtin_amdgcn_ds_swizzle({0}, 2079)' fmt=true
+%49 = bitcast %47 dtype=i32
+%50 = call %48 %49
+%51 = bitcast %50 dtype=f32
+%52 = max %47 %51
+%53 = native %32 code='__builtin_amdgcn_ds_swizzle({0}, 1055)' fmt=true
+%54 = bitcast %52 dtype=i32
+%55 = call %53 %54
+%56 = bitcast %55 dtype=f32
+%57 = max %52 %56
+%58 = cmpeq %31 %57
+%59 = cast %2 dtype=i32
+%60 = mul %59 -1
+%61 = cast -32 dtype=i32
+%62 = where %58 %60 %61
+%63 = call %33 %62
+%64 = max %62 %63
+%65 = call %38 %64
+%66 = max %64 %65
+%67 = call %43 %66
+%68 = max %66 %67
+%69 = call %48 %68
+%70 = max %68 %69
+%71 = call %53 %70
+%72 = max %70 %71
+%73 = mul %72 -1
+%74 = store %6 %73
+%75 = param 4 slot=1 dtype=f32
+%76 = reshape %75 [1 4]
+%77 = index %76 %5 0
+%78 = cmpeq %59 %73
+%79 = after %8 %21 %28
+%80 = index %79 0
+%81 = load %80
+%82 = cast 0.0 dtype=f32
+%83 = where %78 %81 %82
+%84 = bitcast %83 dtype=i32
+%85 = call %33 %84
+%86 = bitcast %85 dtype=f32
+%87 = add %83 %86
+%88 = bitcast %87 dtype=i32
+%89 = call %38 %88
+%90 = bitcast %89 dtype=f32
+%91 = add %87 %90
+%92 = bitcast %91 dtype=i32
+%93 = call %43 %92
+%94 = bitcast %93 dtype=f32
+%95 = add %91 %94
+%96 = bitcast %95 dtype=i32
+%97 = call %48 %96
+%98 = bitcast %97 dtype=f32
+%99 = add %95 %98
+%100 = bitcast %99 dtype=i32
+%101 = call %53 %100
+%102 = bitcast %101 dtype=f32
+%103 = add %99 %102
+%104 = cast %13 dtype=i32
+%105 = cmpeq %104 %73
+%106 = cast -1.0000000150474662e+30 dtype=f32
+%107 = where %105 %106 %31
+%108 = store %30 %107
+%109 = after %29 %108
+%110 = index %109 0
+%111 = load %110
+%112 = bitcast %111 dtype=i32
+%113 = call %33 %112
+%114 = bitcast %113 dtype=f32
+%115 = max %111 %114
+%116 = bitcast %115 dtype=i32
+%117 = call %38 %116
+%118 = bitcast %117 dtype=f32
+%119 = max %115 %118
+%120 = bitcast %119 dtype=i32
+%121 = call %43 %120
+%122 = bitcast %121 dtype=f32
+%123 = max %119 %122
+%124 = bitcast %123 dtype=i32
+%125 = call %48 %124
+%126 = bitcast %125 dtype=f32
+%127 = max %123 %126
+%128 = bitcast %127 dtype=i32
+%129 = call %53 %128
+%130 = bitcast %129 dtype=f32
+%131 = max %127 %130
+%132 = cmpeq %111 %131
+%133 = where %132 %60 %61
+%134 = call %33 %133
+%135 = max %133 %134
+%136 = call %38 %135
+%137 = max %135 %136
+%138 = call %43 %137
+%139 = max %137 %138
+%140 = call %48 %139
+%141 = max %139 %140
+%142 = call %53 %141
+%143 = max %141 %142
+%144 = mul %143 -1
+%145 = cmpeq %59 %144
+%146 = where %145 %81 %82
+%147 = bitcast %146 dtype=i32
+%148 = call %33 %147
+%149 = bitcast %148 dtype=f32
+%150 = add %146 %149
+%151 = bitcast %150 dtype=i32
+%152 = call %38 %151
+%153 = bitcast %152 dtype=f32
+%154 = add %150 %153
+%155 = bitcast %154 dtype=i32
+%156 = call %43 %155
+%157 = bitcast %156 dtype=f32
+%158 = add %154 %157
+%159 = bitcast %158 dtype=i32
+%160 = call %48 %159
+%161 = bitcast %160 dtype=f32
+%162 = add %158 %161
+%163 = bitcast %162 dtype=i32
+%164 = call %53 %163
+%165 = bitcast %164 dtype=f32
+%166 = add %162 %165
+%167 = add %103 %166
+%168 = cmpeq %104 %144
+%169 = where %168 %106 %111
+%170 = store %110 %169
+%171 = after %109 %170
+%172 = index %171 0
+%173 = load %172
+%174 = bitcast %173 dtype=i32
+%175 = call %33 %174
+%176 = bitcast %175 dtype=f32
+%177 = max %173 %176
+%178 = bitcast %177 dtype=i32
+%179 = call %38 %178
+%180 = bitcast %179 dtype=f32
+%181 = max %177 %180
+%182 = bitcast %181 dtype=i32
+%183 = call %43 %182
+%184 = bitcast %183 dtype=f32
+%185 = max %181 %184
+%186 = bitcast %185 dtype=i32
+%187 = call %48 %186
+%188 = bitcast %187 dtype=f32
+%189 = max %185 %188
+%190 = bitcast %189 dtype=i32
+%191 = call %53 %190
+%192 = bitcast %191 dtype=f32
+%193 = max %189 %192
+%194 = cmpeq %173 %193
+%195 = where %194 %60 %61
+%196 = call %33 %195
+%197 = max %195 %196
+%198 = call %38 %197
+%199 = max %197 %198
+%200 = call %43 %199
+%201 = max %199 %200
+%202 = call %48 %201
+%203 = max %201 %202
+%204 = call %53 %203
+%205 = max %203 %204
+%206 = mul %205 -1
+%207 = cmpeq %59 %206
+%208 = where %207 %81 %82
+%209 = bitcast %208 dtype=i32
+%210 = call %33 %209
+%211 = bitcast %210 dtype=f32
+%212 = add %208 %211
+%213 = bitcast %212 dtype=i32
+%214 = call %38 %213
+%215 = bitcast %214 dtype=f32
+%216 = add %212 %215
+%217 = bitcast %216 dtype=i32
+%218 = call %43 %217
+%219 = bitcast %218 dtype=f32
+%220 = add %216 %219
+%221 = bitcast %220 dtype=i32
+%222 = call %48 %221
+%223 = bitcast %222 dtype=f32
+%224 = add %220 %223
+%225 = bitcast %224 dtype=i32
+%226 = call %53 %225
+%227 = bitcast %226 dtype=f32
+%228 = add %224 %227
+%229 = add %167 %228
+%230 = cmpeq %104 %206
+%231 = where %230 %106 %173
+%232 = store %172 %231
+%233 = after %171 %232
+%234 = index %233 0
+%235 = load %234
+%236 = bitcast %235 dtype=i32
+%237 = call %33 %236
+%238 = bitcast %237 dtype=f32
+%239 = max %235 %238
+%240 = bitcast %239 dtype=i32
+%241 = call %38 %240
+%242 = bitcast %241 dtype=f32
+%243 = max %239 %242
+%244 = bitcast %243 dtype=i32
+%245 = call %43 %244
+%246 = bitcast %245 dtype=f32
+%247 = max %243 %246
+%248 = bitcast %247 dtype=i32
+%249 = call %48 %248
+%250 = bitcast %249 dtype=f32
+%251 = max %247 %250
+%252 = bitcast %251 dtype=i32
+%253 = call %53 %252
+%254 = bitcast %253 dtype=f32
+%255 = max %251 %254
+%256 = cmpeq %235 %255
+%257 = where %256 %60 %61
+%258 = call %33 %257
+%259 = max %257 %258
+%260 = call %38 %259
+%261 = max %259 %260
+%262 = call %43 %261
+%263 = max %261 %262
+%264 = call %48 %263
+%265 = max %263 %264
+%266 = call %53 %265
+%267 = max %265 %266
+%268 = mul %267 -1
+%269 = cmpeq %59 %268
+%270 = where %269 %81 %82
+%271 = bitcast %270 dtype=i32
+%272 = call %33 %271
+%273 = bitcast %272 dtype=f32
+%274 = add %270 %273
+%275 = bitcast %274 dtype=i32
+%276 = call %38 %275
+%277 = bitcast %276 dtype=f32
+%278 = add %274 %277
+%279 = bitcast %278 dtype=i32
+%280 = call %43 %279
+%281 = bitcast %280 dtype=f32
+%282 = add %278 %281
+%283 = bitcast %282 dtype=i32
+%284 = call %48 %283
+%285 = bitcast %284 dtype=f32
+%286 = add %282 %285
+%287 = bitcast %286 dtype=i32
+%288 = call %53 %287
+%289 = bitcast %288 dtype=f32
+%290 = add %286 %289
+%291 = add %229 %290
+%292 = recip %291
+%293 = mul 1.0 %292
+%294 = mul %103 %293
+%295 = store %77 %294
+%296 = index %1 %5 1
+%297 = store %296 %144
+%298 = index %76 %5 1
+%299 = mul %166 %293
+%300 = store %298 %299
+%301 = index %1 %5 2
+%302 = store %301 %206
+%303 = index %76 %5 2
+%304 = mul %228 %293
+%305 = store %303 %304
+%306 = index %1 %5 3
+%307 = store %306 %268
+%308 = index %76 %5 3
+%309 = mul %290 %293
+%310 = store %308 %309
+%311 = after [] %74 %295 %297 %300 %302 %305 %307 %310
+%312 = end %311 %4 %2
+%313 = sink %312 name=moe_router_topk opts_to_apply=[]

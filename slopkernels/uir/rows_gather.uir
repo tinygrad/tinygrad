@@ -1,0 +1,25 @@
+%0 = param 1024 slot=0 dtype=f32
+%1 = reshape %0 [4 256]
+%2 = range 4 slot=0 axis=GLOBAL
+%3 = range 1 slot=1 axis=GLOBAL
+%4 = mul %3 256
+%5 = range 256 slot=2 axis=LOCAL
+%6 = add %4 %5
+%7 = index %1 %2 %6
+%8 = param 16384 slot=1 dtype=f16
+%9 = reshape %8 [64 256]
+%10 = param 4 slot=2 dtype=i32
+%11 = index %10 %2
+%12 = load %11
+%13 = cast %12 dtype=weakint
+%14 = max %13 0
+%15 = xor %14 -1
+%16 = xor 63 -1
+%17 = max %15 %16
+%18 = xor %17 -1
+%19 = index %9 %18 %6
+%20 = load %19
+%21 = cast %20 dtype=f32
+%22 = store %7 %21
+%23 = end %22 %2 %3 %5
+%24 = sink %23 name=rows_gather opts_to_apply=[]

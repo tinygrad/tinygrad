@@ -1,0 +1,209 @@
+%0 = param 144 slot=0 dtype=u32
+%1 = reshape %0 [2 8 9]
+%2 = range 2 slot=0 axis=GLOBAL
+%3 = div %2 1
+%4 = mod %2 1
+%5 = mul %4 8
+%6 = range 32 slot=-1 axis=WARP
+%7 = div %6 4
+%8 = add %5 %7
+%9 = mod %6 4
+%10 = mul %9 2
+%11 = add %10 0
+%12 = index %1 %3 %8 %11
+%13 = param [] slot=-1 dtype=f32
+%14 = native %13 code='__builtin_nearbyintf({0}/{1})' fmt=true
+%15 = param 512 slot=1 dtype=f32
+%16 = reshape %15 [2 256]
+%17 = add 0 %3
+%18 = mul %8 32
+%19 = mul %9 8
+%20 = add %18 %19
+%21 = add %20 0
+%22 = index %16 %17 %21
+%23 = load %22
+%24 = cmpeq %23 0.0
+%25 = cmpeq %24 false
+%26 = cmplt %23 0.0
+%27 = cast -1.0 dtype=f32
+%28 = cast 1.0 dtype=f32
+%29 = where %26 %27 %28
+%30 = cast 0.0 dtype=f32
+%31 = where %25 %29 %30
+%32 = mul %23 %31
+%33 = add %20 1
+%34 = index %16 %17 %33
+%35 = load %34
+%36 = cmpeq %35 0.0
+%37 = cmpeq %36 false
+%38 = cmplt %35 0.0
+%39 = where %38 %27 %28
+%40 = where %37 %39 %30
+%41 = mul %35 %40
+%42 = max %32 %41
+%43 = add %20 2
+%44 = index %16 %17 %43
+%45 = load %44
+%46 = cmpeq %45 0.0
+%47 = cmpeq %46 false
+%48 = cmplt %45 0.0
+%49 = where %48 %27 %28
+%50 = where %47 %49 %30
+%51 = mul %45 %50
+%52 = max %42 %51
+%53 = add %20 3
+%54 = index %16 %17 %53
+%55 = load %54
+%56 = cmpeq %55 0.0
+%57 = cmpeq %56 false
+%58 = cmplt %55 0.0
+%59 = where %58 %27 %28
+%60 = where %57 %59 %30
+%61 = mul %55 %60
+%62 = max %52 %61
+%63 = add %20 4
+%64 = index %16 %17 %63
+%65 = load %64
+%66 = cmpeq %65 0.0
+%67 = cmpeq %66 false
+%68 = cmplt %65 0.0
+%69 = where %68 %27 %28
+%70 = where %67 %69 %30
+%71 = mul %65 %70
+%72 = max %62 %71
+%73 = add %20 5
+%74 = index %16 %17 %73
+%75 = load %74
+%76 = cmpeq %75 0.0
+%77 = cmpeq %76 false
+%78 = cmplt %75 0.0
+%79 = where %78 %27 %28
+%80 = where %77 %79 %30
+%81 = mul %75 %80
+%82 = max %72 %81
+%83 = add %20 6
+%84 = index %16 %17 %83
+%85 = load %84
+%86 = cmpeq %85 0.0
+%87 = cmpeq %86 false
+%88 = cmplt %85 0.0
+%89 = where %88 %27 %28
+%90 = where %87 %89 %30
+%91 = mul %85 %90
+%92 = max %82 %91
+%93 = add %20 7
+%94 = index %16 %17 %93
+%95 = load %94
+%96 = cmpeq %95 0.0
+%97 = cmpeq %96 false
+%98 = cmplt %95 0.0
+%99 = where %98 %27 %28
+%100 = where %97 %99 %30
+%101 = mul %95 %100
+%102 = max %92 %101
+%103 = param [] slot=-1 dtype=i32
+%104 = native %103 code='__builtin_amdgcn_ds_swizzle({0}, 1055)' fmt=true
+%105 = bitcast %102 dtype=i32
+%106 = call %104 %105
+%107 = bitcast %106 dtype=f32
+%108 = max %102 %107
+%109 = native %103 code='__builtin_amdgcn_ds_swizzle({0}, 2079)' fmt=true
+%110 = bitcast %108 dtype=i32
+%111 = call %109 %110
+%112 = bitcast %111 dtype=f32
+%113 = max %108 %112
+%114 = recip 127.0
+%115 = mul %113 %114
+%116 = max %115 1e-08
+%117 = call %14 %23 %116
+%118 = cmplt %117 -127.0
+%119 = where %118 -127.0 %117
+%120 = cmplt 127.0 %119
+%121 = where %120 127.0 %119
+%122 = cast %121 dtype=i8
+%123 = cast %122 dtype=u8
+%124 = cast %123 dtype=u32
+%125 = shl %124 0
+%126 = call %14 %35 %116
+%127 = cmplt %126 -127.0
+%128 = where %127 -127.0 %126
+%129 = cmplt 127.0 %128
+%130 = where %129 127.0 %128
+%131 = cast %130 dtype=i8
+%132 = cast %131 dtype=u8
+%133 = cast %132 dtype=u32
+%134 = shl %133 8
+%135 = or %125 %134
+%136 = call %14 %45 %116
+%137 = cmplt %136 -127.0
+%138 = where %137 -127.0 %136
+%139 = cmplt 127.0 %138
+%140 = where %139 127.0 %138
+%141 = cast %140 dtype=i8
+%142 = cast %141 dtype=u8
+%143 = cast %142 dtype=u32
+%144 = shl %143 16
+%145 = or %135 %144
+%146 = call %14 %55 %116
+%147 = cmplt %146 -127.0
+%148 = where %147 -127.0 %146
+%149 = cmplt 127.0 %148
+%150 = where %149 127.0 %148
+%151 = cast %150 dtype=i8
+%152 = cast %151 dtype=u8
+%153 = cast %152 dtype=u32
+%154 = shl %153 24
+%155 = or %145 %154
+%156 = store %12 %155
+%157 = add %10 1
+%158 = index %1 %3 %8 %157
+%159 = call %14 %65 %116
+%160 = cmplt %159 -127.0
+%161 = where %160 -127.0 %159
+%162 = cmplt 127.0 %161
+%163 = where %162 127.0 %161
+%164 = cast %163 dtype=i8
+%165 = cast %164 dtype=u8
+%166 = cast %165 dtype=u32
+%167 = shl %166 0
+%168 = call %14 %75 %116
+%169 = cmplt %168 -127.0
+%170 = where %169 -127.0 %168
+%171 = cmplt 127.0 %170
+%172 = where %171 127.0 %170
+%173 = cast %172 dtype=i8
+%174 = cast %173 dtype=u8
+%175 = cast %174 dtype=u32
+%176 = shl %175 8
+%177 = or %167 %176
+%178 = call %14 %85 %116
+%179 = cmplt %178 -127.0
+%180 = where %179 -127.0 %178
+%181 = cmplt 127.0 %180
+%182 = where %181 127.0 %180
+%183 = cast %182 dtype=i8
+%184 = cast %183 dtype=u8
+%185 = cast %184 dtype=u32
+%186 = shl %185 16
+%187 = or %177 %186
+%188 = call %14 %95 %116
+%189 = cmplt %188 -127.0
+%190 = where %189 -127.0 %188
+%191 = cmplt 127.0 %190
+%192 = where %191 127.0 %190
+%193 = cast %192 dtype=i8
+%194 = cast %193 dtype=u8
+%195 = cast %194 dtype=u32
+%196 = shl %195 24
+%197 = or %187 %196
+%198 = store %158 %197
+%199 = cmpeq %9 0
+%200 = mul %9 0
+%201 = add %200 8
+%202 = where %199 %201 invalid
+%203 = index %1 %3 %8 %202
+%204 = bitcast %116 dtype=u32
+%205 = store %203 %204
+%206 = after [] %156 %198 %205
+%207 = end %206 %2 %6
+%208 = sink %207 name=q8_pack opts_to_apply=[]

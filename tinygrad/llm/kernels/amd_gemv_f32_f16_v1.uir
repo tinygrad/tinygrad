@@ -1,0 +1,92 @@
+%0 = param [] slot=-1 dtype=i32 vmin_vmax=[1 15] name=tokens addrspace=TEMPLATE
+%1 = param [] slot=-1 dtype=i32 vmin_vmax=[1 1048576] name=out_features addrspace=TEMPLATE
+%2 = mul %0 %1
+%3 = param %2 slot=0 dtype=f32
+%4 = stack %0 %1
+%5 = reshape %3 %4
+%6 = add %1 1
+%7 = div %6 2
+%8 = mul %0 %7
+%9 = cast %8 dtype=weakint
+%10 = range %9 slot=0 axis=GLOBAL
+%11 = cast %10 dtype=i32
+%12 = div %11 %7
+%13 = mod %11 %7
+%14 = mul %13 2
+%15 = range 2 slot=3 axis=LOCAL
+%16 = cast %15 dtype=i32
+%17 = add %14 %16
+%18 = cmplt %17 %1
+%19 = range 32 slot=2 axis=LOCAL
+%20 = cmpeq %19 0
+%21 = and %18 %20
+%22 = xor %17 -1
+%23 = add %1 -1
+%24 = xor %23 -1
+%25 = max %22 %24
+%26 = xor %25 -1
+%27 = where %21 %26 invalid
+%28 = index %5 %12 %27
+%29 = alloc 1 slot=0 dtype=f32 addrspace=REG
+%30 = index %29 0
+%31 = cast 0.0 dtype=f32
+%32 = store %30 %31
+%33 = after %29 %32
+%34 = index %33 0
+%35 = param [] slot=-1 dtype=i32 vmin_vmax=[32 1048576] name=in_features addrspace=TEMPLATE
+%36 = div %35 32
+%37 = cast %36 dtype=weakint
+%38 = range %37 slot=4
+%39 = after %33 %38
+%40 = index %39 0
+%41 = load %40
+%42 = mul %1 %35
+%43 = param %42 slot=1 dtype=f32
+%44 = stack %1 %36 32
+%45 = reshape %43 %44
+%46 = index %45 %26 %38 %19
+%47 = load %46
+%48 = mul %0 %35
+%49 = param %48 slot=2 dtype=f16
+%50 = stack %0 %36 32
+%51 = reshape %49 %50
+%52 = index %51 %12 %38 %19
+%53 = load %52
+%54 = cast %53 dtype=f32
+%55 = mul %47 %54
+%56 = add %31 %55
+%57 = add %41 %56
+%58 = store %34 %57
+%59 = end %58 %38
+%60 = after %33 %59
+%61 = index %60 0
+%62 = load %61
+%63 = param [] slot=-1 dtype=i32
+%64 = native %63 code='__builtin_amdgcn_ds_swizzle({0}, 16415)' fmt=true
+%65 = bitcast %62 dtype=i32
+%66 = call %64 %65
+%67 = bitcast %66 dtype=f32
+%68 = add %62 %67
+%69 = native %63 code='__builtin_amdgcn_ds_swizzle({0}, 8223)' fmt=true
+%70 = bitcast %68 dtype=i32
+%71 = call %69 %70
+%72 = bitcast %71 dtype=f32
+%73 = add %68 %72
+%74 = native %63 code='__builtin_amdgcn_ds_swizzle({0}, 4127)' fmt=true
+%75 = bitcast %73 dtype=i32
+%76 = call %74 %75
+%77 = bitcast %76 dtype=f32
+%78 = add %73 %77
+%79 = native %63 code='__builtin_amdgcn_ds_swizzle({0}, 2079)' fmt=true
+%80 = bitcast %78 dtype=i32
+%81 = call %79 %80
+%82 = bitcast %81 dtype=f32
+%83 = add %78 %82
+%84 = native %63 code='__builtin_amdgcn_ds_swizzle({0}, 1055)' fmt=true
+%85 = bitcast %83 dtype=i32
+%86 = call %84 %85
+%87 = bitcast %86 dtype=f32
+%88 = add %83 %87
+%89 = store %28 %88
+%90 = end %89 %10 %15 %19
+%91 = sink %90 name=linear_f16_gemv opts_to_apply=[]

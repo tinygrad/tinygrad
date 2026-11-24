@@ -1,0 +1,162 @@
+%0 = param [] slot=-1 dtype=i32 vmin_vmax=[1 1048576] name=tokens addrspace=TEMPLATE
+%1 = mul %0 24
+%2 = param %1 slot=0 dtype=f32
+%3 = stack %0 24
+%4 = reshape %2 %3
+%5 = cast %0 dtype=weakint
+%6 = range %5 slot=0 axis=GLOBAL
+%7 = range 32 slot=-1 axis=WARP
+%8 = cmplt %7 24
+%9 = cmplt %7 16
+%10 = add %7 8
+%11 = add %7 -16
+%12 = where %9 %10 %11
+%13 = where %8 %12 invalid
+%14 = index %4 %6 %13
+%15 = alloc 1 slot=0 dtype=f32 addrspace=REG
+%16 = index %15 0
+%17 = param %1 slot=1 dtype=f32
+%18 = reshape %17 %3
+%19 = xor %11 -1
+%20 = max %19 -8
+%21 = xor %20 -1
+%22 = max %21 0
+%23 = where %9 %10 %22
+%24 = index %18 %6 %23
+%25 = load %24
+%26 = mul %0 32
+%27 = param %26 slot=2 dtype=f32
+%28 = stack %0 32
+%29 = reshape %27 %28
+%30 = index %29 %6 %7
+%31 = load %30
+%32 = param [] slot=-1 dtype=i32
+%33 = native %32 code='__builtin_amdgcn_ds_swizzle({0}, 16415)' fmt=true
+%34 = bitcast %31 dtype=i32
+%35 = call %33 %34
+%36 = bitcast %35 dtype=f32
+%37 = add %31 %36
+%38 = native %32 code='__builtin_amdgcn_ds_swizzle({0}, 8223)' fmt=true
+%39 = bitcast %37 dtype=i32
+%40 = call %38 %39
+%41 = bitcast %40 dtype=f32
+%42 = add %37 %41
+%43 = native %32 code='__builtin_amdgcn_ds_swizzle({0}, 4127)' fmt=true
+%44 = bitcast %42 dtype=i32
+%45 = call %43 %44
+%46 = bitcast %45 dtype=f32
+%47 = add %42 %46
+%48 = native %32 code='__builtin_amdgcn_ds_swizzle({0}, 2079)' fmt=true
+%49 = bitcast %47 dtype=i32
+%50 = call %48 %49
+%51 = bitcast %50 dtype=f32
+%52 = add %47 %51
+%53 = native %32 code='__builtin_amdgcn_ds_swizzle({0}, 1055)' fmt=true
+%54 = bitcast %52 dtype=i32
+%55 = call %53 %54
+%56 = bitcast %55 dtype=f32
+%57 = add %52 %56
+%58 = param [] slot=-1 dtype=i32 vmin_vmax=[32 1048576] name=features addrspace=TEMPLATE
+%59 = cast %58 dtype=f32
+%60 = recip %59
+%61 = mul %57 %60
+%62 = param [] slot=-1 dtype=f32 vmin_vmax=[0.0 1.0] name=norm_eps addrspace=TEMPLATE
+%63 = add %61 %62
+%64 = sqrt %63
+%65 = recip %64
+%66 = mul %25 %65
+%67 = cmplt %7 20
+%68 = where %67 0 1
+%69 = where %9 2 %68
+%70 = cmpeq %69 0
+%71 = param 3 slot=4 dtype=f16
+%72 = index %71 0
+%73 = load %72
+%74 = cast %73 dtype=f32
+%75 = cmpeq %69 1
+%76 = index %71 1
+%77 = load %76
+%78 = cast %77 dtype=f32
+%79 = index %71 2
+%80 = load %79
+%81 = cast %80 dtype=f32
+%82 = where %75 %78 %81
+%83 = where %70 %74 %82
+%84 = mul %66 %83
+%85 = param 24 slot=3 dtype=f16
+%86 = index %85 %23
+%87 = load %86
+%88 = cast %87 dtype=f32
+%89 = add %84 %88
+%90 = bitcast %89 dtype=i32
+%91 = call %53 %90
+%92 = bitcast %91 dtype=f32
+%93 = max %89 %92
+%94 = bitcast %93 dtype=i32
+%95 = call %48 %94
+%96 = bitcast %95 dtype=f32
+%97 = max %93 %96
+%98 = mul %97 -1.0
+%99 = add %89 %98
+%100 = mul %99 1.4426950408889634
+%101 = exp2 %100
+%102 = bitcast %101 dtype=i32
+%103 = call %53 %102
+%104 = bitcast %103 dtype=f32
+%105 = add %101 %104
+%106 = bitcast %105 dtype=i32
+%107 = call %48 %106
+%108 = bitcast %107 dtype=f32
+%109 = add %105 %108
+%110 = recip %109
+%111 = mul %101 %110
+%112 = param [] slot=-1 dtype=f32 vmin_vmax=[0.0 1.0] name=eps addrspace=TEMPLATE
+%113 = add %111 %112
+%114 = store %16 %113
+%115 = after %15 %114
+%116 = index %115 0
+%117 = param [] slot=-1 dtype=i32 vmin_vmax=[1 64] name=iters addrspace=TEMPLATE
+%118 = mul 2 %117
+%119 = add %118 -1
+%120 = cast %119 dtype=weakint
+%121 = range %120 slot=1
+%122 = after %115 %121
+%123 = index %122 0
+%124 = load %123
+%125 = mod %121 2
+%126 = cmpeq %125 0
+%127 = bitcast %124 dtype=i32
+%128 = call %43 %127
+%129 = bitcast %128 dtype=f32
+%130 = add %124 %129
+%131 = bitcast %130 dtype=i32
+%132 = call %38 %131
+%133 = bitcast %132 dtype=f32
+%134 = add %130 %133
+%135 = call %53 %127
+%136 = bitcast %135 dtype=f32
+%137 = add %124 %136
+%138 = bitcast %137 dtype=i32
+%139 = call %48 %138
+%140 = bitcast %139 dtype=f32
+%141 = add %137 %140
+%142 = where %126 %134 %141
+%143 = add %142 %112
+%144 = recip %143
+%145 = mul %124 %144
+%146 = store %116 %145
+%147 = end %146 %121
+%148 = after %115 %147
+%149 = index %148 0
+%150 = load %149
+%151 = mul %89 -1.4426950408889634
+%152 = exp2 %151
+%153 = add 1.0 %152
+%154 = recip %153
+%155 = add %154 %112
+%156 = mul %154 2.0
+%157 = where %70 %155 %156
+%158 = where %9 %150 %157
+%159 = store %14 %158
+%160 = end %159 %6 %7
+%161 = sink %160 name=hc_coeffs opts_to_apply=[]

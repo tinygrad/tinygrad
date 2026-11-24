@@ -1,0 +1,374 @@
+%0 = param 16384 slot=6 dtype=f32
+%1 = reshape %0 [1 4 64 64]
+%2 = reshape %1 [4 64 64]
+%3 = range 64 slot=0 axis=GLOBAL
+%4 = div %3 16
+%5 = mod %3 16
+%6 = mul %5 4
+%7 = add %6 0
+%8 = range 32 slot=1 axis=LOCAL
+%9 = add %8 0
+%10 = index %2 %4 %7 %9
+%11 = alloc 8 slot=0 dtype=f32 addrspace=REG
+%12 = add %8 32
+%13 = index %2 %4 %7 %12
+%14 = add %6 1
+%15 = index %2 %4 %14 %9
+%16 = index %2 %4 %14 %12
+%17 = add %6 2
+%18 = index %2 %4 %17 %9
+%19 = index %2 %4 %17 %12
+%20 = add %6 3
+%21 = index %2 %4 %20 %9
+%22 = index %2 %4 %20 %12
+%23 = stack %10 %13 %15 %16 %18 %19 %21 %22
+%24 = store %11 %23
+%25 = after %11 %24
+%26 = param 2048 slot=0 dtype=f32
+%27 = reshape %26 [1 4 8 64]
+%28 = reshape %27 [4 8 64]
+%29 = range 8 slot=2
+%30 = cmpeq %8 0
+%31 = where %30 %7 invalid
+%32 = index %28 %4 %29 %31
+%33 = cast 0.0 dtype=f32
+%34 = after %25 %29
+%35 = index %34 0
+%36 = load %35
+%37 = param 32 slot=5 dtype=f32
+%38 = reshape %37 [1 4 8]
+%39 = reshape %38 [4 8 1]
+%40 = index %39 %4 %29 0
+%41 = load %40
+%42 = mul %36 %41
+%43 = param 2048 slot=1 dtype=f32
+%44 = reshape %43 [1 4 8 64]
+%45 = reshape %44 [4 8 64]
+%46 = index %45 %4 %29 %9
+%47 = load %46
+%48 = mul %42 %47
+%49 = add %33 %48
+%50 = index %34 1
+%51 = load %50
+%52 = mul %51 %41
+%53 = index %45 %4 %29 %12
+%54 = load %53
+%55 = mul %52 %54
+%56 = add %49 %55
+%57 = param [] slot=-1 dtype=i32
+%58 = native %57 code='__builtin_amdgcn_ds_swizzle({0}, 16415)' fmt=true
+%59 = bitcast %56 dtype=i32
+%60 = call %58 %59
+%61 = bitcast %60 dtype=f32
+%62 = add %56 %61
+%63 = native %57 code='__builtin_amdgcn_ds_swizzle({0}, 8223)' fmt=true
+%64 = bitcast %62 dtype=i32
+%65 = call %63 %64
+%66 = bitcast %65 dtype=f32
+%67 = add %62 %66
+%68 = native %57 code='__builtin_amdgcn_ds_swizzle({0}, 4127)' fmt=true
+%69 = bitcast %67 dtype=i32
+%70 = call %68 %69
+%71 = bitcast %70 dtype=f32
+%72 = add %67 %71
+%73 = native %57 code='__builtin_amdgcn_ds_swizzle({0}, 2079)' fmt=true
+%74 = bitcast %72 dtype=i32
+%75 = call %73 %74
+%76 = bitcast %75 dtype=f32
+%77 = add %72 %76
+%78 = native %57 code='__builtin_amdgcn_ds_swizzle({0}, 1055)' fmt=true
+%79 = bitcast %77 dtype=i32
+%80 = call %78 %79
+%81 = bitcast %80 dtype=f32
+%82 = add %77 %81
+%83 = param 2048 slot=3 dtype=f32
+%84 = reshape %83 [1 4 8 64]
+%85 = reshape %84 [4 8 64]
+%86 = index %85 %4 %29 %7
+%87 = load %86
+%88 = param 2048 slot=2 dtype=f32
+%89 = reshape %88 [1 4 8 64]
+%90 = reshape %89 [4 8 64]
+%91 = index %90 %4 %29 %9
+%92 = load %91
+%93 = mul %42 %92
+%94 = add %33 %93
+%95 = index %90 %4 %29 %12
+%96 = load %95
+%97 = mul %52 %96
+%98 = add %94 %97
+%99 = bitcast %98 dtype=i32
+%100 = call %58 %99
+%101 = bitcast %100 dtype=f32
+%102 = add %98 %101
+%103 = bitcast %102 dtype=i32
+%104 = call %63 %103
+%105 = bitcast %104 dtype=f32
+%106 = add %102 %105
+%107 = bitcast %106 dtype=i32
+%108 = call %68 %107
+%109 = bitcast %108 dtype=f32
+%110 = add %106 %109
+%111 = bitcast %110 dtype=i32
+%112 = call %73 %111
+%113 = bitcast %112 dtype=f32
+%114 = add %110 %113
+%115 = bitcast %114 dtype=i32
+%116 = call %78 %115
+%117 = bitcast %116 dtype=f32
+%118 = add %114 %117
+%119 = mul %118 -1.0
+%120 = add %87 %119
+%121 = param 32 slot=4 dtype=f32
+%122 = reshape %121 [1 4 8]
+%123 = reshape %122 [4 8]
+%124 = index %123 %4 %29
+%125 = load %124
+%126 = mul %120 %125
+%127 = param 32 slot=7 dtype=f32
+%128 = reshape %127 [1 4 8]
+%129 = reshape %128 [4 8]
+%130 = index %129 %4 %29
+%131 = mul %126 %130
+%132 = add %82 %131
+%133 = store %32 %132
+%134 = where %30 %14 invalid
+%135 = index %28 %4 %29 %134
+%136 = index %34 2
+%137 = load %136
+%138 = mul %137 %41
+%139 = mul %138 %47
+%140 = add %33 %139
+%141 = index %34 3
+%142 = load %141
+%143 = mul %142 %41
+%144 = mul %143 %54
+%145 = add %140 %144
+%146 = bitcast %145 dtype=i32
+%147 = call %58 %146
+%148 = bitcast %147 dtype=f32
+%149 = add %145 %148
+%150 = bitcast %149 dtype=i32
+%151 = call %63 %150
+%152 = bitcast %151 dtype=f32
+%153 = add %149 %152
+%154 = bitcast %153 dtype=i32
+%155 = call %68 %154
+%156 = bitcast %155 dtype=f32
+%157 = add %153 %156
+%158 = bitcast %157 dtype=i32
+%159 = call %73 %158
+%160 = bitcast %159 dtype=f32
+%161 = add %157 %160
+%162 = bitcast %161 dtype=i32
+%163 = call %78 %162
+%164 = bitcast %163 dtype=f32
+%165 = add %161 %164
+%166 = index %85 %4 %29 %14
+%167 = load %166
+%168 = mul %138 %92
+%169 = add %33 %168
+%170 = mul %143 %96
+%171 = add %169 %170
+%172 = bitcast %171 dtype=i32
+%173 = call %58 %172
+%174 = bitcast %173 dtype=f32
+%175 = add %171 %174
+%176 = bitcast %175 dtype=i32
+%177 = call %63 %176
+%178 = bitcast %177 dtype=f32
+%179 = add %175 %178
+%180 = bitcast %179 dtype=i32
+%181 = call %68 %180
+%182 = bitcast %181 dtype=f32
+%183 = add %179 %182
+%184 = bitcast %183 dtype=i32
+%185 = call %73 %184
+%186 = bitcast %185 dtype=f32
+%187 = add %183 %186
+%188 = bitcast %187 dtype=i32
+%189 = call %78 %188
+%190 = bitcast %189 dtype=f32
+%191 = add %187 %190
+%192 = mul %191 -1.0
+%193 = add %167 %192
+%194 = mul %193 %125
+%195 = mul %194 %130
+%196 = add %165 %195
+%197 = store %135 %196
+%198 = where %30 %17 invalid
+%199 = index %28 %4 %29 %198
+%200 = index %34 4
+%201 = load %200
+%202 = mul %201 %41
+%203 = mul %202 %47
+%204 = add %33 %203
+%205 = index %34 5
+%206 = load %205
+%207 = mul %206 %41
+%208 = mul %207 %54
+%209 = add %204 %208
+%210 = bitcast %209 dtype=i32
+%211 = call %58 %210
+%212 = bitcast %211 dtype=f32
+%213 = add %209 %212
+%214 = bitcast %213 dtype=i32
+%215 = call %63 %214
+%216 = bitcast %215 dtype=f32
+%217 = add %213 %216
+%218 = bitcast %217 dtype=i32
+%219 = call %68 %218
+%220 = bitcast %219 dtype=f32
+%221 = add %217 %220
+%222 = bitcast %221 dtype=i32
+%223 = call %73 %222
+%224 = bitcast %223 dtype=f32
+%225 = add %221 %224
+%226 = bitcast %225 dtype=i32
+%227 = call %78 %226
+%228 = bitcast %227 dtype=f32
+%229 = add %225 %228
+%230 = index %85 %4 %29 %17
+%231 = load %230
+%232 = mul %202 %92
+%233 = add %33 %232
+%234 = mul %207 %96
+%235 = add %233 %234
+%236 = bitcast %235 dtype=i32
+%237 = call %58 %236
+%238 = bitcast %237 dtype=f32
+%239 = add %235 %238
+%240 = bitcast %239 dtype=i32
+%241 = call %63 %240
+%242 = bitcast %241 dtype=f32
+%243 = add %239 %242
+%244 = bitcast %243 dtype=i32
+%245 = call %68 %244
+%246 = bitcast %245 dtype=f32
+%247 = add %243 %246
+%248 = bitcast %247 dtype=i32
+%249 = call %73 %248
+%250 = bitcast %249 dtype=f32
+%251 = add %247 %250
+%252 = bitcast %251 dtype=i32
+%253 = call %78 %252
+%254 = bitcast %253 dtype=f32
+%255 = add %251 %254
+%256 = mul %255 -1.0
+%257 = add %231 %256
+%258 = mul %257 %125
+%259 = mul %258 %130
+%260 = add %229 %259
+%261 = store %199 %260
+%262 = where %30 %20 invalid
+%263 = index %28 %4 %29 %262
+%264 = index %34 6
+%265 = load %264
+%266 = mul %265 %41
+%267 = mul %266 %47
+%268 = add %33 %267
+%269 = index %34 7
+%270 = load %269
+%271 = mul %270 %41
+%272 = mul %271 %54
+%273 = add %268 %272
+%274 = bitcast %273 dtype=i32
+%275 = call %58 %274
+%276 = bitcast %275 dtype=f32
+%277 = add %273 %276
+%278 = bitcast %277 dtype=i32
+%279 = call %63 %278
+%280 = bitcast %279 dtype=f32
+%281 = add %277 %280
+%282 = bitcast %281 dtype=i32
+%283 = call %68 %282
+%284 = bitcast %283 dtype=f32
+%285 = add %281 %284
+%286 = bitcast %285 dtype=i32
+%287 = call %73 %286
+%288 = bitcast %287 dtype=f32
+%289 = add %285 %288
+%290 = bitcast %289 dtype=i32
+%291 = call %78 %290
+%292 = bitcast %291 dtype=f32
+%293 = add %289 %292
+%294 = index %85 %4 %29 %20
+%295 = load %294
+%296 = mul %266 %92
+%297 = add %33 %296
+%298 = mul %271 %96
+%299 = add %297 %298
+%300 = bitcast %299 dtype=i32
+%301 = call %58 %300
+%302 = bitcast %301 dtype=f32
+%303 = add %299 %302
+%304 = bitcast %303 dtype=i32
+%305 = call %63 %304
+%306 = bitcast %305 dtype=f32
+%307 = add %303 %306
+%308 = bitcast %307 dtype=i32
+%309 = call %68 %308
+%310 = bitcast %309 dtype=f32
+%311 = add %307 %310
+%312 = bitcast %311 dtype=i32
+%313 = call %73 %312
+%314 = bitcast %313 dtype=f32
+%315 = add %311 %314
+%316 = bitcast %315 dtype=i32
+%317 = call %78 %316
+%318 = bitcast %317 dtype=f32
+%319 = add %315 %318
+%320 = mul %319 -1.0
+%321 = add %295 %320
+%322 = mul %321 %125
+%323 = mul %322 %130
+%324 = add %293 %323
+%325 = store %263 %324
+%326 = mul %126 %92
+%327 = add %42 %326
+%328 = mul %126 %96
+%329 = add %52 %328
+%330 = mul %194 %92
+%331 = add %138 %330
+%332 = mul %194 %96
+%333 = add %143 %332
+%334 = mul %258 %92
+%335 = add %202 %334
+%336 = mul %258 %96
+%337 = add %207 %336
+%338 = mul %322 %92
+%339 = add %266 %338
+%340 = mul %322 %96
+%341 = add %271 %340
+%342 = stack %327 %329 %331 %333 %335 %337 %339 %341
+%343 = store %25 %342
+%344 = after [] %133 %197 %261 %325 %343
+%345 = end %344 %29
+%346 = after %25 %345
+%347 = index %346 0
+%348 = load %347
+%349 = store %10 %348
+%350 = index %346 1
+%351 = load %350
+%352 = store %13 %351
+%353 = index %346 2
+%354 = load %353
+%355 = store %15 %354
+%356 = index %346 3
+%357 = load %356
+%358 = store %16 %357
+%359 = index %346 4
+%360 = load %359
+%361 = store %18 %360
+%362 = index %346 5
+%363 = load %362
+%364 = store %19 %363
+%365 = index %346 6
+%366 = load %365
+%367 = store %21 %366
+%368 = index %346 7
+%369 = load %368
+%370 = store %22 %369
+%371 = after [] %349 %352 %355 %358 %361 %364 %367 %370
+%372 = end %371 %8 %3
+%373 = sink %372 name=gated_delta_prefill opts_to_apply=[]

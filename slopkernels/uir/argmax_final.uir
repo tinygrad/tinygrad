@@ -1,0 +1,37 @@
+%0 = param 4 slot=0 dtype=f32
+%1 = reshape %0 [2 2]
+%2 = range 2 slot=0 axis=GLOBAL
+%3 = index %1 %2 0
+%4 = param 16 slot=1 dtype=f32
+%5 = reshape %4 [2 4 2]
+%6 = index %5 %2 0 0
+%7 = load %6
+%8 = index %5 %2 1 0
+%9 = load %8
+%10 = cmplt %7 %9
+%11 = where %10 %9 %7
+%12 = index %5 %2 2 0
+%13 = load %12
+%14 = cmplt %11 %13
+%15 = where %14 %13 %11
+%16 = index %5 %2 3 0
+%17 = load %16
+%18 = cmplt %15 %17
+%19 = where %18 %17 %15
+%20 = store %3 %19
+%21 = index %1 %2 1
+%22 = index %5 %2 3 1
+%23 = load %22
+%24 = index %5 %2 2 1
+%25 = load %24
+%26 = index %5 %2 1 1
+%27 = load %26
+%28 = index %5 %2 0 1
+%29 = load %28
+%30 = where %10 %27 %29
+%31 = where %14 %25 %30
+%32 = where %18 %23 %31
+%33 = store %21 %32
+%34 = after [] %20 %33
+%35 = end %34 %2
+%36 = sink %35 name=argmax_final opts_to_apply=[]

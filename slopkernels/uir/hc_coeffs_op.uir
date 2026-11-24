@@ -1,0 +1,167 @@
+%0 = alloc 48 slot=0 dtype=f32 device=AMD
+%1 = reshape %0 [2 24]
+%2 = param 48 slot=0 dtype=f32
+%3 = reshape %2 [2 24]
+%4 = range 2 slot=0 axis=GLOBAL
+%5 = range 32 slot=-1 axis=WARP
+%6 = cmplt %5 24
+%7 = cmplt %5 16
+%8 = add %5 8
+%9 = mul 16 -1
+%10 = add %5 %9
+%11 = where %7 %8 %10
+%12 = where %6 %11 invalid
+%13 = index %3 %4 %12
+%14 = param 48 slot=1 dtype=f32
+%15 = reshape %14 [2 24]
+%16 = xor %10 -1
+%17 = xor 7 -1
+%18 = max %16 %17
+%19 = xor %18 -1
+%20 = max %19 0
+%21 = where %7 %8 %20
+%22 = index %15 %4 %21
+%23 = load %22
+%24 = cast 0.0 dtype=f32
+%25 = param 64 slot=2 dtype=f32
+%26 = reshape %25 [2 32]
+%27 = add %5 0
+%28 = cmplt %27 32
+%29 = where %28 %27 invalid
+%30 = index %26 %4 %29
+%31 = load %30
+%32 = add %24 %31
+%33 = param [] slot=-1 dtype=i32
+%34 = native %33 code='__builtin_amdgcn_ds_swizzle({0}, 16415)' fmt=true
+%35 = bitcast %32 dtype=i32
+%36 = call %34 %35
+%37 = bitcast %36 dtype=f32
+%38 = add %32 %37
+%39 = native %33 code='__builtin_amdgcn_ds_swizzle({0}, 8223)' fmt=true
+%40 = bitcast %38 dtype=i32
+%41 = call %39 %40
+%42 = bitcast %41 dtype=f32
+%43 = add %38 %42
+%44 = native %33 code='__builtin_amdgcn_ds_swizzle({0}, 4127)' fmt=true
+%45 = bitcast %43 dtype=i32
+%46 = call %44 %45
+%47 = bitcast %46 dtype=f32
+%48 = add %43 %47
+%49 = native %33 code='__builtin_amdgcn_ds_swizzle({0}, 2079)' fmt=true
+%50 = bitcast %48 dtype=i32
+%51 = call %49 %50
+%52 = bitcast %51 dtype=f32
+%53 = add %48 %52
+%54 = native %33 code='__builtin_amdgcn_ds_swizzle({0}, 1055)' fmt=true
+%55 = bitcast %53 dtype=i32
+%56 = call %54 %55
+%57 = bitcast %56 dtype=f32
+%58 = add %53 %57
+%59 = mul %58 0.0078125
+%60 = add %59 1e-06
+%61 = sqrt %60
+%62 = recip %61
+%63 = mul %23 %62
+%64 = cmplt %5 20
+%65 = where %64 0 1
+%66 = where %7 2 %65
+%67 = cmpeq %66 0
+%68 = param 3 slot=4 dtype=f16
+%69 = index %68 0
+%70 = load %69
+%71 = cast %70 dtype=f32
+%72 = cmpeq %66 1
+%73 = index %68 1
+%74 = load %73
+%75 = cast %74 dtype=f32
+%76 = index %68 2
+%77 = load %76
+%78 = cast %77 dtype=f32
+%79 = where %72 %75 %78
+%80 = where %67 %71 %79
+%81 = mul %63 %80
+%82 = param 24 slot=3 dtype=f16
+%83 = index %82 %21
+%84 = load %83
+%85 = cast %84 dtype=f32
+%86 = add %81 %85
+%87 = bitcast %86 dtype=i32
+%88 = call %54 %87
+%89 = bitcast %88 dtype=f32
+%90 = max %86 %89
+%91 = bitcast %90 dtype=i32
+%92 = call %49 %91
+%93 = bitcast %92 dtype=f32
+%94 = max %90 %93
+%95 = mul %94 -1.0
+%96 = add %86 %95
+%97 = mul %96 1.4426950408889634
+%98 = exp2 %97
+%99 = bitcast %98 dtype=i32
+%100 = call %54 %99
+%101 = bitcast %100 dtype=f32
+%102 = add %98 %101
+%103 = bitcast %102 dtype=i32
+%104 = call %49 %103
+%105 = bitcast %104 dtype=f32
+%106 = add %102 %105
+%107 = recip %106
+%108 = mul %98 %107
+%109 = add %108 1e-06
+%110 = bitcast %109 dtype=i32
+%111 = call %44 %110
+%112 = bitcast %111 dtype=f32
+%113 = add %109 %112
+%114 = bitcast %113 dtype=i32
+%115 = call %39 %114
+%116 = bitcast %115 dtype=f32
+%117 = add %113 %116
+%118 = add %117 1e-06
+%119 = recip %118
+%120 = mul %109 %119
+%121 = bitcast %120 dtype=i32
+%122 = call %54 %121
+%123 = bitcast %122 dtype=f32
+%124 = add %120 %123
+%125 = bitcast %124 dtype=i32
+%126 = call %49 %125
+%127 = bitcast %126 dtype=f32
+%128 = add %124 %127
+%129 = add %128 1e-06
+%130 = recip %129
+%131 = mul %120 %130
+%132 = bitcast %131 dtype=i32
+%133 = call %44 %132
+%134 = bitcast %133 dtype=f32
+%135 = add %131 %134
+%136 = bitcast %135 dtype=i32
+%137 = call %39 %136
+%138 = bitcast %137 dtype=f32
+%139 = add %135 %138
+%140 = add %139 1e-06
+%141 = recip %140
+%142 = mul %131 %141
+%143 = mul %86 -1.4426950408889634
+%144 = exp2 %143
+%145 = add 1.0 %144
+%146 = recip %145
+%147 = add %146 1e-06
+%148 = mul %146 2.0
+%149 = where %67 %147 %148
+%150 = where %7 %142 %149
+%151 = store %13 %150
+%152 = end %151 %4 %5
+%153 = sink %152 name=hc_coeffs opts_to_apply=[]
+%154 = param 48 slot=0 dtype=f32 device=AMD
+%155 = reshape %154 [2 24]
+%156 = param 256 slot=1 dtype=f32 device=AMD
+%157 = reshape %156 [2 128]
+%158 = mul %157 %157
+%159 = reshape %158 [2 32 4]
+%160 = permute %159 [2 0 1]
+%161 = reduce %160 op=add pop=1
+%162 = stage %161
+%163 = param 24 slot=2 dtype=f16 device=AMD
+%164 = param 3 slot=3 dtype=f16 device=AMD
+%165 = call %153 %1 %155 %162 %163 %164
+%166 = after %1 %165

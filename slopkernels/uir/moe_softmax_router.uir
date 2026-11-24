@@ -1,0 +1,458 @@
+%0 = param 8 slot=0 dtype=i32
+%1 = reshape %0 [2 4]
+%2 = range 2 slot=0 axis=GLOBAL
+%3 = range 32 slot=-1 axis=WARP
+%4 = cmplt %3 4
+%5 = where %4 %3 invalid
+%6 = index %1 %2 %5
+%7 = div %3 1
+%8 = cmpeq %7 3
+%9 = cast -inf dtype=f32
+%10 = param 128 slot=2 dtype=f32
+%11 = reshape %10 [2 64]
+%12 = add %3 0
+%13 = cast %12 dtype=i32
+%14 = index %11 %2 %13
+%15 = load %14
+%16 = where false -inf %15
+%17 = cmplt %9 %16
+%18 = cmpeq %16 %9
+%19 = where false 1073741824 %13
+%20 = cast 1073741824 dtype=i32
+%21 = cmplt %19 %20
+%22 = and %18 %21
+%23 = or %17 %22
+%24 = where %23 %16 %9
+%25 = add %3 32
+%26 = cast %25 dtype=i32
+%27 = index %11 %2 %26
+%28 = load %27
+%29 = where false -inf %28
+%30 = cmplt %24 %29
+%31 = cmpeq %29 %24
+%32 = where false 1073741824 %26
+%33 = where %23 %19 %20
+%34 = cmplt %32 %33
+%35 = and %31 %34
+%36 = or %30 %35
+%37 = where %36 %29 %24
+%38 = param [] slot=-1 dtype=i32
+%39 = native %38 code='__builtin_amdgcn_ds_swizzle({0}, 16415)' fmt=true
+%40 = bitcast %37 dtype=i32
+%41 = call %39 %40
+%42 = bitcast %41 dtype=f32
+%43 = cmplt %37 %42
+%44 = cmpeq %42 %37
+%45 = where %36 %32 %33
+%46 = bitcast %45 dtype=f32
+%47 = bitcast %46 dtype=i32
+%48 = call %39 %47
+%49 = bitcast %48 dtype=f32
+%50 = bitcast %49 dtype=i32
+%51 = cmplt %50 %45
+%52 = and %44 %51
+%53 = or %43 %52
+%54 = where %53 %42 %37
+%55 = native %38 code='__builtin_amdgcn_ds_swizzle({0}, 8223)' fmt=true
+%56 = bitcast %54 dtype=i32
+%57 = call %55 %56
+%58 = bitcast %57 dtype=f32
+%59 = cmplt %54 %58
+%60 = cmpeq %58 %54
+%61 = where %53 %50 %45
+%62 = bitcast %61 dtype=f32
+%63 = bitcast %62 dtype=i32
+%64 = call %55 %63
+%65 = bitcast %64 dtype=f32
+%66 = bitcast %65 dtype=i32
+%67 = cmplt %66 %61
+%68 = and %60 %67
+%69 = or %59 %68
+%70 = where %69 %58 %54
+%71 = native %38 code='__builtin_amdgcn_ds_swizzle({0}, 4127)' fmt=true
+%72 = bitcast %70 dtype=i32
+%73 = call %71 %72
+%74 = bitcast %73 dtype=f32
+%75 = cmplt %70 %74
+%76 = cmpeq %74 %70
+%77 = where %69 %66 %61
+%78 = bitcast %77 dtype=f32
+%79 = bitcast %78 dtype=i32
+%80 = call %71 %79
+%81 = bitcast %80 dtype=f32
+%82 = bitcast %81 dtype=i32
+%83 = cmplt %82 %77
+%84 = and %76 %83
+%85 = or %75 %84
+%86 = where %85 %74 %70
+%87 = native %38 code='__builtin_amdgcn_ds_swizzle({0}, 2079)' fmt=true
+%88 = bitcast %86 dtype=i32
+%89 = call %87 %88
+%90 = bitcast %89 dtype=f32
+%91 = cmplt %86 %90
+%92 = cmpeq %90 %86
+%93 = where %85 %82 %77
+%94 = bitcast %93 dtype=f32
+%95 = bitcast %94 dtype=i32
+%96 = call %87 %95
+%97 = bitcast %96 dtype=f32
+%98 = bitcast %97 dtype=i32
+%99 = cmplt %98 %93
+%100 = and %92 %99
+%101 = or %91 %100
+%102 = where %101 %90 %86
+%103 = native %38 code='__builtin_amdgcn_ds_swizzle({0}, 1055)' fmt=true
+%104 = bitcast %102 dtype=i32
+%105 = call %103 %104
+%106 = bitcast %105 dtype=f32
+%107 = cmplt %102 %106
+%108 = cmpeq %106 %102
+%109 = where %101 %98 %93
+%110 = bitcast %109 dtype=f32
+%111 = bitcast %110 dtype=i32
+%112 = call %103 %111
+%113 = bitcast %112 dtype=f32
+%114 = bitcast %113 dtype=i32
+%115 = cmplt %114 %109
+%116 = and %108 %115
+%117 = or %107 %116
+%118 = where %117 %114 %109
+%119 = cmpeq %7 2
+%120 = cmpeq %13 %118
+%121 = or false %120
+%122 = where %121 -inf %15
+%123 = cmplt %9 %122
+%124 = cmpeq %122 %9
+%125 = where %121 1073741824 %13
+%126 = cmplt %125 %20
+%127 = and %124 %126
+%128 = or %123 %127
+%129 = where %128 %122 %9
+%130 = cmpeq %26 %118
+%131 = or false %130
+%132 = where %131 -inf %28
+%133 = cmplt %129 %132
+%134 = cmpeq %132 %129
+%135 = where %131 1073741824 %26
+%136 = where %128 %125 %20
+%137 = cmplt %135 %136
+%138 = and %134 %137
+%139 = or %133 %138
+%140 = where %139 %132 %129
+%141 = bitcast %140 dtype=i32
+%142 = call %39 %141
+%143 = bitcast %142 dtype=f32
+%144 = cmplt %140 %143
+%145 = cmpeq %143 %140
+%146 = where %139 %135 %136
+%147 = bitcast %146 dtype=f32
+%148 = bitcast %147 dtype=i32
+%149 = call %39 %148
+%150 = bitcast %149 dtype=f32
+%151 = bitcast %150 dtype=i32
+%152 = cmplt %151 %146
+%153 = and %145 %152
+%154 = or %144 %153
+%155 = where %154 %143 %140
+%156 = bitcast %155 dtype=i32
+%157 = call %55 %156
+%158 = bitcast %157 dtype=f32
+%159 = cmplt %155 %158
+%160 = cmpeq %158 %155
+%161 = where %154 %151 %146
+%162 = bitcast %161 dtype=f32
+%163 = bitcast %162 dtype=i32
+%164 = call %55 %163
+%165 = bitcast %164 dtype=f32
+%166 = bitcast %165 dtype=i32
+%167 = cmplt %166 %161
+%168 = and %160 %167
+%169 = or %159 %168
+%170 = where %169 %158 %155
+%171 = bitcast %170 dtype=i32
+%172 = call %71 %171
+%173 = bitcast %172 dtype=f32
+%174 = cmplt %170 %173
+%175 = cmpeq %173 %170
+%176 = where %169 %166 %161
+%177 = bitcast %176 dtype=f32
+%178 = bitcast %177 dtype=i32
+%179 = call %71 %178
+%180 = bitcast %179 dtype=f32
+%181 = bitcast %180 dtype=i32
+%182 = cmplt %181 %176
+%183 = and %175 %182
+%184 = or %174 %183
+%185 = where %184 %173 %170
+%186 = bitcast %185 dtype=i32
+%187 = call %87 %186
+%188 = bitcast %187 dtype=f32
+%189 = cmplt %185 %188
+%190 = cmpeq %188 %185
+%191 = where %184 %181 %176
+%192 = bitcast %191 dtype=f32
+%193 = bitcast %192 dtype=i32
+%194 = call %87 %193
+%195 = bitcast %194 dtype=f32
+%196 = bitcast %195 dtype=i32
+%197 = cmplt %196 %191
+%198 = and %190 %197
+%199 = or %189 %198
+%200 = where %199 %188 %185
+%201 = bitcast %200 dtype=i32
+%202 = call %103 %201
+%203 = bitcast %202 dtype=f32
+%204 = cmplt %200 %203
+%205 = cmpeq %203 %200
+%206 = where %199 %196 %191
+%207 = bitcast %206 dtype=f32
+%208 = bitcast %207 dtype=i32
+%209 = call %103 %208
+%210 = bitcast %209 dtype=f32
+%211 = bitcast %210 dtype=i32
+%212 = cmplt %211 %206
+%213 = and %205 %212
+%214 = or %204 %213
+%215 = where %214 %211 %206
+%216 = cmpeq %7 1
+%217 = cmpeq %13 %215
+%218 = or %121 %217
+%219 = where %218 -inf %15
+%220 = cmplt %9 %219
+%221 = cmpeq %219 %9
+%222 = where %218 1073741824 %13
+%223 = cmplt %222 %20
+%224 = and %221 %223
+%225 = or %220 %224
+%226 = where %225 %219 %9
+%227 = cmpeq %26 %215
+%228 = or %131 %227
+%229 = where %228 -inf %28
+%230 = cmplt %226 %229
+%231 = cmpeq %229 %226
+%232 = where %228 1073741824 %26
+%233 = where %225 %222 %20
+%234 = cmplt %232 %233
+%235 = and %231 %234
+%236 = or %230 %235
+%237 = where %236 %229 %226
+%238 = bitcast %237 dtype=i32
+%239 = call %39 %238
+%240 = bitcast %239 dtype=f32
+%241 = cmplt %237 %240
+%242 = cmpeq %240 %237
+%243 = where %236 %232 %233
+%244 = bitcast %243 dtype=f32
+%245 = bitcast %244 dtype=i32
+%246 = call %39 %245
+%247 = bitcast %246 dtype=f32
+%248 = bitcast %247 dtype=i32
+%249 = cmplt %248 %243
+%250 = and %242 %249
+%251 = or %241 %250
+%252 = where %251 %240 %237
+%253 = bitcast %252 dtype=i32
+%254 = call %55 %253
+%255 = bitcast %254 dtype=f32
+%256 = cmplt %252 %255
+%257 = cmpeq %255 %252
+%258 = where %251 %248 %243
+%259 = bitcast %258 dtype=f32
+%260 = bitcast %259 dtype=i32
+%261 = call %55 %260
+%262 = bitcast %261 dtype=f32
+%263 = bitcast %262 dtype=i32
+%264 = cmplt %263 %258
+%265 = and %257 %264
+%266 = or %256 %265
+%267 = where %266 %255 %252
+%268 = bitcast %267 dtype=i32
+%269 = call %71 %268
+%270 = bitcast %269 dtype=f32
+%271 = cmplt %267 %270
+%272 = cmpeq %270 %267
+%273 = where %266 %263 %258
+%274 = bitcast %273 dtype=f32
+%275 = bitcast %274 dtype=i32
+%276 = call %71 %275
+%277 = bitcast %276 dtype=f32
+%278 = bitcast %277 dtype=i32
+%279 = cmplt %278 %273
+%280 = and %272 %279
+%281 = or %271 %280
+%282 = where %281 %270 %267
+%283 = bitcast %282 dtype=i32
+%284 = call %87 %283
+%285 = bitcast %284 dtype=f32
+%286 = cmplt %282 %285
+%287 = cmpeq %285 %282
+%288 = where %281 %278 %273
+%289 = bitcast %288 dtype=f32
+%290 = bitcast %289 dtype=i32
+%291 = call %87 %290
+%292 = bitcast %291 dtype=f32
+%293 = bitcast %292 dtype=i32
+%294 = cmplt %293 %288
+%295 = and %287 %294
+%296 = or %286 %295
+%297 = where %296 %285 %282
+%298 = bitcast %297 dtype=i32
+%299 = call %103 %298
+%300 = bitcast %299 dtype=f32
+%301 = cmplt %297 %300
+%302 = cmpeq %300 %297
+%303 = where %296 %293 %288
+%304 = bitcast %303 dtype=f32
+%305 = bitcast %304 dtype=i32
+%306 = call %103 %305
+%307 = bitcast %306 dtype=f32
+%308 = bitcast %307 dtype=i32
+%309 = cmplt %308 %303
+%310 = and %302 %309
+%311 = or %301 %310
+%312 = where %311 %308 %303
+%313 = cmpeq %13 %312
+%314 = or %218 %313
+%315 = where %314 -inf %15
+%316 = cmplt %9 %315
+%317 = cmpeq %315 %9
+%318 = where %314 1073741824 %13
+%319 = cmplt %318 %20
+%320 = and %317 %319
+%321 = or %316 %320
+%322 = where %321 %315 %9
+%323 = cmpeq %26 %312
+%324 = or %228 %323
+%325 = where %324 -inf %28
+%326 = cmplt %322 %325
+%327 = cmpeq %325 %322
+%328 = where %324 1073741824 %26
+%329 = where %321 %318 %20
+%330 = cmplt %328 %329
+%331 = and %327 %330
+%332 = or %326 %331
+%333 = where %332 %325 %322
+%334 = bitcast %333 dtype=i32
+%335 = call %39 %334
+%336 = bitcast %335 dtype=f32
+%337 = cmplt %333 %336
+%338 = cmpeq %336 %333
+%339 = where %332 %328 %329
+%340 = bitcast %339 dtype=f32
+%341 = bitcast %340 dtype=i32
+%342 = call %39 %341
+%343 = bitcast %342 dtype=f32
+%344 = bitcast %343 dtype=i32
+%345 = cmplt %344 %339
+%346 = and %338 %345
+%347 = or %337 %346
+%348 = where %347 %336 %333
+%349 = bitcast %348 dtype=i32
+%350 = call %55 %349
+%351 = bitcast %350 dtype=f32
+%352 = cmplt %348 %351
+%353 = cmpeq %351 %348
+%354 = where %347 %344 %339
+%355 = bitcast %354 dtype=f32
+%356 = bitcast %355 dtype=i32
+%357 = call %55 %356
+%358 = bitcast %357 dtype=f32
+%359 = bitcast %358 dtype=i32
+%360 = cmplt %359 %354
+%361 = and %353 %360
+%362 = or %352 %361
+%363 = where %362 %351 %348
+%364 = bitcast %363 dtype=i32
+%365 = call %71 %364
+%366 = bitcast %365 dtype=f32
+%367 = cmplt %363 %366
+%368 = cmpeq %366 %363
+%369 = where %362 %359 %354
+%370 = bitcast %369 dtype=f32
+%371 = bitcast %370 dtype=i32
+%372 = call %71 %371
+%373 = bitcast %372 dtype=f32
+%374 = bitcast %373 dtype=i32
+%375 = cmplt %374 %369
+%376 = and %368 %375
+%377 = or %367 %376
+%378 = where %377 %366 %363
+%379 = bitcast %378 dtype=i32
+%380 = call %87 %379
+%381 = bitcast %380 dtype=f32
+%382 = cmplt %378 %381
+%383 = cmpeq %381 %378
+%384 = where %377 %374 %369
+%385 = bitcast %384 dtype=f32
+%386 = bitcast %385 dtype=i32
+%387 = call %87 %386
+%388 = bitcast %387 dtype=f32
+%389 = bitcast %388 dtype=i32
+%390 = cmplt %389 %384
+%391 = and %383 %390
+%392 = or %382 %391
+%393 = where %392 %381 %378
+%394 = bitcast %393 dtype=i32
+%395 = call %103 %394
+%396 = bitcast %395 dtype=f32
+%397 = cmplt %393 %396
+%398 = cmpeq %396 %393
+%399 = where %392 %389 %384
+%400 = bitcast %399 dtype=f32
+%401 = bitcast %400 dtype=i32
+%402 = call %103 %401
+%403 = bitcast %402 dtype=f32
+%404 = bitcast %403 dtype=i32
+%405 = cmplt %404 %399
+%406 = and %398 %405
+%407 = or %397 %406
+%408 = where %407 %404 %399
+%409 = where %216 %312 %408
+%410 = where %119 %215 %409
+%411 = where %8 %118 %410
+%412 = store %6 %411
+%413 = param 8 slot=1 dtype=f32
+%414 = reshape %413 [2 4]
+%415 = index %414 %2 %5
+%416 = where %117 %106 %102
+%417 = where %214 %203 %200
+%418 = where %311 %300 %297
+%419 = where %407 %396 %393
+%420 = where %216 %418 %419
+%421 = where %119 %417 %420
+%422 = where %8 %416 %421
+%423 = mul %416 -1.0
+%424 = add %422 %423
+%425 = mul %424 1.4426950408889634
+%426 = exp2 %425
+%427 = mod %3 1
+%428 = cmpeq %427 0
+%429 = and %4 %428
+%430 = where %429 %426 0.0
+%431 = bitcast %430 dtype=i32
+%432 = call %39 %431
+%433 = bitcast %432 dtype=f32
+%434 = add %430 %433
+%435 = bitcast %434 dtype=i32
+%436 = call %55 %435
+%437 = bitcast %436 dtype=f32
+%438 = add %434 %437
+%439 = bitcast %438 dtype=i32
+%440 = call %71 %439
+%441 = bitcast %440 dtype=f32
+%442 = add %438 %441
+%443 = bitcast %442 dtype=i32
+%444 = call %87 %443
+%445 = bitcast %444 dtype=f32
+%446 = add %442 %445
+%447 = bitcast %446 dtype=i32
+%448 = call %103 %447
+%449 = bitcast %448 dtype=f32
+%450 = add %446 %449
+%451 = recip %450
+%452 = mul %426 %451
+%453 = mul %452 1.0
+%454 = store %415 %453
+%455 = after [] %412 %454
+%456 = end %455 %2 %3
+%457 = sink %456 name=moe_softmax_router opts_to_apply=[]

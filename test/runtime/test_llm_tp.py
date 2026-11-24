@@ -128,7 +128,7 @@ class TestTensorParallel(unittest.TestCase):
       if amd_custom_kernels_supported(DEVICES[0]):
         p_ep = Transformer.from_gguf(path, 16, shard=2)[0]
         self.assertEqual(p_ep.blk[0].ffn_gate_exps.weight.uop.axis, 0)
-        with patch("tinygrad.llm.model._slop_uop", return_value=None):
+        with patch("tinygrad.llm.model._llm_kernel_dispatch", return_value=None):
           np.testing.assert_allclose(p_ep.blk[0]._feed_forward(x.shard(DEVICES)).to(Device.DEFAULT).numpy(), ref, atol=2e-2, rtol=2e-2)
 
   def test_axis0_biased_experts_and_sharded_kda(self):

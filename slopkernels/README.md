@@ -21,6 +21,9 @@ print(slopkernels.list_kernels())
 # 2. Compile a kernel or logical op spec into pure tinygrad UIR text (or None if unsupported)
 uir = slopkernels.get("f16_gemv", in_features=128, out_features=64, tokens=1)
 
+# 2b. Manifest-only lookup (returns None on a miss without invoking any builder)
+uir = slopkernels.get("f16_gemv", in_features=128, out_features=64, tokens=1, precompiled=True)
+
 # 3. Compile every registered kernel offline to .uir files (zero GPU required)
 uirs = slopkernels.compile_all("out_uir")
 ```
@@ -69,6 +72,12 @@ DEV=NULL python3 -m slopkernels /tmp/slopkernels_uir
 ls /tmp/slopkernels_uir/*.uir
 ```
 
+### Verify pregenerated manifest offline (regenerates every artifact & checks size + SHA-256)
+
+```bash
+DEV=NULL python3 -m slopkernels --manifest slopkernels/manifest.json
+```
+
 ### Benchmark on AMD GPU (cold-DRAM with 256 MB Infinity Cache flush)
 
 ```bash
@@ -88,7 +97,10 @@ DEV="MOCK+AMD" python3 -m pytest slopkernels/test/ -n12
 ## Layout
 
 - `__init__.py` — narrow public API (`list_kernels`, `get`, `compile_all`) and kernel registry
-- `__main__.py` — offline CLI compiler (`python3 -m slopkernels [out_dir]`)
+- `precompiled.py` — lazy manifest loader and manifest-only UIR lookup (`get(..., precompiled=True)`)
+- `trace.py` — offline-only template tracing utilities (never imported by runtime code)
+- `manifest.json` + `uir/` — 47 canonical pregenerated `gfx1201` UIR artifacts with declared byte sizes and SHA-256 hashes
+- `__main__.py` — offline CLI compiler and manifest generator/verifier (`python3 -m slopkernels --manifest MANIFEST`)
 - `bench.py` — cold-DRAM GPU LLM op benchmark suite (runs in CI on `7900xtx` & `9060xt`)
 - `src/` — pure `UOp` kernel and logical-op builders (`amd.py`, `amd_gguf.py`, `extra.py`, `ops.py`)
-- `test/` — purity/boundary, offline UIR compilation, 2-GPU TP, and AMD numerical tests
+- `test/` — purity/boundary, offline UIR compilation, precompiled manifest, template tracing, 2-GPU TP, and AMD numerical tests

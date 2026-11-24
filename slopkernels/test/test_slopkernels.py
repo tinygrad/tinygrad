@@ -1,7 +1,13 @@
 import ast
+import hashlib
+import json
+import os
 import pathlib
+import subprocess
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 from tinygrad import Device, Tensor, dtypes
@@ -57,11 +63,11 @@ class TestSlopKernelsUIR(unittest.TestCase):
     for name, (_, sample) in slopkernels._REGISTRY.items():
       for k, v in sample.items():
         self.assertTrue(_is_pure_spec(v), f"{name}.{k} must be pure primitive/tuple, got {type(v).__name__}")
-    # 1. Verify slopkernels/__init__.py and slopkernels/src/*.py are 100% pure UOp (no Tensor/Buffer/Device/getenv/realize/numpy)
+    # 1. Verify slopkernels/__init__.py, precompiled.py, trace.py, and src/*.py are 100% pure UOp (no Tensor/Buffer/Device/getenv/realize/numpy)
     pkg_dir = pathlib.Path(slopkernels.__file__).resolve().parent
     forbidden_names = {"Tensor", "Buffer", "Device", "getenv", "nn"}
     forbidden_attrs = {"realize", "numpy", "item"}
-    for p in [pkg_dir / "__init__.py", *(pkg_dir / "src").glob("*.py")]:
+    for p in [pkg_dir / "__init__.py", pkg_dir / "precompiled.py", pkg_dir / "trace.py", *(pkg_dir / "src").glob("*.py")]:
       tree = ast.parse(p.read_text())
       for node in ast.walk(tree):
         if isinstance(node, ast.Name):
@@ -71,25 +77,34 @@ class TestSlopKernelsUIR(unittest.TestCase):
             self.assertNotIn(alias.name, forbidden_names, f"{p.name} must not import {alias.name}")
         elif isinstance(node, ast.Attribute):
           self.assertNotIn(node.attr, forbidden_attrs, f"{p.name} must not call .{node.attr}()")
-    # 2. Verify tinygrad only imports from top-level slopkernels (__all__) and has no llm/slop.py
+    # 1b. Verify offline-only trace.py is NEVER imported by runtime code (tinygrad/, __init__.py, precompiled.py, src/*),
+    #     and precompiled.py NEVER imports slopkernels.src builders.
+    def _imports_module(path:pathlib.Path, mod_prefix:str) -> bool:
+      tree = ast.parse(path.read_text())
+      for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+          if node.module == mod_prefix or node.module.startswith(mod_prefix + "."): return True
+          if node.module == "slopkernels" and any(a.name == mod_prefix.split(".")[-1] for a in node.names): return True
+        elif isinstance(node, ast.Import):
+          if any(a.name == mod_prefix or a.name.startswith(mod_prefix + ".") for a in node.names): return True
+      return False
+    for p in [pkg_dir / "__init__.py", pkg_dir / "precompiled.py", *(pkg_dir / "src").glob("*.py")]:
+      self.assertFalse(_imports_module(p, "slopkernels.trace"), f"runtime file {p.name} must not import slopkernels.trace")
+    self.assertFalse(_imports_module(pkg_dir / "precompiled.py", "slopkernels.src"), "precompiled.py must not import builders")
+    # 2. Verify tinygrad has ZERO imports of slopkernels anywhere (uses pregenerated UIRs in tinygrad/llm/kernels/)
     import tinygrad
     root = pathlib.Path(tinygrad.__file__).resolve().parent
     self.assertFalse((root / "llm" / "slop.py").exists(), "tinygrad/llm/slop.py should not exist")
-    found: list[str] = []
     for p in root.rglob("*.py"):
       txt = p.read_text()
       if "slopkernels" not in txt: continue
-      tree = ast.parse(txt)
-      for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[0] == "slopkernels":
-          self.assertEqual(node.module, "slopkernels", f"{p} must only import from top-level slopkernels")
-          for alias in node.names:
-            self.assertIn(alias.name, slopkernels.__all__, f"{p} imported {alias.name!r} outside narrow API")
-            found.append(alias.name)
-        elif isinstance(node, ast.Import):
-          for alias in node.names:
-            self.assertNotEqual(alias.name.split(".")[0], "slopkernels", f"{p} must import from slopkernels narrow API")
-    if not (root / "llm" / "kernels").exists(): self.assertGreater(len(found), 0)
+      self.assertFalse(_imports_module(p, "slopkernels"), f"{p} must not import slopkernels")
+    # 3. Verify no exported .uir file contains ANSI color escape codes
+    for uir_dir in (pkg_dir / "uir", root / "llm" / "kernels"):
+      uir_files = list(uir_dir.glob("*.uir"))
+      self.assertGreater(len(uir_files), 0, f"expected .uir files in {uir_dir}")
+      for uf in uir_files:
+        self.assertNotIn("\x1b", uf.read_text(encoding="utf-8"), f"ANSI color escape found in {uf}")
 
   def test_compile_all_offline_to_uir(self):
     """Every registered universal slopkernel compiles offline to a .uir file and round-trips to an Ops.SINK with KernelInfo."""
@@ -479,6 +494,167 @@ class TestSlopKernelsUIR(unittest.TestCase):
       ref_fa = q_fa.float().scaled_dot_product_attention(kv_fa[0, :, :, :64].float(), kv_fa[1, :, :, :64].float(),
                                                          attn_mask=mask, enable_gqa=True).numpy()
       np.testing.assert_allclose(got_fa, ref_fa, rtol=5e-3, atol=5e-3)
+
+  def test_precompiled_manifest_lookup_and_lazy_loading(self):
+    """get(..., precompiled=True) lazily loads manifest.json, hits all 47 canonical gfx1201 artifacts,
+    and returns None on misses without ever invoking a builder."""
+    from slopkernels import precompiled
+
+    # 1. Verify lazy loading in a fresh interpreter (importing slopkernels does NOT load manifest.json)
+    env = {**os.environ, "DEV": "NULL"}
+    code = (
+      "import slopkernels; from slopkernels import precompiled; "
+      "assert not precompiled.is_loaded(), 'manifest loaded eagerly on import'; "
+      "u = slopkernels.get('f16_gemv', in_features=128, out_features=64, tokens=1, precompiled=True); "
+      "assert u is not None and precompiled.is_loaded(), 'manifest should load lazily on first precompiled get'"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=False)
+    self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+
+    # 2. Compute expected canonical gfx1201 UIRs, then block EVERY builder in _REGISTRY
+    expected = slopkernels.compile_all(target="gfx1201")
+    self.assertEqual(len(expected), 47)
+    specs = {name: slopkernels._canonical_spec(name, target="gfx1201") for name in slopkernels.list_kernels()}
+    precompiled.clear_cache()
+    self.assertFalse(precompiled.is_loaded())
+
+    def _forbid(*_a:object, **_kw:object) -> str|None: raise AssertionError("builder must not be invoked with precompiled=True")
+    blocked = {name: (_forbid, sample) for name, (_, sample) in slopkernels._REGISTRY.items()}
+    # Preserve signatures on _forbid wrappers? Keep original specs checked via _normalize_spec before lookup:
+    # Wrap each real fn's signature without calling it
+    def _wrap_forbid(fn):
+      def _f(*_a:object, **_kw:object) -> str|None: raise AssertionError(f"builder {fn.__name__} must not be invoked")
+      _f.__wrapped__ = fn
+      return _f
+    blocked = {name: (_wrap_forbid(fn), sample) for name, (fn, sample) in slopkernels._REGISTRY.items()}
+
+    with patch.dict(slopkernels._REGISTRY, blocked, clear=True):
+      for name, spec in specs.items():
+        got = slopkernels.get(name, precompiled=True, **spec)
+        self.assertIsNotNone(got, f"precompiled miss on canonical gfx1201 spec for {name!r}")
+        self.assertEqual(got, expected[name], f"precompiled UIR mismatch for {name!r}")
+      self.assertTrue(precompiled.is_loaded())
+      # Tuple target (12, 0, 1) normalizes to 'gfx1201' and hits
+      dl_spec = dict(specs["dense_linear"], target=(12, 0, 1))
+      self.assertEqual(slopkernels.get("dense_linear", precompiled=True, **dl_spec), expected["dense_linear"])
+      # Default kwarg omission (tokens=1) hits; wrong values / missing required args / unknown kwargs miss without invoking builders
+      self.assertEqual(slopkernels.get("f16_gemv", in_features=128, out_features=64, precompiled=True), expected["f16_gemv"])
+      self.assertIsNone(slopkernels.get("f16_gemv", in_features=256, out_features=64, tokens=1, precompiled=True))
+      self.assertIsNone(slopkernels.get("f16_gemv", in_features=128, out_features=64, tokens=2, precompiled=True))
+      self.assertIsNone(slopkernels.get("f16_gemv", in_features=128, precompiled=True))
+      self.assertIsNone(slopkernels.get("dense_linear", target="gfx1100", srcs=specs["dense_linear"]["srcs"], precompiled=True))
+      self.assertIsNone(slopkernels.get("f16_gemv", in_features=128, out_features=64, tokens=1, unknown_kw=1, precompiled=True))
+      with self.assertRaises(KeyError): slopkernels.get("nonexistent_kernel", precompiled=True)
+
+  def test_manifest_cli_verification(self):
+    """python -m slopkernels --manifest MANIFEST regenerates all 47 artifacts and verifies size + SHA-256."""
+    manifest_path = pathlib.Path(slopkernels.__file__).resolve().parent / "manifest.json"
+    self.assertTrue(manifest_path.is_file())
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    self.assertEqual(data["target"], "gfx1201")
+    self.assertEqual(len(data["artifacts"]), 47)
+
+    env = {**os.environ, "DEV": "NULL"}
+    ok = subprocess.run([sys.executable, "-m", "slopkernels", "--manifest", str(manifest_path)],
+                        env=env, capture_output=True, text=True, check=False)
+    self.assertEqual(ok.returncode, 0, ok.stderr or ok.stdout)
+    self.assertIn("verified 47 artifacts", ok.stdout)
+
+    # Tampered size or sha256 must fail verification
+    with tempfile.TemporaryDirectory() as td:
+      bad_size = pathlib.Path(td) / "bad_size.json"
+      tampered = json.loads(manifest_path.read_text(encoding="utf-8"))
+      tampered["artifacts"][0]["size"] += 1
+      bad_size.write_text(json.dumps(tampered), encoding="utf-8")
+      res = subprocess.run([sys.executable, "-m", "slopkernels", "--manifest", str(bad_size)],
+                           env=env, capture_output=True, text=True, check=False)
+      self.assertNotEqual(res.returncode, 0)
+      self.assertIn("size", res.stderr)
+
+      bad_hash = pathlib.Path(td) / "bad_hash.json"
+      tampered = json.loads(manifest_path.read_text(encoding="utf-8"))
+      tampered["artifacts"][0]["sha256"] = "0" * 64
+      bad_hash.write_text(json.dumps(tampered), encoding="utf-8")
+      res = subprocess.run([sys.executable, "-m", "slopkernels", "--manifest", str(bad_hash)],
+                           env=env, capture_output=True, text=True, check=False)
+      self.assertNotEqual(res.returncode, 0)
+      self.assertIn("sha256", res.stderr)
+
+  def test_offline_template_tracing_and_precompiled_specialization(self):
+    """Offline template tracing builds templated UIR artifacts that verify via --manifest, specialize via
+    precompiled.lookup across multiple concrete shapes/floats, and execute accurately on AMD."""
+    from slopkernels import precompiled
+    from slopkernels.__main__ import verify_manifest
+    from slopkernels.trace import TemplateParam, discover_traceable_params, trace_kernel
+
+    q8_spec = slopkernels._canonical_spec("q8_embed", target="gfx1201")
+    self.assertEqual(discover_traceable_params("q8_embed", q8_spec), ("d", "r", "vocab"))
+    q8_tparams = {
+      "r": TemplateParam("r", dtypes.int32, (1, 128)),
+      "vocab": TemplateParam("vocab", dtypes.int32, (1, 1024)),
+      "d": TemplateParam("d", dtypes.int32, (32, 4096)),
+    }
+    q8_uir = trace_kernel("q8_embed", q8_spec, q8_tparams,
+                          verify_samples=({"r": 4, "vocab": 64, "d": 256}, {"r": 2, "vocab": 16, "d": 128}))
+    self.assertIn("addrspace=TEMPLATE", q8_uir)
+
+    situ_spec = slopkernels._canonical_spec("situ", target="gfx1201")
+    situ_tparams = {
+      "b0": TemplateParam("b0", dtypes.float32, (1e-6, 1e6)),
+      "b1": TemplateParam("b1", dtypes.float32, (1e-6, 1e6)),
+    }
+    situ_uir = trace_kernel("situ", situ_spec, situ_tparams,
+                            verify_samples=({"b0": 4.0, "b1": 4.0}, {"b0": 2.0, "b1": 8.0}))
+    self.assertIn("addrspace=TEMPLATE", situ_uir)
+
+    # Package templated artifacts into a manifest, verify regeneration + hashes, and look up concrete specializations
+    with tempfile.TemporaryDirectory() as td:
+      td_path = pathlib.Path(td)
+      uir_dir = td_path / "uir"
+      uir_dir.mkdir()
+      entries = []
+      for name, spec, tparams, uir in (("q8_embed", q8_spec, q8_tparams, q8_uir), ("situ", situ_spec, situ_tparams, situ_uir)):
+        raw = (uir + "\n").encode("utf-8")
+        (uir_dir / f"{name}.uir").write_bytes(raw)
+        entries.append({
+          "name": name, "target": "gfx1201", "spec": spec,
+          "templates": {k: tp.to_dict() for k, tp in tparams.items()},
+          "path": f"uir/{name}.uir", "size": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
+        })
+      mpath = td_path / "manifest.json"
+      mpath.write_text(json.dumps({"version": 1, "target": "gfx1201", "artifacts": entries}, indent=2) + "\n", encoding="utf-8")
+
+      count, _ = verify_manifest(mpath)
+      self.assertEqual(count, 2)
+
+      # Templated precompiled lookup specializes to multiple concrete values and misses out-of-range values
+      spec_q8_a = precompiled.lookup("q8_embed", {**q8_spec, "r": 2, "vocab": 16, "d": 128}, manifest_path=mpath)
+      spec_q8_b = precompiled.lookup("q8_embed", {**q8_spec, "r": 4, "vocab": 32, "d": 256}, manifest_path=mpath)
+      self.assertIsNotNone(spec_q8_a)
+      self.assertIsNotNone(spec_q8_b)
+      self.assertNotIn("addrspace=TEMPLATE", spec_q8_a or "")
+      self.assertIsNone(precompiled.lookup("q8_embed", {**q8_spec, "r": 9999, "vocab": 16, "d": 128}, manifest_path=mpath))
+
+      spec_situ = precompiled.lookup("situ", {**situ_spec, "b0": 2.0, "b1": 6.0}, manifest_path=mpath)
+      self.assertIsNotNone(spec_situ)
+      self.assertNotIn("addrspace=TEMPLATE", spec_situ or "")
+      self.assertIsNone(precompiled.lookup("situ", {**situ_spec, "b0": -1.0, "b1": 6.0}, manifest_path=mpath))
+
+      # Execute specialized UIRs on AMD if available
+      if _amd_target() is not None:
+        rng = np.random.default_rng(77)
+        raw_u8, _, w_ref = _make_q8_0(rng, 16, 128)
+        ids = Tensor(np.array([3, 11], dtype=np.int32)).realize()
+        assert spec_q8_a is not None
+        got_emb = _run_uir(spec_q8_a, Tensor.empty(2, 128, dtype="float32"), raw_u8, ids)[0].numpy()
+        np.testing.assert_allclose(got_emb, w_ref.half().float().numpy()[[3, 11]], rtol=1e-5, atol=1e-5)
+
+        g_t = Tensor(rng.standard_normal((1, 1, 256)).astype(np.float32)).realize()
+        u_t = Tensor(rng.standard_normal((1, 1, 256)).astype(np.float32)).realize()
+        assert spec_situ is not None
+        got_s = _run_uir(spec_situ, Tensor.empty(1, 1, 256, dtype="float32"), g_t, u_t)[0].numpy()
+        ref_s = ((g_t / 2.0).tanh() * 2.0 * g_t.sigmoid() * (u_t / 6.0).tanh() * 6.0).numpy()
+        np.testing.assert_allclose(got_s, ref_s, rtol=1e-5, atol=1e-5)
 
 
 if __name__ == "__main__":

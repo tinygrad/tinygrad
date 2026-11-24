@@ -1,25 +1,24 @@
 from __future__ import annotations
-import enum, functools, importlib.util, itertools, json, math, pathlib, re
+import enum, functools, itertools, json, math, pathlib, re
 from dataclasses import dataclass, replace
 from typing import Callable
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device, Context
 from tinygrad.llm.gguf import gguf_parse, gguf_shard, GGUFPackedTable, _GGML_QUANT, find_packed
 from tinygrad.llm.hf import hf_load
+from tinygrad.llm.kernels import dispatch as _llm_kernel_dispatch
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.uop.ops import Ops, resolve, smax, ssimplify
-from tinygrad.uop.uir import parse_uir
 from tinygrad.helpers import SLOP, unwrap, round_up, ceildiv, get_child
 
 StartPos = tuple[int|UOp, ...]
 Sublayer = Callable[[Tensor], tuple[Tensor, Tensor|None]]
 
-# ***** optional slopkernels UIR speedups (falls back to pure tinygrad when absent) *****
+# ***** optional pregenerated UIR kernel speedups (falls back to pure tinygrad when disabled/unsupported) *****
 
 _slop_warned = False
 
 @functools.cache
 def _slop_target_cached(device:str|tuple[str, ...]|None) -> tuple[int, ...]|None:
-  if importlib.util.find_spec("slopkernels") is None: return None
   dev = device[0] if isinstance(device, tuple) else device
   if dev is None or dev.split(":")[0] != "AMD": return None
   with Context(ALLOW_DEVICE_USAGE=1):
@@ -31,29 +30,18 @@ def _slop_target(device:str|tuple[str, ...]|None) -> tuple[int, ...]|None:
 
 def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool: return _slop_target(device) is not None
 
-def _slop_desc(s:Tensor|UOp) -> tuple:
-  # Pure, hashable descriptor for slopkernels.get(..., srcs=...):
-  #   Tensor -> (shape, max_shard_shape, axis, dtype_name), symbolic UOp -> (vmin, vmax)
-  if isinstance(s, Tensor):
-    return (tuple(int(d) for d in s.shape), tuple(int(d) for d in s.uop.max_shard_shape), s.uop.axis, s.dtype.name)
-  return (int((u:=s.unbind_all()[0]).vmin), int(u.vmax))
-
-@functools.cache
-def _slop_uop(name:str, target:tuple[int, ...], device:str|tuple[str, ...], srcs:tuple, **attrs) -> UOp|None:
+def _slop(name:str, *srcs:Tensor|UOp, **attrs) -> Tensor|None:
   global _slop_warned
+  dev = srcs[0].device
+  if dev is None or (target:=_slop_target(dev)) is None: return None
   try:
-    from slopkernels import get as slop_uir
-    return None if (uir:=slop_uir(name, target=target, device=device, srcs=srcs, **attrs)) is None else parse_uir(uir)
+    u = _llm_kernel_dispatch(name, target, dev, *(s.uop if isinstance(s, Tensor) else s for s in srcs), **attrs)
+    return None if u is None else Tensor(u)
   except Exception as e:
     if not _slop_warned:
       _slop_warned = True
-      print(f"warning: slopkernels disabled for {name!r} ({type(e).__name__}: {e}); falling back to pure tinygrad")
+      print(f"warning: pregenerated LLM kernels disabled for {name!r} ({type(e).__name__}: {e}); falling back to pure tinygrad")
     return None
-
-def _slop(name:str, *srcs:Tensor|UOp, **attrs) -> Tensor|None:
-  if (target:=_slop_target(dev:=srcs[0].device)) is None: return None
-  if (u:=_slop_uop(name, target, dev, tuple(_slop_desc(s) for s in srcs), **attrs)) is None: return None
-  return Tensor(u.call_with_output(*(s.uop if isinstance(s, Tensor) else s for s in srcs)))
 
 # ***** linear & MoE layers (pure tinygrad math + optional slopkernels speedup) *****
 

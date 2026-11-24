@@ -151,6 +151,20 @@ spec_tensor = PatternMatcher([
    and (buf.arg.device is None or (buf.addrspace is AddrSpace.GLOBAL and is_device(buf.arg.device)))
    and valid_device_range(buf.arg.device, buf.src[1:])),
 
+  # a Template is a named scalar int/float PARAM with slot=-1, AddrSpace.TEMPLATE, no device, no bound val
+  (UPat(Ops.PARAM, name="buf"), lambda buf:
+   buf.arg.slot == -1 and isinstance(buf.arg.name, str) and len(buf.arg.name) > 0 and buf.arg.device is None and buf.arg.val is None
+   and buf.src == (UOp(Ops.STACK),) and (dtypes.is_int(buf.dtype) or dtypes.is_float(buf.dtype))
+   if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.TEMPLATE else None),
+  # PARAM/ALLOC may carry an exact symbolic template size expression before specialization
+  (UPat(Ops.PARAM, src=(UPat(),), name="x"), lambda x:
+   isinstance(x.arg, ParamArg) and x.src[0]._shape == () and dtypes.is_int(x.src[0].dtype) if x.src[0].has_templates else None),
+  (UPat(Ops.ALLOC, src=(UPat(),), allow_any_len=True, name="buf"), lambda buf:
+   isinstance(buf.arg, ParamArg) and buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)
+   and buf.arg.buffer is None and buf.src[0]._shape == () and dtypes.is_int(buf.src[0].dtype)
+   and (buf.arg.device is None or (buf.addrspace is AddrSpace.GLOBAL and is_device(buf.arg.device)))
+   and valid_device_range(buf.arg.device, buf.src[1:]) if buf.src[0].has_templates else None),
+
   # a Variable is a scalar ALU PARAM with a value range and no device
   (UPat(Ops.PARAM, src=(UPat(Ops.STACK, src=()),), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
 
@@ -200,6 +214,8 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
+  # unresolved templates are forbidden in lowered programs
+  (UPat(Ops.PARAM, name="x"), lambda x: False if x.addrspace is AddrSpace.TEMPLATE else None),
   # a bare CONST only appears under its width CAST or as a PARAM/BUFFER/ALLOC size
   (UPat(GroupOp.All-GroupOp.Defines, name="x"), lambda x: False if x.op is not Ops.CAST and any(s.op is Ops.CONST for s in x.src) else None),
   (UPat(GroupOp.All-{Ops.CONST}, dtypes.weaks), lambda: False),
