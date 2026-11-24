@@ -375,10 +375,11 @@ def _make_wmma_dequant(raw:UOp, ggml_type:int, lane_group:UOp, kgroups:int, k_u:
   if ggml_type in (Q4_K, Q5_K):
     def dequant_q5(base:UOp, subgroup:UOp, half:UOp) -> UOp:
       d, dmin, scale, minimum = _q5_scales(raw, base, subgroup, stream=False)
+      ds, dm = d * scale, dmin * minimum
       qs_base = base + (4 if ggml_type == Q4_K else 12) + (subgroup // 2) * 8 + half * 4
       word = (raw[qs_base + w_idx].load() >> ((subgroup & 1) * 4).cast(dtypes.uint32)) & 0x0f0f0f0f
       if ggml_type == Q5_K: word |= ((raw[base + 4 + half * 4 + w_idx].load() >> subgroup.cast(dtypes.uint32)) & 0x01010101) << 4
-      return (((word >> _sh(b_u * 8)) & 255).float() * d * scale - dmin * minimum).cast(dtypes.float16)
+      return (((word >> _sh(b_u * 8)) & 255).float() * ds - dm).cast(dtypes.float16)
     return dequant_q5
   if ggml_type == IQ4_XS:
     assert table is not None
@@ -387,6 +388,26 @@ def _make_wmma_dequant(raw:UOp, ggml_type:int, lane_group:UOp, kgroups:int, k_u:
       pair = table[((raw[base + 2 + subgroup * 4 + w_idx].load() >> _sh(b_u * 8)) & 255).cast(dtypes.weakint)].load()
       return (_half((pair >> _sh(half * 16)) & 0xffff) * scale).cast(dtypes.float16)
     return dequant_iq4
+  if ggml_type == MXFP4:
+    def dequant_mxfp4(base:UOp, subgroup:UOp, half:UOp) -> tuple[UOp, ...]:
+      b_base = base + subgroup * 17
+      e = raw[b_base].cast(dtypes.uint32)
+      small = e < 116
+      # Shift small exponents up by 2^4 (2^-6 scaled e2m1) so subnormal fp16 results stay bit-exact down to e=100.
+      c_lo = small.where(UOp.const(0x26242000, dtypes.uint32), UOp.const(0x36343000, dtypes.uint32))
+      c_hi = small.where(UOp.const(0x2e2c2a28, dtypes.uint32), UOp.const(0x3e3c3a38, dtypes.uint32))
+      sc2 = _e8m0_halved(e + small.where(UOp.const(7, dtypes.uint32), UOp.const(3, dtypes.uint32))).cast(dtypes.half).reshape((1,)).expand((2,))
+      zero_u, sel01, sel23 = UOp.const(0, dtypes.uint32), UOp.const(0x05000400, dtypes.uint32), UOp.const(0x07000600, dtypes.uint32)
+      sh = _sh(half * 4)
+      out_vals: list[UOp] = []
+      for wi in word_indices:
+        pw = _load_u32(raw, b_base, 1 + wi * 4) >> sh
+        fp_bytes = _amd_byte_perm(c_hi, c_lo, pw & 0x07070707) | ((pw & 0x08080808) << 4)
+        v01 = _amd_byte_perm(fp_bytes, zero_u, sel01).reshape((1,)).bitcast(dtypes.half) * sc2
+        v23 = _amd_byte_perm(fp_bytes, zero_u, sel23).reshape((1,)).bitcast(dtypes.half) * sc2
+        out_vals.extend((v01[0], v01[1], v23[0], v23[1]))
+      return tuple(out_vals)
+    return dequant_mxfp4
   def dequant(base:UOp, subgroup:UOp, half:UOp) -> UOp|tuple[UOp, ...]:
     if ggml_type in SMALL_BLOCK_QUANTS: base += subgroup * SMALL_BLOCK_QUANTS[ggml_type]  # eight independent blocks per 256 weights
     if ggml_type == Q8_0:
@@ -507,16 +528,8 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
   tc_axes = (((k_u.arg, frag_k), (m_u.arg, 1)), ((k_u.arg, frag_k), (m_u.arg, 1)), ((k_u.arg, 1), (m_u.arg, rows)))
   wmma = UOp.wmma(a_elem, b_elem, UOp.const((0.0,) * rows, dtypes.float32), WMMA_ARG[0], lanes, tc_upcast_axes=tc_axes)
   res = wmma.reduce(group, half, arg=(Ops.ADD, 0))
-  if kgroups > 1:
-    st = UOp(Ops.STORE, src=(out[(token_block * m_tiles + mt_u) * 16 + lane_group * rows + m_u, output], res.cast(out.dtype)))
-    return st.end(k_u, m_u, mt_u, token_block, output_block, lane).sink(
-      arg=KernelInfo(name=f"linear_{QUANT_NAMES[ggml_type]}_f16_wmma", optimized=True))
-  lds = UOp.alloc((m_tiles, 32, 8), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  lds_r = lds.after(UOp(Ops.STORE, src=(lds[mt_u, lane, m_u], res)).end(k_u, m_u, mt_u))
-  mt_o, i4, j2 = UOp.range(m_tiles, 22, AxisType.UPCAST), UOp.range(4, 23, AxisType.UPCAST), UOp.range(2, 24, AxisType.UPCAST)
-  low = (lane // 16).eq(0)
-  own, peer = lds_r[mt_o, lane, i4 + j2 * 4].load(), lds_r[mt_o, lane ^ 16, i4 + (1 - j2) * 4].load()
-  val = j2.eq(0).where(low.where(own, peer), low.where(peer, own))
-  return out[(token_block * m_tiles + mt_o) * 16 + lane_group * 8 + i4 * 2 + j2, output].store(val.cast(out.dtype)) \
-    .end(i4, j2, mt_o, token_block, output_block, lane).sink(arg=KernelInfo(name=f"linear_{QUANT_NAMES[ggml_type]}_f16_wmma", optimized=True))
+  row_in_tile = lane_group * rows + m_u if kgroups > 1 else m_u * 2 + lane_group
+  st = UOp(Ops.STORE, src=(out[(token_block * m_tiles + mt_u) * 16 + row_in_tile, output], res.cast(out.dtype)))
+  return st.end(k_u, m_u, mt_u, token_block, output_block, lane).sink(
+    arg=KernelInfo(name=f"linear_{QUANT_NAMES[ggml_type]}_f16_wmma", optimized=True))
 
