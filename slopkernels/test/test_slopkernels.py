@@ -94,7 +94,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
   def test_compile_all_offline_to_uir(self):
     """Every registered universal slopkernel compiles offline to a .uir file and round-trips to an Ops.SINK with KernelInfo."""
     with tempfile.TemporaryDirectory() as td:
-      uirs = slopkernels.compile_all(td)
+      uirs = slopkernels.compile_all(td, target=_amd_target())
       self.assertEqual(tuple(sorted(uirs)), slopkernels.list_kernels())
       self.assertGreaterEqual(len(uirs), 40)
       for name, txt in uirs.items():

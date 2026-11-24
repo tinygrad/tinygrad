@@ -15,6 +15,7 @@ Logical-op contract (`dense_linear`, `quant_linear`, `moe_linear`, `flash_attent
 """
 from __future__ import annotations
 
+import inspect
 import pathlib
 from collections.abc import Callable
 from typing import Any
@@ -484,14 +485,24 @@ def get(name:str, /, **spec:Any) -> str|None:
   if name not in _REGISTRY: raise KeyError(f"unknown slopkernel {name!r}; available: {list_kernels()}")
   return _REGISTRY[name][0](**spec)
 
-def compile_all(out_dir:str|pathlib.Path|None=None) -> dict[str, str]:
+def compile_all(out_dir:str|pathlib.Path|None=None, target:str|tuple[int, ...]|None=None) -> dict[str, str]:
   """Compile every registered slopkernel with its canonical spec into pure UIR text (optionally writing `<name>.uir` files)."""
   out: dict[str, str] = {}
   dst = pathlib.Path(out_dir) if out_dir is not None else None
   if dst is not None: dst.mkdir(parents=True, exist_ok=True)
+  ver = _ops.parse_amd_target(target) if target is not None else None
   for name in list_kernels():
     fn, sample = _REGISTRY[name]
-    uir = fn(**sample)
+    spec = dict(sample)
+    if ver is not None:
+      cdna, rdna4 = ver[0] == 9, ver[0] == 12
+      if "target" in spec: spec["target"] = target
+      params = inspect.signature(fn).parameters
+      if "cdna" in params: spec["cdna"] = cdna
+      if "rdna4" in params: spec["rdna4"] = rdna4
+      if "kgroups" in params: spec["kgroups"] = 4 if cdna else 2 if rdna4 else 1
+      if "lanes" in params: spec["lanes"] = 64 if cdna else 32
+    uir = fn(**spec)
     assert uir is not None, f"canonical sample for {name!r} returned None"
     out[name] = uir
     if dst is not None: (dst / f"{name}.uir").write_text(uir + "\n")
