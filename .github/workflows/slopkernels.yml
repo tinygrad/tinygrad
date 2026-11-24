@@ -54,7 +54,7 @@ jobs:
 
   bench:
     name: Benchmarks (${{ matrix.runner }})
-    if: github.repository_owner == 'tinygrad' && github.event_name != 'pull_request'
+    if: github.repository != 'tinygrad/tinygrad' || github.event_name == 'push' || github.event.pull_request.author_association == 'COLLABORATOR'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
