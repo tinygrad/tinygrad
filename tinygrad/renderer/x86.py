@@ -75,7 +75,7 @@ class X86Ops(FastEnum):
   CMOVNE = auto()
   VBLENDVPS = auto(); VBLENDVPD = auto()
   # jumps
-  JNE = auto(); JE = auto(); JGE = auto(); JMP = auto(); JAE = auto()
+  JNE = auto(); JE = auto(); JGE = auto(); JMP = auto()
   # vectorize / gep
   VINSERTPS = auto(); VPSRLDQ = auto()
   VPEXTRW = auto(); VPEXTRD = auto()
@@ -115,7 +115,7 @@ class X86GroupOp:
   ReadFlags = {X86Ops.CMOVNE, X86Ops.SETB, X86Ops.SETL, X86Ops.SETE, X86Ops.SETNE, X86Ops.JNE, X86Ops.JE, X86Ops.JGE}
 
   # X86Ops that jump, their first src is what the LABEL they jump to marks
-  Jump = {X86Ops.JNE, X86Ops.JE, X86Ops.JGE, X86Ops.JMP, X86Ops.JAE}
+  Jump = {X86Ops.JNE, X86Ops.JE, X86Ops.JGE, X86Ops.JMP}
 
   # X86Ops whose first src is the rm field. a TwoAddress op drops its first src post regalloc, so its Rm2nd src ends up first
   Rm1st = {X86Ops.MOV, X86Ops.VMOVSS, X86Ops.VMOVSD, X86Ops.VMOVUPS, X86Ops.MOVZX, X86Ops.MOVSX, X86Ops.MOVSXD, X86Ops.VMOVD, X86Ops.VMOVQ,
@@ -665,7 +665,6 @@ encodings = {
   X86Ops.JNE: lambda x: bytes([0x0F, 0x85]) + int(0).to_bytes(4),
   X86Ops.JE: lambda x: bytes([0x0F, 0x84]) + int(0).to_bytes(4),
   X86Ops.JGE: lambda x: bytes([0x0F, 0x8D]) + int(0).to_bytes(4),
-  X86Ops.JAE: lambda x: bytes([0x0F, 0x83]) + int(0).to_bytes(4),
   X86Ops.JMP: lambda x: bytes([0xE9]) + int(0).to_bytes(4),
   X86Ops.RET: lambda x: bytes([0xC3]),
 }
