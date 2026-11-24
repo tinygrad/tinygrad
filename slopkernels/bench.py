@@ -107,9 +107,12 @@ def _make_packed(rows:int, cols:int, qname:str, dev:str, seed:int=7) -> tuple[Te
     # Bytes in [0x20, 0x37] keep every little-endian f16 header scale finite in ~[0.008, 0.49] across all GGUF block layouts
     tile_np = rng.integers(0x20, 0x38, size=(tile_rows, row_bytes), dtype=np.uint8)
   tile_u8 = Tensor(tile_np, device=dev).realize()
+  np_dt = {dtypes.uint8: np.uint8, dtypes.uint16: np.uint16, dtypes.uint32: np.uint32}[w_dt]
+  tile_w = Tensor(np.ascontiguousarray(tile_np).view(np_dt), device=dev).realize()
   reps = rows // tile_rows
-  full_u8 = tile_u8 if reps == 1 else tile_u8.reshape(1, tile_rows, row_bytes).expand(reps, tile_rows, row_bytes).reshape(-1).contiguous().realize()
-  packed = full_u8.flatten().bitcast(w_dt).contiguous().realize()
+  row_words = row_bytes // w_dt.itemsize
+  if reps == 1: packed = tile_w.flatten().contiguous().realize()
+  else: packed = tile_w.reshape(1, tile_rows, row_words).expand(reps, tile_rows, row_words).reshape(-1).contiguous().realize()
   return packed, tile_u8
 
 def _assert_close(got:np.ndarray, ref:np.ndarray, rtol:float, atol:float) -> None:
