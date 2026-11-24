@@ -263,7 +263,7 @@ class HyperConnection:
 
   def __call__(self, xs:Tensor, sublayer:Sublayer, pre:Tensor|None=None) -> tuple[Tensor, Tensor|None, Tensor|None]:
     """mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb"""
-    if self.pre_delayed and pre is None: pre = Tensor([1.0] + [0.0] * (self.count - 1))
+    if self.pre_delayed and pre is None: pre = Tensor([1.0] + [0.0] * (self.count - 1), device=xs.device)
     if hc_coeffs_supported(flat:=xs.flatten(2), self.count):
       own, post, comb = hc_coeffs(self.fn, flat, self.base["weight"], self.scale["weight"], self.count, self.iters, self.eps, self.norm_eps)
       out, aux = sublayer(weighted_sum(xs, own if pre is None else pre))
@@ -693,13 +693,14 @@ class CompressedAttentionBlock(FFNBlock):
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len if prefix_len == cached_len else 0
 
   def _pools(self, x:Tensor, start_pos:StartPos) -> tuple[Tensor|None, Tensor|None]:  # the pools of the attention and of the indexer
-    if (src:=self.kv_source) is not None:
-      return src.attn_compressor.cache_pools, unwrap(src.indexer).compressor.cache_pools if self.indexer is not None else None
     if not self.ratio: return None, None
-    new_pools = self.attn_compressor.pool(x, start_pos)
-    pools = self.attn_compressor(x, start_pos, self.freqs_cis, new_pools)
-    if self.indexer is None or not self.config.kv_source_layers: return pools, None
-    return pools, self.indexer.compressor(new_pools, (start_pos[0] // self.ratio,), self.freqs_cis[::self.ratio])
+    if self.kv_source is not None:  # v4.1 non-source: read the caches of the source
+      return self.kv_source.attn_compressor.cache_pools, unwrap(self.kv_source.indexer).compressor.cache_pools if self.indexer is not None else None
+    # v4.0: the indexer compresses x on its own
+    if self.indexer is None or not self.config.kv_source_layers: return self.attn_compressor(x, start_pos, self.freqs_cis), None
+    new_pools = self.attn_compressor.pool(x, start_pos)  # v4.1 source: the index keys come from the new pools
+    index_k = self.indexer.compressor(new_pools, (start_pos[0] // self.ratio,), self.freqs_cis[::self.ratio])
+    return self.attn_compressor(x, start_pos, self.freqs_cis, new_pools), index_k
 
   def _attend(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None) -> tuple[Tensor, Tensor|None]:
     assert len(start_pos) == 1, "independent positions are not supported for compressed attention"
@@ -956,7 +957,7 @@ class Transformer:
     num_blocks = kv[f'{arch}.block_count'] - kv.get(f'{arch}.nextn_predict_layers', 0)
     ssm, candidates = None, None
     ssm_layers: tuple[bool, ...] = ()
-    if arch == 'deepseek41':
+    if f'{arch}.attention.indexer.candidate_source_layer' in kv:
       candidates = IndexerCandsConfig(**{k: kv[f'{arch}.attention.indexer.candidate_{k}'] for k in ('source_layer', 'top_k_blocks', 'block_size')})
     if arch in ('qwen35', 'qwen35moe', 'qwen4exp'):
       ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')},
@@ -1029,7 +1030,7 @@ class Transformer:
         tuple(i > 2 and i % 4 != 2 for i in range(num_blocks)) if arch == 'glm-dsa' and kv[f'{arch}.context_length'] >= 1048576 else
         tuple(f'blk.{i}.indexer.attn_q_b.weight' not in state_dict for i in range(num_blocks)) if arch.startswith('deepseek4') else (),
       ple=PLEConfig(tuple(kv[f'{arch}.ple.layers']), ple_entry[1][1], tuple(kv[f'{arch}.ple.layer_multipliers']),
-                    tuple(kv[f'{arch}.ple.head_vocab_sizes']), kv.get(f'{arch}.ple.eos_token_id') or kv[f'{arch}.engram.pad_token_id'],
+                    tuple(kv[f'{arch}.ple.head_vocab_sizes']), kv.get(f'{arch}.ple.eos_token_id', kv.get(f'{arch}.engram.pad_token_id', 0)),
                     kv.get(f'{arch}.ple.conv_kernel', 0), tuple(kv.get(f'{arch}.engram.token_map', ())),
                     cut_at_pad=f'{arch}.ple.eos_token_id' in kv) if ple_entry else None,
       expert_latent_dim=kv.get(f'{arch}.expert_latent_length', 0), attn_res_block_size=kv.get(f'{arch}.attn_res.block_size', 0),
