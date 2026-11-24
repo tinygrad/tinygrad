@@ -737,7 +737,7 @@ class NVDevice(Compiled):
       for i, e in enumerate(sm_errors.smErrorStateArray):
         if e.hwwGlobalEsr or e.hwwWarpEsr: report += [f"SM {i} fault: esr={e.hwwGlobalEsr} warp_esr={e.hwwWarpEsr:#x} warp_pc={e.hwwWarpEsrPc64:#x}"]
 
-    raise RuntimeError("\n".join(report))
+    raise RuntimeError("\n".join(report) or f"{self.device} device hang")
 
   def _prof_init(self):
     self.profiler = self.iface.rm_alloc(self.subdevice, nv_gpu.MAXWELL_PROFILER_DEVICE,

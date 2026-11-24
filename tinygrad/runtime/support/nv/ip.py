@@ -373,7 +373,7 @@ class NV_FLCN_COT(NV_IP):
 
 class NV_GSP(NV_IP):
   def init_sw(self):
-    self.handle_gen, self.chan_runlists = itertools.count(0xcf000000), {}
+    self.handle_gen, self.chan_runlists, self.clients = itertools.count(0xcf000000), {}, []
     self.init_rm_args()
     self.init_libos_args()
     self.init_wpr_meta()
@@ -547,7 +547,9 @@ class NV_GSP(NV_IP):
     self.priv_root = 0xc1e00004
     self.init_golden_image()
 
-  def fini_hw(self): self.rpc_unloading_guest_driver()
+  def fini_hw(self):
+    for c in reversed(self.clients): self.rpc_free(c, c, c)
+    self.rpc_unloading_guest_driver()
 
   ### RPCs
 
@@ -594,7 +596,13 @@ class NV_GSP(NV_IP):
     if hClass == self.compute_class and client != self.priv_root:
       phys_gr_ctx = self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
       self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
+    if hClass == nv_gpu.NV1_ROOT: self.clients.append(client)
     return obj if hClass != nv_gpu.NV1_ROOT else client
+
+  def rpc_free(self, root:int, parent:int, obj:int):
+    free_args = nv.rpc_free_v(params=nv.struct_NVOS00_PARAMETERS_v03_00(hRoot=root, hObjectParent=parent, hObjectOld=obj))
+    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_FREE, bytes(free_args))
+    self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_FREE)
 
   def rpc_rm_control(self, hObject:int, cmd:int, params:Any, client=None, extra=None):
     if cmd == nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES:
