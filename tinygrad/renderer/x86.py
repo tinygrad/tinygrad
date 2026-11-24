@@ -4,7 +4,7 @@ import struct, functools, itertools
 from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype, uopfunc
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype, uopfunc, KernelInfo
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import unwrap, Target
 
@@ -306,7 +306,7 @@ def store_native(opcode:str, base:UOp, index:UOp, displacement:UOp, scale:UOp, v
 
 pm_remove_native = PatternMatcher([
   (UPat(Ops.NATIVE, name="native").call(allow_any_len=True, name="call"),
-   lambda native,call: call.replace(src=(UOp.sink(native.src[0]), *call.src_without_body), arg=replace(call.arg, name=native.arg.code.name.lower()))),
+   lambda native,call: call.replace(src=(native.src[0].sink(arg=KernelInfo(native.arg.code.name.lower())), *call.src_without_body))),
   (UPat(Ops.BUFFER, name="x"), lambda x: UOp.param(0, dtypes.uint64, 1, name="args", addrspace=AddrSpace.REG) if x == RDI else None),
 ])
 
