@@ -92,7 +92,7 @@ def pm4_for(dev:str): return importlib.import_module(f"tinygrad.runtime.autogen.
 def sdma_for(dev:str): return import_module('sdma', (4, 0, 0) if gc_for(dev).version[0] == 9 else (6, 0, 0))
 def xccs_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("xccs", dict(gfx942=8, gfx950=8).get(t.arch, 1))
 def lds_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("lds", dict(gfx950=160).get(t.arch, 64))
-def scratch_waves_for(dev:str) -> UOp: return UOp.extern((), dtypes.uint32, None, to_name(dev, "scratch_waves"))
+def waves_for(dev:str) -> UOp: return UOp.extern((), dtypes.uint32, None, to_name(dev, "scratch_waves"))
 def scratch_wavesize(dev:str, psize:int) -> int: # the scratch of a wave (64 lanes), in units of 256 bytes (1024 on gfx9)
   return ceildiv(max(psize, 128) * 64, 256 if gc_for(dev).version[0] != 9 else 1024)
 
@@ -417,8 +417,7 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
-    self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, waves=scratch_waves_for(self.devs[0]),
-              wavesize=scratch_wavesize(self.devs[0], data.private_segment_size))
+    self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, waves=waves_for(self.devs[0]), wavesize=scratch_wavesize(self.devs[0], data.private_segment_size))
     for xcc_id in range(self.xccs): # architected flat scratch: each xcc gets its part
       with self.pred_exec(xcc_mask=1 << xcc_id):
         self.wreg(self.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, (scratch_addr + data.private_segment_size // self.xccs * xcc_id) >> 8)
@@ -882,8 +881,7 @@ class AMDDevice(Compiled):
     names = ("ring", "write_ptr", "doorbell", "put_value")
     Compiled.link_bufs |= {to_name(self.device, n, q): lambda b, n=n, f=f: getattr(f(), n) for q, f in queues.items() for n in names}
     Compiled.link_bufs |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel())}
-    Compiled.pm_link += PatternMatcher([(UPat(Ops.EXTERN, arg=scratch_waves_for(self.device).arg, name="e"), lambda e, d=self:
-      e.const_like(d.scratch_waves))])
+    Compiled.pm_link += PatternMatcher([(UPat(Ops.EXTERN, arg=waves_for(self.device).arg), lambda d=self: UOp.const(d.scratch_waves, dtypes.u32))])
     if self.is_usb: setup_usb_rules(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
