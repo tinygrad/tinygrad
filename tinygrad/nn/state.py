@@ -229,7 +229,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
 
     if prod(size) and tuple(st for s,st in zip(size, stride) if s != 1) != strides_for_shape(tuple(s for s in size if s != 1)):
       ret = ret.to(None)
-      for s,st in zip(size, stride): ret = ret.unfold(-1, ret.shape[-1]-(s-1)*st, max(st, 1))
+      for s,st in zip(size, stride): ret = ret.unfold(-1, ret.shape[-1]-(s-1)*st, max(st, 1)).expand(*ret.shape[:-1], s, -1)
 
     return ret.reshape(size)
 
