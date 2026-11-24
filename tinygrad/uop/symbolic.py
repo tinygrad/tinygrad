@@ -238,10 +238,10 @@ commutative = PatternMatcher([
 
 def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
   """in cond.where(t, f), cond is True within t and False within f"""
-  if cond not in t.bool_slice and cond not in f.bool_slice: return None
   # INDEX gates are owned by the valid/store-coalescing machinery, leave them alone
   if any(u.op_in_backward_slice_with_self(Ops.INDEX) for u in (cond, t, f)): return None
-  return cond.where(t.substitute({cond: cond.const_like(True)}), f.substitute({cond: cond.const_like(False)}))
+  nt, nf = t.substitute({cond: cond.const_like(True)}), f.substitute({cond: cond.const_like(False)})
+  return None if nt is t and nf is f else cond.where(nt, nf)
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
