@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         arch: ['gfx1100', 'gfx1201']
-    timeout-minutes: 3
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -49,8 +49,8 @@ jobs:
       run: |
         python3 -m ruff check slopkernels/
         python3 -m mypy slopkernels/__init__.py slopkernels/__main__.py slopkernels/bench.py slopkernels/src
-    - name: Compile all slopkernels offline to UIR
-      run: DEV=NULL python3 -m slopkernels /tmp/slopkernels_uir --target ${{ matrix.arch }}
+    - name: Generate all slopkernels UIRs
+      run: DEV=NULL python3 -m slopkernels
     - name: Run slopkernels tests
       run: python3 -m pytest slopkernels/test/ -n=auto -q --durations=10
 
@@ -71,7 +71,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: ['7900xtx', '9060xt']
-    timeout-minutes: 3
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash -e -o pipefail {0}

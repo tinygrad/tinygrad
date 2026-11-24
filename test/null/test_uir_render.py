@@ -48,6 +48,14 @@ class TestSSARender(unittest.TestCase):
     g = UOp.sink(((n + 1) * 2) % 7, (n % 5) + UOp.const(Invalid))
     assert_roundtrip(self, g)
 
+  def test_template_param(self):
+    from tinygrad import Context
+    with Context(SPEC=0):
+      n = UOp.template("N", (1, 64))
+      eps = UOp.template("eps", (0.0, 1.0), dtype=dtypes.float32)
+      p = UOp.param(0, dtypes.float32, (n, 4))
+      assert_roundtrip(self, UOp.sink(p, (n + 1) * 2, eps))
+
   def test_buffer_in_call_body(self):
     b = Tensor.empty(8, device="NULL").realize().uop.buf_uop
     p = UOp.param(0, b.dtype, 8, "NULL")

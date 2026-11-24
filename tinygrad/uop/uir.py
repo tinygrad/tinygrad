@@ -93,7 +93,7 @@ def _render_arg(x:UOp, ref:Callable[[UOp], str|None]=lambda _: None) -> str:
   key = _arg_key.get(x.op, "arg")
   return f"{key}={_val(a, key in _named_keys, ref)}"
 
-def render_uir(root:UOp|list[UOp]) -> str:
+def render_uir(root:UOp|list[UOp], color:bool=True) -> str:
   """one line per UOp: %id = op src src key=value"""
   nodes = [u for u in (root.toposort(enter_calls=True) if isinstance(root, UOp) else root) if not _inline(u)]
   table = {u:i for i,u in enumerate(nodes)}
@@ -104,7 +104,8 @@ def render_uir(root:UOp|list[UOp]) -> str:
   for i,u in enumerate(nodes):
     # a UOp in an arg is its %id if it has an earlier line
     arg = _render_arg(u, lambda v: f"%{table[v]}" if table.get(v, i) < i else None)
-    lines.append(" ".join([f"%{i} = {colored(u.op.name.lower(), uops_colors.get(u.op))}", *map(src_str, u.src)] + ([arg] if arg else [])))
+    op_str = colored(u.op.name.lower(), uops_colors.get(u.op)) if color else u.op.name.lower()
+    lines.append(" ".join([f"%{i} = {op_str}", *map(src_str, u.src)] + ([arg] if arg else [])))
   # an inline root has no line of its own, so it's a literal value
   if isinstance(root, UOp) and _inline(root): lines.append(f"%{len(nodes)} = {src_str(root)}")
   return "\n".join(lines)

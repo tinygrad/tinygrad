@@ -49,7 +49,8 @@ from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphE
 from tinygrad.dtype import dtypes, AddrSpace
 
 
-addrspace_colors = {AddrSpace.ALU: "#AAAAAA", AddrSpace.REG:"#e68181", AddrSpace.LOCAL:"#e7c86a", AddrSpace.GLOBAL:"#75bd7b"}
+addrspace_colors = {AddrSpace.ALU: "#AAAAAA", AddrSpace.REG: "#e68181", AddrSpace.LOCAL: "#e7c86a",
+                    AddrSpace.GLOBAL: "#75bd7b", AddrSpace.TEMPLATE: "#c8a0e0"}
 
 # VIZ API
 
