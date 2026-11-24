@@ -307,6 +307,7 @@ def store_native(opcode:str, base:UOp, index:UOp, displacement:UOp, scale:UOp, v
 pm_remove_native = PatternMatcher([
   (UPat(Ops.NATIVE, name="native").call(allow_any_len=True, name="call"),
    lambda native,call: call.replace(src=(UOp.sink(native.src[0]), *call.src_without_body), arg=replace(call.arg, name=native.arg.code.name.lower()))),
+  (UPat(Ops.BUFFER, name="x"), lambda x: UOp.param(0, dtypes.uint64, 1, name="args", addrspace=AddrSpace.REG) if x == RDI else None),
 ])
 
 GPR_DEST_OPS = {X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI, X86Ops.VMOVDm, X86Ops.VMOVQm}

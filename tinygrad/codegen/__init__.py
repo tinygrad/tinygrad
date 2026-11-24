@@ -10,7 +10,7 @@ from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.uir import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates, TinyELF
-from tinygrad.renderer.x86 import ISARenderer, IselContext, pm_remove_native, RDI
+from tinygrad.renderer.x86 import ISARenderer, IselContext, pm_remove_native
 from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
@@ -508,9 +508,8 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
         from tinygrad.renderer.cstyle import ClangRenderer
         full_sink = graph_rewrite(full_sink, pm_remove_native, name="remove native", bottom_up=True)
         host_renderer = ClangRenderer(replace(renderer.target, device="CPU", renderer="", interface=""))
-        host_renderer.packed_args = False  # X86 already packed the arguments
-        # the packed X86 entry ABI reads its arguments through RDI, expose that register as the host function's argument pointer
-        full_sink = full_sink.substitute({RDI: UOp.param(0, dtypes.uint64, 1, name="args", addrspace=AddrSpace.REG)})
+        # TODO: renderer.packed_args is not idempotent
+        host_renderer.packed_args = False
         return to_program(full_sink, host_renderer).replace(arg=prog_info)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
