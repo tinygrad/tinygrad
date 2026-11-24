@@ -67,15 +67,15 @@ class PythonProgram(Program['PythonDevice']):
           exec_masks.pop()
           i += 1
           continue
+        if u.op is Ops.IF:
+          exec_masks.append([x and y for x,y in zip(exec_masks[-1], src_values[0])])
+          i += 1
+          continue
         if not any(exec_masks[-1]): # NOTE: thread divergence isnt handled
           i += 1
           continue
         if u.op is Ops.BACKEDGE:
           i = self.uop_to_index[u.src[1]] if values[u.src[2]][0] else i+1
-          continue
-        if u.op is Ops.IF:
-          exec_masks.append([x and y for x,y in zip(exec_masks[-1], src_values[0])])
-          i += 1
           continue
         if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.NATIVE) or (u.op is Ops.RANGE and u.dtype == dtypes.void) or u in env \
           or (u.op is Ops.AFTER and u.dtype is dtypes.void):
