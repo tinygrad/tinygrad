@@ -112,6 +112,7 @@ class ExpertWeights:
   """Like Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
   ggml_type:int|None = None
   use_custom_quant = True
+  scale:Tensor|None = None
   weight_scale_inv:Tensor|None = None
   weight_block_size:tuple[int, int] = (128, 128)
   def __init__(self, num_experts:int, in_features:int, out_features:int, bias:bool=False):
@@ -134,6 +135,7 @@ class ExpertWeights:
       ret = fp8_matmul(x.unsqueeze(-2), self.weight[sel], self.weight_scale_inv[sel], self.weight_block_size).squeeze(-2)
     elif self.ggml_type is not None and supported: ret = moe_linear(self, sel, x)
     else: ret = (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
+    if self.scale is not None: ret = ret * self.scale[sel].unsqueeze(-1)
     return ret + self.bias[sel] if hasattr(self, 'bias') else ret
 
 # ******** tiny dense fp16 gemv ********

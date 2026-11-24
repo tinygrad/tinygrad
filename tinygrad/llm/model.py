@@ -870,12 +870,10 @@ class Transformer:
 
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
-    for k in [k for k in state_dict if k.endswith('.scale')]:
-      w = k.removesuffix('scale')+'weight'
-      state_dict[w] = state_dict[w] * state_dict.pop(k).reshape(-1, *(1,)*(state_dict[w].ndim-1))
 
-    # all float state items should be float16, not float32
-    state_dict = {k:v.cast('float16') if getenv("HALF", 1) and dtypes.is_float(v.dtype) else v for k,v in state_dict.items()}
+    # all float state items should be float16, not float32. NVFP4 tensor scales (.scale) stay float32, most are below the float16 normal range
+    state_dict = {k:v.cast('float16') if getenv("HALF", 1) and dtypes.is_float(v.dtype) and not k.endswith('.scale') else v
+                  for k,v in state_dict.items()}
 
     hc = HCConfig(kv[f'{arch}.hyper_connection.count'], kv.get(f'{arch}.hyper_connection.sinkhorn_iterations', 0),
                   kv.get(f'{arch}.hyper_connection.epsilon', 0.0),
@@ -983,7 +981,11 @@ class Transformer:
       o_lora_rank=kv.get(f'{arch}.attention.output_lora_rank', 0), hash_layers=kv.get(f'{arch}.hash_layer_count', 0))
     model = Transformer(config)
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
+    # NVFP4 tensor scales, only the experts take them for now
+    scales = {k.removesuffix('.scale'):state_dict.pop(k) for k in list(state_dict) if k.endswith('.scale')}
+    if (bad:=[k for k in scales if not k.endswith('_exps')]): raise NotImplementedError(f"tensor scale outside the experts: {bad[0]}.scale")
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
+    for k, v in scales.items(): get_child(model, k).scale = v
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())

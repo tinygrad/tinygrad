@@ -261,7 +261,7 @@ class TestGGUF(unittest.TestCase):
                                rope_theta=10000, rope_dim=2, max_context=16, num_experts=4, num_experts_per_tok=2)
     rng = np.random.default_rng(0)
     weights = {k:rng.normal(size=v.shape).astype(np.float32) for k,v in nn.state.get_state_dict(Transformer(config)).items()}
-    scales = {'blk.0.attn_output.scale': np.array([0.25], np.float32), 'blk.0.ffn_down_exps.scale': np.array([1, 2, 3, 4], np.float32)}
+    scales = {'blk.0.ffn_down_exps.scale': np.array([1, 2, 3, 4], np.float32)}
     with tempfile.TemporaryDirectory() as folder:
       writer = GGUFWriter(path:=pathlib.Path(folder)/'model.gguf', 'deepseek2')
       for key,value in {'context_length':16, 'embedding_length':8, 'expert_feed_forward_length':8, 'block_count':1, 'expert_count':4,
@@ -277,10 +277,10 @@ class TestGGUF(unittest.TestCase):
       writer.write_tensors_to_file()
       writer.close()
       with Context(DEV="CPU"):
-        blk = Transformer.from_gguf(path)[0].blk[0]
-      np.testing.assert_allclose(blk.attn_output.weight.numpy(), weights['blk.0.attn_output.weight'] * 0.25, rtol=1e-3)
-      expected = weights['blk.0.ffn_down_exps.weight'] * np.arange(1, 5).reshape(4, 1, 1)
-      np.testing.assert_allclose(blk.ffn_down_exps.weight.numpy(), expected, rtol=1e-3)
+        model = Transformer.from_gguf(path)[0]
+        # the weight stays as stored, the experts apply the scale to their output
+        np.testing.assert_equal(model.blk[0].ffn_down_exps.scale.numpy(), scales['blk.0.ffn_down_exps.scale'])
+        np.testing.assert_allclose(model.blk[0].ffn_down_exps.weight.numpy(), weights['blk.0.ffn_down_exps.weight'], rtol=1e-3)
 
   def test_parse_empty(self):
     blob = self._build_gguf([], [("general.name", "empty")])
