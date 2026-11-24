@@ -2623,6 +2623,10 @@ class TestOps(TensorTestCase):
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=float("inf")),
       lambda x: x.scatter(dim=1, index=a, src=float("inf")), forward_only=True)
 
+    # empty index is a no-op
+    helper_test_op([(3,4)], lambda x: x.scatter(1, torch.zeros(3,0,dtype=torch.int64), 1.0),
+                            lambda x: x.scatter(1, Tensor.zeros(3,0,dtype=dtypes.int32), 1.0), forward_only=True)
+
     # overlapping indices with 0s
     b = torch.tensor([0,0], requires_grad=False)
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32)

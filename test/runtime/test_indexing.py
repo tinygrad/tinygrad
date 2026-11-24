@@ -382,20 +382,18 @@ class TestIndexing(unittest.TestCase):
     result = x[rows[:, None], columns]
     numpy_testing_assert_equal_helper(result.numpy().tolist(), [[0, 2], [9, 11]])
 
-  # TODO jax supports empty tensor indexing
-  @unittest.skip("empty tensor indexing not supported")
   def test_empty_index(self):
     x = Tensor.arange(0, 12).reshape(4, 3)
     idx = Tensor([], dtype=dtypes.int64)
     numpy_testing_assert_equal_helper(x[idx].numel(), 0)
 
-    # TODO empty setitem
-    '''
     # empty assignment should have no effect but not throw an exception
     y = clone(x)
     y[idx] = -1
     numpy_testing_assert_equal_helper(x, y)
 
+    # TODO bool mask setitem
+    '''
     mask = Tensor.zeros(4, 3).cast(dtypes.bool)
     y[mask] = -1
     numpy_testing_assert_equal_helper(x, y)
