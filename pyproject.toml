@@ -18,6 +18,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 include-package-data = true
 packages = [
+  'slopkernels',
+  'slopkernels.src',
   'tinygrad',
   'tinygrad.codegen',
   'tinygrad.codegen.decomp',
@@ -137,7 +139,7 @@ debug = true
 
 [tool.mypy]
 warn_unused_configs = true
-files = ["tinygrad", "test/mockgpu"]
+files = ["tinygrad", "test/mockgpu", "slopkernels/__init__.py", "slopkernels/__main__.py", "slopkernels/bench.py", "slopkernels/src"]
 ignore_missing_imports = true
 check_untyped_defs = true
 explicit_package_bases = true
