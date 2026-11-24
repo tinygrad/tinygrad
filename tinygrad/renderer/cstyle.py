@@ -3,7 +3,7 @@ import math
 from collections import defaultdict, Counter
 from tinygrad.renderer import tc, Renderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters, promo_dtype
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, all_same, Target, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_storage_scalar
 
 base_rewrite = PatternMatcher([
@@ -61,8 +61,8 @@ base_rewrite = PatternMatcher([
   # alu/gep
   (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{_wmma_name(x)}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
-    *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} and (i == 0 or x.dtype not in dtypes.sints)
-       else ctx[v] for i,v in enumerate(x.src)]), x.dtype)),
+    *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} and
+       (i == 0 or x.dtype not in dtypes.sints+dtypes.floats) else ctx[v] for i,v in enumerate(x.src)]), x.dtype)),
 
   # call native code or an external function by symbol: the NATIVE body names the callee, the srcs are the args and set the types
   (UPat(Ops.CALL, src=(UPat(Ops.NATIVE, name="f"),), allow_any_len=True, name="x"), lambda ctx,x,f:
@@ -294,6 +294,19 @@ class ClangRenderer(CStyleLanguage):
   barrier = "__atomic_thread_fence(__ATOMIC_SEQ_CST);"
   buffer_suffix = " restrict"
   type_map = {**CStyleLanguage.type_map, dtypes.bool:"_Bool", dtypes.f16:"__fp16"}
+  string_rewrite = PatternMatcher([
+    # C casts on ext_vector_type bitcast; __builtin_convertvector converts lane-wise
+    (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})"
+     if x.max_numel() > 1 and x.addrspace is AddrSpace.ALU else None),
+    (UPat((Ops.SQRT, Ops.TRUNC), name="x"), lambda ctx,x: f"__builtin_elementwise_{x.op.name.lower()}({ctx[x.src[0]]})"
+     if x.max_numel() > 1 else None),
+    (UPat(Ops.STACK, name="x"), lambda ctx,x: f"(({ctx.render_type(x)})({ctx[x.src[0]]}))" if len(x.src) > 1 and all_same(x.src) else None),
+    # vector comparisons return -1/0 int masks; convert to/from _Bool vectors for WHERE
+    (UPat(GroupOp.Comparison, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx.code_for_op[x.op](*[ctx[s] for s in x.src], x.dtype)}, "
+     f"{ctx.render_type(x)})" if x.max_numel() > 1 else None),
+    (UPat(Ops.WHERE, name="x"), lambda ctx,x: f"((-__builtin_convertvector({ctx[x.src[0]]}, __typeof__(({ctx.render_type(x)}){{}}<"
+     f"({ctx.render_type(x)}){{}})))?{ctx[x.src[1]]}:{ctx[x.src[2]]})" if x.src[0].max_numel() > 1 else None),
+  ]) + base_rewrite
   code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [Ops.EXP2, Ops.SIN, Ops.LOG2, Ops.RECIP]}),
                  Ops.SQRT: lambda x,dtype: f"__builtin_sqrt({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
                  Ops.TRUNC: lambda x,dtype: f"__builtin_trunc({x})" if dtype == dtypes.float64 else f"__builtin_truncf({x})",
@@ -304,10 +317,8 @@ class ClangRenderer(CStyleLanguage):
     + pm_narrow_uint + create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
 
   def render_vector_prefix(self, dt:DType, count:int) -> str:
-    # round (down) to power of two (this is actually the default clang behavior)
-    alignment = dt.itemsize if self.target.device == "CPU" else (2**int(math.log2(dt.itemsize * count)) if not dtypes.is_bool(dt) else 1)
     vec = self._render_dtype(dt, count, AddrSpace.REG)
-    return f"typedef {self.render_dtype(dt)} {vec} __attribute__((aligned({alignment}),ext_vector_type({count})));"
+    return f"typedef {self.render_dtype(dt)} {vec} __attribute__((aligned({dt.itemsize}),ext_vector_type({count})));"
 
   def _render_defines(self, uops) -> list[str]: return [self.render_vector_prefix(dt, count) for dt, count in uops_to_dtypes(uops) if count > 1]
   def _render_body(self, function_name, kernel, bufs, uops, pref=None) -> str: return super().render_kernel(function_name, kernel, bufs, uops, pref)

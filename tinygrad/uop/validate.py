@@ -1,5 +1,5 @@
 from typing import Callable
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, python_alu, range_str
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, python_alu, range_str, graph_rewrite
 from tinygrad.dtype import dtypes, Invalid
 from tinygrad.helpers import cpu_profile
 import z3
@@ -82,16 +82,25 @@ z3_renderer = PatternMatcher([
   (UPat(GroupOp.ALU, name="x"), lambda x,ctx: python_alu[x.op](*(ctx[1][s] for s in x.src))),
 ])
 
+pm_vec_lane = PatternMatcher([
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="v"), UPat.var("c"))),
+   lambda v,c: v.src[c.vmin] if c.vmin == c.vmax and isinstance(c.vmin, int) and 0 <= c.vmin < len(v.src) else None),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.ALU|{Ops.CAST, Ops.BITCAST}, name="v"), UPat.var("c"))),
+   lambda v,c: v.replace(src=tuple(s if not s._shape else UOp(Ops.INDEX, src=(s, c)) for s in v.src))
+     if v._shape and v.ndim == 1 and all(not s._shape or s._shape == v._shape for s in v.src) else None),
+])
+
 def uops_to_z3(solver:z3.Solver, *uops: UOp) -> list[z3.ExprRef]:
+  sink = graph_rewrite(UOp.sink(*uops), pm_vec_lane, name="z3 vector lanes")
   # gate on upstream memory addressing, but keep INDEX as an unknown LOAD
-  lst = list(UOp.sink(*uops).toposort(gate=lambda x: x.op not in {Ops.SHRINK, Ops.ALLOC, Ops.BUFFER}
-                                      and (x.dtype in dtypes.ints+(dtypes.bool, dtypes.weakint) or x.op is Ops.SINK)))[:-1]
+  lst = list(sink.toposort(gate=lambda x: x.op not in {Ops.SHRINK, Ops.ALLOC, Ops.BUFFER}
+                           and (x.dtype in dtypes.ints+(dtypes.bool, dtypes.weakint) or x.op is Ops.SINK)))[:-1]
   z3map: dict[UOp, z3.ExprRef] = {}
   for u in lst:
     if (z3_rewritten:=z3_renderer.rewrite(u, ctx=(solver, z3map))) is None: raise NotImplementedError(f"{u.op} is not supported by z3")
     z3map[u] = z3_wrap(u, z3_rewritten)
-  assert all(u in z3map for u in uops), "UOp failed to rewrite to z3!"
-  return [z3map[u] for u in uops]
+  assert all(u in z3map for u in sink.src), "UOp failed to rewrite to z3!"
+  return [z3map[u] for u in sink.src]
 
 def validate_index_with_z3(sz:int, idx:UOp, gate:UOp) -> bool:
   solver = z3.Solver(ctx=z3.Context())

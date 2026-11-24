@@ -143,6 +143,12 @@ class TestDTypeALU(unittest.TestCase):
   def test_bfloat16(self, a, b, op):
     universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(b, dtypes.bfloat16), dtypes.bfloat16, op)
 
+  @Context(EMULATED_DTYPES="half")
+  def test_emulated_float16_padded_window(self):
+    x = np.arange(1, 9, dtype=np.float16)
+    out = sum(Tensor(x).pad(((2,2),))[i:i+8] for i in range(5)).numpy()
+    np.testing.assert_equal(out, sum(np.pad(x.astype(np.float32), 2)[i:i+8] for i in range(5)))
+
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
   @Context(EMULATED_DTYPES="bfloat16")
   def test_emulated_bfloat16(self, a, b, op):

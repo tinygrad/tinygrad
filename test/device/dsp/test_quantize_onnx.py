@@ -43,7 +43,8 @@ def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
   prg = to_program(replace_opts(call.src[0], opts), renderer=Device[Device.DEFAULT].renderer)
   if replace_src is not None:
     old_name = prg.src[2].arg.split("__attribute__((noinline)) void ")[1].split("(")[0]
-    new_src = replace_src + "/* DSP boilerplate */" + prg.src[2].arg.split("/* DSP boilerplate */")[1].replace(old_name, "fxn")
+    entry = (src:=prg.src[2].arg)[src.index("/* DSP boilerplate */" if "/* DSP boilerplate */" in src else "void kernel_run("):]
+    new_src = replace_src + "\n" + entry.replace(old_name, "fxn")
     # drop BINARY and replace SOURCE so run_linear recompiles
     prg = prg.replace(src=prg.src[:2] + (UOp(Ops.SOURCE, arg=new_src),))
   linear = linear.replace(src=linear.src[:-1] + (call.replace(src=(prg, *call.src[1:])),))

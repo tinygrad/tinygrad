@@ -1,8 +1,8 @@
-import itertools
+import itertools, math
 from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, graph_rewrite, _substitute, range_start, AxisType, identity_element
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import partition, dedup
+from tinygrad.helpers import partition, dedup, prod
 from tinygrad.dtype import dtypes
 
 def flatten_range(r:UOp) -> UOp|None:
@@ -158,4 +158,53 @@ pm_load_collapse = PatternMatcher([
   (UPat(Ops.REDUCE, arg=(Ops.ADD, 0), src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse
   ((UPat.var("x", dtypes.weakint)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
+])
+
+# **** quantized integer math ****
+
+def int_factors(u:UOp, rngs:tuple[UOp, ...]) -> tuple[list[UOp], list[UOp]]|None:
+  if u.op is Ops.CAST and dtypes.is_int(u.src[0].dtype) and dtypes.is_float(u.dtype) and not u.src[0].overflows(dtypes.int32):
+    return [u.src[0].cast(dtypes.int32)], []
+  if not any(r in u.ranges for r in rngs): return [], [u]
+  if u.op is Ops.MUL and (a:=int_factors(u.src[0], rngs)) is not None and (b:=int_factors(u.src[1], rngs)) is not None: return a[0]+b[0], a[1]+b[1]
+  if u.op is Ops.WHERE and u.src[2].op is Ops.CONST and u.src[2].arg == 0 and (f:=int_factors(u.src[1], rngs)) is not None and f[0]:
+    return [u.src[0].where(f[0][0], 0)]+f[0][1:], f[1]
+  return None
+
+def int_reduce(red:UOp) -> UOp|None:
+  # lift float sum of int products into int32 when it fits
+  if (f:=int_factors(red.src[0], red.src[1:])) is None or not f[0]: return None
+  if prod(max(abs(x.vmin), abs(x.vmax)) for x in f[0]) * prod(r.vmax+1 for r in red.src[1:]) >= 2**31: return None
+  return UOp.uprod(UOp.uprod(*f[0]).reduce(*red.src[1:], arg=red.arg).cast(red.dtype), *f[1])
+
+def int_bound(x:UOp) -> int:
+  if x.op is Ops.REDUCE and x.arg[0] is Ops.ADD: return int_bound(x.src[0]) * prod(int(r.vmax+1) for r in x.src[1:])
+  b = max(abs(int(x.vmin)), abs(int(x.vmax)))
+  if x.op is Ops.ADD: return min(b, int_bound(x.src[0]) + int_bound(x.src[1]))
+  if x.op is Ops.MUL: return min(b, int_bound(x.src[0]) * int_bound(x.src[1]))
+  return min(b, int_bound(x.src[0])) if x.op is Ops.CAST and dtypes.is_int(x.src[0].dtype) and not x.src[0].overflows(x.dtype) else b
+
+def requantize(x:UOp) -> UOp|None:
+  # fixed-point cast(sum(int_i * c_i) + k, sint) via int64 mulhi
+  def flat(t:UOp, c:float) -> list[tuple[UOp, float]]:
+    if t.op is Ops.ADD: return flat(t.src[0], c) + flat(t.src[1], c)
+    return flat(t.src[0], c*t.src[1].arg) if t.op is Ops.MUL and t.src[1].op is Ops.CONST else [(t, c)]
+  terms: list[tuple[UOp, int, float]] = []
+  k = 0.0
+  for t, c in flat(x.src[0], 1.0):
+    if t.op is Ops.CAST and dtypes.is_int((i:=t.src[0]).dtype) and 0 < (b:=int_bound(i)) < 2**31: terms.append((i.int(), 30-b.bit_length(), c))
+    elif t.op is Ops.CONST: k += t.arg * c
+    else: return None
+  if not terms or not math.isfinite(k + sum(c for _,_,c in terms)) or (max_m:=max(abs(c)*2**-p for _,p,c in terms)) == 0: return None
+  if (F:=min(-1 - math.frexp(max_m)[1], 30)) < 0: return None
+  err = (len(terms)*1.125 + 0.5)*2**-F + sum((2**-p - 1)*abs(c) for _,p,c in terms if p < 0)
+  if err > 2**-10 or len(terms)*2**29 + abs(k)*2**F + 1 >= 2**31: return None
+  hi = UOp.usum(*[(((a*2**p if p >= 0 else a >> -p).cast(dtypes.int64) * round(c*2**(F+32-p))) >> 32).cast(dtypes.int32) for a,p,c in terms])
+  return ((hi + round(k*2**F)) >> F).cast(x.dtype)
+
+pm_int_reduce = PatternMatcher([
+  (UPat(Ops.REDUCE, arg=(Ops.ADD, 0), dtype=dtypes.floats, name="red"), int_reduce),
+  # clamped >= 0 so arithmetic right-shift floor matches float->int truncation
+  (UPat(Ops.CAST, dtype=dtypes.sints, src=(UPat(Ops.ADD, dtype=dtypes.floats),), name="x").maximum(UPat.cvar("c")),
+   lambda x,c: r.maximum(c) if c.arg >= 0 and (r:=requantize(x)) is not None else None),
 ])

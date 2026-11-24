@@ -117,7 +117,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       assert len(u.src) == (2 if u.op is Ops.STORE else 1), "memory coalescing does not support gated loads/stores"
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
-      if buf.addrspace == AddrSpace.REG: continue
+      if buf.addrspace == AddrSpace.REG and not ctx.vector_lanes: continue
       if buf.buf_uop.op is Ops.PARAM and buf.buf_uop.arg.volatile: continue # volatile accesses never merge
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
       if idx.is_invalid: continue
@@ -136,8 +136,8 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     # allowed lengths (copied in)
     lengths = []
     must_divide = True
-    if ctx.target.device == "DSP":
-      lengths = [128,64,32,16,8,4]
+    if ctx.vector_lanes and buf.dtype != dtypes.bool:
+      lengths = [1 << i for i in range(ctx.vector_lanes.bit_length()-1, 1, -1)]
       must_divide = False
     elif buf.dtype in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and ctx.supports_float4:
       # TODO: a better way to get this than ctx

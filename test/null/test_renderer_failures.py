@@ -33,6 +33,12 @@ class TestCStyleFailures(unittest.TestCase):
 
   def test_repeat_sub(self): self._test_src_strip_paren(Ops.SUB, should_strip_paren=False)
 
+  def test_float_chain_in_right_src(self):
+    ret = Tensor.empty(1)
+    for _ in range(5): ret = Tensor.empty(1) * (ret * Tensor.empty(1))
+    linear, _ = check_schedule(ret, 1)
+    self.assertGreaterEqual(to_program(linear.src[0].src[0], Device[Device.DEFAULT].renderer).src[2].arg.count("*("), 5)
+
 class TestWGSLFailures(unittest.TestCase):
   def test_folded_packed_store(self):
     b = UOp.param(0, dtypes.char, 4)

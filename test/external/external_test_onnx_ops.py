@@ -515,7 +515,7 @@ class TestContribOnnxOps(TestOnnxOps):
 
     base_inps = {
       "input": np.random.randn(batch_size, seq_len, input_hidden_size).astype(np.float32),
-      "weights": np.random.randn(input_hidden_size, hidden_size * 3).astype(np.float32),
+      "weights": (np.random.randn(input_hidden_size, hidden_size * 3) / np.sqrt(input_hidden_size)).astype(np.float32),
       # bias is required in ORT (segfaults otherwise), eventhough docs says it's optional
       "bias": np.random.randn(hidden_size * 2 + v_hidden_size).astype(np.float32),
     }
@@ -535,7 +535,7 @@ class TestContribOnnxOps(TestOnnxOps):
       # e.g. mask_index = [[0, 0, 1, 0, 1, 1, 1, 1], [0, 0, 1, 0, 1, 1, 1, 1]]
       # will need mask[:, :, 0:1, 0:1] = True
       ({"mask_index": np.array([[1, 0, 1, 0, 1, 1, 1, 1], [1, 0, 1, 0, 1, 1, 1, 1]], dtype=np.int32)}, {"unidirectional": 1}),
-      ({ "weights": np.random.randn(input_hidden_size, hidden_size + hidden_size + 128).astype(np.float32),
+      ({ "weights": (np.random.randn(input_hidden_size, hidden_size + hidden_size + 128) / np.sqrt(input_hidden_size)).astype(np.float32),
          "bias": np.random.randn(hidden_size + hidden_size + 128).astype(np.float32)},
        {"qkv_hidden_sizes": [hidden_size, hidden_size, 128]}),
       # TODO: past is not tested. ORT gives type error for input
