@@ -623,6 +623,17 @@ class TestCallInKernel(unittest.TestCase):
     x = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
     self.assertEqual(Tensor.empty_like(x).custom_kernel(x, fxn=kernel)[0].tolist(), [1, 3, 5, 7])
 
+  def test_call_value(self):
+    @uopfunc
+    def add(a:UOp, b:UOp) -> UOp: return UOp.sink(a+b)
+
+    def kernel(out:UOp, src:UOp) -> UOp:
+      i = UOp.range(src.shape[0], 0)
+      return out[i].store(add(src[i], 3)).end(i).sink(arg=KernelInfo(name="call_value", opts_to_apply=()))
+
+    x = Tensor([1, 2, 3, 4], dtype=dtypes.int).realize()
+    self.assertEqual(Tensor.empty_like(x).custom_kernel(x, fxn=kernel)[0].tolist(), [4, 5, 6, 7])
+
   def test_call_with_gated_store(self):
     @uopfunc
     def gated_store(out:UOp, idx:UOp):

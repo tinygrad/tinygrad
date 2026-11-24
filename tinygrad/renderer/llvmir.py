@@ -2,7 +2,7 @@ import struct
 from tinygrad.renderer import tc, Renderer
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast, fp8_index, amd_fp8s
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str, call_return_value
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
 from tinygrad.helpers import prod, Target
 
@@ -16,6 +16,9 @@ def ldt(dt:DType, count=1, ptr=False):
           dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double"}[dt]
 
 def lparam(u:UOp) -> str: return ldt(u.dtype, ptr=u.addrspace not in (None, AddrSpace.ALU)) # an external function's arg, an index is its address
+def lret(body:UOp) -> str:
+  ret = call_return_value(body)
+  return "void" if ret.dtype is dtypes.void else ldt(ret.dtype, ret.max_numel())
 
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
@@ -168,11 +171,11 @@ class LLVMRenderer(Renderer):
     super().__init__(target)
     self.extra_matcher = create_non_native_float_pats((dtypes.bfloat16,))+ \
       pm_manual_bf16_cast+pm_widen_uidx if target.arch != "gfx950" else pm_widen_uidx
-  def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None) -> str:
+  def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None, ret="void") -> str:
     # Buffer views may start at an offset from the aligned allocation.
     tys = [ldt(u.dtype, ptr=u.addrspace != AddrSpace.ALU) for _,u in args]
     sargs = ", ".join(f"{t}{' noalias' if u.addrspace == AddrSpace.GLOBAL else ''} {name}" for t,(name,u) in zip(tys, args))
-    return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
+    return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} {ret} @{name}({sargs}) #0", "{"] + kernel + ["}"])
   def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None, name="test") -> tuple[tuple[str, ...], str]:
     r: dict[UOp, str] = {}
     args: list[tuple[str, UOp]] = []
@@ -205,7 +208,10 @@ class LLVMRenderer(Renderer):
       elif u.op is Ops.BINARY: r[u] = f"@bin_{u.key.hex()}"
       elif u.op is Ops.CALL and u.body.op is Ops.PROGRAM:
         call_args = ', '.join(f'{lparam(p)} {r[u.src[p.arg.slot+1]]}' for p in u.body.arg.params)
-        kernel.append(f"  call void @{u.body.src[0].arg.function_name}({call_args})")
+        if u.dtype is not dtypes.void:
+          vc += 1
+          r[u] = f"%v{vc}"
+        kernel.append(f"  {'' if u.dtype is dtypes.void else r[u] + ' = '}call {lret(u.body)} @{u.body.src[0].arg.function_name}({call_args})")
       elif u.op is Ops.CAST and u.src[0].op is Ops.CONST: r[u] = lconst(u.src[0].val, u.dtype)
       elif (u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype)) or (u.op is Ops.BITCAST and u.addrspace not in (None, AddrSpace.ALU)):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
@@ -218,7 +224,9 @@ class LLVMRenderer(Renderer):
         if l is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(l)
-    return tuple(local_args), self._render_fn(name, args, kernel, prefix)
+    ret = call_return_value(uops[-1])
+    kernel.append("  ret void" if ret.dtype is dtypes.void else f"  ret {lret(uops[-1])} {r[ret]}")
+    return tuple(local_args), self._render_fn(name, args, kernel, prefix, lret(uops[-1]))
 
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
@@ -230,7 +238,8 @@ class CPULLVMRenderer(LLVMRenderer):
   def _render_footer(self, uops: list[UOp]) -> str:
     decls = {x.body.arg.code: f"declare {ldt(x.dtype)} @{x.body.arg.code}({', '.join(map(lparam, x.src[1:]))})"
              for x in uops if x.op is Ops.CALL and x.body.op is Ops.NATIVE}
-    decls |= {x.body.src[0].arg.function_name: f"declare void @{x.body.src[0].arg.function_name}({', '.join(map(lparam, x.body.arg.params))})"
+    decls |= {x.body.src[0].arg.function_name: f"declare {lret(x.body)} @{x.body.src[0].arg.function_name}("
+                                                f"{', '.join(map(lparam, x.body.arg.params))})"
               for x in uops if x.op is Ops.CALL and x.body.op is Ops.PROGRAM}
     blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '", align 16'
              for x in uops if x.op is Ops.BINARY}

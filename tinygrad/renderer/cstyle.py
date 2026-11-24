@@ -2,7 +2,7 @@ from typing import Literal, Callable
 import math
 from collections import defaultdict, Counter
 from tinygrad.renderer import tc, Renderer
-from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters, promo_dtype
+from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters, promo_dtype, call_return_value
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_storage_scalar
 
@@ -72,11 +72,12 @@ base_rewrite = PatternMatcher([
 
   # call to PROGRAM links BINARY at runtime
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body:
-   f"{body.src[0].arg.function_name}({', '.join(ctx[x.src[p.arg.slot+1]] for p in body.arg.params)});"),
+   f"{body.src[0].arg.function_name}({', '.join(f'({ctx.param_type(p)})({ctx[x.src[p.arg.slot+1]]})' for p in body.arg.params)})" +
+   (";" if x.dtype is dtypes.void else "")),
 
   # call to LINEAR renders the call in SOURCE
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="body"),), allow_any_len=True, name="x"), lambda ctx,x,body: f"{body.arg}("
-   f"{', '.join(ctx[x.src[p.arg.slot+1]] for p in body.src if p.op is Ops.PARAM)});"),
+   f"{', '.join(ctx[x.src[p.arg.slot+1]] for p in body.src if p.op is Ops.PARAM)})" + (";" if x.dtype is dtypes.void else "")),
 ])
 
 # C promotes uchar and ushort to int, WGSL holds them in u32 and PTX holds uchar in u16, so the ops that wrap compute in uint and narrow after
@@ -165,7 +166,8 @@ class CStyleLanguage(Renderer):
                        (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
-    prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
+    kernel_typedef = self.kernel_typedef.replace("void", self.render_return_type(uops[-1]))
+    prg = ''.join([f"{kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
@@ -196,6 +198,8 @@ class CStyleLanguage(Renderer):
 
   def render_type(self, u:UOp):
     return self._render_dtype(u.dtype, u.max_numel(), u.addrspace, shape=u._shape, override_ptr=u.op is Ops.INDEX and u.addrspace is AddrSpace.REG)
+  def render_return_type(self, body:UOp):
+    return "void" if (ret:=call_return_value(body)).dtype is dtypes.void else self.render_type(ret)
   def render_ptr(self, u:UOp):
     # the address of an access, vector-cast if the access reads/writes more lanes than the pointer's scalar type
     if u.max_numel() > 1 or u.dtype != u.src[0].dtype:
@@ -231,6 +235,7 @@ class CStyleLanguage(Renderer):
         continue
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
+        if (ret:=call_return_value(u)).dtype is not dtypes.void: kernel.append(f"{'  '*depth}return {r[ret]};")
         continue
       if u.op is Ops.PARAM:
         r[u] = (u.arg.name.replace(":", "_") if u.arg.name is not None else f"data{u.arg.slot}") + \
@@ -275,8 +280,10 @@ class CStyleLanguage(Renderer):
                    and not (u.body.op is Ops.NATIVE and u.body.arg.fmt))
     inlines = {b:self._render(list(b.src)) for b in bodies if b.op is Ops.LINEAR}
     prefix = [f"extern void {b.arg.code}();" if b.op is Ops.NATIVE else
-              f"extern void {b.src[0].arg.function_name}({', '.join(self.param_type(p) for p in b.arg.params)});" if b.op is Ops.PROGRAM else
-              f"static inline {self.inline_prefix} void {b.arg}({', '.join(f'{self.param_type(p)} {n}' for n,(p,_) in inlines[b][2])}) {{\n" +
+              f"extern {self.render_return_type(b)} {b.src[0].arg.function_name}("
+              f"{', '.join(self.param_type(p) for p in b.arg.params)});" if b.op is Ops.PROGRAM else
+              f"static inline {self.inline_prefix} {self.render_return_type(b)} {b.arg}("
+              f"{', '.join(f'{self.param_type(p)} {n}' for n,(p,_) in inlines[b][2])}) {{\n" +
               '\n'.join(inlines[b][1]) + "\n}" for b in bodies]
     return self.render_kernel(*self._render(uops), uops+[u for b in inlines for u in b.src], prefix or None)
 
