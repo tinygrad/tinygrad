@@ -1201,8 +1201,11 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
-  def native(code:Any, src:UOp|None=None, shape:tuple[sint, ...]=(), dtype:DType=dtypes.void, fmt:bool=False) -> UOp:
-    return UOp(Ops.NATIVE, src=(src if src is not None else UOp.param(-1, dtype, shape),), arg=NativeInfo(code, fmt=fmt))
+  def native(code:Any, src:UOp|None=None, shape:tuple[sint, ...]|None=None, dtype:DType|None=None, fmt:bool=False) -> UOp:
+    if shape is not None or dtype is not None:
+      assert src is None, f"native either receives src or {dtype=} and {shape=}"
+      src = UOp.param(-1, dtype or dtypes.void, shape or ())
+    return UOp(Ops.NATIVE, src=(src,), arg=NativeInfo(code, fmt=fmt))
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, inline:bool=False, hcq:HCQInfo|None=None) -> UOp:
