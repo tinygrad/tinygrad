@@ -97,34 +97,6 @@ def scratch_wavesize(dev:str, psize:int) -> int: # the scratch of a wave (64 lan
   return ceildiv(max(psize, 128) * 64, 256 if gc_for(dev).version[0] != 9 else 1024)
 def se_for(dev:str) -> int: return Device.target_for(dev).get("se", 0)
 
-def pmc_enabled() -> bool: return PROFILE > 0 and PMC > 0
-def sqtt_enabled() -> bool: return PROFILE > 0 and SQTT > 0
-def prof_enabled() -> bool: return pmc_enabled() or sqtt_enabled()
-def prof_slots() -> int: return getenv("PROF_SLOTS", 32)
-def sqtt_win() -> int: return (getenv("SQTT_BUFFER_SIZE", 256) << 20) // prof_slots() # mb, per shader engine
-
-def pmc_sched_for(dev:str) -> list[tuple[PMCSample, AMDReg, int]]:
-  t, gc, xccs = Device.target_for(dev), gc_for(dev), xccs_for(dev)
-  counters, gfx9, end_off, sched = import_pmc(t.arch), gc.version[0] == 9, 0, []
-  # validate counters: SQ for SIMD busy/instruction counts, LDS stats, GRBM for GPU cycles, L2 cache hits/misses
-  l2, lds = ("TCC", "SQ") if gfx9 else ("GL2C", "SQC")
-  pmc_default = f"SQ_BUSY_CYCLES,SQ_INSTS_VALU,SQ_INSTS_SALU,{lds}_LDS_IDX_ACTIVE,{lds}_LDS_BANK_CONFLICT,GRBM_GUI_ACTIVE,{l2}_HIT,{l2}_MISS"
-  block2pid:dict[str, itertools.count] = collections.defaultdict(lambda: itertools.count())
-  for name in getenv("PMC_COUNTERS", pmc_default).split(","):
-    if name not in counters: raise RuntimeError(f"PMC counter {name} is not supported. Available: {','.join(counters.keys())}")
-    block, idx = counters[name]
-    # sq block on gfx11+ goes down to wgps
-    inst_cnt, se_cnt, sa_cnt, wgp_cnt = {"GRBM": (1, 1, 1, 1), "GL2C": (32, 1, 1, 1), "TCC": (16, 1, 1, 1),
-      "SQ": (1, se_for(dev)) + ((1, 1) if gfx9 else (2, t.get("cu_per_sa", 0) // 2))}[block]
-    end_off += (rec_size:=prod((xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
-
-    # gfx11+ and later require even-numbered SQ *_SELECT registers
-    regsample = f'reg{block}_PERFCOUNTER{(pcid:=next(block2pid[block]))}'
-    if (regsel:=getattr(gc, (f'reg{block}_PERFCOUNTER{(pcid*2) if not gfx9 and block=="SQ" else pcid}_SELECT'), None)) is None:
-      raise RuntimeError(f'{block} is out of perfcounter registers: ({regsample} is not found)')
-    sched.append((PMCSample(name, block, xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt, end_off-rec_size, rec_size, regsample), regsel, idx))
-  return sched
-
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
 def dispatch_packet(data:AMDProgramData, dims:tuple, kernel_object:UOp=UOp.const(0, dtypes.uint64),
@@ -142,8 +114,9 @@ class AMDComputeQueue(HWQueue):
     self.pm4, self.gc, self.xccs, self.se_cnt = pm4_for(self.devs[0]), gc_for(self.devs[0]), xccs_for(self.devs[0]), se_for(self.devs[0])
     self.soc = import_soc(self.gc.version)
     self.profiled:list[UOp] = []
-    self.pmc_sched = pmc_sched_for(self.devs[0]) if pmc_enabled() else []
-    if pmc_enabled(): self.pmc_start()
+    self.pmc, self.sqtt, self.slots = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0, getenv("PROF_SLOTS", 32)
+    self.pmc_sched = self.pmc_schedule(self.devs[0]) if self.pmc else []
+    if self.pmc: self.pmc_start()
 
   def pkt3(self, cmd, *vals): self.q(self.pm4.PACKET3(cmd, _dw(vals) - 1), *vals)
 
@@ -223,25 +196,46 @@ class AMDComputeQueue(HWQueue):
   def prof_buf(self, name:str, dtype:DType, size:int) -> UOp: return UOp.extern((size,), dtype, self.devs[0], name)
 
   def prof_start(self, info:ProgramInfo, lib:UOp) -> UOp:
-    log = self.prof_buf("prof_log", dtypes.uint64, 1 + prof_slots())
-    slot = (log.index(0).load() + len(self.profiled)) % prof_slots()
+    log = self.prof_buf("prof_log", dtypes.uint64, 1 + self.slots)
+    slot = (log.index(0).load() + len(self.profiled)) % self.slots
     self.profiled.append(log.index(1 + slot.cast(dtypes.int)).store(UOp.const(unwrap_view(lib)[0].arg.slot, dtypes.uint64)))
-    if sqtt_enabled():
+    if self.sqtt:
       self.sqtt_start(slot)
       self.sqtt_setup_exec(info)
     return slot
 
   def prof_stop(self, slot:UOp):
     self.exec_barrier()
-    if pmc_enabled(): self.pmc_read(slot)
-    if sqtt_enabled(): self.sqtt_stop(slot)
+    if self.pmc: self.pmc_read(slot)
+    if self.sqtt: self.sqtt_stop(slot)
 
   def prof_bump(self, cmdbuf:UOp) -> UOp:
     if not self.profiled: return cmdbuf
-    log = self.prof_buf("prof_log", dtypes.uint64, 1 + prof_slots())
+    log = self.prof_buf("prof_log", dtypes.uint64, 1 + self.slots)
     return cmdbuf.after(log.after(cmdbuf, *self.profiled).index(0).store(log.index(0).load() + len(self.profiled)))
 
   ### PMC
+
+  @staticmethod
+  def pmc_schedule(dev:str) -> list[tuple[PMCSample, AMDReg, int]]: # each counter's sample, select register and event
+    t, gc, xccs, gfx9 = Device.target_for(dev), gc_for(dev), xccs_for(dev), gc_for(dev).version[0] == 9
+    # validate counters: SQ for SIMD busy/instruction counts, LDS stats, GRBM for GPU cycles, L2 cache hits/misses
+    counters, (l2, lds), end_off, sched = import_pmc(t.arch), ("TCC", "SQ") if gfx9 else ("GL2C", "SQC"), 0, []
+    pmc_default = f"SQ_BUSY_CYCLES,SQ_INSTS_VALU,SQ_INSTS_SALU,{lds}_LDS_IDX_ACTIVE,{lds}_LDS_BANK_CONFLICT,GRBM_GUI_ACTIVE,{l2}_HIT,{l2}_MISS"
+    block2pid:dict[str, itertools.count] = collections.defaultdict(itertools.count)
+    for name in getenv("PMC_COUNTERS", pmc_default).split(","):
+      if name not in counters: raise RuntimeError(f"PMC counter {name} is not supported. Available: {','.join(counters.keys())}")
+      block, idx = counters[name]
+      # sq block on gfx11+ goes down to wgps
+      inst_cnt, se_cnt, sa_cnt, wgp_cnt = {"GRBM": (1, 1, 1, 1), "GL2C": (32, 1, 1, 1), "TCC": (16, 1, 1, 1),
+        "SQ": (1, se_for(dev)) + ((1, 1) if gfx9 else (2, t.get("cu_per_sa", 0) // 2))}[block]
+      end_off += (rec_size:=prod((xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
+      # gfx11+ and later require even-numbered SQ *_SELECT registers
+      regsample = f'reg{block}_PERFCOUNTER{(pcid:=next(block2pid[block]))}'
+      if (regsel:=getattr(gc, (f'reg{block}_PERFCOUNTER{(pcid*2) if not gfx9 and block=="SQ" else pcid}_SELECT'), None)) is None:
+        raise RuntimeError(f'{block} is out of perfcounter registers: ({regsample} is not found)')
+      sched.append((PMCSample(name, block, xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt, end_off-rec_size, rec_size, regsample), regsel, idx))
+    return sched
 
   def pmc_reset_counters(self, en=True):
     self.set_grbm()
@@ -261,8 +255,8 @@ class AMDComputeQueue(HWQueue):
     self.pmc_reset_counters(en=True)
 
   def pmc_read(self, slot:UOp):
-    pmc_size, wgp_mask = (last:=self.pmc_sched[-1][0]).off + last.size, Device.target_for(self.devs[0]).get("wgp_mask", -1)
-    buf = self.prof_buf("pmc_buf", dtypes.uint8, pmc_size * prof_slots()).getaddr(self.devs) + slot * pmc_size
+    pmc_size, wgp_mask = sum(smp.size for smp, _, _ in self.pmc_sched), Device.target_for(self.devs[0]).get("wgp_mask", -1)
+    buf = self.prof_buf("pmc_buf", dtypes.uint8, pmc_size * self.slots).getaddr(self.devs) + slot * pmc_size
     self.set_grbm()
     self.wreg(self.gc.regCP_PERFMON_CNTL if self.gc.version[0] <= 11 else self.gc.regCP_PERFMON_CNTL_1, perfmon_state=1, perfmon_sample_enable=1)
 
@@ -308,8 +302,8 @@ class AMDComputeQueue(HWQueue):
 
   def sqtt_start(self, slot:UOp):
     self.memory_barrier()
-    win, ses = sqtt_win(), self.se_cnt * self.xccs
-    base = self.prof_buf("sqtt_buf", dtypes.uint8, win * prof_slots() * ses).getaddr(self.devs) + slot * win
+    win, ses = (getenv("SQTT_BUFFER_SIZE", 256) << 20) // self.slots, self.se_cnt * self.xccs
+    base = self.prof_buf("sqtt_buf", dtypes.uint8, win * self.slots * ses).getaddr(self.devs) + slot * win
     if self.gc.version[0] == 9:
       self.set_grbm()
       self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, simd_en=0xf, cu_sel=0, sq_stall_en=1, spi_stall_en=1, reg_stall_en=1, vm_id_mask=0)
@@ -318,7 +312,7 @@ class AMDComputeQueue(HWQueue):
              | (__SQTT_USERDATA:=1<<12) | (__SQTT_REG_CS:=1<<5) | (__SQTT_REG_CS_PRIV:=1<<15)
         if (SQTT_ITRACE_SE_MASK.value >> se) & 0b1: mask |= (__SQTTINST:=1<<10) | (__SQTT_INST_PC:=1<<11) | (__SQTT_ISSUE:=1<<13)
 
-        buf0_lo, buf0_hi = [((base + se * prof_slots() * win) >> sh).cast(dtypes.uint32) for sh in (12, 44)]
+        buf0_lo, buf0_hi = [((base + se * self.slots * win) >> sh).cast(dtypes.uint32) for sh in (12, 44)]
         with self.pred_exec(xcc_mask=1<<(se // self.se_cnt)):
           self.set_grbm(se=se % self.se_cnt, sh=0)
           self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_mask=0xf, token_mask=mask)
@@ -334,7 +328,7 @@ class AMDComputeQueue(HWQueue):
       for se in range(ses):
         self.set_grbm(se=se, sh=0)
 
-        buf0_lo, buf0_hi = [((base + se * prof_slots() * win) >> sh).cast(dtypes.uint32) for sh in (12, 44)]
+        buf0_lo, buf0_hi = [((base + se * self.slots * win) >> sh).cast(dtypes.uint32) for sh in (12, 44)]
         if self.gc.version >= (12,0,0):
           self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, size=win >> 12)
           self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE_LO, buf0_lo)
@@ -375,7 +369,7 @@ class AMDComputeQueue(HWQueue):
     self.memory_barrier()
     self.set_grbm()
     ses = self.se_cnt * self.xccs
-    wptrs = self.prof_buf("sqtt_wptrs", dtypes.uint32, prof_slots() * ses).getaddr(self.devs) + slot * (ses * 4)
+    wptrs = self.prof_buf("sqtt_wptrs", dtypes.uint32, self.slots * ses).getaddr(self.devs) + slot * (ses * 4)
 
     # Start shutting everything down
     if self.gc.version[0] == 9: self.wreg(self.gc.regSQ_THREAD_TRACE_MODE, mask_cs=1, autoflush_en=1, mode=0)
@@ -427,7 +421,7 @@ class AMDComputeQueue(HWQueue):
       **({'cs_w32_en': int(data.wave32)} if self.gc.version[0] != 9 else {}), force_start_at_000=1, compute_shader_en=1)
     if data.private_segment_size: self.exec_barrier() # kernels share the scratch ring, each with its own TMPRING wave size
     self.acquire_mem(gli=0, gl2=0)
-    if prof_enabled(): slot = self.prof_start(prg.arg, lib)
+    if self.pmc or self.sqtt: slot = self.prof_start(prg.arg, lib)
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
@@ -441,8 +435,8 @@ class AMDComputeQueue(HWQueue):
     global_size, local_size = prg.arg.launch_dims(call)
     self.wreg(self.gc.regCOMPUTE_START_X, 0, 0, 0, *local_size, 0, 0)
     self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *global_size, dispatch_init)
-    if sqtt_enabled(): self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
-    if prof_enabled(): self.prof_stop(slot)
+    if self.sqtt: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
+    if self.pmc or self.sqtt: self.prof_stop(slot)
 
   def exec_barrier(self):
     self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
@@ -489,12 +483,12 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
   def exec(self, call:UOp, prg:UOp):
     data, lib = amd_build_program(prg, self.devs)
     self.deps += (UOp.extern((data.private_segment_size,), dtypes.uint8, self.devs[0], "scratch"),) # the queue descriptor holds the scratch
-    if prof_enabled(): slot = self.prof_start(prg.arg, lib)
+    if self.pmc or self.sqtt: slot = self.prof_start(prg.arg, lib)
     self.close_run(len(self.blob))
     pkt = dispatch_packet(data, prg.arg.launch_dims(call), lib.getaddr(self.devs) + data.desc_offset, self.kernargs(call, prg, data))
     self.pkts += [UOp.const(w, dtypes.uint32) if isinstance(w, int) else w for w in pkt]
     self.run_start = len(self.blob)
-    if prof_enabled(): self.prof_stop(slot)
+    if self.pmc or self.sqtt: self.prof_stop(slot)
 
   def submit(self, cmdbuf:UOp) -> UOp: # the doorbell is the last packet's index
     self.close_run(cmdbuf.max_numel())
@@ -902,11 +896,11 @@ class AMDDevice(Compiled):
     if self.is_usb: setup_usb_rules(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
-    self.pmc_enabled, self.sqtt_enabled, self.prof_enabled = pmc_enabled(), sqtt_enabled(), prof_enabled()
+    self.pmc_enabled, self.sqtt_enabled, self.prof_enabled = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0, PROFILE > 0 and (PMC > 0 or SQTT > 0)
     if self.prof_enabled:
       self.iface.require_profile_mode()
-      self.prof_slots, self.prof_read = prof_slots(), 0
-      self.sqtt_ses, self.sqtt_win = self.se_cnt * self.xccs, sqtt_win()
+      self.prof_slots, self.prof_read = getenv("PROF_SLOTS", 32), 0
+      self.sqtt_ses, self.sqtt_win = self.se_cnt * self.xccs, (getenv("SQTT_BUFFER_SIZE", 256) << 20) // self.prof_slots # mb, per shader engine
       Compiled.link_bufs |= {to_name(self.device, n): lambda b, n=n: getattr(self, n) for n in ("prof_log", "pmc_buf", "sqtt_buf", "sqtt_wptrs")}
 
     # the pf resets a vf that holds its init access for 20s: set up every queue now and hand it back
@@ -991,7 +985,7 @@ class AMDDevice(Compiled):
   @functools.cached_property
   def prof_log(self) -> Buffer: return self._prof_buffer(1 + self.prof_slots, dtypes.uint64)
   @functools.cached_property
-  def pmc_sched(self) -> list[PMCSample]: return [smp for smp, _, _ in pmc_sched_for(self.device)]
+  def pmc_sched(self) -> list[PMCSample]: return [smp for smp, _, _ in AMDComputeQueue.pmc_schedule(self.device)]
   @property
   def pmc_size(self) -> int: return self.pmc_sched[-1].off + self.pmc_sched[-1].size
   @functools.cached_property

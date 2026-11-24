@@ -28,7 +28,6 @@ PMA = ContextVar("PMA", abs(VIZ.value)>=2)
 GPFIFO_ENTRIES = 0x10000
 SHARED_MEM_WINDOW, LOCAL_MEM_WINDOW = 0x729400000000, 0x729300000000 # set windows addresses to not collide with other allocated buffers
 
-def pma_enabled() -> bool: return PMA.value > 0 and PROFILE >= 1
 def sm_version_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("sm_version", dict(sm_89=0x809, sm_100=0xa00, sm_120=0xa04).get(t.arch, 0))
 
 @dataclass(frozen=True)
@@ -190,7 +189,7 @@ class NVComputeQueue(NVQueue):
       self.nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, *hilo(lmem.getaddr(self.devs)))
       self.nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, *data64(self.lmem_per_tpc), 0xff)
     if self.prev_qmd is None:
-      if pma_enabled(): self.nvm(1, nv_gpu.NVC6C0_PM_TRIGGER, 0)
+      if PMA.value > 0 and PROFILE >= 1: self.nvm(1, nv_gpu.NVC6C0_PM_TRIGGER, 0)
       self.nvm(1, nv_gpu.NVC6C0_SEND_PCAS_A, (qmd_addr >> 8).cast(dtypes.uint32))
       self.nvm(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B_PCAS_ACTION_PREFETCH_SCHEDULE)
     else: self.prev_qmd.write(dependent_qmd0_pointer=qmd_addr >> 8, dependent_qmd0_action=1, dependent_qmd0_prefetch=1, dependent_qmd0_enable=1)
@@ -621,7 +620,7 @@ class NVDevice(Compiled):
     super().__init__(device, NVAllocator(self), None, arch=self.arch, props={"sm_version": self.sm_version, "gpcs": self.num_gpcs,
                      "tpc_per_gpc": self.num_tpc_per_gpc, "sm_per_tpc": self.num_sm_per_tpc, "warps_per_sm": self.max_warps_per_sm})
 
-    self.pma_enabled, self.pma_exec_counter = pma_enabled(), itertools.count(0)
+    self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 
     queues, names = ("COMPUTE:0", "COPY:0", "ENCDEC:0"), ("ring", "gpput", "doorbell", "put_value")
     bufs = ("local_mem", "vid_coloc", "vid_filter", "vid_stat")
