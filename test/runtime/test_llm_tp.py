@@ -3,9 +3,8 @@ import numpy as np
 from gguf import GGUFWriter, GGMLQuantizationType as Q, GGML_QUANT_SIZES
 from tinygrad import Device, Tensor, Variable, nn
 from tinygrad.helpers import DEV
-from tinygrad.llm.model import Transformer, TransformerConfig, SSMConfig
+from tinygrad.llm.model import Transformer, TransformerConfig, SSMConfig, Linear, ExpertWeights, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_load, gguf_parse, gguf_shard, ggml_data_to_tensor
-from tinygrad.llm.kernels.amd import Linear, ExpertWeights, amd_custom_kernels_supported
 from test.helpers import needs_devices
 
 DEVICES = (Device.DEFAULT, f"{Device.DEFAULT}:1")
@@ -93,6 +92,66 @@ class TestTensorParallel(unittest.TestCase):
       ref = single.blk[0]._feed_forward(x).numpy()
       out = parallel.blk[0]._feed_forward(x.shard(DEVICES)).to(Device.DEFAULT).numpy()
       np.testing.assert_allclose(out, ref, atol=2e-3, rtol=2e-3)
+
+  def test_moe_ep_fallback_without_slopkernels(self):
+    # Down-projection dim=256 with Q4_K (block=256) cannot split across 2 devices -> ep=True; with SLOP=0 it must replicate instead of asserting.
+    from tinygrad import Context
+    with tempfile.TemporaryDirectory() as folder:
+      config = TransformerConfig(num_blocks=1, dim=256, hidden_dim=256, n_heads=4, n_kv_heads=4, norm_eps=1e-5,
+        vocab_size=32, head_dim=64, v_head_dim=64, rope_theta=10000, rope_dim=64, max_context=16,
+        num_experts=4, num_experts_per_tok=2)
+      writer = GGUFWriter(path:=pathlib.Path(folder)/'model.gguf', 'deepseek2')
+      for key,value in {'context_length':16, 'embedding_length':256, 'expert_feed_forward_length':256, 'block_count':1,
+                        'attention.head_count':4, 'attention.head_count_kv':4, 'attention.key_length':64,
+                        'rope.dimension_count':64, 'expert_count':4, 'expert_used_count':2}.items(): writer.add_uint32('deepseek2.'+key, value)
+      writer.add_float32('deepseek2.rope.freq_base', 10000)
+      writer.add_float32('deepseek2.attention.layer_norm_rms_epsilon', 1e-5)
+      writer.add_array('tokenizer.ggml.tokens', [str(i) for i in range(32)])
+      rng = np.random.default_rng(7)
+      for name,weight in nn.state.get_state_dict(Transformer(config)).items():
+        if name.endswith('_exps.weight'): writer.add_tensor(name, random_data(weight.shape, Q.Q4_K, seed=7), raw_dtype=Q.Q4_K)
+        else:
+          value = rng.normal(1, .1, weight.shape) if name.endswith('norm.weight') else rng.normal(0, .05, weight.shape)
+          writer.add_tensor(name, value.astype(np.float32))
+      write_gguf(writer)
+      with Context(SLOP=0):
+        single, parallel = Transformer.from_gguf(path, 16)[0], Transformer.from_gguf(path, 16, shard=2)[0]
+        block = parallel.blk[0]
+        self.assertEqual((block.ffn_gate_exps.weight.uop.axis, block.ffn_up_exps.weight.uop.axis, block.ffn_down_exps.weight.uop.axis),
+                         (None, None, None))
+        x = Tensor(rng.normal(size=(1, 2, config.dim)).astype(np.float32)).realize()
+        ref = single.blk[0]._feed_forward(x).numpy()
+        out = parallel.blk[0]._feed_forward(x.shard(DEVICES)).to(Device.DEFAULT).numpy()
+        np.testing.assert_allclose(out, ref, atol=2e-2, rtol=2e-2)
+      # Already-split axis-0 experts must also fall back cleanly if the provider rejects or errors on moe_linear.
+      from unittest.mock import patch
+      if amd_custom_kernels_supported(DEVICES[0]):
+        p_ep = Transformer.from_gguf(path, 16, shard=2)[0]
+        self.assertEqual(p_ep.blk[0].ffn_gate_exps.weight.uop.axis, 0)
+        with patch("tinygrad.llm.model._slop_uop", return_value=None):
+          np.testing.assert_allclose(p_ep.blk[0]._feed_forward(x.shard(DEVICES)).to(Device.DEFAULT).numpy(), ref, atol=2e-2, rtol=2e-2)
+
+  def test_axis0_biased_experts_and_sharded_kda(self):
+    # 1. Biased axis-0 split experts must not count projection bias once per device.
+    E, O, I = shape = (4, 8, 256)
+    raw = Tensor(np.zeros((E, O, I // 256 * 144), dtype=np.uint8).reshape(-1), device='CPU')
+    layer = ExpertWeights(E, I, O, bias=True)
+    layer.weight = gguf_shard({'w': (raw, shape, Q.Q4_K)}, DEVICES, {'w': 0})['w'].half()
+    layer.bias = Tensor.ones(E, O).shard(DEVICES).realize()
+    sel = Tensor(np.array([[[0, 2]]], dtype=np.int32)).shard(DEVICES).realize()
+    x = Tensor.ones(1, 1, 1, I, dtype='float16').shard(DEVICES).realize()
+    got = layer(sel, x)
+    if got.ndim == 5: got = got.sum(0)
+    np.testing.assert_allclose(got.to(Device.DEFAULT).numpy(), 1.0, rtol=1e-4, atol=1e-4)
+    # 2. Head-sharded KDA inputs must be rejected by gated_delta_prefill_op (not dispatched with global head count).
+    from tinygrad.llm.model import _slop
+    q = Tensor.zeros(1, 2, 1, 32).shard(DEVICES, 1).realize()
+    k = Tensor.zeros(1, 2, 1, 32).shard(DEVICES, 1).realize()
+    v = Tensor.zeros(1, 2, 1, 32).shard(DEVICES, 1).realize()
+    beta = Tensor.zeros(1, 2, 1).shard(DEVICES, 1).realize()
+    alpha = Tensor.ones(1, 2, 1, 32).shard(DEVICES, 1).realize()
+    state = Tensor.zeros(1, 2, 32, 32).shard(DEVICES, 1).realize()
+    self.assertIsNone(_slop("gated_delta_prefill_op", q, k, v, beta, alpha, state))
 
   def test_quantized_linear(self):
     # the AMD kernels on the packed shards: decode (1 token) and WMMA (16 tokens), output and input features split
