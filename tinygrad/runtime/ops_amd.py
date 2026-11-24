@@ -416,8 +416,8 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
-    self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, waves=UOp.variable(to_name(self.devs[0], "scratch_waves"), 0, 0xfff, dtypes.uint32),
-              wavesize=scratch_wavesize(self.devs[0], data.private_segment_size))
+    waves = UOp.extern((), dtypes.uint32, None, to_name(self.devs[0], "scratch_waves"))
+    self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, waves=waves, wavesize=scratch_wavesize(self.devs[0], data.private_segment_size))
     for xcc_id in range(self.xccs): # architected flat scratch: each xcc gets its part
       with self.pred_exec(xcc_mask=1 << xcc_id):
         self.wreg(self.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, (scratch_addr + data.private_segment_size // self.xccs * xcc_id) >> 8)
@@ -876,12 +876,12 @@ class AMDDevice(Compiled):
     # Scratch setup
     self.max_private_segment_size = 0
     self.scratch_waves = (self.iface.props['max_slots_scratch_cu'] * self.cu_cnt // (self.se_cnt if self.target[0] != 9 else 1)) & 0xfff
-    self.var_vals = {to_name(self.device, "scratch_waves"): self.scratch_waves}
     # the ring and its pointers of every queue it can make, made on first use
     queues = {"COMPUTE:0": lambda: self.compute_queue} | {f"COPY:{i}": functools.partial(self.sdma_queue, i) for i in range(8)}
     names = ("ring", "write_ptr", "doorbell", "put_value")
     Compiled.link_bufs |= {to_name(self.device, n, q): lambda b, n=n, f=f: getattr(f(), n) for q, f in queues.items() for n in names}
-    Compiled.link_bufs |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel())}
+    Compiled.link_bufs |= {to_name(self.device, "scratch"): lambda b: self.scratch_buffer(b.max_numel()),
+                           to_name(self.device, "scratch_waves"): self.scratch_waves}
     if self.is_usb: setup_usb_rules(self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)

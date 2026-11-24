@@ -542,6 +542,7 @@ def resolve_extern(ctx:LinkCtx, b:UOp) -> UOp:
     a = ctx.inputs[b.arg.slot]
     return UOp.const(a.arg.val, b.dtype) if a.is_bound_var else a
   owned = Compiled.link_bufs[b.arg.name if b.arg.name in Compiled.link_bufs else to_name(b.device, b.arg.name)]
+  if isinstance(owned, int): return UOp.const(owned, b.dtype)
   return UOp.from_buffer(owned if isinstance(owned, Buffer) else owned(b), b.dtype, HCQ_RUNTIME_DEV.device)
 
 def resolve_getaddr(ctx:LinkCtx, g:UOp) -> UOp|None:
