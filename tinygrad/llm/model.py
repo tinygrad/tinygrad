@@ -26,48 +26,44 @@ def _slop_target_cached(device:str|tuple[str, ...]|None) -> tuple[int, ...]|None
   if dev is None or dev.split(":")[0] != "AMD": return None
   with Context(ALLOW_DEVICE_USAGE=1):
     t = getattr(Device[dev], "target", None)
-    return tuple(int(x) for x in t) if t is not None and isinstance(Device[dev].renderer, HIPRenderer) else None
+    return tuple(int(x) for x in t) if t is not None and t[0] in (9, 11, 12) and isinstance(Device[dev].renderer, HIPRenderer) else None
 
-def _slop_target(device:str|tuple[str, ...]|None) -> tuple[int, ...]|None:
-  return _slop_target_cached(device) if SLOP else None
-
+def _slop_target(device:str|tuple[str, ...]|None) -> tuple[int, ...]|None: return _slop_target_cached(device) if SLOP else None
 def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool: return _slop_target(device) is not None
+
+def _sh(shp:tuple[int, ...], axis:int|None, div:int) -> tuple[int, ...]: return tuple(s // div if i == axis else s for i, s in enumerate(shp))
 
 def _spec_kernel(name:str, **kw:int|float) -> UOp|None:
   global _slop_warned
   try: return None if (u := _load_kernel(name)) is None else u.specialize(**kw)
   except Exception as e:
-    if not _slop_warned:
-      _slop_warned = True
-      print(f"warning: pregenerated LLM kernels disabled for {name!r} ({type(e).__name__}: {e}); falling back to pure tinygrad")
+    if not _slop_warned: print(f"warning: LLM kernels disabled for {name!r} ({type(e).__name__}: {e}); falling back to pure tinygrad")
+    _slop_warned = True
     return None
 
-def _kcall(name:str, out_shape:tuple[int, ...], device:str|tuple[str, ...]|None, *args:Tensor|UOp,
-           axis:int|None=None, **kw:int|float) -> Tensor|None:
+def _kcall(name:str, shp:tuple[int, ...], dev:str|tuple[str, ...]|None, *args:Tensor|UOp, axis:int|None=None, **kw:int|float) -> Tensor|None:
   if (k := _spec_kernel(name, **kw)) is None: return None
-  out = UOp.alloc(out_shape, dtypes.float32, device=device, axis=axis)
-  return Tensor(out.after(k.call(out, *(a.uop if isinstance(a, Tensor) else a for a in args))))
+  return Tensor((o := UOp.alloc(shp, dtypes.float32, device=dev, axis=axis)).after(k.call(o, *(a.uop if isinstance(a, Tensor) else a for a in args))))
 
-def _q8_quantize(x:Tensor, tokens:int, in_f:int, device:str|tuple[str, ...]|None, axis:int|None=None) -> tuple[UOp, UOp, UOp]|None:
+def _q8_quantize(x:Tensor, tokens:int, in_f:int, dev:str|tuple[str, ...]|None, axis:int|None=None) -> tuple[UOp, UOp, UOp]|None:
   if (k := _spec_kernel(f"amd_q8_quantize_{x.dtype.name}", tokens=tokens, in_features=in_f)) is None: return None
-  g = in_f // 32
-  q, d = UOp.alloc((tokens, g, 8), dtypes.uint32, device=device, axis=axis), UOp.alloc((tokens, g), dtypes.float32, device=device, axis=axis)
-  s = UOp.alloc((tokens, g, 2), dtypes.float32, device=device, axis=axis)
+  g, f = in_f // 32, dtypes.float32
+  q, d, s = (UOp.alloc((tokens, g, *e), dt, device=dev, axis=axis) for e, dt in (((8,), dtypes.uint32), ((), f), ((2,), f)))
   c = k.call(q, d, s, x.reshape(tokens, in_f).uop if x.uop.axis is None else x.uop)
   return q.after(c), d.after(c), s.after(c)
 
 @functools.cache
-def _iq_lut(t:int, device:str|tuple[str, ...]|None, half:bool=False) -> UOp:
+def _iq_lut(t:int, dev:str|tuple[str, ...]|None, wmma:bool=False) -> tuple[UOp, ...]:
+  if dev is None or t not in ({16, 17, 18, 19, 21, 22, 23} if wmma else {16, 17, 18, 19, 21, 22}): return ()
   from tinygrad.runtime.autogen import ggml_common as g
-  if t == 23 or half:
+  if t == 23 or (wmma and t in (18, 22)):
     vals = ([g.kvalues_iq4nl[k] for j in range(16) for i in range(16) for k in (i, j)] if t == 23 else
             [((v >> (8*i)) & 0xff) / 64.0 for v in (g.iq3xxs_grid if t == 18 else g.iq2s_grid) for i in range(4 if t == 18 else 8)])
-    words = struct.unpack(f"<{len(vals)//2}I", struct.pack(f"<{len(vals)}e", *vals))
+    words: tuple[int, ...] = struct.unpack(f"<{len(vals)//2}I", struct.pack(f"<{len(vals)}e", *vals))
   else:
     grid, nw = {16:(g.iq2xxs_grid,2), 17:(g.iq2xs_grid,2), 19:(g.iq1s_grid,2), 22:(g.iq2s_grid,2), 18:(g.iq3xxs_grid,1), 21:(g.iq3s_grid,1)}[t]
     words = tuple((v >> (32*i)) & 0xffffffff for v in grid for i in range(nw))
-  assert device is not None
-  return UOp(Ops.STACK, tuple(UOp.const(w, dtypes.uint32) for w in words)).cast(dtypes.uint32).copy_to_device(device)
+  return (UOp(Ops.STACK, tuple(UOp.const(w, dtypes.uint32) for w in words)).cast(dtypes.uint32).copy_to_device(dev),)
 
 # ***** linear & MoE layers (pure tinygrad math + optional slopkernels speedup) *****
 
@@ -105,53 +101,42 @@ class Linear(nn.Linear):
     if self.weight_scale_inv is not None:
       out = fp8_matmul(x, self.weight, self.weight_scale_inv, self.weight_block_size)
       return out + self.bias if self.bias is not None else out
-    if self.use_custom_quant and (target := _slop_target((self.packed if self.packed is not None else self.weight).device)) is not None \
-        and target[0] in (9, 11, 12):
+    if self.use_custom_quant and (target := _slop_target((self.packed if self.packed is not None else self.weight).device)) is not None:
       if self.ggml_type is None: self.set_quantized(self.weight)
       if self.ggml_type in _QUANT_NAMES and self.packed is not None:
         xp = x if isinstance(x.numel(), int) else x.pad_to(x.max_shape)
         dev, x_shape, x_shard = self.packed.device, tuple(int(d) for d in xp.shape), tuple(int(d) for d in xp.uop.max_shard_shape)
-        x_axis, ndev = xp.uop.axis, len(dev) if isinstance(dev, tuple) else 1
-        w_len = int(prod(int(d) for d in self.packed.uop.max_shard_shape))
+        xa, ndev, w_len = xp.uop.axis, len(dev) if isinstance(dev, tuple) else 1, int(prod(int(d) for d in self.packed.uop.max_shard_shape))
         rows, tokens, out_f, in_f = int(prod(x_shape[:-2])), int(prod(x_shape)) // self.in_features, self.out_features // self.groups, x_shard[-1]
-        splits, w_axis = self.in_features // in_f, self.shard_axis
-        local_out = out_f // ndev if ndev > 1 and w_axis == 0 and self.groups == 1 else out_f
-        if (w_axis == 1) == (splits > 1) and (self.groups == 1 or (w_axis, x_axis) in ((None, None), (0, len(x_shape) - 2))):
+        splits, wa = self.in_features // in_f, self.shard_axis
+        lo = out_f // (ndev if ndev > 1 and wa == 0 and self.groups == 1 else 1)
+        if (wa == 1) == (splits > 1) and (self.groups == 1 or (wa, xa) in ((None, None), (0, len(x_shape) - 2))):
           x_u = xp.reshape(rows, self.groups, -1).permute(1, 0, 2).reshape(self.groups * rows, self.in_features) if self.groups > 1 else xp
-          axis, qname = 0 if self.groups > 1 and x_axis is not None else None if w_axis is None else 1 - w_axis, _QUANT_NAMES[self.ggml_type]
-          if self.groups == 1 and tokens % 16 == 0 and local_out % 16 == 0:
-            extra = [_iq_lut(self.ggml_type, dev, half=self.ggml_type in (18, 22))] if self.ggml_type in {16, 17, 18, 19, 21, 22, 23} else []
-            sh_out = tuple(s // ndev if axis is not None and i == axis else s for i, s in enumerate((splits * tokens, out_f)))
-            x_f16 = x_u.half().contiguous().reshape(sh_out[0], in_f) if x_axis is None else x_u.half().contiguous()
-            arch = "cdna" if target[0] == 9 else "rdna4" if target[0] == 12 else "rdna3"
-            slop = _kcall(f"{arch}_gemm_{qname}_f16", sh_out, dev, self.packed, x_f16, *extra, axis=axis,
-                          tokens=sh_out[0], out_features=local_out, in_features=in_f, raw_len=w_len)
+          ax, qn = 0 if self.groups > 1 and xa is not None else None if wa is None else 1 - wa, _QUANT_NAMES[self.ggml_type]
+          if self.groups == 1 and tokens % 16 == 0 and lo % 16 == 0:
+            sh_o = _sh((splits * tokens, out_f), ax, ndev)
+            slop = _kcall(f"{'cdna' if target[0] == 9 else 'rdna4' if target[0] == 12 else 'rdna3'}_gemm_{qn}_f16", sh_o, dev, self.packed,
+                          x_u.half().contiguous().reshape(sh_o[0], in_f) if xa is None else x_u.half().contiguous(),
+                          *_iq_lut(self.ggml_type, dev, True), axis=ax, tokens=sh_o[0], out_features=lo, in_features=in_f, raw_len=w_len)
           else:
-            x_tok_sh, chunks = int(prod(x_shard[:-1])), ceildiv(in_f, 1024)
-            q8 = _q8_quantize(x_u, x_tok_sh, in_f, dev, axis=0 if self.groups > 1 and x_axis is not None else None)
-            extra = [_iq_lut(self.ggml_type, dev)] if self.ggml_type in {16, 17, 18, 19, 21, 22} else []
-            sh_out = tuple(s // ndev if axis is not None and i == axis else s for i, s in enumerate((splits * tokens, out_f, chunks)))
-            slop = None if q8 is None else _kcall(f"{'cdna' if target[0] == 9 else 'rdna'}_gemv_{qname}", sh_out, dev, self.packed, *q8, *extra,
-              axis=axis, tokens=x_tok_sh, out_features=local_out, in_features=in_f, chunks=chunks, raw_len=w_len,
+            xt, ch = int(prod(x_shard[:-1])), ceildiv(in_f, 1024)
+            slop = None if (q8 := _q8_quantize(x_u, xt, in_f, dev, axis=0 if self.groups > 1 and xa is not None else None)) is None else _kcall(
+              f"{'cdna' if target[0] == 9 else 'rdna'}_gemv_{qn}", _sh((splits * tokens, out_f, ch), ax, ndev), dev, self.packed, *q8,
+              *_iq_lut(self.ggml_type, dev), axis=ax, tokens=xt, out_features=lo, in_features=in_f, chunks=ch, raw_len=w_len,
               group_rows=rows if self.groups > 1 else 0)
-            if slop is not None: slop = slop.sum(-1) if chunks > 1 else slop.reshape(splits * tokens, out_f)
+            if slop is not None: slop = slop.sum(-1) if ch > 1 else slop.reshape(splits * tokens, out_f)
           if slop is not None:
-            if splits > 1: slop = slop.reshape(splits, tokens, out_f).sum(0)
-            if self.groups > 1: slop = slop.reshape(self.groups, rows, out_f).permute(1, 0, 2)
-            slop = slop.reshape(*x_shape[:-1], out_f)
-            if not isinstance(x.numel(), int): slop = slop.shrink(tuple((0, s) for s in (*x.shape[:-1], out_f)))
+            slop = slop.reshape(splits, tokens, out_f).sum(0) if splits > 1 else slop
+            slop = (slop.reshape(self.groups, rows, out_f).permute(1, 0, 2) if self.groups > 1 else slop).reshape(*x_shape[:-1], out_f)
+            slop = slop if isinstance(x.numel(), int) else slop.shrink(tuple((0, s) for s in (*x.shape[:-1], out_f)))
             return slop if self.bias is None else slop + (self.bias.reshape(self.groups, -1) if self.groups > 1 else self.bias)
       elif self.groups == 1 and isinstance(x.numel(), int) and self.in_features % 32 == 0:
-        w, xi = _unview_float(self.weight).contiguous(), _unview_float(x).contiguous()
-        dt_ok, tokens = (dtypes.float16, dtypes.bfloat16, dtypes.float32), int(prod(int(d) for d in x.shape[:-1]))
-        if w.uop.axis is None and xi.uop.axis is None and w.dtype in dt_ok and xi.dtype in dt_ok and tokens < 16 and \
-            least_upper_dtype(w.dtype, xi.dtype) == dtypes.float32 and \
-            (self.bias is None or (self.bias.uop.axis is None and self.bias.dtype in dt_ok)):
-          if (slop := _kcall(f"amd_gemv_{w.dtype.name}_{xi.dtype.name}{'' if self.in_features % 128 == 0 else '_v1'}", (tokens, self.out_features),
-              w.device, w, xi.reshape(tokens, self.in_features), tokens=tokens, out_features=self.out_features,
-              in_features=self.in_features)) is not None:
-            if self.bias is not None: slop = slop + _unview_float(self.bias).float()
-            return slop.reshape(*x.shape[:-1], self.out_features)
+        w, xi, ok = _unview_float(self.weight).contiguous(), _unview_float(x).contiguous(), (dtypes.float16, dtypes.bfloat16, dtypes.float32)
+        if w.uop.axis is None and xi.uop.axis is None and w.dtype in ok and xi.dtype in ok and (tk:=int(prod(x.shape[:-1]))) < 16 and \
+            least_upper_dtype(w.dtype, xi.dtype) == dtypes.float32 and (self.bias is None or self.bias.uop.axis is None and self.bias.dtype in ok):
+          if (slop := _kcall(f"amd_gemv_{w.dtype.name}_{xi.dtype.name}{'' if self.in_features % 128 == 0 else '_v1'}", (tk, self.out_features),
+              w.device, w, xi.reshape(tk, self.in_features), tokens=tk, out_features=self.out_features, in_features=self.in_features)) is not None:
+            return (slop if self.bias is None else slop + _unview_float(self.bias).float()).reshape(*x.shape[:-1], self.out_features)
     if self.groups > 1:
       out = (x.unsqueeze(-2) @ self.weight.reshape(self.groups, -1, self.in_features).transpose(-1, -2)).squeeze(-2)
       return out if self.bias is None else out + self.bias.reshape(self.groups, -1)
@@ -178,23 +163,19 @@ class ExpertWeights:
         if self.ggml_type is None: self.use_custom_quant = False
       slop: Tensor|None = None
       if self.ggml_type in _QUANT_NAMES and self.use_custom_quant and not (self.weight.uop.axis == 0 and hasattr(self, 'bias')) and \
-          (target := _slop_target(self.weight.device)) is not None and target[0] in (9, 11, 12):
+          (target := _slop_target(self.weight.device)) is not None:
         sp, xp = (sel, x) if isinstance(T:=sel.shape[1], int) else (sel.pad_to(sel.max_shape, value=-1), x.pad_to(x.max_shape))
-        B, Tm, slots = (int(s) for s in sp.shape[-3:])
-        dev, w_axis, local_in, x_slots = self.packed.device, self.weight.uop.axis, int(xp.uop.max_shard_shape[-1]), int(xp.shape[-2])
-        local_out, global_out = int(self.weight.uop.max_shard_shape[1]), int(self.weight.shape[1])
-        ndev, splits = int(self.weight.shape[0]) // int(self.weight.uop.shard_shape[0]), self.in_features // local_in
-        if (w_axis == 2) == (splits > 1) and x_slots in (1, slots):
-          x_rows, chunks, w_len = B * Tm * x_slots, ceildiv(local_in, 1024), int(prod(int(d) for d in self.packed.uop.max_shard_shape))
-          out_shape = (ndev * B * Tm * slots, global_out, splits * chunks)
-          sh_out = tuple(s // (ndev if w_axis == 0 else splits if w_axis == 2 else (global_out // local_out))
-                         if w_axis is not None and i == w_axis else s for i, s in enumerate(out_shape))
-          q8 = _q8_quantize(xp.contiguous(), x_rows, local_in, dev)
-          extra = [_iq_lut(self.ggml_type, dev)] if self.ggml_type in {16, 17, 18, 19, 21, 22} else []
-          if q8 is not None and (slop := _kcall(f"{'cdna' if target[0] == 9 else 'rdna'}_moe_{_QUANT_NAMES[self.ggml_type]}", sh_out, dev,
-              self.packed, *q8, sp.cast(dtypes.int32).flatten(), *extra, axis=w_axis, rows=B*Tm*slots, x_rows=x_rows,
-              out_features=local_out, in_features=local_in, chunks=chunks, raw_len=w_len, x_share=slots // x_slots, ndev=ndev)) is not None:
-            slop = slop.sum(-1).reshape((ndev, B, Tm, slots, global_out) if ndev > 1 else (B, Tm, slots, global_out))
+        (B, Tm, slots), dev, wa = (int(s) for s in sp.shape[-3:]), self.packed.device, self.weight.uop.axis
+        lin, xs, lo, go = int(xp.uop.max_shard_shape[-1]), int(xp.shape[-2]), int(self.weight.uop.max_shard_shape[1]), int(self.weight.shape[1])
+        ndev, splits = int(self.weight.shape[0]) // int(self.weight.uop.shard_shape[0]), self.in_features // lin
+        if (wa == 2) == (splits > 1) and xs in (1, slots):
+          xr, ch, wl = B * Tm * xs, ceildiv(lin, 1024), int(prod(int(d) for d in self.packed.uop.max_shard_shape))
+          sh_o = _sh((ndev * B * Tm * slots, go, splits * ch), wa, ndev if wa == 0 else splits if wa == 2 else (go // lo))
+          if (q8 := _q8_quantize(xp.contiguous(), xr, lin, dev)) is not None and (slop := _kcall(
+              f"{'cdna' if target[0] == 9 else 'rdna'}_moe_{_QUANT_NAMES[self.ggml_type]}", sh_o, dev, self.packed, *q8,
+              sp.cast(dtypes.int32).flatten(), *_iq_lut(self.ggml_type, dev), axis=wa, rows=B*Tm*slots, x_rows=xr, out_features=lo,
+              in_features=lin, chunks=ch, raw_len=wl, x_share=slots // xs, ndev=ndev)) is not None:
+            slop = slop.sum(-1).reshape((ndev, B, Tm, slots, go) if ndev > 1 else (B, Tm, slots, go))
             if not isinstance(T, int): slop = slop[..., :T, :, :]
       ret = slop if slop is not None else (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
     if self.scale is not None: ret = ret * self.scale[sel].unsqueeze(-1)
@@ -452,13 +433,11 @@ class HyperConnection:
     """mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb"""
     if self.pre_delayed and pre is None: pre = Tensor([1.0] + [0.0] * (self.count - 1), device=xs.device)
     flat = xs.flatten(2)
-    if (target := _slop_target(xs.device)) is not None and target[0] in (9, 11, 12) and xs.dtype == dtypes.float32 and xs.uop.axis is None \
-        and self.count == 4:
-      mix = self.fn(fp:=flat.pad_to(flat.max_shape).reshape(-1, flat.shape[-1]))
-      tokens, features, base, scale = int(mix.shape[0]), int(fp.shape[-1]), self.base["weight"].contiguous(), self.scale["weight"].contiguous()
-      if features % 32 == 0 and (co := _kcall(f"amd_hc_coeffs_{base.dtype.name}_{scale.dtype.name}", (tokens, 24), xs.device,
-          mix.float().contiguous(), (fp.float() * fp.float()).reshape(tokens, 32, features // 32).sum(-1).contiguous(), base, scale,
-          tokens=tokens, features=features, iters=self.iters, eps=float(self.eps), norm_eps=float(self.norm_eps))) is not None:
+    if _slop_target(xs.device) is not None and xs.dtype == dtypes.float32 and xs.uop.axis is None and self.count == 4:
+      mix, base, scale = self.fn(fp:=flat.pad_to(flat.max_shape).reshape(-1, flat.shape[-1])), self.base["weight"], self.scale["weight"]
+      if (f := int(fp.shape[-1])) % 32 == 0 and (co := _kcall(f"amd_hc_coeffs_{base.dtype.name}_{scale.dtype.name}", (tk:=int(mix.shape[0]), 24),
+          xs.device, mix.float().contiguous(), (fp.float() * fp.float()).reshape(tk, 32, f // 32).sum(-1).contiguous(), base.contiguous(),
+          scale.contiguous(), tokens=tk, features=f, iters=self.iters, eps=float(self.eps), norm_eps=float(self.norm_eps))) is not None:
         co = co.reshape(*flat.max_shape[:-1], -1).shrink_to(*flat.shape[:-1], None)
         c = self.count
         own, post, comb = co[..., :c], co[..., c:2*c], co[..., 2*c:].reshape(*flat.shape[:-1], c, c)
@@ -632,31 +611,25 @@ class TransformerBlock(FFNBlock):
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
     assigned_kv = _update_cache(self.cache_kv.transpose(0, 1), Tensor.stack(k, v).transpose(0, 1), start_pos, 3)
     # optional slopkernels flash attention speedup on the KV cache
-    if idx_mask is None and self.config.ssm is not None and len(start_pos) == 1 and (target := _slop_target(x.device)) is not None \
-        and target[0] in (9, 11, 12):
+    if idx_mask is None and self.config.ssm is not None and len(start_pos) == 1 and (target := _slop_target(x.device)) is not None:
       kv, T_real, sp = assigned_kv.transpose(0, 1), q.shape[2], start_pos[0]
       q_in = (q if not isinstance(T_real, UOp) else q.pad_to((*q.shape[:2], q.max_shape[2], q.shape[3]))).half()
-      q_shard, q_axis = tuple(int(d) for d in q_in.uop.max_shard_shape), q_in.uop.axis
-      sh_b, sh_h, sh_m, D = q_shard
+      sh_b, sh_h, sh_m, D = (q_shard := tuple(int(d) for d in q_in.uop.max_shard_shape))
       _, _, sh_hkv, N_phys, _ = (int(d) for d in kv.uop.max_shard_shape)
-      vkl_u, vkl_off, attn = sp if isinstance(sp, UOp) else UOp.const(int(sp)), T_real if isinstance(T_real, int) else 0, None
-      if resolve(T_real == 1, False) and sh_m == 1 and D in (64, 128, 256) and (grp := sh_h // sh_hkv) in (1, 2, 4, 8) and N_phys % 64 == 0:
-        chunks = min(48, ceildiv(N_phys, 64))
-        kp = _spec_kernel(f"amd_flash_decode_partial_g{grp}_d{D}", B=sh_b, H_KV=sh_hkv, n_blks=N_phys // 64, C=chunks, valid_kv_offset=vkl_off)
-        kc = _spec_kernel("amd_flash_decode_combine", B=sh_b, H=sh_h, C=chunks, d_blks=D // 64, valid_kv_offset=vkl_off)
-        if kp is not None and kc is not None:
-          partial = UOp.alloc((sh_b, sh_h, chunks, D), dtypes.float32, device=q_in.device, axis=q_axis)
-          stats = UOp.alloc((sh_b, sh_h, chunks, 2), dtypes.float32, device=q_in.device, axis=q_axis)
-          out = UOp.alloc(q_shard, dtypes.float32, device=q_in.device, axis=q_axis)
-          cp = kp.call(partial, stats, q_in.uop, kv.uop, vkl_u)
-          attn = Tensor(out.after(kc.call(out, partial.after(cp), stats.after(cp), vkl_u)))
-      elif target[0] != 9 and D in (64, 128, 256) and N_phys % 32 == 0 and int(q_in.shape[2]) % 32 == 0:
-        q_t, q_h = int(q_in.shape[2]), int(q_in.shape[1])
-        if (k_fa := _spec_kernel(f"{'rdna4' if target[0] == 12 else 'rdna3'}_flash_attn_d{D}", BH=sh_b * sh_h, m_blks=q_t // 32, B=sh_b,
+      q_axis, vkl_u, vkl_off, attn = q_in.uop.axis, sp if isinstance(sp, UOp) else UOp.const(int(sp)), T_real if isinstance(T_real, int) else 0, None
+      if resolve(T_real == 1, False) and sh_m == 1 and D in (64, 128, 256) and (grp := sh_h // sh_hkv) in (1, 2, 4, 8) and N_phys % 64 == 0 and \
+          (kp := _spec_kernel(f"amd_flash_decode_partial_g{grp}_d{D}", B=sh_b, H_KV=sh_hkv, n_blks=N_phys // 64, C=(ch:=min(48, ceildiv(N_phys, 64))),
+                              valid_kv_offset=vkl_off)) is not None:
+        partial, stats = (UOp.alloc((sh_b, sh_h, ch, d), dtypes.float32, device=q_in.device, axis=q_axis) for d in (D, 2))
+        cp = kp.call(partial, stats, q_in.uop, kv.uop, vkl_u)
+        attn = _kcall("amd_flash_decode_combine", q_shard, q_in.device, partial.after(cp), stats.after(cp), vkl_u, axis=q_axis,
+                      B=sh_b, H=sh_h, C=ch, d_blks=D // 64, valid_kv_offset=vkl_off)
+      elif target[0] != 9 and D in (64, 128, 256) and N_phys % 32 == 0 and (q_t := int(q_in.shape[2])) % 32 == 0 and \
+          (k_fa := _spec_kernel(f"{'rdna4' if target[0] == 12 else 'rdna3'}_flash_attn_d{D}", BH=sh_b * sh_h, m_blks=q_t // 32, B=sh_b,
             H_KV=sh_hkv, n_blks=N_phys // 32, valid_kv_offset=vkl_off, q_start_from_end=0 if isinstance(T_real, UOp) else 1)) is not None:
-          out = UOp.alloc(q_shard, dtypes.float32, device=q_in.device, axis=q_axis).reshape((B * q_h, q_t, D))
-          ql_u = T_real if isinstance(T_real, UOp) else UOp.const(q_t)
-          attn = Tensor(out.after(k_fa.call(out, q_in.reshape(B * q_h, q_t, D).uop, kv.uop, vkl_u, ql_u)).reshape((B, q_h, q_t, D)))
+        q_h, ql_u = int(q_in.shape[1]), T_real if isinstance(T_real, UOp) else UOp.const(q_t)
+        out = UOp.alloc(q_shard, dtypes.float32, device=q_in.device, axis=q_axis).reshape((B * q_h, q_t, D))
+        attn = Tensor(out.after(k_fa.call(out, q_in.reshape(B * q_h, q_t, D).uop, kv.uop, vkl_u, ql_u)).reshape((B, q_h, q_t, D)))
       if attn is not None:
         attn = (attn if not isinstance(T_real, UOp) else attn[:, :, :T_real]).transpose(1, 2).reshape(B, T, -1)
         return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
@@ -1023,10 +996,9 @@ class GatedDeltaNetBlock(FFNBlock):
 
     # recurrent: scan over the (padded) tokens, updating the recurrent state. collect the per-step outputs
     state_dep = Tensor(self.recurrent_state.uop.after(*conv_state_stores))
-    ca = alpha.ndim == 4 and int(alpha.shape[-1]) == self.head_k_dim
-    if q.uop.axis is None and state_dep.uop.axis is None and (target := _slop_target(q.device)) is not None and target[0] in (9, 11, 12) and \
-        self.head_k_dim in (32, 64, 128, 256) and self.head_v_dim % 4 == 0 and \
-        (core_slop := _kcall(f"amd_gated_delta_k{self.head_k_dim}_{'ak' if ca else 'a1'}",
+    if q.uop.axis is None and state_dep.uop.axis is None and _slop_target(q.device) is not None and \
+        self.head_k_dim in (32, 64, 128, 256) and self.head_v_dim % 4 == 0 and (core_slop := _kcall(
+         f"amd_gated_delta_k{self.head_k_dim}_{'ak' if (ca := alpha.ndim == 4 and int(alpha.shape[-1]) == self.head_k_dim) else 'a1'}",
          (int(B), self.num_v_heads, T_pad, self.head_v_dim), q.device, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(),
          alpha.contiguous().reshape((int(B), self.num_v_heads, T_pad, self.head_k_dim) if ca else (int(B), self.num_v_heads, T_pad)),
          state_dep, (q * k).sum(-1).contiguous(), pos if isinstance(pos, UOp) else UOp.const(int(pos)),

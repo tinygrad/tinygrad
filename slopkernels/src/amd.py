@@ -41,21 +41,32 @@ def _amd_load(ptr:UOp, lanes:int|None=None, stream:bool=False) -> UOp:
 # ******** tiny dense fp16 gemv ********
 
 @functools.cache
-def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *rest:UOp, in_features:int, out_features:int, tokens:int) -> UOp:
+def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *rest:UOp, in_features:int|UOp, out_features:int|UOp, tokens:int|UOp,
+                         val_chunk:int|None=None) -> UOp:
   bias: UOp|None = rest[0] if rest else None
   # one wave per output row; tile all tokens in registers so w is loaded once across speculative verify batches
   lanes = WARP_SIZE
-  val_chunk = 4 if in_features % (lanes * 4) == 0 else 2 if in_features % (lanes * 2) == 0 else 1
-  rows = math.gcd(out_features, 2 if out_features <= 128 else 4)
+  if val_chunk is None: val_chunk = 4 if in_features % (lanes * 4) == 0 else 2 if in_features % (lanes * 2) == 0 else 1
+  rows = 1 if isinstance(out_features, UOp) else math.gcd(out_features, 2 if out_features <= 128 else 4)
   out_blk = UOp.range(out_features // rows, 0, AxisType.GLOBAL)
   wave = UOp.range(rows, 3, AxisType.LOCAL)
   lane = UOp.range(lanes, 2, axis_type=AxisType.LOCAL)
   out_row = out_blk * rows + wave
   per = in_features // (lanes * val_chunk)
-  assert per * lanes * val_chunk == in_features
+  assert isinstance(in_features, UOp) or per * lanes * val_chunk == in_features
   w = w.reshape((out_features, per, lanes*val_chunk))
   x = x.reshape((tokens, per, lanes*val_chunk))
   zero = UOp.const(0, dtypes.float32)
+  if isinstance(tokens, UOp):
+    t = UOp.range(tokens, 5, AxisType.GLOBAL)
+    acc = UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG)
+    acc = acc.after(acc[0].store(zero))
+    i_r = UOp.range(per, 4)
+    wv, xv = _vec_load(w[out_row, i_r, lane*val_chunk], val_chunk), _vec_load(x[t, i_r, lane*val_chunk], val_chunk)
+    upd = acc[0].store(acc.after(i_r)[0].load() + sum((wv[j] * xv[j] for j in range(val_chunk)), zero)).end(i_r)
+    total = warp_reduce(acc.after(upd)[0].load(), full_wave=True) + (bias[out_row].load().float() if bias is not None else zero)
+    return out[t, out_row.valid(lane.eq(0))].store(total.cast(out.dtype)).end(t, out_blk, wave, lane).sink(
+      arg=KernelInfo(name="linear_f16_gemv", opts_to_apply=()))
   if tokens > 1 and per > 4:
     accs_reg = tuple(UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG) for _ in range(tokens))
     accs_reg = tuple(a.after(a[0].store(zero)) for a in accs_reg)
@@ -538,7 +549,7 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *extra:UOp, valid_kv_len:int|U
 def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:int|UOp|None=None) -> UOp:
   batch, heads, tokens, value_dim, row_tile = *core.shape, 4
   key_dim, alpha_dim = q.shape[-1], alpha.shape[-1] if len(alpha.shape) == 4 else 1
-  assert all(isinstance(x, int) for x in (batch, heads, tokens, value_dim, key_dim)) and key_dim % 32 == 0 and value_dim % row_tile == 0
+  assert isinstance(key_dim, int) and key_dim % 32 == 0 and (isinstance(value_dim, UOp) or value_dim % row_tile == 0)
   core, v = (x.reshape(batch*heads, tokens, value_dim) for x in (core, v))
   q, k = (x.reshape(batch*heads, tokens, key_dim) for x in (q, k))
   beta, kq = (x.reshape(batch*heads, tokens) for x in (beta, kq))

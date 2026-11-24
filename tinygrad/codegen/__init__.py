@@ -262,12 +262,8 @@ pm_implicit_barriers = PatternMatcher([
   (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
-def assert_no_templates(ast:UOp):
-  if ast.has_templates:
-    raise RuntimeError(f"unresolved template parameter(s) at codegen boundary: {', '.join(sorted(dedup(t.arg.name for t in ast.templates())))}")
-
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
-  assert_no_templates(ast)
+  assert not ast.has_templates, "unresolved template parameter(s) at codegen boundary"
   if DEBUG >= 5: print(render_uir(ast))
   if SPEC: type_verify(ast, spec_tensor)
 
@@ -494,7 +490,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   Returns:
     The Ops.PROGRAM with SINK/LINEAR/SOURCE/BINARY.
   """
-  assert_no_templates(ast)
+  assert not ast.has_templates, "unresolved template parameter(s) at codegen boundary"
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   ast = graph_rewrite(ast, pm_lower_calls, ctx=LowerCallsCtx(renderer), name="lower calls", walk=True)
   if ast.op is Ops.PROGRAM: prg = ast
@@ -627,7 +623,6 @@ schedule_cache: dict[bytes|tuple[UOp, int], UOp] = {}
 def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = call.body
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
-  assert_no_templates(function)
   st = time.perf_counter()
   cache_key = function.key
   # SCACHE >= 2 also persists the cache to disk
@@ -719,7 +714,7 @@ pm_contiguous_views = PatternMatcher([
 @rewrite_group(lambda fn,ret,**_: f"Schedule {len(fn.src)} -> {len(ret.src)}")
 def create_linear(fn:UOp) -> UOp:
   """an exported function (no runtime state) to the LINEAR of calls that runs it, on its EXTERNs, view args and ALLOCs"""
-  assert_no_templates(fn)
+  assert not fn.has_templates, "unresolved template parameter(s) at codegen boundary"
   key = (fn, NO_MEMORY_PLANNER.value)
   if SCACHE and (hit:=schedule_cache.get(key)) is not None: return hit
   # a contiguous view of storage is a different buffer: it's an input of the scheduled function, the call arg is the view

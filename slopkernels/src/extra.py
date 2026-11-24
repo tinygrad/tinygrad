@@ -291,12 +291,13 @@ def _moe_softmax_router_kernel(sel:UOp, probs:UOp, logits:UOp, *table:UOp, k:int
     arg=KernelInfo(name="moe_softmax_router", opts_to_apply=()))
 
 
-def _hc_coeffs_kernel(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, count:int, iters:int, eps:float, norm_eps:float, features:int) -> UOp:
+def _hc_coeffs_kernel(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, count:int, iters:int|UOp, eps:float|UOp, norm_eps:float|UOp,
+                      features:int|UOp) -> UOp:
   assert count == 4, "the swizzles assume 4 streams"
   token, lane = UOp.range(out.shape[0], 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   groups = sq.shape[1]
   total = sum((sq[token, (lane + 32 * i).valid(lane + 32 * i < groups)].load() for i in range((groups + 31) // 32)), UOp.const(0.0, dtypes.float))
-  rms = (warp_reduce(total, full_wave=True) * (1.0 / features) + norm_eps).rsqrt()
+  rms = (warp_reduce(total, full_wave=True) * (1.0 / (features.cast(dtypes.float32) if isinstance(features, UOp) else features)) + norm_eps).rsqrt()
   is_comb = lane < count * count
   idx = is_comb.where(lane + 2 * count, (lane - count * count).minimum(2 * count - 1).maximum(0))
   which = is_comb.where(2, (lane < count * count + count).where(0, 1))
@@ -308,7 +309,14 @@ def _hc_coeffs_kernel(out:UOp, mix:UOp, sq:UOp, base:UOp, scale:UOp, count:int, 
   def colsum(x:UOp) -> UOp: return (y := x + _lane_xor(x, 4)) + _lane_xor(y, 8)
   e = ((v - rowsum(v, UOp.maximum)) * LOG2E).exp2()
   c = e * rowsum(e).reciprocal() + eps
-  for it in range(2 * iters - 1): c = c * ((colsum(c) if it % 2 == 0 else rowsum(c)) + eps).reciprocal()
+  if isinstance(iters, UOp):
+    reg = UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG)
+    reg = reg.after(reg[0].store(c))
+    it = UOp.range(2 * iters - 1, 4)
+    cv = reg.after(it)[0].load()
+    c = reg.after(reg[0].store(cv * ((it % 2).eq(0).where(colsum(cv), rowsum(cv)) + eps).reciprocal()).end(it))[0].load()
+  else:
+    for it_i in range(2 * iters - 1): c = c * ((colsum(c) if it_i % 2 == 0 else rowsum(c)) + eps).reciprocal()
   valid = lane < count * count + 2 * count
   out_idx = is_comb.where(lane + 2 * count, lane - count * count)
   return out[token, out_idx.valid(valid)].store(is_comb.where(c, prepost)).end(token, lane).sink(

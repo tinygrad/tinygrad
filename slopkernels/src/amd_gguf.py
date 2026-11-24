@@ -86,7 +86,7 @@ def _iq1_scale(raw:UOp, base:UOp, subgroup:UOp) -> tuple[UOp, UOp]:
   return (((qh >> 12) & 7)*2+1).float() * _half(raw[base]), (qh >> 15).eq(0).where(-0.125, 0.125)
 
 @functools.cache
-def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, tokens:int, in_features:int) -> UOp:
+def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, tokens:int|UOp, in_features:int|UOp) -> UOp:
   groups = in_features//Q8_GROUP_SIZE
   token_group, lane = UOp.range(tokens*groups, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   token, group = token_group//groups, token_group%groups
@@ -104,21 +104,22 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, tokens:int, in_featur
             xsum[token, group, (lane//16).valid((lane%16).eq(0))].store(warp_reduce(quant.float())))
   return UOp.group(*stores).end(token_group, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
 
-def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:str, token_tile:int=1, post:Callable|None=None,
+def _decode_linear(out:UOp, out_features:int|UOp, group_count:int|UOp, group_dot, name:str, token_tile:int=1, post:Callable|None=None,
                    group_dots:Callable|None=None) -> UOp:
   chunks = out.shape[2] if len(out.shape) == 3 else 1
   # One wave per output/chunk; group neighboring rows to amortize workgroup scheduling.
-  rows = math.gcd(out_features, 4)
+  rows = 1 if isinstance(out_features, UOp) else math.gcd(out_features, 4)
   row = UOp.range(out.shape[0]//token_tile*out_features//rows, 0, AxisType.GLOBAL)
   wave = UOp.range(rows, 3, AxisType.LOCAL)
   token_output = row*rows+wave
-  chunk = UOp.range(chunks, 1, AxisType.GLOBAL) if chunks > 1 else UOp.const(0, dtypes.weakint)
+  has_chunks = isinstance(chunks, UOp) or chunks > 1
+  chunk = UOp.range(chunks, 1, AxisType.GLOBAL) if has_chunks else UOp.const(0, dtypes.weakint)
   lane = UOp.range(32, 2, AxisType.LOCAL)
   token, output = token_output // out_features * token_tile, token_output % out_features
   steps = (group_count + chunks * 32 - 1) // (chunks * 32)
   if token_tile > 1 and group_dots is not None:
     zero = UOp.const(0, dtypes.float32)
-    if steps == 1:
+    if not isinstance(steps, UOp) and steps == 1:
       group = lane + chunk * 32
       raw_vals = group_dots(token, output, group.minimum(group_count - 1))
       vals = [warp_reduce((group < group_count).where(v, zero), full_wave=True) for v in raw_vals]
@@ -134,11 +135,11 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
     if post is not None: vals = [post(token + t, vals[t]) for t in range(token_tile)]
     if len(out.shape) == 3:
       stores = [out[token+t, output, chunk.valid(lane.eq(0))].store(vals[t].cast(out.dtype)) for t in range(token_tile)]
-      return UOp.group(*stores).end(row, wave, *([chunk] if chunks > 1 else []), lane).sink(arg=KernelInfo(name=name, opts_to_apply=()))
+      return UOp.group(*stores).end(row, wave, *([chunk] if has_chunks else []), lane).sink(arg=KernelInfo(name=name, opts_to_apply=()))
     stores = [out[token+t, output.valid(lane.eq(0))].store(vals[t].cast(out.dtype)) for t in range(token_tile)]
     return UOp.group(*stores).end(row, wave, lane).sink(arg=KernelInfo(name=name, opts_to_apply=()))
   def total(token:UOp) -> UOp:
-    if steps == 1:
+    if not isinstance(steps, UOp) and steps == 1:
       group = lane + chunk * 32
       val = warp_reduce((group < group_count).where(group_dot(token, output, group.minimum(group_count-1)), UOp.const(0, dtypes.float32)),
                         full_wave=True)
@@ -153,7 +154,7 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
     return post(token, val) if post is not None else val
   if len(out.shape) == 3:
     stores = [out[token+t, output, chunk.valid(lane.eq(0))].store(total(token+t).cast(out.dtype)) for t in range(token_tile)]
-    return UOp.group(*stores).end(row, wave, *([chunk] if chunks > 1 else []), lane).sink(arg=KernelInfo(name=name, opts_to_apply=()))
+    return UOp.group(*stores).end(row, wave, *([chunk] if has_chunks else []), lane).sink(arg=KernelInfo(name=name, opts_to_apply=()))
   stores = [out[token+t, output.valid(lane.eq(0))].store(total(token+t).cast(out.dtype)) for t in range(token_tile)]
   return UOp.group(*stores).end(row, wave, lane).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
@@ -214,19 +215,20 @@ def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:
   return _iq_signed_word(grid[index*grid_words+i%grid_words].load(), signs >> (4*(i%2)))
 
 @functools.cache
-def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp, out_features:int, in_features:int, ggml_type:int,
-                         cdna:bool=False, group_rows:int=0) -> UOp:
-  tokens = cast(int, out.shape[0])
-  token_tile = tokens if tokens <= 12 else (4 if tokens <= 16 and tokens % 4 == 0 else 1)
+def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp, out_features:int|UOp, in_features:int|UOp, ggml_type:int,
+                         cdna:bool=False, group_rows:int|UOp=0) -> UOp:
+  tokens = out.shape[0]
+  token_tile = 1 if isinstance(tokens, UOp) else (tokens if tokens <= 12 else (4 if tokens <= 16 and tokens % 4 == 0 else 1))
   words = out_features * in_features * QUANT_SIZES[ggml_type] // GGML_BLOCK_SIZE // raw.dtype.itemsize
-  gate = (lambda token, base: base + token // group_rows * words) if group_rows else None
+  gate = ((lambda token, base: base + (group_rows > 0).where(token // group_rows.maximum(1) * words, 0)) if isinstance(group_rows, UOp)
+          else (lambda token, base: base + token // group_rows * words) if group_rows else None)
   return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, cdna, gate, token_tile=token_tile)
 
 def _situ_expr(g:UOp, u:UOp, situ:tuple[float, float]) -> UOp:
   b0, b1 = situ
   return _fast_tanh(g * (1.0 / b0)) * b0 * (1.0 / (1.0 + (g * (-LOG2E)).exp2())) * _fast_tanh(u * (1.0 / b1)) * b1
 
-def _quant_base(output:UOp, group:UOp, in_features:int, ggml_type:int, itemsize:int) -> UOp:
+def _quant_base(output:UOp, group:UOp, in_features:int|UOp, ggml_type:int, itemsize:int) -> UOp:
   if ggml_type == NVFP4: return (output*in_features//64 + (group//8)*4) * (36//itemsize)
   if ggml_type in SMALL_BLOCK_QUANTS: return (output*in_features//32 + group) * SMALL_BLOCK_QUANTS[ggml_type]
   return (output*in_features//256 + group//8) * (QUANT_SIZES[ggml_type]//itemsize)
@@ -512,7 +514,7 @@ def _quant_group_dots_multi(raw:UOp, base:UOp, subgroup:UOp, xwords_list:tuple[U
   if ggml_type == IQ2_XXS: sc = sc * ((word(6 + subgroup * 8) >> 28).float() + 0.5) * 0.25
   return tuple(((dots[t][0] + dots[t][1]).float() * sc) * xd_list[t] for t in range(n_tok))
 
-def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp, ...], out_features:int, in_features:int, ggml_type:int,
+def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp, ...], out_features:int|UOp, in_features:int|UOp, ggml_type:int,
                        cdna:bool, gate:Callable|None=None, xtoken:Callable|None=None, name:str="linear_", token_tile:int=1,
                        post:Callable|None=None) -> UOp:
   # gate(token, base) -> base: moves the weight rows, xtoken(token) -> the activation row of an output row
@@ -698,7 +700,7 @@ def _moe_decode_down_sum_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UO
 
 @functools.cache
 def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *extra:UOp,
-                       out_features:int, in_features:int, ggml_type:int, x_share:int, cdna:bool=False, ndev:int=1,
+                       out_features:int|UOp, in_features:int|UOp, ggml_type:int, x_share:int|UOp, cdna:bool=False, ndev:int|UOp=1,
                        has_scale:bool=False) -> UOp:
   # out rows are (token, slot): the slot's expert reads its weight rows, x_share slots share an activation row
   exp_scale = extra[0] if has_scale else None
@@ -708,7 +710,7 @@ def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *extra
   def expert(row:UOp) -> UOp: return sel[row].cast(dtypes.weakint) - UOp.range(ndev, 4, AxisType.DEVICE)*local_experts
   def gate(row:UOp, base:UOp) -> UOp:
     base = base + expert(row).maximum(0).minimum(local_experts-1) * expert_words
-    return base.valid((expert(row) >= 0) & (expert(row) < local_experts)) if ndev > 1 else base
+    return base.valid((expert(row) >= 0) & (expert(row) < local_experts)) if (isinstance(ndev, UOp) or ndev > 1) else base
   def xtoken(row:UOp) -> UOp: return row // x_share
   post = (lambda row, val: val * exp_scale[sel[row].maximum(0).cast(dtypes.weakint)].load().float()) if exp_scale is not None else None
   return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, cdna, gate, xtoken, "moe_", post=post)
@@ -736,10 +738,12 @@ def _iq_half_vals_f32(table:UOp, base_idx:UOp, s4:UOp, sc_f:UOp) -> tuple[UOp, U
 def _wmma_words(lane_group:UOp, kgroups:int) -> tuple[UOp|int, ...]:
   return tuple(range(4)) if kgroups == 1 else tuple(lane_group + kgroups*j for j in range(4//kgroups))
 
-def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int, lanes:int, valid_tokens:int|UOp|None=None,
+def _wmma_layout(out:UOp, out_features:int|UOp, token_tile:int, output_tiles:int, lanes:int, valid_tokens:int|UOp|None=None,
                  max_waves:int=2):
-  if out_features % (16*output_tiles): output_tiles = 1
-  output_waves = 4 if max_waves >= 4 and out_features % (64*output_tiles) == 0 else 2 if out_features % (32*output_tiles) == 0 else 1
+  if isinstance(out_features, UOp): output_tiles, output_waves = 1, 1
+  else:
+    if out_features % (16*output_tiles): output_tiles = 1
+    output_waves = 4 if max_waves >= 4 and out_features % (64*output_tiles) == 0 else 2 if out_features % (32*output_tiles) == 0 else 1
   n_tblocks = out.shape[0] // token_tile if valid_tokens is None else (_unbind(valid_tokens) + token_tile - 1) // token_tile
   token_block = UOp.range(n_tblocks, 0, AxisType.GLOBAL)
   output_block = UOp.range(out_features//(16*output_tiles*output_waves), 1, AxisType.GLOBAL)
@@ -1108,10 +1112,10 @@ def _make_wmma_dequant(raw:UOp, ggml_type:int, word_indices:tuple[UOp|int, ...],
 
 @functools.cache
 def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
-                                  out_features:int, in_features:int, ggml_type:int, kgroups:int, lanes:int,
+                                  out_features:int|UOp, in_features:int|UOp, ggml_type:int, kgroups:int, lanes:int,
                                   valid_tokens:int|UOp|None=None) -> UOp:
-  token_tile = 64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16
-  layout = _wmma_layout(out, out_features, token_tile, 2, lanes, valid_tokens=valid_tokens)
+  token_tile = 16 if isinstance(out.shape[0], UOp) else (64 if out.shape[0] % 64 == 0 else 32 if out.shape[0] % 32 == 0 else 16)
+  layout = _wmma_layout(out, out_features, token_tile, 1 if isinstance(out_features, UOp) else 2, lanes, valid_tokens=valid_tokens)
   output_waves, _, _, lane, wave, lane_group, _, _, _ = layout
   word_indices = _wmma_words(lane_group, kgroups)
   grid = None

@@ -49,7 +49,7 @@ packages = [
 [tool.setuptools.package-data]
 tinygrad = ["py.typed"]
 "tinygrad.llm" = ["chat.html"]
-"tinygrad.llm.kernels" = ["*.uir", "manifest.json"]
+"tinygrad.llm.kernels" = ["*.uir"]
 "tinygrad.viz" = ["index.html", "assets/**/*", "js/*"]
 
 

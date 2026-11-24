@@ -86,7 +86,7 @@ spec_shared = PatternMatcher([
    lambda x: x.arg is None and x.src[2].shape == () and not x.src[2].base.is_invalid),
 
   # PARAM/BUFFER carry a size CONST or an empty STACK for scalars
-  (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  (UPat(Ops.PARAM, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace is not AddrSpace.TEMPLATE),
   (UPat(Ops.REFPARAM, src=(p_size, UPat(dtype=dtypes.uint64)), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, src=(p_size,), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
@@ -151,16 +151,6 @@ spec_tensor = PatternMatcher([
    and (buf.arg.device is None or (buf.addrspace is AddrSpace.GLOBAL and is_device(buf.arg.device)))
    and valid_device_range(buf.arg.device, buf.src[1:])),
 
-  # Templates and template-sized PARAM/ALLOC before specialization
-  (UPat(Ops.PARAM, name="b"), lambda b: b.arg.slot == -1 and isinstance(b.arg.name, str) and bool(b.arg.name) and b.arg.device is None
-   and b.arg.val is None and b.src == (UOp(Ops.STACK),) and (dtypes.is_int(b.dtype) or dtypes.is_float(b.dtype))
-   if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.TEMPLATE else None),
-  (UPat((Ops.PARAM, Ops.ALLOC), src=(UPat(),), allow_any_len=True, name="b"), lambda b:
-   isinstance(b.arg, ParamArg) and b.src[0]._shape == () and dtypes.is_int(b.src[0].dtype)
-   and (b.op is Ops.PARAM or (b.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) and b.arg.buffer is None
-   and (b.arg.device is None or (b.addrspace is AddrSpace.GLOBAL and is_device(b.arg.device))) and valid_device_range(b.arg.device, b.src[1:])))
-   if b.src[0].has_templates else None),
-
   # a Variable is a scalar ALU PARAM with a value range and no device
   (UPat(Ops.PARAM, src=(UPat(Ops.STACK, src=()),), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
 
@@ -210,8 +200,6 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
-  # unresolved templates are forbidden in lowered programs
-  (UPat(Ops.PARAM, name="x"), lambda x: False if x.addrspace is AddrSpace.TEMPLATE else None),
   # a bare CONST only appears under its width CAST or as a PARAM/BUFFER/ALLOC size
   (UPat(GroupOp.All-GroupOp.Defines, name="x"), lambda x: False if x.op is not Ops.CAST and any(s.op is Ops.CONST for s in x.src) else None),
   (UPat(GroupOp.All-{Ops.CONST}, dtypes.weaks), lambda: False),
