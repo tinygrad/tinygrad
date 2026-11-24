@@ -201,8 +201,8 @@ class TestHostCalls(unittest.TestCase):
 
   def test_sink_calls_function(self): # a bare sink with args calls a function that writes one arg and takes the address of the other
     def sink(o:UOp, b:UOp):
-      return addr_of(UOp.param(0, dtypes.uint64, 1, name="o"), UOp.param(1, dtypes.uint8, 16, name="b")).sink(
-        arg=KernelInfo("sink", kernel=False)).call(o, b)
+      return addr_of(UOp.param(0, dtypes.uint64, 1, name="o"),
+                     UOp.param(1, dtypes.uint8, 16, name="b")).sink(arg=KernelInfo("sink", kernel=False)).call(o, b)
     outs, b = [self._buf(1) for _ in range(2)], self._buf(16, dtypes.uint8)
     for out in outs: self.assertEqual(self._run(sink, out, b), [b.buffer.get_buf("CPU")]) # the second run reuses the program
 

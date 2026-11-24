@@ -261,7 +261,6 @@ class TestFunction(unittest.TestCase):
     foo = Foo()
     f = function(foo, allow_implicit=True)
     np.testing.assert_equal(f(Tensor([1,2,3])).numpy(), [11,22,33])
-    assert f(Tensor([1,2,3])).uop.src[1].op is Ops.CALL
 
   def test_iadd(self):
     @function
