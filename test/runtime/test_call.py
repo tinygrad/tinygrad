@@ -371,7 +371,7 @@ class TestArgOrder(unittest.TestCase):
   def make_intersperse_call(self, x, precompile=False):
     # the output is at position 0, the input (param slot 1) at position 1 in the call's args
     val = UOp.param(1, x.dtype, x.shape, self._dev(x)).reshape(x.shape) * 2
-    return UOp.call_with_outputs((val,), x.uop, name='t', output_pos=(0,), precompile=precompile)
+    return UOp.call_with_outputs((val,), x.uop, output_pos=(0,), precompile=precompile)
 
   def test_intersperse_returned(self):
     x = Tensor.arange(3, dtype=dtypes.int).realize()
@@ -402,7 +402,7 @@ class TestArgOrder(unittest.TestCase):
     x.requires_grad = True
     p1 = UOp.param(1, dtypes.float, x.shape, self._dev(x))
     val = p1.reshape(x.shape) * p1.reshape(x.shape)
-    outs = UOp.call_with_outputs((val,), x.uop, name='t', output_pos=(0,))
+    outs = UOp.call_with_outputs((val,), x.uop, output_pos=(0,))
     y = Tensor(outs[0], device=x.device)
     y.sum().backward()
     np.testing.assert_equal(x.grad.numpy(), [2, 4, 6])
