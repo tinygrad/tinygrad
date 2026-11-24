@@ -333,6 +333,11 @@ class TestMultiTensor(unittest.TestCase):
     out = attn.cache_k.flatten().numpy()
     np.testing.assert_allclose(out, [1.,1.,1.,1.,1.,1.,0.,0.,1.,1.,1.,1.,1.,1.,0.,0.])
 
+  def test_assign_shard_reads_flipped_self(self):
+    a = Tensor([[0, 1, 2, 3], [4, 5, 6, 7]]).shard(devices_2, axis=0).contiguous().realize()
+    a.assign(a.flip(1) + 1)
+    self.assertEqual(a.tolist(), [[4, 3, 2, 1], [8, 7, 6, 5]])  # each shard reads its old row reversed before it is overwritten
+
   def test_multi_tensor_jit_graph_assign_updates_each_shard(self):
     @TinyJit
     def jf(out: Tensor) -> Tensor:
