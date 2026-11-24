@@ -899,31 +899,19 @@ class GatedDeltaNetBlock(FFNBlock):
                             start_pos=None if isinstance(pos, UOp) else int(pos))) is not None:
       core = core_slop.transpose(1, 2)
     else:
+      q, k, v, beta, alpha = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1), alpha.unsqueeze(-2)
       state = initial.where(0, self.recurrent_state.float())
-      if T_pad > 1 and not is_kda:
-        # Chunked WY-representation scan: invert strictly lower-triangular (I + A) via log2(T_pad) matrix squarings
-        G = log_alpha.transpose(1, 2).float().cumsum(-2)
-        tril = Tensor.ones(T_pad, T_pad, device=q.device if isinstance(q.device, str) else None).tril()
-        if isinstance(q.device, tuple): tril = tril.shard(q.device)
-        dG = ((G - G.transpose(-1, -2)) * tril).exp() * tril
-        inv, P = tril - tril.tril(-1), -((k @ k.transpose(-1, -2)) * dG.tril(-1) * beta.unsqueeze(-1))
-        for _ in range((T_pad - 1).bit_length()): inv, P = inv + inv @ P, P @ P
-        u = inv @ ((v - (k * G.exp()) @ state.transpose(-1, -2)) * beta.unsqueeze(-1))
-        out_t = ((q * G.exp()) @ state.transpose(-1, -2) + ((q @ k.transpose(-1, -2)) * dG) @ u).transpose(1, 2)
-        state = state * G[:, :, -1:].exp().transpose(-1, -2) + u.transpose(-1, -2) @ (k * (G[:, :, -1:] - G).exp())
-      else:
-        q, k, v, beta, alpha = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1), alpha.unsqueeze(-2)
-        outs = []
-        for t in range(T_pad):
-          s1 = state * alpha[:, :, t]  # decay the state
-          delta = (v[:, :, t] - (s1*k[:, :, t]).sum(-1, keepdim=True)) * beta[:, :, t]  # the delta rule update
-          state = s1 + delta * k[:, :, t]
-          outs.append((state * q[:, :, t]).sum(-1))
-        out_t = outs[0].stack(*outs[1:], dim=1)
-      # store the updated recurrent state in place, then read the outputs after the state and conv writes
+      outs = []
+      for t in range(T_pad):
+        s1 = state * alpha[:, :, t]  # decay the state
+        delta = (v[:, :, t] - (s1*k[:, :, t]).sum(-1, keepdim=True)) * beta[:, :, t]  # the delta rule update
+        state = s1 + delta * k[:, :, t]
+        outs.append((state * q[:, :, t]).sum(-1))
+
+      # store the updated recurrent state in place, then read the stacked outputs after the state and conv writes
       state_store = self.recurrent_state.uop.after(self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop))
       conv_writes = [c.uop.after(st) for c, st in zip(states, conv_state_stores)]
-      core = Tensor(out_t.contiguous().uop.after(state_store, *conv_writes))
+      core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store, *conv_writes))
 
     # output; undo the padding before the output projection
     z = (self.ssm_norm(core) * (out_gate.silu() if unwrap(self.config.ssm).silu_gate else out_gate.sigmoid())).cast(x.dtype).contiguous()
@@ -1233,8 +1221,7 @@ class Transformer:
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
   def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
-    if self.has_recurrent_block and self.config.ssm is not None and self.config.ssm.kda \
-        and not amd_custom_kernels_supported(self.token_embd.weight.device): chunk_size = 1
+    if self.has_recurrent_block and not amd_custom_kernels_supported(self.token_embd.weight.device): chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported

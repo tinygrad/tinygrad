@@ -140,31 +140,6 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
     finally:
       _slop_uop.cache_clear()
 
-  def test_gated_delta_chunked_wy_matches_sequential(self):
-    from tinygrad.llm.model import GatedDeltaNetBlock, SSMConfig, TransformerConfig
-    rng = np.random.default_rng(19)
-    ssm = SSMConfig(conv_kernel=2, state_size=16, group_count=2, time_step_rank=2, inner_size=32, silu_gate=True)
-    cfg = TransformerConfig(num_blocks=1, dim=32, hidden_dim=32, n_heads=2, n_kv_heads=2, norm_eps=1e-6, vocab_size=32,
-                            head_dim=16, v_head_dim=16, rope_theta=1e4, rope_dim=16, max_context=64, ssm=ssm)
-    blk = GatedDeltaNetBlock(cfg, ssm)
-    for k, w in blk.__dict__.items():
-      if isinstance(w, Linear): w.weight = Tensor(rng.normal(0, 0.05, w.weight.shape).astype(np.float16)).realize()
-    blk.ssm_conv1d["weight"] = Tensor(rng.normal(0, 0.1, blk.ssm_conv1d["weight"].shape).astype(np.float32)).realize()
-    blk.ssm_a = Tensor(-rng.uniform(0.1, 1.0, blk.ssm_a.shape).astype(np.float32)).realize()
-    x = Tensor(rng.normal(0, 0.3, (1, 16, 32)).astype(np.float32)).realize()
-    with Context(SLOP=0):
-      # Chunked WY (T=16 in one call) vs sequential (16 calls of T=1)
-      blk._init_state(x)
-      got = blk._attention(x, (0,)).numpy()
-      st_chunk = blk.recurrent_state.numpy().copy()
-      del blk.recurrent_state, blk.conv_state
-      blk._init_state(x[:, :1])
-      outs = [blk._attention(x[:, i:i+1], (i,)).numpy() for i in range(16)]
-      ref = np.concatenate(outs, axis=1)
-      st_seq = blk.recurrent_state.numpy().copy()
-    np.testing.assert_allclose(got, ref, rtol=2e-3, atol=2e-3)
-    np.testing.assert_allclose(st_chunk, st_seq, rtol=2e-3, atol=2e-3)
-
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "slow on WEBGPU")
   def test_quant_linear_fallback(self):
     if amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("run with SLOP=0")
