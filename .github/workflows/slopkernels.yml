@@ -36,7 +36,7 @@ jobs:
         python-version: '3.12'
     - name: Install test dependencies & AMD comgr
       run: |
-        pip install -q mypy==2.3.1 pytest pytest-xdist numpy gguf
+        pip install -q ruff==0.16.4 mypy==2.3.1 pytest pytest-xdist numpy gguf
         if ! dpkg-query -W -f='${db:Status-Abbrev}' comgr 2>/dev/null | grep -q '^ii'; then
           sudo mkdir -p /etc/apt/keyrings
           wget -qO- https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg >/dev/null
@@ -45,8 +45,10 @@ jobs:
         fi
         printf '/opt/rocm/lib\n/opt/rocm/lib64\n' | sudo tee /etc/ld.so.conf.d/rocm.conf >/dev/null
         sudo ldconfig
-    - name: Typecheck slopkernels
-      run: python3 -m mypy slopkernels/__init__.py slopkernels/__main__.py slopkernels/bench.py slopkernels/src
+    - name: Lint & typecheck slopkernels
+      run: |
+        python3 -m ruff check slopkernels/
+        python3 -m mypy slopkernels/__init__.py slopkernels/__main__.py slopkernels/bench.py slopkernels/src
     - name: Compile all slopkernels offline to UIR
       run: DEV=NULL python3 -m slopkernels /tmp/slopkernels_uir --target ${{ matrix.arch }}
     - name: Run slopkernels tests
@@ -73,5 +75,5 @@ jobs:
       uses: actions/checkout@v6
     - name: Setup (AMD)
       run: AM_RESET=1 python3 -c 'from tinygrad import Device; Device[Device.DEFAULT]'
-    - name: Benchmark LLM ops (GGUF GEMV, GGUF GEMM, MoE, Attention)
-      run: python3 -m slopkernels.bench --fast --warmup 2 --iters 5
+    - name: Benchmark & verify LLM ops (GGUF GEMV, GGUF GEMM, MoE, Attention)
+      run: python3 -u -m slopkernels.bench --fast --warmup 2 --iters 5
