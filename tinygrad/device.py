@@ -40,10 +40,12 @@ class _Device:
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()} as DEV={self.target_for(ix)}")
     return ret
   def target_for(self, device:str, cv=DEV) -> Target:
-    if not (t:=cv.target(device.split(':')[0])).arch and device not in self._opened_devices: self[device]
-    if (d:=self._opened_devices.get(device)) is None: return t
-    iface = type(d.iface).__name__[:-5] if hasattr(d, "iface") else ""
-    return replace(t, arch=t.arch or d.arch or "", interface=t.interface or iface, props=",".join(f"{k}={v}" for k, v in (d.props | t.opts).items()))
+    if (t:=cv.target(device.split(':')[0])).arch: return t
+    if device not in self._opened_devices:
+      try: self[device]
+      except Exception as e: raise RuntimeError(f"no target for {device}: set its arch in DEV, or open it") from e
+    iface = type(d.iface).__name__[:-5] if hasattr(d:=self._opened_devices[device], "iface") else ""
+    return replace(t, arch=d.arch or "", interface=t.interface or iface, props=",".join(f"{k}={v}" for k, v in (d.props | t.opts).items()))
   def renderer_for(self, device:str, cv=DEV) -> Renderer: return select_renderer(cv.target((t:=self.target_for(device, cv)).device, arch=t.arch))
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]

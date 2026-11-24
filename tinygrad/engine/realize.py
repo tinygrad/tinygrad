@@ -6,7 +6,7 @@ from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCount
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.uop.ops import pm_flatten_linear
-from tinygrad.device import Device, Buffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS
+from tinygrad.device import Device, Buffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS, host_of
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer, TinyELF
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
@@ -245,14 +245,24 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat.native("validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None, cache=False) -> UOp:
-  if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
-  if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
-  linear = lower_and_compile(linear)
-  linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
-  return linear
+def ensure_targets(linear:UOp):
+  devs = {d for c in linear.src for b in get_call_arg_uops(c.without_after) for d in to_tuple(b.device) if d is not None}
+  for d in sorted(devs | {host_of(d) for d in devs} | {HCQ_RUNTIME_DEV.device}): Device.target_for(d)
 
-def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp: return hcq_link(linear, input_uops=input_uops)
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None, cache=False) -> UOp:
+  ensure_targets(linear)
+  with Context(ALLOW_DEVICE_USAGE=0):
+    if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
+    if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
+    linear = lower_and_compile(linear)
+    return hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
+
+def ensure_devices(linear:UOp):
+  for d in sorted({d for u in linear.toposort() if u.op is Ops.EXTERN for d in to_tuple(u.device) if d is not None}): Device[d]
+
+def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
+  ensure_devices(linear)
+  return hcq_link(linear, input_uops=input_uops)
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   assert linear.op is Ops.LINEAR, f"run_linear calls on {linear.op}"
