@@ -378,7 +378,7 @@ class TestVizIntegration(unittest.TestCase):
     c2 = Tensor.empty(8, device="NULL")
     # uniquely named A = B + 1 kernel
     kernel_name = f"custom_add1_link_sched_codegen_{BEAM.value}"
-    def custom_add1(A:UOp, B:UOp): return A[0].store(B[0]+1).sink(arg=KernelInfo(kernel_name))
+    def custom_add1(A:UOp, B:UOp): return A[0].store(B[0].load()+1).sink(arg=KernelInfo(kernel_name))
     with save_viz() as viz:
       c1 = Tensor.custom_kernel(c1, c2, fxn=custom_add1)[0]
       c1.realize()
@@ -404,7 +404,7 @@ class TestVizIntegration(unittest.TestCase):
   @Context(DEV="NULL:X86:x86_64")
   def test_insts_label(self):
     name = "insts_label"
-    def custom_insts(A): return A[0].set(A[0]+1).sink(arg=KernelInfo(name))
+    def custom_insts(A): return A[0].set(A[0].load()+1).sink(arg=KernelInfo(name))
     x = Tensor.custom_kernel(Tensor.empty(1), fxn=custom_insts)[0]
     with save_viz() as viz:
       x.realize()

@@ -194,7 +194,7 @@ class TestTensorCores(unittest.TestCase):
     n, m, k = (tc:=Device[Device.DEFAULT].renderer.tensor_cores[0]).dims
     def kernel(C:UOp, A:UOp, B:UOp) -> UOp:
       i, j, r = UOp.range(m*2, 0, AxisType.WEAK), UOp.range(n*2, 1), UOp.range(k*2, 2)
-      out = (A[i, r]*B[r, j]).cast(tc.dtype_out).reduce(i, r, arg=Ops.ADD)
+      out = (A[i, r].load()*B[r, j].load()).cast(tc.dtype_out).reduce(i, r, arg=Ops.ADD)
       return C[j].store(out).end(j).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.TC, 0, (-1, 0, 1)),)))
     a, b, c = Tensor.empty(m*2, k*2, dtype=tc.dtype_in), Tensor.empty(k*2, n*2, dtype=tc.dtype_in), Tensor.empty(n*2, dtype=tc.dtype_out)
     ast = Tensor.custom_kernel(c, a, b, fxn=kernel)[0].schedule_linear().src[-1].src[0]

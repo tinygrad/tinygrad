@@ -32,7 +32,7 @@ def rngs_for_shape(shape:tuple[sint, ...], rng:int, axis_type=AxisType.WEAK): re
 def copy(dest:UOp, src:UOp, rng:int, upcast=False):
   assert dest.shape == src.shape
   rngs = rngs_for_shape(src.shape, rng, AxisType.UPCAST if upcast else AxisType.WEAK)
-  return dest[*rngs].store(src[*rngs]).end(*rngs)
+  return dest[*rngs].store(src[*rngs].load()).end(*rngs)
 
 def hand_spec_kernel3(c:UOp, a:UOp, b:UOp) -> UOp:
   # ---------------------------
@@ -98,7 +98,7 @@ def hand_spec_kernel3(c:UOp, a:UOp, b:UOp) -> UOp:
   # TODO: why don't these work as upcast?
   # why if the ranges merge is it slow?!? (if you change the order on end, they will merge. big slowdown on METAL)
   iter_m, t_m, iter_n, t_n = rngs = rngs_for_shape(c_regs.shape, 500)
-  sink = c_regs[*rngs].store(c_regs.after(k)[*rngs] + A_col[iter_m, t_m] * B_row[iter_n, t_n]).end(iter_m, iter_n, t_m, t_n)
+  sink = c_regs[*rngs].store(c_regs.after(k)[*rngs].load() + A_col[iter_m, t_m].load() * B_row[iter_n, t_n].load()).end(iter_m, iter_n, t_m, t_n)
 
   # Close k, sync, and close K tiles
   sink = sink.end(k).end(k_tile_range)

@@ -29,18 +29,18 @@ def custom_add_one_kernel(B:UOp, A:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
   assert B.numel() == A.numel()
   i = UOp.range(A.numel(), 0)
-  return B[i].store(A[i] + 1).end(i).sink(arg=KernelInfo(name=f"add_one_{A.numel()}"))
+  return B.index(i).store(A.index(i).load() + 1).end(i).sink(arg=KernelInfo(name=f"add_one_{A.numel()}"))
 
 def custom_ignore_first_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
   # A is unused on purpose: the kernel takes call buffers 0 and 2, not 0, 1, 2
   C, B = C.flatten(), B.flatten()
   i = UOp.range(C.numel(), 0)
-  return C[i].store(B[i] + 1).end(i).sink(arg=KernelInfo(name=f"ignore_first_{C.numel()}"))
+  return C[i].store(B[i].load() + 1).end(i).sink(arg=KernelInfo(name=f"ignore_first_{C.numel()}"))
 
 def custom_add_var_kernel(*srcs:UOp, n_slot:int) -> UOp:
   C, *Bs = [s.flatten() for i,s in enumerate(srcs) if i != n_slot]
   i = UOp.range(C.numel(), 0)
-  out = functools.reduce(lambda a,b: a+b, [B[i] for B in Bs]) + srcs[n_slot]
+  out = functools.reduce(lambda a,b: a+b, [B[i].load() for B in Bs]) + srcs[n_slot]
   return C[i].store(out).end(i).sink(arg=KernelInfo(name=f"add_var_{n_slot}_{len(Bs)}"))
 
 def run_kernel_args(out:Tensor, name:str) -> list[str|None]:
@@ -54,18 +54,18 @@ def custom_ignore_first_var_kernel(C:UOp, A:UOp, B:UOp, n:UOp) -> UOp:
   C, B = C.flatten(), B.flatten()
   k = UOp.variable("k", 0, 100, dtype=dtypes.int)
   i = UOp.range(C.numel(), 0)
-  return C[i].store(B[i] + n + k).end(i).sink(arg=KernelInfo(name=f"ignore_first_var_{C.numel()}"))
+  return C[i].store(B[i].load() + n + k).end(i).sink(arg=KernelInfo(name=f"ignore_first_var_{C.numel()}"))
 
 def custom_sum(B:UOp, A:UOp) -> UOp:
   i = UOp.range(A.shape[0], 0)
   B = B[0].set(0.0)
-  B = B[0].set(B.after(i)[0] + A[i], end=i)
+  B = B[0].set(B.after(i)[0].load() + A[i].load(), end=i)
   return B.sink(arg=KernelInfo(name=f"custom_sum_{A.shape[0]}", opts_to_apply=()))
 
 def flip_contract_kernel(dest:UOp, src:UOp):
   i = UOp.range(dest.shape[0], 0)
   j = UOp.range(dest.shape[1], 1, AxisType.UPCAST)
-  vec = src[i, j].contract(j)
+  vec = src[i, j].load().contract(j)
   store = UOp.group(*[dest[i, k].store(vec.index(3-k)) for k in range(4)])
   return store.end(i, j).sink(arg=KernelInfo(name=f"flip_contract_{dest.numel()}", opts_to_apply=()))
 
@@ -75,8 +75,8 @@ def slice_sum_kernel(dest:UOp, src:UOp):
   reg = UOp.placeholder((1,), dest.dtype, 0, addrspace=AddrSpace.REG)
   reg = reg.after(G)[0].set(0)
   R = UOp.range(src.shape[1], 1)
-  reg = reg[0].set(reg.after(R)[0] + slice_src[R], end=R)
-  ast = dest[G].set(reg[0], end=G)
+  reg = reg[0].set(reg.after(R)[0].load() + slice_src[R].load(), end=R)
+  ast = dest[G].set(reg[0].load(), end=G)
   return ast.sink(arg=KernelInfo(name=f"slice_sum_{src.shape[0]}_{src.shape[1]}", opts_to_apply=()))
 
 def simple_qkv_kernel(O:UOp, Q:UOp, K:UOp, V:UOp) -> UOp:
@@ -90,14 +90,14 @@ def simple_qkv_kernel(O:UOp, Q:UOp, K:UOp, V:UOp) -> UOp:
   k_inner = UOp.range(d, 3)
   qk_acc = UOp.placeholder((1,), Q.dtype, 0, addrspace=AddrSpace.REG)
   qk_acc = qk_acc.after(i, j)[0].set(0.0)
-  qk_acc = qk_acc[0].set(qk_acc.after(k_inner)[0] + Q[i, k_inner] * K[j, k_inner], end=k_inner)
-  qk_score = qk_acc[0] / (d ** 0.5)
+  qk_acc = qk_acc[0].set(qk_acc.after(k_inner)[0].load() + Q[i, k_inner].load() * K[j, k_inner].load(), end=k_inner)
+  qk_score = qk_acc[0].load() / (d ** 0.5)
 
   out_acc = UOp.placeholder((1,), Q.dtype, 1, addrspace=AddrSpace.REG)
   out_acc = out_acc.after(i, d_out)[0].set(0.0)
-  out_acc = out_acc[0].set(out_acc.after(j)[0] + qk_score * V[j, d_out], end=j)
+  out_acc = out_acc[0].set(out_acc.after(j)[0].load() + qk_score * V[j, d_out].load(), end=j)
 
-  store = O[i, d_out].store(out_acc[0])
+  store = O[i, d_out].store(out_acc[0].load())
   return store.end(d_out).end(i).sink(arg=KernelInfo(name=f"simple_qkv_{N}_{d}", opts_to_apply=()))
 
 # **** backward callbacks ****
@@ -150,6 +150,12 @@ class TestCustomKernel(unittest.TestCase):
     tst = tst.custom_kernel(fxn=custom_arange_kernel)[0]
     self.assertTrue((ref == tst).all().item())
 
+  def test_store_reshape_destination(self):
+    def kernel(C:UOp):
+      i = UOp.range(4, 0)
+      return C.reshape(4, 4).index(i, 0).store(7).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    self.assertEqual(Tensor.custom_kernel(Tensor.zeros(16, dtype=dtypes.int).contiguous(), fxn=kernel)[0].tolist(), [7, 0, 0, 0]*4)
+
   def test_eye(self):
     ref = Tensor.eye(1024).clone().realize()
     tst = Tensor.empty_like(ref)
@@ -169,6 +175,14 @@ class TestCustomKernel(unittest.TestCase):
     b = a+1
     b_p1 = Tensor.custom_kernel(tst, b, fxn=custom_add_one_kernel)[0]
     self.assertTrue((b_p1 == 3).all().item())
+
+  def test_noncontig_call_input(self):
+    x = Tensor.arange(32).clone().realize().flip(0)
+    y = Tensor.custom_kernel(Tensor.empty_like(x), x, fxn=custom_add_one_kernel)[0]
+    GlobalCounters.reset()
+    y.realize()
+    assert_kernel_count(2)
+    self.assertEqual(y.tolist(), list(range(32, 0, -1)))
 
   def test_sum(self):
     a = Tensor([1.0, 2, 3, 4, 5])
@@ -207,12 +221,12 @@ class TestCustomKernel(unittest.TestCase):
     # the inner reduce ends r1 alone, so r0 and r1 don't merge. the inner sum is 4, the outer adds it 4*4*4 times
     def kernel(C:UOp, A:UOp) -> UOp:
       r0, r1, r2 = [UOp.range(4, n, AxisType.UPCAST) for n in range(3)]
-      return C[0].store(A[r2].reduce(r1, arg=Ops.ADD).reduce(r0, r1, r2, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+      return C[0].store(A[r2].load().reduce(r1, arg=Ops.ADD).reduce(r0, r1, r2, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(1), Tensor.ones(4).contiguous(), fxn=kernel)[0].item(), 256)
 
   def test_reduce_over_singleton_range(self):
     def kernel(C:UOp, A:UOp) -> UOp:
-      return C[0].store(A[1].reduce(UOp.range(1, 0), arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+      return C[0].store(A[1].load().reduce(UOp.range(1, 0), arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), Tensor([2, 3]).contiguous(), fxn=kernel)[0].item(), 3)
 
   def test_reduce_axis_and_range(self):
@@ -236,7 +250,7 @@ class TestCustomKernel(unittest.TestCase):
     # j%2 splits j into two ranges, both are still LOCAL
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.LOCAL)
-      return C[i].store((A[i, j] * (j%2).cast(A.dtype)).reduce(j, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+      return C[i].store((A[i, j].load() * (j%2).cast(A.dtype)).reduce(j, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), a[:, 1::2].sum(1).tolist())
 
@@ -245,7 +259,7 @@ class TestCustomKernel(unittest.TestCase):
     # the inner group's stage is indexed by the outer group's range, which is live at the inner reduce
     def kernel(C:UOp, B:UOp) -> UOp:
       i, g1, g2 = UOp.range(4, 0), UOp.range(4, 1, AxisType.LOCAL), UOp.range(8, 2, AxisType.LOCAL)
-      return C[i].store(B[i, g1, g2].reduce(g2, arg=Ops.ADD).reduce(g1, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+      return C[i].store(B[i, g1, g2].load().reduce(g2, arg=Ops.ADD).reduce(g1, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     b = Tensor.arange(128).reshape(4, 4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), b, fxn=kernel)[0].tolist(), b.sum((1, 2)).tolist())
 
@@ -256,7 +270,7 @@ class TestCustomKernel(unittest.TestCase):
     for at in (AxisType.LOCAL, AxisType.WARP):
       def kernel(C:UOp, A:UOp) -> UOp:
         i, j = UOp.range(4, 0), UOp.range(8, 1, at)
-        return C[i].store(A[i, j].reduce(j, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+        return C[i].store(A[i, j].load().reduce(j, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
       self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), a.sum(1).tolist())
 
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_shared, "LOCAL STAGE needs shared memory")
@@ -264,8 +278,8 @@ class TestCustomKernel(unittest.TestCase):
     # the STAGE ends j, so the accumulator of the reduce over jj is initialized before the jj loop, not inside it
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j, jj = UOp.range(4, 0), UOp.range(8, 1), UOp.range(8, 2)
-      stage = (A[i, j] * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.LOCAL))
-      return C[i].store(stage.index(jj).reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+      stage = (A[i, j].load() * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.LOCAL))
+      return C[i].store(stage.index(jj).load().reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
 
@@ -274,8 +288,8 @@ class TestCustomKernel(unittest.TestCase):
     # the STAGE is inside the thread range i, so every thread stages its own row
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j, jj = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1), UOp.range(8, 2)
-      stage = (A[i, j] * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.LOCAL))
-      return C[i].store(stage.index(jj).reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+      stage = (A[i, j].load() * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.LOCAL))
+      return C[i].store(stage.index(jj).load().reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
 
@@ -284,8 +298,8 @@ class TestCustomKernel(unittest.TestCase):
     # the REG buffer of the STAGE and the accumulator of the reduce are different buffers
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j, jj = UOp.range(4, 0), UOp.range(8, 1), UOp.range(8, 2)
-      stage = (A[i, j] * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.REG))
-      return C[i].store(stage.index(jj).reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+      stage = (A[i, j].load() * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.REG))
+      return C[i].store(stage.index(jj).load().reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
 
@@ -298,7 +312,7 @@ class TestCustomKernel(unittest.TestCase):
         r, i = UOp.range(n, 1), UOp.range(n//2, 0)
         v = (A+1).pad((pad,)).index(r)
         s = (v + (r%2).cast(dtypes.int) if split else v).bufferize(r, arg=BufferizeOpts(None, AddrSpace.REG))
-        return C[i].store(s[i] + s[i+n//2]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+        return C[i].store(s[i].load() + s[i+n//2].load()).end(i).sink(arg=KernelInfo(opts_to_apply=()))
       with self.subTest(split=split):
         self.assertEqual(Tensor.custom_kernel(Tensor.empty(n//2, dtype=dtypes.int), a, fxn=kernel)[0].tolist(), want)
 
@@ -307,8 +321,8 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(C:UOp, A:UOp) -> UOp:
       i, j = UOp.range(4, 0), UOp.range(8, 1)
       reg = UOp.placeholder((1,), dtypes.float, 0, addrspace=AddrSpace.REG)
-      reg = reg.after(i)[0].set(A[i, 0])
-      return C[i].store(A[i, j].reduce(j, arg=Ops.ADD) + reg[0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+      reg = reg.after(i)[0].set(A[i, 0].load())
+      return C[i].store(A[i, j].load().reduce(j, arg=Ops.ADD) + reg[0].load()).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a.sum(1) + a[:, 0]).tolist())
 
@@ -322,7 +336,7 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(out):
       i, j = UOp.range(3, 0), UOp.range(4, 1)
       v = (i*10+j).cast(dtypes.int).bufferize(j, arg=BufferizeOpts(None, space, removable=False))
-      return out[i].store(v.index(2)).end(i).sink()
+      return out[i].store(v.index(2).load()).end(i).sink()
     self.assertEqual(Tensor.empty(3, dtype=dtypes.int).custom_kernel(fxn=kernel)[0].tolist(), [2, 12, 22])
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does not support dynamic register indexing")
   def test_explicit_stage_free_range_reg(self): self._test_explicit_stage_free_range(AddrSpace.REG)
@@ -354,8 +368,9 @@ class TestCustomKernel(unittest.TestCase):
       r, l = UOp.range(4, 0, AxisType.WEAK), UOp.loop(1)
       cnt = UOp.placeholder((1,), dtypes.int, slot=0, addrspace=AddrSpace.REG)
       cnt = cnt.after(r)[0].set(0)
-      cnt = cnt.after(cnt[0].store(nxt:=cnt.after(l)[0] + 1).backedge(l, nxt < 3))
-      return C[r].set(A[r] + cnt[0].cast(C.dtype), end=r).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)),)))
+      cnt = cnt.after(cnt[0].store(nxt:=cnt.after(l)[0].load() + 1).backedge(l, nxt < 3))
+      return C[r].set(A[r].load() + cnt[0].load().cast(C.dtype), end=r).sink(
+        arg=KernelInfo(opts_to_apply=(Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)),)))
     a = Tensor([1., 2, 3, 4])
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), [4., 5, 6, 7])
 
@@ -363,14 +378,14 @@ class TestCustomKernel(unittest.TestCase):
     # a default range is a LOOP: each iteration loads what the previous one stored
     def kernel(A:UOp) -> UOp:
       i = UOp.range(4, 0)
-      return A[i+1].store(A[i]).end(i).sink(arg=KernelInfo())
+      return A[i+1].store(A[i].load()).end(i).sink(arg=KernelInfo())
     self.assertEqual(Tensor.custom_kernel(Tensor([1, 2, 3, 4, 5]).contiguous(), fxn=kernel)[0].tolist(), [1, 1, 1, 1, 1])
 
   def test_range_bound_after_outer_range(self):
     def kernel(C:UOp) -> UOp:
       i = UOp.range(3, 0)
       j = UOp.range(UOp.const(2, dtypes.weakint).after(i), 1)
-      return C[0].set(C.after(i, j)[0] + 1, end=(j, i)).sink(arg=KernelInfo())
+      return C[0].set(C.after(i, j)[0].load() + 1, end=(j, i)).sink(arg=KernelInfo())
     self.assertEqual(Tensor.custom_kernel(Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)[0].tolist(), [6])
 
   def test_gemm_backward_custom(self): self.test_gemm_backward(True)
@@ -420,6 +435,11 @@ class TestCustomKernel(unittest.TestCase):
     assert all(i == 3. for i in c.flatten().tolist()), f"all 3 {c.tolist()}"
     assert_kernel_count(2)
 
+  @Context(SPEC=1)
+  def test_pointer_value_rejected(self):
+    with self.assertRaisesRegex(RuntimeError, r"read it with \.load\(\)"):
+      Tensor.empty(1).custom_kernel(fxn=lambda a: a[0].store(a[0]+1).sink(arg=KernelInfo()))[0].realize()
+
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "kernel timing not supported")
   def test_invalids_into_custom_kernel_with_beam(self):
     a = Tensor.full((4, 4), 3.).contiguous()
@@ -441,8 +461,8 @@ class TestCustomKernel(unittest.TestCase):
     def custom_add_with_tmp(o1:UOp, o2:UOp, A:UOp, B:UOp) -> UOp:
       o1,o2,A,B = o1.flatten(), o2.flatten(), A.flatten(), B.flatten()
       i = UOp.range(o1.numel(), 0)
-      store_o1 = o1[i].store(A[i]+B[i])
-      store_o2 = o2[i].store(A[i]+B[i]+2)
+      store_o1 = o1[i].store(A[i].load()+B[i].load())
+      store_o2 = o2[i].store(A[i].load()+B[i].load()+2)
       return UOp.group(store_o1, store_o2).end(i).sink(arg=KernelInfo(name=f"add_with_tmp_{o1.numel()}")).simplify()
 
     from tinygrad import function
@@ -506,7 +526,8 @@ class TestCustomKernel(unittest.TestCase):
     def custom_assign_row_max_kernel(A:UOp) -> UOp:
       row = UOp.range(A.shape[0], 0)
       col = UOp.range(A.shape[1], 1)
-      return A[row, col].store(A[row].max(axis=0)).end(col).end(row).sink(arg=KernelInfo(name=f"assign_row_max_{A.numel()}", opts_to_apply=()))
+      return A[row, col].store(A[row].load().max(axis=0)).end(col).end(row).sink(
+        arg=KernelInfo(name=f"assign_row_max_{A.numel()}", opts_to_apply=()))
     a = Tensor.arange(4).reshape(2, 2).clone().realize()
     a = Tensor.custom_kernel(a.T, fxn=custom_assign_row_max_kernel)[0]
     with self.assertRaises(AssertionError):
@@ -521,7 +542,7 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(out:UOp):
       i = UOp.range(len(payload), 0)
       data = view(UOp(Ops.BINARY, arg=payload))
-      return out[i].store(data[i]).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
+      return out[i].store(data[i].load()).end(i).sink(arg=KernelInfo(name="binary", opts_to_apply=()))
     self.assertEqual(Tensor.empty(len(payload), dtype=dtypes.uint8).custom_kernel(fxn=kernel)[0].tolist(),
                      view(Tensor(payload, dtype=dtypes.uint8)).tolist())
 
@@ -542,7 +563,7 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(Tensor.custom_kernel(Tensor([1, 0]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), fxn=kernel)[1].tolist(), [3])
 
   def test_index_coordinate_read(self):
-    def kernel(A:UOp, B:UOp, C:UOp): return B[0].store(C[A[0]]).sink(arg=KernelInfo(opts_to_apply=()))
+    def kernel(A:UOp, B:UOp, C:UOp): return B[0].store(C[A[0].load()].load()).sink(arg=KernelInfo(opts_to_apply=()))
     a, b, c = Tensor([2]).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous(), Tensor([10, 11, 12]).contiguous()
     with Context(CHECK_OOB=0):
       self.assertEqual(Tensor.custom_kernel(a, b, c, fxn=kernel)[1].tolist(), [12])
@@ -553,7 +574,7 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(b.tolist(), [(-3 & 0xFFFF) + (4 << 16)])
 
   def test_index_vector_bitcast_narrow(self):
-    def kernel(A:UOp, B:UOp): return B[0].store((A.index()+1).bitcast(dtypes.uint16)[3]).sink(arg=KernelInfo(opts_to_apply=()))
+    def kernel(A:UOp, B:UOp): return B[0].store((A.index().load()+1).bitcast(dtypes.uint16)[3]).sink(arg=KernelInfo(opts_to_apply=()))
     _, b = Tensor.custom_kernel(Tensor([1, 5 << 16], dtype=dtypes.uint32).contiguous(), Tensor.zeros(1, dtype=dtypes.uint16).contiguous(), fxn=kernel)
     self.assertEqual(b.tolist(), [5])
 
@@ -580,9 +601,9 @@ class TestCustomKernel(unittest.TestCase):
       i = UOp.range(N, 0, AxisType.LOOP)
       alloc = UOp.alloc((N,), dtypes.int, -1, addrspace=AddrSpace.REG)
       buf = UOp._buffer(N, dtypes.int, -1, addrspace=AddrSpace.REG)
-      alloc = alloc[i].set(inp[i])
-      buf = buf.after(alloc)[i].set(inp[i+N])
-      return out[i].store(alloc.after(buf)[i] + buf[i]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+      alloc = alloc[i].set(inp[i].load())
+      buf = buf.after(alloc)[i].set(inp[i+N].load())
+      return out[i].store(alloc.after(buf)[i].load() + buf[i].load()).end(i).sink(arg=KernelInfo(opts_to_apply=()))
     out = Tensor.custom_kernel(Tensor.empty(N, dtype=dtypes.int), Tensor.arange(2*N).clone().realize(), fxn=kernel)[0]
     self.assertEqual(out.tolist(), [2*i+N for i in range(N)])
 
@@ -594,7 +615,7 @@ class TestCustomKernel(unittest.TestCase):
       def kernel(out:UOp, inp:UOp):
         reg = UOp.alloc((2,), dtypes.int, addrspace=AddrSpace.REG)
         reg = reg.after(reg.store(inp.reshape(shape)))
-        return UOp.sink(out[0].store(reg[0]), out[1].store(reg[1]), arg=KernelInfo(opts_to_apply=()))
+        return UOp.sink(out[0].store(reg[0].load()), out[1].store(reg[1].load()), arg=KernelInfo(opts_to_apply=()))
       return Tensor.custom_kernel(Tensor.empty(2, dtype=dtypes.int), Tensor([2, 3]).realize(), fxn=kernel)[0].tolist()
     self.assertEqual(stored((1, 2)), [2, 3])
     with self.assertRaises(ValueError): stored((2, 1))
@@ -749,7 +770,7 @@ class TestCustomKernelSharded(unittest.TestCase):
   def test_reduce_device_range_not_copy(self):
     def kernel(C:UOp, A:UOp):
       d = UOp.range(2, 0, AxisType.DEVICE)
-      return UOp(Ops.NOOP).after(d.after(C[0].store(A[0])).reduce(d, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
+      return UOp(Ops.NOOP).after(d.after(C[0].store(A[0].load())).reduce(d, arg=Ops.ADD)).sink(arg=KernelInfo(opts_to_apply=()))
     out = Tensor.zeros(2, device='CPU').shard(('CPU:1', 'CPU:2'), axis=0).contiguous().realize()
     with self.assertRaises(RuntimeError): Tensor.custom_kernel(out, Tensor([7.]).realize(), fxn=kernel)[0].realize()
 
@@ -780,7 +801,7 @@ class TestUnshardIndex(unittest.TestCase):
       j = UOp.range(8, 2)
       # 8x8 fragment, 8 threads -> 64x8 full tile. thread ty owns rows [ty*8, ty*8+8).
       frag = UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG).unshard((0,), (ty,))
-      return C[ty*8 + ir, j].store(frag[ty*8 + ir, j]).end(j, ir, ty).sink(arg=KernelInfo(name="contig_frag"))
+      return C[ty*8 + ir, j].store(frag[ty*8 + ir, j].load()).end(j, ir, ty).sink(arg=KernelInfo(name="contig_frag"))
     out = self._run(kernel, (64, 8))
     assert out.shape == (64, 8)
 
@@ -793,7 +814,7 @@ class TestUnshardIndex(unittest.TestCase):
       j = UOp.range(8, 2)
       frag = UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG).unshard((0,), (ty,))
       frag = frag.after(frag.store(A)).reshape(8, 8, 8).permute(1, 0, 2)
-      return C[ty + ir*8, j].store(frag[ir, ty, j]).end(j, ir, ty).sink(arg=KernelInfo(name="strided_frag", opts_to_apply=()))
+      return C[ty + ir*8, j].store(frag[ir, ty, j].load()).end(j, ir, ty).sink(arg=KernelInfo(name="strided_frag", opts_to_apply=()))
     a = Tensor.arange(512).float().reshape(64, 8).contiguous()
     np.testing.assert_equal(self._run(kernel, (64, 8), inputs=(a,)), a.numpy().reshape(8, 8, 8).transpose(1, 0, 2).reshape(64, 8))
 
@@ -804,7 +825,7 @@ class TestUnshardIndex(unittest.TestCase):
       local = UOp.range(2, 1)
       frag = UOp.placeholder((2,), dtypes.float32, 0, AddrSpace.REG).unshard(0, owner)
       frag = frag.after(frag.store(A))
-      return C[owner + local*2].store(frag[owner + local*2]).end(local, owner).sink(arg=KernelInfo(opts_to_apply=()))
+      return C[owner + local*2].store(frag[owner + local*2].load()).end(local, owner).sink(arg=KernelInfo(opts_to_apply=()))
     with self.assertRaisesRegex(RuntimeError, "cannot shard index"): self._run(kernel, (4,), inputs=(Tensor.arange(4).float().contiguous(),))
 
   def test_fragment_index_cannot_shard(self):
@@ -814,7 +835,7 @@ class TestUnshardIndex(unittest.TestCase):
       ir = UOp.range(8, 1)
       j = UOp.range(8, 2)
       frag = UOp.placeholder((8, 8), dtypes.float32, 0, AddrSpace.REG).unshard((0,), (ty,))
-      return C[ty + ir, j].store(frag[ty + ir, j]).end(j, ir, ty).sink(arg=KernelInfo(name="bad_frag"))
+      return C[ty + ir, j].store(frag[ty + ir, j].load()).end(j, ir, ty).sink(arg=KernelInfo(name="bad_frag"))
     with self.assertRaisesRegex(RuntimeError, "cannot shard index"):
       self._run(kernel, (64, 8))
 

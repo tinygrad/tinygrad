@@ -61,8 +61,9 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
   if k.ren.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
     k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.ren.has_shared and \
-    (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.INDEX and mulop.src[1].op is Ops.INDEX:
-    idx0, idx1 = mulop.src[0].src[1].get_idx(), mulop.src[1].src[1].get_idx()
+    (mulop:=k.reduceop.src[0]).op is Ops.MUL and \
+    all(map(lambda x: x.op is Ops.INDEX, (idxs:=tuple(s.src[0] if s.op is Ops.LOAD else s for s in mulop.src)))):
+    idx0, idx1 = (x.src[1].get_idx() for x in idxs)
     if reduce_axes:=k.axes_of(AxisType.WEAK, reduce=True):
       first_reduce_rng = k.rngs[reduce_axes[0]]
       if any(u is first_reduce_rng for u in idx0.split_uop(Ops.ADD)) and all(r in idx1.ranges for r in idx0.ranges):

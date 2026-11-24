@@ -436,6 +436,8 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6) < 3, 0, 1, "(a<3)")
     self.helper_test_variable(Variable("a", 0, 6) < 8, 1, 1, "True")
 
+  def test_pointer_cast_bool(self): self.assertEqual(UOp.param(0, dtypes.int, 1).index(0).cast(dtypes.bool).simplify().op, Ops.CAST)
+
   def test_cast_bool(self):
     self.helper_test_variable(Variable("a", 0, 10).cast(dtypes.bool), 0, 1, "a!=0")
 
@@ -1450,7 +1452,7 @@ class TestInvalidIndex(unittest.TestCase):
     buf = UOp.param(0, dtypes.bool, 17)
     ridx = Variable("ridx", 0, 31)
     cond = ridx < 17
-    load = buf.index(ridx.valid(cond))
+    load = buf.index(ridx.valid(cond)).load()
     out = graph_rewrite(cond.where(load.where(uconst(2), uconst(0)), UOp.invalid()), sym)
     idx = next(u for u in out.toposort() if u.op is Ops.INDEX)
     self.assertIs(idx.src[1].get_valid(), cond.simplify())
@@ -1479,7 +1481,7 @@ class TestMoveWhereOnLoad(unittest.TestCase):
     cond = (a < 4) & (r < 2)
     valid = (a < 2)  # pre-existing valid on the load (to pass can_move check for the r-only clause)
     idx = buf.index(a.valid(valid))
-    expr = cond.where(idx, UOp.const(0))
+    expr = cond.where(idx.load(), UOp.const(0))
     out = graph_rewrite(expr, pm_move_where_on_load)
     type_verify(out, spec_shared)  # Invalid matches any dtype
 

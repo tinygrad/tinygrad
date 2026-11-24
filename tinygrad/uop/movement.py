@@ -16,6 +16,12 @@ mop_cleanup = PatternMatcher([
   # STACK on INDEX CONST
   (UPat(Ops.STACK, src=UPat(Ops.INDEX, src=(UPat.var("src"), UPat(Ops.CONST))), name="stk"),
    lambda src,stk: src if stk.shape == src.shape and list(range(len(stk.src))) == [x.src[1].val for x in stk.src] else None),
+  # STACK of LOADs folds only when all lanes share a buffer and LOAD arg
+  (UPat(Ops.STACK, src=UPat(Ops.INDEX, src=(UPat(), UPat(Ops.CONST))).load(), name="stk")
+   .f(Ops.INDEX, allow_any_len=True, name="idx"),
+   lambda stk,idx: stk.src[0].replace(src=(src.index(*idx.src[1:]),)) if
+   stk.shape == (src:=stk.src[0].src[0].src[0]).shape and list(range(len(stk.src))) == [x.src[0].src[1].val for x in stk.src] and
+   all(x.src[0].src[0] is src and x.arg == stk.src[0].arg for x in stk.src) else None),
   # const INDEX into STACK is src
   (UPat(Ops.INDEX, src=(UPat(Ops.STACK, name="a"), UPat.cvar("i")), name="idx", allow_any_len=True),
    lambda a,i,idx: a.src[i.val] if len(idx.src) <= 2 else a.src[i.val].index(*idx.src[2:])),
