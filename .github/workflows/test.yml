@@ -494,6 +494,9 @@ jobs:
       run: |
         python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
         DEBUG=4 python test/test_tiny.py TestTiny.test_plus
+    - name: Test x86 emulator
+      if: matrix.dev == 'CPU:X86'
+      run: DEV=MOCK+CPU:X86 python test/test_tiny.py TestTiny.test_plus
     - name: Run runtime tests
       run: python -m pytest -n=auto test/runtime test/device/$(python -c 'from tinygrad import Device; print(Device.DEFAULT.lower())') --durations=20
     - name: Run process replay tests
