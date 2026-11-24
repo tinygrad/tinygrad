@@ -2,7 +2,7 @@ from __future__ import annotations
 import ctypes, functools, mmap, struct, time
 from typing import Any, Callable
 from tinygrad.helpers import DEBUG, DEV, getenv, unwrap, to_name
-from tinygrad.device import Device, Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV
+from tinygrad.device import Device, Buffer, BufferStorage, BufferSpec, Allocator, Compiled, MMIOInterface, HCQ_RUNTIME_DEV, host_of
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.engine.realize import get_call_kernel_args
@@ -21,35 +21,36 @@ def check(status:int):
 # *****************
 # runtime
 
-def cu_launch_kernel(ctx:CUDADevice, call:UOp, prg:UOp) -> tuple:
-  rows = layout_args(get_call_kernel_args(call, prg, (ctx.device,)), 48)
+def cu_launch_kernel(ctx:str, call:UOp, prg:UOp) -> tuple:
+  rows = layout_args(get_call_kernel_args(call, prg, (ctx,)), 48)
   buf = UOp.alloc((max([o + w.dtype.itemsize for o, w in rows], default=48),), dtypes.uint8, device=HCQ_RUNTIME_DEV.device, name="kernargs")
   addr = buf.getaddr(HCQ_RUNTIME_DEV.device) # [extra: buffer pointer, &args, buffer size, &size, end][size][args]
-  hdr = layout_args([UOp.const(v, dtypes.uint64) if isinstance(v, int) else v for v in (1, addr+48, 2, addr+40, ctx.launch_end, buf.max_numel()-48)])
-  func = (p:=make_program(prg, 8, ctx.device)).after(p.store(prg)).bitcast(dtypes.u64).index(0).load()
+  hdr = layout_args([UOp.const(v, dtypes.uint64) if isinstance(v, int) else v
+                     for v in (1, addr+48, 2, addr+40, Device.get_class(ctx).launch_end, buf.max_numel()-48)])
+  func = (p:=make_program(prg, 8, ctx)).after(p.store(prg)).bitcast(dtypes.u64).index(0).load()
   global_size, local_size = prg.arg.launch_dims(call)
   return (cuda.cuLaunchKernel, func, *global_size, *local_size, 0, None, 0, patch(buf, hdr + rows).index(0))
 
 pm_cuda = PatternMatcher([ # None is the stream
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), cu_launch_kernel),
   (UPat(Ops.CALL, src=(UPat(Ops.STORE), UPat(name="dst"), UPat(name="src")), allow_any_len=True),
-   lambda ctx, dst, src: (cuda.cuMemcpyAsync, dst.getaddr(ctx.device), src.getaddr(ctx.device), src.max_numel() * src.dtype.itemsize, None)),
+   lambda ctx, dst, src: (cuda.cuMemcpyAsync, dst.getaddr(ctx), src.getaddr(ctx), src.max_numel() * src.dtype.itemsize, None)),
   (UPat(Ops.CALL, src=(UPat.native("copy"), UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
-   lambda ctx, dst, src, n: (cuda.cuMemcpyAsync, dst.getaddr(ctx.device), src.getaddr(ctx.device), n.val, None)),
+   lambda ctx, dst, src, n: (cuda.cuMemcpyAsync, dst.getaddr(ctx), src.getaddr(ctx), n.val, None)),
   (UPat(Ops.CALL, src=(UPat.native("wait"), UPat(name="sig"), UPat(name="val"))),
-   lambda ctx, sig, val: (cuda.cuStreamWaitValue32_v2, None, sig.getaddr(ctx.device), val.cast(dtypes.uint32), cuda.CU_STREAM_WAIT_VALUE_GEQ)),
+   lambda ctx, sig, val: (cuda.cuStreamWaitValue32_v2, None, sig.getaddr(ctx), val.cast(dtypes.uint32), cuda.CU_STREAM_WAIT_VALUE_GEQ)),
   (UPat(Ops.CALL, src=(UPat.native("store"), UPat(name="sig"), UPat(name="val"))),
-   lambda ctx, sig, val: (cuda.cuStreamWriteValue32_v2, None, sig.getaddr(ctx.device), val.cast(dtypes.uint32), cuda.CU_STREAM_WRITE_VALUE_DEFAULT)),
+   lambda ctx, sig, val: (cuda.cuStreamWriteValue32_v2, None, sig.getaddr(ctx), val.cast(dtypes.uint32), cuda.CU_STREAM_WRITE_VALUE_DEFAULT)),
   (UPat(Ops.CALL, src=(UPat.native("timestamp"), UPat(name="sig"))), # [sig][stamp]
-   lambda ctx, sig: (cuda.cuLaunchHostFunc, None, UOp.extern((1,), dtypes.uint64, ctx.device, "stamp").getaddr(ctx.host),
-                     sig[1:2].getaddr(ctx.device))),
+   lambda ctx, sig: (cuda.cuLaunchHostFunc, None, UOp.extern((1,), dtypes.uint64, ctx, "stamp").getaddr(host_of(ctx)),
+                     sig[1:2].getaddr(ctx))),
 ])
 
 def cuda_submit(s:UOp, ccallfn:Callable[[Any, *tuple[UOp, ...]], UOp]=ccall) -> UOp:
   (call, *deps), q = s.src, s.src[0].src[1]
   rt_vars = UOp.param(0, dtypes.uint64, 3, q.device, name="rt_vars") # [ctx, compute stream, copy stream]
   h = ccallfn(cuda.cuCtxSetCurrent, rt_vars.index(0).load())
-  for fn, *args in [x for c in call.body.src if (x:=pm_cuda.rewrite(c, ctx=Device[q.device])) is not None]:
+  for fn, *args in [x for c in call.body.src if (x:=pm_cuda.rewrite(c, ctx=q.device)) is not None]:
     stream = rt_vars.after(h).index(2 if q.arg.name.startswith("COPY") else 1).load() # the stream after the last call
     h = ccallfn(fn, *[stream if a is None else UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args])
   return h.sink(arg=KernelInfo(call.body.arg.name)).call(UOp.extern((3,), dtypes.uint64, q.device, "handles").after(*deps))
