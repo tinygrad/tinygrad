@@ -109,7 +109,8 @@ class NVMEDevice(Compiled):
   def __init__(self, device:str):
     self.iface = self._select_iface(device)
     self.nvme = cast(NVMEDev, self.iface.dev_impl)
-    super().__init__(device, NVMEAllocator(self), None, props={"max_xfer": self.nvme.max_xfer, "lba_shift": self.nvme.lba_shift, "size": self.nvme.size})
+    super().__init__(device, NVMEAllocator(self), None,
+                     props={"max_xfer": self.nvme.max_xfer, "lba_shift": self.nvme.lba_shift, "size": self.nvme.size})
   def synchronize(self, timeout:int|None=None): pass
 
 # *****************
