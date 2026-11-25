@@ -22,8 +22,6 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
     else: onetime.append(si)
   return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
 
-# **** merge: the exports of a capture become one linear on one list of externs, like one export
-
 def merge_extern(slots:dict[UOp, int], x:UOp) -> UOp: return x.as_extern(slots.setdefault(x, len(slots)))
 pm_merge_export = PatternMatcher([
   (UPat(Ops.EXTERN, name="e"), lambda ctx,e: merge_extern(ctx[1], ctx[0][e.arg.slot])),
@@ -35,7 +33,7 @@ pm_merge_export = PatternMatcher([
 def jit_lower(linear:UOp, externs:list[UOp], held_bufs:set[UOp], num_inputs:int) -> tuple[UOp, list[UOp]]:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
 
-  # an input is a param bound at run, the storage the jit holds and the Variables stay externs, the rest is scratch: planned and bound at link
+  # parametrize input buffers, storage no one outside the jit holds is scratch: it's planned and bound at link
   params = [UOp.param(i, x.dtype, x.max_numel(), x.device) for i,x in enumerate(externs[:num_inputs])]
   used = [e for e in linear.toposort() if e.op is Ops.EXTERN]
   kept = [x for e in used if e.arg.slot >= num_inputs and ((x:=externs[e.arg.slot]).is_variable or x in held_bufs)]
@@ -62,7 +60,7 @@ ReturnType = TypeVar('ReturnType')
 class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
   _linear: UOp
-  _externs: list[UOp]  # a param per input, then what it's linked to: the storage the jit holds and the Variables at capture
+  _externs: list[UOp]
   expected_names: list[int|str]
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
   _linears: dict[tuple[UOp, ...], tuple[UOp, dict[UOp, UOp]]] = field(default_factory=dict)  # aliased inputs -> (linked linear with copies, staging)
@@ -80,7 +78,7 @@ class CapturedJit(Generic[ReturnType]):
     return [(t, *ub) for t in get_parameters(self.ret) if (ub:=t.uop.unbind_all())[1]]
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
-    # an input the jit holds too is read from staging, the held storage is copied there before the calls
+    # aliased inputs
     if (aliased:=tuple(u for u in input_uops if u in self._slots)) not in self._linears:
       if any(u.on_disk() for u in aliased): raise JitError("cannot make an independent copy of a written DISK input")
       copies = [self._externs[i].store_call(u.as_extern(self._slots[u])) for i,u in enumerate(input_uops) if u in self._slots]
@@ -161,8 +159,7 @@ class _TinyJit(Generic[ReturnType]):
       _check_no_non_tensor_return(ret)
       if DEBUG >= 1: print(f"JIT captured {len(self._exports)} exports with {len(input_buf_uops)} inputs")
 
-      # schedule the captured exports and merge them on one list of externs, the inputs come first. the prune needs unplanned storage,
-      # jit_lower plans the memory of all of them together
+      # schedule the captured exports on one list of externs. the prune needs unplanned storage, jit_lower plans the memory of all of them together
       slots = {u:i for i,u in enumerate(input_buf_uops)}
       with Context(NO_MEMORY_PLANNER=1):
         linears = [graph_rewrite(create_linear(fn), pm_merge_export, ctx=(externs, slots), walk=True, name="merge export")
