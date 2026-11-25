@@ -4,9 +4,9 @@ from tinygrad import Tensor, TinyJit, GlobalCounters, Device
 from tinygrad.helpers import getenv, Context
 from tinygrad.nn.optim import LAMB
 from tinygrad.nn.state import get_parameters
-from tinygrad.engine.realize import run_linear
 
 from extra.models import bert
+from test.helpers import run_schedule
 
 bs = getenv("BS", 16)
 seq_len = getenv("SEQ_LEN", 512)
@@ -53,7 +53,7 @@ class BenchmarkBertTrain(unittest.TestCase):
       else: linear, var_vals = Tensor.linear_with_vars(y, *list(inputs), *[t.grad for t in optim.params])
 
       for _ in range(JITCNT):
-        run_linear(linear, var_vals)
+        run_schedule(linear, var_vals)
 
     CNT = getenv("CNT", 5)
     best_tm = None

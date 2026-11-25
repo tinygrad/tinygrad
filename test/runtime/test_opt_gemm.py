@@ -3,9 +3,8 @@ import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import get_single_element
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.engine.realize import run_linear
 from tinygrad.uop.ops import Ops, UOp, AxisType
-from test.helpers import replace_opts
+from test.helpers import replace_opts, run_schedule
 
 class TestOptGemm(unittest.TestCase):
   @classmethod
@@ -21,7 +20,7 @@ class TestOptGemm(unittest.TestCase):
     # TODO: this should be a generic test helper
     call = get_single_element(t.schedule_linear().src)
     new_call = call.replace(src=(replace_opts(call.src[0], opts), *call.src[1:]))
-    run_linear(UOp(Ops.LINEAR, src=(new_call,)))
+    run_schedule(UOp(Ops.LINEAR, src=(new_call,)))
     test = Tensor(call.src[1]).numpy().reshape(self.res.shape)
     np.testing.assert_allclose(self.res, test, atol=1e-4)
 

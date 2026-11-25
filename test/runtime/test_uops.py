@@ -7,14 +7,13 @@ from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType, GroupOp
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.engine.realize import run_linear
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
-from test.helpers import buffer_uops
+from test.helpers import buffer_uops, run_schedule
 
 def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
   buf_uops = buffer_uops(UOp.sink(*uops_list), bufs)
-  run_linear(UOp(Ops.LINEAR, src=(UOp.sink(*uops_list, arg=KernelInfo()).call(*buf_uops),)))
+  run_schedule(UOp(Ops.LINEAR, src=(UOp.sink(*uops_list, arg=KernelInfo()).call(*buf_uops),)))
 
 def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   if op is Ops.CONST: uops.append(UOp.const(arg).cast(dtype))
@@ -229,7 +228,7 @@ class TestZeroRange(unittest.TestCase):
 
 class TestUOpPrograms(unittest.TestCase):
   def _run(self, prog:UOp, *tensors:Tensor):
-    run_linear(UOp(Ops.LINEAR, src=(prog.call(*[t.realize().uop.buf_uop for t in tensors]),)), update_stats=False)
+    run_schedule(UOp(Ops.LINEAR, src=(prog.call(*[t.realize().uop.buf_uop for t in tensors]),)), update_stats=False)
 
   def test_masked_read_of_bounded_param(self):
     out, a = Tensor.empty(4, dtype=dtypes.int), Tensor([4, 5, 6, 7])

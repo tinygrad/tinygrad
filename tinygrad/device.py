@@ -40,10 +40,11 @@ class _Device:
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()} as DEV={self.target_for(ix)}")
     return ret
   def target_for(self, device:str, cv=DEV) -> Target:
-    if not (t:=cv.target(device.split(':')[0])).arch and device not in self._opened_devices: self[device]
-    if (d:=self._opened_devices.get(device)) is None: return t
+    if (t:=cv.target(device.split(':')[0])).arch: return t
+    try: d = self._opened_devices.get(device:=self.canonicalize(device)) or self[device]
+    except Exception as e: raise RuntimeError(f"no target for {device}: set its arch in DEV, or open it") from e
     iface = type(d.iface).__name__[:-5] if hasattr(d, "iface") else ""
-    return replace(t, arch=t.arch or d.arch or "", interface=t.interface or iface, props=",".join(f"{k}={v}" for k, v in (d.props | t.opts).items()))
+    return replace(t, arch=d.arch or "", interface=t.interface or iface, props=",".join(f"{k}={v}" for k, v in (d.props | t.opts).items()))
   def renderer_for(self, device:str, cv=DEV) -> Renderer: return select_renderer(cv.target((t:=self.target_for(device, cv)).device, arch=t.arch))
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
@@ -241,10 +242,11 @@ class Buffer:
   def copy_from(self, src:Buffer) -> Buffer:
     assert self.nbytes == src.nbytes, f"copy size mismatch, {self.nbytes} != {src.nbytes}"
     assert self.is_allocated() and src.is_allocated(), "copy requires allocated buffers"
-    from tinygrad.engine.realize import run_linear
+    from tinygrad.engine.realize import compile_linear, link_linear, run_linear
     from tinygrad.uop.ops import UOp, Ops
     du, su = UOp.from_buffer(self, dtypes.uint8), UOp.from_buffer(src, dtypes.uint8)
-    run_linear(UOp(Ops.LINEAR, src=(du.store_call(su),)), update_stats=False)
+    linear = compile_linear(UOp(Ops.LINEAR, src=(du.store_call(su),)), input_uops=(inputs:=list[UOp]()), cache=True)
+    run_linear(link_linear(linear, inputs), input_uops=inputs, update_stats=False)
     return self
 
   def view(self, nbytes:int, offset:int) -> Buffer:
