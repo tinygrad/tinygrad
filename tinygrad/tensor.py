@@ -6,8 +6,7 @@ from typing import Callable, cast, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod, canonicalize_device_name
-from tinygrad.helpers import Context, cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
-from tinygrad.helpers import VALIDATE_WITH_CPU
+from tinygrad.helpers import VALIDATE_WITH_CPU, cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
 from tinygrad.uop.ops import UOp, Ops, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.uop.ops import KernelInfo, AxisType
 from tinygrad.mixin import Mixin
@@ -47,10 +46,6 @@ pm_export: PatternMatcher = PatternMatcher([
   (UPat(Ops.CALL, name="c"), export_call),
 ])
 
-def bind_alloc(b:UOp) -> UOp:
-  if b.device is None: raise RuntimeError("global storage needs a device, give the ALLOC one")
-  return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
-
 # EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
 def map_back_extern(ctx:tuple[UOp, ...], e:UOp) -> UOp:
   if e.arg.slot >= len(ctx) or (x:=ctx[e.arg.slot]).as_extern(e.arg.slot) is not e:
@@ -61,7 +56,7 @@ def map_back_extern(ctx:tuple[UOp, ...], e:UOp) -> UOp:
 pm_map_back = PatternMatcher([
   (UPat(Ops.EXTERN, name="e"), map_back_extern),
   # global ALLOCs are bound to fresh BUFFERs for this invocation
-  (UPat(Ops.ALLOC, name="b"), lambda b: bind_alloc(b) if b.addrspace is AddrSpace.GLOBAL else None),
+  (UPat(Ops.ALLOC, name="b"), lambda b: UOp.new_buffer(b.device, b.max_numel(), b.dtype) if b.addrspace is AddrSpace.GLOBAL else None),
 ])
 
 def map_back(linear:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, dict[str, int]]:
@@ -69,11 +64,7 @@ def map_back(linear:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, dict[str, int]]:
   linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, name="map back")
   # the values of the bound Variables the linear uses, they are call args
   used_vars = {v.expr for si in linear.src for v in UOp.sink(*si.src[1:]).variables()}
-  var_vals: dict[str, int] = {}
-  for b in externs:
-    if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
-      raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
-  return linear, var_vals
+  return linear, {b.expr: b.arg.val for b in externs if b.is_bound_var and b.expr in used_vars}
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -282,8 +273,7 @@ class Tensor(Mixin):
   @staticmethod
   def compile(fn:UOp) -> UOp:
     """Compile a function from `Tensor.export` to a LINEAR of compiled calls without binding its externs. It reads the targets in DEV."""
-    with Context(ALLOW_DEVICE_USAGE=0): linear = create_linear(fn)
-    return compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=[], cache=True)
+    return compile_linear(create_linear(fn), validate=VALIDATE_WITH_CPU, input_uops=[], cache=True)
 
   @staticmethod
   def link(linear:UOp, externs:tuple[UOp, ...]) -> UOp:

@@ -183,8 +183,7 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return ets + [_prof_tm(d, prof) if ctx.wait else None for d, _, _, prof, *_ in info.kernels if prof]
 
 def _validate(call:UOp, sink:UOp) -> UOp:
-  slot = int.from_bytes(call.key[:8], "little")
-  shadows = tuple(p if p.addrspace is AddrSpace.ALU else UOp.alloc((prod(p.max_shape),), p.dtype, slot+i,
+  shadows = tuple(p if p.addrspace is AddrSpace.ALU else UOp.alloc((prod(p.max_shape),), p.dtype, int.from_bytes(call.key[:8], "little")+i,
                   device=("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU") for i,p in enumerate(call.src[1:]))
   copies = tuple(s.store_call(p) for s, p in zip(shadows, call.src[1:]) if p.addrspace is not AddrSpace.ALU)
   return UOp(Ops.LINEAR, src=copies + (call, UOp.native("validate", sink).call(*shadows, *call.src[1:])))
@@ -271,7 +270,7 @@ def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   assert linear.op is Ops.LINEAR, f"run_linear calls on {linear.op}"
   if len(linear.src) == 0: return
-  var_vals = {**{f"e{i}": x.arg.val for i,x in enumerate(input_uops) if x.is_bound_var}, **(var_vals or {})}
+  var_vals = {f"e{i}": x.arg.val for i,x in enumerate(input_uops) if x.is_bound_var} | (var_vals or {})
   ctx = ExecContext(var_vals, tuple(input_uops), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: track_stats(ctx, call.without_after, perf_counter_us(), pm_exec.rewrite(call.without_after, ctx))
 
