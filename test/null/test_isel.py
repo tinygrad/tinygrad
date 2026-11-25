@@ -32,7 +32,8 @@ class TestIselX86(unittest.TestCase):
     ops = [u.body.arg.code for u in n.toposort() if u.op is Ops.CALL]
     self.assertEqual(ops.count(X86Ops.CMOVNE), 2)
     self.assertEqual(ops.count(X86Ops.SETL), 1)
-    self.assertEqual(ops.count(X86Ops.SETNE), 1)
+    # the int CMPNE gate's cmov reads the flags of its own compare, no SETNE
+    self.assertEqual(ops.count(X86Ops.SETNE), 0)
     self.assertEqual(ops.count(X86Ops.CMP), 1)
 
   def test_vinsertps(self):

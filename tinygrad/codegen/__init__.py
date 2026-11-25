@@ -281,7 +281,7 @@ def remove_range(sink:UOp):
     replacements[rng] = acc.after(loop)[0].load()
     next_idx = replacements[rng] + 1
     body = end.src[0]
-    edge = body.backedge(loop, (next_idx < bound).after(acc.after(body)[0].store(next_idx)))
+    edge = body.backedge(loop, next_idx.alu(Ops.CMPNE, bound.without_after).after(acc.after(body)[0].store(next_idx)))
     replacements[end] = UOp(Ops.ENDIF, src=(entry, edge)) if entry.op is Ops.IF else edge
   return sink.substitute(replacements, extra_pm=pm_cast_const, name="remove range")
 

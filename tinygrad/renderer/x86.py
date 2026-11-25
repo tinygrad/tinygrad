@@ -75,7 +75,7 @@ class X86Ops(FastEnum):
   CMOVNE = auto()
   VBLENDVPS = auto(); VBLENDVPD = auto()
   # jumps
-  JNE = auto(); JE = auto(); JGE = auto(); JMP = auto()
+  JNE = auto(); JE = auto()
   # vectorize / gep
   VINSERTPS = auto(); VPSRLDQ = auto()
   VPEXTRW = auto(); VPEXTRD = auto()
@@ -112,10 +112,10 @@ class X86GroupOp:
               X86Ops.VCVTPS2PH, X86Ops.VPEXTRW, X86Ops.VPEXTRD}
 
   # X86Ops that read flags
-  ReadFlags = {X86Ops.CMOVNE, X86Ops.SETB, X86Ops.SETL, X86Ops.SETE, X86Ops.SETNE, X86Ops.JNE, X86Ops.JE, X86Ops.JGE}
+  ReadFlags = {X86Ops.CMOVNE, X86Ops.SETB, X86Ops.SETL, X86Ops.SETE, X86Ops.SETNE, X86Ops.JNE, X86Ops.JE}
 
   # X86Ops that jump, their first src is what the LABEL they jump to marks
-  Jump = {X86Ops.JNE, X86Ops.JE, X86Ops.JGE, X86Ops.JMP}
+  Jump = {X86Ops.JNE, X86Ops.JE}
 
   # X86Ops whose first src is the rm field. a TwoAddress op drops its first src post regalloc, so its Rm2nd src ends up first
   Rm1st = {X86Ops.MOV, X86Ops.VMOVSS, X86Ops.VMOVSD, X86Ops.VMOVUPS, X86Ops.MOVZX, X86Ops.MOVSX, X86Ops.MOVSXD, X86Ops.VMOVD, X86Ops.VMOVQ,
@@ -236,7 +236,10 @@ def mask(x:UOp) -> UOp:
   dt, v = x.src[0].dtype, UOp.cconst({Ops.CMPLT: 1, Ops.CMPNE: 4, Ops.CMPEQ: 0}[x.op], dtypes.u8)
   return UOp.ins(X86Ops.VCMPSS if dt is dtypes.float32 else X86Ops.VCMPSD, x.src + (v,), dt)
 
-def test_gate(m:UOp) -> UOp: return UOp.ins(X86Ops.CMPi, (m.cast(dtypes.int), UOp.cconst(0, dtypes.i32)), dtypes.void)
+def test_gate(m:UOp) -> UOp:
+  # an int CMPNE's own compare already sets the flags a NE consumer reads
+  if (g:=m.without_after).op is Ops.CMPNE and dtypes.is_int(g.src[0].dtype): return cmp(g).after(*m.src[1:]) if m.op is Ops.AFTER else cmp(g)
+  return UOp.ins(X86Ops.CMPi, (m.cast(dtypes.int), UOp.cconst(0, dtypes.i32)), dtypes.void)
 
 # vinsertps xmm2, xmm0, xmm1, imm
 # inserts any 32 bit element in xmm1 into any position in xmm0 according to immm, result is written to xmm2
@@ -487,7 +490,6 @@ def alloc_buffer(ctx:X86LinearContext, x:UOp):
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
   return nx, [RSP, nx]
 
-# TODO: control flow should be overhauled so that this isn't necessary
 # a LABEL marks its src: the start of a loop its RANGE, the exit of a loop the start LABEL. a jump's first src is what its LABEL marks
 def label(x:UOp) -> UOp: return UOp.ins(X86Ops.LABEL, (x,), dtypes.void)
 
@@ -664,8 +666,6 @@ encodings = {
   # jumps are encoded with a placeholder which gets patched later once the real offset is known
   X86Ops.JNE: lambda x: bytes([0x0F, 0x85]) + int(0).to_bytes(4),
   X86Ops.JE: lambda x: bytes([0x0F, 0x84]) + int(0).to_bytes(4),
-  X86Ops.JGE: lambda x: bytes([0x0F, 0x8D]) + int(0).to_bytes(4),
-  X86Ops.JMP: lambda x: bytes([0xE9]) + int(0).to_bytes(4),
   X86Ops.RET: lambda x: bytes([0xC3]),
 }
 

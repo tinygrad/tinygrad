@@ -63,7 +63,7 @@ class CFGContext:
 
       if u.op in (Ops.END, Ops.BACKEDGE, Ops.SINK):
         nesting |= {x:u for x in deps[u] if x.op in (Ops.END, Ops.BACKEDGE) and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
-      if u.op in (Ops.IF, Ops.RANGE, Ops.END, Ops.BACKEDGE): deps[u][u] = None
+      if u.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE): deps[u][u] = None
 
     self.edges: dict[UOp, UOp] = {}
     siblings: dict[UOp, list[UOp]] = {}
