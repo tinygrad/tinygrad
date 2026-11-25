@@ -84,17 +84,18 @@ class TestExport(unittest.TestCase):
     from unittest.mock import patch
     from tinygrad import Context
     import tinygrad.codegen as codegen
+    from tinygrad.engine.realize import compile_cache
     @function(precompile=True)
     def add_one(x): return (x+1).contiguous()
     fn, _ = Tensor.export((add_one(buf())*2+3).contiguous())
-    codegen.schedule_cache.clear()
+    compile_cache.clear()
     with patch("tinygrad.codegen.memory_plan_rewrite", wraps=codegen.memory_plan_rewrite) as plan:
       linear = Tensor.compile(fn)
       self.assertIs(Tensor.compile(fn), linear)
       self.assertEqual(plan.call_count, 1)
       with Context(SCACHE=0): Tensor.compile(fn)
       self.assertEqual(plan.call_count, 2)
-      codegen.schedule_cache.clear()
+      compile_cache.clear()
       Tensor.compile(fn)
       self.assertEqual(plan.call_count, 3)
 

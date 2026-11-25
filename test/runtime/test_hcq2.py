@@ -5,14 +5,13 @@ from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, UOp, uopfunc, KernelInfo
-from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
+from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear, compile_cache
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.c import init_c_struct_t
 import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in
-from tinygrad.codegen import schedule_cache
 from test.null.test_hcq2 import compiled_chain, lower_hcq
 from test.helpers import run_schedule
 
@@ -38,9 +37,9 @@ class TestHCQ2Schedule(unittest.TestCase):
     ins = [(Tensor.full((23,), float(i)).contiguous().realize(), Tensor.full((23,), 2.0).contiguous().realize()) for i in range(6)]
     for a, b in ins[:3]: f(a, b).tolist() # warm the jit and the copyout
 
-    before = len(schedule_cache)
+    before = len(compile_cache)
     for i, (a, b) in enumerate(ins[3:], 3): self.assertEqual(f(a, b).tolist(), [i * 3.0] * 23)
-    self.assertEqual(len(schedule_cache), before)
+    self.assertEqual(len(compile_cache), before)
 
   def test_jit_symbolic(self):
     @TinyJit
