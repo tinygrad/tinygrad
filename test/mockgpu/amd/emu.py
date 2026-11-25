@@ -299,8 +299,8 @@ class _Ctx:
   def __init__(self, wave_size: int = 32):
     self._axis_id, self.wave_size = 0, wave_size
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
-    self.vgpr = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr")
-    self.accvgpr = UOp.param(5, dtypes.uint32, 256 * wave_size, name="accvgpr") if wave_size == 64 else self.vgpr
+    self.vgpr = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr", addrspace=AddrSpace.REG)
+    self.accvgpr = UOp.param(5, dtypes.uint32, 256 * wave_size, name="accvgpr", addrspace=AddrSpace.REG) if wave_size == 64 else self.vgpr
     self.branch_cond: UOp | None = None
 
   def range(self, n: int | None = None) -> UOp:
