@@ -26,11 +26,11 @@ if __name__ == "__main__":
       Opt(op=OptOps.SPLIT, axis=1, arg=(2, AxisType.LOCAL)),
       Opt(op=OptOps.SPLIT, axis=0, arg=(2, AxisType.LOCAL)),
     ]
-  linear = C.schedule_linear()
+  linear, externs = C.linear_with_externs()
   call = linear.src[-1]
   new_ast = call.src[0].replace(arg=replace(call.src[0].arg, opts_to_apply=tuple(opts)))
   new_call = call.replace(src=(new_ast, *call.src[1:]))
   linear = linear.replace(src=tuple(new_call if c is call else c for c in linear.src))
   with Context(DEBUG=2):
-    linear = link_linear(compile_linear(linear))
-    for i in range(5): run_linear(linear)
+    linear = link_linear(compile_linear(linear), list(externs))
+    for i in range(5): run_linear(linear, input_uops=externs)

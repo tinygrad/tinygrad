@@ -20,7 +20,7 @@ class TestRingAllReduce(unittest.TestCase):
       x = Tensor.arange(N*M, dtype=dtypes.float).reshape(N, M)
       t = (x*x).clone().shard(ds, axis=0).realize()
       out = t.sum(0).mul(2.).contiguous()
-      linear, var_vals = out.linear_with_vars()
+      linear, externs = out.linear_with_externs()
       copies = [si for si in linear.src if si.src[0].op is Ops.STORE]
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
       # N*(N-1) copies for input and output
@@ -30,7 +30,7 @@ class TestRingAllReduce(unittest.TestCase):
       sink_count = (N*(N-1))+(N)+(N)+(1)+(1)
       if len(sinks) != sink_count: raise KernelCountException(sink_count, len(sinks))
       # correctness
-      run_schedule(linear, var_vals)
+      run_schedule(linear, externs)
       expected = [2*sum((d*M+i)**2 for d in range(N)) for i in range(M)]
       dev_nums = Tensor.arange(1, N+1, dtype=dtypes.float).reshape(N, 1).expand(N, M).shard(ds, axis=0)
       shards = out.reshape(1, M).expand(N, M)+dev_nums

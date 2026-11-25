@@ -27,7 +27,7 @@ class TestSSARender(unittest.TestCase):
     assert_roundtrip(self, root)
 
   def _kernel(self, t:Tensor) -> UOp:
-    lin, _ = Tensor.linear_with_vars(t)
+    lin, _ = Tensor.linear_with_externs(t)
     return [c for c in lin.src if any(u.op is Ops.REDUCE for u in c.src[0].toposort())][0].src[0]
 
   def test_conv_kernel_graph(self):

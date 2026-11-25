@@ -11,7 +11,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.x86 import ISARenderer
-from test.helpers import replace_opts, check_schedule, run_schedule
+from test.helpers import replace_opts, check_schedule, run_schedule, bound_schedule
 from test.runtime.test_softmax_fusion import single_kernel_softmax
 MOCKGPU = DEV.interface.startswith("MOCK")
 
@@ -25,7 +25,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(4).realize(), Tensor.randn(4).realize()
     np_a, np_b = a.numpy(), b.numpy()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
-    linear = c.schedule_linear()
+    linear = bound_schedule(c)
     run_schedule(linear)
     rawbufs = [s.buffer for s in linear.src[-1].src[1:] if not s.is_bound_var]
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.uop.base.realized, b.uop.base.realized}
@@ -164,8 +164,8 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.ones(4, 4).contiguous().realize()
     b = a.shrink(((1, 2), None)).pad(((1, 2), None)).bool()
     a.assign(b.where(2, a))
-    linear, var_vals = check_schedule(a, 1)
-    run_schedule(linear, var_vals)
+    linear, externs = check_schedule(a, 1)
+    run_schedule(linear, externs)
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
     program = to_program(replace_opts(linear.src[-1].src[0], []), renderer=Device[Device.DEFAULT].renderer)
     assert not any(u.op == Ops.WHERE for u in tuple(program.src[1].src)), "found where where where should be folded"
@@ -288,8 +288,8 @@ class TestLinearizer(unittest.TestCase):
 
 def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   if isinstance(r, Tensor): r = [r]
-  linear, var_vals = Tensor.linear_with_vars(*r)
-  run_schedule(UOp(Ops.LINEAR, src=linear.src[:-1]), var_vals)  # run all kernels except the last one
+  linear = bound_schedule(*r)
+  run_schedule(UOp(Ops.LINEAR, src=linear.src[:-1]))  # run all kernels except the last one
   last_call = linear.src[-1]
   ast = last_call.src[0]
   assert ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {last_call}"

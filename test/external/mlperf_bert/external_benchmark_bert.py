@@ -49,11 +49,11 @@ class BenchmarkBertTrain(unittest.TestCase):
 
       y = layer(*inputs).contiguous().contiguous_backward()
       y.sum().backward()
-      if getenv("ASSIGN", 1): linear, var_vals = Tensor.linear_with_vars(y, *list(inputs), *optim.schedule_step())
-      else: linear, var_vals = Tensor.linear_with_vars(y, *list(inputs), *[t.grad for t in optim.params])
+      if getenv("ASSIGN", 1): linear, externs = Tensor.linear_with_externs(y, *list(inputs), *optim.schedule_step())
+      else: linear, externs = Tensor.linear_with_externs(y, *list(inputs), *[t.grad for t in optim.params])
 
       for _ in range(JITCNT):
-        run_schedule(linear, var_vals)
+        run_schedule(linear, externs)
 
     CNT = getenv("CNT", 5)
     best_tm = None
