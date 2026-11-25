@@ -1,10 +1,10 @@
 from typing import TypeVar, Generic, Callable, Any, overload
 import functools
-from tinygrad.tensor import Tensor, all_tensors, map_back
+from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.dtype import DType
-from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite
+from tinygrad.dtype import DType, AddrSpace
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite
 from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear
 from tinygrad.codegen import create_linear
 from tinygrad.codegen.memory import memory_plan_rewrite, _collect_bufs
@@ -22,18 +22,31 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
     else: onetime.append(si)
   return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
 
-@rewrite_group(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
-def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
+# **** merge: the exports of a capture become one linear on one list of externs, like one export
+
+def merge_extern(slots:dict[UOp, int], x:UOp) -> UOp: return x.as_extern(slots.setdefault(x, len(slots)))
+pm_merge_export = PatternMatcher([
+  (UPat(Ops.EXTERN, name="e"), lambda ctx,e: merge_extern(ctx[1], ctx[0][e.arg.slot])),
+  (UPat(Ops.ALLOC, name="b"), lambda ctx,b: merge_extern(ctx[1], UOp.new_buffer(b.device, b.max_numel(), b.dtype))
+   if b.addrspace is AddrSpace.GLOBAL else None),
+])
+
+@rewrite_group(lambda linear,externs,held_bufs,num_inputs,ret=(): f"JIT {pluralize('call', len(linear.src))}")
+def jit_lower(linear:UOp, externs:list[UOp], held_bufs:set[UOp], num_inputs:int) -> tuple[UOp, list[UOp]]:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
 
-  # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
-  linear = linear.substitute({u: UOp.param(i, u.dtype, u.max_numel(), u.device) for i,u in enumerate(input_uops)}, walk=True)
-  # storage no one outside the jit holds is scratch: it's planned and bound at link
-  scratch = {u: UOp.alloc((u.max_numel(),), u.dtype, device=u.device) for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs}
-  linear = memory_plan_rewrite(linear.substitute(scratch, walk=True))
-  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), input_uops=input_uops, cache=False)
+  # an input is a param bound at run, the storage the jit holds and the Variables stay externs, the rest is scratch: planned and bound at link
+  params = [UOp.param(i, x.dtype, x.max_numel(), x.device) for i,x in enumerate(externs[:num_inputs])]
+  used = [e for e in linear.toposort() if e.op is Ops.EXTERN]
+  kept = [x for e in used if e.arg.slot >= num_inputs and ((x:=externs[e.arg.slot]).is_variable or x in held_bufs)]
+  slots = {x: num_inputs+i for i,x in enumerate(kept)}
+  def lower(e:UOp) -> UOp:
+    if e.arg.slot < num_inputs: return params[e.arg.slot]
+    return x.as_extern(slots[x]) if (x:=externs[e.arg.slot]) in slots else UOp.alloc((e.max_numel(),), e.dtype, device=e.device)
+  linear = memory_plan_rewrite(linear.substitute({e: lower(e) for e in used}, walk=True))
+  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View compiled linear")
-  return linear
+  return linear, params + kept
 
 class JitError(Exception): pass
 
@@ -49,31 +62,36 @@ ReturnType = TypeVar('ReturnType')
 class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
   _linear: UOp
+  _externs: list[UOp]  # a param per input, then what it's linked to: the storage the jit holds and the Variables at capture
   expected_names: list[int|str]
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
-  var_vals: dict[str, int]  # the values of the Variables at capture, inputs are replaced every call
   _linears: dict[tuple[UOp, ...], tuple[UOp, dict[UOp, UOp]]] = field(default_factory=dict)  # aliased inputs -> (linked linear with copies, staging)
 
-  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info, self.var_vals)
+  def __reduce__(self): return self.__class__, (self.ret, self._linear, self._externs, self.expected_names, self.expected_input_info)
 
   @functools.cached_property
-  def _jit_bufs(self) -> set[UOp]: return {u for u in self._linear.toposort() if u.op is Ops.BUFFER}
+  def _slots(self) -> dict[UOp, int]: return {x:i for i,x in enumerate(self._externs)}
+
+  @functools.cached_property
+  def _vars(self) -> list[tuple[str, UOp]]: return [(f"e{i}", x) for i,x in enumerate(self._externs) if x.is_bound_var]
 
   @functools.cached_property
   def _symbolic_ret(self) -> list[tuple[Tensor, UOp, dict[Variable, int]]]:
     return [(t, *ub) for t in get_parameters(self.ret) if (ub:=t.uop.unbind_all())[1]]
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
-    # aliased inputs
-    if (aliased:=tuple(u for u in input_uops if u in self._jit_bufs)) not in self._linears:
+    # an input the jit holds too is read from staging, the held storage is copied there before the calls
+    if (aliased:=tuple(u for u in input_uops if u in self._slots)) not in self._linears:
       if any(u.on_disk() for u in aliased): raise JitError("cannot make an independent copy of a written DISK input")
+      copies = [self._externs[i].store_call(u.as_extern(self._slots[u])) for i,u in enumerate(input_uops) if u in self._slots]
+      linear = self._linear.replace(src=compile_linear(UOp(Ops.LINEAR, src=tuple(copies))).src+self._linear.src)
       staging = {u: UOp.new_buffer(u.device, u.max_numel(), u.dtype) for u in aliased}
-      copies = compile_linear(UOp(Ops.LINEAR, src=tuple(s.store_call(u) for u,s in staging.items())))
-      self._linears[aliased] = (link_linear(self._linear.replace(src=copies.src+self._linear.src)), staging)
+      self._linears[aliased] = (link_linear(linear, self._externs), staging)
 
     linear, staging = self._linears[aliased]
     if DEBUG >= 1 and len(linear.src) >= 10: print(f"jit execs {len(linear.src)} calls")
-    run_linear(linear, {**self.var_vals, **var_vals}, input_uops=[staging.get(u, u) for u in input_uops], jit=True)
+    slot_vals = {e: var_vals.get(x.expr, x.arg.val) for e,x in self._vars}
+    run_linear(linear, {**var_vals, **slot_vals}, [*[staging.get(u, u) for u in input_uops], *self._externs[len(input_uops):]], jit=True)
     for t,u,vals in self._symbolic_ret: t.uop = u.substitute({v:v.bind(var_vals.get(v.expr, i)) for v,i in vals.items()}, walk=True)
     return self.ret
 
@@ -143,31 +161,33 @@ class _TinyJit(Generic[ReturnType]):
       _check_no_non_tensor_return(ret)
       if DEBUG >= 1: print(f"JIT captured {len(self._exports)} exports with {len(input_buf_uops)} inputs")
 
-      # schedule the captured exports on their storage. the prune needs unplanned storage, jit_lower plans the memory of all of them together
-      with Context(NO_MEMORY_PLANNER=1): linears = [map_back(create_linear(fn), externs) for fn,externs in self._exports]
+      # schedule the captured exports and merge them on one list of externs, the inputs come first. the prune needs unplanned storage,
+      # jit_lower plans the memory of all of them together
+      slots = {u:i for i,u in enumerate(input_buf_uops)}
+      with Context(NO_MEMORY_PLANNER=1):
+        linears = [graph_rewrite(create_linear(fn), pm_merge_export, ctx=(externs, slots), walk=True, name="merge export")
+                   for fn,externs in self._exports]
       del self._exports
-      # combine all the linears into one, memory plan, and compile
-      big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l,_ in linears])))
-      # the values of the Variables at capture, inputs are replaced every call
-      capture_var_vals = merge_dicts([vv for _,vv in linears])
+      big_linear, externs = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in linears]))), list(slots)
       del linears
 
       if self.prune:
-        big_linear, onetime_linear = prune_linear(big_linear, set(input_buf_uops))
+        big_linear, onetime_linear = prune_linear(big_linear, {u.as_extern(i) for i,u in enumerate(input_buf_uops)})
         if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
-        run_linear(link_linear(compile_linear(onetime_linear)), capture_var_vals)
+        onetime_vals = {f"e{i}": x.arg.val for i,x in enumerate(externs) if x.is_bound_var}
+        run_linear(link_linear(compile_linear(onetime_linear), externs), onetime_vals, externs)
         del onetime_linear
 
       # hold all buffers with real storage reachable from live Tensors (e.g. lazy .grad created during capture) and all buffers with
       # allocated storage in the captured linear (e.g. constants baked in by copies): the memory planner can't suballocate those
       def _buf_or_none(u:UOp) -> Buffer|MultiBuffer|None: return u.arg.buffer if u.op is Ops.BUFFER else None
       held_bufs = {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if _buf_or_none(u) is not None}
-      held_bufs |= {u for u in big_linear.toposort() if (b:=_buf_or_none(u)) is not None and b.is_allocated()}
-      linear = jit_lower(big_linear, held_bufs, input_buf_uops)
+      held_bufs |= {u for u in externs if (b:=_buf_or_none(u)) is not None and b.is_allocated()}
+      linear, externs = jit_lower(big_linear, externs, held_bufs, len(input_buf_uops))
       # drop the pre-planning graph: it keeps the whole capture-time working set allocated (big_linear) or referenced (held_bufs).
       # the planned linear only uses the arena/held buffers, so the intermediates must be freed before linking and first exec
       del big_linear, held_bufs
-      self.captured = CapturedJit(ret, linear, names, expected_input_info, capture_var_vals)
+      self.captured = CapturedJit(ret, linear, externs, names, expected_input_info)
       ret = self.captured(input_buf_uops, var_vals)
     elif self.cnt >= 2:
       # jit exec
