@@ -2,7 +2,7 @@ import unittest
 from tinygrad.helpers import Timing, getenv, unwrap, wait_cond
 from tinygrad import Tensor, Device, TinyJit, dtypes
 from tinygrad.device import Buffer
-from tinygrad.engine.realize import run_linear
+from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 from tinygrad.uop.ops import UOp
 from tinygrad.runtime.ops_amd import AMDSDMAQueue
 from tinygrad.runtime.support.hcq2 import make_submit
@@ -97,7 +97,7 @@ class TestUSBIntegrity(USBTestCase):
     if nbytes := target - put[0]:
       nops = UOp.from_buffer(Buffer("CPU", nbytes, initial_value=bytes(nbytes)), dtypes.uint8)
       hq = AMDSDMAQueue(make_submit(dev=self.dev.device, queue="COPY:0", deps=(nops,)))
-      run_linear(lower_hcq(hq.submit(nops)))
+      run_linear(link_linear(compile_linear(lower_hcq(hq.submit(nops)))))
     wait_cond(lambda: read[0], value=target)
     self.assertEqual(put[0], target)
 
