@@ -537,7 +537,8 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp:
 
 def resolve_extern(ctx:LinkCtx, b:UOp) -> UOp:
   if b.arg.name is None:
-    a = ctx.inputs[b.arg.slot]
+    if (i:=b.arg.slot) >= len(ctx.inputs) or (a:=ctx.inputs[i]).as_extern(i) is not b:
+      raise RuntimeError(f"extern {i} must match its EXTERN, {b.dtype} {b.shape} on {b.device}, got {ctx.inputs[i:i+1] or 'nothing'}")
     return UOp.const(a.arg.val, b.dtype) if a.is_bound_var else a
   owned = Compiled.link_bufs[b.arg.name if b.arg.name in Compiled.link_bufs else to_name(b.device, b.arg.name)]
   return UOp.from_buffer(owned if isinstance(owned, Buffer) else owned(b), b.dtype, HCQ_RUNTIME_DEV.device)
