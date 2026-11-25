@@ -8,32 +8,36 @@ from test.mockgpu.amd.emu import run_asm
 def _f32(x:int) -> float: return struct.unpack('<f', struct.pack('<I', x))[0]
 def _genexp(lane:int, shift:int) -> int: return 124 + ((lane + (lane >> shift)) & 7)
 
-def _scale_insts(shift:int) -> list:
-  # Byte 1 of scales A and B is lane-dependent in [124,131]. Other bytes are neutral.
+def _scale_insts(shift:int, a_byte:int, b_byte:int) -> list:
+  # The selected bytes of scales A and B are lane-dependent in [124,131]. Other bytes are neutral.
   # Adding the lane-group index makes the selected exponent differ across 32-wide K chunks.
+  a_neutral = 0x7f7f7f7f & ~(0xff << (a_byte * 8))
+  b_neutral = 0x7f7f7f7f & ~(0xff << (b_byte * 8))
   return [
     cdna.v_and_b32_e32(cdna.v[200], 7, cdna.v[255]),
     cdna.v_lshrrev_b32_e32(cdna.v[201], shift, cdna.v[255]),
     cdna.v_add_u32_e32(cdna.v[200], cdna.v[201], cdna.v[200]),
     cdna.v_and_b32_e32(cdna.v[200], 7, cdna.v[200]),
     cdna.v_add_u32_e32(cdna.v[200], 124, cdna.v[200]),
-    cdna.v_lshlrev_b32_e32(cdna.v[201], 8, cdna.v[200]),
-    cdna.v_mov_b32_e32(cdna.v[202], 0x7f7f007f),
+    cdna.v_lshlrev_b32_e32(cdna.v[201], a_byte * 8, cdna.v[200]),
+    cdna.v_mov_b32_e32(cdna.v[202], a_neutral),
     cdna.v_or_b32_e32(cdna.v[20], cdna.v[201], cdna.v[202]),
-    cdna.v_lshlrev_b32_e32(cdna.v[201], 8, cdna.v[200]),
-    cdna.v_mov_b32_e32(cdna.v[202], 0x7f7f007f),
+    cdna.v_lshlrev_b32_e32(cdna.v[201], b_byte * 8, cdna.v[200]),
+    cdna.v_mov_b32_e32(cdna.v[202], b_neutral),
     cdna.v_or_b32_e32(cdna.v[21], cdna.v[201], cdna.v[202]),
   ]
 
-def _run_scaled(shape:str) -> list[list[float]]:
+def _run_scaled(shape:str, opsel:int=3, opsel_hi:int=0) -> list[list[float]]:
   lanes, nouts, shift = 64, 4 if shape == '16' else 16, 4 if shape == '16' else 5
   ins = [cdna.v_mov_b32_e32(cdna.v[r], 3.5) for r in range(16)]
   # A is 1.0 in the first half of K and 0.5 in the second half; B is all 1.0 (E4M3 encodings, four per register).
   ins += [cdna.v_mov_b32_e32(cdna.v[r], 0x38383838) for r in range(32, 36)]
   ins += [cdna.v_mov_b32_e32(cdna.v[r], 0x30303030) for r in range(36, 40)]
   ins += [cdna.v_mov_b32_e32(cdna.v[r], 0x38383838) for r in range(40, 48)]
-  ins += _scale_insts(shift)
-  args = dict(opsel=3, opsel_hi=0, cbsz=0, blgp=0, scale_src0=cdna.v[20].offset, scale_src1=cdna.v[21].offset)
+  a_byte = ((opsel_hi & 1) << 1) | (opsel & 1)
+  b_byte = (((opsel_hi >> 1) & 1) << 1) | ((opsel >> 1) & 1)
+  ins += _scale_insts(shift, a_byte, b_byte)
+  args = dict(opsel=opsel, opsel_hi=opsel_hi, cbsz=0, blgp=0, scale_src0=cdna.v[20].offset, scale_src1=cdna.v[21].offset)
   if shape == '16': mfma = cdna.v_mfma_scale_f32_16x16x128_f8f6f4(cdna.v[0:3], cdna.v[32:39], cdna.v[40:47], cdna.v[0:3], **args)
   else: mfma = cdna.v_mfma_scale_f32_32x32x64_f8f6f4(cdna.v[0:15], cdna.v[32:39], cdna.v[40:47], cdna.v[0:15], **args)
   ins.append(mfma)
@@ -78,6 +82,9 @@ class TestCDNAScaledMFMA(unittest.TestCase):
 
   def test_mfma_scale_fp8_16x16x128(self): self.check_shape('16')
   def test_mfma_scale_fp8_32x32x64(self): self.check_shape('32')
+  def test_mfma_scale_fp8_asymmetric_selectors(self):
+    # OP_SEL/OP_SEL_HI=(0,1) selects byte 2 for A and byte 0 for B under the CDNA4 split-bit encoding.
+    self.assertEqual(_run_scaled('16', opsel=0, opsel_hi=1), _expected('16'))
 
 if __name__ == "__main__":
   unittest.main()
