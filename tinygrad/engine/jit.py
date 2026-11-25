@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.dtype import DType, AddrSpace
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite
+from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite
 from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear
 from tinygrad.codegen import create_linear
 from tinygrad.codegen.memory import memory_plan_rewrite, _collect_bufs
@@ -23,10 +23,10 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
   return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
 
 # a captured export is scheduled on its storage: the EXTERNs are its externs, the ALLOCs get fresh storage
-pm_bind_export = PatternMatcher([
-  (UPat(Ops.EXTERN, name="e"), lambda ctx,e: x.unbound() if (x:=ctx[e.arg.slot]).is_variable else x),
-  (UPat(Ops.ALLOC, name="b"), lambda ctx,b: UOp.new_buffer(b.device, b.max_numel(), b.dtype) if b.addrspace is AddrSpace.GLOBAL else None),
-])
+def bind_export(linear:UOp, externs:tuple[UOp, ...]) -> UOp:
+  storage = {x.as_extern(i): x.unbound() if x.is_variable else x for i,x in enumerate(externs)}
+  allocs = {b: UOp.new_buffer(b.device, b.max_numel(), b.dtype) for b in linear.toposort() if b.op is Ops.ALLOC and b.addrspace is AddrSpace.GLOBAL}
+  return linear.substitute(storage | allocs, walk=True)
 
 @rewrite_group(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
 def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> tuple[UOp, tuple[UOp, ...]]:
@@ -83,7 +83,7 @@ class CapturedJit(Generic[ReturnType]):
 
     linear, staging = self._linears[aliased]
     if DEBUG >= 1 and len(linear.src) >= 10: print(f"jit execs {len(linear.src)} calls")
-    run_linear(linear, {**self.var_vals, **var_vals}, input_uops=[*[staging.get(u, u) for u in input_uops], *self._externs], jit=True)
+    run_linear(linear, {**self.var_vals, **var_vals}, input_uops=tuple(staging.get(u, u) for u in input_uops)+self._externs, jit=True)
     for t,u,vals in self._symbolic_ret: t.uop = u.substitute({v:v.bind(var_vals.get(v.expr, i)) for v,i in vals.items()}, walk=True)
     return self.ret
 
@@ -154,8 +154,7 @@ class _TinyJit(Generic[ReturnType]):
       if DEBUG >= 1: print(f"JIT captured {len(self._exports)} exports with {len(input_buf_uops)} inputs")
 
       # schedule the captured exports on their storage. the prune needs unplanned storage, jit_lower plans the memory of all of them together
-      with Context(NO_MEMORY_PLANNER=1):
-        linears = [graph_rewrite(create_linear(fn), pm_bind_export, ctx=externs, walk=True, name="bind export") for fn,externs in self._exports]
+      with Context(NO_MEMORY_PLANNER=1): linears = [bind_export(create_linear(fn), externs) for fn,externs in self._exports]
       # combine all the linears into one, memory plan, and compile
       big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in linears])))
       # the values of the Variables at capture, inputs are replaced every call
