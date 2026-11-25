@@ -150,6 +150,15 @@ def _iq_lut(t:int, dev:str|tuple[str, ...], wmma:bool=False) -> tuple[UOp, ...]:
     words = tuple((v >> (32 * i)) & 0xffffffff for v in grid for i in range(nw))
   return (Tensor(np.array(words, dtype=np.uint32), device=dev).realize().uop,)
 
+def _r4_qrow(x:Tensor, m:int, k:int, dev:str|tuple[str, ...]) -> tuple[UOp, UOp]:
+  kg = k // 32
+  kern = unwrap(slopkernels.get("rdna4_fp8_qrow_tiled")).specialize(m_tiles=m // 16, k_groups=kg, waves=min(8, max(1, kg // 16)))
+  xq, xsc = UOp.alloc((m // 16, kg, 2, 16, 4), dtypes.uint32, device=dev), UOp.alloc((m,), dtypes.float32, device=dev)
+  c = kern.call(xq, xsc, x.half().contiguous().uop)
+  return xq.after(c), xsc.after(c)
+
+_R4_FP8_TYPES = {8, 10, 12, 13, 14, 21, 22, 23, 39}
+
 def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[str, int, int, SetupFn]]:
   target, cdna = _arch_info(dev)
   N, K, FFN = (128, 256, 256) if smoke else (4096, 4096, 14336)
@@ -170,6 +179,13 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         w4 = ggml_data_to_tensor(tile_u8[:CHECK_ROWS].flatten(), CHECK_ROWS * K, qtype).reshape(CHECK_ROWS, K)
         _assert_close(out[:, :CHECK_ROWS].float().numpy(), (x.float() @ w4.T).numpy(), rtol=4e-2, atol=5e-2)
       if m % 16 == 0 and n % 16 == 0:
+        if target[0] == 12 and m >= 128 and n >= 128 and K >= 512 and m % 128 == 0 and n % 64 == 0 and K % 256 == 0 and qtype in _R4_FP8_TYPES:
+          def _run_fp8() -> Tensor:
+            xq, xsc = _r4_qrow(x, m, K, dev)
+            gl = _iq_lut(qtype, dev, wmma=False) if qtype in (21, 22) else ()
+            return _krun(f"rdna4_gemm_{kname}_fp8", (m, n), dev, w_packed, xq, xsc, *gl,
+                         m_blks=m // 128, n_blks=n // 64, k_pairs=K // 256, raw_len=w_len)
+          return _run_fp8, _verify
         if not cdna and m % 32 == 0 and n % 64 == 0 and K % 64 == 0:
           sk = 1
           if target[0] == 12:
@@ -199,10 +215,12 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         mt = 8 if m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
         return (lambda: _krun(f"{arch_gemm}_gemm_{kname}_f16", (m, n), dev, w_packed, x.half().contiguous(),
                               *_iq_lut(qtype, dev, True), m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=K, raw_len=w_len)), _verify
-      if not cdna and m == 1 and qtype in (8, 10, 12, 13, 14, 19, 21, 23, 39) and x_dt in (dtypes.float32, dtypes.float16):
-        half_m = K >= 2048 and ((target[0] == 12 and qtype in (10, 13, 23, 39)) or (target[0] == 11 and qtype in (10, 39)))
+      if not cdna and m == 1 and qtype in (8, 10, 11, 12, 13, 14, 19, 20, 21, 22, 23, 39) and x_dt in (dtypes.float32, dtypes.float16):
+        half_m = qtype in (11, 20, 22) or (K >= 2048 and ((target[0] == 12 and qtype in (8, 10, 14, 21, 23, 39))
+                                                          or (target[0] == 11 and qtype in (10, 39))))
         wv = min(ceildiv(K * (2 if half_m else 1), 1024), 32)
-        rpw = 2 if n % 2 == 0 and n >= 1024 and ((target[0] == 12 and qtype in (10, 13, 14)) or (target[0] == 11 and qtype in (10, 12, 14))) else 1
+        rpw_t = ({8:4, 10:2, 11:2, 19:16, 20:2, 21:16, 22:16, 39:2} if target[0] == 12 else {10:2, 12:2, 14:2}).get(qtype, 1)
+        rpw = rpw_t if n >= 1024 and n % rpw_t == 0 else 1
         return (lambda: _krun(f"rdna_gemv_direct{'2' if half_m else ''}_{kname}_{x_dt.name}", (1, n), dev, w_packed, x, *_iq_lut(qtype, dev),
                               out_features=n, in_features=K, waves=wv, rows_per_wg=rpw, raw_len=w_len)), _verify
       wv = min(ceildiv(K, 1024), 32)
@@ -257,9 +275,10 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         _assert_close(got, np.broadcast_to(ref1, got.shape), rtol=4e-2, atol=5e-2)
       def _run() -> Tensor:
         if not cdna and qtype in (8, 10, 12, 13, 14, 19, 21, 23, 39):
-          half_m = target[0] == 12 and qtype in (23, 39) and MOE_K >= 2048
+          half_m = target[0] == 12 and qtype in (8, 12, 23, 39) and MOE_K >= 2048
           wv_d = min(ceildiv(MOE_K * (2 if half_m else 1), 1024), 32)
-          rpw = 2 if MOE_N % 2 == 0 and MOE_N >= 1024 and target[0] == 11 and qtype == 12 else 1
+          rpw_t = ({8:4, 12:2, 19:16, 23:2, 39:2} if target[0] == 12 else {12:2}).get(qtype, 1)
+          rpw = rpw_t if MOE_N >= 1024 and MOE_N % rpw_t == 0 else 1
           return _krun(f"rdna_moe_direct{'2' if half_m else ''}_{kname}", (TOPK, MOE_N), dev, w_packed, x.reshape(1, MOE_K), sel,
                        *_iq_lut(qtype, dev), rows=TOPK, x_rows=1, out_features=MOE_N, in_features=MOE_K,
                        waves=wv_d, rows_per_wg=rpw, raw_len=w_len, x_share=TOPK, ndev=1).reshape(1, 1, TOPK, MOE_N)
@@ -358,6 +377,9 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         ref[t] = st @ q0[t]
       _assert_close(out[0, 0].numpy(), ref, rtol=2e-3, atol=2e-4)
       _assert_close(state[0, 0].numpy(), st, rtol=2e-3, atol=2e-4)
+    if target[0] == 12 and gd_d in (64, 128) and gd_t >= 16:
+      return (lambda: _krun("rdna4_gated_delta_wmma", (1, gd_h, gd_t, gd_d), dev, q, k, v, beta, alpha, state, UOp.const(1),
+                            batch=1, heads=gd_h, tokens=gd_t, d_blks=gd_d // 64)), _verify
     return (lambda: _krun("amd_gated_delta", (1, gd_h, gd_t, gd_d), dev, q, k, v, beta, alpha.reshape(1, gd_h, gd_t, 1), state,
                           (q * k).sum(-1).contiguous(), UOp.const(1), batch=1, heads=gd_h, tokens=gd_t, v_tiles=gd_d // 4,
                           k_blks=gd_d // 32, alpha_k=1)), _verify
@@ -377,8 +399,8 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       comb = (m_n[:, 8:] * scale[2].float() + base[8:].float()).reshape(t_h, 4, 4).softmax(-1) + 1e-6
       for i in range(3): comb = comb / (comb.sum(-1 if i % 2 else -2, keepdim=True) + 1e-6)
       _assert_close(out.float().numpy(), pre.cat(post, comb.reshape(t_h, 16), dim=-1).numpy(), rtol=2e-3, atol=2e-3)
-    return (lambda: _krun("amd_hc_coeffs_f16_f16", (t_h, 24), dev, mix, flat.reshape(t_h, 32, -1).square().sum(-1).contiguous(),
-                          base, scale, tokens=t_h, features=K, iters=2, eps=1e-6, norm_eps=1e-6)), _verify
+    return (lambda: _krun("amd_hc_coeffs_f16_f16", (t_h, 24), dev, mix, flat, base, scale,
+                          tokens=t_h, features=K, waves=min(max(1, ceildiv(K, 512)), 8), iters=2, eps=1e-6, norm_eps=1e-6)), _verify
   cases.append((f"hc_coeffs_{2 if smoke else 32}x{K}", (2 if smoke else 32) * K * 4, 0, _mk_hc))
   return cases
 

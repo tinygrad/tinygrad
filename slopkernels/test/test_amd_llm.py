@@ -136,7 +136,8 @@ class TestQ8Quantize(unittest.TestCase):
         x = rng.normal(size=(tokens, in_features)).astype(np.float32 if tokens == 3 else np.float16)
         reference_x = x.astype(np.float32)
         wmma = custom and (32 if symbolic else tokens) % 16 == 0 and out_features % 16 == 0
-        direct = custom and not symbolic and tokens == 1 and not _is_cdna(Tensor.empty(1).device) and ggml_type in (8, 10, 12, 13, 14, 19, 21, 23, 39)
+        direct = (custom and not symbolic and tokens == 1 and not _is_cdna(Tensor.empty(1).device)
+                  and ggml_type in (8, 10, 11, 12, 13, 14, 19, 20, 21, 22, 23, 39))
         if wmma or direct: reference_x = x.astype(np.float16).astype(np.float32)
         if custom and not wmma and not direct:
           grouped = reference_x.reshape(tokens, -1, 32)

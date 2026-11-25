@@ -17,7 +17,7 @@ Sublayer = Callable[[Tensor], tuple[Tensor, Tensor|None]]
 
 _QUANT_NAMES = {8:"q8_0", 10:"q2_k", 11:"q3_k", 12:"q4_k", 13:"q5_k", 14:"q6", 16:"iq2_xxs", 17:"iq2_xs",
                 18:"iq3_xxs", 19:"iq1_s", 20:"iq4_nl", 21:"iq3_s", 22:"iq2_s", 23:"iq4_xs", 39:"mxfp4", 40:"nvfp4"}
-_DIRECT_GEMV_TYPES = {8, 10, 12, 13, 14, 19, 21, 23, 39}
+_DIRECT_GEMV_TYPES = {8, 10, 11, 12, 13, 14, 19, 20, 21, 22, 23, 39}
 _DP4A_M_TYPES = {8, 12, 23, 39}
 
 @functools.cache
@@ -122,7 +122,17 @@ class Linear(nn.Linear):
       arch = "cdna" if target[0] == 9 else "rdna4" if target[0] == 12 else "rdna3"
       out_shape = _shard_shape((splits * tokens, out_f), out_axis, ndev)
       x_f16 = x_in.half().contiguous().reshape(out_shape[0], in_f) if x_axis is None else x_in.half().contiguous()
-      if target[0] in (11, 12) and aligned4 and out_shape[0] % 32 == 0 and local_out % 64 == 0 and in_f % 64 == 0:
+      out: Tensor|None = None
+      if target[0] == 12 and aligned4 and out_axis is None and out_shape[0] >= 128 and local_out >= 128 and in_f >= 512 \
+          and out_shape[0] % 128 == 0 and local_out % 64 == 0 and in_f % 256 == 0 and self.ggml_type in {8, 10, 12, 13, 14, 21, 22, 23, 39} \
+          and (kq := _get_kernel("rdna4_fp8_qrow_tiled", m_tiles=out_shape[0]//16, k_groups=in_f//32, waves=min(8, max(1, in_f//512)))) is not None:
+        xq, xsc = UOp.alloc((out_shape[0]//16, in_f//32, 2, 16, 4), dtypes.uint32, device=dev), UOp.alloc((out_shape[0],), dtypes.float32, device=dev)
+        c = kq.call(xq, xsc, x_f16.uop)
+        out = _run_kernel(f"rdna4_gemm_{qname}_fp8", out_shape, dev, self.packed, xq.after(c), xsc.after(c),
+                          *(_iq_lut(self.ggml_type, dev) if self.ggml_type in (21, 22) else ()),
+                          m_blks=out_shape[0] // 128, n_blks=local_out // 64, k_pairs=in_f // 256, raw_len=raw_len)
+      if out is not None: pass
+      elif target[0] in (11, 12) and aligned4 and out_shape[0] % 32 == 0 and local_out % 64 == 0 and in_f % 64 == 0:
         m_s, sk = out_shape[0], 1
         if target[0] == 12:
           if m_s >= 256 and m_s % 256 == 0 and local_out % 128 == 0 and self.ggml_type != 12: wm, wn, tm, tn = 4, 2, 4, 4
@@ -161,10 +171,11 @@ class Linear(nn.Linear):
       out_shape = _shard_shape((splits * tokens, out_f), out_axis, ndev)
       if target[0] in (11, 12) and self.groups == 1 and x_tokens == 1 and self.ggml_type in _DIRECT_GEMV_TYPES \
           and x_in.dtype in (dtypes.float32, dtypes.float16) and (self.ggml_type != 39 or aligned4):
-        half_m = in_f >= 2048 and ((target[0] == 12 and self.ggml_type in (10, 13, 23, 39)) or (target[0] == 11 and self.ggml_type in (10, 39)))
+        half_m = self.ggml_type in (11, 20, 22) or (in_f >= 2048 and ((target[0] == 12 and self.ggml_type in (8, 10, 14, 21, 23, 39))
+                                                                      or (target[0] == 11 and self.ggml_type in (10, 39))))
         waves = min(ceildiv(in_f * (2 if half_m else 1), 1024), 32)
-        rpw = 2 if local_out % 2 == 0 and local_out >= 1024 and (
-          (target[0] == 12 and self.ggml_type in (10, 13, 14)) or (target[0] == 11 and self.ggml_type in (10, 12, 14))) else 1
+        rpw_t = ({8:4, 10:2, 11:2, 19:16, 20:2, 21:16, 22:16, 39:2} if target[0] == 12 else {10:2, 12:2, 14:2}).get(self.ggml_type, 1)
+        rpw = rpw_t if local_out >= 1024 and local_out % rpw_t == 0 else 1
         x_flat = x_in.contiguous().reshape(1, in_f) if x_axis is None else x_in.contiguous()
         out = _run_kernel(f"rdna_gemv_direct{'2' if half_m else ''}_{qname}_{x_in.dtype.name}", out_shape, dev,
                           self.packed, x_flat, *_iq_lut(self.ggml_type, dev), axis=out_axis,
@@ -243,10 +254,12 @@ class ExpertWeights:
     arch, out_axis = "cdna" if target[0] == 9 else "rdna", 0 if w_axis == 2 else w_axis
     out_shape = _shard_shape((ndev * splits * B * Tm * slots, global_out), out_axis,
                              ndev if w_axis == 0 else splits if w_axis == 2 else (global_out // local_out))
-    if target[0] in (11, 12) and self.ggml_type in _DIRECT_GEMV_TYPES and x_p.dtype == dtypes.float32 and (self.ggml_type != 39 or aligned4):
-      half_m = target[0] == 12 and self.ggml_type in (23, 39) and local_in >= 2048
+    if target[0] in (11, 12) and self.ggml_type in (_DIRECT_GEMV_TYPES - {11, 20, 22}) \
+        and x_p.dtype == dtypes.float32 and (self.ggml_type != 39 or aligned4):
+      half_m = target[0] == 12 and self.ggml_type in (8, 12, 23, 39) and local_in >= 2048
       waves = min(ceildiv(local_in * (2 if half_m else 1), 1024), 32)
-      rpw = 2 if local_out % 2 == 0 and local_out >= 1024 and target[0] == 11 and self.ggml_type == 12 else 1
+      rpw_t = ({8:4, 12:2, 19:16, 23:2, 39:2} if target[0] == 12 else {12:2}).get(self.ggml_type, 1)
+      rpw = rpw_t if local_out >= 1024 and local_out % rpw_t == 0 else 1
       x_flat = x_p.contiguous().reshape(x_rows, local_in) if x_p.uop.axis is None else x_p.contiguous()
       out = _run_kernel(f"rdna_moe_direct{'2' if half_m else ''}_{_QUANT_NAMES[self.ggml_type]}", out_shape, dev,
                         self.packed, x_flat, sel_p.cast(dtypes.int32).flatten(), *_iq_lut(self.ggml_type, dev), axis=out_axis,
@@ -533,10 +546,10 @@ class HyperConnection:
       flat_pad = flat.pad_to(flat.max_shape).reshape(-1, flat.shape[-1])
       tokens, features = int(flat_pad.shape[0]), int(flat_pad.shape[-1])
       mix, base, scale = self.fn(flat_pad), self.base["weight"], self.scale["weight"]
-      sq = (flat_pad.float() * flat_pad.float()).reshape(tokens, 32, features // 32).sum(-1).contiguous()
       coeffs = (_run_kernel(f"amd_hc_coeffs_{base.dtype.name}_{scale.dtype.name}", (tokens, 24), xs.device,
-                            mix.float().contiguous(), sq, base.contiguous(), scale.contiguous(),
-                            tokens=tokens, features=features, iters=self.iters, eps=float(self.eps), norm_eps=float(self.norm_eps))
+                            mix.float().contiguous(), flat_pad.float().contiguous(), base.contiguous(), scale.contiguous(),
+                            tokens=tokens, features=features, waves=min(max(1, ceildiv(features, 512)), 8),
+                            iters=self.iters, eps=float(self.eps), norm_eps=float(self.norm_eps))
                 if features % 32 == 0 else None)
       if coeffs is not None:
         coeffs = coeffs.reshape(*flat.max_shape[:-1], -1).shrink_to(*flat.shape[:-1], None)
@@ -1136,17 +1149,22 @@ class GatedDeltaNetBlock(FFNBlock):
     # recurrent: scan over the (padded) tokens, updating the recurrent state. collect the per-step outputs
     state_dep = Tensor(self.recurrent_state.uop.after(*conv_state_stores))
     core_out: Tensor|None = None
-    if q.uop.axis is None and state_dep.uop.axis is None and _amd_target(q.device) is not None \
+    if q.uop.axis is None and state_dep.uop.axis is None and (gd_tgt := _amd_target(q.device)) is not None \
         and self.head_k_dim % 32 == 0 and 32 <= self.head_k_dim <= 256 and self.head_v_dim % 4 == 0:
       alpha_k = self.head_k_dim if (alpha.ndim == 4 and int(alpha.shape[-1]) == self.head_k_dim) else 1
       alpha_in = alpha.contiguous().reshape(int(B), self.num_v_heads, T_pad, alpha_k)
       start_pos_uop = pos if isinstance(pos, UOp) else UOp.const(int(pos))
-      core_out = _run_kernel("amd_gated_delta",
-                             (int(B), self.num_v_heads, T_pad, self.head_v_dim), q.device,
-                             q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha_in, state_dep,
-                             (q * k).sum(-1).contiguous(), start_pos_uop,
-                             batch=int(B), heads=self.num_v_heads, tokens=T_pad, v_tiles=self.head_v_dim // 4,
-                             k_blks=self.head_k_dim // 32, alpha_k=alpha_k)
+      if gd_tgt[0] == 12 and alpha_k == 1 and self.head_k_dim == self.head_v_dim in (64, 128) and T_pad >= 16 and state_dep.dtype == dtypes.float32:
+        core_out = _run_kernel("rdna4_gated_delta_wmma", (int(B), self.num_v_heads, T_pad, self.head_v_dim), q.device,
+                               q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha_in.squeeze(-1), state_dep,
+                               start_pos_uop, batch=int(B), heads=self.num_v_heads, tokens=T_pad, d_blks=self.head_k_dim // 64)
+      if core_out is None:
+        core_out = _run_kernel("amd_gated_delta",
+                               (int(B), self.num_v_heads, T_pad, self.head_v_dim), q.device,
+                               q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha_in, state_dep,
+                               (q * k).sum(-1).contiguous(), start_pos_uop,
+                               batch=int(B), heads=self.num_v_heads, tokens=T_pad, v_tiles=self.head_v_dim // 4,
+                               k_blks=self.head_k_dim // 32, alpha_k=alpha_k)
     if core_out is not None:
       core = core_out.transpose(1, 2)
     else:

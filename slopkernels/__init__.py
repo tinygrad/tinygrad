@@ -17,8 +17,8 @@ UIR_DIR = pathlib.Path(__file__).resolve().parent / "uir"
 _DTYPES: dict[str, DType] = {v.name: v for v in vars(type(dtypes)).values() if isinstance(v, DType)}
 _IQ_GRID_LENS = {_gguf.IQ2_XXS: 512, _gguf.IQ2_XS: 1024, _gguf.IQ1_S: 4096, _gguf.IQ2_S: 2048, _gguf.IQ3_XXS: 256, _gguf.IQ3_S: 512}
 _WMMA_TBL_LENS = {**_IQ_GRID_LENS, _gguf.IQ3_XXS: 512, _gguf.IQ2_S: 4096}
-_HALF_DIRECT_QUANTS = (_gguf.Q2_K, _gguf.Q5_K, _gguf.IQ4_XS, _gguf.MXFP4)
-_HALF_MOE_QUANTS = (_gguf.IQ4_XS, _gguf.MXFP4)
+_HALF_DIRECT_QUANTS = (_gguf.Q8_0, _gguf.Q6_K, _gguf.Q3_K, _gguf.Q2_K, _gguf.IQ4_XS, _gguf.IQ4_NL, _gguf.IQ3_S, _gguf.IQ2_S, _gguf.MXFP4)
+_HALF_MOE_QUANTS = (_gguf.Q8_0, _gguf.Q4_K, _gguf.IQ4_XS, _gguf.MXFP4)
 
 def _wdt(t:int) -> DType: return dtypes.uint8 if t == _gguf.MXFP4 else dtypes.uint16 if t in _gguf.HALFWORD_QUANTS else dtypes.uint32
 def _p(slot:int, shape:tuple[int|UOp, ...], dt:str|DType) -> UOp: return UOp.param(slot, dt if isinstance(dt, DType) else _DTYPES[dt], shape)
@@ -58,7 +58,7 @@ def _b_qgemv_m(qt:int, cdna:bool) -> UOp:
 
 def _b_qgemv_direct(qt:int, xdt:str, half_mode:bool) -> UOp:
   inf, outf, rl = _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 30)
-  wv, rpw = _t("waves", 1, 32), _t("rows_per_wg", 1, 2)
+  wv, rpw = _t("waves", 1, 32), _t("rows_per_wg", 1, 32)
   gl = (_p(3, (_IQ_GRID_LENS[qt],), "u32"),) if qt in _IQ_GRID_LENS else ()
   return _gguf._quant_direct_gemv_kernel(_p(0, (1, outf), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (1, inf), xdt), *gl,
                                          out_features=outf, in_features=inf, waves=wv, rows_per_wg=rpw, ggml_type=qt, half_mode=half_mode)
@@ -73,7 +73,7 @@ def _b_moe(qt:int, cdna:bool) -> UOp:
 
 def _b_moe_direct(qt:int, half_mode:bool) -> UOp:
   inf, outf, rl, wv = _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 30), _t("waves", 1, 32)
-  rows, xrows, xs, nd, rpw = _t("rows"), _t("x_rows"), _t("x_share", 1, 1024), _t("ndev", 1, 64), _t("rows_per_wg", 1, 2)
+  rows, xrows, xs, nd, rpw = _t("rows"), _t("x_rows"), _t("x_share", 1, 1024), _t("ndev", 1, 64), _t("rows_per_wg", 1, 32)
   gl = (_p(4, (_IQ_GRID_LENS[qt],), "u32"),) if qt in _IQ_GRID_LENS else ()
   return _gguf._moe_direct_kernel(_p(0, (rows, outf), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (xrows, inf), "f32"), _p(3, (rows,), "i32"), *gl,
                                   out_features=outf, in_features=inf, waves=wv, rows_per_wg=rpw, ggml_type=qt, x_share=xs,
@@ -129,10 +129,10 @@ def _b_fpc() -> UOp:
                                          _p(2, (sk, BH, M, 2), "f32"), split_kv=sk, d_blks=db)
 
 def _b_hc(bdt:str, sdt:str) -> UOp:
-  tok, feats, iters = _t("tokens"), _t("features", 32), _t("iters", 1, 64)
+  tok, feats, wv, iters = _t("tokens"), _t("features", 32), _t("waves", 1, 32), _t("iters", 1, 64)
   eps, neps = _t("eps", 0.0, 1.0, dtypes.float32), _t("norm_eps", 0.0, 1.0, dtypes.float32)
-  return _amd._hc_coeffs_kernel(_p(0, (tok, 24), "f32"), _p(1, (tok, 24), "f32"), _p(2, (tok, 32), "f32"),
-                                _p(3, (24,), bdt), _p(4, (3,), sdt), 4, iters, eps, neps, feats)
+  return _amd._hc_coeffs_kernel(_p(0, (tok, 24), "f32"), _p(1, (tok, 24), "f32"), _p(2, (tok, feats), "f32"),
+                                _p(3, (24,), bdt), _p(4, (3,), sdt), 4, wv, iters, eps, neps, feats)
 
 def _b_gd() -> UOp:
   tok, ba, hd, vt, kb, ak = _t("tokens"), _t("batch", 1, 64), _t("heads", 1, 256), _t("v_tiles", 1, 1024), _t("k_blks", 1, 8), _t("alpha_k", 1, 256)
@@ -141,6 +141,25 @@ def _b_gd() -> UOp:
     _p(2, (ba, hd, tok, K), "f32"), _p(3, (ba, hd, tok, vt * 4), "f32"), _p(4, (ba, hd, tok), "f32"),
     _p(5, (ba, hd, tok, ak), "f32"), _p(6, (ba, hd, vt * 4, K), "f32"),
     _p(7, (ba, hd, tok), "f32"), k_blks=kb, alpha_k=ak, start_pos=_v(8, "start_pos"))
+
+def _b_gd_wmma() -> UOp:
+  ba, hd, tok, db = _t("batch", 1, 64), _t("heads", 1, 256), _t("tokens"), _t("d_blks", 1, 2)
+  D = db * 64
+  return _amd._gated_delta_prefill_wmma_kernel(_p(0, (ba, hd, tok, D), "f32"), _p(1, (ba, hd, tok, D), "f32"),
+    _p(2, (ba, hd, tok, D), "f32"), _p(3, (ba, hd, tok, D), "f32"), _p(4, (ba, hd, tok), "f32"),
+    _p(5, (ba, hd, tok), "f32"), _p(6, (ba, hd, D, D), "f32"), d_blks=db, start_pos=_v(7, "start_pos"))
+
+def _b_r4_qrow() -> UOp:
+  mt, kg, wv = _t("m_tiles", 1, 4096), _t("k_groups", 8, 4096), _t("waves", 1, 8)
+  return _gguf._rdna4_qrow_tiled_kernel(_p(0, (mt, kg, 2, 16, 4), "u32"), _p(1, (mt * 16,), "f32"), _p(2, (mt * 16, kg * 32), "f16"),
+                                        m_tiles=mt, k_groups=kg, waves=wv)
+
+def _b_r4_gemm_fp8(qt:int) -> UOp:
+  mb, nb, kp, rl = _t("m_blks", 1, 4096), _t("n_blks", 1, 4096), _t("k_pairs", 1, 4096), _t("raw_len", 1, 1 << 30)
+  gl = (_p(4, (_IQ_GRID_LENS[qt],), "u32"),) if qt in (_gguf.IQ2_S, _gguf.IQ3_S) else ()
+  return _gguf._rdna4_gemm_fp8_kernel(_p(0, (mb * 128, nb * 64), "f32"), _p(1, (rl,), _wdt(qt)),
+                                      _p(2, (mb * 8, kp * 8, 2, 16, 4), "u32"), _p(3, (mb * 128,), "f32"), *gl,
+                                      m_blks=mb, n_blks=nb, k_pairs=kp, ggml_type=qt)
 
 _BUILDERS: dict[str, Callable[[], UOp]] = {
   **{f"amd_q8_quantize_{dt}": functools.partial(_b_q8, dt) for dt in ("f16", "bf16", "f32")},
@@ -162,6 +181,8 @@ _BUILDERS: dict[str, Callable[[], UOp]] = {
      for qt, qn in _gguf.QUANT_NAMES.items() for a, kg, ln in (("rdna4", 2, 32), ("rdna3", 1, 32), ("cdna", 4, 64))},
   **{f"{a}_gemm_{qn}_2d": functools.partial(_b_gemm_2d, qt, rdna4)
      for qt, qn in _gguf.QUANT_NAMES.items() for a, rdna4 in (("rdna4", True), ("rdna3", False))},
+  "rdna4_fp8_qrow_tiled": _b_r4_qrow,
+  **{f"rdna4_gemm_{_gguf.QUANT_NAMES[qt]}_fp8": functools.partial(_b_r4_gemm_fp8, qt) for qt in _gguf.RDNA4_FP8_QUANTS},
   "amd_flash_decode_combine": _b_fdc,
   "amd_flash_decode_partial": _b_fdp,
   "rdna4_flash_attn": functools.partial(_b_fa, True, False),
@@ -170,6 +191,7 @@ _BUILDERS: dict[str, Callable[[], UOp]] = {
   "amd_flash_prefill_combine": _b_fpc,
   **{f"amd_hc_coeffs_{b}_{s}": functools.partial(_b_hc, b, s) for b in ("f16", "f32") for s in ("f16", "f32")},
   "amd_gated_delta": _b_gd,
+  "rdna4_gated_delta_wmma": _b_gd_wmma,
 }
 
 def _emit(name:str, fn:Callable[[], UOp]) -> tuple[pathlib.Path, str]:

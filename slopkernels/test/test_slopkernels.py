@@ -165,11 +165,11 @@ class TestSlopKernelsUIR(unittest.TestCase):
       np.testing.assert_allclose(gd_s.numpy(), st_ref, rtol=2e-4, atol=2e-6)
     # 6. mHC coeffs
     hc_mix = Tensor(rng.normal(0, 0.2, (2, 24)).astype(np.float32)).realize()
-    hc_sq = Tensor(rng.standard_normal((2, 128)).astype(np.float32)).reshape(2, 32, 4).square().sum(-1).contiguous().realize()
+    hc_flat = Tensor(rng.standard_normal((2, 128)).astype(np.float32)).contiguous().realize()
     hc_base = Tensor(rng.normal(0, 0.2, (24,)).astype(np.float16)).realize()
     hc_scale = Tensor(rng.uniform(0.5, 1.5, (3,)).astype(np.float16)).realize()
-    got_hc = _krun("amd_hc_coeffs_f16_f16", (2, 24), dev, hc_mix, hc_sq, hc_base, hc_scale,
-                   tokens=2, features=128, iters=2, eps=1e-6, norm_eps=1e-6).numpy()
+    got_hc = _krun("amd_hc_coeffs_f16_f16", (2, 24), dev, hc_mix, hc_flat, hc_base, hc_scale,
+                   tokens=2, features=128, waves=1, iters=2, eps=1e-6, norm_eps=1e-6).numpy()
     np.testing.assert_allclose(got_hc[:, 8:].reshape(2, 4, 4).sum(-1), 1.0, rtol=2e-2, atol=2e-2)
 
   def test_multi_gpu_tp(self):
