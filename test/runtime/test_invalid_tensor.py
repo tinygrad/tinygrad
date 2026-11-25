@@ -6,12 +6,12 @@ from test.helpers import run_schedule
 
 class TestInvalidTensor(unittest.TestCase):
   def _invalid_test_helper(self, out, expected):
-    linear, var_vals = out.linear_with_vars()
+    linear, externs = out.linear_with_externs()
     buf = out.uop.buffer
     buf.allocate()
     buf.copy_from(Buffer("PYTHON", buf.nbytes, initial_value=b'\x42' * buf.nbytes))
     before = buf.as_memoryview().cast(out.dtype.fmt).tolist()
-    run_schedule(linear, var_vals)
+    run_schedule(linear, externs)
     ret = buf.as_memoryview().cast(out.dtype.fmt).tolist()
 
     for i,v in enumerate(expected): self.assertEqual(ret[i], before[i] if v is None else v)

@@ -19,7 +19,7 @@
 
 ## tinygrad ops
 
-::: tinygrad.Tensor.linear_with_vars
+::: tinygrad.Tensor.linear_with_externs
 ::: tinygrad.Tensor.schedule_linear
 ::: tinygrad.Tensor.export
 ::: tinygrad.Tensor.compile

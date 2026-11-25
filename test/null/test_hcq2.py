@@ -42,7 +42,7 @@ def scheduled(*ts:Tensor, **kwargs) -> list[UOp]:
     lin = orig(l, profile)
     batches.extend(c for c in lin.src if c.op is Ops.CALL and c.arg.hcq is not None)
     return lin
-  with patch.object(hcq2, "sched_batches", track): compile_linear(ts[0].linear_with_vars(*ts[1:])[0], **kwargs)
+  with patch.object(hcq2, "sched_batches", track): compile_linear(ts[0].linear_with_externs(*ts[1:])[0], **kwargs)
   return batches
 
 def submits(batch:UOp) -> list[UOp]: # the submit calls of a batch sink in order

@@ -43,9 +43,9 @@ if __name__ == "__main__":
   with Context(DEBUG=2):
     for _ in range(run_count): tc = (a@b).realize()
 
-  linear = Tensor.custom_kernel(a, b, c, fxn=make_matmul_kernel(name, src, local_size))[2].schedule_linear()
+  linear, externs = Tensor.custom_kernel(a, b, c, fxn=make_matmul_kernel(name, src, local_size))[2].linear_with_externs()
   GlobalCounters.reset()
   with Context(DEBUG=2):
-    linear = link_linear(compile_linear(linear))
-    for _ in range(run_count): run_linear(linear)
+    linear = link_linear(compile_linear(linear), list(externs))
+    for _ in range(run_count): run_linear(linear, input_uops=externs)
   print(f"custom  {(c-tc).square().mean().item()}")
