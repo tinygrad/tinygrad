@@ -290,10 +290,10 @@ def _int_clamp(op_name: str, srcs: dict) -> UOp | None:
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
   __slots__ = ('dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr', 'branch_cond')
-  sgpr = UOp.param(0, dtypes.uint32, SGPR_COUNT, name="sgpr")
-  vmem = UOp.param(2, dtypes.uint32, 1 << 46, name="vmem")
-  lds = UOp.param(3, dtypes.uint32, 16384, name="lds")
-  scratch = UOp.param(4, dtypes.uint8, 1 << 30, name="scratch")
+  sgpr = UOp.param(0, dtypes.uint32, SGPR_COUNT, name="sgpr", addrspace=AddrSpace.REG)
+  vmem = UOp.param(2, dtypes.uint32, 1 << 46, name="vmem", addrspace=AddrSpace.GLOBAL)
+  lds = UOp.param(3, dtypes.uint32, 16384, name="lds", addrspace=AddrSpace.REG)
+  scratch = UOp.param(4, dtypes.uint8, 1 << 30, name="scratch", addrspace=AddrSpace.REG)
   scratch_stride = UOp.param(9, dtypes.uint32, name="scratch_stride", addrspace=AddrSpace.ALU)
 
   def __init__(self, wave_size: int = 32):
