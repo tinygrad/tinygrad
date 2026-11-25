@@ -179,6 +179,7 @@ class NIRRenderer(Renderer):
   def param(self, b:mesa.nir_builder, x, sz:int) -> mesa.nir_def: raise NotImplementedError("needs param")
   def prerender(self, uops:list[UOp]):
     self.b = mesa.nir_builder_init_simple_shader(mesa.MESA_SHADER_COMPUTE, mesa.nir_shader_compiler_options.from_buffer_copy(self.nir_options), None)
+    self.b.fp_fast_math = 0x1ff # FLOAT_CONTROLS_SIGNED_ZERO_INF_NAN_PRESERVE_FP16|FP32|FP64: no folds like x*0 -> 0
   def postrender(self, uops:list[UOp]): pass
 
   def render(self, uops:list[UOp]):

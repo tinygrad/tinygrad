@@ -516,6 +516,9 @@ class TestOps(TensorTestCase):
   def test_sub(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x-y)
     helper_test_op([(), ()], lambda x,y: x-y)
+    # WGSL lets the compiler assume no inf/nan, Dawn folds x-x and x*0 to 0
+    if Device.DEFAULT != "WEBGPU": helper_test_op(None, lambda x: x-x, vals=[[-1.0, math.inf, math.nan]])
+    self.assertFalse(np.signbit(((x:=Tensor([-1.0]))-x).numpy()).any())
   def test_scalar_sub(self):
     helper_test_op([(45,65)], lambda x: x-2)
     helper_test_op([()], lambda x: x-2)
@@ -627,6 +630,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(45,65)], lambda x: x*math.inf)
     helper_test_op([(45,65)], lambda x: x*-math.inf)
     helper_test_op([(45,65)], lambda x: x*math.nan)
+    if Device.DEFAULT != "WEBGPU": helper_test_op(None, lambda x: x*0, vals=[[1.0, math.inf, -math.inf, math.nan]])
   def test_div_naninf(self):
     helper_test_op([(45,65)], lambda x: x/math.inf)
     helper_test_op([(45,65)], lambda x: x/-math.inf)
@@ -667,6 +671,7 @@ class TestOps(TensorTestCase):
     helper_test_op([(45,65)], lambda x: x**-5.5)
     # helper_test_op([(45,65)], lambda x: x**-8.0)  # TODO: fix this
     helper_test_op([(45,65)], lambda x: 1.0**x)
+    helper_test_op(None, lambda x: 1.0**x, vals=[[math.nan, math.inf, -math.inf]])
     helper_test_op([(45,65)], lambda x: 5.5**x)
     helper_test_op([(45,65)], lambda x: (-5.5)**x)
     helper_test_op([(45,65)], lambda x: 8.0**x)
@@ -1515,9 +1520,10 @@ class TestOps(TensorTestCase):
   def test_var_one_in_axis(self):
     with warnings.catch_warnings():
       warnings.filterwarnings("ignore", message="var\\(\\): degrees of freedom is <= 0")
-      helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3)))
+      # a single element var is 0/0, WGSL lets the compiler assume no nan
+      if Device.DEFAULT != "WEBGPU": helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3)))
       # TODO: fix backward
-      helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=5), forward_only=True)
+      if Device.DEFAULT != "WEBGPU": helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=5), forward_only=True)
       helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,4), correction=5), forward_only=True)
     helper_test_op([(1,)], lambda x: x.var(axis=(0,), correction=0))
     helper_test_op([(1,2,3,1,5)], lambda x: x.var(axis=(0,3), correction=0))
@@ -1541,8 +1547,8 @@ class TestOps(TensorTestCase):
   def test_std_one_in_axis(self):
     with warnings.catch_warnings():
       warnings.filterwarnings("ignore", message="std\\(\\): degrees of freedom is <= 0")
-      helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3)))
-      helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=5))
+      if Device.DEFAULT != "WEBGPU": helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3)))
+      if Device.DEFAULT != "WEBGPU": helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,3), correction=5))
       helper_test_op([(1,2,3,1,5)], lambda x: x.std(axis=(0,4), correction=5))
     # TODO: fix backward
     helper_test_op([(1,)], lambda x: x.std(axis=(0,), correction=0), forward_only=True)

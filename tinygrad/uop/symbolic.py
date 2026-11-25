@@ -176,11 +176,8 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var('x', dtype=dtypes.bool).maximum(UPat.var('y', dtype=dtypes.bool)), lambda x,y: x|y),
   # *** div rules ***
   (UPat.cvar('x', arg=0) / 0, lambda x: x.const_like(float('nan'))),   # 0/0 -> nan
-  # x*0 -> 0 or 0*x -> 0
-  # if x is nan or inf it should render the nan value.
-  # NOTE: this can be wrong for loaded NaN
-  (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if x.op is Ops.CONST
-                                             and isinstance(x.val, float) and (math.isnan(x.val) or math.isinf(x.val)) else 0)),
+  # x*0 -> 0, not for floats: inf*0 and nan*0 are nan
+  (UPat.var("x", dtypes.wints+(dtypes.bool,)) * 0, lambda x: x.const_like(0)),
   # *** cast/bitcast ***
   (UPat((Ops.CAST, Ops.BITCAST), name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
   # a BITCAST reads its operand at the width it states, so a weak const is nonsense here: the bare arm is bool only
@@ -193,6 +190,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x").cast(dtypes.bool), lambda x: x != 0),
   # ** pow **
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c")), simplify_pow),
+  (UPat.const(1).alu(Ops.POW, UPat.var()).named("p"), lambda p: p.const_like(1)),
   # positive const ** x
   (UPat.cvar("c").alu(Ops.POW, UPat.var("x")),
    lambda c,x: (x*math.log2(c.val)).exp2() if c.val > 0 and dtypes.is_float(x.dtype) else None),
@@ -253,7 +251,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("y") + UPat.var("x", dtypes.wints) * UPat.cvar("c0")) + UPat.var("x") * UPat.cvar("c1"),
    lambda x,y,c0,c1: y+m if fits(x, c0.vmin+c1.vmin) and no_overflow(m:=x*(c0+c1)) else None),
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), # (x+x*c)-> x*(c+1)
-   lambda x,c: x*(c+1) if (x.dtype in dtypes.wints or c.arg == -1) and fits(x, c.vmin+1) else None),
+   lambda x,c: x*(c+1) if x.dtype in dtypes.wints and fits(x, c.vmin+1) else None),
   ((UPat.var("y") + UPat.var("x", dtypes.wints)) + UPat.var("x") * UPat.cvar("c"),
    lambda x,y,c: y+m if fits(x, c.vmin+1) and no_overflow(m:=x*(c+1)) else None),
   ((UPat.var("y") + UPat.var("x", dtypes.wints) * UPat.cvar("c")) + UPat.var("x"),
