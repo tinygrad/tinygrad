@@ -288,7 +288,8 @@ class Tensor(Mixin):
   @staticmethod
   def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
     """Links a LINEAR from `Tensor.compile` to the externs from `Tensor.export` and runs it."""
-    run_linear(Tensor.link(linear, externs), input_uops=externs, update_stats=do_update_stats)
+    var_vals = {f"e{i}": x.arg.val for i,x in enumerate(externs) if x.is_bound_var}
+    run_linear(Tensor.link(linear, externs), var_vals, externs, update_stats=do_update_stats)
 
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
