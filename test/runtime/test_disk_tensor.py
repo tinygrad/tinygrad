@@ -28,6 +28,11 @@ def compare_weights_both(url):
   print(f"compared {len(tg_weights)} weights")
 
 class TestTorchLoad(TempDirTestCase):
+  def test_load_int8(self):
+    import torch
+    torch.save({"w": torch.tensor([-1], dtype=torch.int8)}, self.tmp("int8.pt"))
+    self.assertEqual(torch_load(self.tmp("int8.pt"))["w"].tolist(), [-1])
+
   def test_load_expanded(self):
     import torch
     torch.save({"w": torch.tensor([1.]).expand(2)}, self.tmp("expanded.pt"))
