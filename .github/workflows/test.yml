@@ -732,7 +732,7 @@ jobs:
 # `turin` label instead of falling back to ubuntu-24.04.
   gpu-canary:
     name: GPU Canary
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && (github.event_name == 'push' || github.event_name == 'pull_request') && 'turin' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && (github.event_name == 'push' || github.event_name == 'pull_request') && '4090' || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
       - name: Probe self-hosted runner hardware
