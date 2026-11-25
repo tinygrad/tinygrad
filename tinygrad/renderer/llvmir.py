@@ -284,7 +284,9 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     requiredMaxThreadsPerBlock = prod([d.vmax for d in local_dims])
     attributes = ["alwaysinline", "nounwind", '"no-builtins"',
                   f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}"', '"no-trapping-math"="true"']
-    return 'attributes #0 = { ' + ' '.join(attributes) + ' }'
+    blobs = {x.key: f"@bin_{x.key.hex()} = private constant [{len(x.arg)} x i8] c\"" + "".join("\\%02X" % b for b in x.arg) + '\", align 16'
+             for x in uops if x.op is Ops.BINARY}
+    return "\n".join([*blobs.values(), 'attributes #0 = { ' + ' '.join(attributes) + ' }'])
   @staticmethod
   def is_rdna4(arch): return arch in {'gfx1200', 'gfx1201'}
   def __init__(self, target:Target):
