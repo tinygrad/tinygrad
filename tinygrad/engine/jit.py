@@ -1,9 +1,9 @@
 from typing import TypeVar, Generic, Callable, Any, overload
 import functools
-from tinygrad.tensor import Tensor, all_tensors, map_back
+from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, pluralize, VIZ, disable_gc
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, AddrSpace
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite
 from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear
 from tinygrad.codegen import create_linear
@@ -22,8 +22,14 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
     else: onetime.append(si)
   return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
 
+# a captured export is scheduled on its storage: the EXTERNs are its externs, the ALLOCs get fresh storage
+def bind_export(linear:UOp, externs:tuple[UOp, ...]) -> UOp:
+  storage = {x.as_extern(i): x.unbound() if x.is_variable else x for i,x in enumerate(externs)}
+  allocs = {b: UOp.new_buffer(b.device, b.max_numel(), b.dtype) for b in linear.toposort() if b.op is Ops.ALLOC and b.addrspace is AddrSpace.GLOBAL}
+  return linear.substitute(storage | allocs, walk=True)
+
 @rewrite_group(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
-def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
+def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> tuple[UOp, tuple[UOp, ...]]:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
 
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
@@ -31,9 +37,12 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   # storage no one outside the jit holds is scratch: it's planned and bound at link
   scratch = {u: UOp.alloc((u.max_numel(),), u.dtype, device=u.device) for u in linear.toposort() if u.op is Ops.BUFFER and u not in held_bufs}
   linear = memory_plan_rewrite(linear.substitute(scratch, walk=True))
+  # the storage it holds is linked after the inputs: the compiled linear has no buffers
+  held = tuple(u for u in linear.toposort() if u.op is Ops.BUFFER)
+  linear = linear.substitute({u: u.as_extern(len(input_uops)+i) for i,u in enumerate(held)}, walk=True)
   linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), input_uops=input_uops, cache=False)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View compiled linear")
-  return linear
+  return linear, held
 
 class JitError(Exception): pass
 
@@ -49,15 +58,16 @@ ReturnType = TypeVar('ReturnType')
 class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
   _linear: UOp
+  _externs: tuple[UOp, ...]  # the storage the jit holds, linked after the inputs
   expected_names: list[int|str]
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
   var_vals: dict[str, int]  # the values of the Variables at capture, inputs are replaced every call
   _linears: dict[tuple[UOp, ...], tuple[UOp, dict[UOp, UOp]]] = field(default_factory=dict)  # aliased inputs -> (linked linear with copies, staging)
 
-  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info, self.var_vals)
+  def __reduce__(self): return self.__class__, (self.ret, self._linear, self._externs, self.expected_names, self.expected_input_info, self.var_vals)
 
   @functools.cached_property
-  def _jit_bufs(self) -> set[UOp]: return {u for u in self._linear.toposort() if u.op is Ops.BUFFER}
+  def _jit_bufs(self) -> set[UOp]: return set(self._externs)
 
   @functools.cached_property
   def _symbolic_ret(self) -> list[tuple[Tensor, UOp, dict[Variable, int]]]:
@@ -69,11 +79,11 @@ class CapturedJit(Generic[ReturnType]):
       if any(u.on_disk() for u in aliased): raise JitError("cannot make an independent copy of a written DISK input")
       staging = {u: UOp.new_buffer(u.device, u.max_numel(), u.dtype) for u in aliased}
       copies = compile_linear(UOp(Ops.LINEAR, src=tuple(s.store_call(u) for u,s in staging.items())))
-      self._linears[aliased] = (link_linear(self._linear.replace(src=copies.src+self._linear.src)), staging)
+      self._linears[aliased] = (link_linear(self._linear.replace(src=copies.src+self._linear.src), [*input_uops, *self._externs]), staging)
 
     linear, staging = self._linears[aliased]
     if DEBUG >= 1 and len(linear.src) >= 10: print(f"jit execs {len(linear.src)} calls")
-    run_linear(linear, {**self.var_vals, **var_vals}, input_uops=[staging.get(u, u) for u in input_uops], jit=True)
+    run_linear(linear, {**self.var_vals, **var_vals}, input_uops=tuple(staging.get(u, u) for u in input_uops)+self._externs, jit=True)
     for t,u,vals in self._symbolic_ret: t.uop = u.substitute({v:v.bind(var_vals.get(v.expr, i)) for v,i in vals.items()}, walk=True)
     return self.ret
 
@@ -144,13 +154,12 @@ class _TinyJit(Generic[ReturnType]):
       if DEBUG >= 1: print(f"JIT captured {len(self._exports)} exports with {len(input_buf_uops)} inputs")
 
       # schedule the captured exports on their storage. the prune needs unplanned storage, jit_lower plans the memory of all of them together
-      with Context(NO_MEMORY_PLANNER=1): linears = [map_back(create_linear(fn), externs) for fn,externs in self._exports]
-      del self._exports
+      with Context(NO_MEMORY_PLANNER=1): linears = [bind_export(create_linear(fn), externs) for fn,externs in self._exports]
       # combine all the linears into one, memory plan, and compile
-      big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l,_ in linears])))
+      big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in linears])))
       # the values of the Variables at capture, inputs are replaced every call
-      capture_var_vals = merge_dicts([vv for _,vv in linears])
-      del linears
+      capture_var_vals = merge_dicts([{x.expr: x.arg.val for x in externs if x.is_bound_var} for _,externs in self._exports])
+      del linears, self._exports
 
       if self.prune:
         big_linear, onetime_linear = prune_linear(big_linear, set(input_buf_uops))
@@ -163,11 +172,11 @@ class _TinyJit(Generic[ReturnType]):
       def _buf_or_none(u:UOp) -> Buffer|MultiBuffer|None: return u.arg.buffer if u.op is Ops.BUFFER else None
       held_bufs = {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if _buf_or_none(u) is not None}
       held_bufs |= {u for u in big_linear.toposort() if (b:=_buf_or_none(u)) is not None and b.is_allocated()}
-      linear = jit_lower(big_linear, held_bufs, input_buf_uops)
+      linear, held = jit_lower(big_linear, held_bufs, input_buf_uops)
       # drop the pre-planning graph: it keeps the whole capture-time working set allocated (big_linear) or referenced (held_bufs).
       # the planned linear only uses the arena/held buffers, so the intermediates must be freed before linking and first exec
       del big_linear, held_bufs
-      self.captured = CapturedJit(ret, linear, names, expected_input_info, capture_var_vals)
+      self.captured = CapturedJit(ret, linear, held, names, expected_input_info, capture_var_vals)
       ret = self.captured(input_buf_uops, var_vals)
     elif self.cnt >= 2:
       # jit exec
