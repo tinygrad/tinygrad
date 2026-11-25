@@ -588,7 +588,7 @@ class TestFunctionTuple(unittest.TestCase):
       return c
 
     def count_kernels(t:Tensor):
-      linear, _ = t.linear_with_vars()
+      linear, _ = t.linear_with_externs()
       return sum((len(call.device) if isinstance(call.device, tuple) else 1)
                  for call in linear.src if call.src[0].op is Ops.SINK)
 

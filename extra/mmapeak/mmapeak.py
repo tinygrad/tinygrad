@@ -40,13 +40,13 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.native(x).call() for x in insts]))))
   dummy = Tensor.zeros(1).contiguous().realize()
   out = Tensor.custom_kernel(dummy, fxn=fxn)[0]
-  linear = out.schedule_linear()
+  linear, externs = out.linear_with_externs()
   ets = []
   with Context(DEBUG=2):
-    linear = link_linear(compile_linear(linear))
+    linear = link_linear(compile_linear(linear), list(externs))
     for _ in range(2):
       start = GlobalCounters.time_sum_s
-      run_linear(linear)
+      run_linear(linear, input_uops=externs)
       ets.append(GlobalCounters.time_sum_s - start)
   elapsed = min(ets)
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP

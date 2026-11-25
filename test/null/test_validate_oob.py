@@ -227,6 +227,18 @@ class TestValidateOOB(unittest.TestCase):
       ld0 = shrink.load().index(0)
       to_uops_list([buf1.index(ld0.valid((ld0 >= 0) & (ld0 < 64))).load()])
 
+  def test_shrink_access(self):
+    with Context(CHECK_OOB=1, SPEC=2):
+      r = UOp.range(4, 0, AxisType.GLOBAL)
+      def shrink(n): return UOp(Ops.SHRINK, src=(UOp.param(0, dtypes.int, n), r*4, UOp.const(4)))
+      vals = UOp.stack(*[UOp.const(0, dtypes.int)]*4)
+      to_uops_list([shrink(16).load()])  # 0..15 valid
+      to_uops_list([shrink(16).store(vals)])
+      with self.assertRaises(RuntimeError):
+        to_uops_list([shrink(15).load()])  # the last access reads 12..15 of 15
+      with self.assertRaises(RuntimeError):
+        to_uops_list([shrink(15).store(vals)])  # the last access writes 12..15 of 15
+
   def test_load_bool_as_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf_bool = UOp.param(0, dtypes.bool, 16)

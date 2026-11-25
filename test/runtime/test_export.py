@@ -5,7 +5,7 @@ from tinygrad.device import host_of
 from tinygrad.helpers import HCQ_RUNTIME_DEV
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.codegen import create_linear
-from tinygrad.engine.realize import compile_linear, link_linear, run_linear
+from tinygrad.engine.realize import compile_linear
 
 @Context(ALLOW_DEVICE_USAGE=0)
 def compile_uir(src:str, dev:str, host:str) -> str:
@@ -37,7 +37,7 @@ class TestExportRun(unittest.TestCase):
     compiled = compile_linear(create_linear(fn))
     for n in (2, 3):
       inputs = [scale.bind(n) if x.is_bound_var else x for x in externs]
-      run_linear(link_linear(compiled, inputs), input_uops=inputs, jit=True)
+      Tensor.run(compiled, tuple(inputs))
       self.assertEqual(out.tolist(), [n, 2*n, 3*n])
 
   def test_capture_export(self):

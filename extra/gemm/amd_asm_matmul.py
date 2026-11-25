@@ -464,14 +464,14 @@ def test_matmul():
                                                                                   estimates=Estimates(ops=N*N*N*2, mem=N*N*4*3)))
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.native(x).call() for x in insts]))))
   c = Tensor.custom_kernel(a, b, c, fxn=asm_kernel)[2]
-  linear = c.schedule_linear()
+  linear, externs = c.linear_with_externs()
 
   ets = []
   with Context(DEBUG=2):
-    linear = link_linear(compile_linear(linear))
+    linear = link_linear(compile_linear(linear), list(externs))
     for _ in range(getenv("CNT", 5)):
       start = GlobalCounters.time_sum_s
-      run_linear(linear)
+      run_linear(linear, input_uops=externs)
       ets.append(GlobalCounters.time_sum_s - start)
   print(f"REAL TFLOPS {N * N * N * 2 / min(ets) * 1e-12:.2f}")
 
