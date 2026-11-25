@@ -8,6 +8,7 @@ import tinygrad.runtime.autogen.amd.cdna.ins as cdna
 from tinygrad.renderer.amd.dsl import NULL
 from test.amd.hw.helpers import USE_HW, assemble
 from test.mockgpu.amd.emu import run_asm
+from test.helpers import run_schedule
 
 def _code(instructions: list, out_reg: int = 2) -> list:
   return [
@@ -36,7 +37,6 @@ def _run_hw(instructions: list, out_reg: int = 2, lanes: int = 1) -> list[int]:
   from tinygrad.device import Device, Buffer
   from tinygrad.dtype import dtypes, AddrSpace
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
-  from tinygrad.engine.realize import run_linear
 
   dev = Device["AMD"]
   if dev.arch != "gfx950": raise unittest.SkipTest("requires gfx950 hardware")
@@ -45,7 +45,7 @@ def _run_hw(instructions: list, out_reg: int = 2, lanes: int = 1) -> list[int]:
   sink = UOp.sink(UOp.param(0, dtypes.uint32, (lanes,)), UOp.special(lanes, "lidx0"), lds, arg=KernelInfo("test"))
   body = UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in _code(instructions, out_reg)))
   prg = UOp(Ops.PROGRAM, src=(sink, body))
-  run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
+  run_schedule(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
   out = out_gpu.as_memoryview()
   return list(struct.unpack(f"<{lanes}I", out))
 

@@ -8,6 +8,7 @@ import ctypes, unittest
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 from test.amd.hw.helpers import USE_HW, assemble
 from test.mockgpu.amd.emu import run_asm
+from test.helpers import run_schedule
 
 WAVE64 = 64
 
@@ -39,7 +40,6 @@ def _run_wave64_hw(instructions: list, out_reg: int = 1) -> list[int]:
   from tinygrad.device import Device, Buffer
   from tinygrad.dtype import dtypes, AddrSpace
   from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
-  from tinygrad.engine.realize import run_linear
 
   dev = Device["AMD"]
   out_gpu = Buffer(dev.device, WAVE64 * 4, preallocate=True)
@@ -48,7 +48,7 @@ def _run_wave64_hw(instructions: list, out_reg: int = 1) -> list[int]:
                   lds.end(UOp.range(WAVE64, 0, AxisType.WARP)), arg=KernelInfo("test"))
   body = UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in _wave64_code(instructions, out_reg)))
   prg = UOp(Ops.PROGRAM, src=(sink, body))
-  run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
+  run_schedule(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
   out = out_gpu.as_memoryview()
   return [int.from_bytes(out[i*4:(i+1)*4], 'little') for i in range(WAVE64)]
 

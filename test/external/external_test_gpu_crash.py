@@ -6,9 +6,9 @@ Run with: DEV=AMD python -m pytest test/external/external_test_gpu_crash.py -v
 """
 import unittest, re, importlib
 from tinygrad import Device, UOp, dtypes
-from tinygrad.engine.realize import run_linear
 from tinygrad.uop.ops import Ops, KernelInfo
 from tinygrad.renderer.amd.dsl import s, v, Inst, NULL
+from test.helpers import run_schedule
 
 RDNA3_CDNA3_MAP = {"v_mov_b32_e32": "v_mov_b32_e32", "s_mov_b32": "s_mov_b32", "s_waitcnt": "s_waitcnt", "s_endpgm": "s_endpgm",
                    "global_load_b32": "global_load_dword", "global_store_b32": "global_store_dword",
@@ -38,7 +38,7 @@ class TestGPUCrash(unittest.TestCase):
     buf = UOp.new_buffer("AMD", 64, dtypes.uint8)
     sink = UOp.sink(UOp.param(0, dtypes.uint8, 64, device="AMD"), UOp.special(1, "lidx0"), arg=KernelInfo("test"))
     prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.native(i).call() for i in insts))))
-    run_linear(UOp(Ops.LINEAR, src=(prg.call(buf),)), wait=True)
+    run_schedule(UOp(Ops.LINEAR, src=(prg.call(buf),)), wait=True)
 
   def _assert_gpu_fault(self, func):
     """Assert that func raises a RuntimeError indicating a GPU fault (not a setup error)."""

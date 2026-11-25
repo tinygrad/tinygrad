@@ -4,7 +4,7 @@ from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.helpers import getenv, colored
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.engine.realize import Estimates, run_linear
+from tinygrad.engine.realize import Estimates, compile_linear, link_linear, run_linear
 from tinygrad.renderer.amd.dsl import s, v, VCC_LO, NULL, src, ttmp
 from tinygrad.runtime.autogen.amd.rdna4.ins import *
 
@@ -230,6 +230,7 @@ def test_matmul():
 
   ets = []
   with Context(DEBUG=2):
+    linear = link_linear(compile_linear(linear))
     for _ in range(getenv("CNT", 5)):
       start = GlobalCounters.time_sum_s
       run_linear(linear)

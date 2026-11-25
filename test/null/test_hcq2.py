@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from collections import defaultdict
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes
-from tinygrad.device import Compiled, ProfileGraphEvent
+from tinygrad.device import Compiled, ProfileGraphEvent, host_of
 from tinygrad.helpers import Context, unwrap, to_tuple
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, ParamArg
 from tinygrad.uop.uir import render_uir, parse_uir
@@ -29,7 +29,7 @@ def compiled_chain(n:int, jit=False, device="NULL") -> tuple[Tensor, UOp, list[U
   if jit:
     f = TinyJit(lambda a: chain(a, n).realize())
     f(x)
-    return f(x), f.captured._linear, [x.uop.base]
+    return f(x), f.captured._linear, [x.uop.base, *f.captured._externs]
   out = chain(x, n)
   return out, compile_linear(out.schedule_linear(), input_uops=inputs, cache=True), inputs
 
@@ -219,7 +219,7 @@ class TestHCQ2Profile(unittest.TestCase):
 
   def test_slots_addressed_by_the_device(self):
     pm = PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat())),), allow_any_len=True),
-                          lambda buf: buf.getaddr(Device["NULL"].host) if is_slots(buf) else None)])
+                          lambda buf: buf.getaddr(host_of("NULL")) if is_slots(buf) else None)])
     with patch.object(Compiled, "pm_lower", pm + Compiled.pm_lower): self.test_profiling_reports_a_range_per_kernel(n=3)
 
 class TestHCQ2Link(unittest.TestCase):
