@@ -47,7 +47,6 @@ def cl_run(buf:UOp, cmds:tuple) -> UOp: # one in-order queue, every call after t
   return cb.sink()
 
 class CLQueue(HWQueue):
-  dev:CLDevice
   def q64(self, *vals) -> int: return self.q(*[UOp.const(v, dtypes.uint64) if isinstance(v, int) else v.cast(dtypes.uint64) for v in vals])
   @property
   def handles(self) -> list[UOp]: return [UOp.variable(to_name(self.devs[0], n), 0, 2**64 - 1, dtypes.uint64) for n in ("context", "queue")]
