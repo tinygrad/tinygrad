@@ -1174,6 +1174,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   def extern(shape:tuple[int, ...], dtype:DType, device, name:str):
     if not shape: return UOp(Ops.EXTERN, src=(UOp(Ops.STACK),), arg=ParamArg(0, dtype, (dtype.min, dtype.max), name, AddrSpace.ALU))
     return UOp.alloc(shape, dtype, 0, device=device, name=name).replace(op=Ops.EXTERN)
+  def as_extern(self, slot:int) -> UOp: return self.replace(op=Ops.EXTERN, arg=replace(self.arg, slot=slot, buffer=None, name=None, val=None))
   def alloc_like(self, slot:int|None=None, addrspace=AddrSpace.GLOBAL): return UOp.alloc(self.max_shard_shape, self.dtype, slot, addrspace)
 
   @staticmethod
