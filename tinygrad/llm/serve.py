@@ -25,7 +25,7 @@ def parse_tool_call(s:str) -> tuple[str, typing.Any]|None:
   if s.startswith("{"):  # hermes JSON format: {"name": ..., "arguments": {...}}
     try:
       call = json.loads(s)
-      return call["name"], call.get("arguments", call.get("parameters", {}))
+      return call["name"], call.get("arguments", call.get("parameters", call.get("args", {})))
     except (json.JSONDecodeError, KeyError): return None
   # XML format: <function=name>\n<parameter=key>\nvalue\n</parameter>...</function>
   # GLM format: name<arg_key>key</arg_key><arg_value>value</arg_value>...
@@ -61,15 +61,19 @@ def disconnected(conn:socket.socket) -> bool:
 
 class StreamRouter:
   # routes streamed output text to (field, text) deltas, keeping tool_call regions in .buf for the final parse
-  # (start think, end think, end content, tool call, special token that selects the format)
-  FORMATS = (("<think>", "</think>", "<tool_call>", r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", "<tool_call>"),
-             ("<|open|>think<|sep|>", "<|close|>think<|sep|><|open|>response<|sep|>", "<|close|>response<|sep|>",
+  # (start think, end think, start content, end content, tool call, special token that selects the format)
+  # with a start content tag, the message after thinking is the content if it opens with that tag, else a tool call
+  FORMATS = (("<think>", "</think>", "", "<tool_call>", r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", "<tool_call>"),
+             ("<|open|>think<|sep|>", "<|close|>think<|sep|><|open|>response<|sep|>", "", "<|close|>response<|sep|>",
               r"<\|open\|>call \s*(.*?)\s*(?:<\|close\|>call<\|sep\|>|$)", "<|close|>"),
              # the calls block is function_calls (V3.2), tool_calls (V4) or " calls" (V4.1)
-             ("<think>", "</think>", f"\n\n<{DSML}", rf"<{DSML} ?invoke (.*?)\s*(?:</{DSML} ?invoke>|$)", DSML))
+             ("<think>", "</think>", "", f"\n\n<{DSML}", rf"<{DSML} ?invoke (.*?)\s*(?:</{DSML} ?invoke>|$)", DSML),
+             # Inkling: <|message_model|>name<|content_invoke_tool_json|>{"name":...,"args":{...}}<|end_message|>
+             ("<|message_model|><|content_thinking|>", "<|end_message|>", "<|message_model|><|content_text|>", "<|end_message|>",
+              r"<\|content_invoke_tool_json\|>(.*?)(?:<\|end_message\|>|$)", "<|content_invoke_tool_json|>"))
   def __init__(self, special_tokens:dict[str, int], reasoning:bool=False):
-    self.think, self.end_think, self.end_content, self.call = next((f for f in self.FORMATS if f[-1] in special_tokens),
-                                                                   self.FORMATS[0])[:-1]
+    self.think, self.end_think, self.start_content, self.end_content, self.call = next((f for f in self.FORMATS if f[-1] in special_tokens),
+                                                                                       self.FORMATS[0])[:-1]
     self.buf = ""
     self.mode = "reasoning" if reasoning else "undecided"  # output inside a think block is sent as reasoning_content
   def split(self, tag:str, final:bool) -> tuple[str, bool]:
@@ -84,12 +88,15 @@ class StreamRouter:
     self.buf += piece
     if self.mode == "undecided":  # decide whether the output starts with a think block
       if not final and len(self.buf) < len(self.think) and self.think.startswith(self.buf): return
-      self.mode, self.buf = ("reasoning", self.buf[len(self.think):]) if self.buf.startswith(self.think) else ("content", self.buf)
+      self.mode, self.buf = ("reasoning", self.buf[len(self.think):]) if self.buf.startswith(self.think) else ("start", self.buf)
     if self.mode == "reasoning":
       emit, done = self.split(self.end_think, final)
       if emit: yield "reasoning_content", emit
       if not done: return
-      self.mode = "content"
+      self.mode = "start"
+    if self.mode == "start":
+      if not final and len(self.buf) < len(self.start_content) and self.start_content.startswith(self.buf): return
+      self.mode, self.buf = ("content", self.buf[len(self.start_content):]) if self.buf.startswith(self.start_content) else ("tool", self.buf)
     if self.mode == "tool": return
     emit, found = self.split(self.end_content, final)
     if emit: yield "content", emit

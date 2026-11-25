@@ -294,16 +294,16 @@ def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:t
   return {name: decode(name, shape, typ) for name, (_, shape, typ) in entries.items()}
 
 Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K = 8, 10, 11, 12, 13, 14
-IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS, MXFP4 = 16, 17, 18, 19, 20, 21, 22, 23, 39
+IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS, MXFP4, NVFP4 = 16, 17, 18, 19, 20, 21, 22, 23, 39, 40
 QUANT_SIZES = {t: 256 // b * s for t, (b, s) in _GGML_QUANT.items()
-               if t in (Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS, MXFP4)}
+               if t in (Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S, IQ4_XS, MXFP4, NVFP4)}
 HALFWORD_QUANTS = (Q8_0, Q6_K, Q2_K, Q3_K, IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S)
 SMALL_BLOCK_QUANTS = {Q8_0: 17, IQ4_NL: 9, MXFP4: 17}
 
 def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
   """(ggml type, packed words) if `decoded` is the lazy dequantization of packed ggml weights, rows of in_features."""
-  if in_features % 32: return None
-  packed_sizes = {t: decoded.numel() * sz // 256 for t, sz in QUANT_SIZES.items() if in_features % 256 == 0 or t in SMALL_BLOCK_QUANTS}
+  packed_sizes = {t: decoded.numel() * sz // 256 for t, sz in QUANT_SIZES.items() if in_features % _GGML_QUANT[t][0] == 0}
+  if not packed_sizes: return None
   ops = (Ops.UNSHARD,) if decoded.uop.axis is not None else (Ops.SHRINK, Ops.BUFFER)
   raw = next((u for u in decoded.uop.toposort() if u.op in ops and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes.values()), None)
   if raw is None: return None

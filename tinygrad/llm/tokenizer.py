@@ -5,7 +5,7 @@ class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
                bos_id:int|None=None, add_bos:bool=True, eos_id:int=0, eot_id:int|None=None, eom_id:int|None=None, chat_template:str|None=None):
     marks = preset in ("qwen35", "qwen35moe")
-    preset = {"qwen35":"qwen2","qwen35moe":"qwen2","minimax-m2":"gpt-4o","deepseek-v3":"joyai-llm"}.get(preset, preset)
+    preset = {"qwen35":"qwen2","qwen35moe":"qwen2","minimax-m2":"gpt-4o","inkling2":"gpt-4o","deepseek-v3":"joyai-llm"}.get(preset, preset)
     if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4","gpt-4o","joyai-llm","bailingmoe2"):
       raise ValueError(f"Invalid tokenizer preset '{preset}'")
     # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
