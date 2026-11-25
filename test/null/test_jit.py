@@ -20,6 +20,14 @@ class TestJit(unittest.TestCase):
         a = Tensor.empty(10, 10).realize()[:, i:i+2]
         add(a)
 
+  def test_jit_shape_views_mismatch_alt(self):
+    @TinyJit
+    def add(a): return (a+1).realize()
+    for _ in range(2):
+      add(Tensor.empty(()))
+    with self.assertRaisesRegex(JitError, "args mismatch"):
+      add(Tensor.empty(2))
+
   def test_nothing_jitted(self):
     @TinyJit
     def add(a, b): return None

@@ -561,7 +561,9 @@ class PCIIface(PCIIfaceBase):
   def rm_alloc(self, parent, clss, params=None, root=None) -> int: return self.dev_impl.gsp.rpc_rm_alloc(parent, clss, params, self.root)
   def rm_control(self, obj, cmd, params=None, **kwargs): return self.dev_impl.gsp.rpc_rm_control(obj, cmd, params, self.root, **kwargs)
 
-  def device_fini(self): self.dev_impl.fini()
+  def device_fini(self):
+    self.dev_impl.gsp.rpc_free(self.root)
+    self.dev_impl.fini()
 
   def sleep(self, timeout):
     for _ in self.dev_impl.gsp.stat_q.read_resp(): pass
