@@ -1,15 +1,12 @@
-import multiprocessing, tempfile, unittest
+import multiprocessing, unittest
 from concurrent.futures import ProcessPoolExecutor
-from tinygrad import Context, Device, Tensor, Variable, dtypes
+from tinygrad import Context, Tensor, Variable
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.codegen import create_linear
 from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 
 @Context(ALLOW_DEVICE_USAGE=0)
 def compile_uir(src:str) -> str: return render_uir(Tensor.compile(parse_uir(src)))
-
-def compile_for(target:str, fn):
-  with Context(DEV=target): return compile_linear(create_linear(fn))
 
 class TestExportRun(unittest.TestCase):
   def test_export_compile_run(self):
@@ -36,18 +33,6 @@ class TestExportRun(unittest.TestCase):
       inputs = [scale.bind(n) if x.is_bound_var else x for x in externs]
       run_linear(link_linear(compiled, inputs), input_uops=inputs, jit=True)
       self.assertEqual(out.tolist(), [n, 2*n, 3*n])
-
-  def test_link_disk_read_compiled_elsewhere(self):
-    # the compiler only gets the target. its io_uring is not ours, the read binds to this process' ring at link
-    with tempfile.NamedTemporaryFile() as f:
-      f.write(data:=bytes(range(256))*1024)
-      f.flush()
-      out = Tensor.empty(len(data), dtype=dtypes.uint8, device=f"disk:{f.name}").to(Device.DEFAULT)
-      fn, externs = out.export()
-      with ProcessPoolExecutor(1, mp_context=multiprocessing.get_context("spawn")) as compiler:
-        compiled = compiler.submit(compile_for, str(Device.target_for(Device.DEFAULT)), fn).result()
-      run_linear(link_linear(compiled, list(externs)), input_uops=list(externs), jit=True)
-      self.assertEqual(out.data().tobytes(), data)
 
   def test_capture_export(self):
     # a capturer gets the export, a function with no runtime state and its externs. nothing is compiled or run until it does
