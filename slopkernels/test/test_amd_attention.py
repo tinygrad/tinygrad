@@ -17,10 +17,11 @@ def _amd_supported(dev:str|tuple[str, ...]|None) -> bool:
 
 def _gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor) -> Tensor:
   B, H, T, K, V = int(q.shape[0]), int(q.shape[1]), int(q.shape[2]), int(q.shape[3]), int(v.shape[3])
-  kern = unwrap(slopkernels.get(f"amd_gated_delta_k{K}_{'ak' if alpha.ndim == 4 else 'a1'}")).specialize(batch=B, heads=H, tokens=T, v_tiles=V // 4)
+  ak = K if alpha.ndim == 4 else 1
+  kern = unwrap(slopkernels.get("amd_gated_delta")).specialize(batch=B, heads=H, tokens=T, v_tiles=V // 4, k_blks=K // 32, alpha_k=ak)
   out = UOp.alloc((B, H, T, V), dtypes.float32, device=q.device)
   return Tensor(out.after(kern.call(out, q.contiguous().uop, k.contiguous().uop, v.contiguous().uop, beta.contiguous().uop,
-                                    alpha.contiguous().uop, state.uop, (q * k).sum(-1).contiguous().uop, UOp.const(1))))
+                                    alpha.contiguous().reshape(B, H, T, ak).uop, state.uop, (q * k).sum(-1).contiguous().uop, UOp.const(1))))
 
 
 class TestGatedDeltaNetBlock(unittest.TestCase):
