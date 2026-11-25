@@ -8,13 +8,13 @@ from tinygrad.helpers import DEBUG, Context, CHECK_OOB, all_same, is_image_shape
 
 def validate_index(uidx:UOp, gate:UOp|None=None):
   # skip when OOB checking is off, or for a non final index. TODO: check more complex index with shape
-  if not CHECK_OOB or len(uidx.src) != 2: return True
-  buf,idx = uidx.src
+  if not CHECK_OOB or len(uidx.src) != (3 if uidx.op is Ops.SHRINK else 2): return True
+  buf,idx = uidx.src[:2]
   # TODO: check for overflow
   if idx.is_invalid or is_image_shape(buf._shape): return True
 
-  # buffer size
-  sz = buf.max_numel()
+  # sz is the number of valid start positions: an INDEX accesses one element, a SHRINK(buf, start, length) accesses length
+  sz = buf.max_numel() - (int(uidx.src[2].vmax)-1 if uidx.op is Ops.SHRINK else 0)
 
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
   if 0<=idx.vmin and idx.vmax<sz: return True
