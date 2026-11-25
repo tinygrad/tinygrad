@@ -290,17 +290,17 @@ def _int_clamp(op_name: str, srcs: dict) -> UOp | None:
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
   __slots__ = ('dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr', 'branch_cond')
-  sgpr = UOp.param(0, dtypes.uint32, SGPR_COUNT, name="sgpr")
-  vmem = UOp.param(2, dtypes.uint32, 1 << 46, name="vmem")
-  lds = UOp.param(3, dtypes.uint32, 16384, name="lds")
-  scratch = UOp.param(4, dtypes.uint8, 1 << 30, name="scratch")
+  sgpr = UOp.param(0, dtypes.uint32, SGPR_COUNT, name="sgpr", addrspace=AddrSpace.REG)
+  vmem = UOp.param(2, dtypes.uint32, 1 << 46, name="vmem", addrspace=AddrSpace.GLOBAL)
+  lds = UOp.param(3, dtypes.uint32, 16384, name="lds", addrspace=AddrSpace.REG)
+  scratch = UOp.param(4, dtypes.uint8, 1 << 30, name="scratch", addrspace=AddrSpace.REG)
   scratch_stride = UOp.param(9, dtypes.uint32, name="scratch_stride", addrspace=AddrSpace.ALU)
 
   def __init__(self, wave_size: int = 32):
     self._axis_id, self.wave_size = 0, wave_size
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
-    self.vgpr = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr")
-    self.accvgpr = UOp.param(5, dtypes.uint32, 256 * wave_size, name="accvgpr") if wave_size == 64 else self.vgpr
+    self.vgpr = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr", addrspace=AddrSpace.REG)
+    self.accvgpr = UOp.param(5, dtypes.uint32, 256 * wave_size, name="accvgpr", addrspace=AddrSpace.REG) if wave_size == 64 else self.vgpr
     self.branch_cond: UOp | None = None
 
   def range(self, n: int | None = None) -> UOp:
@@ -1728,7 +1728,7 @@ def emu_loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
 
 def lower_body(sink:UOp) -> UOp:
   bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
-  body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}, walk=True)
+  body = sink.substitute({b:UOp.param(i, b.dtype, b.shape, name=b.arg.name, addrspace=b.addrspace) for i,b in enumerate(bufs)}, walk=True)
   return body.call(*bufs)
 
 instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp, UOp|None]]]] = {}
@@ -1754,7 +1754,7 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|N
 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
   bufs = sorted({b for call in instructions for b in call.src[1:] if b.op is Ops.PARAM}, key=lambda b: b.arg.slot)
-  params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
+  params = {b:UOp.param(i, b.dtype, b.shape, name=b.arg.name, addrspace=b.addrspace) for i,b in enumerate(bufs)}
   linear = list(UOp.sink(*params.values()).toposort())[:-1]
   seen = set(linear)
   for call in instructions:
@@ -1900,7 +1900,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   if wave_size == 64: buffers[ctx.accvgpr] = (accvgpr, 256*wave_size)
   routes = UOp.alloc((n_waves,), dtypes.int, 6, AddrSpace.REG)
   active = UOp.alloc((1,), dtypes.bool, 7, AddrSpace.REG)
-  route = UOp.param(6, dtypes.int, (1,), name="route")
+  route = UOp.param(6, dtypes.int, (1,), name="route", addrspace=AddrSpace.REG)
   taken, fallthrough = [UOp.param(i, dtypes.int, name=name, addrspace=AddrSpace.ALU) for i,name in enumerate(("taken", "fallthrough"), 7)]
   buffers[route] = (routes, 1)
   # set per wave registers
@@ -1945,8 +1945,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     body, bufs = instruction_block(instructions)
     args = [values[b] if b.addrspace is AddrSpace.ALU else buffers[b][0] for b in bufs]
     args += [_c(block_pc, dtypes.int).after(end, *scopes)]
-    params = [UOp.param(i, a.dtype, a.shape, addrspace=AddrSpace.ALU if i >= len(bufs) or bufs[i].addrspace is AddrSpace.ALU
-                        else AddrSpace.GLOBAL, name=bufs[i].arg.name if i < len(bufs) else None) for i,a in enumerate(args)]
+    params = [UOp.param(i, a.dtype, a.shape, name=b.arg.name, addrspace=b.addrspace) for i,(a,b) in enumerate(zip(args, bufs))]
+    params.append(UOp.param(len(bufs), dtypes.int, addrspace=AddrSpace.ALU))
     # lower the wave loop with the block, so repeated blocks share its indexing and route check too.
     w = UOp.range(n_waves, 0, dtype=dtypes.int)
     gates = () if block_pc in unconditional else (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
