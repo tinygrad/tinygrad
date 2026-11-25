@@ -253,15 +253,16 @@ pm_exec = PatternMatcher([
 def devices_of(linear:UOp) -> list[str]:
   return sorted({d for u in linear.toposort() if u.op in {Ops.BUFFER, Ops.PARAM, Ops.ALLOC, Ops.EXTERN} for d in to_tuple(u.device) if d is not None})
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None, cache=False) -> UOp:
-  # fill the targets compile reads: a device without an arch in DEV is opened for its target, compile itself opens nothing
+# fill the targets compile reads: a device without an arch in DEV is opened for its target, compile itself opens nothing
+def ensure_targets(linear:UOp):
   for d in sorted({*(devs:=devices_of(linear)), *map(host_of, devs), HCQ_RUNTIME_DEV.device}): Device.target_for(d)
-  with Context(ALLOW_DEVICE_USAGE=0):
-    linear = graph_rewrite(linear, pm_scalar_externs, name="scalar externs", walk=True)
-    if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
-    if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
-    linear = lower_and_compile(linear)
-    return hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
+
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None, cache=False) -> UOp:
+  linear = graph_rewrite(linear, pm_scalar_externs, name="scalar externs", walk=True)
+  if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
+  if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
+  linear = lower_and_compile(linear)
+  return hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
 
 def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
   # link opens the devices the linear uses, opening a device registers its link buffers and rules

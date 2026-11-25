@@ -5,13 +5,13 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, cast, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
-from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod, canonicalize_device_name
-from tinygrad.helpers import VALIDATE_WITH_CPU, cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
+from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod, canonicalize_device_name, VALIDATE_WITH_CPU
+from tinygrad.helpers import Context, cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
 from tinygrad.uop.ops import UOp, Ops, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.uop.ops import KernelInfo, AxisType
 from tinygrad.mixin import Mixin
 from tinygrad.codegen import create_linear, contiguous_mops_to_view
-from tinygrad.engine.realize import run_linear, capturing, compile_linear, link_linear
+from tinygrad.engine.realize import run_linear, capturing, compile_linear, link_linear, ensure_targets
 from tinygrad.device import Buffer
 
 # **** export: storage becomes EXTERN(slot), bound Variables lose their value and ALLOCs get canonical slots. ctx.externs is what's mapped back
@@ -283,7 +283,8 @@ class Tensor(Mixin):
     """Compile a function from `Tensor.export` to a LINEAR of compiled calls without binding its externs. It reads the targets in DEV."""
     for u in (linear:=create_linear(fn)).toposort():
       if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL and u.device is None: raise RuntimeError("global storage needs a device")
-    return compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=[], cache=True)
+    ensure_targets(linear)
+    with Context(ALLOW_DEVICE_USAGE=0): return compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=[], cache=True)
 
   @staticmethod
   def link(linear:UOp, externs:tuple[UOp, ...]) -> UOp:
