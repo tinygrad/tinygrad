@@ -49,7 +49,8 @@ def _load_u32(raw:UOp, base:UOp, offset:int|UOp) -> UOp:
 def _half(value:UOp) -> UOp: return value.cast(dtypes.uint16).bitcast(dtypes.float16).float()
 
 IQ4NL_LUT = (0xbfad9881, 0xf6eaddcf, 0x26190d01, 0x71594535)
-IQ4NL_U8_LUT = tuple(x ^ 0x80808080 for x in IQ4NL_LUT)
+IQ4NL_U8_LUT: tuple[int, int, int, int] = (IQ4NL_LUT[0] ^ 0x80808080, IQ4NL_LUT[1] ^ 0x80808080,
+                                           IQ4NL_LUT[2] ^ 0x80808080, IQ4NL_LUT[3] ^ 0x80808080)
 MXFP4_LUT = (0x03020100, 0x0c080604, 0xfdfeff00, 0xf4f8fafc)  # e2m1 doubled
 
 def _nibble_lut(packed:UOp, shift:int|UOp, lut:tuple[int, int, int, int]) -> UOp:

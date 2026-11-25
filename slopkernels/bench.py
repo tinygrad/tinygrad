@@ -417,7 +417,7 @@ def main() -> None:
     bw_str = f"{r.gb_s:>9.1f} {bw_pct:>6.1f}%" if peak_bw > 0 else f"{r.gb_s:>9.1f} {'-':>7}"
     tf_str = f"{r.tflops:>9.2f} {tf_pct:>6.1f}%" if peak_tf > 0 and flops > 0 else f"{r.tflops:>9.2f} {'-':>7}"
     if peak_bw > 0 and (peak_tf <= 0 or flops <= 0 or bw_pct >= tf_pct):
-      bw_str = colored(bw_str, "green" if bw_pct >= 90 else "yellow" if bw_pct >= 70 else "red")
+      bw_str = colored(bw_str, "green" if bw_pct >= 85 else "yellow" if bw_pct >= 70 else "red")
     elif peak_tf > 0 and flops > 0:
       tf_str = colored(tf_str, "green" if tf_pct >= 70 else "yellow" if tf_pct >= 40 else "red")
     print(f"{r.name:<46} {r.median_us:>12.1f} {r.min_us:>10.1f} {bw_str} {tf_str}", flush=True)

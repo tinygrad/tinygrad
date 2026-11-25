@@ -404,7 +404,7 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *extra:UOp, valid_kv_len:UOp, 
       k_frag = K_lds[kr, (k_qk * 2) ^ (kr & 7)].cat(K_lds[kr, (k_qk * 2 + 1) ^ (kr & 7)])
       qk_done = S_reg[tn1].store(UOp.wmma(k_frag, q_reg[k_qk], S_reg.after(k_qk)[tn1], *WMMA_ARG)).end(tn1, k_qk)
     S_cur = S_reg.after(qk_done)
-    v_st = store_v_reg_r4(vbuf, (qk_done, it), rid + 31) if rdna4 else store_v(tile_idx, (qk_done,), masked, rid + 1)
+    v_st = store_v_reg_r4(vbuf, (qk_done, it), rid + 31) if vbuf is not None else store_v(tile_idx, (qk_done,), masked, rid + 1)
     q_idx = q_start + block_m * block_m_sz + wave_m * 16 + lane_c
     if masked:
       tn_m, e_m = UOp.range(TN, rid + 4), UOp.range(8, rid + 5, AxisType.UPCAST)

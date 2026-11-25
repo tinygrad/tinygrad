@@ -758,8 +758,8 @@ class TransformerBlock(FFNBlock):
             part = UOp.alloc((sk, B * q_h, q_t, D), dtypes.half, device=q_in.device)
             st_b = UOp.alloc((sk, B * q_h, q_t, 2), dtypes.float32, device=q_in.device)
             cp = k_attn.call(part, st_b, q_in.reshape(B * q_h, q_t, D).uop, kv.uop, valid_kv, q_len)
-            comb = _run_kernel("amd_flash_prefill_combine", (B * q_h, q_t, D), q_in.device, part.after(cp), st_b.after(cp),
-                               BH=B * q_h, M=q_t, d_blks=D // 64, split_kv=sk)
+            comb = _run_kernel("amd_flash_prefill_combine", (sh_b * q_h, q_t, D), q_in.device, part.after(cp), st_b.after(cp),
+                               BH=sh_b * q_h, M=q_t, d_blks=D // 64, split_kv=sk)
             if comb is not None: attn = comb.reshape((B, q_h, q_t, D))
         else:
           wm = 4 if q_t % 64 == 0 else 2
