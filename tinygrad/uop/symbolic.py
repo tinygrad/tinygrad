@@ -176,8 +176,6 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var('x', dtype=dtypes.bool).maximum(UPat.var('y', dtype=dtypes.bool)), lambda x,y: x|y),
   # *** div rules ***
   (UPat.cvar('x', arg=0) / 0, lambda x: x.const_like(float('nan'))),   # 0/0 -> nan
-  # can be wrong if x or x2 is 0
-  (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)),          # x/x -> 1
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
