@@ -119,19 +119,18 @@ class Linear(nn.Linear):
       arch = "cdna" if target[0] == 9 else "rdna4" if target[0] == 12 else "rdna3"
       out_shape = _shard_shape((splits * tokens, out_f), out_axis, ndev)
       x_f16 = x_in.half().contiguous().reshape(out_shape[0], in_f) if x_axis is None else x_in.half().contiguous()
-      mt = next((t for t in (8, 4, 2) if out_shape[0] % (t * 16) == 0 and (t < 8 or out_shape[0] >= 256)
-                 and (out_shape[0] // (t * 16)) * (local_out // 16) >= 256), 1)
+      mt = next((t for t in (8, 4, 2) if out_shape[0] % (t * 16) == 0
+                 and (out_shape[0] // (t * 16)) * (local_out // 16) >= (512 if t >= 4 else 256)), 1)
       out = _run_kernel(f"{arch}_gemm_{qname}_f16", out_shape, dev, self.packed, x_f16, *_iq_lut(self.ggml_type, dev, True),
                         axis=out_axis, m_blks=out_shape[0] // (mt * 16), m_tiles=mt, out_features=local_out, in_features=in_f, raw_len=raw_len)
     else:
-      x_tokens, chunks = int(prod(x_shard[:-1])), ceildiv(in_f, 1024)
+      x_tokens, waves = int(prod(x_shard[:-1])), min(ceildiv(in_f, 1024), 32)
       q8 = _q8_quantize(x_in, x_tokens, in_f, dev, axis=0 if self.groups > 1 and x_axis is not None else None)
       if q8 is None: return None
       arch = "cdna" if target[0] == 9 else "rdna"
-      out = _run_kernel(f"{arch}_gemv_{qname}", _shard_shape((splits * tokens, out_f, chunks), out_axis, ndev), dev,
+      out = _run_kernel(f"{arch}_gemv_{qname}", _shard_shape((splits * tokens, out_f), out_axis, ndev), dev,
                         self.packed, *q8, *_iq_lut(self.ggml_type, dev), axis=out_axis, tokens=x_tokens, out_features=local_out,
-                        in_features=in_f, chunks=chunks, raw_len=raw_len, group_rows=rows if self.groups > 1 else 0)
-      if out is not None: out = out.sum(-1) if chunks > 1 else out.reshape(splits * tokens, out_f)
+                        in_features=in_f, waves=waves, raw_len=raw_len, group_rows=rows if self.groups > 1 else 0)
     if out is None: return None
     if splits > 1: out = out.reshape(splits, tokens, out_f).sum(0)
     if self.groups > 1: out = out.reshape(self.groups, rows, out_f).permute(1, 0, 2)
@@ -146,10 +145,11 @@ class Linear(nn.Linear):
     if w.uop.axis is not None or xi.uop.axis is not None or w.dtype not in ok or xi.dtype not in ok or tokens >= 16: return None
     if least_upper_dtype(w.dtype, xi.dtype) != dtypes.float32: return None
     if self.bias is not None and (self.bias.uop.axis is not None or self.bias.dtype not in ok): return None
-    vc = 4 if self.in_features % 128 == 0 else 1
+    vc = 8 if w.dtype.itemsize == 2 and self.in_features % 256 == 0 else 4 if self.in_features % 128 == 0 else 1
+    ku = 2 if (self.in_features // (32 * vc)) % 2 == 0 else 1
     out = _run_kernel(f"amd_gemv_{w.dtype.name}_{xi.dtype.name}", (tokens, self.out_features),
                       w.device, w, xi.reshape(tokens, self.in_features),
-                      tokens=tokens, out_features=self.out_features, in_blks=self.in_features // (32 * vc), val_chunk=vc)
+                      tokens=tokens, out_features=self.out_features, in_blks=self.in_features // (32 * vc * ku), val_chunk=vc, k_unroll=ku)
     if out is None: return None
     return (out if self.bias is None else out + _unview_float(self.bias).float()).reshape(*x.shape[:-1], self.out_features)
 
@@ -187,19 +187,20 @@ class ExpertWeights:
     local_out, global_out = int(self.weight.uop.max_shard_shape[1]), int(self.weight.shape[1])
     ndev, splits = int(self.weight.shape[0]) // int(self.weight.uop.shard_shape[0]), self.in_features // local_in
     if (w_axis == 2) != (splits > 1) or x_slots not in (1, slots): return None
-    x_rows, chunks = B * Tm * x_slots, ceildiv(local_in, 1024)
+    x_rows, waves = B * Tm * x_slots, min(ceildiv(local_in, 1024), 32)
     raw_len = int(prod(int(d) for d in self.packed.uop.max_shard_shape))
     q8 = _q8_quantize(x_p.contiguous(), x_rows, local_in, dev)
     if q8 is None: return None
-    arch = "cdna" if target[0] == 9 else "rdna"
-    out_shape = _shard_shape((ndev * B * Tm * slots, global_out, splits * chunks), w_axis,
+    arch, out_axis = "cdna" if target[0] == 9 else "rdna", 0 if w_axis == 2 else w_axis
+    out_shape = _shard_shape((ndev * splits * B * Tm * slots, global_out), out_axis,
                              ndev if w_axis == 0 else splits if w_axis == 2 else (global_out // local_out))
     out = _run_kernel(f"{arch}_moe_{_QUANT_NAMES[self.ggml_type]}", out_shape, dev, self.packed, *q8,
-                      sel_p.cast(dtypes.int32).flatten(), *_iq_lut(self.ggml_type, dev), axis=w_axis,
+                      sel_p.cast(dtypes.int32).flatten(), *_iq_lut(self.ggml_type, dev), axis=out_axis,
                       rows=B * Tm * slots, x_rows=x_rows, out_features=local_out, in_features=local_in,
-                      chunks=chunks, raw_len=raw_len, x_share=slots // x_slots, ndev=ndev)
+                      waves=waves, raw_len=raw_len, x_share=slots // x_slots, ndev=ndev)
     if out is None: return None
-    out = out.sum(-1).reshape((ndev, B, Tm, slots, global_out) if ndev > 1 else (B, Tm, slots, global_out))
+    if splits > 1: out = out.reshape(splits, ndev * B * Tm * slots, global_out).sum(0)
+    out = out.reshape((ndev, B, Tm, slots, global_out) if ndev > 1 else (B, Tm, slots, global_out))
     return out if isinstance(T, int) else out[..., :T, :, :]
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     if self.weight_scale_inv is not None:
@@ -247,8 +248,7 @@ def gated_activation(gate:Tensor, up:Tensor, config:TransformerConfig) -> Tensor
   alpha, limit, up_bias, situ = config.swiglu_alpha, config.swiglu_limit, config.swiglu_up_bias, config.situ
   if situ is not None: return (gate / situ[0]).tanh() * situ[0] * gate.sigmoid() * (up / situ[1]).tanh() * situ[1]
   if limit is not None and limit > 0: gate, up = gate.clamp(max_=limit), up.clamp(-limit, limit)
-  # TODO: remove the need for this contiguous
-  return gate * (gate * alpha).sigmoid().contiguous() * (up + up_bias)
+  return gate * (gate * alpha).sigmoid() * (up + up_bias)
 
 def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False, last:bool=False) -> Tensor:
   # rotates freqs_cis.shape[-1] dims of x: the leading dims by default, the trailing dims if last=True
@@ -650,7 +650,8 @@ class TransformerBlock(FFNBlock):
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
     assigned_kv = _update_cache(self.cache_kv.transpose(0, 1), Tensor.stack(k, v).transpose(0, 1), start_pos, 3)
     # optional custom flash attention speedup on the KV cache
-    if idx_mask is None and self.config.ssm is not None and len(start_pos) == 1 and (target := _amd_target(x.device)) is not None:
+    if idx_mask is None and not self.config.sliding_window and not hasattr(self, 'attn_sinks') and len(start_pos) == 1 \
+        and (target := _amd_target(x.device)) is not None:
       kv, T_real, sp = assigned_kv.transpose(0, 1), q.shape[2], start_pos[0]
       q_in = (q if not isinstance(T_real, UOp) else q.pad_to((*q.shape[:2], q.max_shape[2], q.shape[3]))).half()
       q_shard = tuple(int(d) for d in q_in.uop.max_shard_shape)
@@ -659,8 +660,8 @@ class TransformerBlock(FFNBlock):
       q_axis, valid_kv = q_in.uop.axis, sp if isinstance(sp, UOp) else UOp.const(int(sp))
       valid_kv_offset, attn = T_real if isinstance(T_real, int) else 0, None
       if resolve(T_real == 1, False) and sh_m == 1 and D % 64 == 0 and 1 <= D <= 512 \
-          and (group := sh_h // sh_hkv) in (1, 2, 4, 8) and N_phys % 64 == 0:
-        chunks, waves = min(48, ceildiv(N_phys, 64)), 16
+          and 1 <= (group := sh_h // sh_hkv) <= 8 and N_phys % 64 == 0:
+        chunks, waves = min(max(16, 128 // sh_hkv), ceildiv(N_phys, 64)), 16
         while waves * group * ((D + 4) * 2 + 8) > 65536: waves //= 2
         k_partial = _get_kernel("amd_flash_decode_partial", B=sh_b, H_KV=sh_hkv, G=group, d_blks=D // 64,
                                 n_blks=N_phys // 64, C=chunks, valid_kv_offset=valid_kv_offset, waves=waves)

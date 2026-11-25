@@ -37,15 +37,34 @@ class BenchResult:
   median_us: float
   min_us: float
   gb_s: float
+  bw_pct: float
   tflops: float
+  tflops_pct: float
 
 VerifyFn = Callable[[Tensor], None]
 SetupFn = Callable[[], tuple[Callable[[], Tensor], VerifyFn]]
+
+# (target, total_cus) -> (gpu_name, peak_gb_s, peak_fp16_matrix_tflops)
+_AMD_PEAKS: dict[tuple[tuple[int, ...], int], tuple[str, float, float]] = {
+  ((11, 0, 0), 96): ("RX 7900 XTX", 960.0, 122.9), ((11, 0, 0), 84): ("RX 7900 XT", 800.0, 103.0),
+  ((11, 0, 0), 80): ("RX 7900 GRE", 576.0, 92.0), ((11, 0, 1), 60): ("RX 7800 XT", 624.0, 74.6),
+  ((11, 0, 1), 54): ("RX 7700 XT", 432.0, 70.3), ((11, 0, 2), 32): ("RX 7600", 288.0, 43.5),
+  ((12, 0, 1), 64): ("RX 9070 XT", 640.0, 195.0), ((12, 0, 1), 56): ("RX 9070", 640.0, 144.4),
+  ((12, 0, 0), 32): ("RX 9060 XT", 320.0, 103.0),
+  ((9, 4, 2), 304): ("MI300X", 5300.0, 1307.4), ((9, 5, 0), 256): ("MI350X", 8000.0, 2309.6),
+}
 
 def _arch_info(dev:str) -> tuple[tuple[int, ...], bool]:
   raw = getattr(Device[dev], "target", None)
   target = tuple(int(x) for x in raw) if isinstance(raw, tuple) else (11, 0, 0)
   return target, target[0] == 9
+
+def _peak_specs(dev:str) -> tuple[str, int, float, float]:
+  d = Device[dev]
+  target, cus = _arch_info(dev)[0], int(getattr(d, "cu_cnt", 0)) * int(getattr(d, "xccs", 1))
+  fallback = (f"gfx{target[0]}{target[1]:x}{target[2]:x}", 0.0, 0.0)
+  spec = _AMD_PEAKS.get((target, cus)) or next((v for (t, _), v in _AMD_PEAKS.items() if t == target), fallback)
+  return spec[0], cus, spec[1], spec[2]
 
 def _packed_words(rows:int, cols:int, qname:str) -> tuple[int, int, DType, str]:
   qtype, blk_bytes, w_dt, kname = _QUANT_META[qname]
@@ -155,11 +174,10 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         mt = 8 if m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
         return (lambda: _krun(f"{arch_gemm}_gemm_{kname}_f16", (m, n), dev, w_packed, x.half().contiguous(),
                               *_iq_lut(qtype, dev, True), m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=K, raw_len=w_len)), _verify
-      ch = ceildiv(K, 1024)
+      wv = min(ceildiv(K, 1024), 32)
       def _run() -> Tensor:
-        out = _krun(f"{arch_gemv}_gemv_{kname}", (m, n, ch), dev, w_packed, *_q8(x, m, K, dev), *_iq_lut(qtype, dev),
-                    tokens=m, out_features=n, in_features=K, chunks=ch, raw_len=w_len, group_rows=0)
-        return out.sum(-1) if ch > 1 else out.reshape(m, n)
+        return _krun(f"{arch_gemv}_gemv_{kname}", (m, n), dev, w_packed, *_q8(x, m, K, dev), *_iq_lut(qtype, dev),
+                     tokens=m, out_features=n, in_features=K, waves=wv, raw_len=w_len, group_rows=0)
       return _run, _verify
     return _setup
 
@@ -198,15 +216,15 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       w_packed, tile_u8 = _make_packed(E * MOE_N, MOE_K, qname, dev, seed=19)
       sel = Tensor(list(range(TOPK)), dtype=dtypes.int32, device=dev).realize()
       x = _nonuniform((1, 1, 1, MOE_K), dtypes.float32, dev, scale=0.5, freq=0.011)
-      ch, w_len = ceildiv(MOE_K, 1024), int(w_packed.numel())
+      wv, w_len = min(ceildiv(MOE_K, 1024), 32), int(w_packed.numel())
       def _verify(out:Tensor) -> None:
         w4 = ggml_data_to_tensor(tile_u8[:CHECK_ROWS].flatten(), CHECK_ROWS * MOE_K, qtype).reshape(CHECK_ROWS, MOE_K)
         ref1, got = (x.reshape(1, MOE_K) @ w4.T).numpy()[0], out[0, 0, :, :CHECK_ROWS].float().numpy()
         _assert_close(got, np.broadcast_to(ref1, got.shape), rtol=4e-2, atol=5e-2)
       def _run() -> Tensor:
-        return _krun(f"{arch_gemv}_moe_{kname}", (TOPK, MOE_N, ch), dev, w_packed, *_q8(x, 1, MOE_K, dev), sel, *_iq_lut(qtype, dev),
-                     rows=TOPK, x_rows=1, out_features=MOE_N, in_features=MOE_K, chunks=ch, raw_len=w_len, x_share=TOPK,
-                     ndev=1).sum(-1).reshape(1, 1, TOPK, MOE_N)
+        return _krun(f"{arch_gemv}_moe_{kname}", (TOPK, MOE_N), dev, w_packed, *_q8(x, 1, MOE_K, dev), sel, *_iq_lut(qtype, dev),
+                     rows=TOPK, x_rows=1, out_features=MOE_N, in_features=MOE_K, waves=wv, raw_len=w_len, x_share=TOPK,
+                     ndev=1).reshape(1, 1, TOPK, MOE_N)
       return _run, _verify
     cases.append((f"moe_gemv_{qname}_E{E}k{TOPK}_{MOE_N}x{MOE_K}", TOPK * per_e_words * w_dt.itemsize, 2 * TOPK * MOE_N * MOE_K, _mk_moe))
 
@@ -216,7 +234,10 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       x = _nonuniform((m, K), dtypes.float32, dev, scale=0.5, freq=0.023)
       def _verify(out:Tensor) -> None:
         _assert_close(out[:, :CHECK_ROWS].float().numpy(), (x @ w[:CHECK_ROWS].float().T).numpy(), rtol=3e-3, atol=3e-3)
-      return (lambda: _krun("amd_gemv_f16_f32", (m, n), dev, w, x, tokens=m, out_features=n, in_blks=K // 128, val_chunk=4)), _verify
+      vc = 8 if K % 256 == 0 else 4
+      ku = 2 if (K // (32 * vc)) % 2 == 0 else 1
+      return (lambda: _krun("amd_gemv_f16_f32", (m, n), dev, w, x, tokens=m, out_features=n,
+                            in_blks=K // (32 * vc * ku), val_chunk=vc, k_unroll=ku)), _verify
     cases.append((f"dense_gemv_f16_{m}x{n}x{K}", n * K * 2 + m * (K + n) * 4, 2 * m * n * K, _mk_dense))
 
   if not cdna:
@@ -244,7 +265,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         ref = q[:, :1].float().scaled_dot_product_attention(kv[0, :, :1].float(), kv[1, :, :1].float(), enable_gqa=True).numpy()
         _assert_close(out[:, :1].float().numpy(), ref, rtol=5e-3, atol=5e-3)
       def _run() -> Tensor:
-        ch, grp, waves = min(48, ceildiv(ctx, 64)), ATTN_H // ATTN_HKV, 16
+        ch, grp, waves = min(max(16, 128 // ATTN_HKV), ceildiv(ctx, 64)), ATTN_H // ATTN_HKV, 16
         while waves * grp * ((ATTN_D + 4) * 2 + 8) > 65536: waves //= 2
         kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
           B=1, H_KV=ATTN_HKV, G=grp, d_blks=ATTN_D // 64, n_blks=ctx // 64, C=ch, valid_kv_offset=0, waves=waves)
@@ -310,12 +331,14 @@ def main() -> None:
   args = ap.parse_args()
 
   dev, target = Device.DEFAULT, getattr(Device[Device.DEFAULT], "target", None)
+  gpu_name, cus, peak_bw, peak_tf = _peak_specs(dev)
   flush_mb = min(args.flush_mb, 2) if args.smoke else args.flush_mb
   flush_fn, t_start = _make_cache_flusher(flush_mb), time.perf_counter()
-  print(f"slopkernels LLM benchmark | DEV={dev} | target={target} | warmup={args.warmup} iters={args.iters} flush={flush_mb}MB "
+  peak_str = f"{gpu_name} ({cus} CU, {peak_bw:.0f} GB/s, {peak_tf:.1f} TF)" if peak_bw > 0 else f"target={target}"
+  print(f"slopkernels LLM benchmark | DEV={dev} | {peak_str} | warmup={args.warmup} iters={args.iters} flush={flush_mb}MB "
         f"verify={not args.no_verify} smoke={args.smoke}", flush=True)
-  print(f"{'Op':<46} {'Median (us)':>12} {'Min (us)':>10} {'GB/s':>9} {'TFLOPS':>9}", flush=True)
-  print("-" * 90, flush=True)
+  print(f"{'Op':<46} {'Median (us)':>12} {'Min (us)':>10} {'GB/s':>9} {'%BW':>7} {'TFLOPS':>9} {'%TF':>7}", flush=True)
+  print("-" * 106, flush=True)
   pat, results = re.compile(args.filter) if args.filter else None, []
   for name, io_bytes, flops, setup_fn in build_benchmarks(dev, smoke=args.smoke, fast=args.fast):
     if pat is not None and not pat.search(name): continue
@@ -323,10 +346,14 @@ def main() -> None:
     med_us, min_us = _time_fn(step_fn, None if args.no_verify else verify_fn, args.warmup, args.iters, flush_fn)
     gb_s = (io_bytes / 1e9) / (med_us / 1e6) if io_bytes > 0 and med_us > 0 else 0.0
     tflops = (flops / 1e12) / (med_us / 1e6) if flops > 0 and med_us > 0 else 0.0
-    r = BenchResult(name=name, median_us=med_us, min_us=min_us, gb_s=gb_s, tflops=tflops)
+    bw_pct = 100.0 * gb_s / peak_bw if peak_bw > 0 else 0.0
+    tf_pct = 100.0 * tflops / peak_tf if peak_tf > 0 else 0.0
+    r = BenchResult(name=name, median_us=med_us, min_us=min_us, gb_s=gb_s, bw_pct=bw_pct, tflops=tflops, tflops_pct=tf_pct)
     results.append(r)
-    print(f"{r.name:<46} {r.median_us:>12.1f} {r.min_us:>10.1f} {r.gb_s:>9.1f} {r.tflops:>9.2f}", flush=True)
-  print("-" * 90, flush=True)
+    bw_s = f"{bw_pct:>6.1f}%" if peak_bw > 0 else f"{'-':>7}"
+    tf_s = f"{tf_pct:>6.1f}%" if peak_tf > 0 and flops > 0 else f"{'-':>7}"
+    print(f"{r.name:<46} {r.median_us:>12.1f} {r.min_us:>10.1f} {r.gb_s:>9.1f} {bw_s} {r.tflops:>9.2f} {tf_s}", flush=True)
+  print("-" * 106, flush=True)
   print(f"Benchmarked & verified {len(results)} LLM ops in {time.perf_counter() - t_start:.1f}s.", flush=True)
   if args.json:
     with open(args.json, "w") as f: json.dump([r.__dict__ for r in results], f, indent=2)

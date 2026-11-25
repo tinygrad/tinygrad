@@ -30,26 +30,26 @@ def _b_q8(dt:str) -> UOp:
                                    _p(3, (tok, g * 32), dt), tok, g * 32)
 
 def _b_gemv(wdt:str, xdt:str) -> UOp:
-  tok, ib, outf, vc = _t("tokens"), _t("in_blks"), _t("out_features"), _t("val_chunk", 1, 4)
-  inf = ib * (32 * vc)
+  tok, ib, outf, vc, ku = _t("tokens"), _t("in_blks"), _t("out_features"), _t("val_chunk", 1, 8), _t("k_unroll", 1, 4)
+  inf = ib * (32 * vc * ku)
   return _amd._amd_f16_gemv_kernel(_p(0, (tok, outf), "f32"), _p(1, (outf, inf), wdt), _p(2, (tok, inf), xdt),
-                                   in_blks=ib, out_features=outf, tokens=tok, val_chunk=vc)
+                                   in_blks=ib, out_features=outf, tokens=tok, val_chunk=vc, k_unroll=ku)
 
 def _b_qgemv(qt:int, cdna:bool) -> UOp:
   tok, inf, outf, rl = _t("tokens"), _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 30)
-  ch, gr, g = _t("chunks", 1, 1024), _t("group_rows", 0), inf // 32
+  wv, gr, g = _t("waves", 1, 32), _t("group_rows", 0), inf // 32
   gl = (_p(5, (_IQ_GRID_LENS[qt],), "u32"),) if qt in _IQ_GRID_LENS else ()
-  return _gguf._quant_decode_kernel(_p(0, (tok, outf, ch), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (tok, g, 8), "u32"),
+  return _gguf._quant_decode_kernel(_p(0, (tok, outf), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (tok, g, 8), "u32"),
                                     _p(3, (tok, g), "f32"), _p(4, (tok, g, 2), "f32"), *gl,
-                                    out_features=outf, in_features=inf, ggml_type=qt, cdna=cdna, group_rows=gr)
+                                    out_features=outf, in_features=inf, waves=wv, ggml_type=qt, cdna=cdna, group_rows=gr)
 
 def _b_moe(qt:int, cdna:bool) -> UOp:
-  inf, outf, rl, ch = _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 30), _t("chunks", 1, 1024)
+  inf, outf, rl, wv = _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 30), _t("waves", 1, 32)
   rows, xrows, xs, nd, g = _t("rows"), _t("x_rows"), _t("x_share", 1, 1024), _t("ndev", 1, 64), inf // 32
   gl = (_p(6, (_IQ_GRID_LENS[qt],), "u32"),) if qt in _IQ_GRID_LENS else ()
-  return _gguf._moe_decode_kernel(_p(0, (rows, outf, ch), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (xrows, g, 8), "u32"),
+  return _gguf._moe_decode_kernel(_p(0, (rows, outf), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (xrows, g, 8), "u32"),
                                   _p(3, (xrows, g), "f32"), _p(4, (xrows, g, 2), "f32"), _p(5, (rows,), "i32"), *gl,
-                                  out_features=outf, in_features=inf, ggml_type=qt, x_share=xs, cdna=cdna, ndev=nd)
+                                  out_features=outf, in_features=inf, waves=wv, ggml_type=qt, x_share=xs, cdna=cdna, ndev=nd)
 
 def _b_gemm(qt:int, kg:int, ln:int) -> UOp:
   mb, mt, inf, outf, rl = _t("m_blks"), _t("m_tiles", 1, 8), _t("in_features", 32), _t("out_features", 16), _t("raw_len", 1, 1 << 30)

@@ -5,7 +5,6 @@ from collections.abc import Callable
 
 from tinygrad import UOp
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import unwrap
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 
 from slopkernels.src.amd import WMMA_ARG, _amd_load, warp_reduce
@@ -34,12 +33,10 @@ def _load_byte(raw:UOp, base:UOp, offset:int|UOp) -> UOp:
   size = raw.dtype.itemsize
   sh = (offset % size) * 8
   return (raw[base + offset // size].cast(dtypes.uint32) >> (sh.cast(dtypes.uint32) if isinstance(sh, UOp) else sh)) & 255
-def _load_u32(raw:UOp, base:UOp, offset:int|UOp, stream:bool=False) -> UOp:
+def _load_u32(raw:UOp, base:UOp, offset:int|UOp) -> UOp:
   # Halfword-aligned (mxfp4 byte-aligned) formats cannot load u32 directly.
   size = raw.dtype.itemsize
-  parts = [raw[base+offset//size+i] for i in range(4//size)]
-  if stream: parts = [_amd_load(p) for p in parts]
-  return functools.reduce(lambda x,y: x|y, (p.cast(dtypes.uint32) << (8*size*i) for i,p in enumerate(parts)))
+  return functools.reduce(lambda x,y: x|y, (raw[base+offset//size+i].cast(dtypes.uint32) << (8*size*i) for i in range(4//size)))
 
 def _half(value:UOp) -> UOp: return value.cast(dtypes.uint16).bitcast(dtypes.float16).float()
 
@@ -67,18 +64,21 @@ def _ue4m3_halved(e:UOp) -> UOp:
 
 def _q5_scales(raw:UOp, base:UOp, subgroup:UOp, stream:bool=True) -> tuple[UOp, UOp, UOp, UOp]:
   # scales/mins (6-bit each) live in block bytes 4-15: three words total, same for the whole super-block's lanes
-  def _direct_load(p:UOp) -> UOp: return p.load()
-  ld = _amd_load if stream else _direct_load
-  w1, w2, w3 = ld(raw[base+1]), ld(raw[base+2]), ld(raw[base+3])
+  if stream:
+    hdr = _amd_load(raw[base], 4, stream=True)
+    w0, w1, w2, w3 = hdr[0], hdr[1], hdr[2], hdr[3]
+  else: w0, w1, w2, w3 = raw[base].load(), raw[base+1].load(), raw[base+2].load(), raw[base+3].load()
   sb = (subgroup & 3) * 8  # byte within word
   byte1, byte2, byte3 = (w1 >> sb) & 255, (w2 >> sb) & 255, (w3 >> sb) & 255
   scale = (subgroup < 4).where(byte1 & 63, (byte3 & 15) | ((byte1 >> 6) << 4))
   minimum = (subgroup < 4).where(byte2 & 63, (byte3 >> 4) | ((byte2 >> 6) << 4))
-  d, dmin = (raw[base] & 0xffff).cast(dtypes.uint16), (raw[base] >> 16).cast(dtypes.uint16)
-  return _half(d), _half(dmin), scale.float(), minimum.float()
+  return _half((w0 & 0xffff).cast(dtypes.uint16)), _half((w0 >> 16).cast(dtypes.uint16)), scale.float(), minimum.float()
 
-def _iq4_scale(raw:UOp, base:UOp, subgroup:UOp) -> UOp:
-  header, low = raw[base].load(), raw[base+1].load()
+def _iq4_scale(raw:UOp, base:UOp, subgroup:UOp, stream:bool=False) -> UOp:
+  if stream:
+    hdr = _amd_load(raw[base], 2, stream=True)
+    header, low = hdr[0], hdr[1]
+  else: header, low = raw[base].load(), raw[base+1].load()
   scale = ((low >> (4*subgroup)) & 15) | (((header >> (16+2*subgroup)) & 3) << 4)
   return _half(header) * (scale.cast(dtypes.int32)-32).float()
 
@@ -95,9 +95,9 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, tokens:int|UOp, in_fe
   # Quantize each input once, then pack four neighboring lanes into one word.
   # Keep divisions intact: reciprocal multiplication can move half-precision inputs across rounding ties.
   warp_max = warp_reduce(value.abs(), Ops.MAX, full_wave=True)
-  d = UOp.native("({0}/127.0f)", shape=warp_max.shape, dtype=dtypes.float, fmt=True).call(warp_max).maximum(1e-8)
-  rounded = UOp.native("__builtin_nearbyintf({0}/{1})", shape=value.shape, dtype=dtypes.float, fmt=True).call(value, d)
-  quant = rounded.clip(-127, 127).cast(dtypes.int8)
+  d = warp_max.alu(Ops.FDIV, warp_max.const_like(127.0)).maximum(1e-8)
+  # IEEE round-to-nearest-even for |x| <= 127 without native nearbyintf: adding 1.5*2^23 aligns the ULP to 1.
+  quant = ((value.alu(Ops.FDIV, d).clip(-127.0, 127.0) + 12582912.0).bitcast(dtypes.int32) - 0x4b400000).cast(dtypes.int8)
   word = quant.cast(dtypes.uint8).cast(dtypes.uint32) << ((lane%4)*8).cast(dtypes.uint32)
   word = warp_reduce(word, Ops.OR, masks=(1, 2))
   stores = (q[token, group, (lane//4).valid((lane%4).eq(0))].store(word),
@@ -105,21 +105,24 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, tokens:int|UOp, in_fe
             xsum[token, group, (lane//16).valid((lane%16).eq(0))].store(warp_reduce(quant.float())))
   return UOp.group(*stores).end(token_group, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
 
-def _decode_linear(out:UOp, out_features:int|UOp, group_count:int|UOp, group_dot, name:str) -> UOp:
-  chunks = out.shape[2]
+def _decode_linear(out:UOp, out_features:int|UOp, group_count:int|UOp, waves:UOp, group_dot, name:str) -> UOp:
   row = UOp.range(out.shape[0] * out_features, 0, AxisType.GLOBAL)
-  chunk = UOp.range(chunks, 1, AxisType.GLOBAL)
-  lane = UOp.range(32, 2, AxisType.LOCAL)
+  # lane has the smaller local axis id so it is always threadIdx.x (contiguous 32-lane half-wave on both RDNA and CDNA)
+  lane, wave = UOp.range(32, 1, AxisType.LOCAL), UOp.range(waves, 2, AxisType.LOCAL)
   token, output = row // out_features, row % out_features
-  steps = (group_count + chunks * 32 - 1) // (chunks * 32)
+  steps = (group_count + waves * 32 - 1) // (waves * 32)
   acc = UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG)
   acc = acc.after(acc[0].store(UOp.const(0, dtypes.float32)))
   s = UOp.range(steps, 4)
-  group = lane + (chunk + s * chunks) * 32
+  group = lane + (wave + s * waves) * 32
   upd = acc[0].store(acc.after(s)[0].load() +
                      (group < group_count).where(group_dot(token, output, group.minimum(group_count - 1), s), UOp.const(0, dtypes.float32))).end(s)
   val = warp_reduce(acc.after(upd)[0].load(), full_wave=True)
-  return out[token, output, chunk.valid(lane.eq(0))].store(val.cast(out.dtype)).end(row, chunk, lane).sink(
+  lds = UOp.alloc((waves,), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  lds = lds.after(lds[wave.valid(lane.eq(0))].store(val).barrier())
+  w_r = UOp.range(waves, 5)
+  total = waves.eq(1).where(val, lds[w_r].load().reduce(w_r, arg=(Ops.ADD, 0)))
+  return out[token, output.valid(wave.eq(0) & lane.eq(0))].store(total.cast(out.dtype)).end(row, wave, lane).sink(
     arg=KernelInfo(name=name, opts_to_apply=()))
 
 def _iq_even_signs(signs:UOp) -> UOp:
@@ -135,66 +138,44 @@ def _iq_signed_word(word:UOp, signs:UOp) -> UOp:
 
 def _sh(x:int|UOp) -> int|UOp: return x.cast(dtypes.uint32) if isinstance(x, UOp) else x
 
-def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:UOp|None, stream:bool=True) -> UOp:
+def _quant_word(raw:UOp, base:UOp, subgroup:UOp, i:int|UOp, ggml_type:int, grid:UOp|None) -> UOp:
   # Four packed weight bytes, shared by integer-dot decode and FP16 WMMA prefill.
   def byte(offset): return _load_byte(raw, base, offset)
-  def word(offset): return _load_u32(raw, base, offset, stream=stream and ggml_type == Q6_K)
-  if ggml_type == Q8_0: return _load_u32(raw, base, 2+i*4, stream=stream)
-  if ggml_type in (Q4_K, Q5_K):
-    offset = (4 if ggml_type == Q4_K else 12) + (subgroup//2)*8
-    weights = (_amd_load(raw[base+offset], 8)[i] >> ((subgroup&1)*4).cast(dtypes.uint32)) & 0x0f0f0f0f
-    if ggml_type == Q5_K: weights |= ((_amd_load(raw[base+4], 8)[i] >> subgroup.cast(dtypes.uint32)) & 0x01010101) << 4
-    return weights
-  if ggml_type == Q6_K:
-    low = word((subgroup//4)*64 + (subgroup%2)*32 + i*4) >> ((subgroup%4//2)*4).cast(dtypes.uint32)
-    high = word(128 + (subgroup//4)*32 + i*4) >> ((subgroup%4)*2).cast(dtypes.uint32)
-    return (low & 0x0f0f0f0f) | ((high & 0x03030303) << 4)
+  def word(offset): return _load_u32(raw, base, offset)
   if ggml_type in (Q2_K, Q3_K):
     offset = (16 if ggml_type == Q2_K else 32) + (subgroup//4)*32 + i*4
     weights = (word(offset) >> ((subgroup%4)*2).cast(dtypes.uint32)) & 0x03030303
     if ggml_type == Q3_K: weights |= ((word(i*4) >> subgroup.cast(dtypes.uint32)) & 0x01010101) << 2
     return weights
-  if ggml_type == NVFP4:
-    block64, subblock = subgroup//2, (subgroup%2)*2 + i//4
-    packed = word(block64*36 + 4 + subblock*8 + (i%2)*4)
-    return _nibble_lut(packed, _sh(4*((i%4)//2)), MXFP4_LUT)
-  if ggml_type in (IQ4_NL, IQ4_XS, MXFP4):
-    packed = _amd_load(raw[base+2+subgroup*4+i%4]) if ggml_type == IQ4_XS else word((1 if ggml_type == MXFP4 else 2)+(i%4)*4)
-    return _nibble_lut(packed, _sh(4*(i//4)), MXFP4_LUT if ggml_type == MXFP4 else IQ4NL_LUT)
+  if ggml_type == IQ4_NL:
+    return _nibble_lut(word(2 + (i%4)*4), _sh(4*(i//4)), IQ4NL_LUT)
   assert grid is not None
-  grid_words = 2 if ggml_type in (IQ2_XXS, IQ2_XS, IQ1_S, IQ2_S) else 1
-  if ggml_type in (IQ3_S, IQ3_XXS, IQ2_XXS):
+  grid_words = 2 if ggml_type in (IQ2_XXS, IQ2_XS, IQ1_S) else 1
+  if ggml_type in (IQ3_S, IQ2_XXS):
     index = byte(2+subgroup*8+i//grid_words)
     if ggml_type == IQ3_S:
       index |= ((byte(66+subgroup) >> _sh(i)) & 1) << 8
       signs = byte(74+subgroup*4+i//2)
-    else: signs = _iq_even_signs((word(66+subgroup*4 if ggml_type == IQ3_XXS else 6+subgroup*8) >> _sh(7*(i//2))) & 127)
+    else: signs = _iq_even_signs((word(6+subgroup*8) >> _sh(7*(i//2))) & 127)
   elif ggml_type == IQ2_XS:
     packed = raw[base+1+subgroup*4+i//2].cast(dtypes.uint32)
     index, signs = packed & 511, _iq_even_signs(packed >> 9)
-  elif ggml_type == IQ1_S:
+  else:  # IQ1_S
     index = byte(2+subgroup*4+i//2) | (((raw[base+17+subgroup].cast(dtypes.uint32) >> _sh(3*(i//2))) & 7) << 8)
     signs = index.const_like(0)
-  else:
-    index = byte(2+subgroup*4+i//2) | (((byte(66+subgroup) >> _sh(2*(i//2))) & 3) << 8)
-    signs = byte(34+subgroup*4+i//2)
   return _iq_signed_word(grid[index*grid_words+i%grid_words].load(), signs >> _sh(4*(i%2)))
 
 @functools.cache
-def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp, out_features:UOp, in_features:UOp, ggml_type:int,
+def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp, out_features:UOp, in_features:UOp, waves:UOp, ggml_type:int,
                          cdna:bool=False, group_rows:UOp) -> UOp:
   words = out_features * in_features * QUANT_SIZES[ggml_type] // GGML_BLOCK_SIZE // raw.dtype.itemsize
-  return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, cdna,
+  return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, waves, ggml_type, cdna,
                             lambda token, base: base + (group_rows > 0).where(token // group_rows.maximum(1) * words, 0))
 
 def _quant_base(output:UOp, group:UOp, in_features:int|UOp, ggml_type:int, itemsize:int) -> UOp:
   if ggml_type == NVFP4: return (output*in_features//64 + (group//8)*4) * (36//itemsize)
   if ggml_type in SMALL_BLOCK_QUANTS: return (output*in_features//32 + group) * SMALL_BLOCK_QUANTS[ggml_type]
   return (output*in_features//256 + group//8) * (QUANT_SIZES[ggml_type]//itemsize)
-
-def _fma(a:UOp, b:UOp, c:UOp) -> UOp:
-  args = tuple(x.load() if x.op is Ops.INDEX else x for x in (a, b, c))
-  return UOp.native("__builtin_fmaf({0},{1},{2})", shape=args[0].shape, dtype=dtypes.float32, fmt=True).call(*args)
 
 def _dp4a_loop(n:int, dep:UOp, word_fn:Callable[[UOp], UOp], x_reg:UOp, cdna:bool, x_off:int|UOp=0, rid:int=11) -> UOp:
   acc = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
@@ -214,17 +195,41 @@ def _dp4a_2loop(dep:UOp, word_fn:Callable[[UOp, UOp], UOp], x_reg:UOp, cdna:bool
 
 def _quant_group_dot(raw:UOp, base:UOp, subgroup:UOp, x_reg:UOp, xd_val:UOp, xs_fn:Callable[[int], UOp],
                      ggml_type:int, cdna:bool, grid:UOp|None, dep:UOp) -> UOp:
-  if ggml_type == Q8_0 and raw.dtype == dtypes.uint16:
+  if ggml_type == Q8_0:
     w_reg = UOp.alloc((8,), dtypes.uint32, addrspace=AddrSpace.REG)
     w_reg = w_reg.after(w_reg[:4].store(_amd_load(raw[base + 1], 8, stream=True).bitcast(dtypes.uint32)),
                         w_reg[4:].store(_amd_load(raw[base + 9], 8, stream=True).bitcast(dtypes.uint32)))
-    return (_dp4a_loop(8, dep, lambda i: w_reg[i].load(), x_reg, cdna).float() * _half(raw[base])) * xd_val
-  if ggml_type == IQ4_NL and raw.dtype == dtypes.uint16:
+    return (_dp4a_loop(8, dep, lambda i: w_reg[i].load(), x_reg, cdna).float() * _half(_amd_load(raw[base]))) * xd_val
+  if ggml_type in (IQ4_NL, IQ4_XS, MXFP4):
     p_reg = UOp.alloc((4,), dtypes.uint32, addrspace=AddrSpace.REG)
-    p_reg = p_reg.after(p_reg.store(_amd_load(raw[base + 1], 8, stream=True).bitcast(dtypes.uint32)))
-    acc_i = _dp4a_loop(8, dep, lambda i: _nibble_lut(p_reg[i % 4].load(), _sh((i // 4) * 4), IQ4NL_LUT), x_reg, cdna)
-    return (acc_i.float() * _half(raw[base])) * xd_val
-  if ggml_type in (Q4_K, Q5_K) and raw.dtype == dtypes.uint32:
+    p_load = (_amd_load(raw[base + 2 + subgroup * 4], 4, stream=True) if ggml_type == IQ4_XS
+              else _amd_load(raw[base + 1], 16 if ggml_type == MXFP4 else 8, stream=True).bitcast(dtypes.uint32))
+    p_reg = p_reg.after(p_reg.store(p_load))
+    lut = MXFP4_LUT if ggml_type == MXFP4 else IQ4NL_LUT
+    acc = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
+    acc = acc.after(acc.after(dep)[0].store(UOp.const(0, dtypes.int32)))
+    i = UOp.range(4, 11)
+    pw = p_reg[i].load()
+    a1 = _amd_dp4a(_nibble_lut(pw, 0, lut), x_reg[i].load(), acc.after(i)[0].load(), cdna)
+    a2 = _amd_dp4a(_nibble_lut(pw, 4, lut), x_reg[4 + i].load(), a1, cdna)
+    acc_i = acc.after(acc[0].store(a2).end(i))[0].load()
+    sc = (_e8m0_halved(_amd_load(raw[base])) if ggml_type == MXFP4 else
+          _half(_amd_load(raw[base])) if ggml_type == IQ4_NL else _iq4_scale(raw, base, subgroup, stream=True))
+    return (acc_i.float() * sc) * xd_val
+  if ggml_type == Q6_K:
+    ql_base, qh_base = base + (subgroup // 4) * 32 + (subgroup % 2) * 16, base + 64 + (subgroup // 4) * 16
+    ql_reg, qh_reg = UOp.alloc((8,), dtypes.uint32, addrspace=AddrSpace.REG), UOp.alloc((8,), dtypes.uint32, addrspace=AddrSpace.REG)
+    ql_reg = ql_reg.after(ql_reg[:4].store(_amd_load(raw[ql_base], 8, stream=True).bitcast(dtypes.uint32)),
+                          ql_reg[4:].store(_amd_load(raw[ql_base + 8], 8, stream=True).bitcast(dtypes.uint32)))
+    qh_reg = qh_reg.after(qh_reg[:4].store(_amd_load(raw[qh_base], 8, stream=True).bitcast(dtypes.uint32)),
+                          qh_reg[4:].store(_amd_load(raw[qh_base + 8], 8, stream=True).bitcast(dtypes.uint32)))
+    ql_sh, qh_sh = ((subgroup % 4 // 2) * 4).cast(dtypes.uint32), ((subgroup % 4) * 2).cast(dtypes.uint32)
+    dots = _dp4a_2loop(dep, lambda h, i: ((ql_reg[h * 4 + i].load() >> ql_sh) & 0x0f0f0f0f) |
+                       (((qh_reg[h * 4 + i].load() >> qh_sh) & 0x03030303) << 4), x_reg, cdna)
+    sc_w = _amd_load(raw[base + 96 + subgroup])
+    scales = [(sc_w >> (h * 8)).cast(dtypes.uint8).bitcast(dtypes.int8).float() for h in range(2)]
+    return sum((dots[h].float() - 32 * xs_fn(h)) * scales[h] for h in range(2)) * xd_val * _half(_amd_load(raw[base + 104]))
+  if ggml_type in (Q4_K, Q5_K):
     q_reg = UOp.alloc((8,), dtypes.uint32, addrspace=AddrSpace.REG)
     q_reg = q_reg.after(q_reg.store(_amd_load(raw[base + (4 if ggml_type == Q4_K else 12) + (subgroup // 2) * 8], 8, stream=True)))
     h_reg = UOp.alloc((8,), dtypes.uint32, addrspace=AddrSpace.REG) if ggml_type == Q5_K else None
@@ -233,46 +238,32 @@ def _quant_group_dot(raw:UOp, base:UOp, subgroup:UOp, x_reg:UOp, xd_val:UOp, xs_
     def q5_w(i:UOp) -> UOp:
       w = (q_reg[i].load() >> q5_sh) & 0x0f0f0f0f
       return w if h_reg is None else (w | (((h_reg[i].load() >> subgroup.cast(dtypes.uint32)) & 0x01010101) << 4))
-    acc_i = _dp4a_loop(8, dep, q5_w, x_reg, cdna)
     d, dmin, scale, minimum = _q5_scales(raw, base, subgroup)
-    return (acc_i.float() * (d * scale) - (xs_fn(0) + xs_fn(1)) * (dmin * minimum)) * xd_val
-  if ggml_type == IQ4_XS and raw.dtype == dtypes.uint32:
-    p_reg = UOp.alloc((4,), dtypes.uint32, addrspace=AddrSpace.REG)
-    p_reg = p_reg.after(p_reg.store(_amd_load(raw[base + 2 + subgroup * 4], 4, stream=True)))
-    acc_i = _dp4a_loop(8, dep, lambda i: _nibble_lut(p_reg[i % 4].load(), _sh((i // 4) * 4), IQ4NL_LUT), x_reg, cdna)
-    return (acc_i.float() * _iq4_scale(raw, base, subgroup)) * xd_val
-  if ggml_type == NVFP4 and raw.dtype == dtypes.uint32:
+    return (_dp4a_loop(8, dep, q5_w, x_reg, cdna).float() * (d * scale) - (xs_fn(0) + xs_fn(1)) * (dmin * minimum)) * xd_val
+  if ggml_type == NVFP4:
     b64, h64 = subgroup // 2, subgroup % 2
     sc_w = raw[base + b64 * 9].load()
     p_reg = UOp.alloc((4,), dtypes.uint32, addrspace=AddrSpace.REG)
     p_reg = p_reg.after(p_reg.store(_amd_load(raw[base + b64 * 9 + 1 + h64 * 4], 4, stream=True)))
     d0, d1 = _dp4a_2loop(dep, lambda h, i: _nibble_lut(p_reg[h * 2 + i % 2].load(), _sh((i // 2) * 4), MXFP4_LUT), x_reg, cdna)
-    ns0 = _ue4m3_halved((sc_w >> (h64 * 16).cast(dtypes.uint32)) & 255)
-    ns1 = _ue4m3_halved((sc_w >> (h64 * 16 + 8).cast(dtypes.uint32)) & 255)
-    return (d0.float() * ns0 + d1.float() * ns1) * xd_val
-  if ggml_type == IQ3_XXS and grid is not None:
+    return (d0.float() * _ue4m3_halved((sc_w >> (h64 * 16).cast(dtypes.uint32)) & 255) +
+            d1.float() * _ue4m3_halved((sc_w >> (h64 * 16 + 8).cast(dtypes.uint32)) & 255)) * xd_val
+  if ggml_type == IQ3_XXS:
+    assert grid is not None
     q_reg = UOp.alloc((2,), dtypes.uint32, addrspace=AddrSpace.REG)
-    if raw.dtype == dtypes.uint16:
-      sc_w = _amd_load(raw[base + 33 + subgroup * 2], 2, stream=True).bitcast(dtypes.uint32)[0]
-      q_reg = q_reg.after(q_reg.store(_amd_load(raw[base + 1 + subgroup * 4], 4, stream=True).bitcast(dtypes.uint32)))
-    else:
-      sc_w = _load_u32(raw, base, 66 + subgroup * 4)
-      q_reg = q_reg.after(q_reg[0].store(_load_u32(raw, base, 2 + subgroup * 8)), q_reg[1].store(_load_u32(raw, base, 6 + subgroup * 8)))
+    sc_w = _amd_load(raw[base + 33 + subgroup * 2], 2, stream=True).bitcast(dtypes.uint32)[0]
+    q_reg = q_reg.after(q_reg.store(_amd_load(raw[base + 1 + subgroup * 4], 4, stream=True).bitcast(dtypes.uint32)))
     acc = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
     acc = acc.after(acc.after(dep)[0].store(UOp.const(0, dtypes.int32)))
     p = UOp.range(4, 11)
-    sgn = _iq_even_signs((sc_w >> _sh(7 * p)) & 127)
-    qw, sh = q_reg[p // 2].load(), (p & 1) * 16
+    sgn, qw, sh = _iq_even_signs((sc_w >> _sh(7 * p)) & 127), q_reg[p // 2].load(), (p & 1) * 16
     a1 = _amd_dp4a(_iq_signed_word(grid[(qw >> _sh(sh)) & 255].load(), sgn), x_reg[2 * p].load(), acc.after(p)[0].load(), cdna)
     a2 = _amd_dp4a(_iq_signed_word(grid[(qw >> _sh(sh + 8)) & 255].load(), sgn >> 4), x_reg[2 * p + 1].load(), a1, cdna)
-    acc_i = acc.after(acc[0].store(a2).end(p))[0].load()
-    return acc_i.float() * (_half(raw[base]) * ((sc_w >> 28).float() + 0.5) * 0.5) * xd_val
-  if ggml_type == IQ2_S and grid is not None:
-    if raw.dtype == dtypes.uint16:
-      q0 = _amd_load(raw[base + 1 + subgroup * 2], 2, stream=True).bitcast(dtypes.uint32)[0]
-      s0 = _amd_load(raw[base + 17 + subgroup * 2], 2, stream=True).bitcast(dtypes.uint32)[0]
-    else:
-      q0, s0 = _load_u32(raw, base, 2 + subgroup * 4), _load_u32(raw, base, 34 + subgroup * 4)
+    return acc.after(acc[0].store(a2).end(p))[0].load().float() * (_half(raw[base]) * ((sc_w >> 28).float() + 0.5) * 0.5) * xd_val
+  if ggml_type == IQ2_S:
+    assert grid is not None
+    q0 = _amd_load(raw[base + 1 + subgroup * 2], 2, stream=True).bitcast(dtypes.uint32)[0]
+    s0 = _amd_load(raw[base + 17 + subgroup * 2], 2, stream=True).bitcast(dtypes.uint32)[0]
     qh, sc_b = _load_byte(raw, base, 66 + subgroup), _load_byte(raw, base, 74 + subgroup)
     acc = UOp.alloc((2,), dtypes.int32, addrspace=AddrSpace.REG)
     h0 = UOp.range(2, 11, AxisType.UPCAST)
@@ -286,31 +277,13 @@ def _quant_group_dot(raw:UOp, base:UOp, subgroup:UOp, x_reg:UOp, xd_val:UOp, xs_
     acc = acc.after(acc[hl].store(a2).end(pi, hl))
     d = _half(raw[base]) * 0.25
     sf0, sf1 = ((sc_b & 15).float() + 0.5) * d, (((sc_b >> 4) & 15).float() + 0.5) * d
-    return _fma(acc[0].load().float(), sf0, acc[1].load().float() * sf1) * xd_val
+    return (acc[0].load().float() * sf0 + acc[1].load().float() * sf1) * xd_val
   def byte(offset): return _load_byte(raw, base, offset)
   def word(offset): return _load_u32(raw, base, offset)
-  # One accumulator per scale group: 32 weights for Q4/Q5/IQ4_XS, two groups of 16 otherwise.
-  if ggml_type in (Q4_K, Q5_K, IQ4_XS):
-    dots = [_dp4a_loop(8, dep, lambda i: _quant_word(raw, base, subgroup, i, ggml_type, grid), x_reg, cdna)]
-  else:
-    d0, d1 = _dp4a_2loop(dep, lambda h, i: _quant_word(raw, base, subgroup, h * 4 + i, ggml_type, grid), x_reg, cdna)
-    dots = [d0, d1]
-  if ggml_type in (Q4_K, Q5_K):
-    d, dmin, scale, minimum = _q5_scales(raw, base, subgroup)
-    ds, dm = d * scale, dmin * minimum
-    total = dots[0].float() * ds - (xs_fn(0) + xs_fn(1)) * dm
-  elif ggml_type == IQ4_XS:
-    total = dots[0].float() * _iq4_scale(raw, base, subgroup)
-  elif ggml_type == Q6_K:
-    # Subtract the quant offset via the activation sums instead of unpacking signed bytes.
-    scales = [(raw[base+96+subgroup] >> (h*8)).cast(dtypes.uint8).bitcast(dtypes.int8).float() for h in range(2)]
-    total = sum((dots[h].float()-32*xs_fn(h))*scales[h] for h in range(2))
-    return total * xd_val * _half(raw[base+104])
-  elif ggml_type in (Q2_K, Q3_K):
-    d_reg = UOp.alloc((2,), dtypes.int32, addrspace=AddrSpace.REG)
-    d_reg = d_reg.after(d_reg[0].store(dots[0]), d_reg[1].store(dots[1]))
-    xs_reg = UOp.alloc((2,), dtypes.float32, addrspace=AddrSpace.REG)
-    xs_reg = xs_reg.after(xs_reg[0].store(xs_fn(0)), xs_reg[1].store(xs_fn(1)))
+  dots = _dp4a_2loop(dep, lambda h, i: _quant_word(raw, base, subgroup, h * 4 + i, ggml_type, grid), x_reg, cdna)
+  if ggml_type in (Q2_K, Q3_K):
+    d_reg, xs_reg = UOp.alloc((2,), dtypes.int32, addrspace=AddrSpace.REG), UOp.alloc((2,), dtypes.float32, addrspace=AddrSpace.REG)
+    d_reg, xs_reg = d_reg.after(d_reg[0].store(dots[0]), d_reg[1].store(dots[1])), xs_reg.after(xs_reg[0].store(xs_fn(0)), xs_reg[1].store(xs_fn(1)))
     hu = UOp.range(2, 14, AxisType.UPCAST)
     j = subgroup * 2 + hu
     if ggml_type == Q2_K:
@@ -319,25 +292,20 @@ def _quant_group_dot(raw:UOp, base:UOp, subgroup:UOp, x_reg:UOp, xd_val:UOp, xs_
     else:
       sc = ((byte(96 + j % 8) >> _sh((j // 8) * 4)) & 15) | (((byte(104 + j % 4) >> _sh((j // 4) * 2)) & 3) << 4)
       term = (d_reg[hu].load().float() - 4 * xs_reg[hu].load()) * (sc.cast(dtypes.int32) - 32).float() * _half(raw[base + 54])
-    total = term.reduce(hu, arg=(Ops.ADD, 0))
-  elif ggml_type in (IQ2_XS, IQ2_S):
-    scales = byte((66 if ggml_type == IQ2_XS else 74)+subgroup)
-    total = sum(dots[h].float() * (((scales >> (h*4)) & 15).float()+0.5) for h in range(2)) * 0.25 * _half(raw[base])
-  elif ggml_type == IQ1_S:
+    return term.reduce(hu, arg=(Ops.ADD, 0)) * xd_val
+  if ggml_type == IQ2_XS:
+    scales = byte(66 + subgroup)
+    return sum(dots[h].float() * (((scales >> (h*4)) & 15).float()+0.5) for h in range(2)) * 0.25 * _half(raw[base]) * xd_val
+  if ggml_type == IQ1_S:
     scale, zero = _iq1_scale(raw, base, subgroup)
-    total = ((dots[0]+dots[1]).float() - (xs_fn(0)+xs_fn(1))*zero) * scale
-  elif ggml_type == NVFP4:
-    offset = (subgroup//2)*36 + (subgroup%2)*2
-    total = dots[0].float()*_ue4m3_halved(byte(offset)) + dots[1].float()*_ue4m3_halved(byte(offset+1))
-  else:
-    total = (dots[0]+dots[1]).float() * (_e8m0_halved(raw[base]) if ggml_type == MXFP4 else _half(raw[base]))
-    if ggml_type == IQ3_S: total *= (1+2*((byte(106+subgroup//2) >> _sh((subgroup%2)*4)) & 15)).float()
-    if ggml_type == IQ3_XXS: total *= ((word(66+subgroup*4) >> 28).float()+0.5)*0.5
-    if ggml_type == IQ2_XXS: total *= ((word(6+subgroup*8) >> 28).float()+0.5)*0.25
+    return ((dots[0]+dots[1]).float() - (xs_fn(0)+xs_fn(1))*zero) * scale * xd_val
+  total = (dots[0]+dots[1]).float() * _half(raw[base])
+  if ggml_type == IQ3_S: total *= (1+2*((byte(106+subgroup//2) >> _sh((subgroup%2)*4)) & 15)).float()
+  if ggml_type == IQ2_XXS: total *= ((word(6+subgroup*8) >> 28).float()+0.5)*0.25
   return total * xd_val
 
-def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp, ...], out_features:int|UOp, in_features:int|UOp, ggml_type:int,
-                       cdna:bool, gate:Callable|None=None, xtoken:Callable|None=None, name:str="linear_") -> UOp:
+def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp, ...], out_features:int|UOp, in_features:int|UOp,
+                       waves:UOp, ggml_type:int, cdna:bool, gate:Callable|None=None, xtoken:Callable|None=None, name:str="linear_") -> UOp:
   def group_dot(token:UOp, output:UOp, group:UOp, dep:UOp) -> UOp:
     base = _quant_base(output, group, in_features, ggml_type, raw.dtype.itemsize)
     if gate is not None: base = gate(token, base)
@@ -346,17 +314,17 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
     x_reg = x_reg.after(x_reg.store(_amd_load(xq[token, group, 0], 8)))
     return _quant_group_dot(raw, base, group%8, x_reg, xd[token, group], lambda h: xs[token, group, h].load(),
                             ggml_type, cdna, grids[0] if grids else None, dep)
-  return _decode_linear(out, out_features, in_features//32, group_dot, name+QUANT_NAMES[ggml_type])
+  return _decode_linear(out, out_features, in_features//32, waves, group_dot, name+QUANT_NAMES[ggml_type])
 
 @functools.cache
 def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *grids:UOp,
-                       out_features:UOp, in_features:UOp, ggml_type:int, x_share:UOp, cdna:bool=False, ndev:UOp) -> UOp:
+                       out_features:UOp, in_features:UOp, waves:UOp, ggml_type:int, x_share:UOp, cdna:bool=False, ndev:UOp) -> UOp:
   expert_words = out_features * in_features * QUANT_SIZES[ggml_type] // 256 // raw.dtype.itemsize
   local_experts = raw.shape[0]//expert_words
   def expert(row:UOp) -> UOp: return sel[row].cast(dtypes.weakint) - UOp.range(ndev, 4, AxisType.DEVICE)*local_experts
   def gate(row:UOp, base:UOp) -> UOp:
     return (base + expert(row).maximum(0).minimum(local_experts-1) * expert_words).valid((expert(row) >= 0) & (expert(row) < local_experts))
-  return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, ggml_type, cdna, gate, lambda row: row // x_share, "moe_")
+  return _quant_decode_body(out, raw, xq, xd, xs, grids, out_features, in_features, waves, ggml_type, cdna, gate, lambda row: row // x_share, "moe_")
 
 def _iq_half_elem_f32(table:UOp, base_idx:UOp, s4:UOp, sc_f:UOp, b_idx:UOp) -> UOp:
   h_pair = table[base_idx + b_idx // 2].load()
@@ -367,6 +335,14 @@ def _iq_half_elem_f32(table:UOp, base_idx:UOp, s4:UOp, sc_f:UOp, b_idx:UOp) -> U
 # kgroups: groups of 16 lanes that split k in a 16x16x16 fragment, RDNA3 copies a and b in both halves
 def _wmma_words(lane_group:UOp, kgroups:int) -> tuple[UOp|int, ...]:
   return tuple(range(4)) if kgroups == 1 else tuple(lane_group + kgroups * j for j in range(4 // kgroups))
+
+def _e2m1_half4(pw:UOp, c_lo:UOp, c_hi:UOp, sc2:UOp) -> tuple[UOp, UOp, UOp, UOp]:
+  # Unpack 4 low-nibble e2m1 values into 4 scaled fp16 values using 3 byte_perms and 2 half2 multiplies.
+  fp_bytes = _amd_byte_perm(c_hi, c_lo, pw & 0x07070707) | ((pw & 0x08080808) << 4)
+  zero_u = UOp.const(0, dtypes.uint32)
+  v01 = _amd_byte_perm(fp_bytes, zero_u, UOp.const(0x05000400, dtypes.uint32)).reshape((1,)).bitcast(dtypes.half) * sc2
+  v23 = _amd_byte_perm(fp_bytes, zero_u, UOp.const(0x07000600, dtypes.uint32)).reshape((1,)).bitcast(dtypes.half) * sc2
+  return v01[0], v01[1], v23[0], v23[1]
 
 def _make_wmma_dequant(raw:UOp, ggml_type:int, lane_group:UOp, kgroups:int, k_u:UOp,
                        table:UOp|None) -> Callable[[UOp, UOp, UOp], UOp|tuple[UOp, ...]]:
@@ -380,8 +356,21 @@ def _make_wmma_dequant(raw:UOp, ggml_type:int, lane_group:UOp, kgroups:int, k_u:
       qs_base = base + (4 if ggml_type == Q4_K else 12) + (subgroup // 2) * 8 + half * 4
       word = (raw[qs_base + w_idx].load() >> ((subgroup & 1) * 4).cast(dtypes.uint32)) & 0x0f0f0f0f
       if ggml_type == Q5_K: word |= ((raw[base + 4 + half * 4 + w_idx].load() >> subgroup.cast(dtypes.uint32)) & 0x01010101) << 4
-      return (((word >> _sh(b_u * 8)) & 255).float() * ds - dm).cast(dtypes.float16)
+      return ((word >> _sh(b_u * 8)) & 255).float().alu(Ops.MULACC, ds, -dm).cast(dtypes.float16)
     return dequant_q5
+  if ggml_type == Q6_K:
+    def dequant_q6(base:UOp, subgroup:UOp, half:UOp) -> tuple[UOp, ...]:
+      scale = _half(raw[base + 104]) * _load_byte(raw, base, 192 + subgroup * 2 + half).cast(dtypes.uint8).bitcast(dtypes.int8).float()
+      ql_base, qh_base = base + (subgroup // 4) * 32 + (subgroup % 2) * 16 + half * 8, base + 64 + (subgroup // 4) * 16 + half * 8
+      ql_sh, qh_sh = ((subgroup % 4 // 2) * 4).cast(dtypes.uint32), ((subgroup % 4) * 2).cast(dtypes.uint32)
+      out_vals: list[UOp] = []
+      for wi in word_indices:
+        ql_w = _amd_load(raw[ql_base + wi * 2], 2).bitcast(dtypes.uint32)[0]
+        qh_w = _amd_load(raw[qh_base + wi * 2], 2).bitcast(dtypes.uint32)[0]
+        w = ((ql_w >> ql_sh) & 0x0f0f0f0f) | (((qh_w >> qh_sh) & 0x03030303) << 4)
+        out_vals.extend(((w >> (b * 8)) & 63).float().alu(Ops.MULACC, scale, -32.0 * scale).cast(dtypes.half) for b in range(4))
+      return tuple(out_vals)
+    return dequant_q6
   if ggml_type == IQ4_XS:
     assert table is not None
     def dequant_iq4(base:UOp, subgroup:UOp, half:UOp) -> UOp:
@@ -398,40 +387,23 @@ def _make_wmma_dequant(raw:UOp, ggml_type:int, lane_group:UOp, kgroups:int, k_u:
       c_lo = small.where(UOp.const(0x26242000, dtypes.uint32), UOp.const(0x36343000, dtypes.uint32))
       c_hi = small.where(UOp.const(0x2e2c2a28, dtypes.uint32), UOp.const(0x3e3c3a38, dtypes.uint32))
       sc2 = _e8m0_halved(e + small.where(UOp.const(7, dtypes.uint32), UOp.const(3, dtypes.uint32))).cast(dtypes.half).reshape((1,)).expand((2,))
-      zero_u, sel01, sel23 = UOp.const(0, dtypes.uint32), UOp.const(0x05000400, dtypes.uint32), UOp.const(0x07000600, dtypes.uint32)
       sh = _sh(half * 4)
-      out_vals: list[UOp] = []
-      for wi in word_indices:
-        pw = _load_u32(raw, b_base, 1 + wi * 4) >> sh
-        fp_bytes = _amd_byte_perm(c_hi, c_lo, pw & 0x07070707) | ((pw & 0x08080808) << 4)
-        v01 = _amd_byte_perm(fp_bytes, zero_u, sel01).reshape((1,)).bitcast(dtypes.half) * sc2
-        v23 = _amd_byte_perm(fp_bytes, zero_u, sel23).reshape((1,)).bitcast(dtypes.half) * sc2
-        out_vals.extend((v01[0], v01[1], v23[0], v23[1]))
-      return tuple(out_vals)
+      return tuple(v for wi in word_indices for v in _e2m1_half4(_load_u32(raw, b_base, 1 + wi * 4) >> sh, c_lo, c_hi, sc2))
     return dequant_mxfp4
   def dequant(base:UOp, subgroup:UOp, half:UOp) -> UOp|tuple[UOp, ...]:
     if ggml_type in SMALL_BLOCK_QUANTS: base += subgroup * SMALL_BLOCK_QUANTS[ggml_type]  # eight independent blocks per 256 weights
     if ggml_type == Q8_0:
       scale2 = raw[base].load().bitcast(dtypes.half).reshape((1,)).expand((2,))
       neg1152_2 = UOp.const(-1152.0, dtypes.half).reshape((1,)).expand((2,))
-      c6400 = UOp.const(0x64006400, dtypes.uint32)
-      if word_indices == (0, 1, 2, 3):
-        c8080, sel_lo, sel_hi = UOp.const(0x80808080, dtypes.uint32), UOp.const(0x05010500, dtypes.uint32), UOp.const(0x05030502, dtypes.uint32)
-        hv = _amd_load(raw[base + 1 + half * 8], 8).bitcast(dtypes.uint32)
-        out_vals: list[UOp] = []
-        for qi in range(4):
-          ux = hv[qi] ^ c8080
-          v01 = (_amd_byte_perm(c6400, ux, sel_lo).reshape((1,)).bitcast(dtypes.half) + neg1152_2) * scale2
-          v23 = (_amd_byte_perm(c6400, ux, sel_hi).reshape((1,)).bitcast(dtypes.half) + neg1152_2) * scale2
-          out_vals.extend((v01[0], v01[1], v23[0], v23[1]))
-        return tuple(out_vals)
-      c8080, csel = UOp.const(0x8080, dtypes.uint32), UOp.const(0x05010500, dtypes.uint32)
-      out_vals = []
-      for w in word_indices:
-        for p in range(2):
-          ux = raw[base + 1 + half * 8 + w * 2 + p].load().cast(dtypes.uint32) ^ c8080
-          v01 = (_amd_byte_perm(c6400, ux, csel).reshape((1,)).bitcast(dtypes.half) + neg1152_2) * scale2
-          out_vals.extend((v01[0], v01[1]))
+      c6400, c8080 = UOp.const(0x64006400, dtypes.uint32), UOp.const(0x80808080, dtypes.uint32)
+      sel_lo, sel_hi = UOp.const(0x05010500, dtypes.uint32), UOp.const(0x05030502, dtypes.uint32)
+      hv = _amd_load(raw[base + 1 + half * 8], 8).bitcast(dtypes.uint32) if word_indices == (0, 1, 2, 3) else None
+      out_vals: list[UOp] = []
+      for qi, wi in enumerate(word_indices):
+        ux = (hv[qi] if hv is not None else _amd_load(raw[base + 1 + half * 8 + wi * 2], 2).bitcast(dtypes.uint32)[0]) ^ c8080
+        v01 = (_amd_byte_perm(c6400, ux, sel_lo).reshape((1,)).bitcast(dtypes.half) + neg1152_2) * scale2
+        v23 = (_amd_byte_perm(c6400, ux, sel_hi).reshape((1,)).bitcast(dtypes.half) + neg1152_2) * scale2
+        out_vals.extend((v01[0], v01[1], v23[0], v23[1]))
       return tuple(out_vals)
     def byte(offset): return _load_byte(raw, base, offset)
     zero: int|UOp = 0
@@ -443,34 +415,16 @@ def _make_wmma_dequant(raw:UOp, ggml_type:int, lane_group:UOp, kgroups:int, k_u:
       j = subgroup * 2 + half
       sc = ((byte(96 + j % 8) >> _sh((j // 8) * 4)) & 15) | (((byte(104 + j % 4) >> _sh((j // 4) * 2)) & 3) << 4)
       scale, zero = _half(raw[base + 54]) * (sc.cast(dtypes.int32) - 32).float(), 4
-    elif ggml_type == Q6_K:
-      scale, zero = _half(raw[base + 104]) * byte(192 + subgroup * 2 + half).cast(dtypes.uint8).bitcast(dtypes.int8).float(), 32
     elif ggml_type == IQ1_S: scale, zero = _iq1_scale(raw, base, subgroup)
     elif ggml_type == NVFP4:
       e = byte((subgroup // 2) * 36 + (subgroup % 2) * 2 + half).cast(dtypes.uint32)
-      if word_indices == (0, 1, 2, 3):
-        sc_u16 = e.eq(0x7f).where(UOp.const(0, dtypes.uint32), (e & 0x7f) << 7).cast(dtypes.uint16)
-        sc2 = sc_u16.bitcast(dtypes.half).reshape((1,)).expand((2,))
-        # Exact FP16 high bytes for 256x-scaled e2m1 magnitudes [0, 128, 256, 384, 512, 768, 1024, 1536] (low bytes 0x00)
-        c_lo, c_hi = UOp.const(0x5e5c5800, dtypes.uint32), UOp.const(0x66646260, dtypes.uint32)
-        zero_u = UOp.const(0, dtypes.uint32)
-        sel01, sel23 = UOp.const(0x05000400, dtypes.uint32), UOp.const(0x07000600, dtypes.uint32)
-        subblock = (subgroup % 2) * 2 + half
-        pv = _amd_load(raw[base + (subgroup // 2) * 9 + 1 + subblock * 2], 2)
-        vals: list[UOp|None] = [None] * 16
-        for wi in range(2):
-          pw = pv[wi]
-          lo_fp = _amd_byte_perm(c_hi, c_lo, pw & 0x07070707) | ((pw & 0x08080808) << 4)
-          hi_fp = _amd_byte_perm(c_hi, c_lo, (pw >> 4) & 0x07070707) | (pw & 0x80808080)
-          for bi, fp_bytes in ((0, lo_fp), (8, hi_fp)):
-            v01 = _amd_byte_perm(fp_bytes, zero_u, sel01).reshape((1,)).bitcast(dtypes.half) * sc2
-            v23 = _amd_byte_perm(fp_bytes, zero_u, sel23).reshape((1,)).bitcast(dtypes.half) * sc2
-            idx = bi + wi * 4
-            vals[idx], vals[idx + 1], vals[idx + 2], vals[idx + 3] = v01[0], v01[1], v23[0], v23[1]
-        return tuple(unwrap(v) for v in vals)
-      scale = _ue4m3_halved(e)
+      sc2 = e.eq(0x7f).where(UOp.const(0, dtypes.uint32), (e & 0x7f) << 7).cast(dtypes.uint16).bitcast(dtypes.half).reshape((1,)).expand((2,))
+      # Exact FP16 high bytes for 256x-scaled e2m1 magnitudes [0, 128, 256, 384, 512, 768, 1024, 1536] (low bytes 0x00)
+      c_lo, c_hi = UOp.const(0x5e5c5800, dtypes.uint32), UOp.const(0x66646260, dtypes.uint32)
+      p_base = base + (subgroup // 2) * 9 + 1 + ((subgroup % 2) * 2 + half) * 2
+      return tuple(v for wi in word_indices for v in _e2m1_half4(raw[p_base + wi % 2].load() >> _sh(4 * (wi // 2)), c_lo, c_hi, sc2))
     else:
-      scale = _e8m0_halved(raw[base]) if ggml_type == MXFP4 else _half(raw[base])
+      scale = _half(raw[base])
       if ggml_type in (IQ2_XS, IQ2_S):
         sc = byte((66 if ggml_type == IQ2_XS else 74) + subgroup)
         scale *= (((sc >> _sh(half * 4)) & 15).float() + 0.5) * 0.25
@@ -491,13 +445,13 @@ def _make_wmma_dequant(raw:UOp, ggml_type:int, lane_group:UOp, kgroups:int, k_u:
       g_idx = byte(2 + subgroup * 4 + pair) | (((qh >> _sh(2 * pair)) & 3) << 8)
       s4 = byte(34 + subgroup * 4 + pair) >> _sh(4 * (idx_i & 1))
       return _iq_half_elem_f32(table, g_idx * 4 + (idx_i & 1) * 2, s4, sc_f, b_u)
-    if ggml_type in (IQ4_NL, MXFP4, NVFP4):
-      words = tuple(_quant_word(raw, base, subgroup, half * 4 + wi, ggml_type, table, stream=False) for wi in word_indices)
+    if ggml_type == IQ4_NL:
+      words = tuple(_quant_word(raw, base, subgroup, half * 4 + wi, ggml_type, table) for wi in word_indices)
       w_reg = UOp.alloc((len(words),), dtypes.uint32, addrspace=AddrSpace.REG)
       word = w_reg.after(w_reg.store(UOp.stack(*words)))[w_u].load()
     else:
-      word = _quant_word(raw, base, subgroup, half * 4 + w_idx, ggml_type, table, stream=False)
-    return (((word >> _sh(b_u * 8)).cast(dtypes.uint8).bitcast(dtypes.int8).float() - zero) * scale - minimum).cast(dtypes.half)
+      word = _quant_word(raw, base, subgroup, half * 4 + w_idx, ggml_type, table)
+    return (((word >> _sh(b_u * 8)).cast(dtypes.uint8).bitcast(dtypes.int8).float() - zero).alu(Ops.MULACC, scale, -minimum)).cast(dtypes.half)
   return dequant
 
 @functools.cache
