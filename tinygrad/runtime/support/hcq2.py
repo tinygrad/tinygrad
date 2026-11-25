@@ -180,8 +180,7 @@ def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   devs = [to_tuple(b.device)[0] for b in (dst, src)]
   if host_of(devs[0]) == host_of(devs[1]): return None # not 2 nodes
 
-  from tinygrad.runtime.support.system import PCIIfaceBase
-  if not all(isinstance(getattr(Device[d], "iface", None), PCIIfaceBase) for d in devs): return None
+  if not all(Device.target_for(d).interface.endswith("PCI") for d in devs): return None
   from tinygrad.runtime.ops_rdma import rdma_nic_for
   if None in (nics:=[rdma_nic_for(Device[d], Device[min(devs)]) for d in devs]): return None
 
@@ -406,7 +405,6 @@ class HWQueue:
     call, self.deps = submit.src[0], submit.src[1:]
     self.lin, q = call.body, call.src[1]
     self.devs, self.queue = (q.device,), q.arg.name
-    self.dev = Device[self.devs[0]]
     self.blob, self.patches = bytearray(), list[tuple[int|UOp, UOp]]()
 
   def q(self, *words:UOp|int) -> int:
