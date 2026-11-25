@@ -44,7 +44,8 @@ def _amd_load(ptr:UOp, lanes:int|None=None, stream:bool=False) -> UOp:
 @functools.cache
 def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *, in_blks:UOp, out_features:UOp, tokens:UOp, val_chunk:UOp, k_unroll:UOp) -> UOp:
   lanes = WARP_SIZE
-  out_row, t = UOp.range(out_features, 0, AxisType.GLOBAL), UOp.range(tokens, 5, AxisType.GLOBAL)
+  row = UOp.range(tokens * out_features, 0, AxisType.GLOBAL)
+  t, out_row = row % tokens, row // tokens
   lane = UOp.range(lanes, 2, axis_type=AxisType.LOCAL)
   acc = _reg((1,), 0)
   i_r, ku, u = UOp.range(in_blks, 4), UOp.range(k_unroll, 7, AxisType.UPCAST), UOp.range(val_chunk, 6, AxisType.UPCAST)
@@ -52,7 +53,7 @@ def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *, in_blks:UOp, out_features:UOp
   dot = (w[out_row, col].load(arg="nontemporal").float() * x[t, col].load().float()).reduce(u, ku, arg=(Ops.ADD, 0))
   upd = acc[0].store(acc.after(i_r)[0].load() + dot).end(i_r)
   total = warp_reduce(acc.after(upd)[0].load(), full_wave=True)
-  return out[t, out_row.valid(lane.eq(0))].store(total.cast(out.dtype)).end(t, out_row, lane).sink(
+  return out[t, out_row.valid(lane.eq(0))].store(total.cast(out.dtype)).end(row, lane).sink(
     arg=KernelInfo(name="linear_f16_gemv", opts_to_apply=()))
 
 # ******** flash attention on the KV cache ********

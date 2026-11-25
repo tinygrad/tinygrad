@@ -105,11 +105,11 @@ def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, tokens:int|UOp, in_fe
             xsum[token, group, (lane//16).valid((lane%16).eq(0))].store(warp_reduce(quant.float())))
   return UOp.group(*stores).end(token_group, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
 
-def _decode_linear(out:UOp, out_features:int|UOp, group_count:int|UOp, waves:UOp, group_dot, name:str) -> UOp:
+def _decode_linear(out:UOp, out_features:int|UOp, group_count:int|UOp, waves:UOp, group_dot, name:str, share_weights:bool=True) -> UOp:
   row = UOp.range(out.shape[0] * out_features, 0, AxisType.GLOBAL)
   # lane has the smaller local axis id so it is always threadIdx.x (contiguous 32-lane half-wave on both RDNA and CDNA)
   lane, wave = UOp.range(32, 1, AxisType.LOCAL), UOp.range(waves, 2, AxisType.LOCAL)
-  token, output = row // out_features, row % out_features
+  token, output = (row % out.shape[0], row // out.shape[0]) if share_weights else (row // out_features, row % out_features)
   steps = (group_count + waves * 32 - 1) // (waves * 32)
   acc = UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG)
   acc = acc.after(acc[0].store(UOp.const(0, dtypes.float32)))
@@ -314,7 +314,7 @@ def _quant_decode_body(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, grids:tuple[UOp
     x_reg = x_reg.after(x_reg.store(_amd_load(xq[token, group, 0], 8)))
     return _quant_group_dot(raw, base, group%8, x_reg, xd[token, group], lambda h: xs[token, group, h].load(),
                             ggml_type, cdna, grids[0] if grids else None, dep)
-  return _decode_linear(out, out_features, in_features//32, waves, group_dot, name+QUANT_NAMES[ggml_type])
+  return _decode_linear(out, out_features, in_features//32, waves, group_dot, name+QUANT_NAMES[ggml_type], share_weights=name == "linear_")
 
 @functools.cache
 def _moe_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, sel:UOp, *grids:UOp,
