@@ -1180,7 +1180,7 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
   acc_reader, acc_writer = (ctx.raccvgpr_dyn, ctx.waccvgpr_dyn) if use_acc else (ctx.rvgpr_dyn, ctx.wvgpr_dyn)
   tmp2 = tmp.after(read_phase)
 
-  def _dot_accum(acc: UOp, a_row: UOp, b_row: UOp, m_row: UOp, n_row: UOp) -> UOp:
+  def _dot_accum(acc: UOp, a_row: UOp, b_row: UOp, m_row: UOp, n_row: UOp, lane: UOp) -> UOp:
     """acc += sum_k A[a_row+k] * B[b_row+k] in order (FP-associativity matters).
     For scaled MFMA each 32-wide K chunk has independent A/B exponents; C itself is not scaled."""
     def prod(k: int) -> UOp:
@@ -1188,9 +1188,15 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
     if not scaled:
       for k in range(K): acc = acc + prod(k)
       return acc
+    def scaled_dot32(base_a: UOp, base_b: UOp) -> UOp:
+      # Keep the arithmetic graph small for K=128 scaled shapes while preserving the ordered sum.
+      k, reg = ctx.range(32), UOp.alloc((), acc_dt, addrspace=AddrSpace.REG)
+      init = reg.after(lane).store(acc.const_like(-0.0))
+      cur = reg.after(init, k)
+      return reg.after(cur.store(cur + tmp2.index(base_a + k).bitcast(acc_dt) * tmp2.index(base_b + k).bitcast(acc_dt)).end(k))
     for chunk in range(K // 32):
-      dot = prod(chunk * 32)
-      for k in range(chunk * 32 + 1, chunk * 32 + 32): dot = dot + prod(k)
+      off = _c(chunk * 32, dtypes.int)
+      dot = scaled_dot32(a_row + off, b_row + off)
       scale_exp = _scale_exp(scale0, M, m_row, chunk) + _scale_exp(scale1, N, n_row, chunk)
       acc = acc + dot * UOp.exp2(scale_exp.cast(dtypes.float32))
     return acc
@@ -1213,7 +1219,7 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
     acc_v = acc_reader(src2_off - _c(256 - out_reg), compute_lane, src2_is_vgpr)
     acc_v = acc_v.cast(dtypes.int32) if is_int_out else acc_v.bitcast(dtypes.float32)
     a_base, b_base, m_row = out_ab(out_reg)
-    acc = _dot_accum(src2_is_vgpr.where(acc_v, acc_scalar), a_base, b_base, m_row, c_mn)
+    acc = _dot_accum(src2_is_vgpr.where(acc_v, acc_scalar), a_base, b_base, m_row, c_mn, compute_lane)
     out_bits = acc.cast(dtypes.uint32) if is_int_out else acc.bitcast(dtypes.uint32)
     compute_stores.append(acc_writer(vdst_reg + _c(out_reg), compute_lane, out_bits, exec_mask))
   compute_phase = UOp.group(*compute_stores).end(compute_lane)
