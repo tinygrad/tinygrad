@@ -1,11 +1,17 @@
-import unittest
-from tinygrad import Tensor, Variable, dtypes
+import unittest, multiprocessing
+from concurrent.futures import ProcessPoolExecutor
+from tinygrad import Tensor, Variable, dtypes, Context, Device
+from tinygrad.helpers import HCQ_RUNTIME_DEV
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import ParamArg, AddrSpace
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.function import function
 from tinygrad.codegen import create_linear
 def buf(n=8) -> Tensor: return Tensor.empty(n, device="NULL").realize()
+
+@Context(ALLOW_DEVICE_USAGE=0)
+def cross_compile(src:str, dev:str, host:str) -> tuple[str, list[str]]:
+  with Context(DEV=dev, HCQ_RUNTIME_DEV=host): return render_uir(Tensor.compile(parse_uir(src))), sorted(Device._opened_devices)
 
 class TestExport(unittest.TestCase):
   def test_exportable(self):
@@ -113,6 +119,49 @@ class TestExport(unittest.TestCase):
       schedule_cache.clear()
       with Context(NO_MEMORY_PLANNER=1, SPLIT_REDUCEOP=1): self.assertEqual(len(create_linear(fn).src), 2)
       self.assertEqual(len(create_linear(fn).src), 2)  # use the rebuilt schedule, not the old planned entry
+
+class TestCrossCompile(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
+    cls.cpu, cls.host = Device.target_for("CPU"), Device.target_for(HCQ_RUNTIME_DEV.device, HCQ_RUNTIME_DEV)
+    try: CPULLVMCompiler(cls.cpu.arch.split(","))
+    except Exception as e: raise unittest.SkipTest(f"LLVM not available: {e}")
+    cls.compiler = ProcessPoolExecutor(1, mp_context=multiprocessing.get_context("spawn"))
+  @classmethod
+  def tearDownClass(cls): cls.compiler.shutdown()
+
+  def cross_compile(self, out:Tensor, dev:str, host:str|None=None):
+    src, opened = self.compiler.submit(cross_compile, render_uir(out.export()[0]), f"{dev};{self.cpu!r}", host or repr(self.host)).result()
+    self.assertEqual(opened, [])
+    nodes = (linear:=parse_uir(src)).toposort(enter_calls=True)
+    self.assertFalse(any(u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL for u in nodes))
+    self.assertTrue(all(u.src[-1].op is Ops.BINARY for u in nodes if u.op is Ops.PROGRAM))
+    return linear
+
+  def test_amd_archs(self):
+    for arch in ("gfx1100", "gfx1200", "gfx950"):
+      with self.subTest(arch=arch):
+        out = ((Tensor.empty(4, 4, device="AMD") @ Tensor.empty(4, 4, device="AMD")).to("CPU") + 1).contiguous()
+        self.assertGreater(len(self.cross_compile(out, f"AMD:LLVM:{arch}").src), 0)
+
+  def test_amd_shapes_of_functions(self):
+    outs = {"symbolic": Tensor.empty(8, device="AMD")[:Variable("i", 1, 8).bind(3)] + 1,
+            "two devices": Tensor.empty(4, device="AMD:0").to("AMD:1") + Tensor.empty(4, device="AMD:1"),
+            "sharded": Tensor.empty(4, 8, device="AMD").shard(("AMD:0", "AMD:1"), axis=0) + 1}
+    for name, out in outs.items():
+      with self.subTest(name=name): self.assertGreater(len(self.cross_compile(out.contiguous(), "AMD:LLVM:gfx1100").src), 0)
+
+  def test_other_cpu_arch(self):
+    self.assertEqual(len(self.cross_compile((Tensor.empty(4, device="CPU") + 1).contiguous(), "CPU:LLVM:arm64,generic").src), 1)
+
+  def test_device_needs_an_arch(self):
+    with self.assertRaisesRegex(RuntimeError, "no target for AMD: set its arch in DEV"):
+      self.cross_compile((Tensor.empty(4, device="AMD") + 1).contiguous(), "AMD:LLVM")
+
+  def test_host_runtime_needs_an_arch(self):
+    with self.assertRaisesRegex(RuntimeError, "no target for CPU: set its arch in HCQ_RUNTIME_DEV"):
+      self.cross_compile((Tensor.empty(4, device="AMD") + 1).contiguous(), "AMD:LLVM:gfx1100", host=f"CPU:{self.host.renderer}")
 
 if __name__ == "__main__":
   unittest.main()
