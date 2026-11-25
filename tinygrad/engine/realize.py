@@ -141,10 +141,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, device:str|None=None) -> lis
     if device.split(":")[0] in HOST_DEVS: Device[device].synchronize(ctx.timeout)
   prg_bufs = {i:_buffer(call.src[1+i], ctx.input_uops).ensure_allocated() for i in ast.arg.globals}
   rt = get_runtime(device, ast, cache=ctx.cache)
-  def scalar(a:UOp):
-    if not a.is_variable: return _resolve(a, ctx.input_uops).val
-    if not a.vmin <= (val:=ctx.var_vals[a.expr]) <= a.vmax: raise RuntimeError(f"Variable {a.expr}={val} is out of range [{a.vmin}, {a.vmax}]")
-    return val
+  def scalar(a:UOp): return ctx.var_vals[a.expr] if a.is_variable else _resolve(a, ctx.input_uops).val
   try:
     args = [scalar(call.scalar_arg(p)) if p.addrspace is AddrSpace.ALU else prg_bufs[p.arg.slot].get_buf(device) for p in ast.kernel_params]
     global_sz, local_sz = (tuple(sym_infer(x, ctx.var_vals) for x in dims) for dims in ast.arg.launch_dims(call))
