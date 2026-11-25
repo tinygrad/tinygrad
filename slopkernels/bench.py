@@ -152,7 +152,7 @@ def _iq_lut(t:int, dev:str|tuple[str, ...], wmma:bool=False) -> tuple[UOp, ...]:
 
 def _r4_qrow(x:Tensor, m:int, k:int, dev:str|tuple[str, ...]) -> tuple[UOp, UOp]:
   kg = k // 32
-  kern = unwrap(slopkernels.get("rdna4_fp8_qrow_tiled")).specialize(m_tiles=m // 16, k_groups=kg, waves=min(8, max(1, kg // 16)))
+  kern = unwrap(slopkernels.get("rdna4_fp8_qrow_tiled")).specialize(m_tiles=m // 16, k_groups=kg)
   xq, xsc = UOp.alloc((m // 16, kg, 2, 16, 4), dtypes.uint32, device=dev), UOp.alloc((m,), dtypes.float32, device=dev)
   c = kern.call(xq, xsc, x.half().contiguous().uop)
   return xq.after(c), xsc.after(c)
@@ -187,31 +187,23 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
                          m_blks=m // 128, n_blks=n // 64, k_pairs=K // 256, raw_len=w_len)
           return _run_fp8, _verify
         if not cdna and m % 32 == 0 and n % 64 == 0 and K % 64 == 0:
-          wm, wn, tm, tn = ((4, 2, 4, 4) if m % 256 == 0 and n % 128 == 0 and qtype != 12 else
-                            (2, 4, 4, 2) if m >= 256 and m % 128 == 0 and n % 128 == 0 else
-                            (2, 2, 4, 2) if m % 128 == 0 else (2, 2, 2, 2) if m % 64 == 0 else (1, 2, 2, 2))
-          sk = 3 if (target[0] == 11 and m >= 128 and K >= 192 and (m // (wm * tm * 16)) * (n // (wn * tn * 16)) <= 128) else 1
+          sk = 3 if target[0] == 11 and m >= 128 and K >= 192 and (m // 128) * (n // 64) <= 128 else 1
           def _run_2d() -> Tensor:
             out = _krun(f"{arch_gemm}_gemm_{kname}_2d", (sk * m, n), dev, w_packed, x.half().contiguous(), *_iq_lut(qtype, dev, True),
-                        m_blks=m // (wm * tm * 16), n_blks=n // (wn * tn * 16), wm=wm, wn=wn, tm=tm, tn=tn,
-                        in_features=K, split_k=sk, raw_len=w_len)
+                        tokens=m, out_features=n, in_features=K, split_k=sk, raw_len=w_len)
             return out if sk == 1 else out.reshape(sk, m, n).sum(0)
           return _run_2d, _verify
-        mt = 8 if m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
         return (lambda: _krun(f"{arch_gemm}_gemm_{kname}_f16", (m, n), dev, w_packed, x.half().contiguous(),
-                              *_iq_lut(qtype, dev, True), m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=K, raw_len=w_len)), _verify
+                              *_iq_lut(qtype, dev, True), tokens=m, out_features=n, in_features=K, raw_len=w_len)), _verify
       if not cdna and m == 1 and qtype in (8, 10, 11, 12, 13, 14, 19, 20, 21, 22, 23, 39) and x_dt in (dtypes.float32, dtypes.float16):
-        rpw_t = ({8:4, 10:2, 11:2, 12:2, 19:16, 20:2, 21:16, 22:16, 39:2} if target[0] == 12 else {10:2, 12:2, 14:2}).get(qtype, 1)
-        rpw = rpw_t if n >= 1024 and n % rpw_t == 0 else 1
         return (lambda: _krun(f"rdna_gemv_direct_{kname}_{x_dt.name}", (1, n), dev, w_packed, x, *_iq_lut(qtype, dev),
-                              out_features=n, in_features=K, waves=min(ceildiv(K, 512), 32), rows_per_wg=rpw, raw_len=w_len)), _verify
-      wv = min(ceildiv(K, 1024), 32)
+                              out_features=n, in_features=K, raw_len=w_len)), _verify
       if 2 <= m <= 8 and qtype in (8, 12, 23, 39):
         return (lambda: _krun(f"{arch_gemv}_gemv_m_{kname}", (m, n), dev, w_packed, *_q8(x, m, K, dev),
-                              tokens=m, out_features=n, in_features=K, waves=wv, raw_len=w_len)), _verify
+                              tokens=m, out_features=n, in_features=K, raw_len=w_len)), _verify
       def _run() -> Tensor:
         return _krun(f"{arch_gemv}_gemv_{kname}", (m, n), dev, w_packed, *_q8(x, m, K, dev), *_iq_lut(qtype, dev),
-                     tokens=m, out_features=n, in_features=K, waves=wv, raw_len=w_len, group_rows=0)
+                     tokens=m, out_features=n, in_features=K, raw_len=w_len, group_rows=0)
       return _run, _verify
     return _setup
 
@@ -250,20 +242,18 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       w_packed, tile_u8 = _make_packed(E * MOE_N, MOE_K, qname, dev, seed=19)
       sel = Tensor(list(range(TOPK)), dtype=dtypes.int32, device=dev).realize()
       x = _nonuniform((1, 1, 1, MOE_K), dtypes.float32, dev, scale=0.5, freq=0.011)
-      wv, w_len = min(ceildiv(MOE_K, 1024), 32), int(w_packed.numel())
+      w_len = int(w_packed.numel())
       def _verify(out:Tensor) -> None:
         w4 = ggml_data_to_tensor(tile_u8[:CHECK_ROWS].flatten(), CHECK_ROWS * MOE_K, qtype).reshape(CHECK_ROWS, MOE_K)
         ref1, got = (x.reshape(1, MOE_K) @ w4.T).numpy()[0], out[0, 0, :, :CHECK_ROWS].float().numpy()
         _assert_close(got, np.broadcast_to(ref1, got.shape), rtol=4e-2, atol=5e-2)
       def _run() -> Tensor:
         if not cdna and qtype in (8, 10, 12, 13, 14, 19, 21, 23, 39):
-          rpw_t = ({8:4, 12:2, 19:16, 23:2, 39:2} if target[0] == 12 else {12:2}).get(qtype, 1)
-          rpw = rpw_t if MOE_N >= 1024 and MOE_N % rpw_t == 0 else 1
           return _krun(f"rdna_moe_direct_{kname}", (TOPK, MOE_N), dev, w_packed, x.reshape(1, MOE_K), sel,
                        *_iq_lut(qtype, dev), rows=TOPK, x_rows=1, out_features=MOE_N, in_features=MOE_K,
-                       waves=min(ceildiv(MOE_K, 512), 32), rows_per_wg=rpw, raw_len=w_len, x_share=TOPK, ndev=1).reshape(1, 1, TOPK, MOE_N)
+                       raw_len=w_len, x_share=TOPK, ndev=1).reshape(1, 1, TOPK, MOE_N)
         return _krun(f"{arch_gemv}_moe_{kname}", (TOPK, MOE_N), dev, w_packed, *_q8(x, 1, MOE_K, dev), sel, *_iq_lut(qtype, dev),
-                     rows=TOPK, x_rows=1, out_features=MOE_N, in_features=MOE_K, waves=wv, raw_len=w_len, x_share=TOPK,
+                     rows=TOPK, x_rows=1, out_features=MOE_N, in_features=MOE_K, raw_len=w_len, x_share=TOPK,
                      ndev=1).reshape(1, 1, TOPK, MOE_N)
       return _run, _verify
     cases.append((f"moe_gemv_{qname}_E{E}k{TOPK}_{MOE_N}x{MOE_K}", TOPK * per_e_words * w_dt.itemsize, 2 * TOPK * MOE_N * MOE_K, _mk_moe))
@@ -274,10 +264,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       x = _nonuniform((m, K), dtypes.float32, dev, scale=0.5, freq=0.023)
       def _verify(out:Tensor) -> None:
         _assert_close(out[:, :CHECK_ROWS].float().numpy(), (x @ w[:CHECK_ROWS].float().T).numpy(), rtol=3e-3, atol=3e-3)
-      vc = 8 if K % 256 == 0 else 4
-      ku = 2 if (K // (32 * vc)) % 2 == 0 else 1
-      return (lambda: _krun("amd_gemv_f16_f32", (m, n), dev, w, x, tokens=m, out_features=n,
-                            in_blks=K // (32 * vc * ku), val_chunk=vc, k_unroll=ku)), _verify
+      return (lambda: _krun("amd_gemv_f16_f32", (m, n), dev, w, x, tokens=m, out_features=n, in_features=K)), _verify
     cases.append((f"dense_gemv_f16_{m}x{n}x{K}", n * K * 2 + m * (K + n) * 4, 2 * m * n * K, _mk_dense))
 
   if not cdna:
@@ -288,30 +275,9 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         mask = Tensor.full((ATTN_M, ATTN_N), float("-inf"), dtype=dtypes.float32, device=dev).triu(ATTN_N - ATTN_M + 1)
         ref = q[:, :1].float().scaled_dot_product_attention(kv[0, :, :1].float(), kv[1, :, :1].float(), attn_mask=mask, enable_gqa=True).numpy()
         _assert_close(out[:, :1].float().numpy(), ref, rtol=5e-3, atol=5e-3)
-      def _run() -> Tensor:
-        grp = ATTN_H // ATTN_HKV
-        if target[0] == 12:
-          if ATTN_D <= 128 and grp % 4 == 0 and (ATTN_D == 128 or ATTN_N % 64 == 0): wm, gqa_w, bnt = 8, 4, 2 if ATTN_D == 128 else 4
-          else: wm, gqa_w, bnt = (4 if ATTN_M % 64 == 0 else 2), 1, (4 if ATTN_D <= 128 and ATTN_N % 64 == 0 else 2)
-          return _krun("rdna4_flash_attn", (ATTN_H, ATTN_M, ATTN_D), dev, q.reshape(ATTN_H, ATTN_M, ATTN_D), kv,
-                       UOp.const(ATTN_N), UOp.const(ATTN_M), BH=ATTN_H, m_blks=ATTN_M // ((wm // gqa_w) * 16), B=1, H_KV=ATTN_HKV,
-                       d_blks=ATTN_D // 64, n_blks=ATTN_N // (bnt * 16), waves_m=wm, bn_tiles=bnt, gqa_w=gqa_w,
-                       valid_kv_offset=0, q_start_from_end=1).reshape(1, ATTN_H, ATTN_M, ATTN_D)
-        if ATTN_D == 128 and ATTN_M >= 128 and ATTN_M % 128 == 0 and ATTN_N >= 512:
-          wm, sk = 8, 3
-          ks = unwrap(slopkernels.get("rdna3_flash_attn_split")).specialize(
-            BH=ATTN_H, m_blks=ATTN_M // (wm * 16), B=1, H_KV=ATTN_HKV, d_blks=ATTN_D // 64, n_blks=ATTN_N // 32,
-            waves_m=wm, bn_tiles=2, gqa_w=1, split_kv=sk, valid_kv_offset=0, q_start_from_end=1)
-          part = UOp.alloc((sk, ATTN_H, ATTN_M, ATTN_D), dtypes.half, device=dev)
-          st_b = UOp.alloc((sk, ATTN_H, ATTN_M, 2), dtypes.float32, device=dev)
-          cp = ks.call(part, st_b, q.reshape(ATTN_H, ATTN_M, ATTN_D).uop, kv.uop, UOp.const(ATTN_N), UOp.const(ATTN_M))
-          return _krun("amd_flash_prefill_combine", (ATTN_H, ATTN_M, ATTN_D), dev, part.after(cp), st_b.after(cp),
-                       BH=ATTN_H, M=ATTN_M, d_blks=ATTN_D // 64, split_kv=sk).reshape(1, ATTN_H, ATTN_M, ATTN_D)
-        wm = 4 if ATTN_M % 64 == 0 else 2
-        return _krun("rdna3_flash_attn", (ATTN_H, ATTN_M, ATTN_D), dev, q.reshape(ATTN_H, ATTN_M, ATTN_D), kv,
-                     UOp.const(ATTN_N), UOp.const(ATTN_M), BH=ATTN_H, m_blks=ATTN_M // (wm * 16), B=1, H_KV=ATTN_HKV, d_blks=ATTN_D // 64,
-                     n_blks=ATTN_N // 32, waves_m=wm, bn_tiles=2, gqa_w=1, valid_kv_offset=0, q_start_from_end=1).reshape(1, ATTN_H, ATTN_M, ATTN_D)
-      return _run, _verify
+      return (lambda: _krun(f"{arch_gemm}_flash_attn", (ATTN_H, ATTN_M, ATTN_D), dev, q.reshape(ATTN_H, ATTN_M, ATTN_D), kv,
+                            UOp.const(ATTN_N), UOp.const(ATTN_M), BH=ATTN_H, M=ATTN_M, B=1, H_KV=ATTN_HKV, d_blks=ATTN_D // 64,
+                            N=ATTN_N, valid_kv_offset=0, q_start_from_end=1).reshape(1, ATTN_H, ATTN_M, ATTN_D)), _verify
     cases.append((f"flash_attn_prefill_H{ATTN_H}_M{ATTN_M}_N{ATTN_N}_D{ATTN_D}",
                   (ATTN_H * ATTN_M * ATTN_D + 2 * ATTN_HKV * ATTN_N * ATTN_D) * 2 + ATTN_H * ATTN_M * ATTN_D * 4,
                   4 * ATTN_H * ATTN_M * ATTN_N * ATTN_D, _mk_fa_prefill))
@@ -380,7 +346,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       for i in range(3): comb = comb / (comb.sum(-1 if i % 2 else -2, keepdim=True) + 1e-6)
       _assert_close(out.float().numpy(), pre.cat(post, comb.reshape(t_h, 16), dim=-1).numpy(), rtol=2e-3, atol=2e-3)
     return (lambda: _krun("amd_hc_coeffs_f16_f16", (t_h, 24), dev, mix, flat, base, scale,
-                          tokens=t_h, features=K, waves=min(max(1, ceildiv(K, 512)), 8), iters=2, eps=1e-6, norm_eps=1e-6)), _verify
+                          tokens=t_h, features=K, iters=2, eps=1e-6, norm_eps=1e-6)), _verify
   cases.append((f"hc_coeffs_{2 if smoke else 32}x{K}", (2 if smoke else 32) * K * 4, 0, _mk_hc))
   return cases
 

@@ -237,43 +237,31 @@ def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, *, valid_kv_len:UOp
     arg=KernelInfo(name="flash_decode_combine", opts_to_apply=()))
 
 @functools.cache
-def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *extra:UOp, valid_kv_len:UOp, q_start:UOp, d_blks:UOp,
-                         m_blks:UOp, waves_m:UOp, bn_tiles:UOp, gqa_w:UOp, rdna4:bool=False, split_kv:UOp|None=None) -> UOp:
+def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:UOp, d_blks:UOp,
+                         m_blks:UOp, waves_m:UOp, bn_tiles:UOp, gqa_w:UOp, rdna4:bool=False) -> UOp:
   # Zero-P_lds S^T = wmma(K, Q) with separate zero-pad XOR-swizzled K_lds & V_lds (2 barriers/tile),
-  # register byte_perm V transpose (ds16=0), ds_bpermute alpha/l_inv (zero alpha_lds), 2-loop unmasked+tail split,
-  # GQA-fused WGs (gqa_w) on RDNA4, and optional split_kv on RDNA3.
+  # register byte_perm V transpose (ds16=0), ds_bpermute alpha/l_inv (zero alpha_lds), 2-loop unmasked+tail split, GQA-fused WGs on RDNA4.
   valid_kv_len, q_start = _unbind(valid_kv_len), _unbind(q_start)
-  stats = extra[0] if split_kv is not None else None
   BH, _, D = q.shape
   _, B, H_KV, physical_n, _ = cache.shape
-  gqa_group = BH // (B * H_KV)
-  w_per_head = waves_m // gqa_w
+  gqa_group, w_per_head = BH // (B * H_KV), waves_m // gqa_w
   block_m_sz, block_n_sz, threads = w_per_head * WMMA_M, bn_tiles * WMMA_N, waves_m * WARP_SIZE
   TN, TD, K_CH, V_CH = bn_tiles, d_blks * 4, d_blks * 8, bn_tiles * 2
   SCALE_L2 = (d_blks * 64).cast(dtypes.float32).rsqrt() * LOG2E
-  head_grps = BH // gqa_w
-  block_hg, block_m_raw = UOp.range(head_grps, 0, AxisType.GLOBAL), UOp.range(m_blks, 1, AxisType.GLOBAL)
+  block_hg, block_m_raw = UOp.range(BH // gqa_w, 0, AxisType.GLOBAL), UOp.range(m_blks, 1, AxisType.GLOBAL)
   block_m = m_blks - 1 - block_m_raw
-  sk_r = UOp.range(split_kv, 3, AxisType.GLOBAL) if split_kv is not None else None
   wave, lane = UOp.range(waves_m, 2, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   tid, lane_g, lane_c = wave * WARP_SIZE + lane, lane // 16, lane % 16
   block_bh, wave_m = block_hg * gqa_w + (wave // w_per_head), wave % w_per_head
   kv_head = block_hg // (gqa_group // gqa_w)
-  k_u32 = cache.flatten().bitcast(dtypes.uint32)
-  v_base_u32 = B * H_KV * physical_n * (d_blks * 32)
-  if split_kv is not None:
-    assert stats is not None
-    o_tile = o[sk_r, block_bh].reshape(m_blks, block_m_sz, D)[block_m]
-    s_tile = stats[sk_r, block_bh].reshape(m_blks, block_m_sz, 2)[block_m]
-  else:
-    o_tile, s_tile = o[block_bh].reshape(m_blks, block_m_sz, D)[block_m], None
-  q_tile = q[block_bh].reshape(m_blks, block_m_sz, D)[block_m]
+  k_u32, v_base_u32 = cache.flatten().bitcast(dtypes.uint32), B * H_KV * physical_n * (d_blks * 32)
+  m_base = block_m * block_m_sz + wave_m * 16
 
   frag_k = 8 if rdna4 else 16
   q_reg = UOp.alloc((TD, frag_k), dtypes.half, addrspace=AddrSpace.REG)
   kq_i, qk_u = UOp.range(TD, 10), UOp.range(frag_k, 11, AxisType.UPCAST)
   q_col = kq_i * 16 + ((qk_u // 4) * 8 + lane_g * 4 + (qk_u % 4) if rdna4 else qk_u)
-  q_reg = q_reg.after(q_reg[kq_i, qk_u].store((q_tile[wave_m * 16 + lane_c, q_col].load().float() * SCALE_L2).cast(dtypes.half)).end(qk_u, kq_i))
+  q_reg = q_reg.after(q_reg[kq_i, qk_u].store((q[block_bh, m_base + lane_c, q_col].load().float() * SCALE_L2).cast(dtypes.half)).end(qk_u, kq_i))
 
   k_lds_raw = UOp.alloc((block_n_sz * K_CH * 8,), dtypes.half, addrspace=AddrSpace.LOCAL)
   v_lds_raw = UOp.alloc((D * V_CH * 8,), dtypes.half, addrspace=AddrSpace.LOCAL)
@@ -284,17 +272,8 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *extra:UOp, valid_kv_len:UOp, 
   P_tmp_buf = UOp.alloc((16,), dtypes.half, addrspace=AddrSpace.REG) if not rdna4 else None
 
   n_end_all = ((q_start + (block_m + 1) * block_m_sz).minimum(valid_kv_len) + block_n_sz - 1) // block_n_sz
-  n_full_all = ((q_start + block_m * block_m_sz + 1).minimum(valid_kv_len) // block_n_sz).minimum(n_end_all)
-  if split_kv is not None:
-    assert sk_r is not None
-    base_t, rem_t = n_end_all // split_kv, n_end_all % split_kv
-    t_start = sk_r * base_t + sk_r.minimum(rem_t)
-    t_end = (t_start + base_t + (sk_r < rem_t).where(UOp.const(1, dtypes.weakint), UOp.const(0, dtypes.weakint))).minimum(n_end_all)
-    n_full, n_tail = (t_end.minimum(n_full_all) - t_start).maximum(0), (t_end - t_start.maximum(n_full_all)).maximum(0)
-    full_base, tail_base = t_start, t_start.maximum(n_full_all)
-  else:
-    t_start, t_end = UOp.const(0, dtypes.weakint), n_end_all
-    n_full, n_tail, full_base, tail_base = n_full_all, n_end_all - n_full_all, UOp.const(0, dtypes.weakint), n_full_all
+  n_full = ((q_start + block_m * block_m_sz + 1).minimum(valid_kv_len) // block_n_sz).minimum(n_end_all)
+  n_tail, t_start, t_end = n_end_all - n_full, UOp.const(0, dtypes.weakint), n_end_all
 
   def swz_k_r4(kr:UOp, kk:UOp) -> UOp: return (kr & 7) ^ (d_blks >= 2).where((kk >> 2) & 1, UOp.const(0, dtypes.weakint))
   def swz_v_ch(d_idx:UOp, ch:UOp) -> UOp:
@@ -499,42 +478,15 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *extra:UOp, valid_kv_len:UOp, 
     done = UOp.group(pv_grp, k_next).barrier().end(it)
     return acc.after(done), m_i.after(done), l_i.after(done), done
 
-  k0 = store_k(t_start.minimum((n_end_all - 1).maximum(0)), (q_reg,), 20).barrier()
-  acc1, m1, l1, d1 = run_stage(n_full, full_base, 100, False, acc, m_i, l_i, k0)
-  acc_f, m_f, l_f, _ = run_stage(n_tail, tail_base, 200, True, acc1, m1, l1, d1)
-  lf_val = l_f[0].load()
-  l_inv = _fast_fmax(lf_val, UOp.const(1e-30, dtypes.float32)).reciprocal() if split_kv is not None else lf_val.reciprocal()
+  k0 = store_k(t_start, (q_reg,), 20).barrier()
+  acc1, m1, l1, d1 = run_stage(n_full, t_start, 100, False, acc, m_i, l_i, k0)
+  acc_f, _, l_f, _ = run_stage(n_tail, n_full, 200, True, acc1, m1, l1, d1)
+  l_inv = l_f[0].load().reciprocal()
   inv_es = [_ds_bpermute((lane_g * 8 + e if rdna4 else e * 2 + lane_g) * 4, l_inv) for e in range(8)]
   td_o = UOp.range(TD, 300)
-  o_sts = [UOp.group(*(o_tile[wave_m * 16 + (lane_g * 8 + e if rdna4 else e * 2 + lane_g), td_o * 16 + lane_c].store(
-    (acc_f[td_o, e].load() * inv_es[e]).cast(o.dtype)) for e in range(8))).end(td_o)]
-  if split_kv is not None:
-    assert s_tile is not None
-    row_s = wave_m * 16 + lane_c
-    o_sts += [s_tile[row_s.valid(lane_g.eq(0)), 0].store(m_f[0].load()), s_tile[row_s.valid(lane_g.eq(0)), 1].store(lf_val)]
-  end_r = (*((sk_r,) if sk_r is not None else ()), block_m_raw, block_hg)
-  kname = ("rdna4_flash_attn" if rdna4 else "rdna3_flash_attn") + ("_split" if split_kv is not None else "")
-  return UOp.group(*o_sts).end(lane, wave, *end_r).sink(arg=KernelInfo(name=kname, opts_to_apply=()))
-
-@functools.cache
-def _amd_flash_prefill_combine(o:UOp, part:UOp, stats:UOp, *, split_kv:UOp, d_blks:UOp) -> UOp:
-  # Vectorized prefill split-KV combine: 16 rows/WG, 16 threads/row x (d_blks*4) elems -> global_load_b128 on fp16 partials.
-  _, BH, M, _ = part.shape
-  elems = d_blks * 4
-  wg = UOp.range((BH * M) // 16, 0, AxisType.GLOBAL)
-  tid, u = UOp.range(256, 1, AxisType.LOCAL), UOp.range(elems, 10, AxisType.UPCAST)
-  row = wg * 16 + tid // 16
-  bh, m, d = row // M, row % M, (tid % 16) * elems + u
-  s0 = UOp.range(split_kv, 11)
-  mmax = stats[s0, bh, m, 0].load().reduce(s0, arg=(Ops.MAX, 0))
-  s1 = UOp.range(split_kv, 12)
-  w1 = _fast_exp2(stats[s1, bh, m, 0].load() - mmax) * stats[s1, bh, m, 1].load()
-  wsum = w1.reduce(s1, arg=(Ops.ADD, 0))
-  s2 = UOp.range(split_kv, 13)
-  w2 = _fast_exp2(stats[s2, bh, m, 0].load() - mmax) * stats[s2, bh, m, 1].load()
-  acc = (w2 * part[s2, bh, m, d].load().float()).reduce(s2, arg=(Ops.ADD, 0))
-  return o[bh, m, d].store((acc * _fast_fmax(wsum, UOp.const(1e-30, dtypes.float32)).reciprocal()).cast(o.dtype)).end(u, tid, wg).sink(
-    arg=KernelInfo(name="flash_prefill_combine", opts_to_apply=()))
+  o_st = UOp.group(*(o[block_bh, m_base + (lane_g * 8 + e if rdna4 else e * 2 + lane_g), td_o * 16 + lane_c].store(
+    (acc_f[td_o, e].load() * inv_es[e]).cast(o.dtype)) for e in range(8))).end(td_o)
+  return o_st.end(lane, wave, block_m_raw, block_hg).sink(arg=KernelInfo(name="rdna4_flash_attn" if rdna4 else "rdna3_flash_attn", opts_to_apply=()))
 
 # ******** gated delta net: fused recurrent scan ********
 
