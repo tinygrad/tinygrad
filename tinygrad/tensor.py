@@ -254,7 +254,7 @@ class Tensor(Mixin):
     """Compile a function from `Tensor.export` to a LINEAR of compiled calls without binding its externs. It reads the targets in DEV."""
     devs = {d for u in fn.toposort() for d in to_tuple(u.device) if d is not None}
     for d in sorted({*devs, *map(host_of, devs), HCQ_RUNTIME_DEV.device}): Device.target_for(d)
-    with Context(ALLOW_DEVICE_USAGE=0): return compile_linear(create_linear(fn), validate=VALIDATE_WITH_CPU, input_uops=[], cache=True)
+    with Context(ALLOW_DEVICE_USAGE=0): return compile_linear(create_linear(fn), validate=VALIDATE_WITH_CPU, cache=True)
 
   @staticmethod
   def link(linear:UOp, externs:tuple[UOp, ...]) -> UOp:

@@ -244,9 +244,9 @@ class Buffer:
     assert self.is_allocated() and src.is_allocated(), "copy requires allocated buffers"
     from tinygrad.engine.realize import compile_linear, link_linear, run_linear
     from tinygrad.uop.ops import UOp, Ops
-    du, su, inputs = UOp.from_buffer(self, dtypes.uint8), UOp.from_buffer(src, dtypes.uint8), list[UOp]()
-    linear = compile_linear(UOp(Ops.LINEAR, src=(du.store_call(su),)), input_uops=inputs, cache=True)
-    run_linear(link_linear(linear, inputs), input_uops=inputs, update_stats=False)
+    du, su = UOp.from_buffer(self, dtypes.uint8), UOp.from_buffer(src, dtypes.uint8)
+    linear = compile_linear(UOp(Ops.LINEAR, src=(du.as_extern(0).store_call(su.as_extern(1)),)), cache=True)
+    run_linear(link_linear(linear, [du, su]), input_uops=(du, su), update_stats=False)
     return self
 
   def view(self, nbytes:int, offset:int) -> Buffer:

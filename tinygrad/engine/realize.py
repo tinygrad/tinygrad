@@ -3,13 +3,13 @@ from typing import cast, Iterator, Any, Sequence
 import decimal
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, Context, to_tuple, tqdm, unwrap
-from tinygrad.helpers import BEAM, size_to_str, time_to_str, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
+from tinygrad.helpers import BEAM, ALL2ALL, size_to_str, time_to_str, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.uop.ops import pm_flatten_linear
 from tinygrad.device import Device, Buffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer, TinyELF
-from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
+from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context, to_program_config
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
 # **************** Helpers ****************
@@ -253,12 +253,17 @@ pm_exec = PatternMatcher([
 def devices_of(linear:UOp) -> list[str]:
   return sorted({d for u in linear.toposort() if u.op in {Ops.BUFFER, Ops.PARAM, Ops.ALLOC, Ops.EXTERN} for d in to_tuple(u.device) if d is not None})
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None, cache=False) -> UOp:
-  linear = graph_rewrite(linear, pm_scalar_externs, name="scalar externs", walk=True)
-  if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
-  if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
-  linear = lower_and_compile(linear)
-  return hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
+compile_cache:dict[tuple, UOp] = {}
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, profile:bool|None=None, cache=False) -> UOp:
+  beam, profile = BEAM.value if beam is None else beam, bool(PROFILE or DEBUG >= 2) if profile is None else profile
+  key = (linear, beam, bool(validate), profile, ALL2ALL >= 1, tuple(DEV.value), tuple(HCQ_RUNTIME_DEV.value), *[x.value for x in to_program_config])
+  if cache and (ret:=compile_cache.get(key)) is not None: return ret
+  ret = graph_rewrite(linear, pm_scalar_externs, name="scalar externs", walk=True)
+  if validate: ret = graph_rewrite(ret, pm_validate, name="validate", walk=True)
+  if beam >= 1: ret = graph_rewrite(ret, pm_beam, ctx=beam, walk=True)
+  ret = hcq_compile(lower_and_compile(ret), profile)
+  if cache and ret is not linear: compile_cache[key] = ret
+  return ret
 
 def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
   # link opens the devices the linear uses, opening a device registers its link buffers and rules
@@ -273,7 +278,7 @@ def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequenc
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
-  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True, cache=False))
+  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True))
   while True:
     if clear_l2:
       if hasattr(dev:=Device[call.device], 'invalidate_caches'): dev.invalidate_caches()
