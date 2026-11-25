@@ -516,19 +516,25 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
     grid = grid.after(grid[g_off].store(grids[0][g_off].load()).end(g4, g_i))
   type_words = QUANT_SIZES[ggml_type] // raw.dtype.itemsize
   output_words = in_features * type_words // GGML_BLOCK_SIZE
-  group, half = UOp.range(in_features // Q8_GROUP_SIZE, 4), UOp.range(2, 5)
-  block, subgroup, half_group = group // 8, group % 8, group * 2 + half
+  if ggml_type in (Q4_K, Q5_K, Q2_K, Q3_K, Q6_K):
+    block, subgroup, half = UOp.range(in_features // GGML_BLOCK_SIZE, 4), UOp.range(8, 5), UOp.range(2, 6)
+    red_ranges: tuple[UOp, ...] = (block, subgroup, half)
+  else:
+    group, half = UOp.range(in_features // Q8_GROUP_SIZE, 4), UOp.range(2, 5)
+    block, subgroup = group // 8, group % 8
+    red_ranges = (group, half)
+  half_group = (block * 8 + subgroup) * 2 + half
   k_u, m_u, mt_u = UOp.range(frag_k, 10, AxisType.UPCAST), UOp.range(rows, 11, AxisType.UPCAST), UOp.range(m_tiles, 12, AxisType.UPCAST)
   w_idx = (k_u // 4) if kgroups == 1 else (lane_group + kgroups * (k_u // 4))
   a_elem = x[(token_block * m_tiles + mt_u) * 16 + col, half_group * 16 + w_idx * 4 + (k_u % 4)].load()
   b_raw = _make_wmma_dequant(raw, ggml_type, lane_group, kgroups, k_u, grid)(output * output_words + block * type_words, subgroup, half)
   if isinstance(b_raw, tuple):
     b_reg = UOp.alloc((frag_k,), dtypes.float16, addrspace=AddrSpace.REG)
-    b_elem = b_reg.after(b_reg.after(group, half).store(UOp.stack(*b_raw)))[k_u].load()
+    b_elem = b_reg.after(b_reg.after(*red_ranges).store(UOp.stack(*b_raw)))[k_u].load()
   else: b_elem = b_raw
   tc_axes = (((k_u.arg, frag_k), (m_u.arg, 1)), ((k_u.arg, frag_k), (m_u.arg, 1)), ((k_u.arg, 1), (m_u.arg, rows)))
   wmma = UOp.wmma(a_elem, b_elem, UOp.const((0.0,) * rows, dtypes.float32), WMMA_ARG[0], lanes, tc_upcast_axes=tc_axes)
-  res = wmma.reduce(group, half, arg=(Ops.ADD, 0))
+  res = wmma.reduce(*red_ranges, arg=(Ops.ADD, 0))
   row_in_tile = lane_group * rows + m_u if kgroups > 1 else m_u * 2 + lane_group
   st = UOp(Ops.STORE, src=(out[(token_block * m_tiles + mt_u) * 16 + row_in_tile, output], res.cast(out.dtype)))
   return st.end(k_u, m_u, mt_u, token_block, output_block, lane).sink(
