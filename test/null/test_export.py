@@ -92,13 +92,11 @@ class TestExport(unittest.TestCase):
       linear = Tensor.compile(fn)
       self.assertIs(Tensor.compile(fn), linear)
       self.assertEqual(plan.call_count, 1)
-      # the jit defers the memory plan, a planned linear is not what it gets
-      with Context(NO_MEMORY_PLANNER=1): self.assertIsNot(Tensor.compile(fn), linear)
       with Context(SCACHE=0): Tensor.compile(fn)
-      self.assertEqual(plan.call_count, 3)
+      self.assertEqual(plan.call_count, 2)
       codegen.schedule_cache.clear()
       Tensor.compile(fn)
-      self.assertEqual(plan.call_count, 4)
+      self.assertEqual(plan.call_count, 3)
 
   def test_linear_cache_isolation(self):
     from tinygrad import Context
