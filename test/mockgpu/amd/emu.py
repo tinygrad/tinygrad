@@ -1860,7 +1860,7 @@ pm_render = PatternMatcher([
 ])
 
 pm_remove_native = PatternMatcher([
-  (UPat(Ops.NATIVE, name="native"), lambda native:native.src[0]),
+  (UPat(Ops.NATIVE, name="native"), lambda native: native.src[0]),
 ])
 
 # instructions that directly read/write PC
