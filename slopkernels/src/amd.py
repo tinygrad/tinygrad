@@ -90,7 +90,8 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   vfrag = valid_s.where(cache_kv[1, b, kv_head, key_s, lane * DPL + d_u].load(arg="nontemporal").float(), zerof)
   prev_acc, prev_max, prev_sum = acc_reg.after(chunk_round, s_it), max_reg.after(chunk_round, s_it), sum_reg.after(chunk_round, s_it)
   h_u = UOp.range(group, 17)
-  score_s = valid_s.where(warp_reduce((qf_reg[h_u, d_u].load() * kfrag).reduce(d_u, arg=(Ops.ADD, 0)), full_wave=True), UOp.const(-1e30, dtypes.float))
+  score_s = valid_s.where(warp_reduce((qf_reg[h_u, d_u].load() * kfrag).reduce(d_u, arg=(Ops.ADD, 0)), full_wave=True),
+                          UOp.const(-1e30, dtypes.float))
   old_max = prev_max[h_u].load()
   new_max = old_max.maximum(score_s)
   alpha = ((old_max - new_max) * LOG2E).exp2()
@@ -263,7 +264,8 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:U
   qk_done = S_frag.store(UOp.wmma(q_reg[k_qk], k_frag, S_frag.after(k_qk), *WMMA_ARG)).end(tn1).end(k_qk).barrier()
   S_reg = S_reg.after(qk_done)
   rm, rn = UOp.range(TM, 250), UOp.range(TN, 251)
-  q_idx, k_idx = q_start + block_m * block_m_sz + wave_m * WMMA_M + rm * LANES_PER_WAVE_M + lane_m, n_tile * block_n_sz + rn * LANES_PER_WAVE_N + lane_n
+  q_idx = q_start + block_m * block_m_sz + wave_m * WMMA_M + rm * LANES_PER_WAVE_M + lane_m
+  k_idx = n_tile * block_n_sz + rn * LANES_PER_WAVE_N + lane_n
   causal = (k_idx <= q_idx) & (k_idx < valid_kv_len)
   S_reg = S_reg.after(S_reg[rm, rn].store(causal.where(S_reg[rm, rn], S_reg[rm, rn].const_like(-math.inf))).end(rm, rn))
   m_ij, rn_u, ri_w = UOp.alloc((TM,), dtypes.float, addrspace=AddrSpace.REG), UOp.range(TN, 261, AxisType.UPCAST), UOp.range(TM, 270)
