@@ -237,9 +237,7 @@ class Tensor(Mixin):
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
     fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, name="export")
-    vals: dict[str, int] = {}
-    for x in ctx.externs:
-      if x.is_bound_var and (v:=vals.setdefault(x.expr, x.arg.val)) != x.arg.val: raise RuntimeError(f"bind mismatch on {x.expr}, {v} != {x.arg.val}")
+    if len(names:=[v.expr for v in ctx.externs if v.is_bound_var]) != len(set(names)): raise RuntimeError(f"bind mismatch on a Variable in {names}")
     return fn, tuple(ctx.externs)
 
   def linear_with_externs(self, *lst:Tensor) -> tuple[UOp, tuple[UOp, ...]]:
@@ -267,6 +265,7 @@ class Tensor(Mixin):
   @staticmethod
   def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
     """Links a LINEAR from `Tensor.compile` to the externs from `Tensor.export` and runs it."""
+    if capturing and CAPTURING: raise RuntimeError("a JIT can't capture a compiled LINEAR, realize the Tensors instead")
     var_vals = {f"e{i}": x.arg.val for i,x in enumerate(externs) if x.is_bound_var}
     run_linear(Tensor.link(linear, externs), var_vals, externs, update_stats=do_update_stats)
 

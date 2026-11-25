@@ -167,8 +167,7 @@ class _TinyJit(Generic[ReturnType]):
       del self._exports
       big_linear, externs = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in linears]))), list(slots)
       del linears, slots
-      for x in externs:
-        if x.is_bound_var and var_vals.get(x.expr, x.arg.val) != x.arg.val: raise JitError(f"bind mismatch on {x.expr} with a JIT input")
+      if any(x.is_bound_var and var_vals.get(x.expr, x.arg.val) != x.arg.val for x in externs): raise JitError("bind mismatch with a JIT input")
 
       if self.prune:
         big_linear, onetime_linear = prune_linear(big_linear, {u.as_extern(i) for i,u in enumerate(input_buf_uops)})
