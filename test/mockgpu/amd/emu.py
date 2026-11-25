@@ -1863,12 +1863,13 @@ pm_remove_native = PatternMatcher([
   (UPat(Ops.NATIVE, name="native"), lambda native:native.src[0]),
 ])
 
+# instructions that directly read/write PC
+PC_INSTS = ("S_GETPC", "S_SETPC")
+
 @rewrite_group(replay="emu_process_replay")
 def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
   insts = amd_decode(code, arch)
-  for inst in insts.values():
-    inst_st = getattr(inst, "op_name", "").lower()
-    if inst_st.startswith(("s_getpc", "s_setpc")): raise NotImplementedError(f"AMD lifter does not support {inst_st}")
+  assert not any(getattr(inst, "op_name", "").startswith(PC_INSTS) for inst in insts.values()), f"instruction stream cannot contain {PC_INSTS}"
   cfg = get_cfg(insts)
   thread_branches(insts, cfg["blocks"], cfg["paths"])
   try: regions = cfg_regions(cfg["paths"], 0)
@@ -1938,10 +1939,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     cond = UOp.const(True)
     instructions = []
     for off in cfg["blocks"][block_pc]:
-      inst = insts[off]
-      inst_st = getattr(inst, "op_name", "").lower()
-      if inst_st.startswith("s_code_end"): continue
-      call, branch_cond = instruction_call(inst, arch, renderer)
+      call, branch_cond = instruction_call(insts[off], arch, renderer)
       if branch_cond is not None: cond = branch_cond
       if call is not None: instructions.append(call)
     values = {ctx.scratch_stride:_c(scratch_size)}
