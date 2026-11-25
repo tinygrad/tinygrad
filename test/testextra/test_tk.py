@@ -2,13 +2,13 @@ import unittest, math, time
 
 from tinygrad import Tensor, Device, dtypes, Context, GlobalCounters
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.engine.realize import run_linear
 from tinygrad.engine.jit import TinyJit
 import numpy as np
 
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.kernel import Kernel
 from extra.thunder.tiny.tk.tiles import ST_16X32, RT_16X32, RT_16X16, TileLayout
+from test.helpers import run_schedule
 
 def assert_allclose(cmp:Tensor, ref:Tensor, **kwargs) -> None:
   if Device.DEFAULT == "NULL": Tensor.realize(cmp, ref)
@@ -68,7 +68,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (c, a, b)]),))
 
-    for _ in range(5): run_linear(linear, update_stats=False)
+    for _ in range(5): run_schedule(linear, update_stats=False)
     c = c.float()
 
     ref = a.matmul(b, dtype=dtypes.float32).float()
@@ -117,7 +117,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (c, a, b)]),))
 
-    for _ in range(5): run_linear(linear, update_stats=False)
+    for _ in range(5): run_schedule(linear, update_stats=False)
     c = c.float()
 
     ref = a.matmul(b.transpose(2, 3), dtype=dtypes.float32).float()
@@ -154,7 +154,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, update_stats=False)
+    for _ in range(5): run_schedule(linear, update_stats=False)
     b = b.float()
 
     ref = a.float()
@@ -194,7 +194,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, update_stats=False)
+    for _ in range(5): run_schedule(linear, update_stats=False)
     b = b.float()
 
     ref = a.float()
@@ -237,7 +237,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, c, a)]),))
 
-    for _ in range(5): run_linear(linear, update_stats=False)
+    for _ in range(5): run_schedule(linear, update_stats=False)
     b = b.float()
     c = c.float()
 
@@ -278,7 +278,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, update_stats=False)
+    for _ in range(5): run_schedule(linear, update_stats=False)
     b = b.float()
 
     ref = a.float()
@@ -316,7 +316,7 @@ class TestTK(unittest.TestCase):
 
       linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-      for _ in range(5): run_linear(linear, update_stats=False)
+      for _ in range(5): run_schedule(linear, update_stats=False)
       b = b.float()
 
       ref = a.float() + 1
@@ -362,7 +362,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, update_stats=False)
+    for _ in range(5): run_schedule(linear, update_stats=False)
     b = b.float()
 
     ref = a.float().max(axis=2, keepdim=True).expand(a.shape)
@@ -408,7 +408,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, update_stats=False)
+    for _ in range(5): run_schedule(linear, update_stats=False)
     b = b.float()
 
     ref = a.float().max(axis=2, keepdim=True).expand(a.shape)
@@ -454,7 +454,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, update_stats=False)
+    for _ in range(5): run_schedule(linear, update_stats=False)
     b = b.float()
 
     ref = a.float().sum(axis=2, keepdim=True).expand(a.shape)
@@ -500,7 +500,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, update_stats=False)
+    for _ in range(5): run_schedule(linear, update_stats=False)
     b = b.float()
 
     ref = a.float().sum(axis=2, keepdim=True).expand(a.shape)
@@ -561,7 +561,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, update_stats=False)
+    for _ in range(5): run_schedule(linear, update_stats=False)
     b = b.float()
 
     ref = a.float().softmax(axis=3)
@@ -622,7 +622,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, update_stats=False)
+    for _ in range(5): run_schedule(linear, update_stats=False)
     b = b.float()
 
     ref = a.float().softmax(axis=2)
@@ -734,7 +734,7 @@ class TestTK(unittest.TestCase):
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (out, q, k, v)]),))
     for _ in range(5):
       GlobalCounters.reset()
-      with Context(DEBUG=2): run_linear(linear)
+      with Context(DEBUG=2): run_schedule(linear)
       et = GlobalCounters.time_sum_s
       attn_flops = 2 * B * H * N * N * D + \
                    4 * B * H * N * N + \

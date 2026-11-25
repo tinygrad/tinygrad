@@ -7,8 +7,7 @@ from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo
 from tinygrad.dtype import DType
 from tinygrad.device import Buffer
 from tinygrad.helpers import Context, TC_SELECT, TC_OPT
-from test.helpers import slow, replace_opts, buffer_uops
-from tinygrad.engine.realize import run_linear
+from test.helpers import slow, replace_opts, buffer_uops, run_schedule
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -26,7 +25,7 @@ def _tc_rand(*shape, dtype:DType, signed:bool=False) -> Tensor:
 
 def run_program(prg:UOp, bufs:list[Buffer]):
   buf_uops = buffer_uops(prg, bufs)
-  run_linear(UOp(Ops.LINEAR, src=(prg.call(*buf_uops),)))
+  run_schedule(UOp(Ops.LINEAR, src=(prg.call(*buf_uops),)))
 
 def _skip_unsupported_tc_dtypes(dtype_in:DType, dtype_out:DType):
   supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
