@@ -518,6 +518,11 @@ class HIPRenderer(CStyleLanguage):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_amd import HIPCompiler, HIPCCCompiler
     self.compiler, self.tensor_cores = (HIPCCCompiler if use_hipcc else HIPCompiler)(target.arch), tc.get_amd(target.arch)
+    # Lower explicit nodes without advertising them in code_for_op and changing late rewrites for unrelated kernels.
+    self.string_rewrite = PatternMatcher([
+      (UPat(Ops.FDIV, name="x"), lambda ctx,x: f"({ctx[x.src[0]]}/{ctx[x.src[1]]})"),
+      (UPat(Ops.MULACC, dtypes.float32, name="x"),
+       lambda ctx,x: f"__builtin_fmaf({ctx[x.src[0]]},{ctx[x.src[1]]},{ctx[x.src[2]]})")]) + self.string_rewrite
     if self.is_cdna(target.arch):
       self.string_rewrite = PatternMatcher([
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{_wmma_name(x)}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]},"

@@ -65,18 +65,18 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
     v_base, v_off = _split_offset(valid_end)
     vkl_u = v_base if isinstance(v_base, UOp) else UOp.const(int(v_base))
     if decode and M == 1 and D in (64, 128, 256) and (grp := H // H_KV) in (1, 2, 4, 8) and N_phys % 64 == 0:
-      ch, waves = min(48, ceildiv(N_phys, 64)), 16
-      while waves * grp * ((D + 4) * 2 + 8) > 65536: waves //= 2
+      ch, waves = min(48, ceildiv(N_phys, 64)), 16 if target[0] == 12 else 8
+      while waves * grp * (D * 2 + 8) > 65536: waves //= 2
       kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
         B=B, H_KV=H_KV, G=grp, d_blks=D // 64, n_blks=N_phys // 64, C=ch, valid_kv_offset=v_off, waves=waves)
-      partial, stats = (UOp.alloc((B, H, ch, d), dtypes.float32, device=q.device) for d in (D, 2))
+      partial, stats = UOp.alloc((B, H, ch, D), dtypes.half, device=q.device), UOp.alloc((B, H, ch, 2), dtypes.float32, device=q.device)
       cp = kp.call(partial, stats, q_in.uop, assigned_kv.uop, vkl_u)
-      kc = unwrap(slopkernels.get("amd_flash_decode_combine")).specialize(B=B, H=H, C=ch, d_blks=D // 64, valid_kv_offset=v_off)
+      kc = unwrap(slopkernels.get("amd_flash_decode_combine")).specialize(B=B, H=H, C=ch, d_blks=D // 64, valid_kv_offset=v_off, step_keys=waves)
       out = UOp.alloc((B, H, 1, D), dtypes.float32, device=q.device)
       return Tensor(out.after(kc.call(out, partial.after(cp), stats.after(cp), vkl_u)))
     if not decode and target[0] != 9 and D in (64, 128, 256, 320) and N_phys % 32 == 0 and M % 32 == 0:
       k_fa = unwrap(slopkernels.get(f"{'rdna4' if target[0] == 12 else 'rdna3'}_flash_attn")).specialize(
-        BH=B * H, m_blks=M // 32, B=B, H_KV=H_KV, d_blks=D // 64, n_blks=N_phys // 32, valid_kv_offset=v_off, q_start_from_end=1)
+        BH=B * H, M=M, B=B, H_KV=H_KV, d_blks=D // 64, N=N_phys, valid_kv_offset=v_off, q_start_from_end=1)
       ql_u = T_real if isinstance(T_real, UOp) else UOp.const(M)
       out = UOp.alloc((B * H, M, D), dtypes.float32, device=q.device)
       ret = Tensor(out.after(k_fa.call(out, q_in.reshape(B * H, M, D).uop, assigned_kv.uop, vkl_u, ql_u)).reshape((B, H, M, D)))
@@ -133,8 +133,10 @@ class TestQ8Quantize(unittest.TestCase):
         x = rng.normal(size=(tokens, in_features)).astype(np.float32 if tokens == 3 else np.float16)
         reference_x = x.astype(np.float32)
         wmma = custom and (32 if symbolic else tokens) % 16 == 0 and out_features % 16 == 0
-        if wmma: reference_x = x.astype(np.float16).astype(np.float32)
-        if custom and not wmma:
+        direct = (custom and not symbolic and tokens == 1 and not _is_cdna(Tensor.empty(1).device)
+                  and ggml_type in (8, 10, 11, 12, 13, 14, 19, 20, 21, 22, 23, 39))
+        if wmma or direct: reference_x = x.astype(np.float16).astype(np.float32)
+        if custom and not wmma and not direct:
           grouped = reference_x.reshape(tokens, -1, 32)
           scale = np.maximum(np.abs(grouped).max(-1, keepdims=True) / 127, 1e-8)
           reference_x = (np.clip(np.rint(grouped / scale), -127, 127) * scale).reshape(tokens, in_features)
