@@ -238,7 +238,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
 
   deserialized_objects: dict[str, Any] = {}
   intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16,
-               "IntStorage": dtypes.int32, "BoolStorage": dtypes.bool,
+               "IntStorage": dtypes.int32, "BoolStorage": dtypes.bool, "CharStorage": dtypes.int8,
                "LongStorage": dtypes.int64, "_rebuild_tensor": _rebuild_tensor_v2, "_rebuild_tensor_v2": _rebuild_tensor_v2,
                "FloatTensor": None, "Parameter": Parameter}
   whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed
