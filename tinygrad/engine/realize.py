@@ -3,13 +3,14 @@ from typing import cast, Iterator, Any, Sequence
 import decimal
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, Context, to_tuple, tqdm, unwrap
-from tinygrad.helpers import BEAM, ALL2ALL, size_to_str, time_to_str, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
+from tinygrad.helpers import BEAM, ALL2ALL, SCACHE, size_to_str, time_to_str, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.uop.ops import pm_flatten_linear
+from tinygrad.helpers import NO_MEMORY_PLANNER
 from tinygrad.device import Device, Buffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer, TinyELF
-from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context, to_program_config, schedule_cache
+from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context, to_program_config, schedule_cache, create_linear
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
 # **************** Helpers ****************
@@ -250,14 +251,15 @@ def devices_of(linear:UOp) -> list[str]:
 
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, profile:bool|None=None, cache=False) -> UOp:
   beam, profile = BEAM.value if beam is None else beam, bool(PROFILE or DEBUG >= 2) if profile is None else profile
-  key = (linear, beam, bool(validate), profile, ALL2ALL >= 1, tuple(DEV.value), tuple(HCQ_RUNTIME_DEV.value), *[x.value for x in to_program_config])
-  if cache and (hit:=schedule_cache.get(key)) is not None: return hit
+  config = (NO_MEMORY_PLANNER.value, ALL2ALL >= 1, tuple(DEV.value), tuple(HCQ_RUNTIME_DEV.value), *[x.value for x in to_program_config])
+  if (cache:=cache and bool(SCACHE)) and (hit:=schedule_cache.get(key:=(linear, beam, bool(validate), profile, *config))) is not None: return hit
+  if linear.op is not Ops.LINEAR: linear = create_linear(linear) # an exported function is scheduled first
   scalars = [e for e in linear.toposort() if e.op is Ops.EXTERN and e.is_variable and e.arg.name is None] # they bind by slot at run
   ret = linear.substitute({e: UOp.variable(e.expr, e.vmin, e.vmax, dtype=e.dtype) for e in scalars}, walk=True)
   if validate: ret = graph_rewrite(ret, pm_validate, name="validate", walk=True)
   if beam >= 1: ret = graph_rewrite(ret, pm_beam, ctx=beam, walk=True)
   ret = hcq_compile(lower_and_compile(ret), profile)
-  if cache and ret is not linear: schedule_cache[key] = ret
+  if cache and ret is not key[0]: schedule_cache[key] = ret
   return ret
 
 def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:

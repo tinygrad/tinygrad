@@ -33,7 +33,7 @@ class TestScheduleCache(unittest.TestCase):
     with Context(SCACHE=1):
       schedule_one()
       schedule_one()
-    self.assertEqual(len(schedule_cache), 2)  # one body schedule and one final LINEAR
+    self.assertEqual(len(schedule_cache), 1)  # one body schedule, the final LINEAR is cached once it's compiled
 
     # test read
     with Context(PROFILE=1):
