@@ -1969,5 +1969,5 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     if p.addrspace is AddrSpace.ALU: args[p.arg.slot] = p.bind(args_ptr)
   with _MXCSRContext():
     linear = compile_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)), cache=True)
-    run_linear(link_linear(linear, [vmem_buf]), input_uops=[vmem_buf], update_stats=False)
+    run_linear(link_linear(linear, inputs:=[vmem_buf]), input_uops=inputs, update_stats=False)
   return 0

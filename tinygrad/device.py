@@ -246,7 +246,7 @@ class Buffer:
     from tinygrad.uop.ops import UOp, Ops
     du, su = UOp.from_buffer(self, dtypes.uint8), UOp.from_buffer(src, dtypes.uint8)
     linear = compile_linear(UOp(Ops.LINEAR, src=(du.as_extern(0).store_call(su.as_extern(1)),)), cache=True)
-    run_linear(link_linear(linear, [du, su]), input_uops=(du, su), update_stats=False)
+    run_linear(link_linear(linear, inputs:=[du, su]), input_uops=inputs, update_stats=False)
     return self
 
   def view(self, nbytes:int, offset:int) -> Buffer:

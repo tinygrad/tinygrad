@@ -616,7 +616,7 @@ pm_resolve_linear_call = PatternMatcher([
 ])+pm_flatten_linear
 
 # Body hashes cache schedules; (exported function, NO_MEMORY_PLANNER) keys cache final LINEARs.
-schedule_cache: dict[bytes|tuple, UOp] = {}
+schedule_cache: dict[bytes|tuple[UOp, int], UOp] = {}
 def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = call.body
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
