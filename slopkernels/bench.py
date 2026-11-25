@@ -18,7 +18,7 @@ if str(root := pathlib.Path(__file__).resolve().parent.parent) not in sys.path: 
 from tinygrad import Device, Tensor, UOp, dtypes
 from tinygrad.dtype import DType
 from tinygrad.engine.realize import ExecContext, compile_linear, link_linear, pm_exec
-from tinygrad.helpers import ceildiv, colored, prod, unwrap
+from tinygrad.helpers import ceildiv, prod, unwrap
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 import slopkernels
@@ -37,34 +37,15 @@ class BenchResult:
   median_us: float
   min_us: float
   gb_s: float
-  bw_pct: float
   tflops: float
-  tflops_pct: float
 
 VerifyFn = Callable[[Tensor], None]
 SetupFn = Callable[[], tuple[Callable[[], Tensor], VerifyFn]]
-
-# (target, total_cus) -> (gpu_name, peak_gb_s, peak_fp16_matrix_tflops)
-_AMD_PEAKS: dict[tuple[tuple[int, ...], int], tuple[str, float, float]] = {
-  ((11, 0, 0), 96): ("RX 7900 XTX", 960.0, 122.9), ((11, 0, 0), 84): ("RX 7900 XT", 800.0, 103.0),
-  ((11, 0, 0), 80): ("RX 7900 GRE", 576.0, 92.0), ((11, 0, 1), 60): ("RX 7800 XT", 624.0, 74.6),
-  ((11, 0, 1), 54): ("RX 7700 XT", 432.0, 70.3), ((11, 0, 2), 32): ("RX 7600", 288.0, 43.5),
-  ((12, 0, 1), 64): ("RX 9070 XT", 640.0, 195.0), ((12, 0, 1), 56): ("RX 9070", 640.0, 144.4),
-  ((12, 0, 0), 32): ("RX 9060 XT", 320.0, 103.0),
-  ((9, 4, 2), 304): ("MI300X", 5300.0, 1307.4), ((9, 5, 0), 256): ("MI350X", 8000.0, 2309.6),
-}
 
 def _arch_info(dev:str) -> tuple[tuple[int, ...], bool]:
   raw = getattr(Device[dev], "target", None)
   target = tuple(int(x) for x in raw) if isinstance(raw, tuple) else (11, 0, 0)
   return target, target[0] == 9
-
-def _peak_specs(dev:str) -> tuple[str, int, float, float]:
-  d = Device[dev]
-  target, cus = _arch_info(dev)[0], int(getattr(d, "cu_cnt", 0)) * int(getattr(d, "xccs", 1))
-  fallback = (f"gfx{target[0]}{target[1]:x}{target[2]:x}", 0.0, 0.0)
-  spec = _AMD_PEAKS.get((target, cus)) or next((v for (t, _), v in _AMD_PEAKS.items() if t == target), fallback)
-  return spec[0], cus, spec[1], spec[2]
 
 def _packed_words(rows:int, cols:int, qname:str) -> tuple[int, int, DType, str]:
   qtype, blk_bytes, w_dt, kname = _QUANT_META[qname]
@@ -139,25 +120,17 @@ def _q8(x:Tensor, tokens:int, in_f:int, dev:str|tuple[str, ...], axis:int|None=N
 
 @functools.cache
 def _iq_lut(t:int, dev:str|tuple[str, ...], wmma:bool=False) -> tuple[UOp, ...]:
-  if t not in {16, 17, 18, 19, 21, 22}: return ()
+  if t not in ({16, 17, 18, 19, 21, 22, 23} if wmma else {16, 17, 18, 19, 21, 22}): return ()
   from tinygrad.runtime.autogen import ggml_common as g
-  if wmma and t in (18, 22):
-    vals = [((v >> (8 * i)) & 0xff) / 64.0 for v in (g.iq3xxs_grid if t == 18 else g.iq2s_grid) for i in range(4 if t == 18 else 8)]
+  if t == 23 or (wmma and t in (18, 22)):
+    vals = ([g.kvalues_iq4nl[k] for j in range(16) for i in range(16) for k in (i, j)] if t == 23 else
+            [((v >> (8 * i)) & 0xff) / 64.0 for v in (g.iq3xxs_grid if t == 18 else g.iq2s_grid) for i in range(4 if t == 18 else 8)])
     words: tuple[int, ...] = struct.unpack(f"<{len(vals) // 2}I", struct.pack(f"<{len(vals)}e", *vals))
   else:
     grid, nw = {16:(g.iq2xxs_grid, 2), 17:(g.iq2xs_grid, 2), 19:(g.iq1s_grid, 2), 22:(g.iq2s_grid, 2),
                 18:(g.iq3xxs_grid, 1), 21:(g.iq3s_grid, 1)}[t]
     words = tuple((v >> (32 * i)) & 0xffffffff for v in grid for i in range(nw))
   return (Tensor(np.array(words, dtype=np.uint32), device=dev).realize().uop,)
-
-def _r4_qrow(x:Tensor, m:int, k:int, dev:str|tuple[str, ...]) -> tuple[UOp, UOp]:
-  kg = k // 32
-  kern = unwrap(slopkernels.get("rdna4_fp8_qrow_tiled")).specialize(m_tiles=m // 16, k_groups=kg)
-  xq, xsc = UOp.alloc((m // 16, kg, 2, 16, 4), dtypes.uint32, device=dev), UOp.alloc((m,), dtypes.float32, device=dev)
-  c = kern.call(xq, xsc, x.half().contiguous().uop)
-  return xq.after(c), xsc.after(c)
-
-_R4_FP8_TYPES = {8, 10, 12, 13, 14, 21, 22, 23, 39}
 
 def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[str, int, int, SetupFn]]:
   target, cdna = _arch_info(dev)
@@ -179,31 +152,14 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         w4 = ggml_data_to_tensor(tile_u8[:CHECK_ROWS].flatten(), CHECK_ROWS * K, qtype).reshape(CHECK_ROWS, K)
         _assert_close(out[:, :CHECK_ROWS].float().numpy(), (x.float() @ w4.T).numpy(), rtol=4e-2, atol=5e-2)
       if m % 16 == 0 and n % 16 == 0:
-        if target[0] == 12 and m >= 128 and n >= 128 and K >= 512 and m % 128 == 0 and n % 64 == 0 and K % 256 == 0 and qtype in _R4_FP8_TYPES:
-          def _run_fp8() -> Tensor:
-            xq, xsc = _r4_qrow(x, m, K, dev)
-            gl = _iq_lut(qtype, dev, wmma=False) if qtype in (21, 22) else ()
-            return _krun(f"rdna4_gemm_{kname}_fp8", (m, n), dev, w_packed, xq, xsc, *gl,
-                         m_blks=m // 128, n_blks=n // 64, k_pairs=K // 256, raw_len=w_len)
-          return _run_fp8, _verify
-        if not cdna and m % 32 == 0 and n % 64 == 0 and K % 64 == 0:
-          sk = 3 if target[0] == 11 and m >= 128 and K >= 192 and (m // 128) * (n // 64) <= 128 else 1
-          def _run_2d() -> Tensor:
-            out = _krun(f"{arch_gemm}_gemm_{kname}_2d", (sk * m, n), dev, w_packed, x.half().contiguous(), *_iq_lut(qtype, dev, True),
-                        tokens=m, out_features=n, in_features=K, split_k=sk, raw_len=w_len)
-            return out if sk == 1 else out.reshape(sk, m, n).sum(0)
-          return _run_2d, _verify
+        mt = 8 if m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
         return (lambda: _krun(f"{arch_gemm}_gemm_{kname}_f16", (m, n), dev, w_packed, x.half().contiguous(),
-                              *_iq_lut(qtype, dev, True), tokens=m, out_features=n, in_features=K, raw_len=w_len)), _verify
-      if not cdna and m == 1 and qtype in (8, 10, 11, 12, 13, 14, 19, 20, 21, 22, 23, 39) and x_dt in (dtypes.float32, dtypes.float16):
-        return (lambda: _krun(f"rdna_gemv_direct_{kname}_{x_dt.name}", (1, n), dev, w_packed, x, *_iq_lut(qtype, dev),
-                              out_features=n, in_features=K, raw_len=w_len)), _verify
-      if 2 <= m <= 8 and qtype in (8, 12, 23, 39):
-        return (lambda: _krun(f"{arch_gemv}_gemv_m_{kname}", (m, n), dev, w_packed, *_q8(x, m, K, dev),
-                              tokens=m, out_features=n, in_features=K, raw_len=w_len)), _verify
+                              *_iq_lut(qtype, dev, True), m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=K, raw_len=w_len)), _verify
+      ch = ceildiv(K, 1024)
       def _run() -> Tensor:
-        return _krun(f"{arch_gemv}_gemv_{kname}", (m, n), dev, w_packed, *_q8(x, m, K, dev), *_iq_lut(qtype, dev),
-                     tokens=m, out_features=n, in_features=K, raw_len=w_len, group_rows=0)
+        out = _krun(f"{arch_gemv}_gemv_{kname}", (m, n, ch), dev, w_packed, *_q8(x, m, K, dev), *_iq_lut(qtype, dev),
+                    tokens=m, out_features=n, in_features=K, chunks=ch, raw_len=w_len, group_rows=0)
+        return out.sum(-1) if ch > 1 else out.reshape(m, n)
       return _run, _verify
     return _setup
 
@@ -242,19 +198,15 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       w_packed, tile_u8 = _make_packed(E * MOE_N, MOE_K, qname, dev, seed=19)
       sel = Tensor(list(range(TOPK)), dtype=dtypes.int32, device=dev).realize()
       x = _nonuniform((1, 1, 1, MOE_K), dtypes.float32, dev, scale=0.5, freq=0.011)
-      w_len = int(w_packed.numel())
+      ch, w_len = ceildiv(MOE_K, 1024), int(w_packed.numel())
       def _verify(out:Tensor) -> None:
         w4 = ggml_data_to_tensor(tile_u8[:CHECK_ROWS].flatten(), CHECK_ROWS * MOE_K, qtype).reshape(CHECK_ROWS, MOE_K)
         ref1, got = (x.reshape(1, MOE_K) @ w4.T).numpy()[0], out[0, 0, :, :CHECK_ROWS].float().numpy()
         _assert_close(got, np.broadcast_to(ref1, got.shape), rtol=4e-2, atol=5e-2)
       def _run() -> Tensor:
-        if not cdna and qtype in (8, 10, 12, 13, 14, 19, 21, 23, 39):
-          return _krun(f"rdna_moe_direct_{kname}", (TOPK, MOE_N), dev, w_packed, x.reshape(1, MOE_K), sel,
-                       *_iq_lut(qtype, dev), rows=TOPK, x_rows=1, out_features=MOE_N, in_features=MOE_K,
-                       raw_len=w_len, x_share=TOPK, ndev=1).reshape(1, 1, TOPK, MOE_N)
-        return _krun(f"{arch_gemv}_moe_{kname}", (TOPK, MOE_N), dev, w_packed, *_q8(x, 1, MOE_K, dev), sel, *_iq_lut(qtype, dev),
-                     rows=TOPK, x_rows=1, out_features=MOE_N, in_features=MOE_K, raw_len=w_len, x_share=TOPK,
-                     ndev=1).reshape(1, 1, TOPK, MOE_N)
+        return _krun(f"{arch_gemv}_moe_{kname}", (TOPK, MOE_N, ch), dev, w_packed, *_q8(x, 1, MOE_K, dev), sel, *_iq_lut(qtype, dev),
+                     rows=TOPK, x_rows=1, out_features=MOE_N, in_features=MOE_K, chunks=ch, raw_len=w_len, x_share=TOPK,
+                     ndev=1).sum(-1).reshape(1, 1, TOPK, MOE_N)
       return _run, _verify
     cases.append((f"moe_gemv_{qname}_E{E}k{TOPK}_{MOE_N}x{MOE_K}", TOPK * per_e_words * w_dt.itemsize, 2 * TOPK * MOE_N * MOE_K, _mk_moe))
 
@@ -264,7 +216,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       x = _nonuniform((m, K), dtypes.float32, dev, scale=0.5, freq=0.023)
       def _verify(out:Tensor) -> None:
         _assert_close(out[:, :CHECK_ROWS].float().numpy(), (x @ w[:CHECK_ROWS].float().T).numpy(), rtol=3e-3, atol=3e-3)
-      return (lambda: _krun("amd_gemv_f16_f32", (m, n), dev, w, x, tokens=m, out_features=n, in_features=K)), _verify
+      return (lambda: _krun("amd_gemv_f16_f32", (m, n), dev, w, x, tokens=m, out_features=n, in_blks=K // 128, val_chunk=4)), _verify
     cases.append((f"dense_gemv_f16_{m}x{n}x{K}", n * K * 2 + m * (K + n) * 4, 2 * m * n * K, _mk_dense))
 
   if not cdna:
@@ -275,9 +227,11 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         mask = Tensor.full((ATTN_M, ATTN_N), float("-inf"), dtype=dtypes.float32, device=dev).triu(ATTN_N - ATTN_M + 1)
         ref = q[:, :1].float().scaled_dot_product_attention(kv[0, :, :1].float(), kv[1, :, :1].float(), attn_mask=mask, enable_gqa=True).numpy()
         _assert_close(out[:, :1].float().numpy(), ref, rtol=5e-3, atol=5e-3)
-      return (lambda: _krun(f"{arch_gemm}_flash_attn", (ATTN_H, ATTN_M, ATTN_D), dev, q.reshape(ATTN_H, ATTN_M, ATTN_D), kv,
-                            UOp.const(ATTN_N), UOp.const(ATTN_M), BH=ATTN_H, M=ATTN_M, B=1, H_KV=ATTN_HKV, d_blks=ATTN_D // 64,
-                            N=ATTN_N, valid_kv_offset=0, q_start_from_end=1).reshape(1, ATTN_H, ATTN_M, ATTN_D)), _verify
+      def _run() -> Tensor:
+        return _krun(f"{arch_gemm}_flash_attn", (ATTN_H, ATTN_M, ATTN_D), dev, q.reshape(ATTN_H, ATTN_M, ATTN_D), kv,
+                     UOp.const(ATTN_N), UOp.const(ATTN_M), BH=ATTN_H, m_blks=ATTN_M // 32, B=1, H_KV=ATTN_HKV, d_blks=ATTN_D // 64,
+                     n_blks=ATTN_N // 32, valid_kv_offset=0, q_start_from_end=1).reshape(1, ATTN_H, ATTN_M, ATTN_D)
+      return _run, _verify
     cases.append((f"flash_attn_prefill_H{ATTN_H}_M{ATTN_M}_N{ATTN_N}_D{ATTN_D}",
                   (ATTN_H * ATTN_M * ATTN_D + 2 * ATTN_HKV * ATTN_N * ATTN_D) * 2 + ATTN_H * ATTN_M * ATTN_D * 4,
                   4 * ATTN_H * ATTN_M * ATTN_N * ATTN_D, _mk_fa_prefill))
@@ -290,18 +244,14 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         ref = q[:, :1].float().scaled_dot_product_attention(kv[0, :, :1].float(), kv[1, :, :1].float(), enable_gqa=True).numpy()
         _assert_close(out[:, :1].float().numpy(), ref, rtol=5e-3, atol=5e-3)
       def _run() -> Tensor:
-        grp = ATTN_H // ATTN_HKV
-        ch = (8 if target[0] == 12 and ATTN_HKV >= 4 and ctx >= 512 else
-              12 if target[0] == 11 and ATTN_HKV >= 4 and ctx >= 512 else min(max(16, 128 // ATTN_HKV), ceildiv(ctx, 64)))
-        waves = 16 if target[0] == 12 else 8
-        while waves * grp * (ATTN_D * 2 + 8) > 65536: waves //= 2
+        ch, grp, waves = min(48, ceildiv(ctx, 64)), ATTN_H // ATTN_HKV, 16
+        while waves * grp * ((ATTN_D + 4) * 2 + 8) > 65536: waves //= 2
         kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
           B=1, H_KV=ATTN_HKV, G=grp, d_blks=ATTN_D // 64, n_blks=ctx // 64, C=ch, valid_kv_offset=0, waves=waves)
-        partial = UOp.alloc((1, ATTN_H, ch, ATTN_D), dtypes.half, device=dev)
-        stats = UOp.alloc((1, ATTN_H, ch, 2), dtypes.float32, device=dev)
+        partial, stats = (UOp.alloc((1, ATTN_H, ch, d), dtypes.float32, device=dev) for d in (ATTN_D, 2))
         cp = kp.call(partial, stats, q.uop, kv.uop, UOp.const(ctx))
         return _krun("amd_flash_decode_combine", (1, ATTN_H, 1, ATTN_D), dev, partial.after(cp), stats.after(cp), UOp.const(ctx),
-                     B=1, H=ATTN_H, C=ch, d_blks=ATTN_D // 64, valid_kv_offset=0, step_keys=waves)
+                     B=1, H=ATTN_H, C=ch, d_blks=ATTN_D // 64, valid_kv_offset=0)
       return _run, _verify
     cases.append((f"flash_attn_decode_H{ATTN_H}_N{ctx}_D{ATTN_D}", 2 * ATTN_HKV * ctx * ATTN_D * 2 + ATTN_H * ATTN_D * 6,
                   4 * ATTN_H * ctx * ATTN_D, _mk_fa_dec))
@@ -323,9 +273,6 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         ref[t] = st @ q0[t]
       _assert_close(out[0, 0].numpy(), ref, rtol=2e-3, atol=2e-4)
       _assert_close(state[0, 0].numpy(), st, rtol=2e-3, atol=2e-4)
-    if target[0] == 12 and gd_d in (64, 128) and gd_t >= 16:
-      return (lambda: _krun("rdna4_gated_delta_wmma", (1, gd_h, gd_t, gd_d), dev, q, k, v, beta, alpha, state, UOp.const(1),
-                            batch=1, heads=gd_h, tokens=gd_t, d_blks=gd_d // 64)), _verify
     return (lambda: _krun("amd_gated_delta", (1, gd_h, gd_t, gd_d), dev, q, k, v, beta, alpha.reshape(1, gd_h, gd_t, 1), state,
                           (q * k).sum(-1).contiguous(), UOp.const(1), batch=1, heads=gd_h, tokens=gd_t, v_tiles=gd_d // 4,
                           k_blks=gd_d // 32, alpha_k=1)), _verify
@@ -345,8 +292,8 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       comb = (m_n[:, 8:] * scale[2].float() + base[8:].float()).reshape(t_h, 4, 4).softmax(-1) + 1e-6
       for i in range(3): comb = comb / (comb.sum(-1 if i % 2 else -2, keepdim=True) + 1e-6)
       _assert_close(out.float().numpy(), pre.cat(post, comb.reshape(t_h, 16), dim=-1).numpy(), rtol=2e-3, atol=2e-3)
-    return (lambda: _krun("amd_hc_coeffs_f16_f16", (t_h, 24), dev, mix, flat, base, scale,
-                          tokens=t_h, features=K, iters=2, eps=1e-6, norm_eps=1e-6)), _verify
+    return (lambda: _krun("amd_hc_coeffs_f16_f16", (t_h, 24), dev, mix, flat.reshape(t_h, 32, -1).square().sum(-1).contiguous(),
+                          base, scale, tokens=t_h, features=K, iters=2, eps=1e-6, norm_eps=1e-6)), _verify
   cases.append((f"hc_coeffs_{2 if smoke else 32}x{K}", (2 if smoke else 32) * K * 4, 0, _mk_hc))
   return cases
 
@@ -363,14 +310,12 @@ def main() -> None:
   args = ap.parse_args()
 
   dev, target = Device.DEFAULT, getattr(Device[Device.DEFAULT], "target", None)
-  gpu_name, cus, peak_bw, peak_tf = _peak_specs(dev)
   flush_mb = min(args.flush_mb, 2) if args.smoke else args.flush_mb
   flush_fn, t_start = _make_cache_flusher(flush_mb), time.perf_counter()
-  peak_str = f"{gpu_name} ({cus} CU, {peak_bw:.0f} GB/s, {peak_tf:.1f} TF)" if peak_bw > 0 else f"target={target}"
-  print(f"slopkernels LLM benchmark | DEV={dev} | {peak_str} | warmup={args.warmup} iters={args.iters} flush={flush_mb}MB "
+  print(f"slopkernels LLM benchmark | DEV={dev} | target={target} | warmup={args.warmup} iters={args.iters} flush={flush_mb}MB "
         f"verify={not args.no_verify} smoke={args.smoke}", flush=True)
-  print(f"{'Op':<46} {'Median (us)':>12} {'Min (us)':>10} {'GB/s':>9} {'%BW':>7} {'TFLOPS':>9} {'%TF':>7}", flush=True)
-  print("-" * 106, flush=True)
+  print(f"{'Op':<46} {'Median (us)':>12} {'Min (us)':>10} {'GB/s':>9} {'TFLOPS':>9}", flush=True)
+  print("-" * 90, flush=True)
   pat, results = re.compile(args.filter) if args.filter else None, []
   for name, io_bytes, flops, setup_fn in build_benchmarks(dev, smoke=args.smoke, fast=args.fast):
     if pat is not None and not pat.search(name): continue
@@ -378,18 +323,10 @@ def main() -> None:
     med_us, min_us = _time_fn(step_fn, None if args.no_verify else verify_fn, args.warmup, args.iters, flush_fn)
     gb_s = (io_bytes / 1e9) / (med_us / 1e6) if io_bytes > 0 and med_us > 0 else 0.0
     tflops = (flops / 1e12) / (med_us / 1e6) if flops > 0 and med_us > 0 else 0.0
-    bw_pct = 100.0 * gb_s / peak_bw if peak_bw > 0 else 0.0
-    tf_pct = 100.0 * tflops / peak_tf if peak_tf > 0 else 0.0
-    r = BenchResult(name=name, median_us=med_us, min_us=min_us, gb_s=gb_s, bw_pct=bw_pct, tflops=tflops, tflops_pct=tf_pct)
+    r = BenchResult(name=name, median_us=med_us, min_us=min_us, gb_s=gb_s, tflops=tflops)
     results.append(r)
-    bw_str = f"{r.gb_s:>9.1f} {bw_pct:>6.1f}%" if peak_bw > 0 else f"{r.gb_s:>9.1f} {'-':>7}"
-    tf_str = f"{r.tflops:>9.2f} {tf_pct:>6.1f}%" if peak_tf > 0 and flops > 0 else f"{r.tflops:>9.2f} {'-':>7}"
-    if peak_bw > 0 and (peak_tf <= 0 or flops <= 0 or bw_pct >= tf_pct):
-      bw_str = colored(bw_str, "green" if bw_pct >= 85 else "yellow" if bw_pct >= 70 else "red")
-    elif peak_tf > 0 and flops > 0:
-      tf_str = colored(tf_str, "green" if tf_pct >= 70 else "yellow" if tf_pct >= 40 else "red")
-    print(f"{r.name:<46} {r.median_us:>12.1f} {r.min_us:>10.1f} {bw_str} {tf_str}", flush=True)
-  print("-" * 106, flush=True)
+    print(f"{r.name:<46} {r.median_us:>12.1f} {r.min_us:>10.1f} {r.gb_s:>9.1f} {r.tflops:>9.2f}", flush=True)
+  print("-" * 90, flush=True)
   print(f"Benchmarked & verified {len(results)} LLM ops in {time.perf_counter() - t_start:.1f}s.", flush=True)
   if args.json:
     with open(args.json, "w") as f: json.dump([r.__dict__ for r in results], f, indent=2)
