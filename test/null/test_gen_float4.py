@@ -124,7 +124,7 @@ class TestFloat4(unittest.TestCase):
 
     # should float4 both
 
-    s = c.linear_with_vars()[0].src[0]
+    s = c.linear_with_externs()[0].src[0]
     uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]),
                             renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
@@ -138,7 +138,7 @@ class TestFloat4(unittest.TestCase):
 
     # should float4 a but not b
 
-    s = c.linear_with_vars()[0].src[0]
+    s = c.linear_with_externs()[0].src[0]
     uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]),
                             renderer=Device[Device.DEFAULT].renderer).src[1].src)
 

@@ -399,15 +399,15 @@ class TestNN(unittest.TestCase):
     a = Tensor([[1, 5, 9, 11],
                 [12, 19, 8, 1]])
     result = layer(a)
-    linear, var_vals = check_schedule(result, kcount)
-    run_schedule(linear, var_vals)
+    linear, externs = check_schedule(result, kcount)
+    run_schedule(linear, externs)
 
     b = Tensor([[1, 2, 3],
                 [4, 5, 6],
                 [7, 8, 9]])
     result = layer(b)
-    linear, var_vals = check_schedule(result, 1)
-    run_schedule(linear, var_vals)
+    linear, externs = check_schedule(result, 1)
+    run_schedule(linear, externs)
     print(f"Embedding used {GlobalCounters.global_ops} ops")
     self.assertLessEqual(GlobalCounters.global_ops, ops)
 

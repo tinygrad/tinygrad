@@ -50,12 +50,11 @@ class TestExport(unittest.TestCase):
   def test_symbolic_program_shared_across_bindings(self):
     from tinygrad.engine.realize import lower_and_compile
     def compile_slice(name, value):
-      linear, vals = (buf()[:Variable(name, 1, 8).bind(value)] + 1).linear_with_vars()
+      linear, externs = (buf()[:Variable(name, 1, 8).bind(value)] + 1).linear_with_externs()
       call, = linear.src
       p, = call.body.variables()
       self.assertIsNone(p.arg.name)
-      self.assertEqual(call.src[1+p.arg.slot].expr, name)
-      self.assertEqual(vals, {name: value})
+      self.assertEqual(externs[call.src[1+p.arg.slot].arg.slot].unbind(), (Variable(name, 1, 8), value))
       return lower_and_compile(linear).src[0].body
     self.assertIs(compile_slice("i", 2), compile_slice("j", 5))
 
@@ -64,10 +63,10 @@ class TestExport(unittest.TestCase):
     a, b, c, d = buf(), buf(), buf(), buf()
     fn, _ = Tensor.export((a+b).contiguous()*v.bind(2))
     self.assertIs(fn, Tensor.export((c+d).contiguous()*v.bind(3))[0])
-    # mapped back to this storage and these values
-    linear, var_vals = ((c+d).contiguous()*v.bind(3)).linear_with_vars()
-    self.assertEqual(var_vals, {"v": 3})
-    self.assertTrue({c.uop.buf_uop, d.uop.buf_uop} <= set(linear.toposort()))
+    # its externs are this storage and these values
+    _, externs = ((c+d).contiguous()*v.bind(3)).linear_with_externs()
+    self.assertEqual({x.expr: x.arg.val for x in externs if x.is_bound_var}, {"v": 3})
+    self.assertTrue({c.uop.buf_uop, d.uop.buf_uop} <= set(externs))
 
   def test_create_linear_deterministic(self):
     # the linear only depends on the export, the storage it allocates gets canonical slots

@@ -25,13 +25,13 @@ def add_n(n:UOp, C:UOp, B:UOp) -> UOp:
 def chain_input(value:int=2, device="NULL") -> Tensor: return Tensor.full((4,), value, dtype=dtypes.int32, device=device).contiguous().realize()
 
 def compiled_chain(n:int, jit=False, device="NULL") -> tuple[Tensor, UOp, list[UOp]]:
-  x, inputs = chain_input(device=device), []
+  x = chain_input(device=device)
   if jit:
     f = TinyJit(lambda a: chain(a, n).realize())
     f(x)
     return f(x), f.captured._linear, [x.uop.base, *f.captured._externs]
-  out = chain(x, n)
-  return out, compile_linear(out.schedule_linear(), input_uops=inputs, cache=True), inputs
+  linear, externs = (out:=chain(x, n)).linear_with_externs()
+  return out, compile_linear(linear, input_uops=[], cache=True), list(externs)
 
 # NULL never runs a batch, so the scheduler is tested on the commands it hands each queue, run by a small executor with symbolic
 # signals and timelines. the fence and the ffi are tested by running them on CPU, see test/runtime/test_hcq2.py.
@@ -42,7 +42,7 @@ def scheduled(*ts:Tensor, **kwargs) -> list[UOp]:
     lin = orig(l, profile)
     batches.extend(c for c in lin.src if c.op is Ops.CALL and c.arg.hcq is not None)
     return lin
-  with patch.object(hcq2, "sched_batches", track): compile_linear(ts[0].linear_with_vars(*ts[1:])[0], **kwargs)
+  with patch.object(hcq2, "sched_batches", track): compile_linear(ts[0].linear_with_externs(*ts[1:])[0], **kwargs)
   return batches
 
 def submits(batch:UOp) -> list[UOp]: # the submit calls of a batch sink in order
