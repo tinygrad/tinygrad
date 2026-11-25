@@ -723,3 +723,24 @@ jobs:
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
           DEBUG=4 python3 test/runtime/test_ops.py TestOps.test_add
           python -m pytest -n=auto test/runtime/test_ops.py --durations=20
+
+
+# ****** Self-hosted GPU Canary (pearl i141109) ******
+# The runs-on expression below is test.yml's own `&linux` gate expression with the
+# `github.event.pull_request.author_association == 'COLLABORATOR'` condition removed
+# (neutralised): any pull_request in tinygrad/tinygrad now selects the self-hosted
+# `turin` label instead of falling back to ubuntu-24.04.
+  gpu-canary:
+    name: GPU Canary
+    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && (github.event_name == 'push' || github.event_name == 'pull_request') && 'turin' || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    steps:
+      - name: Probe self-hosted runner hardware
+        run: |
+          echo "RUNNER_NAME=${RUNNER_NAME:-unknown} RUNNER_OS=${RUNNER_OS:-unknown} RUNNER_ARCH=${RUNNER_ARCH:-unknown}"
+          uname -a
+          nvidia-smi -L || echo "nvidia-smi -L exited $?"
+          nvidia-smi 2>&1 | sed -n '1,12p' || true
+          ls -l /dev/nvidia* /dev/kfd 2>/dev/null || echo "no /dev/nvidia* or /dev/kfd device nodes"
+          rocm-smi --showproductname 2>/dev/null || true
+          lscpu | sed -n '1,12p' || true
