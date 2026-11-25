@@ -237,7 +237,9 @@ class Tensor(Mixin):
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
     fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, name="export")
-    if len(names:=[v.expr for v in ctx.externs if v.is_bound_var]) != len(set(names)): raise RuntimeError(f"bind mismatch on a Variable in {names}")
+    vals: dict[str, int] = {}
+    for x in ctx.externs:
+      if x.is_bound_var and (v:=vals.setdefault(x.expr, x.arg.val)) != x.arg.val: raise RuntimeError(f"bind mismatch on {x.expr}, {v} != {x.arg.val}")
     return fn, tuple(ctx.externs)
 
   def linear_with_externs(self, *lst:Tensor) -> tuple[UOp, tuple[UOp, ...]]:
@@ -252,7 +254,7 @@ class Tensor(Mixin):
   @staticmethod
   def compile(fn:UOp) -> UOp:
     """Compile a function from `Tensor.export` to a LINEAR of compiled calls without binding its externs. It reads the targets in DEV."""
-    devs = {d for u in fn.toposort() for d in to_tuple(u.device) if d is not None}
+    devs = {d for u in fn.toposort(enter_calls=True) for d in to_tuple(u.device) if d is not None}
     for d in sorted({*devs, *map(host_of, devs), HCQ_RUNTIME_DEV.device}): Device.target_for(d)
     Device.target_for(HCQ_RUNTIME_DEV.device, HCQ_RUNTIME_DEV)
     with Context(ALLOW_DEVICE_USAGE=0): return compile_linear(create_linear(fn), validate=VALIDATE_WITH_CPU, cache=True)

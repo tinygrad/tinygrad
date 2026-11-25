@@ -166,13 +166,14 @@ class _TinyJit(Generic[ReturnType]):
                    for fn,externs in self._exports]
       del self._exports
       big_linear, externs = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in linears]))), list(slots)
-      del linears
+      del linears, slots
+      for x in externs:
+        if x.is_bound_var and var_vals.get(x.expr, x.arg.val) != x.arg.val: raise JitError(f"bind mismatch on {x.expr} with a JIT input")
 
       if self.prune:
         big_linear, onetime_linear = prune_linear(big_linear, {u.as_extern(i) for i,u in enumerate(input_buf_uops)})
         if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
-        onetime_vals = {f"e{i}": x.arg.val for i,x in enumerate(externs) if x.is_bound_var}
-        run_linear(link_linear(compile_linear(onetime_linear), externs), onetime_vals, externs)
+        Tensor.run(compile_linear(onetime_linear), tuple(externs))
         del onetime_linear
 
       # hold all buffers with real storage reachable from live Tensors (e.g. lazy .grad created during capture) and all buffers with
