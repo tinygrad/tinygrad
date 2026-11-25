@@ -29,7 +29,7 @@ def compiled_chain(n:int, jit=False, device="NULL") -> tuple[Tensor, UOp, list[U
   if jit:
     f = TinyJit(lambda a: chain(a, n).realize())
     f(x)
-    return f(x), f.captured._linear, [x.uop.base]
+    return f(x), f.captured._linear, [x.uop.base, *f.captured._externs]
   out = chain(x, n)
   return out, compile_linear(out.schedule_linear(), input_uops=inputs, cache=True), inputs
 
