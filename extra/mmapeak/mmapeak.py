@@ -8,7 +8,7 @@ from tinygrad.helpers import getenv, DEV
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from tinygrad.renderer.amd.dsl import Reg, Inst, s, v
-from tinygrad.engine.realize import run_linear
+from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
@@ -43,6 +43,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   linear = out.schedule_linear()
   ets = []
   with Context(DEBUG=2):
+    linear = link_linear(compile_linear(linear))
     for _ in range(2):
       start = GlobalCounters.time_sum_s
       run_linear(linear)

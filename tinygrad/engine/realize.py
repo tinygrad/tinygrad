@@ -3,7 +3,7 @@ from typing import cast, Iterator, Any, Sequence
 import decimal
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, Context, to_tuple, tqdm, unwrap
-from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
+from tinygrad.helpers import BEAM, size_to_str, time_to_str, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.uop.ops import pm_flatten_linear
 from tinygrad.device import Device, Buffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS, host_of
@@ -183,11 +183,16 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return ets + [_prof_tm(d, prof) if ctx.wait else None for d, _, _, prof, *_ in info.kernels if prof]
 
 def _validate(call:UOp, sink:UOp) -> UOp:
-  shadows = tuple(p if p.addrspace is AddrSpace.ALU else
-                  UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in call.src[1:])
+  slot = int.from_bytes(call.key[:8], "little")
+  shadows = tuple(p if p.addrspace is AddrSpace.ALU else UOp.alloc((prod(p.max_shape),), p.dtype, slot+i,
+                  device=("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU") for i,p in enumerate(call.src[1:]))
   copies = tuple(s.store_call(p) for s, p in zip(shadows, call.src[1:]) if p.addrspace is not AddrSpace.ALU)
   return UOp(Ops.LINEAR, src=copies + (call, UOp.native("validate", sink).call(*shadows, *call.src[1:])))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
+
+pm_scalar_externs = PatternMatcher([
+  (UPat(Ops.EXTERN, name="e"), lambda e: UOp.variable(e.expr, e.vmin, e.vmax, dtype=e.dtype) if e.is_variable and e.arg.name is None else None),
+])
 
 # ctx is beam value
 pm_beam = PatternMatcher([
@@ -252,6 +257,7 @@ def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:li
   # fill the targets compile reads: a device without an arch in DEV is opened for its target, compile itself opens nothing
   for d in sorted({*(devs:=devices_of(linear)), *map(host_of, devs), HCQ_RUNTIME_DEV.device}): Device.target_for(d)
   with Context(ALLOW_DEVICE_USAGE=0):
+    linear = graph_rewrite(linear, pm_scalar_externs, name="scalar externs", walk=True)
     if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
     if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
     linear = lower_and_compile(linear)
@@ -265,9 +271,8 @@ def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   assert linear.op is Ops.LINEAR, f"run_linear calls on {linear.op}"
   if len(linear.src) == 0: return
-  inputs = list(input_uops)
-  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, cache=True), input_uops=inputs)
-  ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
+  var_vals = {**{f"e{i}": x.arg.val for i,x in enumerate(input_uops) if x.is_bound_var}, **(var_vals or {})}
+  ctx = ExecContext(var_vals, tuple(input_uops), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: track_stats(ctx, call.without_after, perf_counter_us(), pm_exec.rewrite(call.without_after, ctx))
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:

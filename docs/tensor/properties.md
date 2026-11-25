@@ -23,6 +23,7 @@
 ::: tinygrad.Tensor.schedule_linear
 ::: tinygrad.Tensor.export
 ::: tinygrad.Tensor.compile
+::: tinygrad.Tensor.link
 ::: tinygrad.Tensor.run
 ::: tinygrad.Tensor.realize
 ::: tinygrad.Tensor.replace
