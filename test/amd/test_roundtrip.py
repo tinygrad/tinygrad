@@ -59,10 +59,11 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
   from tinygrad import Tensor
   from tinygrad.uop.ops import Ops
   from tinygrad.engine.realize import lower_and_compile, get_call_arg_uops
+  from test.helpers import bound_schedule
   from tinygrad.runtime.support.elf import elf_loader
 
   out = op_fn(Tensor)
-  linear = lower_and_compile(out.schedule_linear())
+  linear = lower_and_compile(bound_schedule(out))
   kernels = []
   buf_pool: dict[int, int] = {}  # buffer id -> size
   buf_data: dict[int, bytes] = {}  # buffer id -> initial data from bulk STORE

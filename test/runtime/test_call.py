@@ -9,7 +9,7 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
-from test.helpers import run_schedule
+from test.helpers import run_schedule, bound_schedule
 
 def sched_key(t:Tensor): return t.export()[0].key
 
@@ -747,7 +747,7 @@ class TestCallInKernel(unittest.TestCase):
       return A[i].store(tmp[i].after(plus2(tmp[i], A[i]))).end(i).sink(arg=KernelInfo(name="test_kernel", opts_to_apply=()))
 
     x = Tensor.custom_kernel(Tensor.arange(4).clone().realize(), fxn=kernel)[0]
-    run_schedule(lin:=x.schedule_linear())
+    run_schedule(lin:=bound_schedule(x))
 
     prg = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer)
     assert "+2" not in prg.src[2].arg, f"found callee body in caller kernel {prg.src[2].arg}"
@@ -758,7 +758,7 @@ class TestCallInKernel(unittest.TestCase):
 
     # launch a different caller with the same callee
     x = Tensor.custom_kernel(Tensor.arange(5).clone().realize(), fxn=lambda A: kernel(A, extra=True))[0]
-    run_schedule(lin:=x.schedule_linear())
+    run_schedule(lin:=bound_schedule(x))
     prg2 = to_program(lin.src[0].body, Device[Device.DEFAULT].renderer).src[1]
     self.assertIs(call.body, next(u.body for u in prg2.src if u.op is Ops.CALL and u.body.src[0].arg.name == "plus2"))
     self.assertIs(first_binary, next(u.body.src[3] for u in prg2.src if u.op is Ops.CALL and u.body.src[0].arg.name == "plus2"))

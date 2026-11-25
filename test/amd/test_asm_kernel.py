@@ -14,7 +14,7 @@ from tinygrad.renderer.amd.dsl import s, v, NULL
 from test.amd.helpers import TARGET_TO_ARCH
 from test.mockgpu.amd.emu import RELIFT
 from extra.gemm.amd_asm_matmul import Kernel
-from test.helpers import run_schedule
+from test.helpers import run_schedule, bound_schedule
 
 def custom_add_one(A:UOp) -> UOp:
   A = A.flatten()
@@ -180,7 +180,7 @@ class TestAsmKernel(unittest.TestCase):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     a = Tensor.full((16, 16), 1.).contiguous().realize()
     a = Tensor.custom_kernel(a, fxn=custom_add_one)[0]
-    linear = lower_and_compile(a.schedule_linear())
+    linear = lower_and_compile(bound_schedule(a))
     est = estimate_uop(linear.src[-1])
     self.assertEqual(est.ops, a.numel())
     self.assertEqual(est.mem, a.nbytes()*2)
@@ -192,7 +192,7 @@ class TestAsmKernel(unittest.TestCase):
     b = Tensor.full((16, 16), 1, dtype=dtypes.uint32).contiguous().realize()
     a = Tensor.zeros_like(b).contiguous().realize()
     a = Tensor.custom_kernel(a, b, Tensor(UOp.variable("var", 0, 10, dtypes.int)), fxn=custom_add_var)[0]
-    linear = a.schedule_linear()
+    linear = bound_schedule(a)
     for i in range(4):
       run_schedule(linear, var_vals={"var":i})
       self.assertTrue((a.numpy() == 1+i).all())

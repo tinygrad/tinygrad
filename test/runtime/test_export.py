@@ -1,12 +1,15 @@
 import multiprocessing, unittest
 from concurrent.futures import ProcessPoolExecutor
-from tinygrad import Context, Tensor, Variable
+from tinygrad import Context, Tensor, Variable, Device
+from tinygrad.device import host_of
+from tinygrad.helpers import HCQ_RUNTIME_DEV
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.codegen import create_linear
-from tinygrad.engine.realize import compile_linear, link_linear, run_linear
+from tinygrad.engine.realize import compile_linear
 
 @Context(ALLOW_DEVICE_USAGE=0)
-def compile_uir(src:str) -> str: return render_uir(Tensor.compile(parse_uir(src)))
+def compile_uir(src:str, dev:str, host:str) -> str:
+  with Context(DEV=dev, HCQ_RUNTIME_DEV=host): return render_uir(Tensor.compile(parse_uir(src)))
 
 class TestExportRun(unittest.TestCase):
   def test_export_compile_run(self):
@@ -17,8 +20,11 @@ class TestExportRun(unittest.TestCase):
     a, b = model([1., 2., 3., 4.], 3), model([10., 20., 30., 40.], 2)
     fn, first = a.export()
     _, second = b.export()
+    # the compiler only gets the targets, it opens no device
+    dev = ";".join(repr(Device.target_for(d)) for d in dict.fromkeys([Device.DEFAULT, host_of(Device.DEFAULT)]))
+    host = repr(Device.target_for(HCQ_RUNTIME_DEV.device, HCQ_RUNTIME_DEV))
     with ProcessPoolExecutor(1, mp_context=multiprocessing.get_context("spawn")) as compiler:
-      linear = parse_uir(compiler.submit(compile_uir, render_uir(fn)).result())
+      linear = parse_uir(compiler.submit(compile_uir, render_uir(fn), dev, host).result())
     Tensor.run(linear, first)
     Tensor.run(linear, second)
     self.assertEqual(a.shrink(((0, 3),)).tolist(), [6., 9., 12.])
@@ -31,7 +37,7 @@ class TestExportRun(unittest.TestCase):
     compiled = compile_linear(create_linear(fn))
     for n in (2, 3):
       inputs = [scale.bind(n) if x.is_bound_var else x for x in externs]
-      run_linear(link_linear(compiled, inputs), input_uops=inputs, jit=True)
+      Tensor.run(compiled, tuple(inputs))
       self.assertEqual(out.tolist(), [n, 2*n, 3*n])
 
   def test_capture_export(self):

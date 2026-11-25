@@ -53,7 +53,7 @@ class _MXCSRContext:
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, uopfunc, rewrite_group, graph_rewrite, PatternMatcher, UPat
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec, Device
-from tinygrad.engine.realize import run_linear
+from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 from tinygrad.codegen import to_program, to_program_config
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import Context, DEV, to_mv, ContextVar, VIZ
@@ -1964,9 +1964,10 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
         relift_lib = get_elf_section(ret.src[3].arg, ".text").content
     prg = dispatch_cache[key]
   vmem_buf = UOp.from_buffer(Buffer('CPU', 1 << 48, options=BufferSpec(external_ptr=0), opaque=0), dtypes.u32)
-  args = [vmem_buf] * (max(p.arg.slot for p in prg.kernel_params) + 1)
+  args = [vmem_buf.as_extern(0)] * (max(p.arg.slot for p in prg.kernel_params) + 1)
   for p in prg.kernel_params:
     if p.addrspace is AddrSpace.ALU: args[p.arg.slot] = p.bind(args_ptr)
   with _MXCSRContext():
-    run_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)), update_stats=False)
+    linear = compile_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)), cache=True)
+    run_linear(link_linear(linear, inputs:=[vmem_buf]), input_uops=inputs, update_stats=False)
   return 0

@@ -102,8 +102,8 @@ class TestSchedule(unittest.TestCase):
     a2 = mop(a)
     expected = (a+a2).tolist()
     a.assign(a+a2)
-    linear, var_vals = check_schedule(a, expected_kcount)
-    run_schedule(linear, var_vals)
+    linear, externs = check_schedule(a, expected_kcount)
+    run_schedule(linear, externs)
     self.assertListEqual(a.tolist(), expected)
   def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
   def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 1)
@@ -191,7 +191,7 @@ class TestLimitBufs(unittest.TestCase):
 
   def test_limit_bufs_cat(self):
     with Context(MAX_KERNEL_BUFFERS=8):
-      linear, _ = Tensor.cat(*[Tensor.empty(4) for _ in range(32)]).linear_with_vars()
+      linear, _ = Tensor.cat(*[Tensor.empty(4) for _ in range(32)]).linear_with_externs()
     self.assertLessEqual(max(len(call.src)-1 for call in linear.src if call.src[0].op is Ops.SINK), 8)
 
   def test_limit_bufs_sum(self):
@@ -366,9 +366,9 @@ class TestCopyFolding(unittest.TestCase):
   def test_copy_to_same_device_sched(self):
     a = Tensor.ones(4).contiguous().realize().uop.buf_uop
     t = Tensor(a.copy_to_device(a.device))
-    linear, var_vals = t.linear_with_vars()
+    linear, externs = t.linear_with_externs()
     assert len([call for call in linear.src if call.src[0].op is Ops.STORE]) == 0
-    run_schedule(linear, var_vals)
+    run_schedule(linear, externs)
     assert t.uop.is_realized, f"didn't realize Tensor {t}"
     self.assertListEqual(t.tolist(), [1.,1.,1.,1.])
 
@@ -455,7 +455,7 @@ class TestFusionOp(unittest.TestCase):
   def test_expand_fuse(self):
     bt = Tensor(np.ones((10, 1)), dtype=dtypes.float32)
     out = (bt*2).expand(10,10).sum(1)
-    run_schedule(*out.linear_with_vars())
+    run_schedule(*out.linear_with_externs())
     outd = out.tolist()
     assert all(x == 20.0 for x in outd)
 

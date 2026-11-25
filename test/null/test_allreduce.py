@@ -10,9 +10,9 @@ class TestRingAllReduce(unittest.TestCase):
       N = 4
       ds = tuple(f"NULL:{i}" for i in range(N))
       t = Tensor.empty(N, N*100).shard(ds, axis=0).realize()
-      linear = t.sum(0).linear_with_vars()[0]
+      linear = t.sum(0).linear_with_externs()[0]
       copies = [si for si in linear.src if si.src[0].op is Ops.STORE]
-      pairs = [(c.src[1].buffer.device, c.src[2].buffer.device) for c in copies]
+      pairs = [(c.src[1].device, c.src[2].device) for c in copies]
       # N*(N-1) scatter reduce, and N*(N-1) allgather
       if len(pairs) != N*(N-1)*2: raise KernelCountException(N*(N-1)*2, len(pairs))
       # copy topology forms a ring
@@ -23,11 +23,11 @@ class TestRingAllReduce(unittest.TestCase):
     N = 4
     ds = tuple(f"NULL:{i}" for i in range(N))
     t = Tensor.empty(N, 4096).shard(ds, axis=0).realize()
-    linear = t.sum(0).linear_with_vars()[0]
+    linear = t.sum(0).linear_with_externs()[0]
 
     copies = [si for si in linear.src if si.src[0].op is Ops.STORE]
     sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
-    pairs = [(c.src[1].buffer.device, c.src[2].buffer.device) for c in copies]
+    pairs = [(c.src[1].device, c.src[2].device) for c in copies]
 
     if len(pairs) != N*(N-1): raise KernelCountException(N*(N-1), len(pairs))
     if len(sinks) != 2: raise KernelCountException(2, len(sinks))
@@ -38,7 +38,7 @@ class TestAllreduceCast(unittest.TestCase):
     ds = tuple(f"NULL:{i}" for i in range(2))
     with Context(ALLREDUCE_CAST=allreduce_cast, RING=0, SCACHE=0):
       t = Tensor.empty(4, 4, dtype=dtype).shard(ds, axis=0)
-      linear = t.sum(0).linear_with_vars()[0]
+      linear = t.sum(0).linear_with_externs()[0]
       return {si.src[1].dtype for si in linear.src if si.src[0].op is Ops.STORE}
 
   def test_allreduce_cast_bf16(self):

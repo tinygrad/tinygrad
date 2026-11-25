@@ -89,7 +89,8 @@ def _make_cache_flusher(flush_mb:int) -> Callable[[], None]:
   src = Tensor.ones(flush_mb * 1024 * 1024 // 4, dtype=dtypes.float32).contiguous().realize()
   sink = src.sum()
   Device[Device.DEFAULT].synchronize()
-  linked = link_linear(compile_linear(sink.schedule_linear(), beam=0, profile=False, cache=True))
+  linear, externs = sink.linear_with_externs()
+  linked = link_linear(compile_linear(linear, beam=0, profile=False, cache=True), list(externs))
   ctx, keep = ExecContext({}, update_stats=False, wait=True, cache=True), (src, sink, linked)
   def _flush() -> None:
     _ = keep
@@ -100,7 +101,8 @@ def _make_cache_flusher(flush_mb:int) -> Callable[[], None]:
 def _time_fn(fn:Callable[[], Tensor], verify:VerifyFn|None, warmup:int, iters:int, flush_fn:Callable[[], None]) -> tuple[float, float]:
   Device[Device.DEFAULT].synchronize()
   out = fn()
-  linked = link_linear(compile_linear(out.schedule_linear(), beam=0, profile=True, cache=True))
+  linear, externs = out.linear_with_externs()
+  linked = link_linear(compile_linear(linear, beam=0, profile=True, cache=True), list(externs))
   ctx = ExecContext({}, update_stats=False, wait=True, cache=True)
   def _run_once() -> float:
     return sum(sum(map(unwrap, pm_exec.rewrite(c, ctx)[c.arg.hcq is not None:])) for raw in linked.src for c in (raw.without_after,))
