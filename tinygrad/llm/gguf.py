@@ -300,8 +300,8 @@ SMALL_BLOCK_QUANTS = {Q8_0: 17, IQ4_NL: 9, MXFP4: 17}
 
 def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
   """(ggml type, packed words) if `decoded` is the lazy dequantization of packed ggml weights, rows of in_features."""
-  if in_features % 32: return None
-  packed_sizes = {t: decoded.numel() * sz // 256 for t, sz in QUANT_SIZES.items() if in_features % 256 == 0 or t in SMALL_BLOCK_QUANTS}
+  packed_sizes = {t: decoded.numel() * sz // 256 for t, sz in QUANT_SIZES.items() if in_features % _GGML_QUANT[t][0] == 0}
+  if not packed_sizes: return None
   ops = (Ops.UNSHARD,) if decoded.uop.axis is not None else (Ops.SHRINK, Ops.BUFFER)
   raw = next((u for u in decoded.uop.toposort() if u.op in ops and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes.values()), None)
   if raw is None: return None
