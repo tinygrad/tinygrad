@@ -189,10 +189,6 @@ def _validate(call:UOp, sink:UOp) -> UOp:
   return UOp(Ops.LINEAR, src=copies + (call, UOp.native("validate", sink).call(*shadows, *call.src[1:])))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
-pm_scalar_externs = PatternMatcher([
-  (UPat(Ops.EXTERN, name="e"), lambda e: UOp.variable(e.expr, e.vmin, e.vmax, dtype=e.dtype) if e.is_variable and e.arg.name is None else None),
-])
-
 # ctx is beam value
 pm_beam = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True),
@@ -256,7 +252,8 @@ def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:li
   # fill the targets compile reads: a device without an arch in DEV is opened for its target, compile itself opens nothing
   for d in sorted({*(devs:=devices_of(linear)), *map(host_of, devs), HCQ_RUNTIME_DEV.device}): Device.target_for(d)
   with Context(ALLOW_DEVICE_USAGE=0):
-    linear = graph_rewrite(linear, pm_scalar_externs, name="scalar externs", walk=True)
+    scalars = [e for e in linear.toposort() if e.op is Ops.EXTERN and e.is_variable and e.arg.name is None] # they bind by slot at run
+    linear = linear.substitute({e: UOp.variable(e.expr, e.vmin, e.vmax, dtype=e.dtype) for e in scalars}, walk=True)
     if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
     if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
     linear = lower_and_compile(linear)
