@@ -785,6 +785,7 @@ class RelAttentionBlock(TransformerBlock):
     return Tensor(((x + out[:, :T]) / math.sqrt((1 if taps is None else 2) * w.shape[-1] + 1)).contiguous().uop.after(store))
 
   def _attention(self, x:Tensor, start_pos:StartPos, idx_mask:Tensor|None=None) -> Tensor:
+    assert len(start_pos) == 1, "independent positions are not supported for relative attention"
     (B, T), cfg, ra = x.shape[:2], self.config, unwrap(self.config.rel_attn)
     H, Hkv, window = cfg.n_heads, cfg.n_kv_heads, cfg.sliding_window
     xq, xk, xv = (x, x, x) if x.ndim == 3 else (x[:, :, 0], x[:, :, 1], x[:, :, 2])
@@ -1230,7 +1231,7 @@ class Transformer:
     if (hc:=self.config.hc) is not None: x = x.unsqueeze(2).expand(*x.shape[:2], hc.count, x.shape[-1]).contiguous()
     elif self.config.attn_res_block_size: x = x.unsqueeze(2)
     idx_mask, pre = None, None
-    for block in self.layers: x, idx_mask, pre = block(x, start_pos, idx_mask, t, pre)
+    for block in (self.layers if self.config.loop else self.blk): x, idx_mask, pre = block(x, start_pos, idx_mask, t, pre)
     if pre is not None: x = weighted_sum(x, pre)
     elif hc is not None: x = self.output_hc.mix(x)[0] if hasattr(self, 'output_hc') else x.mean(2)
     elif self.config.attn_res_block_size: x = self.output_res_score.mix(x)
@@ -1243,7 +1244,7 @@ class Transformer:
   # built once on first use: each loop copy keeps its caches across calls, and at load time its blocks would be extra state_dict keys
   @functools.cached_property
   def layers(self) -> list[Callable]:
-    if (loop:=self.config.loop) is None: return list(self.blk)
+    loop = unwrap(self.config.loop)
     passes = [[copy.copy(b) for b in self.blk[loop.start:loop.end]] for _ in range(loop.count)]
     def looped_blks(prelude:Tensor, start_pos:StartPos, idx_mask:Tensor|None, tokens:Tensor|None, pre:Tensor|None):
       h, prev_pass = prelude, None
