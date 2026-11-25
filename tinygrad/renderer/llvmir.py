@@ -247,12 +247,25 @@ class CPULLVMRenderer(LLVMRenderer):
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
                      "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
+def render_amd_atomic_fetch_add(ctx, x:UOp, f:UOp) -> str|None:
+  scopes = {"__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);": "",
+            "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);": 'syncscope("agent") '}
+  if not f.arg.fmt or f.arg.code not in scopes or len(x.src) != 3: return None
+  idx, val = x.src[1:]
+  atomic_floats = (dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64)
+  if idx.dtype != val.dtype or not (val.dtype in atomic_floats or val.dtype in dtypes.ints): return None
+  op = "fadd" if val.dtype in atomic_floats else "add"
+  scope = scopes[f.arg.code]
+  ins = f"atomicrmw {op} {ldt(idx.dtype, ptr=True)} {ctx[idx]}, {ldt(val.dtype)} {ctx[val]}"
+  return f"  {ctx[x]} = {ins} {scope}monotonic, align {idx.dtype.itemsize}"
+
 class AMDLLVMRenderer(LLVMRenderer):
   shared_max = HIPRenderer.shared_max
   global_max = HIPRenderer.global_max
   global_prod_max = HIPRenderer.global_prod_max
   abi = "amdgpu_kernel"
   string_rewrite = PatternMatcher([
+    (UPat(Ops.CALL, src=(UPat(Ops.NATIVE, name="f"),), allow_any_len=True, name="x"), render_amd_atomic_fetch_add),
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0]](x.arg[-1])}; "),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
     (UPat(Ops.CAST, dtypes.fp8s, (UPat(dtype=dtypes.float),), name="x",), lambda ctx,x:
