@@ -981,9 +981,9 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a+b*2+c*4<1).ne(True), 0, 1, "(((a+b)+c)<1).eq(False)")
 
   def test_mul_by_zero_casted_to_emulated_dtype(self):
-    # a float zero cast to bfloat16 is one committed const, so the mul-by-zero fold still sees it
+    # the cast chain folds to one zero const, the float multiply stays: x can be inf or nan
     x = Variable("x", 0, 3, dtypes.bfloat16)
-    self.assertIs(graph_rewrite(x*uconst(0.0).cast(dtypes.float).cast(dtypes.bfloat16), sym), UOp.const(0.0, dtypes.bfloat16))
+    self.assertIs(graph_rewrite(x*uconst(0.0).cast(dtypes.float).cast(dtypes.bfloat16), sym), x*uconst(0.0))
 
   def test_cast_bool_to_int_ne_const(self):
     cond = Variable("a", 0, 3) < 2
