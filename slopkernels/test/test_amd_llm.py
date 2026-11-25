@@ -65,17 +65,18 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
     v_base, v_off = _split_offset(valid_end)
     vkl_u = v_base if isinstance(v_base, UOp) else UOp.const(int(v_base))
     if decode and M == 1 and D in (64, 128, 256) and (grp := H // H_KV) in (1, 2, 4, 8) and N_phys % 64 == 0:
-      ch = min(48, ceildiv(N_phys, 64))
-      kp = unwrap(slopkernels.get(f"amd_flash_decode_partial_g{grp}_d{D}")).specialize(
-        B=B, H_KV=H_KV, n_blks=N_phys // 64, C=ch, valid_kv_offset=v_off)
+      ch, waves = min(48, ceildiv(N_phys, 64)), 16
+      while waves * grp * ((D + 4) * 2 + 8) > 65536: waves //= 2
+      kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
+        B=B, H_KV=H_KV, G=grp, d_blks=D // 64, n_blks=N_phys // 64, C=ch, valid_kv_offset=v_off, waves=waves)
       partial, stats = (UOp.alloc((B, H, ch, d), dtypes.float32, device=q.device) for d in (D, 2))
       cp = kp.call(partial, stats, q_in.uop, assigned_kv.uop, vkl_u)
       kc = unwrap(slopkernels.get("amd_flash_decode_combine")).specialize(B=B, H=H, C=ch, d_blks=D // 64, valid_kv_offset=v_off)
       out = UOp.alloc((B, H, 1, D), dtypes.float32, device=q.device)
       return Tensor(out.after(kc.call(out, partial.after(cp), stats.after(cp), vkl_u)))
     if not decode and target[0] != 9 and D in (64, 128, 256, 320) and N_phys % 32 == 0 and M % 32 == 0:
-      k_fa = unwrap(slopkernels.get(f"{'rdna4' if target[0] == 12 else 'rdna3'}_flash_attn_d{D}")).specialize(
-        BH=B * H, m_blks=M // 32, B=B, H_KV=H_KV, n_blks=N_phys // 32, valid_kv_offset=v_off, q_start_from_end=1)
+      k_fa = unwrap(slopkernels.get(f"{'rdna4' if target[0] == 12 else 'rdna3'}_flash_attn")).specialize(
+        BH=B * H, m_blks=M // 32, B=B, H_KV=H_KV, d_blks=D // 64, n_blks=N_phys // 32, valid_kv_offset=v_off, q_start_from_end=1)
       ql_u = T_real if isinstance(T_real, UOp) else UOp.const(M)
       out = UOp.alloc((B * H, M, D), dtypes.float32, device=q.device)
       ret = Tensor(out.after(k_fa.call(out, q_in.reshape(B * H, M, D).uop, assigned_kv.uop, vkl_u, ql_u)).reshape((B, H, M, D)))
@@ -89,9 +90,12 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   assert q.dtype == k.dtype == dtypes.float32, "recurrent Q/K must be float32"
   assert state.uop.contiguous_view_offset() is not None, "recurrent state must be contiguous"
   B, H, T, K, V = int(q.shape[0]), int(q.shape[1]), int(q.shape[2]), int(q.shape[3]), int(v.shape[3])
-  kern = unwrap(slopkernels.get(f"amd_gated_delta_k{K}_{'ak' if alpha.ndim == 4 else 'a1'}")).specialize(batch=B, heads=H, tokens=T, v_tiles=V // 4)
+  ak = K if alpha.ndim == 4 else 1
+  kern = unwrap(slopkernels.get("amd_gated_delta")).specialize(batch=B, heads=H, tokens=T, v_tiles=V // 4, k_blks=K // 32, alpha_k=ak)
   out = UOp.alloc((B, H, T, V), dtypes.float32, device=q.device)
-  srcs = [s.uop if s.uop.op is Ops.AFTER else s.contiguous().uop for s in (q, k, v, beta, alpha, state)]
+  srcs = [s.uop if s.uop.op is Ops.AFTER else s.contiguous().uop for s in (q, k, v, beta)]
+  srcs += [alpha.uop.reshape(B, H, T, ak) if alpha.uop.op is Ops.AFTER else alpha.contiguous().reshape(B, H, T, ak).uop]
+  srcs += [state.uop if state.uop.op is Ops.AFTER else state.contiguous().uop]
   sp = start_pos.uop if start_pos is not None else UOp.const(1)
   return Tensor(out.after(kern.call(out, *srcs, (q * k).sum(-1).contiguous().uop, sp)))
 

@@ -77,7 +77,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: AMD
-      PARALLEL: "1"
+      PARALLEL: "0"
       PYTHONPATH: ${{ github.workspace }}
     steps:
     - name: Checkout Code

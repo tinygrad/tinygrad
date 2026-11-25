@@ -119,8 +119,9 @@ class Linear(nn.Linear):
       arch = "cdna" if target[0] == 9 else "rdna4" if target[0] == 12 else "rdna3"
       out_shape = _shard_shape((splits * tokens, out_f), out_axis, ndev)
       x_f16 = x_in.half().contiguous().reshape(out_shape[0], in_f) if x_axis is None else x_in.half().contiguous()
+      mt = 8 if out_shape[0] % 128 == 0 and out_shape[0] >= 256 else 4 if out_shape[0] % 64 == 0 else 2 if out_shape[0] % 32 == 0 else 1
       out = _run_kernel(f"{arch}_gemm_{qname}_f16", out_shape, dev, self.packed, x_f16, *_iq_lut(self.ggml_type, dev, True),
-                        axis=out_axis, tokens=out_shape[0], out_features=local_out, in_features=in_f, raw_len=raw_len)
+                        axis=out_axis, m_blks=out_shape[0] // (mt * 16), m_tiles=mt, out_features=local_out, in_features=in_f, raw_len=raw_len)
     else:
       x_tokens, chunks = int(prod(x_shard[:-1])), ceildiv(in_f, 1024)
       q8 = _q8_quantize(x_in, x_tokens, in_f, dev, axis=0 if self.groups > 1 and x_axis is not None else None)
@@ -144,10 +145,10 @@ class Linear(nn.Linear):
     if w.uop.axis is not None or xi.uop.axis is not None or w.dtype not in ok or xi.dtype not in ok or tokens >= 16: return None
     if least_upper_dtype(w.dtype, xi.dtype) != dtypes.float32: return None
     if self.bias is not None and (self.bias.uop.axis is not None or self.bias.dtype not in ok): return None
-    vec4 = self.in_features % 128 == 0
-    out = _run_kernel(f"amd_gemv_{w.dtype.name}_{xi.dtype.name}{'' if vec4 else '_v1'}", (tokens, self.out_features),
+    vc = 4 if self.in_features % 128 == 0 else 1
+    out = _run_kernel(f"amd_gemv_{w.dtype.name}_{xi.dtype.name}", (tokens, self.out_features),
                       w.device, w, xi.reshape(tokens, self.in_features),
-                      tokens=tokens, out_features=self.out_features, in_blks=self.in_features // (128 if vec4 else 32))
+                      tokens=tokens, out_features=self.out_features, in_blks=self.in_features // (32 * vc), val_chunk=vc)
     if out is None: return None
     return (out if self.bias is None else out + _unview_float(self.bias).float()).reshape(*x.shape[:-1], self.out_features)
 
@@ -656,19 +657,21 @@ class TransformerBlock(FFNBlock):
       _, _, sh_hkv, N_phys, _ = (int(d) for d in kv.uop.max_shard_shape)
       q_axis, valid_kv = q_in.uop.axis, sp if isinstance(sp, UOp) else UOp.const(int(sp))
       valid_kv_offset, attn = T_real if isinstance(T_real, int) else 0, None
-      if resolve(T_real == 1, False) and sh_m == 1 and D in (64, 128, 256) and (group := sh_h // sh_hkv) in (1, 2, 4, 8) and N_phys % 64 == 0:
-        chunks = min(48, ceildiv(N_phys, 64))
-        k_partial = _get_kernel(f"amd_flash_decode_partial_g{group}_d{D}", B=sh_b, H_KV=sh_hkv, n_blks=N_phys // 64,
-                                C=chunks, valid_kv_offset=valid_kv_offset)
+      if resolve(T_real == 1, False) and sh_m == 1 and D % 64 == 0 and 1 <= D <= 512 \
+          and (group := sh_h // sh_hkv) in (1, 2, 4, 8) and N_phys % 64 == 0:
+        chunks, waves = min(48, ceildiv(N_phys, 64)), 16
+        while waves * group * ((D + 4) * 2 + 8) > 65536: waves //= 2
+        k_partial = _get_kernel("amd_flash_decode_partial", B=sh_b, H_KV=sh_hkv, G=group, d_blks=D // 64,
+                                n_blks=N_phys // 64, C=chunks, valid_kv_offset=valid_kv_offset, waves=waves)
         if k_partial is not None:
           partial = UOp.alloc((sh_b, sh_h, chunks, D), dtypes.float32, device=q_in.device, axis=q_axis)
           stats = UOp.alloc((sh_b, sh_h, chunks, 2), dtypes.float32, device=q_in.device, axis=q_axis)
           cp = k_partial.call(partial, stats, q_in.uop, kv.uop, valid_kv)
           attn = _run_kernel("amd_flash_decode_combine", q_shard, q_in.device, partial.after(cp), stats.after(cp), valid_kv,
                              axis=q_axis, B=sh_b, H=sh_h, C=chunks, d_blks=D // 64, valid_kv_offset=valid_kv_offset)
-      elif target[0] != 9 and D in (64, 128, 256, 320) and N_phys % 32 == 0 and (q_t := int(q_in.shape[2])) % 32 == 0:
+      elif target[0] != 9 and D % 64 == 0 and 1 <= D <= 512 and N_phys % 32 == 0 and (q_t := int(q_in.shape[2])) % 32 == 0:
         arch = "rdna4" if target[0] == 12 else "rdna3"
-        k_attn = _get_kernel(f"{arch}_flash_attn_d{D}", BH=sh_b * sh_h, m_blks=q_t // 32, B=sh_b, H_KV=sh_hkv,
+        k_attn = _get_kernel(f"{arch}_flash_attn", BH=sh_b * sh_h, m_blks=q_t // 32, B=sh_b, H_KV=sh_hkv, d_blks=D // 64,
                              n_blks=N_phys // 32, valid_kv_offset=valid_kv_offset, q_start_from_end=0 if isinstance(T_real, UOp) else 1)
         if k_attn is not None:
           q_h, q_len = int(q_in.shape[1]), T_real if isinstance(T_real, UOp) else UOp.const(q_t)
@@ -1042,15 +1045,16 @@ class GatedDeltaNetBlock(FFNBlock):
     state_dep = Tensor(self.recurrent_state.uop.after(*conv_state_stores))
     core_out: Tensor|None = None
     if q.uop.axis is None and state_dep.uop.axis is None and _amd_target(q.device) is not None \
-        and self.head_k_dim in (32, 64, 128, 256) and self.head_v_dim % 4 == 0:
-      per_channel = alpha.ndim == 4 and int(alpha.shape[-1]) == self.head_k_dim
-      alpha_in = alpha.contiguous().reshape((int(B), self.num_v_heads, T_pad, self.head_k_dim) if per_channel else (int(B), self.num_v_heads, T_pad))
+        and self.head_k_dim % 32 == 0 and 32 <= self.head_k_dim <= 256 and self.head_v_dim % 4 == 0:
+      alpha_k = self.head_k_dim if (alpha.ndim == 4 and int(alpha.shape[-1]) == self.head_k_dim) else 1
+      alpha_in = alpha.contiguous().reshape(int(B), self.num_v_heads, T_pad, alpha_k)
       start_pos_uop = pos if isinstance(pos, UOp) else UOp.const(int(pos))
-      core_out = _run_kernel(f"amd_gated_delta_k{self.head_k_dim}_{'ak' if per_channel else 'a1'}",
+      core_out = _run_kernel("amd_gated_delta",
                              (int(B), self.num_v_heads, T_pad, self.head_v_dim), q.device,
                              q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha_in, state_dep,
                              (q * k).sum(-1).contiguous(), start_pos_uop,
-                             batch=int(B), heads=self.num_v_heads, tokens=T_pad, v_tiles=self.head_v_dim // 4)
+                             batch=int(B), heads=self.num_v_heads, tokens=T_pad, v_tiles=self.head_v_dim // 4,
+                             k_blks=self.head_k_dim // 32, alpha_k=alpha_k)
     if core_out is not None:
       core = core_out.transpose(1, 2)
     else:
