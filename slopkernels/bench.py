@@ -18,7 +18,7 @@ if str(root := pathlib.Path(__file__).resolve().parent.parent) not in sys.path: 
 from tinygrad import Device, Tensor, UOp, dtypes
 from tinygrad.dtype import DType
 from tinygrad.engine.realize import ExecContext, compile_linear, link_linear, pm_exec
-from tinygrad.helpers import ceildiv, prod, unwrap
+from tinygrad.helpers import ceildiv, colored, prod, unwrap
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 import slopkernels
@@ -171,14 +171,44 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         _assert_close(out[:, :CHECK_ROWS].float().numpy(), (x.float() @ w4.T).numpy(), rtol=4e-2, atol=5e-2)
       if m % 16 == 0 and n % 16 == 0:
         if not cdna and m % 32 == 0 and n % 64 == 0 and K % 64 == 0:
-          wm, wn, tm, tn = (2, 4, 4, 2) if m >= 256 and m % 128 == 0 and n % 128 == 0 else (2, 2, 2, 2) if m % 64 == 0 else (1, 2, 2, 2)
-          return (lambda: _krun(f"{arch_gemm}_gemm_{kname}_2d", (m, n), dev, w_packed, x.half().contiguous(),
-                                *_iq_lut(qtype, dev, True), m_blks=m // (wm * tm * 16), n_blks=n // (wn * tn * 16),
-                                wm=wm, wn=wn, tm=tm, tn=tn, in_features=K, raw_len=w_len)), _verify
+          sk = 1
+          if target[0] == 12:
+            if m >= 256 and m % 256 == 0 and n % 128 == 0 and qtype != 12: wm, wn, tm, tn = 4, 2, 4, 4
+            elif m >= 256 and m % 128 == 0 and n % 128 == 0: wm, wn, tm, tn = 2, 4, 4, 2
+            elif m % 128 == 0 and n % 128 == 0:
+              wm, wn, tm, tn = (2, 2, 2, 4) if qtype in (23, 39) else (2, 2, 4, 2)
+              if qtype == 12 and K >= 128 and (m * n) % 1024 == 0: sk = 2
+            elif m % 64 == 0: wm, wn, tm, tn = 2, 2, 2, 2
+            else: wm, wn, tm, tn = 1, 2, 2, 2
+          else:
+            if m >= 256 and m % 128 == 0 and n % 128 == 0:
+              wm, wn, tm, tn = (4, 2, 4, 4) if m % 256 == 0 and qtype in (8, 23) else (4, 2, 2, 4) if qtype == 39 else (2, 4, 4, 2)
+              if K >= 192 and (m // (wm * tm * 16)) * (n // (wn * tn * 16)) <= 128 and (m * n) % 1024 == 0: sk = 3
+            elif m % 128 == 0:
+              wm, wn, tm, tn = 2, 2, 4, 2
+              if K >= 192 and (m // 128) * (n // 64) <= 128 and (m * n) % 1024 == 0: sk = 3
+            elif m % 64 == 0: wm, wn, tm, tn = 2, 2, 2, 2
+            else: wm, wn, tm, tn = 1, 2, 2, 2
+          def _run_2d() -> Tensor:
+            out = _krun(f"{arch_gemm}_gemm_{kname}_2d", (sk * m, n), dev, w_packed, x.half().contiguous(), *_iq_lut(qtype, dev, True),
+                        m_blks=m // (wm * tm * 16), n_blks=n // (wn * tn * 16), wm=wm, wn=wn, tm=tm, tn=tn,
+                        in_features=K, split_k=sk, raw_len=w_len)
+            if sk == 1: return out
+            return _krun("amd_splitk_reduce", (m * n,), dev, out.reshape(sk, m * n), split_k=sk, n_blks=(m * n) // 1024).reshape(m, n)
+          return _run_2d, _verify
         mt = 8 if m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
         return (lambda: _krun(f"{arch_gemm}_gemm_{kname}_f16", (m, n), dev, w_packed, x.half().contiguous(),
                               *_iq_lut(qtype, dev, True), m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=K, raw_len=w_len)), _verify
+      if not cdna and m == 1 and qtype in (8, 10, 12, 13, 14, 19, 21, 23, 39) and x_dt in (dtypes.float32, dtypes.float16):
+        half_m = K >= 2048 and ((target[0] == 12 and qtype in (10, 13, 23, 39)) or (target[0] == 11 and qtype in (10, 39)))
+        wv = min(ceildiv(K * (2 if half_m else 1), 1024), 32)
+        rpw = 2 if n % 2 == 0 and n >= 1024 and ((target[0] == 12 and qtype in (10, 13, 14)) or (target[0] == 11 and qtype in (10, 12, 14))) else 1
+        return (lambda: _krun(f"rdna_gemv_direct{'2' if half_m else ''}_{kname}_{x_dt.name}", (1, n), dev, w_packed, x, *_iq_lut(qtype, dev),
+                              out_features=n, in_features=K, waves=wv, rows_per_wg=rpw, raw_len=w_len)), _verify
       wv = min(ceildiv(K, 1024), 32)
+      if 2 <= m <= 8 and qtype in (8, 12, 23, 39):
+        return (lambda: _krun(f"{arch_gemv}_gemv_m_{kname}", (m, n), dev, w_packed, *_q8(x, m, K, dev),
+                              tokens=m, out_features=n, in_features=K, waves=wv, raw_len=w_len)), _verify
       def _run() -> Tensor:
         return _krun(f"{arch_gemv}_gemv_{kname}", (m, n), dev, w_packed, *_q8(x, m, K, dev), *_iq_lut(qtype, dev),
                      tokens=m, out_features=n, in_features=K, waves=wv, raw_len=w_len, group_rows=0)
@@ -226,6 +256,13 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         ref1, got = (x.reshape(1, MOE_K) @ w4.T).numpy()[0], out[0, 0, :, :CHECK_ROWS].float().numpy()
         _assert_close(got, np.broadcast_to(ref1, got.shape), rtol=4e-2, atol=5e-2)
       def _run() -> Tensor:
+        if not cdna and qtype in (8, 10, 12, 13, 14, 19, 21, 23, 39):
+          half_m = target[0] == 12 and qtype in (23, 39) and MOE_K >= 2048
+          wv_d = min(ceildiv(MOE_K * (2 if half_m else 1), 1024), 32)
+          rpw = 2 if MOE_N % 2 == 0 and MOE_N >= 1024 and target[0] == 11 and qtype == 12 else 1
+          return _krun(f"rdna_moe_direct{'2' if half_m else ''}_{kname}", (TOPK, MOE_N), dev, w_packed, x.reshape(1, MOE_K), sel,
+                       *_iq_lut(qtype, dev), rows=TOPK, x_rows=1, out_features=MOE_N, in_features=MOE_K,
+                       waves=wv_d, rows_per_wg=rpw, raw_len=w_len, x_share=TOPK, ndev=1).reshape(1, 1, TOPK, MOE_N)
         return _krun(f"{arch_gemv}_moe_{kname}", (TOPK, MOE_N), dev, w_packed, *_q8(x, 1, MOE_K, dev), sel, *_iq_lut(qtype, dev),
                      rows=TOPK, x_rows=1, out_features=MOE_N, in_features=MOE_K, waves=wv, raw_len=w_len, x_share=TOPK,
                      ndev=1).reshape(1, 1, TOPK, MOE_N)
@@ -253,11 +290,28 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         ref = q[:, :1].float().scaled_dot_product_attention(kv[0, :, :1].float(), kv[1, :, :1].float(), attn_mask=mask, enable_gqa=True).numpy()
         _assert_close(out[:, :1].float().numpy(), ref, rtol=5e-3, atol=5e-3)
       def _run() -> Tensor:
+        grp = ATTN_H // ATTN_HKV
+        if target[0] == 12:
+          if ATTN_D <= 128 and grp % 4 == 0 and (ATTN_D == 128 or ATTN_N % 64 == 0): wm, gqa_w, bnt = 8, 4, 2 if ATTN_D == 128 else 4
+          else: wm, gqa_w, bnt = (4 if ATTN_M % 64 == 0 else 2), 1, (4 if ATTN_D <= 128 and ATTN_N % 64 == 0 else 2)
+          return _krun("rdna4_flash_attn", (ATTN_H, ATTN_M, ATTN_D), dev, q.reshape(ATTN_H, ATTN_M, ATTN_D), kv,
+                       UOp.const(ATTN_N), UOp.const(ATTN_M), BH=ATTN_H, m_blks=ATTN_M // ((wm // gqa_w) * 16), B=1, H_KV=ATTN_HKV,
+                       d_blks=ATTN_D // 64, n_blks=ATTN_N // (bnt * 16), waves_m=wm, bn_tiles=bnt, gqa_w=gqa_w,
+                       valid_kv_offset=0, q_start_from_end=1).reshape(1, ATTN_H, ATTN_M, ATTN_D)
+        if ATTN_D == 128 and ATTN_M >= 128 and ATTN_M % 128 == 0 and ATTN_N >= 512:
+          wm, sk = 8, 3
+          ks = unwrap(slopkernels.get("rdna3_flash_attn_split")).specialize(
+            BH=ATTN_H, m_blks=ATTN_M // (wm * 16), B=1, H_KV=ATTN_HKV, d_blks=ATTN_D // 64, n_blks=ATTN_N // 32,
+            waves_m=wm, bn_tiles=2, gqa_w=1, split_kv=sk, valid_kv_offset=0, q_start_from_end=1)
+          part = UOp.alloc((sk, ATTN_H, ATTN_M, ATTN_D), dtypes.half, device=dev)
+          st_b = UOp.alloc((sk, ATTN_H, ATTN_M, 2), dtypes.float32, device=dev)
+          cp = ks.call(part, st_b, q.reshape(ATTN_H, ATTN_M, ATTN_D).uop, kv.uop, UOp.const(ATTN_N), UOp.const(ATTN_M))
+          return _krun("amd_flash_prefill_combine", (ATTN_H, ATTN_M, ATTN_D), dev, part.after(cp), st_b.after(cp),
+                       BH=ATTN_H, M=ATTN_M, d_blks=ATTN_D // 64, split_kv=sk).reshape(1, ATTN_H, ATTN_M, ATTN_D)
         wm = 4 if ATTN_M % 64 == 0 else 2
-        bnt = 4 if target[0] == 12 and ATTN_D <= 128 and ATTN_N % 64 == 0 else 2
-        return _krun(f"{arch_gemm}_flash_attn", (ATTN_H, ATTN_M, ATTN_D), dev, q.reshape(ATTN_H, ATTN_M, ATTN_D), kv,
+        return _krun("rdna3_flash_attn", (ATTN_H, ATTN_M, ATTN_D), dev, q.reshape(ATTN_H, ATTN_M, ATTN_D), kv,
                      UOp.const(ATTN_N), UOp.const(ATTN_M), BH=ATTN_H, m_blks=ATTN_M // (wm * 16), B=1, H_KV=ATTN_HKV, d_blks=ATTN_D // 64,
-                     n_blks=ATTN_N // (bnt * 16), waves_m=wm, bn_tiles=bnt, valid_kv_offset=0, q_start_from_end=1).reshape(1, ATTN_H, ATTN_M, ATTN_D)
+                     n_blks=ATTN_N // 32, waves_m=wm, bn_tiles=2, gqa_w=1, valid_kv_offset=0, q_start_from_end=1).reshape(1, ATTN_H, ATTN_M, ATTN_D)
       return _run, _verify
     cases.append((f"flash_attn_prefill_H{ATTN_H}_M{ATTN_M}_N{ATTN_N}_D{ATTN_D}",
                   (ATTN_H * ATTN_M * ATTN_D + 2 * ATTN_HKV * ATTN_N * ATTN_D) * 2 + ATTN_H * ATTN_M * ATTN_D * 4,
@@ -271,14 +325,18 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         ref = q[:, :1].float().scaled_dot_product_attention(kv[0, :, :1].float(), kv[1, :, :1].float(), enable_gqa=True).numpy()
         _assert_close(out[:, :1].float().numpy(), ref, rtol=5e-3, atol=5e-3)
       def _run() -> Tensor:
-        ch, grp, waves = min(max(16, 128 // ATTN_HKV), ceildiv(ctx, 64)), ATTN_H // ATTN_HKV, 8
-        while waves * grp * ((ATTN_D + 4) * 2 + 8) > 65536: waves //= 2
+        grp = ATTN_H // ATTN_HKV
+        ch = (8 if target[0] == 12 and ATTN_HKV >= 4 and ctx >= 512 else
+              12 if target[0] == 11 and ATTN_HKV >= 4 and ctx >= 512 else min(max(16, 128 // ATTN_HKV), ceildiv(ctx, 64)))
+        waves = 16 if target[0] == 12 else 8
+        while waves * grp * (ATTN_D * 2 + 8) > 65536: waves //= 2
         kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
           B=1, H_KV=ATTN_HKV, G=grp, d_blks=ATTN_D // 64, n_blks=ctx // 64, C=ch, valid_kv_offset=0, waves=waves)
-        partial, stats = (UOp.alloc((1, ATTN_H, ch, d), dtypes.float32, device=dev) for d in (ATTN_D, 2))
+        partial = UOp.alloc((1, ATTN_H, ch, ATTN_D), dtypes.half, device=dev)
+        stats = UOp.alloc((1, ATTN_H, ch, 2), dtypes.float32, device=dev)
         cp = kp.call(partial, stats, q.uop, kv.uop, UOp.const(ctx))
         return _krun("amd_flash_decode_combine", (1, ATTN_H, 1, ATTN_D), dev, partial.after(cp), stats.after(cp), UOp.const(ctx),
-                     B=1, H=ATTN_H, C=ch, d_blks=ATTN_D // 64, valid_kv_offset=0)
+                     B=1, H=ATTN_H, C=ch, d_blks=ATTN_D // 64, valid_kv_offset=0, step_keys=waves)
       return _run, _verify
     cases.append((f"flash_attn_decode_H{ATTN_H}_N{ctx}_D{ATTN_D}", 2 * ATTN_HKV * ctx * ATTN_D * 2 + ATTN_H * ATTN_D * 6,
                   4 * ATTN_H * ctx * ATTN_D, _mk_fa_dec))
@@ -356,9 +414,13 @@ def main() -> None:
     tf_pct = 100.0 * tflops / peak_tf if peak_tf > 0 else 0.0
     r = BenchResult(name=name, median_us=med_us, min_us=min_us, gb_s=gb_s, bw_pct=bw_pct, tflops=tflops, tflops_pct=tf_pct)
     results.append(r)
-    bw_s = f"{bw_pct:>6.1f}%" if peak_bw > 0 else f"{'-':>7}"
-    tf_s = f"{tf_pct:>6.1f}%" if peak_tf > 0 and flops > 0 else f"{'-':>7}"
-    print(f"{r.name:<46} {r.median_us:>12.1f} {r.min_us:>10.1f} {r.gb_s:>9.1f} {bw_s} {r.tflops:>9.2f} {tf_s}", flush=True)
+    bw_str = f"{r.gb_s:>9.1f} {bw_pct:>6.1f}%" if peak_bw > 0 else f"{r.gb_s:>9.1f} {'-':>7}"
+    tf_str = f"{r.tflops:>9.2f} {tf_pct:>6.1f}%" if peak_tf > 0 and flops > 0 else f"{r.tflops:>9.2f} {'-':>7}"
+    if peak_bw > 0 and (peak_tf <= 0 or flops <= 0 or bw_pct >= tf_pct):
+      bw_str = colored(bw_str, "green" if bw_pct >= 90 else "yellow" if bw_pct >= 70 else "red")
+    elif peak_tf > 0 and flops > 0:
+      tf_str = colored(tf_str, "green" if tf_pct >= 70 else "yellow" if tf_pct >= 40 else "red")
+    print(f"{r.name:<46} {r.median_us:>12.1f} {r.min_us:>10.1f} {bw_str} {tf_str}", flush=True)
   print("-" * 106, flush=True)
   print(f"Benchmarked & verified {len(results)} LLM ops in {time.perf_counter() - t_start:.1f}s.", flush=True)
   if args.json:
