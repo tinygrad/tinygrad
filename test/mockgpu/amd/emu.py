@@ -1744,7 +1744,9 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|N
   else:
     ctx = _Ctx(_wave_size(arch))
     sink = _get_handler(inst)(inst, ctx)
-    call = lower_body(sink)
+    base, mask = ctx.canonical_mask(inst_bytes)
+    name = f"{_op_name(inst).lower()}_{base.to_bytes(len(inst_bytes), 'little').hex()}"
+    call = lower_body(sink.replace(arg=KernelInfo(name)))
     used = UOp.sink(call, ctx.branch_cond).toposort()
     ret = call, ctx.branch_cond, {p:index for index,p in ctx.sgpr_reads.items() if p in used}
     entries.append(ctx.canonical_mask(inst_bytes)+(ret,))
@@ -1753,7 +1755,7 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|N
   bindings = {_Ctx.inst_word(i):_c(words[f"inst_w{i}"]) for i in range(inst.size()//4)}
   bindings.update({p:_Ctx.sgpr.index(_c(index.get_idx().sym_infer(words))).load() if index.get_valid().sym_infer(words) else _c(0)
                    for p,index in reads.items()})
-  if call is not None: call = call.replace(src=(call.body, *(bindings.get(b, b) for b in call.src[1:])))
+  if call is not None: call = call.replace(src=(UOp.native(inst, call.body), *(bindings.get(b, b) for b in call.src[1:])))
   return call, cond.substitute(bindings) if cond is not None else None
 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
@@ -1846,20 +1848,19 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
 
 RENDER = ContextVar("RENDER", 0) # render lifted ast back to assembly
 
-def render_call(call:UOp, sink:UOp):
-  if sink.arg.name.startswith("emu_"):
-    return UOp(Ops.LINEAR, src=tuple(y for x in call.body.toposort() if x.op is Ops.LINEAR for y in x.src if y.op in {Ops.BINARY, Ops.STACK}))
-  encoding = bytes.fromhex(sink.arg.name.rsplit("_", 1)[1])
-  words = [UOp(Ops.BINARY, arg=encoding[i:i+4]) for i in range(0, len(encoding), 4)]
-  for i,x in enumerate(call.src_without_body[:len(words)]):
-    words[-1-i] = UOp(Ops.BINARY, arg=int(x.src[0].arg).to_bytes(4, "little"))
-  return words[0] if len(words) == 1 else UOp(Ops.STACK, src=tuple(words))
+def linearize_basic_block(call:UOp):
+  return UOp(Ops.LINEAR, src=tuple(y for x in call.body.toposort() if x.op is Ops.LINEAR for y in x.src if y.op is Ops.BINARY))
 
 pm_render = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat.any(UPat(Ops.SINK, name="sink"), UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"),), allow_any_len=True)),),
-        allow_any_len=True, name="call"), render_call),
+  (UPat(Ops.NATIVE, name="native").call(allow_any_len=True), lambda native: UOp(Ops.BINARY, arg=native.arg.code.to_bytes())),
+  (UPat(Ops.CALL, src=(UPat.any(UPat(Ops.SINK), UPat(Ops.PROGRAM, src=(UPat(Ops.SINK),), allow_any_len=True)),),
+        allow_any_len=True, name="call"), linearize_basic_block),
   (UPat(Ops.SINK, name="root"), lambda root: next((x for x in root.toposort() if x.op is Ops.LINEAR), None)
    if isinstance(root.arg, KernelInfo) and root.arg.name.startswith("emu ") else None),
+])
+
+pm_remove_native = PatternMatcher([
+  (UPat(Ops.NATIVE, name="native"), lambda native:native.src[0]),
 ])
 
 @rewrite_group(replay="emu_process_replay")
@@ -1985,6 +1986,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     for (pc, inst), x in zip(insts.items(), linear.src):
       out = x.arg if x.op is Ops.BINARY else b"".join(y.arg for y in x.src)
       assert out == inst.to_bytes(), f"{inst.op_name.lower()}: {out.hex()} != {inst.to_bytes().hex()}"
+  ret = graph_rewrite(ret, pm_remove_native, name="remove native", enter_calls=True)
   return ret
 
 dispatch_cache:dict[tuple, UOp] = {}
