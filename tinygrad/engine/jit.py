@@ -40,7 +40,7 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> tuple[UOp
   # the storage it holds is linked after the inputs: the compiled linear has no buffers
   held = tuple(u for u in linear.toposort() if u.op is Ops.BUFFER)
   linear = linear.substitute({u: u.as_extern(len(input_uops)+i) for i,u in enumerate(held)}, walk=True)
-  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), input_uops=input_uops, cache=False)
+  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View compiled linear")
   return linear, held
 

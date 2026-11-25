@@ -31,7 +31,7 @@ def compiled_chain(n:int, jit=False, device="NULL") -> tuple[Tensor, UOp, list[U
     f(x)
     return f(x), f.captured._linear, [x.uop.base, *f.captured._externs]
   linear, externs = (out:=chain(x, n)).linear_with_externs()
-  return out, compile_linear(linear, input_uops=[], cache=True), list(externs)
+  return out, compile_linear(linear, cache=True), list(externs)
 
 # NULL never runs a batch, so the scheduler is tested on the commands it hands each queue, run by a small executor with symbolic
 # signals and timelines. the fence and the ffi are tested by running them on CPU, see test/runtime/test_hcq2.py.
