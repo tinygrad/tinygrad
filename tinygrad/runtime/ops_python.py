@@ -60,9 +60,7 @@ class PythonProgram(Program['PythonDevice']):
       i = 0
       while i < len(self.uops):
         u = self.uops[i]
-        src_values: list[Any] = [values.get(v, None) for v in u.src_without_body if v.dtype is not dtypes.void]
-        src_dtypes = [v.dtype for v in u.src_without_body if v.dtype is not dtypes.void]
-        if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
+        # control flow is handled before reading srcs: inside a fully masked IF, srcs may never have been computed
         if u.op is Ops.ENDIF:
           exec_masks.pop()
           i += 1
@@ -72,9 +70,12 @@ class PythonProgram(Program['PythonDevice']):
           i += 1
           continue
         if u.op is Ops.IF:
-          exec_masks.append([x and y for x,y in zip(exec_masks[-1], src_values[0])])
+          exec_masks.append([x and y for x,y in zip(exec_masks[-1], values[u.src[0]])])
           i += 1
           continue
+        src_values = [values[v] for v in u.src_without_body if v.dtype is not dtypes.void]
+        src_dtypes = [v.dtype for v in u.src_without_body if v.dtype is not dtypes.void]
+        if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
         if u.op is Ops.BACKEDGE:
           i = self.uop_to_index[u.src[1]] if values[u.src[2]][0] else i+1
           continue
