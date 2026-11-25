@@ -350,13 +350,20 @@ def _make_wmma_dequant(raw:UOp, ggml_type:int, lane_group:UOp, kgroups:int, k_u:
   w_idx = w_u if kgroups == 1 else (lane_group + kgroups * w_u)
   word_indices = _wmma_words(lane_group, kgroups)
   if ggml_type in (Q4_K, Q5_K):
-    def dequant_q5(base:UOp, subgroup:UOp, half:UOp) -> UOp:
+    def dequant_q5(base:UOp, subgroup:UOp, half:UOp) -> tuple[UOp, ...]:
       d, dmin, scale, minimum = _q5_scales(raw, base, subgroup, stream=False)
       ds, dm = d * scale, dmin * minimum
       qs_base = base + (4 if ggml_type == Q4_K else 12) + (subgroup // 2) * 8 + half * 4
-      word = (raw[qs_base + w_idx].load() >> ((subgroup & 1) * 4).cast(dtypes.uint32)) & 0x0f0f0f0f
-      if ggml_type == Q5_K: word |= ((raw[base + 4 + half * 4 + w_idx].load() >> subgroup.cast(dtypes.uint32)) & 0x01010101) << 4
-      return ((word >> _sh(b_u * 8)) & 255).float().alu(Ops.MULACC, ds, -dm).cast(dtypes.float16)
+      sh_s = ((subgroup & 1) * 4).cast(dtypes.uint32)
+      qs_vec = _amd_load(raw[qs_base], 4) if word_indices == (0, 1, 2, 3) else None
+      qh_vec = _amd_load(raw[base + 4 + half * 4], 4) if ggml_type == Q5_K and word_indices == (0, 1, 2, 3) else None
+      out_vals: list[UOp] = []
+      for qi, wi in enumerate(word_indices):
+        word = ((qs_vec[qi] if qs_vec is not None else raw[qs_base + wi].load()) >> sh_s) & 0x0f0f0f0f
+        if ggml_type == Q5_K:
+          word |= (((qh_vec[qi] if qh_vec is not None else raw[base + 4 + half * 4 + wi].load()) >> subgroup.cast(dtypes.uint32)) & 0x01010101) << 4
+        out_vals.extend(((word >> (b * 8)) & 255).float().alu(Ops.MULACC, ds, -dm).cast(dtypes.half) for b in range(4))
+      return tuple(out_vals)
     return dequant_q5
   if ggml_type == Q6_K:
     def dequant_q6(base:UOp, subgroup:UOp, half:UOp) -> tuple[UOp, ...]:
@@ -372,11 +379,15 @@ def _make_wmma_dequant(raw:UOp, ggml_type:int, lane_group:UOp, kgroups:int, k_u:
       return tuple(out_vals)
     return dequant_q6
   if ggml_type == IQ4_XS:
-    assert table is not None
-    def dequant_iq4(base:UOp, subgroup:UOp, half:UOp) -> UOp:
-      scale = _iq4_scale(raw, base, subgroup)
-      pair = table[((raw[base + 2 + subgroup * 4 + w_idx].load() >> _sh(b_u * 8)) & 255).cast(dtypes.weakint)].load()
-      return (_half((pair >> _sh(half * 16)) & 0xffff) * scale).cast(dtypes.float16)
+    def dequant_iq4(base:UOp, subgroup:UOp, half:UOp) -> tuple[UOp, ...]:
+      scale, sh = _iq4_scale(raw, base, subgroup), _sh(half * 4)
+      qs_base = base + 2 + subgroup * 4
+      qs_vec = _amd_load(raw[qs_base], 4) if word_indices == (0, 1, 2, 3) else None
+      out_vals: list[UOp] = []
+      for qi, wi in enumerate(word_indices):
+        w = _nibble_lut(qs_vec[qi] if qs_vec is not None else raw[qs_base + wi].load(), sh, IQ4NL_LUT)
+        out_vals.extend(((w >> (b * 8)).cast(dtypes.uint8).bitcast(dtypes.int8).float() * scale).cast(dtypes.half) for b in range(4))
+      return tuple(out_vals)
     return dequant_iq4
   if ggml_type == MXFP4:
     def dequant_mxfp4(base:UOp, subgroup:UOp, half:UOp) -> tuple[UOp, ...]:
@@ -493,4 +504,89 @@ def _quant_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
   st = UOp(Ops.STORE, src=(out[(token_block * m_tiles + mt_u) * 16 + row_in_tile, output], res.cast(out.dtype)))
   return st.end(k_u, m_u, mt_u, token_block, output_block, lane).sink(
     arg=KernelInfo(name=f"linear_{QUANT_NAMES[ggml_type]}_f16_wmma", optimized=True))
+
+@functools.cache
+def _quant_linear_2d_wmma_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp,
+                                 m_blks:UOp, n_blks:UOp, wm:UOp, wn:UOp, tm:UOp, tn:UOp, in_features:UOp,
+                                 ggml_type:int, rdna4:bool=True) -> UOp:
+  # 2D LDS-tiled FP16 WMMA (BK=64) with zero-pad XOR-swizzled bank-conflict-free ds_load_b128.
+  # RDNA4 permutes each K=16 block into [0..3,8..11] and [4..7,12..15] so each lane's fragment is a single ds_load_b128.
+  # RDNA3 stores contiguous K=16 blocks XOR-swizzled by (row & 3) so each lane's 16-half fragment is 2x ds_load_b128.
+  bm, bn, waves, threads = wm * tm * 16, wn * tn * 16, wm * wn, wm * wn * 32
+  gid = UOp.range(m_blks * n_blks, 0, AxisType.GLOBAL)
+  swz = (m_blks % 4).eq(0).where(4, 1)
+  grp, in_grp = gid // (swz * n_blks), gid % (swz * n_blks)
+  block_m, block_n = grp * swz + in_grp % swz, in_grp // swz
+  lane, wave = UOp.range(32, -1, AxisType.WARP), UOp.range(waves, 2, AxisType.LOCAL)
+  tid, wave_m, wave_n, col, lane_group = wave * 32 + lane, wave // wn, wave % wn, lane % 16, lane // 16
+  grid = None
+  if grids:
+    g_len = int(grids[0].numel())
+    grid = UOp.alloc((g_len,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+    g_i = UOp.range((g_len + threads - 1) // threads, 20)
+    g_off = tid + g_i * threads
+    grid = grid.after(grid[g_off.valid(g_off < g_len)].store(grids[0][g_off.valid(g_off < g_len)].load()).end(g_i).barrier())
+  # LDS: 32,768B exact for 128x128x64 (2 WGs/CU on 64KB LDS), 16,384B for 64x64x64 (4 WGs/CU).
+  lds_shape = (8, 8) if rdna4 else (4, 16)
+  A_lds = UOp.alloc((bm, *lds_shape), dtypes.half, addrspace=AddrSpace.LOCAL)
+  B_lds = UOp.alloc((bn, *lds_shape), dtypes.half, addrspace=AddrSpace.LOCAL)
+  A_u32 = A_lds.flatten().bitcast(dtypes.uint32).reshape(bm, 8, 4)
+  x_u32 = x.flatten().bitcast(dtypes.uint32)
+  acc = UOp.alloc((tm, tn, 8), dtypes.float32, addrspace=AddrSpace.REG)
+  acc = acc.after(acc.store(acc.const_like(0.0)))
+  type_words = QUANT_SIZES[ggml_type] // raw.dtype.itemsize
+  output_words = in_features * type_words // GGML_BLOCK_SIZE
+  k_tile = UOp.range(in_features // 64, 10)
+  # Stage A (BM x 64 halves): each iter loads 16 halves (2x global_load_b128) and writes 2 XOR-swizzled 16B chunks.
+  ai = UOp.range((2 * tm) // wn, 22)
+  abid = tid + ai * threads
+  am, ak = abid // 4, abid % 4
+  a_base = (block_m * bm + am) * (in_features // 2) + k_tile * 32 + ak * 8
+  v0, v1 = _amd_load(x_u32[a_base], 4), _amd_load(x_u32[a_base + 4], 4)
+  if rdna4:
+    ac0, ac1 = (ak * 2) ^ (am & 7), (ak * 2 + 1) ^ (am & 7)
+    s0, s1 = (v0[0], v0[1], v1[0], v1[1]), (v0[2], v0[3], v1[2], v1[3])
+  else:
+    ac0, ac1 = ((ak ^ (am & 3)) * 2), ((ak ^ (am & 3)) * 2 + 1)
+    s0, s1 = (v0[0], v0[1], v0[2], v0[3]), (v1[0], v1[1], v1[2], v1[3])
+  a_sts = [A_u32.after(k_tile)[am, ac0, j].store(s0[j]) for j in range(4)] + [A_u32.after(k_tile)[am, ac1, j].store(s1[j]) for j in range(4)]
+  stage_a = UOp.group(*a_sts).end(ai)
+  # Stage B (BN x 64 halves): each iter dequants 1 group of 32 weights (= 2 K=16 blocks) using exact _make_wmma_dequant.
+  bi = UOp.range(tn // wm, 24)
+  bbid = tid + bi * threads
+  bn_i, bg = bbid // 2, bbid % 2
+  gn, gbg = block_n * bn + bn_i, k_tile * 2 + bg
+  base, subgroup = gn * output_words + (gbg // 8) * type_words, gbg % 8
+  B_dst = B_lds.after(k_tile)
+  b_sts: list[UOp] = []
+  for k16 in range(2):
+    k_u = UOp.range(16, 25 + k16, AxisType.UPCAST)
+    vals = _make_wmma_dequant(raw, ggml_type, UOp.const(0, dtypes.weakint), 1, k_u, grid)(base, subgroup, UOp.const(k16, dtypes.weakint))
+    if isinstance(vals, tuple):
+      if rdna4:
+        bc0, bc1 = (bg * 4 + k16 * 2) ^ (bn_i & 7), (bg * 4 + k16 * 2 + 1) ^ (bn_i & 7)
+        for q, idx in enumerate((0, 1, 2, 3, 8, 9, 10, 11)): b_sts.append(B_dst[bn_i, bc0, q].store(vals[idx]))
+        for q, idx in enumerate((4, 5, 6, 7, 12, 13, 14, 15)): b_sts.append(B_dst[bn_i, bc1, q].store(vals[idx]))
+      else:
+        bblk = (bg * 2 + k16) ^ (bn_i & 3)
+        for q in range(16): b_sts.append(B_dst[bn_i, bblk, q].store(vals[q]))
+    else:
+      if rdna4:
+        bc, bq = (bg * 4 + k16 * 2 + (k_u // 4) % 2) ^ (bn_i & 7), (k_u // 8) * 4 + (k_u % 4)
+        b_sts.append(B_dst[bn_i, bc, bq].store(vals).end(k_u))
+      else:
+        b_sts.append(B_dst[bn_i, (bg * 2 + k16) ^ (bn_i & 3), k_u].store(vals).end(k_u))
+  staged = UOp.group(stage_a, UOp.group(*b_sts).end(bi)).barrier()
+  A_r, B_r = A_lds.after(staged), B_lds.after(staged)
+  kk, tm_r, tn_r = UOp.range(4, 30), UOp.range(tm, 31), UOp.range(tn, 32)
+  mr, nr = (wave_m * tm + tm_r) * 16 + col, (wave_n * tn + tn_r) * 16 + col
+  a_f = A_r[mr, (kk * 2 + lane_group) ^ (mr & 7)] if rdna4 else A_r[mr, kk ^ (mr & 3)]
+  b_f = B_r[nr, (kk * 2 + lane_group) ^ (nr & 7)] if rdna4 else B_r[nr, kk ^ (nr & 3)]
+  comp = acc[tm_r, tn_r].store(UOp.wmma(a_f, b_f, acc.after(k_tile, kk)[tm_r, tn_r], *WMMA_ARG)).end(tn_r, tm_r, kk).barrier().end(k_tile)
+  acc_f = acc.after(comp)
+  tm_o, tn_o, e_o = UOp.range(tm, 40), UOp.range(tn, 41), UOp.range(8, 42, AxisType.UPCAST)
+  out_m = block_m * bm + (wave_m * tm + tm_o) * 16 + (lane_group * 8 + e_o if rdna4 else e_o * 2 + lane_group)
+  out_n = block_n * bn + (wave_n * tn + tn_o) * 16 + col
+  return out[out_m, out_n].store(acc_f[tm_o, tn_o, e_o].load().cast(out.dtype)).end(e_o, tn_o, tm_o, wave, lane, gid).sink(
+    arg=KernelInfo(name=f"linear_{QUANT_NAMES[ggml_type]}_2d_wmma", opts_to_apply=()))
 

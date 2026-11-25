@@ -139,11 +139,10 @@ def _q8(x:Tensor, tokens:int, in_f:int, dev:str|tuple[str, ...], axis:int|None=N
 
 @functools.cache
 def _iq_lut(t:int, dev:str|tuple[str, ...], wmma:bool=False) -> tuple[UOp, ...]:
-  if t not in ({16, 17, 18, 19, 21, 22, 23} if wmma else {16, 17, 18, 19, 21, 22}): return ()
+  if t not in {16, 17, 18, 19, 21, 22}: return ()
   from tinygrad.runtime.autogen import ggml_common as g
-  if t == 23 or (wmma and t in (18, 22)):
-    vals = ([g.kvalues_iq4nl[k] for j in range(16) for i in range(16) for k in (i, j)] if t == 23 else
-            [((v >> (8 * i)) & 0xff) / 64.0 for v in (g.iq3xxs_grid if t == 18 else g.iq2s_grid) for i in range(4 if t == 18 else 8)])
+  if wmma and t in (18, 22):
+    vals = [((v >> (8 * i)) & 0xff) / 64.0 for v in (g.iq3xxs_grid if t == 18 else g.iq2s_grid) for i in range(4 if t == 18 else 8)]
     words: tuple[int, ...] = struct.unpack(f"<{len(vals) // 2}I", struct.pack(f"<{len(vals)}e", *vals))
   else:
     grid, nw = {16:(g.iq2xxs_grid, 2), 17:(g.iq2xs_grid, 2), 19:(g.iq1s_grid, 2), 22:(g.iq2s_grid, 2),
@@ -171,6 +170,11 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         w4 = ggml_data_to_tensor(tile_u8[:CHECK_ROWS].flatten(), CHECK_ROWS * K, qtype).reshape(CHECK_ROWS, K)
         _assert_close(out[:, :CHECK_ROWS].float().numpy(), (x.float() @ w4.T).numpy(), rtol=4e-2, atol=5e-2)
       if m % 16 == 0 and n % 16 == 0:
+        if not cdna and m % 32 == 0 and n % 64 == 0 and K % 64 == 0:
+          wm, wn, tm, tn = (2, 4, 4, 2) if m >= 256 and m % 128 == 0 and n % 128 == 0 else (2, 2, 2, 2) if m % 64 == 0 else (1, 2, 2, 2)
+          return (lambda: _krun(f"{arch_gemm}_gemm_{kname}_2d", (m, n), dev, w_packed, x.half().contiguous(),
+                                *_iq_lut(qtype, dev, True), m_blks=m // (wm * tm * 16), n_blks=n // (wn * tn * 16),
+                                wm=wm, wn=wn, tm=tm, tn=tn, in_features=K, raw_len=w_len)), _verify
         mt = 8 if m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
         return (lambda: _krun(f"{arch_gemm}_gemm_{kname}_f16", (m, n), dev, w_packed, x.half().contiguous(),
                               *_iq_lut(qtype, dev, True), m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=K, raw_len=w_len)), _verify
@@ -249,9 +253,11 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         ref = q[:, :1].float().scaled_dot_product_attention(kv[0, :, :1].float(), kv[1, :, :1].float(), attn_mask=mask, enable_gqa=True).numpy()
         _assert_close(out[:, :1].float().numpy(), ref, rtol=5e-3, atol=5e-3)
       def _run() -> Tensor:
+        wm = 4 if ATTN_M % 64 == 0 else 2
+        bnt = 4 if target[0] == 12 and ATTN_D <= 128 and ATTN_N % 64 == 0 else 2
         return _krun(f"{arch_gemm}_flash_attn", (ATTN_H, ATTN_M, ATTN_D), dev, q.reshape(ATTN_H, ATTN_M, ATTN_D), kv,
-                     UOp.const(ATTN_N), UOp.const(ATTN_M), BH=ATTN_H, m_blks=ATTN_M // 32, B=1, H_KV=ATTN_HKV, d_blks=ATTN_D // 64,
-                     n_blks=ATTN_N // 32, valid_kv_offset=0, q_start_from_end=1).reshape(1, ATTN_H, ATTN_M, ATTN_D)
+                     UOp.const(ATTN_N), UOp.const(ATTN_M), BH=ATTN_H, m_blks=ATTN_M // (wm * 16), B=1, H_KV=ATTN_HKV, d_blks=ATTN_D // 64,
+                     n_blks=ATTN_N // (bnt * 16), waves_m=wm, bn_tiles=bnt, valid_kv_offset=0, q_start_from_end=1).reshape(1, ATTN_H, ATTN_M, ATTN_D)
       return _run, _verify
     cases.append((f"flash_attn_prefill_H{ATTN_H}_M{ATTN_M}_N{ATTN_N}_D{ATTN_D}",
                   (ATTN_H * ATTN_M * ATTN_D + 2 * ATTN_HKV * ATTN_N * ATTN_D) * 2 + ATTN_H * ATTN_M * ATTN_D * 4,
@@ -265,7 +271,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         ref = q[:, :1].float().scaled_dot_product_attention(kv[0, :, :1].float(), kv[1, :, :1].float(), enable_gqa=True).numpy()
         _assert_close(out[:, :1].float().numpy(), ref, rtol=5e-3, atol=5e-3)
       def _run() -> Tensor:
-        ch, grp, waves = min(max(16, 128 // ATTN_HKV), ceildiv(ctx, 64)), ATTN_H // ATTN_HKV, 16
+        ch, grp, waves = min(max(16, 128 // ATTN_HKV), ceildiv(ctx, 64)), ATTN_H // ATTN_HKV, 8
         while waves * grp * ((ATTN_D + 4) * 2 + 8) > 65536: waves //= 2
         kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
           B=1, H_KV=ATTN_HKV, G=grp, d_blks=ATTN_D // 64, n_blks=ctx // 64, C=ch, valid_kv_offset=0, waves=waves)

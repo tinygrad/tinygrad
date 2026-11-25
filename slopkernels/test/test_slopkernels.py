@@ -109,6 +109,12 @@ class TestSlopKernelsUIR(unittest.TestCase):
     got_q16 = _krun(f"{arch_gemm}_gemm_q8_0_f16", (16, 64), dev, w_u16, x_q16,
                     m_blks=1, m_tiles=1, out_features=64, in_features=1280, raw_len=w_len).numpy()
     np.testing.assert_allclose(got_q16, ref_q16, rtol=2e-2, atol=2e-2 * np.abs(ref_q16).max())
+    if tgt[0] != 9:
+      x_q64 = Tensor(rng.standard_normal((64, 1280)).astype(np.float16)).realize()
+      ref_q64 = (x_q64.float() @ w_ref.T).numpy()
+      got_q64 = _krun(f"{arch_gemm}_gemm_q8_0_2d", (64, 64), dev, w_u16, x_q64,
+                      m_blks=1, n_blks=1, wm=2, wn=2, tm=2, tn=2, in_features=1280, raw_len=w_len).numpy()
+      np.testing.assert_allclose(got_q64, ref_q64, rtol=2e-2, atol=2e-2 * np.abs(ref_q64).max())
     # 3. MoE decode
     _, mw_u16, mw_ref = _make_q8_0(rng, 4 * 16, 256)
     mw_ref_np = mw_ref.numpy().reshape(4, 16, 256)
@@ -132,7 +138,8 @@ class TestSlopKernelsUIR(unittest.TestCase):
     if tgt[0] != 9:
       q_pre = Tensor(rng.standard_normal((1, 4, 32, 64)).astype(np.float16)).realize()
       got_fp = _krun(f"{arch_gemm}_flash_attn", (4, 32, 64), dev, q_pre.reshape(4, 32, 64), kv_fa, UOp.const(64), UOp.const(32),
-                     BH=4, m_blks=1, B=1, H_KV=2, d_blks=1, n_blks=4, valid_kv_offset=0, q_start_from_end=1).reshape(1, 4, 32, 64)
+                     BH=4, m_blks=1, B=1, H_KV=2, d_blks=1, n_blks=4, waves_m=2, bn_tiles=2, valid_kv_offset=0,
+                     q_start_from_end=1).reshape(1, 4, 32, 64)
       mask = Tensor.full((32, 64), float("-inf"), dtype=dtypes.float32).triu(64 - 32 + 1)
       ref_fp = q_pre.float().scaled_dot_product_attention(kv_fa[0, :, :, :64].float(), kv_fa[1, :, :, :64].float(), attn_mask=mask, enable_gqa=True)
       np.testing.assert_allclose(got_fp.numpy(), ref_fp.numpy(), rtol=5e-3, atol=5e-3)

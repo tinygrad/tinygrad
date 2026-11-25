@@ -16,7 +16,7 @@ from slopkernels.src import amd as _amd, amd_gguf as _gguf
 UIR_DIR = pathlib.Path(__file__).resolve().parent / "uir"
 _DTYPES: dict[str, DType] = {v.name: v for v in vars(type(dtypes)).values() if isinstance(v, DType)}
 _IQ_GRID_LENS = {_gguf.IQ2_XXS: 512, _gguf.IQ2_XS: 1024, _gguf.IQ1_S: 4096, _gguf.IQ2_S: 2048, _gguf.IQ3_XXS: 256, _gguf.IQ3_S: 512}
-_WMMA_TBL_LENS = {**_IQ_GRID_LENS, _gguf.IQ4_XS: 256, _gguf.IQ3_XXS: 512, _gguf.IQ2_S: 4096}
+_WMMA_TBL_LENS = {**_IQ_GRID_LENS, _gguf.IQ3_XXS: 512, _gguf.IQ2_S: 4096}
 
 def _wdt(t:int) -> DType: return dtypes.uint8 if t == _gguf.MXFP4 else dtypes.uint16 if t in _gguf.HALFWORD_QUANTS else dtypes.uint32
 def _p(slot:int, shape:tuple[int|UOp, ...], dt:str|DType) -> UOp: return UOp.param(slot, dt if isinstance(dt, DType) else _DTYPES[dt], shape)
@@ -58,6 +58,14 @@ def _b_gemm(qt:int, kg:int, ln:int) -> UOp:
   return _gguf._quant_linear_f16_wmma_kernel(_p(0, (tok, outf), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (tok, inf), "f16"), *tbl,
                                              m_blks=mb, m_tiles=mt, out_features=outf, in_features=inf, ggml_type=qt, kgroups=kg, lanes=ln)
 
+def _b_gemm_2d(qt:int, rdna4:bool) -> UOp:
+  mb, nb, wm, wn, tm, tn = _t("m_blks"), _t("n_blks"), _t("wm", 1, 4), _t("wn", 1, 4), _t("tm", 1, 4), _t("tn", 1, 4)
+  inf, rl = _t("in_features", 64), _t("raw_len", 1, 1 << 30)
+  tok, outf = mb * (wm * tm * 16), nb * (wn * tn * 16)
+  tbl = (_p(3, (_WMMA_TBL_LENS[qt],), "u32"),) if qt in _WMMA_TBL_LENS else ()
+  return _gguf._quant_linear_2d_wmma_kernel(_p(0, (tok, outf), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (tok, inf), "f16"), *tbl,
+                                            m_blks=mb, n_blks=nb, wm=wm, wn=wn, tm=tm, tn=tn, in_features=inf, ggml_type=qt, rdna4=rdna4)
+
 def _b_fdc() -> UOp:
   B, H, C, db, voff = _t("B", 1, 64), _t("H", 1, 256), _t("C", 1, 48), _t("d_blks", 1, 8), _t("valid_kv_offset", 0)
   return _amd._amd_flash_decode_combine(_p(0, (B, H, 1, db * 64), "f32"), _p(1, (B, H, C, db * 64), "f32"),
@@ -72,9 +80,11 @@ def _b_fdp() -> UOp:
 
 def _b_fa(rdna4:bool) -> UOp:
   B, H_KV, db, nb, voff = _t("B", 1, 64), _t("H_KV", 1, 256), _t("d_blks", 1, 8), _t("n_blks", 1, 65536), _t("valid_kv_offset", 0)
-  BH, mb, qfe, vkl, ql, D = _t("BH", 1, 4096), _t("m_blks", 1, 4096), _t("q_start_from_end", 0, 1), _v(3, "valid_kv_len"), _v(4, "q_len"), db * 64
-  return _amd._amd_flash_attention(_p(0, (BH, mb * 32, D), "f32"), _p(1, (BH, mb * 32, D), "f16"), _p(2, (2, B, H_KV, nb * 32, D), "f16"),
-    valid_kv_len=qfe.eq(1).where(vkl + voff, vkl + voff + ql), q_start=qfe.eq(1).where(vkl + voff - ql, vkl + voff), d_blks=db, rdna4=rdna4)
+  BH, mb, wm, bnt = _t("BH", 1, 4096), _t("m_blks", 1, 4096), _t("waves_m", 2, 4), _t("bn_tiles", 2, 4)
+  qfe, vkl, ql, D = _t("q_start_from_end", 0, 1), _v(3, "valid_kv_len"), _v(4, "q_len"), db * 64
+  return _amd._amd_flash_attention(_p(0, (BH, mb * (wm * 16), D), "f32"), _p(1, (BH, mb * (wm * 16), D), "f16"),
+    _p(2, (2, B, H_KV, nb * (bnt * 16), D), "f16"), valid_kv_len=qfe.eq(1).where(vkl + voff, vkl + voff + ql),
+    q_start=qfe.eq(1).where(vkl + voff - ql, vkl + voff), d_blks=db, m_blks=mb, waves_m=wm, bn_tiles=bnt, rdna4=rdna4)
 
 def _b_hc(bdt:str, sdt:str) -> UOp:
   tok, feats, iters = _t("tokens"), _t("features", 32), _t("iters", 1, 64)
@@ -99,6 +109,8 @@ _BUILDERS: dict[str, Callable[[], UOp]] = {
   **{f"{a}_moe_{qn}": functools.partial(_b_moe, qt, cdna) for qt, qn in _gguf.QUANT_NAMES.items() for a, cdna in (("rdna", False), ("cdna", True))},
   **{f"{a}_gemm_{qn}_f16": functools.partial(_b_gemm, qt, kg, ln)
      for qt, qn in _gguf.QUANT_NAMES.items() for a, kg, ln in (("rdna4", 2, 32), ("rdna3", 1, 32), ("cdna", 4, 64))},
+  **{f"{a}_gemm_{qn}_2d": functools.partial(_b_gemm_2d, qt, rdna4)
+     for qt, qn in _gguf.QUANT_NAMES.items() for a, rdna4 in (("rdna4", True), ("rdna3", False))},
   "amd_flash_decode_combine": _b_fdc,
   "amd_flash_decode_partial": _b_fdp,
   "rdna4_flash_attn": functools.partial(_b_fa, True),

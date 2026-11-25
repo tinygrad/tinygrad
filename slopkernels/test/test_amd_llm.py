@@ -65,7 +65,7 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
     v_base, v_off = _split_offset(valid_end)
     vkl_u = v_base if isinstance(v_base, UOp) else UOp.const(int(v_base))
     if decode and M == 1 and D in (64, 128, 256) and (grp := H // H_KV) in (1, 2, 4, 8) and N_phys % 64 == 0:
-      ch, waves = min(48, ceildiv(N_phys, 64)), 16
+      ch, waves = min(48, ceildiv(N_phys, 64)), 8
       while waves * grp * ((D + 4) * 2 + 8) > 65536: waves //= 2
       kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
         B=B, H_KV=H_KV, G=grp, d_blks=D // 64, n_blks=N_phys // 64, C=ch, valid_kv_offset=v_off, waves=waves)
@@ -75,8 +75,11 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
       out = UOp.alloc((B, H, 1, D), dtypes.float32, device=q.device)
       return Tensor(out.after(kc.call(out, partial.after(cp), stats.after(cp), vkl_u)))
     if not decode and target[0] != 9 and D in (64, 128, 256, 320) and N_phys % 32 == 0 and M % 32 == 0:
+      wm = 4 if M % 64 == 0 else 2
+      bnt = 4 if target[0] == 12 and D <= 128 and N_phys % 64 == 0 else 2
       k_fa = unwrap(slopkernels.get(f"{'rdna4' if target[0] == 12 else 'rdna3'}_flash_attn")).specialize(
-        BH=B * H, m_blks=M // 32, B=B, H_KV=H_KV, d_blks=D // 64, n_blks=N_phys // 32, valid_kv_offset=v_off, q_start_from_end=1)
+        BH=B * H, m_blks=M // (wm * 16), B=B, H_KV=H_KV, d_blks=D // 64, n_blks=N_phys // (bnt * 16),
+        waves_m=wm, bn_tiles=bnt, valid_kv_offset=v_off, q_start_from_end=1)
       ql_u = T_real if isinstance(T_real, UOp) else UOp.const(M)
       out = UOp.alloc((B * H, M, D), dtypes.float32, device=q.device)
       ret = Tensor(out.after(k_fa.call(out, q_in.reshape(B * H, M, D).uop, assigned_kv.uop, vkl_u, ql_u)).reshape((B, H, M, D)))

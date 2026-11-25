@@ -5,10 +5,8 @@ from tinygrad import UOp
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 
-BLOCK_M, BLOCK_N, WARP_SIZE = 32, 32, 32
-WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
-WAVES_M, LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 2, 16
-WMMA_ACC, THREADS_PER_BLOCK = WMMA_M // LANES_PER_WAVE_M, WARP_SIZE * WAVES_M
+WARP_SIZE, WMMA_M, WMMA_N, WMMA_K = 32, 16, 16, 16
+LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 16
 LDS_PAD, WMMA_ARG, LOG2E = 4, ((WMMA_N, WMMA_M, WMMA_K), 32), math.log2(math.e)
 
 def _unbind(v:UOp) -> UOp: return v.unbind_all()[0]
@@ -63,7 +61,7 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
                                         valid_kv_len:UOp, d_blks:UOp, group:UOp, waves:UOp) -> UOp:
   valid_kv_len = _unbind(valid_kv_len)
   _, B, H_KV, _, _ = cache_kv.shape
-  D, DPL, CHUNK, PARTIALS, SEC = d_blks * 64, d_blks * 2, 64, out.shape[2], 64 // waves
+  D, DPL, CHUNK, PARTIALS, STEPS = d_blks * 64, d_blks * 2, 64, out.shape[2], 64 // waves
   scale = D.cast(dtypes.float32).rsqrt()
   total_chunks = (valid_kv_len + CHUNK - 1) // CHUNK
   live_chunks = total_chunks.minimum(PARTIALS)
@@ -72,10 +70,10 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   b, kv_head = block_bhkv // H_KV, block_bhkv % H_KV
   d_u = UOp.range(DPL, 11, AxisType.UPCAST)
   zerof = UOp.const(0, dtypes.float)
-  # per-lane query fragments for every GQA head, kept in registers
+  # per-lane prescaled query fragments for every GQA head, kept in registers
   qf_reg = UOp.alloc((group, DPL), dtypes.float, addrspace=AddrSpace.REG)
   h_q = UOp.range(group, 15)
-  qf_reg = qf_reg.after(qf_reg[h_q, d_u].store(q[b, kv_head * group + h_q, 0, lane * DPL + d_u].load().float()).end(d_u, h_q))
+  qf_reg = qf_reg.after(qf_reg[h_q, d_u].store(q[b, kv_head * group + h_q, 0, lane * DPL + d_u].load().float() * scale).end(d_u, h_q))
   # A finite initial max keeps fully masked waves from computing exp(-inf - -inf).
   h_init = UOp.range(group, 16)
   acc_reg = UOp.alloc((group, DPL), dtypes.float, addrspace=AddrSpace.REG)
@@ -85,40 +83,29 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
   max_reg = max_reg.after(max_reg[h_init].store(UOp.const(-1e30, dtypes.float)).end(h_init))
   sum_reg = sum_reg.after(sum_reg[h_init].store(zerof).end(h_init))
   n_rounds = (block_chunk < total_chunks).where((total_chunks - 1 - block_chunk) // PARTIALS + 1, UOp.const(0, dtypes.weakint))
-  chunk_round = UOp.range(n_rounds, 4)
-  chunk_id = block_chunk + chunk_round * PARTIALS
-  scores_reg = UOp.alloc((SEC, group), dtypes.float, addrspace=AddrSpace.REG)
-  v_reg = UOp.alloc((SEC, DPL), dtypes.float, addrspace=AddrSpace.REG)
-  j_s, h_s = UOp.range(SEC, 12), UOp.range(group, 10)
-  key_s = chunk_id * CHUNK + wave * SEC + j_s
+  chunk_round, s_it = UOp.range(n_rounds, 4), UOp.range(STEPS, 5)
+  key_s = (block_chunk + chunk_round * PARTIALS) * CHUNK + s_it * waves + wave
   valid_s = key_s < valid_kv_len
-  kfrag = cache_kv[0, b, kv_head, key_s, lane * DPL + d_u].load().float()
-  vfrag = valid_s.where(cache_kv[1, b, kv_head, key_s, lane * DPL + d_u].load().float(), zerof)
-  dot_lane = (qf_reg[h_s, d_u].load() * kfrag).reduce(d_u, arg=(Ops.ADD, 0)) * scale
-  score_s = valid_s.where(warp_reduce(dot_lane, full_wave=True), UOp.const(-1e30, dtypes.float))
-  pass1 = UOp.group(scores_reg.after(chunk_round)[j_s, h_s].store(score_s).end(h_s),
-                    v_reg.after(chunk_round)[j_s, d_u].store(vfrag).end(d_u)).end(j_s)
-  scores_r, v_r = scores_reg.after(pass1), v_reg.after(pass1)
-  prev_acc, prev_max, prev_sum = acc_reg.after(chunk_round), max_reg.after(chunk_round), sum_reg.after(chunk_round)
-  h_u, j_u = UOp.range(group, 17, AxisType.UPCAST), UOp.range(SEC, 18, AxisType.UPCAST)
-  key_u = chunk_id * CHUNK + wave * SEC + j_u
-  valid_u = key_u < valid_kv_len
-  sc_u = scores_r[j_u, h_u].load()
-  row_max = prev_max[h_u].load().maximum(sc_u.reduce(j_u, arg=(Ops.MAX, 0)))
-  alpha = ((prev_max[h_u].load() - row_max) * LOG2E).exp2()
-  beta = valid_u.where(((sc_u - row_max) * LOG2E).exp2(), zerof)
-  new_acc = alpha * prev_acc[h_u, d_u].load() + (beta * v_r[j_u, d_u].load()).reduce(j_u, arg=(Ops.ADD, 0))
-  new_sum = alpha * prev_sum[h_u].load() + beta.reduce(j_u, arg=(Ops.ADD, 0))
-  update = UOp.group(acc_reg[h_u, d_u].store(new_acc).end(h_u, d_u), max_reg[h_u].store(row_max).end(h_u),
-                     sum_reg[h_u].store(new_sum).end(h_u)).end(chunk_round)
+  kfrag = cache_kv[0, b, kv_head, key_s, lane * DPL + d_u].load(arg="nontemporal").float()
+  vfrag = valid_s.where(cache_kv[1, b, kv_head, key_s, lane * DPL + d_u].load(arg="nontemporal").float(), zerof)
+  prev_acc, prev_max, prev_sum = acc_reg.after(chunk_round, s_it), max_reg.after(chunk_round, s_it), sum_reg.after(chunk_round, s_it)
+  h_u = UOp.range(group, 17)
+  score_s = valid_s.where(warp_reduce((qf_reg[h_u, d_u].load() * kfrag).reduce(d_u, arg=(Ops.ADD, 0)), full_wave=True), UOp.const(-1e30, dtypes.float))
+  old_max = prev_max[h_u].load()
+  new_max = old_max.maximum(score_s)
+  alpha = ((old_max - new_max) * LOG2E).exp2()
+  beta = valid_s.where(((score_s - new_max) * LOG2E).exp2(), zerof)
+  update = UOp.group(acc_reg[h_u, d_u].store(alpha * prev_acc[h_u, d_u].load() + beta * vfrag).end(d_u),
+                     max_reg[h_u].store(new_max), sum_reg[h_u].store(alpha * prev_sum[h_u].load() + beta)).end(h_u, s_it, chunk_round)
   acc_reg, max_reg, sum_reg = acc_reg.after(update), max_reg.after(update), sum_reg.after(update)
   # exchange across the block's waves through LDS (fp16 halves LDS so more blocks fit per CU)
   acc_lds = UOp.alloc((waves, group, D + LDS_PAD), dtypes.half, addrspace=AddrSpace.LOCAL)[:, :, :D]
   ml_lds = UOp.alloc((waves, group, 2), dtypes.float, addrspace=AddrSpace.LOCAL)
   lds_acc = acc_lds.reshape(waves, group, WARP_SIZE, DPL)
+  h_w = UOp.range(group, 18, AxisType.UPCAST)
   # Normalize before fp16 to avoid overflow. Nonempty waves have sum >= 1; empty waves keep their zero accumulator.
-  s_acc = lds_acc[wave, h_u, lane, d_u].store((acc_reg[h_u, d_u].load() / sum_reg[h_u].load().maximum(1.0)).cast(dtypes.half)).end(h_u, d_u)
-  s_m, s_l = ml_lds[wave, h_u, 0].store(max_reg[h_u].load()).end(h_u), ml_lds[wave, h_u, 1].store(sum_reg[h_u].load()).end(h_u)
+  s_acc = lds_acc[wave, h_w, lane, d_u].store((acc_reg[h_w, d_u].load() / sum_reg[h_w].load().maximum(1.0)).cast(dtypes.half)).end(h_w, d_u)
+  s_m, s_l = ml_lds[wave, h_w, 0].store(max_reg[h_w].load()).end(h_w), ml_lds[wave, h_w, 1].store(sum_reg[h_w].load()).end(h_w)
   acc_lds, ml_lds = acc_lds.after(s_acc, s_m, s_l), ml_lds.after(s_acc, s_m, s_l)
   tid, w_u = wave * WARP_SIZE + lane, UOp.range(waves, 14, AxisType.UPCAST)
   fi = UOp.range((group * D + waves * WARP_SIZE - 1) // (waves * WARP_SIZE), 13)
@@ -165,49 +152,120 @@ def _wmma_fragment(fragment:UOp, lane:UOp, rdna4:bool) -> UOp:
   return fragment.reshape(2, 2, 4)[:, lane // 16, :].reshape(8) if rdna4 else fragment
 
 @functools.cache
-def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:UOp, d_blks:UOp, rdna4:bool=False) -> UOp:
+def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:UOp, d_blks:UOp,
+                         m_blks:UOp, waves_m:UOp, bn_tiles:UOp, rdna4:bool=False) -> UOp:
   valid_kv_len, q_start = _unbind(valid_kv_len), _unbind(q_start)
-  BH, M, D = q.shape
+  BH, _, D = q.shape
   _, B, H_KV, physical_n, _ = cache.shape
   v = cache[1].reshape(B * H_KV, physical_n, D)
   gqa_group = BH // v.shape[0]
-  TM, TN, TD, frag_k = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M), BLOCK_N // LANES_PER_WAVE_N, d_blks * 4, 8 if rdna4 else 16
+  block_m_sz, block_n_sz, threads = waves_m * WMMA_M, bn_tiles * WMMA_N, waves_m * WARP_SIZE
+  TM, TN, TD = WMMA_M // LANES_PER_WAVE_M, bn_tiles, d_blks * 4
   SCALE_L2 = (d_blks * 64).cast(dtypes.float32).rsqrt() * LOG2E
-  block_bh, block_m = UOp.range(BH, 0, AxisType.GLOBAL), UOp.range(M // BLOCK_M, 1, AxisType.GLOBAL)
+  block_bh, block_m_raw = UOp.range(BH, 0, AxisType.GLOBAL), UOp.range(m_blks, 1, AxisType.GLOBAL)
+  # Reverse causal M-tile order so the heaviest tiles launch first and reduce tail imbalance across CUs.
+  block_m = m_blks - 1 - block_m_raw
   kv_head = block_bh // gqa_group
   k_u32 = cache.flatten().bitcast(dtypes.uint32)
-  o = o.reshape(BH, M // BLOCK_M, BLOCK_M, D)[block_bh, block_m]
-  q_tile = q.reshape(BH, M // BLOCK_M, BLOCK_M, D)[block_bh, block_m]
+  o_tile = o[block_bh].reshape(m_blks, block_m_sz, D)[block_m]
+  q_tile = q[block_bh].reshape(m_blks, block_m_sz, D)[block_m]
   v = v[kv_head]
-  wave_m, lane = UOp.range(WAVES_M, 2, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
+  wave_m, lane = UOp.range(waves_m, 2, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, AxisType.WARP)
   tid, lane_m, lane_n = wave_m * WARP_SIZE + lane, lane // LANES_PER_WAVE_N, lane % LANES_PER_WAVE_N
-  # Keep Q fragments in registers (no Q_lds), and share KV_lds between K (QK^T) and V (PV) alongside a tiny P_lds.
-  q_reg = UOp.alloc((d_blks * 4, frag_k), dtypes.half, addrspace=AddrSpace.REG)
-  kq_i, qk_u = UOp.range(d_blks * 4, 10), UOp.range(frag_k, 11, AxisType.UPCAST)
+  frag_k = 8 if rdna4 else 16
+  q_reg = UOp.alloc((TD, frag_k), dtypes.half, addrspace=AddrSpace.REG)
+  kq_i, qk_u = UOp.range(TD, 10), UOp.range(frag_k, 11, AxisType.UPCAST)
   q_col = kq_i * 16 + ((qk_u // 4) * 8 + lane_m * 4 + (qk_u % 4) if rdna4 else qk_u)
-  q_reg = q_reg.after(q_reg[kq_i, qk_u].store(q_tile[wave_m * WMMA_M + lane_n, q_col].load()).end(qk_u, kq_i))
-  kv_lds_raw = UOp.alloc((D * (BLOCK_N + LDS_PAD),), dtypes.half, addrspace=AddrSpace.LOCAL)
-  p_lds_alloc = UOp.alloc((BLOCK_M, BLOCK_N + LDS_PAD), dtypes.half, addrspace=AddrSpace.LOCAL)[:, :BLOCK_N]
-  acc, m_i, l_i = _reg((TM, TD), 0), _reg((TM,), -1e30), _reg((TM,), 0)
-  n_end = ((q_start + (block_m + 1) * BLOCK_M).minimum(valid_kv_len) + BLOCK_N - 1) // BLOCK_N
+  q_val = (q_tile[wave_m * WMMA_M + lane_n, q_col].load().float() * SCALE_L2).cast(dtypes.half)
+  q_reg = q_reg.after(q_reg[kq_i, qk_u].store(q_val).end(qk_u, kq_i))
+  n_end = ((q_start + (block_m + 1) * block_m_sz).minimum(valid_kv_len) + block_n_sz - 1) // block_n_sz
   n_tile = UOp.range(n_end, 100)
-  ki, k4 = UOp.range(d_blks * 4, 12), UOp.range(4, 13, AxisType.UPCAST)
-  k_off = tid * (d_blks * 16) + ki * 4 + k4
-  k_lds_u32 = kv_lds_raw.after(n_tile).bitcast(dtypes.uint32)[:BLOCK_N * (d_blks * 32 + 2)] \
-    .reshape(BLOCK_N, d_blks * 32 + 2)[:, :d_blks * 32].reshape(BLOCK_N * (d_blks * 32))
-  k_store = k_lds_u32[k_off].store(k_u32[(kv_head * physical_n + n_tile * BLOCK_N) * (d_blks * 32) + k_off].load()).end(k4, ki)
-  KV_lds_k = kv_lds_raw.after(k_store)[:BLOCK_N * (D + LDS_PAD)].reshape(BLOCK_N, D + LDS_PAD)[:, :D]
+  if rdna4:
+    # RDNA4: compute S^T = K @ Q^T so each M-row lives in only 2 lanes (lane, lane^16) -> 1-shuffle softmax,
+    # ZERO P_lds (P_reg feeds P @ V WMMA directly), K-permuted XOR ds_load_b128 for K, and 8-half padded V_lds.
+    v_pad = 8
+    kv_lds_raw = UOp.alloc((D * (block_n_sz + v_pad),), dtypes.half, addrspace=AddrSpace.LOCAL)
+    alpha_lds = UOp.alloc((waves_m, 16), dtypes.float32, addrspace=AddrSpace.LOCAL)
+    acc, m_i, l_i = _reg((TD, 8), 0), _reg((1,), -1e30), _reg((1,), 0)
+    ki = UOp.range((bn_tiles * d_blks * 2) // waves_m, 12)
+    bid = tid + ki * threads
+    kr, kk_i = bid // TD, bid % TD
+    k_base = (kv_head * physical_n + n_tile * block_n_sz + kr) * (d_blks * 32) + kk_i * 8
+    v0, v1 = _amd_load(k_u32[k_base], 4), _amd_load(k_u32[k_base + 4], 4)
+    ch0, ch1 = (kk_i * 2) ^ (kr & 7), (kk_i * 2 + 1) ^ (kr & 7)
+    k_lds_u32 = kv_lds_raw.after(n_tile).bitcast(dtypes.uint32)[:block_n_sz * (d_blks * 8) * 4].reshape(block_n_sz, d_blks * 8, 4)
+    ks = ([k_lds_u32[kr, ch0, j].store(s) for j, s in enumerate((v0[0], v0[1], v1[0], v1[1]))] +
+          [k_lds_u32[kr, ch1, j].store(s) for j, s in enumerate((v0[2], v0[3], v1[2], v1[3]))])
+    k_ready = UOp.group(*ks).end(ki).barrier()
+    K_lds = kv_lds_raw.after(k_ready)[:block_n_sz * (d_blks * 8) * 8].reshape(block_n_sz, d_blks * 8, 8)
+    S_reg = _reg((TN, 8), 0, n_tile)
+    k_qk, tn1 = UOp.range(TD, 101), UOp.range(TN, 102)
+    k_row = tn1 * 16 + lane_n
+    k_frag = K_lds[k_row, (k_qk * 2 + lane_m) ^ (k_row & 7)]
+    qk_done = S_reg[tn1].store(UOp.wmma(k_frag, q_reg[k_qk], S_reg.after(k_qk)[tn1], *WMMA_ARG)).end(tn1).end(k_qk).barrier()
+    S_reg = S_reg.after(qk_done)
+    q_idx = q_start + block_m * block_m_sz + wave_m * 16 + lane_n
+    tn_m, e_m = UOp.range(TN, 105), UOp.range(8, 106, AxisType.UPCAST)
+    k_idx = n_tile * block_n_sz + tn_m * 16 + lane_m * 8 + e_m
+    causal = (k_idx <= q_idx) & (k_idx < valid_kv_len)
+    S_reg = S_reg.after(S_reg[tn_m, e_m].store(causal.where(S_reg[tn_m, e_m].load(), UOp.const(-math.inf, dtypes.float32))).end(e_m, tn_m))
+    tn_u1, e_u1 = UOp.range(TN, 107, AxisType.UPCAST), UOp.range(8, 108, AxisType.UPCAST)
+    row_max = warp_reduce(S_reg[tn_u1, e_u1].load().reduce(e_u1, tn_u1, arg=(Ops.MAX, 0)), Ops.MAX, masks=(16,))
+    m_prev = m_i.after(n_tile)[0].load()
+    m_new = m_prev.maximum(row_max)
+    m_safe = m_new.maximum(-1e30)
+    alpha = (m_prev - m_safe).exp2()
+    tn_s2, e_s2 = UOp.range(TN, 109), UOp.range(8, 110, AxisType.UPCAST)
+    S_reg = S_reg.after(S_reg[tn_s2, e_s2].store((S_reg[tn_s2, e_s2].load() - m_safe).exp2()).end(e_s2, tn_s2))
+    tn_u3, e_u3 = UOp.range(TN, 111, AxisType.UPCAST), UOp.range(8, 112, AxisType.UPCAST)
+    p_sum = warp_reduce(S_reg[tn_u3, e_u3].load().reduce(e_u3, tn_u3, arg=(Ops.ADD, 0)), Ops.ADD, masks=(16,))
+    P_reg = UOp.alloc((TN, 8), dtypes.half, addrspace=AddrSpace.REG)
+    tn_s4, e_s4 = UOp.range(TN, 113), UOp.range(8, 114, AxisType.UPCAST)
+    P_reg = P_reg.after(P_reg[tn_s4, e_s4].store(S_reg[tn_s4, e_s4].load().cast(dtypes.half)).end(e_s4, tn_s4))
+    ml_upd = UOp.group(m_i[0].store(m_new), l_i[0].store(alpha * l_i.after(n_tile)[0].load() + p_sum),
+                       alpha_lds.after(n_tile)[wave_m, lane_n.valid(lane_m.eq(0))].store(alpha))
+    V_dst = kv_lds_raw.after(qk_done).reshape(D, block_n_sz + v_pad)
+    v_iters = (bn_tiles * d_blks * 8) // waves_m
+    vi, v4 = UOp.range(v_iters, 115, AxisType.UPCAST), UOp.range(4, 116, AxisType.UPCAST)
+    v_off = (tid * v_iters + vi) * 4 + v4
+    vr, vc = v_off // D, v_off % D
+    in_v = (n_tile * block_n_sz + vr) < valid_kv_len
+    v_store = V_dst[vc, vr].store(
+      in_v.where(v.reshape(physical_n * D)[n_tile * (block_n_sz * D) + v_off].load(), UOp.const(0, dtypes.half))).end(v4, vi)
+    v_ready = UOp.group(ml_upd, v_store).barrier()
+    alpha_r, V_lds = alpha_lds.after(v_ready), kv_lds_raw.after(v_ready).reshape(D, block_n_sz + v_pad)[:, :block_n_sz]
+    td_r, e_r = UOp.range(TD, 117), UOp.range(8, 118, AxisType.UPCAST)
+    acc_c = acc.after(acc[td_r, e_r].store(acc.after(n_tile, v_ready)[td_r, e_r].load() * alpha_r[wave_m, lane_m * 8 + e_r].load()).end(e_r, td_r))
+    tn_pv, td_pv = UOp.range(TN, 119), UOp.range(TD, 120)
+    v_frag = V_lds[td_pv * 16 + lane_n].reshape(TN, 2, 8)[tn_pv, lane_m]
+    pv_done = acc[td_pv].store(UOp.wmma(P_reg[tn_pv], v_frag, acc_c.after(tn_pv)[td_pv], *WMMA_ARG)).end(td_pv).end(tn_pv).barrier().end(n_tile)
+    acc_f, l_f = acc.after(pv_done), l_i.after(pv_done)
+    l_r = alpha_lds.after(alpha_lds.after(pv_done)[wave_m, lane_n.valid(lane_m.eq(0))].store(l_f[0].load()).barrier())
+    td_o, e_o = UOp.range(TD, 130), UOp.range(8, 131, AxisType.UPCAST)
+    return o_tile[wave_m * 16 + lane_m * 8 + e_o, td_o * 16 + lane_n].store(
+      acc_f[td_o, e_o].load() / l_r[wave_m, lane_m * 8 + e_o].load()).end(e_o, td_o, wave_m, lane, block_m_raw, block_bh).sink(
+      arg=KernelInfo(name="rdna4_flash_attn", opts_to_apply=()))
+  # RDNA3: keep Q fragments in registers, share KV_lds between K (QK^T) and V (PV) alongside P_lds.
+  kv_lds_raw = UOp.alloc((D * (block_n_sz + LDS_PAD),), dtypes.half, addrspace=AddrSpace.LOCAL)
+  p_lds_alloc = UOp.alloc((block_m_sz, block_n_sz + LDS_PAD), dtypes.half, addrspace=AddrSpace.LOCAL)[:, :block_n_sz]
+  acc, m_i, l_i = _reg((TM, TD), 0), _reg((TM,), -1e30), _reg((TM,), 0)
+  k_iters = (bn_tiles * d_blks * 4) // waves_m
+  ki, k4 = UOp.range(k_iters, 12), UOp.range(4, 13, AxisType.UPCAST)
+  k_off = (tid * k_iters + ki) * 4 + k4
+  k_lds_u32 = kv_lds_raw.after(n_tile).bitcast(dtypes.uint32)[:block_n_sz * (d_blks * 32 + 2)].reshape(block_n_sz, d_blks * 32 + 2)
+  k_store = k_lds_u32[k_off // (d_blks * 32), k_off % (d_blks * 32)].store(
+    k_u32[(kv_head * physical_n + n_tile * block_n_sz) * (d_blks * 32) + k_off].load()).end(k4, ki)
+  KV_lds_k = kv_lds_raw.after(k_store)[:block_n_sz * (D + LDS_PAD)].reshape(block_n_sz, D + LDS_PAD)[:, :D]
   S_reg = _reg((TM, TN), 0, n_tile)
-  k_qk, tn1 = UOp.range(d_blks * 4, 101), UOp.range(TN, 201)
+  k_qk, tn1 = UOp.range(TD, 101), UOp.range(TN, 201)
   S_frag = S_reg.permute(1, 0)[tn1]
-  k_frag = _wmma_fragment(KV_lds_k.reshape(TN, WMMA_N, d_blks * 4, WMMA_K)[tn1, lane_n, k_qk], lane, rdna4)
+  k_frag = _wmma_fragment(KV_lds_k[tn1 * WMMA_N + lane_n].reshape(TD, WMMA_K)[k_qk], lane, False)
   qk_done = S_frag.store(UOp.wmma(q_reg[k_qk], k_frag, S_frag.after(k_qk), *WMMA_ARG)).end(tn1).end(k_qk).barrier()
   S_reg = S_reg.after(qk_done)
   rm, rn = UOp.range(TM, 250), UOp.range(TN, 251)
-  q_local = wave_m * WMMA_M + (lane_m * TM + rm if rdna4 else rm * LANES_PER_WAVE_M + lane_m)
-  q_idx, k_idx = q_start + block_m * BLOCK_M + q_local, n_tile * BLOCK_N + rn * LANES_PER_WAVE_N + lane_n
+  q_idx, k_idx = q_start + block_m * block_m_sz + wave_m * WMMA_M + rm * LANES_PER_WAVE_M + lane_m, n_tile * block_n_sz + rn * LANES_PER_WAVE_N + lane_n
   causal = (k_idx <= q_idx) & (k_idx < valid_kv_len)
-  S_reg = S_reg.after(S_reg[rm, rn].store(causal.where(S_reg[rm, rn] * SCALE_L2, S_reg[rm, rn].const_like(-math.inf))).end(rm, rn))
+  S_reg = S_reg.after(S_reg[rm, rn].store(causal.where(S_reg[rm, rn], S_reg[rm, rn].const_like(-math.inf))).end(rm, rn))
   m_ij, rn_u, ri_w = UOp.alloc((TM,), dtypes.float, addrspace=AddrSpace.REG), UOp.range(TN, 261, AxisType.UPCAST), UOp.range(TM, 270)
   m_ij = m_ij.after(m_ij[ri_w].store(warp_reduce(S_reg[ri_w, rn_u].load().reduce(rn_u, arg=(Ops.MAX, 0)), Ops.MAX)).end(ri_w))
   m_new_reg, alpha_reg = UOp.alloc((TM,), dtypes.float, addrspace=AddrSpace.REG), UOp.alloc((TM,), dtypes.float, addrspace=AddrSpace.REG)
@@ -219,32 +277,32 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:U
   S_reg = S_reg.after(S_reg.store((S_reg - m_new_r.reshape(TM, 1).expand(TM, TN)).exp2()))
   p_local, ri_ws = UOp.alloc((TM,), dtypes.float, addrspace=AddrSpace.REG), UOp.range(TM, 295)
   p_sum = p_local.after(p_local[ri_ws].store(warp_reduce(S_reg[ri_ws, rn_u].load().reduce(rn_u, arg=(Ops.ADD, 0)))).end(ri_ws))
-  # gfx11 distributes even/odd rows between half-waves; gfx12 distributes the low/high eight rows.
-  row_shape, (row_lane, row_elem) = ((LANES_PER_WAVE_M, TM), (1, 2)) if rdna4 else ((TM, LANES_PER_WAVE_M), (2, 1))
-  P_write = p_lds_alloc.after(n_tile).reshape(WAVES_M, *row_shape, TN, LANES_PER_WAVE_N) \
-    .permute(0, row_lane, 4, row_elem, 3).reshape(THREADS_PER_BLOCK, TM, TN)
-  P_store = P_write[tid].store(S_reg.cast(dtypes.half))
+  rm_p, rn_p = UOp.range(TM, 310), UOp.range(TN, 311)
+  P_store = p_lds_alloc.after(n_tile)[wave_m * WMMA_M + rm_p * LANES_PER_WAVE_M + lane_m, rn_p * LANES_PER_WAVE_N + lane_n].store(
+    S_reg[rm_p, rn_p].load().cast(dtypes.half)).end(rn_p, rm_p)
   ri4, rj4 = UOp.range(TM, 330), UOp.range(TD, 331)
   correction = UOp.group(acc[ri4, rj4].store(alpha_r[ri4] * acc[ri4, rj4]).end(rj4),
                          l_i[ri4].store(alpha_r[ri4] * l_i[ri4] + p_sum[ri4])).end(ri4)
   acc, l_i = acc.after(correction), l_i.after(correction)
-  V_copy = kv_lds_raw.after(qk_done).reshape(D, BLOCK_N + LDS_PAD)[:, :BLOCK_N].permute(1, 0)
-  vi, v4 = UOp.range(d_blks * 8, 14, AxisType.UPCAST), UOp.range(4, 15, AxisType.UPCAST)
-  v_off = tid * (d_blks * 32) + vi * 4 + v4
-  in_v = (n_tile * BLOCK_N + v_off // D) < valid_kv_len
-  v_store = V_copy.reshape(BLOCK_N * D)[v_off].store(
-    in_v.where(v.reshape(physical_n * D)[n_tile * (BLOCK_N * D) + v_off].load(), UOp.const(0, dtypes.half))).end(v4, vi)
-  P_lds, V_lds = p_lds_alloc.after(P_store), kv_lds_raw.after(v_store).reshape(D, BLOCK_N + LDS_PAD)[:, :BLOCK_N]
-  k_pv, tn2 = UOp.range(BLOCK_N // WMMA_K, 400), UOp.range(TD, 402)
+  V_dst = kv_lds_raw.after(qk_done).reshape(D, block_n_sz + LDS_PAD)
+  v_iters = (bn_tiles * d_blks * 8) // waves_m
+  vi, v4 = UOp.range(v_iters, 14, AxisType.UPCAST), UOp.range(4, 15, AxisType.UPCAST)
+  v_off = (tid * v_iters + vi) * 4 + v4
+  vr, vc = v_off // D, v_off % D
+  in_v = (n_tile * block_n_sz + vr) < valid_kv_len
+  v_store = V_dst[vc, vr].store(
+    in_v.where(v.reshape(physical_n * D)[n_tile * (block_n_sz * D) + v_off].load(), UOp.const(0, dtypes.half))).end(v4, vi)
+  P_lds, V_lds = p_lds_alloc.after(P_store), kv_lds_raw.after(v_store).reshape(D, block_n_sz + LDS_PAD)[:, :block_n_sz]
+  k_pv, tn2 = UOp.range(TN, 400), UOp.range(TD, 402)
   acc_frag = acc.permute(1, 0)[tn2]
-  p_frag = _wmma_fragment(P_lds.reshape(WAVES_M, WMMA_M, BLOCK_N // WMMA_K, WMMA_K)[wave_m, lane_n, k_pv], lane, rdna4)
-  v_frag = _wmma_fragment(V_lds.reshape(TD, WMMA_N, BLOCK_N // WMMA_K, WMMA_K)[tn2, lane_n, k_pv], lane, rdna4)
+  p_frag = _wmma_fragment(P_lds[wave_m * WMMA_M + lane_n].reshape(TN, WMMA_K)[k_pv], lane, False)
+  v_frag = _wmma_fragment(V_lds[tn2 * WMMA_N + lane_n].reshape(TN, WMMA_K)[k_pv], lane, False)
   n_tile_end = acc_frag.store(UOp.wmma(p_frag, v_frag, acc_frag.after(k_pv), *WMMA_ARG)).end(tn2).end(k_pv).barrier().end(n_tile)
   acc, l_i = acc.after(n_tile_end), l_i.after(n_tile_end)
-  o = o.reshape(WAVES_M, *row_shape, TD, LANES_PER_WAVE_N).permute(0, row_lane, 4, row_elem, 3).reshape(THREADS_PER_BLOCK, TM, TD)
   rm_o, rd_o = UOp.range(TM, 420), UOp.range(TD, 421)
-  return o[tid, rm_o, rd_o].store(acc[rm_o, rd_o].load() / l_i[rm_o].load()).end(rm_o, rd_o, wave_m, lane, block_m, block_bh).sink(
-    arg=KernelInfo(opts_to_apply=()))
+  return o_tile[wave_m * WMMA_M + rm_o * LANES_PER_WAVE_M + lane_m, rd_o * LANES_PER_WAVE_N + lane_n].store(
+    acc[rm_o, rd_o].load() / l_i[rm_o].load()).end(rm_o, rd_o, wave_m, lane, block_m_raw, block_bh).sink(
+    arg=KernelInfo(name="rdna3_flash_attn", opts_to_apply=()))
 
 # ******** gated delta net: fused recurrent scan ********
 

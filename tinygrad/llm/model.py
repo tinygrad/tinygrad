@@ -59,11 +59,10 @@ def _q8_quantize(x:Tensor, tokens:int, in_features:int, device:str|tuple[str, ..
 
 @functools.cache
 def _iq_lut(t:int, dev:str|tuple[str, ...]|None, wmma:bool=False) -> tuple[UOp, ...]:
-  if dev is None or t not in ({16, 17, 18, 19, 21, 22, 23} if wmma else {16, 17, 18, 19, 21, 22}): return ()
+  if dev is None or t not in {16, 17, 18, 19, 21, 22}: return ()
   from tinygrad.runtime.autogen import ggml_common as g
-  if t == 23 or (wmma and t in (18, 22)):
-    vals:list[float] = ([g.kvalues_iq4nl[k] for j in range(16) for i in range(16) for k in (i, j)] if t == 23 else
-            [((v >> (8*i)) & 0xff) / 64.0 for v in (g.iq3xxs_grid if t == 18 else g.iq2s_grid) for i in range(4 if t == 18 else 8)])
+  if wmma and t in (18, 22):
+    vals = [((v >> (8*i)) & 0xff) / 64.0 for v in (g.iq3xxs_grid if t == 18 else g.iq2s_grid) for i in range(4 if t == 18 else 8)]
     words: tuple[int, ...] = struct.unpack(f"<{len(vals)//2}I", struct.pack(f"<{len(vals)}e", *vals))
   else:
     grid, nw = {16:(g.iq2xxs_grid,2), 17:(g.iq2xs_grid,2), 19:(g.iq1s_grid,2), 22:(g.iq2s_grid,2), 18:(g.iq3xxs_grid,1), 21:(g.iq3s_grid,1)}[t]
@@ -119,10 +118,17 @@ class Linear(nn.Linear):
       arch = "cdna" if target[0] == 9 else "rdna4" if target[0] == 12 else "rdna3"
       out_shape = _shard_shape((splits * tokens, out_f), out_axis, ndev)
       x_f16 = x_in.half().contiguous().reshape(out_shape[0], in_f) if x_axis is None else x_in.half().contiguous()
-      mt = next((t for t in (8, 4, 2) if out_shape[0] % (t * 16) == 0
-                 and (out_shape[0] // (t * 16)) * (local_out // 16) >= (512 if t >= 4 else 256)), 1)
-      out = _run_kernel(f"{arch}_gemm_{qname}_f16", out_shape, dev, self.packed, x_f16, *_iq_lut(self.ggml_type, dev, True),
-                        axis=out_axis, m_blks=out_shape[0] // (mt * 16), m_tiles=mt, out_features=local_out, in_features=in_f, raw_len=raw_len)
+      if target[0] in (11, 12) and out_shape[0] % 32 == 0 and local_out % 64 == 0 and in_f % 64 == 0:
+        wm, wn, tm, tn = ((2, 4, 4, 2) if out_shape[0] >= 256 and out_shape[0] % 128 == 0 and local_out % 128 == 0 else
+                          (2, 2, 2, 2) if out_shape[0] % 64 == 0 else (1, 2, 2, 2))
+        out = _run_kernel(f"{arch}_gemm_{qname}_2d", out_shape, dev, self.packed, x_f16, *_iq_lut(self.ggml_type, dev, True),
+                          axis=out_axis, m_blks=out_shape[0] // (wm * tm * 16), n_blks=local_out // (wn * tn * 16),
+                          wm=wm, wn=wn, tm=tm, tn=tn, in_features=in_f, raw_len=raw_len)
+      else:
+        mt = next((t for t in (8, 4, 2) if out_shape[0] % (t * 16) == 0
+                   and (out_shape[0] // (t * 16)) * (local_out // 16) >= (512 if t >= 4 else 256)), 1)
+        out = _run_kernel(f"{arch}_gemm_{qname}_f16", out_shape, dev, self.packed, x_f16, *_iq_lut(self.ggml_type, dev, True),
+                          axis=out_axis, m_blks=out_shape[0] // (mt * 16), m_tiles=mt, out_features=local_out, in_features=in_f, raw_len=raw_len)
     else:
       x_tokens, waves = int(prod(x_shard[:-1])), min(ceildiv(in_f, 1024), 32)
       q8 = _q8_quantize(x_in, x_tokens, in_f, dev, axis=0 if self.groups > 1 and x_axis is not None else None)
@@ -661,7 +667,7 @@ class TransformerBlock(FFNBlock):
       valid_kv_offset, attn = T_real if isinstance(T_real, int) else 0, None
       if resolve(T_real == 1, False) and sh_m == 1 and D % 64 == 0 and 1 <= D <= 512 \
           and 1 <= (group := sh_h // sh_hkv) <= 8 and N_phys % 64 == 0:
-        chunks, waves = min(max(16, 128 // sh_hkv), ceildiv(N_phys, 64)), 16
+        chunks, waves = min(max(16, 128 // sh_hkv), ceildiv(N_phys, 64)), 8
         while waves * group * ((D + 4) * 2 + 8) > 65536: waves //= 2
         k_partial = _get_kernel("amd_flash_decode_partial", B=sh_b, H_KV=sh_hkv, G=group, d_blks=D // 64,
                                 n_blks=N_phys // 64, C=chunks, valid_kv_offset=valid_kv_offset, waves=waves)
@@ -672,9 +678,11 @@ class TransformerBlock(FFNBlock):
           attn = _run_kernel("amd_flash_decode_combine", q_shard, q_in.device, partial.after(cp), stats.after(cp), valid_kv,
                              axis=q_axis, B=sh_b, H=sh_h, C=chunks, d_blks=D // 64, valid_kv_offset=valid_kv_offset)
       elif target[0] != 9 and D % 64 == 0 and 1 <= D <= 512 and N_phys % 32 == 0 and (q_t := int(q_in.shape[2])) % 32 == 0:
-        arch = "rdna4" if target[0] == 12 else "rdna3"
-        k_attn = _get_kernel(f"{arch}_flash_attn", BH=sh_b * sh_h, m_blks=q_t // 32, B=sh_b, H_KV=sh_hkv, d_blks=D // 64,
-                             n_blks=N_phys // 32, valid_kv_offset=valid_kv_offset, q_start_from_end=0 if isinstance(T_real, UOp) else 1)
+        arch, wm = "rdna4" if target[0] == 12 else "rdna3", 4 if q_t % 64 == 0 else 2
+        bnt = 4 if target[0] == 12 and D <= 128 and N_phys % 64 == 0 else 2
+        k_attn = _get_kernel(f"{arch}_flash_attn", BH=sh_b * sh_h, m_blks=q_t // (wm * 16), B=sh_b, H_KV=sh_hkv, d_blks=D // 64,
+                             n_blks=N_phys // (bnt * 16), waves_m=wm, bn_tiles=bnt,
+                             valid_kv_offset=valid_kv_offset, q_start_from_end=0 if isinstance(T_real, UOp) else 1)
         if k_attn is not None:
           q_h, q_len = int(q_in.shape[1]), T_real if isinstance(T_real, UOp) else UOp.const(q_t)
           out = UOp.alloc(q_shard, dtypes.float32, device=q_in.device, axis=q_axis).reshape((B * q_h, q_t, D))
