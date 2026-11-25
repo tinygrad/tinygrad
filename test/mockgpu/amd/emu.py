@@ -1944,8 +1944,8 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     if not instructions: return end
     body, bufs = instruction_block(instructions)
     args = [values[b] if b.addrspace is AddrSpace.ALU else buffers[b][0] for b in bufs]
+    args += [_c(block_pc, dtypes.int).after(end, *scopes)]
     params = [UOp.param(i, a.dtype, a.shape, name=b.arg.name, addrspace=b.addrspace) for i,(a,b) in enumerate(zip(args, bufs))]
-    args.append(_c(block_pc, dtypes.int).after(end, *scopes))
     params.append(UOp.param(len(bufs), dtypes.int, addrspace=AddrSpace.ALU))
     # lower the wave loop with the block, so repeated blocks share its indexing and route check too.
     w = UOp.range(n_waves, 0, dtype=dtypes.int)
