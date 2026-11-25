@@ -187,42 +187,24 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
                          m_blks=m // 128, n_blks=n // 64, k_pairs=K // 256, raw_len=w_len)
           return _run_fp8, _verify
         if not cdna and m % 32 == 0 and n % 64 == 0 and K % 64 == 0:
-          sk = 1
-          if target[0] == 12:
-            if m >= 256 and m % 256 == 0 and n % 128 == 0 and qtype != 12: wm, wn, tm, tn = 4, 2, 4, 4
-            elif m >= 256 and m % 128 == 0 and n % 128 == 0: wm, wn, tm, tn = 2, 4, 4, 2
-            elif m % 128 == 0 and n % 128 == 0:
-              wm, wn, tm, tn = (2, 2, 2, 4) if qtype in (23, 39) else (2, 2, 4, 2)
-              if qtype == 12 and K >= 128 and (m * n) % 1024 == 0: sk = 2
-            elif m % 64 == 0: wm, wn, tm, tn = 2, 2, 2, 2
-            else: wm, wn, tm, tn = 1, 2, 2, 2
-          else:
-            if m >= 256 and m % 128 == 0 and n % 128 == 0:
-              wm, wn, tm, tn = (4, 2, 4, 4) if m % 256 == 0 and qtype in (8, 23) else (4, 2, 2, 4) if qtype == 39 else (2, 4, 4, 2)
-              if K >= 192 and (m // (wm * tm * 16)) * (n // (wn * tn * 16)) <= 128 and (m * n) % 1024 == 0: sk = 3
-            elif m % 128 == 0:
-              wm, wn, tm, tn = 2, 2, 4, 2
-              if K >= 192 and (m // 128) * (n // 64) <= 128 and (m * n) % 1024 == 0: sk = 3
-            elif m % 64 == 0: wm, wn, tm, tn = 2, 2, 2, 2
-            else: wm, wn, tm, tn = 1, 2, 2, 2
+          wm, wn, tm, tn = ((4, 2, 4, 4) if m % 256 == 0 and n % 128 == 0 and qtype != 12 else
+                            (2, 4, 4, 2) if m >= 256 and m % 128 == 0 and n % 128 == 0 else
+                            (2, 2, 4, 2) if m % 128 == 0 else (2, 2, 2, 2) if m % 64 == 0 else (1, 2, 2, 2))
+          sk = 3 if (target[0] == 11 and m >= 128 and K >= 192 and (m // (wm * tm * 16)) * (n // (wn * tn * 16)) <= 128) else 1
           def _run_2d() -> Tensor:
             out = _krun(f"{arch_gemm}_gemm_{kname}_2d", (sk * m, n), dev, w_packed, x.half().contiguous(), *_iq_lut(qtype, dev, True),
                         m_blks=m // (wm * tm * 16), n_blks=n // (wn * tn * 16), wm=wm, wn=wn, tm=tm, tn=tn,
                         in_features=K, split_k=sk, raw_len=w_len)
-            if sk == 1: return out
-            return _krun("amd_splitk_reduce", (m * n,), dev, out.reshape(sk, m * n), split_k=sk, n_blks=(m * n) // 1024).reshape(m, n)
+            return out if sk == 1 else out.reshape(sk, m, n).sum(0)
           return _run_2d, _verify
         mt = 8 if m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
         return (lambda: _krun(f"{arch_gemm}_gemm_{kname}_f16", (m, n), dev, w_packed, x.half().contiguous(),
                               *_iq_lut(qtype, dev, True), m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=K, raw_len=w_len)), _verify
       if not cdna and m == 1 and qtype in (8, 10, 11, 12, 13, 14, 19, 20, 21, 22, 23, 39) and x_dt in (dtypes.float32, dtypes.float16):
-        half_m = qtype in (11, 20, 22) or (K >= 2048 and ((target[0] == 12 and qtype in (8, 10, 14, 21, 23, 39))
-                                                          or (target[0] == 11 and qtype in (10, 39))))
-        wv = min(ceildiv(K * (2 if half_m else 1), 1024), 32)
-        rpw_t = ({8:4, 10:2, 11:2, 19:16, 20:2, 21:16, 22:16, 39:2} if target[0] == 12 else {10:2, 12:2, 14:2}).get(qtype, 1)
+        rpw_t = ({8:4, 10:2, 11:2, 12:2, 19:16, 20:2, 21:16, 22:16, 39:2} if target[0] == 12 else {10:2, 12:2, 14:2}).get(qtype, 1)
         rpw = rpw_t if n >= 1024 and n % rpw_t == 0 else 1
-        return (lambda: _krun(f"rdna_gemv_direct{'2' if half_m else ''}_{kname}_{x_dt.name}", (1, n), dev, w_packed, x, *_iq_lut(qtype, dev),
-                              out_features=n, in_features=K, waves=wv, rows_per_wg=rpw, raw_len=w_len)), _verify
+        return (lambda: _krun(f"rdna_gemv_direct_{kname}_{x_dt.name}", (1, n), dev, w_packed, x, *_iq_lut(qtype, dev),
+                              out_features=n, in_features=K, waves=min(ceildiv(K, 512), 32), rows_per_wg=rpw, raw_len=w_len)), _verify
       wv = min(ceildiv(K, 1024), 32)
       if 2 <= m <= 8 and qtype in (8, 12, 23, 39):
         return (lambda: _krun(f"{arch_gemv}_gemv_m_{kname}", (m, n), dev, w_packed, *_q8(x, m, K, dev),
@@ -275,13 +257,11 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         _assert_close(got, np.broadcast_to(ref1, got.shape), rtol=4e-2, atol=5e-2)
       def _run() -> Tensor:
         if not cdna and qtype in (8, 10, 12, 13, 14, 19, 21, 23, 39):
-          half_m = target[0] == 12 and qtype in (8, 12, 23, 39) and MOE_K >= 2048
-          wv_d = min(ceildiv(MOE_K * (2 if half_m else 1), 1024), 32)
           rpw_t = ({8:4, 12:2, 19:16, 23:2, 39:2} if target[0] == 12 else {12:2}).get(qtype, 1)
           rpw = rpw_t if MOE_N >= 1024 and MOE_N % rpw_t == 0 else 1
-          return _krun(f"rdna_moe_direct{'2' if half_m else ''}_{kname}", (TOPK, MOE_N), dev, w_packed, x.reshape(1, MOE_K), sel,
+          return _krun(f"rdna_moe_direct_{kname}", (TOPK, MOE_N), dev, w_packed, x.reshape(1, MOE_K), sel,
                        *_iq_lut(qtype, dev), rows=TOPK, x_rows=1, out_features=MOE_N, in_features=MOE_K,
-                       waves=wv_d, rows_per_wg=rpw, raw_len=w_len, x_share=TOPK, ndev=1).reshape(1, 1, TOPK, MOE_N)
+                       waves=min(ceildiv(MOE_K, 512), 32), rows_per_wg=rpw, raw_len=w_len, x_share=TOPK, ndev=1).reshape(1, 1, TOPK, MOE_N)
         return _krun(f"{arch_gemv}_moe_{kname}", (TOPK, MOE_N), dev, w_packed, *_q8(x, 1, MOE_K, dev), sel, *_iq_lut(qtype, dev),
                      rows=TOPK, x_rows=1, out_features=MOE_N, in_features=MOE_K, waves=wv, raw_len=w_len, x_share=TOPK,
                      ndev=1).reshape(1, 1, TOPK, MOE_N)

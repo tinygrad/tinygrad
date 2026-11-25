@@ -17,8 +17,6 @@ UIR_DIR = pathlib.Path(__file__).resolve().parent / "uir"
 _DTYPES: dict[str, DType] = {v.name: v for v in vars(type(dtypes)).values() if isinstance(v, DType)}
 _IQ_GRID_LENS = {_gguf.IQ2_XXS: 512, _gguf.IQ2_XS: 1024, _gguf.IQ1_S: 4096, _gguf.IQ2_S: 2048, _gguf.IQ3_XXS: 256, _gguf.IQ3_S: 512}
 _WMMA_TBL_LENS = {**_IQ_GRID_LENS, _gguf.IQ3_XXS: 512, _gguf.IQ2_S: 4096}
-_HALF_DIRECT_QUANTS = (_gguf.Q8_0, _gguf.Q6_K, _gguf.Q3_K, _gguf.Q2_K, _gguf.IQ4_XS, _gguf.IQ4_NL, _gguf.IQ3_S, _gguf.IQ2_S, _gguf.MXFP4)
-_HALF_MOE_QUANTS = (_gguf.Q8_0, _gguf.Q4_K, _gguf.IQ4_XS, _gguf.MXFP4)
 
 def _wdt(t:int) -> DType: return dtypes.uint8 if t == _gguf.MXFP4 else dtypes.uint16 if t in _gguf.HALFWORD_QUANTS else dtypes.uint32
 def _p(slot:int, shape:tuple[int|UOp, ...], dt:str|DType) -> UOp: return UOp.param(slot, dt if isinstance(dt, DType) else _DTYPES[dt], shape)
@@ -37,10 +35,6 @@ def _b_gemv(wdt:str, xdt:str) -> UOp:
   return _amd._amd_f16_gemv_kernel(_p(0, (tok, outf), "f32"), _p(1, (outf, inf), wdt), _p(2, (tok, inf), xdt),
                                    in_blks=ib, out_features=outf, tokens=tok, val_chunk=vc, k_unroll=ku)
 
-def _b_sk_reduce() -> UOp:
-  sk, nb = _t("split_k", 1, 16), _t("n_blks")
-  return _amd._amd_splitk_reduce_kernel(_p(0, (nb * 1024,), "f32"), _p(1, (sk, nb * 1024), "f32"), split_k=sk, n_blks=nb)
-
 def _b_qgemv(qt:int, cdna:bool) -> UOp:
   tok, inf, outf, rl = _t("tokens"), _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 30)
   wv, gr, g = _t("waves", 1, 32), _t("group_rows", 0), inf // 32
@@ -56,12 +50,12 @@ def _b_qgemv_m(qt:int, cdna:bool) -> UOp:
                                       _p(3, (tok, g), "f32"), _p(4, (tok, g, 2), "f32"),
                                       tokens=tok, out_features=outf, in_features=inf, waves=wv, ggml_type=qt, cdna=cdna)
 
-def _b_qgemv_direct(qt:int, xdt:str, half_mode:bool) -> UOp:
+def _b_qgemv_direct(qt:int, xdt:str) -> UOp:
   inf, outf, rl = _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 30)
   wv, rpw = _t("waves", 1, 32), _t("rows_per_wg", 1, 32)
   gl = (_p(3, (_IQ_GRID_LENS[qt],), "u32"),) if qt in _IQ_GRID_LENS else ()
   return _gguf._quant_direct_gemv_kernel(_p(0, (1, outf), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (1, inf), xdt), *gl,
-                                         out_features=outf, in_features=inf, waves=wv, rows_per_wg=rpw, ggml_type=qt, half_mode=half_mode)
+                                         out_features=outf, in_features=inf, waves=wv, rows_per_wg=rpw, ggml_type=qt)
 
 def _b_moe(qt:int, cdna:bool) -> UOp:
   inf, outf, rl, wv = _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 30), _t("waves", 1, 32)
@@ -71,13 +65,12 @@ def _b_moe(qt:int, cdna:bool) -> UOp:
                                   _p(3, (xrows, g), "f32"), _p(4, (xrows, g, 2), "f32"), _p(5, (rows,), "i32"), *gl,
                                   out_features=outf, in_features=inf, waves=wv, ggml_type=qt, x_share=xs, cdna=cdna, ndev=nd)
 
-def _b_moe_direct(qt:int, half_mode:bool) -> UOp:
+def _b_moe_direct(qt:int) -> UOp:
   inf, outf, rl, wv = _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 30), _t("waves", 1, 32)
   rows, xrows, xs, nd, rpw = _t("rows"), _t("x_rows"), _t("x_share", 1, 1024), _t("ndev", 1, 64), _t("rows_per_wg", 1, 32)
   gl = (_p(4, (_IQ_GRID_LENS[qt],), "u32"),) if qt in _IQ_GRID_LENS else ()
   return _gguf._moe_direct_kernel(_p(0, (rows, outf), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (xrows, inf), "f32"), _p(3, (rows,), "i32"), *gl,
-                                  out_features=outf, in_features=inf, waves=wv, rows_per_wg=rpw, ggml_type=qt, x_share=xs,
-                                  ndev=nd, half_mode=half_mode)
+                                  out_features=outf, in_features=inf, waves=wv, rows_per_wg=rpw, ggml_type=qt, x_share=xs, ndev=nd)
 
 def _b_gemm(qt:int, kg:int, ln:int) -> UOp:
   mb, mt, inf, outf, rl = _t("m_blks"), _t("m_tiles", 1, 8), _t("in_features", 32), _t("out_features", 16), _t("raw_len", 1, 1 << 30)
@@ -165,18 +158,14 @@ _BUILDERS: dict[str, Callable[[], UOp]] = {
   **{f"amd_q8_quantize_{dt}": functools.partial(_b_q8, dt) for dt in ("f16", "bf16", "f32")},
   **{f"amd_gemv_{w}_{x}": functools.partial(_b_gemv, w, x)
      for w, x in (("f16", "f32"), ("f32", "f16"), ("bf16", "f32"), ("f32", "bf16"), ("f32", "f32"))},
-  "amd_splitk_reduce": _b_sk_reduce,
   **{f"{a}_gemv_{qn}": functools.partial(_b_qgemv, qt, cdna)
      for qt, qn in _gguf.QUANT_NAMES.items() for a, cdna in (("rdna", False), ("cdna", True))},
   **{f"{a}_gemv_m_{_gguf.QUANT_NAMES[qt]}": functools.partial(_b_qgemv_m, qt, cdna)
      for qt in _gguf.DP4A_M_QUANTS for a, cdna in (("rdna", False), ("cdna", True))},
-  **{f"rdna_gemv_direct_{_gguf.QUANT_NAMES[qt]}_{xdt}": functools.partial(_b_qgemv_direct, qt, xdt, False)
+  **{f"rdna_gemv_direct_{_gguf.QUANT_NAMES[qt]}_{xdt}": functools.partial(_b_qgemv_direct, qt, xdt)
      for qt in _gguf.DIRECT_GEMV_QUANTS for xdt in ("f32", "f16")},
-  **{f"rdna_gemv_direct2_{_gguf.QUANT_NAMES[qt]}_{xdt}": functools.partial(_b_qgemv_direct, qt, xdt, True)
-     for qt in _HALF_DIRECT_QUANTS for xdt in ("f32", "f16")},
   **{f"{a}_moe_{qn}": functools.partial(_b_moe, qt, cdna) for qt, qn in _gguf.QUANT_NAMES.items() for a, cdna in (("rdna", False), ("cdna", True))},
-  **{f"rdna_moe_direct_{_gguf.QUANT_NAMES[qt]}": functools.partial(_b_moe_direct, qt, False) for qt in _gguf.DIRECT_GEMV_QUANTS},
-  **{f"rdna_moe_direct2_{_gguf.QUANT_NAMES[qt]}": functools.partial(_b_moe_direct, qt, True) for qt in _HALF_MOE_QUANTS},
+  **{f"rdna_moe_direct_{_gguf.QUANT_NAMES[qt]}": functools.partial(_b_moe_direct, qt) for qt in _gguf.DIRECT_MOE_QUANTS},
   **{f"{a}_gemm_{qn}_f16": functools.partial(_b_gemm, qt, kg, ln)
      for qt, qn in _gguf.QUANT_NAMES.items() for a, kg, ln in (("rdna4", 2, 32), ("rdna3", 1, 32), ("cdna", 4, 64))},
   **{f"{a}_gemm_{qn}_2d": functools.partial(_b_gemm_2d, qt, rdna4)
