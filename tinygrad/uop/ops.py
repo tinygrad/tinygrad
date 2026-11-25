@@ -334,16 +334,12 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.BACKEDGE | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.NOOP:
         return None
 
       # special (terrible) case for RESHAPE on NOOP
       case Ops.RESHAPE:
         if self.src[0].op is Ops.NOOP: return self.marg
-
-      # hacks for NOOP
-      case Ops.NOOP:
-        return self.src[0]._shape if len(self.src) >= 1 else None
 
       case Ops.INDEX:
         return tuple(d for s in self.src[1:] for d in s.shape) + self.src[0].shape[len(self.src)-1:]
