@@ -6,6 +6,7 @@ from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, Ops, rewrite_group, graph_rewrite
 from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear
+from tinygrad.codegen import create_linear
 from tinygrad.codegen.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
 from tinygrad.uop.movement import mop_cleanup
@@ -143,7 +144,7 @@ class _TinyJit(Generic[ReturnType]):
       if DEBUG >= 1: print(f"JIT captured {len(self._exports)} exports with {len(input_buf_uops)} inputs")
 
       # schedule the captured exports on their storage. the prune needs unplanned storage, jit_lower plans the memory of all of them together
-      with Context(NO_MEMORY_PLANNER=1): linears = [map_back(Tensor.compile(fn), externs) for fn,externs in self._exports]
+      with Context(NO_MEMORY_PLANNER=1): linears = [map_back(create_linear(fn), externs) for fn,externs in self._exports]
       del self._exports
       # combine all the linears into one, memory plan, and compile
       big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l,_ in linears])))
@@ -154,7 +155,7 @@ class _TinyJit(Generic[ReturnType]):
       if self.prune:
         big_linear, onetime_linear = prune_linear(big_linear, set(input_buf_uops))
         if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
-        run_linear(onetime_linear, capture_var_vals)
+        run_linear(link_linear(compile_linear(onetime_linear)), capture_var_vals)
         del onetime_linear
 
       # hold all buffers with real storage reachable from live Tensors (e.g. lazy .grad created during capture) and all buffers with

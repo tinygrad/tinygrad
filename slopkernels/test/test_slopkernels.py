@@ -94,7 +94,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
     # 1. Dense GEMV
     w_d = Tensor(rng.standard_normal((64, 128)).astype(np.float16)).realize()
     x_d = Tensor(rng.standard_normal((2, 128)).astype(np.float32)).realize()
-    got_d = _krun("amd_gemv_f16_f32", (2, 64), dev, w_d, x_d, tokens=2, out_features=64, in_blks=1).numpy()
+    got_d = _krun("amd_gemv_f16_f32", (2, 64), dev, w_d, x_d, tokens=2, out_features=64, in_blks=1, val_chunk=4).numpy()
     np.testing.assert_allclose(got_d, x_d.numpy() @ w_d.numpy().astype(np.float32).T, rtol=2e-3, atol=2e-3)
     # 2. Quantized GEMV (split-K) & WMMA (M=16)
     _, w_u16, w_ref = _make_q8_0(rng, 64, 1280)
@@ -107,7 +107,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
     x_q16 = Tensor(rng.standard_normal((16, 1280)).astype(np.float16)).realize()
     ref_q16 = (x_q16.float() @ w_ref.T).numpy()
     got_q16 = _krun(f"{arch_gemm}_gemm_q8_0_f16", (16, 64), dev, w_u16, x_q16,
-                    tokens=16, out_features=64, in_features=1280, raw_len=w_len).numpy()
+                    m_blks=1, m_tiles=1, out_features=64, in_features=1280, raw_len=w_len).numpy()
     np.testing.assert_allclose(got_q16, ref_q16, rtol=2e-2, atol=2e-2 * np.abs(ref_q16).max())
     # 3. MoE decode
     _, mw_u16, mw_ref = _make_q8_0(rng, 4 * 16, 256)
@@ -121,7 +121,8 @@ class TestSlopKernelsUIR(unittest.TestCase):
     # 4. Flash attention decode + prefill
     kv_fa = Tensor(rng.standard_normal((2, 1, 2, 128, 64)).astype(np.float16)).realize()
     q_dec = Tensor(rng.standard_normal((1, 4, 1, 64)).astype(np.float16)).realize()
-    kp = unwrap(slopkernels.get("amd_flash_decode_partial_g2_d64")).specialize(B=1, H_KV=2, n_blks=2, C=2, valid_kv_offset=0)
+    kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
+      B=1, H_KV=2, G=2, d_blks=1, n_blks=2, C=2, valid_kv_offset=0, waves=16)
     partial, stats = (UOp.alloc((1, 4, 2, d), dtypes.float32, device=dev) for d in (64, 2))
     cp = kp.call(partial, stats, q_dec.uop, kv_fa.uop, UOp.const(53))
     got_fd = _krun("amd_flash_decode_combine", (1, 4, 1, 64), dev, partial.after(cp), stats.after(cp), UOp.const(53),
@@ -130,8 +131,8 @@ class TestSlopKernelsUIR(unittest.TestCase):
     np.testing.assert_allclose(got_fd, ref_fd, rtol=5e-3, atol=5e-3)
     if tgt[0] != 9:
       q_pre = Tensor(rng.standard_normal((1, 4, 32, 64)).astype(np.float16)).realize()
-      got_fp = _krun(f"{arch_gemm}_flash_attn_d64", (4, 32, 64), dev, q_pre.reshape(4, 32, 64), kv_fa, UOp.const(64), UOp.const(32),
-                     BH=4, m_blks=1, B=1, H_KV=2, n_blks=4, valid_kv_offset=0, q_start_from_end=1).reshape(1, 4, 32, 64)
+      got_fp = _krun(f"{arch_gemm}_flash_attn", (4, 32, 64), dev, q_pre.reshape(4, 32, 64), kv_fa, UOp.const(64), UOp.const(32),
+                     BH=4, m_blks=1, B=1, H_KV=2, d_blks=1, n_blks=4, valid_kv_offset=0, q_start_from_end=1).reshape(1, 4, 32, 64)
       mask = Tensor.full((32, 64), float("-inf"), dtype=dtypes.float32).triu(64 - 32 + 1)
       ref_fp = q_pre.float().scaled_dot_product_attention(kv_fa[0, :, :, :64].float(), kv_fa[1, :, :, :64].float(), attn_mask=mask, enable_gqa=True)
       np.testing.assert_allclose(got_fp.numpy(), ref_fp.numpy(), rtol=5e-3, atol=5e-3)
@@ -151,8 +152,8 @@ class TestSlopKernelsUIR(unittest.TestCase):
         delta = (gd_v.numpy()[:, :, t] - (st_ref * gd_k.numpy()[:, :, t, None]).sum(-1)) * gd_b.numpy()[:, :, t, None]
         st_ref += delta[..., None] * gd_k.numpy()[:, :, t, None]
         outs_ref.append((st_ref * gd_q.numpy()[:, :, t, None]).sum(-1))
-      got_gd = _krun("amd_gated_delta_k32_a1", (1, 2, 4, 8), dev, gd_q, gd_k, gd_v, gd_b, gd_a, gd_s,
-                     (gd_q * gd_k).sum(-1).contiguous(), UOp.const(sp), batch=1, heads=2, tokens=4, v_tiles=2).numpy()
+      got_gd = _krun("amd_gated_delta", (1, 2, 4, 8), dev, gd_q, gd_k, gd_v, gd_b, gd_a.reshape(1, 2, 4, 1), gd_s,
+                     (gd_q * gd_k).sum(-1).contiguous(), UOp.const(sp), batch=1, heads=2, tokens=4, v_tiles=2, k_blks=1, alpha_k=1).numpy()
       np.testing.assert_allclose(got_gd, np.stack(outs_ref, axis=2), rtol=2e-4, atol=2e-6)
       np.testing.assert_allclose(gd_s.numpy(), st_ref, rtol=2e-4, atol=2e-6)
     # 6. mHC coeffs
@@ -197,7 +198,8 @@ class TestSlopKernelsUIR(unittest.TestCase):
     q_fa = Tensor(rng.standard_normal((1, 4, 1, 64)).astype(np.float16)).realize()
     kv_fa = Tensor(rng.standard_normal((2, 1, 2, 128, 64)).astype(np.float16)).realize()
     q_sh, kv_sh = q_fa.shard(devs, axis=1).realize(), kv_fa.shard(devs, axis=2).realize()
-    kp = unwrap(slopkernels.get("amd_flash_decode_partial_g2_d64")).specialize(B=1, H_KV=1, n_blks=2, C=2, valid_kv_offset=0)
+    kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
+      B=1, H_KV=1, G=2, d_blks=1, n_blks=2, C=2, valid_kv_offset=0, waves=16)
     partial, stats = (UOp.alloc((1, 2, 2, d), dtypes.float32, device=devs, axis=1) for d in (64, 2))
     cp = kp.call(partial, stats, q_sh.uop, kv_sh.uop, UOp.const(41))
     got_fs = _krun("amd_flash_decode_combine", (1, 2, 1, 64), devs, partial.after(cp), stats.after(cp), UOp.const(41), axis=1,

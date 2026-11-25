@@ -7,8 +7,7 @@ from tinygrad.helpers import GlobalCounters, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
-from test.helpers import check_schedule, needs_devices, slow
-from tinygrad.engine.realize import run_linear
+from test.helpers import check_schedule, needs_devices, slow, run_schedule
 
 @slow
 class TestNN(unittest.TestCase):
@@ -401,14 +400,14 @@ class TestNN(unittest.TestCase):
                 [12, 19, 8, 1]])
     result = layer(a)
     linear, var_vals = check_schedule(result, kcount)
-    run_linear(linear, var_vals)
+    run_schedule(linear, var_vals)
 
     b = Tensor([[1, 2, 3],
                 [4, 5, 6],
                 [7, 8, 9]])
     result = layer(b)
     linear, var_vals = check_schedule(result, 1)
-    run_linear(linear, var_vals)
+    run_schedule(linear, var_vals)
     print(f"Embedding used {GlobalCounters.global_ops} ops")
     self.assertLessEqual(GlobalCounters.global_ops, ops)
 

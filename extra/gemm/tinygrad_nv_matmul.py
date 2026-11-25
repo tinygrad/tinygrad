@@ -2,7 +2,7 @@ from tinygrad import Tensor, dtypes, Context
 from tinygrad.helpers import getenv
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.uop.ops import AxisType
-from tinygrad.engine.realize import run_linear
+from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 from dataclasses import replace
 
 N = 4096
@@ -32,4 +32,5 @@ if __name__ == "__main__":
   new_call = call.replace(src=(new_ast, *call.src[1:]))
   linear = linear.replace(src=tuple(new_call if c is call else c for c in linear.src))
   with Context(DEBUG=2):
+    linear = link_linear(compile_linear(linear))
     for i in range(5): run_linear(linear)

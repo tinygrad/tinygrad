@@ -2,8 +2,8 @@ import unittest, threading, functools
 from tinygrad import Tensor, UOp, Context
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.engine.realize import run_linear
 from tinygrad.uop.ops import Ops, KernelInfo
+from test.helpers import run_schedule
 
 def wait_loop_kernel(C:UOp, N=10) -> UOp:
   # a void RANGE is a bound-less loop header: a jump target with no induction variable.
@@ -167,7 +167,7 @@ class TestVolatileLoops(unittest.TestCase):
 
     sync = threading.Thread(target=set_signal, daemon=True)
     sync.start()
-    run_linear(UOp(Ops.LINEAR, src=(wait_ext_kernel().call(UOp.from_buffer(sig_buf, dtypes.int32)),)), wait=True)
+    run_schedule(UOp(Ops.LINEAR, src=(wait_ext_kernel().call(UOp.from_buffer(sig_buf, dtypes.int32)),)), wait=True)
     sync.join(timeout=3)
 
 
