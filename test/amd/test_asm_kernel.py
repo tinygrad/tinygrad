@@ -3,7 +3,7 @@ import functools
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile
+from tinygrad.engine.realize import estimate_uop, lower_and_compile
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import getenv, Context
@@ -14,6 +14,7 @@ from tinygrad.renderer.amd.dsl import s, v, NULL
 from test.amd.helpers import TARGET_TO_ARCH
 from test.mockgpu.amd.emu import RELIFT
 from extra.gemm.amd_asm_matmul import Kernel
+from test.helpers import run_schedule
 
 def custom_add_one(A:UOp) -> UOp:
   A = A.flatten()
@@ -183,7 +184,7 @@ class TestAsmKernel(unittest.TestCase):
     est = estimate_uop(linear.src[-1])
     self.assertEqual(est.ops, a.numel())
     self.assertEqual(est.mem, a.nbytes()*2)
-    run_linear(linear)
+    run_schedule(linear)
     self.assertTrue((a.numpy() == 2.).all())
 
   def test_variable(self):
@@ -193,7 +194,7 @@ class TestAsmKernel(unittest.TestCase):
     a = Tensor.custom_kernel(a, b, Tensor(UOp.variable("var", 0, 10, dtypes.int)), fxn=custom_add_var)[0]
     linear = a.schedule_linear()
     for i in range(4):
-      run_linear(linear, var_vals={"var":i})
+      run_schedule(linear, var_vals={"var":i})
       self.assertTrue((a.numpy() == 1+i).all())
 
   def test_lds_sync(self):

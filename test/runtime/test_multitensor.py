@@ -4,8 +4,8 @@ from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variab
 from tinygrad.uop.ops import Ops, UOp, AxisType, graph_rewrite
 from tinygrad.helpers import prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.engine.realize import run_linear, lower_and_compile, pm_beam
-from test.helpers import needs_devices, slow, check_schedule, assert_kernel_count, KernelCountException
+from tinygrad.engine.realize import lower_and_compile, pm_beam
+from test.helpers import needs_devices, slow, check_schedule, assert_kernel_count, KernelCountException, run_schedule
 from hypothesis import given, strategies as strat, settings
 
 settings.register_profile("my_profile", max_examples=getenv("TEST_MAX_EXAMPLES", 200), deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -119,7 +119,7 @@ class TestMultiTensor(unittest.TestCase):
     out = (X + X)
     linear = lower_and_compile(out.schedule_linear())
     uops = [call.src[0].src[0] for call in linear.src if call.src[0].op is Ops.PROGRAM]
-    run_linear(linear)
+    run_schedule(linear)
     self.assertEqual(len(set(uops)), 1, "function was relinearized")
 
   def test_shard_same_device(self):
@@ -162,7 +162,7 @@ class TestMultiTensor(unittest.TestCase):
       #kernels = [call for call in linear.src if call.src[0].op is Ops.SINK]
       #self.assertEqual(len(kernels), 1)
       #self.assertEqual(kernels[0].src[1].buffer.device, devices_2[i])
-      run_linear(linear, var_vals)
+      run_schedule(linear, var_vals)
       np.testing.assert_equal(xt.numpy(), X_np[i*2:i*2+2])
 
   @needs_devices(3)
@@ -382,7 +382,7 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor.ones(16, 16, dtype=dtypes.int).shard(devices_2, axis=0)
     out = t.const_like(2)[:, :8]
     linear, var_vals = check_schedule(out, 0)
-    run_linear(linear, var_vals)
+    run_schedule(linear, var_vals)
     self.assertEqual(out.tolist(), [[2]*8]*16)
 
   def test_arange_shrink(self):
@@ -926,7 +926,7 @@ class TestMultiBufferView(unittest.TestCase):
     if all(not d.startswith(("WEBGPU", "CL")) for d in b_multi.device):
       compiled = [call for call in linear.src if call.src[0].op is Ops.SINK]
       if len(compiled) != 0: raise KernelCountException(0, len(compiled))
-    run_linear(linear, var_vals)
+    run_schedule(linear, var_vals)
     np.testing.assert_equal(b_multi.numpy(), b_ref.numpy())
 
   @unittest.skip("flaky on LLVM")
@@ -959,7 +959,7 @@ class TestMultiBufferView(unittest.TestCase):
     if all(not d.startswith(("WEBGPU", "CL")) for d in out.device):
       compiled = [call for call in linear.src if call.src[0].op is Ops.SINK]
       self.assertEqual(len(compiled), 0)
-    run_linear(linear, var_vals)
+    run_schedule(linear, var_vals)
     np.testing.assert_equal(out.numpy(), ref[5].numpy())
 
 @needs_devices(4)

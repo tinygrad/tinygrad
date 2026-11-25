@@ -6,7 +6,7 @@ import torch
 from tinygrad import GlobalCounters, Tensor, Device
 from tinygrad.helpers import getenv, Context
 from tinygrad.nn.state import get_parameters
-from tinygrad.engine.realize import capturing, run_linear
+from tinygrad.engine.realize import capturing
 from tinygrad.tensor import _to_np_dtype, map_back
 
 class CLCache:
@@ -16,7 +16,7 @@ class CLCache:
   def add_export(self, fn, externs):
     linear, var_vals = map_back(Tensor.compile(fn), externs)
     self.count += len(linear.src)
-    run_linear(linear, var_vals)
+    run_schedule(linear, var_vals)
   def __enter__(self):
     if self.preclear:
       gc.collect()
@@ -36,6 +36,7 @@ from extra.models.convnext import ConvNeXt
 from extra.models.efficientnet import EfficientNet
 from extra.models.resnet import ResNet18
 from extra.models.vit import ViT
+from test.helpers import run_schedule
 
 @unittest.skipUnless(Device.DEFAULT == "CL", "Not Implemented")
 class TestInferenceMinKernels(unittest.TestCase):

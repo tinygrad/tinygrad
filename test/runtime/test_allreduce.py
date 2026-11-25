@@ -2,8 +2,7 @@ import unittest
 from tinygrad import Tensor, UOp, dtypes
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops
-from test.helpers import KernelCountException
-from tinygrad.engine.realize import run_linear
+from test.helpers import KernelCountException, run_schedule
 
 class TestRingAllReduce(unittest.TestCase):
   def test_hierarchy(self):
@@ -31,7 +30,7 @@ class TestRingAllReduce(unittest.TestCase):
       sink_count = (N*(N-1))+(N)+(N)+(1)+(1)
       if len(sinks) != sink_count: raise KernelCountException(sink_count, len(sinks))
       # correctness
-      run_linear(linear, var_vals)
+      run_schedule(linear, var_vals)
       expected = [2*sum((d*M+i)**2 for d in range(N)) for i in range(M)]
       dev_nums = Tensor.arange(1, N+1, dtype=dtypes.float).reshape(N, 1).expand(N, M).shard(ds, axis=0)
       shards = out.reshape(1, M).expand(N, M)+dev_nums

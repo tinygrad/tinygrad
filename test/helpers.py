@@ -13,7 +13,7 @@ from tinygrad.helpers import T, Target, DEV, DEBUG, Context, GlobalCounters
 from tinygrad.renderer import Renderer, TinyELF
 from tinygrad.codegen import full_rewrite_to_sink, linearize_cleanups
 from tinygrad.codegen.late.linearizer import linearize
-from tinygrad.engine.realize import compile_linear
+from tinygrad.engine.realize import compile_linear, run_linear
 
 # decorator to skip slow tests by default, run with RUN_SLOW=1 to include them
 slow = unittest.skipUnless(os.getenv("RUN_SLOW"), "slow test, set RUN_SLOW=1 to run")
@@ -44,6 +44,9 @@ class KernelCountException(Exception):
   def __init__(self, expected:int, got:int):
     self.expected, self.got = expected, got
     super().__init__(f"expected {expected}, got {got}")
+
+def run_schedule(linear:UOp, var_vals:dict[str, int]|None=None, update_stats=True, wait=False) -> None:
+  run_linear(linear, var_vals, update_stats=update_stats, wait=wait)
 
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
   if to_prerealize:

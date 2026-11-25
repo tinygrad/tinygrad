@@ -13,6 +13,7 @@ from tinygrad.runtime.support.c import init_c_struct_t
 import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in, hcq_compile_cache
 from test.null.test_hcq2 import compiled_chain, lower_hcq
+from test.helpers import run_schedule
 
 def cpu_buf(size:int=1, dtype=dtypes.uint8, **kwargs) -> UOp: return UOp.alloc((size,), dtype, device="CPU", **kwargs)
 
@@ -53,7 +54,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     new.host[:] = bytes(range(256)) * 16
     hu, vu, nu = [UOp.from_buffer(b, dtypes.uint8) for b in (host, vram, new)]
     copyout, copyin = hu.store_call(vu), vu.store_call(nu)
-    run_linear(UOp(Ops.LINEAR, src=(copyout, copyin, copyout)), wait=True)
+    run_schedule(UOp(Ops.LINEAR, src=(copyout, copyin, copyout)), wait=True)
     self.assertEqual(bytes(host.host[:]), bytes(new.host[:]))
 
   @patch.object(hcq2, "host_of", lambda _: "CPU")
