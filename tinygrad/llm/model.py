@@ -62,7 +62,7 @@ def _iq_lut(t:int, dev:str|tuple[str, ...]|None, wmma:bool=False) -> tuple[UOp, 
   if dev is None or t not in ({16, 17, 18, 19, 21, 22, 23} if wmma else {16, 17, 18, 19, 21, 22}): return ()
   from tinygrad.runtime.autogen import ggml_common as g
   if t == 23 or (wmma and t in (18, 22)):
-    vals = ([g.kvalues_iq4nl[k] for j in range(16) for i in range(16) for k in (i, j)] if t == 23 else
+    vals:list[float] = ([g.kvalues_iq4nl[k] for j in range(16) for i in range(16) for k in (i, j)] if t == 23 else
             [((v >> (8*i)) & 0xff) / 64.0 for v in (g.iq3xxs_grid if t == 18 else g.iq2s_grid) for i in range(4 if t == 18 else 8)])
     words: tuple[int, ...] = struct.unpack(f"<{len(vals)//2}I", struct.pack(f"<{len(vals)}e", *vals))
   else:

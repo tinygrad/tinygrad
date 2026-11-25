@@ -67,7 +67,8 @@ def _ue4m3_halved(e:UOp) -> UOp:
 
 def _q5_scales(raw:UOp, base:UOp, subgroup:UOp, stream:bool=True) -> tuple[UOp, UOp, UOp, UOp]:
   # scales/mins (6-bit each) live in block bytes 4-15: three words total, same for the whole super-block's lanes
-  ld = _amd_load if stream else (lambda p: p.load())
+  def _direct_load(p:UOp) -> UOp: return p.load()
+  ld = _amd_load if stream else _direct_load
   w1, w2, w3 = ld(raw[base+1]), ld(raw[base+2]), ld(raw[base+3])
   sb = (subgroup & 3) * 8  # byte within word
   byte1, byte2, byte3 = (w1 >> sb) & 255, (w2 >> sb) & 255, (w3 >> sb) & 255
