@@ -58,7 +58,7 @@ from tinygrad.codegen import to_program, to_program_config
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import Context, DEV, to_mv, ContextVar, VIZ
 from tinygrad.runtime.autogen import hsa
-from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, UNCOND, get_elf_section
+from tinygrad.viz.serve import amd_decode, get_cfg, COND_TAKEN, COND_NOT_TAKEN, get_elf_section
 
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE as PCODE_RDNA3
 from tinygrad.runtime.autogen.amd.rdna4.str_pcode import PCODE as PCODE_RDNA4
@@ -1767,42 +1767,8 @@ def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
     linear.append(call.replace(src=(call.body, *args)))
   return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("emu_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
-def thread_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
-  # thread jump-only blocks.
-  targets:dict[int, int] = {}
-  def target(pc:int) -> int:
-    seen:set[int] = set()
-    while pc not in targets and pc not in seen and len(blocks[pc]) == 1 and getattr(insts[blocks[pc][0]], "op_name", "") == "S_BRANCH":
-      seen.add(pc)
-      pc = next(iter(paths[pc]))
-    pc = targets.get(pc, pc)
-    targets.update((src, pc) for src in seen)
-    return pc
-  for pc, dsts in list(paths.items()): paths[pc] = {target(dst):kind for dst,kind in dsts.items()}
-
-def merge_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
-  groups:dict[tuple, list[int]] = {}
-  opposite = {"S_CBRANCH_SCC1":"S_CBRANCH_SCC0", "S_CBRANCH_VCCNZ":"S_CBRANCH_VCCZ", "S_CBRANCH_EXECNZ":"S_CBRANCH_EXECZ"}
-  for pc, pcs in blocks.items():
-    if len(paths[pc]) != 2: continue
-    inst = insts[pcs[-1]]
-    # complementary tests with reversed destinations are the same branch.
-    branch_dests = tuple(sorted((dst, kind ^ (inst.op_name in opposite)) for dst,kind in paths[pc].items()))
-    key = (type(inst), opposite.get(inst.op_name, inst.op_name),
-           tuple((n, getattr(inst, n)) for n,_ in inst._fields if n not in {"op", "simm16"}), branch_dests)
-    groups.setdefault(key, []).append(pc)
-  for group in groups.values():
-    if len(group) < 2: continue
-    header = blocks[group[0]][-1]
-    dests = paths[group[0]]
-    for pc in group:
-      blocks[pc] = blocks[pc][:-1]
-      paths[pc] = {header:UNCOND}
-    blocks[header], paths[header] = [header], dests
-
 # a block has an empty body; a loop contains its header block and the rest of its iteration.
 CFGRegion = tuple[int, list["CFGRegion"]]
-class IrreducibleCFG(RuntimeError): pass
 
 def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
   # number the reachable blocks in DFS postorder, without recursion on long instruction streams.
@@ -1831,9 +1797,8 @@ def cfg_regions(paths:dict[int, dict[int, int]], entry:int) -> list[CFGRegion]:
         todo.extend(preds[dst])
       body:list[CFGRegion] = []
       if len(component) > 1 or pc in paths[pc]:
-        if any(preds[dst] - component for dst in component if dst != pc):
-          raise IrreducibleCFG("irreducible control flow is not supported by the AMD lifter")
-        # removing the single entry exposes nested loops; the original DFS order still applies.
+        # Bourdoncle WTO: removing the max-postorder head exposes nested loops; the original DFS order still applies,
+        # and after one pass through body every wave still in component is guaranteed to be at pc.
         body = [(pc, [])] + build(component - {pc})
       regions.append((pc, body))
     return regions
@@ -1864,12 +1829,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   insts = amd_decode(code, arch)
   assert not any(getattr(inst, "op_name", "").startswith(PC_INSTS) for inst in insts.values()), f"instruction stream cannot contain {PC_INSTS}"
   cfg = get_cfg(insts)
-  thread_branches(insts, cfg["blocks"], cfg["paths"])
-  try: regions = cfg_regions(cfg["paths"], 0)
-  except IrreducibleCFG:
-    # sharing branch tails can make rotated loops reducible, but adds dispatch blocks otherwise.
-    merge_branches(insts, cfg["blocks"], cfg["paths"])
-    regions = cfg_regions(cfg["paths"], 0)
+  regions = cfg_regions(cfg["paths"], 0)
   # propagate possible wave PCs across acyclic regions; loops retain runtime routing.
   unconditional:set[int] = set()
   possible:set[int]|None = {0}
