@@ -289,7 +289,7 @@ def _int_clamp(op_name: str, srcs: dict) -> UOp | None:
 
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
-  __slots__ = ('dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr', 'branch_cond', 'sgpr_reads')
+  __slots__ = ('dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr', 'branch_cond')
   sgpr = UOp.param(0, dtypes.uint32, SGPR_COUNT, name="sgpr")
   vmem = UOp.param(2, dtypes.uint32, 1 << 46, name="vmem")
   lds = UOp.param(3, dtypes.uint32, 16384, name="lds")
@@ -302,7 +302,6 @@ class _Ctx:
     self.vgpr = UOp.param(1, dtypes.uint32, 256 * wave_size, name="vgpr")
     self.accvgpr = UOp.param(5, dtypes.uint32, 256 * wave_size, name="accvgpr") if wave_size == 64 else self.vgpr
     self.branch_cond: UOp | None = None
-    self.sgpr_reads: dict[UOp, UOp] = {}
 
   def range(self, n: int | None = None) -> UOp:
     """Create a lane range UOp with unique axis ID."""
@@ -370,9 +369,8 @@ class _Ctx:
 
   # Dynamic register access (takes UOp index instead of int)
   def rsgpr_dyn(self, reg: UOp, valid: UOp | None = None) -> UOp:
-    index = reg.valid(valid) if valid is not None else reg
-    if index not in self.sgpr_reads: self.sgpr_reads[index] = UOp.param(SGPR_COUNT+len(self.sgpr_reads), dtypes.uint32, addrspace=AddrSpace.ALU)
-    return self.sgpr_reads[index]
+    if valid is not None: return self.sgpr.index(reg.valid(valid)).load()
+    return self.sgpr.index(reg).load()
 
   def wsgpr_dyn(self, reg: UOp, val: UOp) -> UOp:
     """Write SGPR with dynamic register index. On RDNA, index 124 = NULL (writes discarded). On CDNA, index 124 = M0 (read/write)."""
@@ -1733,7 +1731,7 @@ def lower_body(sink:UOp) -> UOp:
   body = sink.substitute({b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}, walk=True)
   return body.call(*bufs)
 
-instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp, UOp|None, dict[UOp, UOp]]]]] = {}
+instruction_cache:dict[tuple, list[tuple[int, int, tuple[UOp, UOp|None]]]] = {}
 
 def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|None]:
   entries = instruction_cache.setdefault((arch, type(inst), inst.size(), type(renderer), renderer.target, *(x.value for x in to_program_config)), [])
@@ -1747,31 +1745,26 @@ def instruction_call(inst:Inst, arch:str, renderer:Renderer) -> tuple[UOp, UOp|N
     base, mask = ctx.canonical_mask(inst_bytes)
     name = f"{_op_name(inst).lower()}_{base.to_bytes(len(inst_bytes), 'little').hex()}"
     call = lower_body(sink.replace(arg=KernelInfo(name)))
-    used = UOp.sink(call, ctx.branch_cond).toposort()
-    ret = call, ctx.branch_cond, {p:index for index,p in ctx.sgpr_reads.items() if p in used}
+    ret = call, ctx.branch_cond
     entries.append(ctx.canonical_mask(inst_bytes)+(ret,))
-  call, cond, reads = ret
-  words = {f"inst_w{i}":(bits >> (32*i)) & 0xffffffff for i in range(inst.size()//4)}
-  bindings = {_Ctx.inst_word(i):_c(words[f"inst_w{i}"]) for i in range(inst.size()//4)}
-  bindings.update({p:_Ctx.sgpr.index(_c(index.get_idx().sym_infer(words))).load() if index.get_valid().sym_infer(words) else _c(0)
-                   for p,index in reads.items()})
-  if call is not None: call = call.replace(src=(UOp.native(inst, call.body), *(bindings.get(b, b) for b in call.src[1:])))
-  return call, cond.substitute(bindings) if cond is not None else None
+  call, cond = ret
+  words = {_Ctx.inst_word(i):_c((bits >> (32*i)) & 0xffffffff) for i in range(inst.size()//4)}
+  if call is not None: call = call.replace(src=(UOp.native(inst, call.body), *(words.get(b, b) for b in call.src[1:])))
+  return call, cond.substitute(words) if cond is not None else None
 
 def instruction_block(instructions:list[UOp]) -> tuple[UOp, list[UOp]]:
-  bufs = sorted({buf for call in instructions for b in call.src[1:] if (buf:=b.buf_uop).op is Ops.PARAM}, key=lambda b: b.arg.slot)
+  bufs = sorted({b for call in instructions for b in call.src[1:] if b.op is Ops.PARAM}, key=lambda b: b.arg.slot)
   params = {b:b.param_like(i, name=b.arg.name) for i,b in enumerate(bufs)}
   linear = list(UOp.sink(*params.values()).toposort())[:-1]
-  seen: set[UOp] = set()
+  seen = set(linear)
   for call in instructions:
     args = [params.get(b, b) for b in call.src[1:]]
     inputs = UOp.sink(*args)
-    nodes = inputs.toposort(lambda u:u.op is not Ops.PARAM and u not in seen)
+    nodes = inputs.toposort(lambda u:u not in seen)
     nodes.pop(inputs)
     seen.update(nodes)
     linear.extend(nodes)
     linear.append(call.replace(src=(call.body, *args)))
-    if _Ctx.sgpr in call.src[1:]: seen.clear()
   return UOp(Ops.PROGRAM, src=(sink:=UOp.sink(*linear, arg=KernelInfo("emu_block", optimized=True)), UOp(Ops.LINEAR, src=(*linear, sink)))), bufs
 
 def thread_branches(insts, blocks:dict[int, list[int]], paths:dict[int, dict[int, int]]):
