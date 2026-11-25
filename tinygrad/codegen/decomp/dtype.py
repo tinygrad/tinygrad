@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate
 from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES
 from tinygrad.uop import GroupOp
@@ -187,25 +187,15 @@ pm_float_decomp: PatternMatcher = PatternMatcher([
    f2f_store(st, idx, val, ctx.fr, ctx.to) if val.dtype == ctx.to and idx.dtype == f2f_dt[ctx.fr] else None),
 ])
 
-@dataclass
-class DTypeDecompCtx:
-  renderer: Renderer
-  dtypes: set[DType] = field(default_factory=set)
+DECOMP_DTYPES = (*dtypes.fp8s, dtypes.bfloat16, dtypes.half, dtypes.long, dtypes.ulong)
+def emulated_dtypes(ren:Renderer) -> set[DType]:
+  emulated, supported = EMULATED_DTYPES.tolist(dtypes), ren.supported_dtypes()
+  return {dt for dt in DECOMP_DTYPES if {dtypes.ulong:dtypes.long}.get(dt, dt) in emulated or dt in emulated or dt not in supported}
 
-def do_dtype_decomps(sink:UOp, ctx:DTypeDecompCtx) -> UOp:
-  def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or dt not in ctx.renderer.supported_dtypes()
-  for fr in sorted(filter(_should_emulate, ctx.dtypes)):
+def decomp_dtypes(sink:UOp, emulated:set[DType]) -> UOp:
+  for fr in sorted({dtypes.long if u.dtype == dtypes.ulong else u.dtype for u in sink.toposort() if u.dtype in emulated}):
     to = dtypes.int if fr == dtypes.long else dtypes.float
     if DEBUG >= 2: print(f"emulating {fr} as {to}")
-    pm = pm_float_decomp if fr in dtypes.floats else pm_long_decomp
-    sink = graph_rewrite(sink, pm, name=f"decomp {fr} -> {to}", ctx=FloatDecompCtx(fr, to), bottom_up=True)
-  ctx.dtypes.clear()
+    sink = graph_rewrite(sink, pm_float_decomp if fr in dtypes.floats else pm_long_decomp,
+                         name=f"decomp {fr} -> {to}", ctx=FloatDecompCtx(fr, to), bottom_up=True)
   return sink
-
-pm_dtype_decomps = PatternMatcher([
-  # detect dtypes to decompose
-  (UPat(GroupOp.All, (*dtypes.fp8s, dtypes.bfloat16, dtypes.half, dtypes.long, dtypes.ulong), name="x"), lambda x,ctx:
-   ctx.dtypes.add({dtypes.ulong:dtypes.long}.get(dt:=x.dtype, dt))),
-  # do the rewrites
-  (UPat(Ops.SINK, name="sink"), do_dtype_decomps),
-])

@@ -39,8 +39,12 @@ def _load_kernel(name:str) -> UOp|None:
     return get(name)
   except ImportError: return None
 
+# bounded cache: keeps specialized UIR kernel UOps across repeated layers without retaining unbounded dynamic shapes
+@functools.lru_cache(maxsize=256)
+def _specialize(u:UOp, items:tuple[tuple[str, int|float], ...]) -> UOp: return u.specialize(**dict(items))
+
 def _get_kernel(name:str, **params:int|float) -> UOp|None:
-  return None if (u := _load_kernel(name)) is None else u.specialize(**params)
+  return None if (u := _load_kernel(name)) is None else _specialize(u, tuple(params.items()))
 
 def _run_kernel(name:str, out_shape:tuple[int, ...], device:str|tuple[str, ...]|None,
                 *args:Tensor|UOp, axis:int|None=None, **params:int|float) -> Tensor|None:

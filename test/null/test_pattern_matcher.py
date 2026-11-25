@@ -1,7 +1,7 @@
 import unittest, itertools
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, GroupOp # noqa: F401
-from tinygrad.uop.ops import PatternMatcher, UPat
+from tinygrad.uop.ops import PatternMatcher, UPat, BottomUpGate, graph_rewrite
 
 # the rewrite uses a global defined after its PatternMatcher, like codegen's lower_call -> to_program
 late_pms = [PatternMatcher([(UPat(Ops.CONST, name="x"), lambda x: late_global(x))], compiled=c) for c in (False, True)]
@@ -244,6 +244,22 @@ class TestPatternMatcher(unittest.TestCase):
       if isinstance(u.src, itertools.repeat): return next(u.src[0])
       return u.src[0]
     for a,b in zip(simple_src(a), simple_src(b)): self._assert_eq_upat(a, b)
+
+  def test_walk_rewrite_bottom_up_gate(self):
+    a, b = UOp.const(1, dtypes.int32), UOp.const(2, dtypes.int32)
+    gated, normal = UOp(Ops.NEG, src=(a + b,)), (a + b)
+    def stop_neg(): raise BottomUpGate
+    pm = PatternMatcher([(UPat(Ops.ADD, src=(UPat.var("x"), UPat.var("y"))), lambda x, y: x * y)])
+    bpm = PatternMatcher([(UPat(Ops.NEG), stop_neg)])
+    out = graph_rewrite(UOp.sink(gated, normal), pm, bpm=bpm, walk=True)
+    self.assertIs(out.src[0], gated)
+    self.assertEqual(out.src[1], a * b)
+
+  def test_substitute_walk_enter_calls(self):
+    a, b = UOp.const(1, dtypes.int32), UOp.const(2, dtypes.int32)
+    c = (a + b).sink().call(a)
+    self.assertEqual(c.substitute({a: b}, walk=True, enter_calls=False), (a + b).sink().call(b))
+    self.assertEqual(c.substitute({a: b}, walk=True, enter_calls=True), (b + b).sink().call(b))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

@@ -86,7 +86,7 @@ pm_mops = PatternMatcher([
   # A store through a padded view gates the destination index, not its loaded value.
   (UPat.var("a").where(UPat.var("b").where(UPat.var("dst"), 0), UPat.var("pad")).store(UPat.var("val")),
    lambda a,b,dst,pad,val: (a&b).where(dst, 0).store(val) if pad.is_invalid else None),
-  (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")), 0).store(UPat.var("val")),
+  (UPat.var("cond").where(UPat.any(p:=UPat.var("buf").index(UPat.var("idx")), p.load()), 0).store(UPat.var("val")),
    lambda cond,buf,idx,val: buf.index(idx.valid(cond)).store(val)),
   # storage moves movement ops and INDEX after AFTER
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
@@ -126,27 +126,24 @@ def split_reduceop(reduce:UOp, x:UOp):
 
 def resolve_function(c:UOp) -> UOp|None:
   if not c.is_inline_call: return None
-  nodes = c.body.toposort()
-  # Input and output PARAMs both bind to explicit arguments by slot; unused arguments are allowed.
-  args = c.src[1:]
-
+  # Input and output PARAMs bind to explicit arguments by slot; unused arguments are allowed.
   # params have a flat storage size in the arg, the logical shape is a view (RESHAPE/SHRINK/UNSHARD) on top of it.
   # substitute args by their flat max-shaped storage view so the movement views on the params stay valid
-  def flat_storage(a:UOp) -> tuple[int, UOp]:  # returns (size, view of a as flat max-shaped storage)
-    shp = a.max_shard_shape if a.axis is not None and isinstance(a.device, tuple) else a.max_shape
-    if a.op is Ops.SHRINK and a.src[0].shape == shp and all(s == 0 for s,_ in a.marg): a = a.src[0]
-    return (n:=prod(shp)), a if a.shape == (n,) else a.pad_to(shp).reshape((n,))
-  dict_map = {p:args[p.arg.slot] for p in nodes if p.op is Ops.PARAM and p.arg.slot >= 0}
-  for p, a in dict_map.items():
-    if p.shape:
-      n, flat = flat_storage(a)
-      if p.max_numel() != n: raise TypeError(f"arg {p.arg.slot} shape mismatch: expected size {p.max_numel()}, got {a.shape}")
-      dict_map[p] = flat
-    elif a.shape != ():
-      raise TypeError(f"arg {p.arg.slot} shape mismatch: expected scalar, got {a.shape}")
-    if p.dtype != a.dtype: raise TypeError(f"arg {p.arg.slot} dtype mismatch: expected {p.dtype}, got {a.dtype}")
-  # Inlining removes the call scope, so its local allocations need fresh identities.
-  dict_map.update({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in nodes if b.op is Ops.ALLOC})
+  nodes, args = c.body.toposort(), c.src[1:]
+  dict_map: dict[UOp, UOp] = {}
+  for p in nodes:
+    # Inlining removes the call scope, so its local allocations need fresh identities.
+    if p.op is Ops.ALLOC: dict_map[p] = p.replace(arg=replace(p.arg, slot=next(UOp.unique_num)))
+    elif p.op is Ops.PARAM and p.arg.slot >= 0:
+      a = args[p.arg.slot]
+      if p.dtype != a.dtype: raise TypeError(f"arg {p.arg.slot} dtype mismatch: expected {p.dtype}, got {a.dtype}")
+      if p.shape:
+        shp = a.max_shard_shape if a.axis is not None and isinstance(a.device, tuple) else a.max_shape
+        if a.op is Ops.SHRINK and a.src[0].shape == shp and all(s == 0 for s,_ in a.marg): a = a.src[0]
+        if p.max_numel() != (n:=prod(shp)): raise TypeError(f"arg {p.arg.slot} shape mismatch: expected size {p.max_numel()}, got {a.shape}")
+        dict_map[p] = a if a.shape == (n,) else a.pad_to(shp).reshape((n,))
+      elif a.shape != (): raise TypeError(f"arg {p.arg.slot} shape mismatch: expected scalar, got {a.shape}")
+      else: dict_map[p] = a
   return c.body.substitute(dict_map, walk=True)
 
 # shape-changing bitcast
@@ -184,12 +181,9 @@ def materialize_cross_device_src(dest:UOp, src:UOp):
   if src.device is None or dest.device == src.device or src.has_buffer_identity(after_ok=True): return None
   return dest.store(src.contiguous())
 
-pm_inline_calls = PatternMatcher([
+pm_inline_calls = pm_mops+PatternMatcher([
   (UPat(Ops.CALL, name="c"), resolve_function),
   (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
-])
-
-pm_disk_copy = PatternMatcher([
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement | {Ops.BITCAST}, name="x").f(Ops.STAGE).f(Ops.COPY, name="copy"), lambda x,copy:
    copy.replace(src=(x,)) if x.on_disk() else None),
@@ -267,9 +261,11 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
 @rewrite_group(new_ctx=False)
 def prepare_rangeify(sink:UOp) -> UOp:
-  # prepare for rangeify
-  tsink = graph_rewrite(forward_call_outputs(sink), multi_pm, name="multi_pm")
-  tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls+pm_disk_copy, name="inline calls")
+  tsink = forward_call_outputs(sink)
+  ops = {u.op for u in tsink.toposort()}
+  if ops & {Ops.UNSHARD, Ops.ALLREDUCE, Ops.COPY, Ops.MSELECT, Ops.MSTACK}:
+    tsink = graph_rewrite(tsink, multi_pm, name="multi_pm")
+    ops = {u.op for u in tsink.toposort()}
+  if Ops.CALL in ops or Ops.COPY in ops: tsink = graph_rewrite(tsink, pm_inline_calls, name="inline calls")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, init_ctx=MapCtx, name="fold moved afters")
-  tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
-  return tsink
+  return graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")

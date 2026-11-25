@@ -8,7 +8,6 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtyp
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod, canonicalize_device_name, VALIDATE_WITH_CPU
 from tinygrad.helpers import Context, cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device, to_tuple
 from tinygrad.uop.ops import UOp, Ops, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
-from tinygrad.uop.ops import KernelInfo, AxisType
 from tinygrad.mixin import Mixin
 from tinygrad.codegen import create_linear, contiguous_mops_to_view
 from tinygrad.engine.realize import run_linear, capturing, compile_linear, link_linear
@@ -32,18 +31,9 @@ def canonicalize_alloc(ctx:ExportCtx, b:UOp) -> UOp|None:
   if b.arg.slot >= 0 and b not in ctx.allocs: ctx.allocs[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.allocs)))
   return ctx.allocs.get(b)
 
-def export_call(ctx:ExportCtx, c:UOp) -> UOp:
-  # a call body is its own scope for ALLOC slots, the EXTERNs are shared
-  c = c.replace(src=(graph_rewrite(c.body, pm_export, ctx=ExportCtx(ctx.externs), bottom_up=True, name="export call body"),)+c.src[1:])
-  # what it reads from the enclosing scope, the EXTERNs, the free Variables and a kernel's device number, are its args. nested calls are done
-  kernel = isinstance(c.body.arg, KernelInfo)
-  return c.lift_args([u for u in c.body.toposort() if u.op is Ops.EXTERN or (u.is_variable and u.arg.slot == -1) or
-                      (kernel and u.op is Ops.RANGE and u.axis_type is AxisType.DEVICE)])
-
 pm_export: PatternMatcher = PatternMatcher([
   (UPat((Ops.BUFFER, Ops.PARAM), name="x"), to_extern),
   (UPat(Ops.ALLOC, name="b"), canonicalize_alloc),
-  (UPat(Ops.CALL, name="c"), export_call),
 ])
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
@@ -230,12 +220,12 @@ class Tensor(Mixin):
     # the stores are the AFTERs into storage: an AFTER on a BUFFER (an assign) or a STORE into an ALLOC. an ALLOC after a CALL is a call output
     stores = UOp.sink(*(u for u in sink.toposort()
                         if u.op is Ops.AFTER and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE)))
-    storage = graph_rewrite(stores, pm_drop_after, bottom_up=True, name="drop after")
+    storage = graph_rewrite(stores, pm_drop_after, bottom_up=True, walk=True, name="drop after")
     becomes_map = {u:s.shrink_to(u.shape) for u,s in zip(stores.src, storage.src)}
     assert not any(x in becomes_map for x in becomes_map.values())
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
-    fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, name="export")
+    fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, walk=True, name="export")
     if len(names:=[v.expr for v in ctx.externs if v.is_bound_var]) != len(set(names)): raise RuntimeError(f"bind mismatch on a Variable in {names}")
     return fn, tuple(ctx.externs)
 

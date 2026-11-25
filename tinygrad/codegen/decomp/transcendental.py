@@ -59,7 +59,8 @@ def frexp(v:UOp) -> tuple[UOp, UOp]:
   exponent = shr(bits, mantissa_bits(v.dtype)) & exponent_mask(v.dtype)
   # Set the exponent bits appropriately to normalize the mantissa into the range of [0.5, 1.0).
   mantissa = ((bits & m1) | m2).bitcast(v.dtype)
-  exp = exponent - exponent_bias(v.dtype) + 1
+  # pre-fold (bias - 1) so exponent subtraction emits a single constant even without a separate post-decomp symbolic pass
+  exp = exponent - (exponent_bias(v.dtype) - 1)
   return mantissa, exp
 
 # *** reduction algorithms for sine ***

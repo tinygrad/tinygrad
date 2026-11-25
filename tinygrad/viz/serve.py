@@ -80,7 +80,7 @@ def load_rewrites(data:VizData) -> None:
                                trace=k.tb if j==0 else None, depth=s.depth))
       if s.name == "View Base AST": data.ref_map[canonicalize_ast(_reconstruct(data, s.sink))] = i
       # get source and binary from Ops.PROGRAM
-      if s.name == "linearize/render": lin_idx, depth = j, s.depth
+      if s.name in ("linearize/render", "View Program"): lin_idx, depth = j, s.depth
       if lin_idx is not None and (j+1 == len(rewrites) or rewrites[j+1].depth <= depth):
         steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin_idx, depth=depth))
         steps.append(create_step("View Source", ("/code", i, len(steps)), lin_idx, depth=depth))
@@ -205,8 +205,9 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, update_sink=True) ->
     if not ctx.bottom_up: next_sink = new_sink
 
 def get_sink_at(upats:tuple[str, ...], viz_data:VizData, kernel_idx:int, lin_idx:int, src:int, alt:str|None=None) -> UOp|None:
-  for i in range(lin_idx+1, len(rewrites:=viz_data.trace.rewrites[kernel_idx])):
-    if (r:=rewrites[i]).name == alt: return _reconstruct(viz_data, viz_data.trace.uop_fields[r.sink][1][src])
+  for i in range(lin_idx, len(rewrites:=viz_data.trace.rewrites[kernel_idx])):
+    if (r:=rewrites[i]).name == alt:
+      return _reconstruct(viz_data, srcs[src]) if src < len(srcs:=viz_data.trace.uop_fields[r.sink][1]) else None
   for s in get_full_rewrite(viz_data, rewrites[lin_idx]):
     if (s["upat"] is not None and any(n in s["upat"][1] for n in upats)): return u if (u:=s["_sink"]).op is Ops.REWRITE_ERROR else u.src[src]
   return None

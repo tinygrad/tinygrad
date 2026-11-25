@@ -51,35 +51,36 @@ def threefry2x32(x: UOp, key: UOp):
 
 # ***** decomposition patterns *****
 
+def _sign_diff(a:UOp, b:UOp) -> UOp:
+  if b.vmin >= 0: return a < 0
+  if a.vmin >= 0: return b < 0
+  return (a<0).ne(b<0)
+
 def floordiv_to_idiv(a:UOp, b:UOp) -> UOp:
   if (a.vmin >= 0 and b.vmin >= 0) or (a.vmax <= 0 and b.vmax <= 0): return a.alu(Ops.TRUNCDIV, b)
-  return a.alu(Ops.TRUNCDIV, b) - (a.alu(Ops.TRUNCMOD, b).ne(0) & (a<0).ne(b<0))
+  return a.alu(Ops.TRUNCDIV, b) - (a.alu(Ops.TRUNCMOD, b).ne(0) & _sign_diff(a, b))
 
 def floormod_to_mod(a:UOp, b:UOp) -> UOp:
   if (a.vmin >= 0 and b.vmin >= 0) or (a.vmax <= 0 and b.vmax <= 0): return a.alu(Ops.TRUNCMOD, b)
   r = a.alu(Ops.TRUNCMOD, b)
   # use where instead of mul to avoid being fused into MULACC (which int64 long-decomp doesn't handle)
-  return r + (r.ne(0) & (a<0).ne(b<0)).where(b, b.const_like(0))
+  return r + (r.ne(0) & _sign_diff(a, b)).where(b, b.const_like(0))
 
 powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
 @functools.cache
-def get_simplifying_rewrite_patterns(ops:tuple[Ops, ...]) -> PatternMatcher:
-  # these are rewrites that make things simpler
-  pat: list[tuple[UPat, Callable]] = []
-  # DIV by 2**y -> x >> y (an arithmetic shift is exactly floor division for any sign); fires before floordiv_to_idiv
+def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> PatternMatcher:
+  pat: list[tuple[UPat, Callable]] = [
+    # float ALUs need a float operand before decomps expand SIN/LOG2/EXP2 into float polynomials
+    (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIP), src=(UPat(name="x"),), name="u"),
+     lambda u,x: u.replace(src=(x.cast(u.dtype),)) if x.dtype != u.dtype else None),
+  ]
+  # DIV/MOD by 2**y -> shift/mask (fires before floordiv_to_idiv / floormod_to_mod)
   if Ops.SHR in ops: pat.append((UPat.var("x", dtypes.ints)//UPat.cvar("c"),
     lambda x,c: x >> v if (v:=powers_of_two.get(c.val, 0)) else None))
   pat.append((UPat.var("a")//UPat.var("b"), floordiv_to_idiv))
-  # MOD by 2**y -> x & (2**y-1) (correct floor mod for any sign in two's complement); fires before floormod_to_mod
   if Ops.AND in ops: pat.append((UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.val-1) if c.val in powers_of_two else None))
   pat.append((UPat.var("a")%UPat.var("b"), floormod_to_mod))
-  # no real hardware supports THREEFRY, but NullRenderer does
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
-  return PatternMatcher(pat)
-
-@functools.cache
-def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> PatternMatcher:
-  pat: list[tuple[UPat, Callable]] = []
   # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends). late: WHERE loses the bound MAX carries
   if Ops.MAX not in ops and Ops.CMPLT in ops: pat += [(UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0]))]
   if Ops.OR in ops: pat += [(UPat.var("x", dtypes.bool).logical_not()&UPat.var("y", dtypes.bool).logical_not(),
@@ -116,7 +117,8 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
   if Ops.MULACC in ops:
     pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
     # also fuse (x << n) + c → MULACC(x, 2^n, c) since MUL→SHL may run first
-    if Ops.SHL in ops: pat += [(UPat.var('x').alu(Ops.SHL, UPat.cvar('n'))+UPat.var('c'), lambda x,n,c: x.alu(Ops.MULACC, x.const_like(1<<n.val), c))]
+    if Ops.SHL in ops: pat += [(UPat.var('x').alu(Ops.SHL, UPat.cvar('n').or_casted())+UPat.var('c'),
+                                lambda x,n,c: x.alu(Ops.MULACC, x.const_like(1<<n.val), c))]
   # some backends emit FDIV for RECIP, in that case: a*(1/b) -> a/b
   if Ops.FDIV in ops:
     pat += [(UPat.var("x").reciprocal(), lambda x: UOp.const(1.0).alu(Ops.FDIV, x))]

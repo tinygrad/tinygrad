@@ -413,7 +413,7 @@ def usb_copy_rewriter(s:UOp) -> UOp|None:
 
 Compiled.pm_encode = PatternMatcher([(UPat.sink().call(UPat(Ops.PARAM)).after(allow_any_len=True, name="s"),
   usb_copy_rewriter)]) + Compiled.pm_encode # the copies of a submit go through the sram window
-Compiled.pm_lower += PatternMatcher([
+Compiled.pm_encode += PatternMatcher([
   # the gpu's memory is reached over usb
   (UPat.native("memcpy").call(UPat.var("dst"), UPat.var("src"), UPat.var("n")), usb_memcpy),
   (UPat.native("memset").call(UPat.var("dst"), UPat.const(0).or_casted(), UPat.var("n")),

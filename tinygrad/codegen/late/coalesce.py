@@ -4,7 +4,7 @@ from dataclasses import replace
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, graph_rewrite
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate, sym
-from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv, is_image_shape
+from tinygrad.helpers import getenv, OSX, ceildiv, is_image_shape
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -75,7 +75,7 @@ def image_valid_dims(base:DType, size:int, arch:str) -> list[tuple[int,int]]:
 
 def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   shapes, ren, read_write = ctx
-  if not IMAGE or ren.target.device not in {"QCOM", "CL", "PYTHON", "NULL"} or buf in read_write: return None
+  if ren.target.device not in {"QCOM", "CL", "PYTHON", "NULL"} or buf in read_write: return None
   valid, x = x.get_valid(), x.get_idx()
   # search for dims that drop the most valid statements
   best_drop, cands = -1, []
@@ -106,7 +106,7 @@ pm_simplify_add_image = PatternMatcher([
 ])
 
 def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
-  if getenv("DMC"): return sink
+  if getenv("DMC") or (not ctx.supports_float4 and ctx.target.device != "DSP"): return sink
 
   # collect
   memory: defaultdict[tuple[Ops, UOp, UOp|None, UOp, object, int|tuple[int, int]], dict[int, list[UOp]]] = defaultdict(dict)
@@ -134,36 +134,31 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
 
   # build replacements
   replacements = {}
+  is_dsp = ctx.target.device == "DSP"
   for (op,buf,_,_,ld_arg,_),offsets in memory.items():
     # allowed lengths (copied in)
-    lengths = []
-    must_divide = True
-    if ctx.target.device == "DSP":
-      lengths = [128,64,32,16,8,4]
-      must_divide = False
+    lengths: list[int] = []
+    if is_dsp: lengths = [128,64,32,16,8,4]
     elif buf.dtype in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and ctx.supports_float4:
-      # TODO: a better way to get this than ctx
       lengths = [8,4,2] if buf.dtype == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
     lengths.append(1)  # worst case, it's not folded
     # do the grouping
     for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0]):
       full_grp = [offsets[x] for _,x in group]
-      while len(full_grp):
+      while full_grp:
         # the group starts at its first access's index, valid included
         offset = full_grp[0][0].src[0].src[1]
-        length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.get_idx().divides(l) is not None)][0]
+        length = next(l for l in lengths if l <= len(full_grp) and (is_dsp or offset.get_idx().divides(l) is not None))
         grp, full_grp = full_grp[:length], full_grp[length:]
         assert op is not Ops.STORE or all(len(g) == 1 for g in grp), "attempting multiple stores"
         if length == 1: continue
         idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(length)))
         if op == Ops.STORE:
-          datas = [g[0].src[1] for g in grp]
-          store = idx.store(UOp.stack(*datas))
+          store = idx.store(UOp.stack(*[g[0].src[1] for g in grp]))
           for g in grp: replacements[g[0]] = store
         else:
           ld = idx.load(arg=ld_arg)
           for i,g in enumerate(grp):
             for oo in g: replacements[oo] = ld.index(i)
-
   # apply
   return sink.substitute(replacements, name="memory coalescing")

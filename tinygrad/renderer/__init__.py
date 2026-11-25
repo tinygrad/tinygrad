@@ -99,7 +99,7 @@ class Estimates:
         flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
       elif u.op is Ops.WMMA and u not in excluded:
         flops += 2 * prod(u.arg[0]) // u.arg[2] * mults
-    return Estimates(ssimplify(flops), lds, sum(mem.values()))
+    return Estimates(flops, lds, sum(mem.values())).simplify()
 
 class Renderer:
   target: Target

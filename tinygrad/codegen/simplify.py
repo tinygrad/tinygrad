@@ -132,21 +132,19 @@ pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
 ])
 
 def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp|None:
+  disallowed_ops = GroupOp.Effect | {Ops.REDUCE} | ({Ops.INDEX} if pm is pm_reduce_collapse else set())
   for r in red.src[1:]:
     included = u.toposort(gate=lambda x: r in x.ranges)
-    if any(x.op in GroupOp.Effect|{Ops.REDUCE} for x in included): return None
+    if any(x.op in disallowed_ops for x in included): return None
     replaces: dict[UOp, UOp] = {}
-    for u in included:
-      for s in u.src:
+    for x in included:
+      for s in x.src:
         if s in included or s in replaces or s.op in GroupOp.Defines|{Ops.CONST}: continue
         replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype)
-    collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
-    sink = graph_rewrite(collapse_fxn, pm_flatten_range+pm, name="reduce_collapse")
+    sink = graph_rewrite(u.substitute(replaces, walk=True).reduce(r, arg=Ops.ADD), pm_flatten_range+pm, name="reduce_collapse")
     if not no_range(sink): return None
-    u = sink.substitute({v:k for k,v in replaces.items()})
+    u = sink.substitute({v:k for k,v in replaces.items()}, walk=True)
   return u
-
-def reduce_load_collapse(red:UOp, u:UOp) -> UOp|None: return reduce_collapse(red, u, pm=pm_reduce_load_collapse)
 
 # remove REDUCE without loads (generic arange opt / indexing).
 pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
@@ -155,7 +153,7 @@ pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
 # remove REDUCE on load, comes from indexing a tensor with another tensor
 def no_load(u:UOp) -> bool: return not u.op_in_backward_slice_with_self(Ops.INDEX)
 pm_load_collapse = PatternMatcher([
-  (UPat(Ops.REDUCE, arg=(Ops.ADD, 0), src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
+  (UPat(Ops.REDUCE, arg=(Ops.ADD, 0), src=(UPat.var("u"), UPat()), name="red"), lambda red,u: reduce_collapse(red, u, pm_reduce_load_collapse)),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse
   ((UPat.var("x", dtypes.weakint)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
 ])

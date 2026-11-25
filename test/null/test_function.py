@@ -24,6 +24,68 @@ class TestFunction(unittest.TestCase):
       @function
       def __call__(self, x:Tensor) -> Tensor: return x + 1
 
+  def test_implicit_symbolic_var_lifted(self):
+    from tinygrad import Variable
+    from tinygrad.uop.ops import Ops
+    v = Variable("n", 1, 8).bind(4)
+    imp = (Tensor.ones(8).contiguous().realize()[:v] + 1).contiguous()
+    @function(allow_implicit=True, precompile=True)
+    def g(x:Tensor) -> Tensor: return x + imp.sum()
+    call = next(x for x in g(Tensor.ones(1)).uop.toposort() if x.op is Ops.CALL)
+    self.assertEqual([x for x in call.body.toposort() if x.is_variable and x.arg.slot == -1], [])
+
+  def test_lower_call_inline_nested_name_collision(self):
+    from tinygrad.dtype import dtypes
+    from tinygrad.codegen import do_to_program
+    from tinygrad.renderer import Target
+    from tinygrad.renderer.cstyle import CStyleLanguage
+    ren = CStyleLanguage(Target())
+    ren.inline_prefix = "static inline"
+    p0 = UOp.param(0, dtypes.float32, (1,))
+    sub1 = UOp.sink(p0[0].store(p0[0].load() + UOp.const(1.0, dtypes.float32)), arg=KernelInfo("sub", optimized=True))
+    sub2 = UOp.sink(p0[0].store(p0[0].load() + UOp.const(2.0, dtypes.float32)), arg=KernelInfo("sub", optimized=True))
+    # helper calls sub1; outer1 calls sub2 (claims "sub") then helper (sub1 -> "sub_1"); outer2 calls only helper (sub1 -> "sub")
+    helper = UOp.sink(sub1.call(p0), arg=KernelInfo("helper", optimized=True))
+    outer1 = UOp.sink(sub2.call(p0), helper.call(p0), arg=KernelInfo("outer1", optimized=True))
+    outer2 = UOp.sink(helper.call(p0), arg=KernelInfo("outer2", optimized=True))
+    p1 = do_to_program(outer1, ren)
+    p2 = do_to_program(outer2, ren)
+    # outer2 must call "sub", not outer1's cached "sub_1"
+    self.assertIn("sub(", p2.src[2].arg)
+    self.assertNotIn("sub_1(", p2.src[2].arg)
+    self.assertIn("sub_1(", p1.src[2].arg)
+
+  def test_split_store_dependent_range_renumber(self):
+    from tinygrad.dtype import dtypes
+    from tinygrad.uop.ops import Ops
+    from tinygrad.codegen.rangeify import split_store
+    buf = UOp.new_buffer("NULL", 16, dtypes.float32)
+    r0 = UOp.range(4, 5)
+    r1 = UOp.range(r0 + 1, 7)
+    st = buf.index(r0 * 4 + r1).store(UOp.const(1.0, dtypes.float32)).end(r0, r1)
+    call = split_store(st)
+    assert call is not None
+    ranges = [u for u in call.body.toposort() if u.op is Ops.RANGE]
+    # inner range bound must reference the renumbered outer range, not the stale axis_id=5 range
+    self.assertEqual({r.axis_id for r in ranges}, {(0,), (1,)})
+
+  def test_custom_kernel_captured_buffer_lifted(self):
+    from tinygrad.uop.ops import Ops
+    w = Tensor([10., 20., 30., 40.]).contiguous().realize()
+    def k(C:UOp, A:UOp) -> UOp:
+      i = UOp.range(4, 0)
+      return C[i].store(A[i] + w.uop[i]).end(i).sink(arg=KernelInfo(name="ck_closure"))
+    out = Tensor.custom_kernel(Tensor.empty(4), Tensor([1., 2., 3., 4.]).contiguous().realize(), fxn=k)[0]
+    call = next(x for x in out.uop.toposort() if x.op is Ops.CALL)
+    self.assertEqual([x for x in call.body.toposort() if x.op is Ops.BUFFER], [])
+    self.assertIn(w.uop.base, call.src[1:])
+
+  def test_simplify_weak_nan_cast(self):
+    from tinygrad.dtype import dtypes
+    from tinygrad.uop.ops import Ops
+    u = UOp(Ops.CAST, (UOp.const(float("nan")),), dtypes.weakint)
+    self.assertIs(u.simplify().op, Ops.CAST)
+
 class TestFunctionMulti(unittest.TestCase):
   devices_2 = ("NULL:0", "NULL:1")
 

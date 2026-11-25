@@ -9,7 +9,7 @@ from tinygrad.renderer import Compiler, CompileError, TinyELF
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, uopfunc
 from tinygrad.engine.realize import get_call_kernel_args
-from tinygrad.runtime.support.hcq2 import HWQueue, ccall, encode_cmdbuf, make_program
+from tinygrad.runtime.support.hcq2 import HWQueue, ccall, encode_cmdbuf, make_program, _write_host
 
 CC_CB = c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], c.POINTER[None], cl.size_t, c.POINTER[None]]]
 BP_CB = c.CFUNCTYPE[None, [cl.cl_program, c.POINTER[None]]]
@@ -121,8 +121,8 @@ class CLDevice(Compiled):
       check(cl.clGetDeviceInfo(self.cl_dev, cl.CL_DEVICE_IMAGE_PITCH_ALIGNMENT, 4, ctypes.byref(ipa := ctypes.c_uint32()), None))
       arch += f",IMAGE_PITCH_ALIGNMENT={ipa.value}"
     super().__init__(device, CLAllocator(self), None, arch=arch)
-    Compiled.pm_link += PatternMatcher([(UPat(Ops.ALLOC, name="p").store(UPat(Ops.PROGRAM, name="prg")), lambda p, prg, d=self:
-      p.store(UOp(Ops.BINARY, arg=d.function(prg.src[3].arg, prg.src[0].arg.function_name))) if p.device == d.device else None)])
+    Compiled.pm_link += PatternMatcher([(UPat(Ops.BUFFER, name="p").store(UPat(Ops.PROGRAM, name="prg")), lambda p, prg, d=self:
+      _write_host(p, d.function(prg.src[3].arg, prg.src[0].arg.function_name)) if p.buffer.device == d.device else None)])
 
   @functools.cache
   def function(self, src:bytes, name:str) -> bytes:

@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, Context, Device, dtypes
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.codegen.late.linearizer import do_split_ends
+from tinygrad.codegen.gpudims import do_split_ends
 from tinygrad.uop.ops import KernelInfo, AxisType, UOp, Ops
 from test.helpers import to_uops_list
 

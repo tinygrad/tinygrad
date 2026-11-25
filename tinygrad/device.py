@@ -362,7 +362,6 @@ class Compiled:
 
   # hcq2
   pm_encode:PatternMatcher
-  pm_lower:PatternMatcher
   pm_link:PatternMatcher
   link_bufs:dict[str, Buffer|Callable[..., Buffer]] = {}
 

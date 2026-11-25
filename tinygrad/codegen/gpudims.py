@@ -1,6 +1,6 @@
 import math
+from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, ssimplify, AxisType
-from tinygrad.codegen.late.linearizer import pm_split_ends
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Renderer
 
@@ -39,12 +39,13 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
   axis_type = AxisType.GLOBAL if prefix == "gidx" else AxisType.LOCAL
   raw_idxs = [UOp.range(s, i, axis_type) for i,s in enumerate(limited)]
   flat = sum(idx * math.prod(limited[i+1:]) for i,idx in enumerate(raw_idxs))
-  return [ssimplify(flat // math.prod(dims[i+1:])) if i == 0 else ssimplify((flat // math.prod(dims[i+1:])) % dims[i]) for i in range(len(dims))]
+  return [(flat // math.prod(dims[i+1:])).simplify() if i == 0 else ((flat // math.prod(dims[i+1:])) % dims[i]).simplify() for i in range(len(dims))]
 
-def group_gpudims(ctx:Renderer, s:UOp):
-  if s.arg is None: return None
+# Run once: grouping creates new GLOBAL/LOCAL ranges, which must not be grouped again.
+def group_gpudims(ctx:Renderer, s:UOp) -> UOp:
+  if s.arg is None: return s
   s_topo = list(s.toposort())
-  if any(x.op is Ops.SPECIAL for x in s_topo): return None
+  if any(x.op is Ops.SPECIAL for x in s_topo): return s
 
   # get ranges
   all_ranges = {x.arg:x for x in s_topo if x.op is Ops.RANGE}
@@ -54,7 +55,7 @@ def group_gpudims(ctx:Renderer, s:UOp):
   # WARP maps to hardware dimension zero, independently of nesting order.
   local_dims = [x.arg for x in sorted((x for x in all_ranges.values() if x.axis_type in (AxisType.WARP, AxisType.LOCAL)),
                                     key=lambda x: (x.axis_type is not AxisType.WARP, x.axis_id))]
-  if not global_dims and not local_dims: return None
+  if not global_dims and not local_dims: return s
 
   # get global and local shape
   global_shape = tuple(ssimplify(all_ranges[r].src[0]) for r in global_dims)
@@ -75,19 +76,20 @@ def group_gpudims(ctx:Renderer, s:UOp):
   for r in s_topo:
     # look for local INDEXes that are not used in the GLOBAL store, then add them as an INVALID
     if r.op is Ops.STORE and len((idx := r.src[0]).src) and idx.src[0].addrspace == AddrSpace.GLOBAL:
-      missing_locals = [all_ranges[rng] for rng in local_dims if all_ranges[rng] not in idx.ranges]
-      if len(missing_locals):
+      if missing_locals := [all_ranges[rng] for rng in local_dims if all_ranges[rng] not in idx.ranges]:
         assert len(idx.src) == 2, "index has 2 sources"
-        mask: UOp = UOp.uprod(*[x.eq(0) for x in missing_locals])
-        masks[idx] = idx.replace(src=(idx.src[0], idx.src[1].valid(mask)))
+        masks[idx] = idx.replace(src=(idx.src[0], idx.src[1].valid(UOp.uprod(*[x.eq(0) for x in missing_locals]))))
     if r.op is Ops.RANGE and r.arg in idx_of: subs[r] = idx_of[r.arg]
   # Hardware ids may coincide with logical ids: replace ranges simultaneously, including those in the new masks.
   return s.substitute(masks).substitute(subs, walk=True)
 
-# Run once: grouping creates new GLOBAL/LOCAL ranges, which must not be grouped again.
-pm_group_gpudims = PatternMatcher([(UPat(Ops.SINK, name="s"), group_gpudims)])
+def do_split_ends(e:UOp) -> UOp:
+  ret = e.src[0]
+  for r in sorted(dedup(r for s in e.src[1:] for r in ((s,) if s.op is Ops.RANGE else s.ranges)), key=lambda x: x.arg, reverse=True): ret = ret.end(r)
+  return ret
 
 pm_range_to_special = PatternMatcher([
   (UPat(Ops.RANGE, name="r"), lambda r: r.replace(op=Ops.SPECIAL, arg=f"{'g' if r.axis_type is AxisType.GLOBAL else 'l'}idx{r.axis_id[-1]}")
    if r.axis_type in (AxisType.GLOBAL, AxisType.LOCAL) else None),
-])+pm_split_ends
+  (UPat(Ops.END, name="e"), do_split_ends),
+])

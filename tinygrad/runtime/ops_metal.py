@@ -194,7 +194,7 @@ def poll_event(p:UOp, t:UOp) -> UOp|None:
   done = (r:=UOp.placeholder((1,), dtypes.uint64, None, AddrSpace.REG)).after(mtl_msg(event, "signaledValue", out=r))[0]
   # then mirror it into the timeline
   return r.after(t.index(0).store(done))[0]
-Compiled.pm_lower += PatternMatcher([(UPat(Ops.PARAM, name="p").f(Ops.AFTER, allow_any_len=True, name="t").index(UPat.const(0)).load(), poll_event)])
+Compiled.pm_encode += PatternMatcher([(UPat(Ops.PARAM, name="p").f(Ops.AFTER, allow_any_len=True, name="t").index(UPat.const(0)).load(), poll_event)])
 
 class MetalDevice(Compiled):
   renderers = [MetalRenderer]

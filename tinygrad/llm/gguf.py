@@ -184,15 +184,19 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       return d * (bits * 2 - 1)
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
+_scalar_fmts = {0:("c",1), 1:("b",1), 2:("H",2), 3:("h",2), 4:("I",4), 5:("i",4), 6:("f",4), 7:("?",1), 10:("Q",8), 11:("q",8), 12:("d",8)}
+_unpack_u64 = struct.Struct("<Q").unpack
 def _read_unpack(fmt: str, n: int, r:io.BufferedIOBase): return struct.unpack(fmt, r.read(n))[0]
-def read_str(r:io.BufferedIOBase): return str(r.read(read_uint64(r)), "utf-8")
+def read_str(r:io.BufferedIOBase): return r.read(_unpack_u64(r.read(8))[0]).decode("utf-8")
 def read_arr(r:io.BufferedIOBase):
-  item_reader, n = readers[read_int32(r)], read_uint64(r)
+  t, n = read_int32(r), read_uint64(r)
+  if (sf := _scalar_fmts.get(t)) is not None: return list(struct.unpack(f"<{n}{sf[0]}", r.read(n * sf[1])))
+  if t == 8: return [r.read(_unpack_u64(r.read(8))[0]).decode("utf-8") for _ in range(n)]
+  item_reader = readers[t]
   return [item_reader(r) for _ in range(n)]
 
 readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_arr,
-  **{ t: functools.partial(_read_unpack, "<"+f, nb) for t,f,nb in \
-    [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
+  **{ t: functools.partial(_read_unpack, "<"+f, nb) for t,(f,nb) in _scalar_fmts.items() } }
 read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
 def gguf_parse(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, tuple[Tensor, tuple[int, ...], int]]]:
@@ -274,15 +278,23 @@ def gguf_shard(entries:dict[str, tuple[Tensor, tuple[int, ...], int]], devices:t
     data, shape, typ = entries[name]
     if n % r or shape[0] % (n//r): raise ValueError(f"{name}: can't repeat {shape} {r} times over {n} devices")
     entries[name] = (data.to("CPU").reshape(n//r, -1).repeat_interleave(r, 0).flatten(), (shape[0]*r, *shape[1:]), typ)
-  for name, (data, shape, typ) in entries.items():
-    if (axis:=shard_map.get(name)) is None: packed[name] = data.shard(devices)
-    else:
-      if shape[axis] % n or (axis == len(shape)-1 and shape[axis]//n % _GGML_QUANT.get(typ, (1,))[0]):
-        raise ValueError(f"{name}: can't split {shape} on axis {axis} over {n} devices")
-      parts = (data.to("CPU") if prod(shape[:axis]) > 1 else data).reshape(*shape[:axis], n, -1)
-      packed[name] = parts.permute(axis, *range(axis), axis+1).shard(devices, 0)
-  # TODO: shard copies the full tensor to every device
-  for t in packed.values(): t.realize()
+  if n == 1 and not repeats and entries and not devices[0].startswith(("CL", "WEBGPU")):
+    cvs = {k: (cv, d.nbytes()) for k, (d, _, _) in entries.items() if (cv:=d.uop.contiguous_view()) is not None and cv[0].dtype == dtypes.uint8}
+    if len(cvs) == len(entries) and len({cv[0] for cv, _ in cvs.values()}) == 1:
+      min_off, max_end = min(cv[1] for cv, _ in cvs.values()), max(cv[1] + sz for cv, sz in cvs.values())
+      if 0 < max_end - min_off <= sum(sz for _, sz in cvs.values()) * 1.05 and all(sz > 0 and (cv[1] - min_off) % 4 == 0 for cv, sz in cvs.values()):
+        buf = Tensor(next(iter(cvs.values()))[0][0])[min_off:max_end].to(devices[0]).realize()._buffer()
+        packed = {k: Tensor(UOp.from_buffer(buf.view(sz, cv[1]-min_off), dtypes.uint8)) for k, (cv, sz) in cvs.items()}
+  if not packed:
+    for name, (data, shape, typ) in entries.items():
+      if (axis:=shard_map.get(name)) is None: packed[name] = data.shard(devices)
+      else:
+        if shape[axis] % n or (axis == len(shape)-1 and shape[axis]//n % _GGML_QUANT.get(typ, (1,))[0]):
+          raise ValueError(f"{name}: can't split {shape} on axis {axis} over {n} devices")
+        parts = (data.to("CPU") if prod(shape[:axis]) > 1 else data).reshape(*shape[:axis], n, -1)
+        packed[name] = parts.permute(axis, *range(axis), axis+1).shard(devices, 0)
+    # TODO: shard copies the full tensor to every device
+    for grp in ([packed.values()] if n == 1 and packed else ([t] for t in packed.values())): Tensor.realize(*grp)
   for d in devices: Device[d].allocator.free_cache()
   def decode(name:str, shape:tuple[int, ...], typ:int) -> Tensor:
     decoded = ggml_data_to_tensor(packed[name].flatten(), prod(shape), typ)

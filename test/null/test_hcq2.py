@@ -220,7 +220,8 @@ class TestHCQ2Profile(unittest.TestCase):
   def test_slots_addressed_by_the_device(self):
     pm = PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat())),), allow_any_len=True),
                           lambda buf: buf.getaddr(host_of("NULL")) if is_slots(buf) else None)])
-    with patch.object(Compiled, "pm_lower", pm + Compiled.pm_lower): self.test_profiling_reports_a_range_per_kernel(n=3)
+    Device["NULL"] # backends extend pm_encode on import: one first imported inside the patch would lose its rules when it's undone
+    with patch.object(Compiled, "pm_encode", pm + Compiled.pm_encode): self.test_profiling_reports_a_range_per_kernel(n=3)
 
 class TestHCQ2Link(unittest.TestCase):
   def setUp(self): self.enterContext(Context(DEV="NULL"))
@@ -245,6 +246,30 @@ class TestHCQ2Link(unittest.TestCase):
     for step in range(3):
       run_linear(linked, jit=True)
       self.assertEqual([cmdbuf.host.view(fmt="I")[o // 4] for o in offs], [step] * 10)
+
+  def test_repeated_offset_loops_signed(self): # for (i..10) cmdbuf[off[i]] = (int32)var + (-4*(i+1))
+    var, offs = UOp.alloc((1,), dtypes.int32, device="CPU", name="var"), [4 * i * i for i in range(10)]
+    var = hcq2.patch(var, [], bytes(4))
+    patches = [(o, var.index(0).load() + UOp.const(-4 * (i + 1), dtypes.int32)) for i, o in enumerate(offs)]
+    hq = SimpleNamespace(blob=bytearray(offs[-1] + 4), patches=patches, devs=("CPU",), queue="COPY:0", deps=())
+    lowered = lower_hcq(var.after(hcq2.encode_cmdbuf(hq, device="CPU")).index(0).store(var.index(0).load() + 100))
+    self.assertEqual(len([u for u in lowered.src[0].without_after.src[0].toposort() if u.op is Ops.RANGE]), 1)
+    linked = hcq2.hcq_link(lower_and_compile(lowered))
+    args = zip(lowered.src[0].without_after.src[1:], linked.src[0].without_after.src[1:])
+    cmdbuf = next(b.buffer for p, b in args if p.without_after.arg.name == "cmdbuf_copy_0")
+    for step in range(3):
+      run_linear(linked, jit=True)
+      self.assertEqual([cmdbuf.host.view(fmt="i")[o // 4] for o in offs], [step * 100 - 4 * (i + 1) for i in range(10)])
+
+  def test_link_uop_unresolved_is_atomic(self):
+    from tinygrad.dtype import AddrSpace
+    buf = UOp.alloc((2,), dtypes.uint32, device="CPU", name="atomic_test")
+    st = buf.index(UOp.stack(UOp.const(0), UOp.const(1))).store(
+      UOp.stack(UOp.const(0x12345678, dtypes.uint32), UOp.param(0, dtypes.uint32, addrspace=AddrSpace.ALU)))
+    linked = hcq2.hcq_link(UOp.sink(st))
+    self.assertIs(linked.src[0].op, Ops.STORE)
+    self.assertIs(linked.src[0].src[0].src[0].op, Ops.BUFFER)
+    self.assertNotEqual(linked.src[0].src[0].src[0].buffer.host.view(fmt="I")[0], 0x12345678) # the allocator may return a reused buffer
 
 if __name__ == "__main__":
   unittest.main()
