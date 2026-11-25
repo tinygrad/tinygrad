@@ -1094,15 +1094,15 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
     assert isinstance(inst, irc.VOP3PX2)
     # F8F6F4 input formats: 0=FP8(E4M3), 1=BF8(E5M2). FP6/FP4 (2-4) not emulated.
     if int(inst.cbsz) > 1 or int(inst.blgp) > 1: raise RuntimeError(f"unsupported scaled MFMA formats cbsz={inst.cbsz} blgp={inst.blgp}")
-    # scale_src0/scale_src1 are source operands pointing at 32-bit registers holding 4 packed E8M0 scale exponents.
-    # The 2-bit opsel/opsel_hi select which byte applies to A/B for this instruction.
-    scale0 = ctx.inst_field(type(inst).scale_src0), _iattr(inst, 'opsel') & 3
-    scale1 = ctx.inst_field(type(inst).scale_src1), _iattr(inst, 'opsel_hi') & 3
-    def _scale_exp(off_sel: tuple[UOp, int], lane: UOp) -> UOp:
-      byte = (ctx.rsrc_dyn(off_sel[0], lane, 32) >> _c(off_sel[1] * 8, dtypes.uint32)) & _c(0xFF, dtypes.uint32)
+    # scale_src0/scale_src1 hold four packed E8M0 exponents per lane. OP_SEL/OP_SEL_HI are split by operand:
+    # A uses {OP_SEL_HI[0], OP_SEL[0]} and B uses {OP_SEL_HI[1], OP_SEL[1]} to select one packed byte.
+    scale0 = ctx.inst_field(type(inst).scale_src0), ((_iattr(inst, 'opsel_hi') & 1) << 1) | (_iattr(inst, 'opsel') & 1)
+    scale1 = ctx.inst_field(type(inst).scale_src1), (((_iattr(inst, 'opsel_hi') >> 1) & 1) << 1) | ((_iattr(inst, 'opsel') >> 1) & 1)
+    def _scale_exp(off_sel: tuple[UOp, int], dim: int, row: UOp, chunk: int) -> UOp:
+      # CDNA4 scale lanes are row-major within each 32-wide K chunk: lane = chunk*dim + row, where dim is M for A and N for B.
+      scale_lane = _c(chunk * dim, dtypes.int) + row
+      byte = (ctx.rsrc_dyn(off_sel[0], scale_lane, 32) >> _c(off_sel[1] * 8, dtypes.uint32)) & _c(0xFF, dtypes.uint32)
       return byte.cast(dtypes.int32) - _c(127, dtypes.int32)
-    def scale_factor(lane: UOp) -> UOp:  # combined A*B scale for this lane: 2^(ea-127) * 2^(eb-127)
-      return UOp.exp2((_scale_exp(scale0, lane) + _scale_exp(scale1, lane)).cast(dtypes.float32))
 
   if (m := re.search(r'(\d+)X(\d+)X(\d+)', op_name)) is None: raise ValueError(f"could not parse MFMA dimensions from {op_name}")
   M, N, K = int(m.group(1)), int(m.group(2)), int(m.group(3))
@@ -1118,8 +1118,10 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
   acc_dt = dtypes.int32 if is_int_out else dtypes.float32
 
   # Per-operand fp8 format ("fp8"=E4M3, "bf8"=E5M2) for A and B
+  fp8_interleaved = False
   if 'F8F6F4' in op_name:
     assert isinstance(inst, (irc.VOP3P_MFMA, irc.VOP3PX2))
+    fp8_interleaved = int(inst.cbsz) <= 1 and int(inst.blgp) <= 1
     a_fmt, b_fmt = {0: "fp8", 1: "bf8"}.get(int(inst.cbsz), "fp8"), {0: "fp8", 1: "bf8"}.get(int(inst.blgp), "fp8")
   elif is_fp8:  # A/B formats from name suffix, e.g. V_MFMA_F32_16X16X32_BF8_FP8
     a_fmt, b_fmt = ("bf8" if sfx == "BF8" else "fp8" for sfx in op_name.rsplit('_', 2)[-2:])
@@ -1157,12 +1159,18 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
     return _c(base + kl, dtypes.int) + mn * _c(K, dtypes.int) + grp * _c(k_per_grp, dtypes.int)
 
   read_stores = []
-  for kl in range(k_per_grp):
-    reg_idx, sub_idx = kl // vpg, kl % vpg
+  for elem in range(k_per_grp):
+    reg_idx, sub_idx = elem // vpg, elem % vpg
     # src_off >= 256 means VGPR operand, otherwise inline constant/SGPR
     for off, is_vgpr, fmt, base, dim in ((src0_off, src0_off >= _c(256), a_fmt, 0, M), (src1_off, src1_off >= _c(256), b_fmt, n_a_elems, N)):
       raw = is_vgpr.where(ctx.rvgpr_dyn(off - _c(256 - reg_idx), read_lane), ctx.rsrc_dyn(off, _c(0, dtypes.int), 32))
-      read_stores.append(tmp.index(mat_idx(base, dim, kl)).store(cvt_elem(raw, sub_idx, fmt)))
+      idx = mat_idx(base, dim, elem)
+      if fp8_interleaved:
+        # F8F6F4 FP8/BF8 lanes hold 16-value K pieces. The first/second four VGPRs cover pieces in the first/second half of K.
+        k_abs = grp * _c(16, dtypes.int) + _c((reg_idx % 4) * 4 + sub_idx, dtypes.int)
+        k_abs += _c((reg_idx // 4) * (64 if M == 16 else 32), dtypes.int)
+        idx = _c(base, dtypes.int) + mn * _c(K, dtypes.int) + k_abs
+      read_stores.append(tmp.index(idx).store(cvt_elem(raw, sub_idx, fmt)))
   read_phase = UOp.group(*read_stores).end(read_lane)
 
   # Phase 2: dot products and accumulate. acc reads src2 (VGPR, or scalar inline constant/SGPR broadcast).
@@ -1172,36 +1180,40 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
   acc_reader, acc_writer = (ctx.raccvgpr_dyn, ctx.waccvgpr_dyn) if use_acc else (ctx.rvgpr_dyn, ctx.wvgpr_dyn)
   tmp2 = tmp.after(read_phase)
 
-  def _dot_accum(acc: UOp, a_row: UOp, b_row: UOp, lane: UOp) -> UOp:
-    """acc += sum_k A[a_row+k] * B[b_row+k] in order (FP-associativity matters). For scaled MFMA only the dot is scaled: D = dot*scale + C."""
+  def _dot_accum(acc: UOp, a_row: UOp, b_row: UOp, m_row: UOp, n_row: UOp) -> UOp:
+    """acc += sum_k A[a_row+k] * B[b_row+k] in order (FP-associativity matters).
+    For scaled MFMA each 32-wide K chunk has independent A/B exponents; C itself is not scaled."""
     def prod(k: int) -> UOp:
       return tmp2.index(a_row + _c(k, dtypes.int)).bitcast(acc_dt) * tmp2.index(b_row + _c(k, dtypes.int)).bitcast(acc_dt)
     if not scaled:
       for k in range(K): acc = acc + prod(k)
       return acc
-    dot = prod(0)
-    for k in range(1, K): dot = dot + prod(k)
-    return acc + dot * scale_factor(lane)
+    for chunk in range(K // 32):
+      dot = prod(chunk * 32)
+      for k in range(chunk * 32 + 1, chunk * 32 + 32): dot = dot + prod(k)
+      scale_exp = _scale_exp(scale0, M, m_row, chunk) + _scale_exp(scale1, N, n_row, chunk)
+      acc = acc + dot * UOp.exp2(scale_exp.cast(dtypes.float32))
+    return acc
 
   compute_lane = ctx.range()
   c_mn, c_grp = mn_idx(compute_lane), grp_idx(compute_lane)
   b_off = _c(n_a_elems, dtypes.int)
-  def out_ab(out_reg: int) -> tuple[UOp, UOp]:  # A/B tmp base indices for one output element of this lane
-    if M == 32:  # 16 outputs per lane: rows (lane//32)*16 + blocks of 4 within the wave
-      m_base = c_grp * _c(16, dtypes.int) + _c(out_reg, dtypes.int)
-      return m_base * _c(K, dtypes.int), b_off + c_mn * _c(K, dtypes.int)
+  def out_ab(out_reg: int) -> tuple[UOp, UOp, UOp]:  # A/B tmp base indices for one output element of this lane
+    if M == 32:  # 16 outputs per lane: rows are interleaved in groups of 4 across the two lane halves
+      m_base = _c((out_reg // 4) * 8 + out_reg % 4, dtypes.int) + c_grp * _c(4, dtypes.int)
+      return m_base * _c(K, dtypes.int), b_off + c_mn * _c(K, dtypes.int), m_base
     if M == 4:  # each group of 4 lanes computes an independent 4x4 block
       a_base = c_grp * _c(M * K, dtypes.int) + _c(out_reg * K, dtypes.int)
-      return a_base, b_off + (c_grp * _c(N, dtypes.int) + c_mn) * _c(K, dtypes.int)
+      return a_base, b_off + (c_grp * _c(N, dtypes.int) + c_mn) * _c(K, dtypes.int), c_mn
     m_base = c_grp * _c(out_per_lane, dtypes.int) + _c(out_reg, dtypes.int)  # 16x16: 4 outputs, one row each
-    return m_base * _c(K, dtypes.int), b_off + c_mn * _c(K, dtypes.int)
+    return m_base * _c(K, dtypes.int), b_off + c_mn * _c(K, dtypes.int), m_base
 
   compute_stores = []
   for out_reg in range(out_per_lane):
     acc_v = acc_reader(src2_off - _c(256 - out_reg), compute_lane, src2_is_vgpr)
     acc_v = acc_v.cast(dtypes.int32) if is_int_out else acc_v.bitcast(dtypes.float32)
-    a_base, b_base = out_ab(out_reg)
-    acc = _dot_accum(src2_is_vgpr.where(acc_v, acc_scalar), a_base, b_base, compute_lane)
+    a_base, b_base, m_row = out_ab(out_reg)
+    acc = _dot_accum(src2_is_vgpr.where(acc_v, acc_scalar), a_base, b_base, m_row, c_mn)
     out_bits = acc.cast(dtypes.uint32) if is_int_out else acc.bitcast(dtypes.uint32)
     compute_stores.append(acc_writer(vdst_reg + _c(out_reg), compute_lane, out_bits, exec_mask))
   compute_phase = UOp.group(*compute_stores).end(compute_lane)
