@@ -2,6 +2,7 @@ import unittest
 from tinygrad import Tensor, Variable, GlobalCounters, Context, Device
 from tinygrad.uop.ops import sym_infer
 from tinygrad.dtype import dtypes
+from tinygrad.renderer.nir import NIRRenderer
 from examples.gpt2 import Attention
 import numpy as np
 
@@ -195,8 +196,8 @@ class TestSymbolicOps(unittest.TestCase):
 
   def test_var(self):
     a = Tensor.rand(10, 3)
-    # i=1 var over axis 0 is 0/0, WGSL assumes no nan
-    for i in range(2 if Device.DEFAULT == "WEBGPU" else 1, 5):
+    # i=1 var over axis 0 is 0/0, WGSL and mesa NIR (without float controls) assume no nan
+    for i in range(2 if Device.DEFAULT == "WEBGPU" or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer) else 1, 5):
       vi = Variable("i", 1, 10).bind(i)
       for axis in [None, 0, 1]:
         expected = a[:i].var(axis).numpy()
