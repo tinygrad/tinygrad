@@ -709,7 +709,6 @@ pm_contiguous_views = PatternMatcher([
 ])
 
 @rewrite_group(lambda fn,ret,**_: f"Schedule {len(fn.src)} -> {len(ret.src)}")
-@Context(ALLOW_DEVICE_USAGE=0)
 def create_linear(fn:UOp) -> UOp:
   """an exported function (no runtime state) to the LINEAR of calls that runs it, on its EXTERNs, view args and ALLOCs"""
   key = (fn, NO_MEMORY_PLANNER.value)
