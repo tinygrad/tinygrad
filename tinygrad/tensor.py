@@ -7,13 +7,13 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod, canonicalize_device_name
 from tinygrad.helpers import Context, cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
-from tinygrad.helpers import VALIDATE_WITH_CPU, to_tuple
+from tinygrad.helpers import VALIDATE_WITH_CPU
 from tinygrad.uop.ops import UOp, Ops, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.uop.ops import KernelInfo, AxisType
 from tinygrad.mixin import Mixin
 from tinygrad.codegen import create_linear, contiguous_mops_to_view
 from tinygrad.engine.realize import run_linear, capturing, compile_linear, link_linear
-from tinygrad.device import Buffer, Device, HCQ_RUNTIME_DEV, host_of
+from tinygrad.device import Buffer
 
 # **** export: storage becomes EXTERN(slot), bound Variables lose their value and ALLOCs get canonical slots. ctx.externs is what's mapped back
 
@@ -282,9 +282,8 @@ class Tensor(Mixin):
   @staticmethod
   def compile(fn:UOp) -> UOp:
     """Compile a function from `Tensor.export` to a LINEAR of compiled calls without binding its externs. It reads the targets in DEV."""
-    devs = {d for u in fn.toposort() for d in to_tuple(u.device) if d is not None}
-    for d in sorted({*devs, *map(host_of, devs), HCQ_RUNTIME_DEV.device}): Device.target_for(d)
-    with Context(ALLOW_DEVICE_USAGE=0): return compile_linear(create_linear(fn), validate=VALIDATE_WITH_CPU, input_uops=[], cache=True)
+    with Context(ALLOW_DEVICE_USAGE=0): linear = create_linear(fn)
+    return compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=[], cache=True)
 
   @staticmethod
   def link(linear:UOp, externs:tuple[UOp, ...]) -> UOp:
