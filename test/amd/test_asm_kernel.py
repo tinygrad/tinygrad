@@ -266,6 +266,35 @@ class TestAsmKernel(unittest.TestCase):
     out = Tensor.empty(1, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel)[0]
     self.assertListEqual(out.tolist(), [4])
 
+  def test_cfg_irreducible(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    def cfg_kernel(out:UOp):
+      k = Kernel()
+      k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
+      k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+      k.emit(v_readfirstlane_b32_e32(s[2], v[0]))
+      k.emit(s_mov_b32(s[3], 0))
+      k.emit(s_cmp_eq_i32(s[2], 0))
+      k.emit(s_cbranch_scc0(), target="entry_b")
+      k.label("entry_a")
+      k.emit(s_add_u32(s[3], s[3], 1))
+      k.emit(s_cmp_lt_i32(s[3], 5))
+      k.emit(s_cbranch_scc0(), target="exit")
+      k.label("entry_b")
+      k.emit(s_add_u32(s[3], s[3], 2))
+      k.emit(s_cmp_lt_i32(s[3], 5))
+      k.emit(s_cbranch_scc1(), target="entry_a")
+      k.label("exit")
+      k.emit(v_mov_b32_e32(v[1], s[3]))
+      k.emit(v_lshlrev_b32_e32(v[2], 2, v[0]))
+      k.emit(global_store_b32(addr=v[2], data=v[1], saddr=s[0:1]))
+      k.emit(s_endpgm())
+      insts = k.finalize()
+      sink = UOp.sink(out.base, UOp.special(64, "lidx0"), arg=KernelInfo("cfg_irreducible_kernel"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp.native(x).call() for x in insts]))))
+    out = Tensor.empty(64, dtype=dtypes.int).custom_kernel(fxn=cfg_kernel)[0]
+    self.assertListEqual(out.tolist(), [6]*32 + [5]*32)
+
   def test_store_offset2(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     def store_kernel(out:UOp):
