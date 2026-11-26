@@ -51,7 +51,7 @@ def _grid_len(qt:UOp) -> UOp:
 
 def _b_qgemv() -> UOp:
   qt, tok, inf, outf = _t("qtype", 8, 40), _t("tokens"), _t("in_features", 32), _t("out_features")
-  rb, gr = _t("raw_bytes", 1, 1 << 30), _t("group_rows", 0)
+  rb, gr = _t("raw_bytes", 1, 1 << 40), _t("group_rows", 0)
   use_sel, xrows, xs, nd = _t("use_sel", 0, 1), _t("x_rows"), _t("x_share", 1, 1024), _t("ndev", 1, 64)
   arch, ne, gl = _t("arch", 0, 12), _t("num_experts", 0, 512), _grid_len(qt)
   p_out, p_raw, p_x = _p(0, (tok, outf), "f32"), _p(1, (rb,), "u8"), _p(2, (xrows, inf), "f32")
@@ -113,7 +113,7 @@ def _b_qgemv() -> UOp:
 
 def _b_gemm(kg:int, ln:int) -> UOp:
   qt, mb, mt, inf, outf = _t("qtype", 8, 40), _t("m_blks"), _t("m_tiles", 1, 8), _t("in_features", 32), _t("out_features", 16)
-  rb, gl = _t("raw_bytes", 1, 1 << 30), _grid_len(qt)
+  rb, gl = _t("raw_bytes", 1, 1 << 40), _grid_len(qt)
   tok = mb * (mt * 16)
   p_out, p_raw, p_x, p_grid = _p(0, (tok, outf), "f32"), _p(1, (rb,), "u8"), _p(2, (tok, inf), "f16"), _p(3, (gl,), "u32")
   if kg == 1:  # RDNA3: Direct-A + Double-Buffered-B 2D FP16 WMMA + in-WG K-split (wk=2,4)

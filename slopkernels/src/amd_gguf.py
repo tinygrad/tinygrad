@@ -650,7 +650,7 @@ def _quant_word(raw:UOp, base:UOp, sub:UOp, i:int|UOp, qt:int, grid:UOp|None) ->
 def _make_wmma_dequant(raw:UOp, qt:int, lane_group:UOp, kgroups:int, k_u:UOp, table:UOp|None) -> Callable[[UOp, UOp, UOp], UOp|tuple[UOp, ...]]:
   w_u, b_u = k_u // 4, k_u % 4
   w_idx = w_u if kgroups == 1 else (lane_group + kgroups * w_u)
-  word_indices = tuple(range(4)) if kgroups == 1 else tuple(lane_group + kgroups * j for j in range(4 // kgroups))
+  word_indices: tuple[int|UOp, ...] = tuple(range(4)) if kgroups == 1 else tuple(lane_group + kgroups * j for j in range(4 // kgroups))
   def dequant(base:UOp, sub:UOp, half:UOp) -> UOp|tuple[UOp, ...]:
     if qt in (Q4_K, Q5_K):
       d, dmin, sc, mn = _q5_scales(raw, base, sub, stream=False)
