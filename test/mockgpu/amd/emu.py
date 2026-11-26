@@ -1726,6 +1726,16 @@ def emu_loop_active(routes:UOp, active:UOp, header:UOp, waves:UOp):
   w = UOp.range(waves, 0, dtype=dtypes.int)
   return active[0].store(routes[w].load().eq(header).cast(dtypes.u32).reduce(w, arg=Ops.MAX).ne(0)).sink()
 
+@uopfunc
+def emu_trace_block(vmem:UOp, trace_ptr:UOp, wg:UOp, w:UOp, block_pc:UOp, n_waves:UOp, trace_wgs:UOp, stride:UOp):
+  valid = wg < trace_wgs.cast(dtypes.u64)
+  base = (trace_ptr >> 2) + (wg * n_waves.cast(dtypes.u64) + w.cast(dtypes.u64)) * stride.cast(dtypes.u64)
+  cnt = vmem.index(base.valid(valid)).load()
+  can_write = valid & (cnt + 1 < stride)
+  w_idx = base + cnt.cast(dtypes.u64) + 1
+  return UOp.group(vmem.index(w_idx.valid(can_write)).store(block_pc.cast(dtypes.u32)),
+                   vmem.index(base.valid(can_write)).store(cnt + 1)).sink()
+
 def lower_body(sink:UOp) -> UOp:
   bufs = sorted((u for u in sink.toposort() if u.op is Ops.PARAM), key=lambda u: u.arg.slot)
   body = sink.substitute({b:UOp.param(i, b.dtype, b.shape, name=b.arg.name, addrspace=b.addrspace) for i,b in enumerate(bufs)}, walk=True)
@@ -1825,7 +1835,7 @@ pm_remove_native = PatternMatcher([
 PC_INSTS = ("S_GETPC", "S_SETPC")
 
 @rewrite_group(replay="emu_process_replay")
-def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -> UOp:
+def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="", trace_wgs:int=0) -> UOp:
   insts = amd_decode(code, arch)
   assert not any(getattr(inst, "op_name", "").startswith(PC_INSTS) for inst in insts.values()), f"instruction stream cannot contain {PC_INSTS}"
   cfg = get_cfg(insts)
@@ -1854,6 +1864,7 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
   scratch = UOp.alloc((max(scratch_size*wave_size*n_waves, 1),), dtypes.u8, 4, AddrSpace.REG)
   accvgpr = UOp.alloc((256*wave_size*n_waves,), dtypes.u32, 5, AddrSpace.REG) if wave_size == 64 else vgpr
   args_ptr = UOp.variable("args_ptr", 0, dtypes.u64.max, dtypes.u64)
+  trace_ptr = UOp.variable("trace_ptr", 0, dtypes.u64.max, dtypes.u64) if trace_wgs > 0 else None
   ctx = _Ctx(wave_size)
   buffers = {ctx.sgpr:(sgpr, SGPR_COUNT), ctx.vgpr:(vgpr, 256*wave_size), ctx.vmem:(ctx.vmem, 0),
              ctx.lds:(lds, 0), ctx.scratch:(scratch, scratch_size*wave_size)}
@@ -1906,14 +1917,30 @@ def lift(code:bytes, arch:str, renderer:Renderer, dispatch:tuple, name:str="") -
     args = [values[b] if b.addrspace is AddrSpace.ALU else buffers[b][0] for b in bufs]
     args += [_c(block_pc, dtypes.int).after(end, *scopes)]
     params = [UOp.param(i, a.dtype, a.shape, name=b.arg.name, addrspace=b.addrspace) for i,(a,b) in enumerate(zip(args, bufs))]
-    params.append(UOp.param(len(bufs), dtypes.int, addrspace=AddrSpace.ALU))
+    pc_param = UOp.param(len(bufs), dtypes.int, addrspace=AddrSpace.ALU)
+    params.append(pc_param)
     # lower the wave loop with the block, so repeated blocks share its indexing and route check too.
     w = UOp.range(n_waves, 0, dtype=dtypes.int)
-    gates = () if block_pc in unconditional else (UOp.range(params[bufs.index(route)][w].load().eq(params[-1]).cast(dtypes.int),
+    gates = () if block_pc in unconditional else (UOp.range(params[bufs.index(route)][w].load().eq(pc_param).cast(dtypes.int),
                                                             1, dtype=dtypes.int),)
     call_args = [p if b.addrspace is AddrSpace.ALU else p.after(*gates, w).shrink(((w*s, (w+1)*s),))
                  if (s:=buffers[b][1]) else p.after(*gates, w) for b,p in zip(bufs, params)]
-    block = UOp.group(body.call(*call_args), *gates, w).end(*gates).end(w).sink(arg=KernelInfo("emu_waves"))
+    trace_ops: tuple[UOp, ...] = ()
+    if trace_wgs > 0:
+      if ctx.vmem in bufs: vmem_p = params[bufs.index(ctx.vmem)]
+      else:
+        vmem_p = UOp.param(len(params), ctx.vmem.dtype, ctx.vmem.shape, name="vmem", addrspace=AddrSpace.GLOBAL)
+        params.append(vmem_p)
+        args.append(ctx.vmem)
+      tp_p = UOp.param(len(params), dtypes.u64, addrspace=AddrSpace.ALU)
+      params.append(tp_p)
+      args.append(trace_ptr)
+      wg_p = UOp.param(len(params), dtypes.u64, addrspace=AddrSpace.ALU)
+      params.append(wg_p)
+      args.append(wg)
+      trace_ops = (emu_trace_block(vmem_p.after(*gates, w), tp_p, wg_p, w, pc_param,
+                                   _c(n_waves, dtypes.int), _c(trace_wgs, dtypes.int), _c(TRACE_STRIDE, dtypes.int)),)
+    block = UOp.group(*trace_ops, body.call(*call_args), *gates, w).end(*gates).end(w).sink(arg=KernelInfo("emu_waves"))
     return block.call(*args)
   def emit_dispatch(regions:list[CFGRegion], scopes:tuple[UOp, ...], end:UOp) -> UOp:
     for pc, body in regions:
@@ -1943,17 +1970,19 @@ dispatch_cache:dict[tuple, UOp] = {}
 
 RELIFT = ContextVar("RELIFT", 0) # lift and recompile to assembly N times
 REPLAY_EMU = ContextVar("REPLAY_EMU", 0)
+TRACE_STRIDE = 4096
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
-            scratch_size: int = 0, arch: str = "rdna3", name: str = "asm") -> int:
+            scratch_size: int = 0, arch: str = "rdna3", name: str = "asm", block_traces: dict[tuple[int, int], list[int]] | None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
+  trace_wgs = min(gx * gy * gz, 48) if block_traces is not None else 0
   with Context(DEV=DEV.target('CPU', renderer='LLVM'), NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="",
                CAPTURE_PROCESS_REPLAY=REPLAY_EMU.value, DEFAULT_FLOAT="float32", DEFAULT_INT="int32", TRANSCENDENTAL=1):
     code = bytes(to_mv(lib, lib_sz))
     dispatch = (gx, gy, gz, lx, ly, lz, rsrc2, scratch_size)
     renderer = Device['CPU'].renderer
-    if (key:=(code, arch, dispatch, name, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
-      dispatch_cache[key] = to_program(lift(code, arch, renderer, dispatch, f"emu {name}"), renderer)
+    if (key:=(code, arch, dispatch, name, trace_wgs, type(renderer), renderer.target, *(x.value for x in to_program_config))) not in dispatch_cache:
+      dispatch_cache[key] = to_program(lift(code, arch, renderer, dispatch, f"emu {name}", trace_wgs=trace_wgs), renderer)
       relift_lib = code
       for relift_count in range(1, RELIFT.value+1):
         try:
@@ -1964,10 +1993,21 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
         relift_lib = get_elf_section(ret.src[3].arg, ".text").content
     prg = dispatch_cache[key]
   vmem_buf = UOp.from_buffer(Buffer('CPU', 1 << 48, options=BufferSpec(external_ptr=0), opaque=0), dtypes.u32)
+  trace_buf = None
+  if trace_wgs > 0:
+    n_waves = (lx * ly * lz + _wave_size(arch) - 1) // _wave_size(arch)
+    trace_buf = (ctypes.c_uint32 * (trace_wgs * n_waves * TRACE_STRIDE))()
   args = [vmem_buf.as_extern(0)] * (max(p.arg.slot for p in prg.kernel_params) + 1)
   for p in prg.kernel_params:
-    if p.addrspace is AddrSpace.ALU: args[p.arg.slot] = p.bind(args_ptr)
+    if p.addrspace is AddrSpace.ALU:
+      args[p.arg.slot] = p.bind(ctypes.addressof(trace_buf) if trace_buf is not None and p.arg.name == "trace_ptr" else args_ptr)
   with _MXCSRContext():
     linear = compile_linear(UOp(Ops.LINEAR, src=(prg.call(*args),)), cache=True)
     run_linear(link_linear(linear, inputs:=[vmem_buf]), input_uops=inputs, update_stats=False)
+  if trace_buf is not None and block_traces is not None:
+    for wg_i in range(trace_wgs):
+      for w_i in range(n_waves):
+        off = (wg_i * n_waves + w_i) * TRACE_STRIDE
+        cnt = min(trace_buf[off], TRACE_STRIDE - 1)
+        if cnt: block_traces[(wg_i, w_i)] = [trace_buf[off + 1 + i] for i in range(cnt)]
   return 0

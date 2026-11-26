@@ -199,6 +199,12 @@ class PacketType:
     inst._raw, inst._time = raw, time
     return inst
 
+  @classmethod
+  def encode(cls, **kwargs) -> int:
+    raw = cls.encoding.set(0, None)
+    for k, v in kwargs.items(): raw = cls._fields[k].set(raw, v)
+    return raw
+
   def __repr__(self) -> str:
     fields_str = ", ".join(f"{k}={getattr(self, k)}" for k in self._fields if not k.startswith('_') and k != 'encoding')
     return f"{self.__class__.__name__}({fields_str})"
@@ -645,6 +651,49 @@ def decode(data: bytes) -> Iterator[PacketType]:
     elif packets_since_reset: packets_since_reset.append(pkt)
     else: yield pkt
   yield from packets_since_reset
+
+def encode(packets: list[tuple[int, type[PacketType], dict]]) -> bytes:
+  """Encode a list of (time, pkt_cls, fields) into a raw RDNA3 SQTT byte stream."""
+  nibbles: list[int] = []
+  def emit(cls: type[PacketType], **kwargs):
+    raw = cls.encode(**kwargs)
+    for i in range(cls._size_nibbles): nibbles.append((raw >> (i * 4)) & 0xF)
+
+  cur_time = 0
+  for t, cls, fields in packets:
+    if cls is LAYOUT_HEADER:
+      emit(cls, **fields)
+      continue
+    if cls is TS_DELTA_OR_MARK and fields.get("rt"):
+      dt = max(0, t - cur_time)
+      if dt > 0:
+        if 4 <= dt <= 19: emit(TS_DELTA_SHORT, delta=dt - 4)
+        else: emit(TS_DELTA_OR_MARK, delta=dt)
+        cur_time = t
+      emit(cls, **fields)
+      continue
+    dt = max(0, t - cur_time)
+    delta_field = getattr(cls, 'delta', None)
+    max_d = delta_field.mask if delta_field is not None else 0
+    if dt > max_d:
+      rem = dt - max_d
+      if 4 <= rem <= 19:
+        emit(TS_DELTA_SHORT, delta=rem - 4)
+        dt = max_d
+      else:
+        emit(TS_DELTA_OR_MARK, delta=dt)
+        dt = 0
+    cur_time = max(cur_time, t)
+    kw = dict(fields)
+    if delta_field is not None: kw["delta"] = dt
+    emit(cls, **kw)
+
+  # pad with NOP nibbles (>= 16 nibbles for decoder lookahead, aligned to 32-byte WPTR granularity)
+  nibbles.extend([0] * 16)
+  if len(nibbles) & 1: nibbles.append(0)
+  out = bytearray((nibbles[i] | (nibbles[i + 1] << 4)) for i in range(0, len(nibbles), 2))
+  if (rem := len(out) % 32): out.extend(b"\x00" * (32 - rem))
+  return bytes(out)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAPPER

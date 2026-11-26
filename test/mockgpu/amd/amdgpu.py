@@ -15,11 +15,15 @@ SDMA_MAX_COPY_SIZE = 0x400000
 regCOMPUTE_PGM_LO = 0x1bac + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_PGM_RSRC2 = 0x1bb3 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_TMPRING_SIZE = 0x1bb8 + amd_gpu.GC_BASE__INST0_SEG0
+regCOMPUTE_THREAD_TRACE_ENABLE = 0x1bbe + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_USER_DATA_0 = 0x1be0 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_NUM_THREAD_X = 0x1ba7 + amd_gpu.GC_BASE__INST0_SEG0
 regGRBM_GFX_INDEX = 0x2200 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_BUF0_BASE = 0x39e8 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_BUF0_SIZE = {"rdna3": 0x39e9, "rdna4": 0x39e6, "cdna4": 0x39e9}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_CTRL = 0x39ec + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_MASK = 0x39ed + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_TOKEN_MASK = 0x39ee + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_WPTR = 0x39ef + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_STATUS = 0x39f4 + amd_gpu.GC_BASE__INST0_SEG1
 regCP_PERFMON_CNTL = 0x3808 + amd_gpu.GC_BASE__INST0_SEG1
@@ -209,9 +213,23 @@ class PM4Executor(AMDQueue):
 
     assert 0 < self.kernel_text_size <= prg_sz, "Invalid prg ptr or text size"
     from test.mockgpu.amd.emu import run_asm
+    sqtt_active = MOCKGPU_ARCH == "rdna3" and self.gpu.regs.regs.get((regCOMPUTE_THREAD_TRACE_ENABLE, 0), 0) == 1
+    block_traces: dict[tuple[int, int], list[int]] | None = {} if sqtt_active else None
     err = run_asm(prg_addr, self.kernel_text_size, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2], args_addr,
-                  rsrc2, scratch_size, self.gpu.arch, self.kernel_name)
+                  rsrc2, scratch_size, self.gpu.arch, self.kernel_name, block_traces=block_traces)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
+    if sqtt_active:
+      from test.mockgpu.amd.sqtt_emu import simulate_rdna3_sqtt
+      itrace_mask = 0
+      for se in range(self.gpu.regs.n_se):
+        # token_exclude bit 0..5 set when instruction tracing is disabled on that SE
+        tmask = self.gpu.regs.regs.get((regSQ_THREAD_TRACE_TOKEN_MASK, se), 0)
+        if not (tmask & 0x27): itrace_mask |= (1 << se)
+      simd_sel = self.gpu.regs.regs.get((regSQ_THREAD_TRACE_MASK, 0), 0) & 0x3
+      code = bytes(to_mv(prg_addr, self.kernel_text_size))
+      self.gpu.sqtt_blobs = simulate_rdna3_sqtt(code, gl[0], gl[1], gl[2], lc[0], lc[1], lc[2],
+                                                n_se=self.gpu.regs.n_se, itrace_se_mask=itrace_mask, simd_sel=simd_sel,
+                                                block_traces=block_traces or None)
 
   def _exec_indirect_buffer(self, n):
     addr_lo = self._next_dword()
@@ -235,9 +253,14 @@ class PM4Executor(AMDQueue):
           self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << 12 # FINISH_PENDING==0 FINISH_DONE==1 BUSY==0
           if MOCKGPU_ARCH == "rdna3":
             buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12
+            buf_size = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE] >> 8) & 0x3FFFFF) << 12
+            blob = self.gpu.sqtt_blobs.pop(se, b"")
+            nbytes = min(len(blob), buf_size)
+            if nbytes: to_mv(self.gpu.translate_addr(buf_addr), nbytes)[:] = blob[:nbytes]
+            wptr_val = ((buf_addr + nbytes) // 32) & 0x1FFFFFFF
           else:
             buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_HI])<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_LO])<<12
-          wptr_val = ((buf_addr if MOCKGPU_ARCH == "rdna3" else 0) // 32) & 0x1FFFFFFF
+            wptr_val = 0
           self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = wptr_val
         self.gpu.regs.grbm_index = old_idx
       case _: pass # NOTE: for now most events aren't emulated
@@ -340,6 +363,7 @@ class AMDGPU(VirtGPU):
     self.regs = AMDGPURegisters()
     self.mapped_ranges = set()
     self.queues = []
+    self.sqtt_blobs: dict[int, bytes] = {}
     self.arch = "cdna" if MOCKGPU_ARCH == "cdna4" else MOCKGPU_ARCH
 
   def translate_addr(self, addr:int) -> int: return addr
