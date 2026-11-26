@@ -776,7 +776,7 @@ def _rdna3_gemm_2d_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp, m_blks:UOp, n_blk
   bm, bn, waves = wm * tm * 16, wn * tn * 16, wm * wn * wk
   threads, k_groups, k8_cnt, k16_cnt = waves * 32, bk // 32, bk // 8, bk // 16
   k16_pw = k16_cnt // wk
-  split_ks, b_total, total_kt = k16_pw // 2, bn * k_groups, (in_features // bk).maximum(1)
+  b_total, total_kt = bn * k_groups, (in_features // bk).maximum(1)
   b_iters, swz_m = (b_total + threads - 1) // threads, (k8_cnt - 1).minimum(7)
   x_u32 = x.flatten().bitcast(dtypes.uint32)
   gid = UOp.range(m_blks * n_blks, 0, AxisType.GLOBAL)
@@ -985,8 +985,7 @@ def _rdna3_gemm_2d_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp, m_blks:UOp, n_blk
   bc, bn_i = kt_c % 2, kt % 2
   r_ld, r_cmp = UOp.range(do_ld.cast(dtypes.weakint), 11), UOp.range(do_cmp.cast(dtypes.weakint), 12)
   br_map = {q: load_b_reg_q(q, kt_ld, (kt, r_ld), 30) for q in qts}
-  pa = compute_slice(kt_c, B_lds.after(kt, r_cmp)[bc], acc.after(kt, r_cmp), 0, split_ks, 34)
-  pb = compute_slice(kt_c, B_lds.after(kt, pa)[bc], acc.after(pa), split_ks, k16_pw - split_ks, 50).end(r_cmp)
+  pb = compute_slice(kt_c, B_lds.after(kt, r_cmp)[bc], acc.after(kt, r_cmp), 0, k16_pw, 34).end(r_cmp)
   st_nxt = store_b_lds(bn_i, br_map, kt_ld, (kt, r_ld), 44).end(r_ld)
   done = UOp.group(pb, st_nxt).barrier().end(kt)
   r_w1 = UOp.range(has_wk.logical_not().cast(dtypes.weakint), 193)
@@ -1241,25 +1240,30 @@ def _rdna4_quant_x_frag_kernel(xt:UOp, xsc:UOp, x:UOp, tok_idx:UOp|None=None, ti
   else:
     r_ok, src_row = (m_tile * 16 + row16) < x_rows, (m_tile * 16 + row16).minimum(x_rows - 1)
     x_g, xt_g, xsc_g = x, xt, xsc
+  u_buf = UOp.alloc((16,), dtypes.uint32, addrspace=AddrSpace.REG)
   if x.dtype == dtypes.float32:
-    xf = x_g.flatten()
-    fs = [v for c in range(8) for v in _v4(_amd_load(xf[src_row * in_features + kt * 128 + kg * 32 + c * 4], 4))]
-    us = [_nat("__builtin_bit_cast(unsigned int, __builtin_amdgcn_cvt_pkrtz({0}, {1}))", dtypes.uint32, fs[2 * i], fs[2 * i + 1]) for i in range(16)]
+    xf, c_i = x_g.flatten(), UOp.range(8, 20)
+    fv = _amd_load(xf[src_row * in_features + kt * 128 + kg * 32 + c_i * 4], 4)
+    u_r = u_buf.after(UOp.group(
+      u_buf[2 * c_i].store(_nat("__builtin_bit_cast(unsigned int, __builtin_amdgcn_cvt_pkrtz({0}, {1}))", dtypes.uint32, fv[0], fv[1])),
+      u_buf[2 * c_i + 1].store(_nat("__builtin_bit_cast(unsigned int, __builtin_amdgcn_cvt_pkrtz({0}, {1}))", dtypes.uint32, fv[2], fv[3]))).end(c_i))
   else:
-    x_u32 = x_g.flatten().bitcast(dtypes.uint32)
-    us = [v for c in range(4) for v in _v4(_amd_load(x_u32[src_row * (in_features // 2) + kt * 64 + kg * 16 + c * 4], 4))]
-  lvl = [_pk_max_u16(us[2 * i] & 0x7fff7fff, us[2 * i + 1] & 0x7fff7fff) for i in range(8)]
-  while len(lvl) > 1: lvl = [_pk_max_u16(lvl[2 * i], lvl[2 * i + 1]) for i in range(len(lvl) // 2)]
-  rm = _pk_max_u16(lvl[0], _lane_xor(lvl[0], 1, dpp=True))
+    x_u32, c_i = x_g.flatten().bitcast(dtypes.uint32), UOp.range(4, 20)
+    u_r = u_buf.after(u_buf.reshape(4, 4)[c_i].store(_amd_load(x_u32[src_row * (in_features // 2) + kt * 64 + kg * 16 + c_i * 4], 4)).end(c_i))
+  rm_buf, m_i = UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG), UOp.range(16, 21)
+  rm_0 = rm_buf.after(rm_buf.after(u_r)[0].store(z32))
+  rm = rm_buf.after(rm_buf[0].store(_pk_max_u16(rm_0.after(m_i)[0].load(), u_r[m_i].load() & 0x7fff7fff)).end(m_i))[0].load()
+  rm = _pk_max_u16(rm, _lane_xor(rm, 1, dpp=True))
   rm = _pk_max_u16(rm, _lane_xor(rm, 2, dpp=True))
   asc = _fast_fmax(_fast_fmax(_half(rm & 0xffff), _half(rm >> 16)) * UOp.const(1.0 / 448.0, dtypes.float32),
                    UOp.const(1.0 / 32768.0, dtypes.float32))
-  inv_h2 = _f32_to_h2(_fast_rcp(asc))
-  pks = [r_ok.where(_h2x2_to_fp8_pk(us[2 * i], us[2 * i + 1], inv_h2), z32) for i in range(8)]
-  sts = [xt_g[m_tile, kt * 8 + kg * 2 + k_sub, lg_i * 16 + row16, j].store(pks[k_sub * 4 + lg_i * 2 + j])
-         for k_sub in (0, 1) for lg_i in (0, 1) for j in (0, 1)]
-  sts.append(xsc_g[m_tile, kt, row16.valid(kg.eq(0))].store(r_ok.where(asc, UOp.const(0.0, dtypes.float32))))
-  return UOp.group(*sts).end(lane, wave, gid).sink(arg=KernelInfo(name="rdna4_quant_x_frag", opts_to_apply=()))
+  inv_h2, ks_i, lg_i = _f32_to_h2(_fast_rcp(asc)), UOp.range(2, 22), UOp.range(2, 23)
+  b_off = ks_i * 8 + lg_i * 4
+  p0 = r_ok.where(_h2x2_to_fp8_pk(u_r[b_off].load(), u_r[b_off + 1].load(), inv_h2), z32)
+  p1 = r_ok.where(_h2x2_to_fp8_pk(u_r[b_off + 2].load(), u_r[b_off + 3].load(), inv_h2), z32)
+  st_xt = xt_g[m_tile, kt * 8 + kg * 2 + ks_i, lg_i * 16 + row16].store(UOp.stack(p0, p1)).end(lg_i, ks_i)
+  st_sc = xsc_g[m_tile, kt, row16.valid(kg.eq(0))].store(r_ok.where(asc, UOp.const(0.0, dtypes.float32)))
+  return UOp.group(st_xt, st_sc).end(lane, wave, gid).sink(arg=KernelInfo(name="rdna4_quant_x_frag", opts_to_apply=()))
 
 @functools.cache
 def _rdna4_gemm_fp8_kernel(out:UOp, raw:UOp, xt:UOp, xsc:UOp, grid:UOp, tok_idx:UOp|None=None, tile_exp:UOp|None=None,
@@ -1476,9 +1480,10 @@ def _rdna4_gemm_fp8_kernel(out:UOp, raw:UOp, xt:UOp, xsc:UOp, grid:UOp, tok_idx:
                    (((((s0 >> _sh(8 * p + 4 * k)) & 15) * 0x00204081) & 0x01010101) << 7))[2], _half(get_u(4)) * 0.5)
     f_done = _qswitch(ggml_type, [(q, fill_q(q)) for q in qts])
     t8_r, sc_v, r_blk, r_in = t8.after(f_done), sc_r.after(f_done)[0].load(), bn_i // 16, bn_i % 16
-    return UOp.group(*[dst[r_blk, bg * 2 + k_loc, lg_ * 16 + r_in, j].store(t8_r[k_loc * 4 + lg_ * 2 + j].load())
-                       for k_loc in (0, 1) for lg_ in (0, 1) for j in (0, 1)],
-                     sdst[bn_i.valid(bg.eq(0))].store(sc_v)).end(bi)
+    k_loc, lg_ = UOp.range(2, rid + 4), UOp.range(2, rid + 5)
+    t_off = k_loc * 4 + lg_ * 2
+    st_b = dst[r_blk, bg * 2 + k_loc, lg_ * 16 + r_in].store(UOp.stack(t8_r[t_off].load(), t8_r[t_off + 1].load())).end(lg_, k_loc)
+    return UOp.group(st_b, sdst[bn_i.valid(bg.eq(0))].store(sc_v)).end(bi)
 
   kt = UOp.range(k_tiles + 1, 10)
   kt_ld, kt_c, do_cmp, do_st = kt.minimum(k_tiles - 1), (kt - 1).maximum(0), kt > 0, kt < k_tiles
@@ -1514,3 +1519,648 @@ def _rdna4_gemm_fp8_kernel(out:UOp, raw:UOp, xt:UOp, xsc:UOp, grid:UOp, tok_idx:
   kname = f"linear_{QUANT_NAMES[ggml_type]}_fp8_wmma" if isinstance(ggml_type, int) else "linear_quant_fp8_wmma"
   return out_g[om.valid(om_ok), on.valid(on < out_features)].store(acc_f[ti_o, tn_o, e_o].load().cast(out.dtype)).end(
     e_o, tn_o, ti_o, wave, lane, gid).sink(arg=KernelInfo(name=kname, opts_to_apply=()))
+
+def _lds_barrier(sink_r:UOp, *deps:UOp, bid:int=0) -> UOp:
+  v = (sink_r.after(*deps) if deps else sink_r)[0].load()
+  b = _nat(f'({{{{ int _x = ({{0}}); __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local"); '
+           f'__builtin_amdgcn_s_barrier(); '
+           f'__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local"); _x ^ {bid}; }}}})',
+           dtypes.int32, v, inline=False)
+  return (sink_r.after(*deps) if deps else sink_r)[0].store(b)
+
+def _sched_barrier(sink_r:UOp, *deps:UOp, bid:int=0) -> UOp:
+  v = (sink_r.after(*deps) if deps else sink_r)[0].load()
+  b = _nat(f"({{{{ int _x = ({{0}}); __builtin_amdgcn_sched_barrier(0); _x ^ {bid}; }}}})", dtypes.int32, v, inline=False)
+  return (sink_r.after(*deps) if deps else sink_r)[0].store(b)
+
+def _lds_st1(ptr:UOp, v:UOp, sink_r:UOp, *deps:UOp) -> UOp:
+  st = _nat("({{ *({0}) = ({1}); 0; }})", dtypes.int32, ptr, v, inline=False)
+  return (sink_r.after(*deps) if deps else sink_r)[0].store(st)
+
+def _lds_st2(ptr:UOp, v0:UOp, v1:UOp, sink_r:UOp, *deps:UOp) -> UOp:
+  st = _nat("({{ typedef unsigned int _u2 __attribute__((ext_vector_type(2))); "
+            "*((_u2*)(__builtin_assume_aligned(({0}), 8))) = (_u2){{(unsigned int)({1}), (unsigned int)({2})}}; 0; }})",
+            dtypes.int32, ptr, v0, v1, inline=False)
+  return (sink_r.after(*deps) if deps else sink_r)[0].store(st)
+
+def _dpp_quad(v:UOp, q:int) -> UOp:
+  return _nat(f"__builtin_amdgcn_update_dpp(0, (int)({{0}}), {q * 0x55}, 15, 15, true)", dtypes.uint32, v, inline=False)
+
+def _rfl(v:UOp) -> UOp: return _nat("__builtin_amdgcn_readfirstlane((int)({0}))", dtypes.int32, v.cast(dtypes.int32), inline=False)
+
+@functools.cache
+def _rdna4_row_amax_kernel(xsc:UOp, x:UOp) -> UOp:
+  # 1 wave (32 lanes) per row, 100% coalesced b128 loads (256 f16/iter), ZERO LDS, ZERO barriers!
+  m_tiles, x_rows, in_features = xsc.shape[0], x.shape[0], x.shape[1]
+  assert isinstance(m_tiles, UOp) and isinstance(x_rows, UOp) and isinstance(in_features, UOp)
+  k_chunks = in_features // 256
+  gid, lane = UOp.range(m_tiles * 16, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
+  r_ok, src_row = gid < x_rows, gid.minimum(x_rows - 1)
+  x_u32 = x.flatten().bitcast(dtypes.uint32)
+  rm_buf = UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG)
+  rm_buf = rm_buf.after(rm_buf[0].store(UOp.const(0, dtypes.uint32)))
+  kc = UOp.range(k_chunks, 10)
+  v = _amd_load(x_u32[src_row * (k_chunks * 128) + kc * 128 + lane * 4], 4)
+  m = _pk_max_u16(_pk_max_u16(v[0] & 0x7fff7fff, v[1] & 0x7fff7fff), _pk_max_u16(v[2] & 0x7fff7fff, v[3] & 0x7fff7fff))
+  rm_d = rm_buf[0].store(_pk_max_u16(rm_buf.after(kc)[0].load(), m)).end(kc)
+  rm = rm_buf.after(rm_d)[0].load()
+  rm = _pk_max_u16(rm, _lane_xor(rm, 1, dpp=True))
+  rm = _pk_max_u16(rm, _lane_xor(rm, 2, dpp=True))
+  for msk in (4, 8, 16): rm = _pk_max_u16(rm, _lane_bpermute(lane ^ msk, rm))
+  asc = _fast_fmax(_fast_fmax(_half(rm & 0xffff), _half(rm >> 16)) * UOp.const(1.0 / 448.0, dtypes.float32),
+                   UOp.const(1.0 / 32768.0, dtypes.float32))
+  return xsc[gid // 16, (gid % 16).valid(lane.eq(0))].store(r_ok.where(asc, UOp.const(0.0, dtypes.float32))).end(lane, gid).sink(
+    arg=KernelInfo(name="rdna4_row_amax", opts_to_apply=()))
+
+@functools.cache
+def _rdna4_quant_x_apply_kernel(xt:UOp, xsc:UOp, x:UOp) -> UOp:
+  # 1-pass ZERO-LDS ZERO-BARRIER FP8 fragment quantizer using precomputed per-row xsc (reads hot L3 x_f16!).
+  m_tiles, k_steps, x_rows = xt.shape[0], xt.shape[1], x.shape[0]
+  assert isinstance(m_tiles, UOp) and isinstance(k_steps, UOp) and isinstance(x_rows, UOp)
+  k_chunks = k_steps // 16
+  gid = UOp.range(m_tiles * k_chunks, 0, AxisType.GLOBAL)
+  wave, lane = UOp.range(4, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
+  tid, mt, kc = wave * 32 + lane, gid // k_chunks, gid % k_chunks
+  row16, kg, z32 = tid // 8, tid % 8, UOp.const(0, dtypes.uint32)
+  r_ok, src_row = (mt * 16 + row16) < x_rows, (mt * 16 + row16).minimum(x_rows - 1)
+  asc = _fast_fmax(xsc[mt, row16].load(), UOp.const(1.0 / 32768.0, dtypes.float32))
+  inv_h2 = _f32_to_h2(_fast_rcp(asc).cast(dtypes.half).float())
+  x_u32 = x.flatten().bitcast(dtypes.uint32)
+  base = src_row * (k_chunks * 128) + kc * 128 + kg * 16
+  us = [v for c in range(4) for v in _v4(_amd_load(x_u32[base + c * 4], 4))]
+  pks = [r_ok.where(_h2x2_to_fp8_pk(us[2 * i], us[2 * i + 1], inv_h2), z32) for i in range(8)]
+  sts = [xt[mt, kc * 16 + kg * 2 + k_sub, lg_i * 16 + row16].store(UOp.stack(pks[k_sub * 4 + lg_i * 2], pks[k_sub * 4 + lg_i * 2 + 1]))
+         for k_sub in (0, 1) for lg_i in (0, 1)]
+  return UOp.group(*sts).end(lane, wave, gid).sink(arg=KernelInfo(name="rdna4_quant_x_apply", opts_to_apply=()))
+
+@functools.cache
+def _rdna4_gemm_fp8_dense_kernel(out:UOp, raw:UOp, xt:UOp, xsc:UOp, grid:UOp, *, out_features:UOp, in_features:UOp,
+                                 ggml_type:int|UOp, tm:int|UOp, tn:int|UOp, bk:int, wm:int|UOp=4, qtypes:tuple[int, ...]|None=None) -> UOp:
+  # Double-buffered W_lds[2], 1 LDS-only barrier/slab (ZERO s_wait_loadcnt at barriers!), online register wRef, per-row xsc (0 K-loop xsc rescale!).
+  # Exact 1:1 thread mapping: threads == bn * 4 (wm == 2 * tn -> 16 wts/thr for bk=64, 32 wts/thr for bk=128; ZERO idle waves!).
+  qts = qtypes if qtypes is not None else ((ggml_type,) if isinstance(ggml_type, int) else tuple(sorted(OTF_FP8_QUANTS)))
+  wn = 2
+  bm, bn, waves = wm * tm * 16, wn * tn * 16, wm * wn
+  threads, ns = waves * 32, bk // 16
+  assert bk in (64, 128) and (not isinstance(threads, int) or threads == bn * 4)
+  m_tiles_tot, tok_out = xt.shape[0], out.shape[0]
+  assert isinstance(m_tiles_tot, UOp) and isinstance(tok_out, UOp)
+  m_blks, n_blks, k_tiles, k_sb = (tok_out + bm - 1) // bm, (out_features + bn - 1) // bn, in_features // bk, in_features // 256
+  gid = UOp.range(m_blks * n_blks, 0, AxisType.GLOBAL)
+  swz = (m_blks % 4).eq(0).where(4, (m_blks % 2).eq(0).where(2, 1))
+  grp, in_grp = gid // (swz * n_blks), gid % (swz * n_blks)
+  block_m, block_n = grp * swz + in_grp % swz, in_grp // swz
+  lane, wave = UOp.range(32, -1, AxisType.WARP), UOp.range(waves, 2, AxisType.LOCAL)
+  tid, wave_m, wave_n, col, lg = wave * 32 + lane, wave // wn, wave % wn, lane % 16, lane // 16
+  raw_u32 = _qraw_u32(raw)
+  w_str_u32 = bk // 4 + 2  # +8 byte pad -> conflict-free ds_load_b64
+  W_lds_u32 = UOp.alloc((2, bn, w_str_u32), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+  sRef = UOp.alloc((bn,), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+  sRatio = UOp.alloc((2, bn), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  sRatioTag = UOp.alloc((2, bn), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+  sFlag = UOp.alloc((2, wn), dtypes.uint32, addrspace=AddrSpace.LOCAL)
+  acc = UOp.alloc((tm, tn, 8), dtypes.float32, addrspace=AddrSpace.REG)
+  ref_r = UOp.alloc((1,), dtypes.uint32, addrspace=AddrSpace.REG)
+  sink_r = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
+  z_u, z_f, one_f, eps = UOp.const(0, dtypes.uint32), UOp.const(0.0, dtypes.float32), UOp.const(1.0, dtypes.float32), UOp.const(1e-30, dtypes.float32)
+  # Init LDS via _nat stores + _lds_barrier (zero Ops.STORE to LOCAL -> zero __syncthreads()!)
+  s0_init = sink_r[0].store(UOp.const(0, dtypes.int32))
+  r_it1 = UOp.range((tid < 2 * bn).cast(dtypes.weakint), 20)
+  st_rt0 = _lds_st1(sRatioTag[tid // bn, tid % bn], z_u, sink_r, s0_init, r_it1).end(r_it1)
+  r_it2 = UOp.range((tid < 2 * wn).cast(dtypes.weakint), 21)
+  st_fl0 = _lds_st1(sFlag[tid // wn, tid % wn], z_u, sink_r, s0_init, r_it2).end(r_it2)
+  init_done = _lds_barrier(sink_r, s0_init, acc.store(acc.const_like(0.0)), ref_r[0].store(z_u), st_rt0, st_fl0, bid=1)
+  bn_i, bg = tid // 4, tid % 4
+  qg, hg, base_l = bg // 2, bg & 1, (lane // 4) * 4
+  gn = (block_n * bn + bn_i).minimum(out_features - 1)
+  xt_u32, ksteps_g = xt.flatten(), in_features // 16
+  mt_base = block_m * (wm * tm) + wave_m * tm
+
+  wreg_n = {MXFP4: (3, 5), Q8_0: (5, 9), Q4_K: (3, 5), Q5_K: (5, 7), Q6_K: (8, 8), Q3_K: (7, 7),
+            IQ4_XS: (3, 5), Q2_K: (6, 10), IQ3_S: (5, 6), IQ3_XXS: (3, 4), IQ2_S: (5, 5)}
+  w_reg = {q: UOp.alloc((wreg_n[q][0 if bk == 64 else 1],), dtypes.uint32, addrspace=AddrSpace.REG) for q in qts}
+
+  def load_b_reg_q(q:int, kt_v:UOp, dep:tuple[UOp, ...]) -> UOp:
+    rq = _qraw(raw, q)
+    ru, rd = raw_u32.after(*dep), rq.after(*dep)
+    if bk == 64:  # 16 weights/thread (bg=0..3: qg=0..1, hg=0..1)
+      gbg = kt_v * 2 + qg
+      sub, sb = gbg % 8, gn * k_sb + gbg // 8
+      if q == MXFP4:
+        a32 = ((gn * (in_features // 32) + kt_v * 2) * 17) // 4 + bg * 2
+        v2 = _amd_load(ru[a32], 2)
+        uv = [v2[0], v2[1], ru[a32 + 2].load()]
+      elif q == Q8_0:
+        b32 = (gn * (in_features // 64) + kt_v) * 17
+        off = bg.eq(0).where(0, bg.eq(1).where(4, bg.eq(2).where(9, 13)))
+        uv = _v4(_amd_load(ru[b32 + off], 4)) + [ru[b32 + bg.eq(0).where(4, 8)].load()]
+      elif q == Q4_K:
+        b, pair = sb * 36, kt_v % 4
+        v2 = _amd_load(ru[b + 4 + pair * 8 + bg * 2], 2)
+        uv = [v2[0], v2[1], ru[b + bg].load()]
+      elif q == Q5_K:
+        b, pair = sb * 44, kt_v % 4
+        qs2, qh2 = _amd_load(ru[b + 12 + pair * 8 + bg * 2], 2), _amd_load(ru[b + 4 + bg * 2], 2)
+        uv = [qs2[0], qs2[1], qh2[0], qh2[1], ru[b + bg].load()]
+      elif q == Q6_K:
+        b, s4 = sb * 105, sub // 4
+        ql = _v4(_amd_load(rd[b + s4 * 32 + qg * 16 + hg * 8], 8).bitcast(dtypes.uint32))
+        qh = _amd_load(rd[b + 64 + s4 * 16 + (hg * 2 + qg) * 4], 4).bitcast(dtypes.uint32)
+        uv = ql + [qh[0], qh[1], rd[b + 96 + sub].load().cast(dtypes.uint32), rd[b + 104].load().cast(dtypes.uint32)]
+      elif q == Q3_K:
+        b, s4, p_idx = sb * 55, sub // 4, hg * 2 + qg
+        hm = _amd_load(rd[b + p_idx * 4], 4).bitcast(dtypes.uint32)
+        qs = _amd_load(rd[b + 16 + s4 * 16 + p_idx * 4], 4).bitcast(dtypes.uint32)
+        uv = [hm[0], hm[1], qs[0], qs[1], rd[b + 48 + (sub % 4)].load().cast(dtypes.uint32),
+              rd[b + 52 + (sub & 1)].load().cast(dtypes.uint32), rd[b + 54].load().cast(dtypes.uint32)]
+      elif q == IQ4_XS:
+        b = sb * 34
+        v2 = _amd_load(ru[b + 2 + sub * 4 + hg * 2], 2)
+        uv = [v2[0], v2[1], ru[b + hg].load()]
+      elif q == Q2_K:
+        b32 = sb * 21
+        uv = _v4(_amd_load(ru[b32 + 4 + (sub // 4) * 8 + hg * 4], 4)) + [ru[b32 + sub // 2].load(), ru[b32 + 20].load()]
+      elif q == IQ3_S:
+        b = sb * 55
+        uv = [_amd_load(rd[b + 1 + sub * 4 + hg * 2], 2).bitcast(dtypes.uint32)[0], rd[b + 37 + sub * 2 + hg].load().cast(dtypes.uint32),
+              rd[b + 33 + sub // 2].load().cast(dtypes.uint32), rd[b + 53 + sub // 4].load().cast(dtypes.uint32), rd[b].load().cast(dtypes.uint32)]
+      elif q == IQ3_XXS:
+        b = sb * 49
+        uv = [_amd_load(rd[b + 1 + sub * 4 + hg * 2], 2).bitcast(dtypes.uint32)[0],
+              _amd_load(rd[b + 33 + sub * 2], 2).bitcast(dtypes.uint32)[0], rd[b].load().cast(dtypes.uint32)]
+      else:  # IQ2_S
+        b = sb * 41
+        uv = [rd[b + 1 + sub * 2 + hg].load().cast(dtypes.uint32), rd[b + 17 + sub * 2 + hg].load().cast(dtypes.uint32),
+              rd[b + 33 + sub // 2].load().cast(dtypes.uint32), rd[b + 37 + sub // 2].load().cast(dtypes.uint32), rd[b].load().cast(dtypes.uint32)]
+    else:  # bk == 128: 32 weights/thread (bg=0..3, global_load_b128 for peak HBM bandwidth at M=64..512!)
+      gbg = kt_v * 4 + bg
+      sub, sb = gbg % 8, gn * k_sb + gbg // 8
+      if q == MXFP4:
+        b32 = ((gn * (in_features // 32) + kt_v * 4) * 17) // 4
+        uv = _v4(_amd_load(ru[b32 + bg * 4], 4)) + [ru[b32 + 16].load()]
+      elif q == Q8_0:
+        b32, off = (gn * (in_features // 64) + gbg // 2) * 17, (bg & 1) * 9
+        uv = _v4(_amd_load(ru[b32 + off], 4)) + _v4(_amd_load(ru[b32 + off + 4], 4)) + [ru[b32 + 8].load()]
+      elif q == Q4_K:
+        b = sb * 36
+        uv = _v4(_amd_load(ru[b + 4 + ((gbg // 2) % 4) * 8 + (gbg & 1) * 4], 4)) + [ru[b + bg].load()]
+      elif q == Q5_K:
+        b, qh2 = sb * 44, _amd_load(ru[sb * 44 + 4 + bg * 2], 2)
+        uv = _v4(_amd_load(ru[b + 12 + ((gbg // 2) % 4) * 8 + (gbg & 1) * 4], 4)) + [qh2[0], qh2[1], ru[b + bg].load()]
+      elif q == Q6_K:
+        b, s4 = sb * 105, sub // 4
+        qh = _amd_load(rd[b + 64 + s4 * 16 + bg * 4], 4).bitcast(dtypes.uint32)
+        ql = _v4(_amd_load(rd[b + s4 * 32 + (bg & 1) * 16 + (bg // 2) * 8], 8).bitcast(dtypes.uint32))
+        uv = ql + [qh[0], qh[1], rd[b + 96 + sub].load().cast(dtypes.uint32), rd[b + 104].load().cast(dtypes.uint32)]
+      elif q == Q3_K:
+        b, s4 = sb * 55, sub // 4
+        hm, qs = _amd_load(rd[b + bg * 4], 4).bitcast(dtypes.uint32), _amd_load(rd[b + 16 + s4 * 16 + bg * 4], 4).bitcast(dtypes.uint32)
+        uv = [hm[0], hm[1], qs[0], qs[1], rd[b + 48 + (sub % 4)].load().cast(dtypes.uint32),
+              rd[b + 52 + (sub & 1)].load().cast(dtypes.uint32), rd[b + 54].load().cast(dtypes.uint32)]
+      elif q == IQ4_XS:
+        b = sb * 34
+        uv = _v4(_amd_load(ru[b + 2 + sub * 4], 4)) + [ru[b + (bg & 1)].load()]
+      elif q == Q2_K:
+        b32 = sb * 21
+        uv = (_v4(_amd_load(ru[b32 + 4 + (sub // 4) * 8], 4)) + _v4(_amd_load(ru[b32 + 8 + (sub // 4) * 8], 4)) +
+              [ru[b32 + sub // 2].load(), ru[b32 + 20].load()])
+      elif q == IQ3_S:
+        b = sb * 55
+        q01 = _amd_load(rd[b + 1 + sub * 4], 4).bitcast(dtypes.uint32)
+        uv = [q01[0], q01[1], _amd_load(rd[b + 37 + sub * 2], 2).bitcast(dtypes.uint32)[0],
+              rd[b + 33 + sub // 2].load().cast(dtypes.uint32), rd[b + 53 + sub // 4].load().cast(dtypes.uint32), rd[b].load().cast(dtypes.uint32)]
+      elif q == IQ3_XXS:
+        b = sb * 49
+        q01 = _amd_load(rd[b + 1 + sub * 4], 4).bitcast(dtypes.uint32)
+        uv = [q01[0], q01[1], _amd_load(rd[b + 33 + sub * 2], 2).bitcast(dtypes.uint32)[0], rd[b].load().cast(dtypes.uint32)]
+      else:  # IQ2_S
+        b = sb * 41
+        uv = [_amd_load(rd[b + 1 + sub * 2], 2).bitcast(dtypes.uint32)[0], _amd_load(rd[b + 17 + sub * 2], 2).bitcast(dtypes.uint32)[0],
+              rd[b + 33 + sub // 2].load().cast(dtypes.uint32), rd[b + 37 + sub // 2].load().cast(dtypes.uint32), rd[b].load().cast(dtypes.uint32)]
+    return UOp.group(*(w_reg[q].after(*dep)[j].store(v) for j, v in enumerate(uv)))
+
+  def load_b_reg(kt_v:UOp, dep:tuple[UOp, ...]) -> UOp:
+    return _qswitch(ggml_type, [(q, load_b_reg_q(q, kt_v, dep)) for q in qts])
+
+  def store_b_lds(buf_i:UOp, bmap:dict[int, UOp], kt_v:UOp, dep:tuple[UOp, ...], rid:int, allow_upd:UOp|bool=True) -> UOp:
+    dst, rat_d, rtag_d, flg_d = W_lds_u32.after(*dep)[buf_i], sRatio.after(*dep)[buf_i], sRatioTag.after(*dep)[buf_i], sFlag.after(*dep)
+    tag = (kt_v + 1).cast(dtypes.uint32)
+    t_out = UOp.alloc((4 if bk == 64 else 8,), dtypes.uint32, addrspace=AddrSpace.REG)
+    nr_r, rat_r, upd_r = (UOp.alloc((1,), dt, addrspace=AddrSpace.REG) for dt in (dtypes.uint32, dtypes.float32, dtypes.bool))
+    def _done(st_t:UOp, new_r_u:UOp, rat_v:UOp, upd:UOp) -> UOp:
+      return UOp.group(st_t, nr_r.after(*dep)[0].store(new_r_u), rat_r.after(*dep)[0].store(rat_v), upd_r.after(*dep)[0].store(upd))
+    def fill_q(q:int) -> UOp:
+      breg = bmap[q]
+      def get_u(j:int|UOp) -> UOp: return breg[j].load()
+      def _upd_ref(tsc_need:UOp) -> tuple[UOp, UOp, UOp, UOp]:
+        old_u = _nat("({{ unsigned int _v = ({0}); __builtin_amdgcn_s_setprio(2); _v; }})", dtypes.uint32, ref_r.after(*dep)[0].load(), inline=False)
+        old_r = old_u.bitcast(dtypes.float32)
+        upd = (tsc_need > old_r) & allow_upd if isinstance(allow_upd, UOp) else (tsc_need > old_r)
+        new_r = upd.where(_fast_fmax(tsc_need * UOp.const(8.0, dtypes.float32), eps), old_r)
+        inv_r = (new_r > z_f).where(_fast_rcp(new_r), z_f)
+        return new_r.bitcast(dtypes.uint32), inv_r, (old_r > z_f).where(old_r * inv_r, z_f), upd
+      if bk == 64:  # 16 weights/thread -> 4 fp8 u32s -> 2x ds_store_b64!
+        gbg = kt_v * 2 + qg
+        sub = gbg % 8
+        def put4_r(fn_w:Callable[[UOp], UOp], new_r_u:UOp, rat_v:UOp, upd:UOp) -> UOp:
+          jr = UOp.range(4, rid + 1)
+          return _done(t_out.after(*dep)[jr].store(fn_w(jr)).end(jr), new_r_u, rat_v, upd)
+        def put4_r2(fn_p:Callable[[UOp], tuple[UOp, UOp]], new_r_u:UOp, rat_v:UOp, upd:UOp, stride2:bool=False) -> UOp:
+          jr = UOp.range(2, rid + 1)
+          w0, w1 = fn_p(jr)
+          i0, i1 = (2 * jr, 2 * jr + 1) if stride2 else (jr, jr + 2)
+          return _done(UOp.group(t_out.after(*dep)[i0].store(w0), t_out.after(*dep)[i1].store(w1)).end(jr), new_r_u, rat_v, upd)
+        if q == MXFP4:
+          h2 = (((gn * (in_features // 32) + kt_v * 2) * 17 // 2) & 1).cast(dtypes.uint32)
+          rem = h2 * 2 + qg.cast(dtypes.uint32)
+          w0, w1, w2 = get_u(0), get_u(1), get_u(2)
+          e_w = hg.eq(0).where(w0, _lane_xor(w0, 1, dpp=True))
+          e = (e_w >> (rem * 8)) & 255
+          em = e.maximum(_lane_xor(e, 2, dpp=True))
+          old_r = _nat("({{ unsigned int _v = ({0}); __builtin_amdgcn_s_setprio(2); _v; }})",
+                       dtypes.uint32, ref_r.after(*dep)[0].load(), inline=False)
+          upd = (em > old_r) & allow_upd if isinstance(allow_upd, UOp) else (em > old_r)
+          new_r = upd.where((em + UOp.const(5, dtypes.uint32)).minimum(UOp.const(254, dtypes.uint32)), old_r)
+          de, c11 = new_r - e, UOp.const(11, dtypes.uint32)
+          ok, d4 = de <= c11, ((c11 - de.minimum(c11)) << 3) * UOp.const(0x01010101, dtypes.uint32)
+          l0 = ok.where(UOp.const(0x0c080000, dtypes.uint32) + (d4 & UOp.const(0xffffff00, dtypes.uint32)), 0)
+          l1 = ok.where(UOp.const(0x1c181410, dtypes.uint32) + d4, 0)
+          sh_b = (rem + 1) & 3
+          pw0, pw1 = rem.eq(3).where(w1, _perm_alignbyte(w1, w0, sh_b)), rem.eq(3).where(w2, _perm_alignbyte(w2, w1, sh_b))
+          lo0 = _amd_byte_perm(l1, l0, pw0 & 0x07070707) | ((pw0 & 0x08080808) << 4)
+          lo1 = _amd_byte_perm(l1, l0, pw1 & 0x07070707) | ((pw1 & 0x08080808) << 4)
+          hi0 = _amd_byte_perm(l1, l0, (pw0 >> 4) & 0x07070707) | (pw0 & 0x80808080)
+          hi1 = _amd_byte_perm(l1, l0, (pw1 >> 4) & 0x07070707) | (pw1 & 0x80808080)
+          sh_e = new_r - old_r
+          mx_rat = (sh_e >= UOp.const(127, dtypes.uint32)).where(z_f, ((UOp.const(127, dtypes.uint32) - sh_e) << 23).bitcast(dtypes.float32))
+          return _done(UOp.group(*(t_out.after(*dep)[i].store(v) for i, v in enumerate((lo0, lo1, hi0, hi1)))), new_r, mx_rat, upd)
+        if q == Q8_0:
+          w0, w4 = get_u(0), get_u(4)
+          d_raw = qg.eq(0).where(hg.eq(0).where(w0 & 0xffff, _lane_xor(w0 & 0xffff, 1, dpp=True)), w4 >> 16)
+          sc = _half(d_raw)
+          sm = _fast_fmax(sc.abs(), _lane_xor(sc.abs(), 2, dpp=True))
+          new_r_u, inv_r, rat_v, upd = _upd_ref(sm)
+          sn, c80 = sc * inv_r, UOp.const(0x80808080, dtypes.uint32)
+          sel = qg.eq(0).where(UOp.const(0x05040302, dtypes.uint32), UOp.const(0x03020100, dtypes.uint32))
+          return put4_r(lambda j: _b4_to_fp8(_amd_byte_perm(get_u(j + 1), get_u(j), sel) ^ c80, sn, -8388736.0), new_r_u, rat_v, upd)
+        if q in (Q4_K, Q5_K):
+          wh = get_u(2 if q == Q4_K else 4)
+          hdr = [_dpp_quad(wh, k) for k in range(4)]
+          tsc_need = _fast_fmax(_half(hdr[0] & 0xffff).abs() * UOp.const(4.0 if q == Q4_K else 8.0, dtypes.float32),
+                                _half(hdr[0] >> 16).abs() * UOp.const(0.25, dtypes.float32))
+          new_r_u, inv_r, rat_v, upd = _upd_ref(tsc_need)
+          ds0, dm0, ds1, dm1 = _q4k_pair_scales(hdr, kt_v % 4)
+          is_lo = qg.eq(0)
+          ds_m, dm_m = is_lo.where(ds0, ds1) * inv_r, is_lo.where(-dm0, -dm1) * inv_r
+          sh = is_lo.where(UOp.const(0, dtypes.uint32), UOp.const(4, dtypes.uint32))
+          def q45_w(j:UOp) -> UOp:
+            qm = get_u(j % 2)
+            qo = _lane_xor(qm, 2, dpp=True)
+            qv = (j < 2).where(is_lo.where(qm, qo), is_lo.where(qo, qm))
+            qbits = (qv >> sh) & 0x0f0f0f0f
+            if q == Q5_K:
+              hm = get_u(2 + (j % 2))
+              ho = _lane_xor(hm, 2, dpp=True)
+              hv = (j < 2).where(is_lo.where(hm, ho), is_lo.where(ho, hm))
+              qbits = qbits | (((hv >> _sh(sub)) & 0x01010101) << 4)
+            return _b4_to_fp8(qbits, ds_m, -8388608.0, dm_m)
+          return put4_r(q45_w, new_r_u, rat_v, upd)
+        if q == Q6_K:
+          sc_w, d_f = get_u(6), _half(get_u(7))
+          new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * UOp.const(16.0, dtypes.float32))
+          s_b = ((sc_w >> _sh(hg * 8)) & 255).cast(dtypes.uint8).bitcast(dtypes.int8).float() * (d_f * inv_r)
+          is_lo = qg.eq(0)
+          ql_sh, qh_sh = _sh(((sub % 4) // 2) * 4), _sh((sub % 4) * 2)
+          def q6_w(j:UOp) -> UOp:
+            qhm = get_u(4 + (j % 2))
+            qho = _lane_xor(qhm, 2, dpp=True)
+            qhv = (j < 2).where(is_lo.where(qhm, qho), is_lo.where(qho, qhm))
+            return _b4_to_fp8(((get_u(j) >> ql_sh) & 0x0f0f0f0f) | (((qhv >> qh_sh) & 0x03030303) << 4), s_b, -8388640.0)
+          return put4_r(q6_w, new_r_u, rat_v, upd)
+        if q == Q3_K:
+          sl16, sh16, d_f = get_u(4), get_u(5), _half(get_u(6))
+          new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * UOp.const(0.5, dtypes.float32))
+          q3_sc = ((((sl16 >> _sh(hg * 8 + (sub // 4) * 4)) & 15) |
+                    (((sh16 >> _sh(hg * 8 + (sub // 2) * 2)) & 3) << 4)).cast(dtypes.int32) - 32).float() * (d_f * inv_r)
+          l0, l1 = _pack4_fp8(*(float(v) * q3_sc for v in (-4, -3, -2, -1))), _pack4_fp8(*(float(v) * q3_sc for v in (0, 1, 2, 3)))
+          is_lo = qg.eq(0)
+          qs_sh, hm_sh = _sh((sub % 4) * 2), _sh(sub)
+          def q3_w(j:UOp) -> UOp:
+            hmm, qsm = get_u(j % 2), get_u(2 + (j % 2))
+            hmo, qso = _lane_xor(hmm, 2, dpp=True), _lane_xor(qsm, 2, dpp=True)
+            hmv = (j < 2).where(is_lo.where(hmm, hmo), is_lo.where(hmo, hmm))
+            qsv = (j < 2).where(is_lo.where(qsm, qso), is_lo.where(qso, qsm))
+            return _amd_byte_perm(l1, l0, ((qsv >> qs_sh) & 0x03030303) | (((hmv >> hm_sh) & 0x01010101) << 2))
+          return put4_r(q3_w, new_r_u, rat_v, upd)
+        if q == IQ4_XS:
+          hm, ho = get_u(2), _lane_xor(get_u(2), 1, dpp=True)
+          h0, h1 = hg.eq(0).where(hm, ho), hg.eq(0).where(ho, hm)
+          d_f = _half(h0)
+          new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * UOp.const(32.0 / 3.0, dtypes.float32))
+          sc_i = (((h1 >> _sh(4 * sub)) & 15) | (((h0 >> _sh(16 + 2 * sub)) & 3) << 4)).cast(dtypes.int32) - 32
+          sc = sc_i.float() * (d_f * inv_r)
+          lut = tuple(_pack4_fp8(*(UOp.const(float(v), dtypes.float32) * sc for v in _IQ4NL_VALS[k:k + 4])) for k in (0, 4, 8, 12))
+          return put4_r(lambda j: _nibble_lut(get_u(j % 2), _sh((j // 2) * 4), lut), new_r_u, rat_v, upd)
+        if q == Q2_K:
+          sc_b, dm_w = (get_u(4) >> _sh((sub & 1) * 16 + hg * 8)) & 255, get_u(5)
+          dr, dmr = _half(dm_w & 0xffff), _half(dm_w >> 16)
+          new_r_u, inv_r, rat_v, upd = _upd_ref(_fast_fmax(dr.abs(), dmr.abs()) * UOp.const(0.25, dtypes.float32))
+          sh = _sh((sub % 4) * 2)
+          l0 = _pack4_fp8(*(float(i) * dr * inv_r * (sc_b & 15).float() - dmr * inv_r * (sc_b >> 4).float() for i in range(4)))
+          return put4_r(lambda j: _amd_byte_perm(z_u, l0, (get_u(j) >> sh) & 0x03030303), new_r_u, rat_v, upd)
+        if q == IQ3_S:
+          q_h, s_h, d_f = get_u(0), get_u(1), _half(get_u(4))
+          qh_4, sc_n = (get_u(2) >> _sh((sub & 1) * 8 + hg * 4)) & 15, (get_u(3) >> _sh((sub & 3) * 4)) & 15
+          new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * UOp.const(2.0, dtypes.float32))
+          sn = (1.0 + 2.0 * sc_n.float()) * (d_f * inv_r)
+          l0, l1 = _pack4_fp8(*(float(v) * sn for v in (1, 3, 5, 7))), _pack4_fp8(*(float(v) * sn for v in (9, 11, 13, 15)))
+          return put4_r(lambda i: _amd_byte_perm(
+            l1, l0, (grid[((q_h >> _sh(i * 8)) & 255) | (((qh_4 >> _sh(i)) & 1) << 8)].load() >> 1) & 0x07070707) ^
+                        (((((s_h >> _sh(i * 4)) & 15) * 0x00204081) & 0x01010101) << 7), new_r_u, rat_v, upd)
+        if q == IQ3_XXS:
+          q_h, sc_w, d_f = get_u(0), get_u(1), _half(get_u(2))
+          new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * UOp.const(1.5, dtypes.float32))
+          sn = ((sc_w >> 28).float() + 0.5) * UOp.const(0.5, dtypes.float32) * (d_f * inv_r)
+          l0, l1 = _pack4_fp8(*(float(v) * sn for v in (4, 12, 20, 28))), _pack4_fp8(*(float(v) * sn for v in (36, 44, 52, 62)))
+          def iq3x64_pair(p_i:UOp) -> tuple[UOp, UOp]:
+            qw, sgn = q_h >> _sh(p_i * 16), _iq_even_signs((sc_w >> _sh(7 * (hg * 2 + p_i))) & 127)
+            return (_amd_byte_perm(l1, l0, (grid[qw & 255].load() >> 3) & 0x07070707) ^ ((((sgn & 15) * 0x00204081) & 0x01010101) << 7),
+                    _amd_byte_perm(l1, l0, (grid[(qw >> 8) & 255].load() >> 3) & 0x07070707) ^ (((((sgn >> 4) & 15) * 0x00204081) & 0x01010101) << 7))
+          return put4_r2(iq3x64_pair, new_r_u, rat_v, upd, stride2=True)
+        # IQ2_S
+        q_h, s_h, bsh, d_f = get_u(0), get_u(1), _sh((sub & 1) * 8 + hg * 4), _half(get_u(4))
+        qh_4, sc_4 = (get_u(2) >> bsh) & 15, (get_u(3) >> bsh) & 15
+        new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * UOp.const(0.5, dtypes.float32))
+        sf = (sc_4.float() + 0.5) * UOp.const(0.25, dtypes.float32) * (d_f * inv_r)
+        l0 = _pack4_fp8(8.0 * sf, 25.0 * sf, 43.0 * sf, z_f)
+        return put4_r(lambda j: (p := j // 2, k := j % 2, _amd_byte_perm(z_u, l0,
+                      (grid[(((q_h >> _sh(8 * p)) & 255) | (((qh_4 >> _sh(2 * p)) & 3) << 8)) * 2 + k].load() >> 4) & 0x03030303) ^
+                      (((((s_h >> _sh(8 * p + 4 * k)) & 15) * 0x00204081) & 0x01010101) << 7))[2], new_r_u, rat_v, upd)
+
+      # bk == 128: 32 weights/thread -> 8 fp8 u32s -> 4x ds_store_b64!
+      gbg = kt_v * 4 + bg
+      sub = gbg % 8
+      def put_r(fn_w:Callable[[UOp], UOp], new_r_u:UOp, rat_v:UOp, upd:UOp) -> UOp:
+        jr = UOp.range(8, rid + 1)
+        return _done(t_out.after(*dep)[jr].store(fn_w(jr)).end(jr), new_r_u, rat_v, upd)
+      def put_r4(fn_pair:Callable[[UOp], tuple[UOp, UOp]], new_r_u:UOp, rat_v:UOp, upd:UOp, stride2:bool=False) -> UOp:
+        jr = UOp.range(4, rid + 1)
+        w0, w1 = fn_pair(jr)
+        i0, i1 = (2 * jr, 2 * jr + 1) if stride2 else (jr, jr + 4)
+        return _done(UOp.group(t_out.after(*dep)[i0].store(w0), t_out.after(*dep)[i1].store(w1)).end(jr), new_r_u, rat_v, upd)
+      def _reg_u32(n:int, fn:Callable[[UOp], UOp], r_id:int) -> UOp:
+        arr, ri = UOp.alloc((n,), dtypes.uint32, addrspace=AddrSpace.REG), UOp.range(n, r_id)
+        return arr.after(arr.after(*dep)[ri].store(fn(ri)).end(ri))
+      if q == MXFP4:
+        rem = bg.cast(dtypes.uint32)
+        w0, w4 = get_u(0), bg.eq(3).where(get_u(4), _lane_bpermute(lane + 1, get_u(0)))
+        e = (w0 >> (rem * 8)) & 255
+        em = e.maximum(_lane_xor(e, 1, dpp=True))
+        em = em.maximum(_lane_xor(em, 2, dpp=True))
+        old_r = _nat("({{ unsigned int _v = ({0}); __builtin_amdgcn_s_setprio(2); _v; }})", dtypes.uint32, ref_r.after(*dep)[0].load(), inline=False)
+        upd = (em > old_r) & allow_upd if isinstance(allow_upd, UOp) else (em > old_r)
+        new_r = upd.where((em + UOp.const(5, dtypes.uint32)).minimum(UOp.const(254, dtypes.uint32)), old_r)
+        de, c11 = new_r - e, UOp.const(11, dtypes.uint32)
+        ok, d4 = de <= c11, ((c11 - de.minimum(c11)) << 3) * UOp.const(0x01010101, dtypes.uint32)
+        l0 = ok.where(UOp.const(0x0c080000, dtypes.uint32) + (d4 & UOp.const(0xffffff00, dtypes.uint32)), 0)
+        l1 = ok.where(UOp.const(0x1c181410, dtypes.uint32) + d4, 0)
+        def mx_pair(j:UOp) -> tuple[UOp, UOp]:
+          lo, hi = get_u(j), j.eq(3).where(w4, get_u(j + 1))
+          pw = rem.eq(3).where(hi, _perm_alignbyte(hi, lo, (rem + 1) & 3))
+          return (_amd_byte_perm(l1, l0, pw & 0x07070707) | ((pw & 0x08080808) << 4),
+                  _amd_byte_perm(l1, l0, (pw >> 4) & 0x07070707) | (pw & 0x80808080))
+        sh_e = new_r - old_r
+        mx_rat = (sh_e >= UOp.const(127, dtypes.uint32)).where(z_f, ((UOp.const(127, dtypes.uint32) - sh_e) << 23).bitcast(dtypes.float32))
+        return put_r4(mx_pair, new_r, mx_rat, upd)
+      if q == Q8_0:
+        is_e = (bg & 1).eq(0)
+        sc = _half(is_e.where(get_u(0) & 0xffff, get_u(8) >> 16))
+        sm = _fast_fmax(sc.abs(), _lane_xor(sc.abs(), 1, dpp=True))
+        sm = _fast_fmax(sm, _lane_xor(sm, 2, dpp=True))
+        new_r_u, inv_r, rat_v, upd = _upd_ref(sm)
+        sn, c80 = sc * inv_r, UOp.const(0x80808080, dtypes.uint32)
+        sel_a = is_e.where(UOp.const(0x05040302, dtypes.uint32), UOp.const(0x03020100, dtypes.uint32))
+        return put_r(lambda j: _b4_to_fp8(_amd_byte_perm(get_u(j + 1), get_u(j), sel_a) ^ c80, sn, -8388736.0), new_r_u, rat_v, upd)
+      if q in (Q4_K, Q5_K):
+        is_lo = (gbg & 1).eq(0)
+        hdr = [_dpp_quad(get_u(4 if q == Q4_K else 6), k) for k in range(4)]
+        tsc_need = _fast_fmax(_half(hdr[0] & 0xffff).abs() * UOp.const(4.0 if q == Q4_K else 8.0, dtypes.float32),
+                              _half(hdr[0] >> 16).abs() * UOp.const(0.25, dtypes.float32))
+        new_r_u, inv_r, rat_v, upd = _upd_ref(tsc_need)
+        ds0, dm0, ds1, dm1 = _q4k_pair_scales(hdr, (gbg // 2) % 4)
+        ds_m, dm_m = is_lo.where(ds0, ds1) * inv_r, is_lo.where(-dm0, -dm1) * inv_r
+        sh = is_lo.where(UOp.const(0, dtypes.uint32), UOp.const(4, dtypes.uint32))
+        if q == Q4_K:
+          def q4_pair(j:UOp) -> tuple[UOp, UOp]:
+            q_m = get_u(j)
+            q_o = _lane_xor(q_m, 1, dpp=True)
+            return (_b4_to_fp8((is_lo.where(q_m, q_o) >> sh) & 0x0f0f0f0f, ds_m, -8388608.0, dm_m),
+                    _b4_to_fp8((is_lo.where(q_o, q_m) >> sh) & 0x0f0f0f0f, ds_m, -8388608.0, dm_m))
+          return put_r4(q4_pair, new_r_u, rat_v, upd)
+        pa_r = _reg_u32(8, lambda j: (q_m := get_u(j % 4), q_o := _lane_xor(q_m, 1, dpp=True),
+                        (j < 4).where(is_lo.where(q_m, q_o), is_lo.where(q_o, q_m)))[2], rid + 2)
+        qh_r = _reg_u32(8, lambda j: _lane_bpermute(base_l + j // 2, get_u(4 + (j % 2))), rid + 3)
+        return put_r(lambda j: _b4_to_fp8(((pa_r[j].load() >> sh) & 0x0f0f0f0f) | (((qh_r[j].load() >> _sh(sub)) & 0x01010101) << 4),
+                     ds_m, -8388608.0, dm_m), new_r_u, rat_v, upd)
+      if q == Q6_K:
+        sc_w, d_f, is_l2 = get_u(6), _half(get_u(7)), bg < 2
+        ql_r = _reg_u32(8, lambda j: (q_m := get_u(j % 4), q_o := _lane_xor(q_m, 2, dpp=True),
+                        (j < 4).where(is_l2.where(q_m, q_o), is_l2.where(q_o, q_m)))[2], rid + 2)
+        qh_r = _reg_u32(8, lambda j: _lane_bpermute(base_l + j // 2, get_u(4 + (j % 2))), rid + 3)
+        new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * UOp.const(16.0, dtypes.float32))
+        d_n = d_f * inv_r
+        s0 = (sc_w & 255).cast(dtypes.uint8).bitcast(dtypes.int8).float() * d_n
+        s1 = ((sc_w >> 8) & 255).cast(dtypes.uint8).bitcast(dtypes.int8).float() * d_n
+        ql_sh, qh_sh = _sh((sub % 4 // 2) * 4), _sh((sub % 4) * 2)
+        return put_r(lambda j: _b4_to_fp8(((ql_r[j].load() >> ql_sh) & 0x0f0f0f0f) | (((qh_r[j].load() >> qh_sh) & 0x03030303) << 4),
+                     (j < 4).where(s0, s1), -8388640.0), new_r_u, rat_v, upd)
+      if q == Q3_K:
+        hm_r = _reg_u32(8, lambda j: _lane_bpermute(base_l + j // 2, get_u(j % 2)), rid + 2)
+        qs_r = _reg_u32(8, lambda j: _lane_bpermute(base_l + j // 2, get_u(2 + (j % 2))), rid + 3)
+        sl16, sh16, d_f = get_u(4), get_u(5), _half(get_u(6))
+        new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * UOp.const(0.5, dtypes.float32))
+        d_n = d_f * inv_r
+        q3_scs = [((((sl16 >> _sh(h * 8 + (sub // 4) * 4)) & 15) |
+                    (((sh16 >> _sh(h * 8 + (sub // 2) * 2)) & 3) << 4)).cast(dtypes.int32) - 32).float() * d_n for h in (0, 1)]
+        luts = [(_pack4_fp8(*(float(v) * sc for v in (-4, -3, -2, -1))), _pack4_fp8(*(float(v) * sc for v in (0, 1, 2, 3)))) for sc in q3_scs]
+        qs_sh, hm_sh = _sh((sub % 4) * 2), _sh(sub)
+        return put_r(lambda j: _amd_byte_perm((j < 4).where(luts[0][1], luts[1][1]), (j < 4).where(luts[0][0], luts[1][0]),
+                     ((qs_r[j].load() >> qs_sh) & 0x03030303) | (((hm_r[j].load() >> hm_sh) & 0x01010101) << 2)), new_r_u, rat_v, upd)
+      if q == IQ4_XS:
+        hm, ho = get_u(4), _lane_xor(get_u(4), 1, dpp=True)
+        h0, h1 = (bg & 1).eq(0).where(hm, ho), (bg & 1).eq(0).where(ho, hm)
+        d_f = _half(h0)
+        new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * UOp.const(32.0 / 3.0, dtypes.float32))
+        sc_i = (((h1 >> _sh(4 * sub)) & 15) | (((h0 >> _sh(16 + 2 * sub)) & 3) << 4)).cast(dtypes.int32) - 32
+        sc = sc_i.float() * (d_f * inv_r)
+        lut = tuple(_pack4_fp8(*(UOp.const(float(v), dtypes.float32) * sc for v in _IQ4NL_VALS[k:k + 4])) for k in (0, 4, 8, 12))
+        return put_r(lambda j: _nibble_lut(get_u(j % 4), _sh((j // 4) * 4), lut), new_r_u, rat_v, upd)
+      if q == Q2_K:
+        sc16, dm_w = (get_u(8) >> _sh((sub & 1) * 16)) & 0xffff, get_u(9)
+        dr, dmr = _half(dm_w & 0xffff), _half(dm_w >> 16)
+        new_r_u, inv_r, rat_v, upd = _upd_ref(_fast_fmax(dr.abs(), dmr.abs()) * UOp.const(0.25, dtypes.float32))
+        sh = _sh((sub % 4) * 2)
+        luts1 = [_pack4_fp8(*(float(i) * dr * inv_r * (sc & 15).float() - dmr * inv_r * (sc >> 4).float() for i in range(4)))
+                 for sc in (sc16 & 255, (sc16 >> 8) & 255)]
+        return put_r(lambda j: _amd_byte_perm(z_u, (j < 4).where(luts1[0], luts1[1]), (get_u(j) >> sh) & 0x03030303), new_r_u, rat_v, upd)
+      if q == IQ3_S:
+        q0, q1, s0, d_f = get_u(0), get_u(1), get_u(2), _half(get_u(5))
+        qh_s, sc_n = (get_u(3) >> _sh((sub & 1) * 8)) & 255, (get_u(4) >> _sh((sub & 3) * 4)) & 15
+        new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * UOp.const(2.0, dtypes.float32))
+        sn = (1.0 + 2.0 * sc_n.float()) * (d_f * inv_r)
+        l0, l1 = _pack4_fp8(*(float(v) * sn for v in (1, 3, 5, 7))), _pack4_fp8(*(float(v) * sn for v in (9, 11, 13, 15)))
+        return put_r(lambda i: _amd_byte_perm(l1, l0, (grid[(((i < 4).where(q0, q1) >> _sh((i & 3) * 8)) & 255) |
+                     (((qh_s >> _sh(i)) & 1) << 8)].load() >> 1) & 0x07070707) ^
+                     (((((s0 >> _sh(i * 4)) & 15) * 0x00204081) & 0x01010101) << 7), new_r_u, rat_v, upd)
+      if q == IQ3_XXS:
+        q0, q1, sc_w, d_f = get_u(0), get_u(1), get_u(2), _half(get_u(3))
+        new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * UOp.const(1.5, dtypes.float32))
+        sn = ((sc_w >> 28).float() + 0.5) * UOp.const(0.5, dtypes.float32) * (d_f * inv_r)
+        l0, l1 = _pack4_fp8(*(float(v) * sn for v in (4, 12, 20, 28))), _pack4_fp8(*(float(v) * sn for v in (36, 44, 52, 62)))
+        def iq3x_pair(p:UOp) -> tuple[UOp, UOp]:
+          qw, sgn = (p < 2).where(q0, q1) >> _sh((p & 1) * 16), _iq_even_signs((sc_w >> _sh(7 * p)) & 127)
+          return (_amd_byte_perm(l1, l0, (grid[qw & 255].load() >> 3) & 0x07070707) ^ ((((sgn & 15) * 0x00204081) & 0x01010101) << 7),
+                  _amd_byte_perm(l1, l0, (grid[(qw >> 8) & 255].load() >> 3) & 0x07070707) ^ (((((sgn >> 4) & 15) * 0x00204081) & 0x01010101) << 7))
+        return put_r4(iq3x_pair, new_r_u, rat_v, upd, stride2=True)
+      q0, s0, bsh, d_f = get_u(0), get_u(1), _sh((sub & 1) * 8), _half(get_u(4))
+      qh_2, sc_b = (get_u(2) >> bsh) & 255, (get_u(3) >> bsh) & 255
+      new_r_u, inv_r, rat_v, upd = _upd_ref(d_f.abs() * UOp.const(0.5, dtypes.float32))
+      luts2 = [_pack4_fp8(8.0 * sf, 25.0 * sf, 43.0 * sf, z_f)
+               for k in (0, 1) for sf in ((((sc_b >> (k * 4)) & 15).float() + 0.5) * UOp.const(0.25, dtypes.float32) * (d_f * inv_r),)]
+      return put_r(lambda j: (p := j // 2, k := j % 2, _amd_byte_perm(z_u, (p < 2).where(luts2[0], luts2[1]),
+                   (grid[(((q0 >> _sh(8 * p)) & 255) | (((qh_2 >> _sh(2 * p)) & 3) << 8)) * 2 + k].load() >> 4) & 0x03030303) ^
+                   (((((s0 >> _sh(8 * p + 4 * k)) & 15) * 0x00204081) & 0x01010101) << 7))[2], new_r_u, rat_v, upd)
+    f_done = _qswitch(ggml_type, [(q, fill_q(q)) for q in qts])
+    tr, new_r_u, rat_v, upd = t_out.after(f_done), nr_r.after(f_done)[0].load(), rat_r.after(f_done)[0].load(), upd_r.after(f_done)[0].load()
+    r_u = UOp.range((upd & bg.eq(0)).cast(dtypes.weakint), rid + 4)
+    st_u = UOp.group(_lds_st1(rat_d.after(f_done, r_u)[bn_i], rat_v, sink_r, f_done, r_u),
+                     _lds_st1(rtag_d.after(f_done, r_u)[bn_i], tag, sink_r, f_done, r_u),
+                     _lds_st1(flg_d.after(f_done, r_u)[buf_i, bn_i // (tn * 16)], tag, sink_r, f_done, r_u)).end(r_u)
+    ref_st = UOp.group(ref_r.after(f_done)[0].store(new_r_u), st_u)
+    if bk == 64:
+      is_sp = (ggml_type in (MXFP4, Q4_K, Q5_K, IQ4_XS)) if isinstance(ggml_type, int) else (
+        ggml_type.eq(MXFP4) | ggml_type.eq(Q4_K) | ggml_type.eq(Q5_K) | ggml_type.eq(IQ4_XS))
+      p0 = is_sp.where(qg * 8 + hg * 2, bg * 4) if isinstance(is_sp, UOp) else (qg * 8 + hg * 2 if is_sp else bg * 4)
+      p1 = is_sp.where(qg * 8 + hg * 2 + 4, bg * 4 + 2) if isinstance(is_sp, UOp) else (qg * 8 + hg * 2 + 4 if is_sp else bg * 4 + 2)
+      return UOp.group(_lds_st2(dst[bn_i, p0], tr[0].load(), tr[1].load(), sink_r, f_done),
+                       _lds_st2(dst[bn_i, p1], tr[2].load(), tr[3].load(), sink_r, f_done), ref_st)
+    k_st = UOp.range(4, rid + 5)
+    return UOp.group(_lds_st2(dst[bn_i, bg * 8 + k_st * 2], tr[k_st * 2].load(), tr[k_st * 2 + 1].load(), sink_r, f_done, k_st).end(k_st), ref_st)
+
+  def _by_tn(fn:Callable[[int], UOp]) -> UOp:
+    return UOp(Ops.WHERE, src=(tn.eq(2), fn(2), fn(1))) if isinstance(tn, UOp) else fn(tn)
+
+  def _rescale_block(kt_c:UOp, cur_b:UOp, dep:tuple[UOp, ...]) -> UOp:
+    # Rare (<1%) wRef rescale (per-wave_n sFlag) — ZERO xsc rescale in K-loop!
+    tag_c = (kt_c + 1).cast(dtypes.uint32)
+    flg_v = _rfl(sFlag.after(*dep)[cur_b, wave_n].load())
+    r_res = UOp.range(((kt_c > 0) & flg_v.eq((kt_c + 1).cast(dtypes.int32))).cast(dtypes.weakint), 65)
+    rat_r, rtag_r = sRatio.after(*dep, r_res)[cur_b], sRatioTag.after(*dep, r_res)[cur_b]
+    ri_r, re_r = UOp.range(tm, 66), UOp.range(8, 67, AxisType.UPCAST)
+    def _res_tn(tn_c:int) -> UOp:
+      r_c = [rtag_r[(wave_n * tn_c + j) * 16 + col].load().eq(tag_c).where(rat_r[(wave_n * tn_c + j) * 16 + col].load(), one_f)
+             for j in range(tn_c)]
+      return UOp.group(*[acc[ri_r, j, re_r].store(acc.after(*dep, r_res)[ri_r, j, re_r].load() * r_c[j])
+                         for j in range(tn_c)])
+    return _by_tn(_res_tn).end(re_r, ri_r, r_res)
+
+  if bk == 64:
+    # Large-M (WM=8, TN=4, BK=64): unified single-copy 2-stage pipeline (1x load_b_reg + 1x store_b_lds in UIR!).
+    # kt=0: load(0); kt=1: store(0)+load(1)+bar; kt=2..k_tiles+1: rescale(kt-2)+af[0]+store(kt-1)+early load(kt)+64xWMMA+bar!
+    assert isinstance(tn, int)
+    kt = UOp.range(k_tiles + 2, 10)
+    kt_c = (kt - 2).maximum(0)
+    cur_b, st_b = kt_c % 2, (kt - 1).maximum(0) % 2
+    af_buf = UOp.alloc((2, tm, 2), dtypes.uint32, addrspace=AddrSpace.REG)
+    r_pre = UOp.range((kt >= 2).cast(dtypes.weakint), 50)
+    res_done = _rescale_block(kt_c, cur_b, (init_done, kt, r_pre))
+    ia_0 = UOp.range(tm, 55)
+    a0_idx = ((mt_base + ia_0).minimum(m_tiles_tot - 1) * ksteps_g + kt_c * ns) * 64 + lane * 2
+    av0 = _amd_load(xt_u32.after(res_done, ia_0)[a0_idx], 2)
+    pre_done = UOp.group(af_buf.after(res_done)[0, ia_0, 0].store(av0[0]),
+                         af_buf.after(res_done)[0, ia_0, 1].store(av0[1])).end(ia_0, r_pre)
+    r_st = UOp.range((kt >= 1).cast(dtypes.weakint), 51)
+    st_w = store_b_lds(st_b, {q: w_reg[q].after(init_done, kt, pre_done, r_st) for q in qts},
+                       (kt - 1).maximum(0).minimum(k_tiles - 1), (init_done, kt, pre_done, r_st), 48, allow_upd=(kt <= k_tiles)).end(r_st)
+    r_wl = UOp.range((kt < k_tiles).cast(dtypes.weakint), 52)
+    wl_done = load_b_reg(kt.minimum(k_tiles - 1), (init_done, kt, st_w, r_wl)).end(r_wl)
+    r_wm = UOp.range((kt >= 2).cast(dtypes.weakint), 53)
+    W_r = W_lds_u32.after(init_done, kt, pre_done, r_wm)[cur_b]
+    step_r = UOp.range(ns, 100)
+    s_cur, s_nxt = step_r % 2, (step_r + 1) % 2
+    r_an = UOp.range((step_r + 1 < ns).cast(dtypes.weakint), 102)
+    ia_n = UOp.range(tm, 103)
+    an_idx = ((mt_base + ia_n).minimum(m_tiles_tot - 1) * ksteps_g + kt_c * ns + (step_r + 1).minimum(ns - 1)) * 64 + lane * 2
+    avn = _amd_load(xt_u32.after(pre_done, st_w, wl_done, r_wm, step_r, r_an, ia_n)[an_idx], 2)
+    afn_done = UOp.group(af_buf.after(pre_done, st_w, wl_done, r_wm, step_r, r_an)[s_nxt, ia_n, 0].store(avn[0]),
+                         af_buf.after(pre_done, st_w, wl_done, r_wm, step_r, r_an)[s_nxt, ia_n, 1].store(avn[1])).end(ia_n, r_an)
+    wf_lo = [W_r[(wave_n * tn + j) * 16 + col, step_r * 4 + lg * 2].load() for j in range(tn)]
+    wf_hi = [W_r[(wave_n * tn + j) * 16 + col, step_r * 4 + lg * 2 + 1].load() for j in range(tn)]
+    wf_hi[-1] = _nat("({{ unsigned int _v = ({0}); __builtin_amdgcn_sched_barrier(0); if ({1}) __builtin_amdgcn_s_setprio(0); _v; }})",
+                     dtypes.uint32, wf_hi[-1], step_r.eq(0), inline=False)
+    wm_i = UOp.range(tm, 101)
+    af_cur = af_buf.after(pre_done, st_w, wl_done, afn_done, r_wm, step_r)
+    a_f8 = UOp.stack(af_cur[s_cur, wm_i, 0].load(), af_cur[s_cur, wm_i, 1].load()).bitcast(dtypes.fp8e4m3)
+    w_ops = UOp.group(*[acc[wm_i, j].store(UOp.wmma(a_f8, UOp.stack(wf_lo[j], wf_hi[j]).bitcast(dtypes.fp8e4m3),
+                        acc.after(init_done, kt, pre_done, afn_done, r_wm, step_r)[wm_i, j], *WMMA_ARG))
+                        for j in range(tn)]).end(wm_i)
+    w_ops = acc[0, 0, 7].store(_nat("({{ float _v = ({0}); __builtin_amdgcn_sched_barrier(0); _v; }})",
+                                    dtypes.float32, acc.after(w_ops)[0, 0, 7].load(), inline=False))
+    cmp_done = w_ops.end(step_r, r_wm)
+    b_end = _lds_barrier(sink_r, st_w, wl_done, cmp_done, bid=2).end(kt)
+  else:
+    # Small/Medium-M (TN=1,2, BK=128): unified single-copy Saber PIPE=1 loop (1x load_b_reg + 1x store_b_lds in UIR!).
+    kt = UOp.range(k_tiles + 1, 10)
+    kt_c = (kt - 1).maximum(0)
+    cur_b = kt_c % 2
+    af_all = UOp.alloc((tm, ns, 2), dtypes.uint32, addrspace=AddrSpace.REG)
+    r_st = UOp.range((kt > 0).cast(dtypes.weakint), 50)
+    st_w = store_b_lds(cur_b, {q: w_reg[q].after(init_done, kt, r_st) for q in qts}, kt_c, (init_done, kt, r_st), 48)
+    ia_r, st_r = UOp.range(tm, 55), UOp.range(ns, 56)
+    a_idx = ((mt_base + ia_r).minimum(m_tiles_tot - 1) * ksteps_g + kt_c * ns + st_r) * 64 + lane * 2
+    av = _amd_load(xt_u32.after(init_done, kt, r_st, ia_r, st_r)[a_idx], 2)
+    af_done = UOp.group(af_all.after(init_done, kt, r_st)[ia_r, st_r, 0].store(av[0]),
+                        af_all.after(init_done, kt, r_st)[ia_r, st_r, 1].store(av[1])).end(st_r, ia_r)
+    st_af_done = UOp.group(st_w, af_done).end(r_st)
+    r_wl = UOp.range((kt < k_tiles).cast(dtypes.weakint), 51)
+    wl_done = load_b_reg(kt.minimum(k_tiles - 1), (init_done, kt, st_af_done, r_wl)).end(r_wl)
+    r_wm = UOp.range((kt > 0).cast(dtypes.weakint), 52)
+    b_mid = _lds_barrier(sink_r, st_af_done, wl_done, r_wm, bid=3)
+    res_done = _rescale_block(kt_c, cur_b, (init_done, kt, b_mid))
+    W_r = W_lds_u32.after(b_mid)[cur_b]
+    af_r = af_all.after(b_mid, res_done)
+    step_r = UOp.range(ns, 100)
+    def _wmma_128(tn_c:int) -> UOp:
+      wf_lo = [W_r[(wave_n * tn_c + j) * 16 + col, step_r * 4 + lg * 2].load() for j in range(tn_c)]
+      wf_hi = [W_r[(wave_n * tn_c + j) * 16 + col, step_r * 4 + lg * 2 + 1].load() for j in range(tn_c)]
+      wf_hi[-1] = _nat("({{ unsigned int _v = ({0}); __builtin_amdgcn_sched_barrier(0); if ({1}) __builtin_amdgcn_s_setprio(0); _v; }})",
+                       dtypes.uint32, wf_hi[-1], step_r.eq(0), inline=False)
+      wm_i = UOp.range(tm, 101)
+      a_f8 = UOp.stack(af_r[wm_i, step_r, 0].load(), af_r[wm_i, step_r, 1].load()).bitcast(dtypes.fp8e4m3)
+      return UOp.group(*[acc[wm_i, j].store(UOp.wmma(a_f8, UOp.stack(wf_lo[j], wf_hi[j]).bitcast(dtypes.fp8e4m3),
+                         acc.after(init_done, kt, res_done, step_r)[wm_i, j], *WMMA_ARG))
+                         for j in range(tn_c)]).end(wm_i)
+    b_end = _by_tn(_wmma_128).end(step_r, r_wm, kt)
+
+  acc_f = acc.after(b_end)
+  # Publish final register ref_r -> sRef ONCE for epilogue (via _nat store + _lds_barrier)!
+  r_sf = UOp.range(bg.eq(0).cast(dtypes.weakint), 185)
+  sRef_done = _lds_barrier(sink_r, _lds_st1(sRef.after(b_end, r_sf)[bn_i], ref_r.after(b_end, r_sf)[0].load(), sink_r, b_end, r_sf).end(r_sf), bid=4)
+  is_mx = (ggml_type == MXFP4) if isinstance(ggml_type, int) else ggml_type.eq(MXFP4)
+  sRef_u_f = sRef.after(sRef_done)
+  ti_o, e_o = UOp.range(tm, 190), UOp.range(8, 192, AxisType.UPCAST)
+  mt_o = (mt_base + ti_o).minimum(m_tiles_tot - 1)
+  om = block_m * bm + (wave_m * tm + ti_o) * 16 + lg * 8 + e_o
+  xs_o = xsc[mt_o, lg * 8 + e_o].load()
+  def _ep_tn(tn_c:int) -> UOp:
+    w_sc = [(is_mx.where(_e8m0_halved(sRef_u_f[(wave_n * tn_c + j) * 16 + col].load()) * UOp.const(1.0 / 16.0, dtypes.float32),
+                         sRef_u_f[(wave_n * tn_c + j) * 16 + col].load().bitcast(dtypes.float32)) if isinstance(is_mx, UOp) else
+             (_e8m0_halved(sRef_u_f[(wave_n * tn_c + j) * 16 + col].load()) * UOp.const(1.0 / 16.0, dtypes.float32) if is_mx else
+              sRef_u_f[(wave_n * tn_c + j) * 16 + col].load().bitcast(dtypes.float32))) for j in range(tn_c)]
+    return UOp.group(*[out[om.valid(om < tok_out), (block_n * bn + (wave_n * tn_c + j) * 16 + col).valid(
+      (block_n * bn + (wave_n * tn_c + j) * 16 + col) < out_features)].store(
+      (acc_f[ti_o, j, e_o].load() * w_sc[j] * xs_o).cast(out.dtype)) for j in range(tn_c)])
+  ep_group = _by_tn(_ep_tn).end(e_o)
+  if bk == 64: ep_group = _sched_barrier(sink_r, ep_group, bid=12)
+  kname = f"linear_{QUANT_NAMES[ggml_type]}_fp8_wmma" if isinstance(ggml_type, int) else "linear_quant_fp8_wmma"
+  return ep_group.end(ti_o, wave, lane, gid).sink(arg=KernelInfo(name=kname, opts_to_apply=()))

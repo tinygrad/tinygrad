@@ -133,19 +133,29 @@ def _b_gemm(kg:int, ln:int) -> UOp:
   if kg != 2:
     return _gguf._quant_linear_f16_wmma_kernel(p_out, p_raw, p_x, p_grid, m_blks=mb, m_tiles=mt, out_features=outf, in_features=inf,
                                                ggml_type=qt, kgroups=kg, lanes=ln)
-  # RDNA4: 2-kernel OTF FP8 2D WMMA (M>=64, N>=2048) -> ZLDS F16 -> F16 WMMA
-  mt_tot, kt_d = mb * mt, (inf // 128).maximum(1)
-  xt_d, xsc_d = UOp.alloc((mt_tot, kt_d * 8, 32, 2), dtypes.uint32, slot=0), UOp.alloc((mt_tot, kt_d, 16), dtypes.float32, slot=1)
-  k_qxd = _gguf._rdna4_quant_x_frag_kernel(_p(0, (mt_tot, kt_d * 8, 32, 2), "u32"), _p(1, (mt_tot, kt_d, 16), "f32"),
-                                           _p(2, (tok, kt_d * 128), "f16"), use_moe=False, x_share=1)
-  k_fp8d = _gguf._rdna4_gemm_fp8_kernel(_p(0, (tok, outf), "f32"), _p(1, (rb,), "u8"), _p(2, (mt_tot, kt_d * 8, 32, 2), "u32"),
-                                        _p(3, (mt_tot, kt_d, 16), "f32"), _p(4, (gl,), "u32"), out_features=outf, in_features=kt_d * 128,
-                                        ggml_type=qt, use_moe=False, use_128=tok >= 256, qtypes=tuple(sorted(_gguf.OTF_FP8_QUANTS)))
-  cqd = k_qxd.call(xt_d, xsc_d, p_x)
-  k_fp8_pipe = UOp.sink(k_fp8d.call(p_out, p_raw, xt_d.after(cqd), xsc_d.after(cqd), p_grid))
+  # RDNA4: 3-stage OTF FP8 2D WMMA (M>=64, N>=2048): row_amax -> quant_apply -> dense FP8 WMMA -> ZLDS F16 -> F16 WMMA
+  mt_tot, kc_d = mb * mt, (inf // 256).maximum(1)
+  xt_d, xsc_d = UOp.alloc((mt_tot, kc_d * 16, 32, 2), dtypes.uint32, slot=0), UOp.alloc((mt_tot, 16), dtypes.float32, slot=1)
+  k_ramax = _gguf._rdna4_row_amax_kernel(_p(0, (mt_tot, 16), "f32"), _p(1, (tok, kc_d * 256), "f16"))
+  k_qapp = _gguf._rdna4_quant_x_apply_kernel(_p(0, (mt_tot, kc_d * 16, 32, 2), "u32"), _p(1, (mt_tot, 16), "f32"),
+                                             _p(2, (tok, kc_d * 256), "f16"))
+  fp8_qts = tuple(sorted(_gguf.OTF_FP8_QUANTS))
+  p_fp8 = (_p(0, (tok, outf), "f32"), _p(1, (rb,), "u8"), _p(2, (mt_tot, kc_d * 16, 32, 2), "u32"),
+           _p(3, (mt_tot, 16), "f32"), _p(4, (gl,), "u32"))
+  use_m = tok >= 256
+  k_fp8_sm = _gguf._rdna4_gemm_fp8_dense_kernel(*p_fp8, out_features=outf, in_features=kc_d * 256,
+                                                ggml_type=qt, wm=use_m.where(4, 2), tm=4, tn=use_m.where(2, 1), bk=128, qtypes=fp8_qts)
+  k_fp8_w = _gguf._rdna4_gemm_fp8_dense_kernel(*p_fp8, out_features=outf, in_features=kc_d * 256,
+                                               ggml_type=qt, wm=8, tm=4, tn=4, bk=64, qtypes=fp8_qts)
+  cra = k_ramax.call(xsc_d, p_x)
+  xsc_r = xsc_d.after(cra)
+  cqa = k_qapp.call(xt_d, xsc_r, p_x)
+  xt_r = xt_d.after(cqa)
+  k_fp8_pipe = UOp(Ops.WHERE, src=((tok >= 1024),
+                                   UOp.sink(k_fp8_w.call(p_out, p_raw, xt_r, xsc_r, p_grid)),
+                                   UOp.sink(k_fp8_sm.call(p_out, p_raw, xt_r, xsc_r, p_grid))))
   is_otf = _gguf._qswitch(qt, [(q, UOp.const(q in _gguf.OTF_FP8_QUANTS, dtypes.bool)) for q in _gguf.QUANT_NAMES])
-  k_align = (qt.eq(_gguf.Q8_0) | qt.eq(_gguf.MXFP4)).where(128, 256)
-  cond_fp8 = is_otf & (tok >= 64) & (outf >= 2048) & (outf % 128).eq(0) & (inf >= 512) & (inf % k_align).eq(0)
+  cond_fp8 = is_otf & (tok >= 64) & (outf >= 2048) & (outf % 128).eq(0) & (inf >= 512) & (inf % 256).eq(0)
   k_sb = inf // 256
   wk_z, tn_z = ((k_sb >= 4) & (k_sb % 4).eq(0)).where(4, ((k_sb >= 2) & (k_sb % 2).eq(0)).where(2, 1)), (outf >= 32).where(2, 1)
   k_zlds = _gguf._rdna4_zlds_f16_kernel(p_out, p_raw, p_x, p_grid, tok=tok, out_features=outf, in_features=inf,
