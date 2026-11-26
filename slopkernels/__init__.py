@@ -70,7 +70,7 @@ def _b_qgemv() -> UOp:
     return base + is_moe.where(expert(row).maximum(0).minimum(local_experts - 1), 0) * (outf * inf * (_gguf.QUANT_SIZES[q] // isz) // 256)
   k_direct = _gguf._direct_gemv_body(
     p_out, p_raw, p_x, (p_grid,), outf, inf, qt, rpw=rpw, wk_cap=wk_cap, w1_cond=w1,
-    aligned4=False, lds_grid=True, group_rows=gr, gate=_gate,
+    lds_grid=True, group_rows=gr, gate=_gate,
     xtoken=lambda row: row // xs, row_mask=lambda row: is_moe.logical_not() | ((expert(row) >= 0) & (expert(row) < local_experts)))
   # 2-kernel SDOT4 pipeline for dense small-batch (4..15 tokens) on RDNA3/4
   xq, xds = UOp.alloc((tok, inf // 32, 8), dtypes.uint32, slot=0), UOp.alloc((tok, inf // 32, 3), dtypes.float32, slot=1)
@@ -80,7 +80,7 @@ def _b_qgemv() -> UOp:
   wr_s = is_iq3x.where((outf % 4).eq(0).where(4, 1), (outf % 8).eq(0).where(8, (outf % 4).eq(0).where(4, 1)))
   k_sd = _gguf._sdot4_gemv_kernel(_p(0, (tok, outf), "f32"), _p(1, (rb,), "u8"), _p(2, (tok, inf // 32, 8), "u32"),
                                   _p(3, (tok, inf // 32, 3), "f32"), (_p(4, (gl,), "u32"),), outf, inf, qt,
-                                  w_rows=wr_s, waves_k=wk_s, aligned4=False, group_rows=gr)
+                                  w_rows=wr_s, waves_k=wk_s, group_rows=gr)
   cq8 = k_q8.call(xq, xds, p_x)
   k_sdot4_pipe = UOp.sink(k_sd.call(p_out, p_raw, xq.after(cq8), xds.after(cq8), p_grid))
   eff_tok = (gr > 0).where(gr, tok)
@@ -95,12 +95,12 @@ def _b_qgemv() -> UOp:
                                      _p(3, (max_tiles,), "i32"), _p(4, (1,), "i32"), _p(5, (tok,), "i32"), num_experts=ne_safe, ndev=nd)
   k_qxm = _gguf._rdna4_quant_x_frag_kernel(_p(0, (max_tiles, kt_m * 8, 32, 2), "u32"), _p(1, (max_tiles, kt_m, 16), "f32"),
                                            _p(2, (xrows, kt_m * 128), "f32"), _p(3, (tok,), "i32"), _p(4, (max_tiles,), "i32"),
-                                           _p(5, (max_tiles,), "i32"), _p(6, (1,), "i32"), use_moe=True, x_share=xs)
+                                           _p(5, (max_tiles,), "i32"), _p(6, (1,), "i32"), x_share=xs)
   k_fp8m = _gguf._rdna4_gemm_fp8_kernel(_p(0, (tok, outf), "f32"), _p(1, (rb,), "u8"), _p(2, (max_tiles, kt_m * 8, 32, 2), "u32"),
                                         _p(3, (max_tiles, kt_m, 16), "f32"), _p(4, (gl,), "u32"), _p(5, (tok,), "i32"),
                                         _p(6, (max_tiles,), "i32"), _p(7, (max_tiles,), "i32"), _p(8, (max_tiles,), "i32"),
                                         _p(9, (1,), "i32"), out_features=outf, in_features=kt_m * 128, ggml_type=qt,
-                                        use_moe=True, use_128=False, qtypes=tuple(sorted(_gguf.OTF_FP8_QUANTS)))
+                                        qtypes=tuple(sorted(_gguf.OTF_FP8_QUANTS)))
   cr = k_rt.call(t_idx, t_exp, t_off, t_cnt, t_tot, p_sel)
   t_idx, t_exp, t_off, t_cnt, t_tot = (a.after(cr) for a in (t_idx, t_exp, t_off, t_cnt, t_tot))
   cqm = k_qxm.call(xt_m, xsc_m, p_x, t_idx, t_off, t_cnt, t_tot)

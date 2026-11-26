@@ -428,69 +428,66 @@ def _amd_flash_attention_smallm(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_
   return ep.end(lane, wn, block_m_raw, block_bh).sink(arg=KernelInfo(name="rdna3_flash_attn_smallm", opts_to_apply=()))
 
 @functools.cache
-def _rdna4_fa_lo(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:UOp, d_blks:UOp, qm:int=1) -> UOp:
-  # DSPLIT=1 RDNA4 kernel: 8W, TN=2 (TILE=32), 100% K/V pipelined, 2 barriers/tile, per-tni P_reg -> 0 VGPR spills on ALL shapes!
-  # qm=2 (D<=128): 2.0 WMMAs/ds_load (halves LDS BW!), f_buf(1,4) in QK + P_reg(2,4) per tni -> <=250 VGPRs, 0 spills!
-  # qm=1 (D=192,256): 8W, f_buf(4,4) + P_reg(4,) per tni -> <=251 VGPRs, 0 spills!
+def _rdna4_fa_kernel(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:UOp, d_blks:UOp, qm:int=1, ds2:bool=False) -> UOp:
+  # Unified RDNA4 FlashAttention kernel (qm=2 D<=128, qm=1 D=192..256, ds2=True D>=320 or D=256 GQA%6==0):
+  # 100% K/V pipelined (global_load_tr_b128 for V), 2 barriers/tile, <=251 VGPRs, 0 spills across all shapes.
   valid_kv_len, q_start, (BH, M, D), (_, B, H_KV, physical_n, _) = _unbind(valid_kv_len), _unbind(q_start), q.shape, cache.shape
   assert isinstance(BH, UOp) and isinstance(M, UOp) and isinstance(D, UOp) and isinstance(B, UOp) and isinstance(H_KV, UOp)
-  zf = UOp.const(0.0, dtypes.float32)
+  zf, tn, waves_d = UOp.const(0.0, dtypes.float32), 1 if ds2 else 2, 2 if ds2 else 1
   gqa_group, m_qm_tot = BH // (B * H_KV), M // (qm * 16)
-  gqa_w = (gqa_group % 8).eq(0).where(8, (gqa_group % 4).eq(0).where(4, (gqa_group % 3).eq(0).where(3, (gqa_group % 2).eq(0).where(2, 1))))
-  n_hg, max_wph = BH // gqa_w, (8 // gqa_w).maximum(1)
-  if qm == 2:
-    w_per_head = ((max_wph >= 8) & (m_qm_tot % 8).eq(0) & (n_hg * (m_qm_tot // 8) >= 64)).where(8,
-                 ((max_wph >= 4) & (m_qm_tot % 4).eq(0) & (n_hg * (m_qm_tot // 4) >= 64)).where(4,
-                 ((max_wph >= 2) & (m_qm_tot % 2).eq(0) & (n_hg * (m_qm_tot // 2) >= 64)).where(2, 1)))
+  gqa_w4 = (gqa_group % 4).eq(0).where(4, (gqa_group % 3).eq(0).where(3, (gqa_group % 2).eq(0).where(2, 1)))
+  if ds2:
+    is_g6 = (d_blks <= 4) & (gqa_group % 6).eq(0)
+    gqa_w = is_g6.where(6, gqa_w4)
+    max_wph = (is_g6.where(12, 8) // (gqa_w * 2)).maximum(1)
   else:
-    w_per_head = ((max_wph >= 8) & (m_qm_tot % 8).eq(0)).where(8,
-                 ((max_wph >= 4) & (m_qm_tot % 4).eq(0)).where(4,
-                 ((max_wph >= 2) & (m_qm_tot % 2).eq(0)).where(2, 1)))
-  total_waves, block_m_sz, block_n_sz = gqa_w * w_per_head, w_per_head * qm * WMMA_M, 2 * WMMA_N
-  threads, m_blks_eff, TD = total_waves * WARP_SIZE, M // block_m_sz, d_blks * 4
-  KSTR_8, VSTR_8 = d_blks * 8 + 1, 5
-  DG, KGRP = d_blks * 8, 4
+    gqa_w = (gqa_group % 8).eq(0).where(8, gqa_w4)
+    max_wph = (8 // gqa_w).maximum(1)
+  n_hg = BH // gqa_w
+  def _wph_ok(k:int) -> UOp:
+    c = (max_wph >= k) & (m_qm_tot % k).eq(0)
+    return (c & (n_hg * (m_qm_tot // k) >= 64)) if qm == 2 else c
+  w_per_head = _wph_ok(8).where(8, _wph_ok(4).where(4, _wph_ok(2).where(2, 1)))
+  total_waves, block_m_sz, block_n_sz = gqa_w * w_per_head * waves_d, w_per_head * qm * WMMA_M, tn * WMMA_N
+  threads, m_blks_eff, TD_w = total_waves * WARP_SIZE, M // block_m_sz, (d_blks * 4) // waves_d
+  KSTR_8, VSTR_8, DG, KGRP = d_blks * 8 + 1, 3 if ds2 else 5, d_blks * 8, 2 if ds2 else 4
   KITEMS, NTR, LGRP = block_n_sz * DG, KGRP * DG, threads // 8
   KP, VP = (KITEMS + threads - 1) // threads, (NTR + LGRP - 1) // LGRP
-  KVP = KP.maximum(VP)
-  SCALE_L2 = D.cast(dtypes.float32).rsqrt() * LOG2E
+  KVP, SCALE_L2 = KP.maximum(VP), D.cast(dtypes.float32).rsqrt() * LOG2E
 
-  if qm == 2:
-    block_hg, block_m_raw = UOp.range(n_hg, 1, AxisType.GLOBAL), UOp.range(m_blks_eff, 0, AxisType.GLOBAL)
-  else:
-    block_hg, block_m_raw = UOp.range(n_hg, 0, AxisType.GLOBAL), UOp.range(m_blks_eff, 1, AxisType.GLOBAL)
+  ax_hg, ax_m = (1, 0) if qm == 2 else (0, 1)
+  block_hg, block_m_raw = UOp.range(n_hg, ax_hg, AxisType.GLOBAL), UOp.range(m_blks_eff, ax_m, AxisType.GLOBAL)
   block_m = m_blks_eff - 1 - block_m_raw
-  wave, lane = UOp.range(total_waves, 2, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP)
-  tid = wave * WARP_SIZE + lane
+  wave_tot, lane = UOp.range(total_waves, 2, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP)
+  wave, wd = (wave_tot // 2, wave_tot % 2) if ds2 else (wave_tot, UOp.const(0, dtypes.weakint))
+  tid = wave_tot * WARP_SIZE + lane
   lane_g, lane_c, vj, lgi = lane // 16, lane % 16, tid & 7, tid >> 3
   g_idx, qbi = wave % gqa_w, wave // gqa_w
   block_bh, kv_head = block_hg * gqa_w + g_idx, block_hg // (gqa_group // gqa_w)
-  m_base = block_m * block_m_sz + qbi * qm * 16
+  m_base, td_base = block_m * block_m_sz + qbi * qm * 16, wd * TD_w
 
   q_u32, k_u32 = q.flatten().bitcast(dtypes.uint32), cache.flatten().bitcast(dtypes.uint32)
   v_flat, v_base_h = cache.flatten(), B * H_KV * physical_n * D
-  q_reg_u32, qv_b = UOp.alloc((qm, TD, 4), dtypes.uint32, addrspace=AddrSpace.REG), UOp.alloc((4,), dtypes.uint32, addrspace=AddrSpace.REG)
-  qi_q, kq_i, p_q = UOp.range(qm, 9), UOp.range(TD, 10), UOp.range(4, 11)
+  q_reg_u32, qv_b = UOp.alloc((qm, TD_w, 4), dtypes.uint32, addrspace=AddrSpace.REG), UOp.alloc((4,), dtypes.uint32, addrspace=AddrSpace.REG)
+  qi_q, kq_i, p_q = UOp.range(qm, 9), UOp.range(TD_w, 10), UOp.range(4, 11)
   qv_r = qv_b.after(qv_b.after(qi_q, kq_i).store(
-    _amd_load(q_u32[(block_bh * M + m_base + qi_q * 16 + lane_c) * (d_blks * 32) + kq_i * 8 + lane_g * 4], 4)))
+    _amd_load(q_u32[(block_bh * M + m_base + qi_q * 16 + lane_c) * (d_blks * 32) + (td_base + kq_i) * 8 + lane_g * 4], 4)))
   hq = qv_r[p_q].load().reshape((1,)).bitcast(dtypes.half)
   q_reg = q_reg_u32.after(q_reg_u32[qi_q, kq_i, p_q].store(
     _cvt_pk_f16(hq[0].float() * SCALE_L2, hq[1].float() * SCALE_L2, inline=False)).end(p_q, kq_i, qi_q))
 
   sK = UOp.alloc((block_n_sz * KSTR_8 * 8,), dtypes.half, addrspace=AddrSpace.LOCAL)
   sV = UOp.alloc((D * VSTR_8 * 8,), dtypes.half, addrspace=AddrSpace.LOCAL)
-  acc, m_i, l_i = _reg((qm, TD, 8), 0.0), _reg((qm,), -1e30), _reg((qm,), 0.0)
-  al_reg = UOp.alloc((qm,), dtypes.float32, addrspace=AddrSpace.REG)
-  S_reg_buf = UOp.alloc((qm, 2, 8), dtypes.float32, addrspace=AddrSpace.REG)
-  P_reg_u32 = UOp.alloc((qm, 2, 4), dtypes.uint32, addrspace=AddrSpace.REG)
+  sX = UOp.alloc((total_waves * WARP_SIZE * 8,), dtypes.float32, addrspace=AddrSpace.LOCAL) if ds2 else None
+  acc, m_i, l_i = _reg((qm, TD_w, 8), 0.0), _reg((qm,), -1e30), _reg((qm,), 0.0)
+  al_reg, S_reg_buf = UOp.alloc((qm,), dtypes.float32, addrspace=AddrSpace.REG), UOp.alloc((qm, tn, 8), dtypes.float32, addrspace=AddrSpace.REG)
+  P_reg_u32 = UOp.alloc((qm, tn, 4), dtypes.uint32, addrspace=AddrSpace.REG)
   f_buf_u32 = UOp.alloc((2 if qm == 2 else 4, 4), dtypes.uint32, addrspace=AddrSpace.REG)
-  kv_reg = UOp.alloc((KVP, 4), dtypes.uint32, addrspace=AddrSpace.REG)
-  tok = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
+  kv_reg, tok = UOp.alloc((KVP, 4), dtypes.uint32, addrspace=AddrSpace.REG), UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
 
-  kv_max = (valid_kv_len - 1).maximum(0)
+  kv_max, one_h2 = (valid_kv_len - 1).maximum(0), UOp.const(0x3c003c00, dtypes.uint32)
   n_end_all = ((q_start + (block_m + 1) * block_m_sz).minimum(valid_kv_len) + block_n_sz - 1) // block_n_sz
   n_full = ((q_start + block_m * block_m_sz + 1).minimum(valid_kv_len) // block_n_sz).minimum(n_end_all)
-  one_h2 = UOp.const(0x3c003c00, dtypes.uint32)
 
   p_k0 = UOp.range(KP, 20)
   i_k0 = tid + p_k0 * threads
@@ -514,25 +511,36 @@ def _rdna4_fa_lo(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:UOp, d_bl
   vr_ld0 = tok.after(k0_b, ti)[0].store(vr_call).end(r_v)
   vr_ld = m_i[0].store(_sb0(m_i.after(k0_b, ti, vr_ld0)[0].load()))
 
+  def _lds_wmma_loop(n_it:UOp, n_f:int, rid:int, dep:UOp, ld_fn, wmma_fn) -> UOp:
+    r_i = UOp.range(n_it, rid)
+    st = UOp.group(*(f_buf_u32.after(dep, r_i)[j].store(ld_fn(r_i, j)) for j in range(n_f)))
+    sb = UOp.group(st, f_buf_u32[0, 0].store(_sb0(f_buf_u32.after(st)[0, 0].load())))
+    fr, wt = f_buf_u32.after(sb), sb
+    return wmma_fn(r_i, fr, wt).end(r_i)
+
   S_reg = S_reg_buf.after(S_reg_buf.after(k0_b, ti, vr_ld).store(S_reg_buf.const_like(0.0)))
-  if qm == 2:
-    k_r = UOp.range(TD, 111)
-    kf_st = UOp.group(*(f_buf_u32.after(S_reg, k_r)[tni].store(K_lds_u32[tni * 16 + lane_c, k_r * 2 + lane_g].load()) for tni in range(2)))
-    kf_sb = UOp.group(kf_st, f_buf_u32[0, 0].store(_sb0(f_buf_u32.after(kf_st)[0, 0].load())))
-    kf_r, wt = f_buf_u32.after(kf_sb), kf_sb
-    for tni in range(2):
-      for qi in range(2): wt = _wmma_u4(kf_r[tni, 0], q_reg[qi, k_r, 0], S_reg.after(wt)[qi, tni, 0], tok, wt)
-    qk_done = wt.end(k_r)
+  if ds2:
+    n_b4, n_r2 = TD_w // 4, (TD_w % 4) // 2
+    def _qk_ds2(n_it:UOp, un:int, base:int|UOp, rid:int, dep:UOp) -> UOp:
+      def _w(r_i, fr, wt):
+        for j in range(un): wt = _wmma_u4(fr[j, 0], q_reg[0, base + r_i * un + j, 0], S_reg.after(dep, wt)[0, 0, 0], tok, wt)
+        return wt
+      return _lds_wmma_loop(n_it, un, rid, dep, lambda r_i, j: K_lds_u32.after(r_i)[lane_c, (td_base + base + r_i * un + j) * 2 + lane_g].load(), _w)
+    qk_d4 = _qk_ds2(n_b4, 4, 0, 111, S_reg)
+    qk_done = UOp.group(qk_d4, _qk_ds2(n_r2, 2, n_b4 * 4, 112, qk_d4))
+  elif qm == 2:
+    def _qk_qm2(r_i, fr, wt):
+      for tni in range(2):
+        for qi in range(2): wt = _wmma_u4(fr[tni, 0], q_reg[qi, r_i, 0], S_reg.after(wt)[qi, tni, 0], tok, wt)
+      return wt
+    qk_done = _lds_wmma_loop(TD_w, 2, 111, S_reg, lambda r_i, tni: K_lds_u32[tni * 16 + lane_c, r_i * 2 + lane_g].load(), _qk_qm2)
   else:
-    k2 = UOp.range(TD // 2, 111)
-    kf_st = UOp.group(*(f_buf_u32.after(S_reg, k2)[j * 2 + tni].store(K_lds_u32[tni * 16 + lane_c, (k2 * 2 + j) * 2 + lane_g].load())
-                        for j in range(2) for tni in range(2)))
-    kf_sb = UOp.group(kf_st, f_buf_u32[0, 0].store(_sb0(f_buf_u32.after(kf_st)[0, 0].load())))
-    kf_r, wt = f_buf_u32.after(kf_sb), kf_sb
-    for j in range(2):
-      w0 = _wmma_u4(kf_r[j * 2, 0], q_reg[0, k2 * 2 + j, 0], S_reg.after(wt)[0, 0, 0], tok, wt)
-      wt = _wmma_u4(kf_r[j * 2 + 1, 0], q_reg[0, k2 * 2 + j, 0], S_reg.after(w0)[0, 1, 0], tok, w0)
-    qk_done = wt.end(k2)
+    def _qk_qm1(r_i, fr, wt):
+      for j in range(2):
+        for tni in range(2): wt = _wmma_u4(fr[j * 2 + tni, 0], q_reg[0, r_i * 2 + j, 0], S_reg.after(wt)[0, tni, 0], tok, wt)
+      return wt
+    qk_done = _lds_wmma_loop(TD_w // 2, 4, 111, S_reg,
+                             lambda r_i, k: K_lds_u32[(k % 2) * 16 + lane_c, (r_i * 2 + k // 2) * 2 + lane_g].load(), _qk_qm1)
 
   vr_r = kv_reg.after(qk_done, vr_ld)
   sV_u32 = sV.after(qk_done, vr_ld).bitcast(dtypes.uint32).reshape(D, VSTR_8, 4)
@@ -543,10 +551,20 @@ def _rdna4_fa_lo(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:UOp, d_bl
     u_vs = lgi + r_i * LGRP
     ok_vs, u_vss = (r_i < VP) & (u_vs < NTR), u_vs.minimum(NTR - 1)
     st_vs.append(sV_u32[((u_vss // KGRP) * 8 + vj).valid(ok_vs), u_vss % KGRP].store(vr_r[r_i.minimum(KVP - 1)].load()))
-  b_mid = UOp.group(*st_vs).end(r_vs).barrier()
+  st_v = UOp.group(*st_vs).end(r_vs)
+  if ds2:
+    assert sX is not None
+    e_w1 = UOp.range(8, 116, AxisType.UPCAST)
+    st_sx = sX.after(qk_done)[(wave_tot * WARP_SIZE + lane) * 8 + e_w1].store(S_reg.after(qk_done)[0, 0, e_w1].load()).end(e_w1)
+    b_mid = UOp.group(st_v, st_sx).barrier()
+    e_w2, peer_w = UOp.range(8, 117, AxisType.UPCAST), wave_tot ^ UOp.const(1, dtypes.weakint)
+    s_dep = S_reg[0, 0, e_w2].store(S_reg.after(b_mid)[0, 0, e_w2].load() + sX.after(b_mid)[(peer_w * WARP_SIZE + lane) * 8 + e_w2].load()).end(e_w2)
+    S_cur = S_reg.after(s_dep)
+  else:
+    b_mid = s_dep = st_v.barrier()
+    S_cur = S_reg.after(qk_done, b_mid)
 
-  S_cur = S_reg.after(qk_done, b_mid)
-  r_cm, tn_m, e_m = UOp.range((ti >= n_full).cast(dtypes.weakint), 118), UOp.range(2, 119), UOp.range(8, 120, AxisType.UPCAST)
+  r_cm, tn_m, e_m = UOp.range((ti >= n_full).cast(dtypes.weakint), 118), UOp.range(tn, 119), UOp.range(8, 120, AxisType.UPCAST)
   k_idx = k0 + tn_m * 16 + lane_g * 8 + e_m
   S_cur = S_reg.after(UOp.group(*(S_reg[qi, tn_m, e_m].store(
     ((k_idx <= q_start + m_base + qi * 16 + lane_c) & (k_idx < valid_kv_len)).where(
@@ -554,33 +572,32 @@ def _rdna4_fa_lo(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:UOp, d_bl
 
   need_g = UOp.const(False, dtypes.bool)
   for qi in range(qm):
-    smax = _tree_fmax([S_cur[qi, tni, e].load() for tni in range(2) for e in range(8)])
-    need_g = need_g | (smax > (m_i.after(ti, b_mid)[qi].load() + UOp.const(14.0, dtypes.float32)))
+    smax = _tree_fmax([S_cur[qi, tni, e].load() for tni in range(tn) for e in range(8)])
+    need_g = need_g | (smax > (m_i.after(ti, s_dep)[qi].load() + UOp.const(14.0, dtypes.float32)))
   r_grow = UOp.range(_nat("(__builtin_amdgcn_ballot_w32({0}) != 0u)", dtypes.bool, need_g).cast(dtypes.weakint), 121)
   g_sts = []
   for qi in range(qm):
-    m_p = m_i.after(ti, b_mid, r_grow)[qi].load()
-    sm_i = _tree_fmax([S_cur.after(r_grow)[qi, tni, e].load() for tni in range(2) for e in range(8)])
+    m_p = m_i.after(ti, s_dep, r_grow)[qi].load()
+    sm_i = _tree_fmax([S_cur.after(r_grow)[qi, tni, e].load() for tni in range(tn) for e in range(8)])
     rm = _fast_fmax(sm_i, _lane_xor(sm_i, 16, inline=False, dpp=True))
     m_n = _fast_fmax(_fast_fmax(m_p, rm), UOp.const(-1e30, dtypes.float32))
     al_s = al_reg.after(r_grow)[qi].store(_fast_exp2(m_p - m_n))
     al = al_reg.after(al_s)[qi].load()
-    td_a, e_a = UOp.range(TD, 122 + qi * 2), UOp.range(8, 123 + qi * 2, AxisType.UPCAST)
+    td_a, e_a = UOp.range(TD_w, 122 + qi * 2), UOp.range(8, 123 + qi * 2, AxisType.UPCAST)
     g_sts += [
-      acc[qi, td_a, e_a].store(acc.after(ti, b_mid, al_s)[qi, td_a, e_a].load() * al).end(e_a, td_a),
-      l_i.after(al_s)[qi].store(l_i.after(ti, b_mid, al_s)[qi].load() * al),
+      acc[qi, td_a, e_a].store(acc.after(ti, s_dep, al_s)[qi, td_a, e_a].load() * al).end(e_a, td_a),
+      l_i.after(al_s)[qi].store(l_i.after(ti, s_dep, al_s)[qi].load() * al),
       m_i.after(al_s)[qi].store(m_n),
     ]
   acc_res = UOp.group(*g_sts).end(r_grow)
 
-  k0_next = (ti + 1) * block_n_sz
-  p_k = UOp.range(KP, 101)
+  k0_next, p_k = (ti + 1) * block_n_sz, UOp.range(KP, 101)
   i_k = (tid + p_k * threads).minimum(KITEMS - 1)
   kv_u = _amd_load(k_u32[(kv_head * physical_n + (k0_next + i_k // DG).minimum(kv_max)) * (d_blks * 32) + (i_k % DG) * 4], 4)
   kr_ld0 = kv_reg.after(b_mid, acc_res)[p_k].store(kv_u).end(p_k)
   kr_ld = UOp.group(kr_ld0, l_i[0].store(_sb0(l_i.after(acc_res, kr_ld0)[0].load())))
 
-  qi_p, tni_p, j_p = UOp.range(qm, 130), UOp.range(2, 131), UOp.range(4, 132)
+  qi_p, tni_p, j_p = UOp.range(qm, 130), UOp.range(tn, 131), UOp.range(4, 132)
   m_cur = m_i.after(acc_res, kr_ld)[qi_p].load()
   pk = _cvt_pk_f16(_fast_exp2(S_cur[qi_p, tni_p, 2 * j_p].load() - m_cur),
                    _fast_exp2(S_cur[qi_p, tni_p, 2 * j_p + 1].load() - m_cur), inline=False)
@@ -588,24 +605,24 @@ def _rdna4_fa_lo(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:UOp, d_bl
                      l_i[qi_p].store(_amd_fdot2(pk, one_h2, l_i.after(acc_res, kr_ld, qi_p, tni_p, j_p)[qi_p].load()))).end(j_p, tni_p, qi_p)
 
   V_lds_u32, p_frag = sV.after(b_mid, p_done).bitcast(dtypes.uint32).reshape(D, VSTR_8, 4), P_reg_u32.after(p_done)
-  pv_t = p_done
-  for tni in range(2):
-    if qm == 2:
-      t2_v = UOp.range(TD // 2, 126 + tni)
-      vf_st = UOp.group(*(f_buf_u32.after(pv_t, t2_v)[j].store(V_lds_u32[(t2_v * 2 + j) * 16 + lane_c, tni * 2 + lane_g].load()) for j in range(2)))
-      vf_sb = UOp.group(vf_st, f_buf_u32[0, 0].store(_sb0(f_buf_u32.after(vf_st)[0, 0].load())))
-      vf_r, w_t = f_buf_u32.after(vf_sb), vf_sb
-      for j in range(2):
-        for qi in range(2): w_t = _wmma_u4(vf_r[j, 0], p_frag[qi, tni, 0], acc.after(pv_t, t2_v, w_t)[qi, t2_v * 2 + j, 0], tok, w_t)
-      pv_t = w_t.end(t2_v)
-    else:
-      t4_v = UOp.range(TD // 4, 126 + tni)
-      vf_st = UOp.group(*(f_buf_u32.after(pv_t, t4_v)[j].store(V_lds_u32[(t4_v * 4 + j) * 16 + lane_c, tni * 2 + lane_g].load()) for j in range(4)))
-      vf_sb = UOp.group(vf_st, f_buf_u32[0, 0].store(_sb0(f_buf_u32.after(vf_st)[0, 0].load())))
-      vf_r, w_t = f_buf_u32.after(vf_sb), vf_sb
-      for j in range(4): w_t = _wmma_u4(vf_r[j, 0], p_frag[0, tni, 0], acc.after(pv_t, t4_v, w_t)[0, t4_v * 4 + j, 0], tok, w_t)
-      pv_t = w_t.end(t4_v)
-  pv_done = pv_t
+  if ds2:
+    def _pv_ds2(n_it:UOp, un:int, base:int|UOp, rid:int, dep:UOp) -> UOp:
+      def _w(r_i, fr, wt):
+        for j in range(un): wt = _wmma_u4(fr[j, 0], p_frag[0, 0, 0], acc.after(dep, r_i, wt)[0, base + r_i * un + j, 0], tok, wt)
+        return wt
+      return _lds_wmma_loop(n_it, un, rid, dep, lambda r_i, j: V_lds_u32.after(r_i)[(td_base + base + r_i * un + j) * 16 + lane_c, lane_g].load(), _w)
+    pv_d4 = _pv_ds2(n_b4, 4, 0, 125, p_done)
+    pv_done = UOp.group(pv_d4, _pv_ds2(n_r2, 2, n_b4 * 4, 126, pv_d4))
+  else:
+    pv_t, un_v = p_done, 2 if qm == 2 else 4
+    for tni in range(2):
+      def _pv_lo(r_i, fr, wt, tni=tni, pv_t=pv_t):
+        for j in range(un_v):
+          for qi in range(qm): wt = _wmma_u4(fr[j, 0], p_frag[qi, tni, 0], acc.after(pv_t, r_i, wt)[qi, r_i * un_v + j, 0], tok, wt)
+        return wt
+      pv_t = _lds_wmma_loop(TD_w // un_v, un_v, 126 + tni, pv_t,
+                            lambda r_i, j, tni=tni: V_lds_u32[(r_i * un_v + j) * 16 + lane_c, tni * 2 + lane_g].load(), _pv_lo)
+    pv_done = pv_t
 
   kr_r = kv_reg.after(pv_done, kr_ld)
   sK_u32 = sK.after(pv_done, kr_ld).bitcast(dtypes.uint32).reshape(block_n_sz, KSTR_8, 4)
@@ -618,189 +635,12 @@ def _rdna4_fa_lo(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:UOp, d_bl
   loop_done = UOp.group(*st_ks).end(p_ks).barrier().end(ti)
 
   acc_f, l_f = acc.after(loop_done), l_i.after(loop_done)
-  qi_o, td_o, e_o = UOp.range(qm, 299), UOp.range(TD, 300), UOp.range(8, 301, AxisType.UPCAST)
+  qi_o, td_o, e_o = UOp.range(qm, 299), UOp.range(TD_w, 300), UOp.range(8, 301, AxisType.UPCAST)
   l_tot = l_f[qi_o].load() + _lane_xor(l_f[qi_o].load(), 16, inline=False, dpp=True)
   l_inv = (l_tot > zf).where(l_tot.reciprocal(), zf)
-  return o[block_bh, m_base + qi_o * 16 + lane_c, td_o * 16 + lane_g * 8 + e_o].store(
+  return o[block_bh, m_base + qi_o * 16 + lane_c, (td_base + td_o) * 16 + lane_g * 8 + e_o].store(
     (acc_f[qi_o, td_o, e_o].load() * l_inv).cast(o.dtype)).end(
-    e_o, td_o, qi_o, lane, wave, block_hg, block_m_raw).sink(arg=KernelInfo(name="rdna4_flash_attn", opts_to_apply=()))
-
-@functools.cache
-def _rdna4_fa_ds2(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:UOp, d_blks:UOp) -> UOp:
-  # DSPLIT=2 RDNA4 kernel for D>=320 and D=256 GQA%6==0: 8W (12W for D=256 GQA=6), TILE=16, 100% K/V pipelined, ONLY 2 barriers/tile, 0 spills!
-  valid_kv_len, q_start, (BH, M, D), (_, B, H_KV, physical_n, _) = _unbind(valid_kv_len), _unbind(q_start), q.shape, cache.shape
-  assert isinstance(BH, UOp) and isinstance(M, UOp) and isinstance(D, UOp) and isinstance(B, UOp) and isinstance(H_KV, UOp)
-  zf = UOp.const(0.0, dtypes.float32)
-  gqa_group, m_tiles_tot = BH // (B * H_KV), M // 16
-  is_g6 = (d_blks <= 4) & (gqa_group % 6).eq(0)
-  gqa_w_4 = (gqa_group % 4).eq(0).where(4, (gqa_group % 3).eq(0).where(3, (gqa_group % 2).eq(0).where(2, 1)))
-  gqa_w = is_g6.where(6, gqa_w_4)
-  max_wph = (is_g6.where(12, 8) // (gqa_w * 2)).maximum(1)
-  n_hg = BH // gqa_w
-  w_per_head = ((max_wph >= 8) & (m_tiles_tot % 8).eq(0)).where(8,
-               ((max_wph >= 4) & (m_tiles_tot % 4).eq(0)).where(4,
-               ((max_wph >= 2) & (m_tiles_tot % 2).eq(0)).where(2, 1)))
-  total_waves, block_m_sz, block_n_sz = gqa_w * w_per_head * 2, w_per_head * WMMA_M, WMMA_N
-  threads, m_blks_eff = total_waves * WARP_SIZE, M // block_m_sz
-  TD_w = (d_blks * 4) // 2
-  n_b4, n_r2 = TD_w // 4, (TD_w % 4) // 2
-  KSTR_8, VSTR_8 = d_blks * 8 + 1, 3
-  DG, KGRP = d_blks * 8, 2
-  KITEMS, NTR, LGRP = block_n_sz * DG, KGRP * DG, threads // 8
-  KP, VP = (KITEMS + threads - 1) // threads, (NTR + LGRP - 1) // LGRP
-  KVP = KP.maximum(VP)
-  SCALE_L2 = D.cast(dtypes.float32).rsqrt() * LOG2E
-
-  block_hg, block_m_raw = UOp.range(n_hg, 0, AxisType.GLOBAL), UOp.range(m_blks_eff, 1, AxisType.GLOBAL)
-  block_m = m_blks_eff - 1 - block_m_raw
-  wave_tot, lane = UOp.range(total_waves, 2, AxisType.LOCAL), UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP)
-  wave, wd, tid = wave_tot // 2, wave_tot % 2, wave_tot * WARP_SIZE + lane
-  lane_g, lane_c, vj, lgi = lane // 16, lane % 16, tid & 7, tid >> 3
-  g_idx, qbi = wave % gqa_w, wave // gqa_w
-  block_bh, kv_head = block_hg * gqa_w + g_idx, block_hg // (gqa_group // gqa_w)
-  m_base, td_base = block_m * block_m_sz + qbi * 16, wd * TD_w
-
-  q_u32, k_u32 = q.flatten().bitcast(dtypes.uint32), cache.flatten().bitcast(dtypes.uint32)
-  v_flat, v_base_h = cache.flatten(), B * H_KV * physical_n * D
-  q_reg_u32, qv_b = UOp.alloc((TD_w, 4), dtypes.uint32, addrspace=AddrSpace.REG), UOp.alloc((4,), dtypes.uint32, addrspace=AddrSpace.REG)
-  kq_i, p_q = UOp.range(TD_w, 10), UOp.range(4, 11)
-  qv_r = qv_b.after(qv_b.after(kq_i).store(_amd_load(q_u32[(block_bh * M + m_base + lane_c) * (d_blks * 32) + (td_base + kq_i) * 8 + lane_g * 4], 4)))
-  hq = qv_r[p_q].load().reshape((1,)).bitcast(dtypes.half)
-  q_reg = q_reg_u32.after(q_reg_u32[kq_i, p_q].store(
-    _cvt_pk_f16(hq[0].float() * SCALE_L2, hq[1].float() * SCALE_L2, inline=False)).end(p_q, kq_i))
-
-  sK = UOp.alloc((block_n_sz * KSTR_8 * 8,), dtypes.half, addrspace=AddrSpace.LOCAL)
-  sV = UOp.alloc((D * VSTR_8 * 8,), dtypes.half, addrspace=AddrSpace.LOCAL)
-  sX = UOp.alloc((total_waves * WARP_SIZE * 8,), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  acc, m_i, l_i = _reg((TD_w, 8), 0.0), _reg((1,), -1e30), _reg((1,), 0.0)
-  al_reg, S_reg_buf = UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG), UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG)
-  P_reg_u32, f_buf_u32 = UOp.alloc((4,), dtypes.uint32, addrspace=AddrSpace.REG), UOp.alloc((4, 4), dtypes.uint32, addrspace=AddrSpace.REG)
-  kv_reg = UOp.alloc((KVP, 4), dtypes.uint32, addrspace=AddrSpace.REG)
-  tok = UOp.alloc((1,), dtypes.int32, addrspace=AddrSpace.REG)
-
-  kv_max = (valid_kv_len - 1).maximum(0)
-  n_end_all = ((q_start + (block_m + 1) * block_m_sz).minimum(valid_kv_len) + block_n_sz - 1) // block_n_sz
-  n_full = ((q_start + block_m * block_m_sz + 1).minimum(valid_kv_len) // block_n_sz).minimum(n_end_all)
-  one_h2 = UOp.const(0x3c003c00, dtypes.uint32)
-
-  p_k0 = UOp.range(KP, 20)
-  i_k0 = tid + p_k0 * threads
-  ok_k0, i_k0s = i_k0 < KITEMS, i_k0.minimum(KITEMS - 1)
-  kv_u0 = _amd_load(k_u32[(kv_head * physical_n + (i_k0s // DG).minimum(kv_max)) * (d_blks * 32) + (i_k0s % DG) * 4], 4)
-  sK_u32_0 = sK.after(q_reg).bitcast(dtypes.uint32).reshape(block_n_sz, KSTR_8, 4)
-  k0_b = sK_u32_0[(i_k0s // DG).valid(ok_k0), i_k0s % DG].store(kv_u0).end(p_k0).barrier()
-
-  ti = UOp.range(n_end_all, 100)
-  k0 = ti * block_n_sz
-  K_lds_u32 = sK.after(k0_b, ti).bitcast(dtypes.uint32).reshape(block_n_sz, KSTR_8, 4)
-
-  r_v = UOp.range(VP, 102)
-  u_v = (lgi + r_v * LGRP).minimum(NTR - 1)
-  v_ptr = v_flat[v_base_h + (kv_head * physical_n + (k0 + (u_v % KGRP) * 8 + vj).minimum(kv_max)) * D + (u_v // KGRP) * 8]
-  vr_call = UOp.native(
-    "({{ typedef __fp16 _hv8 __attribute__((__vector_size__(8 * sizeof(__fp16)))); "
-    "*(_hv8*)({0}) = __builtin_amdgcn_global_load_tr_b128_v8f16((_hv8*)({1})); 0; }})",
-    shape=(), dtype=dtypes.int32, fmt=True).call(kv_reg.after(k0_b, ti)[r_v, 0], v_ptr, inline=False)
-  vr_ld0 = tok.after(k0_b, ti)[0].store(vr_call).end(r_v)
-  vr_ld = m_i[0].store(_sb0(m_i.after(k0_b, ti, vr_ld0)[0].load()))
-
-  S_reg = S_reg_buf.after(S_reg_buf.after(k0_b, ti, vr_ld).store(S_reg_buf.const_like(0.0)))
-  t4_q = UOp.range(n_b4, 111)
-  kf_st4 = UOp.group(*(f_buf_u32.after(S_reg, t4_q)[j].store(K_lds_u32[lane_c, (td_base + t4_q * 4 + j) * 2 + lane_g].load()) for j in range(4)))
-  kf_sb4 = UOp.group(kf_st4, f_buf_u32[0, 0].store(_sb0(f_buf_u32.after(kf_st4)[0, 0].load())))
-  kf_r4, wt = f_buf_u32.after(kf_sb4), kf_sb4
-  for j in range(4): wt = _wmma_u4(kf_r4[j, 0], q_reg[t4_q * 4 + j, 0], S_reg.after(wt)[0], tok, wt)
-  qk_d4 = wt.end(t4_q)
-  t2_q = UOp.range(n_r2, 112)
-  kf_st2 = UOp.group(*(f_buf_u32.after(qk_d4, t2_q)[j].store(
-    K_lds_u32.after(t2_q)[lane_c, (td_base + n_b4 * 4 + t2_q * 2 + j) * 2 + lane_g].load()) for j in range(2)))
-  kf_sb2 = UOp.group(kf_st2, f_buf_u32[0, 0].store(_sb0(f_buf_u32.after(kf_st2)[0, 0].load())))
-  kf_r2, wt2 = f_buf_u32.after(kf_sb2), kf_sb2
-  for j in range(2): wt2 = _wmma_u4(kf_r2[j, 0], q_reg[n_b4 * 4 + t2_q * 2 + j, 0], S_reg.after(qk_d4, wt2)[0], tok, wt2)
-  qk_done = UOp.group(qk_d4, wt2.end(t2_q))
-
-  vr_r = kv_reg.after(qk_done, vr_ld)
-  sV_u32 = sV.after(qk_done, vr_ld).bitcast(dtypes.uint32).reshape(D, VSTR_8, 4)
-  r_vs, st_vs = UOp.range((VP + 3) // 4, 103), []
-  for su in range(4):
-    r_i = r_vs * 4 + su
-    u_vs = lgi + r_i * LGRP
-    ok_vs, u_vss = (r_i < VP) & (u_vs < NTR), u_vs.minimum(NTR - 1)
-    st_vs.append(sV_u32[((u_vss // KGRP) * 8 + vj).valid(ok_vs), u_vss % KGRP].store(vr_r[r_i.minimum(KVP - 1)].load()))
-  st_v = UOp.group(*st_vs).end(r_vs)
-  e_w1 = UOp.range(8, 116, AxisType.UPCAST)
-  st_sx = sX.after(qk_done)[(wave_tot * WARP_SIZE + lane) * 8 + e_w1].store(S_reg.after(qk_done)[e_w1].load()).end(e_w1)
-  b_mid = UOp.group(st_v, st_sx).barrier()
-
-  e_w2, peer_w = UOp.range(8, 117, AxisType.UPCAST), wave_tot ^ UOp.const(1, dtypes.weakint)
-  qk_all = S_reg[e_w2].store(S_reg.after(b_mid)[e_w2].load() + sX.after(b_mid)[(peer_w * WARP_SIZE + lane) * 8 + e_w2].load()).end(e_w2)
-  S_cur = S_reg.after(qk_all)
-  r_cm, e_m = UOp.range((ti >= n_full).cast(dtypes.weakint), 118), UOp.range(8, 119, AxisType.UPCAST)
-  k_idx = k0 + lane_g * 8 + e_m
-  S_cur = S_reg.after(S_reg[e_m].store(
-    ((k_idx <= q_start + m_base + lane_c) & (k_idx < valid_kv_len)).where(
-      S_cur.after(r_cm)[e_m].load(), UOp.const(-math.inf, dtypes.float32))).end(e_m, r_cm))
-
-  need_g = _tree_fmax([S_cur[e].load() for e in range(8)]) > (m_i.after(ti, qk_all)[0].load() + UOp.const(14.0, dtypes.float32))
-  r_grow = UOp.range(_nat("(__builtin_amdgcn_ballot_w32({0}) != 0u)", dtypes.bool, need_g).cast(dtypes.weakint), 120)
-  m_p = m_i.after(ti, qk_all, r_grow)[0].load()
-  sm_i = _tree_fmax([S_cur.after(r_grow)[e].load() for e in range(8)])
-  rm = _fast_fmax(sm_i, _lane_xor(sm_i, 16, inline=False, dpp=True))
-  m_n = _fast_fmax(_fast_fmax(m_p, rm), UOp.const(-1e30, dtypes.float32))
-  al_s = al_reg.after(r_grow)[0].store(_fast_exp2(m_p - m_n))
-  al = al_reg.after(al_s)[0].load()
-  td_a, e_a = UOp.range(TD_w, 121), UOp.range(8, 122, AxisType.UPCAST)
-  acc_res = UOp.group(
-    acc[td_a, e_a].store(acc.after(ti, qk_all, al_s)[td_a, e_a].load() * al).end(e_a, td_a),
-    l_i.after(al_s)[0].store(l_i.after(ti, qk_all, al_s)[0].load() * al),
-    m_i.after(al_s)[0].store(m_n),
-  ).end(r_grow)
-
-  k0_next = (ti + 1) * block_n_sz
-  p_k = UOp.range(KP, 101)
-  i_k = (tid + p_k * threads).minimum(KITEMS - 1)
-  kv_u = _amd_load(k_u32[(kv_head * physical_n + (k0_next + i_k // DG).minimum(kv_max)) * (d_blks * 32) + (i_k % DG) * 4], 4)
-  kr_ld0 = kv_reg.after(b_mid, acc_res)[p_k].store(kv_u).end(p_k)
-  kr_ld = UOp.group(kr_ld0, l_i[0].store(_sb0(l_i.after(acc_res, kr_ld0)[0].load())))
-
-  m_cur, j_p = m_i.after(acc_res, kr_ld)[0].load(), UOp.range(4, 132)
-  pk = _cvt_pk_f16(_fast_exp2(S_cur[2 * j_p].load() - m_cur), _fast_exp2(S_cur[2 * j_p + 1].load() - m_cur), inline=False)
-  p_done = UOp.group(P_reg_u32.after(acc_res, kr_ld)[j_p].store(pk),
-                     l_i[0].store(_amd_fdot2(pk, one_h2, l_i.after(acc_res, kr_ld, j_p)[0].load()))).end(j_p)
-  p_frag = P_reg_u32.after(p_done)
-
-  V_lds_u32 = sV.after(b_mid, p_done).bitcast(dtypes.uint32).reshape(D, VSTR_8, 4)
-  t4_v = UOp.range(n_b4, 125)
-  vf_st4 = UOp.group(*(f_buf_u32.after(p_done, t4_v)[j].store(V_lds_u32[(td_base + t4_v * 4 + j) * 16 + lane_c, lane_g].load()) for j in range(4)))
-  vf_sb4 = UOp.group(vf_st4, f_buf_u32[0, 0].store(_sb0(f_buf_u32.after(vf_st4)[0, 0].load())))
-  vf_r4, wv4 = f_buf_u32.after(vf_sb4), vf_sb4
-  for j in range(4): wv4 = _wmma_u4(vf_r4[j, 0], p_frag[0], acc.after(p_done, t4_v, wv4)[t4_v * 4 + j, 0], tok, wv4)
-  pv_d4 = wv4.end(t4_v)
-  t2_v = UOp.range(n_r2, 126)
-  vf_st2 = UOp.group(*(f_buf_u32.after(pv_d4, t2_v)[j].store(
-    V_lds_u32.after(t2_v)[(td_base + n_b4 * 4 + t2_v * 2 + j) * 16 + lane_c, lane_g].load()) for j in range(2)))
-  vf_sb2 = UOp.group(vf_st2, f_buf_u32[0, 0].store(_sb0(f_buf_u32.after(vf_st2)[0, 0].load())))
-  vf_r2, wv2 = f_buf_u32.after(vf_sb2), vf_sb2
-  for j in range(2): wv2 = _wmma_u4(vf_r2[j, 0], p_frag[0], acc.after(pv_d4, t2_v, wv2)[n_b4 * 4 + t2_v * 2 + j, 0], tok, wv2)
-  pv_done = UOp.group(pv_d4, wv2.end(t2_v))
-
-  kr_r = kv_reg.after(pv_done, kr_ld)
-  sK_u32 = sK.after(pv_done, kr_ld).bitcast(dtypes.uint32).reshape(block_n_sz, KSTR_8, 4)
-  p_ks, st_ks = UOp.range((KP + 3) // 4, 104), []
-  for su in range(4):
-    p_i = p_ks * 4 + su
-    i_ks0 = tid + p_i * threads
-    ok_ks, i_kss = (p_i < KP) & (i_ks0 < KITEMS), i_ks0.minimum(KITEMS - 1)
-    st_ks.append(sK_u32[(i_kss // DG).valid(ok_ks), i_kss % DG].store(kr_r[p_i.minimum(KVP - 1)].load()))
-  loop_done = UOp.group(*st_ks).end(p_ks).barrier().end(ti)
-
-  acc_f, l_f = acc.after(loop_done), l_i.after(loop_done)
-  l_tot = l_f[0].load() + _lane_xor(l_f[0].load(), 16, inline=False, dpp=True)
-  l_inv = (l_tot > zf).where(l_tot.reciprocal(), zf)
-  td_o, e_o = UOp.range(TD_w, 300), UOp.range(8, 301, AxisType.UPCAST)
-  return o[block_bh, m_base + lane_c, (td_base + td_o) * 16 + lane_g * 8 + e_o].store(
-    (acc_f[td_o, e_o].load() * l_inv).cast(o.dtype)).end(
-    e_o, td_o, lane, wave_tot, block_m_raw, block_hg).sink(arg=KernelInfo(name="rdna4_flash_attn", opts_to_apply=()))
+    e_o, td_o, qi_o, lane, wave_tot, block_hg, block_m_raw).sink(arg=KernelInfo(name="rdna4_flash_attn", opts_to_apply=()))
 
 @functools.cache
 def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:UOp, d_blks:UOp, rdna4:bool=False) -> UOp:
@@ -811,10 +651,10 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:U
     use_dsplit = (d_blks >= 5) | ((d_blks >= 3) & (gqa_group % 6).eq(0))
     use_qm2 = (d_blks <= 2) & (M >= 512)
     return UOp(Ops.WHERE, src=(use_dsplit,
-      _rdna4_fa_ds2(o, q, cache, valid_kv_len=valid_kv_len, q_start=q_start, d_blks=d_blks),
+      _rdna4_fa_kernel(o, q, cache, valid_kv_len=valid_kv_len, q_start=q_start, d_blks=d_blks, ds2=True),
       UOp(Ops.WHERE, src=(use_qm2,
-        _rdna4_fa_lo(o, q, cache, valid_kv_len=valid_kv_len, q_start=q_start, d_blks=d_blks, qm=2),
-        _rdna4_fa_lo(o, q, cache, valid_kv_len=valid_kv_len, q_start=q_start, d_blks=d_blks, qm=1)))))
+        _rdna4_fa_kernel(o, q, cache, valid_kv_len=valid_kv_len, q_start=q_start, d_blks=d_blks, qm=2),
+        _rdna4_fa_kernel(o, q, cache, valid_kv_len=valid_kv_len, q_start=q_start, d_blks=d_blks, qm=1)))))
   valid_kv_len, q_start, (BH, M, D), (_, B, H_KV, physical_n, _) = _unbind(valid_kv_len), _unbind(q_start), q.shape, cache.shape
   assert isinstance(BH, UOp) and isinstance(M, UOp) and isinstance(D, UOp) and isinstance(B, UOp) and isinstance(H_KV, UOp)
   gqa_group = BH // (B * H_KV)
