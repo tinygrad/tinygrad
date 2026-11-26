@@ -4,9 +4,8 @@ import tempfile, unittest
 from tinygrad import Tensor, Device, dtypes, UOp
 from tinygrad.uop.ops import Ops, AxisType
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
-from test.helpers import replace_opts
+from test.helpers import replace_opts, run_schedule, bound_schedule
 
 N = 512
 
@@ -38,7 +37,7 @@ def create_gemm_model(model_path:str, batch_size=N, in_size=N, out_size=N, bias=
   return model_path
 
 def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
-  linear = out.schedule_linear()
+  linear = bound_schedule(out)
   call = linear.src[-1]
   prg = to_program(replace_opts(call.src[0], opts), renderer=Device[Device.DEFAULT].renderer)
   if replace_src is not None:
@@ -47,7 +46,7 @@ def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
     # drop BINARY and replace SOURCE so run_linear recompiles
     prg = prg.replace(src=prg.src[:2] + (UOp(Ops.SOURCE, arg=new_src),))
   linear = linear.replace(src=linear.src[:-1] + (call.replace(src=(prg, *call.src[1:])),))
-  for _ in range(run_count): run_linear(linear)
+  for _ in range(run_count): run_schedule(linear)
 
 def get_quantized_model(sz):
   from onnxruntime.quantization import quantize_static, QuantFormat, QuantType, CalibrationDataReader

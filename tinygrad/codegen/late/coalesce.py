@@ -14,18 +14,20 @@ def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
   for i,stmt in enumerate(valid.split_uop(Ops.AND)):
-    if (res:=parse_valid(stmt)) is None: continue
+    # bound X where stmt is False: parse its negation
+    neg = stmt.src[0] if stmt.op is Ops.CMPEQ and stmt.src[1] is UOp.const(False) else stmt.eq(False)
+    if (res:=parse_valid(neg)) is None: continue
     X, is_upper_bound, c = res
 
-    # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
-    if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in X.split_uop(Ops.ADD)):
+    # X0 + X1 + ... <= 0 with every Xi >= 0 means Xi = 0 for all i
+    if is_upper_bound and c == 0 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in X.split_uop(Ops.ADD)):
       testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), X.split_uop(Ops.ADD), idx)
       if testidx.index(0).vmax < 0 or testidx.index(1).vmax < 0:
         drop_stmt.append(stmt)
         continue
 
-    # check if idx is out of bound when X is on the wrong side of the bound: X in [c+1, vmax] or [vmin, c-1]
-    lo, hi = (c + 1, X.vmax) if is_upper_bound else (X.vmin, c - 1)
+    # check if idx is out of bound for every X in the bound
+    lo, hi = (X.vmin, c) if is_upper_bound else (c, X.vmax)
     if lo <= hi:
       fake = UOp.variable(f"fake{i}", lo, hi, X.dtype)
       subs = [{X: fake}]

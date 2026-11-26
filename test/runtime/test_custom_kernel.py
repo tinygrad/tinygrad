@@ -1,6 +1,6 @@
 import unittest, functools
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, Variable, TinyJit
-from tinygrad.engine.realize import run_linear, compile_linear
+from tinygrad.engine.realize import compile_linear
 from tinygrad.codegen import to_program
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes
@@ -11,7 +11,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer import TinyELF
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
-from test.helpers import assert_kernel_count
+from test.helpers import assert_kernel_count, run_schedule
 from test.null.test_custom_kernel import custom_elementwise_add_kernel, custom_elementwise_addmul_kernel, custom_gemm
 
 # **** kernels ****
@@ -44,10 +44,10 @@ def custom_add_var_kernel(*srcs:UOp, n_slot:int) -> UOp:
   return C[i].store(out).end(i).sink(arg=KernelInfo(name=f"add_var_{n_slot}_{len(Bs)}"))
 
 def run_kernel_args(out:Tensor, name:str) -> list[str|None]:
-  linear, var_vals = out.linear_with_vars()
+  linear, externs = out.linear_with_externs()
   sink = [u for u in linear.toposort(enter_calls=True) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) and u.arg.name == name][0]
   sig = TinyELF.from_program(to_program(sink, Device[Device.DEFAULT].renderer)).signature
-  run_linear(linear, var_vals)
+  run_schedule(linear, externs)
   return [nm for nm, *_ in sig]
 
 def custom_ignore_first_var_kernel(C:UOp, A:UOp, B:UOp, n:UOp) -> UOp:
@@ -658,8 +658,8 @@ class TestCustomKernelArgs(unittest.TestCase):
     srcs = (Tensor.empty(4, dtype=dtypes.int), Tensor.empty(4, dtype=dtypes.int), Tensor([1, 2, 3, 4], dtype=dtypes.int).realize(),
             Tensor(Variable("n", 0, 100, dtypes.int).bind(5)))
     out = Tensor.custom_kernel(*srcs, fxn=custom_ignore_first_var_kernel)[0]
-    linear, var_vals = out.linear_with_vars()
-    run_linear(linear, {**var_vals, "k": 10})
+    linear, externs = out.linear_with_externs()
+    run_schedule(linear, externs, {"k": 10})
     self.assertEqual(out.tolist(), [16, 17, 18, 19])
 
   def test_scalar_arg_jit(self):
@@ -692,11 +692,11 @@ class TestCustomKernelSharded(unittest.TestCase):
     # the kernel's DEVICE range is its device number arg, bound per device and validated on each
     def kernel(C:UOp) -> UOp: return C[0].store(UOp.range(2, 0, AxisType.DEVICE).cast(dtypes.int)).sink(arg=KernelInfo(name="store_dnum"))
     out = Tensor.custom_kernel(Tensor.zeros(2, dtype=dtypes.int, device="CPU").shard(("CPU:1", "CPU:2"), axis=0).contiguous(), fxn=kernel)[0]
-    linear, _ = out.linear_with_vars()
+    linear, externs = out.linear_with_externs()
     validated = compile_linear(linear, validate=True).toposort()
     self.assertEqual(len([c for c in validated if c.op is Ops.CALL and c.body.op is Ops.NATIVE and c.body.arg.code == "validate"
                           and c.body.src[-1].arg.name == "store_dnum"]), 2)
-    run_linear(linear)
+    run_schedule(linear, externs)
     self.assertEqual(out.tolist(), [0, 1])
 
   def test_simple_sharded(self):

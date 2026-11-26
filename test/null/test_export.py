@@ -4,6 +4,7 @@ from tinygrad.uop import Ops
 from tinygrad.uop.ops import ParamArg, AddrSpace
 from tinygrad.uop.uir import render_uir, parse_uir
 from tinygrad.function import function
+from tinygrad.codegen import create_linear
 def buf(n=8) -> Tensor: return Tensor.empty(n, device="NULL").realize()
 
 class TestExport(unittest.TestCase):
@@ -37,7 +38,6 @@ class TestExport(unittest.TestCase):
     with self.assertRaises(AssertionError): e.bind(3)
 
   def test_symbolic_kernel_arg(self):
-    from tinygrad.codegen import create_linear
     fn, _ = Tensor.export(buf()[:Variable("i", 1, 8).bind(3)] + 1)
     e, = fn.variables()
     call, = create_linear(fn).src
@@ -50,12 +50,11 @@ class TestExport(unittest.TestCase):
   def test_symbolic_program_shared_across_bindings(self):
     from tinygrad.engine.realize import lower_and_compile
     def compile_slice(name, value):
-      linear, vals = (buf()[:Variable(name, 1, 8).bind(value)] + 1).linear_with_vars()
+      linear, externs = (buf()[:Variable(name, 1, 8).bind(value)] + 1).linear_with_externs()
       call, = linear.src
       p, = call.body.variables()
       self.assertIsNone(p.arg.name)
-      self.assertEqual(call.src[1+p.arg.slot].expr, name)
-      self.assertEqual(vals, {name: value})
+      self.assertEqual(externs[call.src[1+p.arg.slot].arg.slot].unbind(), (Variable(name, 1, 8), value))
       return lower_and_compile(linear).src[0].body
     self.assertIs(compile_slice("i", 2), compile_slice("j", 5))
 
@@ -64,10 +63,10 @@ class TestExport(unittest.TestCase):
     a, b, c, d = buf(), buf(), buf(), buf()
     fn, _ = Tensor.export((a+b).contiguous()*v.bind(2))
     self.assertIs(fn, Tensor.export((c+d).contiguous()*v.bind(3))[0])
-    # mapped back to this storage and these values
-    linear, var_vals = ((c+d).contiguous()*v.bind(3)).linear_with_vars()
-    self.assertEqual(var_vals, {"v": 3})
-    self.assertTrue({c.uop.buf_uop, d.uop.buf_uop} <= set(linear.toposort()))
+    # its externs are this storage and these values
+    _, externs = ((c+d).contiguous()*v.bind(3)).linear_with_externs()
+    self.assertEqual({x.expr: x.arg.val for x in externs if x.is_bound_var}, {"v": 3})
+    self.assertTrue({c.uop.buf_uop, d.uop.buf_uop} <= set(externs))
 
   def test_create_linear_deterministic(self):
     # the linear only depends on the export, the storage it allocates gets canonical slots
@@ -90,15 +89,15 @@ class TestExport(unittest.TestCase):
     fn, _ = Tensor.export((add_one(buf())*2+3).contiguous())
     codegen.schedule_cache.clear()
     with patch("tinygrad.codegen.memory_plan_rewrite", wraps=codegen.memory_plan_rewrite) as plan:
-      linear = Tensor.compile(fn)
-      self.assertIs(Tensor.compile(fn), linear)
+      linear = create_linear(fn)
+      self.assertIs(create_linear(fn), linear)
       self.assertEqual(plan.call_count, 1)
       # the jit defers the memory plan, a planned linear is not what it gets
-      with Context(NO_MEMORY_PLANNER=1): self.assertIsNot(Tensor.compile(fn), linear)
-      with Context(SCACHE=0): self.assertIs(Tensor.compile(fn), linear)
+      with Context(NO_MEMORY_PLANNER=1): self.assertIsNot(create_linear(fn), linear)
+      with Context(SCACHE=0): self.assertIs(create_linear(fn), linear)
       self.assertEqual(plan.call_count, 3)
       codegen.schedule_cache.clear()
-      self.assertIs(Tensor.compile(fn), linear)
+      self.assertIs(create_linear(fn), linear)
       self.assertEqual(plan.call_count, 4)
 
   def test_linear_cache_isolation(self):
@@ -107,13 +106,13 @@ class TestExport(unittest.TestCase):
     fn, _ = Tensor.export(buf(65536).sum())
     schedule_cache.clear()
     with Context(SCACHE=1, SPLIT_REDUCEOP=0, NO_MEMORY_PLANNER=0):
-      linear = Tensor.compile(fn)
+      linear = create_linear(fn)
       self.assertEqual(len(linear.src), 1)
-      with Context(SCACHE=0, SPLIT_REDUCEOP=1): self.assertEqual(len(Tensor.compile(fn).src), 2)
-      self.assertIs(Tensor.compile(fn), linear)  # disabled cache didn't overwrite the planned entry
+      with Context(SCACHE=0, SPLIT_REDUCEOP=1): self.assertEqual(len(create_linear(fn).src), 2)
+      self.assertIs(create_linear(fn), linear)  # disabled cache didn't overwrite the planned entry
       schedule_cache.clear()
-      with Context(NO_MEMORY_PLANNER=1, SPLIT_REDUCEOP=1): self.assertEqual(len(Tensor.compile(fn).src), 2)
-      self.assertEqual(len(Tensor.compile(fn).src), 2)  # use the rebuilt schedule, not the old planned entry
+      with Context(NO_MEMORY_PLANNER=1, SPLIT_REDUCEOP=1): self.assertEqual(len(create_linear(fn).src), 2)
+      self.assertEqual(len(create_linear(fn).src), 2)  # use the rebuilt schedule, not the old planned entry
 
 if __name__ == "__main__":
   unittest.main()

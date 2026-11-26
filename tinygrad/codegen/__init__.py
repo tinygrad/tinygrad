@@ -116,10 +116,9 @@ def index_lanes(x:UOp) -> list[UOp]:
 
 def do_devectorize(b:UOp):
   if b.shape == (): return None
-  # broadcasting needs to be already unpacked, Invalid matches any dtype and shape
-  if not all(x.shape == b.shape or x.base.is_invalid for x in b.src): return None
-  lanes = [[x.base] * b.max_numel() if x.base.is_invalid else index_lanes(x) for x in b.src]
-  src = [b.replace(src=values) for values in zip(*lanes, strict=True)]
+  # broadcasting needs to be already unpacked
+  if not all(x.shape == b.shape for x in b.src): return None
+  src = [b.replace(src=values) for values in zip(*map(index_lanes, b.src), strict=True)]
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
@@ -720,7 +719,7 @@ def create_linear(fn:UOp) -> UOp:
   fn = fn.substitute({v:v.param_like(i) for v,i in views.items()}, walk=True, name="views to params")
   linear_call = graph_rewrite(fn.call(*views, precompile=True), pm_schedule, name="schedule to linear", enter_calls=True)
 
-  # this recursively resolves the linear_call, storage stays unbound until map back
+  # this recursively resolves the linear_call, storage stays unbound until link
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
   # create copies
@@ -729,8 +728,9 @@ def create_linear(fn:UOp) -> UOp:
   # plan the storage the function allocates
   linear = memory_plan_rewrite(linear)
 
-  # the storage it allocates gets canonical slots, so the linear only depends on fn. map back binds each to fresh storage
+  # the storage it allocates gets canonical slots, so the linear only depends on fn. link binds each to fresh storage
   allocs = [u for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL]
+  if any(b.device is None for b in allocs): raise RuntimeError("global storage needs a device, give the ALLOC one")
   ret = linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
   if SCACHE: schedule_cache[key] = ret
   return ret

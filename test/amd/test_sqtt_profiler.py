@@ -1,11 +1,10 @@
 import unittest, contextlib, functools
 from tinygrad import Device, Tensor, Context, TinyJit, dtypes
 from tinygrad.dtype import AddrSpace
-from test.helpers import is_hcq2_device
+from test.helpers import is_hcq2_device, run_schedule, bound_schedule
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.device import Compiled, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
-from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.viz.serve import load_amd_counters, VizData
 from tinygrad.renderer.amd.sqtt import decode, print_packets, map_insts, IMMEDIATE_MASK
@@ -104,8 +103,8 @@ class TestSQTTProfiler(unittest.TestCase):
   def test_simple(self):
     t = Tensor.empty(1) + 1
     with save_sqtt() as data:
-      linear = t.schedule_linear()
-      run_linear(linear)
+      linear = bound_schedule(t)
+      run_schedule(linear)
     fn_name = to_program(linear.src[0].src[0], renderer=Device[Device.DEFAULT].renderer).src[0].arg.function_name
     sqtt = map_sqtt(data)
     self.assertEqual(len(sqtt), 1)
@@ -160,8 +159,8 @@ class TestSQTTProfiler(unittest.TestCase):
   def test_multiple_runs(self):
     t = Tensor.empty(1) + 1
     with save_sqtt() as data:
-      linear = t.schedule_linear()
-      for _ in range(N:=3): run_linear(linear)
+      linear = bound_schedule(t)
+      for _ in range(N:=3): run_schedule(linear)
     fn_name = to_program(linear.src[0].src[0], renderer=Device[Device.DEFAULT].renderer).src[0].arg.function_name
     sqtt = map_sqtt(data)
     self.assertEqual(len(sqtt), N)
@@ -170,9 +169,9 @@ class TestSQTTProfiler(unittest.TestCase):
 
   def test_multiple_kernels(self):
     t = ((Tensor.empty(1) + 1).contiguous() + 2)
-    linear = t.schedule_linear()
+    linear = bound_schedule(t)
     with save_sqtt() as data:
-      run_linear(linear)
+      run_schedule(linear)
     sqtt = map_sqtt(data)
     self.assertEqual(len(sqtt), len(linear.src))
     for i,call in enumerate(linear.src):
@@ -181,9 +180,9 @@ class TestSQTTProfiler(unittest.TestCase):
 
   def test_multiple_kernels_lower(self):
     t = ((Tensor.empty(1) + 1).contiguous() + 2)
-    linear = t.schedule_linear()
+    linear = bound_schedule(t)
     with save_sqtt() as data:
-      run_linear(linear)
+      run_schedule(linear)
     sqtt = map_sqtt(data)
     self.assertEqual(len(sqtt), len(linear.src))
     for i,call in enumerate(linear.src):

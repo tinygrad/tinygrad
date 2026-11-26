@@ -6,11 +6,11 @@ from tinygrad import Tensor, TinyJit, GlobalCounters, Device
 from tinygrad.helpers import getenv, Context
 from tinygrad.nn.optim import SGD
 from tinygrad.nn.state import get_parameters
-from tinygrad.engine.realize import run_linear
 
 from extra.models import resnet
 from examples.mlperf.initializers import Conv2dHeNormal, Linear
 from examples.hlb_cifar10 import UnsyncedBatchNorm
+from test.helpers import run_schedule
 
 # benchmark memory or kernel count: DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
 # benchmark speed:                  BEAM=2 JITCNT=10 DEFAULT_FLOAT=HALF python test/external/external_benchmark_resnet.py
@@ -71,11 +71,11 @@ class BenchmarkResnetTrain(unittest.TestCase):
 
       y = x.sequential(layer).contiguous().contiguous_backward()
       y.sum().backward()
-      if getenv("ASSIGN", 1): linear, var_vals = Tensor.linear_with_vars(y, x.grad, *optim.schedule_step())
-      else: linear, var_vals = Tensor.linear_with_vars(y, x.grad, *[t.grad for t in optim.params])
+      if getenv("ASSIGN", 1): linear, externs = Tensor.linear_with_externs(y, x.grad, *optim.schedule_step())
+      else: linear, externs = Tensor.linear_with_externs(y, x.grad, *[t.grad for t in optim.params])
 
       for _ in range(JITCNT):
-        run_linear(linear, var_vals)
+        run_schedule(linear, externs)
 
     CNT = getenv("CNT", 5)
     best_tm = None

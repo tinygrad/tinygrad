@@ -2,9 +2,8 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, Context, Device
 from tinygrad.dtype import DTypeLike, dtypes
-from tinygrad.engine.realize import run_linear
 from tinygrad.helpers import DEBUG, get_single_element
-from test.helpers import check_schedule
+from test.helpers import check_schedule, run_schedule
 
 def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
   # only support axis =-1
@@ -28,9 +27,9 @@ def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Te
   return out
 
 def run_one_schedule_item(out):
-  linear = out.schedule_linear()
+  linear, externs = out.linear_with_externs()
   get_single_element(linear.src)
-  run_linear(linear)
+  run_schedule(linear, externs)
 
 class TestFuse(unittest.TestCase):
   def _test_fuse(self, fxn, *args, atol=1e-6, allow_multiple=False, **kwargs):

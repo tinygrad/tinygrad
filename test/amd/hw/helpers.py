@@ -9,6 +9,7 @@ import tinygrad.runtime.autogen.amd.rdna4.ins as r4
 
 from test.mockgpu.amd.emu import run_asm
 from tinygrad.renderer.amd.dsl import NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, M0
+from test.helpers import run_schedule
 
 def _i32(f: float) -> int: return struct.unpack('<I', struct.pack('<f', f))[0]
 def _f32(i: int) -> float: return struct.unpack('<f', struct.pack('<I', i & 0xFFFFFFFF))[0]
@@ -102,14 +103,13 @@ def run_rdna4(instructions: list, out_reg: int = 2) -> list[int]:
   from tinygrad.device import Device, Buffer
   from tinygrad.dtype import dtypes
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
-  from tinygrad.engine.realize import run_linear
 
   dev = Device['AMD']
   if not dev.renderer.target.arch.startswith('gfx12'): raise unittest.SkipTest('requires RDNA4 hardware')
   out_gpu = Buffer(dev.device, WAVE_SIZE * 4).ensure_allocated()
   sink = UOp.sink(UOp.param(0, dtypes.uint32, (WAVE_SIZE,)), UOp.special(WAVE_SIZE, 'lidx0'), arg=KernelInfo('test'))
   prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in instructions))))
-  run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
+  run_schedule(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
   hw = list(out_gpu.as_memoryview().cast('I'))
   if emu != hw:
     diffs = [f"lane {i}: emu=0x{e:08x} hw=0x{h:08x}" for i, (e, h) in enumerate(zip(emu, hw)) if e != h]
@@ -214,7 +214,6 @@ def run_program_hw(instructions: list, n_lanes: int = 1) -> WaveState:
   from tinygrad.device import Device, Buffer
   from tinygrad.dtype import dtypes, AddrSpace
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
-  from tinygrad.engine.realize import run_linear
 
   dev = Device["AMD"]
   prologue, epilogue = get_prologue_epilogue(n_lanes)
@@ -226,7 +225,7 @@ def run_program_hw(instructions: list, n_lanes: int = 1) -> WaveState:
   sink = UOp.sink(UOp.param(0, dtypes.uint32, (buf_sz // 4,)), UOp.special(n_lanes, "lidx0"), lds, scratch, arg=KernelInfo("test"))
   body = UOp(Ops.LINEAR, src=tuple(UOp.native(x).call() for x in prologue + instructions + epilogue))
   prg = UOp(Ops.PROGRAM, src=(sink, body))
-  run_linear(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
+  run_schedule(UOp(Ops.LINEAR, src=(prg.call(UOp.from_buffer(out_gpu, dtypes.uint32)),)), wait=True)
 
   out_buf = out_gpu.as_memoryview()
 

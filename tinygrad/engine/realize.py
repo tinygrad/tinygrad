@@ -3,13 +3,13 @@ from typing import cast, Iterator, Any, Sequence
 import decimal
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import CAPTURE_PROCESS_REPLAY, colored, DEBUG, GlobalCounters, ansipad, prod, Context, to_tuple, tqdm, unwrap
-from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
+from tinygrad.helpers import BEAM, ALL2ALL, size_to_str, time_to_str, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import get_process_replay_loc, Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, ProgramInfo, KernelInfo
 from tinygrad.uop.ops import pm_flatten_linear
 from tinygrad.device import Device, Buffer, ProfileGraphEntry, DEV, HCQ_RUNTIME_DEV, HOST_DEVS
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Estimates, Renderer, TinyELF
-from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
+from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context, to_program_config
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
 # **************** Helpers ****************
@@ -183,8 +183,8 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return ets + [_prof_tm(d, prof) if ctx.wait else None for d, _, _, prof, *_ in info.kernels if prof]
 
 def _validate(call:UOp, sink:UOp) -> UOp:
-  shadows = tuple(p if p.addrspace is AddrSpace.ALU else
-                  UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in call.src[1:])
+  shadows = tuple(p if p.addrspace is AddrSpace.ALU else UOp.alloc((prod(p.max_shape),), p.dtype, int.from_bytes(call.key[:8], "little")+i,
+                  device=("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU") for i,p in enumerate(call.src[1:]))
   copies = tuple(s.store_call(p) for s, p in zip(shadows, call.src[1:]) if p.addrspace is not AddrSpace.ALU)
   return UOp(Ops.LINEAR, src=copies + (call, UOp.native("validate", sink).call(*shadows, *call.src[1:])))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
@@ -245,26 +245,36 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat.native("validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None, cache=False) -> UOp:
-  if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
-  if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
-  linear = lower_and_compile(linear)
-  linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
-  return linear
+def devices_of(linear:UOp) -> list[str]:
+  return sorted({d for u in linear.toposort() if u.op in {Ops.BUFFER, Ops.PARAM, Ops.ALLOC, Ops.EXTERN} for d in to_tuple(u.device) if d is not None})
 
-def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp: return hcq_link(linear, input_uops=input_uops)
+compile_cache:dict[tuple, UOp] = {}
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, profile:bool|None=None, cache=False) -> UOp:
+  beam, profile = BEAM.value if beam is None else beam, bool(PROFILE or DEBUG >= 2) if profile is None else profile
+  key = (linear, beam, bool(validate), profile, ALL2ALL >= 1, tuple(DEV.value), tuple(HCQ_RUNTIME_DEV.value), *[x.value for x in to_program_config])
+  if cache and (hit:=compile_cache.get(key)) is not None: return hit
+  scalars = [e for e in linear.toposort() if e.op is Ops.EXTERN and e.is_variable and e.arg.name is None] # they bind by slot at run
+  ret = linear.substitute({e: UOp.variable(e.expr, e.vmin, e.vmax, dtype=e.dtype) for e in scalars}, walk=True)
+  if validate: ret = graph_rewrite(ret, pm_validate, name="validate", walk=True)
+  if beam >= 1: ret = graph_rewrite(ret, pm_beam, ctx=beam, walk=True)
+  ret = hcq_compile(lower_and_compile(ret), profile)
+  if cache and ret is not linear: compile_cache[key] = ret
+  return ret
+
+def link_linear(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
+  # link opens the devices the linear uses, opening a device registers its link buffers and rules
+  for d in devices_of(linear): Device[d]
+  return hcq_link(linear, input_uops=input_uops)
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   assert linear.op is Ops.LINEAR, f"run_linear calls on {linear.op}"
   if len(linear.src) == 0: return
-  inputs = list(input_uops)
-  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, cache=True), input_uops=inputs)
-  ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
+  ctx = ExecContext(var_vals or {}, tuple(input_uops), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: track_stats(ctx, call.without_after, perf_counter_us(), pm_exec.rewrite(call.without_after, ctx))
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
-  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True, cache=False))
+  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True))
   while True:
     if clear_l2:
       if hasattr(dev:=Device[call.device], 'invalidate_caches'): dev.invalidate_caches()

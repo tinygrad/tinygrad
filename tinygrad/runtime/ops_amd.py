@@ -90,7 +90,7 @@ def hdp_flush_for(dev:str) -> list[AMDReg]:
   return [getattr(nbio:=nbio_for(dev), f'regBIF_BX_PF{int(nbio.version[:2] == (7, 11))}_GPU_HDP_FLUSH_{x}') for x in ("REQ", "DONE")]
 def pm4_for(dev:str): return importlib.import_module(f"tinygrad.runtime.autogen.am.pm4_{'soc15' if gc_for(dev).version[0] == 9 else 'nv'}")
 def sdma_for(dev:str): return import_module('sdma', (4, 0, 0) if gc_for(dev).version[0] == 9 else (6, 0, 0))
-def xccs_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("xccs", dict(gfx942=8, gfx950=8).get(t.arch, 1))
+def xccs_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("xccs", 8 if t.arch in ("gfx942", "gfx950") and "MOCK" not in t.interface else 1)
 def lds_for(dev:str) -> int: return (t:=Device.target_for(dev)).get("lds", dict(gfx950=160).get(t.arch, 64))
 def waves_for(dev:str) -> UOp: return UOp.extern((), dtypes.u32, None, to_name(dev, "waves"))
 def scratch_wavesize(dev:str, psize:int) -> int: # the scratch of a wave (64 lanes), in units of 256 bytes (1024 on gfx9)
@@ -502,8 +502,6 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
 # SDMA
 
 class AMDSDMAQueue(HWQueue):
-  dev:AMDDevice
-
   def __init__(self, submit):
     super().__init__(submit)
     self.sdma = sdma_for(self.devs[0])
@@ -1025,6 +1023,6 @@ class AMDDevice(Compiled):
 
 Compiled.pm_encode += PatternMatcher([
   (UPat.sink(arg=KernelInfo("amd_compute_submit")).call(UPat(name="q")).after(allow_any_len=True, name="s"),
-   lambda s, q: (AMDComputeAQLQueue if Device.target_for(q.device).get("aql", 0) else AMDComputeQueue)(s).encode()),
+   lambda s, q: (AMDComputeAQLQueue if Device.target_for(q.device).get("aql", int(xccs_for(q.device) > 1)) else AMDComputeQueue)(s).encode()),
   (UPat.sink(arg=KernelInfo("amd_copy_submit")).call(UPat()).after(allow_any_len=True, name="s"), lambda s: AMDSDMAQueue(s).encode()),
 ])

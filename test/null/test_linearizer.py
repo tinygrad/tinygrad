@@ -69,7 +69,7 @@ class TestLinearizer(unittest.TestCase):
     # idx*2 is even, so the gather never selects the odd entry 5 and the store folds to 0
     idx = UOp.variable("idx", 0, 3).bind(0)
     out = Tensor.const((0, 0, 0, 5, 0, 0, 0, 0), dtypes.int)[idx*2].to("NULL", force=True)
-    uops = to_program(out.linear_with_vars()[0].src[-1].src[0], Device["NULL"].renderer).src[1].src
+    uops = to_program(out.linear_with_externs()[0].src[-1].src[0], Device["NULL"].renderer).src[1].src
     self.assertNotIn(Ops.WHERE, [u.op for u in uops])
     self.assertEqual(next(u for u in uops if u.op is Ops.STORE).src[1].vmax, 0)
 

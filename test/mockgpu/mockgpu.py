@@ -1,6 +1,6 @@
 import ctypes, time, os, builtins, fcntl, typing
 from tinygrad.helpers import DEV, dedup, to_tuple, round_up
-from tinygrad.device import Compiled, Device
+from tinygrad.device import Compiled, host_of
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 from tinygrad.runtime.support.system import FileIOInterface, System
@@ -23,7 +23,7 @@ setattr(libc.dll, "mockgpu_doorbell", mockgpu_doorbell)
 
 mocked = {t.device for t in DEV.value if t.interface.startswith("MOCK")}
 def hook_doorbells(s:UOp) -> UOp|None:
-  hooks = tuple(UOp.native("mockgpu_doorbell").call(b.after(c).getaddr(Device[d].host)) for c in s.toposort() if c.op is Ops.CALL
+  hooks = tuple(UOp.native("mockgpu_doorbell").call(b.after(c).getaddr(host_of(d))) for c in s.toposort() if c.op is Ops.CALL
                 for b in c.src[1:] if b.op is Ops.EXTERN and "doorbell" in str(b.arg.name) and (d:=to_tuple(b.device)[0]).split(":")[0] in mocked)
   return None if all(h in s.src for h in hooks) else s.replace(src=tuple(dedup(s.src + hooks)))
 Compiled.pm_lower += PatternMatcher([(UPat(Ops.SINK, name="s"), hook_doorbells)])

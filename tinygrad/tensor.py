@@ -5,28 +5,26 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, cast, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
-from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod, canonicalize_device_name
-from tinygrad.helpers import Context, cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device
+from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod, canonicalize_device_name, VALIDATE_WITH_CPU
+from tinygrad.helpers import Context, cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device, to_tuple
 from tinygrad.uop.ops import UOp, Ops, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.uop.ops import KernelInfo, AxisType
 from tinygrad.mixin import Mixin
 from tinygrad.codegen import create_linear, contiguous_mops_to_view
-from tinygrad.engine.realize import run_linear, capturing
-from tinygrad.device import Buffer
+from tinygrad.engine.realize import run_linear, capturing, compile_linear, link_linear
+from tinygrad.device import Buffer, Device, HCQ_RUNTIME_DEV, host_of
 
-# **** export: storage becomes EXTERN(slot), bound Variables lose their value and ALLOCs get canonical slots. ctx.externs is what's mapped back
+# **** export: storage becomes EXTERN(slot), bound Variables lose their value and ALLOCs get canonical slots. ctx.externs is what it's linked to
 
 @dataclass
 class ExportCtx:
   externs: dict[UOp, UOp] = field(default_factory=dict)
   allocs: dict[UOp, UOp] = field(default_factory=dict)
 
-def as_extern(x:UOp, slot:int) -> UOp: return x.replace(op=Ops.EXTERN, arg=replace(x.arg, slot=slot, buffer=None, name=None, val=None))
-
 def to_extern(ctx:ExportCtx, x:UOp) -> UOp|None:
   # realized storage and bound Variables are runtime state
   if not (x.is_bound_var or (x.op is Ops.BUFFER and x.addrspace is AddrSpace.GLOBAL)): return None
-  return ctx.externs.setdefault(x, as_extern(x, len(ctx.externs)))
+  return ctx.externs.setdefault(x, x.as_extern(len(ctx.externs)))
 
 # ALLOCs get canonical scope-local id slots so structurally identical calls hash identically for the schedule cache
 # (fresh slots are all positive from the global counter; negative slots are already canonical)
@@ -47,34 +45,6 @@ pm_export: PatternMatcher = PatternMatcher([
   (UPat(Ops.ALLOC, name="b"), canonicalize_alloc),
   (UPat(Ops.CALL, name="c"), export_call),
 ])
-
-def bind_alloc(b:UOp) -> UOp:
-  if b.device is None: raise RuntimeError("global storage needs a device, give the ALLOC one")
-  return UOp.new_buffer(b.device, b.max_numel(), b.dtype)
-
-# EXTERNs map back to their storage, bound Variables map back to the Variable, its value is in var_vals
-def map_back_extern(ctx:tuple[UOp, ...], e:UOp) -> UOp:
-  if e.arg.slot >= len(ctx) or as_extern(x:=ctx[e.arg.slot], e.arg.slot) is not e:
-    got = f"{x.dtype} {x.shape} on {x.device}" if e.arg.slot < len(ctx) else "nothing"
-    raise RuntimeError(f"extern {e.arg.slot} must match its EXTERN, {e.dtype} {e.shape} on {e.device}, got {got}")
-  return x.unbound() if x.is_variable else x
-
-pm_map_back = PatternMatcher([
-  (UPat(Ops.EXTERN, name="e"), map_back_extern),
-  # global ALLOCs are bound to fresh BUFFERs for this invocation
-  (UPat(Ops.ALLOC, name="b"), lambda b: bind_alloc(b) if b.addrspace is AddrSpace.GLOBAL else None),
-])
-
-def map_back(linear:UOp, externs:tuple[UOp, ...]) -> tuple[UOp, dict[str, int]]:
-  # the EXTERNs become the storage and the bound Variables of this invocation, ALLOCs get fresh storage
-  linear = graph_rewrite(linear, pm_map_back, ctx=externs, walk=True, name="map back")
-  # the values of the bound Variables the linear uses, they are call args
-  used_vars = {v.expr for si in linear.src for v in UOp.sink(*si.src[1:]).variables()}
-  var_vals: dict[str, int] = {}
-  for b in externs:
-    if b.is_bound_var and b.expr in used_vars and var_vals.setdefault(b.expr, b.arg.val) != b.arg.val:
-      raise RuntimeError(f"bind mismatch on {b.expr}, {var_vals[b.expr]} != {b.arg.val}")
-  return linear, var_vals
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -266,30 +236,38 @@ class Tensor(Mixin):
     tensor_map = dict(zip(tensor_map, UOp.sink(*tensor_map.values()).substitute(becomes_map, walk=True).src))
     _apply_map_to_tensors(becomes_map | tensor_map, name="bufferize")
     fn = graph_rewrite(stores, pm_export, ctx=(ctx:=ExportCtx()), bottom_up=True, name="export")
+    if len(names:=[v.expr for v in ctx.externs if v.is_bound_var]) != len(set(names)): raise RuntimeError(f"bind mismatch on a Variable in {names}")
     return fn, tuple(ctx.externs)
 
-  def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
-    """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
+  def linear_with_externs(self, *lst:Tensor) -> tuple[UOp, tuple[UOp, ...]]:
+    """Creates the LINEAR UOp needed to realize these Tensor(s), with its externs."""
     fn, externs = self.export(*lst)
-    return map_back(Tensor.compile(fn), externs)
+    return create_linear(fn), externs
 
   def schedule_linear(self, *lst:Tensor) -> UOp:
     """Creates the schedule needed to realize these Tensor(s)."""
-    linear, var_vals = self.linear_with_vars(*lst)
-    assert len(var_vals) == 0
-    return linear
+    return self.linear_with_externs(*lst)[0]
 
   @staticmethod
-  @Context(ALLOW_DEVICE_USAGE=0)
   def compile(fn:UOp) -> UOp:
-    """Schedule a function from `Tensor.export` without binding its externs."""
-    return create_linear(fn)
+    """Compile a function from `Tensor.export` to a LINEAR of compiled calls without binding its externs. It reads the targets in DEV."""
+
+    # validate all targets are set
+    devs = {d for u in fn.toposort(enter_calls=True) for d in to_tuple(u.device) if d is not None}
+    for d in sorted({*devs, *map(host_of, devs), HCQ_RUNTIME_DEV.device}): Device.target_for(d)
+
+    with Context(ALLOW_DEVICE_USAGE=0): return compile_linear(create_linear(fn), validate=VALIDATE_WITH_CPU, cache=True)
+
+  @staticmethod
+  def link(linear:UOp, externs:tuple[UOp, ...]) -> UOp:
+    """Links a LINEAR from `Tensor.compile` to the externs from `Tensor.export`, it opens their devices."""
+    return link_linear(linear, list(externs))
 
   @staticmethod
   def run(linear:UOp, externs:tuple[UOp, ...], do_update_stats=True) -> None:
-    """Runs an exported function compiled to a LINEAR, its EXTERNs are the externs from `Tensor.export`."""
-    linear, var_vals = map_back(linear, externs)
-    run_linear(linear, var_vals, update_stats=do_update_stats)
+    """Links a LINEAR from `Tensor.compile` to the externs from `Tensor.export` and runs it."""
+    var_vals = {f"e{i}": x.arg.val for i,x in enumerate(externs) if x.is_bound_var}
+    run_linear(Tensor.link(linear, externs), var_vals, externs, update_stats=do_update_stats)
 
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:

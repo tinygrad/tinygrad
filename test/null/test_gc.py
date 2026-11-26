@@ -2,8 +2,8 @@
 import gc, weakref, contextlib
 import unittest
 import numpy as np
-from tinygrad.engine.realize import run_linear
 from tinygrad.tensor import Tensor
+from test.helpers import run_schedule
 
 def _allocations_of_type(t):
   ret = 0
@@ -83,7 +83,7 @@ class TestGC(unittest.TestCase):
     with assert_freed(x.uop.buffer):
       y = x+Tensor.ones(256).contiguous()
       del x
-      run_linear(*y.linear_with_vars())
+      run_schedule(*y.linear_with_externs())
     with assert_freed(y.uop.buffer):
       del y
 

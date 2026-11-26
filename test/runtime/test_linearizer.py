@@ -5,14 +5,13 @@ from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType, KernelInfo
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.helpers import Context, dedup, TC_SELECT, TC_OPT, DEV
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.x86 import ISARenderer
-from test.helpers import replace_opts, check_schedule
+from test.helpers import replace_opts, check_schedule, run_schedule, bound_schedule
 from test.runtime.test_softmax_fusion import single_kernel_softmax
 MOCKGPU = DEV.interface.startswith("MOCK")
 
@@ -26,8 +25,8 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(4).realize(), Tensor.randn(4).realize()
     np_a, np_b = a.numpy(), b.numpy()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
-    linear = c.schedule_linear()
-    run_linear(linear)
+    linear = bound_schedule(c)
+    run_schedule(linear)
     rawbufs = [s.buffer for s in linear.src[-1].src[1:] if not s.is_bound_var]
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.uop.base.realized, b.uop.base.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
@@ -165,8 +164,8 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.ones(4, 4).contiguous().realize()
     b = a.shrink(((1, 2), None)).pad(((1, 2), None)).bool()
     a.assign(b.where(2, a))
-    linear, var_vals = check_schedule(a, 1)
-    run_linear(linear, var_vals)
+    linear, externs = check_schedule(a, 1)
+    run_schedule(linear, externs)
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
     program = to_program(replace_opts(linear.src[-1].src[0], []), renderer=Device[Device.DEFAULT].renderer)
     assert not any(u.op == Ops.WHERE for u in tuple(program.src[1].src)), "found where where where should be folded"
@@ -282,15 +281,15 @@ class TestLinearizer(unittest.TestCase):
     r1 = UOp.range(g, 1, dtype=dtypes.int)
     r2 = UOp.range(g.after(o.index(i*2+r1).store(v).end(r1)), 2, dtype=dtypes.int)
     prog = o.index(i*2+1+r2).store(v).end(r2).end(i).sink(arg=KernelInfo())
-    run_linear(UOp(Ops.LINEAR, src=(prog.call(flag.uop.buf_uop, out.uop.buf_uop),)), update_stats=False)
+    run_schedule(UOp(Ops.LINEAR, src=(prog.call(flag.uop.buf_uop, out.uop.buf_uop),)), update_stats=False)
     self.assertEqual(out.tolist(), [0, 0, 1, 1])
 
 # *** helpers ***
 
 def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   if isinstance(r, Tensor): r = [r]
-  linear, var_vals = Tensor.linear_with_vars(*r)
-  run_linear(UOp(Ops.LINEAR, src=linear.src[:-1]), var_vals)  # run all kernels except the last one
+  linear = bound_schedule(*r)
+  run_schedule(UOp(Ops.LINEAR, src=linear.src[:-1]))  # run all kernels except the last one
   last_call = linear.src[-1]
   ast = last_call.src[0]
   assert ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {last_call}"
@@ -323,7 +322,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
 
   def run_prg(opts):
     ast = realized_ast if opts is None else replace_opts(realized_ast, list(opts))
-    run_linear(UOp(Ops.LINEAR, src=(ast.call(*buf_uops),)))
+    run_schedule(UOp(Ops.LINEAR, src=(ast.call(*buf_uops),)))
 
   def check_opt(opts):
     reset_bufs(outbufs)

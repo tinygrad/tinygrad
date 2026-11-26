@@ -2,20 +2,20 @@ import unittest
 import numpy as np
 from tinygrad.device import Device, Buffer
 from tinygrad.dtype import dtypes, ConstType
-from tinygrad.engine.realize import run_linear
 from tinygrad.helpers import prod
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.tensor import Tensor
+from test.helpers import run_schedule
 
 def _test_uop_result(inputs:list[Tensor], sink:UOp, local_size=None):
   for x in inputs: x.realize()
   sz = 1 if local_size is None else prod(local_size)
   outs = [UOp.new_buffer(Device.DEFAULT, sz, u.src[1].dtype) for u in sink.src if u.op is Ops.STORE]
   for u in outs: u.buffer.allocate().copy_from(Buffer("PYTHON", u.buffer.nbytes, initial_value=bytes(u.buffer.nbytes)))
-  run_linear(UOp(Ops.LINEAR, src=(sink.call(*outs, *(x.uop.base for x in inputs)),)))
+  run_schedule(UOp(Ops.LINEAR, src=(sink.call(*outs, *(x.uop.base for x in inputs)),)))
   return [Tensor(u).numpy() for u in outs]
 
 def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
