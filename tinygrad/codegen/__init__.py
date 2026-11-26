@@ -4,6 +4,7 @@ import itertools, functools, time, inspect
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC, SCACHE, BASEDIR
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile, prod
 from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored, NO_MEMORY_PLANNER
+from tinygrad.helpers import strides_for_shape
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
@@ -111,6 +112,10 @@ def index_lanes(x:UOp) -> list[UOp]:
   if x.max_numel() == 0: return []
   if x.op is Ops.RESHAPE and all_int(x.src[0].shape): return index_lanes(x.src[0])
   if x.op is Ops.EXPAND: return index_lanes(x.src[0]) * int(prod(x.marg))
+  if x.op is Ops.PERMUTE:
+    lanes, shape = index_lanes(x.src[0]), x.src[0].shape
+    offsets = [[i*st for i in range(sz)] for sz,st in zip(shape, strides_for_shape(shape))]
+    return [lanes[sum(idx)] for idx in itertools.product(*(offsets[a] for a in x.marg))]
   if not x.shape: return [x]
   return [x.index(*idx) for idx in itertools.product(*map(range, x.shape))]
 
