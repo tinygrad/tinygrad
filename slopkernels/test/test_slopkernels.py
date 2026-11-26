@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import numpy as np
 from tinygrad import Device, Tensor, UOp, dtypes
-from tinygrad.helpers import DEV, unwrap
+from tinygrad.helpers import DEV
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.uop.ops import Ops
@@ -123,7 +123,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
     ref_q1 = (x_q1 @ w_ref.T).numpy()
     got_q1 = _krun("amd_gemv_quant_f32", (2, 64), dev, w_u8, x_q1, sel0, g0, qtype=8,
                    tokens=2, x_rows=2, out_features=64, in_features=1280, raw_bytes=w_bytes, grid_len=1,
-                   group_rows=0, use_sel=0, x_share=1, ndev=1).numpy()
+                   group_rows=0, use_sel=0, x_share=1, ndev=1, arch=tgt[0], num_experts=0).numpy()
     np.testing.assert_allclose(got_q1, ref_q1, rtol=3e-2, atol=2e-2 * np.abs(ref_q1).max())
     x_q16 = Tensor(rng.standard_normal((16, 1280)).astype(np.float16)).realize()
     ref_q16 = (x_q16.float() @ w_ref.T).numpy()
@@ -137,18 +137,14 @@ class TestSlopKernelsUIR(unittest.TestCase):
     x_m = Tensor(rng.standard_normal((1, 256)).astype(np.float32)).realize()
     got_m = _krun("amd_gemv_quant_f32", (2, 16), dev, mw_u8, x_m, sel_m, g0, qtype=8,
                   tokens=2, x_rows=1, out_features=16, in_features=256, raw_bytes=int(mw_u8.numel()), grid_len=1, group_rows=0,
-                  use_sel=1, x_share=2, ndev=1).numpy()
+                  use_sel=1, x_share=2, ndev=1, arch=tgt[0], num_experts=4).numpy()
     for j, eid in enumerate((2, 0)):
       np.testing.assert_allclose(got_m[j], mw_ref_np[eid] @ x_m.numpy()[0], rtol=3e-2, atol=5e-2)
     # 4. Flash attention decode + prefill
     kv_fa = Tensor(rng.standard_normal((2, 1, 2, 128, 64)).astype(np.float16)).realize()
     q_dec = Tensor(rng.standard_normal((1, 4, 1, 64)).astype(np.float16)).realize()
-    kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
-      B=1, H_KV=2, G=2, d_blks=1, n_blks=2, C=2, valid_kv_offset=0, waves=16)
-    partial, stats = (UOp.alloc((1, 4, 2, d), dtypes.float32, device=dev) for d in (64, 2))
-    cp = kp.call(partial, stats, q_dec.uop, kv_fa.uop, UOp.const(53))
-    got_fd = _krun("amd_flash_decode_combine", (1, 4, 1, 64), dev, partial.after(cp), stats.after(cp), UOp.const(53),
-                   B=1, H=4, C=2, d_blks=1, valid_kv_offset=0).numpy()
+    got_fd = _krun("amd_flash_decode", (1, 4, 1, 64), dev, q_dec, kv_fa, UOp.const(53),
+                   B=1, H_KV=2, G=2, d_blks=1, n_blks=2, C=2, valid_kv_offset=0).numpy()
     ref_fd = q_dec.float().scaled_dot_product_attention(kv_fa[0, :, :, :53].float(), kv_fa[1, :, :, :53].float(), enable_gqa=True).numpy()
     np.testing.assert_allclose(got_fd, ref_fd, rtol=5e-3, atol=5e-3)
     if tgt[0] != 9:
@@ -198,7 +194,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
     x_rep = Tensor(rng.standard_normal((2, 256)).astype(np.float32)).shard(devs, axis=None).realize()
     got_col = _krun("amd_gemv_quant_f32", (2, 32), devs, w_col, x_rep, sel0, g0, axis=1, qtype=8,
                     tokens=2, x_rows=2, out_features=32, in_features=256, raw_bytes=int(w_col.uop.max_shard_shape[0]),
-                    grid_len=1, group_rows=0, use_sel=0, x_share=1, ndev=1)
+                    grid_len=1, group_rows=0, use_sel=0, x_share=1, ndev=1, arch=12, num_experts=0)
     np.testing.assert_allclose(got_col.numpy(), (x_rep.to("AMD:0") @ w_ref.T).numpy(), rtol=3e-2, atol=5e-2)
     # 2. Row-sharded GEMV (split-K all-reduce)
     w_u8_r, _, w_ref_r = _make_q8_0(rng, 32, 512)
@@ -207,7 +203,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
     ref_row = (x_sh.to("AMD:0") @ w_ref_r.T).numpy()
     got_row = _krun("amd_gemv_quant_f32", (2, 32), devs, w_row, x_sh, sel0, g0, axis=0, qtype=8,
                     tokens=2, x_rows=2, out_features=32, in_features=256, raw_bytes=int(w_row.uop.max_shard_shape[0]),
-                    grid_len=1, group_rows=0, use_sel=0, x_share=1, ndev=1).reshape(2, 2, 32).sum(0)
+                    grid_len=1, group_rows=0, use_sel=0, x_share=1, ndev=1, arch=12, num_experts=0).reshape(2, 2, 32).sum(0)
     np.testing.assert_allclose(got_row.numpy(), ref_row, rtol=3e-2, atol=2e-2 * np.abs(ref_row).max())
     # 3. Expert-sharded MoE
     mw_u8, _, mw_ref = _make_q8_0(rng, 4 * 16, 256)
@@ -216,19 +212,15 @@ class TestSlopKernelsUIR(unittest.TestCase):
     xm_sh = Tensor(rng.standard_normal((1, 256)).astype(np.float32)).shard(devs, axis=None).realize()
     got_ms = _krun("amd_gemv_quant_f32", (2, 16), devs, mw_sh, xm_sh, sel_sh, g0, axis=0, qtype=8, tokens=2, x_rows=1,
                    out_features=16, in_features=256, raw_bytes=int(mw_sh.uop.max_shard_shape[0]), grid_len=1, group_rows=0,
-                   use_sel=1, x_share=2, ndev=2).reshape(2, 2, 16).sum(0).numpy()
+                   use_sel=1, x_share=2, ndev=2, arch=12, num_experts=4).reshape(2, 2, 16).sum(0).numpy()
     for j, eid in enumerate((3, 1)):
       np.testing.assert_allclose(got_ms[j], mw_ref.numpy().reshape(4, 16, 256)[eid] @ xm_sh.to("AMD:0").numpy()[0], rtol=3e-2, atol=5e-2)
     # 4. Head-sharded flash decode
     q_fa = Tensor(rng.standard_normal((1, 4, 1, 64)).astype(np.float16)).realize()
     kv_fa = Tensor(rng.standard_normal((2, 1, 2, 128, 64)).astype(np.float16)).realize()
     q_sh, kv_sh = q_fa.shard(devs, axis=1).realize(), kv_fa.shard(devs, axis=2).realize()
-    kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
-      B=1, H_KV=1, G=2, d_blks=1, n_blks=2, C=2, valid_kv_offset=0, waves=16)
-    partial, stats = (UOp.alloc((1, 2, 2, d), dtypes.float32, device=devs, axis=1) for d in (64, 2))
-    cp = kp.call(partial, stats, q_sh.uop, kv_sh.uop, UOp.const(41))
-    got_fs = _krun("amd_flash_decode_combine", (1, 2, 1, 64), devs, partial.after(cp), stats.after(cp), UOp.const(41), axis=1,
-                   B=1, H=2, C=2, d_blks=1, valid_kv_offset=0).numpy()
+    got_fs = _krun("amd_flash_decode", (1, 2, 1, 64), devs, q_sh, kv_sh, UOp.const(41), axis=1,
+                   B=1, H_KV=1, G=2, d_blks=1, n_blks=2, C=2, valid_kv_offset=0).numpy()
     ref_fs = q_fa.float().scaled_dot_product_attention(kv_fa[0, :, :, :41].float(), kv_fa[1, :, :, :41].float(), enable_gqa=True).numpy()
     np.testing.assert_allclose(got_fs, ref_fs, rtol=5e-3, atol=5e-3)
 

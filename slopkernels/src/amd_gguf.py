@@ -319,10 +319,22 @@ def _direct_gemv_body(out:UOp, raw:UOp, x:UOp, grids:tuple[UOp, ...], out_featur
   grid = grids[0] if grids else None
   grid_lds = grid
   if lds_grid and grid is not None:
+    is_iq3x:bool|UOp = (qt == IQ3_XXS) if isinstance(qt, int) else qt.eq(IQ3_XXS)
     g_len = grid.shape[0]
-    g_lds, g_i = UOp.alloc((g_len,), dtypes.uint32, addrspace=AddrSpace.LOCAL), UOp.range((g_len + threads - 1) // threads, 20)
+    g_lds_len = (512 if is_iq3x else g_len) if isinstance(is_iq3x, bool) else is_iq3x.where(512, g_len)
+    g_lds, g_i = UOp.alloc((g_lds_len,), dtypes.uint32, addrspace=AddrSpace.LOCAL), UOp.range((g_len + threads - 1) // threads, 20)
     g_off = tid + g_i * threads
-    grid_lds = g_lds.after(g_lds[g_off.valid(g_off < g_len)].store(grid[g_off.valid(g_off < g_len)].load()).end(g_i).barrier())
+    gv = grid[g_off.valid(g_off < g_len)].load()
+    bf = [((gv >> (8 * i)) & 255).float() * UOp.const(1.0 / 64.0, dtypes.float32) for i in range(4)]
+    pk0 = _nat("__builtin_bit_cast(unsigned int, __builtin_amdgcn_cvt_pkrtz({0}, {1}))", dtypes.uint32, bf[0], bf[1])
+    pk1 = _nat("__builtin_bit_cast(unsigned int, __builtin_amdgcn_cvt_pkrtz({0}, {1}))", dtypes.uint32, bf[2], bf[3])
+    if isinstance(is_iq3x, bool):
+      st_g = (UOp.group(g_lds[(g_off * 2).valid(g_off < g_len)].store(pk0), g_lds[(g_off * 2 + 1).valid(g_off < g_len)].store(pk1))
+              if is_iq3x else g_lds[g_off.valid(g_off < g_len)].store(gv))
+    else:
+      st_g = UOp.group(g_lds[is_iq3x.where(g_off * 2, g_off).valid(g_off < g_len)].store(is_iq3x.where(pk0, gv)),
+                       g_lds[(g_off * 2 + 1).valid(is_iq3x & (g_off < g_len))].store(pk1))
+    grid_lds = g_lds.after(st_g.end(g_i).barrier())
   ones_h2, z = UOp.const(0x3c003c00, dtypes.uint32), UOp.const(0.0, dtypes.float32)
   c6400, sel_lo, sel_hi = UOp.const(0x64006400, dtypes.uint32), UOp.const(0x05010500, dtypes.uint32), UOp.const(0x05030502, dtypes.uint32)
   acc = UOp.alloc((rpw,), dtypes.float32, addrspace=AddrSpace.REG)
@@ -1201,23 +1213,32 @@ def _amd_moe_route_kernel(tok_idx:UOp, tile_exp:UOp, tile_off:UOp, tile_cnt:UOp,
   return UOp.group(sc_done, td_done, st_tot).end(tid, blk).sink(arg=KernelInfo(name="amd_moe_route", opts_to_apply=()))
 
 @functools.cache
-def _rdna4_quant_x_frag_kernel(xt:UOp, xsc:UOp, x:UOp, tok_idx:UOp, tile_off:UOp, tile_cnt:UOp, total_tiles:UOp, *,
-                               use_moe:UOp, x_share:UOp) -> UOp:
+def _rdna4_quant_x_frag_kernel(xt:UOp, xsc:UOp, x:UOp, tok_idx:UOp|None=None, tile_off:UOp|None=None, tile_cnt:UOp|None=None,
+                               total_tiles:UOp|None=None, *, use_moe:bool=False, x_share:int|UOp=1) -> UOp:
   m_tiles, k_tiles, x_rows, in_features = xt.shape[0], xsc.shape[1], x.shape[0], x.shape[1]
   assert isinstance(m_tiles, UOp) and isinstance(k_tiles, UOp) and isinstance(x_rows, UOp) and isinstance(in_features, UOp)
-  is_moe = use_moe.eq(1)
   gid = UOp.range(m_tiles * k_tiles, 0, AxisType.GLOBAL)
   wave, lane = UOp.range(2, 1, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
   tid, m_tile, kt = wave * 32 + lane, gid // k_tiles, gid % k_tiles
   row16, kg, z32 = tid // 4, tid % 4, UOp.const(0, dtypes.uint32)
-  guard = UOp(Ops.WHERE, src=(is_moe, _nat("({{ if ((int)({0}) >= (int)({1})) return; 0; }})", dtypes.int32,
-                                           m_tile, total_tiles[0].load(), inline=False), UOp.const(0, dtypes.int32)))
-  cnt_m, off_m = tile_cnt.after(guard)[m_tile].load().cast(dtypes.weakint), tile_off.after(guard)[m_tile].load().cast(dtypes.weakint)
-  r_ok = is_moe.where(row16 < cnt_m, (m_tile * 16 + row16) < x_rows)
-  moe_idx = r_ok.where(tok_idx.after(guard)[(off_m + row16).valid(is_moe & r_ok)].load(), UOp.const(0, dtypes.int32)).cast(dtypes.weakint) // x_share
-  src_row = is_moe.where(moe_idx.maximum(0).minimum(x_rows - 1), (m_tile * 16 + row16).minimum(x_rows - 1))
-  x_u32 = x.after(guard).flatten().bitcast(dtypes.uint32)
-  us = [v for c in range(4) for v in _v4(_amd_load(x_u32[src_row * (in_features // 2) + kt * 64 + kg * 16 + c * 4], 4))]
+  if use_moe:
+    assert tok_idx is not None and tile_off is not None and tile_cnt is not None and total_tiles is not None
+    guard = _nat("({{ if ((int)({0}) >= (int)({1})) return; 0; }})", dtypes.int32, m_tile, total_tiles[0].load(), inline=False)
+    cnt_m, off_m = tile_cnt.after(guard)[m_tile].load().cast(dtypes.weakint), tile_off.after(guard)[m_tile].load().cast(dtypes.weakint)
+    r_ok = row16 < cnt_m
+    src_row = (r_ok.where(tok_idx.after(guard)[(off_m + row16).valid(r_ok)].load(), UOp.const(0, dtypes.int32)).cast(dtypes.weakint) // x_share
+               ).maximum(0).minimum(x_rows - 1)
+    x_g, xt_g, xsc_g = x.after(guard), xt.after(guard), xsc.after(guard)
+  else:
+    r_ok, src_row = (m_tile * 16 + row16) < x_rows, (m_tile * 16 + row16).minimum(x_rows - 1)
+    x_g, xt_g, xsc_g = x, xt, xsc
+  if x.dtype == dtypes.float32:
+    xf = x_g.flatten()
+    fs = [v for c in range(8) for v in _v4(_amd_load(xf[src_row * in_features + kt * 128 + kg * 32 + c * 4], 4))]
+    us = [_nat("__builtin_bit_cast(unsigned int, __builtin_amdgcn_cvt_pkrtz({0}, {1}))", dtypes.uint32, fs[2 * i], fs[2 * i + 1]) for i in range(16)]
+  else:
+    x_u32 = x_g.flatten().bitcast(dtypes.uint32)
+    us = [v for c in range(4) for v in _v4(_amd_load(x_u32[src_row * (in_features // 2) + kt * 64 + kg * 16 + c * 4], 4))]
   lvl = [_pk_max_u16(us[2 * i] & 0x7fff7fff, us[2 * i + 1] & 0x7fff7fff) for i in range(8)]
   while len(lvl) > 1: lvl = [_pk_max_u16(lvl[2 * i], lvl[2 * i + 1]) for i in range(len(lvl) // 2)]
   rm = _pk_max_u16(lvl[0], _lane_xor(lvl[0], 1, dpp=True))
@@ -1226,44 +1247,48 @@ def _rdna4_quant_x_frag_kernel(xt:UOp, xsc:UOp, x:UOp, tok_idx:UOp, tile_off:UOp
                    UOp.const(1.0 / 32768.0, dtypes.float32))
   inv_h2 = _f32_to_h2(_fast_rcp(asc))
   pks = [r_ok.where(_h2x2_to_fp8_pk(us[2 * i], us[2 * i + 1], inv_h2), z32) for i in range(8)]
-  sts = [xt.after(guard)[m_tile, kt * 8 + kg * 2 + k_sub, lg_i * 16 + row16, j].store(pks[k_sub * 4 + lg_i * 2 + j])
+  sts = [xt_g[m_tile, kt * 8 + kg * 2 + k_sub, lg_i * 16 + row16, j].store(pks[k_sub * 4 + lg_i * 2 + j])
          for k_sub in (0, 1) for lg_i in (0, 1) for j in (0, 1)]
-  sts.append(xsc.after(guard)[m_tile, kt, row16.valid(kg.eq(0))].store(r_ok.where(asc, UOp.const(0.0, dtypes.float32))))
+  sts.append(xsc_g[m_tile, kt, row16.valid(kg.eq(0))].store(r_ok.where(asc, UOp.const(0.0, dtypes.float32))))
   return UOp.group(*sts).end(lane, wave, gid).sink(arg=KernelInfo(name="rdna4_quant_x_frag", opts_to_apply=()))
 
 @functools.cache
-def _rdna4_gemm_fp8_kernel(out:UOp, raw:UOp, xt:UOp, xsc:UOp, grid:UOp, tok_idx:UOp, tile_exp:UOp, tile_off:UOp, tile_cnt:UOp,
-                           total_tiles:UOp, *, out_features:UOp, in_features:UOp, ggml_type:int|UOp, use_moe:UOp,
-                           use_128:UOp, qtypes:tuple[int, ...]|None=None) -> UOp:
+def _rdna4_gemm_fp8_kernel(out:UOp, raw:UOp, xt:UOp, xsc:UOp, grid:UOp, tok_idx:UOp|None=None, tile_exp:UOp|None=None,
+                           tile_off:UOp|None=None, tile_cnt:UOp|None=None, total_tiles:UOp|None=None, *, out_features:UOp,
+                           in_features:UOp, ggml_type:int|UOp, use_moe:bool=False, use_128:bool|UOp=False,
+                           qtypes:tuple[int, ...]|None=None) -> UOp:
   qts = qtypes if qtypes is not None else ((ggml_type,) if isinstance(ggml_type, int) else tuple(sorted(OTF_FP8_QUANTS)))
-  is_moe = use_moe.eq(1)
-  u128 = is_moe.logical_not() & use_128
-  wm_w, wn_x = 4, is_moe.where(1, 2)
-  tm_w, tn_x = is_moe.where(1, 2), is_moe.where(1, u128.where(4, 2))
+  wm_w, wn_x = 4, (1 if use_moe else 2)
+  tm_w = 1 if use_moe else 2
+  tn_x:int|UOp = 1 if use_moe else (use_128.where(4, 2) if isinstance(use_128, UOp) else (4 if use_128 else 2))
   bn, bm, waves = wm_w * tm_w * 16, wn_x * tn_x * 16, wm_w * wn_x
   threads, b_iters = waves * 32, 2
   m_tiles_tot, tok_out = xt.shape[0], out.shape[0]
   assert isinstance(m_tiles_tot, UOp) and isinstance(tok_out, UOp)
-  m_blks = is_moe.where(m_tiles_tot, (tok_out + bm - 1) // bm)
+  m_blks = m_tiles_tot if use_moe else (tok_out + bm - 1) // bm
   n_blks, k_tiles, k_sb = (out_features + bn - 1) // bn, in_features // 128, in_features // 256
   gid = UOp.range(m_blks * n_blks, 0, AxisType.GLOBAL)
   swz = (m_blks % 4).eq(0).where(4, (m_blks % 2).eq(0).where(2, 1))
   grp, in_grp = gid // (swz * n_blks), gid % (swz * n_blks)
-  block_m = is_moe.where(gid // n_blks, grp * swz + in_grp % swz)
-  block_n = is_moe.where(gid % n_blks, in_grp // swz)
+  block_m = (gid // n_blks) if use_moe else (grp * swz + in_grp % swz)
+  block_n = (gid % n_blks) if use_moe else (in_grp // swz)
   lane, wave = UOp.range(32, -1, AxisType.WARP), UOp.range(waves, 2, AxisType.LOCAL)
   tid, wave_n, wave_m, col, lg = wave * 32 + lane, wave // wn_x, wave % wn_x, lane % 16, lane // 16
-  guard = UOp(Ops.WHERE, src=(is_moe, _nat("({{ if ((int)({0}) >= (int)({1})) return; 0; }})", dtypes.int32,
-                                           block_m, total_tiles[0].load(), inline=False), UOp.const(0, dtypes.int32)))
-  exp_id = is_moe.where(tile_exp.after(guard)[block_m].load().cast(dtypes.weakint), UOp.const(0, dtypes.weakint))
-  raw_g, xt_g = raw.after(guard), xt.after(guard)
+  if use_moe:
+    assert tok_idx is not None and tile_exp is not None and tile_off is not None and tile_cnt is not None and total_tiles is not None
+    guard:UOp|None = _nat("({{ if ((int)({0}) >= (int)({1})) return; 0; }})", dtypes.int32, block_m, total_tiles[0].load(), inline=False)
+    exp_id = tile_exp.after(guard)[block_m].load().cast(dtypes.weakint)
+    raw_g, xt_g, xsc_g, out_g = raw.after(guard), xt.after(guard), xsc.after(guard), out.after(guard)
+    gdep:tuple[UOp, ...] = (guard,)
+  else:
+    guard, exp_id, raw_g, xt_g, xsc_g, out_g, gdep = None, UOp.const(0, dtypes.weakint), raw, xt, xsc, out, ()
   raw_u32 = _qraw_u32(raw_g)
   B_lds = UOp.alloc((2, bn // 16, 8, 32, 8), dtypes.fp8e4m3, addrspace=AddrSpace.LOCAL)
   B_u32 = B_lds.flatten().bitcast(dtypes.uint32).reshape(2, bn // 16, 8, 32, 2)
   Bsc_lds = UOp.alloc((2, bn), dtypes.float32, addrspace=AddrSpace.LOCAL)
   acc = UOp.alloc((tm_w, tn_x, 8), dtypes.float32, addrspace=AddrSpace.REG)
   sub_acc, eps = UOp.alloc((tn_x, 8), dtypes.float32, addrspace=AddrSpace.REG), UOp.const(1e-30, dtypes.float32)
-  acc = acc.after(acc.after(guard).store(acc.const_like(0.0)))
+  acc = acc.after((acc.after(*gdep) if gdep else acc).store(acc.const_like(0.0)))
 
   def load_b_reg_q(q:int, kt:UOp, dep:tuple[UOp, ...], rid:int) -> tuple[UOp, UOp]:
     rq = _qraw(raw_g, q)
@@ -1448,31 +1473,34 @@ def _rdna4_gemm_fp8_kernel(out:UOp, raw:UOp, xt:UOp, xsc:UOp, grid:UOp, tok_idx:
   kt = UOp.range(k_tiles + 1, 10)
   kt_ld, kt_c, do_cmp, do_st = kt.minimum(k_tiles - 1), (kt - 1).maximum(0), kt > 0, kt < k_tiles
   bc, bn_b = kt_c % 2, kt % 2
-  b_map, br_v = load_b_reg(kt_ld, (guard, kt), 34)
+  b_map, br_v = load_b_reg(kt_ld, gdep + (kt,), 34)
   r_cmp = UOp.range(do_cmp.cast(dtypes.weakint), 12)
-  W_r, Wsc_r = B_lds.after(guard, kt, r_cmp, br_v)[bc], Bsc_lds.after(guard, kt, r_cmp, br_v)[bc]
+  W_r, Wsc_r = B_lds.after(*gdep, kt, r_cmp, br_v)[bc], Bsc_lds.after(*gdep, kt, r_cmp, br_v)[bc]
   ti_r = UOp.range(tm_w, 100)
-  sa = sub_acc.after(sub_acc.after(guard, kt, r_cmp, br_v, ti_r).store(sub_acc.const_like(0.0)))
+  sa = sub_acc.after(sub_acc.after(*gdep, kt, r_cmp, br_v, ti_r).store(sub_acc.const_like(0.0)))
   kg_r, tn_r = UOp.range(8, 101), UOp.range(tn_x, 102)
-  tb_j = is_moe.where(block_m, (block_m * (wn_x * tn_x) + wave_m * tn_x + tn_r).minimum(m_tiles_tot - 1))
+  tb_j = block_m if use_moe else (block_m * (wn_x * tn_x) + wave_m * tn_x + tn_r).minimum(m_tiles_tot - 1)
   bv = _amd_load(xt_g[tb_j, kt_c * 8 + kg_r, lane, 0], 2).bitcast(dtypes.fp8e4m3)
   w_op = sub_acc[tn_r].store(UOp.wmma(W_r[wave_n * tm_w + ti_r, kg_r, lane], bv, sa.after(kg_r)[tn_r], *WMMA_ARG)).end(tn_r, kg_r)
   tn_f, e_f = UOp.range(tn_x, 120), UOp.range(8, 121, AxisType.UPCAST)
-  tb_f = is_moe.where(block_m, (block_m * (wn_x * tn_x) + wave_m * tn_x + tn_f).minimum(m_tiles_tot - 1))
-  fl = acc[ti_r, tn_f, e_f].store(acc.after(guard, kt, r_cmp, ti_r)[ti_r, tn_f, e_f].load() + sub_acc.after(w_op)[tn_f, e_f].load() * (
-    Wsc_r[(wave_n * tm_w + ti_r) * 16 + lg * 8 + e_f].load() * xsc[tb_f, kt_c, col].load())).end(e_f, tn_f, ti_r)
+  tb_f = block_m if use_moe else (block_m * (wn_x * tn_x) + wave_m * tn_x + tn_f).minimum(m_tiles_tot - 1)
+  fl = acc[ti_r, tn_f, e_f].store(acc.after(*gdep, kt, r_cmp, ti_r)[ti_r, tn_f, e_f].load() + sub_acc.after(w_op)[tn_f, e_f].load() * (
+    Wsc_r[(wave_n * tm_w + ti_r) * 16 + lg * 8 + e_f].load() * xsc_g[tb_f, kt_c, col].load())).end(e_f, tn_f, ti_r)
   cmp_done = acc[0, 0, 7].store(_pin_f32(acc.after(fl)[0, 0, 7].load(), fl)).end(r_cmp)
   r_st = UOp.range(do_st.cast(dtypes.weakint), 11)
-  st_w = store_b_lds(bn_b, b_map, kt_ld, (guard, kt, r_st, br_v), 48).end(r_st)
+  st_w = store_b_lds(bn_b, b_map, kt_ld, gdep + (kt, r_st, br_v), 48).end(r_st)
   lp = UOp.group(cmp_done, st_w).barrier().end(kt)
   acc_f = acc.after(lp)
   ti_o, tn_o, e_o = UOp.range(tm_w, 190), UOp.range(tn_x, 191), UOp.range(8, 192, AxisType.UPCAST)
   on = block_n * bn + (wave_n * tm_w + ti_o) * 16 + lg * 8 + e_o
-  m_dense = block_m * bm + (wave_m * tn_x + tn_o) * 16 + col
-  m_ok_moe = col < tile_cnt.after(guard)[block_m].load().cast(dtypes.weakint)
-  m_moe = m_ok_moe.where(tok_idx.after(guard)[(tile_off.after(guard)[block_m].load().cast(dtypes.weakint) + col).valid(
-    is_moe & m_ok_moe)].load(), UOp.const(0, dtypes.int32)).cast(dtypes.weakint)
-  om, om_ok = is_moe.where(m_moe, m_dense), is_moe.where(m_ok_moe, m_dense < tok_out)
+  if use_moe:
+    assert tok_idx is not None and tile_off is not None and tile_cnt is not None and guard is not None
+    om_ok = col < tile_cnt.after(guard)[block_m].load().cast(dtypes.weakint)
+    om = om_ok.where(tok_idx.after(guard)[(tile_off.after(guard)[block_m].load().cast(dtypes.weakint) + col).valid(om_ok)].load(),
+                     UOp.const(0, dtypes.int32)).cast(dtypes.weakint)
+  else:
+    om = block_m * bm + (wave_m * tn_x + tn_o) * 16 + col
+    om_ok = om < tok_out
   kname = f"linear_{QUANT_NAMES[ggml_type]}_fp8_wmma" if isinstance(ggml_type, int) else "linear_quant_fp8_wmma"
-  return out.after(guard)[om.valid(om_ok), on.valid(on < out_features)].store(acc_f[ti_o, tn_o, e_o].load().cast(out.dtype)).end(
+  return out_g[om.valid(om_ok), on.valid(on < out_features)].store(acc_f[ti_o, tn_o, e_o].load().cast(out.dtype)).end(
     e_o, tn_o, ti_o, wave, lane, gid).sink(arg=KernelInfo(name=kname, opts_to_apply=()))

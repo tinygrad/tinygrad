@@ -1,3 +1,4 @@
+from dataclasses import replace
 import math
 import unittest
 from unittest.mock import patch
@@ -55,15 +56,14 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
     v_base, v_off = _split_offset(valid_end)
     vkl_u = v_base if isinstance(v_base, UOp) else UOp.const(int(v_base))
     if decode and M == 1 and D in (64, 128, 256) and (grp := H // H_KV) in (1, 2, 4, 8) and N_phys % 64 == 0:
-      ch, waves = min(48, ceildiv(N_phys, 64)), 16
-      while waves * grp * ((D + 4) * 2 + 8) > 65536: waves //= 2
-      kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
-        B=B, H_KV=H_KV, G=grp, d_blks=D // 64, n_blks=N_phys // 64, C=ch, valid_kv_offset=v_off, waves=waves)
-      partial, stats = (UOp.alloc((B, H, ch, d), dtypes.float32, device=q.device) for d in (D, 2))
-      cp = kp.call(partial, stats, q_in.uop, assigned_kv.uop, vkl_u)
-      kc = unwrap(slopkernels.get("amd_flash_decode_combine")).specialize(B=B, H=H, C=ch, d_blks=D // 64, valid_kv_offset=v_off)
+      ch = min(48, ceildiv(N_phys, 64))
+      kf = unwrap(slopkernels.get("amd_flash_decode")).specialize(
+        B=B, H_KV=H_KV, G=grp, d_blks=D // 64, n_blks=N_phys // 64, C=ch, valid_kv_offset=v_off)
+      if kf.op is Ops.SINK and kf.arg is None:
+        kf = kf.substitute({b: b.replace(src=b.src[:1] + UOp.device_range_src(q.device), arg=replace(b.arg, device=q.device))
+                            for b in kf.toposort() if b.op is Ops.ALLOC and b.arg.device is None})
       out = UOp.alloc((B, H, 1, D), dtypes.float32, device=q.device)
-      return Tensor(out.after(kc.call(out, partial.after(cp), stats.after(cp), vkl_u)))
+      return Tensor(out.after(kf.call(out, q_in.uop, assigned_kv.uop, vkl_u)))
     if not decode and target[0] != 9 and D in (64, 128, 256, 320) and N_phys % 32 == 0 and M % 32 == 0:
       k_fa = unwrap(slopkernels.get(f"{'rdna4' if target[0] == 12 else 'rdna3'}_flash_attn")).specialize(
         BH=B * H, m_blks=M // 32, B=B, H_KV=H_KV, d_blks=D // 64, n_blks=N_phys // 32, valid_kv_offset=v_off, q_start_from_end=1)

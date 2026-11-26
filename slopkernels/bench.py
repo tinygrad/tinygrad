@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse, functools, json, math, pathlib, re, statistics, struct, sys, time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -14,6 +14,7 @@ from tinygrad.dtype import DType
 from tinygrad.engine.realize import ExecContext, compile_linear, link_linear, pm_exec
 from tinygrad.helpers import ceildiv, colored, prod, unwrap
 from tinygrad.llm.gguf import ggml_data_to_tensor
+from tinygrad.uop.ops import Ops
 
 import slopkernels
 
@@ -116,6 +117,9 @@ def _time_fn(fn:Callable[[], Tensor], verify:VerifyFn|None, warmup:int, iters:in
 
 def _krun(name:str, shp:tuple[int, ...], dev:str|tuple[str, ...], *args:Tensor|UOp, axis:int|None=None, **kw:int|float) -> Tensor:
   k, o = unwrap(slopkernels.get(name)).specialize(**kw), UOp.alloc(shp, dtypes.float32, device=dev, axis=axis)
+  if k.op is Ops.SINK and k.arg is None:
+    k = k.substitute({b: b.replace(src=b.src[:1] + UOp.device_range_src(dev), arg=replace(b.arg, device=dev))
+                      for b in k.toposort() if b.op is Ops.ALLOC and b.arg.device is None})
   return Tensor(o.after(k.call(o, *(a.uop if isinstance(a, Tensor) else a for a in args))))
 
 @functools.cache
@@ -153,41 +157,15 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         w4 = ggml_data_to_tensor(tile_u8[:CR].flatten(), CR * k, qtype).reshape(CR, k)
         _assert_close(out[:, :CR].float().numpy(), (x.float() @ w4.T).numpy(), rtol=4e-2, atol=5e-2)
       if m % 16 == 0 and n % 16 == 0:
-        if target[0] == 12 and qtype in (8, 10, 11, 12, 13, 14, 18, 21, 22, 23, 39) and m >= 64 and n >= 2048 and n % 128 == 0 \
-            and k >= 512 and k % (128 if qtype in (8, 39) else 256) == 0:
-          m_tiles, k_tiles = ceildiv(m, 16), k // 128
-          lut, gl = _iq_lut(qtype, dev, False)
-          z1 = Tensor([0], dtype=dtypes.int32, device=dev).realize().uop
-          zm = Tensor(np.zeros(m_tiles, dtype=np.int32), device=dev).realize().uop
-          def _run_fp8() -> Tensor:
-            qk = unwrap(slopkernels.get("rdna4_quant_x_frag")).specialize(
-              m_tiles=m_tiles, k_tiles=k_tiles, x_rows=m, tok_len=1, use_moe=0, x_share=1)
-            xt = UOp.alloc((m_tiles, k_tiles * 8, 32, 2), dtypes.uint32, device=dev)
-            xsc = UOp.alloc((m_tiles, k_tiles, 16), dtypes.float32, device=dev)
-            cq = qk.call(xt, xsc, x.half().contiguous().uop, z1, zm, zm, z1)
-            return _krun("rdna4_gemm_fp8", (m, n), dev, w_u8, xt.after(cq), xsc.after(cq), lut, z1, zm, zm, zm, z1,
-                         qtype=qtype, tokens=m, m_tiles=m_tiles, out_features=n, in_features=k,
-                         raw_bytes=raw_bytes, grid_len=gl, use_moe=0, tok_len=1)
-          return _run_fp8, _verify
         mt = 8 if m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
         lut, gl = _iq_lut(qtype, dev, target[0] == 11 or qtype == 23)
         return (lambda: _krun(f"{arch}_gemm_f16", (m, n), dev, w_u8, x.half().contiguous(), lut,
                               qtype=qtype, m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=k,
                               raw_bytes=raw_bytes, grid_len=gl)), _verify
-      if not cdna and 2 <= m <= 15 and k >= 1024 and n % 4 == 0:
-        lut, gl = _iq_lut(qtype, dev, False)
-        def _run_sdot4() -> Tensor:
-          qk = unwrap(slopkernels.get("amd_quant_q8_1_f32")).specialize(tokens=m, in_features=k)
-          xq, xds = UOp.alloc((m, k // 32, 8), dtypes.uint32, device=dev), UOp.alloc((m, k // 32, 3), dtypes.float32, device=dev)
-          cq = qk.call(xq, xds, x.float().contiguous().uop)
-          return _krun("amd_sdot4", (m, n), dev, w_u8, xq.after(cq), xds.after(cq), lut,
-                       qtype=qtype, tokens=m, out_features=n, in_features=k, raw_bytes=raw_bytes, grid_len=gl, group_rows=0)
-        return _run_sdot4, _verify
-      sel0 = Tensor([0], dtype=dtypes.int32, device=dev).realize()
-      lut, gl = _iq_lut(qtype, dev, qtype == 18)
-      return (lambda: _krun("amd_gemv_quant_f32", (m, n), dev, w_u8, x, sel0, lut, qtype=qtype,
+      lut, gl = _iq_lut(qtype, dev, False)
+      return (lambda: _krun("amd_gemv_quant_f32", (m, n), dev, w_u8, x, lut.bitcast(dtypes.int32), lut, qtype=qtype,
                             tokens=m, x_rows=m, out_features=n, in_features=k, raw_bytes=raw_bytes, grid_len=gl,
-                            group_rows=0, use_sel=0, x_share=1, ndev=1)), _verify
+                            group_rows=0, use_sel=0, x_share=1, ndev=1, arch=target[0], num_experts=0)), _verify
     kind = "gemm" if m % 16 == 0 and n % 16 == 0 else "gemv"
     cases.append((f"quant_{kind}_{qname}_{m}x{n}x{k}", w_len * w_dt.itemsize + m * k * x_dt.itemsize + m * n * 4, 2 * m * n * k, _setup))
 
@@ -223,14 +201,14 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       w_packed, tile_u8 = _make_packed(E * mn, mk, qname, dev, seed=19)
       w_u8 = w_packed if w_packed.dtype == dtypes.uint8 else w_packed.bitcast(dtypes.uint8)
       sel, x = Tensor(list(range(TOPK)), dtype=dtypes.int32, device=dev).realize(), _nonuniform((1, mk), dtypes.float32, dev, scale=0.5, freq=0.011)
-      lut, gl = _iq_lut(qtype, dev, qtype == 18)
+      lut, gl = _iq_lut(qtype, dev, False)
       def _verify(out:Tensor) -> None:
         w4 = ggml_data_to_tensor(tile_u8[:CR].flatten(), CR * mk, qtype).reshape(CR, mk)
         ref1, got = (x @ w4.T).numpy()[0], out[:, :CR].float().numpy()
         _assert_close(got, np.broadcast_to(ref1, got.shape), rtol=4e-2, atol=5e-2)
       return (lambda: _krun("amd_gemv_quant_f32", (TOPK, mn), dev, w_u8, x, sel, lut, qtype=qtype,
                             tokens=TOPK, x_rows=1, out_features=mn, in_features=mk, raw_bytes=int(w_u8.numel()), grid_len=gl,
-                            group_rows=0, use_sel=1, x_share=TOPK, ndev=1)), _verify
+                            group_rows=0, use_sel=1, x_share=TOPK, ndev=1, arch=target[0], num_experts=E)), _verify
     cases.append((f"moe_gemv_{qname}_E{E}k{TOPK}_{mn}x{mk}", TOPK * per_e_words * w_dt.itemsize, 2 * TOPK * mn * mk, _mk_moe))
 
   if target[0] == 12 and not smoke:
@@ -240,28 +218,17 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       w_packed, tile_u8 = _make_packed(me * mn_p, mk_p, "Q4_K", dev, seed=23)
       w_u8 = w_packed if w_packed.dtype == dtypes.uint8 else w_packed.bitcast(dtypes.uint8)
       sel = Tensor(np.random.default_rng(7).integers(0, me, size=(mt_t * mk_t,), dtype=np.int32), device=dev).realize()
-      x = _nonuniform((mt_t, mk_p), dtypes.float16, dev, scale=0.5, freq=0.011)
+      x = _nonuniform((mt_t, mk_p), dtypes.float32, dev, scale=0.5, freq=0.011)
       lut, gl = _iq_lut(qtype, dev, False)
-      m_tot, max_tiles = mt_t * mk_t, mt_t * mk_t // 16 + me
-      def _run_moe_pre() -> Tensor:
-        rk = unwrap(slopkernels.get("amd_moe_route")).specialize(m_tot=m_tot, max_tiles=max_tiles, num_experts=me, ndev=1)
-        tok_i, te, to, tc, tot = (UOp.alloc(s, dtypes.int32, device=dev) for s in ((m_tot,), (max_tiles,), (max_tiles,), (max_tiles,), (1,)))
-        cr = rk.call(tok_i, te, to, tc, tot, sel.uop)
-        tok_i, te, to, tc, tot = (a.after(cr) for a in (tok_i, te, to, tc, tot))
-        qk = unwrap(slopkernels.get("rdna4_quant_x_frag")).specialize(
-          m_tiles=max_tiles, k_tiles=mk_p // 128, x_rows=mt_t, tok_len=m_tot, use_moe=1, x_share=mk_t)
-        xt = UOp.alloc((max_tiles, mk_p // 16, 32, 2), dtypes.uint32, device=dev)
-        xsc = UOp.alloc((max_tiles, mk_p // 128, 16), dtypes.float32, device=dev)
-        cq = qk.call(xt, xsc, x.uop, tok_i, to, tc, tot)
-        return _krun("rdna4_gemm_fp8", (m_tot, mn_p), dev, w_u8, xt.after(cq), xsc.after(cq), lut, tok_i, te, to, tc, tot,
-                     qtype=qtype, tokens=m_tot, m_tiles=max_tiles, out_features=mn_p, in_features=mk_p,
-                     raw_bytes=int(w_u8.numel()), grid_len=gl, use_moe=1, tok_len=m_tot)
+      m_tot = mt_t * mk_t
       def _verify(out:Tensor) -> None:
         w4 = ggml_data_to_tensor(tile_u8[:CR].flatten(), CR * mk_p, qtype).reshape(CR, mk_p)
         ref = (x[:16].float() @ w4.T).numpy()
         got = out[:16 * mk_t, :CR].float().numpy().reshape(16, mk_t, CR)
         _assert_close(got, np.broadcast_to(ref[:, None, :], got.shape), rtol=4e-2, atol=5e-2)
-      return _run_moe_pre, _verify
+      return (lambda: _krun("amd_gemv_quant_f32", (m_tot, mn_p), dev, w_u8, x, sel, lut, qtype=qtype,
+                            tokens=m_tot, x_rows=mt_t, out_features=mn_p, in_features=mk_p, raw_bytes=int(w_u8.numel()), grid_len=gl,
+                            group_rows=0, use_sel=1, x_share=mk_t, ndev=1, arch=target[0], num_experts=me)), _verify
     cases.append((f"moe_prefill_Q4_K_T{mt_t}_E{me}k{mk_t}_{mn_p}x{mk_p}", me * per_e_words * w_dt.itemsize,
                   2 * mt_t * mk_t * mn_p * mk_p, _mk_moe_pre))
 
@@ -295,14 +262,8 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       q = _nonuniform((1, fh, 1, fd), dtypes.float16, dev, scale=0.2, freq=0.037)
       kv = _nonuniform((2, 1, fhkv, ctx, fd), dtypes.float16, dev, scale=0.2, freq=0.041, phase=1.1)
       def _run() -> Tensor:
-        ch, grp, waves = min(max(8, 64 // fhkv), 64, ceildiv(ctx, 64)), fh // fhkv, 16
-        while waves * grp * ((fd + 4) * 2 + 8) > 65536: waves //= 2
-        kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
-          B=1, H_KV=fhkv, G=grp, d_blks=fd // 64, n_blks=ctx // 64, C=ch, valid_kv_offset=0, waves=waves)
-        partial, stats = (UOp.alloc((1, fh, ch, d), dtypes.float32, device=dev) for d in (fd, 2))
-        cp = kp.call(partial, stats, q.uop, kv.uop, UOp.const(ctx))
-        return _krun("amd_flash_decode_combine", (1, fh, 1, fd), dev, partial.after(cp), stats.after(cp), UOp.const(ctx),
-                     B=1, H=fh, C=ch, d_blks=fd // 64, valid_kv_offset=0)
+        return _krun("amd_flash_decode", (1, fh, 1, fd), dev, q, kv, UOp.const(ctx), B=1, H_KV=fhkv, G=fh // fhkv,
+                     d_blks=fd // 64, n_blks=ctx // 64, C=min(max(8, 64 // fhkv), 64, ceildiv(ctx, 64)), valid_kv_offset=0)
       def _verify(out:Tensor) -> None:
         ref = q[:, :1].float().scaled_dot_product_attention(kv[0, :, :1].float(), kv[1, :, :1].float(), enable_gqa=True)
         _assert_close(out[:, :1].float().numpy(), ref.numpy(), rtol=5e-3, atol=5e-3)
