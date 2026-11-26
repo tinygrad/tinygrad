@@ -145,9 +145,7 @@ class Linear(nn.Linear):
 
   def __call__(self, x:Tensor) -> Tensor:
     out = self._forward(x)
-    if self.scale is None: return out
-    assert self.bias is None, "a tensor scale goes before the bias, which isn't supported"
-    return (out * self.scale).cast(x.dtype)
+    return out if self.scale is None else (out * self.scale).cast(x.dtype)
 
   def _forward(self, x:Tensor) -> Tensor:
     if self.weight_scale_inv is not None:
