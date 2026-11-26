@@ -4,15 +4,27 @@ from tinygrad import UOp
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 
-WARP_SIZE, WMMA_M, WMMA_N, WMMA_K, DECODE_C_CAP = 32, 16, 16, 16, 8
+WARP_SIZE, WMMA_M, WMMA_N, WMMA_K, DECODE_C_CAP = 32, 16, 16, 16, 64
 WMMA_ARG, LOG2E = ((WMMA_N, WMMA_M, WMMA_K), 32), math.log2(math.e)
 _H2T = "decltype(__builtin_amdgcn_cvt_pkrtz(0.0f, 0.0f))"
 
 def _unbind(v:UOp) -> UOp: return v.unbind_all()[0]
 def _nat(s:str, dt:DType, *args:UOp, inline:bool=True) -> UOp:
   return UOp.native(s, shape=args[0].shape, dtype=dt, fmt=True).call(*args, inline=inline)
-def _lane_xor(v:UOp, m:int, inline:bool=False) -> UOp:
-  return _nat(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f | m<<10})", dtypes.int32, v.bitcast(dtypes.int32), inline=inline).bitcast(v.dtype)
+def _lane_xor(v:UOp, m:int, inline:bool=False, dpp:bool=False) -> UOp:
+  vi = v.bitcast(dtypes.int32)
+  if dpp and m in (1, 2, 4, 8):
+    return _nat(f"__builtin_amdgcn_update_dpp(0, {{0}}, {0x160 | m}, 15, 15, true)", dtypes.int32, vi, inline=inline).bitcast(v.dtype)
+  if dpp and m == 16:
+    return _nat("__builtin_amdgcn_permlanex16({0}, {0}, 0x76543210u, 0xfedcba98u, false, false)",
+                dtypes.int32, vi, inline=inline).bitcast(v.dtype)
+  return _nat(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f | m<<10})", dtypes.int32, vi, inline=inline).bitcast(v.dtype)
+def _ld_tr_into(dst:UOp, ptr:UOp, *deps:UOp) -> UOp:
+  st = UOp.native(
+    "({{ typedef __fp16 _hv8 __attribute__((__vector_size__(8 * sizeof(__fp16)))); "
+    "*(_hv8*)({0}) = __builtin_amdgcn_global_load_tr_b128_v8f16((_hv8*)({1})); 0; }})",
+    shape=(), dtype=dtypes.int32, fmt=True).call(dst.after(*deps)[0], ptr, inline=False)
+  return dst.after(st)
 def _ds_bpermute(a:UOp, v:UOp, inline:bool=True) -> UOp:
   return _nat("__builtin_amdgcn_ds_bpermute({0}, {1})", dtypes.int32, a.cast(dtypes.int32), v.bitcast(dtypes.int32), inline=inline).bitcast(v.dtype)
 def _fast_exp2(v:UOp) -> UOp: return _nat("__builtin_amdgcn_exp2f({})", dtypes.float32, v)
@@ -32,14 +44,15 @@ def _tree_fmax(vs:list[UOp]) -> UOp:
 def _u4_to_h8(u4:list[UOp], tmp:UOp, *deps:UOp) -> UOp:
   return tmp.after(UOp.group(*(tmp.after(*deps)[2 * j + m].store(u4[j].reshape((1,)).bitcast(dtypes.half)[m]) for j in range(4) for m in (0, 1))))
 
-def warp_reduce(val:UOp, op:Ops=Ops.ADD, full_wave:bool=False, masks:tuple[int, ...]|None=None) -> UOp:
+def warp_reduce(val:UOp, op:Ops=Ops.ADD, full_wave:bool=False, masks:tuple[int, ...]|None=None, dpp:bool=False) -> UOp:
   if val.op is Ops.INDEX and val.addrspace == AddrSpace.REG: val = val.load()
   if val.op is Ops.REDUCE or any(u.op is Ops.REDUCE for u in val.src):
     tmp = UOp.alloc((1,), val.dtype, addrspace=AddrSpace.REG)
     val = tmp.after(tmp[0].store(val))[0].load()
   assert val.dtype in (dtypes.float32, dtypes.int32, dtypes.uint32)
   for mask in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)) if masks is None else masks:
-    val = _fast_fmax(val, _lane_xor(val, mask)) if op is Ops.MAX and val.dtype == dtypes.float32 else val.alu(op, _lane_xor(val, mask))
+    peer = _lane_xor(val, mask, dpp=dpp)
+    val = _fast_fmax(val, peer) if op is Ops.MAX and val.dtype == dtypes.float32 else val.alu(op, peer)
   return val
 
 def _reg(shape:tuple[int|UOp, ...], value:float, *deps:UOp) -> UOp:
@@ -138,7 +151,9 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
     h_u, w_d = UOp.range(Gw, rid), UOp.range(u32_pl, rid + 1)
     d_r = _reg((1,), 0.0, h_u)
     d_v = d_r.after(d_r[0].store(_amd_fdot2(qh_reg[h_u, w_d].load(), kb[w_d].load(), d_r.after(w_d)[0].load())).end(w_d))[0].load()
-    for mask in (8, 4, 2, 1): d_v = d_v + _lane_xor(d_v, mask, inline=True)
+    for mask in (4, 2, 1): d_v = d_v + _lane_xor(d_v, mask, inline=True)
+    d_v = (lanes_per_tok > 8).where(d_v + _lane_xor(d_v, 8, inline=True), d_v) if isinstance(lanes_per_tok, UOp) else (
+      d_v + _lane_xor(d_v, 8, inline=True) if lanes_per_tok > 8 else d_v)
     d_v = (lanes_per_tok > 16).where(d_v + _lane_xor(d_v, 16, inline=True), d_v) if isinstance(lanes_per_tok, UOp) else (
       d_v + _lane_xor(d_v, 16, inline=True) if lanes_per_tok > 16 else d_v)
     vl = (st_idx * step_stride + w_tok_id < vlen) if st_idx is not None else None
@@ -329,12 +344,12 @@ def _amd_flash_attention_smallm(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_
   k_idx = rnd * block_n_tot + wn * bn_w + (lane_g * 8 + e_m if rdna4 else e_m * 2 + lane_g)
   causal = (k_idx <= q_start + m_base + lane_c) & (k_idx < valid_kv_len)
   S_cur = S_reg.after(S_reg[e_m].store(causal.where(S_cur.after(r_cm)[e_m].load(), UOp.const(-math.inf, dtypes.float32))).end(e_m, r_cm))
-  row_max = warp_reduce(_tree_fmax([S_cur[ei].load() for ei in range(8)]), Ops.MAX, masks=(16,))
+  row_max = warp_reduce(_tree_fmax([S_cur[ei].load() for ei in range(8)]), Ops.MAX, masks=(16,), dpp=rdna4)
   m_prev = m_i.after(rnd, qk_done)[0].load()
   m_new = _fast_fmax(m_prev, row_max)
   m_safe = _fast_fmax(m_new, UOp.const(-1e30, dtypes.float32))
-  alpha, acc_p, td_a, e_a = _fast_exp2(m_prev - m_safe), acc.after(rnd, qk_done), UOp.range(TD, 120), UOp.range(8, 121)
-  acc_res = acc[td_a, e_a].store(acc_p[td_a, e_a].load() * _ds_bpermute((lane_g * 8 + e_a if rdna4 else e_a * 2 + lane_g) * 4, alpha)).end(e_a, td_a)
+  alpha, acc_p, td_a, e_a = _fast_exp2(m_prev - m_safe), acc.after(rnd, qk_done), UOp.range(TD, 120), UOp.range(8, 121, AxisType.UPCAST)
+  acc_res = acc[td_a, e_a].store(acc_p[td_a, e_a].load() * alpha).end(e_a, td_a)
   ps_r, j_p = _reg((1,), 0.0, qk_done), UOp.range(4, 122)
   p0, p1 = _fast_exp2(S_cur[2 * j_p].load() - m_safe), _fast_exp2(S_cur[2 * j_p + 1].load() - m_safe)
   pk = _cvt_pk_f16(p0, p1)
@@ -347,7 +362,8 @@ def _amd_flash_attention_smallm(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_
     p_st = P_half_buf.after(qk_done)[j_p].store(pk)
   p_done = UOp.group(p_st, ps_r[0].store(ps_r.after(qk_done, j_p)[0].load() + (p0 + p1))).end(j_p)
   sm_done = UOp.group(acc_res, p_done, m_i[0].store(m_new),
-                      l_i[0].store(alpha * l_i.after(rnd, qk_done)[0].load() + warp_reduce(ps_r.after(p_done)[0].load(), Ops.ADD, masks=(16,))))
+                      l_i[0].store(alpha * l_i.after(rnd, qk_done)[0].load() +
+                                   warp_reduce(ps_r.after(p_done)[0].load(), Ops.ADD, masks=(16,), dpp=rdna4)))
   v_ready = UOp.group(sm_done, v_st).barrier()
   td_pv = UOp.range(TD, 150)
   d_row = td_pv * 16 + lane_c
@@ -356,22 +372,22 @@ def _amd_flash_attention_smallm(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_
     k_next = store_k((rnd + 1).minimum((n_end_r - 1).maximum(0)), (v_ready,), 103)
     V_lds = v_lds_raw.after(v_ready).reshape(D, V_CH_tot, 8)
     last_d = acc[td_pv].store(
-      UOp.wmma(P_reg_buf.after(v_ready), V_lds[d_row, swz_v(d_row, wn * 2 + lane_g)], acc.after(v_ready)[td_pv], *WMMA_ARG)).end(td_pv)
+      UOp.wmma(V_lds[d_row, swz_v(d_row, wn * 2 + lane_g)], P_reg_buf.after(v_ready), acc.after(v_ready)[td_pv], *WMMA_ARG)).end(td_pv)
     df = UOp.group(last_d, k_next).barrier().end(rnd)
   else:
     assert P_half_buf is not None and P_tmp_buf is not None
     V_lds = v_lds_raw.after(v_ready).reshape(waves_n, D, 2, 8)
     p_f = _r3_unpack_p(P_half_buf.after(v_ready), P_tmp_buf, is_g0, v_ready)
     v_f = V_lds[wn, d_row, swz_v(d_row, UOp.const(0, dtypes.weakint))].cat(V_lds[wn, d_row, swz_v(d_row, UOp.const(1, dtypes.weakint))])
-    df = UOp.group(v_ready, acc[td_pv].store(UOp.wmma(p_f, v_f, acc.after(v_ready)[td_pv], *WMMA_ARG)).end(td_pv)).barrier().end(rnd)
+    df = UOp.group(v_ready, acc[td_pv].store(UOp.wmma(v_f, p_f, acc.after(v_ready)[td_pv], *WMMA_ARG)).end(td_pv)).barrier().end(rnd)
   acc_f, m_f, l_f = acc.after(df), m_i.after(df), l_i.after(df)
 
   b_pre = df.barrier()
   l_inv_w = (l_f[0].load() > UOp.const(0.0, dtypes.float32)).where(l_f[0].load().reciprocal(), UOp.const(0.0, dtypes.float32))
   if rdna4:
     acc_lds, ml_f32, td_w, e_w = k_lds_raw.after(b_pre), v_lds_raw.after(b_pre).bitcast(dtypes.float32), UOp.range(TD, 300), UOp.range(8, 301)
-    st_acc = acc_lds[(wn * 16 + lane_g * 8 + e_w) * D + td_w * 16 + lane_c].store(
-      (acc_f[td_w, e_w].load() * _ds_bpermute((lane_g * 8 + e_w) * 4, l_inv_w)).cast(dtypes.half)).end(e_w, td_w)
+    st_acc = acc_lds[(wn * 16 + lane_c) * D + td_w * 16 + lane_g * 8 + e_w].store(
+      (acc_f[td_w, e_w].load() * l_inv_w).cast(dtypes.half)).end(e_w, td_w)
     b_red = UOp.group(st_acc, ml_f32[((wn * 16 + lane_c) * 2).valid(is_g0)].store(m_f[0].load()),
                       ml_f32[((wn * 16 + lane_c) * 2 + 1).valid(is_g0)].store(l_f[0].load())).barrier()
     acc_lr, ml_lr, tot_out = k_lds_raw.after(b_red), v_lds_raw.after(b_red).bitcast(dtypes.float32), 16 * D
@@ -397,8 +413,8 @@ def _amd_flash_attention_smallm(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_
                     ml_f32[(ml_base + (wn * 16 + lane_c) * 2 + 1).valid(is_g0)].store(l_f[0].load())).barrier()
   ml_r, dh = ml_f32.after(st_ml), UOp.range(2, 289)
   o_h16, td_s, e_w = k_lds_raw.after(st_ml, dh), UOp.range(TD // 2, 290), UOp.range(8, 291)
-  st_o = o_h16[wn * 16 * (D // 2) + (e_w * 2 + lane_g) * (D // 2) + td_s * 16 + lane_c].store(
-    (acc_f[dh * (TD // 2) + td_s, e_w].load() * _ds_bpermute((e_w * 2 + lane_g) * 4, l_inv_w)).cast(dtypes.half)).end(e_w, td_s).barrier()
+  st_o = o_h16[wn * 16 * (D // 2) + lane_c * (D // 2) + td_s * 16 + e_w * 2 + lane_g].store(
+    (acc_f[dh * (TD // 2) + td_s, e_w].load() * l_inv_w).cast(dtypes.half)).end(e_w, td_s).barrier()
   o_r, ri, ci = k_lds_raw.after(st_o), UOp.range(2, 310), UOp.range((D // 2) // 32, 315)
   r_out, c_loc = wn * 2 + ri, lane * ((D // 2) // 32) + ci
   mr, wk_m = _reg((1,), -1e30, ri, ci), UOp.range(waves_n, 316)
@@ -417,13 +433,15 @@ def _amd_flash_attention_smallm(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_
 def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:UOp, d_blks:UOp, rdna4:bool=False) -> UOp:
   valid_kv_len, q_start, (BH, M, D), (_, B, H_KV, physical_n, _) = _unbind(valid_kv_len), _unbind(q_start), q.shape, cache.shape
   assert isinstance(BH, UOp) and isinstance(M, UOp) and isinstance(D, UOp) and isinstance(B, UOp) and isinstance(H_KV, UOp)
-  gqa_group, waves_d = BH // (B * H_KV), ((d_blks >= 4) & (d_blks % 2).eq(0)).where(2, 1)
-  use_wd2, gqa_base = waves_d.eq(2), (gqa_group % 4).eq(0).where(4, (gqa_group % 2).eq(0).where(2, 1))
+  use_tr_v = (d_blks >= 8) if rdna4 else UOp.const(False, dtypes.bool)
+  gqa_group = BH // (B * H_KV)
+  waves_d = use_tr_v.where(4, ((d_blks >= 4) & (d_blks % 2).eq(0)).where(2, 1))
+  use_wd, gqa_base = waves_d > 1, (gqa_group % 4).eq(0).where(4, (gqa_group % 2).eq(0).where(2, 1))
   gqa_wd2 = (d_blks >= 6).where((gqa_group % 2).eq(0).where(2, 1),
             (gqa_group % 6).eq(0).where(6, (gqa_group % 4).eq(0).where(4, (gqa_group % 3).eq(0).where(3, (gqa_group % 2).eq(0).where(2, 1)))))
-  gqa_w = use_wd2.where(gqa_wd2 if rdna4 else (gqa_group % 2).eq(0).where(2, 1), gqa_base)
-  w_per_head = use_wd2.where((d_blks >= 6).where(1, (gqa_w <= 3).where(2, 1)), UOp.const(2, dtypes.weakint)) if rdna4 else \
-               use_wd2.where((d_blks >= 6).where(1, 2), UOp.const(2, dtypes.weakint))
+  gqa_w = use_wd.where(gqa_wd2 if rdna4 else (gqa_group % 2).eq(0).where(2, 1), gqa_base)
+  w_per_head = use_wd.where((d_blks >= 6).where(1, (gqa_w <= 3).where(2, 1)), UOp.const(2, dtypes.weakint)) if rdna4 else \
+               use_wd.where((d_blks >= 6).where(1, 2), UOp.const(2, dtypes.weakint))
   waves_m, bn_tiles = gqa_w * w_per_head, 2
   total_waves, block_m_sz, block_n_sz = waves_m * waves_d, w_per_head * WMMA_M, bn_tiles * WMMA_N
   threads, m_blks_eff, TN, TD, K_CH, V_CH = total_waves * WARP_SIZE, M // block_m_sz, bn_tiles, d_blks * 4, d_blks * 8, bn_tiles * 2
@@ -435,13 +453,16 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:U
   wave, wd, tid, lane_g, lane_c = wave_tot // waves_d, wave_tot % waves_d, wave_tot * WARP_SIZE + lane, lane // 16, lane % 16
   is_g0, block_bh, wave_m, kv_head = lane_g.eq(0), block_hg * gqa_w + (wave // w_per_head), wave % w_per_head, block_hg // (gqa_group // gqa_w)
   k_u32, v_base_u32 = cache.flatten().bitcast(dtypes.uint32), B * H_KV * physical_n * (d_blks * 32)
+  v_flat, v_base_h = cache.flatten(), B * H_KV * physical_n * D
   m_base, td_base = block_m * block_m_sz + wave_m * 16, wd * TD_w
   q_reg, q_tmp = _fa_load_q(q, block_bh, m_base, td_base, TD_w, d_blks, M, lane_c, lane_g, SCALE_L2, rdna4)
 
-  k_lds_raw, v_lds_raw = (UOp.alloc((block_n_sz * D,), dtypes.half, addrspace=AddrSpace.LOCAL) for _ in range(2))
-  s_lds = UOp.alloc((waves_m, 2, WARP_SIZE, TN, 8), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  k_lds_raw = UOp.alloc((block_n_sz * D,), dtypes.half, addrspace=AddrSpace.LOCAL)
+  v_lds_raw = UOp.alloc((block_n_sz * D,), dtypes.half, addrspace=AddrSpace.LOCAL)
+  s_lds = UOp.alloc((waves_m, waves_d, WARP_SIZE, TN, 8), dtypes.float32, addrspace=AddrSpace.LOCAL)
   acc, m_i, l_i, S_reg_buf = _reg((TD_w, 8), 0.0), _reg((1,), -1e30), _reg((1,), 0.0), UOp.alloc((TN, 8), dtypes.float32, addrspace=AddrSpace.REG)
   P_reg_buf = UOp.alloc((TN, 8), dtypes.half, addrspace=AddrSpace.REG) if rdna4 else None
+  v_tr_bufs = [UOp.alloc((8,), dtypes.half, addrspace=AddrSpace.REG) for _ in range(TN)] if rdna4 else None
   P_half_buf = UOp.alloc((TN, 4), dtypes.uint32, addrspace=AddrSpace.REG) if not rdna4 else None
   P_tmp_buf = UOp.alloc((16,), dtypes.half, addrspace=AddrSpace.REG) if not rdna4 else None
 
@@ -486,9 +507,9 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:U
              for p in range(4) for m in (0, 1)]
     return UOp.group(*vs).end(ti)
 
-  def run_stage(n_len:UOp, t_base:UOp, rid:int, masked:bool, acc_in:UOp, m_in:UOp, l_in:UOp, prev:UOp):
+  def run_stage(n_len:UOp, t_base:UOp, rid:int, masked_mode:str, acc_in:UOp, m_in:UOp, l_in:UOp, prev:UOp):
     it = UOp.range(n_len, rid)
-    tile_idx, K_lds = t_base + it, k_lds_raw.after(prev, it).reshape(block_n_sz, K_CH, 8)
+    tile_idx, K_lds = (t_base + it) if not (isinstance(t_base, UOp) and t_base is zw) else it, k_lds_raw.after(prev, it).reshape(block_n_sz, K_CH, 8)
     S_reg = S_reg_buf.after(S_reg_buf.after(it).store(S_reg_buf.const_like(0.0)))
     if rdna4:
       assert q_tmp is not None
@@ -508,87 +529,128 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, *, valid_kv_len:UOp, q_start:U
         K_lds[tni * 16 + lane_c, (kk * 2) ^ ((tni * 16 + lane_c) & 7)].cat(K_lds[tni * 16 + lane_c, (kk * 2 + 1) ^ ((tni * 16 + lane_c) & 7)]),
         q_reg[k_s], S_reg.after(k_s)[tni], *WMMA_ARG)) for tni in range(TN))).end(k_s)
 
-    r_wd, e_r = UOp.range(use_wd2.cast(dtypes.weakint), rid + 38), UOp.range(8, rid + 40, AxisType.UPCAST)
-    s_st_b = UOp.group(*(s_lds.after(qk_done, r_wd)[wave.valid(use_wd2), wd, lane, tn_i, e_r].store(
+    r_wd, e_r = UOp.range(use_wd.cast(dtypes.weakint), rid + 38), UOp.range(8, rid + 40, AxisType.UPCAST)
+    s_st_b = UOp.group(*(s_lds.after(qk_done, r_wd)[wave.valid(use_wd), wd, lane, tn_i, e_r].store(
       S_reg.after(qk_done, r_wd)[tn_i, e_r].load()) for tn_i in range(TN))).end(e_r).barrier()
-    e_r2, peer_wd = UOp.range(8, rid + 42, AxisType.UPCAST), UOp.const(1, dtypes.weakint) - wd
-    qk_all = UOp.group(qk_done, UOp.group(*(S_reg[tn_i, e_r2].store(S_reg.after(qk_done, r_wd)[tn_i, e_r2].load() +
-      s_lds.after(s_st_b)[wave, peer_wd, lane, tn_i, e_r2].load()) for tn_i in range(TN))).end(e_r2, r_wd))
-    S_cur, v_st = S_reg.after(qk_all), store_v(tile_idx, (qk_all,), masked, rid + 1)
-    if masked:
+    e_r2, wd_r = UOp.range(8, rid + 42, AxisType.UPCAST), UOp.range(waves_d, rid + 43)
+    qk_all = UOp.group(qk_done, UOp.group(*(S_reg[tn_i, e_r2].store(
+      s_lds.after(s_st_b)[wave, wd_r, lane, tn_i, e_r2].load().reduce(wd_r, arg=(Ops.ADD, 0))) for tn_i in range(TN))).end(e_r2, r_wd))
+    S_cur = S_reg.after(qk_all)
+    v_st = UOp(Ops.WHERE, src=(use_tr_v, qk_all, store_v(tile_idx, (qk_all,), masked_mode != "none", rid + 1))) if rdna4 else \
+           store_v(tile_idx, (qk_all,), masked_mode != "none", rid + 1)
+    if masked_mode == "always":
       tn_m, e_m = UOp.range(TN, rid + 4), UOp.range(8, rid + 5, AxisType.UPCAST)
       k_idx = tile_idx * block_n_sz + tn_m * 16 + (lane_g * 8 + e_m if rdna4 else e_m * 2 + lane_g)
       causal = (k_idx <= q_start + m_base + lane_c) & (k_idx < valid_kv_len)
       S_cur = S_reg.after(S_reg[tn_m, e_m].store(causal.where(S_cur[tn_m, e_m].load(), UOp.const(-math.inf, dtypes.float32))).end(e_m, tn_m))
+    elif masked_mode == "cond":
+      r_cm, tn_m, e_m = UOp.range((tile_idx >= n_full).cast(dtypes.weakint), rid + 3), UOp.range(TN, rid + 4), UOp.range(8, rid + 5, AxisType.UPCAST)
+      k_idx = tile_idx * block_n_sz + tn_m * 16 + (lane_g * 8 + e_m if rdna4 else e_m * 2 + lane_g)
+      causal = (k_idx <= q_start + m_base + lane_c) & (k_idx < valid_kv_len)
+      S_cur = S_reg.after(S_reg[tn_m, e_m].store(
+        causal.where(S_cur.after(r_cm)[tn_m, e_m].load(), UOp.const(-math.inf, dtypes.float32))).end(e_m, tn_m, r_cm))
 
-    row_max = warp_reduce(_tree_fmax([S_cur[ti, ei].load() for ti in range(TN) for ei in range(8)]), Ops.MAX, masks=(16,))
+    row_max = warp_reduce(_tree_fmax([S_cur[ti, ei].load() for ti in range(TN) for ei in range(8)]), Ops.MAX, masks=(16,), dpp=rdna4)
     m_prev = m_in.after(it, qk_all)[0].load()
-    m_new = _fast_fmax(m_prev, row_max)
-    m_safe = _fast_fmax(m_new, UOp.const(-1e30, dtypes.float32)) if masked else m_new
-    alpha, acc_p, td_a = _fast_exp2(m_prev - m_safe), acc_in.after(it, qk_all), UOp.range(TD_w, rid + 20)
-    a_es = [_ds_bpermute((lane_g * 8 + e if rdna4 else e * 2 + lane_g) * 4, alpha) for e in range(8)]
-    acc_res = UOp.group(*(acc[td_a, e].store(acc_p[td_a, e].load() * a_es[e]) for e in range(8))).end(td_a)
-    p_sum_r, tn_p, j_p = _reg((1,), 0.0, qk_all), UOp.range(TN, rid + 10), UOp.range(4, rid + 22)
-    p0, p1 = _fast_exp2(S_cur[tn_p, 2 * j_p].load() - m_safe), _fast_exp2(S_cur[tn_p, 2 * j_p + 1].load() - m_safe)
+    if not rdna4:
+      row_grow = row_max > (m_prev + UOp.const(12.0, dtypes.float32))
+      r_grow = UOp.range(_nat("(__builtin_amdgcn_ballot_w32({0}) != 0u)", dtypes.bool, row_grow).cast(dtypes.weakint), rid + 19)
+      m_new = row_grow.where(_fast_fmax(_fast_fmax(m_prev, row_max), UOp.const(-1e30, dtypes.float32)), m_prev)
+      alpha, acc_p = _fast_exp2(m_prev - m_new), acc_in.after(it, qk_all, r_grow)
+      td_a, e_a = UOp.range(TD_w, rid + 20), UOp.range(8, rid + 21, AxisType.UPCAST)
+      acc_res = UOp.group(
+        acc[td_a, e_a].store(acc_p[td_a, e_a].load() * alpha).end(e_a, td_a),
+        m_i[0].store(m_new),
+        l_i[0].store(l_in.after(it, qk_all, r_grow)[0].load() * alpha),
+      ).end(r_grow)
+      m_cur = m_i.after(acc_res)[0].load()
+    else:
+      m_new = _fast_fmax(m_prev, row_max)
+      m_safe = _fast_fmax(m_new, UOp.const(-1e30, dtypes.float32)) if masked_mode != "none" else m_new
+      ms_reg, al_reg = UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG), UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG)
+      ms_st = ms_reg.after(it, qk_all)[0].store(m_safe)
+      m_cur = ms_reg.after(ms_st)[0].load()
+      al_st = al_reg.after(ms_st)[0].store(_fast_exp2(m_prev - m_cur))
+      alpha = al_reg.after(al_st)[0].load()
+      acc_p, td_a, e_a = acc_in.after(it, qk_all), UOp.range(TD_w, rid + 20), UOp.range(8, rid + 21, AxisType.UPCAST)
+      acc_res = UOp.group(acc[td_a, e_a].store(acc_p[td_a, e_a].load() * alpha).end(e_a, td_a), m_i[0].store(m_new),
+                          l_i[0].store(l_in.after(it, qk_all)[0].load() * alpha))
+    p_sum_r, tn_p, j_p = _reg((1,), 0.0, acc_res), UOp.range(TN, rid + 10), UOp.range(4, rid + 22)
+    p0, p1 = _fast_exp2(S_cur[tn_p, 2 * j_p].load() - m_cur), _fast_exp2(S_cur[tn_p, 2 * j_p + 1].load() - m_cur)
     pk = _cvt_pk_f16(p0, p1)
     if rdna4:
       assert P_reg_buf is not None
       h2 = pk.reshape((1,)).bitcast(dtypes.half)
-      p_st = UOp.group(P_reg_buf.after(qk_all)[tn_p, 2 * j_p].store(h2[0]), P_reg_buf.after(qk_all)[tn_p, 2 * j_p + 1].store(h2[1]))
+      p_st = UOp.group(P_reg_buf.after(acc_res)[tn_p, 2 * j_p].store(h2[0]), P_reg_buf.after(acc_res)[tn_p, 2 * j_p + 1].store(h2[1]))
     else:
       assert P_half_buf is not None
-      p_st = P_half_buf.after(qk_all)[tn_p, j_p].store(pk)
-    p_done = UOp.group(p_st, p_sum_r[0].store(p_sum_r.after(qk_all, tn_p, j_p)[0].load() + (p0 + p1))).end(j_p, tn_p)
-    sm_done = UOp.group(acc_res, p_done, m_i[0].store(m_new),
-                        l_i[0].store(alpha * l_in.after(it, qk_all)[0].load() + warp_reduce(p_sum_r.after(p_done)[0].load(), Ops.ADD, masks=(16,))))
+      p_st = P_half_buf.after(acc_res)[tn_p, j_p].store(pk)
+    p_done = UOp.group(p_st, p_sum_r[0].store(p_sum_r.after(acc_res, tn_p, j_p)[0].load() + (p0 + p1))).end(j_p, tn_p)
+    sm_done = UOp.group(acc_res, p_done,
+                        l_i[0].store(l_i.after(acc_res)[0].load() +
+                                     warp_reduce(p_sum_r.after(p_done)[0].load(), Ops.ADD, masks=(16,), dpp=rdna4)))
     if rdna4: sm_done = UOp.group(sm_done, m_i[0].store(_sb0(m_i.after(sm_done)[0].load())))
     v_ready = UOp.group(sm_done, v_st).barrier()
     k_next_par = None if rdna4 else store_k((tile_idx + 1).minimum((n_end_all - 1).maximum(0)), (v_ready,), rid + 12)
-    V_lds, a_cur = v_lds_raw.after(v_ready).reshape(D, V_CH, 8), acc.after(v_ready)
+    a_cur = acc.after(v_ready)
     if rdna4:
-      assert P_reg_buf is not None
-      pv_seg = TD_w // 2
-      for sg in range(2):
-        td_pv = UOp.range(pv_seg, rid + 14 + sg)
-        td_loc = sg * pv_seg + td_pv
-        d_row, c_cur = (td_base + td_loc) * 16 + lane_c, a_cur[td_loc]
-        for tni in range(TN):
-          c_cur = UOp.wmma(P_reg_buf.after(v_ready)[tni], V_lds[d_row, swz_v_ch(d_row, tni * 2 + lane_g)], c_cur, *WMMA_ARG)
-        step_d = acc[td_loc].store(c_cur).end(td_pv)
-        if sg == 0: step_d = UOp.group(step_d, acc[0, 0].store(_sb0(acc.after(step_d)[0, 0].load())))
-        a_cur = acc.after(step_d)
+      assert P_reg_buf is not None and v_tr_bufs is not None
+      V_lds, pv_seg = v_lds_raw.after(v_ready).reshape(D, V_CH, 8), TD_w // 2
+      def _pv_body(use_tr:bool) -> UOp:
+        ac = a_cur
+        for sg in range(2):
+          td_pv = UOp.range(pv_seg, rid + 14 + sg)
+          td_loc = sg * pv_seg + td_pv
+          d_row, c_cur = (td_base + td_loc) * 16 + lane_c, ac[td_loc]
+          for tni in range(TN):
+            if use_tr:
+              v_row = (tile_idx * block_n_sz + tni * 16 + lane_g * 8 + (lane % 8)).minimum(physical_n - 1)
+              v_f = _ld_tr_into(v_tr_bufs[tni], v_flat[v_base_h + (kv_head * physical_n + v_row) * D +
+                                                       (td_base + td_loc) * 16 + ((lane // 8) % 2) * 8], ac, td_pv)
+            else: v_f = V_lds[d_row, swz_v_ch(d_row, tni * 2 + lane_g)]
+            c_cur = UOp.wmma(v_f, P_reg_buf.after(v_ready)[tni], c_cur, *WMMA_ARG)
+          step_d = acc[td_loc].store(c_cur).end(td_pv)
+          if sg == 0: step_d = UOp.group(step_d, acc[0, 0].store(_sb0(acc.after(step_d)[0, 0].load())))
+          ac = acc.after(step_d)
+        return ac
+      a_cur = UOp(Ops.WHERE, src=(use_tr_v, _pv_body(True), _pv_body(False)))
     else:
       assert P_half_buf is not None and P_tmp_buf is not None
+      V_lds = v_lds_raw.after(v_ready).reshape(D, V_CH, 8)
       for tni in range(TN):
         td_pv = UOp.range(TD_w, rid + 14 + tni)
         d_row = (td_base + td_pv) * 16 + lane_c
         p_f = _r3_unpack_p(P_half_buf.after(v_ready)[tni], P_tmp_buf, is_g0, a_cur)
         v_f = V_lds[d_row, swz_v_ch(d_row, tni * 2)].cat(V_lds[d_row, swz_v_ch(d_row, tni * 2 + 1)])
-        a_cur = acc.after(acc[td_pv].store(UOp.wmma(p_f, v_f, a_cur[td_pv], *WMMA_ARG)).end(td_pv))
+        a_cur = acc.after(acc[td_pv].store(UOp.wmma(v_f, p_f, a_cur[td_pv], *WMMA_ARG)).end(td_pv))
     done = (store_k((tile_idx + 1).minimum((n_end_all - 1).maximum(0)), (a_cur,), rid + 12) if rdna4 else
             UOp.group(a_cur, k_next_par)).barrier().end(it)
     return acc.after(done), m_i.after(done), l_i.after(done), done
 
   k0 = store_k(zw, (q_reg,), 20).barrier()
-  acc1, m1, l1, d1 = run_stage(n_full, zw, 100, False, acc, m_i, l_i, k0)
-  acc_f, _, l_f, _ = run_stage(n_end_all - n_full, n_full, 200, True, acc1, m1, l1, d1)
+  if rdna4:
+    acc1, m1, l1, d1 = run_stage(n_full, zw, 100, "none", acc, m_i, l_i, k0)
+    acc_f, _, l_f, _ = run_stage(n_end_all - n_full, n_full, 200, "always", acc1, m1, l1, d1)
+  else:
+    acc_f, _, l_f, _ = run_stage(n_end_all, zw, 100, "cond", acc, m_i, l_i, k0)
   l_inv = (l_f[0].load() > UOp.const(0.0, dtypes.float32)).where(l_f[0].load().reciprocal(), UOp.const(0.0, dtypes.float32))
-  l_invs, td_o = [_ds_bpermute((lane_g * 8 + e if rdna4 else e * 2 + lane_g) * 4, l_inv) for e in range(8)], UOp.range(TD_w, 300)
-  return UOp.group(*(o[block_bh, m_base + (lane_g * 8 + e if rdna4 else e * 2 + lane_g), (td_base + td_o) * 16 + lane_c].store(
-    (acc_f[td_o, e].load() * l_invs[e]).cast(o.dtype)) for e in range(8))).end(
-    td_o, lane, wave_tot, block_m_raw, block_hg).sink(arg=KernelInfo(name="rdna4_flash_attn" if rdna4 else "rdna3_flash_attn", opts_to_apply=()))
+  td_o, e_o = UOp.range(TD_w, 300), UOp.range(8, 301, AxisType.UPCAST)
+  return o[block_bh, m_base + lane_c, (td_base + td_o) * 16 + (lane_g * 8 + e_o if rdna4 else e_o * 2 + lane_g)].store(
+    (acc_f[td_o, e_o].load() * l_inv).cast(o.dtype)).end(
+    e_o, td_o, lane, wave_tot, block_m_raw, block_hg).sink(arg=KernelInfo(name="rdna4_flash_attn" if rdna4 else "rdna3_flash_attn", opts_to_apply=()))
 
 # ******** gated delta net: unified RDNA4/RDNA3 WMMA Chunked-WY + zero-LDS inline-kq decode ********
 
 @functools.cache
 def _gated_delta_wmma_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, *,
-                             k_blks:UOp, alpha_k:UOp, start_pos:UOp, rdna4:bool=True, is_kda:bool=False) -> UOp:
+                             k_blks:UOp, alpha_k:UOp, start_pos:UOp, rdna4:bool=True) -> UOp:
   batch, heads, tokens, value_dim = core.shape
   assert isinstance(value_dim, UOp)
+  is_kda = alpha_k > 1
   D, BH, k_tiles, v_tiles = k_blks * 32, batch * heads, k_blks * 2, value_dim // 4
   v_wgs, n_vsub, k_split = (v_tiles // 8).maximum(1), 2, (k_tiles >= 8).where(4, 2)
   kt_w, waves = k_tiles // k_split, n_vsub * k_split
-  threads, sup_ch = waves * WARP_SIZE, (k_blks >= 8).where(1, 2) if is_kda else (k_blks >= 8).where(2, 4)
+  threads, sup_ch = waves * WARP_SIZE, is_kda.where((k_blks >= 8).where(1, 2), (k_blks >= 8).where(2, 4))
   sup_tok = sup_ch * 16
 
   core_f, v_f = core.reshape(BH, tokens, value_dim), v.reshape(BH, tokens, value_dim)
@@ -603,15 +665,14 @@ def _gated_delta_wmma_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp,
   def swz(row:UOp, ch8:UOp) -> UOp: return ch8 ^ (row & 7)
   def row_of(e:int|UOp) -> UOp: return lane_g * 8 + e if rdna4 else e * 2 + lane_g
 
-  frag_len, n_skq = (8 if rdna4 else 16), (3 if is_kda else 2)
+  frag_len, n_skq = (8 if rdna4 else 16), is_kda.where(3, 2)
   skq = UOp.alloc((n_skq * sup_tok * D,), dtypes.half, addrspace=AddrSpace.LOCAL)
   skt = UOp.alloc((sup_ch * D * 16,), dtypes.half, addrspace=AddrSpace.LOCAL)
   s_T, s_P = UOp.alloc((sup_ch * 256,), dtypes.half, addrspace=AddrSpace.LOCAL), UOp.alloc((sup_ch * 256,), dtypes.half, addrspace=AddrSpace.LOCAL)
   s_M = UOp.alloc((sup_ch * 256 + n_vsub * 3 * 2 * 32 * 4,), dtypes.float32, addrspace=AddrSpace.LOCAL)
   s_dd, s_b = UOp.alloc((n_vsub * 128,), dtypes.float32, addrspace=AddrSpace.LOCAL), UOp.alloc((sup_tok,), dtypes.float32, addrspace=AddrSpace.LOCAL)
-  s_gvec = UOp.alloc((3, sup_ch, D), dtypes.float32, addrspace=AddrSpace.LOCAL) if is_kda else None
-  s_L = UOp.alloc((sup_tok,), dtypes.float32, addrspace=AddrSpace.LOCAL) if not is_kda else None
-  s_g = UOp.alloc((sup_tok,), dtypes.float32, addrspace=AddrSpace.LOCAL) if not is_kda else None
+  s_gvec = UOp.alloc((3, sup_ch, D), dtypes.float32, addrspace=AddrSpace.LOCAL)
+  s_L, s_g = UOp.alloc((sup_tok,), dtypes.float32, addrspace=AddrSpace.LOCAL), UOp.alloc((sup_tok,), dtypes.float32, addrspace=AddrSpace.LOCAL)
   s_reg = UOp.alloc((kt_w, 8), dtypes.float32, addrspace=AddrSpace.REG)
   buf_a, buf_b = UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG), UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG)
   buf_h = UOp.alloc((frag_len,), dtypes.half, addrspace=AddrSpace.REG)
@@ -650,92 +711,82 @@ def _gated_delta_wmma_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp,
   t_base, s_cur_super = sup_r * sup_tok, s_cur_init.after(sup_r)
   n_ch, n_ch8 = ((tokens - t_base + 15) // 16).minimum(sup_ch), D // 8
 
-  if not is_kda:
-    dk4_cnt, total_pairs = D // 4, (sup_tok // 2) * (D // 4)
-    it_kq = UOp.range((total_pairs + threads - 1) // threads, 21)
-    pid = tid + it_kq * threads
-    p_ok, pid_s = pid < total_pairs, pid.minimum(total_pairs - 1)
-    rp_all, dk4 = pid_s // dk4_cnt, pid_s % dk4_cnt
-    c_loc_s, rp_loc, dk, ta_l, tb_l = rp_all // 8, rp_all % 8, dk4 * 4, rp_all * 2, rp_all * 2 + 1
-    ta_g, tb_g = t_base + ta_l, t_base + tb_l
-    def ld_pk(src:UOp, tg:UOp) -> tuple[UOp, UOp]:
-      r, vl = _amd_load(src[bh, tg.minimum(tokens - 1), dk], 4), tg < tokens
-      return _cvt_pk_f16(vl.where(r[0], z0), vl.where(r[1], z0), inline=False), _cvt_pk_f16(vl.where(r[2], z0), vl.where(r[3], z0), inline=False)
-    ka, kb, qa, qb = ld_pk(k_f, ta_g), ld_pk(k_f, tb_g), ld_pk(q_f, ta_g), ld_pk(q_f, tb_g)
-    skq_u32 = skq.after(sup_r).bitcast(dtypes.uint32).reshape(2, sup_tok, n_ch8, 4)
-    skt_u32 = skt.after(sup_r).bitcast(dtypes.uint32).reshape(sup_ch, D, 8)
-    ch8, sub, rp_s = dk4 // 2, (dk4 % 2) * 2, rp_loc ^ ((dk4 & 1) * 4)
-    ca, cb = swz(ta_l, ch8), swz(tb_l, ch8)
-    kq_st = UOp.group(
-      *(skq_u32[m, tl.valid(p_ok), c, sub + s].store(p[s])
-        for m, tl, c, p in ((0, ta_l, ca, ka), (0, tb_l, cb, kb), (1, ta_l, ca, qa), (1, tb_l, cb, qb)) for s in (0, 1)),
-      *(skt_u32[c_loc_s.valid(p_ok), dk + 2 * i + m, rp_s].store(_amd_byte_perm(kb[i], ka[i], c_hi if m else c_lo)) for i in (0, 1) for m in (0, 1)),
-    ).end(it_kq)
-    t_ab_l = w_ch * 16 + lane_c
-    t_ab_g = t_base + t_ab_l
-    v_ab = t_ab_g < tokens
-    a_val = v_ab.where(alpha_f[bh, t_ab_g.minimum(tokens - 1), 0].load(), o1)
-    b_val = v_ab.where(beta_f[bh, t_ab_g.minimum(tokens - 1)].load(), z0)
-    la_reg = UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG)
-    la_cur = la_reg.after(la_reg.after(sup_r)[0].store(_fast_log2(a_val.maximum(UOp.const(1e-30, dtypes.float32)))))
-    for d_sh in (1, 2, 4, 8):
-      lv = la_cur[0].load()
-      la_cur = la_reg.after(la_reg[0].store((lane_c >= d_sh).where(lv + _ds_bpermute((lane_c - d_sh).maximum(0) * 4, lv, inline=False), lv)))
-    la_fin, ab_en = la_cur[0].load(), is_g0 & w_role.eq(0)
-    assert s_L is not None and s_g is not None
-    b1 = UOp.group(kq_st, s_L.after(sup_r)[t_ab_l.valid(ab_en)].store(la_fin), s_g.after(sup_r)[t_ab_l.valid(ab_en)].store(_fast_exp2(la_fin)),
-                   s_b.after(sup_r)[t_ab_l.valid(ab_en)].store(b_val)).barrier()
-  else:
-    assert s_gvec is not None
-    tot_k = sup_ch * D
-    it_k = UOp.range((tot_k + threads - 1) // threads, 21)
-    kid = tid + it_k * threads
-    k_ok, kid_s = kid < tot_k, kid.minimum(tot_k - 1)
-    c_loc_s, k_col = kid_s // D, kid_s % D
-    L_buf, l_acc, t_r = UOp.alloc((16,), dtypes.float32, addrspace=AddrSpace.REG), _reg((1,), 0.0, sup_r, it_k), UOp.range(16, 212)
-    tg = t_base + c_loc_s * 16 + t_r
-    a_t = (tg < tokens).where(_amd_load(alpha_f[bh, tg.minimum(tokens - 1), k_col]), o1)
-    l_nxt = l_acc.after(t_r)[0].load() + _fast_log2(a_t.maximum(UOp.const(1e-30, dtypes.float32)))
-    L_r = L_buf.after(UOp.group(l_acc[0].store(l_nxt), L_buf.after(sup_r, it_k)[t_r].store(l_nxt)).end(t_r))
-    L_ref, L_last = L_r[7].load(), L_r[15].load()
-    gv_st = UOp.group(*(s_gvec.after(sup_r)[idx, c_loc_s.valid(k_ok), k_col].store(_fast_exp2(val))
-                        for idx, val in ((0, L_ref), (1, L_last - L_ref), (2, L_last))))
-    skq_u32 = skq.after(sup_r).bitcast(dtypes.uint32).reshape(3, sup_tok, n_ch8, 4)
-    skt_u32 = skt.after(sup_r).bitcast(dtypes.uint32).reshape(sup_ch, D, 8)
-    ch8, slot4, w_en, rp = k_col // 8, (k_col % 8) // 2, k_ok & (k_col & 1).eq(0), UOp.range(8, 211)
-    ta_l, tb_l = c_loc_s * 16 + rp * 2, c_loc_s * 16 + rp * 2 + 1
-    ta_g, tb_g = t_base + ta_l, t_base + tb_l
-    vla, vlb = ta_g < tokens, tb_g < tokens
-    ka_s, kb_s = _amd_load(k_f[bh, ta_g.minimum(tokens - 1), k_col]), _amd_load(k_f[bh, tb_g.minimum(tokens - 1), k_col])
-    qa_s, qb_s = _amd_load(q_f[bh, ta_g.minimum(tokens - 1), k_col]), _amd_load(q_f[bh, tb_g.minimum(tokens - 1), k_col])
-    c20, cn20 = UOp.const(20.0, dtypes.float32), UOp.const(-20.0, dtypes.float32)
-    la_d, lb_d = (L_r[rp * 2].load() - L_ref).maximum(cn20).minimum(c20), (L_r[rp * 2 + 1].load() - L_ref).maximum(cn20).minimum(c20)
-    upa, upb, ina, inb = _fast_exp2(la_d), _fast_exp2(lb_d), _fast_exp2(-la_d), _fast_exp2(-lb_d)
-    def pk_pair(v_me:UOp) -> UOp: return _cvt_pk_f16(v_me, _lane_xor(v_me, 1), inline=False)
-    ca, cb, rp_s = swz(ta_l, ch8), swz(tb_l, ch8), rp ^ (((k_col >> 2) & 1) * 4)
-    kia, kib = vla.where(ka_s * ina, z0), vlb.where(kb_s * inb, z0)
-    rp_st = UOp.group(
-      *(skq_u32[m, tl.valid(w_en), c, slot4].store(pk_pair(val))
-        for m, tl, c, val in ((0, ta_l, ca, vla.where(ka_s * upa, z0)), (0, tb_l, cb, vlb.where(kb_s * upb, z0)),
-                              (1, ta_l, ca, vla.where(qa_s * upa, z0)), (1, tb_l, cb, vlb.where(qb_s * upb, z0)),
-                              (2, ta_l, ca, kia), (2, tb_l, cb, kib))),
-      skt_u32[c_loc_s.valid(k_ok), k_col, rp_s].store(_cvt_pk_f16(kia, kib, inline=False)),
-    ).end(rp)
-    t_ab_l = w_ch * 16 + lane_c
-    t_ab_g = t_base + t_ab_l
-    b1 = UOp.group(UOp.group(gv_st, rp_st).end(it_k),
-                   s_b.after(sup_r)[t_ab_l.valid(is_g0 & w_role.eq(0))].store(
-                     (t_ab_g < tokens).where(beta_f[bh, t_ab_g.minimum(tokens - 1)].load(), z0))).barrier()
+  dk4_cnt, total_pairs = D // 4, (sup_tok // 2) * (D // 4)
+  it_kq = UOp.range((total_pairs + threads - 1) // threads, 21)
+  pid = tid + it_kq * threads
+  p_ok, pid_s = pid < total_pairs, pid.minimum(total_pairs - 1)
+  rp_all, dk4 = pid_s // dk4_cnt, pid_s % dk4_cnt
+  c_loc_s, rp_loc, dk, ta_l, tb_l = rp_all // 8, rp_all % 8, dk4 * 4, rp_all * 2, rp_all * 2 + 1
+  ta_g, tb_g = t_base + ta_l, t_base + tb_l
+  def ld_pk(src:UOp, tg:UOp) -> tuple[UOp, UOp]:
+    r, vl = _amd_load(src[bh, tg.minimum(tokens - 1), dk], 4), tg < tokens
+    return _cvt_pk_f16(vl.where(r[0], z0), vl.where(r[1], z0), inline=False), _cvt_pk_f16(vl.where(r[2], z0), vl.where(r[3], z0), inline=False)
+  ka, kb, qa, qb = ld_pk(k_f, ta_g), ld_pk(k_f, tb_g), ld_pk(q_f, ta_g), ld_pk(q_f, tb_g)
+  skq_u32 = skq.after(sup_r).bitcast(dtypes.uint32).reshape(n_skq, sup_tok, n_ch8, 4)
+  skt_u32 = skt.after(sup_r).bitcast(dtypes.uint32).reshape(sup_ch, D, 8)
+  ch8, sub, rp_s = dk4 // 2, (dk4 % 2) * 2, rp_loc ^ ((dk4 & 1) * 4)
+  ca, cb = swz(ta_l, ch8), swz(tb_l, ch8)
+  kq_st = UOp.group(
+    *(skq_u32[m, tl.valid(p_ok), c, sub + s].store(p[s])
+      for m, tl, c, p in ((0, ta_l, ca, ka), (0, tb_l, cb, kb), (1, ta_l, ca, qa), (1, tb_l, cb, qb)) for s in (0, 1)),
+    *(skt_u32[c_loc_s.valid(p_ok), dk + 2 * i + m, rp_s].store(_amd_byte_perm(kb[i], ka[i], c_hi if m else c_lo)) for i in (0, 1) for m in (0, 1)),
+  ).end(it_kq)
+  t_ab_l = w_ch * 16 + lane_c
+  t_ab_g = t_base + t_ab_l
+  v_ab = t_ab_g < tokens
+  a_val = v_ab.where(alpha_f[bh, t_ab_g.minimum(tokens - 1), 0].load(), o1)
+  b_val = v_ab.where(beta_f[bh, t_ab_g.minimum(tokens - 1)].load(), z0)
+  la_reg = UOp.alloc((1,), dtypes.float32, addrspace=AddrSpace.REG)
+  la_cur = la_reg.after(la_reg.after(sup_r)[0].store(_fast_log2(a_val.maximum(UOp.const(1e-30, dtypes.float32)))))
+  for d_sh in (1, 2, 4, 8):
+    lv = la_cur[0].load()
+    la_cur = la_reg.after(la_reg[0].store((lane_c >= d_sh).where(lv + _ds_bpermute((lane_c - d_sh).maximum(0) * 4, lv, inline=False), lv)))
+  la_fin, ab_en = la_cur[0].load(), is_g0 & w_role.eq(0)
+  b1_gdn = UOp.group(kq_st, s_L.after(sup_r)[t_ab_l.valid(ab_en)].store(la_fin), s_g.after(sup_r)[t_ab_l.valid(ab_en)].store(_fast_exp2(la_fin)),
+                     s_b.after(sup_r)[t_ab_l.valid(ab_en)].store(b_val))
+
+  tot_k = sup_ch * D
+  it_k = UOp.range((tot_k + threads - 1) // threads, 21)
+  kid = tid + it_k * threads
+  k_ok, kid_s = kid < tot_k, kid.minimum(tot_k - 1)
+  c_loc_k, k_col = kid_s // D, kid_s % D
+  L_buf, l_acc, t_r = UOp.alloc((16,), dtypes.float32, addrspace=AddrSpace.REG), _reg((1,), 0.0, sup_r, it_k), UOp.range(16, 212)
+  tg = t_base + c_loc_k * 16 + t_r
+  a_t = (tg < tokens).where(_amd_load(alpha_f[bh, tg.minimum(tokens - 1), k_col % alpha_k]), o1)
+  l_nxt = l_acc.after(t_r)[0].load() + _fast_log2(a_t.maximum(UOp.const(1e-30, dtypes.float32)))
+  L_r = L_buf.after(UOp.group(l_acc[0].store(l_nxt), L_buf.after(sup_r, it_k)[t_r].store(l_nxt)).end(t_r))
+  L_ref, L_last = L_r[7].load(), L_r[15].load()
+  gv_st = UOp.group(*(s_gvec.after(sup_r)[idx, c_loc_k.valid(k_ok), k_col].store(_fast_exp2(val))
+                      for idx, val in ((0, L_ref), (1, L_last - L_ref), (2, L_last))))
+  ch8_k, slot4, w_en, rp = k_col // 8, (k_col % 8) // 2, k_ok & (k_col & 1).eq(0), UOp.range(8, 211)
+  ta_lk, tb_lk = c_loc_k * 16 + rp * 2, c_loc_k * 16 + rp * 2 + 1
+  ta_gk, tb_gk = t_base + ta_lk, t_base + tb_lk
+  vla, vlb = ta_gk < tokens, tb_gk < tokens
+  ka_s, kb_s = _amd_load(k_f[bh, ta_gk.minimum(tokens - 1), k_col]), _amd_load(k_f[bh, tb_gk.minimum(tokens - 1), k_col])
+  qa_s, qb_s = _amd_load(q_f[bh, ta_gk.minimum(tokens - 1), k_col]), _amd_load(q_f[bh, tb_gk.minimum(tokens - 1), k_col])
+  c20, cn20 = UOp.const(20.0, dtypes.float32), UOp.const(-20.0, dtypes.float32)
+  la_d, lb_d = (L_r[rp * 2].load() - L_ref).maximum(cn20).minimum(c20), (L_r[rp * 2 + 1].load() - L_ref).maximum(cn20).minimum(c20)
+  upa, upb, ina, inb = _fast_exp2(la_d), _fast_exp2(lb_d), _fast_exp2(-la_d), _fast_exp2(-lb_d)
+  def pk_pair(v_me:UOp) -> UOp: return _cvt_pk_f16(v_me, _lane_xor(v_me, 1), inline=False)
+  ca_k, cb_k, rp_sk = swz(ta_lk, ch8_k), swz(tb_lk, ch8_k), rp ^ (((k_col >> 2) & 1) * 4)
+  kia, kib = vla.where(ka_s * ina, z0), vlb.where(kb_s * inb, z0)
+  rp_st = UOp.group(
+    *(skq_u32[m, tl.valid(w_en), c, slot4].store(pk_pair(val))
+      for m, tl, c, val in ((0, ta_lk, ca_k, vla.where(ka_s * upa, z0)), (0, tb_lk, cb_k, vlb.where(kb_s * upb, z0)),
+                            (1, ta_lk, ca_k, vla.where(qa_s * upa, z0)), (1, tb_lk, cb_k, vlb.where(qb_s * upb, z0)),
+                            (2, ta_lk, ca_k, kia), (2, tb_lk, cb_k, kib))),
+    skt_u32[c_loc_k.valid(k_ok), k_col, rp_sk].store(_cvt_pk_f16(kia, kib, inline=False)),
+  ).end(rp)
+  b1_kda = UOp.group(UOp.group(gv_st, rp_st).end(it_k), s_b.after(sup_r)[t_ab_l.valid(ab_en)].store(b_val))
+  b1 = UOp(Ops.WHERE, src=(is_kda, b1_kda, b1_gdn)).barrier()
 
   skq_8, skt_8, sb_r = skq.after(b1).reshape(n_skq, sup_ch, 16, n_ch8, 8), skt.after(b1).reshape(sup_ch, D, 2, 8), s_b.after(b1).reshape(sup_ch, 16)
-  sL_r = s_L.after(b1).reshape(sup_ch, 16) if s_L is not None else None
-  sg_r = s_g.after(b1).reshape(sup_ch, 16) if s_g is not None else None
-  sgv_r = s_gvec.after(b1) if s_gvec is not None else None
+  sL_r, sg_r, sgv_r = s_L.after(b1).reshape(sup_ch, 16), s_g.after(b1).reshape(sup_ch, 16), s_gvec.after(b1)
   def skq_frag(m_idx:UOp|int, c_idx:UOp, kt_idx:UOp) -> UOp:
     return skq_8[m_idx, c_idx, lane_c, swz(lane_c, kt_idx * 2 + lane_g)] if rdna4 else \
            skq_8[m_idx, c_idx, lane_c, swz(lane_c, kt_idx * 2)].cat(skq_8[m_idx, c_idx, lane_c, swz(lane_c, kt_idx * 2 + 1)])
 
-  k_rhs_idx, sM_1d, sP_u32, has_2roles = (2 if is_kda else 0), s_M.after(b1), s_P.after(b1).bitcast(dtypes.uint32), waves >= (sup_ch * 2)
+  k_rhs_idx, sM_1d, sP_u32, has_2roles = is_kda.where(2, 0), s_M.after(b1), s_P.after(b1).bitcast(dtypes.uint32), waves >= (sup_ch * 2)
   ga0, gb0, jg = buf_a.after(b1).store(buf_a.const_like(0.0)), buf_b.after(b1).store(buf_b.const_like(0.0)), UOp.range(k_tiles, 22)
   kf_rhs = skq_frag(k_rhs_idx, w_ch, jg)
   gram_lhs = skq_frag(has_2roles.where(w_role.minimum(1), UOp.const(0, dtypes.weakint)), w_ch, jg)
@@ -744,7 +795,7 @@ def _gated_delta_wmma_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp,
   gram_done = UOp.group(gram_a, buf_b.store(UOp.wmma(skq_frag(1, w_ch, jg), kf_rhs, buf_b.after(gb0, jg, r_g1), *WMMA_ARG)).end(r_g1)).end(jg)
   gva, gvb, pv_reg, e_g = buf_a.after(gram_done), buf_b.after(gram_done), UOp.alloc((8,), dtypes.float32, addrspace=AddrSpace.REG), UOp.range(8, 221)
   tr_g = row_of(e_g)
-  g_rat = o1 if is_kda else (lane_c <= tr_g).where(_fast_exp2((sL_r[w_ch, tr_g].load() - sL_r[w_ch, lane_c].load()).minimum(z0)), z0)  # type: ignore[index]
+  g_rat = is_kda.where(o1, (lane_c <= tr_g).where(_fast_exp2((sL_r[w_ch, tr_g].load() - sL_r[w_ch, lane_c].load()).minimum(z0)), z0))
   a_st = sM_1d[((w_ch * 16 + tr_g) * 16 + lane_c).valid(w_role.eq(0))].store(
     (lane_c < tr_g).where(sb_r[w_ch, tr_g].load() * g_rat * gva[e_g].load(), z0))
   pv_st = pv_reg.after(gram_done)[e_g].store((lane_c <= tr_g).where(g_rat * has_2roles.where(gva[e_g].load(), gvb[e_g].load()), z0))
@@ -803,8 +854,7 @@ def _gated_delta_wmma_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp,
   v_tmp_r = v_tmp.after(v_tmp.after(b3, ch, r_vp)[e_vp].store(
     (tg_v < tokens).where(_amd_load(v_f[bh, tg_v.minimum(tokens - 1), v_col]), z0)).end(e_vp, r_vp))
   x_init, qs_init, j_s = buf_a.after(b3, ch).store(buf_a.const_like(0.0)), buf_b.after(b3, ch).store(buf_b.const_like(0.0)), UOp.range(kt_w, 25)
-  sb_h = (f8_to_frag_fn(lambda e: s_cur[j_s, e].load() * sgv_r[0, ch, (kw * kt_w + j_s) * 16 + row_of(e)].load(), (j_s,), 244, buf_h)  # type: ignore[index]
-          if is_kda else f8_to_frag(s_cur[j_s], j_s, 244))
+  sb_h = f8_to_frag_fn(lambda e: s_cur[j_s, e].load() * is_kda.where(sgv_r[0, ch, (kw * kt_w + j_s) * 16 + row_of(e)].load(), o1), (j_s,), 244, buf_h)
   xq_done = UOp.group(buf_a.store(UOp.wmma(skq_frag(0, ch, kw * kt_w + j_s), sb_h, buf_a.after(x_init, j_s), *WMMA_ARG)),
                       buf_b.store(UOp.wmma(skq_frag(1, ch, kw * kt_w + j_s), sb_h, buf_b.after(qs_init, j_s), *WMMA_ARG))).end(j_s)
   x_p, qs_p, s_xq_1d, n_peers = buf_a.after(xq_done), buf_b.after(xq_done), s_M.after(b3, ch), k_split - 1
@@ -818,12 +868,12 @@ def _gated_delta_wmma_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp,
     for m, buf in ((0, buf_a), (1, buf_b)))).end(e_rd, pk_r)
   x_tot, qs_tot = buf_a.after(red_p), buf_b.after(red_p)
   y_ready = f8_to_frag_fn(lambda e: sb_r[ch, row_of(e)].load() * (v_tmp_r.after(xq_b, r_k0)[e].load() -
-    (o1 if is_kda else sg_r[ch, row_of(e)].load()) * x_tot[e].load()), (red_p,), 246, buf_h)  # type: ignore[index]
+    is_kda.where(o1, sg_r[ch, row_of(e)].load()) * x_tot[e].load()), (red_p,), 246, buf_h)
   d_done = buf_a.store(UOp.wmma(lds_frag(sT_8, ch, lane_c), y_ready, buf_a.after(buf_a.after(y_ready).store(buf_a.const_like(0.0))), *WMMA_ARG))
   d_v, e_os = buf_a.after(d_done), UOp.range(8, 247)
-  o_scale = buf_b.after(d_done)[e_os].store((o1 if is_kda else sg_r[ch, row_of(e_os)].load()) * qs_tot[e_os].load()).end(e_os)  # type: ignore[index]
+  o_scale = buf_b.after(d_done)[e_os].store(is_kda.where(o1, sg_r[ch, row_of(e_os)].load()) * qs_tot[e_os].load()).end(e_os)
   def dd_of(e:UOp) -> UOp:
-    return d_v[e].load() if is_kda else _fast_exp2((sL_r[ch, 15].load() - sL_r[ch, row_of(e)].load()).minimum(z0)) * d_v[e].load()  # type: ignore[index]
+    return is_kda.where(o1, _fast_exp2((sL_r[ch, 15].load() - sL_r[ch, row_of(e)].load()).minimum(z0))) * d_v[e].load()
   p_dd = UOp.range(4, 248)
   if rdna4:
     dd_st = s_dd.after(o_scale)[(v_sub * 32 + lane) * 4 + p_dd].store(
@@ -847,14 +897,12 @@ def _gated_delta_wmma_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp,
   k_col_r = (k_row_u >> 2) & 1
   skt_u = skt_8[ch, k_row_u, lane_g ^ k_col_r] if rdna4 else skt_8[ch, k_row_u, k_col_r].cat(skt_8[ch, k_row_u, 1 ^ k_col_r])
   e_su = UOp.range(8, 251)
-  if is_kda:
-    du_v = buf_a.after(buf_a.store(UOp.wmma(skt_u, dd_frag, buf_a.after(buf_a.after(b_dd, j_u).store(buf_a.const_like(0.0))), *WMMA_ARG)))
-    s_u_done = s_reg[j_u, e_su].store(s_cur.after(b_dd, j_u)[j_u, e_su].load() * sgv_r[2, ch, k_ubase + row_of(e_su)].load() +  # type: ignore[index]
-                                      du_v[e_su].load() * sgv_r[1, ch, k_ubase + row_of(e_su)].load()).end(e_su, j_u)  # type: ignore[index]
-  else:
-    g_last = sg_r[ch, 15].load()  # type: ignore[index]
-    s_sc = s_reg[j_u, e_su].store(s_cur.after(b_dd, j_u)[j_u, e_su].load() * g_last).end(e_su)
-    s_u_done = s_reg[j_u].store(UOp.wmma(skt_u, dd_frag, s_reg.after(s_sc)[j_u], *WMMA_ARG)).end(j_u)
+  du_v = buf_a.after(buf_a.store(UOp.wmma(skt_u, dd_frag, buf_a.after(buf_a.after(b_dd, j_u).store(buf_a.const_like(0.0))), *WMMA_ARG)))
+  s_u_kda = s_reg[j_u, e_su].store(s_cur.after(b_dd, j_u)[j_u, e_su].load() * sgv_r[2, ch, k_ubase + row_of(e_su)].load() +
+                                   du_v[e_su].load() * sgv_r[1, ch, k_ubase + row_of(e_su)].load()).end(e_su, j_u)
+  s_sc = s_reg[j_u, e_su].store(s_cur.after(b_dd, j_u)[j_u, e_su].load() * sg_r[ch, 15].load()).end(e_su)
+  s_u_gdn = s_reg[j_u].store(UOp.wmma(skt_u, dd_frag, s_reg.after(s_sc)[j_u], *WMMA_ARG)).end(j_u)
+  s_u_done = UOp(Ops.WHERE, src=(is_kda, s_u_kda, s_u_gdn))
 
   s_fin, j_o = s_reg.after(s_u_done.barrier().end(ch).end(sup_r)), UOp.range(kt_w, 30)
   k0_o = (kw * kt_w + j_o) * 16 + lane_g * 8
@@ -870,7 +918,8 @@ def _gated_delta_wmma_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp,
                      arg=KernelInfo(name="gated_delta_wmma", opts_to_apply=()))
 
 @functools.cache
-def _gated_delta_scalar_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, *, k_blks:UOp, alpha_k:UOp, start_pos:UOp) -> UOp:
+def _gated_delta_scalar_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, *, k_blks:UOp, alpha_k:UOp, start_pos:UOp,
+                               rdna4:bool=False) -> UOp:
   batch, heads, tokens, value_dim = core.shape
   v_tiles, key_dim, BH = value_dim // 4, k_blks * 32, batch * heads
   core_f, v_f = core.reshape(BH, tokens, value_dim), v.reshape(BH, tokens, value_dim)
@@ -885,12 +934,12 @@ def _gated_delta_scalar_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UO
     start_pos.eq(0).where(z0, state_f[bh_sc, row_base + r_init, col_sc].load().float())).end(ci_u, r_init))
   kv_s, qv_s = k_f[bh_sc, tok_r, col_sc].load(), q_f[bh_sc, tok_r, col_sc].load()
   bv_s, av_s = beta_f[bh_sc, tok_r].load(), alpha_f[bh_sc, tok_r, col_sc % alpha_k].load()
-  kqv_s = warp_reduce((kv_s * qv_s).reduce(ci_u, arg=(Ops.ADD, 0)), full_wave=True)
+  kqv_s = warp_reduce((kv_s * qv_s).reduce(ci_u, arg=(Ops.ADD, 0)), full_wave=True, dpp=rdna4)
   sc_stores: list[UOp] = []
   for r_i in range(4):
     dec = cur_sc.after(tok_r)[r_i, ci_u].load() * av_s
-    delta = (v_f[bh_sc, tok_r, row_base + r_i].load() - warp_reduce((dec * kv_s).reduce(ci_u, arg=(Ops.ADD, 0)), full_wave=True)) * bv_s
-    q_red = warp_reduce((dec * qv_s).reduce(ci_u, arg=(Ops.ADD, 0)), full_wave=True)
+    delta = (v_f[bh_sc, tok_r, row_base + r_i].load() - warp_reduce((dec * kv_s).reduce(ci_u, arg=(Ops.ADD, 0)), full_wave=True, dpp=rdna4)) * bv_s
+    q_red = warp_reduce((dec * qv_s).reduce(ci_u, arg=(Ops.ADD, 0)), full_wave=True, dpp=rdna4)
     sc_stores += [core_f[bh_sc, tok_r, (row_base + r_i).valid(lane.eq(0))].store(q_red + delta * kqv_s),
                   cur_sc[r_i, ci_u].store(dec + delta * kv_s).end(ci_u)]
   return state_f[bh_sc, row_base + r_out, col_sc].store(cur_sc.after(UOp.group(*sc_stores).end(tok_r))[r_out, ci_u].load().cast(state.dtype)).end(
@@ -902,14 +951,12 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   _, _, tokens, value_dim = core.shape
   assert isinstance(value_dim, UOp)
   v_tiles = value_dim // 4
-  k_sc = _gated_delta_scalar_kernel(core, q, k, v, beta, alpha, state, k_blks=k_blks, alpha_k=alpha_k, start_pos=start_pos)
-  if arch == "amd": return k_sc
   rdna4 = arch == "rdna4"
-  can_wmma = (tokens >= 16) & (v_tiles % 8).eq(0) & (k_blks >= 2) & (k_blks % 2).eq(0) & (k_blks <= 8)
-  k_ak1 = _gated_delta_wmma_kernel(core, q, k, v, beta, alpha, state, k_blks=k_blks, alpha_k=alpha_k, start_pos=start_pos, rdna4=rdna4, is_kda=False)
-  k_kda = _gated_delta_wmma_kernel(core, q, k, v, beta, alpha, state, k_blks=k_blks, alpha_k=alpha_k, start_pos=start_pos, rdna4=rdna4, is_kda=True)
-  sel = UOp(Ops.WHERE, src=(can_wmma & alpha_k.eq(k_blks * 32), k_kda, k_sc))
-  return UOp(Ops.WHERE, src=(can_wmma & alpha_k.eq(1), k_ak1, sel))
+  k_sc = _gated_delta_scalar_kernel(core, q, k, v, beta, alpha, state, k_blks=k_blks, alpha_k=alpha_k, start_pos=start_pos, rdna4=rdna4)
+  if arch == "amd": return k_sc
+  can_wmma = (tokens >= 16) & (v_tiles % 8).eq(0) & (k_blks >= 2) & (k_blks % 2).eq(0) & (k_blks <= 8) & (alpha_k.eq(1) | alpha_k.eq(k_blks * 32))
+  k_wmma = _gated_delta_wmma_kernel(core, q, k, v, beta, alpha, state, k_blks=k_blks, alpha_k=alpha_k, start_pos=start_pos, rdna4=rdna4)
+  return UOp(Ops.WHERE, src=(can_wmma, k_wmma, k_sc))
 
 # ******** fused mHC coefficients (fuses flat.square().sum(-1) directly) ********
 

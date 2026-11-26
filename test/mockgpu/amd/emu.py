@@ -492,7 +492,7 @@ class _Ctx:
     op_name = op.name
     src0_off, vdst_off = self.inst_field(type(inst).src0), self.inst_field(type(inst).vdst)
     src0_reg = (src0_off >= _c(256)).where(src0_off - _c(256), _c(0))  # VGPR index or 0
-    src1_off, src2_off = self.optional_field(inst, 'src1'), self.optional_field(inst, 'src2')
+    src1_off, src2_off, literal = self.optional_field(inst, 'src1'), self.optional_field(inst, 'src2'), self.optional_field(inst, 'literal')
     src1_reg = (src1_off >= _c(256)).where(src1_off - _c(256), src1_off) if src1_off is not None else _c(0)
     src2_reg = (src2_off >= _c(256)).where(src2_off - _c(256), src2_off) if src2_off is not None else _c(0)
     exec_val = self.rexec()
@@ -500,9 +500,9 @@ class _Ctx:
     srcs = {
       'SRC0': src0_reg, 'VDST': vdst_off, 'EXEC_LO': exec_lo, 'EXEC': exec_val.cast(dtypes.uint64),
       '_vgpr': self.vgpr, '_wave_size': self.wave_size, 'SRC1': src1_reg, 'SRC2': src2_reg,
-      'S0': self.rsrc_dyn(src0_off, _c(0, dtypes.int)) if 'WRITELANE' in op_name else src0_reg,
-      'S1': self.rsrc_dyn(src1_off, _c(0, dtypes.int)) if src1_off is not None else _c(0),
-      'S2': self.rsrc_dyn(src2_off, _c(0, dtypes.int)) if src2_off is not None else _c(0),
+      'S0': self.rsrc_dyn(src0_off, _c(0, dtypes.int), literal=literal) if 'WRITELANE' in op_name else src0_reg,
+      'S1': self.rsrc_dyn(src1_off, _c(0, dtypes.int), literal=literal) if src1_off is not None else _c(0),
+      'S2': self.rsrc_dyn(src2_off, _c(0, dtypes.int), literal=literal) if src2_off is not None else _c(0),
     }
     _, assigns = parse_pcode(pcode, srcs)
     stores = []
@@ -734,6 +734,8 @@ def _dpp16_ctrl(lane: UOp, dpp: int, row_mask: int, bank_mask: int, wave_size: i
     elif op == 'row_mirror': src_lane = row_base + (_c(15, dtypes.int) - lane_in_row)
     elif op == 'row_half_mirror': src_lane = row_base + ((lane_in_row & _c(8, dtypes.int)) | (_c(7, dtypes.int) - (lane_in_row & _c(7, dtypes.int))))
     elif op == 'row_bcast': src_lane = row_base
+    elif op in ('row_share', 'row_newbcast'): src_lane = row_base + _c(arg, dtypes.int)
+    elif op == 'row_xmask': src_lane = row_base + (lane_in_row ^ _c(arg, dtypes.int))
     elif op == 'wave_shl': src_lane, valid = lane_i + _c(arg, dtypes.int), lane_i < _c(wave_size - arg, dtypes.int)
     elif op == 'wave_rol': src_lane = (lane_i + _c(arg, dtypes.int)) % _c(wave_size, dtypes.int)
     elif op == 'wave_shr': src_lane, valid = lane_i - _c(arg, dtypes.int), lane_i >= _c(arg, dtypes.int)
@@ -742,10 +744,13 @@ def _dpp16_ctrl(lane: UOp, dpp: int, row_mask: int, bank_mask: int, wave_size: i
   return src_lane, enabled, valid
 
 def _load_dpp16_src0(ctx: _Ctx, inst, lane: UOp, fallback: UOp) -> UOp:
-  """Load a DPP16-swizzled src0 value from vsrc0."""
+  """Load a DPP16-swizzled src0 value from vsrc0 (snapshotting vsrc0 first so vdst==vsrc0 never aliases)."""
+  vsrc0_reg = ctx.inst_field(type(inst).vsrc0)
+  snap, sl = UOp.alloc((ctx.wave_size,), dtypes.uint32, 0, AddrSpace.REG), ctx.range()
+  snap = snap.after(snap.index(sl).store(ctx.rvgpr_dyn(vsrc0_reg, sl)).end(sl))
   src_lane, enabled, valid = _dpp16_ctrl(lane, _iattr(inst, 'dpp'), _iattr(inst, 'row_mask', 0xf), _iattr(inst, 'bank_mask', 0xf), ctx.wave_size)
   safe_src_lane = (enabled & valid).where(src_lane, _c(0, dtypes.int))
-  swizzled = ctx.rvgpr_dyn(ctx.inst_field(type(inst).vsrc0), safe_src_lane)
+  swizzled = snap.index(safe_src_lane).load()
   invalid = _c(0, fallback.dtype) if _iattr(inst, 'bc') else fallback
   return enabled.where(valid.where(swizzled, invalid), fallback)
 

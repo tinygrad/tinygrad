@@ -96,34 +96,45 @@ def _b_gemm(kg:int, ln:int) -> UOp:
   wk_z, tn_z = ((k_sb >= 4) & (k_sb % 4).eq(0)).where(4, ((k_sb >= 2) & (k_sb % 2).eq(0)).where(2, 1)), (outf >= 32).where(2, 1)
   k_zlds = _gguf._rdna4_zlds_f16_kernel(p_out, p_raw, p_x, p_grid, tok=tok, out_features=outf, in_features=inf,
                                         ggml_type=qt, waves_k=wk_z, tn=tn_z)
-  f16_qts = tuple(q for q in _gguf.QUANT_NAMES if (q in _gguf.SMALL_BLOCK_QUANTS or q not in _gguf.OTF_FP8_QUANTS))
+  f16_qts = tuple(sorted(_gguf.SMALL_BLOCK_QUANTS))
   k_f16 = _gguf._quant_linear_f16_wmma_kernel(p_out, p_raw, p_x, p_grid, m_blks=mb, m_tiles=mt, out_features=outf, in_features=inf,
                                               ggml_type=qt, kgroups=kg, lanes=ln, qtypes=f16_qts)
-  sel_base = UOp(Ops.WHERE, src=((inf >= 256) & (inf % 256).eq(0) & (outf >= 16) & (tok >= 16), k_zlds, k_f16))
-  otf_all = tuple(sorted(_gguf.OTF_FP8_QUANTS))
-  k_128 = _gguf._rdna4_gemm_fp8_kernel(p_out, p_raw, p_x, p_grid, tok=tok, out_features=outf, in_features=inf, ggml_type=qt,
-                                       qtypes=otf_all, wm=4, wn=4, tm=2, tn=2, double_buf=False, lanes_a=4)
-  k_64x128 = _gguf._rdna4_gemm_fp8_kernel(p_out, p_raw, p_x, p_grid, tok=tok, out_features=outf, in_features=inf, ggml_type=qt,
-                                          qtypes=otf_all, wm=4, wn=4, tm=1, tn=2, double_buf=True, lanes_a=8)
-  is_otf = _gguf._qswitch(qt, [(q, UOp.const(q in _gguf.OTF_FP8_QUANTS, dtypes.bool)) for q in _gguf.QUANT_NAMES])
-  can = is_otf & (inf >= 512) & (inf % 256).eq(0) & (outf >= 2048) & (outf % 128).eq(0)
-  use_128 = (tok >= 256) | ((tok >= 128) & ((outf >= 8192) | ((outf > 4096) & (inf >= 8192))))
-  use_64 = qt.eq(_gguf.Q8_0).where(tok >= 128, tok >= 64)
-  return UOp(Ops.WHERE, src=(can & use_128, k_128, UOp(Ops.WHERE, src=(can & use_64, k_64x128, sel_base))))
+  return UOp(Ops.WHERE, src=((inf >= 256) & (inf % 256).eq(0) & (outf >= 16) & (tok >= 16), k_zlds, k_f16))
+
+def _b_moe_route() -> UOp:
+  mtot, maxt, ne, nd = _t("m_tot"), _t("max_tiles"), _t("num_experts", 1, 512), _t("ndev", 1, 64)
+  return _gguf._amd_moe_route_kernel(_p(0, (mtot,), "i32"), _p(1, (maxt,), "i32"), _p(2, (maxt,), "i32"), _p(3, (maxt,), "i32"),
+                                     _p(4, (1,), "i32"), _p(5, (mtot,), "i32"), num_experts=ne, ndev=nd)
+
+def _b_quant_x_frag() -> UOp:
+  mt, kt, xr, um, xs = _t("m_tiles"), _t("k_tiles"), _t("x_rows"), _t("use_moe", 0, 1), _t("x_share", 1, 1024)
+  tl = _t("tok_len")
+  return _gguf._rdna4_quant_x_frag_kernel(_p(0, (mt, kt * 8, 32, 2), "u32"), _p(1, (mt, kt, 16), "f32"), _p(2, (xr, kt * 128), "f16"),
+                                          _p(3, (tl,), "i32"), _p(4, (mt,), "i32"), _p(5, (mt,), "i32"), _p(6, (1,), "i32"),
+                                          use_moe=um, x_share=xs)
+
+def _b_rdna4_gemm_fp8() -> UOp:
+  qt, tok, mt, inf, outf = _t("qtype", 8, 40), _t("tokens"), _t("m_tiles"), _t("in_features", 128), _t("out_features", 64)
+  rb, gl, um = _t("raw_bytes", 1, 1 << 30), _t("grid_len", 1, 4096), _t("use_moe", 0, 1)
+  tl = _t("tok_len")
+  return _gguf._rdna4_gemm_fp8_kernel(
+    _p(0, (tok, outf), "f32"), _p(1, (rb,), "u8"), _p(2, (mt, inf // 16, 32, 2), "u32"), _p(3, (mt, inf // 128, 16), "f32"),
+    _p(4, (gl,), "u32"), _p(5, (tl,), "i32"), _p(6, (mt,), "i32"), _p(7, (mt,), "i32"), _p(8, (mt,), "i32"), _p(9, (1,), "i32"),
+    out_features=outf, in_features=inf, ggml_type=qt, use_moe=um, use_128=tok >= 256, qtypes=tuple(sorted(_gguf.OTF_FP8_QUANTS)))
 
 def _b_fdc() -> UOp:
-  B, H, C, db, voff = _t("B", 1, 64), _t("H", 1, 256), _t("C", 1, 48), _t("d_blks", 1, 8), _t("valid_kv_offset", 0)
+  B, H, C, db, voff = _t("B", 1, 64), _t("H", 1, 256), _t("C", 1, 64), _t("d_blks", 1, 8), _t("valid_kv_offset", 0)
   return _amd._amd_flash_decode_combine(_p(0, (B, H, 1, db * 64), "f32"), _p(1, (B, H, C, db * 64), "f32"),
                                         _p(2, (B, H, C, 2), "f32"), valid_kv_len=_v(3, "valid_kv_len") + voff)
 
 def _b_fdp() -> UOp:
-  B, H_KV, G, db, C, nb = _t("B", 1, 64), _t("H_KV", 1, 256), _t("G", 1, 8), _t("d_blks", 1, 8), _t("C", 1, 48), _t("n_blks", 1, 65536)
+  B, H_KV, G, db, C, nb = _t("B", 1, 64), _t("H_KV", 1, 256), _t("G", 1, 8), _t("d_blks", 1, 8), _t("C", 1, 64), _t("n_blks", 1, 65536)
   voff, waves, D = _t("valid_kv_offset", 0), _t("waves", 1, 16), db * 64
   args = (_p(0, (B, H_KV * G, C, D), "f32"), _p(1, (B, H_KV * G, C, 2), "f32"),
           _p(2, (B, H_KV * G, 1, D), "f16"), _p(3, (2, B, H_KV, nb * 64, D), "f16"))
   can_gs2 = (G % 2).eq(0) & (waves >= 2)
   gs = (can_gs2 & (db.eq(2) | (db >= 4))).where(2, 1)
-  lpt = (can_gs2 & db.eq(2)).where(16, 32)
+  lpt = (db.eq(1) & (waves * G <= 112)).where(8, (db.eq(2) & ((waves // gs) * G <= 112)).where(16, 32))
   return _amd._amd_flash_attention_decode_partial(*args, valid_kv_len=_v(4, "valid_kv_len") + voff, d_blks=db, group=G, waves=waves,
                                                   g_split=gs, lanes_per_tok=lpt)
 
@@ -150,12 +161,14 @@ def _b_gd(arch:str) -> UOp:
     k_blks=kb, alpha_k=ak, start_pos=_v(7, "start_pos"), arch=arch)
 
 _BUILDERS: dict[str, Callable[[], UOp]] = {
-  **{f"amd_gemv_{w}_{x}": functools.partial(_b_gemv, w, x)
-     for w, x in (("f16", "f32"), ("f32", "f16"), ("bf16", "f32"), ("f32", "bf16"), ("f32", "f32"))},
+  **{f"amd_gemv_{w}_f32": functools.partial(_b_gemv, w, "f32") for w in ("f16", "bf16", "f32")},
   "amd_gemv_quant_f32": _b_qgemv,
-  **{f"amd_quant_q8_1_{dt}": functools.partial(_b_quant_q8_1, dt) for dt in ("f16", "f32")},
+  "amd_quant_q8_1_f32": functools.partial(_b_quant_q8_1, "f32"),
   "amd_sdot4": _b_sdot4,
   **{f"{a}_gemm_f16": functools.partial(_b_gemm, kg, ln) for a, kg, ln in (("rdna4", 2, 32), ("rdna3", 1, 32), ("cdna", 4, 64))},
+  "amd_moe_route": _b_moe_route,
+  "rdna4_quant_x_frag": _b_quant_x_frag,
+  "rdna4_gemm_fp8": _b_rdna4_gemm_fp8,
   "amd_flash_decode_combine": _b_fdc, "amd_flash_decode_partial": _b_fdp,
   "rdna4_flash_attn": functools.partial(_b_fa, True), "rdna3_flash_attn": functools.partial(_b_fa, False),
   "amd_hc_coeffs": _b_hc,
