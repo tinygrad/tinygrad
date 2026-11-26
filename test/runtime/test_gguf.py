@@ -152,7 +152,7 @@ class TestGGUF(unittest.TestCase):
   def test_dequantization_iq4_xs(self): self._test_dequantization(GGMLQuantizationType.IQ4_XS)
   def test_dequantization_iq1_m(self): self._test_dequantization(GGMLQuantizationType.IQ1_M)
   def test_dequantization_mxfp4(self): self._test_dequantization(GGMLQuantizationType.MXFP4)
-  def test_dequantization_nvfp4(self): self._test_dequantization(GGMLQuantizationType(40), block_count=2)
+  def test_dequantization_nvfp4(self): self._test_dequantization(GGMLQuantizationType.NVFP4)
   @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, "Backend must support bfloat16")
   def test_dequantization_bf16(self): self._test_dequantization(GGMLQuantizationType.BF16)
   def test_dequantization_mxfp4_old(self):
@@ -253,15 +253,17 @@ class TestGGUF(unittest.TestCase):
 
   def test_load_weight_scale(self):
     from gguf import GGUFWriter
+    from tinygrad.helpers import get_child
     from tinygrad.llm.model import Transformer
-    # shapes in the GGUF's numpy order, no output.weight so it ties to token_embd
+    # numpy order shapes, output ties to token_embd
     block = {'attn_norm': (8,), 'attn_q': (8, 8), 'attn_k': (8, 8), 'attn_v': (8, 8), 'attn_output': (8, 8), 'ffn_norm': (8,),
              'ffn_gate_inp': (4, 8), 'ffn_gate_exps': (4, 8, 8), 'ffn_up_exps': (4, 8, 8), 'ffn_down_exps': (4, 8, 8)}
     shapes = {'token_embd.weight': (32, 8), 'output_norm.weight': (8,), **{f'blk.{i}.{k}.weight': s for i in range(2) for k, s in block.items()}}
     rng = np.random.default_rng(0)
     weights = {k:rng.normal(size=s).astype(np.float32) for k,s in shapes.items()}
-    # only blk.0 has scales, like Inkling where the last layers' experts are Q8_0. below the float16 normal range like real NVFP4 scales
+    # only blk.0 has scales, below the float16 range like real ones
     scales = {f'blk.0.ffn_{p}_exps.scale': np.array([1, 2, 3, 4], np.float32) * (i+1) * 1e-6 for i, p in enumerate(('gate', 'up', 'down'))}
+    scales['blk.0.attn_output.scale'] = np.array([5e-6], np.float32)
     with tempfile.TemporaryDirectory() as folder:
       writer = GGUFWriter(path:=pathlib.Path(folder)/'model.gguf', 'deepseek2')
       for key,value in {'context_length':16, 'embedding_length':8, 'expert_feed_forward_length':8, 'block_count':2, 'expert_count':4,
@@ -278,10 +280,15 @@ class TestGGUF(unittest.TestCase):
       writer.close()
       with Context(DEV="CPU"):
         model = Transformer.from_gguf(path)[0]
-        # the scales load into blk.0's experts as is, blk.1's experts have none
-        for p in ('gate', 'up', 'down'):
-          np.testing.assert_equal(getattr(model.blk[0], f'ffn_{p}_exps').scale.numpy(), scales[f'blk.0.ffn_{p}_exps.scale'])
+        # blk.0's layers get the scales, blk.1's have none
+        for k, v in scales.items(): np.testing.assert_equal(get_child(model, k.removesuffix('.scale')).scale.numpy(), v)
         self.assertIsNone(model.blk[1].ffn_down_exps.scale)
+        # the unscaled product would overflow float16
+        x, w = np.full((1, 1, 8), 30000, np.float16), {k: v.astype(np.float16).astype(np.float64) for k, v in weights.items()}
+        self.assertGreater(np.abs(x @ w['blk.0.attn_output.weight'].T).max(), 65504)
+        np.testing.assert_allclose(model.blk[0].attn_output(Tensor(x)).numpy(), x @ w['blk.0.attn_output.weight'].T * 5e-6, rtol=1e-2)
+        expert = model.blk[0].ffn_down_exps(Tensor([[[1]]]), Tensor(x).unsqueeze(2)).numpy()
+        np.testing.assert_allclose(expert, x[:, :, None] @ w['blk.0.ffn_down_exps.weight'][1].T * scales['blk.0.ffn_down_exps.scale'][1], rtol=1e-2)
 
   def test_parse_empty(self):
     blob = self._build_gguf([], [("general.name", "empty")])
