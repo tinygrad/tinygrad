@@ -3,7 +3,7 @@ import itertools
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, function, Device, TinyJit
 from tinygrad.helpers import Context
-from tinygrad.llm.gguf import ggml_data_to_tensor, QUANT_SIZES, HALFWORD_QUANTS, SMALL_BLOCK_QUANTS
+from tinygrad.llm.gguf import ggml_data_to_tensor, QUANT_SIZES, SMALL_BLOCK_QUANTS
 from tinygrad.llm.model import Linear, ExpertWeights, fp8_matmul, amd_custom_kernels_supported
 from tinygrad.llm.hf import e4m3fn_to_fnuz
 from test.helpers import needs_devices
@@ -91,7 +91,7 @@ class TestQ8Quantize(QuantLinearMixin, unittest.TestCase):
         assert linear.packed is not None
         linear.packed.realize()
         self.assertEqual(linear.ggml_type, ggml_type)
-        self.assertEqual(linear.packed.dtype, dtypes.uint8 if ggml_type == 39 else dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32)
+        self.assertEqual(linear.packed.dtype, dtypes.uint8)
         self.assertEqual(linear.packed.nbytes(), type_size)
         np.testing.assert_array_equal(linear.packed.bitcast(dtypes.uint8).numpy(), packed[offset:])
         raw.assign(raw.full_like(1)).realize()

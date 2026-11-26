@@ -1,3 +1,4 @@
+from dataclasses import replace
 import math
 import unittest
 from unittest.mock import patch
@@ -56,21 +57,20 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
     v_base, v_off = _split_offset(valid_end)
     vkl_u = v_base if isinstance(v_base, UOp) else UOp.const(int(v_base))
     if decode and M == 1 and D in (64, 128, 256) and (grp := H // H_KV) in (1, 2, 4, 8) and N_phys % 64 == 0:
-      ch, waves = min(48, ceildiv(N_phys, 64)), 16
-      while waves * grp * ((D + 4) * 2 + 8) > 65536: waves //= 2
-      kp = unwrap(slopkernels.get("amd_flash_decode_partial")).specialize(
-        B=B, H_KV=H_KV, G=grp, d_blks=D // 64, n_blks=N_phys // 64, C=ch, valid_kv_offset=v_off, waves=waves)
-      partial, stats = (UOp.alloc((B, H, ch, d), dtypes.float32, device=q.device) for d in (D, 2))
-      cp = kp.call(partial, stats, q_in.uop, assigned_kv.uop, vkl_u)
-      kc = unwrap(slopkernels.get("amd_flash_decode_combine")).specialize(B=B, H=H, C=ch, d_blks=D // 64, valid_kv_offset=v_off)
+      ch = min(48, ceildiv(N_phys, 64))
+      kf = unwrap(slopkernels.get("amd_flash_decode")).specialize(
+        B=B, H_KV=H_KV, G=grp, d_blks=D // 64, n_blks=N_phys // 64, C=ch, valid_kv_offset=v_off)
+      if kf.op is Ops.SINK and kf.arg is None:
+        kf = kf.substitute({b: b.replace(src=b.src[:1] + UOp.device_range_src(q.device), arg=replace(b.arg, device=q.device))
+                            for b in kf.toposort() if b.op is Ops.ALLOC and b.arg.device is None})
       out = UOp.alloc((B, H, 1, D), dtypes.float32, device=q.device)
-      return Tensor(out.after(kc.call(out, partial.after(cp), stats.after(cp), vkl_u)))
+      return Tensor(out.after(kf.call(out, q_in.uop, assigned_kv.uop, vkl_u)))
     if not decode and target[0] != 9 and D in (64, 128, 256, 320) and N_phys % 32 == 0 and M % 32 == 0:
       k_fa = unwrap(slopkernels.get(f"{'rdna4' if target[0] == 12 else 'rdna3'}_flash_attn")).specialize(
-        BH=B * H, m_blks=M // 32, B=B, H_KV=H_KV, d_blks=D // 64, n_blks=N_phys // 32, valid_kv_offset=v_off, q_start_from_end=1)
+        B=B, H=H, H_KV=H_KV, m_blks=M // 32, d_blks=D // 64, n_blks=N_phys // 32, valid_kv_offset=v_off, q_start_from_end=1)
       ql_u = T_real if isinstance(T_real, UOp) else UOp.const(M)
-      out = UOp.alloc((B * H, M, D), dtypes.float32, device=q.device)
-      ret = Tensor(out.after(k_fa.call(out, q_in.reshape(B * H, M, D).uop, assigned_kv.uop, vkl_u, ql_u)).reshape((B, H, M, D)))
+      out = UOp.alloc((B, H, M, D), dtypes.float32, device=q.device)
+      ret = Tensor(out.after(k_fa.call(out, q_in.uop, assigned_kv.uop, vkl_u, ql_u)))
       return ret if not isinstance(T_real, UOp) else ret[:, :, :T_real]
   k, v = (assigned_kv[i, :, :, :valid_end].float() for i in range(2))
   mask = None if decode else Tensor.full((T_real, valid_end), -math.inf, dtype=dtypes.float32, device=q.device).triu(valid_end - T_real + 1)
@@ -83,8 +83,8 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   B, H, T, K, V = int(q.shape[0]), int(q.shape[1]), int(q.shape[2]), int(q.shape[3]), int(v.shape[3])
   ak = K if alpha.ndim == 4 else 1
   target = _slop_target(q.device)
-  arch = "rdna4" if target and target[0] == 12 else "rdna3" if target and target[0] == 11 else "amd"
-  kern = unwrap(slopkernels.get(f"{arch}_gated_delta")).specialize(batch=B, heads=H, tokens=T, v_tiles=V // 4, k_blks=K // 32, alpha_k=ak)
+  kern = unwrap(slopkernels.get("amd_gated_delta")).specialize(
+    batch=B, heads=H, tokens=T, v_tiles=V // 4, k_blks=K // 32, alpha_k=ak, arch=target[0] if target else 9)
   out = UOp.alloc((B, H, T, V), dtypes.float32, device=q.device)
   srcs = [s.uop if s.uop.op is Ops.AFTER else s.contiguous().uop for s in (q, k, v, beta)]
   srcs += [alpha.uop.reshape(B, H, T, ak) if alpha.uop.op is Ops.AFTER else alpha.contiguous().reshape(B, H, T, ak).uop]
@@ -156,7 +156,7 @@ class TestQ8Quantize(unittest.TestCase):
     self.assertTrue(np.isfinite(run(Tensor.randn(1, 256)).realize().item()))
     packed_w = p if (p := getattr(linear, "packed", None)) is not None else linear.weight
     self.assertEqual(packed_w.nbytes(), 210)
-    self.assertEqual(packed_w.dtype, dtypes.uint16)
+    self.assertEqual(packed_w.dtype, dtypes.uint8)
 
   def test_q4_k_linear(self): self._test_quant_linear(12, 144)
   def test_iq4_linear(self): self._test_quant_linear(23, 136)
@@ -411,7 +411,7 @@ class TestQ8Quantize(unittest.TestCase):
     rng = np.random.default_rng(0)
     hc.fn.weight, hc.base["weight"] = Tensor(rng.normal(0, 0.1, (24, 128)).astype(np.float16)), Tensor(rng.normal(size=24).astype(np.float16))
     hc.scale["weight"], xs = Tensor(rng.uniform(0.5, 1.5, 3).astype(np.float16)), Tensor(rng.normal(size=(1, 3, 4, 32)).astype(np.float32))
-    self.assertIsNotNone(slopkernels.get("amd_hc_coeffs_f16_f16"))
+    self.assertIsNotNone(slopkernels.get("amd_hc_coeffs"))
     got = hc(xs, lambda h: (h * 0.5, None))[0].numpy()
     hc.fn.weight, hc.base["weight"], hc.scale["weight"] = (t.to("CPU") for t in (hc.fn.weight, hc.base["weight"], hc.scale["weight"]))
     np.testing.assert_allclose(got, hc(xs.to("CPU"), lambda h: (h * 0.5, None))[0].numpy(), rtol=1e-4, atol=1e-5)

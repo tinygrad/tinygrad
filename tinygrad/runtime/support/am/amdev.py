@@ -196,12 +196,16 @@ class AMDev:
         if self.is_hive():
           if reset_mode: return # in reset mode, do not raise
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
-        # Quiesce first: mode1 reset over live engines can wedge the GPU until power cycled.
+        # Quiesce first: mode1 reset over live engines (or max clocks after an AM crash) can wedge RDNA4 until power cycled.
+        # Only drop clocks when recovering an AM session (not amdgpu's state).
         self.gfx.fini_hw()
+        if self.reg("regSCRATCH_REG7").read() == AMDev.Version:
+          with contextlib.suppress(TimeoutError): self.smu.set_clocks(level=0)
         self.gfx.halt_engines()
         self.sdma.halt_engines()
         time.sleep(0.1)
         self.smu.mode1_reset()
+      self._disable_aspm()
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
       self.init_hw(self.soc, self.gmc, self.ih, *(() if self.is_vf else (self.psp, self.smu)))
     elif not self.is_vf: self.psp._tmr_init()
@@ -213,14 +217,14 @@ class AMDev:
     self.init_hw(self.gfx, self.sdma)
 
     if not self.is_vf: # skip in vf mode, these are pf funcs.
+      self.reg("regSCRATCH_REG5").write(self.psp.tmr_size) # scratch registers are writable after GFX initialization
+      self.reg("regSCRATCH_REG7").write(AMDev.Version)
+      self.reg("regSCRATCH_REG6").write(1) # set initialized state.
       if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0: self.smu.set_power_limit(max_power)
       levels, perf = {"auto": None, "high": -1, "low": 0}, getenv("AM_PERF_LEVEL", "auto" if max_power > 0 else "high")
       assert perf in levels, f"AM_PERF_LEVEL must be one of {list(levels)}, got {perf!r}"
       self.smu.set_clocks(level=levels[perf])
       for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
-      self.reg("regSCRATCH_REG5").write(self.psp.tmr_size) # scratch registers are writable after GFX initialization
-      self.reg("regSCRATCH_REG7").write(AMDev.Version)
-      self.reg("regSCRATCH_REG6").write(1) # set initialized state.
 
     pci_dev.reset_lock(False)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
