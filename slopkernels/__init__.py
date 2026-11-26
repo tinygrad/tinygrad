@@ -7,11 +7,19 @@ from dataclasses import replace
 
 from tinygrad import Context, UOp, dtypes
 from tinygrad.dtype import AddrSpace, DType
-from tinygrad.uop.ops import AxisType, Ops, ParamArg, graph_rewrite
-from tinygrad.uop.symbolic import symbolic_simple
+from tinygrad.uop.ops import AxisType, Ops, ParamArg, PatternMatcher, UPat, graph_rewrite
+from tinygrad.uop.symbolic import symbolic
 from tinygrad.uop.uir import parse_uir, render_uir
 
 from slopkernels.src import amd as _amd, amd_gguf as _gguf
+
+_UIR_PM = PatternMatcher([
+  (UPat(Ops.WHERE, dtype=dtypes.void, src=(UPat.var("c", dtype=dtypes.bool).logical_not(), UPat.var("t"), UPat.var("f"))),
+   lambda c, t, f: UOp(Ops.WHERE, src=(c, f, t))),
+  (UPat(Ops.END, name="e"), lambda e: (
+    e.src[0] if not (r := tuple(x for x in e.src[1:] if x.op is Ops.RANGE)) else e.replace(src=(e.src[0], *r)))
+   if any(x.op is not Ops.RANGE for x in e.src[1:]) else None),
+]) + PatternMatcher([(p, f) for p, f in symbolic.patterns if not (p.op is not None and Ops.AFTER in p.op)])
 
 UIR_DIR = pathlib.Path(__file__).resolve().parent.parent / "tinygrad" / "llm" / "kernels"
 _DTYPES: dict[str, DType] = {v.name: v for v in vars(type(dtypes)).values() if isinstance(v, DType)}
@@ -52,10 +60,7 @@ def _b_qgemv() -> UOp:
   rpw = (is_moe & (tok >= 16)).where(rpw_pre, rpw_dec)
   wk_cap = (is_moe & (tok >= 16)).where(4, rpw_dec.eq(2).where(8, 16))
   def _gate(row:UOp, base:UOp, q:int, isz:int) -> UOp:
-    ew = outf * inf * (_gguf.QUANT_SIZES[q] // isz) // 256
-    le = ((rb // isz) // ew).maximum(1)
-    ex = p_sel[row].cast(dtypes.weakint) - UOp.range(nd, 10, AxisType.DEVICE) * le
-    return is_moe.where(base + ex.maximum(0).minimum(le - 1) * ew, base)
+    return base + is_moe.where(expert(row).maximum(0).minimum(local_experts - 1), 0) * (outf * inf * (_gguf.QUANT_SIZES[q] // isz) // 256)
   k_direct = _gguf._direct_gemv_body(
     p_out, p_raw, p_x, (p_grid,), outf, inf, qt, rpw=rpw, wk_cap=wk_cap, w1_cond=w1,
     aligned4=False, lds_grid=True, group_rows=gr, gate=_gate,
@@ -76,8 +81,8 @@ def _b_qgemv() -> UOp:
   # 3-kernel RDNA4 MoE FP8 WMMA pipeline (route -> quant_x_frag -> gemm_fp8)
   max_tiles, ne_safe = (tok // 16 + ne).maximum(1), ne.maximum(1)
   kt_m = (inf // 128).maximum(1)
-  t_idx, t_exp, t_off, t_cnt, t_tot = (UOp.alloc(s, dtypes.int32, slot=i + 2)
-                                       for i, s in enumerate(((tok,), (max_tiles,), (max_tiles,), (max_tiles,), (1,))))
+  t_idx, t_exp, t_off, t_cnt = (UOp.alloc((n,), dtypes.int32, slot=i + 2) for i, n in enumerate((tok, max_tiles, max_tiles, max_tiles)))
+  t_tot = UOp.alloc((1,), dtypes.int32, slot=6)
   xt_m, xsc_m = UOp.alloc((max_tiles, kt_m * 8, 32, 2), dtypes.uint32, slot=7), UOp.alloc((max_tiles, kt_m, 16), dtypes.float32, slot=8)
   k_rt = _gguf._amd_moe_route_kernel(_p(0, (tok,), "i32"), _p(1, (max_tiles,), "i32"), _p(2, (max_tiles,), "i32"),
                                      _p(3, (max_tiles,), "i32"), _p(4, (1,), "i32"), _p(5, (tok,), "i32"), num_experts=ne_safe, ndev=nd)
@@ -197,7 +202,7 @@ _BUILDERS: dict[str, Callable[[], UOp]] = {
 def _emit(name:str, fn:Callable[[], UOp]) -> tuple[pathlib.Path, str]:
   UIR_DIR.mkdir(parents=True, exist_ok=True)
   with Context(TRACK_MATCH_STATS=0, SPEC=0):
-    u = graph_rewrite(fn(), symbolic_simple, enter_calls=True)
+    u = graph_rewrite(fn(), _UIR_PM, enter_calls=True)
     if allocs := [x for x in u.toposort(enter_calls=True) if x.op is Ops.ALLOC]:
       u = u.substitute({b: b.replace(arg=replace(b.arg, slot=-1 - i)) for i, b in enumerate(allocs)}, enter_calls=True)
       u = u.substitute({b.replace(arg=replace(b.arg, slot=-1 - i)): b.replace(arg=replace(b.arg, slot=i))

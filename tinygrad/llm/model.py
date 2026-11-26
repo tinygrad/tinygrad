@@ -55,9 +55,9 @@ def _run_kernel(name:str, out_shape:tuple[int, ...], device:str|tuple[str, ...]|
   return Tensor(out.after(kern.call(out, *(a.uop if isinstance(a, Tensor) else a for a in args))))
 
 @functools.cache
-def _iq_lut(t:int, dev:str|tuple[str, ...]|None, wmma:bool=False) -> UOp:
+def _iq_lut(t:int, dev:str|tuple[str, ...], wmma:bool=False) -> UOp:
   if t not in ({16, 17, 18, 19, 21, 22, 23} if wmma else {16, 17, 18, 19, 21, 22}):
-    return UOp(Ops.STACK, (UOp.const(0, dtypes.uint32),)).cast(dtypes.uint32).copy_to_device(unwrap(dev))
+    return UOp(Ops.STACK, (UOp.const(0, dtypes.uint32),)).cast(dtypes.uint32).copy_to_device(dev)
   from tinygrad.runtime.autogen import ggml_common as g
   if t == 23 or (wmma and t == 18):
     vals:list[float] = ([g.kvalues_iq4nl[k] for j in range(16) for i in range(16) for k in (i, j)] if t == 23 else
@@ -66,7 +66,7 @@ def _iq_lut(t:int, dev:str|tuple[str, ...]|None, wmma:bool=False) -> UOp:
   else:
     grid, nw = {16:(g.iq2xxs_grid,2), 17:(g.iq2xs_grid,2), 19:(g.iq1s_grid,2), 22:(g.iq2s_grid,2), 18:(g.iq3xxs_grid,1), 21:(g.iq3s_grid,1)}[t]
     words = tuple((v >> (32*i)) & 0xffffffff for v in grid for i in range(nw))
-  return UOp(Ops.STACK, tuple(UOp.const(w, dtypes.uint32) for w in words)).cast(dtypes.uint32).copy_to_device(unwrap(dev))
+  return UOp(Ops.STACK, tuple(UOp.const(w, dtypes.uint32) for w in words)).cast(dtypes.uint32).copy_to_device(dev)
 
 # ***** linear & MoE layers (pure tinygrad math + optional custom kernel speedup) *****
 
