@@ -16,6 +16,13 @@ from slopkernels.src import amd as _amd, amd_gguf as _gguf
 _UIR_PM = PatternMatcher([
   (UPat(Ops.WHERE, dtype=dtypes.void, src=(UPat.var("c", dtype=dtypes.bool).logical_not(), UPat.var("t"), UPat.var("f"))),
    lambda c, t, f: UOp(Ops.WHERE, src=(c, f, t))),
+  (UPat(Ops.WHERE, dtype=dtypes.void, src=(UPat.var("a"), UPat(Ops.WHERE, dtype=dtypes.void, src=(UPat.var("b"), UPat.var("c"), UPat.var("d"))),
+                                           UPat.var("d"))), lambda a, b, c, d: UOp(Ops.WHERE, src=(a & b, c, d))),
+  (UPat(Ops.WHERE, dtype=dtypes.void, src=(UPat.var("a"), UPat(Ops.WHERE, dtype=dtypes.void, src=(UPat.var("b"), UPat.var("c"), UPat.var("d"))),
+                                           UPat.var("c"))), lambda a, b, c, d: UOp(Ops.WHERE, src=(a & b.logical_not(), d, c))),
+  (UPat(Ops.WHERE, dtype=dtypes.void, src=(UPat.var("a"), UPat.var("c"),
+                                           UPat(Ops.WHERE, dtype=dtypes.void, src=(UPat.var("b"), UPat.var("c"), UPat.var("d"))))),
+   lambda a, b, c, d: UOp(Ops.WHERE, src=(a | b, c, d))),
   (UPat(Ops.END, name="e"), lambda e: (
     e.src[0] if not (r := tuple(x for x in e.src[1:] if x.op is Ops.RANGE)) else e.replace(src=(e.src[0], *r)))
    if any(x.op is not Ops.RANGE for x in e.src[1:]) else None),
@@ -38,8 +45,8 @@ def _b_gemv(wdt:str, xdt:str) -> UOp:
   k_lds = _amd._amd_f16_gemv_kernel(*args, in_blks=ib, out_features=outf, tokens=tok, val_chunk=vc, lds_mt=True)
   return UOp(Ops.WHERE, src=((tok > 1) & (tok <= 8) & (inf % 1024).eq(0) & (outf >= 1024) & (outf % 8).eq(0), k_lds, k_base))
 
-def _grid_len(qt:UOp, wmma_iq3x:bool=False, wmma_iq4x:bool=False) -> UOp:
-  tbl = {16: 512, 17: 1024, 18: 512 if wmma_iq3x else 256, 19: 4096, 21: 512, 22: 2048, **({23: 256} if wmma_iq4x else {})}
+def _grid_len(qt:UOp) -> UOp:
+  tbl = {16: 512, 17: 1024, 18: 256, 19: 4096, 21: 512, 22: 2048}
   return _gguf._qswitch(qt, [(q, UOp.const(tbl.get(q, 1), dtypes.weakint)) for q in _gguf.QUANT_NAMES])
 
 def _b_qgemv() -> UOp:
@@ -106,7 +113,7 @@ def _b_qgemv() -> UOp:
 
 def _b_gemm(kg:int, ln:int) -> UOp:
   qt, mb, mt, inf, outf = _t("qtype", 8, 40), _t("m_blks"), _t("m_tiles", 1, 8), _t("in_features", 32), _t("out_features", 16)
-  rb, gl = _t("raw_bytes", 1, 1 << 30), _grid_len(qt, wmma_iq3x=(kg == 1), wmma_iq4x=True)
+  rb, gl = _t("raw_bytes", 1, 1 << 30), _grid_len(qt)
   tok = mb * (mt * 16)
   p_out, p_raw, p_x, p_grid = _p(0, (tok, outf), "f32"), _p(1, (rb,), "u8"), _p(2, (tok, inf), "f16"), _p(3, (gl,), "u32")
   if kg == 1:  # RDNA3: Direct-A + Double-Buffered-B 2D FP16 WMMA + in-WG K-split (wk=2,4)
@@ -182,12 +189,14 @@ def _b_hc() -> UOp:
   return _amd._hc_coeffs_kernel(_p(0, (tok, 24), "f32"), _p(1, (tok, 24), "f32"), _p(2, (tok, feats), "f32"),
                                 _p(3, (24,), "f32"), _p(4, (3,), "f32"), 4, iters, eps, neps)
 
-def _b_gd(arch:str) -> UOp:
-  tok, ba, hd, vt, kb, ak = _t("tokens"), _t("batch", 1, 64), _t("heads", 1, 256), _t("v_tiles", 1, 1024), _t("k_blks", 1, 8), _t("alpha_k", 1, 256)
-  K = kb * 32
-  return _amd._gated_delta_prefill_kernel(_p(0, (ba, hd, tok, vt * 4), "f32"), _p(1, (ba, hd, tok, K), "f32"), _p(2, (ba, hd, tok, K), "f32"),
-    _p(3, (ba, hd, tok, vt * 4), "f32"), _p(4, (ba, hd, tok), "f32"), _p(5, (ba, hd, tok, ak), "f32"), _p(6, (ba, hd, vt * 4, K), "f32"),
-    k_blks=kb, alpha_k=ak, start_pos=_v(7, "start_pos"), arch=arch)
+def _b_gd() -> UOp:
+  tok, ba, hd, vt, kb, ak, arch = (_t("tokens"), _t("batch", 1, 64), _t("heads", 1, 256), _t("v_tiles", 1, 1024),
+                                   _t("k_blks", 1, 8), _t("alpha_k", 1, 256), _t("arch", 9, 12))
+  K, sp = kb * 32, _v(7, "start_pos")
+  args = (_p(0, (ba, hd, tok, vt * 4), "f32"), _p(1, (ba, hd, tok, K), "f32"), _p(2, (ba, hd, tok, K), "f32"),
+          _p(3, (ba, hd, tok, vt * 4), "f32"), _p(4, (ba, hd, tok), "f32"), _p(5, (ba, hd, tok, ak), "f32"),
+          _p(6, (ba, hd, vt * 4, K), "f32"))
+  return _amd._gated_delta_prefill_kernel(*args, k_blks=kb, alpha_k=ak, start_pos=sp, arch=arch)
 
 _BUILDERS: dict[str, Callable[[], UOp]] = {
   **{f"amd_gemv_{w}_f32": functools.partial(_b_gemv, w, "f32") for w in ("f16", "bf16", "f32")},
@@ -196,7 +205,7 @@ _BUILDERS: dict[str, Callable[[], UOp]] = {
   "amd_flash_decode": _b_flash_decode,
   "rdna4_flash_attn": functools.partial(_b_fa, True), "rdna3_flash_attn": functools.partial(_b_fa, False),
   "amd_hc_coeffs": _b_hc,
-  **{f"{a}_gated_delta": functools.partial(_b_gd, a) for a in ("rdna4", "rdna3", "amd")},
+  "amd_gated_delta": _b_gd,
 }
 
 def _emit(name:str, fn:Callable[[], UOp]) -> tuple[pathlib.Path, str]:

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import enum, functools, itertools, json, math, pathlib, re, struct
+import enum, functools, itertools, json, math, pathlib, re
 from dataclasses import dataclass, replace
 from typing import Callable
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes, Device, Context
@@ -55,17 +55,11 @@ def _run_kernel(name:str, out_shape:tuple[int, ...], device:str|tuple[str, ...]|
   return Tensor(out.after(kern.call(out, *(a.uop if isinstance(a, Tensor) else a for a in args))))
 
 @functools.cache
-def _iq_lut(t:int, dev:str|tuple[str, ...], wmma:bool=False) -> UOp:
-  if t not in ({16, 17, 18, 19, 21, 22, 23} if wmma else {16, 17, 18, 19, 21, 22}):
-    return UOp(Ops.STACK, (UOp.const(0, dtypes.uint32),)).cast(dtypes.uint32).copy_to_device(dev)
+def _iq_lut(t:int, dev:str|tuple[str, ...]) -> UOp:
+  if t not in (16, 17, 18, 19, 21, 22): return UOp(Ops.STACK, (UOp.const(0, dtypes.uint32),)).cast(dtypes.uint32).copy_to_device(dev)
   from tinygrad.runtime.autogen import ggml_common as g
-  if t == 23 or (wmma and t == 18):
-    vals:list[float] = ([g.kvalues_iq4nl[k] for j in range(16) for i in range(16) for k in (i, j)] if t == 23 else
-                        [((v >> (8*i)) & 0xff) / 64.0 for v in g.iq3xxs_grid for i in range(4)])
-    words: tuple[int, ...] = struct.unpack(f"<{len(vals)//2}I", struct.pack(f"<{len(vals)}e", *vals))
-  else:
-    grid, nw = {16:(g.iq2xxs_grid,2), 17:(g.iq2xs_grid,2), 19:(g.iq1s_grid,2), 22:(g.iq2s_grid,2), 18:(g.iq3xxs_grid,1), 21:(g.iq3s_grid,1)}[t]
-    words = tuple((v >> (32*i)) & 0xffffffff for v in grid for i in range(nw))
+  grid, nw = {16:(g.iq2xxs_grid,2), 17:(g.iq2xs_grid,2), 19:(g.iq1s_grid,2), 22:(g.iq2s_grid,2), 18:(g.iq3xxs_grid,1), 21:(g.iq3s_grid,1)}[t]
+  words = tuple((v >> (32*i)) & 0xffffffff for v in grid for i in range(nw))
   return UOp(Ops.STACK, tuple(UOp.const(w, dtypes.uint32) for w in words)).cast(dtypes.uint32).copy_to_device(dev)
 
 # ***** linear & MoE layers (pure tinygrad math + optional custom kernel speedup) *****
@@ -118,14 +112,14 @@ class Linear(nn.Linear):
       out_shape = _shard_shape((splits * tokens, out_f), out_axis, ndev)
       x_f16 = x_in.half().contiguous().reshape(out_shape[0], in_f) if x_axis is None else x_in.half().contiguous()
       mt = 8 if out_shape[0] % 128 == 0 and out_shape[0] >= 256 else 4 if out_shape[0] % 64 == 0 else 2 if out_shape[0] % 32 == 0 else 1
-      out = _run_kernel(f"{arch}_gemm_f16", out_shape, dev, self.packed, x_f16, _iq_lut(self.ggml_type, dev, target[0] == 11 or self.ggml_type == 23),
+      out = _run_kernel(f"{arch}_gemm_f16", out_shape, dev, self.packed, x_f16, _iq_lut(self.ggml_type, dev),
                         axis=out_axis, qtype=self.ggml_type, m_blks=out_shape[0] // (mt * 16), m_tiles=mt, out_features=local_out, in_features=in_f,
                         raw_bytes=raw_bytes)
     else:
       x_tokens = int(prod(x_shard[:-1]))
       x_flat = x_in.float().contiguous().reshape(x_tokens, in_f) if x_in.uop.axis is None else x_in.float().contiguous()
       out = _run_kernel("amd_gemv_quant_f32", _shard_shape((splits * tokens, out_f), out_axis, ndev), dev, self.packed, x_flat,
-                        (lut := _iq_lut(self.ggml_type, dev, False)).bitcast(dtypes.int32), lut, axis=out_axis, qtype=self.ggml_type,
+                        (lut := _iq_lut(self.ggml_type, dev)).bitcast(dtypes.int32), lut, axis=out_axis, qtype=self.ggml_type,
                         tokens=x_tokens, x_rows=x_tokens, out_features=local_out, in_features=in_f, raw_bytes=raw_bytes,
                         group_rows=rows if self.groups > 1 else 0, use_sel=0, x_share=1, ndev=1,
                         arch=target[0] if isinstance(x.numel(), int) else 0, num_experts=0)
@@ -190,7 +184,7 @@ class ExpertWeights:
     out_shape = _shard_shape((splits * ndev * B * Tm * slots, global_out), out_axis,
                              ndev if w_axis == 0 else splits if w_axis == 2 else (global_out // local_out))
     out = _run_kernel("amd_gemv_quant_f32", out_shape, dev, self.packed, x_flat, sel_p.cast(dtypes.int32).flatten(),
-                      _iq_lut(self.ggml_type, dev, False), axis=out_axis, qtype=self.ggml_type, tokens=B * Tm * slots, x_rows=x_rows,
+                      _iq_lut(self.ggml_type, dev), axis=out_axis, qtype=self.ggml_type, tokens=B * Tm * slots, x_rows=x_rows,
                       out_features=local_out, in_features=local_in, raw_bytes=raw_bytes, group_rows=0, use_sel=1, x_share=slots // x_slots,
                       ndev=ndev, arch=target[0], num_experts=int(self.weight.shape[0]))
     if out is None: return None
@@ -1033,11 +1027,10 @@ class GatedDeltaNetBlock(FFNBlock):
         and self.head_k_dim % 32 == 0 and 32 <= self.head_k_dim <= 256 and self.head_v_dim % 4 == 0:
       alpha_k = self.head_k_dim if (alpha.ndim == 4 and int(alpha.shape[-1]) == self.head_k_dim) else 1
       alpha_in = alpha.contiguous().reshape(int(B), self.num_v_heads, T_pad, alpha_k)
-      arch = "rdna4" if target[0] == 12 else "rdna3" if target[0] == 11 else "amd"
-      core_out = _run_kernel(f"{arch}_gated_delta", (int(B), self.num_v_heads, T_pad, self.head_v_dim), q.device,
+      core_out = _run_kernel("amd_gated_delta", (int(B), self.num_v_heads, T_pad, self.head_v_dim), q.device,
                              q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha_in, state_dep,
                              pos if isinstance(pos, UOp) else UOp.const(int(pos)), batch=int(B), heads=self.num_v_heads,
-                             tokens=T_pad, v_tiles=self.head_v_dim // 4, k_blks=self.head_k_dim // 32, alpha_k=alpha_k)
+                             tokens=T_pad, v_tiles=self.head_v_dim // 4, k_blks=self.head_k_dim // 32, alpha_k=alpha_k, arch=target[0])
     if core_out is not None:
       core = core_out.transpose(1, 2)
     else:

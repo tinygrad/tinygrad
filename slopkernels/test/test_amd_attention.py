@@ -21,8 +21,8 @@ def _gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor
   d = q.device[0] if isinstance(q.device, tuple) else q.device
   assert d is not None
   t = getattr(Device[d], "target", (11, 0, 0))
-  gd_name = f"{'rdna4' if t[0] == 12 else 'rdna3' if t[0] == 11 else 'amd'}_gated_delta"
-  kern = unwrap(slopkernels.get(gd_name)).specialize(batch=B, heads=H, tokens=T, v_tiles=V // 4, k_blks=K // 32, alpha_k=ak)
+  kern = unwrap(slopkernels.get("amd_gated_delta")).specialize(
+    batch=B, heads=H, tokens=T, v_tiles=V // 4, k_blks=K // 32, alpha_k=ak, arch=t[0])
   out = UOp.alloc((B, H, T, V), dtypes.float32, device=q.device)
   return Tensor(out.after(kern.call(out, q.contiguous().uop, k.contiguous().uop, v.contiguous().uop, beta.contiguous().uop,
                                     alpha.contiguous().reshape(B, H, T, ak).uop, state.uop, UOp.const(1))))

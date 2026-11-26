@@ -1,7 +1,7 @@
 """End-to-end LLM kernel benchmark & correctness suite for slopkernels on AMD GPUs (e.g. 7900XTX, 9060XT, 9070XT)."""
 from __future__ import annotations
 
-import argparse, functools, json, math, pathlib, re, statistics, struct, sys, time
+import argparse, functools, json, math, pathlib, re, statistics, sys, time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
@@ -123,17 +123,11 @@ def _krun(name:str, shp:tuple[int, ...], dev:str|tuple[str, ...], *args:Tensor|U
   return Tensor(o.after(k.call(o, *(a.uop if isinstance(a, Tensor) else a for a in args))))
 
 @functools.cache
-def _iq_lut(t:int, dev:str|tuple[str, ...], wmma:bool=False) -> tuple[UOp, int]:
-  if t not in ({16, 17, 18, 19, 21, 22, 23} if wmma else {16, 17, 18, 19, 21, 22}):
-    return Tensor(np.array([0], dtype=np.uint32), device=dev).realize().uop, 1
+def _iq_lut(t:int, dev:str|tuple[str, ...]) -> tuple[UOp, int]:
+  if t not in (16, 17, 18, 19, 21, 22): return Tensor(np.array([0], dtype=np.uint32), device=dev).realize().uop, 1
   from tinygrad.runtime.autogen import ggml_common as g
-  if t == 23 or (wmma and t == 18):
-    vals = ([g.kvalues_iq4nl[k] for j in range(16) for i in range(16) for k in (i, j)] if t == 23 else
-            [((v >> (8 * i)) & 0xff) / 64.0 for v in g.iq3xxs_grid for i in range(4)])
-    words: tuple[int, ...] = struct.unpack(f"<{len(vals) // 2}I", struct.pack(f"<{len(vals)}e", *vals))
-  else:
-    grid, nw = {16:(g.iq2xxs_grid, 2), 17:(g.iq2xs_grid, 2), 19:(g.iq1s_grid, 2), 22:(g.iq2s_grid, 2), 18:(g.iq3xxs_grid, 1), 21:(g.iq3s_grid, 1)}[t]
-    words = tuple((v >> (32 * i)) & 0xffffffff for v in grid for i in range(nw))
+  grid, nw = {16:(g.iq2xxs_grid, 2), 17:(g.iq2xs_grid, 2), 19:(g.iq1s_grid, 2), 22:(g.iq2s_grid, 2), 18:(g.iq3xxs_grid, 1), 21:(g.iq3s_grid, 1)}[t]
+  words = tuple((v >> (32 * i)) & 0xffffffff for v in grid for i in range(nw))
   return Tensor(np.array(words, dtype=np.uint32), device=dev).realize().uop, len(words)
 
 def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[str, int, int, SetupFn]]:
@@ -143,7 +137,6 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
   E, TOPK, MOE_N, MOE_K = (8, 4, 128, 256) if smoke else (64, 8, 2048, 4096)
   AH, AHKV, AD, AN, AM, CR = *((4, 2, 64, 128, 32) if smoke else (32, 8, 128, 2048, 256)), 4
   arch = "cdna" if cdna else "rdna4" if target[0] == 12 else "rdna3"
-  gd_arch = "amd" if cdna else arch
   cases: list[tuple[str, int, int, SetupFn]] = []
 
   def _add_qlinear(qname:str, m:int, n:int, k:int, x_dt:DType) -> None:
@@ -158,10 +151,10 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         _assert_close(out[:, :CR].float().numpy(), (x.float() @ w4.T).numpy(), rtol=4e-2, atol=5e-2)
       if m % 16 == 0 and n % 16 == 0:
         mt = 8 if m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
-        lut, _ = _iq_lut(qtype, dev, target[0] == 11 or qtype == 23)
+        lut, _ = _iq_lut(qtype, dev)
         return (lambda: _krun(f"{arch}_gemm_f16", (m, n), dev, w_u8, x.half().contiguous(), lut,
                               qtype=qtype, m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=k, raw_bytes=raw_bytes)), _verify
-      lut, _ = _iq_lut(qtype, dev, False)
+      lut, _ = _iq_lut(qtype, dev)
       return (lambda: _krun("amd_gemv_quant_f32", (m, n), dev, w_u8, x, lut.bitcast(dtypes.int32), lut, qtype=qtype,
                             tokens=m, x_rows=m, out_features=n, in_features=k, raw_bytes=raw_bytes,
                             group_rows=0, use_sel=0, x_share=1, ndev=1, arch=target[0], num_experts=0)), _verify
@@ -200,7 +193,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       w_packed, tile_u8 = _make_packed(E * mn, mk, qname, dev, seed=19)
       w_u8 = w_packed if w_packed.dtype == dtypes.uint8 else w_packed.bitcast(dtypes.uint8)
       sel, x = Tensor(list(range(TOPK)), dtype=dtypes.int32, device=dev).realize(), _nonuniform((1, mk), dtypes.float32, dev, scale=0.5, freq=0.011)
-      lut, _ = _iq_lut(qtype, dev, False)
+      lut, _ = _iq_lut(qtype, dev)
       def _verify(out:Tensor) -> None:
         w4 = ggml_data_to_tensor(tile_u8[:CR].flatten(), CR * mk, qtype).reshape(CR, mk)
         ref1, got = (x @ w4.T).numpy()[0], out[:, :CR].float().numpy()
@@ -218,7 +211,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       w_u8 = w_packed if w_packed.dtype == dtypes.uint8 else w_packed.bitcast(dtypes.uint8)
       sel = Tensor(np.random.default_rng(7).integers(0, me, size=(mt_t * mk_t,), dtype=np.int32), device=dev).realize()
       x = _nonuniform((mt_t, mk_p), dtypes.float32, dev, scale=0.5, freq=0.011)
-      lut, _ = _iq_lut(qtype, dev, False)
+      lut, _ = _iq_lut(qtype, dev)
       m_tot = mt_t * mk_t
       def _verify(out:Tensor) -> None:
         w4 = ggml_data_to_tensor(tile_u8[:CR].flatten(), CR * mk_p, qtype).reshape(CR, mk_p)
@@ -286,8 +279,8 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
           ref[t] = st @ q0[t]
         _assert_close(out[0, 0].numpy(), ref, rtol=2e-3, atol=2e-4)
         _assert_close(state[0, 0].numpy(), st, rtol=2e-3, atol=2e-4)
-      return (lambda: _krun(f"{gd_arch}_gated_delta", (1, gh, gt, gd), dev, q, k, v, beta, alpha, state, UOp.const(1),
-                            batch=1, heads=gh, tokens=gt, v_tiles=gd // 4, k_blks=gd // 32, alpha_k=ak)), _verify
+      return (lambda: _krun("amd_gated_delta", (1, gh, gt, gd), dev, q, k, v, beta, alpha, state, UOp.const(1),
+                            batch=1, heads=gh, tokens=gt, v_tiles=gd // 4, k_blks=gd // 32, alpha_k=ak, arch=target[0])), _verify
     tag = "kda" if ak > 1 else ("decode" if gt == 1 else "prefill")
     cases.append((f"gated_delta_{tag}_H{gh}_T{gt}_D{gd}", (4 * gh * gt * gd + 2 * gh * gd * gd) * 4, 6 * gh * gt * gd * gd, _mk_gd))
 

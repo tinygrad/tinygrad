@@ -82,8 +82,8 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   B, H, T, K, V = int(q.shape[0]), int(q.shape[1]), int(q.shape[2]), int(q.shape[3]), int(v.shape[3])
   ak = K if alpha.ndim == 4 else 1
   target = _slop_target(q.device)
-  arch = "rdna4" if target and target[0] == 12 else "rdna3" if target and target[0] == 11 else "amd"
-  kern = unwrap(slopkernels.get(f"{arch}_gated_delta")).specialize(batch=B, heads=H, tokens=T, v_tiles=V // 4, k_blks=K // 32, alpha_k=ak)
+  kern = unwrap(slopkernels.get("amd_gated_delta")).specialize(
+    batch=B, heads=H, tokens=T, v_tiles=V // 4, k_blks=K // 32, alpha_k=ak, arch=target[0] if target else 9)
   out = UOp.alloc((B, H, T, V), dtypes.float32, device=q.device)
   srcs = [s.uop if s.uop.op is Ops.AFTER else s.contiguous().uop for s in (q, k, v, beta)]
   srcs += [alpha.uop.reshape(B, H, T, ak) if alpha.uop.op is Ops.AFTER else alpha.contiguous().reshape(B, H, T, ak).uop]

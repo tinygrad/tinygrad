@@ -83,8 +83,9 @@ class TestSlopKernelsUIR(unittest.TestCase):
     self.assertNotIn("stale garbage", sample.read_text(encoding="utf-8"))
     self.assertNotIn("\x1b", sample.read_text(encoding="utf-8"))
     self.assertIsNone(slopkernels.get("nonexistent_llm_kernel"))
-    # Release mode: slopkernels absent, tinygrad/llm/kernels/<name>.uir present -> loaded directly from disk.
+    # Release mode: slopkernels absent, tinygrad/llm/kernels/<name>.uir present -> loaded & executable directly from disk.
     llm_model._load_kernel.cache_clear()
+    llm_model._get_kernel.cache_clear()
     with patch.dict(sys.modules, {"slopkernels": None}):
       u_rel = llm_model._load_kernel("cdna_gemm_f16")
       self.assertIsNotNone(u_rel)
@@ -92,7 +93,20 @@ class TestSlopKernelsUIR(unittest.TestCase):
       self.assertIs(u_rel.op, Ops.SINK)
       self.assertTrue(any(x.is_template for x in u_rel.toposort()))
       self.assertIsNone(llm_model._load_kernel("nonexistent_llm_kernel"))
+      if _amd_target() is not None:
+        dev = Tensor.empty(1).device
+        rng = np.random.default_rng(7)
+        mix = Tensor(rng.normal(0, 0.2, (2, 24)).astype(np.float32)).realize()
+        flat = Tensor(rng.normal(0, 0.5, (2, 128)).astype(np.float32)).realize()
+        base = Tensor(rng.normal(0, 0.2, (24,)).astype(np.float32)).realize()
+        scale = Tensor(rng.uniform(0.5, 1.5, (3,)).astype(np.float32)).realize()
+        got_hc = llm_model._run_kernel("amd_hc_coeffs", (2, 24), dev, mix, flat, base, scale,
+                                       tokens=2, features=128, iters=2, eps=1e-6, norm_eps=1e-6)
+        self.assertIsNotNone(got_hc)
+        assert got_hc is not None
+        np.testing.assert_allclose(got_hc.numpy()[:, 8:].reshape(2, 4, 4).sum(-1), 1.0, rtol=2e-2, atol=2e-2)
     llm_model._load_kernel.cache_clear()
+    llm_model._get_kernel.cache_clear()
     all_uirs = slopkernels.generate_all()
     self.assertEqual(len(all_uirs), len(slopkernels._BUILDERS))
     self.assertEqual(len(list(uir_dir.glob("*.uir"))), len(all_uirs))
@@ -108,7 +122,6 @@ class TestSlopKernelsUIR(unittest.TestCase):
     assert dev is not None
     rng = np.random.default_rng(23)
     arch_gemm = "cdna" if tgt[0] == 9 else "rdna4" if tgt[0] == 12 else "rdna3"
-    gd_arch = "amd" if tgt[0] == 9 else arch_gemm
     g0 = Tensor([0], dtype=dtypes.uint32).realize()
     # 1. Dense GEMV
     w_d = Tensor(rng.standard_normal((64, 128)).astype(np.float16)).realize()
@@ -170,8 +183,8 @@ class TestSlopKernelsUIR(unittest.TestCase):
         delta = (gd_v.numpy()[:, :, t] - (st_ref * gd_k.numpy()[:, :, t, None]).sum(-1)) * gd_b.numpy()[:, :, t, None]
         st_ref += delta[..., None] * gd_k.numpy()[:, :, t, None]
         outs_ref.append((st_ref * gd_q.numpy()[:, :, t, None]).sum(-1))
-      got_gd = _krun(f"{gd_arch}_gated_delta", (1, 2, 4, 8), dev, gd_q, gd_k, gd_v, gd_b, gd_a.reshape(1, 2, 4, 1), gd_s,
-                     UOp.const(sp), batch=1, heads=2, tokens=4, v_tiles=2, k_blks=1, alpha_k=1).numpy()
+      got_gd = _krun("amd_gated_delta", (1, 2, 4, 8), dev, gd_q, gd_k, gd_v, gd_b, gd_a.reshape(1, 2, 4, 1), gd_s,
+                     UOp.const(sp), batch=1, heads=2, tokens=4, v_tiles=2, k_blks=1, alpha_k=1, arch=tgt[0]).numpy()
       np.testing.assert_allclose(got_gd, np.stack(outs_ref, axis=2), rtol=2e-4, atol=2e-6)
       np.testing.assert_allclose(gd_s.numpy(), st_ref, rtol=2e-4, atol=2e-6)
     # 6. mHC coeffs
