@@ -255,13 +255,11 @@ class TestGGUF(unittest.TestCase):
     from gguf import GGUFWriter
     from tinygrad.helpers import get_child
     from tinygrad.llm.model import Transformer
-    # numpy order shapes, output ties to token_embd
     block = {'attn_norm': (8,), 'attn_q': (8, 8), 'attn_k': (8, 8), 'attn_v': (8, 8), 'attn_output': (8, 8), 'ffn_norm': (8,),
              'ffn_gate_inp': (4, 8), 'ffn_gate_exps': (4, 8, 8), 'ffn_up_exps': (4, 8, 8), 'ffn_down_exps': (4, 8, 8)}
     shapes = {'token_embd.weight': (32, 8), 'output_norm.weight': (8,), **{f'blk.{i}.{k}.weight': s for i in range(2) for k, s in block.items()}}
     rng = np.random.default_rng(0)
     weights = {k:rng.normal(size=s).astype(np.float32) for k,s in shapes.items()}
-    # only blk.0 has scales, below the float16 range like real ones
     scales = {f'blk.0.ffn_{p}_exps.scale': np.array([1, 2, 3, 4], np.float32) * (i+1) * 1e-6 for i, p in enumerate(('gate', 'up', 'down'))}
     scales['blk.0.attn_output.scale'] = np.array([5e-6], np.float32)
     with tempfile.TemporaryDirectory() as folder:
@@ -280,10 +278,8 @@ class TestGGUF(unittest.TestCase):
       writer.close()
       with Context(DEV="CPU"):
         model = Transformer.from_gguf(path)[0]
-        # blk.0's layers get the scales, blk.1's have none
         for k, v in scales.items(): np.testing.assert_equal(get_child(model, k.removesuffix('.scale')).scale.numpy(), v)
         self.assertIsNone(model.blk[1].ffn_down_exps.scale)
-        # the unscaled product would overflow float16
         x, w = np.full((1, 1, 8), 30000, np.float16), {k: v.astype(np.float16).astype(np.float64) for k, v in weights.items()}
         self.assertGreater(np.abs(x @ w['blk.0.attn_output.weight'].T).max(), 65504)
         np.testing.assert_allclose(model.blk[0].attn_output(Tensor(x)).numpy(), x @ w['blk.0.attn_output.weight'].T * 5e-6, rtol=1e-2)

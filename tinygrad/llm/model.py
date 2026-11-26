@@ -157,7 +157,6 @@ class Linear(nn.Linear):
       if self.ggml_type is None: self.set_quantized(self.weight)
       custom = self._custom_quant(x, target) if self.ggml_type in _QUANT_NAMES and self.packed is not None else self._custom_dense(x)
       if custom is not None: return custom
-    # NVFP4 weights are unscaled, upcast so the product doesn't overflow float16
     if self.scale is not None: x = x.float()
     if self.groups > 1:
       out = (x.unsqueeze(-2) @ self.weight.reshape(self.groups, -1, self.in_features).transpose(-1, -2)).squeeze(-2)
@@ -208,7 +207,6 @@ class ExpertWeights:
         if self.ggml_type is None: self.use_custom_quant = False
       out = (self._custom_moe(sel, x, target) if target is not None and self.ggml_type in _QUANT_NAMES
              and not (self.weight.uop.axis == 0 and hasattr(self, 'bias')) else None)
-      # NVFP4 weights are unscaled, upcast so the product doesn't overflow float16
       xs = x if self.scale is None else x.float()
       ret = out if out is not None else (xs.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
     if self.scale is not None: ret = (ret * self.scale[sel].unsqueeze(-1)).cast(x.dtype)
@@ -1171,7 +1169,7 @@ class Transformer:
     state_dict = gguf_shard(entries, devices, {k: v for k, v in ((k, ep_axis if ep and '_exps.' in k else v) for k, v in shard_map.items())
                                                if v is not None}, repeats)
 
-    # all float state items should be float16, not float32. except NVFP4 .scale, it's below the float16 range
+    # all float state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) and dtypes.is_float(v.dtype) and not k.endswith('.scale') else v
                   for k,v in state_dict.items()}
 
@@ -1292,7 +1290,6 @@ class Transformer:
       o_lora_rank=kv.get(f'{arch}.attention.output_lora_rank', 0), hash_layers=kv.get(f'{arch}.hash_layer_count', 0))
     model = Transformer(config)
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
-    # NVFP4 tensor scales, the activation .input_scale is unused
     scales = {k.removesuffix('.scale'): state_dict.pop(k) for k in list(state_dict) if k.endswith('.scale')}
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     for k, v in scales.items(): get_child(model, k).scale = v

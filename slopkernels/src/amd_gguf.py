@@ -16,7 +16,7 @@ QUANT_SIZES = {Q8_0: 272, Q2_K: 84, Q3_K: 110, Q4_K: 144, Q5_K: 176, Q6_K: 210, 
 QUANT_NAMES = {Q8_0: "q8_0", Q2_K: "q2_k", Q3_K: "q3_k", Q4_K: "q4_k", Q5_K: "q5_k", Q6_K: "q6",
                IQ2_XXS: "iq2_xxs", IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ1_S: "iq1_s", IQ4_NL: "iq4_nl",
                IQ3_S: "iq3_s", IQ2_S: "iq2_s", IQ4_XS: "iq4_xs", MXFP4: "mxfp4", NVFP4: "nvfp4"}
-SMALL_BLOCK_QUANTS = {Q8_0: 17, IQ4_NL: 9, MXFP4: 17}
+SMALL_BLOCK_QUANTS = {Q8_0: (1, 17), IQ4_NL: (1, 9), MXFP4: (1, 17), NVFP4: (2, 9)}
 HALFWORD_QUANTS = {Q8_0, Q2_K, Q3_K, Q6_K, IQ2_XXS, IQ2_XS, IQ3_XXS, IQ1_S, IQ4_NL, IQ3_S, IQ2_S}
 OTF_FP8_QUANTS = {Q8_0, Q6_K, Q5_K, Q4_K, Q3_K, Q2_K, IQ4_XS, IQ3_S, IQ3_XXS, IQ2_S, MXFP4}
 _RPW2_QUANTS = {IQ1_S, IQ2_S, IQ2_XS, IQ2_XXS, IQ3_XXS, IQ3_S}
@@ -98,8 +98,13 @@ def _iq1_scale(raw:UOp, base:UOp, sub:UOp) -> tuple[UOp, UOp]:
   qh = raw[base + 17 + sub].cast(dtypes.uint32)
   return (((qh >> 12) & 7) * 2 + 1).float() * _half(raw[base]), (qh >> 15).eq(0).where(-0.125, 0.125)
 def _quant_base(out_i:UOp, grp:UOp, in_f:int|UOp, qt:int, itemsize:int) -> UOp:
-  if qt in SMALL_BLOCK_QUANTS: return (out_i * (in_f // Q8_GROUP_SIZE) + grp) * SMALL_BLOCK_QUANTS[qt]
+  if qt in SMALL_BLOCK_QUANTS:
+    g, bw = SMALL_BLOCK_QUANTS[qt]
+    return (out_i * (in_f // (Q8_GROUP_SIZE * g)) + grp // g) * bw
   return (out_i * (in_f // GGML_BLOCK_SIZE) + grp // 8) * (QUANT_SIZES[qt] // itemsize)
+def _small_block(sb_base:UOp, sub:UOp, qt:int) -> UOp:
+  g, bw = SMALL_BLOCK_QUANTS[qt]
+  return sb_base + sub // g * bw
 
 # ******** unified single-kernel direct fdot2 GEMV & MoE (RDNA3 / RDNA4 / CDNA) ********
 
@@ -206,8 +211,8 @@ def _direct_group_dot_fn(raw:UOp, raw_u32:UOp, base:UOp, sub:UOp, qt:int, grid:U
     wh2 = [h for sh in (0, 4) for j in range(4) for h in mxfp4_wh2((pws[j] >> sh) if sh else pws[j])]
     return make_wh2_dot(wh2, lambda d0, d1, x0, x1: (d0 + d1) * sc)
   if qt == NVFP4:
-    b64, h64 = sub // 2, sub % 2
-    sc_w, pv = ld(raw[base + b64 * 9]), ld(raw[base + b64 * 9 + 1 + h64 * 4], 4)
+    h64 = sub % 2
+    sc_w, pv = ld(raw[base]), ld(raw[base + 1 + h64 * 4], 4)
     wh2 = [h for h_i in range(2) for i in range(4) for h in mxfp4_wh2((pv[h_i * 2 + i % 2] >> ((i // 2) * 4)) if i >= 2 else pv[h_i * 2 + i % 2])]
     s0, s1 = _ue4m3_halved((sc_w >> _sh(h64 * 16)) & 255), _ue4m3_halved((sc_w >> _sh(h64 * 16 + 8)) & 255)
     return make_wh2_dot(wh2, lambda d0, d1, x0, x1: d0 * s0 + d1 * s1)
@@ -384,7 +389,7 @@ def _quant_word(raw:UOp, base:UOp, sub:UOp, i:int|UOp, qt:int, grid:UOp|None) ->
     return ql | (((_load_u32(raw, base, 128 + (sub // 4) * 32 + (i // 4) * 16 + (i % 4) * 4) >> _sh((sub % 4) * 2)) & 0x03030303) << 4)
   if qt == IQ4_NL: return _nibble_lut(_load_u32(raw, base, 2 + (i % 4) * 4), (i // 4) * 4, IQ4NL_LUT)
   if qt == NVFP4:
-    return _nibble_lut(_load_u32(raw, base, (sub // 2) * 36 + 4 + (sub % 2) * 16 + (i // 4) * 8 + (i % 2) * 4), ((i // 2) % 2) * 4, MXFP4_LUT)
+    return _nibble_lut(_load_u32(raw, base, 4 + (sub % 2) * 16 + (i // 4) * 8 + (i % 2) * 4), ((i // 2) % 2) * 4, MXFP4_LUT)
   assert grid is not None
   if qt == IQ3_S:
     return _iq_signed_word(grid[_load_byte(raw, base, 2 + sub * 8 + i) | (((_load_byte(raw, base, 66 + sub) >> _sh(i)) & 1) << 8)].load(),
@@ -418,7 +423,7 @@ def _make_wmma_dequant(raw:UOp, qt:int, lane_group:UOp, kgroups:int, k_u:UOp, ta
       assert table is not None
       pair = table[((raw[base + 2 + sub * 4 + w_idx].load() >> _sh(b_u * 8)) & 255).cast(dtypes.weakint)].load()
       return (_half((pair >> _sh(half * 16)) & 0xffff) * _iq4_scale(raw, base, sub)).cast(dtypes.float16)
-    if qt in SMALL_BLOCK_QUANTS: base = base + sub * SMALL_BLOCK_QUANTS[qt]
+    if qt in SMALL_BLOCK_QUANTS: base = _small_block(base, sub, qt)
     if qt == MXFP4:
       e = raw[base].cast(dtypes.uint32)
       small = e < 116
@@ -458,12 +463,12 @@ def _make_wmma_dequant(raw:UOp, qt:int, lane_group:UOp, kgroups:int, k_u:UOp, ta
     elif qt == Q6_K: scale, zero = _half(raw[base + 104]) * byte(192 + sub * 2 + half).cast(dtypes.uint8).bitcast(dtypes.int8).float(), 32
     elif qt == IQ1_S: scale, zero = _iq1_scale(raw, base, sub)
     elif qt == NVFP4:
-      e = byte((sub // 2) * 36 + (sub % 2) * 2 + half).cast(dtypes.uint32)
+      e = byte((sub % 2) * 2 + half).cast(dtypes.uint32)
       if word_indices == (0, 1, 2, 3):
         sc2 = e.eq(0x7f).where(UOp.const(0, dtypes.uint32), (e & 0x7f) << 7).cast(dtypes.uint16).bitcast(dtypes.half).reshape((1,)).expand((2,))
         c_lo, c_hi, z_u = UOp.const(0x5e5c5800, dtypes.uint32), UOp.const(0x66646260, dtypes.uint32), UOp.const(0, dtypes.uint32)
         s01, s23 = UOp.const(0x05000400, dtypes.uint32), UOp.const(0x07000600, dtypes.uint32)
-        pv, vals = _amd_load(raw[base + (sub // 2) * 9 + 1 + ((sub % 2) * 2 + half) * 2], 2), list[UOp|None]([None] * 16)
+        pv, vals = _amd_load(raw[base + 1 + ((sub % 2) * 2 + half) * 2], 2), list[UOp|None]([None] * 16)
         for wi in range(2):
           pw = pv[wi]
           for bi, fpb in ((0, _amd_byte_perm(c_hi, c_lo, pw & 0x07070707) | ((pw & 0x08080808) << 4)),
@@ -669,8 +674,10 @@ def _rdna3_gemm_2d_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp, m_blks:UOp, n_blk
                     dec4_iq2(grid[idxs[p1] * 2].load(), (s_w >> (p1 * 8)) & 15, sf, sc2),
                     dec4_iq2(grid[idxs[p1] * 2 + 1].load(), (s_w >> (p1 * 8 + 4)) & 15, sf, sc2))
       return UOp.group(*sts).end(bi)
-    base, sub = (((gn * (in_features // 32) + gbg) * SMALL_BLOCK_QUANTS[ggml_type], UOp.const(0, dtypes.weakint))
-                 if ggml_type in SMALL_BLOCK_QUANTS else (gn * ow + (gbg // 8) * tw, gbg % 8))
+    if ggml_type in SMALL_BLOCK_QUANTS:
+      g, bw = SMALL_BLOCK_QUANTS[ggml_type]
+      base, sub = (gn * (in_features // (32 * g)) + gbg // g) * bw, gbg % g if g > 1 else UOp.const(0, dtypes.weakint)
+    else: base, sub = gn * ow + (gbg // 8) * tw, gbg % 8
     B_dst, b_sts = B_lds[buf_i].after(*dep), list[UOp]()
     for k16 in range(2):
       k_u = UOp.range(16, rid + 1 + k16, AxisType.UPCAST)
@@ -849,7 +856,7 @@ def _rdna4_zlds_f16_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp, tok:UOp, out_fea
     b, d_f = hdrs[tj] if len(hdrs[tj]) == 2 else (hdrs[tj][0], UOp.const(0.0, dtypes.float32))
     out2 = []
     for h_i in (0, 1):
-      wb = b + sub * SMALL_BLOCK_QUANTS[ggml_type] if ggml_type in SMALL_BLOCK_QUANTS else b
+      wb = _small_block(b, sub, ggml_type) if ggml_type in SMALL_BLOCK_QUANTS else b
       w0, w1 = _quant_word(raw, wb, sub, h_i * 4 + lg * 2, ggml_type, grid), _quant_word(raw, wb, sub, h_i * 4 + lg * 2 + 1, ggml_type, grid)
       if ggml_type == Q6_K:
         out2.append(u8x8_to_f16(w0, w1, z_off, _load_byte(raw, b, 192 + sub * 2 + h_i).cast(dtypes.uint8).bitcast(dtypes.int8).float() * d_f))
@@ -867,7 +874,7 @@ def _rdna4_zlds_f16_kernel(out:UOp, raw:UOp, x:UOp, *grids:UOp, tok:UOp, out_fea
         elif ggml_type in (IQ2_XS, IQ2_S):
           sc = d_f * (((_load_byte(raw, b, (66 if ggml_type == IQ2_XS else 74) + sub) >> _sh(h_i * 4)) & 15).float() + 0.5) * 0.25
         elif ggml_type == IQ2_XXS: sc = d_f * ((_load_u32(raw, b, 6 + sub * 8) >> 28).float() + 0.5) * 0.25
-        elif ggml_type == NVFP4: sc = _ue4m3_halved(_load_byte(raw, b, (sub // 2) * 36 + (sub % 2) * 2 + h_i))
+        elif ggml_type == NVFP4: sc = _ue4m3_halved(_load_byte(raw, wb, (sub % 2) * 2 + h_i))
         else: sc = _half(raw[wb].load().cast(dtypes.uint32))
         out2.append(u8x8_to_f16(w0 ^ c80, w1 ^ c80, -8388736.0, sc))
     return out2[0], out2[1]
