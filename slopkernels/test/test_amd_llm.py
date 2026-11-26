@@ -154,7 +154,7 @@ class TestQ8Quantize(unittest.TestCase):
     self.assertTrue(np.isfinite(run(Tensor.randn(1, 256)).realize().item()))
     packed_w = p if (p := getattr(linear, "packed", None)) is not None else linear.weight
     self.assertEqual(packed_w.nbytes(), 210)
-    self.assertEqual(packed_w.dtype, dtypes.uint16)
+    self.assertEqual(packed_w.dtype, dtypes.uint8)
 
   def test_q4_k_linear(self): self._test_quant_linear(12, 144)
   def test_iq4_linear(self): self._test_quant_linear(23, 136)
@@ -405,7 +405,7 @@ class TestQ8Quantize(unittest.TestCase):
     rng = np.random.default_rng(0)
     hc.fn.weight, hc.base["weight"] = Tensor(rng.normal(0, 0.1, (24, 128)).astype(np.float16)), Tensor(rng.normal(size=24).astype(np.float16))
     hc.scale["weight"], xs = Tensor(rng.uniform(0.5, 1.5, 3).astype(np.float16)), Tensor(rng.normal(size=(1, 3, 4, 32)).astype(np.float32))
-    self.assertIsNotNone(slopkernels.get("amd_hc_coeffs_f16_f16"))
+    self.assertIsNotNone(slopkernels.get("amd_hc_coeffs"))
     got = hc(xs, lambda h: (h * 0.5, None))[0].numpy()
     hc.fn.weight, hc.base["weight"], hc.scale["weight"] = (t.to("CPU") for t in (hc.fn.weight, hc.base["weight"], hc.scale["weight"]))
     np.testing.assert_allclose(got, hc(xs.to("CPU"), lambda h: (h * 0.5, None))[0].numpy(), rtol=1e-4, atol=1e-5)

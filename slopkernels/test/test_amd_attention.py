@@ -19,6 +19,7 @@ def _gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor
   B, H, T, K, V = int(q.shape[0]), int(q.shape[1]), int(q.shape[2]), int(q.shape[3]), int(v.shape[3])
   ak = K if alpha.ndim == 4 else 1
   d = q.device[0] if isinstance(q.device, tuple) else q.device
+  assert d is not None
   t = getattr(Device[d], "target", (11, 0, 0))
   gd_name = f"{'rdna4' if t[0] == 12 else 'rdna3' if t[0] == 11 else 'amd'}_gated_delta"
   kern = unwrap(slopkernels.get(gd_name)).specialize(batch=B, heads=H, tokens=T, v_tiles=V // 4, k_blks=K // 32, alpha_k=ak)

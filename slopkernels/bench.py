@@ -67,7 +67,7 @@ def _nonuniform(shape:tuple[int, ...], dtype:DType, dev:str, scale:float=0.5, fr
   return t.cast(dtype).reshape(shape).contiguous().realize()
 
 def _make_packed(rows:int, cols:int, qname:str, dev:str, seed:int=7) -> tuple[Tensor, Tensor]:
-  qtype, blk_bytes, w_dt, _ = _QUANT_META[qname]
+  qtype, blk_bytes, _, _ = _QUANT_META[qname]
   row_bytes, tile_rows, rng = cols * blk_bytes // 256, min(16, rows), np.random.default_rng(seed + qtype)
   if qtype == 39:
     blocks = rng.integers(0, 256, size=(tile_rows, cols // 32, 17), dtype=np.uint8)
@@ -75,10 +75,8 @@ def _make_packed(rows:int, cols:int, qname:str, dev:str, seed:int=7) -> tuple[Te
     tile_np = blocks.reshape(tile_rows, row_bytes)
   else: tile_np = rng.integers(0x20, 0x38, size=(tile_rows, row_bytes), dtype=np.uint8)
   tile_u8 = Tensor(tile_np, device=dev).realize()
-  tile_w = Tensor(np.ascontiguousarray(tile_np).view({dtypes.uint8: np.uint8, dtypes.uint16: np.uint16, dtypes.uint32: np.uint32}[w_dt]),
-                  device=dev).realize()
-  reps, row_words = rows // tile_rows, row_bytes // w_dt.itemsize
-  packed = tile_w.flatten() if reps == 1 else tile_w.reshape(1, tile_rows, row_words).expand(reps, tile_rows, row_words).reshape(-1)
+  reps = rows // tile_rows
+  packed = tile_u8.flatten() if reps == 1 else tile_u8.reshape(1, tile_rows, row_bytes).expand(reps, tile_rows, row_bytes).reshape(-1)
   return packed.contiguous().realize(), tile_u8
 
 def _assert_close(got:np.ndarray, ref:np.ndarray, rtol:float, atol:float) -> None:
@@ -121,8 +119,9 @@ def _krun(name:str, shp:tuple[int, ...], dev:str|tuple[str, ...], *args:Tensor|U
   return Tensor(o.after(k.call(o, *(a.uop if isinstance(a, Tensor) else a for a in args))))
 
 @functools.cache
-def _iq_lut(t:int, dev:str|tuple[str, ...], wmma:bool=False) -> tuple[UOp, ...]:
-  if t not in ({16, 17, 18, 19, 21, 22, 23} if wmma else {16, 17, 18, 19, 21, 22}): return ()
+def _iq_lut(t:int, dev:str|tuple[str, ...], wmma:bool=False) -> tuple[UOp, int]:
+  if t not in ({16, 17, 18, 19, 21, 22, 23} if wmma else {16, 17, 18, 19, 21, 22}):
+    return Tensor(np.array([0], dtype=np.uint32), device=dev).realize().uop, 1
   from tinygrad.runtime.autogen import ggml_common as g
   if t == 23 or (wmma and t == 18):
     vals = ([g.kvalues_iq4nl[k] for j in range(16) for i in range(16) for k in (i, j)] if t == 23 else
@@ -131,7 +130,7 @@ def _iq_lut(t:int, dev:str|tuple[str, ...], wmma:bool=False) -> tuple[UOp, ...]:
   else:
     grid, nw = {16:(g.iq2xxs_grid, 2), 17:(g.iq2xs_grid, 2), 19:(g.iq1s_grid, 2), 22:(g.iq2s_grid, 2), 18:(g.iq3xxs_grid, 1), 21:(g.iq3s_grid, 1)}[t]
     words = tuple((v >> (32 * i)) & 0xffffffff for v in grid for i in range(nw))
-  return (Tensor(np.array(words, dtype=np.uint32), device=dev).realize().uop,)
+  return Tensor(np.array(words, dtype=np.uint32), device=dev).realize().uop, len(words)
 
 def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[str, int, int, SetupFn]]:
   target, cdna = _arch_info(dev)
@@ -144,20 +143,35 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
   cases: list[tuple[str, int, int, SetupFn]] = []
 
   def _add_qlinear(qname:str, m:int, n:int, k:int, x_dt:DType) -> None:
-    qtype, w_len, w_dt, kname = _packed_words(n, k, qname)
+    qtype, w_len, w_dt, _ = _packed_words(n, k, qname)
+    raw_bytes = w_len * w_dt.itemsize
     def _setup() -> tuple[Callable[[], Tensor], VerifyFn]:
       w_packed, tile_u8 = _make_packed(n, k, qname, dev)
+      w_u8 = w_packed if w_packed.dtype == dtypes.uint8 else w_packed.bitcast(dtypes.uint8)
       x = _nonuniform((m, k), x_dt, dev, scale=0.5, freq=0.013)
       def _verify(out:Tensor) -> None:
         w4 = ggml_data_to_tensor(tile_u8[:CR].flatten(), CR * k, qtype).reshape(CR, k)
         _assert_close(out[:, :CR].float().numpy(), (x.float() @ w4.T).numpy(), rtol=4e-2, atol=5e-2)
       if m % 16 == 0 and n % 16 == 0:
         mt = 8 if m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
-        return (lambda: _krun(f"{arch}_gemm_{kname}_f16", (m, n), dev, w_packed, x.half().contiguous(),
-                              *_iq_lut(qtype, dev, target[0] == 11 or qtype == 23), m_blks=m // (mt * 16), m_tiles=mt,
-                              out_features=n, in_features=k, raw_len=w_len)), _verify
-      return (lambda: _krun(f"amd_gemv_{kname}_{x_dt.name}", (m, n), dev, w_packed, x, *_iq_lut(qtype, dev, qtype == 18),
-                            tokens=m, out_features=n, in_features=k, raw_len=w_len, group_rows=0)), _verify
+        lut, gl = _iq_lut(qtype, dev, target[0] == 11 or qtype == 23)
+        return (lambda: _krun(f"{arch}_gemm_f16", (m, n), dev, w_u8, x.half().contiguous(), lut,
+                              qtype=qtype, m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=k,
+                              raw_bytes=raw_bytes, grid_len=gl)), _verify
+      if not cdna and 2 <= m <= 15 and k >= 1024 and n % 4 == 0:
+        lut, gl = _iq_lut(qtype, dev, False)
+        def _run_sdot4() -> Tensor:
+          qk = unwrap(slopkernels.get(f"amd_quant_q8_1_{x_dt.name}")).specialize(tokens=m, in_features=k)
+          xq, xds = UOp.alloc((m, k // 32, 8), dtypes.uint32, device=dev), UOp.alloc((m, k // 32, 3), dtypes.float32, device=dev)
+          cq = qk.call(xq, xds, x.uop)
+          return _krun("amd_sdot4", (m, n), dev, w_u8, xq.after(cq), xds.after(cq), lut,
+                       qtype=qtype, tokens=m, out_features=n, in_features=k, raw_bytes=raw_bytes, grid_len=gl, group_rows=0)
+        return _run_sdot4, _verify
+      sel0 = Tensor([0], dtype=dtypes.int32, device=dev).realize()
+      lut, gl = _iq_lut(qtype, dev, qtype == 18)
+      return (lambda: _krun("amd_gemv_quant_f32", (m, n), dev, w_u8, x, sel0, lut, qtype=qtype,
+                            tokens=m, x_rows=m, out_features=n, in_features=k, raw_bytes=raw_bytes, grid_len=gl,
+                            group_rows=0, use_sel=0, x_share=1, ndev=1)), _verify
     kind = "gemm" if m % 16 == 0 and n % 16 == 0 else "gemv"
     cases.append((f"quant_{kind}_{qname}_{m}x{n}x{k}", w_len * w_dt.itemsize + m * k * x_dt.itemsize + m * n * 4, 2 * m * n * k, _setup))
 
@@ -189,15 +203,18 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
      ("MXFP4", MOE_N, MOE_K), ("Q4_K", 1024, 2048), ("IQ4_XS", 512, 2048), ("IQ4_XS", 2048, 512)])
   for qname, mn, mk in moe_specs:
     qtype, per_e_words, w_dt, kname = _packed_words(mn, mk, qname)
-    def _mk_moe(qname:str=qname, qtype:int=qtype, kname:str=kname, mn:int=mn, mk:int=mk) -> tuple[Callable[[], Tensor], VerifyFn]:
+    def _mk_moe(qname:str=qname, qtype:int=qtype, mn:int=mn, mk:int=mk) -> tuple[Callable[[], Tensor], VerifyFn]:
       w_packed, tile_u8 = _make_packed(E * mn, mk, qname, dev, seed=19)
+      w_u8 = w_packed if w_packed.dtype == dtypes.uint8 else w_packed.bitcast(dtypes.uint8)
       sel, x = Tensor(list(range(TOPK)), dtype=dtypes.int32, device=dev).realize(), _nonuniform((1, mk), dtypes.float32, dev, scale=0.5, freq=0.011)
+      lut, gl = _iq_lut(qtype, dev, qtype == 18)
       def _verify(out:Tensor) -> None:
         w4 = ggml_data_to_tensor(tile_u8[:CR].flatten(), CR * mk, qtype).reshape(CR, mk)
         ref1, got = (x @ w4.T).numpy()[0], out[:, :CR].float().numpy()
         _assert_close(got, np.broadcast_to(ref1, got.shape), rtol=4e-2, atol=5e-2)
-      return (lambda: _krun(f"amd_moe_{kname}_f32", (TOPK, mn), dev, w_packed, x, sel, *_iq_lut(qtype, dev, qtype == 18),
-                            rows=TOPK, x_rows=1, out_features=mn, in_features=mk, raw_len=int(w_packed.numel()), x_share=TOPK, ndev=1)), _verify
+      return (lambda: _krun("amd_gemv_quant_f32", (TOPK, mn), dev, w_u8, x, sel, lut, qtype=qtype,
+                            tokens=TOPK, x_rows=1, out_features=mn, in_features=mk, raw_bytes=int(w_u8.numel()), grid_len=gl,
+                            group_rows=0, use_sel=1, x_share=TOPK, ndev=1)), _verify
     cases.append((f"moe_gemv_{qname}_E{E}k{TOPK}_{mn}x{mk}", TOPK * per_e_words * w_dt.itemsize, 2 * TOPK * mn * mk, _mk_moe))
 
   for m, n, k in (((1, FFN, K),) if fast else ((1, N, K), (1, FFN, K), (4, N, K)) + (() if smoke else ((1, 3072, 8192),))):
@@ -276,7 +293,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       comb = (m_n[:, 8:] * scale[2].float() + base[8:].float()).reshape(t_h, 4, 4).softmax(-1) + 1e-6
       for i in range(3): comb = comb / (comb.sum(-1 if i % 2 else -2, keepdim=True) + 1e-6)
       _assert_close(out.float().numpy(), pre.cat(post, comb.reshape(t_h, 16), dim=-1).numpy(), rtol=2e-3, atol=2e-3)
-    return (lambda: _krun("amd_hc_coeffs_f16_f16", (t_h, 24), dev, mix, flat, base, scale,
+    return (lambda: _krun("amd_hc_coeffs", (t_h, 24), dev, mix, flat, base.float().contiguous(), scale.float().contiguous(),
                           tokens=t_h, features=K, iters=2, eps=1e-6, norm_eps=1e-6)), _verify
   cases.append((f"hc_coeffs_{2 if smoke else 32}x{K}", (2 if smoke else 32) * K * 4, 0, _mk_hc))
   return cases
