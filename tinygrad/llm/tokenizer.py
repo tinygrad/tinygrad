@@ -1,5 +1,4 @@
 import sys, codecs, itertools, typing, re, string, unicodedata, json, pathlib
-from tinygrad.helpers import partition
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -10,17 +9,18 @@ class SimpleTokenizer:
       raise ValueError(f"Invalid tokenizer preset '{preset}'")
     # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]  # bytes that map to themselves
-    self._byte_decoder = {chr(b): b for b in bs} | {chr(256+i): b for i,b in enumerate(b for b in range(256) if b not in bs)}
+    trans = str.maketrans({chr(256+i): chr(b) for i,b in enumerate(b for b in range(256) if b not in bs)})
 
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L286
-    # each limit is one past the category's max codepoint (Z→U+3000, N→U+1FBF9, L→U+323AF, M→U+E01EF, P→U+1E95F, S→U+1FBCA)
+    # each limit is one past the category's max codepoint (Z→U+3000, N→U+1FBF9, L→U+323AF, M→U+1E95F + U+E0100..U+E01EF, P→U+1E95F, S→U+1FBCA)
     # compact adjacent codepoints into ranges: listing them all makes re spend seconds on large prompts
     def ucat_range(pre:str|tuple[str, ...]) -> str:
-      limits = {"Z": 0x3001, "N": 0x1fbfa, "L": 0x323b0, "M": 0xe01f0, "P": 0x1e960, "S": 0x1fbcb}
+      limits = {"Z": 0x3001, "N": 0x1fbfa, "L": 0x323b0, "M": 0x1e960, "P": 0x1e960, "S": 0x1fbcb}
       limit = max(limits[p if p in limits else p[0]] for p in (pre if isinstance(pre, tuple) else (pre,)))
       cps = enumerate(cp for cp in range(limit) if unicodedata.category(chr(cp)).startswith(pre))
       runs = [list(g) for _, g in itertools.groupby(cps, lambda e: e[1]-e[0])]
-      return "".join(re.escape(chr(g[0][1])) + (f"-{re.escape(chr(g[-1][1]))}" if len(g) > 1 else "") for g in runs)
+      return "".join(re.escape(chr(g[0][1])) + (f"-{re.escape(chr(g[-1][1]))}" if len(g) > 1 else "") for g in runs) + \
+        ("\U000e0100-\U000e01ef" if "M" in pre else "")
     r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range(("L", "M") if marks else "L")
     contr, r_l, r_n = "(?i:'s|'t|'re|'ve|'m|'ll|'d)", f"[^\\r\\n{r_p_N}{r_p_L}]?", f"[{r_p_N}]" if preset == "tekken" else f"[{r_p_N}]{{1,3}}"
     r_p, r_w, r_t = f" ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*", f"{contr}|{r_l}[{r_p_L}]+", f"[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+"
@@ -41,21 +41,21 @@ class SimpleTokenizer:
     self._split_to_word = re.compile(f"({r_w}|{r_n}|{r_p}|{r_t})")
     self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
 
-    self._normal_tokens = {bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
+    self._normal_tokens = {(tok if tok.isascii() else tok.translate(trans)).encode('latin1'): tid for tok, tid in normal_tokens.items()}
     self._special_tokens = special_tokens
-    self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
+    self._tok2bytes = dict(zip(self._normal_tokens.values(), self._normal_tokens.keys())) | {tid: tok.encode() for tok, tid in special_tokens.items()}
     self.preset, self.chat_template = preset, chat_template
     self.bos_id, self.add_bos, self.eos_id, self.eot_id, self.eom_id = bos_id, add_bos, eos_id, eot_id, eom_id
 
   @staticmethod
   def from_gguf_kv(kv:dict):
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
-    vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
-    normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] not in (2, 3, 4)) # UNKNOWN|CONTROL|USER_DEFINED
-    special_tokens_dict = dict(special_tokens)
-    return SimpleTokenizer(dict(normal_tokens), special_tokens_dict, kv["tokenizer.ggml.pre"],
+    normal_tokens, special_tokens = dict[str, int](), dict[str, int]()
+    for idx, (tok, typ) in enumerate(zip(kv["tokenizer.ggml.tokens"], kv["tokenizer.ggml.token_type"], strict=True)):
+      (special_tokens if typ in (2, 3, 4) else normal_tokens)[tok] = idx # UNKNOWN|CONTROL|USER_DEFINED
+    return SimpleTokenizer(normal_tokens, special_tokens, kv["tokenizer.ggml.pre"],
       bos_id=kv.get('tokenizer.ggml.bos_token_id'), add_bos=kv.get('tokenizer.ggml.add_bos_token', True),
-      eos_id=kv.get('tokenizer.ggml.eos_token_id', 0), eot_id=kv.get('tokenizer.ggml.eot_token_id', special_tokens_dict.get('<|im_end|>')),
+      eos_id=kv.get('tokenizer.ggml.eos_token_id', 0), eot_id=kv.get('tokenizer.ggml.eot_token_id', special_tokens.get('<|im_end|>')),
       eom_id=kv.get('tokenizer.ggml.eom_token_id'), chat_template=kv.get('tokenizer.chat_template'))
 
   @staticmethod
