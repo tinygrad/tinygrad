@@ -130,7 +130,7 @@ class Linear(nn.Linear):
     return out if self.bias is None else out + (self.bias.reshape(self.groups, -1) if self.groups > 1 else self.bias)
 
   def _custom_dense(self, x:Tensor) -> Tensor|None:
-    if self.groups != 1 or not isinstance(x.numel(), int) or self.in_features % 32 != 0 or self.out_features > 2048: return None
+    if self.groups != 1 or not isinstance(x.numel(), int) or self.in_features % 32 != 0: return None
     w, xi = _unview_float(self.weight).contiguous(), _unview_float(x).contiguous()
     ok, tokens = (dtypes.float16, dtypes.bfloat16, dtypes.float32), int(prod(x.shape[:-1]))
     if w.uop.axis is not None or xi.uop.axis is not None or w.dtype not in ok or xi.dtype not in ok or tokens >= 16: return None
@@ -1163,8 +1163,7 @@ class Transformer:
         'ssm_conv1d_v.weight', 'ssm_dt.bias', 'ssm_a', 'ssm_beta.weight', 'ssm_f_b.weight', 'ssm_g.weight', 'ssm_g_b.weight', 'attn_gate.weight')})
       shard_map = {name: rules[k] for name in entries if (k:=re.sub(r"^blk\.\d+\.", "", name)) in rules}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
-    ep = any(shape[-1] % (shard*_GGML_QUANT.get(typ, (1,))[0]) for k,(_,shape,typ) in entries.items()
-             if 'ffn_down_exps.' in k and not k.endswith(('.scale', '.input_scale')))
+    ep = any(shape[-1] % (shard*_GGML_QUANT.get(typ, (1,))[0]) for k,(_,shape,typ) in entries.items() if k.endswith('ffn_down_exps.weight'))
     ep_axis = 0 if _amd_target(devices) is not None else None
     state_dict = gguf_shard(entries, devices, {k: v for k, v in ((k, ep_axis if ep and '_exps.' in k else v) for k, v in shard_map.items())
                                                if v is not None}, repeats)
