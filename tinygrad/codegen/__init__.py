@@ -615,7 +615,7 @@ pm_resolve_linear_call = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), resolve_linear_call),
 ])+pm_flatten_linear
 
-# Body hashes cache schedules; (exported function, NO_MEMORY_PLANNER) keys cache final LINEARs.
+# Body hashes cache schedules.
 schedule_cache: dict[bytes, UOp] = {}
 def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = call.body
