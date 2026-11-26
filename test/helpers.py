@@ -14,6 +14,7 @@ from tinygrad.renderer import Renderer, TinyELF
 from tinygrad.codegen import full_rewrite_to_sink, linearize_cleanups
 from tinygrad.codegen.late.linearizer import linearize
 from tinygrad.engine.realize import compile_linear, link_linear, run_linear
+from tinygrad.engine.jit import bind_export
 
 # decorator to skip slow tests by default, run with RUN_SLOW=1 to include them
 slow = unittest.skipUnless(os.getenv("RUN_SLOW"), "slow test, set RUN_SLOW=1 to run")
@@ -45,18 +46,21 @@ class KernelCountException(Exception):
     self.expected, self.got = expected, got
     super().__init__(f"expected {expected}, got {got}")
 
-def run_schedule(linear:UOp, var_vals:dict[str, int]|None=None, update_stats=True, wait=False) -> None:
-  linked = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=(inputs:=list[UOp]()), cache=True), inputs)
-  run_linear(linked, var_vals, inputs, update_stats=update_stats, wait=wait)
+def bound_schedule(*ts:Tensor) -> UOp: return bind_export(*Tensor.linear_with_externs(*ts))
+
+def run_schedule(linear:UOp, externs:tuple[UOp, ...]=(), var_vals:dict[str, int]|None=None, update_stats=True, wait=False) -> None:
+  var_vals = {**{f"e{i}": x.arg.val for i,x in enumerate(externs) if x.is_bound_var}, **(var_vals or {})}
+  linked = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU), list(externs))
+  run_linear(linked, var_vals, externs, update_stats=update_stats, wait=wait)
 
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
   if to_prerealize:
     with Context(DEBUG=0, TRACK_MATCH_STATS=0): Tensor.realize(*to_prerealize)
-  if isinstance(t, Tensor): linear, var_vals = t.linear_with_vars()
-  elif isinstance(t, list) and isinstance(t[0], Tensor): linear, var_vals = Tensor.linear_with_vars(*t)
+  if isinstance(t, Tensor): linear, externs = t.linear_with_externs()
+  elif isinstance(t, list) and isinstance(t[0], Tensor): linear, externs = Tensor.linear_with_externs(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
-    linear, var_vals = Tensor(t).linear_with_vars()
+    linear, externs = Tensor(t).linear_with_externs()
   # test compiling the linear
   compile_linear(linear)
   kernel_cnt = sum((len(call.device) if isinstance(call.device, tuple) else 1)
@@ -68,7 +72,7 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
         print("kernel", i+1)
         print(call.src[0])
     raise KernelCountException(allowed, kernel_cnt)
-  return linear, var_vals
+  return linear, externs
 
 @contextlib.contextmanager
 def measure_mem() -> Iterator[Callable[[], int]]:

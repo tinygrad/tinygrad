@@ -5,13 +5,13 @@ from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, UOp, uopfunc, KernelInfo
-from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
+from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear, compile_cache
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.llvmir import LLVMRenderer
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.c import init_c_struct_t
 import tinygrad.runtime.support.hcq2 as hcq2
-from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in, hcq_compile_cache
+from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in
 from test.null.test_hcq2 import compiled_chain, lower_hcq
 from test.helpers import run_schedule
 
@@ -25,7 +25,7 @@ class TestHCQ2Schedule(unittest.TestCase):
         out, compiled, inputs = compiled_chain(2, jit=jit, device=Device.DEFAULT)
         linked = link_linear(compiled, input_uops=inputs)
         before = tuple(inputs)
-        for linear in (compiled, linked): self.assertIs(compile_linear(linear, input_uops=inputs, cache=not jit), linear)
+        for linear in (compiled, linked): self.assertIs(compile_linear(linear, cache=not jit), linear)
         self.assertIs(link_linear(linked, input_uops=inputs), linked)
         self.assertEqual(tuple(inputs), before)
         run_linear(linked, input_uops=inputs, jit=True, wait=True)
@@ -37,9 +37,9 @@ class TestHCQ2Schedule(unittest.TestCase):
     ins = [(Tensor.full((23,), float(i)).contiguous().realize(), Tensor.full((23,), 2.0).contiguous().realize()) for i in range(6)]
     for a, b in ins[:3]: f(a, b).tolist() # warm the jit and the copyout
 
-    before = len(hcq_compile_cache)
+    before = len(compile_cache)
     for i, (a, b) in enumerate(ins[3:], 3): self.assertEqual(f(a, b).tolist(), [i * 3.0] * 23)
-    self.assertEqual(len(hcq_compile_cache), before)
+    self.assertEqual(len(compile_cache), before)
 
   def test_jit_symbolic(self):
     @TinyJit

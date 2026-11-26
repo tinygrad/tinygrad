@@ -7,6 +7,7 @@ from tinygrad.engine.realize import time_call
 from tinygrad.helpers import Context, DEBUG
 from tinygrad.nn import Conv2d
 from tinygrad.nn.state import get_parameters
+from test.helpers import bound_schedule
 
 class TestKernelSpeed(unittest.TestCase):
   def _get_tensor(self, *shape:int):
@@ -15,7 +16,7 @@ class TestKernelSpeed(unittest.TestCase):
       return Tensor.randn(shape, dtype="half").realize()
 
   def _time_kernel(self, out:Tensor, beam:int):
-    linear = out.schedule_linear()
+    linear = bound_schedule(out)
     self.assertEqual(len(linear.src), 1, "expected a single kernel")
     call = linear.src[0]
     prg = to_program(call.src[0].replace(arg=replace(call.src[0].arg, beam=beam)), Device[out.device].renderer)

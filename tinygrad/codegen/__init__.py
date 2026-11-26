@@ -719,7 +719,7 @@ def create_linear(fn:UOp) -> UOp:
   fn = fn.substitute({v:v.param_like(i) for v,i in views.items()}, walk=True, name="views to params")
   linear_call = graph_rewrite(fn.call(*views, precompile=True), pm_schedule, name="schedule to linear", enter_calls=True)
 
-  # this recursively resolves the linear_call, storage stays unbound until map back
+  # this recursively resolves the linear_call, storage stays unbound until link
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
   # create copies
@@ -728,7 +728,7 @@ def create_linear(fn:UOp) -> UOp:
   # plan the storage the function allocates
   linear = memory_plan_rewrite(linear)
 
-  # the storage it allocates gets canonical slots, so the linear only depends on fn. map back binds each to fresh storage
+  # the storage it allocates gets canonical slots, so the linear only depends on fn. link binds each to fresh storage
   allocs = [u for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL]
   if any(b.device is None for b in allocs): raise RuntimeError("global storage needs a device, give the ALLOC one")
   ret = linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")

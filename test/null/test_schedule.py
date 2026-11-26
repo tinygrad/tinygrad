@@ -26,9 +26,9 @@ class TestBufferUOp(unittest.TestCase):
     # the device Buffer remains unallocated until it's we run the schedule
     self.assertFalse(buf.uop.buffer.is_allocated())
     add = buf+1
-    linear, var_vals = add.linear_with_vars()
+    linear, externs = add.linear_with_externs()
     self.assertFalse(buf.uop.buffer.is_allocated())
-    run_schedule(linear, var_vals)
+    run_schedule(linear, externs)
     self.assertTrue(buf.uop.buffer.is_allocated())
 
   def test_buffer_has_unique_buffer(self):
@@ -78,12 +78,12 @@ class TestBufferUOp(unittest.TestCase):
     run_schedule(*check_schedule(a, 0))
     self.assertIsNone(a.uop.base.realized)
 
-  def test_unused_var_not_in_var_vals(self):
-    # unused variable should not appear in var_vals even when there's other work
+  def test_unused_var_not_in_externs(self):
+    # unused variable should not appear in the externs even when there's other work
     a = Tensor(UOp.variable("unused", 0, 10).bind(1))
     b = Tensor.empty(3) + 1
-    _, var_vals = Tensor.linear_with_vars(a, b)
-    self.assertEqual(var_vals, {})
+    _, externs = Tensor.linear_with_externs(a, b)
+    self.assertFalse(any(x.is_bound_var for x in externs))
     self.assertIsNone(a.uop.base.realized)
 
   def test_view_does_not_realize(self):

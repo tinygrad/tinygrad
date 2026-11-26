@@ -27,9 +27,9 @@ def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Te
   return out
 
 def run_one_schedule_item(out):
-  linear = out.schedule_linear()
+  linear, externs = out.linear_with_externs()
   get_single_element(linear.src)
-  run_schedule(linear)
+  run_schedule(linear, externs)
 
 class TestFuse(unittest.TestCase):
   def _test_fuse(self, fxn, *args, atol=1e-6, allow_multiple=False, **kwargs):

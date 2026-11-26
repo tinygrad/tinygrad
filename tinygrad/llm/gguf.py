@@ -316,6 +316,6 @@ def find_packed(decoded:Tensor, in_features:int) -> tuple[int, Tensor]|None:
     expected = ggml_data_to_tensor(Tensor(raw).flatten(), int(decoded.numel()), ggml_type)
     if unwrapped(decoded.uop).key == unwrapped(expected.uop).key: break
   else: return None
-  word_dtype = dtypes.uint8 if ggml_type == MXFP4 else dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32
-  if (off:=raw.contiguous_view_offset()) is None or off % word_dtype.itemsize or raw.buf_uop.dtype != dtypes.uint8: return None
-  return ggml_type, Tensor(raw).flatten().bitcast(word_dtype).contiguous()
+  align = 1 if ggml_type == MXFP4 else 2 if ggml_type in HALFWORD_QUANTS else 4
+  if (off:=raw.contiguous_view_offset()) is None or off % align or raw.buf_uop.dtype != dtypes.uint8: return None
+  return ggml_type, Tensor(raw).flatten().contiguous()

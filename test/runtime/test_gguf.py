@@ -152,7 +152,7 @@ class TestGGUF(unittest.TestCase):
   def test_dequantization_iq4_xs(self): self._test_dequantization(GGMLQuantizationType.IQ4_XS)
   def test_dequantization_iq1_m(self): self._test_dequantization(GGMLQuantizationType.IQ1_M)
   def test_dequantization_mxfp4(self): self._test_dequantization(GGMLQuantizationType.MXFP4)
-  def test_dequantization_nvfp4(self): self._test_dequantization(GGMLQuantizationType(40), block_count=2)
+  def test_dequantization_nvfp4(self): self._test_dequantization(GGMLQuantizationType.NVFP4)
   @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, "Backend must support bfloat16")
   def test_dequantization_bf16(self): self._test_dequantization(GGMLQuantizationType.BF16)
   def test_dequantization_mxfp4_old(self):
@@ -253,18 +253,18 @@ class TestGGUF(unittest.TestCase):
 
   def test_load_weight_scale(self):
     from gguf import GGUFWriter
+    from tinygrad.helpers import get_child
     from tinygrad.llm.model import Transformer
-    # shapes in the GGUF's numpy order, gate and up fused like Inkling, no output.weight so it ties to token_embd
     block = {'attn_norm': (8,), 'attn_q': (8, 8), 'attn_k': (8, 8), 'attn_v': (8, 8), 'attn_output': (8, 8), 'ffn_norm': (8,),
-             'ffn_gate_inp': (4, 8), 'ffn_gate_up_exps': (4, 16, 8), 'ffn_down_exps': (4, 8, 8)}
-    shapes = {'token_embd.weight': (32, 8), 'output_norm.weight': (8,), **{f'blk.{i}.{k}.weight': s for i in range(2) for k, s in block.items()}}
+             'ffn_gate_inp': (4, 8), 'ffn_gate_exps': (4, 8, 8), 'ffn_up_exps': (4, 8, 8), 'ffn_down_exps': (4, 8, 8)}
+    shapes = {'token_embd.weight': (32, 8), 'output_norm.weight': (8,), **{f'blk.0.{k}.weight': s for k, s in block.items()}}
     rng = np.random.default_rng(0)
     weights = {k:rng.normal(size=s).astype(np.float32) for k,s in shapes.items()}
-    # only blk.0 has scales, like Inkling where the last layers' experts are Q8_0. below the float16 normal range like real NVFP4 scales
-    scales = {f'blk.0.ffn_{p}_exps.scale': np.array([1, 2, 3, 4], np.float32) * (i+1) * 1e-6 for i, p in enumerate(('gate_up', 'down'))}
+    scales = {f'blk.0.ffn_{p}_exps.scale': np.array([1, 2, 3, 4], np.float32) * (i+1) * 1e-6 for i, p in enumerate(('gate', 'up', 'down'))}
+    scales['blk.0.attn_output.scale'] = np.array([5e-6], np.float32)
     with tempfile.TemporaryDirectory() as folder:
       writer = GGUFWriter(path:=pathlib.Path(folder)/'model.gguf', 'deepseek2')
-      for key,value in {'context_length':16, 'embedding_length':8, 'expert_feed_forward_length':8, 'block_count':2, 'expert_count':4,
+      for key,value in {'context_length':16, 'embedding_length':8, 'expert_feed_forward_length':8, 'block_count':1, 'expert_count':4,
                         'expert_used_count':2, 'attention.head_count':4, 'attention.head_count_kv':4, 'attention.key_length':2,
                         'rope.dimension_count':2}.items():
         writer.add_uint32('deepseek2.'+key, value)
@@ -278,10 +278,8 @@ class TestGGUF(unittest.TestCase):
       writer.close()
       with Context(DEV="CPU"):
         model = Transformer.from_gguf(path)[0]
-        # the scales load into blk.0's experts as is, blk.1's experts have none
-        for p in ('gate_up', 'down'):
-          np.testing.assert_equal(getattr(model.blk[0], f'ffn_{p}_exps').scale.numpy(), scales[f'blk.0.ffn_{p}_exps.scale'])
-        self.assertIsNone(model.blk[1].ffn_down_exps.scale)
+        for k, v in scales.items(): np.testing.assert_equal(get_child(model, k.removesuffix('.scale')).scale.numpy(), v)
+        self.assertIsNone(model.blk[0].attn_q.scale)
 
   def test_parse_empty(self):
     blob = self._build_gguf([], [("general.name", "empty")])
@@ -322,9 +320,9 @@ class TestGGUF(unittest.TestCase):
       for loader in (gguf_parse, gguf_load):
         with self.assertRaises(FileNotFoundError): loader(d / "test-00001-of-00002.gguf")
 
-  def _test_dequantization(self, qtype: GGMLQuantizationType, block_count:int=ggml_test_block_count):
+  def _test_dequantization(self, qtype: GGMLQuantizationType):
     block_size, type_size = GGML_QUANT_SIZES[qtype]
-    n_el, n_bytes = block_count * block_size, block_count * type_size
+    n_el, n_bytes = ggml_test_block_count * block_size, ggml_test_block_count * type_size
 
     try:
       q_data = quantize((np.random.random((n_el,)).astype(np.float32) * 100 - 50), qtype)
