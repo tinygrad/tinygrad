@@ -1016,9 +1016,11 @@ class UOp(Mixin, metaclass=UOpMetaClass):
       v = values[u.arg.name]
       assert not isinstance(v, bool) and (u.arg.vmin_vmax is None or u.arg.vmin_vmax[0] <= v <= u.arg.vmin_vmax[1])
       subs[u] = UOp.const(v if dtypes.is_int(u.dtype) else float(v), u.dtype)
-    from tinygrad.uop.symbolic import symbolic_simple
+    from tinygrad.uop.symbolic import sym_simple, symbolic_simple
     with Context(TRACK_MATCH_STATS=0, SPEC=min(SPEC.value, 1)):
-      return graph_rewrite(self.substitute(subs, enter_calls=True), symbolic_simple, enter_calls=True, name="specialize") if subs else self
+      if not subs: return self
+      u = graph_rewrite(self.substitute(subs, enter_calls=True), sym_simple, enter_calls=True)
+      return graph_rewrite(u, symbolic_simple, enter_calls=True, name="specialize")
 
   # *** uop symbolic stuff ***
 

@@ -492,7 +492,7 @@ class _Ctx:
     op_name = op.name
     src0_off, vdst_off = self.inst_field(type(inst).src0), self.inst_field(type(inst).vdst)
     src0_reg = (src0_off >= _c(256)).where(src0_off - _c(256), _c(0))  # VGPR index or 0
-    src1_off, src2_off = self.optional_field(inst, 'src1'), self.optional_field(inst, 'src2')
+    src1_off, src2_off, literal = self.optional_field(inst, 'src1'), self.optional_field(inst, 'src2'), self.optional_field(inst, 'literal')
     src1_reg = (src1_off >= _c(256)).where(src1_off - _c(256), src1_off) if src1_off is not None else _c(0)
     src2_reg = (src2_off >= _c(256)).where(src2_off - _c(256), src2_off) if src2_off is not None else _c(0)
     exec_val = self.rexec()
@@ -500,9 +500,9 @@ class _Ctx:
     srcs = {
       'SRC0': src0_reg, 'VDST': vdst_off, 'EXEC_LO': exec_lo, 'EXEC': exec_val.cast(dtypes.uint64),
       '_vgpr': self.vgpr, '_wave_size': self.wave_size, 'SRC1': src1_reg, 'SRC2': src2_reg,
-      'S0': self.rsrc_dyn(src0_off, _c(0, dtypes.int)) if 'WRITELANE' in op_name else src0_reg,
-      'S1': self.rsrc_dyn(src1_off, _c(0, dtypes.int)) if src1_off is not None else _c(0),
-      'S2': self.rsrc_dyn(src2_off, _c(0, dtypes.int)) if src2_off is not None else _c(0),
+      'S0': self.rsrc_dyn(src0_off, _c(0, dtypes.int), literal=literal) if 'WRITELANE' in op_name else src0_reg,
+      'S1': self.rsrc_dyn(src1_off, _c(0, dtypes.int), literal=literal) if src1_off is not None else _c(0),
+      'S2': self.rsrc_dyn(src2_off, _c(0, dtypes.int), literal=literal) if src2_off is not None else _c(0),
     }
     _, assigns = parse_pcode(pcode, srcs)
     stores = []
@@ -734,6 +734,8 @@ def _dpp16_ctrl(lane: UOp, dpp: int, row_mask: int, bank_mask: int, wave_size: i
     elif op == 'row_mirror': src_lane = row_base + (_c(15, dtypes.int) - lane_in_row)
     elif op == 'row_half_mirror': src_lane = row_base + ((lane_in_row & _c(8, dtypes.int)) | (_c(7, dtypes.int) - (lane_in_row & _c(7, dtypes.int))))
     elif op == 'row_bcast': src_lane = row_base
+    elif op in ('row_share', 'row_newbcast'): src_lane = row_base + _c(arg, dtypes.int)
+    elif op == 'row_xmask': src_lane = row_base + (lane_in_row ^ _c(arg, dtypes.int))
     elif op == 'wave_shl': src_lane, valid = lane_i + _c(arg, dtypes.int), lane_i < _c(wave_size - arg, dtypes.int)
     elif op == 'wave_rol': src_lane = (lane_i + _c(arg, dtypes.int)) % _c(wave_size, dtypes.int)
     elif op == 'wave_shr': src_lane, valid = lane_i - _c(arg, dtypes.int), lane_i >= _c(arg, dtypes.int)
@@ -742,10 +744,13 @@ def _dpp16_ctrl(lane: UOp, dpp: int, row_mask: int, bank_mask: int, wave_size: i
   return src_lane, enabled, valid
 
 def _load_dpp16_src0(ctx: _Ctx, inst, lane: UOp, fallback: UOp) -> UOp:
-  """Load a DPP16-swizzled src0 value from vsrc0."""
+  """Load a DPP16-swizzled src0 value from vsrc0 (snapshotting vsrc0 first so vdst==vsrc0 never aliases)."""
+  vsrc0_reg = ctx.inst_field(type(inst).vsrc0)
+  snap, sl = UOp.alloc((ctx.wave_size,), dtypes.uint32, 0, AddrSpace.REG), ctx.range()
+  snap = snap.after(snap.index(sl).store(ctx.rvgpr_dyn(vsrc0_reg, sl)).end(sl))
   src_lane, enabled, valid = _dpp16_ctrl(lane, _iattr(inst, 'dpp'), _iattr(inst, 'row_mask', 0xf), _iattr(inst, 'bank_mask', 0xf), ctx.wave_size)
   safe_src_lane = (enabled & valid).where(src_lane, _c(0, dtypes.int))
-  swizzled = ctx.rvgpr_dyn(ctx.inst_field(type(inst).vsrc0), safe_src_lane)
+  swizzled = snap.index(safe_src_lane).load()
   invalid = _c(0, fallback.dtype) if _iattr(inst, 'bc') else fallback
   return enabled.where(valid.where(swizzled, invalid), fallback)
 
@@ -1420,6 +1425,38 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
                     |irc.DS|irc.FLAT|irc.GLOBAL|irc.SCRATCH, ctx: _Ctx) -> UOp:
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rexec(), _op_name(inst)
+  if op_name in ('GLOBAL_LOAD_TR_B128', 'GLOBAL_LOAD_TR_B64'):
+    # RDNA4 transpose loads ignore EXEC (whole-wave mode): all lanes participate in reading and writing.
+    addr_reg, vdst_reg = ctx.inst_field(type(inst).vaddr), ctx.inst_field(type(inst).vdst)  # type: ignore[union-attr]
+    saddr_reg = ctx.optional_field(inst, 'saddr')
+    offset64 = ctx.inst_field_signed(type(inst).ioffset).cast(dtypes.uint64)  # type: ignore[union-attr]
+    use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(False)
+    saddr_base = _u64(ctx.rsgpr_dyn(saddr_reg), ctx.rsgpr_dyn(saddr_reg + _c(1))) if saddr_reg is not None else _c(0, dtypes.uint64)
+    mem_u8, full_exec = ctx.vmem.bitcast(dtypes.uint8), _c((1 << ctx.wave_size) - 1, exec_mask.dtype)
+    def lane_addr(l: UOp) -> UOp:
+      vaddr_base = _u64(ctx.rvgpr_dyn(addr_reg, l), ctx.rvgpr_dyn(addr_reg + _c(1), l))
+      return use_saddr.where(saddr_base + ctx.rvgpr_dyn(addr_reg, l).cast(dtypes.uint64), vaddr_base) + offset64
+    def ld_u8(a: UOp) -> UOp: return mem_u8.index(a).load().cast(dtypes.uint32)
+    def ld_u16(a: UOp) -> UOp: return ld_u8(a) | (ld_u8(a + _c(1, dtypes.uint64)) << _c(8))
+    addrs = [lane_addr(_c(i)) for i in range(ctx.wave_size)]
+    vals: list[list[UOp]] = []
+    if op_name == 'GLOBAL_LOAD_TR_B128':
+      # 8-lane groups, 16-bit elements: lane (grp + col) receives u16 elements from lanes grp..grp+7 at byte offset col*2.
+      for i in range(ctx.wave_size):
+        grp, off = i & ~7, _c((i & 7) * 2, dtypes.uint64)
+        vals.append([ld_u16(addrs[grp + 2*d] + off) | (ld_u16(addrs[grp + 2*d + 1] + off) << _c(16)) for d in range(4)])
+    else:
+      # 16-lane groups, 8-bit elements: lane (grp + half*8 + col) receives bytes from lanes grp+half*4..+3 (d0) and grp+8+half*4..+3 (d1).
+      for i in range(ctx.wave_size):
+        grp, half, off = i & ~15, (i >> 3) & 1, _c(i & 7, dtypes.uint64)
+        d0 = d1 = _c(0)
+        for k in range(4):
+          d0 = d0 | (ld_u8(addrs[grp + half * 4 + k] + off) << _c(k * 8))
+          d1 = d1 | (ld_u8(addrs[grp + 8 + half * 4 + k] + off) << _c(k * 8))
+        vals.append([d0, d1])
+    reads = UOp(Ops.STACK, src=tuple(v for lv in vals for v in lv))
+    return UOp.sink(*(ctx.wvgpr_dyn(vdst_reg + _c(d), _c(i), vals[i][d], full_exec, after=reads)
+                      for i in range(ctx.wave_size) for d in range(len(vals[i]))))
   pcode = get_pcode(inst.op)
   # CDNA and RDNA4 FLAT/SCRATCH pcode compute addresses from raw components, but make_addr already handles this.
   # Strip the addr computation line and use pre-computed ADDR directly (rename 'addr' -> 'ADDR' in remaining pcode).
