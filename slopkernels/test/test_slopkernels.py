@@ -122,13 +122,13 @@ class TestSlopKernelsUIR(unittest.TestCase):
     x_q1 = Tensor(rng.standard_normal((2, 1280)).astype(np.float32)).realize()
     ref_q1 = (x_q1 @ w_ref.T).numpy()
     got_q1 = _krun("amd_gemv_quant_f32", (2, 64), dev, w_u8, x_q1, sel0, g0, qtype=8,
-                   tokens=2, x_rows=2, out_features=64, in_features=1280, raw_bytes=w_bytes, grid_len=1,
+                   tokens=2, x_rows=2, out_features=64, in_features=1280, raw_bytes=w_bytes,
                    group_rows=0, use_sel=0, x_share=1, ndev=1, arch=tgt[0], num_experts=0).numpy()
     np.testing.assert_allclose(got_q1, ref_q1, rtol=3e-2, atol=2e-2 * np.abs(ref_q1).max())
     x_q16 = Tensor(rng.standard_normal((16, 1280)).astype(np.float16)).realize()
     ref_q16 = (x_q16.float() @ w_ref.T).numpy()
     got_q16 = _krun(f"{arch_gemm}_gemm_f16", (16, 64), dev, w_u8, x_q16, g0, qtype=8,
-                    m_blks=1, m_tiles=1, out_features=64, in_features=1280, raw_bytes=w_bytes, grid_len=1).numpy()
+                    m_blks=1, m_tiles=1, out_features=64, in_features=1280, raw_bytes=w_bytes).numpy()
     np.testing.assert_allclose(got_q16, ref_q16, rtol=2e-2, atol=2e-2 * np.abs(ref_q16).max())
     # 3. MoE decode
     mw_u8, _, mw_ref = _make_q8_0(rng, 4 * 16, 256)
@@ -136,7 +136,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
     sel_m = Tensor(np.array([2, 0], dtype=np.int32)).realize()
     x_m = Tensor(rng.standard_normal((1, 256)).astype(np.float32)).realize()
     got_m = _krun("amd_gemv_quant_f32", (2, 16), dev, mw_u8, x_m, sel_m, g0, qtype=8,
-                  tokens=2, x_rows=1, out_features=16, in_features=256, raw_bytes=int(mw_u8.numel()), grid_len=1, group_rows=0,
+                  tokens=2, x_rows=1, out_features=16, in_features=256, raw_bytes=int(mw_u8.numel()), group_rows=0,
                   use_sel=1, x_share=2, ndev=1, arch=tgt[0], num_experts=4).numpy()
     for j, eid in enumerate((2, 0)):
       np.testing.assert_allclose(got_m[j], mw_ref_np[eid] @ x_m.numpy()[0], rtol=3e-2, atol=5e-2)
@@ -149,8 +149,8 @@ class TestSlopKernelsUIR(unittest.TestCase):
     np.testing.assert_allclose(got_fd, ref_fd, rtol=5e-3, atol=5e-3)
     if tgt[0] != 9:
       q_pre = Tensor(rng.standard_normal((1, 4, 32, 64)).astype(np.float16)).realize()
-      got_fp = _krun(f"{arch_gemm}_flash_attn", (4, 32, 64), dev, q_pre.reshape(4, 32, 64), kv_fa, UOp.const(64), UOp.const(32),
-                     BH=4, m_blks=1, B=1, H_KV=2, d_blks=1, n_blks=4, valid_kv_offset=0, q_start_from_end=1).reshape(1, 4, 32, 64)
+      got_fp = _krun(f"{arch_gemm}_flash_attn", (1, 4, 32, 64), dev, q_pre, kv_fa, UOp.const(64), UOp.const(32),
+                     B=1, H=4, H_KV=2, m_blks=1, d_blks=1, n_blks=4, valid_kv_offset=0, q_start_from_end=1)
       mask = Tensor.full((32, 64), float("-inf"), dtype=dtypes.float32).triu(64 - 32 + 1)
       ref_fp = q_pre.float().scaled_dot_product_attention(kv_fa[0, :, :, :64].float(), kv_fa[1, :, :, :64].float(), attn_mask=mask, enable_gqa=True)
       np.testing.assert_allclose(got_fp.numpy(), ref_fp.numpy(), rtol=5e-3, atol=5e-3)
@@ -194,7 +194,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
     x_rep = Tensor(rng.standard_normal((2, 256)).astype(np.float32)).shard(devs, axis=None).realize()
     got_col = _krun("amd_gemv_quant_f32", (2, 32), devs, w_col, x_rep, sel0, g0, axis=1, qtype=8,
                     tokens=2, x_rows=2, out_features=32, in_features=256, raw_bytes=int(w_col.uop.max_shard_shape[0]),
-                    grid_len=1, group_rows=0, use_sel=0, x_share=1, ndev=1, arch=12, num_experts=0)
+                    group_rows=0, use_sel=0, x_share=1, ndev=1, arch=12, num_experts=0)
     np.testing.assert_allclose(got_col.numpy(), (x_rep.to("AMD:0") @ w_ref.T).numpy(), rtol=3e-2, atol=5e-2)
     # 2. Row-sharded GEMV (split-K all-reduce)
     w_u8_r, _, w_ref_r = _make_q8_0(rng, 32, 512)
@@ -203,7 +203,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
     ref_row = (x_sh.to("AMD:0") @ w_ref_r.T).numpy()
     got_row = _krun("amd_gemv_quant_f32", (2, 32), devs, w_row, x_sh, sel0, g0, axis=0, qtype=8,
                     tokens=2, x_rows=2, out_features=32, in_features=256, raw_bytes=int(w_row.uop.max_shard_shape[0]),
-                    grid_len=1, group_rows=0, use_sel=0, x_share=1, ndev=1, arch=12, num_experts=0).reshape(2, 2, 32).sum(0)
+                    group_rows=0, use_sel=0, x_share=1, ndev=1, arch=12, num_experts=0).reshape(2, 2, 32).sum(0)
     np.testing.assert_allclose(got_row.numpy(), ref_row, rtol=3e-2, atol=2e-2 * np.abs(ref_row).max())
     # 3. Expert-sharded MoE
     mw_u8, _, mw_ref = _make_q8_0(rng, 4 * 16, 256)
@@ -211,7 +211,7 @@ class TestSlopKernelsUIR(unittest.TestCase):
     sel_sh = Tensor(np.array([3, 1], dtype=np.int32)).shard(devs, axis=None).realize()
     xm_sh = Tensor(rng.standard_normal((1, 256)).astype(np.float32)).shard(devs, axis=None).realize()
     got_ms = _krun("amd_gemv_quant_f32", (2, 16), devs, mw_sh, xm_sh, sel_sh, g0, axis=0, qtype=8, tokens=2, x_rows=1,
-                   out_features=16, in_features=256, raw_bytes=int(mw_sh.uop.max_shard_shape[0]), grid_len=1, group_rows=0,
+                   out_features=16, in_features=256, raw_bytes=int(mw_sh.uop.max_shard_shape[0]), group_rows=0,
                    use_sel=1, x_share=2, ndev=2, arch=12, num_experts=4).reshape(2, 2, 16).sum(0).numpy()
     for j, eid in enumerate((3, 1)):
       np.testing.assert_allclose(got_ms[j], mw_ref.numpy().reshape(4, 16, 256)[eid] @ xm_sh.to("AMD:0").numpy()[0], rtol=3e-2, atol=5e-2)

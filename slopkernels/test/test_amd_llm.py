@@ -66,10 +66,10 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
       return Tensor(out.after(kf.call(out, q_in.uop, assigned_kv.uop, vkl_u)))
     if not decode and target[0] != 9 and D in (64, 128, 256, 320) and N_phys % 32 == 0 and M % 32 == 0:
       k_fa = unwrap(slopkernels.get(f"{'rdna4' if target[0] == 12 else 'rdna3'}_flash_attn")).specialize(
-        BH=B * H, m_blks=M // 32, B=B, H_KV=H_KV, d_blks=D // 64, n_blks=N_phys // 32, valid_kv_offset=v_off, q_start_from_end=1)
+        B=B, H=H, H_KV=H_KV, m_blks=M // 32, d_blks=D // 64, n_blks=N_phys // 32, valid_kv_offset=v_off, q_start_from_end=1)
       ql_u = T_real if isinstance(T_real, UOp) else UOp.const(M)
-      out = UOp.alloc((B * H, M, D), dtypes.float32, device=q.device)
-      ret = Tensor(out.after(k_fa.call(out, q_in.reshape(B * H, M, D).uop, assigned_kv.uop, vkl_u, ql_u)).reshape((B, H, M, D)))
+      out = UOp.alloc((B, H, M, D), dtypes.float32, device=q.device)
+      ret = Tensor(out.after(k_fa.call(out, q_in.uop, assigned_kv.uop, vkl_u, ql_u)))
       return ret if not isinstance(T_real, UOp) else ret[:, :, :T_real]
   k, v = (assigned_kv[i, :, :, :valid_end].float() for i in range(2))
   mask = None if decode else Tensor.full((T_real, valid_end), -math.inf, dtype=dtypes.float32, device=q.device).triu(valid_end - T_real + 1)

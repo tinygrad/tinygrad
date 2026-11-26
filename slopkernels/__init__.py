@@ -30,11 +30,15 @@ def _b_gemv(wdt:str, xdt:str) -> UOp:
   k_lds = _amd._amd_f16_gemv_kernel(*args, in_blks=ib, out_features=outf, tokens=tok, val_chunk=vc, lds_mt=True)
   return UOp(Ops.WHERE, src=((tok > 1) & (tok <= 8) & (inf % 1024).eq(0) & (outf >= 1024) & (outf % 8).eq(0), k_lds, k_base))
 
+def _grid_len(qt:UOp, wmma_iq3x:bool=False, wmma_iq4x:bool=False) -> UOp:
+  tbl = {16: 512, 17: 1024, 18: 512 if wmma_iq3x else 256, 19: 4096, 21: 512, 22: 2048, **({23: 256} if wmma_iq4x else {})}
+  return _gguf._qswitch(qt, [(q, UOp.const(tbl.get(q, 1), dtypes.weakint)) for q in _gguf.QUANT_NAMES])
+
 def _b_qgemv() -> UOp:
   qt, tok, inf, outf = _t("qtype", 8, 40), _t("tokens"), _t("in_features", 32), _t("out_features")
-  rb, gl, gr = _t("raw_bytes", 1, 1 << 30), _t("grid_len", 1, 4096), _t("group_rows", 0)
+  rb, gr = _t("raw_bytes", 1, 1 << 30), _t("group_rows", 0)
   use_sel, xrows, xs, nd = _t("use_sel", 0, 1), _t("x_rows"), _t("x_share", 1, 1024), _t("ndev", 1, 64)
-  arch, ne = _t("arch", 0, 12), _t("num_experts", 0, 512)
+  arch, ne, gl = _t("arch", 0, 12), _t("num_experts", 0, 512), _grid_len(qt)
   p_out, p_raw, p_x = _p(0, (tok, outf), "f32"), _p(1, (rb,), "u8"), _p(2, (xrows, inf), "f32")
   is_moe = use_sel.eq(1)
   p_sel, p_grid = _p(3, (is_moe.where(tok, gl),), "i32"), _p(4, (gl,), "u32")
@@ -97,7 +101,7 @@ def _b_qgemv() -> UOp:
 
 def _b_gemm(kg:int, ln:int) -> UOp:
   qt, mb, mt, inf, outf = _t("qtype", 8, 40), _t("m_blks"), _t("m_tiles", 1, 8), _t("in_features", 32), _t("out_features", 16)
-  rb, gl = _t("raw_bytes", 1, 1 << 30), _t("grid_len", 1, 4096)
+  rb, gl = _t("raw_bytes", 1, 1 << 30), _grid_len(qt, wmma_iq3x=(kg == 1), wmma_iq4x=True)
   tok = mb * (mt * 16)
   p_out, p_raw, p_x, p_grid = _p(0, (tok, outf), "f32"), _p(1, (rb,), "u8"), _p(2, (tok, inf), "f16"), _p(3, (gl,), "u32")
   if kg == 1:  # RDNA3: Direct-A + Double-Buffered-B 2D FP16 WMMA + in-WG K-split (wk=2,4)
@@ -158,9 +162,10 @@ def _b_flash_decode() -> UOp:
   return UOp.sink(k_comb.call(_p(0, (B, H, 1, D), "f32"), partial.after(cp), stats.after(cp), vkl))
 
 def _b_fa(rdna4:bool) -> UOp:
-  B, H_KV, db, nb, voff = _t("B", 1, 64), _t("H_KV", 1, 256), _t("d_blks", 1, 8), _t("n_blks", 1, 65536), _t("valid_kv_offset", 0)
-  BH, mb, qfe, vkl, ql, D = _t("BH", 1, 4096), _t("m_blks", 1, 4096), _t("q_start_from_end", 0, 1), _v(3, "valid_kv_len"), _v(4, "q_len"), db * 64
-  args = (_p(0, (BH, mb * 32, D), "f32"), _p(1, (BH, mb * 32, D), "f16"), _p(2, (2, B, H_KV, nb * 32, D), "f16"))
+  B, H, H_KV, db, nb, voff = _t("B", 1, 64), _t("H", 1, 256), _t("H_KV", 1, 256), _t("d_blks", 1, 8), _t("n_blks", 1, 65536), _t("valid_kv_offset", 0)
+  mb, qfe, vkl, ql, D = _t("m_blks", 1, 4096), _t("q_start_from_end", 0, 1), _v(3, "valid_kv_len"), _v(4, "q_len"), db * 64
+  args = (_p(0, (B, H, mb * 32, D), "f32").reshape((B * H, mb * 32, D)),
+          _p(1, (B, H, mb * 32, D), "f16").reshape((B * H, mb * 32, D)), _p(2, (2, B, H_KV, nb * 32, D), "f16"))
   vkl_e, qs_e = qfe.eq(1).where(vkl + voff, vkl + voff + ql), qfe.eq(1).where(vkl + voff - ql, vkl + voff)
   k_sm = _amd._amd_flash_attention_smallm(*args, valid_kv_len=vkl_e, q_start=qs_e, d_blks=db, rdna4=rdna4)
   k_gen = _amd._amd_flash_attention(*args, valid_kv_len=vkl_e, q_start=qs_e, d_blks=db, rdna4=rdna4)

@@ -27,6 +27,7 @@ def _amd_target_cached(device:str|tuple[str, ...]|None) -> tuple[int, ...]|None:
 
 def _amd_target(device:str|tuple[str, ...]|None) -> tuple[int, ...]|None: return _amd_target_cached(device) if SLOP else None
 def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool: return _amd_target(device) is not None
+
 def _shard_shape(shape:tuple[int, ...], axis:int|None, ndev:int) -> tuple[int, ...]:
   return tuple(s // ndev if i == axis else s for i, s in enumerate(shape))
 
@@ -41,10 +42,11 @@ def _load_kernel(name:str) -> UOp|None:
     with Context(SPEC=0): return parse_uir(p.read_text(encoding="utf-8"))
 
 @functools.cache
-def _get_kernel(name:str, **params:int|float) -> UOp|None: return None if (u := _load_kernel(name)) is None else u.specialize(**params)
+def _get_kernel(name:str, **params:int|float) -> UOp|None:
+  return None if (u := _load_kernel(name)) is None else u.specialize(**params)
 
-def _run_kernel(name:str, out_shape:tuple[int, ...], device:str|tuple[str, ...]|None, *args:Tensor|UOp,
-                axis:int|None=None, **params:int|float) -> Tensor|None:
+def _run_kernel(name:str, out_shape:tuple[int, ...], device:str|tuple[str, ...]|None,
+                *args:Tensor|UOp, axis:int|None=None, **params:int|float) -> Tensor|None:
   if (kern := _get_kernel(name, **params)) is None: return None
   if kern.op is Ops.SINK and kern.arg is None:
     kern = kern.substitute({b: b.replace(src=b.src[:1] + UOp.device_range_src(device), arg=replace(b.arg, device=device))
@@ -53,9 +55,9 @@ def _run_kernel(name:str, out_shape:tuple[int, ...], device:str|tuple[str, ...]|
   return Tensor(out.after(kern.call(out, *(a.uop if isinstance(a, Tensor) else a for a in args))))
 
 @functools.cache
-def _iq_lut(t:int, dev:str|tuple[str, ...]|None, wmma:bool=False) -> tuple[UOp, int]:
+def _iq_lut(t:int, dev:str|tuple[str, ...]|None, wmma:bool=False) -> UOp:
   if t not in ({16, 17, 18, 19, 21, 22, 23} if wmma else {16, 17, 18, 19, 21, 22}):
-    return UOp(Ops.STACK, (UOp.const(0, dtypes.uint32),)).cast(dtypes.uint32).copy_to_device(unwrap(dev)), 1
+    return UOp(Ops.STACK, (UOp.const(0, dtypes.uint32),)).cast(dtypes.uint32).copy_to_device(unwrap(dev))
   from tinygrad.runtime.autogen import ggml_common as g
   if t == 23 or (wmma and t == 18):
     vals:list[float] = ([g.kvalues_iq4nl[k] for j in range(16) for i in range(16) for k in (i, j)] if t == 23 else
@@ -64,7 +66,7 @@ def _iq_lut(t:int, dev:str|tuple[str, ...]|None, wmma:bool=False) -> tuple[UOp, 
   else:
     grid, nw = {16:(g.iq2xxs_grid,2), 17:(g.iq2xs_grid,2), 19:(g.iq1s_grid,2), 22:(g.iq2s_grid,2), 18:(g.iq3xxs_grid,1), 21:(g.iq3s_grid,1)}[t]
     words = tuple((v >> (32*i)) & 0xffffffff for v in grid for i in range(nw))
-  return UOp(Ops.STACK, tuple(UOp.const(w, dtypes.uint32) for w in words)).cast(dtypes.uint32).copy_to_device(unwrap(dev)), len(words)
+  return UOp(Ops.STACK, tuple(UOp.const(w, dtypes.uint32) for w in words)).cast(dtypes.uint32).copy_to_device(unwrap(dev))
 
 # ***** linear & MoE layers (pure tinygrad math + optional custom kernel speedup) *****
 
@@ -111,24 +113,22 @@ class Linear(nn.Linear):
     x_in = xp.reshape(rows, self.groups, -1).permute(1, 0, 2).reshape(self.groups * rows, self.in_features) if self.groups > 1 else xp
     out_axis = 0 if self.groups > 1 and x_axis is not None else None if w_axis is None else 1 - w_axis
     raw_bytes = int(prod(int(d) for d in self.packed.uop.max_shard_shape))
-    if self.groups == 1 and tokens >= 16 and local_out % 16 == 0:
-      arch, tok_pad = "cdna" if target[0] == 9 else "rdna4" if target[0] == 12 else "rdna3", round_up(tokens, 16)
-      x_f16 = x_in.half().contiguous().reshape(tokens, in_f) if x_axis is None else x_in.half().contiguous()
-      if tok_pad != tokens: x_f16 = (x_f16 if x_axis is None else x_f16.reshape(tokens, -1)).pad(((0, tok_pad - tokens), (0, 0)))
-      mt = 8 if tok_pad % 128 == 0 and tok_pad >= 256 else 4 if tok_pad % 64 == 0 else 2 if tok_pad % 32 == 0 else 1
-      lut, gl = _iq_lut(self.ggml_type, dev, target[0] == 11 or self.ggml_type == 23)
-      out = _run_kernel(f"{arch}_gemm_f16", _shard_shape((splits * tok_pad, out_f), out_axis, ndev), dev, self.packed, x_f16, lut, axis=out_axis,
-                        qtype=self.ggml_type, m_blks=tok_pad // (mt * 16), m_tiles=mt, out_features=local_out, in_features=in_f,
-                        raw_bytes=raw_bytes, grid_len=gl)
-      if out is not None and tok_pad != tokens:
-        out = out.reshape(splits, tok_pad, out_f)[:, :tokens, :].reshape(splits * tokens, out_f) if splits > 1 else out[:tokens]
+    if self.groups == 1 and tokens % 16 == 0 and local_out % 16 == 0:
+      arch = "cdna" if target[0] == 9 else "rdna4" if target[0] == 12 else "rdna3"
+      out_shape = _shard_shape((splits * tokens, out_f), out_axis, ndev)
+      x_f16 = x_in.half().contiguous().reshape(out_shape[0], in_f) if x_axis is None else x_in.half().contiguous()
+      mt = 8 if out_shape[0] % 128 == 0 and out_shape[0] >= 256 else 4 if out_shape[0] % 64 == 0 else 2 if out_shape[0] % 32 == 0 else 1
+      out = _run_kernel(f"{arch}_gemm_f16", out_shape, dev, self.packed, x_f16, _iq_lut(self.ggml_type, dev, target[0] == 11 or self.ggml_type == 23),
+                        axis=out_axis, qtype=self.ggml_type, m_blks=out_shape[0] // (mt * 16), m_tiles=mt, out_features=local_out, in_features=in_f,
+                        raw_bytes=raw_bytes)
     else:
-      x_tokens, (lut, gl) = int(prod(x_shard[:-1])), _iq_lut(self.ggml_type, dev, False)
+      x_tokens = int(prod(x_shard[:-1]))
       x_flat = x_in.float().contiguous().reshape(x_tokens, in_f) if x_in.uop.axis is None else x_in.float().contiguous()
       out = _run_kernel("amd_gemv_quant_f32", _shard_shape((splits * tokens, out_f), out_axis, ndev), dev, self.packed, x_flat,
-                        lut.bitcast(dtypes.int32), lut, axis=out_axis, qtype=self.ggml_type, tokens=x_tokens, x_rows=x_tokens,
-                        out_features=local_out, in_features=in_f, raw_bytes=raw_bytes, grid_len=gl, group_rows=rows if self.groups > 1 else 0,
-                        use_sel=0, x_share=1, ndev=1, arch=target[0] if isinstance(x.numel(), int) else 0, num_experts=0)
+                        (lut := _iq_lut(self.ggml_type, dev, False)).bitcast(dtypes.int32), lut, axis=out_axis, qtype=self.ggml_type,
+                        tokens=x_tokens, x_rows=x_tokens, out_features=local_out, in_features=in_f, raw_bytes=raw_bytes,
+                        group_rows=rows if self.groups > 1 else 0, use_sel=0, x_share=1, ndev=1,
+                        arch=target[0] if isinstance(x.numel(), int) else 0, num_experts=0)
     if out is None: return None
     if splits > 1: out = out.reshape(splits, tokens, out_f).sum(0)
     if self.groups > 1: out = out.reshape(self.groups, rows, out_f).permute(1, 0, 2)
@@ -139,14 +139,16 @@ class Linear(nn.Linear):
   def _custom_dense(self, x:Tensor) -> Tensor|None:
     if self.groups != 1 or not isinstance(x.numel(), int) or self.in_features % 32 != 0: return None
     w, xi = _unview_float(self.weight).contiguous(), _unview_float(x).contiguous()
-    ok, tokens, b = (dtypes.float16, dtypes.bfloat16, dtypes.float32), int(prod(x.shape[:-1])), self.bias
-    if w.uop.axis is not None or xi.uop.axis is not None or w.dtype not in ok or xi.dtype not in ok or tokens >= 16 \
-        or (b is not None and (b.uop.axis is not None or b.dtype not in ok)): return None
-    out_dt, vc = least_upper_dtype(w.dtype, x.dtype), 4 if self.in_features % 128 == 0 else 1
-    out = _run_kernel(f"amd_gemv_{w.dtype.name}_f32", (tokens, self.out_features), w.device, w, xi.float().contiguous().reshape(tokens, -1),
+    ok, tokens = (dtypes.float16, dtypes.bfloat16, dtypes.float32), int(prod(x.shape[:-1]))
+    if w.uop.axis is not None or xi.uop.axis is not None or w.dtype not in ok or xi.dtype not in ok or tokens >= 16: return None
+    if self.bias is not None and (self.bias.uop.axis is not None or self.bias.dtype not in ok): return None
+    out_dt = least_upper_dtype(w.dtype, x.dtype)
+    vc = 4 if self.in_features % 128 == 0 else 1
+    out = _run_kernel(f"amd_gemv_{w.dtype.name}_f32", (tokens, self.out_features),
+                      w.device, w, xi.float().contiguous().reshape(tokens, self.in_features),
                       tokens=tokens, out_features=self.out_features, in_blks=self.in_features // (32 * vc), val_chunk=vc)
     if out is None: return None
-    return (out + _unview_float(b).float() if b is not None else out).cast(out_dt).reshape(*x.shape[:-1], self.out_features)
+    return (out if self.bias is None else out + _unview_float(self.bias).float()).cast(out_dt).reshape(*x.shape[:-1], self.out_features)
 
   def __call__(self, x:Tensor) -> Tensor:
     if self.weight_scale_inv is not None:
@@ -183,15 +185,14 @@ class ExpertWeights:
     ndev, splits = int(self.weight.shape[0]) // int(self.weight.uop.shard_shape[0]), self.in_features // local_in
     if (w_axis == 2) != (splits > 1) or x_slots not in (1, slots): return None
     x_rows, raw_bytes = B * Tm * x_slots, int(prod(int(d) for d in self.packed.uop.max_shard_shape))
+    x_flat = x_p.float().contiguous().reshape(x_rows, local_in) if x_p.uop.axis is None else x_p.float().contiguous()
     out_axis = 0 if w_axis == 2 else w_axis
     out_shape = _shard_shape((splits * ndev * B * Tm * slots, global_out), out_axis,
                              ndev if w_axis == 0 else splits if w_axis == 2 else (global_out // local_out))
-    x_flat, (lut, gl) = (x_p.float().contiguous().reshape(x_rows, local_in) if x_p.uop.axis is None else x_p.float().contiguous(),
-                         _iq_lut(self.ggml_type, dev, False))
-    out = _run_kernel("amd_gemv_quant_f32", out_shape, dev, self.packed, x_flat, sel_p.cast(dtypes.int32).flatten(), lut,
-                      axis=out_axis, qtype=self.ggml_type, tokens=B * Tm * slots, x_rows=x_rows, out_features=local_out, in_features=local_in,
-                      raw_bytes=raw_bytes, grid_len=gl, group_rows=0, use_sel=1, x_share=slots // x_slots, ndev=ndev,
-                      arch=target[0], num_experts=int(self.weight.shape[0]))
+    out = _run_kernel("amd_gemv_quant_f32", out_shape, dev, self.packed, x_flat, sel_p.cast(dtypes.int32).flatten(),
+                      _iq_lut(self.ggml_type, dev, False), axis=out_axis, qtype=self.ggml_type, tokens=B * Tm * slots, x_rows=x_rows,
+                      out_features=local_out, in_features=local_in, raw_bytes=raw_bytes, group_rows=0, use_sel=1, x_share=slots // x_slots,
+                      ndev=ndev, arch=target[0], num_experts=int(self.weight.shape[0]))
     if out is None: return None
     out = (out.reshape(splits, B, Tm, slots, global_out).sum(0) if splits > 1 else
            out.reshape((ndev, B, Tm, slots, global_out) if ndev > 1 else (B, Tm, slots, global_out)))
@@ -468,21 +469,26 @@ class HyperConnection:
   def __call__(self, xs:Tensor, sublayer:Sublayer, pre:Tensor|None=None) -> tuple[Tensor, Tensor|None, Tensor|None]:
     """mHC: the sublayer sees a pre-weighted sum of the (B, T, hc, D) streams, its output is added back by post onto the streams mixed by comb"""
     if self.pre_delayed and pre is None: pre = Tensor([1.0] + [0.0] * (self.count - 1), device=xs.device)
-    flat, coeffs, c = xs.flatten(2), None, self.count
-    if _amd_target(xs.device) is not None and xs.dtype == dtypes.float32 and xs.uop.axis is None and c == 4 and flat.shape[-1] % 32 == 0:
-      fp = flat.pad_to(flat.max_shape).reshape(-1, flat.shape[-1])
-      coeffs = _run_kernel("amd_hc_coeffs", (int(fp.shape[0]), 24), xs.device, self.fn(fp).float().contiguous(), fp.float().contiguous(),
-                           self.base["weight"].float().contiguous(), self.scale["weight"].float().contiguous(), tokens=int(fp.shape[0]),
-                           features=int(fp.shape[-1]), iters=self.iters, eps=float(self.eps), norm_eps=float(self.norm_eps))
-    if coeffs is not None:
-      coeffs = coeffs.reshape(*flat.max_shape[:-1], -1).shrink_to(*flat.shape[:-1], None)
-      own, post, comb = coeffs[..., :c], coeffs[..., c:2*c], coeffs[..., 2*c:].reshape(*flat.shape[:-1], c, c)
-    else:
-      (own, mix), base, scale = self.pre(xs), self.base["weight"], self.scale["weight"]
-      post = (mix[..., c:2*c] * scale[1] + base[c:2*c]).sigmoid() * 2
-      comb = (mix[..., 2*c:] * scale[2] + base[2*c:]).reshape(*mix.shape[:-1], c, c).softmax(-1) + self.eps
-      # sinkhorn: normalize the columns then the rows, alternating, to make comb doubly stochastic
-      for i in range(2 * self.iters - 1): comb = comb / (comb.sum(-1 if i % 2 else -2, keepdim=True) + self.eps)
+    flat = xs.flatten(2)
+    if _amd_target(xs.device) is not None and xs.dtype == dtypes.float32 and xs.uop.axis is None and self.count == 4:
+      flat_pad = flat.pad_to(flat.max_shape).reshape(-1, flat.shape[-1])
+      tokens, features = int(flat_pad.shape[0]), int(flat_pad.shape[-1])
+      mix, base, scale = self.fn(flat_pad), self.base["weight"], self.scale["weight"]
+      coeffs = (_run_kernel("amd_hc_coeffs", (tokens, 24), xs.device,
+                            mix.float().contiguous(), flat_pad.float().contiguous(), base.float().contiguous(), scale.float().contiguous(),
+                            tokens=tokens, features=features, iters=self.iters, eps=float(self.eps), norm_eps=float(self.norm_eps))
+                if features % 32 == 0 else None)
+      if coeffs is not None:
+        coeffs = coeffs.reshape(*flat.max_shape[:-1], -1).shrink_to(*flat.shape[:-1], None)
+        c = self.count
+        own, post, comb = coeffs[..., :c], coeffs[..., c:2*c], coeffs[..., 2*c:].reshape(*flat.shape[:-1], c, c)
+        out, aux = sublayer(weighted_sum(xs, own if pre is None else pre))
+        return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs), aux, None if pre is None else own
+    (own, mix), base, scale = self.pre(xs), self.base["weight"], self.scale["weight"]
+    post = (mix[..., self.count:2*self.count] * scale[1] + base[self.count:2*self.count]).sigmoid() * 2
+    comb = (mix[..., 2*self.count:] * scale[2] + base[2*self.count:]).reshape(*mix.shape[:-1], self.count, self.count).softmax(-1) + self.eps
+    # sinkhorn: normalize the columns then the rows, alternating, to make comb doubly stochastic
+    for i in range(2 * self.iters - 1): comb = comb / (comb.sum(-1 if i % 2 else -2, keepdim=True) + self.eps)
     out, aux = sublayer(weighted_sum(xs, own if pre is None else pre))
     return out.unsqueeze(2) * post.unsqueeze(-1) + (comb.transpose(-1, -2) @ xs), aux, None if pre is None else own
 
@@ -650,7 +656,8 @@ class TransformerBlock(FFNBlock):
         and (target := _amd_target(x.device)) is not None:
       kv, T_real, sp = assigned_kv.transpose(0, 1), q.shape[2], start_pos[0]
       q_in = (q if not isinstance(T_real, UOp) else q.pad_to((*q.shape[:2], q.max_shape[2], q.shape[3]))).half()
-      sh_b, sh_h, sh_m, D = (q_shard := tuple(int(d) for d in q_in.uop.max_shard_shape))
+      q_shard = tuple(int(d) for d in q_in.uop.max_shard_shape)
+      sh_b, sh_h, sh_m, D = q_shard
       _, _, sh_hkv, N_phys, _ = (int(d) for d in kv.uop.max_shard_shape)
       q_axis, valid_kv = q_in.uop.axis, sp if isinstance(sp, UOp) else UOp.const(int(sp))
       valid_kv_offset, attn = T_real if isinstance(T_real, int) else 0, None
@@ -660,13 +667,9 @@ class TransformerBlock(FFNBlock):
                            d_blks=D // 64, n_blks=N_phys // 64, C=min(max(8, 64 // (sh_b * sh_hkv)), 64, ceildiv(N_phys, 64)),
                            valid_kv_offset=valid_kv_offset)
       elif target[0] != 9 and D % 64 == 0 and 1 <= D <= 512 and N_phys % 32 == 0 and (q_t := int(q_in.shape[2])) % 32 == 0:
-        arch = "rdna4" if target[0] == 12 else "rdna3"
-        k_attn = _get_kernel(f"{arch}_flash_attn", BH=sh_b * sh_h, m_blks=q_t // 32, B=sh_b, H_KV=sh_hkv, d_blks=D // 64,
-                             n_blks=N_phys // 32, valid_kv_offset=valid_kv_offset, q_start_from_end=0 if isinstance(T_real, UOp) else 1)
-        if k_attn is not None:
-          q_h, q_len = int(q_in.shape[1]), T_real if isinstance(T_real, UOp) else UOp.const(q_t)
-          out = UOp.alloc(q_shard, dtypes.float32, device=q_in.device, axis=q_axis).reshape((B * q_h, q_t, D))
-          attn = Tensor(out.after(k_attn.call(out, q_in.reshape(B * q_h, q_t, D).uop, kv.uop, valid_kv, q_len)).reshape((B, q_h, q_t, D)))
+        attn = _run_kernel(f"{'rdna4' if target[0] == 12 else 'rdna3'}_flash_attn", q_shard, q_in.device, q_in, kv, valid_kv,
+                           T_real if isinstance(T_real, UOp) else UOp.const(q_t), axis=q_axis, B=sh_b, H=sh_h, H_KV=sh_hkv, m_blks=q_t // 32,
+                           d_blks=D // 64, n_blks=N_phys // 32, valid_kv_offset=valid_kv_offset, q_start_from_end=0 if isinstance(T_real, UOp) else 1)
       if attn is not None:
         attn = (attn if not isinstance(T_real, UOp) else attn[:, :, :T_real]).transpose(1, 2).reshape(B, T, -1)
         return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))

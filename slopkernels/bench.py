@@ -158,13 +158,12 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         _assert_close(out[:, :CR].float().numpy(), (x.float() @ w4.T).numpy(), rtol=4e-2, atol=5e-2)
       if m % 16 == 0 and n % 16 == 0:
         mt = 8 if m % 128 == 0 and m >= 256 else 4 if m % 64 == 0 else 2 if m % 32 == 0 else 1
-        lut, gl = _iq_lut(qtype, dev, target[0] == 11 or qtype == 23)
+        lut, _ = _iq_lut(qtype, dev, target[0] == 11 or qtype == 23)
         return (lambda: _krun(f"{arch}_gemm_f16", (m, n), dev, w_u8, x.half().contiguous(), lut,
-                              qtype=qtype, m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=k,
-                              raw_bytes=raw_bytes, grid_len=gl)), _verify
-      lut, gl = _iq_lut(qtype, dev, False)
+                              qtype=qtype, m_blks=m // (mt * 16), m_tiles=mt, out_features=n, in_features=k, raw_bytes=raw_bytes)), _verify
+      lut, _ = _iq_lut(qtype, dev, False)
       return (lambda: _krun("amd_gemv_quant_f32", (m, n), dev, w_u8, x, lut.bitcast(dtypes.int32), lut, qtype=qtype,
-                            tokens=m, x_rows=m, out_features=n, in_features=k, raw_bytes=raw_bytes, grid_len=gl,
+                            tokens=m, x_rows=m, out_features=n, in_features=k, raw_bytes=raw_bytes,
                             group_rows=0, use_sel=0, x_share=1, ndev=1, arch=target[0], num_experts=0)), _verify
     kind = "gemm" if m % 16 == 0 and n % 16 == 0 else "gemv"
     cases.append((f"quant_{kind}_{qname}_{m}x{n}x{k}", w_len * w_dt.itemsize + m * k * x_dt.itemsize + m * n * 4, 2 * m * n * k, _setup))
@@ -201,13 +200,13 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       w_packed, tile_u8 = _make_packed(E * mn, mk, qname, dev, seed=19)
       w_u8 = w_packed if w_packed.dtype == dtypes.uint8 else w_packed.bitcast(dtypes.uint8)
       sel, x = Tensor(list(range(TOPK)), dtype=dtypes.int32, device=dev).realize(), _nonuniform((1, mk), dtypes.float32, dev, scale=0.5, freq=0.011)
-      lut, gl = _iq_lut(qtype, dev, False)
+      lut, _ = _iq_lut(qtype, dev, False)
       def _verify(out:Tensor) -> None:
         w4 = ggml_data_to_tensor(tile_u8[:CR].flatten(), CR * mk, qtype).reshape(CR, mk)
         ref1, got = (x @ w4.T).numpy()[0], out[:, :CR].float().numpy()
         _assert_close(got, np.broadcast_to(ref1, got.shape), rtol=4e-2, atol=5e-2)
       return (lambda: _krun("amd_gemv_quant_f32", (TOPK, mn), dev, w_u8, x, sel, lut, qtype=qtype,
-                            tokens=TOPK, x_rows=1, out_features=mn, in_features=mk, raw_bytes=int(w_u8.numel()), grid_len=gl,
+                            tokens=TOPK, x_rows=1, out_features=mn, in_features=mk, raw_bytes=int(w_u8.numel()),
                             group_rows=0, use_sel=1, x_share=TOPK, ndev=1, arch=target[0], num_experts=E)), _verify
     cases.append((f"moe_gemv_{qname}_E{E}k{TOPK}_{mn}x{mk}", TOPK * per_e_words * w_dt.itemsize, 2 * TOPK * mn * mk, _mk_moe))
 
@@ -219,7 +218,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
       w_u8 = w_packed if w_packed.dtype == dtypes.uint8 else w_packed.bitcast(dtypes.uint8)
       sel = Tensor(np.random.default_rng(7).integers(0, me, size=(mt_t * mk_t,), dtype=np.int32), device=dev).realize()
       x = _nonuniform((mt_t, mk_p), dtypes.float32, dev, scale=0.5, freq=0.011)
-      lut, gl = _iq_lut(qtype, dev, False)
+      lut, _ = _iq_lut(qtype, dev, False)
       m_tot = mt_t * mk_t
       def _verify(out:Tensor) -> None:
         w4 = ggml_data_to_tensor(tile_u8[:CR].flatten(), CR * mk_p, qtype).reshape(CR, mk_p)
@@ -227,7 +226,7 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
         got = out[:16 * mk_t, :CR].float().numpy().reshape(16, mk_t, CR)
         _assert_close(got, np.broadcast_to(ref[:, None, :], got.shape), rtol=4e-2, atol=5e-2)
       return (lambda: _krun("amd_gemv_quant_f32", (m_tot, mn_p), dev, w_u8, x, sel, lut, qtype=qtype,
-                            tokens=m_tot, x_rows=mt_t, out_features=mn_p, in_features=mk_p, raw_bytes=int(w_u8.numel()), grid_len=gl,
+                            tokens=m_tot, x_rows=mt_t, out_features=mn_p, in_features=mk_p, raw_bytes=int(w_u8.numel()),
                             group_rows=0, use_sel=1, x_share=mk_t, ndev=1, arch=target[0], num_experts=me)), _verify
     cases.append((f"moe_prefill_Q4_K_T{mt_t}_E{me}k{mk_t}_{mn_p}x{mk_p}", me * per_e_words * w_dt.itemsize,
                   2 * mt_t * mk_t * mn_p * mk_p, _mk_moe_pre))
@@ -250,9 +249,9 @@ def build_benchmarks(dev:str, smoke:bool=False, fast:bool=False) -> list[tuple[s
           mask = Tensor.full((fm, fn), float("-inf"), dtype=dtypes.float32, device=dev).triu(fn - fm + 1)
           ref = q[:, :1].float().scaled_dot_product_attention(kv[0, :, :1].float(), kv[1, :, :1].float(), attn_mask=mask, enable_gqa=True)
           _assert_close(out[:, :1].float().numpy(), ref.numpy(), rtol=5e-3, atol=5e-3)
-        return (lambda: _krun(f"{arch}_flash_attn", (fh, fm, fd), dev, q.reshape(fh, fm, fd), kv, UOp.const(fn), UOp.const(fm),
-                              BH=fh, m_blks=fm // 32, B=1, H_KV=fhkv, d_blks=fd // 64, n_blks=fn // 32,
-                              valid_kv_offset=0, q_start_from_end=1).reshape(1, fh, fm, fd)), _verify
+        return (lambda: _krun(f"{arch}_flash_attn", (1, fh, fm, fd), dev, q, kv, UOp.const(fn), UOp.const(fm),
+                              B=1, H=fh, H_KV=fhkv, m_blks=fm // 32, d_blks=fd // 64, n_blks=fn // 32,
+                              valid_kv_offset=0, q_start_from_end=1)), _verify
       io_b = (fh * fm * fd + 2 * fhkv * fn * fd) * 2 + fh * fm * fd * 4
       cases.append((f"flash_attn_prefill_H{fh}_M{fm}_N{fn}_D{fd}", io_b, 4 * fh * fm * fn * fd, _mk_fa_pre))
 
