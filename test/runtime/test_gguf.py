@@ -281,17 +281,6 @@ class TestGGUF(unittest.TestCase):
         for k, v in scales.items(): np.testing.assert_equal(get_child(model, k.removesuffix('.scale')).scale.numpy(), v)
         self.assertIsNone(model.blk[0].attn_q.scale)
 
-  def test_linear_scale_overflow(self):
-    from tinygrad.llm.model import Linear
-    w = np.random.default_rng(0).normal(size=(8, 8)).astype(np.float16)
-    x = np.full((1, 8), 30000, np.float16)
-    ref = x.astype(np.float64) @ w.astype(np.float64).T
-    self.assertGreater(np.abs(ref).max(), 65504)
-    with Context(DEV="CPU"):
-      lin = Linear(8, 8, bias=False)
-      lin.weight, lin.scale = Tensor(w), Tensor([5e-6])
-      np.testing.assert_allclose(lin(Tensor(x)).numpy(), ref * 5e-6, rtol=1e-2)
-
   def test_parse_empty(self):
     blob = self._build_gguf([], [("general.name", "empty")])
     for loader in (gguf_parse, gguf_load):

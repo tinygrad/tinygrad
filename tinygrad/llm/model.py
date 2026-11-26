@@ -147,7 +147,7 @@ class Linear(nn.Linear):
 
   def __call__(self, x:Tensor) -> Tensor:
     out = self._forward(x)
-    return out if self.scale is None else (out * self.scale).cast(x.dtype)
+    return out if self.scale is None else out * self.scale
 
   def _forward(self, x:Tensor) -> Tensor:
     if self.weight_scale_inv is not None:
@@ -157,7 +157,6 @@ class Linear(nn.Linear):
       if self.ggml_type is None: self.set_quantized(self.weight)
       custom = self._custom_quant(x, target) if self.ggml_type in _QUANT_TYPES and self.packed is not None else self._custom_dense(x)
       if custom is not None: return custom
-    if self.scale is not None: x = x.float()
     if self.groups > 1:
       out = (x.unsqueeze(-2) @ self.weight.reshape(self.groups, -1, self.in_features).transpose(-1, -2)).squeeze(-2)
       return out if self.bias is None else out + self.bias.reshape(self.groups, -1)
@@ -207,9 +206,8 @@ class ExpertWeights:
         if self.ggml_type is None: self.use_custom_quant = False
       out = (self._custom_moe(sel, x, target) if target is not None and self.ggml_type in _QUANT_TYPES
              and not (self.weight.uop.axis == 0 and hasattr(self, 'bias')) else None)
-      xs = x if self.scale is None else x.float()
-      ret = out if out is not None else (xs.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
-    if self.scale is not None: ret = (ret * self.scale[sel].unsqueeze(-1)).cast(x.dtype)
+      ret = out if out is not None else (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
+    if self.scale is not None: ret = ret * self.scale[sel].unsqueeze(-1)
     return ret if not hasattr(self, 'bias') else ret + self.bias[sel]
 
 class ExpertGating(enum.IntEnum):
