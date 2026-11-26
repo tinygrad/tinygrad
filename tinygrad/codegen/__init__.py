@@ -3,7 +3,7 @@ from collections import deque
 import itertools, functools, time, inspect
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, CHECK_OOB, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC, SCACHE, BASEDIR
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic, cpu_profile, prod
-from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored, NO_MEMORY_PLANNER
+from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
@@ -615,8 +615,8 @@ pm_resolve_linear_call = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), resolve_linear_call),
 ])+pm_flatten_linear
 
-# Body hashes cache schedules; (exported function, NO_MEMORY_PLANNER) keys cache final LINEARs.
-schedule_cache: dict[bytes|tuple[UOp, int], UOp] = {}
+# Body hashes cache schedules.
+schedule_cache: dict[bytes, UOp] = {}
 def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = call.body
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
@@ -711,8 +711,6 @@ pm_contiguous_views = PatternMatcher([
 @rewrite_group(lambda fn,ret,**_: f"Schedule {len(fn.src)} -> {len(ret.src)}")
 def create_linear(fn:UOp) -> UOp:
   """an exported function (no runtime state) to the LINEAR of calls that runs it, on its EXTERNs, view args and ALLOCs"""
-  key = (fn, NO_MEMORY_PLANNER.value)
-  if SCACHE and (hit:=schedule_cache.get(key)) is not None: return hit
   # a contiguous view of storage is a different buffer: it's an input of the scheduled function, the call arg is the view
   views: dict[UOp, int] = {}
   fn = graph_rewrite(fn, pm_contiguous_views, ctx=views, name="contiguous views")
@@ -731,6 +729,4 @@ def create_linear(fn:UOp) -> UOp:
   # the storage it allocates gets canonical slots, so the linear only depends on fn. link binds each to fresh storage
   allocs = [u for u in linear.toposort() if u.op is Ops.ALLOC and u.addrspace is AddrSpace.GLOBAL]
   if any(b.device is None for b in allocs): raise RuntimeError("global storage needs a device, give the ALLOC one")
-  ret = linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
-  if SCACHE: schedule_cache[key] = ret
-  return ret
+  return linear.substitute({b:b.replace(arg=replace(b.arg, slot=-1-i)) for i,b in enumerate(allocs)}, walk=True, name="canonical alloc slots")
