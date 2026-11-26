@@ -171,9 +171,10 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
       rngs = tuple(r if (sz == sh and off == 0) else (r-off).valid(graph_rewrite((r >= off) & (r < (sh+off)),
         symbolic+pm_simplify_valid, name="pad")) for r,sh,(off,sz) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
-      sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
+      sink = UOp.sink(*rngs)
+      if not all(r.op is Ops.CONST or (r.op is Ops.RANGE and r.vmax > 0 and r.src[0].op is Ops.CONST) for r in rngs): sink = sink.simplify()
       sub_array = {r:r.replace(arg=(AxisType.PLACEHOLDER, i)) for i,r in enumerate(sink.ranges)}
-      rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src
+      rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array, walk=True)).substitute({v:k for k,v in sub_array.items()}, walk=True).src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 

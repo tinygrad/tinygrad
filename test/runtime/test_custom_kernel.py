@@ -976,5 +976,25 @@ class TestUOpWhere(unittest.TestCase):
     result = Tensor(cond.uop.where(1.5, 0))
     self.assertEqual(result.tolist(), [1.5, 0, 1.5])
 
+  def test_custom_kernel_single_device_num(self):
+    dev_rng = UOp.range(2, 0, AxisType.DEVICE)
+    def fxn(C:UOp) -> UOp:
+      i = UOp.range(C.numel(), 0)
+      return C[i].store(dev_rng.cast(C.dtype)).end(i).sink(arg=KernelInfo("dev_num_once"))
+    out = Tensor.empty(4).realize()
+    ret = Tensor.custom_kernel(out, fxn=fxn)[0]
+    call = ret.uop.src[1]
+    self.assertEqual(sum(1 for a in call.src[1:] if a.is_variable and a.arg.name == "_device_num"), 1)
+
+  def test_raw_call_lifts_bound_var(self):
+    v = Variable("bv", 0, 10, dtypes.int).bind(3)
+    C = UOp.placeholder((4,), dtypes.int, 0)
+    i = UOp.range(4, 0)
+    sink = C[i].store(i + v).end(i).sink(arg=KernelInfo("raw_bound_var"))
+    out = Tensor.empty(4, dtype=dtypes.int)
+    call = sink.call(out.uop)
+    self.assertEqual(len(call.src), 3)
+    self.assertEqual(Tensor(out.uop.after(call)).tolist(), [3, 4, 5, 6])
+
 if __name__ == '__main__':
   unittest.main()

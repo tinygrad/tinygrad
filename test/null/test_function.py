@@ -24,6 +24,27 @@ class TestFunction(unittest.TestCase):
       @function
       def __call__(self, x:Tensor) -> Tensor: return x + 1
 
+  def test_implicit_symbolic_var_lifted(self):
+    from tinygrad import Variable
+    from tinygrad.uop.ops import Ops
+    v = Variable("n", 1, 8).bind(4)
+    imp = (Tensor.ones(8).contiguous().realize()[:v] + 1).contiguous()
+    @function(allow_implicit=True, precompile=True)
+    def g(x:Tensor) -> Tensor: return x + imp.sum()
+    call = next(x for x in g(Tensor.ones(1)).uop.toposort() if x.op is Ops.CALL)
+    self.assertEqual([x for x in call.body.toposort() if x.is_variable and x.arg.slot == -1], [])
+
+  def test_custom_kernel_captured_buffer_lifted(self):
+    from tinygrad.uop.ops import Ops
+    w = Tensor([10., 20., 30., 40.]).contiguous().realize()
+    def k(C:UOp, A:UOp) -> UOp:
+      i = UOp.range(4, 0)
+      return C[i].store(A[i] + w.uop[i]).end(i).sink(arg=KernelInfo(name="ck_closure"))
+    out = Tensor.custom_kernel(Tensor.empty(4), Tensor([1., 2., 3., 4.]).contiguous().realize(), fxn=k)[0]
+    call = next(x for x in out.uop.toposort() if x.op is Ops.CALL)
+    self.assertEqual([x for x in call.body.toposort() if x.op is Ops.BUFFER], [])
+    self.assertIn(w.uop.base, call.src[1:])
+
 class TestFunctionMulti(unittest.TestCase):
   devices_2 = ("NULL:0", "NULL:1")
 

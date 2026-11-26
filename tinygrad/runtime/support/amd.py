@@ -21,8 +21,9 @@ class AMDIP:
   def regs(self): return import_asic_regs(self.name, self.version, cls=functools.partial(AMDReg, bases=self.bases))
 
   def __getattr__(self, name:str):
-    if name in self.regs: return self.regs[name]
-    if (name10:=name.replace('reg', 'mm')) in self.regs: return self.regs[name10]
+    if (reg:=self.regs.get(name) or self.regs.get(name.replace('reg', 'mm'))) is not None:
+      setattr(self, name, reg)
+      return reg
     raise AttributeError(f"{self.name.upper()} has no register {name}")
 
 # load the greatest module with matching major version that's less than or equal to the target version

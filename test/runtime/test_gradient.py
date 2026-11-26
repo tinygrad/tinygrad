@@ -230,5 +230,13 @@ class TestViewGradient(unittest.TestCase):
     with self.assertRaises(AssertionError):
       np.testing.assert_allclose(aex.grad.numpy(), a.grad.expand(10).numpy())
 
+  def test_custom_grad_fxn_short_return_raises(self):
+    def k(C:UOp, A:UOp, B:UOp) -> UOp:
+      i = UOp.range(C.numel(), 0)
+      return C[i].store(A[i] + B[i]).end(i).sink(arg=KernelInfo("short_grad"))
+    a, b = Tensor([1.0, 2.0]).realize(), Tensor([3.0, 4.0]).realize()
+    c = Tensor.empty(2).custom_kernel(a, b, fxn=k, grad_fxn=lambda g, call: (None, g))[0]
+    with self.assertRaises(AssertionError): c.sum().gradient(a, b)
+
 if __name__ == '__main__':
   unittest.main()

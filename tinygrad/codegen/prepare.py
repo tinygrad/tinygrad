@@ -268,8 +268,11 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 @rewrite_group(new_ctx=False)
 def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
-  tsink = graph_rewrite(forward_call_outputs(sink), multi_pm, name="multi_pm")
-  tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls+pm_disk_copy, name="inline calls")
+  tsink = forward_call_outputs(sink)
+  ops = {u.op for u in tsink.toposort()}
+  if ops & {Ops.UNSHARD, Ops.ALLREDUCE, Ops.COPY, Ops.MSELECT, Ops.MSTACK}:
+    tsink = graph_rewrite(tsink, multi_pm, name="multi_pm")
+    ops = {u.op for u in tsink.toposort()}
+  if Ops.CALL in ops or Ops.COPY in ops: tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls+pm_disk_copy, name="inline calls")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, init_ctx=MapCtx, name="fold moved afters")
-  tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
-  return tsink
+  return graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")

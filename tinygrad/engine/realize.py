@@ -36,11 +36,10 @@ def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
   return [(d, call, None) for d in to_tuple(call.device if ast.op is Ops.STORE else get_call_arg_uops(call)[0].device)]
 
 def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|None=None) -> str:
+  if (ast:=call.body).op is Ops.PROGRAM: return ast.src[0].arg.name
   def _uop_sz_to_str(uop:UOp) -> str: return size_to_str(sym_infer(prod(uop.shape) * uop.dtype.itemsize, var_vals or {}))
   def _dev_str(buf:Buffer|UOp) -> str: return ', '.join(d[:7] for d in to_tuple(buf.device))
-
-  ast, arg_uops = call.body, get_call_arg_uops(call)
-  if ast.op is Ops.PROGRAM: return ast.src[0].arg.name
+  arg_uops = get_call_arg_uops(call)
   if ast.op is Ops.STORE: return colored(f"copy {_uop_sz_to_str(arg_uops[0]):>10}, {_dev_str(bufs[0]):>7s} <- {_dev_str(bufs[1]):7s}", "yellow")
   if ast.op is Ops.NATIVE and ast.arg.code == "encdec": return colored(f"enc/dec {_uop_sz_to_str(arg_uops[0])}", "yellow")
   raise NotImplementedError("get_call_name is not implemented")
@@ -210,14 +209,14 @@ def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
 
 def lower_and_compile(linear:UOp, verbose=True) -> UOp:
   # collect the kernels to lower and compile, deduped by their compile cache key
-  if not len(ar:={c: a for c in linear.toposort() if c.op is Ops.CALL and (a:=_get_call_to_compile(c)) is not None}): return linear
+  calls = [s.without_after for s in (linear.src if linear.op is Ops.LINEAR else (linear,))]
+  if not len(ar:={c: a for c in calls if c.op is Ops.CALL and (a:=_get_call_to_compile(c)) is not None}): return linear
 
   # lower and compile what's not cached, in parallel if there's a worker pool
   keys = {c: to_program_key(*a) for c, a in ar.items()}
   todo = list({keys[c]: a for c, a in ar.items() if keys[c] not in to_program_cache}.items())
   if len(todo):
     # kernels that beam search must compile in the parent, beam needs device access to time candidates
-
     pool = None if len(todo) == 1 or any(getattr(c.body.arg, "beam", 0) for c in ar) else get_worker_pool()
     ctx = {v.key: v.value for v in to_program_context}
     if CAPTURE_PROCESS_REPLAY: ctx["PROCESS_REPLAY_LOC"] = get_process_replay_loc()
@@ -233,8 +232,7 @@ def lower_and_compile(linear:UOp, verbose=True) -> UOp:
       raise
 
   # swap the compiled PROGRAMs into the calls
-  return linear.substitute({c: c.replace(src=(to_program_cache[keys[c]], *c.src[1:])) for c in ar},
-                           name="precompile kernels")
+  return linear.substitute({c: c.replace(src=(to_program_cache[keys[c]], *c.src[1:])) for c in ar}, walk=True)
 
 from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link # noqa: E402 # down here, hcq2 imports realize
 
@@ -246,7 +244,8 @@ pm_exec = PatternMatcher([
 ])
 
 def devices_of(linear:UOp) -> list[str]:
-  return sorted({d for u in linear.toposort() if u.op in {Ops.BUFFER, Ops.PARAM, Ops.ALLOC, Ops.EXTERN} for d in to_tuple(u.device) if d is not None})
+  return sorted({d for u in linear.toposort(gate=lambda u: u.op is not Ops.PROGRAM)
+                 if u.op in {Ops.BUFFER, Ops.PARAM, Ops.ALLOC, Ops.EXTERN} for d in to_tuple(u.device) if d is not None})
 
 compile_cache:dict[tuple, UOp] = {}
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, profile:bool|None=None, cache=False) -> UOp:

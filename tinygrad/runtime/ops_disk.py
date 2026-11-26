@@ -141,13 +141,15 @@ def disk_copy_rewriter(s:UOp) -> UOp|None:
     done = disk_read(file, srcs[2 * ks[0]:2 * ks[-1] + 2], counts.after(done), fd, rings, sqes)
 
   # gpu part
+  base = counts.index(0).load()
+  slot_addrs = [counts.getaddr(dev) + 4096 + ((base + i) % SLOTS) * SLOT_SZ for i in range(SLOTS)]
   for k, c in enumerate(copies):
-    first, slots = counts.index(0).load() + off, counts.getaddr(dev) + 4096 + srcs.index(2 * k).load() % 4096
-    off += ceildiv(c.src[2].nbytes(), CHUNK_SZ)
-    for chunk in range(ceildiv(c.src[2].nbytes(), CHUNK_SZ)):
-      n, dst, nb = first + chunk, c.src[1].getaddr() + chunk * CHUNK_SZ, min(CHUNK_SZ, c.src[2].nbytes() - chunk * CHUNK_SZ)
-      gpu_ops[c] += [ins("wait", counts, n + 1), ins("copy", dst, slots + n % SLOTS * SLOT_SZ, nb), ins("store", counts[1:], n + 1)]
-  return done.substitute({lin: lin.replace(src=tuple(flatten(gpu_ops.get(c, [c]) for c in lin.src)))}, enter_calls=True)
+    page_off = srcs.index(2 * k).load() % 4096
+    for chunk in range(nchunks:=ceildiv(c.src[2].nbytes(), CHUNK_SZ)):
+      n, dst, nb = base + (off + chunk + 1), c.src[1].getaddr() + chunk * CHUNK_SZ, min(CHUNK_SZ, c.src[2].nbytes() - chunk * CHUNK_SZ)
+      gpu_ops[c] += [ins("wait", counts, n), ins("copy", dst, slot_addrs[(off + chunk) % SLOTS] + page_off, nb), ins("store", counts[1:], n)]
+    off += nchunks
+  return done.substitute({lin: lin.replace(src=tuple(flatten(gpu_ops.get(c, [c]) for c in lin.src)))}, walk=True, enter_calls=True)
 Compiled.pm_encode = PatternMatcher([(UPat.sink().call(UPat(Ops.PARAM)).after(allow_any_len=True, name="s"),
   disk_copy_rewriter)]) + Compiled.pm_encode
 

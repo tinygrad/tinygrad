@@ -116,6 +116,15 @@ class AMDComputeQueue(HWQueue):
     self.profiled:list[UOp] = []
     self.pmc, self.sqtt, self.slots = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0, getenv("PROF_SLOTS", 32)
     self.pmc_sched = self.pmc_schedule(self.devs[0]) if self.pmc else []
+    self._progs:dict[UOp, tuple[AMDProgramData, UOp, UOp, bytes, list[tuple[int|UOp, UOp]]]] = {}
+    self._dispatch_init = tuple(self.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(
+      **({'cs_w32_en': w} if self.gc.version[0] != 9 else {}), force_start_at_000=1, compute_shader_en=1) for w in (0, 1))
+    self.acquire_mem(gli=0, gl2=0)
+    self._acq_exec = bytes(self.blob)
+    self.blob.clear()
+    self.wreg(self.gc.regCOMPUTE_RESOURCE_LIMITS, self.gc.regCOMPUTE_RESOURCE_LIMITS.encode(waves_per_sh=getenv("WAVES_PER_SH")))
+    self._res_limits = bytes(self.blob)
+    self.blob.clear()
     if self.pmc: self.pmc_start()
 
   def pkt3(self, cmd, *vals): self.q(self.pm4.PACKET3(cmd, _dw(vals) - 1), *vals)
@@ -406,35 +415,40 @@ class AMDComputeQueue(HWQueue):
     return UOp(Ops.LINEAR, src=tuple(words), arg="kernargs").getaddr(self.devs)
 
   def exec(self, call:UOp, prg:UOp):
-    data, lib = amd_build_program(prg, self.devs)
-
-    prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
+    if (built:=self._progs.get(prg)) is None:
+      data, lib = amd_build_program(prg, self.devs)
+      priv_sz = data.private_segment_size
+      scratch_addr = UOp.extern((priv_sz,), dtypes.uint8, self.devs[0], "scratch").getaddr(self.devs)
+      tmpring = self.gc.regCOMPUTE_TMPRING_SIZE.encode(waves=waves_for(self.devs[0]), wavesize=scratch_wavesize(self.devs[0], priv_sz))
+      blob_start, patch_start = len(self.blob), len(self.patches)
+      self.wreg(self.gc.regCOMPUTE_PGM_LO, (lib.getaddr(self.devs) + data.entry_point_offset) >> 8)
+      self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
+      self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
+      self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, tmpring)
+      for xcc_id in range(self.xccs): # architected flat scratch: each xcc gets its part
+        with self.pred_exec(xcc_mask=1 << xcc_id):
+          self.wreg(self.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, (scratch_addr + priv_sz // self.xccs * xcc_id) >> 8)
+      self.wreg(self.gc.regCOMPUTE_RESTART_X, 0, 0, 0)
+      header, header_patches = bytes(self.blob[blob_start:]), [(o - blob_start, w) for o, w in self.patches[patch_start:]]
+      del self.blob[blob_start:], self.patches[patch_start:]
+      self._progs[prg] = built = (data, lib, scratch_addr, header, header_patches)
+    data, lib, scratch_addr, header, header_patches = built
     args_addr = self.kernargs(call, prg, data)
-    scratch_addr = UOp.extern((data.private_segment_size,), dtypes.uint8, self.devs[0], "scratch").getaddr(self.devs)
-
-    user_regs:list = []
-    if data.enable_private_segment_sgpr: user_regs = [scratch_addr | (1 << 63), 0xffffffff, 0x20c14000]
+    user_regs:list = [scratch_addr | (1 << 63), 0xffffffff, 0x20c14000] if data.enable_private_segment_sgpr else []
     if data.enable_dispatch_ptr: user_regs += [args_addr + data.kernargs_segment_size]
     user_regs += [args_addr]
 
-    dispatch_init = self.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(
-      **({'cs_w32_en': int(data.wave32)} if self.gc.version[0] != 9 else {}), force_start_at_000=1, compute_shader_en=1)
     if data.private_segment_size: self.exec_barrier() # kernels share the scratch ring, each with its own TMPRING wave size
-    self.acquire_mem(gli=0, gl2=0)
+    self.blob += self._acq_exec
     if self.pmc or self.sqtt: slot = self.prof_start(prg.arg, lib)
-    self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
-    self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
-    self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
-    self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, waves=waves_for(self.devs[0]), wavesize=scratch_wavesize(self.devs[0], data.private_segment_size))
-    for xcc_id in range(self.xccs): # architected flat scratch: each xcc gets its part
-      with self.pred_exec(xcc_mask=1 << xcc_id):
-        self.wreg(self.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, (scratch_addr + data.private_segment_size // self.xccs * xcc_id) >> 8)
-    self.wreg(self.gc.regCOMPUTE_RESTART_X, 0, 0, 0)
+    base = len(self.blob)
+    self.blob += header
+    self.patches += [(base + o, w) for o, w in header_patches]
     self.wreg(self.gc.regCOMPUTE_USER_DATA_0, *user_regs)
-    self.wreg(self.gc.regCOMPUTE_RESOURCE_LIMITS, self.gc.regCOMPUTE_RESOURCE_LIMITS.encode(waves_per_sh=getenv("WAVES_PER_SH")))
+    self.blob += self._res_limits
     global_size, local_size = prg.arg.launch_dims(call)
     self.wreg(self.gc.regCOMPUTE_START_X, 0, 0, 0, *local_size, 0, 0)
-    self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *global_size, dispatch_init)
+    self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *global_size, self._dispatch_init[data.wave32])
     if self.sqtt: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
     if self.pmc or self.sqtt: self.prof_stop(slot)
 
@@ -548,6 +562,8 @@ def amd_build_program(prg:UOp, devs:tuple[str, ...]) -> tuple[AMDProgramData, UO
   data, image = _amd_program_image(devs[0], prg.src[3].arg)
   return data, patch(make_program(prg, len(image), devs[0]), [], image)
 
+# bounded cache: avoids re-parsing ELF images per launch while capping pinned binary bytes in RAM
+@functools.lru_cache(maxsize=1024)
 def _amd_program_image(dev:str, lib:bytes) -> tuple[AMDProgramData, bytes]:
   image, sections, relocs = elf_loader(lib)
   rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")

@@ -4,7 +4,7 @@ import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import prod, dedup, VIZ, MAX_KERNEL_BUFFERS, SPEC, get_single_element
+from tinygrad.helpers import prod, dedup, VIZ, MAX_KERNEL_BUFFERS, SPEC, get_single_element, to_tuple
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.indexing import run_rangeify, BufferizeOpts, apply_movement_op
 from tinygrad.codegen.prepare import pm_mops
@@ -174,8 +174,8 @@ def fix_store_hazard(ctx:LimitBufsContext, dst:UOp, src:UOp):
   loads = [u for u in src.toposort(gate=lambda u: u.op not in {Ops.STAGE, Ops.AFTER}) if u.op is Ops.INDEX and u.buf_uop is dst.buf_uop]
   if any(u.src[1].get_idx() is not dst.src[1].get_idx() for u in loads): return dst.store(stage(ctx, src))
 
-pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), _limit_bufs),
-  (UPat(Ops.INDEX, name="dst").store(UPat.var("src")), fix_store_hazard)])
+pm_fix_store_hazard = PatternMatcher([(UPat(Ops.INDEX, name="dst").store(UPat.var("src")), fix_store_hazard)])
+pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), _limit_bufs)])+pm_fix_store_hazard
 
 # *****************
 # 4. put in buffers for bufferize
@@ -303,10 +303,9 @@ def split_store(x:UOp) -> UOp|None:
   ret = graph_rewrite(ret, pm_renumber_range, ctx={a:i for i,a in enumerate(lctx.ranges)}, walk=True)
 
   # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
-  kernel = ret.sink(arg=KernelInfo()).call(*lctx.map.values())
   # the scalars it reads (also in the symbolic shapes of its storage) and its device number are args after the storage
-  return kernel.lift_args([u for u in kernel.body.toposort() if (u.op in {Ops.PARAM, Ops.EXTERN} and u.addrspace is AddrSpace.ALU) or
-                           (u.op is Ops.RANGE and u.axis_type is AxisType.DEVICE)])
+  free = [u for u in ret.toposort() if u.op in {Ops.PARAM, Ops.EXTERN} and u.addrspace is AddrSpace.ALU and not (u.is_variable and u.arg.slot == -1)]
+  return ret.sink(arg=KernelInfo()).call(*lctx.map.values()).lift_args(free)
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
@@ -321,13 +320,18 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   tsink = graph_rewrite(tsink,
                         symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize,
                         name="symbolic+reduce_collapse+debuf")
-  next_range = max((x.axis_id[0] for x in tsink.toposort() if x.op is Ops.RANGE), default=-1) + 1
-  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=LimitBufsContext(range_idx=itertools.count(next_range)), name="limit buffers")
+  topo = tsink.toposort()
+  limit = bool(MAX_KERNEL_BUFFERS) or any(u.op in GroupOp.Defines and u.device is not None
+    and any(d.split(":")[0] in DEVICE_MAX_BUFS for d in to_tuple(u.device)) for u in topo)
+  if limit or any(u.op is Ops.STORE and u.src[0].op is Ops.INDEX for u in topo):
+    next_range = max((x.axis_id[0] for x in topo if x.op is Ops.RANGE), default=-1) + 1
+    tsink = graph_rewrite(tsink, pm_limit_bufs if limit else pm_fix_store_hazard,
+                          ctx=LimitBufsContext(range_idx=itertools.count(next_range)), name="limit buffers")
+    topo = tsink.toposort()
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
   # bufferize -> store
-  slots = [x.arg.slot for x in tsink.toposort() if x.op is Ops.ALLOC]
-  paramarg_start: int = max([-1]+slots) + 1
+  paramarg_start: int = max([-1]+[x.arg.slot for x in topo if x.op is Ops.ALLOC]) + 1
   tsink = graph_rewrite(tsink, pm_add_buffers, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")
   tsink = graph_rewrite(tsink, pm_no_indexing_calls, name="remove indexing from call args")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")

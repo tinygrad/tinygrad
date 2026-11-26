@@ -26,8 +26,12 @@ def call_gradient(grads:dict[UOp, UOp], k:UOp, needed:set[int]) -> tuple[UOp|Non
   if k.arg.grad_fxn is not None:
     real = [g.clone(device=args[i].device) if g.device is None else g
             for i,g in out_grads.items()]
-    git = iter(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
-    return (None,) + tuple(None if i in outputs else next(git) for i in range(len(args)))
+    ret_grads = tuple(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
+    non_out = [i for i in range(len(args)) if i not in outputs]
+    assert len(ret_grads) <= len(non_out) and all(args[i].is_variable for i in non_out[len(ret_grads):]), \
+      f"grad_fxn returned {len(ret_grads)} gradients, expected {len(non_out)}"
+    git = iter(ret_grads)
+    return (None,) + tuple(None if i in outputs else next(git, None) for i in range(len(args)))
   assert outputs, f"expected a CALL with output STOREs or a grad_fxn, got {fxn.op}"
   params = {p.arg.slot:p for p in fxn.toposort() if p.op is Ops.PARAM and p.arg.slot in needed}
   grad_slots = [i for i in outputs if i in out_grads]
