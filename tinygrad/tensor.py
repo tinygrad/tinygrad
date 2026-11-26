@@ -6,7 +6,7 @@ from typing import Callable, cast, ParamSpec, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, PROFILE, TracingKey, is_numpy_ndarray, prod, canonicalize_device_name, VALIDATE_WITH_CPU
-from tinygrad.helpers import Context, cpu_profile, suppress_finalizing, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device, to_tuple
+from tinygrad.helpers import Context, cpu_profile, disable_gc, VIZ, CAPTURING, is_disk_device, canonicalize_device, to_tuple
 from tinygrad.uop.ops import UOp, Ops, Variable, ConstLike, PatternMatcher, UPat, GroupOp, graph_rewrite, rewrite_group, pm_drop_after
 from tinygrad.uop.ops import KernelInfo, AxisType
 from tinygrad.mixin import Mixin
@@ -129,10 +129,7 @@ class Tensor(Mixin):
     if _dtype is not None: self.uop = self.uop.cast(_dtype)
 
     # add to all_tensors after construction succeeds
-    all_tensors[weakref.ref(self)] = None
-
-  @suppress_finalizing
-  def __del__(self): all_tensors.pop(weakref.ref(self), None)
+    all_tensors[weakref.ref(self, all_tensors.pop)] = None
 
   def _apply_uop(self, new_uop:UOp) -> Tensor:
     if new_uop is self.uop: return self
@@ -140,7 +137,7 @@ class Tensor(Mixin):
     ret = Tensor.__new__(Tensor)
     ret.uop, ret.grad, ret.is_param = new_uop, None, True
     # add to all_tensors after construction succeeds
-    all_tensors[weakref.ref(ret)] = None
+    all_tensors[weakref.ref(ret, all_tensors.pop)] = None
     return ret
 
   # alu, _uop, _wrap_uop and const are used by the mixins
