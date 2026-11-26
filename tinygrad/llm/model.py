@@ -85,6 +85,7 @@ class Linear(nn.Linear):
   packed:Tensor|None = None
   use_custom_quant = True
   shard_axis:int|None = None
+  scale:Tensor|None = None
   weight_scale_inv:Tensor|None = None
   weight_block_size:tuple[int, int] = (128, 128)
   def __init__(self, in_features:int, out_features:int, bias=True, groups:int=1):
@@ -145,6 +146,10 @@ class Linear(nn.Linear):
     return (out if self.bias is None else out + _unview_float(self.bias).float()).cast(out_dt).reshape(*x.shape[:-1], self.out_features)
 
   def __call__(self, x:Tensor) -> Tensor:
+    out = self._forward(x)
+    return out if self.scale is None else out * self.scale
+
+  def _forward(self, x:Tensor) -> Tensor:
     if self.weight_scale_inv is not None:
       out = fp8_matmul(x, self.weight, self.weight_scale_inv, self.weight_block_size)
       return out + self.bias if self.bias is not None else out
@@ -1145,13 +1150,14 @@ class Transformer:
         'ssm_conv1d_v.weight', 'ssm_dt.bias', 'ssm_a', 'ssm_beta.weight', 'ssm_f_b.weight', 'ssm_g.weight', 'ssm_g_b.weight', 'attn_gate.weight')})
       shard_map = {name: rules[k] for name in entries if (k:=re.sub(r"^blk\.\d+\.", "", name)) in rules}
     devices = tuple(Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(shard))
-    ep = any(shape[-1] % (shard*_GGML_QUANT.get(typ, (1,))[0]) for k,(_,shape,typ) in entries.items() if 'ffn_down_exps.' in k)
+    ep = any(shape[-1] % (shard*_GGML_QUANT.get(typ, (1,))[0]) for k,(_,shape,typ) in entries.items() if k.endswith('ffn_down_exps.weight'))
     ep_axis = 0 if _amd_target(devices) is not None else None
     state_dict = gguf_shard(entries, devices, {k: v for k, v in ((k, ep_axis if ep and '_exps.' in k else v) for k, v in shard_map.items())
                                                if v is not None}, repeats)
 
     # all float state items should be float16, not float32
-    state_dict = {k:v.cast('float16') if getenv("HALF", 1) and dtypes.is_float(v.dtype) else v for k,v in state_dict.items()}
+    state_dict = {k:v.cast('float16') if getenv("HALF", 1) and dtypes.is_float(v.dtype) and not k.endswith('.scale') else v
+                  for k,v in state_dict.items()}
 
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
@@ -1272,7 +1278,9 @@ class Transformer:
       o_lora_rank=kv.get(f'{arch}.attention.output_lora_rank', 0), hash_layers=kv.get(f'{arch}.hash_layer_count', 0))
     model = Transformer(config)
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
+    scales = {k.removesuffix('.scale'): state_dict.pop(k) for k in list(state_dict) if k.endswith('.scale')}
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
+    for k, v in scales.items(): get_child(model, k).scale = v
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
