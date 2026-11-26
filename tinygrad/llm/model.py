@@ -162,9 +162,10 @@ class ExpertWeights:
   scale:Tensor|None = None
   weight_scale_inv:Tensor|None = None
   weight_block_size:tuple[int, int] = (128, 128)
-  def __init__(self, num_experts:int, in_features:int, out_features:int, bias:bool=False):
+  def __init__(self, num_experts:int, in_features:int, out_features:int, bias:bool=False, scale:bool=False):
     self.in_features, self.weight = in_features, Tensor.zeros(num_experts, out_features, in_features)
     if bias: self.bias = Tensor.zeros(num_experts, out_features)
+    if scale: self.scale = Tensor.ones(num_experts)  # NVFP4 per expert tensor scale
   def set_quantized(self):
     if (found:=find_packed(self.weight, self.in_features)) is not None: self.ggml_type, self.packed = found
   def _custom_moe(self, sel:Tensor, x:Tensor, target:tuple[int, ...]) -> Tensor|None:
@@ -403,6 +404,8 @@ class TransformerConfig:
   qkv_bias: bool = False
   expert_bias: bool = False
   expert_proj_bias: bool = False
+  expert_scale: bool = False
+  expert_scale_layers: tuple[bool, ...] = ()
   swiglu_alpha: float = 1.0
   swiglu_limit: float|None = None
   swiglu_up_bias: float = 0.0
@@ -525,9 +528,9 @@ class FFNBlock:
       if config.expert_bias: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
       if config.expert_hash: self.ffn_gate_tid2eid = {"weight": Tensor.zeros(config.vocab_size, config.num_experts_per_tok, dtype=dtypes.int32)}
       expert_dim = config.expert_latent_dim or config.dim
-      self.ffn_gate_exps = ExpertWeights(config.num_experts, expert_dim, config.hidden_dim, bias=config.expert_proj_bias)
-      self.ffn_up_exps = ExpertWeights(config.num_experts, expert_dim, config.hidden_dim, bias=config.expert_proj_bias)
-      self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, expert_dim, bias=config.expert_proj_bias)
+      self.ffn_gate_exps = ExpertWeights(config.num_experts, expert_dim, config.hidden_dim, bias=config.expert_proj_bias, scale=config.expert_scale)
+      self.ffn_up_exps = ExpertWeights(config.num_experts, expert_dim, config.hidden_dim, bias=config.expert_proj_bias, scale=config.expert_scale)
+      self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, expert_dim, bias=config.expert_proj_bias, scale=config.expert_scale)
       if config.shared_expert_dim > 0:
         self.ffn_gate_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
         self.ffn_up_shexp = Linear(config.dim, config.shared_expert_dim, bias=False)
@@ -1086,6 +1089,7 @@ class Transformer:
       if config.ple: c = replace(c, ple=config.ple.layer(i))
       if (cand:=config.indexer_candidates) is not None and i == cand.source_layer: c = replace(c, indexer=replace(unwrap(c.indexer), candidates=cand))
       if i < config.hash_layers: c = replace(c, expert_hash=True, expert_bias=False)
+      if config.expert_scale_layers: c = replace(c, expert_scale=config.expert_scale_layers[i])
       if config.compress_ratios:
         self.blk.append(blk:=CompressedAttentionBlock(c, config.compress_ratios[i], None if i in config.kv_source_layers else last_kv_source))
         if i in config.kv_source_layers: last_kv_source = blk
@@ -1261,6 +1265,7 @@ class Transformer:
       qkv_bias='blk.0.attn_q.bias' in state_dict,
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0) + kv.get(f'{arch}.hash_layer_count', 0)}.exp_probs_b.bias" in state_dict,
       expert_proj_bias='blk.0.ffn_gate_exps.bias' in state_dict, attn_output_bias='blk.0.attn_output.bias' in state_dict,
+      expert_scale_layers=tuple(f'blk.{i}.ffn_down_exps.scale' in state_dict for i in range(num_blocks)),
       swiglu_alpha=1.702 if swiglu_oai else 1.0, swiglu_limit=7.0 if swiglu_oai else kv.get(f'{arch}.swiglu_clamp_exp', [None])[0],
       swiglu_up_bias=1.0 if swiglu_oai else 0.0, attn_sinks='blk.0.attn_sinks.weight' in state_dict,
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0), sliding_window_layers=swa_layers, hc=hc, indexer=indexer,
@@ -1280,11 +1285,9 @@ class Transformer:
       o_lora_rank=kv.get(f'{arch}.attention.output_lora_rank', 0), hash_layers=kv.get(f'{arch}.hash_layer_count', 0))
     model = Transformer(config)
     for p in (nn.state.get_parameters(model) if shard > 1 else []): p.to_(devices)
-    # NVFP4 tensor scales, only the experts take them for now
-    scales = {k.removesuffix('.scale'):state_dict.pop(k) for k in list(state_dict) if k.endswith('.scale')}
-    if (bad:=[k for k in scales if not k.endswith('_exps')]): raise NotImplementedError(f"tensor scale outside the experts: {bad[0]}.scale")
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
-    for k, v in scales.items(): get_child(model, k).scale = v
+    # only the experts take NVFP4 tensor scales for now, any other is left unused
+    if (unused:=[k for k in state_dict if k.endswith('.scale')]): raise NotImplementedError(f"tensor scale outside the experts: {unused[0]}")
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
