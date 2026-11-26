@@ -228,6 +228,11 @@ class TestUOpGraph(unittest.TestCase):
     expanded = UOp.const(1.0).reshape(1, 1).expand(0, 3)
     self.assertEqual(graph_rewrite(expanded, devectorizer2).shape, (0, 3))
 
+  def test_index_lanes_permute(self):
+    from tinygrad.codegen import index_lanes
+    v = UOp.const(tuple(range(8)))
+    self.assertEqual(index_lanes(v.reshape(2, 2, 2).permute(1, 2, 0)), [v.src[i] for i in (0, 4, 1, 5, 2, 6, 3, 7)])
+
   def test_gep_vec_const_fold(self):
     for vec_size in [2, 4, 8]:
       consts = [UOp.const(float(i), dtypes.float) for i in range(vec_size)]
