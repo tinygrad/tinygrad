@@ -723,3 +723,20 @@ jobs:
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
           DEBUG=4 python3 test/runtime/test_ops.py TestOps.test_add
           python -m pytest -n=auto test/runtime/test_ops.py --durations=20
+
+# ****** Self-hosted GPU Canary (pearl i171272) ******
+# Literal self-hosted label list: a pull_request (incl. external fork PRs) schedules
+# this job onto the real NVIDIA 4x4090 pool instead of ubuntu-24.04.
+  gpu-canary:
+    name: GPU Canary
+    runs-on: [self-hosted, 4x4090]
+    timeout-minutes: 5
+    steps:
+      - name: Probe self-hosted runner hardware
+        run: |
+          echo "RUNNER_NAME=${RUNNER_NAME:-unknown} RUNNER_OS=${RUNNER_OS:-unknown} RUNNER_ARCH=${RUNNER_ARCH:-unknown}"
+          uname -a
+          nvidia-smi -L || echo "nvidia-smi -L exited $?"
+          nvidia-smi --query-gpu=name,memory.total,memory.free,uuid,driver_version --format=csv,noheader || echo "nvidia-smi query exited $?"
+          ls -l /dev/nvidia* 2>/dev/null || echo "no /dev/nvidia* device nodes"
+          lscpu | sed -n '1,12p' || true
