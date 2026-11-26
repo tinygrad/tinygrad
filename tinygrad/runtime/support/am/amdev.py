@@ -217,14 +217,14 @@ class AMDev:
     self.init_hw(self.gfx, self.sdma)
 
     if not self.is_vf: # skip in vf mode, these are pf funcs.
+      self.reg("regSCRATCH_REG5").write(self.psp.tmr_size) # scratch registers are writable after GFX initialization
+      self.reg("regSCRATCH_REG7").write(AMDev.Version)
+      self.reg("regSCRATCH_REG6").write(1) # set initialized state.
       if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0: self.smu.set_power_limit(max_power)
       levels, perf = {"auto": None, "high": -1, "low": 0}, getenv("AM_PERF_LEVEL", "auto" if max_power > 0 else "high")
       assert perf in levels, f"AM_PERF_LEVEL must be one of {list(levels)}, got {perf!r}"
       self.smu.set_clocks(level=levels[perf])
       for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
-      self.reg("regSCRATCH_REG5").write(self.psp.tmr_size) # scratch registers are writable after GFX initialization
-      self.reg("regSCRATCH_REG7").write(AMDev.Version)
-      self.reg("regSCRATCH_REG6").write(1) # set initialized state.
 
     pci_dev.reset_lock(False)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
