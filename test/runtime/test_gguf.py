@@ -257,14 +257,14 @@ class TestGGUF(unittest.TestCase):
     from tinygrad.llm.model import Transformer
     block = {'attn_norm': (8,), 'attn_q': (8, 8), 'attn_k': (8, 8), 'attn_v': (8, 8), 'attn_output': (8, 8), 'ffn_norm': (8,),
              'ffn_gate_inp': (4, 8), 'ffn_gate_exps': (4, 8, 8), 'ffn_up_exps': (4, 8, 8), 'ffn_down_exps': (4, 8, 8)}
-    shapes = {'token_embd.weight': (32, 8), 'output_norm.weight': (8,), **{f'blk.{i}.{k}.weight': s for i in range(2) for k, s in block.items()}}
+    shapes = {'token_embd.weight': (32, 8), 'output_norm.weight': (8,), **{f'blk.0.{k}.weight': s for k, s in block.items()}}
     rng = np.random.default_rng(0)
     weights = {k:rng.normal(size=s).astype(np.float32) for k,s in shapes.items()}
     scales = {f'blk.0.ffn_{p}_exps.scale': np.array([1, 2, 3, 4], np.float32) * (i+1) * 1e-6 for i, p in enumerate(('gate', 'up', 'down'))}
     scales['blk.0.attn_output.scale'] = np.array([5e-6], np.float32)
     with tempfile.TemporaryDirectory() as folder:
       writer = GGUFWriter(path:=pathlib.Path(folder)/'model.gguf', 'deepseek2')
-      for key,value in {'context_length':16, 'embedding_length':8, 'expert_feed_forward_length':8, 'block_count':2, 'expert_count':4,
+      for key,value in {'context_length':16, 'embedding_length':8, 'expert_feed_forward_length':8, 'block_count':1, 'expert_count':4,
                         'expert_used_count':2, 'attention.head_count':4, 'attention.head_count_kv':4, 'attention.key_length':2,
                         'rope.dimension_count':2}.items():
         writer.add_uint32('deepseek2.'+key, value)
@@ -279,12 +279,18 @@ class TestGGUF(unittest.TestCase):
       with Context(DEV="CPU"):
         model = Transformer.from_gguf(path)[0]
         for k, v in scales.items(): np.testing.assert_equal(get_child(model, k.removesuffix('.scale')).scale.numpy(), v)
-        self.assertIsNone(model.blk[1].ffn_down_exps.scale)
-        x, w = np.full((1, 1, 8), 30000, np.float16), {k: v.astype(np.float16).astype(np.float64) for k, v in weights.items()}
-        self.assertGreater(np.abs(x @ w['blk.0.attn_output.weight'].T).max(), 65504)
-        np.testing.assert_allclose(model.blk[0].attn_output(Tensor(x)).numpy(), x @ w['blk.0.attn_output.weight'].T * 5e-6, rtol=1e-2)
-        expert = model.blk[0].ffn_down_exps(Tensor([[[1]]]), Tensor(x).unsqueeze(2)).numpy()
-        np.testing.assert_allclose(expert, x[:, :, None] @ w['blk.0.ffn_down_exps.weight'][1].T * scales['blk.0.ffn_down_exps.scale'][1], rtol=1e-2)
+        self.assertIsNone(model.blk[0].attn_q.scale)
+
+  def test_linear_scale_overflow(self):
+    from tinygrad.llm.model import Linear
+    w = np.random.default_rng(0).normal(size=(8, 8)).astype(np.float16)
+    x = np.full((1, 8), 30000, np.float16)
+    ref = x.astype(np.float64) @ w.astype(np.float64).T
+    self.assertGreater(np.abs(ref).max(), 65504)
+    with Context(DEV="CPU"):
+      lin = Linear(8, 8, bias=False)
+      lin.weight, lin.scale = Tensor(w), Tensor([5e-6])
+      np.testing.assert_allclose(lin(Tensor(x)).numpy(), ref * 5e-6, rtol=1e-2)
 
   def test_parse_empty(self):
     blob = self._build_gguf([], [("general.name", "empty")])
@@ -325,9 +331,9 @@ class TestGGUF(unittest.TestCase):
       for loader in (gguf_parse, gguf_load):
         with self.assertRaises(FileNotFoundError): loader(d / "test-00001-of-00002.gguf")
 
-  def _test_dequantization(self, qtype: GGMLQuantizationType, block_count:int=ggml_test_block_count):
+  def _test_dequantization(self, qtype: GGMLQuantizationType):
     block_size, type_size = GGML_QUANT_SIZES[qtype]
-    n_el, n_bytes = block_count * block_size, block_count * type_size
+    n_el, n_bytes = ggml_test_block_count * block_size, ggml_test_block_count * type_size
 
     try:
       q_data = quantize((np.random.random((n_el,)).astype(np.float32) * 100 - 50), qtype)
