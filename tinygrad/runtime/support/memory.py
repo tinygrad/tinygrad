@@ -243,7 +243,7 @@ class MemoryManager:
 
     # Alloc physical memory and map it to the virtual address
     size = round_up(size, 0x1000)
-    if contiguous: paddrs = [(self.palloc(size, zero=True), size)]
+    if contiguous: paddrs = [(self.palloc(size, zero=zero), size)]
     else:
       # Try to allocate the longest segment to reduce TLB pressure.
       nxt_range, rem_size, paddrs = 0, size, []
