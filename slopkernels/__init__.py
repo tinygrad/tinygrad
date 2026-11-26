@@ -36,7 +36,7 @@ def _b_gemv(wdt:str, xdt:str) -> UOp:
   return UOp(Ops.WHERE, src=((tok > 1) & (tok <= 8) & (inf % 1024).eq(0) & (outf >= 1024) & (outf % 8).eq(0), k_lds, k_base))
 
 def _b_qgemv(qt:int, xdt:str) -> UOp:
-  tok, inf, outf, rl, gr = _t("tokens"), _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 30), _t("group_rows", 0)
+  tok, inf, outf, rl, gr = _t("tokens"), _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 40), _t("group_rows", 0)
   gl = (_p(3, (_DIRECT_GRID_LENS[qt],), "u32"),) if qt in _DIRECT_GRID_LENS else ()
   p_out, p_raw, p_x = _p(0, (tok, outf), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (tok, inf), xdt)
   t_eff = (gr > 0).where(gr, tok)
@@ -47,7 +47,7 @@ def _b_qgemv(qt:int, xdt:str) -> UOp:
   return UOp(Ops.WHERE, src=((rl % 4).eq(0), mk(True), mk(False))) if qt == _gguf.MXFP4 else mk(True)
 
 def _b_moe(qt:int, xdt:str) -> UOp:
-  inf, outf, rl = _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 30)
+  inf, outf, rl = _t("in_features", 32), _t("out_features"), _t("raw_len", 1, 1 << 40)
   rows, xrows, xs, nd = _t("rows"), _t("x_rows"), _t("x_share", 1, 1024), _t("ndev", 1, 64)
   gl = (_p(4, (_DIRECT_GRID_LENS[qt],), "u32"),) if qt in _DIRECT_GRID_LENS else ()
   p_out, p_raw, p_x, p_sel = _p(0, (rows, outf), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (xrows, inf), xdt), _p(3, (rows,), "i32")
@@ -65,7 +65,7 @@ def _b_moe(qt:int, xdt:str) -> UOp:
   return UOp(Ops.WHERE, src=((rl % 4).eq(0), mk(True), mk(False))) if qt == _gguf.MXFP4 else mk(True)
 
 def _b_gemm(qt:int, kg:int, ln:int) -> UOp:
-  mb, mt, inf, outf, rl = _t("m_blks"), _t("m_tiles", 1, 8), _t("in_features", 32), _t("out_features", 16), _t("raw_len", 1, 1 << 30)
+  mb, mt, inf, outf, rl = _t("m_blks"), _t("m_tiles", 1, 8), _t("in_features", 32), _t("out_features", 16), _t("raw_len", 1, 1 << 40)
   tok = mb * (mt * 16)
   p_out, p_raw, p_x = _p(0, (tok, outf), "f32"), _p(1, (rl,), _wdt(qt)), _p(2, (tok, inf), "f16")
   tbl_map = _R3_WMMA_TBL_LENS if kg == 1 else _WMMA_TBL_LENS
