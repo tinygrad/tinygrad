@@ -116,7 +116,7 @@ A value \op{Call} is void: its \op{Sink} body stores to output \op{Param}s bound
 \midrule
 \op{Load} & (buf, alt?, gate?) & --- & Read from buffer into AddrSpace.ALU. \\
 \op{Copy} & (buf,) & device & Copy buf to device arg. \\
-\op{Stage} & $(T, r_0, r_1, \ldots)$ & \texttt{BufferizeOpts?} & Materialize $T$ into storage. \\
+\op{Stage} & $(T, r_0, r_1, \ldots)$ & \texttt{StageOpts?} & Materialize $T$ into storage. \\
   & & & Ranges become leading dimensions. \\
 \bottomrule
 \end{tabular}

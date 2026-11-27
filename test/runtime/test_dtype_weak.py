@@ -78,7 +78,7 @@ class TestWeakPromotion(unittest.TestCase):
 class TestWeakBounds(unittest.TestCase):
   def test_bounds_survive_movement(self):
     moved = Tensor(5).reshape(1).expand(2).pad((1, 1)).detach().contiguous_backward()
-    self.assertEqual((moved.uop.vmin, moved.uop.vmax, moved.uop.bufferize().vmax), (0, 5, 5))
+    self.assertEqual((moved.uop.vmin, moved.uop.vmax, moved.uop.stage().vmax), (0, 5, 5))
     self.assertEqual(moved.numpy().dtype, Tensor(5).numpy().dtype)   # a moved weak int reads at the same dtype as the bare one
 
   def test_wide_src_keeps_its_width(self):

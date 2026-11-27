@@ -48,6 +48,13 @@ class ParamArg:
     if self.buffer is not None:
       args.append(f"buffer=UOp.new_buffer({self.device!r}, {self.buffer.nbytes // self.dtype.itemsize}, {self.dtype!r}, {self.slot}).buffer")
     return f"ParamArg({', '.join(args)})"
+
+@dataclass(frozen=True)
+class StageOpts:
+  device: str|tuple[str, ...]|None
+  addrspace: AddrSpace = AddrSpace.GLOBAL
+  removable: bool = True
+
 axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.WEAK: "L",
                 AxisType.LOOP: "L", AxisType.UPCAST: "u"}
 axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN",
@@ -635,7 +642,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   def reduce(self, *src:UOp, arg=None, **kwargs):
     return UOp(Ops.REDUCE, src=(self,)+src, arg=(arg, 0) if isinstance(arg, Ops) else arg, **kwargs)
 
-  def bufferize(self, *args, **kwargs): return UOp(Ops.STAGE, src=(self,)+args, **kwargs)
+  def stage(self, *args, **kwargs): return UOp(Ops.STAGE, src=(self,)+args, **kwargs)
   def allreduce(self, op, device:str|tuple[str, ...]):
     assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
     return UOp(Ops.ALLREDUCE, src=(self,), arg=(op, device))

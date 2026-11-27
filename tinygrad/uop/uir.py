@@ -12,7 +12,7 @@ a value is a literal, a bare word, a 'string', a [list], a %id, or a `python obj
 hash-consed, when every python object's repr evaluates back to it. runtime objects aren't rendered: a BUFFER's Buffer and a CALL's grad_fxn.
 parse_uir also reads studentgrad's hand-written UIR: %names, nested (op ...), [stacks] of expressions and {scoped blocks}.
 """
-import re, math, ast, functools, importlib
+import re, math, ast, importlib
 from collections import deque
 from enum import Enum
 from dataclasses import fields
@@ -20,7 +20,7 @@ from typing import Any, Callable
 from tinygrad import dtype
 from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid
 from tinygrad.uop import Ops, GroupOp, ops
-from tinygrad.uop.ops import UOp, KernelInfo, CallInfo, NativeInfo, ProgramInfo, ParamArg, AxisType
+from tinygrad.uop.ops import UOp, KernelInfo, CallInfo, NativeInfo, ProgramInfo, ParamArg, AxisType, StageOpts
 from tinygrad.helpers import colored, ansistrip, Target
 
 # ***** render *****
@@ -44,11 +44,8 @@ _arg_key = {Ops.CAST:"dtype", Ops.BITCAST:"dtype", Ops.COPY:"device", Ops.GETADD
             Ops.MSELECT:"index"}
 _skip_fields = {"buffer", "grad_fxn"}   # runtime objects
 
-@functools.cache
-def _struct_args() -> dict[Ops, type]:
-  from tinygrad.codegen.indexing import BufferizeOpts  # codegen imports this
-  return {Ops.PARAM: ParamArg, Ops.REFPARAM: ParamArg, Ops.BUFFER: ParamArg, Ops.ALLOC: ParamArg, Ops.EXTERN: ParamArg, Ops.SINK: KernelInfo,
-          Ops.CALL: CallInfo, Ops.NATIVE: NativeInfo, Ops.STAGE: BufferizeOpts, Ops.PROGRAM: ProgramInfo}
+_struct_args: dict[Ops, type] = {Ops.PARAM: ParamArg, Ops.REFPARAM: ParamArg, Ops.BUFFER: ParamArg, Ops.ALLOC: ParamArg, Ops.EXTERN: ParamArg,
+                                 Ops.SINK: KernelInfo, Ops.CALL: CallInfo, Ops.NATIVE: NativeInfo, Ops.STAGE: StageOpts, Ops.PROGRAM: ProgramInfo}
 
 def _inline(u:UOp) -> bool: return u.op is Ops.CONST or (u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src))
 
@@ -87,7 +84,7 @@ def _render_arg(x:UOp, ref:Callable[[UOp], str|None]=lambda _: None) -> str:
     return f"slot={_val(slot, False, ref)}" + ("" if a[0] is AxisType.LOOP else f" axis={a[0].name}")
   if x.op is Ops.REDUCE: return f"op={a[0].name.lower()}" + (f" pop={a[1]}" if a[1] else "")
   if x.op is Ops.ALLREDUCE: return f"op={a[0].name.lower()} device={_val(a[1], False, ref)}"
-  if type(a) is _struct_args().get(x.op):
+  if type(a) is _struct_args.get(x.op):
     # the first field is always written, so a default arg isn't None. a CALL's arg is always a CallInfo
     return _fields_str(a, ref, first=x.op is not Ops.CALL)
   key = _arg_key.get(x.op, "arg")
@@ -140,7 +137,7 @@ _tuple_keys = {Ops.RANGE: {"slot", "axis"}, Ops.REDUCE: {"op", "pop"}, Ops.ALLRE
 def _build(name:str, srcs:tuple[UOp, ...], kv:dict[str, Any]) -> UOp:
   """make the UOp for `name srcs key=value`. any op's arg can be a lone arg="""
   if (op:=_ops.get(name)) is None: raise ValueError(f"unknown op {name!r}")
-  struct = _struct_args().get(op)
+  struct = _struct_args.get(op)
   keys = _tuple_keys.get(op) or ({f.name for f in fields(struct)} if struct else {_arg_key.get(op, "arg")})
   if set(kv) - keys and set(kv) != {"arg"}: raise ValueError(f"{name} has no {sorted(set(kv) - keys)}, its args are {sorted(keys)}")
   if "target" in kv: kv["target"] = Target.parse(kv["target"])   # a Target is written as its string

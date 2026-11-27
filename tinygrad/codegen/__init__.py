@@ -6,7 +6,7 @@ from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, 
 from tinygrad.helpers import all_same, argsort, partition, to_function_name, dedup, all_int, diskcache_get, diskcache_put, colored, NO_MEMORY_PLANNER
 from tinygrad.helpers import strides_for_shape
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, MapCtx, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
-from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear
+from tinygrad.uop.ops import UOpMetaClass, gate_kernel_sink, identity_element, _broadcast_shape, pm_resolve_params, pm_flatten_linear, StageOpts
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.uir import render_uir
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
@@ -30,7 +30,7 @@ from tinygrad.codegen.indexing import _stack_select
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import indexing_simplify, memory_coalescing, pm_simplify_add_image
-from tinygrad.codegen.rangeify import BufferizeOpts, get_kernel_graph
+from tinygrad.codegen.rangeify import get_kernel_graph
 from tinygrad.codegen.memory import memory_plan_rewrite
 
 def do_number_param(ctx:tuple[int, dict[str, int]], x:UOp): # after the params, one slot per name
@@ -159,7 +159,7 @@ def fix_group_for_reduce(x:UOp):
   # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
   reduce_weak = [x.replace(arg=(AxisType.WEAK, x.axis_id[0]+100, *x.axis_id[1:])) for x in reduce_gfr]
-  buf = ret.bufferize(*reduce_gfr, arg=BufferizeOpts(None, AddrSpace.LOCAL)).index(*reduce_weak)
+  buf = ret.stage(*reduce_gfr, arg=StageOpts(None, AddrSpace.LOCAL)).index(*reduce_weak)
 
   # do the final reduce (if/barrier are added in gpudims step)
   # NOTE: we remove all horizontal reduces here, they remain in the first reduce

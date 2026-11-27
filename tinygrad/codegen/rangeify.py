@@ -3,10 +3,11 @@ from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
+from tinygrad.uop.ops import StageOpts
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, dedup, VIZ, MAX_KERNEL_BUFFERS, SPEC, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
-from tinygrad.codegen.indexing import run_rangeify, BufferizeOpts, apply_movement_op
+from tinygrad.codegen.indexing import run_rangeify, apply_movement_op
 from tinygrad.codegen.prepare import pm_mops
 
 # creation can recurse a lot
@@ -41,16 +42,16 @@ def gate_substitute(ctx, b:UOp) -> None:
 pm_gate_substitute = PatternMatcher([(UPat(GroupOp.All, name="b"), gate_substitute)], compiled=False)
 # if a buffer is being stored just for permutes or something, remove it
 # we want to reexpress the indexes of idx2 in terms of the implied b1
-def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
+def remove_stage(src:UOp, buf:UOp, idx:UOp):
   # see if we can't do it, should this ever hit?
-  assert len(buf.src) == len(idx.src), f"index on wrong bufferize, {len(buf.src)} != {len(idx.src)}"
+  assert len(buf.src) == len(idx.src), f"index on wrong STAGE, {len(buf.src)} != {len(idx.src)}"
   assert all(x.op in {Ops.RANGE, Ops.CONST} for x in buf.src[1:])
 
   # if it's user contiguous, we never remove it
   if not buf.arg.removable: return None
 
   # *** here is where we compute the cost ***
-  # if we return None, the bufferize is kept
+  # if we return None, the STAGE is kept
 
   accessed_buffers: list[UOp] = []
   reduces: list[UOp] = []
@@ -86,13 +87,13 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   if buffer_in_reduce:
     return None
 
-  # if it makes it here, the bufferize is removed
+  # if it makes it here, the STAGE is removed
   # this is the ranges replaced
   # NOTE: if buf src is a const, we don't replace it. if idx is Invalid (dead load), don't replace it either
   replaced = {k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST and not (v.op is Ops.CONST and v.val is Invalid)}
   return src.substitute(replaced, extra_pm=pm_gate_substitute)
 
-def remove_noop_bufferize(idx,b2):
+def remove_noop_stage(idx,b2):
   if idx.src[1:] != b2.src[1:]: return None
   return idx.src[0].shrink(tuple((0, s) for s in b2.shape))
 
@@ -106,7 +107,7 @@ def after_all_invalid(after:UOp):
 pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
-  (UPat(Ops.INDEX, name="idx").f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_bufferize),
+  (UPat(Ops.INDEX, name="idx").f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_stage),
   # no buffers for a const, in either spelling
   (UPat.cvar('c').or_casted().f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.val)),
   # indexing a const is the const
@@ -116,9 +117,9 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
 ])
 
-pm_remove_bufferize = PatternMatcher([
+pm_remove_stage = PatternMatcher([
   # remove reindexing with cost function
-  (UPat.var("src").f(Ops.STAGE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
+  (UPat.var("src").f(Ops.STAGE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_stage),
   # STORE to self is NOOP
   (UPat.var("x").store(UPat.var("x")), lambda x: UOp(Ops.NOOP)),
 ])
@@ -151,10 +152,10 @@ class LimitBufsContext:
   buf_cache: dict[UOp, frozenset[UOp]] = field(default_factory=dict)
   range_idx: itertools.count = field(default_factory=itertools.count)
 
-def stage(ctx:LimitBufsContext, s:UOp) -> UOp:
-  # Insert bufferize: use fresh WEAK ranges, while the DEVICE range stays a launched axis
+def insert_stage(ctx:LimitBufsContext, s:UOp) -> UOp:
+  # Insert STAGE: use fresh WEAK ranges, while the DEVICE range stays a launched axis
   end_ranges = [x.replace(arg=(AxisType.WEAK, next(ctx.range_idx))) if x.axis_type is not AxisType.DEVICE else x for x in s.ranges]
-  return s.substitute(dict(zip(s.ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*s.ranges)
+  return s.substitute(dict(zip(s.ranges, end_ranges))).stage(*end_ranges, arg=StageOpts(device=s.device)).index(*s.ranges)
 
 def _limit_bufs(ctx:LimitBufsContext, root:UOp):
   if (device:=root.device) is None: return None # no device, index related calculations
@@ -168,24 +169,24 @@ def _limit_bufs(ctx:LimitBufsContext, root:UOp):
   bufs = root.topovisit(visitor, ctx.buf_cache)
 
   if len(bufs) > MAX_BUFS - 1: # NOTE: this -1 is for the output buffer
-    return root.replace(src=tuple(stage(ctx, s) if s.op in GroupOp.Elementwise and s.device is not None else s for s in root.src))
+    return root.replace(src=tuple(insert_stage(ctx, s) if s.op in GroupOp.Elementwise and s.device is not None else s for s in root.src))
 
 def fix_store_hazard(ctx:LimitBufsContext, dst:UOp, src:UOp):
   loads = [u for u in src.toposort(gate=lambda u: u.op not in {Ops.STAGE, Ops.AFTER}) if u.op is Ops.INDEX and u.buf_uop is dst.buf_uop]
-  if any(u.src[1].get_idx() is not dst.src[1].get_idx() for u in loads): return dst.store(stage(ctx, src))
+  if any(u.src[1].get_idx() is not dst.src[1].get_idx() for u in loads): return dst.store(insert_stage(ctx, src))
 
 pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), _limit_bufs),
   (UPat(Ops.INDEX, name="dst").store(UPat.var("src")), fix_store_hazard)])
 
 # *****************
-# 4. put in buffers for bufferize
-# TODO: should BUFFERIZE look a lot more like STORE
-# BUFFERIZE has device in arg
-# BUFFERIZE doesn't have indexing, that's implied by the ranges it closes
-# BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
+# 4. put in buffers for STAGE
+# TODO: should STAGE look a lot more like STORE
+# STAGE has device in arg
+# STAGE doesn't have indexing, that's implied by the ranges it closes
+# STAGE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
 
-def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
+def stage_to_store(ctx:itertools.count, x:UOp, idx:UOp):
   size = prod(x.shape)
   dtype = x.commit_dtype()  # a BUFFER is never weak: store at the committed dtype, the .cast(x.dtype) on the result keeps readers unchanged
   # the store ends the loops it is in, the DEVICE range is launched per device
@@ -196,7 +197,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
   if (after:=x.src[0]).op is Ops.AFTER:
     buf = after.src[0].buf_uop.base
     if not (stores := [s for s in after.src[1:] if s.op is Ops.STORE and s.src[0].op is Ops.INDEX]): return buf
-    # BUFFERIZE(INDEX(...)); store through the underlying global index instead.
+    # STAGE(INDEX(...)); store through the underlying global index instead.
     ended_stores = []
     for store in stores:
       store_target = store.src[0]
@@ -212,12 +213,12 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp):
     do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
     return buf.after(do_store).cast(x.dtype)
 
-# collapse any BUFFERIZE to single input BUFFERIZE
-def flatten_bufferize(x:UOp):
+# collapse any STAGE to single input STAGE
+def flatten_stage(x:UOp):
   if len(x.src) == 2: return None
   ret = x.replace(src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:]))))
   return ret.reshape(x.shape).view_as(tuple(r.src[0] if r.op is not Ops.CONST else 1 for r in x.src[1:]))
-pm_flatten_bufferize = PatternMatcher([(UPat(Ops.STAGE, name="x"), flatten_bufferize)])
+pm_flatten_stage = PatternMatcher([(UPat(Ops.STAGE, name="x"), flatten_stage)])
 
 def is_noop_after_dep(x:UOp) -> bool:
   return (x.op is Ops.NOOP and len(x.src) == 0) or (x.op in (Ops.END, Ops.AFTER) and is_noop_after_dep(x.src[0]) and
@@ -228,8 +229,8 @@ def remove_noop_afters(x:UOp) -> UOp|None:
   if len(src) != len(x.src): return src[0] if len(src) == 1 else x.replace(src=src)
   return None
 
-pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
-  (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), bufferize_to_store),
+pm_add_buffers = pm_mops+pm_flatten_stage+PatternMatcher([
+  (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), stage_to_store),
 
   # INDEX of a buffer through the weak cast added above: index the buffer directly and cast the loaded value instead.
   # this must run in the same rewrite that adds the cast, or the expander expands the whole casted buffer into one big VECTORIZE
@@ -319,13 +320,13 @@ def get_kernel_graph(tsink:UOp) -> UOp:
 
   # cleanups for speed and runability
   tsink = graph_rewrite(tsink,
-                        symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize,
-                        name="symbolic+reduce_collapse+debuf")
+                        symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_stage,
+                        name="symbolic+reduce_collapse+remove_stage")
   next_range = max((x.axis_id[0] for x in tsink.toposort() if x.op is Ops.RANGE), default=-1) + 1
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=LimitBufsContext(range_idx=itertools.count(next_range)), name="limit buffers")
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
-  # bufferize -> store
+  # STAGE -> STORE
   slots = [x.arg.slot for x in tsink.toposort() if x.op is Ops.ALLOC]
   paramarg_start: int = max([-1]+slots) + 1
   tsink = graph_rewrite(tsink, pm_add_buffers, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")

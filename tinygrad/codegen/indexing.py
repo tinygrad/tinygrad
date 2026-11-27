@@ -1,9 +1,8 @@
 from typing import Iterator
 import functools, itertools
 from dataclasses import dataclass, field, replace
-from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
-from tinygrad.uop.ops import gate_kernel_sink
+from tinygrad.uop.ops import gate_kernel_sink, StageOpts
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, Context, SPEC
 
@@ -51,12 +50,6 @@ pm_generate_realize_map = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))), realize_store_after_src),
 ])
 
-@dataclass(frozen=True)
-class BufferizeOpts:
-  device: str|tuple[str, ...]|None
-  addrspace: AddrSpace = AddrSpace.GLOBAL
-  removable: bool = True
-
 def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
   if x.op not in GroupOp.Broadcastable|{Ops.STORE}: return rngs
   baxes, nleft = broadcast_axes(src.shape, x.shape), len(x.shape)-len(src.shape)
@@ -68,7 +61,7 @@ def data_srcs(op:Ops, src:tuple[UOp, ...]) -> tuple[UOp, ...]:
   if op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END, Ops.BACKEDGE, Ops.COPY}: return src[:1]
   return src
 
-def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
+def create_stage_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   new_srcs = []
   # shape/bound/index args that are not data src should not be indexed
   data_src_count = len(data_srcs(x.op, x.src))
@@ -85,26 +78,25 @@ def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
         del ctx.realize_map[s]
       else:
         removable = s.op not in ALWAYS_CONTIGUOUS and s not in ctx.non_removable
-        opts = BufferizeOpts(device=s.device, removable=removable)
-        new_src = UOp(Ops.STAGE, src=(new_src,)+closed_ranges, arg=opts)
+        new_src = new_src.stage(*closed_ranges, arg=StageOpts(device=s.device, removable=removable))
         if x in ctx.range_map: new_src = new_src.index(*src_rngs)
     new_srcs.append(new_src)
   return new_srcs
 
-def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
-  return x.replace(src=tuple(create_bufferize_and_index_srcs(ctx, x)))
+def create_stage_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
+  return x.replace(src=tuple(create_stage_and_index_srcs(ctx, x)))
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
   if x.op is Ops.INDEX and len(ctx.range_map[x][0]) == len(ctx.range_map[x][1]): return None
-  if (bx:=create_bufferize_and_index_based_on_ranges(ctx, x)).src[0] is x: return None
+  if (bx:=create_stage_and_index_based_on_ranges(ctx, x)).src[0] is x: return None
   valid: UOp = UOp.const(True).uprod([r.get_valid() for r in ctx.range_map[x][0]])
   return valid.where(bx.src[0], UOp.const(x.dtype.const(0)))
 
 def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   if x.arg[1] == 0: return None
   if x not in ctx.range_map: raise RuntimeError("REDUCE has no ranges in rangeify, UOp verification failed")
-  bx = create_bufferize_and_index_based_on_ranges(ctx, x)
+  bx = create_stage_and_index_based_on_ranges(ctx, x)
   # only non-singleton popped axes contribute loops alongside the REDUCE's own ranges
   new_ranges = tuple(r for r in ctx.range_map[x][0][:x.arg[1]] if r.op is Ops.RANGE)
   return UOp(Ops.REDUCE, src=(bx.src[0],)+new_ranges+bx.src[1:], arg=(x.arg[0], 0))
@@ -119,7 +111,7 @@ def convert_stack_to_where(ctx:IndexingContext, x:UOp):
   # only data STACKs: shape tuple STACKs aren't in range_map
   if x not in ctx.range_map: return None
   # use the src list directly, a transient STACK of mid-rangeify srcs violates the spec shape rule
-  srcs = create_bufferize_and_index_srcs(ctx, x)
+  srcs = create_stage_and_index_srcs(ctx, x)
   return _stack_select(ctx.range_map[x][1][0], srcs)
 
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
@@ -133,7 +125,7 @@ pm_apply_rangeify = PatternMatcher([
   # STACK -> WHERE select on the leading range
   (UPat(Ops.STACK, name="x"), convert_stack_to_where),
   # finally, apply_rangeify
-  (UPat(GroupOp.All-{Ops.STAGE, Ops.INDEX}, name="x"), create_bufferize_and_index_based_on_ranges),
+  (UPat(GroupOp.All-{Ops.STAGE, Ops.INDEX}, name="x"), create_stage_and_index_based_on_ranges),
   # remove movement op
   (UPat(GroupOp.Movement, name="x"), remove_movement_op_after_rangeify),
 ])

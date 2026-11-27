@@ -51,7 +51,7 @@ class Scheduler:
     if not self.ren.has_local: return
     red = self.reduce_ranges
     rngs = [r for s in self.ast.src if s.op is Ops.END for r in s.src[1:] if r.axis_type is AxisType.WEAK and r not in red]
-    # exclude any output ranges from global that don't appear in all BUFFERIZE
+    # exclude any output ranges from global that don't appear in all STAGE
     for x in self.ast.backward_slice:
       if x.op is Ops.STAGE:
         rngs = [r for r in rngs if r in x.ranges]
