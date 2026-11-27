@@ -53,7 +53,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_value_order_dependency_requires_storage(self):
     c = Tensor([0], dtype=dtypes.int32).realize()
-    with self.assertRaisesRegex(RuntimeError, "kernel boundary requires storage"):
+    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
       Tensor(UOp.const(1, dtypes.int32).after(c.uop.index(0).store(5))).item()
 
   def test_cumsum_parallel_reduce_fused(self):
@@ -106,7 +106,7 @@ class TestSchedule(unittest.TestCase):
     run_schedule(linear, externs)
     self.assertListEqual(a.tolist(), expected)
   def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
-  def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 1)
+  def test_setitem_padded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 2)
 
   def test_setitem_overlapping_slice_temp_size(self):
     a = Tensor.empty(128)

@@ -48,6 +48,13 @@ class ParamArg:
     if self.buffer is not None:
       args.append(f"buffer=UOp.new_buffer({self.device!r}, {self.buffer.nbytes // self.dtype.itemsize}, {self.dtype!r}, {self.slot}).buffer")
     return f"ParamArg({', '.join(args)})"
+
+@dataclass(frozen=True)
+class StageOpts:
+  device: str|tuple[str, ...]|None = None
+  addrspace: AddrSpace = AddrSpace.GLOBAL
+  removable: bool = False
+
 axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.WEAK: "L",
                 AxisType.LOOP: "L", AxisType.UPCAST: "u"}
 axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN",
@@ -539,7 +546,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
     new_srcs: list[UOp] = [UOp.const(x) if isinstance(x, int) else x for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].val]
     ret = UOp(Ops.INDEX, src=(self,)+tuple(new_srcs), **kwargs)
-    return UOp.invalid().expand(ret.shape) if self.base.is_invalid else ret
+    return UOp.invalid().expand(ret.shape) if self.op is Ops.EXPAND and self.src[0].is_invalid else ret
   def __getitem__(self, idx):
     # buffers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
     if self.addrspace in (None, AddrSpace.ALU, AddrSpace.TEMPLATE) or self.device is not None: return super(UOp, self).__getitem__(idx)
@@ -635,7 +642,7 @@ class UOp(Mixin, metaclass=UOpMetaClass):
   def reduce(self, *src:UOp, arg=None, **kwargs):
     return UOp(Ops.REDUCE, src=(self,)+src, arg=(arg, 0) if isinstance(arg, Ops) else arg, **kwargs)
 
-  def bufferize(self, *args, **kwargs): return UOp(Ops.STAGE, src=(self,)+args, **kwargs)
+  def stage(self, *args, **kwargs): return UOp(Ops.STAGE, src=(self,)+args, **kwargs)
   def allreduce(self, op, device:str|tuple[str, ...]):
     assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
     return UOp(Ops.ALLREDUCE, src=(self,), arg=(op, device))
@@ -908,10 +915,10 @@ class UOp(Mixin, metaclass=UOpMetaClass):
 
   def has_buffer_identity(self, after_ok=False):
     """Check if this UOp has a storage identity in the graph, whether or not its buffer is bound."""
-    # TODO: this is confusing because UOp.variable('v', 0, 1, dtypes.weakfloat) is True for jit to work, but it doesn't have a buffer
+    if self.op is Ops.MSTACK: return all(s.has_buffer_identity(after_ok) for s in self.src)
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
-    return self.op in GroupOp.Defines
+    return self.op in GroupOp.Defines and self.addrspace is not AddrSpace.ALU
 
   @functools.cached_property
   def _buffer_view(self) -> tuple[UOp, int]:
@@ -1423,7 +1430,7 @@ def exec_alu(op:Ops, dtype:DType, operands):
     return tuple([exec_alu(op, dtype, [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(count)])
   if op in GroupOp.Binary and Invalid in operands: return Invalid
   alu = python_alu[op](*operands)
-  return truncate_fxn(alu) if (truncate_fxn:=truncate.get(dtype)) is not None else alu
+  return alu if alu is Invalid or (truncate_fxn:=truncate.get(dtype)) is None else truncate_fxn(alu)
 
 # ***** pattern matcher *****
 
@@ -1506,6 +1513,7 @@ class UPat(Mixin):
     if dtype is not None and self.match_dtype == (dtype,): return self
     return UPat(Ops.CAST, dtype, (self,), **kwargs)
   def bitcast(self, dtype=None): return UPat(Ops.BITCAST, dtype, (self,))
+  def stage(self, *src:UPat, **kwargs): return UPat(Ops.STAGE, src=(self,)+src, **kwargs)
   def load(self, *src:UPat, **kwargs): return UPat(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, src=(self,)+src, **kwargs)
   def reduce(self, *src:UPat, arg=None, **kwargs):

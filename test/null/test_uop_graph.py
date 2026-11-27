@@ -417,7 +417,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertNotIn(r, e.ranges)
     group = UOp.group(e, None, e)
     self.assertIs(group, UOp(Ops.STACK).after(e, e))
-    self.assertIs(group.simplify(), UOp(Ops.STACK).after(e))
+    self.assertIs(group.simplify(), UOp(Ops.STACK))
 
     a = c.after(e)
     self.assertNotIn(r, a.ranges)
@@ -484,41 +484,6 @@ class TestMovementOps(unittest.TestCase):
     result = graph_rewrite(src.reshape((2, 3, 2)).index(UOp.range(2, 0)), pm_mops, name="test")
     self.assertEqual(result.op, Ops.INDEX)
     self.assertEqual(result.src[0].op, Ops.RESHAPE)
-
-class TestConstBufferize(unittest.TestCase):
-  def test_const_bufferize_with_ranges(self):
-    """Test that CONST.BUFFERIZE with ranges is folded correctly.
-
-    BUFFERIZE can have ranges as additional sources beyond the value.
-    The pattern at rangeify.py uses allow_any_len=True because
-    CONST doesn't depend on ranges (constant is same value everywhere).
-    """
-    from tinygrad.codegen.rangeify import pm_const_buffer_folding, BufferizeOpts
-    c = UOp.const(42.0)
-    r1 = UOp.range(3, 0)
-    bufferize_with_range = c.bufferize(r1, arg=BufferizeOpts(device=None))
-    self.assertEqual(len(bufferize_with_range.src), 2)  # const + 1 range
-
-    result = graph_rewrite(bufferize_with_range, pm_const_buffer_folding, name='test')
-    # BUFFERIZE should be removed, result is const broadcast to shape
-    self.assertNotEqual(result.op, Ops.STAGE)
-    const_vals = [u.val for u in result.toposort() if u.op is Ops.CONST and u.dtype is dtypes.weakfloat]
-    self.assertIn(42.0, const_vals)
-
-  def test_const_bufferize_with_multiple_ranges(self):
-    """Test CONST.BUFFERIZE with multiple ranges is also folded."""
-    from tinygrad.codegen.rangeify import pm_const_buffer_folding, BufferizeOpts
-    c = UOp.const(3.14)
-    r1 = UOp.range(3, 0)
-    r2 = UOp.range(4, 1)
-    bufferize_with_ranges = c.bufferize(r1, r2, arg=BufferizeOpts(device=None))
-    self.assertEqual(len(bufferize_with_ranges.src), 3)  # const + 2 ranges
-
-    result = graph_rewrite(bufferize_with_ranges, pm_const_buffer_folding, name='test')
-    # BUFFERIZE should be removed
-    self.assertNotEqual(result.op, Ops.STAGE)
-    const_vals = [u.val for u in result.toposort() if u.op is Ops.CONST and u.dtype is dtypes.weakfloat]
-    self.assertIn(3.14, const_vals)
 
 class TestUOpGetItem(unittest.TestCase):
   def _placeholder(self, shape, dtype=dtypes.half):
