@@ -20,7 +20,7 @@ pm_ctx = PatternMatcher([
   (UPat(GroupOp.Defines, name="x"), lambda ctx,x: add_to_ctx(ctx,x) if is_implicit_storage(ctx, x) else None),
   (UPat((Ops.AFTER, Ops.STAGE), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if
    not any(p.op is Ops.PARAM and p.arg.slot >= 0 for p in x.backward_slice) and
-   any(is_implicit_storage(ctx, b) for b in x.toposort()) else None),
+   any(is_implicit_storage(ctx, b) for b in x.backward_slice) else None),
 ])
 
 def invalid_outputs(uret:UOp) -> set[UOp]:

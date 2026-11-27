@@ -121,7 +121,7 @@ def beam_search(s:Scheduler, amt:int, allow_test_size=True):
 
   try:
     var_vals = {p.expr:int(p.vmax+p.vmin)//2 for p in s.ast.variables()}
-    params = {p.arg.slot:p for p in s.ast.toposort() if p.op is Ops.PARAM and p.arg.slot >= 0}
+    params = {p.arg.slot:p for p in s.ast.backward_slice if p.op is Ops.PARAM and p.arg.slot >= 0}
     # a scalar gets the middle of its range, an unused slot a placeholder
     args = [UOp.const(0, dtypes.int)] * (max(params, default=-1)+1)
     for i,p in params.items():
