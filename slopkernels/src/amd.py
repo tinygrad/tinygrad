@@ -74,8 +74,29 @@ def _live_decode_chunks(vlen:UOp, C:UOp|int) -> UOp:
 # ******** dense fp16/bf16/f32 gemv (nontemporal + tiled LDS fdot2 for multi-token f16) ********
 
 @functools.cache
-def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *, in_blks:UOp, out_features:UOp, tokens:UOp, val_chunk:UOp, lds_mt:bool=False) -> UOp:
+def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *, in_blks:UOp, out_features:UOp, tokens:UOp, val_chunk:UOp,
+                         lds_mt:bool=False, fdot2_1t:bool=False) -> UOp:
   inf = in_blks * (32 * val_chunk)
+  if fdot2_1t:
+    n_k = inf // 256
+    wk = (out_features >= 2048).where(4, (out_features >= 1024).where(2, 4)).minimum(n_k)
+    wr = ((out_features >= 1024) & (out_features % 4).eq(0)).where(4, (out_features % 2).eq(0).where(2, 1))
+    steps = (n_k + wk - 1) // wk
+    rb = UOp.range(out_features // wr, 0, AxisType.GLOBAL)
+    lane, wave_k, w_row = UOp.range(32, -1, AxisType.WARP), UOp.range(wk, 1, AxisType.LOCAL), UOp.range(wr, 2, AxisType.LOCAL)
+    row, acc, s = rb * wr + w_row, _reg((1,), 0.0), UOp.range(steps, 5)
+    kblk = wave_k + s * wk
+    ok, base_k = kblk < n_k, kblk.minimum(n_k - 1) * 256 + lane * 8
+    wv, v = _amd_load(w[row, base_k], 8).bitcast(dtypes.uint32), acc.after(s)[0].load()
+    xv0, xv1 = _amd_load(x[0, base_k], 4), _amd_load(x[0, base_k + 4], 4)
+    for j, (a0, a1) in enumerate(((xv0[0], xv0[1]), (xv0[2], xv0[3]), (xv1[0], xv1[1]), (xv1[2], xv1[3]))):
+      v = _amd_fdot2(wv[j], _cvt_pk_f16(a0, a1), v)
+    upd = acc[0].store(ok.where(v, acc.after(s)[0].load())).end(s)
+    wsum = warp_reduce(acc.after(upd)[0].load(), full_wave=True)
+    lds = UOp.alloc((wr, wk), dtypes.float32, addrspace=AddrSpace.LOCAL)
+    lds_r, kr = lds.after(lds[w_row, wave_k.valid(lane.eq(0))].store(wsum).barrier()), UOp.range(wk, 12)
+    return out[0, row.valid(wave_k.eq(0) & lane.eq(0))].store(lds_r[w_row, kr].load().reduce(kr, arg=(Ops.ADD, 0)).cast(out.dtype)).end(
+      lane, wave_k, w_row, rb).sink(arg=KernelInfo(name="linear_f16_gemv", opts_to_apply=()))
   if lds_mt:
     w_rows_l, ku_l, blk_k = (out_features % 16).eq(0).where(16, 8), 4, 1024
     rb, wr, lane = UOp.range(out_features // w_rows_l, 0, AxisType.GLOBAL), UOp.range(w_rows_l, 2, AxisType.LOCAL), UOp.range(32, -1, AxisType.WARP)
@@ -112,7 +133,7 @@ def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *, in_blks:UOp, out_features:UOp
 
 @functools.cache
 def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp, *, valid_kv_len:UOp, d_blks:UOp, group:UOp, waves:UOp,
-                                        g_split:int|UOp=1, lanes_per_tok:int|UOp=32) -> UOp:
+                                        g_split:int|UOp=1, lanes_per_tok:UOp) -> UOp:
   vlen, (_, B, H_KV, max_n, _) = _unbind(valid_kv_len), cache_kv.shape
   D, PARTIALS = d_blks * 64, out.shape[2]
   Gw, waves_n, toks_per_w = group // g_split, waves // g_split, WARP_SIZE // lanes_per_tok
@@ -154,10 +175,8 @@ def _amd_flash_attention_decode_partial(out:UOp, stats:UOp, q:UOp, cache_kv:UOp,
     d_r = _reg((1,), 0.0, h_u)
     d_v = d_r.after(d_r[0].store(_amd_fdot2(qh_reg[h_u, w_d].load(), kb[w_d].load(), d_r.after(w_d)[0].load())).end(w_d))[0].load()
     for mask in (4, 2, 1): d_v = d_v + _lane_xor(d_v, mask, inline=True)
-    d_v = (lanes_per_tok > 8).where(d_v + _lane_xor(d_v, 8, inline=True), d_v) if isinstance(lanes_per_tok, UOp) else (
-      d_v + _lane_xor(d_v, 8, inline=True) if lanes_per_tok > 8 else d_v)
-    d_v = (lanes_per_tok > 16).where(d_v + _lane_xor(d_v, 16, inline=True), d_v) if isinstance(lanes_per_tok, UOp) else (
-      d_v + _lane_xor(d_v, 16, inline=True) if lanes_per_tok > 16 else d_v)
+    d_v = (lanes_per_tok > 8).where(d_v + _lane_xor(d_v, 8, inline=True), d_v)
+    d_v = (lanes_per_tok > 16).where(d_v + _lane_xor(d_v, 16, inline=True), d_v)
     vl = (st_idx * step_stride + w_tok_id < vlen) if st_idx is not None else None
     sc, old_m = vl.where(d_v, neg_inf) if vl is not None else d_v, m_in[h_u].load()
     new_m = _fast_fmax(old_m, sc)

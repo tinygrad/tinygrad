@@ -42,8 +42,10 @@ def _b_gemv(wdt:str, xdt:str) -> UOp:
   args = (_p(0, (tok, outf), "f32"), _p(1, (outf, inf), wdt), _p(2, (tok, inf), xdt))
   k_base = _amd._amd_f16_gemv_kernel(*args, in_blks=ib, out_features=outf, tokens=tok, val_chunk=vc)
   if wdt != "f16": return k_base
+  k_1t = _amd._amd_f16_gemv_kernel(*args, in_blks=ib, out_features=outf, tokens=tok, val_chunk=vc, fdot2_1t=True)
   k_lds = _amd._amd_f16_gemv_kernel(*args, in_blks=ib, out_features=outf, tokens=tok, val_chunk=vc, lds_mt=True)
-  return UOp(Ops.WHERE, src=((tok > 1) & (tok <= 8) & (inf % 1024).eq(0) & (outf >= 1024) & (outf % 8).eq(0), k_lds, k_base))
+  return UOp(Ops.WHERE, src=(tok.eq(1) & (inf >= 512) & (inf % 256).eq(0), k_1t,
+             UOp(Ops.WHERE, src=((tok > 1) & (tok <= 8) & (inf % 1024).eq(0) & (outf >= 1024) & (outf % 8).eq(0), k_lds, k_base))))
 
 def _grid_len(qt:UOp) -> UOp:
   tbl = {16: 512, 17: 1024, 18: 256, 19: 4096, 21: 512, 22: 2048}
@@ -60,7 +62,7 @@ def _b_qgemv() -> UOp:
   expert_bytes = outf * inf * _gguf._qsize(qt) // 256
   local_experts = (rb // expert_bytes).maximum(1)
   def expert(row:UOp) -> UOp: return p_sel[row].cast(dtypes.weakint) - UOp.range(nd, 10, AxisType.DEVICE) * local_experts
-  w1 = (inf <= 1024) | (is_moe.logical_not() & tok.eq(1) & (outf <= 1024) & (inf <= 4096)) | (is_moe & (tok >= 16) & (inf <= 2048))
+  w1 = (inf <= 1024) | (is_moe.logical_not() & tok.eq(1) & (outf <= 1024) & (inf <= 5120)) | (is_moe & (tok >= 16) & (inf <= 2048))
   is_rpw2 = _gguf._qswitch(qt, [(q, UOp.const(q in _gguf._RPW2_QUANTS, dtypes.bool)) for q in _gguf.QUANT_NAMES])
   rpw_dec = is_rpw2.where((inf <= 1024).where(1, (outf % 2).eq(0).where(2, 1)), 1)
   rpw_pre = (outf % 4).eq(0).where(4, (outf % 2).eq(0).where(2, 1))
@@ -109,7 +111,10 @@ def _b_qgemv() -> UOp:
   k_align = (qt.eq(_gguf.Q8_0) | qt.eq(_gguf.MXFP4)).where(128, 256)
   cond_moe_fp8 = (arch.eq(12) & is_moe & nd.eq(1) & ((tok // xs) >= 16) & is_otf & (ne >= 1) & (ne <= 512) &
                   (outf >= 64) & (outf % 64).eq(0) & (inf >= 256) & (inf % k_align).eq(0))
-  return UOp(Ops.WHERE, src=(cond_moe_fp8, k_moe_fp8_pipe, UOp(Ops.WHERE, src=(cond_sdot4, k_sdot4_pipe, k_direct))))
+  k_iq4_lds = _gguf._iq4_lds_gemv_kernel(p_out, p_raw, p_x, outf, inf, arch)
+  cond_iq4_lds = (arch >= 11) & is_moe.logical_not() & gr.eq(0) & tok.eq(1) & tok.eq(xrows) & qt.eq(_gguf.IQ4_XS) & (inf >= 2048)
+  k_sel = UOp(Ops.WHERE, src=(cond_sdot4, k_sdot4_pipe, UOp(Ops.WHERE, src=(cond_iq4_lds, k_iq4_lds, k_direct))))
+  return UOp(Ops.WHERE, src=(cond_moe_fp8, k_moe_fp8_pipe, k_sel))
 
 def _b_gemm(kg:int, ln:int) -> UOp:
   qt, mb, mt, inf, outf = _t("qtype", 8, 40), _t("m_blks"), _t("m_tiles", 1, 8), _t("in_features", 32), _t("out_features", 16)

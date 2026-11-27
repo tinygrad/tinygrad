@@ -133,8 +133,8 @@ class Linear(nn.Linear):
 
   def _custom_dense(self, x:Tensor) -> Tensor|None:
     if self.groups != 1 or not isinstance(x.numel(), int) or self.in_features % 32 != 0: return None
-    if not (w := _unview_float(self.weight)).uop.has_buffer_identity(after_ok=True): return None
-    xi = _unview_float(x).contiguous()
+    if (w := _unview_float(self.weight)).uop.op is Ops.CAST or w.uop.contiguous_view() is None: return None
+    w, xi = w.contiguous(), _unview_float(x).contiguous()
     ok, tokens = (dtypes.float16, dtypes.bfloat16, dtypes.float32), int(prod(x.shape[:-1]))
     if w.uop.axis is not None or xi.uop.axis is not None or w.dtype not in ok or xi.dtype not in ok or tokens >= 16: return None
     if self.bias is not None and (self.bias.uop.axis is not None or self.bias.dtype not in ok): return None
