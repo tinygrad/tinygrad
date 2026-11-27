@@ -67,6 +67,13 @@ class TestNN(unittest.TestCase):
   def test_batchnorm3d_no_running_stats(self): self.test_batchnorm2d(False, True, False)
   def test_batchnorm3d_training_no_running_stats(self): self.test_batchnorm2d(True, True, False)
 
+  def test_batchnorm_mixed_precision_running_stats(self):
+    with Context(DEFAULT_FLOAT=dtypes.float16, TRAINING=1):
+      bn = BatchNorm(1, momentum=0.5)
+      bn(Tensor([[1.], [3.]], dtype=dtypes.float32))
+      self.assertEqual(bn.running_mean.item(), 1.0)
+      self.assertEqual(bn.running_var.item(), 1.5)
+
   def test_batchnorm_axis(self):
     sz = (2, 4, 3, 2, 2)
     x = Tensor.randn(sz)
